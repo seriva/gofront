@@ -3203,6 +3203,349 @@ func main() {
 	assertEqual(runJs(js), "5");
 });
 
+// ── copy() and cap() ──────────────────────────────────────────
+
+section("copy() and cap()");
+
+test("copy copies elements into destination", () => {
+	const js = compile(`package main
+func main() {
+	src := []int{1, 2, 3}
+	dst := make([]int, 3)
+	copy(dst, src)
+	console.log(dst[0], dst[1], dst[2])
+}`).js;
+	assertEqual(runJs(js), "1 2 3");
+});
+
+test("copy returns number of elements copied", () => {
+	const js = compile(`package main
+func main() {
+	src := []int{10, 20, 30}
+	dst := make([]int, 2)
+	n := copy(dst, src)
+	console.log(n)
+}`).js;
+	assertEqual(runJs(js), "2");
+});
+
+test("copy with shorter destination only fills dst length", () => {
+	const js = compile(`package main
+func main() {
+	src := []int{1, 2, 3, 4, 5}
+	dst := make([]int, 3)
+	copy(dst, src)
+	console.log(len(dst))
+	console.log(dst[2])
+}`).js;
+	assertEqual(runJs(js), "3\n3");
+});
+
+test("copy with shorter source only copies src length", () => {
+	const js = compile(`package main
+func main() {
+	src := []int{7, 8}
+	dst := make([]int, 5)
+	n := copy(dst, src)
+	console.log(n)
+	console.log(dst[0], dst[1])
+}`).js;
+	assertEqual(runJs(js), "2\n7 8");
+});
+
+test("cap returns same as len for GoFront slices", () => {
+	const js = compile(`package main
+func main() {
+	s := []int{1, 2, 3}
+	console.log(cap(s))
+}`).js;
+	assertEqual(runJs(js), "3");
+});
+
+test("cap after append equals new len", () => {
+	const js = compile(`package main
+func main() {
+	s := []int{1, 2}
+	s = append(s, 3)
+	console.log(cap(s))
+}`).js;
+	assertEqual(runJs(js), "3");
+});
+
+// ── Compound assignments on fields and elements ───────────────
+
+section("Compound assignments on struct fields and slice elements");
+
+test("+= on struct field", () => {
+	const js = compile(`package main
+type Counter struct { n int }
+func main() {
+	c := Counter{n: 10}
+	c.n += 5
+	console.log(c.n)
+}`).js;
+	assertEqual(runJs(js), "15");
+});
+
+test("-= on struct field", () => {
+	const js = compile(`package main
+type Counter struct { n int }
+func main() {
+	c := Counter{n: 10}
+	c.n -= 3
+	console.log(c.n)
+}`).js;
+	assertEqual(runJs(js), "7");
+});
+
+test("+= on slice element", () => {
+	const js = compile(`package main
+func main() {
+	s := []int{1, 2, 3}
+	s[1] += 10
+	console.log(s[1])
+}`).js;
+	assertEqual(runJs(js), "12");
+});
+
+test("|= on slice element", () => {
+	const js = compile(`package main
+func main() {
+	flags := []int{0, 0, 0}
+	flags[0] |= 3
+	flags[0] |= 4
+	console.log(flags[0])
+}`).js;
+	assertEqual(runJs(js), "7");
+});
+
+test("&= on struct field", () => {
+	const js = compile(`package main
+type Bits struct { v int }
+func main() {
+	b := Bits{v: 15}
+	b.v &= 6
+	console.log(b.v)
+}`).js;
+	assertEqual(runJs(js), "6");
+});
+
+// ── String comparisons ────────────────────────────────────────
+
+section("String comparison operators");
+
+test("string equality ==", () => {
+	const js = compile(`package main
+func main() {
+	console.log("abc" == "abc")
+	console.log("abc" == "def")
+}`).js;
+	assertEqual(runJs(js), "true\nfalse");
+});
+
+test("string inequality !=", () => {
+	const js = compile(`package main
+func main() {
+	console.log("abc" != "def")
+	console.log("abc" != "abc")
+}`).js;
+	assertEqual(runJs(js), "true\nfalse");
+});
+
+test("string < and >", () => {
+	const js = compile(`package main
+func main() {
+	console.log("apple" < "banana")
+	console.log("zebra" > "apple")
+}`).js;
+	assertEqual(runJs(js), "true\ntrue");
+});
+
+test("string <= and >=", () => {
+	const js = compile(`package main
+func main() {
+	console.log("abc" <= "abc")
+	console.log("abc" >= "abc")
+	console.log("abc" <= "abd")
+}`).js;
+	assertEqual(runJs(js), "true\ntrue\ntrue");
+});
+
+test("string comparison in if condition", () => {
+	const js = compile(`package main
+func main() {
+	s := "hello"
+	if s == "hello" {
+		console.log("match")
+	} else {
+		console.log("no match")
+	}
+}`).js;
+	assertEqual(runJs(js), "match");
+});
+
+// ── Blank identifier ──────────────────────────────────────────
+
+section("Blank identifier");
+
+test("blank _ discards second return value", () => {
+	const js = compile(`package main
+func pair() (int, string) {
+	return 42, "hello"
+}
+func main() {
+	x, _ := pair()
+	console.log(x)
+}`).js;
+	assertEqual(runJs(js), "42");
+});
+
+test("blank _ discards first return value", () => {
+	const js = compile(`package main
+func pair() (int, string) {
+	return 42, "hello"
+}
+func main() {
+	_, s := pair()
+	console.log(s)
+}`).js;
+	assertEqual(runJs(js), "hello");
+});
+
+test("blank _ in for range discards index", () => {
+	const js = compile(`package main
+func main() {
+	sum := 0
+	for _, v := range []int{1, 2, 3} {
+		sum += v
+	}
+	console.log(sum)
+}`).js;
+	assertEqual(runJs(js), "6");
+});
+
+test("blank _ in map comma-ok", () => {
+	const js = compile(`package main
+func main() {
+	m := map[string]int{"a": 1}
+	_, ok := m["a"]
+	console.log(ok)
+}`).js;
+	assertEqual(runJs(js), "true");
+});
+
+// ── Sized types — type errors still caught ────────────────────
+
+section("Sized integer types — type safety");
+
+test("passing string to uint param is a type error", () => {
+	const { errors } = compile(`package main
+func f(n uint) { console.log(n) }
+func main() { f("oops") }`);
+	assertErrorContains(errors, "Cannot assign string to int");
+});
+
+test("uint return type mismatch caught", () => {
+	const { errors } = compile(`package main
+func f() uint { return "bad" }`);
+	assertErrorContains(errors, "Cannot assign string to int");
+});
+
+test("uintptr accepted as type annotation", () => {
+	const js = compile(`package main
+func main() {
+	var p uintptr = 1024
+	console.log(p)
+}`).js;
+	assertEqual(runJs(js), "1024");
+});
+
+// ── Struct tags — edge cases ──────────────────────────────────
+
+section("Struct tags — edge cases");
+
+test("struct tag on embedded struct field", () => {
+	const js = compile(`package main
+type Base struct {
+	ID int \`json:"id"\`
+}
+type User struct {
+	Base
+	Name string \`json:"name"\`
+}
+func main() {
+	u := User{Base: Base{ID: 1}, Name: "Alice"}
+	console.log(u.ID)
+	console.log(u.Name)
+}`).js;
+	assertEqual(runJs(js), "1\nAlice");
+});
+
+test("multiple fields sharing a line with tag", () => {
+	const js = compile(`package main
+type T struct {
+	X int \`json:"x"\`
+	Y int \`json:"y"\`
+	Z int \`json:"z"\`
+}
+func main() {
+	t := T{X: 1, Y: 2, Z: 3}
+	console.log(t.X + t.Y + t.Z)
+}`).js;
+	assertEqual(runJs(js), "6");
+});
+
+// ── recover() — additional scenarios ─────────────────────────
+
+section("recover() — additional scenarios");
+
+test("recover with multiple defers — only innermost catches", () => {
+	const js = compile(`package main
+func main() {
+	defer func() {
+		console.log("outer defer")
+	}()
+	defer func() {
+		if r := recover(); r != nil {
+			console.log("caught:", r)
+		}
+	}()
+	panic("boom")
+}`).js;
+	assertEqual(runJs(js), "caught: boom\nouter defer");
+});
+
+test("recover allows function to return normally after panic", () => {
+	const js = compile(`package main
+func safe() string {
+	defer func() {
+		recover()
+	}()
+	panic("ignored")
+	return "never"
+}
+func main() {
+	console.log("done")
+}`).js;
+	assertEqual(runJs(js), "done");
+});
+
+test("panic in nested call is caught by caller's recover", () => {
+	const js = compile(`package main
+func boom() {
+	panic("deep")
+}
+func main() {
+	defer func() {
+		if r := recover(); r != nil {
+			console.log("caught:", r)
+		}
+	}()
+	boom()
+}`).js;
+	assertEqual(runJs(js), "caught: deep");
+});
+
 // ── Summary ──────────────────────────────────────────────────
 
 const total = passed + failed;

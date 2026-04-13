@@ -31,10 +31,10 @@ const (
 // ── Todo ──────────────────────────────────────────────────────
 
 type Todo struct {
-    id       int
-    text     string
-    done     bool
-    priority int
+    id       int    `json:"id"`
+    text     string `json:"text"`
+    done     bool   `json:"done"`
+    priority int    `json:"priority"`
 }
 
 func (t Todo) priorityClass() string {
