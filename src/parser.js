@@ -1,4 +1,4 @@
-// Recursive-descent parser.  Produces an AST from a GoWeb token stream.
+// Recursive-descent parser.  Produces an AST from a GoFront token stream.
 //
 // Node kinds used throughout the compiler:
 //   Program, PackageDecl, ImportDecl

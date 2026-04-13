@@ -268,7 +268,7 @@ export class TypeChecker {
 		}
 	}
 
-	// Add an imported GoWeb package as a qualified namespace.
+	// Add an imported GoFront package as a qualified namespace.
 	// e.g. addPackageNamespace('utils', symbolsMap, typesMap)
 	// lets callers type-check `utils.Foo` via SelectorExpr.
 	addPackageNamespace(pkgName, symbols, types) {
@@ -1175,7 +1175,7 @@ export class TypeChecker {
 			// error.Error() is valid — it returns the error string
 			if (isError(base) && field === "Error")
 				return { kind: "func", params: [], returns: [STRING], async: false };
-			// pointer.value is the GoWeb new(T) pattern
+			// pointer.value is the GoFront new(T) pattern
 			if (base.kind === "pointer" && field === "value") return base.base ?? ANY;
 			const badKinds = ["basic", "slice", "array", "map", "func", "tuple"];
 			if (badKinds.includes(base.kind)) {

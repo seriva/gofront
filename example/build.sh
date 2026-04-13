@@ -1,5 +1,5 @@
 #!/bin/sh
-# Build the GoWeb todo example.
+# Build the GoFront todo example.
 # Run from the repo root:  sh example/build.sh
 
 set -e

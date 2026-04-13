@@ -1,4 +1,4 @@
-// Minimal fetch / Headers / Response types for GoWeb tests.
+// Minimal fetch / Headers / Response types for GoFront tests.
 
 interface Headers {
 	get(name: string): string;

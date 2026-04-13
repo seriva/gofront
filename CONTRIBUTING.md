@@ -1,10 +1,10 @@
-# Contributing to GoWeb
+# Contributing to GoFront
 
 ## Getting started
 
 ```sh
-git clone https://github.com/seriva/goweb.git
-cd goweb
+git clone https://github.com/seriva/gofront.git
+cd gofront
 npm install
 npm test
 ```
@@ -25,7 +25,7 @@ test/
   run.js          — test suite (no framework dependency)
   fixtures/       — .go and .d.ts files used by tests
 example/
-  src/          — GoWeb source files (compiled to example/app.js)
+  src/          — GoFront source files (compiled to example/app.js)
   index.html    — static HTML/CSS
   app.js        — build output (generated)
 ```
@@ -70,7 +70,7 @@ source text
 ```
 
 Each stage is a plain class. The easiest way to explore is to run
-`goweb <file.go> --tokens` or `goweb <file.go> --ast`.
+`gofront <file.go> --tokens` or `gofront <file.go> --ast`.
 
 ## Submitting a pull request
 

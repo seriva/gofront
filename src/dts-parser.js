@@ -1,7 +1,7 @@
-// Parses TypeScript .d.ts declaration files into GoWeb's type system.
+// Parses TypeScript .d.ts declaration files into GoFront's type system.
 //
 // Produces:
-//   { types: Map<name, GoWebType>, values: Map<name, GoWebType> }
+//   { types: Map<name, GoFrontType>, values: Map<name, GoFrontType> }
 //
 // Types / values are kept separate because TypeScript allows a name to be
 // both a type alias (e.g. `export type mat4 = ...`) and a namespace
@@ -228,7 +228,7 @@ export class DtsParser {
 
 	// ── Type parsing ─────────────────────────────────────────────
 
-	// Parse a TypeScript type expression and return a GoWeb type.
+	// Parse a TypeScript type expression and return a GoFront type.
 	// Always returns something; falls back to ANY for complex types.
 	parseType() {
 		this.skip();
@@ -390,7 +390,7 @@ export class DtsParser {
 	// ── Body parsing ─────────────────────────────────────────────
 
 	// Parse the interior of a namespace/class/interface/module block.
-	// Returns a plain object: { memberName: GoWebType }
+	// Returns a plain object: { memberName: GoFrontType }
 	parseBody() {
 		const members = {};
 		while (!this.eof() && this.peek() !== "}") {

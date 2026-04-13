@@ -57,7 +57,7 @@ function buildSourceMap(sourceName, mappings) {
 
 export class CodeGen {
 	// jsImports:       Map<importPath, string[]> — npm package imports to emit at top of file
-	// bundledPackages: Set<string>               — GoWeb package names bundled inline;
+	// bundledPackages: Set<string>               — GoFront package names bundled inline;
 	//                                             SelectorExpr `pkg.Foo` → just `Foo`
 	constructor(
 		checker = null,
@@ -774,7 +774,7 @@ export class CodeGen {
 
 			case "SelectorExpr": {
 				const base = this.genExpr(expr.expr);
-				// Bundled GoWeb packages are inlined — drop the qualifier.
+				// Bundled GoFront packages are inlined — drop the qualifier.
 				if (this.bundledPackages.has(base)) return expr.field;
 				// Pointer types are wrapped as { value: T }; route through .value
 				if (expr.expr._type?.kind === "pointer" && expr.field !== "value") {

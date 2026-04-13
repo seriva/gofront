@@ -1,10 +1,10 @@
-# GoWeb
+# GoFront
 
 I love Go for the backend — simple, type-safe, no nonsense. I like JavaScript for the
 frontend — runs everywhere, no setup. What I don't like is JavaScript's loose typing. And
 I don't like TypeScript either. I know, controversial. It's fine, I just don't enjoy it.
 
-So I built GoWeb. Go syntax, type safety, compiles to plain ES modules. Same language
+So I built GoFront. Go syntax, type safety, compiles to plain ES modules. Same language
 front and back, no runtime, no framework, no tsconfig.json.
 
 Is this useful? Probably only for hobby projects. But it was fun to build and it works.
@@ -35,7 +35,7 @@ func main() {
 
 Compiles to clean, readable JavaScript — no runtime, no framework.
 
-GoWeb source files use the `.go` extension so editors automatically apply Go syntax
+GoFront source files use the `.go` extension so editors automatically apply Go syntax
 highlighting, bracket matching, and indentation rules without any extra configuration.
 
 ---
@@ -43,7 +43,7 @@ highlighting, bracket matching, and indentation rules without any extra configur
 ## Install
 
 ```sh
-npm install -g go-web
+npm install -g gofront
 ```
 
 Requires Node.js 25+.
@@ -87,18 +87,18 @@ sh example/build.sh
 ## CLI
 
 ```
-goweb <file.go>                compile single file → stdout
-goweb <dir>                    compile all *.go in directory → stdout
-goweb <input> -o out.js        write output to file (prints elapsed compile time e.g. "15ms")
-goweb <input> --check          type-check only
-goweb <input> --watch          watch for changes and recompile
-goweb <input> --source-map     append inline source map to output
-goweb <input> --minify         minify output with terser
-goweb <file.go> --ast          dump AST (debug)
-goweb <file.go> --tokens       dump tokens (debug)
-goweb init [dir]               scaffold a new project
-goweb --version / -v           print version
-goweb --help / -h              print this help
+gofront <file.go>                compile single file → stdout
+gofront <dir>                    compile all *.go in directory → stdout
+gofront <input> -o out.js        write output to file (prints elapsed compile time e.g. "15ms")
+gofront <input> --check          type-check only
+gofront <input> --watch          watch for changes and recompile
+gofront <input> --source-map     append inline source map to output
+gofront <input> --minify         minify output with terser
+gofront <file.go> --ast          dump AST (debug)
+gofront <file.go> --tokens       dump tokens (debug)
+gofront init [dir]               scaffold a new project
+gofront --version / -v           print version
+gofront --help / -h              print this help
 ```
 
 ---
@@ -132,7 +132,7 @@ func main() {
 
 ## Type checking
 
-GoWeb performs static type checking before emitting any code, accurately tracking source locations in error messages across multiple files:
+GoFront performs static type checking before emitting any code, accurately tracking source locations in error messages across multiple files:
 
 ```go
 func greet(name string) {

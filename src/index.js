@@ -1,17 +1,17 @@
 #!/usr/bin/env node
-// GoWeb compiler CLI
+// GoFront compiler CLI
 //
 // Usage:
-//   goweb <file.go>              — compile single file, print JS to stdout
-//   goweb <dir>                  — compile all *.go in directory as one package
-//   goweb .                      — compile current directory
-//   goweb <file.go> -o out.js    — write to file
-//   goweb <dir>    -o out.js     — write bundle to file
-//   goweb <file.go> --check      — type-check only (no output)
-//   goweb <file.go> --watch      — watch and recompile on change
-//   goweb <file.go> --ast        — dump AST of first file (debug)
-//   goweb <file.go> --tokens     — dump tokens of first file (debug)
-//   goweb init [dir]             — scaffold a new GoWeb project
+//   gofront <file.go>              — compile single file, print JS to stdout
+//   gofront <dir>                  — compile all *.go in directory as one package
+//   gofront .                      — compile current directory
+//   gofront <file.go> -o out.js    — write to file
+//   gofront <dir>    -o out.js     — write bundle to file
+//   gofront <file.go> --check      — type-check only (no output)
+//   gofront <file.go> --watch      — watch and recompile on change
+//   gofront <file.go> --ast        — dump AST of first file (debug)
+//   gofront <file.go> --tokens     — dump tokens of first file (debug)
+//   gofront init [dir]             — scaffold a new GoFront project
 
 import {
 	existsSync,
@@ -40,27 +40,27 @@ import { TypeChecker } from "./typechecker.js";
 
 const args = process.argv.slice(2);
 if (args[0] === "--version" || args[0] === "-v") {
-	console.log(`goweb ${version}`);
+	console.log(`gofront ${version}`);
 	process.exit(0);
 }
 
 if (args.length === 0 || args[0] === "--help" || args[0] === "-h") {
 	console.log(
 		`
-GoWeb — a Go-inspired language that compiles to JavaScript
+GoFront — a Go-inspired language that compiles to JavaScript
 
 Usage:
-  goweb <file.go>              Compile single file and print to stdout
-  goweb <dir>  (or goweb .)    Compile all *.go in directory as one bundle
-  goweb <input> -o out.js      Compile and write to file
-  goweb <input> --check        Type-check only
-  goweb <input> --watch        Watch for changes and recompile
-  goweb <input> --source-map   Append inline source map to output
-  goweb <input> --minify       Minify output with terser
-  goweb <file.go> --ast        Dump AST (debug)
-  goweb <file.go> --tokens     Dump tokens (debug)
-  goweb init [dir]             Scaffold a new GoWeb project
-  goweb --version              Print version
+  gofront <file.go>              Compile single file and print to stdout
+  gofront <dir>  (or gofront .)    Compile all *.go in directory as one bundle
+  gofront <input> -o out.js      Compile and write to file
+  gofront <input> --check        Type-check only
+  gofront <input> --watch        Watch for changes and recompile
+  gofront <input> --source-map   Append inline source map to output
+  gofront <input> --minify       Minify output with terser
+  gofront <file.go> --ast        Dump AST (debug)
+  gofront <file.go> --tokens     Dump tokens (debug)
+  gofront init [dir]             Scaffold a new GoFront project
+  gofront --version              Print version
 `.trim(),
 	);
 	process.exit(0);
@@ -76,14 +76,14 @@ if (args[0] === "init") {
 		try {
 			mkdirSync(targetDir, { recursive: true });
 		} catch (e) {
-			console.error(`goweb: cannot create '${targetArg}': ${e.message}`);
+			console.error(`gofront: cannot create '${targetArg}': ${e.message}`);
 			process.exit(1);
 		}
 	}
 
 	const mainPath = join(targetDir, "main.go");
 	if (existsSync(mainPath)) {
-		console.error(`goweb: ${mainPath} already exists — nothing written`);
+		console.error(`gofront: ${mainPath} already exists — nothing written`);
 		process.exit(1);
 	}
 
@@ -95,19 +95,19 @@ if (args[0] === "init") {
 	const template = `package ${safePkg}
 
 func main() {
-\tconsole.log("Hello from GoWeb!")
+\tconsole.log("Hello from GoFront!")
 }
 `;
 	try {
 		writeFileSync(mainPath, template);
 	} catch (e) {
-		console.error(`goweb: cannot write '${mainPath}': ${e.message}`);
+		console.error(`gofront: cannot write '${mainPath}': ${e.message}`);
 		process.exit(1);
 	}
 
-	console.error(`goweb: created ${mainPath}`);
+	console.error(`gofront: created ${mainPath}`);
 	console.error(
-		`goweb: run  goweb ${targetArg === "." ? "main.go" : `${targetArg}/main.go`}  to compile`,
+		`gofront: run  gofront ${targetArg === "." ? "main.go" : `${targetArg}/main.go`}  to compile`,
 	);
 	process.exit(0);
 }
@@ -129,7 +129,7 @@ let isDir = false;
 try {
 	isDir = statSync(inputPath).isDirectory();
 } catch (e) {
-	console.error(`goweb: cannot access '${inputArg}': ${e.message}`);
+	console.error(`gofront: cannot access '${inputArg}': ${e.message}`);
 	process.exit(1);
 }
 
@@ -198,7 +198,7 @@ function runCompile() {
 			const depDir = resolveGwDir(path, inputPath);
 			if (!depDir) {
 				console.error(
-					`goweb: warning: cannot find local package '${path}' relative to ${fromDir}`,
+					`gofront: warning: cannot find local package '${path}' relative to ${fromDir}`,
 				);
 				continue;
 			}
@@ -259,13 +259,13 @@ if (!watchMode) {
 	try {
 		result = runCompile();
 	} catch (e) {
-		console.error(`goweb: ${e.message}`);
+		console.error(`gofront: ${e.message}`);
 		process.exit(1);
 	}
 
 	if (checkOnly) {
 		const elapsedMs = (performance.now() - startMs).toFixed(0);
-		console.error(`goweb: ${inputArg} — OK (${elapsedMs}ms)`);
+		console.error(`gofront: ${inputArg} — OK (${elapsedMs}ms)`);
 		process.exit(0);
 	}
 
@@ -273,7 +273,7 @@ if (!watchMode) {
 	try {
 		js = await maybeMinify(result.js);
 	} catch (e) {
-		console.error(`goweb: minify failed: ${e.message}`);
+		console.error(`gofront: minify failed: ${e.message}`);
 		process.exit(1);
 	}
 
@@ -282,9 +282,9 @@ if (!watchMode) {
 	if (outputFile) {
 		try {
 			writeFileSync(outputFile, `${js}\n`);
-			console.error(`goweb: wrote ${outputFile} (${elapsedMs}ms)`);
+			console.error(`gofront: wrote ${outputFile} (${elapsedMs}ms)`);
 		} catch (e) {
-			console.error(`goweb: cannot write '${outputFile}': ${e.message}`);
+			console.error(`gofront: cannot write '${outputFile}': ${e.message}`);
 			process.exit(1);
 		}
 	} else {
@@ -308,16 +308,16 @@ async function buildOnce(_label) {
 		if (outputFile) {
 			writeFileSync(outputFile, `${js}\n`);
 			console.error(
-				`[${timestamp()}] goweb: OK — wrote ${outputFile} (${elapsedMs}ms)`,
+				`[${timestamp()}] gofront: OK — wrote ${outputFile} (${elapsedMs}ms)`,
 			);
 		} else {
 			// Clear screen then print
 			process.stdout.write("\x1Bc");
 			console.log(js);
-			console.error(`[${timestamp()}] goweb: OK (${elapsedMs}ms)`);
+			console.error(`[${timestamp()}] gofront: OK (${elapsedMs}ms)`);
 		}
 	} catch (e) {
-		console.error(`[${timestamp()}] goweb: ERROR`);
+		console.error(`[${timestamp()}] gofront: ERROR`);
 		for (const line of e.message.split("\n")) console.error(`  ${line}`);
 	}
 }
@@ -335,4 +335,4 @@ watch(watchTarget, { recursive: true }, (_event, filename) => {
 	debounce = setTimeout(() => buildOnce(filename ?? "change"), 80);
 });
 
-console.error(`[${timestamp()}] goweb: watching ${inputArg} ...`);
+console.error(`[${timestamp()}] gofront: watching ${inputArg} ...`);

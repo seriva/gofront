@@ -1,4 +1,4 @@
-// GoWeb test suite
+// GoFront test suite
 //
 // Categories:
 //   1. Language features  — compile + run in vm, check stdout
@@ -580,10 +580,10 @@ test("getElementById + textContent", () => {
 	const { js } = compile(`package main
 func main() {
   el := document.getElementById("target")
-  el.textContent = "Hello GoWeb"
+  el.textContent = "Hello GoFront"
 }`);
 	const { document } = runInDom(js, '<body><div id="target"></div></body>');
-	assertEqual(document.getElementById("target").textContent, "Hello GoWeb");
+	assertEqual(document.getElementById("target").textContent, "Hello GoFront");
 });
 
 test("createElement + appendChild", () => {
@@ -1860,7 +1860,7 @@ func main() {
 });
 
 test("map range iteration visits all keys (insertion order)", () => {
-	// GoWeb maps use JS objects — iteration is insertion-order, not randomised.
+	// GoFront maps use JS objects — iteration is insertion-order, not randomised.
 	// This test documents the semantic difference from Go and ensures it works.
 	const { js, errors } = compile(`package main
 func main() {
@@ -1875,7 +1875,7 @@ func main() {
 });
 
 test("cap() on slice", () => {
-	// GoWeb compiles to JS arrays which have no separate capacity concept;
+	// GoFront compiles to JS arrays which have no separate capacity concept;
 	// cap() returns length (the only meaningful value at runtime).
 	const { js } = compile(`package main
 func main() {
@@ -2291,7 +2291,7 @@ function cli(args) {
 }
 
 function makeTmp(name, content) {
-	const dir = mkdtempSync(join(tmpdir(), "goweb-"));
+	const dir = mkdtempSync(join(tmpdir(), "gofront-"));
 	const file = join(dir, name);
 	writeFileSync(file, content);
 	return { dir, file };
@@ -2300,7 +2300,7 @@ function makeTmp(name, content) {
 test("--version prints version", () => {
 	const { stdout, code } = cli(["--version"]);
 	assert(code === 0, `expected exit 0, got ${code}`);
-	assert(stdout.startsWith("goweb "), `unexpected output: ${stdout}`);
+	assert(stdout.startsWith("gofront "), `unexpected output: ${stdout}`);
 });
 
 test("--check exits 0 on valid file", () => {
@@ -2357,8 +2357,8 @@ test("--source-map appends sourceMappingURL comment", () => {
 	}
 });
 
-test("goweb init creates main.go", () => {
-	const dir = mkdtempSync(join(tmpdir(), "goweb-init-"));
+test("gofront init creates main.go", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-init-"));
 	try {
 		const { code, stderr } = cli(["init", dir]);
 		assert(code === 0, `expected exit 0: ${stderr}`);

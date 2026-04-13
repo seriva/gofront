@@ -1,16 +1,16 @@
 {
-	"name": "go-web",
+	"name": "gofront",
 	"version": "0.0.1",
 	"author": "Luuk van Venrooij",
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/seriva/goweb.git"
+		"url": "https://github.com/seriva/gofront.git"
 	},
 	"bugs": {
-		"url": "https://github.com/seriva/goweb/issues"
+		"url": "https://github.com/seriva/gofront/issues"
 	},
-	"homepage": "https://github.com/seriva/goweb#readme",
+	"homepage": "https://github.com/seriva/gofront#readme",
 	"description": "A Go-inspired language that transpiles to JavaScript",
 	"keywords": [
 		"go",
@@ -25,7 +25,7 @@
 	},
 	"type": "module",
 	"bin": {
-		"goweb": "./src/index.js"
+		"gofront": "./src/index.js"
 	},
 	"scripts": {
 		"build": "node src/index.js",

@@ -9,7 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [0.0.1] - 2026-04-12
 
 ### Added
-- Initial release of the GoWeb compiler
+- Initial release of the GoFront compiler
 - Go-inspired syntax compiling to JavaScript
 - Structs, interfaces, methods, closures
 - Multiple return values and named returns
@@ -35,7 +35,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `--check` (type-check only), `--ast`, `--tokens` debug flags
 - `--watch` mode with debounced recompilation
 - `--minify` flag — minifies output with terser (`module: true, compress: true, mangle: true`)
-- `goweb init [dir]` to scaffold a new project
+- `gofront init [dir]` to scaffold a new project
 - `--version` / `-v` flag
 - `--help` output
 - Source files use `.go` extension for automatic editor syntax highlighting

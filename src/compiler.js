@@ -1,4 +1,4 @@
-// Multi-file GoWeb package compiler.
+// Multi-file GoFront package compiler.
 //
 // compileDir(dir, options)   — compile all *.go in a directory as one package
 // compileFiles(files, options) — compile an explicit list of .go files
@@ -106,7 +106,7 @@ export function compileFiles(files, options = {}) {
 		jsImports.set(path, [...info.values.keys()]);
 	}
 
-	// local GoWeb packages (./subdir)
+	// local GoFront packages (./subdir)
 	const seenLocalPaths = new Set();
 	for (const imp of allImports) {
 		for (const path of imp.paths) {
@@ -116,7 +116,7 @@ export function compileFiles(files, options = {}) {
 			const depDir = resolveGwDir(path, dummyFromFile);
 			if (!depDir) {
 				console.error(
-					`goweb: warning: cannot find local package '${path}' relative to ${fromDir}`,
+					`gofront: warning: cannot find local package '${path}' relative to ${fromDir}`,
 				);
 				continue;
 			}

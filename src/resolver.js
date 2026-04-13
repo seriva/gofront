@@ -91,7 +91,7 @@ export function resolveAll(imports, fromFile, parseDts) {
 			const result = resolveImport(path, fromFile);
 			if (!result) {
 				console.error(
-					`goweb: warning: cannot find types for '${path}', treating as any`,
+					`gofront: warning: cannot find types for '${path}', treating as any`,
 				);
 				resolved.set(path, null);
 				continue;
@@ -103,7 +103,7 @@ export function resolveAll(imports, fromFile, parseDts) {
 				resolved.set(path, { ...result, types, values });
 			} catch (e) {
 				console.error(
-					`goweb: warning: failed to parse '${result.dtsPath}': ${e.message}`,
+					`gofront: warning: failed to parse '${result.dtsPath}': ${e.message}`,
 				);
 				resolved.set(path, null);
 			}

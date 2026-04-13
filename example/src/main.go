@@ -87,7 +87,7 @@ async func main() {
     // Restore persisted todos; fall back to seed data if storage is empty.
     loadErr := await loadTodos()
     if loadErr != nil || len(todos) == 0 {
-        addTodo("Read the GoWeb docs",             PriorityNormal)
+        addTodo("Read the GoFront docs",             PriorityNormal)
         addTodo("Fix the critical production bug", PriorityHigh)
         addTodo("Write tests",                     PriorityNormal)
         addTodo("Deploy to staging",               PriorityHigh)

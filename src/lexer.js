@@ -1,4 +1,4 @@
-// Lexer: tokenizes GoWeb source into a flat token stream.
+// Lexer: tokenizes GoFront source into a flat token stream.
 // Implements Go-style automatic semicolon insertion.
 
 export const T = {

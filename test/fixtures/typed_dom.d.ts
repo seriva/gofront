@@ -1,4 +1,4 @@
-// Typed DOM subset for GoWeb tests.
+// Typed DOM subset for GoFront tests.
 // Use with `import "js:typed_dom.d.ts"` — document is already a global
 // so we redeclare it with a stronger type here.
 
