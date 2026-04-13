@@ -166,6 +166,7 @@ npm package types are resolved automatically from `node_modules/` and `@types/`.
 | Embedded structs | ✓ |
 | Pointer receivers | ✓ |
 | Interfaces | ✓ |
+| Interface embedding | ✓ |
 | Closures | ✓ |
 | Slices (`append`, `len`, `make`) | ✓ |
 | Maps (`make`, `delete`, comma-ok) | ✓ — note: iteration order is insertion-order (JS), not randomised (Go) |

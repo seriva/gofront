@@ -1163,6 +1163,27 @@ export class TypeChecker {
 						: [VOID];
 					methods.set(m.name, { kind: "func", params, returns });
 				}
+				// Flatten embedded interface methods
+				if (node.embeds) {
+					for (const embed of node.embeds) {
+						const resolved = this.resolveTypeNode(embed, scope);
+						const base =
+							resolved?.kind === "named"
+								? resolved.underlying
+								: resolved;
+						if (base?.kind === "interface") {
+							for (const [mName, mType] of base.methods) {
+								if (!methods.has(mName))
+									methods.set(mName, mType);
+							}
+						} else if (!isAny(resolved)) {
+							this.err(
+								`cannot embed non-interface type ${typeStr(resolved)}`,
+								embed,
+							);
+						}
+					}
+				}
 				return { kind: "interface", methods };
 			}
 			case "TupleType": {

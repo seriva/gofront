@@ -3822,6 +3822,106 @@ func main() {
 	assertEqual(runJs(js), "caught: deep");
 });
 
+// ── Interface embedding ──────────────────────────────────────
+
+section("Interface embedding");
+
+test("embedded interface — methods flattened for satisfaction", () => {
+	const { js, errors } = compile(`package main
+type Reader interface { Read() string }
+type Writer interface { Write(s string) }
+type ReadWriter interface {
+	Reader
+	Writer
+}
+type File struct { Name string }
+func (f File) Read() string { return "data" }
+func (f File) Write(s string) { console.log(s) }
+func process(rw ReadWriter) { console.log(rw.Read()) }
+func main() { process(File{Name: "test.txt"}) }`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "data");
+});
+
+test("embedded interface — struct missing embedded method fails", () => {
+	const { errors } = compile(`package main
+type Reader interface { Read() string }
+type ReadWriter interface {
+	Reader
+	Write(s string)
+}
+type Broken struct {}
+func (b Broken) Write(s string) {}
+func process(rw ReadWriter) {}
+func main() { process(Broken{}) }`);
+	assert(errors.length > 0, "expected error");
+	assertErrorContains(errors, "does not implement");
+});
+
+test("embedded interface — own methods plus embedded", () => {
+	const { js, errors } = compile(`package main
+type Stringer interface { String() string }
+type Formatter interface {
+	Stringer
+	Format() string
+}
+type Doc struct { Title string }
+func (d Doc) String() string { return d.Title }
+func (d Doc) Format() string { return "[" + d.Title + "]" }
+func show(f Formatter) { console.log(f.Format()) }
+func main() { show(Doc{Title: "README"}) }`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "[README]");
+});
+
+test("embedded interface — multiple embeds composed", () => {
+	const { js, errors } = compile(`package main
+type A interface { MethodA() string }
+type B interface { MethodB() string }
+type C interface { MethodC() string }
+type ABC interface {
+	A
+	B
+	C
+}
+type Impl struct {}
+func (i Impl) MethodA() string { return "a" }
+func (i Impl) MethodB() string { return "b" }
+func (i Impl) MethodC() string { return "c" }
+func use(x ABC) { console.log(x.MethodA(), x.MethodB(), x.MethodC()) }
+func main() { use(Impl{}) }`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "a b c");
+});
+
+test("embedded interface — diamond embedding (shared method)", () => {
+	const { js, errors } = compile(`package main
+type Base interface { Name() string }
+type Left interface { Base }
+type Right interface { Base }
+type Both interface {
+	Left
+	Right
+}
+type Thing struct {}
+func (t Thing) Name() string { return "thing" }
+func show(b Both) { console.log(b.Name()) }
+func main() { show(Thing{}) }`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "thing");
+});
+
+test("embedding non-interface type is an error", () => {
+	const { errors } = compile(`package main
+type Point struct { X int; Y int }
+type Bad interface {
+	Point
+}
+func main() {}`);
+	assert(errors.length > 0, "expected error");
+	assertErrorContains(errors, "cannot embed non-interface type");
+});
+
 // ── Summary ──────────────────────────────────────────────────
 
 const total = passed + failed;

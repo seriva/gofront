@@ -297,7 +297,12 @@ export class Parser {
 
 	parseReturnType(inTypeExpr = false) {
 		// No return type
-		if (this.check(T.LBRACE) || this.check(T.SEMICOLON) || this.check(T.EOF))
+		if (
+			this.check(T.LBRACE) ||
+			this.check(T.RBRACE) ||
+			this.check(T.SEMICOLON) ||
+			this.check(T.EOF)
+		)
 			return null;
 		// Inside a type expression (e.g. func type in a tuple), `,` and `)` also end the type
 		if (inTypeExpr && (this.check(T.COMMA) || this.check(T.RPAREN)))
@@ -526,15 +531,27 @@ export class Parser {
 		this.expect(T.INTERFACE);
 		this.expect(T.LBRACE);
 		const methods = [];
+		const embeds = [];
 		while (!this.check(T.RBRACE) && !this.check(T.EOF)) {
 			const name = this.expect(T.IDENT).value;
-			const params = this.parseParamList();
-			const returnType = this.parseReturnType();
-			methods.push({ name, params, returnType });
+			if (this.check(T.LPAREN)) {
+				// Method signature: Name(params) returnType
+				const params = this.parseParamList();
+				const returnType = this.parseReturnType();
+				methods.push({ name, params, returnType });
+			} else {
+				// Embedded interface: TypeName or pkg.TypeName
+				let typeName = name;
+				if (this.check(T.DOT)) {
+					this.advance();
+					typeName += `.${this.expect(T.IDENT).value}`;
+				}
+				embeds.push({ kind: "TypeName", name: typeName });
+			}
 			this.semi();
 		}
 		this.expect(T.RBRACE);
-		return { kind: "InterfaceType", methods };
+		return { kind: "InterfaceType", methods, embeds };
 	}
 
 	// ── Statements ───────────────────────────────────────────────
