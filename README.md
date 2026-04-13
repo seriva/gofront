@@ -43,7 +43,7 @@ highlighting, bracket matching, and indentation rules without any extra configur
 ## Install
 
 ```sh
-npm install -g goweb
+npm install -g go-web
 ```
 
 Requires Node.js 25+.
