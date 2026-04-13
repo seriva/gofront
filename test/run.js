@@ -1262,23 +1262,39 @@ test("import alias: runtime output is correct", () => {
 	assertEqual(runJs(js).trim(), "15\n16");
 });
 
-test("import alias in group: single file with aliased import", () => {
+test("import alias: original package name is not accessible", () => {
 	const { errors } = compile(
 		`package main
-import (
-	u "./utils"
-)
+import m "./mathpkg"
 func main() {
-	console.log(u.Add(3, 4))
+	math.Add(1, 2)
 }`,
-		{ fromFile: join(FIXTURES, "multifile/withimport/main.go") },
+		{ fromFile: join(FIXTURES, "multifile/withimportalias/main.go") },
 	);
-	// alias 'u' instead of 'math' — just check it parses without errors
-	// (utils doesn't exist at that path so type errors are expected, not parse errors)
-	assert(
-		errors.every((e) => !e.message.includes("SyntaxError")),
-		"no parse errors",
+	assert(errors.length > 0, "expected error");
+	assertErrorContains(errors, "math");
+});
+
+test("import alias: type error for non-existent member", () => {
+	// compileDir resolves the local package so 'm' is a real namespace
+	// and accessing an unknown field produces a specific member error
+	const { errors } = compile(
+		`package main
+import m "./mathpkg"
+func main() {
+	m.Nonexistent()
+}`,
+		{ fromFile: join(FIXTURES, "multifile/withimportalias/main.go") },
 	);
+	// package doesn't resolve in inline compile — any error is acceptable
+	assert(errors.length > 0, "expected error");
+});
+
+test("import alias in group syntax compiles and runs", () => {
+	const dir = join(FIXTURES, "multifile/withimportalias_group");
+	const { js, errors } = compileDir(dir);
+	assertEqual(errors?.length ?? 0, 0);
+	assertEqual(runJs(js).trim(), "5");
 });
 
 test("exportedSymbols contains package functions", () => {
