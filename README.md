@@ -1,4 +1,4 @@
-# GoFront
+## About
 
 I love Go for the backend — simple, type-safe, no nonsense. I like JavaScript for the
 frontend — runs everywhere, no setup. What I don't like is JavaScript's loose typing. And
@@ -7,7 +7,7 @@ I don't like TypeScript either. I know, controversial. It's fine, I just don't e
 So I built GoFront. Go syntax, type safety, compiles to plain ES modules. Same language
 front and back, no runtime, no framework, no tsconfig.json.
 
-Is this useful? Probably only for hobby projects. But it was fun to build and it works.
+Is this useful? Probably not, but it was fun to build:D
 
 ```go
 package main
