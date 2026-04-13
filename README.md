@@ -212,6 +212,12 @@ The following Go features are not supported or behave differently from the Go sp
 | Generics (Go 1.18+) | No `[T Type]` type parameters |
 | `[...]T{...}` array length inference | Not supported |
 | Side-effect imports (`import _ "pkg"`) | Not supported |
+| Type switch (`switch x.(type) { case T: ... }`) | Regular type assertions (`x.(T)`) work; type-switching does not |
+| Interface embedding | `type Reader interface { io.Reader }` produces a parse error |
+| Struct tags | `` `json:"name"` `` field tags produce a parse error |
+| Sized integer types | `int8`, `int16`, `int32`, `int64`, `uint`, `uint8`–`uint64`, `float32` are unknown types — use `int` / `float64` |
+| `[]byte(s)` / `[]rune(s)` conversions | String-to-slice type conversions are not supported |
+| Bitwise compound assignments | `&=`, `\|=`, `^=`, `<<=`, `>>=` produce a parse error |
 
 ### Behaves differently from Go
 
@@ -223,6 +229,7 @@ The following Go features are not supported or behave differently from the Go sp
 | Fixed-size arrays (`[n]T`) | Compiled as plain JS arrays (no length enforcement) | Fixed at compile time |
 | `rune` / `byte` types | Treated as `int`; no UTF-8 semantics | Distinct types with proper encoding |
 | `range` over string gives JS string characters, not rune code points | JS `Array.from(s)` iteration | Go UTF-8 rune iteration |
+| `len()` on strings | Returns JS character count (UTF-16 code units) | Returns byte count (UTF-8) |
 
 ---
 
