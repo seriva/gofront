@@ -1,0 +1,27 @@
+# Development / CI
+.github/
+.vscode/
+.cursorrules
+.gitignore
+AGENTS.md
+CLAUDE.md
+CONTRIBUTING.md
+CHANGELOG.md
+biome.json
+
+# Agent / tool files
+.agent/
+.agents/
+.claude/
+
+# Husky
+.husky/
+
+# Tests
+test/
+
+# Example app
+example/
+
+# Dependencies
+node_modules/

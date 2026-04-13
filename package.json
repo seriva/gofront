@@ -1,0 +1,32 @@
+{
+	"name": "goweb",
+	"version": "0.1.0",
+	"author": "Luuk van Venrooij",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/seriva/goweb.git"
+	},
+	"bugs": {
+		"url": "https://github.com/seriva/goweb/issues"
+	},
+	"homepage": "https://github.com/seriva/goweb#readme",
+	"description": "A Go-inspired language that transpiles to JavaScript",
+	"keywords": ["go", "compiler", "transpiler", "javascript", "frontend", "type-safe"],
+	"engines": { "node": ">=20" },
+	"type": "module",
+	"bin": {
+		"goweb": "./src/index.js"
+	},
+	"scripts": {
+		"build": "node src/index.js",
+		"test": "node test/run.js",
+		"format": "biome format --write .",
+		"check": "biome check ."
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.4.11",
+		"jsdom": "^29.0.2",
+		"terser": "^5.46.1"
+	}
+}
