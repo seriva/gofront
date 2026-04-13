@@ -712,14 +712,27 @@ export class Parser {
 		let init = null;
 		let tag = null;
 		if (!this.check(T.LBRACE)) {
-			const expr = this.parseExpr(0, true);
+			const first = this.parseSimpleStmtRaw(true);
 			if (this.match(T.SEMICOLON)) {
-				init = this.exprToStmt(expr);
-				if (!this.check(T.LBRACE)) tag = this.parseExpr(0, true);
+				init = first;
+				if (!this.check(T.LBRACE))
+					tag = this.stmtToExpr(this.parseSimpleStmtRaw(true));
 			} else {
-				tag = expr;
+				tag = this.stmtToExpr(first);
 			}
 		}
+
+		// Detect type switch: switch x.(type) or switch v := x.(type)
+		if (tag?.kind === "TypeSwitchExpr") {
+			return this._parseTypeSwitchBody(null, tag.expr);
+		}
+		if (tag?.kind === "DefineStmt" && tag.rhs[0]?.kind === "TypeSwitchExpr") {
+			return this._parseTypeSwitchBody(
+				tag.lhs[0]?.name ?? null,
+				tag.rhs[0].expr,
+			);
+		}
+
 		this.expect(T.LBRACE);
 		const cases = [];
 		while (!this.check(T.RBRACE) && !this.check(T.EOF)) {
@@ -727,35 +740,69 @@ export class Parser {
 				this.advance();
 				const list = this.parseExprList();
 				this.expect(T.COLON);
-				const stmts = [];
-				while (
-					!this.check(T.CASE) &&
-					!this.check(T.DEFAULT) &&
-					!this.check(T.RBRACE)
-				) {
-					stmts.push(this.parseStmt());
-					this.semi();
-				}
-				cases.push({ kind: "CaseClause", list, stmts });
+				cases.push({ kind: "CaseClause", list, stmts: this._parseCaseBody() });
 			} else if (this.check(T.DEFAULT)) {
 				this.advance();
 				this.expect(T.COLON);
-				const stmts = [];
-				while (
-					!this.check(T.CASE) &&
-					!this.check(T.DEFAULT) &&
-					!this.check(T.RBRACE)
-				) {
-					stmts.push(this.parseStmt());
-					this.semi();
-				}
-				cases.push({ kind: "CaseClause", list: null, stmts });
+				cases.push({
+					kind: "CaseClause",
+					list: null,
+					stmts: this._parseCaseBody(),
+				});
 			} else {
 				this.err("Expected case or default");
 			}
 		}
 		this.expect(T.RBRACE);
 		return { kind: "SwitchStmt", init, tag, cases };
+	}
+
+	_parseCaseBody() {
+		const stmts = [];
+		while (
+			!this.check(T.CASE) &&
+			!this.check(T.DEFAULT) &&
+			!this.check(T.RBRACE)
+		) {
+			stmts.push(this.parseStmt());
+			this.semi();
+		}
+		return stmts;
+	}
+
+	_parseTypeSwitchBody(assign, expr) {
+		this.expect(T.LBRACE);
+		const cases = [];
+		while (!this.check(T.RBRACE) && !this.check(T.EOF)) {
+			if (this.check(T.CASE)) {
+				this.advance();
+				const types = this._parseTypeSwitchTypeList();
+				this.expect(T.COLON);
+				cases.push({ types, stmts: this._parseCaseBody() });
+			} else if (this.check(T.DEFAULT)) {
+				this.advance();
+				this.expect(T.COLON);
+				cases.push({ types: null, stmts: this._parseCaseBody() });
+			} else {
+				this.err("Expected case or default");
+			}
+		}
+		this.expect(T.RBRACE);
+		return { kind: "TypeSwitchStmt", assign, expr, cases };
+	}
+
+	_parseTypeSwitchTypeList() {
+		const parseOne = () => {
+			// nil is a keyword, not a type name, so handle it explicitly
+			if (this.check(T.NIL)) {
+				this.advance();
+				return { kind: "TypeName", name: "nil" };
+			}
+			return this.parseType();
+		};
+		const types = [parseOne()];
+		while (this.match(T.COMMA)) types.push(parseOne());
+		return types;
 	}
 
 	// Parses a "simple statement": assignment, define, inc/dec, or expression.
@@ -885,9 +932,16 @@ export class Parser {
 				// type assertion: expr.(Type)
 				if (this.check(T.LPAREN)) {
 					this.advance();
-					const type = this.parseType();
-					this.expect(T.RPAREN);
-					expr = { kind: "TypeAssertExpr", expr, type };
+					// x.(type) — type switch guard expression
+					if (this.check(T.TYPE)) {
+						this.advance();
+						this.expect(T.RPAREN);
+						expr = { kind: "TypeSwitchExpr", expr };
+					} else {
+						const type = this.parseType();
+						this.expect(T.RPAREN);
+						expr = { kind: "TypeAssertExpr", expr, type };
+					}
 				} else {
 					const field = this.advance().value;
 					expr = { kind: "SelectorExpr", expr, field };

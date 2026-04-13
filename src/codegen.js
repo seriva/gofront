@@ -560,6 +560,10 @@ export class CodeGen {
 				this.genSwitch(stmt);
 				break;
 
+			case "TypeSwitchStmt":
+				this.genTypeSwitch(stmt);
+				break;
+
 			case "DeferStmt":
 				this.line(`__defers.push(() => { ${this.genExpr(stmt.call)}; });`);
 				break;
@@ -755,6 +759,42 @@ export class CodeGen {
 		} else {
 			genBody();
 		}
+	}
+
+	genTypeSwitch(stmt) {
+		this.line("{");
+		this.indented(() => {
+			const val = this.genExpr(stmt.expr);
+			this.line(`const __tsw = ${val};`);
+			if (stmt.assign) this.line(`let ${stmt.assign} = __tsw;`);
+
+			let first = true;
+			let hasDefault = false;
+			for (const c of stmt.cases) {
+				if (!c.types) {
+					// default case — emit last
+					hasDefault = c;
+					continue;
+				}
+				const cond = c.types
+					.map((t) => this._typeCheckExpr(t, "__tsw"))
+					.join(" || ");
+				this.line(`${first ? "if" : "else if"} (${cond}) {`);
+				this.indented(() => {
+					for (const s of c.stmts) this.genStmt(s);
+				});
+				this.line("}");
+				first = false;
+			}
+			if (hasDefault) {
+				this.line(first ? "{" : "else {");
+				this.indented(() => {
+					for (const s of hasDefault.stmts) this.genStmt(s);
+				});
+				this.line("}");
+			}
+		});
+		this.line("}");
 	}
 
 	// ── Expressions ──────────────────────────────────────────────
@@ -1180,6 +1220,17 @@ export class CodeGen {
 		if (typeNode.kind === "TypeName") {
 			switch (typeNode.name) {
 				case "int":
+				case "uint":
+				case "int8":
+				case "int16":
+				case "int32":
+				case "int64":
+				case "uint8":
+				case "uint16":
+				case "uint32":
+				case "uint64":
+				case "uintptr":
+				case "float32":
 				case "float64":
 				case "byte":
 				case "rune":
@@ -1188,6 +1239,10 @@ export class CodeGen {
 					return `typeof ${val} === "string"`;
 				case "bool":
 					return `typeof ${val} === "boolean"`;
+				case "nil":
+					return `${val} === null`;
+				case "error":
+					return `typeof ${val} === "string"`;
 				default:
 					if (this.structNames.has(typeNode.name))
 						return `${val} instanceof ${typeNode.name}`;

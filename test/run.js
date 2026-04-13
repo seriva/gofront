@@ -3203,6 +3203,156 @@ func main() {
 	assertEqual(runJs(js), "5");
 });
 
+// ── Type switch ───────────────────────────────────────────────
+
+section("Type switch");
+
+test("type switch dispatches on int", () => {
+	const js = compile(`package main
+func describe(x any) string {
+	switch x.(type) {
+	case int:
+		return "int"
+	case string:
+		return "string"
+	case bool:
+		return "bool"
+	default:
+		return "other"
+	}
+}
+func main() {
+	console.log(describe(42))
+	console.log(describe("hi"))
+	console.log(describe(true))
+}`).js;
+	assertEqual(runJs(js), "int\nstring\nbool");
+});
+
+test("type switch with binding variable", () => {
+	const js = compile(`package main
+func double(x any) any {
+	switch v := x.(type) {
+	case int:
+		return v * 2
+	case string:
+		return v + v
+	default:
+		return v
+	}
+}
+func main() {
+	console.log(double(21))
+	console.log(double("ab"))
+}`).js;
+	assertEqual(runJs(js), "42\nabab");
+});
+
+test("type switch default branch", () => {
+	const js = compile(`package main
+func classify(x any) string {
+	switch x.(type) {
+	case int:
+		return "number"
+	default:
+		return "unknown"
+	}
+}
+func main() {
+	console.log(classify([]int{1, 2}))
+}`).js;
+	assertEqual(runJs(js), "unknown");
+});
+
+test("type switch case nil", () => {
+	const js = compile(`package main
+func isNil(x any) bool {
+	switch x.(type) {
+	case nil:
+		return true
+	default:
+		return false
+	}
+}
+func main() {
+	console.log(isNil(nil))
+	console.log(isNil(1))
+}`).js;
+	assertEqual(runJs(js), "true\nfalse");
+});
+
+test("type switch multi-type case", () => {
+	const js = compile(`package main
+func isNumeric(x any) bool {
+	switch x.(type) {
+	case int, float64:
+		return true
+	default:
+		return false
+	}
+}
+func main() {
+	console.log(isNumeric(1))
+	console.log(isNumeric(3.14))
+	console.log(isNumeric("x"))
+}`).js;
+	assertEqual(runJs(js), "true\ntrue\nfalse");
+});
+
+test("type switch on struct type", () => {
+	const js = compile(`package main
+type Dog struct { name string }
+type Cat struct { name string }
+func speak(x any) string {
+	switch x.(type) {
+	case Dog:
+		return "woof"
+	case Cat:
+		return "meow"
+	default:
+		return "..."
+	}
+}
+func main() {
+	console.log(speak(Dog{name: "Rex"}))
+	console.log(speak(Cat{name: "Mew"}))
+	console.log(speak(42))
+}`).js;
+	assertEqual(runJs(js), "woof\nmeow\n...");
+});
+
+test("type switch without default falls through silently", () => {
+	const js = compile(`package main
+func main() {
+	var x any = "hello"
+	switch x.(type) {
+	case int:
+		console.log("int")
+	case bool:
+		console.log("bool")
+	}
+	console.log("done")
+}`).js;
+	assertEqual(runJs(js), "done");
+});
+
+test("type switch binding var used in case body", () => {
+	const js = compile(`package main
+func process(x any) int {
+	switch v := x.(type) {
+	case int:
+		return v + 10
+	default:
+		return 0
+	}
+}
+func main() {
+	console.log(process(5))
+	console.log(process("s"))
+}`).js;
+	assertEqual(runJs(js), "15\n0");
+});
+
 // ── copy() and cap() ──────────────────────────────────────────
 
 section("copy() and cap()");

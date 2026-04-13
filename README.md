@@ -175,6 +175,7 @@ npm package types are resolved automatically from `node_modules/` and `@types/`.
 | `new(T)` | ✓ |
 | Type conversions | ✓ |
 | Type assertions (`x.(T)`) | ✓ |
+| Type switch (`switch x.(type)`, `switch v := x.(type)`) | ✓ — compiles to `if/else if` with `typeof` / `instanceof` checks |
 | Slice expressions (`s[lo:hi]`) | ✓ |
 | `break` / `continue` / labeled `break` / labeled `continue` | ✓ |
 | `cap()`, `copy()`, `panic()` | ✓ |
@@ -214,7 +215,6 @@ The following Go features are not supported or behave differently from the Go sp
 | Generics (Go 1.18+) | No `[T Type]` type parameters |
 | `[...]T{...}` array length inference | Not supported |
 | Side-effect imports (`import _ "pkg"`) | Not supported |
-| Type switch (`switch x.(type) { case T: ... }`) | Regular type assertions (`x.(T)`) work; type-switching does not |
 | Interface embedding | `type Reader interface { io.Reader }` produces a parse error |
 | `[]byte(s)` / `[]rune(s)` conversions | String-to-slice type conversions are not supported |
 
@@ -238,4 +238,4 @@ The following Go features are not supported or behave differently from the Go sp
 npm test
 ```
 
-256 tests covering language features, type errors, edge cases, DOM (jsdom), external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, and the example app.
+264 tests covering language features, type errors, edge cases, DOM (jsdom), external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, and the example app.

@@ -726,6 +726,26 @@ export class TypeChecker {
 				break;
 			}
 
+			case "TypeSwitchStmt": {
+				const inner = new Scope(scope);
+				this.checkExpr(stmt.expr, inner);
+				this._switchDepth++;
+				for (const c of stmt.cases) {
+					const caseScope = new Scope(inner);
+					if (stmt.assign) {
+						// Bind the variable to the single case type, or any for multi/default
+						const bindType =
+							c.types?.length === 1
+								? this.resolveTypeNode(c.types[0], inner)
+								: ANY;
+						caseScope.define(stmt.assign, bindType);
+					}
+					for (const s of c.stmts) this.checkStmt(s, caseScope, returnType);
+				}
+				this._switchDepth--;
+				break;
+			}
+
 			case "DeferStmt": {
 				if (stmt.call.kind !== "CallExpr")
 					this.err("defer requires a function call", stmt.call);
