@@ -513,6 +513,8 @@ export class Parser {
 				continue;
 			}
 			const type = this.parseType();
+			// Consume optional struct tag (backtick string), e.g. `json:"name"`
+			if (this.check(T.STRING)) this.advance();
 			fields.push({ names, type });
 			this.semi();
 		}
@@ -793,6 +795,11 @@ export class Parser {
 			T.STAR_ASSIGN,
 			T.SLASH_ASSIGN,
 			T.PERCENT_ASSIGN,
+			T.AMP_ASSIGN,
+			T.PIPE_ASSIGN,
+			T.CARET_ASSIGN,
+			T.LSHIFT_ASSIGN,
+			T.RSHIFT_ASSIGN,
 		];
 		if (assignOps.includes(t.type)) {
 			const op = this.advance().value;

@@ -3053,6 +3053,156 @@ Outer:
 	assertEqual(runJs(js), "3");
 });
 
+// ── Sized integer types ───────────────────────────────────────
+
+section("Sized integer types");
+
+test("uint is accepted as a type", () => {
+	const js = compile(`package main
+func main() {
+	var x uint = 42
+	console.log(x)
+}`).js;
+	assertEqual(runJs(js), "42");
+});
+
+test("int32 is accepted as a type", () => {
+	const js = compile(`package main
+func main() {
+	var x int32 = 100
+	console.log(x)
+}`).js;
+	assertEqual(runJs(js), "100");
+});
+
+test("float32 is accepted as a type", () => {
+	const js = compile(`package main
+func main() {
+	var x float32 = 3.14
+	console.log(x)
+}`).js;
+	assertEqual(runJs(js), "3.14");
+});
+
+test("uint64 used in function signature", () => {
+	const js = compile(`package main
+func double(n uint64) uint64 {
+	return n * 2
+}
+func main() {
+	console.log(double(21))
+}`).js;
+	assertEqual(runJs(js), "42");
+});
+
+test("int8, int16, int64 all accepted", () => {
+	const js = compile(`package main
+func main() {
+	var a int8 = 1
+	var b int16 = 2
+	var c int64 = 3
+	console.log(a + b + c)
+}`).js;
+	assertEqual(runJs(js), "6");
+});
+
+// ── Struct tags ───────────────────────────────────────────────
+
+section("Struct tags");
+
+test("struct tag is parsed and ignored", () => {
+	const js = compile(`package main
+type User struct {
+	Name string \`json:"name"\`
+	Age  int    \`json:"age"\`
+}
+func main() {
+	u := User{Name: "Alice", Age: 30}
+	console.log(u.Name)
+	console.log(u.Age)
+}`).js;
+	assertEqual(runJs(js), "Alice\n30");
+});
+
+test("struct with mixed tagged and untagged fields", () => {
+	const js = compile(`package main
+type Point struct {
+	X int \`json:"x"\`
+	Y int
+}
+func main() {
+	p := Point{X: 3, Y: 4}
+	console.log(p.X + p.Y)
+}`).js;
+	assertEqual(runJs(js), "7");
+});
+
+// ── Bitwise compound assignments ──────────────────────────────
+
+section("Bitwise compound assignments");
+
+test("&= clears bits", () => {
+	const js = compile(`package main
+func main() {
+	x := 15
+	x &= 10
+	console.log(x)
+}`).js;
+	assertEqual(runJs(js), "10");
+});
+
+test("|= sets bits", () => {
+	const js = compile(`package main
+func main() {
+	x := 5
+	x |= 10
+	console.log(x)
+}`).js;
+	assertEqual(runJs(js), "15");
+});
+
+test("^= toggles bits", () => {
+	const js = compile(`package main
+func main() {
+	x := 12
+	x ^= 10
+	console.log(x)
+}`).js;
+	assertEqual(runJs(js), "6");
+});
+
+test("<<= shifts left", () => {
+	const js = compile(`package main
+func main() {
+	x := 1
+	x <<= 3
+	console.log(x)
+}`).js;
+	assertEqual(runJs(js), "8");
+});
+
+test(">>= shifts right", () => {
+	const js = compile(`package main
+func main() {
+	x := 16
+	x >>= 2
+	console.log(x)
+}`).js;
+	assertEqual(runJs(js), "4");
+});
+
+test("chained bitwise assignments", () => {
+	const js = compile(`package main
+func main() {
+	flags := 0
+	flags |= 1
+	flags |= 4
+	flags &= 5
+	console.log(flags)
+}`).js;
+	assertEqual(runJs(js), "5");
+});
+
 // ── Summary ──────────────────────────────────────────────────
 
 const total = passed + failed;

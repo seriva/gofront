@@ -180,7 +180,7 @@ npm package types are resolved automatically from `node_modules/` and `@types/`.
 | `cap()`, `copy()`, `panic()` | ✓ |
 | Variadic spread (`f(slice...)`, `append(a, b...)`) | ✓ |
 | Bitwise operators (`&`, `\|`, `^`, `<<`, `>>`) | ✓ |
-| Compound assignment (`+=`, `-=`, `*=`, `/=`, `%=`) | ✓ |
+| Compound assignment (`+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `\|=`, `^=`, `<<=`, `>>=`) | ✓ |
 | Increment / decrement (`i++`, `i--`) | ✓ |
 | Raw string literals (backticks) | ✓ |
 | Rune / char literals (`'a'`, `'\n'`) | ✓ — compiled to integer char codes |
@@ -194,6 +194,8 @@ npm package types are resolved automatically from `node_modules/` and `@types/`.
 | Multi-file packages | ✓ |
 | Cross-package imports | ✓ |
 | Import aliases (`import m "./pkg"`) | ✓ |
+| Sized integer types (`uint`, `int8`–`int64`, `uint8`–`uint64`, `float32`) | ✓ — mapped to `int` / `float64` at runtime |
+| Struct field tags (`` `json:"name"` ``) | ✓ — parsed and ignored (no reflection) |
 
 ---
 
@@ -214,10 +216,7 @@ The following Go features are not supported or behave differently from the Go sp
 | Side-effect imports (`import _ "pkg"`) | Not supported |
 | Type switch (`switch x.(type) { case T: ... }`) | Regular type assertions (`x.(T)`) work; type-switching does not |
 | Interface embedding | `type Reader interface { io.Reader }` produces a parse error |
-| Struct tags | `` `json:"name"` `` field tags produce a parse error |
-| Sized integer types | `int8`, `int16`, `int32`, `int64`, `uint`, `uint8`–`uint64`, `float32` are unknown types — use `int` / `float64` |
 | `[]byte(s)` / `[]rune(s)` conversions | String-to-slice type conversions are not supported |
-| Bitwise compound assignments | `&=`, `\|=`, `^=`, `<<=`, `>>=` produce a parse error |
 
 ### Behaves differently from Go
 
@@ -239,4 +238,4 @@ The following Go features are not supported or behave differently from the Go sp
 npm test
 ```
 
-210 tests covering language features, type errors, edge cases, DOM (jsdom), external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, and the example app.
+228 tests covering language features, type errors, edge cases, DOM (jsdom), external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, and the example app.

@@ -58,6 +58,11 @@ export const T = {
 	STAR_ASSIGN: "*=",
 	SLASH_ASSIGN: "/=",
 	PERCENT_ASSIGN: "%=",
+	AMP_ASSIGN: "&=",
+	PIPE_ASSIGN: "|=",
+	CARET_ASSIGN: "^=",
+	LSHIFT_ASSIGN: "<<=",
+	RSHIFT_ASSIGN: ">>=",
 	INC: "++",
 	DEC: "--",
 	AMP: "&",
@@ -452,25 +457,32 @@ export class Lexer {
 					else this.push(T.NOT, "!", l, c);
 					break;
 				case "<":
-					if (this.match("<")) this.push(T.LSHIFT, "<<", l, c);
-					else if (this.match("=")) this.push(T.LTE, "<=", l, c);
+					if (this.match("<")) {
+						if (this.match("=")) this.push(T.LSHIFT_ASSIGN, "<<=", l, c);
+						else this.push(T.LSHIFT, "<<", l, c);
+					} else if (this.match("=")) this.push(T.LTE, "<=", l, c);
 					else this.push(T.LT, "<", l, c);
 					break;
 				case ">":
-					if (this.match(">")) this.push(T.RSHIFT, ">>", l, c);
-					else if (this.match("=")) this.push(T.GTE, ">=", l, c);
+					if (this.match(">")) {
+						if (this.match("=")) this.push(T.RSHIFT_ASSIGN, ">>=", l, c);
+						else this.push(T.RSHIFT, ">>", l, c);
+					} else if (this.match("=")) this.push(T.GTE, ">=", l, c);
 					else this.push(T.GT, ">", l, c);
 					break;
 				case "&":
 					if (this.match("&")) this.push(T.AND, "&&", l, c);
+					else if (this.match("=")) this.push(T.AMP_ASSIGN, "&=", l, c);
 					else this.push(T.AMP, "&", l, c);
 					break;
 				case "|":
 					if (this.match("|")) this.push(T.OR, "||", l, c);
+					else if (this.match("=")) this.push(T.PIPE_ASSIGN, "|=", l, c);
 					else this.push(T.PIPE, "|", l, c);
 					break;
 				case "^":
-					this.push(T.CARET, "^", l, c);
+					if (this.match("=")) this.push(T.CARET_ASSIGN, "^=", l, c);
+					else this.push(T.CARET, "^", l, c);
 					break;
 				case ":":
 					if (this.match("=")) this.push(T.DEFINE, ":=", l, c);

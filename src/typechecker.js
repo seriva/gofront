@@ -54,6 +54,18 @@ const BASIC_TYPES = {
 	byte: INT,
 	rune: INT,
 	error: ERROR,
+	// Sized integer / float aliases — all map to int or float64 at runtime
+	uint: INT,
+	int8: INT,
+	int16: INT,
+	int32: INT,
+	int64: INT,
+	uint8: INT,
+	uint16: INT,
+	uint32: INT,
+	uint64: INT,
+	uintptr: INT,
+	float32: FLOAT64,
 };
 
 function isNumeric(t) {
