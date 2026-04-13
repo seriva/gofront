@@ -554,8 +554,18 @@ export class CodeGen {
 				this.line(`__defers.push(() => { ${this.genExpr(stmt.call)}; });`);
 				break;
 
+			case "LabeledStmt":
+				this.line(`${stmt.label}:`);
+				this.genStmt(stmt.body);
+				break;
+
 			case "BranchStmt":
-				if (stmt.keyword !== "fallthrough") this.line(`${stmt.keyword};`);
+				if (stmt.keyword !== "fallthrough")
+					this.line(
+						stmt.label
+							? `${stmt.keyword} ${stmt.label};`
+							: `${stmt.keyword};`,
+					);
 				// fallthrough: omit — JS switch falls through naturally without a break
 				break;
 
@@ -937,13 +947,17 @@ export class CodeGen {
 		}
 
 		const fn = this.genExpr(expr.func);
-		const args = expr.args.map((a) => this.genExpr(a)).join(", ");
+		const args = expr.args
+			.map((a) => (a._spread ? `...${this.genExpr(a)}` : this.genExpr(a)))
+			.join(", ");
 		return `${fn}(${args})`;
 	}
 
 	genAppend(expr) {
 		const slice = this.genExpr(expr.args[0]);
-		const elems = expr.args.slice(1).map((a) => this.genExpr(a));
+		const elems = expr.args
+			.slice(1)
+			.map((a) => (a._spread ? `...${this.genExpr(a)}` : this.genExpr(a)));
 		if (elems.length === 0) return slice;
 		this._usesAppend = true;
 		return `__append(${slice}, ${elems.join(", ")})`;

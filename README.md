@@ -176,12 +176,14 @@ npm package types are resolved automatically from `node_modules/` and `@types/`.
 | Type conversions | ✓ |
 | Type assertions (`x.(T)`) | ✓ |
 | Slice expressions (`s[lo:hi]`) | ✓ |
-| `break` / `continue` | ✓ |
+| `break` / `continue` / labeled `break` / labeled `continue` | ✓ |
 | `cap()`, `copy()`, `panic()` | ✓ |
+| Variadic spread (`f(slice...)`, `append(a, b...)`) | ✓ |
 | Bitwise operators (`&`, `\|`, `^`, `<<`, `>>`) | ✓ |
 | Compound assignment (`+=`, `-=`, `*=`, `/=`, `%=`) | ✓ |
 | Increment / decrement (`i++`, `i--`) | ✓ |
 | Raw string literals (backticks) | ✓ |
+| Rune / char literals (`'a'`, `'\n'`) | ✓ — compiled to integer char codes |
 | `defer` | ✓ |
 | `error` type / `error("msg")` / `.Error()` | ✓ |
 | `async func` / `await` expressions | ✓ |
@@ -190,6 +192,37 @@ npm package types are resolved automatically from `node_modules/` and `@types/`.
 | npm package types | ✓ |
 | Multi-file packages | ✓ |
 | Cross-package imports | ✓ |
+
+---
+
+## Limitations / Not implemented
+
+The following Go features are not supported or behave differently from the Go specification.
+
+### Not implemented
+
+| Feature | Notes |
+|---|---|
+| Goroutines (`go` keyword) | No concurrency model — JS is single-threaded |
+| Channels (`chan`, `<-`) | Depends on goroutines |
+| `select` statement | Depends on channels |
+| `goto` statement | Not planned |
+| `recover()` | `panic()` works but `recover()` is absent |
+| Generics (Go 1.18+) | No `[T Type]` type parameters |
+| `[...]T{...}` array length inference | Not supported |
+| Import aliases (`import foo "pkg"`) | Not supported |
+| Side-effect imports (`import _ "pkg"`) | Not supported |
+
+### Behaves differently from Go
+
+| Feature | GoFront behaviour | Go behaviour |
+|---|---|---|
+| Map iteration order | Insertion-order (JS `Object.entries`) | Randomised |
+| Integer overflow | Silent IEEE 754 float64 wrap | Wraps at type boundary |
+| `cap()` | Always equals `len()` | May exceed `len()` |
+| Fixed-size arrays (`[n]T`) | Compiled as plain JS arrays (no length enforcement) | Fixed at compile time |
+| `rune` / `byte` types | Treated as `int`; no UTF-8 semantics | Distinct types with proper encoding |
+| `range` over string gives JS string characters, not rune code points | JS `Array.from(s)` iteration | Go UTF-8 rune iteration |
 
 ---
 

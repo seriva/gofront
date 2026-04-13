@@ -564,10 +564,20 @@ export class Parser {
 				return this.parseDefer();
 			case T.BREAK:
 				this.advance();
+				if (this.check(T.IDENT)) {
+					const label = this.advance().value;
+					this.semi();
+					return { kind: "BranchStmt", keyword: "break", label };
+				}
 				this.semi();
 				return { kind: "BranchStmt", keyword: "break" };
 			case T.CONTINUE:
 				this.advance();
+				if (this.check(T.IDENT)) {
+					const label = this.advance().value;
+					this.semi();
+					return { kind: "BranchStmt", keyword: "continue", label };
+				}
 				this.semi();
 				return { kind: "BranchStmt", keyword: "continue" };
 			case T.FALLTHROUGH:
@@ -582,6 +592,14 @@ export class Parser {
 				return this.parseSwitch();
 			case T.LBRACE:
 				return this.parseBlock();
+			case T.IDENT:
+				if (this.check2(T.COLON)) {
+					const label = this.advance().value; // consume IDENT
+					this.advance(); // consume COLON
+					const body = this.parseStmt();
+					return { kind: "LabeledStmt", label, body };
+				}
+				return this.parseSimpleStmt();
 			default:
 				return this.parseSimpleStmt();
 		}
@@ -917,9 +935,10 @@ export class Parser {
 				) {
 					args.push({ kind: "TypeExpr", type: this.parseType() });
 				} else {
-					args.push(this.parseExpr());
+					const arg = this.parseExpr();
+					if (this.match(T.ELLIPSIS)) arg._spread = true;
+					args.push(arg);
 				}
-				this.match(T.ELLIPSIS); // variadic spread, ignore for now
 			} while (this.match(T.COMMA));
 		}
 		this.expect(T.RPAREN);

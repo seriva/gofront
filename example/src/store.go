@@ -48,9 +48,12 @@ func addTodo(text string, priority int) {
 }
 
 func toggleTodo(id int) {
+Search:
     for i := 0; i < len(todos); i++ {
-        if todos[i].id == id {
+        switch todos[i].id {
+        case id:
             todos[i].done = !todos[i].done
+            break Search
         }
     }
 }
@@ -133,7 +136,7 @@ func visibleTodos() []Todo {
         }
         return out
     default:
-        return todos
+        return append([]Todo{}, todos...)
     }
 }
 

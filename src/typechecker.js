@@ -717,8 +717,13 @@ export class TypeChecker {
 				break;
 			}
 
+			case "LabeledStmt":
+				this.checkStmt(stmt.body, scope, returnType);
+				break;
+
 			case "BranchStmt": {
 				const kw = stmt.keyword;
+				if (stmt.label) break; // labeled branch — target checked by JS
 				if (kw === "continue" && this._loopDepth === 0)
 					this.err("continue statement outside for loop", stmt);
 				else if (
@@ -915,6 +920,8 @@ export class TypeChecker {
 				fnType.variadic && i >= fnType.params.length - 1
 					? fnType.params.length - 1
 					: i;
+			// Spread arg (f(slice...)) passes a whole slice into a variadic — skip per-element check
+			if (expr.args[i]?._spread) continue;
 			this.assertAssignable(fnType.params[paramIdx], argTypes[i], expr.args[i]);
 		}
 

@@ -2724,6 +2724,217 @@ func main() {
 	assertEqual(errors.length, 0);
 });
 
+// ═════════════════════════════════════════════════════════════
+
+section("Variadic spread (...)");
+
+test("append with spread merges two slices", () => {
+	const js = compile(`package main
+func main() {
+	a := []int{1, 2, 3}
+	b := []int{4, 5, 6}
+	a = append(a, b...)
+	console.log(len(a))
+}`).js;
+	assertEqual(runJs(js), "6");
+});
+
+test("append spread of empty slice is a no-op", () => {
+	const js = compile(`package main
+func main() {
+	a := []int{1, 2, 3}
+	b := []int{}
+	a = append(a, b...)
+	console.log(len(a))
+}`).js;
+	assertEqual(runJs(js), "3");
+});
+
+test("append spread into nil slice", () => {
+	const js = compile(`package main
+func main() {
+	var a []int
+	b := []int{1, 2, 3}
+	a = append(a, b...)
+	console.log(len(a))
+}`).js;
+	assertEqual(runJs(js), "3");
+});
+
+test("spread into variadic function", () => {
+	const js = compile(`package main
+func sum(nums ...int) int {
+	total := 0
+	for _, n := range nums {
+		total += n
+	}
+	return total
+}
+func main() {
+	nums := []int{1, 2, 3, 4}
+	console.log(sum(nums...))
+}`).js;
+	assertEqual(runJs(js), "10");
+});
+
+// ═════════════════════════════════════════════════════════════
+
+section("Rune / char literals");
+
+test("char literal produces its char code", () => {
+	const js = compile(`package main
+func main() {
+	var r rune = 'A'
+	console.log(r)
+}`).js;
+	assertEqual(runJs(js), "65");
+});
+
+test("char literal escape sequences", () => {
+	const js = compile(`package main
+func main() {
+	console.log('\\n')
+	console.log('\\t')
+	console.log('\\'')
+	console.log('\\\\')
+}`).js;
+	assertEqual(runJs(js), "10\n9\n39\n92");
+});
+
+test("char literal used in arithmetic", () => {
+	const js = compile(`package main
+func main() {
+	x := 'a' + 1
+	console.log(x)
+}`).js;
+	assertEqual(runJs(js), "98");
+});
+
+test("char literal as const", () => {
+	const js = compile(`package main
+const Tab = '\t'
+func main() {
+	console.log(Tab)
+}`).js;
+	assertEqual(runJs(js), "9");
+});
+
+test("switch on char literal cases", () => {
+	const js = compile(`package main
+func grade(c rune) string {
+	switch c {
+	case 'A':
+		return "excellent"
+	case 'B':
+		return "good"
+	default:
+		return "other"
+	}
+}
+func main() {
+	console.log(grade('A'))
+	console.log(grade('B'))
+	console.log(grade('C'))
+}`).js;
+	assertEqual(runJs(js), "excellent\ngood\nother");
+});
+
+test("unicode char literal", () => {
+	const js = compile(`package main
+func main() {
+	console.log('€')
+}`).js;
+	assertEqual(runJs(js), "8364");
+});
+
+test("char literal used in comparison", () => {
+	const js = compile(`package main
+func main() {
+	c := 'z'
+	if c > 'a' {
+		console.log("yes")
+	}
+}`).js;
+	assertEqual(runJs(js), "yes");
+});
+
+// ═════════════════════════════════════════════════════════════
+
+section("Labeled break / continue");
+
+test("labeled break exits outer loop", () => {
+	const js = compile(`package main
+func main() {
+	result := 0
+Outer:
+	for i := 0; i < 3; i++ {
+		for j := 0; j < 3; j++ {
+			if j == 1 {
+				break Outer
+			}
+			result++
+		}
+	}
+	console.log(result)
+}`).js;
+	assertEqual(runJs(js), "1");
+});
+
+test("labeled break exits for from inside switch", () => {
+	const js = compile(`package main
+func main() {
+	result := 0
+Search:
+	for i := 0; i < 5; i++ {
+		switch i {
+		case 3:
+			break Search
+		default:
+			result++
+		}
+	}
+	console.log(result)
+}`).js;
+	assertEqual(runJs(js), "3");
+});
+
+test("labeled continue on for range loop", () => {
+	const js = compile(`package main
+func main() {
+	result := 0
+	items := []int{1, 2, 3}
+Outer:
+	for _, x := range items {
+		for _, y := range items {
+			if y == 2 {
+				continue Outer
+			}
+			result += x
+		}
+	}
+	console.log(result)
+}`).js;
+	assertEqual(runJs(js), "6");
+});
+
+test("labeled continue skips to outer loop", () => {
+	const js = compile(`package main
+func main() {
+	result := 0
+Outer:
+	for i := 0; i < 3; i++ {
+		for j := 0; j < 3; j++ {
+			if j == 1 {
+				continue Outer
+			}
+			result++
+		}
+	}
+	console.log(result)
+}`).js;
+	assertEqual(runJs(js), "3");
+});
+
 // ── Summary ──────────────────────────────────────────────────
 
 const total = passed + failed;
