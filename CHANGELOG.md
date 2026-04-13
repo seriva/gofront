@@ -40,5 +40,5 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `--help` output
 - Source files use `.go` extension for automatic editor syntax highlighting
 - 191 tests covering language features, type errors, edge cases, DOM (jsdom), external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, and the example app
-- CI via GitHub Actions (Node 20 and 22)
+- CI via GitHub Actions (Node 25)
 - Example todo app demonstrating structs, iota constants, named returns, closures, slices, maps, `for range`, `switch`, cross-package imports, `async`/`await`, localStorage persistence, and HTML5 drag-and-drop

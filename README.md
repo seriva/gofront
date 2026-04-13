@@ -40,6 +40,16 @@ highlighting, bracket matching, and indentation rules without any extra configur
 
 ---
 
+## Install
+
+```sh
+npm install -g goweb
+```
+
+Requires Node.js 25+.
+
+---
+
 ## Example — Todo App
 
 The only example is a full todo web app in `example/`, split across a
