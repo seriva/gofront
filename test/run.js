@@ -88,6 +88,8 @@ function runJs(js, extraGlobals = {}) {
 		Boolean,
 		Array,
 		Object,
+		TextEncoder,
+		TextDecoder,
 		console: {
 			log: (...args) => lines.push(args.map((a) => String(a)).join(" ")),
 		},
@@ -3351,6 +3353,130 @@ func main() {
 	console.log(process("s"))
 }`).js;
 	assertEqual(runJs(js), "15\n0");
+});
+
+// ── []byte / []rune conversions ───────────────────────────────
+
+section("[]byte and []rune conversions");
+
+test("[]byte(s) produces UTF-8 byte values", () => {
+	const js = compile(`package main
+func main() {
+	b := []byte("ABC")
+	console.log(b[0], b[1], b[2])
+}`).js;
+	assertEqual(runJs(js), "65 66 67");
+});
+
+test("[]byte(s) length equals byte count for ASCII", () => {
+	const js = compile(`package main
+func main() {
+	b := []byte("hello")
+	console.log(len(b))
+}`).js;
+	assertEqual(runJs(js), "5");
+});
+
+test("[]byte(s) encodes multi-byte UTF-8 correctly", () => {
+	// é is U+00E9 → 2 bytes in UTF-8: 0xC3 0xA9
+	const js = compile(`package main
+func main() {
+	b := []byte("é")
+	console.log(len(b))
+	console.log(b[0], b[1])
+}`).js;
+	assertEqual(runJs(js), "2\n195 169");
+});
+
+test("[]rune(s) produces Unicode code points", () => {
+	const js = compile(`package main
+func main() {
+	r := []rune("ABC")
+	console.log(r[0], r[1], r[2])
+}`).js;
+	assertEqual(runJs(js), "65 66 67");
+});
+
+test("[]rune(s) length equals character count", () => {
+	const js = compile(`package main
+func main() {
+	r := []rune("hello")
+	console.log(len(r))
+}`).js;
+	assertEqual(runJs(js), "5");
+});
+
+test("[]rune(s) handles multi-byte char as single code point", () => {
+	// é is one rune (U+00E9 = 233)
+	const js = compile(`package main
+func main() {
+	r := []rune("é")
+	console.log(len(r))
+	console.log(r[0])
+}`).js;
+	assertEqual(runJs(js), "1\n233");
+});
+
+test("[]byte result is a regular slice (supports append)", () => {
+	const js = compile(`package main
+func main() {
+	b := []byte("hi")
+	b = append(b, 33)
+	console.log(len(b))
+	console.log(b[2])
+}`).js;
+	assertEqual(runJs(js), "3\n33");
+});
+
+test("[]rune result is a regular slice (supports range)", () => {
+	const js = compile(`package main
+func main() {
+	sum := 0
+	for _, r := range []rune("ABC") {
+		sum += r
+	}
+	console.log(sum)
+}`).js;
+	assertEqual(runJs(js), "198");
+});
+
+test("[]byte of empty string is empty slice", () => {
+	const js = compile(`package main
+func main() {
+	b := []byte("")
+	console.log(len(b))
+}`).js;
+	assertEqual(runJs(js), "0");
+});
+
+test("[]rune of empty string is empty slice", () => {
+	const js = compile(`package main
+func main() {
+	r := []rune("")
+	console.log(len(r))
+}`).js;
+	assertEqual(runJs(js), "0");
+});
+
+test("len([]rune(s)) counts Unicode characters not bytes", () => {
+	// "héllo" is 5 chars but 6 UTF-8 bytes; len([]rune) should give 5
+	const js = compile(`package main
+func main() {
+	s := "héllo"
+	console.log(len([]rune(s)))
+}`).js;
+	assertEqual(runJs(js), "5");
+});
+
+test("[]rune handles emoji as single code point", () => {
+	// 😀 is U+1F600, a single rune despite being 4 UTF-8 bytes
+	const js = compile(`package main
+func main() {
+	r := []rune("😀")
+	console.log(len(r))
+	console.log(r[0])
+}`).js;
+	assertEqual(runJs(js), "1\n128512");
 });
 
 // ── copy() and cap() ──────────────────────────────────────────

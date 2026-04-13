@@ -999,7 +999,20 @@ export class Parser {
 					(t.type === T.MAP || isSliceOrArrayType) &&
 					!this.looksLikeCompositeLitArg()
 				) {
-					args.push({ kind: "TypeExpr", type: this.parseType() });
+					const typeNode = this.parseType();
+					// []byte(s) / []rune(s) used as a call argument — it's a type conversion
+					if (this.check(T.LPAREN)) {
+						this.advance();
+						const convExpr = this.parseExpr();
+						this.expect(T.RPAREN);
+						args.push({
+							kind: "TypeConversion",
+							targetType: typeNode,
+							expr: convExpr,
+						});
+					} else {
+						args.push({ kind: "TypeExpr", type: typeNode });
+					}
 				} else {
 					const arg = this.parseExpr();
 					if (this.match(T.ELLIPSIS)) arg._spread = true;
@@ -1165,9 +1178,17 @@ export class Parser {
 			return { kind: "Ident", name: t.value };
 		}
 
-		// Slice/array/map composite literals: []int{1,2}, map[string]int{"a":1}
+		// Slice/array/map composite literals or type conversions:
+		//   []int{1,2}           → CompositeLit
+		//   []byte(s), []rune(s) → TypeConversion
 		if (t.type === T.LBRACKET || t.type === T.MAP) {
 			const typeExpr = this.parseType();
+			if (this.check(T.LPAREN)) {
+				this.advance();
+				const expr = this.parseExpr();
+				this.expect(T.RPAREN);
+				return { kind: "TypeConversion", targetType: typeExpr, expr };
+			}
 			return this.parseCompositeLit(typeExpr);
 		}
 

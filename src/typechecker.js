@@ -234,6 +234,8 @@ export class TypeChecker {
 			"FileReader",
 			"ArrayBuffer",
 			"Uint8Array",
+			"TextEncoder",
+			"TextDecoder",
 			"WebGLRenderingContext",
 			"WebGL2RenderingContext",
 			"GPUDevice",

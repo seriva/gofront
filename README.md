@@ -197,6 +197,8 @@ npm package types are resolved automatically from `node_modules/` and `@types/`.
 | Import aliases (`import m "./pkg"`) | ✓ |
 | Sized integer types (`uint`, `int8`–`int64`, `uint8`–`uint64`, `float32`) | ✓ — mapped to `int` / `float64` at runtime |
 | Struct field tags (`` `json:"name"` ``) | ✓ — parsed and ignored (no reflection) |
+| `[]byte(s)` conversion | ✓ — produces UTF-8 byte values via `TextEncoder` |
+| `[]rune(s)` conversion | ✓ — produces Unicode code points via `Array.from` |
 
 ---
 
@@ -216,7 +218,6 @@ The following Go features are not supported or behave differently from the Go sp
 | `[...]T{...}` array length inference | Not supported |
 | Side-effect imports (`import _ "pkg"`) | Not supported |
 | Interface embedding | `type Reader interface { io.Reader }` produces a parse error |
-| `[]byte(s)` / `[]rune(s)` conversions | String-to-slice type conversions are not supported |
 
 ### Behaves differently from Go
 
@@ -238,4 +239,4 @@ The following Go features are not supported or behave differently from the Go sp
 npm test
 ```
 
-264 tests covering language features, type errors, edge cases, DOM (jsdom), external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, and the example app.
+276 tests covering language features, type errors, edge cases, DOM (jsdom), external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, and the example app.

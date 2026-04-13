@@ -15,9 +15,14 @@ func togglePriorityMode() {
     }
 }
 
+const maxTodoLen = 120
+
 func validateTodo(text string) error {
     if text == "" {
         return error("todo text cannot be empty")
+    }
+    if len([]rune(text)) > maxTodoLen {
+        return error("todo text too long")
     }
     return nil
 }

@@ -881,7 +881,23 @@ export class CodeGen {
 
 			case "TypeConversion": {
 				const inner = this.genExpr(expr.expr);
-				const target = expr.targetType?.name;
+				const t = expr.targetType;
+
+				// Slice type conversions
+				if (t?.kind === "SliceType") {
+					const elem = t.elem?.name;
+					// []byte(s) → UTF-8 byte array
+					if (elem === "byte" || elem === "uint8") {
+						return `Array.from(new TextEncoder().encode(${inner}))`;
+					}
+					// []rune(s) → Unicode code point array
+					if (elem === "rune" || elem === "int32" || elem === "int") {
+						return `Array.from(${inner}, __c => __c.codePointAt(0))`;
+					}
+					return `Array.from(${inner})`;
+				}
+
+				const target = t?.name;
 				switch (target) {
 					case "string":
 						return `String(${inner})`;
