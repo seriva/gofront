@@ -86,7 +86,7 @@ export function compileFiles(files, options = {}) {
 
 	// js: prefix — local .d.ts files
 	for (const imp of allImports) {
-		for (const path of imp.paths) {
+		for (const { path } of imp.imports) {
 			if (!path.startsWith("js:")) continue;
 			const dtsPath = join(fromDir, path.slice(3));
 			try {
@@ -109,7 +109,7 @@ export function compileFiles(files, options = {}) {
 	// local GoFront packages (./subdir)
 	const seenLocalPaths = new Set();
 	for (const imp of allImports) {
-		for (const path of imp.paths) {
+		for (const { path, alias } of imp.imports) {
 			if (!isLocalPath(path) || seenLocalPaths.has(path)) continue;
 			seenLocalPaths.add(path);
 
@@ -124,9 +124,10 @@ export function compileFiles(files, options = {}) {
 			// Recursively compile dependency
 			const dep = compileDir(depDir);
 			preambles.push(dep.js);
-			bundledPackages.add(dep.pkgName);
+			const nameUsed = alias ?? dep.pkgName;
+			bundledPackages.add(nameUsed);
 			checker.addPackageNamespace(
-				dep.pkgName,
+				nameUsed,
 				dep.exportedSymbols,
 				dep.exportedTypes,
 			);

@@ -129,18 +129,23 @@ export class Parser {
 
 	parseImport() {
 		this.expect(T.IMPORT);
-		const paths = [];
+		const imports = [];
+		const parseOne = () => {
+			const alias = this.check(T.IDENT) ? this.advance().value : null;
+			const path = this.expect(T.STRING).value;
+			return { path, alias };
+		};
 		if (this.match(T.LPAREN)) {
 			while (!this.check(T.RPAREN) && !this.check(T.EOF)) {
-				paths.push(this.expect(T.STRING).value);
+				imports.push(parseOne());
 				this.semi();
 			}
 			this.expect(T.RPAREN);
 		} else {
-			paths.push(this.expect(T.STRING).value);
+			imports.push(parseOne());
 		}
 		this.semi();
-		return { kind: "ImportDecl", paths };
+		return { kind: "ImportDecl", imports };
 	}
 
 	// ── Top-level declarations ───────────────────────────────────

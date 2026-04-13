@@ -170,7 +170,7 @@ function runCompile() {
 	const jsImports = new Map();
 
 	for (const imp of ast.imports) {
-		for (const path of imp.paths) {
+		for (const { path } of imp.imports) {
 			if (!path.startsWith("js:")) continue;
 			const dtsPath = join(fromDir, path.slice(3));
 			try {
@@ -193,7 +193,7 @@ function runCompile() {
 	const preambles = [];
 
 	for (const imp of ast.imports) {
-		for (const path of imp.paths) {
+		for (const { path, alias } of imp.imports) {
 			if (!isLocalPath(path)) continue;
 			const depDir = resolveGwDir(path, inputPath);
 			if (!depDir) {
@@ -204,9 +204,10 @@ function runCompile() {
 			}
 			const dep = compileDir(depDir);
 			preambles.push(dep.js);
-			bundledPackages.add(dep.pkgName);
+			const nameUsed = alias ?? dep.pkgName;
+			bundledPackages.add(nameUsed);
 			checker.addPackageNamespace(
-				dep.pkgName,
+				nameUsed,
 				dep.exportedSymbols,
 				dep.exportedTypes,
 			);

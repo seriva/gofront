@@ -82,7 +82,7 @@ export function resolveAll(imports, fromFile, parseDts) {
 	const resolved = new Map();
 
 	for (const imp of imports) {
-		for (const path of imp.paths) {
+		for (const { path } of imp.imports) {
 			if (path.startsWith("js:")) continue; // handled separately
 			if (isLocalPath(path)) continue; // local .go packages — handled by compiler
 

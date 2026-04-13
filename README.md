@@ -193,6 +193,7 @@ npm package types are resolved automatically from `node_modules/` and `@types/`.
 | npm package types | ✓ |
 | Multi-file packages | ✓ |
 | Cross-package imports | ✓ |
+| Import aliases (`import m "./pkg"`) | ✓ |
 
 ---
 
@@ -210,7 +211,6 @@ The following Go features are not supported or behave differently from the Go sp
 | `goto` statement | Not planned |
 | Generics (Go 1.18+) | No `[T Type]` type parameters |
 | `[...]T{...}` array length inference | Not supported |
-| Import aliases (`import foo "pkg"`) | Not supported |
 | Side-effect imports (`import _ "pkg"`) | Not supported |
 
 ### Behaves differently from Go

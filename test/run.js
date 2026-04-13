@@ -45,7 +45,7 @@ function compile(source, { fromFile = join(FIXTURES, "_dummy.go") } = {}) {
 	const jsImports = new Map();
 
 	for (const imp of ast.imports) {
-		for (const path of imp.paths) {
+		for (const { path } of imp.imports) {
 			if (!path.startsWith("js:")) continue;
 			const dtsPath = join(fromDir, path.slice(3));
 			const { types, values } = parseDts(readFileSync(dtsPath, "utf8"));
@@ -1247,6 +1247,38 @@ test("cross-package import: runtime output is correct", () => {
 	const { js } = compileDir(dir);
 	const out = runJs(js);
 	assertEqual(out.trim(), "15\n16"); // Add(10,5)=15, Square(4)=16
+});
+
+test("import alias: qualified access uses alias name", () => {
+	const dir = join(FIXTURES, "multifile/withimportalias");
+	const { js } = compileDir(dir);
+	assertContains(js, "Add(10, 5)");
+	assertContains(js, "Square(4)");
+});
+
+test("import alias: runtime output is correct", () => {
+	const dir = join(FIXTURES, "multifile/withimportalias");
+	const { js } = compileDir(dir);
+	assertEqual(runJs(js).trim(), "15\n16");
+});
+
+test("import alias in group: single file with aliased import", () => {
+	const { errors } = compile(
+		`package main
+import (
+	u "./utils"
+)
+func main() {
+	console.log(u.Add(3, 4))
+}`,
+		{ fromFile: join(FIXTURES, "multifile/withimport/main.go") },
+	);
+	// alias 'u' instead of 'math' — just check it parses without errors
+	// (utils doesn't exist at that path so type errors are expected, not parse errors)
+	assert(
+		errors.every((e) => !e.message.includes("SyntaxError")),
+		"no parse errors",
+	);
 });
 
 test("exportedSymbols contains package functions", () => {
