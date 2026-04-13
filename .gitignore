@@ -1,5 +1,9 @@
 # Dependencies
-node_modules/
+/node_modules/
+/example/node_modules/
+
+# Test fixture packages (tracked intentionally)
+!/test/fixtures/node_modules/
 
 # Build output
 dist/
