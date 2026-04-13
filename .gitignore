@@ -5,6 +5,9 @@
 # Test fixture packages (tracked intentionally)
 !/test/fixtures/node_modules/
 
+# Coverage
+coverage/
+
 # Build output
 dist/
 out/

@@ -890,9 +890,13 @@ export class CodeGen {
 					if (elem === "byte" || elem === "uint8") {
 						return `Array.from(new TextEncoder().encode(${inner}))`;
 					}
-					// []rune(s) → Unicode code point array
+					// []rune(s) → Unicode code point array (only when source is a string)
 					if (elem === "rune" || elem === "int32" || elem === "int") {
-						return `Array.from(${inner}, __c => __c.codePointAt(0))`;
+						const srcType = expr.expr._type;
+						if (srcType?.kind === "basic" && srcType?.name === "string") {
+							return `Array.from(${inner}, __c => __c.codePointAt(0))`;
+						}
+						return `Array.from(${inner})`;
 					}
 					return `Array.from(${inner})`;
 				}

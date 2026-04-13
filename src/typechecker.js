@@ -922,12 +922,19 @@ export class TypeChecker {
 
 	checkCall(expr, scope) {
 		const fnType = this.checkExpr(expr.func, scope);
-		const argTypes = expr.args.map((a) => this.checkExpr(a, scope));
 
-		// Built-in handling
+		// Handle built-ins before evaluating args; some (e.g. new) take type names as
+		// arguments, which would otherwise produce false "Undefined" errors.
 		if (fnType.kind === "builtin") {
+			const argTypes = expr.args.map((a, i) => {
+				// new(T) — first arg is a type name, not a value expression
+				if (fnType.name === "new" && i === 0) return ANY;
+				return this.checkExpr(a, scope);
+			});
 			return this.checkBuiltin(fnType.name, expr, argTypes, scope);
 		}
+
+		const argTypes = expr.args.map((a) => this.checkExpr(a, scope));
 
 		if (isAny(fnType)) return ANY;
 
@@ -1105,7 +1112,10 @@ export class TypeChecker {
 			case "ArrayType":
 				return {
 					kind: "array",
-					size: node.size,
+					size:
+						node.size?.value !== undefined
+							? Number(node.size.value)
+							: node.size,
 					elem: this.resolveTypeNode(node.elem, scope),
 				};
 			case "MapType":
@@ -1168,13 +1178,10 @@ export class TypeChecker {
 					for (const embed of node.embeds) {
 						const resolved = this.resolveTypeNode(embed, scope);
 						const base =
-							resolved?.kind === "named"
-								? resolved.underlying
-								: resolved;
+							resolved?.kind === "named" ? resolved.underlying : resolved;
 						if (base?.kind === "interface") {
 							for (const [mName, mType] of base.methods) {
-								if (!methods.has(mName))
-									methods.set(mName, mType);
+								if (!methods.has(mName)) methods.set(mName, mType);
 							}
 						} else if (!isAny(resolved)) {
 							this.err(

@@ -13,7 +13,8 @@
 			"!docs",
 			"!.claude",
 			"!node_modules",
-			"!example/app.js"
+			"!example/app.js",
+			"!coverage"
 		]
 	},
 	"formatter": {

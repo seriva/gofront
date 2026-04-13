@@ -272,7 +272,7 @@ export class Lexer {
 			}
 		}
 		if (this.pos >= this.src.length)
-			throw new LexError("Unterminated string", l, c, this.filename);
+			throw new LexError("Unterminated string", l, c, this.filename, this.src);
 		this.advance(); // closing "
 		return s;
 	}
@@ -319,13 +319,14 @@ export class Lexer {
 						l,
 						c,
 						this.filename,
+						this.src,
 					);
 			}
 		} else if (this.peek() !== "'") {
 			code = this.src.codePointAt(this.pos);
 			this.advance();
 		} else {
-			throw new LexError("Empty rune literal", l, c, this.filename);
+			throw new LexError("Empty rune literal", l, c, this.filename, this.src);
 		}
 		if (this.peek() !== "'")
 			throw new LexError(
@@ -333,6 +334,7 @@ export class Lexer {
 				l,
 				c,
 				this.filename,
+				this.src,
 			);
 		this.advance(); // closing '
 		return String(code);

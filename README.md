@@ -218,7 +218,6 @@ The following Go features are not supported or behave differently from the Go sp
 | Generics (Go 1.18+) | No `[T Type]` type parameters |
 | `[...]T{...}` array length inference | Not supported |
 | Side-effect imports (`import _ "pkg"`) | Not supported |
-| Interface embedding | `type Reader interface { io.Reader }` produces a parse error |
 
 ### Behaves differently from Go
 
@@ -240,4 +239,4 @@ The following Go features are not supported or behave differently from the Go sp
 npm test
 ```
 
-276 tests covering language features, type errors, edge cases, DOM (jsdom), external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, and the example app.
+422 tests covering language features, type errors, edge cases, DOM (jsdom), external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, and the example app.
