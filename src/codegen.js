@@ -562,9 +562,7 @@ export class CodeGen {
 			case "BranchStmt":
 				if (stmt.keyword !== "fallthrough")
 					this.line(
-						stmt.label
-							? `${stmt.keyword} ${stmt.label};`
-							: `${stmt.keyword};`,
+						stmt.label ? `${stmt.keyword} ${stmt.label};` : `${stmt.keyword};`,
 					);
 				// fallthrough: omit — JS switch falls through naturally without a break
 				break;
@@ -776,7 +774,10 @@ export class CodeGen {
 				) {
 					return `Math.trunc(${l} / ${r})`;
 				}
-				return `${l} ${expr.op} ${r}`;
+				// Go == and != are strict — map to JS === / !==
+				const op =
+					expr.op === "==" ? "===" : expr.op === "!=" ? "!==" : expr.op;
+				return `${l} ${op} ${r}`;
 			}
 
 			case "CallExpr":

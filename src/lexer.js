@@ -282,21 +282,39 @@ export class Lexer {
 	}
 
 	readRuneLiteral() {
-		const l = this.line, c = this.col;
+		const l = this.line,
+			c = this.col;
 		this.advance(); // opening '
 		let code;
 		if (this.peek() === "\\") {
 			this.advance();
 			const esc = this.advance();
 			switch (esc) {
-				case "n":  code = 10;  break;
-				case "t":  code = 9;   break;
-				case "r":  code = 13;  break;
-				case "'":  code = 39;  break;
-				case "\\":  code = 92; break;
-				case "0":  code = 0;   break;
+				case "n":
+					code = 10;
+					break;
+				case "t":
+					code = 9;
+					break;
+				case "r":
+					code = 13;
+					break;
+				case "'":
+					code = 39;
+					break;
+				case "\\":
+					code = 92;
+					break;
+				case "0":
+					code = 0;
+					break;
 				default:
-					throw new LexError(`Unknown escape in rune literal: \\${esc}`, l, c, this.filename);
+					throw new LexError(
+						`Unknown escape in rune literal: \\${esc}`,
+						l,
+						c,
+						this.filename,
+					);
 			}
 		} else if (this.peek() !== "'") {
 			code = this.src.codePointAt(this.pos);
@@ -305,7 +323,12 @@ export class Lexer {
 			throw new LexError("Empty rune literal", l, c, this.filename);
 		}
 		if (this.peek() !== "'")
-			throw new LexError("Rune literal must contain exactly one character", l, c, this.filename);
+			throw new LexError(
+				"Rune literal must contain exactly one character",
+				l,
+				c,
+				this.filename,
+			);
 		this.advance(); // closing '
 		return String(code);
 	}

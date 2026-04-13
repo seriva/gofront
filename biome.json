@@ -7,7 +7,14 @@
 	},
 	"files": {
 		"ignoreUnknown": false,
-		"includes": ["**/*", "!template", "!docs", "!.claude", "!node_modules"]
+		"includes": [
+			"**/*",
+			"!template",
+			"!docs",
+			"!.claude",
+			"!node_modules",
+			"!example/app.js"
+		]
 	},
 	"formatter": {
 		"enabled": true,
