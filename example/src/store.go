@@ -19,6 +19,18 @@ async func saveTodos() error {
     return nil
 }
 
+// safeJsonParse wraps JSON.parse in a recover so that malformed input
+// returns an error instead of propagating a JS SyntaxError panic.
+func safeJsonParse(raw string) (result any, err error) {
+    defer func() {
+        if r := recover(); r != nil {
+            err = error(r)
+        }
+    }()
+    result = JSON.parse(raw)
+    return result, nil
+}
+
 // loadTodos restores the todo list from localStorage on startup.
 // Returns an error if the stored data cannot be parsed.
 async func loadTodos() error {
@@ -26,7 +38,10 @@ async func loadTodos() error {
     if raw == nil {
         return nil
     }
-    parsed := JSON.parse(raw)
+    parsed, parseErr := safeJsonParse(raw)
+    if parseErr != nil {
+        return parseErr
+    }
     if parsed == nil {
         return error("failed to parse stored todos")
     }

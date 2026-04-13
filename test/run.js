@@ -2726,6 +2726,76 @@ func main() {
 
 // ═════════════════════════════════════════════════════════════
 
+section("recover()");
+
+test("recover catches a panic and returns the message", () => {
+	const js = compile(`package main
+func safeDo(fn func()) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = error(r)
+		}
+	}()
+	fn()
+	return nil
+}
+func main() {
+	err := safeDo(func() {
+		panic("something went wrong")
+	})
+	console.log(err)
+}`).js;
+	assertEqual(runJs(js), "something went wrong");
+});
+
+test("recover returns nil when no panic", () => {
+	const js = compile(`package main
+func safeDo(fn func()) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = error(r)
+		}
+	}()
+	fn()
+	return nil
+}
+func main() {
+	err := safeDo(func() {})
+	if err == nil {
+		console.log("no panic")
+	}
+}`).js;
+	assertEqual(runJs(js), "no panic");
+});
+
+test("recover outside defer returns nil", () => {
+	const js = compile(`package main
+func main() {
+	r := recover()
+	if r == nil {
+		console.log("nil")
+	}
+}`).js;
+	assertEqual(runJs(js), "nil");
+});
+
+test("panic without recover propagates", () => {
+	const js = compile(`package main
+func main() {
+	defer func() {}()
+	panic("boom")
+}`).js;
+	let threw = false;
+	try {
+		runJs(js);
+	} catch (_) {
+		threw = true;
+	}
+	assert(threw, "expected panic to propagate");
+});
+
+// ═════════════════════════════════════════════════════════════
+
 section("Variadic spread (...)");
 
 test("append with spread merges two slices", () => {

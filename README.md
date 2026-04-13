@@ -185,6 +185,7 @@ npm package types are resolved automatically from `node_modules/` and `@types/`.
 | Raw string literals (backticks) | ✓ |
 | Rune / char literals (`'a'`, `'\n'`) | ✓ — compiled to integer char codes |
 | `defer` | ✓ |
+| `panic()` / `recover()` | ✓ |
 | `error` type / `error("msg")` / `.Error()` | ✓ |
 | `async func` / `await` expressions | ✓ |
 | `fmt.Sprintf` / `fmt.Printf` / `fmt.Println` / `fmt.Errorf` | ✓ |
@@ -207,7 +208,6 @@ The following Go features are not supported or behave differently from the Go sp
 | Channels (`chan`, `<-`) | Depends on goroutines |
 | `select` statement | Depends on channels |
 | `goto` statement | Not planned |
-| `recover()` | `panic()` works but `recover()` is absent |
 | Generics (Go 1.18+) | No `[T Type]` type parameters |
 | `[...]T{...}` array length inference | Not supported |
 | Import aliases (`import foo "pkg"`) | Not supported |
@@ -232,4 +232,4 @@ The following Go features are not supported or behave differently from the Go sp
 npm test
 ```
 
-206 tests covering language features, type errors, edge cases, DOM (jsdom), external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, and the example app.
+210 tests covering language features, type errors, edge cases, DOM (jsdom), external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, and the example app.

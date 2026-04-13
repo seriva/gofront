@@ -254,6 +254,7 @@ export class TypeChecker {
 		this.globals.define("print", { kind: "builtin", name: "print" });
 		this.globals.define("println", { kind: "builtin", name: "println" });
 		this.globals.define("panic", { kind: "builtin", name: "panic" });
+		this.globals.define("recover", { kind: "builtin", name: "recover" });
 		this.globals.define("new", { kind: "builtin", name: "new" });
 		this.globals.define("copy", { kind: "builtin", name: "copy" });
 		this.globals.define("error", { kind: "builtin", name: "error" });
@@ -957,6 +958,8 @@ export class TypeChecker {
 			case "println":
 			case "panic":
 				return VOID;
+			case "recover":
+				return ANY;
 			case "error":
 				return ERROR;
 			default:

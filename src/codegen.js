@@ -339,22 +339,36 @@ export class CodeGen {
 		this.namedReturnVars = prev;
 	}
 
-	// Emit a function body, wrapping in try/finally for defer if needed.
+	// Emit a function body, wrapping in try/catch/finally for defer if needed.
 	_genBody(body) {
 		if (!this._hasDefer(body)) {
 			this.genBlock(body, true);
 			return;
 		}
 		this.line("const __defers = [];");
+		this.line("let __panic = null;");
 		this.line("try {");
 		this.indented(() => this.genBlock(body, true));
+		this.line("} catch (__err) {");
+		this.indented(() => this.line("__panic = __err;"));
 		this.line("} finally {");
 		this.indented(() => {
 			this.line(
 				"for (let __i = __defers.length - 1; __i >= 0; __i--) __defers[__i]();",
 			);
+			this.line("if (__panic !== null) throw __panic;");
 		});
 		this.line("}");
+		// If a recover() cleared __panic, execution reaches here.
+		// Return named return vars so deferred mutations are visible to the caller.
+		if (this.namedReturnVars?.length > 0) {
+			const vars = this.namedReturnVars;
+			this.line(
+				vars.length === 1
+					? `return ${vars[0]};`
+					: `return [${vars.join(", ")}];`,
+			);
+		}
 	}
 
 	// Recursively check if a block (or nested blocks) contains any DeferStmt.
@@ -904,6 +918,8 @@ export class CodeGen {
 					const arg = this.genExpr(expr.args[0]);
 					return `(() => { throw new Error(${arg}); })()`;
 				}
+				case "recover":
+					return `(typeof __panic !== "undefined" && __panic !== null ? (() => { const __r = __panic.message ?? String(__panic); __panic = null; return __r; })() : null)`;
 				case "error": {
 					// errors are plain strings; nil (null) means no error
 					const arg = this.genExpr(expr.args[0]);
@@ -947,7 +963,9 @@ export class CodeGen {
 			}
 		}
 
-		const fn = this.genExpr(expr.func);
+		const rawFn = this.genExpr(expr.func);
+		// Wrap function literals in parens so `function(){}()` → `(function(){})()`
+		const fn = expr.func.kind === "FuncLit" ? `(${rawFn})` : rawFn;
 		const args = expr.args
 			.map((a) => (a._spread ? `...${this.genExpr(a)}` : this.genExpr(a)))
 			.join(", ");
