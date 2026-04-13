@@ -21,7 +21,7 @@
 		"type-safe"
 	],
 	"engines": {
-		"node": ">=20"
+		"node": ">=25"
 	},
 	"type": "module",
 	"bin": {

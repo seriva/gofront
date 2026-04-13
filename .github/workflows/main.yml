@@ -19,7 +19,7 @@ jobs:
             - name: Setup Node.js
               uses: actions/setup-node@v5
               with:
-                  node-version: "24.x"
+                  node-version: "25.x"
 
             - name: Install dependencies
               run: npm install
@@ -45,7 +45,7 @@ jobs:
             - name: Setup Node.js
               uses: actions/setup-node@v5
               with:
-                  node-version: "24.x"
+                  node-version: "25.x"
 
             - name: Clear npm auth token (OIDC will authenticate)
               run: npm config delete //registry.npmjs.org/:_authToken --location project
