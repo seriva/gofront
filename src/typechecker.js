@@ -34,6 +34,10 @@ export class TypeCheckError extends Error {
 	}
 }
 
+// ── Static operator sets (module-level for reuse) ────────────
+const CMP_OPS = new Set(["==", "!=", "<", ">", "<=", ">="]);
+const LOG_OPS = new Set(["&&", "||"]);
+
 // ── Built-in types ───────────────────────────────────────────
 
 const INT = { kind: "basic", name: "int" };
@@ -200,7 +204,6 @@ export class TypeChecker {
 			"Boolean",
 			"Array",
 			"Object",
-			"JSON",
 			"parseInt",
 			"parseFloat",
 			"isNaN",
@@ -712,7 +715,7 @@ export class TypeChecker {
 			case "SwitchStmt": {
 				const inner = new Scope(scope);
 				if (stmt.init) this.checkStmt(stmt.init, inner, returnType);
-				const _tagType = stmt.tag ? this.checkExpr(stmt.tag, inner) : BOOL;
+				if (stmt.tag) this.checkExpr(stmt.tag, inner);
 				this._switchDepth++;
 				for (const c of stmt.cases) {
 					const caseScope = new Scope(inner);
@@ -1211,10 +1214,8 @@ export class TypeChecker {
 	}
 
 	binaryResultType(op, lt, rt, node) {
-		const cmp = ["==", "!=", "<", ">", "<=", ">="];
-		const log = ["&&", "||"];
-		if (cmp.includes(op)) return BOOL;
-		if (log.includes(op)) return BOOL;
+		if (CMP_OPS.has(op)) return BOOL;
+		if (LOG_OPS.has(op)) return BOOL;
 		if (isAny(lt) || isAny(rt)) return ANY;
 		if (isNumeric(lt) && isNumeric(rt)) {
 			// float64 is contagious

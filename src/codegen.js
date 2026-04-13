@@ -210,10 +210,6 @@ export class CodeGen {
 
 	// ── Type declarations ────────────────────────────────────────
 
-	genTypeDecl(decl) {
-		this.genTypeDeclWithMethods(decl, []);
-	}
-
 	genTypeDeclWithMethods(decl, methodDecls) {
 		if (decl.type.kind === "StructType") {
 			this.genStruct(decl.name, decl.type, methodDecls);
@@ -424,7 +420,7 @@ export class CodeGen {
 
 	// ── Statements ───────────────────────────────────────────────
 
-	genBlock(block, _skipBraces = false) {
+	genBlock(block) {
 		for (const stmt of block.stmts) this.genStmt(stmt);
 	}
 
@@ -440,7 +436,7 @@ export class CodeGen {
 				this.genConstDecl(stmt);
 				break;
 			case "TypeDecl":
-				this.genTypeDecl(stmt);
+				this.genTypeDeclWithMethods(stmt, []);
 				break;
 
 			case "DefineStmt": {
@@ -719,43 +715,45 @@ export class CodeGen {
 	}
 
 	genSwitch(stmt) {
+		const genBody = () => {
+			const tag = stmt.tag ? this.genExpr(stmt.tag) : "true";
+			this.line(`switch (${tag}) {`);
+			this.indented(() => {
+				for (const c of stmt.cases) {
+					if (c.list) {
+						for (const e of c.list) this.line(`case ${this.genExpr(e)}:`);
+					} else {
+						this.line("default:");
+					}
+					// Wrap each case body in {} so `let` declarations don't bleed
+					// across sibling cases (JS switch shares one block scope).
+					this.line("{");
+					this.indented(() => {
+						for (const s of c.stmts) this.genStmt(s);
+						// Go doesn't fall through by default — add break unless last stmt is return/break
+						const last = c.stmts[c.stmts.length - 1];
+						if (
+							!last ||
+							(last.kind !== "ReturnStmt" && last.kind !== "BranchStmt")
+						) {
+							this.line("break;");
+						}
+					});
+					this.line("}");
+				}
+			});
+			this.line("}");
+		};
+
 		if (stmt.init) {
 			this.line("{");
-			this.indent++;
-			this.genStmt(stmt.init);
-		}
-
-		const tag = stmt.tag ? this.genExpr(stmt.tag) : "true";
-		this.line(`switch (${tag}) {`);
-		this.indented(() => {
-			for (const c of stmt.cases) {
-				if (c.list) {
-					for (const e of c.list) this.line(`case ${this.genExpr(e)}:`);
-				} else {
-					this.line("default:");
-				}
-				// Wrap each case body in {} so `let` declarations don't bleed
-				// across sibling cases (JS switch shares one block scope).
-				this.line("{");
-				this.indented(() => {
-					for (const s of c.stmts) this.genStmt(s);
-					// Go doesn't fall through by default — add break unless last stmt is return/break
-					const last = c.stmts[c.stmts.length - 1];
-					if (
-						!last ||
-						(last.kind !== "ReturnStmt" && last.kind !== "BranchStmt")
-					) {
-						this.line("break;");
-					}
-				});
-				this.line("}");
-			}
-		});
-		this.line("}");
-
-		if (stmt.init) {
-			this.indent--;
+			this.indented(() => {
+				this.genStmt(stmt.init);
+				genBody();
+			});
 			this.line("}");
+		} else {
+			genBody();
 		}
 	}
 
@@ -1006,10 +1004,7 @@ export class CodeGen {
 			}
 			return `new Array(${n}).fill(${zero})`;
 		}
-		if (typeNode.kind === "MapType" || resolvedKind === "map") {
-			return "{}";
-		}
-		// Fallback
+		// map or fallback
 		return "{}";
 	}
 
@@ -1112,6 +1107,17 @@ export class CodeGen {
 	_zeroForBasicName(name) {
 		switch (name) {
 			case "int":
+			case "uint":
+			case "int8":
+			case "int16":
+			case "int32":
+			case "int64":
+			case "uint8":
+			case "uint16":
+			case "uint32":
+			case "uint64":
+			case "uintptr":
+			case "float32":
 			case "float64":
 			case "byte":
 			case "rune":

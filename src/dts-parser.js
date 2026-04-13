@@ -404,13 +404,11 @@ export class DtsParser {
 		if (this.eof() || this.ch() === "}") return;
 
 		// Skip modifiers (export, declare, static, readonly, etc.)
-		let _exported = false;
 		while (true) {
 			this.skip();
 			let found = false;
 			for (const mod of SKIP_MODIFIERS) {
 				if (this.matchKw(mod)) {
-					if (mod === "export") _exported = true;
 					found = true;
 					break;
 				}
@@ -604,13 +602,11 @@ export class DtsParser {
 			if (this.eof() || this.ch() === "}") break;
 
 			// Collect modifiers
-			let _isExport = false;
 			while (true) {
 				this.skip();
 				let found = false;
 				for (const mod of SKIP_MODIFIERS) {
 					if (this.matchKw(mod)) {
-						if (mod === "export") _isExport = true;
 						found = true;
 						break;
 					}

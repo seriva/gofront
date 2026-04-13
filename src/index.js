@@ -148,16 +148,14 @@ function runCompile() {
 		throw new Error(`cannot read '${inputArg}': ${e.message}`);
 	}
 
-	let tokens;
-	tokens = new Lexer(source, basename(inputPath)).tokenize();
+	const tokens = new Lexer(source, basename(inputPath)).tokenize();
 
 	if (dumpTokens) {
 		for (const tok of tokens) console.log(tok.toString());
 		process.exit(0);
 	}
 
-	let ast;
-	ast = new Parser(tokens, basename(inputPath), source).parse();
+	const ast = new Parser(tokens, basename(inputPath), source).parse();
 	ast._source = source;
 
 	if (dumpAst) {
@@ -230,14 +228,6 @@ function runCompile() {
 
 	const output = preambles.length > 0 ? `${preambles.join("\n")}\n${js}` : js;
 	return { js: output, _cg: cg };
-}
-
-function _writeOutput(js) {
-	if (outputFile) {
-		writeFileSync(outputFile, `${js}\n`);
-	} else {
-		console.log(js);
-	}
 }
 
 // ── Minify helper ────────────────────────────────────────────

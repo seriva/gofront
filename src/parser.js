@@ -160,7 +160,7 @@ export class Parser {
 			case T.TYPE:
 				return this.parseTypeDecl();
 			case T.VAR:
-				return this.parseVarDecl(true);
+				return this.parseVarDecl();
 			case T.CONST:
 				return this.parseConstDecl();
 			default:
@@ -340,7 +340,7 @@ export class Parser {
 		return { kind: "TypeDecl", name, type };
 	}
 
-	parseVarDecl(_topLevel = false) {
+	parseVarDecl() {
 		this.expect(T.VAR);
 		const decls = [];
 		if (this.match(T.LPAREN)) {
