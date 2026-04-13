@@ -316,7 +316,7 @@ export class DtsParser {
 			/[0-9]/.test(c) ||
 			(c === "-" && /[0-9]/.test(this.src[this.pos + 1]))
 		) {
-			while (!this.eof() && /[0-9._\-]/.test(this.ch())) this.pos++;
+			while (!this.eof() && /[0-9._-]/.test(this.ch())) this.pos++;
 			return { kind: "basic", name: "float64" };
 		}
 
@@ -404,13 +404,13 @@ export class DtsParser {
 		if (this.eof() || this.ch() === "}") return;
 
 		// Skip modifiers (export, declare, static, readonly, etc.)
-		let exported = false;
+		let _exported = false;
 		while (true) {
 			this.skip();
 			let found = false;
 			for (const mod of SKIP_MODIFIERS) {
 				if (this.matchKw(mod)) {
-					if (mod === "export") exported = true;
+					if (mod === "export") _exported = true;
 					found = true;
 					break;
 				}
@@ -604,13 +604,13 @@ export class DtsParser {
 			if (this.eof() || this.ch() === "}") break;
 
 			// Collect modifiers
-			let isExport = false;
+			let _isExport = false;
 			while (true) {
 				this.skip();
 				let found = false;
 				for (const mod of SKIP_MODIFIERS) {
 					if (this.matchKw(mod)) {
-						if (mod === "export") isExport = true;
+						if (mod === "export") _isExport = true;
 						found = true;
 						break;
 					}

@@ -12,15 +12,19 @@
 //   { kind: 'tuple',     types: Type[] }   ← multiple return values
 //   { kind: 'named',     name: string, underlying: Type }
 
-export class TypeError extends Error {
+export class TypeCheckError extends Error {
 	constructor(msg, node, filename, sourceCode) {
 		const lineNum = node?.line || node?._line;
 		const loc = filename
-			? (lineNum ? ` in ${filename} at line ${lineNum}` : ` in ${filename}`)
-			: (lineNum ? ` at line ${lineNum}` : "");
+			? lineNum
+				? ` in ${filename} at line ${lineNum}`
+				: ` in ${filename}`
+			: lineNum
+				? ` at line ${lineNum}`
+				: "";
 		let lineContext = "";
 		if (lineNum && sourceCode) {
-			const lines = sourceCode.split('\n');
+			const lines = sourceCode.split("\n");
 			const lineStr = lines[lineNum - 1];
 			if (lineStr !== undefined) {
 				lineContext = `\n  ${lineNum} | ${lineStr}`;
@@ -147,7 +151,7 @@ export class TypeChecker {
 		this.errors = [];
 		this._currentFile = null; // filename of file currently being checked
 		this._currentSource = null;
-		this._loopDepth = 0;   // for break/continue validation
+		this._loopDepth = 0; // for break/continue validation
 		this._switchDepth = 0; // for break/fallthrough validation
 		this._setupGlobals();
 	}
@@ -224,7 +228,12 @@ export class TypeChecker {
 
 		// Built-in functions
 		// fmt package — string formatting (variadic: format string + any args)
-		const fmtVariadic = (ret) => ({ kind: "func", params: [STRING, ANY], returns: [ret], variadic: true });
+		const fmtVariadic = (ret) => ({
+			kind: "func",
+			params: [STRING, ANY],
+			returns: [ret],
+			variadic: true,
+		});
 		this.globals.define("fmt", {
 			kind: "namespace",
 			name: "fmt",
@@ -286,7 +295,12 @@ export class TypeChecker {
 	}
 
 	err(msg, node) {
-		const e = new TypeError(msg, node, this._currentFile, this._currentSource);
+		const e = new TypeCheckError(
+			msg,
+			node,
+			this._currentFile,
+			this._currentSource,
+		);
 		this.errors.push(e);
 		return ANY; // recovery type
 	}
@@ -387,8 +401,7 @@ export class TypeChecker {
 					const base = embed.kind === "named" ? embed.underlying : embed;
 					if (base?.kind !== "struct" || !base.methods) continue;
 					for (const [mName, mType] of base.methods.entries()) {
-						if (!struct.methods.has(mName))
-							struct.methods.set(mName, mType);
+						if (!struct.methods.has(mName)) struct.methods.set(mName, mType);
 					}
 				}
 			}
@@ -686,7 +699,7 @@ export class TypeChecker {
 			case "SwitchStmt": {
 				const inner = new Scope(scope);
 				if (stmt.init) this.checkStmt(stmt.init, inner, returnType);
-				const tagType = stmt.tag ? this.checkExpr(stmt.tag, inner) : BOOL;
+				const _tagType = stmt.tag ? this.checkExpr(stmt.tag, inner) : BOOL;
 				this._switchDepth++;
 				for (const c of stmt.cases) {
 					const caseScope = new Scope(inner);
@@ -708,7 +721,11 @@ export class TypeChecker {
 				const kw = stmt.keyword;
 				if (kw === "continue" && this._loopDepth === 0)
 					this.err("continue statement outside for loop", stmt);
-				else if (kw === "break" && this._loopDepth === 0 && this._switchDepth === 0)
+				else if (
+					kw === "break" &&
+					this._loopDepth === 0 &&
+					this._switchDepth === 0
+				)
 					this.err("break statement outside for loop or switch", stmt);
 				else if (kw === "fallthrough" && this._switchDepth === 0)
 					this.err("fallthrough statement outside switch", stmt);
@@ -1080,7 +1097,12 @@ export class TypeChecker {
 						for (const n of f.names) fields.set(n, ft);
 					}
 				}
-				const structType = { kind: "struct", fields, methods: new Map(), _embeds: embeds };
+				const structType = {
+					kind: "struct",
+					fields,
+					methods: new Map(),
+					_embeds: embeds,
+				};
 				return structType;
 			}
 			case "InterfaceType": {
@@ -1213,7 +1235,7 @@ export class TypeChecker {
 		}
 	}
 
-	implements(srcType, iface, node) {
+	implements(srcType, iface, _node) {
 		let base = srcType.kind === "named" ? srcType.underlying : srcType;
 		base = this.resolveType(base);
 		if (base?.kind !== "struct") return false;

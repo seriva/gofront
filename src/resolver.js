@@ -10,8 +10,8 @@
 //   dtsPath    — absolute path to the .d.ts file to parse
 //   importPath — the JS import path to emit in generated code (e.g. "gl-matrix")
 
-import { readFileSync, existsSync, readdirSync } from "fs";
-import { join, resolve, dirname } from "path";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 
 // Walk up from startDir looking for a node_modules directory
 function findNodeModules(startDir) {

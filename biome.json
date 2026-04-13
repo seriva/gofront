@@ -7,11 +7,7 @@
 	},
 	"files": {
 		"ignoreUnknown": false,
-		"includes": [
-			"**/*",
-			"!template",
-			"!docs"
-		]
+		"includes": ["**/*", "!template", "!docs", "!.claude", "!node_modules"]
 	},
 	"formatter": {
 		"enabled": true,

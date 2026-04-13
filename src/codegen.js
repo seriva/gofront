@@ -33,7 +33,7 @@ function buildSourceMap(sourceName, mappings) {
 	// Emits one segment per generated line, column 0 → source line (delta-encoded).
 	const lines = [];
 	let prevSrcLine = 0;
-	let maxGen = mappings.reduce((m, e) => Math.max(m, e.genLine), -1);
+	const maxGen = mappings.reduce((m, e) => Math.max(m, e.genLine), -1);
 	for (let g = 0; g <= maxGen; g++) {
 		const entry = mappings.find((e) => e.genLine === g);
 		if (entry) {
@@ -175,10 +175,18 @@ export class CodeGen {
 
 		// Prepend runtime helpers that were actually used
 		const helpers = [];
-		if (this._usesLen) helpers.push("function __len(a) { return a?.length ?? 0; }");
-		if (this._usesAppend) helpers.push("function __append(a, ...b) { return a ? [...a, ...b] : b; }");
-		if (this._usesSliceGuard) helpers.push("function __s(a) { return a || []; }");
-		if (this._usesSprintf) helpers.push("function __sprintf(f,...a){let i=0;return f.replace(/%[sdvf%]/g,m=>{if(m==='%%')return'%';const v=a[i++];return m==='%f'?Number(v).toString():String(v==null?'<nil>':v);});}");
+		if (this._usesLen)
+			helpers.push("function __len(a) { return a?.length ?? 0; }");
+		if (this._usesAppend)
+			helpers.push(
+				"function __append(a, ...b) { return a ? [...a, ...b] : b; }",
+			);
+		if (this._usesSliceGuard)
+			helpers.push("function __s(a) { return a || []; }");
+		if (this._usesSprintf)
+			helpers.push(
+				"function __sprintf(f,...a){let i=0;return f.replace(/%[sdvf%]/g,m=>{if(m==='%%')return'%';const v=a[i++];return m==='%f'?Number(v).toString():String(v==null?'<nil>':v);});}",
+			);
 
 		if (helpers.length > 0) this.out.unshift(...helpers, "");
 
@@ -402,7 +410,7 @@ export class CodeGen {
 
 	// ── Statements ───────────────────────────────────────────────
 
-	genBlock(block, skipBraces = false) {
+	genBlock(block, _skipBraces = false) {
 		for (const stmt of block.stmts) this.genStmt(stmt);
 	}
 
@@ -951,7 +959,8 @@ export class CodeGen {
 			const n = expr.args[1] ? this.genExpr(expr.args[1]) : "0";
 			// Use the proper zero value for the element type (e.g. new Point() not 0)
 			const elemNode = typeNode.kind === "SliceType" ? typeNode.elem : null;
-			const elemResolved = typeArg._type?.kind === "slice" ? typeArg._type.elem : null;
+			const elemResolved =
+				typeArg._type?.kind === "slice" ? typeArg._type.elem : null;
 			let zero = "null";
 			if (elemResolved) {
 				zero = this.zeroValueForType(elemResolved);
@@ -995,7 +1004,10 @@ export class CodeGen {
 					return `new ${typeName}({ ${this._genStructFields(expr.elems)} })`;
 				}
 				const fields = expr.elems
-					.map((e) => `${e.key.name ?? this.genExpr(e.key)}: ${this.genExpr(e.value)}`)
+					.map(
+						(e) =>
+							`${e.key.name ?? this.genExpr(e.key)}: ${this.genExpr(e.value)}`,
+					)
 					.join(", ");
 				return `{ ${fields} }`;
 			}
@@ -1012,7 +1024,9 @@ export class CodeGen {
 		// Slice/array: [1, 2, 3]
 		if (t?.kind === "SliceType" || t?.kind === "ArrayType") {
 			const elems = expr.elems
-				.map((e) => (e.kind === "KeyValueExpr" ? this.genExpr(e.value) : this.genExpr(e)))
+				.map((e) =>
+					e.kind === "KeyValueExpr" ? this.genExpr(e.value) : this.genExpr(e),
+				)
 				.join(", ");
 			return `[${elems}]`;
 		}
@@ -1022,9 +1036,10 @@ export class CodeGen {
 			const entries = expr.elems
 				.map((e) => {
 					if (e.kind === "KeyValueExpr") {
-						const k = e.key.litKind === "STRING"
-							? JSON.stringify(e.key.value)
-							: `[${this.genExpr(e.key)}]`;
+						const k =
+							e.key.litKind === "STRING"
+								? JSON.stringify(e.key.value)
+								: `[${this.genExpr(e.key)}]`;
 						return `${k}: ${this.genExpr(e.value)}`;
 					}
 					return this.genExpr(e);
@@ -1036,7 +1051,10 @@ export class CodeGen {
 		// Fallback: key-value pairs → plain object, positional → array
 		if (expr.elems.length > 0 && expr.elems[0]?.kind === "KeyValueExpr") {
 			const fields = expr.elems
-				.map((e) => `${e.key.name ?? this.genExpr(e.key)}: ${this.genExpr(e.value)}`)
+				.map(
+					(e) =>
+						`${e.key.name ?? this.genExpr(e.key)}: ${this.genExpr(e.value)}`,
+				)
 				.join(", ");
 			return `{ ${fields} }`;
 		}
@@ -1060,10 +1078,17 @@ export class CodeGen {
 	// Returns the JS zero-value literal for a basic type name, or null if not a basic type.
 	_zeroForBasicName(name) {
 		switch (name) {
-			case "int": case "float64": case "byte": case "rune": return "0";
-			case "string": return '""';
-			case "bool": return "false";
-			default: return null;
+			case "int":
+			case "float64":
+			case "byte":
+			case "rune":
+				return "0";
+			case "string":
+				return '""';
+			case "bool":
+				return "false";
+			default:
+				return null;
 		}
 	}
 
@@ -1073,14 +1098,20 @@ export class CodeGen {
 			case "TypeName": {
 				const basic = this._zeroForBasicName(typeNode.name);
 				if (basic !== null) return basic;
-				if (this.structNames.has(typeNode.name)) return `new ${typeNode.name}()`;
+				if (this.structNames.has(typeNode.name))
+					return `new ${typeNode.name}()`;
 				return "null";
 			}
-			case "SliceType": return "null";
-			case "ArrayType": return "[]";
-			case "MapType": return "{}";
-			case "PointerType": return "null";
-			default: return "null";
+			case "SliceType":
+				return "null";
+			case "ArrayType":
+				return "[]";
+			case "MapType":
+				return "{}";
+			case "PointerType":
+				return "null";
+			default:
+				return "null";
 		}
 	}
 
@@ -1092,12 +1123,15 @@ export class CodeGen {
 				const basic = this._zeroForBasicName(t.name);
 				return basic !== null ? basic : "null";
 			}
-			case "slice": return "null";
-			case "map": return "{}";
+			case "slice":
+				return "null";
+			case "map":
+				return "{}";
 			case "named":
 				if (this.structNames.has(t.name)) return `new ${t.name}()`;
 				return "null";
-			default: return "null";
+			default:
+				return "null";
 		}
 	}
 

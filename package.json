@@ -12,8 +12,17 @@
 	},
 	"homepage": "https://github.com/seriva/goweb#readme",
 	"description": "A Go-inspired language that transpiles to JavaScript",
-	"keywords": ["go", "compiler", "transpiler", "javascript", "frontend", "type-safe"],
-	"engines": { "node": ">=20" },
+	"keywords": [
+		"go",
+		"compiler",
+		"transpiler",
+		"javascript",
+		"frontend",
+		"type-safe"
+	],
+	"engines": {
+		"node": ">=20"
+	},
 	"type": "module",
 	"bin": {
 		"goweb": "./src/index.js"

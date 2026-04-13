@@ -11,7 +11,7 @@ interface Response {
 	statusText: string;
 	headers: Headers;
 	text(): string;
-	json(): any;
+	json(): unknown;
 }
 
 interface RequestInit {

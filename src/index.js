@@ -14,26 +14,27 @@
 //   goweb init [dir]             — scaffold a new GoWeb project
 
 import {
-	readFileSync,
-	writeFileSync,
-	statSync,
-	readdirSync,
-	mkdirSync,
 	existsSync,
+	mkdirSync,
+	readFileSync,
+	statSync,
 	watch,
-} from "fs";
-import { createRequire } from "module";
+	writeFileSync,
+} from "node:fs";
+import { createRequire } from "node:module";
+
 const _require = createRequire(import.meta.url);
 const { version } = _require("../package.json");
-import { resolve, dirname, join, basename } from "path";
+
+import { basename, dirname, join, resolve } from "node:path";
 import { minify } from "terser";
+import { CodeGen } from "./codegen.js";
+import { compileDir } from "./compiler.js";
+import { parseDts } from "./dts-parser.js";
 import { Lexer } from "./lexer.js";
 import { Parser } from "./parser.js";
+import { isLocalPath, resolveAll, resolveGwDir } from "./resolver.js";
 import { TypeChecker } from "./typechecker.js";
-import { CodeGen } from "./codegen.js";
-import { parseDts } from "./dts-parser.js";
-import { resolveAll, isLocalPath, resolveGwDir } from "./resolver.js";
-import { compileDir, compileFiles } from "./compiler.js";
 
 // ── Parse CLI args ───────────────────────────────────────────
 
@@ -86,7 +87,8 @@ if (args[0] === "init") {
 		process.exit(1);
 	}
 
-	const pkgName = targetArg === "." ? basename(resolve(".")) : basename(targetDir);
+	const pkgName =
+		targetArg === "." ? basename(resolve(".")) : basename(targetDir);
 	// package names must be valid identifiers
 	const safePkg = pkgName.replace(/[^a-zA-Z0-9_]/g, "_").replace(/^[0-9]/, "_");
 
@@ -104,7 +106,9 @@ func main() {
 	}
 
 	console.error(`goweb: created ${mainPath}`);
-	console.error(`goweb: run  goweb ${targetArg === "." ? "main.go" : targetArg + "/main.go"}  to compile`);
+	console.error(
+		`goweb: run  goweb ${targetArg === "." ? "main.go" : `${targetArg}/main.go`}  to compile`,
+	);
 	process.exit(0);
 }
 
@@ -145,11 +149,7 @@ function runCompile() {
 	}
 
 	let tokens;
-	try {
-		tokens = new Lexer(source, basename(inputPath)).tokenize();
-	} catch (e) {
-		throw e;
-	}
+	tokens = new Lexer(source, basename(inputPath)).tokenize();
 
 	if (dumpTokens) {
 		for (const tok of tokens) console.log(tok.toString());
@@ -157,12 +157,8 @@ function runCompile() {
 	}
 
 	let ast;
-	try {
-		ast = new Parser(tokens, basename(inputPath), source).parse();
-		ast._source = source;
-	} catch (e) {
-		throw e;
-	}
+	ast = new Parser(tokens, basename(inputPath), source).parse();
+	ast._source = source;
 
 	if (dumpAst) {
 		console.log(JSON.stringify(ast, null, 2));
@@ -209,7 +205,11 @@ function runCompile() {
 			const dep = compileDir(depDir);
 			preambles.push(dep.js);
 			bundledPackages.add(dep.pkgName);
-			checker.addPackageNamespace(dep.pkgName, dep.exportedSymbols, dep.exportedTypes);
+			checker.addPackageNamespace(
+				dep.pkgName,
+				dep.exportedSymbols,
+				dep.exportedTypes,
+			);
 		}
 	}
 
@@ -227,13 +227,13 @@ function runCompile() {
 		js += `\n//# sourceMappingURL=data:application/json;base64,${b64}`;
 	}
 
-	const output = preambles.length > 0 ? preambles.join("\n") + "\n" + js : js;
+	const output = preambles.length > 0 ? `${preambles.join("\n")}\n${js}` : js;
 	return { js: output, _cg: cg };
 }
 
-function writeOutput(js) {
+function _writeOutput(js) {
 	if (outputFile) {
-		writeFileSync(outputFile, js + "\n");
+		writeFileSync(outputFile, `${js}\n`);
 	} else {
 		console.log(js);
 	}
@@ -243,7 +243,11 @@ function writeOutput(js) {
 
 async function maybeMinify(js) {
 	if (!minifyOutput) return js;
-	const result = await minify(js, { module: true, compress: true, mangle: true });
+	const result = await minify(js, {
+		module: true,
+		compress: true,
+		mangle: true,
+	});
 	return result.code;
 }
 
@@ -277,7 +281,7 @@ if (!watchMode) {
 
 	if (outputFile) {
 		try {
-			writeFileSync(outputFile, js + "\n");
+			writeFileSync(outputFile, `${js}\n`);
 			console.error(`goweb: wrote ${outputFile} (${elapsedMs}ms)`);
 		} catch (e) {
 			console.error(`goweb: cannot write '${outputFile}': ${e.message}`);
@@ -295,15 +299,17 @@ function timestamp() {
 	return new Date().toLocaleTimeString();
 }
 
-async function buildOnce(label) {
+async function buildOnce(_label) {
 	try {
 		const startMs = performance.now();
 		const result = runCompile();
 		const js = await maybeMinify(result.js);
 		const elapsedMs = (performance.now() - startMs).toFixed(0);
 		if (outputFile) {
-			writeFileSync(outputFile, js + "\n");
-			console.error(`[${timestamp()}] goweb: OK — wrote ${outputFile} (${elapsedMs}ms)`);
+			writeFileSync(outputFile, `${js}\n`);
+			console.error(
+				`[${timestamp()}] goweb: OK — wrote ${outputFile} (${elapsedMs}ms)`,
+			);
 		} else {
 			// Clear screen then print
 			process.stdout.write("\x1Bc");
@@ -323,7 +329,7 @@ buildOnce("initial");
 const watchTarget = isDir ? inputPath : dirname(inputPath);
 
 let debounce = null;
-watch(watchTarget, { recursive: true }, (event, filename) => {
+watch(watchTarget, { recursive: true }, (_event, filename) => {
 	if (filename && !filename.endsWith(".go")) return;
 	clearTimeout(debounce);
 	debounce = setTimeout(() => buildOnce(filename ?? "change"), 80);

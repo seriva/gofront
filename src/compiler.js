@@ -15,14 +15,14 @@
 // Cross-package access uses the qualified form: `pkg.Foo`.  The codegen
 // de-qualifies it because the dependency is inlined.
 
-import { readFileSync, readdirSync } from "fs";
-import { join, resolve, dirname, basename } from "path";
-import { Lexer } from "./lexer.js";
-import { Parser } from "./parser.js";
-import { TypeChecker } from "./typechecker.js";
+import { readdirSync, readFileSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import { CodeGen } from "./codegen.js";
 import { parseDts } from "./dts-parser.js";
-import { resolveAll, isLocalPath, resolveGwDir } from "./resolver.js";
+import { Lexer } from "./lexer.js";
+import { Parser } from "./parser.js";
+import { isLocalPath, resolveAll, resolveGwDir } from "./resolver.js";
+import { TypeChecker } from "./typechecker.js";
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -145,7 +145,7 @@ export function compileFiles(files, options = {}) {
 	const mainJs = codegen.generateAll(programs);
 
 	const js =
-		preambles.length > 0 ? preambles.join("\n") + "\n" + mainJs : mainJs;
+		preambles.length > 0 ? `${preambles.join("\n")}\n${mainJs}` : mainJs;
 
 	return {
 		pkgName,

@@ -20,14 +20,14 @@ export class ParseError extends Error {
 			: `${token.line}:${token.col}`;
 		let lineContext = "";
 		if (token.line && sourceCode) {
-			const lines = sourceCode.split('\n');
+			const lines = sourceCode.split("\n");
 			const lineStr = lines[token.line - 1];
 			if (lineStr !== undefined) {
 				lineContext = `\n  ${token.line} | ${lineStr}`;
 			}
 		}
 		super(
-			`Parse error at ${loc}: ${msg} (got ${token.type} "${token.value}")${lineContext}`
+			`Parse error at ${loc}: ${msg} (got ${token.type} "${token.value}")${lineContext}`,
 		);
 		this.token = token;
 	}
@@ -335,7 +335,7 @@ export class Parser {
 		return { kind: "TypeDecl", name, type };
 	}
 
-	parseVarDecl(topLevel = false) {
+	parseVarDecl(_topLevel = false) {
 		this.expect(T.VAR);
 		const decls = [];
 		if (this.match(T.LPAREN)) {
@@ -454,7 +454,7 @@ export class Parser {
 		// qualified: pkg.Type
 		if (this.check(T.DOT)) {
 			this.advance();
-			name += "." + this.expect(T.IDENT).value;
+			name += `.${this.expect(T.IDENT).value}`;
 		}
 		return { kind: "TypeName", name };
 	}

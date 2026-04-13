@@ -150,7 +150,7 @@ export class LexError extends Error {
 		const loc = filename ? `${filename}:${line}:${col}` : `${line}:${col}`;
 		let lineContext = "";
 		if (line && sourceCode) {
-			const lines = sourceCode.split('\n');
+			const lines = sourceCode.split("\n");
 			const lineStr = lines[line - 1];
 			if (lineStr !== undefined) {
 				lineContext = `\n  ${line} | ${lineStr}`;
@@ -260,7 +260,7 @@ export class Lexer {
 						s += "\0";
 						break;
 					default:
-						s += "\\" + esc;
+						s += `\\${esc}`;
 				}
 			} else {
 				s += this.advance();

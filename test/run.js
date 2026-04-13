@@ -7,21 +7,26 @@
 //   4. External .d.ts     — local js: imports with type checking
 //   5. npm package resolver — end-to-end node_modules resolution
 
-import { readFileSync, writeFileSync, unlinkSync, mkdtempSync, existsSync, rmSync } from "fs";
-import { execFileSync, spawnSync } from "child_process";
-import { tmpdir } from "os";
-import { resolve, dirname, join } from "path";
-import { fileURLToPath } from "url";
-import vm from "vm";
+import { spawnSync } from "node:child_process";
+import {
+	existsSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import vm from "node:vm";
 import { JSDOM } from "jsdom";
-
+import { CodeGen } from "../src/codegen.js";
+import { compileDir } from "../src/compiler.js";
+import { parseDts } from "../src/dts-parser.js";
 import { Lexer } from "../src/lexer.js";
 import { Parser } from "../src/parser.js";
-import { TypeChecker } from "../src/typechecker.js";
-import { CodeGen } from "../src/codegen.js";
-import { parseDts } from "../src/dts-parser.js";
 import { resolveAll } from "../src/resolver.js";
-import { compileDir } from "../src/compiler.js";
+import { TypeChecker } from "../src/typechecker.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -783,7 +788,7 @@ test("type alias from .d.ts", () => {
 });
 
 test("http_client.d.ts — valid fetch call compiles", () => {
-	const { errors } = compile(
+	compile(
 		`package main
 import "js:http_client.d.ts"
 func main() {
@@ -1174,7 +1179,7 @@ func main() {
 
 test("unknown npm package warns but compiles as any", () => {
 	// should not throw — unknown imports are treated as any
-	const { js, errors } = compile(
+	const { errors } = compile(
 		`package main
 import "totally-unknown-pkg"
 func main() { console.log("ok") }`,
@@ -1216,7 +1221,7 @@ test("same-package multi-file: cross-file function call works at runtime", () =>
 	const dir = join(FIXTURES, "multifile/mathpkg");
 	const { js: pkgJs } = compileDir(dir);
 	// Wrap in a test harness since there's no main() in mathpkg
-	const harness = pkgJs + "\nconsole.log(Square(5));";
+	const harness = `${pkgJs}\nconsole.log(Square(5));`;
 	const out = runJs(harness);
 	assertEqual(out.trim(), "25");
 });
@@ -1351,7 +1356,7 @@ async func main() {
 });
 
 test("async function literal", () => {
-	const { js, errors } = compile(`package main
+	const { errors } = compile(`package main
 func main() {
   fn := async func() string {
     return "world"
@@ -1752,7 +1757,7 @@ test("example exports expected functions", () => {
 
 test("example store logic runs correctly (addTodo / stats)", () => {
 	const exampleDir = join(ROOT, "example", "src");
-	const { js } = compileDir(exampleDir);
+	compileDir(exampleDir);
 	// Inject a test driver after the compiled code, bypassing DOM calls
 	const driver = `
 var todos = [];
@@ -2278,7 +2283,11 @@ const CLI = join(ROOT, "src", "index.js");
 
 function cli(args) {
 	const r = spawnSync(process.execPath, [CLI, ...args], { encoding: "utf8" });
-	return { stdout: r.stdout ?? "", stderr: r.stderr ?? "", code: r.status ?? 1 };
+	return {
+		stdout: r.stdout ?? "",
+		stderr: r.stderr ?? "",
+		code: r.status ?? 1,
+	};
 }
 
 function makeTmp(name, content) {
@@ -2295,35 +2304,56 @@ test("--version prints version", () => {
 });
 
 test("--check exits 0 on valid file", () => {
-	const { file, dir } = makeTmp("ok.go", `package main\nfunc main() { console.log("hi") }\n`);
+	const { file, dir } = makeTmp(
+		"ok.go",
+		`package main\nfunc main() { console.log("hi") }\n`,
+	);
 	try {
 		const { code, stderr } = cli([file, "--check"]);
 		assert(code === 0, `expected exit 0, got ${code} — ${stderr}`);
 		assert(stderr.includes("OK"), `expected OK in stderr: ${stderr}`);
 	} finally {
-		try { rmSync(dir, { recursive: true, force: true }); } catch {}
+		try {
+			rmSync(dir, { recursive: true, force: true });
+		} catch {}
 	}
 });
 
 test("--check exits 1 on type error", () => {
-	const { file, dir } = makeTmp("bad.go", `package main\nfunc main() { notDefined }\n`);
+	const { file, dir } = makeTmp(
+		"bad.go",
+		`package main\nfunc main() { notDefined }\n`,
+	);
 	try {
 		const { code, stderr } = cli([file, "--check"]);
 		assert(code !== 0, "expected non-zero exit on type error");
-		assert(stderr.includes("notDefined") || stderr.includes("Undefined"), `expected error in stderr: ${stderr}`);
+		assert(
+			stderr.includes("notDefined") || stderr.includes("Undefined"),
+			`expected error in stderr: ${stderr}`,
+		);
 	} finally {
-		try { rmSync(dir, { recursive: true, force: true }); } catch {}
+		try {
+			rmSync(dir, { recursive: true, force: true });
+		} catch {}
 	}
 });
 
 test("--source-map appends sourceMappingURL comment", () => {
-	const { file, dir } = makeTmp("sm.go", `package main\nfunc main() { console.log("hi") }\n`);
+	const { file, dir } = makeTmp(
+		"sm.go",
+		`package main\nfunc main() { console.log("hi") }\n`,
+	);
 	try {
 		const { stdout, code } = cli([file, "--source-map"]);
 		assert(code === 0, `expected exit 0, got ${code}`);
-		assert(stdout.includes("sourceMappingURL=data:application/json;base64,"), "expected inline source map");
+		assert(
+			stdout.includes("sourceMappingURL=data:application/json;base64,"),
+			"expected inline source map",
+		);
 	} finally {
-		try { rmSync(dir, { recursive: true, force: true }); } catch {}
+		try {
+			rmSync(dir, { recursive: true, force: true });
+		} catch {}
 	}
 });
 
@@ -2337,7 +2367,9 @@ test("goweb init creates main.go", () => {
 		const content = readFileSync(mainPath, "utf8");
 		assert(content.includes("func main()"), "expected func main() in scaffold");
 	} finally {
-		try { rmSync(dir, { recursive: true, force: true }); } catch {}
+		try {
+			rmSync(dir, { recursive: true, force: true });
+		} catch {}
 	}
 });
 
@@ -2364,13 +2396,13 @@ test("error messages include filenames", () => {
 });
 
 test("generated code size - len helper", () => {
-    const { js } = compile(`package main
+	const { js } = compile(`package main
 func main() {
     xs := []int{1,2}
     console.log(len(xs))
 }`);
-    assertContains(js, "function __len(a)");
-    assertEqual(runJs(js), "2");
+	assertContains(js, "function __len(a)");
+	assertEqual(runJs(js), "2");
 });
 
 // ═════════════════════════════════════════════════════════════
