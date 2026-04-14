@@ -1,16 +1,12 @@
 // GoFront test suite — lexer, parser, dts-parser, codegen
 import { fileURLToPath } from "node:url";
 import {
-	FIXTURES,
-	ROOT,
-	DtsParser,
-	Lexer,
 	assert,
 	assertContains,
-	assertErrorContains,
 	assertEqual,
 	compile,
-	compileFile,
+	DtsParser,
+	Lexer,
 	parseDts,
 	runJs,
 	section,
@@ -145,7 +141,6 @@ test("parseDts: numeric literal type resolves to float64", () => {
 // codegen — interface and type alias comments
 // ═════════════════════════════════════════════════════════════
 
-
 section("codegen — type alias and interface comments");
 
 test("interface TypeDecl emits a compile-time-only comment", () => {
@@ -171,7 +166,6 @@ func main() {
 // ═════════════════════════════════════════════════════════════
 // Language features — address-of & dereference
 // ═════════════════════════════════════════════════════════════
-
 
 section("Lexer and parser edge cases");
 
@@ -231,7 +225,6 @@ func main() {
 });
 
 // ─── compileDir: mixed-package error ─────────────────────────
-
 
 section("Lexer — block comments and escape sequences");
 
@@ -365,7 +358,6 @@ test("unexpected character @ throws a lex error", () => {
 	assert(threw, "expected LexError for unexpected character");
 });
 
-
 section("Lexer — scientific notation and modulo");
 
 test("scientific notation 1e10 is parsed as float", () => {
@@ -417,7 +409,6 @@ func main() {
 // TypeChecker — error messages and edge cases
 // ═════════════════════════════════════════════════════════════
 
-
 section("Lexer — tab escape");
 
 test("string escape \\t is a horizontal tab (char code 9)", () => {
@@ -442,7 +433,6 @@ func main() {
 // ═════════════════════════════════════════════════════════════
 // Parser — parenthesized expressions and error recovery
 // ═════════════════════════════════════════════════════════════
-
 
 section("Parser — parenthesized expressions");
 
@@ -477,7 +467,6 @@ func main() {
 // ═════════════════════════════════════════════════════════════
 // compiler.js — additional error paths
 // ═════════════════════════════════════════════════════════════
-
 
 section("dts-parser — additional type patterns");
 
@@ -731,7 +720,6 @@ declare let count: number = 0;
 // ═════════════════════════════════════════════════════════════
 // TypeChecker — new(T) and pointer types
 // ═════════════════════════════════════════════════════════════
-
 
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

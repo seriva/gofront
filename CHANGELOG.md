@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- Test suite split into focused files (`language.test.js`, `types.test.js`,
+  `structs.test.js`, `builtins.test.js`, `compiler.test.js`, `dom.test.js`,
+  `lexer-parser.test.js`) with shared helpers in `test/helpers.js`; `test/run.js`
+  is now a thin orchestrator. Each file can be run standalone with
+  `node test/<file>.test.js`.
+- Expanded CLI coverage tests: `--watch` mode (initial build, error path, `-o`
+  output), `init` failure paths (mkdir/write errors), single-file unreadable input,
+  output file write failure, npm import resolution, and local package bundling.
+
 ### Fixed
 - `new(T)` for basic types (`new(int)`, `new(string)`, `new(bool)`, `new(float64)`) — the type-checker was incorrectly evaluating the type-name argument as a value expression, producing a false "Undefined" error; the argument is now treated as a type node
 - Array type notation in error messages — `[3]int` was displayed as `[object Object]int`; the size AST node is now converted to a number when building the type object

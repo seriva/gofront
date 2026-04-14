@@ -1,14 +1,12 @@
 // GoFront test suite — DOM and external .d.ts
 import { fileURLToPath } from "node:url";
 import {
-	FIXTURES,
-	ROOT,
 	assert,
-	assertContains,
-	assertErrorContains,
 	assertEqual,
+	assertErrorContains,
 	compile,
 	compileFile,
+	FIXTURES,
 	join,
 	runInDom,
 	runJs,
@@ -178,7 +176,6 @@ func main() {
 // 4. External .d.ts (js: prefix)
 // ═════════════════════════════════════════════════════════════
 
-
 section("External .d.ts (js: prefix)");
 
 test("namespace function call", () => {
@@ -249,7 +246,6 @@ func main() {
 // ═════════════════════════════════════════════════════════════
 // 5. Additional language features
 // ═════════════════════════════════════════════════════════════
-
 
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

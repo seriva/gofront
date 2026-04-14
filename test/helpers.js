@@ -12,7 +12,7 @@ import { Parser } from "../src/parser.js";
 import { resolveAll } from "../src/resolver.js";
 import { TypeChecker } from "../src/typechecker.js";
 
-export { compileDir, parseDts, DtsParser, Lexer, Parser, join };
+export { compileDir, DtsParser, join, Lexer, Parser, parseDts };
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -21,7 +21,10 @@ export const FIXTURES = join(__dirname, "fixtures");
 
 // ── Compiler ─────────────────────────────────────────────────
 
-export function compile(source, { fromFile = join(FIXTURES, "_dummy.go") } = {}) {
+export function compile(
+	source,
+	{ fromFile = join(FIXTURES, "_dummy.go") } = {},
+) {
 	const filename = fromFile.split("/").pop();
 	const tokens = new Lexer(source, filename).tokenize();
 	const ast = new Parser(tokens, filename).parse();
@@ -84,7 +87,10 @@ export function runJs(js, extraGlobals = {}) {
 	return lines.join("\n");
 }
 
-export function runInDom(js, html = "<!DOCTYPE html><html><body></body></html>") {
+export function runInDom(
+	js,
+	html = "<!DOCTYPE html><html><body></body></html>",
+) {
 	const dom = new JSDOM(html);
 	const { window } = dom;
 	const lines = [];

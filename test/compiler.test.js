@@ -1,6 +1,7 @@
 // GoFront test suite — compiler, multi-file, CLI, npm resolver
 import { spawnSync } from "node:child_process";
 import {
+	chmodSync,
 	existsSync,
 	mkdtempSync,
 	readFileSync,
@@ -12,15 +13,14 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 import {
-	FIXTURES,
-	ROOT,
 	assert,
 	assertContains,
-	assertErrorContains,
 	assertEqual,
+	assertErrorContains,
 	compile,
 	compileDir,
-	compileFile,
+	FIXTURES,
+	ROOT,
 	runJs,
 	section,
 	summarize,
@@ -93,7 +93,6 @@ func main() { console.log("ok") }`,
 });
 
 // ── Multi-file compilation ───────────────────────────────────
-
 
 section("Multi-file package compilation");
 
@@ -214,7 +213,6 @@ test("exportedSymbols contains package functions", () => {
 // defer & error
 // ═════════════════════════════════════════════════════════════
 
-
 section("Example app (todo)");
 
 test("example dir compiles without errors", () => {
@@ -304,7 +302,6 @@ test("utils.Plural formats correctly", () => {
 // ═════════════════════════════════════════════════════════════
 // Builtins
 // ═════════════════════════════════════════════════════════════
-
 
 section("Store functions (moveTodo / removeTodo / filters)");
 
@@ -476,7 +473,6 @@ func main() {
 // CLI flags
 // ═════════════════════════════════════════════════════════════
 
-
 section("CLI flags");
 
 const CLI = join(ROOT, "src", "index.js");
@@ -574,7 +570,6 @@ test("gofront init creates main.go", () => {
 });
 
 // ── 7. New feature tests ─────────────────────────────────────
-
 
 section("CLI flags — additional");
 
@@ -674,10 +669,275 @@ test("gofront init exits 1 if main.go already exists", () => {
 	}
 });
 
+test("-v (short flag) prints version", () => {
+	const { stdout, code } = cli(["-v"]);
+	assert(code === 0, `expected exit 0, got ${code}`);
+	assert(stdout.startsWith("gofront "), `unexpected output: ${stdout}`);
+});
+
+test("-h (short flag) prints usage", () => {
+	const { stdout, code } = cli(["-h"]);
+	assert(code === 0, `expected exit 0, got ${code}`);
+	assertContains(stdout, "Usage");
+});
+
+test("gofront init <new-dir> creates directory and main.go", () => {
+	const base = mkdtempSync(join(tmpdir(), "gofront-init-parent-"));
+	const newDir = join(base, "myproject");
+	try {
+		const { code, stderr } = cli(["init", newDir]);
+		assert(code === 0, `expected exit 0: ${stderr}`);
+		assert(existsSync(join(newDir, "main.go")), "expected main.go in new dir");
+		assertContains(
+			readFileSync(join(newDir, "main.go"), "utf8"),
+			"func main()",
+		);
+	} finally {
+		try {
+			rmSync(base, { recursive: true, force: true });
+		} catch {}
+	}
+});
+
+test("gofront init . creates main.go in cwd", () => {
+	const tmpDir = mkdtempSync(join(tmpdir(), "gofront-init-dot-"));
+	try {
+		const r = spawnSync(process.execPath, [CLI, "init", "."], {
+			encoding: "utf8",
+			cwd: tmpDir,
+		});
+		assert(r.status === 0, `expected exit 0: ${r.stderr}`);
+		assert(existsSync(join(tmpDir, "main.go")), "expected main.go in tmpDir");
+		assertContains(
+			readFileSync(join(tmpDir, "main.go"), "utf8"),
+			"func main()",
+		);
+	} finally {
+		try {
+			rmSync(tmpDir, { recursive: true, force: true });
+		} catch {}
+	}
+});
+
+test("gofront <dir> compiles directory to stdout", () => {
+	const { stdout, code, stderr } = cli([
+		join(FIXTURES, "multifile/withimport"),
+	]);
+	assert(code === 0, `expected exit 0: ${stderr}`);
+	assertContains(stdout, "function Add(");
+});
+
+test("gofront <dir> -o out.js compiles directory to file", () => {
+	const tmpDir = mkdtempSync(join(tmpdir(), "gofront-dir-o-"));
+	const outFile = join(tmpDir, "bundle.js");
+	try {
+		const { code, stderr } = cli([
+			join(FIXTURES, "multifile/withimport"),
+			"-o",
+			outFile,
+		]);
+		assert(code === 0, `expected exit 0: ${stderr}`);
+		assert(existsSync(outFile), "expected bundle.js to be created");
+		assertContains(readFileSync(outFile, "utf8"), "function Add(");
+	} finally {
+		try {
+			rmSync(tmpDir, { recursive: true, force: true });
+		} catch {}
+	}
+});
+
+test("gofront <dir> --check exits 0 on valid directory", () => {
+	const { code, stderr } = cli([
+		join(FIXTURES, "multifile/withimport"),
+		"--check",
+	]);
+	assert(code === 0, `expected exit 0: ${stderr}`);
+	assertContains(stderr, "OK");
+});
+
+test("single file with unreadable js: import path exits 1", () => {
+	const { file, dir } = makeTmp(
+		"bad_dts.go",
+		`package main\nimport "js:nonexistent.d.ts"\nfunc main() {}\n`,
+	);
+	try {
+		const { code, stderr } = cli([file]);
+		assert(code !== 0, "expected non-zero exit for unreadable dts");
+		assertContains(stderr, "gofront:");
+	} finally {
+		try {
+			rmSync(dir, { recursive: true, force: true });
+		} catch {}
+	}
+});
+
+test("single file with local package import bundles dependency", () => {
+	// Exercises the local-import bundling loop in runCompile (lines 194-213)
+	const { stdout, code, stderr } = cli([
+		join(FIXTURES, "multifile/withimport/main.go"),
+	]);
+	assert(code === 0, `expected exit 0: ${stderr}`);
+	assertContains(stdout, "function Add(");
+	assertContains(stdout, "function Square(");
+});
+
+test("single file with npm import emits import statement", () => {
+	// Exercises the resolveAll results loop in runCompile (lines 185-188)
+	// Write a temp file inside fixtures/ so node_modules is discoverable
+	const tmpGo = join(FIXTURES, "_npm_cli_tmp.go");
+	try {
+		writeFileSync(
+			tmpGo,
+			`package main\nimport "fake-lib"\nfunc main() { r := math.add(1.0, 2.0); console.log(r) }\n`,
+		);
+		const { stdout, code, stderr } = cli([tmpGo]);
+		assert(code === 0, `expected exit 0: ${stderr}`);
+		assertContains(stdout, "from 'fake-lib'");
+	} finally {
+		try {
+			rmSync(tmpGo);
+		} catch {}
+	}
+});
+
+test("single file unreadable exits 1 with cannot-read error", () => {
+	// Exercises the readFileSync catch in runCompile (lines 148-149)
+	const dir = mkdtempSync(join(tmpdir(), "gofront-unread-"));
+	const file = join(dir, "locked.go");
+	try {
+		writeFileSync(file, "package main\nfunc main() {}\n");
+		chmodSync(file, 0o000);
+		const { code, stderr } = cli([file]);
+		assert(code !== 0, "expected non-zero exit");
+		assertContains(stderr, "gofront:");
+	} finally {
+		try {
+			chmodSync(file, 0o644);
+		} catch {}
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("-o write failure exits 1 with cannot-write error", () => {
+	// Exercises the outputFile writeFileSync catch (lines 278-280)
+	const srcDir = mkdtempSync(join(tmpdir(), "gofront-wsrc-"));
+	const outDir = mkdtempSync(join(tmpdir(), "gofront-wout-"));
+	const file = join(srcDir, "main.go");
+	const outFile = join(outDir, "out.js");
+	try {
+		writeFileSync(file, `package main\nfunc main() { console.log("hi") }\n`);
+		chmodSync(outDir, 0o555);
+		const { code, stderr } = cli([file, "-o", outFile]);
+		assert(code !== 0, "expected non-zero exit");
+		assertContains(stderr, "cannot write");
+	} finally {
+		try {
+			chmodSync(outDir, 0o755);
+		} catch {}
+		rmSync(srcDir, { recursive: true, force: true });
+		rmSync(outDir, { recursive: true, force: true });
+	}
+});
+
+test("init mkdir failure exits 1", () => {
+	// Exercises the mkdirSync catch in init (lines 79-81)
+	// Create a regular file where a directory would need to be created
+	const base = mkdtempSync(join(tmpdir(), "gofront-init-fail-"));
+	const blockFile = join(base, "blocked");
+	try {
+		writeFileSync(blockFile, "i am a file");
+		const { code, stderr } = cli(["init", join(blockFile, "subproject")]);
+		assert(code !== 0, "expected non-zero exit");
+		assertContains(stderr, "cannot create");
+	} finally {
+		rmSync(base, { recursive: true, force: true });
+	}
+});
+
+test("init write failure exits 1", () => {
+	// Exercises the writeFileSync catch in init (lines 104-106)
+	const dir = mkdtempSync(join(tmpdir(), "gofront-init-nowrite-"));
+	try {
+		chmodSync(dir, 0o555);
+		const { code, stderr } = cli(["init", dir]);
+		assert(code !== 0, "expected non-zero exit");
+		assertContains(stderr, "cannot write");
+	} finally {
+		try {
+			chmodSync(dir, 0o755);
+		} catch {}
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+// ── Watch mode ───────────────────────────────────────────────
+
+section("CLI flags — watch mode");
+
+test("--watch starts, builds, and emits 'watching' message", () => {
+	// Exercises watch mode (lines 287-329): buildOnce + watch setup
+	const dir = mkdtempSync(join(tmpdir(), "gofront-watch-"));
+	const file = join(dir, "main.go");
+	try {
+		writeFileSync(file, `package main\nfunc main() { console.log("hi") }\n`);
+		// spawnSync with timeout kills the watch process after 900ms
+		const r = spawnSync(process.execPath, [CLI, file, "--watch"], {
+			encoding: "utf8",
+			timeout: 900,
+		});
+		assert(r.stderr.includes("OK"), `expected OK in stderr: ${r.stderr}`);
+		assert(
+			r.stderr.includes("watching"),
+			`expected 'watching' in stderr: ${r.stderr}`,
+		);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("--watch with compile error logs ERROR without exiting", () => {
+	// Exercises buildOnce error handler (lines 310-313)
+	const dir = mkdtempSync(join(tmpdir(), "gofront-watch-err-"));
+	const file = join(dir, "bad.go");
+	try {
+		writeFileSync(file, `package main\nfunc main() { notDefined }\n`);
+		const r = spawnSync(process.execPath, [CLI, file, "--watch"], {
+			encoding: "utf8",
+			timeout: 900,
+		});
+		assert(r.stderr.includes("ERROR"), `expected ERROR in stderr: ${r.stderr}`);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("--watch -o writes output file on initial build", () => {
+	// Exercises outputFile branch in buildOnce (lines 299-303)
+	const srcDir = mkdtempSync(join(tmpdir(), "gofront-watch-o-src-"));
+	const outDir = mkdtempSync(join(tmpdir(), "gofront-watch-o-out-"));
+	const file = join(srcDir, "main.go");
+	const outFile = join(outDir, "out.js");
+	try {
+		writeFileSync(file, `package main\nfunc main() { console.log("hi") }\n`);
+		const r = spawnSync(
+			process.execPath,
+			[CLI, file, "--watch", "-o", outFile],
+			{ encoding: "utf8", timeout: 900 },
+		);
+		assert(r.stderr.includes("OK"), `expected OK in stderr: ${r.stderr}`);
+		assert(
+			r.stderr.includes("wrote"),
+			`expected 'wrote' in stderr: ${r.stderr}`,
+		);
+	} finally {
+		rmSync(srcDir, { recursive: true, force: true });
+		rmSync(outDir, { recursive: true, force: true });
+	}
+});
+
 // ═════════════════════════════════════════════════════════════
 // Type error — additional cases
 // ═════════════════════════════════════════════════════════════
-
 
 section("compiler.js — error paths");
 
@@ -695,7 +955,6 @@ test("compileDir throws on mixed package names", () => {
 // ═════════════════════════════════════════════════════════════
 // Lexer edge cases
 // ═════════════════════════════════════════════════════════════
-
 
 section("compiler.js — mixed package names");
 
@@ -795,7 +1054,6 @@ func main() { console.log("ok") }`,
 // ═════════════════════════════════════════════════════════════
 // dts-parser — additional coverage
 // ═════════════════════════════════════════════════════════════
-
 
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

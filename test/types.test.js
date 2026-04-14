@@ -1,15 +1,11 @@
 // GoFront test suite — type system and type checking
+
 import { fileURLToPath } from "node:url";
-import { join } from "node:path";
 import {
-	FIXTURES,
-	ROOT,
 	assert,
-	assertContains,
-	assertErrorContains,
 	assertEqual,
+	assertErrorContains,
 	compile,
-	compileFile,
 	runJs,
 	section,
 	summarize,
@@ -77,7 +73,6 @@ func foo() {}`);
 // ═════════════════════════════════════════════════════════════
 // 3. DOM tests (jsdom)
 // ═════════════════════════════════════════════════════════════
-
 
 section("Type error negative tests");
 
@@ -257,7 +252,6 @@ type Widget struct { Child Ghost }`);
 // Edge case tests
 // ═════════════════════════════════════════════════════════════
 
-
 section("Type assertions");
 
 test("type assertion extracts concrete value", () => {
@@ -298,7 +292,6 @@ func main() {
 // ═════════════════════════════════════════════════════════════
 // Scoping and closures
 // ═════════════════════════════════════════════════════════════
-
 
 section("New type checks");
 
@@ -394,7 +387,6 @@ func main() {
 
 // ═════════════════════════════════════════════════════════════
 
-
 section("Sized integer types");
 
 test("uint is accepted as a type", () => {
@@ -447,7 +439,6 @@ func main() {
 });
 
 // ── Struct tags ───────────────────────────────────────────────
-
 
 section("Type switch");
 
@@ -599,7 +590,6 @@ func main() {
 
 // ── []byte / []rune conversions ───────────────────────────────
 
-
 section("Sized integer types — type safety");
 
 test("passing string to uint param is a type error", () => {
@@ -625,7 +615,6 @@ func main() {
 });
 
 // ── Struct tags — edge cases ──────────────────────────────────
-
 
 section("Interface embedding");
 
@@ -729,7 +718,6 @@ func main() {}`);
 // Additional coverage
 // ═════════════════════════════════════════════════════════════
 
-
 section("Type errors — condition and operator checks");
 
 test("if condition must be bool — non-bool raises error", () => {
@@ -797,7 +785,6 @@ func main() {
 // dts-parser unit tests
 // ═════════════════════════════════════════════════════════════
 
-
 section("TypeChecker — error messages");
 
 test("missing return value in non-void function is an error", () => {
@@ -841,7 +828,6 @@ func main() {
 // CodeGen — new(T) for basic types
 // ═════════════════════════════════════════════════════════════
 
-
 section("new(T) for basic types");
 
 test("new(int) zero value is 0", () => {
@@ -884,7 +870,6 @@ func main() {
 // CodeGen — type conversions
 // ═════════════════════════════════════════════════════════════
 
-
 section("Type conversions");
 
 test("bool(x) converts non-zero int to true", () => {
@@ -912,7 +897,6 @@ func main() {
 // Type assertion — comma-ok with error type
 // ═════════════════════════════════════════════════════════════
 
-
 section("Type assertion — error type");
 
 test("type assert comma-ok on error type — string value is true", () => {
@@ -938,7 +922,6 @@ func main() {
 // ═════════════════════════════════════════════════════════════
 // Lexer — tab escape in strings
 // ═════════════════════════════════════════════════════════════
-
 
 section("TypeChecker — pointer type field access");
 
@@ -968,7 +951,6 @@ func main() { f("hello") }`);
 // TypeChecker — make() with various types
 // ═════════════════════════════════════════════════════════════
 
-
 section("TypeChecker — make and new builtins");
 
 test("make(map[string]int) compiles and runs", () => {
@@ -991,7 +973,6 @@ func main() {
 }`).js;
 	assertEqual(runJs(js), "0\n0");
 });
-
 
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

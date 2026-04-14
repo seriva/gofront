@@ -23,7 +23,7 @@ packages. `src/dts-parser.js` parses TypeScript `.d.ts` declaration files.
 ## Commands
 
 ```sh
-npm test          # run the full test suite (191 tests, no browser required)
+npm test          # run the full test suite (444 tests, no browser required)
 npm run format    # format with Biome
 npm run check     # lint with Biome
 
@@ -88,8 +88,10 @@ example/
    `checkStmt`; return the correct type.
 4. **CodeGen** (`src/codegen.js`) — handle the new node in `genExpr` or `genStmt`;
    throw on unhandled kinds so failures are loud.
-5. **Tests** (`test/run.js`) — add at least one positive test (compiles + runs
-   correctly) and one negative test (type error produces the expected message).
+5. **Tests** — add at least one positive test (compiles + runs correctly) and one
+   negative test (type error produces the expected message) to the most relevant
+   `test/*.test.js` file. Run `node test/<file>.test.js` to check just that suite, or
+   `npm test` for the full combined run.
 6. **CHANGELOG.md** — add an entry under `## [Unreleased]`.
 
 ## Type system
@@ -123,13 +125,14 @@ Types are plain JS objects:
 
 ## Testing conventions
 
-- Tests live in a single file: `test/run.js`.
-- Helper functions: `compile(src)`, `compileFile(path)`, `compileDir(dir)`,
-  `runJs(js)`, `runInDom(js, html)`.
+- Tests are split across focused files in `test/`; `test/run.js` is the orchestrator.
+- Shared helpers live in `test/helpers.js`: `compile(src)`, `compileFile(path)`,
+  `compileDir(dir)`, `runJs(js)`, `runInDom(js, html)`.
 - Assertion helpers: `assertEqual`, `assertContains`, `assertErrorContains`, `assert`.
 - Negative tests must call `assertErrorContains(errors, "substring")` — not just
   `assert(errors.length > 0)` — so the error message is verified too.
 - Group related tests with `section("Name")` for readable output.
+- Run a single suite with `node test/<file>.test.js`, or the full suite with `npm test`.
 
 ## Changing the example app
 

@@ -1,15 +1,11 @@
 // GoFront test suite — structs, embedded structs, methods
+
 import { fileURLToPath } from "node:url";
-import { join } from "node:path";
 import {
-	FIXTURES,
-	ROOT,
 	assert,
-	assertContains,
-	assertErrorContains,
 	assertEqual,
+	assertErrorContains,
 	compile,
-	compileFile,
 	runJs,
 	section,
 	summarize,
@@ -46,7 +42,6 @@ func main() {
 // ═════════════════════════════════════════════════════════════
 // Store functions (example app logic)
 // ═════════════════════════════════════════════════════════════
-
 
 section("Store functions (moveTodo / removeTodo / filters)");
 
@@ -218,7 +213,6 @@ func main() {
 // CLI flags
 // ═════════════════════════════════════════════════════════════
 
-
 section("Embedded structs");
 
 test("embedded struct fields accessible on outer struct", () => {
@@ -346,7 +340,6 @@ func main() {
 // String formatting (fmt package)
 // ═════════════════════════════════════════════════════════════
 
-
 section("Struct tags");
 
 test("struct tag is parsed and ignored", () => {
@@ -377,7 +370,6 @@ func main() {
 });
 
 // ── Bitwise compound assignments ──────────────────────────────
-
 
 section("Struct tags — edge cases");
 
@@ -414,7 +406,6 @@ func main() {
 
 // ── recover() — additional scenarios ─────────────────────────
 
-
 section("new() for struct types");
 
 test("new(T) pointer — field access via .value", () => {
@@ -442,7 +433,6 @@ func main() {
 });
 
 // ── Local type declarations ───────────────────────────────────
-
 
 section("Address-of & and dereference *");
 
@@ -476,7 +466,6 @@ func main() {
 // ═════════════════════════════════════════════════════════════
 // switch with init statement
 // ═════════════════════════════════════════════════════════════
-
 
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

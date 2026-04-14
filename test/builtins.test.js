@@ -1,15 +1,11 @@
 // GoFront test suite — built-in functions and operators
+
 import { fileURLToPath } from "node:url";
-import { join } from "node:path";
 import {
-	FIXTURES,
-	ROOT,
 	assert,
 	assertContains,
-	assertErrorContains,
 	assertEqual,
 	compile,
-	compileFile,
 	runJs,
 	section,
 	summarize,
@@ -126,7 +122,6 @@ func main() {
 // Type assertions
 // ═════════════════════════════════════════════════════════════
 
-
 section("fmt package");
 
 test("fmt.Sprintf formats %s and %d", () => {
@@ -223,7 +218,6 @@ func main() {
 // New type checks
 // ═════════════════════════════════════════════════════════════
 
-
 section("recover()");
 
 test("recover catches a panic and returns the message", () => {
@@ -293,7 +287,6 @@ func main() {
 });
 
 // ═════════════════════════════════════════════════════════════
-
 
 section("Rune / char literals");
 
@@ -376,7 +369,6 @@ func main() {
 
 // ═════════════════════════════════════════════════════════════
 
-
 section("Bitwise compound assignments");
 
 test("&= clears bits", () => {
@@ -442,7 +434,6 @@ func main() {
 });
 
 // ── Type switch ───────────────────────────────────────────────
-
 
 section("[]byte and []rune conversions");
 
@@ -568,7 +559,6 @@ func main() {
 
 // ── copy() and cap() ──────────────────────────────────────────
 
-
 section("copy() and cap()");
 
 test("copy copies elements into destination", () => {
@@ -638,7 +628,6 @@ func main() {
 
 // ── Compound assignments on fields and elements ───────────────
 
-
 section("Compound assignments on struct fields and slice elements");
 
 test("+= on struct field", () => {
@@ -697,7 +686,6 @@ func main() {
 
 // ── String comparisons ────────────────────────────────────────
 
-
 section("String comparison operators");
 
 test("string equality ==", () => {
@@ -752,7 +740,6 @@ func main() {
 
 // ── Blank identifier ──────────────────────────────────────────
 
-
 section("Blank identifier");
 
 test("blank _ discards second return value", () => {
@@ -802,7 +789,6 @@ func main() {
 });
 
 // ── Sized types — type errors still caught ────────────────────
-
 
 section("recover() — additional scenarios");
 
@@ -855,7 +841,6 @@ func main() {
 
 // ── Interface embedding ──────────────────────────────────────
 
-
 section("print / println builtins");
 
 test("print() compiles and runs", () => {
@@ -875,7 +860,6 @@ func main() {
 });
 
 // ── fmt.Sprintf %f format verb ────────────────────────────────
-
 
 section("fmt.Sprintf format verbs");
 
@@ -900,7 +884,6 @@ func main() {
 });
 
 // ── Bitwise operators as expressions ─────────────────────────
-
 
 section("Bitwise operators (expressions)");
 
@@ -970,7 +953,6 @@ func main() {
 
 // ── Integer division truncation ───────────────────────────────
 
-
 section("Integer division");
 
 test("int / int truncates toward zero", () => {
@@ -995,7 +977,6 @@ func main() {
 
 // ── String indexing ───────────────────────────────────────────
 
-
 section("String indexing");
 
 test("s[i] returns the character at that position", () => {
@@ -1010,7 +991,6 @@ func main() {
 });
 
 // ── Full slice xs[:] ─────────────────────────────────────────
-
 
 section("Slice expressions");
 
@@ -1047,7 +1027,6 @@ func main() {
 
 // ── Array types [n]T ─────────────────────────────────────────
 
-
 section("Array types");
 
 test("[n]T array literal and indexing", () => {
@@ -1070,7 +1049,6 @@ func main() {
 });
 
 // ── Map with non-string keys ──────────────────────────────────
-
 
 section("Map with non-string keys");
 
@@ -1095,7 +1073,6 @@ func main() {
 
 // ── for range with only blank vars ───────────────────────────
 
-
 section("for range — blank variables");
 
 test("for range body runs once per element (value unused)", () => {
@@ -1117,7 +1094,6 @@ func main() {
 
 // ── for range — index only on string ─────────────────────────
 
-
 section("for range — index-only on string");
 
 test("for i := range string iterates indices", () => {
@@ -1132,7 +1108,6 @@ func main() {
 });
 
 // ── for range — assignment (not define) ──────────────────────
-
 
 section("for range — assignment to existing variables");
 
@@ -1153,7 +1128,6 @@ func main() {
 
 // ── new(T) for struct types ───────────────────────────────────
 
-
 section("Local type declarations");
 
 test("type declared inside function body is usable", () => {
@@ -1167,7 +1141,6 @@ func main() {
 });
 
 // ── make([]T, n, cap) with capacity hint ─────────────────────
-
 
 section("make with capacity");
 
@@ -1193,7 +1166,6 @@ func main() {
 
 // ── Standalone block statement ────────────────────────────────
 
-
 section("fmt.Print and fmt.Printf");
 
 test("fmt.Print compiles without error", () => {
@@ -1217,7 +1189,6 @@ func main() {
 // ═════════════════════════════════════════════════════════════
 // Lexer / parser edge cases
 // ═════════════════════════════════════════════════════════════
-
 
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

@@ -1,15 +1,15 @@
 // GoFront test suite — language features
-import { fileURLToPath } from "node:url";
+
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
-	FIXTURES,
-	ROOT,
 	assert,
 	assertContains,
-	assertErrorContains,
 	assertEqual,
+	assertErrorContains,
 	compile,
 	compileFile,
+	FIXTURES,
 	runJs,
 	section,
 	summarize,
@@ -356,7 +356,6 @@ func main() {
 // 2. Type error tests
 // ═════════════════════════════════════════════════════════════
 
-
 section("Additional language features");
 
 test("const declaration", () => {
@@ -674,7 +673,6 @@ func main() { greet(Dog{}) }`);
 // 6. npm package resolver
 // ═════════════════════════════════════════════════════════════
 
-
 section("defer and error");
 
 test("defer runs after function body", () => {
@@ -755,7 +753,6 @@ func main() {
 
 // ═════════════════════════════════════════════════════════════
 
-
 section("async/await");
 
 test("async function compiles and resolves", () => {
@@ -784,7 +781,6 @@ func main() {
 // ═════════════════════════════════════════════════════════════
 // Type error negative tests
 // ═════════════════════════════════════════════════════════════
-
 
 section("Edge cases");
 
@@ -967,7 +963,6 @@ func main() {
 // Example app compilation tests
 // ═════════════════════════════════════════════════════════════
 
-
 section("Scoping and closures");
 
 test("inner scope variable shadows outer", () => {
@@ -1038,7 +1033,6 @@ func main() {
 // Named returns
 // ═════════════════════════════════════════════════════════════
 
-
 section("Named returns");
 
 test("named return modified before bare return", () => {
@@ -1075,7 +1069,6 @@ func main() {
 // Pointer receivers
 // ═════════════════════════════════════════════════════════════
 
-
 section("New features");
 
 test("init() functions execute before main in order", () => {
@@ -1109,7 +1102,6 @@ func main() {
 // ═════════════════════════════════════════════════════════════
 // Embedded structs
 // ═════════════════════════════════════════════════════════════
-
 
 section("Variadic spread (...)");
 
@@ -1163,7 +1155,6 @@ func main() {
 });
 
 // ═════════════════════════════════════════════════════════════
-
 
 section("Labeled break / continue");
 
@@ -1242,7 +1233,6 @@ Outer:
 
 // ── Sized integer types ───────────────────────────────────────
 
-
 section("for-condition loop (while pattern)");
 
 test("for cond {} compiles to while loop", () => {
@@ -1272,7 +1262,6 @@ func main() {
 
 // ── print / println builtins ──────────────────────────────────
 
-
 section("Standalone block statement");
 
 test("standalone block introduces new scope", () => {
@@ -1290,7 +1279,6 @@ func main() {
 
 // ── Const expression arithmetic ───────────────────────────────
 
-
 section("Const expression arithmetic");
 
 test("const from arithmetic expression", () => {
@@ -1307,7 +1295,6 @@ func main() {
 // ═════════════════════════════════════════════════════════════
 // CLI — additional flags
 // ═════════════════════════════════════════════════════════════
-
 
 section("switch with init statement");
 
@@ -1347,7 +1334,6 @@ func main() {
 // ═════════════════════════════════════════════════════════════
 // fmt.Print and fmt.Printf
 // ═════════════════════════════════════════════════════════════
-
 
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
