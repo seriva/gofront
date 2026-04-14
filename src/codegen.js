@@ -34,8 +34,9 @@ function buildSourceMap(sourceName, mappings) {
 	const lines = [];
 	let prevSrcLine = 0;
 	const maxGen = mappings.reduce((m, e) => Math.max(m, e.genLine), -1);
+	const byLine = new Map(mappings.map((e) => [e.genLine, e]));
 	for (let g = 0; g <= maxGen; g++) {
-		const entry = mappings.find((e) => e.genLine === g);
+		const entry = byLine.get(g);
 		if (entry) {
 			const srcDelta = entry.srcLine - prevSrcLine;
 			// Segment: [genCol=0, srcFileIdx=0, srcLineDelta, srcCol=0]
@@ -381,7 +382,7 @@ export class CodeGen {
 			if (stmt.kind === "ForStmt" && this._hasDefer(stmt.body)) return true;
 			if (
 				stmt.kind === "SwitchStmt" &&
-				stmt.cases.some((c) => c.stmts.some((s) => s.kind === "DeferStmt"))
+				stmt.cases.some((c) => this._hasDefer({ stmts: c.stmts }))
 			)
 				return true;
 		}

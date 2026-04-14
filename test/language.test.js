@@ -709,6 +709,62 @@ func main() {
 	assertEqual(runJs(js), "hello\nbye\nafter");
 });
 
+test("defer inside if inside switch case", () => {
+	const { js } = compile(`package main
+func run() string {
+  x := 1
+  switch x {
+  case 1:
+    if true {
+      defer console.log("deferred-in-if-in-switch")
+    }
+    console.log("case-body")
+  }
+  return "done"
+}
+func main() {
+  result := run()
+  console.log(result)
+}`);
+	assertEqual(runJs(js), "case-body\ndeferred-in-if-in-switch\ndone");
+});
+
+test("defer inside for inside switch case", () => {
+	const { js } = compile(`package main
+func run() {
+  x := 1
+  switch x {
+  case 1:
+    for i := 0; i < 1; i++ {
+      defer console.log("deferred-in-for-in-switch")
+    }
+    console.log("after-for")
+  }
+}
+func main() {
+  run()
+}`);
+	assertEqual(runJs(js), "after-for\ndeferred-in-for-in-switch");
+});
+
+test("defer inside nested block inside switch case", () => {
+	const { js } = compile(`package main
+func run() {
+  x := 1
+  switch x {
+  case 1:
+    {
+      defer console.log("deferred-in-block-in-switch")
+    }
+    console.log("case-end")
+  }
+}
+func main() {
+  run()
+}`);
+	assertEqual(runJs(js), "case-end\ndeferred-in-block-in-switch");
+});
+
 test("error() creates an error value", () => {
 	const { js } = compile(`package main
 func divide(a int, b int) (int, error) {

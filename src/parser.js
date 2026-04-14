@@ -55,6 +55,31 @@ const PREC = {
 	[T.AMP]: 5,
 };
 
+const TYPE_KEYWORDS = new Set([
+	"int",
+	"float64",
+	"string",
+	"bool",
+	"any",
+	"byte",
+	"rune",
+	"error",
+]);
+
+const BUILTIN_KEYWORDS = new Set([
+	"new",
+	"make",
+	"len",
+	"cap",
+	"append",
+	"delete",
+	"copy",
+	"print",
+	"println",
+	"panic",
+	"error",
+]);
+
 export class Parser {
 	constructor(tokens, filename = null, source = null) {
 		this.tokens = tokens;
@@ -281,17 +306,7 @@ export class Parser {
 			tok.type === T.FUNC ||
 			tok.type === T.INTERFACE ||
 			tok.type === T.STRUCT ||
-			(tok.type === T.IDENT && tok.value !== "_") ||
-			[
-				"int",
-				"float64",
-				"string",
-				"bool",
-				"any",
-				"byte",
-				"rune",
-				"error",
-			].includes(tok.value)
+			(tok.type === T.IDENT && tok.value !== "_")
 		);
 	}
 
@@ -1181,18 +1196,16 @@ export class Parser {
 		) {
 			this.advance();
 			// Type conversion or composite lit: Type(expr) or Type{...}
-			if (this.isTypeKeyword(t) || this.check(T.LPAREN)) {
-				if (this.check(T.LPAREN) && this.isTypeKeyword(t)) {
-					// type conversion: int(x), string(x), etc.
-					this.advance();
-					const expr = this.parseExpr();
-					this.expect(T.RPAREN);
-					return {
-						kind: "TypeConversion",
-						targetType: { kind: "TypeName", name: t.value },
-						expr,
-					};
-				}
+			if (this.isTypeKeyword(t) && this.check(T.LPAREN)) {
+				// type conversion: int(x), string(x), etc.
+				this.advance();
+				const expr = this.parseExpr();
+				this.expect(T.RPAREN);
+				return {
+					kind: "TypeConversion",
+					targetType: { kind: "TypeName", name: t.value },
+					expr,
+				};
 			}
 			return { kind: "Ident", name: t.value };
 		}
@@ -1215,31 +1228,10 @@ export class Parser {
 	}
 
 	isTypeKeyword(t) {
-		return [
-			"int",
-			"float64",
-			"string",
-			"bool",
-			"any",
-			"byte",
-			"rune",
-			"error",
-		].includes(t.value);
+		return TYPE_KEYWORDS.has(t.value);
 	}
 
 	isBuiltinKeyword(t) {
-		return [
-			"new",
-			"make",
-			"len",
-			"cap",
-			"append",
-			"delete",
-			"copy",
-			"print",
-			"println",
-			"panic",
-			"error",
-		].includes(t.value);
+		return BUILTIN_KEYWORDS.has(t.value);
 	}
 }

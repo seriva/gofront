@@ -290,7 +290,7 @@ function timestamp() {
 	return new Date().toLocaleTimeString();
 }
 
-async function buildOnce(_label) {
+async function buildOnce() {
 	try {
 		const startMs = performance.now();
 		const result = runCompile();
@@ -314,7 +314,7 @@ async function buildOnce(_label) {
 }
 
 // Initial build
-buildOnce("initial");
+buildOnce();
 
 // Determine what to watch
 const watchTarget = isDir ? inputPath : dirname(inputPath);
@@ -323,7 +323,7 @@ let debounce = null;
 watch(watchTarget, { recursive: true }, (_event, filename) => {
 	if (filename && !filename.endsWith(".go")) return;
 	clearTimeout(debounce);
-	debounce = setTimeout(() => buildOnce(filename ?? "change"), 80);
+	debounce = setTimeout(() => buildOnce(), 80);
 });
 
 console.error(`[${timestamp()}] gofront: watching ${inputArg} ...`);
