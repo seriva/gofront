@@ -1016,7 +1016,10 @@ export class CodeGen {
 					const arg = expr.args[0];
 					const t = arg?._type;
 					const js = this.genExpr(arg);
-					if (t?.kind === "map" || (t?.kind === "named" && t.underlying?.kind === "map")) {
+					if (
+						t?.kind === "map" ||
+						(t?.kind === "named" && t.underlying?.kind === "map")
+					) {
 						return `((__m) => { for (const __k in __m) delete __m[__k]; })(${js})`;
 					}
 					return `(${js}).length = 0`;

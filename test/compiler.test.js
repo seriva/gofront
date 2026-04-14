@@ -1088,7 +1088,10 @@ func main() {
 }`,
 		{ fromFile: join(FIXTURES, "multifile/withsideeffectimport/main.go") },
 	);
-	assert(errors.length > 0, "expected type error: math namespace not accessible");
+	assert(
+		errors.length > 0,
+		"expected type error: math namespace not accessible",
+	);
 	assertErrorContains(errors, "math");
 });
 
