@@ -10,21 +10,7 @@ func Plural(n int, word string) string {
     return String(n) + " " + word + "s"
 }
 
-// Max returns the larger of two ints.
-func Max(a int, b int) int {
-    if a > b {
-        return a
-    }
-    return b
-}
-
 // Clamp keeps n within [lo, hi].
 func Clamp(n int, lo int, hi int) int {
-    if n < lo {
-        return lo
-    }
-    if n > hi {
-        return hi
-    }
-    return n
+    return max(min(n, hi), lo)
 }

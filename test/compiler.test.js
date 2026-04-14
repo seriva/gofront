@@ -296,7 +296,7 @@ test("utils.Plural formats correctly", () => {
 	const utilsDir = join(ROOT, "example", "src", "utils");
 	const result = compileDir(utilsDir);
 	assert(result.js.includes("Plural"), "expected Plural in output");
-	assert(result.js.includes("Max"), "expected Max in output");
+	assert(result.js.includes("Clamp"), "expected Clamp in output");
 });
 
 // ═════════════════════════════════════════════════════════════

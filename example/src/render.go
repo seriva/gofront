@@ -92,7 +92,7 @@ func renderTodo(t Todo) any {
 // ── Filter bar ────────────────────────────────────────────────
 
 func renderFilterBar(bar any) {
-    filters := []int{FilterAll, FilterActive, FilterCompleted}
+    filters := [...]int{FilterAll, FilterActive, FilterCompleted}
     for _, f := range filters {
         btn := document.createElement("button")
         btn.textContent = filterLabel(f)
@@ -156,7 +156,7 @@ func render() {
         empty.textContent = "Nothing here."
         list.appendChild(empty)
     } else {
-        for i := 0; i < len(visible); i++ {
+        for i := range len(visible) {
             list.appendChild(renderTodo(visible[i]))
         }
     }

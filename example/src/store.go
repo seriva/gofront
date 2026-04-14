@@ -174,8 +174,7 @@ func statusLine() string {
     return utils.Plural(remaining, "task") + " left"
 }
 
-// highCount returns the number of high-priority incomplete todos,
-// using utils.Max to demonstrate a cross-package utility call.
+// highCount returns the number of high-priority incomplete todos.
 func highCount() int {
     n := 0
     for _, t := range todos {
@@ -183,5 +182,5 @@ func highCount() int {
             n++
         }
     }
-    return utils.Max(n, 0)
+    return max(n, 0)
 }
