@@ -476,6 +476,11 @@ export class Parser {
 			this.advance();
 			return { kind: "SliceType", elem: this.parseType() };
 		}
+		if (this.match(T.ELLIPSIS)) {
+			// [...]T — array with inferred length from composite literal
+			this.expect(T.RBRACKET);
+			return { kind: "ArrayType", inferLen: true, elem: this.parseType() };
+		}
 		// fixed array: [n]T — treated as slice for JS purposes
 		const size = this.parseExpr();
 		this.expect(T.RBRACKET);

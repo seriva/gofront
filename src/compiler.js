@@ -86,8 +86,9 @@ export function compileFiles(files, options = {}) {
 
 	// js: prefix — local .d.ts files
 	for (const imp of allImports) {
-		for (const { path } of imp.imports) {
+		for (const { path, alias } of imp.imports) {
 			if (!path.startsWith("js:")) continue;
+			if (alias === "_") continue; // side-effect import — no type definitions
 			const dtsPath = join(fromDir, path.slice(3));
 			try {
 				const { types, values } = parseDts(readFileSync(dtsPath, "utf8"));
@@ -98,8 +99,12 @@ export function compileFiles(files, options = {}) {
 		}
 	}
 
-	// npm packages
-	const resolved = resolveAll(allImports, dummyFromFile, parseDts);
+	// npm packages — exclude side-effect imports (alias "_") from type resolution
+	const allImportsNoSideEffect = allImports.map((imp) => ({
+		...imp,
+		imports: imp.imports.filter(({ alias }) => alias !== "_"),
+	}));
+	const resolved = resolveAll(allImportsNoSideEffect, dummyFromFile, parseDts);
 	for (const [path, info] of resolved) {
 		if (!info) continue;
 		checker.addDefinitions(info.types, info.values);
@@ -124,6 +129,7 @@ export function compileFiles(files, options = {}) {
 			// Recursively compile dependency
 			const dep = compileDir(depDir);
 			preambles.push(dep.js);
+			if (alias === "_") continue; // side-effect import — bundle code but don't expose namespace
 			const nameUsed = alias ?? dep.pkgName;
 			bundledPackages.add(nameUsed);
 			checker.addPackageNamespace(

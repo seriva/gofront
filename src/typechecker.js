@@ -1047,7 +1047,7 @@ export class TypeChecker {
 			return t;
 		}
 
-		if (base?.kind === "slice") {
+		if (base?.kind === "slice" || base?.kind === "array") {
 			for (const elem of expr.elems) {
 				if (elem.kind === "CompositeLit" && elem.typeExpr === null) {
 					const et = this.checkCompositeLit(elem, scope, base.elem);
@@ -1112,8 +1112,10 @@ export class TypeChecker {
 			case "ArrayType":
 				return {
 					kind: "array",
-					size:
-						node.size?.value !== undefined
+					// inferLen: true means [...]T — size is determined by composite literal
+					size: node.inferLen
+						? null
+						: node.size?.value !== undefined
 							? Number(node.size.value)
 							: node.size,
 					elem: this.resolveTypeNode(node.elem, scope),

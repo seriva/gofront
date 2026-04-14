@@ -200,6 +200,8 @@ npm package types are resolved automatically from `node_modules/` and `@types/`.
 | Struct field tags (`` `json:"name"` ``) | ✓ — parsed and ignored (no reflection) |
 | `[]byte(s)` conversion | ✓ — produces UTF-8 byte values via `TextEncoder` |
 | `[]rune(s)` conversion | ✓ — produces Unicode code points via `Array.from` |
+| `[...]T{...}` array length inference | ✓ |
+| Side-effect imports (`import _ "pkg"`) | ✓ — dependency code is bundled; package namespace is not exposed |
 
 ---
 
@@ -216,8 +218,6 @@ The following Go features are not supported or behave differently from the Go sp
 | `select` statement | Depends on channels |
 | `goto` statement | Not planned |
 | Generics (Go 1.18+) | No `[T Type]` type parameters |
-| `[...]T{...}` array length inference | Not supported |
-| Side-effect imports (`import _ "pkg"`) | Not supported |
 
 ### Behaves differently from Go
 
@@ -239,4 +239,4 @@ The following Go features are not supported or behave differently from the Go sp
 npm test
 ```
 
-422 tests covering language features, type errors, edge cases, DOM (jsdom), external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, and the example app.
+454 tests covering language features, type errors, edge cases, DOM (jsdom), external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, and the example app.

@@ -1052,6 +1052,62 @@ func main() { console.log("ok") }`,
 });
 
 // ═════════════════════════════════════════════════════════════
+// Side-effect imports (import _ "pkg")
+// ═════════════════════════════════════════════════════════════
+
+section("Side-effect imports");
+
+test("import _ compiles without error", () => {
+	const dir = join(FIXTURES, "multifile/withsideeffectimport");
+	const { js, errors } = compileDir(dir);
+	assertEqual(errors?.length ?? 0, 0);
+	assertContains(js, "side-effect-only");
+});
+
+test("import _ bundles the dependency code", () => {
+	const dir = join(FIXTURES, "multifile/withsideeffectimport");
+	const { js } = compileDir(dir);
+	// mathpkg should be inlined even though it's a side-effect import
+	assertContains(js, "function Add(");
+});
+
+test("import _ runs correctly", () => {
+	const dir = join(FIXTURES, "multifile/withsideeffectimport");
+	const { js } = compileDir(dir);
+	assertEqual(runJs(js).trim(), "side-effect-only");
+});
+
+test("import _ does not expose package namespace", () => {
+	// Using math.Add should be a type error — the namespace is not registered
+	const { errors } = compile(
+		`package main
+import _ "../mathpkg"
+func main() {
+	x := math.Add(1, 2)
+	console.log(x)
+}`,
+		{ fromFile: join(FIXTURES, "multifile/withsideeffectimport/main.go") },
+	);
+	assert(errors.length > 0, "expected type error: math namespace not accessible");
+	assertErrorContains(errors, "math");
+});
+
+test("import _ in group syntax compiles without error", () => {
+	const { js, errors } = compile(
+		`package main
+import (
+	_ "../mathpkg"
+)
+func main() {
+	console.log("ok")
+}`,
+		{ fromFile: join(FIXTURES, "multifile/withsideeffectimport/main.go") },
+	);
+	assertEqual(errors?.length ?? 0, 0);
+	assertEqual(runJs(js).trim(), "ok");
+});
+
+// ═════════════════════════════════════════════════════════════
 // dts-parser — additional coverage
 // ═════════════════════════════════════════════════════════════
 

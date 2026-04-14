@@ -1335,6 +1335,60 @@ func main() {
 // fmt.Print and fmt.Printf
 // ═════════════════════════════════════════════════════════════
 
+// ═════════════════════════════════════════════════════════════
+// [...]T array length inference
+// ═════════════════════════════════════════════════════════════
+
+section("[...]T array length inference");
+
+test("[...]int{} infers correct length", () => {
+	const js = compile(`package main
+func main() {
+	a := [...]int{10, 20, 30}
+	console.log(len(a))
+}`).js;
+	assertEqual(runJs(js), "3");
+});
+
+test("[...]string{} compiles and is iterable", () => {
+	const js = compile(`package main
+func main() {
+	words := [...]string{"go", "front", "js"}
+	for _, w := range words {
+		console.log(w)
+	}
+}`).js;
+	assertEqual(runJs(js), "go\nfront\njs");
+});
+
+test("[...]T{} can be indexed and assigned", () => {
+	const js = compile(`package main
+func main() {
+	a := [...]int{1, 2, 3}
+	a[1] = 99
+	console.log(a[0], a[1], a[2])
+}`).js;
+	assertEqual(runJs(js), "1 99 3");
+});
+
+test("[...]T{} single element infers length 1", () => {
+	const js = compile(`package main
+func main() {
+	a := [...]bool{true}
+	console.log(len(a))
+}`).js;
+	assertEqual(runJs(js), "1");
+});
+
+test("[...]T{} type error on wrong element type", () => {
+	const { errors } = compile(`package main
+func main() {
+	_ = [...]int{1, "bad", 3}
+}`);
+	assert(errors.length > 0, "expected type error");
+	assertErrorContains(errors, "string");
+});
+
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit(summarize() > 0 ? 1 : 0);
