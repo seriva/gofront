@@ -338,13 +338,13 @@ export class CodeGen {
 	// Emit a function body, wrapping in try/catch/finally for defer if needed.
 	_genBody(body) {
 		if (!this._hasDefer(body)) {
-			this.genBlock(body, true);
+			this.genBlock(body);
 			return;
 		}
 		this.line("const __defers = [];");
 		this.line("let __panic = null;");
 		this.line("try {");
-		this.indented(() => this.genBlock(body, true));
+		this.indented(() => this.genBlock(body));
 		this.line("} catch (__err) {");
 		this.indented(() => this.line("__panic = __err;"));
 		this.line("} finally {");

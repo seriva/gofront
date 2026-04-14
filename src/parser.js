@@ -900,10 +900,6 @@ export class Parser {
 		return stmt;
 	}
 
-	exprToStmt(expr) {
-		return { kind: "ExprStmt", expr };
-	}
-
 	// ── Expressions ──────────────────────────────────────────────
 
 	parseExprList() {

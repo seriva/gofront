@@ -227,7 +227,7 @@ function runCompile() {
 	}
 
 	const output = preambles.length > 0 ? `${preambles.join("\n")}\n${js}` : js;
-	return { js: output, _cg: cg };
+	return { js: output };
 }
 
 // ── Minify helper ────────────────────────────────────────────
