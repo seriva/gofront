@@ -1389,6 +1389,187 @@ func main() {
 	assertErrorContains(errors, "string");
 });
 
+// ═════════════════════════════════════════════════════════════
+// min() / max() builtins
+// ═════════════════════════════════════════════════════════════
+
+section("min() / max() builtins");
+
+test("min() returns smallest value", () => {
+	const js = compile(`package main
+func main() {
+	console.log(min(3, 1, 2))
+}`).js;
+	assertEqual(runJs(js), "1");
+});
+
+test("max() returns largest value", () => {
+	const js = compile(`package main
+func main() {
+	console.log(max(3, 1, 2))
+}`).js;
+	assertEqual(runJs(js), "3");
+});
+
+test("min/max with two args", () => {
+	const js = compile(`package main
+func main() {
+	a := 10
+	b := 20
+	console.log(min(a, b))
+	console.log(max(a, b))
+}`).js;
+	assertEqual(runJs(js), "10\n20");
+});
+
+test("min/max with float64", () => {
+	const js = compile(`package main
+func main() {
+	console.log(min(1.5, 2.3, 0.7))
+	console.log(max(1.5, 2.3, 0.7))
+}`).js;
+	assertEqual(runJs(js), "0.7\n2.3");
+});
+
+// ═════════════════════════════════════════════════════════════
+// clear() builtin
+// ═════════════════════════════════════════════════════════════
+
+section("clear() builtin");
+
+test("clear() empties a slice", () => {
+	const js = compile(`package main
+func main() {
+	s := []int{1, 2, 3}
+	clear(s)
+	console.log(len(s))
+}`).js;
+	assertEqual(runJs(js), "0");
+});
+
+test("clear() empties a map", () => {
+	const js = compile(`package main
+func main() {
+	m := map[string]int{"a": 1, "b": 2}
+	clear(m)
+	console.log(len(m))
+}`).js;
+	assertEqual(runJs(js), "0");
+});
+
+// ═════════════════════════════════════════════════════════════
+// range over integer (Go 1.22)
+// ═════════════════════════════════════════════════════════════
+
+section("range over integer");
+
+test("for i := range N iterates 0..N-1", () => {
+	const js = compile(`package main
+func main() {
+	sum := 0
+	for i := range 5 {
+		sum = sum + i
+	}
+	console.log(sum)
+}`).js;
+	assertEqual(runJs(js), "10");
+});
+
+test("for range N runs N times (no variable)", () => {
+	const js = compile(`package main
+func main() {
+	count := 0
+	for range 3 {
+		count = count + 1
+	}
+	console.log(count)
+}`).js;
+	assertEqual(runJs(js), "3");
+});
+
+test("for i := range variable", () => {
+	const js = compile(`package main
+func main() {
+	n := 4
+	sum := 0
+	for i := range n {
+		sum = sum + i
+	}
+	console.log(sum)
+}`).js;
+	assertEqual(runJs(js), "6");
+});
+
+test("range over integer does not break variadic range", () => {
+	const js = compile(`package main
+func sum(ns ...int) int {
+	total := 0
+	for _, n := range ns { total = total + n }
+	return total
+}
+func main() {
+	console.log(sum(1, 2, 3, 4))
+}`).js;
+	assertEqual(runJs(js), "10");
+});
+
+// ═════════════════════════════════════════════════════════════
+// Type aliases (type A = B)
+// ═════════════════════════════════════════════════════════════
+
+section("Type aliases");
+
+test("type alias is transparent", () => {
+	const { js, errors } = compile(`package main
+type MyInt = int
+func double(n MyInt) MyInt {
+	return n * 2
+}
+func main() {
+	x := 5
+	console.log(double(x))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "10");
+});
+
+test("type alias for string", () => {
+	const { js, errors } = compile(`package main
+type Name = string
+func greet(n Name) string {
+	return "Hello, " + n
+}
+func main() {
+	console.log(greet("World"))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "Hello, World");
+});
+
+test("type alias does not require conversion", () => {
+	// With a type alias, no conversion is needed between alias and original
+	const { errors } = compile(`package main
+type MyInt = int
+func main() {
+	var x MyInt = 5
+	var y int = x
+	console.log(y)
+}`);
+	assertEqual(errors.length, 0);
+});
+
+test("type alias for struct", () => {
+	const { js, errors } = compile(`package main
+type Point struct { X int; Y int }
+type Coord = Point
+func main() {
+	p := Coord{X: 3, Y: 4}
+	console.log(p.X, p.Y)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "3 4");
+});
+
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit(summarize() > 0 ? 1 : 0);

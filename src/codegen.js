@@ -625,6 +625,15 @@ export class CodeGen {
 			return;
 		}
 
+		// for range N { } — no variable, just repeat N times
+		if (stmt.cond?.kind === "RangeExpr") {
+			const iteree = this.genExpr(stmt.cond.expr);
+			this.line(`for (let _$ = 0; _$ < ${iteree}; _$++) {`);
+			this.indented(() => this.genBlock(stmt.body));
+			this.line("}");
+			return;
+		}
+
 		if (!stmt.init && !stmt.post) {
 			if (!stmt.cond) {
 				// infinite loop
@@ -661,6 +670,18 @@ export class CodeGen {
 		const iterType = range.expr._type;
 
 		let iterExpr;
+		if (
+			lhs.length <= 1 &&
+			iterType?.kind === "basic" &&
+			(iterType.name === "int" || iterType.name === "float64")
+		) {
+			// integer range (Go 1.22): for i := range n  → C-style for loop
+			const v = lhs[0] === "_" ? "_$" : lhs[0];
+			this.line(`for (let ${v} = 0; ${v} < ${iteree}; ${v}++) {`);
+			this.indented(() => this.genBlock(stmt.body));
+			this.line("}");
+			return;
+		}
 		if (
 			iterType?.kind === "map" ||
 			(iterType?.kind === "named" && iterType.underlying?.kind === "map")
@@ -982,6 +1003,23 @@ export class CodeGen {
 					// errors are plain strings; nil (null) means no error
 					const arg = this.genExpr(expr.args[0]);
 					return arg;
+				}
+				case "min": {
+					const args = expr.args.map((a) => this.genExpr(a)).join(", ");
+					return `Math.min(${args})`;
+				}
+				case "max": {
+					const args = expr.args.map((a) => this.genExpr(a)).join(", ");
+					return `Math.max(${args})`;
+				}
+				case "clear": {
+					const arg = expr.args[0];
+					const t = arg?._type;
+					const js = this.genExpr(arg);
+					if (t?.kind === "map" || (t?.kind === "named" && t.underlying?.kind === "map")) {
+						return `((__m) => { for (const __k in __m) delete __m[__k]; })(${js})`;
+					}
+					return `(${js}).length = 0`;
 				}
 			}
 		}

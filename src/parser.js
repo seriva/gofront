@@ -340,9 +340,10 @@ export class Parser {
 	parseTypeDecl() {
 		this.expect(T.TYPE);
 		const name = this.expect(T.IDENT).value;
+		const isAlias = this.match(T.ASSIGN);
 		const type = this.parseType();
 		this.semi();
-		return { kind: "TypeDecl", name, type };
+		return { kind: "TypeDecl", name, type, isAlias };
 	}
 
 	parseVarDecl() {

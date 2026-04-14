@@ -158,6 +158,9 @@ npm package types are resolved automatically from `node_modules/` and `@types/`.
 |---|---|
 | Variables (`var`, `:=` short re-declaration) | ✓ |
 | Constants (`const`, `iota`) | ✓ |
+| `if` / `else if` / `else` | ✓ |
+| `if` with init statement (`if err := f(); err != nil`) | ✓ |
+| Type definitions (`type MyType ...`) | ✓ |
 | Functions, multiple returns | ✓ |
 | Named return values | ✓ |
 | Variadic parameters | ✓ |
@@ -173,6 +176,7 @@ npm package types are resolved automatically from `node_modules/` and `@types/`.
 | `for`, `for range`, `for {}` | ✓ |
 | `range` over string | ✓ |
 | `switch` / `fallthrough` | ✓ |
+| `switch` with init statement (`switch x := f(); x {}`) | ✓ |
 | `new(T)` | ✓ |
 | Type conversions | ✓ |
 | Type assertions (`x.(T)`) | ✓ |
@@ -188,9 +192,11 @@ npm package types are resolved automatically from `node_modules/` and `@types/`.
 | Rune / char literals (`'a'`, `'\n'`) | ✓ — compiled to integer char codes |
 | `defer` | ✓ |
 | `panic()` / `recover()` | ✓ |
+| `print` / `println` builtins | ✓ — compile to `console.log` |
+| Pointer operators (`&`, `*`) | ✓ |
 | `error` type / `error("msg")` / `.Error()` | ✓ |
 | `async func` / `await` expressions | ✓ |
-| `fmt.Sprintf` / `fmt.Printf` / `fmt.Println` / `fmt.Errorf` | ✓ |
+| `fmt.Sprintf` / `fmt.Printf` / `fmt.Println` / `fmt.Print` / `fmt.Errorf` | ✓ |
 | External `.d.ts` types | ✓ |
 | npm package types | ✓ |
 | Multi-file packages | ✓ |
@@ -202,6 +208,10 @@ npm package types are resolved automatically from `node_modules/` and `@types/`.
 | `[]rune(s)` conversion | ✓ — produces Unicode code points via `Array.from` |
 | `[...]T{...}` array length inference | ✓ |
 | Side-effect imports (`import _ "pkg"`) | ✓ — dependency code is bundled; package namespace is not exposed |
+| `min()` / `max()` builtins | ✓ — compiles to `Math.min` / `Math.max` |
+| `clear()` builtin | ✓ — zeroes slice length or deletes all map keys |
+| `range` over integer (`for i := range n`) | ✓ — Go 1.22; also supports `for range n` |
+| Type aliases (`type A = B`) | ✓ — transparent alias; no conversion needed between alias and original |
 
 ---
 
@@ -239,4 +249,4 @@ The following Go features are not supported or behave differently from the Go sp
 npm test
 ```
 
-454 tests covering language features, type errors, edge cases, DOM (jsdom), external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, and the example app.
+468 tests covering language features, type errors, edge cases, DOM (jsdom), external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, and the example app.

@@ -23,7 +23,7 @@ packages. `src/dts-parser.js` parses TypeScript `.d.ts` declaration files.
 ## Commands
 
 ```sh
-npm test          # run the full test suite (454 tests, no browser required)
+npm test          # run the full test suite (468 tests, no browser required)
 npm run format    # format with Biome
 npm run check     # lint with Biome
 

@@ -275,6 +275,9 @@ export class TypeChecker {
 		this.globals.define("new", { kind: "builtin", name: "new" });
 		this.globals.define("copy", { kind: "builtin", name: "copy" });
 		this.globals.define("error", { kind: "builtin", name: "error" });
+		this.globals.define("min", { kind: "builtin", name: "min" });
+		this.globals.define("max", { kind: "builtin", name: "max" });
+		this.globals.define("clear", { kind: "builtin", name: "clear" });
 	}
 
 	addDefinitions(types, values) {
@@ -430,6 +433,12 @@ export class TypeChecker {
 
 	collectType(decl) {
 		const underlying = this.resolveTypeNode(decl.type, this.globals);
+		if (decl.isAlias) {
+			// type A = B — transparent alias, A and B are identical types
+			this.types.set(decl.name, underlying);
+			this.globals.define(decl.name, underlying);
+			return;
+		}
 		const named = { kind: "named", name: decl.name, underlying };
 		if (underlying.kind === "struct") {
 			underlying.name = decl.name;
@@ -703,9 +712,14 @@ export class TypeChecker {
 				const inner = new Scope(scope);
 				if (stmt.init) this.checkStmt(stmt.init, inner, returnType);
 				if (stmt.cond) {
-					const ct = this.checkExpr(stmt.cond, inner);
-					if (!isBool(ct) && !isAny(ct))
-						this.err("For condition must be bool", stmt);
+					// for range N { } — RangeExpr as condition is valid (Go 1.22 int range)
+					if (stmt.cond.kind !== "RangeExpr") {
+						const ct = this.checkExpr(stmt.cond, inner);
+						if (!isBool(ct) && !isAny(ct))
+							this.err("For condition must be bool", stmt);
+					} else {
+						this.checkExpr(stmt.cond.expr, inner);
+					}
 				}
 				if (stmt.post) this.checkStmt(stmt.post, inner, returnType);
 				this._loopDepth++;
@@ -1006,6 +1020,11 @@ export class TypeChecker {
 				return ANY;
 			case "error":
 				return ERROR;
+			case "min":
+			case "max":
+				return argTypes[0] ?? ANY;
+			case "clear":
+				return VOID;
 			default:
 				return ANY;
 		}
