@@ -199,6 +199,12 @@ export class TypeChecker {
 		return ANY; // recovery type
 	}
 
+	_reportUnused(scope, node) {
+		for (const name of scope.unusedLocals()) {
+			this.err(`'${name}' declared and not used`, node);
+		}
+	}
+
 	check(program) {
 		this._currentFile = program._filename ?? null;
 		this._currentSource = program._source ?? null;
@@ -393,6 +399,7 @@ export class TypeChecker {
 		const savedDefer = this._deferCount;
 		this._deferCount = 0;
 		this.checkBlock(decl.body, inner, returnType);
+		this._reportUnused(inner, decl);
 		if (this._deferCount > 0) decl.body._hasDefer = true;
 		this._deferCount = savedDefer;
 		decl._returnType = returnType;
@@ -417,6 +424,7 @@ export class TypeChecker {
 		const savedDefer = this._deferCount;
 		this._deferCount = 0;
 		this.checkBlock(decl.body, inner, returnType);
+		this._reportUnused(inner, decl);
 		if (this._deferCount > 0) decl.body._hasDefer = true;
 		this._deferCount = savedDefer;
 		decl._returnType = returnType;
@@ -442,7 +450,7 @@ export class TypeChecker {
 				}
 			}
 			if (!type) type = ANY;
-			for (const name of spec.names) scope.define(name, type);
+			for (const name of spec.names) scope.defineLocal(name, type);
 		}
 	}
 

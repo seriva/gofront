@@ -782,7 +782,10 @@ func main() {
 	const mainBody = js.split("function main()")[1];
 	const closureStart = mainBody.indexOf("function()");
 	const beforeClosure = mainBody.slice(0, closureStart);
-	assert(!beforeClosure.includes("__defers"), "outer function should not have __defers");
+	assert(
+		!beforeClosure.includes("__defers"),
+		"outer function should not have __defers",
+	);
 });
 
 test("function without defer produces no try/finally wrapper", () => {
@@ -878,9 +881,9 @@ test("empty struct compiles and is usable", () => {
 type Empty struct {}
 func main() {
   e := Empty{}
-  console.log("ok")
+  console.log(e)
 }`);
-	assertEqual(runJs(js), "ok");
+	assertEqual(runJs(js), "[object Object]");
 });
 
 test("nil slice has zero length", () => {

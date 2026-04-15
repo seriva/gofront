@@ -132,9 +132,15 @@ export class Scope {
 		this.parent = parent;
 		this.symbols = new Map();
 		this._consts = new Set(); // names declared as const in this scope
+		this._locals = new Set(); // names declared as local variables (var / :=)
+		this._used = new Set(); // names referenced in this scope
 	}
 	define(name, type) {
 		this.symbols.set(name, type);
+	}
+	defineLocal(name, type) {
+		this.symbols.set(name, type);
+		if (name !== "_") this._locals.add(name);
 	}
 	defineConst(name, type) {
 		this.symbols.set(name, type);
@@ -146,7 +152,10 @@ export class Scope {
 		return false;
 	}
 	lookup(name) {
-		if (this.symbols.has(name)) return this.symbols.get(name);
+		if (this.symbols.has(name)) {
+			this._used.add(name);
+			return this.symbols.get(name);
+		}
 		if (this.parent) return this.parent.lookup(name);
 		return null;
 	}
@@ -155,5 +164,13 @@ export class Scope {
 		if (this.symbols.has(name)) return this;
 		if (this.parent) return this.parent.lookupScope(name);
 		return null;
+	}
+	// Returns local variable names that were never referenced
+	unusedLocals() {
+		const unused = [];
+		for (const name of this._locals) {
+			if (!this._used.has(name)) unused.push(name);
+		}
+		return unused;
 	}
 }

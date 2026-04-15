@@ -37,8 +37,8 @@ export const statementCheckMethods = {
 				// comma-ok type assertion returns [assertedType, bool]
 				if (stmt.rhs[0]?._commaOk) {
 					const lhsNames = stmt.lhs.map((e) => e.name ?? e);
-					if (lhsNames[0] !== "_") scope.define(lhsNames[0], rhs[0]);
-					if (lhsNames[1] !== "_") scope.define(lhsNames[1], BOOL);
+					if (lhsNames[0] !== "_") scope.defineLocal(lhsNames[0], rhs[0]);
+					if (lhsNames[1] !== "_") scope.defineLocal(lhsNames[1], BOOL);
 					stmt._rhsTypes = [rhs[0], BOOL];
 					break;
 				}
@@ -50,7 +50,7 @@ export const statementCheckMethods = {
 					if (scope.symbols.has(name)) {
 						stmt.lhs[i]._redecl = true;
 					}
-					scope.define(name, rhsFlat[i] ?? ANY);
+					scope.defineLocal(name, rhsFlat[i] ?? ANY);
 				}
 				// Go requires at least one new variable in :=
 				const allRedecl = stmt.lhs.every(
@@ -125,12 +125,17 @@ export const statementCheckMethods = {
 				const ct = this.checkExpr(stmt.cond, inner);
 				if (!isBool(ct) && !isAny(ct))
 					this.err("If condition must be bool", stmt);
-				this.checkBlock(stmt.body, new Scope(inner), returnType);
+				const bodyScope = new Scope(inner);
+				this.checkBlock(stmt.body, bodyScope, returnType);
+				this._reportUnused(bodyScope, stmt);
 				if (stmt.elseBody) {
-					if (stmt.elseBody.kind === "Block")
-						this.checkBlock(stmt.elseBody, new Scope(inner), returnType);
-					else this.checkStmt(stmt.elseBody, inner, returnType);
+					if (stmt.elseBody.kind === "Block") {
+						const elseScope = new Scope(inner);
+						this.checkBlock(stmt.elseBody, elseScope, returnType);
+						this._reportUnused(elseScope, stmt);
+					} else this.checkStmt(stmt.elseBody, inner, returnType);
 				}
+				this._reportUnused(inner, stmt);
 				break;
 			}
 
@@ -149,8 +154,11 @@ export const statementCheckMethods = {
 				}
 				if (stmt.post) this.checkStmt(stmt.post, inner, returnType);
 				this._loopDepth++;
-				this.checkBlock(stmt.body, new Scope(inner), returnType);
+				const bodyScope = new Scope(inner);
+				this.checkBlock(stmt.body, bodyScope, returnType);
+				this._reportUnused(bodyScope, stmt);
 				this._loopDepth--;
+				this._reportUnused(inner, stmt);
 				break;
 			}
 
@@ -163,8 +171,10 @@ export const statementCheckMethods = {
 					const caseScope = new Scope(inner);
 					if (c.list) for (const e of c.list) this.checkExpr(e, caseScope);
 					for (const s of c.stmts) this.checkStmt(s, caseScope, returnType);
+					this._reportUnused(caseScope, stmt);
 				}
 				this._switchDepth--;
+				this._reportUnused(inner, stmt);
 				break;
 			}
 
@@ -180,9 +190,10 @@ export const statementCheckMethods = {
 							c.types?.length === 1
 								? this.resolveTypeNode(c.types[0], inner)
 								: ANY;
-						caseScope.define(stmt.assign, bindType);
+						caseScope.defineLocal(stmt.assign, bindType);
 					}
 					for (const s of c.stmts) this.checkStmt(s, caseScope, returnType);
+					this._reportUnused(caseScope, stmt);
 				}
 				this._switchDepth--;
 				break;
@@ -215,9 +226,12 @@ export const statementCheckMethods = {
 					this.err("fallthrough statement outside switch", stmt);
 				break;
 			}
-			case "Block":
-				this.checkBlock(stmt, new Scope(scope), returnType);
+			case "Block": {
+				const blockScope = new Scope(scope);
+				this.checkBlock(stmt, blockScope, returnType);
+				this._reportUnused(blockScope, stmt);
 				break;
+			}
 			default:
 				break;
 		}

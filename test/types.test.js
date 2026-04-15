@@ -274,9 +274,9 @@ test("comma-ok type assertion — success", () => {
 func main() {
   var x any = 42
   n, ok := x.(int)
-  console.log(ok)
+  console.log(n, ok)
 }`);
-	assertEqual(runJs(js), "true");
+	assertEqual(runJs(js), "42 true");
 });
 
 test("comma-ok type assertion — failure is safe", () => {
@@ -578,6 +578,7 @@ func process(x any) int {
 	case int:
 		return v + 10
 	default:
+		console.log(v)
 		return 0
 	}
 }
@@ -585,7 +586,7 @@ func main() {
 	console.log(process(5))
 	console.log(process("s"))
 }`).js;
-	assertEqual(runJs(js), "15\n0");
+	assertEqual(runJs(js), "15\ns\n0");
 });
 
 // ── []byte / []rune conversions ───────────────────────────────
@@ -972,6 +973,104 @@ func main() {
 	console.log(p.value.Y)
 }`).js;
 	assertEqual(runJs(js), "0\n0");
+});
+
+// ── Unused variable detection ─────────────────────────────────
+
+section("Unused variables");
+
+test("unused := variable is an error", () => {
+	const { errors } = compile(`package main
+func main() {
+  x := 1
+}`);
+	assertErrorContains(errors, "'x' declared and not used");
+});
+
+test("unused var declaration is an error", () => {
+	const { errors } = compile(`package main
+func main() {
+  var x int
+}`);
+	assertErrorContains(errors, "'x' declared and not used");
+});
+
+test("used variable is fine", () => {
+	const { js } = compile(`package main
+func main() {
+  x := 42
+  console.log(x)
+}`);
+	assertEqual(runJs(js), "42");
+});
+
+test("blank identifier _ is exempt from unused check", () => {
+	const { js } = compile(`package main
+func main() {
+  _, ok := 1, true
+  console.log(ok)
+}`);
+	assertEqual(runJs(js), "true");
+});
+
+test("unused variable in if-init is an error", () => {
+	const { errors } = compile(`package main
+func main() {
+  if x := 1; true {
+    console.log("yes")
+  }
+}`);
+	assertErrorContains(errors, "'x' declared and not used");
+});
+
+test("used variable in if-init is fine", () => {
+	const { js } = compile(`package main
+func main() {
+  if x := 1; x > 0 {
+    console.log("positive")
+  }
+}`);
+	assertEqual(runJs(js), "positive");
+});
+
+test("unused variable inside for body is an error", () => {
+	const { errors } = compile(`package main
+func main() {
+  for i := 0; i < 1; i++ {
+    y := 99
+  }
+}`);
+	assertErrorContains(errors, "'y' declared and not used");
+});
+
+test("function params are not flagged as unused", () => {
+	const { js } = compile(`package main
+func f(x int) {
+  console.log("ok")
+}
+func main() {
+  f(1)
+}`);
+	assertEqual(runJs(js), "ok");
+});
+
+test("unused const is not flagged", () => {
+	const { js } = compile(`package main
+func main() {
+  const c = 42
+  console.log("ok")
+}`);
+	assertEqual(runJs(js), "ok");
+});
+
+test("multiple unused variables reported", () => {
+	const { errors } = compile(`package main
+func main() {
+  a := 1
+  b := 2
+}`);
+	assertErrorContains(errors, "'a' declared and not used");
+	assertErrorContains(errors, "'b' declared and not used");
 });
 
 // ── Entry point ───────────────────────────────────────────────

@@ -119,6 +119,7 @@ export const expressionCheckMethods = {
 				const savedDefer = this._deferCount;
 				this._deferCount = 0;
 				this.checkBlock(expr.body, inner, ret);
+				this._reportUnused(inner, expr);
 				if (this._deferCount > 0) expr.body._hasDefer = true;
 				this._deferCount = savedDefer;
 				const paramTypes = expr.params.map((p) =>
