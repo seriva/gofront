@@ -53,6 +53,11 @@ export const expressionGenMethods = {
 				const idx = this.genExpr(expr.index);
 				if (expr._mapValueType && !expr._lvalue) {
 					const zero = this.zeroValueForType(expr._mapValueType);
+					// Use an IIFE to avoid double-evaluating base/key when either
+					// could be a function call or other expression with side effects.
+					if (this._hasCallExpr(expr.expr) || this._hasCallExpr(expr.index)) {
+						return `((__m, __k) => __m[__k] ?? ${zero})(${base}, ${idx})`;
+					}
 					return `(${base}[${idx}] ?? ${zero})`;
 				}
 				return `${base}[${idx}]`;
@@ -385,6 +390,16 @@ export const expressionGenMethods = {
 		if (!t) return false;
 		const base = t.kind === "named" ? t.underlying : t;
 		return base?.kind === "basic" && base.name === "int";
+	},
+
+	// Returns true if the AST node contains a function call (side-effect risk).
+	_hasCallExpr(node) {
+		if (!node || typeof node !== "object") return false;
+		if (node.kind === "CallExpr") return true;
+		for (const v of Object.values(node)) {
+			if (v && typeof v === "object" && this._hasCallExpr(v)) return true;
+		}
+		return false;
 	},
 
 	// Returns the JS zero-value literal for a basic type name, or null if not a basic type.

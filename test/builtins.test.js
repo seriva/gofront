@@ -1172,6 +1172,21 @@ func main() {
 	assertEqual(runJs(js), "0");
 });
 
+test("map access with call expr key evaluates key only once", () => {
+	const js = compile(`package main
+var count int
+func getKey() string {
+	count++
+	return "k"
+}
+func main() {
+	m := map[string]int{"k": 5}
+	v := m[getKey()]
+	console.log(v, count)
+}`).js;
+	assertEqual(runJs(js), "5 1");
+});
+
 // ── for range with only blank vars ───────────────────────────
 
 section("for range — blank variables");
