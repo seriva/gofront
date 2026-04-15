@@ -354,6 +354,26 @@ func main() {
 	assertEqual(errors.length, 0);
 });
 
+test("labeled continue outside loop is an error", () => {
+	const { errors } = compile(`package main
+func main() {
+MyLabel:
+  continue MyLabel
+}`);
+	assert(errors.length > 0, "expected error");
+	assertErrorContains(errors, "continue");
+});
+
+test("labeled break outside loop and switch is an error", () => {
+	const { errors } = compile(`package main
+func main() {
+MyLabel:
+  break MyLabel
+}`);
+	assert(errors.length > 0, "expected error");
+	assertErrorContains(errors, "break");
+});
+
 test("reassigning a const is an error", () => {
 	const { errors } = compile(`package main
 const MaxSize = 10

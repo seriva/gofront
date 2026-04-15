@@ -358,6 +358,17 @@ test("unexpected character @ throws a lex error", () => {
 	assert(threw, "expected LexError for unexpected character");
 });
 
+test("unterminated block comment throws a lex error", () => {
+	let threw = false;
+	try {
+		new Lexer("package main\n/* no closing", "test.go").tokenize();
+	} catch (e) {
+		threw = true;
+		assertContains(e.message, "Unterminated block comment");
+	}
+	assert(threw, "expected LexError for unterminated block comment");
+});
+
 section("Lexer — scientific notation and modulo");
 
 test("scientific notation 1e10 is parsed as float", () => {

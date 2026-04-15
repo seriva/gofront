@@ -169,7 +169,7 @@ export const statementGenMethods = {
 				break;
 
 			default:
-				break;
+				throw new Error(`CodeGen: unhandled statement kind '${stmt.kind}'`);
 		}
 		// Record source mapping: first output line this statement produced
 		if (srcLine != null && this.out.length > _line0) {

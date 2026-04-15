@@ -217,16 +217,28 @@ export class Lexer {
 				while (this.pos < this.src.length && this.peek() !== "\n")
 					this.advance();
 			} else if (ch === "/" && this.peek(1) === "*") {
+				const startLine = this.line,
+					startCol = this.col;
 				this.advance();
 				this.advance();
+				let closed = false;
 				while (this.pos < this.src.length) {
 					if (this.peek() === "*" && this.peek(1) === "/") {
 						this.advance();
 						this.advance();
+						closed = true;
 						break;
 					}
 					this.advance();
 				}
+				if (!closed)
+					throw new LexError(
+						"Unterminated block comment",
+						startLine,
+						startCol,
+						this.filename,
+						this.src,
+					);
 			} else {
 				break;
 			}

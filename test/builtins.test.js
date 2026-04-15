@@ -1053,6 +1053,19 @@ func main() {
 	assertEqual(runJs(js), "3\n3\n-3");
 });
 
+test("type alias int division truncates toward zero", () => {
+	const js = compile(`package main
+type MyInt = int
+func main() {
+	var a MyInt = 7
+	var b MyInt = 2
+	console.log(a / b)
+	var c MyInt = -7
+	console.log(c / b)
+}`).js;
+	assertEqual(runJs(js), "3\n-3");
+});
+
 test("float64 / float64 is not truncated", () => {
 	const js = compile(`package main
 func main() {

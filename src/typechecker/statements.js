@@ -213,7 +213,6 @@ export const statementCheckMethods = {
 
 			case "BranchStmt": {
 				const kw = stmt.keyword;
-				if (stmt.label) break; // labeled branch — target checked by JS
 				if (kw === "continue" && this._loopDepth === 0)
 					this.err("continue statement outside for loop", stmt);
 				else if (

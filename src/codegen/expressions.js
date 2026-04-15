@@ -382,7 +382,9 @@ export const expressionGenMethods = {
 	},
 
 	isIntType(t) {
-		return t?.kind === "basic" && t.name === "int";
+		if (!t) return false;
+		const base = t.kind === "named" ? t.underlying : t;
+		return base?.kind === "basic" && base.name === "int";
 	},
 
 	// Returns the JS zero-value literal for a basic type name, or null if not a basic type.
