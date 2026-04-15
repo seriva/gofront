@@ -303,7 +303,7 @@ export class CodeGen {
 
 	// Emit a function body, wrapping in try/catch/finally for defer if needed.
 	_genBody(body) {
-		if (!this._hasDefer(body)) {
+		if (!body._hasDefer) {
 			this.genBlock(body);
 			return;
 		}
@@ -331,27 +331,6 @@ export class CodeGen {
 					: `return [${vars.join(", ")}];`,
 			);
 		}
-	}
-
-	// Recursively check if a block (or nested blocks) contains any DeferStmt.
-	_hasDefer(block) {
-		if (!block?.stmts) return false;
-		for (const stmt of block.stmts) {
-			if (stmt.kind === "DeferStmt") return true;
-			if (stmt.kind === "Block" && this._hasDefer(stmt)) return true;
-			if (
-				stmt.kind === "IfStmt" &&
-				(this._hasDefer(stmt.body) || this._hasDefer(stmt.elseBody))
-			)
-				return true;
-			if (stmt.kind === "ForStmt" && this._hasDefer(stmt.body)) return true;
-			if (
-				stmt.kind === "SwitchStmt" &&
-				stmt.cases.some((c) => this._hasDefer({ stmts: c.stmts }))
-			)
-				return true;
-		}
-		return false;
 	}
 
 	// ── Variable / const declarations ────────────────────────────

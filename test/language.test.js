@@ -765,6 +765,39 @@ func main() {
 	assertEqual(runJs(js), "case-end\ndeferred-in-block-in-switch");
 });
 
+test("defer in closure does not add try/finally to parent", () => {
+	// The _hasDefer flag must be scoped to each function body.
+	// A defer inside a closure should NOT cause the outer function to emit try/finally.
+	const { js } = compile(`package main
+func main() {
+  fn := func() {
+    defer console.log("inner defer")
+    console.log("inner body")
+  }
+  fn()
+  console.log("outer done")
+}`);
+	assertEqual(runJs(js), "inner body\ninner defer\nouter done");
+	// Outer function (main) should NOT have __defers — only the closure should
+	const mainBody = js.split("function main()")[1];
+	const closureStart = mainBody.indexOf("function()");
+	const beforeClosure = mainBody.slice(0, closureStart);
+	assert(!beforeClosure.includes("__defers"), "outer function should not have __defers");
+});
+
+test("function without defer produces no try/finally wrapper", () => {
+	const { js } = compile(`package main
+func add(a int, b int) int {
+  return a + b
+}
+func main() {
+  console.log(add(1, 2))
+}`);
+	assertEqual(runJs(js), "3");
+	assert(!js.includes("__defers"), "output should not contain __defers");
+	assert(!js.includes("try {"), "output should not contain try/finally");
+});
+
 test("error() creates an error value", () => {
 	const { js } = compile(`package main
 func divide(a int, b int) (int, error) {

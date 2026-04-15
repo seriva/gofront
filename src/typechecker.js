@@ -41,6 +41,7 @@ export class TypeChecker {
 		this._currentSource = null;
 		this._loopDepth = 0; // for break/continue validation
 		this._switchDepth = 0; // for break/fallthrough validation
+		this._deferCount = 0; // tracks defer usage in current function body
 		this._setupGlobals();
 	}
 
@@ -389,7 +390,11 @@ export class TypeChecker {
 			outer,
 		);
 		if (hasNamedReturns && returnType) returnType._hasNamedReturns = true;
+		const savedDefer = this._deferCount;
+		this._deferCount = 0;
 		this.checkBlock(decl.body, inner, returnType);
+		if (this._deferCount > 0) decl.body._hasDefer = true;
+		this._deferCount = savedDefer;
 		decl._returnType = returnType;
 	}
 
@@ -409,7 +414,11 @@ export class TypeChecker {
 			outer,
 		);
 		if (hasNamedReturns && returnType) returnType._hasNamedReturns = true;
+		const savedDefer = this._deferCount;
+		this._deferCount = 0;
 		this.checkBlock(decl.body, inner, returnType);
+		if (this._deferCount > 0) decl.body._hasDefer = true;
+		this._deferCount = savedDefer;
 		decl._returnType = returnType;
 	}
 

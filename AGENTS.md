@@ -23,7 +23,7 @@ packages. `src/dts-parser.js` parses TypeScript `.d.ts` declaration files.
 ## Commands
 
 ```sh
-npm test          # run the full test suite (474 tests, no browser required)
+npm test          # run the full test suite (482 tests, no browser required)
 npm run format    # format with Biome
 npm run check     # lint with Biome
 
@@ -43,9 +43,21 @@ node src/index.js init [dir]             # scaffold new project
 ```
 src/
   lexer.js          tokenizer — Go-style semicolon insertion
-  parser.js         recursive-descent parser → AST
-  typechecker.js    type inference, interface satisfaction, error reporting
-  codegen.js        AST → JavaScript (+ optional source maps)
+  parser.js         recursive-descent parser → AST (core + declarations)
+  parser/
+    types.js        type expression parsing (slice, map, struct, interface)
+    statements.js   block, control flow, simple statements
+    expressions.js  operator precedence, unary, postfix, primary, literals
+  typechecker.js    type inference, interface satisfaction, error reporting (core)
+  typechecker/
+    types.js        shared type constants, predicates, Scope, TypeCheckError
+    statements.js   checkBlock, checkStmt
+    expressions.js  checkExpr, checkCall, checkBuiltin, checkCompositeLit
+  codegen.js        AST → JavaScript (core + struct/function generation)
+  codegen/
+    source-map.js   VLQ encoder and source map builder
+    statements.js   genBlock, genStmt, genFor, genSwitch, etc.
+    expressions.js  genExpr, genCall, genCompositeLit, helpers
   compiler.js       multi-file / directory compilation entry point
   resolver.js       npm and local package type resolution
   dts-parser.js     TypeScript .d.ts loader
@@ -89,9 +101,13 @@ example/
 
 1. **Lexer** (`src/lexer.js`) — add any new keywords or token types.
 2. **Parser** (`src/parser.js`) — add grammar rules; return a new AST node kind.
-3. **TypeChecker** (`src/typechecker.js`) — handle the new node in `_checkExpr` or
-   `checkStmt`; return the correct type.
-4. **CodeGen** (`src/codegen.js`) — handle the new node in `genExpr` or `genStmt`;
+   Expression parsing lives in `src/parser/expressions.js`, statements in
+   `src/parser/statements.js`, type expressions in `src/parser/types.js`.
+3. **TypeChecker** (`src/typechecker.js`) — handle the new node in `_checkExpr`
+   (`src/typechecker/expressions.js`) or `checkStmt`
+   (`src/typechecker/statements.js`); return the correct type.
+4. **CodeGen** (`src/codegen.js`) — handle the new node in `genExpr`
+   (`src/codegen/expressions.js`) or `genStmt` (`src/codegen/statements.js`);
    throw on unhandled kinds so failures are loud.
 5. **Tests** — add at least one positive test (compiles + runs correctly) and one
    negative test (type error produces the expected message) to the most relevant

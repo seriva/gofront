@@ -434,4 +434,4 @@ These features exist but behave differently due to fundamental JS/Go runtime dif
 npm test
 ```
 
-474 tests covering language features, type errors, edge cases, DOM (jsdom), external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, and both example apps.
+482 tests covering language features, type errors, edge cases, DOM (jsdom), external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, map iteration order, integer overflow semantics, and both example apps.

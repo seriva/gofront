@@ -116,7 +116,11 @@ export const expressionCheckMethods = {
 				const ret = expr.returnType
 					? this.resolveTypeNode(expr.returnType, scope)
 					: VOID;
+				const savedDefer = this._deferCount;
+				this._deferCount = 0;
 				this.checkBlock(expr.body, inner, ret);
+				if (this._deferCount > 0) expr.body._hasDefer = true;
+				this._deferCount = savedDefer;
 				const paramTypes = expr.params.map((p) =>
 					p.type ? this.resolveTypeNode(p.type, scope) : ANY,
 				);

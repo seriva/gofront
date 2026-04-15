@@ -192,6 +192,7 @@ export const statementCheckMethods = {
 				if (stmt.call.kind !== "CallExpr")
 					this.err("defer requires a function call", stmt.call);
 				this.checkExpr(stmt.call, scope);
+				this._deferCount++;
 				break;
 			}
 
