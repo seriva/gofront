@@ -357,6 +357,10 @@ export const expressionParserMethods = {
 			return this.parseCompositeLit(typeExpr);
 		}
 
+		if (t.type === T.CHAN) {
+			this.err("channels are not supported in GoFront");
+		}
+
 		this.err(`Unexpected token in expression: '${t.value}'`);
 	},
 

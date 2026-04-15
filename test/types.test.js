@@ -1093,6 +1093,14 @@ func main() {
 	assertErrorContains(errors, "'b' declared and not used");
 });
 
+test("circular type alias does not crash", () => {
+	const { errors } = compile(`package main
+type A = B
+type B = A
+func main() {}`);
+	assert(errors.length > 0, "expected error for circular type alias");
+});
+
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit(summarize() > 0 ? 1 : 0);

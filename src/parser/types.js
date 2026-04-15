@@ -19,6 +19,9 @@ export const typeParserMethods = {
 			case T.STAR:
 				this.advance();
 				return { kind: "PointerType", base: this.parseType() };
+			case T.CHAN:
+				this.err("channels are not supported in GoFront");
+				break;
 			case T.IDENT:
 			case "int":
 			case "float64":

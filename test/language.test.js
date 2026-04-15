@@ -1662,6 +1662,69 @@ func main() {
 	assertEqual(runJs(js), "3 4");
 });
 
+// ── Unimplemented Go features ─────────────────────────────────
+
+section("Unimplemented Go features");
+
+test("go statement produces a clear error", () => {
+	let threw = false;
+	try {
+		compile(`package main
+func main() {
+	go doSomething()
+}`);
+	} catch (e) {
+		threw = true;
+		assertContains(e.message, "goroutines are not supported");
+	}
+	assert(threw, "expected parse error for go statement");
+});
+
+test("select statement produces a clear error", () => {
+	let threw = false;
+	try {
+		compile(`package main
+func main() {
+	select {
+	}
+}`);
+	} catch (e) {
+		threw = true;
+		assertContains(e.message, "select statement is not supported");
+	}
+	assert(threw, "expected parse error for select statement");
+});
+
+test("chan type produces a clear error", () => {
+	let threw = false;
+	try {
+		compile(`package main
+func main() {
+	var ch chan int
+	_ = ch
+}`);
+	} catch (e) {
+		threw = true;
+		assertContains(e.message, "channels are not supported");
+	}
+	assert(threw, "expected parse error for chan type");
+});
+
+test("make(chan int) produces a clear error", () => {
+	let threw = false;
+	try {
+		compile(`package main
+func main() {
+	ch := make(chan int)
+	_ = ch
+}`);
+	} catch (e) {
+		threw = true;
+		assertContains(e.message, "channels are not supported");
+	}
+	assert(threw, "expected parse error for chan in make");
+});
+
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit(summarize() > 0 ? 1 : 0);

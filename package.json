@@ -21,9 +21,12 @@
 		"type-safe"
 	],
 	"engines": {
-		"node": ">=25"
+		"node": ">=20"
 	},
 	"type": "module",
+	"files": [
+		"src/"
+	],
 	"bin": {
 		"gofront": "./src/index.js"
 	},

@@ -35,6 +35,9 @@ export const T = {
 	DEFER: "defer",
 	ASYNC: "async",
 	AWAIT: "await",
+	GO: "go",
+	CHAN: "chan",
+	SELECT: "select",
 
 	// Operators
 	PLUS: "+",
@@ -136,6 +139,9 @@ const KEYWORDS = new Set([
 	"defer",
 	"async",
 	"await",
+	"go",
+	"chan",
+	"select",
 ]);
 
 export class Token {
