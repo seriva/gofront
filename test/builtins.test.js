@@ -67,6 +67,94 @@ func main() {
 	assertEqual(runJs(js), "a 1\nb 2\nc 3");
 });
 
+test("map iteration order is preserved after insertion and deletion", () => {
+	// JS Object.entries() guarantees insertion order for string keys.
+	// Verify order is maintained even after deleting and re-adding keys.
+	const { js, errors } = compile(`package main
+func main() {
+  m := map[string]int{"a": 1, "b": 2, "c": 3, "d": 4}
+  delete(m, "b")
+  m["e"] = 5
+  for k, v := range m {
+    console.log(k, v)
+  }
+}`);
+	assertEqual(errors.length, 0);
+	// "b" removed; remaining keys stay in original order, "e" appended last
+	assertEqual(runJs(js), "a 1\nc 3\nd 4\ne 5");
+});
+
+test("map iteration order with integer keys uses insertion order", () => {
+	// In Go, map iteration is randomised. In GoFront, JS objects with small
+	// integer-like string keys still follow insertion order via Object.entries().
+	const { js, errors } = compile(`package main
+func main() {
+  m := map[string]int{}
+  m["z"] = 1
+  m["a"] = 2
+  m["m"] = 3
+  for k, v := range m {
+    console.log(k, v)
+  }
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "z 1\na 2\nm 3");
+});
+
+// ── Integer overflow / float64 semantics ─────────────────────
+// Go ints wrap on overflow; GoFront compiles to JS numbers (IEEE 754 float64).
+// These tests document the semantic difference.
+
+test("large integers beyond 32-bit range work (no wrapping)", () => {
+	// In Go, int32 would wrap at 2^31. GoFront uses JS float64, so large
+	// values are representable without wrapping.
+	const { js, errors } = compile(`package main
+func main() {
+  x := 2147483647
+  x = x + 1
+  console.log(x)
+}`);
+	assertEqual(errors.length, 0);
+	// Go int32 would wrap to -2147483648; GoFront produces 2147483648
+	assertEqual(runJs(js), "2147483648");
+});
+
+test("integer arithmetic stays precise up to 2^53", () => {
+	// JS float64 has 53 bits of integer precision (Number.MAX_SAFE_INTEGER).
+	const { js, errors } = compile(`package main
+func main() {
+  a := 9007199254740992
+  b := 9007199254740993
+  console.log(a == b)
+}`);
+	assertEqual(errors.length, 0);
+	// These two values are indistinguishable in float64 — precision loss
+	assertEqual(runJs(js), "true");
+});
+
+test("integer division truncates toward zero", () => {
+	// Both Go and GoFront truncate toward zero, but GoFront uses Math.trunc().
+	const { js, errors } = compile(`package main
+func main() {
+  console.log(7 / 2)
+  console.log(-7 / 2)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "3\n-3");
+});
+
+test("float64 special values (Inf, NaN-like behaviour)", () => {
+	// Go float64 division by zero is +Inf; GoFront inherits JS Infinity.
+	const { js, errors } = compile(`package main
+func main() {
+  a := 1.0
+  b := 0.0
+  console.log(a / b)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "Infinity");
+});
+
 test("cap() on slice", () => {
 	// GoFront compiles to JS arrays which have no separate capacity concept;
 	// cap() returns length (the only meaningful value at runtime).
