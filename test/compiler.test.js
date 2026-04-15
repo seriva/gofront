@@ -213,16 +213,16 @@ test("exportedSymbols contains package functions", () => {
 // defer & error
 // ═════════════════════════════════════════════════════════════
 
-section("Example app (todo)");
+section("Example app — simple (todo)");
 
-test("example dir compiles without errors", () => {
-	const exampleDir = join(ROOT, "example", "src");
+test("simple example compiles without errors", () => {
+	const exampleDir = join(ROOT, "example", "simple", "src");
 	const result = compileDir(exampleDir);
 	assert(result.js && result.js.length > 0, "expected non-empty JS output");
 });
 
-test("example exports expected functions", () => {
-	const exampleDir = join(ROOT, "example", "src");
+test("simple example exports expected functions", () => {
+	const exampleDir = join(ROOT, "example", "simple", "src");
 	const result = compileDir(exampleDir);
 	assert(result.exportedSymbols.has("main"), "expected main to be exported");
 	assert(
@@ -239,8 +239,34 @@ test("example exports expected functions", () => {
 	);
 });
 
+section("Example app — reactive (todo)");
+
+test("reactive example compiles without errors", () => {
+	const exampleDir = join(ROOT, "example", "reactive", "src");
+	const result = compileDir(exampleDir);
+	assert(result.js && result.js.length > 0, "expected non-empty JS output");
+});
+
+test("reactive example exports expected functions", () => {
+	const exampleDir = join(ROOT, "example", "reactive", "src");
+	const result = compileDir(exampleDir);
+	assert(result.exportedSymbols.has("main"), "expected main to be exported");
+	assert(
+		result.exportedSymbols.has("initStore"),
+		"expected initStore to be exported",
+	);
+	assert(
+		result.exportedSymbols.has("createAppShell"),
+		"expected createAppShell to be exported",
+	);
+	assert(
+		result.exportedSymbols.has("injectStyles"),
+		"expected injectStyles to be exported",
+	);
+});
+
 test("example store logic runs correctly (addTodo / stats)", () => {
-	const exampleDir = join(ROOT, "example", "src");
+	const exampleDir = join(ROOT, "example", "simple", "src");
 	compileDir(exampleDir);
 	// Inject a test driver after the compiled code, bypassing DOM calls
 	const driver = `
@@ -292,11 +318,16 @@ func main() {
 	assertEqual(runJs(js), "true\ntrue\ntodo text cannot be empty");
 });
 
-test("utils.Plural formats correctly", () => {
-	const utilsDir = join(ROOT, "example", "src", "utils");
+test("simple utils.Plural formats correctly", () => {
+	const utilsDir = join(ROOT, "example", "simple", "src", "utils");
 	const result = compileDir(utilsDir);
 	assert(result.js.includes("Plural"), "expected Plural in output");
-	assert(result.js.includes("Clamp"), "expected Clamp in output");
+});
+
+test("reactive utils.Plural formats correctly", () => {
+	const utilsDir = join(ROOT, "example", "reactive", "src", "utils");
+	const result = compileDir(utilsDir);
+	assert(result.js.includes("Plural"), "expected Plural in output");
 });
 
 // ═════════════════════════════════════════════════════════════

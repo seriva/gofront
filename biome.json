@@ -13,7 +13,7 @@
 			"!docs",
 			"!.claude",
 			"!node_modules",
-			"!example/app.js",
+			"!example/*/app.js",
 			"!coverage"
 		]
 	},
@@ -27,6 +27,9 @@
 			"recommended": true,
 			"complexity": {
 				"noStaticOnlyClass": "off"
+			},
+			"suspicious": {
+				"noExplicitAny": "off"
 			}
 		}
 	},

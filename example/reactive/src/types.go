@@ -37,9 +37,23 @@ type Todo struct {
     priority int    `json:"priority"`
 }
 
-func (t Todo) priorityClass() string {
-    if t.priority == PriorityHigh {
-        return "todo-item high"
-    }
-    return "todo-item"
+// ── Stats ─────────────────────────────────────────────────────
+
+type Stats struct {
+    remaining int
+    completed int
+}
+
+// ── AppElements ───────────────────────────────────────────────
+// References to key DOM elements, passed between setup functions
+// so nothing relies on getElementById after mount.
+
+type AppElements struct {
+    input       any
+    addBtn      any
+    priorityBtn any
+    list        any
+    footer      any
+    badge       any
+    syncStatus  any
 }

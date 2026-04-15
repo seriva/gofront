@@ -179,36 +179,71 @@ enforces correctness; JavaScript doesn't need to know.
 
 ---
 
-## Example — Todo App
+## Examples — Todo App
 
-The only example is a full todo web app in `example/`, split across a
-sub-package and four source files to showcase multi-file compilation.
+There are two example apps — both implement the same todo app to show different aspects
+of GoFront.
+
+### Simple (vanilla DOM)
+
+The default example. Zero dependencies, clean 1:1 compiled JS output. Showcases GoFront's
+core language features with straightforward DOM manipulation.
 
 ```
-example/
+example/simple/
   src/
-    utils/        ← sub-package: Plural(), Max(), Clamp() — pure utilities
-      utils.go
-    types.go      ← Todo struct · FilterMode & Priority consts (iota) · filterLabel()
-    store.go      ← state management: add/toggle/remove/clear · visibleTodos()
-                     · stats() with named returns · statusLine() via utils.Plural
-    render.go     ← renderTodo() · renderFilterBar() · renderFooter() · render()
-    main.go       ← priority-toggle state · submitInput() · event wiring · seed data
-  index.html      ← HTML + CSS, loads app.js as an ES module
-  app.js          ← generated output  (produced by build)
-  build.sh        ← build script
+    types.go      ← Todo struct · FilterAll/Active/Completed iota · Priority iota
+    store.go      ← state as plain variables · add/toggle/remove/clear · visibleTodos()
+                     · stats() with named returns · defer/recover · async persistence
+    render.go     ← render() updates DOM via innerHTML · renderTodo() · renderFilterBar()
+    styles.go     ← injectStyles() creates <style> element with all CSS
+    main.go       ← createApp() builds DOM shell · setupEvents() · event delegation
+    utils/
+      utils.go    ← Plural() — cross-package import demo
+    browser.d.ts  ← minimal external type declarations (sleep)
+  index.html      ← bare HTML shell, loads app.js as ES module
+  app.js          ← generated output
 ```
 
-**Features demonstrated:** structs & methods, iota constants, named return values,
-closures, slices, maps, `for range`, `switch`, cross-package imports, multi-file
-same-package compilation, DOM APIs.
+### Reactive (signals + d.ts imports)
 
-**Build and run:**
+Same app rebuilt with [reactive.js](https://github.com/seriva/microtastic), a tiny
+signals-based reactive framework. Demonstrates how GoFront integrates with external JS
+libraries via `.d.ts` type declarations — the GoFront code uses typed `Signal` values,
+`Signals.create()`, `Signals.computed()`, `Signals.batch()`, and `Reactive.bind()`,
+all described in a hand-written `browser.d.ts` shim.
+
+```
+example/reactive/
+  src/
+    types.go      ← Todo, Stats, AppElements structs
+    store.go      ← Signal-typed state · Signals.create/computed/batch
+    render.go     ← createAppShell() returns AppElements · ctx.computed/ctx.bind
+    styles.go     ← injectStyles()
+    main.go       ← wires everything together
+    utils/
+      utils.go    ← Plural()
+    browser.d.ts  ← Signal interface · Signals/Reactive/ComponentContext namespaces
+  reactive.js     ← signals framework (from microtastic)
+  index.html      ← loads reactive.js + app.js
+  app.js          ← generated output
+```
+
+### Features demonstrated
+
+Both apps cover: structs & methods, iota constants, named return values, closures,
+slices, `for range`, `switch`, cross-package imports, multi-file same-package compilation,
+`async`/`await`, `defer`/`recover`, localStorage persistence, and DOM APIs.
+
+The reactive example additionally demonstrates: external `.d.ts` type imports,
+`declare namespace` patterns for typing JS libraries, and reactive UI updates via signals.
+
+### Build and run
 
 ```sh
-sh example/build.sh
-# → writes example/app.js
-# open example/index.html in a browser
+npm run build:simple      # → example/simple/app.js
+npm run build:reactive    # → example/reactive/app.js
+# open the respective index.html in a browser
 ```
 
 ---
@@ -399,4 +434,4 @@ These features exist but behave differently due to fundamental JS/Go runtime dif
 npm test
 ```
 
-471 tests covering language features, type errors, edge cases, DOM (jsdom), external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, and the example app.
+474 tests covering language features, type errors, edge cases, DOM (jsdom), external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, and both example apps.

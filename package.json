@@ -28,7 +28,8 @@
 		"gofront": "./src/index.js"
 	},
 	"scripts": {
-		"build": "node src/index.js",
+		"build:simple": "node src/index.js example/simple/src -o example/simple/app.js",
+		"build:reactive": "node src/index.js example/reactive/src -o example/reactive/app.js",
 		"test": "node test/run.js",
 		"format": "biome format --write .",
 		"check": "biome check ."
