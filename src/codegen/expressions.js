@@ -1,5 +1,21 @@
 // CodeGen expression methods and helpers — installed as a mixin on CodeGen.prototype.
 
+const INT_TYPE_NAMES = new Set([
+	"int",
+	"uint",
+	"int8",
+	"int16",
+	"int32",
+	"int64",
+	"uint8",
+	"uint16",
+	"uint32",
+	"uint64",
+	"uintptr",
+	"byte",
+	"rune",
+]);
+
 export const expressionGenMethods = {
 	genExpr(expr) {
 		switch (expr.kind) {
@@ -389,7 +405,7 @@ export const expressionGenMethods = {
 	isIntType(t) {
 		if (!t) return false;
 		const base = t.kind === "named" ? t.underlying : t;
-		return base?.kind === "basic" && base.name === "int";
+		return base?.kind === "basic" && INT_TYPE_NAMES.has(base.name);
 	},
 
 	// Returns true if the AST node contains a function call (side-effect risk).
