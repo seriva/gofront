@@ -215,7 +215,10 @@ export const expressionCheckMethods = {
 					return { kind: "tuple", types: [INT, resolved.elem ?? ANY] };
 				}
 				if (resolved?.kind === "map") {
-					return { kind: "tuple", types: [resolved.key ?? ANY, resolved.value ?? ANY] };
+					return {
+						kind: "tuple",
+						types: [resolved.key ?? ANY, resolved.value ?? ANY],
+					};
 				}
 				// integer range or unknown — return single-element tuple
 				return { kind: "tuple", types: [collType] };
