@@ -41,6 +41,7 @@ export class TypeChecker {
 		this._currentSource = null;
 		this._loopDepth = 0; // for break/continue validation
 		this._switchDepth = 0; // for break/fallthrough validation
+		this._typeSwitchDepth = 0; // for rejecting fallthrough in type switch
 		this._deferCount = 0; // tracks defer usage in current function body
 		this._setupGlobals();
 	}

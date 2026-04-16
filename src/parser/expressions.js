@@ -22,6 +22,7 @@ const PREC = {
 	[T.LSHIFT]: 5,
 	[T.RSHIFT]: 5,
 	[T.AMP]: 5,
+	[T.AND_NOT]: 5,
 };
 
 const TYPE_KEYWORDS = new Set([

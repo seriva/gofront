@@ -71,6 +71,7 @@ export const T = {
 	AMP: "&",
 	PIPE: "|",
 	CARET: "^",
+	AND_NOT: "&^",
 	LSHIFT: "<<",
 	RSHIFT: ">>",
 	ELLIPSIS: "...",
@@ -361,20 +362,58 @@ export class Lexer {
 	readNumber() {
 		let n = "";
 		let isFloat = false;
-		while (this.pos < this.src.length && /[0-9]/.test(this.peek()))
-			n += this.advance();
+
+		// Check for prefix: 0b, 0o, 0x
+		const first = this.advance();
+		n += first;
+		if (first === "0") {
+			const p = this.peek();
+			if (p === "b" || p === "B") {
+				n += this.advance();
+				while (this.pos < this.src.length && /[01_]/.test(this.peek())) {
+					const ch = this.advance();
+					if (ch !== "_") n += ch;
+				}
+				return { n, isFloat: false };
+			}
+			if (p === "o" || p === "O") {
+				n += this.advance();
+				while (this.pos < this.src.length && /[0-7_]/.test(this.peek())) {
+					const ch = this.advance();
+					if (ch !== "_") n += ch;
+				}
+				return { n, isFloat: false };
+			}
+			if (p === "x" || p === "X") {
+				n += this.advance();
+				while (this.pos < this.src.length && /[0-9a-fA-F_]/.test(this.peek())) {
+					const ch = this.advance();
+					if (ch !== "_") n += ch;
+				}
+				return { n, isFloat: false };
+			}
+		}
+
+		while (this.pos < this.src.length && /[0-9_]/.test(this.peek())) {
+			const ch = this.advance();
+			if (ch !== "_") n += ch;
+		}
 		if (this.peek() === "." && /[0-9]/.test(this.peek(1))) {
 			isFloat = true;
 			n += this.advance();
-			while (this.pos < this.src.length && /[0-9]/.test(this.peek()))
-				n += this.advance();
+			while (this.pos < this.src.length && /[0-9_]/.test(this.peek())) {
+				const ch = this.advance();
+				if (ch !== "_") n += ch;
+			}
 		}
 		if (this.peek() === "e" || this.peek() === "E") {
 			isFloat = true;
 			n += this.advance();
 			if (this.peek() === "+" || this.peek() === "-") n += this.advance();
-			while (this.pos < this.src.length && /[0-9]/.test(this.peek()))
-				n += this.advance();
+			while (this.pos < this.src.length && /[0-9_]/.test(this.peek())) {
+				const ch = this.advance();
+				if (ch !== "_") n += ch;
+			}
 		}
 		return { n, isFloat };
 	}
@@ -492,6 +531,7 @@ export class Lexer {
 					break;
 				case "&":
 					if (this.match("&")) this.push(T.AND, "&&", l, c);
+					else if (this.match("^")) this.push(T.AND_NOT, "&^", l, c);
 					else if (this.match("=")) this.push(T.AMP_ASSIGN, "&=", l, c);
 					else this.push(T.AMP, "&", l, c);
 					break;

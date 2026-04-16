@@ -44,6 +44,10 @@ export const expressionGenMethods = {
 				) {
 					return `Math.trunc(${l} / ${r})`;
 				}
+				// Go &^ (bit clear / AND NOT) → JS & ~
+				if (expr.op === "&^") {
+					return `${l} & ~${r}`;
+				}
 				// Go == and != are strict — map to JS === / !==
 				const op =
 					expr.op === "==" ? "===" : expr.op === "!=" ? "!==" : expr.op;

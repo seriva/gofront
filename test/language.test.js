@@ -1725,6 +1725,128 @@ func main() {
 	assert(threw, "expected parse error for chan in make");
 });
 
+// ═════════════════════════════════════════════════════════════
+// Bit clear operator &^
+// ═════════════════════════════════════════════════════════════
+
+section("Bit clear operator &^");
+
+test("&^ clears bits", () => {
+	const { js } = compile(`package main
+func main() {
+	a := 0xFF
+	b := a &^ 0x0F
+	println(b)
+}`);
+	const out = runJs(js);
+	assertEqual(out.trim(), "240");
+});
+
+test("&^ in expression", () => {
+	const { js } = compile(`package main
+func main() {
+	x := 6 &^ 3
+	println(x)
+}`);
+	const out = runJs(js);
+	assertEqual(out.trim(), "4");
+});
+
+// ═════════════════════════════════════════════════════════════
+// Numeric literal formats
+// ═════════════════════════════════════════════════════════════
+
+section("Numeric literal formats");
+
+test("numeric separator 1_000_000", () => {
+	const { js } = compile(`package main
+func main() {
+	n := 1_000_000
+	println(n)
+}`);
+	const out = runJs(js);
+	assertEqual(out.trim(), "1000000");
+});
+
+test("binary literal 0b1010", () => {
+	const { js } = compile(`package main
+func main() {
+	n := 0b1010
+	println(n)
+}`);
+	const out = runJs(js);
+	assertEqual(out.trim(), "10");
+});
+
+test("octal literal 0o777", () => {
+	const { js } = compile(`package main
+func main() {
+	n := 0o777
+	println(n)
+}`);
+	const out = runJs(js);
+	assertEqual(out.trim(), "511");
+});
+
+test("hex literal 0xFF", () => {
+	const { js } = compile(`package main
+func main() {
+	n := 0xFF
+	println(n)
+}`);
+	const out = runJs(js);
+	assertEqual(out.trim(), "255");
+});
+
+test("binary with separators 0b1111_0000", () => {
+	const { js } = compile(`package main
+func main() {
+	n := 0b1111_0000
+	println(n)
+}`);
+	const out = runJs(js);
+	assertEqual(out.trim(), "240");
+});
+
+// ═════════════════════════════════════════════════════════════
+// Fallthrough in type switch
+// ═════════════════════════════════════════════════════════════
+
+section("Fallthrough in type switch");
+
+test("fallthrough in type switch is a type error", () => {
+	const { errors } = compile(`package main
+func main() {
+	var x any = 42
+	switch x.(type) {
+	case int:
+		println("int")
+		fallthrough
+	case string:
+		println("string")
+	}
+}`);
+	assertErrorContains(errors, "cannot fallthrough in type switch");
+});
+
+test("fallthrough in regular switch is still allowed", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	x := 1
+	switch x {
+	case 1:
+		println("one")
+		fallthrough
+	case 2:
+		println("two")
+	}
+}`);
+	assertEqual(errors.length, 0);
+	const out = runJs(js);
+	assertContains(out, "one");
+	assertContains(out, "two");
+});
+
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit(summarize() > 0 ? 1 : 0);

@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Bit clear operator `&^` (AND NOT) — compiles to `& ~` in JavaScript
+- Numeric literal separators (`1_000_000`, `0xFF_FF`) — underscores stripped at lex time
+- Binary literals (`0b1010`, `0B1010`) and explicit octal literals (`0o777`, `0O777`)
+- `fallthrough` inside type switch is now a compile error (matching Go spec)
 - Unused variable detection — local variables declared with `:=` or `var` that are never referenced are now type errors (matching Go semantics). Function parameters, constants, and `_` are exempt.
 - `go`, `chan`, `select` are now recognized keywords — using goroutines, channels, or select produces clear parse errors (e.g. "goroutines are not supported in GoFront") instead of confusing "Undefined" messages
 - Split `parser.js` (1,237 lines) into `parser/types.js`, `parser/statements.js`, and `parser/expressions.js` sub-modules using the mixin pattern

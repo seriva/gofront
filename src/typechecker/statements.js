@@ -182,6 +182,7 @@ export const statementCheckMethods = {
 				const inner = new Scope(scope);
 				this.checkExpr(stmt.expr, inner);
 				this._switchDepth++;
+				this._typeSwitchDepth++;
 				for (const c of stmt.cases) {
 					const caseScope = new Scope(inner);
 					if (stmt.assign) {
@@ -195,6 +196,7 @@ export const statementCheckMethods = {
 					for (const s of c.stmts) this.checkStmt(s, caseScope, returnType);
 					this._reportUnused(caseScope, stmt);
 				}
+				this._typeSwitchDepth--;
 				this._switchDepth--;
 				break;
 			}
@@ -223,6 +225,8 @@ export const statementCheckMethods = {
 					this.err("break statement outside for loop or switch", stmt);
 				else if (kw === "fallthrough" && this._switchDepth === 0)
 					this.err("fallthrough statement outside switch", stmt);
+				else if (kw === "fallthrough" && this._typeSwitchDepth > 0)
+					this.err("cannot fallthrough in type switch", stmt);
 				break;
 			}
 			case "Block": {
