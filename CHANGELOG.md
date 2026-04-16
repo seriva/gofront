@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-04-16
+
 ### Added
 - Built-in `strings` package — `Contains`, `HasPrefix`, `HasSuffix`, `Index`, `LastIndex`, `Count`, `Repeat`, `Replace`, `ReplaceAll`, `ToUpper`, `ToLower`, `TrimSpace`, `Trim`, `TrimPrefix`, `TrimSuffix`, `TrimLeft`, `TrimRight`, `Split`, `Join`, `EqualFold`
 - Built-in `strconv` package — `Itoa`, `Atoi`, `FormatBool`, `FormatInt`, `FormatFloat`, `ParseFloat`, `ParseInt`, `ParseBool` (multi-return with error for parse functions)
@@ -61,6 +63,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `defer` detection moved from codegen to type-checking phase — the typechecker now sets `body._hasDefer` on function body AST nodes during `checkFuncDecl`/`checkMethodDecl`/`FuncLit`, replacing the recursive `_hasDefer()` AST walk that ran on every function emit in codegen
 - Map access with side-effecting key expressions (e.g. `m[getKey()]`) no longer double-evaluates the key — when the index contains a call expression, codegen now emits an IIFE `((__m, __k) => __m[__k] ?? zero)(m, getKey())` instead of the inline `(m[getKey()] ?? zero)` pattern; simple literal/variable keys still use the lean inline form
 - `isIntType()` in codegen now recognises all sized integer types (`int8`–`int64`, `uint`–`uint64`, `uintptr`, `byte`, `rune`) via a `Set` lookup, not just `int` — ensures `Math.trunc` is emitted for integer division regardless of the declared type
+- Test suite restructured: `language.test.js`, `builtins.test.js`, `types.test.js`, and `compiler.test.js` split into subdirectories (`test/language/`, `test/builtins/`, `test/types/`, `test/compiler/`) with 3–4 focused files each, mirroring the `src/` submodule pattern
+- Removed `ROADMAP.md` — condensed roadmap is now an inline section in `README.md`
 
 ## [0.0.2] - 2026-04-14
 

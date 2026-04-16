@@ -23,7 +23,7 @@ packages. `src/dts-parser.js` parses TypeScript `.d.ts` declaration files.
 ## Commands
 
 ```sh
-npm test          # run the full test suite (552 tests, no browser required)
+npm test          # run the full test suite (611 tests, no browser required)
 npm run format    # format with Biome
 npm run check     # lint with Biome
 
@@ -63,8 +63,16 @@ src/
   dts-parser.js     TypeScript .d.ts loader
   index.js          CLI entry point
 test/
-  run.js            test suite (no framework, plain Node vm)
+  run.js            test suite orchestrator (no framework, plain Node vm)
+  helpers.js        shared compile/run/assert helpers
   fixtures/         .go and .d.ts files used by tests
+  structs.test.js   structs, embedded structs, methods
+  dom.test.js       DOM (jsdom) and external .d.ts
+  lexer-parser.test.js  lexer, parser, dts-parser, codegen
+  language/         core language feature tests (4 files)
+  types/            type system and type checking tests (3 files)
+  builtins/         built-in functions, operators, stdlib tests (3 files)
+  compiler/         multi-file packages, CLI, imports tests (3 files)
 example/
   simple/             vanilla DOM todo app (default example)
     src/              GoFront source files
@@ -117,7 +125,9 @@ example/
    throw on unhandled kinds so failures are loud.
 5. **Tests** — add at least one positive test (compiles + runs correctly) and one
    negative test (type error produces the expected message) to the most relevant
-   `test/*.test.js` file. Run `node test/<file>.test.js` to check just that suite, or
+   test file. Tests are split into directories (`test/language/`, `test/types/`,
+   `test/builtins/`, `test/compiler/`) plus root-level files for structs, DOM, and
+   lexer-parser. Run a single file with `node test/language/core.test.js`, or
    `npm test` for the full combined run.
 6. **CHANGELOG.md** — add an entry under `## [Unreleased]`.
 
@@ -161,14 +171,15 @@ Key items to be aware of when working on the compiler:
 
 ## Testing conventions
 
-- Tests are split across focused files in `test/`; `test/run.js` is the orchestrator.
+- Tests are split across focused files in `test/` subdirectories; `test/run.js` is the orchestrator.
 - Shared helpers live in `test/helpers.js`: `compile(src)`, `compileFile(path)`,
   `compileDir(dir)`, `runJs(js)`, `runInDom(js, html)`.
 - Assertion helpers: `assertEqual`, `assertContains`, `assertErrorContains`, `assert`.
 - Negative tests must call `assertErrorContains(errors, "substring")` — not just
   `assert(errors.length > 0)` — so the error message is verified too.
 - Group related tests with `section("Name")` for readable output.
-- Run a single suite with `node test/<file>.test.js`, or the full suite with `npm test`.
+- Run a single file with `node test/language/core.test.js`, a directory's files
+  individually, or the full suite with `npm test`.
 
 ## Changing the example app
 
