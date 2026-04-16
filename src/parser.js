@@ -118,7 +118,13 @@ export class Parser {
 		const imports = [];
 		const parseOne = () => {
 			const _line = this.peek().line;
-			const alias = this.check(T.IDENT) ? this.advance().value : null;
+			let alias = null;
+			if (this.check(T.IDENT)) {
+				alias = this.advance().value;
+			} else if (this.check(T.DOT)) {
+				alias = ".";
+				this.advance();
+			}
 			const path = this.expect(T.STRING).value;
 			return { path, alias, _line };
 		};

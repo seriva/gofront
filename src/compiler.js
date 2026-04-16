@@ -131,6 +131,16 @@ export function compileFiles(files, options = {}) {
 				const dep = compileDir(depDir);
 				preambles.push(dep.js);
 				if (alias === "_") continue; // side-effect import — bundle code but don't expose namespace
+
+				// Dot import: flatten all exported symbols into global scope
+				if (alias === ".") {
+					checker.addDefinitions(dep.exportedTypes, dep.exportedSymbols);
+					// All dep symbols must be treated as bundled so codegen
+					// can emit them without a qualifier.  We DON'T add a
+					// namespace, so SelectorExpr never appears for these.
+					continue;
+				}
+
 				const nameUsed = alias ?? dep.pkgName;
 				bundledPackages.add(nameUsed);
 				checker.addPackageNamespace(

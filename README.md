@@ -386,6 +386,7 @@ signatures into GoFront's internal type representation.
 | `[]rune(s)` conversion | ✓ — produces Unicode code points via `Array.from` |
 | `[...]T{...}` array length inference | ✓ |
 | Side-effect imports (`import _ "pkg"`) | ✓ — dependency code is bundled; package namespace is not exposed |
+| Dot imports (`import . "pkg"`) | ✓ — merges package exports into the current scope (no qualifier needed) |
 | Unused local import detection | ✓ — unused cross-package imports are type errors (matching Go); `import _` exempt |
 | `min()` / `max()` builtins | ✓ — compiles to `Math.min` / `Math.max` |
 | `clear()` builtin | ✓ — zeroes slice length or deletes all map keys |
@@ -417,7 +418,6 @@ some were intentionally left out to keep the compiler simple.
 |---|---|
 | `goto` statement | Unstructured control flow has no clean JS translation. `goto` is rare in idiomatic Go. Not planned. |
 | Complex numbers (`complex64`, `complex128`) | `complex()`, `real()`, `imag()` builtins would need a runtime complex-number type. Rarely used in frontend code. |
-| Dot imports (`import . "pkg"`) | Merges a package's namespace into the current scope. Rare in idiomatic Go and adds complexity for little benefit. |
 | Untyped constants | Go constants are untyped until assigned, allowing implicit numeric coercion. GoFront assigns a concrete type immediately. |
 
 ### Semantic differences — JS can't match Go behaviour

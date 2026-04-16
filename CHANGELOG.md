@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `fallthrough` inside type switch is now a compile error (matching Go spec)
 - Unused local import detection — importing a cross-package dependency without using it is a type error (matching Go); `import _` side-effect imports are exempt
 - Anonymous struct types — `struct { Name string; Age int }` can now be used as inline type expressions, composite literals, function return types, and variable declarations. Compiled to plain JS objects (no class emitted).
+- Dot imports (`import . "pkg"`) — merges a package's exported symbols into the current scope so they can be used without a qualifier
 - Unused variable detection — local variables declared with `:=` or `var` that are never referenced are now type errors (matching Go semantics). Function parameters, constants, and `_` are exempt.
 - `go`, `chan`, `select` are now recognized keywords — using goroutines, channels, or select produces clear parse errors (e.g. "goroutines are not supported in GoFront") instead of confusing "Undefined" messages
 - Split `parser.js` (1,237 lines) into `parser/types.js`, `parser/statements.js`, and `parser/expressions.js` sub-modules using the mixin pattern

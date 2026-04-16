@@ -1172,6 +1172,30 @@ test("side-effect import _ is not flagged as unused", () => {
 	assertContains(js, "function Add(");
 });
 
+section("Dot imports");
+
+test("dot import: functions available without qualifier", () => {
+	const dir = join(FIXTURES, "multifile/withdotimport");
+	const { js } = compileDir(dir);
+	// Add and Square should be called directly, not as math.Add / math.Square
+	assertContains(js, "Add(10, 5)");
+	assertContains(js, "Square(4)");
+});
+
+test("dot import: runtime output is correct", () => {
+	const dir = join(FIXTURES, "multifile/withdotimport");
+	const { js } = compileDir(dir);
+	const out = runJs(js);
+	assertEqual(out.trim(), "15\n16");
+});
+
+test("dot import: no namespace variable emitted", () => {
+	const dir = join(FIXTURES, "multifile/withdotimport");
+	const { js } = compileDir(dir);
+	// Should NOT contain "const math = " or "let math = " — no namespace
+	assert(!js.includes("const math"), "should not have namespace variable");
+});
+
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit(summarize() > 0 ? 1 : 0);
