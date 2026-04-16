@@ -53,7 +53,7 @@ This document is compared against the [Go Language Specification](https://go.dev
 | Blank identifier `_` | Strong match | Usable in declarations, assignments, range loops, and imports. |
 | Multiple assignment | Strong match | Tuple swaps (`a, b = b, a`) and multi-value assignment are supported. |
 | Compound assignment ops | Strong match | All compound assignment operators (`+=`, `-=`, `<<=`, etc.) are supported. |
-| Grouped declarations | Partial match | `var (...)` and `const (...)` with iota are supported. Grouped `type (...)` is not yet supported. |
+| Grouped declarations | Strong match | `var (...)`, `const (...)` with iota, and `type (...)` are all supported. |
 | Slice expressions | Partial match | Simple (`a[low:high]`) and three-index (`a[low:high:max]`) syntax is parsed. The `max` capacity bound is accepted but ignored at runtime. |
 | String indexing / slicing | Partial match | `s[i]` and `s[low:high]` work, but `s[i]` returns a JS character rather than a Go byte value. |
 | Named / blank imports | Strong match | Import aliases (`import m "pkg"`), dot imports (`import . "pkg"`), and blank imports (`import _ "pkg"`) are supported. |
@@ -195,7 +195,7 @@ system work or start pushing against the no-runtime direction.
 | Better array semantics | Arrays are currently too close to slices. | Medium | Moderate |
 | Better pointer model | Current pointer boxing is useful but shallow. | High | Moderate |
 | Richer error values | Would make error handling feel more Go-like than plain strings. | Medium | Moderate |
-| Grouped `type (...)` declarations | Minor parser gap. Would complete parity for declaration grouping syntax. | Low | None |
+| Grouped `type (...)` declarations | Minor parser gap. Would complete parity for declaration grouping syntax. | Low | Done. Grouped `type (...)` declarations now supported at top-level and inside function bodies. |
 | Reduced runtime metadata for interfaces/assertions | Would improve type assertions and type switches. | High | High |
 | Reduced reflection support | Useful for some patterns, but only if GoFront accepts a small runtime metadata story. | High | High |
 

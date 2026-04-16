@@ -7,7 +7,9 @@ export const statementParserMethods = {
 		this.expect(T.LBRACE);
 		const stmts = [];
 		while (!this.check(T.RBRACE) && !this.check(T.EOF)) {
-			stmts.push(this.parseStmt());
+			const result = this.parseStmt();
+			if (Array.isArray(result)) stmts.push(...result);
+			else stmts.push(result);
 			this.semi();
 		}
 		this.expect(T.RBRACE);
@@ -17,6 +19,10 @@ export const statementParserMethods = {
 	parseStmt() {
 		const t = this.peek();
 		const stmt = this._parseStmt(t);
+		if (Array.isArray(stmt)) {
+			for (const s of stmt) s._line = t.line;
+			return stmt;
+		}
 		stmt._line = t.line;
 		return stmt;
 	},

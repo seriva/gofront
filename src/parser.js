@@ -102,7 +102,11 @@ export class Parser {
 		const imports = [];
 		while (this.check(T.IMPORT)) imports.push(this.parseImport());
 		const decls = [];
-		while (!this.check(T.EOF)) decls.push(this.parseTopDecl());
+		while (!this.check(T.EOF)) {
+			const result = this.parseTopDecl();
+			if (Array.isArray(result)) decls.push(...result);
+			else decls.push(result);
+		}
 		return { kind: "Program", pkg, imports, decls, _filename: this.filename };
 	}
 
@@ -322,6 +326,19 @@ export class Parser {
 
 	parseTypeDecl() {
 		this.expect(T.TYPE);
+		if (this.match(T.LPAREN)) {
+			const decls = [];
+			while (!this.check(T.RPAREN) && !this.check(T.EOF)) {
+				const name = this.expect(T.IDENT).value;
+				const isAlias = this.match(T.ASSIGN);
+				const type = this.parseType();
+				decls.push({ kind: "TypeDecl", name, type, isAlias });
+				this.semi();
+			}
+			this.expect(T.RPAREN);
+			this.semi();
+			return decls;
+		}
 		const name = this.expect(T.IDENT).value;
 		const isAlias = this.match(T.ASSIGN);
 		const type = this.parseType();

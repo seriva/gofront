@@ -1858,6 +1858,81 @@ func main() {
 	assertEqual(runJs(js), "3 4");
 });
 
+// ── Grouped type declarations ─────────────────────────────────
+
+section("Grouped type declarations");
+
+test("grouped type with struct and alias", () => {
+	const { js, errors } = compile(`package main
+type (
+	Point struct { X int; Y int }
+	Name = string
+)
+func main() {
+	p := Point{X: 1, Y: 2}
+	var n Name = "hello"
+	console.log(p.X, p.Y, n)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "1 2 hello");
+});
+
+test("grouped type with interface and structs", () => {
+	const { js, errors } = compile(`package main
+type (
+	Animal interface { Sound() string }
+	Dog struct { Name string }
+	Cat struct {}
+)
+func (d Dog) Sound() string { return "woof" }
+func (c Cat) Sound() string { return "meow" }
+func main() {
+	var a Animal = Dog{Name: "Rex"}
+	console.log(a.Sound())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "woof");
+});
+
+test("grouped type with multiple aliases", () => {
+	const { js, errors } = compile(`package main
+type (
+	MyInt = int
+	MyStr = string
+	MyBool = bool
+)
+func main() {
+	var x MyInt = 42
+	var s MyStr = "go"
+	var b MyBool = true
+	console.log(x, s, b)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "42 go true");
+});
+
+test("empty grouped type declaration", () => {
+	const { errors } = compile(`package main
+type ()
+func main() {}`);
+	assertEqual(errors.length, 0);
+});
+
+test("grouped type inside function body", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	type (
+		Pair struct { A int; B int }
+		Label = string
+	)
+	p := Pair{A: 10, B: 20}
+	var l Label = "sum"
+	console.log(l, p.A + p.B)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "sum 30");
+});
+
 // ── Unimplemented Go features ─────────────────────────────────
 
 section("Unimplemented Go features");

@@ -488,4 +488,4 @@ you know exactly what to expect.
 npm test
 ```
 
-566 tests covering language features, type errors, edge cases, DOM (jsdom), external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, map iteration order, integer overflow semantics, unused variable detection, unused import detection, semantic difference verification, and both example apps.
+571 tests covering language features, type errors, edge cases, DOM (jsdom), external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, map iteration order, integer overflow semantics, unused variable detection, unused import detection, semantic difference verification, and both example apps.
