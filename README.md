@@ -399,40 +399,86 @@ signatures into GoFront's internal type representation.
 
 ---
 
-## What's not implemented, and why
+## Go Compatibility
 
-GoFront targets the browser. Several Go features don't translate to JavaScript, and
-some were intentionally left out to keep the compiler simple.
+GoFront implements a practical subset of the
+[Go Language Specification](https://go.dev/ref/spec) (go1.26). It is not aiming for
+byte-level parity — it is a Go-inspired language for the JavaScript platform. This
+section explains exactly where GoFront matches Go, where it intentionally diverges, and
+where JS fundamentally prevents matching Go semantics.
 
-### Fundamental mismatches — can't implement without a runtime
+For a detailed feature-by-feature matrix and roadmap, see [ROADMAP.md](ROADMAP.md).
 
-| Feature | Why |
+### What matches Go
+
+The core language surface is well covered. All of these compile and behave as a Go
+developer would expect:
+
+- **Declarations**: `var`, `:=` (with re-declaration), `const` (with `iota`), `type`,
+  `func`, methods, `init()`.
+- **Control flow**: `if`/`else` (with init statement), `for` (classic, condition-only,
+  infinite, `range`), `switch`/`case`/`default`/`fallthrough`, type switches, labeled
+  `break`/`continue`, `defer`, `panic`/`recover`.
+- **Types**: `int`, `float64`, `string`, `bool`, sized integers (`int8`–`int64`,
+  `uint8`–`uint64`), `float32`, `byte`, `rune`, `error`, slices, maps, arrays, structs,
+  interfaces (with embedding), pointers (`*T`, `&x`), type aliases, function types.
+- **Expressions**: all arithmetic, comparison, logical, and bitwise operators (including
+  `&^`), compound assignment, increment/decrement, type conversions, type assertions
+  (plain and comma-ok), slice expressions (`a[lo:hi]`, `a[lo:hi:max]`), composite
+  literals, `[...]T{...}` inference, rune literals, raw string literals, variadic
+  spread, blank identifier `_`.
+- **Builtins**: `len`, `cap`, `append`, `copy`, `make`, `delete`, `new`, `clear`, `min`,
+  `max`, `print`, `println`, `panic`, `recover`, `fmt.Sprintf`/`Printf`/`Println`/`Errorf`.
+- **Packages**: multi-file packages, cross-package imports, import aliases,
+  dot imports, blank imports, unused import detection.
+
+### GoFront extensions (not in Go)
+
+These features are intentional additions for the JavaScript platform:
+
+| Feature | Purpose |
 |---|---|
-| Goroutines (`go` keyword) | Go's concurrency model has no JS equivalent. Workers are a different abstraction. A userland scheduler would defeat the "no runtime" goal. |
-| Channels (`chan`, `<-`) | Channels are the communication primitive for goroutines. Without goroutines, channels have no purpose. |
-| `select` statement | Multiplexes channel operations. Same dependency. |
-| Generics (Go 1.18+) | Would require monomorphisation or type-erasure strategy. Type parameters (`[T any]`) touch every compiler stage. Possible, but a large effort with limited payoff for a JS target where everything is `any` at runtime. |
+| `async func` / `await` | First-class async syntax for frontend work. |
+| Browser globals (`document`, `console`, etc.) | Predeclared as `any` for practical DOM access. |
+| `.d.ts` type imports (`import "js:./types.d.ts"`) | Type-safe interop with JavaScript libraries. |
+| npm package resolution | Import types from `node_modules/` and `@types/` automatically. |
 
-### Intentionally skipped
+### What's not implemented
 
-| Feature | Why |
-|---|---|
-| `goto` statement | Unstructured control flow has no clean JS translation. `goto` is rare in idiomatic Go. Not planned. |
-| Complex numbers (`complex64`, `complex128`) | `complex()`, `real()`, `imag()` builtins would need a runtime complex-number type. Rarely used in frontend code. |
+| Feature | Reason | Prospect |
+|---|---|---|
+| Generics (`[T any]`) | Touches every compiler stage. Large effort, limited runtime payoff on a JS target. | Feasible — highest-priority future feature. |
+| Range over iterator functions (Go 1.23) | `func(yield func(K, V) bool)` protocol. | Feasible. |
+| Complex numbers (`complex64`, `complex128`, `3i`) | Would need a runtime complex type. Rarely used in frontend. | Feasible but low priority. |
+| `goto` | No clean JS translation. Rare in idiomatic Go. | Not planned. |
+| Method expressions (`T.Method`) | Requires function-wrapping with explicit receiver. | Feasible. |
+| Goroutines / channels / `select` | Go's concurrency model has no JS equivalent. A userland scheduler defeats the "no runtime" goal. | Out of scope. |
+| `unsafe`, `reflect`, `cgo` | Require memory model or runtime type metadata that JS cannot provide. | Out of scope. |
 
-### Semantic differences — JS can't match Go behaviour
+### Semantic differences
 
-These features exist but behave differently due to fundamental JS/Go runtime differences:
+These features are implemented but behave differently due to fundamental JS runtime
+constraints. These are **not bugs** — they are deliberate trade-offs documented here so
+you know exactly what to expect.
 
-| Feature | GoFront behaviour | Go behaviour | Why |
+| Feature | GoFront | Go | Why |
 |---|---|---|---|
-| Map iteration order | Insertion-order (`Object.entries`) | Randomised | JS objects preserve insertion order. Wrapping in a custom `Map` class would add runtime overhead for no practical benefit. |
-| Integer overflow | IEEE 754 float64 wrap | Wraps at type boundary (e.g. `int32`) | All JS numbers are float64. Emitting `\|0` or `BigInt` for every arithmetic op would be prohibitively expensive. |
-| `cap()` | Always equals `len()` | May exceed `len()` | JS arrays don't expose allocation capacity. |
-| Fixed-size arrays (`[n]T`) | Plain JS arrays (no length enforcement) | Fixed at compile time | Could add a length check at construction, but runtime enforcement adds overhead for no safety benefit in JS. |
-| `rune` / `byte` types | Treated as `int` | Distinct types with UTF-8 encoding | JS strings are UTF-16. Proper rune handling would require wrapping every string operation. |
-| `range` over string | JS characters (UTF-16 code units via `Array.from`) | Go runes (UTF-8 code points) | Same UTF-16 vs UTF-8 mismatch. |
-| `len()` on strings | JS `.length` (UTF-16 code units) | Byte count (UTF-8) | Matching Go would require `TextEncoder` on every `len(s)` call. |
+| Map iteration order | Insertion-order (`Object.entries`) | Randomised | JS objects preserve insertion order. |
+| Integer overflow | IEEE 754 float64 semantics | Wraps at type boundary (e.g. `int32`) | All JS numbers are float64. |
+| Integer precision | Safe up to 2⁵³ | Full width per type (`int64` = 64 bits) | JS `number` limitation. |
+| `cap()` | Always equals `len()` | May exceed `len()` | JS arrays have no separate capacity. |
+| Fixed-size arrays (`[n]T`) | Plain JS arrays (no length enforcement) | Fixed at compile time | Runtime enforcement adds overhead for no JS benefit. |
+| `nil` | Maps to `null` | Typed nil (distinct per type) | JS has no typed nil concept. |
+| `rune` / `byte` | Treated as `int` | Distinct types with UTF-8 encoding | JS strings are UTF-16. |
+| `range` over string | JS characters (UTF-16 via `Array.from`) | Runes (UTF-8 code points) | UTF-16 vs UTF-8 mismatch. |
+| `len()` on strings | JS `.length` (UTF-16 code units) | Byte count (UTF-8) | Matching Go would require `TextEncoder` on every call. |
+| `error` type | Plain string | Interface `{ Error() string }` | Practical simplification for JS. |
+| `defer` | `try`/`finally` with a defer stack | Runtime stack unwinding | Covers most cases but not identical to Go internals. |
+| Struct field tags | Parsed, silently discarded | Available via `reflect` | No reflection = no use for tag values. |
+| Pointers (`&x`, `*p`) | Syntax accepted, semantically transparent | True memory indirection | JS has no pointer model. |
+| Three-index slice (`a[lo:hi:max]`) | `max` is parsed but ignored | Sets result capacity | JS arrays have no capacity. |
+| Type assertions (plain) | Unchecked at runtime | Panics on failure | Comma-ok form does emit runtime checks. |
+| Exported / unexported | Uppercase names exported across packages | Access enforced per-identifier | Cross-package access to lowercase names is not yet an error. |
 
 ---
 
@@ -442,4 +488,4 @@ These features exist but behave differently due to fundamental JS/Go runtime dif
 npm test
 ```
 
-526 tests covering language features, type errors, edge cases, DOM (jsdom), external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, map iteration order, integer overflow semantics, unused variable detection, unused import detection, and both example apps.
+552 tests covering language features, type errors, edge cases, DOM (jsdom), external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, map iteration order, integer overflow semantics, unused variable detection, unused import detection, semantic difference verification, and both example apps.

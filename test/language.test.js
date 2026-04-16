@@ -2207,6 +2207,112 @@ func main() {
 	assertEqual(out.trim(), "10\n20");
 });
 
+// ═════════════════════════════════════════════════════════════
+// Semantic differences from Go
+// ═════════════════════════════════════════════════════════════
+// These tests explicitly encode GoFront behaviour that intentionally diverges
+// from the Go specification. Each test documents the difference so regressions
+// are caught immediately.
+
+section("Semantic differences — string len() and range");
+
+test("len() on string returns JS character count, not Go byte count", () => {
+	// Go: len("héllo") == 6 (UTF-8 bytes: h=1, é=2, l=1, l=1, o=1)
+	// GoFront: len("héllo") == 5 (JS string .length, UTF-16 code units)
+	const { js, errors } = compile(`package main
+func main() {
+	s := "héllo"
+	println(len(s))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js).trim(), "5");
+});
+
+test("len() on emoji string returns JS character count", () => {
+	// Go: len("😀") == 4 (4 UTF-8 bytes)
+	// GoFront: len("😀") depends on JS — emoji is a surrogate pair so .length == 2
+	const { js, errors } = compile(`package main
+func main() {
+	s := "😀"
+	println(len(s))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js).trim(), "2");
+});
+
+test("range over multi-byte string yields sequential indices, not byte offsets", () => {
+	// Go: for i, ch := range "héllo" → indices 0, 1, 3, 4, 5 (byte offsets; é is 2 bytes)
+	// GoFront: indices are 0, 1, 2, 3, 4 (JS character positions)
+	const { js, errors } = compile(`package main
+func main() {
+	result := ""
+	for i, _ := range "héllo" {
+		if result != "" {
+			result += ","
+		}
+		result += fmt.Sprintf("%d", i)
+	}
+	println(result)
+}`);
+	assertEqual(errors.length, 0);
+	// GoFront: sequential 0,1,2,3,4 — Go would produce 0,1,3,4,5
+	assertEqual(runJs(js).trim(), "0,1,2,3,4");
+});
+
+section("Semantic differences — fixed-size arrays");
+
+test("[n]T array is a plain JS array with no size enforcement", () => {
+	// Go: [3]int has exactly 3 elements, always. You cannot append to it.
+	// GoFront: [3]int compiles to a plain JS array. len() returns 3, but
+	// there is no runtime enforcement of the size. The array is mutable.
+	const { js, errors } = compile(`package main
+func main() {
+	arr := [3]int{10, 20, 30}
+	println(len(arr))
+	println(arr[0])
+	println(arr[1])
+	println(arr[2])
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js).trim(), "3\n10\n20\n30");
+	// Verify the generated JS is a plain array literal, not a fixed-length wrapper
+	assertContains(js, "[10, 20, 30]");
+});
+
+section("Semantic differences — type assertions");
+
+test("plain type assertion on wrong type does not panic at runtime", () => {
+	// Go: x.(int) on a string value panics at runtime.
+	// GoFront: plain (non-comma-ok) type assertion is unchecked at runtime —
+	// it just passes the value through without a panic.
+	const { js, errors } = compile(`package main
+func main() {
+	var x any = "hello"
+	v := x.(int)
+	println(v)
+}`);
+	assertEqual(errors.length, 0);
+	// Should not throw — the assertion is a no-op at runtime
+	const out = runJs(js);
+	// The value passes through as the original string
+	assertEqual(out.trim(), "hello");
+});
+
+test("comma-ok type assertion on wrong type returns false safely", () => {
+	// Both Go and GoFront: comma-ok form does not panic.
+	// Difference: Go sets v to the zero value of T on failure;
+	// GoFront sets v to the original value (extraction is a no-op).
+	const { js, errors } = compile(`package main
+func main() {
+	var x any = "hello"
+	_, ok := x.(int)
+	println(ok)
+}`);
+	assertEqual(errors.length, 0);
+	const out = runJs(js);
+	assertContains(out, "false");
+});
+
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit(summarize() > 0 ? 1 : 0);

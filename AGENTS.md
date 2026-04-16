@@ -23,7 +23,7 @@ packages. `src/dts-parser.js` parses TypeScript `.d.ts` declaration files.
 ## Commands
 
 ```sh
-npm test          # run the full test suite (545 tests, no browser required)
+npm test          # run the full test suite (552 tests, no browser required)
 npm run format    # format with Biome
 npm run check     # lint with Biome
 
@@ -143,13 +143,15 @@ untyped; mixing untyped + typed yields the typed side.
 
 ## Known semantic differences from Go
 
-| Feature | Go | GoFront |
-|---|---|---|
-| Map iteration order | randomised | insertion-order (JS `Object.entries()`) |
-| Goroutines / channels | built-in | not implemented |
-| `select` statement | built-in | not implemented |
-| Slice capacity | tracked separately from length | `cap()` returns `length` |
-| Integer overflow | wraps silently | JS number (IEEE 754 float64) |
+See the "Semantic differences" table in README.md § Go Compatibility for the full list.
+Key items to be aware of when working on the compiler:
+
+- **All JS numbers are float64** — no integer overflow wrapping, precision only to 2⁵³.
+- **Strings are UTF-16** — `len()` returns `.length`, `range` iterates JS characters.
+- **Maps are plain objects** — insertion-order iteration, not randomised.
+- **`error` is a plain string**, not an interface.
+- **Pointers are transparent** — `&x` / `*p` are accepted syntax but no indirection.
+- **Goroutines / channels / `select`** are not implemented.
 
 ## Testing conventions
 
@@ -164,22 +166,11 @@ untyped; mixing untyped + typed yields the typed side.
 
 ## Changing the example app
 
-There are two example apps in `example/`:
-
-- **`example/simple/`** — vanilla DOM todo app, zero dependencies. This is the
-  default example that showcases GoFront's core language features with readable,
-  1:1 compiled JS output.
-- **`example/reactive/`** — same app using `reactive.js` signals and `.d.ts`
-  type imports. Demonstrates framework integration.
-
-Build them with:
+See README.md § Examples for full descriptions of both apps.
 
 ```sh
 npm run build:simple      # builds example/simple/app.js
 npm run build:reactive    # builds example/reactive/app.js
 ```
 
-Then open the respective `index.html` in a browser. Both apps demonstrate:
-structs & methods, iota constants, named returns, closures, slices,
-`for range`, `switch`, cross-package imports (`./utils`), `async`/`await`,
-`defer`/`recover`, localStorage persistence, and HTML5 drag-and-drop.
+Then open the respective `index.html` in a browser.

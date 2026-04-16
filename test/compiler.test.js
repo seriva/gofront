@@ -1196,6 +1196,22 @@ test("dot import: no namespace variable emitted", () => {
 	assert(!js.includes("const math"), "should not have namespace variable");
 });
 
+// ═════════════════════════════════════════════════════════════
+// Semantic differences — export access control
+// ═════════════════════════════════════════════════════════════
+
+section("Semantic differences — exported/unexported access");
+
+test("unexported function from another package is accessible (differs from Go)", () => {
+	// Go: accessing mypkg.helper() (lowercase) from another package is a compile error.
+	// GoFront: no enforcement — unexported symbols are accessible across packages.
+	// This test encodes the current behavior so any future enforcement is intentional.
+	const dir = join(FIXTURES, "multifile/unexported_access");
+	const { js, errors } = compileDir(dir);
+	assertEqual(errors?.length ?? 0, 0);
+	assertEqual(runJs(js).trim(), "42");
+});
+
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit(summarize() > 0 ? 1 : 0);

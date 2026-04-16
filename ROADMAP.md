@@ -168,8 +168,8 @@ a real runtime system.
 
 | Item | Why it matters | Difficulty | Notes |
 |---|---|---|---|
-| Compatibility guide in docs | Makes it obvious where GoFront matches Go and where it intentionally diverges. | Low | This is mostly documentation work and removes ambiguity for users. |
-| Expanded semantic-difference tests | Locks in current behavior and prevents accidental regressions. | Low | Especially useful for maps, numeric behavior, assertions, and interfaces. |
+| Compatibility guide in docs | Makes it obvious where GoFront matches Go and where it intentionally diverges. | Low | Done. The README now has a "Go Compatibility" section covering what matches, extensions, missing features, and semantic differences. |
+| Expanded semantic-difference tests | Locks in current behavior and prevents accidental regressions. | Low | Done. Tests added for: string `len()` on multi-byte chars, `range` over multi-byte strings, `[n]T` as plain arrays, unchecked plain type assertions, comma-ok assertion semantics, and unexported cross-package access. |
 | Stronger interface method checks | Closes compile-time gaps without changing the JS runtime model. | Medium | Good parity win with low runtime cost. |
 | Stronger type assertion rules | Reduces trust-me behavior in plain assertions. | Medium | Likely the best language-safety win after docs. |
 | Focused built-in/stdlib shims | Improves real-world usability without chasing full stdlib parity. | Medium | Best handled as a curated set of packages, not a full clone of Go's stdlib. |
