@@ -1,4 +1,4 @@
-# Better Pointer Model Implementation Plan (v0.0.4)
+# Better Pointer Model Implementation Plan (v0.0.5)
 
 Currently `&x` and `*p` are syntactically accepted but semantically transparent —
 they compile to no-ops. Only `new(T)` produces actual pointer types with `{ value: T }`

@@ -1,4 +1,4 @@
-# Richer Error Values Implementation Plan (v0.0.4)
+# Richer Error Values Implementation Plan (v0.0.5)
 
 The `error` type is currently a plain string at runtime. `error("msg")` is an identity,
 `.Error()` returns the string itself, `errors.New` is an identity, and `fmt.Errorf`

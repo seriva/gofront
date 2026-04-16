@@ -1,4 +1,4 @@
-# Better Array Semantics Implementation Plan (v0.0.4)
+# Better Array Semantics Implementation Plan (v0.0.5)
 
 Arrays (`[N]T`) and slices (`[]T`) are currently indistinguishable at runtime — both
 compile to plain JavaScript arrays. The compiler already tracks them as separate type

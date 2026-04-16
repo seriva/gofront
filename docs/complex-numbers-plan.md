@@ -1,4 +1,4 @@
-# Complex Number Types Implementation Plan (v0.0.4)
+# Complex Number Types Implementation Plan (v0.0.5)
 
 Go has first-class complex number support: `complex64` and `complex128` types, imaginary
 literals (`3i`), and three builtins: `complex(r, i)`, `real(z)`, `imag(z)`. Complex

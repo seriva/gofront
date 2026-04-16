@@ -502,23 +502,44 @@ access are out of scope.
 
 ### v0.0.4
 
-These are the open items for v0.0.4, roughly in priority order.
+**Theme: Spec compliance & bug fixes** — close the most impactful correctness gaps with
+low-effort changes. See the full [gap analysis](docs/v0.0.4-roadmap.md).
 
-| Feature | Difficulty | Notes |
-|---|---|---|
-| Generics (`[T any]`) | High | Biggest modern Go feature gap. Touches every compiler stage but has low runtime pressure. See [design plan](docs/generics-plan.md). |
-| Range over iterator functions | Medium | Go 1.23 `func(yield func(K, V) bool)` protocol. Low runtime pressure. See [design plan](docs/range-iter-plan.md). |
-| Complex number types | Medium | New type kind + builtins (`complex`, `real`, `imag`). Shimmed with a two-field object. See [design plan](docs/complex-numbers-plan.md). |
-| Richer error values | Medium | Move `error` from plain string to an interface-like value. See [design plan](docs/error-values-plan.md). |
-| Better array semantics | Medium | Arrays are currently indistinguishable from slices at runtime. See [design plan](docs/array-semantics-plan.md). |
-| Better pointer model | High | Current `{ value: T }` boxing is useful but shallow. See [design plan](docs/pointer-model-plan.md). |
-
-Explicitly **out of scope**: goroutines, channels, `select`, `unsafe`, full `reflect`,
-`cgo`, exact integer overflow, Go-equivalent map semantics.
+| Feature | Tier | Effort | Notes |
+|---|---|---|---|
+| Blank identifier `_ = expr` | Bug fix | Low | `_ = f()` rejected as undefined |
+| Comma-ok with `=` assignment | Bug fix | Low | `v, ok = m[k]` only works with `:=` |
+| `interface{}` assignability | Bug fix | Low–Med | `any` works but explicit `interface{}` doesn't |
+| Positional struct literals | Bug fix | Medium | `Point{1, 2}` generates empty struct |
+| `for range` string yields runes | Bug fix | Low–Med | Loop var is JS string, not integer code point |
+| Type switch multi-case capture var | Bug fix | Low–Med | False "unused variable" error |
+| Exported/unexported enforcement | Feature | Low | Reject cross-package access to lowercase identifiers |
+| Const expression repetition + `iota` | Feature | Low–Med | `1 << iota` patterns in grouped const blocks |
+| String indexing → byte (`.charCodeAt`) | Feature | Low | `s[i]` must return a byte, not a single-char string |
+| Method values (bound receivers) | Feature | Low–Med | Emit `.bind()` when method is used as value, not called |
+| Slice → array conversion | Feature | Low | `[N]T(slice)` — Go 1.20 feature |
+| Additional stdlib shims | Feature | Low–Med | `unicode`, `os`, `bytes`, `path` |
 
 ### v0.0.5
 
-TODO
+**Theme: Major language features.** These are high-complexity items that touch multiple
+compiler stages.
+
+| Feature | Difficulty | Notes |
+|---|---|---|
+| Generics (`[T any]`) | High | Biggest modern Go feature gap. Touches every compiler stage. See [design plan](docs/generics-plan.md). |
+| Range over iterator functions | Medium | Go 1.23 `func(yield func(K, V) bool)` protocol. See [design plan](docs/range-iter-plan.md). |
+| Complex number types | Medium | New type kind + builtins (`complex`, `real`, `imag`). See [design plan](docs/complex-numbers-plan.md). |
+| Richer error values | Medium | Move `error` from plain string to an interface-like value. See [design plan](docs/error-values-plan.md). |
+| Better array semantics | Medium | Arrays currently indistinguishable from slices at runtime. See [design plan](docs/array-semantics-plan.md). |
+| Better pointer model | High | Current `{ value: T }` boxing is useful but shallow. See [design plan](docs/pointer-model-plan.md). |
+| Method expressions (`T.Method`) | Medium | Compile-time transform — wrap method with explicit receiver param |
+| Struct / array equality (`==`, `!=`) | Medium | Tree-shaken `__equal` helper for deep comparison |
+| Terminating statement analysis | Medium | Verify all code paths return in non-void functions |
+| Multi-value function forwarding | Medium | `f(g())` where g returns multiple values |
+
+Explicitly **out of scope**: goroutines, channels, `select`, `unsafe`, full `reflect`,
+`cgo`, exact integer overflow, Go-equivalent map semantics.
 
 ---
 

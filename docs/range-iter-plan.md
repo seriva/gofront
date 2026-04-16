@@ -1,4 +1,4 @@
-# Range-over-Iterator Functions Implementation Plan (v0.0.4)
+# Range-over-Iterator Functions Implementation Plan (v0.0.5)
 
 Go 1.23 feature: `for range` over functions with a `yield` callback.
 

@@ -1,4 +1,4 @@
-# Generics Implementation Plan (v0.0.4)
+# Generics Implementation Plan (v0.0.5)
 
 ## Key Insight
 
