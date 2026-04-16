@@ -1,21 +1,29 @@
 // GoFront test suite — orchestrator
 // Imports all split test files in order and prints a combined summary.
-// Run individual suites directly:  node test/language.test.js
 //
-// Test files:
-//   language.test.js    — core language features
-//   types.test.js       — type system and type checking
-//   structs.test.js     — structs, embedded structs, methods
-//   builtins.test.js    — built-in functions and operators
-//   compiler.test.js    — multi-file, CLI, npm resolver
-//   dom.test.js         — DOM and external .d.ts
-//   lexer-parser.test.js — lexer, parser, dts-parser, codegen
+// Test directories:
+//   language/     — core language features, control flow, declarations, expressions
+//   types/        — type errors, type checks, type inference
+//   structs/      — structs, embedded structs, methods (single file)
+//   builtins/     — built-in functions, operators, stdlib shims
+//   compiler/     — multi-file packages, CLI, imports
+//   dom/          — DOM and external .d.ts (single file)
+//   lexer-parser/ — lexer, parser, dts-parser, codegen (single file)
 
-import "./language.test.js";
-import "./types.test.js";
+import "./language/core.test.js";
+import "./language/control-flow.test.js";
+import "./language/declarations.test.js";
+import "./language/expressions.test.js";
+import "./types/errors.test.js";
+import "./types/checks.test.js";
+import "./types/inference.test.js";
 import "./structs.test.js";
-import "./builtins.test.js";
-import "./compiler.test.js";
+import "./builtins/core.test.js";
+import "./builtins/operators.test.js";
+import "./builtins/stdlib.test.js";
+import "./compiler/packages.test.js";
+import "./compiler/cli.test.js";
+import "./compiler/imports.test.js";
 import "./dom.test.js";
 import "./lexer-parser.test.js";
 
