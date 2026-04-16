@@ -46,7 +46,7 @@ highlighting, bracket matching, and indentation rules without any extra configur
 npm install -g gofront
 ```
 
-Requires Node.js 25+.
+Requires Node.js 20+.
 
 ---
 
