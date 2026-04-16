@@ -156,10 +156,15 @@ export const expressionGenMethods = {
 
 			case "TypeAssertExpr": {
 				const val = this.genExpr(expr.expr);
-				if (!expr._commaOk) return val; // unsafe assertion — just pass value through
-				// comma-ok: emit [value, runtimeTypeCheck]
 				const check = this._typeCheckExpr(expr.type, val);
-				return `[${val}, ${check}]`;
+				if (!expr._commaOk) {
+					// plain assertion: panic if check fails (matches Go behavior)
+					if (check === "true") return val; // can't check at runtime — pass through
+					return `(${check} ? ${val} : (() => { throw new Error("interface conversion: type assertion failed"); })())`;
+				}
+				// comma-ok: emit [value-or-zero, runtimeTypeCheck]
+				const zero = this.zeroValueForTypeNode(expr.type);
+				return `(${check} ? [${val}, true] : [${zero}, false])`;
 			}
 
 			case "AwaitExpr":

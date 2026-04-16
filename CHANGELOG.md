@@ -6,10 +6,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Changed
-- Interface satisfaction checks now verify full method signatures — parameter types, parameter count, variadic flags, and all return types must match exactly (previously only method name and first return type were checked)
-- Interface method declarations now preserve the variadic flag from the parser
-
 ### Added
 - Go Compatibility section in README — documents what matches Go, GoFront extensions, unimplemented features, and 16 semantic differences in one place
 - Semantic difference tests — explicit tests encoding GoFront-specific behaviour for: `len()` on multi-byte strings, `range` over multi-byte strings (sequential indices vs byte offsets), `[n]T` as plain JS arrays, unchecked plain type assertions, comma-ok assertion semantics, and cross-package unexported symbol access
@@ -44,6 +40,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Labeled `break`/`continue` now validate loop/switch depth — `continue MyLabel` outside a loop is now a compile error even when a label is present
 
 ### Changed
+- Type assertions (`x.(T)`) now require the source expression to be an interface or `any` type — asserting from a concrete type is a compile error (matching Go)
+- Plain type assertions (`x.(T)`) now panic at runtime on type mismatch (matching Go) — previously the value passed through unchecked
+- Comma-ok type assertions (`v, ok := x.(T)`) now return the zero value of `T` on failure (matching Go) — previously the original value was returned
+- Interface satisfaction checks now verify full method signatures — parameter types, parameter count, variadic flags, and all return types must match exactly (previously only method name and first return type were checked)
+- Interface method declarations now preserve the variadic flag from the parser
 - Source-map `buildSourceMap` uses a `Map` lookup instead of linear `.find()` scan — O(n) instead of O(n²)
 - `isTypeKeyword()` / `isBuiltinKeyword()` in the parser now use module-level `Set`s instead of allocating arrays on every call
 - Removed redundant `.includes()` check in `looksLikeType()` — the `T.IDENT` branch already covers type keyword values

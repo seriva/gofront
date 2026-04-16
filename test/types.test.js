@@ -289,6 +289,92 @@ func main() {
 	assertEqual(runJs(js), "false");
 });
 
+test("type assertion on non-interface source is a compile error", () => {
+	const { errors } = compile(`package main
+func main() {
+  x := 42
+  _ = x.(string)
+}`);
+	assert(errors.length > 0, "expected error");
+	assertErrorContains(errors, "is not an interface");
+});
+
+test("type assertion on interface source is allowed", () => {
+	const { js, errors } = compile(`package main
+type Animal interface { Sound() string }
+type Dog struct {}
+func (d Dog) Sound() string { return "woof" }
+func main() {
+  var a Animal = Dog{}
+  d := a.(Dog)
+  console.log(d.Sound())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "woof");
+});
+
+test("type assertion on any source is allowed", () => {
+	const { js, errors } = compile(`package main
+func main() {
+  var x any = 42
+  v := x.(int)
+  console.log(v)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "42");
+});
+
+test("plain type assertion panics on type mismatch", () => {
+	const { js, errors } = compile(`package main
+func main() {
+  var x any = "hello"
+  v := x.(int)
+  console.log(v)
+}`);
+	assertEqual(errors.length, 0);
+	let threw = false;
+	try {
+		runJs(js);
+	} catch (_e) {
+		threw = true;
+	}
+	assert(threw, "expected plain assertion to panic on type mismatch");
+});
+
+test("comma-ok assertion returns zero value on failure", () => {
+	const { js, errors } = compile(`package main
+func main() {
+  var x any = "hello"
+  v, ok := x.(int)
+  console.log(v, ok)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "0 false");
+});
+
+test("comma-ok assertion returns value on success", () => {
+	const { js, errors } = compile(`package main
+func main() {
+  var x any = 42
+  v, ok := x.(int)
+  console.log(v, ok)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "42 true");
+});
+
+test("comma-ok assertion on struct returns zero on failure", () => {
+	const { js, errors } = compile(`package main
+type Dog struct { Name string }
+func main() {
+  var x any = 42
+  d, ok := x.(Dog)
+  console.log(d, ok)
+}`);
+	assertEqual(errors.length, 0);
+	assert(runJs(js).includes("false"), "expected ok to be false");
+});
+
 // ═════════════════════════════════════════════════════════════
 // Scoping and closures
 // ═════════════════════════════════════════════════════════════

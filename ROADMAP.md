@@ -83,7 +83,7 @@ This document is compared against the [Go Language Specification](https://go.dev
 | Type aliases | Strong match | Aliases work as transparent type-checker aliases. |
 | Pointers | Partial match | `new(T)` returns `{ value: T }`, pointer receivers work, but this is not full Go pointer semantics. |
 | Address-of / dereference | Partial match | Syntax is accepted, but lowering is effectively transparent in JS rather than true memory indirection. |
-| Type assertions | Partial match | Plain assertions are effectively unchecked at runtime; comma-ok assertions emit runtime checks. |
+| Type assertions | Strong match | Compile-time: source must be interface or `any`. Plain assertions panic on mismatch. Comma-ok returns zero value on failure. Runtime checks use `typeof`/`instanceof`. |
 | Complex types | Missing but feasible | `complex64`, `complex128`, imaginary literals (`3i`), and builtins (`complex`, `real`, `imag`) are not implemented. Could be shimmed with a two-field object. |
 | Struct tags | Partial match | Parsed and accepted syntactically, but tag values are silently discarded. Not available at compile time or runtime. |
 | Exported/unexported access control | Partial match | Uppercase names are exported across packages via `getExportedSymbols`. However, importing a lowercase name from another package does not produce an error. |
@@ -171,7 +171,7 @@ a real runtime system.
 | Compatibility guide in docs | Makes it obvious where GoFront matches Go and where it intentionally diverges. | Low | Done. The README now has a "Go Compatibility" section covering what matches, extensions, missing features, and semantic differences. |
 | Expanded semantic-difference tests | Locks in current behavior and prevents accidental regressions. | Low | Done. Tests added for: string `len()` on multi-byte chars, `range` over multi-byte strings, `[n]T` as plain arrays, unchecked plain type assertions, comma-ok assertion semantics, and unexported cross-package access. |
 | Stronger interface method checks | Closes compile-time gaps without changing the JS runtime model. | Medium | Done. `implements()` now checks full method signatures: parameter types, parameter count, variadic flags, and all return types. Interface method declarations also preserve the variadic flag. |
-| Stronger type assertion rules | Reduces trust-me behavior in plain assertions. | Medium | Likely the best language-safety win after docs. |
+| Stronger type assertion rules | Reduces trust-me behavior in plain assertions. | Medium | Done. Type assertions now require the source to be an interface or `any` (compile-time check). Plain assertions panic on mismatch and comma-ok returns zero value on failure (runtime checks), matching Go behavior. |
 | Focused built-in/stdlib shims | Improves real-world usability without chasing full stdlib parity. | Medium | Best handled as a curated set of packages, not a full clone of Go's stdlib. |
 
 Recommended order:

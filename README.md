@@ -477,7 +477,7 @@ you know exactly what to expect.
 | Struct field tags | Parsed, silently discarded | Available via `reflect` | No reflection = no use for tag values. |
 | Pointers (`&x`, `*p`) | Syntax accepted, semantically transparent | True memory indirection | JS has no pointer model. |
 | Three-index slice (`a[lo:hi:max]`) | `max` is parsed but ignored | Sets result capacity | JS arrays have no capacity. |
-| Type assertions (plain) | Unchecked at runtime | Panics on failure | Comma-ok form does emit runtime checks. |
+| Type assertions (plain) | Panics on failure (matching Go) | Panics on failure | Comma-ok form returns zero value on failure. |
 | Exported / unexported | Uppercase names exported across packages | Access enforced per-identifier | Cross-package access to lowercase names is not yet an error. |
 
 ---
@@ -488,4 +488,4 @@ you know exactly what to expect.
 npm test
 ```
 
-552 tests covering language features, type errors, edge cases, DOM (jsdom), external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, map iteration order, integer overflow semantics, unused variable detection, unused import detection, semantic difference verification, and both example apps.
+566 tests covering language features, type errors, edge cases, DOM (jsdom), external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, map iteration order, integer overflow semantics, unused variable detection, unused import detection, semantic difference verification, and both example apps.

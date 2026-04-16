@@ -2281,10 +2281,9 @@ func main() {
 
 section("Semantic differences — type assertions");
 
-test("plain type assertion on wrong type does not panic at runtime", () => {
+test("plain type assertion on wrong type panics at runtime", () => {
 	// Go: x.(int) on a string value panics at runtime.
-	// GoFront: plain (non-comma-ok) type assertion is unchecked at runtime —
-	// it just passes the value through without a panic.
+	// GoFront: plain (non-comma-ok) type assertion now panics (matching Go).
 	const { js, errors } = compile(`package main
 func main() {
 	var x any = "hello"
@@ -2292,25 +2291,28 @@ func main() {
 	println(v)
 }`);
 	assertEqual(errors.length, 0);
-	// Should not throw — the assertion is a no-op at runtime
-	const out = runJs(js);
-	// The value passes through as the original string
-	assertEqual(out.trim(), "hello");
+	// Should throw — the assertion fails at runtime
+	let threw = false;
+	try {
+		runJs(js);
+	} catch (_e) {
+		threw = true;
+	}
+	assert(threw, "expected plain type assertion to panic on type mismatch");
 });
 
 test("comma-ok type assertion on wrong type returns false safely", () => {
 	// Both Go and GoFront: comma-ok form does not panic.
-	// Difference: Go sets v to the zero value of T on failure;
-	// GoFront sets v to the original value (extraction is a no-op).
+	// GoFront now matches Go: v is set to the zero value of T on failure.
 	const { js, errors } = compile(`package main
 func main() {
 	var x any = "hello"
-	_, ok := x.(int)
-	println(ok)
+	v, ok := x.(int)
+	println(v, ok)
 }`);
 	assertEqual(errors.length, 0);
 	const out = runJs(js);
-	assertContains(out, "false");
+	assertContains(out, "0 false");
 });
 
 // ── Entry point ───────────────────────────────────────────────

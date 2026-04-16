@@ -148,8 +148,24 @@ export const expressionCheckMethods = {
 			}
 
 			case "TypeAssertExpr": {
-				this.checkExpr(expr.expr, scope);
-				return this.resolveTypeNode(expr.type, scope);
+				const srcType = this.checkExpr(expr.expr, scope);
+				const targetType = this.resolveTypeNode(expr.type, scope);
+
+				// In Go, the source of a type assertion must be an interface type.
+				// We allow `any` (which is GoFront's basic any) and interface types.
+				if (srcType && !isAny(srcType)) {
+					let underlying =
+						srcType.kind === "named" ? srcType.underlying : srcType;
+					underlying = this.resolveType(underlying);
+					if (underlying?.kind !== "interface") {
+						this.err(
+							`invalid type assertion: ${typeStr(srcType)} is not an interface`,
+							expr,
+						);
+					}
+				}
+
+				return targetType;
 			}
 
 			case "RangeExpr": {
