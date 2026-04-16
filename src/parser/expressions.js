@@ -152,7 +152,8 @@ export const expressionParserMethods = {
 		return (
 			expr.kind === "Ident" ||
 			expr.kind === "SelectorExpr" ||
-			expr.kind === "TypeExpr"
+			expr.kind === "TypeExpr" ||
+			expr.kind === "StructType"
 		);
 	},
 
@@ -362,6 +363,12 @@ export const expressionParserMethods = {
 				this.expect(T.RPAREN);
 				return { kind: "TypeConversion", targetType: typeExpr, expr };
 			}
+			return this.parseCompositeLit(typeExpr);
+		}
+
+		// Anonymous struct composite literal: struct{Name string}{Name: "Alice"}
+		if (t.type === T.STRUCT) {
+			const typeExpr = this.parseStructType();
 			return this.parseCompositeLit(typeExpr);
 		}
 

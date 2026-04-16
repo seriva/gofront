@@ -1956,6 +1956,62 @@ func main() {
 	assertEqual(out.trim(), "2.5");
 });
 
+// ═════════════════════════════════════════════════════════════
+// Anonymous struct types
+// ═════════════════════════════════════════════════════════════
+
+section("Anonymous struct types");
+
+test("anonymous struct composite literal", () => {
+	const { js } = compile(`package main
+func main() {
+	x := struct { Name string; Age int }{Name: "Alice", Age: 30}
+	println(x.Name)
+	println(x.Age)
+}`);
+	const out = runJs(js);
+	assertEqual(out.trim(), "Alice\n30");
+});
+
+test("var with anonymous struct type produces zero-value object", () => {
+	const { js } = compile(`package main
+func main() {
+	var x struct { Name string; Active bool }
+	println(x.Name)
+	println(x.Active)
+}`);
+	const out = runJs(js);
+	assertContains(out, "false");
+	// Name is "" (empty string), Active is false
+	assertEqual(out, "\nfalse");
+});
+
+test("anonymous struct field assignment", () => {
+	const { js } = compile(`package main
+func main() {
+	var x struct { Val int }
+	x.Val = 42
+	println(x.Val)
+}`);
+	const out = runJs(js);
+	assertEqual(out.trim(), "42");
+});
+
+test("anonymous struct as function return type", () => {
+	const { js, errors } = compile(`package main
+func newPoint() struct { X int; Y int } {
+	return struct { X int; Y int }{X: 10, Y: 20}
+}
+func main() {
+	p := newPoint()
+	println(p.X)
+	println(p.Y)
+}`);
+	assertEqual(errors.length, 0);
+	const out = runJs(js);
+	assertEqual(out.trim(), "10\n20");
+});
+
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit(summarize() > 0 ? 1 : 0);

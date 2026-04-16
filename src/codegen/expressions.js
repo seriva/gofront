@@ -474,6 +474,16 @@ export const expressionGenMethods = {
 				return "{}";
 			case "PointerType":
 				return "null";
+			case "StructType": {
+				const fields = typeNode.fields
+					.filter((f) => !f.embedded && f.names.length > 0)
+					.map(
+						(f) =>
+							`${f.names.map((n) => `${n}: ${this.zeroValueForTypeNode(f.type)}`).join(", ")}`,
+					)
+					.join(", ");
+				return `{ ${fields} }`;
+			}
 			default:
 				return "null";
 		}
@@ -491,6 +501,12 @@ export const expressionGenMethods = {
 				return "null";
 			case "map":
 				return "{}";
+			case "struct": {
+				const fields = [...t.fields.entries()]
+					.map(([name, ft]) => `${name}: ${this.zeroValueForType(ft)}`)
+					.join(", ");
+				return `{ ${fields} }`;
+			}
 			case "named":
 				if (this.structNames.has(t.name)) return `new ${t.name}()`;
 				return "null";

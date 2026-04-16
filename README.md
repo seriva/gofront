@@ -343,6 +343,7 @@ signatures into GoFront's internal type representation.
 | Variadic parameters | ✓ |
 | `init()` functions | ✓ |
 | Structs + methods | ✓ |
+| Anonymous struct types (`struct { Name string }`) | ✓ — compile to plain JS objects (no class emitted) |
 | Embedded structs | ✓ |
 | Pointer receivers | ✓ |
 | Interfaces | ✓ |
@@ -417,7 +418,6 @@ some were intentionally left out to keep the compiler simple.
 | `goto` statement | Unstructured control flow has no clean JS translation. `goto` is rare in idiomatic Go. Not planned. |
 | Complex numbers (`complex64`, `complex128`) | `complex()`, `real()`, `imag()` builtins would need a runtime complex-number type. Rarely used in frontend code. |
 | Dot imports (`import . "pkg"`) | Merges a package's namespace into the current scope. Rare in idiomatic Go and adds complexity for little benefit. |
-| Anonymous struct types (`var x struct { ... }`) | Inline struct type expressions without a name. Only named struct declarations are supported. |
 | Untyped constants | Go constants are untyped until assigned, allowing implicit numeric coercion. GoFront assigns a concrete type immediately. |
 
 ### Semantic differences — JS can't match Go behaviour
@@ -442,4 +442,4 @@ These features exist but behave differently due to fundamental JS/Go runtime dif
 npm test
 ```
 
-522 tests covering language features, type errors, edge cases, DOM (jsdom), external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, map iteration order, integer overflow semantics, unused variable detection, unused import detection, and both example apps.
+526 tests covering language features, type errors, edge cases, DOM (jsdom), external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, map iteration order, integer overflow semantics, unused variable detection, unused import detection, and both example apps.
