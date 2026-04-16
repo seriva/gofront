@@ -169,6 +169,12 @@ readable and debuggable — no name mangling, no opaque wrappers.
 | `clear(x)` | `.length = 0` (slice) or delete-loop (map) |
 | `print` / `println` | `console.log` |
 | `fmt.Sprintf` | `__sprintf` tree-shaken helper |
+| `strings.*` | JS string methods (`.includes`, `.startsWith`, `.split`, etc.) |
+| `strconv.*` | `String()`, `parseInt()`, `Number()` |
+| `sort.Slice` | `Array.prototype.sort()` with comparator wrapping |
+| `math.*` | `Math.*` methods and constants |
+| `errors.New` | Identity (returns string) |
+| `time.Now()` | `Date.now()` |
 
 ### Type system at runtime
 
@@ -413,8 +419,6 @@ byte-level parity — it is a Go-inspired language for the JavaScript platform. 
 section explains exactly where GoFront matches Go, where it intentionally diverges, and
 where JS fundamentally prevents matching Go semantics.
 
-For a detailed feature-by-feature matrix and roadmap, see [ROADMAP.md](ROADMAP.md).
-
 ### What matches Go
 
 The core language surface is well covered. All of these compile and behave as a Go
@@ -486,8 +490,27 @@ you know exactly what to expect.
 | Struct field tags | Parsed, silently discarded | Available via `reflect` | No reflection = no use for tag values. |
 | Pointers (`&x`, `*p`) | Syntax accepted, semantically transparent | True memory indirection | JS has no pointer model. |
 | Three-index slice (`a[lo:hi:max]`) | `max` is parsed but ignored | Sets result capacity | JS arrays have no capacity. |
-| Type assertions (plain) | Panics on failure (matching Go) | Panics on failure | Comma-ok form returns zero value on failure. |
 | Exported / unexported | Uppercase names exported across packages | Access enforced per-identifier | Cross-package access to lowercase names is not yet an error. |
+
+---
+
+## Roadmap
+
+These are the open items roughly in priority order. GoFront's guiding principle is
+**no runtime** — features that need a scheduler, runtime type descriptors, or raw memory
+access are out of scope.
+
+| Feature | Difficulty | Notes |
+|---|---|---|
+| Generics (`[T any]`) | High | Biggest modern Go feature gap. Touches every compiler stage but has low runtime pressure. |
+| Range over iterator functions | Medium | Go 1.23 `func(yield func(K, V) bool)` protocol. Low runtime pressure. |
+| Complex number types | Medium | New type kind + builtins (`complex`, `real`, `imag`). Shimmed with a two-field object. |
+| Richer error values | Medium | Move `error` from plain string to an interface-like value. |
+| Better array semantics | Medium | Arrays are currently indistinguishable from slices at runtime. |
+| Better pointer model | High | Current `{ value: T }` boxing is useful but shallow. |
+
+Explicitly **out of scope**: goroutines, channels, `select`, `unsafe`, full `reflect`,
+`cgo`, exact integer overflow, Go-equivalent map semantics.
 
 ---
 
@@ -497,4 +520,7 @@ you know exactly what to expect.
 npm test
 ```
 
-611 tests covering language features, type errors, edge cases, DOM (jsdom), external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, map iteration order, integer overflow semantics, unused variable detection, unused import detection, semantic difference verification, stdlib shim packages, and both example apps.
+611 tests covering language features, type errors, edge cases, DOM (jsdom), external
+`.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, map
+iteration order, integer overflow semantics, unused variable detection, unused import
+detection, semantic difference verification, stdlib shim packages, and both example apps.
