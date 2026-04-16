@@ -130,8 +130,14 @@ export const expressionGenMethods = {
 
 				const target = t?.name;
 				switch (target) {
-					case "string":
+					case "string": {
+						// Go string(65) → "A" (Unicode code point), not "65"
+						const srcType = expr.expr._type;
+						if (srcType && this.isIntType(srcType)) {
+							return `String.fromCodePoint(${inner})`;
+						}
 						return `String(${inner})`;
+					}
 					case "int":
 					case "byte":
 					case "rune":

@@ -83,7 +83,7 @@ func main() {
   display := document.getElementById("display")
   btn.addEventListener("click", func() {
     count = count + 1
-    display.textContent = string(count)
+    display.textContent = fmt.Sprintf("%d", count)
   })
 }`);
 	const { document } = runInDom(

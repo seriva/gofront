@@ -390,6 +390,36 @@ export class Lexer {
 					const ch = this.advance();
 					if (ch !== "_") n += ch;
 				}
+				// Hex float: 0x1.Fp10 or 0xAp-2
+				if (this.peek() === "." || this.peek() === "p" || this.peek() === "P") {
+					let frac = "";
+					if (this.peek() === ".") {
+						this.advance(); // skip the dot (don't add to n)
+						while (
+							this.pos < this.src.length &&
+							/[0-9a-fA-F_]/.test(this.peek())
+						) {
+							const ch = this.advance();
+							if (ch !== "_") frac += ch;
+						}
+					}
+					if (this.peek() === "p" || this.peek() === "P") {
+						this.advance(); // skip p/P
+						let exp = "";
+						if (this.peek() === "+" || this.peek() === "-")
+							exp += this.advance();
+						while (this.pos < this.src.length && /[0-9]/.test(this.peek()))
+							exp += this.advance();
+						// Evaluate: JS can't parse hex floats, so convert manually
+						// n is "0x1" (integer hex part), frac is hex fractional digits
+						let mantissa = Number(n);
+						if (frac) {
+							mantissa += Number.parseInt(frac, 16) / 16 ** frac.length;
+						}
+						const value = mantissa * 2 ** Number(exp);
+						return { n: String(value), isFloat: true };
+					}
+				}
 				return { n, isFloat: false };
 			}
 		}

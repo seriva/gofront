@@ -358,7 +358,7 @@ signatures into GoFront's internal type representation.
 | Type conversions | ✓ |
 | Type assertions (`x.(T)`) | ✓ |
 | Type switch (`switch x.(type)`, `switch v := x.(type)`) | ✓ — compiles to `if/else if` with `typeof` / `instanceof` checks |
-| Slice expressions (`s[lo:hi]`) | ✓ |
+| Slice expressions (`s[lo:hi]`, `s[lo:hi:max]`) | ✓ — three-index form is parsed; `max` is ignored at runtime (JS has no capacity) |
 | `break` / `continue` / labeled `break` / labeled `continue` | ✓ |
 | `cap()`, `copy()`, `panic()` | ✓ |
 | Variadic spread (`f(slice...)`, `append(a, b...)`) | ✓ |
@@ -391,6 +391,7 @@ signatures into GoFront's internal type representation.
 | Type aliases (`type A = B`) | ✓ — transparent alias; no conversion needed between alias and original |
 | Numeric literal separators (`1_000_000`) | ✓ — underscores stripped at lex time |
 | Binary / octal literals (`0b1010`, `0o777`) | ✓ — passed through to JS which supports them natively |
+| Hex float literals (`0x1.8p1`) | ✓ — evaluated at lex time to a decimal value |
 
 ---
 
@@ -414,10 +415,8 @@ some were intentionally left out to keep the compiler simple.
 |---|---|
 | `goto` statement | Unstructured control flow has no clean JS translation. `goto` is rare in idiomatic Go. Not planned. |
 | Complex numbers (`complex64`, `complex128`) | `complex()`, `real()`, `imag()` builtins would need a runtime complex-number type. Rarely used in frontend code. |
-| Three-index slice expressions (`s[lo:hi:max]`) | Controls capacity of the resulting slice. JS arrays have no capacity concept, so the third index is meaningless. |
 | Dot imports (`import . "pkg"`) | Merges a package's namespace into the current scope. Rare in idiomatic Go and adds complexity for little benefit. |
 | Anonymous struct types (`var x struct { ... }`) | Inline struct type expressions without a name. Only named struct declarations are supported. |
-| Hex float literals (`0x1.0p10`) | Go 1.13 hex float format. JS `Number()` doesn't parse these natively. |
 | Unused import detection | Go rejects unused imports. GoFront silently allows them. |
 | Untyped constants | Go constants are untyped until assigned, allowing implicit numeric coercion. GoFront assigns a concrete type immediately. |
 
@@ -434,7 +433,6 @@ These features exist but behave differently due to fundamental JS/Go runtime dif
 | `rune` / `byte` types | Treated as `int` | Distinct types with UTF-8 encoding | JS strings are UTF-16. Proper rune handling would require wrapping every string operation. |
 | `range` over string | JS characters (UTF-16 code units via `Array.from`) | Go runes (UTF-8 code points) | Same UTF-16 vs UTF-8 mismatch. |
 | `len()` on strings | JS `.length` (UTF-16 code units) | Byte count (UTF-8) | Matching Go would require `TextEncoder` on every `len(s)` call. |
-| `string(65)` | Produces `"65"` (JS `String()`) | Produces `"A"` (Unicode code point) | JS `String()` converts numbers to their decimal representation, not the corresponding Unicode character. |
 
 ---
 
@@ -444,4 +442,4 @@ These features exist but behave differently due to fundamental JS/Go runtime dif
 npm test
 ```
 
-511 tests covering language features, type errors, edge cases, DOM (jsdom), external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, map iteration order, integer overflow semantics, unused variable detection, and both example apps.
+519 tests covering language features, type errors, edge cases, DOM (jsdom), external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, map iteration order, integer overflow semantics, unused variable detection, and both example apps.

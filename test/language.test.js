@@ -77,7 +77,8 @@ func main() {
   s := string(n)
   console.log(s)
 }`);
-	assertEqual(runJs(js), "42");
+	// Go: string(42) → "*" (Unicode code point 42)
+	assertEqual(runJs(js), "*");
 });
 
 test("if / else if / else", () => {
@@ -1845,6 +1846,114 @@ func main() {
 	const out = runJs(js);
 	assertContains(out, "one");
 	assertContains(out, "two");
+});
+
+// ═════════════════════════════════════════════════════════════
+// string(int) → Unicode code point
+// ═════════════════════════════════════════════════════════════
+
+section("string(int) conversion");
+
+test("string(65) produces 'A'", () => {
+	const { js } = compile(`package main
+func main() {
+	s := string(65)
+	println(s)
+}`);
+	const out = runJs(js);
+	assertEqual(out.trim(), "A");
+});
+
+test("string(9731) produces snowman ☃", () => {
+	const { js } = compile(`package main
+func main() {
+	s := string(9731)
+	println(s)
+}`);
+	const out = runJs(js);
+	assertEqual(out.trim(), "☃");
+});
+
+test("string(str) still uses String()", () => {
+	const { js } = compile(`package main
+func main() {
+	x := 42
+	s := string(x)
+	println(s)
+}`);
+	assertContains(js, "String.fromCodePoint");
+	const out = runJs(js);
+	assertEqual(out.trim(), "*");
+});
+
+// ═════════════════════════════════════════════════════════════
+// Three-index slice expressions
+// ═════════════════════════════════════════════════════════════
+
+section("Three-index slice expressions");
+
+test("s[1:3:5] compiles and slices correctly", () => {
+	const { js } = compile(`package main
+func main() {
+	s := []int{10, 20, 30, 40, 50}
+	t := s[1:3:5]
+	println(len(t))
+	println(t[0])
+	println(t[1])
+}`);
+	const out = runJs(js);
+	const lines = out.trim().split("\n");
+	assertEqual(lines[0], "2");
+	assertEqual(lines[1], "20");
+	assertEqual(lines[2], "30");
+});
+
+test("three-index slice type checks max index", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	s := []int{1, 2, 3}
+	t := s[0:1:2]
+	println(t[0])
+}`);
+	assertEqual(errors.length, 0);
+	const out = runJs(js);
+	assertEqual(out.trim(), "1");
+});
+
+// ═════════════════════════════════════════════════════════════
+// Hex float literals
+// ═════════════════════════════════════════════════════════════
+
+section("Hex float literals");
+
+test("0x1p10 equals 1024", () => {
+	const { js } = compile(`package main
+func main() {
+	n := 0x1p10
+	println(n)
+}`);
+	const out = runJs(js);
+	assertEqual(out.trim(), "1024");
+});
+
+test("0x1.8p1 equals 3", () => {
+	const { js } = compile(`package main
+func main() {
+	n := 0x1.8p1
+	println(n)
+}`);
+	const out = runJs(js);
+	assertEqual(out.trim(), "3");
+});
+
+test("0xAp-2 equals 2.5", () => {
+	const { js } = compile(`package main
+func main() {
+	n := 0xAp-2
+	println(n)
+}`);
+	const out = runJs(js);
+	assertEqual(out.trim(), "2.5");
 });
 
 // ── Entry point ───────────────────────────────────────────────

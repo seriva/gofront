@@ -118,9 +118,16 @@ export const expressionParserMethods = {
 				this.advance();
 				const low = this.check(T.COLON) ? null : this.parseExpr();
 				if (this.match(T.COLON)) {
-					const high = this.check(T.RBRACKET) ? null : this.parseExpr();
+					const high =
+						this.check(T.RBRACKET) || this.check(T.COLON)
+							? null
+							: this.parseExpr();
+					let max = null;
+					if (this.match(T.COLON)) {
+						max = this.parseExpr();
+					}
 					this.expect(T.RBRACKET);
-					expr = { kind: "SliceExpr", expr, low, high };
+					expr = { kind: "SliceExpr", expr, low, high, max };
 				} else {
 					this.expect(T.RBRACKET);
 					expr = { kind: "IndexExpr", expr, index: low };

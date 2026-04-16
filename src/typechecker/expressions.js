@@ -95,6 +95,7 @@ export const expressionCheckMethods = {
 				const bt = this.checkExpr(expr.expr, scope);
 				if (expr.low) this.checkExpr(expr.low, scope);
 				if (expr.high) this.checkExpr(expr.high, scope);
+				if (expr.max) this.checkExpr(expr.max, scope);
 				if (isAny(bt)) return ANY;
 				if (bt.kind === "slice" || bt.kind === "array")
 					return { kind: "slice", elem: bt.elem };
