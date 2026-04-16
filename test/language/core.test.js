@@ -611,14 +611,15 @@ func main() {
 	assertEqual(runJs(js), "10 20");
 });
 
-test("range over string yields index and char", () => {
+test("range over string yields index and rune (integer code point)", () => {
+	// Go spec: iterating a string yields (byte-index, rune) where rune is an integer
 	const { js } = compile(`package main
 func main() {
-  for i, ch := range "hi!" {
-    console.log(i, ch)
+  for i, r := range "hi!" {
+    console.log(i, r)
   }
 }`);
-	assertEqual(runJs(js), "0 h\n1 i\n2 !");
+	assertEqual(runJs(js), "0 104\n1 105\n2 33");
 });
 
 test("fallthrough in switch", () => {

@@ -145,7 +145,7 @@ readable and debuggable — no name mangling, no opaque wrappers.
 | `for {}` | `while (true) {}` |
 | `for i, v := range slice` | `for (const [i, v] of arr.entries())` |
 | `for k, v := range map` | `for (const [k, v] of Object.entries(m))` |
-| `for i, ch := range str` | `for (const [i, ch] of Array.from(s).entries())` |
+| `for i, r := range str` | `for (const [i, r] of Array.from(s, (c, i) => [i, c.codePointAt(0)]))` — `r` is a rune integer |
 | `for i := range n` | `for (let i = 0; i < n; i++)` |
 | `switch` / `fallthrough` | `switch` / case fall-through |
 | `switch v := x.(type)` | `if/else if` with `typeof` / `instanceof` checks |
@@ -387,6 +387,8 @@ signatures into GoFront's internal type representation.
 | `math` package | ✓ — `Sqrt`, `Pow`, `Abs`, `Floor`, `Ceil`, `Round`, `Log`, trig functions + `Pi`, `E`, `MaxInt` constants |
 | `errors` package | ✓ — `errors.New` (returns plain string) |
 | `time` package (partial) | ✓ — `Now`, `Since`, `Sleep` + `Millisecond`, `Second`, `Minute`, `Hour` constants |
+| `unicode` package | ✓ — `IsLetter`, `IsDigit`, `IsSpace`, `IsUpper`, `IsLower`, `IsPunct`, `IsControl`, `IsPrint`, `IsGraphic`, `ToUpper`, `ToLower` |
+| `os` package (partial) | ✓ — `Exit`, `Args`, `Getenv` |
 | External `.d.ts` types | ✓ |
 | npm package types | ✓ |
 | Multi-file packages | ✓ |
@@ -408,6 +410,12 @@ signatures into GoFront's internal type representation.
 | Binary / octal literals (`0b1010`, `0o777`) | ✓ — passed through to JS which supports them natively |
 | Hex float literals (`0x1.8p1`) | ✓ — evaluated at lex time to a decimal value |
 | Untyped constants | ✓ — `const x = 5` produces an untyped int that coerces to `int` or `float64` on use (Go spec §Constants) |
+| Positional (unkeyed) struct literals (`Point{1, 2}`) | ✓ |
+| Method expressions (`T.Method`) | ✓ — compiles to `(recv, ...args) => recv.Method(...args)` |
+| Method values (`x.Method`) | ✓ — compiles to `x.Method.bind(x)` |
+| Struct and array equality (`a == b`) | ✓ — deep comparison via tree-shaken `__equal` helper |
+| Multi-value function forwarding (`f(g())`) | ✓ — single multi-return call forwarded as spread |
+| Terminating statement analysis | ✓ — missing `return` in non-void functions is a type error |
 
 ---
 
@@ -435,13 +443,15 @@ developer would expect:
 - **Expressions**: all arithmetic, comparison, logical, and bitwise operators (including
   `&^`), compound assignment, increment/decrement, type conversions, type assertions
   (plain and comma-ok), slice expressions (`a[lo:hi]`, `a[lo:hi:max]`), composite
-  literals, `[...]T{...}` inference, rune literals, raw string literals, variadic
-  spread, blank identifier `_`.
+  literals (keyed and positional), `[...]T{...}` inference, rune literals, raw string
+  literals, variadic spread, blank identifier `_`, method expressions (`T.Method`),
+  method values (`x.Method`), struct/array equality, multi-value function forwarding.
 - **Builtins**: `len`, `cap`, `append`, `copy`, `make`, `delete`, `new`, `clear`, `min`,
   `max`, `print`, `println`, `panic`, `recover`, `fmt.Sprintf`/`Printf`/`Println`/`Errorf`.
 - **Standard library shims**: `strings` (20 functions), `strconv` (8 functions),
   `sort` (6 functions), `math` (20 functions + 6 constants), `errors.New`,
-  `time.Now`/`Since`/`Sleep` + duration constants.
+  `time.Now`/`Since`/`Sleep` + duration constants, `unicode` (11 functions),
+  `os.Exit`/`Args`/`Getenv`.
 - **Packages**: multi-file packages, cross-package imports, import aliases,
   dot imports, blank imports, unused import detection.
 
@@ -464,7 +474,6 @@ These features are intentional additions for the JavaScript platform:
 | Range over iterator functions (Go 1.23) | `func(yield func(K, V) bool)` protocol. | Feasible. |
 | Complex numbers (`complex64`, `complex128`, `3i`) | Would need a runtime complex type. Rarely used in frontend. | Feasible but low priority. |
 | `goto` | No clean JS translation. Rare in idiomatic Go. | Not planned. |
-| Method expressions (`T.Method`) | Requires function-wrapping with explicit receiver. | Feasible. |
 | Goroutines / channels / `select` | Go's concurrency model has no JS equivalent. A userland scheduler defeats the "no runtime" goal. | Out of scope. |
 | `unsafe`, `reflect`, `cgo` | Require memory model or runtime type metadata that JS cannot provide. | Out of scope. |
 
@@ -483,63 +492,22 @@ you know exactly what to expect.
 | Fixed-size arrays (`[n]T`) | Plain JS arrays (no length enforcement) | Fixed at compile time | Runtime enforcement adds overhead for no JS benefit. |
 | `nil` | Maps to `null` | Typed nil (distinct per type) | JS has no typed nil concept. |
 | `rune` / `byte` | Treated as `int` | Distinct types with UTF-8 encoding | JS strings are UTF-16. |
-| `range` over string | JS characters (UTF-16 via `Array.from`) | Runes (UTF-8 code points) | UTF-16 vs UTF-8 mismatch. |
+| `range` over string | Rune integers via `.codePointAt()` | Runes (UTF-8 code points) | Close match — indices are byte-sequential, values are code points. |
 | `len()` on strings | JS `.length` (UTF-16 code units) | Byte count (UTF-8) | Matching Go would require `TextEncoder` on every call. |
 | `error` type | Plain string | Interface `{ Error() string }` | Practical simplification for JS. |
 | `defer` | `try`/`finally` with a defer stack | Runtime stack unwinding | Covers most cases but not identical to Go internals. |
 | Struct field tags | Parsed, silently discarded | Available via `reflect` | No reflection = no use for tag values. |
 | Pointers (`&x`, `*p`) | Syntax accepted, semantically transparent | True memory indirection | JS has no pointer model. |
 | Three-index slice (`a[lo:hi:max]`) | `max` is parsed but ignored | Sets result capacity | JS arrays have no capacity. |
-| Exported / unexported | Uppercase names exported across packages | Access enforced per-identifier | Cross-package access to lowercase names is not yet an error. |
+| Exported / unexported | Enforced for GoFront packages; external `.d.ts`/npm namespaces are exempt | Access enforced uniformly | External JS APIs use lowercase names by convention. |
 
 ---
 
 ## Roadmap
 
-GoFront's guiding principle is
-**no runtime** — features that need a scheduler, runtime type descriptors, or raw memory
-access are out of scope.
-
-### v0.0.4
-
-**Theme: Spec compliance & bug fixes** — close the most impactful correctness gaps with
-low-effort changes. See the full [gap analysis](docs/v0.0.4-roadmap.md).
-
-| Feature | Tier | Effort | Notes |
-|---|---|---|---|
-| Blank identifier `_ = expr` | Bug fix | Low | `_ = f()` rejected as undefined |
-| Comma-ok with `=` assignment | Bug fix | Low | `v, ok = m[k]` only works with `:=` |
-| `interface{}` assignability | Bug fix | Low–Med | `any` works but explicit `interface{}` doesn't |
-| Positional struct literals | Bug fix | Medium | `Point{1, 2}` generates empty struct |
-| `for range` string yields runes | Bug fix | Low–Med | Loop var is JS string, not integer code point |
-| Type switch multi-case capture var | Bug fix | Low–Med | False "unused variable" error |
-| Exported/unexported enforcement | Feature | Low | Reject cross-package access to lowercase identifiers |
-| Const expression repetition + `iota` | Feature | Low–Med | `1 << iota` patterns in grouped const blocks |
-| String indexing → byte (`.charCodeAt`) | Feature | Low | `s[i]` must return a byte, not a single-char string |
-| Method values (bound receivers) | Feature | Low–Med | Emit `.bind()` when method is used as value, not called |
-| Slice → array conversion | Feature | Low | `[N]T(slice)` — Go 1.20 feature |
-| Additional stdlib shims | Feature | Low–Med | `unicode`, `os`, `bytes`, `path` |
-
-### v0.0.5
-
-**Theme: Major language features.** These are high-complexity items that touch multiple
-compiler stages.
-
-| Feature | Difficulty | Notes |
-|---|---|---|
-| Generics (`[T any]`) | High | Biggest modern Go feature gap. Touches every compiler stage. See [design plan](docs/generics-plan.md). |
-| Range over iterator functions | Medium | Go 1.23 `func(yield func(K, V) bool)` protocol. See [design plan](docs/range-iter-plan.md). |
-| Complex number types | Medium | New type kind + builtins (`complex`, `real`, `imag`). See [design plan](docs/complex-numbers-plan.md). |
-| Richer error values | Medium | Move `error` from plain string to an interface-like value. See [design plan](docs/error-values-plan.md). |
-| Better array semantics | Medium | Arrays currently indistinguishable from slices at runtime. See [design plan](docs/array-semantics-plan.md). |
-| Better pointer model | High | Current `{ value: T }` boxing is useful but shallow. See [design plan](docs/pointer-model-plan.md). |
-| Method expressions (`T.Method`) | Medium | Compile-time transform — wrap method with explicit receiver param |
-| Struct / array equality (`==`, `!=`) | Medium | Tree-shaken `__equal` helper for deep comparison |
-| Terminating statement analysis | Medium | Verify all code paths return in non-void functions |
-| Multi-value function forwarding | Medium | `f(g())` where g returns multiple values |
-
-Explicitly **out of scope**: goroutines, channels, `select`, `unsafe`, full `reflect`,
-`cgo`, exact integer overflow, Go-equivalent map semantics.
+See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full roadmap and release history.
+Design documents for planned features are organised by release under `docs/v*/`
+(e.g. [`docs/v0.0.5/`](docs/v0.0.5/)).
 
 ---
 
@@ -549,7 +517,7 @@ Explicitly **out of scope**: goroutines, channels, `select`, `unsafe`, full `ref
 npm test
 ```
 
-611 tests covering language features, type errors, edge cases, DOM (jsdom), external
+655 tests covering language features, type errors, edge cases, DOM (jsdom), external
 `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, map
 iteration order, integer overflow semantics, unused variable detection, unused import
 detection, semantic difference verification, stdlib shim packages, and both example apps.

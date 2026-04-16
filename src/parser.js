@@ -383,31 +383,34 @@ export class Parser {
 		const decls = [];
 		if (this.match(T.LPAREN)) {
 			let iotaVal = 0;
+			let prevRawExprs = null; // raw AST (with iota Idents) from the previous spec
+			let prevType = null;
 			while (!this.check(T.RPAREN) && !this.check(T.EOF)) {
 				const names = [this.expect(T.IDENT).value];
 				while (this.match(T.COMMA)) names.push(this.expect(T.IDENT).value);
 				let type = null;
-				let value;
+				let rawExprs; // before iota substitution
 				if (this.check(T.ASSIGN)) {
 					this.advance();
-					value = this.parseExprList();
+					rawExprs = this.parseExprList();
+					prevRawExprs = rawExprs;
+					prevType = null;
 				} else if (!this.check(T.SEMICOLON) && !this.check(T.RPAREN)) {
 					// optional type annotation before =
 					type = this.parseType();
+					prevType = type;
 					this.expect(T.ASSIGN);
-					value = this.parseExprList();
+					rawExprs = this.parseExprList();
+					prevRawExprs = rawExprs;
 				} else {
-					// implicit iota
-					value = [
+					// Omitted expression — repeat previous expression with updated iota
+					rawExprs = prevRawExprs ?? [
 						{ kind: "BasicLit", litKind: "INT", value: String(iotaVal) },
 					];
+					type = prevType ?? null;
 				}
-				// Replace iota identifier with current counter value
-				value = value.map((v) =>
-					v.kind === "Ident" && v.name === "iota"
-						? { kind: "BasicLit", litKind: "INT", value: String(iotaVal) }
-						: v,
-				);
+				// Substitute iota deeply in a cloned expression AST
+				const value = rawExprs.map((v) => this._substituteIota(v, iotaVal));
 				decls.push({ names, type, value });
 				iotaVal++;
 				this.semi();
@@ -424,6 +427,25 @@ export class Parser {
 		}
 		this.semi();
 		return { kind: "ConstDecl", decls };
+	}
+
+	// Deep-clone an expression AST, replacing `iota` identifiers with the given integer.
+	_substituteIota(node, val) {
+		if (!node || typeof node !== "object") return node;
+		if (node.kind === "Ident" && node.name === "iota") {
+			return { kind: "BasicLit", litKind: "INT", value: String(val) };
+		}
+		// Shallow-clone the node, then recursively substitute in all child properties
+		const clone = { ...node };
+		for (const key of Object.keys(clone)) {
+			const v = clone[key];
+			if (Array.isArray(v)) {
+				clone[key] = v.map((item) => this._substituteIota(item, val));
+			} else if (v && typeof v === "object" && v.kind) {
+				clone[key] = this._substituteIota(v, val);
+			}
+		}
+		return clone;
 	}
 }
 

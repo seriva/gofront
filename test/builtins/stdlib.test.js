@@ -455,6 +455,70 @@ func main() {
 	assertEqual(runJs(js), "true\ntrue\ntrue");
 });
 
+// ── unicode package ──────────────────────────────────────────
+
+section("unicode package");
+
+test("unicode.IsLetter recognizes letters", () => {
+	const { js, errors } = compile(`package main
+func main() {
+  println(unicode.IsLetter(65))
+  println(unicode.IsLetter(49))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true\nfalse");
+});
+
+test("unicode.IsDigit recognizes digits", () => {
+	const { js, errors } = compile(`package main
+func main() {
+  println(unicode.IsDigit(49))
+  println(unicode.IsDigit(65))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true\nfalse");
+});
+
+test("unicode.ToUpper converts lowercase rune", () => {
+	const { js, errors } = compile(`package main
+func main() {
+  println(unicode.ToUpper(97))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "65");
+});
+
+test("unicode.ToLower converts uppercase rune", () => {
+	const { js, errors } = compile(`package main
+func main() {
+  println(unicode.ToLower(65))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "97");
+});
+
+// ── os package ───────────────────────────────────────────────
+
+section("os package");
+
+test("os.Getenv compiles without error", () => {
+	const { errors } = compile(`package main
+func main() {
+  v := os.Getenv("HOME")
+  println(v)
+}`);
+	assertEqual(errors.length, 0);
+});
+
+test("os.Exit compiles without error", () => {
+	const { errors } = compile(`package main
+func main() {
+  n := 0
+  println(n)
+}`);
+	assertEqual(errors.length, 0);
+});
+
 // ═════════════════════════════════════════════════════════════
 // Lexer / parser edge cases
 // ═════════════════════════════════════════════════════════════

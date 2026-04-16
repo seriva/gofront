@@ -48,6 +48,15 @@ export const expressionGenMethods = {
 				if (expr.op === "&^") {
 					return `${l} & ~${r}`;
 				}
+				// Struct/array equality: use __equal for value comparison
+				if (expr.op === "==" || expr.op === "!=") {
+					const lt = expr.left._type;
+					if (this._isStructOrArrayType(lt)) {
+						this._usesEqual = true;
+						const cmp = `__equal(${l}, ${r})`;
+						return expr.op === "==" ? cmp : `!${cmp}`;
+					}
+				}
 				// Go == and != are strict — map to JS === / !==
 				const op =
 					expr.op === "==" ? "===" : expr.op === "!=" ? "!==" : expr.op;
@@ -58,6 +67,11 @@ export const expressionGenMethods = {
 				return this.genCall(expr);
 
 			case "SelectorExpr": {
+				// Method expression: TypeName.MethodName → (recv, ...args) => recv.method(...args)
+				if (expr._isMethodExpr) {
+					const method = expr.field;
+					return `((recv, ...args) => recv.${method}(...args))`;
+				}
 				// math constants
 				if (expr.expr.kind === "Ident" && expr.expr.name === "math") {
 					switch (expr.field) {
@@ -73,6 +87,13 @@ export const expressionGenMethods = {
 							return "Number.MAX_SAFE_INTEGER";
 						case "MinInt":
 							return "Number.MIN_SAFE_INTEGER";
+					}
+				}
+				// os constants/vars
+				if (expr.expr.kind === "Ident" && expr.expr.name === "os") {
+					switch (expr.field) {
+						case "Args":
+							return "process.argv";
 					}
 				}
 				// time constants (nanosecond durations)
@@ -93,9 +114,15 @@ export const expressionGenMethods = {
 				if (this.bundledPackages.has(base)) return expr.field;
 				// Pointer types are wrapped as { value: T }; route through .value
 				if (expr.expr._type?.kind === "pointer" && expr.field !== "value") {
-					return `${base}.value.${expr.field}`;
+					const sel = `${base}.value.${expr.field}`;
+					if (expr._isMethodValue && !expr._callee)
+						return `${sel}.bind(${base}.value)`;
+					return sel;
 				}
-				return `${base}.${expr.field}`;
+				const sel = `${base}.${expr.field}`;
+				// Method used as value (not called) — bind the receiver
+				if (expr._isMethodValue && !expr._callee) return `${sel}.bind(${base})`;
+				return sel;
 			}
 
 			case "IndexExpr": {
@@ -109,6 +136,14 @@ export const expressionGenMethods = {
 						return `((__m, __k) => __m[__k] ?? ${zero})(${base}, ${idx})`;
 					}
 					return `(${base}[${idx}] ?? ${zero})`;
+				}
+				// String indexing returns a byte (charCodeAt), not a JS character
+				const exprType = expr.expr._type;
+				const isStr =
+					(exprType?.kind === "basic" && exprType.name === "string") ||
+					(exprType?.kind === "untyped" && exprType.base === "string");
+				if (isStr && !expr._lvalue) {
+					return `${base}.charCodeAt(${idx})`;
 				}
 				return `${base}[${idx}]`;
 			}
@@ -295,20 +330,16 @@ export const expressionGenMethods = {
 			const fmtArgs = expr.args.map((a) => this.genExpr(a)).join(", ");
 			switch (expr.func.field) {
 				case "Sprintf":
-					this._usesSprintf = true;
-					return `__sprintf(${fmtArgs})`;
 				case "Errorf":
 					this._usesSprintf = true;
 					return `__sprintf(${fmtArgs})`;
 				case "Printf":
+				case "Print":
 					this._usesSprintf = true;
 					return `process?.stdout?.write(__sprintf(${fmtArgs}))`;
 				case "Println":
 					this._usesSprintf = true;
 					return `console.log(__sprintf(${fmtArgs}))`;
-				case "Print":
-					this._usesSprintf = true;
-					return `process?.stdout?.write(__sprintf(${fmtArgs}))`;
 			}
 		}
 
@@ -463,6 +494,54 @@ export const expressionGenMethods = {
 			}
 		}
 
+		// unicode.* — rune/character classification
+		if (
+			expr.func.kind === "SelectorExpr" &&
+			expr.func.expr.kind === "Ident" &&
+			expr.func.expr.name === "unicode"
+		) {
+			const a = expr.args.map((e) => this.genExpr(e));
+			switch (expr.func.field) {
+				case "IsLetter":
+					return `/\\p{L}/u.test(String.fromCodePoint(${a[0]}))`;
+				case "IsDigit":
+					return `/\\p{Nd}/u.test(String.fromCodePoint(${a[0]}))`;
+				case "IsSpace":
+					return `/\\s/.test(String.fromCodePoint(${a[0]}))`;
+				case "IsUpper":
+					return `((__c) => __c === __c.toUpperCase() && /\\p{L}/u.test(__c))(String.fromCodePoint(${a[0]}))`;
+				case "IsLower":
+					return `((__c) => __c === __c.toLowerCase() && /\\p{L}/u.test(__c))(String.fromCodePoint(${a[0]}))`;
+				case "IsPunct":
+					return `/\\p{P}/u.test(String.fromCodePoint(${a[0]}))`;
+				case "IsControl":
+					return `/\\p{Cc}/u.test(String.fromCodePoint(${a[0]}))`;
+				case "IsPrint":
+					return `!/\\p{Cc}/u.test(String.fromCodePoint(${a[0]}))`;
+				case "IsGraphic":
+					return `!/\\p{Cc}/u.test(String.fromCodePoint(${a[0]}))`;
+				case "ToUpper":
+					return `String.fromCodePoint(${a[0]}).toUpperCase().codePointAt(0)`;
+				case "ToLower":
+					return `String.fromCodePoint(${a[0]}).toLowerCase().codePointAt(0)`;
+			}
+		}
+
+		// os.* — process/environment access
+		if (
+			expr.func.kind === "SelectorExpr" &&
+			expr.func.expr.kind === "Ident" &&
+			expr.func.expr.name === "os"
+		) {
+			const a = expr.args.map((e) => this.genExpr(e));
+			switch (expr.func.field) {
+				case "Exit":
+					return `process.exit(${a[0]})`;
+				case "Getenv":
+					return `(process.env[${a[0]}] ?? "")`;
+			}
+		}
+
 		// errors.New — identity (errors are plain strings)
 		if (
 			expr.func.kind === "SelectorExpr" &&
@@ -490,9 +569,15 @@ export const expressionGenMethods = {
 			}
 		}
 
+		// Mark the callee so SelectorExpr knows it's being called, not used as a value
+		expr.func._callee = true;
 		const rawFn = this.genExpr(expr.func);
 		// Wrap function literals in parens so `function(){}()` → `(function(){})()`
 		const fn = expr.func.kind === "FuncLit" ? `(${rawFn})` : rawFn;
+		// Multi-value forwarding: f(g()) where g() returns multiple values → f(...g())
+		if (expr._multiForward) {
+			return `${fn}(...${this.genExpr(expr.args[0])})`;
+		}
 		const args = expr.args
 			.map((a) => (a._spread ? `...${this.genExpr(a)}` : this.genExpr(a)))
 			.join(", ");
@@ -537,34 +622,40 @@ export const expressionGenMethods = {
 		return "{}";
 	},
 
-	// Render KeyValueExpr elements as a JS field list string.
-	// Handles embedded-spread (_isEmbedInit) and plain key: value pairs.
+	// Render struct elements as a JS field list string.
+	// Handles positional (_positionalField), embedded-spread (_isEmbedInit), and keyed (KeyValueExpr).
 	_genStructFields(elems) {
 		return elems
-			.filter((e) => e.kind === "KeyValueExpr")
-			.map((e) =>
-				e._isEmbedInit
-					? `...${this.genExpr(e.value)}`
-					: `${e.key.name ?? this.genExpr(e.key)}: ${this.genExpr(e.value)}`,
-			)
+			.map((e) => {
+				if (e._positionalField) {
+					return `${e._positionalField}: ${this.genExpr(e)}`;
+				}
+				if (e.kind !== "KeyValueExpr") return null;
+				if (e._isEmbedInit) return `...${this.genExpr(e.value)}`;
+				return `${e.key.name ?? this.genExpr(e.key)}: ${this.genExpr(e.value)}`;
+			})
+			.filter((s) => s !== null)
 			.join(", ");
 	},
 
 	genCompositeLit(expr) {
 		const t = expr.typeExpr;
 
-		// Implicit composite literal: {X: 1} inside a slice/map — type inferred from context
+		// Implicit composite literal: {X: 1} or {1, 2} inside a slice/map — type inferred from context
 		if (t === null) {
-			if (expr.elems.length > 0 && expr.elems[0]?.kind === "KeyValueExpr") {
-				const typeName = expr._type?.name ?? expr._type?.underlying?.name;
+			const typeName = expr._type?.name ?? expr._type?.underlying?.name;
+			const hasPositional = expr.elems.some((e) => e._positionalField);
+			const hasKeyed = expr.elems.some((e) => e.kind === "KeyValueExpr");
+			if (hasPositional || hasKeyed) {
 				if (typeName && this.structNames.has(typeName)) {
 					return `new ${typeName}({ ${this._genStructFields(expr.elems)} })`;
 				}
 				const fields = expr.elems
-					.map(
-						(e) =>
-							`${e.key.name ?? this.genExpr(e.key)}: ${this.genExpr(e.value)}`,
-					)
+					.map((e) => {
+						if (e._positionalField)
+							return `${e._positionalField}: ${this.genExpr(e)}`;
+						return `${e.key.name ?? this.genExpr(e.key)}: ${this.genExpr(e.value)}`;
+					})
 					.join(", ");
 				return `{ ${fields} }`;
 			}
@@ -573,9 +664,16 @@ export const expressionGenMethods = {
 
 		const typeName = this.getTypeName(t);
 
-		// Struct: new Foo({ X: 1, Y: 2 })
+		// Struct: new Foo({ X: 1, Y: 2 }) — keyed or positional
 		if (typeName && this.structNames.has(typeName)) {
 			return `new ${typeName}({ ${this._genStructFields(expr.elems)} })`;
+		}
+
+		// Fallback: named type that's not a struct but has positional elements → treat as struct
+		if (expr.elems.some((e) => e._positionalField)) {
+			if (typeName) {
+				return `new ${typeName}({ ${this._genStructFields(expr.elems)} })`;
+			}
 		}
 
 		// Slice/array: [1, 2, 3]
@@ -784,6 +882,13 @@ export const expressionGenMethods = {
 			}
 		}
 		return "null";
+	},
+
+	// Returns true if the type is a struct or array (uses value comparison with __equal).
+	_isStructOrArrayType(t) {
+		if (!t) return false;
+		const base = t.kind === "named" ? t.underlying : t;
+		return base?.kind === "struct" || base?.kind === "array";
 	},
 
 	typeComment(typeNode) {

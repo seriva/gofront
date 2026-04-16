@@ -48,6 +48,8 @@ export const expressionCheckMethods = {
 			case "Ident": {
 				const t = scope.lookup(expr.name);
 				if (!t) return this.err(`Undefined: '${expr.name}'`, expr);
+				// Mark type-name identifiers so SelectorExpr can detect method expressions
+				if (this.types.has(expr.name)) expr._isTypeRef = true;
 				return t;
 			}
 
@@ -79,7 +81,33 @@ export const expressionCheckMethods = {
 
 			case "SelectorExpr": {
 				const baseType = this.checkExpr(expr.expr, scope);
-				return this.fieldType(baseType, expr.field, expr);
+				// Method expression: TypeName.MethodName → func(ReceiverType, ...params) ret
+				if (expr.expr._isTypeRef) {
+					let base = baseType.kind === "named" ? baseType.underlying : baseType;
+					base = this.resolveType(base);
+					if (base?.kind === "struct" && base.methods?.has(expr.field)) {
+						const methodType = base.methods.get(expr.field);
+						// Return a func type with the receiver prepended to params
+						expr._isMethodExpr = true;
+						expr._methodExprRecv = baseType;
+						return {
+							kind: "func",
+							params: [baseType, ...(methodType.params ?? [])],
+							returns: methodType.returns ?? [],
+							variadic: methodType.variadic,
+						};
+					}
+				}
+				const ft = this.fieldType(baseType, expr.field, expr);
+				// Mark method selectors so codegen can emit .bind() when used as a value
+				if (ft?.kind === "func") {
+					let base = baseType.kind === "named" ? baseType.underlying : baseType;
+					base = this.resolveType(base);
+					if (base?.kind === "struct" && base.methods?.has(expr.field)) {
+						expr._isMethodValue = true;
+					}
+				}
+				return ft;
 			}
 
 			case "IndexExpr": {
@@ -194,7 +222,20 @@ export const expressionCheckMethods = {
 			return this.checkBuiltin(fnType.name, expr, argTypes, scope);
 		}
 
-		const argTypes = expr.args.map((a) => this.checkExpr(a, scope));
+		// Multi-value forwarding: f(g()) where g() returns multiple values
+		// When a single argument is a multi-return call, flatten its tuple into args.
+		let argTypes;
+		if (expr.args.length === 1 && expr.args[0].kind === "CallExpr") {
+			const argType = this.checkExpr(expr.args[0], scope);
+			if (argType?.kind === "tuple") {
+				expr._multiForward = true; // flag for codegen
+				argTypes = argType.types;
+			} else {
+				argTypes = [argType];
+			}
+		} else {
+			argTypes = expr.args.map((a) => this.checkExpr(a, scope));
+		}
 
 		if (isAny(fnType)) return ANY;
 
@@ -285,6 +326,30 @@ export const expressionCheckMethods = {
 		const base = t.kind === "named" ? t.underlying : t;
 
 		if (base?.kind === "struct") {
+			// Detect positional (unkeyed) literal: all elements must be non-KeyValueExpr
+			const hasPositional = expr.elems.some((e) => e.kind !== "KeyValueExpr");
+			const hasKeyed = expr.elems.some((e) => e.kind === "KeyValueExpr");
+			if (hasPositional && hasKeyed) {
+				this.err("mixture of field:value and value initializers", expr);
+			}
+			if (hasPositional) {
+				// Map positional elements to struct fields by declaration order
+				const fieldNames = [...(base.fields?.keys() ?? [])];
+				for (let i = 0; i < expr.elems.length; i++) {
+					const elem = expr.elems[i];
+					const fieldName = fieldNames[i];
+					if (!fieldName) {
+						this.err("too many values in struct literal", elem);
+						continue;
+					}
+					const fieldType = base.fields.get(fieldName);
+					const vt = this.checkExpr(elem, scope);
+					if (fieldType) this.assertAssignable(fieldType, vt, elem);
+					// Annotate for codegen
+					elem._positionalField = fieldName;
+				}
+				return t;
+			}
 			for (const elem of expr.elems) {
 				if (elem.kind === "KeyValueExpr") {
 					const keyName = elem.key.name;

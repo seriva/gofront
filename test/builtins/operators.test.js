@@ -142,15 +142,35 @@ func main() {
 
 section("String indexing");
 
-test("s[i] returns the character at that position", () => {
-	// GoFront string indexing delegates to JS string indexing — returns the character
+test("s[i] returns the byte value (charCodeAt) at that position", () => {
+	// Go spec: s[i] on a string returns a byte (uint8 integer), not a character
 	const js = compile(`package main
 func main() {
 	s := "ABC"
 	console.log(s[0])
 	console.log(s[1])
 }`).js;
-	assertEqual(runJs(js), "A\nB");
+	assertEqual(runJs(js), "65\n66");
+});
+
+test("byte arithmetic on string index", () => {
+	const { js, errors } = compile(`package main
+func main() {
+  s := "ABC"
+  println(s[0] - 65)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "0");
+});
+
+test("string indexing in expression context", () => {
+	const { js, errors } = compile(`package main
+func main() {
+  s := "hello"
+  println(s[0] == 104)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true");
 });
 
 // ── Full slice xs[:] ─────────────────────────────────────────

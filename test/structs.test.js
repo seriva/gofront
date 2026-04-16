@@ -461,6 +461,166 @@ func main() {
 	assertEqual(errors.length, 0);
 });
 
+// ── Positional (unkeyed) struct literals ─────────────────────
+
+section("Positional (unkeyed) struct literals");
+
+test("Point{1, 2} generates correct struct fields", () => {
+	const { js, errors } = compile(`package main
+type Point struct {
+  X int
+  Y int
+}
+func main() {
+  p := Point{1, 2}
+  println(p.X, p.Y)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "1 2");
+});
+
+test("positional struct literal in slice []Point{{1,2},{3,4}}", () => {
+	const { js, errors } = compile(`package main
+type Point struct { X int; Y int }
+func main() {
+  pts := []Point{{1, 2}, {3, 4}}
+  for _, p := range pts {
+    println(p.X, p.Y)
+  }
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "1 2\n3 4");
+});
+
+test("three-field struct positional literal", () => {
+	const { js, errors } = compile(`package main
+type RGB struct { R int; G int; B int }
+func main() {
+  c := RGB{255, 128, 0}
+  println(c.R, c.G, c.B)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "255 128 0");
+});
+
+test("positional struct literal rejects wrong count", () => {
+	const { errors } = compile(`package main
+type Point struct { X int; Y int }
+func main() {
+  _ = Point{1, 2, 3}
+}`);
+	assertErrorContains(errors, "too many values");
+});
+
+// ── Method values (.bind) ─────────────────────────────────────
+
+section("Method values (.bind)");
+
+test("bound method value retains receiver", () => {
+	const { js, errors } = compile(`package main
+type Counter struct { N int }
+func (c Counter) Value() int { return c.N }
+func main() {
+  c := Counter{N: 42}
+  f := c.Value
+  println(f())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "42");
+});
+
+test("bound method passed to higher-order function", () => {
+	const { js, errors } = compile(`package main
+type Greeter struct { Name string }
+func (g Greeter) Greet() string { return "Hello " + g.Name }
+func call(f func() string) string { return f() }
+func main() {
+  g := Greeter{Name: "World"}
+  println(call(g.Greet))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "Hello World");
+});
+
+// ── Struct and array equality ─────────────────────────────────
+
+section("Struct and array equality");
+
+test("two structs with same fields are equal", () => {
+	const { js, errors } = compile(`package main
+type Point struct { X int; Y int }
+func main() {
+  a := Point{X: 1, Y: 2}
+  b := Point{X: 1, Y: 2}
+  println(a == b)
+  println(a != b)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true\nfalse");
+});
+
+test("two structs with different fields are not equal", () => {
+	const { js, errors } = compile(`package main
+type Point struct { X int; Y int }
+func main() {
+  a := Point{X: 1, Y: 2}
+  b := Point{X: 1, Y: 3}
+  println(a == b)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "false");
+});
+
+test("slice == nil is still valid (not struct equality)", () => {
+	const { js, errors } = compile(`package main
+func main() {
+  var s []int
+  println(s == nil)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true");
+});
+
+test("comparing two non-nil slices is a type error", () => {
+	const { errors } = compile(`package main
+func main() {
+  a := []int{1, 2}
+  b := []int{1, 2}
+  println(a == b)
+}`);
+	assertErrorContains(errors, "not defined on");
+});
+
+// ── Method expressions (T.Method) ────────────────────────────
+
+section("Method expressions (T.Method)");
+
+test("T.Method produces a function taking a receiver", () => {
+	const { js, errors } = compile(`package main
+type Point struct { X int; Y int }
+func (p Point) Sum() int { return p.X + p.Y }
+func main() {
+  f := Point.Sum
+  p := Point{X: 3, Y: 4}
+  println(f(p))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "7");
+});
+
+test("method expression passed to higher-order function", () => {
+	const { js, errors } = compile(`package main
+type Counter struct { N int }
+func (c Counter) Value() int { return c.N }
+func apply(f func(Counter) int, c Counter) int { return f(c) }
+func main() {
+  c := Counter{N: 10}
+  println(apply(Counter.Value, c))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "10");
+});
+
 // ═════════════════════════════════════════════════════════════
 // switch with init statement
 // ═════════════════════════════════════════════════════════════

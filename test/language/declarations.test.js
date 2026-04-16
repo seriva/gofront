@@ -785,4 +785,89 @@ func main() {
 	assertEqual(runJs(js), "sum 30");
 });
 
+// ── Blank identifier in assignments ──────────────────────────
+
+section("Blank identifier in assignments");
+
+test("_ = expr discards value without error", () => {
+	const { js, errors } = compile(`package main
+func sideEffect() int { return 42 }
+func main() {
+  _ = sideEffect()
+  println("ok")
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "ok");
+});
+
+test("_, err = f() discards first return value", () => {
+	const { js, errors } = compile(`package main
+func twoVals() (int, string) { return 1, "hello" }
+func main() {
+  var s string
+  _, s = twoVals()
+  println(s)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "hello");
+});
+
+test("x, _ = f() discards second return value", () => {
+	const { js, errors } = compile(`package main
+func twoVals() (int, string) { return 7, "discard" }
+func main() {
+  var n int
+  n, _ = twoVals()
+  println(n)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "7");
+});
+
+// ── Const expression repetition with iota ────────────────────
+
+section("Const expression repetition with iota");
+
+test("repeated iota expression B = iota*2", () => {
+	const { js, errors } = compile(`package main
+const (
+  A = iota * 2
+  B
+  C
+)
+func main() {
+  println(A, B, C)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "0 2 4");
+});
+
+test("bit-shift iota pattern", () => {
+	const { js, errors } = compile(`package main
+const (
+  Read   = 1 << iota
+  Write
+  Exec
+)
+func main() {
+  println(Read, Write, Exec)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "1 2 4");
+});
+
+test("plain iota (no expression) still works", () => {
+	const { js, errors } = compile(`package main
+const (
+  Zero = iota
+  One
+  Two
+)
+func main() {
+  println(Zero, One, Two)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "0 1 2");
+});
+
 // ── Unimplemented Go features ─────────────────────────────────

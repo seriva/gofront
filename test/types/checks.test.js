@@ -533,6 +533,223 @@ func main() { use(Console{}) }`);
 	assertEqual(runJs(js), "logged");
 });
 
+// ── interface{} assignability ────────────────────────────────
+
+section("interface{} assignability");
+
+test("var x interface{} = 42 is accepted", () => {
+	const { errors } = compile(`package main
+func main() {
+  var x interface{} = 42
+  println(x)
+}`);
+	assertEqual(errors.length, 0);
+});
+
+test("func(x interface{}) accepts concrete values", () => {
+	const { js, errors } = compile(`package main
+func show(x interface{}) {
+  println(x)
+}
+func main() {
+  show(42)
+  show("hello")
+  show(true)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "42\nhello\ntrue");
+});
+
+test("typed value assignable to interface{} variable", () => {
+	const { errors } = compile(`package main
+func main() {
+  var n int = 42
+  var x interface{} = n
+  println(x)
+}`);
+	assertEqual(errors.length, 0);
+});
+
+test("func(any) still accepts concrete values", () => {
+	const { js, errors } = compile(`package main
+func show(x any) { println(x) }
+func main() { show(99) }`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "99");
+});
+
+// ── Comma-ok with = assignment ───────────────────────────────
+
+section("Comma-ok with = assignment");
+
+test("v, ok = m[key] with existing key", () => {
+	const { js, errors } = compile(`package main
+func main() {
+  m := map[string]int{"a": 1}
+  var v int
+  var ok bool
+  v, ok = m["a"]
+  println(v, ok)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "1 true");
+});
+
+test("v, ok = m[key] with missing key", () => {
+	const { js, errors } = compile(`package main
+func main() {
+  m := map[string]int{"a": 1}
+  var v int
+  var ok bool
+  v, ok = m["z"]
+  println(v, ok)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "0 false");
+});
+
+test("v, ok = x.(T) type assertion with = succeeds", () => {
+	const { js, errors } = compile(`package main
+func main() {
+  var x any = 42
+  var v int
+  var ok bool
+  v, ok = x.(int)
+  println(v, ok)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "42 true");
+});
+
+test("v, ok = x.(T) type assertion with = fails", () => {
+	const { js, errors } = compile(`package main
+func main() {
+  var x any = "hello"
+  var v int
+  var ok bool
+  v, ok = x.(int)
+  println(v, ok)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "0 false");
+});
+
+// ── Type switch multi-case capture variable ───────────────────
+
+section("Type switch multi-case capture variable");
+
+test("type switch with binding variable used in all cases", () => {
+	const { js, errors } = compile(`package main
+func describe(x any) string {
+  switch v := x.(type) {
+  case int:
+    return "int"
+  case string:
+    return "string"
+  default:
+    return "other"
+  }
+}
+func main() {
+  println(describe(42))
+  println(describe("hi"))
+  println(describe(true))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "int\nstring\nother");
+});
+
+test("type switch capture var not reported as unused", () => {
+	const { errors } = compile(`package main
+func f(x any) {
+  switch v := x.(type) {
+  case int:
+    println(v + 1)
+  case string:
+    println(v)
+  case bool:
+    println(v)
+  }
+}
+func main() { f(1) }`);
+	assertEqual(errors.length, 0);
+});
+
+// ── Terminating statement analysis ───────────────────────────
+
+section("Terminating statement analysis");
+
+test("function missing return is a type error", () => {
+	const { errors } = compile(`package main
+func f(x int) int {
+  if x > 0 {
+    return x
+  }
+}`);
+	assertErrorContains(errors, "missing return");
+});
+
+test("function with all paths returning is valid", () => {
+	const { errors } = compile(`package main
+func abs(x int) int {
+  if x >= 0 {
+    return x
+  } else {
+    return -x
+  }
+}`);
+	assertEqual(errors.length, 0);
+});
+
+test("function with switch+default all returning is valid", () => {
+	const { errors } = compile(`package main
+func sign(x int) string {
+  switch {
+  case x > 0:
+    return "positive"
+  case x < 0:
+    return "negative"
+  default:
+    return "zero"
+  }
+}`);
+	assertEqual(errors.length, 0);
+});
+
+test("switch without default is not terminating", () => {
+	const { errors } = compile(`package main
+func sign(x int) string {
+  switch {
+  case x > 0:
+    return "positive"
+  case x < 0:
+    return "negative"
+  }
+}`);
+	assertErrorContains(errors, "missing return");
+});
+
+test("void function does not need terminating analysis", () => {
+	const { errors } = compile(`package main
+func greet(name string) {
+  if name != "" {
+    println("hello " + name)
+  }
+}`);
+	assertEqual(errors.length, 0);
+});
+
+test("function ending in panic() is terminating", () => {
+	const { errors } = compile(`package main
+func mustPositive(n int) int {
+  if n > 0 {
+    return n
+  }
+  panic("non-positive")
+}`);
+	assertEqual(errors.length, 0);
+});
+
 // ═════════════════════════════════════════════════════════════
 // Additional coverage
 // ═════════════════════════════════════════════════════════════

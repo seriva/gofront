@@ -23,6 +23,7 @@ import {
 	isNumeric,
 	isString,
 	isUntyped,
+	isVoid,
 	LOG_OPS,
 	Scope,
 	STRING,
@@ -346,6 +347,41 @@ export class TypeChecker {
 			},
 		});
 
+		// unicode package
+		const runeToStr = { kind: "func", params: [INT], returns: [BOOL] };
+		const runeTrans = { kind: "func", params: [INT], returns: [INT] };
+		this.globals.define("unicode", {
+			kind: "namespace",
+			name: "unicode",
+			members: {
+				IsLetter: runeToStr,
+				IsDigit: runeToStr,
+				IsSpace: runeToStr,
+				IsUpper: runeToStr,
+				IsLower: runeToStr,
+				IsPunct: runeToStr,
+				IsControl: runeToStr,
+				IsPrint: runeToStr,
+				IsGraphic: runeToStr,
+				ToUpper: runeTrans,
+				ToLower: runeTrans,
+			},
+		});
+
+		// os package (JS-friendly subset)
+		this.globals.define("os", {
+			kind: "namespace",
+			name: "os",
+			members: {
+				Exit: { kind: "func", params: [INT], returns: [VOID] },
+				Args: { kind: "slice", elem: STRING },
+				Getenv: { kind: "func", params: [STRING], returns: [STRING] },
+				Stdout: ANY,
+				Stderr: ANY,
+				Stdin: ANY,
+			},
+		});
+
 		this.globals.define("append", { kind: "builtin", name: "append" });
 		this.globals.define("len", { kind: "builtin", name: "len" });
 		this.globals.define("cap", { kind: "builtin", name: "cap" });
@@ -378,7 +414,13 @@ export class TypeChecker {
 	addPackageNamespace(pkgName, symbols, types) {
 		const members = {};
 		for (const [name, type] of symbols) members[name] = type;
-		this.globals.define(pkgName, { kind: "namespace", name: pkgName, members });
+		// _gofront: true marks this as a GoFront package — exported identifier rules apply
+		this.globals.define(pkgName, {
+			kind: "namespace",
+			name: pkgName,
+			members,
+			_gofront: true,
+		});
 		for (const [name, type] of types) this.types.set(name, type);
 	}
 
@@ -618,7 +660,7 @@ export class TypeChecker {
 		for (const p of decl.params) {
 			inner.define(p.name, this.resolveTypeNode(p.type, outer));
 		}
-		const returnType = decl.returnType
+		let returnType = decl.returnType
 			? this.resolveTypeNode(decl.returnType, outer)
 			: VOID;
 		const hasNamedReturns = this._injectNamedReturns(
@@ -626,7 +668,9 @@ export class TypeChecker {
 			inner,
 			outer,
 		);
-		if (hasNamedReturns && returnType) returnType._hasNamedReturns = true;
+		// Wrap the return type to avoid mutating the shared singleton
+		if (hasNamedReturns && returnType)
+			returnType = { ...returnType, _hasNamedReturns: true };
 		const savedDefer = this._deferCount;
 		this._deferCount = 0;
 		this.checkBlock(decl.body, inner, returnType);
@@ -634,6 +678,12 @@ export class TypeChecker {
 		if (this._deferCount > 0) decl.body._hasDefer = true;
 		this._deferCount = savedDefer;
 		decl._returnType = returnType;
+		// Missing return check: non-void functions must terminate on all paths
+		if (!isVoid(returnType) && !returnType._hasNamedReturns) {
+			if (!this._isTerminating(decl.body)) {
+				this.err(`missing return at end of function '${decl.name}'`, decl);
+			}
+		}
 	}
 
 	checkMethodDecl(decl, outer) {
@@ -643,7 +693,7 @@ export class TypeChecker {
 		for (const p of decl.params) {
 			inner.define(p.name, this.resolveTypeNode(p.type, outer));
 		}
-		const returnType = decl.returnType
+		let returnType = decl.returnType
 			? this.resolveTypeNode(decl.returnType, outer)
 			: VOID;
 		const hasNamedReturns = this._injectNamedReturns(
@@ -651,7 +701,8 @@ export class TypeChecker {
 			inner,
 			outer,
 		);
-		if (hasNamedReturns && returnType) returnType._hasNamedReturns = true;
+		if (hasNamedReturns && returnType)
+			returnType = { ...returnType, _hasNamedReturns: true };
 		const savedDefer = this._deferCount;
 		this._deferCount = 0;
 		this.checkBlock(decl.body, inner, returnType);
@@ -659,6 +710,92 @@ export class TypeChecker {
 		if (this._deferCount > 0) decl.body._hasDefer = true;
 		this._deferCount = savedDefer;
 		decl._returnType = returnType;
+		// Missing return check
+		if (!isVoid(returnType) && !returnType._hasNamedReturns) {
+			if (!this._isTerminating(decl.body)) {
+				this.err(`missing return at end of method '${decl.name}'`, decl);
+			}
+		}
+	}
+
+	// Go spec §Terminating statements — returns true if the statement always terminates.
+	_isTerminating(stmt) {
+		if (!stmt) return false;
+		switch (stmt.kind) {
+			case "ReturnStmt":
+				return true;
+			case "BranchStmt":
+				// panic() is in ExprStmt, not BranchStmt — but "goto" could be here
+				return false;
+			case "ExprStmt":
+				// panic(...) is a terminating call
+				if (
+					stmt.expr?.kind === "CallExpr" &&
+					stmt.expr?.func?.kind === "Ident" &&
+					stmt.expr?.func?.name === "panic"
+				)
+					return true;
+				return false;
+			case "Block":
+				return this._isTerminatingBlock(stmt);
+			case "IfStmt":
+				// Terminating if: has else, and both branches terminate
+				if (!stmt.elseBody) return false;
+				return (
+					this._isTerminatingBlock(stmt.body) &&
+					(stmt.elseBody.kind === "Block"
+						? this._isTerminatingBlock(stmt.elseBody)
+						: this._isTerminating(stmt.elseBody))
+				);
+			case "ForStmt":
+				// Infinite loop (no condition) with no break — terminating
+				if (!stmt.cond && !this._blockHasBreak(stmt.body)) return true;
+				return false;
+			case "SwitchStmt":
+				// Terminating switch: has default and every case terminates
+				return this._isTerminatingSwitch(stmt);
+			case "TypeSwitchStmt":
+				return this._isTerminatingTypeSwitch(stmt);
+			case "LabeledStmt":
+				return this._isTerminating(stmt.body);
+			default:
+				return false;
+		}
+	}
+
+	_isTerminatingBlock(block) {
+		if (!block?.stmts?.length) return false;
+		return this._isTerminating(block.stmts[block.stmts.length - 1]);
+	}
+
+	_blockHasBreak(block) {
+		if (!block?.stmts) return false;
+		for (const s of block.stmts) {
+			if (s.kind === "BranchStmt" && s.keyword === "break") return true;
+		}
+		return false;
+	}
+
+	_isTerminatingSwitch(stmt) {
+		let hasDefault = false;
+		for (const c of stmt.cases ?? []) {
+			if (!c.list) hasDefault = true;
+			if (!c.stmts?.length) return false;
+			const last = c.stmts[c.stmts.length - 1];
+			if (!this._isTerminating(last)) return false;
+		}
+		return hasDefault;
+	}
+
+	_isTerminatingTypeSwitch(stmt) {
+		let hasDefault = false;
+		for (const c of stmt.cases ?? []) {
+			if (!c.types) hasDefault = true;
+			if (!c.stmts?.length) return false;
+			const last = c.stmts[c.stmts.length - 1];
+			if (!this._isTerminating(last)) return false;
+		}
+		return hasDefault;
 	}
 
 	_injectNamedReturns(returnTypeNode, scope, outer) {
@@ -852,6 +989,18 @@ export class TypeChecker {
 			return this.err(`No field '${field}' on ${typeStr(baseType)}`, node);
 		}
 		if (base?.kind === "namespace") {
+			// Enforce exported identifier rule for GoFront packages only
+			if (
+				base._gofront &&
+				field.length > 0 &&
+				field[0] >= "a" &&
+				field[0] <= "z"
+			) {
+				return this.err(
+					`cannot refer to unexported name ${base.name}.${field}`,
+					node,
+				);
+			}
 			if (field in base.members) return base.members[field];
 			return this.err(`No member '${field}' in namespace ${base.name}`, node);
 		}
@@ -875,7 +1024,26 @@ export class TypeChecker {
 	}
 
 	binaryResultType(op, lt, rt, node) {
-		if (CMP_OPS.has(op)) return BOOL;
+		if (CMP_OPS.has(op)) {
+			// Reject slice/map/func comparisons unless one side is nil (Go spec)
+			if (op === "==" || op === "!=") {
+				const lNil = isNil(lt);
+				const rNil = isNil(rt);
+				if (!lNil && !rNil) {
+					for (const t of [lt, rt]) {
+						const base = t?.kind === "named" ? t.underlying : t;
+						if (
+							base?.kind === "slice" ||
+							base?.kind === "map" ||
+							base?.kind === "func"
+						) {
+							this.err(`operator ${op} not defined on ${typeStr(t)}`, node);
+						}
+					}
+				}
+			}
+			return BOOL;
+		}
 		if (LOG_OPS.has(op)) return BOOL;
 		if (isAny(lt) || isAny(rt)) return ANY;
 		if (isNumeric(lt) && isNumeric(rt)) {
@@ -946,6 +1114,8 @@ export class TypeChecker {
 			tBase = this.resolveType(tBase);
 			sBase = this.resolveType(sBase);
 			if (tBase?.kind === "interface") {
+				// Empty interface (interface{}) accepts any type
+				if (tBase.methods.size === 0) return;
 				if (!this.implements(source, tBase, node)) {
 					this.err(
 						`${typeStr(source)} does not implement ${typeStr(target)}`,

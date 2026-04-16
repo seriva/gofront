@@ -75,14 +75,69 @@ export const statementGenMethods = {
 			}
 
 			case "AssignStmt": {
+				// comma-ok map index: v, ok = m["key"]
+				if (stmt._commaOkMap) {
+					const rhsNode = stmt.rhs[0];
+					const mapExpr = this.genExpr(rhsNode.expr);
+					const keyExpr = this.genExpr(rhsNode.index);
+					const [vName, okName] = stmt.lhs.map(
+						(e) => e.name ?? this.genExpr(e),
+					);
+					if (vName !== "_") {
+						const zero = rhsNode._mapValueType
+							? this.zeroValueForType(rhsNode._mapValueType)
+							: "undefined";
+						this.line(
+							`${vName} = (${keyExpr}) in ${mapExpr} ? ${mapExpr}[${keyExpr}] : ${zero};`,
+						);
+					}
+					if (okName !== "_")
+						this.line(`${okName} = (${keyExpr}) in ${mapExpr};`);
+					break;
+				}
+				// comma-ok type assertion: v, ok = x.(T)
+				if (
+					stmt.lhs.length === 2 &&
+					stmt.rhs.length === 1 &&
+					stmt.rhs[0]._commaOk
+				) {
+					const val = this.genExpr(stmt.rhs[0]);
+					const [vName, okName] = stmt.lhs.map(
+						(e) => e.name ?? this.genExpr(e),
+					);
+					const tmp = "__ta";
+					this.line(`let ${tmp} = ${val};`);
+					if (vName !== "_") this.line(`${vName} = ${tmp}[0];`);
+					if (okName !== "_") this.line(`${okName} = ${tmp}[1];`);
+					break;
+				}
 				const rhs = stmt.rhs.map((e) => this.genExpr(e));
 				for (const e of stmt.lhs) if (e.kind === "IndexExpr") e._lvalue = true;
-				const lhs = stmt.lhs.map((e) => this.genExpr(e));
-				if (lhs.length === 1) {
-					this.line(`${lhs[0]} ${stmt.op} ${rhs[0]};`);
+				const lhs = stmt.lhs.map((e) => e.name ?? this.genExpr(e));
+				// Filter out blank identifier assignments entirely
+				const pairs = lhs.map((l, i) => ({ l, r: rhs[i] ?? rhs[0] }));
+				const active = pairs.filter((p) => p.l !== "_");
+				if (active.length === 0) {
+					// All _ — still need to evaluate rhs for side effects
+					if (rhs.length > 0) this.line(`${rhs[0]};`);
+				} else if (lhs.length === 1) {
+					this.line(`${active[0].l} ${stmt.op} ${active[0].r};`);
 				} else {
+					// multi-assign: emit only non-blank targets
 					const rhsStr = rhs.length === 1 ? rhs[0] : `[${rhs.join(", ")}]`;
-					this.line(`[${lhs.join(", ")}] = ${rhsStr};`);
+					if (active.length === pairs.length) {
+						this.line(`[${lhs.join(", ")}] = ${rhsStr};`);
+					} else {
+						// Some blanks — use temp and assign only non-blank
+						const tmp = "__t";
+						this.line(`let ${tmp} = ${rhsStr};`);
+						for (let i = 0; i < lhs.length; i++) {
+							if (lhs[i] !== "_") {
+								const src = rhs.length === 1 ? `${tmp}[${i}]` : rhs[i];
+								this.line(`${lhs[i]} ${stmt.op} ${src};`);
+							}
+						}
+					}
 				}
 				break;
 			}
@@ -275,11 +330,14 @@ export const statementGenMethods = {
 			(iterType?.kind === "basic" && iterType.name === "string") ||
 			(iterType?.kind === "untyped" && iterType.base === "string")
 		) {
-			// string: for i, ch := range s  → for (const [i, ch] of s.split('').entries())
-			iterExpr =
-				lhs.length === 1
-					? `Array.from(${iteree}).keys()`
-					: `Array.from(${iteree}).entries()`;
+			// string: for i, r := range s  → rune (code point), not JS character
+			// Go spec: iterating a string yields (byte-index, rune) pairs
+			if (lhs.length === 1) {
+				iterExpr = `Array.from(${iteree}).keys()`;
+			} else {
+				// Wrap code points so the value is an integer (rune), not a JS string
+				iterExpr = `Array.from(${iteree}, (__c, __i) => [__i, __c.codePointAt(0)])`;
+			}
 		} else {
 			// slice/array: for i, v := range arr → for (const [i, v] of __s(arr).entries())
 			// null-guard handles nil slices (zero value) gracefully.

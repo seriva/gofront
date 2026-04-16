@@ -43,6 +43,7 @@ export class CodeGen {
 		this._usesAppend = false;
 		this._usesSliceGuard = false;
 		this._usesSprintf = false;
+		this._usesEqual = false;
 	}
 
 	// ── Output helpers ───────────────────────────────────────────
@@ -120,10 +121,7 @@ export class CodeGen {
 				if (d.name === "init") {
 					const renamed = initCount === 0 ? "init" : `init$${initCount}`;
 					initNames.push(renamed);
-					const saved = d.name;
-					d.name = renamed;
-					this.genFuncDecl(d);
-					d.name = saved;
+					this.genFuncDecl(d, renamed);
 					initCount++;
 				} else {
 					this.genFuncDecl(d);
@@ -149,6 +147,10 @@ export class CodeGen {
 			);
 		if (this._usesSliceGuard)
 			helpers.push("function __s(a) { return a || []; }");
+		if (this._usesEqual)
+			helpers.push(
+				'function __equal(a,b){if(a===b)return true;if(a===null||b===null)return false;if(Array.isArray(a)&&Array.isArray(b)){if(a.length!==b.length)return false;for(let i=0;i<a.length;i++)if(!__equal(a[i],b[i]))return false;return true;}if(typeof a==="object"&&typeof b==="object"){const ka=Object.keys(a),kb=Object.keys(b);if(ka.length!==kb.length)return false;for(const k of ka)if(!__equal(a[k],b[k]))return false;return true;}return false;}',
+			);
 		if (this._usesSprintf)
 			helpers.push(
 				[
@@ -287,7 +289,8 @@ export class CodeGen {
 
 	// ── Function declarations ────────────────────────────────────
 
-	genFuncDecl(decl) {
+	genFuncDecl(decl, nameOverride) {
+		const name = nameOverride ?? decl.name;
 		const params = decl.params
 			.map((p, i) =>
 				p.variadic && i === decl.params.length - 1 ? `...${p.name}` : p.name,
@@ -296,7 +299,7 @@ export class CodeGen {
 		const asyncPrefix = decl.async ? "async " : "";
 		const srcLine = decl._line ?? null;
 		this.line(
-			`${asyncPrefix}function ${decl.name}(${params}) {`,
+			`${asyncPrefix}function ${name}(${params}) {`,
 			srcLine ? srcLine - 1 : null,
 		);
 		this.indented(() =>

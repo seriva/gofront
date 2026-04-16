@@ -245,14 +245,26 @@ test("dot import: no namespace variable emitted", () => {
 
 section("Semantic differences — exported/unexported access");
 
-test("unexported function from another package is accessible (differs from Go)", () => {
-	// Go: accessing mypkg.helper() (lowercase) from another package is a compile error.
-	// GoFront: no enforcement — unexported symbols are accessible across packages.
-	// This test encodes the current behavior so any future enforcement is intentional.
+test("unexported function from another package is rejected", () => {
+	// Go spec: lowercase identifiers from another package are unexported and must not be accessed.
 	const dir = join(FIXTURES, "multifile/unexported_access");
-	const { js, errors } = compileDir(dir);
-	assertEqual(errors?.length ?? 0, 0);
-	assertEqual(runJs(js).trim(), "42");
+	let errMsg = "";
+	try {
+		compileDir(dir);
+	} catch (e) {
+		errMsg = e.message;
+	}
+	assertContains(errMsg, "cannot refer to unexported name");
+});
+
+test("uppercase package member access is allowed", () => {
+	// Built-in namespaces (fmt, strings, etc.) always use uppercase — should work
+	const { errors } = compile(`package main
+func main() {
+  s := fmt.Sprintf("%d", 42)
+  println(s)
+}`);
+	assertEqual(errors.length, 0);
 });
 
 // ── Entry point ───────────────────────────────────────────────

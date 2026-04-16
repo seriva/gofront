@@ -6,18 +6,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.0.4] - 2026-04-17
+
+### Added
+- **Method expressions** (`T.Method`) — `TypeName.MethodName` now produces a first-class function whose first argument is the receiver, e.g. `f := Point.Dist; f(p)` (Go spec §Method expressions)
+- **Method values** (`.bind()`) — `p.Dist` stored in a variable now binds the receiver via `.bind(p)`, so calling the stored function later behaves correctly (Go spec §Method values)
+- **Struct and array equality** — `==` and `!=` on struct and array types now perform deep value comparison via a tree-shaken `__equal` helper; comparing two non-nil slices or maps is now a type error (Go spec §Comparison operators)
+- **Terminating statement analysis** — non-void functions that lack a return on some path now produce a `missing return` compile error (Go spec §Terminating statements). Handles `if/else`, `switch` with `default`, `TypeSwitchStmt`, and `panic()` calls.
+- **Const expression repetition** — in a `const (...)` block, omitting the expression on subsequent specs now correctly repeats the previous expression with the updated `iota` value, e.g. `Read = 1 << iota; Write; Exec` gives 1, 2, 4 (Go spec §Constant declarations §Iota)
+- **Exported/unexported identifier enforcement** — accessing a lowercase-named symbol from a GoFront package via `pkg.name` is now a type error (`cannot refer to unexported name`). External `.d.ts` / npm namespaces are exempt. (Go spec §Exported identifiers)
+- **String indexing returns byte** — `s[i]` on a string now compiles to `s.charCodeAt(i)`, returning an integer byte value instead of a JS character (Go spec §Index expressions)
+- **`unicode` package** — `IsLetter`, `IsDigit`, `IsSpace`, `IsUpper`, `IsLower`, `IsPunct`, `IsControl`, `IsPrint`, `IsGraphic`, `ToUpper`, `ToLower` — implemented using Unicode-aware JS regex and `codePointAt`/`fromCodePoint`
+- **`os` package** (partial) — `Exit` (→ `process.exit`), `Args` (→ `process.argv`), `Getenv` (→ `process.env[...]`)
+- **Multi-value function forwarding** — `f(g())` where `g()` returns multiple values is now valid and compiles to `f(...g())` (Go spec §Calls)
+
 ### Fixed
-- `binaryResultType` was called with 2 arguments instead of 4 when either operand was `any`; now passes `ANY, ANY, expr` explicitly (`src/typechecker/expressions.js`)
-- Removed unused `toUntyped()` export from `src/typechecker/types.js` (dead code)
-- `zeroValueForType` duplicated the basic-type zero-value switch instead of delegating to `_zeroForBasicName()`; now uses the helper consistently (`src/codegen/expressions.js`)
-- Renamed `isTypeName()` → `isReceiverTerminator()` in `src/parser.js` — the method returned `true` for terminator tokens, not type-name tokens, making the name misleading
+- **Blank identifier `_ = expr`** in regular `=` assignments — `_ = someFunc()` and `x, _ = f()` no longer produce `Undefined: '_'` errors
+- **Positional (unkeyed) struct literals** — `Point{1, 2}` now correctly generates `new Point({ X: 1, Y: 2 })` instead of an empty struct; also works inside slices (`[]Point{{1, 2}, {3, 4}}`)
+- **`interface{}` assignability** — assigning any concrete value to an `interface{}`-typed variable or parameter is now accepted (previously only the `any` alias worked)
+- **Comma-ok with `=`** — `v, ok = m["key"]` (map index) and `v, ok = x.(T)` (type assertion) now work with regular `=` assignment, not just `:=`; missing map keys return the zero value
+- **`for range` string yields rune integers** — the value variable in `for i, r := range s` is now an integer code point (`r == 65`) rather than a JS character string
+- **Type switch multi-case capture variable** — `switch v := x.(type) { case int: ...; case string: ... }` no longer spuriously reports `'v' declared and not used`
+- **Slice/map `== nil`** comparison is still valid — the new incomparable-type check correctly allows `slice == nil` while rejecting `slice1 == slice2`
 
 ### Tests
-- Replaced 3 always-true `assert(errors !== undefined)` assertions with meaningful checks (`assertEqual(errors.length, 0)` or `assertErrorContains`)
-- Replaced 7 `assert(true)` placeholder assertions: parser position checks in `lexer-parser.test.js` (5) and removed meaningless no-crash asserts in `compiler/imports.test.js` (2)
-- Upgraded 13 `assert(errors.length > 0)` weak assertions to `assertErrorContains` with verified error substrings, per AGENTS.md convention (`types/errors.test.js`, `types/inference.test.js`, `dom.test.js`)
-- Removed 163-line duplicate "Store functions" test section from `compiler/packages.test.js` — these 5 tests were verbatim copies of tests already in `structs.test.js`
-- Fixed `& (address-of)` test in `structs.test.js` to use code that actually compiles and verifies output, instead of code that produced a type error
+- Added 49 tests covering all new features and bug fixes, distributed across the existing test files
+- Updated `test/language/core.test.js`: `range over string` test updated to expect rune integers (correct Go behavior)
+- Updated `test/builtins/operators.test.js`: `s[i]` test updated to expect `charCodeAt` integer result
+- Updated `test/compiler/imports.test.js`: unexported-access test now asserts the error is emitted rather than silently accepted
 
 ## [0.0.3] - 2026-04-16
 

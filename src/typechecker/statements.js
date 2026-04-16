@@ -72,9 +72,37 @@ export const statementCheckMethods = {
 			}
 
 			case "AssignStmt": {
+				// comma-ok map index: v, ok = m["key"]
+				// Evaluate map expr first so _type is populated, then detect the pattern.
+				if (
+					stmt.lhs.length === 2 &&
+					stmt.rhs.length === 1 &&
+					stmt.rhs[0].kind === "IndexExpr"
+				) {
+					const mapBaseType = this.checkExpr(stmt.rhs[0].expr, scope);
+					const resolvedBase =
+						mapBaseType?.kind === "named"
+							? mapBaseType.underlying
+							: mapBaseType;
+					if (resolvedBase?.kind === "map") {
+						this.checkExpr(stmt.rhs[0].index, scope);
+						stmt._commaOkMap = true;
+						// Store the map value type so codegen can emit the zero-value fallback
+						stmt.rhs[0]._mapValueType = resolvedBase.value;
+						break;
+					}
+				}
+				// comma-ok type assertion: v, ok = x.(T)
+				if (
+					stmt.lhs.length === 2 &&
+					stmt.rhs.length === 1 &&
+					stmt.rhs[0].kind === "TypeAssertExpr"
+				) {
+					stmt.rhs[0]._commaOk = true;
+				}
 				// Check for const reassignment before evaluating RHS
 				for (const lhs of stmt.lhs) {
-					if (lhs.kind === "Ident") {
+					if (lhs.kind === "Ident" && lhs.name !== "_") {
 						const ownerScope = scope.lookupScope(lhs.name);
 						if (ownerScope?.isConst(lhs.name))
 							this.err(`cannot assign to const '${lhs.name}'`, lhs);
@@ -83,8 +111,13 @@ export const statementCheckMethods = {
 				const rhs = stmt.rhs.map((e) => this.checkExpr(e, scope));
 				const rhsFlat =
 					rhs.length === 1 && rhs[0]?.kind === "tuple" ? rhs[0].types : rhs;
-				const lhsTypes = stmt.lhs.map((e) => this.checkExpr(e, scope));
+				const lhsTypes = stmt.lhs.map((e) => {
+					if (e.kind === "Ident" && e.name === "_") return ANY;
+					return this.checkExpr(e, scope);
+				});
 				for (let i = 0; i < lhsTypes.length; i++) {
+					if (stmt.lhs[i]?.kind === "Ident" && stmt.lhs[i]?.name === "_")
+						continue;
 					const r = rhsFlat[i] ?? ANY;
 					if (!isAny(lhsTypes[i]) && !isAny(r)) {
 						this.assertAssignable(lhsTypes[i], r, stmt.lhs[i]);
@@ -200,6 +233,10 @@ export const statementCheckMethods = {
 								? this.resolveTypeNode(c.types[0], inner)
 								: ANY;
 						caseScope.defineLocal(stmt.assign, bindType);
+						// The capture variable is always considered used — it's the whole
+						// point of the switch-with-assign form. Each case body uses its own
+						// typed copy of the variable.
+						caseScope.lookup(stmt.assign);
 					}
 					for (const s of c.stmts) this.checkStmt(s, caseScope, returnType);
 					this._reportUnused(caseScope, stmt);

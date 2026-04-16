@@ -83,6 +83,12 @@ example/
     index.html        HTML shell (loads reactive.js)
     reactive.js       signals-based reactive framework
     app.js            build output
+docs/
+  ROADMAP.md          release history + upcoming roadmap
+  v0.0.5/             design documents for v0.0.5 features
+    generics-plan.md
+    range-iter-plan.md
+    ...
 ```
 
 ## Key design decisions
@@ -236,6 +242,34 @@ Key points:
 - Wrap each case in `test(name, fn)` — the harness catches and reports errors.
 - Use `section(title)` to group related tests under a heading.
 - New test files must be registered in `test/run.js` to be included in `npm test`.
+
+## Planning and roadmap
+
+Release planning follows a docs-first workflow:
+
+- **`docs/ROADMAP.md`** — the single source of truth for past releases and the current
+  roadmap. Update this file when a release ships or when the scope of an upcoming release
+  changes.
+- **`docs/v0.0.X/`** — one subfolder per planned release, containing design documents for
+  the features in that release. When starting work on a new release, create the folder and
+  add a design document for each non-trivial feature before writing any code.
+
+### Starting a new release
+
+1. Create `docs/vX.Y.Z/` and add a `<feature>-plan.md` for each significant feature.
+2. Add a `## vX.Y.Z` section to `docs/ROADMAP.md` with the theme and a feature table.
+3. Implement the features following the TDD workflow above.
+4. When the release ships, mark features ✓ in `docs/ROADMAP.md` and add a dated entry to
+   `CHANGELOG.md`.
+
+### Design document format
+
+A plan file should cover:
+- **Goal** — what Go behaviour is being matched and why it matters.
+- **Approach** — which compiler stages are affected (Lexer / Parser / TypeChecker /
+  CodeGen) and what the key changes are.
+- **Edge cases** — known tricky inputs and how they are handled.
+- **JS output examples** — concrete before/after code snippets.
 
 ## Changing the example app
 

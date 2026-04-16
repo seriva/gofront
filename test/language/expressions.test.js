@@ -467,6 +467,84 @@ func main() {
 	assertContains(out, "0 false");
 });
 
+// ── for range string yields rune integers ────────────────────
+
+section("for range string yields rune integers");
+
+test("range string value is rune integer (code point)", () => {
+	const { js, errors } = compile(`package main
+func main() {
+  for _, r := range "AB" {
+    println(r)
+  }
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "65\n66");
+});
+
+test("rune arithmetic works in range loop", () => {
+	const { js, errors } = compile(`package main
+func main() {
+  for _, r := range "AB" {
+    println(r + 1)
+  }
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "66\n67");
+});
+
+test("rune comparison works in range loop", () => {
+	const { js, errors } = compile(`package main
+func main() {
+  for _, r := range "AB" {
+    println(r == 65)
+  }
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true\nfalse");
+});
+
+test("range string index-only loop still works", () => {
+	const { js, errors } = compile(`package main
+func main() {
+  for i := range "abc" {
+    println(i)
+  }
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "0\n1\n2");
+});
+
+// ── Multi-value function forwarding f(g()) ───────────────────
+
+section("Multi-value function forwarding f(g())");
+
+test("f(g()) forwards two-return values to function taking two params", () => {
+	const { js, errors } = compile(`package main
+func split(s string) (string, string) {
+  return "hello", "world"
+}
+func join(a string, b string) string {
+  return a + " " + b
+}
+func main() {
+  println(join(split("hello world")))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "hello world");
+});
+
+test("multi-value forward in assignment also works", () => {
+	const { js, errors } = compile(`package main
+func pair() (int, int) { return 3, 4 }
+func add(a int, b int) int { return a + b }
+func main() {
+  println(add(pair()))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "7");
+});
+
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit(summarize() > 0 ? 1 : 0);
