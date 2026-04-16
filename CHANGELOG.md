@@ -12,6 +12,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `zeroValueForType` duplicated the basic-type zero-value switch instead of delegating to `_zeroForBasicName()`; now uses the helper consistently (`src/codegen/expressions.js`)
 - Renamed `isTypeName()` → `isReceiverTerminator()` in `src/parser.js` — the method returned `true` for terminator tokens, not type-name tokens, making the name misleading
 
+### Tests
+- Replaced 3 always-true `assert(errors !== undefined)` assertions with meaningful checks (`assertEqual(errors.length, 0)` or `assertErrorContains`)
+- Replaced 7 `assert(true)` placeholder assertions: parser position checks in `lexer-parser.test.js` (5) and removed meaningless no-crash asserts in `compiler/imports.test.js` (2)
+- Upgraded 13 `assert(errors.length > 0)` weak assertions to `assertErrorContains` with verified error substrings, per AGENTS.md convention (`types/errors.test.js`, `types/inference.test.js`, `dom.test.js`)
+- Removed 163-line duplicate "Store functions" test section from `compiler/packages.test.js` — these 5 tests were verbatim copies of tests already in `structs.test.js`
+- Fixed `& (address-of)` test in `structs.test.js` to use code that actually compiles and verifies output, instead of code that produced a type error
+
 ## [0.0.3] - 2026-04-16
 
 ### Added
