@@ -23,7 +23,7 @@ packages. `src/dts-parser.js` parses TypeScript `.d.ts` declaration files.
 ## Commands
 
 ```sh
-npm test          # run the full test suite (611 tests, no browser required)
+npm test          # run the full test suite (~600 tests, no browser required)
 npm run format    # format with Biome
 npm run check     # lint with Biome
 
@@ -111,25 +111,42 @@ example/
 - **`error` type** is a plain JS string at runtime; `error("msg")` is an identity,
   `.Error()` returns the string itself.
 
+## Development workflow — TDD
+
+This project follows **test-driven development**. Always write tests before
+implementing a feature or fixing a bug.
+
+1. **Write failing tests first.** Add at least one positive test (compiles + runs
+   correctly) and one negative test (type error produces the expected message) to
+   the most relevant test file. Run the tests and confirm they fail for the
+   expected reason.
+2. **Implement the minimum code** to make the failing tests pass.
+3. **Run the full suite** (`npm test`) and verify nothing else broke.
+4. **Refactor** if needed while keeping all tests green.
+
+For bug fixes, start by writing a test that reproduces the bug, confirm it fails,
+then fix the code.
+
 ## Adding a language feature
 
-1. **Lexer** (`src/lexer.js`) — add any new keywords or token types.
-2. **Parser** (`src/parser.js`) — add grammar rules; return a new AST node kind.
+1. **Tests** — write tests first (see TDD workflow above). Add them to the most
+   relevant test file. Tests are split into directories (`test/language/`,
+   `test/types/`, `test/builtins/`, `test/compiler/`) plus root-level files for
+   structs, DOM, and lexer-parser. Run a single file with
+   `node test/language/core.test.js`, or `npm test` for the full combined run.
+   Confirm the new tests fail before proceeding.
+2. **Lexer** (`src/lexer.js`) — add any new keywords or token types.
+3. **Parser** (`src/parser.js`) — add grammar rules; return a new AST node kind.
    Expression parsing lives in `src/parser/expressions.js`, statements in
    `src/parser/statements.js`, type expressions in `src/parser/types.js`.
-3. **TypeChecker** (`src/typechecker.js`) — handle the new node in `_checkExpr`
+4. **TypeChecker** (`src/typechecker.js`) — handle the new node in `_checkExpr`
    (`src/typechecker/expressions.js`) or `checkStmt`
    (`src/typechecker/statements.js`); return the correct type.
-4. **CodeGen** (`src/codegen.js`) — handle the new node in `genExpr`
+5. **CodeGen** (`src/codegen.js`) — handle the new node in `genExpr`
    (`src/codegen/expressions.js`) or `genStmt` (`src/codegen/statements.js`);
    throw on unhandled kinds so failures are loud.
-5. **Tests** — add at least one positive test (compiles + runs correctly) and one
-   negative test (type error produces the expected message) to the most relevant
-   test file. Tests are split into directories (`test/language/`, `test/types/`,
-   `test/builtins/`, `test/compiler/`) plus root-level files for structs, DOM, and
-   lexer-parser. Run a single file with `node test/language/core.test.js`, or
-   `npm test` for the full combined run.
-6. **CHANGELOG.md** — add an entry under `## [Unreleased]`.
+6. **Run tests** — all new and existing tests must pass.
+7. **CHANGELOG.md** — add an entry under `## [Unreleased]`.
 
 ## Type system
 
@@ -180,6 +197,36 @@ Key items to be aware of when working on the compiler:
 - Group related tests with `section("Name")` for readable output.
 - Run a single file with `node test/language/core.test.js`, a directory's files
   individually, or the full suite with `npm test`.
+
+### Writing a new test file
+
+Every test file imports from `test/helpers.js` and follows this structure:
+
+```js
+import { test, section, summarize, compile, runJs, assertEqual, assertErrorContains } from "../helpers.js";
+
+section("Feature name");
+
+test("descriptive name", () => {
+  const { js, errors } = compile(`package main; ...`);
+  assertEqual(errors.length, 0);
+  assertEqual(runJs(js), "expected output");
+});
+
+test("rejects bad input", () => {
+  const { errors } = compile(`package main; ...`);
+  assertErrorContains(errors, "expected error substring");
+});
+
+process.exit(summarize());
+```
+
+Key points:
+- Each file must end with `process.exit(summarize())` to report results and exit
+  with a non-zero code on failure.
+- Wrap each case in `test(name, fn)` — the harness catches and reports errors.
+- Use `section(title)` to group related tests under a heading.
+- New test files must be registered in `test/run.js` to be included in `npm test`.
 
 ## Changing the example app
 
