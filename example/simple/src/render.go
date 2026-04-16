@@ -9,18 +9,18 @@ var dragSrcId int
 
 func esc(s string) string {
     out := ""
-    for _, ch := range s {
-        switch string(ch) {
-        case "&":
+    for _, r := range s {
+        switch r {
+        case '&':
             out = out + "&amp;"
-        case "<":
+        case '<':
             out = out + "&lt;"
-        case ">":
+        case '>':
             out = out + "&gt;"
-        case `"`:
+        case '"':
             out = out + "&quot;"
         default:
-            out = out + string(ch)
+            out = out + string(r)
         }
     }
     return out
@@ -32,7 +32,7 @@ func renderTodo(t Todo) string {
     cls := "todo-item"
     if t.done {
         cls = "todo-item done"
-    } else if t.priority == PriorityHigh {
+    } else if t.isUrgent() {
         cls = "todo-item high"
     }
 
@@ -42,7 +42,7 @@ func renderTodo(t Todo) string {
     }
 
     badge := ""
-    if t.priority == PriorityHigh && !t.done {
+    if t.isUrgent() {
         badge = `<span class="badge">urgent</span>`
     }
 

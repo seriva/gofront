@@ -61,7 +61,7 @@ func toggleTodo(id int) {
     var next []Todo
     for _, t := range todos {
         if t.id == id {
-            next = append(next, Todo{id: t.id, text: t.text, done: !t.done, priority: t.priority})
+            next = append(next, t.withDone(!t.done))
         } else {
             next = append(next, t)
         }
@@ -160,7 +160,7 @@ func stats() (remaining int, completed int) {
 func highCount() int {
     n := 0
     for _, t := range todos {
-        if t.priority == PriorityHigh && !t.done {
+        if t.isUrgent() {
             n++
         }
     }

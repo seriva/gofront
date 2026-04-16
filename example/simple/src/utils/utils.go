@@ -9,3 +9,13 @@ func Plural(n int, word string) string {
     }
     return String(n) + " " + word + "s"
 }
+
+// HasText reports whether s contains at least one non-whitespace character.
+func HasText(s string) bool {
+    for _, r := range s {
+        if !unicode.IsSpace(r) {
+            return true
+        }
+    }
+    return false
+}

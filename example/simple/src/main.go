@@ -3,7 +3,7 @@ package main
 const maxTodoLen = 120
 
 func validateTodo(text string) error {
-    if text == "" {
+    if !utils.HasText(text) {
         return error("todo text cannot be empty")
     }
     if len([]rune(text)) > maxTodoLen {

@@ -9,6 +9,15 @@ function Clamp(n, lo, hi) {
   return Math.max(Math.min(n, hi), lo);
 }
 
+function HasText(s) {
+  for (const [_$, r] of Array.from(s, (__c, __i) => [__i, __c.codePointAt(0)])) {
+    if (!/\s/.test(String.fromCodePoint(r))) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function __len(a) { return a?.length ?? 0; }
 function __append(a, ...b) { return a ? [...a, ...b] : b; }
 function __s(a) { return a || []; }
@@ -19,6 +28,16 @@ class Todo {
     this.text = text;
     this.done = done;
     this.priority = priority;
+  }
+
+  isUrgent() {
+    const t = this;
+    return t.priority === PriorityHigh && !t.done;
+  }
+
+  withDone(done) {
+    const t = this;
+    return new Todo({ id: t.id, text: t.text, done: done, priority: t.priority });
   }
 }
 
@@ -67,7 +86,7 @@ const PriorityNormal = 0;
 const PriorityHigh = 1;
 
 function validateTodo(text) {
-  if (text === "") {
+  if (!HasText(text)) {
     return "todo text cannot be empty";
   }
   if (__len(Array.from(text, __c => __c.codePointAt(0))) > maxTodoLen) {
@@ -160,31 +179,31 @@ async function main() {
 
 function esc(s) {
   let out = "";
-  for (const [_$, ch] of Array.from(s).entries()) {
-    switch (String(ch)) {
-      case "&":
+  for (const [_$, r] of Array.from(s, (__c, __i) => [__i, __c.codePointAt(0)])) {
+    switch (r) {
+      case 38:
       {
         out = out + "&amp;";
         break;
       }
-      case "<":
+      case 60:
       {
         out = out + "&lt;";
         break;
       }
-      case ">":
+      case 62:
       {
         out = out + "&gt;";
         break;
       }
-      case "\"":
+      case 34:
       {
         out = out + "&quot;";
         break;
       }
       default:
       {
-        out = out + String(ch);
+        out = out + String.fromCodePoint(r);
         break;
       }
     }
@@ -196,7 +215,7 @@ function renderTodoHTML(t) {
   let cls = "todo-item";
   if (t.done) {
     cls = "todo-item done";
-  } else if (t.priority === PriorityHigh) {
+  } else if (t.isUrgent()) {
     cls = "todo-item high";
   }
   let checked = "";
@@ -204,7 +223,7 @@ function renderTodoHTML(t) {
     checked = " checked";
   }
   let badge = "";
-  if (t.priority === PriorityHigh && !t.done) {
+  if (t.isUrgent()) {
     badge = "<span class=\"badge\">urgent</span>";
   }
   let id = String(t.id);
@@ -406,7 +425,7 @@ function initStore() {
   highCountSignal = Signals.computed(function() {
     let n = 0;
     for (const [_$, t] of __s(todosSignal.get()).entries()) {
-      if (t.priority === PriorityHigh && !t.done) {
+      if (t.isUrgent()) {
         n++;
       }
     }
@@ -483,7 +502,7 @@ function toggleTodo(id) {
   let next = null;
   for (const [_$, t] of __s(cur).entries()) {
     if (t.id === id) {
-      next = __append(next, new Todo({ id: t.id, text: t.text, done: !t.done, priority: t.priority }));
+      next = __append(next, t.withDone(!t.done));
     } else {
       next = __append(next, t);
     }

@@ -199,7 +199,26 @@ export const expressionCheckMethods = {
 
 			case "RangeExpr": {
 				// Type-check the iterated expression so its _type is annotated
-				return this.checkExpr(expr.expr, scope);
+				const collType = this.checkExpr(expr.expr, scope);
+				const resolved =
+					collType?.kind === "named" ? collType.underlying : collType;
+				// Return a tuple of (index/key type, value type) so DefineStmt can
+				// assign the correct types to range variables.
+				const isString =
+					(resolved?.kind === "basic" && resolved.name === "string") ||
+					(resolved?.kind === "untyped" && resolved.base === "string");
+				if (isString) {
+					// string range: (int index, rune value) — rune is an alias for int
+					return { kind: "tuple", types: [INT, INT] };
+				}
+				if (resolved?.kind === "slice") {
+					return { kind: "tuple", types: [INT, resolved.elem ?? ANY] };
+				}
+				if (resolved?.kind === "map") {
+					return { kind: "tuple", types: [resolved.key ?? ANY, resolved.value ?? ANY] };
+				}
+				// integer range or unknown — return single-element tuple
+				return { kind: "tuple", types: [collType] };
 			}
 
 			default:

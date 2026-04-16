@@ -515,6 +515,37 @@ func main() {
 	assertEqual(runJs(js), "0\n1\n2");
 });
 
+test("string(r) converts rune back to character in range loop", () => {
+	const { js, errors } = compile(`package main
+func main() {
+  for _, r := range "AB" {
+    println(string(r))
+  }
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "A\nB");
+});
+
+test("switch string(r) over range string matches character cases", () => {
+	const { js, errors } = compile(`package main
+func main() {
+  out := ""
+  for _, r := range "a<b&c" {
+    switch string(r) {
+    case "<":
+      out = out + "[lt]"
+    case "&":
+      out = out + "[amp]"
+    default:
+      out = out + string(r)
+    }
+  }
+  println(out)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "a[lt]b[amp]c");
+});
+
 // ── Multi-value function forwarding f(g()) ───────────────────
 
 section("Multi-value function forwarding f(g())");
