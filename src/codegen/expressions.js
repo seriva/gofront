@@ -120,7 +120,10 @@ export const expressionGenMethods = {
 					// []rune(s) → Unicode code point array (only when source is a string)
 					if (elem === "rune" || elem === "int32" || elem === "int") {
 						const srcType = expr.expr._type;
-						if (srcType?.kind === "basic" && srcType?.name === "string") {
+						if (
+							(srcType?.kind === "basic" && srcType?.name === "string") ||
+							(srcType?.kind === "untyped" && srcType?.base === "string")
+						) {
 							return `Array.from(${inner}, __c => __c.codePointAt(0))`;
 						}
 						return `Array.from(${inner})`;
@@ -414,6 +417,7 @@ export const expressionGenMethods = {
 
 	isIntType(t) {
 		if (!t) return false;
+		if (t.kind === "untyped") return t.base === "int";
 		const base = t.kind === "named" ? t.underlying : t;
 		return base?.kind === "basic" && INT_TYPE_NAMES.has(base.name);
 	},

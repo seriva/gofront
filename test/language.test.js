@@ -1385,6 +1385,201 @@ func main() {
 	assertEqual(runJs(js), "25");
 });
 
+// ── Untyped constants ─────────────────────────────────────────
+
+section("Untyped constants");
+
+test("untyped int const assigns to float64 var", () => {
+	const { js, errors } = compile(`package main
+const x = 5
+func main() {
+	var f float64 = x
+	console.log(f)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "5");
+});
+
+test("untyped float const assigns to float64 var", () => {
+	const { js, errors } = compile(`package main
+const pi = 3.14
+func main() {
+	var f float64 = pi
+	console.log(f)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "3.14");
+});
+
+test("untyped string const assigns to string var", () => {
+	const { js, errors } = compile(`package main
+const greeting = "hello"
+func main() {
+	var s string = greeting
+	console.log(s)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "hello");
+});
+
+test("untyped bool const assigns to bool var", () => {
+	const { js, errors } = compile(`package main
+const yes = true
+func main() {
+	var b bool = yes
+	console.log(b)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true");
+});
+
+test("untyped int const in float64 function arg", () => {
+	const { js, errors } = compile(`package main
+const limit = 100
+func compute(f float64) float64 { return f * 2 }
+func main() {
+	console.log(compute(limit))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "200");
+});
+
+test("untyped const arithmetic stays untyped", () => {
+	const { js, errors } = compile(`package main
+const a = 10
+const b = a * 3
+const c = b + 5
+func main() {
+	var f float64 = c
+	console.log(f)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "35");
+});
+
+test("untyped int + typed int = typed int", () => {
+	const { js, errors } = compile(`package main
+const offset = 10
+func main() {
+	var x int = 5
+	y := x + offset
+	console.log(y)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "15");
+});
+
+test("typed const int cannot implicitly assign to float64 param in strict Go", () => {
+	// In GoFront, typed int -> float64 is still allowed (existing promotion),
+	// but this test documents the behavior: typed const uses declared type
+	const { js, errors } = compile(`package main
+const x int = 42
+func main() {
+	var f float64 = x
+	console.log(f)
+}`);
+	// GoFront allows int -> float64 promotion even for typed values
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "42");
+});
+
+test("untyped float const in arithmetic with int var", () => {
+	const { js, errors } = compile(`package main
+const scale = 2.5
+func main() {
+	var n int = 4
+	result := float64(n) * scale
+	console.log(result)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "10");
+});
+
+test(":= materializes untyped to default type", () => {
+	const { js, errors } = compile(`package main
+const x = 42
+func main() {
+	y := x
+	console.log(y)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "42");
+});
+
+test("const iota values are untyped", () => {
+	const { js, errors } = compile(`package main
+const (
+	A = iota
+	B
+	C
+)
+func main() {
+	var f float64 = C
+	console.log(f)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "2");
+});
+
+test("integer division with untyped int constants uses Math.trunc", () => {
+	const { js, errors } = compile(`package main
+const a = 7
+const b = 2
+func main() {
+	console.log(a / b)
+}`);
+	assertEqual(errors.length, 0);
+	assert(
+		js.includes("Math.trunc"),
+		"should use Math.trunc for integer division",
+	);
+	assertEqual(runJs(js), "3");
+});
+
+test("mixed untyped int and float produces float result", () => {
+	const { js, errors } = compile(`package main
+const i = 10
+const f = 2.5
+func main() {
+	console.log(i + f)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "12.5");
+});
+
+test("untyped string const in string concatenation", () => {
+	const { js, errors } = compile(`package main
+const prefix = "Hello"
+func main() {
+	var s string = prefix + " World"
+	console.log(s)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "Hello World");
+});
+
+test("untyped const returned from function", () => {
+	const { js, errors } = compile(`package main
+const val = 99
+func getVal() int { return val }
+func main() {
+	console.log(getVal())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "99");
+});
+
+test("untyped const returned as float64", () => {
+	const { js, errors } = compile(`package main
+const val = 99
+func getVal() float64 { return val }
+func main() {
+	console.log(getVal())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "99");
+});
+
 // ═════════════════════════════════════════════════════════════
 // CLI — additional flags
 // ═════════════════════════════════════════════════════════════

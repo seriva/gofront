@@ -4,7 +4,6 @@ import {
 	ANY,
 	BOOL,
 	ERROR,
-	FLOAT64,
 	INT,
 	isAny,
 	isBool,
@@ -14,6 +13,10 @@ import {
 	Scope,
 	STRING,
 	typeStr,
+	UNTYPED_BOOL,
+	UNTYPED_FLOAT,
+	UNTYPED_INT,
+	UNTYPED_STRING,
 	VOID,
 } from "./types.js";
 
@@ -29,13 +32,13 @@ export const expressionCheckMethods = {
 			case "BasicLit": {
 				switch (expr.litKind) {
 					case "INT":
-						return INT;
+						return UNTYPED_INT;
 					case "FLOAT":
-						return FLOAT64;
+						return UNTYPED_FLOAT;
 					case "STRING":
-						return STRING;
+						return UNTYPED_STRING;
 					case "BOOL":
-						return BOOL;
+						return UNTYPED_BOOL;
 					case "NIL":
 						return NIL;
 				}

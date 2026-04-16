@@ -23,7 +23,7 @@ packages. `src/dts-parser.js` parses TypeScript `.d.ts` declaration files.
 ## Commands
 
 ```sh
-npm test          # run the full test suite (529 tests, no browser required)
+npm test          # run the full test suite (545 tests, no browser required)
 npm run format    # format with Biome
 npm run check     # lint with Biome
 
@@ -130,9 +130,16 @@ Types are plain JS objects:
 { kind: "namespace", name: string, members: {[name]: Type} }  ← packages / fmt
 { kind: "builtin",   name: string }
 { kind: "tuple",     types: Type[] }  ← multiple return values
+{ kind: "untyped",   base: "int"|"float64"|"string"|"bool" }  ← untyped constants
 ```
 
 `ANY` is the recovery / unknown type — any operation on it is permitted without error.
+
+Untyped types (`UNTYPED_INT`, `UNTYPED_FLOAT`, `UNTYPED_STRING`, `UNTYPED_BOOL`) are
+produced by literals and const declarations without an explicit type. They coerce to
+any compatible typed context via `assertAssignable`. Variables (`:=`, `var`) materialize
+untyped → default type via `defaultType()`. Binary ops between untyped values stay
+untyped; mixing untyped + typed yields the typed side.
 
 ## Known semantic differences from Go
 

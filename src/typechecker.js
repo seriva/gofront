@@ -13,6 +13,7 @@ import {
 	BASIC_TYPES,
 	BOOL,
 	CMP_OPS,
+	defaultType,
 	ERROR,
 	FLOAT64,
 	INT,
@@ -21,11 +22,14 @@ import {
 	isNil,
 	isNumeric,
 	isString,
+	isUntyped,
 	LOG_OPS,
 	Scope,
 	STRING,
 	TypeCheckError,
 	typeStr,
+	UNTYPED_FLOAT,
+	UNTYPED_INT,
 	VOID,
 } from "./typechecker/types.js";
 
@@ -466,7 +470,7 @@ export class TypeChecker {
 			let type = spec.type ? this.resolveTypeNode(spec.type, scope) : null;
 			if (spec.value) {
 				const valTypes = spec.value.map((v) => this.checkExpr(v, scope));
-				if (!type) type = valTypes[0] ?? ANY;
+				if (!type) type = defaultType(valTypes[0]) ?? ANY;
 				for (let i = 0; i < spec.names.length; i++) {
 					const vt = valTypes[i] ?? ANY;
 					this.assertAssignable(type, vt, spec.value[i]);
@@ -480,6 +484,7 @@ export class TypeChecker {
 	checkConstDecl(decl, scope) {
 		for (const spec of decl.decls) {
 			const valTypes = spec.value.map((v) => this.checkExpr(v, scope));
+			// Explicit type annotation → typed constant; otherwise preserve untyped
 			const type = spec.type
 				? this.resolveTypeNode(spec.type, scope)
 				: (valTypes[0] ?? ANY);
@@ -666,10 +671,26 @@ export class TypeChecker {
 		if (LOG_OPS.has(op)) return BOOL;
 		if (isAny(lt) || isAny(rt)) return ANY;
 		if (isNumeric(lt) && isNumeric(rt)) {
-			// float64 is contagious
-			return lt.name === "float64" || rt.name === "float64" ? FLOAT64 : INT;
+			const lFloat = (lt.kind === "untyped" ? lt.base : lt.name) === "float64";
+			const rFloat = (rt.kind === "untyped" ? rt.base : rt.name) === "float64";
+			const isFloat = lFloat || rFloat;
+			// Both untyped → result is untyped
+			if (lt.kind === "untyped" && rt.kind === "untyped")
+				return isFloat ? UNTYPED_FLOAT : UNTYPED_INT;
+			// One typed, one untyped → typed wins
+			if (lt.kind === "untyped")
+				return isFloat && rt.name !== "float64" ? FLOAT64 : rt;
+			if (rt.kind === "untyped")
+				return isFloat && lt.name !== "float64" ? FLOAT64 : lt;
+			// Both typed
+			return isFloat ? FLOAT64 : INT;
 		}
-		if (isString(lt) && isString(rt) && op === "+") return STRING;
+		if (isString(lt) && isString(rt) && op === "+") {
+			if (lt.kind === "untyped" && rt.kind === "untyped") return lt;
+			if (lt.kind === "untyped") return rt;
+			if (rt.kind === "untyped") return lt;
+			return STRING;
+		}
 		if (node)
 			this.err(`Invalid operation: ${typeStr(lt)} ${op} ${typeStr(rt)}`, node);
 		return ANY;
@@ -681,6 +702,29 @@ export class TypeChecker {
 		source = this.resolveType(source);
 		if (isAny(target) || isAny(source)) return;
 		if (isNil(source)) return; // nil is assignable to anything nullable
+
+		// Untyped constants coerce to any compatible typed target
+		if (isUntyped(source)) {
+			if (isUntyped(target)) return; // untyped → untyped always OK
+			if (target.kind === "basic") {
+				// untyped int → int or float64
+				if (
+					source.base === "int" &&
+					(target.name === "int" || target.name === "float64")
+				)
+					return;
+				// untyped float → float64 (and int for compatibility)
+				if (
+					source.base === "float64" &&
+					(target.name === "float64" || target.name === "int")
+				)
+					return;
+				// untyped string → string
+				if (source.base === "string" && target.name === "string") return;
+				// untyped bool → bool
+				if (source.base === "bool" && target.name === "bool") return;
+			}
+		}
 
 		// Go untyped constant promotion: int literals are assignable to float64
 		if (target.kind === "basic" && source.kind === "basic") {

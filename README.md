@@ -395,6 +395,7 @@ signatures into GoFront's internal type representation.
 | Numeric literal separators (`1_000_000`) | ✓ — underscores stripped at lex time |
 | Binary / octal literals (`0b1010`, `0o777`) | ✓ — passed through to JS which supports them natively |
 | Hex float literals (`0x1.8p1`) | ✓ — evaluated at lex time to a decimal value |
+| Untyped constants | ✓ — `const x = 5` produces an untyped int that coerces to `int` or `float64` on use (Go spec §Constants) |
 
 ---
 
@@ -418,7 +419,6 @@ some were intentionally left out to keep the compiler simple.
 |---|---|
 | `goto` statement | Unstructured control flow has no clean JS translation. `goto` is rare in idiomatic Go. Not planned. |
 | Complex numbers (`complex64`, `complex128`) | `complex()`, `real()`, `imag()` builtins would need a runtime complex-number type. Rarely used in frontend code. |
-| Untyped constants | Go constants are untyped until assigned, allowing implicit numeric coercion. GoFront assigns a concrete type immediately. |
 
 ### Semantic differences — JS can't match Go behaviour
 

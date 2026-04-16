@@ -137,104 +137,86 @@ on plain JavaScript.
 
 ## Implementation Roadmap
 
-### Phase 1: High-leverage parity wins
+### Easy implementation wins to close gaps
 
-These items improve language credibility without requiring a major runtime redesign.
+These are the items that improve the Go story the most without pulling GoFront toward
+a real runtime system.
 
-| Priority | Item | Why it matters | Difficulty | Platform risk |
-|---|---|---|---|---|
-| P1 | Generics | Biggest modern Go feature gap. Unlocks reusable containers and APIs. | High | Moderate |
-| P1 | Stronger type assertion semantics | Current plain assertions are runtime-trusting. Tightening this reduces surprising behavior. | Medium | Low |
-| P1 | Better interface method identity checks | Brings compile-time behavior closer to Go and reduces false positives. | Medium | Low |
-| P1 | Clear compatibility documentation in README/docs | Low engineering cost, high user value. Makes divergence explicit. | Low | None |
-| P1 | Expanded negative tests for semantic differences | Prevents accidental drift and makes future tradeoffs deliberate. | Low | None |
+| Item | Why it matters | Difficulty | Notes |
+|---|---|---|---|
+| Compatibility guide in docs | Makes it obvious where GoFront matches Go and where it intentionally diverges. | Low | This is mostly documentation work and removes ambiguity for users. |
+| Expanded semantic-difference tests | Locks in current behavior and prevents accidental regressions. | Low | Especially useful for maps, numeric behavior, assertions, and interfaces. |
+| Stronger interface method checks | Closes compile-time gaps without changing the JS runtime model. | Medium | Good parity win with low runtime cost. |
+| Stronger type assertion rules | Reduces trust-me behavior in plain assertions. | Medium | Likely the best language-safety win after docs. |
+| Focused built-in/stdlib shims | Improves real-world usability without chasing full stdlib parity. | Medium | Best handled as a curated set of packages, not a full clone of Go's stdlib. |
 
-Recommended deliverables:
+Recommended order:
 
-1. Add a generic type parameter model to parser, typechecker, and codegen.
-2. Decide whether plain type assertions should panic on failure or be rejected unless runtime-checkable.
-3. Tighten interface satisfaction rules to mirror Go method signatures more closely.
-4. Add a documented compatibility section that points users to this roadmap.
+1. Publish a compatibility section in the docs.
+2. Add tests that explicitly encode current semantic differences.
+3. Tighten interface satisfaction checks.
+4. Tighten type assertion behavior.
+5. Add a few high-value library shims only where they fit the JS platform naturally.
 
-### Phase 2: Better data model fidelity
+### Hard things we might still do
 
-These items make existing supported features behave more like Go.
+These are real gaps, but they are harder because they either require non-trivial type
+system work or start pushing against the no-runtime direction.
 
-| Priority | Item | Why it matters | Difficulty | Platform risk |
-|---|---|---|---|---|
-| P2 | More explicit array semantics | Arrays are currently too slice-like. This is a meaningful semantic gap. | Medium | Moderate |
-| P2 | Better pointer model | Current pointer boxing works for some cases but is not a complete abstraction. | High | Moderate |
-| P2 | More faithful map behavior where possible | Cannot fully match Go, but some edge-case handling can improve predictability. | Medium | High |
-| P2 | Richer error values | Moving beyond raw strings would make `error` closer to Go usage patterns. | Medium | Low |
-| P2 | Broader built-in package surface | Improves practical adoption even if it is shim-based rather than stdlib-complete. | Medium | Low |
+| Item | Why it matters | Difficulty | Runtime pressure |
+|---|---|---|---|
+| Generics | Biggest modern Go feature gap and the most visible missing language feature. | High | Low to moderate |
+| Better array semantics | Arrays are currently too close to slices. | Medium | Moderate |
+| Better pointer model | Current pointer boxing is useful but shallow. | High | Moderate |
+| Richer error values | Would make error handling feel more Go-like than plain strings. | Medium | Moderate |
+| Reduced runtime metadata for interfaces/assertions | Would improve type assertions and type switches. | High | High |
+| Reduced reflection support | Useful for some patterns, but only if GoFront accepts a small runtime metadata story. | High | High |
 
-Recommended deliverables:
+Guidance:
 
-1. Decide whether arrays remain a compatibility surface or become a distinct runtime abstraction.
-2. Formalize pointer behavior rather than relying on transparent `&` and `*` lowering.
-3. Introduce a GoFront-specific error object shape if richer errors become necessary.
-4. Prioritize a small set of high-value packages instead of chasing broad stdlib parity.
+1. Generics are the best hard feature to pursue because they improve parity without forcing concurrency or reflection work.
+2. Array and pointer work should be done only if the team is willing to define a GoFront-specific model rather than pretend JS has Go memory semantics.
+3. Runtime metadata should be treated as a line-crossing decision, not as a casual compiler enhancement.
 
-### Phase 3: Controlled runtime expansion
+### Things we do not want to do
 
-These items are possible only if GoFront is willing to carry a stronger runtime story.
+These are the items that either conflict directly with the no-runtime goal or would
+still fail to match Go faithfully on JavaScript even after substantial work.
 
-| Priority | Item | Why it matters | Difficulty | Platform risk |
-|---|---|---|---|---|
-| P3 | Reduced reflection support | Some libraries and patterns need runtime type information. | High | High |
-| P3 | Runtime interface metadata | Makes assertions and type switches more principled. | High | High |
-| P3 | Optional richer runtime helpers | Could enable better semantics at cost of output simplicity. | High | Moderate |
+| Item | Why we do not want it |
+|---|---|
+| True goroutine semantics | Would require a scheduler/runtime model that plain JS does not provide. |
+| Native Go-style channels | Any implementation would be an approximation with different blocking and ownership semantics. |
+| Real `select` semantics | Depends on real channels and scheduler behavior that JS does not have. |
+| Exact integer overflow and full 64-bit integer behavior on plain JS numbers | Conflicts with the target runtime's numeric model. |
+| `unsafe`-style memory access | JavaScript has no compatible memory model. |
+| `cgo` | Outside the browser/plain JS execution model. |
+| Full Go reflection parity | Conflicts with the current type-erasure and no-runtime design. |
+| Pretending maps can exactly behave like Go maps | JS object semantics are fundamentally different, especially for ordering and keys. |
 
-Recommended deliverables:
+Practical rule:
 
-1. Decide whether GoFront remains a minimal-runtime compiler or evolves into a language with a lightweight runtime library.
-2. If yes, define a minimal metadata format for structs, interfaces, and asserted values.
-3. Keep runtime additions opt-in when possible to preserve readable output for simple programs.
-
-### Phase 4: Platform-limited experiments
-
-These should be treated as research work, not commitments.
-
-| Priority | Item | Why it matters | Difficulty | Platform risk |
-|---|---|---|---|---|
-| P4 | Channel-like abstraction | Could offer Go-inspired coordination patterns for async JS code. | Very high | Very high |
-| P4 | `select`-like async multiplexing | Useful in theory, but will not behave like native Go `select`. | Very high | Very high |
-| P4 | Worker-backed concurrency model | Might create a Go-like story for some apps, but only with strong restrictions. | Very high | Very high |
-
-These items are worth exploring only if the project explicitly accepts that the result
-will be Go-inspired, not Go-equivalent.
+If a feature needs a scheduler, real runtime type descriptors, raw memory access, or
+non-JS numeric guarantees, it is probably outside the design target for GoFront.
 
 ## Suggested Order of Work
 
-1. Generics.
-2. Type assertion and interface semantics.
-3. Documentation of semantic differences and guarantees.
-4. Array and pointer model improvements.
-5. Richer error and library surface.
-6. Optional runtime metadata.
-7. Any channel/select experiment only after the language model above is stable.
-
-## Non-Goals Unless Project Direction Changes
-
-The following should be treated as non-goals unless GoFront deliberately becomes a
-much heavier runtime system:
-
-1. Exact goroutine scheduling semantics.
-2. Native channel behavior identical to Go.
-3. Exact integer overflow and full 64-bit integer behavior on plain JS numbers.
-4. `unsafe`-style memory access.
-5. `cgo`.
-6. Full Go reflection parity without runtime type metadata.
+1. Docs and compatibility notes.
+2. More semantic-difference tests.
+3. Interface and type assertion tightening.
+4. Generics.
+5. Only after that: array, pointer, and richer error-model work.
+6. Avoid runtime-metadata work unless the project explicitly changes its philosophy.
 
 ## Recommended Next Milestone
 
-If the goal is maximum value for minimum complexity, the next milestone should be:
+If the goal is to close the most important gaps while staying aligned with the current
+project direction, the next milestone should be:
 
-1. Ship generics.
-2. Tighten type assertion behavior.
-3. Tighten interface satisfaction rules.
-4. Publish a formal compatibility guide that explicitly lists semantic differences.
+1. Document what GoFront intentionally does not try to match.
+2. Tighten interface and type assertion behavior.
+3. Add tests around the known semantic differences.
+4. Start design work for generics.
 
-That milestone would significantly improve the answer to the question, "How much of Go
-can I actually rely on here?" without forcing GoFront into a heavy runtime or a fake
-concurrency model.
+That keeps the language honest about its limits, improves the safety story, and closes
+real gaps without drifting into a runtime-heavy implementation strategy.

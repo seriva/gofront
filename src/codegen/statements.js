@@ -253,8 +253,10 @@ export const statementGenMethods = {
 		let iterExpr;
 		if (
 			lhs.length <= 1 &&
-			iterType?.kind === "basic" &&
-			(iterType.name === "int" || iterType.name === "float64")
+			((iterType?.kind === "basic" &&
+				(iterType.name === "int" || iterType.name === "float64")) ||
+				(iterType?.kind === "untyped" &&
+					(iterType.base === "int" || iterType.base === "float64")))
 		) {
 			// integer range (Go 1.22): for i := range n  → C-style for loop
 			const v = lhs[0] === "_" ? "_$" : lhs[0];
@@ -269,7 +271,10 @@ export const statementGenMethods = {
 		) {
 			// map: for k, v := range m  → for (const [k, v] of Object.entries(m))
 			iterExpr = `Object.entries(${iteree})`;
-		} else if (iterType?.kind === "basic" && iterType.name === "string") {
+		} else if (
+			(iterType?.kind === "basic" && iterType.name === "string") ||
+			(iterType?.kind === "untyped" && iterType.base === "string")
+		) {
 			// string: for i, ch := range s  → for (const [i, ch] of s.split('').entries())
 			iterExpr =
 				lhs.length === 1

@@ -49,6 +49,13 @@ export const VOID = { kind: "basic", name: "void" };
 export const NIL = { kind: "basic", name: "nil" };
 export const ERROR = { kind: "basic", name: "error" };
 
+// ── Untyped constant types (Go spec §Constants) ─────────────
+// Untyped constants coerce to any compatible typed context.
+export const UNTYPED_INT = { kind: "untyped", base: "int" };
+export const UNTYPED_FLOAT = { kind: "untyped", base: "float64" };
+export const UNTYPED_STRING = { kind: "untyped", base: "string" };
+export const UNTYPED_BOOL = { kind: "untyped", base: "bool" };
+
 export const BASIC_TYPES = {
 	int: INT,
 	float64: FLOAT64,
@@ -73,25 +80,66 @@ export const BASIC_TYPES = {
 };
 
 export function isNumeric(t) {
-	return t.kind === "basic" && (t.name === "int" || t.name === "float64");
+	if (t?.kind === "untyped") return t.base === "int" || t.base === "float64";
+	return t?.kind === "basic" && (t.name === "int" || t.name === "float64");
 }
 export function isString(t) {
-	return t.kind === "basic" && t.name === "string";
+	if (t?.kind === "untyped") return t.base === "string";
+	return t?.kind === "basic" && t.name === "string";
 }
 export function isBool(t) {
-	return t.kind === "basic" && t.name === "bool";
+	if (t?.kind === "untyped") return t.base === "bool";
+	return t?.kind === "basic" && t.name === "bool";
 }
 export function isAny(t) {
-	return t.kind === "basic" && t.name === "any";
+	return t?.kind === "basic" && t.name === "any";
 }
 export function isNil(t) {
-	return t.kind === "basic" && t.name === "nil";
+	return t?.kind === "basic" && t.name === "nil";
 }
 export function isVoid(t) {
-	return t.kind === "basic" && t.name === "void";
+	return t?.kind === "basic" && t.name === "void";
 }
 export function isError(t) {
-	return t.kind === "basic" && t.name === "error";
+	return t?.kind === "basic" && t.name === "error";
+}
+export function isUntyped(t) {
+	return t?.kind === "untyped";
+}
+
+/** Materialize an untyped type to its default concrete type. */
+export function defaultType(t) {
+	if (t?.kind !== "untyped") return t;
+	switch (t.base) {
+		case "int":
+			return INT;
+		case "float64":
+			return FLOAT64;
+		case "string":
+			return STRING;
+		case "bool":
+			return BOOL;
+		default:
+			return ANY;
+	}
+}
+
+/** Convert a concrete basic type to its untyped equivalent (for const inference). */
+export function toUntyped(t) {
+	if (t?.kind === "untyped") return t;
+	if (t?.kind === "basic") {
+		switch (t.name) {
+			case "int":
+				return UNTYPED_INT;
+			case "float64":
+				return UNTYPED_FLOAT;
+			case "string":
+				return UNTYPED_STRING;
+			case "bool":
+				return UNTYPED_BOOL;
+		}
+	}
+	return t;
 }
 
 export function typeStr(t) {
@@ -100,6 +148,8 @@ export function typeStr(t) {
 	switch (t.kind) {
 		case "basic":
 			return t.name;
+		case "untyped":
+			return `untyped ${t.base}`;
 		case "slice":
 			return `[]${typeStr(t.elem)}`;
 		case "array":

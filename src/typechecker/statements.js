@@ -1,6 +1,14 @@
 // TypeChecker statement-checking methods — installed as a mixin on TypeChecker.prototype.
 
-import { ANY, BOOL, isAny, isBool, isVoid, Scope } from "./types.js";
+import {
+	ANY,
+	BOOL,
+	defaultType,
+	isAny,
+	isBool,
+	isVoid,
+	Scope,
+} from "./types.js";
 
 export const statementCheckMethods = {
 	checkBlock(block, scope, returnType) {
@@ -50,7 +58,7 @@ export const statementCheckMethods = {
 					if (scope.symbols.has(name)) {
 						stmt.lhs[i]._redecl = true;
 					}
-					scope.defineLocal(name, rhsFlat[i] ?? ANY);
+					scope.defineLocal(name, defaultType(rhsFlat[i]) ?? ANY);
 				}
 				// Go requires at least one new variable in :=
 				const allRedecl = stmt.lhs.every(
@@ -59,7 +67,7 @@ export const statementCheckMethods = {
 				if (allRedecl && stmt.lhs.length > 0) {
 					this.err("no new variables on left side of :=", stmt.lhs[0]);
 				}
-				stmt._rhsTypes = rhsFlat;
+				stmt._rhsTypes = rhsFlat.map((t) => defaultType(t) ?? ANY);
 				break;
 			}
 
