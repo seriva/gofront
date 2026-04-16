@@ -1145,6 +1145,33 @@ func main() {
 // dts-parser — additional coverage
 // ═════════════════════════════════════════════════════════════
 
+section("Unused import detection");
+
+test("unused local package import is a type error", () => {
+	const dir = join(FIXTURES, "multifile/unusedimport");
+	let threw = false;
+	try {
+		compileDir(dir);
+	} catch (e) {
+		threw = true;
+		assertContains(e.message, "imported and not used");
+	}
+	assert(threw, "expected type error for unused import");
+});
+
+test("used local package import is not an error", () => {
+	const dir = join(FIXTURES, "multifile/withimport");
+	const { js } = compileDir(dir);
+	const out = runJs(js);
+	assertEqual(out.trim(), "15\n16");
+});
+
+test("side-effect import _ is not flagged as unused", () => {
+	const dir = join(FIXTURES, "multifile/withsideeffectimport");
+	const { js } = compileDir(dir);
+	assertContains(js, "function Add(");
+});
+
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit(summarize() > 0 ? 1 : 0);

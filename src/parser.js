@@ -117,9 +117,10 @@ export class Parser {
 		this.expect(T.IMPORT);
 		const imports = [];
 		const parseOne = () => {
+			const _line = this.peek().line;
 			const alias = this.check(T.IDENT) ? this.advance().value : null;
 			const path = this.expect(T.STRING).value;
-			return { path, alias };
+			return { path, alias, _line };
 		};
 		if (this.match(T.LPAREN)) {
 			while (!this.check(T.RPAREN) && !this.check(T.EOF)) {

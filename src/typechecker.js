@@ -43,6 +43,7 @@ export class TypeChecker {
 		this._switchDepth = 0; // for break/fallthrough validation
 		this._typeSwitchDepth = 0; // for rejecting fallthrough in type switch
 		this._deferCount = 0; // tracks defer usage in current function body
+		this._imports = []; // tracked imports for unused-import detection
 		this._setupGlobals();
 	}
 
@@ -171,6 +172,27 @@ export class TypeChecker {
 		for (const [name, type] of symbols) members[name] = type;
 		this.globals.define(pkgName, { kind: "namespace", name: pkgName, members });
 		for (const [name, type] of types) this.types.set(name, type);
+	}
+
+	// Register an import for unused-import detection.
+	// `name` is the package name or alias used in code.
+	// `node` carries _line for error reporting.
+	// `filename` / `source` identify the file containing the import.
+	trackImport(name, node, filename, source) {
+		this._imports.push({ name, node, filename, source });
+	}
+
+	// Report any tracked imports whose package name was never referenced.
+	reportUnusedImports() {
+		for (const { name, node, filename, source } of this._imports) {
+			if (!this.globals._used.has(name)) {
+				const saved = [this._currentFile, this._currentSource];
+				this._currentFile = filename;
+				this._currentSource = source;
+				this.err(`'${name}' imported and not used`, node);
+				[this._currentFile, this._currentSource] = saved;
+			}
+		}
 	}
 
 	// Return a snapshot of all user-defined globals (excludes built-ins).

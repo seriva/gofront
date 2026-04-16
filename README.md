@@ -385,6 +385,7 @@ signatures into GoFront's internal type representation.
 | `[]rune(s)` conversion | ✓ — produces Unicode code points via `Array.from` |
 | `[...]T{...}` array length inference | ✓ |
 | Side-effect imports (`import _ "pkg"`) | ✓ — dependency code is bundled; package namespace is not exposed |
+| Unused local import detection | ✓ — unused cross-package imports are type errors (matching Go); `import _` exempt |
 | `min()` / `max()` builtins | ✓ — compiles to `Math.min` / `Math.max` |
 | `clear()` builtin | ✓ — zeroes slice length or deletes all map keys |
 | `range` over integer (`for i := range n`) | ✓ — Go 1.22; also supports `for range n` |
@@ -417,7 +418,6 @@ some were intentionally left out to keep the compiler simple.
 | Complex numbers (`complex64`, `complex128`) | `complex()`, `real()`, `imag()` builtins would need a runtime complex-number type. Rarely used in frontend code. |
 | Dot imports (`import . "pkg"`) | Merges a package's namespace into the current scope. Rare in idiomatic Go and adds complexity for little benefit. |
 | Anonymous struct types (`var x struct { ... }`) | Inline struct type expressions without a name. Only named struct declarations are supported. |
-| Unused import detection | Go rejects unused imports. GoFront silently allows them. |
 | Untyped constants | Go constants are untyped until assigned, allowing implicit numeric coercion. GoFront assigns a concrete type immediately. |
 
 ### Semantic differences — JS can't match Go behaviour
@@ -442,4 +442,4 @@ These features exist but behave differently due to fundamental JS/Go runtime dif
 npm test
 ```
 
-519 tests covering language features, type errors, edge cases, DOM (jsdom), external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, map iteration order, integer overflow semantics, unused variable detection, and both example apps.
+522 tests covering language features, type errors, edge cases, DOM (jsdom), external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, map iteration order, integer overflow semantics, unused variable detection, unused import detection, and both example apps.

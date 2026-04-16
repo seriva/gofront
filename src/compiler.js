@@ -113,35 +113,39 @@ export function compileFiles(files, options = {}) {
 
 	// local GoFront packages (./subdir)
 	const seenLocalPaths = new Set();
-	for (const imp of allImports) {
-		for (const { path, alias } of imp.imports) {
-			if (!isLocalPath(path) || seenLocalPaths.has(path)) continue;
-			seenLocalPaths.add(path);
+	for (const p of programs) {
+		for (const imp of p.imports) {
+			for (const { path, alias, _line } of imp.imports) {
+				if (!isLocalPath(path) || seenLocalPaths.has(path)) continue;
+				seenLocalPaths.add(path);
 
-			const depDir = resolveGwDir(path, dummyFromFile);
-			if (!depDir) {
-				console.error(
-					`gofront: warning: cannot find local package '${path}' relative to ${fromDir}`,
+				const depDir = resolveGwDir(path, dummyFromFile);
+				if (!depDir) {
+					console.error(
+						`gofront: warning: cannot find local package '${path}' relative to ${fromDir}`,
+					);
+					continue;
+				}
+
+				// Recursively compile dependency
+				const dep = compileDir(depDir);
+				preambles.push(dep.js);
+				if (alias === "_") continue; // side-effect import — bundle code but don't expose namespace
+				const nameUsed = alias ?? dep.pkgName;
+				bundledPackages.add(nameUsed);
+				checker.addPackageNamespace(
+					nameUsed,
+					dep.exportedSymbols,
+					dep.exportedTypes,
 				);
-				continue;
+				checker.trackImport(nameUsed, { _line }, p._filename, p._source);
 			}
-
-			// Recursively compile dependency
-			const dep = compileDir(depDir);
-			preambles.push(dep.js);
-			if (alias === "_") continue; // side-effect import — bundle code but don't expose namespace
-			const nameUsed = alias ?? dep.pkgName;
-			bundledPackages.add(nameUsed);
-			checker.addPackageNamespace(
-				nameUsed,
-				dep.exportedSymbols,
-				dep.exportedTypes,
-			);
 		}
 	}
 
 	// ── 3. Type-check ─────────────────────────────────────────────
 	const errors = checker.checkAll(programs);
+	checker.reportUnusedImports();
 	if (errors.length > 0) {
 		const msgs = errors.map((e) => e.message).join("\n");
 		throw new Error(msgs);
