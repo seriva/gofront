@@ -62,7 +62,7 @@ func main() {
 	b := true
 	console.log(b[0])
 }`);
-	assert(errors.length > 0, "expected error");
+	assertErrorContains(errors, "Cannot index");
 });
 
 test("cannot slice an int value", () => {
@@ -71,7 +71,7 @@ func main() {
 	n := 42
 	console.log(n[1:3])
 }`);
-	assert(errors.length > 0, "expected error");
+	assertErrorContains(errors, "Cannot slice");
 });
 
 // ═════════════════════════════════════════════════════════════
@@ -114,7 +114,7 @@ func main() {
 	p := Point{1, 2}
 	console.log(p.X)
 }`);
-	assert(errors !== undefined);
+	assertEqual(errors.length, 0);
 });
 
 // ═════════════════════════════════════════════════════════════
@@ -370,7 +370,7 @@ test("circular type alias does not crash", () => {
 type A = B
 type B = A
 func main() {}`);
-	assert(errors.length > 0, "expected error for circular type alias");
+	assertErrorContains(errors, "Unknown type");
 });
 
 // ── Entry point ───────────────────────────────────────────────

@@ -31,13 +31,13 @@ test("too many arguments", () => {
 	const { errors } = compile(`package main
 func id(x int) int { return x }
 func main() { id(1, 2, 3) }`);
-	assert(errors.length > 0, "expected error");
+	assertErrorContains(errors, "Too many arguments");
 });
 
 test("return type mismatch", () => {
 	const { errors } = compile(`package main
 func getNum() int { return "oops" }`);
-	assert(errors.length > 0, "expected error");
+	assertErrorContains(errors, "Cannot assign");
 });
 
 test("field access on unknown type", () => {
@@ -57,7 +57,7 @@ func main() {
   x := 42
   x()
 }`);
-	assert(errors.length > 0, "expected error");
+	assertErrorContains(errors, "Cannot call non-function");
 });
 
 test("duplicate function declaration", () => {
@@ -100,7 +100,7 @@ func main() {
   b := true
   console.log(b.Value)
 }`);
-	assert(errors.length > 0, "expected error");
+	assertErrorContains(errors, "has no field");
 });
 
 test("field access on slice", () => {
@@ -109,7 +109,7 @@ func main() {
   xs := []int{1, 2, 3}
   console.log(xs.Missing)
 }`);
-	assert(errors.length > 0, "expected error");
+	assertErrorContains(errors, "has no field");
 });
 
 test("type mismatch in assign", () => {
@@ -117,7 +117,7 @@ test("type mismatch in assign", () => {
 func main() {
   var x int = "not an int"
 }`);
-	assert(errors.length > 0, "expected error");
+	assertErrorContains(errors, "Cannot assign");
 });
 
 test("wrong return type from function", () => {
@@ -125,7 +125,7 @@ test("wrong return type from function", () => {
 func name() string {
   return 42
 }`);
-	assert(errors.length > 0, "expected error");
+	assertErrorContains(errors, "Cannot assign");
 });
 
 test("calling result of non-function expression", () => {
@@ -134,7 +134,7 @@ func main() {
   s := "hello"
   s()
 }`);
-	assert(errors.length > 0, "expected error");
+	assertErrorContains(errors, "Cannot call non-function");
 });
 
 test("undefined field on struct", () => {
@@ -154,8 +154,7 @@ func pair() (int, int) { return 1, 2 }
 func main() {
   a, b, c := pair()
 }`);
-	// either a type error or should compile without crash — must not throw internally
-	assert(errors !== undefined);
+	assertErrorContains(errors, "not used");
 });
 
 test("defer non-call expression is rejected", () => {
@@ -173,7 +172,7 @@ func main() {
   x := 42
   console.log(x.Error)
 }`);
-	assert(errors.length > 0, "expected error");
+	assertErrorContains(errors, "has no field");
 });
 
 test("wrong argument type to function", () => {

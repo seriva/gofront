@@ -225,11 +225,11 @@ test("custom .d.ts interface method — invalid field caught", () => {
 test("type alias from .d.ts", () => {
 	// type_alias_test.go: `var n int = s` where s is MyString (=string) → type error
 	const { errors } = compileFile(join(FIXTURES, "type_alias_test.go"));
-	assert(errors.length > 0, "expected type mismatch error");
+	assertErrorContains(errors, "Cannot assign");
 });
 
 test("http_client.d.ts — valid fetch call compiles", () => {
-	compile(
+	const { errors } = compile(
 		`package main
 import "js:http_client.d.ts"
 func main() {
@@ -238,9 +238,8 @@ func main() {
 }`,
 		{ fromFile: join(FIXTURES, "_dummy.go") },
 	);
-	// RequestInit is an interface, not instantiable as struct — expect no crash on compile
-	// (type checker may or may not resolve this perfectly; at minimum should not panic)
-	assert(true); // just checking we don't throw
+	// RequestInit is resolved from .d.ts — type checker accepts this without errors
+	assertEqual(errors.length, 0);
 });
 
 // ═════════════════════════════════════════════════════════════

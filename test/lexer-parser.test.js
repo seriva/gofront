@@ -671,8 +671,8 @@ test("parseDts: skipTypeExpr handles <> nesting inside parenthesised type", () =
 	p.pos++; // consume "("
 	p.skipTypeExpr(")");
 	p.pos++; // consume ")"
-	// If we get here without error or infinite loop, depth tracking worked
-	assert(true, "skipTypeExpr with angle brackets completed");
+	// Parser should have consumed everything up to and including ")" — " => void" remains
+	assertEqual(p.src.slice(p.pos), " => void");
 });
 
 test("parseDts: skipTypeExpr handles [] nesting inside tuple context", () => {
@@ -680,8 +680,8 @@ test("parseDts: skipTypeExpr handles [] nesting inside tuple context", () => {
 	const p = new DtsParser("[[string, number], boolean]");
 	p.pos++; // consume outer [
 	p.skipTypeExpr("]");
-	// If complete without error, brackets depth tracking worked
-	assert(true, "skipTypeExpr with brackets inside brackets completed");
+	// Parser stops at the depth-0 "]" — only that character should remain
+	assertEqual(p.src.slice(p.pos), "]");
 });
 
 test("parseDts: skipTypeExpr handles () nesting inside function type", () => {
@@ -689,21 +689,24 @@ test("parseDts: skipTypeExpr handles () nesting inside function type", () => {
 	const p = new DtsParser("(a: (x: number) => void)");
 	p.pos++; // consume outer (
 	p.skipTypeExpr(")");
-	assert(true, "skipTypeExpr with nested parens completed");
+	// Parser stops at the depth-0 ")" — only that character should remain
+	assertEqual(p.src.slice(p.pos), ")");
 });
 
 test("parseDts: skipGenerics handles string literal inside generics", () => {
 	// exercises skipGenerics line 140-142: `"` inside <...> calls skipStringLit
 	const p = new DtsParser(`<Record<"key", string>>`);
 	p.skipGenerics();
-	assert(true, "skipGenerics with string literal inside completed");
+	// skipGenerics should consume the entire input
+	assertEqual(p.src.slice(p.pos), "");
 });
 
 test("parseDts: skipBlock handles string literal inside block body", () => {
 	// exercises skipBlock lines 158-160: `"` inside {...} calls skipStringLit
 	const p = new DtsParser(`{ key: "value"; other: 'text'; }`);
 	p.skipBlock();
-	assert(true, "skipBlock with string literal inside completed");
+	// skipBlock should consume the entire input including the closing brace
+	assertEqual(p.src.slice(p.pos), "");
 });
 
 test("parseDts: type alias with = initializer in namespace body", () => {

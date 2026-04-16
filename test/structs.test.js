@@ -2,7 +2,6 @@
 
 import { fileURLToPath } from "node:url";
 import {
-	assert,
 	assertEqual,
 	assertErrorContains,
 	compile,
@@ -437,18 +436,17 @@ func main() {
 section("Address-of & and dereference *");
 
 test("& (address-of) is transparent — wraps as {value: T}", () => {
-	// In GoFront, & on a variable is a no-op at codegen (pointer = {value: T} via new)
-	// This test ensures it compiles without error
-	const { errors } = compile(`package main
+	// In GoFront, & on a variable is syntactically accepted; field access through
+	// the pointer variable compiles and runs correctly.
+	const { js, errors } = compile(`package main
 type Box struct { N int }
-func setN(b *Box) { b.N = 99 }
 func main() {
-	b := Box{N: 0}
-	setN(&b)
-	console.log(b.N)
+	b := Box{N: 42}
+	p := &b
+	console.log(p.N)
 }`);
-	// Pointer receivers already tested; just verify no compile crash on &
-	assert(errors !== undefined);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "42");
 });
 
 test("* (dereference) in expression is transparent", () => {

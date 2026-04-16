@@ -100,12 +100,10 @@ func main() { console.log("ok") }`,
 	try {
 		compileDir(tmpDir);
 	} catch (_) {
-		// ignore
+		// ignore — the test exercises the if(!info) path; no crash is the goal
 	} finally {
 		rmSync(tmpDir, { recursive: true, force: true });
 	}
-	// Either succeeds or throws — the important thing is it runs the if(!info) path
-	assert(true, "reached without crash");
 });
 
 test("compileDir with missing local package import warns and continues", () => {
@@ -121,12 +119,10 @@ func main() { console.log("ok") }`,
 	try {
 		compileDir(tmpDir);
 	} catch (_) {
-		// ignore
+		// ignore — the test exercises the missing-subdir warning path; no crash is the goal
 	} finally {
 		rmSync(tmpDir, { recursive: true, force: true });
 	}
-	// Either warns and continues, or throws — the warning path (118-122) should execute
-	assert(true, "reached the missing local package branch");
 });
 
 // ═════════════════════════════════════════════════════════════
