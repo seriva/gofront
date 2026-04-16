@@ -142,6 +142,210 @@ export class TypeChecker {
 			},
 		});
 
+		// strings package
+		const strFn1 = (ret) => ({
+			kind: "func",
+			params: [STRING],
+			returns: [ret],
+		});
+		const strFn2 = (p2, ret) => ({
+			kind: "func",
+			params: [STRING, p2],
+			returns: [ret],
+		});
+		const strFn3 = (p2, p3, ret) => ({
+			kind: "func",
+			params: [STRING, p2, p3],
+			returns: [ret],
+		});
+		this.globals.define("strings", {
+			kind: "namespace",
+			name: "strings",
+			members: {
+				Contains: strFn2(STRING, BOOL),
+				HasPrefix: strFn2(STRING, BOOL),
+				HasSuffix: strFn2(STRING, BOOL),
+				Index: strFn2(STRING, INT),
+				LastIndex: strFn2(STRING, INT),
+				Count: strFn2(STRING, INT),
+				Repeat: strFn2(INT, STRING),
+				Replace: {
+					kind: "func",
+					params: [STRING, STRING, STRING, INT],
+					returns: [STRING],
+				},
+				ReplaceAll: strFn3(STRING, STRING, STRING),
+				ToUpper: strFn1(STRING),
+				ToLower: strFn1(STRING),
+				TrimSpace: strFn1(STRING),
+				Trim: strFn2(STRING, STRING),
+				TrimPrefix: strFn2(STRING, STRING),
+				TrimSuffix: strFn2(STRING, STRING),
+				TrimLeft: strFn2(STRING, STRING),
+				TrimRight: strFn2(STRING, STRING),
+				Split: strFn2(STRING, { kind: "slice", elem: STRING }),
+				Join: {
+					kind: "func",
+					params: [{ kind: "slice", elem: STRING }, STRING],
+					returns: [STRING],
+				},
+				EqualFold: strFn2(STRING, BOOL),
+			},
+		});
+
+		// strconv package
+		this.globals.define("strconv", {
+			kind: "namespace",
+			name: "strconv",
+			members: {
+				Itoa: { kind: "func", params: [INT], returns: [STRING] },
+				Atoi: {
+					kind: "func",
+					params: [STRING],
+					returns: [INT, ERROR],
+				},
+				FormatFloat: {
+					kind: "func",
+					params: [FLOAT64, INT, INT, INT],
+					returns: [STRING],
+				},
+				FormatBool: { kind: "func", params: [BOOL], returns: [STRING] },
+				FormatInt: { kind: "func", params: [INT, INT], returns: [STRING] },
+				ParseFloat: {
+					kind: "func",
+					params: [STRING, INT],
+					returns: [FLOAT64, ERROR],
+				},
+				ParseInt: {
+					kind: "func",
+					params: [STRING, INT, INT],
+					returns: [INT, ERROR],
+				},
+				ParseBool: {
+					kind: "func",
+					params: [STRING],
+					returns: [BOOL, ERROR],
+				},
+			},
+		});
+
+		// sort package
+		this.globals.define("sort", {
+			kind: "namespace",
+			name: "sort",
+			members: {
+				Ints: {
+					kind: "func",
+					params: [{ kind: "slice", elem: INT }],
+					returns: [VOID],
+				},
+				Float64s: {
+					kind: "func",
+					params: [{ kind: "slice", elem: FLOAT64 }],
+					returns: [VOID],
+				},
+				Strings: {
+					kind: "func",
+					params: [{ kind: "slice", elem: STRING }],
+					returns: [VOID],
+				},
+				Slice: {
+					kind: "func",
+					params: [ANY, ANY],
+					returns: [VOID],
+				},
+				SliceStable: {
+					kind: "func",
+					params: [ANY, ANY],
+					returns: [VOID],
+				},
+				SliceIsSorted: {
+					kind: "func",
+					params: [ANY, ANY],
+					returns: [BOOL],
+				},
+			},
+		});
+
+		// math package
+		this.globals.define("math", {
+			kind: "namespace",
+			name: "math",
+			members: {
+				Abs: { kind: "func", params: [FLOAT64], returns: [FLOAT64] },
+				Floor: { kind: "func", params: [FLOAT64], returns: [FLOAT64] },
+				Ceil: { kind: "func", params: [FLOAT64], returns: [FLOAT64] },
+				Round: { kind: "func", params: [FLOAT64], returns: [FLOAT64] },
+				Sqrt: { kind: "func", params: [FLOAT64], returns: [FLOAT64] },
+				Cbrt: { kind: "func", params: [FLOAT64], returns: [FLOAT64] },
+				Pow: {
+					kind: "func",
+					params: [FLOAT64, FLOAT64],
+					returns: [FLOAT64],
+				},
+				Log: { kind: "func", params: [FLOAT64], returns: [FLOAT64] },
+				Log2: { kind: "func", params: [FLOAT64], returns: [FLOAT64] },
+				Log10: { kind: "func", params: [FLOAT64], returns: [FLOAT64] },
+				Sin: { kind: "func", params: [FLOAT64], returns: [FLOAT64] },
+				Cos: { kind: "func", params: [FLOAT64], returns: [FLOAT64] },
+				Tan: { kind: "func", params: [FLOAT64], returns: [FLOAT64] },
+				Min: {
+					kind: "func",
+					params: [FLOAT64, FLOAT64],
+					returns: [FLOAT64],
+				},
+				Max: {
+					kind: "func",
+					params: [FLOAT64, FLOAT64],
+					returns: [FLOAT64],
+				},
+				Mod: {
+					kind: "func",
+					params: [FLOAT64, FLOAT64],
+					returns: [FLOAT64],
+				},
+				Inf: { kind: "func", params: [INT], returns: [FLOAT64] },
+				IsNaN: { kind: "func", params: [FLOAT64], returns: [BOOL] },
+				IsInf: {
+					kind: "func",
+					params: [FLOAT64, INT],
+					returns: [BOOL],
+				},
+				NaN: { kind: "func", params: [], returns: [FLOAT64] },
+				// Constants (typed as func with no params for namespace member access)
+				Pi: FLOAT64,
+				E: FLOAT64,
+				MaxFloat64: FLOAT64,
+				SmallestNonzeroFloat64: FLOAT64,
+				MaxInt: INT,
+				MinInt: INT,
+			},
+		});
+
+		// errors package
+		this.globals.define("errors", {
+			kind: "namespace",
+			name: "errors",
+			members: {
+				New: { kind: "func", params: [STRING], returns: [ERROR] },
+			},
+		});
+
+		// time package (partial — JS-friendly subset)
+		this.globals.define("time", {
+			kind: "namespace",
+			name: "time",
+			members: {
+				Now: { kind: "func", params: [], returns: [ANY] },
+				Since: { kind: "func", params: [ANY], returns: [ANY] },
+				Sleep: { kind: "func", params: [ANY], returns: [VOID], async: true },
+				Millisecond: INT,
+				Second: INT,
+				Minute: INT,
+				Hour: INT,
+			},
+		});
+
 		this.globals.define("append", { kind: "builtin", name: "append" });
 		this.globals.define("len", { kind: "builtin", name: "len" });
 		this.globals.define("cap", { kind: "builtin", name: "cap" });

@@ -7,6 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Built-in `strings` package — `Contains`, `HasPrefix`, `HasSuffix`, `Index`, `LastIndex`, `Count`, `Repeat`, `Replace`, `ReplaceAll`, `ToUpper`, `ToLower`, `TrimSpace`, `Trim`, `TrimPrefix`, `TrimSuffix`, `TrimLeft`, `TrimRight`, `Split`, `Join`, `EqualFold`
+- Built-in `strconv` package — `Itoa`, `Atoi`, `FormatBool`, `FormatInt`, `FormatFloat`, `ParseFloat`, `ParseInt`, `ParseBool` (multi-return with error for parse functions)
+- Built-in `sort` package — `Ints`, `Float64s`, `Strings`, `Slice`, `SliceStable`, `SliceIsSorted`
+- Built-in `math` package — `Abs`, `Floor`, `Ceil`, `Round`, `Sqrt`, `Cbrt`, `Pow`, `Log`, `Log2`, `Log10`, `Sin`, `Cos`, `Tan`, `Min`, `Max`, `Mod`, `Inf`, `IsNaN`, `IsInf`, `NaN` + constants `Pi`, `E`, `MaxFloat64`, `SmallestNonzeroFloat64`, `MaxInt`, `MinInt`
+- Built-in `errors` package — `errors.New` (returns a plain string, consistent with GoFront's error model)
+- Built-in `time` package (partial) — `time.Now` (→ `Date.now()`), `time.Since`, `time.Sleep` (async, ms conversion) + duration constants `Millisecond`, `Second`, `Minute`, `Hour`
+- Expanded `fmt.Sprintf` format verbs — `%t` (bool), `%x`/`%X` (hex), `%o` (octal), `%b` (binary), `%q` (quoted string), `%e`/`%E` (scientific), `%g`/`%G` (general float), width specifiers (`%8d`), zero-padding (`%04d`), and precision (`%.2f`)
 - Grouped `type (...)` declarations — multiple type definitions can be grouped in parentheses, matching Go syntax for `var (...)` and `const (...)`; works at top-level and inside function bodies
 - Go Compatibility section in README — documents what matches Go, GoFront extensions, unimplemented features, and 16 semantic differences in one place
 - Semantic difference tests — explicit tests encoding GoFront-specific behaviour for: `len()` on multi-byte strings, `range` over multi-byte strings (sequential indices vs byte offsets), `[n]T` as plain JS arrays, unchecked plain type assertions, comma-ok assertion semantics, and cross-package unexported symbol access

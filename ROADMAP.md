@@ -172,7 +172,7 @@ a real runtime system.
 | Expanded semantic-difference tests | Locks in current behavior and prevents accidental regressions. | Low | Done. Tests added for: string `len()` on multi-byte chars, `range` over multi-byte strings, `[n]T` as plain arrays, unchecked plain type assertions, comma-ok assertion semantics, and unexported cross-package access. |
 | Stronger interface method checks | Closes compile-time gaps without changing the JS runtime model. | Medium | Done. `implements()` now checks full method signatures: parameter types, parameter count, variadic flags, and all return types. Interface method declarations also preserve the variadic flag. |
 | Stronger type assertion rules | Reduces trust-me behavior in plain assertions. | Medium | Done. Type assertions now require the source to be an interface or `any` (compile-time check). Plain assertions panic on mismatch and comma-ok returns zero value on failure (runtime checks), matching Go behavior. |
-| Focused built-in/stdlib shims | Improves real-world usability without chasing full stdlib parity. | Medium | Best handled as a curated set of packages, not a full clone of Go's stdlib. |
+| Focused built-in/stdlib shims | Improves real-world usability without chasing full stdlib parity. | Medium | Done. Added `strings` (20 functions), `strconv` (8 functions), `sort` (6 functions), `math` (20 functions + 6 constants), `errors.New`, and `time` (partial: `Now`, `Since`, `Sleep` + duration constants). Also expanded `fmt.Sprintf` with `%t`, `%x`, `%X`, `%o`, `%b`, `%q`, `%e`, `%g`, width/precision. |
 
 Recommended order:
 

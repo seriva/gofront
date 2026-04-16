@@ -374,7 +374,13 @@ signatures into GoFront's internal type representation.
 | Pointer operators (`&`, `*`) | ✓ |
 | `error` type / `error("msg")` / `.Error()` | ✓ |
 | `async func` / `await` expressions | ✓ |
-| `fmt.Sprintf` / `fmt.Printf` / `fmt.Println` / `fmt.Print` / `fmt.Errorf` | ✓ |
+| `fmt.Sprintf` / `fmt.Printf` / `fmt.Println` / `fmt.Print` / `fmt.Errorf` | ✓ — expanded: `%t`, `%x`, `%X`, `%o`, `%b`, `%q`, `%e`, `%g`, width/precision |
+| `strings` package | ✓ — 20 functions: `Contains`, `HasPrefix`, `Split`, `Join`, `ToUpper`, `ToLower`, `TrimSpace`, etc. |
+| `strconv` package | ✓ — `Itoa`, `Atoi`, `FormatBool`, `FormatInt`, `ParseFloat`, `ParseInt`, `ParseBool` |
+| `sort` package | ✓ — `Ints`, `Float64s`, `Strings`, `Slice`, `SliceStable`, `SliceIsSorted` |
+| `math` package | ✓ — `Sqrt`, `Pow`, `Abs`, `Floor`, `Ceil`, `Round`, `Log`, trig functions + `Pi`, `E`, `MaxInt` constants |
+| `errors` package | ✓ — `errors.New` (returns plain string) |
+| `time` package (partial) | ✓ — `Now`, `Since`, `Sleep` + `Millisecond`, `Second`, `Minute`, `Hour` constants |
 | External `.d.ts` types | ✓ |
 | npm package types | ✓ |
 | Multi-file packages | ✓ |
@@ -429,6 +435,9 @@ developer would expect:
   spread, blank identifier `_`.
 - **Builtins**: `len`, `cap`, `append`, `copy`, `make`, `delete`, `new`, `clear`, `min`,
   `max`, `print`, `println`, `panic`, `recover`, `fmt.Sprintf`/`Printf`/`Println`/`Errorf`.
+- **Standard library shims**: `strings` (20 functions), `strconv` (8 functions),
+  `sort` (6 functions), `math` (20 functions + 6 constants), `errors.New`,
+  `time.Now`/`Since`/`Sleep` + duration constants.
 - **Packages**: multi-file packages, cross-package imports, import aliases,
   dot imports, blank imports, unused import detection.
 
@@ -488,4 +497,4 @@ you know exactly what to expect.
 npm test
 ```
 
-571 tests covering language features, type errors, edge cases, DOM (jsdom), external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, map iteration order, integer overflow semantics, unused variable detection, unused import detection, semantic difference verification, and both example apps.
+611 tests covering language features, type errors, edge cases, DOM (jsdom), external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, map iteration order, integer overflow semantics, unused variable detection, unused import detection, semantic difference verification, stdlib shim packages, and both example apps.

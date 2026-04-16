@@ -91,6 +91,12 @@ example/
   only emitted when used.
 - **`fmt` package** is a built-in namespace (no import needed); `fmt.Sprintf` etc.
   compile to a `__sprintf` helper.
+- **Standard library shims** — `strings`, `strconv`, `sort`, `math`, `errors`, and
+  `time` are built-in namespaces (like `fmt`). They compile to inline JS: `strings`
+  maps to JS string methods, `strconv` to `Number`/`parseInt`/`parseFloat`, `sort` to
+  `Array.prototype.sort`, `math` to the `Math` object, `errors.New` is an identity,
+  and `time` wraps `Date.now()`. Functions that return `(value, error)` in Go emit
+  two-element arrays.
 - **`async func` / `await`** are first-class syntax; async functions emit
   `async function` in JS.
 - **`defer`** compiles to try/finally.

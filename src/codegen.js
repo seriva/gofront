@@ -151,7 +151,28 @@ export class CodeGen {
 			helpers.push("function __s(a) { return a || []; }");
 		if (this._usesSprintf)
 			helpers.push(
-				"function __sprintf(f,...a){let i=0;return f.replace(/%[sdvf%]/g,m=>{if(m==='%%')return'%';const v=a[i++];return m==='%f'?Number(v).toString():String(v==null?'<nil>':v);});}",
+				[
+					"function __sprintf(f,...a){let i=0;return f.replace(/%([#+\\- 0]*)([0-9]*)\\.?([0-9]*)[sdvftxXqobeEgG%]/g,(m)=>{",
+					"if(m==='%%')return'%';const fl=m.slice(1,-1),verb=m.slice(-1),v=a[i++];",
+					"const pad=(s,w,z)=>{w=parseInt(w)||0;if(!w)return s;const p=(z?'0':' ').repeat(Math.max(0,w-s.length));return fl.includes('-')?s+p:p+s;};",
+					"const [,flags,width,prec]=m.match(/^%([#+\\- 0]*)([0-9]*)\\.?([0-9]*)/)||[];",
+					"const zero=flags?.includes('0')&&!flags?.includes('-');",
+					"switch(verb){",
+					"case's':return pad(String(v==null?'<nil>':v),width,false);",
+					"case'd':return pad(String(Math.trunc(Number(v))),width,zero);",
+					"case'v':return pad(String(v==null?'<nil>':v),width,false);",
+					"case'f':{const n=Number(v),p=prec!==''?parseInt(prec):6;return pad(n.toFixed(p),width,zero);}",
+					"case't':return pad(String(!!v),width,false);",
+					"case'x':return pad((Number(v)>>>0).toString(16),width,zero);",
+					"case'X':return pad((Number(v)>>>0).toString(16).toUpperCase(),width,zero);",
+					"case'o':return pad((Number(v)>>>0).toString(8),width,zero);",
+					"case'b':return pad((Number(v)>>>0).toString(2),width,zero);",
+					"case'q':return pad('\"'+String(v==null?'':v).replace(/\\\\/g,'\\\\\\\\').replace(/\"/g,'\\\\\"')+'\"',width,false);",
+					"case'e':case'E':{const n=Number(v),p=prec!==''?parseInt(prec):6;return pad(n.toExponential(p),width,zero);}",
+					"case'g':case'G':{const n=Number(v);return pad(prec!==''?n.toPrecision(parseInt(prec)):String(n),width,zero);}",
+					"default:return m;}});",
+					"}",
+				].join(""),
 			);
 
 		if (helpers.length > 0) this.out.unshift(...helpers, "");
