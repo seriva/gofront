@@ -496,21 +496,29 @@ you know exactly what to expect.
 
 ## Roadmap
 
-These are the open items roughly in priority order. GoFront's guiding principle is
+GoFront's guiding principle is
 **no runtime** — features that need a scheduler, runtime type descriptors, or raw memory
 access are out of scope.
 
+### v0.0.4
+
+These are the open items for v0.0.4, roughly in priority order.
+
 | Feature | Difficulty | Notes |
 |---|---|---|
-| Generics (`[T any]`) | High | Biggest modern Go feature gap. Touches every compiler stage but has low runtime pressure. |
-| Range over iterator functions | Medium | Go 1.23 `func(yield func(K, V) bool)` protocol. Low runtime pressure. |
-| Complex number types | Medium | New type kind + builtins (`complex`, `real`, `imag`). Shimmed with a two-field object. |
-| Richer error values | Medium | Move `error` from plain string to an interface-like value. |
-| Better array semantics | Medium | Arrays are currently indistinguishable from slices at runtime. |
-| Better pointer model | High | Current `{ value: T }` boxing is useful but shallow. |
+| Generics (`[T any]`) | High | Biggest modern Go feature gap. Touches every compiler stage but has low runtime pressure. See [design plan](docs/generics-plan.md). |
+| Range over iterator functions | Medium | Go 1.23 `func(yield func(K, V) bool)` protocol. Low runtime pressure. See [design plan](docs/range-iter-plan.md). |
+| Complex number types | Medium | New type kind + builtins (`complex`, `real`, `imag`). Shimmed with a two-field object. See [design plan](docs/complex-numbers-plan.md). |
+| Richer error values | Medium | Move `error` from plain string to an interface-like value. See [design plan](docs/error-values-plan.md). |
+| Better array semantics | Medium | Arrays are currently indistinguishable from slices at runtime. See [design plan](docs/array-semantics-plan.md). |
+| Better pointer model | High | Current `{ value: T }` boxing is useful but shallow. See [design plan](docs/pointer-model-plan.md). |
 
 Explicitly **out of scope**: goroutines, channels, `select`, `unsafe`, full `reflect`,
 `cgo`, exact integer overflow, Go-equivalent map semantics.
+
+### v0.0.5
+
+TODO
 
 ---
 
