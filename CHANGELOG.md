@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- `binaryResultType` was called with 2 arguments instead of 4 when either operand was `any`; now passes `ANY, ANY, expr` explicitly (`src/typechecker/expressions.js`)
+- Removed unused `toUntyped()` export from `src/typechecker/types.js` (dead code)
+- `zeroValueForType` duplicated the basic-type zero-value switch instead of delegating to `_zeroForBasicName()`; now uses the helper consistently (`src/codegen/expressions.js`)
+- Renamed `isTypeName()` → `isReceiverTerminator()` in `src/parser.js` — the method returned `true` for terminator tokens, not type-name tokens, making the name misleading
+
 ## [0.0.3] - 2026-04-16
 
 ### Added

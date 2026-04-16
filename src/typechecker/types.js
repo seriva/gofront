@@ -124,24 +124,6 @@ export function defaultType(t) {
 	}
 }
 
-/** Convert a concrete basic type to its untyped equivalent (for const inference). */
-export function toUntyped(t) {
-	if (t?.kind === "untyped") return t;
-	if (t?.kind === "basic") {
-		switch (t.name) {
-			case "int":
-				return UNTYPED_INT;
-			case "float64":
-				return UNTYPED_FLOAT;
-			case "string":
-				return UNTYPED_STRING;
-			case "bool":
-				return UNTYPED_BOOL;
-		}
-	}
-	return t;
-}
-
 export function typeStr(t) {
 	if (!t) return "void";
 	if (t.kind === "basic" && t.alias) return t.alias;

@@ -710,10 +710,8 @@ export const expressionGenMethods = {
 	zeroValueForType(t) {
 		if (!t) return "null";
 		switch (t.kind) {
-			case "basic": {
-				const basic = this._zeroForBasicName(t.name);
-				return basic !== null ? basic : "null";
-			}
+			case "basic":
+				return this._zeroForBasicName(t.name) ?? "null";
 			case "slice":
 				return "null";
 			case "map":

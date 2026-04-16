@@ -122,7 +122,13 @@ implementing a feature or fixing a bug.
    expected reason.
 2. **Implement the minimum code** to make the failing tests pass.
 3. **Run the full suite** (`npm test`) and verify nothing else broke.
-4. **Refactor** if needed while keeping all tests green.
+4. **Run the linter** (`npm run check`) and fix any reported issues.
+5. **Refactor** if needed while keeping all tests green.
+6. **Update CHANGELOG.md** — add an entry under `## [Unreleased]` describing what
+   changed (use `### Added`, `### Fixed`, `### Changed`, or `### Removed` as
+   appropriate).
+7. **Update README.md** if the change affects user-facing behaviour, CLI flags,
+   supported syntax, built-in packages, or known semantic differences.
 
 For bug fixes, start by writing a test that reproduces the bug, confirm it fails,
 then fix the code.
@@ -145,8 +151,11 @@ then fix the code.
 5. **CodeGen** (`src/codegen.js`) — handle the new node in `genExpr`
    (`src/codegen/expressions.js`) or `genStmt` (`src/codegen/statements.js`);
    throw on unhandled kinds so failures are loud.
-6. **Run tests** — all new and existing tests must pass.
-7. **CHANGELOG.md** — add an entry under `## [Unreleased]`.
+6. **Run tests** — all new and existing tests must pass (`npm test`).
+7. **Run the linter** — `npm run check` must report no errors.
+8. **CHANGELOG.md** — add an entry under `## [Unreleased]`.
+9. **README.md** — update the supported syntax, built-in packages, or semantic
+   differences table if the feature is user-facing.
 
 ## Type system
 

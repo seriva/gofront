@@ -68,7 +68,8 @@ export const expressionCheckMethods = {
 			case "BinaryExpr": {
 				const lt = this.checkExpr(expr.left, scope);
 				const rt = this.checkExpr(expr.right, scope);
-				if (isAny(lt) || isAny(rt)) return this.binaryResultType(expr.op, ANY);
+				if (isAny(lt) || isAny(rt))
+					return this.binaryResultType(expr.op, ANY, ANY, expr);
 				return this.binaryResultType(expr.op, lt, rt, expr);
 			}
 

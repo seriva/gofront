@@ -172,7 +172,7 @@ export class Parser {
 		if (this.check(T.LPAREN)) {
 			this.expect(T.LPAREN);
 			const recvName =
-				this.check(T.IDENT) && !this.isTypeName(this.peek2())
+				this.check(T.IDENT) && !this.isReceiverTerminator(this.peek2())
 					? this.advance().value
 					: "_";
 			this.match(T.STAR); // pointer receiver: (c *Counter) — strip *, treat same as value receiver
@@ -208,8 +208,8 @@ export class Parser {
 		return decl;
 	}
 
-	// Returns true if tok looks like a type name token (for receiver parsing)
-	isTypeName(tok) {
+	// Returns true if tok is a receiver-list terminator (i.e. not a type name)
+	isReceiverTerminator(tok) {
 		return (
 			tok &&
 			(tok.type === T.RPAREN ||
