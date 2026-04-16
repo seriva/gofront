@@ -735,6 +735,87 @@ func main() {}`);
 	assertErrorContains(errors, "cannot embed non-interface type");
 });
 
+// ── Interface satisfaction — strict signature checks ──────────
+
+section("Interface satisfaction — strict signature checks");
+
+test("interface not satisfied when method has wrong parameter type", () => {
+	const { errors } = compile(`package main
+type Greeter interface { Greet(name string) }
+type Bot struct{}
+func (b Bot) Greet(name int) {}
+func hello(g Greeter) {}
+func main() { hello(Bot{}) }`);
+	assert(errors.length > 0, "expected error");
+	assertErrorContains(errors, "does not implement");
+});
+
+test("interface not satisfied when method has wrong parameter count", () => {
+	const { errors } = compile(`package main
+type Runner interface { Run(speed int) }
+type Dog struct{}
+func (d Dog) Run() {}
+func race(r Runner) {}
+func main() { race(Dog{}) }`);
+	assert(errors.length > 0, "expected error");
+	assertErrorContains(errors, "does not implement");
+});
+
+test("interface not satisfied when method has extra parameters", () => {
+	const { errors } = compile(`package main
+type Pinger interface { Ping() }
+type Bot struct{}
+func (b Bot) Ping(addr string) {}
+func check(p Pinger) {}
+func main() { check(Bot{}) }`);
+	assert(errors.length > 0, "expected error");
+	assertErrorContains(errors, "does not implement");
+});
+
+test("interface not satisfied when method has wrong second return type", () => {
+	const { errors } = compile(`package main
+type Loader interface { Load() (string, error) }
+type Cache struct{}
+func (c Cache) Load() (string, int) { return "x", 0 }
+func fetch(l Loader) {}
+func main() { fetch(Cache{}) }`);
+	assert(errors.length > 0, "expected error");
+	assertErrorContains(errors, "does not implement");
+});
+
+test("interface not satisfied when method has fewer return values", () => {
+	const { errors } = compile(`package main
+type Loader interface { Load() (string, error) }
+type Cache struct{}
+func (c Cache) Load() string { return "x" }
+func fetch(l Loader) {}
+func main() { fetch(Cache{}) }`);
+	assert(errors.length > 0, "expected error");
+	assertErrorContains(errors, "does not implement");
+});
+
+test("interface satisfied when full signature matches", () => {
+	const { js, errors } = compile(`package main
+type Saver interface { Save(key string, value int) (bool, error) }
+type DB struct{}
+func (d DB) Save(key string, value int) (bool, error) { return true, nil }
+func persist(s Saver) { console.log("ok") }
+func main() { persist(DB{}) }`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "ok");
+});
+
+test("interface satisfied with matching variadic signature", () => {
+	const { js, errors } = compile(`package main
+type Logger interface { Log(msgs ...string) }
+type Console struct{}
+func (c Console) Log(msgs ...string) { console.log("logged") }
+func use(l Logger) { l.Log("a", "b") }
+func main() { use(Console{}) }`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "logged");
+});
+
 // ═════════════════════════════════════════════════════════════
 // Additional coverage
 // ═════════════════════════════════════════════════════════════

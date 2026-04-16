@@ -574,7 +574,11 @@ export class TypeChecker {
 					const returns = m.returnType
 						? [this.resolveTypeNode(m.returnType, scope)]
 						: [VOID];
-					methods.set(m.name, { kind: "func", params, returns });
+					const isVariadic =
+						m.params.length > 0 && m.params[m.params.length - 1].variadic;
+					const mType = { kind: "func", params, returns };
+					if (isVariadic) mType.variadic = true;
+					methods.set(m.name, mType);
 				}
 				// Flatten embedded interface methods
 				if (node.embeds) {
@@ -757,10 +761,27 @@ export class TypeChecker {
 		for (const [name, required] of iface.methods) {
 			const actual = base.methods?.get(name);
 			if (!actual) return false;
-			// Check return type matches (params are not strictly checked — Go allows covariance)
-			const reqRet = required.returns?.[0];
-			const actRet = actual.returns?.[0];
-			if (reqRet && actRet && typeStr(reqRet) !== typeStr(actRet)) return false;
+
+			// Check parameter count matches
+			const reqParams = required.params ?? [];
+			const actParams = actual.params ?? [];
+			if (reqParams.length !== actParams.length) return false;
+
+			// Check each parameter type matches
+			for (let i = 0; i < reqParams.length; i++) {
+				if (typeStr(reqParams[i]) !== typeStr(actParams[i])) return false;
+			}
+
+			// Check variadic flag matches
+			if (!!required.variadic !== !!actual.variadic) return false;
+
+			// Check return types match (count and each type)
+			const reqRets = required.returns ?? [];
+			const actRets = actual.returns ?? [];
+			if (reqRets.length !== actRets.length) return false;
+			for (let i = 0; i < reqRets.length; i++) {
+				if (typeStr(reqRets[i]) !== typeStr(actRets[i])) return false;
+			}
 		}
 		return true;
 	}
