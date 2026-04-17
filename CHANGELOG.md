@@ -94,6 +94,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`terser` removed** — replaced by the built-in minifier; `terser` is no longer a
   devDependency. The `--minify` flag now uses `src/minifier.js` directly.
 
+## [0.0.4] - 2026-04-17
+
 ### Added
 - **Method expressions** (`T.Method`) — `TypeName.MethodName` now produces a first-class function whose first argument is the receiver, e.g. `f := Point.Dist; f(p)` (Go spec §Method expressions)
 - **Method values** (`.bind()`) — `p.Dist` stored in a variable now binds the receiver via `.bind(p)`, so calling the stored function later behaves correctly (Go spec §Method values)
