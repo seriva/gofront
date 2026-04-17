@@ -92,8 +92,11 @@ export const BASIC_TYPES = {
 };
 
 export function isNumeric(t) {
-	if (t?.kind === "untyped") return t.base === "int" || t.base === "float64";
-	return t?.kind === "basic" && (t.name === "int" || t.name === "float64");
+	if (!t) return false;
+	if (t.kind === "untyped") return t.base === "int" || t.base === "float64";
+	if (t.kind === "basic") return t.name === "int" || t.name === "float64";
+	if (t.kind === "named") return isNumeric(t.underlying);
+	return false;
 }
 export function isComplex(t) {
 	if (!t) return false;
@@ -107,12 +110,18 @@ export function isComplexOrNumeric(t) {
 	return isNumeric(t) || isComplex(t);
 }
 export function isString(t) {
-	if (t?.kind === "untyped") return t.base === "string";
-	return t?.kind === "basic" && t.name === "string";
+	if (!t) return false;
+	if (t.kind === "untyped") return t.base === "string";
+	if (t.kind === "basic") return t.name === "string";
+	if (t.kind === "named") return isString(t.underlying);
+	return false;
 }
 export function isBool(t) {
-	if (t?.kind === "untyped") return t.base === "bool";
-	return t?.kind === "basic" && t.name === "bool";
+	if (!t) return false;
+	if (t.kind === "untyped") return t.base === "bool";
+	if (t.kind === "basic") return t.name === "bool";
+	if (t.kind === "named") return isBool(t.underlying);
+	return false;
 }
 export function isAny(t) {
 	return t?.kind === "basic" && t.name === "any";

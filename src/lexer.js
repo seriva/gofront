@@ -300,10 +300,20 @@ export class Lexer {
 	}
 
 	readRawString() {
+		const l = this.line,
+			c = this.col;
 		this.advance(); // opening `
 		let s = "";
 		while (this.pos < this.src.length && this.peek() !== "`")
 			s += this.advance();
+		if (this.pos >= this.src.length)
+			throw new LexError(
+				"Unterminated raw string",
+				l,
+				c,
+				this.filename,
+				this.src,
+			);
 		this.advance(); // closing `
 		return s;
 	}

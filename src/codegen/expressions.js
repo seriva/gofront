@@ -428,313 +428,13 @@ export const expressionGenMethods = {
 		}
 
 		// fmt.Sprintf / fmt.Printf / fmt.Println / fmt.Print / fmt.Errorf
-		if (
-			expr.func.kind === "SelectorExpr" &&
-			expr.func.expr.kind === "Ident" &&
-			expr.func.expr.name === "fmt"
-		) {
-			const fmtArgs = expr.args.map((a) => this.genExpr(a)).join(", ");
-			switch (expr.func.field) {
-				case "Sprintf":
-					this._usesSprintf = true;
-					return `__sprintf(${fmtArgs})`;
-				case "Errorf": {
-					this._usesSprintf = true;
-					this._usesError = true;
-					// Check for %w verb — extract the wrapped error as cause
-					const fmtStr = expr.args[0];
-					if (fmtStr?.kind === "BasicLit" && fmtStr.value?.includes("%w")) {
-						const lastArg = this.genExpr(expr.args[expr.args.length - 1]);
-						return `__error(__sprintf(${fmtArgs}), ${lastArg})`;
-					}
-					return `__error(__sprintf(${fmtArgs}))`;
-				}
-				case "Printf":
-				case "Print":
-					this._usesSprintf = true;
-					return `process?.stdout?.write(__sprintf(${fmtArgs}))`;
-				case "Println":
-					this._usesSprintf = true;
-					return `console.log(__sprintf(${fmtArgs}))`;
-			}
-		}
-
-		// strings.* — direct JS string method mappings
-		if (
-			expr.func.kind === "SelectorExpr" &&
-			expr.func.expr.kind === "Ident" &&
-			expr.func.expr.name === "strings"
-		) {
-			const a = expr.args.map((e) => this.genExpr(e));
-			switch (expr.func.field) {
-				case "Contains":
-					return `${a[0]}.includes(${a[1]})`;
-				case "HasPrefix":
-					return `${a[0]}.startsWith(${a[1]})`;
-				case "HasSuffix":
-					return `${a[0]}.endsWith(${a[1]})`;
-				case "Index":
-					return `${a[0]}.indexOf(${a[1]})`;
-				case "LastIndex":
-					return `${a[0]}.lastIndexOf(${a[1]})`;
-				case "Count":
-					return `${a[0]}.split(${a[1]}).length - 1`;
-				case "Repeat":
-					return `${a[0]}.repeat(${a[1]})`;
-				case "Replace":
-					return `${a[0]}.replace(${a[1]}, ${a[2]})`;
-				case "ReplaceAll":
-					return `${a[0]}.replaceAll(${a[1]}, ${a[2]})`;
-				case "ToUpper":
-					return `${a[0]}.toUpperCase()`;
-				case "ToLower":
-					return `${a[0]}.toLowerCase()`;
-				case "TrimSpace":
-					return `${a[0]}.trim()`;
-				case "Trim":
-					return `${a[0]}.replace(new RegExp(\`^[\${${a[1]}}]+|[\${${a[1]}}]+$\`, "g"), "")`;
-				case "TrimPrefix":
-					return `(${a[0]}.startsWith(${a[1]}) ? ${a[0]}.slice(${a[1]}.length) : ${a[0]})`;
-				case "TrimSuffix":
-					return `(${a[0]}.endsWith(${a[1]}) ? ${a[0]}.slice(0, -${a[1]}.length) : ${a[0]})`;
-				case "TrimLeft":
-					return `${a[0]}.replace(new RegExp(\`^[\${${a[1]}}]+\`), "")`;
-				case "TrimRight":
-					return `${a[0]}.replace(new RegExp(\`[\${${a[1]}}]+$\`), "")`;
-				case "Split":
-					return `${a[0]}.split(${a[1]})`;
-				case "Join":
-					return `${a[0]}.join(${a[1]})`;
-				case "EqualFold":
-					return `${a[0]}.toLowerCase() === ${a[1]}.toLowerCase()`;
-			}
-		}
-
-		// bytes.* — byte slice operations via string conversion
-		const __bs = `(b => String.fromCharCode(...b))`;
-		const __sb = `(s => [...s].map(c => c.charCodeAt(0)))`;
-		if (
-			expr.func.kind === "SelectorExpr" &&
-			expr.func.expr.kind === "Ident" &&
-			expr.func.expr.name === "bytes"
-		) {
-			const a = expr.args.map((e) => this.genExpr(e));
-			switch (expr.func.field) {
-				case "Contains":
-					return `${__bs}(${a[0]}).includes(${__bs}(${a[1]}))`;
-				case "HasPrefix": {
-					return `((b, p) => { for (let i = 0; i < p.length; i++) if (b[i] !== p[i]) return false; return b.length >= p.length; })(${a[0]}, ${a[1]})`;
-				}
-				case "HasSuffix": {
-					return `((b, s) => { const off = b.length - s.length; if (off < 0) return false; for (let i = 0; i < s.length; i++) if (b[off + i] !== s[i]) return false; return true; })(${a[0]}, ${a[1]})`;
-				}
-				case "Index":
-					return `${__bs}(${a[0]}).indexOf(${__bs}(${a[1]}))`;
-				case "Count":
-					return `${__bs}(${a[0]}).split(${__bs}(${a[1]})).length - 1`;
-				case "Repeat":
-					return `${__sb}(${__bs}(${a[0]}).repeat(${a[1]}))`;
-				case "Replace":
-					return `((b, o, n, cnt) => { let s = ${__bs}(b), os = ${__bs}(o), ns = ${__bs}(n); if (cnt < 0) return ${__sb}(s.replaceAll(os, ns)); for (let i = 0; i < cnt; i++) s = s.replace(os, ns); return ${__sb}(s); })(${a[0]}, ${a[1]}, ${a[2]}, ${a[3]})`;
-				case "ToUpper":
-					return `${__sb}(${__bs}(${a[0]}).toUpperCase())`;
-				case "ToLower":
-					return `${__sb}(${__bs}(${a[0]}).toLowerCase())`;
-				case "TrimSpace":
-					return `${__sb}(${__bs}(${a[0]}).trim())`;
-				case "Trim":
-					return `${__sb}(${__bs}(${a[0]}).replace(new RegExp(\`^[\${${a[1]}}]+|[\${${a[1]}}]+$\`, "g"), ""))`;
-				case "Equal":
-					return `((a, b) => { if (a.length !== b.length) return false; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false; return true; })(${a[0]}, ${a[1]})`;
-				case "Split":
-					return `${__bs}(${a[0]}).split(${__bs}(${a[1]})).map(p => ${__sb}(p))`;
-				case "Join":
-					return `${__sb}(${a[0]}.map(p => ${__bs}(p)).join(${__bs}(${a[1]})))`;
-			}
-		}
-
-		// strconv.* — number/string conversion
-		if (
-			expr.func.kind === "SelectorExpr" &&
-			expr.func.expr.kind === "Ident" &&
-			expr.func.expr.name === "strconv"
-		) {
-			const a = expr.args.map((e) => this.genExpr(e));
-			switch (expr.func.field) {
-				case "Itoa":
-					return `String(${a[0]})`;
-				case "Atoi":
-					return `(Number.isNaN(Number(${a[0]})) ? [0, "invalid syntax"] : [Number(${a[0]}) | 0, null])`;
-				case "FormatBool":
-					return `String(${a[0]})`;
-				case "FormatInt":
-					return `(${a[0]}).toString(${a[1]})`;
-				case "FormatFloat":
-					return `String(${a[0]})`;
-				case "ParseFloat":
-					return `(Number.isNaN(Number(${a[0]})) ? [0, "invalid syntax"] : [Number(${a[0]}), null])`;
-				case "ParseInt":
-					return `(Number.isNaN(parseInt(${a[0]}, ${a[1]} || 10)) ? [0, "invalid syntax"] : [parseInt(${a[0]}, ${a[1]} || 10), null])`;
-				case "ParseBool":
-					return `(${a[0]} === "true" || ${a[0]} === "1" ? [true, null] : ${a[0]} === "false" || ${a[0]} === "0" ? [false, null] : [false, "invalid syntax"])`;
-			}
-		}
-
-		// sort.* — in-place sorting
-		if (
-			expr.func.kind === "SelectorExpr" &&
-			expr.func.expr.kind === "Ident" &&
-			expr.func.expr.name === "sort"
-		) {
-			const a = expr.args.map((e) => this.genExpr(e));
-			switch (expr.func.field) {
-				case "Ints":
-				case "Float64s":
-					return `${a[0]}.sort((a, b) => a - b)`;
-				case "Strings":
-					return `${a[0]}.sort()`;
-				case "Slice":
-					return `${a[0]}.sort((a, b) => ${a[1]}(a, b) ? -1 : ${a[1]}(b, a) ? 1 : 0)`;
-				case "SliceStable":
-					return `${a[0]}.sort((a, b) => ${a[1]}(a, b) ? -1 : ${a[1]}(b, a) ? 1 : 0)`;
-				case "SliceIsSorted":
-					return `${a[0]}.every((v, i, a) => i === 0 || ${a[1]}(a[i - 1], v))`;
-			}
-		}
-
-		// math.* — math functions
-		if (
-			expr.func.kind === "SelectorExpr" &&
-			expr.func.expr.kind === "Ident" &&
-			expr.func.expr.name === "math"
-		) {
-			const a = expr.args.map((e) => this.genExpr(e));
-			switch (expr.func.field) {
-				case "Abs":
-					return `Math.abs(${a[0]})`;
-				case "Floor":
-					return `Math.floor(${a[0]})`;
-				case "Ceil":
-					return `Math.ceil(${a[0]})`;
-				case "Round":
-					return `Math.round(${a[0]})`;
-				case "Sqrt":
-					return `Math.sqrt(${a[0]})`;
-				case "Cbrt":
-					return `Math.cbrt(${a[0]})`;
-				case "Pow":
-					return `Math.pow(${a[0]}, ${a[1]})`;
-				case "Log":
-					return `Math.log(${a[0]})`;
-				case "Log2":
-					return `Math.log2(${a[0]})`;
-				case "Log10":
-					return `Math.log10(${a[0]})`;
-				case "Sin":
-					return `Math.sin(${a[0]})`;
-				case "Cos":
-					return `Math.cos(${a[0]})`;
-				case "Tan":
-					return `Math.tan(${a[0]})`;
-				case "Min":
-					return `Math.min(${a[0]}, ${a[1]})`;
-				case "Max":
-					return `Math.max(${a[0]}, ${a[1]})`;
-				case "Mod":
-					return `${a[0]} % ${a[1]}`;
-				case "Inf":
-					return `(${a[0]} >= 0 ? Infinity : -Infinity)`;
-				case "IsNaN":
-					return `Number.isNaN(${a[0]})`;
-				case "IsInf":
-					return `(${a[1]} > 0 ? ${a[0]} === Infinity : ${a[1]} < 0 ? ${a[0]} === -Infinity : !Number.isFinite(${a[0]}))`;
-				case "NaN":
-					return "NaN";
-			}
-		}
-
-		// unicode.* — rune/character classification
-		if (
-			expr.func.kind === "SelectorExpr" &&
-			expr.func.expr.kind === "Ident" &&
-			expr.func.expr.name === "unicode"
-		) {
-			const a = expr.args.map((e) => this.genExpr(e));
-			switch (expr.func.field) {
-				case "IsLetter":
-					return `/\\p{L}/u.test(String.fromCodePoint(${a[0]}))`;
-				case "IsDigit":
-					return `/\\p{Nd}/u.test(String.fromCodePoint(${a[0]}))`;
-				case "IsSpace":
-					return `/\\s/.test(String.fromCodePoint(${a[0]}))`;
-				case "IsUpper":
-					return `((__c) => __c === __c.toUpperCase() && /\\p{L}/u.test(__c))(String.fromCodePoint(${a[0]}))`;
-				case "IsLower":
-					return `((__c) => __c === __c.toLowerCase() && /\\p{L}/u.test(__c))(String.fromCodePoint(${a[0]}))`;
-				case "IsPunct":
-					return `/\\p{P}/u.test(String.fromCodePoint(${a[0]}))`;
-				case "IsControl":
-					return `/\\p{Cc}/u.test(String.fromCodePoint(${a[0]}))`;
-				case "IsPrint":
-					return `!/\\p{Cc}/u.test(String.fromCodePoint(${a[0]}))`;
-				case "IsGraphic":
-					return `!/\\p{Cc}/u.test(String.fromCodePoint(${a[0]}))`;
-				case "ToUpper":
-					return `String.fromCodePoint(${a[0]}).toUpperCase().codePointAt(0)`;
-				case "ToLower":
-					return `String.fromCodePoint(${a[0]}).toLowerCase().codePointAt(0)`;
-			}
-		}
-
-		// os.* — process/environment access
-		if (
-			expr.func.kind === "SelectorExpr" &&
-			expr.func.expr.kind === "Ident" &&
-			expr.func.expr.name === "os"
-		) {
-			const a = expr.args.map((e) => this.genExpr(e));
-			switch (expr.func.field) {
-				case "Exit":
-					return `process.exit(${a[0]})`;
-				case "Getenv":
-					return `(process.env[${a[0]}] ?? "")`;
-			}
-		}
-
-		// errors.New / errors.Is / errors.Unwrap
-		if (
-			expr.func.kind === "SelectorExpr" &&
-			expr.func.expr.kind === "Ident" &&
-			expr.func.expr.name === "errors"
-		) {
-			const a = expr.args.map((e) => this.genExpr(e));
-			switch (expr.func.field) {
-				case "New":
-					this._usesError = true;
-					return `__error(${a[0]})`;
-				case "Is":
-					this._usesErrorIs = true;
-					return `__errorIs(${a[0]}, ${a[1]})`;
-				case "Unwrap":
-					return `(${a[0]}?._cause ?? null)`;
-			}
-		}
-
-		// time.* — partial JS-friendly time support
-		if (
-			expr.func.kind === "SelectorExpr" &&
-			expr.func.expr.kind === "Ident" &&
-			expr.func.expr.name === "time"
-		) {
-			const a = expr.args.map((e) => this.genExpr(e));
-			switch (expr.func.field) {
-				case "Now":
-					return "Date.now()";
-				case "Since":
-					return `(Date.now() - ${a[0]})`;
-				case "Sleep":
-					return `await new Promise(r => setTimeout(r, ${a[0]} / 1000000))`;
-			}
+		// Standard library namespace dispatch — all follow the pattern:
+		// pkg.Func(args) → inline JS
+		if (expr.func.kind === "SelectorExpr" && expr.func.expr.kind === "Ident") {
+			const ns = expr.func.expr.name;
+			const fn = expr.func.field;
+			const result = this._genStdlibCall(ns, fn, expr);
+			if (result !== undefined) return result;
 		}
 
 		// Mark the callee so SelectorExpr knows it's being called, not used as a value
@@ -1078,6 +778,313 @@ export const expressionGenMethods = {
 				return `map[${this.typeComment(typeNode.key)}]${this.typeComment(typeNode.value)}`;
 			default:
 				return typeNode.kind;
+		}
+	},
+
+	// Dispatch table for stdlib namespace calls (pkg.Func → inline JS).
+	// Returns the generated JS string, or undefined if not handled.
+	_genStdlibCall(ns, fn, expr) {
+		const a = () => expr.args.map((e) => this.genExpr(e));
+		switch (ns) {
+			case "fmt":
+				return this._genFmt(fn, a, expr);
+			case "strings":
+				return this._genStrings(fn, a);
+			case "bytes":
+				return this._genBytes(fn, a);
+			case "strconv":
+				return this._genStrconv(fn, a);
+			case "sort":
+				return this._genSort(fn, a);
+			case "math":
+				return this._genMath(fn, a);
+			case "unicode":
+				return this._genUnicode(fn, a);
+			case "os":
+				return this._genOs(fn, a);
+			case "errors":
+				return this._genErrors(fn, a);
+			case "time":
+				return this._genTime(fn, a);
+			default:
+				return undefined;
+		}
+	},
+
+	_genFmt(fn, _a, expr) {
+		const fmtArgs = expr.args.map((e) => this.genExpr(e)).join(", ");
+		switch (fn) {
+			case "Sprintf":
+				this._usesSprintf = true;
+				return `__sprintf(${fmtArgs})`;
+			case "Errorf": {
+				this._usesSprintf = true;
+				this._usesError = true;
+				const fmtStr = expr.args[0];
+				if (fmtStr?.kind === "BasicLit" && fmtStr.value?.includes("%w")) {
+					const lastArg = this.genExpr(expr.args[expr.args.length - 1]);
+					return `__error(__sprintf(${fmtArgs}), ${lastArg})`;
+				}
+				return `__error(__sprintf(${fmtArgs}))`;
+			}
+			case "Printf":
+			case "Print":
+				this._usesSprintf = true;
+				return `process?.stdout?.write(__sprintf(${fmtArgs}))`;
+			case "Println":
+				this._usesSprintf = true;
+				return `console.log(__sprintf(${fmtArgs}))`;
+			default:
+				return undefined;
+		}
+	},
+
+	_genStrings(fn, a) {
+		const args = a();
+		switch (fn) {
+			case "Contains":
+				return `${args[0]}.includes(${args[1]})`;
+			case "HasPrefix":
+				return `${args[0]}.startsWith(${args[1]})`;
+			case "HasSuffix":
+				return `${args[0]}.endsWith(${args[1]})`;
+			case "Index":
+				return `${args[0]}.indexOf(${args[1]})`;
+			case "LastIndex":
+				return `${args[0]}.lastIndexOf(${args[1]})`;
+			case "Count":
+				return `${args[0]}.split(${args[1]}).length - 1`;
+			case "Repeat":
+				return `${args[0]}.repeat(${args[1]})`;
+			case "Replace":
+				return `${args[0]}.replace(${args[1]}, ${args[2]})`;
+			case "ReplaceAll":
+				return `${args[0]}.replaceAll(${args[1]}, ${args[2]})`;
+			case "ToUpper":
+				return `${args[0]}.toUpperCase()`;
+			case "ToLower":
+				return `${args[0]}.toLowerCase()`;
+			case "TrimSpace":
+				return `${args[0]}.trim()`;
+			case "Trim":
+				return `${args[0]}.replace(new RegExp(\`^[\${${args[1]}}]+|[\${${args[1]}}]+$\`, "g"), "")`;
+			case "TrimPrefix":
+				return `(${args[0]}.startsWith(${args[1]}) ? ${args[0]}.slice(${args[1]}.length) : ${args[0]})`;
+			case "TrimSuffix":
+				return `(${args[0]}.endsWith(${args[1]}) ? ${args[0]}.slice(0, -${args[1]}.length) : ${args[0]})`;
+			case "TrimLeft":
+				return `${args[0]}.replace(new RegExp(\`^[\${${args[1]}}]+\`), "")`;
+			case "TrimRight":
+				return `${args[0]}.replace(new RegExp(\`[\${${args[1]}}]+$\`), "")`;
+			case "Split":
+				return `${args[0]}.split(${args[1]})`;
+			case "Join":
+				return `${args[0]}.join(${args[1]})`;
+			case "EqualFold":
+				return `${args[0]}.toLowerCase() === ${args[1]}.toLowerCase()`;
+			default:
+				return undefined;
+		}
+	},
+
+	_genBytes(fn, a) {
+		const __bs = `(b => String.fromCharCode(...b))`;
+		const __sb = `(s => [...s].map(c => c.charCodeAt(0)))`;
+		const args = a();
+		switch (fn) {
+			case "Contains":
+				return `${__bs}(${args[0]}).includes(${__bs}(${args[1]}))`;
+			case "HasPrefix":
+				return `((b, p) => { for (let i = 0; i < p.length; i++) if (b[i] !== p[i]) return false; return b.length >= p.length; })(${args[0]}, ${args[1]})`;
+			case "HasSuffix":
+				return `((b, s) => { const off = b.length - s.length; if (off < 0) return false; for (let i = 0; i < s.length; i++) if (b[off + i] !== s[i]) return false; return true; })(${args[0]}, ${args[1]})`;
+			case "Index":
+				return `${__bs}(${args[0]}).indexOf(${__bs}(${args[1]}))`;
+			case "Count":
+				return `${__bs}(${args[0]}).split(${__bs}(${args[1]})).length - 1`;
+			case "Repeat":
+				return `${__sb}(${__bs}(${args[0]}).repeat(${args[1]}))`;
+			case "Replace":
+				return `((b, o, n, cnt) => { let s = ${__bs}(b), os = ${__bs}(o), ns = ${__bs}(n); if (cnt < 0) return ${__sb}(s.replaceAll(os, ns)); for (let i = 0; i < cnt; i++) s = s.replace(os, ns); return ${__sb}(s); })(${args[0]}, ${args[1]}, ${args[2]}, ${args[3]})`;
+			case "ToUpper":
+				return `${__sb}(${__bs}(${args[0]}).toUpperCase())`;
+			case "ToLower":
+				return `${__sb}(${__bs}(${args[0]}).toLowerCase())`;
+			case "TrimSpace":
+				return `${__sb}(${__bs}(${args[0]}).trim())`;
+			case "Trim":
+				return `${__sb}(${__bs}(${args[0]}).replace(new RegExp(\`^[\${${args[1]}}]+|[\${${args[1]}}]+$\`, "g"), ""))`;
+			case "Equal":
+				return `((a, b) => { if (a.length !== b.length) return false; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false; return true; })(${args[0]}, ${args[1]})`;
+			case "Split":
+				return `${__bs}(${args[0]}).split(${__bs}(${args[1]})).map(p => ${__sb}(p))`;
+			case "Join":
+				return `${__sb}(${args[0]}.map(p => ${__bs}(p)).join(${__bs}(${args[1]})))`;
+			default:
+				return undefined;
+		}
+	},
+
+	_genStrconv(fn, a) {
+		const args = a();
+		switch (fn) {
+			case "Itoa":
+				return `String(${args[0]})`;
+			case "Atoi":
+				return `(Number.isNaN(Number(${args[0]})) ? [0, "invalid syntax"] : [Number(${args[0]}) | 0, null])`;
+			case "FormatBool":
+				return `String(${args[0]})`;
+			case "FormatInt":
+				return `(${args[0]}).toString(${args[1]})`;
+			case "FormatFloat":
+				return `String(${args[0]})`;
+			case "ParseFloat":
+				return `(Number.isNaN(Number(${args[0]})) ? [0, "invalid syntax"] : [Number(${args[0]}), null])`;
+			case "ParseInt":
+				return `(Number.isNaN(parseInt(${args[0]}, ${args[1]} || 10)) ? [0, "invalid syntax"] : [parseInt(${args[0]}, ${args[1]} || 10), null])`;
+			case "ParseBool":
+				return `(${args[0]} === "true" || ${args[0]} === "1" ? [true, null] : ${args[0]} === "false" || ${args[0]} === "0" ? [false, null] : [false, "invalid syntax"])`;
+			default:
+				return undefined;
+		}
+	},
+
+	_genSort(fn, a) {
+		const args = a();
+		switch (fn) {
+			case "Ints":
+			case "Float64s":
+				return `${args[0]}.sort((a, b) => a - b)`;
+			case "Strings":
+				return `${args[0]}.sort()`;
+			case "Slice":
+			case "SliceStable":
+				return `${args[0]}.sort((a, b) => ${args[1]}(a, b) ? -1 : ${args[1]}(b, a) ? 1 : 0)`;
+			case "SliceIsSorted":
+				return `${args[0]}.every((v, i, a) => i === 0 || ${args[1]}(a[i - 1], v))`;
+			default:
+				return undefined;
+		}
+	},
+
+	_genMath(fn, a) {
+		const args = a();
+		switch (fn) {
+			case "Abs":
+				return `Math.abs(${args[0]})`;
+			case "Floor":
+				return `Math.floor(${args[0]})`;
+			case "Ceil":
+				return `Math.ceil(${args[0]})`;
+			case "Round":
+				return `Math.round(${args[0]})`;
+			case "Sqrt":
+				return `Math.sqrt(${args[0]})`;
+			case "Cbrt":
+				return `Math.cbrt(${args[0]})`;
+			case "Pow":
+				return `Math.pow(${args[0]}, ${args[1]})`;
+			case "Log":
+				return `Math.log(${args[0]})`;
+			case "Log2":
+				return `Math.log2(${args[0]})`;
+			case "Log10":
+				return `Math.log10(${args[0]})`;
+			case "Sin":
+				return `Math.sin(${args[0]})`;
+			case "Cos":
+				return `Math.cos(${args[0]})`;
+			case "Tan":
+				return `Math.tan(${args[0]})`;
+			case "Min":
+				return `Math.min(${args[0]}, ${args[1]})`;
+			case "Max":
+				return `Math.max(${args[0]}, ${args[1]})`;
+			case "Mod":
+				return `${args[0]} % ${args[1]}`;
+			case "Inf":
+				return `(${args[0]} >= 0 ? Infinity : -Infinity)`;
+			case "IsNaN":
+				return `Number.isNaN(${args[0]})`;
+			case "IsInf":
+				return `(${args[1]} > 0 ? ${args[0]} === Infinity : ${args[1]} < 0 ? ${args[0]} === -Infinity : !Number.isFinite(${args[0]}))`;
+			case "NaN":
+				return "NaN";
+			default:
+				return undefined;
+		}
+	},
+
+	_genUnicode(fn, a) {
+		const args = a();
+		const cp = `String.fromCodePoint(${args[0]})`;
+		switch (fn) {
+			case "IsLetter":
+				return `/\\p{L}/u.test(${cp})`;
+			case "IsDigit":
+				return `/\\p{Nd}/u.test(${cp})`;
+			case "IsSpace":
+				return `/\\s/.test(${cp})`;
+			case "IsUpper":
+				return `((__c) => __c === __c.toUpperCase() && /\\p{L}/u.test(__c))(${cp})`;
+			case "IsLower":
+				return `((__c) => __c === __c.toLowerCase() && /\\p{L}/u.test(__c))(${cp})`;
+			case "IsPunct":
+				return `/\\p{P}/u.test(${cp})`;
+			case "IsControl":
+				return `/\\p{Cc}/u.test(${cp})`;
+			case "IsPrint":
+				return `!/\\p{Cc}/u.test(${cp})`;
+			case "IsGraphic":
+				return `!/\\p{Cc}/u.test(${cp})`;
+			case "ToUpper":
+				return `${cp}.toUpperCase().codePointAt(0)`;
+			case "ToLower":
+				return `${cp}.toLowerCase().codePointAt(0)`;
+			default:
+				return undefined;
+		}
+	},
+
+	_genOs(fn, a) {
+		const args = a();
+		switch (fn) {
+			case "Exit":
+				return `process.exit(${args[0]})`;
+			case "Getenv":
+				return `(process.env[${args[0]}] ?? "")`;
+			default:
+				return undefined;
+		}
+	},
+
+	_genErrors(fn, a) {
+		const args = a();
+		switch (fn) {
+			case "New":
+				this._usesError = true;
+				return `__error(${args[0]})`;
+			case "Is":
+				this._usesErrorIs = true;
+				return `__errorIs(${args[0]}, ${args[1]})`;
+			case "Unwrap":
+				return `(${args[0]}?._cause ?? null)`;
+			default:
+				return undefined;
+		}
+	},
+
+	_genTime(fn, a) {
+		const args = a();
+		switch (fn) {
+			case "Now":
+				return "Date.now()";
+			case "Since":
+				return `(Date.now() - ${args[0]})`;
+			case "Sleep":
+				return `await new Promise(r => setTimeout(r, ${args[0]} / 1000000))`;
+			default:
+				return undefined;
 		}
 	},
 };
