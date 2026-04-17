@@ -335,6 +335,30 @@ export const expressionCheckMethods = {
 				return { kind: "tuple", types: [collType] };
 			}
 
+			case "InstantiationExpr": {
+				// Generic instantiation: Foo[int] or Foo[int, string]
+				const baseType = this.checkExpr(expr.expr, scope);
+				if (baseType?.kind === "generic") {
+					const typeArgs = expr.typeArgs.map((ta) =>
+						this.resolveTypeNode(ta, scope),
+					);
+					// Check constraints
+					for (
+						let i = 0;
+						i < baseType.typeParams.length && i < typeArgs.length;
+						i++
+					) {
+						const tp = baseType.typeParams[i];
+						const constraint = tp.constraint
+							? this.resolveTypeNode(tp.constraint, scope)
+							: null;
+						if (constraint) this.checkConstraint(typeArgs[i], constraint, expr);
+					}
+					return this.instantiateGenericFunc(baseType, typeArgs);
+				}
+				return baseType;
+			}
+
 			default:
 				return ANY;
 		}
@@ -356,7 +380,7 @@ export const expressionCheckMethods = {
 	},
 
 	checkCall(expr, scope) {
-		const fnType = this.checkExpr(expr.func, scope);
+		let fnType = this.checkExpr(expr.func, scope);
 
 		// Handle built-ins before evaluating args; some (e.g. new) take type names as
 		// arguments, which would otherwise produce false "Undefined" errors.
@@ -385,6 +409,30 @@ export const expressionCheckMethods = {
 		}
 
 		if (isAny(fnType)) return ANY;
+
+		// Generic function inference
+		if (fnType.kind === "generic") {
+			const typeArgs = this.inferTypeArgs(fnType, argTypes);
+			if (!typeArgs) {
+				return this.err(
+					`Cannot infer type arguments for generic function '${fnType.name}'`,
+					expr,
+				);
+			}
+			// Check constraints
+			for (
+				let i = 0;
+				i < fnType.typeParams.length && i < typeArgs.length;
+				i++
+			) {
+				const tp = fnType.typeParams[i];
+				const constraint = tp.constraint
+					? this.resolveTypeNode(tp.constraint, scope)
+					: null;
+				if (constraint) this.checkConstraint(typeArgs[i], constraint, expr);
+			}
+			fnType = this.instantiateGenericFunc(fnType, typeArgs);
+		}
 
 		if (fnType.kind !== "func") {
 			return this.err(`Cannot call non-function type ${typeStr(fnType)}`, expr);

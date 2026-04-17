@@ -74,6 +74,7 @@ export const T = {
 	PIPE: "|",
 	CARET: "^",
 	AND_NOT: "&^",
+	TILDE: "~",
 	LSHIFT: "<<",
 	RSHIFT: ">>",
 	ELLIPSIS: "...",
@@ -592,6 +593,9 @@ export class Lexer {
 				case "^":
 					if (this.match("=")) this.push(T.CARET_ASSIGN, "^=", l, c);
 					else this.push(T.CARET, "^", l, c);
+					break;
+				case "~":
+					this.push(T.TILDE, "~", l, c);
 					break;
 				case ":":
 					if (this.match("=")) this.push(T.DEFINE, ":=", l, c);

@@ -176,8 +176,9 @@ readable and debuggable — no name mangling, no opaque wrappers.
 
 All type checking happens at compile time. At runtime, types are erased — there are no
 type tags, no reflection, no runtime overhead. Sized integers (`int8`–`int64`,
-`uint8`–`uint64`) are all `number` at runtime. `float32` is `number`. The type checker
-enforces correctness; JavaScript doesn't need to know.
+`uint8`–`uint64`) are all `number` at runtime. `float32` is `number`. Generic type
+parameters are erased completely — `func Map[T, U any](...)` compiles to `function Map(...)`.
+The type checker enforces correctness; JavaScript doesn't need to know.
 
 ---
 
@@ -201,7 +202,7 @@ example/simple/
     styles.go     ← injectStyles() creates <style> element with all CSS
     main.go       ← createApp() builds DOM shell · setupEvents() · event delegation
     utils/
-      utils.go    ← Plural() — cross-package import demo
+      utils.go    ← Plural() · generic Filter/Map — cross-package import demo
     browser.d.ts  ← minimal external type declarations (sleep)
   index.html      ← bare HTML shell, loads app.js as ES module
   app.js          ← generated output
@@ -224,7 +225,7 @@ example/reactive/
     styles.go     ← injectStyles()
     main.go       ← wires everything together
     utils/
-      utils.go    ← Plural()
+      utils.go    ← Plural() · generic Filter/Map
     browser.d.ts  ← Signal interface · Signals/Reactive/ComponentContext namespaces
   reactive.js     ← signals framework (from microtastic)
   index.html      ← loads reactive.js + app.js
@@ -235,7 +236,8 @@ example/reactive/
 
 Both apps cover: structs & methods, iota constants, named return values, closures,
 slices, `for range`, `switch`, cross-package imports, multi-file same-package compilation,
-`async`/`await`, `defer`/`recover`, localStorage persistence, and DOM APIs.
+`async`/`await`, `defer`/`recover`, localStorage persistence, DOM APIs, and generic
+utility functions (`Filter[T]`, `Map[T, U]`).
 
 The reactive example additionally demonstrates: external `.d.ts` type imports,
 `declare namespace` patterns for typing JS libraries, and reactive UI updates via signals.
@@ -366,6 +368,7 @@ signatures into GoFront's internal type representation.
 | Type conversions, type assertions (plain & comma-ok) | ✓ |
 | Type switch (`switch v := x.(type)`) | ✓ — compiles to `if/else if` with `typeof` / `instanceof` |
 | Sized integers (`int8`–`int64`, `uint8`–`uint64`, `float32`) | ✓ — mapped to `number` at runtime |
+| Generics (`func F[T any]`, `type S[T any] struct`) | ✓ — type erasure to JS; generic functions, structs, constraints (`any`, `comparable`, interfaces, unions), type inference |
 | Struct field tags | ✓ — parsed and ignored (no reflection) |
 | Struct and array equality (`a == b`) | ✓ — deep comparison via `__equal` helper |
 
@@ -447,7 +450,6 @@ These features are intentional additions for the JavaScript platform:
 
 | Feature | Reason | Prospect |
 |---|---|---|
-| Generics (`[T any]`) | Touches every compiler stage. Large effort, limited runtime payoff on a JS target. | Feasible — highest-priority future feature. |
 | `goto` | No clean JS translation. Rare in idiomatic Go. | Not planned. |
 | Goroutines / channels / `select` | Go's concurrency model has no JS equivalent. A userland scheduler defeats the "no runtime" goal. | Out of scope. |
 | `unsafe`, `reflect`, `cgo` | Require memory model or runtime type metadata that JS cannot provide. | Out of scope. |
@@ -492,7 +494,8 @@ Design documents for planned features are organised by release under `docs/v*/`
 npm test
 ```
 
-846 tests covering language features, type errors, edge cases, DOM (jsdom), external
+869 tests covering language features, type errors, edge cases, DOM (jsdom), external
 `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, map
 iteration order, integer overflow semantics, unused variable detection, unused import
-detection, semantic difference verification, stdlib shim packages, and both example apps.
+detection, semantic difference verification, stdlib shim packages, generics (type params,
+inference, constraints), and both example apps.

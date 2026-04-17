@@ -7,6 +7,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Generics (type parameters)** — Go-style generic functions and types:
+  - Generic function declarations: `func Map[T any, U any](items []T, f func(T) U) []U`
+  - Generic struct declarations: `type Box[T any] struct { Value T }`
+  - Type inference: `Map(nums, fn)` infers T and U from argument types
+  - Explicit type arguments: `Identity[int](42)`, `Box[string]{Value: "hi"}`
+  - Constraints: `any`, `comparable`, named interfaces, union constraints (`~int | ~string`)
+  - Methods on generic types: `func (s *Stack[T]) Push(v T)`
+  - Generic functions as values: `Apply(Identity[int], 99)`
+  - Type erasure to JavaScript — no runtime overhead, all complexity in the front-end
+  - New `TILDE` token in lexer for `~` operator in union constraints
 - **Better pointer model** — `&x` and `*p` now produce real pointer semantics instead
   of being no-ops:
   - `&x` on scalar locals (int, float64, string, bool) boxes the variable as `{ value: x }`

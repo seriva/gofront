@@ -21,6 +21,7 @@ import "./types/checks.test.js";
 import "./types/inference.test.js";
 import "./types/arrays.test.js";
 import "./types/complex.test.js";
+import "./types/generics.test.js";
 import "./structs.test.js";
 import "./builtins/core.test.js";
 import "./builtins/operators.test.js";

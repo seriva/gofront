@@ -52,28 +52,6 @@ async func loadTodos() error {
 
 // ── Mutations (slice operations) ──────────────────────────────
 
-// where returns an iterator over todos matching a predicate (range-over-function).
-func where(pred func(Todo) bool) func(yield func(Todo) bool) {
-    return func(yield func(Todo) bool) {
-        for _, t := range todos {
-            if pred(t) {
-                if !yield(t) {
-                    return
-                }
-            }
-        }
-    }
-}
-
-// collect materializes an iterator into a slice.
-func collect(iter func(yield func(Todo) bool)) []Todo {
-    var out []Todo
-    for t := range iter {
-        out = append(out, t)
-    }
-    return out
-}
-
 func addTodo(text string, priority int) {
     todos = append(todos, Todo{id: nextId, text: text, done: false, priority: priority})
     nextId++
@@ -92,11 +70,11 @@ func toggleTodo(id int) {
 }
 
 func removeTodo(id int) {
-    todos = collect(where(func(t Todo) bool { return t.id != id }))
+    todos = utils.Filter(todos, func(t Todo) bool { return t.id != id })
 }
 
 func clearCompleted() {
-    todos = collect(where(func(t Todo) bool { return !t.done }))
+    todos = utils.Filter(todos, func(t Todo) bool { return !t.done })
 }
 
 func setFilter(f int) {
@@ -136,9 +114,9 @@ func moveTodo(fromId int, toId int) {
 func visibleTodos() []Todo {
     switch filter {
     case FilterActive:
-        return collect(where(func(t Todo) bool { return !t.done }))
+        return utils.Filter(todos, func(t Todo) bool { return !t.done })
     case FilterCompleted:
-        return collect(where(func(t Todo) bool { return t.done }))
+        return utils.Filter(todos, func(t Todo) bool { return t.done })
     default:
         return append([]Todo{}, todos...)
     }
@@ -156,9 +134,5 @@ func stats() (remaining int, completed int) {
 }
 
 func highCount() int {
-    n := 0
-    for _ = range where(func(t Todo) bool { return t.isUrgent() }) {
-        n++
-    }
-    return n
+    return len(utils.Filter(todos, func(t Todo) bool { return t.isUrgent() }))
 }

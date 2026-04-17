@@ -26,9 +26,9 @@ func initStore() {
         f     := filterSignal.get()
         switch f {
         case FilterActive:
-            return collect(where(todos, func(t Todo) bool { return !t.done }))
+            return utils.Filter(todos, func(t Todo) bool { return !t.done })
         case FilterCompleted:
-            return collect(where(todos, func(t Todo) bool { return t.done }))
+            return utils.Filter(todos, func(t Todo) bool { return t.done })
         default:
             return append([]Todo{}, todos...)
         }
@@ -50,11 +50,8 @@ func initStore() {
 
     // Computed: number of urgent, incomplete tasks
     highCountSignal = Signals.computed(func() any {
-        n := 0
-        for _ = range where(todosSignal.get(), func(t Todo) bool { return t.isUrgent() }) {
-            n++
-        }
-        return max(n, 0)
+        urgent := utils.Filter(todosSignal.get(), func(t Todo) bool { return t.isUrgent() })
+        return max(len(urgent), 0)
     }, "highCount")
 }
 
@@ -100,30 +97,6 @@ async func loadTodos() error {
     return nil
 }
 
-// ── Iterators (range-over-function) ────────────────────────────
-
-// where returns an iterator over items in a slice matching a predicate.
-func where(items []Todo, pred func(Todo) bool) func(yield func(Todo) bool) {
-    return func(yield func(Todo) bool) {
-        for _, t := range items {
-            if pred(t) {
-                if !yield(t) {
-                    return
-                }
-            }
-        }
-    }
-}
-
-// collect materializes an iterator into a slice.
-func collect(iter func(yield func(Todo) bool)) []Todo {
-    var out []Todo
-    for t := range iter {
-        out = append(out, t)
-    }
-    return out
-}
-
 // ── Mutations ─────────────────────────────────────────────────
 // Each mutation uses Signals.batch to coalesce updates when doing
 // multiple signal writes, ensuring computed signals recompute once.
@@ -152,12 +125,12 @@ func toggleTodo(id int) {
 
 func removeTodo(id int) {
     cur := todosSignal.get()
-    todosSignal.set(collect(where(cur, func(t Todo) bool { return t.id != id })))
+    todosSignal.set(utils.Filter(cur, func(t Todo) bool { return t.id != id }))
 }
 
 func clearCompleted() {
     cur := todosSignal.get()
-    todosSignal.set(collect(where(cur, func(t Todo) bool { return !t.done })))
+    todosSignal.set(utils.Filter(cur, func(t Todo) bool { return !t.done }))
 }
 
 func setFilter(f int) {

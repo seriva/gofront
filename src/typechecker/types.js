@@ -91,6 +91,16 @@ export const BASIC_TYPES = {
 	complex128: COMPLEX128,
 };
 
+export const COMPARABLE = { kind: "basic", name: "comparable" };
+
+export function isTypeParam(t) {
+	return t?.kind === "typeParam";
+}
+
+export function isGeneric(t) {
+	return t?.kind === "generic";
+}
+
 export function isNumeric(t) {
 	if (!t) return false;
 	if (t.kind === "untyped") return t.base === "int" || t.base === "float64";
@@ -202,6 +212,10 @@ export function typeStr(t) {
 			return t.name;
 		case "pointer":
 			return `*${typeStr(t.base)}`;
+		case "typeParam":
+			return t.name;
+		case "generic":
+			return t.name || `generic(${typeStr(t.underlying)})`;
 		default:
 			return "?";
 	}

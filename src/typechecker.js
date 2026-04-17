@@ -636,6 +636,36 @@ export class TypeChecker {
 	// ── Type collection ──────────────────────────────────────────
 
 	collectType(decl) {
+		if (decl.typeParams) {
+			// Generic type — resolve underlying with type params as ANY for struct fields
+			const typeScope = new Scope(this.globals);
+			const typeParamTypes = decl.typeParams.map((tp) => {
+				const t = {
+					kind: "typeParam",
+					name: tp.name,
+					constraint: tp.constraint,
+				};
+				typeScope.define(tp.name, t);
+				return t;
+			});
+			const underlying = this.resolveTypeNode(decl.type, typeScope);
+			const named = {
+				kind: "named",
+				name: decl.name,
+				underlying,
+				_generic: {
+					typeParams: typeParamTypes,
+					declNode: decl,
+				},
+			};
+			if (underlying.kind === "struct") {
+				underlying.name = decl.name;
+				underlying.methods = new Map();
+			}
+			this.types.set(decl.name, named);
+			this.globals.define(decl.name, named);
+			return;
+		}
 		const underlying = this.resolveTypeNode(decl.type, this.globals);
 		if (decl.isAlias) {
 			// type A = B — transparent alias, A and B are identical types
@@ -656,11 +686,40 @@ export class TypeChecker {
 	}
 
 	collectFunc(decl) {
+		// For generic functions, create type param scope for resolving param/return types
+		let resolveScope = this.globals;
+		let typeParamTypes = null;
+		if (decl.typeParams) {
+			resolveScope = new Scope(this.globals);
+			typeParamTypes = decl.typeParams.map((tp) => {
+				const t = {
+					kind: "typeParam",
+					name: tp.name,
+					constraint: tp.constraint,
+				};
+				resolveScope.define(tp.name, t);
+				return t;
+			});
+		}
+		// For methods on generic types, inject the receiver's type params
+		if (decl.kind === "MethodDecl") {
+			const recvTypeName =
+				decl.recvType.kind === "GenericTypeName"
+					? decl.recvType.name
+					: decl.recvType.name;
+			const recvNamedType = this.types.get(recvTypeName);
+			if (recvNamedType?._generic) {
+				resolveScope = new Scope(this.globals);
+				for (const tp of recvNamedType._generic.typeParams) {
+					resolveScope.define(tp.name, tp);
+				}
+			}
+		}
 		const paramTypes = decl.params.map((p) =>
-			this.resolveTypeNode(p.type, this.globals),
+			this.resolveTypeNode(p.type, resolveScope),
 		);
 		const returnType = decl.returnType
-			? this.resolveTypeNode(decl.returnType, this.globals)
+			? this.resolveTypeNode(decl.returnType, resolveScope)
 			: VOID;
 		const isVariadic =
 			decl.params.length > 0 && decl.params[decl.params.length - 1].variadic;
@@ -675,13 +734,38 @@ export class TypeChecker {
 			if (this.globals.symbols.has(decl.name) && decl.name !== "init") {
 				this.err(`${decl.name} redeclared in this block`, decl);
 			}
-			this.globals.define(decl.name, funcType);
+			if (typeParamTypes) {
+				this.globals.define(decl.name, {
+					kind: "generic",
+					name: decl.name,
+					typeParams: typeParamTypes,
+					underlying: funcType,
+				});
+			} else {
+				this.globals.define(decl.name, funcType);
+			}
 		} else {
 			// Method: attach to struct type
-			const recvType = this.resolveTypeNodeName(decl.recvType, this.globals);
-			const base = recvType?.underlying ?? recvType;
-			if (base?.kind === "struct") {
-				base.methods.set(decl.name, funcType);
+			const recvTypeName =
+				decl.recvType.kind === "GenericTypeName"
+					? decl.recvType.name
+					: decl.recvType.name;
+			const recvNamedType = this.types.get(recvTypeName);
+			if (recvNamedType?._generic) {
+				// Store method on the generic metadata and on the underlying struct
+				if (!recvNamedType._generic.methods)
+					recvNamedType._generic.methods = new Map();
+				recvNamedType._generic.methods.set(decl.name, funcType);
+				const base = recvNamedType.underlying;
+				if (base?.kind === "struct") {
+					base.methods.set(decl.name, funcType);
+				}
+			} else {
+				const recvType = this.resolveTypeNodeName(decl.recvType, this.globals);
+				const base = recvType?.underlying ?? recvType;
+				if (base?.kind === "struct") {
+					base.methods.set(decl.name, funcType);
+				}
 			}
 		}
 	}
@@ -709,11 +793,20 @@ export class TypeChecker {
 
 	checkFuncDecl(decl, outer) {
 		const inner = new Scope(outer);
+		// Inject type params into scope for generic functions
+		if (decl.typeParams) {
+			for (const tp of decl.typeParams) {
+				const constraint = tp.constraint
+					? this.resolveTypeNode(tp.constraint, outer)
+					: ANY;
+				inner.define(tp.name, { kind: "typeParam", name: tp.name, constraint });
+			}
+		}
 		for (const p of decl.params) {
-			inner.define(p.name, this.resolveTypeNode(p.type, outer));
+			inner.define(p.name, this.resolveTypeNode(p.type, inner));
 		}
 		let returnType = decl.returnType
-			? this.resolveTypeNode(decl.returnType, outer)
+			? this.resolveTypeNode(decl.returnType, inner)
 			: VOID;
 		const hasNamedReturns = this._injectNamedReturns(
 			decl.returnType,
@@ -740,18 +833,29 @@ export class TypeChecker {
 
 	checkMethodDecl(decl, outer) {
 		const inner = new Scope(outer);
+		// For generic receiver types (e.g. Stack[T]), inject type params
+		const recvTypeName =
+			decl.recvType.kind === "GenericTypeName"
+				? decl.recvType.name
+				: decl.recvType.name;
+		const recvNamedType = this.types.get(recvTypeName);
+		if (recvNamedType?._generic) {
+			for (const tp of recvNamedType._generic.typeParams) {
+				inner.define(tp.name, tp);
+			}
+		}
 		const recvType = this.resolveTypeNodeName(decl.recvType, outer);
 		inner.define(decl.recvName, recvType);
 		for (const p of decl.params) {
-			inner.define(p.name, this.resolveTypeNode(p.type, outer));
+			inner.define(p.name, this.resolveTypeNode(p.type, inner));
 		}
 		let returnType = decl.returnType
-			? this.resolveTypeNode(decl.returnType, outer)
+			? this.resolveTypeNode(decl.returnType, inner)
 			: VOID;
 		const hasNamedReturns = this._injectNamedReturns(
 			decl.returnType,
 			inner,
-			outer,
+			inner,
 		);
 		if (hasNamedReturns && returnType)
 			returnType = { ...returnType, _hasNamedReturns: true };
@@ -894,10 +998,37 @@ export class TypeChecker {
 		switch (node.kind) {
 			case "TypeName": {
 				if (BASIC_TYPES[node.name]) return BASIC_TYPES[node.name];
+				if (node.name === "comparable")
+					return { kind: "basic", name: "comparable" };
+				// Check scope for type params before checking this.types
+				if (scope) {
+					const fromScope = scope.lookup(node.name);
+					if (fromScope?.kind === "typeParam") return fromScope;
+				}
 				const named = this.types.get(node.name);
 				if (named) return named;
 				return this.err(`Unknown type '${node.name}'`, node);
 			}
+			case "GenericTypeName": {
+				const base = this.types.get(node.name);
+				if (!base) return this.err(`Unknown type '${node.name}'`, node);
+				if (base.kind === "named" && base._generic) {
+					return this.instantiateGenericType(
+						base._generic,
+						node.typeArgs,
+						scope,
+					);
+				}
+				return this.err(`Type '${node.name}' is not generic`, node);
+			}
+			case "TypeParam": {
+				const constraint = node.constraint
+					? this.resolveTypeNode(node.constraint, scope)
+					: ANY;
+				return { kind: "typeParam", name: node.name, constraint };
+			}
+			case "UnionConstraint":
+				return node;
 			case "SliceType":
 				return {
 					kind: "slice",
@@ -1016,10 +1147,226 @@ export class TypeChecker {
 			const named = this.types.get(node.name);
 			if (named) return named;
 		}
+		if (node.kind === "GenericTypeName") {
+			const named = this.types.get(node.name);
+			if (named) return named;
+		}
 		return this.resolveTypeNode(node, scope);
 	}
 
 	// ── Helpers ───────────────────────────────────────────────────
+
+	// ── Generics — instantiation, inference, substitution ────────
+
+	substituteType(type, map) {
+		if (!type) return type;
+		if (type.kind === "typeParam") {
+			const bound = map.get(type.name);
+			return bound ?? type;
+		}
+		switch (type.kind) {
+			case "basic":
+			case "untyped":
+				return type;
+			case "slice":
+				return { kind: "slice", elem: this.substituteType(type.elem, map) };
+			case "array":
+				return {
+					kind: "array",
+					size: type.size,
+					elem: this.substituteType(type.elem, map),
+				};
+			case "map":
+				return {
+					kind: "map",
+					key: this.substituteType(type.key, map),
+					value: this.substituteType(type.value, map),
+				};
+			case "func": {
+				return {
+					kind: "func",
+					params: type.params.map((p) => this.substituteType(p, map)),
+					returns: type.returns.map((r) => this.substituteType(r, map)),
+					variadic: type.variadic,
+					async: type.async,
+				};
+			}
+			case "struct": {
+				const fields = new Map();
+				for (const [k, v] of type.fields)
+					fields.set(k, this.substituteType(v, map));
+				const methods = new Map();
+				for (const [k, v] of type.methods)
+					methods.set(k, this.substituteType(v, map));
+				return {
+					kind: "struct",
+					name: type.name,
+					fields,
+					methods,
+					_embeds: type._embeds,
+				};
+			}
+			case "interface": {
+				const methods = new Map();
+				for (const [k, v] of type.methods)
+					methods.set(k, this.substituteType(v, map));
+				return { kind: "interface", name: type.name, methods };
+			}
+			case "named":
+				return {
+					kind: "named",
+					name: type.name,
+					underlying: this.substituteType(type.underlying, map),
+				};
+			case "pointer":
+				return { kind: "pointer", base: this.substituteType(type.base, map) };
+			case "tuple":
+				return {
+					kind: "tuple",
+					types: type.types.map((t) => this.substituteType(t, map)),
+				};
+			default:
+				return type;
+		}
+	}
+
+	instantiateGenericFunc(genericType, typeArgs) {
+		const map = new Map();
+		for (let i = 0; i < genericType.typeParams.length; i++) {
+			map.set(genericType.typeParams[i].name, typeArgs[i] ?? ANY);
+		}
+		return this.substituteType(genericType.underlying, map);
+	}
+
+	instantiateGenericType(generic, typeArgNodes, scope) {
+		const map = new Map();
+		const typeArgs = typeArgNodes.map((n) => this.resolveTypeNode(n, scope));
+		for (let i = 0; i < generic.typeParams.length; i++) {
+			map.set(generic.typeParams[i].name, typeArgs[i] ?? ANY);
+		}
+		// Resolve the underlying type from the decl node using a scope with type params bound
+		const typeScope = new Scope(this.globals);
+		for (const [name, type] of map) typeScope.define(name, type);
+		const underlying = this.resolveTypeNode(generic.declNode.type, typeScope);
+		const instantiated = this.substituteType(underlying, map);
+		if (instantiated.kind === "struct") {
+			instantiated.name = generic.declNode.name;
+			if (!instantiated.methods) instantiated.methods = new Map();
+			// Copy and substitute methods from the generic
+			if (generic.methods) {
+				for (const [mName, mType] of generic.methods) {
+					instantiated.methods.set(mName, this.substituteType(mType, map));
+				}
+			}
+		}
+		return {
+			kind: "named",
+			name: generic.declNode.name,
+			underlying: instantiated,
+		};
+	}
+
+	inferTypeArgs(genericType, argTypes) {
+		const map = new Map();
+		const params = genericType.underlying.params;
+		for (let i = 0; i < params.length && i < argTypes.length; i++) {
+			this._inferFromPair(params[i], argTypes[i], map);
+		}
+		// Check all type params are resolved
+		for (const tp of genericType.typeParams) {
+			if (!map.has(tp.name)) return null;
+		}
+		// Apply defaultType to resolve untyped constants
+		const result = [];
+		for (const tp of genericType.typeParams) {
+			result.push(defaultType(map.get(tp.name)));
+		}
+		return result;
+	}
+
+	_inferFromPair(paramType, argType, map) {
+		if (!paramType || !argType) return;
+		if (paramType.kind === "typeParam") {
+			if (!map.has(paramType.name)) {
+				map.set(paramType.name, argType);
+			}
+			return;
+		}
+		if (paramType.kind === "slice" && argType.kind === "slice") {
+			this._inferFromPair(paramType.elem, argType.elem, map);
+		}
+		if (paramType.kind === "map" && argType.kind === "map") {
+			this._inferFromPair(paramType.key, argType.key, map);
+			this._inferFromPair(paramType.value, argType.value, map);
+		}
+		if (paramType.kind === "func" && argType.kind === "func") {
+			for (
+				let i = 0;
+				i < paramType.params.length && i < argType.params.length;
+				i++
+			) {
+				this._inferFromPair(paramType.params[i], argType.params[i], map);
+			}
+			for (
+				let i = 0;
+				i < paramType.returns.length && i < argType.returns.length;
+				i++
+			) {
+				this._inferFromPair(paramType.returns[i], argType.returns[i], map);
+			}
+		}
+	}
+
+	checkConstraint(typeArg, constraint, node) {
+		if (!constraint) return;
+		if (isAny(constraint)) return;
+		if (constraint.kind === "basic" && constraint.name === "comparable") return;
+		if (constraint.kind === "UnionConstraint") {
+			// Check if typeArg matches any term; ~terms always pass (v1)
+			for (const term of constraint.terms) {
+				if (term.approx) return; // ~ means approximate, always passes
+				const termType = this.resolveTypeNode(term.type, this.globals);
+				if (typeStr(typeArg) === typeStr(termType)) return;
+			}
+			this.err(`type ${typeStr(typeArg)} does not satisfy constraint`, node);
+			return;
+		}
+		// Interface constraint
+		const base =
+			constraint.kind === "named" ? constraint.underlying : constraint;
+		if (base?.kind === "interface") {
+			if (base.methods.size === 0) return; // empty interface = any
+			// Check if typeArg has union constraint (from interface type decl)
+			if (base.unionConstraint) {
+				return this.checkConstraint(typeArg, base.unionConstraint, node);
+			}
+			if (!this.implements(typeArg, base, node)) {
+				this.err(
+					`type ${typeStr(typeArg)} does not satisfy constraint ${typeStr(constraint)}`,
+					node,
+				);
+			}
+			return;
+		}
+		// Named type used as constraint — look at underlying
+		if (
+			constraint.kind === "named" &&
+			constraint.underlying?.kind === "interface"
+		) {
+			const iface = constraint.underlying;
+			if (iface.methods.size === 0 && !iface.unionConstraint) return;
+			if (iface.unionConstraint) {
+				return this.checkConstraint(typeArg, iface.unionConstraint, node);
+			}
+			if (!this.implements(typeArg, iface, node)) {
+				this.err(
+					`type ${typeStr(typeArg)} does not satisfy constraint ${typeStr(constraint)}`,
+					node,
+				);
+			}
+			return;
+		}
+	}
 
 	resolveType(t) {
 		if (!t) return ANY;
@@ -1077,6 +1424,12 @@ export class TypeChecker {
 	}
 
 	binaryResultType(op, lt, rt, node) {
+		// Type parameters are permissive — allow operations and return the typeParam
+		if (lt?.kind === "typeParam" || rt?.kind === "typeParam") {
+			if (CMP_OPS.has(op)) return BOOL;
+			if (LOG_OPS.has(op)) return BOOL;
+			return lt?.kind === "typeParam" ? lt : rt;
+		}
 		if (CMP_OPS.has(op)) {
 			// Complex only supports == and !=
 			if (isComplex(lt) || isComplex(rt)) {
@@ -1159,6 +1512,8 @@ export class TypeChecker {
 		if (!target || !source) return;
 		target = this.resolveType(target);
 		source = this.resolveType(source);
+		// Type params are permissive — allow any assignment
+		if (target?.kind === "typeParam" || source?.kind === "typeParam") return;
 		if (isAny(target) || isAny(source)) return;
 		if (isNil(source)) return; // nil is assignable to anything nullable
 		// Pointer type: nil → *T is allowed (handled above); *T → *T check base types

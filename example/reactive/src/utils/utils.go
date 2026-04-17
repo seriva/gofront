@@ -19,3 +19,23 @@ func Clamp(n int, lo int, hi int) int {
 func HasText(s string) bool {
     return strings.TrimSpace(s) != ""
 }
+
+// Filter returns a new slice containing only elements that satisfy pred.
+func Filter[T any](items []T, pred func(T) bool) []T {
+    var out []T
+    for _, item := range items {
+        if pred(item) {
+            out = append(out, item)
+        }
+    }
+    return out
+}
+
+// Map transforms each element of a slice using the given function.
+func Map[T any, U any](items []T, f func(T) U) []U {
+    var out []U
+    for _, item := range items {
+        out = append(out, f(item))
+    }
+    return out
+}

@@ -45,7 +45,94 @@ export const typeParserMethods = {
 			this.advance();
 			name += `.${this.expect(T.IDENT).value}`;
 		}
+		// Generic type instantiation: Type[int, string]
+		if (this.check(T.LBRACKET) && this._looksLikeTypeArgListInType()) {
+			this.expect(T.LBRACKET);
+			const typeArgs = [this.parseType()];
+			while (this.match(T.COMMA)) typeArgs.push(this.parseType());
+			this.expect(T.RBRACKET);
+			return { kind: "GenericTypeName", name, typeArgs };
+		}
 		return { kind: "TypeName", name };
+	},
+
+	// Lookahead to distinguish Type[int] (generic) from [n]T (array) in type context.
+	// Scans from [ to matching ] looking for only type-like tokens.
+	_looksLikeTypeArgListInType() {
+		let i = this.pos + 1; // skip [
+		const src = this.tokens;
+		let depth = 1;
+		while (i < src.length && depth > 0) {
+			const tt = src[i].type;
+			if (tt === T.LBRACKET) {
+				depth++;
+				i++;
+				continue;
+			}
+			if (tt === T.RBRACKET) {
+				depth--;
+				if (depth === 0) break;
+				i++;
+				continue;
+			}
+			// Reject literals — it's an index/array expression
+			if (tt === T.INT || tt === T.FLOAT || tt === T.STRING) return false;
+			i++;
+		}
+		return depth === 0;
+	},
+
+	parseTypeParamList() {
+		this.expect(T.LBRACKET);
+		const params = [];
+		do {
+			const name = this.expect(T.IDENT).value;
+			const constraint = this.parseConstraint();
+			params.push({ kind: "TypeParam", name, constraint });
+		} while (this.match(T.COMMA));
+		this.expect(T.RBRACKET);
+		return params;
+	},
+
+	parseConstraint() {
+		// Union constraint: ~int | ~string or int | string
+		if (
+			this.check(T.TILDE) ||
+			(this.check(T.IDENT) && this._looksLikeUnionConstraint())
+		) {
+			return this._parseUnionConstraint();
+		}
+		// Single constraint: any, comparable, or named type
+		return this.parseType();
+	},
+
+	_looksLikeUnionConstraint() {
+		// Check if after the identifier there's a | before the next , or ]
+		let i = this.pos + 1;
+		const src = this.tokens;
+		while (i < src.length) {
+			const tt = src[i].type;
+			if (tt === T.PIPE) return true;
+			if (
+				tt === T.COMMA ||
+				tt === T.RBRACKET ||
+				tt === T.SEMICOLON ||
+				tt === T.EOF
+			)
+				return false;
+			i++;
+		}
+		return false;
+	},
+
+	_parseUnionConstraint() {
+		const terms = [];
+		do {
+			const approx = this.match(T.TILDE);
+			const type = this.parseType();
+			terms.push({ approx, type });
+		} while (this.match(T.PIPE));
+		return { kind: "UnionConstraint", terms };
 	},
 
 	parseSliceOrArrayType() {
@@ -116,13 +203,30 @@ export const typeParserMethods = {
 		this.expect(T.LBRACE);
 		const methods = [];
 		const embeds = [];
+		let unionConstraint = null;
 		while (!this.check(T.RBRACE) && !this.check(T.EOF)) {
+			// Union constraint element: ~int | ~string
+			if (this.check(T.TILDE)) {
+				unionConstraint = this._parseUnionConstraint();
+				this.semi();
+				continue;
+			}
 			const name = this.expect(T.IDENT).value;
 			if (this.check(T.LPAREN)) {
 				// Method signature: Name(params) returnType
 				const params = this.parseParamList();
 				const returnType = this.parseReturnType();
 				methods.push({ name, params, returnType });
+			} else if (this.check(T.PIPE) || this.check(T.TILDE)) {
+				// Union constraint starting with a type name: int | string
+				// We already consumed the first ident, build the union
+				const terms = [{ approx: false, type: { kind: "TypeName", name } }];
+				while (this.match(T.PIPE)) {
+					const approx = this.match(T.TILDE);
+					const type = this.parseType();
+					terms.push({ approx, type });
+				}
+				unionConstraint = { kind: "UnionConstraint", terms };
 			} else {
 				// Embedded interface: TypeName or pkg.TypeName
 				let typeName = name;
@@ -135,6 +239,8 @@ export const typeParserMethods = {
 			this.semi();
 		}
 		this.expect(T.RBRACE);
-		return { kind: "InterfaceType", methods, embeds };
+		const node = { kind: "InterfaceType", methods, embeds };
+		if (unionConstraint) node.unionConstraint = unionConstraint;
+		return node;
 	},
 };

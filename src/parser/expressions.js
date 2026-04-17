@@ -120,22 +120,36 @@ export const expressionParserMethods = {
 					expr = { kind: "SelectorExpr", expr, field };
 				}
 			} else if (t.type === T.LBRACKET) {
-				this.advance();
-				const low = this.check(T.COLON) ? null : this.parseExpr();
-				if (this.match(T.COLON)) {
-					const high =
-						this.check(T.RBRACKET) || this.check(T.COLON)
-							? null
-							: this.parseExpr();
-					let max = null;
-					if (this.match(T.COLON)) {
-						max = this.parseExpr();
-					}
+				// Check if this looks like generic type args: Ident[Type](...)  or Ident[Type]{...}
+				if (expr.kind === "Ident" && this.looksLikeTypeArgList()) {
+					this.advance(); // consume [
+					const typeArgs = [this.parseType()];
+					while (this.match(T.COMMA)) typeArgs.push(this.parseType());
 					this.expect(T.RBRACKET);
-					expr = { kind: "SliceExpr", expr, low, high, max };
+					expr = {
+						kind: "InstantiationExpr",
+						expr,
+						typeArgs,
+						_line: expr._line,
+					};
 				} else {
-					this.expect(T.RBRACKET);
-					expr = { kind: "IndexExpr", expr, index: low };
+					this.advance();
+					const low = this.check(T.COLON) ? null : this.parseExpr();
+					if (this.match(T.COLON)) {
+						const high =
+							this.check(T.RBRACKET) || this.check(T.COLON)
+								? null
+								: this.parseExpr();
+						let max = null;
+						if (this.match(T.COLON)) {
+							max = this.parseExpr();
+						}
+						this.expect(T.RBRACKET);
+						expr = { kind: "SliceExpr", expr, low, high, max };
+					} else {
+						this.expect(T.RBRACKET);
+						expr = { kind: "IndexExpr", expr, index: low };
+					}
 				}
 			} else if (t.type === T.LPAREN) {
 				expr = this.parseCall(expr);
@@ -158,8 +172,85 @@ export const expressionParserMethods = {
 			expr.kind === "Ident" ||
 			expr.kind === "SelectorExpr" ||
 			expr.kind === "TypeExpr" ||
-			expr.kind === "StructType"
+			expr.kind === "StructType" ||
+			expr.kind === "InstantiationExpr"
 		);
+	},
+
+	// Lookahead: does the [ ... ] after an Ident look like generic type args?
+	// Returns true if: only type-like tokens inside brackets, AND followed by a valid continuation
+	looksLikeTypeArgList() {
+		let i = this.pos + 1; // skip [
+		const src = this.tokens;
+		let depth = 1;
+		let hasComma = false;
+		let hasTypeKeyword = false;
+		while (i < src.length && depth > 0) {
+			const tt = src[i].type;
+			if (tt === T.LBRACKET) {
+				depth++;
+				i++;
+				continue;
+			}
+			if (tt === T.RBRACKET) {
+				depth--;
+				if (depth === 0) break;
+				i++;
+				continue;
+			}
+			// Reject literals — it's an index expression
+			if (tt === T.INT || tt === T.FLOAT || tt === T.STRING) return false;
+			// Reject binary operators that wouldn't appear in type args
+			if (
+				tt === T.PLUS ||
+				tt === T.MINUS ||
+				tt === T.PERCENT ||
+				tt === T.SLASH ||
+				tt === T.AND ||
+				tt === T.OR ||
+				tt === T.CARET ||
+				tt === T.NOT ||
+				tt === T.LT ||
+				tt === T.GT ||
+				tt === T.LTE ||
+				tt === T.GTE ||
+				tt === T.EQ ||
+				tt === T.NEQ ||
+				tt === T.LSHIFT ||
+				tt === T.RSHIFT ||
+				tt === T.AND_NOT ||
+				tt === T.COLON ||
+				tt === T.DEFINE ||
+				tt === T.ASSIGN
+			)
+				return false;
+			if (depth === 1) {
+				if (tt === T.COMMA) hasComma = true;
+				if (
+					tt === T.STAR ||
+					tt === T.MAP ||
+					tt === T.FUNC ||
+					tt === T.INTERFACE ||
+					tt === T.STRUCT
+				)
+					hasTypeKeyword = true;
+				// Check if it's a builtin type name
+				if (tt === T.IDENT && TYPE_KEYWORDS.has(src[i].value))
+					hasTypeKeyword = true;
+			}
+			i++;
+		}
+		if (depth !== 0) return false;
+		// Check what follows ]
+		const after = src[i + 1];
+		if (!after) return false;
+		// Call or composite lit — always valid as type args
+		if (after.type === T.LPAREN || after.type === T.LBRACE) return true;
+		// Function value in argument list: Identity[int], 99) — only if clearly a type
+		if (after.type === T.COMMA || after.type === T.RPAREN) {
+			return hasComma || hasTypeKeyword;
+		}
+		return false;
 	},
 
 	parseCall(fn) {

@@ -1,3 +1,6 @@
+function __append(a, ...b) { return a ? [...a, ...b] : b; }
+function __s(a) { return a || []; }
+
 function Plural(n, word) {
   if (n === 1) {
     return String(n) + " " + word;
@@ -11,6 +14,24 @@ function Clamp(n, lo, hi) {
 
 function HasText(s) {
   return s.trim() !== "";
+}
+
+function Filter(items, pred) {
+  let out = null;
+  for (const [_$, item] of __s(items).entries()) {
+    if (pred(item)) {
+      out = __append(out, item);
+    }
+  }
+  return out;
+}
+
+function Map(items, f) {
+  let out = null;
+  for (const [_$, item] of __s(items).entries()) {
+    out = __append(out, f(item));
+  }
+  return out;
 }
 
 function __len(a) { return a?.length ?? 0; }
@@ -383,15 +404,15 @@ function initStore() {
     switch (f) {
       case FilterActive:
       {
-        return collect(where(todos, function(t) {
+        return Filter(todos, function(t) {
           return !t.done;
-        }));
+        });
       }
       case FilterCompleted:
       {
-        return collect(where(todos, function(t) {
+        return Filter(todos, function(t) {
           return t.done;
-        }));
+        });
       }
       default:
       {
@@ -412,21 +433,10 @@ function initStore() {
     return new Stats({ remaining: remaining, completed: completed });
   }, "stats");
   highCountSignal = Signals.computed(function() {
-    let n = 0;
-    {
-      let __broke0 = false;
-      let __returned0 = false;
-      let __retVal0;
-      where(todosSignal.get(), function(t) {
+    let urgent = Filter(todosSignal.get(), function(t) {
       return t.isUrgent();
-    })(function(_$0) {
-        if (__broke0) return false;
-        n++;
-        return true;
-      });
-      if (__returned0) return __retVal0;
-    }
-    return Math.max(n, 0);
+    });
+    return Math.max(__len(urgent), 0);
   }, "highCount");
 }
 
@@ -485,34 +495,6 @@ async function loadTodos() {
   return null;
 }
 
-function where(items, pred) {
-  return function(yield) {
-    for (const [_$, t] of __s(items).entries()) {
-      if (pred(t)) {
-        if (!yield(t)) {
-          return;
-        }
-      }
-    }
-  };
-}
-
-function collect(iter) {
-  let out = null;
-  {
-    let __broke0 = false;
-    let __returned0 = false;
-    let __retVal0;
-    iter(function(t) {
-      if (__broke0) return false;
-      out = __append(out, t);
-      return true;
-    });
-    if (__returned0) return __retVal0;
-  }
-  return out;
-}
-
 function addTodo(text, priority) {
   Signals.batch(function() {
     let cur = todosSignal.get();
@@ -537,16 +519,16 @@ function toggleTodo(id) {
 
 function removeTodo(id) {
   let cur = todosSignal.get();
-  todosSignal.set(collect(where(cur, function(t) {
+  todosSignal.set(Filter(cur, function(t) {
     return t.id !== id;
-  })));
+  }));
 }
 
 function clearCompleted() {
   let cur = todosSignal.get();
-  todosSignal.set(collect(where(cur, function(t) {
+  todosSignal.set(Filter(cur, function(t) {
     return !t.done;
-  })));
+  }));
 }
 
 function setFilter(f) {

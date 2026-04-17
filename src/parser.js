@@ -195,10 +195,23 @@ export class Parser {
 		}
 		// plain function
 		const name = this.expect(T.IDENT).value;
+		// generic function: func Name[T any, U Stringer](...) ...
+		let typeParams = null;
+		if (this.check(T.LBRACKET) && this._looksLikeTypeParamList()) {
+			typeParams = this.parseTypeParamList();
+		}
 		const { params, returnType } = this.parseSignature();
 		const body = this.parseBlock();
 		this.semi();
-		return { kind: "FuncDecl", name, params, returnType, body, _line };
+		return {
+			kind: "FuncDecl",
+			name,
+			typeParams,
+			params,
+			returnType,
+			body,
+			_line,
+		};
 	}
 
 	parseAsyncFuncOrMethod() {
@@ -217,6 +230,24 @@ export class Parser {
 				tok.type === T.SEMICOLON ||
 				tok.type === T.EOF)
 		);
+	}
+
+	// Lookahead: does the [ ... ] after a func name or type name look like a type param list?
+	// Type param lists contain IDENT followed by a constraint (another IDENT or keyword),
+	// not expressions like integers or operators.
+	_looksLikeTypeParamList() {
+		const i = this.pos + 1; // skip [
+		const src = this.tokens;
+		// First token must be an IDENT (the type param name)
+		if (!src[i] || src[i].type !== T.IDENT) return false;
+		// Second token should be a constraint (IDENT like 'any', 'comparable', another type name)
+		// or TILDE for union constraints
+		const second = src[i + 1];
+		if (!second) return false;
+		if (second.type === T.IDENT) return true; // T any, T Stringer
+		if (second.type === T.TILDE) return true; // T ~int
+		if (second.type === T.INTERFACE) return true; // T interface{...}
+		return false;
 	}
 
 	parseSignature() {
@@ -357,10 +388,15 @@ export class Parser {
 			return decls;
 		}
 		const name = this.expect(T.IDENT).value;
+		// generic type: type Name[T any] struct { ... }
+		let typeParams = null;
+		if (this.check(T.LBRACKET) && this._looksLikeTypeParamList()) {
+			typeParams = this.parseTypeParamList();
+		}
 		const isAlias = this.match(T.ASSIGN);
 		const type = this.parseType();
 		this.semi();
-		return { kind: "TypeDecl", name, type, isAlias };
+		return { kind: "TypeDecl", name, typeParams, type, isAlias };
 	}
 
 	parseVarDecl() {

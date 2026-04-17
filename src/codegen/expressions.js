@@ -121,6 +121,9 @@ export const expressionGenMethods = {
 			case "CallExpr":
 				return this.genCall(expr);
 
+			case "InstantiationExpr":
+				return this.genExpr(expr.expr); // type erasure
+
 			case "SelectorExpr": {
 				// Method expression: TypeName.MethodName → (recv, ...args) => recv.method(...args)
 				if (expr._isMethodExpr) {
@@ -336,9 +339,12 @@ export const expressionGenMethods = {
 	},
 
 	genCall(expr) {
+		// Unwrap InstantiationExpr for function calls: Foo[int](42) → Foo(42)
+		const funcExpr =
+			expr.func.kind === "InstantiationExpr" ? expr.func.expr : expr.func;
 		// Handle built-ins that need special JS translation
-		if (expr.func.kind === "Ident") {
-			switch (expr.func.name) {
+		if (funcExpr.kind === "Ident") {
+			switch (funcExpr.name) {
 				case "append":
 					return this.genAppend(expr);
 				case "len": {
@@ -594,7 +600,10 @@ export const expressionGenMethods = {
 	getTypeName(typeNode) {
 		if (!typeNode) return null;
 		if (typeNode.kind === "TypeName") return typeNode.name;
+		if (typeNode.kind === "GenericTypeName") return typeNode.name;
 		if (typeNode.kind === "Ident") return typeNode.name;
+		if (typeNode.kind === "InstantiationExpr")
+			return this.getTypeName(typeNode.expr);
 		if (typeNode.kind === "SelectorExpr") return typeNode.field;
 		return null;
 	},

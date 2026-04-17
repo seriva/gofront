@@ -1,3 +1,6 @@
+function __append(a, ...b) { return a ? [...a, ...b] : b; }
+function __s(a) { return a || []; }
+
 function Plural(n, word) {
   if (n === 1) {
     return String(n) + " " + word;
@@ -7,6 +10,24 @@ function Plural(n, word) {
 
 function HasText(s) {
   return s.trim() !== "";
+}
+
+function Filter(items, pred) {
+  let out = null;
+  for (const [_$, item] of __s(items).entries()) {
+    if (pred(item)) {
+      out = __append(out, item);
+    }
+  }
+  return out;
+}
+
+function Map(items, f) {
+  let out = null;
+  for (const [_$, item] of __s(items).entries()) {
+    out = __append(out, f(item));
+  }
+  return out;
 }
 
 function __len(a) { return a?.length ?? 0; }
@@ -397,34 +418,6 @@ async function loadTodos() {
   return null;
 }
 
-function where(pred) {
-  return function(yield) {
-    for (const [_$, t] of __s(todos).entries()) {
-      if (pred(t)) {
-        if (!yield(t)) {
-          return;
-        }
-      }
-    }
-  };
-}
-
-function collect(iter) {
-  let out = null;
-  {
-    let __broke0 = false;
-    let __returned0 = false;
-    let __retVal0;
-    iter(function(t) {
-      if (__broke0) return false;
-      out = __append(out, t);
-      return true;
-    });
-    if (__returned0) return __retVal0;
-  }
-  return out;
-}
-
 function addTodo(text, priority) {
   todos = __append(todos, new Todo({ id: nextId, text: text, done: false, priority: priority }));
   nextId++;
@@ -443,15 +436,15 @@ function toggleTodo(id) {
 }
 
 function removeTodo(id) {
-  todos = collect(where(function(t) {
+  todos = Filter(todos, function(t) {
     return t.id !== id;
-  }));
+  });
 }
 
 function clearCompleted() {
-  todos = collect(where(function(t) {
+  todos = Filter(todos, function(t) {
     return !t.done;
-  }));
+  });
 }
 
 function setFilter(f) {
@@ -490,15 +483,15 @@ function visibleTodos() {
   switch (filter) {
     case FilterActive:
     {
-      return collect(where(function(t) {
+      return Filter(todos, function(t) {
         return !t.done;
-      }));
+      });
     }
     case FilterCompleted:
     {
-      return collect(where(function(t) {
+      return Filter(todos, function(t) {
         return t.done;
-      }));
+      });
     }
     default:
     {
@@ -521,21 +514,9 @@ function stats() {
 }
 
 function highCount() {
-  let n = 0;
-  {
-    let __broke0 = false;
-    let __returned0 = false;
-    let __retVal0;
-    where(function(t) {
+  return __len(Filter(todos, function(t) {
     return t.isUrgent();
-  })(function(_$0) {
-      if (__broke0) return false;
-      n++;
-      return true;
-    });
-    if (__returned0) return __retVal0;
-  }
-  return n;
+  }));
 }
 
 function injectStyles() {
