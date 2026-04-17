@@ -26,21 +26,9 @@ func initStore() {
         f     := filterSignal.get()
         switch f {
         case FilterActive:
-            var out []Todo
-            for _, t := range todos {
-                if !t.done {
-                    out = append(out, t)
-                }
-            }
-            return out
+            return collect(where(todos, func(t Todo) bool { return !t.done }))
         case FilterCompleted:
-            var out []Todo
-            for _, t := range todos {
-                if t.done {
-                    out = append(out, t)
-                }
-            }
-            return out
+            return collect(where(todos, func(t Todo) bool { return t.done }))
         default:
             return append([]Todo{}, todos...)
         }
@@ -63,10 +51,8 @@ func initStore() {
     // Computed: number of urgent, incomplete tasks
     highCountSignal = Signals.computed(func() any {
         n := 0
-        for _, t := range todosSignal.get() {
-            if t.isUrgent() {
-                n++
-            }
+        for _ = range where(todosSignal.get(), func(t Todo) bool { return t.isUrgent() }) {
+            n++
         }
         return max(n, 0)
     }, "highCount")
@@ -83,7 +69,7 @@ async func saveTodos() error {
 func safeJsonParse(raw string) (result any, err error) {
     defer func() {
         if r := recover(); r != nil {
-            err = error(r)
+            err = errors.New(fmt.Sprintf("%v", r))
         }
     }()
     result = JSON.parse(raw)
@@ -97,10 +83,10 @@ async func loadTodos() error {
     }
     parsed, parseErr := safeJsonParse(raw)
     if parseErr != nil {
-        return parseErr
+        return fmt.Errorf("invalid stored todos: %w", parseErr)
     }
     if parsed == nil {
-        return error("failed to parse stored todos")
+        return errors.New("failed to parse stored todos")
     }
     var loaded []Todo
     for _, raw := range parsed {
@@ -112,6 +98,30 @@ async func loadTodos() error {
     }
     todosSignal.set(loaded)
     return nil
+}
+
+// ── Iterators (range-over-function) ────────────────────────────
+
+// where returns an iterator over items in a slice matching a predicate.
+func where(items []Todo, pred func(Todo) bool) func(yield func(Todo) bool) {
+    return func(yield func(Todo) bool) {
+        for _, t := range items {
+            if pred(t) {
+                if !yield(t) {
+                    return
+                }
+            }
+        }
+    }
+}
+
+// collect materializes an iterator into a slice.
+func collect(iter func(yield func(Todo) bool)) []Todo {
+    var out []Todo
+    for t := range iter {
+        out = append(out, t)
+    }
+    return out
 }
 
 // ── Mutations ─────────────────────────────────────────────────
@@ -142,24 +152,12 @@ func toggleTodo(id int) {
 
 func removeTodo(id int) {
     cur := todosSignal.get()
-    var next []Todo
-    for _, t := range cur {
-        if t.id != id {
-            next = append(next, t)
-        }
-    }
-    todosSignal.set(next)
+    todosSignal.set(collect(where(cur, func(t Todo) bool { return t.id != id })))
 }
 
 func clearCompleted() {
     cur := todosSignal.get()
-    var next []Todo
-    for _, t := range cur {
-        if !t.done {
-            next = append(next, t)
-        }
-    }
-    todosSignal.set(next)
+    todosSignal.set(collect(where(cur, func(t Todo) bool { return !t.done })))
 }
 
 func setFilter(f int) {

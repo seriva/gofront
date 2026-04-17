@@ -4,10 +4,10 @@ const maxTodoLen = 120
 
 func validateTodo(text string) error {
     if !utils.HasText(text) {
-        return error("todo text cannot be empty")
+        return errors.New("todo text cannot be empty")
     }
     if len([]rune(text)) > maxTodoLen {
-        return error("todo text too long")
+        return errors.New("todo text too long")
     }
     return nil
 }

@@ -10,17 +10,13 @@ function Clamp(n, lo, hi) {
 }
 
 function HasText(s) {
-  for (const [_$, r] of Array.from(s, (__c, __i) => [__i, __c.codePointAt(0)])) {
-    if (!/\s/.test(String.fromCodePoint(r))) {
-      return true;
-    }
-  }
-  return false;
+  return s.trim() !== "";
 }
 
 function __len(a) { return a?.length ?? 0; }
 function __append(a, ...b) { return a ? [...a, ...b] : b; }
 function __s(a) { return a || []; }
+function __sprintf(f,...a){let i=0;return f.replace(/%([#+\- 0]*)([0-9]*)\.?([0-9]*)[sdvftxXqobeEgGw%]/g,(m)=>{if(m==='%%')return'%';const fl=m.slice(1,-1),verb=m.slice(-1),v=a[i++];const pad=(s,w,z)=>{w=parseInt(w)||0;if(!w)return s;const p=(z?'0':' ').repeat(Math.max(0,w-s.length));return fl.includes('-')?s+p:p+s;};const [,flags,width,prec]=m.match(/^%([#+\- 0]*)([0-9]*)\.?([0-9]*)/)||[];const zero=flags?.includes('0')&&!flags?.includes('-');switch(verb){case's':return pad(String(v==null?'<nil>':v),width,false);case'd':return pad(String(Math.trunc(Number(v))),width,zero);case'v':{if(typeof v==='object'&&v!==null&&'re' in v&&'im' in v){const sign=v.im>=0?'+':'';return pad('('+v.re+sign+v.im+'i)',width,false);}return pad(String(v==null?'<nil>':v),width,false);}case'f':{const n=Number(v),p=prec!==''?parseInt(prec):6;return pad(n.toFixed(p),width,zero);}case't':return pad(String(!!v),width,false);case'x':return pad((Number(v)>>>0).toString(16),width,zero);case'X':return pad((Number(v)>>>0).toString(16).toUpperCase(),width,zero);case'o':return pad((Number(v)>>>0).toString(8),width,zero);case'b':return pad((Number(v)>>>0).toString(2),width,zero);case'q':return pad('"'+String(v==null?'':v).replace(/\\/g,'\\\\').replace(/"/g,'\\"')+'"',width,false);case'e':case'E':{const n=Number(v),p=prec!==''?parseInt(prec):6;return pad(n.toExponential(p),width,zero);}case'g':case'G':{const n=Number(v);return pad(prec!==''?n.toPrecision(parseInt(prec)):String(n),width,zero);}case'w':return pad(String(v==null?'<nil>':typeof v==='object'&&v.Error?v.Error():v),width,false);default:return m;}});}
 function __error(msg, cause) { return { Error() { return msg; }, toString() { return msg; }, _msg: msg, _cause: cause ?? null }; }
 
 class Todo {
@@ -387,23 +383,15 @@ function initStore() {
     switch (f) {
       case FilterActive:
       {
-        let out = null;
-        for (const [_$, t] of __s(todos).entries()) {
-          if (!t.done) {
-            out = __append(out, t);
-          }
-        }
-        return out;
+        return collect(where(todos, function(t) {
+          return !t.done;
+        }));
       }
       case FilterCompleted:
       {
-        let out = null;
-        for (const [_$, t] of __s(todos).entries()) {
-          if (t.done) {
-            out = __append(out, t);
-          }
-        }
-        return out;
+        return collect(where(todos, function(t) {
+          return t.done;
+        }));
       }
       default:
       {
@@ -425,10 +413,18 @@ function initStore() {
   }, "stats");
   highCountSignal = Signals.computed(function() {
     let n = 0;
-    for (const [_$, t] of __s(todosSignal.get()).entries()) {
-      if (t.isUrgent()) {
+    {
+      let __broke0 = false;
+      let __returned0 = false;
+      let __retVal0;
+      where(todosSignal.get(), function(t) {
+      return t.isUrgent();
+    })(function(_$0) {
+        if (__broke0) return false;
         n++;
-      }
+        return true;
+      });
+      if (__returned0) return __retVal0;
     }
     return Math.max(n, 0);
   }, "highCount");
@@ -450,7 +446,7 @@ function safeJsonParse(raw) {
       {
         let r = (typeof __panic !== "undefined" && __panic !== null ? (() => { const __r = __panic.message ?? String(__panic); __panic = null; return __r; })() : null);
         if (r !== null) {
-          err = __error(r);
+          err = __error(__sprintf("%v", r));
         }
       }
     })(); });
@@ -472,7 +468,7 @@ async function loadTodos() {
   }
   let [parsed, parseErr] = safeJsonParse(raw);
   if (parseErr !== null) {
-    return parseErr;
+    return __error(__sprintf("invalid stored todos: %w", parseErr), parseErr);
   }
   if (parsed === null) {
     return __error("failed to parse stored todos");
@@ -487,6 +483,34 @@ async function loadTodos() {
   }
   todosSignal.set(loaded);
   return null;
+}
+
+function where(items, pred) {
+  return function(yield) {
+    for (const [_$, t] of __s(items).entries()) {
+      if (pred(t)) {
+        if (!yield(t)) {
+          return;
+        }
+      }
+    }
+  };
+}
+
+function collect(iter) {
+  let out = null;
+  {
+    let __broke0 = false;
+    let __returned0 = false;
+    let __retVal0;
+    iter(function(t) {
+      if (__broke0) return false;
+      out = __append(out, t);
+      return true;
+    });
+    if (__returned0) return __retVal0;
+  }
+  return out;
 }
 
 function addTodo(text, priority) {
@@ -513,24 +537,16 @@ function toggleTodo(id) {
 
 function removeTodo(id) {
   let cur = todosSignal.get();
-  let next = null;
-  for (const [_$, t] of __s(cur).entries()) {
-    if (t.id !== id) {
-      next = __append(next, t);
-    }
-  }
-  todosSignal.set(next);
+  todosSignal.set(collect(where(cur, function(t) {
+    return t.id !== id;
+  })));
 }
 
 function clearCompleted() {
   let cur = todosSignal.get();
-  let next = null;
-  for (const [_$, t] of __s(cur).entries()) {
-    if (!t.done) {
-      next = __append(next, t);
-    }
-  }
-  todosSignal.set(next);
+  todosSignal.set(collect(where(cur, function(t) {
+    return !t.done;
+  })));
 }
 
 function setFilter(f) {

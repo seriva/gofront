@@ -14,7 +14,7 @@ var highPriority bool
 func safeJsonParse(raw string) (result any, err error) {
     defer func() {
         if r := recover(); r != nil {
-            err = error(r)
+            err = errors.New(fmt.Sprintf("%v", r))
         }
     }()
     result = JSON.parse(raw)
@@ -33,10 +33,10 @@ async func loadTodos() error {
     }
     parsed, parseErr := safeJsonParse(raw)
     if parseErr != nil {
-        return parseErr
+        return fmt.Errorf("invalid stored todos: %w", parseErr)
     }
     if parsed == nil {
-        return error("failed to parse stored todos")
+        return errors.New("failed to parse stored todos")
     }
     var loaded []Todo
     for _, raw := range parsed {
@@ -51,6 +51,28 @@ async func loadTodos() error {
 }
 
 // ── Mutations (slice operations) ──────────────────────────────
+
+// where returns an iterator over todos matching a predicate (range-over-function).
+func where(pred func(Todo) bool) func(yield func(Todo) bool) {
+    return func(yield func(Todo) bool) {
+        for _, t := range todos {
+            if pred(t) {
+                if !yield(t) {
+                    return
+                }
+            }
+        }
+    }
+}
+
+// collect materializes an iterator into a slice.
+func collect(iter func(yield func(Todo) bool)) []Todo {
+    var out []Todo
+    for t := range iter {
+        out = append(out, t)
+    }
+    return out
+}
 
 func addTodo(text string, priority int) {
     todos = append(todos, Todo{id: nextId, text: text, done: false, priority: priority})
@@ -70,23 +92,11 @@ func toggleTodo(id int) {
 }
 
 func removeTodo(id int) {
-    var next []Todo
-    for _, t := range todos {
-        if t.id != id {
-            next = append(next, t)
-        }
-    }
-    todos = next
+    todos = collect(where(func(t Todo) bool { return t.id != id }))
 }
 
 func clearCompleted() {
-    var next []Todo
-    for _, t := range todos {
-        if !t.done {
-            next = append(next, t)
-        }
-    }
-    todos = next
+    todos = collect(where(func(t Todo) bool { return !t.done }))
 }
 
 func setFilter(f int) {
@@ -126,21 +136,9 @@ func moveTodo(fromId int, toId int) {
 func visibleTodos() []Todo {
     switch filter {
     case FilterActive:
-        var out []Todo
-        for _, t := range todos {
-            if !t.done {
-                out = append(out, t)
-            }
-        }
-        return out
+        return collect(where(func(t Todo) bool { return !t.done }))
     case FilterCompleted:
-        var out []Todo
-        for _, t := range todos {
-            if t.done {
-                out = append(out, t)
-            }
-        }
-        return out
+        return collect(where(func(t Todo) bool { return t.done }))
     default:
         return append([]Todo{}, todos...)
     }
@@ -159,10 +157,8 @@ func stats() (remaining int, completed int) {
 
 func highCount() int {
     n := 0
-    for _, t := range todos {
-        if t.isUrgent() {
-            n++
-        }
+    for _ = range where(func(t Todo) bool { return t.isUrgent() }) {
+        n++
     }
     return n
 }
