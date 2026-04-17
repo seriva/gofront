@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.0.5] - 2026-04-17
+
 ### Added
 - **Generics (type parameters)** — Go-style generic functions and types:
   - Generic function declarations: `func Map[T any, U any](items []T, f func(T) U) []U`
@@ -77,8 +79,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - Array assignment size matching (`[3]int` ≠ `[4]int`, `[]int` ≠ `[3]int`)
   - Compile-time `len()` for fixed arrays emits constant instead of `__len()`
   - Slicing arrays produces slice types (`arr[1:3]` on `[5]int` → `[]int`)
+- **Range over iterator functions** (Go 1.23) — `func(yield func(V) bool)` and
+  `func(yield func(K, V) bool)` iterator protocols:
+  - `for v := range iterFunc` and `for k, v := range iterFunc` syntax
+  - `break`, `continue`, and `return` inside iterator loops propagate correctly via
+    yield return value
+  - Iterator functions can be stored in variables or returned from other functions
+  - Works with all existing `for range` features (labels, blank identifiers)
+- **`bytes` stdlib shim** — `Contains`, `HasPrefix`, `HasSuffix`, `Index`, `Join`,
+  `Split`, `Replace`, `ToUpper`, `ToLower`, `TrimSpace`, `Equal`, `Count`, `Repeat` —
+  parallel to the `strings` shim but operating on `[]byte` slices
 
-## [0.0.4] - 2026-04-17
+### Changed
+- **`terser` removed** — replaced by the built-in minifier; `terser` is no longer a
+  devDependency. The `--minify` flag now uses `src/minifier.js` directly.
 
 ### Added
 - **Method expressions** (`T.Method`) — `TypeName.MethodName` now produces a first-class function whose first argument is the receiver, e.g. `f := Point.Dist; f(p)` (Go spec §Method expressions)
