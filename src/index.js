@@ -27,7 +27,6 @@ const _require = createRequire(import.meta.url);
 const { version } = _require("../package.json");
 
 import { basename, dirname, join, resolve } from "node:path";
-import { minify } from "terser";
 import { CodeGen } from "./codegen.js";
 import { compileDir } from "./compiler.js";
 import { parseDts } from "./dts-parser.js";
@@ -234,6 +233,13 @@ function runCompile() {
 
 async function maybeMinify(js) {
 	if (!minifyOutput) return js;
+	let minify;
+	try {
+		({ minify } = await import("terser"));
+	} catch {
+		console.error("gofront: --minify requires terser: npm install terser");
+		process.exit(1);
+	}
 	const result = await minify(js, {
 		module: true,
 		compress: true,

@@ -23,6 +23,7 @@ compiler stages. Design documents are in [`docs/v0.0.5/`](v0.0.5/).
 | Better pointer model | High | Current `{ value: T }` boxing is useful but shallow. See [design plan](v0.0.5/pointer-model-plan.md). |
 | Slice → array conversion `[N]T(slice)` | Low | Go 1.20 feature; depends on array semantics work. |
 | `bytes` stdlib shim | Medium | Parallel to `strings` shim but for `[]byte`. |
+| Built-in minifier (replace terser) | Medium | Purpose-built for GoFront output. Removes the only external dependency. See [design plan](v0.0.5/minifier-plan.md). |
 
 ---
 

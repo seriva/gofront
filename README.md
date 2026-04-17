@@ -1,3 +1,8 @@
+[![npm version](https://img.shields.io/npm/v/gofront)](https://www.npmjs.com/package/gofront)
+[![license](https://img.shields.io/github/license/seriva/gofront)](https://github.com/seriva/gofront/blob/main/LICENSE)
+[![node](https://img.shields.io/node/v/gofront)](https://nodejs.org)
+[![tests](https://img.shields.io/badge/tests-657%20passing-brightgreen)](https://github.com/seriva/gofront)
+
 ## About
 
 I love Go for the backend — simple, type-safe, no nonsense. I like JavaScript for the
