@@ -1331,12 +1331,11 @@ export class TypeChecker {
 			this.err(`type ${typeStr(typeArg)} does not satisfy constraint`, node);
 			return;
 		}
-		// Interface constraint
+		// Interface constraint — unwrap named types
 		const base =
 			constraint.kind === "named" ? constraint.underlying : constraint;
 		if (base?.kind === "interface") {
-			if (base.methods.size === 0) return; // empty interface = any
-			// Check if typeArg has union constraint (from interface type decl)
+			if (base.methods.size === 0 && !base.unionConstraint) return;
 			if (base.unionConstraint) {
 				return this.checkConstraint(typeArg, base.unionConstraint, node);
 			}
@@ -1346,25 +1345,6 @@ export class TypeChecker {
 					node,
 				);
 			}
-			return;
-		}
-		// Named type used as constraint — look at underlying
-		if (
-			constraint.kind === "named" &&
-			constraint.underlying?.kind === "interface"
-		) {
-			const iface = constraint.underlying;
-			if (iface.methods.size === 0 && !iface.unionConstraint) return;
-			if (iface.unionConstraint) {
-				return this.checkConstraint(typeArg, iface.unionConstraint, node);
-			}
-			if (!this.implements(typeArg, iface, node)) {
-				this.err(
-					`type ${typeStr(typeArg)} does not satisfy constraint ${typeStr(constraint)}`,
-					node,
-				);
-			}
-			return;
 		}
 	}
 

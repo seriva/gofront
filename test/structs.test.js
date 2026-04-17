@@ -621,10 +621,6 @@ func main() {
 	assertEqual(runJs(js), "10");
 });
 
-// ═════════════════════════════════════════════════════════════
-// switch with init statement
-// ═════════════════════════════════════════════════════════════
-
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit(summarize() > 0 ? 1 : 0);

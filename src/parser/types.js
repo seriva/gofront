@@ -20,8 +20,7 @@ export const typeParserMethods = {
 				this.advance();
 				return { kind: "PointerType", base: this.parseType() };
 			case T.CHAN:
-				this.err("channels are not supported in GoFront");
-				break;
+				return this.err("channels are not supported in GoFront");
 			case T.IDENT:
 			case "int":
 			case "float64":

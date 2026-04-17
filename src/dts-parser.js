@@ -74,7 +74,7 @@ export class DtsParser {
 				this.pos += 2;
 				while (!this.eof() && !(this.ch() === "*" && this.ch1() === "/"))
 					this.pos++;
-				this.pos += 2;
+				if (!this.eof()) this.pos += 2;
 				continue;
 			}
 			break;

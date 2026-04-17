@@ -68,11 +68,11 @@ export const statementParserMethods = {
 			case T.SWITCH:
 				return this.parseSwitch();
 			case T.GO:
-				this.err("goroutines are not supported in GoFront");
-				break;
+				return this.err("goroutines are not supported in GoFront");
 			case T.SELECT:
-				this.err("select statement is not supported in GoFront (no channels)");
-				break;
+				return this.err(
+					"select statement is not supported in GoFront (no channels)",
+				);
 			case T.LBRACE:
 				return this.parseBlock();
 			case T.IDENT:
