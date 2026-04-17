@@ -1,5 +1,7 @@
 // CodeGen statement methods — installed as a mixin on CodeGen.prototype.
 
+import { isComplex } from "../typechecker/types.js";
+
 export const statementGenMethods = {
 	genBlock(block) {
 		for (const stmt of block.stmts) this.genStmt(stmt);
@@ -45,10 +47,16 @@ export const statementGenMethods = {
 				const redecls = stmt.lhs.map((e) => !!e._redecl);
 				const anyRedecl = redecls.some((r) => r);
 				if (lhs.length === 1) {
+					const isBoxed = this._boxedVars.has(lhs[0]);
+					const val = isBoxed && !redecls[0] ? `{ value: ${rhs[0]} }` : rhs[0];
 					if (redecls[0]) {
-						this.line(`${lhs[0]} = ${rhs[0]};`);
+						if (isBoxed) {
+							this.line(`${lhs[0]}.value = ${rhs[0]};`);
+						} else {
+							this.line(`${lhs[0]} = ${val};`);
+						}
 					} else {
-						this.line(`let ${lhs[0]} = ${rhs[0]};`);
+						this.line(`let ${lhs[0]} = ${val};`);
 					}
 				} else if (!anyRedecl) {
 					// All new: let [a, b] = ...
@@ -75,6 +83,38 @@ export const statementGenMethods = {
 			}
 
 			case "AssignStmt": {
+				// Complex compound assignment: z += w → z = z + w (with complex codegen)
+				if (
+					stmt.op !== "=" &&
+					stmt.lhs.length === 1 &&
+					stmt.rhs.length === 1 &&
+					isComplex(stmt.lhs[0]._type)
+				) {
+					const lhsStr = stmt.lhs[0].name ?? this.genExpr(stmt.lhs[0]);
+					const rhsExpr = this._genComplexOperand(stmt.rhs[0]);
+					const baseOp = stmt.op.slice(0, -1); // "+=" → "+"
+					let result;
+					switch (baseOp) {
+						case "+":
+							result = `{ re: ${lhsStr}.re + ${rhsExpr}.re, im: ${lhsStr}.im + ${rhsExpr}.im }`;
+							break;
+						case "-":
+							result = `{ re: ${lhsStr}.re - ${rhsExpr}.re, im: ${lhsStr}.im - ${rhsExpr}.im }`;
+							break;
+						case "*":
+							this._usesCmul = true;
+							result = `__cmul(${lhsStr}, ${rhsExpr})`;
+							break;
+						case "/":
+							this._usesCdiv = true;
+							result = `__cdiv(${lhsStr}, ${rhsExpr})`;
+							break;
+						default:
+							result = rhsExpr;
+					}
+					this.line(`${lhsStr} = ${result};`);
+					break;
+				}
 				// comma-ok map index: v, ok = m["key"]
 				if (stmt._commaOkMap) {
 					const rhsNode = stmt.rhs[0];
@@ -113,7 +153,15 @@ export const statementGenMethods = {
 				}
 				const rhs = stmt.rhs.map((e) => this.genExpr(e));
 				for (const e of stmt.lhs) if (e.kind === "IndexExpr") e._lvalue = true;
-				const lhs = stmt.lhs.map((e) => e.name ?? this.genExpr(e));
+				const lhs = stmt.lhs.map((e) => {
+					if (
+						e.kind === "Ident" &&
+						e.name !== "_" &&
+						this._boxedVars.has(e.name)
+					)
+						return `${e.name}.value`;
+					return e.name ?? this.genExpr(e);
+				});
 				// Filter out blank identifier assignments entirely
 				const pairs = lhs.map((l, i) => ({ l, r: rhs[i] ?? rhs[0] }));
 				const active = pairs.filter((p) => p.l !== "_");
@@ -151,6 +199,21 @@ export const statementGenMethods = {
 				break;
 
 			case "ReturnStmt": {
+				if (this._inIteratorBody) {
+					if (stmt.values.length === 0 && !this.namedReturnVars?.length) {
+						this.line(`${this._iterReturnFlag} = true; return false;`);
+					} else {
+						const vals =
+							stmt.values.length > 0
+								? stmt.values.map((v) => this.genExpr(v))
+								: (this.namedReturnVars ?? []);
+						const stored = vals.length === 1 ? vals[0] : `[${vals.join(", ")}]`;
+						this.line(
+							`${this._iterReturnFlag} = true; ${this._iterReturnVar} = ${stored}; return false;`,
+						);
+					}
+					break;
+				}
 				if (stmt.values.length === 0) {
 					// bare return — emit named return vars if present
 					if (this.namedReturnVars?.length > 0) {
@@ -210,6 +273,16 @@ export const statementGenMethods = {
 				break;
 
 			case "BranchStmt":
+				if (this._inIteratorBody && !stmt.label) {
+					if (stmt.keyword === "break") {
+						this.line(`${this._iterBreakFlag} = true; return false;`);
+						break;
+					}
+					if (stmt.keyword === "continue") {
+						this.line("return true;");
+						break;
+					}
+				}
 				if (stmt.keyword !== "fallthrough")
 					this.line(
 						stmt.label ? `${stmt.keyword} ${stmt.label};` : `${stmt.keyword};`,
@@ -255,14 +328,22 @@ export const statementGenMethods = {
 	},
 
 	genFor(stmt) {
-		// Detect range: init is DefineStmt with rhs[0] being a RangeExpr
+		// Detect range: init is DefineStmt/AssignStmt with rhs[0] being a RangeExpr
 		if (this.isRangeFor(stmt)) {
-			this.genRangeFor(stmt);
+			if (stmt.init.rhs[0]._isIterator) {
+				this.genIteratorFor(stmt);
+			} else {
+				this.genRangeFor(stmt);
+			}
 			return;
 		}
 
-		// for range N { } — no variable, just repeat N times
+		// for range expr — no variable; could be int range or 0-param iterator
 		if (stmt.cond?.kind === "RangeExpr") {
+			if (stmt.cond._isIterator) {
+				this.genIteratorForCond(stmt);
+				return;
+			}
 			const iteree = this.genExpr(stmt.cond.expr);
 			this.line(`for (let _$ = 0; _$ < ${iteree}; _$++) {`);
 			this.indented(() => this.genBlock(stmt.body));
@@ -359,6 +440,112 @@ export const statementGenMethods = {
 		this.line(`for (const ${binding} of ${iterExpr}) {`);
 		this.indented(() => this.genBlock(stmt.body));
 		this.line("}");
+	},
+
+	genIteratorFor(stmt) {
+		const range = stmt.init.rhs[0];
+		const lhs = stmt.init.lhs.map((e) => e.name ?? this.genExpr(e));
+		let iteree = this.genExpr(range.expr);
+		const yieldParams = range._yieldParams;
+
+		// Wrap bare function expressions to avoid "Function statements require a name"
+		if (range.expr.kind === "FuncLit") {
+			iteree = `(${iteree})`;
+		}
+
+		const d = this._iterDepth++;
+		const breakFlag = `__broke${d}`;
+		const retFlag = `__returned${d}`;
+		const retVar = `__retVal${d}`;
+
+		// Yield callback param names (blank vars get _$N to avoid JS syntax error)
+		const cbParams = lhs.map((n, i) => (n === "_" ? `_$${i}` : n));
+
+		this.line("{");
+		this.indented(() => {
+			this.line(`let ${breakFlag} = false;`);
+			this.line(`let ${retFlag} = false;`);
+			this.line(`let ${retVar};`);
+
+			const params = yieldParams.length === 0 ? "" : cbParams.join(", ");
+			this.line(`${iteree}(function(${params}) {`);
+			this.indented(() => {
+				this.line(`if (${breakFlag}) return false;`);
+				const prev = {
+					in: this._inIteratorBody,
+					break: this._iterBreakFlag,
+					ret: this._iterReturnFlag,
+					retVar: this._iterReturnVar,
+				};
+				this._inIteratorBody = true;
+				this._iterBreakFlag = breakFlag;
+				this._iterReturnFlag = retFlag;
+				this._iterReturnVar = retVar;
+
+				this.genBlock(stmt.body);
+
+				this._inIteratorBody = prev.in;
+				this._iterBreakFlag = prev.break;
+				this._iterReturnFlag = prev.ret;
+				this._iterReturnVar = prev.retVar;
+
+				this.line("return true;");
+			});
+			this.line("});");
+			this.line(`if (${retFlag}) return ${retVar};`);
+		});
+		this.line("}");
+		this._iterDepth--;
+	},
+
+	// 0-param iterator: for range iter { body }
+	genIteratorForCond(stmt) {
+		const range = stmt.cond;
+		let iteree = this.genExpr(range.expr);
+
+		if (range.expr.kind === "FuncLit") {
+			iteree = `(${iteree})`;
+		}
+
+		const d = this._iterDepth++;
+		const breakFlag = `__broke${d}`;
+		const retFlag = `__returned${d}`;
+		const retVar = `__retVal${d}`;
+
+		this.line("{");
+		this.indented(() => {
+			this.line(`let ${breakFlag} = false;`);
+			this.line(`let ${retFlag} = false;`);
+			this.line(`let ${retVar};`);
+
+			this.line(`${iteree}(function() {`);
+			this.indented(() => {
+				this.line(`if (${breakFlag}) return false;`);
+				const prev = {
+					in: this._inIteratorBody,
+					break: this._iterBreakFlag,
+					ret: this._iterReturnFlag,
+					retVar: this._iterReturnVar,
+				};
+				this._inIteratorBody = true;
+				this._iterBreakFlag = breakFlag;
+				this._iterReturnFlag = retFlag;
+				this._iterReturnVar = retVar;
+
+				this.genBlock(stmt.body);
+
+				this._inIteratorBody = prev.in;
+				this._iterBreakFlag = prev.break;
+				this._iterReturnFlag = prev.ret;
+				this._iterReturnVar = prev.retVar;
+
+				this.line("return true;");
+			});
+			this.line("});");
+			this.line(`if (${retFlag}) return ${retVar};`);
+		});
+		this.line("}");
+		this._iterDepth--;
 	},
 
 	// Inline a statement as a for-init/post string (no semicolon)

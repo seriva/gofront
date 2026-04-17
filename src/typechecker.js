@@ -13,14 +13,17 @@ import {
 	BASIC_TYPES,
 	BOOL,
 	CMP_OPS,
+	COMPLEX128,
 	defaultType,
 	ERROR,
 	FLOAT64,
 	INT,
 	isAny,
-	isError,
+	isComplex,
+	isComplexOrNumeric,
 	isNil,
 	isNumeric,
+	isPointer,
 	isString,
 	isUntyped,
 	isVoid,
@@ -29,6 +32,7 @@ import {
 	STRING,
 	TypeCheckError,
 	typeStr,
+	UNTYPED_COMPLEX,
 	UNTYPED_FLOAT,
 	UNTYPED_INT,
 	VOID,
@@ -50,6 +54,8 @@ export class TypeChecker {
 		this._deferCount = 0; // tracks defer usage in current function body
 		this._imports = []; // tracked imports for unused-import detection
 		this._setupGlobals();
+		// Register error as a named type (interface)
+		this.types.set("error", ERROR);
 	}
 
 	_setupGlobals() {
@@ -194,6 +200,47 @@ export class TypeChecker {
 			},
 		});
 
+		// bytes package — operates on []byte (JS arrays of numbers)
+		const BYTE_SLICE = { kind: "slice", elem: INT };
+		const byFn1 = (ret) => ({
+			kind: "func",
+			params: [BYTE_SLICE],
+			returns: [ret],
+		});
+		const byFn2 = (p2, ret) => ({
+			kind: "func",
+			params: [BYTE_SLICE, p2],
+			returns: [ret],
+		});
+		this.globals.define("bytes", {
+			kind: "namespace",
+			name: "bytes",
+			members: {
+				Contains: byFn2(BYTE_SLICE, BOOL),
+				HasPrefix: byFn2(BYTE_SLICE, BOOL),
+				HasSuffix: byFn2(BYTE_SLICE, BOOL),
+				Index: byFn2(BYTE_SLICE, INT),
+				Count: byFn2(BYTE_SLICE, INT),
+				Repeat: byFn2(INT, BYTE_SLICE),
+				Replace: {
+					kind: "func",
+					params: [BYTE_SLICE, BYTE_SLICE, BYTE_SLICE, INT],
+					returns: [BYTE_SLICE],
+				},
+				ToUpper: byFn1(BYTE_SLICE),
+				ToLower: byFn1(BYTE_SLICE),
+				TrimSpace: byFn1(BYTE_SLICE),
+				Trim: byFn2(STRING, BYTE_SLICE),
+				Equal: byFn2(BYTE_SLICE, BOOL),
+				Split: byFn2(BYTE_SLICE, { kind: "slice", elem: BYTE_SLICE }),
+				Join: {
+					kind: "func",
+					params: [{ kind: "slice", elem: BYTE_SLICE }, BYTE_SLICE],
+					returns: [BYTE_SLICE],
+				},
+			},
+		});
+
 		// strconv package
 		this.globals.define("strconv", {
 			kind: "namespace",
@@ -329,6 +376,8 @@ export class TypeChecker {
 			name: "errors",
 			members: {
 				New: { kind: "func", params: [STRING], returns: [ERROR] },
+				Is: { kind: "func", params: [ERROR, ERROR], returns: [BOOL] },
+				Unwrap: { kind: "func", params: [ERROR], returns: [ERROR] },
 			},
 		});
 
@@ -397,6 +446,9 @@ export class TypeChecker {
 		this.globals.define("min", { kind: "builtin", name: "min" });
 		this.globals.define("max", { kind: "builtin", name: "max" });
 		this.globals.define("clear", { kind: "builtin", name: "clear" });
+		this.globals.define("complex", { kind: "builtin", name: "complex" });
+		this.globals.define("real", { kind: "builtin", name: "real" });
+		this.globals.define("imag", { kind: "builtin", name: "imag" });
 	}
 
 	addDefinitions(types, values) {
@@ -988,6 +1040,10 @@ export class TypeChecker {
 			if (base.methods?.has(field)) return base.methods.get(field);
 			return this.err(`No field '${field}' on ${typeStr(baseType)}`, node);
 		}
+		if (base?.kind === "interface") {
+			if (base.methods?.has(field)) return base.methods.get(field);
+			return this.err(`No method '${field}' on ${typeStr(baseType)}`, node);
+		}
 		if (base?.kind === "namespace") {
 			// Enforce exported identifier rule for GoFront packages only
 			if (
@@ -1007,9 +1063,6 @@ export class TypeChecker {
 		// For explicitly typed non-any values, report the bad access rather than
 		// silently returning any — this catches typos on structs and primitive misuse.
 		if (base && !isAny(base)) {
-			// error.Error() is valid — it returns the error string
-			if (isError(base) && field === "Error")
-				return { kind: "func", params: [], returns: [STRING], async: false };
 			// pointer.value is the GoFront new(T) pattern
 			if (base.kind === "pointer" && field === "value") return base.base ?? ANY;
 			const badKinds = ["basic", "slice", "array", "map", "func", "tuple"];
@@ -1025,6 +1078,16 @@ export class TypeChecker {
 
 	binaryResultType(op, lt, rt, node) {
 		if (CMP_OPS.has(op)) {
+			// Complex only supports == and !=
+			if (isComplex(lt) || isComplex(rt)) {
+				if (op !== "==" && op !== "!=") {
+					this.err(
+						`invalid operation: ${typeStr(lt)} ${op} ${typeStr(rt)}`,
+						node,
+					);
+					return ANY;
+				}
+			}
 			// Reject slice/map/func comparisons unless one side is nil (Go spec)
 			if (op === "==" || op === "!=") {
 				const lNil = isNil(lt);
@@ -1046,6 +1109,26 @@ export class TypeChecker {
 		}
 		if (LOG_OPS.has(op)) return BOOL;
 		if (isAny(lt) || isAny(rt)) return ANY;
+		// Complex arithmetic: +, -, *, /
+		if (isComplex(lt) || isComplex(rt)) {
+			if (!isComplexOrNumeric(lt) || !isComplexOrNumeric(rt)) {
+				this.err(
+					`invalid operation: ${typeStr(lt)} ${op} ${typeStr(rt)}`,
+					node,
+				);
+				return ANY;
+			}
+			if (op !== "+" && op !== "-" && op !== "*" && op !== "/") {
+				this.err(
+					`invalid operation: ${typeStr(lt)} ${op} ${typeStr(rt)}`,
+					node,
+				);
+				return ANY;
+			}
+			if (lt.kind === "untyped" && rt.kind === "untyped")
+				return UNTYPED_COMPLEX;
+			return COMPLEX128;
+		}
 		if (isNumeric(lt) && isNumeric(rt)) {
 			const lFloat = (lt.kind === "untyped" ? lt.base : lt.name) === "float64";
 			const rFloat = (rt.kind === "untyped" ? rt.base : rt.name) === "float64";
@@ -1078,6 +1161,15 @@ export class TypeChecker {
 		source = this.resolveType(source);
 		if (isAny(target) || isAny(source)) return;
 		if (isNil(source)) return; // nil is assignable to anything nullable
+		// Pointer type: nil → *T is allowed (handled above); *T → *T check base types
+		if (isPointer(target) && isPointer(source)) {
+			this.assertAssignable(
+				target.base ?? target.underlying?.base,
+				source.base ?? source.underlying?.base,
+				node,
+			);
+			return;
+		}
 
 		// Untyped constants coerce to any compatible typed target
 		if (isUntyped(source)) {
@@ -1099,6 +1191,18 @@ export class TypeChecker {
 				if (source.base === "string" && target.name === "string") return;
 				// untyped bool → bool
 				if (source.base === "bool" && target.name === "bool") return;
+				// untyped complex → complex128 or complex64
+				if (
+					source.base === "complex128" &&
+					(target.name === "complex128" || target.name === "complex64")
+				)
+					return;
+				// untyped int/float → complex (Go allows: var z complex128 = 5)
+				if (
+					isComplex(target) &&
+					(source.base === "int" || source.base === "float64")
+				)
+					return;
 			}
 		}
 
@@ -1107,6 +1211,33 @@ export class TypeChecker {
 			if (target.name === "float64" && source.name === "int") return;
 			if (target.name === "int" && source.name === "float64") return; // truncating
 		}
+
+		// Array-specific checks: size matching and array/slice incompatibility
+		if (target.kind === "array" && source.kind === "array") {
+			if (
+				target.size != null &&
+				source.size != null &&
+				target.size !== source.size
+			) {
+				this.err(
+					`Cannot assign ${typeStr(source)} to ${typeStr(target)} (different array lengths)`,
+					node,
+				);
+				return;
+			}
+			// Check element type compatibility
+			this.assertAssignable(target.elem, source.elem, node);
+			return;
+		}
+		if (target.kind === "array" && source.kind === "slice") {
+			this.err(`Cannot assign ${typeStr(source)} to ${typeStr(target)}`, node);
+			return;
+		}
+		if (target.kind === "slice" && source.kind === "array") {
+			this.err(`Cannot assign ${typeStr(source)} to ${typeStr(target)}`, node);
+			return;
+		}
+
 		if (typeStr(target) !== typeStr(source)) {
 			// Interface satisfaction check
 			let tBase = target.kind === "named" ? target.underlying : target;

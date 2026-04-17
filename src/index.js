@@ -31,6 +31,7 @@ import { CodeGen } from "./codegen.js";
 import { compileDir } from "./compiler.js";
 import { parseDts } from "./dts-parser.js";
 import { Lexer } from "./lexer.js";
+import { minify } from "./minifier.js";
 import { Parser } from "./parser.js";
 import { isLocalPath, resolveAll, resolveGwDir } from "./resolver.js";
 import { TypeChecker } from "./typechecker.js";
@@ -55,7 +56,8 @@ Usage:
   gofront <input> --check        Type-check only
   gofront <input> --watch        Watch for changes and recompile
   gofront <input> --source-map   Append inline source map to output
-  gofront <input> --minify       Minify output with terser
+  gofront <input> --minify       Minify output
+  gofront <input> --minify --mangle  Minify and mangle identifiers
   gofront <file.go> --ast        Dump AST (debug)
   gofront <file.go> --tokens     Dump tokens (debug)
   gofront init [dir]             Scaffold a new GoFront project
@@ -120,6 +122,7 @@ const dumpTokens = args.includes("--tokens");
 const sourceMap = args.includes("--source-map");
 const watchMode = args.includes("--watch");
 const minifyOutput = args.includes("--minify");
+const mangleOutput = args.includes("--mangle");
 
 // ── Determine input mode ─────────────────────────────────────
 
@@ -231,21 +234,13 @@ function runCompile() {
 
 // ── Minify helper ────────────────────────────────────────────
 
-async function maybeMinify(js) {
+function maybeMinify(js) {
 	if (!minifyOutput) return js;
-	let minify;
-	try {
-		({ minify } = await import("terser"));
-	} catch {
-		console.error("gofront: --minify requires terser: npm install terser");
+	if (sourceMap) {
+		console.error("gofront: --source-map and --minify cannot be used together");
 		process.exit(1);
 	}
-	const result = await minify(js, {
-		module: true,
-		compress: true,
-		mangle: true,
-	});
-	return result.code;
+	return minify(js, { mangle: mangleOutput });
 }
 
 // ── Single-shot mode ─────────────────────────────────────────
@@ -268,7 +263,7 @@ if (!watchMode) {
 
 	let js;
 	try {
-		js = await maybeMinify(result.js);
+		js = maybeMinify(result.js);
 	} catch (e) {
 		console.error(`gofront: minify failed: ${e.message}`);
 		process.exit(1);
@@ -296,11 +291,11 @@ function timestamp() {
 	return new Date().toLocaleTimeString();
 }
 
-async function buildOnce() {
+function buildOnce() {
 	try {
 		const startMs = performance.now();
 		const result = runCompile();
-		const js = await maybeMinify(result.js);
+		const js = maybeMinify(result.js);
 		const elapsedMs = (performance.now() - startMs).toFixed(0);
 		if (outputFile) {
 			writeFileSync(outputFile, `${js}\n`);

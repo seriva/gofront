@@ -34,6 +34,8 @@ const TYPE_KEYWORDS = new Set([
 	"byte",
 	"rune",
 	"error",
+	"complex64",
+	"complex128",
 ]);
 
 const BUILTIN_KEYWORDS = new Set([
@@ -48,6 +50,9 @@ const BUILTIN_KEYWORDS = new Set([
 	"println",
 	"panic",
 	"error",
+	"complex",
+	"real",
+	"imag",
 ]);
 
 export const expressionParserMethods = {
@@ -290,6 +295,10 @@ export const expressionParserMethods = {
 		if (t.type === T.STRING) {
 			this.advance();
 			return { kind: "BasicLit", litKind: "STRING", value: t.value };
+		}
+		if (t.type === T.IMAG) {
+			this.advance();
+			return { kind: "ImagLit", value: t.value };
 		}
 		if (t.type === T.TRUE) {
 			this.advance();

@@ -7,6 +7,7 @@ import {
 	isAny,
 	isBool,
 	isVoid,
+	iteratorYieldParams,
 	Scope,
 } from "./types.js";
 
@@ -182,15 +183,30 @@ export const statementCheckMethods = {
 
 			case "ForStmt": {
 				const inner = new Scope(scope);
-				if (stmt.init) this.checkStmt(stmt.init, inner, returnType);
+				let iterInfo = null;
+				if (stmt.init?.rhs?.[0]?.kind === "RangeExpr") {
+					iterInfo = this._checkRangeIterStmt(stmt.init, inner, returnType);
+				}
+				if (!iterInfo && stmt.init)
+					this.checkStmt(stmt.init, inner, returnType);
 				if (stmt.cond) {
-					// for range N { } — RangeExpr as condition is valid (Go 1.22 int range)
 					if (stmt.cond.kind !== "RangeExpr") {
 						const ct = this.checkExpr(stmt.cond, inner);
 						if (!isBool(ct) && !isAny(ct))
 							this.err("For condition must be bool", stmt);
 					} else {
-						this.checkExpr(stmt.cond.expr, inner);
+						// for range expr — could be int range or 0-param iterator
+						const ct = this.checkExpr(stmt.cond.expr, inner);
+						const info = iteratorYieldParams(ct);
+						if (info) {
+							stmt.cond._isIterator = true;
+							stmt.cond._yieldParams = info.yieldParams;
+						} else if (ct?.kind === "func") {
+							this.err(
+								"cannot range over func: not an iterator function",
+								stmt,
+							);
+						}
 					}
 				}
 				if (stmt.post) this.checkStmt(stmt.post, inner, returnType);
@@ -283,5 +299,50 @@ export const statementCheckMethods = {
 			default:
 				break;
 		}
+	},
+
+	_checkRangeIterStmt(initStmt, scope, _returnType) {
+		const rangeExpr = initStmt.rhs[0];
+		const iterType = this.checkExpr(rangeExpr.expr, scope);
+		const info = iteratorYieldParams(iterType);
+		if (!info) {
+			// If it's a func but not a valid iterator shape, reject it
+			const underlying =
+				iterType?.kind === "named" ? iterType.underlying : iterType;
+			if (underlying?.kind === "func") {
+				this.err("cannot range over func: not an iterator function", initStmt);
+			}
+			return null;
+		}
+
+		const lhs = initStmt.lhs;
+		if (lhs.length > info.yieldParams.length) {
+			this.err(
+				`range over iterator: too many loop variables (got ${lhs.length}, max ${info.yieldParams.length})`,
+				initStmt,
+			);
+		}
+
+		// Annotate for codegen
+		rangeExpr._isIterator = true;
+		rangeExpr._yieldParams = info.yieldParams;
+
+		// Bind loop variables to their yield param types
+		if (initStmt.kind === "DefineStmt") {
+			for (let i = 0; i < lhs.length; i++) {
+				const name = lhs[i].name ?? lhs[i];
+				if (name === "_") continue;
+				const varType = info.yieldParams[i] ?? ANY;
+				scope.defineLocal(name, varType);
+			}
+		} else {
+			// AssignStmt — just type-check the lhs expressions
+			for (const e of lhs) {
+				if (e.kind === "Ident" && e.name !== "_") {
+					this.checkExpr(e, scope);
+				}
+			}
+		}
+		return info;
 	},
 };

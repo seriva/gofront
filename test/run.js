@@ -14,18 +14,24 @@ import "./language/core.test.js";
 import "./language/control-flow.test.js";
 import "./language/declarations.test.js";
 import "./language/expressions.test.js";
+import "./language/range-iter.test.js";
+import "./language/pointers.test.js";
 import "./types/errors.test.js";
 import "./types/checks.test.js";
 import "./types/inference.test.js";
+import "./types/arrays.test.js";
+import "./types/complex.test.js";
 import "./structs.test.js";
 import "./builtins/core.test.js";
 import "./builtins/operators.test.js";
 import "./builtins/stdlib.test.js";
+import "./builtins/bytes.test.js";
 import "./compiler/packages.test.js";
 import "./compiler/cli.test.js";
 import "./compiler/imports.test.js";
 import "./dom.test.js";
 import "./lexer-parser.test.js";
+import "./minifier.test.js";
 
 import { summarize } from "./helpers.js";
 

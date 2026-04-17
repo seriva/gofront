@@ -3,10 +3,15 @@
 import {
 	ANY,
 	BOOL,
+	COMPLEX128,
 	ERROR,
+	FLOAT64,
 	INT,
 	isAny,
+	isArray,
 	isBool,
+	isComplex,
+	isComplexOrNumeric,
 	isNumeric,
 	isString,
 	NIL,
@@ -14,6 +19,7 @@ import {
 	STRING,
 	typeStr,
 	UNTYPED_BOOL,
+	UNTYPED_COMPLEX,
 	UNTYPED_FLOAT,
 	UNTYPED_INT,
 	UNTYPED_STRING,
@@ -45,6 +51,9 @@ export const expressionCheckMethods = {
 				break;
 			}
 
+			case "ImagLit":
+				return UNTYPED_COMPLEX;
+
 			case "Ident": {
 				const t = scope.lookup(expr.name);
 				if (!t) return this.err(`Undefined: '${expr.name}'`, expr);
@@ -60,9 +69,26 @@ export const expressionCheckMethods = {
 					return BOOL;
 				}
 				if (expr.op === "-" || expr.op === "+") {
-					if (!isNumeric(ot) && !isAny(ot))
+					if (!isNumeric(ot) && !isComplex(ot) && !isAny(ot))
 						this.err(`${expr.op} requires numeric`, expr);
 					return ot;
+				}
+				if (expr.op === "&") {
+					// Mark the operand as address-taken for codegen
+					if (expr.operand.kind === "Ident") {
+						expr.operand._addressTaken = true;
+						const sym = scope.lookup(expr.operand.name);
+						if (sym) sym._addressTaken = true;
+					}
+					return { kind: "pointer", base: ot };
+				}
+				if (expr.op === "*") {
+					if (ot === ANY) return ANY;
+					if (ot.kind === "pointer") return ot.base;
+					if (ot.kind === "named" && ot.underlying?.kind === "pointer")
+						return ot.underlying.base;
+					this.err(`cannot dereference non-pointer type ${typeStr(ot)}`, expr);
+					return ANY;
 				}
 				return ot;
 			}
@@ -114,7 +140,26 @@ export const expressionCheckMethods = {
 				const bt = this.checkExpr(expr.expr, scope);
 				this.checkExpr(expr.index, scope);
 				if (isAny(bt)) return ANY;
-				if (bt.kind === "slice" || bt.kind === "array") return bt.elem;
+				if (bt.kind === "slice" || bt.kind === "array") {
+					// Compile-time bounds checking for arrays
+					if (bt.kind === "array" && bt.size != null) {
+						const idx = this._constIntValue(expr.index);
+						if (idx !== null) {
+							if (idx < 0) {
+								this.err(
+									`invalid array index ${idx} (index must not be negative)`,
+									expr,
+								);
+							} else if (idx >= bt.size) {
+								this.err(
+									`invalid array index ${idx} (out of bounds for ${typeStr(bt)})`,
+									expr,
+								);
+							}
+						}
+					}
+					return bt.elem;
+				}
 				if (bt.kind === "map") {
 					expr._mapValueType = bt.value; // for codegen zero-value fallback
 					return bt.value;
@@ -172,8 +217,74 @@ export const expressionCheckMethods = {
 			}
 
 			case "TypeConversion": {
-				this.checkExpr(expr.expr, scope);
-				return this.resolveTypeNode(expr.targetType, scope);
+				const srcType = this.checkExpr(expr.expr, scope);
+				const targetType = this.resolveTypeNode(expr.targetType, scope);
+				const srcResolved =
+					srcType?.kind === "named" ? srcType.underlying : srcType;
+				const tgtResolved =
+					targetType?.kind === "named" ? targetType.underlying : targetType;
+				// Reject float64(complex) — must use real()/imag()
+				if (isNumeric(targetType) && isComplex(srcType)) {
+					this.err(
+						`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)} (use real() or imag())`,
+						expr,
+					);
+				}
+				// Allow complex128/64(numeric) and complex128/64(complex)
+				if (isComplex(targetType)) {
+					if (!isComplexOrNumeric(srcType) && !isAny(srcType)) {
+						this.err(
+							`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)}`,
+							expr,
+						);
+					}
+				}
+				// Slice → array conversion: [N]T(slice)
+				if (tgtResolved?.kind === "array" && srcResolved?.kind === "slice") {
+					const tgtElem = tgtResolved.elem;
+					const srcElem = srcResolved.elem;
+					if (
+						tgtElem &&
+						srcElem &&
+						!isAny(tgtElem) &&
+						!isAny(srcElem) &&
+						typeStr(tgtElem) !== typeStr(srcElem)
+					) {
+						this.err(
+							`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)}`,
+							expr,
+						);
+					}
+					return targetType;
+				}
+				// Array → slice conversion: []T(array)
+				if (tgtResolved?.kind === "slice" && srcResolved?.kind === "array") {
+					const tgtElem = tgtResolved.elem;
+					const srcElem = srcResolved.elem;
+					if (
+						tgtElem &&
+						srcElem &&
+						!isAny(tgtElem) &&
+						!isAny(srcElem) &&
+						typeStr(tgtElem) !== typeStr(srcElem)
+					) {
+						this.err(
+							`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)}`,
+							expr,
+						);
+					}
+					return targetType;
+				}
+				// Reject conversions between array and incompatible types
+				if (tgtResolved?.kind === "array" && srcResolved?.kind !== "array") {
+					if (!isAny(srcType)) {
+						this.err(
+							`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)}`,
+							expr,
+						);
+					}
+				}
+				return targetType;
 			}
 
 			case "TypeAssertExpr": {
@@ -211,7 +322,7 @@ export const expressionCheckMethods = {
 					// string range: (int index, rune value) — rune is an alias for int
 					return { kind: "tuple", types: [INT, INT] };
 				}
-				if (resolved?.kind === "slice") {
+				if (resolved?.kind === "slice" || resolved?.kind === "array") {
 					return { kind: "tuple", types: [INT, resolved.elem ?? ANY] };
 				}
 				if (resolved?.kind === "map") {
@@ -228,6 +339,20 @@ export const expressionCheckMethods = {
 				return ANY;
 		}
 		return ANY;
+	},
+
+	_constIntValue(expr) {
+		if (expr.kind === "BasicLit" && expr.litKind === "INT")
+			return Number(expr.value);
+		if (
+			expr.kind === "UnaryExpr" &&
+			expr.op === "-" &&
+			expr.operand?.kind === "BasicLit" &&
+			expr.operand.litKind === "INT"
+		) {
+			return -Number(expr.operand.value);
+		}
+		return null;
 	},
 
 	checkCall(expr, scope) {
@@ -302,10 +427,32 @@ export const expressionCheckMethods = {
 	checkBuiltin(name, expr, argTypes, scope) {
 		switch (name) {
 			case "len":
-			case "cap":
+			case "cap": {
+				// Compile-time len() for fixed arrays
+				if (
+					name === "len" &&
+					argTypes[0]?.kind === "array" &&
+					argTypes[0].size != null
+				) {
+					expr._constLen = argTypes[0].size;
+				} else if (
+					name === "len" &&
+					argTypes[0]?.kind === "named" &&
+					argTypes[0].underlying?.kind === "array" &&
+					argTypes[0].underlying.size != null
+				) {
+					expr._constLen = argTypes[0].underlying.size;
+				}
 				return INT;
-			case "append":
-				return argTypes[0] ?? ANY;
+			}
+			case "append": {
+				const sliceType = argTypes[0] ?? ANY;
+				if (isArray(sliceType)) {
+					this.err(`cannot append to array (type ${typeStr(sliceType)})`, expr);
+					return sliceType;
+				}
+				return sliceType;
+			}
 			case "copy":
 				return INT;
 			case "delete":
@@ -334,6 +481,39 @@ export const expressionCheckMethods = {
 				return argTypes[0] ?? ANY;
 			case "clear":
 				return VOID;
+			case "complex": {
+				if (expr.args.length !== 2) {
+					this.err("complex() requires exactly 2 arguments", expr);
+					return ANY;
+				}
+				const crt = argTypes[0];
+				const cit = argTypes[1];
+				if (!isNumeric(crt)) {
+					this.err(`cannot use ${typeStr(crt)} as float in complex()`, expr);
+					return ANY;
+				}
+				if (!isNumeric(cit)) {
+					this.err(`cannot use ${typeStr(cit)} as float in complex()`, expr);
+					return ANY;
+				}
+				if (crt.kind === "untyped" && cit.kind === "untyped")
+					return UNTYPED_COMPLEX;
+				return COMPLEX128;
+			}
+			case "real":
+			case "imag": {
+				if (expr.args.length !== 1) {
+					this.err(`${name}() requires exactly 1 argument`, expr);
+					return ANY;
+				}
+				const zt = argTypes[0];
+				if (!isComplex(zt)) {
+					this.err(`cannot use ${typeStr(zt)} as complex in ${name}()`, expr);
+					return ANY;
+				}
+				if (zt.kind === "untyped") return UNTYPED_FLOAT;
+				return FLOAT64;
+			}
 			default:
 				return ANY;
 		}
@@ -346,6 +526,19 @@ export const expressionCheckMethods = {
 				? (hintType ?? ANY)
 				: this.resolveTypeNode(expr.typeExpr, scope);
 		const base = t.kind === "named" ? t.underlying : t;
+
+		// [...]T size inference: count elements and set size
+		const typeNode = expr.typeExpr;
+		if (
+			typeNode?.kind === "ArrayType" &&
+			typeNode.inferLen &&
+			base?.kind === "array"
+		) {
+			const maxIndex = computeMaxIndex(expr.elems);
+			base.size = maxIndex + 1;
+			// If t is a named type wrapping the array, the underlying is already base
+			// If t === base, it's the same object
+		}
 
 		if (base?.kind === "struct") {
 			// Detect positional (unkeyed) literal: all elements must be non-KeyValueExpr
@@ -404,11 +597,26 @@ export const expressionCheckMethods = {
 				if (elem.kind === "CompositeLit" && elem.typeExpr === null) {
 					const et = this.checkCompositeLit(elem, scope, base.elem);
 					elem._type = et;
-				} else if (elem.kind !== "KeyValueExpr") {
+				} else if (elem.kind === "KeyValueExpr") {
+					const vt = this.checkExpr(elem.value, scope);
+					this.assertAssignable(base.elem, vt, elem.value);
+				} else {
 					const et = this.checkExpr(elem, scope);
 					this.assertAssignable(base.elem, et, elem);
 				}
 			}
+
+			// Composite literal element count validation for explicit-size arrays
+			if (base.kind === "array" && base.size != null && !typeNode?.inferLen) {
+				const maxIndex = computeMaxIndex(expr.elems);
+				if (maxIndex >= base.size) {
+					this.err(
+						`array index ${maxIndex} out of bounds [0:${base.size}]`,
+						expr,
+					);
+				}
+			}
+
 			return t;
 		}
 
@@ -445,3 +653,16 @@ export const expressionCheckMethods = {
 		return t ?? ANY;
 	},
 };
+
+function computeMaxIndex(elems) {
+	let sequential = 0;
+	let maxKeyed = -1;
+	for (const e of elems) {
+		if (e.kind === "KeyValueExpr" && e.key?.value !== undefined) {
+			maxKeyed = Math.max(maxKeyed, Number(e.key.value));
+		} else {
+			sequential++;
+		}
+	}
+	return Math.max(sequential - 1, maxKeyed);
+}

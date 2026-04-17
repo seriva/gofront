@@ -234,13 +234,13 @@ export class Parser {
 				if (this.check(T.RPAREN)) break;
 				// Collect names, then type
 				const names = [];
-				if (this.check(T.IDENT) && this.isParamType(this.peek2())) {
+				if (this.check(T.IDENT) && this._isNamedParam()) {
 					// named: a, b int  or  ns ...int
 					names.push(this.advance().value);
 					while (
 						this.match(T.COMMA) &&
 						this.check(T.IDENT) &&
-						this.isParamType(this.peek2())
+						this._isNamedParam()
 					) {
 						names.push(this.advance().value);
 					}
@@ -258,6 +258,23 @@ export class Parser {
 		}
 		this.expect(T.RPAREN);
 		return params;
+	}
+
+	// Lookahead: determine if current IDENT starts a named param (name type)
+	// vs an unnamed param (just a type). Scans IDENT (COMMA IDENT)* and checks
+	// if a type-start token follows — if so, the IDENTs are names; if ) or ,
+	// follows, the IDENTs are themselves types.
+	_isNamedParam() {
+		let pos = this.pos + 1; // skip current IDENT
+		while (
+			this.tokens[pos]?.type === T.COMMA &&
+			this.tokens[pos + 1]?.type === T.IDENT
+		) {
+			pos += 2;
+		}
+		const next = this.tokens[pos];
+		if (!next) return false;
+		return this.looksLikeType(next) || next.type === T.ELLIPSIS;
 	}
 
 	// Heuristic: peek2 is a param-name separator if it's a comma, rparen, or a type token

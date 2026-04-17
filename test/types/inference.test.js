@@ -192,14 +192,14 @@ func main() {
 
 section("Type assertion — error type");
 
-test("type assert comma-ok on error type — string value is true", () => {
+test("type assert comma-ok on error type — string value is false", () => {
 	const js = compile(`package main
 func main() {
 	var x any = "some error"
 	_, ok := x.(error)
 	console.log(ok)
 }`).js;
-	assertEqual(runJs(js), "true");
+	assertEqual(runJs(js), "false");
 });
 
 test("type assert comma-ok on error type — non-string value is false", () => {

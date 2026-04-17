@@ -20,6 +20,7 @@
 import { expressionGenMethods } from "./codegen/expressions.js";
 import { buildSourceMap } from "./codegen/source-map.js";
 import { statementGenMethods } from "./codegen/statements.js";
+import { isComplex, isNumeric } from "./typechecker/types.js";
 
 export class CodeGen {
 	// jsImports:       Map<importPath, string[]> — npm package imports to emit at top of file
@@ -38,12 +39,23 @@ export class CodeGen {
 		this.bundledPackages = bundledPackages;
 		this.namedReturnVars = null; // names of current function's named return vars
 		this._srcMappings = []; // { genLine, srcLine } for source map
+		this._boxedVars = new Set(); // address-taken scalar variables that need boxing
 		// Runtime helper usage tracking — only emit helpers that are actually used
 		this._usesLen = false;
 		this._usesAppend = false;
 		this._usesSliceGuard = false;
 		this._usesSprintf = false;
 		this._usesEqual = false;
+		this._usesCmul = false;
+		this._usesCdiv = false;
+		this._usesError = false;
+		this._usesErrorIs = false;
+		// Iterator (range-over-func) context
+		this._inIteratorBody = false;
+		this._iterDepth = 0;
+		this._iterBreakFlag = null;
+		this._iterReturnFlag = null;
+		this._iterReturnVar = null;
 	}
 
 	// ── Output helpers ───────────────────────────────────────────
@@ -151,10 +163,18 @@ export class CodeGen {
 			helpers.push(
 				'function __equal(a,b){if(a===b)return true;if(a===null||b===null)return false;if(Array.isArray(a)&&Array.isArray(b)){if(a.length!==b.length)return false;for(let i=0;i<a.length;i++)if(!__equal(a[i],b[i]))return false;return true;}if(typeof a==="object"&&typeof b==="object"){const ka=Object.keys(a),kb=Object.keys(b);if(ka.length!==kb.length)return false;for(const k of ka)if(!__equal(a[k],b[k]))return false;return true;}return false;}',
 			);
+		if (this._usesCmul)
+			helpers.push(
+				"function __cmul(a, b) { return { re: a.re * b.re - a.im * b.im, im: a.re * b.im + a.im * b.re }; }",
+			);
+		if (this._usesCdiv)
+			helpers.push(
+				"function __cdiv(a, b) { const d = b.re * b.re + b.im * b.im; return { re: (a.re * b.re + a.im * b.im) / d, im: (a.im * b.re - a.re * b.im) / d }; }",
+			);
 		if (this._usesSprintf)
 			helpers.push(
 				[
-					"function __sprintf(f,...a){let i=0;return f.replace(/%([#+\\- 0]*)([0-9]*)\\.?([0-9]*)[sdvftxXqobeEgG%]/g,(m)=>{",
+					"function __sprintf(f,...a){let i=0;return f.replace(/%([#+\\- 0]*)([0-9]*)\\.?([0-9]*)[sdvftxXqobeEgGw%]/g,(m)=>{",
 					"if(m==='%%')return'%';const fl=m.slice(1,-1),verb=m.slice(-1),v=a[i++];",
 					"const pad=(s,w,z)=>{w=parseInt(w)||0;if(!w)return s;const p=(z?'0':' ').repeat(Math.max(0,w-s.length));return fl.includes('-')?s+p:p+s;};",
 					"const [,flags,width,prec]=m.match(/^%([#+\\- 0]*)([0-9]*)\\.?([0-9]*)/)||[];",
@@ -162,7 +182,7 @@ export class CodeGen {
 					"switch(verb){",
 					"case's':return pad(String(v==null?'<nil>':v),width,false);",
 					"case'd':return pad(String(Math.trunc(Number(v))),width,zero);",
-					"case'v':return pad(String(v==null?'<nil>':v),width,false);",
+					"case'v':{if(typeof v==='object'&&v!==null&&'re' in v&&'im' in v){const sign=v.im>=0?'+':'';return pad('('+v.re+sign+v.im+'i)',width,false);}return pad(String(v==null?'<nil>':v),width,false);}",
 					"case'f':{const n=Number(v),p=prec!==''?parseInt(prec):6;return pad(n.toFixed(p),width,zero);}",
 					"case't':return pad(String(!!v),width,false);",
 					"case'x':return pad((Number(v)>>>0).toString(16),width,zero);",
@@ -172,9 +192,18 @@ export class CodeGen {
 					"case'q':return pad('\"'+String(v==null?'':v).replace(/\\\\/g,'\\\\\\\\').replace(/\"/g,'\\\\\"')+'\"',width,false);",
 					"case'e':case'E':{const n=Number(v),p=prec!==''?parseInt(prec):6;return pad(n.toExponential(p),width,zero);}",
 					"case'g':case'G':{const n=Number(v);return pad(prec!==''?n.toPrecision(parseInt(prec)):String(n),width,zero);}",
+					"case'w':return pad(String(v==null?'<nil>':typeof v==='object'&&v.Error?v.Error():v),width,false);",
 					"default:return m;}});",
 					"}",
 				].join(""),
+			);
+		if (this._usesError)
+			helpers.push(
+				"function __error(msg, cause) { return { Error() { return msg; }, toString() { return msg; }, _msg: msg, _cause: cause ?? null }; }",
+			);
+		if (this._usesErrorIs)
+			helpers.push(
+				'function __errorIs(err, target) { while (err !== null && err !== undefined) { if (err === target) return true; if (typeof err === "object" && typeof target === "object" && err._msg !== undefined && target._msg !== undefined && err._msg === target._msg) return true; err = err?._cause ?? null; } return false; }',
 			);
 
 		if (helpers.length > 0) this.out.unshift(...helpers, "");
@@ -278,12 +307,16 @@ export class CodeGen {
 		const params = decl.params.map((p) => p.name).join(", ");
 		const asyncPrefix = decl.async ? "async " : "";
 		this.line(`${asyncPrefix}${decl.name}(${params}) {`);
+		const prevBoxed = this._boxedVars;
+		this._boxedVars = new Set();
+		this._scanAddressTaken(decl.body);
 		this.indented(() => {
 			if (decl.recvName && decl.recvName !== "_") {
 				this.line(`const ${decl.recvName} = this;`);
 			}
 			this._withNamedReturns(decl, () => this._genBody(decl.body));
 		});
+		this._boxedVars = prevBoxed;
 		this.line("}");
 	}
 
@@ -302,9 +335,13 @@ export class CodeGen {
 			`${asyncPrefix}function ${name}(${params}) {`,
 			srcLine ? srcLine - 1 : null,
 		);
+		const prevBoxed = this._boxedVars;
+		this._boxedVars = new Set();
+		this._scanAddressTaken(decl.body);
 		this.indented(() =>
 			this._withNamedReturns(decl, () => this._genBody(decl.body)),
 		);
+		this._boxedVars = prevBoxed;
 		this.line("}");
 	}
 
@@ -357,12 +394,61 @@ export class CodeGen {
 		}
 	}
 
+	// Scan AST node for _addressTaken idents on scalars and populate _boxedVars.
+	_scanAddressTaken(node) {
+		if (!node || typeof node !== "object") return;
+		if (Array.isArray(node)) {
+			for (const child of node) this._scanAddressTaken(child);
+			return;
+		}
+		// &x — the operand ident will have _addressTaken set by typechecker
+		if (node.kind === "Ident" && node._addressTaken) {
+			// Check if the type is a scalar (needs boxing) vs reference type (no boxing)
+			const t = node._type;
+			if (t && !this._isReferenceType(t)) {
+				this._boxedVars.add(node.name);
+			}
+		}
+		// Recurse into FuncLit too — closures may take address of outer vars
+		for (const key of Object.keys(node)) {
+			if (key.startsWith("_")) continue;
+			this._scanAddressTaken(node[key]);
+		}
+	}
+
+	_isReferenceType(t) {
+		if (!t) return false;
+		const base = t.kind === "named" ? t.underlying : t;
+		return (
+			base?.kind === "struct" ||
+			base?.kind === "slice" ||
+			base?.kind === "map" ||
+			base?.kind === "func" ||
+			base?.kind === "interface"
+		);
+	}
+
 	// ── Variable / const declarations ────────────────────────────
 
 	genVarDecl(decl) {
 		for (const spec of decl.decls) {
 			if (spec.value) {
-				const vals = spec.value.map((v) => this.genExpr(v));
+				const vals = spec.value.map((v) => {
+					const js = this.genExpr(v);
+					// Wrap numeric values assigned to complex-typed vars
+					if (
+						spec.type?.name === "complex128" ||
+						spec.type?.name === "complex64"
+					) {
+						if (
+							!isComplex(v._type) &&
+							(isNumeric(v._type) || v._type?.kind === "untyped")
+						) {
+							return `{ re: ${js}, im: 0 }`;
+						}
+					}
+					return js;
+				});
 				if (spec.names.length === 1) {
 					this.line(`let ${spec.names[0]} = ${vals[0]};`);
 				} else {

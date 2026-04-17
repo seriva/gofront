@@ -8,6 +8,8 @@ export const T = {
 	STRING: "STRING",
 	IDENT: "IDENT",
 
+	IMAG: "IMAG",
+
 	// Keywords
 	FUNC: "func",
 	VAR: "var",
@@ -97,6 +99,7 @@ const SEMI_TRIGGERS = new Set([
 	T.IDENT,
 	T.INT,
 	T.FLOAT,
+	T.IMAG,
 	T.STRING,
 	T.RPAREN,
 	T.RBRACE,
@@ -501,7 +504,13 @@ export class Lexer {
 			// Numbers
 			if (/[0-9]/.test(ch)) {
 				const { n, isFloat } = this.readNumber();
-				this.push(isFloat ? T.FLOAT : T.INT, n, l, c);
+				if (this.src[this.pos] === "i") {
+					this.pos++;
+					this.col++;
+					this.push(T.IMAG, n, l, c);
+				} else {
+					this.push(isFloat ? T.FLOAT : T.INT, n, l, c);
+				}
 				continue;
 			}
 

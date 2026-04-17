@@ -1,7 +1,7 @@
 [![npm version](https://img.shields.io/npm/v/gofront)](https://www.npmjs.com/package/gofront)
 [![license](https://img.shields.io/github/license/seriva/gofront)](https://github.com/seriva/gofront/blob/main/LICENSE)
 [![node](https://img.shields.io/node/v/gofront)](https://nodejs.org)
-[![tests](https://img.shields.io/badge/tests-657%20passing-brightgreen)](https://github.com/seriva/gofront)
+[![tests](https://img.shields.io/badge/tests-846%20passing-brightgreen)](https://github.com/seriva/gofront)
 
 ## About
 
@@ -105,8 +105,9 @@ operation on it is silently permitted, preventing cascading errors.
 Walks the typed AST and emits clean, readable JavaScript. No intermediate representation
 — the codegen writes directly to an output buffer with indentation tracking.
 
-Runtime helpers (`__len`, `__append`, `__s`, `__sprintf`) are tree-shaken: only emitted
-when actually used. Optional inline source maps are supported via VLQ-encoded mappings.
+Runtime helpers (`__len`, `__append`, `__s`, `__sprintf`, `__cmul`, `__cdiv`, `__error`,
+`__errorIs`) are tree-shaken: only emitted when actually used. Optional inline source
+maps are supported via VLQ-encoded mappings.
 
 ---
 
@@ -125,7 +126,7 @@ readable and debuggable — no name mangling, no opaque wrappers.
 | `[]T` (slice) | `Array` | `append` → spread, `len` → `.length` |
 | `map[K]V` | Plain object `{}` | Key access via `[]`, iteration via `Object.entries()` |
 | `nil` | `null` | |
-| `error` | `string` | `error("msg")` → `"msg"`, `.Error()` → the string itself |
+| `error` | `__error` object | `error("msg")` → `__error("msg")`, `.Error()` → real method call. `toString()` for string context compat |
 | Pointers (`*T`) | `{ value: T }` | `new(T)` allocates a boxed zero value |
 
 ### Functions
@@ -169,17 +170,12 @@ readable and debuggable — no name mangling, no opaque wrappers.
 | `make(map[K]V)` | `{}` |
 | `delete(m, k)` | `delete m[k]` |
 | `new(T)` | `{ value: zeroOf(T) }` |
-| `min(a, b, ...)` | `Math.min(a, b, ...)` |
-| `max(a, b, ...)` | `Math.max(a, b, ...)` |
+| `min` / `max` | `Math.min` / `Math.max` |
 | `clear(x)` | `.length = 0` (slice) or delete-loop (map) |
 | `print` / `println` | `console.log` |
+| `complex(r, i)` | `{ re: r, im: i }` |
+| `real(z)` / `imag(z)` | `z.re` / `z.im` |
 | `fmt.Sprintf` | `__sprintf` tree-shaken helper |
-| `strings.*` | JS string methods (`.includes`, `.startsWith`, `.split`, etc.) |
-| `strconv.*` | `String()`, `parseInt()`, `Number()` |
-| `sort.Slice` | `Array.prototype.sort()` with comparator wrapping |
-| `math.*` | `Math.*` methods and constants |
-| `errors.New` | Identity (returns string) |
-| `time.Now()` | `Date.now()` |
 
 ### Type system at runtime
 
@@ -268,7 +264,8 @@ gofront <input> -o out.js        write output to file (prints elapsed compile ti
 gofront <input> --check          type-check only
 gofront <input> --watch          watch for changes and recompile
 gofront <input> --source-map     append inline source map to output
-gofront <input> --minify         minify output with terser
+gofront <input> --minify         minify output (built-in minifier)
+gofront <input> --minify --mangle  minify and rename local identifiers
 gofront <file.go> --ast          dump AST (debug)
 gofront <file.go> --tokens       dump tokens (debug)
 gofront init [dir]               scaffold a new project
@@ -342,85 +339,95 @@ signatures into GoFront's internal type representation.
 
 ## Language features
 
+### Core language
+
 | Feature | Status |
 |---|---|
 | Variables (`var`, `:=` short re-declaration) | ✓ |
-| Constants (`const`, `iota`) | ✓ |
-| `if` / `else if` / `else` | ✓ |
-| `if` with init statement (`if err := f(); err != nil`) | ✓ |
-| Type definitions (`type MyType ...`) | ✓ |
-| Functions, multiple returns | ✓ |
-| Named return values | ✓ |
-| Variadic parameters | ✓ |
+| Constants (`const`, `iota`, untyped constants) | ✓ |
+| Functions, multiple returns, named returns, variadic | ✓ |
 | `init()` functions | ✓ |
-| Structs + methods | ✓ |
-| Anonymous struct types (`struct { Name string }`) | ✓ — compile to plain JS objects (no class emitted) |
-| Embedded structs | ✓ |
-| Pointer receivers | ✓ |
-| Interfaces | ✓ |
-| Interface embedding | ✓ |
-| Closures | ✓ |
-| Slices (`append`, `len`, `make`) | ✓ |
-| Maps (`make`, `delete`, comma-ok) | ✓ — note: iteration order is insertion-order (JS), not randomised (Go) |
-| `for`, `for range`, `for {}` | ✓ |
-| `range` over string | ✓ |
-| `switch` / `fallthrough` | ✓ |
-| `switch` with init statement (`switch x := f(); x {}`) | ✓ |
-| `new(T)` | ✓ |
-| Type conversions | ✓ |
-| Type assertions (`x.(T)`) | ✓ |
-| Type switch (`switch x.(type)`, `switch v := x.(type)`) | ✓ — compiles to `if/else if` with `typeof` / `instanceof` checks |
-| Slice expressions (`s[lo:hi]`, `s[lo:hi:max]`) | ✓ — three-index form is parsed; `max` is ignored at runtime (JS has no capacity) |
-| `break` / `continue` / labeled `break` / labeled `continue` | ✓ |
-| `cap()`, `copy()`, `panic()` | ✓ |
-| Variadic spread (`f(slice...)`, `append(a, b...)`) | ✓ |
-| Bitwise operators (`&`, `\|`, `^`, `&^`, `<<`, `>>`) | ✓ — `&^` (bit clear) compiles to `& ~` |
-| Compound assignment (`+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `\|=`, `^=`, `<<=`, `>>=`) | ✓ |
-| Increment / decrement (`i++`, `i--`) | ✓ |
-| Raw string literals (backticks) | ✓ |
-| Rune / char literals (`'a'`, `'\n'`) | ✓ — compiled to integer char codes |
-| `defer` | ✓ |
-| `panic()` / `recover()` | ✓ |
-| `print` / `println` builtins | ✓ — compile to `console.log` |
-| Pointer operators (`&`, `*`) | ✓ |
-| `error` type / `error("msg")` / `.Error()` | ✓ |
+| Closures / function literals | ✓ |
 | `async func` / `await` expressions | ✓ |
-| `fmt.Sprintf` / `fmt.Printf` / `fmt.Println` / `fmt.Print` / `fmt.Errorf` | ✓ — expanded: `%t`, `%x`, `%X`, `%o`, `%b`, `%q`, `%e`, `%g`, width/precision |
-| `strings` package | ✓ — 20 functions: `Contains`, `HasPrefix`, `Split`, `Join`, `ToUpper`, `ToLower`, `TrimSpace`, etc. |
-| `strconv` package | ✓ — `Itoa`, `Atoi`, `FormatBool`, `FormatInt`, `ParseFloat`, `ParseInt`, `ParseBool` |
-| `sort` package | ✓ — `Ints`, `Float64s`, `Strings`, `Slice`, `SliceStable`, `SliceIsSorted` |
-| `math` package | ✓ — `Sqrt`, `Pow`, `Abs`, `Floor`, `Ceil`, `Round`, `Log`, trig functions + `Pi`, `E`, `MaxInt` constants |
-| `errors` package | ✓ — `errors.New` (returns plain string) |
-| `time` package (partial) | ✓ — `Now`, `Since`, `Sleep` + `Millisecond`, `Second`, `Minute`, `Hour` constants |
-| `unicode` package | ✓ — `IsLetter`, `IsDigit`, `IsSpace`, `IsUpper`, `IsLower`, `IsPunct`, `IsControl`, `IsPrint`, `IsGraphic`, `ToUpper`, `ToLower` |
-| `os` package (partial) | ✓ — `Exit`, `Args`, `Getenv` |
-| External `.d.ts` types | ✓ |
-| npm package types | ✓ |
+| `defer`, `panic()` / `recover()` | ✓ |
+| `print` / `println` builtins | ✓ — compile to `console.log` |
+
+### Types & data structures
+
+| Feature | Status |
+|---|---|
+| Structs + methods (value & pointer receivers) | ✓ |
+| Embedded structs (flattened fields + promoted methods) | ✓ |
+| Anonymous struct types | ✓ — compile to plain JS objects |
+| Interfaces (with embedding) | ✓ |
+| Slices (`append`, `len`, `make`) | ✓ |
+| Maps (`make`, `delete`, comma-ok) | ✓ |
+| Arrays with compile-time enforcement | ✓ — reject `append`, bounds checking, size matching, `[...]T` inference, compile-time `len()` |
+| Slice → array conversion (`[N]T(slice)`) | ✓ — Go 1.20 |
+| Pointers (`&x`, `*p`, `new(T)`) | ✓ — scalar locals boxed as `{ value: T }` for shared mutation |
+| `error` type | ✓ — interface `{ Error() string }`; custom error types, `errors.Is`/`Unwrap`, `%w` wrapping |
+| Complex numbers (`complex64`, `complex128`, `3i`) | ✓ — `complex()`, `real()`, `imag()` builtins; `__cmul`/`__cdiv` helpers |
+| Type definitions, type aliases (`type A = B`) | ✓ |
+| Type conversions, type assertions (plain & comma-ok) | ✓ |
+| Type switch (`switch v := x.(type)`) | ✓ — compiles to `if/else if` with `typeof` / `instanceof` |
+| Sized integers (`int8`–`int64`, `uint8`–`uint64`, `float32`) | ✓ — mapped to `number` at runtime |
+| Struct field tags | ✓ — parsed and ignored (no reflection) |
+| Struct and array equality (`a == b`) | ✓ — deep comparison via `__equal` helper |
+
+### Control flow
+
+| Feature | Status |
+|---|---|
+| `if` / `else if` / `else` (with init statement) | ✓ |
+| `for` (C-style, condition-only, infinite, `range`) | ✓ |
+| `range` over slice, map, string, integer | ✓ |
+| Range over iterator functions (Go 1.23) | ✓ — `func(yield func(K, V) bool)` protocol; break/continue/return propagation |
+| `switch` / `fallthrough` (with init statement) | ✓ |
+| `break` / `continue` / labeled variants | ✓ |
+| Terminating statement analysis | ✓ — missing `return` in non-void functions is a type error |
+
+### Expressions & literals
+
+| Feature | Status |
+|---|---|
+| Arithmetic, comparison, logical, bitwise operators | ✓ — includes `&^` (bit clear) |
+| Compound assignment, increment / decrement | ✓ |
+| Slice expressions (`s[lo:hi]`, `s[lo:hi:max]`) | ✓ |
+| Variadic spread (`f(slice...)`, `append(a, b...)`) | ✓ |
+| Positional struct literals (`Point{1, 2}`) | ✓ |
+| Method expressions (`T.Method`) / method values (`x.Method`) | ✓ |
+| Multi-value function forwarding (`f(g())`) | ✓ |
+| Raw string literals (backticks), rune literals | ✓ |
+| Numeric separators (`1_000_000`), binary/octal/hex literals | ✓ |
+| `[]byte(s)` / `[]rune(s)` conversions | ✓ |
+
+### Standard library shims
+
+| Package | Functions |
+|---|---|
+| `fmt` | `Sprintf`, `Printf`, `Println`, `Print`, `Errorf` — format verbs: `%v`, `%d`, `%s`, `%t`, `%x`, `%o`, `%b`, `%q`, `%e`, `%g`, `%w`, width/precision |
+| `strings` | `Contains`, `HasPrefix`, `HasSuffix`, `Index`, `LastIndex`, `Count`, `Repeat`, `Replace`, `ReplaceAll`, `ToUpper`, `ToLower`, `TrimSpace`, `Trim`, `TrimPrefix`, `TrimSuffix`, `TrimLeft`, `TrimRight`, `Split`, `Join`, `EqualFold` |
+| `bytes` | `Contains`, `HasPrefix`, `HasSuffix`, `Index`, `Join`, `Split`, `Replace`, `ToUpper`, `ToLower`, `TrimSpace`, `Equal`, `Count`, `Repeat` |
+| `strconv` | `Itoa`, `Atoi`, `FormatBool`, `FormatInt`, `FormatFloat`, `ParseFloat`, `ParseInt`, `ParseBool` |
+| `sort` | `Ints`, `Float64s`, `Strings`, `Slice`, `SliceStable`, `SliceIsSorted` |
+| `math` | `Abs`, `Floor`, `Ceil`, `Round`, `Sqrt`, `Cbrt`, `Pow`, `Log`, `Log2`, `Log10`, trig functions + `Pi`, `E`, `MaxFloat64`, `MaxInt`, `MinInt` |
+| `errors` | `New`, `Is`, `Unwrap` — custom error types via interface satisfaction |
+| `time` | `Now`, `Since`, `Sleep` + `Millisecond`, `Second`, `Minute`, `Hour` constants |
+| `unicode` | `IsLetter`, `IsDigit`, `IsSpace`, `IsUpper`, `IsLower`, `IsPunct`, `IsControl`, `IsPrint`, `IsGraphic`, `ToUpper`, `ToLower` |
+| `os` | `Exit`, `Args`, `Getenv` |
+
+### Packages & imports
+
+| Feature | Status |
+|---|---|
 | Multi-file packages | ✓ |
 | Cross-package imports | ✓ |
 | Import aliases (`import m "./pkg"`) | ✓ |
-| Sized integer types (`uint`, `int8`–`int64`, `uint8`–`uint64`, `float32`) | ✓ — mapped to `int` / `float64` at runtime |
-| Struct field tags (`` `json:"name"` ``) | ✓ — parsed and ignored (no reflection) |
-| `[]byte(s)` conversion | ✓ — produces UTF-8 byte values via `TextEncoder` |
-| `[]rune(s)` conversion | ✓ — produces Unicode code points via `Array.from` |
-| `[...]T{...}` array length inference | ✓ |
-| Side-effect imports (`import _ "pkg"`) | ✓ — dependency code is bundled; package namespace is not exposed |
-| Dot imports (`import . "pkg"`) | ✓ — merges package exports into the current scope (no qualifier needed) |
-| Unused local import detection | ✓ — unused cross-package imports are type errors (matching Go); `import _` exempt |
-| `min()` / `max()` builtins | ✓ — compiles to `Math.min` / `Math.max` |
-| `clear()` builtin | ✓ — zeroes slice length or deletes all map keys |
-| `range` over integer (`for i := range n`) | ✓ — Go 1.22; also supports `for range n` |
-| Type aliases (`type A = B`) | ✓ — transparent alias; no conversion needed between alias and original |
-| Numeric literal separators (`1_000_000`) | ✓ — underscores stripped at lex time |
-| Binary / octal literals (`0b1010`, `0o777`) | ✓ — passed through to JS which supports them natively |
-| Hex float literals (`0x1.8p1`) | ✓ — evaluated at lex time to a decimal value |
-| Untyped constants | ✓ — `const x = 5` produces an untyped int that coerces to `int` or `float64` on use (Go spec §Constants) |
-| Positional (unkeyed) struct literals (`Point{1, 2}`) | ✓ |
-| Method expressions (`T.Method`) | ✓ — compiles to `(recv, ...args) => recv.Method(...args)` |
-| Method values (`x.Method`) | ✓ — compiles to `x.Method.bind(x)` |
-| Struct and array equality (`a == b`) | ✓ — deep comparison via tree-shaken `__equal` helper |
-| Multi-value function forwarding (`f(g())`) | ✓ — single multi-return call forwarded as spread |
-| Terminating statement analysis | ✓ — missing `return` in non-void functions is a type error |
+| Side-effect imports (`import _ "pkg"`) | ✓ |
+| Dot imports (`import . "pkg"`) | ✓ |
+| Unused import detection | ✓ |
+| External `.d.ts` types | ✓ |
+| npm package type resolution | ✓ |
 
 ---
 
@@ -428,37 +435,7 @@ signatures into GoFront's internal type representation.
 
 GoFront implements a practical subset of the
 [Go Language Specification](https://go.dev/ref/spec) (go1.26). It is not aiming for
-byte-level parity — it is a Go-inspired language for the JavaScript platform. This
-section explains exactly where GoFront matches Go, where it intentionally diverges, and
-where JS fundamentally prevents matching Go semantics.
-
-### What matches Go
-
-The core language surface is well covered. All of these compile and behave as a Go
-developer would expect:
-
-- **Declarations**: `var`, `:=` (with re-declaration), `const` (with `iota`), `type`,
-  `func`, methods, `init()`.
-- **Control flow**: `if`/`else` (with init statement), `for` (classic, condition-only,
-  infinite, `range`), `switch`/`case`/`default`/`fallthrough`, type switches, labeled
-  `break`/`continue`, `defer`, `panic`/`recover`.
-- **Types**: `int`, `float64`, `string`, `bool`, sized integers (`int8`–`int64`,
-  `uint8`–`uint64`), `float32`, `byte`, `rune`, `error`, slices, maps, arrays, structs,
-  interfaces (with embedding), pointers (`*T`, `&x`), type aliases, function types.
-- **Expressions**: all arithmetic, comparison, logical, and bitwise operators (including
-  `&^`), compound assignment, increment/decrement, type conversions, type assertions
-  (plain and comma-ok), slice expressions (`a[lo:hi]`, `a[lo:hi:max]`), composite
-  literals (keyed and positional), `[...]T{...}` inference, rune literals, raw string
-  literals, variadic spread, blank identifier `_`, method expressions (`T.Method`),
-  method values (`x.Method`), struct/array equality, multi-value function forwarding.
-- **Builtins**: `len`, `cap`, `append`, `copy`, `make`, `delete`, `new`, `clear`, `min`,
-  `max`, `print`, `println`, `panic`, `recover`, `fmt.Sprintf`/`Printf`/`Println`/`Errorf`.
-- **Standard library shims**: `strings` (20 functions), `strconv` (8 functions),
-  `sort` (6 functions), `math` (20 functions + 6 constants), `errors.New`,
-  `time.Now`/`Since`/`Sleep` + duration constants, `unicode` (11 functions),
-  `os.Exit`/`Args`/`Getenv`.
-- **Packages**: multi-file packages, cross-package imports, import aliases,
-  dot imports, blank imports, unused import detection.
+byte-level parity — it is a Go-inspired language for the JavaScript platform.
 
 ### GoFront extensions (not in Go)
 
@@ -476,8 +453,6 @@ These features are intentional additions for the JavaScript platform:
 | Feature | Reason | Prospect |
 |---|---|---|
 | Generics (`[T any]`) | Touches every compiler stage. Large effort, limited runtime payoff on a JS target. | Feasible — highest-priority future feature. |
-| Range over iterator functions (Go 1.23) | `func(yield func(K, V) bool)` protocol. | Feasible. |
-| Complex numbers (`complex64`, `complex128`, `3i`) | Would need a runtime complex type. Rarely used in frontend. | Feasible but low priority. |
 | `goto` | No clean JS translation. Rare in idiomatic Go. | Not planned. |
 | Goroutines / channels / `select` | Go's concurrency model has no JS equivalent. A userland scheduler defeats the "no runtime" goal. | Out of scope. |
 | `unsafe`, `reflect`, `cgo` | Require memory model or runtime type metadata that JS cannot provide. | Out of scope. |
@@ -494,15 +469,15 @@ you know exactly what to expect.
 | Integer overflow | IEEE 754 float64 semantics | Wraps at type boundary (e.g. `int32`) | All JS numbers are float64. |
 | Integer precision | Safe up to 2⁵³ | Full width per type (`int64` = 64 bits) | JS `number` limitation. |
 | `cap()` | Always equals `len()` | May exceed `len()` | JS arrays have no separate capacity. |
-| Fixed-size arrays (`[n]T`) | Plain JS arrays (no length enforcement) | Fixed at compile time | Runtime enforcement adds overhead for no JS benefit. |
+| Fixed-size arrays (`[n]T`) | Compile-time enforcement (bounds, append rejected, size matching); plain JS arrays at runtime | Fixed at compile time, value-type copy semantics | Runtime enforcement adds overhead; compile-time checks catch most errors. |
 | `nil` | Maps to `null` | Typed nil (distinct per type) | JS has no typed nil concept. |
 | `rune` / `byte` | Treated as `int` | Distinct types with UTF-8 encoding | JS strings are UTF-16. |
 | `range` over string | Rune integers via `.codePointAt()` | Runes (UTF-8 code points) | Close match — indices are byte-sequential, values are code points. |
 | `len()` on strings | JS `.length` (UTF-16 code units) | Byte count (UTF-8) | Matching Go would require `TextEncoder` on every call. |
-| `error` type | Plain string | Interface `{ Error() string }` | Practical simplification for JS. |
+| `error` type | Interface `{ Error() string }` with `__error` runtime objects | Interface `{ Error() string }` | Close match. Custom error types, `errors.Is`/`Unwrap`, `%w` wrapping all work. `toString()` added for JS string context compat. |
 | `defer` | `try`/`finally` with a defer stack | Runtime stack unwinding | Covers most cases but not identical to Go internals. |
 | Struct field tags | Parsed, silently discarded | Available via `reflect` | No reflection = no use for tag values. |
-| Pointers (`&x`, `*p`) | Syntax accepted, semantically transparent | True memory indirection | JS has no pointer model. |
+| Pointers (`&x`, `*p`) | Address-taken scalars boxed as `{ value: T }`; structs/slices/maps are reference types (no boxing) | True memory indirection | Shared mutation works for scalars; struct fields and slice elements not yet addressable. |
 | Three-index slice (`a[lo:hi:max]`) | `max` is parsed but ignored | Sets result capacity | JS arrays have no capacity. |
 | Exported / unexported | Enforced for GoFront packages; external `.d.ts`/npm namespaces are exempt | Access enforced uniformly | External JS APIs use lowercase names by convention. |
 
@@ -522,7 +497,7 @@ Design documents for planned features are organised by release under `docs/v*/`
 npm test
 ```
 
-655 tests covering language features, type errors, edge cases, DOM (jsdom), external
+846 tests covering language features, type errors, edge cases, DOM (jsdom), external
 `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, map
 iteration order, integer overflow semantics, unused variable detection, unused import
 detection, semantic difference verification, stdlib shim packages, and both example apps.

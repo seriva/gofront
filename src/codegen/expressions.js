@@ -1,5 +1,9 @@
 // CodeGen expression methods and helpers — installed as a mixin on CodeGen.prototype.
 
+import { ERROR, isComplex } from "../typechecker/types.js";
+
+const globalError = ERROR;
+
 const INT_TYPE_NAMES = new Set([
 	"int",
 	"uint",
@@ -23,17 +27,68 @@ export const expressionGenMethods = {
 				if (expr.litKind === "STRING") return JSON.stringify(expr.value);
 				return expr.value; // int, float, bool, nil(null)
 
+			case "ImagLit":
+				return `{ re: 0, im: ${expr.value} }`;
+
 			case "Ident":
+				if (this._boxedVars.has(expr.name) && !expr._isAddressOf)
+					return `${expr.name}.value`;
 				return expr.name;
 
 			case "UnaryExpr": {
 				const op = expr.op === "^" ? "~" : expr.op; // bitwise NOT
-				// Dereference/address-of — transparent in JS
-				if (op === "*" || op === "&") return this.genExpr(expr.operand);
+				// Address-of: &x
+				if (op === "&") {
+					if (expr.operand.kind === "Ident") {
+						// Mark so Ident codegen does NOT append .value
+						expr.operand._isAddressOf = true;
+						// For boxed vars, &x returns the box itself
+						if (this._boxedVars.has(expr.operand.name)) {
+							return this.genExpr(expr.operand);
+						}
+					}
+					// For non-boxed vars (structs, etc.), wrap in { value: x }
+					return `{ value: ${this.genExpr(expr.operand)} }`;
+				}
+				// Dereference: *p → p.value
+				if (op === "*") {
+					return `${this.genExpr(expr.operand)}.value`;
+				}
+				// Unary minus/plus on complex
+				if ((op === "-" || op === "+") && isComplex(expr.operand._type)) {
+					const inner = this.genExpr(expr.operand);
+					if (op === "-") return `{ re: -${inner}.re, im: -${inner}.im }`;
+					return inner;
+				}
 				return `${op}${this.genExpr(expr.operand)}`;
 			}
 
 			case "BinaryExpr": {
+				// Complex binary operations
+				if (
+					isComplex(expr._type) ||
+					isComplex(expr.left._type) ||
+					isComplex(expr.right._type)
+				) {
+					const l = this._genComplexOperand(expr.left);
+					const r = this._genComplexOperand(expr.right);
+					switch (expr.op) {
+						case "+":
+							return `{ re: ${l}.re + ${r}.re, im: ${l}.im + ${r}.im }`;
+						case "-":
+							return `{ re: ${l}.re - ${r}.re, im: ${l}.im - ${r}.im }`;
+						case "*":
+							this._usesCmul = true;
+							return `__cmul(${l}, ${r})`;
+						case "/":
+							this._usesCdiv = true;
+							return `__cdiv(${l}, ${r})`;
+						case "==":
+							return `(${l}.re === ${r}.re && ${l}.im === ${r}.im)`;
+						case "!=":
+							return `(${l}.re !== ${r}.re || ${l}.im !== ${r}.im)`;
+					}
+				}
 				const l = this.genExpr(expr.left);
 				const r = this.genExpr(expr.right);
 				// Integer division: only when both sides are int
@@ -112,7 +167,7 @@ export const expressionGenMethods = {
 				const base = this.genExpr(expr.expr);
 				// Bundled GoFront packages are inlined — drop the qualifier.
 				if (this.bundledPackages.has(base)) return expr.field;
-				// Pointer types are wrapped as { value: T }; route through .value
+				// Pointer types: route through .value
 				if (expr.expr._type?.kind === "pointer" && expr.field !== "value") {
 					const sel = `${base}.value.${expr.field}`;
 					if (expr._isMethodValue && !expr._callee)
@@ -164,16 +219,40 @@ export const expressionGenMethods = {
 				const params = expr.params.map((p) => p.name).join(", ");
 				const asyncPrefix = expr.async ? "async " : "";
 				const saved = this.out;
+				const prevBoxed = this._boxedVars;
+				this._boxedVars = new Set(prevBoxed); // inherit parent's boxed vars (closures)
+				this._scanAddressTaken(expr.body);
 				this.out = [];
 				this.indented(() => this._genBody(expr.body));
 				const body = this.out.join("\n");
 				this.out = saved;
+				this._boxedVars = prevBoxed;
 				return `${asyncPrefix}function(${params}) {\n${body}\n${"  ".repeat(this.indent)}}`;
 			}
 
 			case "TypeConversion": {
 				const inner = this.genExpr(expr.expr);
 				const t = expr.targetType;
+
+				// Complex type conversions
+				if (t?.name === "complex128" || t?.name === "complex64") {
+					const srcType = expr.expr._type;
+					if (isComplex(srcType)) return inner; // complex→complex identity
+					return `{ re: ${inner}, im: 0 }`; // numeric→complex
+				}
+
+				// Array type conversion: [N]T(slice) → slice(0, N)
+				if (t?.kind === "ArrayType") {
+					const srcType = expr.expr._type;
+					const srcResolved =
+						srcType?.kind === "named" ? srcType.underlying : srcType;
+					if (srcResolved?.kind === "slice") {
+						const size =
+							t.size?.value !== undefined ? Number(t.size.value) : t.size;
+						return `${inner}.slice(0, ${size})`;
+					}
+					return inner;
+				}
 
 				// Slice type conversions
 				if (t?.kind === "SliceType") {
@@ -197,12 +276,25 @@ export const expressionGenMethods = {
 				}
 
 				const target = t?.name;
+				// error("msg") → __error("msg")
+				if (target === "error") {
+					this._usesError = true;
+					return `__error(${inner})`;
+				}
 				switch (target) {
 					case "string": {
 						// Go string(65) → "A" (Unicode code point), not "65"
 						const srcType = expr.expr._type;
 						if (srcType && this.isIntType(srcType)) {
 							return `String.fromCodePoint(${inner})`;
+						}
+						// string([]byte) → decode byte array to string
+						if (
+							srcType &&
+							srcType.kind === "slice" &&
+							srcType.elem?.name === "int"
+						) {
+							return `${inner}.map(c => String.fromCharCode(c)).join("")`;
 						}
 						return `String(${inner})`;
 					}
@@ -250,6 +342,7 @@ export const expressionGenMethods = {
 				case "append":
 					return this.genAppend(expr);
 				case "len": {
+					if (expr._constLen != null) return String(expr._constLen);
 					const arg = expr.args[0];
 					const t = arg?._type;
 					const js = this.genExpr(arg);
@@ -285,9 +378,9 @@ export const expressionGenMethods = {
 				case "recover":
 					return `(typeof __panic !== "undefined" && __panic !== null ? (() => { const __r = __panic.message ?? String(__panic); __panic = null; return __r; })() : null)`;
 				case "error": {
-					// errors are plain strings; nil (null) means no error
+					this._usesError = true;
 					const arg = this.genExpr(expr.args[0]);
-					return arg;
+					return `__error(${arg})`;
 				}
 				case "min": {
 					const args = expr.args.map((a) => this.genExpr(a)).join(", ");
@@ -309,16 +402,29 @@ export const expressionGenMethods = {
 					}
 					return `(${js}).length = 0`;
 				}
+				case "complex": {
+					const re = this.genExpr(expr.args[0]);
+					const im = this.genExpr(expr.args[1]);
+					return `{ re: ${re}, im: ${im} }`;
+				}
+				case "real":
+					return `(${this.genExpr(expr.args[0])}).re`;
+				case "imag":
+					return `(${this.genExpr(expr.args[0])}).im`;
 			}
 		}
 
-		// error.Error() → the error string itself (errors are plain strings at runtime)
+		// error.Error() → real method call
 		if (
 			expr.func.kind === "SelectorExpr" &&
 			expr.func.field === "Error" &&
-			expr.func.expr._type?.name === "error"
+			expr.func.expr._type &&
+			(expr.func.expr._type === globalError ||
+				expr.func.expr._type?.name === "error" ||
+				(expr.func.expr._type?.kind === "named" &&
+					expr.func.expr._type?.underlying?.kind === "interface"))
 		) {
-			return this.genExpr(expr.func.expr);
+			return `${this.genExpr(expr.func.expr)}.Error()`;
 		}
 
 		// fmt.Sprintf / fmt.Printf / fmt.Println / fmt.Print / fmt.Errorf
@@ -330,9 +436,19 @@ export const expressionGenMethods = {
 			const fmtArgs = expr.args.map((a) => this.genExpr(a)).join(", ");
 			switch (expr.func.field) {
 				case "Sprintf":
-				case "Errorf":
 					this._usesSprintf = true;
 					return `__sprintf(${fmtArgs})`;
+				case "Errorf": {
+					this._usesSprintf = true;
+					this._usesError = true;
+					// Check for %w verb — extract the wrapped error as cause
+					const fmtStr = expr.args[0];
+					if (fmtStr?.kind === "BasicLit" && fmtStr.value?.includes("%w")) {
+						const lastArg = this.genExpr(expr.args[expr.args.length - 1]);
+						return `__error(__sprintf(${fmtArgs}), ${lastArg})`;
+					}
+					return `__error(__sprintf(${fmtArgs}))`;
+				}
 				case "Printf":
 				case "Print":
 					this._usesSprintf = true;
@@ -391,6 +507,49 @@ export const expressionGenMethods = {
 					return `${a[0]}.join(${a[1]})`;
 				case "EqualFold":
 					return `${a[0]}.toLowerCase() === ${a[1]}.toLowerCase()`;
+			}
+		}
+
+		// bytes.* — byte slice operations via string conversion
+		const __bs = `(b => String.fromCharCode(...b))`;
+		const __sb = `(s => [...s].map(c => c.charCodeAt(0)))`;
+		if (
+			expr.func.kind === "SelectorExpr" &&
+			expr.func.expr.kind === "Ident" &&
+			expr.func.expr.name === "bytes"
+		) {
+			const a = expr.args.map((e) => this.genExpr(e));
+			switch (expr.func.field) {
+				case "Contains":
+					return `${__bs}(${a[0]}).includes(${__bs}(${a[1]}))`;
+				case "HasPrefix": {
+					return `((b, p) => { for (let i = 0; i < p.length; i++) if (b[i] !== p[i]) return false; return b.length >= p.length; })(${a[0]}, ${a[1]})`;
+				}
+				case "HasSuffix": {
+					return `((b, s) => { const off = b.length - s.length; if (off < 0) return false; for (let i = 0; i < s.length; i++) if (b[off + i] !== s[i]) return false; return true; })(${a[0]}, ${a[1]})`;
+				}
+				case "Index":
+					return `${__bs}(${a[0]}).indexOf(${__bs}(${a[1]}))`;
+				case "Count":
+					return `${__bs}(${a[0]}).split(${__bs}(${a[1]})).length - 1`;
+				case "Repeat":
+					return `${__sb}(${__bs}(${a[0]}).repeat(${a[1]}))`;
+				case "Replace":
+					return `((b, o, n, cnt) => { let s = ${__bs}(b), os = ${__bs}(o), ns = ${__bs}(n); if (cnt < 0) return ${__sb}(s.replaceAll(os, ns)); for (let i = 0; i < cnt; i++) s = s.replace(os, ns); return ${__sb}(s); })(${a[0]}, ${a[1]}, ${a[2]}, ${a[3]})`;
+				case "ToUpper":
+					return `${__sb}(${__bs}(${a[0]}).toUpperCase())`;
+				case "ToLower":
+					return `${__sb}(${__bs}(${a[0]}).toLowerCase())`;
+				case "TrimSpace":
+					return `${__sb}(${__bs}(${a[0]}).trim())`;
+				case "Trim":
+					return `${__sb}(${__bs}(${a[0]}).replace(new RegExp(\`^[\${${a[1]}}]+|[\${${a[1]}}]+$\`, "g"), ""))`;
+				case "Equal":
+					return `((a, b) => { if (a.length !== b.length) return false; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false; return true; })(${a[0]}, ${a[1]})`;
+				case "Split":
+					return `${__bs}(${a[0]}).split(${__bs}(${a[1]})).map(p => ${__sb}(p))`;
+				case "Join":
+					return `${__sb}(${a[0]}.map(p => ${__bs}(p)).join(${__bs}(${a[1]})))`;
 			}
 		}
 
@@ -542,14 +701,23 @@ export const expressionGenMethods = {
 			}
 		}
 
-		// errors.New — identity (errors are plain strings)
+		// errors.New / errors.Is / errors.Unwrap
 		if (
 			expr.func.kind === "SelectorExpr" &&
 			expr.func.expr.kind === "Ident" &&
 			expr.func.expr.name === "errors"
 		) {
 			const a = expr.args.map((e) => this.genExpr(e));
-			if (expr.func.field === "New") return a[0];
+			switch (expr.func.field) {
+				case "New":
+					this._usesError = true;
+					return `__error(${a[0]})`;
+				case "Is":
+					this._usesErrorIs = true;
+					return `__errorIs(${a[0]}, ${a[1]})`;
+				case "Unwrap":
+					return `(${a[0]}?._cause ?? null)`;
+			}
 		}
 
 		// time.* — partial JS-friendly time support
@@ -718,6 +886,11 @@ export const expressionGenMethods = {
 
 	// ── Helpers ───────────────────────────────────────────────────
 
+	_genComplexOperand(expr) {
+		if (isComplex(expr._type)) return this.genExpr(expr);
+		return `{ re: ${this.genExpr(expr)}, im: 0 }`;
+	},
+
 	getTypeName(typeNode) {
 		if (!typeNode) return null;
 		if (typeNode.kind === "TypeName") return typeNode.name;
@@ -762,6 +935,9 @@ export const expressionGenMethods = {
 			case "byte":
 			case "rune":
 				return "0";
+			case "complex64":
+			case "complex128":
+				return "{ re: 0, im: 0 }";
 			case "string":
 				return '""';
 			case "bool":
@@ -856,7 +1032,7 @@ export const expressionGenMethods = {
 				case "nil":
 					return `${val} === null`;
 				case "error":
-					return `typeof ${val} === "string"`;
+					return `(typeof ${val} === "object" && ${val} !== null && typeof ${val}.Error === "function")`;
 				default:
 					if (this.structNames.has(typeNode.name))
 						return `${val} instanceof ${typeNode.name}`;

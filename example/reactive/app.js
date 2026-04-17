@@ -21,6 +21,7 @@ function HasText(s) {
 function __len(a) { return a?.length ?? 0; }
 function __append(a, ...b) { return a ? [...a, ...b] : b; }
 function __s(a) { return a || []; }
+function __error(msg, cause) { return { Error() { return msg; }, toString() { return msg; }, _msg: msg, _cause: cause ?? null }; }
 
 class Todo {
   constructor({ id = 0, text = "", done = false, priority = 0 } = {}) {
@@ -87,10 +88,10 @@ const PriorityHigh = 1;
 
 function validateTodo(text) {
   if (!HasText(text)) {
-    return "todo text cannot be empty";
+    return __error("todo text cannot be empty");
   }
   if (__len(Array.from(text, __c => __c.codePointAt(0))) > maxTodoLen) {
-    return "todo text too long";
+    return __error("todo text too long");
   }
   return null;
 }
@@ -449,7 +450,7 @@ function safeJsonParse(raw) {
       {
         let r = (typeof __panic !== "undefined" && __panic !== null ? (() => { const __r = __panic.message ?? String(__panic); __panic = null; return __r; })() : null);
         if (r !== null) {
-          err = r;
+          err = __error(r);
         }
       }
     })(); });
@@ -474,7 +475,7 @@ async function loadTodos() {
     return parseErr;
   }
   if (parsed === null) {
-    return "failed to parse stored todos";
+    return __error("failed to parse stored todos");
   }
   let loaded = null;
   for (const [_$, raw] of __s(parsed).entries()) {

@@ -6,6 +6,68 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Better pointer model** — `&x` and `*p` now produce real pointer semantics instead
+  of being no-ops:
+  - `&x` on scalar locals (int, float64, string, bool) boxes the variable as `{ value: x }`
+    and returns the box reference. All reads/writes to the variable go through `.value`.
+  - `*p` dereferences a pointer by emitting `p.value`
+  - Shared mutation through pointers works correctly: multiple pointers to the same
+    variable see each other's changes
+  - `swap(&x, &y)` pattern works as expected
+  - Pointer comparison (`==`, `!=`) uses reference equality on box objects
+  - `var p *int` initializes to `null`; `p == nil` compiles to `p === null`
+  - `new(T)` continues to produce `{ value: zeroOf(T) }` as before
+  - Structs, slices, and maps are reference types and skip boxing when `&` is applied
+  - Closures capturing address-taken variables work correctly (JS captures the box object)
+  - Type error for dereferencing non-pointer types: `*x` where `x` is not a pointer
+  - `isPointer()` predicate added to type system utilities
+- **Richer error values** — `error` is now an interface type `{ Error() string }` instead
+  of a basic type (plain string). This is a **breaking change** at runtime:
+  - `error("msg")`, `errors.New("msg")`, and `fmt.Errorf(...)` now return `__error` objects
+    with `.Error()` and `.toString()` methods (tree-shaken runtime helper)
+  - Custom error types: any struct with `Error() string` method satisfies the `error` interface
+  - Type assertions on error values (`err.(MyError)`, comma-ok form) work naturally
+  - `errors.Is(err, target)` — walks the error chain comparing by identity or `_msg`
+  - `errors.Unwrap(err)` — returns the wrapped cause error or `nil`
+  - `fmt.Errorf("...: %w", err)` — wraps errors with a cause chain; `%w` verb supported
+    in `__sprintf` helper
+  - Sentinel errors: package-level `var ErrX = errors.New("...")` work with `errors.Is`
+  - `toString()` on error objects provides backward compatibility for `console.log(err)`
+    and string interpolation contexts
+  - **Migration**: `err === "msg"` string comparisons no longer work — use `err.Error() === "msg"`
+    or `errors.Is(err, sentinel)` instead
+- **Slice → array conversion** — `[N]T(slice)` converts a slice to a fixed-size array
+  (Go 1.20 feature). Emits `.slice(0, N)` in JS. Array → slice `[]T(arr)` also supported.
+- **Complex number types** — full support for `complex64`, `complex128`, and untyped complex constants:
+  - Imaginary literals (`3i`, `1.5i`, `0i`) as `IMAG` tokens with semicolon insertion
+  - `complex(r, i)`, `real(z)`, `imag(z)` builtins with correct type inference
+  - Complex arithmetic (`+`, `-`, `*`, `/`) with tree-shaken `__cmul`/`__cdiv` helpers
+  - Complex comparison (`==`, `!=` only; ordering operators rejected)
+  - Numeric-to-complex promotion in mixed expressions (`3 * z`)
+  - Type conversions: `complex128(x)`, `complex64(x)` from numeric types
+  - `float64(complexVal)` rejected with "use real() or imag()" guidance
+  - Compound assignment (`+=`, `-=`, `*=`, `/=`) on complex variables
+  - `fmt.Sprintf("%v", z)` formats complex as `(a+bi)`
+  - Zero value `{ re: 0, im: 0 }` for complex types
+  - Unary `-`/`+` on complex values
+  - Runtime representation: `{ re: number, im: number }` objects
+- **Built-in minifier** (`src/minifier.js`) — replaces the `terser` dependency with a
+  purpose-built minifier that understands GoFront's output:
+  - Stage 1: comment and whitespace stripping
+  - Stage 2: token-level compression (preserves strings, templates, regexes)
+  - Stage 3: identifier mangling (opt-in via `--mangle` flag)
+  - Stage 4: constant numeric literal folding
+  - `--source-map` and `--minify` combined now emit a clear error
+- **Better array semantics** — compile-time enforcement for fixed-size arrays:
+  - `[...]T` size inference from composite literal element count
+  - Reject `append()` on array types (type error)
+  - Compile-time bounds checking for constant array indices
+  - Composite literal element count validation against declared array size
+  - Array assignment size matching (`[3]int` ≠ `[4]int`, `[]int` ≠ `[3]int`)
+  - Compile-time `len()` for fixed arrays emits constant instead of `__len()`
+  - Slicing arrays produces slice types (`arr[1:3]` on `[5]int` → `[]int`)
+
 ## [0.0.4] - 2026-04-17
 
 ### Added
