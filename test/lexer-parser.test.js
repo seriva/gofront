@@ -4,6 +4,7 @@ import {
 	assert,
 	assertContains,
 	assertEqual,
+	assertThrows,
 	compile,
 	DtsParser,
 	Lexer,
@@ -301,72 +302,45 @@ func main() {
 });
 
 test("empty rune literal '' throws a lex error", () => {
-	let threw = false;
-	try {
-		new Lexer("package main\nvar x = ''", "test.go").tokenize();
-	} catch (e) {
-		threw = true;
-		assertContains(e.message, "Empty rune literal");
-	}
-	assert(threw, "expected LexError for empty rune");
+	assertThrows(
+		() => new Lexer("package main\nvar x = ''", "test.go").tokenize(),
+		"Empty rune literal",
+	);
 });
 
 test("multi-char rune literal 'ab' throws a lex error", () => {
-	let threw = false;
-	try {
-		new Lexer("package main\nvar x = 'ab'", "test.go").tokenize();
-	} catch (e) {
-		threw = true;
-		assertContains(
-			e.message,
-			"Rune literal must contain exactly one character",
-		);
-	}
-	assert(threw, "expected LexError for multi-char rune");
+	assertThrows(
+		() => new Lexer("package main\nvar x = 'ab'", "test.go").tokenize(),
+		"Rune literal must contain exactly one character",
+	);
 });
 
 test("unknown rune escape \\q throws a lex error", () => {
-	let threw = false;
-	try {
-		new Lexer("package main\nvar x = '\\q'", "test.go").tokenize();
-	} catch (e) {
-		threw = true;
-		assertContains(e.message, "Unknown escape in rune literal");
-	}
-	assert(threw, "expected LexError for unknown rune escape");
+	assertThrows(
+		() => new Lexer("package main\nvar x = '\\q'", "test.go").tokenize(),
+		"Unknown escape in rune literal",
+	);
 });
 
 test("LexError includes filename and source line in message", () => {
-	let msg = "";
-	try {
-		new Lexer("package main\nvar x = ''", "myfile.go").tokenize();
-	} catch (e) {
-		msg = e.message;
-	}
-	assertContains(msg, "myfile.go");
-	assertContains(msg, "var x");
+	assertThrows(
+		() => new Lexer("package main\nvar x = ''", "myfile.go").tokenize(),
+		"myfile.go",
+	);
 });
 
 test("unexpected character @ throws a lex error", () => {
-	let threw = false;
-	try {
-		new Lexer("package main\nfunc main() { @ }", "test.go").tokenize();
-	} catch (e) {
-		threw = true;
-		assertContains(e.message, "Unexpected character");
-	}
-	assert(threw, "expected LexError for unexpected character");
+	assertThrows(
+		() => new Lexer("package main\nfunc main() { @ }", "test.go").tokenize(),
+		"Unexpected character",
+	);
 });
 
 test("unterminated block comment throws a lex error", () => {
-	let threw = false;
-	try {
-		new Lexer("package main\n/* no closing", "test.go").tokenize();
-	} catch (e) {
-		threw = true;
-		assertContains(e.message, "Unterminated block comment");
-	}
-	assert(threw, "expected LexError for unterminated block comment");
+	assertThrows(
+		() => new Lexer("package main\n/* no closing", "test.go").tokenize(),
+		"Unterminated block comment",
+	);
 });
 
 section("Lexer — scientific notation and modulo");

@@ -4,6 +4,7 @@ import {
 	assert,
 	assertEqual,
 	assertErrorContains,
+	assertThrows,
 	compile,
 	runJs,
 	section,
@@ -329,13 +330,7 @@ func main() {
   console.log(v)
 }`);
 	assertEqual(errors.length, 0);
-	let threw = false;
-	try {
-		runJs(js);
-	} catch (_e) {
-		threw = true;
-	}
-	assert(threw, "expected plain assertion to panic on type mismatch");
+	assertThrows(() => runJs(js));
 });
 
 test("comma-ok assertion returns zero value on failure", () => {

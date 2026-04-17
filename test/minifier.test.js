@@ -295,6 +295,7 @@ func main() {
 }`);
 	assertEqual(errors.length, 0);
 	const original = runJs(js);
+	assertEqual(original, "hello   world");
 	const minified = minify(js);
 	assertEqual(runJs(minified), original);
 });
@@ -330,6 +331,7 @@ func main() {
 }`);
 	assertEqual(errors.length, 0);
 	const original = runJs(js);
+	assertEqual(original, "two");
 	const minified = minify(js);
 	assertEqual(runJs(minified), original);
 });
@@ -350,6 +352,7 @@ func main() {
 }`);
 	assertEqual(errors.length, 0);
 	const original = runJs(js);
+	assertEqual(original, "5");
 	const minified = minify(js);
 	assertEqual(runJs(minified), original);
 });
@@ -363,6 +366,7 @@ func main() {
 }`);
 	assertEqual(errors.length, 0);
 	const original = runJs(js);
+	assertEqual(original, "John Doe");
 	const mangled = minify(js, { mangle: true });
 	assertEqual(runJs(mangled), original);
 });

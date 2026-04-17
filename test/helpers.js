@@ -67,6 +67,7 @@ function stripImports(js) {
 }
 
 export function runJs(js, extraGlobals = {}) {
+	if (!js) throw new Error("runJs: js is null — compilation likely failed");
 	const lines = [];
 	const ctx = vm.createContext({
 		Math,
@@ -83,7 +84,11 @@ export function runJs(js, extraGlobals = {}) {
 		},
 		...extraGlobals,
 	});
-	vm.runInContext(stripImports(js), ctx);
+	try {
+		vm.runInContext(stripImports(js), ctx);
+	} catch (e) {
+		throw new Error(`Runtime error in generated JS: ${e.message}`);
+	}
 	return lines.join("\n");
 }
 
@@ -150,6 +155,34 @@ export function assertContains(haystack, needle) {
 	if (!haystack.includes(needle))
 		throw new Error(
 			`expected output to contain ${JSON.stringify(needle)}\ngot: ${JSON.stringify(haystack)}`,
+		);
+}
+
+export function assertDoesNotContain(haystack, needle) {
+	if (haystack.includes(needle))
+		throw new Error(`expected output NOT to contain ${JSON.stringify(needle)}`);
+}
+
+export function assertNotEqual(actual, notExpected) {
+	if (actual === notExpected)
+		throw new Error(
+			`expected value to differ from ${JSON.stringify(notExpected)}`,
+		);
+}
+
+export function assertThrows(fn, substring) {
+	let threw = false;
+	let msg = "";
+	try {
+		fn();
+	} catch (e) {
+		threw = true;
+		msg = e.message ?? String(e);
+	}
+	if (!threw) throw new Error("expected function to throw, but it did not");
+	if (substring && !msg.includes(substring))
+		throw new Error(
+			`expected error containing ${JSON.stringify(substring)}\ngot: ${JSON.stringify(msg)}`,
 		);
 }
 

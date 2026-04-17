@@ -4,6 +4,7 @@ import {
 	assert,
 	assertContains,
 	assertEqual,
+	assertThrows,
 	compile,
 	runJs,
 	section,
@@ -195,13 +196,7 @@ test("panic() throws with message", () => {
 func main() {
   panic("something went wrong")
 }`);
-	let threw = false;
-	try {
-		runJs(js);
-	} catch (e) {
-		threw = e.message.includes("something went wrong");
-	}
-	assert(threw, "expected panic to throw");
+	assertThrows(() => runJs(js), "something went wrong");
 });
 
 // ═════════════════════════════════════════════════════════════
@@ -363,13 +358,7 @@ func main() {
 	defer func() {}()
 	panic("boom")
 }`).js;
-	let threw = false;
-	try {
-		runJs(js);
-	} catch (_) {
-		threw = true;
-	}
-	assert(threw, "expected panic to propagate");
+	assertThrows(() => runJs(js), "boom");
 });
 
 // ═════════════════════════════════════════════════════════════

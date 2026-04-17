@@ -9,6 +9,7 @@ import {
 	assertContains,
 	assertEqual,
 	assertErrorContains,
+	assertThrows,
 	compile,
 	compileDir,
 	FIXTURES,
@@ -21,13 +22,7 @@ section("compiler.js — error paths");
 
 test("compileDir throws on mixed package names", () => {
 	const dir = join(FIXTURES, "missing_go");
-	let threw = false;
-	try {
-		compileDir(dir);
-	} catch (_e) {
-		threw = true;
-	}
-	assert(threw, "expected error for empty/missing directory");
+	assertThrows(() => compileDir(dir));
 });
 
 // ═════════════════════════════════════════════════════════════
@@ -38,53 +33,35 @@ section("compiler.js — mixed package names");
 
 test("compileDir throws when package names differ across files", () => {
 	const dir = join(FIXTURES, "mixed_packages");
-	let threw = false;
-	let msg = "";
-	try {
-		compileDir(dir);
-	} catch (e) {
-		threw = true;
-		msg = e.message;
-	}
-	assert(threw, "expected error for mixed package names");
-	assertContains(msg, "Mixed package names");
+	assertThrows(() => compileDir(dir), "Mixed package names");
 });
 
 test("compileDir throws on parse error in a .go file", () => {
-	// Write a file with a syntax error into a temp dir and compile it
 	const tmpDir = mkdtempSync(join(tmpdir(), "gofront-test-"));
-	writeFileSync(join(tmpDir, "bad.go"), "package main\nfunc (( {}", "utf8");
-	let threw = false;
 	try {
-		compileDir(tmpDir);
-	} catch (_e) {
-		threw = true;
+		writeFileSync(join(tmpDir, "bad.go"), "package main\nfunc (( {}", "utf8");
+		assertThrows(() => compileDir(tmpDir));
 	} finally {
 		rmSync(tmpDir, { recursive: true, force: true });
 	}
-	assert(threw, "expected error for parse error");
 });
 
 test("compileDir throws on type-check error", () => {
 	const tmpDir = mkdtempSync(join(tmpdir(), "gofront-test-"));
-	writeFileSync(
-		join(tmpDir, "bad.go"),
-		`package main
+	try {
+		writeFileSync(
+			join(tmpDir, "bad.go"),
+			`package main
 func main() {
 	var x int = "hello"
 	console.log(x)
 }`,
-		"utf8",
-	);
-	let threw = false;
-	try {
-		compileDir(tmpDir);
-	} catch (_e) {
-		threw = true;
+			"utf8",
+		);
+		assertThrows(() => compileDir(tmpDir));
 	} finally {
 		rmSync(tmpDir, { recursive: true, force: true });
 	}
-	assert(threw, "expected error for type-check error");
 });
 
 test("compileDir with unknown npm import compiles without crash", () => {
@@ -192,14 +169,7 @@ section("Unused import detection");
 
 test("unused local package import is a type error", () => {
 	const dir = join(FIXTURES, "multifile/unusedimport");
-	let threw = false;
-	try {
-		compileDir(dir);
-	} catch (e) {
-		threw = true;
-		assertContains(e.message, "imported and not used");
-	}
-	assert(threw, "expected type error for unused import");
+	assertThrows(() => compileDir(dir), "imported and not used");
 });
 
 test("used local package import is not an error", () => {

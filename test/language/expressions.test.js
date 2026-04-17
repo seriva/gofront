@@ -2,10 +2,10 @@
 
 import { fileURLToPath } from "node:url";
 import {
-	assert,
 	assertContains,
 	assertEqual,
 	assertErrorContains,
+	assertThrows,
 	compile,
 	runJs,
 	section,
@@ -15,62 +15,50 @@ import {
 section("Unimplemented Go features");
 
 test("go statement produces a clear error", () => {
-	let threw = false;
-	try {
-		compile(`package main
+	assertThrows(
+		() =>
+			compile(`package main
 func main() {
 	go doSomething()
-}`);
-	} catch (e) {
-		threw = true;
-		assertContains(e.message, "goroutines are not supported");
-	}
-	assert(threw, "expected parse error for go statement");
+}`),
+		"goroutines are not supported",
+	);
 });
 
 test("select statement produces a clear error", () => {
-	let threw = false;
-	try {
-		compile(`package main
+	assertThrows(
+		() =>
+			compile(`package main
 func main() {
 	select {
 	}
-}`);
-	} catch (e) {
-		threw = true;
-		assertContains(e.message, "select statement is not supported");
-	}
-	assert(threw, "expected parse error for select statement");
+}`),
+		"select statement is not supported",
+	);
 });
 
 test("chan type produces a clear error", () => {
-	let threw = false;
-	try {
-		compile(`package main
+	assertThrows(
+		() =>
+			compile(`package main
 func main() {
 	var ch chan int
 	_ = ch
-}`);
-	} catch (e) {
-		threw = true;
-		assertContains(e.message, "channels are not supported");
-	}
-	assert(threw, "expected parse error for chan type");
+}`),
+		"channels are not supported",
+	);
 });
 
 test("make(chan int) produces a clear error", () => {
-	let threw = false;
-	try {
-		compile(`package main
+	assertThrows(
+		() =>
+			compile(`package main
 func main() {
 	ch := make(chan int)
 	_ = ch
-}`);
-	} catch (e) {
-		threw = true;
-		assertContains(e.message, "channels are not supported");
-	}
-	assert(threw, "expected parse error for chan in make");
+}`),
+		"channels are not supported",
+	);
 });
 
 // ═════════════════════════════════════════════════════════════
@@ -443,14 +431,7 @@ func main() {
 	println(v)
 }`);
 	assertEqual(errors.length, 0);
-	// Should throw — the assertion fails at runtime
-	let threw = false;
-	try {
-		runJs(js);
-	} catch (_e) {
-		threw = true;
-	}
-	assert(threw, "expected plain type assertion to panic on type mismatch");
+	assertThrows(() => runJs(js));
 });
 
 test("comma-ok type assertion on wrong type returns false safely", () => {
