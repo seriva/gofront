@@ -40,7 +40,7 @@ func main() {
     xs := []int{1,2}
     console.log(len(xs))
 }`);
-	assertContains(js, "function __len(a)");
+	assertContains(js, "__len");
 	assertEqual(runJs(js), "2");
 });
 

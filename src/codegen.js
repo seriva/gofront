@@ -152,29 +152,31 @@ export class CodeGen {
 		// Prepend runtime helpers that were actually used
 		const helpers = [];
 		if (this._usesLen)
-			helpers.push("function __len(a) { return a?.length ?? 0; }");
+			helpers.push(
+				"var __len = __len || function(a) { return a?.length ?? 0; };",
+			);
 		if (this._usesAppend)
 			helpers.push(
-				"function __append(a, ...b) { return a ? [...a, ...b] : b; }",
+				"var __append = __append || function(a, ...b) { return a ? [...a, ...b] : b; };",
 			);
 		if (this._usesSliceGuard)
-			helpers.push("function __s(a) { return a || []; }");
+			helpers.push("var __s = __s || function(a) { return a || []; };");
 		if (this._usesEqual)
 			helpers.push(
-				'function __equal(a,b){if(a===b)return true;if(a===null||b===null)return false;if(Array.isArray(a)&&Array.isArray(b)){if(a.length!==b.length)return false;for(let i=0;i<a.length;i++)if(!__equal(a[i],b[i]))return false;return true;}if(typeof a==="object"&&typeof b==="object"){const ka=Object.keys(a),kb=Object.keys(b);if(ka.length!==kb.length)return false;for(const k of ka)if(!__equal(a[k],b[k]))return false;return true;}return false;}',
+				'var __equal = __equal || function __equal(a,b){if(a===b)return true;if(a===null||b===null)return false;if(Array.isArray(a)&&Array.isArray(b)){if(a.length!==b.length)return false;for(let i=0;i<a.length;i++)if(!__equal(a[i],b[i]))return false;return true;}if(typeof a==="object"&&typeof b==="object"){const ka=Object.keys(a),kb=Object.keys(b);if(ka.length!==kb.length)return false;for(const k of ka)if(!__equal(a[k],b[k]))return false;return true;}return false;};',
 			);
 		if (this._usesCmul)
 			helpers.push(
-				"function __cmul(a, b) { return { re: a.re * b.re - a.im * b.im, im: a.re * b.im + a.im * b.re }; }",
+				"var __cmul = __cmul || function(a, b) { return { re: a.re * b.re - a.im * b.im, im: a.re * b.im + a.im * b.re }; };",
 			);
 		if (this._usesCdiv)
 			helpers.push(
-				"function __cdiv(a, b) { const d = b.re * b.re + b.im * b.im; return { re: (a.re * b.re + a.im * b.im) / d, im: (a.im * b.re - a.re * b.im) / d }; }",
+				"var __cdiv = __cdiv || function(a, b) { const d = b.re * b.re + b.im * b.im; return { re: (a.re * b.re + a.im * b.im) / d, im: (a.im * b.re - a.re * b.im) / d }; };",
 			);
 		if (this._usesSprintf)
 			helpers.push(
 				[
-					"function __sprintf(f,...a){let i=0;return f.replace(/%([#+\\- 0]*)([0-9]*)\\.?([0-9]*)[sdvftxXqobeEgGw%]/g,(m)=>{",
+					"var __sprintf = __sprintf || function(f,...a){let i=0;return f.replace(/%([#+\\- 0]*)([0-9]*)\\.?([0-9]*)[sdvftxXqobeEgGw%]/g,(m)=>{",
 					"if(m==='%%')return'%';const fl=m.slice(1,-1),verb=m.slice(-1),v=a[i++];",
 					"const pad=(s,w,z)=>{w=parseInt(w)||0;if(!w)return s;const p=(z?'0':' ').repeat(Math.max(0,w-s.length));return fl.includes('-')?s+p:p+s;};",
 					"const [,flags,width,prec]=m.match(/^%([#+\\- 0]*)([0-9]*)\\.?([0-9]*)/)||[];",
@@ -194,16 +196,16 @@ export class CodeGen {
 					"case'g':case'G':{const n=Number(v);return pad(prec!==''?n.toPrecision(parseInt(prec)):String(n),width,zero);}",
 					"case'w':return pad(String(v==null?'<nil>':typeof v==='object'&&v.Error?v.Error():v),width,false);",
 					"default:return m;}});",
-					"}",
+					"};",
 				].join(""),
 			);
 		if (this._usesError)
 			helpers.push(
-				"function __error(msg, cause) { return { Error() { return msg; }, toString() { return msg; }, _msg: msg, _cause: cause ?? null }; }",
+				"var __error = __error || function(msg, cause) { return { Error() { return msg; }, toString() { return msg; }, _msg: msg, _cause: cause ?? null }; };",
 			);
 		if (this._usesErrorIs)
 			helpers.push(
-				'function __errorIs(err, target) { while (err !== null && err !== undefined) { if (err === target) return true; if (typeof err === "object" && typeof target === "object" && err._msg !== undefined && target._msg !== undefined && err._msg === target._msg) return true; err = err?._cause ?? null; } return false; }',
+				'var __errorIs = __errorIs || function(err, target) { while (err !== null && err !== undefined) { if (err === target) return true; if (typeof err === "object" && typeof target === "object" && err._msg !== undefined && target._msg !== undefined && err._msg === target._msg) return true; err = err?._cause ?? null; } return false; };',
 			);
 
 		if (helpers.length > 0) this.out.unshift(...helpers, "");
