@@ -38,7 +38,8 @@ export class CodeGen {
 		this.jsImports = jsImports;
 		this.bundledPackages = bundledPackages;
 		this.namedReturnVars = null; // names of current function's named return vars
-		this._srcMappings = []; // { genLine, srcLine } for source map
+		this._srcMappings = []; // { genLine, srcLine, srcFileIdx } for source map
+		this._currentSrcFileIdx = 0; // updated as each top-level decl is generated
 		this._boxedVars = new Set(); // address-taken scalar variables that need boxing
 		// Runtime helper usage tracking — only emit helpers that are actually used
 		this._usesLen = false;
@@ -67,8 +68,9 @@ export class CodeGen {
 		if (srcLine != null) {
 			this._srcMappings.push({
 				genLine: this.out.length,
-				srcLine: srcLine - 1,
-			}); // 0-based
+				srcLine: srcLine - 1, // 0-based
+				srcFileIdx: this._currentSrcFileIdx,
+			});
 		}
 		this.out.push("  ".repeat(this.indent) + s);
 	}
@@ -109,6 +111,7 @@ export class CodeGen {
 
 		for (const d of program.decls) {
 			if (d.kind === "TypeDecl") {
+				this._currentSrcFileIdx = d._srcFileIdx ?? 0;
 				this.genTypeDeclWithMethods(d, methods.get(d.name) ?? []);
 				this.blank();
 			}
@@ -116,10 +119,12 @@ export class CodeGen {
 
 		for (const d of program.decls) {
 			if (d.kind === "VarDecl") {
+				this._currentSrcFileIdx = d._srcFileIdx ?? 0;
 				this.genVarDecl(d);
 				this.blank();
 			}
 			if (d.kind === "ConstDecl") {
+				this._currentSrcFileIdx = d._srcFileIdx ?? 0;
 				this.genConstDecl(d);
 				this.blank();
 			}
@@ -130,6 +135,7 @@ export class CodeGen {
 		const initNames = [];
 		for (const d of program.decls) {
 			if (d.kind === "FuncDecl") {
+				this._currentSrcFileIdx = d._srcFileIdx ?? 0;
 				if (d.name === "init") {
 					const renamed = initCount === 0 ? "init" : `init$${initCount}`;
 					initNames.push(renamed);
@@ -216,16 +222,22 @@ export class CodeGen {
 	}
 
 	// Generate a single bundle from multiple programs (same-package multi-file).
-	// Merges all decls and generates as if it were one program.
+	// Annotates each decl with its source file index before merging.
 	generateAll(programs) {
+		for (let i = 0; i < programs.length; i++) {
+			for (const decl of programs[i].decls) {
+				decl._srcFileIdx = i;
+			}
+		}
 		const merged = { decls: programs.flatMap((p) => p.decls) };
 		return this.generate(merged);
 	}
 
 	// Returns a source map JSON string for the last generate() call.
-	// sourceName: the .go filename to reference in the map.
-	getSourceMap(sourceName) {
-		return buildSourceMap(sourceName, this._srcMappings);
+	// sources: string[] of source filenames (relative to the output file).
+	getSourceMap(sources) {
+		const srcArray = Array.isArray(sources) ? sources : [sources];
+		return buildSourceMap(srcArray, this._srcMappings);
 	}
 
 	// ── Type declarations ────────────────────────────────────────

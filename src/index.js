@@ -26,7 +26,7 @@ import { createRequire } from "node:module";
 const _require = createRequire(import.meta.url);
 const { version } = _require("../package.json");
 
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { CodeGen } from "./codegen.js";
 import { compileDir } from "./compiler.js";
 import { parseDts } from "./dts-parser.js";
@@ -139,7 +139,8 @@ try {
 
 function runCompile() {
 	if (isDir) {
-		return compileDir(inputPath, { sourceMap });
+		const outputDir = outputFile ? dirname(resolve(outputFile)) : resolve(".");
+		return compileDir(inputPath, { sourceMap, outputDir });
 	}
 
 	// Single-file mode
@@ -223,7 +224,9 @@ function runCompile() {
 	let js = cg.generate(ast);
 
 	if (sourceMap) {
-		const map = cg.getSourceMap(inputArg);
+		const outputDir = outputFile ? dirname(resolve(outputFile)) : resolve(".");
+		const srcPath = relative(outputDir, inputPath);
+		const map = cg.getSourceMap(srcPath);
 		const b64 = Buffer.from(map).toString("base64");
 		js += `\n//# sourceMappingURL=data:application/json;base64,${b64}`;
 	}
