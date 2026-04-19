@@ -139,7 +139,7 @@ try {
 
 function runCompile() {
 	if (isDir) {
-		return compileDir(inputPath);
+		return compileDir(inputPath, { sourceMap });
 	}
 
 	// Single-file mode

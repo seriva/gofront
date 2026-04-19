@@ -165,8 +165,13 @@ export function compileFiles(files, options = {}) {
 	const codegen = new CodeGen(checker, jsImports, bundledPackages);
 	const mainJs = codegen.generateAll(programs);
 
-	const js =
-		preambles.length > 0 ? `${preambles.join("\n")}\n${mainJs}` : mainJs;
+	let js = preambles.length > 0 ? `${preambles.join("\n")}\n${mainJs}` : mainJs;
+
+	if (options.sourceMap) {
+		const map = codegen.getSourceMap(fromDir);
+		const b64 = Buffer.from(map).toString("base64");
+		js += `\n//# sourceMappingURL=data:application/json;base64,${b64}`;
+	}
 
 	return {
 		pkgName,

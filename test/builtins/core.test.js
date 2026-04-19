@@ -292,7 +292,7 @@ func main() {
   console.log(fmt.Sprintf("%s", "x"))
 }`);
 	assertContains(js, "__sprintf");
-	assertContains(js, "function __sprintf");
+	assertContains(js, "var __sprintf");
 });
 
 // ═════════════════════════════════════════════════════════════
