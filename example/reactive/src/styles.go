@@ -233,18 +233,6 @@ h1 {
   box-shadow: inset 0 2px 0 0 var(--accent);
 }
 
-.todo-item.high .todo-text::before {
-  content: '';
-  display: inline-block;
-  width: 6px; height: 6px;
-  background: var(--red);
-  border-radius: 50%;
-  margin-right: 8px;
-  vertical-align: middle;
-  box-shadow: 0 0 6px var(--red);
-  flex-shrink: 0;
-}
-.todo-item.done .todo-text::before { display: none; }
 
 .todo-cb {
   appearance: none;

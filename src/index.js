@@ -29,6 +29,7 @@ const { version } = _require("../package.json");
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { CodeGen } from "./codegen.js";
 import { compileDir } from "./compiler.js";
+import { createDevServer, liveReloadClient } from "./dev-server.js";
 import { parseDts } from "./dts-parser.js";
 import { Lexer } from "./lexer.js";
 import { minify } from "./minifier.js";
@@ -55,6 +56,8 @@ Usage:
   gofront <input> -o out.js      Compile and write to file
   gofront <input> --check        Type-check only
   gofront <input> --watch        Watch for changes and recompile
+  gofront <input> -o out.js --serve          Watch + serve with live reload (default port 3000)
+  gofront <input> -o out.js --serve --port 8080  Use a custom port
   gofront <input> --source-map   Append inline source map to output
   gofront <input> --minify       Minify output
   gofront <input> --minify --mangle  Minify and mangle identifiers
@@ -120,9 +123,12 @@ const checkOnly = args.includes("--check");
 const dumpAst = args.includes("--ast");
 const dumpTokens = args.includes("--tokens");
 const sourceMap = args.includes("--source-map");
-const watchMode = args.includes("--watch");
+const serveMode = args.includes("--serve");
+const watchMode = args.includes("--watch") || serveMode;
 const minifyOutput = args.includes("--minify");
 const mangleOutput = args.includes("--mangle");
+const portFlag = args.indexOf("--port");
+const servePort = portFlag !== -1 ? parseInt(args[portFlag + 1], 10) : 3000;
 
 // ── Determine input mode ─────────────────────────────────────
 
@@ -294,11 +300,31 @@ function timestamp() {
 	return new Date().toLocaleTimeString();
 }
 
+// Start dev server before first build so the browser can connect immediately
+let devServer = null;
+if (serveMode) {
+	if (!outputFile) {
+		console.error("gofront: --serve requires -o <output file>");
+		process.exit(1);
+	}
+	const serveDir = dirname(resolve(outputFile));
+	devServer = createDevServer(serveDir, servePort);
+}
+
 function buildOnce() {
 	try {
 		const startMs = performance.now();
 		const result = runCompile();
-		const js = maybeMinify(result.js);
+		let js = maybeMinify(result.js);
+		if (serveMode) {
+			// Insert live reload client before the source map comment so it stays last
+			const smIdx = js.lastIndexOf("\n//# sourceMappingURL=");
+			if (smIdx !== -1) {
+				js = `${js.slice(0, smIdx)}\n${liveReloadClient}${js.slice(smIdx)}`;
+			} else {
+				js += `\n${liveReloadClient}`;
+			}
+		}
 		const elapsedMs = (performance.now() - startMs).toFixed(0);
 		if (outputFile) {
 			writeFileSync(outputFile, `${js}\n`);
@@ -311,6 +337,7 @@ function buildOnce() {
 			console.log(js);
 			console.error(`[${timestamp()}] gofront: OK (${elapsedMs}ms)`);
 		}
+		devServer?.notify();
 	} catch (e) {
 		console.error(`[${timestamp()}] gofront: ERROR`);
 		for (const line of e.message.split("\n")) console.error(`  ${line}`);
