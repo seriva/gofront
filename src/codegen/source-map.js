@@ -33,7 +33,10 @@ export function buildSourceMap(sources, mappings) {
 			const srcDelta = entry.srcLine - prevSrcLine;
 			// Segment: [genCol=0, srcFileIdxDelta, srcLineDelta, srcCol=0]
 			lines.push(
-				vlqEncode(0) + vlqEncode(fileDelta) + vlqEncode(srcDelta) + vlqEncode(0),
+				vlqEncode(0) +
+					vlqEncode(fileDelta) +
+					vlqEncode(srcDelta) +
+					vlqEncode(0),
 			);
 			prevSrcFile = fileIdx;
 			prevSrcLine = entry.srcLine;
