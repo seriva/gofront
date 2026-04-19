@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **`--source-map` now works for directory builds** — previously the flag was silently
+  ignored when compiling a directory with `-o`; the inline source map is now correctly
+  appended to the output file.
+- **Per-file source maps for multi-file packages** — the `sources` array in the generated
+  source map now lists each `.go` file individually (e.g. `src/main.go`, `src/store.go`)
+  with paths relative to the output file, instead of a single directory entry. DevTools
+  will show each source file separately and map breakpoints correctly.
+- **Duplicate runtime helper declarations** — when a sub-package and its importer both
+  used the same helper (e.g. `__append`), the bundled output contained two `function`
+  declarations with the same name, which is a `SyntaxError` in ES module context. Helpers
+  are now emitted as `var __name = __name || function(...) { ... };`, which is safe to
+  appear multiple times.
+
 ## [0.0.5] - 2026-04-17
 
 ### Added

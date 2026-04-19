@@ -260,7 +260,7 @@ gofront <dir>                    compile all *.go in directory → stdout
 gofront <input> -o out.js        write output to file (prints elapsed compile time e.g. "15ms")
 gofront <input> --check          type-check only
 gofront <input> --watch          watch for changes and recompile
-gofront <input> --source-map     append inline source map to output
+gofront <input> --source-map     append inline source map to output (works for single files and directories; multi-file packages emit per-file mappings)
 gofront <input> --minify         minify output (built-in minifier)
 gofront <input> --minify --mangle  minify and rename local identifiers
 gofront <file.go> --ast          dump AST (debug)

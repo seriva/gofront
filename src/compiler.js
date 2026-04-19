@@ -16,7 +16,7 @@
 // de-qualifies it because the dependency is inlined.
 
 import { readdirSync, readFileSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { CodeGen } from "./codegen.js";
 import { parseDts } from "./dts-parser.js";
 import { Lexer } from "./lexer.js";
@@ -168,7 +168,9 @@ export function compileFiles(files, options = {}) {
 	let js = preambles.length > 0 ? `${preambles.join("\n")}\n${mainJs}` : mainJs;
 
 	if (options.sourceMap) {
-		const map = codegen.getSourceMap(fromDir);
+		const outputDir = options.outputDir ?? fromDir;
+		const sourceFiles = files.map((f) => relative(outputDir, f));
+		const map = codegen.getSourceMap(sourceFiles);
 		const b64 = Buffer.from(map).toString("base64");
 		js += `\n//# sourceMappingURL=data:application/json;base64,${b64}`;
 	}
