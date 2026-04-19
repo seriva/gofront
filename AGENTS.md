@@ -27,15 +27,17 @@ npm test          # run the full test suite (~600 tests, no browser required)
 npm run format    # format with Biome
 npm run check     # lint with Biome
 
-node src/index.js <file.go>              # compile single file → stdout
-node src/index.js <dir> -o out.js        # compile directory → file
-node src/index.js <input> --check        # type-check only
-node src/index.js <input> --watch        # watch mode
-node src/index.js <input> --source-map   # append inline source map
-node src/index.js <input> --minify       # minify output with terser
-node src/index.js <file.go> --ast        # dump AST (debug)
-node src/index.js <file.go> --tokens     # dump tokens (debug)
-node src/index.js init [dir]             # scaffold new project
+node src/index.js <file.go>                       # compile single file → stdout
+node src/index.js <dir> -o out.js                 # compile directory → file
+node src/index.js <input> --check                 # type-check only
+node src/index.js <input> --watch                 # watch mode
+node src/index.js <input> -o out.js --serve       # watch + dev server with live reload (port 3000)
+node src/index.js <input> -o out.js --serve --port 8080  # custom port
+node src/index.js <input> --source-map            # append inline source map
+node src/index.js <input> --minify                # minify output with terser
+node src/index.js <file.go> --ast                 # dump AST (debug)
+node src/index.js <file.go> --tokens              # dump tokens (debug)
+node src/index.js init [dir]                      # scaffold new project
 ```
 
 ## Repository layout
@@ -61,6 +63,7 @@ src/
   compiler.js       multi-file / directory compilation entry point
   resolver.js       npm and local package type resolution
   dts-parser.js     TypeScript .d.ts loader
+  dev-server.js     static file server + SSE live reload (used by --serve)
   index.js          CLI entry point
 test/
   run.js            test suite orchestrator (no framework, plain Node vm)

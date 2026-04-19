@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Dev server with live reload (`--serve`)** — new flag that starts a static file server
+  and automatically reloads the browser after each successful recompile. Implies `--watch`.
+  Serves files from the directory of the output file (`-o` is required). Default port is
+  3000; use `--port <n>` to override. A small SSE-based reload client is injected into the
+  compiled output — no extra dependencies, uses Node's built-in `http` module only.
+  Can be combined with `--source-map`; the source map comment is always kept as the last
+  line of the output.
+
 ### Fixed
 - **`--source-map` now works for directory builds** — previously the flag was silently
   ignored when compiling a directory with `-o`; the inline source map is now correctly

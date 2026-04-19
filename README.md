@@ -258,16 +258,18 @@ npm run build:reactive    # → example/reactive/app.js
 gofront <file.go>                compile single file → stdout
 gofront <dir>                    compile all *.go in directory → stdout
 gofront <input> -o out.js        write output to file (prints elapsed compile time e.g. "15ms")
-gofront <input> --check          type-check only
-gofront <input> --watch          watch for changes and recompile
-gofront <input> --source-map     append inline source map to output (works for single files and directories; multi-file packages emit per-file mappings)
-gofront <input> --minify         minify output (built-in minifier)
-gofront <input> --minify --mangle  minify and rename local identifiers
-gofront <file.go> --ast          dump AST (debug)
-gofront <file.go> --tokens       dump tokens (debug)
-gofront init [dir]               scaffold a new project
-gofront --version / -v           print version
-gofront --help / -h              print this help
+gofront <input> --check                    type-check only
+gofront <input> --watch                    watch for changes and recompile
+gofront <input> -o out.js --serve          watch + serve with live reload (default port 3000)
+gofront <input> -o out.js --serve --port 8080  use a custom port
+gofront <input> --source-map               append inline source map (single file or directory; multi-file packages emit per-file mappings)
+gofront <input> --minify                   minify output (built-in minifier)
+gofront <input> --minify --mangle          minify and rename local identifiers
+gofront <file.go> --ast                    dump AST (debug)
+gofront <file.go> --tokens                 dump tokens (debug)
+gofront init [dir]                         scaffold a new project
+gofront --version / -v                     print version
+gofront --help / -h                        print this help
 ```
 
 ---
