@@ -520,8 +520,349 @@ func main() {
 });
 
 // ═════════════════════════════════════════════════════════════
-// Lexer / parser edge cases
+// strings.Builder
 // ═════════════════════════════════════════════════════════════
+
+section("strings.Builder");
+
+test("WriteString and String", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	var b strings.Builder
+	b.WriteString("hello")
+	b.WriteString(", ")
+	b.WriteString("world")
+	console.log(b.String())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "hello, world");
+});
+
+test("WriteByte", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	var b strings.Builder
+	b.WriteByte('H')
+	b.WriteByte('i')
+	console.log(b.String())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "Hi");
+});
+
+test("WriteRune", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	var b strings.Builder
+	b.WriteRune('G')
+	b.WriteRune('o')
+	console.log(b.String())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "Go");
+});
+
+test("Len", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	var b strings.Builder
+	b.WriteString("hello")
+	console.log(b.Len())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "5");
+});
+
+test("Reset", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	var b strings.Builder
+	b.WriteString("hello")
+	b.Reset()
+	b.WriteString("world")
+	console.log(b.String())
+	console.log(b.Len())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "world\n5");
+});
+
+test("Grow is a no-op", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	var b strings.Builder
+	b.Grow(64)
+	b.WriteString("ok")
+	console.log(b.String())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "ok");
+});
+
+test("zero value is usable", () => {
+	const { js, errors } = compile(`package main
+func build() string {
+	var b strings.Builder
+	b.WriteString("x")
+	return b.String()
+}
+func main() {
+	console.log(build())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "x");
+});
+
+// ═════════════════════════════════════════════════════════════
+// bytes.Buffer
+// ═════════════════════════════════════════════════════════════
+
+section("bytes.Buffer");
+
+test("WriteString and String", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	var b bytes.Buffer
+	b.WriteString("hello")
+	b.WriteString(", world")
+	console.log(b.String())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "hello, world");
+});
+
+test("WriteByte", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	var b bytes.Buffer
+	b.WriteByte(72)
+	b.WriteByte(105)
+	console.log(b.String())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "Hi");
+});
+
+test("Write (byte slice)", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	var b bytes.Buffer
+	b.Write([]byte{71, 111})
+	console.log(b.String())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "Go");
+});
+
+test("Bytes", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	var b bytes.Buffer
+	b.WriteByte(1)
+	b.WriteByte(2)
+	bs := b.Bytes()
+	console.log(bs[0], bs[1])
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "1 2");
+});
+
+test("Len", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	var b bytes.Buffer
+	b.WriteString("hello")
+	console.log(b.Len())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "5");
+});
+
+test("Reset", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	var b bytes.Buffer
+	b.WriteString("old")
+	b.Reset()
+	b.WriteString("new")
+	console.log(b.String())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "new");
+});
+
+test("fmt.Fprintf writes to bytes.Buffer", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	var b bytes.Buffer
+	fmt.Fprintf(&b, "hello %s, you are %d", "world", 42)
+	console.log(b.String())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "hello world, you are 42");
+});
+
+test("fmt.Fprintf writes to strings.Builder", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d + %d = %d", 1, 2, 3)
+	console.log(b.String())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "1 + 2 = 3");
+});
+
+// ═════════════════════════════════════════════════════════════
+// regexp package
+// ═════════════════════════════════════════════════════════════
+
+section("regexp package");
+
+test("MustCompile + MatchString", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	re := regexp.MustCompile("[0-9]+")
+	console.log(re.MatchString("abc123"))
+	console.log(re.MatchString("abc"))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true\nfalse");
+});
+
+test("Compile returns (*Regexp, error)", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	re, err := regexp.Compile("[a-z]+")
+	console.log(err == nil)
+	console.log(re.MatchString("hello"))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true\ntrue");
+});
+
+test("FindString", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	re := regexp.MustCompile("[0-9]+")
+	console.log(re.FindString("abc123def"))
+	console.log(re.FindString("no digits"))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "123\n");
+});
+
+test("FindAllString", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	re := regexp.MustCompile("[0-9]+")
+	all := re.FindAllString("a1b22c333", -1)
+	for _, s := range all {
+		console.log(s)
+	}
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "1\n22\n333");
+});
+
+test("FindAllString with limit", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	re := regexp.MustCompile("[0-9]+")
+	all := re.FindAllString("1 2 3 4", 2)
+	console.log(len(all))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "2");
+});
+
+test("FindStringSubmatch", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	re := regexp.MustCompile("([a-z]+)([0-9]+)")
+	m := re.FindStringSubmatch("abc123")
+	console.log(m[0])
+	console.log(m[1])
+	console.log(m[2])
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "abc123\nabc\n123");
+});
+
+test("ReplaceAllString", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	re := regexp.MustCompile("[aeiou]")
+	console.log(re.ReplaceAllString("hello world", "*"))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "h*ll* w*rld");
+});
+
+test("ReplaceAllLiteralString", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	re := regexp.MustCompile("[0-9]+")
+	console.log(re.ReplaceAllLiteralString("a1b2c3", "$NUM"))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "a$NUMb$NUMc$NUM");
+});
+
+test("Split", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	re := regexp.MustCompile("[,;]+")
+	parts := re.Split("a,b;;c,d", -1)
+	for _, p := range parts {
+		console.log(p)
+	}
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "a\nb\nc\nd");
+});
+
+test("String returns pattern source", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	re := regexp.MustCompile("[0-9]+")
+	console.log(re.String())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "[0-9]+");
+});
+
+test("regexp.MatchString package-level function", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	ok, err := regexp.MatchString("[0-9]+", "abc123")
+	console.log(ok)
+	console.log(err == nil)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true\ntrue");
+});
+
+test("regexp.QuoteMeta", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(regexp.QuoteMeta("a.b+c?"))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "a\\.b\\+c\\?");
+});
+
+test("FindStringIndex", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	re := regexp.MustCompile("[0-9]+")
+	idx := re.FindStringIndex("abc123def")
+	console.log(idx[0])
+	console.log(idx[1])
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "3\n6");
+});
 
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

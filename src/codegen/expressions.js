@@ -443,6 +443,19 @@ export const expressionGenMethods = {
 			if (result !== undefined) return result;
 		}
 
+		// strings.Builder / bytes.Buffer method dispatch
+		if (expr.func.kind === "SelectorExpr") {
+			const recvName = expr.func.expr._type?.name;
+			if (recvName === "strings.Builder" || recvName === "bytes.Buffer") {
+				return this._genBuilderCall(recvName, expr.func.field, expr);
+			}
+			// &b (pointer to Builder/Buffer) — unwrap the pointer
+			const ptrBase = expr.func.expr._type?.base?.name;
+			if (ptrBase === "strings.Builder" || ptrBase === "bytes.Buffer") {
+				return this._genBuilderCall(ptrBase, expr.func.field, expr);
+			}
+		}
+
 		// Mark the callee so SelectorExpr knows it's being called, not used as a value
 		expr.func._callee = true;
 		const rawFn = this.genExpr(expr.func);
@@ -662,6 +675,8 @@ export const expressionGenMethods = {
 			case "TypeName": {
 				const basic = this._zeroForBasicName(typeNode.name);
 				if (basic !== null) return basic;
+				if (typeNode.name === "strings.Builder") return '{ _buf: "" }';
+				if (typeNode.name === "bytes.Buffer") return "{ _buf: [] }";
 				if (this.structNames.has(typeNode.name))
 					return `new ${typeNode.name}()`;
 				return "null";
@@ -706,6 +721,8 @@ export const expressionGenMethods = {
 				return `{ ${fields} }`;
 			}
 			case "named":
+				if (t.name === "strings.Builder") return '{ _buf: "" }';
+				if (t.name === "bytes.Buffer") return "{ _buf: [] }";
 				if (this.structNames.has(t.name)) return `new ${t.name}()`;
 				return "null";
 			default:
@@ -776,6 +793,57 @@ export const expressionGenMethods = {
 		return base?.kind === "struct" || base?.kind === "array";
 	},
 
+	_genBuilderCall(typeName, method, expr) {
+		// Resolve the receiver — may be a direct var or a &var (pointer)
+		const recv = expr.func.expr;
+		const isPtr = recv._type?.kind === "pointer";
+		const base = isPtr ? `${this.genExpr(recv)}.value` : this.genExpr(recv);
+		const args = expr.args.map((a) => this.genExpr(a));
+
+		if (typeName === "strings.Builder") {
+			switch (method) {
+				case "WriteString":
+					return `(${base}._buf += ${args[0]}, [${args[0]}.length, null])`;
+				case "WriteByte":
+				case "WriteRune":
+					return `(${base}._buf += String.fromCodePoint(${args[0]}))`;
+				case "Write":
+					return `(${base}._buf += String.fromCharCode(...${args[0]}))`;
+				case "String":
+					return `${base}._buf`;
+				case "Len":
+					return `${base}._buf.length`;
+				case "Reset":
+					return `(${base}._buf = "")`;
+				case "Grow":
+					return "undefined";
+			}
+		}
+
+		if (typeName === "bytes.Buffer") {
+			switch (method) {
+				case "WriteString":
+					return `(${base}._buf.push(...new TextEncoder().encode(${args[0]})), [${args[0]}.length, null])`;
+				case "WriteByte":
+					return `${base}._buf.push(${args[0]})`;
+				case "Write":
+					return `(${base}._buf.push(...${args[0]}), [${args[0]}.length, null])`;
+				case "String":
+					return `new TextDecoder().decode(new Uint8Array(${base}._buf))`;
+				case "Bytes":
+					return `${base}._buf.slice()`;
+				case "Len":
+					return `${base}._buf.length`;
+				case "Reset":
+					return `(${base}._buf = [])`;
+				case "Grow":
+					return "undefined";
+			}
+		}
+
+		return undefined;
+	},
+
 	typeComment(typeNode) {
 		if (!typeNode) return "unknown";
 		switch (typeNode.kind) {
@@ -843,6 +911,52 @@ export const expressionGenMethods = {
 			case "Println":
 				this._usesSprintf = true;
 				return `console.log(__sprintf(${fmtArgs}))`;
+			case "Fprintf":
+			case "Fprintln":
+			case "Fprint": {
+				this._usesSprintf = true;
+				const writerArg = expr.args[0];
+				const rest = expr.args.slice(1);
+				const restJs = rest.map((e) => this.genExpr(e)).join(", ");
+				// Resolve the writer to its underlying buffer expression
+				const writerType = writerArg._type;
+				const targetTypeName =
+					writerType?.name ??
+					(writerType?.kind === "pointer" ? writerType.base?.name : null);
+				let buf;
+				if (targetTypeName === "strings.Builder") {
+					const w = this.genExpr(writerArg);
+					buf =
+						writerType?.kind === "pointer" ? `${w}.value._buf` : `${w}._buf`;
+				} else if (targetTypeName === "bytes.Buffer") {
+					const w = this.genExpr(writerArg);
+					const base = writerType?.kind === "pointer" ? `${w}.value` : w;
+					buf = null;
+					if (fn === "Fprintf") {
+						return `((__b,__s)=>{ __b._buf.push(...new TextEncoder().encode(__s)); })(${base}, __sprintf(${restJs}))`;
+					}
+					const valJs =
+						fn === "Fprintln"
+							? `__sprintf("%v\\n", ${restJs})`
+							: `__sprintf("%v", ${restJs})`;
+					return `((__b,__s)=>{ __b._buf.push(...new TextEncoder().encode(__s)); })(${base}, ${valJs})`;
+				} else {
+					// Generic io.Writer fallback — call .WriteString if available
+					const w = this.genExpr(writerArg);
+					const formatted =
+						fn === "Fprintf"
+							? `__sprintf(${restJs})`
+							: fn === "Fprintln"
+								? `__sprintf("%v\\n", ${restJs})`
+								: `__sprintf("%v", ${restJs})`;
+					return `${w}.WriteString(${formatted})`;
+				}
+				// strings.Builder path
+				if (fn === "Fprintf") return `(${buf} += __sprintf(${restJs}))`;
+				if (fn === "Fprintln")
+					return `(${buf} += __sprintf("%v\\n", ${restJs}))`;
+				return `(${buf} += __sprintf("%v", ${restJs}))`;
+			}
 			default:
 				return undefined;
 		}
