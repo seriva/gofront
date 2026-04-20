@@ -195,40 +195,6 @@ async function main() {
   setupReactiveDOM(els);
 }
 
-function esc(s) {
-  let b = { _buf: "" };
-  for (const [_$, r] of Array.from(s, (__c, __i) => [__i, __c.codePointAt(0)])) {
-    switch (r) {
-      case 38:
-      {
-        (b._buf += "&amp;", ["&amp;".length, null]);
-        break;
-      }
-      case 60:
-      {
-        (b._buf += "&lt;", ["&lt;".length, null]);
-        break;
-      }
-      case 62:
-      {
-        (b._buf += "&gt;", ["&gt;".length, null]);
-        break;
-      }
-      case 34:
-      {
-        (b._buf += "&quot;", ["&quot;".length, null]);
-        break;
-      }
-      default:
-      {
-        (b._buf += String.fromCodePoint(r));
-        break;
-      }
-    }
-  }
-  return b._buf;
-}
-
 function renderTodoHTML(t) {
   let cls = "todo-item";
   if (t.done) {
@@ -245,7 +211,7 @@ function renderTodoHTML(t) {
     badge = "<span class=\"badge\">urgent</span>";
   }
   let id = String(t.id);
-  return trusted("<li class=\"" + cls + "\" draggable=\"true\" data-id=\"" + id + "\">\n<input type=\"checkbox\" class=\"todo-cb\" data-action=\"toggle\" data-todo-id=\"" + id + "\"" + checked + " />\n<span class=\"todo-text\">" + esc(t.text) + "</span>" + badge + "<button class=\"del-btn\" data-action=\"delete\" data-todo-id=\"" + id + "\">✕</button>\n</li>");
+  return trusted("<li class=\"" + cls + "\" draggable=\"true\" data-id=\"" + id + "\">\n<input type=\"checkbox\" class=\"todo-cb\" data-action=\"toggle\" data-todo-id=\"" + id + "\"" + checked + " />\n<span class=\"todo-text\">" + t.text.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&#34;").replace(/'/g,"&#39;") + "</span>" + badge + "<button class=\"del-btn\" data-action=\"delete\" data-todo-id=\"" + id + "\">✕</button>\n</li>");
 }
 
 function renderFilterBarHTML(activeFilter) {
@@ -293,7 +259,7 @@ function setupReactiveDOM(els) {
     if (s.completed > 0) {
       clearBtn = "<button class=\"clear-btn\" data-action=\"clear-completed\">Clear completed (" + String(s.completed) + ")</button>";
     }
-    return trusted("<span class=\"count\">" + esc(countText) + "</span>" + renderFilterBarHTML(f).content + clearBtn);
+    return trusted("<span class=\"count\">" + countText.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&#34;").replace(/'/g,"&#39;") + "</span>" + renderFilterBarHTML(f).content + clearBtn);
   }, "footerView");
   let badgeView = ctx.computed(function() {
     let hc = highCountSignal.get();

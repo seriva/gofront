@@ -7,25 +7,6 @@ var dragSrcId int
 
 // ── HTML builders (SafeHTML via trusted()) ────────────────────
 
-// esc escapes a string for safe inclusion in HTML attributes and text.
-func esc(s string) string {
-    var b strings.Builder
-    for _, r := range s {
-        switch r {
-        case '&':
-            b.WriteString("&amp;")
-        case '<':
-            b.WriteString("&lt;")
-        case '>':
-            b.WriteString("&gt;")
-        case '"':
-            b.WriteString("&quot;")
-        default:
-            b.WriteRune(r)
-        }
-    }
-    return b.String()
-}
 
 func renderTodoHTML(t Todo) SafeHTML {
     cls := "todo-item"
@@ -49,7 +30,7 @@ func renderTodoHTML(t Todo) SafeHTML {
     return trusted(
         `<li class="` + cls + `" draggable="true" data-id="` + id + `">
 <input type="checkbox" class="todo-cb" data-action="toggle" data-todo-id="` + id + `"` + checked + ` />
-<span class="todo-text">` + esc(t.text) + `</span>` +
+<span class="todo-text">` + html.EscapeString(t.text) + `</span>` +
         badge +
         `<button class="del-btn" data-action="delete" data-todo-id="` + id + `">✕</button>
 </li>`,
@@ -144,7 +125,7 @@ func setupReactiveDOM(els AppElements) {
             clearBtn = `<button class="clear-btn" data-action="clear-completed">Clear completed (` +
                 String(s.completed) + `)</button>`
         }
-        return trusted(`<span class="count">` + esc(countText) + `</span>` +
+        return trusted(`<span class="count">` + html.EscapeString(countText) + `</span>` +
             renderFilterBarHTML(f).content + clearBtn)
     }, "footerView")
 
