@@ -9,22 +9,22 @@ var dragSrcId int
 
 // esc escapes a string for safe inclusion in HTML attributes and text.
 func esc(s string) string {
-    out := ""
+    var b strings.Builder
     for _, r := range s {
         switch r {
         case '&':
-            out = out + "&amp;"
+            b.WriteString("&amp;")
         case '<':
-            out = out + "&lt;"
+            b.WriteString("&lt;")
         case '>':
-            out = out + "&gt;"
+            b.WriteString("&gt;")
         case '"':
-            out = out + "&quot;"
+            b.WriteString("&quot;")
         default:
-            out = out + string(r)
+            b.WriteRune(r)
         }
     }
-    return out
+    return b.String()
 }
 
 func renderTodoHTML(t Todo) SafeHTML {

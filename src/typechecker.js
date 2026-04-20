@@ -146,6 +146,24 @@ export class TypeChecker {
 				Printf: fmtVariadic(VOID),
 				Println: fmtVariadic(VOID),
 				Print: fmtVariadic(VOID),
+				Fprintf: {
+					kind: "func",
+					params: [ANY, STRING],
+					returns: [INT, ERROR],
+					variadic: true,
+				},
+				Fprintln: {
+					kind: "func",
+					params: [ANY],
+					returns: [INT, ERROR],
+					variadic: true,
+				},
+				Fprint: {
+					kind: "func",
+					params: [ANY],
+					returns: [INT, ERROR],
+					variadic: true,
+				},
 			},
 		});
 
@@ -428,6 +446,89 @@ export class TypeChecker {
 				Stdout: ANY,
 				Stderr: ANY,
 				Stdin: ANY,
+			},
+		});
+
+		// regexp package
+		const REGEXP_T = { kind: "named", name: "regexp.Regexp", underlying: { kind: "struct", fields: new Map(), methods: new Map() } };
+		const REGEXP_PTR = { kind: "pointer", base: REGEXP_T };
+		const regexpMethods = new Map([
+			["MatchString", { kind: "func", params: [STRING], returns: [BOOL] }],
+			["FindString", { kind: "func", params: [STRING], returns: [STRING] }],
+			["FindStringIndex", { kind: "func", params: [STRING], returns: { kind: "slice", elem: INT } }],
+			["FindAllString", { kind: "func", params: [STRING, INT], returns: { kind: "slice", elem: STRING } }],
+			["FindStringSubmatch", { kind: "func", params: [STRING], returns: { kind: "slice", elem: STRING } }],
+			["FindAllStringSubmatch", { kind: "func", params: [STRING, INT], returns: { kind: "slice", elem: { kind: "slice", elem: STRING } } }],
+			["ReplaceAllString", { kind: "func", params: [STRING, STRING], returns: [STRING] }],
+			["ReplaceAllLiteralString", { kind: "func", params: [STRING, STRING], returns: [STRING] }],
+			["Split", { kind: "func", params: [STRING, INT], returns: { kind: "slice", elem: STRING } }],
+			["String", { kind: "func", params: [], returns: [STRING] }],
+		]);
+		REGEXP_T.underlying.methods = regexpMethods;
+		this.types.set("regexp.Regexp", REGEXP_T);
+		this.globals.define("regexp", {
+			kind: "namespace",
+			name: "regexp",
+			members: {
+				MustCompile: { kind: "func", params: [STRING], returns: [REGEXP_PTR] },
+				Compile: { kind: "func", params: [STRING], returns: [REGEXP_PTR, ERROR] },
+				MatchString: { kind: "func", params: [STRING, STRING], returns: [BOOL, ERROR] },
+				QuoteMeta: { kind: "func", params: [STRING], returns: [STRING] },
+			},
+		});
+
+		// strings.Builder
+		const BYTE_SLICE_T = { kind: "slice", elem: INT };
+		const strBuilderMethods = new Map([
+			[
+				"WriteString",
+				{ kind: "func", params: [STRING], returns: [INT, ERROR] },
+			],
+			["WriteByte", { kind: "func", params: [INT], returns: [VOID] }],
+			["WriteRune", { kind: "func", params: [INT], returns: [VOID] }],
+			[
+				"Write",
+				{ kind: "func", params: [BYTE_SLICE_T], returns: [INT, ERROR] },
+			],
+			["String", { kind: "func", params: [], returns: [STRING] }],
+			["Len", { kind: "func", params: [], returns: [INT] }],
+			["Reset", { kind: "func", params: [], returns: [VOID] }],
+			["Grow", { kind: "func", params: [INT], returns: [VOID] }],
+		]);
+		this.types.set("strings.Builder", {
+			kind: "named",
+			name: "strings.Builder",
+			underlying: {
+				kind: "struct",
+				fields: new Map(),
+				methods: strBuilderMethods,
+			},
+		});
+
+		// bytes.Buffer
+		const bytesBufferMethods = new Map([
+			[
+				"WriteString",
+				{ kind: "func", params: [STRING], returns: [INT, ERROR] },
+			],
+			["WriteByte", { kind: "func", params: [INT], returns: [VOID] }],
+			[
+				"Write",
+				{ kind: "func", params: [BYTE_SLICE_T], returns: [INT, ERROR] },
+			],
+			["String", { kind: "func", params: [], returns: [STRING] }],
+			["Bytes", { kind: "func", params: [], returns: [BYTE_SLICE_T] }],
+			["Len", { kind: "func", params: [], returns: [INT] }],
+			["Reset", { kind: "func", params: [], returns: [VOID] }],
+			["Grow", { kind: "func", params: [INT], returns: [VOID] }],
+		]);
+		this.types.set("bytes.Buffer", {
+			kind: "named",
+			name: "bytes.Buffer",
+			underlying: {
+				kind: "struct",
+				fields: new Map(),
+				methods: bytesBufferMethods,
 			},
 		});
 

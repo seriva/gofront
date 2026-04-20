@@ -196,37 +196,37 @@ async function main() {
 }
 
 function esc(s) {
-  let out = "";
+  let b = { _buf: "" };
   for (const [_$, r] of Array.from(s, (__c, __i) => [__i, __c.codePointAt(0)])) {
     switch (r) {
       case 38:
       {
-        out = out + "&amp;";
+        (b._buf += "&amp;", ["&amp;".length, null]);
         break;
       }
       case 60:
       {
-        out = out + "&lt;";
+        (b._buf += "&lt;", ["&lt;".length, null]);
         break;
       }
       case 62:
       {
-        out = out + "&gt;";
+        (b._buf += "&gt;", ["&gt;".length, null]);
         break;
       }
       case 34:
       {
-        out = out + "&quot;";
+        (b._buf += "&quot;", ["&quot;".length, null]);
         break;
       }
       default:
       {
-        out = out + String.fromCodePoint(r);
+        (b._buf += String.fromCodePoint(r));
         break;
       }
     }
   }
-  return out;
+  return b._buf;
 }
 
 function renderTodoHTML(t) {
