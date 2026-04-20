@@ -443,16 +443,16 @@ export const expressionGenMethods = {
 			if (result !== undefined) return result;
 		}
 
-		// strings.Builder / bytes.Buffer method dispatch
+		// strings.Builder / bytes.Buffer / regexp.Regexp method dispatch
 		if (expr.func.kind === "SelectorExpr") {
-			const recvName = expr.func.expr._type?.name;
+			const recvType = expr.func.expr._type;
+			const recvName = recvType?.name ?? recvType?.base?.name;
 			if (recvName === "strings.Builder" || recvName === "bytes.Buffer") {
-				return this._genBuilderCall(recvName, expr.func.field, expr);
+				const typeName = recvType?.name ?? recvType?.base?.name;
+				return this._genBuilderCall(typeName, expr.func.field, expr);
 			}
-			// &b (pointer to Builder/Buffer) — unwrap the pointer
-			const ptrBase = expr.func.expr._type?.base?.name;
-			if (ptrBase === "strings.Builder" || ptrBase === "bytes.Buffer") {
-				return this._genBuilderCall(ptrBase, expr.func.field, expr);
+			if (recvName === "regexp.Regexp") {
+				return this._genRegexpMethodCall(expr.func.field, expr);
 			}
 		}
 
@@ -844,6 +844,53 @@ export const expressionGenMethods = {
 		return undefined;
 	},
 
+	_genRegexp(fn, a) {
+		switch (fn) {
+			case "MustCompile":
+				return `new RegExp(${a()[0]})`;
+			case "Compile":
+				return `[new RegExp(${a()[0]}), null]`;
+			case "MatchString": {
+				const [pat, s] = a();
+				return `[new RegExp(${pat}).test(${s}), null]`;
+			}
+			case "QuoteMeta":
+				return `${a()[0]}.replace(/[.*+?^\${}()|[\\]\\\\]/g, '\\\\$&')`;
+		}
+		return undefined;
+	},
+
+	_genRegexpMethodCall(method, expr) {
+		const recv = expr.func.expr;
+		// *Regexp is a plain JS RegExp — no .value boxing needed
+		const re = this.genExpr(recv);
+		const args = expr.args.map((a) => this.genExpr(a));
+
+		switch (method) {
+			case "MatchString":
+				return `${re}.test(${args[0]})`;
+			case "FindString":
+				return `(${re}.exec(${args[0]})?.[0] ?? "")`;
+			case "FindStringIndex":
+				return `((m => m ? [m.index, m.index + m[0].length] : null)(${re}.exec(${args[0]})))`;
+			case "FindAllString":
+				return `[...${args[0]}.matchAll(new RegExp(${re}.source, ${re}.flags.includes("g") ? ${re}.flags : ${re}.flags + "g"))].slice(0, ${args[1]} < 0 ? undefined : ${args[1]}).map(m => m[0])`;
+			case "FindStringSubmatch":
+				return `[...(${re}.exec(${args[0]}) ?? [])]`;
+			case "FindAllStringSubmatch":
+				return `[...${args[0]}.matchAll(new RegExp(${re}.source, ${re}.flags.includes("g") ? ${re}.flags : ${re}.flags + "g"))].slice(0, ${args[1]} < 0 ? undefined : ${args[1]}).map(m => [...m])`;
+			case "ReplaceAllString":
+				return `${args[0]}.replaceAll(new RegExp(${re}.source, ${re}.flags.includes("g") ? ${re}.flags : ${re}.flags + "g"), ${args[1]})`;
+			case "ReplaceAllLiteralString":
+				return `${args[0]}.replaceAll(new RegExp(${re}.source, ${re}.flags.includes("g") ? ${re}.flags : ${re}.flags + "g"), ${args[1]}.replace(/\\$/g, '$$$$'))`;
+			case "Split":
+				return `${args[0]}.split(${re}).slice(0, ${args[1]} < 0 ? undefined : ${args[1]})`;
+			case "String":
+				return `${re}.source`;
+		}
+		return undefined;
+	},
+
 	typeComment(typeNode) {
 		if (!typeNode) return "unknown";
 		switch (typeNode.kind) {
@@ -883,6 +930,8 @@ export const expressionGenMethods = {
 				return this._genErrors(fn, a);
 			case "time":
 				return this._genTime(fn, a);
+			case "regexp":
+				return this._genRegexp(fn, a);
 			default:
 				return undefined;
 		}
