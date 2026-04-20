@@ -66,3 +66,6 @@ See [design plan](v0.0.7/gomponents-plan.md) for full details.
 Goroutines, channels, `select`, `unsafe`, full `reflect`, `cgo`, exact integer overflow,
 Go-equivalent map semantics. These all require either a runtime scheduler or memory model
 that conflicts with the "no runtime" principle.
+
+`goto` — no clean JS translation in the general case (cross-scope jumps require a
+runtime scheduler equivalent). See README § What's not implemented for the full list.
