@@ -1,5 +1,6 @@
 // GoFront test suite — type checks, type switch, interfaces
 
+import { fileURLToPath } from "node:url";
 import {
 	assert,
 	assertEqual,
@@ -7,6 +8,7 @@ import {
 	compile,
 	runJs,
 	section,
+	summarize,
 	test,
 } from "../helpers.js";
 
@@ -40,35 +42,41 @@ func main() {
 });
 
 test("break inside for loop is valid", () => {
-	const { errors } = compile(`package main
+	const { js, errors } = compile(`package main
 func main() {
   for i := 0; i < 3; i++ {
-    break
+    if i == 1 { break }
+    console.log(i)
   }
 }`);
 	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "0");
 });
 
 test("break inside switch is valid", () => {
-	const { errors } = compile(`package main
+	const { js, errors } = compile(`package main
 func main() {
   x := 1
   switch x {
   case 1:
     break
   }
+  console.log("done")
 }`);
 	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "done");
 });
 
 test("continue inside for loop is valid", () => {
-	const { errors } = compile(`package main
+	const { js, errors } = compile(`package main
 func main() {
   for i := 0; i < 3; i++ {
-    continue
+    if i == 1 { continue }
+    console.log(i)
   }
 }`);
 	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "0\n2");
 });
 
 test("labeled continue outside loop is an error", () => {
@@ -112,14 +120,14 @@ func main() {
 });
 
 test("shadowing a const with a var in inner scope is allowed", () => {
-	// In Go, shadowing a const with a var in a child scope is valid
-	const { errors } = compile(`package main
+	const { js, errors } = compile(`package main
 const x = 5
 func main() {
   x := 10
   console.log(x)
 }`);
 	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "10");
 });
 
 // ═════════════════════════════════════════════════════════════
@@ -538,12 +546,13 @@ func main() { use(Console{}) }`);
 section("interface{} assignability");
 
 test("var x interface{} = 42 is accepted", () => {
-	const { errors } = compile(`package main
+	const { js, errors } = compile(`package main
 func main() {
   var x interface{} = 42
   println(x)
 }`);
 	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "42");
 });
 
 test("func(x interface{}) accepts concrete values", () => {
@@ -561,13 +570,14 @@ func main() {
 });
 
 test("typed value assignable to interface{} variable", () => {
-	const { errors } = compile(`package main
+	const { js, errors } = compile(`package main
 func main() {
   var n int = 42
   var x interface{} = n
   println(x)
 }`);
 	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "42");
 });
 
 test("func(any) still accepts concrete values", () => {
@@ -660,7 +670,7 @@ func main() {
 });
 
 test("type switch capture var not reported as unused", () => {
-	const { errors } = compile(`package main
+	const { js, errors } = compile(`package main
 func f(x any) {
   switch v := x.(type) {
   case int:
@@ -673,6 +683,7 @@ func f(x any) {
 }
 func main() { f(1) }`);
 	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "2");
 });
 
 // ── Terminating statement analysis ───────────────────────────
@@ -690,19 +701,21 @@ func f(x int) int {
 });
 
 test("function with all paths returning is valid", () => {
-	const { errors } = compile(`package main
+	const { js, errors } = compile(`package main
 func abs(x int) int {
   if x >= 0 {
     return x
   } else {
     return -x
   }
-}`);
+}
+func main() { console.log(abs(-5), abs(3)) }`);
 	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "5 3");
 });
 
 test("function with switch+default all returning is valid", () => {
-	const { errors } = compile(`package main
+	const { js, errors } = compile(`package main
 func sign(x int) string {
   switch {
   case x > 0:
@@ -712,8 +725,10 @@ func sign(x int) string {
   default:
     return "zero"
   }
-}`);
+}
+func main() { console.log(sign(1), sign(-1), sign(0)) }`);
 	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "positive negative zero");
 });
 
 test("switch without default is not terminating", () => {
@@ -730,26 +745,34 @@ func sign(x int) string {
 });
 
 test("void function does not need terminating analysis", () => {
-	const { errors } = compile(`package main
+	const { js, errors } = compile(`package main
 func greet(name string) {
   if name != "" {
     println("hello " + name)
   }
-}`);
+}
+func main() { greet("Go") }`);
 	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "hello Go");
 });
 
 test("function ending in panic() is terminating", () => {
-	const { errors } = compile(`package main
+	const { js, errors } = compile(`package main
 func mustPositive(n int) int {
   if n > 0 {
     return n
   }
   panic("non-positive")
-}`);
+}
+func main() { console.log(mustPositive(5)) }`);
 	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "5");
 });
 
 // ═════════════════════════════════════════════════════════════
 // Additional coverage
 // ═════════════════════════════════════════════════════════════
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+	process.exit(summarize() > 0 ? 1 : 0);
+}

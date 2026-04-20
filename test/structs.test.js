@@ -450,8 +450,7 @@ func main() {
 });
 
 test("* (dereference) in expression is transparent", () => {
-	// Pointer receiver methods already test this path; verify no crash
-	const { errors } = compile(`package main
+	const { js, errors } = compile(`package main
 type Node struct { Val int }
 func (n *Node) Get() int { return n.Val }
 func main() {
@@ -459,6 +458,7 @@ func main() {
 	console.log(n.Get())
 }`);
 	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "7");
 });
 
 // ── Positional (unkeyed) struct literals ─────────────────────

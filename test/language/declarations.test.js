@@ -1,6 +1,7 @@
 // GoFront test suite — declarations, constants, type aliases
 
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
 	assert,
 	assertContains,
@@ -11,6 +12,7 @@ import {
 	FIXTURES,
 	runJs,
 	section,
+	summarize,
 	test,
 } from "../helpers.js";
 
@@ -687,8 +689,7 @@ func main() {
 });
 
 test("type alias does not require conversion", () => {
-	// With a type alias, no conversion is needed between alias and original
-	const { errors } = compile(`package main
+	const { js, errors } = compile(`package main
 type MyInt = int
 func main() {
 	var x MyInt = 5
@@ -696,6 +697,7 @@ func main() {
 	console.log(y)
 }`);
 	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "5");
 });
 
 test("type alias for struct", () => {
@@ -764,10 +766,11 @@ func main() {
 });
 
 test("empty grouped type declaration", () => {
-	const { errors } = compile(`package main
+	const { js, errors } = compile(`package main
 type ()
-func main() {}`);
+func main() { console.log("ok") }`);
 	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "ok");
 });
 
 test("grouped type inside function body", () => {
@@ -871,3 +874,7 @@ func main() {
 });
 
 // ── Unimplemented Go features ─────────────────────────────────
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+	process.exit(summarize() > 0 ? 1 : 0);
+}

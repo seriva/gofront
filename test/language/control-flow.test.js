@@ -1,11 +1,13 @@
 // GoFront test suite — control flow, defer, async, scoping
 
+import { fileURLToPath } from "node:url";
 import {
 	assert,
 	assertEqual,
 	compile,
 	runJs,
 	section,
+	summarize,
 	test,
 } from "../helpers.js";
 
@@ -496,3 +498,7 @@ func main() {
 // ═════════════════════════════════════════════════════════════
 // Pointer receivers
 // ═════════════════════════════════════════════════════════════
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+	process.exit(summarize() > 0 ? 1 : 0);
+}

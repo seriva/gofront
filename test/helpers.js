@@ -158,18 +158,6 @@ export function assertContains(haystack, needle) {
 		);
 }
 
-export function assertDoesNotContain(haystack, needle) {
-	if (haystack.includes(needle))
-		throw new Error(`expected output NOT to contain ${JSON.stringify(needle)}`);
-}
-
-export function assertNotEqual(actual, notExpected) {
-	if (actual === notExpected)
-		throw new Error(
-			`expected value to differ from ${JSON.stringify(notExpected)}`,
-		);
-}
-
 export function assertThrows(fn, substring) {
 	let threw = false;
 	let msg = "";

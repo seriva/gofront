@@ -1,5 +1,6 @@
 // GoFront test suite — operators, formatting, data structures
 
+import { fileURLToPath } from "node:url";
 import {
 	assert,
 	assertContains,
@@ -7,6 +8,7 @@ import {
 	compile,
 	runJs,
 	section,
+	summarize,
 	test,
 } from "../helpers.js";
 
@@ -387,3 +389,7 @@ func main() {
 // ═════════════════════════════════════════════════════════════
 // strings package
 // ═════════════════════════════════════════════════════════════
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+	process.exit(summarize() > 0 ? 1 : 0);
+}

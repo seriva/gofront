@@ -1,6 +1,7 @@
 // GoFront test suite — multi-file packages, examples, npm resolver
 
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 import {
 	assert,
@@ -13,6 +14,7 @@ import {
 	ROOT,
 	runJs,
 	section,
+	summarize,
 	test,
 } from "../helpers.js";
 
@@ -322,3 +324,7 @@ test("reactive utils.Plural formats correctly", () => {
 // ═════════════════════════════════════════════════════════════
 // CLI flags
 // ═════════════════════════════════════════════════════════════
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+	process.exit(summarize() > 0 ? 1 : 0);
+}

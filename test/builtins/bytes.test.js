@@ -1,11 +1,13 @@
 // GoFront test suite — bytes standard library shim
 
+import { fileURLToPath } from "node:url";
 import {
 	assertEqual,
 	assertErrorContains,
 	compile,
 	runJs,
 	section,
+	summarize,
 	test,
 } from "../helpers.js";
 
@@ -161,3 +163,7 @@ func main() {
 }`);
 	assertErrorContains(errors, "Cannot assign");
 });
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+	process.exit(summarize() > 0 ? 1 : 0);
+}
