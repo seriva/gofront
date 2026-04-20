@@ -1160,7 +1160,7 @@ section("html package");
 test("html.EscapeString", () => {
 	const { js, errors } = compile(`package main
 func main() {
-	console.log(html.EscapeString("<b>Hello & \"World\"</b>"))
+	console.log(html.EscapeString("<b>Hello & \\"World\\"</b>"))
 }`);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "&lt;b&gt;Hello &amp; &#34;World&#34;&lt;/b&gt;");
@@ -1181,7 +1181,7 @@ func main() {
 	console.log(html.UnescapeString("&lt;b&gt;Hello &amp; &#34;World&#34;&lt;/b&gt;"))
 }`);
 	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "<b>Hello & \"World\"</b>");
+	assertEqual(runJs(js), '<b>Hello & "World"</b>');
 });
 
 test("html.EscapeString roundtrip", () => {

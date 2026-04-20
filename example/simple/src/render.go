@@ -5,27 +5,6 @@ import "./utils"
 // dragSrcId holds the id of the todo currently being dragged.
 var dragSrcId int
 
-// ── HTML escaping ─────────────────────────────────────────────
-
-func esc(s string) string {
-    var b strings.Builder
-    for _, r := range s {
-        switch r {
-        case '&':
-            b.WriteString("&amp;")
-        case '<':
-            b.WriteString("&lt;")
-        case '>':
-            b.WriteString("&gt;")
-        case '"':
-            b.WriteString("&quot;")
-        default:
-            b.WriteRune(r)
-        }
-    }
-    return b.String()
-}
-
 // ── Rendering (vanilla DOM via innerHTML) ─────────────────────
 
 func renderTodo(t Todo) string {
@@ -49,7 +28,7 @@ func renderTodo(t Todo) string {
     id := String(t.id)
     return `<li class="` + cls + `" draggable="true" data-id="` + id + `">
 <input type="checkbox" class="todo-cb" data-action="toggle" data-todo-id="` + id + `"` + checked + ` />
-<span class="todo-text">` + esc(t.text) + `</span>` +
+<span class="todo-text">` + html.EscapeString(t.text) + `</span>` +
         badge +
         `<button class="del-btn" data-action="delete" data-todo-id="` + id + `">✕</button>
 </li>`
@@ -95,7 +74,7 @@ func render() {
             clearBtn = `<button class="clear-btn" data-action="clear-completed">Clear completed (` +
                 String(completed) + `)</button>`
         }
-        footer.innerHTML = `<span class="count">` + esc(countText) + `</span>` +
+        footer.innerHTML = `<span class="count">` + html.EscapeString(countText) + `</span>` +
             renderFilterBar() + clearBtn
     }
 

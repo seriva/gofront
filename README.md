@@ -413,6 +413,7 @@ signatures into GoFront's internal type representation.
 | `math` | `Abs`, `Floor`, `Ceil`, `Round`, `Sqrt`, `Cbrt`, `Pow`, `Log`, `Log2`, `Log10`, trig functions + `Pi`, `E`, `MaxFloat64`, `MaxInt`, `MinInt` |
 | `errors` | `New`, `Is`, `Unwrap` — custom error types via interface satisfaction |
 | `time` | `Now`, `Since`, `Sleep` + `Millisecond`, `Second`, `Minute`, `Hour` constants |
+| `html` | `EscapeString`, `UnescapeString` |
 | `maps` | `Keys`, `Values`, `Clone`, `Copy`, `Equal`, `EqualFunc`, `Delete`, `DeleteFunc` |
 | `slices` | `Contains`, `Index`, `Equal`, `Compare`, `Sort`, `SortFunc`, `SortStableFunc`, `IsSorted`, `IsSortedFunc`, `Reverse`, `Max`, `Min`, `MaxFunc`, `MinFunc`, `Clone`, `Compact`, `CompactFunc`, `Concat`, `Delete`, `DeleteFunc`, `Insert`, `Replace`, `Grow`, `Clip` |
 | `regexp` | `MustCompile`, `Compile`, `MatchString`, `QuoteMeta`; **`*Regexp`** methods: `MatchString`, `FindString`, `FindStringIndex`, `FindAllString`, `FindStringSubmatch`, `FindAllStringSubmatch`, `ReplaceAllString`, `ReplaceAllLiteralString`, `Split`, `String` |
