@@ -1195,7 +1195,7 @@ export const expressionGenMethods = {
 			case "LastIndex":
 				return `${args[0]}.lastIndexOf(${args[1]})`;
 			case "Count":
-				return `${args[0]}.split(${args[1]}).length - 1`;
+				return `((s, sep) => sep === "" ? s.length + 1 : s.split(sep).length - 1)(${args[0]}, ${args[1]})`;
 			case "Repeat":
 				return `${args[0]}.repeat(${args[1]})`;
 			case "Replace":
@@ -1211,9 +1211,9 @@ export const expressionGenMethods = {
 			case "Trim":
 				return `${args[0]}.replace(new RegExp(\`^[\${${args[1]}}]+|[\${${args[1]}}]+$\`, "g"), "")`;
 			case "TrimPrefix":
-				return `(${args[0]}.startsWith(${args[1]}) ? ${args[0]}.slice(${args[1]}.length) : ${args[0]})`;
+				return `((s, pre) => s.startsWith(pre) ? s.slice(pre.length) : s)(${args[0]}, ${args[1]})`;
 			case "TrimSuffix":
-				return `(${args[0]}.endsWith(${args[1]}) ? ${args[0]}.slice(0, -${args[1]}.length) : ${args[0]})`;
+				return `((s, suf) => !suf.length || !s.endsWith(suf) ? s : s.slice(0, -suf.length))(${args[0]}, ${args[1]})`;
 			case "TrimLeft":
 				return `${args[0]}.replace(new RegExp(\`^[\${${args[1]}}]+\`), "")`;
 			case "TrimRight":
@@ -1243,7 +1243,7 @@ export const expressionGenMethods = {
 			case "Index":
 				return `${__bs}(${args[0]}).indexOf(${__bs}(${args[1]}))`;
 			case "Count":
-				return `${__bs}(${args[0]}).split(${__bs}(${args[1]})).length - 1`;
+				return `((b, sep) => sep.length === 0 ? b.length + 1 : ${__bs}(b).split(${__bs}(sep)).length - 1)(${args[0]}, ${args[1]})`;
 			case "Repeat":
 				return `${__sb}(${__bs}(${args[0]}).repeat(${args[1]}))`;
 			case "Replace":
