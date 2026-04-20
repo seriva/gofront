@@ -36,16 +36,19 @@ func renderTodo(t Todo) string {
 
 func renderFilterBar() string {
     filters := [...]int{FilterAll, FilterActive, FilterCompleted}
-    out := `<div class="filter-bar">`
+    var b strings.Builder
+    b.WriteString(`<div class="filter-bar">`)
     for _, f := range filters {
         cls := "filter-btn"
         if f == filter {
             cls = "filter-btn active"
         }
-        out = out + `<button class="` + cls + `" data-action="filter" data-filter="` + String(f) + `">` +
-            filterLabel(f) + `</button>`
+        b.WriteString(`<button class="` + cls + `" data-action="filter" data-filter="` + String(f) + `">`)
+        b.WriteString(filterLabel(f))
+        b.WriteString(`</button>`)
     }
-    return out + `</div>`
+    b.WriteString(`</div>`)
+    return b.String()
 }
 
 func render() {
@@ -55,11 +58,11 @@ func render() {
     if len(visible) == 0 {
         list.innerHTML = `<li class="empty">Nothing here.</li>`
     } else {
-        html := ""
+        var b strings.Builder
         for _, t := range visible {
-            html = html + renderTodo(t)
+            b.WriteString(renderTodo(t))
         }
-        list.innerHTML = html
+        list.innerHTML = b.String()
     }
 
     // Footer

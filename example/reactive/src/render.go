@@ -39,17 +39,19 @@ func renderTodoHTML(t Todo) SafeHTML {
 
 func renderFilterBarHTML(activeFilter int) SafeHTML {
     filters := [...]int{FilterAll, FilterActive, FilterCompleted}
-    out := `<div class="filter-bar">`
+    var b strings.Builder
+    b.WriteString(`<div class="filter-bar">`)
     for _, f := range filters {
         cls := "filter-btn"
         if f == activeFilter {
             cls = "filter-btn active"
         }
-        out = out + `<button class="` + cls + `" data-action="filter" data-filter="` + String(f) + `">` +
-            filterLabel(f) + `</button>`
+        b.WriteString(`<button class="` + cls + `" data-action="filter" data-filter="` + String(f) + `">`)
+        b.WriteString(filterLabel(f))
+        b.WriteString(`</button>`)
     }
-    out = out + `</div>`
-    return trusted(out)
+    b.WriteString(`</div>`)
+    return trusted(b.String())
 }
 
 // ── App shell ─────────────────────────────────────────────────

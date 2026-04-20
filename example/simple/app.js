@@ -284,15 +284,19 @@ function renderTodo(t) {
 
 function renderFilterBar() {
   let filters = [FilterAll, FilterActive, FilterCompleted];
-  let out = "<div class=\"filter-bar\">";
+  let b = { _buf: "" };
+  (b._buf += "<div class=\"filter-bar\">", ["<div class=\"filter-bar\">".length, null]);
   for (const [_$, f] of __s(filters).entries()) {
     let cls = "filter-btn";
     if (f === filter) {
       cls = "filter-btn active";
     }
-    out = out + "<button class=\"" + cls + "\" data-action=\"filter\" data-filter=\"" + String(f) + "\">" + filterLabel(f) + "</button>";
+    (b._buf += "<button class=\"" + cls + "\" data-action=\"filter\" data-filter=\"" + String(f) + "\">", ["<button class=\"" + cls + "\" data-action=\"filter\" data-filter=\"" + String(f) + "\">".length, null]);
+    (b._buf += filterLabel(f), [filterLabel(f).length, null]);
+    (b._buf += "</button>", ["</button>".length, null]);
   }
-  return out + "</div>";
+  (b._buf += "</div>", ["</div>".length, null]);
+  return b._buf;
 }
 
 function render() {
@@ -301,11 +305,11 @@ function render() {
   if (__len(visible) === 0) {
     list.innerHTML = "<li class=\"empty\">Nothing here.</li>";
   } else {
-    let html = "";
+    let b = { _buf: "" };
     for (const [_$, t] of __s(visible).entries()) {
-      html = html + renderTodo(t);
+      (b._buf += renderTodo(t), [renderTodo(t).length, null]);
     }
-    list.innerHTML = html;
+    list.innerHTML = b._buf;
   }
   let footer = document.querySelector(".footer");
   if (__len(todos) === 0) {
