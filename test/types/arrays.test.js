@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import {
 	assertContains,
 	assertEqual,
@@ -5,6 +6,7 @@ import {
 	compile,
 	runJs,
 	section,
+	summarize,
 	test,
 } from "../helpers.js";
 
@@ -402,3 +404,7 @@ func main() {
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "1 2 3");
 });
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+	process.exit(summarize() > 0 ? 1 : 0);
+}

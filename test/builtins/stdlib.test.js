@@ -553,7 +553,7 @@ func main() {
 
 section("strings.Builder");
 
-test("WriteString and String", () => {
+test("strings.Builder: WriteString and String", () => {
 	const { js, errors } = compile(`package main
 func main() {
 	var b strings.Builder
@@ -566,7 +566,7 @@ func main() {
 	assertEqual(runJs(js), "hello, world");
 });
 
-test("WriteByte", () => {
+test("strings.Builder: WriteByte", () => {
 	const { js, errors } = compile(`package main
 func main() {
 	var b strings.Builder
@@ -578,7 +578,7 @@ func main() {
 	assertEqual(runJs(js), "Hi");
 });
 
-test("WriteRune", () => {
+test("strings.Builder: WriteRune", () => {
 	const { js, errors } = compile(`package main
 func main() {
 	var b strings.Builder
@@ -590,7 +590,7 @@ func main() {
 	assertEqual(runJs(js), "Go");
 });
 
-test("Len", () => {
+test("strings.Builder: Len", () => {
 	const { js, errors } = compile(`package main
 func main() {
 	var b strings.Builder
@@ -601,7 +601,7 @@ func main() {
 	assertEqual(runJs(js), "5");
 });
 
-test("Reset", () => {
+test("strings.Builder: Reset", () => {
 	const { js, errors } = compile(`package main
 func main() {
 	var b strings.Builder
@@ -615,7 +615,7 @@ func main() {
 	assertEqual(runJs(js), "world\n5");
 });
 
-test("Grow is a no-op", () => {
+test("strings.Builder: Grow is a no-op", () => {
 	const { js, errors } = compile(`package main
 func main() {
 	var b strings.Builder
@@ -647,7 +647,7 @@ func main() {
 
 section("bytes.Buffer");
 
-test("WriteString and String", () => {
+test("bytes.Buffer: WriteString and String", () => {
 	const { js, errors } = compile(`package main
 func main() {
 	var b bytes.Buffer
@@ -659,7 +659,7 @@ func main() {
 	assertEqual(runJs(js), "hello, world");
 });
 
-test("WriteByte", () => {
+test("bytes.Buffer: WriteByte", () => {
 	const { js, errors } = compile(`package main
 func main() {
 	var b bytes.Buffer
@@ -695,7 +695,7 @@ func main() {
 	assertEqual(runJs(js), "1 2");
 });
 
-test("Len", () => {
+test("bytes.Buffer: Len", () => {
 	const { js, errors } = compile(`package main
 func main() {
 	var b bytes.Buffer
@@ -706,7 +706,7 @@ func main() {
 	assertEqual(runJs(js), "5");
 });
 
-test("Reset", () => {
+test("bytes.Buffer: Reset", () => {
 	const { js, errors } = compile(`package main
 func main() {
 	var b bytes.Buffer
@@ -719,7 +719,7 @@ func main() {
 	assertEqual(runJs(js), "new");
 });
 
-test("Grow is a no-op", () => {
+test("bytes.Buffer: Grow is a no-op", () => {
 	const { js, errors } = compile(`package main
 func main() {
 	var b bytes.Buffer

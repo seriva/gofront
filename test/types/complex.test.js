@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import {
 	assertContains,
 	assertEqual,
@@ -6,6 +7,7 @@ import {
 	Lexer,
 	runJs,
 	section,
+	summarize,
 	test,
 } from "../helpers.js";
 
@@ -437,3 +439,7 @@ func main() {
 	// Let's handle via the unary check allowing complex
 	assertEqual(runJs(js), "-3 -4");
 });
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+	process.exit(summarize() > 0 ? 1 : 0);
+}

@@ -1,5 +1,6 @@
 // GoFront test suite — built-in functions and data operations
 
+import { fileURLToPath } from "node:url";
 import {
 	assert,
 	assertContains,
@@ -8,6 +9,7 @@ import {
 	compile,
 	runJs,
 	section,
+	summarize,
 	test,
 } from "../helpers.js";
 
@@ -935,3 +937,7 @@ func main() {
 });
 
 // ── fmt.Sprintf %f format verb ────────────────────────────────
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+	process.exit(summarize() > 0 ? 1 : 0);
+}

@@ -1,5 +1,6 @@
 // GoFront test suite — type errors and type assertions
 
+import { fileURLToPath } from "node:url";
 import {
 	assert,
 	assertEqual,
@@ -8,6 +9,7 @@ import {
 	compile,
 	runJs,
 	section,
+	summarize,
 	test,
 } from "../helpers.js";
 
@@ -743,3 +745,7 @@ func main() {
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "5 true\ndivision by zero");
 });
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+	process.exit(summarize() > 0 ? 1 : 0);
+}

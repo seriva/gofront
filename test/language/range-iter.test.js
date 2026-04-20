@@ -1,5 +1,6 @@
 // GoFront test suite — range-over-iterator functions (Go 1.23)
 
+import { fileURLToPath } from "node:url";
 import {
 	assert,
 	assertEqual,
@@ -7,6 +8,7 @@ import {
 	compile,
 	runJs,
 	section,
+	summarize,
 	test,
 } from "../helpers.js";
 
@@ -362,3 +364,7 @@ func main() {
 }`);
 	assert(errors.length > 0, "expected an error for ranging over a plain func");
 });
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+	process.exit(summarize() > 0 ? 1 : 0);
+}

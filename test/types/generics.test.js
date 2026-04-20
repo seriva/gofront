@@ -1,5 +1,6 @@
 // GoFront test suite — generics (type parameters, inference, constraints)
 
+import { fileURLToPath } from "node:url";
 import {
 	assert,
 	assertEqual,
@@ -8,6 +9,7 @@ import {
 	Lexer,
 	runJs,
 	section,
+	summarize,
 	test,
 } from "../helpers.js";
 
@@ -357,3 +359,7 @@ func main() {
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "7\nhello world");
 });
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+	process.exit(summarize() > 0 ? 1 : 0);
+}

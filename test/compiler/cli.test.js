@@ -11,12 +11,14 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
 	assert,
 	assertContains,
 	FIXTURES,
 	ROOT,
 	section,
+	summarize,
 	test,
 } from "../helpers.js";
 
@@ -485,3 +487,7 @@ test("--watch -o writes output file on initial build", () => {
 // ═════════════════════════════════════════════════════════════
 // Type error — additional cases
 // ═════════════════════════════════════════════════════════════
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+	process.exit(summarize() > 0 ? 1 : 0);
+}

@@ -17,13 +17,13 @@
   <script type="module">
     import { css, html, join, Reactive, Signals, trusted } from './reactive.js';
 
-    window.html = html;
-    window.trusted = trusted;
-    window.join = join;
-    window.css = css;
-    window.Signals = Signals;
-    window.Reactive = Reactive;
-    await import('./app.js');
+        window.html = html;
+        window.trusted = trusted;
+        window.join = join;
+        window.css = css;
+        window.Signals = Signals;
+        window.Reactive = Reactive;
+        await import('./app.js');
   </script>
 </body>
 </html>

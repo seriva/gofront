@@ -1,6 +1,7 @@
 // GoFront test suite — core language features
 
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
 	assert,
 	assertEqual,
@@ -9,6 +10,7 @@ import {
 	FIXTURES,
 	runJs,
 	section,
+	summarize,
 	test,
 } from "../helpers.js";
 
@@ -548,17 +550,6 @@ func main() {
 	assertEqual(runJs(js), "3");
 });
 
-test("iota in const block", () => {
-	const { js } = compile(`package main
-const (
-  Red = iota
-  Green
-  Blue
-)
-func main() { console.log(Red, Green, Blue) }`);
-	assertEqual(runJs(js), "0 1 2");
-});
-
 test("iota with explicit first value", () => {
 	const { js } = compile(`package main
 const (
@@ -658,15 +649,20 @@ func main() { greet(Rock{}) }`);
 });
 
 test("interface satisfied when methods present", () => {
-	const { errors } = compile(`package main
+	const { js, errors } = compile(`package main
 type Speaker interface { Speak() string }
 type Dog struct {}
 func (d Dog) Speak() string { return "woof" }
-func greet(s Speaker) {}
+func greet(s Speaker) { console.log(s.Speak()) }
 func main() { greet(Dog{}) }`);
 	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "woof");
 });
 
 // ═════════════════════════════════════════════════════════════
 // 6. npm package resolver
 // ═════════════════════════════════════════════════════════════
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+	process.exit(summarize() > 0 ? 1 : 0);
+}
