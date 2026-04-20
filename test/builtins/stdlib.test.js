@@ -81,6 +81,16 @@ func main() {
 	assertEqual(runJs(js), "2\n3");
 });
 
+test("strings.Count with empty separator returns len+1", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(strings.Count("hello", ""))
+	console.log(strings.Count("", ""))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "6\n1");
+});
+
 test("strings.Repeat", () => {
 	const { js, errors } = compile(`package main
 func main() {
@@ -99,6 +109,24 @@ func main() {
 }`);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "lo\nhe\nhello");
+});
+
+test("strings.TrimSuffix with empty suffix returns original", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(strings.TrimSuffix("hello", ""))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "hello");
+});
+
+test("strings.TrimPrefix with empty prefix returns original", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(strings.TrimPrefix("hello", ""))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "hello");
 });
 
 test("strings.EqualFold", () => {
