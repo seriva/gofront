@@ -845,11 +845,15 @@ export const expressionGenMethods = {
 	},
 
 	_genRegexp(fn, a) {
+		// Converts a Go regexp pattern string (which may contain inline flags like (?i))
+		// into a JS RegExp, extracting the flags into the second constructor argument.
+		const makeRegExp = (pat) =>
+			`((p) => { const m = /^\\(\\?([gimsuy]+)\\)/.exec(p); return m ? new RegExp(p.slice(m[0].length), m[1]) : new RegExp(p); })(${pat})`;
 		switch (fn) {
 			case "MustCompile":
-				return `new RegExp(${a()[0]})`;
+				return makeRegExp(a()[0]);
 			case "Compile":
-				return `[new RegExp(${a()[0]}), null]`;
+				return `[${makeRegExp(a()[0])}, null]`;
 			case "MatchString": {
 				const [pat, s] = a();
 				return `[new RegExp(${pat}).test(${s}), null]`;

@@ -691,6 +691,18 @@ func main() {
 	assertEqual(runJs(js), "new");
 });
 
+test("Grow is a no-op", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	var b bytes.Buffer
+	b.WriteString("hello")
+	b.Grow(100)
+	console.log(b.String())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "hello");
+});
+
 test("fmt.Fprintf writes to bytes.Buffer", () => {
 	const { js, errors } = compile(`package main
 func main() {
@@ -862,6 +874,41 @@ func main() {
 }`);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "3\n6");
+});
+
+test("FindAllStringSubmatch", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	re := regexp.MustCompile("([a-z]+)([0-9]+)")
+	all := re.FindAllStringSubmatch("ab12 cd34", -1)
+	for _, m := range all {
+		console.log(m[0], m[1], m[2])
+	}
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "ab12 ab 12\ncd34 cd 34");
+});
+
+test("FindStringIndex returns nil on no match", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	re := regexp.MustCompile("[0-9]+")
+	idx := re.FindStringIndex("no digits")
+	console.log(idx == nil)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true");
+});
+
+test("MustCompile with inline (?i) flag", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	re := regexp.MustCompile("(?i)hello")
+	console.log(re.MatchString("HELLO"))
+	console.log(re.MatchString("world"))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true\nfalse");
 });
 
 // ═════════════════════════════════════════════════════════════
@@ -1048,6 +1095,107 @@ func main() {
 	assertEqual(runJs(js), "true\nfalse");
 });
 
+test("slices.Compare", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(slices.Compare([]int{1, 2, 3}, []int{1, 2, 3}))
+	console.log(slices.Compare([]int{1, 2}, []int{1, 3}))
+	console.log(slices.Compare([]int{1, 3}, []int{1, 2}))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "0\n-1\n1");
+});
+
+test("slices.SortStableFunc", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	s := []int{3, 1, 2}
+	slices.SortStableFunc(s, func(a, b int) int { return a - b })
+	for _, v := range s {
+		console.log(v)
+	}
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "1\n2\n3");
+});
+
+test("slices.IsSortedFunc", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	cmp := func(a, b int) int { return a - b }
+	console.log(slices.IsSortedFunc([]int{1, 2, 3}, cmp))
+	console.log(slices.IsSortedFunc([]int{3, 1, 2}, cmp))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true\nfalse");
+});
+
+test("slices.MaxFunc and MinFunc", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	cmp := func(a, b int) int { return a - b }
+	s := []int{3, 1, 4, 1, 5}
+	console.log(slices.MaxFunc(s, cmp))
+	console.log(slices.MinFunc(s, cmp))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "5\n1");
+});
+
+test("slices.CompactFunc", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	s := []int{1, 2, 2, 3, 3, 3}
+	s = slices.CompactFunc(s, func(a, b int) bool { return a == b })
+	for _, v := range s {
+		console.log(v)
+	}
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "1\n2\n3");
+});
+
+test("slices.DeleteFunc", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	s := []int{1, 2, 3, 4, 5}
+	s = slices.DeleteFunc(s, func(v int) bool { return v % 2 == 0 })
+	for _, v := range s {
+		console.log(v)
+	}
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "1\n3\n5");
+});
+
+test("slices.Insert variadic", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	s := []int{1, 5}
+	s = slices.Insert(s, 1, 2, 3, 4)
+	for _, v := range s {
+		console.log(v)
+	}
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "1\n2\n3\n4\n5");
+});
+
+test("slices.Concat three slices", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	a := []int{1}
+	b := []int{2}
+	c := []int{3}
+	r := slices.Concat(a, b, c)
+	for _, v := range r {
+		console.log(v)
+	}
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "1\n2\n3");
+});
+
 test("slices.Grow and slices.Clip are no-ops", () => {
 	const { js, errors } = compile(`package main
 func main() {
@@ -1151,6 +1299,33 @@ func main() {
 	assertEqual(runJs(js), "a\nc");
 });
 
+test("maps.EqualFunc", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	a := map[string]int{"x": 1, "y": 2}
+	b := map[string]int{"x": 10, "y": 20}
+	eq := maps.EqualFunc(a, b, func(v1, v2 int) bool { return v1*10 == v2 })
+	console.log(eq)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true");
+});
+
+test("maps.DeleteFunc", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	m := map[string]int{"a": 1, "b": 2, "c": 3}
+	maps.DeleteFunc(m, func(k string, v int) bool { return v > 1 })
+	keys := maps.Keys(m)
+	slices.Sort(keys)
+	for _, k := range keys {
+		console.log(k)
+	}
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "a");
+});
+
 // ═════════════════════════════════════════════════════════════
 // html package
 // ═════════════════════════════════════════════════════════════
@@ -1182,6 +1357,24 @@ func main() {
 }`);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), '<b>Hello & "World"</b>');
+});
+
+test("html.EscapeString escapes single quotes", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(html.EscapeString("it's a test"))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "it&#39;s a test");
+});
+
+test("html.EscapeString empty string", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(html.EscapeString("") == "")
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true");
 });
 
 test("html.EscapeString roundtrip", () => {
