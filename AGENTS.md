@@ -227,6 +227,7 @@ Key items to be aware of when working on the compiler:
 Every test file imports from `test/helpers.js` and follows this structure:
 
 ```js
+import { fileURLToPath } from "node:url";
 import { test, section, summarize, compile, runJs, assertEqual, assertErrorContains } from "../helpers.js";
 
 section("Feature name");
@@ -242,12 +243,14 @@ test("rejects bad input", () => {
   assertErrorContains(errors, "expected error substring");
 });
 
-process.exit(summarize());
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  process.exit(summarize() > 0 ? 1 : 0);
+}
 ```
 
 Key points:
-- Each file must end with `process.exit(summarize())` to report results and exit
-  with a non-zero code on failure.
+- The `fileURLToPath` guard lets the file be run standalone (`node test/feature.test.js`)
+  and also imported by `test/run.js` without triggering early exit.
 - Wrap each case in `test(name, fn)` — the harness catches and reports errors.
 - Use `section(title)` to group related tests under a heading.
 - New test files must be registered in `test/run.js` to be included in `npm test`.
