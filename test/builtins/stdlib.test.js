@@ -864,6 +864,336 @@ func main() {
 	assertEqual(runJs(js), "3\n6");
 });
 
+// ═════════════════════════════════════════════════════════════
+// slices package
+// ═════════════════════════════════════════════════════════════
+
+section("slices package");
+
+test("slices.Contains", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	s := []int{1, 2, 3}
+	console.log(slices.Contains(s, 2))
+	console.log(slices.Contains(s, 5))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true\nfalse");
+});
+
+test("slices.Index", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	s := []string{"a", "b", "c"}
+	console.log(slices.Index(s, "b"))
+	console.log(slices.Index(s, "z"))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "1\n-1");
+});
+
+test("slices.Equal", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	a := []int{1, 2, 3}
+	b := []int{1, 2, 3}
+	c := []int{1, 2, 4}
+	console.log(slices.Equal(a, b))
+	console.log(slices.Equal(a, c))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true\nfalse");
+});
+
+test("slices.Sort", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	s := []int{3, 1, 4, 1, 5}
+	slices.Sort(s)
+	for _, v := range s {
+		console.log(v)
+	}
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "1\n1\n3\n4\n5");
+});
+
+test("slices.SortFunc", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	s := []int{3, 1, 2}
+	slices.SortFunc(s, func(a, b int) int {
+		if a < b { return -1 }
+		if a > b { return 1 }
+		return 0
+	})
+	for _, v := range s {
+		console.log(v)
+	}
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "1\n2\n3");
+});
+
+test("slices.Reverse", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	s := []int{1, 2, 3}
+	slices.Reverse(s)
+	for _, v := range s {
+		console.log(v)
+	}
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "3\n2\n1");
+});
+
+test("slices.Clone", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	s := []int{1, 2, 3}
+	c := slices.Clone(s)
+	c[0] = 99
+	console.log(s[0])
+	console.log(c[0])
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "1\n99");
+});
+
+test("slices.Compact", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	s := []int{1, 1, 2, 3, 3, 3, 4}
+	s = slices.Compact(s)
+	for _, v := range s {
+		console.log(v)
+	}
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "1\n2\n3\n4");
+});
+
+test("slices.Insert", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	s := []int{1, 2, 4}
+	s = slices.Insert(s, 2, 3)
+	for _, v := range s {
+		console.log(v)
+	}
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "1\n2\n3\n4");
+});
+
+test("slices.Delete", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	s := []int{1, 2, 3, 4, 5}
+	s = slices.Delete(s, 1, 3)
+	for _, v := range s {
+		console.log(v)
+	}
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "1\n4\n5");
+});
+
+test("slices.Replace", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	s := []int{1, 2, 3, 4}
+	s = slices.Replace(s, 1, 3, 9, 8)
+	for _, v := range s {
+		console.log(v)
+	}
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "1\n9\n8\n4");
+});
+
+test("slices.Max and slices.Min", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	s := []int{3, 1, 4, 1, 5, 9}
+	console.log(slices.Max(s))
+	console.log(slices.Min(s))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "9\n1");
+});
+
+test("slices.Concat", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	a := []int{1, 2}
+	b := []int{3, 4}
+	c := slices.Concat(a, b)
+	for _, v := range c {
+		console.log(v)
+	}
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "1\n2\n3\n4");
+});
+
+test("slices.IsSorted", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(slices.IsSorted([]int{1, 2, 3}))
+	console.log(slices.IsSorted([]int{3, 1, 2}))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true\nfalse");
+});
+
+test("slices.Grow and slices.Clip are no-ops", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	s := []int{1, 2, 3}
+	s = slices.Grow(s, 10)
+	s = slices.Clip(s)
+	console.log(len(s))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "3");
+});
+
+// ═════════════════════════════════════════════════════════════
+// maps package
+// ═════════════════════════════════════════════════════════════
+
+section("maps package");
+
+test("maps.Keys", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	m := map[string]int{"a": 1, "b": 2, "c": 3}
+	keys := maps.Keys(m)
+	slices.Sort(keys)
+	for _, k := range keys {
+		console.log(k)
+	}
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "a\nb\nc");
+});
+
+test("maps.Values", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	m := map[string]int{"x": 10, "y": 20}
+	vals := maps.Values(m)
+	slices.Sort(vals)
+	for _, v := range vals {
+		console.log(v)
+	}
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "10\n20");
+});
+
+test("maps.Clone", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	m := map[string]int{"a": 1}
+	c := maps.Clone(m)
+	c["b"] = 2
+	console.log(len(m))
+	console.log(len(c))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "1\n2");
+});
+
+test("maps.Copy", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	dst := map[string]int{"a": 1}
+	src := map[string]int{"b": 2, "c": 3}
+	maps.Copy(dst, src)
+	keys := maps.Keys(dst)
+	slices.Sort(keys)
+	for _, k := range keys {
+		console.log(k)
+	}
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "a\nb\nc");
+});
+
+test("maps.Equal", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	a := map[string]int{"x": 1, "y": 2}
+	b := map[string]int{"x": 1, "y": 2}
+	c := map[string]int{"x": 1, "y": 3}
+	console.log(maps.Equal(a, b))
+	console.log(maps.Equal(a, c))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true\nfalse");
+});
+
+test("maps.Delete", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	m := map[string]int{"a": 1, "b": 2, "c": 3}
+	maps.Delete(m, "b")
+	keys := maps.Keys(m)
+	slices.Sort(keys)
+	for _, k := range keys {
+		console.log(k)
+	}
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "a\nc");
+});
+
+// ═════════════════════════════════════════════════════════════
+// html package
+// ═════════════════════════════════════════════════════════════
+
+section("html package");
+
+test("html.EscapeString", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(html.EscapeString("<b>Hello & \"World\"</b>"))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "&lt;b&gt;Hello &amp; &#34;World&#34;&lt;/b&gt;");
+});
+
+test("html.EscapeString plain string unchanged", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(html.EscapeString("no special chars"))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "no special chars");
+});
+
+test("html.UnescapeString", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(html.UnescapeString("&lt;b&gt;Hello &amp; &#34;World&#34;&lt;/b&gt;"))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "<b>Hello & \"World\"</b>");
+});
+
+test("html.EscapeString roundtrip", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	s := "<script>alert('xss')</script>"
+	console.log(html.UnescapeString(html.EscapeString(s)) == s)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true");
+});
+
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit(summarize() > 0 ? 1 : 0);

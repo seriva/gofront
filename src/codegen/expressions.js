@@ -891,6 +891,152 @@ export const expressionGenMethods = {
 		return undefined;
 	},
 
+	_genSlices(fn, a) {
+		switch (fn) {
+			case "Contains": {
+				const [s, v] = a();
+				return `${s}.includes(${v})`;
+			}
+			case "Index": {
+				const [s, v] = a();
+				return `${s}.indexOf(${v})`;
+			}
+			case "Equal": {
+				this._usesEqual = true;
+				const [a1, b1] = a();
+				return `__equal(${a1}, ${b1})`;
+			}
+			case "Compare": {
+				const [a1, b1] = a();
+				return `((a, b) => { for (let i = 0; i < a.length && i < b.length; i++) { if (a[i] < b[i]) return -1; if (a[i] > b[i]) return 1; } return a.length - b.length; })(${a1}, ${b1})`;
+			}
+			case "Sort": {
+				const [s] = a();
+				return `${s}.sort((a, b) => a < b ? -1 : a > b ? 1 : 0)`;
+			}
+			case "SortFunc": {
+				const [s, cmp] = a();
+				return `${s}.sort(${cmp})`;
+			}
+			case "SortStableFunc": {
+				const [s, cmp] = a();
+				return `${s}.sort(${cmp})`;
+			}
+			case "IsSorted": {
+				const [s] = a();
+				return `((s) => { for (let i = 1; i < s.length; i++) { if (s[i] < s[i-1]) return false; } return true; })(${s})`;
+			}
+			case "IsSortedFunc": {
+				const [s, cmp] = a();
+				return `((s, f) => { for (let i = 1; i < s.length; i++) { if (f(s[i], s[i-1]) < 0) return false; } return true; })(${s}, ${cmp})`;
+			}
+			case "Reverse": {
+				const [s] = a();
+				return `${s}.reverse()`;
+			}
+			case "Max": {
+				const [s] = a();
+				return `Math.max(...${s})`;
+			}
+			case "Min": {
+				const [s] = a();
+				return `Math.min(...${s})`;
+			}
+			case "MaxFunc": {
+				const [s, cmp] = a();
+				return `((s, f) => s.reduce((m, x) => f(x, m) > 0 ? x : m))(${s}, ${cmp})`;
+			}
+			case "MinFunc": {
+				const [s, cmp] = a();
+				return `((s, f) => s.reduce((m, x) => f(x, m) < 0 ? x : m))(${s}, ${cmp})`;
+			}
+			case "Clone": {
+				const [s] = a();
+				return `${s}.slice()`;
+			}
+			case "Compact": {
+				const [s] = a();
+				return `((s) => s.filter((v, i) => i === 0 || v !== s[i-1]))(${s})`;
+			}
+			case "CompactFunc": {
+				const [s, eq] = a();
+				return `((s, f) => s.filter((v, i) => i === 0 || !f(v, s[i-1])))(${s}, ${eq})`;
+			}
+			case "Concat": {
+				const args = a();
+				return `[].concat(${args.join(", ")})`;
+			}
+			case "Delete": {
+				const [s, i, j] = a();
+				return `[...${s}.slice(0, ${i}), ...${s}.slice(${j})]`;
+			}
+			case "DeleteFunc": {
+				const [s, fn2] = a();
+				return `${s}.filter((v) => !${fn2}(v))`;
+			}
+			case "Insert": {
+				const args = a();
+				const s = args[0];
+				const i = args[1];
+				const vs = args.slice(2);
+				return `[...${s}.slice(0, ${i}), ${vs.join(", ")}, ...${s}.slice(${i})]`;
+			}
+			case "Replace": {
+				const args = a();
+				const s = args[0];
+				const i = args[1];
+				const j = args[2];
+				const vs = args.slice(3);
+				return `[...${s}.slice(0, ${i}), ${vs.join(", ")}, ...${s}.slice(${j})]`;
+			}
+			case "Grow":
+			case "Clip": {
+				const [s] = a();
+				return `${s}.slice()`;
+			}
+		}
+		return undefined;
+	},
+
+	_genMaps(fn, a) {
+		switch (fn) {
+			case "Keys": {
+				const [m] = a();
+				return `Object.keys(${m})`;
+			}
+			case "Values": {
+				const [m] = a();
+				return `Object.values(${m})`;
+			}
+			case "Clone": {
+				const [m] = a();
+				return `({...${m}})`;
+			}
+			case "Copy": {
+				const [dst, src] = a();
+				return `Object.assign(${dst}, ${src})`;
+			}
+			case "Equal": {
+				this._usesEqual = true;
+				const [a1, b1] = a();
+				return `__equal(${a1}, ${b1})`;
+			}
+			case "EqualFunc": {
+				const [m1, m2, eq] = a();
+				return `((a, b, f) => { const ka = Object.keys(a); if (ka.length !== Object.keys(b).length) return false; return ka.every(k => k in b && f(a[k], b[k])); })(${m1}, ${m2}, ${eq})`;
+			}
+			case "Delete": {
+				const [m, k] = a();
+				return `(delete ${m}[${k}], undefined)`;
+			}
+			case "DeleteFunc": {
+				const [m, fn2] = a();
+				return `Object.keys(${m}).forEach(k => { if (${fn2}(k, ${m}[k])) delete ${m}[k]; })`;
+			}
+		}
+		return undefined;
+	},
+
 	typeComment(typeNode) {
 		if (!typeNode) return "unknown";
 		switch (typeNode.kind) {
@@ -932,6 +1078,12 @@ export const expressionGenMethods = {
 				return this._genTime(fn, a);
 			case "regexp":
 				return this._genRegexp(fn, a);
+			case "slices":
+				return this._genSlices(fn, a);
+			case "maps":
+				return this._genMaps(fn, a);
+			case "html":
+				return this._genHtml(fn, a);
 			default:
 				return undefined;
 		}

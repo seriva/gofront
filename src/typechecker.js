@@ -449,6 +449,76 @@ export class TypeChecker {
 			},
 		});
 
+		// slices package (Go 1.21)
+		// Functions are generic — use ANY for slice params so any concrete slice type
+		// is accepted without an assignability error (same pattern as sort.Slice).
+		this.globals.define("slices", {
+			kind: "namespace",
+			name: "slices",
+			members: {
+				Contains: { kind: "func", params: [ANY, ANY], returns: [BOOL] },
+				Index: { kind: "func", params: [ANY, ANY], returns: [INT] },
+				Equal: { kind: "func", params: [ANY, ANY], returns: [BOOL] },
+				Compare: { kind: "func", params: [ANY, ANY], returns: [INT] },
+				Sort: { kind: "func", params: [ANY], returns: [VOID] },
+				SortFunc: { kind: "func", params: [ANY, ANY], returns: [VOID] },
+				SortStableFunc: { kind: "func", params: [ANY, ANY], returns: [VOID] },
+				IsSorted: { kind: "func", params: [ANY], returns: [BOOL] },
+				IsSortedFunc: { kind: "func", params: [ANY, ANY], returns: [BOOL] },
+				Reverse: { kind: "func", params: [ANY], returns: [VOID] },
+				Max: { kind: "func", params: [ANY], returns: [ANY] },
+				Min: { kind: "func", params: [ANY], returns: [ANY] },
+				MaxFunc: { kind: "func", params: [ANY, ANY], returns: [ANY] },
+				MinFunc: { kind: "func", params: [ANY, ANY], returns: [ANY] },
+				Clone: { kind: "func", params: [ANY], returns: [ANY] },
+				Compact: { kind: "func", params: [ANY], returns: [ANY] },
+				CompactFunc: { kind: "func", params: [ANY, ANY], returns: [ANY] },
+				Concat: { kind: "func", params: [ANY], returns: [ANY], variadic: true },
+				Delete: { kind: "func", params: [ANY, INT, INT], returns: [ANY] },
+				DeleteFunc: { kind: "func", params: [ANY, ANY], returns: [ANY] },
+				Insert: {
+					kind: "func",
+					params: [ANY, INT, ANY],
+					returns: [ANY],
+					variadic: true,
+				},
+				Replace: {
+					kind: "func",
+					params: [ANY, INT, INT, ANY],
+					returns: [ANY],
+					variadic: true,
+				},
+				Grow: { kind: "func", params: [ANY, INT], returns: [ANY] },
+				Clip: { kind: "func", params: [ANY], returns: [ANY] },
+			},
+		});
+
+		// html package
+		this.globals.define("html", {
+			kind: "namespace",
+			name: "html",
+			members: {
+				EscapeString: { kind: "func", params: [STRING], returns: [STRING] },
+				UnescapeString: { kind: "func", params: [STRING], returns: [STRING] },
+			},
+		});
+
+		// maps package (Go 1.21)
+		this.globals.define("maps", {
+			kind: "namespace",
+			name: "maps",
+			members: {
+				Keys: { kind: "func", params: [ANY], returns: [ANY] },
+				Values: { kind: "func", params: [ANY], returns: [ANY] },
+				Clone: { kind: "func", params: [ANY], returns: [ANY] },
+				Copy: { kind: "func", params: [ANY, ANY], returns: [VOID] },
+				Equal: { kind: "func", params: [ANY, ANY], returns: [BOOL] },
+				EqualFunc: { kind: "func", params: [ANY, ANY, ANY], returns: [BOOL] },
+				Delete: { kind: "func", params: [ANY, ANY], returns: [VOID] },
+				DeleteFunc: { kind: "func", params: [ANY, ANY], returns: [VOID] },
+			},
+		});
+
 		// regexp package
 		const REGEXP_T = {
 			kind: "named",
