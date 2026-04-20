@@ -590,8 +590,8 @@ export class TypeChecker {
 				"WriteString",
 				{ kind: "func", params: [STRING], returns: [INT, ERROR] },
 			],
-			["WriteByte", { kind: "func", params: [INT], returns: [VOID] }],
-			["WriteRune", { kind: "func", params: [INT], returns: [VOID] }],
+			["WriteByte", { kind: "func", params: [INT], returns: [ERROR] }],
+			["WriteRune", { kind: "func", params: [INT], returns: [INT, ERROR] }],
 			[
 				"Write",
 				{ kind: "func", params: [BYTE_SLICE_T], returns: [INT, ERROR] },
@@ -617,7 +617,7 @@ export class TypeChecker {
 				"WriteString",
 				{ kind: "func", params: [STRING], returns: [INT, ERROR] },
 			],
-			["WriteByte", { kind: "func", params: [INT], returns: [VOID] }],
+			["WriteByte", { kind: "func", params: [INT], returns: [ERROR] }],
 			[
 				"Write",
 				{ kind: "func", params: [BYTE_SLICE_T], returns: [INT, ERROR] },
