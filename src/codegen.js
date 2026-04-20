@@ -159,7 +159,7 @@ export class CodeGen {
 		const helpers = [];
 		if (this._usesLen)
 			helpers.push(
-				"var __len = __len || function(a) { return a?.length ?? 0; };",
+				"var __len = __len || function(a) { if (a && typeof a === 'object' && !Array.isArray(a)) return Object.keys(a).length; return a?.length ?? 0; };",
 			);
 		if (this._usesAppend)
 			helpers.push(

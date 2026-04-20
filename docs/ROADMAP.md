@@ -37,8 +37,8 @@ Design documents are in [`docs/v0.0.6/`](v0.0.6/).
 |---|---|---|
 | `strings.Builder` / `bytes.Buffer` | Low | ✓ Idiomatic string/byte building. Maps cleanly to a plain JS object shim. See [design plan](v0.0.6/strings-builder-plan.md). |
 | `regexp` package | Medium | ✓ Pattern matching via JS `RegExp`. `MustCompile`, `FindString`, `ReplaceAllString`, etc. See [design plan](v0.0.6/regexp-plan.md). |
-| `slices` package (Go 1.21) | Low | `Sort`, `Contains`, `Index`, `Reverse`, `Clone`, `Compact`, `Insert`, `Delete`, etc. Maps to JS array methods. See [design plan](v0.0.6/slices-maps-packages-plan.md). |
-| `maps` package (Go 1.21) | Low | `Keys`, `Values`, `Clone`, `Copy`, `Equal`. Maps to `Object.*` methods. See [design plan](v0.0.6/slices-maps-packages-plan.md). |
+| `slices` package (Go 1.21) | Low | ✓ `Sort`, `Contains`, `Index`, `Reverse`, `Clone`, `Compact`, `Insert`, `Delete`, etc. Maps to JS array methods. See [design plan](v0.0.6/slices-maps-packages-plan.md). |
+| `maps` package (Go 1.21) | Low | ✓ `Keys`, `Values`, `Clone`, `Copy`, `Equal`. Maps to `Object.*` methods. See [design plan](v0.0.6/slices-maps-packages-plan.md). |
 | `html` package | Low | `html.EscapeString` / `html.UnescapeString`. Replaces hand-rolled `esc()` helpers like the one in the example apps. |
 
 ---
