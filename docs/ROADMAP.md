@@ -44,6 +44,24 @@ Design documents are in [`docs/v0.0.6/`](v0.0.6/).
 
 ---
 
+## v0.0.7
+
+**Theme: gomponents-style DOM components.** Browser-native declarative component model
+inspired by [gomponents](https://github.com/maragudk/gomponents). Design documents are
+in [`docs/v0.0.7/`](v0.0.7/).
+
+| Feature | Difficulty | Notes |
+|---|---|---|
+| Methods on named non-struct types | Medium | `type Group []Node` and `type NodeFunc func(...)` with methods. Core compiler blocker for everything else. Codegen: ES6 class wrapping the underlying value. |
+| `gom` component library | Low | Browser-native Node interface (`Mount(parent any)`), `El`, `Attr`, `Text`, `If`, `Map`, `Group`, `Mount`. Pure GoFront once named-type methods land. |
+| `gom/html` element helpers | Low | `Div`, `A`, `Span`, `Class`, `ID`, `Href`, etc. as thin wrappers over `gom.El`/`gom.Attr`. |
+| `gom` example app | Low | Rewrite the simple todo app using `gom` to validate the library. |
+| `io` package shim (optional) | Low | `io.Writer` interface + `io.WriteString`. Enables code that compiles both server-side (standard Go) and browser-side (GoFront) unchanged. |
+
+See [design plan](v0.0.7/gomponents-plan.md) for full details.
+
+---
+
 ## Out of scope
 
 Goroutines, channels, `select`, `unsafe`, full `reflect`, `cgo`, exact integer overflow,
