@@ -13,17 +13,17 @@ features (e.g. `docs/v0.0.5/`).
 **Theme: Major language features.** These are high-complexity items that touch multiple
 compiler stages. Design documents are in [`docs/v0.0.5/`](v0.0.5/).
 
-| Feature | Difficulty | Status |
-|---|---|---|
-| Generics (`[T any]`) | High | ✓ |
-| Range over iterator functions | Medium | ✓ |
-| Complex number types | Medium | ✓ |
-| Richer error values | Medium | ✓ |
-| Better array semantics | Medium | ✓ |
-| Better pointer model | High | ✓ |
-| Slice → array conversion `[N]T(slice)` | Low | ✓ |
-| `bytes` stdlib shim | Medium | ✓ |
-| Built-in minifier (replace terser) | Medium | ✓ |
+| Feature | Difficulty | Status | Notes |
+|---|---|---|---|
+| Generics (`[T any]`) | High | ✓ | Type erasure approach. See [design plan](v0.0.5/generics-plan.md). |
+| Range over iterator functions | Medium | ✓ | `func(yield func(K, V) bool)` protocol. See [design plan](v0.0.5/range-iter-plan.md). |
+| Complex number types | Medium | ✓ | `complex64`/`complex128`, `complex()`, `real()`, `imag()`. See [design plan](v0.0.5/complex-numbers-plan.md). |
+| Richer error values | Medium | ✓ | Custom error types, `errors.Is`/`Unwrap`, `%w` wrapping. See [design plan](v0.0.5/error-values-plan.md). |
+| Better array semantics | Medium | ✓ | Compile-time bounds checking, `[...]T` inference, `append` rejection. See [design plan](v0.0.5/array-semantics-plan.md). |
+| Better pointer model | High | ✓ | Address-taken scalars boxed as `{ value: T }`. See [design plan](v0.0.5/pointer-model-plan.md). |
+| Slice → array conversion `[N]T(slice)` | Low | ✓ | Go 1.20 feature. |
+| `bytes` stdlib shim | Medium | ✓ | `Contains`, `Split`, `Join`, `Replace`, `ToUpper`/`ToLower`, etc. |
+| Built-in minifier (replace terser) | Medium | ✓ | Three-stage minifier: comment stripping, token compression, identifier mangling. See [design plan](v0.0.5/minifier-plan.md). |
 
 ---
 
@@ -33,13 +33,13 @@ compiler stages. Design documents are in [`docs/v0.0.5/`](v0.0.5/).
 fills the most commonly used stdlib packages and the last missing spec statement.
 Design documents are in [`docs/v0.0.6/`](v0.0.6/).
 
-| Feature | Difficulty | Notes |
-|---|---|---|
-| `strings.Builder` / `bytes.Buffer` | Low | ✓ Idiomatic string/byte building. Maps cleanly to a plain JS object shim. See [design plan](v0.0.6/strings-builder-plan.md). |
-| `regexp` package | Medium | ✓ Pattern matching via JS `RegExp`. `MustCompile`, `FindString`, `ReplaceAllString`, etc. See [design plan](v0.0.6/regexp-plan.md). |
-| `slices` package (Go 1.21) | Low | ✓ `Sort`, `Contains`, `Index`, `Reverse`, `Clone`, `Compact`, `Insert`, `Delete`, etc. Maps to JS array methods. See [design plan](v0.0.6/slices-maps-packages-plan.md). |
-| `maps` package (Go 1.21) | Low | ✓ `Keys`, `Values`, `Clone`, `Copy`, `Equal`. Maps to `Object.*` methods. See [design plan](v0.0.6/slices-maps-packages-plan.md). |
-| `html` package | Low | ✓ `html.EscapeString` / `html.UnescapeString`. Replaces hand-rolled `esc()` helpers like the one in the example apps. |
+| Feature | Difficulty | Status | Notes |
+|---|---|---|---|
+| `strings.Builder` / `bytes.Buffer` | Low | ✓ | Idiomatic string/byte building via plain JS object shim. See [design plan](v0.0.6/strings-builder-plan.md). |
+| `regexp` package | Medium | ✓ | Pattern matching via JS `RegExp`. `MustCompile`, `FindString`, `ReplaceAllString`, inline flags, etc. See [design plan](v0.0.6/regexp-plan.md). |
+| `slices` package (Go 1.21) | Low | ✓ | `Sort`, `Contains`, `Index`, `Reverse`, `Clone`, `Compact`, `Insert`, `Delete`, and more. See [design plan](v0.0.6/slices-maps-packages-plan.md). |
+| `maps` package (Go 1.21) | Low | ✓ | `Keys`, `Values`, `Clone`, `Copy`, `Equal`, `DeleteFunc`, etc. See [design plan](v0.0.6/slices-maps-packages-plan.md). |
+| `html` package | Low | ✓ | `html.EscapeString` / `html.UnescapeString` via inline `replace` chains. |
 
 ---
 
@@ -49,13 +49,13 @@ Design documents are in [`docs/v0.0.6/`](v0.0.6/).
 inspired by [gomponents](https://github.com/maragudk/gomponents). Design documents are
 in [`docs/v0.0.7/`](v0.0.7/).
 
-| Feature | Difficulty | Notes |
-|---|---|---|
-| Methods on named non-struct types | Medium | `type Group []Node` and `type NodeFunc func(...)` with methods. Core compiler blocker for everything else. Codegen: ES6 class wrapping the underlying value. |
-| `gom` component library | Low | Browser-native Node interface (`Mount(parent any)`), `El`, `Attr`, `Text`, `If`, `Map`, `Group`, `Mount`. Pure GoFront once named-type methods land. |
-| `gom/html` element helpers | Low | `Div`, `A`, `Span`, `Class`, `ID`, `Href`, etc. as thin wrappers over `gom.El`/`gom.Attr`. |
-| `gom` example app | Low | Rewrite the simple todo app using `gom` to validate the library. |
-| `io` package shim (optional) | Low | `io.Writer` interface + `io.WriteString`. Enables code that compiles both server-side (standard Go) and browser-side (GoFront) unchanged. |
+| Feature | Difficulty | Status | Notes |
+|---|---|---|---|
+| Methods on named non-struct types | Medium | | `type Group []Node` and `type NodeFunc func(...)` with methods. Core compiler blocker for everything else. Codegen: ES6 class wrapping the underlying value. |
+| `gom` component library | Low | | Browser-native Node interface (`Mount(parent any)`), `El`, `Attr`, `Text`, `If`, `Map`, `Group`, `Mount`. Pure GoFront once named-type methods land. |
+| `gom/html` element helpers | Low | | `Div`, `A`, `Span`, `Class`, `ID`, `Href`, etc. as thin wrappers over `gom.El`/`gom.Attr`. |
+| `gom` example app | Low | | Rewrite the simple todo app using `gom` to validate the library. |
+| `io` package shim (optional) | Low | | `io.Writer` interface + `io.WriteString`. Enables code that compiles both server-side (standard Go) and browser-side (GoFront) unchanged. |
 
 See [design plan](v0.0.7/gomponents-plan.md) for full details.
 

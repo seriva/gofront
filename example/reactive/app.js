@@ -216,16 +216,19 @@ function renderTodoHTML(t) {
 
 function renderFilterBarHTML(activeFilter) {
   let filters = [FilterAll, FilterActive, FilterCompleted];
-  let out = "<div class=\"filter-bar\">";
+  let b = { _buf: "" };
+  (b._buf += "<div class=\"filter-bar\">", ["<div class=\"filter-bar\">".length, null]);
   for (const [_$, f] of __s(filters).entries()) {
     let cls = "filter-btn";
     if (f === activeFilter) {
       cls = "filter-btn active";
     }
-    out = out + "<button class=\"" + cls + "\" data-action=\"filter\" data-filter=\"" + String(f) + "\">" + filterLabel(f) + "</button>";
+    (b._buf += "<button class=\"" + cls + "\" data-action=\"filter\" data-filter=\"" + String(f) + "\">", ["<button class=\"" + cls + "\" data-action=\"filter\" data-filter=\"" + String(f) + "\">".length, null]);
+    (b._buf += filterLabel(f), [filterLabel(f).length, null]);
+    (b._buf += "</button>", ["</button>".length, null]);
   }
-  out = out + "</div>";
-  return trusted(out);
+  (b._buf += "</div>", ["</div>".length, null]);
+  return trusted(b._buf);
 }
 
 function createAppShell() {
