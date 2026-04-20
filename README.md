@@ -500,7 +500,7 @@ Design documents for planned features are organised by release under `docs/v*/`
 npm test
 ```
 
-869 tests covering language features, type errors, edge cases, DOM (jsdom), external
+940 tests covering language features, type errors, edge cases, DOM (jsdom), external
 `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, map
 iteration order, integer overflow semantics, unused variable detection, unused import
 detection, semantic difference verification, stdlib shim packages, generics (type params,

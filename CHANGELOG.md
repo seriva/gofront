@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.0.6] - 2026-04-20
+
 ### Added
 - **`html` package** — `EscapeString` and `UnescapeString`, compiling to inline `replace` chains. The hand-rolled `esc()` helpers in the example apps have been replaced with `html.EscapeString`.
 - **`maps` package (Go 1.21)** — `Keys`, `Values`, `Clone`, `Copy`, `Equal`, `EqualFunc`, `Delete`, `DeleteFunc`. All map to inline `Object.*` calls. Also fixed `len()` on `any`-typed map values — `__len` now falls back to `Object.keys().length` for plain objects.
