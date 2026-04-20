@@ -450,18 +450,46 @@ export class TypeChecker {
 		});
 
 		// regexp package
-		const REGEXP_T = { kind: "named", name: "regexp.Regexp", underlying: { kind: "struct", fields: new Map(), methods: new Map() } };
+		const REGEXP_T = {
+			kind: "named",
+			name: "regexp.Regexp",
+			underlying: { kind: "struct", fields: new Map(), methods: new Map() },
+		};
 		const REGEXP_PTR = { kind: "pointer", base: REGEXP_T };
+		const STR_SLICE = { kind: "slice", elem: STRING };
+		const INT_SLICE = { kind: "slice", elem: INT };
 		const regexpMethods = new Map([
 			["MatchString", { kind: "func", params: [STRING], returns: [BOOL] }],
 			["FindString", { kind: "func", params: [STRING], returns: [STRING] }],
-			["FindStringIndex", { kind: "func", params: [STRING], returns: { kind: "slice", elem: INT } }],
-			["FindAllString", { kind: "func", params: [STRING, INT], returns: { kind: "slice", elem: STRING } }],
-			["FindStringSubmatch", { kind: "func", params: [STRING], returns: { kind: "slice", elem: STRING } }],
-			["FindAllStringSubmatch", { kind: "func", params: [STRING, INT], returns: { kind: "slice", elem: { kind: "slice", elem: STRING } } }],
-			["ReplaceAllString", { kind: "func", params: [STRING, STRING], returns: [STRING] }],
-			["ReplaceAllLiteralString", { kind: "func", params: [STRING, STRING], returns: [STRING] }],
-			["Split", { kind: "func", params: [STRING, INT], returns: { kind: "slice", elem: STRING } }],
+			[
+				"FindStringIndex",
+				{ kind: "func", params: [STRING], returns: [INT_SLICE] },
+			],
+			[
+				"FindAllString",
+				{ kind: "func", params: [STRING, INT], returns: [STR_SLICE] },
+			],
+			[
+				"FindStringSubmatch",
+				{ kind: "func", params: [STRING], returns: [STR_SLICE] },
+			],
+			[
+				"FindAllStringSubmatch",
+				{
+					kind: "func",
+					params: [STRING, INT],
+					returns: [{ kind: "slice", elem: STR_SLICE }],
+				},
+			],
+			[
+				"ReplaceAllString",
+				{ kind: "func", params: [STRING, STRING], returns: [STRING] },
+			],
+			[
+				"ReplaceAllLiteralString",
+				{ kind: "func", params: [STRING, STRING], returns: [STRING] },
+			],
+			["Split", { kind: "func", params: [STRING, INT], returns: [STR_SLICE] }],
 			["String", { kind: "func", params: [], returns: [STRING] }],
 		]);
 		REGEXP_T.underlying.methods = regexpMethods;
@@ -471,8 +499,16 @@ export class TypeChecker {
 			name: "regexp",
 			members: {
 				MustCompile: { kind: "func", params: [STRING], returns: [REGEXP_PTR] },
-				Compile: { kind: "func", params: [STRING], returns: [REGEXP_PTR, ERROR] },
-				MatchString: { kind: "func", params: [STRING, STRING], returns: [BOOL, ERROR] },
+				Compile: {
+					kind: "func",
+					params: [STRING],
+					returns: [REGEXP_PTR, ERROR],
+				},
+				MatchString: {
+					kind: "func",
+					params: [STRING, STRING],
+					returns: [BOOL, ERROR],
+				},
 				QuoteMeta: { kind: "func", params: [STRING], returns: [STRING] },
 			},
 		});
@@ -1461,6 +1497,15 @@ export class TypeChecker {
 	fieldType(baseType, field, node) {
 		baseType = this.resolveType(baseType);
 		if (!baseType || isAny(baseType)) return ANY;
+		// Transparent pointer dereference for named-type method calls: (*T).Method works like T.Method
+		// (only unwrap when the pointer's base is a named type that has methods)
+		if (
+			baseType.kind === "pointer" &&
+			field !== "value" &&
+			baseType.base?.kind === "named"
+		) {
+			baseType = this.resolveType(baseType.base);
+		}
 		let base = baseType.kind === "named" ? baseType.underlying : baseType;
 		base = this.resolveType(base);
 		if (base?.kind === "struct") {

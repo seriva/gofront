@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **`regexp` package** — pattern matching via JS `RegExp`. Package-level: `MustCompile` (`new RegExp`), `Compile` (returns `(*Regexp, error)`), `MatchString`, `QuoteMeta`. Instance methods on `*Regexp`: `MatchString`, `FindString`, `FindStringIndex`, `FindAllString` (with `n` limit), `FindStringSubmatch`, `FindAllStringSubmatch`, `ReplaceAllString`, `ReplaceAllLiteralString`, `Split`, `String`. The global flag is automatically added for `matchAll`-based methods.
 - **`strings.Builder` and `bytes.Buffer`** — idiomatic string/byte building types. `strings.Builder` supports `WriteString`, `WriteByte`, `WriteRune`, `Write`, `String`, `Len`, `Reset`, and `Grow`; `bytes.Buffer` supports `WriteString`, `WriteByte`, `Write`, `String`, `Bytes`, `Len`, and `Reset`. Both compile to lightweight inline JS (no class generation). `fmt.Fprintf`, `fmt.Fprintln`, and `fmt.Fprint` are also now supported, accepting any writer (including `*strings.Builder` and `*bytes.Buffer`).
 - **Dev server with live reload (`--serve`)** — new flag that starts a static file server
   and automatically reloads the browser after each successful recompile. Implies `--watch`.
