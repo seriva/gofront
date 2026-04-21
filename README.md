@@ -255,17 +255,24 @@ types** (a v0.0.7 compiler feature) so that plain functions and slices can satis
 ```
 example/gom/
   gom/
-    gom.go    ← Node interface · NodeFunc · Group · El · Text · Attr · If · Map · Mount
+    gom.go    ← Node · NodeFunc · Group · El · Text · Attr · If · Map · Style · MountTo · Mount
   src/
-    main.go   ← todo app built with gom
+    types.go  ← Todo struct, filter/priority constants
+    store.go  ← state, mutations, localStorage persistence
+    render.go ← gom node builders (pure node tree, no innerHTML)
+    styles.go ← appStyles() CSS string
+    main.go   ← event setup, submitInput, entry point
+    utils/    ← Filter[T], Plural, HasText
   app.js      ← generated output
   index.html  ← HTML shell
 ```
 
-Key types:
+Key types and functions:
 - `Node` — interface with a single `Mount(parent any)` method
 - `NodeFunc` — `type NodeFunc func(parent any)` with `Mount` method; any function becomes a `Node`
 - `Group` — `type Group []Node` with `Mount` method; composes children in order
+- `Style(css)` — returns a `Node` that injects a `<style>` element; styles are part of the node tree
+- `MountTo(selector, n)` — appends a node without clearing; used to inject styles into `<head>`
 
 ### Features demonstrated
 
@@ -283,8 +290,10 @@ element refs, auto-cleanup event listeners).
 
 The gom example additionally demonstrates: **methods on named func and slice types**,
 interface satisfaction via method sets on non-struct types, type conversions
-(`NodeFunc(fn)`), composite literals (`Group{a, b}`), and cross-package imports of a
-pure-GoFront library.
+(`NodeFunc(fn)`), composite literals (`Group{a, b}`), cross-package imports of a
+pure-GoFront library, styles as nodes (`gom.Style` + `gom.MountTo`), `gom.Map` for
+list rendering, and full feature parity with the other examples (priority mode,
+validation, localStorage persistence, sync status, drag-and-drop reordering).
 
 ### Build and run
 

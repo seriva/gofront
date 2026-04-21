@@ -19,13 +19,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - `len`, `range`, and index access on named slice type variables correctly unwrap
   - Inside method bodies the receiver is automatically unwrapped to the underlying value
 - **`gom` component library** — browser-native declarative DOM component model inspired by
-  gomponents. Lives in `example/gom/` and is a pure GoFront package. Provides `Node`
+  gomponents. Lives in `example/gom/gom/` and is a pure GoFront package. Provides `Node`
   (interface), `NodeFunc` (named func type), `Group` (named slice type), `El`, `Text`,
   `Attr`, `Class`, `ID`, `Href`, `Src`, `Type`, `Placeholder`, `DataAttr`, `If`, `Map`,
-  and `Mount`. Works end-to-end using the new named non-struct type methods feature.
-- **`gom` todo example** — `example/gom/` bundles the `gom` library (`gom/gom.go`) and a
-  fully functional todo app (`src/main.go`) in one folder (add, toggle, delete, filter).
-  Build with `npm run build:gom`.
+  `Style`, `MountTo`, and `Mount`. Works end-to-end using the new named non-struct type
+  methods feature. `Style(css)` returns a `Node` that injects a `<style>` element,
+  keeping styles part of the node tree rather than imperative DOM manipulation.
+  `MountTo(selector, n)` appends a node without clearing, used to inject styles into `<head>`.
+- **`gom` todo example** — `example/gom/` bundles the `gom` library and a fully featured
+  todo app with full parity to the simple and reactive examples: priority mode, input
+  validation, localStorage persistence, sync-status indicator, urgent badge, filter bar,
+  clear-completed, drag-and-drop reordering, and dark theme. All rendering uses pure gom
+  nodes (`gom.El`, `gom.Map`, `gom.If`) — no `innerHTML`. All events are delegated to
+  `#app` once and survive re-renders. Build with `npm run build:gom`.
+- **`gom` element helpers** — `example/gom/gom/elements.go` adds thin wrappers over
+  `gom.El`/`gom.Attr` for all common HTML elements and attributes: block elements
+  (`Div`, `Section`, `Article`, `Header`, `Footer`, `Main`, `Nav`), headings (`H1`–`H6`),
+  inline elements (`Span`, `A`, `Strong`, `Em`, `Code`), lists (`Ul`, `Ol`, `Li`),
+  forms (`Form`, `Input`, `Button`, `Textarea`, `Select`, `Label`), media (`Img`,
+  `Video`, `Canvas`), tables (`Table`, `Tr`, `Th`, `Td`), and attribute helpers
+  (`For`, `Name`, `Value`, `Target`, `Rel`, `Alt`, `Disabled`, `Checked`, `StyleAttr`).
+- **`io` package shim** — `io.Writer` (accepted as a parameter/field type), `io.EOF`
+  (sentinel error string), `io.Discard`, and `io.WriteString(w, s)`. `WriteString`
+  dispatches to `strings.Builder`, `bytes.Buffer`, or any writer with a `WriteString`
+  method, auto-dereferencing GoFront pointer wrappers. Enables shared Go code that
+  accepts `io.Writer` to compile in GoFront unchanged.
+- **Drag-and-drop: insert-before/after by cursor position** — all three examples now
+  detect which half of the drop target the cursor is in. Hovering the top half shows a
+  top accent border and inserts before; hovering the bottom half shows a bottom accent
+  border and inserts after. Items can now be placed at any position including the very
+  top and very bottom of the list.
 - **Qualified type names in imports** — cross-package type annotations like `gom.Node`
   in function signatures now resolve correctly. `addPackageNamespace` registers exported
   types under both the simple name and the `pkg.TypeName` qualified form.

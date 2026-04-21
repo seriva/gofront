@@ -7,6 +7,7 @@ import {
 	compile,
 	runJs,
 	section,
+	summarize,
 	test,
 } from "../helpers.js";
 
@@ -1410,6 +1411,60 @@ test("html.EscapeString roundtrip", () => {
 func main() {
 	s := "<script>alert('xss')</script>"
 	console.log(html.UnescapeString(html.EscapeString(s)) == s)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true");
+});
+
+// ── io package ───────────────────────────────────────────────
+
+section("io package");
+
+test("io.WriteString with strings.Builder", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	var b strings.Builder
+	n, err := io.WriteString(&b, "hello")
+	console.log(b.String())
+	console.log(n > 0)
+	console.log(err == nil)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "hello\ntrue\ntrue");
+});
+
+test("io.WriteString with bytes.Buffer", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	var b bytes.Buffer
+	io.WriteString(&b, "world")
+	console.log(b.String())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "world");
+});
+
+test("io.Writer accepted as parameter type", () => {
+	const { js, errors } = compile(`package main
+func writeAll(w io.Writer, lines []string) {
+	for _, line := range lines {
+		io.WriteString(w, line)
+	}
+}
+func main() {
+	var b strings.Builder
+	writeAll(&b, []string{"a", "b", "c"})
+	console.log(b.String())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "abc");
+});
+
+test("io.EOF is an error value", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	var err error = io.EOF
+	console.log(err != nil)
 }`);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "true");
