@@ -251,8 +251,8 @@ test("reactive example exports expected functions", () => {
 		"expected createAppShell to be exported",
 	);
 	assert(
-		result.exportedSymbols.has("injectStyles"),
-		"expected injectStyles to be exported",
+		result.exportedSymbols.has("setupReactiveDOM"),
+		"expected setupReactiveDOM to be exported",
 	);
 });
 

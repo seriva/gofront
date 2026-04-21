@@ -7,6 +7,47 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --accent:      #a78bfa;
+      --accent-2:    #818cf8;
+      --accent-glow: rgba(167,139,250,.18);
+      --red:         #f87171;
+      --red-glow:    rgba(248,113,113,.15);
+      --green:       #6ee7b7;
+      --text:        #f8fafc;
+      --text-2:      #94a3b8;
+      --muted:       #3f4f63;
+      --surface:     rgba(15,23,42,.7);
+      --surface-2:   rgba(30,41,59,.6);
+      --surface-3:   rgba(51,65,85,.5);
+      --rim:         rgba(255,255,255,.07);
+      --radius:      20px;
+    }
+    body {
+      font-family: "Inter", -apple-system, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 72px 16px 96px;
+      background: #060912;
+      overflow-x: hidden;
+    }
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(ellipse 60% 50% at 20% 10%, rgba(139,92,246,.22) 0%, transparent 60%), radial-gradient(ellipse 50% 60% at 80% 80%, rgba(99,102,241,.18) 0%, transparent 60%), radial-gradient(ellipse 40% 40% at 60% 30%, rgba(236,72,153,.1) 0%, transparent 50%);
+      pointer-events: none;
+      z-index: 0;
+    }
+    @keyframes pop {
+      from { transform: scale(0.5) rotate(-8deg); opacity: 0; }
+      to   { transform: scale(1)   rotate(0deg);  opacity: 1; }
+    }
+  </style>
 </head>
 <body>
   <div id="app"></div>
@@ -15,15 +56,25 @@
     window.sleep = ms => new Promise(r => setTimeout(r, ms));
   </script>
   <script type="module">
-    import { css, html, join, Reactive, Signals, trusted } from './reactive.js';
+    import { css, html, join, Reactive, Signals, trusted, setDebugMode } from './reactive.js';
 
-        window.html = html;
-        window.trusted = trusted;
-        window.join = join;
-        window.css = css;
-        window.Signals = Signals;
-        window.Reactive = Reactive;
-        await import('./app.js');
+    window.html             = html;
+    window.trusted          = trusted;
+    // htmlTag — thin wrapper so GoFront can call the html tagged-template as a plain
+    // function: htmlTag(["prefix", "suffix"], value) auto-escapes interpolated values.
+    window.htmlTag          = (strings, ...values) => html(strings, ...values);
+    window.join             = join;
+    window.css              = css;
+    window.Signals          = Signals;
+    window.Reactive         = Reactive;
+    // setDebugMode — enable reactive system debug logging via ?debug in URL
+    window.setDebugMode     = setDebugMode;
+    // createReactiveComponent — factory wrapper so GoFront calls it as a plain function
+    window.createReactiveComponent = () => new Reactive.Component();
+    // cssClass — thin wrapper so GoFront can call the css tagged template as a plain function
+    window.cssClass         = (content) => css([content]);
+
+    await import('./app.js');
   </script>
 </body>
 </html>
