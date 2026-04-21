@@ -16,6 +16,7 @@ import "./language/declarations.test.js";
 import "./language/expressions.test.js";
 import "./language/range-iter.test.js";
 import "./language/pointers.test.js";
+import "./language/named-type-methods.test.js";
 import "./types/errors.test.js";
 import "./types/checks.test.js";
 import "./types/inference.test.js";

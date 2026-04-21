@@ -680,7 +680,10 @@ export class TypeChecker {
 			members,
 			_gofront: true,
 		});
-		for (const [name, type] of types) this.types.set(name, type);
+		for (const [name, type] of types) {
+			this.types.set(name, type);
+			this.types.set(`${pkgName}.${name}`, type);
+		}
 	}
 
 	// Register an import for unused-import detection.
@@ -884,6 +887,8 @@ export class TypeChecker {
 		if (underlying.kind === "struct") {
 			underlying.name = decl.name;
 			underlying.methods = new Map();
+		} else if (underlying.kind !== "interface") {
+			named.methods = new Map();
 		}
 		if (underlying.kind === "interface") {
 			underlying.name = decl.name;
@@ -952,7 +957,7 @@ export class TypeChecker {
 				this.globals.define(decl.name, funcType);
 			}
 		} else {
-			// Method: attach to struct type
+			// Method: attach to struct or named non-struct type
 			const recvTypeName =
 				decl.recvType.kind === "GenericTypeName"
 					? decl.recvType.name
@@ -972,6 +977,8 @@ export class TypeChecker {
 				const base = recvType?.underlying ?? recvType;
 				if (base?.kind === "struct") {
 					base.methods.set(decl.name, funcType);
+				} else if (recvType?.kind === "named" && recvType.methods) {
+					recvType.methods.set(decl.name, funcType);
 				}
 			}
 		}
@@ -1576,6 +1583,10 @@ export class TypeChecker {
 		) {
 			baseType = this.resolveType(baseType.base);
 		}
+		// Check methods on named type itself (for non-struct named types)
+		if (baseType.kind === "named" && baseType.methods?.has(field)) {
+			return baseType.methods.get(field);
+		}
 		let base = baseType.kind === "named" ? baseType.underlying : baseType;
 		base = this.resolveType(base);
 		if (base?.kind === "struct") {
@@ -1813,9 +1824,16 @@ export class TypeChecker {
 	implements(srcType, iface, _node) {
 		let base = srcType.kind === "named" ? srcType.underlying : srcType;
 		base = this.resolveType(base);
-		if (base?.kind !== "struct") return false;
+		// For non-struct named types, methods live on the named type itself
+		const methodMap =
+			base?.kind === "struct"
+				? base.methods
+				: srcType.kind === "named"
+					? srcType.methods
+					: null;
+		if (!methodMap) return false;
 		for (const [name, required] of iface.methods) {
-			const actual = base.methods?.get(name);
+			const actual = methodMap.get(name);
 			if (!actual) return false;
 
 			// Check parameter count matches

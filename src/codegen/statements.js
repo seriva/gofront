@@ -383,8 +383,11 @@ export const statementGenMethods = {
 		const init = stmt.init;
 		const range = init.rhs[0];
 		const lhs = init.lhs.map((e) => e.name ?? this.genExpr(e));
-		const iteree = this.genExpr(range.expr);
 		const iterType = range.expr._type;
+		const wrapField = this._namedWrapperField(iterType, range.expr);
+		const iteree = wrapField
+			? `${this.genExpr(range.expr)}.${wrapField}`
+			: this.genExpr(range.expr);
 
 		let iterExpr;
 		if (

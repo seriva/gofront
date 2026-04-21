@@ -229,9 +229,8 @@ h1 {
 .todo-item[draggable="true"] { cursor: grab; }
 .todo-item[draggable="true"]:active { cursor: grabbing; }
 .todo-item.dragging { opacity: .35; }
-.todo-item.drag-over {
-  box-shadow: inset 0 2px 0 0 var(--accent);
-}
+.todo-item.drag-over-top    { box-shadow: inset 0  2px 0 0 var(--accent); }
+.todo-item.drag-over-bottom { box-shadow: inset 0 -2px 0 0 var(--accent); }
 
 
 .todo-cb {

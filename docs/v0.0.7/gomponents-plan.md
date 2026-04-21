@@ -237,8 +237,7 @@ func main() {
 3. `strings.Builder` (already planned, useful for `.String()` debug method)
 
 ### v0.0.6 (library)
-4. `example/gom/` — reference implementation of the GoFront component library
-5. `example/gom-todo/` — rewrite the simple todo app using `gom` to prove it out
+4. `example/gom/` — bundles the `gom` library (`gom/gom.go`) and a todo app (`src/main.go`) in one folder
 
 ### v0.0.7 (optional)
 6. `io` package shim — enables writing code that compiles both server-side (standard Go)

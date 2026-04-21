@@ -51,7 +51,7 @@ in [`docs/v0.0.7/`](v0.0.7/).
 
 | Feature | Difficulty | Status | Notes |
 |---|---|---|---|
-| Methods on named non-struct types | Medium | | `type Group []Node` and `type NodeFunc func(...)` with methods. Core compiler blocker for everything else. Codegen: ES6 class wrapping the underlying value. |
+| Methods on named non-struct types | Medium | ✓ | `type Group []Node` and `type NodeFunc func(...)` with methods. Codegen: ES6 class wrapping the underlying value. See [design plan](v0.0.7/named-type-methods-plan.md). |
 | `gom` component library | Low | | Browser-native Node interface (`Mount(parent any)`), `El`, `Attr`, `Text`, `If`, `Map`, `Group`, `Mount`. Pure GoFront once named-type methods land. |
 | `gom/html` element helpers | Low | | `Div`, `A`, `Span`, `Class`, `ID`, `Href`, etc. as thin wrappers over `gom.El`/`gom.Attr`. |
 | `gom` example app | Low | | Rewrite the simple todo app using `gom` to validate the library. |

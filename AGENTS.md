@@ -86,6 +86,13 @@ example/
     index.html        HTML shell (loads reactive.js)
     reactive.js       signals-based reactive framework
     app.js            build output
+  gom/                gom component library + todo app
+    gom/              pure-GoFront component library (package gom)
+      gom.go          Node · NodeFunc · Group · El · Text · Attr · If · Map · Mount
+    src/              todo app source (package main, imports ../gom)
+      main.go
+    index.html        HTML shell
+    app.js            build output
 docs/
   ROADMAP.md          release history + upcoming roadmap
   v0.0.5/             design documents for v0.0.5 features
@@ -290,6 +297,7 @@ See README.md § Examples for full descriptions of both apps.
 ```sh
 npm run build:simple      # builds example/simple/app.js
 npm run build:reactive    # builds example/reactive/app.js
+npm run build:gom         # builds example/gom/app.js
 ```
 
 Then open the respective `index.html` in a browser.

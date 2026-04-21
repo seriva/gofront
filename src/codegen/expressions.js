@@ -184,7 +184,11 @@ export const expressionGenMethods = {
 			}
 
 			case "IndexExpr": {
-				const base = this.genExpr(expr.expr);
+				const exprType = expr.expr._type;
+				const wrapField = this._namedWrapperField(exprType, expr.expr);
+				const base = wrapField
+					? `${this.genExpr(expr.expr)}.${wrapField}`
+					: this.genExpr(expr.expr);
 				const idx = this.genExpr(expr.index);
 				if (expr._mapValueType && !expr._lvalue) {
 					const zero = this.zeroValueForType(expr._mapValueType);
@@ -196,7 +200,6 @@ export const expressionGenMethods = {
 					return `(${base}[${idx}] ?? ${zero})`;
 				}
 				// String indexing returns a byte (charCodeAt), not a JS character
-				const exprType = expr.expr._type;
 				const isStr =
 					(exprType?.kind === "basic" && exprType.name === "string") ||
 					(exprType?.kind === "untyped" && exprType.base === "string");
@@ -212,6 +215,7 @@ export const expressionGenMethods = {
 				const hi = expr.high ? this.genExpr(expr.high) : "";
 				if (!lo && !hi) return `${base}.slice()`;
 				if (!hi) return `${base}.slice(${lo})`;
+				if (!lo) return `${base}.slice(0, ${hi})`;
 				return `${base}.slice(${lo}, ${hi})`;
 			}
 
@@ -284,6 +288,10 @@ export const expressionGenMethods = {
 					this._usesError = true;
 					return `__error(${inner})`;
 				}
+				// Named wrapper type: NodeFunc(fn) → new NodeFunc(fn)
+				if (target && this.namedWrapperNames.has(target)) {
+					return `new ${target}(${inner})`;
+				}
 				switch (target) {
 					case "string": {
 						// Go string(65) → "A" (Unicode code point), not "65"
@@ -339,6 +347,16 @@ export const expressionGenMethods = {
 	},
 
 	genCall(expr) {
+		// Named type constructor call: Greeter(fn), NodeFunc(fn) → new Greeter(fn)
+		if (expr._isTypeConversion) {
+			const name = expr._conversionTargetType?.name;
+			const arg = this.genExpr(expr.args[0]);
+			if (name && this.namedWrapperNames.has(name)) {
+				return `new ${name}(${arg})`;
+			}
+			return arg; // non-wrapper named types: identity
+		}
+
 		// Unwrap InstantiationExpr for function calls: Foo[int](42) → Foo(42)
 		const funcExpr =
 			expr.func.kind === "InstantiationExpr" ? expr.func.expr : expr.func;
@@ -351,6 +369,10 @@ export const expressionGenMethods = {
 					if (expr._constLen != null) return String(expr._constLen);
 					const arg = expr.args[0];
 					const t = arg?._type;
+					const wrapField = this._namedWrapperField(t, arg);
+					if (wrapField) {
+						return `${this.genExpr(arg)}.${wrapField}.length`;
+					}
 					const js = this.genExpr(arg);
 					if (t?.kind === "map") return `Object.keys(${js}).length`;
 					this._usesLen = true;
@@ -472,6 +494,18 @@ export const expressionGenMethods = {
 	},
 
 	genAppend(expr) {
+		const retType = expr._type;
+		const wrapField = this._namedWrapperField(retType, expr.args[0]);
+		if (wrapField) {
+			// Named slice wrapper: append(g, x) → new G(__append(g._items, x))
+			const sliceJS = `${this.genExpr(expr.args[0])}.${wrapField}`;
+			const elems = expr.args
+				.slice(1)
+				.map((a) => (a._spread ? `...${this.genExpr(a)}` : this.genExpr(a)));
+			if (elems.length === 0) return this.genExpr(expr.args[0]);
+			this._usesAppend = true;
+			return `new ${retType.name}(__append(${sliceJS}, ${elems.join(", ")}))`;
+		}
 		const slice = this.genExpr(expr.args[0]);
 		const elems = expr.args
 			.slice(1)
@@ -554,6 +588,34 @@ export const expressionGenMethods = {
 		// Struct: new Foo({ X: 1, Y: 2 }) — keyed or positional
 		if (typeName && this.structNames.has(typeName)) {
 			return `new ${typeName}({ ${this._genStructFields(expr.elems)} })`;
+		}
+
+		// Named wrapper type: Group{a, b} → new Group([a, b])
+		if (typeName && this.namedWrapperNames.has(typeName)) {
+			const namedType = this.checker?.types.get(typeName);
+			const u = namedType?.underlying;
+			if (u?.kind === "map") {
+				const entries = expr.elems
+					.map((e) => {
+						if (e.kind === "KeyValueExpr") {
+							const k =
+								e.key.litKind === "STRING"
+									? JSON.stringify(e.key.value)
+									: `[${this.genExpr(e.key)}]`;
+							return `${k}: ${this.genExpr(e.value)}`;
+						}
+						return this.genExpr(e);
+					})
+					.join(", ");
+				return `new ${typeName}({ ${entries} })`;
+			}
+			// Default: slice
+			const elems = expr.elems
+				.map((e) =>
+					e.kind === "KeyValueExpr" ? this.genExpr(e.value) : this.genExpr(e),
+				)
+				.join(", ");
+			return `new ${typeName}([${elems}])`;
 		}
 
 		// Fallback: named type that's not a struct but has positional elements → treat as struct

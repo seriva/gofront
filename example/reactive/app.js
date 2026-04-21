@@ -413,6 +413,7 @@ function setupReactiveDOM(els) {
 function setupDragDrop(els) {
   let comp = createReactiveComponent();
   let dragSrcSig = comp.signal(0, "dragSrc");
+  let dropAfterSig = comp.signal(false, "dropAfter");
   comp.effect(function() {
     let hc = highCountSignal.get();
     if (hc > 0) {
@@ -438,7 +439,15 @@ function setupDragDrop(els) {
     let targetId = Math.trunc(Number(li.getAttribute("data-id")));
     if (dragSrcSig.peek() !== targetId) {
       e.preventDefault();
-      li.classList.add("drag-over");
+      let rect = li.getBoundingClientRect();
+      let after = e.clientY > rect.top + rect.height / 2;
+      dropAfterSig.set(after);
+      li.classList.remove("drag-over-top", "drag-over-bottom");
+      if (after) {
+        li.classList.add("drag-over-bottom");
+      } else {
+        li.classList.add("drag-over-top");
+      }
     }
   }, null);
   comp.on(els.list, "dragleave", function(e) {
@@ -447,7 +456,7 @@ function setupDragDrop(els) {
       return;
     }
     if (!li.contains(e.relatedTarget)) {
-      li.classList.remove("drag-over");
+      li.classList.remove("drag-over-top", "drag-over-bottom");
     }
   }, null);
   comp.on(els.list, "drop", function(e) {
@@ -459,14 +468,14 @@ function setupDragDrop(els) {
     let targetId = Math.trunc(Number(li.getAttribute("data-id")));
     let src = dragSrcSig.peek();
     if (src !== targetId) {
-      moveTodo(src, targetId);
+      moveTodo(src, targetId, dropAfterSig.peek());
       triggerSave();
     }
   }, null);
   comp.on(els.list, "dragend", function(e) {
     let li = e.target.closest("li");
     if (li !== null) {
-      li.classList.remove("dragging");
+      li.classList.remove("dragging", "drag-over-top", "drag-over-bottom");
     }
   }, null);
 }
@@ -656,7 +665,7 @@ function setFilter(f) {
   filterSignal.set(f);
 }
 
-function moveTodo(fromId, toId) {
+function moveTodo(fromId, toId, after) {
   if (fromId === toId) {
     return;
   }
@@ -673,11 +682,15 @@ function moveTodo(fromId, toId) {
   let result = null;
   let inserted = false;
   for (const [_$, t] of __s(rest).entries()) {
-    if (t.id === toId) {
+    if (!after && t.id === toId) {
       result = __append(result, item);
       inserted = true;
     }
     result = __append(result, t);
+    if (after && t.id === toId) {
+      result = __append(result, item);
+      inserted = true;
+    }
   }
   if (!inserted) {
     result = __append(result, item);
@@ -703,7 +716,7 @@ function inputRowStyles() {
 }
 
 function listStyles() {
-  return cssClass("\n        list-style: none;\n        padding: 8px 0;\n        min-height: 60px;\n        & .todo-item { display: flex; align-items: center; gap: 12px; padding: 12px 20px; transition: background .15s; cursor: default; position: relative; }\n        & .todo-item::after { content: ''; position: absolute; bottom: 0; left: 20px; right: 20px; height: 1px; background: rgba(255,255,255,.04); }\n        & .todo-item:last-child::after { display: none; }\n        & .todo-item:hover { background: rgba(255,255,255,.03); }\n        & .todo-item[draggable=\"true\"] { cursor: grab; }\n        & .todo-item[draggable=\"true\"]:active { cursor: grabbing; }\n        & .todo-item.dragging { opacity: .35; }\n        & .todo-item.drag-over { box-shadow: inset 0 2px 0 0 var(--accent); }\n        & .todo-cb { appearance: none; -webkit-appearance: none; width: 20px; height: 20px; border: 1.5px solid rgba(255,255,255,.15); border-radius: 7px; cursor: pointer; flex-shrink: 0; position: relative; transition: all .2s; background: var(--surface-2); }\n        & .todo-cb:hover { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }\n        & .todo-cb:checked { background: linear-gradient(135deg, #7c3aed, #a78bfa); border-color: transparent; box-shadow: 0 2px 8px rgba(124,58,237,.4); }\n        & .todo-cb:checked::after { content: ''; position: absolute; left: 5px; top: 2px; width: 6px; height: 10px; border: 2px solid #fff; border-top: none; border-left: none; transform: rotate(45deg); }\n        & .todo-text { flex: 1; font-size: .9rem; color: var(--text); line-height: 1.45; transition: color .2s; display: flex; align-items: center; }\n        & .todo-item.done .todo-text { text-decoration: line-through; text-decoration-color: rgba(255,255,255,.2); color: var(--muted); }\n        & .badge { font-size: .58rem; font-weight: 700; background: linear-gradient(135deg, #ef4444, #f87171); color: #fff; padding: 2px 8px; border-radius: 99px; flex-shrink: 0; letter-spacing: .08em; text-transform: uppercase; box-shadow: 0 2px 8px rgba(239,68,68,.35); }\n        & .del-btn { background: none; border: none; color: transparent; font-size: .8rem; cursor: pointer; padding: 5px 7px; border-radius: 8px; line-height: 1; transition: color .15s, background .15s; flex-shrink: 0; }\n        & .todo-item:hover .del-btn { color: var(--muted); }\n        & .del-btn:hover { color: var(--red); background: var(--red-glow); }\n        & .empty { padding: 44px 24px; color: var(--muted); font-size: .85rem; text-align: center; list-style: none; letter-spacing: .01em; }\n    ");
+  return cssClass("\n        list-style: none;\n        padding: 8px 0;\n        min-height: 60px;\n        & .todo-item { display: flex; align-items: center; gap: 12px; padding: 12px 20px; transition: background .15s; cursor: default; position: relative; }\n        & .todo-item::after { content: ''; position: absolute; bottom: 0; left: 20px; right: 20px; height: 1px; background: rgba(255,255,255,.04); }\n        & .todo-item:last-child::after { display: none; }\n        & .todo-item:hover { background: rgba(255,255,255,.03); }\n        & .todo-item[draggable=\"true\"] { cursor: grab; }\n        & .todo-item[draggable=\"true\"]:active { cursor: grabbing; }\n        & .todo-item.dragging { opacity: .35; }\n        & .todo-item.drag-over-top    { box-shadow: inset 0  2px 0 0 var(--accent); }\n        & .todo-item.drag-over-bottom { box-shadow: inset 0 -2px 0 0 var(--accent); }\n        & .todo-cb { appearance: none; -webkit-appearance: none; width: 20px; height: 20px; border: 1.5px solid rgba(255,255,255,.15); border-radius: 7px; cursor: pointer; flex-shrink: 0; position: relative; transition: all .2s; background: var(--surface-2); }\n        & .todo-cb:hover { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }\n        & .todo-cb:checked { background: linear-gradient(135deg, #7c3aed, #a78bfa); border-color: transparent; box-shadow: 0 2px 8px rgba(124,58,237,.4); }\n        & .todo-cb:checked::after { content: ''; position: absolute; left: 5px; top: 2px; width: 6px; height: 10px; border: 2px solid #fff; border-top: none; border-left: none; transform: rotate(45deg); }\n        & .todo-text { flex: 1; font-size: .9rem; color: var(--text); line-height: 1.45; transition: color .2s; display: flex; align-items: center; }\n        & .todo-item.done .todo-text { text-decoration: line-through; text-decoration-color: rgba(255,255,255,.2); color: var(--muted); }\n        & .badge { font-size: .58rem; font-weight: 700; background: linear-gradient(135deg, #ef4444, #f87171); color: #fff; padding: 2px 8px; border-radius: 99px; flex-shrink: 0; letter-spacing: .08em; text-transform: uppercase; box-shadow: 0 2px 8px rgba(239,68,68,.35); }\n        & .del-btn { background: none; border: none; color: transparent; font-size: .8rem; cursor: pointer; padding: 5px 7px; border-radius: 8px; line-height: 1; transition: color .15s, background .15s; flex-shrink: 0; }\n        & .todo-item:hover .del-btn { color: var(--muted); }\n        & .del-btn:hover { color: var(--red); background: var(--red-glow); }\n        & .empty { padding: 44px 24px; color: var(--muted); font-size: .85rem; text-align: center; list-style: none; letter-spacing: .01em; }\n    ");
 }
 
 function footerStyles() {
@@ -736,4 +749,3 @@ function filterLabel(f) {
 }
 
 main();
-(function(){var es=new EventSource('/_gofront/events');es.addEventListener('reload',function(){location.reload();});})();

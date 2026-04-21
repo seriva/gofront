@@ -35,6 +35,7 @@ export class CodeGen {
 		this.out = [];
 		this.indent = 0;
 		this.structNames = new Set();
+		this.namedWrapperNames = new Set();
 		this.jsImports = jsImports;
 		this.bundledPackages = bundledPackages;
 		this.namedReturnVars = null; // names of current function's named return vars
@@ -92,13 +93,25 @@ export class CodeGen {
 			}
 		}
 
-		// Build a map: structName → [MethodDecl, ...]
+		// Build a map: typeName → [MethodDecl, ...]
 		const methods = new Map();
 		for (const d of program.decls) {
 			if (d.kind === "MethodDecl") {
 				const name = d.recvType.name;
 				if (!methods.has(name)) methods.set(name, []);
 				methods.get(name).push(d);
+			}
+		}
+
+		// Collect named non-struct types that have methods (emitted as wrapper classes)
+		for (const d of program.decls) {
+			if (
+				d.kind === "TypeDecl" &&
+				d.type.kind !== "StructType" &&
+				d.type.kind !== "InterfaceType" &&
+				(methods.get(d.name) ?? []).length > 0
+			) {
+				this.namedWrapperNames.add(d.name);
 			}
 		}
 
@@ -248,11 +261,39 @@ export class CodeGen {
 		} else if (decl.type.kind === "InterfaceType") {
 			// Interfaces are compile-time only — no JS output needed.
 			this.line(`// interface ${decl.name} (compile-time only)`);
+		} else if (methodDecls.length > 0) {
+			// Named non-struct type with methods — emit an ES6 wrapper class.
+			this.genNamedTypeClass(decl.name, methodDecls);
 		} else {
-			// Type alias — no JS equivalent needed unless it's used as a constructor.
-			// e.g. type MyInt int → just a comment
 			this.line(`// type ${decl.name} = ${this.typeComment(decl.type)}`);
 		}
+	}
+
+	genNamedTypeClass(name, methodDecls) {
+		const namedType = this.checker?.types.get(name);
+		const underlying = namedType?.underlying;
+		let field, ctorDefault;
+		if (underlying?.kind === "func") {
+			field = "_fn";
+			ctorDefault = "null";
+		} else if (underlying?.kind === "map") {
+			field = "_map";
+			ctorDefault = "{}";
+		} else {
+			field = "_items";
+			ctorDefault = "[]";
+		}
+		this.line(`class ${name} {`);
+		this.indented(() => {
+			this.line(
+				`constructor(${field} = ${ctorDefault}) { this.${field} = ${field}; }`,
+			);
+			for (const m of methodDecls) {
+				this.blank();
+				this.genMethod(m, field);
+			}
+		});
+		this.line("}");
 	}
 
 	genStruct(name, structTypeAst, methodDecls) {
@@ -317,21 +358,43 @@ export class CodeGen {
 		this.line("}");
 	}
 
-	genMethod(decl) {
+	genMethod(decl, recvField = null) {
 		const params = decl.params.map((p) => p.name).join(", ");
 		const asyncPrefix = decl.async ? "async " : "";
 		this.line(`${asyncPrefix}${decl.name}(${params}) {`);
 		const prevBoxed = this._boxedVars;
 		this._boxedVars = new Set();
 		this._scanAddressTaken(decl.body);
+		const prevUnwrapped = this._unwrappedRecv;
 		this.indented(() => {
 			if (decl.recvName && decl.recvName !== "_") {
-				this.line(`const ${decl.recvName} = this;`);
+				if (recvField) {
+					this.line(`const ${decl.recvName} = this.${recvField};`);
+					this._unwrappedRecv = decl.recvName;
+				} else {
+					this.line(`const ${decl.recvName} = this;`);
+				}
 			}
 			this._withNamedReturns(decl, () => this._genBody(decl.body));
 		});
+		this._unwrappedRecv = prevUnwrapped;
 		this._boxedVars = prevBoxed;
 		this.line("}");
+	}
+
+	// Returns the wrapper field name ("_fn", "_items", "_map") if `type` is a named
+	// non-struct type emitted as a wrapper class, or null otherwise.
+	// Pass `expr` so we can skip unwrapping when the expression is the method receiver
+	// (which was already unwrapped to `this.<field>` at the top of the method body).
+	_namedWrapperField(type, expr = null) {
+		if (type?.kind !== "named") return null;
+		if (!this.namedWrapperNames.has(type.name)) return null;
+		if (expr?.kind === "Ident" && expr.name === this._unwrappedRecv)
+			return null;
+		const u = type.underlying;
+		if (u?.kind === "func") return "_fn";
+		if (u?.kind === "map") return "_map";
+		return "_items";
 	}
 
 	// ── Function declarations ────────────────────────────────────

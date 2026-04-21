@@ -56,7 +56,7 @@
     window.sleep = ms => new Promise(r => setTimeout(r, ms));
   </script>
   <script type="module">
-    import { css, html, join, Reactive, Signals, trusted, setDebugMode } from './reactive.js';
+    import { css, html, join, Reactive, Signals, setDebugMode, trusted } from './reactive.js';
 
     window.html             = html;
     window.trusted          = trusted;
