@@ -222,6 +222,51 @@ func main() {
 });
 
 // ═════════════════════════════════════════════════════════════
+// Slice expressions
+// ═════════════════════════════════════════════════════════════
+
+section("Slice expressions");
+
+test("s[:i] emits slice(0, i) not slice(, i)", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	s := []int{1, 2, 3, 4, 5}
+	i := 3
+	t := s[:i]
+	println(len(t))
+	println(t[0])
+	println(t[2])
+}`);
+	assertEqual(errors.length, 0);
+	const out = runJs(js);
+	const lines = out.trim().split("\n");
+	assertEqual(lines[0], "3");
+	assertEqual(lines[1], "1");
+	assertEqual(lines[2], "3");
+});
+
+test("append(s[:i], s[i+1:]...) delete pattern works", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	s := []int{10, 20, 30, 40, 50}
+	i := 2
+	s = append(s[:i], s[i+1:]...)
+	println(len(s))
+	println(s[0])
+	println(s[1])
+	println(s[2])
+	println(s[3])
+}`);
+	assertEqual(errors.length, 0);
+	const lines = runJs(js).trim().split("\n");
+	assertEqual(lines[0], "4");
+	assertEqual(lines[1], "10");
+	assertEqual(lines[2], "20");
+	assertEqual(lines[3], "40");
+	assertEqual(lines[4], "50");
+});
+
+// ═════════════════════════════════════════════════════════════
 // Three-index slice expressions
 // ═════════════════════════════════════════════════════════════
 

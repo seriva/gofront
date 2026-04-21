@@ -159,7 +159,14 @@ func setupEvents() {
         targetId := int(li.getAttribute("data-id"))
         if dragSrcId != targetId {
             e.preventDefault()
-            li.classList.add("drag-over")
+            rect := li.getBoundingClientRect()
+            after := e.clientY > rect.top+rect.height/2
+            li.classList.remove("drag-over-top", "drag-over-bottom")
+            if after {
+                li.classList.add("drag-over-bottom")
+            } else {
+                li.classList.add("drag-over-top")
+            }
         }
     })
 
@@ -167,7 +174,7 @@ func setupEvents() {
         li := e.target.closest("li")
         if li == nil { return }
         if !li.contains(e.relatedTarget) {
-            li.classList.remove("drag-over")
+            li.classList.remove("drag-over-top", "drag-over-bottom")
         }
     })
 
@@ -177,7 +184,9 @@ func setupEvents() {
         if li == nil { return }
         targetId := int(li.getAttribute("data-id"))
         if dragSrcId != targetId {
-            moveTodo(dragSrcId, targetId)
+            rect := li.getBoundingClientRect()
+            after := e.clientY > rect.top+rect.height/2
+            moveTodo(dragSrcId, targetId, after)
             render()
             triggerSave()
         }
@@ -186,7 +195,7 @@ func setupEvents() {
     list.addEventListener("dragend", func(e any) {
         li := e.target.closest("li")
         if li != nil {
-            li.classList.remove("dragging")
+            li.classList.remove("dragging", "drag-over-top", "drag-over-bottom")
         }
     })
 }

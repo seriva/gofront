@@ -350,7 +350,8 @@ func setupDragDrop(els AppElements) {
     comp := createReactiveComponent()
 
     // signal() — create local drag-source state owned by this component
-    dragSrcSig := comp.signal(0, "dragSrc")
+    dragSrcSig  := comp.signal(0, "dragSrc")
+    dropAfterSig := comp.signal(false, "dropAfter")
 
     // effect() — reactive side effect: keep the browser tab title in sync with
     // the urgent-task count. Re-runs automatically whenever highCountSignal changes.
@@ -383,7 +384,15 @@ func setupDragDrop(els AppElements) {
         targetId := int(li.getAttribute("data-id"))
         if dragSrcSig.peek() != targetId {
             e.preventDefault()
-            li.classList.add("drag-over")
+            rect := li.getBoundingClientRect()
+            after := e.clientY > rect.top+rect.height/2
+            dropAfterSig.set(after)
+            li.classList.remove("drag-over-top", "drag-over-bottom")
+            if after {
+                li.classList.add("drag-over-bottom")
+            } else {
+                li.classList.add("drag-over-top")
+            }
         }
     }, nil)
 
@@ -393,7 +402,7 @@ func setupDragDrop(els AppElements) {
             return
         }
         if !li.contains(e.relatedTarget) {
-            li.classList.remove("drag-over")
+            li.classList.remove("drag-over-top", "drag-over-bottom")
         }
     }, nil)
 
@@ -404,10 +413,9 @@ func setupDragDrop(els AppElements) {
             return
         }
         targetId := int(li.getAttribute("data-id"))
-        // peek() — read without tracking; we only need the current value once
         src := dragSrcSig.peek()
         if src != targetId {
-            moveTodo(src, targetId)
+            moveTodo(src, targetId, dropAfterSig.peek())
             triggerSave()
         }
     }, nil)
@@ -415,7 +423,7 @@ func setupDragDrop(els AppElements) {
     comp.on(els.list, "dragend", func(e any) {
         li := e.target.closest("li")
         if li != nil {
-            li.classList.remove("dragging")
+            li.classList.remove("dragging", "drag-over-top", "drag-over-bottom")
         }
     }, nil)
 }

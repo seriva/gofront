@@ -244,12 +244,35 @@ The reactive example covers the full reactive.js API surface:
 | Component instance | `signal`, `effect`, `on` (auto-cleanup event listeners) |
 | Scan attributes | `data-model`, `data-text`, `data-html`, `data-if`, `data-visible`, `data-class-*`, `data-attr-*`, `data-bool-*`, `data-on-*`, `data-ref` |
 
+### gom (component library + todo app)
+
+Browser-native declarative DOM components inspired by
+[gomponents](https://www.gomponents.com). The library lives in `example/gom/gom/` and
+is written entirely in GoFront — no hand-coded JS. It uses **methods on named non-struct
+types** (a v0.0.7 compiler feature) so that plain functions and slices can satisfy the
+`Node` interface without any struct boilerplate.
+
+```
+example/gom/
+  gom/
+    gom.go    ← Node interface · NodeFunc · Group · El · Text · Attr · If · Map · Mount
+  src/
+    main.go   ← todo app built with gom
+  app.js      ← generated output
+  index.html  ← HTML shell
+```
+
+Key types:
+- `Node` — interface with a single `Mount(parent any)` method
+- `NodeFunc` — `type NodeFunc func(parent any)` with `Mount` method; any function becomes a `Node`
+- `Group` — `type Group []Node` with `Mount` method; composes children in order
+
 ### Features demonstrated
 
-Both apps cover: structs & methods, iota constants, named return values, closures,
-slices, `for range`, `switch`, cross-package imports, multi-file same-package compilation,
-`async`/`await`, `defer`/`recover`, localStorage persistence, DOM APIs, and generic
-utility functions (`Filter[T]`, `Map[T, U]`).
+The simple and reactive examples cover: structs & methods, iota constants, named return
+values, closures, slices, `for range`, `switch`, cross-package imports, multi-file
+same-package compilation, `async`/`await`, `defer`/`recover`, localStorage persistence,
+DOM APIs, and generic utility functions (`Filter[T]`, `Map[T, U]`).
 
 The reactive example additionally demonstrates: external `.d.ts` type imports,
 `declare namespace` patterns for typing JS libraries, the full reactive signal graph
@@ -258,11 +281,17 @@ no `querySelector` or `getElementById` in application code, and `Reactive.Compon
 as the primary composition unit (state, template, styles, mount lifecycle, `data-ref`
 element refs, auto-cleanup event listeners).
 
+The gom example additionally demonstrates: **methods on named func and slice types**,
+interface satisfaction via method sets on non-struct types, type conversions
+(`NodeFunc(fn)`), composite literals (`Group{a, b}`), and cross-package imports of a
+pure-GoFront library.
+
 ### Build and run
 
 ```sh
 npm run build:simple      # → example/simple/app.js
 npm run build:reactive    # → example/reactive/app.js
+npm run build:gom         # → example/gom/app.js
 # open the respective index.html in a browser
 ```
 
@@ -383,6 +412,7 @@ signatures into GoFront's internal type representation.
 | `error` type | ✓ — interface `{ Error() string }`; custom error types, `errors.Is`/`Unwrap`, `%w` wrapping |
 | Complex numbers (`complex64`, `complex128`, `3i`) | ✓ — `complex()`, `real()`, `imag()` builtins; `__cmul`/`__cdiv` helpers |
 | Type definitions, type aliases (`type A = B`) | ✓ |
+| Methods on named non-struct types | ✓ — `type T func(...)` or `type T []E` with methods; emitted as ES6 wrapper classes; satisfies interfaces |
 | Type conversions, type assertions (plain & comma-ok) | ✓ |
 | Type switch (`switch v := x.(type)`) | ✓ — compiles to `if/else if` with `typeof` / `instanceof` |
 | Sized integers (`int8`–`int64`, `uint8`–`uint64`, `float32`) | ✓ — mapped to `number` at runtime |

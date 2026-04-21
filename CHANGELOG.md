@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Methods on named non-struct types** — methods can now be declared on any named type,
+  not just structs. Named func and slice types with methods are emitted as ES6 wrapper
+  classes (`class T { constructor(_fn) {...} }` / `class T { constructor(_items) {...} }`).
+  - `type NodeFunc func(parent any)` with `func (n NodeFunc) Mount(parent any)` works
+  - `type Group []Node` with `func (g Group) Mount(parent any)` works
+  - Named non-struct types satisfy interfaces via their method sets
+  - Composite literals: `Group{a, b}` → `new Group([a, b])`
+  - Type conversions: `NodeFunc(fn)` → `new NodeFunc(fn)`
+  - `append` on a named slice type returns the same named type (re-wraps the result)
+  - `len`, `range`, and index access on named slice type variables correctly unwrap
+  - Inside method bodies the receiver is automatically unwrapped to the underlying value
+- **`gom` component library** — browser-native declarative DOM component model inspired by
+  gomponents. Lives in `example/gom/` and is a pure GoFront package. Provides `Node`
+  (interface), `NodeFunc` (named func type), `Group` (named slice type), `El`, `Text`,
+  `Attr`, `Class`, `ID`, `Href`, `Src`, `Type`, `Placeholder`, `DataAttr`, `If`, `Map`,
+  and `Mount`. Works end-to-end using the new named non-struct type methods feature.
+- **`gom` todo example** — `example/gom/` bundles the `gom` library (`gom/gom.go`) and a
+  fully functional todo app (`src/main.go`) in one folder (add, toggle, delete, filter).
+  Build with `npm run build:gom`.
+- **Qualified type names in imports** — cross-package type annotations like `gom.Node`
+  in function signatures now resolve correctly. `addPackageNamespace` registers exported
+  types under both the simple name and the `pkg.TypeName` qualified form.
+
 ### Changed
 - **Reactive example** — overhauled to cover the full reactive.js API surface.
   The app shell is now a `Reactive.Component` using the complete lifecycle (`state`,

@@ -111,8 +111,16 @@ export const expressionCheckMethods = {
 				if (expr.expr._isTypeRef) {
 					let base = baseType.kind === "named" ? baseType.underlying : baseType;
 					base = this.resolveType(base);
+					let methodType = null;
 					if (base?.kind === "struct" && base.methods?.has(expr.field)) {
-						const methodType = base.methods.get(expr.field);
+						methodType = base.methods.get(expr.field);
+					} else if (
+						baseType.kind === "named" &&
+						baseType.methods?.has(expr.field)
+					) {
+						methodType = baseType.methods.get(expr.field);
+					}
+					if (methodType) {
 						// Return a func type with the receiver prepended to params
 						expr._isMethodExpr = true;
 						expr._methodExprRecv = baseType;
@@ -129,7 +137,10 @@ export const expressionCheckMethods = {
 				if (ft?.kind === "func") {
 					let base = baseType.kind === "named" ? baseType.underlying : baseType;
 					base = this.resolveType(base);
-					if (base?.kind === "struct" && base.methods?.has(expr.field)) {
+					if (
+						(base?.kind === "struct" && base.methods?.has(expr.field)) ||
+						(baseType.kind === "named" && baseType.methods?.has(expr.field))
+					) {
 						expr._isMethodValue = true;
 					}
 				}
@@ -140,9 +151,14 @@ export const expressionCheckMethods = {
 				const bt = this.checkExpr(expr.expr, scope);
 				this.checkExpr(expr.index, scope);
 				if (isAny(bt)) return ANY;
-				if (bt.kind === "slice" || bt.kind === "array") {
+				// Named types (e.g. type Nums []int) are indexable via their underlying
+				const btu =
+					bt.kind === "named"
+						? (this.resolveType(bt.underlying) ?? bt.underlying)
+						: bt;
+				if (btu.kind === "slice" || btu.kind === "array") {
 					// Compile-time bounds checking for arrays
-					if (bt.kind === "array" && bt.size != null) {
+					if (btu.kind === "array" && btu.size != null) {
 						const idx = this._constIntValue(expr.index);
 						if (idx !== null) {
 							if (idx < 0) {
@@ -150,7 +166,7 @@ export const expressionCheckMethods = {
 									`invalid array index ${idx} (index must not be negative)`,
 									expr,
 								);
-							} else if (idx >= bt.size) {
+							} else if (idx >= btu.size) {
 								this.err(
 									`invalid array index ${idx} (out of bounds for ${typeStr(bt)})`,
 									expr,
@@ -158,11 +174,11 @@ export const expressionCheckMethods = {
 							}
 						}
 					}
-					return bt.elem;
+					return btu.elem;
 				}
-				if (bt.kind === "map") {
-					expr._mapValueType = bt.value; // for codegen zero-value fallback
-					return bt.value;
+				if (btu.kind === "map") {
+					expr._mapValueType = btu.value; // for codegen zero-value fallback
+					return btu.value;
 				}
 				if (isString(bt)) return INT; // byte
 				return this.err(`Cannot index type ${typeStr(bt)}`, expr);
@@ -409,6 +425,19 @@ export const expressionCheckMethods = {
 		}
 
 		if (isAny(fnType)) return ANY;
+
+		// Named type used as a constructor/conversion: Greeter(fn), NodeFunc(fn)
+		// The callee is a type name, not a callable variable.
+		if (fnType.kind === "named" && expr.func._isTypeRef) {
+			expr._isTypeConversion = true;
+			expr._conversionTargetType = fnType;
+			return fnType;
+		}
+
+		// Named func types (e.g. type Handler func(int) int) are callable via variable
+		if (fnType.kind === "named" && fnType.underlying?.kind === "func") {
+			fnType = fnType.underlying;
+		}
 
 		// Generic function inference
 		if (fnType.kind === "generic") {

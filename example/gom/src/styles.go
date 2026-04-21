@@ -1,9 +1,10 @@
 package main
 
-// injectStyles creates a <style> element with all app CSS and appends it to <head>.
-func injectStyles() {
-    style := document.createElement("style")
-    style.textContent = `
+// appStyles returns the full application CSS string.
+// It is mounted into <head> via gom.Style() in main(), keeping styles
+// part of the gom node system rather than imperative DOM manipulation.
+func appStyles() string {
+	return `
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
@@ -104,7 +105,6 @@ h1 {
 }
 
 .high-badge {
-  display: none;
   font-size: .6rem;
   font-weight: 700;
   background: linear-gradient(135deg, #ef4444, #f87171);
@@ -134,12 +134,14 @@ h1 {
 
 .input-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 20px 20px 16px;
 }
 
 .todo-input {
   flex: 1;
+  min-width: 0;
   padding: 11px 16px;
   border: 1px solid rgba(255,255,255,.08);
   border-radius: 12px;
@@ -155,6 +157,13 @@ h1 {
   border-color: rgba(167,139,250,.5);
   background: var(--surface-3);
   box-shadow: 0 0 0 3px var(--accent-glow), 0 1px 3px rgba(0,0,0,.3);
+}
+.todo-input.high {
+  border-color: rgba(248,113,113,.4);
+}
+.todo-input.high:focus {
+  border-color: rgba(248,113,113,.6);
+  box-shadow: 0 0 0 3px var(--red-glow), 0 1px 3px rgba(0,0,0,.3);
 }
 
 .add-btn {
@@ -196,6 +205,25 @@ h1 {
   box-shadow: 0 0 0 3px rgba(248,113,113,.07);
 }
 
+.priority-hint {
+  width: 100%;
+  font-size: .75rem;
+  color: var(--red);
+  opacity: .8;
+  padding: 0 4px;
+  letter-spacing: .01em;
+}
+
+.error-msg {
+  width: 100%;
+  font-size: .75rem;
+  color: var(--red);
+  background: var(--red-glow);
+  border-radius: 8px;
+  padding: 6px 12px;
+  letter-spacing: .01em;
+}
+
 .list-divider {
   height: 1px;
   background: linear-gradient(90deg, transparent, var(--rim) 30%, var(--rim) 70%, transparent);
@@ -231,7 +259,6 @@ h1 {
 .todo-item.dragging { opacity: .35; }
 .todo-item.drag-over-top    { box-shadow: inset 0  2px 0 0 var(--accent); }
 .todo-item.drag-over-bottom { box-shadow: inset 0 -2px 0 0 var(--accent); }
-
 
 .todo-cb {
   appearance: none;
@@ -317,7 +344,7 @@ h1 {
   letter-spacing: .01em;
 }
 
-.footer {
+footer.footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -327,7 +354,7 @@ h1 {
   position: relative;
 }
 
-.footer::before {
+footer.footer::before {
   content: '';
   position: absolute;
   top: 0; left: 0; right: 0;
@@ -405,6 +432,18 @@ h1 {
   color: var(--red);
   background: var(--red-glow);
 }
+
+.stats-bar {
+  text-align: center;
+  font-size: .65rem;
+  color: var(--muted);
+  padding: 6px 20px 14px;
+  letter-spacing: .04em;
+  opacity: .5;
+  border-top: 1px solid rgba(255,255,255,.04);
+}
+.stats-bar span { cursor: pointer; transition: color .15s; }
+.stats-bar span:hover { color: var(--accent); opacity: 1; }
+.stats-bar strong { font-weight: 600; color: var(--text-2); }
 `
-    document.head.appendChild(style)
 }

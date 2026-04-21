@@ -77,7 +77,8 @@ func listStyles() string {
         & .todo-item[draggable="true"] { cursor: grab; }
         & .todo-item[draggable="true"]:active { cursor: grabbing; }
         & .todo-item.dragging { opacity: .35; }
-        & .todo-item.drag-over { box-shadow: inset 0 2px 0 0 var(--accent); }
+        & .todo-item.drag-over-top    { box-shadow: inset 0  2px 0 0 var(--accent); }
+        & .todo-item.drag-over-bottom { box-shadow: inset 0 -2px 0 0 var(--accent); }
         & .todo-cb { appearance: none; -webkit-appearance: none; width: 20px; height: 20px; border: 1.5px solid rgba(255,255,255,.15); border-radius: 7px; cursor: pointer; flex-shrink: 0; position: relative; transition: all .2s; background: var(--surface-2); }
         & .todo-cb:hover { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
         & .todo-cb:checked { background: linear-gradient(135deg, #7c3aed, #a78bfa); border-color: transparent; box-shadow: 0 2px 8px rgba(124,58,237,.4); }

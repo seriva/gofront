@@ -202,7 +202,7 @@ func setFilter(f int) {
     filterSignal.set(f)
 }
 
-func moveTodo(fromId int, toId int) {
+func moveTodo(fromId int, toId int, after bool) {
     if fromId == toId {
         return
     }
@@ -219,11 +219,15 @@ func moveTodo(fromId int, toId int) {
     var result []Todo
     inserted := false
     for _, t := range rest {
-        if t.id == toId {
+        if !after && t.id == toId {
             result = append(result, item)
             inserted = true
         }
         result = append(result, t)
+        if after && t.id == toId {
+            result = append(result, item)
+            inserted = true
+        }
     }
     if !inserted {
         result = append(result, item)
