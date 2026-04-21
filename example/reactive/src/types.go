@@ -53,8 +53,8 @@ type Stats struct {
 }
 
 // ── AppElements ───────────────────────────────────────────────
-// References to key DOM elements, passed between setup functions
-// so nothing relies on getElementById after mount.
+// References to key DOM elements, populated from comp.refs.* inside
+// createAppShell's mount() hook — no querySelector or getElementById needed.
 
 type AppElements struct {
     input       any
@@ -64,4 +64,7 @@ type AppElements struct {
     footer      any
     badge       any
     syncStatus  any
+    inputRow    any // .input-row — scan attributes resolved via Component state
+    countSpan   any // .count <span>      — bound by ctx.bindMultiple
+    filterArea  any // .filter-area <div> — bound for filter buttons + clear
 }

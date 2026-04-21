@@ -6,19 +6,51 @@ import "js:./browser.d.ts"
 // ── Reactive state (signals) ──────────────────────────────────
 
 // todosSignal is the source-of-truth signal; all derived views are computed from it.
-var todosSignal   Signal
-var filterSignal  Signal
-var nextId        int
-var highPriority  bool
+var todosSignal  Signal
+var filterSignal Signal
+var nextId       int
+
+// highPriority is a signal so the priority button's appearance and the Add
+// button's colour can be driven reactively by setupReactiveDOM.
+var highPriority Signal
+
+// savingSignal is true while an async save is in progress.
+// Bound to the Add button's disabled attribute via ctx.bindBoolAttr.
+var savingSignal Signal
+
+// syncMsgSignal / syncClsSignal drive the sync-status indicator reactively.
+// Bound via ctx.bindText and ctx.bindAttr instead of direct DOM manipulation.
+var syncMsgSignal Signal
+var syncClsSignal Signal
+
+// loadStateSignal tracks the async localStorage read (Signals.computedAsync).
+var loadStateSignal Signal
+
+// loadedSignal becomes true once the initial data load is applied to todosSignal.
+var loadedSignal Signal
+
+// errorSignal holds the current validation error message; "" means no error.
+// Set by submitInput on failure; auto-cleared after a short delay.
+var errorSignal Signal
 
 // Derived (computed) signals — automatically updated when dependencies change.
-var visibleSignal  Signal
-var statsSignal    Signal
+var visibleSignal   Signal
+var statsSignal     Signal
 var highCountSignal Signal
 
 func initStore() {
     todosSignal  = Signals.create([]Todo{}, nil, "todos")
     filterSignal = Signals.create(FilterAll, nil, "filter")
+    highPriority = Signals.create(false, nil, "highPriority")
+    savingSignal = Signals.create(false, nil, "saving")
+    syncMsgSignal = Signals.create("", nil, "syncMsg")
+    syncClsSignal = Signals.create("", nil, "syncCls")
+    loadedSignal  = Signals.create(false, nil, "loaded")
+    errorSignal   = Signals.create("", nil, "error")
+
+    // computedAsync: reads todos from localStorage asynchronously so the
+    // loading placeholder is displayed before parsing begins.
+    loadStateSignal = Signals.computedAsync(asyncLoadFromStorage, "loadState")
 
     // Computed: filtered list of visible todos
     visibleSignal = Signals.computed(func() any {
@@ -55,11 +87,44 @@ func initStore() {
     }, "highCount")
 }
 
+// ── Async storage loader ──────────────────────────────────────
+
+// asyncLoadFromStorage is the computation function for Signals.computedAsync.
+// It is an async function so the reactive library can cancel it if dependencies
+// change, and so the loading placeholder remains visible for at least one frame.
+async func asyncLoadFromStorage(cancel any) any {
+    // Small delay so the loading placeholder is clearly visible to the user
+    // and to honour the computedAsync cancellation contract.
+    await sleep(200)
+    if cancel.cancelled {
+        return nil
+    }
+    raw := localStorage.getItem("todos")
+    if raw == nil {
+        return nil
+    }
+    parsed, parseErr := safeJsonParse(raw)
+    if parseErr != nil || parsed == nil {
+        return nil
+    }
+    var loaded []Todo
+    for _, item := range parsed {
+        loaded = append(loaded, Todo{id: item.id, text: item.text, done: item.done, priority: item.priority})
+    }
+    return loaded
+}
+
 // ── Persistence ───────────────────────────────────────────────
 
+// saveTodos persists the todos list to localStorage.
+// Uses todosSignal.peek() to read the value without registering
+// a reactive dependency — correct since this is an imperative, not reactive, read.
+// Manages savingSignal so the UI can disable the Add button while saving.
 async func saveTodos() error {
+    savingSignal.set(true)
     await sleep(350)
-    localStorage.setItem("todos", JSON.stringify(todosSignal.get()))
+    localStorage.setItem("todos", JSON.stringify(todosSignal.peek()))
+    savingSignal.set(false)
     return nil
 }
 
@@ -73,33 +138,30 @@ func safeJsonParse(raw string) (result any, err error) {
     return result, nil
 }
 
-async func loadTodos() error {
-    raw := localStorage.getItem("todos")
-    if raw == nil {
-        return nil
+// ── Sync status ───────────────────────────────────────────────
+
+// setSyncStatus updates the sync signals instead of touching the DOM directly.
+// The DOM is driven reactively by ctx.bindText + ctx.bindAttr in setupReactiveDOM.
+func setSyncStatus(msg string, cls string) {
+    syncMsgSignal.set(msg)
+    syncClsSignal.set(cls)
+}
+
+// triggerSave persists todos and updates sync-status signals.
+async func triggerSave() {
+    setSyncStatus("Saving…", "saving")
+    err := await saveTodos()
+    if err != nil {
+        setSyncStatus("Save failed", "error")
+        return
     }
-    parsed, parseErr := safeJsonParse(raw)
-    if parseErr != nil {
-        return fmt.Errorf("invalid stored todos: %w", parseErr)
-    }
-    if parsed == nil {
-        return errors.New("failed to parse stored todos")
-    }
-    var loaded []Todo
-    for _, raw := range parsed {
-        loaded = append(loaded, Todo{id: raw.id, text: raw.text, done: raw.done, priority: raw.priority})
-    }
-    if len(loaded) > 0 {
-        last := loaded[len(loaded)-1]
-        nextId = last.id + 1
-    }
-    todosSignal.set(loaded)
-    return nil
+    setSyncStatus("Saved ✓", "saved")
+    await sleep(1500)
+    setSyncStatus("", "")
 }
 
 // ── Mutations ─────────────────────────────────────────────────
-// Each mutation uses Signals.batch to coalesce updates when doing
-// multiple signal writes, ensuring computed signals recompute once.
+// Each mutation uses Signals.batch or signal.update to coalesce updates.
 
 func addTodo(text string, priority int) {
     Signals.batch(func() any {
@@ -110,17 +172,20 @@ func addTodo(text string, priority int) {
     })
 }
 
+// toggleTodo uses signal.update() to derive the next state from the current one,
+// avoiding a separate get()+set() pair.
 func toggleTodo(id int) {
-    cur := todosSignal.get()
-    var next []Todo
-    for _, t := range cur {
-        if t.id == id {
-            next = append(next, t.withDone(!t.done))
-        } else {
-            next = append(next, t)
+    todosSignal.update(func(cur any) any {
+        var next []Todo
+        for _, t := range cur {
+            if t.id == id {
+                next = append(next, t.withDone(!t.done))
+            } else {
+                next = append(next, t)
+            }
         }
-    }
-    todosSignal.set(next)
+        return next
+    })
 }
 
 func removeTodo(id int) {

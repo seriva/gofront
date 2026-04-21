@@ -212,25 +212,37 @@ example/simple/
 
 Same app rebuilt with [reactive.js](https://github.com/seriva/microtastic), a tiny
 signals-based reactive framework. Demonstrates how GoFront integrates with external JS
-libraries via `.d.ts` type declarations — the GoFront code uses typed `Signal` values,
-`Signals.create()`, `Signals.computed()`, `Signals.batch()`, and `Reactive.bind()`,
-all described in a hand-written `browser.d.ts` shim.
+libraries via `.d.ts` type declarations — the entire reactive API surface is typed via a
+hand-written `browser.d.ts` shim and exercised from GoFront source.
 
 ```
 example/reactive/
   src/
     types.go      ← Todo, Stats, AppElements structs
-    store.go      ← Signal-typed state · Signals.create/computed/batch
-    render.go     ← createAppShell() returns AppElements · ctx.computed/ctx.bind
-    styles.go     ← injectStyles()
-    main.go       ← wires everything together
+    store.go      ← reactive state: Signals.create/computed/computedAsync/batch/update
+    render.go     ← Reactive.Component lifecycle · ctx.bind* · setupStatsBar
+    styles.go     ← per-section cssClass() scoped styles
+    main.go       ← async boot, Reactive.mount loading placeholder, signal.subscribe/once
     utils/
       utils.go    ← Plural() · generic Filter/Map
-    browser.d.ts  ← Signal interface · Signals/Reactive/ComponentContext namespaces
+    browser.d.ts  ← Signal · ComponentContext · Signals/Reactive namespaces · htmlTag
   reactive.js     ← signals framework (from microtastic)
-  index.html      ← loads reactive.js + app.js
+  index.html      ← loads reactive.js, exposes helpers, imports app.js
   app.js          ← generated output
 ```
+
+The reactive example covers the full reactive.js API surface:
+
+| Category | Features used |
+|---|---|
+| HTML helpers | `html` tagged template (via `htmlTag`), `trusted`, `join` |
+| CSS | `cssClass` scoped styles with nested `&` selectors |
+| Signals | `create`, `computed`, `computedAsync`, `batch`, `get`, `peek`, `set`, `update`, `subscribe`, `once` |
+| Reactive namespace | `mount` (loading placeholder), `createComponent`, `scan` |
+| Component context | `bind`, `bindAttr`, `bindBoolAttr`, `bindClass`, `bindText`, `bindStyle`, `bindMultiple`, `computed` |
+| Component lifecycle | `state`, `template`, `styles`, `mount`, `mountTo`, `appendTo`, `refs` (via `data-ref`) |
+| Component instance | `signal`, `effect`, `on` (auto-cleanup event listeners) |
+| Scan attributes | `data-model`, `data-text`, `data-html`, `data-if`, `data-visible`, `data-class-*`, `data-attr-*`, `data-bool-*`, `data-on-*`, `data-ref` |
 
 ### Features demonstrated
 
@@ -240,7 +252,11 @@ slices, `for range`, `switch`, cross-package imports, multi-file same-package co
 utility functions (`Filter[T]`, `Map[T, U]`).
 
 The reactive example additionally demonstrates: external `.d.ts` type imports,
-`declare namespace` patterns for typing JS libraries, and reactive UI updates via signals.
+`declare namespace` patterns for typing JS libraries, the full reactive signal graph
+(source signals → computed signals → async computed → DOM bindings), reactive UI with
+no `querySelector` or `getElementById` in application code, and `Reactive.Component`
+as the primary composition unit (state, template, styles, mount lifecycle, `data-ref`
+element refs, auto-cleanup event listeners).
 
 ### Build and run
 

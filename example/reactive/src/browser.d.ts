@@ -1,6 +1,7 @@
 // Helpers injected by index.html before the app module loads.
 declare function sleep(ms: number): Promise<void>;
 
+
 // ── reactive.js types ────────────────────────────────────────
 
 interface SafeHTML {
@@ -38,6 +39,15 @@ interface ComponentContext {
 declare function trusted(content: string): SafeHTML;
 declare function join(items: any, separator: string): SafeHTML;
 declare var css: any;
+
+// New globals exposed by index.html
+declare function setDebugMode(enabled: boolean): void;
+declare function createReactiveComponent(): any;
+declare function cssClass(content: string): string;
+// htmlTag — calls the html tagged template as a plain function so GoFront can
+// use it without native tagged-template syntax. Interpolated values are auto-escaped.
+// Usage: htmlTag([]string{"prefix", "suffix"}, value)
+declare function htmlTag(strings: any, value: any): SafeHTML;
 
 declare namespace Signals {
 	function create(value: any, equals: any, name: string): Signal;

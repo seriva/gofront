@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- **Reactive example** — overhauled to cover the full reactive.js API surface.
+  The app shell is now a `Reactive.Component` using the complete lifecycle (`state`,
+  `template`, `styles`, `mount`, `mountTo`, `refs`), eliminating all `querySelector`
+  and `getElementById` calls from application code. New features demonstrated:
+  `html` tagged template (via `htmlTag` wrapper), `data-html`, `data-visible`,
+  `data-attr-*`, `data-bool-*`, `data-ref`, `Component.state()` auto-computed
+  conversion, `Component.mount()` post-render hook, and `comp.refs.*` element access.
+  The `ScanScope` struct and `setupScanBindings` function are removed — the Component
+  itself is the scan scope. Inline validation errors use `data-if` (DOM removal);
+  a priority hint uses `data-visible` (display toggle); the input placeholder and
+  disabled state are driven reactively via `data-attr-placeholder` and
+  `data-bool-disabled`.
+
 ## [0.0.6] - 2026-04-20
 
 ### Added
