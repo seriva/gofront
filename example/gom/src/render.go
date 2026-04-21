@@ -13,20 +13,20 @@ func todoItemNode(t Todo) gom.Node {
 		cls = "todo-item high"
 	}
 	id := String(t.id)
-	return gom.El("li",
+	return gom.Li(
 		gom.Class(cls),
-		gom.Attr("draggable", "true"),
+		gom.Draggable("true"),
 		gom.DataAttr("id", id),
-		gom.El("input",
+		gom.Input(
 			gom.Type("checkbox"),
 			gom.Class("todo-cb"),
 			gom.DataAttr("action", "toggle"),
 			gom.DataAttr("todo-id", id),
-			gom.If(t.done, gom.Attr("checked", "")),
+			gom.If(t.done, gom.Checked()),
 		),
-		gom.El("span", gom.Class("todo-text"), gom.Text(t.text)),
-		gom.If(t.isUrgent(), gom.El("span", gom.Class("badge"), gom.Text("urgent"))),
-		gom.El("button",
+		gom.Span(gom.Class("todo-text"), gom.Text(t.text)),
+		gom.If(t.isUrgent(), gom.Span(gom.Class("badge"), gom.Text("urgent"))),
+		gom.Button(
 			gom.Class("del-btn"),
 			gom.DataAttr("action", "delete"),
 			gom.DataAttr("todo-id", id),
@@ -40,23 +40,23 @@ func todoItemNode(t Todo) gom.Node {
 func todoListNode() gom.Node {
 	visible := visibleTodos()
 	if len(visible) == 0 {
-		return gom.El("ul", gom.Class("todo-list"),
-			gom.El("li", gom.Class("empty"), gom.Text("Nothing here.")),
+		return gom.Ul(gom.Class("todo-list"),
+			gom.Li(gom.Class("empty"), gom.Text("Nothing here.")),
 		)
 	}
-	return gom.El("ul", gom.Class("todo-list"), gom.Map(visible, todoItemNode))
+	return gom.Ul(gom.Class("todo-list"), gom.Map(visible, todoItemNode))
 }
 
 // ── Filter bar ────────────────────────────────────────────────
 
 func filterBarNode() gom.Node {
 	fs := []int{FilterAll, FilterActive, FilterCompleted}
-	return gom.El("div", gom.Class("filter-bar"), gom.Map(fs, func(f int) gom.Node {
+	return gom.Div(gom.Class("filter-bar"), gom.Map(fs, func(f int) gom.Node {
 		cls := "filter-btn"
 		if f == filter {
 			cls = "filter-btn active"
 		}
-		return gom.El("button",
+		return gom.Button(
 			gom.Class(cls),
 			gom.DataAttr("action", "filter"),
 			gom.DataAttr("filter", String(f)),
@@ -69,14 +69,14 @@ func filterBarNode() gom.Node {
 
 func footerNode() gom.Node {
 	if len(todos) == 0 {
-		return gom.El("footer", gom.Class("footer"))
+		return gom.Footer(gom.Class("footer"))
 	}
 	remaining, completed := stats()
 	countText := utils.Plural(remaining, "task") + " left"
-	return gom.El("footer", gom.Class("footer"),
-		gom.El("span", gom.Class("count"), gom.Text(countText)),
+	return gom.Footer(gom.Class("footer"),
+		gom.Span(gom.Class("count"), gom.Text(countText)),
 		filterBarNode(),
-		gom.If(completed > 0, gom.El("button",
+		gom.If(completed > 0, gom.Button(
 			gom.Class("clear-btn"),
 			gom.DataAttr("action", "clear-completed"),
 			gom.Text("Clear ("+String(completed)+")"),
@@ -89,9 +89,9 @@ func footerNode() gom.Node {
 func badgeNode() gom.Node {
 	hc := highCount()
 	if hc > 0 {
-		return gom.El("span", gom.Class("high-badge"), gom.Text(String(hc)+" urgent"))
+		return gom.Span(gom.Class("high-badge"), gom.Text(String(hc)+" urgent"))
 	}
-	return gom.El("span", gom.Class("high-badge"), gom.Attr("style", "display:none"))
+	return gom.Span(gom.Class("high-badge"), gom.StyleAttr("display:none"))
 }
 
 func syncStatusNode() gom.Node {
@@ -99,23 +99,23 @@ func syncStatusNode() gom.Node {
 	if syncCls != "" {
 		cls = "sync-status " + syncCls
 	}
-	return gom.El("span", gom.Class(cls), gom.Text(syncMsg))
+	return gom.Span(gom.Class(cls), gom.Text(syncMsg))
 }
 
 func headerNode() gom.Node {
-	return gom.El("header", gom.Class("header"),
-		gom.El("div", gom.Class("header-top"),
-			gom.El("div", gom.Class("header-icon"), gom.Text("✓")),
-			gom.El("h1", gom.Text("Todos Gom")),
+	return gom.Header(gom.Class("header"),
+		gom.Div(gom.Class("header-top"),
+			gom.Div(gom.Class("header-icon"), gom.Text("✓")),
+			gom.H1(gom.Text("Todos Gom")),
 			badgeNode(),
 			syncStatusNode(),
 		),
-		gom.El("p", gom.Class("tagline"),
+		gom.P(gom.Class("tagline"),
 			gom.Text("Built with "),
-			gom.El("a",
+			gom.A(
 				gom.Href("https://github.com/seriva/gofront"),
-				gom.Attr("target", "_blank"),
-				gom.El("strong", gom.Text("GoFront")),
+				gom.Target("_blank"),
+				gom.Strong(gom.Text("GoFront")),
 			),
 			gom.Text(" — Go compiled to JS"),
 		),
@@ -139,25 +139,25 @@ func inputRowNode() gom.Node {
 	if highPriority {
 		placeholder = "What's urgent? (high priority)"
 	}
-	return gom.El("div", gom.Class("input-row"),
-		gom.El("input",
+	return gom.Div(gom.Class("input-row"),
+		gom.Input(
 			gom.Class(inputCls),
 			gom.Type("text"),
 			gom.Placeholder(placeholder),
-			gom.Attr("autocomplete", "off"),
+			gom.AutoComplete("off"),
 		),
-		gom.El("button", gom.Class(priorityCls), gom.Type("button"),
+		gom.Button(gom.Class(priorityCls), gom.Type("button"),
 			gom.DataAttr("action", "priority"),
 			gom.Text(priorityText),
 		),
-		gom.El("button", gom.Class("add-btn"), gom.Type("button"),
+		gom.Button(gom.Class("add-btn"), gom.Type("button"),
 			gom.DataAttr("action", "add"),
 			gom.Text("Add"),
 		),
-		gom.If(highPriority, gom.El("span", gom.Class("priority-hint"),
+		gom.If(highPriority, gom.Span(gom.Class("priority-hint"),
 			gom.Text("⚡ High priority — task will be marked urgent"),
 		)),
-		gom.If(errorMsg != "", gom.El("span", gom.Class("error-msg"),
+		gom.If(errorMsg != "", gom.Span(gom.Class("error-msg"),
 			gom.Text(errorMsg),
 		)),
 	)
@@ -171,9 +171,9 @@ func statsBarNode() gom.Node {
 	if n == 1 {
 		word = "todo"
 	}
-	return gom.El("div", gom.Class("stats-bar"),
-		gom.El("span", gom.DataAttr("action", "filter-active"),
-			gom.El("strong", gom.Text(String(n))),
+	return gom.Div(gom.Class("stats-bar"),
+		gom.Span(gom.DataAttr("action", "filter-active"),
+			gom.Strong(gom.Text(String(n))),
 			gom.Text(" "+word+" in session"),
 		),
 	)
@@ -182,10 +182,10 @@ func statsBarNode() gom.Node {
 // ── App root ──────────────────────────────────────────────────
 
 func appView() gom.Node {
-	return gom.El("div", gom.Class("card"),
+	return gom.Div(gom.Class("card"),
 		headerNode(),
 		inputRowNode(),
-		gom.El("div", gom.Class("list-divider")),
+		gom.Div(gom.Class("list-divider")),
 		todoListNode(),
 		footerNode(),
 		statsBarNode(),

@@ -147,6 +147,15 @@ export const expressionGenMethods = {
 							return "Number.MIN_SAFE_INTEGER";
 					}
 				}
+				// io constants
+				if (expr.expr.kind === "Ident" && expr.expr.name === "io") {
+					switch (expr.field) {
+						case "EOF":
+							return '"EOF"';
+						case "Discard":
+							return "{ WriteString(s) { return s.length; }, Write(b) { return b.length; } }";
+					}
+				}
 				// os constants/vars
 				if (expr.expr.kind === "Ident" && expr.expr.name === "os") {
 					switch (expr.field) {
@@ -1064,6 +1073,32 @@ export const expressionGenMethods = {
 		return undefined;
 	},
 
+	_genIo(fn, _a, expr) {
+		switch (fn) {
+			case "WriteString": {
+				const writerArg = expr.args[0];
+				const writerType = writerArg._type;
+				const typeName =
+					writerType?.name ??
+					(writerType?.kind === "pointer" ? writerType.base?.name : null);
+				const w = this.genExpr(writerArg);
+				const s = this.genExpr(expr.args[1]);
+				const isPtr = writerType?.kind === "pointer";
+				const base = isPtr ? `${w}.value` : w;
+				if (typeName === "strings.Builder") {
+					return `((b,s) => { b._buf += s; return [s.length, null]; })(${base}, ${s})`;
+				}
+				if (typeName === "bytes.Buffer") {
+					return `((b,s) => { b._buf.push(...new TextEncoder().encode(s)); return [s.length, null]; })(${base}, ${s})`;
+				}
+				// Generic: auto-dereference pointer, then dispatch on concrete writer type.
+				// strings.Builder has { _buf: string }, bytes.Buffer has { _buf: [] }.
+				return `((b,s) => { const w = b?.value ?? b; if (typeof w.WriteString === "function") return [w.WriteString(s), null]; if (typeof w._buf === "string") { w._buf += s; return [s.length, null]; } if (Array.isArray(w._buf)) { w._buf.push(...new TextEncoder().encode(s)); return [s.length, null]; } return [0, "io.WriteString: unsupported writer"]; })(${w}, ${s})`;
+			}
+		}
+		return undefined;
+	},
+
 	_genHtml(fn, a) {
 		switch (fn) {
 			case "EscapeString": {
@@ -1164,6 +1199,8 @@ export const expressionGenMethods = {
 				return this._genMaps(fn, a);
 			case "html":
 				return this._genHtml(fn, a);
+			case "io":
+				return this._genIo(fn, a, expr);
 			default:
 				return undefined;
 		}

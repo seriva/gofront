@@ -53,9 +53,9 @@ in [`docs/v0.0.7/`](v0.0.7/).
 |---|---|---|---|
 | Methods on named non-struct types | Medium | ✓ | `type Group []Node` and `type NodeFunc func(...)` with methods. Codegen: ES6 class wrapping the underlying value. See [design plan](v0.0.7/named-type-methods-plan.md). |
 | `gom` component library | Low | | Browser-native Node interface (`Mount(parent any)`), `El`, `Attr`, `Text`, `If`, `Map`, `Group`, `Mount`. Pure GoFront once named-type methods land. |
-| `gom/html` element helpers | Low | | `Div`, `A`, `Span`, `Class`, `ID`, `Href`, etc. as thin wrappers over `gom.El`/`gom.Attr`. |
-| `gom` example app | Low | | Rewrite the simple todo app using `gom` to validate the library. |
-| `io` package shim (optional) | Low | | `io.Writer` interface + `io.WriteString`. Enables code that compiles both server-side (standard Go) and browser-side (GoFront) unchanged. |
+| `gom/html` element helpers | Low | ✓ | `Div`, `A`, `Span`, `H1`–`H6`, `Ul`/`Ol`/`Li`, `Form`, `Input`, `Button`, etc. as thin wrappers over `gom.El`/`gom.Attr`. See `example/gom/gom/elements.go`. |
+| `gom` example app | Low | ✓ | Full-featured todo app using `gom`, with feature parity to simple and reactive examples. |
+| `io` package shim (optional) | Low | ✓ | `io.Writer`, `io.EOF`, `io.Discard`, `io.WriteString`. Enables shared Go code that accepts `io.Writer` to compile in GoFront unchanged. |
 
 See [design plan](v0.0.7/gomponents-plan.md) for full details.
 

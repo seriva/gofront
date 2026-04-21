@@ -37,6 +37,290 @@ class attrNode {
   }
 }
 
+function Div(...children) {
+  return El("div", ...children);
+}
+
+function Section(...children) {
+  return El("section", ...children);
+}
+
+function Article(...children) {
+  return El("article", ...children);
+}
+
+function Aside(...children) {
+  return El("aside", ...children);
+}
+
+function Header(...children) {
+  return El("header", ...children);
+}
+
+function Footer(...children) {
+  return El("footer", ...children);
+}
+
+function Main(...children) {
+  return El("main", ...children);
+}
+
+function Nav(...children) {
+  return El("nav", ...children);
+}
+
+function Figure(...children) {
+  return El("figure", ...children);
+}
+
+function H1(...children) {
+  return El("h1", ...children);
+}
+
+function H2(...children) {
+  return El("h2", ...children);
+}
+
+function H3(...children) {
+  return El("h3", ...children);
+}
+
+function H4(...children) {
+  return El("h4", ...children);
+}
+
+function H5(...children) {
+  return El("h5", ...children);
+}
+
+function H6(...children) {
+  return El("h6", ...children);
+}
+
+function Span(...children) {
+  return El("span", ...children);
+}
+
+function A(...children) {
+  return El("a", ...children);
+}
+
+function Strong(...children) {
+  return El("strong", ...children);
+}
+
+function Em(...children) {
+  return El("em", ...children);
+}
+
+function Code(...children) {
+  return El("code", ...children);
+}
+
+function Pre(...children) {
+  return El("pre", ...children);
+}
+
+function Small(...children) {
+  return El("small", ...children);
+}
+
+function Mark(...children) {
+  return El("mark", ...children);
+}
+
+function P(...children) {
+  return El("p", ...children);
+}
+
+function Br() {
+  return El("br");
+}
+
+function Hr() {
+  return El("hr");
+}
+
+function Ul(...children) {
+  return El("ul", ...children);
+}
+
+function Ol(...children) {
+  return El("ol", ...children);
+}
+
+function Li(...children) {
+  return El("li", ...children);
+}
+
+function Dl(...children) {
+  return El("dl", ...children);
+}
+
+function Dt(...children) {
+  return El("dt", ...children);
+}
+
+function Dd(...children) {
+  return El("dd", ...children);
+}
+
+function Form(...children) {
+  return El("form", ...children);
+}
+
+function Input(...children) {
+  return El("input", ...children);
+}
+
+function Button(...children) {
+  return El("button", ...children);
+}
+
+function Textarea(...children) {
+  return El("textarea", ...children);
+}
+
+function Select(...children) {
+  return El("select", ...children);
+}
+
+function Option(...children) {
+  return El("option", ...children);
+}
+
+function Label(...children) {
+  return El("label", ...children);
+}
+
+function Fieldset(...children) {
+  return El("fieldset", ...children);
+}
+
+function Legend(...children) {
+  return El("legend", ...children);
+}
+
+function Img(...children) {
+  return El("img", ...children);
+}
+
+function Video(...children) {
+  return El("video", ...children);
+}
+
+function Audio(...children) {
+  return El("audio", ...children);
+}
+
+function Canvas(...children) {
+  return El("canvas", ...children);
+}
+
+function Table(...children) {
+  return El("table", ...children);
+}
+
+function Thead(...children) {
+  return El("thead", ...children);
+}
+
+function Tbody(...children) {
+  return El("tbody", ...children);
+}
+
+function Tfoot(...children) {
+  return El("tfoot", ...children);
+}
+
+function Tr(...children) {
+  return El("tr", ...children);
+}
+
+function Th(...children) {
+  return El("th", ...children);
+}
+
+function Td(...children) {
+  return El("td", ...children);
+}
+
+function For(v) {
+  return Attr("for", v);
+}
+
+function Name(v) {
+  return Attr("name", v);
+}
+
+function Value(v) {
+  return Attr("value", v);
+}
+
+function Target(v) {
+  return Attr("target", v);
+}
+
+function Rel(v) {
+  return Attr("rel", v);
+}
+
+function Alt(v) {
+  return Attr("alt", v);
+}
+
+function Title(v) {
+  return Attr("title", v);
+}
+
+function Lang(v) {
+  return Attr("lang", v);
+}
+
+function Action(v) {
+  return Attr("action", v);
+}
+
+function Method(v) {
+  return Attr("method", v);
+}
+
+function AutoComplete(v) {
+  return Attr("autocomplete", v);
+}
+
+function Draggable(v) {
+  return Attr("draggable", v);
+}
+
+function Role(v) {
+  return Attr("role", v);
+}
+
+function AriaLabel(v) {
+  return Attr("aria-label", v);
+}
+
+function Disabled() {
+  return Attr("disabled", "");
+}
+
+function Checked() {
+  return Attr("checked", "");
+}
+
+function Selected() {
+  return Attr("selected", "");
+}
+
+function Readonly() {
+  return Attr("readonly", "");
+}
+
+function StyleAttr(v) {
+  return Attr("style", v);
+}
+
 function El(tag, ...children) {
   return new NodeFunc(function(parent) {
     let el = document.createElement(tag);
@@ -370,43 +654,43 @@ function todoItemNode(t) {
     cls = "todo-item high";
   }
   let id = String(t.id);
-  return El("li", Class(cls), Attr("draggable", "true"), DataAttr("id", id), El("input", Type("checkbox"), Class("todo-cb"), DataAttr("action", "toggle"), DataAttr("todo-id", id), If(t.done, Attr("checked", ""))), El("span", Class("todo-text"), Text(t.text)), If(t.isUrgent(), El("span", Class("badge"), Text("urgent"))), El("button", Class("del-btn"), DataAttr("action", "delete"), DataAttr("todo-id", id), Text("✕")));
+  return Li(Class(cls), Draggable("true"), DataAttr("id", id), Input(Type("checkbox"), Class("todo-cb"), DataAttr("action", "toggle"), DataAttr("todo-id", id), If(t.done, Checked())), Span(Class("todo-text"), Text(t.text)), If(t.isUrgent(), Span(Class("badge"), Text("urgent"))), Button(Class("del-btn"), DataAttr("action", "delete"), DataAttr("todo-id", id), Text("✕")));
 }
 
 function todoListNode() {
   let visible = visibleTodos();
   if (__len(visible) === 0) {
-    return El("ul", Class("todo-list"), El("li", Class("empty"), Text("Nothing here.")));
+    return Ul(Class("todo-list"), Li(Class("empty"), Text("Nothing here.")));
   }
-  return El("ul", Class("todo-list"), Map(visible, todoItemNode));
+  return Ul(Class("todo-list"), Map(visible, todoItemNode));
 }
 
 function filterBarNode() {
   let fs = [FilterAll, FilterActive, FilterCompleted];
-  return El("div", Class("filter-bar"), Map(fs, function(f) {
+  return Div(Class("filter-bar"), Map(fs, function(f) {
     let cls = "filter-btn";
     if (f === filter) {
       cls = "filter-btn active";
     }
-    return El("button", Class(cls), DataAttr("action", "filter"), DataAttr("filter", String(f)), Text(filterLabel(f)));
+    return Button(Class(cls), DataAttr("action", "filter"), DataAttr("filter", String(f)), Text(filterLabel(f)));
   }));
 }
 
 function footerNode() {
   if (__len(todos) === 0) {
-    return El("footer", Class("footer"));
+    return Footer(Class("footer"));
   }
   let [remaining, completed] = stats();
   let countText = Plural(remaining, "task") + " left";
-  return El("footer", Class("footer"), El("span", Class("count"), Text(countText)), filterBarNode(), If(completed > 0, El("button", Class("clear-btn"), DataAttr("action", "clear-completed"), Text("Clear (" + String(completed) + ")"))));
+  return Footer(Class("footer"), Span(Class("count"), Text(countText)), filterBarNode(), If(completed > 0, Button(Class("clear-btn"), DataAttr("action", "clear-completed"), Text("Clear (" + String(completed) + ")"))));
 }
 
 function badgeNode() {
   let hc = highCount();
   if (hc > 0) {
-    return El("span", Class("high-badge"), Text(String(hc) + " urgent"));
+    return Span(Class("high-badge"), Text(String(hc) + " urgent"));
   }
-  return El("span", Class("high-badge"), Attr("style", "display:none"));
+  return Span(Class("high-badge"), StyleAttr("display:none"));
 }
 
 function syncStatusNode() {
@@ -414,11 +698,11 @@ function syncStatusNode() {
   if (syncCls !== "") {
     cls = "sync-status " + syncCls;
   }
-  return El("span", Class(cls), Text(syncMsg));
+  return Span(Class(cls), Text(syncMsg));
 }
 
 function headerNode() {
-  return El("header", Class("header"), El("div", Class("header-top"), El("div", Class("header-icon"), Text("✓")), El("h1", Text("Todos Gom")), badgeNode(), syncStatusNode()), El("p", Class("tagline"), Text("Built with "), El("a", Href("https://github.com/seriva/gofront"), Attr("target", "_blank"), El("strong", Text("GoFront"))), Text(" — Go compiled to JS")));
+  return Header(Class("header"), Div(Class("header-top"), Div(Class("header-icon"), Text("✓")), H1(Text("Todos Gom")), badgeNode(), syncStatusNode()), P(Class("tagline"), Text("Built with "), A(Href("https://github.com/seriva/gofront"), Target("_blank"), Strong(Text("GoFront"))), Text(" — Go compiled to JS")));
 }
 
 function inputRowNode() {
@@ -436,7 +720,7 @@ function inputRowNode() {
   if (highPriority) {
     placeholder = "What's urgent? (high priority)";
   }
-  return El("div", Class("input-row"), El("input", Class(inputCls), Type("text"), Placeholder(placeholder), Attr("autocomplete", "off")), El("button", Class(priorityCls), Type("button"), DataAttr("action", "priority"), Text(priorityText)), El("button", Class("add-btn"), Type("button"), DataAttr("action", "add"), Text("Add")), If(highPriority, El("span", Class("priority-hint"), Text("⚡ High priority — task will be marked urgent"))), If(errorMsg !== "", El("span", Class("error-msg"), Text(errorMsg))));
+  return Div(Class("input-row"), Input(Class(inputCls), Type("text"), Placeholder(placeholder), AutoComplete("off")), Button(Class(priorityCls), Type("button"), DataAttr("action", "priority"), Text(priorityText)), Button(Class("add-btn"), Type("button"), DataAttr("action", "add"), Text("Add")), If(highPriority, Span(Class("priority-hint"), Text("⚡ High priority — task will be marked urgent"))), If(errorMsg !== "", Span(Class("error-msg"), Text(errorMsg))));
 }
 
 function statsBarNode() {
@@ -445,11 +729,11 @@ function statsBarNode() {
   if (n === 1) {
     word = "todo";
   }
-  return El("div", Class("stats-bar"), El("span", DataAttr("action", "filter-active"), El("strong", Text(String(n))), Text(" " + word + " in session")));
+  return Div(Class("stats-bar"), Span(DataAttr("action", "filter-active"), Strong(Text(String(n))), Text(" " + word + " in session")));
 }
 
 function appView() {
-  return El("div", Class("card"), headerNode(), inputRowNode(), El("div", Class("list-divider")), todoListNode(), footerNode(), statsBarNode());
+  return Div(Class("card"), headerNode(), inputRowNode(), Div(Class("list-divider")), todoListNode(), footerNode(), statsBarNode());
 }
 
 function render() {

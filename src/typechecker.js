@@ -503,6 +503,26 @@ export class TypeChecker {
 			},
 		});
 
+		// io package — Writer interface + WriteString
+		// io.Writer is typed as ANY so GoFront's built-in writer types (strings.Builder,
+		// bytes.Buffer) are accepted without explicit interface-satisfaction registration.
+		this.globals.define("io", {
+			kind: "namespace",
+			name: "io",
+			members: {
+				Writer: ANY,
+				EOF: ERROR,
+				WriteString: {
+					kind: "func",
+					params: [ANY, STRING],
+					returns: [INT, ERROR],
+				},
+				Discard: ANY,
+			},
+		});
+		// Register io.Writer as a type alias so it resolves in parameter/field annotations.
+		this.types.set("io.Writer", ANY);
+
 		// maps package (Go 1.21)
 		this.globals.define("maps", {
 			kind: "namespace",
