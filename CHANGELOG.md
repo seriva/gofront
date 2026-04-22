@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.0.7] - 2026-04-22
+
 ### Added
 - **Methods on named non-struct types** — methods can now be declared on any named type,
   not just structs. Named func and slice types with methods are emitted as ES6 wrapper
