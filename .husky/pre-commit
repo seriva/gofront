@@ -1,0 +1,4 @@
+npm run check
+node src/index.js example/simple/src --check
+node src/index.js example/reactive/src --check
+node src/index.js example/gom/src --check
