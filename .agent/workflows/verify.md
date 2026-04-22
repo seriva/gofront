@@ -22,7 +22,7 @@ This must complete successfully with all tests passing. If it fails, fix the iss
 
 3. Verify CLI execution (Integration Check):
 ```bash
-node index.js version
+node src/index.js --version
 ```
 This ensures the core CLI can still run without syntax or initialization errors.
 

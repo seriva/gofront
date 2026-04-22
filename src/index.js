@@ -232,7 +232,7 @@ function runCompile() {
 	if (sourceMap) {
 		const outputDir = outputFile ? dirname(resolve(outputFile)) : resolve(".");
 		const srcPath = relative(outputDir, inputPath);
-		const map = cg.getSourceMap(srcPath);
+		const map = cg.getSourceMap(srcPath, [source]);
 		const b64 = Buffer.from(map).toString("base64");
 		js += `\n//# sourceMappingURL=data:application/json;base64,${b64}`;
 	}

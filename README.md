@@ -101,8 +101,8 @@ Walks the typed AST and emits clean, readable JavaScript. No intermediate repres
 — the codegen writes directly to an output buffer with indentation tracking.
 
 Runtime helpers (`__len`, `__append`, `__s`, `__sprintf`, `__cmul`, `__cdiv`, `__error`,
-`__errorIs`) are tree-shaken: only emitted when actually used. Optional inline source
-maps are supported via VLQ-encoded mappings.
+`__errorIs`, `__timeFmt`, `__timeParse`, `__pathClean`) are tree-shaken: only emitted
+when actually used. Optional inline source maps are supported via VLQ-encoded mappings.
 
 ---
 
@@ -561,11 +561,18 @@ Design documents for planned features are organised by release under `docs/v*/`
 ## Tests
 
 ```sh
-npm test
+npm run test:unit   # unit tests only (~1076 tests, no browser required)
+npm run test:e2e    # E2E tests (Playwright, headless Chromium)
+npm test            # both
 ```
 
-990 tests covering language features, type errors, edge cases, DOM (jsdom), external
-`.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, map
-iteration order, integer overflow semantics, unused variable detection, unused import
-detection, semantic difference verification, stdlib shim packages, generics (type params,
-inference, constraints), and both example apps.
+**Unit tests** (1076) cover language features, type errors, edge cases, DOM (jsdom),
+external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string
+formatting, map iteration order, integer overflow semantics, unused variable detection,
+unused import detection, semantic difference verification, stdlib shim packages, and
+generics.
+
+**E2E tests** (74, Playwright) run all three example apps in a real browser and verify
+CRUD, filtering, priority mode, persistence (reload), drag-and-drop reordering, and sync
+status. Per-app suites check app-specific behaviour: scoped styles, stats bar, loading
+placeholder, and `gom.If` conditional rendering.

@@ -238,27 +238,31 @@ export class CodeGen {
 				[
 					"var __timeFmt = __timeFmt || function(d, layout) {",
 					'const pad = (n, w=2) => String(n).padStart(w, "0");',
-					"return layout",
-					'.replace("2006", d.getFullYear())',
-					'.replace("06", String(d.getFullYear()).slice(-2))',
-					'.replace("Monday", ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][d.getDay()])',
-					'.replace("Mon", ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d.getDay()])',
-					'.replace("January", ["January","February","March","April","May","June","July","August","September","October","November","December"][d.getMonth()])',
-					'.replace("Jan", ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getMonth()])',
-					'.replace("01", pad(d.getMonth()+1))',
-					'.replace("1", String(d.getMonth()+1))',
-					'.replace("02", pad(d.getDate()))',
-					'.replace("2", String(d.getDate()))',
-					'.replace("15", pad(d.getHours()))',
-					'.replace("PM", d.getHours()<12?"AM":"PM")',
-					'.replace("3", String(d.getHours()%12||12))',
-					'.replace("04", pad(d.getMinutes()))',
-					'.replace("4", String(d.getMinutes()))',
-					'.replace("05", pad(d.getSeconds()))',
-					'.replace("5", String(d.getSeconds()))',
-					'.replace("Z07:00", (()=>{const o=-d.getTimezoneOffset();return o===0?"Z":(o>0?"+":"-")+pad(Math.floor(Math.abs(o)/60))+":"+pad(Math.abs(o)%60)})())',
-					'.replace(".000", "."+pad(d.getMilliseconds(),3))',
-					'.replace(".999", d.getMilliseconds()>0?"."+String(d.getMilliseconds()).replace(/0+$/,""):"");',
+					'const DAYS=["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];',
+					'const MONTHS=["January","February","March","April","May","June","July","August","September","October","November","December"];',
+					"return layout.replace(/2006|06|Monday|Mon|January|Jan|01|1|02|2|15|PM|3|04|4|05|5|Z07:00|\\.000|\\.999/g, t => {",
+					"switch(t){",
+					'case "2006": return d.getFullYear();',
+					'case "06": return String(d.getFullYear()).slice(-2);',
+					'case "Monday": return DAYS[d.getDay()];',
+					'case "Mon": return DAYS[d.getDay()].slice(0,3);',
+					'case "January": return MONTHS[d.getMonth()];',
+					'case "Jan": return MONTHS[d.getMonth()].slice(0,3);',
+					'case "01": return pad(d.getMonth()+1);',
+					'case "1": return String(d.getMonth()+1);',
+					'case "02": return pad(d.getDate());',
+					'case "2": return String(d.getDate());',
+					'case "15": return pad(d.getHours());',
+					'case "PM": return d.getHours()<12?"AM":"PM";',
+					'case "3": return String(d.getHours()%12||12);',
+					'case "04": return pad(d.getMinutes());',
+					'case "4": return String(d.getMinutes());',
+					'case "05": return pad(d.getSeconds());',
+					'case "5": return String(d.getSeconds());',
+					'case "Z07:00": { const o=-d.getTimezoneOffset(); return o===0?"Z":(o>0?"+":"-")+pad(Math.floor(Math.abs(o)/60))+":"+pad(Math.abs(o)%60); }',
+					'case ".000": return "."+pad(d.getMilliseconds(),3);',
+					'case ".999": return d.getMilliseconds()>0?"."+String(d.getMilliseconds()).replace(/0+$/,""):"";',
+					"default: return t;}});",
 					"};",
 				].join(""),
 			);
@@ -288,9 +292,10 @@ export class CodeGen {
 
 	// Returns a source map JSON string for the last generate() call.
 	// sources: string[] of source filenames (relative to the output file).
-	getSourceMap(sources) {
+	// sourcesContent: string[] of original file contents (embedded for DevTools breakpoints).
+	getSourceMap(sources, sourcesContent) {
 		const srcArray = Array.isArray(sources) ? sources : [sources];
-		return buildSourceMap(srcArray, this._srcMappings);
+		return buildSourceMap(srcArray, this._srcMappings, sourcesContent);
 	}
 
 	// ── Type declarations ────────────────────────────────────────

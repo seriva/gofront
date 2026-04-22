@@ -3,7 +3,6 @@
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-	assert,
 	assertEqual,
 	assertErrorContains,
 	compile,
@@ -634,7 +633,6 @@ func main() {
 test("wrong type in var declaration", () => {
 	const { errors } = compile(`package main
 func main() { var x int = "hello" }`);
-	assert(errors.length > 0);
 	assertErrorContains(errors, "Cannot assign");
 });
 
@@ -644,7 +642,6 @@ type Speaker interface { Speak() string }
 type Rock struct {}
 func greet(s Speaker) {}
 func main() { greet(Rock{}) }`);
-	assert(errors.length > 0);
 	assertErrorContains(errors, "does not implement");
 });
 

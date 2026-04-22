@@ -2,7 +2,6 @@
 
 import { fileURLToPath } from "node:url";
 import {
-	assert,
 	assertEqual,
 	assertErrorContains,
 	compile,
@@ -19,7 +18,6 @@ test("break outside loop and switch is an error", () => {
 func main() {
   break
 }`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "break");
 });
 
@@ -28,7 +26,6 @@ test("continue outside loop is an error", () => {
 func main() {
   continue
 }`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "continue");
 });
 
@@ -37,7 +34,6 @@ test("fallthrough outside switch is an error", () => {
 func main() {
   fallthrough
 }`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "fallthrough");
 });
 
@@ -85,7 +81,6 @@ func main() {
 MyLabel:
   continue MyLabel
 }`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "continue");
 });
 
@@ -95,7 +90,6 @@ func main() {
 MyLabel:
   break MyLabel
 }`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "break");
 });
 
@@ -105,7 +99,6 @@ const MaxSize = 10
 func main() {
   MaxSize = 20
 }`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "const");
 });
 
@@ -115,7 +108,6 @@ func main() {
   const x = 5
   x = 10
 }`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "const");
 });
 
@@ -392,7 +384,6 @@ type Broken struct {}
 func (b Broken) Write(s string) {}
 func process(rw ReadWriter) {}
 func main() { process(Broken{}) }`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "does not implement");
 });
 
@@ -456,7 +447,6 @@ type Bad interface {
 	Point
 }
 func main() {}`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "cannot embed non-interface type");
 });
 
@@ -471,7 +461,6 @@ type Bot struct{}
 func (b Bot) Greet(name int) {}
 func hello(g Greeter) {}
 func main() { hello(Bot{}) }`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "does not implement");
 });
 
@@ -482,7 +471,6 @@ type Dog struct{}
 func (d Dog) Run() {}
 func race(r Runner) {}
 func main() { race(Dog{}) }`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "does not implement");
 });
 
@@ -493,7 +481,6 @@ type Bot struct{}
 func (b Bot) Ping(addr string) {}
 func check(p Pinger) {}
 func main() { check(Bot{}) }`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "does not implement");
 });
 
@@ -504,7 +491,6 @@ type Cache struct{}
 func (c Cache) Load() (string, int) { return "x", 0 }
 func fetch(l Loader) {}
 func main() { fetch(Cache{}) }`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "does not implement");
 });
 
@@ -515,7 +501,6 @@ type Cache struct{}
 func (c Cache) Load() string { return "x" }
 func fetch(l Loader) {}
 func main() { fetch(Cache{}) }`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "does not implement");
 });
 

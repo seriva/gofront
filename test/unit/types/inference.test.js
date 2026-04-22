@@ -2,7 +2,6 @@
 
 import { fileURLToPath } from "node:url";
 import {
-	assert,
 	assertEqual,
 	assertErrorContains,
 	compile,
@@ -19,7 +18,6 @@ func main() {
 	x := 42
 	if x { console.log("bad") }
 }`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "bool");
 });
 
@@ -31,7 +29,6 @@ func main() {
 		break
 	}
 }`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "bool");
 });
 
@@ -41,7 +38,6 @@ func main() {
 	s := "hello" - "world"
 	console.log(s)
 }`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "Invalid operation");
 });
 
@@ -52,7 +48,6 @@ func main() {
 	x := 2
 	console.log(x)
 }`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "no new variables");
 });
 
@@ -86,7 +81,6 @@ func greet() string {
 	return
 }
 func main() { console.log(greet()) }`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "Missing return value");
 });
 
@@ -94,7 +88,6 @@ test("type error message includes array type notation [3]int", () => {
 	const { errors } = compile(`package main
 func f(a [3]int) {}
 func main() { f("hello") }`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "[3]int");
 });
 
@@ -102,7 +95,6 @@ test("type error message includes map type notation", () => {
 	const { errors } = compile(`package main
 func f(m map[string]int) {}
 func main() { f("hello") }`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "map[string]int");
 });
 
@@ -236,7 +228,6 @@ test("arrays have correct string representation in error messages", () => {
 	const { errors } = compile(`package main
 func f(a [3]int) {}
 func main() { f("hello") }`);
-	assert(errors.length > 0, "expected type error");
 	assertErrorContains(errors, "[3]int");
 });
 
