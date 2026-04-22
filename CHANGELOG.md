@@ -27,7 +27,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and four spec files. New npm scripts: `test:e2e`, `test:e2e:ui`,
   `test:e2e:simple`, `test:e2e:reactive`, `test:e2e:gom`.
 
+### Fixed
+- **`__timeFmt` correctness** — replaced chained `.replace()` calls with a single
+  regex pass so substituted year/month/day values can't be re-matched by later
+  tokens (e.g. year `2015` no longer corrupts when `15` is also the hour token).
+
 ### Changed
+- **Test suite** — removed 48 redundant `assert(errors.length > 0)` lines that
+  immediately preceded `assertErrorContains` calls; the latter already reports a
+  clear failure when the errors array is empty. Cleaned up four unused `assert`
+  imports that became dead after the removal.
 - **Example apps** — `removeTodo` and `clearCompleted` now use `slices.DeleteFunc`
   instead of the local `utils.Filter` generic; `validateTodo` uses
   `utf8.RuneCountInString` instead of `len([]rune(text))` across all three apps.

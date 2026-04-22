@@ -2,8 +2,6 @@
 
 import { ERROR, isComplex } from "../typechecker/types.js";
 
-const globalError = ERROR;
-
 const INT_TYPE_NAMES = new Set([
 	"int",
 	"uint",
@@ -518,7 +516,7 @@ export const expressionGenMethods = {
 			expr.func.kind === "SelectorExpr" &&
 			expr.func.field === "Error" &&
 			expr.func.expr._type &&
-			(expr.func.expr._type === globalError ||
+			(expr.func.expr._type === ERROR ||
 				expr.func.expr._type?.name === "error" ||
 				(expr.func.expr._type?.kind === "named" &&
 					expr.func.expr._type?.underlying?.kind === "interface"))

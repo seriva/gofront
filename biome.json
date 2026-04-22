@@ -14,7 +14,8 @@
 			"!.claude",
 			"!node_modules",
 			"!example/*/app.js",
-			"!coverage"
+			"!coverage",
+			"!test-results"
 		]
 	},
 	"formatter": {

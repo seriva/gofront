@@ -32,7 +32,6 @@ test("short variable re-declaration (:=)", () => {
 
 test("error messages include filenames", () => {
 	const { errors } = compileFile(join(FIXTURES, "type_alias_test.go"));
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "type_alias_test.go");
 });
 
@@ -469,7 +468,6 @@ func main() {
 	}
 	_ = x
 }`);
-	assert(errors.length > 0, "expected x to be out of scope after switch");
 	assertErrorContains(errors, "x");
 });
 
@@ -527,7 +525,6 @@ test("[...]T{} type error on wrong element type", () => {
 func main() {
 	_ = [...]int{1, "bad", 3}
 }`);
-	assert(errors.length > 0, "expected type error");
 	assertErrorContains(errors, "string");
 });
 

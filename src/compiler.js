@@ -170,7 +170,8 @@ export function compileFiles(files, options = {}) {
 	if (options.sourceMap) {
 		const outputDir = options.outputDir ?? fromDir;
 		const sourceFiles = files.map((f) => relative(outputDir, f));
-		const map = codegen.getSourceMap(sourceFiles);
+		const sourcesContent = files.map((f) => readFileSync(f, "utf8"));
+		const map = codegen.getSourceMap(sourceFiles, sourcesContent);
 		const b64 = Buffer.from(map).toString("base64");
 		js += `\n//# sourceMappingURL=data:application/json;base64,${b64}`;
 	}

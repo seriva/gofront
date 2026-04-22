@@ -166,7 +166,6 @@ func main() {
 }`,
 		{ fromFile: join(FIXTURES, "multifile/withimportalias/main.go") },
 	);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "math");
 });
 

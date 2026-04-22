@@ -18,7 +18,6 @@ section("Type errors");
 test("undefined variable", () => {
 	const { errors } = compile(`package main
 func main() { console.log(notDefined) }`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "notDefined");
 });
 
@@ -26,7 +25,6 @@ test("wrong argument count", () => {
 	const { errors } = compile(`package main
 func add(a int, b int) int { return a + b }
 func main() { add(1) }`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "argument");
 });
 
@@ -50,7 +48,6 @@ func main() {
   b := Box{W: 1.0}
   console.log(b.Height)
 }`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "Height");
 });
 
@@ -67,7 +64,6 @@ test("duplicate function declaration", () => {
 	const { errors } = compile(`package main
 func foo() {}
 func foo() {}`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "foo");
 });
 
@@ -83,7 +79,6 @@ func main() {
   x := 42
   console.log(x.Foo)
 }`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "Foo");
 });
 
@@ -93,7 +88,6 @@ func main() {
   s := "hello"
   console.log(s.Length)
 }`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "Length");
 });
 
@@ -147,7 +141,6 @@ func main() {
   r := Rect{W: 10, H: 5}
   console.log(r.Depth)
 }`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "Depth");
 });
 
@@ -165,7 +158,6 @@ test("defer non-call expression is rejected", () => {
 func main() {
   defer 42
 }`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "defer");
 });
 
@@ -182,7 +174,6 @@ test("wrong argument type to function", () => {
 	const { errors } = compile(`package main
 func double(n int) int { return n * 2 }
 func main() { double("hello") }`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "Cannot assign");
 });
 
@@ -190,21 +181,18 @@ test("wrong field type in struct literal", () => {
 	const { errors } = compile(`package main
 type Point struct { X int; Y int }
 func main() { _ := Point{X: "not an int", Y: 2} }`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "Cannot assign");
 });
 
 test("undefined type in var declaration", () => {
 	const { errors } = compile(`package main
 func main() { var x Phantom; _ = x }`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "Phantom");
 });
 
 test("undefined type in function parameter", () => {
 	const { errors } = compile(`package main
 func greet(x Ghost) {}`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "Ghost");
 });
 
@@ -215,7 +203,6 @@ func main() {
   r := Rect{W: 10}
   r.Fly()
 }`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "Fly");
 });
 
@@ -226,7 +213,6 @@ type Dog struct{}
 func (d Dog) Speed() string { return "fast" }
 func race(r Runner) {}
 func main() { race(Dog{}) }`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "does not implement");
 });
 
@@ -237,14 +223,12 @@ func main() {
   b := Box{}
   b.Count = "five"
 }`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "Cannot assign");
 });
 
 test("undefined type in struct field definition", () => {
 	const { errors } = compile(`package main
 type Widget struct { Child Ghost }`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "Ghost");
 });
 
@@ -295,7 +279,6 @@ func main() {
   x := 42
   _ = x.(string)
 }`);
-	assert(errors.length > 0, "expected error");
 	assertErrorContains(errors, "is not an interface");
 });
 

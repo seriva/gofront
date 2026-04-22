@@ -16,9 +16,10 @@ function vlqEncode(value) {
 	return result;
 }
 
-export function buildSourceMap(sources, mappings) {
-	// sources:  string[]
-	// mappings: Array<{ genLine: number, srcLine: number, srcFileIdx?: number }>  (0-based)
+export function buildSourceMap(sources, mappings, sourcesContent) {
+	// sources:         string[]
+	// mappings:        Array<{ genLine: number, srcLine: number, srcFileIdx?: number }>  (0-based)
+	// sourcesContent:  string[] | undefined — original file contents, embedded for DevTools
 	// Emits one segment per generated line, column 0 → source line (delta-encoded).
 	const lines = [];
 	let prevSrcLine = 0;
@@ -44,10 +45,12 @@ export function buildSourceMap(sources, mappings) {
 			lines.push(""); // no mapping for this generated line
 		}
 	}
-	return JSON.stringify({
+	const map = {
 		version: 3,
 		sources,
 		names: [],
 		mappings: lines.join(";"),
-	});
+	};
+	if (sourcesContent) map.sourcesContent = sourcesContent;
+	return JSON.stringify(map);
 }

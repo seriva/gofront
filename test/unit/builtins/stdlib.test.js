@@ -2,6 +2,7 @@
 
 import { fileURLToPath } from "node:url";
 import {
+	assert,
 	assertContains,
 	assertEqual,
 	compile,
@@ -2209,6 +2210,30 @@ func main() {
 }`);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "true\n2024");
+});
+
+test("time.Format DateOnly layout", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	t := time.Unix(1704067200, 0)
+	console.log(t.Format(time.DateOnly))
+}`);
+	assertEqual(errors.length, 0);
+	// time.Unix(1704067200, 0) = 2024-01-01 UTC; format result depends on local TZ but year must be 2024
+	const out = runJs(js);
+	assert(out.startsWith("2024-"), `expected year 2024, got: ${out}`);
+});
+
+test("time.Format year containing token digits (2015)", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	t := time.Unix(1420070400, 0)
+	console.log(t.Format(time.DateOnly))
+}`);
+	assertEqual(errors.length, 0);
+	// 1420070400 = 2015-01-01 UTC; year "2015" contains "15" (hour token) — single-pass fix prevents corruption
+	const out = runJs(js);
+	assert(out.startsWith("2015-"), `expected year 2015, got: ${out}`);
 });
 
 // ═════════════════════════════════════════════════════════════

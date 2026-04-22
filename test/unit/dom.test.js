@@ -1,7 +1,6 @@
 // GoFront test suite — DOM and external .d.ts
 import { fileURLToPath } from "node:url";
 import {
-	assert,
 	assertEqual,
 	assertErrorContains,
 	compile,
@@ -153,7 +152,6 @@ func main() {
 }`,
 		{ fromFile: join(FIXTURES, "_dummy.go") },
 	);
-	assert(errors.length > 0, "expected type error for unknown field");
 	assertErrorContains(errors, "nonExistentField");
 });
 
@@ -200,7 +198,6 @@ import "js:math.d.ts"
 func main() { JSMath.add(1) }`,
 		{ fromFile: join(FIXTURES, "_dummy.go") },
 	);
-	assert(errors.length > 0);
 	assertErrorContains(errors, "argument");
 });
 
@@ -218,7 +215,6 @@ test("custom .d.ts interface method — valid", () => {
 
 test("custom .d.ts interface method — invalid field caught", () => {
 	const { errors } = compileFile(join(FIXTURES, "dom_test_error.go"));
-	assert(errors.length > 0, "expected type error");
 	assertErrorContains(errors, "invalidProperty");
 });
 

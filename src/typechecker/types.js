@@ -93,14 +93,6 @@ export const BASIC_TYPES = {
 
 export const COMPARABLE = { kind: "basic", name: "comparable" };
 
-export function isTypeParam(t) {
-	return t?.kind === "typeParam";
-}
-
-export function isGeneric(t) {
-	return t?.kind === "generic";
-}
-
 function makeBasicPredicate(...names) {
 	const set = new Set(names);
 	const pred = (t) => {
@@ -136,13 +128,6 @@ export function isNil(t) {
 }
 export function isVoid(t) {
 	return t?.kind === "basic" && t.name === "void";
-}
-export function isError(t) {
-	if (!t) return false;
-	if (t === ERROR) return true;
-	if (t.kind === "interface" && t.name === "error") return true;
-	if (t.kind === "named" && isError(t.underlying)) return true;
-	return false;
 }
 export function isPointer(t) {
 	if (!t) return false;
