@@ -184,7 +184,7 @@ The type checker enforces correctness; JavaScript doesn't need to know.
 
 ## Examples — Todo App
 
-There are two example apps — both implement the same todo app to show different aspects
+There are three example apps — all implement the same todo app to show different aspects
 of GoFront.
 
 ### Simple (vanilla DOM)
@@ -244,18 +244,16 @@ The reactive example covers the full reactive.js API surface:
 | Component instance | `signal`, `effect`, `on` (auto-cleanup event listeners) |
 | Scan attributes | `data-model`, `data-text`, `data-html`, `data-if`, `data-visible`, `data-class-*`, `data-attr-*`, `data-bool-*`, `data-on-*`, `data-ref` |
 
-### gom (component library + todo app)
+### gom (stdlib component library + todo app)
 
 Browser-native declarative DOM components inspired by
-[gomponents](https://www.gomponents.com). The library lives in `example/gom/gom/` and
-is written entirely in GoFront — no hand-coded JS. It uses **methods on named non-struct
-types** (a v0.0.7 compiler feature) so that plain functions and slices can satisfy the
-`Node` interface without any struct boilerplate.
+[gomponents](https://www.gomponents.com). `gom` is a **built-in stdlib package** — no
+import path needed, available in every GoFront program just like `fmt` or `strings`. It
+uses **methods on named non-struct types** so that plain functions and slices can satisfy
+the `Node` interface without any struct boilerplate.
 
 ```
 example/gom/
-  gom/
-    gom.go    ← Node · NodeFunc · Group · El · Text · Attr · If · Map · Style · MountTo · Mount
   src/
     types.go  ← Todo struct, filter/priority constants
     store.go  ← state, mutations, localStorage persistence
@@ -267,12 +265,19 @@ example/gom/
   index.html  ← HTML shell
 ```
 
-Key types and functions:
-- `Node` — interface with a single `Mount(parent any)` method
-- `NodeFunc` — `type NodeFunc func(parent any)` with `Mount` method; any function becomes a `Node`
-- `Group` — `type Group []Node` with `Mount` method; composes children in order
-- `Style(css)` — returns a `Node` that injects a `<style>` element; styles are part of the node tree
-- `MountTo(selector, n)` — appends a node without clearing; used to inject styles into `<head>`
+Key types and functions (all accessed as `gom.*`, no import needed):
+- `gom.Node` — interface with a single `Mount(parent any)` method
+- `gom.NodeFunc` — `type NodeFunc func(parent any)` with `Mount` method; any function becomes a `Node`
+- `gom.Group` — `type Group []Node` with `Mount` method; composes children in order
+- `gom.El(tag, children...)` — creates an element node
+- `gom.Text(s)` — creates a text node
+- `gom.Attr(name, val)` — generic attribute node; named shortcuts: `gom.Class`, `gom.Href`, `gom.Type`, etc.
+- `gom.If(cond, node)` — conditionally renders a node
+- `gom.Map(slice, fn)` — maps a slice to a `Group` of nodes
+- `gom.Style(css)` — returns a `Node` that injects a `<style>` element; styles are part of the node tree
+- `gom.Mount(selector, n)` — mounts a node into the DOM, replacing the element's content
+- `gom.MountTo(selector, n)` — appends a node without clearing; used to inject styles into `<head>`
+- HTML element helpers: `gom.Div`, `gom.Span`, `gom.Button`, `gom.Input`, `gom.Ul`, `gom.Li`, … (full HTML element set)
 
 ### Features demonstrated
 
@@ -288,12 +293,11 @@ no `querySelector` or `getElementById` in application code, and `Reactive.Compon
 as the primary composition unit (state, template, styles, mount lifecycle, `data-ref`
 element refs, auto-cleanup event listeners).
 
-The gom example additionally demonstrates: **methods on named func and slice types**,
-interface satisfaction via method sets on non-struct types, type conversions
-(`NodeFunc(fn)`), composite literals (`Group{a, b}`), cross-package imports of a
-pure-GoFront library, styles as nodes (`gom.Style` + `gom.MountTo`), `gom.Map` for
-list rendering, and full feature parity with the other examples (priority mode,
-validation, localStorage persistence, sync status, drag-and-drop reordering).
+The gom example additionally demonstrates: **the `gom` built-in stdlib package**,
+styles as nodes (`gom.Style` + `gom.MountTo`), `gom.Map` for list rendering, the
+declarative node-tree pattern (no `innerHTML`, no `querySelector`), and full feature
+parity with the other examples (priority mode, validation, localStorage persistence,
+sync status, drag-and-drop reordering).
 
 ### Build and run
 
@@ -474,6 +478,7 @@ signatures into GoFront's internal type representation.
 | `regexp` | `MustCompile`, `Compile`, `MatchString`, `QuoteMeta`; **`*Regexp`** methods: `MatchString`, `FindString`, `FindStringIndex`, `FindAllString`, `FindStringSubmatch`, `FindAllStringSubmatch`, `ReplaceAllString`, `ReplaceAllLiteralString`, `Split`, `String`. Inline flags (`(?i)`, `(?m)`, `(?s)`) are extracted automatically into the JS `RegExp` constructor. |
 | `unicode` | `IsLetter`, `IsDigit`, `IsSpace`, `IsUpper`, `IsLower`, `IsPunct`, `IsControl`, `IsPrint`, `IsGraphic`, `ToUpper`, `ToLower` |
 | `os` | `Exit`, `Args`, `Getenv` |
+| `gom` | Browser-native declarative DOM component library. **Types**: `Node` (interface), `NodeFunc`, `Group`. **Core**: `El(tag, children...)`, `Text(s)`, `Mount(sel, node)`, `MountTo(sel, node)`. **Attributes**: `Attr`, `Class`, `Href`, `Type`, `Src`, `Placeholder`, `DataAttr`, `Style`, `For`, `Name`, `Value`, `Target`, `Rel`, `Alt`, `Title`, `Draggable`, `Role`, `AriaLabel`, `StyleAttr`; boolean: `Disabled`, `Checked`, `Selected`, `Readonly`. **Logic**: `If(cond, node)`, `Map(slice, fn)`. **Elements**: full HTML element set (`Div`, `Span`, `Button`, `Input`, `Ul`, `Li`, `Table`, `Form`, `Img`, `A`, `H1`–`H6`, …) |
 
 ### Packages & imports
 

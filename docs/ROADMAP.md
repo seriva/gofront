@@ -52,12 +52,49 @@ in [`docs/v0.0.7/`](v0.0.7/).
 | Feature | Difficulty | Status | Notes |
 |---|---|---|---|
 | Methods on named non-struct types | Medium | ✓ | `type Group []Node` and `type NodeFunc func(...)` with methods. Codegen: ES6 class wrapping the underlying value. See [design plan](v0.0.7/named-type-methods-plan.md). |
-| `gom` component library | Low | | Browser-native Node interface (`Mount(parent any)`), `El`, `Attr`, `Text`, `If`, `Map`, `Group`, `Mount`. Pure GoFront once named-type methods land. |
-| `gom/html` element helpers | Low | ✓ | `Div`, `A`, `Span`, `H1`–`H6`, `Ul`/`Ol`/`Li`, `Form`, `Input`, `Button`, etc. as thin wrappers over `gom.El`/`gom.Attr`. See `example/gom/gom/elements.go`. |
+| `gom` built-in namespace | Low | ✓ | Browser-native component built-in: `El`, `Text`, `Attr`, `Class`, `If`, `Map`, `Style`, `Mount`, `MountTo` plus all HTML element and attribute helpers. Registered in typechecker + codegen like `fmt`/`strings` — no source package, zero runtime overhead. |
+| `gom` element helpers | Low | ✓ | `Div`, `A`, `Span`, `H1`–`H6`, `Ul`/`Ol`/`Li`, `Form`, `Input`, `Button`, etc. All built into the `gom` namespace — no `elements.go` source file needed. |
 | `gom` example app | Low | ✓ | Full-featured todo app using `gom`, with feature parity to simple and reactive examples. |
 | `io` package shim (optional) | Low | ✓ | `io.Writer`, `io.EOF`, `io.Discard`, `io.WriteString`. Enables shared Go code that accepts `io.Writer` to compile in GoFront unchanged. |
 
 See [design plan](v0.0.7/gomponents-plan.md) for full details.
+
+---
+
+## v0.0.8
+
+**Theme: stdlib completeness.** The language spec is effectively done. v0.0.8 closes the
+remaining gaps in the standard library shims — adding a new package (`math/rand`) and
+filling missing functions in `math`, `sort`, `strings`, `io`, and `fmt`.
+Design documents are in [`docs/v0.0.8/`](v0.0.8/).
+
+| Feature | Difficulty | Status | Notes |
+|---|---|---|---|
+| `math/rand` package | Low | | `rand.Intn`, `rand.Float64`, `rand.Shuffle`, `rand.Perm`, `rand.Seed` (no-op). Wraps `Math.random()`. See [design plan](v0.0.8/math-rand-plan.md). |
+| `math` additions | Low | | `Atan`, `Atan2`, `Asin`, `Acos`, `Exp`, `Exp2`, `Trunc`, `Hypot`, `Signbit`, `Copysign`, `Dim`, `Remainder`. See [design plan](v0.0.8/stdlib-gaps-plan.md). |
+| `sort` additions | Low | | `sort.Search` (binary search), `sort.IntsAreSorted`, `sort.Float64sAreSorted`, `sort.StringsAreSorted`. See [design plan](v0.0.8/stdlib-gaps-plan.md). |
+| `strings` additions | Low | | `Fields`, `Cut`, `CutPrefix`, `CutSuffix`, `SplitN`, `SplitAfter`, `SplitAfterN`, `IndexAny`, `LastIndexAny`, `ContainsAny`, `ContainsRune`, `IndexRune`, `IndexByte`, `LastIndexByte`, `Map`, `Title`, `ToTitle`, `TrimFunc`, `IndexFunc`, `NewReplacer`. See [design plan](v0.0.8/stdlib-gaps-plan.md). |
+| `bytes` additions | Low | | `ReplaceAll`, `TrimPrefix`, `TrimSuffix`, `TrimLeft`, `TrimRight`, `TrimFunc`, `IndexByte`, `LastIndex`, `LastIndexByte`, `Fields`, `Cut`, `ContainsAny`, `ContainsRune`, `Map`, `SplitN`. See [design plan](v0.0.8/stdlib-gaps-plan.md). |
+| `strconv` additions | Low | | `strconv.Quote`, `strconv.Unquote`, `strconv.AppendInt`, `strconv.AppendFloat`. See [design plan](v0.0.8/stdlib-gaps-plan.md). |
+| `unicode/utf8` package | Low | | `RuneCountInString`, `RuneLen`, `ValidString`, `ValidRune`, `DecodeRuneInString`, `DecodeLastRuneInString`, `FullRuneInString`, `RuneError`/`MaxRune`/`UTFMax` constants. See [design plan](v0.0.8/unicode-utf8-plan.md). |
+| `path` package | Low | | `Join`, `Base`, `Dir`, `Ext`, `Clean`, `IsAbs`, `Split`, `Match`. Also registers `path/filepath` as an alias. See [design plan](v0.0.8/path-plan.md). |
+| `time` additions | Medium | | `t.Format(layout)`, `time.Parse`, `t.Year/Month/Day/Hour/Minute/Second`, `t.Add/Sub/Before/After/Equal`, `time.Date`, `time.Unix`, RFC3339/DateOnly/DateTime constants. See [design plan](v0.0.8/time-format-plan.md). |
+| `io.Reader` shim | Medium | | `strings.NewReader`, `bytes.NewReader`, `io.ReadAll`. Completes the `io` package alongside the v0.0.7 writer side. See [design plan](v0.0.8/io-reader-plan.md). |
+| `fmt` scanning | Medium | | `fmt.Sscan`, `fmt.Sscanln`, `fmt.Sscanf`. Parses whitespace-separated tokens into pointer targets. See [design plan](v0.0.8/fmt-scanning-plan.md). |
+
+---
+
+## v0.0.9
+
+**Theme: `.templ` file support.** Native `.templ` parsing brings the
+[templ](https://templ.guide) authoring experience to GoFront. Components are written in
+familiar templ syntax and compiled directly to DOM manipulation JavaScript, with the
+`gom` built-in (promoted in v0.0.7) as the runtime target.
+Design documents are in [`docs/v0.0.9/`](v0.0.9/).
+
+| Feature | Difficulty | Status | Notes |
+|---|---|---|---|
+| `.templ` file support | High | | Native `.templ` parsing: `templ` declarations, HTML bodies, `{ expr }` interpolation, `@component()` calls, `{ children... }` slots, `if`/`for`/`switch` control flow. Compiles directly to DOM manipulation JS using the `gom` built-in as the runtime target. See [design plan](v0.0.9/templ-plan.md). |
 
 ---
 

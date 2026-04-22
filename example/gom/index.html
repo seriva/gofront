@@ -9,31 +9,31 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: "Inter", -apple-system, sans-serif;
-      min-height: 100vh;
-      display: flex;
-      align-items: flex-start;
-      justify-content: center;
-      padding: 72px 16px 96px;
-      background: #060912;
-      overflow-x: hidden;
-    }
-    body::before {
-      content: '';
-      position: fixed;
-      inset: 0;
-      background:
-        radial-gradient(ellipse 60% 50% at 20% 10%, rgba(139,92,246,.22) 0%, transparent 60%),
-        radial-gradient(ellipse 50% 60% at 80% 80%, rgba(99,102,241,.18) 0%, transparent 60%),
-        radial-gradient(ellipse 40% 40% at 60% 30%, rgba(236,72,153,.1) 0%, transparent 50%);
-      pointer-events: none;
-      z-index: 0;
-    }
-    @keyframes pop {
-      from { transform: scale(0.5) rotate(-8deg); opacity: 0; }
-      to   { transform: scale(1)   rotate(0deg);  opacity: 1; }
-    }
+        body {
+          font-family: "Inter", -apple-system, sans-serif;
+          min-height: 100vh;
+          display: flex;
+          align-items: flex-start;
+          justify-content: center;
+          padding: 72px 16px 96px;
+          background: #060912;
+          overflow-x: hidden;
+        }
+        body::before {
+          content: '';
+          position: fixed;
+          inset: 0;
+          background:
+            radial-gradient(ellipse 60% 50% at 20% 10%, rgba(139,92,246,.22) 0%, transparent 60%),
+            radial-gradient(ellipse 50% 60% at 80% 80%, rgba(99,102,241,.18) 0%, transparent 60%),
+            radial-gradient(ellipse 40% 40% at 60% 30%, rgba(236,72,153,.1) 0%, transparent 50%);
+          pointer-events: none;
+          z-index: 0;
+        }
+        @keyframes pop {
+          from { transform: scale(0.5) rotate(-8deg); opacity: 0; }
+          to   { transform: scale(1)   rotate(0deg);  opacity: 1; }
+        }
   </style>
 </head>
 <body>

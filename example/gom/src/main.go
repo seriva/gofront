@@ -1,6 +1,5 @@
 package main
 
-import "../gom"
 import "js:./browser.d.ts"
 
 // ── Input handling ────────────────────────────────────────────
