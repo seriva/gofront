@@ -63,9 +63,9 @@ See [design plan](v0.0.7/gomponents-plan.md) for full details.
 
 ## v0.0.8
 
-**Theme: stdlib completeness.** The language spec is effectively done. v0.0.8 closes the
-remaining gaps in the standard library shims — adding a new package (`math/rand`) and
-filling missing functions in `math`, `sort`, `strings`, `io`, and `fmt`.
+**Theme: stdlib completeness + E2E testing.** The language spec is effectively done.
+v0.0.8 closes the remaining gaps in the standard library shims and adds end-to-end
+browser tests covering all three example apps.
 Design documents are in [`docs/v0.0.8/`](v0.0.8/).
 
 | Feature | Difficulty | Status | Notes |
@@ -81,6 +81,7 @@ Design documents are in [`docs/v0.0.8/`](v0.0.8/).
 | `time` additions | Medium | | `t.Format(layout)`, `time.Parse`, `t.Year/Month/Day/Hour/Minute/Second`, `t.Add/Sub/Before/After/Equal`, `time.Date`, `time.Unix`, RFC3339/DateOnly/DateTime constants. See [design plan](v0.0.8/time-format-plan.md). |
 | `io.Reader` shim | Medium | | `strings.NewReader`, `bytes.NewReader`, `io.ReadAll`. Completes the `io` package alongside the v0.0.7 writer side. See [design plan](v0.0.8/io-reader-plan.md). |
 | `fmt` scanning | Medium | | `fmt.Sscan`, `fmt.Sscanln`, `fmt.Sscanf`. Parses whitespace-separated tokens into pointer targets. See [design plan](v0.0.8/fmt-scanning-plan.md). |
+| E2E tests (Playwright) | Medium | | Shared test suite covering all three example apps: CRUD, filtering, priority mode, persistence, drag-and-drop, sync status. See [design plan](v0.0.8/e2e-plan.md). |
 
 ---
 

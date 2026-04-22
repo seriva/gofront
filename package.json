@@ -34,7 +34,7 @@
 		"build:simple": "node src/index.js example/simple/src -o example/simple/app.js",
 		"build:reactive": "node src/index.js example/reactive/src -o example/reactive/app.js",
 		"build:gom": "node src/index.js example/gom/src -o example/gom/app.js",
-		"test": "node test/run.js",
+		"test": "node test/unit/run.js",
 		"format": "biome format --write .",
 		"check": "biome check .",
 		"prepare": "husky"
