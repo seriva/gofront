@@ -23,7 +23,7 @@ packages. `src/dts-parser.js` parses TypeScript `.d.ts` declaration files.
 ## Commands
 
 ```sh
-npm test          # run the full test suite (~600 tests, no browser required)
+npm test          # run the full test suite (~990 tests, no browser required)
 npm run format    # format with Biome
 npm run check     # lint with Biome
 
@@ -35,9 +35,11 @@ node src/index.js <input> -o out.js --serve       # watch + dev server with live
 node src/index.js <input> -o out.js --serve --port 8080  # custom port
 node src/index.js <input> --source-map            # append inline source map
 node src/index.js <input> --minify                # minify output with terser
+node src/index.js <input> --minify --mangle       # minify and mangle identifiers
 node src/index.js <file.go> --ast                 # dump AST (debug)
 node src/index.js <file.go> --tokens              # dump tokens (debug)
 node src/index.js init [dir]                      # scaffold new project
+node src/index.js --version                       # print version
 ```
 
 ## Repository layout
@@ -73,9 +75,10 @@ test/
   structs.test.js   structs, embedded structs, methods
   dom.test.js       DOM (jsdom) and external .d.ts
   lexer-parser.test.js  lexer, parser, dts-parser, codegen
-  language/         core language feature tests (4 files)
-  types/            type system and type checking tests (3 files)
-  builtins/         built-in functions, operators, stdlib tests (3 files)
+  minifier.test.js  minifier and mangler
+  language/         core language feature tests (7 files)
+  types/            type system and type checking tests (6 files)
+  builtins/         built-in functions, operators, stdlib, gom tests (5 files)
   compiler/         multi-file packages, CLI, imports tests (3 files)
 example/
   simple/             vanilla DOM todo app (default example)
@@ -90,14 +93,20 @@ example/
   gom/                gom stdlib example (uses gom.* built-in namespace directly)
     src/              todo app source (package main, no imports needed)
       main.go
+      render.go
+      store.go
+      styles.go
+      types.go
+      utils/utils.go
     index.html        HTML shell
     app.js            build output
 docs/
   ROADMAP.md          release history + upcoming roadmap
   v0.0.5/             design documents for v0.0.5 features
-    generics-plan.md
-    range-iter-plan.md
-    ...
+  v0.0.6/             design documents for v0.0.6 features
+  v0.0.7/             design documents for v0.0.7 features (gom built-in)
+  v0.0.8/             design documents for v0.0.8 features (stdlib completeness)
+  v0.0.9/             design documents for v0.0.9 features (templ support)
 ```
 
 ## Key design decisions
@@ -116,14 +125,18 @@ docs/
   compile to a `__sprintf` helper. `fmt.Fprintf`/`Fprintln`/`Fprint` accept any writer,
   including `*strings.Builder` and `*bytes.Buffer`.
 - **Standard library shims** — `strings`, `strconv`, `sort`, `math`, `errors`, `time`,
-  `unicode`, `os`, `regexp`, `slices`, `maps`, and `html` are built-in namespaces (like
-  `fmt`). They compile to inline JS with no runtime overhead: `strings` maps to JS string
-  methods, `strconv` to `Number`/`parseInt`/`parseFloat`, `sort` to
+  `unicode`, `os`, `regexp`, `slices`, `maps`, `html`, and `io` are built-in namespaces
+  (like `fmt`). They compile to inline JS with no runtime overhead: `strings` maps to JS
+  string methods, `strconv` to `Number`/`parseInt`/`parseFloat`, `sort` to
   `Array.prototype.sort`, `math` to the `Math` object, `errors.New` is an identity,
   `time` wraps `Date.now()`, `regexp` wraps JS `RegExp` (inline `(?i)`-style flags are
-  extracted automatically), `slices` maps to JS array methods, `maps` to `Object.*`, and
-  `html` to inline `.replace()` chains. Functions that return `(value, error)` in Go
-  emit two-element arrays.
+  extracted automatically), `slices` maps to JS array methods, `maps` to `Object.*`,
+  `html` to inline `.replace()` chains, and `io` provides `io.Writer` / `io.Reader`
+  interface types. Functions that return `(value, error)` in Go emit two-element arrays.
+- **`gom` package** is a built-in DOM-rendering namespace (no import needed). Every
+  `gom.*` call emits an inline JS object with a `Mount(parent)` method. Includes element
+  helpers (`gom.Div`, `gom.Span`, …), attribute helpers (`gom.Class`, `gom.Attr`, …),
+  and control flow (`gom.If`, `gom.Map`, `gom.Text`).
 - **`strings.Builder` / `bytes.Buffer`** — value types that compile to plain JS objects
   (`{ _buf: "" }` and `{ _buf: [] }`). Methods dispatch inline; no class is generated.
 - **`async func` / `await`** are first-class syntax; async functions emit

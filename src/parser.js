@@ -308,16 +308,6 @@ export class Parser {
 		return this.looksLikeType(next) || next.type === T.ELLIPSIS;
 	}
 
-	// Heuristic: peek2 is a param-name separator if it's a comma, rparen, or a type token
-	isParamType(tok) {
-		if (!tok) return false;
-		// T.RPAREN is intentionally excluded: when peek2 is ")", the current IDENT
-		// is the type of an unnamed param (e.g. func(int)), not a param name.
-		return (
-			tok.type === T.COMMA || tok.type === T.ELLIPSIS || this.looksLikeType(tok)
-		);
-	}
-
 	looksLikeType(tok) {
 		return (
 			tok.type === T.LBRACKET ||
