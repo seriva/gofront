@@ -8,10 +8,6 @@ function Plural(n, word) {
   return String(n) + " " + word + "s";
 }
 
-function Clamp(n, lo, hi) {
-  return Math.max(Math.min(n, hi), lo);
-}
-
 function HasText(s) {
   return s.trim() !== "";
 }
@@ -22,14 +18,6 @@ function Filter(items, pred) {
     if (pred(item)) {
       out = __append(out, item);
     }
-  }
-  return out;
-}
-
-function Map(items, f) {
-  let out = null;
-  for (const [_$, item] of __s(items).entries()) {
-    out = __append(out, f(item));
   }
   return out;
 }
@@ -550,7 +538,7 @@ function initStore() {
     let urgent = Filter(todosSignal.get(), function(t) {
       return t.isUrgent();
     });
-    return Math.max(__len(urgent), 0);
+    return __len(urgent);
   }, "highCount");
 }
 

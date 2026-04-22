@@ -87,10 +87,7 @@ func footerNode() gom.Node {
 
 func badgeNode() gom.Node {
 	hc := highCount()
-	if hc > 0 {
-		return gom.Span(gom.Class("high-badge"), gom.Text(String(hc)+" urgent"))
-	}
-	return gom.Span(gom.Class("high-badge"), gom.StyleAttr("display:none"))
+	return gom.If(hc > 0, gom.Span(gom.Class("high-badge"), gom.Text(String(hc)+" urgent")))
 }
 
 func syncStatusNode() gom.Node {

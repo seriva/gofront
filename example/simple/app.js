@@ -22,14 +22,6 @@ function Filter(items, pred) {
   return out;
 }
 
-function Map(items, f) {
-  let out = null;
-  for (const [_$, item] of __s(items).entries()) {
-    out = __append(out, f(item));
-  }
-  return out;
-}
-
 var __len = __len || function(a) { if (a && typeof a === 'object' && !Array.isArray(a)) return Object.keys(a).length; return a?.length ?? 0; };
 var __append = __append || function(a, ...b) { return a ? [...a, ...b] : b; };
 var __s = __s || function(a) { return a || []; };

@@ -280,10 +280,7 @@ function footerNode() {
 
 function badgeNode() {
   let hc = highCount();
-  if (hc > 0) {
-    return ((...c)=>({Mount(p){const e=document.createElement("span");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))("high-badge"),((s)=>({Mount(p){p.appendChild(document.createTextNode(s))}}))(String(hc) + " urgent"));
-  }
-  return ((...c)=>({Mount(p){const e=document.createElement("span");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))("high-badge"),((v)=>({Mount(e){e.setAttribute("style",v)}}))("display:none"));
+  return ((c,n)=>c?n:{Mount(){}})(hc > 0,((...c)=>({Mount(p){const e=document.createElement("span");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))("high-badge"),((s)=>({Mount(p){p.appendChild(document.createTextNode(s))}}))(String(hc) + " urgent")));
 }
 
 function syncStatusNode() {
