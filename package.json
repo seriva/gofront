@@ -1,45 +1,45 @@
 {
-    "name": "gofront",
-    "version": "0.0.7",
-    "author": "Luuk van Venrooij",
-    "license": "MIT",
-    "repository": {
-        "type": "git",
-        "url": "https://github.com/seriva/gofront.git"
-    },
-    "bugs": {
-        "url": "https://github.com/seriva/gofront/issues"
-    },
-    "homepage": "https://github.com/seriva/gofront#readme",
-    "description": "A Go-inspired language that transpiles to JavaScript",
-    "keywords": [
-        "go",
-        "compiler",
-        "transpiler",
-        "javascript",
-        "frontend",
-        "type-safe"
-    ],
-    "engines": {
-        "node": ">=20"
-    },
-    "type": "module",
-    "files": [
-        "src/"
-    ],
-    "bin": {
-        "gofront": "./src/index.js"
-    },
-    "scripts": {
-        "build:simple": "node src/index.js example/simple/src -o example/simple/app.js",
-        "build:reactive": "node src/index.js example/reactive/src -o example/reactive/app.js",
-        "build:gom": "node src/index.js example/gom/src -o example/gom/app.js",
-        "test": "node test/run.js",
-        "format": "biome format --write .",
-        "check": "biome check ."
-    },
-    "devDependencies": {
-        "@biomejs/biome": "^2.4.11",
-        "jsdom": "^29.0.2"
-    }
+	"name": "gofront",
+	"version": "0.0.7",
+	"author": "Luuk van Venrooij",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/seriva/gofront.git"
+	},
+	"bugs": {
+		"url": "https://github.com/seriva/gofront/issues"
+	},
+	"homepage": "https://github.com/seriva/gofront#readme",
+	"description": "A Go-inspired language that transpiles to JavaScript",
+	"keywords": [
+		"go",
+		"compiler",
+		"transpiler",
+		"javascript",
+		"frontend",
+		"type-safe"
+	],
+	"engines": {
+		"node": ">=20"
+	},
+	"type": "module",
+	"files": [
+		"src/"
+	],
+	"bin": {
+		"gofront": "./src/index.js"
+	},
+	"scripts": {
+		"build:simple": "node src/index.js example/simple/src -o example/simple/app.js",
+		"build:reactive": "node src/index.js example/reactive/src -o example/reactive/app.js",
+		"build:gom": "node src/index.js example/gom/src -o example/gom/app.js",
+		"test": "node test/run.js",
+		"format": "biome format --write .",
+		"check": "biome check ."
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.4.11",
+		"jsdom": "^29.0.2"
+	}
 }
