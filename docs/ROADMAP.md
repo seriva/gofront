@@ -82,6 +82,9 @@ Design documents are in [`docs/v0.0.8/`](v0.0.8/).
 | `io.Reader` shim | Medium | ✓ | `strings.NewReader`, `bytes.NewReader`, `io.ReadAll`. Completes the `io` package alongside the v0.0.7 writer side. See [design plan](v0.0.8/io-reader-plan.md). |
 | `fmt` scanning | Medium | ✓ | `fmt.Sscan`, `fmt.Sscanln`, `fmt.Sscanf`. Parses whitespace-separated tokens into pointer targets. See [design plan](v0.0.8/fmt-scanning-plan.md). |
 | E2E tests (Playwright) | Medium | ✓ | Shared test suite covering all three example apps: CRUD, filtering, priority mode, persistence, drag-and-drop, sync status. See [design plan](v0.0.8/e2e-plan.md). |
+| Source map `sourcesContent` | Low | ✓ | Embed original `.go` source in the source map so browser DevTools can show it and honour breakpoints without fetching source files. |
+| Example app modernisation | Low | ✓ | `slices.DeleteFunc` replaces local `utils.Filter`; `utf8.RuneCountInString` replaces `len([]rune(...))` across all three apps. |
+| GoFront lint in `npm run check` | Low | ✓ | `--check` pass for all three example apps added to `npm run check` and the husky pre-commit hook. |
 
 ---
 
