@@ -7,6 +7,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **`math` additions** — `Atan`, `Atan2`, `Asin`, `Acos`, `Exp`, `Exp2`, `Trunc`, `Hypot`, `Signbit`, `Copysign`, `Dim`, `Remainder`.
+- **`math/rand` package** — `Intn`, `Float64`, `Float32`, `Int`, `Int63`, `Int63n`, `Int31`, `Int31n`, `Seed` (no-op), `Shuffle`, `Perm`. Import `"math/rand"`.
+- **`sort` additions** — `Search` (binary search), `IntsAreSorted`, `Float64sAreSorted`, `StringsAreSorted`.
+- **`strings` additions** — `Fields`, `Cut`, `CutPrefix`, `CutSuffix`, `SplitN`, `SplitAfter`, `SplitAfterN`, `IndexAny`, `LastIndexAny`, `ContainsAny`, `ContainsRune`, `IndexRune`, `IndexByte`, `LastIndexByte`, `Map`, `Title`, `ToTitle`, `TrimFunc`, `TrimLeftFunc`, `TrimRightFunc`, `IndexFunc`, `LastIndexFunc`, `NewReplacer`.
+- **`bytes` additions** — `ReplaceAll`, `TrimPrefix`, `TrimSuffix`, `TrimLeft`, `TrimRight`, `TrimFunc`, `IndexByte`, `LastIndex`, `LastIndexByte`, `Fields`, `Cut`, `ContainsAny`, `ContainsRune`, `Map`, `SplitN`.
+- **`strconv` additions** — `Quote`, `Unquote`, `AppendInt`, `AppendFloat`.
+- **`unicode/utf8` package** — `RuneCountInString`, `RuneLen`, `ValidString`, `ValidRune`, `DecodeRuneInString`, `DecodeLastRuneInString`, `FullRuneInString`; constants `RuneError`, `MaxRune`, `UTFMax`. Import `"unicode/utf8"`.
+- **`path` package** — `Base`, `Dir`, `Ext`, `Join`, `Clean`, `IsAbs`, `Split`, `Match`. `"path/filepath"` is an alias. Tree-shaken `__pathClean` helper.
+- **`time` additions** — `time.Time` named type with methods: `Format`, `String`, `Year`, `Month`, `Day`, `Hour`, `Minute`, `Second`, `Weekday`, `Unix`, `UnixMilli`, `Add`, `Sub`, `Before`, `After`, `Equal`. New functions: `time.Parse`, `time.Unix`, `time.Date`. Layout constants: `RFC3339`, `RFC3339Nano`, `DateOnly`, `TimeOnly`, `DateTime`. Month/weekday constants. Tree-shaken `__timeFmt`/`__timeParse` helpers. **Breaking**: `time.Now()` now returns `{_d: new Date()}` instead of a plain number.
+- **`io.Reader` shim** — `strings.NewReader`, `bytes.NewReader`, `io.ReadAll`.
+- **`fmt` scanning** — `Sscan`, `Sscanln`, `Sscanf`.
 - **E2E tests (Playwright)** — 74 end-to-end tests covering all three example apps
   (Simple, Reactive, Gom). Shared suite tests CRUD, filtering, priority mode,
   persistence (reload), drag-and-drop, and sync status. Per-app suites verify
@@ -15,6 +26,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `test/e2e/` with `global-setup.js` (builds all apps), `selectors.js`, `helpers.js`,
   and four spec files. New npm scripts: `test:e2e`, `test:e2e:ui`,
   `test:e2e:simple`, `test:e2e:reactive`, `test:e2e:gom`.
+
+### Changed
+- **Example apps** — `removeTodo` and `clearCompleted` now use `slices.DeleteFunc`
+  instead of the local `utils.Filter` generic; `validateTodo` uses
+  `utf8.RuneCountInString` instead of `len([]rune(text))` across all three apps.
+- **Resolver** — built-in stdlib package paths (`fmt`, `strings`, `unicode/utf8`,
+  `path`, `math/rand`, etc.) are now silently skipped during import resolution
+  instead of emitting a spurious "cannot find types" warning.
 
 ## [0.0.7] - 2026-04-22
 

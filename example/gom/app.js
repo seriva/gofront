@@ -334,7 +334,7 @@ function validateTodo(text) {
   if (!HasText(text)) {
     return __error("todo text cannot be empty");
   }
-  if (__len(Array.from(text, __c => __c.codePointAt(0))) > maxTodoLen) {
+  if ([...(text)].length > maxTodoLen) {
     return __error("todo text too long");
   }
   return null;
@@ -430,15 +430,15 @@ function toggleTodo(id) {
 }
 
 function removeTodo(id) {
-  todos = Filter(todos, function(t) {
-    return t.id !== id;
-  });
+  todos = todos.filter((v) => !function(t) {
+    return t.id === id;
+  }(v));
 }
 
 function clearCompleted() {
-  todos = Filter(todos, function(t) {
-    return !t.done;
-  });
+  todos = todos.filter((v) => !function(t) {
+    return t.done;
+  }(v));
 }
 
 function setFilter(f) {

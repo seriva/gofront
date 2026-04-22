@@ -70,17 +70,17 @@ Design documents are in [`docs/v0.0.8/`](v0.0.8/).
 
 | Feature | Difficulty | Status | Notes |
 |---|---|---|---|
-| `math/rand` package | Low | | `rand.Intn`, `rand.Float64`, `rand.Shuffle`, `rand.Perm`, `rand.Seed` (no-op). Wraps `Math.random()`. See [design plan](v0.0.8/math-rand-plan.md). |
-| `math` additions | Low | | `Atan`, `Atan2`, `Asin`, `Acos`, `Exp`, `Exp2`, `Trunc`, `Hypot`, `Signbit`, `Copysign`, `Dim`, `Remainder`. See [design plan](v0.0.8/stdlib-gaps-plan.md). |
-| `sort` additions | Low | | `sort.Search` (binary search), `sort.IntsAreSorted`, `sort.Float64sAreSorted`, `sort.StringsAreSorted`. See [design plan](v0.0.8/stdlib-gaps-plan.md). |
-| `strings` additions | Low | | `Fields`, `Cut`, `CutPrefix`, `CutSuffix`, `SplitN`, `SplitAfter`, `SplitAfterN`, `IndexAny`, `LastIndexAny`, `ContainsAny`, `ContainsRune`, `IndexRune`, `IndexByte`, `LastIndexByte`, `Map`, `Title`, `ToTitle`, `TrimFunc`, `IndexFunc`, `NewReplacer`. See [design plan](v0.0.8/stdlib-gaps-plan.md). |
-| `bytes` additions | Low | | `ReplaceAll`, `TrimPrefix`, `TrimSuffix`, `TrimLeft`, `TrimRight`, `TrimFunc`, `IndexByte`, `LastIndex`, `LastIndexByte`, `Fields`, `Cut`, `ContainsAny`, `ContainsRune`, `Map`, `SplitN`. See [design plan](v0.0.8/stdlib-gaps-plan.md). |
-| `strconv` additions | Low | | `strconv.Quote`, `strconv.Unquote`, `strconv.AppendInt`, `strconv.AppendFloat`. See [design plan](v0.0.8/stdlib-gaps-plan.md). |
-| `unicode/utf8` package | Low | | `RuneCountInString`, `RuneLen`, `ValidString`, `ValidRune`, `DecodeRuneInString`, `DecodeLastRuneInString`, `FullRuneInString`, `RuneError`/`MaxRune`/`UTFMax` constants. See [design plan](v0.0.8/unicode-utf8-plan.md). |
-| `path` package | Low | | `Join`, `Base`, `Dir`, `Ext`, `Clean`, `IsAbs`, `Split`, `Match`. Also registers `path/filepath` as an alias. See [design plan](v0.0.8/path-plan.md). |
-| `time` additions | Medium | | `t.Format(layout)`, `time.Parse`, `t.Year/Month/Day/Hour/Minute/Second`, `t.Add/Sub/Before/After/Equal`, `time.Date`, `time.Unix`, RFC3339/DateOnly/DateTime constants. See [design plan](v0.0.8/time-format-plan.md). |
-| `io.Reader` shim | Medium | | `strings.NewReader`, `bytes.NewReader`, `io.ReadAll`. Completes the `io` package alongside the v0.0.7 writer side. See [design plan](v0.0.8/io-reader-plan.md). |
-| `fmt` scanning | Medium | | `fmt.Sscan`, `fmt.Sscanln`, `fmt.Sscanf`. Parses whitespace-separated tokens into pointer targets. See [design plan](v0.0.8/fmt-scanning-plan.md). |
+| `math/rand` package | Low | ✓ | `rand.Intn`, `rand.Float64`, `rand.Shuffle`, `rand.Perm`, `rand.Seed` (no-op). Wraps `Math.random()`. See [design plan](v0.0.8/math-rand-plan.md). |
+| `math` additions | Low | ✓ | `Atan`, `Atan2`, `Asin`, `Acos`, `Exp`, `Exp2`, `Trunc`, `Hypot`, `Signbit`, `Copysign`, `Dim`, `Remainder`. See [design plan](v0.0.8/stdlib-gaps-plan.md). |
+| `sort` additions | Low | ✓ | `sort.Search` (binary search), `sort.IntsAreSorted`, `sort.Float64sAreSorted`, `sort.StringsAreSorted`. See [design plan](v0.0.8/stdlib-gaps-plan.md). |
+| `strings` additions | Low | ✓ | `Fields`, `Cut`, `CutPrefix`, `CutSuffix`, `SplitN`, `SplitAfter`, `SplitAfterN`, `IndexAny`, `LastIndexAny`, `ContainsAny`, `ContainsRune`, `IndexRune`, `IndexByte`, `LastIndexByte`, `Map`, `Title`, `ToTitle`, `TrimFunc`, `TrimLeftFunc`, `TrimRightFunc`, `IndexFunc`, `LastIndexFunc`, `NewReplacer`. See [design plan](v0.0.8/stdlib-gaps-plan.md). |
+| `bytes` additions | Low | ✓ | `ReplaceAll`, `TrimPrefix`, `TrimSuffix`, `TrimLeft`, `TrimRight`, `TrimFunc`, `IndexByte`, `LastIndex`, `LastIndexByte`, `Fields`, `Cut`, `ContainsAny`, `ContainsRune`, `Map`, `SplitN`. See [design plan](v0.0.8/stdlib-gaps-plan.md). |
+| `strconv` additions | Low | ✓ | `strconv.Quote`, `strconv.Unquote`, `strconv.AppendInt`, `strconv.AppendFloat`. See [design plan](v0.0.8/stdlib-gaps-plan.md). |
+| `unicode/utf8` package | Low | ✓ | `RuneCountInString`, `RuneLen`, `ValidString`, `ValidRune`, `DecodeRuneInString`, `DecodeLastRuneInString`, `FullRuneInString`, `RuneError`/`MaxRune`/`UTFMax` constants. See [design plan](v0.0.8/unicode-utf8-plan.md). |
+| `path` package | Low | ✓ | `Join`, `Base`, `Dir`, `Ext`, `Clean`, `IsAbs`, `Split`, `Match`. Also registers `path/filepath` as an alias. See [design plan](v0.0.8/path-plan.md). |
+| `time` additions | Medium | ✓ | `t.Format(layout)`, `time.Parse`, `t.Year/Month/Day/Hour/Minute/Second`, `t.Add/Sub/Before/After/Equal`, `time.Date`, `time.Unix`, RFC3339/DateOnly/DateTime constants. See [design plan](v0.0.8/time-format-plan.md). |
+| `io.Reader` shim | Medium | ✓ | `strings.NewReader`, `bytes.NewReader`, `io.ReadAll`. Completes the `io` package alongside the v0.0.7 writer side. See [design plan](v0.0.8/io-reader-plan.md). |
+| `fmt` scanning | Medium | ✓ | `fmt.Sscan`, `fmt.Sscanln`, `fmt.Sscanf`. Parses whitespace-separated tokens into pointer targets. See [design plan](v0.0.8/fmt-scanning-plan.md). |
 | E2E tests (Playwright) | Medium | ✓ | Shared test suite covering all three example apps: CRUD, filtering, priority mode, persistence, drag-and-drop, sync status. See [design plan](v0.0.8/e2e-plan.md). |
 
 ---

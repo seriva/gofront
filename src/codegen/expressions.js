@@ -163,7 +163,7 @@ export const expressionGenMethods = {
 							return "process.argv";
 					}
 				}
-				// time constants (nanosecond durations)
+				// time constants (nanosecond durations and layout strings)
 				if (expr.expr.kind === "Ident" && expr.expr.name === "time") {
 					switch (expr.field) {
 						case "Millisecond":
@@ -174,6 +174,68 @@ export const expressionGenMethods = {
 							return "60000000000";
 						case "Hour":
 							return "3600000000000";
+						case "RFC3339":
+							return '"2006-01-02T15:04:05Z07:00"';
+						case "RFC3339Nano":
+							return '"2006-01-02T15:04:05.999999999Z07:00"';
+						case "DateOnly":
+							return '"2006-01-02"';
+						case "TimeOnly":
+							return '"15:04:05"';
+						case "DateTime":
+							return '"2006-01-02 15:04:05"';
+						case "UTC":
+						case "Local":
+							return "null";
+						case "January":
+							return "1";
+						case "February":
+							return "2";
+						case "March":
+							return "3";
+						case "April":
+							return "4";
+						case "May":
+							return "5";
+						case "June":
+							return "6";
+						case "July":
+							return "7";
+						case "August":
+							return "8";
+						case "September":
+							return "9";
+						case "October":
+							return "10";
+						case "November":
+							return "11";
+						case "December":
+							return "12";
+						case "Sunday":
+							return "0";
+						case "Monday":
+							return "1";
+						case "Tuesday":
+							return "2";
+						case "Wednesday":
+							return "3";
+						case "Thursday":
+							return "4";
+						case "Friday":
+							return "5";
+						case "Saturday":
+							return "6";
+					}
+				}
+				// utf8 constants
+				if (expr.expr.kind === "Ident" && expr.expr.name === "utf8") {
+					switch (expr.field) {
+						case "RuneError":
+							return "0xFFFD";
+						case "MaxRune":
+							return "0x10FFFF";
+						case "UTFMax":
+							return "4";
 					}
 				}
 				const base = this.genExpr(expr.expr);
@@ -484,6 +546,9 @@ export const expressionGenMethods = {
 			}
 			if (recvName === "regexp.Regexp") {
 				return this._genRegexpMethodCall(expr.func.field, expr);
+			}
+			if (recvName === "time.Time") {
+				return this._genTimeMethodCall(expr.func.field, expr);
 			}
 		}
 
@@ -1096,6 +1161,10 @@ export const expressionGenMethods = {
 				// strings.Builder has { _buf: string }, bytes.Buffer has { _buf: [] }.
 				return `((b,s) => { const w = b?.value ?? b; if (typeof w.WriteString === "function") return [w.WriteString(s), null]; if (typeof w._buf === "string") { w._buf += s; return [s.length, null]; } if (Array.isArray(w._buf)) { w._buf.push(...new TextEncoder().encode(s)); return [s.length, null]; } return [0, "io.WriteString: unsupported writer"]; })(${w}, ${s})`;
 			}
+			case "ReadAll": {
+				const r = this.genExpr(expr.args[0]);
+				return `((r) => { const w = r?.value ?? r; if (typeof w._src === "string") { const s = w._src.slice(w._pos); w._pos = w._src.length; return [[...s].map(c => c.charCodeAt(0)), null]; } if (Array.isArray(w._src)) { const b = w._src.slice(w._pos); w._pos = w._src.length; return [b, null]; } const chunks = []; const buf = new Array(4096); let err = null; while (!err) { const [n, e] = w.Read(buf); if (n > 0) chunks.push(...buf.slice(0, n)); err = e; } return [chunks, err === "EOF" ? null : err]; })(${r})`;
+			}
 		}
 		return undefined;
 	},
@@ -1202,6 +1271,12 @@ export const expressionGenMethods = {
 				return this._genHtml(fn, a);
 			case "io":
 				return this._genIo(fn, a, expr);
+			case "rand":
+				return this._genRand(fn, a);
+			case "utf8":
+				return this._genUtf8(fn, a);
+			case "path":
+				return this._genPath(fn, a, expr);
 			case "gom":
 				return this._genGom(fn, expr);
 			default:
@@ -1425,6 +1500,31 @@ export const expressionGenMethods = {
 					return `(${buf} += __sprintf("%v\\n", ${restJs}))`;
 				return `(${buf} += __sprintf("%v", ${restJs}))`;
 			}
+			case "Sscan": {
+				const strArg = this.genExpr(expr.args[0]);
+				const restArgs = expr.args
+					.slice(1)
+					.map((e) => this.genExpr(e))
+					.join(", ");
+				return `((str, ...ptrs) => { const tokens = str.trim().split(/\\s+/).filter(Boolean); let n = 0; for (let i = 0; i < ptrs.length && i < tokens.length; i++) { const t = tokens[i]; const p = ptrs[i]; if (typeof p.value === "number") p.value = Number(t); else if (typeof p.value === "boolean") p.value = t === "true"; else p.value = t; n++; } return [n, n < ptrs.length ? "unexpected EOF" : null]; })(${strArg}, ${restArgs})`;
+			}
+			case "Sscanln": {
+				const strArg = this.genExpr(expr.args[0]);
+				const restArgs = expr.args
+					.slice(1)
+					.map((e) => this.genExpr(e))
+					.join(", ");
+				return `((str, ...ptrs) => { const line = str.split("\\n")[0]; const tokens = line.trim().split(/\\s+/).filter(Boolean); let n = 0; for (let i = 0; i < ptrs.length && i < tokens.length; i++) { const t = tokens[i]; const p = ptrs[i]; if (typeof p.value === "number") p.value = Number(t); else if (typeof p.value === "boolean") p.value = t === "true"; else p.value = t; n++; } return [n, n < ptrs.length ? "unexpected EOF" : null]; })(${strArg}, ${restArgs})`;
+			}
+			case "Sscanf": {
+				const strArg = this.genExpr(expr.args[0]);
+				const fmtArg = this.genExpr(expr.args[1]);
+				const restArgs = expr.args
+					.slice(2)
+					.map((e) => this.genExpr(e))
+					.join(", ");
+				return `((str, _fmt, ...ptrs) => { const tokens = str.trim().split(/\\s+/).filter(Boolean); let n = 0; for (let i = 0; i < ptrs.length && i < tokens.length; i++) { const t = tokens[i]; const p = ptrs[i]; if (typeof p.value === "number") p.value = Number(t); else if (typeof p.value === "boolean") p.value = t === "true"; else p.value = t; n++; } return [n, n < ptrs.length ? "input does not match format" : null]; })(${strArg}, ${fmtArg}, ${restArgs})`;
+			}
 			default:
 				return undefined;
 		}
@@ -1473,6 +1573,56 @@ export const expressionGenMethods = {
 				return `${args[0]}.join(${args[1]})`;
 			case "EqualFold":
 				return `${args[0]}.toLowerCase() === ${args[1]}.toLowerCase()`;
+			case "Fields":
+				return `(${args[0]}).trim() === '' ? [] : (${args[0]}).trim().split(/\\s+/)`;
+			case "Cut":
+				return `((s, sep) => { const i = s.indexOf(sep); return i < 0 ? [s, "", false] : [s.slice(0, i), s.slice(i + sep.length), true]; })(${args[0]}, ${args[1]})`;
+			case "CutPrefix":
+				return `(${args[0]}).startsWith(${args[1]}) ? [(${args[0]}).slice((${args[1]}).length), true] : [${args[0]}, false]`;
+			case "CutSuffix":
+				return `(${args[0]}).endsWith(${args[1]}) ? [(${args[0]}).slice(0, -(${args[1]}).length), true] : [${args[0]}, false]`;
+			case "SplitN":
+				return `((s, sep, n) => { if (n === 0) return []; if (n < 0) return s.split(sep); const r = []; let cur = s; for (let i = 1; i < n && cur.length; i++) { const j = cur.indexOf(sep); if (j < 0) break; r.push(cur.slice(0, j)); cur = cur.slice(j + sep.length); } r.push(cur); return r; })(${args[0]}, ${args[1]}, ${args[2]})`;
+			case "SplitAfter":
+				return `((s, sep) => { if (sep === "") return [...s]; const r = []; let cur = s; while (cur.length) { const j = cur.indexOf(sep); if (j < 0) { r.push(cur); break; } r.push(cur.slice(0, j + sep.length)); cur = cur.slice(j + sep.length); } return r; })(${args[0]}, ${args[1]})`;
+			case "SplitAfterN":
+				return `((s, sep, n) => { if (n === 0) return []; if (n < 0 || sep === "") return ((s, sep) => { if (sep === "") return [...s]; const r = []; let cur = s; while (cur.length) { const j = cur.indexOf(sep); if (j < 0) { r.push(cur); break; } r.push(cur.slice(0, j + sep.length)); cur = cur.slice(j + sep.length); } return r; })(s, sep); const r = []; let cur = s; for (let i = 1; i < n && cur.length; i++) { const j = cur.indexOf(sep); if (j < 0) break; r.push(cur.slice(0, j + sep.length)); cur = cur.slice(j + sep.length); } r.push(cur); return r; })(${args[0]}, ${args[1]}, ${args[2]})`;
+			case "IndexAny":
+				return `((s, chars) => { let m = -1; for (const c of chars) { const i = s.indexOf(c); if (i >= 0 && (m < 0 || i < m)) m = i; } return m; })(${args[0]}, ${args[1]})`;
+			case "LastIndexAny":
+				return `((s, chars) => { let m = -1; for (const c of chars) { const i = s.lastIndexOf(c); if (i > m) m = i; } return m; })(${args[0]}, ${args[1]})`;
+			case "ContainsAny":
+				return `[...(${args[1]})].some(c => (${args[0]}).includes(c))`;
+			case "ContainsRune":
+				return `(${args[0]}).includes(String.fromCodePoint(${args[1]}))`;
+			case "IndexRune":
+				return `(${args[0]}).indexOf(String.fromCodePoint(${args[1]}))`;
+			case "IndexByte":
+				return `(${args[0]}).indexOf(String.fromCharCode(${args[1]}))`;
+			case "LastIndexByte":
+				return `(${args[0]}).lastIndexOf(String.fromCharCode(${args[1]}))`;
+			case "Map":
+				return `[...(${args[1]})].map(c => String.fromCodePoint((${args[0]})(c.codePointAt(0)))).join("")`;
+			case "Title":
+				return `(${args[0]}).replace(/\\b\\w/g, c => c.toUpperCase())`;
+			case "ToTitle":
+				return `(${args[0]}).toUpperCase()`;
+			case "TrimFunc":
+				return `((s, f) => { let l = 0, r = s.length; while (l < r && f(s.codePointAt(l))) l++; while (r > l && f(s.codePointAt(r - 1))) r--; return s.slice(l, r); })(${args[0]}, ${args[1]})`;
+			case "TrimLeftFunc":
+				return `((s, f) => { let l = 0; while (l < s.length && f(s.codePointAt(l))) l++; return s.slice(l); })(${args[0]}, ${args[1]})`;
+			case "TrimRightFunc":
+				return `((s, f) => { let r = s.length; while (r > 0 && f(s.codePointAt(r - 1))) r--; return s.slice(0, r); })(${args[0]}, ${args[1]})`;
+			case "IndexFunc":
+				return `((s, f) => { for (let i = 0; i < s.length; i++) { const cp = s.codePointAt(i); if (f(cp)) return i; if (cp > 0xFFFF) i++; } return -1; })(${args[0]}, ${args[1]})`;
+			case "LastIndexFunc":
+				return `((s, f) => { for (let i = s.length - 1; i >= 0; i--) { const cp = s.codePointAt(i); if (f(cp)) return i; } return -1; })(${args[0]}, ${args[1]})`;
+			case "NewReader":
+				return `{_src: ${args[0]}, _pos: 0, Read(p) { const n = Math.min(p.length, this._src.length - this._pos); for (let i = 0; i < n; i++) p[i] = this._src.charCodeAt(this._pos + i); this._pos += n; return [n, n === 0 ? "EOF" : null]; }, Len() { return this._src.length - this._pos; }, Reset(s) { this._src = s; this._pos = 0; }}`;
+			case "NewReplacer": {
+				const allArgs = args.join(", ");
+				return `((...pairs) => { const p = []; for (let i = 0; i < pairs.length; i += 2) p.push([pairs[i], pairs[i+1]]); return { _p: p, Replace(s) { let r = s; for (const [o, n] of this._p) r = r.split(o).join(n); return r; } }; })(${allArgs})`;
+			}
 			default:
 				return undefined;
 		}
@@ -1511,6 +1661,38 @@ export const expressionGenMethods = {
 				return `${__bs}(${args[0]}).split(${__bs}(${args[1]})).map(p => ${__sb}(p))`;
 			case "Join":
 				return `${__sb}(${args[0]}.map(p => ${__bs}(p)).join(${__bs}(${args[1]})))`;
+			case "ReplaceAll":
+				return `((b, o, n) => { const r = []; let i = 0; while (i <= b.length - o.length) { if (o.every((v, j) => b[i + j] === v)) { r.push(...n); i += o.length; } else r.push(b[i++]); } return r.concat(b.slice(i)); })(${args[0]}, ${args[1]}, ${args[2]})`;
+			case "TrimPrefix":
+				return `((b, p) => p.every((v, i) => b[i] === v) ? b.slice(p.length) : b.slice())(${args[0]}, ${args[1]})`;
+			case "TrimSuffix":
+				return `((b, s) => s.length && s.every((v, i) => b[b.length - s.length + i] === v) ? b.slice(0, -s.length) : b.slice())(${args[0]}, ${args[1]})`;
+			case "TrimLeft":
+				return `((b, c) => { let i = 0; while (i < b.length && c.includes(String.fromCharCode(b[i]))) i++; return b.slice(i); })(${args[0]}, ${args[1]})`;
+			case "TrimRight":
+				return `((b, c) => { let i = b.length; while (i > 0 && c.includes(String.fromCharCode(b[i - 1]))) i--; return b.slice(0, i); })(${args[0]}, ${args[1]})`;
+			case "TrimFunc":
+				return `((b, f) => { let l = 0, r = b.length; while (l < r && f(b[l])) l++; while (r > l && f(b[r - 1])) r--; return b.slice(l, r); })(${args[0]}, ${args[1]})`;
+			case "IndexByte":
+				return `(${args[0]}).indexOf(${args[1]})`;
+			case "LastIndex":
+				return `((b, s) => { for (let i = b.length - s.length; i >= 0; i--) if (s.every((v, j) => b[i + j] === v)) return i; return -1; })(${args[0]}, ${args[1]})`;
+			case "LastIndexByte":
+				return `(${args[0]}).lastIndexOf(${args[1]})`;
+			case "Fields":
+				return `((b) => { const s = String.fromCharCode(...b).trim(); return s === '' ? [] : s.split(/\\s+/).map(w => [...w].map(c => c.charCodeAt(0))); })(${args[0]})`;
+			case "Cut":
+				return `((b, sep) => { for (let i = 0; i <= b.length - sep.length; i++) if (sep.every((v, j) => b[i + j] === v)) return [b.slice(0, i), b.slice(i + sep.length), true]; return [b.slice(), [], false]; })(${args[0]}, ${args[1]})`;
+			case "ContainsAny":
+				return `[...(${args[1]})].some(c => (${args[0]}).includes(c.charCodeAt(0)))`;
+			case "ContainsRune":
+				return `(${args[0]}).includes(${args[1]})`;
+			case "Map":
+				return `(${args[1]}).map(v => (${args[0]})(v))`;
+			case "SplitN":
+				return `((b, sep, n) => { if (n === 0) return []; if (n < 0) return ((b, sep) => { const r = []; let i = 0; while (i <= b.length) { const j = b.findIndex((_, k) => k >= i && sep.every((v, l) => b[k + l] === sep[l])); if (j < 0 || j >= b.length) break; r.push(b.slice(i, j)); i = j + sep.length; } r.push(b.slice(i)); return r; })(b, sep); const r = []; let i = 0; for (let c = 1; c < n; c++) { const j = b.findIndex((_, k) => k >= i && sep.every((v, l) => b[k + l] === sep[l])); if (j < 0) break; r.push(b.slice(i, j)); i = j + sep.length; } r.push(b.slice(i)); return r; })(${args[0]}, ${args[1]}, ${args[2]})`;
+			case "NewReader":
+				return `{_src: ${args[0]}, _pos: 0, Read(p) { const n = Math.min(p.length, this._src.length - this._pos); for (let i = 0; i < n; i++) p[i] = this._src[this._pos + i]; this._pos += n; return [n, n === 0 ? "EOF" : null]; }, Len() { return this._src.length - this._pos; }, Reset(b) { this._src = b; this._pos = 0; }}`;
 			default:
 				return undefined;
 		}
@@ -1535,6 +1717,14 @@ export const expressionGenMethods = {
 				return `(Number.isNaN(parseInt(${args[0]}, ${args[1]} || 10)) ? [0, "invalid syntax"] : [parseInt(${args[0]}, ${args[1]} || 10), null])`;
 			case "ParseBool":
 				return `(${args[0]} === "true" || ${args[0]} === "1" ? [true, null] : ${args[0]} === "false" || ${args[0]} === "0" ? [false, null] : [false, "invalid syntax"])`;
+			case "Quote":
+				return `JSON.stringify(${args[0]})`;
+			case "Unquote":
+				return `((s) => { try { const v = JSON.parse(s); return [v, null]; } catch(e) { return ["", "invalid syntax"]; } })(${args[0]})`;
+			case "AppendInt":
+				return `[...(${args[0]}), ...new TextEncoder().encode((${args[1]}).toString(${args[2]}))]`;
+			case "AppendFloat":
+				return `[...(${args[0]}), ...new TextEncoder().encode(${args[1]}.toFixed(${args[3]} < 0 ? 6 : ${args[3]}))]`;
 			default:
 				return undefined;
 		}
@@ -1553,6 +1743,12 @@ export const expressionGenMethods = {
 				return `${args[0]}.sort((a, b) => ${args[1]}(a, b) ? -1 : ${args[1]}(b, a) ? 1 : 0)`;
 			case "SliceIsSorted":
 				return `${args[0]}.every((v, i, a) => i === 0 || ${args[1]}(a[i - 1], v))`;
+			case "Search":
+				return `((n, f) => { let lo = 0, hi = n; while (lo < hi) { const mid = (lo + hi) >>> 1; if (f(mid)) hi = mid; else lo = mid + 1; } return lo; })(${args[0]}, ${args[1]})`;
+			case "IntsAreSorted":
+			case "Float64sAreSorted":
+			case "StringsAreSorted":
+				return `(${args[0]}).every((v, i, a) => i === 0 || a[i - 1] <= v)`;
 			default:
 				return undefined;
 		}
@@ -1601,6 +1797,30 @@ export const expressionGenMethods = {
 				return `(${args[1]} > 0 ? ${args[0]} === Infinity : ${args[1]} < 0 ? ${args[0]} === -Infinity : !Number.isFinite(${args[0]}))`;
 			case "NaN":
 				return "NaN";
+			case "Atan":
+				return `Math.atan(${args[0]})`;
+			case "Atan2":
+				return `Math.atan2(${args[0]}, ${args[1]})`;
+			case "Asin":
+				return `Math.asin(${args[0]})`;
+			case "Acos":
+				return `Math.acos(${args[0]})`;
+			case "Exp":
+				return `Math.exp(${args[0]})`;
+			case "Exp2":
+				return `Math.pow(2, ${args[0]})`;
+			case "Trunc":
+				return `Math.trunc(${args[0]})`;
+			case "Hypot":
+				return `Math.hypot(${args[0]}, ${args[1]})`;
+			case "Signbit":
+				return `(${args[0]} < 0 || Object.is(${args[0]}, -0))`;
+			case "Copysign":
+				return `(Math.abs(${args[0]}) * (${args[1]} < 0 || Object.is(${args[1]}, -0) ? -1 : 1))`;
+			case "Dim":
+				return `Math.max(${args[0]} - ${args[1]}, 0)`;
+			case "Remainder":
+				return `(${args[0]} - Math.round(${args[0]} / ${args[1]}) * ${args[1]})`;
 			default:
 				return undefined;
 		}
@@ -1665,15 +1885,142 @@ export const expressionGenMethods = {
 		}
 	},
 
+	_genTimeMethodCall(method, expr) {
+		const recv = expr.func.expr;
+		const recvJs = this.genExpr(recv);
+		const args = expr.args.map((a) => this.genExpr(a));
+		switch (method) {
+			case "Format":
+				this._usesTimeFmt = true;
+				return `__timeFmt(${recvJs}._d, ${args[0]})`;
+			case "String":
+				this._usesTimeFmt = true;
+				return `__timeFmt(${recvJs}._d, "2006-01-02T15:04:05Z07:00")`;
+			case "Year":
+				return `${recvJs}._d.getFullYear()`;
+			case "Month":
+				return `${recvJs}._d.getMonth() + 1`;
+			case "Day":
+				return `${recvJs}._d.getDate()`;
+			case "Hour":
+				return `${recvJs}._d.getHours()`;
+			case "Minute":
+				return `${recvJs}._d.getMinutes()`;
+			case "Second":
+				return `${recvJs}._d.getSeconds()`;
+			case "Weekday":
+				return `${recvJs}._d.getDay()`;
+			case "Unix":
+				return `Math.floor(${recvJs}._d.getTime() / 1000)`;
+			case "UnixMilli":
+				return `${recvJs}._d.getTime()`;
+			case "Add":
+				return `{_d: new Date(${recvJs}._d.getTime() + (${args[0]}))}`;
+			case "Sub":
+				return `${recvJs}._d.getTime() - (${args[0]})._d.getTime()`;
+			case "Before":
+				return `${recvJs}._d < (${args[0]})._d`;
+			case "After":
+				return `${recvJs}._d > (${args[0]})._d`;
+			case "Equal":
+				return `${recvJs}._d.getTime() === (${args[0]})._d.getTime()`;
+			default:
+				return undefined;
+		}
+	},
+
 	_genTime(fn, a) {
 		const args = a();
 		switch (fn) {
 			case "Now":
-				return "Date.now()";
+				return "{_d: new Date()}";
 			case "Since":
-				return `(Date.now() - ${args[0]})`;
+				return `(Date.now() - (${args[0]})._d.getTime())`;
 			case "Sleep":
 				return `await new Promise(r => setTimeout(r, ${args[0]} / 1000000))`;
+			case "Parse":
+				this._usesTimeParse = true;
+				return `__timeParse(${args[0]}, ${args[1]})`;
+			case "Unix":
+				return `{_d: new Date((${args[0]}) * 1000)}`;
+			case "Date":
+				return `{_d: new Date(${args[0]}, ${args[1]} - 1, ${args[2]}, ${args[3]}, ${args[4]}, ${args[5]})}`;
+			default:
+				return undefined;
+		}
+	},
+
+	_genRand(fn, a) {
+		const args = a();
+		switch (fn) {
+			case "Intn":
+			case "Int63n":
+			case "Int31n":
+				return `Math.floor(Math.random() * ${args[0]})`;
+			case "Float64":
+			case "Float32":
+				return "Math.random()";
+			case "Int":
+			case "Int31":
+				return "Math.floor(Math.random() * 2147483647)";
+			case "Int63":
+				return "Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)";
+			case "Seed":
+				return "(void 0)";
+			case "Shuffle":
+				return `((n, f) => { for (let i = n - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); f(i, j); } })(${args[0]}, ${args[1]})`;
+			case "Perm":
+				return `((n) => { const a = Array.from({length: n}, (_, i) => i); for (let i = n - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; })(${args[0]})`;
+			default:
+				return undefined;
+		}
+	},
+
+	_genUtf8(fn, a) {
+		const args = a();
+		switch (fn) {
+			case "RuneCountInString":
+				return `[...(${args[0]})].length`;
+			case "RuneLen":
+				return `((r) => r < 0 ? -1 : r <= 0x7F ? 1 : r <= 0x7FF ? 2 : r <= 0xFFFF ? (r >= 0xD800 && r <= 0xDFFF ? -1 : 3) : r <= 0x10FFFF ? 4 : -1)(${args[0]})`;
+			case "ValidString":
+				return `/[\\uD800-\\uDBFF](?![\\uDC00-\\uDFFF])|(?<![\\uD800-\\uDBFF])[\\uDC00-\\uDFFF]/.test(${args[0]}) === false`;
+			case "ValidRune":
+				return `(${args[0]}) >= 0 && (${args[0]}) <= 0x10FFFF && !((${args[0]}) >= 0xD800 && (${args[0]}) <= 0xDFFF)`;
+			case "DecodeRuneInString":
+				return `((s) => { if (!s) return [0xFFFD, 0]; const cp = s.codePointAt(0); return [cp, cp > 0xFFFF ? 2 : 1]; })(${args[0]})`;
+			case "DecodeLastRuneInString":
+				return `((s) => { if (!s) return [0xFFFD, 0]; const i = s.length > 1 && s.charCodeAt(s.length - 1) >= 0xDC00 && s.charCodeAt(s.length - 1) <= 0xDFFF ? s.length - 2 : s.length - 1; const cp = s.codePointAt(i); return [cp, cp > 0xFFFF ? 2 : 1]; })(${args[0]})`;
+			case "FullRuneInString":
+				return `(${args[0]}).length > 0`;
+			default:
+				return undefined;
+		}
+	},
+
+	_genPath(fn, a, expr) {
+		const args = a();
+		switch (fn) {
+			case "Base":
+				return `((p) => { if (!p) return "."; const stripped = p.replace(/\\/+$/, ""); if (!stripped) return "/"; const i = stripped.lastIndexOf("/"); return i < 0 ? stripped : stripped.slice(i + 1) || "/"; })(${args[0]})`;
+			case "Dir":
+				return `((p) => { const i = p.lastIndexOf("/"); if (i < 0) return "."; if (i === 0) return "/"; return p.slice(0, i); })(${args[0]})`;
+			case "Ext":
+				return `((p) => { const b = p.slice(p.lastIndexOf("/") + 1); const i = b.lastIndexOf("."); return i <= 0 ? "" : b.slice(i); })(${args[0]})`;
+			case "Join": {
+				this._usesPathClean = true;
+				const allArgs = expr.args.map((e) => this.genExpr(e)).join(", ");
+				return `__pathClean([${allArgs}].filter(x => x !== "").join("/"))`;
+			}
+			case "Clean":
+				this._usesPathClean = true;
+				return `__pathClean(${args[0]})`;
+			case "IsAbs":
+				return `(${args[0]}).startsWith("/")`;
+			case "Split":
+				return `((p) => { const i = p.lastIndexOf("/"); return i < 0 ? ["", p] : [p.slice(0, i + 1), p.slice(i + 1)]; })(${args[0]})`;
+			case "Match":
+				return `((pat, name) => { try { const sp=/[.+^$()|[\\]\\\\]/g; const re = new RegExp("^" + pat.replace(sp, "\\\\$&").replace(/\\*/g, "[^/]*").replace(/\\?/g, "[^/]") + "$"); return [re.test(name), null]; } catch(e) { return [false, "syntax error in pattern"]; } })(${args[0]}, ${args[1]})`;
 			default:
 				return undefined;
 		}

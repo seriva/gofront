@@ -52,6 +52,9 @@ export class CodeGen {
 		this._usesCdiv = false;
 		this._usesError = false;
 		this._usesErrorIs = false;
+		this._usesPathClean = false;
+		this._usesTimeFmt = false;
+		this._usesTimeParse = false;
 		// Iterator (range-over-func) context
 		this._inIteratorBody = false;
 		this._iterDepth = 0;
@@ -225,6 +228,43 @@ export class CodeGen {
 		if (this._usesErrorIs)
 			helpers.push(
 				'var __errorIs = __errorIs || function(err, target) { while (err !== null && err !== undefined) { if (err === target) return true; if (typeof err === "object" && typeof target === "object" && err._msg !== undefined && target._msg !== undefined && err._msg === target._msg) return true; err = err?._cause ?? null; } return false; };',
+			);
+		if (this._usesPathClean)
+			helpers.push(
+				'var __pathClean = __pathClean || function(p) { if (!p) return "."; const abs = p.startsWith("/"); const parts = p.split("/").reduce((acc, s) => { if (s === "" || s === ".") return acc; if (s === "..") { if (acc.length && acc[acc.length-1] !== "..") acc.pop(); else if (!abs) acc.push(".."); } else acc.push(s); return acc; }, []); return (abs ? "/" : "") + (parts.join("/") || "."); };',
+			);
+		if (this._usesTimeFmt)
+			helpers.push(
+				[
+					"var __timeFmt = __timeFmt || function(d, layout) {",
+					'const pad = (n, w=2) => String(n).padStart(w, "0");',
+					"return layout",
+					'.replace("2006", d.getFullYear())',
+					'.replace("06", String(d.getFullYear()).slice(-2))',
+					'.replace("Monday", ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][d.getDay()])',
+					'.replace("Mon", ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d.getDay()])',
+					'.replace("January", ["January","February","March","April","May","June","July","August","September","October","November","December"][d.getMonth()])',
+					'.replace("Jan", ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getMonth()])',
+					'.replace("01", pad(d.getMonth()+1))',
+					'.replace("1", String(d.getMonth()+1))',
+					'.replace("02", pad(d.getDate()))',
+					'.replace("2", String(d.getDate()))',
+					'.replace("15", pad(d.getHours()))',
+					'.replace("PM", d.getHours()<12?"AM":"PM")',
+					'.replace("3", String(d.getHours()%12||12))',
+					'.replace("04", pad(d.getMinutes()))',
+					'.replace("4", String(d.getMinutes()))',
+					'.replace("05", pad(d.getSeconds()))',
+					'.replace("5", String(d.getSeconds()))',
+					'.replace("Z07:00", (()=>{const o=-d.getTimezoneOffset();return o===0?"Z":(o>0?"+":"-")+pad(Math.floor(Math.abs(o)/60))+":"+pad(Math.abs(o)%60)})())',
+					'.replace(".000", "."+pad(d.getMilliseconds(),3))',
+					'.replace(".999", d.getMilliseconds()>0?"."+String(d.getMilliseconds()).replace(/0+$/,""):"");',
+					"};",
+				].join(""),
+			);
+		if (this._usesTimeParse)
+			helpers.push(
+				'var __timeParse = __timeParse || function(layout, value) { try { const d = new Date(value); if (isNaN(d.getTime())) throw 0; return [{_d:d}, null]; } catch { return [{_d:new Date(0)}, "parsing time: cannot parse"]; } };',
 			);
 
 		if (helpers.length > 0) this.out.unshift(...helpers, "");
@@ -534,7 +574,10 @@ export class CodeGen {
 				}
 			} else {
 				const zero = spec.type ? this.zeroValueForTypeNode(spec.type) : "null";
-				for (const name of spec.names) this.line(`let ${name} = ${zero};`);
+				for (const name of spec.names) {
+					const val = this._boxedVars.has(name) ? `{ value: ${zero} }` : zero;
+					this.line(`let ${name} = ${val};`);
+				}
 			}
 		}
 	}
