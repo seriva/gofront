@@ -53,6 +53,7 @@ src/
   typechecker.js    type inference, interface satisfaction, error reporting (core)
   typechecker/
     types.js        shared type constants, predicates, Scope, TypeCheckError
+    stdlib.js       browser globals + all built-in package registrations
     statements.js   checkBlock, checkStmt
     expressions.js  checkExpr, checkCall, checkBuiltin, checkCompositeLit
   codegen.js        AST → JavaScript (core + struct/function generation)
@@ -86,10 +87,8 @@ example/
     index.html        HTML shell (loads reactive.js)
     reactive.js       signals-based reactive framework
     app.js            build output
-  gom/                gom component library + todo app
-    gom/              pure-GoFront component library (package gom)
-      gom.go          Node · NodeFunc · Group · El · Text · Attr · If · Map · Mount
-    src/              todo app source (package main, imports ../gom)
+  gom/                gom stdlib example (uses gom.* built-in namespace directly)
+    src/              todo app source (package main, no imports needed)
       main.go
     index.html        HTML shell
     app.js            build output

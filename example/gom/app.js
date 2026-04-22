@@ -1,413 +1,6 @@
 var __append = __append || function(a, ...b) { return a ? [...a, ...b] : b; };
 var __s = __s || function(a) { return a || []; };
 
-// interface Node (compile-time only)
-
-class NodeFunc {
-  constructor(_fn = null) { this._fn = _fn; }
-
-  Mount(parent) {
-    const n = this._fn;
-    n(parent);
-  }
-}
-
-class Group {
-  constructor(_items = []) { this._items = _items; }
-
-  Mount(parent) {
-    const g = this._items;
-    for (const [_$, n] of __s(g).entries()) {
-      if (n !== null) {
-        n.Mount(parent);
-      }
-    }
-  }
-}
-
-class attrNode {
-  constructor({ name = "", value = "" } = {}) {
-    this.name = name;
-    this.value = value;
-  }
-
-  Mount(parent) {
-    const a = this;
-    parent.setAttribute(a.name, a.value);
-  }
-}
-
-function Div(...children) {
-  return El("div", ...children);
-}
-
-function Section(...children) {
-  return El("section", ...children);
-}
-
-function Article(...children) {
-  return El("article", ...children);
-}
-
-function Aside(...children) {
-  return El("aside", ...children);
-}
-
-function Header(...children) {
-  return El("header", ...children);
-}
-
-function Footer(...children) {
-  return El("footer", ...children);
-}
-
-function Main(...children) {
-  return El("main", ...children);
-}
-
-function Nav(...children) {
-  return El("nav", ...children);
-}
-
-function Figure(...children) {
-  return El("figure", ...children);
-}
-
-function H1(...children) {
-  return El("h1", ...children);
-}
-
-function H2(...children) {
-  return El("h2", ...children);
-}
-
-function H3(...children) {
-  return El("h3", ...children);
-}
-
-function H4(...children) {
-  return El("h4", ...children);
-}
-
-function H5(...children) {
-  return El("h5", ...children);
-}
-
-function H6(...children) {
-  return El("h6", ...children);
-}
-
-function Span(...children) {
-  return El("span", ...children);
-}
-
-function A(...children) {
-  return El("a", ...children);
-}
-
-function Strong(...children) {
-  return El("strong", ...children);
-}
-
-function Em(...children) {
-  return El("em", ...children);
-}
-
-function Code(...children) {
-  return El("code", ...children);
-}
-
-function Pre(...children) {
-  return El("pre", ...children);
-}
-
-function Small(...children) {
-  return El("small", ...children);
-}
-
-function Mark(...children) {
-  return El("mark", ...children);
-}
-
-function P(...children) {
-  return El("p", ...children);
-}
-
-function Br() {
-  return El("br");
-}
-
-function Hr() {
-  return El("hr");
-}
-
-function Ul(...children) {
-  return El("ul", ...children);
-}
-
-function Ol(...children) {
-  return El("ol", ...children);
-}
-
-function Li(...children) {
-  return El("li", ...children);
-}
-
-function Dl(...children) {
-  return El("dl", ...children);
-}
-
-function Dt(...children) {
-  return El("dt", ...children);
-}
-
-function Dd(...children) {
-  return El("dd", ...children);
-}
-
-function Form(...children) {
-  return El("form", ...children);
-}
-
-function Input(...children) {
-  return El("input", ...children);
-}
-
-function Button(...children) {
-  return El("button", ...children);
-}
-
-function Textarea(...children) {
-  return El("textarea", ...children);
-}
-
-function Select(...children) {
-  return El("select", ...children);
-}
-
-function Option(...children) {
-  return El("option", ...children);
-}
-
-function Label(...children) {
-  return El("label", ...children);
-}
-
-function Fieldset(...children) {
-  return El("fieldset", ...children);
-}
-
-function Legend(...children) {
-  return El("legend", ...children);
-}
-
-function Img(...children) {
-  return El("img", ...children);
-}
-
-function Video(...children) {
-  return El("video", ...children);
-}
-
-function Audio(...children) {
-  return El("audio", ...children);
-}
-
-function Canvas(...children) {
-  return El("canvas", ...children);
-}
-
-function Table(...children) {
-  return El("table", ...children);
-}
-
-function Thead(...children) {
-  return El("thead", ...children);
-}
-
-function Tbody(...children) {
-  return El("tbody", ...children);
-}
-
-function Tfoot(...children) {
-  return El("tfoot", ...children);
-}
-
-function Tr(...children) {
-  return El("tr", ...children);
-}
-
-function Th(...children) {
-  return El("th", ...children);
-}
-
-function Td(...children) {
-  return El("td", ...children);
-}
-
-function For(v) {
-  return Attr("for", v);
-}
-
-function Name(v) {
-  return Attr("name", v);
-}
-
-function Value(v) {
-  return Attr("value", v);
-}
-
-function Target(v) {
-  return Attr("target", v);
-}
-
-function Rel(v) {
-  return Attr("rel", v);
-}
-
-function Alt(v) {
-  return Attr("alt", v);
-}
-
-function Title(v) {
-  return Attr("title", v);
-}
-
-function Lang(v) {
-  return Attr("lang", v);
-}
-
-function Action(v) {
-  return Attr("action", v);
-}
-
-function Method(v) {
-  return Attr("method", v);
-}
-
-function AutoComplete(v) {
-  return Attr("autocomplete", v);
-}
-
-function Draggable(v) {
-  return Attr("draggable", v);
-}
-
-function Role(v) {
-  return Attr("role", v);
-}
-
-function AriaLabel(v) {
-  return Attr("aria-label", v);
-}
-
-function Disabled() {
-  return Attr("disabled", "");
-}
-
-function Checked() {
-  return Attr("checked", "");
-}
-
-function Selected() {
-  return Attr("selected", "");
-}
-
-function Readonly() {
-  return Attr("readonly", "");
-}
-
-function StyleAttr(v) {
-  return Attr("style", v);
-}
-
-function El(tag, ...children) {
-  return new NodeFunc(function(parent) {
-    let el = document.createElement(tag);
-    for (const [_$, c] of __s(children).entries()) {
-      if (c !== null) {
-        c.Mount(el);
-      }
-    }
-    parent.appendChild(el);
-  });
-}
-
-function Text(s) {
-  return new NodeFunc(function(parent) {
-    parent.appendChild(document.createTextNode(s));
-  });
-}
-
-function Attr(name, value) {
-  return new attrNode({ name: name, value: value });
-}
-
-function Class(v) {
-  return Attr("class", v);
-}
-
-function ID(v) {
-  return Attr("id", v);
-}
-
-function Href(v) {
-  return Attr("href", v);
-}
-
-function Src(v) {
-  return Attr("src", v);
-}
-
-function Type(v) {
-  return Attr("type", v);
-}
-
-function Placeholder(v) {
-  return Attr("placeholder", v);
-}
-
-function DataAttr(name, value) {
-  return Attr("data-" + name, value);
-}
-
-function If(cond, n) {
-  if (cond) {
-    return n;
-  }
-  return null;
-}
-
-function Map(items, f) {
-  let out = new Group([]);
-  for (const [_$, item] of __s(items).entries()) {
-    out = new Group(__append(out._items, f(item)));
-  }
-  return out;
-}
-
-function Style(css) {
-  return new NodeFunc(function(parent) {
-    let el = document.createElement("style");
-    el.textContent = css;
-    parent.appendChild(el);
-  });
-}
-
-function MountTo(selector, n) {
-  let el = document.querySelector(selector);
-  n.Mount(el);
-}
-
-function Mount(selector, n) {
-  let el = document.querySelector(selector);
-  el.innerHTML = "";
-  n.Mount(el);
-}
-
-var __append = __append || function(a, ...b) { return a ? [...a, ...b] : b; };
-var __s = __s || function(a) { return a || []; };
-
 function Plural(n, word) {
   if (n === 1) {
     return String(n) + " " + word;
@@ -630,7 +223,7 @@ function setupEvents() {
 }
 
 async function main() {
-  MountTo("head", Style(appStyles()));
+  ((sel,n)=>{const e=document.querySelector(sel);n.Mount(e)})("head",((s)=>({Mount(p){const e=document.createElement("style");e.textContent=s;p.appendChild(e);}})) (appStyles()));
   render();
   setupEvents();
   let loadErr = await loadTodos();
@@ -654,43 +247,43 @@ function todoItemNode(t) {
     cls = "todo-item high";
   }
   let id = String(t.id);
-  return Li(Class(cls), Draggable("true"), DataAttr("id", id), Input(Type("checkbox"), Class("todo-cb"), DataAttr("action", "toggle"), DataAttr("todo-id", id), If(t.done, Checked())), Span(Class("todo-text"), Text(t.text)), If(t.isUrgent(), Span(Class("badge"), Text("urgent"))), Button(Class("del-btn"), DataAttr("action", "delete"), DataAttr("todo-id", id), Text("✕")));
+  return ((...c)=>({Mount(p){const e=document.createElement("li");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))(cls),((v)=>({Mount(e){e.setAttribute("draggable",v)}}))("true"),((k,v)=>({Mount(e){e.setAttribute("data-"+k,v)}}))("id",id),((...c)=>({Mount(p){const e=document.createElement("input");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.type=v}}))("checkbox"),((v)=>({Mount(e){e.className=v}}))("todo-cb"),((k,v)=>({Mount(e){e.setAttribute("data-"+k,v)}}))("action","toggle"),((k,v)=>({Mount(e){e.setAttribute("data-"+k,v)}}))("todo-id",id),((c,n)=>c?n:{Mount(){}})(t.done,({Mount(e){e.setAttribute("checked","")}}))),((...c)=>({Mount(p){const e=document.createElement("span");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))("todo-text"),((s)=>({Mount(p){p.appendChild(document.createTextNode(s))}}))(t.text)),((c,n)=>c?n:{Mount(){}})(t.isUrgent(),((...c)=>({Mount(p){const e=document.createElement("span");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))("badge"),((s)=>({Mount(p){p.appendChild(document.createTextNode(s))}}))("urgent"))),((...c)=>({Mount(p){const e=document.createElement("button");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))("del-btn"),((k,v)=>({Mount(e){e.setAttribute("data-"+k,v)}}))("action","delete"),((k,v)=>({Mount(e){e.setAttribute("data-"+k,v)}}))("todo-id",id),((s)=>({Mount(p){p.appendChild(document.createTextNode(s))}}))("✕")));
 }
 
 function todoListNode() {
   let visible = visibleTodos();
   if (__len(visible) === 0) {
-    return Ul(Class("todo-list"), Li(Class("empty"), Text("Nothing here.")));
+    return ((...c)=>({Mount(p){const e=document.createElement("ul");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))("todo-list"),((...c)=>({Mount(p){const e=document.createElement("li");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))("empty"),((s)=>({Mount(p){p.appendChild(document.createTextNode(s))}}))("Nothing here.")));
   }
-  return Ul(Class("todo-list"), Map(visible, todoItemNode));
+  return ((...c)=>({Mount(p){const e=document.createElement("ul");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))("todo-list"),((s,f)=>{const c=s.map(f);return{_items:c,Mount(p){c.forEach(n=>n.Mount(p))}}})(visible,todoItemNode));
 }
 
 function filterBarNode() {
   let fs = [FilterAll, FilterActive, FilterCompleted];
-  return Div(Class("filter-bar"), Map(fs, function(f) {
+  return ((...c)=>({Mount(p){const e=document.createElement("div");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))("filter-bar"),((s,f)=>{const c=s.map(f);return{_items:c,Mount(p){c.forEach(n=>n.Mount(p))}}})(fs,function(f) {
     let cls = "filter-btn";
     if (f === filter) {
       cls = "filter-btn active";
     }
-    return Button(Class(cls), DataAttr("action", "filter"), DataAttr("filter", String(f)), Text(filterLabel(f)));
+    return ((...c)=>({Mount(p){const e=document.createElement("button");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))(cls),((k,v)=>({Mount(e){e.setAttribute("data-"+k,v)}}))("action","filter"),((k,v)=>({Mount(e){e.setAttribute("data-"+k,v)}}))("filter",String(f)),((s)=>({Mount(p){p.appendChild(document.createTextNode(s))}}))(filterLabel(f)));
   }));
 }
 
 function footerNode() {
   if (__len(todos) === 0) {
-    return Footer(Class("footer"));
+    return ((...c)=>({Mount(p){const e=document.createElement("footer");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))("footer"));
   }
   let [remaining, completed] = stats();
   let countText = Plural(remaining, "task") + " left";
-  return Footer(Class("footer"), Span(Class("count"), Text(countText)), filterBarNode(), If(completed > 0, Button(Class("clear-btn"), DataAttr("action", "clear-completed"), Text("Clear (" + String(completed) + ")"))));
+  return ((...c)=>({Mount(p){const e=document.createElement("footer");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))("footer"),((...c)=>({Mount(p){const e=document.createElement("span");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))("count"),((s)=>({Mount(p){p.appendChild(document.createTextNode(s))}}))(countText)),filterBarNode(),((c,n)=>c?n:{Mount(){}})(completed > 0,((...c)=>({Mount(p){const e=document.createElement("button");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))("clear-btn"),((k,v)=>({Mount(e){e.setAttribute("data-"+k,v)}}))("action","clear-completed"),((s)=>({Mount(p){p.appendChild(document.createTextNode(s))}}))("Clear (" + String(completed) + ")"))));
 }
 
 function badgeNode() {
   let hc = highCount();
   if (hc > 0) {
-    return Span(Class("high-badge"), Text(String(hc) + " urgent"));
+    return ((...c)=>({Mount(p){const e=document.createElement("span");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))("high-badge"),((s)=>({Mount(p){p.appendChild(document.createTextNode(s))}}))(String(hc) + " urgent"));
   }
-  return Span(Class("high-badge"), StyleAttr("display:none"));
+  return ((...c)=>({Mount(p){const e=document.createElement("span");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))("high-badge"),((v)=>({Mount(e){e.setAttribute("style",v)}}))("display:none"));
 }
 
 function syncStatusNode() {
@@ -698,11 +291,11 @@ function syncStatusNode() {
   if (syncCls !== "") {
     cls = "sync-status " + syncCls;
   }
-  return Span(Class(cls), Text(syncMsg));
+  return ((...c)=>({Mount(p){const e=document.createElement("span");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))(cls),((s)=>({Mount(p){p.appendChild(document.createTextNode(s))}}))(syncMsg));
 }
 
 function headerNode() {
-  return Header(Class("header"), Div(Class("header-top"), Div(Class("header-icon"), Text("✓")), H1(Text("Todos Gom")), badgeNode(), syncStatusNode()), P(Class("tagline"), Text("Built with "), A(Href("https://github.com/seriva/gofront"), Target("_blank"), Strong(Text("GoFront"))), Text(" — Go compiled to JS")));
+  return ((...c)=>({Mount(p){const e=document.createElement("header");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))("header"),((...c)=>({Mount(p){const e=document.createElement("div");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))("header-top"),((...c)=>({Mount(p){const e=document.createElement("div");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))("header-icon"),((s)=>({Mount(p){p.appendChild(document.createTextNode(s))}}))("✓")),((...c)=>({Mount(p){const e=document.createElement("h1");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((s)=>({Mount(p){p.appendChild(document.createTextNode(s))}}))("Todos Gom")),badgeNode(),syncStatusNode()),((...c)=>({Mount(p){const e=document.createElement("p");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))("tagline"),((s)=>({Mount(p){p.appendChild(document.createTextNode(s))}}))("Built with "),((...c)=>({Mount(p){const e=document.createElement("a");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.href=v}}))("https://github.com/seriva/gofront"),((v)=>({Mount(e){e.setAttribute("target",v)}}))("_blank"),((...c)=>({Mount(p){const e=document.createElement("strong");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((s)=>({Mount(p){p.appendChild(document.createTextNode(s))}}))("GoFront"))),((s)=>({Mount(p){p.appendChild(document.createTextNode(s))}}))(" — Go compiled to JS")));
 }
 
 function inputRowNode() {
@@ -720,7 +313,7 @@ function inputRowNode() {
   if (highPriority) {
     placeholder = "What's urgent? (high priority)";
   }
-  return Div(Class("input-row"), Input(Class(inputCls), Type("text"), Placeholder(placeholder), AutoComplete("off")), Button(Class(priorityCls), Type("button"), DataAttr("action", "priority"), Text(priorityText)), Button(Class("add-btn"), Type("button"), DataAttr("action", "add"), Text("Add")), If(highPriority, Span(Class("priority-hint"), Text("⚡ High priority — task will be marked urgent"))), If(errorMsg !== "", Span(Class("error-msg"), Text(errorMsg))));
+  return ((...c)=>({Mount(p){const e=document.createElement("div");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))("input-row"),((...c)=>({Mount(p){const e=document.createElement("input");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))(inputCls),((v)=>({Mount(e){e.type=v}}))("text"),((v)=>({Mount(e){e.placeholder=v}}))(placeholder),((v)=>({Mount(e){e.setAttribute("autocomplete",v)}}))("off")),((...c)=>({Mount(p){const e=document.createElement("button");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))(priorityCls),((v)=>({Mount(e){e.type=v}}))("button"),((k,v)=>({Mount(e){e.setAttribute("data-"+k,v)}}))("action","priority"),((s)=>({Mount(p){p.appendChild(document.createTextNode(s))}}))(priorityText)),((...c)=>({Mount(p){const e=document.createElement("button");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))("add-btn"),((v)=>({Mount(e){e.type=v}}))("button"),((k,v)=>({Mount(e){e.setAttribute("data-"+k,v)}}))("action","add"),((s)=>({Mount(p){p.appendChild(document.createTextNode(s))}}))("Add")),((c,n)=>c?n:{Mount(){}})(highPriority,((...c)=>({Mount(p){const e=document.createElement("span");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))("priority-hint"),((s)=>({Mount(p){p.appendChild(document.createTextNode(s))}}))("⚡ High priority — task will be marked urgent"))),((c,n)=>c?n:{Mount(){}})(errorMsg !== "",((...c)=>({Mount(p){const e=document.createElement("span");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))("error-msg"),((s)=>({Mount(p){p.appendChild(document.createTextNode(s))}}))(errorMsg))));
 }
 
 function statsBarNode() {
@@ -729,15 +322,15 @@ function statsBarNode() {
   if (n === 1) {
     word = "todo";
   }
-  return Div(Class("stats-bar"), Span(DataAttr("action", "filter-active"), Strong(Text(String(n))), Text(" " + word + " in session")));
+  return ((...c)=>({Mount(p){const e=document.createElement("div");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))("stats-bar"),((...c)=>({Mount(p){const e=document.createElement("span");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((k,v)=>({Mount(e){e.setAttribute("data-"+k,v)}}))("action","filter-active"),((...c)=>({Mount(p){const e=document.createElement("strong");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((s)=>({Mount(p){p.appendChild(document.createTextNode(s))}}))(String(n))),((s)=>({Mount(p){p.appendChild(document.createTextNode(s))}}))(" " + word + " in session")));
 }
 
 function appView() {
-  return Div(Class("card"), headerNode(), inputRowNode(), Div(Class("list-divider")), todoListNode(), footerNode(), statsBarNode());
+  return ((...c)=>({Mount(p){const e=document.createElement("div");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))("card"),headerNode(),inputRowNode(),((...c)=>({Mount(p){const e=document.createElement("div");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))("list-divider")),todoListNode(),footerNode(),statsBarNode());
 }
 
 function render() {
-  Mount("#app", appView());
+  ((sel,n)=>{const e=document.querySelector(sel);e.innerHTML="";n.Mount(e)})("#app",appView());
 }
 
 function validateTodo(text) {

@@ -18,27 +18,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - `append` on a named slice type returns the same named type (re-wraps the result)
   - `len`, `range`, and index access on named slice type variables correctly unwrap
   - Inside method bodies the receiver is automatically unwrapped to the underlying value
-- **`gom` component library** — browser-native declarative DOM component model inspired by
-  gomponents. Lives in `example/gom/gom/` and is a pure GoFront package. Provides `Node`
-  (interface), `NodeFunc` (named func type), `Group` (named slice type), `El`, `Text`,
-  `Attr`, `Class`, `ID`, `Href`, `Src`, `Type`, `Placeholder`, `DataAttr`, `If`, `Map`,
-  `Style`, `MountTo`, and `Mount`. Works end-to-end using the new named non-struct type
-  methods feature. `Style(css)` returns a `Node` that injects a `<style>` element,
-  keeping styles part of the node tree rather than imperative DOM manipulation.
-  `MountTo(selector, n)` appends a node without clearing, used to inject styles into `<head>`.
-- **`gom` todo example** — `example/gom/` bundles the `gom` library and a fully featured
-  todo app with full parity to the simple and reactive examples: priority mode, input
-  validation, localStorage persistence, sync-status indicator, urgent badge, filter bar,
-  clear-completed, drag-and-drop reordering, and dark theme. All rendering uses pure gom
-  nodes (`gom.El`, `gom.Map`, `gom.If`) — no `innerHTML`. All events are delegated to
-  `#app` once and survive re-renders. Build with `npm run build:gom`.
-- **`gom` element helpers** — `example/gom/gom/elements.go` adds thin wrappers over
-  `gom.El`/`gom.Attr` for all common HTML elements and attributes: block elements
-  (`Div`, `Section`, `Article`, `Header`, `Footer`, `Main`, `Nav`), headings (`H1`–`H6`),
-  inline elements (`Span`, `A`, `Strong`, `Em`, `Code`), lists (`Ul`, `Ol`, `Li`),
-  forms (`Form`, `Input`, `Button`, `Textarea`, `Select`, `Label`), media (`Img`,
-  `Video`, `Canvas`), tables (`Table`, `Tr`, `Th`, `Td`), and attribute helpers
-  (`For`, `Name`, `Value`, `Target`, `Rel`, `Alt`, `Disabled`, `Checked`, `StyleAttr`).
+- **`gom` built-in namespace** — `gom` is now a first-class built-in namespace (like
+  `fmt` or `strings`) registered in the typechecker and emitted inline by codegen. No
+  source package to vendor — `import "gom"` is not needed; `gom.*` calls are available
+  globally in any GoFront file. Every call compiles to an inline DOM object literal with
+  a `Mount(parent)` method; zero runtime overhead. Provides: `El`, `Text`, `Attr`,
+  `Class`, `Type`, `Href`, `Src`, `Placeholder`, `DataAttr`, `If`, `Map`, `Style`,
+  `Mount`, `MountTo`. All HTML element helpers (`Div`, `Span`, `Button`, `Input`, `Li`,
+  `Ul`, `Header`, `Footer`, `H1`–`H6`, `A`, `Strong`, `P`, `Form`, `Table`, `Tr`, `Th`,
+  `Td`, and 30+ more) and attribute shorthands (`Class`, `For`, `Name`, `Value`,
+  `Target`, `Draggable`, `AriaLabel`, `StyleAttr`, `Checked`, `Disabled`, `Selected`,
+  `Readonly`, etc.) are all built in. Types `gom.Node`, `gom.NodeFunc`, and `gom.Group`
+  are registered and usable in type annotations. The `example/gom/gom/` source directory
+  is removed — the example app imports nothing and uses `gom.*` directly.
+- **`gom` todo example** — `example/gom/` is a fully featured todo app with full parity
+  to the simple and reactive examples: priority mode, input validation, localStorage
+  persistence, sync-status indicator, urgent badge, filter bar, clear-completed,
+  drag-and-drop reordering, and dark theme. All rendering uses pure gom nodes
+  (`gom.El`, `gom.Map`, `gom.If`) — no `innerHTML`. Build with `npm run build:gom`.
 - **`io` package shim** — `io.Writer` (accepted as a parameter/field type), `io.EOF`
   (sentinel error string), `io.Discard`, and `io.WriteString(w, s)`. `WriteString`
   dispatches to `strings.Builder`, `bytes.Buffer`, or any writer with a `WriteString`
@@ -54,6 +51,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   types under both the simple name and the `pkg.TypeName` qualified form.
 
 ### Changed
+- **`typechecker.js` split** — the built-in namespace and browser-global registration
+  (`_setupGlobals`, ~800 lines) has been extracted into a new
+  `src/typechecker/stdlib.js` sub-module, exported as `setupGlobals(globals, types)`.
+  `typechecker.js` now delegates to it in a one-liner. No behaviour change; purely a
+  code-organisation improvement. `src/typechecker.js` drops from ~2033 to ~1272 lines.
 - **Reactive example** — overhauled to cover the full reactive.js API surface.
   The app shell is now a `Reactive.Component` using the complete lifecycle (`state`,
   `template`, `styles`, `mount`, `mountTo`, `refs`), eliminating all `querySelector`
@@ -66,6 +68,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   a priority hint uses `data-visible` (display toggle); the input placeholder and
   disabled state are driven reactively via `data-attr-placeholder` and
   `data-bool-disabled`.
+
 
 ## [0.0.6] - 2026-04-20
 

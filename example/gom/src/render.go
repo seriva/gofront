@@ -1,6 +1,5 @@
 package main
 
-import "../gom"
 import "./utils"
 
 // ── Todo item ─────────────────────────────────────────────────
