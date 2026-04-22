@@ -3,10 +3,8 @@ import { fileURLToPath } from "node:url";
 import {
 	assert,
 	assertEqual,
-	assertErrorContains,
 	compile,
 	runInDom,
-	runJs,
 	section,
 	summarize,
 	test,

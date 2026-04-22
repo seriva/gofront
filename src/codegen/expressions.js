@@ -688,7 +688,8 @@ export const expressionGenMethods = {
 		if (typeNode.kind === "Ident") return typeNode.name;
 		if (typeNode.kind === "InstantiationExpr")
 			return this.getTypeName(typeNode.expr);
-		if (typeNode.kind === "SelectorExpr") return typeNode.field;
+		if (typeNode.kind === "SelectorExpr")
+			return `${this.getTypeName(typeNode.expr)}.${typeNode.field}`;
 		return null;
 	},
 
@@ -1210,7 +1211,9 @@ export const expressionGenMethods = {
 
 	_genGom(fn, expr) {
 		const a = () =>
-			expr.args.map((e) => (e._spread ? `...${this.genExpr(e)}` : this.genExpr(e)));
+			expr.args.map((e) =>
+				e._spread ? `...${this.genExpr(e)}` : this.genExpr(e),
+			);
 		const elementTags = {
 			Div: "div",
 			Section: "section",

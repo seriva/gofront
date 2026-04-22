@@ -7,6 +7,30 @@ export const statementGenMethods = {
 		for (const stmt of block.stmts) this.genStmt(stmt);
 	},
 
+	// Shared helper for comma-ok map index in both DefineStmt and AssignStmt.
+	// isDefine=true  → emit `let v = m[k]; let ok = k in m;`
+	// isDefine=false → emit `v = k in m ? m[k] : zero; ok = k in m;`
+	_genCommaOkMapIndex(stmt, rhsNode, isDefine) {
+		const mapExpr = this.genExpr(rhsNode.expr);
+		const keyExpr = this.genExpr(rhsNode.index);
+		const [vName, okName] = stmt.lhs.map((e) => e.name ?? this.genExpr(e));
+		const decl = isDefine ? "let " : "";
+		if (vName !== "_") {
+			if (isDefine) {
+				this.line(`let ${vName} = ${mapExpr}[${keyExpr}];`);
+			} else {
+				const zero = rhsNode._mapValueType
+					? this.zeroValueForType(rhsNode._mapValueType)
+					: "undefined";
+				this.line(
+					`${vName} = (${keyExpr}) in ${mapExpr} ? ${mapExpr}[${keyExpr}] : ${zero};`,
+				);
+			}
+		}
+		if (okName !== "_")
+			this.line(`${decl}${okName} = (${keyExpr}) in ${mapExpr};`);
+	},
+
 	genStmt(stmt) {
 		// Record source mapping for the first line this statement produces
 		const srcLine = stmt._line ?? null;
@@ -31,15 +55,7 @@ export const statementGenMethods = {
 					rhsNode?.kind === "IndexExpr" &&
 					rhsNode.expr?._type?.kind === "map"
 				) {
-					const mapExpr = this.genExpr(rhsNode.expr);
-					const keyExpr = this.genExpr(rhsNode.index);
-					const [vName, okName] = stmt.lhs.map(
-						(e) => e.name ?? this.genExpr(e),
-					);
-					if (vName !== "_")
-						this.line(`let ${vName} = ${mapExpr}[${keyExpr}];`);
-					if (okName !== "_")
-						this.line(`let ${okName} = (${keyExpr}) in ${mapExpr};`);
+					this._genCommaOkMapIndex(stmt, rhsNode, true);
 					break;
 				}
 				const rhs = stmt.rhs.map((e) => this.genExpr(e));
@@ -117,22 +133,7 @@ export const statementGenMethods = {
 				}
 				// comma-ok map index: v, ok = m["key"]
 				if (stmt._commaOkMap) {
-					const rhsNode = stmt.rhs[0];
-					const mapExpr = this.genExpr(rhsNode.expr);
-					const keyExpr = this.genExpr(rhsNode.index);
-					const [vName, okName] = stmt.lhs.map(
-						(e) => e.name ?? this.genExpr(e),
-					);
-					if (vName !== "_") {
-						const zero = rhsNode._mapValueType
-							? this.zeroValueForType(rhsNode._mapValueType)
-							: "undefined";
-						this.line(
-							`${vName} = (${keyExpr}) in ${mapExpr} ? ${mapExpr}[${keyExpr}] : ${zero};`,
-						);
-					}
-					if (okName !== "_")
-						this.line(`${okName} = (${keyExpr}) in ${mapExpr};`);
+					this._genCommaOkMapIndex(stmt, stmt.rhs[0], false);
 					break;
 				}
 				// comma-ok type assertion: v, ok = x.(T)

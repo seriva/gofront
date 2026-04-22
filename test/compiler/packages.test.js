@@ -181,8 +181,7 @@ func main() {
 }`,
 		{ fromFile: join(FIXTURES, "multifile/withimportalias/main.go") },
 	);
-	// package doesn't resolve in inline compile — any error is acceptable
-	assert(errors.length > 0, "expected error");
+	assertErrorContains(errors, "Undefined");
 });
 
 test("import alias in group syntax compiles and runs", () => {

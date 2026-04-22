@@ -2,7 +2,6 @@
 
 import { fileURLToPath } from "node:url";
 import {
-	assert,
 	assertEqual,
 	assertErrorContains,
 	compile,
@@ -362,7 +361,7 @@ func main() {
 		_ = v
 	}
 }`);
-	assert(errors.length > 0, "expected an error for ranging over a plain func");
+	assertErrorContains(errors, "cannot range over func");
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

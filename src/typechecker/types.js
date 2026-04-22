@@ -101,13 +101,22 @@ export function isGeneric(t) {
 	return t?.kind === "generic";
 }
 
-export function isNumeric(t) {
-	if (!t) return false;
-	if (t.kind === "untyped") return t.base === "int" || t.base === "float64";
-	if (t.kind === "basic") return t.name === "int" || t.name === "float64";
-	if (t.kind === "named") return isNumeric(t.underlying);
-	return false;
+function makeBasicPredicate(...names) {
+	const set = new Set(names);
+	const pred = (t) => {
+		if (!t) return false;
+		if (t.kind === "untyped") return set.has(t.base);
+		if (t.kind === "basic") return set.has(t.name);
+		if (t.kind === "named") return pred(t.underlying);
+		return false;
+	};
+	return pred;
 }
+
+export const isNumeric = makeBasicPredicate("int", "float64");
+export const isString = makeBasicPredicate("string");
+export const isBool = makeBasicPredicate("bool");
+
 export function isComplex(t) {
 	if (!t) return false;
 	if (t.kind === "basic" && (t.name === "complex128" || t.name === "complex64"))
@@ -118,20 +127,6 @@ export function isComplex(t) {
 }
 export function isComplexOrNumeric(t) {
 	return isNumeric(t) || isComplex(t);
-}
-export function isString(t) {
-	if (!t) return false;
-	if (t.kind === "untyped") return t.base === "string";
-	if (t.kind === "basic") return t.name === "string";
-	if (t.kind === "named") return isString(t.underlying);
-	return false;
-}
-export function isBool(t) {
-	if (!t) return false;
-	if (t.kind === "untyped") return t.base === "bool";
-	if (t.kind === "basic") return t.name === "bool";
-	if (t.kind === "named") return isBool(t.underlying);
-	return false;
 }
 export function isAny(t) {
 	return t?.kind === "basic" && t.name === "any";
