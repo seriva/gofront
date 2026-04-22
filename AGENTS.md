@@ -69,17 +69,19 @@ src/
   dev-server.js     static file server + SSE live reload (used by --serve)
   index.js          CLI entry point
 test/
-  run.js            test suite orchestrator (no framework, plain Node vm)
-  helpers.js        shared compile/run/assert helpers
-  fixtures/         .go and .d.ts files used by tests
-  structs.test.js   structs, embedded structs, methods
-  dom.test.js       DOM (jsdom) and external .d.ts
-  lexer-parser.test.js  lexer, parser, dts-parser, codegen
-  minifier.test.js  minifier and mangler
-  language/         core language feature tests (7 files)
-  types/            type system and type checking tests (6 files)
-  builtins/         built-in functions, operators, stdlib, gom tests (5 files)
-  compiler/         multi-file packages, CLI, imports tests (3 files)
+  unit/             all unit tests
+    run.js            test suite orchestrator (no framework, plain Node vm)
+    helpers.js        shared compile/run/assert helpers
+    fixtures/         .go and .d.ts files used by tests
+    structs.test.js   structs, embedded structs, methods
+    dom.test.js       DOM (jsdom) and external .d.ts
+    lexer-parser.test.js  lexer, parser, dts-parser, codegen
+    minifier.test.js  minifier and mangler
+    language/         core language feature tests (7 files)
+    types/            type system and type checking tests (6 files)
+    builtins/         built-in functions, operators, stdlib, gom tests (5 files)
+    compiler/         multi-file packages, CLI, imports tests (3 files)
+  e2e/              end-to-end browser tests (Playwright, v0.0.8)
 example/
   simple/             vanilla DOM todo app (default example)
     src/              GoFront source files
@@ -173,7 +175,7 @@ then fix the code.
    relevant test file. Tests are split into directories (`test/language/`,
    `test/types/`, `test/builtins/`, `test/compiler/`) plus root-level files for
    structs, DOM, and lexer-parser. Run a single file with
-   `node test/language/core.test.js`, or `npm test` for the full combined run.
+   `node test/unit/language/core.test.js`, or `npm test` for the full combined run.
    Confirm the new tests fail before proceeding.
 2. **Lexer** (`src/lexer.js`) — add any new keywords or token types.
 3. **Parser** (`src/parser.js`) — add grammar rules; return a new AST node kind.
@@ -231,14 +233,14 @@ Key items to be aware of when working on the compiler:
 
 ## Testing conventions
 
-- Tests are split across focused files in `test/` subdirectories; `test/run.js` is the orchestrator.
-- Shared helpers live in `test/helpers.js`: `compile(src)`, `compileFile(path)`,
+- Tests are split across focused files in `test/unit/` subdirectories; `test/unit/run.js` is the orchestrator.
+- Shared helpers live in `test/unit/helpers.js`: `compile(src)`, `compileFile(path)`,
   `compileDir(dir)`, `runJs(js)`, `runInDom(js, html)`.
 - Assertion helpers: `assertEqual`, `assertContains`, `assertErrorContains`, `assert`.
 - Negative tests must call `assertErrorContains(errors, "substring")` — not just
   `assert(errors.length > 0)` — so the error message is verified too.
 - Group related tests with `section("Name")` for readable output.
-- Run a single file with `node test/language/core.test.js`, a directory's files
+- Run a single file with `node test/unit/language/core.test.js`, a directory's files
   individually, or the full suite with `npm test`.
 
 ### Writing a new test file
@@ -247,7 +249,7 @@ Every test file imports from `test/helpers.js` and follows this structure:
 
 ```js
 import { fileURLToPath } from "node:url";
-import { test, section, summarize, compile, runJs, assertEqual, assertErrorContains } from "../helpers.js";
+import { test, section, summarize, compile, runJs, assertEqual, assertErrorContains } from "./helpers.js"; // or "../helpers.js" from a subdirectory
 
 section("Feature name");
 
@@ -272,7 +274,7 @@ Key points:
   and also imported by `test/run.js` without triggering early exit.
 - Wrap each case in `test(name, fn)` — the harness catches and reports errors.
 - Use `section(title)` to group related tests under a heading.
-- New test files must be registered in `test/run.js` to be included in `npm test`.
+- New test files must be registered in `test/unit/run.js` to be included in `npm test`.
 
 ## Planning and roadmap
 

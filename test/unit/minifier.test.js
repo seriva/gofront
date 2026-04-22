@@ -1,6 +1,6 @@
 // GoFront test suite — built-in minifier
 
-import { minify } from "../src/minifier.js";
+import { minify } from "../../src/minifier.js";
 import {
 	assert,
 	assertContains,

@@ -4,19 +4,19 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 import { JSDOM } from "jsdom";
-import { CodeGen } from "../src/codegen.js";
-import { compileDir } from "../src/compiler.js";
-import { DtsParser, parseDts } from "../src/dts-parser.js";
-import { Lexer } from "../src/lexer.js";
-import { Parser } from "../src/parser.js";
-import { resolveAll } from "../src/resolver.js";
-import { TypeChecker } from "../src/typechecker.js";
+import { CodeGen } from "../../src/codegen.js";
+import { compileDir } from "../../src/compiler.js";
+import { DtsParser, parseDts } from "../../src/dts-parser.js";
+import { Lexer } from "../../src/lexer.js";
+import { Parser } from "../../src/parser.js";
+import { resolveAll } from "../../src/resolver.js";
+import { TypeChecker } from "../../src/typechecker.js";
 
 export { compileDir, DtsParser, join, Lexer, Parser, parseDts };
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-export const ROOT = resolve(__dirname, "..");
+export const ROOT = resolve(__dirname, "../..");
 export const FIXTURES = join(__dirname, "fixtures");
 
 // ── Compiler ─────────────────────────────────────────────────
