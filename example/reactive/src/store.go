@@ -190,12 +190,12 @@ func toggleTodo(id int) {
 
 func removeTodo(id int) {
     cur := todosSignal.get()
-    todosSignal.set(utils.Filter(cur, func(t Todo) bool { return t.id != id }))
+    todosSignal.set(slices.DeleteFunc(cur, func(t Todo) bool { return t.id == id }))
 }
 
 func clearCompleted() {
     cur := todosSignal.get()
-    todosSignal.set(utils.Filter(cur, func(t Todo) bool { return !t.done }))
+    todosSignal.set(slices.DeleteFunc(cur, func(t Todo) bool { return t.done }))
 }
 
 func setFilter(f int) {

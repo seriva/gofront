@@ -452,11 +452,11 @@ func main() {
 
 section("time package");
 
-test("time.Now returns a timestamp", () => {
+test("time.Now returns a time object (has _d property)", () => {
 	const { js, errors } = compile(`package main
 func main() {
 	t := time.Now()
-	console.log(t > 0)
+	console.log(t.Year() > 2000)
 }`);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "true");
@@ -1468,6 +1468,834 @@ func main() {
 }`);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "true");
+});
+
+// ═════════════════════════════════════════════════════════════
+// math additions (Feature 1)
+// ═════════════════════════════════════════════════════════════
+
+section("math additions");
+
+test("math.Atan and math.Atan2", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(math.Atan(1.0) > 0)
+	console.log(math.Atan2(1.0, 1.0) > 0)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true\ntrue");
+});
+
+test("math.Asin and math.Acos", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(math.Asin(0.0))
+	console.log(math.Acos(1.0))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "0\n0");
+});
+
+test("math.Exp and math.Exp2", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(math.Exp(0.0))
+	console.log(math.Exp2(3.0))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "1\n8");
+});
+
+test("math.Trunc", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(math.Trunc(3.7))
+	console.log(math.Trunc(-3.7))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "3\n-3");
+});
+
+test("math.Hypot", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(math.Hypot(3.0, 4.0))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "5");
+});
+
+test("math.Signbit", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(math.Signbit(-1.0))
+	console.log(math.Signbit(1.0))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true\nfalse");
+});
+
+test("math.Copysign", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(math.Copysign(3.0, -1.0))
+	console.log(math.Copysign(3.0, 1.0))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "-3\n3");
+});
+
+test("math.Dim", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(math.Dim(5.0, 3.0))
+	console.log(math.Dim(3.0, 5.0))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "2\n0");
+});
+
+test("math.Remainder", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	r := math.Remainder(10.0, 3.0)
+	console.log(r > 0.9 && r < 1.1)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true");
+});
+
+// ═════════════════════════════════════════════════════════════
+// math/rand package (Feature 2)
+// ═════════════════════════════════════════════════════════════
+
+section("math/rand package");
+
+test("rand.Intn returns int in range", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	n := rand.Intn(10)
+	console.log(n >= 0 && n < 10)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true");
+});
+
+test("rand.Float64 returns float in [0,1)", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	f := rand.Float64()
+	console.log(f >= 0.0 && f < 1.0)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true");
+});
+
+test("rand.Int returns non-negative int", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	n := rand.Int()
+	console.log(n >= 0)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true");
+});
+
+test("rand.Seed is a no-op", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	rand.Seed(42)
+	console.log(true)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true");
+});
+
+test("rand.Shuffle shuffles elements", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	s := []int{1, 2, 3, 4, 5}
+	rand.Shuffle(len(s), func(i, j int) {
+		s[i], s[j] = s[j], s[i]
+	})
+	console.log(len(s))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "5");
+});
+
+test("rand.Perm returns a permutation", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	p := rand.Perm(5)
+	console.log(len(p))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "5");
+});
+
+// ═════════════════════════════════════════════════════════════
+// sort additions (Feature 3)
+// ═════════════════════════════════════════════════════════════
+
+section("sort additions");
+
+test("sort.Search binary search", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	a := []int{1, 3, 6, 10, 15}
+	idx := sort.Search(len(a), func(i int) bool { return a[i] >= 6 })
+	console.log(idx)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "2");
+});
+
+test("sort.IntsAreSorted", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(sort.IntsAreSorted([]int{1, 2, 3}))
+	console.log(sort.IntsAreSorted([]int{3, 1, 2}))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true\nfalse");
+});
+
+test("sort.StringsAreSorted", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(sort.StringsAreSorted([]string{"a", "b", "c"}))
+	console.log(sort.StringsAreSorted([]string{"c", "a", "b"}))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true\nfalse");
+});
+
+test("sort.Float64sAreSorted", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(sort.Float64sAreSorted([]float64{1.0, 2.0, 3.0}))
+	console.log(sort.Float64sAreSorted([]float64{3.0, 1.0, 2.0}))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true\nfalse");
+});
+
+// ═════════════════════════════════════════════════════════════
+// strings additions (Feature 4)
+// ═════════════════════════════════════════════════════════════
+
+section("strings additions");
+
+test("strings.Fields splits on whitespace", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	f := strings.Fields("  foo bar  baz  ")
+	console.log(len(f))
+	console.log(f[0])
+	console.log(f[1])
+	console.log(f[2])
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "3\nfoo\nbar\nbaz");
+});
+
+test("strings.Fields on empty/whitespace returns empty slice", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	f := strings.Fields("   ")
+	console.log(len(f))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "0");
+});
+
+test("strings.Cut found", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	before, after, found := strings.Cut("user:password", ":")
+	console.log(before)
+	console.log(after)
+	console.log(found)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "user\npassword\ntrue");
+});
+
+test("strings.Cut not found", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	before, after, found := strings.Cut("hello", ":")
+	console.log(before)
+	console.log(after)
+	console.log(found)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "hello\n\nfalse");
+});
+
+test("strings.CutPrefix found", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	after, found := strings.CutPrefix("hello world", "hello ")
+	console.log(after)
+	console.log(found)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "world\ntrue");
+});
+
+test("strings.CutSuffix found", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	before, found := strings.CutSuffix("hello world", " world")
+	console.log(before)
+	console.log(found)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "hello\ntrue");
+});
+
+test("strings.SplitN", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	parts := strings.SplitN("a,b,c,d", ",", 3)
+	console.log(len(parts))
+	console.log(parts[0])
+	console.log(parts[1])
+	console.log(parts[2])
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "3\na\nb\nc,d");
+});
+
+test("strings.SplitAfter", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	parts := strings.SplitAfter("a,b,c", ",")
+	console.log(len(parts))
+	console.log(parts[0])
+	console.log(parts[1])
+	console.log(parts[2])
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "3\na,\nb,\nc");
+});
+
+test("strings.ContainsAny", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(strings.ContainsAny("hello", "aeiou"))
+	console.log(strings.ContainsAny("rhythm", "aeiou"))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true\nfalse");
+});
+
+test("strings.ContainsRune", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(strings.ContainsRune("hello", 'e'))
+	console.log(strings.ContainsRune("hello", 'z'))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true\nfalse");
+});
+
+test("strings.IndexRune", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(strings.IndexRune("hello", 'l'))
+	console.log(strings.IndexRune("hello", 'z'))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "2\n-1");
+});
+
+test("strings.IndexByte", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(strings.IndexByte("hello", 'l'))
+	console.log(strings.IndexByte("hello", 'z'))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "2\n-1");
+});
+
+test("strings.Map transforms characters", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	result := strings.Map(func(r rune) rune {
+		if r == 'a' { return 'b' }
+		return r
+	}, "banana")
+	console.log(result)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "bbnbnb");
+});
+
+test("strings.Title capitalizes words", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(strings.Title("hello world"))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "Hello World");
+});
+
+test("strings.ToTitle converts to uppercase", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(strings.ToTitle("hello"))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "HELLO");
+});
+
+test("strings.TrimFunc", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	result := strings.TrimFunc("  hello  ", func(r rune) bool {
+		return r == ' '
+	})
+	console.log(result)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "hello");
+});
+
+test("strings.IndexFunc", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	idx := strings.IndexFunc("hello123", func(r rune) bool {
+		return r >= '0' && r <= '9'
+	})
+	console.log(idx)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "5");
+});
+
+test("strings.NewReplacer", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	r := strings.NewReplacer("foo", "bar", "baz", "qux")
+	console.log(r.Replace("foo and baz"))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "bar and qux");
+});
+
+test("strings.IndexAny", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(strings.IndexAny("hello", "aeiou"))
+	console.log(strings.IndexAny("rhythm", "aeiou"))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "1\n-1");
+});
+
+// ═════════════════════════════════════════════════════════════
+// strconv additions (Feature 6)
+// ═════════════════════════════════════════════════════════════
+
+section("strconv additions");
+
+test("strconv.Quote", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(strconv.Quote("hello"))
+	console.log(strconv.Quote("say \\"hi\\""))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), '"hello"\n"say \\"hi\\""');
+});
+
+test("strconv.Unquote success", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	s, err := strconv.Unquote("\\"hello\\"")
+	console.log(s)
+	console.log(err == nil)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "hello\ntrue");
+});
+
+test("strconv.Unquote failure", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	_, err := strconv.Unquote("not quoted")
+	console.log(err != nil)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true");
+});
+
+test("strconv.AppendInt", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	dst := []byte("num=")
+	result := strconv.AppendInt(dst, 42, 10)
+	console.log(string(result))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "num=42");
+});
+
+// ═════════════════════════════════════════════════════════════
+// unicode/utf8 package (Feature 7)
+// ═════════════════════════════════════════════════════════════
+
+section("unicode/utf8 package");
+
+test("utf8.RuneCountInString", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(utf8.RuneCountInString("hello"))
+	console.log(utf8.RuneCountInString(""))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "5\n0");
+});
+
+test("utf8.RuneLen", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(utf8.RuneLen(65))
+	console.log(utf8.RuneLen(0x80))
+	console.log(utf8.RuneLen(0x800))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "1\n2\n3");
+});
+
+test("utf8.ValidString", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(utf8.ValidString("hello"))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true");
+});
+
+test("utf8.ValidRune", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(utf8.ValidRune(65))
+	console.log(utf8.ValidRune(-1))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true\nfalse");
+});
+
+test("utf8.RuneError constant", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(utf8.RuneError)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "65533");
+});
+
+test("utf8.MaxRune constant", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(utf8.MaxRune)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "1114111");
+});
+
+test("utf8.DecodeRuneInString", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	r, size := utf8.DecodeRuneInString("hello")
+	console.log(r)
+	console.log(size)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "104\n1");
+});
+
+// ═════════════════════════════════════════════════════════════
+// path package (Feature 8)
+// ═════════════════════════════════════════════════════════════
+
+section("path package");
+
+test("path.Base", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(path.Base("/foo/bar/baz.txt"))
+	console.log(path.Base("/"))
+	console.log(path.Base(""))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "baz.txt\n/\n.");
+});
+
+test("path.Dir", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(path.Dir("/foo/bar/baz.txt"))
+	console.log(path.Dir("/foo"))
+	console.log(path.Dir("foo"))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "/foo/bar\n/\n.");
+});
+
+test("path.Ext", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(path.Ext("index.html"))
+	console.log(path.Ext("noext"))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), ".html\n");
+});
+
+test("path.Join", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(path.Join("foo", "bar", "baz"))
+	console.log(path.Join("/foo", "bar"))
+	console.log(path.Join("foo", "..", "bar"))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "foo/bar/baz\n/foo/bar\nbar");
+});
+
+test("path.Clean", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(path.Clean("foo//bar"))
+	console.log(path.Clean("./foo/./bar"))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "foo/bar\nfoo/bar");
+});
+
+test("path.IsAbs", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(path.IsAbs("/foo/bar"))
+	console.log(path.IsAbs("foo/bar"))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true\nfalse");
+});
+
+test("path.Split", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	dir, file := path.Split("/foo/bar/baz.txt")
+	console.log(dir)
+	console.log(file)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "/foo/bar/\nbaz.txt");
+});
+
+// ═════════════════════════════════════════════════════════════
+// time additions (Feature 9)
+// ═════════════════════════════════════════════════════════════
+
+section("time additions");
+
+test("time.Now returns time.Time object", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	t := time.Now()
+	console.log(t.Year() > 2000)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true");
+});
+
+test("time.Since returns duration in ms", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	t := time.Now()
+	elapsed := time.Since(t)
+	console.log(elapsed >= 0)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true");
+});
+
+test("time.Now().Year() Month() Day()", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	t := time.Now()
+	console.log(t.Year() > 0)
+	console.log(t.Month() >= 1 && t.Month() <= 12)
+	console.log(t.Day() >= 1 && t.Day() <= 31)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true\ntrue\ntrue");
+});
+
+test("time.Unix creates time from epoch seconds", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	t := time.Unix(0, 0)
+	console.log(t.Year())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "1970");
+});
+
+test("time.RFC3339 constant", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(len(time.RFC3339) > 0)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true");
+});
+
+test("time.Month constants", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(time.January)
+	console.log(time.December)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "1\n12");
+});
+
+test("time.Weekday constants", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(time.Sunday)
+	console.log(time.Saturday)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "0\n6");
+});
+
+test("time.Time.UnixMilli", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	t := time.Unix(1000, 0)
+	console.log(t.UnixMilli())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "1000000");
+});
+
+test("time.Time.Before and After", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	t1 := time.Unix(1000, 0)
+	t2 := time.Unix(2000, 0)
+	console.log(t1.Before(t2))
+	console.log(t2.After(t1))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true\ntrue");
+});
+
+test("time.Parse parses date string", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	t, err := time.Parse(time.RFC3339, "2024-01-15T10:30:00Z")
+	console.log(err == nil)
+	console.log(t.Year())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true\n2024");
+});
+
+// ═════════════════════════════════════════════════════════════
+// io.Reader additions (Feature 10)
+// ═════════════════════════════════════════════════════════════
+
+section("io.Reader additions");
+
+test("strings.NewReader Len and Read", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	r := strings.NewReader("hello")
+	console.log(r.Len())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "5");
+});
+
+test("bytes.NewReader Len", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	r := bytes.NewReader([]byte{1, 2, 3})
+	console.log(r.Len())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "3");
+});
+
+test("io.ReadAll from strings.NewReader", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	r := strings.NewReader("hello")
+	data, err := io.ReadAll(r)
+	console.log(err == nil)
+	console.log(len(data))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true\n5");
+});
+
+// ═════════════════════════════════════════════════════════════
+// fmt scanning (Feature 11)
+// ═════════════════════════════════════════════════════════════
+
+section("fmt scanning");
+
+test("fmt.Sscan parses integers", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	var a int
+	var b int
+	n, err := fmt.Sscan("10 20", &a, &b)
+	console.log(n)
+	console.log(err == nil)
+	console.log(a)
+	console.log(b)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "2\ntrue\n10\n20");
+});
+
+test("fmt.Sscanf parses with format", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	var a int
+	var b int
+	n, err := fmt.Sscanf("10 20", "%d %d", &a, &b)
+	console.log(n)
+	console.log(err == nil)
+	console.log(a)
+	console.log(b)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "2\ntrue\n10\n20");
+});
+
+test("fmt.Sscanln parses a line", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	var s string
+	n, err := fmt.Sscanln("hello world", &s)
+	console.log(n)
+	console.log(err == nil)
+	console.log(s)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "1\ntrue\nhello");
 });
 
 // ── Entry point ───────────────────────────────────────────────

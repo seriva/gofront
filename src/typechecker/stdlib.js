@@ -8,6 +8,9 @@
 
 import { ANY, BOOL, ERROR, FLOAT64, INT, STRING, VOID } from "./types.js";
 
+// time.Time named type — used by the time package
+const TIME_T = { kind: "named", name: "time.Time", underlying: ANY };
+
 export function setupGlobals(globals, types) {
 	// Browser globals — typed as 'any' so any access/call is permitted
 	const browserGlobals = [
@@ -113,6 +116,24 @@ export function setupGlobals(globals, types) {
 				returns: [INT, ERROR],
 				variadic: true,
 			},
+			Sscan: {
+				kind: "func",
+				params: [STRING, ANY],
+				returns: [INT, ERROR],
+				variadic: true,
+			},
+			Sscanln: {
+				kind: "func",
+				params: [STRING, ANY],
+				returns: [INT, ERROR],
+				variadic: true,
+			},
+			Sscanf: {
+				kind: "func",
+				params: [STRING, STRING, ANY],
+				returns: [INT, ERROR],
+				variadic: true,
+			},
 		},
 	});
 
@@ -164,6 +185,71 @@ export function setupGlobals(globals, types) {
 				returns: [STRING],
 			},
 			EqualFold: strFn2(STRING, BOOL),
+			Fields: strFn1({ kind: "slice", elem: STRING }),
+			Cut: {
+				kind: "func",
+				params: [STRING, STRING],
+				returns: [STRING, STRING, BOOL],
+			},
+			CutPrefix: {
+				kind: "func",
+				params: [STRING, STRING],
+				returns: [STRING, BOOL],
+			},
+			CutSuffix: {
+				kind: "func",
+				params: [STRING, STRING],
+				returns: [STRING, BOOL],
+			},
+			SplitN: strFn3(STRING, INT, { kind: "slice", elem: STRING }),
+			SplitAfter: strFn2(STRING, { kind: "slice", elem: STRING }),
+			SplitAfterN: strFn3(STRING, INT, { kind: "slice", elem: STRING }),
+			IndexAny: strFn2(STRING, INT),
+			LastIndexAny: strFn2(STRING, INT),
+			ContainsAny: strFn2(STRING, BOOL),
+			ContainsRune: strFn2(INT, BOOL),
+			IndexRune: strFn2(INT, INT),
+			IndexByte: strFn2(INT, INT),
+			LastIndexByte: strFn2(INT, INT),
+			Map: {
+				kind: "func",
+				params: [ANY, STRING],
+				returns: [STRING],
+			},
+			Title: strFn1(STRING),
+			ToTitle: strFn1(STRING),
+			TrimFunc: {
+				kind: "func",
+				params: [STRING, ANY],
+				returns: [STRING],
+			},
+			TrimLeftFunc: {
+				kind: "func",
+				params: [STRING, ANY],
+				returns: [STRING],
+			},
+			TrimRightFunc: {
+				kind: "func",
+				params: [STRING, ANY],
+				returns: [STRING],
+			},
+			IndexFunc: {
+				kind: "func",
+				params: [STRING, ANY],
+				returns: [INT],
+			},
+			LastIndexFunc: {
+				kind: "func",
+				params: [STRING, ANY],
+				returns: [INT],
+			},
+			NewReplacer: {
+				kind: "func",
+				params: [STRING],
+				returns: [ANY],
+				variadic: true,
+			},
+			NewReader: { kind: "func", params: [STRING], returns: [ANY] },
 		},
 	});
 
@@ -205,6 +291,46 @@ export function setupGlobals(globals, types) {
 				params: [{ kind: "slice", elem: BYTE_SLICE }, BYTE_SLICE],
 				returns: [BYTE_SLICE],
 			},
+			ReplaceAll: {
+				kind: "func",
+				params: [BYTE_SLICE, BYTE_SLICE, BYTE_SLICE],
+				returns: [BYTE_SLICE],
+			},
+			TrimPrefix: byFn2(BYTE_SLICE, BYTE_SLICE),
+			TrimSuffix: byFn2(BYTE_SLICE, BYTE_SLICE),
+			TrimLeft: byFn2(STRING, BYTE_SLICE),
+			TrimRight: byFn2(STRING, BYTE_SLICE),
+			TrimFunc: {
+				kind: "func",
+				params: [BYTE_SLICE, ANY],
+				returns: [BYTE_SLICE],
+			},
+			IndexByte: byFn2(INT, INT),
+			LastIndex: byFn2(BYTE_SLICE, INT),
+			LastIndexByte: byFn2(INT, INT),
+			Fields: byFn1({ kind: "slice", elem: BYTE_SLICE }),
+			Cut: {
+				kind: "func",
+				params: [BYTE_SLICE, BYTE_SLICE],
+				returns: [BYTE_SLICE, BYTE_SLICE, BOOL],
+			},
+			ContainsAny: byFn2(STRING, BOOL),
+			ContainsRune: byFn2(INT, BOOL),
+			Map: {
+				kind: "func",
+				params: [ANY, BYTE_SLICE],
+				returns: [BYTE_SLICE],
+			},
+			SplitN: {
+				kind: "func",
+				params: [BYTE_SLICE, BYTE_SLICE, INT],
+				returns: [{ kind: "slice", elem: BYTE_SLICE }],
+			},
+			NewReader: {
+				kind: "func",
+				params: [BYTE_SLICE],
+				returns: [ANY],
+			},
 		},
 	});
 
@@ -240,6 +366,22 @@ export function setupGlobals(globals, types) {
 				kind: "func",
 				params: [STRING],
 				returns: [BOOL, ERROR],
+			},
+			Quote: { kind: "func", params: [STRING], returns: [STRING] },
+			Unquote: {
+				kind: "func",
+				params: [STRING],
+				returns: [STRING, ERROR],
+			},
+			AppendInt: {
+				kind: "func",
+				params: [{ kind: "slice", elem: INT }, INT, INT],
+				returns: [{ kind: "slice", elem: INT }],
+			},
+			AppendFloat: {
+				kind: "func",
+				params: [{ kind: "slice", elem: INT }, FLOAT64, INT, INT, INT],
+				returns: [{ kind: "slice", elem: INT }],
 			},
 		},
 	});
@@ -277,6 +419,26 @@ export function setupGlobals(globals, types) {
 			SliceIsSorted: {
 				kind: "func",
 				params: [ANY, ANY],
+				returns: [BOOL],
+			},
+			Search: {
+				kind: "func",
+				params: [INT, ANY],
+				returns: [INT],
+			},
+			IntsAreSorted: {
+				kind: "func",
+				params: [{ kind: "slice", elem: INT }],
+				returns: [BOOL],
+			},
+			Float64sAreSorted: {
+				kind: "func",
+				params: [{ kind: "slice", elem: FLOAT64 }],
+				returns: [BOOL],
+			},
+			StringsAreSorted: {
+				kind: "func",
+				params: [{ kind: "slice", elem: STRING }],
 				returns: [BOOL],
 			},
 		},
@@ -327,6 +489,26 @@ export function setupGlobals(globals, types) {
 				returns: [BOOL],
 			},
 			NaN: { kind: "func", params: [], returns: [FLOAT64] },
+			Atan: { kind: "func", params: [FLOAT64], returns: [FLOAT64] },
+			Atan2: { kind: "func", params: [FLOAT64, FLOAT64], returns: [FLOAT64] },
+			Asin: { kind: "func", params: [FLOAT64], returns: [FLOAT64] },
+			Acos: { kind: "func", params: [FLOAT64], returns: [FLOAT64] },
+			Exp: { kind: "func", params: [FLOAT64], returns: [FLOAT64] },
+			Exp2: { kind: "func", params: [FLOAT64], returns: [FLOAT64] },
+			Trunc: { kind: "func", params: [FLOAT64], returns: [FLOAT64] },
+			Hypot: { kind: "func", params: [FLOAT64, FLOAT64], returns: [FLOAT64] },
+			Signbit: { kind: "func", params: [FLOAT64], returns: [BOOL] },
+			Copysign: {
+				kind: "func",
+				params: [FLOAT64, FLOAT64],
+				returns: [FLOAT64],
+			},
+			Dim: { kind: "func", params: [FLOAT64, FLOAT64], returns: [FLOAT64] },
+			Remainder: {
+				kind: "func",
+				params: [FLOAT64, FLOAT64],
+				returns: [FLOAT64],
+			},
 			// Constants
 			Pi: FLOAT64,
 			E: FLOAT64,
@@ -353,15 +535,57 @@ export function setupGlobals(globals, types) {
 		kind: "namespace",
 		name: "time",
 		members: {
-			Now: { kind: "func", params: [], returns: [ANY] },
-			Since: { kind: "func", params: [ANY], returns: [ANY] },
+			Now: { kind: "func", params: [], returns: [TIME_T] },
+			Since: { kind: "func", params: [TIME_T], returns: [INT] },
 			Sleep: { kind: "func", params: [ANY], returns: [VOID], async: true },
+			Parse: {
+				kind: "func",
+				params: [STRING, STRING],
+				returns: [TIME_T, ERROR],
+			},
+			Unix: { kind: "func", params: [INT, INT], returns: [TIME_T] },
+			Date: {
+				kind: "func",
+				params: [INT, INT, INT, INT, INT, INT, INT, ANY],
+				returns: [TIME_T],
+			},
 			Millisecond: INT,
 			Second: INT,
 			Minute: INT,
 			Hour: INT,
+			// Layout constants
+			RFC3339: STRING,
+			RFC3339Nano: STRING,
+			DateOnly: STRING,
+			TimeOnly: STRING,
+			DateTime: STRING,
+			// Location constants
+			UTC: ANY,
+			Local: ANY,
+			// Month constants
+			January: INT,
+			February: INT,
+			March: INT,
+			April: INT,
+			May: INT,
+			June: INT,
+			July: INT,
+			August: INT,
+			September: INT,
+			October: INT,
+			November: INT,
+			December: INT,
+			// Weekday constants
+			Sunday: INT,
+			Monday: INT,
+			Tuesday: INT,
+			Wednesday: INT,
+			Thursday: INT,
+			Friday: INT,
+			Saturday: INT,
 		},
 	});
+	types.set("time.Time", TIME_T);
 
 	// unicode package
 	const runeToStr = { kind: "func", params: [INT], returns: [BOOL] };
@@ -455,22 +679,30 @@ export function setupGlobals(globals, types) {
 	// io package — Writer interface + WriteString
 	// io.Writer is typed as ANY so GoFront's built-in writer types (strings.Builder,
 	// bytes.Buffer) are accepted without explicit interface-satisfaction registration.
+	const BYTE_SLICE_IO = { kind: "slice", elem: INT };
 	globals.define("io", {
 		kind: "namespace",
 		name: "io",
 		members: {
 			Writer: ANY,
+			Reader: ANY,
 			EOF: ERROR,
 			WriteString: {
 				kind: "func",
 				params: [ANY, STRING],
 				returns: [INT, ERROR],
 			},
+			ReadAll: {
+				kind: "func",
+				params: [ANY],
+				returns: [BYTE_SLICE_IO, ERROR],
+			},
 			Discard: ANY,
 		},
 	});
 	// Register io.Writer as a type alias so it resolves in parameter/field annotations.
 	types.set("io.Writer", ANY);
+	types.set("io.Reader", ANY);
 
 	// gom package — browser-native component built-in
 	const GOM_NODE_T = {
@@ -739,6 +971,77 @@ export function setupGlobals(globals, types) {
 			kind: "struct",
 			fields: new Map(),
 			methods: bytesBufferMethods,
+		},
+	});
+
+	// math/rand package — import "math/rand" → local name "rand"
+	globals.define("rand", {
+		kind: "namespace",
+		name: "rand",
+		members: {
+			Intn: { kind: "func", params: [INT], returns: [INT] },
+			Float64: { kind: "func", params: [], returns: [FLOAT64] },
+			Float32: { kind: "func", params: [], returns: [FLOAT64] },
+			Int: { kind: "func", params: [], returns: [INT] },
+			Int63: { kind: "func", params: [], returns: [INT] },
+			Int63n: { kind: "func", params: [INT], returns: [INT] },
+			Int31: { kind: "func", params: [], returns: [INT] },
+			Int31n: { kind: "func", params: [INT], returns: [INT] },
+			Seed: { kind: "func", params: [INT], returns: [VOID] },
+			Shuffle: { kind: "func", params: [INT, ANY], returns: [VOID] },
+			Perm: {
+				kind: "func",
+				params: [INT],
+				returns: [{ kind: "slice", elem: INT }],
+			},
+		},
+	});
+
+	// unicode/utf8 package — import "unicode/utf8" → local name "utf8"
+	globals.define("utf8", {
+		kind: "namespace",
+		name: "utf8",
+		members: {
+			RuneCountInString: { kind: "func", params: [STRING], returns: [INT] },
+			RuneLen: { kind: "func", params: [INT], returns: [INT] },
+			ValidString: { kind: "func", params: [STRING], returns: [BOOL] },
+			ValidRune: { kind: "func", params: [INT], returns: [BOOL] },
+			DecodeRuneInString: {
+				kind: "func",
+				params: [STRING],
+				returns: [INT, INT],
+			},
+			DecodeLastRuneInString: {
+				kind: "func",
+				params: [STRING],
+				returns: [INT, INT],
+			},
+			FullRuneInString: { kind: "func", params: [STRING], returns: [BOOL] },
+			// Constants
+			RuneError: INT,
+			MaxRune: INT,
+			UTFMax: INT,
+		},
+	});
+
+	// path package — import "path" or "path/filepath" → local name "path"
+	globals.define("path", {
+		kind: "namespace",
+		name: "path",
+		members: {
+			Base: { kind: "func", params: [STRING], returns: [STRING] },
+			Dir: { kind: "func", params: [STRING], returns: [STRING] },
+			Ext: { kind: "func", params: [STRING], returns: [STRING] },
+			Join: {
+				kind: "func",
+				params: [STRING],
+				returns: [STRING],
+				variadic: true,
+			},
+			Clean: { kind: "func", params: [STRING], returns: [STRING] },
+			IsAbs: { kind: "func", params: [STRING], returns: [BOOL] },
+			Split: { kind: "func", params: [STRING], returns: [STRING, STRING] },
+			Match: { kind: "func", params: [STRING, STRING], returns: [BOOL, ERROR] },
 		},
 	});
 

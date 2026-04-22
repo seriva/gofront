@@ -1,12 +1,14 @@
 package main
 
+import "unicode/utf8"
+
 const maxTodoLen = 120
 
 func validateTodo(text string) error {
     if !utils.HasText(text) {
         return errors.New("todo text cannot be empty")
     }
-    if len([]rune(text)) > maxTodoLen {
+    if utf8.RuneCountInString(text) > maxTodoLen {
         return errors.New("todo text too long")
     }
     return nil

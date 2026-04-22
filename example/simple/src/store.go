@@ -70,11 +70,11 @@ func toggleTodo(id int) {
 }
 
 func removeTodo(id int) {
-    todos = utils.Filter(todos, func(t Todo) bool { return t.id != id })
+    todos = slices.DeleteFunc(todos, func(t Todo) bool { return t.id == id })
 }
 
 func clearCompleted() {
-    todos = utils.Filter(todos, func(t Todo) bool { return !t.done })
+    todos = slices.DeleteFunc(todos, func(t Todo) bool { return t.done })
 }
 
 func setFilter(f int) {

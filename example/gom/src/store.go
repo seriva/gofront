@@ -2,6 +2,7 @@ package main
 
 import "./utils"
 import "js:./browser.d.ts"
+import "unicode/utf8"
 
 // ── Application state ─────────────────────────────────────────
 
@@ -28,7 +29,7 @@ func validateTodo(text string) error {
 	if !utils.HasText(text) {
 		return errors.New("todo text cannot be empty")
 	}
-	if len([]rune(text)) > maxTodoLen {
+	if utf8.RuneCountInString(text) > maxTodoLen {
 		return errors.New("todo text too long")
 	}
 	return nil
@@ -115,11 +116,11 @@ func toggleTodo(id int) {
 }
 
 func removeTodo(id int) {
-	todos = utils.Filter(todos, func(t Todo) bool { return t.id != id })
+	todos = slices.DeleteFunc(todos, func(t Todo) bool { return t.id == id })
 }
 
 func clearCompleted() {
-	todos = utils.Filter(todos, func(t Todo) bool { return !t.done })
+	todos = slices.DeleteFunc(todos, func(t Todo) bool { return t.done })
 }
 
 func setFilter(f int) {

@@ -25,9 +25,37 @@ function findNodeModules(startDir) {
 	}
 }
 
+// Built-in stdlib package paths that are always available as globals — no resolution needed.
+const BUILTIN_PACKAGES = new Set([
+	"fmt",
+	"strings",
+	"bytes",
+	"strconv",
+	"sort",
+	"math",
+	"math/rand",
+	"errors",
+	"time",
+	"unicode",
+	"unicode/utf8",
+	"os",
+	"slices",
+	"html",
+	"io",
+	"gom",
+	"maps",
+	"regexp",
+	"path",
+	"path/filepath",
+]);
+
 // Returns true for local relative paths (start with ./ or ../)
 export function isLocalPath(importPath) {
 	return importPath.startsWith("./") || importPath.startsWith("../");
+}
+
+export function isBuiltinPackage(importPath) {
+	return BUILTIN_PACKAGES.has(importPath);
 }
 
 // Resolve a local relative import path to an absolute directory of .go files.
@@ -85,6 +113,7 @@ export function resolveAll(imports, fromFile, parseDts) {
 		for (const { path } of imp.imports) {
 			if (path.startsWith("js:")) continue; // handled separately
 			if (isLocalPath(path)) continue; // local .go packages — handled by compiler
+			if (isBuiltinPackage(path)) continue; // built-in stdlib namespaces — always available
 
 			if (resolved.has(path)) continue;
 
