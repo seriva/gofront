@@ -36,10 +36,12 @@
 		"build:gom": "node src/index.js example/gom/src -o example/gom/app.js",
 		"test": "node test/run.js",
 		"format": "biome format --write .",
-		"check": "biome check ."
+		"check": "biome check .",
+		"prepare": "husky"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "^2.4.11",
+		"@biomejs/biome": "^2.4.12",
+		"husky": "^9.1.7",
 		"jsdom": "^29.0.2"
 	}
 }
