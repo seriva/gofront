@@ -25,12 +25,3 @@ func Filter[T any](items []T, pred func(T) bool) []T {
     }
     return out
 }
-
-// Map transforms each element of a slice using the given function.
-func Map[T any, U any](items []T, f func(T) U) []U {
-    var out []U
-    for _, item := range items {
-        out = append(out, f(item))
-    }
-    return out
-}

@@ -83,7 +83,7 @@ func initStore() {
     // Computed: number of urgent, incomplete tasks
     highCountSignal = Signals.computed(func() any {
         urgent := utils.Filter(todosSignal.get(), func(t Todo) bool { return t.isUrgent() })
-        return max(len(urgent), 0)
+        return len(urgent)
     }, "highCount")
 }
 

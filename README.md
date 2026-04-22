@@ -202,7 +202,7 @@ example/simple/
     styles.go     ← injectStyles() creates <style> element with all CSS
     main.go       ← createApp() builds DOM shell · setupEvents() · event delegation
     utils/
-      utils.go    ← Plural() · generic Filter/Map — cross-package import demo
+      utils.go    ← Plural() · generic Filter — cross-package import demo
     browser.d.ts  ← minimal external type declarations (sleep)
   index.html      ← bare HTML shell, loads app.js as ES module
   app.js          ← generated output
@@ -224,7 +224,7 @@ example/reactive/
     styles.go     ← per-section cssClass() scoped styles
     main.go       ← async boot, Reactive.mount loading placeholder, signal.subscribe/once
     utils/
-      utils.go    ← Plural() · generic Filter/Map
+      utils.go    ← Plural() · generic Filter
     browser.d.ts  ← Signal · ComponentContext · Signals/Reactive namespaces · htmlTag
   reactive.js     ← signals framework (from microtastic)
   index.html      ← loads reactive.js, exposes helpers, imports app.js
@@ -478,6 +478,7 @@ signatures into GoFront's internal type representation.
 | `regexp` | `MustCompile`, `Compile`, `MatchString`, `QuoteMeta`; **`*Regexp`** methods: `MatchString`, `FindString`, `FindStringIndex`, `FindAllString`, `FindStringSubmatch`, `FindAllStringSubmatch`, `ReplaceAllString`, `ReplaceAllLiteralString`, `Split`, `String`. Inline flags (`(?i)`, `(?m)`, `(?s)`) are extracted automatically into the JS `RegExp` constructor. |
 | `unicode` | `IsLetter`, `IsDigit`, `IsSpace`, `IsUpper`, `IsLower`, `IsPunct`, `IsControl`, `IsPrint`, `IsGraphic`, `ToUpper`, `ToLower` |
 | `os` | `Exit`, `Args`, `Getenv` |
+| `io` | `Writer`, `Reader`, `ReadWriter`, `Closer` interface types — used for accepting `*strings.Builder`, `*bytes.Buffer`, or any compatible writer/reader |
 | `gom` | Browser-native declarative DOM component library. **Types**: `Node` (interface), `NodeFunc`, `Group`. **Core**: `El(tag, children...)`, `Text(s)`, `Mount(sel, node)`, `MountTo(sel, node)`. **Attributes**: `Attr`, `Class`, `Href`, `Type`, `Src`, `Placeholder`, `DataAttr`, `Style`, `For`, `Name`, `Value`, `Target`, `Rel`, `Alt`, `Title`, `Draggable`, `Role`, `AriaLabel`, `StyleAttr`; boolean: `Disabled`, `Checked`, `Selected`, `Readonly`. **Logic**: `If(cond, node)`, `Map(slice, fn)`. **Elements**: full HTML element set (`Div`, `Span`, `Button`, `Input`, `Ul`, `Li`, `Table`, `Form`, `Img`, `A`, `H1`–`H6`, …) |
 
 ### Packages & imports
@@ -550,7 +551,7 @@ you know exactly what to expect.
 
 See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full roadmap and release history.
 Design documents for planned features are organised by release under `docs/v*/`
-(e.g. [`docs/v0.0.5/`](docs/v0.0.5/)).
+(e.g. [`docs/v0.0.8/`](docs/v0.0.8/), [`docs/v0.0.9/`](docs/v0.0.9/)).
 
 ---
 
@@ -560,7 +561,7 @@ Design documents for planned features are organised by release under `docs/v*/`
 npm test
 ```
 
-940 tests covering language features, type errors, edge cases, DOM (jsdom), external
+990 tests covering language features, type errors, edge cases, DOM (jsdom), external
 `.d.ts`, npm resolver, multi-file compilation, embedded structs, string formatting, map
 iteration order, integer overflow semantics, unused variable detection, unused import
 detection, semantic difference verification, stdlib shim packages, generics (type params,

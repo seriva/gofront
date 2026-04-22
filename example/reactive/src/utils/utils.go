@@ -10,11 +10,6 @@ func Plural(n int, word string) string {
     return String(n) + " " + word + "s"
 }
 
-// Clamp keeps n within [lo, hi].
-func Clamp(n int, lo int, hi int) int {
-    return max(min(n, hi), lo)
-}
-
 // HasText reports whether s contains at least one non-whitespace character.
 func HasText(s string) bool {
     return strings.TrimSpace(s) != ""
@@ -31,11 +26,3 @@ func Filter[T any](items []T, pred func(T) bool) []T {
     return out
 }
 
-// Map transforms each element of a slice using the given function.
-func Map[T any, U any](items []T, f func(T) U) []U {
-    var out []U
-    for _, item := range items {
-        out = append(out, f(item))
-    }
-    return out
-}
