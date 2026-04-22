@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **E2E tests (Playwright)** — 74 end-to-end tests covering all three example apps
+  (Simple, Reactive, Gom). Shared suite tests CRUD, filtering, priority mode,
+  persistence (reload), drag-and-drop, and sync status. Per-app suites verify
+  app-specific behaviour: scoped styles, stats bar, loading placeholder, `gom.If`
+  conditional rendering. Infrastructure: `playwright.config.js` at root,
+  `test/e2e/` with `global-setup.js` (builds all apps), `selectors.js`, `helpers.js`,
+  and four spec files. New npm scripts: `test:e2e`, `test:e2e:ui`,
+  `test:e2e:simple`, `test:e2e:reactive`, `test:e2e:gom`.
+
 ## [0.0.7] - 2026-04-22
 
 ### Added

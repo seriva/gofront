@@ -23,7 +23,9 @@ packages. `src/dts-parser.js` parses TypeScript `.d.ts` declaration files.
 ## Commands
 
 ```sh
-npm test          # run the full test suite (~990 tests, no browser required)
+npm run test:unit # run unit tests only (~990 tests, no browser required)
+npm run test:e2e  # run E2E tests (Playwright, headless Chromium, requires built apps)
+npm test          # run both unit and E2E
 npm run format    # format with Biome
 npm run check     # lint with Biome
 
