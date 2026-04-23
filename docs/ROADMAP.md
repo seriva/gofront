@@ -98,7 +98,7 @@ Design documents are in [`docs/v0.0.9/`](v0.0.9/).
 
 | Feature | Difficulty | Status | Notes |
 |---|---|---|---|
-| `.templ` file support | High | | Native `.templ` parsing: `templ` declarations, HTML bodies, `{ expr }` interpolation, `@component()` calls, `{ children... }` slots, `if`/`for`/`switch` control flow. Compiles directly to DOM manipulation JS using the `gom` built-in as the runtime target. See [design plan](v0.0.9/templ-plan.md). |
+| `.templ` file support | High | ✓ | Native `.templ` parsing: `templ` declarations, HTML bodies, `{ expr }` interpolation, `@component()` calls, `{ children... }` slots, `if`/`else if`/`else`, `for`, `switch` control flow, `@templ.Raw()` for trusted HTML injection. Compiles directly to DOM manipulation JS. See [design plan](v0.0.9/templ-plan.md). |
 
 ---
 

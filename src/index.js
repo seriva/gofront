@@ -352,7 +352,8 @@ const watchTarget = isDir ? inputPath : dirname(inputPath);
 
 let debounce = null;
 watch(watchTarget, { recursive: true }, (_event, filename) => {
-	if (filename && !filename.endsWith(".go")) return;
+	if (filename && !filename.endsWith(".go") && !filename.endsWith(".templ"))
+		return;
 	clearTimeout(debounce);
 	debounce = setTimeout(() => buildOnce(), 80);
 });
