@@ -32,6 +32,7 @@ import "./compiler/packages.test.js";
 import "./compiler/cli.test.js";
 import "./compiler/imports.test.js";
 import "./builtins/gom.test.js";
+import "./templ.test.js";
 import "./dom.test.js";
 import "./lexer-parser.test.js";
 import "./minifier.test.js";

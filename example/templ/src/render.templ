@@ -1,0 +1,115 @@
+package main
+
+import "./utils"
+
+// ── Todo item ─────────────────────────────────────────────────
+
+templ TodoItem(t Todo) {
+	<li class={ todoItemClass(t) } draggable="true" data-id={ t.id }>
+		<input type="checkbox" class="todo-cb" data-action="toggle" data-todo-id={ t.id } checked?={ t.done }/>
+		<span class="todo-text">{ t.text }</span>
+		if t.isUrgent() {
+			<span class="badge">urgent</span>
+		}
+		<button class="del-btn" type="button" data-action="delete" data-todo-id={ t.id }>✕</button>
+	</li>
+}
+
+// ── Todo list ─────────────────────────────────────────────────
+
+templ TodoList(visible []Todo) {
+	<ul class="todo-list">
+		if len(visible) == 0 {
+			<li class="empty">Nothing here.</li>
+		} else {
+			for _, t := range visible {
+				@TodoItem(t)
+			}
+		}
+	</ul>
+}
+
+// ── Filter bar ────────────────────────────────────────────────
+
+templ FilterButton(f int, active int) {
+	<button class={ filterBtnClass(f, active) } data-action="filter" data-filter={ f }>{ filterLabel(f) }</button>
+}
+
+templ FilterBar(activeFilter int) {
+	<div class="filter-bar">
+		@FilterButton(FilterAll, activeFilter)
+		@FilterButton(FilterActive, activeFilter)
+		@FilterButton(FilterCompleted, activeFilter)
+	</div>
+}
+
+// ── Footer ────────────────────────────────────────────────────
+
+templ Footer(todos []Todo, activeFilter int) {
+	<footer class="footer">
+		if len(todos) > 0 {
+			<span class="count">{ footerCountText() }</span>
+			@FilterBar(activeFilter)
+			if completedCount() > 0 {
+				<button class="clear-btn" type="button" data-action="clear-completed">Clear ({ completedCount() })</button>
+			}
+		}
+	</footer>
+}
+
+// ── Header ────────────────────────────────────────────────────
+
+templ SyncStatus(msg string, cls string) {
+	<span class={ syncStatusClass(cls) }>{ msg }</span>
+}
+
+templ Header(hc int, msg string, cls string) {
+	<header class="header">
+		<div class="header-top">
+			<div class="header-icon">✓</div>
+			<h1>Todos Templ</h1>
+			if hc > 0 {
+				<span class="high-badge">{ hc } urgent</span>
+			}
+			@SyncStatus(msg, cls)
+		</div>
+		<p class="tagline">Built with <a href="https://github.com/seriva/gofront" target="_blank"><strong>GoFront</strong></a> — Go compiled to JS</p>
+	</header>
+}
+
+// ── Input row ─────────────────────────────────────────────────
+
+templ InputRow(highPri bool, errMsg string) {
+	<div class="input-row">
+		<input class={ inputClass(highPri) } type="text" placeholder={ inputPlaceholder(highPri) } autocomplete="off"/>
+		<button class={ priorityBtnClass(highPri) } type="button" data-action="priority">{ priorityBtnText(highPri) }</button>
+		<button class="add-btn" type="button" data-action="add">Add</button>
+		if highPri {
+			<span class="priority-hint">⚡ High priority — task will be marked urgent</span>
+		}
+		if errMsg != "" {
+			<span class="error-msg">{ errMsg }</span>
+		}
+	</div>
+}
+
+// ── Stats bar ─────────────────────────────────────────────────
+
+templ StatsBar(n int) {
+	<div class="stats-bar">
+		<span data-action="filter-active"><strong>{ n }</strong> { todosWord(n) } in session</span>
+	</div>
+}
+
+// ── App root ──────────────────────────────────────────────────
+
+templ AppView() {
+	<div class="card">
+		@Header(highCount(), syncMsg, syncCls)
+		@InputRow(highPriority, errorMsg)
+		<div class="list-divider"></div>
+		@TodoList(visibleTodos())
+		@Footer(todos, filter)
+		@StatsBar(len(todos))
+	</div>
+}

@@ -7,6 +7,8 @@ quite felt like home either.
 So I built GoFront. Go syntax and type safety, compiling to plain ES modules. One language
 front and back, no runtime, no framework, no tsconfig.json.
 
+With built-in support for declarative DOM rendering via the `gom` standard library, JSX-like `.templ` files, and seamless integration with external JavaScript libraries through TypeScript definition files (`.d.ts`), GoFront is designed specifically as a frontend development target. Build complex, reactive user interfaces entirely in Go.
+
 Probably not useful. Definitely fun to build.
 
 ```go
@@ -61,6 +63,12 @@ source text (.go files)
   → Parser         recursive-descent → AST
   → Type Checker   annotate AST with types + collect errors
   → Code Gen       AST → JavaScript string
+
+source text (.templ files)
+  → TemplLexer     dual-mode: Go mode for declarations, HTML mode inside templ bodies
+  → TemplParser    extends Parser; produces TemplDecl AST nodes with TemplNode children
+  → Type Checker   registers each templ component as func(...) gom.Node
+  → Code Gen       TemplDecl → direct DOM calls (createElement / setAttribute / appendChild)
 ```
 
 ### 1. Lexer (`src/lexer.js`)
@@ -184,7 +192,7 @@ The type checker enforces correctness; JavaScript doesn't need to know.
 
 ## Examples — Todo App
 
-There are three example apps — all implement the same todo app to show different aspects
+There are four example apps — all implement the same todo app to show different aspects
 of GoFront.
 
 ### Simple (vanilla DOM)
@@ -244,6 +252,58 @@ The reactive example covers the full reactive.js API surface:
 | Component instance | `signal`, `effect`, `on` (auto-cleanup event listeners) |
 | Scan attributes | `data-model`, `data-text`, `data-html`, `data-if`, `data-visible`, `data-class-*`, `data-attr-*`, `data-bool-*`, `data-on-*`, `data-ref` |
 
+### templ (template files + direct DOM codegen)
+
+Same todo app using GoFront's `.templ` file format — a JSX-like syntax embedded directly
+in `.go` packages. `templ` declarations compile to direct `document.createElement` calls
+with no intermediate representation, producing `{Mount(p){}}` objects that are fully
+compatible with the `gom.Node` interface.
+
+```
+example/templ/
+  src/
+    render.templ  ← UI as templ declarations: TodoItem, TodoList, Header, InputRow, StatsBar, AppView, …
+    render.go     ← helper functions (todoItemClass, filterLabel, …) + render() entry point
+    types.go      ← Todo struct, filter/priority constants
+    store.go      ← state, mutations, localStorage persistence
+    styles.go     ← appStyles() CSS string
+    main.go       ← event setup, entry point
+    utils/        ← Filter[T], Plural, HasText
+  app.js          ← generated output
+  index.html      ← HTML shell
+```
+
+`.templ` syntax at a glance:
+
+```go
+templ TodoItem(t Todo) {
+    <li class={ todoItemClass(t) } draggable="true" data-id={ t.id }>
+        <input type="checkbox" checked?={ t.done }/>
+        <span class="todo-text">{ t.text }</span>
+        if t.isUrgent() {
+            <span class="badge">urgent</span>
+        }
+    </li>
+}
+
+templ AppView() {
+    <div class="card">
+        @Header(highCount(), syncMsg, syncCls)
+        @TodoList(visibleTodos())
+    </div>
+}
+```
+
+Key syntax features:
+- `{ expr }` — interpolate any Go expression (strings auto-cast, others use `String()`)
+- `attr={ expr }` — dynamic attribute value (expression)
+- `attr?={ expr }` — boolean attribute (present/absent based on truthiness)
+- `@Component(args)` — call another templ component and mount it as a child
+- `if cond { } else { }` — conditional rendering inside template bodies
+- `for _, v := range slice { }` — loop rendering inside template bodies
+- Components are called like regular functions (`AppView()`, `TodoItem(t)`) and return
+  a `gom.Node`-compatible object, so `gom.Mount("#app", AppView())` works directly.
+
 ### gom (stdlib component library + todo app)
 
 Browser-native declarative DOM components inspired by
@@ -299,12 +359,18 @@ declarative node-tree pattern (no `innerHTML`, no `querySelector`), and full fea
 parity with the other examples (priority mode, validation, localStorage persistence,
 sync status, drag-and-drop reordering).
 
+The templ example additionally demonstrates: **`.templ` file compilation**, template
+components with parameters, `{ expr }` interpolation, `attr?={}` conditional boolean
+attributes, `@Component()` calls inside templates, `if/else` and `for range` control
+flow inside template bodies, and seamless interop with `gom.Mount` / `gom.Style`.
+
 ### Build and run
 
 ```sh
 npm run build:simple      # → example/simple/app.js
 npm run build:reactive    # → example/reactive/app.js
 npm run build:gom         # → example/gom/app.js
+npm run build:templ       # → example/templ/app.js
 # open the respective index.html in a browser
 ```
 
@@ -496,6 +562,7 @@ signatures into GoFront's internal type representation.
 | Unused import detection | ✓ |
 | External `.d.ts` types | ✓ |
 | npm package type resolution | ✓ |
+| `.templ` files in packages | ✓ — mix `.go` and `.templ` files freely; templ components visible across the whole package |
 
 ---
 
@@ -561,18 +628,20 @@ Design documents for planned features are organised by release under `docs/v*/`
 ## Tests
 
 ```sh
-npm run test:unit   # unit tests only (~1076 tests, no browser required)
+npm run test:unit   # unit tests only (~1091 tests, no browser required)
 npm run test:e2e    # E2E tests (Playwright, headless Chromium)
 npm test            # both
 ```
 
-**Unit tests** (1076) cover language features, type errors, edge cases, DOM (jsdom),
+**Unit tests** (~1091) cover language features, type errors, edge cases, DOM (jsdom),
 external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string
 formatting, map iteration order, integer overflow semantics, unused variable detection,
-unused import detection, semantic difference verification, stdlib shim packages, and
-generics.
+unused import detection, semantic difference verification, stdlib shim packages, generics,
+and `.templ` file compilation (element rendering, interpolation, boolean attrs, component
+calls, `if/else`, `for range`, mixed `.go`+`.templ` packages).
 
-**E2E tests** (74, Playwright) run all three example apps in a real browser and verify
+**E2E tests** (~104, Playwright) run all four example apps in a real browser and verify
 CRUD, filtering, priority mode, persistence (reload), drag-and-drop reordering, and sync
 status. Per-app suites check app-specific behaviour: scoped styles, stats bar, loading
-placeholder, and `gom.If` conditional rendering.
+placeholder, `gom.If` conditional rendering, and templ-specific features (`if/else`
+priority hint, `for` loop rendering, conditional bool attributes).

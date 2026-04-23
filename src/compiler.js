@@ -22,6 +22,8 @@ import { parseDts } from "./dts-parser.js";
 import { Lexer } from "./lexer.js";
 import { Parser } from "./parser.js";
 import { isLocalPath, resolveAll, resolveGwDir } from "./resolver.js";
+import { TemplLexer } from "./templ-lexer.js";
+import { TemplParser } from "./templ-parser.js";
 import { TypeChecker } from "./typechecker.js";
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -35,9 +37,18 @@ function parseFile(filePath) {
 	return ast;
 }
 
+function parseTemplFile(filePath) {
+	const source = readFileSync(filePath, "utf8");
+	const filename = basename(filePath);
+	const tokens = new TemplLexer(source, filename).tokenize();
+	const ast = new TemplParser(tokens, filename, source).parse();
+	ast._source = source;
+	return ast;
+}
+
 function gwFilesIn(dir) {
 	return readdirSync(dir)
-		.filter((f) => f.endsWith(".go"))
+		.filter((f) => f.endsWith(".go") || f.endsWith(".templ"))
 		.sort() // deterministic order
 		.map((f) => join(dir, f));
 }
@@ -58,7 +69,7 @@ export function compileFiles(files, options = {}) {
 	const programs = [];
 	for (const f of files) {
 		try {
-			programs.push(parseFile(f));
+			programs.push(f.endsWith(".templ") ? parseTemplFile(f) : parseFile(f));
 		} catch (e) {
 			parseErrors.push(e.message);
 		}

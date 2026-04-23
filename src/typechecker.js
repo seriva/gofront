@@ -157,6 +157,8 @@ export class TypeChecker {
 		for (const decl of program.decls) {
 			if (decl.kind === "FuncDecl" || decl.kind === "MethodDecl") {
 				this.collectFunc(decl);
+			} else if (decl.kind === "TemplDecl") {
+				this._collectTemplDecl(decl);
 			}
 		}
 		// Pass 2.1: Promote embedded methods
@@ -203,9 +205,11 @@ export class TypeChecker {
 		for (const p of programs) {
 			this._currentFile = p._filename ?? null;
 			this._currentSource = p._source ?? null;
-			for (const d of p.decls)
+			for (const d of p.decls) {
 				if (d.kind === "FuncDecl" || d.kind === "MethodDecl")
 					this.collectFunc(d);
+				else if (d.kind === "TemplDecl") this._collectTemplDecl(d);
+			}
 		}
 
 		// Pass 2.1: Promote embedded methods
@@ -407,8 +411,32 @@ export class TypeChecker {
 				this.checkConstDecl(decl, scope);
 				break;
 			case "TypeDecl":
-				break; // already collected
+			case "TemplDecl":
+				break; // already collected / no body to check
 		}
+	}
+
+	_collectTemplDecl(decl) {
+		const paramTypes = decl.params.map((p) =>
+			this.resolveTypeNode(p.type, this.globals),
+		);
+		const gomNodeType = this.types.get("gom.Node") ?? {
+			kind: "basic",
+			name: "any",
+		};
+		const isVariadic =
+			decl.params.length > 0 && decl.params[decl.params.length - 1].variadic;
+		const funcType = {
+			kind: "func",
+			params: paramTypes,
+			returns: [gomNodeType],
+			variadic: isVariadic,
+			async: false,
+		};
+		if (this.globals.symbols.has(decl.name) && decl.name !== "init") {
+			this.err(`${decl.name} redeclared in this block`, decl);
+		}
+		this.globals.define(decl.name, funcType);
 	}
 
 	checkFuncDecl(decl, outer) {
