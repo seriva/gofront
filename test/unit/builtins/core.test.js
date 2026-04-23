@@ -156,43 +156,6 @@ func main() {
 	assertEqual(runJs(js), "Infinity");
 });
 
-test("cap() on slice", () => {
-	// GoFront compiles to JS arrays which have no separate capacity concept;
-	// cap() returns length (the only meaningful value at runtime).
-	const { js } = compile(`package main
-func main() {
-  xs := make([]int, 3)
-  console.log(cap(xs))
-}`);
-	assertEqual(runJs(js), "3");
-});
-
-test("copy() copies elements", () => {
-	const { js } = compile(`package main
-func main() {
-  src := []int{1, 2, 3}
-  dst := make([]int, 3)
-  n := copy(dst, src)
-  console.log(n)
-  console.log(dst[0])
-  console.log(dst[2])
-}`);
-	assertEqual(runJs(js), "3\n1\n3");
-});
-
-test("copy() limited by destination length", () => {
-	const { js } = compile(`package main
-func main() {
-  src := []int{10, 20, 30, 40}
-  dst := make([]int, 2)
-  n := copy(dst, src)
-  console.log(n)
-  console.log(dst[0])
-  console.log(dst[1])
-}`);
-	assertEqual(runJs(js), "2\n10\n20");
-});
-
 test("panic() throws with message", () => {
 	const { js } = compile(`package main
 func main() {

@@ -153,7 +153,7 @@ func setupEvents() {
 // ── Entry point ───────────────────────────────────────────────
 
 async func main() {
-	gom.MountTo("head", gom.Style(appStyles()))
+	gom.MountTo("head", AppStyles())
 	render()       // initial render so #app has children before setupEvents
 	setupEvents()  // attach all listeners once to #app
 

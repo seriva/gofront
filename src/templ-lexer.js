@@ -31,7 +31,10 @@ export const TT = {
 	TEMPL_IF: "TEMPL_IF",
 	TEMPL_ELSE: "TEMPL_ELSE",
 	TEMPL_FOR: "TEMPL_FOR",
-	TEMPL_END: "TEMPL_END", // closing } of if/for/templ body
+	TEMPL_SWITCH: "TEMPL_SWITCH", // switch expr {
+	TEMPL_CASE: "TEMPL_CASE", // case expr:
+	TEMPL_DEFAULT: "TEMPL_DEFAULT", // default:
+	TEMPL_END: "TEMPL_END", // closing } of if/for/switch/templ body
 };
 
 // Describes a parsed HTML attribute
@@ -182,11 +185,7 @@ export class TemplLexer {
 		}
 
 		const chunk = this.src.slice(start, this.pos);
-		// Lex this chunk as normal Go and append tokens (excluding EOF)
-		const chunkTokens = new Lexer(chunk, this.filename).tokenize();
-		for (const t of chunkTokens) {
-			if (t.type !== T.EOF) this.tokens.push(t);
-		}
+		for (const t of this._goTokens(chunk)) this.tokens.push(t);
 	}
 
 	// ── Templ declaration lexing ─────────────────────────────────
@@ -210,10 +209,7 @@ export class TemplLexer {
 		const paramStart = this.pos;
 		this._skipBalanced("(", ")");
 		const paramSrc = this.src.slice(paramStart, this.pos);
-		const paramTokens = new Lexer(paramSrc, this.filename).tokenize();
-		for (const t of paramTokens) {
-			if (t.type !== T.EOF) this.tokens.push(t);
-		}
+		for (const t of this._goTokens(paramSrc)) this.tokens.push(t);
 
 		this.skipWhitespace();
 
@@ -230,7 +226,7 @@ export class TemplLexer {
 	// depth: current brace depth (starts at 1 for the opening { of templ)
 	_lexHtmlBody(depth) {
 		while (!this.eof()) {
-			this._skipHtmlWhitespace();
+			this.skipWhitespace();
 			if (this.eof()) break;
 
 			const ch = this.peek();
@@ -248,49 +244,67 @@ export class TemplLexer {
 				return;
 			}
 
-			// HTML comment <!-- ... -->
-			if (ch === "<" && this.src.startsWith("<!--", this.pos)) {
-				this._skipHtmlComment();
-				continue;
-			}
-
-			// Closing tag </tag>
-			if (ch === "<" && this.peek(1) === "/") {
-				this._lexHtmlCloseTag();
-				continue;
-			}
-
-			// Opening tag <tag ...> or <tag .../>
-			if (ch === "<") {
-				this._lexHtmlOpenTag();
-				continue;
-			}
-
-			// @Component(args) call
-			if (ch === "@") {
-				this._lexTemplComponent();
-				continue;
-			}
-
-			// { children... } or { goExpr }
-			if (ch === "{") {
-				this._lexBraceExprOrControl();
-				continue;
-			}
-
-			// Control flow keywords: if, for, switch
-			if (this._peekKeyword("if")) {
-				this._lexTemplIf();
-				continue;
-			}
-			if (this._peekKeyword("for")) {
-				this._lexTemplFor();
-				continue;
-			}
-
-			// Plain text content
-			this._lexHtmlText();
+			this._lexHtmlNode();
 		}
+	}
+
+	// Lex HTML nodes for a switch-case body until case/default/} without consuming
+	// the terminator (the caller handles it).
+	_lexCaseBody() {
+		while (!this.eof()) {
+			this.skipWhitespace();
+			if (this.eof()) break;
+			const ch = this.peek();
+			if (ch === "}") break;
+			if (this._peekKeyword("case") || this._peekKeyword("default")) break;
+			this._lexHtmlNode();
+		}
+	}
+
+	// Lex a single HTML node at the current position.
+	_lexHtmlNode() {
+		const ch = this.peek();
+
+		// HTML comment <!-- ... -->
+		if (ch === "<" && this.src.startsWith("<!--", this.pos)) {
+			this._skipHtmlComment();
+			return;
+		}
+		// Closing tag </tag>
+		if (ch === "<" && this.peek(1) === "/") {
+			this._lexHtmlCloseTag();
+			return;
+		}
+		// Opening tag <tag ...> or <tag .../>
+		if (ch === "<") {
+			this._lexHtmlOpenTag();
+			return;
+		}
+		// @Component(args) call
+		if (ch === "@") {
+			this._lexTemplComponent();
+			return;
+		}
+		// { children... } or { goExpr }
+		if (ch === "{") {
+			this._lexBraceExprOrControl();
+			return;
+		}
+		// Control flow keywords
+		if (this._peekKeyword("if")) {
+			this._lexTemplIf();
+			return;
+		}
+		if (this._peekKeyword("for")) {
+			this._lexTemplFor();
+			return;
+		}
+		if (this._peekKeyword("switch")) {
+			this._lexTemplSwitch();
+			return;
+		}
+		// Plain text content
+		this._lexHtmlText();
 	}
 
 	// ── HTML element lexing ───────────────────────────────────────
@@ -310,7 +324,7 @@ export class TemplLexer {
 
 		// Attributes
 		while (!this.eof()) {
-			this._skipHtmlWhitespace();
+			this.skipWhitespace();
 			const c = this.peek();
 
 			if (c === "/" && this.peek(1) === ">") {
@@ -328,13 +342,13 @@ export class TemplLexer {
 			const attrName = this._readHtmlAttrName();
 			if (!attrName) break;
 
-			this._skipHtmlWhitespace();
+			this.skipWhitespace();
 
 			// Conditional boolean attribute: name?={expr}
 			if (this.peek() === "?" && this.peek(1) === "=") {
 				this.advance();
 				this.advance(); // ?=
-				this._skipHtmlWhitespace();
+				this.skipWhitespace();
 				if (this.peek() !== "{") this.err("expected '{' after ?=");
 				const exprTokens = this._readGoExprInBraces();
 				attrs.push({ kind: "cond-bool", name: attrName, tokens: exprTokens });
@@ -347,7 +361,7 @@ export class TemplLexer {
 				continue;
 			}
 			this.advance(); // =
-			this._skipHtmlWhitespace();
+			this.skipWhitespace();
 
 			if (this.peek() === "{") {
 				// Expression attribute: name={ goExpr }
@@ -375,7 +389,7 @@ export class TemplLexer {
 		this.advance(); // /
 		this.skipWhitespace();
 		const tagName = this._readHtmlName();
-		this._skipHtmlWhitespace();
+		this.skipWhitespace();
 		if (this.peek() === ">") this.advance();
 		this.tokens.push(new Token(TT.HTML_CLOSE, tagName, line, this.col));
 	}
@@ -407,12 +421,12 @@ export class TemplLexer {
 		const saveCol = this.col;
 
 		this.advance(); // {
-		this._skipHtmlWhitespace();
+		this.skipWhitespace();
 
 		// Check for children...
 		if (this.src.startsWith("children...", this.pos)) {
 			this.pos += "children...".length;
-			this._skipHtmlWhitespace();
+			this.skipWhitespace();
 			if (this.peek() === "}") this.advance();
 			this.tokens.push(new Token(TT.TEMPL_CHILDREN, null, saveLine, saveCol));
 			return;
@@ -434,38 +448,28 @@ export class TemplLexer {
 		const name = this.src.slice(nameStart, this.pos);
 		if (!name) this.err("expected component name after @");
 
-		this._skipHtmlWhitespace();
+		this.skipWhitespace();
 		if (this.peek() !== "(") this.err("expected '(' after @component name");
 
 		const argsStart = this.pos;
 		this._skipBalanced("(", ")");
 		const argsSrc = name + this.src.slice(argsStart, this.pos);
 
-		// Lex the whole call as Go tokens
-		const callTokens = new Lexer(argsSrc, this.filename)
-			.tokenize()
-			.filter((t) => t.type !== T.EOF);
+		const callTokens = this._goTokens(argsSrc);
 		this.tokens.push(new Token(TT.TEMPL_COMP, callTokens, line, col));
 	}
 
 	_lexTemplIf() {
 		const line = this.line;
-		// Consume `if` and the condition up to `{`
-		const condStart = this.pos;
-		this._skipToOpenBrace();
-		const condSrc = this.src.slice(condStart, this.pos).trimEnd();
-		const condTokens = new Lexer(condSrc, this.filename)
-			.tokenize()
-			.filter((t) => t.type !== T.EOF);
-		this.advance(); // consume {
+		const condTokens = this._lexGoExprBeforeBrace();
 		this.tokens.push(new Token(TT.TEMPL_IF, condTokens, line, this.col));
 		this._lexHtmlBody(1);
 
 		// Check for else
-		this._skipHtmlWhitespace();
+		this.skipWhitespace();
 		if (this._peekKeyword("else")) {
 			this._readWord(); // consume `else`
-			this._skipHtmlWhitespace();
+			this.skipWhitespace();
 			this.tokens.push(new Token(TT.TEMPL_ELSE, null, this.line, this.col));
 			if (this._peekKeyword("if")) {
 				// else if
@@ -481,15 +485,67 @@ export class TemplLexer {
 
 	_lexTemplFor() {
 		const line = this.line;
-		const stmtStart = this.pos;
-		this._skipToOpenBrace();
-		const stmtSrc = this.src.slice(stmtStart, this.pos).trimEnd();
-		const stmtTokens = new Lexer(stmtSrc, this.filename)
-			.tokenize()
-			.filter((t) => t.type !== T.EOF);
-		this.advance(); // {
+		const stmtTokens = this._lexGoExprBeforeBrace();
 		this.tokens.push(new Token(TT.TEMPL_FOR, stmtTokens, line, this.col));
 		this._lexHtmlBody(1);
+	}
+
+	_lexTemplSwitch() {
+		const line = this.line;
+		this._readWord(); // consume "switch"
+		this.skipWhitespace();
+		const exprTokens = this._lexGoExprBeforeBrace();
+		this.tokens.push(new Token(TT.TEMPL_SWITCH, exprTokens, line, this.col));
+
+		// Lex case/default entries until the closing }
+		while (!this.eof()) {
+			this.skipWhitespace();
+			if (this.eof()) break;
+
+			if (this.peek() === "}") {
+				this.advance(); // consume }
+				this.tokens.push(new Token(TT.TEMPL_END, "}", this.line, this.col));
+				return;
+			}
+
+			if (this._peekKeyword("case")) {
+				const caseLine = this.line;
+				this._readWord(); // consume "case"
+				this.skipWhitespace();
+				// Read case expression up to ":"
+				const caseExprStart = this.pos;
+				// Skip to the colon, handling string literals
+				while (!this.eof() && this.peek() !== ":") {
+					const c = this.peek();
+					if (c === '"' || c === "'") {
+						this._skipGoString(c);
+					} else if (c === "`") {
+						this._skipRawString();
+					} else {
+						this.advance();
+					}
+				}
+				const caseExprSrc = this.src.slice(caseExprStart, this.pos).trimEnd();
+				if (this.peek() === ":") this.advance(); // :
+				const caseTokens = this._goTokens(caseExprSrc);
+				this.tokens.push(
+					new Token(TT.TEMPL_CASE, caseTokens, caseLine, this.col),
+				);
+				this._lexCaseBody();
+			} else if (this._peekKeyword("default")) {
+				const defaultLine = this.line;
+				this._readWord(); // consume "default"
+				this.skipWhitespace();
+				if (this.peek() === ":") this.advance(); // :
+				this.tokens.push(
+					new Token(TT.TEMPL_DEFAULT, null, defaultLine, this.col),
+				);
+				this._lexCaseBody();
+			} else {
+				// Unexpected token inside switch body — skip to avoid infinite loop
+				this.advance();
+			}
+		}
 	}
 
 	// ── HTML text content ─────────────────────────────────────────
@@ -503,7 +559,10 @@ export class TemplLexer {
 			// Detect control-flow keywords at line start
 			if (
 				(c === "i" && this._peekKeyword("if")) ||
-				(c === "f" && this._peekKeyword("for"))
+				(c === "f" && this._peekKeyword("for")) ||
+				(c === "s" && this._peekKeyword("switch")) ||
+				(c === "c" && this._peekKeyword("case")) ||
+				(c === "d" && this._peekKeyword("default"))
 			)
 				break;
 			text += this.advance();
@@ -514,6 +573,21 @@ export class TemplLexer {
 	}
 
 	// ── Helpers ───────────────────────────────────────────────────
+
+	_goTokens(src) {
+		return new Lexer(src, this.filename)
+			.tokenize()
+			.filter((t) => t.type !== T.EOF);
+	}
+
+	// Consume text up to the opening `{`, advance past it, and return Go tokens.
+	_lexGoExprBeforeBrace() {
+		const start = this.pos;
+		this._skipToOpenBrace();
+		const src = this.src.slice(start, this.pos).trimEnd();
+		this.advance(); // consume {
+		return src ? this._goTokens(src) : [];
+	}
 
 	// Read Go expression tokens until the closing }
 	_readGoExprInBraces() {
@@ -542,9 +616,7 @@ export class TemplLexer {
 		const exprSrc = this.src.slice(start, this.pos).trim();
 		if (this.peek() === "}") this.advance(); // consume }
 		if (!exprSrc) return [];
-		return new Lexer(exprSrc, this.filename)
-			.tokenize()
-			.filter((t) => t.type !== T.EOF);
+		return this._goTokens(exprSrc);
 	}
 
 	_readHtmlName() {
@@ -647,18 +719,6 @@ export class TemplLexer {
 		this.advance(); // `
 		while (!this.eof() && this.peek() !== "`") this.advance();
 		if (!this.eof()) this.advance();
-	}
-
-	_skipHtmlWhitespace() {
-		while (!this.eof() && /[ \t\r\n]/.test(this.peek())) {
-			if (this.peek() === "\n") {
-				this.line++;
-				this.col = 1;
-			} else {
-				this.col++;
-			}
-			this.pos++;
-		}
 	}
 
 	// Returns true if src[pos..] starts with `word` followed by a non-word char

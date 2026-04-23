@@ -216,13 +216,16 @@ func main() {
 });
 
 test("chained method calls", () => {
-	// Verify selector chains compile correctly
-	const { errors } = compile(`package main
+	const { js, errors } = compile(`package main
+type B struct { v string }
+func (b B) Add(s string) B { return B{b.v + s} }
+func (b B) Get() string { return b.v }
 func main() {
-	s := "hello"
-	console.log(len(s))
+	result := B{""}.Add("hello").Add(" world").Get()
+	console.log(result)
 }`);
 	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "hello world");
 });
 
 // ─── compileDir: mixed-package error ─────────────────────────
