@@ -13,10 +13,29 @@
 //   TemplChildren  { kind }
 //   TemplIf     { kind, condTokens, then: TemplNode[], else_: TemplNode[] | null }
 //   TemplFor    { kind, stmtTokens, body: TemplNode[] }
+//   TemplSwitch { kind, exprTokens, cases: TemplCase[] }
+//   TemplCase   { kind, caseTokens: tokens | null (null = default), body: TemplNode[] }
 
 import { T } from "./lexer.js";
 import { Parser } from "./parser.js";
 import { TT } from "./templ-lexer.js";
+
+const VOID_ELEMENTS = new Set([
+	"area",
+	"base",
+	"br",
+	"col",
+	"embed",
+	"hr",
+	"img",
+	"input",
+	"link",
+	"meta",
+	"param",
+	"source",
+	"track",
+	"wbr",
+]);
 
 export class TemplParser extends Parser {
 	// ── Top-level declaration override ───────────────────────────
@@ -101,6 +120,10 @@ export class TemplParser extends Parser {
 				this.advance();
 				return this.parseTemplFor(t);
 			}
+			case TT.TEMPL_SWITCH: {
+				this.advance();
+				return this.parseTemplSwitch(t);
+			}
 			default:
 				// Unknown token inside HTML body — skip it to avoid infinite loops
 				this.advance();
@@ -121,23 +144,6 @@ export class TemplParser extends Parser {
 			const node = this.parseHtmlNode();
 			if (node) children.push(node);
 		}
-		// Void elements (self-closing by spec) do not need a close tag
-		const VOID_ELEMENTS = new Set([
-			"area",
-			"base",
-			"br",
-			"col",
-			"embed",
-			"hr",
-			"img",
-			"input",
-			"link",
-			"meta",
-			"param",
-			"source",
-			"track",
-			"wbr",
-		]);
 		if (this.check(TT.HTML_CLOSE)) {
 			const closeTag = this.peek().value;
 			if (closeTag !== tag) {
@@ -177,5 +183,47 @@ export class TemplParser extends Parser {
 		const stmtTokens = tok.value;
 		const body = this.parseHtmlChildren();
 		return { kind: "TemplFor", stmtTokens, body };
+	}
+
+	// Parse a TemplSwitch node. `tok` is the TEMPL_SWITCH token (already advanced).
+	parseTemplSwitch(tok) {
+		const exprTokens = tok.value;
+		const cases = [];
+		while (
+			!this.check(TT.TEMPL_END) &&
+			!this.check(T.RBRACE) &&
+			!this.check(T.EOF)
+		) {
+			if (this.check(TT.TEMPL_CASE)) {
+				const caseTok = this.advance();
+				const body = this.parseTemplCaseBody();
+				cases.push({ kind: "TemplCase", caseTokens: caseTok.value, body });
+			} else if (this.check(TT.TEMPL_DEFAULT)) {
+				this.advance();
+				const body = this.parseTemplCaseBody();
+				cases.push({ kind: "TemplCase", caseTokens: null, body });
+			} else {
+				this.advance(); // skip unexpected
+			}
+		}
+		if (this.check(TT.TEMPL_END)) this.advance(); // consume closing }
+		return { kind: "TemplSwitch", exprTokens, cases };
+	}
+
+	// Parse HTML nodes for a switch case body — stops at CASE/DEFAULT/END/RBRACE.
+	parseTemplCaseBody() {
+		const nodes = [];
+		while (
+			!this.check(TT.TEMPL_CASE) &&
+			!this.check(TT.TEMPL_DEFAULT) &&
+			!this.check(TT.TEMPL_END) &&
+			!this.check(T.RBRACE) &&
+			!this.check(T.EOF)
+		) {
+			if (this.check(TT.TEMPL_ELSE)) break;
+			const node = this.parseHtmlNode();
+			if (node) nodes.push(node);
+		}
+		return nodes;
 	}
 }

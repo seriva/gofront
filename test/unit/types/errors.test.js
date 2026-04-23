@@ -2,7 +2,7 @@
 
 import { fileURLToPath } from "node:url";
 import {
-	assert,
+	assertContains,
 	assertEqual,
 	assertErrorContains,
 	assertThrows,
@@ -349,7 +349,7 @@ func main() {
   console.log(d, ok)
 }`);
 	assertEqual(errors.length, 0);
-	assert(runJs(js).includes("false"), "expected ok to be false");
+	assertContains(runJs(js), "false");
 });
 
 // ═════════════════════════════════════════════════════════════

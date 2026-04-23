@@ -518,10 +518,24 @@ export class CodeGen {
 				return this.line(
 					`${p}.appendChild(document.createTextNode(String(${this._genTemplTokenExpr(node.tokens)})));`,
 				);
-			case "TemplComponent":
+			case "TemplComponent": {
+				// Special case: @templ.Raw(expr) → insertAdjacentHTML
+				const toks = node.tokens;
+				if (
+					toks.length >= 4 &&
+					toks[0]?.value === "templ" &&
+					toks[1]?.type === T.DOT &&
+					toks[2]?.value === "Raw" &&
+					toks[3]?.type === T.LPAREN
+				) {
+					const argTokens = toks.slice(4, toks.length - 1);
+					const argJs = this._genTemplTokenExpr(argTokens);
+					return this.line(`${p}.insertAdjacentHTML("beforeend", ${argJs});`);
+				}
 				return this.line(
 					`(${this._genTemplTokenCallExpr(node.tokens)}).Mount(${p});`,
 				);
+			}
 			case "TemplChildren":
 				// children is a variadic gom.Node param — mount each child
 				return this.line(
@@ -531,6 +545,8 @@ export class CodeGen {
 				return this._genTemplIf(node, p);
 			case "TemplFor":
 				return this._genTemplFor(node, p);
+			case "TemplSwitch":
+				return this._genTemplSwitch(node, p);
 			default:
 				break;
 		}
@@ -582,26 +598,43 @@ export class CodeGen {
 		const condJs = this._genTemplCondTokens(node.condTokens);
 		this.line(`if (${condJs}) {`);
 		this.indented(() => this._genTemplNodes(node.then, p));
-		if (node.else_ && node.else_.length > 0) {
-			// else if: first node may itself be a TemplIf
-			if (node.else_.length === 1 && node.else_[0].kind === "TemplIf") {
-				this.line(
-					`} else if (${this._genTemplCondTokens(node.else_[0].condTokens)}) {`,
-				);
-				this.indented(() => this._genTemplNodes(node.else_[0].then, p));
-				if (node.else_[0].else_?.length) {
-					this.line(`} else {`);
-					this.indented(() => this._genTemplNodes(node.else_[0].else_, p));
-				}
-				this.line(`}`);
-			} else {
-				this.line(`} else {`);
-				this.indented(() => this._genTemplNodes(node.else_, p));
-				this.line(`}`);
-			}
+		this._genTemplIfElse(node.else_, p);
+	}
+
+	_genTemplIfElse(else_, p) {
+		if (!else_ || else_.length === 0) {
+			this.line(`}`);
+			return;
+		}
+		if (else_.length === 1 && else_[0].kind === "TemplIf") {
+			const elseIf = else_[0];
+			this.line(`} else if (${this._genTemplCondTokens(elseIf.condTokens)}) {`);
+			this.indented(() => this._genTemplNodes(elseIf.then, p));
+			this._genTemplIfElse(elseIf.else_, p);
 		} else {
+			this.line(`} else {`);
+			this.indented(() => this._genTemplNodes(else_, p));
 			this.line(`}`);
 		}
+	}
+
+	_genTemplSwitch(node, p) {
+		const { exprTokens, cases } = node;
+		if (cases.length === 0) return;
+		const exprJs = this._genTemplTokenExpr(exprTokens);
+		this.line(`switch (${exprJs}) {`);
+		this.indented(() => {
+			for (const c of cases) {
+				const label =
+					c.caseTokens === null
+						? "default"
+						: `case ${this._genTemplTokenExpr(c.caseTokens)}`;
+				this.line(`${label}: {`);
+				this.indented(() => this._genTemplNodes(c.body, p));
+				this.line(`break; }`);
+			}
+		});
+		this.line(`}`);
 	}
 
 	_genTemplFor(node, p) {

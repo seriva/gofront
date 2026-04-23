@@ -543,8 +543,7 @@ func main() {
 test("os.Exit compiles without error", () => {
 	const { errors } = compile(`package main
 func main() {
-  n := 0
-  println(n)
+  os.Exit(0)
 }`);
 	assertEqual(errors.length, 0);
 });

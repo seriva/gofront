@@ -299,8 +299,10 @@ Key syntax features:
 - `attr={ expr }` — dynamic attribute value (expression)
 - `attr?={ expr }` — boolean attribute (present/absent based on truthiness)
 - `@Component(args)` — call another templ component and mount it as a child
-- `if cond { } else { }` — conditional rendering inside template bodies
+- `if cond { } else if cond { } else { }` — conditional rendering (arbitrary depth)
 - `for _, v := range slice { }` — loop rendering inside template bodies
+- `switch expr { case v: ... default: ... }` — switch rendering inside template bodies
+- `@templ.Raw(htmlStr)` — inject raw/trusted HTML (uses `insertAdjacentHTML`)
 - Components are called like regular functions (`AppView()`, `TodoItem(t)`) and return
   a `gom.Node`-compatible object, so `gom.Mount("#app", AppView())` works directly.
 
@@ -361,8 +363,9 @@ sync status, drag-and-drop reordering).
 
 The templ example additionally demonstrates: **`.templ` file compilation**, template
 components with parameters, `{ expr }` interpolation, `attr?={}` conditional boolean
-attributes, `@Component()` calls inside templates, `if/else` and `for range` control
-flow inside template bodies, and seamless interop with `gom.Mount` / `gom.Style`.
+attributes, `@Component()` calls inside templates, `if / else if / else` chains,
+`switch` blocks, `for range` loops, and `@templ.Raw()` for trusted HTML injection —
+all inside template bodies.
 
 ### Build and run
 
@@ -628,17 +631,18 @@ Design documents for planned features are organised by release under `docs/v*/`
 ## Tests
 
 ```sh
-npm run test:unit   # unit tests only (~1091 tests, no browser required)
+npm run test:unit   # unit tests only (~1098 tests, no browser required)
 npm run test:e2e    # E2E tests (Playwright, headless Chromium)
 npm test            # both
 ```
 
-**Unit tests** (~1091) cover language features, type errors, edge cases, DOM (jsdom),
+**Unit tests** (~1098) cover language features, type errors, edge cases, DOM (jsdom),
 external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string
 formatting, map iteration order, integer overflow semantics, unused variable detection,
 unused import detection, semantic difference verification, stdlib shim packages, generics,
 and `.templ` file compilation (element rendering, interpolation, boolean attrs, component
-calls, `if/else`, `for range`, mixed `.go`+`.templ` packages).
+calls, `if/else/else-if` chains, `for range`, `switch/case/default`, `@templ.Raw()` raw
+HTML injection, mixed `.go`+`.templ` packages).
 
 **E2E tests** (~104, Playwright) run all four example apps in a real browser and verify
 CRUD, filtering, priority mode, persistence (reload), drag-and-drop reordering, and sync

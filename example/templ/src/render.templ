@@ -2,6 +2,12 @@ package main
 
 import "./utils"
 
+// ── Styles injection ──────────────────────────────────────────
+
+templ AppStyles() {
+	@templ.Raw("<style>" + appStyles() + "</style>")
+}
+
 // ── Todo item ─────────────────────────────────────────────────
 
 templ TodoItem(t Todo) {
@@ -32,7 +38,16 @@ templ TodoList(visible []Todo) {
 // ── Filter bar ────────────────────────────────────────────────
 
 templ FilterButton(f int, active int) {
-	<button class={ filterBtnClass(f, active) } data-action="filter" data-filter={ f }>{ filterLabel(f) }</button>
+	<button class={ filterBtnClass(f, active) } data-action="filter" data-filter={ f }>
+		switch f {
+		case FilterAll:
+			All
+		case FilterActive:
+			Active
+		case FilterCompleted:
+			Completed
+		}
+	</button>
 }
 
 templ FilterBar(activeFilter int) {
@@ -84,11 +99,10 @@ templ InputRow(highPri bool, errMsg string) {
 		<input class={ inputClass(highPri) } type="text" placeholder={ inputPlaceholder(highPri) } autocomplete="off"/>
 		<button class={ priorityBtnClass(highPri) } type="button" data-action="priority">{ priorityBtnText(highPri) }</button>
 		<button class="add-btn" type="button" data-action="add">Add</button>
-		if highPri {
-			<span class="priority-hint">⚡ High priority — task will be marked urgent</span>
-		}
 		if errMsg != "" {
 			<span class="error-msg">{ errMsg }</span>
+		} else if highPri {
+			<span class="priority-hint">⚡ High priority — task will be marked urgent</span>
 		}
 	</div>
 }

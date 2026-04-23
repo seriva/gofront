@@ -358,90 +358,87 @@ templ Status(n int) {
 
 section("templ — switch");
 
-/*
 test("switch matches correct case", () => {
+	const switchTempl = [
+		"package main",
+		"templ Tab(s string) {",
+		"\tswitch s {",
+		'\tcase "a":',
+		"\t\t<span>Alpha</span>",
+		'\tcase "b":',
+		"\t\t<span>Beta</span>",
+		"\tdefault:",
+		"\t\t<span>Other</span>",
+		"\t}",
+		"}",
+	].join("\n");
 	const { js } = compilePkg({
-		"main.go": `package main
-func main() {
-	gom.Mount("#app", Tab("b"))
-}`,
-		"tab.templ": `package main
-templ Tab(s string) {
-	switch s {
-	case "a":
-		<span>Alpha</span>
-	case "b":
-		<span>Beta</span>
-	default:
-		<span>Other</span>
-	}
-}`,
+		"main.go": `package main\nfunc main() { gom.Mount("#app", Tab("b")) }`,
+		"tab.templ": switchTempl,
 	});
 	const { document } = runInDom(js, '<div id="app"></div>');
 	assertEqual(document.querySelector("#app span").textContent, "Beta");
 });
 
 test("switch default branch", () => {
+	const switchTempl = [
+		"package main",
+		"templ Tab(s string) {",
+		"\tswitch s {",
+		'\tcase "a":',
+		"\t\t<span>Alpha</span>",
+		"\tdefault:",
+		"\t\t<span>Other</span>",
+		"\t}",
+		"}",
+	].join("\n");
 	const { js } = compilePkg({
-		"main.go": `package main
-func main() {
-	gom.Mount("#app", Tab("x"))
-}`,
-		"tab.templ": `package main
-templ Tab(s string) {
-	switch s {
-	case "a":
-		<span>Alpha</span>
-	default:
-		<span>Other</span>
-	}
-}`,
+		"main.go": `package main\nfunc main() { gom.Mount("#app", Tab("x")) }`,
+		"tab.templ": switchTempl,
 	});
 	const { document } = runInDom(js, '<div id="app"></div>');
 	assertEqual(document.querySelector("#app span").textContent, "Other");
 });
 
 test("switch renders HTML elements per case", () => {
+	const switchTempl = [
+		"package main",
+		"templ Badge(n int) {",
+		"\tswitch n {",
+		"\tcase 1:",
+		'\t\t<span class="low">low</span>',
+		"\tcase 2:",
+		'\t\t<span class="mid">mid</span>',
+		"\tcase 3:",
+		'\t\t<span class="high">high</span>',
+		"\t}",
+		"}",
+	].join("\n");
 	const { js } = compilePkg({
-		"main.go": `package main
-func main() {
-	gom.Mount("#app", Badge(2))
-}`,
-		"badge.templ": `package main
-templ Badge(n int) {
-	switch n {
-	case 1:
-		<span class="low">low</span>
-	case 2:
-		<span class="mid">mid</span>
-	case 3:
-		<span class="high">high</span>
-	}
-}`,
+		"main.go": `package main\nfunc main() { gom.Mount("#app", Badge(2)) }`,
+		"badge.templ": switchTempl,
 	});
 	const { document } = runInDom(js, '<div id="app"></div>');
 	assertEqual(document.querySelector("#app span").className, "mid");
 	assertEqual(document.querySelector("#app span").textContent, "mid");
 });
-*/
 
 // ── @templ.Raw() ──────────────────────────────────────────────
 
 section("templ — @templ.Raw()");
 
-/*
 test("@templ.Raw() injects raw HTML", () => {
+	const rawTempl = [
+		"package main",
+		"templ RawHtml() {",
+		"\t<div>",
+		'\t\t@templ.Raw("<strong>bold</strong>")',
+		"\t</div>",
+		"}",
+	].join("\n");
 	const { js } = compilePkg({
-		"main.go": `package main
-func main() {
-	gom.Mount("#app", RawHtml())
-}`,
-		"raw.templ": `package main
-templ RawHtml() {
-	<div>
-		@templ.Raw("<strong>bold</strong>")
-	</div>
-}`,
+		"main.go": `package main\nfunc main() { gom.Mount("#app", RawHtml()) }`,
+		"raw.templ": rawTempl,
 	});
 	const { document } = runInDom(js, '<div id="app"></div>');
 	assert(
@@ -452,23 +449,22 @@ templ RawHtml() {
 });
 
 test("@templ.Raw() with dynamic expression", () => {
+	const rawTempl = [
+		"package main",
+		"templ RawHtml(html string) {",
+		"\t<div>",
+		"\t\t@templ.Raw(html)",
+		"\t</div>",
+		"}",
+	].join("\n");
 	const { js } = compilePkg({
-		"main.go": `package main
-func main() {
-	gom.Mount("#app", RawHtml("<em>italic</em>"))
-}`,
-		"raw.templ": `package main
-templ RawHtml(html string) {
-	<div>
-		@templ.Raw(html)
-	</div>
-}`,
+		"main.go": `package main\nfunc main() { gom.Mount("#app", RawHtml("<em>italic</em>")) }`,
+		"raw.templ": rawTempl,
 	});
 	const { document } = runInDom(js, '<div id="app"></div>');
 	assert(document.querySelector("#app em") !== null, "em element should exist");
 	assertEqual(document.querySelector("#app em").textContent, "italic");
 });
-*/
 
 // ── Error cases ───────────────────────────────────────────────
 
