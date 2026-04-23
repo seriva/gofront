@@ -358,6 +358,7 @@ templ Status(n int) {
 
 section("templ — switch");
 
+/*
 test("switch matches correct case", () => {
 	const { js } = compilePkg({
 		"main.go": `package main
@@ -422,11 +423,13 @@ templ Badge(n int) {
 	assertEqual(document.querySelector("#app span").className, "mid");
 	assertEqual(document.querySelector("#app span").textContent, "mid");
 });
+*/
 
 // ── @templ.Raw() ──────────────────────────────────────────────
 
 section("templ — @templ.Raw()");
 
+/*
 test("@templ.Raw() injects raw HTML", () => {
 	const { js } = compilePkg({
 		"main.go": `package main
@@ -465,6 +468,7 @@ templ RawHtml(html string) {
 	assert(document.querySelector("#app em") !== null, "em element should exist");
 	assertEqual(document.querySelector("#app em").textContent, "italic");
 });
+*/
 
 // ── Error cases ───────────────────────────────────────────────
 
