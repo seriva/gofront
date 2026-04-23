@@ -34,11 +34,12 @@
 		"build:simple": "node src/index.js example/simple/src -o example/simple/app.js",
 		"build:reactive": "node src/index.js example/reactive/src -o example/reactive/app.js",
 		"build:gom": "node src/index.js example/gom/src -o example/gom/app.js",
+		"build:templ": "node src/index.js example/templ/src -o example/templ/app.js",
 		"test": "npm run test:unit && npm run test:e2e",
 		"test:unit": "node test/unit/run.js",
 		"test:e2e": "playwright test",
 		"format": "biome format --write .",
-		"check": "biome check . && node src/index.js example/simple/src --check && node src/index.js example/reactive/src --check && node src/index.js example/gom/src --check",
+		"check": "biome check . && node src/index.js example/simple/src --check && node src/index.js example/reactive/src --check && node src/index.js example/gom/src --check && node src/index.js example/templ/src --check",
 		"prepare": "husky"
 	},
 	"devDependencies": {

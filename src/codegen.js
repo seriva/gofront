@@ -20,6 +20,8 @@
 import { expressionGenMethods } from "./codegen/expressions.js";
 import { buildSourceMap } from "./codegen/source-map.js";
 import { statementGenMethods } from "./codegen/statements.js";
+import { T, Token } from "./lexer.js";
+import { Parser } from "./parser.js";
 import { isComplex, isNumeric } from "./typechecker/types.js";
 
 export class CodeGen {
@@ -146,7 +148,7 @@ export class CodeGen {
 			}
 		}
 
-		// Emit functions — rename duplicate init() to init$0, init$1, etc.
+		// Emit functions and templ components
 		let initCount = 0;
 		const initNames = [];
 		for (const d of program.decls) {
@@ -160,6 +162,10 @@ export class CodeGen {
 				} else {
 					this.genFuncDecl(d);
 				}
+				this.blank();
+			} else if (d.kind === "TemplDecl") {
+				this._currentSrcFileIdx = d._srcFileIdx ?? 0;
+				this.genTemplDecl(d);
 				this.blank();
 			}
 		}
@@ -465,6 +471,244 @@ export class CodeGen {
 		);
 		this._boxedVars = prevBoxed;
 		this.line("}");
+	}
+
+	// ── TemplDecl code generation ────────────────────────────────
+
+	genTemplDecl(decl) {
+		const params = decl.params
+			.map((p, i) =>
+				p.variadic && i === decl.params.length - 1 ? `...${p.name}` : p.name,
+			)
+			.join(", ");
+		this.line(`function ${decl.name}(${params}) {`);
+		this.indented(() => {
+			this.line(`return {Mount(___p) {`);
+			this.indented(() => {
+				this._genTemplNodes(decl.body, "___p");
+			});
+			this.line(`}};`);
+		});
+		this.line("}");
+	}
+
+	// Emit mount statements for an array of TemplNodes into parent variable `p`.
+	_genTemplNodes(nodes, p) {
+		if (!nodes || nodes.length === 0) return;
+		if (nodes.length === 1) {
+			this._genTemplNodeMount(nodes[0], p);
+			return;
+		}
+		// Wrap multiple root nodes in a fragment div? No — emit each directly.
+		for (const node of nodes) {
+			this._genTemplNodeMount(node, p);
+		}
+	}
+
+	// Emit JS to mount a single TemplNode onto parent `p`.
+	_genTemplNodeMount(node, p) {
+		switch (node.kind) {
+			case "TemplElement":
+				return this._genTemplElement(node, p);
+			case "TemplText":
+				return this.line(
+					`${p}.appendChild(document.createTextNode(${JSON.stringify(node.value)}));`,
+				);
+			case "TemplExpr":
+				return this.line(
+					`${p}.appendChild(document.createTextNode(String(${this._genTemplTokenExpr(node.tokens)})));`,
+				);
+			case "TemplComponent":
+				return this.line(
+					`(${this._genTemplTokenCallExpr(node.tokens)}).Mount(${p});`,
+				);
+			case "TemplChildren":
+				// children is a variadic gom.Node param — mount each child
+				return this.line(
+					`if(typeof children!=="undefined")(Array.isArray(children)?children:[...children]).forEach(___c=>___c?.Mount?.(${p}));`,
+				);
+			case "TemplIf":
+				return this._genTemplIf(node, p);
+			case "TemplFor":
+				return this._genTemplFor(node, p);
+			default:
+				break;
+		}
+	}
+
+	_genTemplElement(node, p) {
+		const { tag, attrs, children } = node;
+		const elVar = this._freshVar("e");
+		this.line(
+			`const ${elVar} = document.createElement(${JSON.stringify(tag)});`,
+		);
+		for (const attr of attrs) {
+			this._genTemplAttr(attr, elVar);
+		}
+		this._genTemplNodes(children, elVar);
+		this.line(`${p}.appendChild(${elVar});`);
+	}
+
+	_genTemplAttr(attr, el) {
+		const { name } = attr;
+		if (attr.kind === "static") {
+			if (name === "class") {
+				this.line(`${el}.className = ${JSON.stringify(attr.value)};`);
+			} else {
+				this.line(
+					`${el}.setAttribute(${JSON.stringify(name)}, ${JSON.stringify(attr.value)});`,
+				);
+			}
+		} else if (attr.kind === "expr") {
+			const exprJs = this._genTemplTokenExpr(attr.tokens);
+			if (name === "class") {
+				this.line(`${el}.className = ${exprJs};`);
+			} else {
+				this.line(
+					`${el}.setAttribute(${JSON.stringify(name)}, String(${exprJs}));`,
+				);
+			}
+		} else if (attr.kind === "bool") {
+			this.line(`${el}.setAttribute(${JSON.stringify(name)}, "");`);
+		} else if (attr.kind === "cond-bool") {
+			const exprJs = this._genTemplTokenExpr(attr.tokens);
+			this.line(
+				`if(${exprJs})${el}.setAttribute(${JSON.stringify(name)}, "");`,
+			);
+		}
+	}
+
+	_genTemplIf(node, p) {
+		const condJs = this._genTemplCondTokens(node.condTokens);
+		this.line(`if (${condJs}) {`);
+		this.indented(() => this._genTemplNodes(node.then, p));
+		if (node.else_ && node.else_.length > 0) {
+			// else if: first node may itself be a TemplIf
+			if (node.else_.length === 1 && node.else_[0].kind === "TemplIf") {
+				this.line(
+					`} else if (${this._genTemplCondTokens(node.else_[0].condTokens)}) {`,
+				);
+				this.indented(() => this._genTemplNodes(node.else_[0].then, p));
+				if (node.else_[0].else_?.length) {
+					this.line(`} else {`);
+					this.indented(() => this._genTemplNodes(node.else_[0].else_, p));
+				}
+				this.line(`}`);
+			} else {
+				this.line(`} else {`);
+				this.indented(() => this._genTemplNodes(node.else_, p));
+				this.line(`}`);
+			}
+		} else {
+			this.line(`}`);
+		}
+	}
+
+	_genTemplFor(node, p) {
+		// stmtTokens include the `for` keyword plus the range clause (no body).
+		// Strip any trailing semicolons (inserted by the Go lexer on newlines),
+		// then add a fake empty body `{ }` so the parser can complete the ForStmt.
+		let tokens = node.stmtTokens;
+		while (tokens.length > 0 && tokens[tokens.length - 1].type === T.SEMICOLON)
+			tokens = tokens.slice(0, -1);
+		const eofTok = new Token(T.EOF, "", 1, 1);
+		const lbrace = new Token(T.LBRACE, "{", 1, 1);
+		const rbrace = new Token(T.RBRACE, "}", 1, 1);
+		const semi = new Token(T.SEMICOLON, ";", 1, 1);
+		const withFor =
+			tokens[0]?.type === T.FOR
+				? [...tokens, lbrace, rbrace, semi, eofTok]
+				: [
+						new Token(T.FOR, "for", 1, 1),
+						...tokens,
+						lbrace,
+						rbrace,
+						semi,
+						eofTok,
+					];
+		try {
+			const p2 = new Parser(withFor);
+			const forStmt = p2.parseFor();
+			this._genTemplRangeFor(forStmt, node.body, p);
+		} catch {
+			// Fallback for non-range loops: emit a comment + skip
+			this.line(`/* templ for: ${this._tokensToSource(tokens)} */`);
+		}
+	}
+
+	_genTemplRangeFor(forStmt, templBody, mountParent) {
+		const init = forStmt.init;
+		if (!init?.rhs?.[0] || init.rhs[0].kind !== "RangeExpr") {
+			// Plain for loop (cond-only or three-clause)
+			const condJs = forStmt.cond ? this.genExpr(forStmt.cond) : "true";
+			this.line(`while (${condJs}) {`);
+			this.indented(() => this._genTemplNodes(templBody, mountParent));
+			this.line("}");
+			return;
+		}
+		// Range for: for key, val := range iter
+		const range = init.rhs[0];
+		const iterJs = this.genExpr(range.expr);
+		const lhs = init.lhs.map((e) => e.name ?? "_");
+		const keyName = lhs[0] ?? "_";
+		const valName = lhs[1] ?? null;
+
+		let loopHeader;
+		if (valName === null || valName === undefined) {
+			loopHeader = `for (const ${keyName === "_" ? "_$" : keyName} of ${iterJs}) {`;
+		} else if (keyName === "_" && valName === "_") {
+			loopHeader = `for (const _$ of ${iterJs}) {`;
+		} else if (keyName === "_") {
+			loopHeader = `for (const ${valName} of ${iterJs}) {`;
+		} else if (valName === "_") {
+			loopHeader = `for (const [${keyName}] of Object.entries(${iterJs})) {`;
+		} else {
+			// Default to .entries() for arrays, Object.entries for objects
+			this._usesSliceGuard = true;
+			loopHeader = `for (const [${keyName}, ${valName}] of __s(${iterJs}).entries()) {`;
+		}
+		this.line(loopHeader);
+		this.indented(() => this._genTemplNodes(templBody, mountParent));
+		this.line("}");
+	}
+
+	// Parse a token array as a Go expression and emit JS.
+	_genTemplTokenExpr(tokens) {
+		if (!tokens || tokens.length === 0) return '""';
+		const eofTok = new Token(T.EOF, "", 1, 1);
+		const p = new Parser([...tokens, eofTok]);
+		const ast = p.parseExpr();
+		return this.genExpr(ast);
+	}
+
+	// Parse a token array as a Go call expression and emit JS.
+	_genTemplTokenCallExpr(tokens) {
+		if (!tokens || tokens.length === 0) return "null";
+		const eofTok = new Token(T.EOF, "", 1, 1);
+		const p = new Parser([...tokens, eofTok]);
+		const ast = p.parseExpr();
+		return this.genExpr(ast);
+	}
+
+	// Extract condition JS from condTokens (which may start with `if`).
+	_genTemplCondTokens(tokens) {
+		if (!tokens || tokens.length === 0) return "false";
+		let toks = tokens;
+		if (toks[0]?.type === T.IF) toks = toks.slice(1); // skip `if` keyword
+		const eofTok = new Token(T.EOF, "", 1, 1);
+		const p = new Parser([...toks, eofTok]);
+		const ast = p.parseExpr();
+		return this.genExpr(ast);
+	}
+
+	_tokensToSource(tokens) {
+		return tokens.map((t) => t.value).join(" ");
+	}
+
+	// Fresh variable name counter
+	_freshVar(prefix = "v") {
+		this._templVarCount = (this._templVarCount ?? 0) + 1;
+		return `___${prefix}${this._templVarCount}`;
 	}
 
 	_withNamedReturns(decl, fn) {

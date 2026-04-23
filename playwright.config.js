@@ -24,6 +24,11 @@ export default defineConfig({
 			use: { baseURL: "http://localhost:3003" },
 			testMatch: ["**/shared.spec.js", "**/gom.spec.js"],
 		},
+		{
+			name: "templ",
+			use: { baseURL: "http://localhost:3004" },
+			testMatch: ["**/shared.spec.js", "**/templ.spec.js"],
+		},
 	],
 	webServer: [
 		{
@@ -39,6 +44,11 @@ export default defineConfig({
 		{
 			command: "npx serve example/gom -l 3003",
 			url: "http://localhost:3003",
+			reuseExistingServer: !process.env.CI,
+		},
+		{
+			command: "npx serve example/templ -l 3004",
+			url: "http://localhost:3004",
 			reuseExistingServer: !process.env.CI,
 		},
 	],
