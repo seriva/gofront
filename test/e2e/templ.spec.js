@@ -17,7 +17,7 @@ test("templ components render the app shell", async ({ page }) => {
 	await expect(page.locator(".stats-bar")).toBeVisible();
 });
 
-test("gom.Style injected a style tag into head", async ({ page }) => {
+test("@templ.Raw injected a style tag into head", async ({ page }) => {
 	const styleCount = await page.locator("head style").count();
 	expect(styleCount).toBeGreaterThan(0);
 });
