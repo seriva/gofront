@@ -8,19 +8,6 @@ const (
 	FilterCompleted
 )
 
-func filterLabel(f int) string {
-	switch f {
-	case FilterAll:
-		return "All"
-	case FilterActive:
-		return "Active"
-	case FilterCompleted:
-		return "Completed"
-	default:
-		return ""
-	}
-}
-
 // ── Priority ──────────────────────────────────────────────────
 
 const (

@@ -262,7 +262,7 @@ export class Lexer {
 		const l = this.line,
 			c = this.col;
 		this.advance(); // opening "
-		let s = "";
+		const parts = [];
 		while (this.pos < this.src.length && this.peek() !== '"') {
 			if (this.peek() === "\n") this.err("Unterminated string literal");
 			if (this.peek() === "\\") {
@@ -270,43 +270,42 @@ export class Lexer {
 				const esc = this.advance();
 				switch (esc) {
 					case "n":
-						s += "\n";
+						parts.push("\n");
 						break;
 					case "t":
-						s += "\t";
+						parts.push("\t");
 						break;
 					case "r":
-						s += "\r";
+						parts.push("\r");
 						break;
 					case '"':
-						s += '"';
+						parts.push('"');
 						break;
 					case "\\":
-						s += "\\";
+						parts.push("\\");
 						break;
 					case "0":
-						s += "\0";
+						parts.push("\0");
 						break;
 					default:
-						s += `\\${esc}`;
+						parts.push(`\\${esc}`);
 				}
 			} else {
-				s += this.advance();
+				parts.push(this.advance());
 			}
 		}
 		if (this.pos >= this.src.length)
 			throw new LexError("Unterminated string", l, c, this.filename, this.src);
 		this.advance(); // closing "
-		return s;
+		return parts.join("");
 	}
 
 	readRawString() {
 		const l = this.line,
 			c = this.col;
 		this.advance(); // opening `
-		let s = "";
-		while (this.pos < this.src.length && this.peek() !== "`")
-			s += this.advance();
+		const start = this.pos;
+		while (this.pos < this.src.length && this.peek() !== "`") this.advance();
 		if (this.pos >= this.src.length)
 			throw new LexError(
 				"Unterminated raw string",
@@ -315,8 +314,9 @@ export class Lexer {
 				this.filename,
 				this.src,
 			);
+		const raw = this.src.slice(start, this.pos);
 		this.advance(); // closing `
-		return s;
+		return raw;
 	}
 
 	readRuneLiteral() {

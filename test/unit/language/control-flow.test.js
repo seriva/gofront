@@ -186,7 +186,7 @@ func main() {
 section("async/await");
 
 test("async function compiles and resolves", () => {
-	const { js } = compile(`package main
+	const { errors } = compile(`package main
 async func fetchData() string {
   return "hello"
 }
@@ -194,7 +194,7 @@ async func main() {
   result := await fetchData()
   console.log(result)
 }`);
-	assertEqual(js !== null, true);
+	assertEqual(errors.length, 0);
 });
 
 test("async function literal", () => {
