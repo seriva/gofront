@@ -7,7 +7,7 @@ quite felt like home either.
 So I built GoFront. Go syntax and type safety, compiling to plain ES modules. One language
 front and back, no runtime, no framework, no tsconfig.json.
 
-With built-in support for declarative DOM rendering via the `gom` standard library, JSX-like `.templ` files, and seamless integration with external JavaScript libraries through TypeScript definition files (`.d.ts`), GoFront is designed specifically as a frontend development target. Build complex, reactive user interfaces entirely in Go.
+With built-in support for declarative DOM rendering via the [`gom`](https://www.gomponents.com) standard library, JSX-like [`.templ`](https://templ.guide/) files, and seamless integration with external JavaScript libraries through TypeScript definition files (`.d.ts`), GoFront is designed specifically as a frontend development target. Build complex, reactive user interfaces entirely in Go.
 
 Probably not useful. Definitely fun to build.
 

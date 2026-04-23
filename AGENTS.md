@@ -9,9 +9,15 @@ Node.js ESM project with no runtime dependencies.
 ## Compiler pipeline
 
 ```
-source text
+source text (.go files)
   → Lexer        (src/lexer.js)        → token stream
   → Parser       (src/parser.js)       → AST
+  → TypeChecker  (src/typechecker.js)  → annotated AST + error list
+  → CodeGen      (src/codegen.js)      → JavaScript string
+
+source text (.templ files)
+  → TemplLexer   (src/templ-lexer.js)  → mixed stream (Go/HTML)
+  → TemplParser  (src/templ-parser.js) → AST (TemplDecl nodes)
   → TypeChecker  (src/typechecker.js)  → annotated AST + error list
   → CodeGen      (src/codegen.js)      → JavaScript string
 ```
@@ -49,7 +55,9 @@ node src/index.js --version                       # print version
 ```
 src/
   lexer.js          tokenizer — Go-style semicolon insertion
+  templ-lexer.js    tokenizer for .templ files (mixed Go/HTML)
   parser.js         recursive-descent parser → AST (core + declarations)
+  templ-parser.js   parser for templ declarations and HTML bodies
   parser/
     types.js        type expression parsing (slice, map, struct, interface)
     statements.js   block, control flow, simple statements
@@ -179,8 +187,8 @@ then fix the code.
    structs, DOM, and lexer-parser. Run a single file with
    `node test/unit/language/core.test.js`, or `npm test` for the full combined run.
    Confirm the new tests fail before proceeding.
-2. **Lexer** (`src/lexer.js`) — add any new keywords or token types.
-3. **Parser** (`src/parser.js`) — add grammar rules; return a new AST node kind.
+2. **Lexer** (`src/lexer.js` or `src/templ-lexer.js`) — add any new keywords or token types.
+3. **Parser** (`src/parser.js` or `src/templ-parser.js`) — add grammar rules; return a new AST node kind.
    Expression parsing lives in `src/parser/expressions.js`, statements in
    `src/parser/statements.js`, type expressions in `src/parser/types.js`.
 4. **TypeChecker** (`src/typechecker.js`) — handle the new node in `_checkExpr`
@@ -277,6 +285,14 @@ Key points:
 - Wrap each case in `test(name, fn)` — the harness catches and reports errors.
 - Use `section(title)` to group related tests under a heading.
 - New test files must be registered in `test/unit/run.js` to be included in `npm test`.
+
+### E2E tests
+
+End-to-end tests live in `test/e2e/` and use Playwright to verify the compiled example apps in a real headless browser.
+
+- **Run with:** `npm run test:e2e` (Note: requires the apps to be built first).
+- Each example app has its own spec file (e.g., `simple.spec.js`, `reactive.spec.js`, `gom.spec.js`, `templ.spec.js`).
+- When adding new DOM-related features or modifying the examples, ensure you add or update the corresponding Playwright assertions to verify correct behavior in the browser.
 
 ## Planning and roadmap
 
