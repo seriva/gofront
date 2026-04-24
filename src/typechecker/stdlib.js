@@ -926,48 +926,38 @@ export function setupGlobals(globals, types) {
 		},
 	});
 
-	// strings.Builder
+	// strings.Builder and bytes.Buffer share most method signatures
 	const BYTE_SLICE_T = { kind: "slice", elem: INT };
-	const strBuilderMethods = new Map([
+	const _builderBase = [
 		["WriteString", { kind: "func", params: [STRING], returns: [INT, ERROR] }],
 		["WriteByte", { kind: "func", params: [INT], returns: [ERROR] }],
-		["WriteRune", { kind: "func", params: [INT], returns: [INT, ERROR] }],
 		["Write", { kind: "func", params: [BYTE_SLICE_T], returns: [INT, ERROR] }],
 		["String", { kind: "func", params: [], returns: [STRING] }],
 		["Len", { kind: "func", params: [], returns: [INT] }],
 		["Reset", { kind: "func", params: [], returns: [VOID] }],
 		["Grow", { kind: "func", params: [INT], returns: [VOID] }],
-	]);
-	types.set("strings.Builder", {
+	];
+	const _makeBuilderType = (name, extra = []) => ({
 		kind: "named",
-		name: "strings.Builder",
+		name,
 		underlying: {
 			kind: "struct",
 			fields: new Map(),
-			methods: strBuilderMethods,
+			methods: new Map([..._builderBase, ...extra]),
 		},
 	});
-
-	// bytes.Buffer
-	const bytesBufferMethods = new Map([
-		["WriteString", { kind: "func", params: [STRING], returns: [INT, ERROR] }],
-		["WriteByte", { kind: "func", params: [INT], returns: [ERROR] }],
-		["Write", { kind: "func", params: [BYTE_SLICE_T], returns: [INT, ERROR] }],
-		["String", { kind: "func", params: [], returns: [STRING] }],
-		["Bytes", { kind: "func", params: [], returns: [BYTE_SLICE_T] }],
-		["Len", { kind: "func", params: [], returns: [INT] }],
-		["Reset", { kind: "func", params: [], returns: [VOID] }],
-		["Grow", { kind: "func", params: [INT], returns: [VOID] }],
-	]);
-	types.set("bytes.Buffer", {
-		kind: "named",
-		name: "bytes.Buffer",
-		underlying: {
-			kind: "struct",
-			fields: new Map(),
-			methods: bytesBufferMethods,
-		},
-	});
+	types.set(
+		"strings.Builder",
+		_makeBuilderType("strings.Builder", [
+			["WriteRune", { kind: "func", params: [INT], returns: [INT, ERROR] }],
+		]),
+	);
+	types.set(
+		"bytes.Buffer",
+		_makeBuilderType("bytes.Buffer", [
+			["Bytes", { kind: "func", params: [], returns: [BYTE_SLICE_T] }],
+		]),
+	);
 
 	// math/rand package — import "math/rand" → local name "rand"
 	globals.define("rand", {

@@ -644,26 +644,11 @@ export class DtsParser {
 					if (name) types.set(name, type);
 					break;
 				}
-				case "interface": {
+				case "interface":
+				case "class": {
 					const name = this.readIdent();
 					this.skipGenerics();
 					while (!this.eof() && this.ch() !== "{") this.pos++;
-					this.consume("{");
-					const body = this.parseBody();
-					this.consume("}");
-					this.consume(";");
-					if (name)
-						types.set(name, {
-							kind: "namespace",
-							name,
-							members: body,
-						});
-					break;
-				}
-				case "namespace":
-				case "module": {
-					const name = this.readIdent() || this._readStringLit();
-					this.skip();
 					this.consume("{");
 					const body = this.parseBody();
 					this.consume("}");
@@ -671,14 +656,14 @@ export class DtsParser {
 					if (name) {
 						const ns = { kind: "namespace", name, members: body };
 						types.set(name, ns);
-						values.set(name, ns);
+						if (kw === "class") values.set(name, ns);
 					}
 					break;
 				}
-				case "class": {
-					const name = this.readIdent();
-					this.skipGenerics();
-					while (!this.eof() && this.ch() !== "{") this.pos++;
+				case "namespace":
+				case "module": {
+					const name = this.readIdent() || this._readStringLit();
+					this.skip();
 					this.consume("{");
 					const body = this.parseBody();
 					this.consume("}");
