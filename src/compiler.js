@@ -15,7 +15,7 @@
 // Cross-package access uses the qualified form: `pkg.Foo`.  The codegen
 // de-qualifies it because the dependency is inlined.
 
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { CodeGen } from "./codegen.js";
 import { parseDts } from "./dts-parser.js";
@@ -26,23 +26,46 @@ import { TemplLexer } from "./templ-lexer.js";
 import { TemplParser } from "./templ-parser.js";
 import { TypeChecker } from "./typechecker.js";
 
+// ── Parse cache ──────────────────────────────────────────────
+
+// Map<filePath, { mtime: number, ast: object }>
+const _parseCache = new Map();
+
+export function clearParseCache() {
+	_parseCache.clear();
+}
+
+export function parseCacheSize() {
+	return _parseCache.size;
+}
+
 // ── Helpers ──────────────────────────────────────────────────
 
 function parseFile(filePath) {
+	const mtime = statSync(filePath).mtimeMs;
+	const cached = _parseCache.get(filePath);
+	if (cached && cached.mtime === mtime) return cached.ast;
+
 	const source = readFileSync(filePath, "utf8");
 	const filename = basename(filePath);
 	const tokens = new Lexer(source, filename).tokenize();
 	const ast = new Parser(tokens, filename, source).parse();
 	ast._source = source;
+	_parseCache.set(filePath, { mtime, ast });
 	return ast;
 }
 
 function parseTemplFile(filePath) {
+	const mtime = statSync(filePath).mtimeMs;
+	const cached = _parseCache.get(filePath);
+	if (cached && cached.mtime === mtime) return cached.ast;
+
 	const source = readFileSync(filePath, "utf8");
 	const filename = basename(filePath);
 	const tokens = new TemplLexer(source, filename).tokenize();
 	const ast = new TemplParser(tokens, filename, source).parse();
 	ast._source = source;
+	_parseCache.set(filePath, { mtime, ast });
 	return ast;
 }
 

@@ -311,7 +311,7 @@ if (serveMode) {
 	devServer = createDevServer(serveDir, servePort);
 }
 
-function buildOnce() {
+function buildOnce(changedFile = null) {
 	try {
 		const startMs = performance.now();
 		const result = runCompile();
@@ -326,16 +326,19 @@ function buildOnce() {
 			}
 		}
 		const elapsedMs = (performance.now() - startMs).toFixed(0);
+		const changeNote = changedFile ? ` — ${changedFile} changed` : "";
 		if (outputFile) {
 			writeFileSync(outputFile, `${js}\n`);
 			console.error(
-				`[${timestamp()}] gofront: OK — wrote ${outputFile} (${elapsedMs}ms)`,
+				`[${timestamp()}] gofront: OK — wrote ${outputFile} (${elapsedMs}ms${changeNote})`,
 			);
 		} else {
 			// Clear screen then print
 			process.stdout.write("\x1Bc");
 			console.log(js);
-			console.error(`[${timestamp()}] gofront: OK (${elapsedMs}ms)`);
+			console.error(
+				`[${timestamp()}] gofront: OK (${elapsedMs}ms${changeNote})`,
+			);
 		}
 		devServer?.notify();
 	} catch (e) {
@@ -355,7 +358,7 @@ watch(watchTarget, { recursive: true }, (_event, filename) => {
 	if (filename && !filename.endsWith(".go") && !filename.endsWith(".templ"))
 		return;
 	clearTimeout(debounce);
-	debounce = setTimeout(() => buildOnce(), 80);
+	debounce = setTimeout(() => buildOnce(filename), 80);
 });
 
 console.error(`[${timestamp()}] gofront: watching ${inputArg} ...`);

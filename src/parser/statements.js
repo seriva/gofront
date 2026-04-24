@@ -20,10 +20,14 @@ export const statementParserMethods = {
 		const t = this.peek();
 		const stmt = this._parseStmt(t);
 		if (Array.isArray(stmt)) {
-			for (const s of stmt) s._line = t.line;
+			for (const s of stmt) {
+				s._line = t.line;
+				s._col = t.col;
+			}
 			return stmt;
 		}
 		stmt._line = t.line;
+		stmt._col = t.col;
 		return stmt;
 	},
 

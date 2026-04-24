@@ -446,7 +446,10 @@ func greet(name string) {
     console.log("Hello, " + name)
 }
 
-greet(42)   // → Type error in src/main.go at line 5: cannot use int as string
+greet(42)
+// → Type error in src/main.go at line 5:7: cannot use int as string
+//     5 | greet(42)
+//           ^
 ```
 
 External TypeScript type definitions are supported via `js:` imports:

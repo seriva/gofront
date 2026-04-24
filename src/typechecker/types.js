@@ -15,19 +15,22 @@
 export class TypeCheckError extends Error {
 	constructor(msg, node, filename, sourceCode) {
 		const lineNum = node?.line || node?._line;
+		const colNum = node?.col || node?._col;
 		const loc = filename
 			? lineNum
-				? ` in ${filename} at line ${lineNum}`
+				? ` in ${filename} at line ${lineNum}:${colNum ?? 1}`
 				: ` in ${filename}`
 			: lineNum
-				? ` at line ${lineNum}`
+				? ` at line ${lineNum}:${colNum ?? 1}`
 				: "";
 		let lineContext = "";
 		if (lineNum && sourceCode) {
 			const lines = sourceCode.split("\n");
 			const lineStr = lines[lineNum - 1];
 			if (lineStr !== undefined) {
-				lineContext = `\n  ${lineNum} | ${lineStr}`;
+				const prefix = `  ${lineNum} | `;
+				const caretPad = " ".repeat((colNum ?? 1) - 1);
+				lineContext = `\n${prefix}${lineStr}\n${" ".repeat(prefix.length)}${caretPad}^`;
 			}
 		}
 		super(`Type error${loc}: ${msg}${lineContext}`);

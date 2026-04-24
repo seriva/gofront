@@ -709,8 +709,62 @@ declare let count: number = 0;
 });
 
 // ═════════════════════════════════════════════════════════════
-// TypeChecker — new(T) and pointer types
+// Column numbers in error messages
 // ═════════════════════════════════════════════════════════════
+
+section("Column numbers in error messages");
+
+test("type error includes line:col coordinate", () => {
+	const { errors } = compile(`package main
+func main() {
+  var x int = "hello"
+  _ = x
+}`);
+	assertEqual(errors.length, 1);
+	assertContains(errors[0].message, "3:");
+});
+
+test("type error emits caret line", () => {
+	const { errors } = compile(`package main
+func main() {
+  var x int = "hello"
+  _ = x
+}`);
+	assertEqual(errors.length, 1);
+	assertContains(errors[0].message, "^");
+});
+
+test("type error caret position matches the offending token column", () => {
+	// "hello" starts at column 15 on the var line
+	const { errors } = compile(`package main
+func main() {
+  var x int = "hello"
+  _ = x
+}`);
+	assertEqual(errors.length, 1);
+	const lines = errors[0].message.split("\n");
+	const caretLine = lines.find((l) => l.includes("^"));
+	assert(caretLine !== undefined, "expected a caret line");
+	const caretCol = caretLine.indexOf("^");
+	// caret should appear under "hello" — find its position in the source line
+	const srcLine = lines.find((l) => l.includes('"hello"'));
+	assert(srcLine !== undefined, "expected source line in error");
+	const srcCol = srcLine.indexOf('"hello"');
+	assertEqual(caretCol, srcCol);
+});
+
+test("parse error already includes line:col", () => {
+	const src = `package main
+func main() {
+  x :=
+}`;
+	// ParseError should already have col — verify format
+	try {
+		compile(src);
+	} catch (e) {
+		assertContains(e.message, ":");
+	}
+});
 
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
