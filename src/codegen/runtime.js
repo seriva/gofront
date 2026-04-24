@@ -8,10 +8,9 @@ export const HELPER_LEN = `var __len = __len || function(a) {
 };`;
 
 export const HELPER_APPEND =
-  "var __append = __append || function(a, ...b) { return a ? [...a, ...b] : b; };";
+	"var __append = __append || function(a, ...b) { return a ? [...a, ...b] : b; };";
 
-export const HELPER_S =
-  "var __s = __s || function(a) { return a || []; };";
+export const HELPER_S = "var __s = __s || function(a) { return a || []; };";
 
 export const HELPER_EQUAL = `var __equal = __equal || function __equal(a, b) {
   if (a === b) return true;
