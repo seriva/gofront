@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-## [0.0.9] - 2026-04-23
+## [0.0.9] - 2026-04-24
 
 ### Added
 - **Column numbers in type error messages** — type errors now include a `line:col` coordinate and a caret line pointing at the offending token, e.g. `Type error in main.go at line 3:15: Cannot assign untyped string to int` followed by `  3 |   var x int = "hello"` and `              ^`. The `_col` field is propagated from lexer tokens through `parsePrimary()` and `parseStmt()`; the `Program` node now carries `_source` so the typechecker can render the source context.
