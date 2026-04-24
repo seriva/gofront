@@ -613,17 +613,20 @@ export const expressionGenMethods = {
 		}
 	},
 
+	_zeroForNamedType(name) {
+		if (name === "strings.Builder") return '{ _buf: "" }';
+		if (name === "bytes.Buffer") return "{ _buf: [] }";
+		if (this.structNames.has(name)) return `new ${name}()`;
+		return "null";
+	},
+
 	zeroValueForTypeNode(typeNode) {
 		if (!typeNode) return "null";
 		switch (typeNode.kind) {
 			case "TypeName": {
 				const basic = this._zeroForBasicName(typeNode.name);
 				if (basic !== null) return basic;
-				if (typeNode.name === "strings.Builder") return '{ _buf: "" }';
-				if (typeNode.name === "bytes.Buffer") return "{ _buf: [] }";
-				if (this.structNames.has(typeNode.name))
-					return `new ${typeNode.name}()`;
-				return "null";
+				return this._zeroForNamedType(typeNode.name);
 			}
 			case "SliceType":
 				return "null";
@@ -665,10 +668,7 @@ export const expressionGenMethods = {
 				return `{ ${fields} }`;
 			}
 			case "named":
-				if (t.name === "strings.Builder") return '{ _buf: "" }';
-				if (t.name === "bytes.Buffer") return "{ _buf: [] }";
-				if (this.structNames.has(t.name)) return `new ${t.name}()`;
-				return "null";
+				return this._zeroForNamedType(t.name);
 			default:
 				return "null";
 		}

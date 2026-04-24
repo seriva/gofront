@@ -41,29 +41,20 @@ export function parseCacheSize() {
 
 // ── Helpers ──────────────────────────────────────────────────
 
-function parseFile(filePath) {
+function parseGoFrontFile(filePath) {
 	const mtime = statSync(filePath).mtimeMs;
 	const cached = _parseCache.get(filePath);
 	if (cached && cached.mtime === mtime) return cached.ast;
 
 	const source = readFileSync(filePath, "utf8");
 	const filename = basename(filePath);
-	const tokens = new Lexer(source, filename).tokenize();
-	const ast = new Parser(tokens, filename, source).parse();
-	ast._source = source;
-	_parseCache.set(filePath, { mtime, ast });
-	return ast;
-}
-
-function parseTemplFile(filePath) {
-	const mtime = statSync(filePath).mtimeMs;
-	const cached = _parseCache.get(filePath);
-	if (cached && cached.mtime === mtime) return cached.ast;
-
-	const source = readFileSync(filePath, "utf8");
-	const filename = basename(filePath);
-	const tokens = new TemplLexer(source, filename).tokenize();
-	const ast = new TemplParser(tokens, filename, source).parse();
+	const isTempl = filePath.endsWith(".templ");
+	const tokens = isTempl
+		? new TemplLexer(source, filename).tokenize()
+		: new Lexer(source, filename).tokenize();
+	const ast = isTempl
+		? new TemplParser(tokens, filename, source).parse()
+		: new Parser(tokens, filename, source).parse();
 	ast._source = source;
 	_parseCache.set(filePath, { mtime, ast });
 	return ast;
@@ -169,7 +160,7 @@ export function compileFiles(files, options = {}) {
 	const programs = [];
 	for (const f of files) {
 		try {
-			programs.push(f.endsWith(".templ") ? parseTemplFile(f) : parseFile(f));
+			programs.push(parseGoFrontFile(f));
 		} catch (e) {
 			parseErrors.push(e.message);
 		}
