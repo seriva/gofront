@@ -595,97 +595,95 @@ export const stdlibGenMethods = {
 
 	_genStrings(fn, a) {
 		const args = a();
+		const [s, s2, s3] = args;
+
+		// Simple s.method() — no args beyond receiver
+		const M1 = {
+			ToUpper: "toUpperCase",
+			ToLower: "toLowerCase",
+			TrimSpace: "trim",
+			ToTitle: "toUpperCase",
+		};
+		if (M1[fn]) return `${s}.${M1[fn]}()`;
+
+		// Simple s.method(arg) — one extra arg
+		const M2 = {
+			Contains: "includes",
+			HasPrefix: "startsWith",
+			HasSuffix: "endsWith",
+			Index: "indexOf",
+			LastIndex: "lastIndexOf",
+			Repeat: "repeat",
+			Split: "split",
+			Join: "join",
+		};
+		if (M2[fn]) return `${s}.${M2[fn]}(${s2})`;
+
 		switch (fn) {
-			case "Contains":
-				return `${args[0]}.includes(${args[1]})`;
-			case "HasPrefix":
-				return `${args[0]}.startsWith(${args[1]})`;
-			case "HasSuffix":
-				return `${args[0]}.endsWith(${args[1]})`;
-			case "Index":
-				return `${args[0]}.indexOf(${args[1]})`;
-			case "LastIndex":
-				return `${args[0]}.lastIndexOf(${args[1]})`;
 			case "Count":
-				return `((s, sep) => sep === "" ? s.length + 1 : s.split(sep).length - 1)(${args[0]}, ${args[1]})`;
-			case "Repeat":
-				return `${args[0]}.repeat(${args[1]})`;
+				return `((s, sep) => sep === "" ? s.length + 1 : s.split(sep).length - 1)(${s}, ${s2})`;
 			case "Replace":
-				return `${args[0]}.replace(${args[1]}, ${args[2]})`;
+				return `${s}.replace(${s2}, ${s3})`;
 			case "ReplaceAll":
-				return `${args[0]}.replaceAll(${args[1]}, ${args[2]})`;
-			case "ToUpper":
-				return `${args[0]}.toUpperCase()`;
-			case "ToLower":
-				return `${args[0]}.toLowerCase()`;
-			case "TrimSpace":
-				return `${args[0]}.trim()`;
+				return `${s}.replaceAll(${s2}, ${s3})`;
 			case "Trim":
-				return `${args[0]}.replace(new RegExp(\`^[\${${args[1]}}]+|[\${${args[1]}}]+$\`, "g"), "")`;
+				return `${s}.replace(new RegExp(\`^[\${${s2}}]+|[\${${s2}}]+$\`, "g"), "")`;
 			case "TrimPrefix":
-				return `((s, pre) => s.startsWith(pre) ? s.slice(pre.length) : s)(${args[0]}, ${args[1]})`;
+				return `((s, pre) => s.startsWith(pre) ? s.slice(pre.length) : s)(${s}, ${s2})`;
 			case "TrimSuffix":
-				return `((s, suf) => !suf.length || !s.endsWith(suf) ? s : s.slice(0, -suf.length))(${args[0]}, ${args[1]})`;
+				return `((s, suf) => !suf.length || !s.endsWith(suf) ? s : s.slice(0, -suf.length))(${s}, ${s2})`;
 			case "TrimLeft":
-				return `${args[0]}.replace(new RegExp(\`^[\${${args[1]}}]+\`), "")`;
+				return `${s}.replace(new RegExp(\`^[\${${s2}}]+\`), "")`;
 			case "TrimRight":
-				return `${args[0]}.replace(new RegExp(\`[\${${args[1]}}]+$\`), "")`;
-			case "Split":
-				return `${args[0]}.split(${args[1]})`;
-			case "Join":
-				return `${args[0]}.join(${args[1]})`;
+				return `${s}.replace(new RegExp(\`[\${${s2}}]+$\`), "")`;
 			case "EqualFold":
-				return `${args[0]}.toLowerCase() === ${args[1]}.toLowerCase()`;
+				return `${s}.toLowerCase() === ${s2}.toLowerCase()`;
 			case "Fields":
-				return `(${args[0]}).trim() === '' ? [] : (${args[0]}).trim().split(/\\s+/)`;
+				return `(${s}).trim() === '' ? [] : (${s}).trim().split(/\\s+/)`;
 			case "Cut":
-				return `((s, sep) => { const i = s.indexOf(sep); return i < 0 ? [s, "", false] : [s.slice(0, i), s.slice(i + sep.length), true]; })(${args[0]}, ${args[1]})`;
+				return `((s, sep) => { const i = s.indexOf(sep); return i < 0 ? [s, "", false] : [s.slice(0, i), s.slice(i + sep.length), true]; })(${s}, ${s2})`;
 			case "CutPrefix":
-				return `(${args[0]}).startsWith(${args[1]}) ? [(${args[0]}).slice((${args[1]}).length), true] : [${args[0]}, false]`;
+				return `(${s}).startsWith(${s2}) ? [(${s}).slice((${s2}).length), true] : [${s}, false]`;
 			case "CutSuffix":
-				return `(${args[0]}).endsWith(${args[1]}) ? [(${args[0]}).slice(0, -(${args[1]}).length), true] : [${args[0]}, false]`;
+				return `(${s}).endsWith(${s2}) ? [(${s}).slice(0, -(${s2}).length), true] : [${s}, false]`;
 			case "SplitN":
-				return `((s, sep, n) => { if (n === 0) return []; if (n < 0) return s.split(sep); const r = []; let cur = s; for (let i = 1; i < n && cur.length; i++) { const j = cur.indexOf(sep); if (j < 0) break; r.push(cur.slice(0, j)); cur = cur.slice(j + sep.length); } r.push(cur); return r; })(${args[0]}, ${args[1]}, ${args[2]})`;
+				return `((s, sep, n) => { if (n === 0) return []; if (n < 0) return s.split(sep); const r = []; let cur = s; for (let i = 1; i < n && cur.length; i++) { const j = cur.indexOf(sep); if (j < 0) break; r.push(cur.slice(0, j)); cur = cur.slice(j + sep.length); } r.push(cur); return r; })(${s}, ${s2}, ${s3})`;
 			case "SplitAfter":
-				return `((s, sep) => { if (sep === "") return [...s]; const r = []; let cur = s; while (cur.length) { const j = cur.indexOf(sep); if (j < 0) { r.push(cur); break; } r.push(cur.slice(0, j + sep.length)); cur = cur.slice(j + sep.length); } return r; })(${args[0]}, ${args[1]})`;
+				return `((s, sep) => { if (sep === "") return [...s]; const r = []; let cur = s; while (cur.length) { const j = cur.indexOf(sep); if (j < 0) { r.push(cur); break; } r.push(cur.slice(0, j + sep.length)); cur = cur.slice(j + sep.length); } return r; })(${s}, ${s2})`;
 			case "SplitAfterN":
-				return `((s, sep, n) => { if (n === 0) return []; if (n < 0 || sep === "") return ((s, sep) => { if (sep === "") return [...s]; const r = []; let cur = s; while (cur.length) { const j = cur.indexOf(sep); if (j < 0) { r.push(cur); break; } r.push(cur.slice(0, j + sep.length)); cur = cur.slice(j + sep.length); } return r; })(s, sep); const r = []; let cur = s; for (let i = 1; i < n && cur.length; i++) { const j = cur.indexOf(sep); if (j < 0) break; r.push(cur.slice(0, j + sep.length)); cur = cur.slice(j + sep.length); } r.push(cur); return r; })(${args[0]}, ${args[1]}, ${args[2]})`;
+				return `((s, sep, n) => { if (n === 0) return []; if (n < 0 || sep === "") return ((s, sep) => { if (sep === "") return [...s]; const r = []; let cur = s; while (cur.length) { const j = cur.indexOf(sep); if (j < 0) { r.push(cur); break; } r.push(cur.slice(0, j + sep.length)); cur = cur.slice(j + sep.length); } return r; })(s, sep); const r = []; let cur = s; for (let i = 1; i < n && cur.length; i++) { const j = cur.indexOf(sep); if (j < 0) break; r.push(cur.slice(0, j + sep.length)); cur = cur.slice(j + sep.length); } r.push(cur); return r; })(${s}, ${s2}, ${s3})`;
 			case "IndexAny":
-				return `((s, chars) => { let m = -1; for (const c of chars) { const i = s.indexOf(c); if (i >= 0 && (m < 0 || i < m)) m = i; } return m; })(${args[0]}, ${args[1]})`;
+				return `((s, chars) => { let m = -1; for (const c of chars) { const i = s.indexOf(c); if (i >= 0 && (m < 0 || i < m)) m = i; } return m; })(${s}, ${s2})`;
 			case "LastIndexAny":
-				return `((s, chars) => { let m = -1; for (const c of chars) { const i = s.lastIndexOf(c); if (i > m) m = i; } return m; })(${args[0]}, ${args[1]})`;
+				return `((s, chars) => { let m = -1; for (const c of chars) { const i = s.lastIndexOf(c); if (i > m) m = i; } return m; })(${s}, ${s2})`;
 			case "ContainsAny":
-				return `[...(${args[1]})].some(c => (${args[0]}).includes(c))`;
+				return `[...(${s2})].some(c => (${s}).includes(c))`;
 			case "ContainsRune":
-				return `(${args[0]}).includes(String.fromCodePoint(${args[1]}))`;
+				return `(${s}).includes(String.fromCodePoint(${s2}))`;
 			case "IndexRune":
-				return `(${args[0]}).indexOf(String.fromCodePoint(${args[1]}))`;
+				return `(${s}).indexOf(String.fromCodePoint(${s2}))`;
 			case "IndexByte":
-				return `(${args[0]}).indexOf(String.fromCharCode(${args[1]}))`;
+				return `(${s}).indexOf(String.fromCharCode(${s2}))`;
 			case "LastIndexByte":
-				return `(${args[0]}).lastIndexOf(String.fromCharCode(${args[1]}))`;
+				return `(${s}).lastIndexOf(String.fromCharCode(${s2}))`;
 			case "Map":
-				return `[...(${args[1]})].map(c => String.fromCodePoint((${args[0]})(c.codePointAt(0)))).join("")`;
+				return `[...(${s2})].map(c => String.fromCodePoint((${s})(c.codePointAt(0)))).join("")`;
 			case "Title":
-				return `(${args[0]}).replace(/\\b\\w/g, c => c.toUpperCase())`;
-			case "ToTitle":
-				return `(${args[0]}).toUpperCase()`;
+				return `(${s}).replace(/\\b\\w/g, c => c.toUpperCase())`;
 			case "TrimFunc":
-				return `((s, f) => { let l = 0, r = s.length; while (l < r && f(s.codePointAt(l))) l++; while (r > l && f(s.codePointAt(r - 1))) r--; return s.slice(l, r); })(${args[0]}, ${args[1]})`;
+				return `((s, f) => { let l = 0, r = s.length; while (l < r && f(s.codePointAt(l))) l++; while (r > l && f(s.codePointAt(r - 1))) r--; return s.slice(l, r); })(${s}, ${s2})`;
 			case "TrimLeftFunc":
-				return `((s, f) => { let l = 0; while (l < s.length && f(s.codePointAt(l))) l++; return s.slice(l); })(${args[0]}, ${args[1]})`;
+				return `((s, f) => { let l = 0; while (l < s.length && f(s.codePointAt(l))) l++; return s.slice(l); })(${s}, ${s2})`;
 			case "TrimRightFunc":
-				return `((s, f) => { let r = s.length; while (r > 0 && f(s.codePointAt(r - 1))) r--; return s.slice(0, r); })(${args[0]}, ${args[1]})`;
+				return `((s, f) => { let r = s.length; while (r > 0 && f(s.codePointAt(r - 1))) r--; return s.slice(0, r); })(${s}, ${s2})`;
 			case "IndexFunc":
-				return `((s, f) => { for (let i = 0; i < s.length; i++) { const cp = s.codePointAt(i); if (f(cp)) return i; if (cp > 0xFFFF) i++; } return -1; })(${args[0]}, ${args[1]})`;
+				return `((s, f) => { for (let i = 0; i < s.length; i++) { const cp = s.codePointAt(i); if (f(cp)) return i; if (cp > 0xFFFF) i++; } return -1; })(${s}, ${s2})`;
 			case "LastIndexFunc":
-				return `((s, f) => { for (let i = s.length - 1; i >= 0; i--) { const cp = s.codePointAt(i); if (f(cp)) return i; } return -1; })(${args[0]}, ${args[1]})`;
+				return `((s, f) => { for (let i = s.length - 1; i >= 0; i--) { const cp = s.codePointAt(i); if (f(cp)) return i; } return -1; })(${s}, ${s2})`;
 			case "NewReader":
-				return `{_src: ${args[0]}, _pos: 0, Read(p) { const n = Math.min(p.length, this._src.length - this._pos); for (let i = 0; i < n; i++) p[i] = this._src.charCodeAt(this._pos + i); this._pos += n; return [n, n === 0 ? "EOF" : null]; }, Len() { return this._src.length - this._pos; }, Reset(s) { this._src = s; this._pos = 0; }}`;
-			case "NewReplacer": {
-				const allArgs = args.join(", ");
-				return `((...pairs) => { const p = []; for (let i = 0; i < pairs.length; i += 2) p.push([pairs[i], pairs[i+1]]); return { _p: p, Replace(s) { let r = s; for (const [o, n] of this._p) r = r.split(o).join(n); return r; } }; })(${allArgs})`;
-			}
+				return `{_src: ${s}, _pos: 0, Read(p) { const n = Math.min(p.length, this._src.length - this._pos); for (let i = 0; i < n; i++) p[i] = this._src.charCodeAt(this._pos + i); this._pos += n; return [n, n === 0 ? "EOF" : null]; }, Len() { return this._src.length - this._pos; }, Reset(s) { this._src = s; this._pos = 0; }}`;
+			case "NewReplacer":
+				return `((...pairs) => { const p = []; for (let i = 0; i < pairs.length; i += 2) p.push([pairs[i], pairs[i+1]]); return { _p: p, Replace(s) { let r = s; for (const [o, n] of this._p) r = r.split(o).join(n); return r; } }; })(${args.join(", ")})`;
 			default:
 				return undefined;
 		}
