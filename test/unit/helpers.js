@@ -27,7 +27,7 @@ export function compile(
 ) {
 	const filename = fromFile.split("/").pop();
 	const tokens = new Lexer(source, filename).tokenize();
-	const ast = new Parser(tokens, filename).parse();
+	const ast = new Parser(tokens, filename, source).parse();
 
 	const checker = new TypeChecker();
 	const fromDir = dirname(resolve(fromFile));

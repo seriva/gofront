@@ -9,6 +9,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [0.0.9] - 2026-04-23
 
 ### Added
+- **Column numbers in type error messages** — type errors now include a `line:col` coordinate and a caret line pointing at the offending token, e.g. `Type error in main.go at line 3:15: Cannot assign untyped string to int` followed by `  3 |   var x int = "hello"` and `              ^`. The `_col` field is propagated from lexer tokens through `parsePrimary()` and `parseStmt()`; the `Program` node now carries `_source` so the typechecker can render the source context.
+- **Incremental parse cache in watch mode** — `compiler.js` maintains a module-level `Map<filePath, {mtime, ast}>` cache. On each rebuild, files whose `mtime` is unchanged are reused without re-reading from disk or re-parsing. `clearParseCache()` and `parseCacheSize()` are exported for testing. The watch log now includes the name of the changed file.
 - **`else if` chains in `.templ` bodies** — arbitrary-depth `if / else if / else` is now supported inside templ declarations; codegen recursively emits chained JS `else if` blocks.
 - **`switch` in `.templ` bodies** — `switch expr { case v: ... default: ... }` inside template bodies compiles to a JS `switch` block, with each case body rendered as DOM nodes.
 - **`@templ.Raw(htmlStr)`** — injects a trusted raw HTML string via `insertAdjacentHTML("beforeend", ...)`. Detected by matching the `templ.Raw(...)` call pattern in `TemplComponent` tokens.

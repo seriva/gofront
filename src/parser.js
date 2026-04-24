@@ -107,7 +107,14 @@ export class Parser {
 			if (Array.isArray(result)) decls.push(...result);
 			else decls.push(result);
 		}
-		return { kind: "Program", pkg, imports, decls, _filename: this.filename };
+		return {
+			kind: "Program",
+			pkg,
+			imports,
+			decls,
+			_filename: this.filename,
+			_source: this.source,
+		};
 	}
 
 	parsePackage() {

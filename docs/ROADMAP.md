@@ -99,6 +99,8 @@ Design documents are in [`docs/v0.0.9/`](v0.0.9/).
 | Feature | Difficulty | Status | Notes |
 |---|---|---|---|
 | `.templ` file support | High | ✓ | Native `.templ` parsing: `templ` declarations, HTML bodies, `{ expr }` interpolation, `@component()` calls, `{ children... }` slots, `if`/`else if`/`else`, `for`, `switch` control flow, `@templ.Raw()` for trusted HTML injection. Compiles directly to DOM manipulation JS. See [design plan](v0.0.9/templ-plan.md). |
+| Column numbers in error messages | Low | — | Store `col` from lexer tokens on AST nodes; emit `file:line:col` and a caret indicator in both parse and type errors. See [design plan](v0.0.9/column-numbers-plan.md). |
+| Incremental compilation in watch mode | Medium | — | Parse cache keyed by file mtime; skip re-parsing unchanged files on every save. Rebuild timing logged to console. See [design plan](v0.0.9/incremental-watch-plan.md). |
 
 ---
 
