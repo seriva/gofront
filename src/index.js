@@ -28,13 +28,11 @@ const { version } = _require("../package.json");
 
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { CodeGen } from "./codegen.js";
-import { compileDir } from "./compiler.js";
+import { compileDir, resolveImports } from "./compiler.js";
 import { createDevServer, liveReloadClient } from "./dev-server.js";
-import { parseDts } from "./dts-parser.js";
 import { Lexer } from "./lexer.js";
 import { minify } from "./minifier.js";
 import { Parser } from "./parser.js";
-import { isLocalPath, resolveAll, resolveGwDir } from "./resolver.js";
 import { TypeChecker } from "./typechecker.js";
 
 // ── Parse CLI args ───────────────────────────────────────────
@@ -173,55 +171,21 @@ function runCompile() {
 	}
 
 	const checker = new TypeChecker();
-	const fromDir = dirname(inputPath);
 	const jsImports = new Map();
-
-	for (const imp of ast.imports) {
-		for (const { path } of imp.imports) {
-			if (!path.startsWith("js:")) continue;
-			const dtsPath = join(fromDir, path.slice(3));
-			try {
-				const { types, values } = parseDts(readFileSync(dtsPath, "utf8"));
-				checker.addDefinitions(types, values);
-			} catch (e) {
-				throw new Error(`cannot read '${dtsPath}': ${e.message}`);
-			}
-		}
-	}
-
-	const resolved = resolveAll(ast.imports, inputPath, parseDts);
-	for (const [path, info] of resolved) {
-		if (!info) continue;
-		checker.addDefinitions(info.types, info.values);
-		jsImports.set(path, [...info.values.keys()]);
-	}
-
 	const bundledPackages = new Set();
 	const preambles = [];
 
-	for (const imp of ast.imports) {
-		for (const { path, alias } of imp.imports) {
-			if (!isLocalPath(path)) continue;
-			const depDir = resolveGwDir(path, inputPath);
-			if (!depDir) {
-				console.error(
-					`gofront: warning: cannot find local package '${path}' relative to ${fromDir}`,
-				);
-				continue;
-			}
-			const dep = compileDir(depDir);
-			preambles.push(dep.js);
-			const nameUsed = alias ?? dep.pkgName;
-			bundledPackages.add(nameUsed);
-			checker.addPackageNamespace(
-				nameUsed,
-				dep.exportedSymbols,
-				dep.exportedTypes,
-			);
-		}
-	}
+	resolveImports(
+		[ast],
+		inputPath,
+		checker,
+		jsImports,
+		bundledPackages,
+		preambles,
+	);
 
 	const errors = checker.check(ast);
+	checker.reportUnusedImports();
 	if (errors.length > 0) {
 		throw new Error(errors.map((e) => e.message).join("\n"));
 	}
