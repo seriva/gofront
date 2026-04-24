@@ -485,6 +485,65 @@ test("--watch -o writes output file on initial build", () => {
 });
 
 // ═════════════════════════════════════════════════════════════
+// Parse cache — incremental compilation
+// ═════════════════════════════════════════════════════════════
+
+import {
+	clearParseCache,
+	compileDir as compileDirCached,
+	parseCacheSize,
+} from "../../../src/compiler.js";
+
+section("Parse cache");
+
+test("clearParseCache resets the cache to zero entries", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-cache-"));
+	const file = join(dir, "main.go");
+	try {
+		writeFileSync(file, `package main\nfunc main() {}\n`);
+		compileDirCached(dir);
+		clearParseCache();
+		assert(parseCacheSize() === 0, "expected cache size 0 after clear");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("compileDir populates the parse cache", () => {
+	clearParseCache();
+	const dir = mkdtempSync(join(tmpdir(), "gofront-cache2-"));
+	const file = join(dir, "main.go");
+	try {
+		writeFileSync(file, `package main\nfunc main() {}\n`);
+		compileDirCached(dir);
+		assert(
+			parseCacheSize() > 0,
+			"expected cache to be populated after compile",
+		);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("second compileDir call reuses cache for unchanged files", () => {
+	clearParseCache();
+	const dir = mkdtempSync(join(tmpdir(), "gofront-cache3-"));
+	const file = join(dir, "main.go");
+	try {
+		writeFileSync(file, `package main\nfunc main() {}\n`);
+		compileDirCached(dir);
+		const sizeAfterFirst = parseCacheSize();
+		compileDirCached(dir);
+		assert(
+			parseCacheSize() === sizeAfterFirst,
+			"cache size should not grow on second compile of unchanged files",
+		);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+// ═════════════════════════════════════════════════════════════
 // Type error — additional cases
 // ═════════════════════════════════════════════════════════════
 

@@ -365,9 +365,10 @@ export const expressionParserMethods = {
 	},
 
 	parsePrimary() {
-		const line = this.peek().line;
+		const t = this.peek();
 		const expr = this._parsePrimary();
-		if (!expr._line) expr._line = line;
+		if (!expr._line) expr._line = t.line;
+		if (!expr._col) expr._col = t.col;
 		return expr;
 	},
 
