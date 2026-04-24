@@ -20,6 +20,7 @@
 import { expressionGenMethods } from "./codegen/expressions.js";
 import { buildSourceMap } from "./codegen/source-map.js";
 import { statementGenMethods } from "./codegen/statements.js";
+import { stdlibGenMethods } from "./codegen/stdlib.js";
 import { T, Token } from "./lexer.js";
 import { Parser } from "./parser.js";
 import { isComplex, isNumeric } from "./typechecker/types.js";
@@ -880,3 +881,4 @@ export class CodeGen {
 
 Object.assign(CodeGen.prototype, statementGenMethods);
 Object.assign(CodeGen.prototype, expressionGenMethods);
+Object.assign(CodeGen.prototype, stdlibGenMethods);
