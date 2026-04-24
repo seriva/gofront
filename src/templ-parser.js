@@ -135,6 +135,12 @@ export class TemplParser extends Parser {
 	parseHtmlElement() {
 		const openTok = this.advance(); // HTML_OPEN
 		const { tag, attrs } = openTok.value;
+
+		// Void elements have no children and no close tag even without />
+		if (VOID_ELEMENTS.has(tag)) {
+			return { kind: "TemplElement", tag, attrs, children: [] };
+		}
+
 		const children = [];
 		while (!this.check(T.EOF) && !this.check(T.RBRACE)) {
 			if (this.check(TT.HTML_CLOSE)) break;

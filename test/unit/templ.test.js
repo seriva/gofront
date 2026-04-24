@@ -466,9 +466,111 @@ test("@templ.Raw() with dynamic expression", () => {
 	assertEqual(document.querySelector("#app em").textContent, "italic");
 });
 
+// ── Conditional bool attribute ────────────────────────────────
+
+section("templ — conditional bool attribute");
+
+test("?= sets attribute when true", () => {
+	const { js } = compilePkg({
+		"main.go": `package main
+func main() {
+	gom.Mount("#app", MyCheck(true))
+}`,
+		"check.templ": `package main
+templ MyCheck(checked bool) {
+	<input type="checkbox" checked?={ checked }/>
+}`,
+	});
+	const { document } = runInDom(js, '<div id="app"></div>');
+	assert(
+		document.querySelector("#app input").hasAttribute("checked"),
+		"checked attribute should be set",
+	);
+});
+
+test("?= omits attribute when false", () => {
+	const { js } = compilePkg({
+		"main.go": `package main
+func main() {
+	gom.Mount("#app", MyCheck(false))
+}`,
+		"check.templ": `package main
+templ MyCheck(checked bool) {
+	<input type="checkbox" checked?={ checked }/>
+}`,
+	});
+	const { document } = runInDom(js, '<div id="app"></div>');
+	assert(
+		!document.querySelector("#app input").hasAttribute("checked"),
+		"checked attribute should be absent",
+	);
+});
+
+// ── Void elements ─────────────────────────────────────────────
+
+section("templ — void elements");
+
+test("void element without self-close slash", () => {
+	const { js } = compilePkg({
+		"main.go": `package main
+func main() {
+	gom.Mount("#app", Rule())
+}`,
+		"rule.templ": `package main
+templ Rule() {
+	<div>
+		<hr>
+		<br>
+	</div>
+}`,
+	});
+	const { document } = runInDom(js, '<div id="app"></div>');
+	assert(document.querySelector("#app hr") !== null, "hr should exist");
+	assert(document.querySelector("#app br") !== null, "br should exist");
+});
+
+// ── else if without trailing else ─────────────────────────────
+
+section("templ — else if without else");
+
+test("else if chain with no final else renders nothing when unmatched", () => {
+	const { js } = compilePkg({
+		"main.go": `package main
+func main() {
+	gom.Mount("#app", Label(99))
+}`,
+		"label.templ": `package main
+templ Label(n int) {
+	<div>
+		if n == 1 {
+			<span>one</span>
+		} else if n == 2 {
+			<span>two</span>
+		}
+	</div>
+}`,
+	});
+	const { document } = runInDom(js, '<div id="app"></div>');
+	assertEqual(document.querySelectorAll("#app span").length, 0);
+});
+
 // ── Error cases ───────────────────────────────────────────────
 
 section("templ — error cases");
+
+test("mismatched close tag throws parse error", () => {
+	assertThrows(
+		() =>
+			compilePkg({
+				"main.go": "package main\nfunc main() {}",
+				"bad.templ": `package main
+templ Bad() {
+	<div><span></div>
+}`,
+			}),
+		"unclosed",
+	);
+});
 
 test("unclosed tag throws parse error", () => {
 	assertThrows(
