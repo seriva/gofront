@@ -6,12 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.0.9] - 2026-04-23
+
 ### Added
 - **`else if` chains in `.templ` bodies** — arbitrary-depth `if / else if / else` is now supported inside templ declarations; codegen recursively emits chained JS `else if` blocks.
 - **`switch` in `.templ` bodies** — `switch expr { case v: ... default: ... }` inside template bodies compiles to a JS `switch` block, with each case body rendered as DOM nodes.
 - **`@templ.Raw(htmlStr)`** — injects a trusted raw HTML string via `insertAdjacentHTML("beforeend", ...)`. Detected by matching the `templ.Raw(...)` call pattern in `TemplComponent` tokens.
 
 ### Fixed
+- **Void elements without self-close slash** — `<br>`, `<hr>`, `<img>` etc. used without a trailing `/` in templ bodies now parse correctly instead of throwing "unclosed tag" errors. The parser short-circuits on void element open tags before attempting to collect children or a close tag.
 - **`_lexHtmlText` swallowed `case`/`default` keywords** — text nodes inside `switch` case bodies incorrectly consumed subsequent `case` and `default` lines. Fixed by adding them to the break-keyword list alongside `if`, `for`, and `switch`.
 
 ### Changed
