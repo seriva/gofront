@@ -3,54 +3,42 @@
 
 export const stdlibGenMethods = {
 	_genBuilderCall(typeName, method, expr) {
-		// Resolve the receiver — may be a direct var or a &var (pointer)
 		const recv = expr.func.expr;
 		const isPtr = recv._type?.kind === "pointer";
 		const base = isPtr ? `${this.genExpr(recv)}.value` : this.genExpr(recv);
 		const args = expr.args.map((a) => this.genExpr(a));
+		const isStr = typeName === "strings.Builder";
 
-		if (typeName === "strings.Builder") {
-			switch (method) {
-				case "WriteString":
-					return `(${base}._buf += ${args[0]}, [${args[0]}.length, null])`;
-				case "WriteByte":
-				case "WriteRune":
-					return `(${base}._buf += String.fromCodePoint(${args[0]}))`;
-				case "Write":
-					return `(${base}._buf += String.fromCharCode(...${args[0]}))`;
-				case "String":
-					return `${base}._buf`;
-				case "Len":
-					return `${base}._buf.length`;
-				case "Reset":
-					return `(${base}._buf = "")`;
-				case "Grow":
-					return "undefined";
-			}
+		switch (method) {
+			case "WriteString":
+				return isStr
+					? `(${base}._buf += ${args[0]}, [${args[0]}.length, null])`
+					: `(${base}._buf.push(...new TextEncoder().encode(${args[0]})), [${args[0]}.length, null])`;
+			case "WriteByte":
+				return isStr
+					? `(${base}._buf += String.fromCodePoint(${args[0]}))`
+					: `${base}._buf.push(${args[0]})`;
+			case "WriteRune":
+				return `(${base}._buf += String.fromCodePoint(${args[0]}))`;
+			case "Write":
+				return isStr
+					? `(${base}._buf += String.fromCharCode(...${args[0]}))`
+					: `(${base}._buf.push(...${args[0]}), [${args[0]}.length, null])`;
+			case "String":
+				return isStr
+					? `${base}._buf`
+					: `new TextDecoder().decode(new Uint8Array(${base}._buf))`;
+			case "Bytes":
+				return `${base}._buf.slice()`;
+			case "Len":
+				return `${base}._buf.length`;
+			case "Reset":
+				return isStr ? `(${base}._buf = "")` : `(${base}._buf = [])`;
+			case "Grow":
+				return "undefined";
+			default:
+				return undefined;
 		}
-
-		if (typeName === "bytes.Buffer") {
-			switch (method) {
-				case "WriteString":
-					return `(${base}._buf.push(...new TextEncoder().encode(${args[0]})), [${args[0]}.length, null])`;
-				case "WriteByte":
-					return `${base}._buf.push(${args[0]})`;
-				case "Write":
-					return `(${base}._buf.push(...${args[0]}), [${args[0]}.length, null])`;
-				case "String":
-					return `new TextDecoder().decode(new Uint8Array(${base}._buf))`;
-				case "Bytes":
-					return `${base}._buf.slice()`;
-				case "Len":
-					return `${base}._buf.length`;
-				case "Reset":
-					return `(${base}._buf = [])`;
-				case "Grow":
-					return "undefined";
-			}
-		}
-
-		return undefined;
 	},
 
 	_genRegexp(fn, a) {
@@ -361,7 +349,9 @@ export const stdlibGenMethods = {
 			expr.args.map((e) =>
 				e._spread ? `...${this.genExpr(e)}` : this.genExpr(e),
 			);
-		const elementTags = {
+
+		// HTML element tags — lower-cased name is the HTML tag
+		const ELEMENT_TAGS = {
 			Div: "div",
 			Section: "section",
 			Article: "article",
@@ -415,8 +405,8 @@ export const stdlibGenMethods = {
 			Th: "th",
 			Td: "td",
 		};
-		if (elementTags[fn]) {
-			const tag = elementTags[fn];
+		if (ELEMENT_TAGS[fn]) {
+			const tag = ELEMENT_TAGS[fn];
 			const args = a();
 			if (args.length === 0)
 				return `(()=>({Mount(p){const e=document.createElement("${tag}");p.appendChild(e);}}))()`;
@@ -425,7 +415,9 @@ export const stdlibGenMethods = {
 				`(${args.join(",")})`
 			);
 		}
-		const attrHelpers = {
+
+		// String attribute helpers — setAttribute(htmlAttr, value)
+		const ATTR_HELPERS = {
 			For: "for",
 			Name: "name",
 			Value: "value",
@@ -440,23 +432,22 @@ export const stdlibGenMethods = {
 			Draggable: "draggable",
 			Role: "role",
 			StyleAttr: "style",
+			AriaLabel: "aria-label",
 		};
-		if (attrHelpers[fn]) {
+		if (ATTR_HELPERS[fn]) {
 			const [v] = a();
-			return `((v)=>({Mount(e){e.setAttribute("${attrHelpers[fn]}",v)}}))(${v})`;
+			return `((v)=>({Mount(e){e.setAttribute("${ATTR_HELPERS[fn]}",v)}}))(${v})`;
 		}
-		if (fn === "AriaLabel") {
-			const [v] = a();
-			return `((v)=>({Mount(e){e.setAttribute("aria-label",v)}}))(${v})`;
-		}
-		const boolAttrs = {
+
+		// Boolean attribute helpers — setAttribute(attr, "")
+		const BOOL_ATTRS = {
 			Disabled: "disabled",
 			Checked: "checked",
 			Selected: "selected",
 			Readonly: "readonly",
 		};
-		if (boolAttrs[fn])
-			return `({Mount(e){e.setAttribute("${boolAttrs[fn]}","")}})`;
+		if (BOOL_ATTRS[fn])
+			return `({Mount(e){e.setAttribute("${BOOL_ATTRS[fn]}","")}})`;
 
 		const args = a();
 		switch (fn) {
@@ -828,105 +819,78 @@ export const stdlibGenMethods = {
 
 	_genMath(fn, a) {
 		const args = a();
+		const [x, y] = args;
+		const MATH1 = {
+			Abs: "abs",
+			Floor: "floor",
+			Ceil: "ceil",
+			Round: "round",
+			Sqrt: "sqrt",
+			Cbrt: "cbrt",
+			Log: "log",
+			Log2: "log2",
+			Log10: "log10",
+			Sin: "sin",
+			Cos: "cos",
+			Tan: "tan",
+			Atan: "atan",
+			Asin: "asin",
+			Acos: "acos",
+			Exp: "exp",
+			Trunc: "trunc",
+		};
+		if (MATH1[fn]) return `Math.${MATH1[fn]}(${x})`;
+		const MATH2 = {
+			Pow: "pow",
+			Min: "min",
+			Max: "max",
+			Atan2: "atan2",
+			Hypot: "hypot",
+		};
+		if (MATH2[fn]) return `Math.${MATH2[fn]}(${x}, ${y})`;
 		switch (fn) {
-			case "Abs":
-				return `Math.abs(${args[0]})`;
-			case "Floor":
-				return `Math.floor(${args[0]})`;
-			case "Ceil":
-				return `Math.ceil(${args[0]})`;
-			case "Round":
-				return `Math.round(${args[0]})`;
-			case "Sqrt":
-				return `Math.sqrt(${args[0]})`;
-			case "Cbrt":
-				return `Math.cbrt(${args[0]})`;
-			case "Pow":
-				return `Math.pow(${args[0]}, ${args[1]})`;
-			case "Log":
-				return `Math.log(${args[0]})`;
-			case "Log2":
-				return `Math.log2(${args[0]})`;
-			case "Log10":
-				return `Math.log10(${args[0]})`;
-			case "Sin":
-				return `Math.sin(${args[0]})`;
-			case "Cos":
-				return `Math.cos(${args[0]})`;
-			case "Tan":
-				return `Math.tan(${args[0]})`;
-			case "Min":
-				return `Math.min(${args[0]}, ${args[1]})`;
-			case "Max":
-				return `Math.max(${args[0]}, ${args[1]})`;
 			case "Mod":
-				return `${args[0]} % ${args[1]}`;
+				return `${x} % ${y}`;
 			case "Inf":
-				return `(${args[0]} >= 0 ? Infinity : -Infinity)`;
+				return `(${x} >= 0 ? Infinity : -Infinity)`;
 			case "IsNaN":
-				return `Number.isNaN(${args[0]})`;
+				return `Number.isNaN(${x})`;
 			case "IsInf":
-				return `(${args[1]} > 0 ? ${args[0]} === Infinity : ${args[1]} < 0 ? ${args[0]} === -Infinity : !Number.isFinite(${args[0]}))`;
+				return `(${y} > 0 ? ${x} === Infinity : ${y} < 0 ? ${x} === -Infinity : !Number.isFinite(${x}))`;
 			case "NaN":
 				return "NaN";
-			case "Atan":
-				return `Math.atan(${args[0]})`;
-			case "Atan2":
-				return `Math.atan2(${args[0]}, ${args[1]})`;
-			case "Asin":
-				return `Math.asin(${args[0]})`;
-			case "Acos":
-				return `Math.acos(${args[0]})`;
-			case "Exp":
-				return `Math.exp(${args[0]})`;
 			case "Exp2":
-				return `Math.pow(2, ${args[0]})`;
-			case "Trunc":
-				return `Math.trunc(${args[0]})`;
-			case "Hypot":
-				return `Math.hypot(${args[0]}, ${args[1]})`;
+				return `Math.pow(2, ${x})`;
 			case "Signbit":
-				return `(${args[0]} < 0 || Object.is(${args[0]}, -0))`;
+				return `(${x} < 0 || Object.is(${x}, -0))`;
 			case "Copysign":
-				return `(Math.abs(${args[0]}) * (${args[1]} < 0 || Object.is(${args[1]}, -0) ? -1 : 1))`;
+				return `(Math.abs(${x}) * (${y} < 0 || Object.is(${y}, -0) ? -1 : 1))`;
 			case "Dim":
-				return `Math.max(${args[0]} - ${args[1]}, 0)`;
+				return `Math.max(${x} - ${y}, 0)`;
 			case "Remainder":
-				return `(${args[0]} - Math.round(${args[0]} / ${args[1]}) * ${args[1]})`;
+				return `(${x} - Math.round(${x} / ${y}) * ${y})`;
 			default:
 				return undefined;
 		}
 	},
 
 	_genUnicode(fn, a) {
-		const args = a();
-		const cp = `String.fromCodePoint(${args[0]})`;
-		switch (fn) {
-			case "IsLetter":
-				return `/\\p{L}/u.test(${cp})`;
-			case "IsDigit":
-				return `/\\p{Nd}/u.test(${cp})`;
-			case "IsSpace":
-				return `/\\s/.test(${cp})`;
-			case "IsUpper":
-				return `((__c) => __c === __c.toUpperCase() && /\\p{L}/u.test(__c))(${cp})`;
-			case "IsLower":
-				return `((__c) => __c === __c.toLowerCase() && /\\p{L}/u.test(__c))(${cp})`;
-			case "IsPunct":
-				return `/\\p{P}/u.test(${cp})`;
-			case "IsControl":
-				return `/\\p{Cc}/u.test(${cp})`;
-			case "IsPrint":
-				return `!/\\p{Cc}/u.test(${cp})`;
-			case "IsGraphic":
-				return `!/\\p{Cc}/u.test(${cp})`;
-			case "ToUpper":
-				return `${cp}.toUpperCase().codePointAt(0)`;
-			case "ToLower":
-				return `${cp}.toLowerCase().codePointAt(0)`;
-			default:
-				return undefined;
-		}
+		const [arg] = a();
+		const cp = `String.fromCodePoint(${arg})`;
+		const UNICODE_TEST = {
+			IsLetter: `/\\p{L}/u.test(${cp})`,
+			IsDigit: `/\\p{Nd}/u.test(${cp})`,
+			IsSpace: `/\\s/.test(${cp})`,
+			IsUpper: `((__c) => __c === __c.toUpperCase() && /\\p{L}/u.test(__c))(${cp})`,
+			IsLower: `((__c) => __c === __c.toLowerCase() && /\\p{L}/u.test(__c))(${cp})`,
+			IsPunct: `/\\p{P}/u.test(${cp})`,
+			IsControl: `/\\p{Cc}/u.test(${cp})`,
+			IsPrint: `!/\\p{Cc}/u.test(${cp})`,
+			IsGraphic: `!/\\p{Cc}/u.test(${cp})`,
+			ToUpper: `${cp}.toUpperCase().codePointAt(0)`,
+			ToLower: `${cp}.toLowerCase().codePointAt(0)`,
+		};
+		return UNICODE_TEST[fn] ?? undefined;
 	},
 
 	_genOs(fn, a) {
