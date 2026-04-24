@@ -631,12 +631,12 @@ Design documents for planned features are organised by release under `docs/v*/`
 ## Tests
 
 ```sh
-npm run test:unit   # unit tests only (~1098 tests, no browser required)
+npm run test:unit   # unit tests only (~1100 tests, no browser required)
 npm run test:e2e    # E2E tests (Playwright, headless Chromium)
 npm test            # both
 ```
 
-**Unit tests** (~1098) cover language features, type errors, edge cases, DOM (jsdom),
+**Unit tests** (~1100) cover language features, type errors, edge cases, DOM (jsdom),
 external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string
 formatting, map iteration order, integer overflow semantics, unused variable detection,
 unused import detection, semantic difference verification, stdlib shim packages, generics,
