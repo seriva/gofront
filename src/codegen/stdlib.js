@@ -519,50 +519,8 @@ export const stdlibGenMethods = {
 				return `console.log(__sprintf(${fmtArgs}))`;
 			case "Fprintf":
 			case "Fprintln":
-			case "Fprint": {
-				this._usesSprintf = true;
-				const writerArg = expr.args[0];
-				const rest = expr.args.slice(1);
-				const restJs = rest.map((e) => this.genExpr(e)).join(", ");
-				// Resolve the writer to its underlying buffer expression
-				const writerType = writerArg._type;
-				const targetTypeName =
-					writerType?.name ??
-					(writerType?.kind === "pointer" ? writerType.base?.name : null);
-				let buf;
-				if (targetTypeName === "strings.Builder") {
-					const w = this.genExpr(writerArg);
-					buf =
-						writerType?.kind === "pointer" ? `${w}.value._buf` : `${w}._buf`;
-				} else if (targetTypeName === "bytes.Buffer") {
-					const w = this.genExpr(writerArg);
-					const base = writerType?.kind === "pointer" ? `${w}.value` : w;
-					buf = null;
-					if (fn === "Fprintf") {
-						return `((__b,__s)=>{ __b._buf.push(...new TextEncoder().encode(__s)); })(${base}, __sprintf(${restJs}))`;
-					}
-					const valJs =
-						fn === "Fprintln"
-							? `__sprintf("%v\\n", ${restJs})`
-							: `__sprintf("%v", ${restJs})`;
-					return `((__b,__s)=>{ __b._buf.push(...new TextEncoder().encode(__s)); })(${base}, ${valJs})`;
-				} else {
-					// Generic io.Writer fallback — call .WriteString if available
-					const w = this.genExpr(writerArg);
-					const formatted =
-						fn === "Fprintf"
-							? `__sprintf(${restJs})`
-							: fn === "Fprintln"
-								? `__sprintf("%v\\n", ${restJs})`
-								: `__sprintf("%v", ${restJs})`;
-					return `${w}.WriteString(${formatted})`;
-				}
-				// strings.Builder path
-				if (fn === "Fprintf") return `(${buf} += __sprintf(${restJs}))`;
-				if (fn === "Fprintln")
-					return `(${buf} += __sprintf("%v\\n", ${restJs}))`;
-				return `(${buf} += __sprintf("%v", ${restJs}))`;
-			}
+			case "Fprint":
+				return this._genFmtFprint(fn, expr);
 			case "Sscan": {
 				const strArg = this.genExpr(expr.args[0]);
 				const restArgs = expr.args
@@ -591,6 +549,46 @@ export const stdlibGenMethods = {
 			default:
 				return undefined;
 		}
+	},
+
+	_genFmtFprint(fn, expr) {
+		this._usesSprintf = true;
+		const writerArg = expr.args[0];
+		const rest = expr.args.slice(1);
+		const restJs = rest.map((e) => this.genExpr(e)).join(", ");
+		const writerType = writerArg._type;
+		const targetTypeName =
+			writerType?.name ??
+			(writerType?.kind === "pointer" ? writerType.base?.name : null);
+		if (targetTypeName === "strings.Builder") {
+			const w = this.genExpr(writerArg);
+			const buf =
+				writerType?.kind === "pointer" ? `${w}.value._buf` : `${w}._buf`;
+			if (fn === "Fprintf") return `(${buf} += __sprintf(${restJs}))`;
+			if (fn === "Fprintln") return `(${buf} += __sprintf("%v\\n", ${restJs}))`;
+			return `(${buf} += __sprintf("%v", ${restJs}))`;
+		}
+		if (targetTypeName === "bytes.Buffer") {
+			const w = this.genExpr(writerArg);
+			const base = writerType?.kind === "pointer" ? `${w}.value` : w;
+			if (fn === "Fprintf") {
+				return `((__b,__s)=>{ __b._buf.push(...new TextEncoder().encode(__s)); })(${base}, __sprintf(${restJs}))`;
+			}
+			const valJs =
+				fn === "Fprintln"
+					? `__sprintf("%v\\n", ${restJs})`
+					: `__sprintf("%v", ${restJs})`;
+			return `((__b,__s)=>{ __b._buf.push(...new TextEncoder().encode(__s)); })(${base}, ${valJs})`;
+		}
+		// Generic io.Writer fallback — call .WriteString if available
+		const w = this.genExpr(writerArg);
+		const formatted =
+			fn === "Fprintf"
+				? `__sprintf(${restJs})`
+				: fn === "Fprintln"
+					? `__sprintf("%v\\n", ${restJs})`
+					: `__sprintf("%v", ${restJs})`;
+		return `${w}.WriteString(${formatted})`;
 	},
 
 	_genStrings(fn, a) {
