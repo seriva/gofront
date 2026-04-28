@@ -137,6 +137,24 @@ export class CodeGen {
 		}
 
 		// Emit functions and templ components
+		const initNames = this._emitFuncDecls(program);
+
+		// Auto-call init() functions, then main()
+		for (const name of initNames) this.line(`${name}();`);
+		const hasMain = program.decls.some(
+			(d) => d.kind === "FuncDecl" && d.name === "main",
+		);
+		if (hasMain) this.line("main();");
+
+		this._prependHelpers();
+
+		// Strip leading blank line
+		while (this.out[0] === "") this.out.shift();
+		return this.out.join("\n");
+	}
+
+	// Emits FuncDecl and TemplDecl nodes; returns renamed init function names.
+	_emitFuncDecls(program) {
 		let initCount = 0;
 		const initNames = [];
 		for (const d of program.decls) {
@@ -157,19 +175,7 @@ export class CodeGen {
 				this.blank();
 			}
 		}
-
-		// Auto-call init() functions, then main()
-		for (const name of initNames) this.line(`${name}();`);
-		const hasMain = program.decls.some(
-			(d) => d.kind === "FuncDecl" && d.name === "main",
-		);
-		if (hasMain) this.line("main();");
-
-		this._prependHelpers();
-
-		// Strip leading blank line
-		while (this.out[0] === "") this.out.shift();
-		return this.out.join("\n");
+		return initNames;
 	}
 
 	// Collects struct names, method map, and named wrapper names from program decls.
@@ -320,28 +326,30 @@ export class CodeGen {
 			}
 
 			// Delegation stubs for promoted embedded methods
-			if (this.checker) {
-				const resolvedType = this.checker.types.get(name)?.underlying;
-				if (resolvedType?.kind === "struct" && resolvedType._embeds) {
-					const declared = new Set(methodDecls.map((m) => m.name));
-					for (const embed of resolvedType._embeds) {
-						const embedName = embed.kind === "named" ? embed.name : null;
-						if (!embedName) continue;
-						const embedBase = embed.kind === "named" ? embed.underlying : embed;
-						if (embedBase?.kind !== "struct" || !embedBase.methods) continue;
-						for (const [mName] of embedBase.methods.entries()) {
-							if (!declared.has(mName)) {
-								this.blank();
-								this.line(
-									`${mName}(...__a) { return ${embedName}.prototype.${mName}.call(this, ...__a); }`,
-								);
-							}
-						}
-					}
-				}
-			}
+			this._genEmbeddedMethodStubs(name, methodDecls);
 		});
 		this.line("}");
+	}
+
+	_genEmbeddedMethodStubs(name, methodDecls) {
+		if (!this.checker) return;
+		const resolvedType = this.checker.types.get(name)?.underlying;
+		if (resolvedType?.kind !== "struct" || !resolvedType._embeds) return;
+		const declared = new Set(methodDecls.map((m) => m.name));
+		for (const embed of resolvedType._embeds) {
+			const embedName = embed.kind === "named" ? embed.name : null;
+			if (!embedName) continue;
+			const embedBase = embed.kind === "named" ? embed.underlying : embed;
+			if (embedBase?.kind !== "struct" || !embedBase.methods) continue;
+			for (const [mName] of embedBase.methods.entries()) {
+				if (!declared.has(mName)) {
+					this.blank();
+					this.line(
+						`${mName}(...__a) { return ${embedName}.prototype.${mName}.call(this, ...__a); }`,
+					);
+				}
+			}
+		}
 	}
 
 	genMethod(decl, recvField = null) {
@@ -453,24 +461,8 @@ export class CodeGen {
 				return this.line(
 					`${p}.appendChild(document.createTextNode(String(${this._genTemplTokenExpr(node.tokens)})));`,
 				);
-			case "TemplComponent": {
-				// Special case: @templ.Raw(expr) → insertAdjacentHTML
-				const toks = node.tokens;
-				if (
-					toks.length >= 4 &&
-					toks[0]?.value === "templ" &&
-					toks[1]?.type === T.DOT &&
-					toks[2]?.value === "Raw" &&
-					toks[3]?.type === T.LPAREN
-				) {
-					const argTokens = toks.slice(4, toks.length - 1);
-					const argJs = this._genTemplTokenExpr(argTokens);
-					return this.line(`${p}.insertAdjacentHTML("beforeend", ${argJs});`);
-				}
-				return this.line(
-					`(${this._genTemplTokenCallExpr(node.tokens)}).Mount(${p});`,
-				);
-			}
+			case "TemplComponent":
+				return this._genTemplComponentMount(node, p);
 			case "TemplChildren":
 				// children is a variadic gom.Node param — mount each child
 				return this.line(
@@ -485,6 +477,25 @@ export class CodeGen {
 			default:
 				break;
 		}
+	}
+
+	_genTemplComponentMount(node, p) {
+		// Special case: @templ.Raw(expr) → insertAdjacentHTML
+		const toks = node.tokens;
+		if (
+			toks.length >= 4 &&
+			toks[0]?.value === "templ" &&
+			toks[1]?.type === T.DOT &&
+			toks[2]?.value === "Raw" &&
+			toks[3]?.type === T.LPAREN
+		) {
+			const argTokens = toks.slice(4, toks.length - 1);
+			const argJs = this._genTemplTokenExpr(argTokens);
+			return this.line(`${p}.insertAdjacentHTML("beforeend", ${argJs});`);
+		}
+		return this.line(
+			`(${this._genTemplTokenCallExpr(node.tokens)}).Mount(${p});`,
+		);
 	}
 
 	_genTemplElement(node, p) {
@@ -621,23 +632,24 @@ export class CodeGen {
 		const keyName = lhs[0] ?? "_";
 		const valName = lhs[1] ?? null;
 
-		let loopHeader;
-		if (valName === null || valName === undefined) {
-			loopHeader = `for (const ${keyName === "_" ? "_$" : keyName} of ${iterJs}) {`;
-		} else if (keyName === "_" && valName === "_") {
-			loopHeader = `for (const _$ of ${iterJs}) {`;
-		} else if (keyName === "_") {
-			loopHeader = `for (const ${valName} of ${iterJs}) {`;
-		} else if (valName === "_") {
-			loopHeader = `for (const [${keyName}] of Object.entries(${iterJs})) {`;
-		} else {
-			// Default to .entries() for arrays, Object.entries for objects
-			this._usesSliceGuard = true;
-			loopHeader = `for (const [${keyName}, ${valName}] of __s(${iterJs}).entries()) {`;
-		}
+		const loopHeader = this._genTemplRangeHeader(keyName, valName, iterJs);
 		this.line(loopHeader);
 		this.indented(() => this._genTemplNodes(templBody, mountParent));
 		this.line("}");
+	}
+
+	_genTemplRangeHeader(keyName, valName, iterJs) {
+		if (valName === null || valName === undefined) {
+			return `for (const ${keyName === "_" ? "_$" : keyName} of ${iterJs}) {`;
+		}
+		if (keyName === "_" && valName === "_")
+			return `for (const _$ of ${iterJs}) {`;
+		if (keyName === "_") return `for (const ${valName} of ${iterJs}) {`;
+		if (valName === "_")
+			return `for (const [${keyName}] of Object.entries(${iterJs})) {`;
+		// Default to .entries() for arrays, Object.entries for objects
+		this._usesSliceGuard = true;
+		return `for (const [${keyName}, ${valName}] of __s(${iterJs}).entries()) {`;
 	}
 
 	// Parse a token array as a Go expression and emit JS.

@@ -242,43 +242,10 @@ export const expressionGenMethods = {
 			if (builtin !== undefined) return builtin;
 		}
 
-		// error.Error() → real method call
-		if (
-			expr.func.kind === "SelectorExpr" &&
-			expr.func.field === "Error" &&
-			expr.func.expr._type &&
-			(expr.func.expr._type === ERROR ||
-				expr.func.expr._type?.name === "error" ||
-				(expr.func.expr._type?.kind === "named" &&
-					expr.func.expr._type?.underlying?.kind === "interface"))
-		) {
-			return `${this.genExpr(expr.func.expr)}.Error()`;
-		}
-
-		// fmt.Sprintf / fmt.Printf / fmt.Println / fmt.Print / fmt.Errorf
-		// Standard library namespace dispatch — all follow the pattern:
-		// pkg.Func(args) → inline JS
-		if (expr.func.kind === "SelectorExpr" && expr.func.expr.kind === "Ident") {
-			const ns = expr.func.expr.name;
-			const fn = expr.func.field;
-			const result = this._genStdlibCall(ns, fn, expr);
-			if (result !== undefined) return result;
-		}
-
-		// strings.Builder / bytes.Buffer / regexp.Regexp method dispatch
+		// SelectorExpr dispatch (error.Error(), stdlib, builder/regexp/time methods)
 		if (expr.func.kind === "SelectorExpr") {
-			const recvType = expr.func.expr._type;
-			const recvName = recvType?.name ?? recvType?.base?.name;
-			if (recvName === "strings.Builder" || recvName === "bytes.Buffer") {
-				const typeName = recvType?.name ?? recvType?.base?.name;
-				return this._genBuilderCall(typeName, expr.func.field, expr);
-			}
-			if (recvName === "regexp.Regexp") {
-				return this._genRegexpMethodCall(expr.func.field, expr);
-			}
-			if (recvName === "time.Time") {
-				return this._genTimeMethodCall(expr.func.field, expr);
-			}
+			const result = this._genSelectorCall(expr);
+			if (result !== undefined) return result;
 		}
 
 		// Mark the callee so SelectorExpr knows it's being called, not used as a value
@@ -294,6 +261,40 @@ export const expressionGenMethods = {
 			.map((a) => (a._spread ? `...${this.genExpr(a)}` : this.genExpr(a)))
 			.join(", ");
 		return `${fn}(${args})`;
+	},
+
+	_genSelectorCall(expr) {
+		// error.Error() → real method call
+		if (
+			expr.func.field === "Error" &&
+			expr.func.expr._type &&
+			(expr.func.expr._type === ERROR ||
+				expr.func.expr._type?.name === "error" ||
+				(expr.func.expr._type?.kind === "named" &&
+					expr.func.expr._type?.underlying?.kind === "interface"))
+		) {
+			return `${this.genExpr(expr.func.expr)}.Error()`;
+		}
+		// fmt.Sprintf / fmt.Printf / fmt.Println / fmt.Print / fmt.Errorf
+		// Standard library namespace dispatch — all follow the pattern:
+		// pkg.Func(args) → inline JS
+		if (expr.func.expr.kind === "Ident") {
+			const ns = expr.func.expr.name;
+			const fn = expr.func.field;
+			const result = this._genStdlibCall(ns, fn, expr);
+			if (result !== undefined) return result;
+		}
+		// strings.Builder / bytes.Buffer / regexp.Regexp / time.Time method dispatch
+		const recvType = expr.func.expr._type;
+		const recvName = recvType?.name ?? recvType?.base?.name;
+		if (recvName === "strings.Builder" || recvName === "bytes.Buffer") {
+			return this._genBuilderCall(recvName, expr.func.field, expr);
+		}
+		if (recvName === "regexp.Regexp")
+			return this._genRegexpMethodCall(expr.func.field, expr);
+		if (recvName === "time.Time")
+			return this._genTimeMethodCall(expr.func.field, expr);
+		return undefined;
 	},
 
 	_genBuiltinIdent(name, expr) {
@@ -800,33 +801,10 @@ export const expressionGenMethods = {
 		if (t?.name === "complex128" || t?.name === "complex64") {
 			return isComplex(expr.expr._type) ? inner : `{ re: ${inner}, im: 0 }`;
 		}
-		if (t?.kind === "ArrayType") {
-			const srcResolved =
-				expr.expr._type?.kind === "named"
-					? expr.expr._type.underlying
-					: expr.expr._type;
-			if (srcResolved?.kind === "slice") {
-				const size =
-					t.size?.value !== undefined ? Number(t.size.value) : t.size;
-				return `${inner}.slice(0, ${size})`;
-			}
-			return inner;
-		}
-		if (t?.kind === "SliceType") {
-			const elem = t.elem?.name;
-			if (elem === "byte" || elem === "uint8")
-				return `Array.from(new TextEncoder().encode(${inner}))`;
-			if (elem === "rune" || elem === "int32" || elem === "int") {
-				const srcType = expr.expr._type;
-				if (
-					(srcType?.kind === "basic" && srcType?.name === "string") ||
-					(srcType?.kind === "untyped" && srcType?.base === "string")
-				) {
-					return `Array.from(${inner}, __c => __c.codePointAt(0))`;
-				}
-			}
-			return `Array.from(${inner})`;
-		}
+		if (t?.kind === "ArrayType")
+			return this._genArrayTypeConversion(expr, inner, t);
+		if (t?.kind === "SliceType")
+			return this._genSliceTypeConversion(expr, inner, t);
 		const target = t?.name;
 		if (target === "error") {
 			this._usesError = true;
@@ -834,6 +812,38 @@ export const expressionGenMethods = {
 		}
 		if (target && this.namedWrapperNames.has(target))
 			return `new ${target}(${inner})`;
+		return this._genPrimitiveConversion(expr, inner, target);
+	},
+
+	_genArrayTypeConversion(expr, inner, t) {
+		const srcResolved =
+			expr.expr._type?.kind === "named"
+				? expr.expr._type.underlying
+				: expr.expr._type;
+		if (srcResolved?.kind === "slice") {
+			const size = t.size?.value !== undefined ? Number(t.size.value) : t.size;
+			return `${inner}.slice(0, ${size})`;
+		}
+		return inner;
+	},
+
+	_genSliceTypeConversion(expr, inner, t) {
+		const elem = t.elem?.name;
+		if (elem === "byte" || elem === "uint8")
+			return `Array.from(new TextEncoder().encode(${inner}))`;
+		if (elem === "rune" || elem === "int32" || elem === "int") {
+			const srcType = expr.expr._type;
+			if (
+				(srcType?.kind === "basic" && srcType?.name === "string") ||
+				(srcType?.kind === "untyped" && srcType?.base === "string")
+			) {
+				return `Array.from(${inner}, __c => __c.codePointAt(0))`;
+			}
+		}
+		return `Array.from(${inner})`;
+	},
+
+	_genPrimitiveConversion(expr, inner, target) {
 		switch (target) {
 			case "string": {
 				const srcType = expr.expr._type;
