@@ -1071,73 +1071,13 @@ export class TypeChecker {
 			if (LOG_OPS.has(op)) return BOOL;
 			return lt?.kind === "typeParam" ? lt : rt;
 		}
-		if (CMP_OPS.has(op)) {
-			// Complex only supports == and !=
-			if (isComplex(lt) || isComplex(rt)) {
-				if (op !== "==" && op !== "!=") {
-					this.err(
-						`invalid operation: ${typeStr(lt)} ${op} ${typeStr(rt)}`,
-						node,
-					);
-					return ANY;
-				}
-			}
-			// Reject slice/map/func comparisons unless one side is nil (Go spec)
-			if (op === "==" || op === "!=") {
-				const lNil = isNil(lt);
-				const rNil = isNil(rt);
-				if (!lNil && !rNil) {
-					for (const t of [lt, rt]) {
-						const base = t?.kind === "named" ? t.underlying : t;
-						if (
-							base?.kind === "slice" ||
-							base?.kind === "map" ||
-							base?.kind === "func"
-						) {
-							this.err(`operator ${op} not defined on ${typeStr(t)}`, node);
-						}
-					}
-				}
-			}
-			return BOOL;
-		}
+		if (CMP_OPS.has(op)) return this._binaryResultTypeCmp(op, lt, rt, node);
 		if (LOG_OPS.has(op)) return BOOL;
 		if (isAny(lt) || isAny(rt)) return ANY;
-		// Complex arithmetic: +, -, *, /
-		if (isComplex(lt) || isComplex(rt)) {
-			if (!isComplexOrNumeric(lt) || !isComplexOrNumeric(rt)) {
-				this.err(
-					`invalid operation: ${typeStr(lt)} ${op} ${typeStr(rt)}`,
-					node,
-				);
-				return ANY;
-			}
-			if (op !== "+" && op !== "-" && op !== "*" && op !== "/") {
-				this.err(
-					`invalid operation: ${typeStr(lt)} ${op} ${typeStr(rt)}`,
-					node,
-				);
-				return ANY;
-			}
-			if (lt.kind === "untyped" && rt.kind === "untyped")
-				return UNTYPED_COMPLEX;
-			return COMPLEX128;
-		}
-		if (isNumeric(lt) && isNumeric(rt)) {
-			const lFloat = (lt.kind === "untyped" ? lt.base : lt.name) === "float64";
-			const rFloat = (rt.kind === "untyped" ? rt.base : rt.name) === "float64";
-			const isFloat = lFloat || rFloat;
-			// Both untyped → result is untyped
-			if (lt.kind === "untyped" && rt.kind === "untyped")
-				return isFloat ? UNTYPED_FLOAT : UNTYPED_INT;
-			// One typed, one untyped → typed wins
-			if (lt.kind === "untyped")
-				return isFloat && rt.name !== "float64" ? FLOAT64 : rt;
-			if (rt.kind === "untyped")
-				return isFloat && lt.name !== "float64" ? FLOAT64 : lt;
-			// Both typed
-			return isFloat ? FLOAT64 : INT;
-		}
+		if (isComplex(lt) || isComplex(rt))
+			return this._binaryResultTypeComplex(op, lt, rt, node);
+		if (isNumeric(lt) && isNumeric(rt))
+			return this._binaryResultTypeNumeric(lt, rt);
 		if (isString(lt) && isString(rt) && op === "+") {
 			if (lt.kind === "untyped" && rt.kind === "untyped") return lt;
 			if (lt.kind === "untyped") return rt;
@@ -1147,6 +1087,66 @@ export class TypeChecker {
 		if (node)
 			this.err(`Invalid operation: ${typeStr(lt)} ${op} ${typeStr(rt)}`, node);
 		return ANY;
+	}
+
+	_binaryResultTypeCmp(op, lt, rt, node) {
+		// Complex only supports == and !=
+		if (isComplex(lt) || isComplex(rt)) {
+			if (op !== "==" && op !== "!=") {
+				this.err(
+					`invalid operation: ${typeStr(lt)} ${op} ${typeStr(rt)}`,
+					node,
+				);
+				return ANY;
+			}
+		}
+		// Reject slice/map/func comparisons unless one side is nil (Go spec)
+		if (op === "==" || op === "!=") {
+			const lNil = isNil(lt);
+			const rNil = isNil(rt);
+			if (!lNil && !rNil) {
+				for (const t of [lt, rt]) {
+					const base = t?.kind === "named" ? t.underlying : t;
+					if (
+						base?.kind === "slice" ||
+						base?.kind === "map" ||
+						base?.kind === "func"
+					) {
+						this.err(`operator ${op} not defined on ${typeStr(t)}`, node);
+					}
+				}
+			}
+		}
+		return BOOL;
+	}
+
+	_binaryResultTypeComplex(op, lt, rt, node) {
+		if (!isComplexOrNumeric(lt) || !isComplexOrNumeric(rt)) {
+			this.err(`invalid operation: ${typeStr(lt)} ${op} ${typeStr(rt)}`, node);
+			return ANY;
+		}
+		if (op !== "+" && op !== "-" && op !== "*" && op !== "/") {
+			this.err(`invalid operation: ${typeStr(lt)} ${op} ${typeStr(rt)}`, node);
+			return ANY;
+		}
+		if (lt.kind === "untyped" && rt.kind === "untyped") return UNTYPED_COMPLEX;
+		return COMPLEX128;
+	}
+
+	_binaryResultTypeNumeric(lt, rt) {
+		const lFloat = (lt.kind === "untyped" ? lt.base : lt.name) === "float64";
+		const rFloat = (rt.kind === "untyped" ? rt.base : rt.name) === "float64";
+		const isFloat = lFloat || rFloat;
+		// Both untyped → result is untyped
+		if (lt.kind === "untyped" && rt.kind === "untyped")
+			return isFloat ? UNTYPED_FLOAT : UNTYPED_INT;
+		// One typed, one untyped → typed wins
+		if (lt.kind === "untyped")
+			return isFloat && rt.name !== "float64" ? FLOAT64 : rt;
+		if (rt.kind === "untyped")
+			return isFloat && lt.name !== "float64" ? FLOAT64 : lt;
+		// Both typed
+		return isFloat ? FLOAT64 : INT;
 	}
 
 	assertAssignable(target, source, node) {
@@ -1168,39 +1168,7 @@ export class TypeChecker {
 		}
 
 		// Untyped constants coerce to any compatible typed target
-		if (isUntyped(source)) {
-			if (isUntyped(target)) return; // untyped → untyped always OK
-			if (target.kind === "basic") {
-				// untyped int → int or float64
-				if (
-					source.base === "int" &&
-					(target.name === "int" || target.name === "float64")
-				)
-					return;
-				// untyped float → float64 (and int for compatibility)
-				if (
-					source.base === "float64" &&
-					(target.name === "float64" || target.name === "int")
-				)
-					return;
-				// untyped string → string
-				if (source.base === "string" && target.name === "string") return;
-				// untyped bool → bool
-				if (source.base === "bool" && target.name === "bool") return;
-				// untyped complex → complex128 or complex64
-				if (
-					source.base === "complex128" &&
-					(target.name === "complex128" || target.name === "complex64")
-				)
-					return;
-				// untyped int/float → complex (Go allows: var z complex128 = 5)
-				if (
-					isComplex(target) &&
-					(source.base === "int" || source.base === "float64")
-				)
-					return;
-			}
-		}
+		if (isUntyped(source) && this._isUntypedAssignable(target, source)) return;
 
 		// Go untyped constant promotion: int literals are assignable to float64
 		if (target.kind === "basic" && source.kind === "basic") {
@@ -1209,37 +1177,12 @@ export class TypeChecker {
 		}
 
 		// Array-specific checks: size matching and array/slice incompatibility
-		if (target.kind === "array" && source.kind === "array") {
-			if (
-				target.size != null &&
-				source.size != null &&
-				target.size !== source.size
-			) {
-				this.err(
-					`Cannot assign ${typeStr(source)} to ${typeStr(target)} (different array lengths)`,
-					node,
-				);
-				return;
-			}
-			// Check element type compatibility
-			this.assertAssignable(target.elem, source.elem, node);
-			return;
-		}
-		if (target.kind === "array" && source.kind === "slice") {
-			this.err(`Cannot assign ${typeStr(source)} to ${typeStr(target)}`, node);
-			return;
-		}
-		if (target.kind === "slice" && source.kind === "array") {
-			this.err(`Cannot assign ${typeStr(source)} to ${typeStr(target)}`, node);
-			return;
-		}
+		if (this._checkArrayAssignable(target, source, node)) return;
 
 		if (typeStr(target) !== typeStr(source)) {
 			// Interface satisfaction check
 			let tBase = target.kind === "named" ? target.underlying : target;
-			let sBase = source.kind === "named" ? source.underlying : source;
 			tBase = this.resolveType(tBase);
-			sBase = this.resolveType(sBase);
 			if (tBase?.kind === "interface") {
 				// Empty interface (interface{}) accepts any type
 				if (tBase.methods.size === 0) return;
@@ -1253,6 +1196,70 @@ export class TypeChecker {
 			}
 			this.err(`Cannot assign ${typeStr(source)} to ${typeStr(target)}`, node);
 		}
+	}
+
+	// Returns true if untyped source is assignable to target (no error needed).
+	_isUntypedAssignable(target, source) {
+		if (isUntyped(target)) return true; // untyped → untyped always OK
+		if (target.kind !== "basic") return false;
+		// untyped int → int or float64
+		if (
+			source.base === "int" &&
+			(target.name === "int" || target.name === "float64")
+		)
+			return true;
+		// untyped float → float64 (and int for compatibility)
+		if (
+			source.base === "float64" &&
+			(target.name === "float64" || target.name === "int")
+		)
+			return true;
+		// untyped string → string
+		if (source.base === "string" && target.name === "string") return true;
+		// untyped bool → bool
+		if (source.base === "bool" && target.name === "bool") return true;
+		// untyped complex → complex128 or complex64
+		if (
+			source.base === "complex128" &&
+			(target.name === "complex128" || target.name === "complex64")
+		)
+			return true;
+		// untyped int/float → complex (Go allows: var z complex128 = 5)
+		if (
+			isComplex(target) &&
+			(source.base === "int" || source.base === "float64")
+		)
+			return true;
+		return false;
+	}
+
+	// Handles array/array, array/slice, slice/array assignability checks.
+	// Returns true if the case was handled (caller should return), false to continue.
+	_checkArrayAssignable(target, source, node) {
+		if (target.kind === "array" && source.kind === "array") {
+			if (
+				target.size != null &&
+				source.size != null &&
+				target.size !== source.size
+			) {
+				this.err(
+					`Cannot assign ${typeStr(source)} to ${typeStr(target)} (different array lengths)`,
+					node,
+				);
+				return true;
+			}
+			this.assertAssignable(target.elem, source.elem, node);
+			return true;
+		}
+		if (target.kind === "array" && source.kind === "slice") {
+			this.err(`Cannot assign ${typeStr(source)} to ${typeStr(target)}`, node);
+			return true;
+		}
+		if (target.kind === "slice" && source.kind === "array") {
+			this.err(`Cannot assign ${typeStr(source)} to ${typeStr(target)}`, node);
+			return true;
+		}
+		return false;
 	}
 
 	implements(srcType, iface, _node) {

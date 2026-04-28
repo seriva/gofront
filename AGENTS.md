@@ -179,6 +179,13 @@ implementing a feature or fixing a bug.
 For bug fixes, start by writing a test that reproduces the bug, confirm it fails,
 then fix the code.
 
+## Architectural quality gate — Sentrux
+
+Sentrux enforces structural quality (layer boundaries, coupling, complexity, zero cycles)
+via rules in `.sentrux/rules.toml` and a regression floor in `.sentrux/baseline.json`.
+It runs automatically as part of `npm run check` (pre-commit and CI). After a deliberate
+structural improvement, run `sentrux gate --save` to raise the baseline floor.
+
 ## Adding a language feature
 
 1. **Tests** — write tests first (see TDD workflow above). Add them to the most

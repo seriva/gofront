@@ -106,34 +106,7 @@ export class CodeGen {
 	}
 
 	generate(program) {
-		// Collect struct names first (needed by zero-value helpers and genCompositeLit)
-		for (const d of program.decls) {
-			if (d.kind === "TypeDecl" && d.type.kind === "StructType") {
-				this.structNames.add(d.name);
-			}
-		}
-
-		// Build a map: typeName → [MethodDecl, ...]
-		const methods = new Map();
-		for (const d of program.decls) {
-			if (d.kind === "MethodDecl") {
-				const name = d.recvType.name;
-				if (!methods.has(name)) methods.set(name, []);
-				methods.get(name).push(d);
-			}
-		}
-
-		// Collect named non-struct types that have methods (emitted as wrapper classes)
-		for (const d of program.decls) {
-			if (
-				d.kind === "TypeDecl" &&
-				d.type.kind !== "StructType" &&
-				d.type.kind !== "InterfaceType" &&
-				(methods.get(d.name) ?? []).length > 0
-			) {
-				this.namedWrapperNames.add(d.name);
-			}
-		}
+		const methods = this._collectDecls(program);
 
 		// Emit ESM import statements for npm packages
 		for (const [importPath, names] of this.jsImports) {
@@ -192,7 +165,44 @@ export class CodeGen {
 		);
 		if (hasMain) this.line("main();");
 
-		// Prepend runtime helpers that were actually used
+		this._prependHelpers();
+
+		// Strip leading blank line
+		while (this.out[0] === "") this.out.shift();
+		return this.out.join("\n");
+	}
+
+	// Collects struct names, method map, and named wrapper names from program decls.
+	// Returns the method map (typeName → MethodDecl[]).
+	_collectDecls(program) {
+		for (const d of program.decls) {
+			if (d.kind === "TypeDecl" && d.type.kind === "StructType") {
+				this.structNames.add(d.name);
+			}
+		}
+		const methods = new Map();
+		for (const d of program.decls) {
+			if (d.kind === "MethodDecl") {
+				const name = d.recvType.name;
+				if (!methods.has(name)) methods.set(name, []);
+				methods.get(name).push(d);
+			}
+		}
+		for (const d of program.decls) {
+			if (
+				d.kind === "TypeDecl" &&
+				d.type.kind !== "StructType" &&
+				d.type.kind !== "InterfaceType" &&
+				(methods.get(d.name) ?? []).length > 0
+			) {
+				this.namedWrapperNames.add(d.name);
+			}
+		}
+		return methods;
+	}
+
+	// Prepends any runtime helpers that were referenced during codegen.
+	_prependHelpers() {
 		const helpers = [];
 		if (this._usesLen) helpers.push(HELPER_LEN);
 		if (this._usesAppend) helpers.push(HELPER_APPEND);
@@ -206,12 +216,7 @@ export class CodeGen {
 		if (this._usesPathClean) helpers.push(HELPER_PATH_CLEAN);
 		if (this._usesTimeFmt) helpers.push(HELPER_TIME_FMT);
 		if (this._usesTimeParse) helpers.push(HELPER_TIME_PARSE);
-
 		if (helpers.length > 0) this.out.unshift(...helpers, "");
-
-		// Strip leading blank line
-		while (this.out[0] === "") this.out.shift();
-		return this.out.join("\n");
 	}
 
 	// Generate a single bundle from multiple programs (same-package multi-file).

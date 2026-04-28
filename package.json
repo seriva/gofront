@@ -39,7 +39,7 @@
 		"test:unit": "node test/unit/run.js",
 		"test:e2e": "playwright test",
 		"format": "biome format --write .",
-		"check": "biome check . && node src/index.js example/simple/src --check && node src/index.js example/reactive/src --check && node src/index.js example/gom/src --check && node src/index.js example/templ/src --check",
+		"check": "biome check . && sentrux check && sentrux gate && node src/index.js example/simple/src --check && node src/index.js example/reactive/src --check && node src/index.js example/gom/src --check && node src/index.js example/templ/src --check",
 		"prepare": "husky"
 	},
 	"devDependencies": {

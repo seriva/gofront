@@ -1,0 +1,46 @@
+[constraints]
+max_cycles   = 0
+max_coupling = "B"
+# Compiler dispatch functions (genExpr, checkStmt, etc.) are inherently complex
+# switch-statements; set a high threshold to flag only truly problematic functions.
+max_cc       = 120
+no_god_files = false   # test/unit/run.js is an intentional test orchestrator
+
+# Compiler pipeline — lower order = higher in the stack (can import higher-order layers).
+# Rule: a layer can only import from layers with HIGHER order numbers.
+# cli(0) → support(1) → codegen(2) → typechecker(3) → parser(4) → lexer(5) → types(6)
+
+[[layers]]
+name  = "cli"
+paths = ["src/index.js"]
+order = 0
+
+[[layers]]
+name  = "support"
+paths = ["src/compiler.js", "src/resolver.js", "src/dts-parser.js", "src/dev-server.js"]
+order = 1
+
+[[layers]]
+name  = "codegen"
+paths = ["src/codegen.js", "src/codegen/*"]
+order = 2
+
+[[layers]]
+name  = "typechecker"
+paths = ["src/typechecker.js", "src/typechecker/expressions.js", "src/typechecker/statements.js", "src/typechecker/stdlib.js"]
+order = 3
+
+[[layers]]
+name  = "parser"
+paths = ["src/parser.js", "src/templ-parser.js", "src/parser/*"]
+order = 4
+
+[[layers]]
+name  = "lexer"
+paths = ["src/lexer.js", "src/templ-lexer.js"]
+order = 5
+
+[[layers]]
+name  = "types"
+paths = ["src/typechecker/types.js"]
+order = 6
