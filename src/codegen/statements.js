@@ -166,29 +166,7 @@ export const statementGenMethods = {
 			stmt.rhs.length === 1 &&
 			isComplex(stmt.lhs[0]._type)
 		) {
-			const lhsStr = stmt.lhs[0].name ?? this.genExpr(stmt.lhs[0]);
-			const rhsExpr = this._genComplexOperand(stmt.rhs[0]);
-			const baseOp = stmt.op.slice(0, -1); // "+=" → "+"
-			let result;
-			switch (baseOp) {
-				case "+":
-					result = `{ re: ${lhsStr}.re + ${rhsExpr}.re, im: ${lhsStr}.im + ${rhsExpr}.im }`;
-					break;
-				case "-":
-					result = `{ re: ${lhsStr}.re - ${rhsExpr}.re, im: ${lhsStr}.im - ${rhsExpr}.im }`;
-					break;
-				case "*":
-					this._usesCmul = true;
-					result = `__cmul(${lhsStr}, ${rhsExpr})`;
-					break;
-				case "/":
-					this._usesCdiv = true;
-					result = `__cdiv(${lhsStr}, ${rhsExpr})`;
-					break;
-				default:
-					result = rhsExpr;
-			}
-			this.line(`${lhsStr} = ${result};`);
+			this._genComplexCompoundAssign(stmt);
 			return;
 		}
 		// comma-ok map index: v, ok = m["key"]
@@ -242,6 +220,32 @@ export const statementGenMethods = {
 				}
 			}
 		}
+	},
+
+	_genComplexCompoundAssign(stmt) {
+		const lhsStr = stmt.lhs[0].name ?? this.genExpr(stmt.lhs[0]);
+		const rhsExpr = this._genComplexOperand(stmt.rhs[0]);
+		const baseOp = stmt.op.slice(0, -1); // "+=" → "+"
+		let result;
+		switch (baseOp) {
+			case "+":
+				result = `{ re: ${lhsStr}.re + ${rhsExpr}.re, im: ${lhsStr}.im + ${rhsExpr}.im }`;
+				break;
+			case "-":
+				result = `{ re: ${lhsStr}.re - ${rhsExpr}.re, im: ${lhsStr}.im - ${rhsExpr}.im }`;
+				break;
+			case "*":
+				this._usesCmul = true;
+				result = `__cmul(${lhsStr}, ${rhsExpr})`;
+				break;
+			case "/":
+				this._usesCdiv = true;
+				result = `__cdiv(${lhsStr}, ${rhsExpr})`;
+				break;
+			default:
+				result = rhsExpr;
+		}
+		this.line(`${lhsStr} = ${result};`);
 	},
 
 	_genReturnStmt(stmt) {
@@ -383,7 +387,6 @@ export const statementGenMethods = {
 			? `${this.genExpr(range.expr)}.${wrapField}`
 			: this.genExpr(range.expr);
 
-		let iterExpr;
 		if (
 			lhs.length <= 1 &&
 			((iterType?.kind === "basic" &&
@@ -398,34 +401,7 @@ export const statementGenMethods = {
 			this.line("}");
 			return;
 		}
-		if (
-			iterType?.kind === "map" ||
-			(iterType?.kind === "named" && iterType.underlying?.kind === "map")
-		) {
-			// map: for k, v := range m  → for (const [k, v] of Object.entries(m))
-			iterExpr = `Object.entries(${iteree})`;
-		} else if (
-			(iterType?.kind === "basic" && iterType.name === "string") ||
-			(iterType?.kind === "untyped" && iterType.base === "string")
-		) {
-			// string: for i, r := range s  → rune (code point), not JS character
-			// Go spec: iterating a string yields (byte-index, rune) pairs
-			if (lhs.length === 1) {
-				iterExpr = `Array.from(${iteree}).keys()`;
-			} else {
-				// Wrap code points so the value is an integer (rune), not a JS string
-				iterExpr = `Array.from(${iteree}, (__c, __i) => [__i, __c.codePointAt(0)])`;
-			}
-		} else {
-			// slice/array: for i, v := range arr → for (const [i, v] of __s(arr).entries())
-			// null-guard handles nil slices (zero value) gracefully.
-			this._usesSliceGuard = true;
-			if (lhs.length === 1) {
-				iterExpr = `__s(${iteree}).keys()`;
-			} else {
-				iterExpr = `__s(${iteree}).entries()`;
-			}
-		}
+		const iterExpr = this._genRangeIterExpr(iterType, iteree, lhs);
 
 		const binding =
 			lhs.length === 1
@@ -437,6 +413,31 @@ export const statementGenMethods = {
 		this.line(`for (const ${binding} of ${iterExpr}) {`);
 		this.indented(() => this.genBlock(stmt.body));
 		this.line("}");
+	},
+
+	_genRangeIterExpr(iterType, iteree, lhs) {
+		if (
+			iterType?.kind === "map" ||
+			(iterType?.kind === "named" && iterType.underlying?.kind === "map")
+		) {
+			// map: for k, v := range m  → for (const [k, v] of Object.entries(m))
+			return `Object.entries(${iteree})`;
+		}
+		if (
+			(iterType?.kind === "basic" && iterType.name === "string") ||
+			(iterType?.kind === "untyped" && iterType.base === "string")
+		) {
+			// string: for i, r := range s  → rune (code point), not JS character
+			// Go spec: iterating a string yields (byte-index, rune) pairs
+			if (lhs.length === 1) return `Array.from(${iteree}).keys()`;
+			// Wrap code points so the value is an integer (rune), not a JS string
+			return `Array.from(${iteree}, (__c, __i) => [__i, __c.codePointAt(0)])`;
+		}
+		// slice/array: for i, v := range arr → for (const [i, v] of __s(arr).entries())
+		// null-guard handles nil slices (zero value) gracefully.
+		this._usesSliceGuard = true;
+		if (lhs.length === 1) return `__s(${iteree}).keys()`;
+		return `__s(${iteree}).entries()`;
 	},
 
 	genIteratorFor(stmt) {
