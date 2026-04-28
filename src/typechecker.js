@@ -43,6 +43,16 @@ import {
 // Re-export for consumers that import from typechecker.js
 export { TypeCheckError, typeStr };
 
+// Untyped constant assignability: maps source.base → Set of compatible target.name values
+// untyped int/float also coerce to complex (Go: var z complex128 = 5)
+const UNTYPED_COMPAT = {
+	int: new Set(["int", "float64", "complex128", "complex64"]),
+	float64: new Set(["float64", "int", "complex128", "complex64"]),
+	string: new Set(["string"]),
+	bool: new Set(["bool"]),
+	complex128: new Set(["complex128", "complex64"]),
+};
+
 export class TypeChecker {
 	constructor() {
 		this.types = new Map(); // named types
@@ -367,29 +377,32 @@ export class TypeChecker {
 				this.globals.define(decl.name, funcType);
 			}
 		} else {
-			// Method: attach to struct or named non-struct type
-			const recvTypeName =
-				decl.recvType.kind === "GenericTypeName"
-					? decl.recvType.name
-					: decl.recvType.name;
-			const recvNamedType = this.types.get(recvTypeName);
-			if (recvNamedType?._generic) {
-				// Store method on the generic metadata and on the underlying struct
-				if (!recvNamedType._generic.methods)
-					recvNamedType._generic.methods = new Map();
-				recvNamedType._generic.methods.set(decl.name, funcType);
-				const base = recvNamedType.underlying;
-				if (base?.kind === "struct") {
-					base.methods.set(decl.name, funcType);
-				}
-			} else {
-				const recvType = this.resolveTypeNodeName(decl.recvType, this.globals);
-				const base = recvType?.underlying ?? recvType;
-				if (base?.kind === "struct") {
-					base.methods.set(decl.name, funcType);
-				} else if (recvType?.kind === "named" && recvType.methods) {
-					recvType.methods.set(decl.name, funcType);
-				}
+			this._attachMethod(decl, funcType);
+		}
+	}
+
+	_attachMethod(decl, funcType) {
+		const recvTypeName =
+			decl.recvType.kind === "GenericTypeName"
+				? decl.recvType.name
+				: decl.recvType.name;
+		const recvNamedType = this.types.get(recvTypeName);
+		if (recvNamedType?._generic) {
+			// Store method on the generic metadata and on the underlying struct
+			if (!recvNamedType._generic.methods)
+				recvNamedType._generic.methods = new Map();
+			recvNamedType._generic.methods.set(decl.name, funcType);
+			const base = recvNamedType.underlying;
+			if (base?.kind === "struct") {
+				base.methods.set(decl.name, funcType);
+			}
+		} else {
+			const recvType = this.resolveTypeNodeName(decl.recvType, this.globals);
+			const base = recvType?.underlying ?? recvType;
+			if (base?.kind === "struct") {
+				base.methods.set(decl.name, funcType);
+			} else if (recvType?.kind === "named" && recvType.methods) {
+				recvType.methods.set(decl.name, funcType);
 			}
 		}
 	}
@@ -1030,22 +1043,8 @@ export class TypeChecker {
 			if (base.methods?.has(field)) return base.methods.get(field);
 			return this.err(`No method '${field}' on ${typeStr(baseType)}`, node);
 		}
-		if (base?.kind === "namespace") {
-			// Enforce exported identifier rule for GoFront packages only
-			if (
-				base._gofront &&
-				field.length > 0 &&
-				field[0] >= "a" &&
-				field[0] <= "z"
-			) {
-				return this.err(
-					`cannot refer to unexported name ${base.name}.${field}`,
-					node,
-				);
-			}
-			if (field in base.members) return base.members[field];
-			return this.err(`No member '${field}' in namespace ${base.name}`, node);
-		}
+		if (base?.kind === "namespace")
+			return this._fieldTypeNamespace(base, field, node);
 		// For explicitly typed non-any values, report the bad access rather than
 		// silently returning any — this catches typos on structs and primitive misuse.
 		if (base && !isAny(base)) {
@@ -1060,6 +1059,23 @@ export class TypeChecker {
 			}
 		}
 		return ANY; // unknown types (e.g. external .d.ts) — allow any access
+	}
+
+	_fieldTypeNamespace(base, field, node) {
+		// Enforce exported identifier rule for GoFront packages only
+		if (
+			base._gofront &&
+			field.length > 0 &&
+			field[0] >= "a" &&
+			field[0] <= "z"
+		) {
+			return this.err(
+				`cannot refer to unexported name ${base.name}.${field}`,
+				node,
+			);
+		}
+		if (field in base.members) return base.members[field];
+		return this.err(`No member '${field}' in namespace ${base.name}`, node);
 	}
 
 	binaryResultType(op, lt, rt, node) {
@@ -1178,57 +1194,36 @@ export class TypeChecker {
 		if (this._checkArrayAssignable(target, source, node)) return;
 
 		if (typeStr(target) !== typeStr(source)) {
-			// Interface satisfaction check
-			let tBase = target.kind === "named" ? target.underlying : target;
-			tBase = this.resolveType(tBase);
-			if (tBase?.kind === "interface") {
-				// Empty interface (interface{}) accepts any type
-				if (tBase.methods.size === 0) return;
-				if (!this.implements(source, tBase, node)) {
-					this.err(
-						`${typeStr(source)} does not implement ${typeStr(target)}`,
-						node,
-					);
-				}
-				return;
-			}
-			this.err(`Cannot assign ${typeStr(source)} to ${typeStr(target)}`, node);
+			this._assertAssignableTypeMismatch(target, source, node);
 		}
+	}
+
+	_assertAssignableTypeMismatch(target, source, node) {
+		let tBase = target.kind === "named" ? target.underlying : target;
+		tBase = this.resolveType(tBase);
+		if (tBase?.kind === "interface") {
+			// Empty interface (interface{}) accepts any type
+			if (tBase.methods.size === 0) return;
+			if (!this.implements(source, tBase, node)) {
+				this.err(
+					`${typeStr(source)} does not implement ${typeStr(target)}`,
+					node,
+				);
+			}
+			return;
+		}
+		this.err(`Cannot assign ${typeStr(source)} to ${typeStr(target)}`, node);
 	}
 
 	// Returns true if untyped source is assignable to target (no error needed).
 	_isUntypedAssignable(target, source) {
 		if (isUntyped(target)) return true; // untyped → untyped always OK
 		if (target.kind !== "basic") return false;
-		// untyped int → int or float64
-		if (
-			source.base === "int" &&
-			(target.name === "int" || target.name === "float64")
-		)
-			return true;
-		// untyped float → float64 (and int for compatibility)
-		if (
-			source.base === "float64" &&
-			(target.name === "float64" || target.name === "int")
-		)
-			return true;
-		// untyped string → string
-		if (source.base === "string" && target.name === "string") return true;
-		// untyped bool → bool
-		if (source.base === "bool" && target.name === "bool") return true;
-		// untyped complex → complex128 or complex64
-		if (
-			source.base === "complex128" &&
-			(target.name === "complex128" || target.name === "complex64")
-		)
-			return true;
-		// untyped int/float → complex (Go allows: var z complex128 = 5)
-		if (
-			isComplex(target) &&
-			(source.base === "int" || source.base === "float64")
-		)
-			return true;
-		return false;
+		return (
+			(UNTYPED_COMPAT[source.base]?.has(target.name) ?? false) ||
+			(isComplex(target) &&
+				(source.base === "int" || source.base === "float64"))
+		);
 	}
 
 	// Handles array/array, array/slice, slice/array assignability checks.

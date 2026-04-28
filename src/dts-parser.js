@@ -59,6 +59,17 @@ export class DtsParser {
 		return this.src[this.pos + 1];
 	}
 
+	_skipLineComment() {
+		while (!this.eof() && this.ch() !== "\n") this.pos++;
+	}
+
+	_skipBlockComment() {
+		this.pos += 2;
+		while (!this.eof() && !(this.ch() === "*" && this.ch1() === "/"))
+			this.pos++;
+		if (!this.eof()) this.pos += 2;
+	}
+
 	skip() {
 		while (!this.eof()) {
 			const c = this.ch();
@@ -67,14 +78,11 @@ export class DtsParser {
 				continue;
 			}
 			if (c === "/" && this.ch1() === "/") {
-				while (!this.eof() && this.ch() !== "\n") this.pos++;
+				this._skipLineComment();
 				continue;
 			}
 			if (c === "/" && this.ch1() === "*") {
-				this.pos += 2;
-				while (!this.eof() && !(this.ch() === "*" && this.ch1() === "/"))
-					this.pos++;
-				if (!this.eof()) this.pos += 2;
+				this._skipBlockComment();
 				continue;
 			}
 			break;
@@ -399,11 +407,7 @@ export class DtsParser {
 		return members;
 	}
 
-	_parseMember(out) {
-		this.skip();
-		if (this.eof() || this.ch() === "}") return;
-
-		// Skip modifiers (export, declare, static, readonly, etc.)
+	_skipModifiers() {
 		while (true) {
 			this.skip();
 			let found = false;
@@ -415,6 +419,14 @@ export class DtsParser {
 			}
 			if (!found) break;
 		}
+	}
+
+	_parseMember(out) {
+		this.skip();
+		if (this.eof() || this.ch() === "}") return;
+
+		// Skip modifiers (export, declare, static, readonly, etc.)
+		this._skipModifiers();
 
 		this.skip();
 		if (this.eof() || this.ch() === "}") return;

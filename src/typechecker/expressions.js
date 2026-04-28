@@ -535,24 +535,8 @@ export const expressionCheckMethods = {
 	checkBuiltin(name, expr, argTypes, scope) {
 		switch (name) {
 			case "len":
-			case "cap": {
-				// Compile-time len() for fixed arrays
-				if (
-					name === "len" &&
-					argTypes[0]?.kind === "array" &&
-					argTypes[0].size != null
-				) {
-					expr._constLen = argTypes[0].size;
-				} else if (
-					name === "len" &&
-					argTypes[0]?.kind === "named" &&
-					argTypes[0].underlying?.kind === "array" &&
-					argTypes[0].underlying.size != null
-				) {
-					expr._constLen = argTypes[0].underlying.size;
-				}
-				return INT;
-			}
+			case "cap":
+				return this._checkBuiltinLen(name, expr, argTypes);
 			case "append": {
 				const sliceType = argTypes[0] ?? ANY;
 				if (isArray(sliceType)) {
@@ -589,42 +573,67 @@ export const expressionCheckMethods = {
 				return argTypes[0] ?? ANY;
 			case "clear":
 				return VOID;
-			case "complex": {
-				if (expr.args.length !== 2) {
-					this.err("complex() requires exactly 2 arguments", expr);
-					return ANY;
-				}
-				const crt = argTypes[0];
-				const cit = argTypes[1];
-				if (!isNumeric(crt)) {
-					this.err(`cannot use ${typeStr(crt)} as float in complex()`, expr);
-					return ANY;
-				}
-				if (!isNumeric(cit)) {
-					this.err(`cannot use ${typeStr(cit)} as float in complex()`, expr);
-					return ANY;
-				}
-				if (crt.kind === "untyped" && cit.kind === "untyped")
-					return UNTYPED_COMPLEX;
-				return COMPLEX128;
-			}
+			case "complex":
+				return this._checkBuiltinComplex(expr, argTypes);
 			case "real":
-			case "imag": {
-				if (expr.args.length !== 1) {
-					this.err(`${name}() requires exactly 1 argument`, expr);
-					return ANY;
-				}
-				const zt = argTypes[0];
-				if (!isComplex(zt)) {
-					this.err(`cannot use ${typeStr(zt)} as complex in ${name}()`, expr);
-					return ANY;
-				}
-				if (zt.kind === "untyped") return UNTYPED_FLOAT;
-				return FLOAT64;
-			}
+			case "imag":
+				return this._checkBuiltinRealImag(name, expr, argTypes);
 			default:
 				return ANY;
 		}
+	},
+
+	_checkBuiltinLen(name, expr, argTypes) {
+		// Compile-time len() for fixed arrays
+		if (
+			name === "len" &&
+			argTypes[0]?.kind === "array" &&
+			argTypes[0].size != null
+		) {
+			expr._constLen = argTypes[0].size;
+		} else if (
+			name === "len" &&
+			argTypes[0]?.kind === "named" &&
+			argTypes[0].underlying?.kind === "array" &&
+			argTypes[0].underlying.size != null
+		) {
+			expr._constLen = argTypes[0].underlying.size;
+		}
+		return INT;
+	},
+
+	_checkBuiltinComplex(expr, argTypes) {
+		if (expr.args.length !== 2) {
+			this.err("complex() requires exactly 2 arguments", expr);
+			return ANY;
+		}
+		const crt = argTypes[0];
+		const cit = argTypes[1];
+		if (!isNumeric(crt)) {
+			this.err(`cannot use ${typeStr(crt)} as float in complex()`, expr);
+			return ANY;
+		}
+		if (!isNumeric(cit)) {
+			this.err(`cannot use ${typeStr(cit)} as float in complex()`, expr);
+			return ANY;
+		}
+		if (crt.kind === "untyped" && cit.kind === "untyped")
+			return UNTYPED_COMPLEX;
+		return COMPLEX128;
+	},
+
+	_checkBuiltinRealImag(name, expr, argTypes) {
+		if (expr.args.length !== 1) {
+			this.err(`${name}() requires exactly 1 argument`, expr);
+			return ANY;
+		}
+		const zt = argTypes[0];
+		if (!isComplex(zt)) {
+			this.err(`cannot use ${typeStr(zt)} as complex in ${name}()`, expr);
+			return ANY;
+		}
+		if (zt.kind === "untyped") return UNTYPED_FLOAT;
+		return FLOAT64;
 	},
 
 	checkCompositeLit(expr, scope, hintType = null) {
