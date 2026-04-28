@@ -29,11 +29,12 @@ packages. `src/dts-parser.js` parses TypeScript `.d.ts` declaration files.
 ## Commands
 
 ```sh
-npm run test:unit # run unit tests only (~990 tests, no browser required)
-npm run test:e2e  # run E2E tests (Playwright, headless Chromium, requires built apps)
-npm test          # run both unit and E2E
-npm run format    # format with Biome
-npm run check     # lint with Biome
+npm run build:all   # build all example apps
+npm run test:unit   # run unit tests only (~990 tests, no browser required)
+npm run test:e2e    # build all examples then run E2E tests (Playwright, headless Chromium)
+npm run test:all    # run both unit and E2E
+npm run format      # format with Biome
+npm run check       # lint, architectural quality gate, and GoFront type-checks
 
 node src/index.js <file.go>                       # compile single file → stdout
 node src/index.js <dir> -o out.js                 # compile directory → file
@@ -167,7 +168,7 @@ implementing a feature or fixing a bug.
    the most relevant test file. Run the tests and confirm they fail for the
    expected reason.
 2. **Implement the minimum code** to make the failing tests pass.
-3. **Run the full suite** (`npm test`) and verify nothing else broke.
+3. **Run the full suite** (`npm run test:all`) and verify nothing else broke.
 4. **Run the linter** (`npm run check`) and fix any reported issues.
 5. **Refactor** if needed while keeping all tests green.
 6. **Update CHANGELOG.md** — add an entry under `## [Unreleased]` describing what
@@ -192,7 +193,7 @@ structural improvement, run `sentrux gate --save` to raise the baseline floor.
    relevant test file. Tests are split into directories (`test/language/`,
    `test/types/`, `test/builtins/`, `test/compiler/`) plus root-level files for
    structs, DOM, and lexer-parser. Run a single file with
-   `node test/unit/language/core.test.js`, or `npm test` for the full combined run.
+   `node test/unit/language/core.test.js`, or `npm run test:all` for the full combined run.
    Confirm the new tests fail before proceeding.
 2. **Lexer** (`src/lexer.js` or `src/templ-lexer.js`) — add any new keywords or token types.
 3. **Parser** (`src/parser.js` or `src/templ-parser.js`) — add grammar rules; return a new AST node kind.
@@ -204,7 +205,7 @@ structural improvement, run `sentrux gate --save` to raise the baseline floor.
 5. **CodeGen** (`src/codegen.js`) — handle the new node in `genExpr`
    (`src/codegen/expressions.js`) or `genStmt` (`src/codegen/statements.js`);
    throw on unhandled kinds so failures are loud.
-6. **Run tests** — all new and existing tests must pass (`npm test`).
+6. **Run tests** — all new and existing tests must pass (`npm run test:all`).
 7. **Run the linter** — `npm run check` must report no errors.
 8. **CHANGELOG.md** — add an entry under `## [Unreleased]`.
 9. **README.md** — update the supported syntax, built-in packages, or semantic
@@ -258,7 +259,7 @@ Key items to be aware of when working on the compiler:
   `assert(errors.length > 0)` — so the error message is verified too.
 - Group related tests with `section("Name")` for readable output.
 - Run a single file with `node test/unit/language/core.test.js`, a directory's files
-  individually, or the full suite with `npm test`.
+  individually, or the full suite with `npm run test:all`.
 
 ### Writing a new test file
 
@@ -291,13 +292,13 @@ Key points:
   and also imported by `test/run.js` without triggering early exit.
 - Wrap each case in `test(name, fn)` — the harness catches and reports errors.
 - Use `section(title)` to group related tests under a heading.
-- New test files must be registered in `test/unit/run.js` to be included in `npm test`.
+- New test files must be registered in `test/unit/run.js` to be included in `npm run test:all`.
 
 ### E2E tests
 
 End-to-end tests live in `test/e2e/` and use Playwright to verify the compiled example apps in a real headless browser.
 
-- **Run with:** `npm run test:e2e` (Note: requires the apps to be built first).
+- **Run with:** `npm run test:e2e` (automatically builds all examples first via `build:all`).
 - Each example app has its own spec file (e.g., `simple.spec.js`, `reactive.spec.js`, `gom.spec.js`, `templ.spec.js`).
 - When adding new DOM-related features or modifying the examples, ensure you add or update the corresponding Playwright assertions to verify correct behavior in the browser.
 
@@ -334,9 +335,11 @@ A plan file should cover:
 See README.md § Examples for full descriptions of both apps.
 
 ```sh
+npm run build:all         # builds all example apps at once
 npm run build:simple      # builds example/simple/app.js
 npm run build:reactive    # builds example/reactive/app.js
 npm run build:gom         # builds example/gom/app.js
+npm run build:templ       # builds example/templ/app.js
 ```
 
 Then open the respective `index.html` in a browser.

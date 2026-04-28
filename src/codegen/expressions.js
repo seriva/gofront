@@ -238,84 +238,8 @@ export const expressionGenMethods = {
 			expr.func.kind === "InstantiationExpr" ? expr.func.expr : expr.func;
 		// Handle built-ins that need special JS translation
 		if (funcExpr.kind === "Ident") {
-			switch (funcExpr.name) {
-				case "append":
-					return this.genAppend(expr);
-				case "len": {
-					if (expr._constLen != null) return String(expr._constLen);
-					const arg = expr.args[0];
-					const t = arg?._type;
-					const wrapField = this._namedWrapperField(t, arg);
-					if (wrapField) {
-						return `${this.genExpr(arg)}.${wrapField}.length`;
-					}
-					const js = this.genExpr(arg);
-					if (t?.kind === "map") return `Object.keys(${js}).length`;
-					this._usesLen = true;
-					return `__len(${js})`;
-				}
-				case "cap":
-					return `${this.genExpr(expr.args[0])}.length`;
-				case "make":
-					return this.genMake(expr);
-				case "delete": {
-					const [m, k] = expr.args.map((a) => this.genExpr(a));
-					return `(delete ${m}[${k}])`;
-				}
-				case "copy": {
-					const [dst, src] = expr.args.map((a) => this.genExpr(a));
-					return `((__cd,__cs)=>{const n=Math.min(__cd.length,__cs.length);__cd.splice(0,n,...__cs.slice(0,n));return n;})(${dst},${src})`;
-				}
-				case "new": {
-					const zero = this.zeroValueForExpr(expr.args[0]);
-					return `{ value: ${zero} }`;
-				}
-				case "print":
-				case "println": {
-					const args = expr.args.map((a) => this.genExpr(a)).join(", ");
-					return `console.log(${args})`;
-				}
-				case "panic": {
-					const arg = this.genExpr(expr.args[0]);
-					return `(() => { throw new Error(${arg}); })()`;
-				}
-				case "recover":
-					return `(typeof __panic !== "undefined" && __panic !== null ? (() => { const __r = __panic.message ?? String(__panic); __panic = null; return __r; })() : null)`;
-				case "error": {
-					this._usesError = true;
-					const arg = this.genExpr(expr.args[0]);
-					return `__error(${arg})`;
-				}
-				case "min": {
-					const args = expr.args.map((a) => this.genExpr(a)).join(", ");
-					return `Math.min(${args})`;
-				}
-				case "max": {
-					const args = expr.args.map((a) => this.genExpr(a)).join(", ");
-					return `Math.max(${args})`;
-				}
-				case "clear": {
-					const arg = expr.args[0];
-					const t = arg?._type;
-					const js = this.genExpr(arg);
-					if (
-						t?.kind === "map" ||
-						(t?.kind === "named" && t.underlying?.kind === "map")
-					) {
-						return `((__m) => { for (const __k in __m) delete __m[__k]; })(${js})`;
-					}
-					return `(${js}).length = 0`;
-				}
-				case "complex": {
-					const re = this.genExpr(expr.args[0]);
-					const im = this.genExpr(expr.args[1]);
-					return `{ re: ${re}, im: ${im} }`;
-				}
-				case "real":
-					return `(${this.genExpr(expr.args[0])}).re`;
-				case "imag":
-					return `(${this.genExpr(expr.args[0])}).im`;
-			}
+			const builtin = this._genBuiltinIdent(funcExpr.name, expr);
+			if (builtin !== undefined) return builtin;
 		}
 
 		// error.Error() → real method call
@@ -370,6 +294,89 @@ export const expressionGenMethods = {
 			.map((a) => (a._spread ? `...${this.genExpr(a)}` : this.genExpr(a)))
 			.join(", ");
 		return `${fn}(${args})`;
+	},
+
+	_genBuiltinIdent(name, expr) {
+		switch (name) {
+			case "append":
+				return this.genAppend(expr);
+			case "len": {
+				if (expr._constLen != null) return String(expr._constLen);
+				const arg = expr.args[0];
+				const t = arg?._type;
+				const wrapField = this._namedWrapperField(t, arg);
+				if (wrapField) {
+					return `${this.genExpr(arg)}.${wrapField}.length`;
+				}
+				const js = this.genExpr(arg);
+				if (t?.kind === "map") return `Object.keys(${js}).length`;
+				this._usesLen = true;
+				return `__len(${js})`;
+			}
+			case "cap":
+				return `${this.genExpr(expr.args[0])}.length`;
+			case "make":
+				return this.genMake(expr);
+			case "delete": {
+				const [m, k] = expr.args.map((a) => this.genExpr(a));
+				return `(delete ${m}[${k}])`;
+			}
+			case "copy": {
+				const [dst, src] = expr.args.map((a) => this.genExpr(a));
+				return `((__cd,__cs)=>{const n=Math.min(__cd.length,__cs.length);__cd.splice(0,n,...__cs.slice(0,n));return n;})(${dst},${src})`;
+			}
+			case "new": {
+				const zero = this.zeroValueForExpr(expr.args[0]);
+				return `{ value: ${zero} }`;
+			}
+			case "print":
+			case "println": {
+				const args = expr.args.map((a) => this.genExpr(a)).join(", ");
+				return `console.log(${args})`;
+			}
+			case "panic": {
+				const arg = this.genExpr(expr.args[0]);
+				return `(() => { throw new Error(${arg}); })()`;
+			}
+			case "recover":
+				return `(typeof __panic !== "undefined" && __panic !== null ? (() => { const __r = __panic.message ?? String(__panic); __panic = null; return __r; })() : null)`;
+			case "error": {
+				this._usesError = true;
+				const arg = this.genExpr(expr.args[0]);
+				return `__error(${arg})`;
+			}
+			case "min": {
+				const args = expr.args.map((a) => this.genExpr(a)).join(", ");
+				return `Math.min(${args})`;
+			}
+			case "max": {
+				const args = expr.args.map((a) => this.genExpr(a)).join(", ");
+				return `Math.max(${args})`;
+			}
+			case "clear": {
+				const arg = expr.args[0];
+				const t = arg?._type;
+				const js = this.genExpr(arg);
+				if (
+					t?.kind === "map" ||
+					(t?.kind === "named" && t.underlying?.kind === "map")
+				) {
+					return `((__m) => { for (const __k in __m) delete __m[__k]; })(${js})`;
+				}
+				return `(${js}).length = 0`;
+			}
+			case "complex": {
+				const re = this.genExpr(expr.args[0]);
+				const im = this.genExpr(expr.args[1]);
+				return `{ re: ${re}, im: ${im} }`;
+			}
+			case "real":
+				return `(${this.genExpr(expr.args[0])}).re`;
+			case "imag":
+				return `(${this.genExpr(expr.args[0])}).im`;
+			default:
+				return undefined;
+		}
 	},
 
 	genAppend(expr) {
@@ -442,25 +449,7 @@ export const expressionGenMethods = {
 		const t = expr.typeExpr;
 
 		// Implicit composite literal: {X: 1} or {1, 2} inside a slice/map — type inferred from context
-		if (t === null) {
-			const typeName = expr._type?.name ?? expr._type?.underlying?.name;
-			const hasPositional = expr.elems.some((e) => e._positionalField);
-			const hasKeyed = expr.elems.some((e) => e.kind === "KeyValueExpr");
-			if (hasPositional || hasKeyed) {
-				if (typeName && this.structNames.has(typeName)) {
-					return `new ${typeName}({ ${this._genStructFields(expr.elems)} })`;
-				}
-				const fields = expr.elems
-					.map((e) => {
-						if (e._positionalField)
-							return `${e._positionalField}: ${this.genExpr(e)}`;
-						return `${e.key.name ?? this.genExpr(e.key)}: ${this.genExpr(e.value)}`;
-					})
-					.join(", ");
-				return `{ ${fields} }`;
-			}
-			return `[${expr.elems.map((e) => this.genExpr(e)).join(", ")}]`;
-		}
+		if (t === null) return this._genImplicitCompositeLit(expr);
 
 		const typeName = this.getTypeName(t);
 
@@ -471,30 +460,7 @@ export const expressionGenMethods = {
 
 		// Named wrapper type: Group{a, b} → new Group([a, b])
 		if (typeName && this.namedWrapperNames.has(typeName)) {
-			const namedType = this.checker?.types.get(typeName);
-			const u = namedType?.underlying;
-			if (u?.kind === "map") {
-				const entries = expr.elems
-					.map((e) => {
-						if (e.kind === "KeyValueExpr") {
-							const k =
-								e.key.litKind === "STRING"
-									? JSON.stringify(e.key.value)
-									: `[${this.genExpr(e.key)}]`;
-							return `${k}: ${this.genExpr(e.value)}`;
-						}
-						return this.genExpr(e);
-					})
-					.join(", ");
-				return `new ${typeName}({ ${entries} })`;
-			}
-			// Default: slice
-			const elems = expr.elems
-				.map((e) =>
-					e.kind === "KeyValueExpr" ? this.genExpr(e.value) : this.genExpr(e),
-				)
-				.join(", ");
-			return `new ${typeName}([${elems}])`;
+			return this._genNamedWrapperLit(typeName, expr);
 		}
 
 		// Fallback: named type that's not a struct but has positional elements → treat as struct
@@ -542,6 +508,53 @@ export const expressionGenMethods = {
 			return `{ ${fields} }`;
 		}
 		return `[${expr.elems.map((e) => this.genExpr(e)).join(", ")}]`;
+	},
+
+	_genImplicitCompositeLit(expr) {
+		const typeName = expr._type?.name ?? expr._type?.underlying?.name;
+		const hasPositional = expr.elems.some((e) => e._positionalField);
+		const hasKeyed = expr.elems.some((e) => e.kind === "KeyValueExpr");
+		if (hasPositional || hasKeyed) {
+			if (typeName && this.structNames.has(typeName)) {
+				return `new ${typeName}({ ${this._genStructFields(expr.elems)} })`;
+			}
+			const fields = expr.elems
+				.map((e) => {
+					if (e._positionalField)
+						return `${e._positionalField}: ${this.genExpr(e)}`;
+					return `${e.key.name ?? this.genExpr(e.key)}: ${this.genExpr(e.value)}`;
+				})
+				.join(", ");
+			return `{ ${fields} }`;
+		}
+		return `[${expr.elems.map((e) => this.genExpr(e)).join(", ")}]`;
+	},
+
+	_genNamedWrapperLit(typeName, expr) {
+		const namedType = this.checker?.types.get(typeName);
+		const u = namedType?.underlying;
+		if (u?.kind === "map") {
+			const entries = expr.elems
+				.map((e) => {
+					if (e.kind === "KeyValueExpr") {
+						const k =
+							e.key.litKind === "STRING"
+								? JSON.stringify(e.key.value)
+								: `[${this.genExpr(e.key)}]`;
+						return `${k}: ${this.genExpr(e.value)}`;
+					}
+					return this.genExpr(e);
+				})
+				.join(", ");
+			return `new ${typeName}({ ${entries} })`;
+		}
+		// Default: slice
+		const elems = expr.elems
+			.map((e) =>
+				e.kind === "KeyValueExpr" ? this.genExpr(e.value) : this.genExpr(e),
+			)
+			.join(", ");
+		return `new ${typeName}([${elems}])`;
 	},
 
 	// ── Helpers ───────────────────────────────────────────────────

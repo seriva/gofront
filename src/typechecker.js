@@ -713,65 +713,10 @@ export class TypeChecker {
 					: [VOID];
 				return { kind: "func", params, returns };
 			}
-			case "StructType": {
-				const fields = new Map();
-				const embeds = []; // track embedded types to merge methods later
-				for (const f of node.fields) {
-					const ft = this.resolveTypeNode(f.type, scope);
-					if (f.embedded) {
-						// Flatten embedded struct fields
-						const base = ft.kind === "named" ? ft.underlying : ft;
-						if (base?.kind === "struct") {
-							for (const [k, v] of base.fields.entries()) fields.set(k, v);
-						}
-						embeds.push(ft);
-					} else {
-						for (const n of f.names) fields.set(n, ft);
-					}
-				}
-				const structType = {
-					kind: "struct",
-					fields,
-					methods: new Map(),
-					_embeds: embeds,
-				};
-				return structType;
-			}
-			case "InterfaceType": {
-				const methods = new Map();
-				for (const m of node.methods) {
-					const params = m.params.map((p) =>
-						this.resolveTypeNode(p.type, scope),
-					);
-					const returns = m.returnType
-						? [this.resolveTypeNode(m.returnType, scope)]
-						: [VOID];
-					const isVariadic =
-						m.params.length > 0 && m.params[m.params.length - 1].variadic;
-					const mType = { kind: "func", params, returns };
-					if (isVariadic) mType.variadic = true;
-					methods.set(m.name, mType);
-				}
-				// Flatten embedded interface methods
-				if (node.embeds) {
-					for (const embed of node.embeds) {
-						const resolved = this.resolveTypeNode(embed, scope);
-						const base =
-							resolved?.kind === "named" ? resolved.underlying : resolved;
-						if (base?.kind === "interface") {
-							for (const [mName, mType] of base.methods) {
-								if (!methods.has(mName)) methods.set(mName, mType);
-							}
-						} else if (!isAny(resolved)) {
-							this.err(
-								`cannot embed non-interface type ${typeStr(resolved)}`,
-								embed,
-							);
-						}
-					}
-				}
-				return { kind: "interface", methods };
-			}
+			case "StructType":
+				return this._resolveStructType(node, scope);
+			case "InterfaceType":
+				return this._resolveInterfaceType(node, scope);
 			case "TupleType": {
 				return {
 					kind: "tuple",
@@ -800,6 +745,59 @@ export class TypeChecker {
 			if (named) return named;
 		}
 		return this.resolveTypeNode(node, scope);
+	}
+
+	_resolveStructType(node, scope) {
+		const fields = new Map();
+		const embeds = []; // track embedded types to merge methods later
+		for (const f of node.fields) {
+			const ft = this.resolveTypeNode(f.type, scope);
+			if (f.embedded) {
+				// Flatten embedded struct fields
+				const base = ft.kind === "named" ? ft.underlying : ft;
+				if (base?.kind === "struct") {
+					for (const [k, v] of base.fields.entries()) fields.set(k, v);
+				}
+				embeds.push(ft);
+			} else {
+				for (const n of f.names) fields.set(n, ft);
+			}
+		}
+		return { kind: "struct", fields, methods: new Map(), _embeds: embeds };
+	}
+
+	_resolveInterfaceType(node, scope) {
+		const methods = new Map();
+		for (const m of node.methods) {
+			const params = m.params.map((p) => this.resolveTypeNode(p.type, scope));
+			const returns = m.returnType
+				? [this.resolveTypeNode(m.returnType, scope)]
+				: [VOID];
+			const isVariadic =
+				m.params.length > 0 && m.params[m.params.length - 1].variadic;
+			const mType = { kind: "func", params, returns };
+			if (isVariadic) mType.variadic = true;
+			methods.set(m.name, mType);
+		}
+		// Flatten embedded interface methods
+		if (node.embeds) {
+			for (const embed of node.embeds) {
+				const resolved = this.resolveTypeNode(embed, scope);
+				const base =
+					resolved?.kind === "named" ? resolved.underlying : resolved;
+				if (base?.kind === "interface") {
+					for (const [mName, mType] of base.methods) {
+						if (!methods.has(mName)) methods.set(mName, mType);
+					}
+				} else if (!isAny(resolved)) {
+					this.err(
+						`cannot embed non-interface type ${typeStr(resolved)}`,
+						embed,
+					);
+				}
+			}
+		}
+		return { kind: "interface", methods };
 	}
 
 	// ── Helpers ───────────────────────────────────────────────────

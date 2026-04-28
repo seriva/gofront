@@ -534,44 +534,44 @@ export class DtsParser {
 				if (name) out[name] = type;
 				break;
 			}
-			default: {
-				// Could be: propertyName: Type  or  methodName(params): Type
-				const name = kw;
-				this.skip();
-				this.consume("?"); // optional property
-				this.skipGenerics();
-				this.skip();
-
-				if (this.ch() === "(") {
-					// Method signature
-					const params = this.parseParams();
-					this.skip();
-					let ret = VOID;
-					if (this.ch() === ":") {
-						this.pos++;
-						ret = this.parseType();
-					}
-					this.consume(";");
-					out[name] = {
-						kind: "func",
-						params: params.map((p) => p.type),
-						returns: [ret],
-					};
-				} else if (this.ch() === ":") {
-					this.pos++;
-					const type = this.parseType();
-					this.consume(";");
-					out[name] = type;
-				} else {
-					// Unknown — skip to next ;
-					this.skipTypeExpr();
-					this.consume(";");
-				}
+			default:
+				this._parseMemberDefault(kw, out);
 				break;
-			}
 		}
 	}
 
+	_parseMemberDefault(name, out) {
+		this.skip();
+		this.consume("?"); // optional property
+		this.skipGenerics();
+		this.skip();
+
+		if (this.ch() === "(") {
+			// Method signature
+			const params = this.parseParams();
+			this.skip();
+			let ret = VOID;
+			if (this.ch() === ":") {
+				this.pos++;
+				ret = this.parseType();
+			}
+			this.consume(";");
+			out[name] = {
+				kind: "func",
+				params: params.map((p) => p.type),
+				returns: [ret],
+			};
+		} else if (this.ch() === ":") {
+			this.pos++;
+			const type = this.parseType();
+			this.consume(";");
+			out[name] = type;
+		} else {
+			// Unknown — skip to next ;
+			this.skipTypeExpr();
+			this.consume(";");
+		}
+	}
 	_readStringLit() {
 		this.skip();
 		const c = this.ch();
@@ -624,115 +624,117 @@ export class DtsParser {
 			}
 
 			this.skip();
-			switch (kw) {
-				case "import":
-				case "export":
-					// skip import { ... } from "..." or export { ... }
-					this.skipTypeExpr();
-					this.consume(";");
-					break;
-				case "type": {
-					const name = this.readIdent();
-					this.skipGenerics();
-					this.skip();
-					let type = ANY;
-					if (this.ch() === "=") {
-						this.pos++;
-						type = this.parseType();
-					}
-					this.consume(";");
-					if (name) types.set(name, type);
-					break;
-				}
-				case "interface":
-				case "class": {
-					const name = this.readIdent();
-					this.skipGenerics();
-					while (!this.eof() && this.ch() !== "{") this.pos++;
-					this.consume("{");
-					const body = this.parseBody();
-					this.consume("}");
-					this.consume(";");
-					if (name) {
-						const ns = { kind: "namespace", name, members: body };
-						types.set(name, ns);
-						if (kw === "class") values.set(name, ns);
-					}
-					break;
-				}
-				case "namespace":
-				case "module": {
-					const name = this.readIdent() || this._readStringLit();
-					this.skip();
-					this.consume("{");
-					const body = this.parseBody();
-					this.consume("}");
-					this.consume(";");
-					if (name) {
-						const ns = { kind: "namespace", name, members: body };
-						types.set(name, ns);
-						values.set(name, ns);
-					}
-					break;
-				}
-				case "enum": {
-					const name = this.readIdent();
-					this.skipBlock();
-					this.consume(";");
-					if (name) {
-						types.set(name, ANY);
-						values.set(name, ANY);
-					}
-					break;
-				}
-				case "function": {
-					const name = this.readIdent();
-					this.skipGenerics();
-					const params = this.parseParams();
-					this.skip();
-					let ret = VOID;
-					if (this.ch() === ":") {
-						this.pos++;
-						ret = this.parseType();
-					}
-					this.consume(";");
-					if (name)
-						values.set(name, {
-							kind: "func",
-							params: params.map((p) => p.type),
-							returns: [ret],
-						});
-					break;
-				}
-				case "const":
-				case "let":
-				case "var": {
-					const name = this.readIdent();
-					this.skip();
-					this.consume("?");
-					let type = ANY;
-					if (this.ch() === ":") {
-						this.pos++;
-						type = this.parseType();
-					}
-					this.skip();
-					if (this.ch() === "=") {
-						this.pos++;
-						this.skipTypeExpr();
-					}
-					this.consume(";");
-					if (name) values.set(name, type);
-					break;
-				}
-				default:
-					// Unknown top-level construct — skip to next ;
-					this.skipTypeExpr();
-					this.consume(";");
-					break;
-			}
+			this._parseTopLevelDecl(kw, types, values);
 		}
 
 		return { types, values };
+	}
+
+	_parseTopLevelDecl(kw, types, values) {
+		switch (kw) {
+			case "import":
+			case "export":
+				this.skipTypeExpr();
+				this.consume(";");
+				break;
+			case "type": {
+				const name = this.readIdent();
+				this.skipGenerics();
+				this.skip();
+				let type = ANY;
+				if (this.ch() === "=") {
+					this.pos++;
+					type = this.parseType();
+				}
+				this.consume(";");
+				if (name) types.set(name, type);
+				break;
+			}
+			case "interface":
+			case "class": {
+				const name = this.readIdent();
+				this.skipGenerics();
+				while (!this.eof() && this.ch() !== "{") this.pos++;
+				this.consume("{");
+				const body = this.parseBody();
+				this.consume("}");
+				this.consume(";");
+				if (name) {
+					const ns = { kind: "namespace", name, members: body };
+					types.set(name, ns);
+					if (kw === "class") values.set(name, ns);
+				}
+				break;
+			}
+			case "namespace":
+			case "module": {
+				const name = this.readIdent() || this._readStringLit();
+				this.skip();
+				this.consume("{");
+				const body = this.parseBody();
+				this.consume("}");
+				this.consume(";");
+				if (name) {
+					const ns = { kind: "namespace", name, members: body };
+					types.set(name, ns);
+					values.set(name, ns);
+				}
+				break;
+			}
+			case "enum": {
+				const name = this.readIdent();
+				this.skipBlock();
+				this.consume(";");
+				if (name) {
+					types.set(name, ANY);
+					values.set(name, ANY);
+				}
+				break;
+			}
+			case "function": {
+				const name = this.readIdent();
+				this.skipGenerics();
+				const params = this.parseParams();
+				this.skip();
+				let ret = VOID;
+				if (this.ch() === ":") {
+					this.pos++;
+					ret = this.parseType();
+				}
+				this.consume(";");
+				if (name)
+					values.set(name, {
+						kind: "func",
+						params: params.map((p) => p.type),
+						returns: [ret],
+					});
+				break;
+			}
+			case "const":
+			case "let":
+			case "var": {
+				const name = this.readIdent();
+				this.skip();
+				this.consume("?");
+				let type = ANY;
+				if (this.ch() === ":") {
+					this.pos++;
+					type = this.parseType();
+				}
+				this.skip();
+				if (this.ch() === "=") {
+					this.pos++;
+					this.skipTypeExpr();
+				}
+				this.consume(";");
+				if (name) values.set(name, type);
+				break;
+			}
+			default:
+				this.skipTypeExpr();
+				this.consume(";");
+				break;
+		}
 	}
 }
 
