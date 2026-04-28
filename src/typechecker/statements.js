@@ -29,239 +29,33 @@ export const statementCheckMethods = {
 			case "TypeDecl":
 				this.collectType(stmt);
 				break;
-
-			case "DefineStmt": {
-				// comma-ok type assertion: n, ok := x.(T)
-				if (
-					stmt.lhs.length === 2 &&
-					stmt.rhs.length === 1 &&
-					stmt.rhs[0].kind === "TypeAssertExpr"
-				) {
-					stmt.rhs[0]._commaOk = true;
-				}
-				const rhs = stmt.rhs.map((e) => this.checkExpr(e, scope));
-				// Flatten tuple returns
-				const rhsFlat =
-					rhs.length === 1 && rhs[0].kind === "tuple" ? rhs[0].types : rhs;
-				// comma-ok type assertion returns [assertedType, bool]
-				if (stmt.rhs[0]?._commaOk) {
-					const lhsNames = stmt.lhs.map((e) => e.name ?? e);
-					if (lhsNames[0] !== "_") scope.defineLocal(lhsNames[0], rhs[0]);
-					if (lhsNames[1] !== "_") scope.defineLocal(lhsNames[1], BOOL);
-					stmt._rhsTypes = [rhs[0], BOOL];
-					break;
-				}
-				for (let i = 0; i < stmt.lhs.length; i++) {
-					const name = stmt.lhs[i].name ?? stmt.lhs[i];
-					if (name === "_") continue;
-					// Short variable re-declaration: mark vars that already exist
-					// in the current (not parent) scope as redeclared.
-					if (scope.symbols.has(name)) {
-						stmt.lhs[i]._redecl = true;
-					}
-					scope.defineLocal(name, defaultType(rhsFlat[i]) ?? ANY);
-				}
-				// Go requires at least one new variable in :=
-				const allRedecl = stmt.lhs.every(
-					(e) => e._redecl || (e.name ?? e) === "_",
-				);
-				if (allRedecl && stmt.lhs.length > 0) {
-					this.err("no new variables on left side of :=", stmt.lhs[0]);
-				}
-				stmt._rhsTypes = rhsFlat.map((t) => defaultType(t) ?? ANY);
+			case "DefineStmt":
+				this._checkDefineStmt(stmt, scope);
 				break;
-			}
-
-			case "AssignStmt": {
-				// comma-ok map index: v, ok = m["key"]
-				// Evaluate map expr first so _type is populated, then detect the pattern.
-				if (
-					stmt.lhs.length === 2 &&
-					stmt.rhs.length === 1 &&
-					stmt.rhs[0].kind === "IndexExpr"
-				) {
-					const mapBaseType = this.checkExpr(stmt.rhs[0].expr, scope);
-					const resolvedBase =
-						mapBaseType?.kind === "named"
-							? mapBaseType.underlying
-							: mapBaseType;
-					if (resolvedBase?.kind === "map") {
-						this.checkExpr(stmt.rhs[0].index, scope);
-						stmt._commaOkMap = true;
-						// Store the map value type so codegen can emit the zero-value fallback
-						stmt.rhs[0]._mapValueType = resolvedBase.value;
-						break;
-					}
-				}
-				// comma-ok type assertion: v, ok = x.(T)
-				if (
-					stmt.lhs.length === 2 &&
-					stmt.rhs.length === 1 &&
-					stmt.rhs[0].kind === "TypeAssertExpr"
-				) {
-					stmt.rhs[0]._commaOk = true;
-				}
-				// Check for const reassignment before evaluating RHS
-				for (const lhs of stmt.lhs) {
-					if (lhs.kind === "Ident" && lhs.name !== "_") {
-						const ownerScope = scope.lookupScope(lhs.name);
-						if (ownerScope?.isConst(lhs.name))
-							this.err(`cannot assign to const '${lhs.name}'`, lhs);
-					}
-				}
-				const rhs = stmt.rhs.map((e) => this.checkExpr(e, scope));
-				const rhsFlat =
-					rhs.length === 1 && rhs[0]?.kind === "tuple" ? rhs[0].types : rhs;
-				const lhsTypes = stmt.lhs.map((e) => {
-					if (e.kind === "Ident" && e.name === "_") return ANY;
-					return this.checkExpr(e, scope);
-				});
-				for (let i = 0; i < lhsTypes.length; i++) {
-					if (stmt.lhs[i]?.kind === "Ident" && stmt.lhs[i]?.name === "_")
-						continue;
-					const r = rhsFlat[i] ?? ANY;
-					if (!isAny(lhsTypes[i]) && !isAny(r)) {
-						this.assertAssignable(lhsTypes[i], r, stmt.lhs[i]);
-					}
-				}
+			case "AssignStmt":
+				this._checkAssignStmt(stmt, scope);
 				break;
-			}
-
 			case "IncDecStmt":
 				this.checkExpr(stmt.expr, scope);
 				break;
-
 			case "ExprStmt":
 				this.checkExpr(stmt.expr, scope);
 				break;
-
-			case "ReturnStmt": {
-				const types = stmt.values.map((v) => this.checkExpr(v, scope));
-				stmt._types = types;
-				if (
-					!isVoid(returnType) &&
-					types.length === 0 &&
-					!returnType?._hasNamedReturns
-				) {
-					this.err("Missing return value", stmt);
-				}
-				// Check each returned value is assignable to its declared type
-				if (!isVoid(returnType) && types.length > 0) {
-					const expected =
-						returnType.kind === "tuple" ? returnType.types : [returnType];
-					for (let i = 0; i < expected.length; i++) {
-						if (types[i])
-							this.assertAssignable(
-								expected[i],
-								types[i],
-								stmt.values[i] ?? stmt,
-							);
-					}
-				}
+			case "ReturnStmt":
+				this._checkReturnStmt(stmt, scope, returnType);
 				break;
-			}
-
-			case "IfStmt": {
-				const inner = new Scope(scope);
-				if (stmt.init) this.checkStmt(stmt.init, inner, returnType);
-				const ct = this.checkExpr(stmt.cond, inner);
-				if (!isBool(ct) && !isAny(ct))
-					this.err("If condition must be bool", stmt);
-				const bodyScope = new Scope(inner);
-				this.checkBlock(stmt.body, bodyScope, returnType);
-				this._reportUnused(bodyScope, stmt);
-				if (stmt.elseBody) {
-					if (stmt.elseBody.kind === "Block") {
-						const elseScope = new Scope(inner);
-						this.checkBlock(stmt.elseBody, elseScope, returnType);
-						this._reportUnused(elseScope, stmt);
-					} else this.checkStmt(stmt.elseBody, inner, returnType);
-				}
-				this._reportUnused(inner, stmt);
+			case "IfStmt":
+				this._checkIfStmt(stmt, scope, returnType);
 				break;
-			}
-
-			case "ForStmt": {
-				const inner = new Scope(scope);
-				let iterInfo = null;
-				if (stmt.init?.rhs?.[0]?.kind === "RangeExpr") {
-					iterInfo = this._checkRangeIterStmt(stmt.init, inner, returnType);
-				}
-				if (!iterInfo && stmt.init)
-					this.checkStmt(stmt.init, inner, returnType);
-				if (stmt.cond) {
-					if (stmt.cond.kind !== "RangeExpr") {
-						const ct = this.checkExpr(stmt.cond, inner);
-						if (!isBool(ct) && !isAny(ct))
-							this.err("For condition must be bool", stmt);
-					} else {
-						// for range expr — could be int range or 0-param iterator
-						const ct = this.checkExpr(stmt.cond.expr, inner);
-						const info = iteratorYieldParams(ct);
-						if (info) {
-							stmt.cond._isIterator = true;
-							stmt.cond._yieldParams = info.yieldParams;
-						} else if (ct?.kind === "func") {
-							this.err(
-								"cannot range over func: not an iterator function",
-								stmt,
-							);
-						}
-					}
-				}
-				if (stmt.post) this.checkStmt(stmt.post, inner, returnType);
-				this._loopDepth++;
-				const bodyScope = new Scope(inner);
-				this.checkBlock(stmt.body, bodyScope, returnType);
-				this._reportUnused(bodyScope, stmt);
-				this._loopDepth--;
-				this._reportUnused(inner, stmt);
+			case "ForStmt":
+				this._checkForStmt(stmt, scope, returnType);
 				break;
-			}
-
-			case "SwitchStmt": {
-				const inner = new Scope(scope);
-				if (stmt.init) this.checkStmt(stmt.init, inner, returnType);
-				if (stmt.tag) this.checkExpr(stmt.tag, inner);
-				this._switchDepth++;
-				for (const c of stmt.cases) {
-					const caseScope = new Scope(inner);
-					if (c.list) for (const e of c.list) this.checkExpr(e, caseScope);
-					for (const s of c.stmts) this.checkStmt(s, caseScope, returnType);
-					this._reportUnused(caseScope, stmt);
-				}
-				this._switchDepth--;
-				this._reportUnused(inner, stmt);
+			case "SwitchStmt":
+				this._checkSwitchStmt(stmt, scope, returnType);
 				break;
-			}
-
-			case "TypeSwitchStmt": {
-				const inner = new Scope(scope);
-				this.checkExpr(stmt.expr, inner);
-				this._switchDepth++;
-				this._typeSwitchDepth++;
-				for (const c of stmt.cases) {
-					const caseScope = new Scope(inner);
-					if (stmt.assign) {
-						// Bind the variable to the single case type, or any for multi/default
-						const bindType =
-							c.types?.length === 1
-								? this.resolveTypeNode(c.types[0], inner)
-								: ANY;
-						caseScope.defineLocal(stmt.assign, bindType);
-						// The capture variable is always considered used — it's the whole
-						// point of the switch-with-assign form. Each case body uses its own
-						// typed copy of the variable.
-						caseScope.lookup(stmt.assign);
-					}
-					for (const s of c.stmts) this.checkStmt(s, caseScope, returnType);
-					this._reportUnused(caseScope, stmt);
-				}
-				this._typeSwitchDepth--;
-				this._switchDepth--;
+			case "TypeSwitchStmt":
+				this._checkTypeSwitchStmt(stmt, scope, returnType);
 				break;
-			}
-
 			case "DeferStmt": {
 				if (stmt.call.kind !== "CallExpr")
 					this.err("defer requires a function call", stmt.call);
@@ -269,27 +63,12 @@ export const statementCheckMethods = {
 				this._deferCount++;
 				break;
 			}
-
 			case "LabeledStmt":
 				this.checkStmt(stmt.body, scope, returnType);
 				break;
-
-			case "BranchStmt": {
-				const kw = stmt.keyword;
-				if (kw === "continue" && this._loopDepth === 0)
-					this.err("continue statement outside for loop", stmt);
-				else if (
-					kw === "break" &&
-					this._loopDepth === 0 &&
-					this._switchDepth === 0
-				)
-					this.err("break statement outside for loop or switch", stmt);
-				else if (kw === "fallthrough" && this._switchDepth === 0)
-					this.err("fallthrough statement outside switch", stmt);
-				else if (kw === "fallthrough" && this._typeSwitchDepth > 0)
-					this.err("cannot fallthrough in type switch", stmt);
+			case "BranchStmt":
+				this._checkBranchStmt(stmt);
 				break;
-			}
 			case "Block": {
 				const blockScope = new Scope(scope);
 				this.checkBlock(stmt, blockScope, returnType);
@@ -299,6 +78,219 @@ export const statementCheckMethods = {
 			default:
 				break;
 		}
+	},
+
+	_checkDefineStmt(stmt, scope) {
+		// comma-ok type assertion: n, ok := x.(T)
+		if (
+			stmt.lhs.length === 2 &&
+			stmt.rhs.length === 1 &&
+			stmt.rhs[0].kind === "TypeAssertExpr"
+		) {
+			stmt.rhs[0]._commaOk = true;
+		}
+		const rhs = stmt.rhs.map((e) => this.checkExpr(e, scope));
+		// Flatten tuple returns
+		const rhsFlat =
+			rhs.length === 1 && rhs[0].kind === "tuple" ? rhs[0].types : rhs;
+		// comma-ok type assertion returns [assertedType, bool]
+		if (stmt.rhs[0]?._commaOk) {
+			const lhsNames = stmt.lhs.map((e) => e.name ?? e);
+			if (lhsNames[0] !== "_") scope.defineLocal(lhsNames[0], rhs[0]);
+			if (lhsNames[1] !== "_") scope.defineLocal(lhsNames[1], BOOL);
+			stmt._rhsTypes = [rhs[0], BOOL];
+			return;
+		}
+		for (let i = 0; i < stmt.lhs.length; i++) {
+			const name = stmt.lhs[i].name ?? stmt.lhs[i];
+			if (name === "_") continue;
+			// Short variable re-declaration: mark vars that already exist
+			// in the current (not parent) scope as redeclared.
+			if (scope.symbols.has(name)) {
+				stmt.lhs[i]._redecl = true;
+			}
+			scope.defineLocal(name, defaultType(rhsFlat[i]) ?? ANY);
+		}
+		// Go requires at least one new variable in :=
+		const allRedecl = stmt.lhs.every((e) => e._redecl || (e.name ?? e) === "_");
+		if (allRedecl && stmt.lhs.length > 0) {
+			this.err("no new variables on left side of :=", stmt.lhs[0]);
+		}
+		stmt._rhsTypes = rhsFlat.map((t) => defaultType(t) ?? ANY);
+	},
+
+	_checkAssignStmt(stmt, scope) {
+		// comma-ok map index: v, ok = m["key"]
+		// Evaluate map expr first so _type is populated, then detect the pattern.
+		if (
+			stmt.lhs.length === 2 &&
+			stmt.rhs.length === 1 &&
+			stmt.rhs[0].kind === "IndexExpr"
+		) {
+			const mapBaseType = this.checkExpr(stmt.rhs[0].expr, scope);
+			const resolvedBase =
+				mapBaseType?.kind === "named" ? mapBaseType.underlying : mapBaseType;
+			if (resolvedBase?.kind === "map") {
+				this.checkExpr(stmt.rhs[0].index, scope);
+				stmt._commaOkMap = true;
+				// Store the map value type so codegen can emit the zero-value fallback
+				stmt.rhs[0]._mapValueType = resolvedBase.value;
+				return;
+			}
+		}
+		// comma-ok type assertion: v, ok = x.(T)
+		if (
+			stmt.lhs.length === 2 &&
+			stmt.rhs.length === 1 &&
+			stmt.rhs[0].kind === "TypeAssertExpr"
+		) {
+			stmt.rhs[0]._commaOk = true;
+		}
+		// Check for const reassignment before evaluating RHS
+		for (const lhs of stmt.lhs) {
+			if (lhs.kind === "Ident" && lhs.name !== "_") {
+				const ownerScope = scope.lookupScope(lhs.name);
+				if (ownerScope?.isConst(lhs.name))
+					this.err(`cannot assign to const '${lhs.name}'`, lhs);
+			}
+		}
+		const rhs = stmt.rhs.map((e) => this.checkExpr(e, scope));
+		const rhsFlat =
+			rhs.length === 1 && rhs[0]?.kind === "tuple" ? rhs[0].types : rhs;
+		const lhsTypes = stmt.lhs.map((e) => {
+			if (e.kind === "Ident" && e.name === "_") return ANY;
+			return this.checkExpr(e, scope);
+		});
+		for (let i = 0; i < lhsTypes.length; i++) {
+			if (stmt.lhs[i]?.kind === "Ident" && stmt.lhs[i]?.name === "_") continue;
+			const r = rhsFlat[i] ?? ANY;
+			if (!isAny(lhsTypes[i]) && !isAny(r)) {
+				this.assertAssignable(lhsTypes[i], r, stmt.lhs[i]);
+			}
+		}
+	},
+
+	_checkReturnStmt(stmt, scope, returnType) {
+		const types = stmt.values.map((v) => this.checkExpr(v, scope));
+		stmt._types = types;
+		if (
+			!isVoid(returnType) &&
+			types.length === 0 &&
+			!returnType?._hasNamedReturns
+		) {
+			this.err("Missing return value", stmt);
+		}
+		// Check each returned value is assignable to its declared type
+		if (!isVoid(returnType) && types.length > 0) {
+			const expected =
+				returnType.kind === "tuple" ? returnType.types : [returnType];
+			for (let i = 0; i < expected.length; i++) {
+				if (types[i])
+					this.assertAssignable(expected[i], types[i], stmt.values[i] ?? stmt);
+			}
+		}
+	},
+
+	_checkIfStmt(stmt, scope, returnType) {
+		const inner = new Scope(scope);
+		if (stmt.init) this.checkStmt(stmt.init, inner, returnType);
+		const ct = this.checkExpr(stmt.cond, inner);
+		if (!isBool(ct) && !isAny(ct)) this.err("If condition must be bool", stmt);
+		const bodyScope = new Scope(inner);
+		this.checkBlock(stmt.body, bodyScope, returnType);
+		this._reportUnused(bodyScope, stmt);
+		if (stmt.elseBody) {
+			if (stmt.elseBody.kind === "Block") {
+				const elseScope = new Scope(inner);
+				this.checkBlock(stmt.elseBody, elseScope, returnType);
+				this._reportUnused(elseScope, stmt);
+			} else this.checkStmt(stmt.elseBody, inner, returnType);
+		}
+		this._reportUnused(inner, stmt);
+	},
+
+	_checkForStmt(stmt, scope, returnType) {
+		const inner = new Scope(scope);
+		let iterInfo = null;
+		if (stmt.init?.rhs?.[0]?.kind === "RangeExpr") {
+			iterInfo = this._checkRangeIterStmt(stmt.init, inner, returnType);
+		}
+		if (!iterInfo && stmt.init) this.checkStmt(stmt.init, inner, returnType);
+		if (stmt.cond) {
+			if (stmt.cond.kind !== "RangeExpr") {
+				const ct = this.checkExpr(stmt.cond, inner);
+				if (!isBool(ct) && !isAny(ct))
+					this.err("For condition must be bool", stmt);
+			} else {
+				// for range expr — could be int range or 0-param iterator
+				const ct = this.checkExpr(stmt.cond.expr, inner);
+				const info = iteratorYieldParams(ct);
+				if (info) {
+					stmt.cond._isIterator = true;
+					stmt.cond._yieldParams = info.yieldParams;
+				} else if (ct?.kind === "func") {
+					this.err("cannot range over func: not an iterator function", stmt);
+				}
+			}
+		}
+		if (stmt.post) this.checkStmt(stmt.post, inner, returnType);
+		this._loopDepth++;
+		const bodyScope = new Scope(inner);
+		this.checkBlock(stmt.body, bodyScope, returnType);
+		this._reportUnused(bodyScope, stmt);
+		this._loopDepth--;
+		this._reportUnused(inner, stmt);
+	},
+
+	_checkSwitchStmt(stmt, scope, returnType) {
+		const inner = new Scope(scope);
+		if (stmt.init) this.checkStmt(stmt.init, inner, returnType);
+		if (stmt.tag) this.checkExpr(stmt.tag, inner);
+		this._switchDepth++;
+		for (const c of stmt.cases) {
+			const caseScope = new Scope(inner);
+			if (c.list) for (const e of c.list) this.checkExpr(e, caseScope);
+			for (const s of c.stmts) this.checkStmt(s, caseScope, returnType);
+			this._reportUnused(caseScope, stmt);
+		}
+		this._switchDepth--;
+		this._reportUnused(inner, stmt);
+	},
+
+	_checkTypeSwitchStmt(stmt, scope, returnType) {
+		const inner = new Scope(scope);
+		this.checkExpr(stmt.expr, inner);
+		this._switchDepth++;
+		this._typeSwitchDepth++;
+		for (const c of stmt.cases) {
+			const caseScope = new Scope(inner);
+			if (stmt.assign) {
+				// Bind the variable to the single case type, or any for multi/default
+				const bindType =
+					c.types?.length === 1 ? this.resolveTypeNode(c.types[0], inner) : ANY;
+				caseScope.defineLocal(stmt.assign, bindType);
+				// The capture variable is always considered used — it's the whole
+				// point of the switch-with-assign form. Each case body uses its own
+				// typed copy of the variable.
+				caseScope.lookup(stmt.assign);
+			}
+			for (const s of c.stmts) this.checkStmt(s, caseScope, returnType);
+			this._reportUnused(caseScope, stmt);
+		}
+		this._typeSwitchDepth--;
+		this._switchDepth--;
+	},
+
+	_checkBranchStmt(stmt) {
+		const kw = stmt.keyword;
+		if (kw === "continue" && this._loopDepth === 0)
+			this.err("continue statement outside for loop", stmt);
+		else if (kw === "break" && this._loopDepth === 0 && this._switchDepth === 0)
+			this.err("break statement outside for loop or switch", stmt);
+		else if (kw === "fallthrough" && this._switchDepth === 0)
+			this.err("fallthrough statement outside switch", stmt);
+		else if (kw === "fallthrough" && this._typeSwitchDepth > 0)
+			this.err("cannot fallthrough in type switch", stmt);
 	},
 
 	_checkRangeIterStmt(initStmt, scope, _returnType) {

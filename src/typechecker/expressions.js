@@ -62,36 +62,8 @@ export const expressionCheckMethods = {
 				return t;
 			}
 
-			case "UnaryExpr": {
-				const ot = this.checkExpr(expr.operand, scope);
-				if (expr.op === "!") {
-					if (!isBool(ot) && !isAny(ot)) this.err("! requires bool", expr);
-					return BOOL;
-				}
-				if (expr.op === "-" || expr.op === "+") {
-					if (!isNumeric(ot) && !isComplex(ot) && !isAny(ot))
-						this.err(`${expr.op} requires numeric`, expr);
-					return ot;
-				}
-				if (expr.op === "&") {
-					// Mark the operand as address-taken for codegen
-					if (expr.operand.kind === "Ident") {
-						expr.operand._addressTaken = true;
-						const sym = scope.lookup(expr.operand.name);
-						if (sym) sym._addressTaken = true;
-					}
-					return { kind: "pointer", base: ot };
-				}
-				if (expr.op === "*") {
-					if (ot === ANY) return ANY;
-					if (ot.kind === "pointer") return ot.base;
-					if (ot.kind === "named" && ot.underlying?.kind === "pointer")
-						return ot.underlying.base;
-					this.err(`cannot dereference non-pointer type ${typeStr(ot)}`, expr);
-					return ANY;
-				}
-				return ot;
-			}
+			case "UnaryExpr":
+				return this._checkUnaryExpr(expr, scope);
 
 			case "BinaryExpr": {
 				const lt = this.checkExpr(expr.left, scope);
@@ -101,284 +73,332 @@ export const expressionCheckMethods = {
 				return this.binaryResultType(expr.op, lt, rt, expr);
 			}
 
-			case "CallExpr": {
+			case "CallExpr":
 				return this.checkCall(expr, scope);
-			}
 
-			case "SelectorExpr": {
-				const baseType = this.checkExpr(expr.expr, scope);
-				// Method expression: TypeName.MethodName → func(ReceiverType, ...params) ret
-				if (expr.expr._isTypeRef) {
-					let base = baseType.kind === "named" ? baseType.underlying : baseType;
-					base = this.resolveType(base);
-					let methodType = null;
-					if (base?.kind === "struct" && base.methods?.has(expr.field)) {
-						methodType = base.methods.get(expr.field);
-					} else if (
-						baseType.kind === "named" &&
-						baseType.methods?.has(expr.field)
-					) {
-						methodType = baseType.methods.get(expr.field);
-					}
-					if (methodType) {
-						// Return a func type with the receiver prepended to params
-						expr._isMethodExpr = true;
-						expr._methodExprRecv = baseType;
-						return {
-							kind: "func",
-							params: [baseType, ...(methodType.params ?? [])],
-							returns: methodType.returns ?? [],
-							variadic: methodType.variadic,
-						};
-					}
-				}
-				const ft = this.fieldType(baseType, expr.field, expr);
-				// Mark method selectors so codegen can emit .bind() when used as a value
-				if (ft?.kind === "func") {
-					let base = baseType.kind === "named" ? baseType.underlying : baseType;
-					base = this.resolveType(base);
-					if (
-						(base?.kind === "struct" && base.methods?.has(expr.field)) ||
-						(baseType.kind === "named" && baseType.methods?.has(expr.field))
-					) {
-						expr._isMethodValue = true;
-					}
-				}
-				return ft;
-			}
+			case "SelectorExpr":
+				return this._checkSelectorExpr(expr, scope);
 
-			case "IndexExpr": {
-				const bt = this.checkExpr(expr.expr, scope);
-				this.checkExpr(expr.index, scope);
-				if (isAny(bt)) return ANY;
-				// Named types (e.g. type Nums []int) are indexable via their underlying
-				const btu =
-					bt.kind === "named"
-						? (this.resolveType(bt.underlying) ?? bt.underlying)
-						: bt;
-				if (btu.kind === "slice" || btu.kind === "array") {
-					// Compile-time bounds checking for arrays
-					if (btu.kind === "array" && btu.size != null) {
-						const idx = this._constIntValue(expr.index);
-						if (idx !== null) {
-							if (idx < 0) {
-								this.err(
-									`invalid array index ${idx} (index must not be negative)`,
-									expr,
-								);
-							} else if (idx >= btu.size) {
-								this.err(
-									`invalid array index ${idx} (out of bounds for ${typeStr(bt)})`,
-									expr,
-								);
-							}
-						}
-					}
-					return btu.elem;
-				}
-				if (btu.kind === "map") {
-					expr._mapValueType = btu.value; // for codegen zero-value fallback
-					return btu.value;
-				}
-				if (isString(bt)) return INT; // byte
-				return this.err(`Cannot index type ${typeStr(bt)}`, expr);
-			}
+			case "IndexExpr":
+				return this._checkIndexExpr(expr, scope);
 
-			case "SliceExpr": {
-				const bt = this.checkExpr(expr.expr, scope);
-				if (expr.low) this.checkExpr(expr.low, scope);
-				if (expr.high) this.checkExpr(expr.high, scope);
-				if (expr.max) this.checkExpr(expr.max, scope);
-				if (isAny(bt)) return ANY;
-				if (bt.kind === "slice" || bt.kind === "array")
-					return { kind: "slice", elem: bt.elem };
-				if (isString(bt)) return STRING;
-				return this.err(`Cannot slice type ${typeStr(bt)}`, expr);
-			}
+			case "SliceExpr":
+				return this._checkSliceExpr(expr, scope);
 
-			case "CompositeLit": {
+			case "CompositeLit":
 				return this.checkCompositeLit(expr, scope);
-			}
 
-			case "FuncLit": {
-				const inner = new Scope(scope);
-				for (const p of expr.params)
-					inner.define(
-						p.name,
-						p.type ? this.resolveTypeNode(p.type, scope) : ANY,
-					);
-				const ret = expr.returnType
-					? this.resolveTypeNode(expr.returnType, scope)
-					: VOID;
-				const savedDefer = this._deferCount;
-				this._deferCount = 0;
-				this.checkBlock(expr.body, inner, ret);
-				this._reportUnused(inner, expr);
-				if (this._deferCount > 0) expr.body._hasDefer = true;
-				this._deferCount = savedDefer;
-				const paramTypes = expr.params.map((p) =>
-					p.type ? this.resolveTypeNode(p.type, scope) : ANY,
-				);
-				return {
-					kind: "func",
-					params: paramTypes,
-					returns: [ret],
-					async: expr.async,
-				};
-			}
+			case "FuncLit":
+				return this._checkFuncLit(expr, scope);
 
-			case "AwaitExpr": {
+			case "AwaitExpr":
 				// await unwraps whatever the expression produces — no Promise type modelling
 				return this.checkExpr(expr.expr, scope);
-			}
 
-			case "TypeConversion": {
-				const srcType = this.checkExpr(expr.expr, scope);
-				const targetType = this.resolveTypeNode(expr.targetType, scope);
-				const srcResolved =
-					srcType?.kind === "named" ? srcType.underlying : srcType;
-				const tgtResolved =
-					targetType?.kind === "named" ? targetType.underlying : targetType;
-				// Reject float64(complex) — must use real()/imag()
-				if (isNumeric(targetType) && isComplex(srcType)) {
-					this.err(
-						`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)} (use real() or imag())`,
-						expr,
-					);
-				}
-				// Allow complex128/64(numeric) and complex128/64(complex)
-				if (isComplex(targetType)) {
-					if (!isComplexOrNumeric(srcType) && !isAny(srcType)) {
-						this.err(
-							`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)}`,
-							expr,
-						);
-					}
-				}
-				// Slice → array conversion: [N]T(slice)
-				if (tgtResolved?.kind === "array" && srcResolved?.kind === "slice") {
-					const tgtElem = tgtResolved.elem;
-					const srcElem = srcResolved.elem;
-					if (
-						tgtElem &&
-						srcElem &&
-						!isAny(tgtElem) &&
-						!isAny(srcElem) &&
-						typeStr(tgtElem) !== typeStr(srcElem)
-					) {
-						this.err(
-							`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)}`,
-							expr,
-						);
-					}
-					return targetType;
-				}
-				// Array → slice conversion: []T(array)
-				if (tgtResolved?.kind === "slice" && srcResolved?.kind === "array") {
-					const tgtElem = tgtResolved.elem;
-					const srcElem = srcResolved.elem;
-					if (
-						tgtElem &&
-						srcElem &&
-						!isAny(tgtElem) &&
-						!isAny(srcElem) &&
-						typeStr(tgtElem) !== typeStr(srcElem)
-					) {
-						this.err(
-							`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)}`,
-							expr,
-						);
-					}
-					return targetType;
-				}
-				// Reject conversions between array and incompatible types
-				if (tgtResolved?.kind === "array" && srcResolved?.kind !== "array") {
-					if (!isAny(srcType)) {
-						this.err(
-							`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)}`,
-							expr,
-						);
-					}
-				}
-				return targetType;
-			}
+			case "TypeConversion":
+				return this._checkTypeConversion(expr, scope);
 
-			case "TypeAssertExpr": {
-				const srcType = this.checkExpr(expr.expr, scope);
-				const targetType = this.resolveTypeNode(expr.type, scope);
+			case "TypeAssertExpr":
+				return this._checkTypeAssertExpr(expr, scope);
 
-				// In Go, the source of a type assertion must be an interface type.
-				// We allow `any` (which is GoFront's basic any) and interface types.
-				if (srcType && !isAny(srcType)) {
-					let underlying =
-						srcType.kind === "named" ? srcType.underlying : srcType;
-					underlying = this.resolveType(underlying);
-					if (underlying?.kind !== "interface") {
-						this.err(
-							`invalid type assertion: ${typeStr(srcType)} is not an interface`,
-							expr,
-						);
-					}
-				}
+			case "RangeExpr":
+				return this._checkRangeExpr(expr, scope);
 
-				return targetType;
-			}
-
-			case "RangeExpr": {
-				// Type-check the iterated expression so its _type is annotated
-				const collType = this.checkExpr(expr.expr, scope);
-				const resolved =
-					collType?.kind === "named" ? collType.underlying : collType;
-				// Return a tuple of (index/key type, value type) so DefineStmt can
-				// assign the correct types to range variables.
-				const isString =
-					(resolved?.kind === "basic" && resolved.name === "string") ||
-					(resolved?.kind === "untyped" && resolved.base === "string");
-				if (isString) {
-					// string range: (int index, rune value) — rune is an alias for int
-					return { kind: "tuple", types: [INT, INT] };
-				}
-				if (resolved?.kind === "slice" || resolved?.kind === "array") {
-					return { kind: "tuple", types: [INT, resolved.elem ?? ANY] };
-				}
-				if (resolved?.kind === "map") {
-					return {
-						kind: "tuple",
-						types: [resolved.key ?? ANY, resolved.value ?? ANY],
-					};
-				}
-				// integer range or unknown — return single-element tuple
-				return { kind: "tuple", types: [collType] };
-			}
-
-			case "InstantiationExpr": {
-				// Generic instantiation: Foo[int] or Foo[int, string]
-				const baseType = this.checkExpr(expr.expr, scope);
-				if (baseType?.kind === "generic") {
-					const typeArgs = expr.typeArgs.map((ta) =>
-						this.resolveTypeNode(ta, scope),
-					);
-					// Check constraints
-					for (
-						let i = 0;
-						i < baseType.typeParams.length && i < typeArgs.length;
-						i++
-					) {
-						const tp = baseType.typeParams[i];
-						const constraint = tp.constraint
-							? this.resolveTypeNode(tp.constraint, scope)
-							: null;
-						if (constraint) this.checkConstraint(typeArgs[i], constraint, expr);
-					}
-					return this.instantiateGenericFunc(baseType, typeArgs);
-				}
-				return baseType;
-			}
+			case "InstantiationExpr":
+				return this._checkInstantiationExpr(expr, scope);
 
 			default:
 				return ANY;
 		}
 		return ANY;
+	},
+
+	_checkUnaryExpr(expr, scope) {
+		const ot = this.checkExpr(expr.operand, scope);
+		if (expr.op === "!") {
+			if (!isBool(ot) && !isAny(ot)) this.err("! requires bool", expr);
+			return BOOL;
+		}
+		if (expr.op === "-" || expr.op === "+") {
+			if (!isNumeric(ot) && !isComplex(ot) && !isAny(ot))
+				this.err(`${expr.op} requires numeric`, expr);
+			return ot;
+		}
+		if (expr.op === "&") {
+			// Mark the operand as address-taken for codegen
+			if (expr.operand.kind === "Ident") {
+				expr.operand._addressTaken = true;
+				const sym = scope.lookup(expr.operand.name);
+				if (sym) sym._addressTaken = true;
+			}
+			return { kind: "pointer", base: ot };
+		}
+		if (expr.op === "*") {
+			if (ot === ANY) return ANY;
+			if (ot.kind === "pointer") return ot.base;
+			if (ot.kind === "named" && ot.underlying?.kind === "pointer")
+				return ot.underlying.base;
+			this.err(`cannot dereference non-pointer type ${typeStr(ot)}`, expr);
+			return ANY;
+		}
+		return ot;
+	},
+
+	_checkSelectorExpr(expr, scope) {
+		const baseType = this.checkExpr(expr.expr, scope);
+		// Method expression: TypeName.MethodName → func(ReceiverType, ...params) ret
+		if (expr.expr._isTypeRef) {
+			let base = baseType.kind === "named" ? baseType.underlying : baseType;
+			base = this.resolveType(base);
+			let methodType = null;
+			if (base?.kind === "struct" && base.methods?.has(expr.field)) {
+				methodType = base.methods.get(expr.field);
+			} else if (
+				baseType.kind === "named" &&
+				baseType.methods?.has(expr.field)
+			) {
+				methodType = baseType.methods.get(expr.field);
+			}
+			if (methodType) {
+				// Return a func type with the receiver prepended to params
+				expr._isMethodExpr = true;
+				expr._methodExprRecv = baseType;
+				return {
+					kind: "func",
+					params: [baseType, ...(methodType.params ?? [])],
+					returns: methodType.returns ?? [],
+					variadic: methodType.variadic,
+				};
+			}
+		}
+		const ft = this.fieldType(baseType, expr.field, expr);
+		// Mark method selectors so codegen can emit .bind() when used as a value
+		if (ft?.kind === "func") {
+			let base = baseType.kind === "named" ? baseType.underlying : baseType;
+			base = this.resolveType(base);
+			if (
+				(base?.kind === "struct" && base.methods?.has(expr.field)) ||
+				(baseType.kind === "named" && baseType.methods?.has(expr.field))
+			) {
+				expr._isMethodValue = true;
+			}
+		}
+		return ft;
+	},
+
+	_checkIndexExpr(expr, scope) {
+		const bt = this.checkExpr(expr.expr, scope);
+		this.checkExpr(expr.index, scope);
+		if (isAny(bt)) return ANY;
+		// Named types (e.g. type Nums []int) are indexable via their underlying
+		const btu =
+			bt.kind === "named"
+				? (this.resolveType(bt.underlying) ?? bt.underlying)
+				: bt;
+		if (btu.kind === "slice" || btu.kind === "array") {
+			// Compile-time bounds checking for arrays
+			if (btu.kind === "array" && btu.size != null) {
+				const idx = this._constIntValue(expr.index);
+				if (idx !== null) {
+					if (idx < 0) {
+						this.err(
+							`invalid array index ${idx} (index must not be negative)`,
+							expr,
+						);
+					} else if (idx >= btu.size) {
+						this.err(
+							`invalid array index ${idx} (out of bounds for ${typeStr(bt)})`,
+							expr,
+						);
+					}
+				}
+			}
+			return btu.elem;
+		}
+		if (btu.kind === "map") {
+			expr._mapValueType = btu.value; // for codegen zero-value fallback
+			return btu.value;
+		}
+		if (isString(bt)) return INT; // byte
+		return this.err(`Cannot index type ${typeStr(bt)}`, expr);
+	},
+
+	_checkSliceExpr(expr, scope) {
+		const bt = this.checkExpr(expr.expr, scope);
+		if (expr.low) this.checkExpr(expr.low, scope);
+		if (expr.high) this.checkExpr(expr.high, scope);
+		if (expr.max) this.checkExpr(expr.max, scope);
+		if (isAny(bt)) return ANY;
+		if (bt.kind === "slice" || bt.kind === "array")
+			return { kind: "slice", elem: bt.elem };
+		if (isString(bt)) return STRING;
+		return this.err(`Cannot slice type ${typeStr(bt)}`, expr);
+	},
+
+	_checkFuncLit(expr, scope) {
+		const inner = new Scope(scope);
+		for (const p of expr.params)
+			inner.define(p.name, p.type ? this.resolveTypeNode(p.type, scope) : ANY);
+		const ret = expr.returnType
+			? this.resolveTypeNode(expr.returnType, scope)
+			: VOID;
+		const savedDefer = this._deferCount;
+		this._deferCount = 0;
+		this.checkBlock(expr.body, inner, ret);
+		this._reportUnused(inner, expr);
+		if (this._deferCount > 0) expr.body._hasDefer = true;
+		this._deferCount = savedDefer;
+		const paramTypes = expr.params.map((p) =>
+			p.type ? this.resolveTypeNode(p.type, scope) : ANY,
+		);
+		return {
+			kind: "func",
+			params: paramTypes,
+			returns: [ret],
+			async: expr.async,
+		};
+	},
+
+	_checkTypeConversion(expr, scope) {
+		const srcType = this.checkExpr(expr.expr, scope);
+		const targetType = this.resolveTypeNode(expr.targetType, scope);
+		const srcResolved =
+			srcType?.kind === "named" ? srcType.underlying : srcType;
+		const tgtResolved =
+			targetType?.kind === "named" ? targetType.underlying : targetType;
+		// Reject float64(complex) — must use real()/imag()
+		if (isNumeric(targetType) && isComplex(srcType)) {
+			this.err(
+				`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)} (use real() or imag())`,
+				expr,
+			);
+		}
+		// Allow complex128/64(numeric) and complex128/64(complex)
+		if (isComplex(targetType)) {
+			if (!isComplexOrNumeric(srcType) && !isAny(srcType)) {
+				this.err(
+					`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)}`,
+					expr,
+				);
+			}
+		}
+		// Slice → array conversion: [N]T(slice)
+		if (tgtResolved?.kind === "array" && srcResolved?.kind === "slice") {
+			const tgtElem = tgtResolved.elem;
+			const srcElem = srcResolved.elem;
+			if (
+				tgtElem &&
+				srcElem &&
+				!isAny(tgtElem) &&
+				!isAny(srcElem) &&
+				typeStr(tgtElem) !== typeStr(srcElem)
+			) {
+				this.err(
+					`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)}`,
+					expr,
+				);
+			}
+			return targetType;
+		}
+		// Array → slice conversion: []T(array)
+		if (tgtResolved?.kind === "slice" && srcResolved?.kind === "array") {
+			const tgtElem = tgtResolved.elem;
+			const srcElem = srcResolved.elem;
+			if (
+				tgtElem &&
+				srcElem &&
+				!isAny(tgtElem) &&
+				!isAny(srcElem) &&
+				typeStr(tgtElem) !== typeStr(srcElem)
+			) {
+				this.err(
+					`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)}`,
+					expr,
+				);
+			}
+			return targetType;
+		}
+		// Reject conversions between array and incompatible types
+		if (tgtResolved?.kind === "array" && srcResolved?.kind !== "array") {
+			if (!isAny(srcType)) {
+				this.err(
+					`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)}`,
+					expr,
+				);
+			}
+		}
+		return targetType;
+	},
+
+	_checkTypeAssertExpr(expr, scope) {
+		const srcType = this.checkExpr(expr.expr, scope);
+		const targetType = this.resolveTypeNode(expr.type, scope);
+
+		// In Go, the source of a type assertion must be an interface type.
+		// We allow `any` (which is GoFront's basic any) and interface types.
+		if (srcType && !isAny(srcType)) {
+			let underlying = srcType.kind === "named" ? srcType.underlying : srcType;
+			underlying = this.resolveType(underlying);
+			if (underlying?.kind !== "interface") {
+				this.err(
+					`invalid type assertion: ${typeStr(srcType)} is not an interface`,
+					expr,
+				);
+			}
+		}
+
+		return targetType;
+	},
+
+	_checkRangeExpr(expr, scope) {
+		// Type-check the iterated expression so its _type is annotated
+		const collType = this.checkExpr(expr.expr, scope);
+		const resolved =
+			collType?.kind === "named" ? collType.underlying : collType;
+		// Return a tuple of (index/key type, value type) so DefineStmt can
+		// assign the correct types to range variables.
+		const isString =
+			(resolved?.kind === "basic" && resolved.name === "string") ||
+			(resolved?.kind === "untyped" && resolved.base === "string");
+		if (isString) {
+			// string range: (int index, rune value) — rune is an alias for int
+			return { kind: "tuple", types: [INT, INT] };
+		}
+		if (resolved?.kind === "slice" || resolved?.kind === "array") {
+			return { kind: "tuple", types: [INT, resolved.elem ?? ANY] };
+		}
+		if (resolved?.kind === "map") {
+			return {
+				kind: "tuple",
+				types: [resolved.key ?? ANY, resolved.value ?? ANY],
+			};
+		}
+		// integer range or unknown — return single-element tuple
+		return { kind: "tuple", types: [collType] };
+	},
+
+	_checkInstantiationExpr(expr, scope) {
+		// Generic instantiation: Foo[int] or Foo[int, string]
+		const baseType = this.checkExpr(expr.expr, scope);
+		if (baseType?.kind === "generic") {
+			const typeArgs = expr.typeArgs.map((ta) =>
+				this.resolveTypeNode(ta, scope),
+			);
+			// Check constraints
+			for (
+				let i = 0;
+				i < baseType.typeParams.length && i < typeArgs.length;
+				i++
+			) {
+				const tp = baseType.typeParams[i];
+				const constraint = tp.constraint
+					? this.resolveTypeNode(tp.constraint, scope)
+					: null;
+				if (constraint) this.checkConstraint(typeArgs[i], constraint, expr);
+			}
+			return this.instantiateGenericFunc(baseType, typeArgs);
+		}
+		return baseType;
 	},
 
 	_constIntValue(expr) {
@@ -617,107 +637,12 @@ export const expressionCheckMethods = {
 			// If t === base, it's the same object
 		}
 
-		if (base?.kind === "struct") {
-			// Detect positional (unkeyed) literal: all elements must be non-KeyValueExpr
-			const hasPositional = expr.elems.some((e) => e.kind !== "KeyValueExpr");
-			const hasKeyed = expr.elems.some((e) => e.kind === "KeyValueExpr");
-			if (hasPositional && hasKeyed) {
-				this.err("mixture of field:value and value initializers", expr);
-			}
-			if (hasPositional) {
-				// Map positional elements to struct fields by declaration order
-				const fieldNames = [...(base.fields?.keys() ?? [])];
-				for (let i = 0; i < expr.elems.length; i++) {
-					const elem = expr.elems[i];
-					const fieldName = fieldNames[i];
-					if (!fieldName) {
-						this.err("too many values in struct literal", elem);
-						continue;
-					}
-					const fieldType = base.fields.get(fieldName);
-					const vt = this.checkExpr(elem, scope);
-					if (fieldType) this.assertAssignable(fieldType, vt, elem);
-					// Annotate for codegen
-					elem._positionalField = fieldName;
-				}
-				return t;
-			}
-			for (const elem of expr.elems) {
-				if (elem.kind === "KeyValueExpr") {
-					const keyName = elem.key.name;
-					const fieldType = base.fields?.get(keyName);
-					if (fieldType) {
-						const vt = this.checkExpr(elem.value, scope);
-						this.assertAssignable(fieldType, vt, elem.value);
-					} else {
-						// Check if it's an embedded type name (e.g. Dog{Animal: Animal{...}})
-						const embed = base._embeds?.find(
-							(e) => (e.kind === "named" ? e.name : null) === keyName,
-						);
-						if (embed) {
-							const vt = this.checkExpr(elem.value, scope);
-							this.assertAssignable(embed, vt, elem.value);
-							elem._isEmbedInit = true;
-						} else {
-							this.err(`Unknown field '${keyName}'`, elem.key);
-						}
-					}
-				} else {
-					this.checkExpr(elem, scope);
-				}
-			}
-			return t;
-		}
-
-		if (base?.kind === "slice" || base?.kind === "array") {
-			for (const elem of expr.elems) {
-				if (elem.kind === "CompositeLit" && elem.typeExpr === null) {
-					const et = this.checkCompositeLit(elem, scope, base.elem);
-					elem._type = et;
-				} else if (elem.kind === "KeyValueExpr") {
-					const vt = this.checkExpr(elem.value, scope);
-					this.assertAssignable(base.elem, vt, elem.value);
-				} else {
-					const et = this.checkExpr(elem, scope);
-					this.assertAssignable(base.elem, et, elem);
-				}
-			}
-
-			// Composite literal element count validation for explicit-size arrays
-			if (base.kind === "array" && base.size != null && !typeNode?.inferLen) {
-				const maxIndex = computeMaxIndex(expr.elems);
-				if (maxIndex >= base.size) {
-					this.err(
-						`array index ${maxIndex} out of bounds [0:${base.size}]`,
-						expr,
-					);
-				}
-			}
-
-			return t;
-		}
-
-		if (base?.kind === "map") {
-			for (const elem of expr.elems) {
-				if (elem.kind === "KeyValueExpr") {
-					const kt = this.checkExpr(elem.key, scope);
-					// value may be an implicit composite lit
-					let vt;
-					if (
-						elem.value.kind === "CompositeLit" &&
-						elem.value.typeExpr === null
-					) {
-						vt = this.checkCompositeLit(elem.value, scope, base.value);
-						elem.value._type = vt;
-					} else {
-						vt = this.checkExpr(elem.value, scope);
-					}
-					this.assertAssignable(base.key, kt, elem.key);
-					this.assertAssignable(base.value, vt, elem.value);
-				}
-			}
-			return t;
-		}
+		if (base?.kind === "struct")
+			return this._checkStructCompositeLit(expr, scope, t, base);
+		if (base?.kind === "slice" || base?.kind === "array")
+			return this._checkSliceArrayCompositeLit(expr, scope, t, base, typeNode);
+		if (base?.kind === "map")
+			return this._checkMapCompositeLit(expr, scope, t, base);
 
 		// Unknown type context — still check elements
 		for (const elem of expr.elems) {
@@ -728,6 +653,108 @@ export const expressionCheckMethods = {
 			}
 		}
 		return t ?? ANY;
+	},
+
+	_checkStructCompositeLit(expr, scope, t, base) {
+		// Detect positional (unkeyed) literal: all elements must be non-KeyValueExpr
+		const hasPositional = expr.elems.some((e) => e.kind !== "KeyValueExpr");
+		const hasKeyed = expr.elems.some((e) => e.kind === "KeyValueExpr");
+		if (hasPositional && hasKeyed) {
+			this.err("mixture of field:value and value initializers", expr);
+		}
+		if (hasPositional) {
+			// Map positional elements to struct fields by declaration order
+			const fieldNames = [...(base.fields?.keys() ?? [])];
+			for (let i = 0; i < expr.elems.length; i++) {
+				const elem = expr.elems[i];
+				const fieldName = fieldNames[i];
+				if (!fieldName) {
+					this.err("too many values in struct literal", elem);
+					continue;
+				}
+				const fieldType = base.fields.get(fieldName);
+				const vt = this.checkExpr(elem, scope);
+				if (fieldType) this.assertAssignable(fieldType, vt, elem);
+				// Annotate for codegen
+				elem._positionalField = fieldName;
+			}
+			return t;
+		}
+		for (const elem of expr.elems) {
+			if (elem.kind === "KeyValueExpr") {
+				const keyName = elem.key.name;
+				const fieldType = base.fields?.get(keyName);
+				if (fieldType) {
+					const vt = this.checkExpr(elem.value, scope);
+					this.assertAssignable(fieldType, vt, elem.value);
+				} else {
+					// Check if it's an embedded type name (e.g. Dog{Animal: Animal{...}})
+					const embed = base._embeds?.find(
+						(e) => (e.kind === "named" ? e.name : null) === keyName,
+					);
+					if (embed) {
+						const vt = this.checkExpr(elem.value, scope);
+						this.assertAssignable(embed, vt, elem.value);
+						elem._isEmbedInit = true;
+					} else {
+						this.err(`Unknown field '${keyName}'`, elem.key);
+					}
+				}
+			} else {
+				this.checkExpr(elem, scope);
+			}
+		}
+		return t;
+	},
+
+	_checkSliceArrayCompositeLit(expr, scope, t, base, typeNode) {
+		for (const elem of expr.elems) {
+			if (elem.kind === "CompositeLit" && elem.typeExpr === null) {
+				const et = this.checkCompositeLit(elem, scope, base.elem);
+				elem._type = et;
+			} else if (elem.kind === "KeyValueExpr") {
+				const vt = this.checkExpr(elem.value, scope);
+				this.assertAssignable(base.elem, vt, elem.value);
+			} else {
+				const et = this.checkExpr(elem, scope);
+				this.assertAssignable(base.elem, et, elem);
+			}
+		}
+
+		// Composite literal element count validation for explicit-size arrays
+		if (base.kind === "array" && base.size != null && !typeNode?.inferLen) {
+			const maxIndex = computeMaxIndex(expr.elems);
+			if (maxIndex >= base.size) {
+				this.err(
+					`array index ${maxIndex} out of bounds [0:${base.size}]`,
+					expr,
+				);
+			}
+		}
+
+		return t;
+	},
+
+	_checkMapCompositeLit(expr, scope, t, base) {
+		for (const elem of expr.elems) {
+			if (elem.kind === "KeyValueExpr") {
+				const kt = this.checkExpr(elem.key, scope);
+				// value may be an implicit composite lit
+				let vt;
+				if (
+					elem.value.kind === "CompositeLit" &&
+					elem.value.typeExpr === null
+				) {
+					vt = this.checkCompositeLit(elem.value, scope, base.value);
+					elem.value._type = vt;
+				} else {
+					vt = this.checkExpr(elem.value, scope);
+				}
+				this.assertAssignable(base.key, kt, elem.key);
+				this.assertAssignable(base.value, vt, elem.value);
+			}
+		}
+		return t;
 	},
 };
 

@@ -45,198 +45,21 @@ export const statementGenMethods = {
 			case "TypeDecl":
 				this.genTypeDeclWithMethods(stmt, []);
 				break;
-
-			case "DefineStmt": {
-				// Map comma-ok: v, ok := m[key]  →  let v = m[key]; let ok = key in m;
-				const rhsNode = stmt.rhs[0];
-				if (
-					stmt.rhs.length === 1 &&
-					stmt.lhs.length === 2 &&
-					rhsNode?.kind === "IndexExpr" &&
-					rhsNode.expr?._type?.kind === "map"
-				) {
-					this._genCommaOkMapIndex(stmt, rhsNode, true);
-					break;
-				}
-				const rhs = stmt.rhs.map((e) => this.genExpr(e));
-				const lhs = stmt.lhs.map((e) => e.name ?? this.genExpr(e));
-				const redecls = stmt.lhs.map((e) => !!e._redecl);
-				const anyRedecl = redecls.some((r) => r);
-				if (lhs.length === 1) {
-					const isBoxed = this._boxedVars.has(lhs[0]);
-					const val = isBoxed && !redecls[0] ? `{ value: ${rhs[0]} }` : rhs[0];
-					if (redecls[0]) {
-						if (isBoxed) {
-							this.line(`${lhs[0]}.value = ${rhs[0]};`);
-						} else {
-							this.line(`${lhs[0]} = ${val};`);
-						}
-					} else {
-						this.line(`let ${lhs[0]} = ${val};`);
-					}
-				} else if (!anyRedecl) {
-					// All new: let [a, b] = ...
-					const rhsStr = rhs.length === 1 ? rhs[0] : `[${rhs.join(", ")}]`;
-					this.line(`let [${lhs.join(", ")}] = ${rhsStr};`);
-				} else {
-					// Mixed new/existing: emit separate statements
-					// First compute the tuple into a temp if needed
-					if (rhs.length === 1 && lhs.length > 1) {
-						const tmp = "__t";
-						this.line(`let ${tmp} = ${rhs[0]};`);
-						for (let i = 0; i < lhs.length; i++) {
-							const prefix = redecls[i] ? "" : "let ";
-							this.line(`${prefix}${lhs[i]} = ${tmp}[${i}];`);
-						}
-					} else {
-						for (let i = 0; i < lhs.length; i++) {
-							const prefix = redecls[i] ? "" : "let ";
-							this.line(`${prefix}${lhs[i]} = ${rhs[i]};`);
-						}
-					}
-				}
+			case "DefineStmt":
+				this._genDefineStmt(stmt);
 				break;
-			}
-
-			case "AssignStmt": {
-				// Complex compound assignment: z += w → z = z + w (with complex codegen)
-				if (
-					stmt.op !== "=" &&
-					stmt.lhs.length === 1 &&
-					stmt.rhs.length === 1 &&
-					isComplex(stmt.lhs[0]._type)
-				) {
-					const lhsStr = stmt.lhs[0].name ?? this.genExpr(stmt.lhs[0]);
-					const rhsExpr = this._genComplexOperand(stmt.rhs[0]);
-					const baseOp = stmt.op.slice(0, -1); // "+=" → "+"
-					let result;
-					switch (baseOp) {
-						case "+":
-							result = `{ re: ${lhsStr}.re + ${rhsExpr}.re, im: ${lhsStr}.im + ${rhsExpr}.im }`;
-							break;
-						case "-":
-							result = `{ re: ${lhsStr}.re - ${rhsExpr}.re, im: ${lhsStr}.im - ${rhsExpr}.im }`;
-							break;
-						case "*":
-							this._usesCmul = true;
-							result = `__cmul(${lhsStr}, ${rhsExpr})`;
-							break;
-						case "/":
-							this._usesCdiv = true;
-							result = `__cdiv(${lhsStr}, ${rhsExpr})`;
-							break;
-						default:
-							result = rhsExpr;
-					}
-					this.line(`${lhsStr} = ${result};`);
-					break;
-				}
-				// comma-ok map index: v, ok = m["key"]
-				if (stmt._commaOkMap) {
-					this._genCommaOkMapIndex(stmt, stmt.rhs[0], false);
-					break;
-				}
-				// comma-ok type assertion: v, ok = x.(T)
-				if (
-					stmt.lhs.length === 2 &&
-					stmt.rhs.length === 1 &&
-					stmt.rhs[0]._commaOk
-				) {
-					const val = this.genExpr(stmt.rhs[0]);
-					const [vName, okName] = stmt.lhs.map(
-						(e) => e.name ?? this.genExpr(e),
-					);
-					const tmp = "__ta";
-					this.line(`let ${tmp} = ${val};`);
-					if (vName !== "_") this.line(`${vName} = ${tmp}[0];`);
-					if (okName !== "_") this.line(`${okName} = ${tmp}[1];`);
-					break;
-				}
-				const rhs = stmt.rhs.map((e) => this.genExpr(e));
-				for (const e of stmt.lhs) if (e.kind === "IndexExpr") e._lvalue = true;
-				const lhs = stmt.lhs.map((e) => {
-					if (
-						e.kind === "Ident" &&
-						e.name !== "_" &&
-						this._boxedVars.has(e.name)
-					)
-						return `${e.name}.value`;
-					return e.name ?? this.genExpr(e);
-				});
-				// Filter out blank identifier assignments entirely
-				const pairs = lhs.map((l, i) => ({ l, r: rhs[i] ?? rhs[0] }));
-				const active = pairs.filter((p) => p.l !== "_");
-				if (active.length === 0) {
-					// All _ — still need to evaluate rhs for side effects
-					if (rhs.length > 0) this.line(`${rhs[0]};`);
-				} else if (lhs.length === 1) {
-					this.line(`${active[0].l} ${stmt.op} ${active[0].r};`);
-				} else {
-					// multi-assign: emit only non-blank targets
-					const rhsStr = rhs.length === 1 ? rhs[0] : `[${rhs.join(", ")}]`;
-					if (active.length === pairs.length) {
-						this.line(`[${lhs.join(", ")}] = ${rhsStr};`);
-					} else {
-						// Some blanks — use temp and assign only non-blank
-						const tmp = "__t";
-						this.line(`let ${tmp} = ${rhsStr};`);
-						for (let i = 0; i < lhs.length; i++) {
-							if (lhs[i] !== "_") {
-								const src = rhs.length === 1 ? `${tmp}[${i}]` : rhs[i];
-								this.line(`${lhs[i]} ${stmt.op} ${src};`);
-							}
-						}
-					}
-				}
+			case "AssignStmt":
+				this._genAssignStmt(stmt);
 				break;
-			}
-
 			case "IncDecStmt":
 				this.line(`${this.genExpr(stmt.expr)}${stmt.op};`);
 				break;
-
 			case "ExprStmt":
 				this.line(`${this.genExpr(stmt.expr)};`);
 				break;
-
-			case "ReturnStmt": {
-				if (this._inIteratorBody) {
-					if (stmt.values.length === 0 && !this.namedReturnVars?.length) {
-						this.line(`${this._iterReturnFlag} = true; return false;`);
-					} else {
-						const vals =
-							stmt.values.length > 0
-								? stmt.values.map((v) => this.genExpr(v))
-								: (this.namedReturnVars ?? []);
-						const stored = vals.length === 1 ? vals[0] : `[${vals.join(", ")}]`;
-						this.line(
-							`${this._iterReturnFlag} = true; ${this._iterReturnVar} = ${stored}; return false;`,
-						);
-					}
-					break;
-				}
-				if (stmt.values.length === 0) {
-					// bare return — emit named return vars if present
-					if (this.namedReturnVars?.length > 0) {
-						const vars = this.namedReturnVars;
-						this.line(
-							vars.length === 1
-								? `return ${vars[0]};`
-								: `return [${vars.join(", ")}];`,
-						);
-					} else {
-						this.line("return;");
-					}
-				} else if (stmt.values.length === 1) {
-					this.line(`return ${this.genExpr(stmt.values[0])};`);
-				} else {
-					this.line(
-						`return [${stmt.values.map((v) => this.genExpr(v)).join(", ")}];`,
-					);
-				}
+			case "ReturnStmt":
+				this._genReturnStmt(stmt);
 				break;
-			}
-
 			case "IfStmt": {
 				if (stmt.init) {
 					// Wrap in a block so init variable is scoped
@@ -251,52 +74,30 @@ export const statementGenMethods = {
 				}
 				break;
 			}
-
 			case "ForStmt":
 				this.genFor(stmt);
 				break;
-
 			case "SwitchStmt":
 				this.genSwitch(stmt);
 				break;
-
 			case "TypeSwitchStmt":
 				this.genTypeSwitch(stmt);
 				break;
-
 			case "DeferStmt":
 				this.line(`__defers.push(() => { ${this.genExpr(stmt.call)}; });`);
 				break;
-
 			case "LabeledStmt":
 				this.line(`${stmt.label}:`);
 				this.genStmt(stmt.body);
 				break;
-
 			case "BranchStmt":
-				if (this._inIteratorBody && !stmt.label) {
-					if (stmt.keyword === "break") {
-						this.line(`${this._iterBreakFlag} = true; return false;`);
-						break;
-					}
-					if (stmt.keyword === "continue") {
-						this.line("return true;");
-						break;
-					}
-				}
-				if (stmt.keyword !== "fallthrough")
-					this.line(
-						stmt.label ? `${stmt.keyword} ${stmt.label};` : `${stmt.keyword};`,
-					);
-				// fallthrough: omit — JS switch falls through naturally without a break
+				this._genBranchStmt(stmt);
 				break;
-
 			case "Block":
 				this.line("{");
 				this.indented(() => this.genBlock(stmt));
 				this.line("}");
 				break;
-
 			default:
 				throw new Error(`CodeGen: unhandled statement kind '${stmt.kind}'`);
 		}
@@ -304,6 +105,198 @@ export const statementGenMethods = {
 		if (srcLine != null && this.out.length > _line0) {
 			this._srcMappings.push({ genLine: _line0, srcLine: srcLine - 1 });
 		}
+	},
+
+	_genDefineStmt(stmt) {
+		// Map comma-ok: v, ok := m[key]  →  let v = m[key]; let ok = key in m;
+		const rhsNode = stmt.rhs[0];
+		if (
+			stmt.rhs.length === 1 &&
+			stmt.lhs.length === 2 &&
+			rhsNode?.kind === "IndexExpr" &&
+			rhsNode.expr?._type?.kind === "map"
+		) {
+			this._genCommaOkMapIndex(stmt, rhsNode, true);
+			return;
+		}
+		const rhs = stmt.rhs.map((e) => this.genExpr(e));
+		const lhs = stmt.lhs.map((e) => e.name ?? this.genExpr(e));
+		const redecls = stmt.lhs.map((e) => !!e._redecl);
+		const anyRedecl = redecls.some((r) => r);
+		if (lhs.length === 1) {
+			const isBoxed = this._boxedVars.has(lhs[0]);
+			const val = isBoxed && !redecls[0] ? `{ value: ${rhs[0]} }` : rhs[0];
+			if (redecls[0]) {
+				if (isBoxed) {
+					this.line(`${lhs[0]}.value = ${rhs[0]};`);
+				} else {
+					this.line(`${lhs[0]} = ${val};`);
+				}
+			} else {
+				this.line(`let ${lhs[0]} = ${val};`);
+			}
+		} else if (!anyRedecl) {
+			// All new: let [a, b] = ...
+			const rhsStr = rhs.length === 1 ? rhs[0] : `[${rhs.join(", ")}]`;
+			this.line(`let [${lhs.join(", ")}] = ${rhsStr};`);
+		} else {
+			// Mixed new/existing: emit separate statements
+			// First compute the tuple into a temp if needed
+			if (rhs.length === 1 && lhs.length > 1) {
+				const tmp = "__t";
+				this.line(`let ${tmp} = ${rhs[0]};`);
+				for (let i = 0; i < lhs.length; i++) {
+					const prefix = redecls[i] ? "" : "let ";
+					this.line(`${prefix}${lhs[i]} = ${tmp}[${i}];`);
+				}
+			} else {
+				for (let i = 0; i < lhs.length; i++) {
+					const prefix = redecls[i] ? "" : "let ";
+					this.line(`${prefix}${lhs[i]} = ${rhs[i]};`);
+				}
+			}
+		}
+	},
+
+	_genAssignStmt(stmt) {
+		// Complex compound assignment: z += w → z = z + w (with complex codegen)
+		if (
+			stmt.op !== "=" &&
+			stmt.lhs.length === 1 &&
+			stmt.rhs.length === 1 &&
+			isComplex(stmt.lhs[0]._type)
+		) {
+			const lhsStr = stmt.lhs[0].name ?? this.genExpr(stmt.lhs[0]);
+			const rhsExpr = this._genComplexOperand(stmt.rhs[0]);
+			const baseOp = stmt.op.slice(0, -1); // "+=" → "+"
+			let result;
+			switch (baseOp) {
+				case "+":
+					result = `{ re: ${lhsStr}.re + ${rhsExpr}.re, im: ${lhsStr}.im + ${rhsExpr}.im }`;
+					break;
+				case "-":
+					result = `{ re: ${lhsStr}.re - ${rhsExpr}.re, im: ${lhsStr}.im - ${rhsExpr}.im }`;
+					break;
+				case "*":
+					this._usesCmul = true;
+					result = `__cmul(${lhsStr}, ${rhsExpr})`;
+					break;
+				case "/":
+					this._usesCdiv = true;
+					result = `__cdiv(${lhsStr}, ${rhsExpr})`;
+					break;
+				default:
+					result = rhsExpr;
+			}
+			this.line(`${lhsStr} = ${result};`);
+			return;
+		}
+		// comma-ok map index: v, ok = m["key"]
+		if (stmt._commaOkMap) {
+			this._genCommaOkMapIndex(stmt, stmt.rhs[0], false);
+			return;
+		}
+		// comma-ok type assertion: v, ok = x.(T)
+		if (
+			stmt.lhs.length === 2 &&
+			stmt.rhs.length === 1 &&
+			stmt.rhs[0]._commaOk
+		) {
+			const val = this.genExpr(stmt.rhs[0]);
+			const [vName, okName] = stmt.lhs.map((e) => e.name ?? this.genExpr(e));
+			const tmp = "__ta";
+			this.line(`let ${tmp} = ${val};`);
+			if (vName !== "_") this.line(`${vName} = ${tmp}[0];`);
+			if (okName !== "_") this.line(`${okName} = ${tmp}[1];`);
+			return;
+		}
+		const rhs = stmt.rhs.map((e) => this.genExpr(e));
+		for (const e of stmt.lhs) if (e.kind === "IndexExpr") e._lvalue = true;
+		const lhs = stmt.lhs.map((e) => {
+			if (e.kind === "Ident" && e.name !== "_" && this._boxedVars.has(e.name))
+				return `${e.name}.value`;
+			return e.name ?? this.genExpr(e);
+		});
+		// Filter out blank identifier assignments entirely
+		const pairs = lhs.map((l, i) => ({ l, r: rhs[i] ?? rhs[0] }));
+		const active = pairs.filter((p) => p.l !== "_");
+		if (active.length === 0) {
+			// All _ — still need to evaluate rhs for side effects
+			if (rhs.length > 0) this.line(`${rhs[0]};`);
+		} else if (lhs.length === 1) {
+			this.line(`${active[0].l} ${stmt.op} ${active[0].r};`);
+		} else {
+			// multi-assign: emit only non-blank targets
+			const rhsStr = rhs.length === 1 ? rhs[0] : `[${rhs.join(", ")}]`;
+			if (active.length === pairs.length) {
+				this.line(`[${lhs.join(", ")}] = ${rhsStr};`);
+			} else {
+				// Some blanks — use temp and assign only non-blank
+				const tmp = "__t";
+				this.line(`let ${tmp} = ${rhsStr};`);
+				for (let i = 0; i < lhs.length; i++) {
+					if (lhs[i] !== "_") {
+						const src = rhs.length === 1 ? `${tmp}[${i}]` : rhs[i];
+						this.line(`${lhs[i]} ${stmt.op} ${src};`);
+					}
+				}
+			}
+		}
+	},
+
+	_genReturnStmt(stmt) {
+		if (this._inIteratorBody) {
+			if (stmt.values.length === 0 && !this.namedReturnVars?.length) {
+				this.line(`${this._iterReturnFlag} = true; return false;`);
+			} else {
+				const vals =
+					stmt.values.length > 0
+						? stmt.values.map((v) => this.genExpr(v))
+						: (this.namedReturnVars ?? []);
+				const stored = vals.length === 1 ? vals[0] : `[${vals.join(", ")}]`;
+				this.line(
+					`${this._iterReturnFlag} = true; ${this._iterReturnVar} = ${stored}; return false;`,
+				);
+			}
+			return;
+		}
+		if (stmt.values.length === 0) {
+			// bare return — emit named return vars if present
+			if (this.namedReturnVars?.length > 0) {
+				const vars = this.namedReturnVars;
+				this.line(
+					vars.length === 1
+						? `return ${vars[0]};`
+						: `return [${vars.join(", ")}];`,
+				);
+			} else {
+				this.line("return;");
+			}
+		} else if (stmt.values.length === 1) {
+			this.line(`return ${this.genExpr(stmt.values[0])};`);
+		} else {
+			this.line(
+				`return [${stmt.values.map((v) => this.genExpr(v)).join(", ")}];`,
+			);
+		}
+	},
+
+	_genBranchStmt(stmt) {
+		if (this._inIteratorBody && !stmt.label) {
+			if (stmt.keyword === "break") {
+				this.line(`${this._iterBreakFlag} = true; return false;`);
+				return;
+			}
+			if (stmt.keyword === "continue") {
+				this.line("return true;");
+				return;
+			}
+		}
+		if (stmt.keyword !== "fallthrough")
+			this.line(
+				stmt.label ? `${stmt.keyword} ${stmt.label};` : `${stmt.keyword};`,
+			);
+		// fallthrough: omit — JS switch falls through naturally without a break
 	},
 
 	_genIf(stmt) {

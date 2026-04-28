@@ -374,70 +374,68 @@ export class Lexer {
 	}
 
 	readNumber() {
-		let n = "";
-		let isFloat = false;
-
-		// Check for prefix: 0b, 0o, 0x
 		const first = this.advance();
-		n += first;
+		const n = first;
 		if (first === "0") {
 			const p = this.peek();
-			if (p === "b" || p === "B") {
-				n += this.advance();
-				while (this.pos < this.src.length && /[01_]/.test(this.peek())) {
-					const ch = this.advance();
-					if (ch !== "_") n += ch;
-				}
-				return { n, isFloat: false };
-			}
-			if (p === "o" || p === "O") {
-				n += this.advance();
-				while (this.pos < this.src.length && /[0-7_]/.test(this.peek())) {
-					const ch = this.advance();
-					if (ch !== "_") n += ch;
-				}
-				return { n, isFloat: false };
-			}
-			if (p === "x" || p === "X") {
-				n += this.advance();
+			if (p === "b" || p === "B") return this._readBinaryNumber(n);
+			if (p === "o" || p === "O") return this._readOctalNumber(n);
+			if (p === "x" || p === "X") return this._readHexNumber(n);
+		}
+		return this._readDecimalNumber(n);
+	}
+
+	_readBinaryNumber(n) {
+		n += this.advance(); // consume b/B
+		while (this.pos < this.src.length && /[01_]/.test(this.peek())) {
+			const ch = this.advance();
+			if (ch !== "_") n += ch;
+		}
+		return { n, isFloat: false };
+	}
+
+	_readOctalNumber(n) {
+		n += this.advance(); // consume o/O
+		while (this.pos < this.src.length && /[0-7_]/.test(this.peek())) {
+			const ch = this.advance();
+			if (ch !== "_") n += ch;
+		}
+		return { n, isFloat: false };
+	}
+
+	_readHexNumber(n) {
+		n += this.advance(); // consume x/X
+		while (this.pos < this.src.length && /[0-9a-fA-F_]/.test(this.peek())) {
+			const ch = this.advance();
+			if (ch !== "_") n += ch;
+		}
+		// Hex float: 0x1.Fp10 or 0xAp-2
+		if (this.peek() === "." || this.peek() === "p" || this.peek() === "P") {
+			let frac = "";
+			if (this.peek() === ".") {
+				this.advance(); // skip the dot (don't add to n)
 				while (this.pos < this.src.length && /[0-9a-fA-F_]/.test(this.peek())) {
 					const ch = this.advance();
-					if (ch !== "_") n += ch;
+					if (ch !== "_") frac += ch;
 				}
-				// Hex float: 0x1.Fp10 or 0xAp-2
-				if (this.peek() === "." || this.peek() === "p" || this.peek() === "P") {
-					let frac = "";
-					if (this.peek() === ".") {
-						this.advance(); // skip the dot (don't add to n)
-						while (
-							this.pos < this.src.length &&
-							/[0-9a-fA-F_]/.test(this.peek())
-						) {
-							const ch = this.advance();
-							if (ch !== "_") frac += ch;
-						}
-					}
-					if (this.peek() === "p" || this.peek() === "P") {
-						this.advance(); // skip p/P
-						let exp = "";
-						if (this.peek() === "+" || this.peek() === "-")
-							exp += this.advance();
-						while (this.pos < this.src.length && /[0-9]/.test(this.peek()))
-							exp += this.advance();
-						// Evaluate: JS can't parse hex floats, so convert manually
-						// n is "0x1" (integer hex part), frac is hex fractional digits
-						let mantissa = Number(n);
-						if (frac) {
-							mantissa += Number.parseInt(frac, 16) / 16 ** frac.length;
-						}
-						const value = mantissa * 2 ** Number(exp);
-						return { n: String(value), isFloat: true };
-					}
-				}
-				return { n, isFloat: false };
+			}
+			if (this.peek() === "p" || this.peek() === "P") {
+				this.advance(); // skip p/P
+				let exp = "";
+				if (this.peek() === "+" || this.peek() === "-") exp += this.advance();
+				while (this.pos < this.src.length && /[0-9]/.test(this.peek()))
+					exp += this.advance();
+				// JS can't parse hex floats natively — convert manually
+				let mantissa = Number(n);
+				if (frac) mantissa += Number.parseInt(frac, 16) / 16 ** frac.length;
+				return { n: String(mantissa * 2 ** Number(exp)), isFloat: true };
 			}
 		}
+		return { n, isFloat: false };
+	}
 
+	_readDecimalNumber(n) {
+		let isFloat = false;
 		while (this.pos < this.src.length && /[0-9_]/.test(this.peek())) {
 			const ch = this.advance();
 			if (ch !== "_") n += ch;
@@ -534,113 +532,116 @@ export class Lexer {
 
 			// Operators & punctuation
 			this.advance();
-			switch (ch) {
-				case "+":
-					if (this.match("+")) this.push(T.INC, "++", l, c);
-					else if (this.match("=")) this.push(T.PLUS_ASSIGN, "+=", l, c);
-					else this.push(T.PLUS, "+", l, c);
-					break;
-				case "-":
-					if (this.match("-")) this.push(T.DEC, "--", l, c);
-					else if (this.match("=")) this.push(T.MINUS_ASSIGN, "-=", l, c);
-					else this.push(T.MINUS, "-", l, c);
-					break;
-				case "*":
-					if (this.match("=")) this.push(T.STAR_ASSIGN, "*=", l, c);
-					else this.push(T.STAR, "*", l, c);
-					break;
-				case "/":
-					if (this.match("=")) this.push(T.SLASH_ASSIGN, "/=", l, c);
-					else this.push(T.SLASH, "/", l, c);
-					break;
-				case "%":
-					if (this.match("=")) this.push(T.PERCENT_ASSIGN, "%=", l, c);
-					else this.push(T.PERCENT, "%", l, c);
-					break;
-				case "=":
-					if (this.match("=")) this.push(T.EQ, "==", l, c);
-					else this.push(T.ASSIGN, "=", l, c);
-					break;
-				case "!":
-					if (this.match("=")) this.push(T.NEQ, "!=", l, c);
-					else this.push(T.NOT, "!", l, c);
-					break;
-				case "<":
-					if (this.match("<")) {
-						if (this.match("=")) this.push(T.LSHIFT_ASSIGN, "<<=", l, c);
-						else this.push(T.LSHIFT, "<<", l, c);
-					} else if (this.match("=")) this.push(T.LTE, "<=", l, c);
-					else this.push(T.LT, "<", l, c);
-					break;
-				case ">":
-					if (this.match(">")) {
-						if (this.match("=")) this.push(T.RSHIFT_ASSIGN, ">>=", l, c);
-						else this.push(T.RSHIFT, ">>", l, c);
-					} else if (this.match("=")) this.push(T.GTE, ">=", l, c);
-					else this.push(T.GT, ">", l, c);
-					break;
-				case "&":
-					if (this.match("&")) this.push(T.AND, "&&", l, c);
-					else if (this.match("^")) this.push(T.AND_NOT, "&^", l, c);
-					else if (this.match("=")) this.push(T.AMP_ASSIGN, "&=", l, c);
-					else this.push(T.AMP, "&", l, c);
-					break;
-				case "|":
-					if (this.match("|")) this.push(T.OR, "||", l, c);
-					else if (this.match("=")) this.push(T.PIPE_ASSIGN, "|=", l, c);
-					else this.push(T.PIPE, "|", l, c);
-					break;
-				case "^":
-					if (this.match("=")) this.push(T.CARET_ASSIGN, "^=", l, c);
-					else this.push(T.CARET, "^", l, c);
-					break;
-				case "~":
-					this.push(T.TILDE, "~", l, c);
-					break;
-				case ":":
-					if (this.match("=")) this.push(T.DEFINE, ":=", l, c);
-					else this.push(T.COLON, ":", l, c);
-					break;
-				case ".":
-					if (this.peek() === "." && this.peek(1) === ".") {
-						this.advance();
-						this.advance();
-						this.push(T.ELLIPSIS, "...", l, c);
-					} else {
-						this.push(T.DOT, ".", l, c);
-					}
-					break;
-				case "(":
-					this.push(T.LPAREN, "(", l, c);
-					break;
-				case ")":
-					this.push(T.RPAREN, ")", l, c);
-					break;
-				case "{":
-					this.push(T.LBRACE, "{", l, c);
-					break;
-				case "}":
-					this.push(T.RBRACE, "}", l, c);
-					break;
-				case "[":
-					this.push(T.LBRACKET, "[", l, c);
-					break;
-				case "]":
-					this.push(T.RBRACKET, "]", l, c);
-					break;
-				case ",":
-					this.push(T.COMMA, ",", l, c);
-					break;
-				case ";":
-					this.push(T.SEMICOLON, ";", l, c);
-					break;
-				default:
-					this.err(`Unexpected character: '${ch}'`);
-			}
+			this._readOperator(ch, l, c);
 		}
 
 		if (this.shouldSemi()) this.push(T.SEMICOLON, ";", this.line, this.col);
 		this.push(T.EOF, "", this.line, this.col);
 		return this.tokens;
+	}
+	_readOperator(ch, l, c) {
+		switch (ch) {
+			case "+":
+				if (this.match("+")) this.push(T.INC, "++", l, c);
+				else if (this.match("=")) this.push(T.PLUS_ASSIGN, "+=", l, c);
+				else this.push(T.PLUS, "+", l, c);
+				break;
+			case "-":
+				if (this.match("-")) this.push(T.DEC, "--", l, c);
+				else if (this.match("=")) this.push(T.MINUS_ASSIGN, "-=", l, c);
+				else this.push(T.MINUS, "-", l, c);
+				break;
+			case "*":
+				if (this.match("=")) this.push(T.STAR_ASSIGN, "*=", l, c);
+				else this.push(T.STAR, "*", l, c);
+				break;
+			case "/":
+				if (this.match("=")) this.push(T.SLASH_ASSIGN, "/=", l, c);
+				else this.push(T.SLASH, "/", l, c);
+				break;
+			case "%":
+				if (this.match("=")) this.push(T.PERCENT_ASSIGN, "%=", l, c);
+				else this.push(T.PERCENT, "%", l, c);
+				break;
+			case "=":
+				if (this.match("=")) this.push(T.EQ, "==", l, c);
+				else this.push(T.ASSIGN, "=", l, c);
+				break;
+			case "!":
+				if (this.match("=")) this.push(T.NEQ, "!=", l, c);
+				else this.push(T.NOT, "!", l, c);
+				break;
+			case "<":
+				if (this.match("<")) {
+					if (this.match("=")) this.push(T.LSHIFT_ASSIGN, "<<=", l, c);
+					else this.push(T.LSHIFT, "<<", l, c);
+				} else if (this.match("=")) this.push(T.LTE, "<=", l, c);
+				else this.push(T.LT, "<", l, c);
+				break;
+			case ">":
+				if (this.match(">")) {
+					if (this.match("=")) this.push(T.RSHIFT_ASSIGN, ">>=", l, c);
+					else this.push(T.RSHIFT, ">>", l, c);
+				} else if (this.match("=")) this.push(T.GTE, ">=", l, c);
+				else this.push(T.GT, ">", l, c);
+				break;
+			case "&":
+				if (this.match("&")) this.push(T.AND, "&&", l, c);
+				else if (this.match("^")) this.push(T.AND_NOT, "&^", l, c);
+				else if (this.match("=")) this.push(T.AMP_ASSIGN, "&=", l, c);
+				else this.push(T.AMP, "&", l, c);
+				break;
+			case "|":
+				if (this.match("|")) this.push(T.OR, "||", l, c);
+				else if (this.match("=")) this.push(T.PIPE_ASSIGN, "|=", l, c);
+				else this.push(T.PIPE, "|", l, c);
+				break;
+			case "^":
+				if (this.match("=")) this.push(T.CARET_ASSIGN, "^=", l, c);
+				else this.push(T.CARET, "^", l, c);
+				break;
+			case "~":
+				this.push(T.TILDE, "~", l, c);
+				break;
+			case ":":
+				if (this.match("=")) this.push(T.DEFINE, ":=", l, c);
+				else this.push(T.COLON, ":", l, c);
+				break;
+			case ".":
+				if (this.peek() === "." && this.peek(1) === ".") {
+					this.advance();
+					this.advance();
+					this.push(T.ELLIPSIS, "...", l, c);
+				} else {
+					this.push(T.DOT, ".", l, c);
+				}
+				break;
+			case "(":
+				this.push(T.LPAREN, "(", l, c);
+				break;
+			case ")":
+				this.push(T.RPAREN, ")", l, c);
+				break;
+			case "{":
+				this.push(T.LBRACE, "{", l, c);
+				break;
+			case "}":
+				this.push(T.RBRACE, "}", l, c);
+				break;
+			case "[":
+				this.push(T.LBRACKET, "[", l, c);
+				break;
+			case "]":
+				this.push(T.RBRACKET, "]", l, c);
+				break;
+			case ",":
+				this.push(T.COMMA, ",", l, c);
+				break;
+			case ";":
+				this.push(T.SEMICOLON, ";", l, c);
+				break;
+			default:
+				this.err(`Unexpected character: '${ch}'`);
+		}
 	}
 }
