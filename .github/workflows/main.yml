@@ -27,7 +27,10 @@ jobs:
             - name: Install Playwright browsers
               run: npx playwright install --with-deps chromium
 
-            - name: Run linter
+            - name: Install Sentrux
+              run: curl -fsSL https://raw.githubusercontent.com/sentrux/sentrux/main/install.sh | sh
+
+            - name: Check
               run: npm run check
 
             - name: Run tests

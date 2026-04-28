@@ -75,6 +75,143 @@ const SPACE_AFTER_KW = new Set([
 // ── Tokenizer ────────────────────────────────────────────────
 // Splits JS source into tokens preserving strings, template literals, and regexes.
 
+const THREE_CHAR_OPS = new Set(["===", "!==", "...", ">>>", "**="]);
+const TWO_CHAR_OPS = new Set([
+	"==",
+	"!=",
+	"<=",
+	">=",
+	"&&",
+	"||",
+	"++",
+	"--",
+	"+=",
+	"-=",
+	"*=",
+	"/=",
+	"=>",
+	"**",
+	"??",
+	"?.",
+	">>",
+	"<<",
+]);
+// Tokens/values after which a `/` starts a regex rather than a division
+const REGEX_CONTEXT_VALUES = new Set([
+	"(",
+	"[",
+	",",
+	";",
+	"!",
+	"=",
+	"==",
+	"===",
+	"!=",
+	"!==",
+	":",
+	"return",
+	"case",
+	"typeof",
+	"{",
+	"&&",
+	"||",
+]);
+
+function _isRegexContext(tokens) {
+	const prev = lastNonWhitespaceToken(tokens);
+	if (!prev) return true;
+	return prev.type === "op" || REGEX_CONTEXT_VALUES.has(prev.value);
+}
+
+function _scanRegexLiteral(code, i, len) {
+	let j = i + 1;
+	let escaped = false;
+	let inCharClass = false;
+	while (j < len) {
+		const rc = code[j];
+		if (escaped) {
+			escaped = false;
+		} else if (rc === "\\") {
+			escaped = true;
+		} else if (rc === "[") {
+			inCharClass = true;
+		} else if (rc === "]") {
+			inCharClass = false;
+		} else if (rc === "/" && !inCharClass) {
+			j++;
+			break;
+		}
+		j++;
+	}
+	// consume flags
+	while (j < len && /[gimsuy]/.test(code[j])) j++;
+	return j;
+}
+
+function _scanStringLiteral(code, i, len, quote) {
+	let j = i + 1;
+	while (j < len) {
+		if (code[j] === "\\" && j + 1 < len) {
+			j += 2;
+		} else if (code[j] === quote) {
+			j++;
+			break;
+		} else {
+			j++;
+		}
+	}
+	return j;
+}
+
+function _scanTemplateLiteral(code, i, len) {
+	let j = i + 1;
+	let depth = 1;
+	let braceDepth = 0;
+	while (j < len && depth > 0) {
+		if (code[j] === "\\" && j + 1 < len) {
+			j += 2;
+			continue;
+		}
+		if (braceDepth === 0 && code[j] === "`") {
+			depth--;
+			j++;
+			continue;
+		}
+		if (code[j] === "$" && code[j + 1] === "{" && braceDepth === 0) {
+			braceDepth = 1;
+			j += 2;
+			continue;
+		}
+		if (braceDepth > 0) {
+			if (code[j] === "{") braceDepth++;
+			else if (code[j] === "}") braceDepth--;
+		}
+		j++;
+	}
+	return j;
+}
+
+function _scanNumber(code, i, len) {
+	const ch = code[i];
+	let j = i + 1;
+	if (ch === "0" && j < len && (code[j] === "x" || code[j] === "X")) {
+		j++;
+		while (j < len && /[0-9a-fA-F]/.test(code[j])) j++;
+	} else {
+		while (j < len && /[0-9]/.test(code[j])) j++;
+		if (j < len && code[j] === ".") {
+			j++;
+			while (j < len && /[0-9]/.test(code[j])) j++;
+		}
+		if (j < len && (code[j] === "e" || code[j] === "E")) {
+			j++;
+			if (j < len && (code[j] === "+" || code[j] === "-")) j++;
+			while (j < len && /[0-9]/.test(code[j])) j++;
+		}
+	}
+	return j;
+}
+
 function tokenize(code) {
 	const tokens = [];
 	let i = 0;
@@ -91,7 +228,6 @@ function tokenize(code) {
 			i = end;
 			continue;
 		}
-
 		// Block comment
 		if (ch === "/" && code[i + 1] === "*") {
 			const end = code.indexOf("*/", i + 2);
@@ -100,110 +236,27 @@ function tokenize(code) {
 			i = closeAt;
 			continue;
 		}
-
 		// Regex literal — only after certain tokens
-		if (ch === "/") {
-			const prev = lastNonWhitespaceToken(tokens);
-			const prevVal = prev?.value;
-			const isRegexContext =
-				!prev ||
-				prev.type === "op" ||
-				prevVal === "(" ||
-				prevVal === "[" ||
-				prevVal === "," ||
-				prevVal === ";" ||
-				prevVal === "!" ||
-				prevVal === "=" ||
-				prevVal === "==" ||
-				prevVal === "===" ||
-				prevVal === "!=" ||
-				prevVal === "!==" ||
-				prevVal === ":" ||
-				prevVal === "return" ||
-				prevVal === "case" ||
-				prevVal === "typeof" ||
-				prevVal === "{" ||
-				prevVal === "&&" ||
-				prevVal === "||";
-			if (isRegexContext) {
-				let j = i + 1;
-				let escaped = false;
-				let inCharClass = false;
-				while (j < len) {
-					const rc = code[j];
-					if (escaped) {
-						escaped = false;
-					} else if (rc === "\\") {
-						escaped = true;
-					} else if (rc === "[") {
-						inCharClass = true;
-					} else if (rc === "]") {
-						inCharClass = false;
-					} else if (rc === "/" && !inCharClass) {
-						j++;
-						break;
-					}
-					j++;
-				}
-				// consume flags
-				while (j < len && /[gimsuy]/.test(code[j])) j++;
-				tokens.push({ type: "regex", value: code.slice(i, j) });
-				i = j;
-				continue;
-			}
+		if (ch === "/" && _isRegexContext(tokens)) {
+			const j = _scanRegexLiteral(code, i, len);
+			tokens.push({ type: "regex", value: code.slice(i, j) });
+			i = j;
+			continue;
 		}
-
-		// String literals (double or single quote)
+		// String literals
 		if (ch === '"' || ch === "'") {
-			let j = i + 1;
-			while (j < len) {
-				if (code[j] === "\\" && j + 1 < len) {
-					j += 2;
-				} else if (code[j] === ch) {
-					j++;
-					break;
-				} else {
-					j++;
-				}
-			}
+			const j = _scanStringLiteral(code, i, len, ch);
 			tokens.push({ type: "string", value: code.slice(i, j) });
 			i = j;
 			continue;
 		}
-
 		// Template literal
 		if (ch === "`") {
-			let j = i + 1;
-			let depth = 1;
-			let braceDepth = 0;
-			while (j < len && depth > 0) {
-				if (code[j] === "\\" && j + 1 < len) {
-					j += 2;
-					continue;
-				}
-				if (braceDepth === 0 && code[j] === "`") {
-					depth--;
-					j++;
-					continue;
-				}
-				if (code[j] === "$" && code[j + 1] === "{" && braceDepth === 0) {
-					braceDepth = 1;
-					j += 2;
-					continue;
-				}
-				if (braceDepth > 0) {
-					if (code[j] === "{") braceDepth++;
-					else if (code[j] === "}") {
-						braceDepth--;
-					}
-				}
-				j++;
-			}
+			const j = _scanTemplateLiteral(code, i, len);
 			tokens.push({ type: "template", value: code.slice(i, j) });
 			i = j;
 			continue;
 		}
-
 		// Whitespace
 		if (/\s/.test(ch)) {
 			let j = i + 1;
@@ -212,7 +265,6 @@ function tokenize(code) {
 			i = j;
 			continue;
 		}
-
 		// Identifier or keyword
 		if (/[a-zA-Z_$]/.test(ch)) {
 			let j = i + 1;
@@ -225,73 +277,29 @@ function tokenize(code) {
 			i = j;
 			continue;
 		}
-
 		// Number
 		if (
 			/[0-9]/.test(ch) ||
 			(ch === "." && i + 1 < len && /[0-9]/.test(code[i + 1]))
 		) {
-			let j = i + 1;
-			// hex
-			if (ch === "0" && j < len && (code[j] === "x" || code[j] === "X")) {
-				j++;
-				while (j < len && /[0-9a-fA-F]/.test(code[j])) j++;
-			} else {
-				while (j < len && /[0-9]/.test(code[j])) j++;
-				if (j < len && code[j] === ".") {
-					j++;
-					while (j < len && /[0-9]/.test(code[j])) j++;
-				}
-				if (j < len && (code[j] === "e" || code[j] === "E")) {
-					j++;
-					if (j < len && (code[j] === "+" || code[j] === "-")) j++;
-					while (j < len && /[0-9]/.test(code[j])) j++;
-				}
-			}
+			const j = _scanNumber(code, i, len);
 			tokens.push({ type: "num", value: code.slice(i, j) });
 			i = j;
 			continue;
 		}
-
 		// Multi-char operators
-		const two = code.slice(i, i + 2);
 		const three = code.slice(i, i + 3);
-		if (
-			three === "===" ||
-			three === "!==" ||
-			three === "..." ||
-			three === ">>>" ||
-			three === "**="
-		) {
+		if (THREE_CHAR_OPS.has(three)) {
 			tokens.push({ type: "op", value: three });
 			i += 3;
 			continue;
 		}
-		if (
-			two === "==" ||
-			two === "!=" ||
-			two === "<=" ||
-			two === ">=" ||
-			two === "&&" ||
-			two === "||" ||
-			two === "++" ||
-			two === "--" ||
-			two === "+=" ||
-			two === "-=" ||
-			two === "*=" ||
-			two === "/=" ||
-			two === "=>" ||
-			two === "**" ||
-			two === "??" ||
-			two === "?." ||
-			two === ">>" ||
-			two === "<<"
-		) {
+		const two = code.slice(i, i + 2);
+		if (TWO_CHAR_OPS.has(two)) {
 			tokens.push({ type: "op", value: two });
 			i += 2;
 			continue;
 		}
-
 		// Single-char operator/punctuation
 		tokens.push({ type: "op", value: ch });
 		i += 1;
@@ -314,39 +322,37 @@ function isIdentLike(type) {
 	return type === "ident" || type === "kw" || type === "num";
 }
 
+// Token types that always need a space after a keyword
+const SPACE_AFTER_KW_RIGHT_TYPES = new Set([
+	"ident",
+	"kw",
+	"num",
+	"string",
+	"template",
+	"regex",
+]);
+// Operator values that do NOT need a space after a keyword
+const NO_SPACE_AFTER_KW_OPS = new Set(["(", "[", "!", "-", "+"]);
+// Adjacent op pairs that would accidentally merge into a different operator
+const _INCREMENT_MERGE_PAIRS = new Set([
+	"+|+",
+	"-|-",
+	"+|++",
+	"-|--",
+	"++|+",
+	"--|−-",
+]);
+
 function needsSpaceBetween(left, right) {
 	// Keywords that need space after when followed by ident/num/string/keyword
 	if (left.type === "kw" && SPACE_AFTER_KW.has(left.value)) {
-		if (
-			right.type === "ident" ||
-			right.type === "kw" ||
-			right.type === "num" ||
-			right.type === "string" ||
-			right.type === "template" ||
-			right.type === "regex"
-		) {
-			return true;
-		}
-		// e.g., `return(` or `return!` — no space needed
-		if (
-			right.type === "op" &&
-			(right.value === "(" ||
-				right.value === "[" ||
-				right.value === "!" ||
-				right.value === "-" ||
-				right.value === "+")
-		) {
-			// "return(" is fine, "delete(" is fine, "new(" is fine
-			// But "function(" needs no space, "class{" needs no space... actually they do need space before name
+		if (SPACE_AFTER_KW_RIGHT_TYPES.has(right.type)) return true;
+		if (right.type === "op" && NO_SPACE_AFTER_KW_OPS.has(right.value))
 			return false;
-		}
 	}
 
 	// Two adjacent ident-like tokens need a space
 	if (isIdentLike(left.type) && isIdentLike(right.type)) return true;
-
-	// ident followed by string/template/regex needs space in some cases
-	// but generally not for GoFront output
 
 	// Prevent ++ or -- from merging with adjacent + or -
 	if (
@@ -424,15 +430,7 @@ function findPrevNonWs(tokens, index) {
 
 // ── Stage 3: Identifier mangling ─────────────────────────────
 
-function mangle(code) {
-	const tokens = tokenize(code);
-
-	// Collect local variable declarations and their scopes
-	const nameGen = shortNameGeneratorFn();
-	const renameMap = new Map();
-
-	// Find all identifiers that are local declarations (let, const, var, function params)
-	// and not class/method names or properties
+function _collectLocalDecls(tokens) {
 	const declaredLocals = new Set();
 	const protectedNames = new Set();
 
@@ -491,6 +489,20 @@ function mangle(code) {
 	for (const name of protectedNames) {
 		declaredLocals.delete(name);
 	}
+
+	return { declaredLocals };
+}
+
+function mangle(code) {
+	const tokens = tokenize(code);
+
+	// Collect local variable declarations and their scopes
+	const nameGen = shortNameGeneratorFn();
+	const renameMap = new Map();
+
+	// Find all identifiers that are local declarations (let, const, var, function params)
+	// and not class/method names or properties
+	const { declaredLocals } = _collectLocalDecls(tokens);
 
 	// Also protect known globals and short names
 	const globals = new Set([

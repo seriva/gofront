@@ -75,153 +75,151 @@ export const expressionGenMethods = {
 			case "BasicLit":
 				if (expr.litKind === "STRING") return JSON.stringify(expr.value);
 				return expr.value; // int, float, bool, nil(null)
-
 			case "ImagLit":
 				return `{ re: 0, im: ${expr.value} }`;
-
 			case "Ident":
 				if (this._boxedVars.has(expr.name) && !expr._isAddressOf)
 					return `${expr.name}.value`;
 				return expr.name;
-
-			case "UnaryExpr": {
-				const op = expr.op === "^" ? "~" : expr.op; // bitwise NOT
-				// Address-of: &x
-				if (op === "&") {
-					if (expr.operand.kind === "Ident") {
-						// Mark so Ident codegen does NOT append .value
-						expr.operand._isAddressOf = true;
-						// For boxed vars, &x returns the box itself
-						if (this._boxedVars.has(expr.operand.name)) {
-							return this.genExpr(expr.operand);
-						}
-					}
-					// For non-boxed vars (structs, etc.), wrap in { value: x }
-					return `{ value: ${this.genExpr(expr.operand)} }`;
-				}
-				// Dereference: *p → p.value
-				if (op === "*") {
-					return `${this.genExpr(expr.operand)}.value`;
-				}
-				// Unary minus/plus on complex
-				if ((op === "-" || op === "+") && isComplex(expr.operand._type)) {
-					const inner = this.genExpr(expr.operand);
-					if (op === "-") return `{ re: -${inner}.re, im: -${inner}.im }`;
-					return inner;
-				}
-				return `${op}${this.genExpr(expr.operand)}`;
-			}
-
+			case "UnaryExpr":
+				return this._genUnaryExpr(expr);
 			case "BinaryExpr":
 				return this._genBinaryExpr(expr);
-
 			case "CallExpr":
 				return this.genCall(expr);
-
 			case "InstantiationExpr":
 				return this.genExpr(expr.expr); // type erasure
-
-			case "SelectorExpr": {
-				if (expr._isMethodExpr) {
-					return `((recv, ...args) => recv.${expr.field}(...args))`;
-				}
-				// Namespace constants: math.Pi, time.RFC3339, utf8.RuneError, etc.
-				if (expr.expr.kind === "Ident") {
-					const nsConst = NS_CONSTANTS[expr.expr.name]?.[expr.field];
-					if (nsConst !== undefined) return nsConst;
-				}
-				const base = this.genExpr(expr.expr);
-				if (this.bundledPackages.has(base)) return expr.field;
-				if (expr.expr._type?.kind === "pointer" && expr.field !== "value") {
-					const sel = `${base}.value.${expr.field}`;
-					if (expr._isMethodValue && !expr._callee)
-						return `${sel}.bind(${base}.value)`;
-					return sel;
-				}
-				const sel = `${base}.${expr.field}`;
-				if (expr._isMethodValue && !expr._callee) return `${sel}.bind(${base})`;
-				return sel;
-			}
-
-			case "IndexExpr": {
-				const exprType = expr.expr._type;
-				const wrapField = this._namedWrapperField(exprType, expr.expr);
-				const base = wrapField
-					? `${this.genExpr(expr.expr)}.${wrapField}`
-					: this.genExpr(expr.expr);
-				const idx = this.genExpr(expr.index);
-				if (expr._mapValueType && !expr._lvalue) {
-					const zero = this.zeroValueForType(expr._mapValueType);
-					// Use an IIFE to avoid double-evaluating base/key when either
-					// could be a function call or other expression with side effects.
-					if (this._hasCallExpr(expr.expr) || this._hasCallExpr(expr.index)) {
-						return `((__m, __k) => __m[__k] ?? ${zero})(${base}, ${idx})`;
-					}
-					return `(${base}[${idx}] ?? ${zero})`;
-				}
-				// String indexing returns a byte (charCodeAt), not a JS character
-				const isStr =
-					(exprType?.kind === "basic" && exprType.name === "string") ||
-					(exprType?.kind === "untyped" && exprType.base === "string");
-				if (isStr && !expr._lvalue) {
-					return `${base}.charCodeAt(${idx})`;
-				}
-				return `${base}[${idx}]`;
-			}
-
-			case "SliceExpr": {
-				const base = this.genExpr(expr.expr);
-				const lo = expr.low ? this.genExpr(expr.low) : "";
-				const hi = expr.high ? this.genExpr(expr.high) : "";
-				if (!lo && !hi) return `${base}.slice()`;
-				if (!hi) return `${base}.slice(${lo})`;
-				if (!lo) return `${base}.slice(0, ${hi})`;
-				return `${base}.slice(${lo}, ${hi})`;
-			}
-
+			case "SelectorExpr":
+				return this._genSelectorExpr(expr);
+			case "IndexExpr":
+				return this._genIndexExpr(expr);
+			case "SliceExpr":
+				return this._genSliceExpr(expr);
 			case "CompositeLit":
 				return this.genCompositeLit(expr);
-
-			case "FuncLit": {
-				const params = expr.params.map((p) => p.name).join(", ");
-				const asyncPrefix = expr.async ? "async " : "";
-				const saved = this.out;
-				const prevBoxed = this._boxedVars;
-				this._boxedVars = new Set(prevBoxed); // inherit parent's boxed vars (closures)
-				this._scanAddressTaken(expr.body);
-				this.out = [];
-				this.indented(() => this._genBody(expr.body));
-				const body = this.out.join("\n");
-				this.out = saved;
-				this._boxedVars = prevBoxed;
-				return `${asyncPrefix}function(${params}) {\n${body}\n${"  ".repeat(this.indent)}}`;
-			}
-
+			case "FuncLit":
+				return this._genFuncLit(expr);
 			case "TypeConversion":
 				return this._genTypeConversion(expr);
-
-			case "TypeAssertExpr": {
-				const val = this.genExpr(expr.expr);
-				const check = this._typeCheckExpr(expr.type, val);
-				if (!expr._commaOk) {
-					// plain assertion: panic if check fails (matches Go behavior)
-					if (check === "true") return val; // can't check at runtime — pass through
-					return `(${check} ? ${val} : (() => { throw new Error("interface conversion: type assertion failed"); })())`;
-				}
-				// comma-ok: emit [value-or-zero, runtimeTypeCheck]
-				const zero = this.zeroValueForTypeNode(expr.type);
-				return `(${check} ? [${val}, true] : [${zero}, false])`;
-			}
-
+			case "TypeAssertExpr":
+				return this._genTypeAssertExpr(expr);
 			case "AwaitExpr":
 				return `await ${this.genExpr(expr.expr)}`;
-
 			case "RangeExpr":
 				return this.genExpr(expr.expr);
-
 			default:
 				throw new Error(`CodeGen: unhandled expression kind '${expr.kind}'`);
 		}
+	},
+
+	_genUnaryExpr(expr) {
+		const op = expr.op === "^" ? "~" : expr.op; // bitwise NOT
+		// Address-of: &x
+		if (op === "&") {
+			if (expr.operand.kind === "Ident") {
+				// Mark so Ident codegen does NOT append .value
+				expr.operand._isAddressOf = true;
+				// For boxed vars, &x returns the box itself
+				if (this._boxedVars.has(expr.operand.name)) {
+					return this.genExpr(expr.operand);
+				}
+			}
+			// For non-boxed vars (structs, etc.), wrap in { value: x }
+			return `{ value: ${this.genExpr(expr.operand)} }`;
+		}
+		// Dereference: *p → p.value
+		if (op === "*") return `${this.genExpr(expr.operand)}.value`;
+		// Unary minus/plus on complex
+		if ((op === "-" || op === "+") && isComplex(expr.operand._type)) {
+			const inner = this.genExpr(expr.operand);
+			if (op === "-") return `{ re: -${inner}.re, im: -${inner}.im }`;
+			return inner;
+		}
+		return `${op}${this.genExpr(expr.operand)}`;
+	},
+
+	_genSelectorExpr(expr) {
+		if (expr._isMethodExpr) {
+			return `((recv, ...args) => recv.${expr.field}(...args))`;
+		}
+		// Namespace constants: math.Pi, time.RFC3339, utf8.RuneError, etc.
+		if (expr.expr.kind === "Ident") {
+			const nsConst = NS_CONSTANTS[expr.expr.name]?.[expr.field];
+			if (nsConst !== undefined) return nsConst;
+		}
+		const base = this.genExpr(expr.expr);
+		if (this.bundledPackages.has(base)) return expr.field;
+		if (expr.expr._type?.kind === "pointer" && expr.field !== "value") {
+			const sel = `${base}.value.${expr.field}`;
+			if (expr._isMethodValue && !expr._callee)
+				return `${sel}.bind(${base}.value)`;
+			return sel;
+		}
+		const sel = `${base}.${expr.field}`;
+		if (expr._isMethodValue && !expr._callee) return `${sel}.bind(${base})`;
+		return sel;
+	},
+
+	_genIndexExpr(expr) {
+		const exprType = expr.expr._type;
+		const wrapField = this._namedWrapperField(exprType, expr.expr);
+		const base = wrapField
+			? `${this.genExpr(expr.expr)}.${wrapField}`
+			: this.genExpr(expr.expr);
+		const idx = this.genExpr(expr.index);
+		if (expr._mapValueType && !expr._lvalue) {
+			const zero = this.zeroValueForType(expr._mapValueType);
+			// Use an IIFE to avoid double-evaluating base/key when either
+			// could be a function call or other expression with side effects.
+			if (this._hasCallExpr(expr.expr) || this._hasCallExpr(expr.index)) {
+				return `((__m, __k) => __m[__k] ?? ${zero})(${base}, ${idx})`;
+			}
+			return `(${base}[${idx}] ?? ${zero})`;
+		}
+		// String indexing returns a byte (charCodeAt), not a JS character
+		const isStr =
+			(exprType?.kind === "basic" && exprType.name === "string") ||
+			(exprType?.kind === "untyped" && exprType.base === "string");
+		if (isStr && !expr._lvalue) return `${base}.charCodeAt(${idx})`;
+		return `${base}[${idx}]`;
+	},
+
+	_genSliceExpr(expr) {
+		const base = this.genExpr(expr.expr);
+		const lo = expr.low ? this.genExpr(expr.low) : "";
+		const hi = expr.high ? this.genExpr(expr.high) : "";
+		if (!lo && !hi) return `${base}.slice()`;
+		if (!hi) return `${base}.slice(${lo})`;
+		if (!lo) return `${base}.slice(0, ${hi})`;
+		return `${base}.slice(${lo}, ${hi})`;
+	},
+
+	_genFuncLit(expr) {
+		const params = expr.params.map((p) => p.name).join(", ");
+		const asyncPrefix = expr.async ? "async " : "";
+		const saved = this.out;
+		const prevBoxed = this._boxedVars;
+		this._boxedVars = new Set(prevBoxed); // inherit parent's boxed vars (closures)
+		this._scanAddressTaken(expr.body);
+		this.out = [];
+		this.indented(() => this._genBody(expr.body));
+		const body = this.out.join("\n");
+		this.out = saved;
+		this._boxedVars = prevBoxed;
+		return `${asyncPrefix}function(${params}) {\n${body}\n${"  ".repeat(this.indent)}}`;
+	},
+
+	_genTypeAssertExpr(expr) {
+		const val = this.genExpr(expr.expr);
+		const check = this._typeCheckExpr(expr.type, val);
+		if (!expr._commaOk) {
+			// plain assertion: panic if check fails (matches Go behavior)
+			if (check === "true") return val; // can't check at runtime — pass through
+			return `(${check} ? ${val} : (() => { throw new Error("interface conversion: type assertion failed"); })())`;
+		}
+		// comma-ok: emit [value-or-zero, runtimeTypeCheck]
+		const zero = this.zeroValueForTypeNode(expr.type);
+		return `(${check} ? [${val}, true] : [${zero}, false])`;
 	},
 
 	genCall(expr) {

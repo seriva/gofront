@@ -55,6 +55,45 @@ const BUILTIN_KEYWORDS = new Set([
 	"imag",
 ]);
 
+// Tokens that cannot legally appear inside a type argument list.
+// Each || in an inline condition counts as CC; extracting here keeps looksLikeTypeArgList lean.
+const DISALLOWED_IN_TYPE_ARGS = new Set([
+	T.PLUS,
+	T.MINUS,
+	T.PERCENT,
+	T.SLASH,
+	T.AND,
+	T.OR,
+	T.CARET,
+	T.NOT,
+	T.LT,
+	T.GT,
+	T.LTE,
+	T.GTE,
+	T.EQ,
+	T.NEQ,
+	T.LSHIFT,
+	T.RSHIFT,
+	T.AND_NOT,
+	T.COLON,
+	T.DEFINE,
+	T.ASSIGN,
+]);
+
+function _isDisallowedInTypeArgs(tt) {
+	return DISALLOWED_IN_TYPE_ARGS.has(tt);
+}
+
+function _isTypeIntroducerToken(tt) {
+	return (
+		tt === T.STAR ||
+		tt === T.MAP ||
+		tt === T.FUNC ||
+		tt === T.INTERFACE ||
+		tt === T.STRUCT
+	);
+}
+
 export const expressionParserMethods = {
 	parseExprList() {
 		const exprs = [this.parseExpr()];
@@ -201,39 +240,10 @@ export const expressionParserMethods = {
 			// Reject literals — it's an index expression
 			if (tt === T.INT || tt === T.FLOAT || tt === T.STRING) return false;
 			// Reject binary operators that wouldn't appear in type args
-			if (
-				tt === T.PLUS ||
-				tt === T.MINUS ||
-				tt === T.PERCENT ||
-				tt === T.SLASH ||
-				tt === T.AND ||
-				tt === T.OR ||
-				tt === T.CARET ||
-				tt === T.NOT ||
-				tt === T.LT ||
-				tt === T.GT ||
-				tt === T.LTE ||
-				tt === T.GTE ||
-				tt === T.EQ ||
-				tt === T.NEQ ||
-				tt === T.LSHIFT ||
-				tt === T.RSHIFT ||
-				tt === T.AND_NOT ||
-				tt === T.COLON ||
-				tt === T.DEFINE ||
-				tt === T.ASSIGN
-			)
-				return false;
+			if (_isDisallowedInTypeArgs(tt)) return false;
 			if (depth === 1) {
 				if (tt === T.COMMA) hasComma = true;
-				if (
-					tt === T.STAR ||
-					tt === T.MAP ||
-					tt === T.FUNC ||
-					tt === T.INTERFACE ||
-					tt === T.STRUCT
-				)
-					hasTypeKeyword = true;
+				if (_isTypeIntroducerToken(tt)) hasTypeKeyword = true;
 				// Check if it's a builtin type name
 				if (tt === T.IDENT && TYPE_KEYWORDS.has(src[i].value))
 					hasTypeKeyword = true;
