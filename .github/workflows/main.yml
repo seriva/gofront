@@ -34,7 +34,7 @@ jobs:
               run: npm run check
 
             - name: Run tests
-              run: npm test
+              run: npm run test:all
 
     publish:
         needs: test

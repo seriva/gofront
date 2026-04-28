@@ -636,7 +636,7 @@ Design documents for planned features are organised by release under `docs/v*/`
 ```sh
 npm run test:unit   # unit tests only (~1100 tests, no browser required)
 npm run test:e2e    # E2E tests (Playwright, headless Chromium)
-npm test            # both
+npm run test:all    # both
 ```
 
 **Unit tests** (~1100) cover language features, type errors, edge cases, DOM (jsdom),

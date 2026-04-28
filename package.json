@@ -35,9 +35,10 @@
 		"build:reactive": "node src/index.js example/reactive/src -o example/reactive/app.js",
 		"build:gom": "node src/index.js example/gom/src -o example/gom/app.js",
 		"build:templ": "node src/index.js example/templ/src -o example/templ/app.js",
-		"test": "npm run test:unit && npm run test:e2e",
+		"build:all": "npm run build:simple && npm run build:reactive && npm run build:gom && npm run build:templ",
+		"test:all": "npm run test:unit && npm run test:e2e",
 		"test:unit": "node test/unit/run.js",
-		"test:e2e": "playwright test",
+		"test:e2e": "npm run build:all && playwright test",
 		"format": "biome format --write .",
 		"check": "biome check . && sentrux check && sentrux gate && node src/index.js example/simple/src --check && node src/index.js example/reactive/src --check && node src/index.js example/gom/src --check && node src/index.js example/templ/src --check",
 		"prepare": "husky"

@@ -461,32 +461,49 @@ export const expressionCheckMethods = {
 
 		// Generic function inference
 		if (fnType.kind === "generic") {
-			const typeArgs = this.inferTypeArgs(fnType, argTypes);
-			if (!typeArgs) {
-				return this.err(
-					`Cannot infer type arguments for generic function '${fnType.name}'`,
-					expr,
-				);
-			}
-			// Check constraints
-			for (
-				let i = 0;
-				i < fnType.typeParams.length && i < typeArgs.length;
-				i++
-			) {
-				const tp = fnType.typeParams[i];
-				const constraint = tp.constraint
-					? this.resolveTypeNode(tp.constraint, scope)
-					: null;
-				if (constraint) this.checkConstraint(typeArgs[i], constraint, expr);
-			}
-			fnType = this.instantiateGenericFunc(fnType, typeArgs);
+			const resolved = this._resolveGenericFnType(
+				fnType,
+				argTypes,
+				expr,
+				scope,
+			);
+			if (!resolved) return ANY;
+			fnType = resolved;
 		}
 
 		if (fnType.kind !== "func") {
 			return this.err(`Cannot call non-function type ${typeStr(fnType)}`, expr);
 		}
 
+		this._checkCallArgs(fnType, argTypes, expr);
+
+		const ret = fnType.returns;
+		if (!ret || ret.length === 0) return VOID;
+		if (ret.length === 1) return ret[0];
+		return { kind: "tuple", types: ret };
+	},
+
+	_resolveGenericFnType(fnType, argTypes, expr, scope) {
+		const typeArgs = this.inferTypeArgs(fnType, argTypes);
+		if (!typeArgs) {
+			this.err(
+				`Cannot infer type arguments for generic function '${fnType.name}'`,
+				expr,
+			);
+			return null;
+		}
+		// Check constraints
+		for (let i = 0; i < fnType.typeParams.length && i < typeArgs.length; i++) {
+			const tp = fnType.typeParams[i];
+			const constraint = tp.constraint
+				? this.resolveTypeNode(tp.constraint, scope)
+				: null;
+			if (constraint) this.checkConstraint(typeArgs[i], constraint, expr);
+		}
+		return this.instantiateGenericFunc(fnType, typeArgs);
+	},
+
+	_checkCallArgs(fnType, argTypes, expr) {
 		// Check arg count (allow variadic slack)
 		const minArgs = fnType.params.filter(
 			(_, i) => !fnType.variadic || i < fnType.params.length - 1,
@@ -503,7 +520,6 @@ export const expressionCheckMethods = {
 				expr,
 			);
 		}
-
 		// Check each argument is assignable to its parameter type
 		for (let i = 0; i < fnType.params.length && i < argTypes.length; i++) {
 			const paramIdx =
@@ -514,11 +530,6 @@ export const expressionCheckMethods = {
 			if (expr.args[i]?._spread) continue;
 			this.assertAssignable(fnType.params[paramIdx], argTypes[i], expr.args[i]);
 		}
-
-		const ret = fnType.returns;
-		if (!ret || ret.length === 0) return VOID;
-		if (ret.length === 1) return ret[0];
-		return { kind: "tuple", types: ret };
 	},
 
 	checkBuiltin(name, expr, argTypes, scope) {
