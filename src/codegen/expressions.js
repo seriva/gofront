@@ -198,21 +198,23 @@ export const expressionGenMethods = {
 		if (expr._isMethodExpr) {
 			return `((recv, ...args) => recv.${expr.field}(...args))`;
 		}
-		// Namespace constants: math.Pi, time.RFC3339, utf8.RuneError, etc.
 		if (expr.expr.kind === "Ident") {
 			const nsConst = NS_CONSTANTS[expr.expr.name]?.[expr.field];
 			if (nsConst !== undefined) return nsConst;
 		}
 		const base = this.genExpr(expr.expr);
 		if (this.bundledPackages.has(base)) return expr.field;
-		if (expr.expr._type?.kind === "pointer" && expr.field !== "value") {
-			const sel = `${base}.value.${expr.field}`;
-			if (expr._isMethodValue && !expr._callee)
-				return `${sel}.bind(${base}.value)`;
-			return sel;
-		}
+		if (expr.expr._type?.kind === "pointer" && expr.field !== "value")
+			return this._genPointerSelectorField(expr, base);
 		const sel = `${base}.${expr.field}`;
 		if (expr._isMethodValue && !expr._callee) return `${sel}.bind(${base})`;
+		return sel;
+	},
+
+	_genPointerSelectorField(expr, base) {
+		const sel = `${base}.value.${expr.field}`;
+		if (expr._isMethodValue && !expr._callee)
+			return `${sel}.bind(${base}.value)`;
 		return sel;
 	},
 
@@ -223,21 +225,25 @@ export const expressionGenMethods = {
 			? `${this.genExpr(expr.expr)}.${wrapField}`
 			: this.genExpr(expr.expr);
 		const idx = this.genExpr(expr.index);
-		if (expr._mapValueType && !expr._lvalue) {
-			const zero = this.zeroValueForType(expr._mapValueType);
-			// Use an IIFE to avoid double-evaluating base/key when either
-			// could be a function call or other expression with side effects.
-			if (this._hasCallExpr(expr.expr) || this._hasCallExpr(expr.index)) {
-				return `((__m, __k) => __m[__k] ?? ${zero})(${base}, ${idx})`;
-			}
-			return `(${base}[${idx}] ?? ${zero})`;
-		}
-		// String indexing returns a byte (charCodeAt), not a JS character
-		const isStr =
-			(exprType?.kind === "basic" && exprType.name === "string") ||
-			(exprType?.kind === "untyped" && exprType.base === "string");
-		if (isStr && !expr._lvalue) return `${base}.charCodeAt(${idx})`;
+		if (expr._mapValueType && !expr._lvalue)
+			return this._genMapIndexExpr(expr, base, idx);
+		if (this._isStringExprType(exprType) && !expr._lvalue)
+			return `${base}.charCodeAt(${idx})`;
 		return `${base}[${idx}]`;
+	},
+
+	_genMapIndexExpr(expr, base, idx) {
+		const zero = this.zeroValueForType(expr._mapValueType);
+		if (this._hasCallExpr(expr.expr) || this._hasCallExpr(expr.index))
+			return `((__m, __k) => __m[__k] ?? ${zero})(${base}, ${idx})`;
+		return `(${base}[${idx}] ?? ${zero})`;
+	},
+
+	_isStringExprType(exprType) {
+		return (
+			(exprType?.kind === "basic" && exprType.name === "string") ||
+			(exprType?.kind === "untyped" && exprType.base === "string")
+		);
 	},
 
 	_genSliceExpr(expr) {

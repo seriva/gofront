@@ -4,13 +4,13 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 import { JSDOM } from "jsdom";
-import { CodeGen } from "../../src/codegen.js";
+import { CodeGen } from "../../src/codegen/index.js";
 import { compileDir } from "../../src/compiler.js";
 import { DtsParser, parseDts } from "../../src/dts-parser.js";
 import { Lexer } from "../../src/lexer.js";
-import { Parser } from "../../src/parser.js";
+import { Parser } from "../../src/parser/index.js";
 import { resolveAll } from "../../src/resolver.js";
-import { TypeChecker } from "../../src/typechecker.js";
+import { TypeChecker } from "../../src/typechecker/index.js";
 
 export { compileDir, DtsParser, join, Lexer, Parser, parseDts };
 
