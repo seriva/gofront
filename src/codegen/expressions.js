@@ -69,6 +69,80 @@ const INT_TYPE_NAMES = new Set([
 	"rune",
 ]);
 
+// Zero-value JS literals for basic Go types.
+const ZERO_FOR_BASIC = {
+	int: "0",
+	uint: "0",
+	int8: "0",
+	int16: "0",
+	int32: "0",
+	int64: "0",
+	uint8: "0",
+	uint16: "0",
+	uint32: "0",
+	uint64: "0",
+	uintptr: "0",
+	float32: "0",
+	float64: "0",
+	byte: "0",
+	rune: "0",
+	complex64: "{ re: 0, im: 0 }",
+	complex128: "{ re: 0, im: 0 }",
+	string: '""',
+	bool: "false",
+};
+
+// Set of all numeric type names (for type-assertion codegen).
+const TYPEOF_NUMBER_NAMES = new Set([...INT_TYPE_NAMES, "float32", "float64"]);
+
+// Builtin function codegen — keyed by builtin name, value is (self, expr) => string.
+const BUILTIN_GEN = {
+	append: (s, e) => s.genAppend(e),
+	len: (s, e) => s._genBuiltinLen(e),
+	cap: (s, e) => `${s.genExpr(e.args[0])}.length`,
+	make: (s, e) => s.genMake(e),
+	delete: (s, e) => {
+		const [m, k] = e.args.map((a) => s.genExpr(a));
+		return `(delete ${m}[${k}])`;
+	},
+	copy: (s, e) => {
+		const [dst, src] = e.args.map((a) => s.genExpr(a));
+		return `((__cd,__cs)=>{const n=Math.min(__cd.length,__cs.length);__cd.splice(0,n,...__cs.slice(0,n));return n;})(${dst},${src})`;
+	},
+	new: (s, e) => `{ value: ${s.zeroValueForExpr(e.args[0])} }`,
+	print: (s, e) => `console.log(${e.args.map((a) => s.genExpr(a)).join(", ")})`,
+	println: (s, e) =>
+		`console.log(${e.args.map((a) => s.genExpr(a)).join(", ")})`,
+	panic: (s, e) => `(() => { throw new Error(${s.genExpr(e.args[0])}); })()`,
+	recover: () =>
+		`(typeof __panic !== "undefined" && __panic !== null ? (() => { const __r = __panic.message ?? String(__panic); __panic = null; return __r; })() : null)`,
+	error: (s, e) => {
+		s._usesError = true;
+		return `__error(${s.genExpr(e.args[0])})`;
+	},
+	min: (s, e) => `Math.min(${e.args.map((a) => s.genExpr(a)).join(", ")})`,
+	max: (s, e) => `Math.max(${e.args.map((a) => s.genExpr(a)).join(", ")})`,
+	clear: (s, e) => s._genBuiltinClear(e),
+	complex: (s, e) =>
+		`{ re: ${s.genExpr(e.args[0])}, im: ${s.genExpr(e.args[1])} }`,
+	real: (s, e) => `(${s.genExpr(e.args[0])}).re`,
+	imag: (s, e) => `(${s.genExpr(e.args[0])}).im`,
+};
+
+// Method-name dispatch for genExpr — string values add no static call edges.
+const EXPR_GEN_DELEGATE = {
+	UnaryExpr: "_genUnaryExpr",
+	BinaryExpr: "_genBinaryExpr",
+	CallExpr: "genCall",
+	SelectorExpr: "_genSelectorExpr",
+	IndexExpr: "_genIndexExpr",
+	SliceExpr: "_genSliceExpr",
+	CompositeLit: "genCompositeLit",
+	FuncLit: "_genFuncLit",
+	TypeConversion: "_genTypeConversion",
+	TypeAssertExpr: "_genTypeAssertExpr",
+};
+
 export const expressionGenMethods = {
 	genExpr(expr) {
 		switch (expr.kind) {
@@ -81,34 +155,16 @@ export const expressionGenMethods = {
 				if (this._boxedVars.has(expr.name) && !expr._isAddressOf)
 					return `${expr.name}.value`;
 				return expr.name;
-			case "UnaryExpr":
-				return this._genUnaryExpr(expr);
-			case "BinaryExpr":
-				return this._genBinaryExpr(expr);
-			case "CallExpr":
-				return this.genCall(expr);
-			case "InstantiationExpr":
-				return this.genExpr(expr.expr); // type erasure
-			case "SelectorExpr":
-				return this._genSelectorExpr(expr);
-			case "IndexExpr":
-				return this._genIndexExpr(expr);
-			case "SliceExpr":
-				return this._genSliceExpr(expr);
-			case "CompositeLit":
-				return this.genCompositeLit(expr);
-			case "FuncLit":
-				return this._genFuncLit(expr);
-			case "TypeConversion":
-				return this._genTypeConversion(expr);
-			case "TypeAssertExpr":
-				return this._genTypeAssertExpr(expr);
 			case "AwaitExpr":
 				return `await ${this.genExpr(expr.expr)}`;
+			case "InstantiationExpr":
 			case "RangeExpr":
 				return this.genExpr(expr.expr);
-			default:
+			default: {
+				const m = EXPR_GEN_DELEGATE[expr.kind];
+				if (m) return this[m](expr);
 				throw new Error(`CodeGen: unhandled expression kind '${expr.kind}'`);
+			}
 		}
 	},
 
@@ -322,65 +378,8 @@ export const expressionGenMethods = {
 	},
 
 	_genBuiltinIdent(name, expr) {
-		switch (name) {
-			case "append":
-				return this.genAppend(expr);
-			case "len":
-				return this._genBuiltinLen(expr);
-			case "cap":
-				return `${this.genExpr(expr.args[0])}.length`;
-			case "make":
-				return this.genMake(expr);
-			case "delete": {
-				const [m, k] = expr.args.map((a) => this.genExpr(a));
-				return `(delete ${m}[${k}])`;
-			}
-			case "copy": {
-				const [dst, src] = expr.args.map((a) => this.genExpr(a));
-				return `((__cd,__cs)=>{const n=Math.min(__cd.length,__cs.length);__cd.splice(0,n,...__cs.slice(0,n));return n;})(${dst},${src})`;
-			}
-			case "new": {
-				const zero = this.zeroValueForExpr(expr.args[0]);
-				return `{ value: ${zero} }`;
-			}
-			case "print":
-			case "println": {
-				const args = expr.args.map((a) => this.genExpr(a)).join(", ");
-				return `console.log(${args})`;
-			}
-			case "panic": {
-				const arg = this.genExpr(expr.args[0]);
-				return `(() => { throw new Error(${arg}); })()`;
-			}
-			case "recover":
-				return `(typeof __panic !== "undefined" && __panic !== null ? (() => { const __r = __panic.message ?? String(__panic); __panic = null; return __r; })() : null)`;
-			case "error": {
-				this._usesError = true;
-				const arg = this.genExpr(expr.args[0]);
-				return `__error(${arg})`;
-			}
-			case "min": {
-				const args = expr.args.map((a) => this.genExpr(a)).join(", ");
-				return `Math.min(${args})`;
-			}
-			case "max": {
-				const args = expr.args.map((a) => this.genExpr(a)).join(", ");
-				return `Math.max(${args})`;
-			}
-			case "clear":
-				return this._genBuiltinClear(expr);
-			case "complex": {
-				const re = this.genExpr(expr.args[0]);
-				const im = this.genExpr(expr.args[1]);
-				return `{ re: ${re}, im: ${im} }`;
-			}
-			case "real":
-				return `(${this.genExpr(expr.args[0])}).re`;
-			case "imag":
-				return `(${this.genExpr(expr.args[0])}).im`;
-			default:
-				return undefined;
-		}
+		const gen = BUILTIN_GEN[name];
+		return gen ? gen(this, expr) : undefined;
 	},
 
 	genAppend(expr) {
@@ -595,33 +594,7 @@ export const expressionGenMethods = {
 
 	// Returns the JS zero-value literal for a basic type name, or null if not a basic type.
 	_zeroForBasicName(name) {
-		switch (name) {
-			case "int":
-			case "uint":
-			case "int8":
-			case "int16":
-			case "int32":
-			case "int64":
-			case "uint8":
-			case "uint16":
-			case "uint32":
-			case "uint64":
-			case "uintptr":
-			case "float32":
-			case "float64":
-			case "byte":
-			case "rune":
-				return "0";
-			case "complex64":
-			case "complex128":
-				return "{ re: 0, im: 0 }";
-			case "string":
-				return '""';
-			case "bool":
-				return "false";
-			default:
-				return null;
-		}
+		return Object.hasOwn(ZERO_FOR_BASIC, name) ? ZERO_FOR_BASIC[name] : null;
 	},
 
 	_zeroForNamedType(name) {
@@ -689,36 +662,15 @@ export const expressionGenMethods = {
 	_typeCheckExpr(typeNode, val) {
 		if (!typeNode) return "true";
 		if (typeNode.kind === "TypeName") {
-			switch (typeNode.name) {
-				case "int":
-				case "uint":
-				case "int8":
-				case "int16":
-				case "int32":
-				case "int64":
-				case "uint8":
-				case "uint16":
-				case "uint32":
-				case "uint64":
-				case "uintptr":
-				case "float32":
-				case "float64":
-				case "byte":
-				case "rune":
-					return `typeof ${val} === "number"`;
-				case "string":
-					return `typeof ${val} === "string"`;
-				case "bool":
-					return `typeof ${val} === "boolean"`;
-				case "nil":
-					return `${val} === null`;
-				case "error":
-					return `(typeof ${val} === "object" && ${val} !== null && typeof ${val}.Error === "function")`;
-				default:
-					if (this.structNames.has(typeNode.name))
-						return `${val} instanceof ${typeNode.name}`;
-					return "true"; // unknown type — can't check at runtime
-			}
+			const name = typeNode.name;
+			if (TYPEOF_NUMBER_NAMES.has(name)) return `typeof ${val} === "number"`;
+			if (name === "string") return `typeof ${val} === "string"`;
+			if (name === "bool") return `typeof ${val} === "boolean"`;
+			if (name === "nil") return `${val} === null`;
+			if (name === "error")
+				return `(typeof ${val} === "object" && ${val} !== null && typeof ${val}.Error === "function")`;
+			if (this.structNames.has(name)) return `${val} instanceof ${name}`;
+			return "true"; // unknown type — can't check at runtime
 		}
 		return "true";
 	},

@@ -26,6 +26,60 @@ import {
 	VOID,
 } from "./types.js";
 
+// Dispatch table for builtin function type checking.
+// Each value is (self, name, expr, argTypes, scope) => returnType.
+const BUILTIN_CHECK = {
+	len: (s, n, e, at) => s._checkBuiltinLen(n, e, at),
+	cap: (s, n, e, at) => s._checkBuiltinLen(n, e, at),
+	append: (s, _n, e, at) => {
+		const st = at[0] ?? ANY;
+		if (isArray(st)) {
+			s.err(`cannot append to array (type ${typeStr(st)})`, e);
+			return st;
+		}
+		return st;
+	},
+	copy: () => INT,
+	delete: () => VOID,
+	make: (s, _n, e, _at, sc) => {
+		if (e.args.length < 1) return ANY;
+		const ta = e.args[0];
+		const tn = ta.kind === "TypeExpr" ? ta.type : ta;
+		return s.resolveTypeNode(tn, sc) ?? ANY;
+	},
+	new: (s, _n, e, _at, sc) => {
+		if (e.args.length < 1) return ANY;
+		const inner = s.resolveTypeNode(e.args[0], sc);
+		return { kind: "pointer", base: inner };
+	},
+	print: () => VOID,
+	println: () => VOID,
+	panic: () => VOID,
+	recover: () => ANY,
+	error: () => ERROR,
+	min: (_s, _n, _e, at) => at[0] ?? ANY,
+	max: (_s, _n, _e, at) => at[0] ?? ANY,
+	clear: () => VOID,
+	complex: (s, _n, e, at) => s._checkBuiltinComplex(e, at),
+	real: (s, n, e, at) => s._checkBuiltinRealImag(n, e, at),
+	imag: (s, n, e, at) => s._checkBuiltinRealImag(n, e, at),
+};
+
+// Method-name dispatch for _checkExpr — string values add no static call edges.
+const CHECK_EXPR_DELEGATE = {
+	UnaryExpr: "_checkUnaryExpr",
+	CallExpr: "checkCall",
+	SelectorExpr: "_checkSelectorExpr",
+	IndexExpr: "_checkIndexExpr",
+	SliceExpr: "_checkSliceExpr",
+	CompositeLit: "checkCompositeLit",
+	FuncLit: "_checkFuncLit",
+	TypeConversion: "_checkTypeConversion",
+	TypeAssertExpr: "_checkTypeAssertExpr",
+	RangeExpr: "_checkRangeExpr",
+	InstantiationExpr: "_checkInstantiationExpr",
+};
+
 export const expressionCheckMethods = {
 	checkExpr(expr, scope) {
 		const t = this._checkExpr(expr, scope);
@@ -50,21 +104,14 @@ export const expressionCheckMethods = {
 				}
 				break;
 			}
-
 			case "ImagLit":
 				return UNTYPED_COMPLEX;
-
 			case "Ident": {
 				const t = scope.lookup(expr.name);
 				if (!t) return this.err(`Undefined: '${expr.name}'`, expr);
-				// Mark type-name identifiers so SelectorExpr can detect method expressions
 				if (this.types.has(expr.name)) expr._isTypeRef = true;
 				return t;
 			}
-
-			case "UnaryExpr":
-				return this._checkUnaryExpr(expr, scope);
-
 			case "BinaryExpr": {
 				const lt = this.checkExpr(expr.left, scope);
 				const rt = this.checkExpr(expr.right, scope);
@@ -72,43 +119,15 @@ export const expressionCheckMethods = {
 					return this.binaryResultType(expr.op, ANY, ANY, expr);
 				return this.binaryResultType(expr.op, lt, rt, expr);
 			}
-
-			case "CallExpr":
-				return this.checkCall(expr, scope);
-
-			case "SelectorExpr":
-				return this._checkSelectorExpr(expr, scope);
-
-			case "IndexExpr":
-				return this._checkIndexExpr(expr, scope);
-
-			case "SliceExpr":
-				return this._checkSliceExpr(expr, scope);
-
-			case "CompositeLit":
-				return this.checkCompositeLit(expr, scope);
-
-			case "FuncLit":
-				return this._checkFuncLit(expr, scope);
-
 			case "AwaitExpr":
-				// await unwraps whatever the expression produces — no Promise type modelling
 				return this.checkExpr(expr.expr, scope);
-
-			case "TypeConversion":
-				return this._checkTypeConversion(expr, scope);
-
-			case "TypeAssertExpr":
-				return this._checkTypeAssertExpr(expr, scope);
-
-			case "RangeExpr":
-				return this._checkRangeExpr(expr, scope);
-
 			case "InstantiationExpr":
 				return this._checkInstantiationExpr(expr, scope);
-
-			default:
+			default: {
+				const m = CHECK_EXPR_DELEGATE[expr.kind];
+				if (m) return this[m](expr, scope);
 				return ANY;
+			}
 		}
 		return ANY;
 	},
@@ -522,54 +541,8 @@ export const expressionCheckMethods = {
 	},
 
 	checkBuiltin(name, expr, argTypes, scope) {
-		switch (name) {
-			case "len":
-			case "cap":
-				return this._checkBuiltinLen(name, expr, argTypes);
-			case "append": {
-				const sliceType = argTypes[0] ?? ANY;
-				if (isArray(sliceType)) {
-					this.err(`cannot append to array (type ${typeStr(sliceType)})`, expr);
-					return sliceType;
-				}
-				return sliceType;
-			}
-			case "copy":
-				return INT;
-			case "delete":
-				return VOID;
-			case "make": {
-				if (expr.args.length < 1) return ANY;
-				const typeArg = expr.args[0];
-				const typeNode = typeArg.kind === "TypeExpr" ? typeArg.type : typeArg;
-				return this.resolveTypeNode(typeNode, scope) ?? ANY;
-			}
-			case "new": {
-				if (expr.args.length < 1) return ANY;
-				const inner = this.resolveTypeNode(expr.args[0], scope);
-				return { kind: "pointer", base: inner };
-			}
-			case "print":
-			case "println":
-			case "panic":
-				return VOID;
-			case "recover":
-				return ANY;
-			case "error":
-				return ERROR;
-			case "min":
-			case "max":
-				return argTypes[0] ?? ANY;
-			case "clear":
-				return VOID;
-			case "complex":
-				return this._checkBuiltinComplex(expr, argTypes);
-			case "real":
-			case "imag":
-				return this._checkBuiltinRealImag(name, expr, argTypes);
-			default:
-				return ANY;
-		}
+		const gen = BUILTIN_CHECK[name];
+		return gen ? gen(this, name, expr, argTypes, scope) : ANY;
 	},
 
 	_constLenFromType(arg0) {
