@@ -191,6 +191,20 @@ function _scanTemplateLiteral(code, i, len) {
 	return j;
 }
 
+function _scanDecimalNumber(code, j, len) {
+	while (j < len && /[0-9]/.test(code[j])) j++;
+	if (j < len && code[j] === ".") {
+		j++;
+		while (j < len && /[0-9]/.test(code[j])) j++;
+	}
+	if (j < len && (code[j] === "e" || code[j] === "E")) {
+		j++;
+		if (j < len && (code[j] === "+" || code[j] === "-")) j++;
+		while (j < len && /[0-9]/.test(code[j])) j++;
+	}
+	return j;
+}
+
 function _scanNumber(code, i, len) {
 	const ch = code[i];
 	let j = i + 1;
@@ -198,18 +212,27 @@ function _scanNumber(code, i, len) {
 		j++;
 		while (j < len && /[0-9a-fA-F]/.test(code[j])) j++;
 	} else {
-		while (j < len && /[0-9]/.test(code[j])) j++;
-		if (j < len && code[j] === ".") {
-			j++;
-			while (j < len && /[0-9]/.test(code[j])) j++;
-		}
-		if (j < len && (code[j] === "e" || code[j] === "E")) {
-			j++;
-			if (j < len && (code[j] === "+" || code[j] === "-")) j++;
-			while (j < len && /[0-9]/.test(code[j])) j++;
-		}
+		j = _scanDecimalNumber(code, j, len);
 	}
 	return j;
+}
+
+function _scanWhitespace(code, i, len) {
+	let j = i + 1;
+	while (j < len && /\s/.test(code[j])) j++;
+	return j;
+}
+
+function _scanIdent(code, i, len) {
+	let j = i + 1;
+	while (j < len && /[a-zA-Z0-9_$]/.test(code[j])) j++;
+	return j;
+}
+
+function _isNumberStart(ch, code, i, len) {
+	return (
+		/[0-9]/.test(ch) || (ch === "." && i + 1 < len && /[0-9]/.test(code[i + 1]))
+	);
 }
 
 function tokenize(code) {
@@ -220,7 +243,6 @@ function tokenize(code) {
 	while (i < len) {
 		const ch = code[i];
 
-		// Line comment
 		if (ch === "/" && code[i + 1] === "/") {
 			let end = code.indexOf("\n", i);
 			if (end === -1) end = len;
@@ -228,7 +250,6 @@ function tokenize(code) {
 			i = end;
 			continue;
 		}
-		// Block comment
 		if (ch === "/" && code[i + 1] === "*") {
 			const end = code.indexOf("*/", i + 2);
 			const closeAt = end === -1 ? len : end + 2;
@@ -236,39 +257,32 @@ function tokenize(code) {
 			i = closeAt;
 			continue;
 		}
-		// Regex literal — only after certain tokens
 		if (ch === "/" && _isRegexContext(tokens)) {
 			const j = _scanRegexLiteral(code, i, len);
 			tokens.push({ type: "regex", value: code.slice(i, j) });
 			i = j;
 			continue;
 		}
-		// String literals
 		if (ch === '"' || ch === "'") {
 			const j = _scanStringLiteral(code, i, len, ch);
 			tokens.push({ type: "string", value: code.slice(i, j) });
 			i = j;
 			continue;
 		}
-		// Template literal
 		if (ch === "`") {
 			const j = _scanTemplateLiteral(code, i, len);
 			tokens.push({ type: "template", value: code.slice(i, j) });
 			i = j;
 			continue;
 		}
-		// Whitespace
 		if (/\s/.test(ch)) {
-			let j = i + 1;
-			while (j < len && /\s/.test(code[j])) j++;
+			const j = _scanWhitespace(code, i, len);
 			tokens.push({ type: "ws", value: code.slice(i, j) });
 			i = j;
 			continue;
 		}
-		// Identifier or keyword
 		if (/[a-zA-Z_$]/.test(ch)) {
-			let j = i + 1;
-			while (j < len && /[a-zA-Z0-9_$]/.test(code[j])) j++;
+			const j = _scanIdent(code, i, len);
 			const word = code.slice(i, j);
 			tokens.push({
 				type: JS_KEYWORDS.has(word) ? "kw" : "ident",
@@ -277,17 +291,12 @@ function tokenize(code) {
 			i = j;
 			continue;
 		}
-		// Number
-		if (
-			/[0-9]/.test(ch) ||
-			(ch === "." && i + 1 < len && /[0-9]/.test(code[i + 1]))
-		) {
+		if (_isNumberStart(ch, code, i, len)) {
 			const j = _scanNumber(code, i, len);
 			tokens.push({ type: "num", value: code.slice(i, j) });
 			i = j;
 			continue;
 		}
-		// Multi-char operators
 		const three = code.slice(i, i + 3);
 		if (THREE_CHAR_OPS.has(three)) {
 			tokens.push({ type: "op", value: three });
@@ -300,7 +309,6 @@ function tokenize(code) {
 			i += 2;
 			continue;
 		}
-		// Single-char operator/punctuation
 		tokens.push({ type: "op", value: ch });
 		i += 1;
 	}
@@ -343,6 +351,17 @@ const _INCREMENT_MERGE_PAIRS = new Set([
 	"--|−-",
 ]);
 
+function _wouldMergeUnaryOps(left, right) {
+	return (
+		(left.value === "+" && right.value === "+") ||
+		(left.value === "-" && right.value === "-") ||
+		(left.value === "+" && right.value === "++") ||
+		(left.value === "-" && right.value === "--") ||
+		(left.value === "++" && right.value === "+") ||
+		(left.value === "--" && right.value === "-")
+	);
+}
+
 function needsSpaceBetween(left, right) {
 	// Keywords that need space after when followed by ident/num/string/keyword
 	if (left.type === "kw" && SPACE_AFTER_KW.has(left.value)) {
@@ -355,16 +374,7 @@ function needsSpaceBetween(left, right) {
 	if (isIdentLike(left.type) && isIdentLike(right.type)) return true;
 
 	// Prevent ++ or -- from merging with adjacent + or -
-	if (
-		(left.value === "+" && right.value === "+") ||
-		(left.value === "-" && right.value === "-") ||
-		(left.value === "+" && right.value === "++") ||
-		(left.value === "-" && right.value === "--") ||
-		(left.value === "++" && right.value === "+") ||
-		(left.value === "--" && right.value === "-")
-	) {
-		return true;
-	}
+	if (_wouldMergeUnaryOps(left, right)) return true;
 
 	return false;
 }
@@ -430,6 +440,29 @@ function findPrevNonWs(tokens, index) {
 
 // ── Stage 3: Identifier mangling ─────────────────────────────
 
+function _collectProtectedIdent(tok, tokens, i, protectedNames) {
+	if (tok.value === "class" || tok.value === "extends" || tok.value === ".") {
+		const next = nextNonWs(tokens, i);
+		if (next && next.tok.type === "ident") protectedNames.add(next.tok.value);
+	}
+}
+
+function _collectVarLocalDecls(tokens, i, declaredLocals) {
+	const next = nextNonWs(tokens, i);
+	if (next && next.tok.type === "ident") declaredLocals.add(next.tok.value);
+	if (next && (next.tok.value === "[" || next.tok.value === "{"))
+		collectDestructured(tokens, next.idx, declaredLocals);
+}
+
+function _collectParamDecls(tokens, i, declaredLocals) {
+	const prev = findPrevNonWsToken(tokens, i);
+	if (
+		prev &&
+		(prev.value === "function" || prev.type === "ident" || prev.value === ")")
+	)
+		collectParams(tokens, i, declaredLocals);
+}
+
 function _collectLocalDecls(tokens) {
 	const declaredLocals = new Set();
 	const protectedNames = new Set();
@@ -438,144 +471,86 @@ function _collectLocalDecls(tokens) {
 		const tok = tokens[i];
 		if (tok.type !== "kw" && tok.type !== "op") continue;
 
-		// class Name or extends Name — protect
-		if (tok.value === "class" || tok.value === "extends") {
-			const next = nextNonWs(tokens, i);
-			if (next && next.tok.type === "ident") {
-				protectedNames.add(next.tok.value);
-			}
-		}
+		_collectProtectedIdent(tok, tokens, i, protectedNames);
 
-		// Property access: .name — protect
-		if (tok.value === ".") {
-			const next = nextNonWs(tokens, i);
-			if (next && next.tok.type === "ident") {
-				protectedNames.add(next.tok.value);
-			}
-		}
+		if (tok.value === "let" || tok.value === "const" || tok.value === "var")
+			_collectVarLocalDecls(tokens, i, declaredLocals);
 
-		// Method definitions: name( in class body — protect
-		// We approximate: ident followed by ( at class level
-
-		// let/const/var name — local
-		if (tok.value === "let" || tok.value === "const" || tok.value === "var") {
-			const next = nextNonWs(tokens, i);
-			if (next && next.tok.type === "ident") {
-				declaredLocals.add(next.tok.value);
-			}
-			// Destructuring: let [a, b] or let {a, b}
-			if (next && (next.tok.value === "[" || next.tok.value === "{")) {
-				collectDestructured(tokens, next.idx, declaredLocals);
-			}
-		}
-
-		// Function params
-		if (tok.value === "(") {
-			const prev = findPrevNonWsToken(tokens, i);
-			if (
-				prev &&
-				(prev.value === "function" ||
-					prev.type === "ident" ||
-					prev.value === ")")
-			) {
-				collectParams(tokens, i, declaredLocals);
-			}
-		}
-
-		// Arrow function params handled by ( above
+		if (tok.value === "(") _collectParamDecls(tokens, i, declaredLocals);
 	}
 
-	// Remove protected names from locals
-	for (const name of protectedNames) {
-		declaredLocals.delete(name);
-	}
-
+	for (const name of protectedNames) declaredLocals.delete(name);
 	return { declaredLocals };
 }
 
-function mangle(code) {
-	const tokens = tokenize(code);
+const MANGLE_GLOBALS = new Set([
+	"console",
+	"document",
+	"window",
+	"Math",
+	"JSON",
+	"String",
+	"Number",
+	"Boolean",
+	"Array",
+	"Object",
+	"Error",
+	"Date",
+	"RegExp",
+	"Map",
+	"Set",
+	"Promise",
+	"Symbol",
+	"parseInt",
+	"parseFloat",
+	"isNaN",
+	"isFinite",
+	"undefined",
+	"null",
+	"NaN",
+	"Infinity",
+	"TextEncoder",
+	"TextDecoder",
+	"setTimeout",
+	"setInterval",
+	"clearTimeout",
+	"clearInterval",
+	"prototype",
+	"constructor",
+	"this",
+	"super",
+	"arguments",
+]);
 
-	// Collect local variable declarations and their scopes
-	const nameGen = shortNameGeneratorFn();
-	const renameMap = new Map();
-
-	// Find all identifiers that are local declarations (let, const, var, function params)
-	// and not class/method names or properties
-	const { declaredLocals } = _collectLocalDecls(tokens);
-
-	// Also protect known globals and short names
-	const globals = new Set([
-		"console",
-		"document",
-		"window",
-		"Math",
-		"JSON",
-		"String",
-		"Number",
-		"Boolean",
-		"Array",
-		"Object",
-		"Error",
-		"Date",
-		"RegExp",
-		"Map",
-		"Set",
-		"Promise",
-		"Symbol",
-		"parseInt",
-		"parseFloat",
-		"isNaN",
-		"isFinite",
-		"undefined",
-		"null",
-		"NaN",
-		"Infinity",
-		"TextEncoder",
-		"TextDecoder",
-		"setTimeout",
-		"setInterval",
-		"clearTimeout",
-		"clearInterval",
-		"prototype",
-		"constructor",
-		"this",
-		"super",
-		"arguments",
-	]);
-	for (const name of globals) declaredLocals.delete(name);
-
-	// Don't mangle __ prefixed helpers or single-char names
+function _filterRenameCandidates(declaredLocals) {
+	for (const name of MANGLE_GLOBALS) declaredLocals.delete(name);
 	for (const name of declaredLocals) {
-		if (name.startsWith("__") || name.length <= 1) {
-			declaredLocals.delete(name);
-		}
+		if (name.startsWith("__") || name.length <= 1) declaredLocals.delete(name);
 	}
+}
 
-	// Assign short names
-	for (const name of declaredLocals) {
-		const short = nameGen();
-		renameMap.set(name, short);
-	}
-
-	// Apply renaming
+function _applyRenaming(tokens, renameMap) {
 	let out = "";
 	for (let i = 0; i < tokens.length; i++) {
 		const tok = tokens[i];
 		if (tok.type === "ident" && renameMap.has(tok.value)) {
-			// Don't rename if preceded by dot (property access)
 			const prev = findPrevNonWsToken(tokens, i);
-			if (prev && prev.value === ".") {
-				out += tok.value;
-			} else {
-				out += renameMap.get(tok.value);
-			}
+			out += prev && prev.value === "." ? tok.value : renameMap.get(tok.value);
 		} else {
 			out += tok.value;
 		}
 	}
-
 	return out;
+}
+
+function mangle(code) {
+	const tokens = tokenize(code);
+	const nameGen = shortNameGeneratorFn();
+	const renameMap = new Map();
+	const { declaredLocals } = _collectLocalDecls(tokens);
+	_filterRenameCandidates(declaredLocals);
+	for (const name of declaredLocals) renameMap.set(name, nameGen());
+	return _applyRenaming(tokens, renameMap);
 }
 
 function nextNonWs(tokens, index) {
@@ -609,25 +584,25 @@ function collectDestructured(tokens, startIdx, locals) {
 	}
 }
 
+function _isParamStart(tokens, i) {
+	const prev = findPrevNonWsToken(tokens, i);
+	return (
+		!prev ||
+		prev.value === "(" ||
+		prev.value === "," ||
+		prev.value === "[" ||
+		prev.value === "{"
+	);
+}
+
 function collectParams(tokens, openIdx, locals) {
 	let depth = 1;
 	for (let i = openIdx + 1; i < tokens.length && depth > 0; i++) {
 		const t = tokens[i];
 		if (t.value === "(") depth++;
 		else if (t.value === ")") depth--;
-		else if (depth === 1 && t.type === "ident") {
-			// Check if not a default value expression
-			const prev = findPrevNonWsToken(tokens, i);
-			if (
-				!prev ||
-				prev.value === "(" ||
-				prev.value === "," ||
-				prev.value === "[" ||
-				prev.value === "{"
-			) {
-				locals.add(t.value);
-			}
-		}
+		else if (depth === 1 && t.type === "ident" && _isParamStart(tokens, i))
+			locals.add(t.value);
 	}
 }
 

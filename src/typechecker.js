@@ -156,9 +156,13 @@ export class TypeChecker {
 		}
 	}
 
+	_setCurrentFile(p) {
+		this._currentFile = p._filename ?? null;
+		this._currentSource = p._source ?? null;
+	}
+
 	check(program) {
-		this._currentFile = program._filename ?? null;
-		this._currentSource = program._source ?? null;
+		this._setCurrentFile(program);
 		// Pass 1: collect type declarations
 		for (const decl of program.decls) {
 			if (decl.kind === "TypeDecl") this.collectType(decl);
@@ -204,45 +208,30 @@ export class TypeChecker {
 	// All passes run across all files before moving to the next pass,
 	// so every file sees every other file's declarations.
 	checkAll(programs) {
-		// Pass 1: collect type declarations
 		for (const p of programs) {
-			this._currentFile = p._filename ?? null;
-			this._currentSource = p._source ?? null;
+			this._setCurrentFile(p);
 			for (const d of p.decls) if (d.kind === "TypeDecl") this.collectType(d);
 		}
-
-		// Pass 2: collect function / method signatures
 		for (const p of programs) {
-			this._currentFile = p._filename ?? null;
-			this._currentSource = p._source ?? null;
+			this._setCurrentFile(p);
 			for (const d of p.decls) {
 				if (d.kind === "FuncDecl" || d.kind === "MethodDecl")
 					this.collectFunc(d);
 				else if (d.kind === "TemplDecl") this._collectTemplDecl(d);
 			}
 		}
-
-		// Pass 2.1: Promote embedded methods
 		this._promoteEmbeddedMethods();
-
-		// Pass 2.5: pre-declare package-level vars and consts
-		// This allows any file's function body to reference vars from other files.
 		for (const p of programs) {
-			this._currentFile = p._filename ?? null;
-			this._currentSource = p._source ?? null;
+			this._setCurrentFile(p);
 			for (const d of p.decls) {
 				if (d.kind === "VarDecl") this.collectVar(d);
 				if (d.kind === "ConstDecl") this.collectConst(d);
 			}
 		}
-
-		// Pass 3: check bodies (re-checks var/const decls with proper types)
 		for (const p of programs) {
-			this._currentFile = p._filename ?? null;
-			this._currentSource = p._source ?? null;
+			this._setCurrentFile(p);
 			for (const d of p.decls) this.checkTopDecl(d, this.globals);
 		}
-
 		return this.errors;
 	}
 
@@ -943,37 +932,39 @@ export class TypeChecker {
 		return result;
 	}
 
-	_inferFromPair(paramType, argType, map) {
-		if (!paramType || !argType) return;
-		if (paramType.kind === "typeParam") {
-			if (!map.has(paramType.name)) {
-				map.set(paramType.name, argType);
-			}
-			return;
-		}
-		if (paramType.kind === "slice" && argType.kind === "slice") {
+	_inferFromFuncPair(paramType, argType, map) {
+		for (
+			let i = 0;
+			i < paramType.params.length && i < argType.params.length;
+			i++
+		)
+			this._inferFromPair(paramType.params[i], argType.params[i], map);
+		for (
+			let i = 0;
+			i < paramType.returns.length && i < argType.returns.length;
+			i++
+		)
+			this._inferFromPair(paramType.returns[i], argType.returns[i], map);
+	}
+
+	_inferFromStructuredPair(paramType, argType, map) {
+		if (paramType.kind === "slice" && argType.kind === "slice")
 			this._inferFromPair(paramType.elem, argType.elem, map);
-		}
 		if (paramType.kind === "map" && argType.kind === "map") {
 			this._inferFromPair(paramType.key, argType.key, map);
 			this._inferFromPair(paramType.value, argType.value, map);
 		}
-		if (paramType.kind === "func" && argType.kind === "func") {
-			for (
-				let i = 0;
-				i < paramType.params.length && i < argType.params.length;
-				i++
-			) {
-				this._inferFromPair(paramType.params[i], argType.params[i], map);
-			}
-			for (
-				let i = 0;
-				i < paramType.returns.length && i < argType.returns.length;
-				i++
-			) {
-				this._inferFromPair(paramType.returns[i], argType.returns[i], map);
-			}
+		if (paramType.kind === "func" && argType.kind === "func")
+			this._inferFromFuncPair(paramType, argType, map);
+	}
+
+	_inferFromPair(paramType, argType, map) {
+		if (!paramType || !argType) return;
+		if (paramType.kind === "typeParam") {
+			if (!map.has(paramType.name)) map.set(paramType.name, argType);
+			return;
 		}
+		this._inferFromStructuredPair(paramType, argType, map);
 	}
 
 	checkConstraint(typeArg, constraint, node) {
@@ -1034,31 +1025,37 @@ export class TypeChecker {
 		}
 		let base = baseType.kind === "named" ? baseType.underlying : baseType;
 		base = this.resolveType(base);
-		if (base?.kind === "struct") {
-			if (base.fields?.has(field)) return base.fields.get(field);
-			if (base.methods?.has(field)) return base.methods.get(field);
-			return this.err(`No field '${field}' on ${typeStr(baseType)}`, node);
-		}
-		if (base?.kind === "interface") {
-			if (base.methods?.has(field)) return base.methods.get(field);
-			return this.err(`No method '${field}' on ${typeStr(baseType)}`, node);
-		}
+		if (base?.kind === "struct")
+			return this._fieldTypeStruct(base, baseType, field, node);
+		if (base?.kind === "interface")
+			return this._fieldTypeInterface(base, baseType, field, node);
 		if (base?.kind === "namespace")
 			return this._fieldTypeNamespace(base, field, node);
-		// For explicitly typed non-any values, report the bad access rather than
-		// silently returning any — this catches typos on structs and primitive misuse.
-		if (base && !isAny(base)) {
-			// pointer.value is the GoFront new(T) pattern
-			if (base.kind === "pointer" && field === "value") return base.base ?? ANY;
-			const badKinds = ["basic", "slice", "array", "map", "func", "tuple"];
-			if (badKinds.includes(base.kind)) {
-				return this.err(
-					`${typeStr(baseType ?? base)} has no field or method '${field}'`,
-					node,
-				);
-			}
-		}
-		return ANY; // unknown types (e.g. external .d.ts) — allow any access
+		if (base && !isAny(base))
+			return this._fieldTypeBadAccess(base, baseType, field, node);
+		return ANY;
+	}
+
+	_fieldTypeStruct(base, baseType, field, node) {
+		if (base.fields?.has(field)) return base.fields.get(field);
+		if (base.methods?.has(field)) return base.methods.get(field);
+		return this.err(`No field '${field}' on ${typeStr(baseType)}`, node);
+	}
+
+	_fieldTypeInterface(base, baseType, field, node) {
+		if (base.methods?.has(field)) return base.methods.get(field);
+		return this.err(`No method '${field}' on ${typeStr(baseType)}`, node);
+	}
+
+	_fieldTypeBadAccess(base, baseType, field, node) {
+		if (base.kind === "pointer" && field === "value") return base.base ?? ANY;
+		const badKinds = ["basic", "slice", "array", "map", "func", "tuple"];
+		if (badKinds.includes(base.kind))
+			return this.err(
+				`${typeStr(baseType ?? base)} has no field or method '${field}'`,
+				node,
+			);
+		return ANY;
 	}
 
 	_fieldTypeNamespace(base, field, node) {
@@ -1078,13 +1075,22 @@ export class TypeChecker {
 		return this.err(`No member '${field}' in namespace ${base.name}`, node);
 	}
 
+	_binaryResultTypeTypeParam(op, lt, rt) {
+		if (CMP_OPS.has(op)) return BOOL;
+		if (LOG_OPS.has(op)) return BOOL;
+		return lt?.kind === "typeParam" ? lt : rt;
+	}
+
+	_binaryResultTypeString(lt, rt) {
+		if (lt.kind === "untyped" && rt.kind === "untyped") return lt;
+		if (lt.kind === "untyped") return rt;
+		if (rt.kind === "untyped") return lt;
+		return STRING;
+	}
+
 	binaryResultType(op, lt, rt, node) {
-		// Type parameters are permissive — allow operations and return the typeParam
-		if (lt?.kind === "typeParam" || rt?.kind === "typeParam") {
-			if (CMP_OPS.has(op)) return BOOL;
-			if (LOG_OPS.has(op)) return BOOL;
-			return lt?.kind === "typeParam" ? lt : rt;
-		}
+		if (lt?.kind === "typeParam" || rt?.kind === "typeParam")
+			return this._binaryResultTypeTypeParam(op, lt, rt);
 		if (CMP_OPS.has(op)) return this._binaryResultTypeCmp(op, lt, rt, node);
 		if (LOG_OPS.has(op)) return BOOL;
 		if (isAny(lt) || isAny(rt)) return ANY;
@@ -1092,12 +1098,8 @@ export class TypeChecker {
 			return this._binaryResultTypeComplex(op, lt, rt, node);
 		if (isNumeric(lt) && isNumeric(rt))
 			return this._binaryResultTypeNumeric(lt, rt);
-		if (isString(lt) && isString(rt) && op === "+") {
-			if (lt.kind === "untyped" && rt.kind === "untyped") return lt;
-			if (lt.kind === "untyped") return rt;
-			if (rt.kind === "untyped") return lt;
-			return STRING;
-		}
+		if (isString(lt) && isString(rt) && op === "+")
+			return this._binaryResultTypeString(lt, rt);
 		if (node)
 			this.err(`Invalid operation: ${typeStr(lt)} ${op} ${typeStr(rt)}`, node);
 		return ANY;
@@ -1163,15 +1165,21 @@ export class TypeChecker {
 		return isFloat ? FLOAT64 : INT;
 	}
 
+	_isNumericCoercible(target, source) {
+		if (target.kind !== "basic" || source.kind !== "basic") return false;
+		return (
+			(target.name === "float64" && source.name === "int") ||
+			(target.name === "int" && source.name === "float64")
+		);
+	}
+
 	assertAssignable(target, source, node) {
 		if (!target || !source) return;
 		target = this.resolveType(target);
 		source = this.resolveType(source);
-		// Type params are permissive — allow any assignment
 		if (target?.kind === "typeParam" || source?.kind === "typeParam") return;
 		if (isAny(target) || isAny(source)) return;
-		if (isNil(source)) return; // nil is assignable to anything nullable
-		// Pointer type: nil → *T is allowed (handled above); *T → *T check base types
+		if (isNil(source)) return;
 		if (isPointer(target) && isPointer(source)) {
 			this.assertAssignable(
 				target.base ?? target.underlying?.base,
@@ -1180,22 +1188,11 @@ export class TypeChecker {
 			);
 			return;
 		}
-
-		// Untyped constants coerce to any compatible typed target
 		if (isUntyped(source) && this._isUntypedAssignable(target, source)) return;
-
-		// Go untyped constant promotion: int literals are assignable to float64
-		if (target.kind === "basic" && source.kind === "basic") {
-			if (target.name === "float64" && source.name === "int") return;
-			if (target.name === "int" && source.name === "float64") return; // truncating
-		}
-
-		// Array-specific checks: size matching and array/slice incompatibility
+		if (this._isNumericCoercible(target, source)) return;
 		if (this._checkArrayAssignable(target, source, node)) return;
-
-		if (typeStr(target) !== typeStr(source)) {
+		if (typeStr(target) !== typeStr(source))
 			this._assertAssignableTypeMismatch(target, source, node);
-		}
 	}
 
 	_assertAssignableTypeMismatch(target, source, node) {
@@ -1255,10 +1252,28 @@ export class TypeChecker {
 		return false;
 	}
 
+	_sigParamsMatch(reqList, actList) {
+		if (reqList.length !== actList.length) return false;
+		for (let i = 0; i < reqList.length; i++) {
+			if (typeStr(reqList[i]) !== typeStr(actList[i])) return false;
+		}
+		return true;
+	}
+
+	_implementsMethod(required, actual) {
+		if (!actual) return false;
+		const rp = required.params ?? [],
+			ap = actual.params ?? [];
+		const rr = required.returns ?? [],
+			ar = actual.returns ?? [];
+		if (!this._sigParamsMatch(rp, ap)) return false;
+		if (!!required.variadic !== !!actual.variadic) return false;
+		return this._sigParamsMatch(rr, ar);
+	}
+
 	implements(srcType, iface, _node) {
 		let base = srcType.kind === "named" ? srcType.underlying : srcType;
 		base = this.resolveType(base);
-		// For non-struct named types, methods live on the named type itself
 		const methodMap =
 			base?.kind === "struct"
 				? base.methods
@@ -1267,29 +1282,7 @@ export class TypeChecker {
 					: null;
 		if (!methodMap) return false;
 		for (const [name, required] of iface.methods) {
-			const actual = methodMap.get(name);
-			if (!actual) return false;
-
-			// Check parameter count matches
-			const reqParams = required.params ?? [];
-			const actParams = actual.params ?? [];
-			if (reqParams.length !== actParams.length) return false;
-
-			// Check each parameter type matches
-			for (let i = 0; i < reqParams.length; i++) {
-				if (typeStr(reqParams[i]) !== typeStr(actParams[i])) return false;
-			}
-
-			// Check variadic flag matches
-			if (!!required.variadic !== !!actual.variadic) return false;
-
-			// Check return types match (count and each type)
-			const reqRets = required.returns ?? [];
-			const actRets = actual.returns ?? [];
-			if (reqRets.length !== actRets.length) return false;
-			for (let i = 0; i < reqRets.length; i++) {
-				if (typeStr(reqRets[i]) !== typeStr(actRets[i])) return false;
-			}
+			if (!this._implementsMethod(required, methodMap.get(name))) return false;
 		}
 		return true;
 	}

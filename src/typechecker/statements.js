@@ -80,6 +80,24 @@ export const statementCheckMethods = {
 		}
 	},
 
+	_checkDefineCommaOkAssert(stmt, rhs, scope) {
+		if (!stmt.rhs[0]?._commaOk) return false;
+		const lhsNames = stmt.lhs.map((e) => e.name ?? e);
+		if (lhsNames[0] !== "_") scope.defineLocal(lhsNames[0], rhs[0]);
+		if (lhsNames[1] !== "_") scope.defineLocal(lhsNames[1], BOOL);
+		stmt._rhsTypes = [rhs[0], BOOL];
+		return true;
+	},
+
+	_declareDefineVars(stmt, rhsFlat, scope) {
+		for (let i = 0; i < stmt.lhs.length; i++) {
+			const name = stmt.lhs[i].name ?? stmt.lhs[i];
+			if (name === "_") continue;
+			if (scope.symbols.has(name)) stmt.lhs[i]._redecl = true;
+			scope.defineLocal(name, defaultType(rhsFlat[i]) ?? ANY);
+		}
+	},
+
 	_checkDefineStmt(stmt, scope) {
 		// comma-ok type assertion: n, ok := x.(T)
 		if (
@@ -90,28 +108,10 @@ export const statementCheckMethods = {
 			stmt.rhs[0]._commaOk = true;
 		}
 		const rhs = stmt.rhs.map((e) => this.checkExpr(e, scope));
-		// Flatten tuple returns
 		const rhsFlat =
 			rhs.length === 1 && rhs[0].kind === "tuple" ? rhs[0].types : rhs;
-		// comma-ok type assertion returns [assertedType, bool]
-		if (stmt.rhs[0]?._commaOk) {
-			const lhsNames = stmt.lhs.map((e) => e.name ?? e);
-			if (lhsNames[0] !== "_") scope.defineLocal(lhsNames[0], rhs[0]);
-			if (lhsNames[1] !== "_") scope.defineLocal(lhsNames[1], BOOL);
-			stmt._rhsTypes = [rhs[0], BOOL];
-			return;
-		}
-		for (let i = 0; i < stmt.lhs.length; i++) {
-			const name = stmt.lhs[i].name ?? stmt.lhs[i];
-			if (name === "_") continue;
-			// Short variable re-declaration: mark vars that already exist
-			// in the current (not parent) scope as redeclared.
-			if (scope.symbols.has(name)) {
-				stmt.lhs[i]._redecl = true;
-			}
-			scope.defineLocal(name, defaultType(rhsFlat[i]) ?? ANY);
-		}
-		// Go requires at least one new variable in :=
+		if (this._checkDefineCommaOkAssert(stmt, rhs, scope)) return;
+		this._declareDefineVars(stmt, rhsFlat, scope);
 		const allRedecl = stmt.lhs.every((e) => e._redecl || (e.name ?? e) === "_");
 		if (allRedecl && stmt.lhs.length > 0) {
 			this.err("no new variables on left side of :=", stmt.lhs[0]);
@@ -119,34 +119,24 @@ export const statementCheckMethods = {
 		stmt._rhsTypes = rhsFlat.map((t) => defaultType(t) ?? ANY);
 	},
 
-	_checkAssignStmt(stmt, scope) {
-		// comma-ok map index: v, ok = m["key"]
-		// Evaluate map expr first so _type is populated, then detect the pattern.
+	_checkAssignCommaOkMap(stmt, scope) {
 		if (
-			stmt.lhs.length === 2 &&
-			stmt.rhs.length === 1 &&
-			stmt.rhs[0].kind === "IndexExpr"
-		) {
-			const mapBaseType = this.checkExpr(stmt.rhs[0].expr, scope);
-			const resolvedBase =
-				mapBaseType?.kind === "named" ? mapBaseType.underlying : mapBaseType;
-			if (resolvedBase?.kind === "map") {
-				this.checkExpr(stmt.rhs[0].index, scope);
-				stmt._commaOkMap = true;
-				// Store the map value type so codegen can emit the zero-value fallback
-				stmt.rhs[0]._mapValueType = resolvedBase.value;
-				return;
-			}
-		}
-		// comma-ok type assertion: v, ok = x.(T)
-		if (
-			stmt.lhs.length === 2 &&
-			stmt.rhs.length === 1 &&
-			stmt.rhs[0].kind === "TypeAssertExpr"
-		) {
-			stmt.rhs[0]._commaOk = true;
-		}
-		// Check for const reassignment before evaluating RHS
+			stmt.lhs.length !== 2 ||
+			stmt.rhs.length !== 1 ||
+			stmt.rhs[0].kind !== "IndexExpr"
+		)
+			return false;
+		const mapBaseType = this.checkExpr(stmt.rhs[0].expr, scope);
+		const resolvedBase =
+			mapBaseType?.kind === "named" ? mapBaseType.underlying : mapBaseType;
+		if (resolvedBase?.kind !== "map") return false;
+		this.checkExpr(stmt.rhs[0].index, scope);
+		stmt._commaOkMap = true;
+		stmt.rhs[0]._mapValueType = resolvedBase.value;
+		return true;
+	},
+
+	_checkConstAssignment(stmt, scope) {
 		for (const lhs of stmt.lhs) {
 			if (lhs.kind === "Ident" && lhs.name !== "_") {
 				const ownerScope = scope.lookupScope(lhs.name);
@@ -154,6 +144,18 @@ export const statementCheckMethods = {
 					this.err(`cannot assign to const '${lhs.name}'`, lhs);
 			}
 		}
+	},
+
+	_checkAssignStmt(stmt, scope) {
+		if (this._checkAssignCommaOkMap(stmt, scope)) return;
+		// comma-ok type assertion: v, ok = x.(T)
+		if (
+			stmt.lhs.length === 2 &&
+			stmt.rhs.length === 1 &&
+			stmt.rhs[0].kind === "TypeAssertExpr"
+		)
+			stmt.rhs[0]._commaOk = true;
+		this._checkConstAssignment(stmt, scope);
 		const rhs = stmt.rhs.map((e) => this.checkExpr(e, scope));
 		const rhsFlat =
 			rhs.length === 1 && rhs[0]?.kind === "tuple" ? rhs[0].types : rhs;
@@ -164,9 +166,8 @@ export const statementCheckMethods = {
 		for (let i = 0; i < lhsTypes.length; i++) {
 			if (stmt.lhs[i]?.kind === "Ident" && stmt.lhs[i]?.name === "_") continue;
 			const r = rhsFlat[i] ?? ANY;
-			if (!isAny(lhsTypes[i]) && !isAny(r)) {
+			if (!isAny(lhsTypes[i]) && !isAny(r))
 				this.assertAssignable(lhsTypes[i], r, stmt.lhs[i]);
-			}
 		}
 	},
 
@@ -209,6 +210,23 @@ export const statementCheckMethods = {
 		this._reportUnused(inner, stmt);
 	},
 
+	_checkForCond(stmt, inner) {
+		if (stmt.cond.kind !== "RangeExpr") {
+			const ct = this.checkExpr(stmt.cond, inner);
+			if (!isBool(ct) && !isAny(ct))
+				this.err("For condition must be bool", stmt);
+		} else {
+			const ct = this.checkExpr(stmt.cond.expr, inner);
+			const info = iteratorYieldParams(ct);
+			if (info) {
+				stmt.cond._isIterator = true;
+				stmt.cond._yieldParams = info.yieldParams;
+			} else if (ct?.kind === "func") {
+				this.err("cannot range over func: not an iterator function", stmt);
+			}
+		}
+	},
+
 	_checkForStmt(stmt, scope, returnType) {
 		const inner = new Scope(scope);
 		let iterInfo = null;
@@ -216,23 +234,7 @@ export const statementCheckMethods = {
 			iterInfo = this._checkRangeIterStmt(stmt.init, inner, returnType);
 		}
 		if (!iterInfo && stmt.init) this.checkStmt(stmt.init, inner, returnType);
-		if (stmt.cond) {
-			if (stmt.cond.kind !== "RangeExpr") {
-				const ct = this.checkExpr(stmt.cond, inner);
-				if (!isBool(ct) && !isAny(ct))
-					this.err("For condition must be bool", stmt);
-			} else {
-				// for range expr — could be int range or 0-param iterator
-				const ct = this.checkExpr(stmt.cond.expr, inner);
-				const info = iteratorYieldParams(ct);
-				if (info) {
-					stmt.cond._isIterator = true;
-					stmt.cond._yieldParams = info.yieldParams;
-				} else if (ct?.kind === "func") {
-					this.err("cannot range over func: not an iterator function", stmt);
-				}
-			}
-		}
+		if (stmt.cond) this._checkForCond(stmt, inner);
 		if (stmt.post) this.checkStmt(stmt.post, inner, returnType);
 		this._loopDepth++;
 		const bodyScope = new Scope(inner);

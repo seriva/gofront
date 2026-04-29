@@ -107,15 +107,45 @@ export const statementGenMethods = {
 		}
 	},
 
-	_genDefineStmt(stmt) {
-		// Map comma-ok: v, ok := m[key]  →  let v = m[key]; let ok = key in m;
-		const rhsNode = stmt.rhs[0];
-		if (
+	_isCommaOkMapExpr(stmt, rhsNode) {
+		return (
 			stmt.rhs.length === 1 &&
 			stmt.lhs.length === 2 &&
 			rhsNode?.kind === "IndexExpr" &&
 			rhsNode.expr?._type?.kind === "map"
-		) {
+		);
+	},
+
+	_genDefineSingleVar(lhs, rhs, redecls) {
+		const isBoxed = this._boxedVars.has(lhs[0]);
+		const val = isBoxed && !redecls[0] ? `{ value: ${rhs[0]} }` : rhs[0];
+		if (redecls[0]) {
+			if (isBoxed) this.line(`${lhs[0]}.value = ${rhs[0]};`);
+			else this.line(`${lhs[0]} = ${val};`);
+		} else {
+			this.line(`let ${lhs[0]} = ${val};`);
+		}
+	},
+
+	_genDefineMixedRedecl(lhs, rhs, redecls) {
+		if (rhs.length === 1 && lhs.length > 1) {
+			const tmp = "__t";
+			this.line(`let ${tmp} = ${rhs[0]};`);
+			for (let i = 0; i < lhs.length; i++) {
+				const prefix = redecls[i] ? "" : "let ";
+				this.line(`${prefix}${lhs[i]} = ${tmp}[${i}];`);
+			}
+		} else {
+			for (let i = 0; i < lhs.length; i++) {
+				const prefix = redecls[i] ? "" : "let ";
+				this.line(`${prefix}${lhs[i]} = ${rhs[i]};`);
+			}
+		}
+	},
+
+	_genDefineStmt(stmt) {
+		const rhsNode = stmt.rhs[0];
+		if (this._isCommaOkMapExpr(stmt, rhsNode)) {
 			this._genCommaOkMapIndex(stmt, rhsNode, true);
 			return;
 		}
@@ -124,100 +154,92 @@ export const statementGenMethods = {
 		const redecls = stmt.lhs.map((e) => !!e._redecl);
 		const anyRedecl = redecls.some((r) => r);
 		if (lhs.length === 1) {
-			const isBoxed = this._boxedVars.has(lhs[0]);
-			const val = isBoxed && !redecls[0] ? `{ value: ${rhs[0]} }` : rhs[0];
-			if (redecls[0]) {
-				if (isBoxed) {
-					this.line(`${lhs[0]}.value = ${rhs[0]};`);
-				} else {
-					this.line(`${lhs[0]} = ${val};`);
-				}
-			} else {
-				this.line(`let ${lhs[0]} = ${val};`);
-			}
+			this._genDefineSingleVar(lhs, rhs, redecls);
 		} else if (!anyRedecl) {
-			// All new: let [a, b] = ...
 			const rhsStr = rhs.length === 1 ? rhs[0] : `[${rhs.join(", ")}]`;
 			this.line(`let [${lhs.join(", ")}] = ${rhsStr};`);
 		} else {
-			// Mixed new/existing: emit separate statements
-			// First compute the tuple into a temp if needed
-			if (rhs.length === 1 && lhs.length > 1) {
-				const tmp = "__t";
-				this.line(`let ${tmp} = ${rhs[0]};`);
-				for (let i = 0; i < lhs.length; i++) {
-					const prefix = redecls[i] ? "" : "let ";
-					this.line(`${prefix}${lhs[i]} = ${tmp}[${i}];`);
-				}
-			} else {
-				for (let i = 0; i < lhs.length; i++) {
-					const prefix = redecls[i] ? "" : "let ";
-					this.line(`${prefix}${lhs[i]} = ${rhs[i]};`);
-				}
-			}
+			this._genDefineMixedRedecl(lhs, rhs, redecls);
 		}
 	},
 
-	_genAssignStmt(stmt) {
-		// Complex compound assignment: z += w → z = z + w (with complex codegen)
-		if (
+	_isComplexCompoundAssign(stmt) {
+		return (
 			stmt.op !== "=" &&
 			stmt.lhs.length === 1 &&
 			stmt.rhs.length === 1 &&
 			isComplex(stmt.lhs[0]._type)
-		) {
+		);
+	},
+
+	_isCommaOkAssertStmt(stmt) {
+		return (
+			stmt.lhs.length === 2 && stmt.rhs.length === 1 && stmt.rhs[0]._commaOk
+		);
+	},
+
+	_genAssignLhsExpr(e) {
+		if (e.kind === "Ident" && e.name !== "_" && this._boxedVars.has(e.name))
+			return `${e.name}.value`;
+		return e.name ?? this.genExpr(e);
+	},
+
+	_markIndexLvalues(exprs) {
+		for (const e of exprs) if (e.kind === "IndexExpr") e._lvalue = true;
+	},
+
+	_genAssignMulti(stmt, lhs, rhs, active, pairs) {
+		const rhsStr = rhs.length === 1 ? rhs[0] : `[${rhs.join(", ")}]`;
+		if (active.length === pairs.length) {
+			this.line(`[${lhs.join(", ")}] = ${rhsStr};`);
+		} else {
+			this._genMultiAssignWithBlanks(stmt, lhs, rhs, rhsStr);
+		}
+	},
+
+	_genAssignStmt(stmt) {
+		if (this._isComplexCompoundAssign(stmt)) {
 			this._genComplexCompoundAssign(stmt);
 			return;
 		}
-		// comma-ok map index: v, ok = m["key"]
 		if (stmt._commaOkMap) {
 			this._genCommaOkMapIndex(stmt, stmt.rhs[0], false);
 			return;
 		}
-		// comma-ok type assertion: v, ok = x.(T)
-		if (
-			stmt.lhs.length === 2 &&
-			stmt.rhs.length === 1 &&
-			stmt.rhs[0]._commaOk
-		) {
-			const val = this.genExpr(stmt.rhs[0]);
-			const [vName, okName] = stmt.lhs.map((e) => e.name ?? this.genExpr(e));
-			const tmp = "__ta";
-			this.line(`let ${tmp} = ${val};`);
-			if (vName !== "_") this.line(`${vName} = ${tmp}[0];`);
-			if (okName !== "_") this.line(`${okName} = ${tmp}[1];`);
+		if (this._isCommaOkAssertStmt(stmt)) {
+			this._genCommaOkTypeAssert(stmt);
 			return;
 		}
 		const rhs = stmt.rhs.map((e) => this.genExpr(e));
-		for (const e of stmt.lhs) if (e.kind === "IndexExpr") e._lvalue = true;
-		const lhs = stmt.lhs.map((e) => {
-			if (e.kind === "Ident" && e.name !== "_" && this._boxedVars.has(e.name))
-				return `${e.name}.value`;
-			return e.name ?? this.genExpr(e);
-		});
-		// Filter out blank identifier assignments entirely
+		this._markIndexLvalues(stmt.lhs);
+		const lhs = stmt.lhs.map((e) => this._genAssignLhsExpr(e));
 		const pairs = lhs.map((l, i) => ({ l, r: rhs[i] ?? rhs[0] }));
 		const active = pairs.filter((p) => p.l !== "_");
 		if (active.length === 0) {
-			// All _ — still need to evaluate rhs for side effects
 			if (rhs.length > 0) this.line(`${rhs[0]};`);
 		} else if (lhs.length === 1) {
 			this.line(`${active[0].l} ${stmt.op} ${active[0].r};`);
 		} else {
-			// multi-assign: emit only non-blank targets
-			const rhsStr = rhs.length === 1 ? rhs[0] : `[${rhs.join(", ")}]`;
-			if (active.length === pairs.length) {
-				this.line(`[${lhs.join(", ")}] = ${rhsStr};`);
-			} else {
-				// Some blanks — use temp and assign only non-blank
-				const tmp = "__t";
-				this.line(`let ${tmp} = ${rhsStr};`);
-				for (let i = 0; i < lhs.length; i++) {
-					if (lhs[i] !== "_") {
-						const src = rhs.length === 1 ? `${tmp}[${i}]` : rhs[i];
-						this.line(`${lhs[i]} ${stmt.op} ${src};`);
-					}
-				}
+			this._genAssignMulti(stmt, lhs, rhs, active, pairs);
+		}
+	},
+
+	_genCommaOkTypeAssert(stmt) {
+		const val = this.genExpr(stmt.rhs[0]);
+		const [vName, okName] = stmt.lhs.map((e) => e.name ?? this.genExpr(e));
+		const tmp = "__ta";
+		this.line(`let ${tmp} = ${val};`);
+		if (vName !== "_") this.line(`${vName} = ${tmp}[0];`);
+		if (okName !== "_") this.line(`${okName} = ${tmp}[1];`);
+	},
+
+	_genMultiAssignWithBlanks(stmt, lhs, rhs, rhsStr) {
+		const tmp = "__t";
+		this.line(`let ${tmp} = ${rhsStr};`);
+		for (let i = 0; i < lhs.length; i++) {
+			if (lhs[i] !== "_") {
+				const src = rhs.length === 1 ? `${tmp}[${i}]` : rhs[i];
+				this.line(`${lhs[i]} ${stmt.op} ${src};`);
 			}
 		}
 	},
