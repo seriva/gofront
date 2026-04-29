@@ -563,34 +563,26 @@ export class DtsParser {
 
 	// ── Top-level parse ──────────────────────────────────────────
 
-	parse() {
-		const types = new Map(); // type namespace (for type annotations)
-		const values = new Map(); // value namespace (for expressions)
-
-		// If wrapped in `declare module "name" { ... }`, strip the wrapper
-		this.skip();
+	_parseDeclareModuleWrapper() {
 		if (this.matchKw("declare") && this.matchKw("module")) {
 			this._readStringLit() || this.readIdent();
 			this.skip();
 			this.consume("{");
 		}
+	}
+
+	parse() {
+		const types = new Map();
+		const values = new Map();
+
+		this.skip();
+		this._parseDeclareModuleWrapper();
 
 		while (!this.eof() && this.peek() !== "}") {
 			this.skip();
 			if (this.eof() || this.ch() === "}") break;
 
-			// Collect modifiers
-			while (true) {
-				this.skip();
-				let found = false;
-				for (const mod of SKIP_MODIFIERS) {
-					if (this.matchKw(mod)) {
-						found = true;
-						break;
-					}
-				}
-				if (!found) break;
-			}
+			this._skipModifiers();
 
 			this.skip();
 			if (this.eof() || this.ch() === "}") break;
@@ -608,6 +600,85 @@ export class DtsParser {
 		return { types, values };
 	}
 
+	_parseTopLevelTypeAlias(types) {
+		const name = this.readIdent();
+		this.skipGenerics();
+		this.skip();
+		let type = ANY;
+		if (this.ch() === "=") {
+			this.pos++;
+			type = this.parseType();
+		}
+		this.consume(";");
+		if (name) types.set(name, type);
+	}
+
+	_parseTopLevelClassDecl(kw, types, values) {
+		const name = this.readIdent();
+		this.skipGenerics();
+		while (!this.eof() && this.ch() !== "{") this.pos++;
+		this.consume("{");
+		const body = this.parseBody();
+		this.consume("}");
+		this.consume(";");
+		if (name) {
+			const ns = { kind: "namespace", name, members: body };
+			types.set(name, ns);
+			if (kw === "class") values.set(name, ns);
+		}
+	}
+
+	_parseTopLevelNamespaceDecl(types, values) {
+		const name = this.readIdent() || this._readStringLit();
+		this.skip();
+		this.consume("{");
+		const body = this.parseBody();
+		this.consume("}");
+		this.consume(";");
+		if (name) {
+			const ns = { kind: "namespace", name, members: body };
+			types.set(name, ns);
+			values.set(name, ns);
+		}
+	}
+
+	_parseTopLevelFuncDecl(values) {
+		const name = this.readIdent();
+		this.skipGenerics();
+		const params = this.parseParams();
+		this.skip();
+		let ret = VOID;
+		if (this.ch() === ":") {
+			this.pos++;
+			ret = this.parseType();
+		}
+		this.consume(";");
+		if (name)
+			values.set(name, {
+				kind: "func",
+				params: params.map((p) => p.type),
+				returns: [ret],
+			});
+	}
+
+	_parseTopLevelVarDecl(values) {
+		const name = this.readIdent();
+		this.skip();
+		this.consume("?");
+		let type = ANY;
+		if (this.ch() === ":") {
+			this.pos++;
+			type = this.parseType();
+		}
+		this.skip();
+		if (this.ch() === "=") {
+			this.pos++;
+			this.skipTypeExpr();
+		}
+		this.consume(";");
+		if (name) values.set(name, type);
+	}
+
 	_parseTopLevelDecl(kw, types, values) {
 		switch (kw) {
 			case "import":
@@ -615,50 +686,17 @@ export class DtsParser {
 				this.skipTypeExpr();
 				this.consume(";");
 				break;
-			case "type": {
-				const name = this.readIdent();
-				this.skipGenerics();
-				this.skip();
-				let type = ANY;
-				if (this.ch() === "=") {
-					this.pos++;
-					type = this.parseType();
-				}
-				this.consume(";");
-				if (name) types.set(name, type);
+			case "type":
+				this._parseTopLevelTypeAlias(types);
 				break;
-			}
 			case "interface":
-			case "class": {
-				const name = this.readIdent();
-				this.skipGenerics();
-				while (!this.eof() && this.ch() !== "{") this.pos++;
-				this.consume("{");
-				const body = this.parseBody();
-				this.consume("}");
-				this.consume(";");
-				if (name) {
-					const ns = { kind: "namespace", name, members: body };
-					types.set(name, ns);
-					if (kw === "class") values.set(name, ns);
-				}
+			case "class":
+				this._parseTopLevelClassDecl(kw, types, values);
 				break;
-			}
 			case "namespace":
-			case "module": {
-				const name = this.readIdent() || this._readStringLit();
-				this.skip();
-				this.consume("{");
-				const body = this.parseBody();
-				this.consume("}");
-				this.consume(";");
-				if (name) {
-					const ns = { kind: "namespace", name, members: body };
-					types.set(name, ns);
-					values.set(name, ns);
-				}
+			case "module":
+				this._parseTopLevelNamespaceDecl(types, values);
 				break;
-			}
 			case "enum": {
 				const name = this.readIdent();
 				this.skipBlock();
@@ -669,45 +707,14 @@ export class DtsParser {
 				}
 				break;
 			}
-			case "function": {
-				const name = this.readIdent();
-				this.skipGenerics();
-				const params = this.parseParams();
-				this.skip();
-				let ret = VOID;
-				if (this.ch() === ":") {
-					this.pos++;
-					ret = this.parseType();
-				}
-				this.consume(";");
-				if (name)
-					values.set(name, {
-						kind: "func",
-						params: params.map((p) => p.type),
-						returns: [ret],
-					});
+			case "function":
+				this._parseTopLevelFuncDecl(values);
 				break;
-			}
 			case "const":
 			case "let":
-			case "var": {
-				const name = this.readIdent();
-				this.skip();
-				this.consume("?");
-				let type = ANY;
-				if (this.ch() === ":") {
-					this.pos++;
-					type = this.parseType();
-				}
-				this.skip();
-				if (this.ch() === "=") {
-					this.pos++;
-					this.skipTypeExpr();
-				}
-				this.consume(";");
-				if (name) values.set(name, type);
+			case "var":
+				this._parseTopLevelVarDecl(values);
 				break;
-			}
 			default:
 				this.skipTypeExpr();
 				this.consume(";");

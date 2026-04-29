@@ -403,35 +403,50 @@ export class Lexer {
 		return { n, isFloat: false };
 	}
 
+	_readHexFrac() {
+		let frac = "";
+		this.advance(); // skip the dot
+		while (this.pos < this.src.length && /[0-9a-fA-F_]/.test(this.peek())) {
+			const ch = this.advance();
+			if (ch !== "_") frac += ch;
+		}
+		return frac;
+	}
+
+	_readHexFloatExp(n, frac) {
+		this.advance(); // skip p/P
+		let exp = "";
+		if (this.peek() === "+" || this.peek() === "-") exp += this.advance();
+		while (this.pos < this.src.length && /[0-9]/.test(this.peek()))
+			exp += this.advance();
+		let mantissa = Number(n);
+		if (frac) mantissa += Number.parseInt(frac, 16) / 16 ** frac.length;
+		return { n: String(mantissa * 2 ** Number(exp)), isFloat: true };
+	}
+
 	_readHexNumber(n) {
 		n += this.advance(); // consume x/X
 		while (this.pos < this.src.length && /[0-9a-fA-F_]/.test(this.peek())) {
 			const ch = this.advance();
 			if (ch !== "_") n += ch;
 		}
-		// Hex float: 0x1.Fp10 or 0xAp-2
 		if (this.peek() === "." || this.peek() === "p" || this.peek() === "P") {
 			let frac = "";
-			if (this.peek() === ".") {
-				this.advance(); // skip the dot (don't add to n)
-				while (this.pos < this.src.length && /[0-9a-fA-F_]/.test(this.peek())) {
-					const ch = this.advance();
-					if (ch !== "_") frac += ch;
-				}
-			}
-			if (this.peek() === "p" || this.peek() === "P") {
-				this.advance(); // skip p/P
-				let exp = "";
-				if (this.peek() === "+" || this.peek() === "-") exp += this.advance();
-				while (this.pos < this.src.length && /[0-9]/.test(this.peek()))
-					exp += this.advance();
-				// JS can't parse hex floats natively — convert manually
-				let mantissa = Number(n);
-				if (frac) mantissa += Number.parseInt(frac, 16) / 16 ** frac.length;
-				return { n: String(mantissa * 2 ** Number(exp)), isFloat: true };
-			}
+			if (this.peek() === ".") frac = this._readHexFrac();
+			if (this.peek() === "p" || this.peek() === "P")
+				return this._readHexFloatExp(n, frac);
 		}
 		return { n, isFloat: false };
+	}
+
+	_readDecimalExponent(n) {
+		n += this.advance(); // consume e/E
+		if (this.peek() === "+" || this.peek() === "-") n += this.advance();
+		while (this.pos < this.src.length && /[0-9_]/.test(this.peek())) {
+			const ch = this.advance();
+			if (ch !== "_") n += ch;
+		}
+		return n;
 	}
 
 	_readDecimalNumber(n) {
@@ -450,12 +465,7 @@ export class Lexer {
 		}
 		if (this.peek() === "e" || this.peek() === "E") {
 			isFloat = true;
-			n += this.advance();
-			if (this.peek() === "+" || this.peek() === "-") n += this.advance();
-			while (this.pos < this.src.length && /[0-9_]/.test(this.peek())) {
-				const ch = this.advance();
-				if (ch !== "_") n += ch;
-			}
+			n = this._readDecimalExponent(n);
 		}
 		return { n, isFloat };
 	}

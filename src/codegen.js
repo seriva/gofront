@@ -105,16 +105,15 @@ export class CodeGen {
 		this.indent--;
 	}
 
-	generate(program) {
-		const methods = this._collectDecls(program);
-
-		// Emit ESM import statements for npm packages
+	_emitJsImports() {
 		for (const [importPath, names] of this.jsImports) {
 			if (names.length === 0) continue;
 			this.line(`import { ${names.join(", ")} } from '${importPath}';`);
 		}
 		if (this.jsImports.size > 0) this.blank();
+	}
 
+	_emitTypeDecls(program, methods) {
 		for (const d of program.decls) {
 			if (d.kind === "TypeDecl") {
 				this._currentSrcFileIdx = d._srcFileIdx ?? 0;
@@ -122,7 +121,9 @@ export class CodeGen {
 				this.blank();
 			}
 		}
+	}
 
+	_emitVarConstDecls(program) {
 		for (const d of program.decls) {
 			if (d.kind === "VarDecl") {
 				this._currentSrcFileIdx = d._srcFileIdx ?? 0;
@@ -135,20 +136,22 @@ export class CodeGen {
 				this.blank();
 			}
 		}
+	}
 
-		// Emit functions and templ components
-		const initNames = this._emitFuncDecls(program);
-
-		// Auto-call init() functions, then main()
+	_callInitAndMain(initNames, program) {
 		for (const name of initNames) this.line(`${name}();`);
-		const hasMain = program.decls.some(
-			(d) => d.kind === "FuncDecl" && d.name === "main",
-		);
-		if (hasMain) this.line("main();");
+		if (program.decls.some((d) => d.kind === "FuncDecl" && d.name === "main"))
+			this.line("main();");
+	}
 
+	generate(program) {
+		const methods = this._collectDecls(program);
+		this._emitJsImports();
+		this._emitTypeDecls(program, methods);
+		this._emitVarConstDecls(program);
+		const initNames = this._emitFuncDecls(program);
+		this._callInitAndMain(initNames, program);
 		this._prependHelpers();
-
-		// Strip leading blank line
 		while (this.out[0] === "") this.out.shift();
 		return this.out.join("\n");
 	}
@@ -180,12 +183,14 @@ export class CodeGen {
 
 	// Collects struct names, method map, and named wrapper names from program decls.
 	// Returns the method map (typeName → MethodDecl[]).
-	_collectDecls(program) {
+	_collectStructNames(program) {
 		for (const d of program.decls) {
-			if (d.kind === "TypeDecl" && d.type.kind === "StructType") {
+			if (d.kind === "TypeDecl" && d.type.kind === "StructType")
 				this.structNames.add(d.name);
-			}
 		}
+	}
+
+	_collectMethodMap(program) {
 		const methods = new Map();
 		for (const d of program.decls) {
 			if (d.kind === "MethodDecl") {
@@ -194,6 +199,10 @@ export class CodeGen {
 				methods.get(name).push(d);
 			}
 		}
+		return methods;
+	}
+
+	_collectNamedWrappers(program, methods) {
 		for (const d of program.decls) {
 			if (
 				d.kind === "TypeDecl" &&
@@ -204,24 +213,31 @@ export class CodeGen {
 				this.namedWrapperNames.add(d.name);
 			}
 		}
+	}
+
+	_collectDecls(program) {
+		this._collectStructNames(program);
+		const methods = this._collectMethodMap(program);
+		this._collectNamedWrappers(program, methods);
 		return methods;
 	}
 
-	// Prepends any runtime helpers that were referenced during codegen.
 	_prependHelpers() {
-		const helpers = [];
-		if (this._usesLen) helpers.push(HELPER_LEN);
-		if (this._usesAppend) helpers.push(HELPER_APPEND);
-		if (this._usesSliceGuard) helpers.push(HELPER_S);
-		if (this._usesEqual) helpers.push(HELPER_EQUAL);
-		if (this._usesCmul) helpers.push(HELPER_CMUL);
-		if (this._usesCdiv) helpers.push(HELPER_CDIV);
-		if (this._usesSprintf) helpers.push(HELPER_SPRINTF);
-		if (this._usesError) helpers.push(HELPER_ERROR);
-		if (this._usesErrorIs) helpers.push(HELPER_ERROR_IS);
-		if (this._usesPathClean) helpers.push(HELPER_PATH_CLEAN);
-		if (this._usesTimeFmt) helpers.push(HELPER_TIME_FMT);
-		if (this._usesTimeParse) helpers.push(HELPER_TIME_PARSE);
+		const HELPER_MAP = [
+			[this._usesLen, HELPER_LEN],
+			[this._usesAppend, HELPER_APPEND],
+			[this._usesSliceGuard, HELPER_S],
+			[this._usesEqual, HELPER_EQUAL],
+			[this._usesCmul, HELPER_CMUL],
+			[this._usesCdiv, HELPER_CDIV],
+			[this._usesSprintf, HELPER_SPRINTF],
+			[this._usesError, HELPER_ERROR],
+			[this._usesErrorIs, HELPER_ERROR_IS],
+			[this._usesPathClean, HELPER_PATH_CLEAN],
+			[this._usesTimeFmt, HELPER_TIME_FMT],
+			[this._usesTimeParse, HELPER_TIME_PARSE],
+		];
+		const helpers = HELPER_MAP.filter(([flag]) => flag).map(([, h]) => h);
 		if (helpers.length > 0) this.out.unshift(...helpers, "");
 	}
 
@@ -288,47 +304,64 @@ export class CodeGen {
 		this.line("}");
 	}
 
-	genStruct(name, structTypeAst, methodDecls) {
+	_collectStructFields(name, structTypeAst) {
 		const fields = [];
 		if (this.checker) {
 			const resolved = this.checker.types.get(name)?.underlying;
 			if (resolved?.kind === "struct") {
-				for (const [fName, fType] of resolved.fields.entries()) {
+				for (const [fName, fType] of resolved.fields.entries())
 					fields.push({ name: fName, zero: this.zeroValueForType(fType) });
-				}
 			}
 		} else {
-			// Fallback (e.g. tests without typechecker)
 			for (const f of structTypeAst.fields) {
-				if (f.embedded) continue; // Can't resolve here
+				if (f.embedded) continue;
 				const zero = this.zeroValueForTypeNode(f.type);
 				for (const n of f.names) fields.push({ name: n, zero });
 			}
 		}
+		return fields;
+	}
 
+	_genStructConstructor(fields) {
+		if (fields.length === 0) {
+			this.line("constructor() {}");
+		} else {
+			const params = fields.map((f) => `${f.name} = ${f.zero}`).join(", ");
+			this.line(`constructor({ ${params} } = {}) {`);
+			this.indented(() => {
+				for (const f of fields) this.line(`this.${f.name} = ${f.name};`);
+			});
+			this.line("}");
+		}
+	}
+
+	genStruct(name, structTypeAst, methodDecls) {
+		const fields = this._collectStructFields(name, structTypeAst);
 		this.line(`class ${name} {`);
 		this.indented(() => {
-			if (fields.length === 0) {
-				this.line("constructor() {}");
-			} else {
-				const params = fields.map((f) => `${f.name} = ${f.zero}`).join(", ");
-				this.line(`constructor({ ${params} } = {}) {`);
-				this.indented(() => {
-					for (const f of fields) this.line(`this.${f.name} = ${f.name};`);
-				});
-				this.line("}");
-			}
-
-			// Methods
+			this._genStructConstructor(fields);
 			for (const m of methodDecls) {
 				this.blank();
 				this.genMethod(m);
 			}
-
-			// Delegation stubs for promoted embedded methods
 			this._genEmbeddedMethodStubs(name, methodDecls);
 		});
 		this.line("}");
+	}
+
+	_genSingleEmbedStubs(embed, declared) {
+		const embedName = embed.kind === "named" ? embed.name : null;
+		if (!embedName) return;
+		const embedBase = embed.kind === "named" ? embed.underlying : embed;
+		if (embedBase?.kind !== "struct" || !embedBase.methods) return;
+		for (const [mName] of embedBase.methods.entries()) {
+			if (!declared.has(mName)) {
+				this.blank();
+				this.line(
+					`${mName}(...__a) { return ${embedName}.prototype.${mName}.call(this, ...__a); }`,
+				);
+			}
+		}
 	}
 
 	_genEmbeddedMethodStubs(name, methodDecls) {
@@ -336,20 +369,8 @@ export class CodeGen {
 		const resolvedType = this.checker.types.get(name)?.underlying;
 		if (resolvedType?.kind !== "struct" || !resolvedType._embeds) return;
 		const declared = new Set(methodDecls.map((m) => m.name));
-		for (const embed of resolvedType._embeds) {
-			const embedName = embed.kind === "named" ? embed.name : null;
-			if (!embedName) continue;
-			const embedBase = embed.kind === "named" ? embed.underlying : embed;
-			if (embedBase?.kind !== "struct" || !embedBase.methods) continue;
-			for (const [mName] of embedBase.methods.entries()) {
-				if (!declared.has(mName)) {
-					this.blank();
-					this.line(
-						`${mName}(...__a) { return ${embedName}.prototype.${mName}.call(this, ...__a); }`,
-					);
-				}
-			}
-		}
+		for (const embed of resolvedType._embeds)
+			this._genSingleEmbedStubs(embed, declared);
 	}
 
 	genMethod(decl, recvField = null) {
