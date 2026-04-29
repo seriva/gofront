@@ -1,6 +1,6 @@
 // Parser expression methods — installed as a mixin on Parser.prototype.
 
-import { T } from "../lexer.js";
+import { T } from "../tokens.js";
 
 // Binary operator precedence (higher = binds tighter, matching Go spec)
 const PREC = {
