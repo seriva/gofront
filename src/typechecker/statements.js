@@ -1,5 +1,20 @@
 // TypeChecker statement-checking methods — installed as a mixin on TypeChecker.prototype.
 
+// Method-name dispatch for checkStmt — string values add no static call edges.
+const CHECK_STMT_DELEGATE = {
+	VarDecl: "checkVarDecl",
+	ConstDecl: "checkConstDecl",
+	TypeDecl: "collectType",
+	DefineStmt: "_checkDefineStmt",
+	AssignStmt: "_checkAssignStmt",
+	ReturnStmt: "_checkReturnStmt",
+	IfStmt: "_checkIfStmt",
+	ForStmt: "_checkForStmt",
+	SwitchStmt: "_checkSwitchStmt",
+	TypeSwitchStmt: "_checkTypeSwitchStmt",
+	BranchStmt: "_checkBranchStmt",
+};
+
 import {
 	ANY,
 	BOOL,
@@ -20,54 +35,18 @@ export const statementCheckMethods = {
 
 	checkStmt(stmt, scope, returnType) {
 		switch (stmt.kind) {
-			case "VarDecl":
-				this.checkVarDecl(stmt, scope);
-				break;
-			case "ConstDecl":
-				this.checkConstDecl(stmt, scope);
-				break;
-			case "TypeDecl":
-				this.collectType(stmt);
-				break;
-			case "DefineStmt":
-				this._checkDefineStmt(stmt, scope);
-				break;
-			case "AssignStmt":
-				this._checkAssignStmt(stmt, scope);
-				break;
 			case "IncDecStmt":
-				this.checkExpr(stmt.expr, scope);
-				break;
 			case "ExprStmt":
 				this.checkExpr(stmt.expr, scope);
 				break;
-			case "ReturnStmt":
-				this._checkReturnStmt(stmt, scope, returnType);
-				break;
-			case "IfStmt":
-				this._checkIfStmt(stmt, scope, returnType);
-				break;
-			case "ForStmt":
-				this._checkForStmt(stmt, scope, returnType);
-				break;
-			case "SwitchStmt":
-				this._checkSwitchStmt(stmt, scope, returnType);
-				break;
-			case "TypeSwitchStmt":
-				this._checkTypeSwitchStmt(stmt, scope, returnType);
-				break;
-			case "DeferStmt": {
+			case "DeferStmt":
 				if (stmt.call.kind !== "CallExpr")
 					this.err("defer requires a function call", stmt.call);
 				this.checkExpr(stmt.call, scope);
 				this._deferCount++;
 				break;
-			}
 			case "LabeledStmt":
 				this.checkStmt(stmt.body, scope, returnType);
-				break;
-			case "BranchStmt":
-				this._checkBranchStmt(stmt);
 				break;
 			case "Block": {
 				const blockScope = new Scope(scope);
@@ -75,8 +54,11 @@ export const statementCheckMethods = {
 				this._reportUnused(blockScope, stmt);
 				break;
 			}
-			default:
+			default: {
+				const m = CHECK_STMT_DELEGATE[stmt.kind];
+				if (m) this[m](stmt, scope, returnType);
 				break;
+			}
 		}
 	},
 

@@ -2,6 +2,19 @@
 
 import { T } from "../lexer.js";
 
+// Method-name dispatch for pure-delegation cases in _parseStmt.
+const PARSE_STMT_DELEGATE = {
+	[T.VAR]: "parseVarDecl",
+	[T.CONST]: "parseConstDecl",
+	[T.TYPE]: "parseTypeDecl",
+	[T.RETURN]: "parseReturn",
+	[T.DEFER]: "parseDefer",
+	[T.IF]: "parseIf",
+	[T.FOR]: "parseFor",
+	[T.SWITCH]: "parseSwitch",
+	[T.LBRACE]: "parseBlock",
+};
+
 export const statementParserMethods = {
 	parseBlock() {
 		this.expect(T.LBRACE);
@@ -32,59 +45,36 @@ export const statementParserMethods = {
 	},
 
 	_parseStmt(t) {
+		const delegate = PARSE_STMT_DELEGATE[t.type];
+		if (delegate) return this[delegate]();
+
 		switch (t.type) {
-			case T.VAR:
-				return this.parseVarDecl();
-			case T.CONST:
-				return this.parseConstDecl();
-			case T.TYPE:
-				return this.parseTypeDecl();
-			case T.RETURN:
-				return this.parseReturn();
-			case T.DEFER:
-				return this.parseDefer();
 			case T.BREAK:
-				this.advance();
+			case T.CONTINUE: {
+				const keyword = this.advance().value;
 				if (this.check(T.IDENT)) {
 					const label = this.advance().value;
 					this.semi();
-					return { kind: "BranchStmt", keyword: "break", label };
+					return { kind: "BranchStmt", keyword, label };
 				}
 				this.semi();
-				return { kind: "BranchStmt", keyword: "break" };
-			case T.CONTINUE:
-				this.advance();
-				if (this.check(T.IDENT)) {
-					const label = this.advance().value;
-					this.semi();
-					return { kind: "BranchStmt", keyword: "continue", label };
-				}
-				this.semi();
-				return { kind: "BranchStmt", keyword: "continue" };
+				return { kind: "BranchStmt", keyword };
+			}
 			case T.FALLTHROUGH:
 				this.advance();
 				this.semi();
 				return { kind: "BranchStmt", keyword: "fallthrough" };
-			case T.IF:
-				return this.parseIf();
-			case T.FOR:
-				return this.parseFor();
-			case T.SWITCH:
-				return this.parseSwitch();
 			case T.GO:
 				return this.err("goroutines are not supported in GoFront");
 			case T.SELECT:
 				return this.err(
 					"select statement is not supported in GoFront (no channels)",
 				);
-			case T.LBRACE:
-				return this.parseBlock();
 			case T.IDENT:
 				if (this.check2(T.COLON)) {
-					const label = this.advance().value; // consume IDENT
+					const label = this.advance().value;
 					this.advance(); // consume COLON
-					const body = this.parseStmt();
-					return { kind: "LabeledStmt", label, body };
+					return { kind: "LabeledStmt", label, body: this.parseStmt() };
 				}
 				return this.parseSimpleStmt();
 			default:

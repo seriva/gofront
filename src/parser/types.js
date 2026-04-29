@@ -2,38 +2,40 @@
 
 import { T } from "../lexer.js";
 
+// Token types that directly map to parseTypeName().
+const TYPE_NAME_TOKENS = new Set([
+	T.IDENT,
+	"int",
+	"float64",
+	"string",
+	"bool",
+	"any",
+	"byte",
+	"rune",
+	"error",
+]);
+// Method-name dispatch for the simple keyword cases in parseType().
+const PARSE_TYPE_DELEGATE = {
+	[T.LBRACKET]: "parseSliceOrArrayType",
+	[T.MAP]: "parseMapType",
+	[T.FUNC]: "parseFuncType",
+	[T.STRUCT]: "parseStructType",
+	[T.INTERFACE]: "parseInterfaceType",
+};
+
 export const typeParserMethods = {
 	parseType() {
 		const t = this.peek();
-		switch (t.type) {
-			case T.LBRACKET:
-				return this.parseSliceOrArrayType();
-			case T.MAP:
-				return this.parseMapType();
-			case T.FUNC:
-				return this.parseFuncType();
-			case T.STRUCT:
-				return this.parseStructType();
-			case T.INTERFACE:
-				return this.parseInterfaceType();
-			case T.STAR:
-				this.advance();
-				return { kind: "PointerType", base: this.parseType() };
-			case T.CHAN:
-				return this.err("channels are not supported in GoFront");
-			case T.IDENT:
-			case "int":
-			case "float64":
-			case "string":
-			case "bool":
-			case "any":
-			case "byte":
-			case "rune":
-			case "error":
-				return this.parseTypeName();
-			default:
-				this.err(`Expected type, got '${t.value}'`);
+		const delegate = PARSE_TYPE_DELEGATE[t.type];
+		if (delegate) return this[delegate]();
+		if (TYPE_NAME_TOKENS.has(t.type)) return this.parseTypeName();
+		if (t.type === T.STAR) {
+			this.advance();
+			return { kind: "PointerType", base: this.parseType() };
 		}
+		if (t.type === T.CHAN)
+			return this.err("channels are not supported in GoFront");
+		return this.err(`Expected type, got '${t.value}'`);
 	},
 
 	parseTypeName() {

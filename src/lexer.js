@@ -149,6 +149,30 @@ const KEYWORDS = new Set([
 	"select",
 ]);
 
+// Single-character punctuation: push a fixed token with no lookahead.
+const PUNCT_TOKEN = {
+	"~": [T.TILDE, "~"],
+	"(": [T.LPAREN, "("],
+	")": [T.RPAREN, ")"],
+	"{": [T.LBRACE, "{"],
+	"}": [T.RBRACE, "}"],
+	"[": [T.LBRACKET, "["],
+	"]": [T.RBRACKET, "]"],
+	",": [T.COMMA, ","],
+	";": [T.SEMICOLON, ";"],
+};
+
+// Operator + optional "=" compound form: [compoundType, compoundVal, baseType, baseVal]
+const ASSIGN_OP = {
+	"*": [T.STAR_ASSIGN, "*=", T.STAR, "*"],
+	"/": [T.SLASH_ASSIGN, "/=", T.SLASH, "/"],
+	"%": [T.PERCENT_ASSIGN, "%=", T.PERCENT, "%"],
+	"=": [T.EQ, "==", T.ASSIGN, "="],
+	"!": [T.NEQ, "!=", T.NOT, "!"],
+	"^": [T.CARET_ASSIGN, "^=", T.CARET, "^"],
+	":": [T.DEFINE, ":=", T.COLON, ":"],
+};
+
 export class Token {
 	constructor(type, value, line, col) {
 		this.type = type;
@@ -585,32 +609,25 @@ export class Lexer {
 	}
 
 	_readOperator(ch, l, c) {
+		const punct = PUNCT_TOKEN[ch];
+		if (punct) {
+			this.push(punct[0], punct[1], l, c);
+			return;
+		}
+
+		const assign = ASSIGN_OP[ch];
+		if (assign) {
+			if (this.match("=")) this.push(assign[0], assign[1], l, c);
+			else this.push(assign[2], assign[3], l, c);
+			return;
+		}
+
 		switch (ch) {
 			case "+":
 				this._readPlusOp(l, c);
 				break;
 			case "-":
 				this._readMinusOp(l, c);
-				break;
-			case "*":
-				if (this.match("=")) this.push(T.STAR_ASSIGN, "*=", l, c);
-				else this.push(T.STAR, "*", l, c);
-				break;
-			case "/":
-				if (this.match("=")) this.push(T.SLASH_ASSIGN, "/=", l, c);
-				else this.push(T.SLASH, "/", l, c);
-				break;
-			case "%":
-				if (this.match("=")) this.push(T.PERCENT_ASSIGN, "%=", l, c);
-				else this.push(T.PERCENT, "%", l, c);
-				break;
-			case "=":
-				if (this.match("=")) this.push(T.EQ, "==", l, c);
-				else this.push(T.ASSIGN, "=", l, c);
-				break;
-			case "!":
-				if (this.match("=")) this.push(T.NEQ, "!=", l, c);
-				else this.push(T.NOT, "!", l, c);
 				break;
 			case "<":
 				this._readLessOp(l, c);
@@ -626,17 +643,6 @@ export class Lexer {
 				else if (this.match("=")) this.push(T.PIPE_ASSIGN, "|=", l, c);
 				else this.push(T.PIPE, "|", l, c);
 				break;
-			case "^":
-				if (this.match("=")) this.push(T.CARET_ASSIGN, "^=", l, c);
-				else this.push(T.CARET, "^", l, c);
-				break;
-			case "~":
-				this.push(T.TILDE, "~", l, c);
-				break;
-			case ":":
-				if (this.match("=")) this.push(T.DEFINE, ":=", l, c);
-				else this.push(T.COLON, ":", l, c);
-				break;
 			case ".":
 				if (this.peek() === "." && this.peek(1) === ".") {
 					this.advance();
@@ -645,30 +651,6 @@ export class Lexer {
 				} else {
 					this.push(T.DOT, ".", l, c);
 				}
-				break;
-			case "(":
-				this.push(T.LPAREN, "(", l, c);
-				break;
-			case ")":
-				this.push(T.RPAREN, ")", l, c);
-				break;
-			case "{":
-				this.push(T.LBRACE, "{", l, c);
-				break;
-			case "}":
-				this.push(T.RBRACE, "}", l, c);
-				break;
-			case "[":
-				this.push(T.LBRACKET, "[", l, c);
-				break;
-			case "]":
-				this.push(T.RBRACKET, "]", l, c);
-				break;
-			case ",":
-				this.push(T.COMMA, ",", l, c);
-				break;
-			case ";":
-				this.push(T.SEMICOLON, ";", l, c);
 				break;
 			default:
 				this.err(`Unexpected character: '${ch}'`);

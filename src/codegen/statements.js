@@ -2,6 +2,19 @@
 
 import { isComplex } from "../typechecker/types.js";
 
+// Method-name dispatch for genStmt — string values add no static call edges.
+const STMT_GEN_DELEGATE = {
+	VarDecl: "genVarDecl",
+	ConstDecl: "genConstDecl",
+	DefineStmt: "_genDefineStmt",
+	AssignStmt: "_genAssignStmt",
+	ReturnStmt: "_genReturnStmt",
+	ForStmt: "genFor",
+	SwitchStmt: "genSwitch",
+	TypeSwitchStmt: "genTypeSwitch",
+	BranchStmt: "_genBranchStmt",
+};
+
 export const statementGenMethods = {
 	genBlock(block) {
 		for (const stmt of block.stmts) this.genStmt(stmt);
@@ -36,20 +49,8 @@ export const statementGenMethods = {
 		const srcLine = stmt._line ?? null;
 		const _line0 = this.out.length;
 		switch (stmt.kind) {
-			case "VarDecl":
-				this.genVarDecl(stmt);
-				break;
-			case "ConstDecl":
-				this.genConstDecl(stmt);
-				break;
 			case "TypeDecl":
 				this.genTypeDeclWithMethods(stmt, []);
-				break;
-			case "DefineStmt":
-				this._genDefineStmt(stmt);
-				break;
-			case "AssignStmt":
-				this._genAssignStmt(stmt);
 				break;
 			case "IncDecStmt":
 				this.line(`${this.genExpr(stmt.expr)}${stmt.op};`);
@@ -57,12 +58,8 @@ export const statementGenMethods = {
 			case "ExprStmt":
 				this.line(`${this.genExpr(stmt.expr)};`);
 				break;
-			case "ReturnStmt":
-				this._genReturnStmt(stmt);
-				break;
-			case "IfStmt": {
+			case "IfStmt":
 				if (stmt.init) {
-					// Wrap in a block so init variable is scoped
 					this.line("{");
 					this.indented(() => {
 						this.genStmt(stmt.init);
@@ -73,16 +70,6 @@ export const statementGenMethods = {
 					this._genIf(stmt);
 				}
 				break;
-			}
-			case "ForStmt":
-				this.genFor(stmt);
-				break;
-			case "SwitchStmt":
-				this.genSwitch(stmt);
-				break;
-			case "TypeSwitchStmt":
-				this.genTypeSwitch(stmt);
-				break;
 			case "DeferStmt":
 				this.line(`__defers.push(() => { ${this.genExpr(stmt.call)}; });`);
 				break;
@@ -90,16 +77,19 @@ export const statementGenMethods = {
 				this.line(`${stmt.label}:`);
 				this.genStmt(stmt.body);
 				break;
-			case "BranchStmt":
-				this._genBranchStmt(stmt);
-				break;
 			case "Block":
 				this.line("{");
 				this.indented(() => this.genBlock(stmt));
 				this.line("}");
 				break;
-			default:
+			default: {
+				const m = STMT_GEN_DELEGATE[stmt.kind];
+				if (m) {
+					this[m](stmt);
+					break;
+				}
 				throw new Error(`CodeGen: unhandled statement kind '${stmt.kind}'`);
+			}
 		}
 		// Record source mapping: first output line this statement produced
 		if (srcLine != null && this.out.length > _line0) {
