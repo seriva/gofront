@@ -1,6 +1,6 @@
 // Parser type-expression methods — installed as a mixin on Parser.prototype.
 
-import { T } from "../lexer.js";
+import { T } from "../tokens.js";
 
 // Token types that directly map to parseTypeName().
 const TYPE_NAME_TOKENS = new Set([

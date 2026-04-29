@@ -16,9 +16,9 @@
 //   TemplSwitch { kind, exprTokens, cases: TemplCase[] }
 //   TemplCase   { kind, caseTokens: tokens | null (null = default), body: TemplNode[] }
 
-import { T } from "./lexer.js";
 import { Parser } from "./parser/index.js";
 import { TT } from "./templ-lexer.js";
+import { T } from "./tokens.js";
 
 const VOID_ELEMENTS = new Set([
 	"area",
