@@ -53,6 +53,64 @@ const UNTYPED_COMPAT = {
 	complex128: new Set(["complex128", "complex64"]),
 };
 
+// Dispatch table for substituteType — keyed by type.kind.
+const SUBSTITUTE_DISPATCH = {
+	basic: (_s, type) => type,
+	untyped: (_s, type) => type,
+	slice: (s, type, map) => ({
+		kind: "slice",
+		elem: s.substituteType(type.elem, map),
+	}),
+	array: (s, type, map) => ({
+		kind: "array",
+		size: type.size,
+		elem: s.substituteType(type.elem, map),
+	}),
+	map: (s, type, map) => ({
+		kind: "map",
+		key: s.substituteType(type.key, map),
+		value: s.substituteType(type.value, map),
+	}),
+	func: (s, type, map) => ({
+		kind: "func",
+		params: type.params.map((p) => s.substituteType(p, map)),
+		returns: type.returns.map((r) => s.substituteType(r, map)),
+		variadic: type.variadic,
+		async: type.async,
+	}),
+	struct: (s, type, map) => {
+		const fields = new Map();
+		for (const [k, v] of type.fields) fields.set(k, s.substituteType(v, map));
+		const methods = new Map();
+		for (const [k, v] of type.methods) methods.set(k, s.substituteType(v, map));
+		return {
+			kind: "struct",
+			name: type.name,
+			fields,
+			methods,
+			_embeds: type._embeds,
+		};
+	},
+	interface: (s, type, map) => {
+		const methods = new Map();
+		for (const [k, v] of type.methods) methods.set(k, s.substituteType(v, map));
+		return { kind: "interface", name: type.name, methods };
+	},
+	named: (s, type, map) => ({
+		kind: "named",
+		name: type.name,
+		underlying: s.substituteType(type.underlying, map),
+	}),
+	pointer: (s, type, map) => ({
+		kind: "pointer",
+		base: s.substituteType(type.base, map),
+	}),
+	tuple: (s, type, map) => ({
+		kind: "tuple",
+		types: type.types.map((t) => s.substituteType(t, map)),
+	}),
+};
+
 export class TypeChecker {
 	constructor() {
 		this.types = new Map(); // named types
@@ -549,39 +607,26 @@ export class TypeChecker {
 
 	_isTerminating(stmt) {
 		if (!stmt) return false;
-		switch (stmt.kind) {
-			case "ReturnStmt":
-				return true;
-			case "BranchStmt":
-				// panic() is in ExprStmt, not BranchStmt — but "goto" could be here
-				return false;
-			case "ExprStmt":
-				return this._isPanicCall(stmt.expr);
-			case "Block":
-				return this._isTerminatingBlock(stmt);
-			case "IfStmt":
-				// Terminating if: has else, and both branches terminate
-				if (!stmt.elseBody) return false;
-				return (
-					this._isTerminatingBlock(stmt.body) &&
-					(stmt.elseBody.kind === "Block"
-						? this._isTerminatingBlock(stmt.elseBody)
-						: this._isTerminating(stmt.elseBody))
-				);
-			case "ForStmt":
-				// Infinite loop (no condition) with no break — terminating
-				if (!stmt.cond && !this._blockHasBreak(stmt.body)) return true;
-				return false;
-			case "SwitchStmt":
-				// Terminating switch: has default and every case terminates
-				return this._isTerminatingSwitch(stmt);
-			case "TypeSwitchStmt":
-				return this._isTerminatingTypeSwitch(stmt);
-			case "LabeledStmt":
-				return this._isTerminating(stmt.body);
-			default:
-				return false;
+		if (stmt.kind === "ReturnStmt") return true;
+		if (stmt.kind === "BranchStmt") return false;
+		if (stmt.kind === "ExprStmt") return this._isPanicCall(stmt.expr);
+		if (stmt.kind === "LabeledStmt") return this._isTerminating(stmt.body);
+		if (stmt.kind === "Block") return this._isTerminatingBlock(stmt);
+		if (stmt.kind === "SwitchStmt") return this._isTerminatingSwitch(stmt);
+		if (stmt.kind === "TypeSwitchStmt")
+			return this._isTerminatingTypeSwitch(stmt);
+		if (stmt.kind === "ForStmt")
+			return !stmt.cond && !this._blockHasBreak(stmt.body);
+		if (stmt.kind === "IfStmt") {
+			if (!stmt.elseBody) return false;
+			return (
+				this._isTerminatingBlock(stmt.body) &&
+				(stmt.elseBody.kind === "Block"
+					? this._isTerminatingBlock(stmt.elseBody)
+					: this._isTerminating(stmt.elseBody))
+			);
 		}
+		return false;
 	}
 
 	_isTerminatingBlock(block) {
@@ -665,7 +710,6 @@ export class TypeChecker {
 				if (BASIC_TYPES[node.name]) return BASIC_TYPES[node.name];
 				if (node.name === "comparable")
 					return { kind: "basic", name: "comparable" };
-				// Check scope for type params before checking this.types
 				if (scope) {
 					const fromScope = scope.lookup(node.name);
 					if (fromScope?.kind === "typeParam") return fromScope;
@@ -677,13 +721,12 @@ export class TypeChecker {
 			case "GenericTypeName": {
 				const base = this.types.get(node.name);
 				if (!base) return this.err(`Unknown type '${node.name}'`, node);
-				if (base.kind === "named" && base._generic) {
+				if (base.kind === "named" && base._generic)
 					return this.instantiateGenericType(
 						base._generic,
 						node.typeArgs,
 						scope,
 					);
-				}
 				return this.err(`Type '${node.name}' is not generic`, node);
 			}
 			case "TypeParam": {
@@ -695,21 +738,7 @@ export class TypeChecker {
 			case "UnionConstraint":
 				return node;
 			case "SliceType":
-				return {
-					kind: "slice",
-					elem: this.resolveTypeNode(node.elem, scope),
-				};
-			case "ArrayType":
-				return {
-					kind: "array",
-					// inferLen: true means [...]T — size is determined by composite literal
-					size: node.inferLen
-						? null
-						: node.size?.value !== undefined
-							? Number(node.size.value)
-							: node.size,
-					elem: this.resolveTypeNode(node.elem, scope),
-				};
+				return { kind: "slice", elem: this.resolveTypeNode(node.elem, scope) };
 			case "MapType":
 				return {
 					kind: "map",
@@ -721,34 +750,47 @@ export class TypeChecker {
 					kind: "pointer",
 					base: this.resolveTypeNode(node.base, scope),
 				};
-			case "FuncType": {
-				const params = node.params.map((p) =>
-					this.resolveTypeNode(p.type, scope),
-				);
-				const returns = node.returnType
-					? [this.resolveTypeNode(node.returnType, scope)]
-					: [VOID];
-				return { kind: "func", params, returns };
-			}
 			case "StructType":
 				return this._resolveStructType(node, scope);
 			case "InterfaceType":
 				return this._resolveInterfaceType(node, scope);
-			case "TupleType": {
-				return {
-					kind: "tuple",
-					types: node.types.map((t) => this.resolveTypeNode(t, scope)),
-				};
-			}
-			// Expression used as type (e.g. in make/new calls)
 			case "Ident":
 				return this.resolveTypeNode(
 					{ kind: "TypeName", name: node.name },
 					scope,
 				);
+			case "ArrayType":
+				return this._resolveArrayTypeNode(node, scope);
+			case "FuncType":
+				return this._resolveFuncTypeNode(node, scope);
+			case "TupleType":
+				return {
+					kind: "tuple",
+					types: node.types.map((t) => this.resolveTypeNode(t, scope)),
+				};
 			default:
 				return ANY;
 		}
+	}
+
+	_resolveArrayTypeNode(node, scope) {
+		return {
+			kind: "array",
+			size: node.inferLen
+				? null
+				: node.size?.value !== undefined
+					? Number(node.size.value)
+					: node.size,
+			elem: this.resolveTypeNode(node.elem, scope),
+		};
+	}
+
+	_resolveFuncTypeNode(node, scope) {
+		const params = node.params.map((p) => this.resolveTypeNode(p.type, scope));
+		const returns = node.returnType
+			? [this.resolveTypeNode(node.returnType, scope)]
+			: [VOID];
+		return { kind: "func", params, returns };
 	}
 
 	resolveTypeNodeName(node, scope) {
@@ -827,70 +869,8 @@ export class TypeChecker {
 			const bound = map.get(type.name);
 			return bound ?? type;
 		}
-		switch (type.kind) {
-			case "basic":
-			case "untyped":
-				return type;
-			case "slice":
-				return { kind: "slice", elem: this.substituteType(type.elem, map) };
-			case "array":
-				return {
-					kind: "array",
-					size: type.size,
-					elem: this.substituteType(type.elem, map),
-				};
-			case "map":
-				return {
-					kind: "map",
-					key: this.substituteType(type.key, map),
-					value: this.substituteType(type.value, map),
-				};
-			case "func": {
-				return {
-					kind: "func",
-					params: type.params.map((p) => this.substituteType(p, map)),
-					returns: type.returns.map((r) => this.substituteType(r, map)),
-					variadic: type.variadic,
-					async: type.async,
-				};
-			}
-			case "struct": {
-				const fields = new Map();
-				for (const [k, v] of type.fields)
-					fields.set(k, this.substituteType(v, map));
-				const methods = new Map();
-				for (const [k, v] of type.methods)
-					methods.set(k, this.substituteType(v, map));
-				return {
-					kind: "struct",
-					name: type.name,
-					fields,
-					methods,
-					_embeds: type._embeds,
-				};
-			}
-			case "interface": {
-				const methods = new Map();
-				for (const [k, v] of type.methods)
-					methods.set(k, this.substituteType(v, map));
-				return { kind: "interface", name: type.name, methods };
-			}
-			case "named":
-				return {
-					kind: "named",
-					name: type.name,
-					underlying: this.substituteType(type.underlying, map),
-				};
-			case "pointer":
-				return { kind: "pointer", base: this.substituteType(type.base, map) };
-			case "tuple":
-				return {
-					kind: "tuple",
-					types: type.types.map((t) => this.substituteType(t, map)),
-				};
-			default:
-				return type;
-		}
+		const gen = SUBSTITUTE_DISPATCH[type.kind];
+		return gen ? gen(this, type, map) : type;
 	}
 
 	instantiateGenericFunc(genericType, typeArgs) {
