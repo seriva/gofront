@@ -539,17 +539,48 @@ export class Lexer {
 		this.push(T.EOF, "", this.line, this.col);
 		return this.tokens;
 	}
+	_readPlusOp(l, c) {
+		if (this.match("+")) this.push(T.INC, "++", l, c);
+		else if (this.match("=")) this.push(T.PLUS_ASSIGN, "+=", l, c);
+		else this.push(T.PLUS, "+", l, c);
+	}
+
+	_readMinusOp(l, c) {
+		if (this.match("-")) this.push(T.DEC, "--", l, c);
+		else if (this.match("=")) this.push(T.MINUS_ASSIGN, "-=", l, c);
+		else this.push(T.MINUS, "-", l, c);
+	}
+
+	_readLessOp(l, c) {
+		if (this.match("<")) {
+			if (this.match("=")) this.push(T.LSHIFT_ASSIGN, "<<=", l, c);
+			else this.push(T.LSHIFT, "<<", l, c);
+		} else if (this.match("=")) this.push(T.LTE, "<=", l, c);
+		else this.push(T.LT, "<", l, c);
+	}
+
+	_readGreaterOp(l, c) {
+		if (this.match(">")) {
+			if (this.match("=")) this.push(T.RSHIFT_ASSIGN, ">>=", l, c);
+			else this.push(T.RSHIFT, ">>", l, c);
+		} else if (this.match("=")) this.push(T.GTE, ">=", l, c);
+		else this.push(T.GT, ">", l, c);
+	}
+
+	_readAmpOp(l, c) {
+		if (this.match("&")) this.push(T.AND, "&&", l, c);
+		else if (this.match("^")) this.push(T.AND_NOT, "&^", l, c);
+		else if (this.match("=")) this.push(T.AMP_ASSIGN, "&=", l, c);
+		else this.push(T.AMP, "&", l, c);
+	}
+
 	_readOperator(ch, l, c) {
 		switch (ch) {
 			case "+":
-				if (this.match("+")) this.push(T.INC, "++", l, c);
-				else if (this.match("=")) this.push(T.PLUS_ASSIGN, "+=", l, c);
-				else this.push(T.PLUS, "+", l, c);
+				this._readPlusOp(l, c);
 				break;
 			case "-":
-				if (this.match("-")) this.push(T.DEC, "--", l, c);
-				else if (this.match("=")) this.push(T.MINUS_ASSIGN, "-=", l, c);
-				else this.push(T.MINUS, "-", l, c);
+				this._readMinusOp(l, c);
 				break;
 			case "*":
 				if (this.match("=")) this.push(T.STAR_ASSIGN, "*=", l, c);
@@ -572,24 +603,13 @@ export class Lexer {
 				else this.push(T.NOT, "!", l, c);
 				break;
 			case "<":
-				if (this.match("<")) {
-					if (this.match("=")) this.push(T.LSHIFT_ASSIGN, "<<=", l, c);
-					else this.push(T.LSHIFT, "<<", l, c);
-				} else if (this.match("=")) this.push(T.LTE, "<=", l, c);
-				else this.push(T.LT, "<", l, c);
+				this._readLessOp(l, c);
 				break;
 			case ">":
-				if (this.match(">")) {
-					if (this.match("=")) this.push(T.RSHIFT_ASSIGN, ">>=", l, c);
-					else this.push(T.RSHIFT, ">>", l, c);
-				} else if (this.match("=")) this.push(T.GTE, ">=", l, c);
-				else this.push(T.GT, ">", l, c);
+				this._readGreaterOp(l, c);
 				break;
 			case "&":
-				if (this.match("&")) this.push(T.AND, "&&", l, c);
-				else if (this.match("^")) this.push(T.AND_NOT, "&^", l, c);
-				else if (this.match("=")) this.push(T.AMP_ASSIGN, "&=", l, c);
-				else this.push(T.AMP, "&", l, c);
+				this._readAmpOp(l, c);
 				break;
 			case "|":
 				if (this.match("|")) this.push(T.OR, "||", l, c);

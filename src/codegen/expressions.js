@@ -263,18 +263,20 @@ export const expressionGenMethods = {
 		return `${fn}(${args})`;
 	},
 
+	_isErrorMethodCall(expr) {
+		if (expr.func.field !== "Error") return false;
+		const t = expr.func.expr._type;
+		return (
+			t &&
+			(t === ERROR ||
+				t?.name === "error" ||
+				(t?.kind === "named" && t?.underlying?.kind === "interface"))
+		);
+	},
+
 	_genSelectorCall(expr) {
-		// error.Error() → real method call
-		if (
-			expr.func.field === "Error" &&
-			expr.func.expr._type &&
-			(expr.func.expr._type === ERROR ||
-				expr.func.expr._type?.name === "error" ||
-				(expr.func.expr._type?.kind === "named" &&
-					expr.func.expr._type?.underlying?.kind === "interface"))
-		) {
+		if (this._isErrorMethodCall(expr))
 			return `${this.genExpr(expr.func.expr)}.Error()`;
-		}
 		// fmt.Sprintf / fmt.Printf / fmt.Println / fmt.Print / fmt.Errorf
 		// Standard library namespace dispatch — all follow the pattern:
 		// pkg.Func(args) → inline JS
@@ -446,59 +448,30 @@ export const expressionGenMethods = {
 			.join(", ");
 	},
 
-	genCompositeLit(expr) {
-		const t = expr.typeExpr;
+	_isSliceOrArrayType(t) {
+		return t?.kind === "SliceType" || t?.kind === "ArrayType";
+	},
 
-		// Implicit composite literal: {X: 1} or {1, 2} inside a slice/map — type inferred from context
-		if (t === null) return this._genImplicitCompositeLit(expr);
+	_isMapTypeNode(t) {
+		return t?.kind === "MapType";
+	},
 
-		const typeName = this.getTypeName(t);
+	_genMapLitEntries(elems) {
+		return elems
+			.map((e) => {
+				if (e.kind === "KeyValueExpr") {
+					const k =
+						e.key.litKind === "STRING"
+							? JSON.stringify(e.key.value)
+							: `[${this.genExpr(e.key)}]`;
+					return `${k}: ${this.genExpr(e.value)}`;
+				}
+				return this.genExpr(e);
+			})
+			.join(", ");
+	},
 
-		// Struct: new Foo({ X: 1, Y: 2 }) — keyed or positional
-		if (typeName && this.structNames.has(typeName)) {
-			return `new ${typeName}({ ${this._genStructFields(expr.elems)} })`;
-		}
-
-		// Named wrapper type: Group{a, b} → new Group([a, b])
-		if (typeName && this.namedWrapperNames.has(typeName)) {
-			return this._genNamedWrapperLit(typeName, expr);
-		}
-
-		// Fallback: named type that's not a struct but has positional elements → treat as struct
-		if (expr.elems.some((e) => e._positionalField)) {
-			if (typeName) {
-				return `new ${typeName}({ ${this._genStructFields(expr.elems)} })`;
-			}
-		}
-
-		// Slice/array: [1, 2, 3]
-		if (t?.kind === "SliceType" || t?.kind === "ArrayType") {
-			const elems = expr.elems
-				.map((e) =>
-					e.kind === "KeyValueExpr" ? this.genExpr(e.value) : this.genExpr(e),
-				)
-				.join(", ");
-			return `[${elems}]`;
-		}
-
-		// Map: { key: value }
-		if (t?.kind === "MapType") {
-			const entries = expr.elems
-				.map((e) => {
-					if (e.kind === "KeyValueExpr") {
-						const k =
-							e.key.litKind === "STRING"
-								? JSON.stringify(e.key.value)
-								: `[${this.genExpr(e.key)}]`;
-						return `${k}: ${this.genExpr(e.value)}`;
-					}
-					return this.genExpr(e);
-				})
-				.join(", ");
-			return `{ ${entries} }`;
-		}
-
-		// Fallback: key-value pairs → plain object, positional → array
+	_genFallbackCompositeLit(expr) {
 		if (expr.elems.length > 0 && expr.elems[0]?.kind === "KeyValueExpr") {
 			const fields = expr.elems
 				.map(
@@ -509,6 +482,31 @@ export const expressionGenMethods = {
 			return `{ ${fields} }`;
 		}
 		return `[${expr.elems.map((e) => this.genExpr(e)).join(", ")}]`;
+	},
+
+	genCompositeLit(expr) {
+		const t = expr.typeExpr;
+		if (t === null) return this._genImplicitCompositeLit(expr);
+		const typeName = this.getTypeName(t);
+		if (typeName && this.structNames.has(typeName))
+			return `new ${typeName}({ ${this._genStructFields(expr.elems)} })`;
+		if (typeName && this.namedWrapperNames.has(typeName))
+			return this._genNamedWrapperLit(typeName, expr);
+		if (expr.elems.some((e) => e._positionalField)) {
+			if (typeName)
+				return `new ${typeName}({ ${this._genStructFields(expr.elems)} })`;
+		}
+		if (this._isSliceOrArrayType(t)) {
+			const elems = expr.elems
+				.map((e) =>
+					e.kind === "KeyValueExpr" ? this.genExpr(e.value) : this.genExpr(e),
+				)
+				.join(", ");
+			return `[${elems}]`;
+		}
+		if (this._isMapTypeNode(t))
+			return `{ ${this._genMapLitEntries(expr.elems)} }`;
+		return this._genFallbackCompositeLit(expr);
 	},
 
 	_genImplicitCompositeLit(expr) {
