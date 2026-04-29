@@ -18,7 +18,6 @@ import { setupGlobals } from "./stdlib.js";
 import { terminationMethods } from "./termination.js";
 import {
 	ANY,
-	BASIC_TYPES,
 	defaultType,
 	ERROR,
 	isVoid,
