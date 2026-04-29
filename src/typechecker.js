@@ -208,10 +208,22 @@ export class TypeChecker {
 	// All passes run across all files before moving to the next pass,
 	// so every file sees every other file's declarations.
 	checkAll(programs) {
+		this._collectTypesPass(programs);
+		this._collectFuncsPass(programs);
+		this._promoteEmbeddedMethods();
+		this._collectVarsConstsPass(programs);
+		this._checkTopDeclsPass(programs);
+		return this.errors;
+	}
+
+	_collectTypesPass(programs) {
 		for (const p of programs) {
 			this._setCurrentFile(p);
 			for (const d of p.decls) if (d.kind === "TypeDecl") this.collectType(d);
 		}
+	}
+
+	_collectFuncsPass(programs) {
 		for (const p of programs) {
 			this._setCurrentFile(p);
 			for (const d of p.decls) {
@@ -220,7 +232,9 @@ export class TypeChecker {
 				else if (d.kind === "TemplDecl") this._collectTemplDecl(d);
 			}
 		}
-		this._promoteEmbeddedMethods();
+	}
+
+	_collectVarsConstsPass(programs) {
 		for (const p of programs) {
 			this._setCurrentFile(p);
 			for (const d of p.decls) {
@@ -228,11 +242,13 @@ export class TypeChecker {
 				if (d.kind === "ConstDecl") this.collectConst(d);
 			}
 		}
+	}
+
+	_checkTopDeclsPass(programs) {
 		for (const p of programs) {
 			this._setCurrentFile(p);
 			for (const d of p.decls) this.checkTopDecl(d, this.globals);
 		}
-		return this.errors;
 	}
 
 	// ── Shared pass helpers ──────────────────────────────────────
@@ -306,8 +322,7 @@ export class TypeChecker {
 		this.globals.define(decl.name, named);
 	}
 
-	collectFunc(decl) {
-		// For generic functions, create type param scope for resolving param/return types
+	_buildCollectFuncScope(decl) {
 		let resolveScope = this.globals;
 		let typeParamTypes = null;
 		if (decl.typeParams) {
@@ -322,20 +337,34 @@ export class TypeChecker {
 				return t;
 			});
 		}
-		// For methods on generic types, inject the receiver's type params
 		if (decl.kind === "MethodDecl") {
-			const recvTypeName =
-				decl.recvType.kind === "GenericTypeName"
-					? decl.recvType.name
-					: decl.recvType.name;
-			const recvNamedType = this.types.get(recvTypeName);
+			const recvNamedType = this.types.get(decl.recvType.name);
 			if (recvNamedType?._generic) {
 				resolveScope = new Scope(this.globals);
-				for (const tp of recvNamedType._generic.typeParams) {
+				for (const tp of recvNamedType._generic.typeParams)
 					resolveScope.define(tp.name, tp);
-				}
 			}
 		}
+		return { resolveScope, typeParamTypes };
+	}
+
+	_registerFuncDecl(decl, funcType, typeParamTypes) {
+		if (this.globals.symbols.has(decl.name) && decl.name !== "init")
+			this.err(`${decl.name} redeclared in this block`, decl);
+		if (typeParamTypes) {
+			this.globals.define(decl.name, {
+				kind: "generic",
+				name: decl.name,
+				typeParams: typeParamTypes,
+				underlying: funcType,
+			});
+		} else {
+			this.globals.define(decl.name, funcType);
+		}
+	}
+
+	collectFunc(decl) {
+		const { resolveScope, typeParamTypes } = this._buildCollectFuncScope(decl);
 		const paramTypes = decl.params.map((p) =>
 			this.resolveTypeNode(p.type, resolveScope),
 		);
@@ -351,49 +380,34 @@ export class TypeChecker {
 			variadic: isVariadic,
 			async: decl.async ?? false,
 		};
-		if (decl.kind === "FuncDecl") {
-			if (this.globals.symbols.has(decl.name) && decl.name !== "init") {
-				this.err(`${decl.name} redeclared in this block`, decl);
-			}
-			if (typeParamTypes) {
-				this.globals.define(decl.name, {
-					kind: "generic",
-					name: decl.name,
-					typeParams: typeParamTypes,
-					underlying: funcType,
-				});
-			} else {
-				this.globals.define(decl.name, funcType);
-			}
-		} else {
-			this._attachMethod(decl, funcType);
+		if (decl.kind === "FuncDecl")
+			this._registerFuncDecl(decl, funcType, typeParamTypes);
+		else this._attachMethod(decl, funcType);
+	}
+
+	_attachGenericMethod(recvNamedType, decl, funcType) {
+		if (!recvNamedType._generic.methods)
+			recvNamedType._generic.methods = new Map();
+		recvNamedType._generic.methods.set(decl.name, funcType);
+		const base = recvNamedType.underlying;
+		if (base?.kind === "struct") base.methods.set(decl.name, funcType);
+	}
+
+	_attachNonGenericMethod(decl, funcType) {
+		const recvType = this.resolveTypeNodeName(decl.recvType, this.globals);
+		const base = recvType?.underlying ?? recvType;
+		if (base?.kind === "struct") {
+			base.methods.set(decl.name, funcType);
+		} else if (recvType?.kind === "named" && recvType.methods) {
+			recvType.methods.set(decl.name, funcType);
 		}
 	}
 
 	_attachMethod(decl, funcType) {
-		const recvTypeName =
-			decl.recvType.kind === "GenericTypeName"
-				? decl.recvType.name
-				: decl.recvType.name;
-		const recvNamedType = this.types.get(recvTypeName);
-		if (recvNamedType?._generic) {
-			// Store method on the generic metadata and on the underlying struct
-			if (!recvNamedType._generic.methods)
-				recvNamedType._generic.methods = new Map();
-			recvNamedType._generic.methods.set(decl.name, funcType);
-			const base = recvNamedType.underlying;
-			if (base?.kind === "struct") {
-				base.methods.set(decl.name, funcType);
-			}
-		} else {
-			const recvType = this.resolveTypeNodeName(decl.recvType, this.globals);
-			const base = recvType?.underlying ?? recvType;
-			if (base?.kind === "struct") {
-				base.methods.set(decl.name, funcType);
-			} else if (recvType?.kind === "named" && recvType.methods) {
-				recvType.methods.set(decl.name, funcType);
-			}
-		}
+		const recvNamedType = this.types.get(decl.recvType.name);
+		if (recvNamedType?._generic)
+			this._attachGenericMethod(recvNamedType, decl, funcType);
+		else this._attachNonGenericMethod(decl, funcType);
 	}
 
 	// ── Top-level checker ────────────────────────────────────────
@@ -525,6 +539,14 @@ export class TypeChecker {
 	}
 
 	// Go spec §Terminating statements — returns true if the statement always terminates.
+	_isPanicCall(expr) {
+		return (
+			expr?.kind === "CallExpr" &&
+			expr?.func?.kind === "Ident" &&
+			expr?.func?.name === "panic"
+		);
+	}
+
 	_isTerminating(stmt) {
 		if (!stmt) return false;
 		switch (stmt.kind) {
@@ -534,14 +556,7 @@ export class TypeChecker {
 				// panic() is in ExprStmt, not BranchStmt — but "goto" could be here
 				return false;
 			case "ExprStmt":
-				// panic(...) is a terminating call
-				if (
-					stmt.expr?.kind === "CallExpr" &&
-					stmt.expr?.func?.kind === "Ident" &&
-					stmt.expr?.func?.name === "panic"
-				)
-					return true;
-				return false;
+				return this._isPanicCall(stmt.expr);
 			case "Block":
 				return this._isTerminatingBlock(stmt);
 			case "IfStmt":
@@ -967,35 +982,41 @@ export class TypeChecker {
 		this._inferFromStructuredPair(paramType, argType, map);
 	}
 
+	_checkUnionConstraint(typeArg, constraint, node) {
+		for (const term of constraint.terms) {
+			if (term.approx) return;
+			const termType = this.resolveTypeNode(term.type, this.globals);
+			if (typeStr(typeArg) === typeStr(termType)) return;
+		}
+		this.err(`type ${typeStr(typeArg)} does not satisfy constraint`, node);
+	}
+
+	_checkInterfaceConstraint(typeArg, base, constraint, node) {
+		if (base.methods.size === 0 && !base.unionConstraint) return;
+		if (base.unionConstraint) {
+			this.checkConstraint(typeArg, base.unionConstraint, node);
+			return;
+		}
+		if (!this.implements(typeArg, base, node)) {
+			this.err(
+				`type ${typeStr(typeArg)} does not satisfy constraint ${typeStr(constraint)}`,
+				node,
+			);
+		}
+	}
+
 	checkConstraint(typeArg, constraint, node) {
 		if (!constraint) return;
 		if (isAny(constraint)) return;
 		if (constraint.kind === "basic" && constraint.name === "comparable") return;
 		if (constraint.kind === "UnionConstraint") {
-			// Check if typeArg matches any term; ~terms always pass (v1)
-			for (const term of constraint.terms) {
-				if (term.approx) return; // ~ means approximate, always passes
-				const termType = this.resolveTypeNode(term.type, this.globals);
-				if (typeStr(typeArg) === typeStr(termType)) return;
-			}
-			this.err(`type ${typeStr(typeArg)} does not satisfy constraint`, node);
+			this._checkUnionConstraint(typeArg, constraint, node);
 			return;
 		}
-		// Interface constraint — unwrap named types
 		const base =
 			constraint.kind === "named" ? constraint.underlying : constraint;
-		if (base?.kind === "interface") {
-			if (base.methods.size === 0 && !base.unionConstraint) return;
-			if (base.unionConstraint) {
-				return this.checkConstraint(typeArg, base.unionConstraint, node);
-			}
-			if (!this.implements(typeArg, base, node)) {
-				this.err(
-					`type ${typeStr(typeArg)} does not satisfy constraint ${typeStr(constraint)}`,
-					node,
-				);
-			}
-		}
+		if (base?.kind === "interface")
+			this._checkInterfaceConstraint(typeArg, base, constraint, node);
 	}
 
 	resolveType(t) {
@@ -1105,34 +1126,38 @@ export class TypeChecker {
 		return ANY;
 	}
 
-	_binaryResultTypeCmp(op, lt, rt, node) {
-		// Complex only supports == and !=
+	_checkComplexCmpOp(op, lt, rt, node) {
 		if (isComplex(lt) || isComplex(rt)) {
 			if (op !== "==" && op !== "!=") {
 				this.err(
 					`invalid operation: ${typeStr(lt)} ${op} ${typeStr(rt)}`,
 					node,
 				);
-				return ANY;
+				return true;
 			}
 		}
-		// Reject slice/map/func comparisons unless one side is nil (Go spec)
-		if (op === "==" || op === "!=") {
-			const lNil = isNil(lt);
-			const rNil = isNil(rt);
-			if (!lNil && !rNil) {
-				for (const t of [lt, rt]) {
-					const base = t?.kind === "named" ? t.underlying : t;
-					if (
-						base?.kind === "slice" ||
-						base?.kind === "map" ||
-						base?.kind === "func"
-					) {
-						this.err(`operator ${op} not defined on ${typeStr(t)}`, node);
-					}
-				}
-			}
+		return false;
+	}
+
+	_isNonComparableKind(t) {
+		const base = t?.kind === "named" ? t.underlying : t;
+		return (
+			base?.kind === "slice" || base?.kind === "map" || base?.kind === "func"
+		);
+	}
+
+	_checkEqualityComparable(op, lt, rt, node) {
+		if (op !== "==" && op !== "!=") return;
+		if (isNil(lt) || isNil(rt)) return;
+		for (const t of [lt, rt]) {
+			if (this._isNonComparableKind(t))
+				this.err(`operator ${op} not defined on ${typeStr(t)}`, node);
 		}
+	}
+
+	_binaryResultTypeCmp(op, lt, rt, node) {
+		if (this._checkComplexCmpOp(op, lt, rt, node)) return ANY;
+		this._checkEqualityComparable(op, lt, rt, node);
 		return BOOL;
 	}
 
@@ -1173,19 +1198,33 @@ export class TypeChecker {
 		);
 	}
 
+	_assertAssignableEarlyReturn(target, source) {
+		if (target?.kind === "typeParam" || source?.kind === "typeParam")
+			return true;
+		if (isAny(target) || isAny(source)) return true;
+		if (isNil(source)) return true;
+		return false;
+	}
+
+	_isPointerPair(target, source) {
+		return isPointer(target) && isPointer(source);
+	}
+
+	_assertPointerAssignable(target, source, node) {
+		this.assertAssignable(
+			target.base ?? target.underlying?.base,
+			source.base ?? source.underlying?.base,
+			node,
+		);
+	}
+
 	assertAssignable(target, source, node) {
 		if (!target || !source) return;
 		target = this.resolveType(target);
 		source = this.resolveType(source);
-		if (target?.kind === "typeParam" || source?.kind === "typeParam") return;
-		if (isAny(target) || isAny(source)) return;
-		if (isNil(source)) return;
-		if (isPointer(target) && isPointer(source)) {
-			this.assertAssignable(
-				target.base ?? target.underlying?.base,
-				source.base ?? source.underlying?.base,
-				node,
-			);
+		if (this._assertAssignableEarlyReturn(target, source)) return;
+		if (this._isPointerPair(target, source)) {
+			this._assertPointerAssignable(target, source, node);
 			return;
 		}
 		if (isUntyped(source) && this._isUntypedAssignable(target, source)) return;

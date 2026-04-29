@@ -222,76 +222,60 @@ export const expressionGenMethods = {
 		return `(${check} ? [${val}, true] : [${zero}, false])`;
 	},
 
-	genCall(expr) {
-		// Named type constructor call: Greeter(fn), NodeFunc(fn) → new Greeter(fn)
-		if (expr._isTypeConversion) {
-			const name = expr._conversionTargetType?.name;
-			const arg = this.genExpr(expr.args[0]);
-			if (name && this.namedWrapperNames.has(name)) {
-				return `new ${name}(${arg})`;
-			}
-			return arg; // non-wrapper named types: identity
-		}
+	_genTypeConversionCall(expr) {
+		const name = expr._conversionTargetType?.name;
+		const arg = this.genExpr(expr.args[0]);
+		if (name && this.namedWrapperNames.has(name)) return `new ${name}(${arg})`;
+		return arg;
+	},
 
-		// Unwrap InstantiationExpr for function calls: Foo[int](42) → Foo(42)
+	genCall(expr) {
+		if (expr._isTypeConversion) return this._genTypeConversionCall(expr);
+
 		const funcExpr =
 			expr.func.kind === "InstantiationExpr" ? expr.func.expr : expr.func;
-		// Handle built-ins that need special JS translation
 		if (funcExpr.kind === "Ident") {
 			const builtin = this._genBuiltinIdent(funcExpr.name, expr);
 			if (builtin !== undefined) return builtin;
 		}
 
-		// SelectorExpr dispatch (error.Error(), stdlib, builder/regexp/time methods)
 		if (expr.func.kind === "SelectorExpr") {
 			const result = this._genSelectorCall(expr);
 			if (result !== undefined) return result;
 		}
 
-		// Mark the callee so SelectorExpr knows it's being called, not used as a value
 		expr.func._callee = true;
 		const rawFn = this.genExpr(expr.func);
-		// Wrap function literals in parens so `function(){}()` → `(function(){})()`
 		const fn = expr.func.kind === "FuncLit" ? `(${rawFn})` : rawFn;
-		// Multi-value forwarding: f(g()) where g() returns multiple values → f(...g())
-		if (expr._multiForward) {
-			return `${fn}(...${this.genExpr(expr.args[0])})`;
-		}
+		if (expr._multiForward) return `${fn}(...${this.genExpr(expr.args[0])})`;
 		const args = expr.args
 			.map((a) => (a._spread ? `...${this.genExpr(a)}` : this.genExpr(a)))
 			.join(", ");
 		return `${fn}(${args})`;
 	},
 
-	_isErrorMethodCall(expr) {
-		if (expr.func.field !== "Error") return false;
-		const t = expr.func.expr._type;
+	_isErrorInterfaceType(t) {
+		return t?.kind === "named" && t?.underlying?.kind === "interface";
+	},
+
+	_isErrorType(t) {
 		return (
-			t &&
-			(t === ERROR ||
-				t?.name === "error" ||
-				(t?.kind === "named" && t?.underlying?.kind === "interface"))
+			t && (t === ERROR || t?.name === "error" || this._isErrorInterfaceType(t))
 		);
 	},
 
-	_genSelectorCall(expr) {
-		if (this._isErrorMethodCall(expr))
-			return `${this.genExpr(expr.func.expr)}.Error()`;
-		// fmt.Sprintf / fmt.Printf / fmt.Println / fmt.Print / fmt.Errorf
-		// Standard library namespace dispatch — all follow the pattern:
-		// pkg.Func(args) → inline JS
-		if (expr.func.expr.kind === "Ident") {
-			const ns = expr.func.expr.name;
-			const fn = expr.func.field;
-			const result = this._genStdlibCall(ns, fn, expr);
-			if (result !== undefined) return result;
-		}
-		// strings.Builder / bytes.Buffer / regexp.Regexp / time.Time method dispatch
-		const recvType = expr.func.expr._type;
-		const recvName = recvType?.name ?? recvType?.base?.name;
-		if (recvName === "strings.Builder" || recvName === "bytes.Buffer") {
+	_isErrorMethodCall(expr) {
+		if (expr.func.field !== "Error") return false;
+		return this._isErrorType(expr.func.expr._type);
+	},
+
+	_resolveRecvName(recvType) {
+		return recvType?.name ?? recvType?.base?.name;
+	},
+
+	_genReceiverTypeCall(recvName, expr) {
+		if (recvName === "strings.Builder" || recvName === "bytes.Buffer")
 			return this._genBuilderCall(recvName, expr.func.field, expr);
-		}
 		if (recvName === "regexp.Regexp")
 			return this._genRegexpMethodCall(expr.func.field, expr);
 		if (recvName === "time.Time")
@@ -299,23 +283,50 @@ export const expressionGenMethods = {
 		return undefined;
 	},
 
+	_genSelectorCall(expr) {
+		if (this._isErrorMethodCall(expr))
+			return `${this.genExpr(expr.func.expr)}.Error()`;
+		if (expr.func.expr.kind === "Ident") {
+			const ns = expr.func.expr.name;
+			const fn = expr.func.field;
+			const result = this._genStdlibCall(ns, fn, expr);
+			if (result !== undefined) return result;
+		}
+		const recvType = expr.func.expr._type;
+		const recvName = this._resolveRecvName(recvType);
+		return this._genReceiverTypeCall(recvName, expr);
+	},
+
+	_genBuiltinLen(expr) {
+		if (expr._constLen != null) return String(expr._constLen);
+		const arg = expr.args[0];
+		const t = arg?._type;
+		const wrapField = this._namedWrapperField(t, arg);
+		if (wrapField) return `${this.genExpr(arg)}.${wrapField}.length`;
+		const js = this.genExpr(arg);
+		if (t?.kind === "map") return `Object.keys(${js}).length`;
+		this._usesLen = true;
+		return `__len(${js})`;
+	},
+
+	_genBuiltinClear(expr) {
+		const arg = expr.args[0];
+		const t = arg?._type;
+		const js = this.genExpr(arg);
+		if (
+			t?.kind === "map" ||
+			(t?.kind === "named" && t.underlying?.kind === "map")
+		)
+			return `((__m) => { for (const __k in __m) delete __m[__k]; })(${js})`;
+		return `(${js}).length = 0`;
+	},
+
 	_genBuiltinIdent(name, expr) {
 		switch (name) {
 			case "append":
 				return this.genAppend(expr);
-			case "len": {
-				if (expr._constLen != null) return String(expr._constLen);
-				const arg = expr.args[0];
-				const t = arg?._type;
-				const wrapField = this._namedWrapperField(t, arg);
-				if (wrapField) {
-					return `${this.genExpr(arg)}.${wrapField}.length`;
-				}
-				const js = this.genExpr(arg);
-				if (t?.kind === "map") return `Object.keys(${js}).length`;
-				this._usesLen = true;
-				return `__len(${js})`;
-			}
+			case "len":
+				return this._genBuiltinLen(expr);
 			case "cap":
 				return `${this.genExpr(expr.args[0])}.length`;
 			case "make":
@@ -356,18 +367,8 @@ export const expressionGenMethods = {
 				const args = expr.args.map((a) => this.genExpr(a)).join(", ");
 				return `Math.max(${args})`;
 			}
-			case "clear": {
-				const arg = expr.args[0];
-				const t = arg?._type;
-				const js = this.genExpr(arg);
-				if (
-					t?.kind === "map" ||
-					(t?.kind === "named" && t.underlying?.kind === "map")
-				) {
-					return `((__m) => { for (const __k in __m) delete __m[__k]; })(${js})`;
-				}
-				return `(${js}).length = 0`;
-			}
+			case "clear":
+				return this._genBuiltinClear(expr);
 			case "complex": {
 				const re = this.genExpr(expr.args[0]);
 				const im = this.genExpr(expr.args[1]);
@@ -747,40 +748,42 @@ export const expressionGenMethods = {
 		return base?.kind === "struct" || base?.kind === "array";
 	},
 
+	_genComplexBinary(expr) {
+		const l = this._genComplexOperand(expr.left);
+		const r = this._genComplexOperand(expr.right);
+		switch (expr.op) {
+			case "+":
+				return `{ re: ${l}.re + ${r}.re, im: ${l}.im + ${r}.im }`;
+			case "-":
+				return `{ re: ${l}.re - ${r}.re, im: ${l}.im - ${r}.im }`;
+			case "*":
+				this._usesCmul = true;
+				return `__cmul(${l}, ${r})`;
+			case "/":
+				this._usesCdiv = true;
+				return `__cdiv(${l}, ${r})`;
+			case "==":
+				return `(${l}.re === ${r}.re && ${l}.im === ${r}.im)`;
+			case "!=":
+				return `(${l}.re !== ${r}.re || ${l}.im !== ${r}.im)`;
+		}
+	},
+
 	_genBinaryExpr(expr) {
 		if (
 			isComplex(expr._type) ||
 			isComplex(expr.left._type) ||
 			isComplex(expr.right._type)
-		) {
-			const l = this._genComplexOperand(expr.left);
-			const r = this._genComplexOperand(expr.right);
-			switch (expr.op) {
-				case "+":
-					return `{ re: ${l}.re + ${r}.re, im: ${l}.im + ${r}.im }`;
-				case "-":
-					return `{ re: ${l}.re - ${r}.re, im: ${l}.im - ${r}.im }`;
-				case "*":
-					this._usesCmul = true;
-					return `__cmul(${l}, ${r})`;
-				case "/":
-					this._usesCdiv = true;
-					return `__cdiv(${l}, ${r})`;
-				case "==":
-					return `(${l}.re === ${r}.re && ${l}.im === ${r}.im)`;
-				case "!=":
-					return `(${l}.re !== ${r}.re || ${l}.im !== ${r}.im)`;
-			}
-		}
+		)
+			return this._genComplexBinary(expr);
 		const l = this.genExpr(expr.left);
 		const r = this.genExpr(expr.right);
 		if (
 			expr.op === "/" &&
 			this.isIntType(expr.left._type) &&
 			this.isIntType(expr.right._type)
-		) {
+		)
 			return `Math.trunc(${l} / ${r})`;
-		}
 		if (expr.op === "&^") return `${l} & ~${r}`;
 		if (expr.op === "==" || expr.op === "!=") {
 			if (this._isStructOrArrayType(expr.left._type)) {
@@ -825,18 +828,20 @@ export const expressionGenMethods = {
 		return inner;
 	},
 
+	_isStringSource(srcType) {
+		return (
+			(srcType?.kind === "basic" && srcType?.name === "string") ||
+			(srcType?.kind === "untyped" && srcType?.base === "string")
+		);
+	},
+
 	_genSliceTypeConversion(expr, inner, t) {
 		const elem = t.elem?.name;
 		if (elem === "byte" || elem === "uint8")
 			return `Array.from(new TextEncoder().encode(${inner}))`;
 		if (elem === "rune" || elem === "int32" || elem === "int") {
-			const srcType = expr.expr._type;
-			if (
-				(srcType?.kind === "basic" && srcType?.name === "string") ||
-				(srcType?.kind === "untyped" && srcType?.base === "string")
-			) {
+			if (this._isStringSource(expr.expr._type))
 				return `Array.from(${inner}, __c => __c.codePointAt(0))`;
-			}
 		}
 		return `Array.from(${inner})`;
 	},
