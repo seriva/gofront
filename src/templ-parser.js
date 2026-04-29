@@ -17,7 +17,7 @@
 //   TemplCase   { kind, caseTokens: tokens | null (null = default), body: TemplNode[] }
 
 import { T } from "./lexer.js";
-import { Parser } from "./parser.js";
+import { Parser } from "./parser/index.js";
 import { TT } from "./templ-lexer.js";
 
 const VOID_ELEMENTS = new Set([

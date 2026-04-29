@@ -22,17 +22,17 @@ order = 1
 
 [[layers]]
 name  = "codegen"
-paths = ["src/codegen.js", "src/codegen/*"]
+paths = ["src/codegen/*"]
 order = 2
 
 [[layers]]
 name  = "typechecker"
-paths = ["src/typechecker.js", "src/typechecker/expressions.js", "src/typechecker/statements.js", "src/typechecker/stdlib.js"]
+paths = ["src/typechecker/index.js", "src/typechecker/expressions.js", "src/typechecker/statements.js", "src/typechecker/stdlib.js", "src/typechecker/resolve.js", "src/typechecker/assignability.js", "src/typechecker/termination.js", "src/typechecker/stdlib/*"]
 order = 3
 
 [[layers]]
 name  = "parser"
-paths = ["src/parser.js", "src/templ-parser.js", "src/parser/*"]
+paths = ["src/templ-parser.js", "src/parser/*"]
 order = 4
 
 [[layers]]
