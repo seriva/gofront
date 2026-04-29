@@ -17,14 +17,14 @@
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
-import { CodeGen } from "./codegen.js";
+import { CodeGen } from "./codegen/index.js";
 import { parseDts } from "./dts-parser.js";
 import { Lexer } from "./lexer.js";
-import { Parser } from "./parser.js";
+import { Parser } from "./parser/index.js";
 import { isLocalPath, resolveAll, resolveGwDir } from "./resolver.js";
 import { TemplLexer } from "./templ-lexer.js";
 import { TemplParser } from "./templ-parser.js";
-import { TypeChecker } from "./typechecker.js";
+import { TypeChecker } from "./typechecker/index.js";
 
 // ── Parse cache ──────────────────────────────────────────────
 

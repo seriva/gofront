@@ -27,13 +27,13 @@ const _require = createRequire(import.meta.url);
 const { version } = _require("../package.json");
 
 import { basename, dirname, join, relative, resolve } from "node:path";
-import { CodeGen } from "./codegen.js";
+import { CodeGen } from "./codegen/index.js";
 import { compileDir, resolveImports } from "./compiler.js";
 import { createDevServer, liveReloadClient } from "./dev-server.js";
 import { Lexer } from "./lexer.js";
 import { minify } from "./minifier.js";
-import { Parser } from "./parser.js";
-import { TypeChecker } from "./typechecker.js";
+import { Parser } from "./parser/index.js";
+import { TypeChecker } from "./typechecker/index.js";
 
 // ── Parse CLI args ───────────────────────────────────────────
 

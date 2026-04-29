@@ -16,10 +16,10 @@
 //   CallExpr, SelectorExpr, IndexExpr, SliceExpr
 //   CompositeLit, KeyValueExpr, FuncLit, AwaitExpr
 
-import { T } from "./lexer.js";
-import { expressionParserMethods } from "./parser/expressions.js";
-import { statementParserMethods } from "./parser/statements.js";
-import { typeParserMethods } from "./parser/types.js";
+import { T } from "../lexer.js";
+import { expressionParserMethods } from "./expressions.js";
+import { statementParserMethods } from "./statements.js";
+import { typeParserMethods } from "./types.js";
 
 export class ParseError extends Error {
 	constructor(msg, token, filename, sourceCode) {

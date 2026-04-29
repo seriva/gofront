@@ -17,7 +17,10 @@
 //   - make(map[K]V)    → {}
 //   - for range        → for...of with .entries()
 
-import { expressionGenMethods } from "./codegen/expressions.js";
+import { T, Token } from "../lexer.js";
+import { Parser } from "../parser/index.js";
+import { isComplex, isNumeric } from "../typechecker/types.js";
+import { expressionGenMethods } from "./expressions.js";
 import {
 	HELPER_APPEND,
 	HELPER_CDIV,
@@ -31,13 +34,10 @@ import {
 	HELPER_SPRINTF,
 	HELPER_TIME_FMT,
 	HELPER_TIME_PARSE,
-} from "./codegen/runtime.js";
-import { buildSourceMap } from "./codegen/source-map.js";
-import { statementGenMethods } from "./codegen/statements.js";
-import { stdlibGenMethods } from "./codegen/stdlib.js";
-import { T, Token } from "./lexer.js";
-import { Parser } from "./parser.js";
-import { isComplex, isNumeric } from "./typechecker/types.js";
+} from "./runtime.js";
+import { buildSourceMap } from "./source-map.js";
+import { statementGenMethods } from "./statements.js";
+import { stdlibGenMethods } from "./stdlib/index.js";
 
 export class CodeGen {
 	// jsImports:       Map<importPath, string[]> — npm package imports to emit at top of file
