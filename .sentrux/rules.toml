@@ -17,12 +17,12 @@ order = 0
 
 [[layers]]
 name  = "support"
-paths = ["src/compiler.js", "src/resolver.js", "src/dts-parser.js", "src/dev-server.js"]
+paths = ["src/compiler.js", "src/resolver.js", "src/dts-parser.js", "src/dev-server.js", "src/minifier.js"]
 order = 1
 
 [[layers]]
 name  = "codegen"
-paths = ["src/codegen/*"]
+paths = ["src/codegen/*", "src/codegen/stdlib/*"]
 order = 2
 
 [[layers]]
