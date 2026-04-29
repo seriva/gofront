@@ -146,29 +146,37 @@ export const statementCheckMethods = {
 		}
 	},
 
-	_checkAssignStmt(stmt, scope) {
-		if (this._checkAssignCommaOkMap(stmt, scope)) return;
-		// comma-ok type assertion: v, ok = x.(T)
-		if (
+	_isCommaOkTypeAssertAssign(stmt) {
+		return (
 			stmt.lhs.length === 2 &&
 			stmt.rhs.length === 1 &&
 			stmt.rhs[0].kind === "TypeAssertExpr"
-		)
-			stmt.rhs[0]._commaOk = true;
-		this._checkConstAssignment(stmt, scope);
-		const rhs = stmt.rhs.map((e) => this.checkExpr(e, scope));
-		const rhsFlat =
-			rhs.length === 1 && rhs[0]?.kind === "tuple" ? rhs[0].types : rhs;
-		const lhsTypes = stmt.lhs.map((e) => {
-			if (e.kind === "Ident" && e.name === "_") return ANY;
-			return this.checkExpr(e, scope);
-		});
+		);
+	},
+
+	_checkAssignLhsType(e, scope) {
+		if (e.kind === "Ident" && e.name === "_") return ANY;
+		return this.checkExpr(e, scope);
+	},
+
+	_checkAssignTypes(stmt, rhsFlat, lhsTypes) {
 		for (let i = 0; i < lhsTypes.length; i++) {
 			if (stmt.lhs[i]?.kind === "Ident" && stmt.lhs[i]?.name === "_") continue;
 			const r = rhsFlat[i] ?? ANY;
 			if (!isAny(lhsTypes[i]) && !isAny(r))
 				this.assertAssignable(lhsTypes[i], r, stmt.lhs[i]);
 		}
+	},
+
+	_checkAssignStmt(stmt, scope) {
+		if (this._checkAssignCommaOkMap(stmt, scope)) return;
+		if (this._isCommaOkTypeAssertAssign(stmt)) stmt.rhs[0]._commaOk = true;
+		this._checkConstAssignment(stmt, scope);
+		const rhs = stmt.rhs.map((e) => this.checkExpr(e, scope));
+		const rhsFlat =
+			rhs.length === 1 && rhs[0]?.kind === "tuple" ? rhs[0].types : rhs;
+		const lhsTypes = stmt.lhs.map((e) => this._checkAssignLhsType(e, scope));
+		this._checkAssignTypes(stmt, rhsFlat, lhsTypes);
 	},
 
 	_checkReturnStmt(stmt, scope, returnType) {
@@ -295,17 +303,34 @@ export const statementCheckMethods = {
 			this.err("cannot fallthrough in type switch", stmt);
 	},
 
+	_checkRangeIterInvalidFunc(iterType, initStmt) {
+		const underlying =
+			iterType?.kind === "named" ? iterType.underlying : iterType;
+		if (underlying?.kind === "func")
+			this.err("cannot range over func: not an iterator function", initStmt);
+	},
+
+	_bindRangeIterDefineVars(lhs, info, scope) {
+		for (let i = 0; i < lhs.length; i++) {
+			const name = lhs[i].name ?? lhs[i];
+			if (name === "_") continue;
+			const varType = info.yieldParams[i] ?? ANY;
+			scope.defineLocal(name, varType);
+		}
+	},
+
+	_checkRangeIterAssignVars(lhs, scope) {
+		for (const e of lhs) {
+			if (e.kind === "Ident" && e.name !== "_") this.checkExpr(e, scope);
+		}
+	},
+
 	_checkRangeIterStmt(initStmt, scope, _returnType) {
 		const rangeExpr = initStmt.rhs[0];
 		const iterType = this.checkExpr(rangeExpr.expr, scope);
 		const info = iteratorYieldParams(iterType);
 		if (!info) {
-			// If it's a func but not a valid iterator shape, reject it
-			const underlying =
-				iterType?.kind === "named" ? iterType.underlying : iterType;
-			if (underlying?.kind === "func") {
-				this.err("cannot range over func: not an iterator function", initStmt);
-			}
+			this._checkRangeIterInvalidFunc(iterType, initStmt);
 			return null;
 		}
 
@@ -317,26 +342,12 @@ export const statementCheckMethods = {
 			);
 		}
 
-		// Annotate for codegen
 		rangeExpr._isIterator = true;
 		rangeExpr._yieldParams = info.yieldParams;
 
-		// Bind loop variables to their yield param types
-		if (initStmt.kind === "DefineStmt") {
-			for (let i = 0; i < lhs.length; i++) {
-				const name = lhs[i].name ?? lhs[i];
-				if (name === "_") continue;
-				const varType = info.yieldParams[i] ?? ANY;
-				scope.defineLocal(name, varType);
-			}
-		} else {
-			// AssignStmt — just type-check the lhs expressions
-			for (const e of lhs) {
-				if (e.kind === "Ident" && e.name !== "_") {
-					this.checkExpr(e, scope);
-				}
-			}
-		}
+		if (initStmt.kind === "DefineStmt")
+			this._bindRangeIterDefineVars(lhs, info, scope);
+		else this._checkRangeIterAssignVars(lhs, scope);
 		return info;
 	},
 };

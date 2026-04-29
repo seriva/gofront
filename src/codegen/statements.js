@@ -270,24 +270,27 @@ export const statementGenMethods = {
 		this.line(`${lhsStr} = ${result};`);
 	},
 
+	_genIteratorReturn(stmt) {
+		if (stmt.values.length === 0 && !this.namedReturnVars?.length) {
+			this.line(`${this._iterReturnFlag} = true; return false;`);
+			return;
+		}
+		const vals =
+			stmt.values.length > 0
+				? stmt.values.map((v) => this.genExpr(v))
+				: (this.namedReturnVars ?? []);
+		const stored = vals.length === 1 ? vals[0] : `[${vals.join(", ")}]`;
+		this.line(
+			`${this._iterReturnFlag} = true; ${this._iterReturnVar} = ${stored}; return false;`,
+		);
+	},
+
 	_genReturnStmt(stmt) {
 		if (this._inIteratorBody) {
-			if (stmt.values.length === 0 && !this.namedReturnVars?.length) {
-				this.line(`${this._iterReturnFlag} = true; return false;`);
-			} else {
-				const vals =
-					stmt.values.length > 0
-						? stmt.values.map((v) => this.genExpr(v))
-						: (this.namedReturnVars ?? []);
-				const stored = vals.length === 1 ? vals[0] : `[${vals.join(", ")}]`;
-				this.line(
-					`${this._iterReturnFlag} = true; ${this._iterReturnVar} = ${stored}; return false;`,
-				);
-			}
+			this._genIteratorReturn(stmt);
 			return;
 		}
 		if (stmt.values.length === 0) {
-			// bare return — emit named return vars if present
 			if (this.namedReturnVars?.length > 0) {
 				const vars = this.namedReturnVars;
 				this.line(
@@ -347,43 +350,41 @@ export const statementGenMethods = {
 		}
 	},
 
+	_genRangeExprFor(stmt) {
+		if (stmt.cond._isIterator) {
+			this.genIteratorForCond(stmt);
+			return;
+		}
+		const iteree = this.genExpr(stmt.cond.expr);
+		this.line(`for (let _$ = 0; _$ < ${iteree}; _$++) {`);
+		this.indented(() => this.genBlock(stmt.body));
+		this.line("}");
+	},
+
+	_genSimpleWhileFor(stmt) {
+		if (!stmt.cond) {
+			this.line("while (true) {");
+		} else {
+			this.line(`while (${this.genExpr(stmt.cond)}) {`);
+		}
+		this.indented(() => this.genBlock(stmt.body));
+		this.line("}");
+	},
+
 	genFor(stmt) {
-		// Detect range: init is DefineStmt/AssignStmt with rhs[0] being a RangeExpr
 		if (this.isRangeFor(stmt)) {
-			if (stmt.init.rhs[0]._isIterator) {
-				this.genIteratorFor(stmt);
-			} else {
-				this.genRangeFor(stmt);
-			}
+			if (stmt.init.rhs[0]._isIterator) this.genIteratorFor(stmt);
+			else this.genRangeFor(stmt);
 			return;
 		}
-
-		// for range expr — no variable; could be int range or 0-param iterator
 		if (stmt.cond?.kind === "RangeExpr") {
-			if (stmt.cond._isIterator) {
-				this.genIteratorForCond(stmt);
-				return;
-			}
-			const iteree = this.genExpr(stmt.cond.expr);
-			this.line(`for (let _$ = 0; _$ < ${iteree}; _$++) {`);
-			this.indented(() => this.genBlock(stmt.body));
-			this.line("}");
+			this._genRangeExprFor(stmt);
 			return;
 		}
-
 		if (!stmt.init && !stmt.post) {
-			if (!stmt.cond) {
-				// infinite loop
-				this.line("while (true) {");
-			} else {
-				this.line(`while (${this.genExpr(stmt.cond)}) {`);
-			}
-			this.indented(() => this.genBlock(stmt.body));
-			this.line("}");
+			this._genSimpleWhileFor(stmt);
 			return;
 		}
-
-		// Standard C-style for
 		const init = stmt.init ? this.stmtInline(stmt.init) : "";
 		const cond = stmt.cond ? this.genExpr(stmt.cond) : "";
 		const post = stmt.post ? this.stmtInline(stmt.post) : "";
@@ -399,6 +400,29 @@ export const statementGenMethods = {
 		return init.rhs?.[0]?.kind === "RangeExpr";
 	},
 
+	_isIntRangeType(iterType) {
+		return (
+			(iterType?.kind === "basic" &&
+				(iterType.name === "int" || iterType.name === "float64")) ||
+			(iterType?.kind === "untyped" &&
+				(iterType.base === "int" || iterType.base === "float64"))
+		);
+	},
+
+	_isMapRangeType(iterType) {
+		return (
+			iterType?.kind === "map" ||
+			(iterType?.kind === "named" && iterType.underlying?.kind === "map")
+		);
+	},
+
+	_isStringRangeType(iterType) {
+		return (
+			(iterType?.kind === "basic" && iterType.name === "string") ||
+			(iterType?.kind === "untyped" && iterType.base === "string")
+		);
+	},
+
 	genRangeFor(stmt) {
 		const init = stmt.init;
 		const range = init.rhs[0];
@@ -409,14 +433,7 @@ export const statementGenMethods = {
 			? `${this.genExpr(range.expr)}.${wrapField}`
 			: this.genExpr(range.expr);
 
-		if (
-			lhs.length <= 1 &&
-			((iterType?.kind === "basic" &&
-				(iterType.name === "int" || iterType.name === "float64")) ||
-				(iterType?.kind === "untyped" &&
-					(iterType.base === "int" || iterType.base === "float64")))
-		) {
-			// integer range (Go 1.22): for i := range n  → C-style for loop
+		if (lhs.length <= 1 && this._isIntRangeType(iterType)) {
 			const v = lhs[0] === "_" ? "_$" : lhs[0];
 			this.line(`for (let ${v} = 0; ${v} < ${iteree}; ${v}++) {`);
 			this.indented(() => this.genBlock(stmt.body));
@@ -424,39 +441,23 @@ export const statementGenMethods = {
 			return;
 		}
 		const iterExpr = this._genRangeIterExpr(iterType, iteree, lhs);
-
 		const binding =
 			lhs.length === 1
 				? lhs[0] === "_"
 					? "_$"
 					: lhs[0]
 				: `[${lhs.map((n) => (n === "_" ? "_$" : n)).join(", ")}]`;
-
 		this.line(`for (const ${binding} of ${iterExpr}) {`);
 		this.indented(() => this.genBlock(stmt.body));
 		this.line("}");
 	},
 
 	_genRangeIterExpr(iterType, iteree, lhs) {
-		if (
-			iterType?.kind === "map" ||
-			(iterType?.kind === "named" && iterType.underlying?.kind === "map")
-		) {
-			// map: for k, v := range m  → for (const [k, v] of Object.entries(m))
-			return `Object.entries(${iteree})`;
-		}
-		if (
-			(iterType?.kind === "basic" && iterType.name === "string") ||
-			(iterType?.kind === "untyped" && iterType.base === "string")
-		) {
-			// string: for i, r := range s  → rune (code point), not JS character
-			// Go spec: iterating a string yields (byte-index, rune) pairs
+		if (this._isMapRangeType(iterType)) return `Object.entries(${iteree})`;
+		if (this._isStringRangeType(iterType)) {
 			if (lhs.length === 1) return `Array.from(${iteree}).keys()`;
-			// Wrap code points so the value is an integer (rune), not a JS string
 			return `Array.from(${iteree}, (__c, __i) => [__i, __c.codePointAt(0)])`;
 		}
-		// slice/array: for i, v := range arr → for (const [i, v] of __s(arr).entries())
-		// null-guard handles nil slices (zero value) gracefully.
 		this._usesSliceGuard = true;
 		if (lhs.length === 1) return `__s(${iteree}).keys()`;
 		return `__s(${iteree}).entries()`;
