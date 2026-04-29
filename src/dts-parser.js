@@ -170,62 +170,30 @@ export class DtsParser {
 		}
 	}
 
+	_trackBracketDepth(c, depths) {
+		const open = { "<": 0, "(": 1, "[": 2, "{": 3 };
+		const close = { ">": 0, ")": 1, "]": 2, "}": 3 };
+		if (c in open) {
+			depths[open[c]]++;
+			return true;
+		}
+		if (c in close && depths[close[c]] > 0) {
+			depths[close[c]]--;
+			return true;
+		}
+		return false;
+	}
+
 	// Skip to the end of a type expression (stops at ; | , | ) | } | { | newline-after-token)
 	skipTypeExpr(stopAt = ";,)}{") {
-		let angleBrackets = 0,
-			parens = 0,
-			brackets = 0,
-			curlies = 0;
+		const depths = [0, 0, 0, 0];
 		while (!this.eof()) {
 			const c = this.ch();
-			if (c === "<") {
-				angleBrackets++;
+			if (this._trackBracketDepth(c, depths)) {
 				this.pos++;
 				continue;
 			}
-			if (c === ">" && angleBrackets > 0) {
-				angleBrackets--;
-				this.pos++;
-				continue;
-			}
-			if (c === "(") {
-				parens++;
-				this.pos++;
-				continue;
-			}
-			if (c === ")" && parens > 0) {
-				parens--;
-				this.pos++;
-				continue;
-			}
-			if (c === "[") {
-				brackets++;
-				this.pos++;
-				continue;
-			}
-			if (c === "]" && brackets > 0) {
-				brackets--;
-				this.pos++;
-				continue;
-			}
-			if (c === "{") {
-				curlies++;
-				this.pos++;
-				continue;
-			}
-			if (c === "}" && curlies > 0) {
-				curlies--;
-				this.pos++;
-				continue;
-			}
-			if (
-				angleBrackets === 0 &&
-				parens === 0 &&
-				brackets === 0 &&
-				curlies === 0 &&
-				stopAt.includes(c)
-			)
-				break;
+			if (!depths.some(Boolean) && stopAt.includes(c)) break;
 			if (c === '"' || c === "'") {
 				this.skipStringLit();
 				continue;
@@ -280,83 +248,71 @@ export class DtsParser {
 		return base;
 	}
 
-	_parseBaseType() {
+	_parseParenType() {
+		this.pos++;
+		this.skipTypeExpr(")");
+		this.consume(")");
 		this.skip();
-		const c = this.ch();
+		if (this.startsWith("=>")) {
+			this.pos += 2;
+			this.parseType();
+		}
+		return ANY;
+	}
 
-		// Tuple / array literal type: [T, U]
-		if (c === "[") {
-			this.pos++; // consume opening [, so skipTypeExpr stops at depth-0 ]
-			this.skipTypeExpr("]");
-			this.consume("]");
-			return ANY;
-		}
-		// Object literal type: { x: T }
-		if (c === "{") {
-			this.skipBlock();
-			return ANY;
-		}
-		// Parenthesised type or function type: (params) => T
-		if (c === "(") {
-			this.pos++; // consume opening (, so skipTypeExpr stops at depth-0 )
-			this.skipTypeExpr(")");
-			this.consume(")");
-			this.skip();
-			if (this.startsWith("=>")) {
-				this.pos += 2;
-				this.parseType();
-			}
-			return ANY;
-		}
-		// String literal type: "foo"
-		if (c === '"' || c === "'") {
-			this.skipStringLit();
-			return { kind: "basic", name: "string" };
-		}
-		// Template literal: `...`
-		if (c === "`") {
-			while (!this.eof() && this.ch() !== "`") this.pos++;
-			this.pos++;
-			return { kind: "basic", name: "string" };
-		}
-		// Numeric literal
-		if (
-			/[0-9]/.test(c) ||
-			(c === "-" && /[0-9]/.test(this.src[this.pos + 1]))
-		) {
-			while (!this.eof() && /[0-9._-]/.test(this.ch())) this.pos++;
-			return { kind: "basic", name: "float64" };
-		}
+	_parseTemplateLit() {
+		while (!this.eof() && this.ch() !== "`") this.pos++;
+		this.pos++;
+		return { kind: "basic", name: "string" };
+	}
 
-		// Named type (including primitives)
-		let name = "";
-		while (!this.eof() && /[a-zA-Z0-9_$]/.test(this.ch()))
-			name += this.src[this.pos++];
-		if (!name) {
-			this.pos++;
-			return ANY;
-		} // skip unknown char
+	_parseNumericLit() {
+		while (!this.eof() && /[0-9._-]/.test(this.ch())) this.pos++;
+		return { kind: "basic", name: "float64" };
+	}
 
+	_parseNamedType(name) {
 		if (TS_PRIMITIVES[name]) {
 			this.skipGenerics();
 			return TS_PRIMITIVES[name];
 		}
-
-		// true / false
 		if (name === "true" || name === "false")
 			return { kind: "basic", name: "bool" };
-
-		// Generic application: T<U> — skip the parameters
 		this.skipGenerics();
-
-		// Qualified name: A.B
 		while (this.ch() === ".") {
 			this.pos++;
-			while (!this.eof() && /[a-zA-Z0-9_$]/.test(this.ch())) this.pos++;
+			this.readIdent();
 		}
-
-		// Return as a named any-alias (the type checker will resolve or fall back to any)
 		return { kind: "basic", name: "any", alias: name };
+	}
+
+	_parseBaseType() {
+		this.skip();
+		const c = this.ch();
+		if (c === "[") {
+			this.pos++;
+			this.skipTypeExpr("]");
+			this.consume("]");
+			return ANY;
+		}
+		if (c === "{") {
+			this.skipBlock();
+			return ANY;
+		}
+		if (c === "(") return this._parseParenType();
+		if (c === '"' || c === "'") {
+			this.skipStringLit();
+			return { kind: "basic", name: "string" };
+		}
+		if (c === "`") return this._parseTemplateLit();
+		if (/[0-9]/.test(c) || (c === "-" && /[0-9]/.test(this.src[this.pos + 1])))
+			return this._parseNumericLit();
+		const name = this.readIdent();
+		if (!name) {
+			this.pos++;
+			return ANY;
+		}
+		return this._parseNamedType(name);
 	}
 
 	// ── Parameter list ───────────────────────────────────────────
@@ -407,6 +363,21 @@ export class DtsParser {
 		return members;
 	}
 
+	_skipEnumBody() {
+		this.skip();
+		this.consume("{");
+		while (!this.eof() && this.ch() !== "}") {
+			this.readIdent();
+			this.skip();
+			if (this.ch() === "=") {
+				this.pos++;
+				this.skipTypeExpr(",}");
+			}
+			this.consume(",");
+		}
+		this.consume("}");
+	}
+
 	_skipModifiers() {
 		while (true) {
 			this.skip();
@@ -421,82 +392,104 @@ export class DtsParser {
 		}
 	}
 
+	_parseMemberFuncDecl(out) {
+		const name = this.readIdent();
+		this.skipGenerics();
+		const params = this.parseParams();
+		this.skip();
+		let ret = VOID;
+		if (this.ch() === ":") {
+			this.pos++;
+			ret = this.parseType();
+		}
+		this.consume(";");
+		if (name)
+			out[name] = {
+				kind: "func",
+				params: params.map((p) => p.type),
+				returns: [ret],
+			};
+	}
+
+	_parseMemberNewSig() {
+		this.skipGenerics();
+		this.parseParams();
+		this.skip();
+		if (this.ch() === ":") {
+			this.pos++;
+			this.parseType();
+		}
+		this.consume(";");
+	}
+
+	_parseMemberTypeDecl(out) {
+		const name = this.readIdent();
+		this.skipGenerics();
+		this.skip();
+		let type = ANY;
+		if (this.ch() === "=") {
+			this.pos++;
+			type = this.parseType();
+		}
+		this.consume(";");
+		if (name) out[name] = type;
+	}
+
+	_parseMemberClassDecl(out) {
+		const name = this.readIdent();
+		this.skipGenerics();
+		while (!this.eof() && this.ch() !== "{") this.pos++;
+		this.consume("{");
+		const body = this.parseBody();
+		this.consume("}");
+		this.consume(";");
+		if (name) out[name] = { kind: "namespace", name, members: body };
+	}
+
+	_parseMemberVarDecl(out) {
+		const name = this.readIdent();
+		this.skip();
+		this.consume("?");
+		let type = ANY;
+		if (this.ch() === ":") {
+			this.pos++;
+			type = this.parseType();
+		}
+		this.skip();
+		if (this.ch() === "=") {
+			this.pos++;
+			this.skipTypeExpr();
+		}
+		this.consume(";");
+		if (name) out[name] = type;
+	}
+
 	_parseMember(out) {
 		this.skip();
 		if (this.eof() || this.ch() === "}") return;
-
-		// Skip modifiers (export, declare, static, readonly, etc.)
 		this._skipModifiers();
-
 		this.skip();
 		if (this.eof() || this.ch() === "}") return;
-
-		// Read the first identifier (keyword or name)
 		const kw = this.readIdent();
 		if (!kw) {
 			this.pos++;
 			return;
 		}
-
 		this.skip();
 		switch (kw) {
-			case "function": {
-				const name = this.readIdent();
-				this.skipGenerics();
-				const params = this.parseParams();
-				this.skip();
-				let ret = VOID;
-				if (this.ch() === ":") {
-					this.pos++;
-					ret = this.parseType();
-				}
-				this.consume(";");
-				if (name)
-					out[name] = {
-						kind: "func",
-						params: params.map((p) => p.type),
-						returns: [ret],
-					};
+			case "function":
+				this._parseMemberFuncDecl(out);
 				break;
-			}
-			case "new": {
-				// constructor signature in interface
-				this.skipGenerics();
-				this.parseParams();
-				this.skip();
-				if (this.ch() === ":") {
-					this.pos++;
-					this.parseType();
-				}
-				this.consume(";");
+			case "new":
+				this._parseMemberNewSig();
 				break;
-			}
-			case "type": {
-				const name = this.readIdent();
-				this.skipGenerics();
-				this.skip();
-				let type = ANY;
-				if (this.ch() === "=") {
-					this.pos++;
-					type = this.parseType();
-				}
-				this.consume(";");
-				if (name) out[name] = type;
+			case "type":
+				this._parseMemberTypeDecl(out);
 				break;
-			}
 			case "interface":
-			case "class": {
-				const name = this.readIdent();
-				this.skipGenerics();
-				// skip extends/implements
-				while (!this.eof() && this.ch() !== "{") this.pos++;
-				this.consume("{");
-				const body = this.parseBody();
-				this.consume("}");
-				this.consume(";");
-				if (name) out[name] = { kind: "namespace", name, members: body };
+			case "class":
+				this._parseMemberClassDecl(out);
 				break;
-			}
 			case "namespace":
 			case "module": {
 				const name = this.readIdent() || this._readStringLit();
@@ -510,42 +503,15 @@ export class DtsParser {
 			}
 			case "enum": {
 				const name = this.readIdent();
-				this.skip();
-				this.consume("{");
-				// skip enum body — members are string/number constants
-				while (!this.eof() && this.ch() !== "}") {
-					this.readIdent();
-					this.skip();
-					if (this.ch() === "=") {
-						this.pos++;
-						this.skipTypeExpr(",}");
-					}
-					this.consume(",");
-				}
-				this.consume("}");
+				this._skipEnumBody();
 				if (name) out[name] = ANY;
 				break;
 			}
 			case "const":
 			case "let":
-			case "var": {
-				const name = this.readIdent();
-				this.skip();
-				this.consume("?");
-				let type = ANY;
-				if (this.ch() === ":") {
-					this.pos++;
-					type = this.parseType();
-				}
-				this.skip();
-				if (this.ch() === "=") {
-					this.pos++;
-					this.skipTypeExpr();
-				}
-				this.consume(";");
-				if (name) out[name] = type;
+			case "var":
+				this._parseMemberVarDecl(out);
 				break;
-			}
 			default:
 				this._parseMemberDefault(kw, out);
 				break;

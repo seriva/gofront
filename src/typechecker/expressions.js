@@ -113,6 +113,15 @@ export const expressionCheckMethods = {
 		return ANY;
 	},
 
+	_checkDeref(ot, expr) {
+		if (ot === ANY) return ANY;
+		if (ot.kind === "pointer") return ot.base;
+		if (ot.kind === "named" && ot.underlying?.kind === "pointer")
+			return ot.underlying.base;
+		this.err(`cannot dereference non-pointer type ${typeStr(ot)}`, expr);
+		return ANY;
+	},
+
 	_checkUnaryExpr(expr, scope) {
 		const ot = this.checkExpr(expr.operand, scope);
 		if (expr.op === "!") {
@@ -125,7 +134,6 @@ export const expressionCheckMethods = {
 			return ot;
 		}
 		if (expr.op === "&") {
-			// Mark the operand as address-taken for codegen
 			if (expr.operand.kind === "Ident") {
 				expr.operand._addressTaken = true;
 				const sym = scope.lookup(expr.operand.name);
@@ -133,34 +141,26 @@ export const expressionCheckMethods = {
 			}
 			return { kind: "pointer", base: ot };
 		}
-		if (expr.op === "*") {
-			if (ot === ANY) return ANY;
-			if (ot.kind === "pointer") return ot.base;
-			if (ot.kind === "named" && ot.underlying?.kind === "pointer")
-				return ot.underlying.base;
-			this.err(`cannot dereference non-pointer type ${typeStr(ot)}`, expr);
-			return ANY;
-		}
+		if (expr.op === "*") return this._checkDeref(ot, expr);
 		return ot;
+	},
+
+	_isStructOrNamedMethod(baseType, base, field) {
+		return (
+			(base?.kind === "struct" && base.methods?.has(field)) ||
+			(baseType.kind === "named" && baseType.methods?.has(field))
+		);
 	},
 
 	_checkSelectorExpr(expr, scope) {
 		const baseType = this.checkExpr(expr.expr, scope);
-		// Method expression: TypeName.MethodName → func(ReceiverType, ...params) ret
 		if (expr.expr._isTypeRef) {
 			let base = baseType.kind === "named" ? baseType.underlying : baseType;
 			base = this.resolveType(base);
-			let methodType = null;
-			if (base?.kind === "struct" && base.methods?.has(expr.field)) {
-				methodType = base.methods.get(expr.field);
-			} else if (
-				baseType.kind === "named" &&
-				baseType.methods?.has(expr.field)
-			) {
-				methodType = baseType.methods.get(expr.field);
-			}
+			const methodType = this._isStructOrNamedMethod(baseType, base, expr.field)
+				? (base?.methods?.get(expr.field) ?? baseType.methods?.get(expr.field))
+				: null;
 			if (methodType) {
-				// Return a func type with the receiver prepended to params
 				expr._isMethodExpr = true;
 				expr._methodExprRecv = baseType;
 				return {
@@ -172,16 +172,11 @@ export const expressionCheckMethods = {
 			}
 		}
 		const ft = this.fieldType(baseType, expr.field, expr);
-		// Mark method selectors so codegen can emit .bind() when used as a value
 		if (ft?.kind === "func") {
 			let base = baseType.kind === "named" ? baseType.underlying : baseType;
 			base = this.resolveType(base);
-			if (
-				(base?.kind === "struct" && base.methods?.has(expr.field)) ||
-				(baseType.kind === "named" && baseType.methods?.has(expr.field))
-			) {
+			if (this._isStructOrNamedMethod(baseType, base, expr.field))
 				expr._isMethodValue = true;
-			}
 		}
 		return ft;
 	},
@@ -259,6 +254,31 @@ export const expressionCheckMethods = {
 		};
 	},
 
+	_checkElemTypeCompatible(tgtElem, srcElem, srcType, targetType, expr) {
+		if (
+			tgtElem &&
+			srcElem &&
+			!isAny(tgtElem) &&
+			!isAny(srcElem) &&
+			typeStr(tgtElem) !== typeStr(srcElem)
+		)
+			this.err(
+				`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)}`,
+				expr,
+			);
+	},
+
+	_isMutualArraySlice(tgt, src) {
+		return (
+			(tgt?.kind === "array" && src?.kind === "slice") ||
+			(tgt?.kind === "slice" && src?.kind === "array")
+		);
+	},
+
+	_isInvalidArrayConv(tgt, src, srcType) {
+		return tgt?.kind === "array" && src?.kind !== "array" && !isAny(srcType);
+	},
+
 	_checkTypeConversion(expr, scope) {
 		const srcType = this.checkExpr(expr.expr, scope);
 		const targetType = this.resolveTypeNode(expr.targetType, scope);
@@ -266,66 +286,37 @@ export const expressionCheckMethods = {
 			srcType?.kind === "named" ? srcType.underlying : srcType;
 		const tgtResolved =
 			targetType?.kind === "named" ? targetType.underlying : targetType;
-		// Reject float64(complex) — must use real()/imag()
 		if (isNumeric(targetType) && isComplex(srcType)) {
 			this.err(
 				`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)} (use real() or imag())`,
 				expr,
 			);
 		}
-		// Allow complex128/64(numeric) and complex128/64(complex)
-		if (isComplex(targetType)) {
-			if (!isComplexOrNumeric(srcType) && !isAny(srcType)) {
-				this.err(
-					`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)}`,
-					expr,
-				);
-			}
+		if (
+			isComplex(targetType) &&
+			!isComplexOrNumeric(srcType) &&
+			!isAny(srcType)
+		) {
+			this.err(
+				`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)}`,
+				expr,
+			);
 		}
-		// Slice → array conversion: [N]T(slice)
-		if (tgtResolved?.kind === "array" && srcResolved?.kind === "slice") {
-			const tgtElem = tgtResolved.elem;
-			const srcElem = srcResolved.elem;
-			if (
-				tgtElem &&
-				srcElem &&
-				!isAny(tgtElem) &&
-				!isAny(srcElem) &&
-				typeStr(tgtElem) !== typeStr(srcElem)
-			) {
-				this.err(
-					`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)}`,
-					expr,
-				);
-			}
+		if (this._isMutualArraySlice(tgtResolved, srcResolved)) {
+			this._checkElemTypeCompatible(
+				tgtResolved.elem,
+				srcResolved.elem,
+				srcType,
+				targetType,
+				expr,
+			);
 			return targetType;
 		}
-		// Array → slice conversion: []T(array)
-		if (tgtResolved?.kind === "slice" && srcResolved?.kind === "array") {
-			const tgtElem = tgtResolved.elem;
-			const srcElem = srcResolved.elem;
-			if (
-				tgtElem &&
-				srcElem &&
-				!isAny(tgtElem) &&
-				!isAny(srcElem) &&
-				typeStr(tgtElem) !== typeStr(srcElem)
-			) {
-				this.err(
-					`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)}`,
-					expr,
-				);
-			}
-			return targetType;
-		}
-		// Reject conversions between array and incompatible types
-		if (tgtResolved?.kind === "array" && srcResolved?.kind !== "array") {
-			if (!isAny(srcType)) {
-				this.err(
-					`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)}`,
-					expr,
-				);
-			}
+		if (this._isInvalidArrayConv(tgtResolved, srcResolved, srcType)) {
+			this.err(
+				`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)}`,
+				expr,
+			);
 		}
 		return targetType;
 	},
@@ -351,29 +342,17 @@ export const expressionCheckMethods = {
 	},
 
 	_checkRangeExpr(expr, scope) {
-		// Type-check the iterated expression so its _type is annotated
 		const collType = this.checkExpr(expr.expr, scope);
 		const resolved =
 			collType?.kind === "named" ? collType.underlying : collType;
-		// Return a tuple of (index/key type, value type) so DefineStmt can
-		// assign the correct types to range variables.
-		const isString =
-			(resolved?.kind === "basic" && resolved.name === "string") ||
-			(resolved?.kind === "untyped" && resolved.base === "string");
-		if (isString) {
-			// string range: (int index, rune value) — rune is an alias for int
-			return { kind: "tuple", types: [INT, INT] };
-		}
-		if (resolved?.kind === "slice" || resolved?.kind === "array") {
+		if (isString(resolved)) return { kind: "tuple", types: [INT, INT] };
+		if (resolved?.kind === "slice" || resolved?.kind === "array")
 			return { kind: "tuple", types: [INT, resolved.elem ?? ANY] };
-		}
-		if (resolved?.kind === "map") {
+		if (resolved?.kind === "map")
 			return {
 				kind: "tuple",
 				types: [resolved.key ?? ANY, resolved.value ?? ANY],
 			};
-		}
-		// integer range or unknown — return single-element tuple
 		return { kind: "tuple", types: [collType] };
 	},
 
@@ -415,11 +394,20 @@ export const expressionCheckMethods = {
 		return null;
 	},
 
+	_resolveCallArgTypes(expr, scope) {
+		if (expr.args.length === 1 && expr.args[0].kind === "CallExpr") {
+			const argType = this.checkExpr(expr.args[0], scope);
+			if (argType?.kind === "tuple") {
+				expr._multiForward = true;
+				return argType.types;
+			}
+			return [argType];
+		}
+		return expr.args.map((a) => this.checkExpr(a, scope));
+	},
+
 	checkCall(expr, scope) {
 		let fnType = this.checkExpr(expr.func, scope);
-
-		// Handle built-ins before evaluating args; some (e.g. new) take type names as
-		// arguments, which would otherwise produce false "Undefined" errors.
 		if (fnType.kind === "builtin") {
 			const argTypes = expr.args.map((a, i) => {
 				// new(T) — first arg is a type name, not a value expression
@@ -429,20 +417,7 @@ export const expressionCheckMethods = {
 			return this.checkBuiltin(fnType.name, expr, argTypes, scope);
 		}
 
-		// Multi-value forwarding: f(g()) where g() returns multiple values
-		// When a single argument is a multi-return call, flatten its tuple into args.
-		let argTypes;
-		if (expr.args.length === 1 && expr.args[0].kind === "CallExpr") {
-			const argType = this.checkExpr(expr.args[0], scope);
-			if (argType?.kind === "tuple") {
-				expr._multiForward = true; // flag for codegen
-				argTypes = argType.types;
-			} else {
-				argTypes = [argType];
-			}
-		} else {
-			argTypes = expr.args.map((a) => this.checkExpr(a, scope));
-		}
+		const argTypes = this._resolveCallArgTypes(expr, scope);
 
 		if (isAny(fnType)) return ANY;
 
