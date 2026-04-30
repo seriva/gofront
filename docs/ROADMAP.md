@@ -104,6 +104,19 @@ Design documents are in [`docs/v0.0.9/`](v0.0.9/).
 
 ---
 
+## v1.0.0
+
+**Theme: Code quality and tooling.** No new language features — focus on structural quality,
+test coverage, and correctness of existing behaviour.
+
+| Area | Status | Notes |
+|---|---|---|
+| Sentrux architectural quality gate | ✓ | Layer boundaries, coupling, complexity, and import cycles enforced via `.sentrux/rules.toml` on every `npm run check` run. Baseline floor: 6447/10000. |
+| Test coverage improvements | ✓ | New unit tests for dts-parser robustness, `fmt.Fprintln`/`Fprint` multi-argument output, generics disambiguation edge cases, and complex compound assignment operators. New e2e tests for templ `switch` rendering and active filter state. |
+| Bug fixes | ✓ | `fmt.Fprintln`/`Fprint` dropped all arguments after the first when writing to a builder or buffer; parser failed to recognise user-defined type names (uppercase identifiers) as generic type arguments; `_genComplexCompoundAssign` silently emitted wrong JS for unsupported operators. |
+
+---
+
 ## Out of scope
 
 Goroutines, channels, `select`, `unsafe`, full `reflect`, `cgo`, exact integer overflow,

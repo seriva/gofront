@@ -224,6 +224,7 @@ export const expressionParserMethods = {
 		let depth = 1;
 		let hasComma = false;
 		let hasTypeKeyword = false;
+		let hasUpperIdent = false;
 		while (i < src.length && depth > 0) {
 			const tt = src[i].type;
 			if (tt === T.LBRACKET) {
@@ -244,9 +245,15 @@ export const expressionParserMethods = {
 			if (depth === 1) {
 				if (tt === T.COMMA) hasComma = true;
 				if (_isTypeIntroducerToken(tt)) hasTypeKeyword = true;
-				// Check if it's a builtin type name
 				if (tt === T.IDENT && TYPE_KEYWORDS.has(src[i].value))
 					hasTypeKeyword = true;
+				// User-defined types start with uppercase (GoFront convention)
+				if (
+					tt === T.IDENT &&
+					/^[A-Z]/.test(src[i].value) &&
+					!TYPE_KEYWORDS.has(src[i].value)
+				)
+					hasUpperIdent = true;
 			}
 			i++;
 		}
@@ -258,7 +265,7 @@ export const expressionParserMethods = {
 		if (after.type === T.LPAREN || after.type === T.LBRACE) return true;
 		// Function value in argument list: Identity[int], 99) — only if clearly a type
 		if (after.type === T.COMMA || after.type === T.RPAREN) {
-			return hasComma || hasTypeKeyword;
+			return hasComma || hasTypeKeyword || hasUpperIdent;
 		}
 		return false;
 	},

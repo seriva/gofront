@@ -1,6 +1,6 @@
 {
 	"name": "gofront",
-	"version": "0.0.9",
+	"version": "1.0.0",
 	"author": "Luuk van Venrooij",
 	"license": "MIT",
 	"repository": {
@@ -38,6 +38,7 @@
 		"build:all": "npm run build:simple && npm run build:reactive && npm run build:gom && npm run build:templ",
 		"test:all": "npm run test:unit && npm run test:e2e",
 		"test:unit": "node test/unit/run.js",
+		"test:coverage": "c8 --include='src/**' --reporter=text --reporter=lcov node test/unit/run.js",
 		"test:e2e": "npm run build:all && playwright test",
 		"format": "biome format --write .",
 		"check": "biome check . && sentrux check && sentrux gate && node src/index.js example/simple/src --check && node src/index.js example/reactive/src --check && node src/index.js example/gom/src --check && node src/index.js example/templ/src --check",
@@ -46,6 +47,7 @@
 	"devDependencies": {
 		"@biomejs/biome": "^2.4.12",
 		"@playwright/test": "^1.59.1",
+		"c8": "^11.0.0",
 		"husky": "^9.1.7",
 		"jsdom": "^29.0.2",
 		"serve": "^14.2.6"

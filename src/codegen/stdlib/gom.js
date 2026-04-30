@@ -77,6 +77,13 @@ const GOM_BOOL_ATTRS = {
 	Selected: "selected",
 	Readonly: "readonly",
 };
+const GOM_PROP_SETTERS = {
+	Class: "className",
+	Type: "type",
+	Href: "href",
+	Src: "src",
+	Placeholder: "placeholder",
+};
 
 export const gomMethods = {
 	_genGom(fn, expr) {
@@ -105,6 +112,10 @@ export const gomMethods = {
 			return `({Mount(e){e.setAttribute("${GOM_BOOL_ATTRS[fn]}","")}})`;
 
 		const args = a();
+
+		if (GOM_PROP_SETTERS[fn])
+			return `((v)=>({Mount(e){e.${GOM_PROP_SETTERS[fn]}=v}}))(${args[0]})`;
+
 		switch (fn) {
 			case "El": {
 				const [tag, ...children] = args;
@@ -123,16 +134,6 @@ export const gomMethods = {
 				const [name, value] = args;
 				return `((n,v)=>({Mount(e){e.setAttribute(n,v)}}))(${name},${value})`;
 			}
-			case "Class":
-				return `((v)=>({Mount(e){e.className=v}}))(${args[0]})`;
-			case "Type":
-				return `((v)=>({Mount(e){e.type=v}}))(${args[0]})`;
-			case "Href":
-				return `((v)=>({Mount(e){e.href=v}}))(${args[0]})`;
-			case "Src":
-				return `((v)=>({Mount(e){e.src=v}}))(${args[0]})`;
-			case "Placeholder":
-				return `((v)=>({Mount(e){e.placeholder=v}}))(${args[0]})`;
 			case "DataAttr":
 				return `((k,v)=>({Mount(e){e.setAttribute("data-"+k,v)}}))(${args[0]},${args[1]})`;
 			case "If":

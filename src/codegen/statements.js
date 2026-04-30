@@ -255,7 +255,9 @@ export const statementGenMethods = {
 				result = `__cdiv(${lhsStr}, ${rhsExpr})`;
 				break;
 			default:
-				result = rhsExpr;
+				throw new Error(
+					`unsupported complex compound assignment operator: ${stmt.op}`,
+				);
 		}
 		this.line(`${lhsStr} = ${result};`);
 	},

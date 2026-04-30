@@ -594,7 +594,19 @@ export class DtsParser {
 			}
 
 			this.skip();
-			this._parseTopLevelDecl(kw, types, values);
+			const savedPos = this.pos;
+			try {
+				this._parseTopLevelDecl(kw, types, values);
+			} catch (err) {
+				this.pos = savedPos;
+				// skip to next top-level boundary (;, }, or EOF) to resume parsing
+				while (!this.eof() && this.ch() !== ";" && this.ch() !== "}")
+					this.pos++;
+				this.consume(";");
+				console.warn(
+					`[dts-parser] skipping malformed declaration '${kw}': ${err.message}`,
+				);
+			}
 		}
 
 		return { types, values };
