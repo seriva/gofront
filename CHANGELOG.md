@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-## [1.0.0] - unreleased
+## [1.0.0] - 2026-04-30
 
 ### Fixed
 - **CodeGen: `fmt.Fprintln` / `fmt.Fprint` dropped arguments beyond the first** — when writing to a `strings.Builder`, `bytes.Buffer`, or generic `io.Writer` with more than one value argument (e.g. `fmt.Fprintln(&b, "hello", "world")`), only the first argument was formatted. A new `_buildFprintSprintfCall` helper now constructs the correct `__sprintf` call with one `%v` placeholder per argument (space-joined for `Fprintln`/`Fprint`, newline-appended for `Fprintln`).
