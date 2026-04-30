@@ -64,3 +64,22 @@ test("templ conditional bool attr: checked item renders checkbox as checked", as
 	const cb = page.locator('[data-action="toggle"][data-todo-id="3"]');
 	await expect(cb).toBeChecked();
 });
+
+test("templ switch: filter buttons render correct labels via switch case", async ({
+	page,
+}) => {
+	// FilterButton uses `switch f { case FilterAll: ... case FilterActive: ... case FilterCompleted: ... }`
+	await expect(page.locator(S.filterAll)).toContainText("All");
+	await expect(page.locator(S.filterActive)).toContainText("Active");
+	await expect(page.locator(S.filterCompleted)).toContainText("Completed");
+});
+
+test("templ switch: active filter button gets active class", async ({
+	page,
+}) => {
+	// Initially filter=All; clicking Active should give it the active class
+	await expect(page.locator(S.filterAll)).toHaveClass(/active/);
+	await page.locator(S.filterActive).click();
+	await expect(page.locator(S.filterActive)).toHaveClass(/active/);
+	await expect(page.locator(S.filterAll)).not.toHaveClass(/active/);
+});

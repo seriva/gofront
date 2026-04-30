@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.0] - unreleased
+
+### Fixed
+- **CodeGen: `fmt.Fprintln` / `fmt.Fprint` dropped arguments beyond the first** — when writing to a `strings.Builder`, `bytes.Buffer`, or generic `io.Writer` with more than one value argument (e.g. `fmt.Fprintln(&b, "hello", "world")`), only the first argument was formatted. A new `_buildFprintSprintfCall` helper now constructs the correct `__sprintf` call with one `%v` placeholder per argument (space-joined for `Fprintln`/`Fprint`, newline-appended for `Fprintln`).
+- **Parser: generic instantiation with user-defined type arg in argument position** — `Identity[MyType]` (where `MyType` is an uppercase, non-builtin identifier) is now correctly recognised as a generic type instantiation rather than an index expression when it appears as a function argument before `,` or `)`. `looksLikeTypeArgList()` now tracks uppercase-starting identifiers as a third disambiguation signal alongside built-in type keywords and comma-separated arg lists.
+- **CodeGen: silent wrong output on unsupported complex compound assignment** — `_genComplexCompoundAssign` previously emitted `lhs = rhs` (dropping the operator) for any compound assignment operator other than `+=`, `-=`, `*=`, `/=`. The `default` branch now throws an internal error, ensuring unsupported operators are caught loudly rather than producing silently incorrect JS.
+
+### Changed
+- **CodeGen: `gom` property-setter dispatch** — `Class`, `Type`, `Href`, `Src`, and `Placeholder` are now resolved via a `GOM_PROP_SETTERS` lookup table instead of five identical switch cases, consistent with the existing `GOM_ATTR_HELPERS` and `GOM_BOOL_ATTRS` tables.
+- **dts-parser: per-declaration error recovery** — a malformed declaration in a `.d.ts` file no longer aborts the entire parse. The parser now wraps each top-level declaration in a try/catch, skips to the next `;` or `}` on failure, and emits a `console.warn` with the offending keyword and error message. Well-formed declarations after the bad one are still parsed.
+- **CodeGen: `fmt.Sscan` / `Sscanln` / `Sscanf` deduplication** — the shared scanning loop (type-coercion and pointer-write logic) is extracted into a module-level `_SSCAN_LOOP` constant, eliminating the three near-identical inline lambda bodies.
+- **TypeChecker: stdlib split** — `src/typechecker/stdlib.js` (previously ~1050 lines) is now a 16-line orchestrator that delegates to two focused modules: `stdlib/core.js` (browser globals, fmt, strings, bytes, strconv, sort, math, errors, time, unicode, os, slices, html, io) and `stdlib/extended.js` (gom, maps, regexp, rand, utf8, path, strings.Builder/bytes.Buffer, built-in functions). This improves cohesion without adding cross-layer import edges.
+- **Architectural quality gate (Sentrux)** — adopted [Sentrux](https://sentrux.dev) for structural quality enforcement. Layer boundaries, coupling, cyclomatic complexity, and import cycles are checked on every `npm run check` run via `.sentrux/rules.toml`. A regression floor is stored in `.sentrux/baseline.json` (current quality signal: 6447/10000). The layer model is: `cli(0) → support(1) → codegen(2) → typechecker(3) → parser(4) → lexer(5) → types(6)`.
+
 ## [0.0.9] - 2026-04-24
 
 ### Added

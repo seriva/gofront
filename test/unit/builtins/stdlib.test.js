@@ -754,6 +754,50 @@ func main() {
 	assertEqual(runJs(js), "1 + 2 = 3");
 });
 
+test("fmt.Fprintln writes to strings.Builder", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	var b strings.Builder
+	fmt.Fprintln(&b, "hello", "world")
+	console.log(b.String())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "hello world\n");
+});
+
+test("fmt.Fprint writes to strings.Builder", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	var b strings.Builder
+	fmt.Fprint(&b, "foo", "bar")
+	console.log(b.String())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "foobar");
+});
+
+test("fmt.Fprintln writes to bytes.Buffer", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	var b bytes.Buffer
+	fmt.Fprintln(&b, "ping")
+	console.log(b.String())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "ping\n");
+});
+
+test("fmt.Fprint writes to bytes.Buffer", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	var b bytes.Buffer
+	fmt.Fprint(&b, "a", "b", "c")
+	console.log(b.String())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "abc");
+});
+
 // ═════════════════════════════════════════════════════════════
 // regexp package
 // ═════════════════════════════════════════════════════════════

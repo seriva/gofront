@@ -30,7 +30,7 @@ packages. `src/dts-parser.js` parses TypeScript `.d.ts` declaration files.
 
 ```sh
 npm run build:all   # build all example apps
-npm run test:unit   # run unit tests only (~990 tests, no browser required)
+npm run test:unit   # run unit tests only (~1110 tests, no browser required)
 npm run test:e2e    # build all examples then run E2E tests (Playwright, headless Chromium)
 npm run test:all    # run both unit and E2E
 npm run format      # format with Biome
@@ -66,7 +66,10 @@ src/
   typechecker.js    type inference, interface satisfaction, error reporting (core)
   typechecker/
     types.js        shared type constants, predicates, Scope, TypeCheckError
-    stdlib.js       browser globals + all built-in package registrations
+    stdlib.js       thin orchestrator — delegates to stdlib/core.js and stdlib/extended.js
+    stdlib/
+      core.js       browser globals, fmt, strings, bytes, strconv, sort, math, errors, time, unicode, os, slices, html, io
+      extended.js   gom, maps, regexp, rand, utf8, path, strings.Builder/bytes.Buffer, built-in functions
     statements.js   checkBlock, checkStmt
     expressions.js  checkExpr, checkCall, checkBuiltin, checkCompositeLit
   codegen.js        AST → JavaScript (core + struct/function generation)
@@ -132,8 +135,7 @@ docs/
 - **Embedded struct fields are flattened** into the outer class constructor.
   Promoted methods are emitted as delegation stubs:
   `Greet(...__a) { return Greeter.prototype.Greet.call(this, ...__a); }`
-- **Runtime helpers** (`__len`, `__append`, `__s`, `__sprintf`) are tree-shaken —
-  only emitted when used.
+- **Runtime helpers** (`__len`, `__append`, `__s`, `__sprintf`, `__equal`, `__cmul`, `__cdiv`, `__error`, `__errorIs`, `__timeFmt`, `__timeParse`, `__pathClean`) are tree-shaken — only emitted when used.
 - **`fmt` package** is a built-in namespace (no import needed); `fmt.Sprintf` etc.
   compile to a `__sprintf` helper. `fmt.Fprintf`/`Fprintln`/`Fprint` accept any writer,
   including `*strings.Builder` and `*bytes.Buffer`.
@@ -142,7 +144,7 @@ docs/
   (like `fmt`). They compile to inline JS with no runtime overhead: `strings` maps to JS
   string methods, `strconv` to `Number`/`parseInt`/`parseFloat`, `sort` to
   `Array.prototype.sort`, `math` to the `Math` object, `errors.New` is an identity,
-  `time` wraps `Date.now()`, `regexp` wraps JS `RegExp` (inline `(?i)`-style flags are
+  `time.Now()` returns a `time.Time` wrapper (`{_d: new Date()}`), `regexp` wraps JS `RegExp` (inline `(?i)`-style flags are
   extracted automatically), `slices` maps to JS array methods, `maps` to `Object.*`,
   `html` to inline `.replace()` chains, and `io` provides `io.Writer` / `io.Reader`
   interface types. Functions that return `(value, error)` in Go emit two-element arrays.
@@ -155,8 +157,10 @@ docs/
 - **`async func` / `await`** are first-class syntax; async functions emit
   `async function` in JS.
 - **`defer`** compiles to try/finally.
-- **`error` type** is a plain JS string at runtime; `error("msg")` is an identity,
-  `.Error()` returns the string itself.
+- **`error` type** compiles to `__error` objects `{ Error(), toString(), _msg, _cause }`.
+  `error("msg")` → `__error("msg")`; `errors.New("msg")` → `__error("msg")`. `.Error()` and
+  string-context coercion both work via the object's methods. `errors.Is` / `%w` wrapping use
+  the `_cause` chain.
 
 ## Development workflow — TDD
 

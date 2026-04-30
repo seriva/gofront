@@ -708,6 +708,25 @@ declare let count: number = 0;
 	assertEqual(values.get("count").name, "float64");
 });
 
+test("parseDts: truncated input does not throw and parses what it can", () => {
+	// A real-world edge case: file truncated mid-declaration.
+	const { values } = parseDts(`
+declare function good(): string;
+declare function truncated(x: string
+`); // deliberately truncated — no closing ) or ;
+	assert(
+		values.has("good"),
+		"complete declaration before truncation should be parsed",
+	);
+});
+
+test("parseDts: parser does not throw on completely garbage input", () => {
+	// Should return empty maps without throwing
+	const { types, values } = parseDts("@@@ ??? !!! %%% ^^^");
+	assertEqual(types.size, 0);
+	assertEqual(values.size, 0);
+});
+
 // ═════════════════════════════════════════════════════════════
 // Column numbers in error messages
 // ═════════════════════════════════════════════════════════════

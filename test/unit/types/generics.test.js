@@ -79,6 +79,18 @@ func main() {
 	assertEqual(runJs(js), "10");
 });
 
+test("f(a[lowerVar]) is an index expression, not a generic type arg", () => {
+	const { js, errors } = compile(`package main
+func double(x int) int { return x * 2 }
+func main() {
+	items := []int{10, 20, 30}
+	idx := 2
+	console.log(double(items[idx]))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "60");
+});
+
 test("a[b[0]] is parsed as nested index, not type args", () => {
 	const { js, errors } = compile(`package main
 func main() {
@@ -329,6 +341,34 @@ func main() {
 }`);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "99");
+});
+
+test("generic function with user-defined type arg in argument position", () => {
+	const { js, errors } = compile(`package main
+type MyNum struct { N int }
+func Identity[T any](x T) T { return x }
+func Apply(f func(MyNum) MyNum, x MyNum) MyNum { return f(x) }
+func main() {
+	result := Apply(Identity[MyNum], MyNum{N: 5})
+	console.log(result.N)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "5");
+});
+
+test("user-defined type arg before rparen in call", () => {
+	const { js, errors } = compile(`package main
+type MyStr struct { S string }
+func Identity[T any](x T) T { return x }
+func Take(f func(MyStr) MyStr) string {
+	result := f(MyStr{S: "hello"})
+	return result.S
+}
+func main() {
+	console.log(Take(Identity[MyStr]))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "hello");
 });
 
 test("multiple generic calls in sequence", () => {
