@@ -1,5 +1,12 @@
 // CodeGen for Go `fmt` package — installed onto CodeGen.prototype via stdlibGenMethods.
 
+const _SSCAN_LOOP =
+	`let n = 0; for (let i = 0; i < ptrs.length && i < tokens.length; i++) { ` +
+	`const t = tokens[i]; const p = ptrs[i]; ` +
+	`if (typeof p.value === "number") p.value = Number(t); ` +
+	`else if (typeof p.value === "boolean") p.value = t === "true"; ` +
+	`else p.value = t; n++; }`;
+
 export const fmtMethods = {
 	_genFmt(fn, _a, expr) {
 		const fmtArgs = expr.args.map((e) => this.genExpr(e)).join(", ");
@@ -34,7 +41,7 @@ export const fmtMethods = {
 					.slice(1)
 					.map((e) => this.genExpr(e))
 					.join(", ");
-				return `((str, ...ptrs) => { const tokens = str.trim().split(/\\s+/).filter(Boolean); let n = 0; for (let i = 0; i < ptrs.length && i < tokens.length; i++) { const t = tokens[i]; const p = ptrs[i]; if (typeof p.value === "number") p.value = Number(t); else if (typeof p.value === "boolean") p.value = t === "true"; else p.value = t; n++; } return [n, n < ptrs.length ? "unexpected EOF" : null]; })(${strArg}, ${restArgs})`;
+				return `((str, ...ptrs) => { const tokens = str.trim().split(/\\s+/).filter(Boolean); ${_SSCAN_LOOP} return [n, n < ptrs.length ? "unexpected EOF" : null]; })(${strArg}, ${restArgs})`;
 			}
 			case "Sscanln": {
 				const strArg = this.genExpr(expr.args[0]);
@@ -42,7 +49,7 @@ export const fmtMethods = {
 					.slice(1)
 					.map((e) => this.genExpr(e))
 					.join(", ");
-				return `((str, ...ptrs) => { const line = str.split("\\n")[0]; const tokens = line.trim().split(/\\s+/).filter(Boolean); let n = 0; for (let i = 0; i < ptrs.length && i < tokens.length; i++) { const t = tokens[i]; const p = ptrs[i]; if (typeof p.value === "number") p.value = Number(t); else if (typeof p.value === "boolean") p.value = t === "true"; else p.value = t; n++; } return [n, n < ptrs.length ? "unexpected EOF" : null]; })(${strArg}, ${restArgs})`;
+				return `((str, ...ptrs) => { const tokens = str.split("\\n")[0].trim().split(/\\s+/).filter(Boolean); ${_SSCAN_LOOP} return [n, n < ptrs.length ? "unexpected EOF" : null]; })(${strArg}, ${restArgs})`;
 			}
 			case "Sscanf": {
 				const strArg = this.genExpr(expr.args[0]);
@@ -51,7 +58,7 @@ export const fmtMethods = {
 					.slice(2)
 					.map((e) => this.genExpr(e))
 					.join(", ");
-				return `((str, _fmt, ...ptrs) => { const tokens = str.trim().split(/\\s+/).filter(Boolean); let n = 0; for (let i = 0; i < ptrs.length && i < tokens.length; i++) { const t = tokens[i]; const p = ptrs[i]; if (typeof p.value === "number") p.value = Number(t); else if (typeof p.value === "boolean") p.value = t === "true"; else p.value = t; n++; } return [n, n < ptrs.length ? "input does not match format" : null]; })(${strArg}, ${fmtArg}, ${restArgs})`;
+				return `((str, _fmt, ...ptrs) => { const tokens = str.trim().split(/\\s+/).filter(Boolean); ${_SSCAN_LOOP} return [n, n < ptrs.length ? "input does not match format" : null]; })(${strArg}, ${fmtArg}, ${restArgs})`;
 			}
 			default:
 				return undefined;
@@ -67,34 +74,28 @@ export const fmtMethods = {
 		const targetTypeName =
 			writerType?.name ??
 			(writerType?.kind === "pointer" ? writerType.base?.name : null);
+		const sprintfCall = this._buildFprintSprintfCall(fn, rest.length, restJs);
 		if (targetTypeName === "strings.Builder") {
 			const w = this.genExpr(writerArg);
 			const buf =
 				writerType?.kind === "pointer" ? `${w}.value._buf` : `${w}._buf`;
-			if (fn === "Fprintf") return `(${buf} += __sprintf(${restJs}))`;
-			if (fn === "Fprintln") return `(${buf} += __sprintf("%v\\n", ${restJs}))`;
-			return `(${buf} += __sprintf("%v", ${restJs}))`;
+			return `(${buf} += ${sprintfCall})`;
 		}
 		if (targetTypeName === "bytes.Buffer") {
 			const w = this.genExpr(writerArg);
 			const base = writerType?.kind === "pointer" ? `${w}.value` : w;
-			if (fn === "Fprintf") {
-				return `((__b,__s)=>{ __b._buf.push(...new TextEncoder().encode(__s)); })(${base}, __sprintf(${restJs}))`;
-			}
-			const valJs =
-				fn === "Fprintln"
-					? `__sprintf("%v\\n", ${restJs})`
-					: `__sprintf("%v", ${restJs})`;
-			return `((__b,__s)=>{ __b._buf.push(...new TextEncoder().encode(__s)); })(${base}, ${valJs})`;
+			return `((__b,__s)=>{ __b._buf.push(...new TextEncoder().encode(__s)); })(${base}, ${sprintfCall})`;
 		}
 		// Generic io.Writer fallback — call .WriteString if available
 		const w = this.genExpr(writerArg);
-		const formatted =
-			fn === "Fprintf"
-				? `__sprintf(${restJs})`
-				: fn === "Fprintln"
-					? `__sprintf("%v\\n", ${restJs})`
-					: `__sprintf("%v", ${restJs})`;
-		return `${w}.WriteString(${formatted})`;
+		return `${w}.WriteString(${sprintfCall})`;
+	},
+
+	_buildFprintSprintfCall(fn, argc, restJs) {
+		if (fn === "Fprintf") return `__sprintf(${restJs})`;
+		const sep = fn === "Fprintln" ? " " : "";
+		const suffix = fn === "Fprintln" ? "\\n" : "";
+		const fmt = Array(argc).fill("%v").join(sep) + suffix;
+		return `__sprintf("${fmt}", ${restJs})`;
 	},
 };

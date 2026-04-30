@@ -108,9 +108,9 @@ operation on it is silently permitted, preventing cascading errors.
 Walks the typed AST and emits clean, readable JavaScript. No intermediate representation
 — the codegen writes directly to an output buffer with indentation tracking.
 
-Runtime helpers (`__len`, `__append`, `__s`, `__sprintf`, `__cmul`, `__cdiv`, `__error`,
-`__errorIs`, `__timeFmt`, `__timeParse`, `__pathClean`) are tree-shaken: only emitted
-when actually used. Optional inline source maps are supported via VLQ-encoded mappings.
+Runtime helpers (`__len`, `__append`, `__s`, `__sprintf`, `__equal`, `__cmul`, `__cdiv`,
+`__error`, `__errorIs`, `__timeFmt`, `__timeParse`, `__pathClean`) are tree-shaken: only
+emitted when actually used. Optional inline source maps are supported via VLQ-encoded mappings.
 
 ---
 
@@ -634,12 +634,12 @@ Design documents for planned features are organised by release under `docs/v*/`
 ## Tests
 
 ```sh
-npm run test:unit   # unit tests only (~1100 tests, no browser required)
+npm run test:unit   # unit tests only (~1118 tests, no browser required)
 npm run test:e2e    # E2E tests (Playwright, headless Chromium)
 npm run test:all    # both
 ```
 
-**Unit tests** (~1100) cover language features, type errors, edge cases, DOM (jsdom),
+**Unit tests** (~1118) cover language features, type errors, edge cases, DOM (jsdom),
 external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string
 formatting, map iteration order, integer overflow semantics, unused variable detection,
 unused import detection, semantic difference verification, stdlib shim packages, generics,

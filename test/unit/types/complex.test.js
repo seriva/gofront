@@ -361,6 +361,17 @@ func main() {
 	assertEqual(runJs(js), "4 6");
 });
 
+test("-= on complex variable", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	z := complex(5, 7)
+	z -= complex(2, 3)
+	println(real(z), imag(z))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "3 4");
+});
+
 test("*= on complex variable", () => {
 	const { js, errors } = compile(`package main
 func main() {
@@ -370,6 +381,17 @@ func main() {
 }`);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "-5 10");
+});
+
+test("/= on complex variable", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	z := complex(10, 0)
+	z /= complex(2, 0)
+	println(real(z), imag(z))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "5 0");
 });
 
 // ── End-to-end ──────────────────────────────────────────────
