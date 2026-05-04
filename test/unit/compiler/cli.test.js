@@ -182,6 +182,22 @@ test("error on non-existent input file", () => {
 	assertContains(stderr, "gofront:");
 });
 
+test("--source-map and --minify together exits 1 with conflict error", () => {
+	const { file, dir } = makeTmp(
+		"conflict.go",
+		`package main\nfunc main() { console.log("hi") }\n`,
+	);
+	try {
+		const { code, stderr } = cli([file, "--source-map", "--minify"]);
+		assert(code !== 0, "expected non-zero exit");
+		assertContains(stderr, "cannot be used together");
+	} finally {
+		try {
+			rmSync(dir, { recursive: true, force: true });
+		} catch {}
+	}
+});
+
 test("--minify produces minified output", () => {
 	const { file, dir } = makeTmp(
 		"min.go",

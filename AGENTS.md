@@ -79,7 +79,7 @@ src/
     source-map.js   VLQ encoder and source map builder
     statements.js   genBlock, genStmt, genFor, genSwitch, etc.
     expressions.js  genExpr, genCall, genCompositeLit, helpers
-  compiler.js       multi-file / directory compilation entry point
+  compiler.js       compileSingleFile, compileDir, compileFiles — all compilation entry points
   resolver.js       npm and local package type resolution
   dts-parser.js     TypeScript .d.ts loader
   dev-server.js     static file server + SSE live reload (used by --serve)
