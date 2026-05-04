@@ -1,5 +1,7 @@
 // CodeGen for Go `fmt` package — installed onto CodeGen.prototype via stdlibGenMethods.
 
+/** @typedef {import('../index.js').CodeGen} CodeGen */
+
 const _SSCAN_LOOP =
 	`let n = 0; for (let i = 0; i < ptrs.length && i < tokens.length; i++) { ` +
 	`const t = tokens[i]; const p = ptrs[i]; ` +
@@ -7,6 +9,7 @@ const _SSCAN_LOOP =
 	`else if (typeof p.value === "boolean") p.value = t === "true"; ` +
 	`else p.value = t; n++; }`;
 
+/** @type {ThisType<CodeGen>} */
 export const fmtMethods = {
 	_genFmt(fn, _a, expr) {
 		const fmtArgs = expr.args.map((e) => this.genExpr(e)).join(", ");

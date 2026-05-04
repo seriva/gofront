@@ -17,7 +17,7 @@ order = 0
 
 [[layers]]
 name  = "support"
-paths = ["src/compiler.js", "src/resolver.js", "src/dts-parser.js", "src/dev-server.js", "src/minifier.js"]
+paths = ["src/compiler.js", "src/resolver.js", "src/dts-parser.js", "src/dev-server.js", "src/minifier.js", "src/cli-core.js"]
 order = 1
 
 [[layers]]

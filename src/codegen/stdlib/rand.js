@@ -1,5 +1,7 @@
 // CodeGen for Go `math/rand` package.
 
+/** @typedef {import('../index.js').CodeGen} CodeGen */
+
 const RAND_DISPATCH = {
 	Intn: (a) => `Math.floor(Math.random() * ${a[0]})`,
 	Int63n: (a) => `Math.floor(Math.random() * ${a[0]})`,
@@ -16,6 +18,7 @@ const RAND_DISPATCH = {
 		`((n) => { const a = Array.from({length: n}, (_, i) => i); for (let i = n - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; })(${a[0]})`,
 };
 
+/** @type {ThisType<CodeGen>} */
 export const randMethods = {
 	_genRand(fn, a) {
 		const gen = RAND_DISPATCH[fn];

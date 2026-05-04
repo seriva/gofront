@@ -22,6 +22,7 @@ import {
 	ERROR,
 	isVoid,
 	Scope,
+	TAINTED_ANY,
 	TypeCheckError,
 	typeStr,
 	VOID,
@@ -124,7 +125,7 @@ export class TypeChecker {
 			this._currentSource,
 		);
 		this.errors.push(e);
-		return ANY; // recovery type
+		return TAINTED_ANY; // tainted recovery type — suppresses downstream cascade errors
 	}
 
 	_reportUnused(scope, node) {

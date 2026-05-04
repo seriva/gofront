@@ -30,6 +30,7 @@ import "./builtins/stdlib.test.js";
 import "./builtins/bytes.test.js";
 import "./compiler/packages.test.js";
 import "./compiler/cli.test.js";
+import "./compiler/cli-core.test.js";
 import "./compiler/imports.test.js";
 import "./builtins/gom.test.js";
 import "./templ.test.js";

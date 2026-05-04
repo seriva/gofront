@@ -1,5 +1,7 @@
 // CodeGen for Go `slices` package.
 
+/** @typedef {import('../index.js').CodeGen} CodeGen */
+
 const SLICES_DISPATCH = {
 	Contains: (a) => `${a[0]}.includes(${a[1]})`,
 	Index: (a) => `${a[0]}.indexOf(${a[1]})`,
@@ -35,6 +37,7 @@ const SLICES_DISPATCH = {
 	Clip: (a) => `${a[0]}.slice()`,
 };
 
+/** @type {ThisType<CodeGen>} */
 export const slicesMethods = {
 	_genSlices(fn, a) {
 		if (fn === "Equal") {

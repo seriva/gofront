@@ -58,9 +58,10 @@ node src/index.js --version                       # print version
 src/
   lexer.js          tokenizer — Go-style semicolon insertion
   templ-lexer.js    tokenizer for .templ files (mixed Go/HTML)
-  parser.js         recursive-descent parser → AST (core + declarations)
+  parser.js         recursive-descent parser → AST (constructor, primitives, entry points)
   templ-parser.js   parser for templ declarations and HTML bodies
   parser/
+    declarations.js top-level declarations (func, method, type, var, const)
     types.js        type expression parsing (slice, map, struct, interface)
     statements.js   block, control flow, simple statements
     expressions.js  operator precedence, unary, postfix, primary, literals
@@ -82,7 +83,8 @@ src/
   resolver.js       npm and local package type resolution
   dts-parser.js     TypeScript .d.ts loader
   dev-server.js     static file server + SSE live reload (used by --serve)
-  index.js          CLI entry point
+  cli-core.js       runCompile, maybeMinify, handleInit — extracted for direct import in tests
+  index.js          CLI entry point (arg parsing, file I/O, watch mode, process.exit only)
 test/
   unit/             all unit tests
     run.js            test suite orchestrator (no framework, plain Node vm)
@@ -203,7 +205,8 @@ structural improvement, run `sentrux gate --save` to raise the baseline floor.
 2. **Lexer** (`src/lexer.js` or `src/templ-lexer.js`) — add any new keywords or token types.
 3. **Parser** (`src/parser.js` or `src/templ-parser.js`) — add grammar rules; return a new AST node kind.
    Expression parsing lives in `src/parser/expressions.js`, statements in
-   `src/parser/statements.js`, type expressions in `src/parser/types.js`.
+   `src/parser/statements.js`, type expressions in `src/parser/types.js`,
+   top-level declarations in `src/parser/declarations.js`.
 4. **TypeChecker** (`src/typechecker.js`) — handle the new node in `_checkExpr`
    (`src/typechecker/expressions.js`) or `checkStmt`
    (`src/typechecker/statements.js`); return the correct type.
@@ -235,6 +238,7 @@ Types are plain JS objects:
 ```
 
 `ANY` is the recovery / unknown type — any operation on it is permitted without error.
+`TAINTED_ANY` (`{ ..., _tainted: true }`) is returned from all error-recovery paths (`err()`). Taint propagates through binary ops, selectors, calls, index, and slice expressions, short-circuiting before any further error is emitted. User-declared `var x any` produces plain `ANY` (not tainted).
 
 Untyped types (`UNTYPED_INT`, `UNTYPED_FLOAT`, `UNTYPED_STRING`, `UNTYPED_BOOL`) are
 produced by literals and const declarations without an explicit type. They coerce to

@@ -1,5 +1,8 @@
 // CodeGen for Go `io` package.
 
+/** @typedef {import('../index.js').CodeGen} CodeGen */
+
+/** @type {ThisType<CodeGen>} */
 export const ioMethods = {
 	_genIo(fn, _a, expr) {
 		switch (fn) {

@@ -24,6 +24,8 @@ import {
 	UNTYPED_INT,
 } from "./types.js";
 
+/** @typedef {import('./index.js').TypeChecker} TypeChecker */
+
 // Untyped constant assignability: maps source.base → Set of compatible target.name values
 const UNTYPED_COMPAT = {
 	int: new Set(["int", "float64", "complex128", "complex64"]),
@@ -33,6 +35,7 @@ const UNTYPED_COMPAT = {
 	complex128: new Set(["complex128", "complex64"]),
 };
 
+/** @type {ThisType<TypeChecker>} */
 export const assignabilityMethods = {
 	// ── Binary result types ───────────────────────────────────────────
 

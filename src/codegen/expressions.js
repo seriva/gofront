@@ -2,6 +2,8 @@
 
 import { ERROR, isComplex } from "../typechecker/types.js";
 
+/** @typedef {import('./index.js').CodeGen} CodeGen */
+
 // Namespace constants: pkg.Field → JS literal
 const NS_CONSTANTS = {
 	math: {
@@ -143,6 +145,7 @@ const EXPR_GEN_DELEGATE = {
 	TypeAssertExpr: "_genTypeAssertExpr",
 };
 
+/** @type {ThisType<CodeGen>} */
 export const expressionGenMethods = {
 	genExpr(expr) {
 		switch (expr.kind) {

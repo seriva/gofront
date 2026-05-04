@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- **CLI core extraction** — compile/minify/init logic extracted from `src/index.js` into `src/cli-core.js`, exporting `runCompile`, `maybeMinify`, and `handleInit`. Single-file compilation logic consolidated into `compileSingleFile()` in `compiler.js`, reducing `cli-core.js` fan-out to 2 source deps (`compiler`, `minifier`). `index.js` is now ~130 lines covering only arg parsing, file I/O, watch mode, and `process.exit`. Direct-import test coverage added in `test/unit/compiler/cli-core.test.js` (15 new tests). Sentrux baseline reset to 6358 (prior 7049 save was a measurement artifact — new files were not yet tracked by git when it was recorded; prior v1.0.0 floor of 6447 is not directly comparable as it was measured with 3 fewer files).
+- **Parser: declarations split** — `src/parser/index.js` (504 lines) is now a 155-line file containing only the constructor, primitives, and entry points (`parse`, `parsePackage`, `parseImport`). All top-level declaration methods (`parseTopDecl`, `parseFuncOrMethod`, `parseTypeDecl`, `parseVarDecl`, `parseConstDecl`, and helpers) are extracted into `src/parser/declarations.js` as `declarationParseMethods`, following the same mixin pattern as `statements.js`, `expressions.js`, and `types.js`.
+- **ANY error cascade suppression** — `TAINTED_ANY` (`{ kind: "basic", name: "any", _tainted: true }`) is returned from all error-recovery paths (`err()` return value). Taint propagates through binary ops, selector expressions, call expressions, index expressions, and slice expressions, short-circuiting before any further error emission. User-declared `var x any` returns plain `ANY` (not tainted) and remains permissive. Eliminates cascading false-positive errors from a single undefined identifier.
+- **Mixin `@this` JSDoc annotations** — all TypeChecker and CodeGen sub-module mixin objects (`statementCheckMethods`, `expressionCheckMethods`, `assignabilityMethods`, `resolveMethods`, `terminationMethods`, `statementGenMethods`, `expressionGenMethods`, `templGenMethods`, and all 20 stdlib codegen modules) are now annotated with `/** @typedef ... */` + `/** @type {ThisType<TypeChecker|CodeGen>} */`. IDE tools (VS Code, etc.) can now resolve `this.*` calls inside mixin methods to the correct class type without any runtime change.
+
 ## [1.0.0] - 2026-04-30
 
 ### Fixed

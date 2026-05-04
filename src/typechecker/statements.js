@@ -26,6 +26,9 @@ import {
 	Scope,
 } from "./types.js";
 
+/** @typedef {import('./index.js').TypeChecker} TypeChecker */
+
+/** @type {ThisType<TypeChecker>} */
 export const statementCheckMethods = {
 	checkBlock(block, scope, returnType) {
 		for (const stmt of block.stmts) {

@@ -1,5 +1,8 @@
 // CodeGen for Go `unicode` package.
 
+/** @typedef {import('../index.js').CodeGen} CodeGen */
+
+/** @type {ThisType<CodeGen>} */
 export const unicodeMethods = {
 	_genUnicode(fn, a) {
 		const [arg] = a();

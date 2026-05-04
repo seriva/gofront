@@ -1,5 +1,7 @@
 // CodeGen for Go `unicode/utf8` package.
 
+/** @typedef {import('../index.js').CodeGen} CodeGen */
+
 const UTF8_DISPATCH = {
 	RuneCountInString: (a) => `[...(${a[0]})].length`,
 	RuneLen: (a) =>
@@ -15,6 +17,7 @@ const UTF8_DISPATCH = {
 	FullRuneInString: (a) => `(${a[0]}).length > 0`,
 };
 
+/** @type {ThisType<CodeGen>} */
 export const utf8Methods = {
 	_genUtf8(fn, a) {
 		const gen = UTF8_DISPATCH[fn];
