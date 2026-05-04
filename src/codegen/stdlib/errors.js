@@ -1,5 +1,8 @@
 // CodeGen for Go `errors` package.
 
+/** @typedef {import('../index.js').CodeGen} CodeGen */
+
+/** @type {ThisType<CodeGen>} */
 export const errorsMethods = {
 	_genErrors(fn, a) {
 		const args = a();

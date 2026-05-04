@@ -1,5 +1,7 @@
 // CodeGen for Go `regexp` package and `*Regexp` methods.
 
+/** @typedef {import('../index.js').CodeGen} CodeGen */
+
 const REGEXP_METHOD = {
 	MatchString: (re, a) => `${re}.test(${a[0]})`,
 	FindString: (re, a) => `(${re}.exec(${a[0]})?.[0] ?? "")`,
@@ -19,6 +21,7 @@ const REGEXP_METHOD = {
 	String: (re) => `${re}.source`,
 };
 
+/** @type {ThisType<CodeGen>} */
 export const regexpMethods = {
 	_genRegexp(fn, a) {
 		// Converts a Go regexp pattern string (which may contain inline flags like (?i))

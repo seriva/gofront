@@ -1,5 +1,7 @@
 // CodeGen for Go `math` package.
 
+/** @typedef {import('../index.js').CodeGen} CodeGen */
+
 const MATH1 = {
 	Abs: "abs",
 	Floor: "floor",
@@ -41,6 +43,7 @@ const MATH_EXTRA = {
 	Remainder: ([x, y]) => `(${x} - Math.round(${x} / ${y}) * ${y})`,
 };
 
+/** @type {ThisType<CodeGen>} */
 export const mathMethods = {
 	_genMath(fn, a) {
 		const args = a();

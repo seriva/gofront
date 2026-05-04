@@ -7,9 +7,12 @@ import {
 	defaultType,
 	isAny,
 	Scope,
+	TAINTED_ANY,
 	typeStr,
 	VOID,
 } from "./types.js";
+
+/** @typedef {import('./index.js').TypeChecker} TypeChecker */
 
 // Dispatch table for substituteType — keyed by type.kind.
 const SUBSTITUTE_DISPATCH = {
@@ -69,6 +72,7 @@ const SUBSTITUTE_DISPATCH = {
 	}),
 };
 
+/** @type {ThisType<TypeChecker>} */
 export const resolveMethods = {
 	resolveTypeNode(node, scope) {
 		if (!node) return ANY;
@@ -354,7 +358,8 @@ export const resolveMethods = {
 
 	fieldType(baseType, field, node) {
 		baseType = this.resolveType(baseType);
-		if (!baseType || isAny(baseType)) return ANY;
+		if (!baseType || isAny(baseType))
+			return baseType?._tainted ? TAINTED_ANY : ANY;
 		if (this._isTransparentPointerField(baseType, field))
 			baseType = this.resolveType(baseType.base);
 		if (baseType.kind === "named" && baseType.methods?.has(field))

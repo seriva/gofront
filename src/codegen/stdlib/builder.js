@@ -1,5 +1,7 @@
 // CodeGen for `strings.Builder` and `bytes.Buffer` method calls.
 
+/** @typedef {import('../index.js').CodeGen} CodeGen */
+
 const BUILDER_STR = {
 	WriteString: (b, a) => `(${b}._buf += ${a[0]}, [${a[0]}.length, null])`,
 	WriteByte: (b, a) => `(${b}._buf += String.fromCodePoint(${a[0]}))`,
@@ -22,6 +24,7 @@ const BUILDER_COMMON = {
 	Grow: () => "undefined",
 };
 
+/** @type {ThisType<CodeGen>} */
 export const builderMethods = {
 	_genBuilderCall(typeName, method, expr) {
 		const recv = expr.func.expr;

@@ -1,9 +1,11 @@
-// Multi-file GoFront package compiler.
+// GoFront package compiler.
 //
-// compileDir(dir, options)   — compile all *.go in a directory as one package
-// compileFiles(files, options) — compile an explicit list of .go files
+// compileSingleFile(path, options) — compile one .go file
+// compileDir(dir, options)         — compile all *.go in a directory as one package
+// compileFiles(files, options)     — compile an explicit list of .go files
 //
-// Both return:
+// compileSingleFile returns: { js } (or { tokens } / { ast } for debug modes)
+// compileDir / compileFiles return:
 //   {
 //     pkgName:         string,
 //     js:              string,          // generated JS bundle (may include dep preamble)
@@ -145,6 +147,63 @@ export function resolveImports(
 }
 
 // ── Main entry points ─────────────────────────────────────────
+
+export function compileSingleFile(inputPath, options = {}) {
+	const {
+		sourceMap = false,
+		outputFile = null,
+		dumpTokens = false,
+		dumpAst = false,
+	} = options;
+
+	let source;
+	try {
+		source = readFileSync(inputPath, "utf8");
+	} catch (e) {
+		throw new Error(`cannot read '${inputPath}': ${e.message}`);
+	}
+
+	const tokens = new Lexer(source, basename(inputPath)).tokenize();
+	if (dumpTokens) return { tokens };
+
+	const ast = new Parser(tokens, basename(inputPath), source).parse();
+	ast._source = source;
+	if (dumpAst) return { ast };
+
+	const checker = new TypeChecker();
+	const jsImports = new Map();
+	const bundledPackages = new Set();
+	const preambles = [];
+
+	resolveImports(
+		[ast],
+		inputPath,
+		checker,
+		jsImports,
+		bundledPackages,
+		preambles,
+	);
+
+	const errors = checker.check(ast);
+	checker.reportUnusedImports();
+	if (errors.length > 0) {
+		throw new Error(errors.map((e) => e.message).join("\n"));
+	}
+
+	const cg = new CodeGen(checker, jsImports, bundledPackages);
+	let js = cg.generate(ast);
+
+	if (sourceMap) {
+		const outputDir = outputFile ? dirname(resolve(outputFile)) : resolve(".");
+		const srcPath = relative(outputDir, inputPath);
+		const map = cg.getSourceMap(srcPath, [source]);
+		const b64 = Buffer.from(map).toString("base64");
+		js += `\n//# sourceMappingURL=data:application/json;base64,${b64}`;
+	}
+
+	const output = preambles.length > 0 ? `${preambles.join("\n")}\n${js}` : js;
+	return { js: output };
+}
 
 export function compileDir(dir, options = {}) {
 	const files = gwFilesIn(dir);

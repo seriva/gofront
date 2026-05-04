@@ -13,27 +13,15 @@
 //   gofront <file.go> --tokens     — dump tokens of first file (debug)
 //   gofront init [dir]             — scaffold a new GoFront project
 
-import {
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	statSync,
-	watch,
-	writeFileSync,
-} from "node:fs";
 import { createRequire } from "node:module";
 
 const _require = createRequire(import.meta.url);
 const { version } = _require("../package.json");
 
-import { basename, dirname, join, relative, resolve } from "node:path";
-import { CodeGen } from "./codegen/index.js";
-import { compileDir, resolveImports } from "./compiler.js";
+import { statSync, watch, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { handleInit, maybeMinify, runCompile } from "./cli-core.js";
 import { createDevServer, liveReloadClient } from "./dev-server.js";
-import { Lexer } from "./lexer.js";
-import { minify } from "./minifier.js";
-import { Parser } from "./parser/index.js";
-import { TypeChecker } from "./typechecker/index.js";
 
 // ── Parse CLI args ───────────────────────────────────────────
 
@@ -73,40 +61,13 @@ Usage:
 if (args[0] === "init") {
 	const targetArg = args[1] ?? ".";
 	const targetDir = resolve(targetArg);
-
-	if (targetArg !== ".") {
-		try {
-			mkdirSync(targetDir, { recursive: true });
-		} catch (e) {
-			console.error(`gofront: cannot create '${targetArg}': ${e.message}`);
-			process.exit(1);
-		}
-	}
-
-	const mainPath = join(targetDir, "main.go");
-	if (existsSync(mainPath)) {
-		console.error(`gofront: ${mainPath} already exists — nothing written`);
-		process.exit(1);
-	}
-
-	const pkgName =
-		targetArg === "." ? basename(resolve(".")) : basename(targetDir);
-	// package names must be valid identifiers
-	const safePkg = pkgName.replace(/[^a-zA-Z0-9_]/g, "_").replace(/^[0-9]/, "_");
-
-	const template = `package ${safePkg}
-
-func main() {
-\tconsole.log("Hello from GoFront!")
-}
-`;
+	let mainPath;
 	try {
-		writeFileSync(mainPath, template);
+		({ mainPath } = handleInit(targetDir));
 	} catch (e) {
-		console.error(`gofront: cannot write '${mainPath}': ${e.message}`);
+		console.error(`gofront: ${e.message}`);
 		process.exit(1);
 	}
-
 	console.error(`gofront: created ${mainPath}`);
 	console.error(
 		`gofront: run  gofront ${targetArg === "." ? "main.go" : `${targetArg}/main.go`}  to compile`,
@@ -139,93 +100,30 @@ try {
 	process.exit(1);
 }
 
-// ── Compile function (used for initial build and re-builds) ──
-
-function runCompile() {
-	if (isDir) {
-		const outputDir = outputFile ? dirname(resolve(outputFile)) : resolve(".");
-		return compileDir(inputPath, { sourceMap, outputDir });
-	}
-
-	// Single-file mode
-	let source;
-	try {
-		source = readFileSync(inputPath, "utf8");
-	} catch (e) {
-		throw new Error(`cannot read '${inputArg}': ${e.message}`);
-	}
-
-	const tokens = new Lexer(source, basename(inputPath)).tokenize();
-
-	if (dumpTokens) {
-		for (const tok of tokens) console.log(tok.toString());
-		process.exit(0);
-	}
-
-	const ast = new Parser(tokens, basename(inputPath), source).parse();
-	ast._source = source;
-
-	if (dumpAst) {
-		console.log(JSON.stringify(ast, null, 2));
-		process.exit(0);
-	}
-
-	const checker = new TypeChecker();
-	const jsImports = new Map();
-	const bundledPackages = new Set();
-	const preambles = [];
-
-	resolveImports(
-		[ast],
-		inputPath,
-		checker,
-		jsImports,
-		bundledPackages,
-		preambles,
-	);
-
-	const errors = checker.check(ast);
-	checker.reportUnusedImports();
-	if (errors.length > 0) {
-		throw new Error(errors.map((e) => e.message).join("\n"));
-	}
-
-	const cg = new CodeGen(checker, jsImports, bundledPackages);
-	let js = cg.generate(ast);
-
-	if (sourceMap) {
-		const outputDir = outputFile ? dirname(resolve(outputFile)) : resolve(".");
-		const srcPath = relative(outputDir, inputPath);
-		const map = cg.getSourceMap(srcPath, [source]);
-		const b64 = Buffer.from(map).toString("base64");
-		js += `\n//# sourceMappingURL=data:application/json;base64,${b64}`;
-	}
-
-	const output = preambles.length > 0 ? `${preambles.join("\n")}\n${js}` : js;
-	return { js: output };
-}
-
-// ── Minify helper ────────────────────────────────────────────
-
-function maybeMinify(js) {
-	if (!minifyOutput) return js;
-	if (sourceMap) {
-		console.error("gofront: --source-map and --minify cannot be used together");
-		process.exit(1);
-	}
-	return minify(js, { mangle: mangleOutput });
-}
-
 // ── Single-shot mode ─────────────────────────────────────────
 
 if (!watchMode) {
 	let result;
 	const startMs = performance.now();
 	try {
-		result = runCompile();
+		result = runCompile(inputPath, isDir, {
+			sourceMap,
+			outputFile,
+			dumpTokens,
+			dumpAst,
+		});
 	} catch (e) {
 		console.error(`gofront: ${e.message}`);
 		process.exit(1);
+	}
+
+	if (result.tokens) {
+		for (const tok of result.tokens) console.log(tok.toString());
+		process.exit(0);
+	}
+	if (result.ast) {
+		console.log(JSON.stringify(result.ast, null, 2));
+		process.exit(0);
 	}
 
 	if (checkOnly) {
@@ -236,7 +134,11 @@ if (!watchMode) {
 
 	let js;
 	try {
-		js = maybeMinify(result.js);
+		js = maybeMinify(result.js, {
+			minify: minifyOutput,
+			mangle: mangleOutput,
+			sourceMap,
+		});
 	} catch (e) {
 		console.error(`gofront: minify failed: ${e.message}`);
 		process.exit(1);
@@ -278,8 +180,12 @@ if (serveMode) {
 function buildOnce(changedFile = null) {
 	try {
 		const startMs = performance.now();
-		const result = runCompile();
-		let js = maybeMinify(result.js);
+		const result = runCompile(inputPath, isDir, { sourceMap, outputFile });
+		let js = maybeMinify(result.js, {
+			minify: minifyOutput,
+			mangle: mangleOutput,
+			sourceMap,
+		});
 		if (serveMode) {
 			// Insert live reload client before the source map comment so it stays last
 			const smIdx = js.lastIndexOf("\n//# sourceMappingURL=");

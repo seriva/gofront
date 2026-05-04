@@ -1,5 +1,8 @@
 // CodeGen for Go `maps` package.
 
+/** @typedef {import('../index.js').CodeGen} CodeGen */
+
+/** @type {ThisType<CodeGen>} */
 export const mapsMethods = {
 	_genMaps(fn, a) {
 		if (fn === "Equal") {

@@ -1,5 +1,7 @@
 // CodeGen for Go `strconv` package.
 
+/** @typedef {import('../index.js').CodeGen} CodeGen */
+
 const STRCONV_DISPATCH = {
 	Itoa: (a) => `String(${a[0]})`,
 	Atoi: (a) =>
@@ -22,6 +24,7 @@ const STRCONV_DISPATCH = {
 		`[...(${a[0]}), ...new TextEncoder().encode(${a[1]}.toFixed(${a[3]} < 0 ? 6 : ${a[3]}))]`,
 };
 
+/** @type {ThisType<CodeGen>} */
 export const strconvMethods = {
 	_genStrconv(fn, a) {
 		const gen = STRCONV_DISPATCH[fn];

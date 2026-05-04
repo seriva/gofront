@@ -1,5 +1,7 @@
 // CodeGen for Go `bytes` package.
 
+/** @typedef {import('../index.js').CodeGen} CodeGen */
+
 const __bs = `(b => String.fromCharCode(...b))`;
 const __sb = `(s => [...s].map(c => c.charCodeAt(0)))`;
 
@@ -54,6 +56,7 @@ const BYTES_DISPATCH = {
 		`{_src: ${a[0]}, _pos: 0, Read(p) { const n = Math.min(p.length, this._src.length - this._pos); for (let i = 0; i < n; i++) p[i] = this._src[this._pos + i]; this._pos += n; return [n, n === 0 ? "EOF" : null]; }, Len() { return this._src.length - this._pos; }, Reset(b) { this._src = b; this._pos = 0; }}`,
 };
 
+/** @type {ThisType<CodeGen>} */
 export const bytesMethods = {
 	_genBytes(fn, a) {
 		const gen = BYTES_DISPATCH[fn];

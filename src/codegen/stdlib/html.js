@@ -1,5 +1,8 @@
 // CodeGen for Go `html` package.
 
+/** @typedef {import('../index.js').CodeGen} CodeGen */
+
+/** @type {ThisType<CodeGen>} */
 export const htmlMethods = {
 	_genHtml(fn, a) {
 		switch (fn) {

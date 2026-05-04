@@ -2,6 +2,8 @@
 
 import { isComplex } from "../typechecker/types.js";
 
+/** @typedef {import('./index.js').CodeGen} CodeGen */
+
 // Method-name dispatch for genStmt — string values add no static call edges.
 const STMT_GEN_DELEGATE = {
 	VarDecl: "genVarDecl",
@@ -15,6 +17,7 @@ const STMT_GEN_DELEGATE = {
 	BranchStmt: "_genBranchStmt",
 };
 
+/** @type {ThisType<CodeGen>} */
 export const statementGenMethods = {
 	genBlock(block) {
 		for (const stmt of block.stmts) this.genStmt(stmt);

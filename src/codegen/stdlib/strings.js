@@ -1,5 +1,7 @@
 // CodeGen for Go `strings` package.
 
+/** @typedef {import('../index.js').CodeGen} CodeGen */
+
 const STRINGS_M1 = {
 	ToUpper: "toUpperCase",
 	ToLower: "toLowerCase",
@@ -71,6 +73,7 @@ const STRINGS_DISPATCH = {
 		`((...pairs) => { const p = []; for (let i = 0; i < pairs.length; i += 2) p.push([pairs[i], pairs[i+1]]); return { _p: p, Replace(s) { let r = s; for (const [o, n] of this._p) r = r.split(o).join(n); return r; } }; })(${args.join(", ")})`,
 };
 
+/** @type {ThisType<CodeGen>} */
 export const stringsMethods = {
 	_genStrings(fn, a) {
 		const args = a();
