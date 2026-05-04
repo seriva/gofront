@@ -22,6 +22,8 @@ import { timeMethods } from "./time.js";
 import { unicodeMethods } from "./unicode.js";
 import { utf8Methods } from "./utf8.js";
 
+/** @typedef {import('../index.js').CodeGen} CodeGen */
+
 // Stdlib namespace → handler method name. Used by _genStdlibCall to dispatch
 // dynamically without creating static call edges.
 const STDLIB_METHOD_MAP = {
@@ -70,6 +72,7 @@ const dispatchMethods = {
 	},
 };
 
+/** @type {ThisType<CodeGen>} */
 export const stdlibGenMethods = {
 	...builderMethods,
 	...bytesMethods,

@@ -5,6 +5,9 @@
 import { Parser } from "../parser/index.js";
 import { T, Token } from "../tokens.js";
 
+/** @typedef {import('./index.js').CodeGen} CodeGen */
+
+/** @type {ThisType<CodeGen>} */
 export const templGenMethods = {
 	genTemplDecl(decl) {
 		const params = decl.params

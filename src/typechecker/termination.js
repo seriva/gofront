@@ -1,6 +1,9 @@
 // Termination analysis — determines whether a statement/block always returns.
 // Installed as a mixin on TypeChecker.prototype.
 
+/** @typedef {import('./index.js').TypeChecker} TypeChecker */
+
+/** @type {ThisType<TypeChecker>} */
 export const terminationMethods = {
 	_isPanicCall(expr) {
 		return (

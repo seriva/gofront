@@ -48,6 +48,7 @@ export const FLOAT64 = { kind: "basic", name: "float64" };
 export const STRING = { kind: "basic", name: "string" };
 export const BOOL = { kind: "basic", name: "bool" };
 export const ANY = { kind: "basic", name: "any" };
+export const TAINTED_ANY = { kind: "basic", name: "any", _tainted: true };
 export const VOID = { kind: "basic", name: "void" };
 export const NIL = { kind: "basic", name: "nil" };
 export const ERROR = {

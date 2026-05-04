@@ -17,6 +17,7 @@ import {
 	NIL,
 	Scope,
 	STRING,
+	TAINTED_ANY,
 	typeStr,
 	UNTYPED_BOOL,
 	UNTYPED_COMPLEX,
@@ -25,6 +26,8 @@ import {
 	UNTYPED_STRING,
 	VOID,
 } from "./types.js";
+
+/** @typedef {import('./index.js').TypeChecker} TypeChecker */
 
 // Dispatch table for builtin function type checking.
 // Each value is (self, name, expr, argTypes, scope) => returnType.
@@ -80,6 +83,7 @@ const CHECK_EXPR_DELEGATE = {
 	InstantiationExpr: "_checkInstantiationExpr",
 };
 
+/** @type {ThisType<TypeChecker>} */
 export const expressionCheckMethods = {
 	checkExpr(expr, scope) {
 		const t = this._checkExpr(expr, scope);
@@ -115,6 +119,7 @@ export const expressionCheckMethods = {
 			case "BinaryExpr": {
 				const lt = this.checkExpr(expr.left, scope);
 				const rt = this.checkExpr(expr.right, scope);
+				if (lt?._tainted || rt?._tainted) return TAINTED_ANY;
 				if (isAny(lt) || isAny(rt))
 					return this.binaryResultType(expr.op, ANY, ANY, expr);
 				return this.binaryResultType(expr.op, lt, rt, expr);
@@ -185,6 +190,7 @@ export const expressionCheckMethods = {
 
 	_checkSelectorExpr(expr, scope) {
 		const baseType = this.checkExpr(expr.expr, scope);
+		if (baseType?._tainted) return TAINTED_ANY;
 		if (expr.expr._isTypeRef) {
 			let base = baseType.kind === "named" ? baseType.underlying : baseType;
 			base = this.resolveType(base);
@@ -230,6 +236,7 @@ export const expressionCheckMethods = {
 	_checkIndexExpr(expr, scope) {
 		const bt = this.checkExpr(expr.expr, scope);
 		this.checkExpr(expr.index, scope);
+		if (bt?._tainted) return TAINTED_ANY;
 		if (isAny(bt)) return ANY;
 		const btu =
 			bt.kind === "named"
@@ -252,6 +259,7 @@ export const expressionCheckMethods = {
 		if (expr.low) this.checkExpr(expr.low, scope);
 		if (expr.high) this.checkExpr(expr.high, scope);
 		if (expr.max) this.checkExpr(expr.max, scope);
+		if (bt?._tainted) return TAINTED_ANY;
 		if (isAny(bt)) return ANY;
 		if (bt.kind === "slice" || bt.kind === "array")
 			return { kind: "slice", elem: bt.elem };
@@ -468,6 +476,7 @@ export const expressionCheckMethods = {
 
 		const argTypes = this._resolveCallArgTypes(expr, scope);
 
+		if (fnType?._tainted) return TAINTED_ANY;
 		if (isAny(fnType)) return ANY;
 
 		// Named type used as a constructor/conversion: Greeter(fn), NodeFunc(fn)

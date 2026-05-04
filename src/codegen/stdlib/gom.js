@@ -1,5 +1,7 @@
 // CodeGen for the GoFront-built-in `gom` DOM-rendering package.
 
+/** @typedef {import('../index.js').CodeGen} CodeGen */
+
 const GOM_ELEMENT_TAGS = {
 	Div: "div",
 	Section: "section",
@@ -85,6 +87,7 @@ const GOM_PROP_SETTERS = {
 	Placeholder: "placeholder",
 };
 
+/** @type {ThisType<CodeGen>} */
 export const gomMethods = {
 	_genGom(fn, expr) {
 		const a = () =>

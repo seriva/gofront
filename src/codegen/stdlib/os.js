@@ -1,5 +1,8 @@
 // CodeGen for Go `os` package.
 
+/** @typedef {import('../index.js').CodeGen} CodeGen */
+
+/** @type {ThisType<CodeGen>} */
 export const osMethods = {
 	_genOs(fn, a) {
 		const args = a();

@@ -1,5 +1,7 @@
 // CodeGen for Go `path` package.
 
+/** @typedef {import('../index.js').CodeGen} CodeGen */
+
 const PATH_DISPATCH = {
 	Base: (a) =>
 		`((p) => { if (!p) return "."; const stripped = p.replace(/\\/+$/, ""); if (!stripped) return "/"; const i = stripped.lastIndexOf("/"); return i < 0 ? stripped : stripped.slice(i + 1) || "/"; })(${a[0]})`,
@@ -14,6 +16,7 @@ const PATH_DISPATCH = {
 		`((pat, name) => { try { const sp=/[.+^$()|[\\]\\\\]/g; const re = new RegExp("^" + pat.replace(sp, "\\\\$&").replace(/\\*/g, "[^/]*").replace(/\\?/g, "[^/]") + "$"); return [re.test(name), null]; } catch(e) { return [false, "syntax error in pattern"]; } })(${a[0]}, ${a[1]})`,
 };
 
+/** @type {ThisType<CodeGen>} */
 export const pathMethods = {
 	_genPath(fn, a, expr) {
 		if (fn === "Join") {

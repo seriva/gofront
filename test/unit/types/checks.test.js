@@ -755,6 +755,70 @@ func main() { console.log(mustPositive(5)) }`);
 });
 
 // ═════════════════════════════════════════════════════════════
+// ANY cascade suppression (TAINTED_ANY)
+// ═════════════════════════════════════════════════════════════
+
+section("ANY cascade suppression");
+
+test("undefined var in call chain produces exactly 1 error", () => {
+	const { errors } = compile(`package main
+func main() {
+  x.Foo()
+}`);
+	assertEqual(errors.length, 1);
+	assertErrorContains(errors, "Undefined: 'x'");
+});
+
+test("undefined var in selector produces exactly 1 error", () => {
+	const { errors } = compile(`package main
+func main() {
+  _ = x.Foo
+}`);
+	assertEqual(errors.length, 1);
+	assertErrorContains(errors, "Undefined: 'x'");
+});
+
+test("undefined var in binary expr produces exactly 1 error", () => {
+	const { errors } = compile(`package main
+func main() {
+  var s string = x + "hello"
+  _ = s
+}`);
+	assertEqual(errors.length, 1);
+	assertErrorContains(errors, "Undefined: 'x'");
+});
+
+test("undefined var in index expr produces exactly 1 error", () => {
+	const { errors } = compile(`package main
+func main() {
+  _ = x[0]
+}`);
+	assertEqual(errors.length, 1);
+	assertErrorContains(errors, "Undefined: 'x'");
+});
+
+test("two independent undefined vars produce 2 errors", () => {
+	const { errors } = compile(`package main
+func main() {
+  x.Foo()
+  y.Bar()
+}`);
+	assertEqual(errors.length, 2);
+});
+
+test("user-declared any is permissive — no cascade suppression via taint", () => {
+	// GoFront treats 'any' like TS's any: permissive, not Go's strict interface{}.
+	// TAINTED_ANY (error-derived any) suppresses cascades; user 'any' does not taint.
+	const { errors } = compile(`package main
+func main() {
+  var x any
+  x.SomeMethod()
+  _ = x + 1
+}`);
+	assertEqual(errors.length, 0);
+});
+
+// ═════════════════════════════════════════════════════════════
 // Additional coverage
 // ═════════════════════════════════════════════════════════════
 

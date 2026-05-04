@@ -1,5 +1,7 @@
 // CodeGen for Go `time` package — `time.Now`, `time.Since`, etc., plus `*Time` methods.
 
+/** @typedef {import('../index.js').CodeGen} CodeGen */
+
 const TIME_METHOD_DISPATCH = {
 	Year: (r) => `${r}._d.getFullYear()`,
 	Month: (r) => `${r}._d.getMonth() + 1`,
@@ -26,6 +28,7 @@ const TIME_DISPATCH = {
 		`{_d: new Date(${a[0]}, ${a[1]} - 1, ${a[2]}, ${a[3]}, ${a[4]}, ${a[5]})}`,
 };
 
+/** @type {ThisType<CodeGen>} */
 export const timeMethods = {
 	_genTimeMethodCall(method, expr) {
 		const recv = expr.func.expr;
