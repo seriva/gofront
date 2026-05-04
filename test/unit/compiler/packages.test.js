@@ -1,8 +1,11 @@
 // GoFront test suite — multi-file packages, examples, npm resolver
 
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
+import { compileFiles } from "../../../src/compiler.js";
 import {
 	assert,
 	assertContains,
@@ -317,6 +320,37 @@ test("reactive utils.Plural formats correctly", () => {
 	const utilsDir = join(ROOT, "example", "reactive", "src", "utils");
 	const result = compileDir(utilsDir);
 	assert(result.js.includes("Plural"), "expected Plural in output");
+});
+
+section("compileFiles — sourceMap");
+
+test("compileFiles with sourceMap appends sourceMappingURL comment", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-smfiles-"));
+	const file = join(dir, "main.go");
+	writeFileSync(file, `package main\nfunc main() { console.log("hi") }\n`);
+	try {
+		const { js } = compileFiles([file], { sourceMap: true, outputDir: dir });
+		assertContains(js, "sourceMappingURL=data:application/json;base64,");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("compileFiles with sourceMap embeds source content", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-smcontent-"));
+	const file = join(dir, "main.go");
+	writeFileSync(file, `package main\nfunc main() { console.log("hi") }\n`);
+	try {
+		const { js } = compileFiles([file], { sourceMap: true, outputDir: dir });
+		const b64 = js.split("base64,")[1].trim();
+		const map = JSON.parse(Buffer.from(b64, "base64").toString("utf8"));
+		assert(
+			Array.isArray(map.sourcesContent) && map.sourcesContent.length > 0,
+			"expected sourcesContent in source map",
+		);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
 });
 
 // ═════════════════════════════════════════════════════════════
