@@ -221,7 +221,9 @@ export const resolveMethods = {
 				}
 			}
 		}
-		return { kind: "interface", methods };
+		const result = { kind: "interface", methods };
+		if (node.unionConstraint) result.unionConstraint = node.unionConstraint;
+		return result;
 	},
 
 	// ── Generics — substitution, instantiation, inference ────────────

@@ -30,7 +30,7 @@ packages. `src/dts-parser.js` parses TypeScript `.d.ts` declaration files.
 
 ```sh
 npm run build:all   # build all example apps
-npm run test:unit     # run unit tests only (~1118 tests, no browser required)
+npm run test:unit     # run unit tests only (no browser required)
 npm run test:e2e      # build all examples then run E2E tests (Playwright, headless Chromium)
 npm run test:all      # run both unit and E2E
 npm run test:coverage # unit tests with V8 coverage report (via c8)
