@@ -400,6 +400,45 @@ func main() {
 	assertEqual(runJs(js), "7\nhello world");
 });
 
+test("named-type union constraint satisfied when arg matches term", () => {
+	const { errors } = compile(`package main
+type Cat struct{}
+type Dog struct{}
+type Pet interface { Cat | Dog }
+func adopt[T Pet](p T) {}
+func main() { adopt(Cat{}) }`);
+	assertEqual(errors.length, 0);
+});
+
+test("named-type union constraint violated when arg does not match", () => {
+	const { errors } = compile(`package main
+type Cat struct{}
+type Dog struct{}
+type Pet interface { Cat | Dog }
+func adopt[T Pet](p T) {}
+type Fish struct{}
+func main() { adopt(Fish{}) }`);
+	assertErrorContains(errors, "does not satisfy constraint");
+});
+
+test("approx constraint (~int) accepts any type — no error", () => {
+	const { errors } = compile(`package main
+type Num interface { ~int }
+func double[T Num](v T) T { return v + v }
+func main() { console.log(double(7)) }`);
+	assertEqual(errors.length, 0);
+});
+
+test("No method error when calling undefined method on interface variable", () => {
+	const { errors } = compile(`package main
+type Reader interface { Read() string }
+func consume(r Reader) {
+  r.Write("x")
+}
+func main() {}`);
+	assertErrorContains(errors, "No method");
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit(summarize() > 0 ? 1 : 0);
 }

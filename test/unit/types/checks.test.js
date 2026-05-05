@@ -450,6 +450,30 @@ func main() {}`);
 	assertErrorContains(errors, "cannot embed non-interface type");
 });
 
+test("interface body union constraint (IDENT | IDENT) parses and is used as constraint", () => {
+	const { errors } = compile(`package main
+type MyInt struct{}
+type MyStr struct{}
+type Either interface {
+  MyInt | MyStr
+}
+func wrap[T Either](v T) T { return v }
+func main() { wrap(MyInt{}) }`);
+	assertEqual(errors.length, 0);
+});
+
+test("interface body pkg.TypeName embed parses correctly", () => {
+	const { errors } = compile(`package main
+import "io"
+type ReadCloser interface {
+  io.Reader
+  Close() error
+}
+func use(rc ReadCloser) {}
+func main() {}`);
+	assertEqual(errors.length, 0);
+});
+
 // ── Interface satisfaction — strict signature checks ──────────
 
 section("Interface satisfaction — strict signature checks");
@@ -752,6 +776,54 @@ func mustPositive(n int) int {
 func main() { console.log(mustPositive(5)) }`);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "5");
+});
+
+test("infinite for loop (no cond, no break) is terminating", () => {
+	const { errors } = compile(`package main
+func forever() int {
+  for {}
+}`);
+	assertEqual(errors.length, 0);
+});
+
+test("infinite for loop with break is not terminating", () => {
+	const { errors } = compile(`package main
+func f() int {
+  for { break }
+}`);
+	assertErrorContains(errors, "missing return");
+});
+
+test("labeled return statement is terminating", () => {
+	const { errors } = compile(`package main
+func f(x int) int {
+result:
+  return x * 2
+}
+func main() { console.log(f(5)) }`);
+	assertEqual(errors.length, 0);
+});
+
+test("switch case ending in break (not return) is not terminating", () => {
+	const { errors } = compile(`package main
+func f(x int) string {
+  switch x {
+  case 1:
+    break
+  default:
+    return "other"
+  }
+}`);
+	assertErrorContains(errors, "missing return");
+});
+
+test("IncDecStmt as last statement is not terminating", () => {
+	const { errors } = compile(`package main
+func f() int {
+  x := 0
+  x++
+}`);
+	assertErrorContains(errors, "missing return");
 });
 
 // ═════════════════════════════════════════════════════════════
