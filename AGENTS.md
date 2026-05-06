@@ -1,41 +1,55 @@
 # GoFront — Agent & Contributor Guide
 
-## Project overview
+## Project Identity
 
-GoFront is a Go-inspired language that compiles to JavaScript. Source files use the `.go`
-extension so editors apply Go syntax highlighting automatically. The compiler is a pure
-Node.js ESM project with no runtime dependencies.
+GoFront is a Go-inspired language that compiles to JavaScript. The compiler is a pure Node.js ESM project (zero runtime dependencies) that takes `.go` and `.templ` source files through Lexer → Parser → TypeChecker → CodeGen to produce JavaScript output.
 
-## Compiler pipeline
+## Tech Stack
 
-```
-source text (.go files)
-  → Lexer        (src/lexer.js)        → token stream
-  → Parser       (src/parser.js)       → AST
-  → TypeChecker  (src/typechecker.js)  → annotated AST + error list
-  → CodeGen      (src/codegen.js)      → JavaScript string
+- **Node.js ESM** — pure ES modules, no CommonJS
+- **Biome** — formatting and linting (`npm run format`, `npm run check`)
+- **Sentrux** — architectural quality gate (layer boundaries, coupling, complexity, zero cycles)
+- **Playwright** — E2E browser tests against compiled example apps
+- **c8** — V8 code coverage for unit tests
+- **No runtime dependencies** — the compiler has zero `dependencies` in package.json
 
-source text (.templ files)
-  → TemplLexer   (src/templ-lexer.js)  → mixed stream (Go/HTML)
-  → TemplParser  (src/templ-parser.js) → AST (TemplDecl nodes)
-  → TypeChecker  (src/typechecker.js)  → annotated AST + error list
-  → CodeGen      (src/codegen.js)      → JavaScript string
-```
+## Core Standards
 
-Multi-file packages are handled by `src/compiler.js`, which runs all four stages across
-all files in a directory as a single unit. `src/resolver.js` resolves npm and `@types/`
-packages. `src/dts-parser.js` parses TypeScript `.d.ts` declaration files.
+1. **Always use TDD.** Write failing tests first (positive + negative), implement the minimum to pass, then run the full suite (`npm run test:all`) and linter (`npm run check`).
+2. **Every feature touches four stages.** Lexer → Parser → TypeChecker → CodeGen. Add the AST node, type-check it, emit JS for it, and throw on unhandled kinds.
+3. **Negative tests verify error messages.** Use `assertErrorContains(errors, "substring")` — never just `assert(errors.length > 0)`.
+4. **Update docs with code.** Every change must update `CHANGELOG.md` (under `## [Unreleased]`) and `README.md` if user-facing.
+5. **Docs-first releases.** Create `docs/vX.Y.Z/<feature>-plan.md` design documents before writing any implementation code.
 
-## Commands
+## Architecture
+
+The compiler pipeline lives in `src/` and flows strictly downward: `index.js` (CLI) → `cli-core.js` → `compiler.js` → `lexer.js` / `parser.js` → `typechecker.js` → `codegen.js`. Parser, TypeChecker, and CodeGen each have a subdirectory splitting concerns (declarations, types, statements, expressions). Standard library type knowledge lives in `typechecker/stdlib/`, package resolution in `resolver.js`, and `.d.ts` support in `dts-parser.js`. Tests live in `test/unit/` (organized by domain: `language/`, `types/`, `builtins/`, `compiler/`) and `test/e2e/`. Examples in `example/` (simple, reactive, gom, templ) serve as E2E fixtures and documentation.
+
+## Anti-Patterns
+
+- **Never skip a compiler stage.** If you add syntax, it must be lexed, parsed, type-checked, *and* code-generated — no partial implementations.
+- **Never add runtime dependencies.** The compiler must remain zero-dependency; all stdlib support compiles to inline JS.
+- **Never use `assert(errors.length > 0)` as a negative test.** Always verify the exact error message substring.
+- **Never modify `src/index.js` for logic.** It is the CLI entry point only — business logic belongs in `cli-core.js` or deeper.
+- **Never commit without `npm run check` passing.** This runs Biome lint, Sentrux quality gate, and GoFront type-checks on the examples.
+
+---
+
+<details>
+<summary><strong>Reference: Commands</strong></summary>
 
 ```sh
-npm run build:all   # build all example apps
-npm run test:unit     # run unit tests only (no browser required)
-npm run test:e2e      # build all examples then run E2E tests (Playwright, headless Chromium)
-npm run test:all      # run both unit and E2E
-npm run test:coverage # unit tests with V8 coverage report (via c8)
-npm run format        # format with Biome
-npm run check         # lint, architectural quality gate, and GoFront type-checks
+npm run build:all         # build all example apps
+npm run build:simple      # builds example/simple/app.js
+npm run build:reactive    # builds example/reactive/app.js
+npm run build:gom         # builds example/gom/app.js
+npm run build:templ       # builds example/templ/app.js
+npm run test:unit         # run unit tests only (no browser required)
+npm run test:e2e          # build all examples then run E2E tests (Playwright, headless Chromium)
+npm run test:all          # run both unit and E2E
+npm run test:coverage     # unit tests with V8 coverage report (via c8)
+npm run format            # format with Biome
+npm run check             # lint, architectural quality gate, and GoFront type-checks
 
 node src/index.js <file.go>                       # compile single file → stdout
 node src/index.js <dir> -o out.js                 # compile directory → file
@@ -52,7 +66,10 @@ node src/index.js init [dir]                      # scaffold new project
 node src/index.js --version                       # print version
 ```
 
-## Repository layout
+</details>
+
+<details>
+<summary><strong>Reference: Repository Layout</strong></summary>
 
 ```
 src/
@@ -101,125 +118,35 @@ test/
   e2e/              end-to-end browser tests (Playwright, v0.0.8)
 example/
   simple/             vanilla DOM todo app (default example)
-    src/              GoFront source files
-    index.html        minimal HTML shell
-    app.js            build output
   reactive/           same app using reactive.js signals + d.ts imports
-    src/              GoFront source files + browser.d.ts
-    index.html        HTML shell (loads reactive.js)
-    reactive.js       signals-based reactive framework
-    app.js            build output
   gom/                gom stdlib example (uses gom.* built-in namespace directly)
-    src/              todo app source (package main, no imports needed)
-      main.go
-      render.go
-      store.go
-      styles.go
-      types.go
-      utils/utils.go
-    index.html        HTML shell
-    app.js            build output
 docs/
   ROADMAP.md          release history + upcoming roadmap
-  v0.0.5/             design documents for v0.0.5 features
-  v0.0.6/             design documents for v0.0.6 features
-  v0.0.7/             design documents for v0.0.7 features (gom built-in)
-  v0.0.8/             design documents for v0.0.8 features (stdlib completeness)
-  v0.0.9/             design documents for v0.0.9 features (templ support)
+  v0.0.5/ – v0.0.9/  design documents per release
 ```
 
-## Key design decisions
+</details>
 
-- **Structs → ES6 classes** with a single destructured-object constructor.
-  `Point{X: 1, Y: 2}` → `new Point({ X: 1, Y: 2 })`.
-- **Multiple returns → JS arrays.** `return a, b` → `return [a, b]`.
-  Destructuring at call sites: `let [a, b] = f()`.
+<details>
+<summary><strong>Reference: Key Design Decisions</strong></summary>
+
+- **Structs → ES6 classes** with a single destructured-object constructor. `Point{X: 1, Y: 2}` → `new Point({ X: 1, Y: 2 })`.
+- **Multiple returns → JS arrays.** `return a, b` → `return [a, b]`. Destructuring at call sites: `let [a, b] = f()`.
 - **nil → null**, slices → JS arrays, maps → plain JS objects.
-- **Embedded struct fields are flattened** into the outer class constructor.
-  Promoted methods are emitted as delegation stubs:
-  `Greet(...__a) { return Greeter.prototype.Greet.call(this, ...__a); }`
+- **Embedded struct fields are flattened** into the outer class constructor. Promoted methods are emitted as delegation stubs.
 - **Runtime helpers** (`__len`, `__append`, `__s`, `__sprintf`, `__equal`, `__cmul`, `__cdiv`, `__error`, `__errorIs`, `__timeFmt`, `__timeParse`, `__pathClean`) are tree-shaken — only emitted when used.
-- **`fmt` package** is a built-in namespace (no import needed); `fmt.Sprintf` etc.
-  compile to a `__sprintf` helper. `fmt.Fprintf`/`Fprintln`/`Fprint` accept any writer,
-  including `*strings.Builder` and `*bytes.Buffer`.
-- **Standard library shims** — `strings`, `strconv`, `sort`, `math`, `errors`, `time`,
-  `unicode`, `os`, `regexp`, `slices`, `maps`, `html`, and `io` are built-in namespaces
-  (like `fmt`). They compile to inline JS with no runtime overhead: `strings` maps to JS
-  string methods, `strconv` to `Number`/`parseInt`/`parseFloat`, `sort` to
-  `Array.prototype.sort`, `math` to the `Math` object, `errors.New` is an identity,
-  `time.Now()` returns a `time.Time` wrapper (`{_d: new Date()}`), `regexp` wraps JS `RegExp` (inline `(?i)`-style flags are
-  extracted automatically), `slices` maps to JS array methods, `maps` to `Object.*`,
-  `html` to inline `.replace()` chains, and `io` provides `io.Writer` / `io.Reader`
-  interface types. Functions that return `(value, error)` in Go emit two-element arrays.
-- **`gom` package** is a built-in DOM-rendering namespace (no import needed). Every
-  `gom.*` call emits an inline JS object with a `Mount(parent)` method. Includes element
-  helpers (`gom.Div`, `gom.Span`, …), attribute helpers (`gom.Class`, `gom.Attr`, …),
-  and control flow (`gom.If`, `gom.Map`, `gom.Text`).
-- **`strings.Builder` / `bytes.Buffer`** — value types that compile to plain JS objects
-  (`{ _buf: "" }` and `{ _buf: [] }`). Methods dispatch inline; no class is generated.
-- **`async func` / `await`** are first-class syntax; async functions emit
-  `async function` in JS.
+- **`fmt` package** is a built-in namespace (no import needed); `fmt.Sprintf` etc. compile to a `__sprintf` helper.
+- **Standard library shims** — `strings`, `strconv`, `sort`, `math`, `errors`, `time`, `unicode`, `os`, `regexp`, `slices`, `maps`, `html`, and `io` are built-in namespaces. They compile to inline JS with no runtime overhead.
+- **`gom` package** is a built-in DOM-rendering namespace. Every `gom.*` call emits an inline JS object with a `Mount(parent)` method.
+- **`strings.Builder` / `bytes.Buffer`** — value types that compile to plain JS objects. Methods dispatch inline; no class is generated.
+- **`async func` / `await`** are first-class syntax; async functions emit `async function` in JS.
 - **`defer`** compiles to try/finally.
 - **`error` type** compiles to `__error` objects `{ Error(), toString(), _msg, _cause }`.
-  `error("msg")` → `__error("msg")`; `errors.New("msg")` → `__error("msg")`. `.Error()` and
-  string-context coercion both work via the object's methods. `errors.Is` / `%w` wrapping use
-  the `_cause` chain.
 
-## Development workflow — TDD
+</details>
 
-This project follows **test-driven development**. Always write tests before
-implementing a feature or fixing a bug.
-
-1. **Write failing tests first.** Add at least one positive test (compiles + runs
-   correctly) and one negative test (type error produces the expected message) to
-   the most relevant test file. Run the tests and confirm they fail for the
-   expected reason.
-2. **Implement the minimum code** to make the failing tests pass.
-3. **Run the full suite** (`npm run test:all`) and verify nothing else broke.
-4. **Run the linter** (`npm run check`) and fix any reported issues.
-5. **Refactor** if needed while keeping all tests green.
-6. **Update CHANGELOG.md** — add an entry under `## [Unreleased]` describing what
-   changed (use `### Added`, `### Fixed`, `### Changed`, or `### Removed` as
-   appropriate).
-7. **Update README.md** if the change affects user-facing behaviour, CLI flags,
-   supported syntax, built-in packages, or known semantic differences.
-
-For bug fixes, start by writing a test that reproduces the bug, confirm it fails,
-then fix the code.
-
-## Architectural quality gate — Sentrux
-
-Sentrux enforces structural quality (layer boundaries, coupling, complexity, zero cycles)
-via rules in `.sentrux/rules.toml` and a regression floor in `.sentrux/baseline.json`.
-It runs automatically as part of `npm run check` (pre-commit and CI). After a deliberate
-structural improvement, run `sentrux gate --save` to raise the baseline floor.
-
-## Adding a language feature
-
-1. **Tests** — write tests first (see TDD workflow above). Add them to the most
-   relevant test file. Tests are split into directories (`test/language/`,
-   `test/types/`, `test/builtins/`, `test/compiler/`) plus root-level files for
-   structs, DOM, and lexer-parser. Run a single file with
-   `node test/unit/language/core.test.js`, or `npm run test:all` for the full combined run.
-   Confirm the new tests fail before proceeding.
-2. **Lexer** (`src/lexer.js` or `src/templ-lexer.js`) — add any new keywords or token types.
-3. **Parser** (`src/parser.js` or `src/templ-parser.js`) — add grammar rules; return a new AST node kind.
-   Expression parsing lives in `src/parser/expressions.js`, statements in
-   `src/parser/statements.js`, type expressions in `src/parser/types.js`,
-   top-level declarations in `src/parser/declarations.js`.
-4. **TypeChecker** (`src/typechecker.js`) — handle the new node in `_checkExpr`
-   (`src/typechecker/expressions.js`) or `checkStmt`
-   (`src/typechecker/statements.js`); return the correct type.
-5. **CodeGen** (`src/codegen.js`) — handle the new node in `genExpr`
-   (`src/codegen/expressions.js`) or `genStmt` (`src/codegen/statements.js`);
-   throw on unhandled kinds so failures are loud.
-6. **Run tests** — all new and existing tests must pass (`npm run test:all`).
-7. **Run the linter** — `npm run check` must report no errors.
-8. **CHANGELOG.md** — add an entry under `## [Unreleased]`.
-9. **README.md** — update the supported syntax, built-in packages, or semantic
-   differences table if the feature is user-facing.
-
-## Type system
+<details>
+<summary><strong>Reference: Type System</strong></summary>
 
 Types are plain JS objects:
 ```
@@ -237,19 +164,14 @@ Types are plain JS objects:
 { kind: "untyped",   base: "int"|"float64"|"string"|"bool" }  ← untyped constants
 ```
 
-`ANY` is the recovery / unknown type — any operation on it is permitted without error.
-`TAINTED_ANY` (`{ ..., _tainted: true }`) is returned from all error-recovery paths (`err()`). Taint propagates through binary ops, selectors, calls, index, and slice expressions, short-circuiting before any further error is emitted. User-declared `var x any` produces plain `ANY` (not tainted).
+`ANY` is the recovery / unknown type — any operation on it is permitted without error. `TAINTED_ANY` (`{ ..., _tainted: true }`) is returned from all error-recovery paths. Taint propagates through binary ops, selectors, calls, index, and slice expressions, short-circuiting before any further error is emitted.
 
-Untyped types (`UNTYPED_INT`, `UNTYPED_FLOAT`, `UNTYPED_STRING`, `UNTYPED_BOOL`) are
-produced by literals and const declarations without an explicit type. They coerce to
-any compatible typed context via `assertAssignable`. Variables (`:=`, `var`) materialize
-untyped → default type via `defaultType()`. Binary ops between untyped values stay
-untyped; mixing untyped + typed yields the typed side.
+Untyped types (`UNTYPED_INT`, `UNTYPED_FLOAT`, `UNTYPED_STRING`, `UNTYPED_BOOL`) are produced by literals and const declarations without an explicit type. They coerce to any compatible typed context via `assertAssignable`. Variables (`:=`, `var`) materialize untyped → default type via `defaultType()`.
 
-## Known semantic differences from Go
+</details>
 
-See the "Semantic differences" table in README.md § Go Compatibility for the full list.
-Key items to be aware of when working on the compiler:
+<details>
+<summary><strong>Reference: Known Semantic Differences from Go</strong></summary>
 
 - **All JS numbers are float64** — no integer overflow wrapping, precision only to 2⁵³.
 - **Strings are UTF-16** — `len()` returns `.length`, `range` iterates JS characters.
@@ -258,25 +180,22 @@ Key items to be aware of when working on the compiler:
 - **Pointers are transparent** — `&x` / `*p` are accepted syntax but no indirection.
 - **Goroutines / channels / `select`** are not implemented.
 
-## Testing conventions
+</details>
+
+<details>
+<summary><strong>Reference: Testing Conventions</strong></summary>
 
 - Tests are split across focused files in `test/unit/` subdirectories; `test/unit/run.js` is the orchestrator.
-- Shared helpers live in `test/unit/helpers.js`: `compile(src)`, `compileFile(path)`,
-  `compileDir(dir)`, `runJs(js)`, `runInDom(js, html)`.
+- Shared helpers live in `test/unit/helpers.js`: `compile(src)`, `compileFile(path)`, `compileDir(dir)`, `runJs(js)`, `runInDom(js, html)`.
 - Assertion helpers: `assertEqual`, `assertContains`, `assertErrorContains`, `assert`.
-- Negative tests must call `assertErrorContains(errors, "substring")` — not just
-  `assert(errors.length > 0)` — so the error message is verified too.
 - Group related tests with `section("Name")` for readable output.
-- Run a single file with `node test/unit/language/core.test.js`, a directory's files
-  individually, or the full suite with `npm run test:all`.
+- Run a single file with `node test/unit/language/core.test.js`, or the full suite with `npm run test:all`.
 
 ### Writing a new test file
 
-Every test file imports from `test/helpers.js` and follows this structure:
-
 ```js
 import { fileURLToPath } from "node:url";
-import { test, section, summarize, compile, runJs, assertEqual, assertErrorContains } from "./helpers.js"; // or "../helpers.js" from a subdirectory
+import { test, section, summarize, compile, runJs, assertEqual, assertErrorContains } from "./helpers.js";
 
 section("Feature name");
 
@@ -296,59 +215,49 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 }
 ```
 
-Key points:
-- The `fileURLToPath` guard lets the file be run standalone (`node test/feature.test.js`)
-  and also imported by `test/run.js` without triggering early exit.
-- Wrap each case in `test(name, fn)` — the harness catches and reports errors.
-- Use `section(title)` to group related tests under a heading.
+- The `fileURLToPath` guard lets the file be run standalone and also imported by `test/run.js`.
 - New test files must be registered in `test/unit/run.js` to be included in `npm run test:all`.
 
 ### E2E tests
 
-End-to-end tests live in `test/e2e/` and use Playwright to verify the compiled example apps in a real headless browser.
-
 - **Run with:** `npm run test:e2e` (automatically builds all examples first via `build:all`).
 - Each example app has its own spec file (e.g., `simple.spec.js`, `reactive.spec.js`, `gom.spec.js`, `templ.spec.js`).
-- When adding new DOM-related features or modifying the examples, ensure you add or update the corresponding Playwright assertions to verify correct behavior in the browser.
 
-## Planning and roadmap
+</details>
 
-Release planning follows a docs-first workflow:
+<details>
+<summary><strong>Reference: Adding a Language Feature</strong></summary>
 
-- **`docs/ROADMAP.md`** — the single source of truth for past releases and the current
-  roadmap. Update this file when a release ships or when the scope of an upcoming release
-  changes.
-- **`docs/v0.0.X/`** — one subfolder per planned release, containing design documents for
-  the features in that release. When starting work on a new release, create the folder and
-  add a design document for each non-trivial feature before writing any code.
+1. **Tests** — write tests first. Add them to the most relevant file in `test/unit/`. Confirm they fail before proceeding.
+2. **Lexer** (`src/lexer.js` or `src/templ-lexer.js`) — add any new keywords or token types.
+3. **Parser** (`src/parser.js` or `src/templ-parser.js`) — add grammar rules; return a new AST node kind. Subdirectory split: `declarations.js`, `types.js`, `statements.js`, `expressions.js`.
+4. **TypeChecker** (`src/typechecker.js`) — handle the new node in `_checkExpr` or `checkStmt`; return the correct type.
+5. **CodeGen** (`src/codegen.js`) — handle the new node in `genExpr` or `genStmt`; throw on unhandled kinds.
+6. **Run tests** — `npm run test:all`.
+7. **Run linter** — `npm run check`.
+8. **CHANGELOG.md** — add entry under `## [Unreleased]`.
+9. **README.md** — update if user-facing.
+
+</details>
+
+<details>
+<summary><strong>Reference: Planning & Releases</strong></summary>
+
+- **`docs/ROADMAP.md`** — single source of truth for past releases and the current roadmap.
+- **`docs/v0.0.X/`** — one subfolder per planned release with design documents.
 
 ### Starting a new release
 
 1. Create `docs/vX.Y.Z/` and add a `<feature>-plan.md` for each significant feature.
-2. Add a `## vX.Y.Z` section to `docs/ROADMAP.md` with the theme and a feature table.
-3. Implement the features following the TDD workflow above.
-4. When the release ships, mark features ✓ in `docs/ROADMAP.md` and add a dated entry to
-   `CHANGELOG.md`.
+2. Add a `## vX.Y.Z` section to `docs/ROADMAP.md`.
+3. Implement features following TDD.
+4. When shipped, mark features ✓ in `docs/ROADMAP.md` and add a dated entry to `CHANGELOG.md`.
 
 ### Design document format
 
-A plan file should cover:
-- **Goal** — what Go behaviour is being matched and why it matters.
-- **Approach** — which compiler stages are affected (Lexer / Parser / TypeChecker /
-  CodeGen) and what the key changes are.
-- **Edge cases** — known tricky inputs and how they are handled.
-- **JS output examples** — concrete before/after code snippets.
+- **Goal** — what Go behaviour is being matched and why.
+- **Approach** — which compiler stages are affected and key changes.
+- **Edge cases** — known tricky inputs and handling.
+- **JS output examples** — concrete before/after snippets.
 
-## Changing the example app
-
-See README.md § Examples for full descriptions of both apps.
-
-```sh
-npm run build:all         # builds all example apps at once
-npm run build:simple      # builds example/simple/app.js
-npm run build:reactive    # builds example/reactive/app.js
-npm run build:gom         # builds example/gom/app.js
-npm run build:templ       # builds example/templ/app.js
-```
-
-Then open the respective `index.html` in a browser.
+</details>
