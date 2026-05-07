@@ -34,3 +34,10 @@ npm-debug.log*
 # Playwright
 /test-results/
 /playwright-report/
+
+# Agentic session artifacts
+docs/superpowers/
+.worktrees/
+
+# Lefthook generated hooks
+.lefthook/
