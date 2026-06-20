@@ -45,11 +45,11 @@
 		"prepare": "lefthook install"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "^2.4.15",
-		"@playwright/test": "^1.59.1",
+		"@biomejs/biome": "^2.5.0",
+		"@playwright/test": "^1.61.0",
 		"c8": "^11.0.0",
 		"jsdom": "^29.0.2",
-		"lefthook": "^2.1.6",
+		"lefthook": "^2.1.9",
 		"serve": "^14.2.6"
 	}
 }
