@@ -12,9 +12,13 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
+        with:
+          ref: ${{ github.head_ref || github.ref }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
@@ -30,6 +34,23 @@ jobs:
 
       - name: Install Sentrux
         run: curl -fsSL https://raw.githubusercontent.com/sentrux/sentrux/main/install.sh | sh
+
+      - name: Auto-format and Migrate (Dependabot only)
+        if: github.actor == 'dependabot[bot]'
+        run: |
+          npx @biomejs/biome migrate --write
+          npm run format
+
+      - name: Commit formatting (Dependabot only)
+        if: github.actor == 'dependabot[bot]'
+        run: |
+          git config --global user.name 'dependabot[bot]'
+          git config --global user.email '49699333+dependabot[bot]@users.noreply.github.com'
+          git add -A
+          if ! git diff --staged --quiet; then
+            git commit -m "chore: apply biome formatting"
+            git push
+          fi
 
       - name: Check
         run: npm run check
