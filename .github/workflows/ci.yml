@@ -39,7 +39,12 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Install Sentrux
-        run: curl -fsSL https://raw.githubusercontent.com/sentrux/sentrux/main/install.sh | sh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download -R sentrux/sentrux --pattern "sentrux-linux-x86_64" -O /tmp/sentrux --clobber
+          chmod +x /tmp/sentrux
+          sudo mv /tmp/sentrux /usr/local/bin/sentrux
 
       - name: Auto-format and Migrate (Dependabot only)
         if: github.actor == 'dependabot[bot]'
