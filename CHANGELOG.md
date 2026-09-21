@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- **Dependencies** — updated `@biomejs/biome` to 2.5.14, `@playwright/test` to 1.63.0, `c8` to 12.0.0, `jsdom` to 30.1.0, and `lefthook` to 2.1.14.
+
+### Fixed
+- **Playwright webServer hang in WSL2** — switched `playwright.config.js` `baseURL` and `webServer.url` targets from `localhost` to `127.0.0.2` and passed `-n` (`--no-clipboard`) to `npx serve`. Under WSL2 mirrored networking mode, TCP SYN probes to inactive ports on `127.0.0.1` are routed through the Windows host and silently dropped, triggering a 127-second TCP SYN retransmission timeout during Playwright server availability checks.
+
 ## [1.0.1] - 2026-05-04
 
 ### Added

@@ -625,7 +625,7 @@ you know exactly what to expect.
 
 ## Roadmap
 
-See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full roadmap and release history.
+See [`docs/roadmap.md`](docs/roadmap.md) for the full roadmap and release history.
 Design documents for planned features are organised by release under `docs/v*/`
 (e.g. [`docs/v0.0.8/`](docs/v0.0.8/), [`docs/v0.0.9/`](docs/v0.0.9/)).
 
