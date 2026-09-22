@@ -85,10 +85,8 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: "25.x"
+          registry-url: "https://registry.npmjs.org"
           cache: "npm"
-
-      - name: Clear npm auth token (OIDC will authenticate)
-        run: npm config delete //registry.npmjs.org/:_authToken --location project
 
       - name: Install dependencies
         run: npm install
