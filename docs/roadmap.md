@@ -8,6 +8,20 @@ features (e.g. `docs/v0.0.5/`).
 
 ---
 
+## v1.1.0
+
+**Theme: Frontend asset management & vendor tooling.** Add native static asset copying,
+vendor dependency packaging, and SPA route fallback to the dev server so GoFront projects
+require no external build wrappers. Design documents in [`docs/v1.1.0/`](v1.1.0/).
+
+| Area | Difficulty | Status | Notes |
+|---|---|---|---|
+| SPA fallback in dev server | Low | Planned | Serve `index.html` on missing routes without file extensions during `gofront --serve`. |
+| Native `assetCopy` manager | Low | Planned | Zero-dependency static asset copying from `package.json` / `gofront.json` using `node:fs`. |
+| Vendor dependency bundler | Medium | Planned | Built-in `gofront prep` / `gofront vendor` bundling external npm dependencies. |
+
+---
+
 ## v1.0.1
 
 **Theme: Structural cleanup.** No new language features. Address four internal quality
