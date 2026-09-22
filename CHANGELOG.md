@@ -5,9 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
+ 
+## [1.1.0] - 2026-09-22
+
+### Added
+- **Native static asset copying (`assetCopy`)** — zero-dependency file and recursive directory copier in `src/asset-manager.js` using Node.js `node:fs`. Reads `"assetCopy"` configuration array from `package.json` or `gofront.json` (`source`, `dest`). Supports single files, destination directory mapping, and full recursive directory trees with directory traversal protection and graceful warnings on missing source paths.
+- **Vendor dependency bundler (`gofront prep`)** — built-in vendor dependency packager in `src/vendor.js`. Dynamically detects `rolldown` or `esbuild` from the consuming project's `devDependencies` without adding dependencies to GoFront. Generates browser-compatible ESM bundles that set global `window` properties while preserving ES module exports.
+- **SPA route fallback in dev server** — enhanced `gofront --serve` in `src/dev-server.js` to automatically fall back to serving `index.html` with `200 OK` for extensionless clean URL paths (e.g. `/blog`, `/projects`), enabling client-side SPA routers out of the box during development. Static assets with extensions correctly return 404 if missing. URL query strings and hash fragments are stripped before path resolution.
+- **CLI subcommands and compiler flags** — `gofront prep [dir]` (and `gofront vendor [dir]`) runs asset copying and vendor dependency bundling via `handlePrep()` in `src/cli-core.js`. `--copy-assets` compiler flag synchronizes static assets during single-shot compilation and watch mode.
+- **Unit test suite expansion** — 30 new unit tests covering dev server SPA fallback, static asset copying, vendor entry generation, configuration resolution, and CLI integration (`test/unit/compiler/dev-server.test.js`, `test/unit/compiler/asset-manager.test.js`, `test/unit/compiler/prep.test.js`), bringing total passing unit tests to 1,183.
 
 ### Changed
-- **Dependencies** — updated `@biomejs/biome` to 2.5.14, `@playwright/test` to 1.63.0, `c8` to 12.0.0, `jsdom` to 30.1.0, and `lefthook` to 2.1.14.
+- **Dependencies & CI** — updated `@biomejs/biome` to 2.5.14, `@playwright/test` to 1.63.0, `c8` to 12.0.0, `jsdom` to 30.1.0, `lefthook` to 2.1.14, and `actions/setup-node` to `v7` in GitHub Actions workflow.
 
 ### Fixed
 - **Playwright webServer hang in WSL2** — switched `playwright.config.js` `baseURL` and `webServer.url` targets from `localhost` to `127.0.0.2` and passed `-n` (`--no-clipboard`) to `npx serve`. Under WSL2 mirrored networking mode, TCP SYN probes to inactive ports on `127.0.0.1` are routed through the Windows host and silently dropped, triggering a 127-second TCP SYN retransmission timeout during Playwright server availability checks.

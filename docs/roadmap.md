@@ -16,9 +16,9 @@ require no external build wrappers. Design documents in [`docs/v1.1.0/`](v1.1.0/
 
 | Area | Difficulty | Status | Notes |
 |---|---|---|---|
-| SPA fallback in dev server | Low | Planned | Serve `index.html` on missing routes without file extensions during `gofront --serve`. |
-| Native `assetCopy` manager | Low | Planned | Zero-dependency static asset copying from `package.json` / `gofront.json` using `node:fs`. |
-| Vendor dependency bundler | Medium | Planned | Built-in `gofront prep` / `gofront vendor` bundling external npm dependencies. |
+| SPA fallback in dev server | Low | ✓ | Serve `index.html` on missing routes without file extensions during `gofront --serve`. |
+| Native `assetCopy` manager | Low | ✓ | Zero-dependency static asset copying from `package.json` / `gofront.json` using `node:fs`. |
+| Vendor dependency bundler | Medium | ✓ | Built-in `gofront prep` / `gofront vendor` bundling external npm dependencies. |
 
 ---
 

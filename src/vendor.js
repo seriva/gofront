@@ -1,0 +1,228 @@
+// Vendor dependency bundler for GoFront projects.
+// Dynamically loads a bundler (rolldown or esbuild) from consumer devDependencies.
+
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+
+export function getExportNames(pkgName) {
+	const base = pkgName.replace(/^@[^/]+\//, "");
+	const clean = base.replace(/[^a-zA-Z0-9_]/g, "_");
+	const names = new Set([pkgName, base, clean]);
+
+	if (pkgName === "@emailjs/browser") names.add("emailjs");
+	if (pkgName === "fuse.js") {
+		names.add("Fuse");
+		names.add("fuse");
+	}
+	if (pkgName === "prismjs") {
+		names.add("Prism");
+		names.add("prism");
+	}
+	if (pkgName === "marked") {
+		names.add("marked");
+	}
+
+	return [...names];
+}
+
+export function generateVendorEntry(packages) {
+	const imports = [];
+	const assignments = [];
+	const exports = [];
+
+	packages.forEach((pkg, idx) => {
+		const id = `_dep_${idx}`;
+		imports.push(`import * as ${id} from ${JSON.stringify(pkg)};`);
+
+		const names = getExportNames(pkg);
+		for (const name of names) {
+			assignments.push(
+				`    window[${JSON.stringify(name)}] = ${id}.default || ${id};`,
+			);
+		}
+
+		const cleanId = pkg
+			.replace(/^@[^/]+\//, "")
+			.replace(/[^a-zA-Z0-9_$]/g, "_");
+		exports.push(`    ${id} as ${cleanId}`);
+	});
+
+	return `// Auto-generated GoFront vendor entry point
+${imports.join("\n")}
+
+if (typeof window !== "undefined") {
+${assignments.join("\n")}
+}
+
+export {
+${exports.join(",\n")}
+};
+`;
+}
+
+export function findBundler(projectDir) {
+	const pkgPath = join(projectDir, "package.json");
+	let req;
+	if (existsSync(pkgPath)) {
+		req = createRequire(pkgPath);
+	} else {
+		req = createRequire(join(projectDir, "dummy.js"));
+	}
+
+	try {
+		const path = req.resolve("rolldown");
+		return { name: "rolldown", path };
+	} catch {}
+
+	try {
+		const path = req.resolve("esbuild");
+		return { name: "esbuild", path };
+	} catch {}
+
+	return null;
+}
+
+export function loadVendorConfig(projectDir) {
+	const pkgPath = join(projectDir, "package.json");
+	let pkg = {};
+	if (existsSync(pkgPath)) {
+		try {
+			pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+		} catch {}
+	}
+
+	const gfjPath = join(projectDir, "gofront.json");
+	let gfj = {};
+	if (existsSync(gfjPath)) {
+		try {
+			gfj = JSON.parse(readFileSync(gfjPath, "utf8"));
+		} catch {}
+	}
+
+	const vendorConfig = gfj.vendor ?? pkg.vendor ?? null;
+	const dependencies = Object.keys(pkg.dependencies ?? {});
+
+	let dest = null;
+	let packages = dependencies;
+
+	if (typeof vendorConfig === "string") {
+		dest = vendorConfig;
+	} else if (vendorConfig && typeof vendorConfig === "object") {
+		if (vendorConfig.dest) dest = vendorConfig.dest;
+		if (Array.isArray(vendorConfig.packages)) packages = vendorConfig.packages;
+	}
+
+	if (!dest) {
+		dest = existsSync(join(projectDir, "app")) ? "app/vendor.js" : "vendor.js";
+	}
+
+	return { dest, packages };
+}
+
+export async function bundleVendor(projectDir = ".", options = {}) {
+	const projectRoot = resolve(projectDir);
+	const config = loadVendorConfig(projectRoot);
+
+	const packages = options.packages ?? config.packages;
+	const dest = options.dest ?? config.dest;
+
+	if (!packages || packages.length === 0) {
+		return {
+			bundled: [],
+			skipped: 0,
+			dest,
+			message: "no external dependencies found",
+		};
+	}
+
+	const destPath = resolve(projectRoot, dest);
+	const relDest = relative(projectRoot, destPath);
+	if (relDest.startsWith("..") || isAbsolute(relDest)) {
+		throw new Error(
+			`gofront: vendor destination '${dest}' is outside project directory`,
+		);
+	}
+
+	const bundlerInfo = options.bundler ?? findBundler(projectRoot);
+	if (!bundlerInfo) {
+		console.warn(
+			"gofront: no bundler found (rolldown or esbuild). Run 'npm install --save-dev rolldown' to enable vendor bundling.",
+		);
+		return {
+			bundled: [],
+			skipped: packages.length,
+			dest,
+			bundler: null,
+			reason: "no bundler installed",
+		};
+	}
+
+	mkdirSync(dirname(destPath), { recursive: true });
+
+	// Allow custom bundler execution function (useful for tests and plugins)
+	if (typeof bundlerInfo.bundle === "function") {
+		await bundlerInfo.bundle({
+			projectRoot,
+			packages,
+			dest: destPath,
+		});
+		return { bundled: packages, bundler: bundlerInfo.name ?? "custom", dest };
+	}
+
+	const entryCode = generateVendorEntry(packages);
+	const entryFile = join(
+		projectRoot,
+		`.gofront-vendor-entry-${Date.now()}.mjs`,
+	);
+	writeFileSync(entryFile, entryCode);
+
+	try {
+		if (bundlerInfo.name === "rolldown") {
+			const rolldownModule =
+				bundlerInfo.instance ??
+				(await import(pathToFileURL(bundlerInfo.path).href));
+			const rolldownFn =
+				rolldownModule.rolldown ||
+				rolldownModule.default?.rolldown ||
+				rolldownModule.default;
+
+			const bundle = await rolldownFn({
+				input: entryFile,
+				cwd: projectRoot,
+			});
+			await bundle.write({
+				file: destPath,
+				format: "esm",
+			});
+			await bundle.close();
+		} else if (bundlerInfo.name === "esbuild") {
+			const esbuildModule =
+				bundlerInfo.instance ??
+				(await import(pathToFileURL(bundlerInfo.path).href));
+			const buildFn =
+				esbuildModule.build || esbuildModule.default?.build || esbuildModule;
+
+			await buildFn({
+				entryPoints: [entryFile],
+				bundle: true,
+				format: "esm",
+				outfile: destPath,
+				absWorkingDir: projectRoot,
+			});
+		}
+	} finally {
+		if (existsSync(entryFile)) {
+			rmSync(entryFile, { force: true });
+		}
+	}
+
+	return { bundled: packages, bundler: bundlerInfo.name, dest };
+}
