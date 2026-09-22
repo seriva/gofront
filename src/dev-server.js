@@ -1,11 +1,11 @@
 // Minimal dev server for gofront --serve watch mode.
 // Serves static files and pushes a reload event via SSE after each build.
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer } from "node:http";
-import { extname, join } from "node:path";
+import { extname, join, resolve } from "node:path";
 
-const MIME = {
+export const MIME = {
 	".html": "text/html; charset=utf-8",
 	".js": "application/javascript; charset=utf-8",
 	".css": "text/css; charset=utf-8",
@@ -22,42 +22,97 @@ const MIME = {
 // Injected at the bottom of compiled JS in serve mode.
 export const liveReloadClient = `(function(){var es=new EventSource('/_gofront/events');es.addEventListener('reload',function(){location.reload();});})();`;
 
-export function createDevServer(serveDir, port) {
-	const clients = new Set();
+export function handleDevRequest(req, res, serveDir, clients = new Set()) {
+	// SSE endpoint — browser connects here to receive reload events
+	if (req.url === "/_gofront/events") {
+		res.writeHead(200, {
+			"Content-Type": "text/event-stream",
+			"Cache-Control": "no-cache",
+			Connection: "keep-alive",
+		});
+		res.write(": connected\n\n");
+		clients.add(res);
+		req.on?.("close", () => clients.delete(res));
+		return;
+	}
 
-	const server = createServer((req, res) => {
-		// SSE endpoint — browser connects here to receive reload events
-		if (req.url === "/_gofront/events") {
-			res.writeHead(200, {
-				"Content-Type": "text/event-stream",
-				"Cache-Control": "no-cache",
-				Connection: "keep-alive",
-			});
-			res.write(": connected\n\n");
-			clients.add(res);
-			req.on("close", () => clients.delete(res));
-			return;
+	let urlPath = req.url.split("?")[0].split("#")[0];
+	try {
+		urlPath = decodeURIComponent(urlPath);
+	} catch {
+		// Ignore malformed URL encoding and use raw path
+	}
+
+	if (urlPath === "/" || urlPath === "") urlPath = "/index.html";
+
+	const resolvedServe = resolve(serveDir);
+	const filePath = resolve(serveDir, `.${urlPath}`);
+	if (!filePath.startsWith(resolvedServe)) {
+		res.writeHead(403, { "Content-Type": "text/plain" });
+		res.end("Forbidden");
+		return;
+	}
+
+	if (!existsSync(filePath)) {
+		// SPA fallback: clean paths with no file extension fall back to index.html
+		const ext = extname(urlPath);
+		if (!ext) {
+			const indexPath = join(serveDir, "index.html");
+			if (existsSync(indexPath)) {
+				try {
+					const data = readFileSync(indexPath);
+					res.writeHead(200, { "Content-Type": MIME[".html"] });
+					res.end(data);
+					return;
+				} catch {
+					res.writeHead(500, { "Content-Type": "text/plain" });
+					res.end("Server error");
+					return;
+				}
+			}
 		}
+		res.writeHead(404, { "Content-Type": "text/plain" });
+		res.end("Not found");
+		return;
+	}
 
-		let urlPath = req.url.split("?")[0];
-		if (urlPath === "/" || urlPath === "") urlPath = "/index.html";
-
-		const filePath = join(serveDir, urlPath);
-		if (!existsSync(filePath)) {
+	try {
+		const stat = statSync(filePath);
+		if (stat.isDirectory()) {
+			const dirIndex = join(filePath, "index.html");
+			if (existsSync(dirIndex)) {
+				const data = readFileSync(dirIndex);
+				res.writeHead(200, { "Content-Type": MIME[".html"] });
+				res.end(data);
+				return;
+			}
+			const rootIndex = join(serveDir, "index.html");
+			if (existsSync(rootIndex)) {
+				const data = readFileSync(rootIndex);
+				res.writeHead(200, { "Content-Type": MIME[".html"] });
+				res.end(data);
+				return;
+			}
 			res.writeHead(404, { "Content-Type": "text/plain" });
 			res.end("Not found");
 			return;
 		}
 
-		try {
-			const data = readFileSync(filePath);
-			const mime = MIME[extname(filePath)] ?? "application/octet-stream";
-			res.writeHead(200, { "Content-Type": mime });
-			res.end(data);
-		} catch {
-			res.writeHead(500, { "Content-Type": "text/plain" });
-			res.end("Server error");
-		}
+		const data = readFileSync(filePath);
+		const mime = MIME[extname(filePath)] ?? "application/octet-stream";
+		res.writeHead(200, { "Content-Type": mime });
+		res.end(data);
+	} catch {
+		res.writeHead(500, { "Content-Type": "text/plain" });
+		res.end("Server error");
+	}
+}
+
+export function createDevServer(serveDir, port = 3000) {
+	const clients = new Set();
+
+	const server = createServer((req, res) => {
+		handleDevRequest(req, res, serveDir, clients);
 	});
 
 	server.on("error", (err) => {
@@ -70,8 +125,12 @@ export function createDevServer(serveDir, port) {
 		}
 		process.exit(1);
 	});
+
 	server.listen(port, () => {
-		console.error(`gofront: dev server → http://localhost:${port}`);
+		const actualPort = server.address()?.port ?? port;
+		if (port !== 0) {
+			console.error(`gofront: dev server → http://localhost:${actualPort}`);
+		}
 	});
 
 	function notify() {
@@ -80,5 +139,9 @@ export function createDevServer(serveDir, port) {
 		}
 	}
 
-	return { notify };
+	return {
+		notify,
+		server,
+		close: () => new Promise((res) => server.close(res)),
+	};
 }

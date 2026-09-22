@@ -18,9 +18,10 @@ import { createRequire } from "node:module";
 const _require = createRequire(import.meta.url);
 const { version } = _require("../package.json");
 
-import { statSync, watch, writeFileSync } from "node:fs";
+import { mkdirSync, statSync, watch, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { handleInit, maybeMinify, runCompile } from "./cli-core.js";
+import { copyAssets } from "./asset-manager.js";
+import { handleInit, handlePrep, maybeMinify, runCompile } from "./cli-core.js";
 import { createDevServer, liveReloadClient } from "./dev-server.js";
 
 // ── Parse CLI args ───────────────────────────────────────────
@@ -44,15 +45,41 @@ Usage:
   gofront <input> --watch        Watch for changes and recompile
   gofront <input> -o out.js --serve          Watch + serve with live reload (default port 3000)
   gofront <input> -o out.js --serve --port 8080  Use a custom port
+  gofront <input> -o out.js --copy-assets    Compile and synchronize static assets
   gofront <input> --source-map   Append inline source map to output
   gofront <input> --minify       Minify output
   gofront <input> --minify --mangle  Minify and mangle identifiers
   gofront <file.go> --ast        Dump AST (debug)
   gofront <file.go> --tokens     Dump tokens (debug)
+  gofront prep [dir]             Copy static assets and bundle vendor dependencies
   gofront init [dir]             Scaffold a new GoFront project
   gofront --version              Print version
 `.trim(),
 	);
+	process.exit(0);
+}
+
+// ── prep / vendor subcommand ──────────────────────────────────
+
+if (args[0] === "prep" || args[0] === "vendor") {
+	const targetArg = args[1] ?? ".";
+	const targetDir = resolve(targetArg);
+	try {
+		const { assets, vendor } = await handlePrep(targetDir);
+		if (assets.copied > 0 || assets.skipped > 0) {
+			console.error(
+				`gofront: copied ${assets.copied} assets (${assets.skipped} skipped)`,
+			);
+		}
+		if (vendor.bundled?.length > 0) {
+			console.error(
+				`gofront: bundled ${vendor.bundled.length} vendor dependencies → ${vendor.dest}`,
+			);
+		}
+	} catch (e) {
+		console.error(`gofront: ${e.message}`);
+		process.exit(1);
+	}
 	process.exit(0);
 }
 
@@ -84,6 +111,7 @@ const dumpTokens = args.includes("--tokens");
 const sourceMap = args.includes("--source-map");
 const serveMode = args.includes("--serve");
 const watchMode = args.includes("--watch") || serveMode;
+const copyAssetsFlag = args.includes("--copy-assets");
 const minifyOutput = args.includes("--minify");
 const mangleOutput = args.includes("--mangle");
 const portFlag = args.indexOf("--port");
@@ -148,6 +176,7 @@ if (!watchMode) {
 
 	if (outputFile) {
 		try {
+			mkdirSync(dirname(resolve(outputFile)), { recursive: true });
 			writeFileSync(outputFile, `${js}\n`);
 			console.error(`gofront: wrote ${outputFile} (${elapsedMs}ms)`);
 		} catch (e) {
@@ -157,6 +186,19 @@ if (!watchMode) {
 	} else {
 		console.log(js);
 	}
+
+	if (copyAssetsFlag) {
+		try {
+			const projectDir = resolve(".");
+			const { copied, skipped } = copyAssets(projectDir);
+			if (copied > 0 || skipped > 0) {
+				console.error(`gofront: copied ${copied} assets (${skipped} skipped)`);
+			}
+		} catch (e) {
+			console.error(`gofront: asset copy failed: ${e.message}`);
+		}
+	}
+
 	process.exit(0);
 }
 
@@ -210,6 +252,15 @@ function buildOnce(changedFile = null) {
 				`[${timestamp()}] gofront: OK (${elapsedMs}ms${changeNote})`,
 			);
 		}
+
+		if (copyAssetsFlag) {
+			try {
+				copyAssets(resolve("."));
+			} catch (e) {
+				console.error(`gofront: asset copy failed: ${e.message}`);
+			}
+		}
+
 		devServer?.notify();
 	} catch (e) {
 		console.error(`[${timestamp()}] gofront: ERROR`);

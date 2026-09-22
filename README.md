@@ -387,17 +387,50 @@ gofront <dir>                    compile all *.go in directory → stdout
 gofront <input> -o out.js        write output to file (prints elapsed compile time e.g. "15ms")
 gofront <input> --check                    type-check only
 gofront <input> --watch                    watch for changes and recompile
-gofront <input> -o out.js --serve          watch + serve with live reload (default port 3000)
+gofront <input> -o out.js --serve          watch + serve with live reload & SPA fallback (default port 3000)
 gofront <input> -o out.js --serve --port 8080  use a custom port
+gofront <input> -o out.js --copy-assets    compile and synchronize static assets from package.json assetCopy
 gofront <input> --source-map               append inline source map (single file or directory; multi-file packages emit per-file mappings)
 gofront <input> --minify                   minify output (built-in minifier)
 gofront <input> --minify --mangle          minify and rename local identifiers
 gofront <file.go> --ast                    dump AST (debug)
 gofront <file.go> --tokens                 dump tokens (debug)
+gofront prep [dir]                         copy static assets and bundle vendor dependencies
 gofront init [dir]                         scaffold a new project
 gofront --version / -v                     print version
 gofront --help / -h                        print this help
 ```
+
+---
+
+## Static assets & vendor bundling
+
+GoFront includes native tooling to manage static assets and package external npm dependencies for the browser without requiring external wrappers or complex build tools.
+
+### Asset copying (`assetCopy`)
+
+Specify static assets (fonts, stylesheets, images) in `package.json` (or `gofront.json`):
+
+```json
+{
+  "assetCopy": [
+    { "source": "node_modules/@fontsource/raleway/files", "dest": "app/fonts" },
+    { "source": "node_modules/prismjs/themes", "dest": "app/css/prism-themes" }
+  ]
+}
+```
+
+Run `gofront prep` to copy them, or pass `--copy-assets` to automatically synchronize assets on build.
+
+### Vendor bundling (`gofront prep`)
+
+Package external npm dependencies for the browser:
+
+```sh
+gofront prep
+```
+
+GoFront inspects your `dependencies`, dynamically uses `rolldown` or `esbuild` from your `devDependencies`, and bundles them into an ES module (defaulting to `app/vendor.js` or `vendor.js`).
 
 ---
 

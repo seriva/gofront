@@ -3,8 +3,10 @@
 
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import { copyAssets } from "./asset-manager.js";
 import { compileDir, compileSingleFile } from "./compiler.js";
 import { minify } from "./minifier.js";
+import { bundleVendor } from "./vendor.js";
 
 export function runCompile(inputPath, isDir, options) {
 	const {
@@ -62,4 +64,11 @@ export function handleInit(targetDir) {
 	}
 
 	return { mainPath };
+}
+
+export async function handlePrep(targetDir, options = {}) {
+	const resolvedTarget = resolve(targetDir);
+	const assets = copyAssets(resolvedTarget, options.assetConfig);
+	const vendor = await bundleVendor(resolvedTarget, options.vendorConfig);
+	return { assets, vendor };
 }
