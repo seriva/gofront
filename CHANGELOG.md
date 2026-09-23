@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Fixed
+- **Struct field named after a struct type crashed at load** — a field whose name matched a type used in any field default (e.g. `type View struct { Project Project }`) compiled to `constructor({ Project = new Project() })`, so the destructuring binding shadowed the class and threw `Cannot access 'Project' before initialization`. Such bindings are now aliased (`Project: Project$ = new Project()`); output for other structs is unchanged.
 - **Single-variable `range` over a map yielded entries instead of keys** — `for k := range m` compiled to `for (const k of Object.entries(m))`, so `k` was a `[key, value]` pair. It now emits `Object.keys(m)`; the two-variable form is unchanged.
 
 ## [1.2.1] - 2026-09-23

@@ -38,6 +38,19 @@ func main() {
 	assertEqual(runJs(js), "3");
 });
 
+test("field named after its own struct type does not shadow the class", () => {
+	const { js } = compile(`package main
+type Project struct { Title string }
+type View struct { Project Project; Other Project }
+func main() {
+  v := View{}
+  console.log(v.Project.Title == "", v.Other.Title == "")
+  w := View{Project: Project{Title: "x"}}
+  console.log(w.Project.Title)
+}`);
+	assertEqual(runJs(js), "true true\nx");
+});
+
 // ═════════════════════════════════════════════════════════════
 // Store functions (example app logic)
 // ═════════════════════════════════════════════════════════════
