@@ -169,6 +169,58 @@ test("prevents directory traversal outside serve directory", () => {
 	}
 });
 
+test("blocks traversal into a sibling directory sharing the serve dir prefix", () => {
+	const root = mkdtempSync(join(tmpdir(), "gofront-dev-sib-"));
+	try {
+		const serveDir = join(root, "app");
+		const sibling = join(root, "app-secret");
+		mkdirSync(serveDir);
+		mkdirSync(sibling);
+		writeFileSync(join(serveDir, "index.html"), "ok");
+		writeFileSync(join(sibling, "secret.txt"), "LEAKED");
+
+		const res = createMockRes();
+		handleDevRequest({ url: "/../app-secret/secret.txt" }, res, serveDir);
+		assertEqual(res.statusCode, 403);
+		assertEqual(res.body, "Forbidden");
+
+		const encoded = createMockRes();
+		handleDevRequest(
+			{ url: "/%2e%2e/app-secret/secret.txt" },
+			encoded,
+			serveDir,
+		);
+		assertEqual(encoded.statusCode, 403);
+
+		const okRes = createMockRes();
+		handleDevRequest({ url: "/" }, okRes, serveDir);
+		assertEqual(okRes.statusCode, 200);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("serves files whose name starts with '..' inside the serve dir", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-dev-dotdot-"));
+	try {
+		mkdirSync(join(dir, "..cache"));
+		writeFileSync(join(dir, "..cache", "x.js"), "1");
+		writeFileSync(join(dir, "..hidden.js"), "2");
+
+		const nested = createMockRes();
+		handleDevRequest({ url: "/..cache/x.js" }, nested, dir);
+		assertEqual(nested.statusCode, 200);
+		assertEqual(nested.body.toString("utf8"), "1");
+
+		const flat = createMockRes();
+		handleDevRequest({ url: "/..hidden.js" }, flat, dir);
+		assertEqual(flat.statusCode, 200);
+		assertEqual(flat.body.toString("utf8"), "2");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
 test("serves nested directory index.html if present, else root index.html", () => {
 	const dir = mkdtempSync(join(tmpdir(), "gofront-dev-dir-"));
 	try {
@@ -229,5 +281,5 @@ test("createDevServer starts and closes cleanly", () => {
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-	process.exit(summarize() > 0 ? 1 : 0);
+	process.exit((await summarize()) > 0 ? 1 : 0);
 }

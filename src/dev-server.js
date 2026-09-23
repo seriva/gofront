@@ -3,7 +3,7 @@
 
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer } from "node:http";
-import { extname, join, resolve } from "node:path";
+import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export const MIME = {
 	".html": "text/html; charset=utf-8",
@@ -21,6 +21,12 @@ export const MIME = {
 
 // Injected at the bottom of compiled JS in serve mode.
 export const liveReloadClient = `(function(){var es=new EventSource('/_gofront/events');es.addEventListener('reload',function(){location.reload();});})();`;
+
+// True when `target` is `root` itself or a path inside it (no `..` escape).
+function isInsideDir(root, target) {
+	const rel = relative(root, target);
+	return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+}
 
 export function handleDevRequest(req, res, serveDir, clients = new Set()) {
 	// SSE endpoint — browser connects here to receive reload events
@@ -45,9 +51,8 @@ export function handleDevRequest(req, res, serveDir, clients = new Set()) {
 
 	if (urlPath === "/" || urlPath === "") urlPath = "/index.html";
 
-	const resolvedServe = resolve(serveDir);
 	const filePath = resolve(serveDir, `.${urlPath}`);
-	if (!filePath.startsWith(resolvedServe)) {
+	if (!isInsideDir(resolve(serveDir), filePath)) {
 		res.writeHead(403, { "Content-Type": "text/plain" });
 		res.end("Forbidden");
 		return;
