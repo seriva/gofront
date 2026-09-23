@@ -448,7 +448,10 @@ export const statementGenMethods = {
 	},
 
 	_genRangeIterExpr(iterType, iteree, lhs) {
-		if (this._isMapRangeType(iterType)) return `Object.entries(${iteree})`;
+		if (this._isMapRangeType(iterType)) {
+			if (lhs.length === 1) return `Object.keys(${iteree})`;
+			return `Object.entries(${iteree})`;
+		}
 		if (this._isStringRangeType(iterType)) {
 			if (lhs.length === 1) return `Array.from(${iteree}).keys()`;
 			return `Array.from(${iteree}, (__c, __i) => [__i, __c.codePointAt(0)])`;
