@@ -44,24 +44,33 @@ function cli(args, cwd) {
 
 section("vendor — entry point generation & export names");
 
-test("getExportNames handles scoped and standard packages", () => {
+test("getExportNames derives generic names only (no hardcoded package aliases)", () => {
 	const emailNames = getExportNames("@emailjs/browser");
-	assert(emailNames.includes("emailjs"), "expected emailjs alias");
 	assert(emailNames.includes("@emailjs/browser"), "expected full name");
+	assert(emailNames.includes("browser"), "expected unscoped base name");
+	assert(!emailNames.includes("emailjs"), "emailjs alias must not be built in");
 
 	const fuseNames = getExportNames("fuse.js");
-	assert(fuseNames.includes("Fuse"), "expected Fuse alias");
 	assert(fuseNames.includes("fuse.js"), "expected full name");
+	assert(fuseNames.includes("fuse_js"), "expected sanitised identifier");
+	assert(!fuseNames.includes("Fuse"), "Fuse alias must not be built in");
 
-	const prismNames = getExportNames("prismjs");
-	assert(prismNames.includes("Prism"), "expected Prism alias");
+	assert(!getExportNames("prismjs").includes("Prism"));
+	assert(getExportNames("marked").includes("marked"));
+});
 
-	const markedNames = getExportNames("marked");
-	assert(markedNames.includes("marked"), "expected marked alias");
+test("getExportNames appends names from a globals mapping", () => {
+	const globals = { "fuse.js": ["Fuse"], prismjs: "Prism" };
+	assert(getExportNames("fuse.js", globals).includes("Fuse"));
+	assert(getExportNames("prismjs", globals).includes("Prism"));
+	assert(!getExportNames("marked", globals).includes("Fuse"));
 });
 
 test("generateVendorEntry creates valid import, window, and export code", () => {
-	const entry = generateVendorEntry(["marked", "prismjs", "@emailjs/browser"]);
+	const entry = generateVendorEntry(["marked", "prismjs", "@emailjs/browser"], {
+		prismjs: ["Prism"],
+		"@emailjs/browser": ["emailjs"],
+	});
 	assertContains(entry, 'import * as _dep_0 from "marked";');
 	assertContains(entry, 'import * as _dep_1 from "prismjs";');
 	assertContains(entry, 'import * as _dep_2 from "@emailjs/browser";');
@@ -70,6 +79,12 @@ test("generateVendorEntry creates valid import, window, and export code", () => 
 	assertContains(entry, 'window["emailjs"] = _dep_2.default || _dep_2;');
 	assertContains(entry, "_dep_0 as marked");
 	assertContains(entry, "_dep_1 as prismjs");
+});
+
+test("generateVendorEntry without globals emits no package-specific aliases", () => {
+	const entry = generateVendorEntry(["prismjs"]);
+	assert(!entry.includes('window["Prism"]'), "no Prism alias without globals");
+	assertContains(entry, 'window["prismjs"] = _dep_0.default || _dep_0;');
 });
 
 section("vendor — configuration loading");
@@ -132,6 +147,51 @@ test("loadVendorConfig parses minify flag and multi-dest array", () => {
 		assertEqual(config.dest[0], "app/vendor.js");
 		assertEqual(config.dest[1], "public/vendor.js");
 		assertEqual(config.minify, true);
+		assertEqual(Object.keys(config.globals).length, 0);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("loadVendorConfig reads globals; gofront.json overrides package.json", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-vendor-cfgglob-"));
+	try {
+		writeFileSync(
+			join(dir, "package.json"),
+			JSON.stringify({
+				vendor: { globals: { "fuse.js": ["Fuse"] } },
+				dependencies: { "fuse.js": "^7.0.0", prismjs: "^1.0.0" },
+			}),
+		);
+		assertEqual(loadVendorConfig(dir).globals["fuse.js"][0], "Fuse");
+
+		writeFileSync(
+			join(dir, "gofront.json"),
+			JSON.stringify({ vendor: { globals: { prismjs: "Prism" } } }),
+		);
+		const config = loadVendorConfig(dir);
+		assertEqual(config.globals.prismjs[0], "Prism");
+		assertEqual(config.globals["fuse.js"], undefined);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("loadVendorConfig rejects invalid globals shapes", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-vendor-cfgbad-"));
+	try {
+		writeFileSync(
+			join(dir, "package.json"),
+			JSON.stringify({ vendor: { globals: { prismjs: 42 } } }),
+		);
+		let msg = "";
+		try {
+			loadVendorConfig(dir);
+		} catch (e) {
+			msg = e.message;
+		}
+		assertContains(msg, "vendor.globals");
+		assertContains(msg, "prismjs");
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -417,5 +477,5 @@ test("gofront prep --minify executes via CLI and copies assets", () => {
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-	process.exit(summarize() > 0 ? 1 : 0);
+	process.exit((await summarize()) > 0 ? 1 : 0);
 }

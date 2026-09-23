@@ -6,12 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-09-23
+
+### Fixed
+- **Dev server path traversal** — `handleDevRequest` in `src/dev-server.js` guarded the resolved path with a plain string-prefix check (`startsWith(serveDir)`), so a sibling directory sharing the prefix (e.g. serving `app/` while `app-secret/` exists) was reachable via `/../app-secret/...`. Containment is now checked with `path.relative()` + `isAbsolute()`, matching only `..` / `../…` so files legitimately named `..foo` inside the serve dir are still served. The same exact check is applied to `assetCopy` destinations.
+- **`gofront test --dom` under global / `npx` installs** — the jsdom availability check accepted a jsdom found next to GoFront's own installation, but the spawned harness imported the bare specifier `"jsdom"` from the project directory and crashed with `ERR_MODULE_NOT_FOUND` when the project had no local copy. The harness now imports jsdom via the resolved `file://` URL (`resolveJsdomPath()`); project-local jsdom still takes precedence.
+- **Test discovery restricted to `*_test.go`** — `discoverTests()` previously scanned every program in the package, so a `TestXxx(t *testing.T)` declared in a non-test file was executed. Only programs whose filename ends in `_test.go` are considered now, matching Go. Programs without a `_filename` (constructed programmatically) are still scanned.
+- **Unit test harness never awaited async tests** — `test()` in `test/unit/helpers.js` called `fn()` synchronously and reported `✓` immediately; promises returned by `async` tests were never awaited and `run.js` exited before their rejections could surface. 25 async tests (test runner, vendor bundler) were vacuously green. `test()` now tracks pending promises and `summarize()` awaits them; results are printed in registration order so async results stay under their own section header; all `process.exit(summarize())` call sites updated. One latent failure surfaced and was corrected (`[build failed]` assertion).
+
+### Changed
+- **CLI parsing moved to `cli-core.js`** — `gofront test` / `gofront prep` argument parsing and the prep summary formatting now live in `parseTestArgs()`, `parsePrepArgs()`, and `formatPrepSummary()` in `src/cli-core.js`, with direct unit coverage. Both parsers now treat any `-`-prefixed argument as a flag. `src/index.js` shrinks from 340 to ~300 lines and is back to routing, I/O, and watch mode only.
+- **`vendor.globals` replaces hardcoded aliases** — `getExportNames()` no longer special-cases `@emailjs/browser`, `fuse.js`, `prismjs`, and `marked`. Projects that need extra `window` names declare them in `vendor.globals` (`{ "fuse.js": ["Fuse"] }`); generic derivations (full name, unscoped name, sanitised identifier) are unchanged. Invalid shapes produce a clear `vendor.globals[...]` config error.
+- **Test harness reporting deduplicated** — the emitted runner uses a single `report(t)` for top-level tests and subtests; output is byte-identical to 1.2.0 and now locked by verbose and non-verbose snapshot tests.
+
 ## [1.2.0] - 2026-09-23
 
 ### Added
 - **Native unit testing & test runner (`gofront test`)** — added built-in unit testing framework and CLI runner. Excludes `*_test.go` files from standard compilation (`compileDir`, `gofront .`), including them during test mode (`compilePackageTests`, `gofront test`). Provides standard library `testing` package with `testing.T` (`t.Error`, `t.Errorf`, `t.Fatal`, `t.Fatalf`, `t.Fail`, `t.Failed`, `t.FailNow`, `t.Log`, `t.Logf`, `t.Skip`, `t.Skipf`, `t.Skipped`, `t.Helper`, `t.Run`, `t.Name`), `testing.Short()`, and `testing.Verbose()`. Detects test functions matching `func TestXxx(t *testing.T)` and executes an inline test harness with Go-idiomatic terminal reporting (`=== RUN`, `--- PASS`, `--- FAIL`, subtests, timing, and exit codes). Supports `-v` (verbose), `-run <regex>` (test filter), and `--dom` (JSDOM environment for DOM/gom/templ component testing).
 - **Vendor minification & multi-destination output (`gofront prep --minify`)** — added native minification support to the vendor bundler (`src/vendor.js`), forwarding `minify` option to `rolldown` and `esbuild`. Supports multi-destination destination arrays (`vendor.dest: ["app/vendor.js", "public/vendor.js"]`) to seamlessly emit both development and production bundles. Added `--minify` CLI flag to `gofront prep [dir] [--minify]`.
 - **Example app unit test suites (`npm run test:examples`)** — added native `*_test.go` suites across `example/simple/src`, `example/reactive/src/utils`, `example/gom/src/utils`, and `example/templ/src/utils`. Wired `test:examples` into `package.json` and integrated it with `test:all`.
+
+### Changed
+- **`== nil` / `!= nil` compile to loose equality** *(entry added retroactively in 1.2.1)* — comparisons where either operand is `nil` now emit `== null` / `!= null` instead of `=== null` / `!== null`, so JavaScript `undefined` (unset struct fields, missing JS interop values) is treated as nil. Struct/array comparisons via `__equal` are unaffected.
+
+### Fixed
+- **Multi-file package-level variable inference** *(entry added retroactively in 1.2.1)* — `checkAll()` now type-checks all package-level `var`/`const` initializers across every file before checking any function body. Previously a function in `a.go` referencing `var cache = map[string]string{...}` declared in `z.go` saw the pre-declared placeholder type (`any`) and, for example, emitted array destructuring instead of a map comma-ok lookup.
 
 ## [1.1.0] - 2026-09-22
 

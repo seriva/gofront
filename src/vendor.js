@@ -13,28 +13,17 @@ import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-export function getExportNames(pkgName) {
+export function getExportNames(pkgName, globals = {}) {
 	const base = pkgName.replace(/^@[^/]+\//, "");
 	const clean = base.replace(/[^a-zA-Z0-9_]/g, "_");
 	const names = new Set([pkgName, base, clean]);
-
-	if (pkgName === "@emailjs/browser") names.add("emailjs");
-	if (pkgName === "fuse.js") {
-		names.add("Fuse");
-		names.add("fuse");
-	}
-	if (pkgName === "prismjs") {
-		names.add("Prism");
-		names.add("prism");
-	}
-	if (pkgName === "marked") {
-		names.add("marked");
-	}
-
+	const extra = globals[pkgName];
+	for (const name of Array.isArray(extra) ? extra : extra ? [extra] : [])
+		names.add(name);
 	return [...names];
 }
 
-export function generateVendorEntry(packages) {
+export function generateVendorEntry(packages, globals = {}) {
 	const imports = [];
 	const assignments = [];
 	const exports = [];
@@ -43,7 +32,7 @@ export function generateVendorEntry(packages) {
 		const id = `_dep_${idx}`;
 		imports.push(`import * as ${id} from ${JSON.stringify(pkg)};`);
 
-		const names = getExportNames(pkg);
+		const names = getExportNames(pkg, globals);
 		for (const name of names) {
 			assignments.push(
 				`    window[${JSON.stringify(name)}] = ${id}.default || ${id};`,
@@ -91,6 +80,27 @@ export function findBundler(projectDir) {
 	return null;
 }
 
+// Normalises `vendor.globals` ({ pkg: string | string[] }) to { pkg: string[] }.
+function normalizeGlobals(raw) {
+	if (raw === undefined || raw === null) return {};
+	if (typeof raw !== "object" || Array.isArray(raw)) {
+		throw new Error(
+			"gofront: vendor.globals must be an object mapping package names to global names",
+		);
+	}
+	const out = {};
+	for (const [pkg, value] of Object.entries(raw)) {
+		const list = Array.isArray(value) ? value : [value];
+		if (list.some((v) => typeof v !== "string")) {
+			throw new Error(
+				`gofront: vendor.globals[${JSON.stringify(pkg)}] must be a string or array of strings`,
+			);
+		}
+		out[pkg] = list;
+	}
+	return out;
+}
+
 export function loadVendorConfig(projectDir) {
 	const pkgPath = join(projectDir, "package.json");
 	let pkg = {};
@@ -114,6 +124,7 @@ export function loadVendorConfig(projectDir) {
 	let dest = null;
 	let packages = dependencies;
 	let minify = false;
+	let globals = {};
 
 	if (typeof vendorConfig === "string") {
 		dest = vendorConfig;
@@ -121,13 +132,14 @@ export function loadVendorConfig(projectDir) {
 		if (vendorConfig.dest) dest = vendorConfig.dest;
 		if (Array.isArray(vendorConfig.packages)) packages = vendorConfig.packages;
 		if (typeof vendorConfig.minify === "boolean") minify = vendorConfig.minify;
+		globals = normalizeGlobals(vendorConfig.globals);
 	}
 
 	if (!dest) {
 		dest = existsSync(join(projectDir, "app")) ? "app/vendor.js" : "vendor.js";
 	}
 
-	return { dest, packages, minify };
+	return { dest, packages, minify, globals };
 }
 
 export function resolveDestinationPaths(projectRoot, dest) {
@@ -201,6 +213,7 @@ export async function bundleVendor(projectDir = ".", options = {}) {
 	const packages = options.packages ?? config.packages;
 	const dest = options.dest ?? config.dest;
 	const minify = options.minify ?? config.minify ?? false;
+	const globals = { ...config.globals, ...normalizeGlobals(options.globals) };
 
 	if (!packages || packages.length === 0) {
 		return {
@@ -247,7 +260,7 @@ export async function bundleVendor(projectDir = ".", options = {}) {
 		};
 	}
 
-	const entryCode = generateVendorEntry(packages);
+	const entryCode = generateVendorEntry(packages, globals);
 	const entryFile = join(
 		projectRoot,
 		`.gofront-vendor-entry-${Date.now()}.mjs`,

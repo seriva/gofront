@@ -8,6 +8,24 @@ features (e.g. `docs/v0.0.5/`).
 
 ---
 
+## v1.2.1
+
+**Theme: Post-release hardening.** No new language features. Fix two bugs and several
+consistency issues found in the v1.2.0 review, and document behaviour changes that shipped
+undocumented. Design document in [`docs/v1.2.1/`](v1.2.1/).
+
+| Area | Difficulty | Status | Notes |
+|---|---|---|---|
+| Async-aware unit test harness | Low | ✓ | `test()` never awaited async tests; 25 async tests were vacuously green. `summarize()` now awaits pending promises. |
+| Dev server path traversal | Low | ✓ | Replace `startsWith` prefix check with `relative()`/`isAbsolute()` containment (sibling-dir escape). See [plan](v1.2.1/post-release-hardening-plan.md). |
+| `--dom` jsdom resolution | Low | ✓ | Resolve jsdom path in parent and inject `file://` import into harness; fixes global/npx installs. |
+| Undocumented 1.2.0 changes | Low | ✓ | Changelog + tests for `== nil` loose-equality codegen and multi-file top-level var inference ordering. |
+| CLI logic → `cli-core.js` | Low | ✓ | Move `test`/`prep` arg parsing and summary formatting out of `index.js` per architecture rule. |
+| `vendor.globals` config | Low | ✓ | Replace hardcoded `fuse.js`/`prismjs`/`@emailjs/browser` global names with a config mapping. |
+| Test-runner cleanups | Low | ✓ | Drop `bundleJsClean`, restrict discovery to `_test.go` programs, dedupe harness reporting. |
+
+---
+
 ## v1.2.0
 
 **Theme: Native unit testing & test runner.** Add built-in `gofront test` command, `*_test.go` file separation, standard `testing` package shim, and test harness execution. Design documents in [`docs/v1.2.0/`](v1.2.0/).

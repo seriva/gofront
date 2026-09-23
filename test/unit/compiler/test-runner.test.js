@@ -5,6 +5,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { handleTest } from "../../../src/cli-core.js";
 import {
 	compileDir,
@@ -15,6 +16,7 @@ import {
 	discoverTests,
 	generateTestHarness,
 	isTestFunc,
+	resolveJsdomPath,
 	runTests,
 } from "../../../src/test-runner.js";
 import {
@@ -177,7 +179,9 @@ test("discoverTests extracts matching test names from programs", () => {
 		writeFileSync(
 			join(dir, "calc.go"),
 			`package calc
+import "testing"
 func Add(a, b int) int { return a + b }
+func TestNotInTestFile(t *testing.T) {}
 `,
 		);
 		writeFileSync(
@@ -195,9 +199,23 @@ func TestSubtract(t *testing.T) {}
 		assertEqual(names.length, 2);
 		assert(names.includes("TestAdd"));
 		assert(names.includes("TestSubtract"));
+		assert(
+			!names.includes("TestNotInTestFile"),
+			"Test funcs outside *_test.go must not be discovered",
+		);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
+});
+
+test("discoverTests treats programs without _filename as test files", () => {
+	const decl = {
+		kind: "FuncDecl",
+		name: "TestBare",
+		params: [{ type: { kind: "PointerType", base: { name: "testing.T" } } }],
+	};
+	assert(isTestFunc(decl), "fixture must be a valid test func");
+	assertEqual(discoverTests([{ decls: [decl] }]).length, 1);
 });
 
 test("generateTestHarness produces executable runner module", () => {
@@ -624,7 +642,7 @@ func TestInvalid(t *testing.T) {
 
 		const result = await runTests(dir, { captureOutput: true });
 		assertEqual(result.exitCode, 1);
-		assertContains(result.stderr, "compile error:");
+		assertContains(result.stderr, "[build failed]");
 		assertContains(result.stderr, "Cannot assign untyped string to int");
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
@@ -658,6 +676,57 @@ test("generateTestHarness uses static __testRegistry and avoids eval", () => {
 	const harness = generateTestHarness("function TestOne(t) {}", ["TestOne"]);
 	assertContains(harness, "__testRegistry");
 	assert(!harness.includes("eval("), "harness should not contain eval");
+});
+
+test("generateTestHarness imports jsdom via resolved file:// URL, not bare specifier", () => {
+	const jsdomPath = "/some where/node_modules/jsdom/lib/api.js";
+	const harness = generateTestHarness("function TestOne(t) {}", ["TestOne"], {
+		dom: true,
+		jsdomPath,
+	});
+	assertContains(
+		harness,
+		`from ${JSON.stringify(pathToFileURL(jsdomPath).href)}`,
+	);
+	assert(
+		!harness.includes('from "jsdom"'),
+		"harness must not import jsdom by bare specifier",
+	);
+});
+
+test("resolveJsdomPath finds jsdom from a directory without local node_modules", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-jsdom-res-"));
+	try {
+		const path = resolveJsdomPath(dir);
+		assert(typeof path === "string" && path.length > 0, "expected a path");
+		assertContains(path, "jsdom");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("runTests --dom works from a project dir with no local jsdom", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-exec-dom-global-"));
+	try {
+		writeFileSync(
+			join(dir, "dom_test.go"),
+			`package dompkg
+import "testing"
+
+func TestDOM(t *testing.T) {
+  el := document.createElement("div")
+  if el == nil {
+    t.Error("expected element")
+  }
+}
+`,
+		);
+		const result = await runTests(dir, { captureOutput: true, dom: true });
+		assertEqual(result.exitCode, 0, result.stderr);
+		assertContains(result.stdout, "PASS");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
 });
 
 test("runTests safely logs circular structures in t.Log", async () => {
@@ -713,6 +782,102 @@ func TestBeta(t *testing.T) {
 		assertEqual(result.exitCode, 0);
 		assert(!result.stdout.includes("alpha ran"));
 		assertContains(result.stdout, "beta ran");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+section("test-runner — output format snapshot");
+
+const SNAPSHOT_SRC = `package snap
+import "testing"
+
+func TestPassWithLog(t *testing.T) {
+  t.Log("pass log")
+}
+
+func TestFailTop(t *testing.T) {
+  t.Error("top failure")
+}
+
+func TestSkipTop(t *testing.T) {
+  t.Skip("skip reason")
+}
+
+func TestGroup(t *testing.T) {
+  t.Run("ok", func(t *testing.T) { t.Log("sub ok log") })
+  t.Run("bad", func(t *testing.T) { t.Errorf("sub bad %d", 1) })
+  t.Run("skipped", func(t *testing.T) { t.Skip("sub skip") })
+}
+`;
+
+// Timing values differ per run; normalise them so the snapshot is stable.
+const normalizeTiming = (s) =>
+	s.replace(/\(\d+\.\d+s\)/g, "(T)").replace(/\t\d+\.\d+s/g, "\tT");
+
+const SNAPSHOT_VERBOSE = [
+	"=== RUN   TestPassWithLog",
+	"    pass log",
+	"--- PASS: TestPassWithLog (T)",
+	"=== RUN   TestFailTop",
+	"    top failure",
+	"--- FAIL: TestFailTop (T)",
+	"=== RUN   TestSkipTop",
+	"--- SKIP: TestSkipTop (T)",
+	"    skip reason",
+	"=== RUN   TestGroup",
+	"=== RUN   TestGroup/ok",
+	"    sub ok log",
+	"--- PASS: TestGroup/ok (T)",
+	"=== RUN   TestGroup/bad",
+	"    sub bad 1",
+	"--- FAIL: TestGroup/bad (T)",
+	"=== RUN   TestGroup/skipped",
+	"--- SKIP: TestGroup/skipped (T)",
+	"    sub skip",
+	"--- FAIL: TestGroup (T)",
+	"FAIL",
+	"FAIL\tsnap\tT",
+	"",
+].join("\n");
+
+const SNAPSHOT_QUIET = [
+	"=== RUN   TestFailTop",
+	"    top failure",
+	"--- FAIL: TestFailTop (T)",
+	"--- SKIP: TestSkipTop (T)",
+	"    skip reason",
+	"=== RUN   TestGroup/bad",
+	"    sub bad 1",
+	"--- FAIL: TestGroup/bad (T)",
+	"--- SKIP: TestGroup/skipped (T)",
+	"    sub skip",
+	"=== RUN   TestGroup",
+	"--- FAIL: TestGroup (T)",
+	"FAIL",
+	"FAIL\tsnap\tT",
+	"",
+].join("\n");
+
+test("runTests verbose output matches Go-style snapshot", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-snap-v-"));
+	try {
+		writeFileSync(join(dir, "snap_test.go"), SNAPSHOT_SRC);
+		const result = await runTests(dir, { captureOutput: true, verbose: true });
+		assertEqual(result.exitCode, 1);
+		assertEqual(normalizeTiming(result.stdout), SNAPSHOT_VERBOSE);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("runTests non-verbose output matches Go-style snapshot", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-snap-q-"));
+	try {
+		writeFileSync(join(dir, "snap_test.go"), SNAPSHOT_SRC);
+		const result = await runTests(dir, { captureOutput: true });
+		assertEqual(result.exitCode, 1);
+		assertEqual(normalizeTiming(result.stdout), SNAPSHOT_QUIET);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}

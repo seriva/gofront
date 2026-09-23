@@ -121,23 +121,66 @@ export function runInDom(
 let passed = 0,
 	failed = 0;
 const failures = [];
+const pending = [];
 
-export function test(name, fn) {
-	try {
-		fn();
-		process.stdout.write(`  \x1b[32m✓\x1b[0m ${name}\n`);
-		passed++;
-	} catch (e) {
-		process.stdout.write(
-			`  \x1b[31m✗\x1b[0m ${name}\n    ${e.message.split("\n").join("\n    ")}\n`,
-		);
-		failures.push({ name, error: e.message });
-		failed++;
+// Output is written in registration order: sync results print immediately,
+// but once an async test is queued, later results wait for it to settle.
+const slots = [];
+let flushed = 0;
+
+function flush() {
+	while (flushed < slots.length && slots[flushed] !== null) {
+		process.stdout.write(slots[flushed++]);
 	}
 }
 
+function reserveSlot() {
+	return slots.push(null) - 1;
+}
+
+function fillSlot(i, text) {
+	slots[i] = text;
+	flush();
+}
+
+function reportPass(slot, name) {
+	passed++;
+	fillSlot(slot, `  \x1b[32m✓\x1b[0m ${name}\n`);
+}
+
+function reportFail(slot, name, e) {
+	const message = e?.message ?? String(e);
+	failures.push({ name, error: message });
+	failed++;
+	fillSlot(
+		slot,
+		`  \x1b[31m✗\x1b[0m ${name}\n    ${message.split("\n").join("\n    ")}\n`,
+	);
+}
+
+export function test(name, fn) {
+	const slot = reserveSlot();
+	let result;
+	try {
+		result = fn();
+	} catch (e) {
+		reportFail(slot, name, e);
+		return;
+	}
+	if (result && typeof result.then === "function") {
+		pending.push(
+			result.then(
+				() => reportPass(slot, name),
+				(e) => reportFail(slot, name, e),
+			),
+		);
+		return;
+	}
+	reportPass(slot, name);
+}
+
 export function section(title) {
-	process.stdout.write(`\n\x1b[1m── ${title}\x1b[0m\n`);
+	fillSlot(reserveSlot(), `\n\x1b[1m── ${title}\x1b[0m\n`);
 }
 
 export function assert(cond, msg) {
@@ -182,7 +225,8 @@ export function assertErrorContains(errors, needle) {
 		);
 }
 
-export function summarize() {
+export async function summarize() {
+	await Promise.all(pending);
 	const total = passed + failed;
 	process.stdout.write(`\n${total} tests: \x1b[32m${passed} passed\x1b[0m`);
 	if (failed > 0) {
