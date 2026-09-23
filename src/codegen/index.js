@@ -333,10 +333,23 @@ export class CodeGen {
 		if (fields.length === 0) {
 			this.line("constructor() {}");
 		} else {
-			const params = fields.map((f) => `${f.name} = ${f.zero}`).join(", ");
+			// A field named like a type used in a default (e.g. `Project Project`)
+			// would shadow that class inside the parameter scope, so alias it.
+			const binding = (f) => {
+				const re = new RegExp(`\\b${f.name}\\b`);
+				return fields.some((o) => re.test(o.zero)) ? `${f.name}$` : f.name;
+			};
+			const params = fields
+				.map((f) => {
+					const b = binding(f);
+					return b === f.name
+						? `${f.name} = ${f.zero}`
+						: `${f.name}: ${b} = ${f.zero}`;
+				})
+				.join(", ");
 			this.line(`constructor({ ${params} } = {}) {`);
 			this.indented(() => {
-				for (const f of fields) this.line(`this.${f.name} = ${f.name};`);
+				for (const f of fields) this.line(`this.${f.name} = ${binding(f)};`);
 			});
 			this.line("}");
 		}
