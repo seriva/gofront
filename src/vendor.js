@@ -2,6 +2,7 @@
 // Dynamically loads a bundler (rolldown or esbuild) from consumer devDependencies.
 
 import {
+	copyFileSync,
 	existsSync,
 	mkdirSync,
 	readFileSync,
@@ -112,19 +113,85 @@ export function loadVendorConfig(projectDir) {
 
 	let dest = null;
 	let packages = dependencies;
+	let minify = false;
 
 	if (typeof vendorConfig === "string") {
 		dest = vendorConfig;
 	} else if (vendorConfig && typeof vendorConfig === "object") {
 		if (vendorConfig.dest) dest = vendorConfig.dest;
 		if (Array.isArray(vendorConfig.packages)) packages = vendorConfig.packages;
+		if (typeof vendorConfig.minify === "boolean") minify = vendorConfig.minify;
 	}
 
 	if (!dest) {
 		dest = existsSync(join(projectDir, "app")) ? "app/vendor.js" : "vendor.js";
 	}
 
-	return { dest, packages };
+	return { dest, packages, minify };
+}
+
+export function resolveDestinationPaths(projectRoot, dest) {
+	const destList = Array.isArray(dest) ? dest : [dest];
+	if (destList.length === 0) {
+		throw new Error(
+			"gofront: at least one vendor destination must be specified",
+		);
+	}
+
+	return destList.map((d) => {
+		const fullPath = resolve(projectRoot, d);
+		const relDest = relative(projectRoot, fullPath);
+		if (relDest.startsWith("..") || isAbsolute(relDest)) {
+			throw new Error(
+				`gofront: vendor destination '${d}' is outside project directory`,
+			);
+		}
+		return fullPath;
+	});
+}
+
+async function runBundler(
+	bundlerInfo,
+	{ projectRoot, entryFile, destPath, minify },
+) {
+	if (bundlerInfo.name === "rolldown") {
+		const rolldownModule =
+			bundlerInfo.instance ??
+			(await import(pathToFileURL(bundlerInfo.path).href));
+		const rolldownFn =
+			rolldownModule.rolldown ||
+			rolldownModule.default?.rolldown ||
+			rolldownModule.default;
+
+		const bundle = await rolldownFn({
+			input: entryFile,
+			cwd: projectRoot,
+		});
+		await bundle.write({
+			file: destPath,
+			format: "esm",
+			minify: Boolean(minify),
+		});
+		await bundle.close();
+		return;
+	}
+
+	if (bundlerInfo.name === "esbuild") {
+		const esbuildModule =
+			bundlerInfo.instance ??
+			(await import(pathToFileURL(bundlerInfo.path).href));
+		const buildFn =
+			esbuildModule.build || esbuildModule.default?.build || esbuildModule;
+
+		await buildFn({
+			entryPoints: [entryFile],
+			bundle: true,
+			format: "esm",
+			outfile: destPath,
+			absWorkingDir: projectRoot,
+			minify: Boolean(minify),
+		});
+	}
 }
 
 export async function bundleVendor(projectDir = ".", options = {}) {
@@ -133,24 +200,19 @@ export async function bundleVendor(projectDir = ".", options = {}) {
 
 	const packages = options.packages ?? config.packages;
 	const dest = options.dest ?? config.dest;
+	const minify = options.minify ?? config.minify ?? false;
 
 	if (!packages || packages.length === 0) {
 		return {
 			bundled: [],
 			skipped: 0,
 			dest,
+			minify: Boolean(minify),
 			message: "no external dependencies found",
 		};
 	}
 
-	const destPath = resolve(projectRoot, dest);
-	const relDest = relative(projectRoot, destPath);
-	if (relDest.startsWith("..") || isAbsolute(relDest)) {
-		throw new Error(
-			`gofront: vendor destination '${dest}' is outside project directory`,
-		);
-	}
-
+	const destPaths = resolveDestinationPaths(projectRoot, dest);
 	const bundlerInfo = options.bundler ?? findBundler(projectRoot);
 	if (!bundlerInfo) {
 		console.warn(
@@ -161,20 +223,28 @@ export async function bundleVendor(projectDir = ".", options = {}) {
 			skipped: packages.length,
 			dest,
 			bundler: null,
+			minify: Boolean(minify),
 			reason: "no bundler installed",
 		};
 	}
 
-	mkdirSync(dirname(destPath), { recursive: true });
+	for (const p of destPaths) {
+		mkdirSync(dirname(p), { recursive: true });
+	}
 
-	// Allow custom bundler execution function (useful for tests and plugins)
 	if (typeof bundlerInfo.bundle === "function") {
 		await bundlerInfo.bundle({
 			projectRoot,
 			packages,
-			dest: destPath,
+			dest: destPaths.length === 1 ? destPaths[0] : destPaths,
+			minify: Boolean(minify),
 		});
-		return { bundled: packages, bundler: bundlerInfo.name ?? "custom", dest };
+		return {
+			bundled: packages,
+			bundler: bundlerInfo.name ?? "custom",
+			dest,
+			minify: Boolean(minify),
+		};
 	}
 
 	const entryCode = generateVendorEntry(packages);
@@ -185,38 +255,15 @@ export async function bundleVendor(projectDir = ".", options = {}) {
 	writeFileSync(entryFile, entryCode);
 
 	try {
-		if (bundlerInfo.name === "rolldown") {
-			const rolldownModule =
-				bundlerInfo.instance ??
-				(await import(pathToFileURL(bundlerInfo.path).href));
-			const rolldownFn =
-				rolldownModule.rolldown ||
-				rolldownModule.default?.rolldown ||
-				rolldownModule.default;
+		await runBundler(bundlerInfo, {
+			projectRoot,
+			entryFile,
+			destPath: destPaths[0],
+			minify,
+		});
 
-			const bundle = await rolldownFn({
-				input: entryFile,
-				cwd: projectRoot,
-			});
-			await bundle.write({
-				file: destPath,
-				format: "esm",
-			});
-			await bundle.close();
-		} else if (bundlerInfo.name === "esbuild") {
-			const esbuildModule =
-				bundlerInfo.instance ??
-				(await import(pathToFileURL(bundlerInfo.path).href));
-			const buildFn =
-				esbuildModule.build || esbuildModule.default?.build || esbuildModule;
-
-			await buildFn({
-				entryPoints: [entryFile],
-				bundle: true,
-				format: "esm",
-				outfile: destPath,
-				absWorkingDir: projectRoot,
-			});
+		for (let i = 1; i < destPaths.length; i++) {
+			copyFileSync(destPaths[0], destPaths[i]);
 		}
 	} finally {
 		if (existsSync(entryFile)) {
@@ -224,5 +271,10 @@ export async function bundleVendor(projectDir = ".", options = {}) {
 		}
 	}
 
-	return { bundled: packages, bundler: bundlerInfo.name, dest };
+	return {
+		bundled: packages,
+		bundler: bundlerInfo.name,
+		dest,
+		minify: Boolean(minify),
+	};
 }

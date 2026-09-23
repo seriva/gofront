@@ -56,9 +56,19 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
       case "s": return pad(String(v == null ? "<nil>" : v), width, false);
       case "d": return pad(String(Math.trunc(Number(v))), width, zero);
       case "v": {
-        if (typeof v === "object" && v !== null && "re" in v && "im" in v) {
-          const sign = v.im >= 0 ? "+" : "";
-          return pad("(" + v.re + sign + v.im + "i)", width, false);
+        if (typeof v === "object" && v !== null) {
+          if ("re" in v && "im" in v) {
+            const sign = v.im >= 0 ? "+" : "";
+            return pad("(" + v.re + sign + v.im + "i)", width, false);
+          }
+          if (typeof v.Error === "function") {
+            return pad(String(v.Error()), width, false);
+          }
+          try {
+            return pad(JSON.stringify(v), width, false);
+          } catch {
+            return pad(String(v), width, false);
+          }
         }
         return pad(String(v == null ? "<nil>" : v), width, false);
       }
@@ -149,3 +159,108 @@ export const HELPER_TIME_PARSE = `var __timeParse = __timeParse || function(layo
     return [{ _d: new Date(0) }, "parsing time: cannot parse"];
   }
 };`;
+
+export const HELPER_TESTING = `var __GoFront_FailNow = __GoFront_FailNow || class extends Error {
+  constructor() { super("FailNow"); this.name = "__GoFront_FailNow"; }
+};
+var __GoFront_SkipNow = __GoFront_SkipNow || class extends Error {
+  constructor() { super("SkipNow"); this.name = "__GoFront_SkipNow"; }
+};
+var __GoFront_T = __GoFront_T || class {
+  constructor(name = "", parent = null) {
+    this._name = name;
+    this._parent = parent;
+    this.failed = false;
+    this.skipped = false;
+    this._logs = [];
+    this._start = typeof performance !== "undefined" ? performance.now() : Date.now();
+  }
+  Name() { return this._name; }
+  Fail() {
+    this.failed = true;
+    if (this._parent) this._parent.Fail();
+  }
+  Failed() { return this.failed; }
+  FailNow() {
+    this.Fail();
+    throw new __GoFront_FailNow();
+  }
+  Log(...args) {
+    const msg = args.map(a => {
+      if (typeof a === "object" && a !== null) {
+        try { return JSON.stringify(a); } catch { return String(a); }
+      }
+      return String(a);
+    }).join(" ");
+    this._logs.push(msg);
+  }
+  Logf(format, ...args) {
+    const msg = typeof __sprintf === "function" ? __sprintf(format, ...args) : format;
+    this._logs.push(msg);
+  }
+  Error(...args) {
+    this.Fail();
+    this.Log(...args);
+  }
+  Errorf(format, ...args) {
+    this.Fail();
+    this.Logf(format, ...args);
+  }
+  Fatal(...args) {
+    this.Log(...args);
+    this.FailNow();
+  }
+  Fatalf(format, ...args) {
+    this.Logf(format, ...args);
+    this.FailNow();
+  }
+  Skip(...args) {
+    this.skipped = true;
+    if (args.length > 0) this.Log(...args);
+    throw new __GoFront_SkipNow();
+  }
+  Skipf(format, ...args) {
+    this.skipped = true;
+    this.Logf(format, ...args);
+    throw new __GoFront_SkipNow();
+  }
+  Skipped() { return this.skipped; }
+  Helper() {}
+  Run(name, fn) {
+    const subName = this._name ? \`\${this._name}/\${name}\` : name;
+    const subT = new __GoFront_T(subName, this);
+    if (typeof globalThis.__onSubtestStart === "function") globalThis.__onSubtestStart(subName);
+    try {
+      const res = fn(subT);
+      if (res && typeof res.then === "function") {
+        return res.then(() => {
+          if (typeof globalThis.__onSubtestEnd === "function") globalThis.__onSubtestEnd(subT);
+          return !subT.failed;
+        }).catch(e => {
+          if (e instanceof __GoFront_FailNow) {
+            // expected
+          } else if (e instanceof __GoFront_SkipNow) {
+            // expected
+          } else {
+            subT.Fail();
+            subT.Log("panic: " + (e?.message ?? String(e)));
+          }
+          if (typeof globalThis.__onSubtestEnd === "function") globalThis.__onSubtestEnd(subT);
+          return false;
+        });
+      }
+    } catch (e) {
+      if (e instanceof __GoFront_FailNow) {
+        // expected on FailNow
+      } else if (e instanceof __GoFront_SkipNow) {
+        // expected on Skip
+      } else {
+        subT.Fail();
+        subT.Log("panic: " + (e?.message ?? String(e)));
+      }
+    }
+    if (typeof globalThis.__onSubtestEnd === "function") globalThis.__onSubtestEnd(subT);
+    return !subT.failed;
+  }
+};
+var __testing_T = __GoFront_T;`;

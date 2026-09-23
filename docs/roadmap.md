@@ -8,6 +8,19 @@ features (e.g. `docs/v0.0.5/`).
 
 ---
 
+## v1.2.0
+
+**Theme: Native unit testing & test runner.** Add built-in `gofront test` command, `*_test.go` file separation, standard `testing` package shim, and test harness execution. Design documents in [`docs/v1.2.0/`](v1.2.0/).
+
+| Area | Difficulty | Status | Notes |
+|---|---|---|---|
+| `*_test.go` file filtering | Low | ✓ | Exclude `*_test.go` during normal builds, include during `gofront test`. |
+| Standard `testing` package shim | Medium | ✓ | Built-in `testing.T` with `Error`, `Fatal`, `Log`, `Run`, `Skip`, `Helper` in typechecker + codegen. |
+| Test discovery & harness generator | Medium | ✓ | Detect `Test*(*testing.T)` functions, emit and execute JS test runner with Go-style terminal formatting. |
+| CLI `gofront test` command | Low | ✓ | Subcommand with `-v`, `-run`, `--dom` support. |
+
+---
+
 ## v1.1.0
 
 **Theme: Frontend asset management & vendor tooling.** Add native static asset copying,

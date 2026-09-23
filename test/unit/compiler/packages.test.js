@@ -322,6 +322,49 @@ test("reactive utils.Plural formats correctly", () => {
 	assert(result.js.includes("Plural"), "expected Plural in output");
 });
 
+test("multi-file package infers package-level var type across file sort order", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-multifile-var-"));
+	try {
+		const fileA = join(dir, "a_caller.go");
+		const fileZ = join(dir, "z_store.go");
+		writeFileSync(
+			fileA,
+			`package main
+func checkMap(k string) (string, bool) {
+  val, ok := cache[k]
+  return val, ok
+}
+`,
+		);
+		writeFileSync(
+			fileZ,
+			`package main
+var cache = map[string]string{"hit": "yes"}
+func main() {
+  v, ok := checkMap("hit")
+  console.log(v, ok)
+  v2, ok2 := checkMap("miss")
+  console.log(v2, ok2)
+}
+`,
+		);
+		const { js } = compileFiles([fileA, fileZ]);
+		// Should emit comma-ok map index, NOT destructuring [val, ok] = cache[k]
+		assert(
+			js.includes("in cache") || js.includes("cache[k]"),
+			"expected map comma-ok check",
+		);
+		assert(
+			!js.includes("let [val, ok] = cache[k]"),
+			"should not emit array destructuring for map index",
+		);
+		const output = runJs(js);
+		assertEqual(output, "yes true\nundefined false");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
 section("compileFiles — sourceMap");
 
 test("compileFiles with sourceMap appends sourceMappingURL comment", () => {

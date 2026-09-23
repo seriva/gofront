@@ -6,6 +6,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { copyAssets } from "./asset-manager.js";
 import { compileDir, compileSingleFile } from "./compiler.js";
 import { minify } from "./minifier.js";
+import { runTests } from "./test-runner.js";
 import { bundleVendor } from "./vendor.js";
 
 export function runCompile(inputPath, isDir, options) {
@@ -71,4 +72,9 @@ export async function handlePrep(targetDir, options = {}) {
 	const assets = copyAssets(resolvedTarget, options.assetConfig);
 	const vendor = await bundleVendor(resolvedTarget, options.vendorConfig);
 	return { assets, vendor };
+}
+
+export async function handleTest(targetDir, options = {}) {
+	const resolvedTarget = resolve(targetDir);
+	return runTests(resolvedTarget, options);
 }
