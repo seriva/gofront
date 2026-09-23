@@ -287,6 +287,17 @@ func main() {
 	assertEqual(runJs(js), "x 10");
 });
 
+test("for range over map with key only", () => {
+	const { js } = compile(`package main
+func main() {
+  m := map[string]int{"x": 10}
+  for k := range m {
+    console.log(k, m[k])
+  }
+}`);
+	assertEqual(runJs(js), "x 10");
+});
+
 test("switch statement", () => {
 	const { js } = compile(`package main
 func grade(n int) string {
