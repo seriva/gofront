@@ -74,7 +74,52 @@ export async function handlePrep(targetDir, options = {}) {
 	return { assets, vendor };
 }
 
-export async function handleTest(targetDir, options = {}) {
-	const resolvedTarget = resolve(targetDir);
-	return runTests(resolvedTarget, options);
+export function parsePrepArgs(argv) {
+	const positional = argv.filter((a) => !a.startsWith("-"));
+	return {
+		targetDir: positional[0] ?? ".",
+		vendorConfig: argv.includes("--minify") ? { minify: true } : {},
+	};
+}
+
+export function formatPrepSummary({ assets, vendor }) {
+	const lines = [];
+	if (assets.copied > 0 || assets.skipped > 0) {
+		lines.push(`copied ${assets.copied} assets (${assets.skipped} skipped)`);
+	}
+	if (vendor.bundled?.length > 0) {
+		const dest = Array.isArray(vendor.dest)
+			? vendor.dest.join(", ")
+			: vendor.dest;
+		const min = vendor.minify ? " (minified)" : "";
+		lines.push(
+			`bundled ${vendor.bundled.length} vendor dependencies → ${dest}${min}`,
+		);
+	}
+	return lines;
+}
+
+export function parseTestArgs(argv) {
+	let run = null;
+	const positional = [];
+	for (let i = 0; i < argv.length; i++) {
+		const arg = argv[i];
+		if (arg === "-run" || arg === "--run") {
+			run = argv[++i] ?? null;
+		} else if (arg.startsWith("-run=") || arg.startsWith("--run=")) {
+			run = arg.slice(arg.indexOf("=") + 1);
+		} else if (!arg.startsWith("-")) {
+			positional.push(arg);
+		}
+	}
+	return {
+		targetDir: positional[0] ?? ".",
+		verbose: argv.includes("-v"),
+		dom: argv.includes("--dom"),
+		run,
+	};
+}
+
+export function handleTest(targetDir, options = {}) {
+	return runTests(targetDir, options);
 }

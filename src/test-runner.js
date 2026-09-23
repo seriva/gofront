@@ -4,6 +4,7 @@
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { basename, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { compilePackageTests, gwFilesIn } from "./compiler.js";
 
 export function isTestFunc(decl) {
@@ -17,9 +18,12 @@ export function isTestFunc(decl) {
 	return false;
 }
 
+// Only programs from *_test.go files are scanned, matching Go. Programs
+// without a `_filename` (constructed by hand) are treated as test files.
 export function discoverTests(programs) {
 	const testNames = [];
 	for (const p of programs) {
+		if (p._filename && !p._filename.endsWith("_test.go")) continue;
 		for (const d of p.decls) {
 			if (isTestFunc(d) && !testNames.includes(d.name)) {
 				testNames.push(d.name);
@@ -34,11 +38,16 @@ export function generateTestHarness(bundleJs, testNames, options = {}) {
 	const verbose = Boolean(options.verbose);
 	const dom = Boolean(options.dom);
 	const pkgName = options.pkgName ?? "main";
+	// The harness runs from stdin with cwd = project dir, so a bare "jsdom"
+	// import only works if the project has it locally. Use the resolved path.
+	const jsdomSpec = options.jsdomPath
+		? pathToFileURL(options.jsdomPath).href
+		: "jsdom";
 
 	return `
 ${
 	dom
-		? `import { JSDOM } from "jsdom";
+		? `import { JSDOM } from ${JSON.stringify(jsdomSpec)};
 const __dom = new JSDOM("<!DOCTYPE html><html><body></body></html>", {
   url: "http://localhost/",
   pretendToBeVisual: true,
@@ -92,36 +101,37 @@ async function __runGoFrontSuite() {
 
   let totalFailures = 0;
   let totalSkipped = 0;
-  const suiteStart = typeof performance !== "undefined" ? performance.now() : Date.now();
+  const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
+  const suiteStart = now();
+
+  // Go-style streaming report. In non-verbose mode only failures and skips are
+  // shown, so the "=== RUN" header is emitted late for failures.
+  const report = (t) => {
+    const elapsed = ((now() - t._start) / 1000).toFixed(2);
+    if (t.skipped) {
+      console.log("--- SKIP: " + t._name + " (" + elapsed + "s)");
+      for (const log of t._logs) console.log("    " + log);
+    } else if (t.failed) {
+      if (!verbose) console.log("=== RUN   " + t._name);
+      for (const log of t._logs) console.log("    " + log);
+      console.log("--- FAIL: " + t._name + " (" + elapsed + "s)");
+    } else if (verbose) {
+      for (const log of t._logs) console.log("    " + log);
+      console.log("--- PASS: " + t._name + " (" + elapsed + "s)");
+    }
+  };
+
+  // FailNow/SkipNow are control flow; anything else is a panic → failure.
+  const recordTestError = (t, e) => {
+    if (e instanceof __GoFront_FailNow || e instanceof __GoFront_SkipNow) return;
+    t.Fail();
+    t.Log("panic: " + (e?.message ?? String(e)));
+  };
 
   globalThis.__onSubtestStart = (name) => {
-    if (verbose) {
-      console.log("=== RUN   " + name);
-    }
+    if (verbose) console.log("=== RUN   " + name);
   };
-
-  globalThis.__onSubtestEnd = (subT) => {
-    const elapsed = (((typeof performance !== "undefined" ? performance.now() : Date.now()) - subT._start) / 1000).toFixed(2);
-    if (subT.skipped) {
-      console.log("--- SKIP: " + subT._name + " (" + elapsed + "s)");
-      for (const log of subT._logs) {
-        console.log("    " + log);
-      }
-    } else if (subT.failed) {
-      if (!verbose) {
-        console.log("=== RUN   " + subT._name);
-      }
-      for (const log of subT._logs) {
-        console.log("    " + log);
-      }
-      console.log("--- FAIL: " + subT._name + " (" + elapsed + "s)");
-    } else if (verbose) {
-      for (const log of subT._logs) {
-        console.log("    " + log);
-      }
-      console.log("--- PASS: " + subT._name + " (" + elapsed + "s)");
-    }
-  };
+  globalThis.__onSubtestEnd = report;
 
   const __testRegistry = {
 ${testNames.map((n) => `    ${JSON.stringify(n)}: typeof ${n} !== "undefined" ? ${n} : null`).join(",\n")}
@@ -136,54 +146,21 @@ ${testNames.map((n) => `    ${JSON.stringify(n)}: typeof ${n} !== "undefined" ? 
     }
 
     const t = new __GoFront_T(name);
-    if (verbose) {
-      console.log("=== RUN   " + name);
-    }
+    if (verbose) console.log("=== RUN   " + name);
 
     try {
       const res = fn(t);
-      if (res && typeof res.then === "function") {
-        await res;
-      }
+      if (res && typeof res.then === "function") await res;
     } catch (e) {
-      if (e instanceof __GoFront_FailNow) {
-        // expected on FailNow
-      } else if (e instanceof __GoFront_SkipNow) {
-        // expected on SkipNow
-      } else {
-        t.Fail();
-        t.Log("panic: " + (e?.message ?? String(e)));
-      }
+      recordTestError(t, e);
     }
 
-    const elapsed = (((typeof performance !== "undefined" ? performance.now() : Date.now()) - t._start) / 1000).toFixed(2);
-
-    if (t.skipped) {
-      totalSkipped++;
-      console.log("--- SKIP: " + name + " (" + elapsed + "s)");
-      for (const log of t._logs) {
-        console.log("    " + log);
-      }
-    } else if (t.failed) {
-      totalFailures++;
-      if (!verbose) {
-        console.log("=== RUN   " + name);
-      }
-      for (const log of t._logs) {
-        console.log("    " + log);
-      }
-      console.log("--- FAIL: " + name + " (" + elapsed + "s)");
-    } else {
-      if (verbose) {
-        for (const log of t._logs) {
-          console.log("    " + log);
-        }
-        console.log("--- PASS: " + name + " (" + elapsed + "s)");
-      }
-    }
+    if (t.skipped) totalSkipped++;
+    else if (t.failed) totalFailures++;
+    report(t);
   }
 
-  const suiteElapsed = (((typeof performance !== "undefined" ? performance.now() : Date.now()) - suiteStart) / 1000).toFixed(3);
+  const suiteElapsed = ((now() - suiteStart) / 1000).toFixed(3);
 
   if (totalFailures > 0) {
     console.log("FAIL");
@@ -200,6 +177,16 @@ __runGoFrontSuite();
 `;
 }
 
+// Project-local jsdom wins; fall back to the one next to GoFront (global/npx installs).
+export function resolveJsdomPath(projectDir) {
+	for (const from of [join(projectDir, "dummy.js"), import.meta.url]) {
+		try {
+			return createRequire(from).resolve("jsdom");
+		} catch {}
+	}
+	return null;
+}
+
 function validateTestOptions(options, resolvedDir) {
 	if (options.run) {
 		try {
@@ -209,26 +196,16 @@ function validateTestOptions(options, resolvedDir) {
 		}
 	}
 
+	let jsdomPath = null;
 	if (options.dom) {
-		let jsdomFound = false;
-		try {
-			const req = createRequire(join(resolvedDir, "dummy.js"));
-			req.resolve("jsdom");
-			jsdomFound = true;
-		} catch {}
-		if (!jsdomFound) {
-			try {
-				const req = createRequire(import.meta.url);
-				req.resolve("jsdom");
-				jsdomFound = true;
-			} catch {}
-		}
-		if (!jsdomFound) {
+		jsdomPath = resolveJsdomPath(resolvedDir);
+		if (!jsdomPath) {
 			throw new Error(
 				"gofront: --dom requires 'jsdom' to be installed. Run 'npm install --save-dev jsdom' to enable DOM testing.",
 			);
 		}
 	}
+	return { jsdomPath };
 }
 
 function reportEmptyTests(label, reason, options) {
@@ -290,7 +267,7 @@ function spawnTestRunner(resolvedDir, harnessJs, testCount, options) {
 
 export async function runTests(targetDir, options = {}) {
 	const resolvedDir = resolve(targetDir);
-	validateTestOptions(options, resolvedDir);
+	const { jsdomPath } = validateTestOptions(options, resolvedDir);
 
 	const allFiles = gwFilesIn(resolvedDir, { includeTests: true });
 	if (allFiles.length === 0) {
@@ -322,14 +299,11 @@ export async function runTests(targetDir, options = {}) {
 		return reportEmptyTests(pkgName, "no tests to run", options);
 	}
 
-	const harnessJs = generateTestHarness(bundleJsClean(js), testNames, {
+	const harnessJs = generateTestHarness(js, testNames, {
 		...options,
 		pkgName,
+		jsdomPath,
 	});
 
 	return spawnTestRunner(resolvedDir, harnessJs, testNames.length, options);
-}
-
-function bundleJsClean(js) {
-	return js;
 }

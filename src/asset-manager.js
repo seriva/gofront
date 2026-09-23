@@ -16,6 +16,7 @@ import {
 	join,
 	relative,
 	resolve,
+	sep,
 } from "node:path";
 
 export function loadAssetConfig(projectDir) {
@@ -58,7 +59,11 @@ function copyAssetEntry(entry, projectRoot) {
 
 	const destPath = resolve(projectRoot, dest);
 	const relDest = relative(projectRoot, destPath);
-	if (relDest.startsWith("..") || isAbsolute(relDest)) {
+	if (
+		relDest === ".." ||
+		relDest.startsWith(`..${sep}`) ||
+		isAbsolute(relDest)
+	) {
 		throw new Error(
 			`gofront: asset destination '${dest}' is outside project directory`,
 		);

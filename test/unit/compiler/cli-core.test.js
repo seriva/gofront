@@ -11,10 +11,18 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { handleInit, maybeMinify, runCompile } from "../../../src/cli-core.js";
+import {
+	formatPrepSummary,
+	handleInit,
+	maybeMinify,
+	parsePrepArgs,
+	parseTestArgs,
+	runCompile,
+} from "../../../src/cli-core.js";
 import {
 	assert,
 	assertContains,
+	assertEqual,
 	FIXTURES,
 	section,
 	summarize,
@@ -202,6 +210,96 @@ test("handleInit written file contains func main", () => {
 	}
 });
 
+section("cli-core — parseTestArgs");
+
+test("parseTestArgs defaults to current dir with no flags", () => {
+	const opts = parseTestArgs([]);
+	assertEqual(opts.targetDir, ".");
+	assertEqual(opts.verbose, false);
+	assertEqual(opts.dom, false);
+	assertEqual(opts.run, null);
+});
+
+test("parseTestArgs picks positional dir and boolean flags", () => {
+	const opts = parseTestArgs(["-v", "src", "--dom"]);
+	assertEqual(opts.targetDir, "src");
+	assertEqual(opts.verbose, true);
+	assertEqual(opts.dom, true);
+});
+
+test("parseTestArgs accepts all -run spellings", () => {
+	assertEqual(parseTestArgs(["-run", "Foo"]).run, "Foo");
+	assertEqual(parseTestArgs(["--run", "Foo"]).run, "Foo");
+	assertEqual(parseTestArgs(["-run=^Foo$"]).run, "^Foo$");
+	assertEqual(parseTestArgs(["--run=a=b"]).run, "a=b");
+});
+
+test("parseTestArgs: -run value is not mistaken for the target dir", () => {
+	const opts = parseTestArgs(["-run", "Foo", "pkg"]);
+	assertEqual(opts.run, "Foo");
+	assertEqual(opts.targetDir, "pkg");
+});
+
+test("parseTestArgs: trailing -run without value yields null", () => {
+	assertEqual(parseTestArgs(["-run"]).run, null);
+});
+
+section("cli-core — parsePrepArgs & formatPrepSummary");
+
+test("parsePrepArgs defaults to '.' and empty vendorConfig", () => {
+	const opts = parsePrepArgs([]);
+	assertEqual(opts.targetDir, ".");
+	assertEqual(Object.keys(opts.vendorConfig).length, 0);
+});
+
+test("parsePrepArgs picks dir and --minify regardless of order", () => {
+	const a = parsePrepArgs(["--minify", "site"]);
+	assertEqual(a.targetDir, "site");
+	assertEqual(a.vendorConfig.minify, true);
+	const b = parsePrepArgs(["site", "--minify"]);
+	assertEqual(b.targetDir, "site");
+	assertEqual(b.vendorConfig.minify, true);
+});
+
+test("parsePrepArgs ignores single-dash flags like parseTestArgs", () => {
+	assertEqual(parsePrepArgs(["-x", "site"]).targetDir, "site");
+	assertEqual(parsePrepArgs(["-v"]).targetDir, ".");
+});
+
+test("formatPrepSummary returns nothing when nothing happened", () => {
+	const lines = formatPrepSummary({
+		assets: { copied: 0, skipped: 0 },
+		vendor: { bundled: [] },
+	});
+	assertEqual(lines.length, 0);
+});
+
+test("formatPrepSummary reports assets and vendor with array dest + minify", () => {
+	const lines = formatPrepSummary({
+		assets: { copied: 3, skipped: 1 },
+		vendor: {
+			bundled: ["marked", "fuse.js"],
+			dest: ["app/vendor.js", "public/vendor.js"],
+			minify: true,
+		},
+	});
+	assertEqual(lines.length, 2);
+	assertEqual(lines[0], "copied 3 assets (1 skipped)");
+	assertEqual(
+		lines[1],
+		"bundled 2 vendor dependencies → app/vendor.js, public/vendor.js (minified)",
+	);
+});
+
+test("formatPrepSummary reports vendor-only with string dest", () => {
+	const lines = formatPrepSummary({
+		assets: { copied: 0, skipped: 0 },
+		vendor: { bundled: ["marked"], dest: "vendor.js", minify: false },
+	});
+	assertEqual(lines.length, 1);
+	assertEqual(lines[0], "bundled 1 vendor dependencies → vendor.js");
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-	process.exit(summarize() > 0 ? 1 : 0);
+	process.exit((await summarize()) > 0 ? 1 : 0);
 }

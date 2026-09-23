@@ -22,10 +22,13 @@ import { mkdirSync, statSync, watch, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { copyAssets } from "./asset-manager.js";
 import {
+	formatPrepSummary,
 	handleInit,
 	handlePrep,
 	handleTest,
 	maybeMinify,
+	parsePrepArgs,
+	parseTestArgs,
 	runCompile,
 } from "./cli-core.js";
 import { createDevServer, liveReloadClient } from "./dev-server.js";
@@ -69,29 +72,11 @@ Usage:
 // ── prep / vendor subcommand ──────────────────────────────────
 
 if (args[0] === "prep" || args[0] === "vendor") {
-	const hasMinify = args.includes("--minify");
-	const filteredArgs = args.slice(1).filter((a) => !a.startsWith("--"));
-	const targetArg = filteredArgs[0] ?? ".";
-	const targetDir = resolve(targetArg);
+	const { targetDir, vendorConfig } = parsePrepArgs(args.slice(1));
 	try {
-		const vendorConfig = hasMinify ? { minify: true } : {};
-		const { assets, vendor } = await handlePrep(targetDir, {
-			vendorConfig,
-		});
-		if (assets.copied > 0 || assets.skipped > 0) {
-			console.error(
-				`gofront: copied ${assets.copied} assets (${assets.skipped} skipped)`,
-			);
-		}
-		if (vendor.bundled?.length > 0) {
-			const destStr = Array.isArray(vendor.dest)
-				? vendor.dest.join(", ")
-				: vendor.dest;
-			const minStr = vendor.minify ? " (minified)" : "";
-			console.error(
-				`gofront: bundled ${vendor.bundled.length} vendor dependencies → ${destStr}${minStr}`,
-			);
-		}
+		const result = await handlePrep(resolve(targetDir), { vendorConfig });
+		for (const line of formatPrepSummary(result))
+			console.error(`gofront: ${line}`);
 	} catch (e) {
 		console.error(`gofront: ${e.message}`);
 		process.exit(1);
@@ -121,35 +106,9 @@ if (args[0] === "init") {
 // ── test subcommand ───────────────────────────────────────────
 
 if (args[0] === "test") {
-	const flags = args.slice(1);
-	let targetDir = ".";
-	let runFilter = null;
-	const nonFlagArgs = [];
-	for (let i = 0; i < flags.length; i++) {
-		const arg = flags[i];
-		if (arg === "-run" || arg === "--run") {
-			runFilter = flags[++i] ?? null;
-			continue;
-		}
-		if (arg.startsWith("-run=") || arg.startsWith("--run=")) {
-			runFilter = arg.slice(arg.indexOf("=") + 1);
-			continue;
-		}
-		if (arg.startsWith("-")) continue;
-		nonFlagArgs.push(arg);
-	}
-	if (nonFlagArgs.length > 0) {
-		targetDir = nonFlagArgs[0];
-	}
-	const verbose = flags.includes("-v");
-	const dom = flags.includes("--dom");
-
+	const { targetDir, ...testOptions } = parseTestArgs(args.slice(1));
 	try {
-		const result = await handleTest(targetDir, {
-			verbose,
-			dom,
-			run: runFilter,
-		});
+		const result = await handleTest(targetDir, testOptions);
 		process.exit(result.exitCode);
 	} catch (e) {
 		console.error(`gofront: ${e.message}`);

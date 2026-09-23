@@ -454,6 +454,12 @@ gofront test -run "Todo"      # run only tests matching regex pattern
 gofront test --dom            # initialize JSDOM for DOM/gom/templ tests
 ```
 
+`--dom` requires `jsdom`. It is resolved from the project directory first and
+then from GoFront's own installation, so a globally installed `gofront` works
+without a project-local copy.
+
+Only `TestXxx` functions declared in `*_test.go` files are discovered, matching Go.
+
 ---
 
 ## Static assets & vendor bundling
@@ -484,6 +490,27 @@ gofront prep
 ```
 
 GoFront inspects your `dependencies`, dynamically uses `rolldown` or `esbuild` from your `devDependencies`, and bundles them into an ES module (defaulting to `app/vendor.js` or `vendor.js`).
+
+Each bundled package is exposed on `window` under its full name, its unscoped name,
+and a sanitised identifier (e.g. `fuse.js` → `window["fuse.js"]`, `window.fuse_js`).
+To expose additional global names, add a `vendor.globals` mapping:
+
+```json
+{
+  "vendor": {
+    "dest": ["app/vendor.js", "public/vendor.js"],
+    "minify": true,
+    "globals": {
+      "fuse.js": ["Fuse"],
+      "prismjs": ["Prism"],
+      "@emailjs/browser": ["emailjs"]
+    }
+  }
+}
+```
+
+`dest` accepts a string or an array (the bundle is written once and copied to each
+extra destination). `gofront prep --minify` overrides `minify` from the command line.
 
 ---
 

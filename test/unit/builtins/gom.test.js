@@ -411,5 +411,5 @@ func main() {
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-	process.exit(summarize() > 0 ? 1 : 0);
+	process.exit((await summarize()) > 0 ? 1 : 0);
 }
