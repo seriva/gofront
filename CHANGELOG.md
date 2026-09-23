@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **Single-variable `range` over a map yielded entries instead of keys** — `for k := range m` compiled to `for (const k of Object.entries(m))`, so `k` was a `[key, value]` pair. It now emits `Object.keys(m)`; the two-variable form is unchanged.
+
 ## [1.2.1] - 2026-09-23
 
 ### Fixed
