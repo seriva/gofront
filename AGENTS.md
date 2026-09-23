@@ -5,11 +5,11 @@
 > **IMMUTABLE SECTION:** Do not modify Part 1 unless explicitly instructed. This is a universal standard. Only adjust Part 2 (Project Context) for project-specific needs.
 
 ## 1. Context & Rules
-- **Caveman Speak:** Communicate in "caveman" style (extreme density, zero fluff, drop grammar, `->` for correlations) for progress updates, execution logs, and short status. Use standard technical English for design reviews, architectural trade-offs, blockers, and questions. Exception: human-facing docs (`README`, `CHANGELOG`, plans) must remain readable.
-- **Plan-first:** Create `docs/vX.Y.Z/<feature>-plan.md` (or `docs/plans/<feature>-plan.md` for unversioned projects) & update roadmap for non-trivial (multi-component, arch-altering, risky) features. For unversioned projects, move completed plans to `docs/plans/archive/` once verified and merged (mark status Completed with date, update roadmap link).
+- **Caveman Speak:** Communicate in "caveman" style (extreme density, zero fluff, drop grammar, `->` for correlations). Exception: human-facing docs (`README`, `CHANGELOG`, plans) must remain readable.
+- **Plan-first:** Create `docs/vX.Y.Z/<feature>-plan.md` & update roadmap for non-trivial (multi-component, arch-altering, risky) features.
 - **TDD:** Write failing tests first for non-trivial logic (if applicable).
-- **Quality:** Run format/lint before every commit. Update `CHANGELOG.md` & `README.md` before commit/PR.
-- **Verify:** Run tests/compiler or ask user to visually verify before concluding/commit/PR. If automated tests do not exist for the subsystem, define and log the exact manual, visual, or console verification steps before declaring done. Never assume.
+- **Quality:** Run format/lint before every commit. Update `CHANGELOG.md` & `README.md` before PR.
+- **Verify:** Run tests/compiler or ask user to visually verify before concluding/PR. Never assume.
 - **Blockers:** Stop and ask user on ambiguity; do not guess.
 - **Scope:** Stick strictly to requested task/plan. No unrequested features/refactoring.
 - **Dependencies:** Use existing packages/standard lib. Ask before adding new dependencies.
