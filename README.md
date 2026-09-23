@@ -395,10 +395,63 @@ gofront <input> --minify                   minify output (built-in minifier)
 gofront <input> --minify --mangle          minify and rename local identifiers
 gofront <file.go> --ast                    dump AST (debug)
 gofront <file.go> --tokens                 dump tokens (debug)
+gofront test [dir] [--dom]                 run unit tests (-v verbose, -run <regex>)
 gofront prep [dir]                         copy static assets and bundle vendor dependencies
 gofront init [dir]                         scaffold a new project
 gofront --version / -v                     print version
 gofront --help / -h                        print this help
+```
+
+---
+
+## Unit testing (`gofront test`)
+
+GoFront provides native, Go-idiomatic unit testing out of the box:
+
+- Files ending in `*_test.go` are automatically excluded from production builds (`gofront .`, `gofront -o app.js`) and compiled only when running tests.
+- Built-in `testing` standard library package with `*testing.T`.
+- Discover and execute `func TestXxx(t *testing.T)` functions with standard Go-style output.
+
+### Writing a test
+
+```go
+package store
+
+import "testing"
+
+func TestAddTodo(t *testing.T) {
+    store := NewTodoStore()
+    store.Add("Buy milk")
+
+    if store.Count() != 1 {
+        t.Errorf("expected 1 item, got %d", store.Count())
+    }
+}
+```
+
+Subtests and skips are fully supported:
+
+```go
+func TestFilter(t *testing.T) {
+    t.Run("active", func(t *testing.T) {
+        // subtest logic
+    })
+    t.Run("completed", func(t *testing.T) {
+        if testing.Short() {
+            t.Skip("skipping in short mode")
+        }
+    })
+}
+```
+
+### Running tests
+
+```sh
+gofront test                  # run tests in current directory
+gofront test ./src            # run tests in specific directory
+gofront test -v               # verbose output (RUN, PASS/FAIL, logs)
+gofront test -run "Todo"      # run only tests matching regex pattern
+gofront test --dom            # initialize JSDOM for DOM/gom/templ tests
 ```
 
 ---

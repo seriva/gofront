@@ -46,9 +46,19 @@ var __sprintf = __sprintf || function(f, ...a) {
       case "s": return pad(String(v == null ? "<nil>" : v), width, false);
       case "d": return pad(String(Math.trunc(Number(v))), width, zero);
       case "v": {
-        if (typeof v === "object" && v !== null && "re" in v && "im" in v) {
-          const sign = v.im >= 0 ? "+" : "";
-          return pad("(" + v.re + sign + v.im + "i)", width, false);
+        if (typeof v === "object" && v !== null) {
+          if ("re" in v && "im" in v) {
+            const sign = v.im >= 0 ? "+" : "";
+            return pad("(" + v.re + sign + v.im + "i)", width, false);
+          }
+          if (typeof v.Error === "function") {
+            return pad(String(v.Error()), width, false);
+          }
+          try {
+            return pad(JSON.stringify(v), width, false);
+          } catch {
+            return pad(String(v), width, false);
+          }
         }
         return pad(String(v == null ? "<nil>" : v), width, false);
       }
@@ -120,7 +130,7 @@ async function submitInput() {
   let input = document.querySelector(".todo-input");
   let text = input.value.trim();
   let err = validateTodo(text);
-  if (err !== null) {
+  if (err != null) {
     errorMsg = __sprintf("%v", err);
     render();
     await sleep(2500);
@@ -147,9 +157,9 @@ function setupEvents() {
   let app = document.querySelector("#app");
   app.addEventListener("click", function(e) {
     let action = e.target.getAttribute("data-action");
-    if (action === null || action === "") {
+    if (action == null || action === "") {
       let btn = e.target.closest("[data-action]");
-      if (btn === null) {
+      if (btn == null) {
         return;
       }
       action = btn.getAttribute("data-action");
@@ -209,7 +219,7 @@ function setupEvents() {
   });
   app.addEventListener("dragstart", function(e) {
     let li = e.target.closest("li");
-    if (li === null) {
+    if (li == null) {
       return;
     }
     dragSrcId = Math.trunc(Number(li.getAttribute("data-id")));
@@ -218,7 +228,7 @@ function setupEvents() {
   });
   app.addEventListener("dragover", function(e) {
     let li = e.target.closest("li");
-    if (li === null) {
+    if (li == null) {
       return;
     }
     let targetId = Math.trunc(Number(li.getAttribute("data-id")));
@@ -236,7 +246,7 @@ function setupEvents() {
   });
   app.addEventListener("dragleave", function(e) {
     let li = e.target.closest("li");
-    if (li === null) {
+    if (li == null) {
       return;
     }
     if (!li.contains(e.relatedTarget)) {
@@ -246,7 +256,7 @@ function setupEvents() {
   app.addEventListener("drop", function(e) {
     e.preventDefault();
     let li = e.target.closest("li");
-    if (li === null) {
+    if (li == null) {
       return;
     }
     let targetId = Math.trunc(Number(li.getAttribute("data-id")));
@@ -258,7 +268,7 @@ function setupEvents() {
   });
   app.addEventListener("dragend", function(e) {
     let li = e.target.closest("li");
-    if (li !== null) {
+    if (li != null) {
       li.classList.remove("dragging", "drag-over-top", "drag-over-bottom");
     }
   });
@@ -269,7 +279,7 @@ async function main() {
   render();
   setupEvents();
   let loadErr = await loadTodos();
-  if (loadErr !== null || __len(todos) === 0) {
+  if (loadErr != null || __len(todos) === 0) {
     addTodo("Read the GoFront docs", PriorityNormal);
     addTodo("Fix the critical production bug", PriorityHigh);
     addTodo("Write tests", PriorityNormal);
@@ -391,7 +401,7 @@ function safeJsonParse(raw) {
     __defers.push(() => { (function() {
       {
         let r = (typeof __panic !== "undefined" && __panic !== null ? (() => { const __r = __panic.message ?? String(__panic); __panic = null; return __r; })() : null);
-        if (r !== null) {
+        if (r != null) {
           err = __error(__sprintf("%v", r));
         }
       }
@@ -414,11 +424,11 @@ async function saveTodos() {
 
 async function loadTodos() {
   let raw = localStorage.getItem("todos");
-  if (raw === null) {
+  if (raw == null) {
     return null;
   }
   let [parsed, parseErr] = safeJsonParse(raw);
-  if (parseErr !== null || parsed === null) {
+  if (parseErr != null || parsed == null) {
     return null;
   }
   let loaded = null;
@@ -442,7 +452,7 @@ async function triggerSave() {
   setSyncStatus("Saving…", "saving");
   render();
   let err = await saveTodos();
-  if (err !== null) {
+  if (err != null) {
     setSyncStatus("Save failed", "error");
     render();
     return;

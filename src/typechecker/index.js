@@ -225,7 +225,19 @@ export class TypeChecker {
 	_checkTopDeclsPass(programs) {
 		for (const p of programs) {
 			this._setCurrentFile(p);
-			for (const d of p.decls) this.checkTopDecl(d, this.globals);
+			for (const d of p.decls) {
+				if (d.kind === "VarDecl" || d.kind === "ConstDecl") {
+					this.checkTopDecl(d, this.globals);
+				}
+			}
+		}
+		for (const p of programs) {
+			this._setCurrentFile(p);
+			for (const d of p.decls) {
+				if (d.kind === "FuncDecl" || d.kind === "MethodDecl") {
+					this.checkTopDecl(d, this.globals);
+				}
+			}
 		}
 	}
 

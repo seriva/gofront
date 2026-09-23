@@ -47,6 +47,7 @@ const BUILTIN_PACKAGES = new Set([
 	"regexp",
 	"path",
 	"path/filepath",
+	"testing",
 ]);
 
 // Returns true for local relative paths (start with ./ or ../)

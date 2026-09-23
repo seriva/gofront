@@ -30,6 +30,7 @@ import {
 	HELPER_PATH_CLEAN,
 	HELPER_S,
 	HELPER_SPRINTF,
+	HELPER_TESTING,
 	HELPER_TIME_FMT,
 	HELPER_TIME_PARSE,
 } from "./runtime.js";
@@ -71,6 +72,7 @@ export class CodeGen {
 		this._usesPathClean = false;
 		this._usesTimeFmt = false;
 		this._usesTimeParse = false;
+		this._usesTesting = false;
 		// Iterator (range-over-func) context
 		this._inIteratorBody = false;
 		this._iterDepth = 0;
@@ -137,20 +139,24 @@ export class CodeGen {
 		}
 	}
 
-	_callInitAndMain(initNames, program) {
+	_callInitAndMain(initNames, program, isTest = false) {
 		for (const name of initNames) this.line(`${name}();`);
-		if (program.decls.some((d) => d.kind === "FuncDecl" && d.name === "main"))
+		if (
+			!isTest &&
+			program.decls.some((d) => d.kind === "FuncDecl" && d.name === "main")
+		)
 			this.line("main();");
 	}
 
-	generate(program) {
+	generate(program, options = {}) {
+		const isTest = options.isTest ?? false;
 		const methods = this._collectDecls(program);
 		this._emitJsImports();
 		this._emitTypeDecls(program, methods);
 		this._emitVarConstDecls(program);
 		const initNames = this._emitFuncDecls(program);
-		this._callInitAndMain(initNames, program);
-		this._prependHelpers();
+		this._callInitAndMain(initNames, program, isTest);
+		this._prependHelpers(isTest);
 		while (this.out[0] === "") this.out.shift();
 		return this.out.join("\n");
 	}
@@ -221,7 +227,8 @@ export class CodeGen {
 		return methods;
 	}
 
-	_prependHelpers() {
+	_prependHelpers(isTest = false) {
+		const needsTesting = isTest || this._usesTesting;
 		const HELPER_MAP = [
 			[this._usesLen, HELPER_LEN],
 			[this._usesAppend, HELPER_APPEND],
@@ -229,12 +236,13 @@ export class CodeGen {
 			[this._usesEqual, HELPER_EQUAL],
 			[this._usesCmul, HELPER_CMUL],
 			[this._usesCdiv, HELPER_CDIV],
-			[this._usesSprintf, HELPER_SPRINTF],
+			[this._usesSprintf || needsTesting, HELPER_SPRINTF],
 			[this._usesError, HELPER_ERROR],
 			[this._usesErrorIs, HELPER_ERROR_IS],
 			[this._usesPathClean, HELPER_PATH_CLEAN],
 			[this._usesTimeFmt, HELPER_TIME_FMT],
 			[this._usesTimeParse, HELPER_TIME_PARSE],
+			[needsTesting, HELPER_TESTING],
 		];
 		const helpers = HELPER_MAP.filter(([flag]) => flag).map(([, h]) => h);
 		if (helpers.length > 0) this.out.unshift(...helpers, "");
@@ -242,14 +250,14 @@ export class CodeGen {
 
 	// Generate a single bundle from multiple programs (same-package multi-file).
 	// Annotates each decl with its source file index before merging.
-	generateAll(programs) {
+	generateAll(programs, options = {}) {
 		for (let i = 0; i < programs.length; i++) {
 			for (const decl of programs[i].decls) {
 				decl._srcFileIdx = i;
 			}
 		}
 		const merged = { decls: programs.flatMap((p) => p.decls) };
-		return this.generate(merged);
+		return this.generate(merged, options);
 	}
 
 	// Returns a source map JSON string for the last generate() call.

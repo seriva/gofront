@@ -35,6 +35,7 @@ import "./compiler/imports.test.js";
 import "./compiler/dev-server.test.js";
 import "./compiler/asset-manager.test.js";
 import "./compiler/prep.test.js";
+import "./compiler/test-runner.test.js";
 import "./builtins/gom.test.js";
 import "./templ.test.js";
 import "./dom.test.js";

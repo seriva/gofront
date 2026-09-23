@@ -21,7 +21,13 @@ const { version } = _require("../package.json");
 import { mkdirSync, statSync, watch, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { copyAssets } from "./asset-manager.js";
-import { handleInit, handlePrep, maybeMinify, runCompile } from "./cli-core.js";
+import {
+	handleInit,
+	handlePrep,
+	handleTest,
+	maybeMinify,
+	runCompile,
+} from "./cli-core.js";
 import { createDevServer, liveReloadClient } from "./dev-server.js";
 
 // ── Parse CLI args ───────────────────────────────────────────
@@ -51,7 +57,8 @@ Usage:
   gofront <input> --minify --mangle  Minify and mangle identifiers
   gofront <file.go> --ast        Dump AST (debug)
   gofront <file.go> --tokens     Dump tokens (debug)
-  gofront prep [dir]             Copy static assets and bundle vendor dependencies
+  gofront test [dir] [--dom]     Run unit tests (-v verbose, -run <regex>)
+  gofront prep [dir] [--minify]  Copy static assets and bundle vendor dependencies
   gofront init [dir]             Scaffold a new GoFront project
   gofront --version              Print version
 `.trim(),
@@ -62,18 +69,27 @@ Usage:
 // ── prep / vendor subcommand ──────────────────────────────────
 
 if (args[0] === "prep" || args[0] === "vendor") {
-	const targetArg = args[1] ?? ".";
+	const hasMinify = args.includes("--minify");
+	const filteredArgs = args.slice(1).filter((a) => !a.startsWith("--"));
+	const targetArg = filteredArgs[0] ?? ".";
 	const targetDir = resolve(targetArg);
 	try {
-		const { assets, vendor } = await handlePrep(targetDir);
+		const vendorConfig = hasMinify ? { minify: true } : {};
+		const { assets, vendor } = await handlePrep(targetDir, {
+			vendorConfig,
+		});
 		if (assets.copied > 0 || assets.skipped > 0) {
 			console.error(
 				`gofront: copied ${assets.copied} assets (${assets.skipped} skipped)`,
 			);
 		}
 		if (vendor.bundled?.length > 0) {
+			const destStr = Array.isArray(vendor.dest)
+				? vendor.dest.join(", ")
+				: vendor.dest;
+			const minStr = vendor.minify ? " (minified)" : "";
 			console.error(
-				`gofront: bundled ${vendor.bundled.length} vendor dependencies → ${vendor.dest}`,
+				`gofront: bundled ${vendor.bundled.length} vendor dependencies → ${destStr}${minStr}`,
 			);
 		}
 	} catch (e) {
@@ -100,6 +116,45 @@ if (args[0] === "init") {
 		`gofront: run  gofront ${targetArg === "." ? "main.go" : `${targetArg}/main.go`}  to compile`,
 	);
 	process.exit(0);
+}
+
+// ── test subcommand ───────────────────────────────────────────
+
+if (args[0] === "test") {
+	const flags = args.slice(1);
+	let targetDir = ".";
+	let runFilter = null;
+	const nonFlagArgs = [];
+	for (let i = 0; i < flags.length; i++) {
+		const arg = flags[i];
+		if (arg === "-run" || arg === "--run") {
+			runFilter = flags[++i] ?? null;
+			continue;
+		}
+		if (arg.startsWith("-run=") || arg.startsWith("--run=")) {
+			runFilter = arg.slice(arg.indexOf("=") + 1);
+			continue;
+		}
+		if (arg.startsWith("-")) continue;
+		nonFlagArgs.push(arg);
+	}
+	if (nonFlagArgs.length > 0) {
+		targetDir = nonFlagArgs[0];
+	}
+	const verbose = flags.includes("-v");
+	const dom = flags.includes("--dom");
+
+	try {
+		const result = await handleTest(targetDir, {
+			verbose,
+			dom,
+			run: runFilter,
+		});
+		process.exit(result.exitCode);
+	} catch (e) {
+		console.error(`gofront: ${e.message}`);
+		process.exit(1);
+	}
 }
 
 const inputArg = args[0];

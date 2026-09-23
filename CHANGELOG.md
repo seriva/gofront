@@ -5,7 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
- 
+
+## [1.2.0] - 2026-09-23
+
+### Added
+- **Native unit testing & test runner (`gofront test`)** — added built-in unit testing framework and CLI runner. Excludes `*_test.go` files from standard compilation (`compileDir`, `gofront .`), including them during test mode (`compilePackageTests`, `gofront test`). Provides standard library `testing` package with `testing.T` (`t.Error`, `t.Errorf`, `t.Fatal`, `t.Fatalf`, `t.Fail`, `t.Failed`, `t.FailNow`, `t.Log`, `t.Logf`, `t.Skip`, `t.Skipf`, `t.Skipped`, `t.Helper`, `t.Run`, `t.Name`), `testing.Short()`, and `testing.Verbose()`. Detects test functions matching `func TestXxx(t *testing.T)` and executes an inline test harness with Go-idiomatic terminal reporting (`=== RUN`, `--- PASS`, `--- FAIL`, subtests, timing, and exit codes). Supports `-v` (verbose), `-run <regex>` (test filter), and `--dom` (JSDOM environment for DOM/gom/templ component testing).
+- **Vendor minification & multi-destination output (`gofront prep --minify`)** — added native minification support to the vendor bundler (`src/vendor.js`), forwarding `minify` option to `rolldown` and `esbuild`. Supports multi-destination destination arrays (`vendor.dest: ["app/vendor.js", "public/vendor.js"]`) to seamlessly emit both development and production bundles. Added `--minify` CLI flag to `gofront prep [dir] [--minify]`.
+- **Example app unit test suites (`npm run test:examples`)** — added native `*_test.go` suites across `example/simple/src`, `example/reactive/src/utils`, `example/gom/src/utils`, and `example/templ/src/utils`. Wired `test:examples` into `package.json` and integrated it with `test:all`.
+
 ## [1.1.0] - 2026-09-22
 
 ### Added

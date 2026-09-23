@@ -62,9 +62,13 @@ function parseGoFrontFile(filePath) {
 	return ast;
 }
 
-function gwFilesIn(dir) {
+export function gwFilesIn(dir, { includeTests = false } = {}) {
 	return readdirSync(dir)
-		.filter((f) => f.endsWith(".go") || f.endsWith(".templ"))
+		.filter((f) => {
+			if (!f.endsWith(".go") && !f.endsWith(".templ")) return false;
+			if (!includeTests && f.endsWith("_test.go")) return false;
+			return true;
+		})
 		.sort() // deterministic order
 		.map((f) => join(dir, f));
 }
@@ -206,9 +210,15 @@ export function compileSingleFile(inputPath, options = {}) {
 }
 
 export function compileDir(dir, options = {}) {
-	const files = gwFilesIn(dir);
+	const files = gwFilesIn(dir, { includeTests: options.includeTests ?? false });
 	if (files.length === 0) throw new Error(`No .go files found in ${dir}`);
 	return compileFiles(files, { ...options, fromDir: dir });
+}
+
+export function compilePackageTests(dir, options = {}) {
+	const files = gwFilesIn(dir, { includeTests: true });
+	if (files.length === 0) throw new Error(`No .go files found in ${dir}`);
+	return compileFiles(files, { ...options, fromDir: dir, isTest: true });
 }
 
 export function compileFiles(files, options = {}) {
@@ -262,7 +272,9 @@ export function compileFiles(files, options = {}) {
 
 	// ── 4. Code generation ────────────────────────────────────────
 	const codegen = new CodeGen(checker, jsImports, bundledPackages);
-	const mainJs = codegen.generateAll(programs);
+	const mainJs = codegen.generateAll(programs, {
+		isTest: options.isTest ?? false,
+	});
 
 	let js = preambles.length > 0 ? `${preambles.join("\n")}\n${mainJs}` : mainJs;
 
@@ -278,6 +290,7 @@ export function compileFiles(files, options = {}) {
 	return {
 		pkgName,
 		js,
+		programs,
 		exportedSymbols: checker.getExportedSymbols(),
 		exportedTypes: checker.getExportedTypes(),
 	};

@@ -46,9 +46,19 @@ var __sprintf = __sprintf || function(f, ...a) {
       case "s": return pad(String(v == null ? "<nil>" : v), width, false);
       case "d": return pad(String(Math.trunc(Number(v))), width, zero);
       case "v": {
-        if (typeof v === "object" && v !== null && "re" in v && "im" in v) {
-          const sign = v.im >= 0 ? "+" : "";
-          return pad("(" + v.re + sign + v.im + "i)", width, false);
+        if (typeof v === "object" && v !== null) {
+          if ("re" in v && "im" in v) {
+            const sign = v.im >= 0 ? "+" : "";
+            return pad("(" + v.re + sign + v.im + "i)", width, false);
+          }
+          if (typeof v.Error === "function") {
+            return pad(String(v.Error()), width, false);
+          }
+          try {
+            return pad(JSON.stringify(v), width, false);
+          } catch {
+            return pad(String(v), width, false);
+          }
         }
         return pad(String(v == null ? "<nil>" : v), width, false);
       }
@@ -127,7 +137,7 @@ function setSyncStatus(msg, cls) {
 async function triggerSave() {
   setSyncStatus("Saving…", "saving");
   let err = await saveTodos();
-  if (err !== null) {
+  if (err != null) {
     setSyncStatus("Save failed", "error");
     return;
   }
@@ -143,7 +153,7 @@ async function submitInput() {
     let input = document.querySelector(".todo-input");
     __defers.push(() => { input.focus(); });
     let err = validateTodo(input.value);
-    if (err !== null) {
+    if (err != null) {
       return;
     }
     let priority = PriorityNormal;
@@ -233,7 +243,7 @@ function setupEvents() {
   });
   list.addEventListener("dragstart", function(e) {
     let li = e.target.closest("li");
-    if (li === null) {
+    if (li == null) {
       return;
     }
     dragSrcId = Math.trunc(Number(li.getAttribute("data-id")));
@@ -242,7 +252,7 @@ function setupEvents() {
   });
   list.addEventListener("dragover", function(e) {
     let li = e.target.closest("li");
-    if (li === null) {
+    if (li == null) {
       return;
     }
     let targetId = Math.trunc(Number(li.getAttribute("data-id")));
@@ -260,7 +270,7 @@ function setupEvents() {
   });
   list.addEventListener("dragleave", function(e) {
     let li = e.target.closest("li");
-    if (li === null) {
+    if (li == null) {
       return;
     }
     if (!li.contains(e.relatedTarget)) {
@@ -270,7 +280,7 @@ function setupEvents() {
   list.addEventListener("drop", function(e) {
     e.preventDefault();
     let li = e.target.closest("li");
-    if (li === null) {
+    if (li == null) {
       return;
     }
     let targetId = Math.trunc(Number(li.getAttribute("data-id")));
@@ -284,7 +294,7 @@ function setupEvents() {
   });
   list.addEventListener("dragend", function(e) {
     let li = e.target.closest("li");
-    if (li !== null) {
+    if (li != null) {
       li.classList.remove("dragging", "drag-over-top", "drag-over-bottom");
     }
   });
@@ -295,7 +305,7 @@ async function main() {
   createApp();
   setupEvents();
   let loadErr = await loadTodos();
-  if (loadErr !== null || __len(todos) === 0) {
+  if (loadErr != null || __len(todos) === 0) {
     addTodo("Read the GoFront docs", PriorityNormal);
     addTodo("Fix the critical production bug", PriorityHigh);
     addTodo("Write tests", PriorityNormal);
@@ -386,7 +396,7 @@ function safeJsonParse(raw) {
     __defers.push(() => { (function() {
       {
         let r = (typeof __panic !== "undefined" && __panic !== null ? (() => { const __r = __panic.message ?? String(__panic); __panic = null; return __r; })() : null);
-        if (r !== null) {
+        if (r != null) {
           err = __error(__sprintf("%v", r));
         }
       }
@@ -409,14 +419,14 @@ async function saveTodos() {
 
 async function loadTodos() {
   let raw = localStorage.getItem("todos");
-  if (raw === null) {
+  if (raw == null) {
     return null;
   }
   let [parsed, parseErr] = safeJsonParse(raw);
-  if (parseErr !== null) {
+  if (parseErr != null) {
     return __error(__sprintf("invalid stored todos: %w", parseErr), parseErr);
   }
-  if (parsed === null) {
+  if (parsed == null) {
     return __error("failed to parse stored todos");
   }
   let loaded = null;

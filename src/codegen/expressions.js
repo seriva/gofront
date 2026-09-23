@@ -345,6 +345,8 @@ export const expressionGenMethods = {
 			return this._genRegexpMethodCall(expr.func.field, expr);
 		if (recvName === "time.Time")
 			return this._genTimeMethodCall(expr.func.field, expr);
+		if (recvName === "testing.T")
+			return this._genTestingMethodCall(expr.func.field, expr);
 		return undefined;
 	},
 
@@ -751,6 +753,10 @@ export const expressionGenMethods = {
 				this._usesEqual = true;
 				const cmp = `__equal(${l}, ${r})`;
 				return expr.op === "==" ? cmp : `!${cmp}`;
+			}
+			if (l === "null" || r === "null") {
+				const op = expr.op === "==" ? "==" : "!=";
+				return `${l} ${op} ${r}`;
 			}
 		}
 		const op = expr.op === "==" ? "===" : expr.op === "!=" ? "!==" : expr.op;

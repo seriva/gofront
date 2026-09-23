@@ -18,6 +18,7 @@ import { slicesMethods } from "./slices.js";
 import { sortMethods } from "./sort.js";
 import { strconvMethods } from "./strconv.js";
 import { stringsMethods } from "./strings.js";
+import { testingMethods } from "./testing.js";
 import { timeMethods } from "./time.js";
 import { unicodeMethods } from "./unicode.js";
 import { utf8Methods } from "./utf8.js";
@@ -45,6 +46,7 @@ const STDLIB_METHOD_MAP = {
 	rand: "_genRand",
 	utf8: "_genUtf8",
 	path: "_genPath",
+	testing: "_genTesting",
 };
 
 const dispatchMethods = {
@@ -94,5 +96,6 @@ export const stdlibGenMethods = {
 	...timeMethods,
 	...unicodeMethods,
 	...utf8Methods,
+	...testingMethods,
 	...dispatchMethods,
 };
