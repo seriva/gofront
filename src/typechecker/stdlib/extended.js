@@ -308,6 +308,64 @@ export function setupExtendedGlobals(globals, types) {
 		},
 	});
 
+	const TESTING_T = {
+		kind: "named",
+		name: "testing.T",
+		underlying: { kind: "struct", fields: new Map(), methods: new Map() },
+	};
+	const TESTING_PTR = { kind: "pointer", base: TESTING_T };
+
+	TESTING_T.underlying.methods = new Map([
+		["Error", { kind: "func", params: [ANY], returns: [VOID], variadic: true }],
+		[
+			"Errorf",
+			{ kind: "func", params: [STRING, ANY], returns: [VOID], variadic: true },
+		],
+		["Fatal", { kind: "func", params: [ANY], returns: [VOID], variadic: true }],
+		[
+			"Fatalf",
+			{ kind: "func", params: [STRING, ANY], returns: [VOID], variadic: true },
+		],
+		["Fail", { kind: "func", params: [], returns: [VOID] }],
+		["Failed", { kind: "func", params: [], returns: [BOOL] }],
+		["FailNow", { kind: "func", params: [], returns: [VOID] }],
+		["Log", { kind: "func", params: [ANY], returns: [VOID], variadic: true }],
+		[
+			"Logf",
+			{ kind: "func", params: [STRING, ANY], returns: [VOID], variadic: true },
+		],
+		["Skip", { kind: "func", params: [ANY], returns: [VOID], variadic: true }],
+		[
+			"Skipf",
+			{ kind: "func", params: [STRING, ANY], returns: [VOID], variadic: true },
+		],
+		["Skipped", { kind: "func", params: [], returns: [BOOL] }],
+		["Helper", { kind: "func", params: [], returns: [VOID] }],
+		[
+			"Run",
+			{
+				kind: "func",
+				params: [
+					STRING,
+					{ kind: "func", params: [TESTING_PTR], returns: [VOID] },
+				],
+				returns: [BOOL],
+			},
+		],
+		["Name", { kind: "func", params: [], returns: [STRING] }],
+	]);
+
+	globals.define("testing", {
+		kind: "namespace",
+		name: "testing",
+		members: {
+			T: TESTING_T,
+			Short: { kind: "func", params: [], returns: [BOOL] },
+			Verbose: { kind: "func", params: [], returns: [BOOL] },
+		},
+	});
+	types.set("testing.T", TESTING_T);
+
 	for (const name of [
 		"append",
 		"len",

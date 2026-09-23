@@ -46,9 +46,19 @@ var __sprintf = __sprintf || function(f, ...a) {
       case "s": return pad(String(v == null ? "<nil>" : v), width, false);
       case "d": return pad(String(Math.trunc(Number(v))), width, zero);
       case "v": {
-        if (typeof v === "object" && v !== null && "re" in v && "im" in v) {
-          const sign = v.im >= 0 ? "+" : "";
-          return pad("(" + v.re + sign + v.im + "i)", width, false);
+        if (typeof v === "object" && v !== null) {
+          if ("re" in v && "im" in v) {
+            const sign = v.im >= 0 ? "+" : "";
+            return pad("(" + v.re + sign + v.im + "i)", width, false);
+          }
+          if (typeof v.Error === "function") {
+            return pad(String(v.Error()), width, false);
+          }
+          try {
+            return pad(JSON.stringify(v), width, false);
+          } catch {
+            return pad(String(v), width, false);
+          }
         }
         return pad(String(v == null ? "<nil>" : v), width, false);
       }
@@ -164,7 +174,7 @@ async function submitInput(input, inputValue) {
   try {
     __defers.push(() => { input.focus(); });
     let err = validateTodo(inputValue.get());
-    if (err !== null) {
+    if (err != null) {
       errorSignal.set(err.Error());
       await sleep(2500);
       errorSignal.set("");
@@ -218,11 +228,11 @@ async function main() {
     if (state.status !== "resolved") {
       return;
     }
-    if (unsub !== null) {
+    if (unsub != null) {
       unsub();
     }
     let loaded = state.data;
-    if (loaded !== null && __len(loaded) > 0) {
+    if (loaded != null && __len(loaded) > 0) {
       let last = loaded[__len(loaded) - 1];
       nextId = last.id + 1;
       todosSignal.set(loaded);
@@ -454,7 +464,7 @@ function setupDragDrop(els) {
   });
   comp.on(els.list, "dragstart", function(e) {
     let li = e.target.closest("li");
-    if (li === null) {
+    if (li == null) {
       return;
     }
     dragSrcSig.set(Math.trunc(Number(li.getAttribute("data-id"))));
@@ -463,7 +473,7 @@ function setupDragDrop(els) {
   }, null);
   comp.on(els.list, "dragover", function(e) {
     let li = e.target.closest("li");
-    if (li === null) {
+    if (li == null) {
       return;
     }
     let targetId = Math.trunc(Number(li.getAttribute("data-id")));
@@ -482,7 +492,7 @@ function setupDragDrop(els) {
   }, null);
   comp.on(els.list, "dragleave", function(e) {
     let li = e.target.closest("li");
-    if (li === null) {
+    if (li == null) {
       return;
     }
     if (!li.contains(e.relatedTarget)) {
@@ -492,7 +502,7 @@ function setupDragDrop(els) {
   comp.on(els.list, "drop", function(e) {
     e.preventDefault();
     let li = e.target.closest("li");
-    if (li === null) {
+    if (li == null) {
       return;
     }
     let targetId = Math.trunc(Number(li.getAttribute("data-id")));
@@ -504,7 +514,7 @@ function setupDragDrop(els) {
   }, null);
   comp.on(els.list, "dragend", function(e) {
     let li = e.target.closest("li");
-    if (li !== null) {
+    if (li != null) {
       li.classList.remove("dragging", "drag-over-top", "drag-over-bottom");
     }
   }, null);
@@ -590,11 +600,11 @@ async function asyncLoadFromStorage(cancel) {
     return null;
   }
   let raw = localStorage.getItem("todos");
-  if (raw === null) {
+  if (raw == null) {
     return null;
   }
   let [parsed, parseErr] = safeJsonParse(raw);
-  if (parseErr !== null || parsed === null) {
+  if (parseErr != null || parsed == null) {
     return null;
   }
   let loaded = null;
@@ -621,7 +631,7 @@ function safeJsonParse(raw) {
     __defers.push(() => { (function() {
       {
         let r = (typeof __panic !== "undefined" && __panic !== null ? (() => { const __r = __panic.message ?? String(__panic); __panic = null; return __r; })() : null);
-        if (r !== null) {
+        if (r != null) {
           err = __error(__sprintf("%v", r));
         }
       }
@@ -645,7 +655,7 @@ function setSyncStatus(msg, cls) {
 async function triggerSave() {
   setSyncStatus("Saving…", "saving");
   let err = await saveTodos();
-  if (err !== null) {
+  if (err != null) {
     setSyncStatus("Save failed", "error");
     return;
   }

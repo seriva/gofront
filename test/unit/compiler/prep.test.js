@@ -112,6 +112,62 @@ test("loadVendorConfig respects explicit vendor string in package.json", () => {
 	}
 });
 
+test("loadVendorConfig parses minify flag and multi-dest array", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-vendor-cfgmult-"));
+	try {
+		writeFileSync(
+			join(dir, "package.json"),
+			JSON.stringify({
+				vendor: {
+					dest: ["app/vendor.js", "public/vendor.js"],
+					minify: true,
+				},
+				dependencies: { marked: "^18.0.0" },
+			}),
+		);
+
+		const config = loadVendorConfig(dir);
+		assertEqual(Array.isArray(config.dest), true);
+		assertEqual(config.dest.length, 2);
+		assertEqual(config.dest[0], "app/vendor.js");
+		assertEqual(config.dest[1], "public/vendor.js");
+		assertEqual(config.minify, true);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("handlePrep preserves vendor.minify from package.json when CLI flag omitted", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-prep-cfgmin-"));
+	try {
+		writeFileSync(
+			join(dir, "package.json"),
+			JSON.stringify({
+				vendor: { minify: true },
+				dependencies: { marked: "^18.0.0" },
+			}),
+		);
+
+		let capturedMinify = null;
+		const mockBundler = {
+			name: "mock",
+			bundle: async ({ minify, dest }) => {
+				capturedMinify = minify;
+				const d = Array.isArray(dest) ? dest[0] : dest;
+				writeFileSync(d, "// bundle");
+			},
+		};
+
+		const { vendor } = await handlePrep(dir, {
+			vendorConfig: { bundler: mockBundler },
+		});
+		assertEqual(vendor.minify, true);
+		assertEqual(capturedMinify, true);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
 section("vendor — bundling workflow");
 
 test("bundleVendor returns early if no dependencies exist", async () => {
@@ -199,6 +255,52 @@ test("bundleVendor throws error on destination directory traversal", async () =>
 			assertContains(err.message, "outside project directory");
 		}
 		assert(threw, "expected bundleVendor to throw on traversal attempt");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("bundleVendor supports minify and multi-destination copying", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-vendor-minmult-"));
+	try {
+		writeFileSync(
+			join(dir, "package.json"),
+			JSON.stringify({
+				dependencies: { marked: "^18.0.0" },
+			}),
+		);
+
+		let passedMinify = null;
+		const mockBundler = {
+			name: "mock-bundler",
+			bundle: async ({ dest, minify }) => {
+				passedMinify = minify;
+				const dests = Array.isArray(dest) ? dest : [dest];
+				for (const d of dests) {
+					writeFileSync(d, `/* minified: ${minify} */`);
+				}
+			},
+		};
+
+		const result = await bundleVendor(dir, {
+			bundler: mockBundler,
+			dest: ["dist/app/vendor.js", "dist/public/vendor.js"],
+			minify: true,
+		});
+
+		assertEqual(result.bundled.length, 1);
+		assertEqual(result.minify, true);
+		assertEqual(passedMinify, true);
+		assert(existsSync(join(dir, "dist/app/vendor.js")));
+		assert(existsSync(join(dir, "dist/public/vendor.js")));
+		assertContains(
+			readFileSync(join(dir, "dist/app/vendor.js"), "utf8"),
+			"minified: true",
+		);
+		assertContains(
+			readFileSync(join(dir, "dist/public/vendor.js"), "utf8"),
+			"minified: true",
+		);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -293,6 +395,25 @@ test("gofront --help lists prep and --copy-assets", () => {
 	assertEqual(code, 0);
 	assertContains(stdout, "gofront prep");
 	assertContains(stdout, "--copy-assets");
+});
+
+test("gofront prep --minify executes via CLI and copies assets", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-prep-mincli-"));
+	try {
+		writeFileSync(
+			join(dir, "package.json"),
+			JSON.stringify({
+				assetCopy: [{ source: "icon.svg", dest: "assets/icon.svg" }],
+			}),
+		);
+		writeFileSync(join(dir, "icon.svg"), "<svg></svg>");
+
+		const { code, stderr } = cli(["prep", dir, "--minify"]);
+		assertEqual(code, 0);
+		assertContains(stderr, "copied 1 assets");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
