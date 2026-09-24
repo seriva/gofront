@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.2.3] - 2026-09-24
+
+### Fixed
+- **Literal folding in minifier corrupted SVG paths and string constants** — `foldLiterals()` in `src/minifier.js` previously executed a global regular expression over raw code, mistakenly matching hyphen-delimited numbers inside string literals (e.g. SVG path coordinate sequences like `12.5-12.5` were folded to `12.-7.5`). Literal folding now operates safely on tokenized code, completely preserving strings, template literals, and regexes while respecting operator precedence, unary minus, and floating-point expansion limits.
+
 ## [1.2.2] - 2026-09-24
 
 ### Fixed
