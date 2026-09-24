@@ -8,6 +8,18 @@ features (e.g. `docs/v0.0.5/`).
 
 ---
 
+## v1.2.2
+
+**Theme: Bug fixes.** Fix identifier collisions in minifier mangling, struct field constructor shadowing, and single-variable map ranges.
+
+| Area | Difficulty | Status | Notes |
+|---|---|---|---|
+| Minifier identifier collision | Low | ✓ | Skip occupied/unrenamed identifiers in `shortNameGenerator` during `--mangle`. |
+| Struct field constructor shadowing | Low | ✓ | Alias constructor parameter when field name matches a type name. |
+| Map range key iteration | Low | ✓ | Single-variable `range` over map emits `Object.keys()`. |
+
+---
+
 ## v1.2.1
 
 **Theme: Post-release hardening.** No new language features. Fix two bugs and several

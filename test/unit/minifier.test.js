@@ -219,6 +219,16 @@ test("mangling disabled by default", () => {
 	assertContains(out, "result");
 });
 
+test("mangling does not collide with existing unrenamed identifiers", () => {
+	const code = "let currentTheme='dark';function t(k){return k}";
+	const out = minify(code, { mangle: true });
+	assert(
+		!out.includes("let t="),
+		"should not mangle currentTheme to existing 't'",
+	);
+	assertContains(out, "function t(k)");
+});
+
 // ── Stage 4: Literal folding ─────────────────────────────────
 
 section("Minifier — Stage 4: Literal folding");
