@@ -257,6 +257,40 @@ test("does not fold non-constant expressions", () => {
 	assertContains(out, "a+2");
 });
 
+test("preserves SVG path strings with minus-separated numbers", () => {
+	const code =
+		'let d = "M233.4 105.4c12.5-12.5 32.8-12.5 45.3 0l192-192c12.5-12.5";';
+	const out = minify(code);
+	assertContains(
+		out,
+		'"M233.4 105.4c12.5-12.5 32.8-12.5 45.3 0l192-192c12.5-12.5"',
+	);
+});
+
+test("preserves template literals with minus-separated numbers", () => {
+	const code = "let d = `M233.4 105.4c12.5-12.5 32.8-12.5`;";
+	const out = minify(code);
+	assertContains(out, "`M233.4 105.4c12.5-12.5 32.8-12.5`");
+});
+
+test("folds chained constant additions", () => {
+	const code = "let x = 1 + 2 + 3;";
+	const out = minify(code);
+	assertContains(out, "let x=6");
+});
+
+test("preserves operator precedence in literal expressions", () => {
+	const code = "let x = 1 + 2 * 3;";
+	const out = minify(code);
+	assertContains(out, "let x=1+2*3");
+});
+
+test("preserves unary minus with binary addition", () => {
+	const code = "let x = -1 + 2;";
+	const out = minify(code);
+	assertContains(out, "let x=-1+2");
+});
+
 // ── Round-trip tests ─────────────────────────────────────────
 
 section("Minifier — Round-trip");

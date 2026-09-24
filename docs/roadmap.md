@@ -8,6 +8,16 @@ features (e.g. `docs/v0.0.5/`).
 
 ---
 
+## v1.2.3
+
+**Theme: Bug fix.** Fix minifier literal folding regex corrupting hyphenated numbers inside SVG path strings.
+
+| Area | Difficulty | Status | Notes |
+|---|---|---|---|
+| Minifier literal folding token preservation | Low | ✓ | Tokenize before folding so strings/templates/regexes are never altered. |
+
+---
+
 ## v1.2.2
 
 **Theme: Bug fixes.** Fix identifier collisions in minifier mangling, struct field constructor shadowing, and single-variable map ranges.
