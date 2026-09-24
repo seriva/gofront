@@ -379,8 +379,7 @@ function needsSpaceBetween(left, right) {
 	return false;
 }
 
-function compress(code) {
-	const tokens = tokenize(code);
+function compressTokens(tokens) {
 	let out = "";
 
 	for (let i = 0; i < tokens.length; i++) {
@@ -428,6 +427,10 @@ function compress(code) {
 	}
 
 	return out;
+}
+
+function compress(code) {
+	return compressTokens(tokenize(code));
 }
 
 function findPrevNonWs(tokens, index) {
@@ -640,39 +643,154 @@ function shortNameGeneratorFn(occupied = new Set()) {
 
 // ── Stage 4: Literal folding ─────────────────────────────────
 
-function foldLiterals(code) {
-	// Fold patterns like: <number> <op> <number> where both are literal constants
-	return code.replace(
-		/\b(\d+(?:\.\d+)?)\s*(\+|-|\*|\/|%)\s*(\d+(?:\.\d+)?)\b/g,
-		(match, left, op, right) => {
-			const l = Number(left);
-			const r = Number(right);
-			let result;
-			switch (op) {
-				case "+":
-					result = l + r;
-					break;
-				case "-":
-					result = l - r;
-					break;
-				case "*":
-					result = l * r;
-					break;
-				case "/":
-					result = r !== 0 ? l / r : null;
-					break;
-				case "%":
-					result = r !== 0 ? l % r : null;
-					break;
-				default:
-					return match;
+const FOLD_SAFE_PREV = new Set([
+	";",
+	"(",
+	"[",
+	"{",
+	",",
+	":",
+	"?",
+	"=",
+	"+=",
+	"-=",
+	"*=",
+	"/=",
+	"%=",
+	"&&",
+	"||",
+	"??",
+	"==",
+	"!=",
+	"===",
+	"!==",
+	"<",
+	"<=",
+	">",
+	">=",
+	"return",
+	"throw",
+	"case",
+	"yield",
+	"await",
+	"=>",
+]);
+
+function _foldBinaryOp(op, l, r) {
+	switch (op) {
+		case "+":
+			return l + r;
+		case "-":
+			return l - r;
+		case "*":
+			return l * r;
+		case "/":
+			return r !== 0 ? l / r : null;
+		case "%":
+			return r !== 0 ? l % r : null;
+		default:
+			return null;
+	}
+}
+
+function _isHigherPrecedenceOp(op, afterOp) {
+	if (
+		afterOp === "**" ||
+		afterOp === "++" ||
+		afterOp === "--" ||
+		afterOp === "."
+	) {
+		return true;
+	}
+	if (
+		(op === "+" || op === "-") &&
+		(afterOp === "*" || afterOp === "/" || afterOp === "%")
+	) {
+		return true;
+	}
+	return false;
+}
+
+function _canFoldLeft(next) {
+	const prevTok = findPrevNonWs(next, next.length);
+	return !prevTok || FOLD_SAFE_PREV.has(prevTok.value);
+}
+
+function _evaluateFold(tok, opTok, rightTok) {
+	const l = Number(tok.value);
+	const r = Number(rightTok.value);
+	if (!Number.isFinite(l) || !Number.isFinite(r)) return null;
+
+	let val = _foldBinaryOp(opTok.value, l, r);
+	if (val === null || !Number.isFinite(val) || val < 0) return null;
+	if (Object.is(val, -0)) val = 0;
+
+	const s = String(val);
+	const origLen = tok.value.length + opTok.value.length + rightTok.value.length;
+	return s.length <= origLen ? s : null;
+}
+
+function _tryFoldAt(current, i, next) {
+	const tok = current[i];
+	if (tok.type !== "num" || !_canFoldLeft(next)) return null;
+
+	const opInfo = nextNonWs(current, i);
+	if (opInfo?.tok.type !== "op") return null;
+
+	const op = opInfo.tok.value;
+	if (op !== "+" && op !== "-" && op !== "*" && op !== "/" && op !== "%") {
+		return null;
+	}
+
+	const rightInfo = nextNonWs(current, opInfo.idx);
+	if (rightInfo?.tok.type !== "num") return null;
+
+	const afterInfo = nextNonWs(current, rightInfo.idx);
+	if (
+		afterInfo?.tok.type === "op" &&
+		_isHigherPrecedenceOp(op, afterInfo.tok.value)
+	) {
+		return null;
+	}
+
+	const folded = _evaluateFold(tok, opInfo.tok, rightInfo.tok);
+	if (!folded) return null;
+
+	next.push({ type: "num", value: folded });
+	return rightInfo.idx + 1;
+}
+
+function foldTokens(tokens) {
+	let changed = true;
+	let current = tokens;
+	let iterations = 0;
+
+	while (changed && iterations < 10) {
+		changed = false;
+		iterations++;
+		const next = [];
+		let i = 0;
+
+		while (i < current.length) {
+			const nextIdx = _tryFoldAt(current, i, next);
+			if (nextIdx !== null) {
+				i = nextIdx;
+				changed = true;
+			} else {
+				next.push(current[i]);
+				i++;
 			}
-			if (result === null || !Number.isFinite(result)) return match;
-			// If result is integer, emit without decimal point
-			const s = Number.isInteger(result) ? String(result) : String(result);
-			return s;
-		},
-	);
+		}
+
+		current = next;
+	}
+
+	return current;
+}
+
+function foldLiterals(code) {
+	const tokens = tokenize(code);
+	return compressTokens(foldTokens(tokens));
 }
 
 // ── Public API ───────────────────────────────────────────────
