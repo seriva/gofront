@@ -545,10 +545,18 @@ function _applyRenaming(tokens, renameMap) {
 
 function mangle(code) {
 	const tokens = tokenize(code);
-	const nameGen = shortNameGeneratorFn();
-	const renameMap = new Map();
 	const { declaredLocals } = _collectLocalDecls(tokens);
 	_filterRenameCandidates(declaredLocals);
+
+	const occupied = new Set(MANGLE_GLOBALS);
+	for (const tok of tokens) {
+		if (tok.type === "ident" && !declaredLocals.has(tok.value)) {
+			occupied.add(tok.value);
+		}
+	}
+
+	const nameGen = shortNameGeneratorFn(occupied);
+	const renameMap = new Map();
 	for (const name of declaredLocals) renameMap.set(name, nameGen());
 	return _applyRenaming(tokens, renameMap);
 }
@@ -606,23 +614,27 @@ function collectParams(tokens, openIdx, locals) {
 	}
 }
 
-function* shortNameGenerator() {
+function* shortNameGenerator(occupied = new Set()) {
 	const chars = "abcdefghijklmnopqrstuvwxyz";
 	let index = 0;
 	while (true) {
+		let name;
 		if (index < 26) {
-			yield chars[index++];
+			name = chars[index++];
 		} else {
 			const base = index - 26;
-			yield chars[base % 26] + (Math.floor(base / 26) + 1);
+			name = chars[base % 26] + (Math.floor(base / 26) + 1);
 			index++;
+		}
+		if (!occupied.has(name)) {
+			yield name;
 		}
 	}
 }
 
 // Make it callable (not an iterator interface)
-function shortNameGeneratorFn() {
-	const gen = shortNameGenerator();
+function shortNameGeneratorFn(occupied = new Set()) {
+	const gen = shortNameGenerator(occupied);
 	return () => gen.next().value;
 }
 
