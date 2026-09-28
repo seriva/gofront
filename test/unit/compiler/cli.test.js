@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import {
 	chmodSync,
 	existsSync,
+	mkdirSync,
 	mkdtempSync,
 	readFileSync,
 	rmSync,
@@ -102,13 +103,29 @@ test("--source-map appends sourceMappingURL comment", () => {
 	}
 });
 
-test("gofront init creates main.go", () => {
+test("gofront init creates modern project structure", () => {
 	const dir = mkdtempSync(join(tmpdir(), "gofront-init-"));
 	try {
 		const { code, stderr } = cli(["init", dir]);
 		assert(code === 0, `expected exit 0: ${stderr}`);
-		const mainPath = join(dir, "main.go");
-		assert(existsSync(mainPath), "expected main.go to be created");
+		const mainPath = join(dir, "app", "src", "main.go");
+		assert(existsSync(mainPath), "expected app/src/main.go to be created");
+		assert(
+			existsSync(join(dir, "app", "index.html")),
+			"expected app/index.html to be created",
+		);
+		assert(
+			existsSync(join(dir, "package.json")),
+			"expected package.json to be created",
+		);
+		assert(
+			existsSync(join(dir, ".gitignore")),
+			"expected .gitignore to be created",
+		);
+		assert(
+			!existsSync(join(dir, ".devcontainer")),
+			"expected no .devcontainer to be created",
+		);
 		const content = readFileSync(mainPath, "utf8");
 		assert(content.includes("func main()"), "expected func main() in scaffold");
 	} finally {
@@ -234,6 +251,21 @@ test("gofront init exits 1 if main.go already exists", () => {
 	}
 });
 
+test("gofront init exits 1 if package.json already exists", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-init-pkg-exists-"));
+	const pkgPath = join(dir, "package.json");
+	try {
+		writeFileSync(pkgPath, "{}\n");
+		const { code, stderr } = cli(["init", dir]);
+		assert(code !== 0, "expected non-zero exit");
+		assertContains(stderr, "already exists");
+	} finally {
+		try {
+			rmSync(dir, { recursive: true, force: true });
+		} catch {}
+	}
+});
+
 test("-v (short flag) prints version", () => {
 	const { stdout, code } = cli(["-v"]);
 	assert(code === 0, `expected exit 0, got ${code}`);
@@ -246,15 +278,22 @@ test("-h (short flag) prints usage", () => {
 	assertContains(stdout, "Usage");
 });
 
-test("gofront init <new-dir> creates directory and main.go", () => {
+test("gofront init <new-dir> creates directory and modern structure", () => {
 	const base = mkdtempSync(join(tmpdir(), "gofront-init-parent-"));
 	const newDir = join(base, "myproject");
 	try {
 		const { code, stderr } = cli(["init", newDir]);
 		assert(code === 0, `expected exit 0: ${stderr}`);
-		assert(existsSync(join(newDir, "main.go")), "expected main.go in new dir");
+		assert(
+			existsSync(join(newDir, "app", "src", "main.go")),
+			"expected main.go in new dir",
+		);
+		assert(
+			existsSync(join(newDir, "package.json")),
+			"expected package.json in new dir",
+		);
 		assertContains(
-			readFileSync(join(newDir, "main.go"), "utf8"),
+			readFileSync(join(newDir, "app", "src", "main.go"), "utf8"),
 			"func main()",
 		);
 	} finally {
@@ -264,7 +303,7 @@ test("gofront init <new-dir> creates directory and main.go", () => {
 	}
 });
 
-test("gofront init . creates main.go in cwd", () => {
+test("gofront init . creates modern structure in cwd", () => {
 	const tmpDir = mkdtempSync(join(tmpdir(), "gofront-init-dot-"));
 	try {
 		const r = spawnSync(process.execPath, [CLI, "init", "."], {
@@ -272,9 +311,16 @@ test("gofront init . creates main.go in cwd", () => {
 			cwd: tmpDir,
 		});
 		assert(r.status === 0, `expected exit 0: ${r.stderr}`);
-		assert(existsSync(join(tmpDir, "main.go")), "expected main.go in tmpDir");
+		assert(
+			existsSync(join(tmpDir, "app", "src", "main.go")),
+			"expected main.go in tmpDir",
+		);
+		assert(
+			existsSync(join(tmpDir, "package.json")),
+			"expected package.json in tmpDir",
+		);
 		assertContains(
-			readFileSync(join(tmpDir, "main.go"), "utf8"),
+			readFileSync(join(tmpDir, "app", "src", "main.go"), "utf8"),
 			"func main()",
 		);
 	} finally {
@@ -560,8 +606,114 @@ test("second compileDir call reuses cache for unchanged files", () => {
 });
 
 // ═════════════════════════════════════════════════════════════
-// Type error — additional cases
+// Semantic subcommands — check, build, dev, init
 // ═════════════════════════════════════════════════════════════
+
+section("CLI semantic subcommands — check, build, dev");
+
+test("gofront check <dir> exits 0 on valid project", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-cli-chk-"));
+	try {
+		writeFileSync(
+			join(dir, "main.go"),
+			`package main\nfunc main() { console.log("check ok") }\n`,
+		);
+		const { code, stderr } = cli(["check", dir]);
+		assert(code === 0, `expected exit 0, got ${code}: ${stderr}`);
+		assertContains(stderr, "OK");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("gofront check <dir> exits 1 on type error", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-cli-chk-err-"));
+	try {
+		writeFileSync(
+			join(dir, "main.go"),
+			`package main\nfunc main() { notFoundVar }\n`,
+		);
+		const { code, stderr } = cli(["check", dir]);
+		assert(code !== 0, "expected non-zero exit on type error");
+		assertContains(stderr, "notFoundVar");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("gofront build <dir> -o <outDir> compiles release bundle", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-cli-bld-"));
+	const outDir = join(dir, "release");
+	try {
+		mkdirSync(join(dir, "app", "src"), { recursive: true });
+		writeFileSync(
+			join(dir, "app", "index.html"),
+			"<html><body>Hello</body></html>",
+		);
+		writeFileSync(
+			join(dir, "app", "src", "main.go"),
+			`package main\nfunc main() { console.log("built release") }\n`,
+		);
+
+		const { code, stderr } = cli(["build", dir, "-o", outDir]);
+		assert(code === 0, `expected exit 0, got ${code}: ${stderr}`);
+		assertContains(stderr, "build complete");
+		assert(
+			existsSync(join(outDir, "app.js")),
+			"expected release/app.js to exist",
+		);
+		assert(
+			existsSync(join(outDir, "index.html")),
+			"expected release/index.html to exist",
+		);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("gofront dev <dir> starts dev server and prints running url", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-cli-dev-"));
+	try {
+		mkdirSync(join(dir, "src"), { recursive: true });
+		writeFileSync(join(dir, "index.html"), "<h1>Dev</h1>");
+		writeFileSync(
+			join(dir, "src", "main.go"),
+			`package main\nfunc main() { console.log("dev running") }\n`,
+		);
+
+		const r = spawnSync(process.execPath, [CLI, "dev", dir, "--port", "3899"], {
+			encoding: "utf8",
+			timeout: 800,
+		});
+		assertContains(r.stderr, "dev server running → http://localhost:3899");
+		assertContains(r.stderr, "watching");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("initialized project passes check and build", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-cli-init-e2e-"));
+	try {
+		const initRes = cli(["init", dir]);
+		assert(initRes.code === 0, `init failed: ${initRes.stderr}`);
+
+		const chkRes = cli(["check", dir]);
+		assert(chkRes.code === 0, `check failed: ${chkRes.stderr}`);
+		assertContains(chkRes.stderr, "OK");
+
+		const bldRes = cli(["build", dir]);
+		assert(bldRes.code === 0, `build failed: ${bldRes.stderr}`);
+		assertContains(bldRes.stderr, "build complete");
+		assert(existsSync(join(dir, "public", "app.js")), "expected public/app.js");
+		assert(
+			existsSync(join(dir, "public", "index.html")),
+			"expected public/index.html",
+		);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
