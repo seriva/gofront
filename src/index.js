@@ -22,16 +22,23 @@ import { mkdirSync, statSync, watch, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { copyAssets } from "./asset-manager.js";
 import {
+	formatBuildSummary,
 	formatPrepSummary,
+	handleBuild,
+	handleCheck,
+	handleDev,
 	handleInit,
 	handlePrep,
 	handleTest,
 	maybeMinify,
+	parseBuildArgs,
+	parseCheckArgs,
+	parseDevArgs,
 	parsePrepArgs,
 	parseTestArgs,
 	runCompile,
 } from "./cli-core.js";
-import { createDevServer, liveReloadClient } from "./dev-server.js";
+import { createDevServer } from "./dev-server.js";
 
 // ── Parse CLI args ───────────────────────────────────────────
 
@@ -47,8 +54,14 @@ if (args.length === 0 || args[0] === "--help" || args[0] === "-h") {
 GoFront — a Go-inspired language that compiles to JavaScript
 
 Usage:
+  gofront dev [dir] [options]    Start dev server with live reload (default port 3000)
+  gofront build [dir] [options]  Build production bundle (-o <dir>, --pwa, --minify)
+  gofront check [dir]            Type-check only
+  gofront test [dir] [--dom]     Run unit tests (-v verbose, -run <regex>)
+  gofront prep [dir] [--minify]  Copy static assets and bundle vendor dependencies
+  gofront init [dir]             Scaffold a new GoFront project
   gofront <file.go>              Compile single file and print to stdout
-  gofront <dir>  (or gofront .)    Compile all *.go in directory as one bundle
+  gofront <dir>  (or gofront .)  Compile all *.go in directory as one bundle
   gofront <input> -o out.js      Compile and write to file
   gofront <input> --check        Type-check only
   gofront <input> --watch        Watch for changes and recompile
@@ -60,9 +73,6 @@ Usage:
   gofront <input> --minify --mangle  Minify and mangle identifiers
   gofront <file.go> --ast        Dump AST (debug)
   gofront <file.go> --tokens     Dump tokens (debug)
-  gofront test [dir] [--dom]     Run unit tests (-v verbose, -run <regex>)
-  gofront prep [dir] [--minify]  Copy static assets and bundle vendor dependencies
-  gofront init [dir]             Scaffold a new GoFront project
   gofront --version              Print version
 `.trim(),
 	);
@@ -110,6 +120,58 @@ if (args[0] === "test") {
 	try {
 		const result = await handleTest(targetDir, testOptions);
 		process.exit(result.exitCode);
+	} catch (e) {
+		console.error(`gofront: ${e.message}`);
+		process.exit(1);
+	}
+}
+
+// ── check subcommand ──────────────────────────────────────────
+
+if (args[0] === "check") {
+	const { targetDir } = parseCheckArgs(args.slice(1));
+	try {
+		const { elapsedMs } = handleCheck(targetDir);
+		console.error(`gofront: ${targetDir} — OK (${elapsedMs}ms)`);
+		process.exit(0);
+	} catch (e) {
+		console.error(`gofront: ${e.message}`);
+		process.exit(1);
+	}
+}
+
+// ── build subcommand ──────────────────────────────────────────
+
+if (args[0] === "build") {
+	const buildOptions = parseBuildArgs(args.slice(1));
+	try {
+		const result = await handleBuild(buildOptions.targetDir, buildOptions);
+		for (const line of formatBuildSummary(result)) {
+			console.error(`gofront: ${line}`);
+		}
+		process.exit(0);
+	} catch (e) {
+		console.error(`gofront: ${e.message}`);
+		process.exit(1);
+	}
+}
+
+// ── dev subcommand ────────────────────────────────────────────
+
+if (args[0] === "dev") {
+	const devOptions = parseDevArgs(args.slice(1));
+	try {
+		const dev = await handleDev(devOptions.targetDir, devOptions);
+		const port = dev.port ?? devOptions.port ?? 3000;
+		console.error(`gofront: dev server running → http://localhost:${port}`);
+		console.error(`gofront: watching ${dev.srcDir} for changes...`);
+
+		const shutdown = async () => {
+			await dev.close();
+			process.exit(0);
+		};
+		process.on("SIGINT", shutdown);
+		process.on("SIGTERM", shutdown);
 	} catch (e) {
 		console.error(`gofront: ${e.message}`);
 		process.exit(1);
@@ -237,20 +299,11 @@ function buildOnce(changedFile = null) {
 	try {
 		const startMs = performance.now();
 		const result = runCompile(inputPath, isDir, { sourceMap, outputFile });
-		let js = maybeMinify(result.js, {
+		const js = maybeMinify(result.js, {
 			minify: minifyOutput,
 			mangle: mangleOutput,
 			sourceMap,
 		});
-		if (serveMode) {
-			// Insert live reload client before the source map comment so it stays last
-			const smIdx = js.lastIndexOf("\n//# sourceMappingURL=");
-			if (smIdx !== -1) {
-				js = `${js.slice(0, smIdx)}\n${liveReloadClient}${js.slice(smIdx)}`;
-			} else {
-				js += `\n${liveReloadClient}`;
-			}
-		}
 		const elapsedMs = (performance.now() - startMs).toFixed(0);
 		const changeNote = changedFile ? ` — ${changedFile} changed` : "";
 		if (outputFile) {
@@ -279,6 +332,7 @@ function buildOnce(changedFile = null) {
 	} catch (e) {
 		console.error(`[${timestamp()}] gofront: ERROR`);
 		for (const line of e.message.split("\n")) console.error(`  ${line}`);
+		devServer?.notifyError?.(e);
 	}
 }
 
@@ -288,10 +342,27 @@ buildOnce();
 // Determine what to watch
 const watchTarget = isDir ? inputPath : dirname(inputPath);
 
+function handleCssWatch(filename) {
+	if (copyAssetsFlag) {
+		try {
+			copyAssets(resolve("."));
+		} catch (e) {
+			console.error(`gofront: asset copy failed: ${e.message}`);
+		}
+	}
+	devServer?.notifyCss?.(filename);
+}
+
 let debounce = null;
+let cssDebounce = null;
 watch(watchTarget, { recursive: true }, (_event, filename) => {
-	if (filename && !filename.endsWith(".go") && !filename.endsWith(".templ"))
+	if (!filename) return;
+	if (filename.endsWith(".css")) {
+		clearTimeout(cssDebounce);
+		cssDebounce = setTimeout(() => handleCssWatch(filename), 50);
 		return;
+	}
+	if (!filename.endsWith(".go") && !filename.endsWith(".templ")) return;
 	clearTimeout(debounce);
 	debounce = setTimeout(() => buildOnce(filename), 80);
 });
