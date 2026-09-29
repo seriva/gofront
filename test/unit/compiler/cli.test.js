@@ -715,6 +715,90 @@ test("initialized project passes check and build", () => {
 	}
 });
 
+test("gofront test auto-detects srcDir in project root", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-cli-test-detect-"));
+	try {
+		mkdirSync(join(dir, "src"), { recursive: true });
+		writeFileSync(
+			join(dir, "package.json"),
+			JSON.stringify({ gofront: { src: "src" } }),
+		);
+		writeFileSync(
+			join(dir, "src", "util.go"),
+			`package main\nfunc Add(a, b int) int { return a + b }\n`,
+		);
+		writeFileSync(
+			join(dir, "src", "util_test.go"),
+			`package main\nimport "testing"\nfunc TestAdd(t *testing.T) {\n\tif Add(1, 2) != 3 { t.Fatal("fail") }\n}\n`,
+		);
+
+		const r = cli(["test", dir]);
+		assert(r.code === 0, `test failed: ${r.stderr}`);
+		assertContains(r.stdout, "PASS");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("gofront check on multi-file package directory compiles all package files", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-cli-check-multi-"));
+	try {
+		writeFileSync(join(dir, "a.go"), `package main\nvar Number = 42\n`);
+		writeFileSync(
+			join(dir, "main.go"),
+			`package main\nfunc main() {\n\tconsole.log(Number)\n}\n`,
+		);
+
+		const r = cli(["check", dir]);
+		assert(r.code === 0, `check failed: ${r.stderr}`);
+		assertContains(r.stderr, "OK");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("gofront test on file target runs tests in containing package directory", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-cli-test-file-"));
+	try {
+		writeFileSync(join(dir, "main.go"), "package main\nfunc main() {}\n");
+		writeFileSync(
+			join(dir, "main_test.go"),
+			`package main\nimport "testing"\nfunc TestFileTarget(t *testing.T) {}\n`,
+		);
+
+		const r = cli(["test", join(dir, "main.go")]);
+		assert(r.code === 0, `test failed: ${r.stderr}`);
+		assertContains(r.stdout, "PASS");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("gofront test with file config.src resolves cleanly to package directory", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-cli-test-cfgfile-"));
+	try {
+		mkdirSync(join(dir, "src"), { recursive: true });
+		writeFileSync(
+			join(dir, "package.json"),
+			JSON.stringify({ gofront: { src: "src/main.go" } }),
+		);
+		writeFileSync(
+			join(dir, "src", "main.go"),
+			"package main\nfunc main() {}\n",
+		);
+		writeFileSync(
+			join(dir, "src", "main_test.go"),
+			`package main\nimport "testing"\nfunc TestConfigSrcFile(t *testing.T) {}\n`,
+		);
+
+		const r = cli(["test", dir]);
+		assert(r.code === 0, `test failed: ${r.stderr}`);
+		assertContains(r.stdout, "PASS");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

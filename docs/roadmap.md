@@ -8,6 +8,18 @@ features (e.g. `docs/v0.0.5/`).
 
 ---
 
+## v1.3.2
+
+**Theme: CLI polish and multi-file package resolution.** Fix multi-file package directory checks, auto-detect project test target, and add `serveDir` live-reload watcher to `gofront dev`.
+
+| Area | Difficulty | Status | Notes |
+|---|---|---|---|
+| Multi-file package checks | Low | ✓ | Compile complete package directory when multiple Go files are present alongside `main.go`. |
+| CLI `test` target auto-detection | Low | ✓ | Auto-detect `project.srcDir` when running `gofront test` from project root. |
+| Dev server `serveDir` watcher | Low | ✓ | Watch `serveDir` for CSS hot-reload and HTML full-reload when distinct from watch target. |
+
+---
+
 ## v1.3.1
 
 **Theme: Bug fix.** Fix CLI routing fall-through in `gofront dev` causing crash on startup.
