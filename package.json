@@ -1,6 +1,6 @@
 {
 	"name": "gofront",
-	"version": "1.2.3",
+	"version": "1.3.0",
 	"author": "Luuk van Venrooij",
 	"license": "MIT",
 	"repository": {
@@ -35,16 +35,18 @@
 		"build:reactive": "node src/index.js example/reactive/src -o example/reactive/app.js",
 		"build:gom": "node src/index.js example/gom/src -o example/gom/app.js",
 		"build:templ": "node src/index.js example/templ/src -o example/templ/app.js",
-		"build:all": "npm run build:simple && npm run build:reactive && npm run build:gom && npm run build:templ",
+		"build:webgl": "node src/index.js example/webgl/src -o example/webgl/app.js",
+		"build:all": "npm run build:simple && npm run build:reactive && npm run build:gom && npm run build:templ && npm run build:webgl",
 		"test": "npm run test:unit",
-		"test:all": "npm run test:unit && npm run test:examples && npm run test:examples:dom && npm run test:e2e",
+		"test:all": "npm run test:unit && npm run test:perf && npm run test:examples && npm run test:examples:dom && npm run test:e2e",
 		"test:unit": "node test/unit/run.js",
+		"test:perf": "node test/e2e/perf/zero-alloc.js",
 		"test:examples": "node src/index.js test example/simple/src && node src/index.js test example/simple/src/utils && node src/index.js test example/reactive/src && node src/index.js test example/reactive/src/utils && node src/index.js test example/gom/src && node src/index.js test example/gom/src/utils && node src/index.js test example/templ/src && node src/index.js test example/templ/src/utils",
 		"test:examples:dom": "node src/index.js test --dom example/simple/src && node src/index.js test --dom example/gom/src && node src/index.js test --dom example/templ/src",
 		"test:coverage": "c8 --include='src/**' --reporter=text --reporter=lcov node test/unit/run.js",
 		"test:e2e": "npm run build:all && playwright test",
 		"format": "biome format --write .",
-		"check": "biome check . && sentrux check && sentrux gate && node src/index.js example/simple/src --check && node src/index.js example/reactive/src --check && node src/index.js example/gom/src --check && node src/index.js example/templ/src --check",
+		"check": "biome check . && sentrux check && sentrux gate && node src/index.js example/simple/src --check && node src/index.js example/reactive/src --check && node src/index.js example/gom/src --check && node src/index.js example/templ/src --check && node src/index.js example/webgl/src --check",
 		"prepare": "lefthook install"
 	},
 	"devDependencies": {

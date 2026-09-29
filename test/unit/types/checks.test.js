@@ -334,13 +334,13 @@ test("passing string to uint param is a type error", () => {
 	const { errors } = compile(`package main
 func f(n uint) { console.log(n) }
 func main() { f("oops") }`);
-	assertErrorContains(errors, "Cannot assign untyped string to int");
+	assertErrorContains(errors, "Cannot assign untyped string to uint");
 });
 
 test("uint return type mismatch caught", () => {
 	const { errors } = compile(`package main
 func f() uint { return "bad" }`);
-	assertErrorContains(errors, "Cannot assign untyped string to int");
+	assertErrorContains(errors, "Cannot assign untyped string to uint");
 });
 
 test("uintptr accepted as type annotation", () => {

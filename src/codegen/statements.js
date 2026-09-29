@@ -171,6 +171,17 @@ export const statementGenMethods = {
 		);
 	},
 
+	_isStructDerefAssign(stmt) {
+		if (stmt.lhs.length !== 1 || stmt.rhs.length !== 1 || stmt.op !== "=")
+			return false;
+		const l = stmt.lhs[0];
+		return (
+			l.kind === "UnaryExpr" &&
+			l.op === "*" &&
+			this._isStructPointerType(l.operand?._type)
+		);
+	},
+
 	_genAssignLhsExpr(e) {
 		if (e.kind === "Ident" && e.name !== "_" && this._boxedVars.has(e.name))
 			return `${e.name}.value`;
@@ -203,6 +214,10 @@ export const statementGenMethods = {
 			this._genCommaOkTypeAssert(stmt);
 			return;
 		}
+		if (this._isStructDerefAssign(stmt)) {
+			this._genStructDerefAssign(stmt);
+			return;
+		}
 		const rhs = stmt.rhs.map((e) => this.genExpr(e));
 		this._markIndexLvalues(stmt.lhs);
 		const lhs = stmt.lhs.map((e) => this._genAssignLhsExpr(e));
@@ -224,6 +239,12 @@ export const statementGenMethods = {
 		this.line(`let ${tmp} = ${val};`);
 		if (vName !== "_") this.line(`${vName} = ${tmp}[0];`);
 		if (okName !== "_") this.line(`${okName} = ${tmp}[1];`);
+	},
+
+	_genStructDerefAssign(stmt) {
+		const target = this.genExpr(stmt.lhs[0].operand);
+		const source = this.genExpr(stmt.rhs[0]);
+		this.line(`Object.assign(${target}, ${source});`);
 	},
 
 	_genMultiAssignWithBlanks(stmt, lhs, rhs, rhsStr) {
@@ -345,13 +366,21 @@ export const statementGenMethods = {
 		}
 	},
 
+	_rangeExprLimit(iterType, iteree) {
+		if (this._isIntRangeType(iterType)) return iteree;
+		if (this._isMapRangeType(iterType)) return `Object.keys(${iteree}).length`;
+		return `(${iteree} ? ${iteree}.length : 0)`;
+	},
+
 	_genRangeExprFor(stmt) {
 		if (stmt.cond._isIterator) {
 			this.genIteratorForCond(stmt);
 			return;
 		}
+		const iterType = stmt.cond.expr._type;
 		const iteree = this.genExpr(stmt.cond.expr);
-		this.line(`for (let _$ = 0; _$ < ${iteree}; _$++) {`);
+		const limit = this._rangeExprLimit(iterType, iteree);
+		this.line(`for (let _$ = 0; _$ < ${limit}; _$++) {`);
 		this.indented(() => this.genBlock(stmt.body));
 		this.line("}");
 	},
@@ -418,6 +447,63 @@ export const statementGenMethods = {
 		);
 	},
 
+	_emitSliceLoopHeader(rawIdx, iteree, isAssign, d) {
+		const arr = `__arr${d}`;
+		const len = `__len${d}`;
+		const hasIdx = rawIdx && rawIdx !== "_";
+		if (isAssign && hasIdx) {
+			this.line(`const ${arr} = ${iteree};`);
+			this.line(`const ${len} = ${arr} ? ${arr}.length : 0;`);
+			this.line(`for (${rawIdx} = 0; ${rawIdx} < ${len}; ${rawIdx}++) {`);
+		} else {
+			const idx = hasIdx ? rawIdx : `__i${d}`;
+			this.line(
+				`for (let ${idx} = 0, ${arr} = ${iteree}, ${len} = ${arr} ? ${arr}.length : 0; ${idx} < ${len}; ${idx}++) {`,
+			);
+		}
+	},
+
+	_emitSliceValAssign(rawIdx, rawVal, isAssign, d) {
+		if (!rawVal || rawVal === "_") return;
+		const idx = rawIdx && rawIdx !== "_" ? rawIdx : `__i${d}`;
+		const kw = isAssign ? "" : "let ";
+		this.line(`${kw}${rawVal} = __arr${d}[${idx}];`);
+	},
+
+	_genSliceRangeFor(stmt, iteree, lhs, isAssign) {
+		this._loopDepth = this._loopDepth ?? 0;
+		const d = this._loopDepth;
+		this._loopDepth++;
+		this._emitSliceLoopHeader(lhs[0], iteree, isAssign, d);
+		this.indented(() => {
+			this._emitSliceValAssign(lhs[0], lhs[1], isAssign, d);
+			this.genBlock(stmt.body);
+		});
+		this.line("}");
+		this._loopDepth--;
+	},
+
+	_genIntRangeFor(rawVar, iteree, body) {
+		const v = rawVar === "_" ? "_$" : rawVar;
+		this.line(`for (let ${v} = 0; ${v} < ${iteree}; ${v}++) {`);
+		this.indented(() => this.genBlock(body));
+		this.line("}");
+	},
+
+	_genIterFor(init, iterType, iteree, lhs, body) {
+		const iterExpr = this._genRangeIterExpr(iterType, iteree, lhs);
+		const binding =
+			lhs.length === 1
+				? lhs[0] === "_"
+					? "_$"
+					: lhs[0]
+				: `[${lhs.map((n) => (n === "_" ? "_$" : n)).join(", ")}]`;
+		const kw = init.kind === "AssignStmt" ? "" : "let ";
+		this.line(`for (${kw}${binding} of ${iterExpr}) {`);
+		this.indented(() => this.genBlock(body));
+		this.line("}");
+	},
+
 	genRangeFor(stmt) {
 		const init = stmt.init;
 		const range = init.rhs[0];
@@ -429,22 +515,16 @@ export const statementGenMethods = {
 			: this.genExpr(range.expr);
 
 		if (lhs.length <= 1 && this._isIntRangeType(iterType)) {
-			const v = lhs[0] === "_" ? "_$" : lhs[0];
-			this.line(`for (let ${v} = 0; ${v} < ${iteree}; ${v}++) {`);
-			this.indented(() => this.genBlock(stmt.body));
-			this.line("}");
+			this._genIntRangeFor(lhs[0], iteree, stmt.body);
 			return;
 		}
-		const iterExpr = this._genRangeIterExpr(iterType, iteree, lhs);
-		const binding =
-			lhs.length === 1
-				? lhs[0] === "_"
-					? "_$"
-					: lhs[0]
-				: `[${lhs.map((n) => (n === "_" ? "_$" : n)).join(", ")}]`;
-		this.line(`for (const ${binding} of ${iterExpr}) {`);
-		this.indented(() => this.genBlock(stmt.body));
-		this.line("}");
+
+		if (!this._isMapRangeType(iterType) && !this._isStringRangeType(iterType)) {
+			this._genSliceRangeFor(stmt, iteree, lhs, init.kind === "AssignStmt");
+			return;
+		}
+
+		this._genIterFor(init, iterType, iteree, lhs, stmt.body);
 	},
 
 	_genRangeIterExpr(iterType, iteree, lhs) {
