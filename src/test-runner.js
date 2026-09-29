@@ -2,8 +2,9 @@
 // Handles test function discovery, test harness emission, and subprocess execution.
 
 import { spawn } from "node:child_process";
+import { statSync } from "node:fs";
 import { createRequire } from "node:module";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { compilePackageTests, gwFilesIn } from "./compiler.js";
 
@@ -266,7 +267,12 @@ function spawnTestRunner(resolvedDir, harnessJs, testCount, options) {
 }
 
 export async function runTests(targetDir, options = {}) {
-	const resolvedDir = resolve(targetDir);
+	let resolvedDir = resolve(targetDir);
+	try {
+		if (statSync(resolvedDir).isFile()) {
+			resolvedDir = dirname(resolvedDir);
+		}
+	} catch {}
 	const { jsdomPath } = validateTestOptions(options, resolvedDir);
 
 	const allFiles = gwFilesIn(resolvedDir, { includeTests: true });
