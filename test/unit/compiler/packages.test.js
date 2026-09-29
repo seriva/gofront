@@ -365,6 +365,43 @@ func main() {
 	}
 });
 
+test("multi-file package resolves struct types declared across file sort order", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-multifile-type-"));
+	try {
+		const fileA = join(dir, "a_container.go");
+		const fileZ = join(dir, "z_element.go");
+		writeFileSync(
+			fileA,
+			`package main
+type Container struct {
+  Item Element
+}
+func (c *Container) GetValue() int {
+  return c.Item.Value
+}
+`,
+		);
+		writeFileSync(
+			fileZ,
+			`package main
+type Element struct {
+  Value int
+}
+func main() {
+  var c Container
+  c.Item.Value = 42
+  println(c.GetValue())
+}
+`,
+		);
+		const { js } = compileFiles([fileA, fileZ]);
+		const output = runJs(js);
+		assertEqual(output.trim(), "42");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
 section("compileFiles — sourceMap");
 
 test("compileFiles with sourceMap appends sourceMappingURL comment", () => {

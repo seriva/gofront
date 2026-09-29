@@ -7,6 +7,7 @@ import {
 	compile,
 	runJs,
 	section,
+	summarize,
 	test,
 } from "../helpers.js";
 

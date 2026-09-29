@@ -890,6 +890,37 @@ func main() {
 	assertEqual(errors.length, 0);
 });
 
+test("function literal assignable to named function type", () => {
+	const { js, errors } = compile(`package main
+type FilterFunc func(x int) bool
+var globalFilter FilterFunc
+
+func main() {
+  globalFilter = func(x int) bool {
+    return x > 10
+  }
+  if globalFilter(15) {
+    println("ok")
+  }
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "ok");
+});
+
+test("function literal with mismatched signature to named func type fails typecheck", () => {
+	const { errors } = compile(`package main
+type FilterFunc func(x int) bool
+var globalFilter FilterFunc
+
+func main() {
+  globalFilter = func(s string) bool {
+    return true
+  }
+}`);
+	assertEqual(errors.length, 1);
+	assertErrorContains(errors, "Cannot assign func(string) bool to FilterFunc");
+});
+
 // ═════════════════════════════════════════════════════════════
 // Additional coverage
 // ═════════════════════════════════════════════════════════════
