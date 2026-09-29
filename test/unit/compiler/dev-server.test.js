@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import {
 	createDevServer,
 	handleDevRequest,
+	injectLiveReload,
 	liveReloadClient,
 	MIME,
 } from "../../../src/dev-server.js";
@@ -51,7 +52,7 @@ function createMockRes() {
 	};
 }
 
-test("serves index.html on root / request", () => {
+test("serves index.html on root / request with injected live reload script", () => {
 	const dir = mkdtempSync(join(tmpdir(), "gofront-dev-"));
 	try {
 		writeFileSync(join(dir, "index.html"), "<h1>Home</h1>");
@@ -61,13 +62,18 @@ test("serves index.html on root / request", () => {
 
 		assertEqual(res.statusCode, 200);
 		assertEqual(res.headers["Content-Type"], MIME[".html"]);
-		assertEqual(res.body.toString("utf8"), "<h1>Home</h1>");
+		assertEqual(
+			res.headers["Cache-Control"],
+			"no-cache, no-store, must-revalidate",
+		);
+		assertContains(res.body.toString("utf8"), "<h1>Home</h1>");
+		assertContains(res.body.toString("utf8"), "gofront-live-reload");
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
 });
 
-test("serves static JS and CSS with correct MIME types", () => {
+test("serves static JS and CSS with correct MIME types without injection", () => {
 	const dir = mkdtempSync(join(tmpdir(), "gofront-dev-mime-"));
 	try {
 		writeFileSync(join(dir, "app.js"), "console.log('hi');");
@@ -77,16 +83,63 @@ test("serves static JS and CSS with correct MIME types", () => {
 		handleDevRequest({ url: "/app.js" }, jsRes, dir);
 		assertEqual(jsRes.statusCode, 200);
 		assertEqual(jsRes.headers["Content-Type"], MIME[".js"]);
+		assertEqual(
+			jsRes.headers["Cache-Control"],
+			"no-cache, no-store, must-revalidate",
+		);
 		assertEqual(jsRes.body.toString("utf8"), "console.log('hi');");
+		assert(
+			!jsRes.body.toString("utf8").includes("gofront-live-reload"),
+			"expected compiled JS to not contain injected reload script",
+		);
 
 		const cssRes = createMockRes();
 		handleDevRequest({ url: "/style.css" }, cssRes, dir);
 		assertEqual(cssRes.statusCode, 200);
 		assertEqual(cssRes.headers["Content-Type"], MIME[".css"]);
+		assertEqual(
+			cssRes.headers["Cache-Control"],
+			"no-cache, no-store, must-revalidate",
+		);
 		assertEqual(cssRes.body.toString("utf8"), "body { color: red; }");
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
+});
+
+test("serves static files when requested without leading slash", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-dev-noslash-"));
+	try {
+		writeFileSync(join(dir, "app.js"), "console.log('noslash');");
+		const jsRes = createMockRes();
+		handleDevRequest({ url: "app.js" }, jsRes, dir);
+		assertEqual(jsRes.statusCode, 200);
+		assertEqual(jsRes.headers["Content-Type"], MIME[".js"]);
+		assertEqual(jsRes.body.toString("utf8"), "console.log('noslash');");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+section("dev-server — HTML SSE script injection");
+
+test("injectLiveReload injects script before </body> when present", () => {
+	const html = "<!DOCTYPE html><html><body><h1>Hello</h1></body></html>";
+	const injected = injectLiveReload(html);
+	assertContains(injected, '<script id="gofront-live-reload">');
+	assert(
+		injected.endsWith("</script></body></html>"),
+		`expected script before </body>, got: ${injected}`,
+	);
+});
+
+test("injectLiveReload appends script when </body> is missing", () => {
+	const html = "<h1>Fragment</h1>";
+	const injected = injectLiveReload(html);
+	assertEqual(
+		injected,
+		`<h1>Fragment</h1><script id="gofront-live-reload">${liveReloadClient}</script>`,
+	);
 });
 
 section("dev-server — SPA fallback");
@@ -102,7 +155,8 @@ test("SPA fallback: serves index.html for clean URLs without file extension", ()
 			handleDevRequest({ url: route }, res, dir);
 			assertEqual(res.statusCode, 200);
 			assertEqual(res.headers["Content-Type"], MIME[".html"]);
-			assertEqual(res.body.toString("utf8"), htmlContent);
+			assertContains(res.body.toString("utf8"), "SPA App");
+			assertContains(res.body.toString("utf8"), "gofront-live-reload");
 		}
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
@@ -119,7 +173,8 @@ test("SPA fallback: strips query strings and hash before matching", () => {
 		handleDevRequest({ url: "/blog?page=2&tag=gofront#section" }, res, dir);
 		assertEqual(res.statusCode, 200);
 		assertEqual(res.headers["Content-Type"], MIME[".html"]);
-		assertEqual(res.body.toString("utf8"), htmlContent);
+		assertContains(res.body.toString("utf8"), "Query SPA");
+		assertContains(res.body.toString("utf8"), "gofront-live-reload");
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -232,14 +287,16 @@ test("serves nested directory index.html if present, else root index.html", () =
 		const docsRes = createMockRes();
 		handleDevRequest({ url: "/docs" }, docsRes, dir);
 		assertEqual(docsRes.statusCode, 200);
-		assertEqual(docsRes.body.toString("utf8"), "docs index");
+		assertContains(docsRes.body.toString("utf8"), "docs index");
+		assertContains(docsRes.body.toString("utf8"), "gofront-live-reload");
 
 		const emptySubDir = join(dir, "empty");
 		mkdirSync(emptySubDir, { recursive: true });
 		const emptyRes = createMockRes();
 		handleDevRequest({ url: "/empty" }, emptyRes, dir);
 		assertEqual(emptyRes.statusCode, 200);
-		assertEqual(emptyRes.body.toString("utf8"), "root index");
+		assertContains(emptyRes.body.toString("utf8"), "root index");
+		assertContains(emptyRes.body.toString("utf8"), "gofront-live-reload");
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -266,6 +323,76 @@ test("SSE endpoint connects and notifies clients", () => {
 	assertContains(liveReloadClient, "EventSource");
 });
 
+test("SSE keep-alive sends ping comment frames", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-dev-ping-"));
+	try {
+		const dev = createDevServer(dir, 0);
+		const client = createMockRes();
+		dev.clients.add(client);
+
+		dev.ping();
+		assertContains(client.body, ": ping\n\n");
+		dev.close();
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("SSE heartbeat interval emits ping comment frames automatically", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-dev-hb-"));
+	try {
+		const dev = createDevServer(dir, 0, { heartbeatInterval: 20 });
+		const client = createMockRes();
+		dev.clients.add(client);
+
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		assertContains(client.body, ": ping\n\n");
+		await dev.close();
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("dev server broadcasts build-error event on compilation error", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-dev-err-"));
+	try {
+		const dev = createDevServer(dir, 0);
+		const client = createMockRes();
+		dev.clients.add(client);
+
+		dev.notifyError(new Error("syntax error on line 42"));
+		assertContains(client.body, "event: build-error\n");
+		assertContains(client.body, "syntax error on line 42");
+		dev.close();
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("dev server broadcasts css-update event on CSS changes", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-dev-css-"));
+	try {
+		const dev = createDevServer(dir, 0);
+		const client = createMockRes();
+		dev.clients.add(client);
+
+		dev.notifyCss("styles.css");
+		assertContains(client.body, "event: css-update\n");
+		assertContains(client.body, "styles.css");
+		dev.close();
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("liveReloadClient contains error overlay, reconnect backoff, and CSS updater", () => {
+	assertContains(liveReloadClient, "gofront-error-overlay");
+	assertContains(liveReloadClient, "retryDelay");
+	assertContains(liveReloadClient, "css-update");
+	assertContains(liveReloadClient, "build-error");
+	assertContains(liveReloadClient, "location.reload()");
+});
+
 test("createDevServer starts and closes cleanly", () => {
 	const dir = mkdtempSync(join(tmpdir(), "gofront-dev-srv-"));
 	try {
@@ -273,6 +400,12 @@ test("createDevServer starts and closes cleanly", () => {
 		const dev = createDevServer(dir, 0);
 		assert(dev.server !== undefined, "expected server instance");
 		assert(typeof dev.notify === "function", "expected notify function");
+		assert(
+			typeof dev.notifyError === "function",
+			"expected notifyError function",
+		);
+		assert(typeof dev.notifyCss === "function", "expected notifyCss function");
+		assert(typeof dev.ping === "function", "expected ping function");
 		assert(typeof dev.close === "function", "expected close function");
 		dev.close();
 	} finally {

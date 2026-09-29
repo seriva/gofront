@@ -28,8 +28,8 @@ const BUILDER_COMMON = {
 export const builderMethods = {
 	_genBuilderCall(typeName, method, expr) {
 		const recv = expr.func.expr;
-		const isPtr = recv._type?.kind === "pointer";
-		const base = isPtr ? `${this.genExpr(recv)}.value` : this.genExpr(recv);
+		const recvJs = this.genExpr(recv);
+		const base = `(${recvJs}?.value ?? ${recvJs})`;
 		const args = expr.args.map((a) => this.genExpr(a));
 		const isStr = typeName === "strings.Builder";
 		const table = isStr ? BUILDER_STR : BUILDER_BYTES;
