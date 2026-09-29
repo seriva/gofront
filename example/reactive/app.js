@@ -1,5 +1,12 @@
-var __append = __append || function(a, ...b) { return a ? [...a, ...b] : b; };
-var __s = __s || function(a) { return a || []; };
+var __append = __append || function(a, ...b) {
+  if (a && ArrayBuffer.isView(a)) {
+    const res = new a.constructor(a.length + b.length);
+    res.set(a);
+    res.set(b, a.length);
+    return res;
+  }
+  return a ? [...a, ...b] : b;
+};
 
 function Plural(n, word) {
   if (n === 1) {
@@ -14,7 +21,8 @@ function HasText(s) {
 
 function Filter(items, pred) {
   let out = null;
-  for (const [_$, item] of __s(items).entries()) {
+  for (let __i0 = 0, __arr0 = items, __len0 = __arr0 ? __arr0.length : 0; __i0 < __len0; __i0++) {
+    let item = __arr0[__i0];
     if (pred(item)) {
       out = __append(out, item);
     }
@@ -26,8 +34,15 @@ var __len = __len || function(a) {
   if (a && typeof a === 'object' && !Array.isArray(a)) return Object.keys(a).length;
   return a?.length ?? 0;
 };
-var __append = __append || function(a, ...b) { return a ? [...a, ...b] : b; };
-var __s = __s || function(a) { return a || []; };
+var __append = __append || function(a, ...b) {
+  if (a && ArrayBuffer.isView(a)) {
+    const res = new a.constructor(a.length + b.length);
+    res.set(a);
+    res.set(b, a.length);
+    return res;
+  }
+  return a ? [...a, ...b] : b;
+};
 var __sprintf = __sprintf || function(f, ...a) {
   let i = 0;
   return f.replace(/%([#+\- 0]*)([0-9]*)\.?([0-9]*)[sdvftxXqobeEgGw%]/g, (m) => {
@@ -81,11 +96,12 @@ var __error = __error || function(msg, cause) {
 };
 
 class Todo {
-  constructor({ id = 0, text = "", done = false, priority = 0 } = {}) {
-    this.id = id;
-    this.text = text;
-    this.done = done;
-    this.priority = priority;
+  constructor(id$ = 0, text$ = "", done$ = false, priority$ = 0) {
+    if (typeof id$ === "object" && id$ !== null && id$.constructor === Object && true) { Object.assign(this, id$); return; }
+    this.id = id$;
+    this.text = text$;
+    this.done = done$;
+    this.priority = priority$;
   }
 
   isUrgent() {
@@ -95,31 +111,36 @@ class Todo {
 
   withDone(done) {
     const t = this;
-    return new Todo({ id: t.id, text: t.text, done: done, priority: t.priority });
+    return new Todo(t.id, t.text, done, t.priority);
   }
 }
+Object.defineProperty(Todo.prototype, "value", { get() { return this; }, set(v) { Object.assign(this, v); }, configurable: true });
 
 class Stats {
-  constructor({ remaining = 0, completed = 0 } = {}) {
-    this.remaining = remaining;
-    this.completed = completed;
+  constructor(remaining$ = 0, completed$ = 0) {
+    if (typeof remaining$ === "object" && remaining$ !== null && remaining$.constructor === Object && true) { Object.assign(this, remaining$); return; }
+    this.remaining = remaining$;
+    this.completed = completed$;
   }
 }
+Object.defineProperty(Stats.prototype, "value", { get() { return this; }, set(v) { Object.assign(this, v); }, configurable: true });
 
 class AppElements {
-  constructor({ input = null, addBtn = null, priorityBtn = null, list = null, footer = null, badge = null, syncStatus = null, inputRow = null, countSpan = null, filterArea = null } = {}) {
-    this.input = input;
-    this.addBtn = addBtn;
-    this.priorityBtn = priorityBtn;
-    this.list = list;
-    this.footer = footer;
-    this.badge = badge;
-    this.syncStatus = syncStatus;
-    this.inputRow = inputRow;
-    this.countSpan = countSpan;
-    this.filterArea = filterArea;
+  constructor(input$ = null, addBtn$ = null, priorityBtn$ = null, list$ = null, footer$ = null, badge$ = null, syncStatus$ = null, inputRow$ = null, countSpan$ = null, filterArea$ = null) {
+    if (typeof input$ === "object" && input$ !== null && input$.constructor === Object && ("input" in input$)) { Object.assign(this, input$); return; }
+    this.input = input$;
+    this.addBtn = addBtn$;
+    this.priorityBtn = priorityBtn$;
+    this.list = list$;
+    this.footer = footer$;
+    this.badge = badge$;
+    this.syncStatus = syncStatus$;
+    this.inputRow = inputRow$;
+    this.countSpan = countSpan$;
+    this.filterArea = filterArea$;
   }
 }
+Object.defineProperty(AppElements.prototype, "value", { get() { return this; }, set(v) { Object.assign(this, v); }, configurable: true });
 
 const maxTodoLen = 120;
 
@@ -271,18 +292,19 @@ function renderTodoHTML(t) {
 function renderFilterBarHTML(activeFilter) {
   let filters = [FilterAll, FilterActive, FilterCompleted];
   let b = { _buf: "" };
-  (b._buf += "<div class=\"filter-bar\">", ["<div class=\"filter-bar\">".length, null]);
-  for (const [_$, f] of __s(filters).entries()) {
+  ((b?.value ?? b)._buf += "<div class=\"filter-bar\">", ["<div class=\"filter-bar\">".length, null]);
+  for (let __i0 = 0, __arr0 = filters, __len0 = __arr0 ? __arr0.length : 0; __i0 < __len0; __i0++) {
+    let f = __arr0[__i0];
     let cls = "filter-btn";
     if (f === activeFilter) {
       cls = "filter-btn active";
     }
-    (b._buf += "<button class=\"" + cls + "\" data-action=\"filter\" data-filter=\"" + String(f) + "\">", ["<button class=\"" + cls + "\" data-action=\"filter\" data-filter=\"" + String(f) + "\">".length, null]);
-    (b._buf += filterLabel(f), [filterLabel(f).length, null]);
-    (b._buf += "</button>", ["</button>".length, null]);
+    ((b?.value ?? b)._buf += "<button class=\"" + cls + "\" data-action=\"filter\" data-filter=\"" + String(f) + "\">", ["<button class=\"" + cls + "\" data-action=\"filter\" data-filter=\"" + String(f) + "\">".length, null]);
+    ((b?.value ?? b)._buf += filterLabel(f), [filterLabel(f).length, null]);
+    ((b?.value ?? b)._buf += "</button>", ["</button>".length, null]);
   }
-  (b._buf += "</div>", ["</div>".length, null]);
-  return trusted(b._buf);
+  ((b?.value ?? b)._buf += "</div>", ["</div>".length, null]);
+  return trusted((b?.value ?? b)._buf);
 }
 
 function createAppShell(inputValue) {
@@ -325,7 +347,7 @@ function createAppShell(inputValue) {
     comp.refs.footer.classList.add(footerStyles());
     syncBaseClass = syncStatusStyles();
     comp.refs.syncStatus.classList.add(syncBaseClass);
-    els = new AppElements({ input: comp.refs.input, addBtn: comp.refs.addBtn, priorityBtn: comp.refs.priorityBtn, list: comp.refs.list, footer: comp.refs.footer, badge: comp.refs.badge, syncStatus: comp.refs.syncStatus, inputRow: comp.refs.inputRow, countSpan: comp.refs.countSpan, filterArea: comp.refs.filterArea });
+    els = new AppElements(comp.refs.input, comp.refs.addBtn, comp.refs.priorityBtn, comp.refs.list, comp.refs.footer, comp.refs.badge, comp.refs.syncStatus, comp.refs.inputRow, comp.refs.countSpan, comp.refs.filterArea);
     setupReactiveDOM(els);
     setupDragDrop(els);
   };
@@ -577,14 +599,15 @@ function initStore() {
   statsSignal = Signals.computed(function() {
     let remaining = 0;
     let completed = 0;
-    for (const [_$, t] of __s(todosSignal.get()).entries()) {
+    for (let __i0 = 0, __arr0 = todosSignal.get(), __len0 = __arr0 ? __arr0.length : 0; __i0 < __len0; __i0++) {
+      let t = __arr0[__i0];
       if (t.done) {
         completed++;
       } else {
         remaining++;
       }
     }
-    return new Stats({ remaining: remaining, completed: completed });
+    return new Stats(remaining, completed);
   }, "stats");
   highCountSignal = Signals.computed(function() {
     let urgent = Filter(todosSignal.get(), function(t) {
@@ -608,8 +631,9 @@ async function asyncLoadFromStorage(cancel) {
     return null;
   }
   let loaded = null;
-  for (const [_$, item] of __s(parsed).entries()) {
-    loaded = __append(loaded, new Todo({ id: item.id, text: item.text, done: item.done, priority: item.priority }));
+  for (let __i0 = 0, __arr0 = parsed, __len0 = __arr0 ? __arr0.length : 0; __i0 < __len0; __i0++) {
+    let item = __arr0[__i0];
+    loaded = __append(loaded, new Todo(item.id, item.text, item.done, item.priority));
   }
   return loaded;
 }
@@ -667,7 +691,7 @@ async function triggerSave() {
 function addTodo(text, priority) {
   Signals.batch(function() {
     let cur = todosSignal.get();
-    todosSignal.set(__append(cur, new Todo({ id: nextId, text: text, done: false, priority: priority })));
+    todosSignal.set(__append(cur, new Todo(nextId, text, false, priority)));
     nextId++;
     return null;
   });
@@ -676,7 +700,8 @@ function addTodo(text, priority) {
 function toggleTodo(id) {
   todosSignal.update(function(cur) {
     let next = null;
-    for (const [_$, t] of __s(cur).entries()) {
+    for (let __i0 = 0, __arr0 = cur, __len0 = __arr0 ? __arr0.length : 0; __i0 < __len0; __i0++) {
+      let t = __arr0[__i0];
       if (t.id === id) {
         next = __append(next, t.withDone(!t.done));
       } else {
@@ -712,7 +737,8 @@ function moveTodo(fromId, toId, after) {
   let cur = todosSignal.get();
   let item = new Todo();
   let rest = null;
-  for (const [_$, t] of __s(cur).entries()) {
+  for (let __i0 = 0, __arr0 = cur, __len0 = __arr0 ? __arr0.length : 0; __i0 < __len0; __i0++) {
+    let t = __arr0[__i0];
     if (t.id === fromId) {
       item = t;
     } else {
@@ -721,7 +747,8 @@ function moveTodo(fromId, toId, after) {
   }
   let result = null;
   let inserted = false;
-  for (const [_$, t] of __s(rest).entries()) {
+  for (let __i0 = 0, __arr0 = rest, __len0 = __arr0 ? __arr0.length : 0; __i0 < __len0; __i0++) {
+    let t = __arr0[__i0];
     if (!after && t.id === toId) {
       result = __append(result, item);
       inserted = true;

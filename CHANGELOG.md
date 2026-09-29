@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.3.0] - 2026-09-29
+
+### Added
+- **Zero-allocation `for range` loops** — slice and array ranges now compile directly to classic indexed loops (`for (let i = 0, __arr0 = slice, __len0 = __arr0 ? __arr0.length : 0; i < __len0; i++)`) rather than allocating `.entries()` iterator tuples per iteration. The generated code safely guards against `nil` slices without runtime crashes, suffixes registers (`__arr${d}`, `__len${d}`) to prevent collisions in nested loops, and supports value variable reassignment (`let v`) and assignment-form ranges (`for i, v = range slice`).
+- **First-class JavaScript TypedArray support** — sized numeric types (`float32`, `float64`, `uint8`, `byte`, `uint16`, `uint32`, `int8`, `int16`, `int32`) are decoupled in the typechecker as distinct basic singletons. `make([]float32, n)` allocates `new Float32Array(n)` (and corresponding TypedArrays for other sized numeric types), and composite slice literals (`[]float32{...}`) emit typed array constructors.
+- **Zero-copy TypedArray sub-slicing (`.subarray`)** — sub-slicing a TypedArray slice (`s[lo:hi]`) compiles to `.subarray(lo, hi)`, delivering true Go zero-copy mutable slice semantics instead of cloning memory via `.slice()`. `copy()` compiles to `.set()` on TypedArrays, and `append()` preserves TypedArray identity via `.set()` buffer transfer.
+- **Positional struct constructors & pointer unboxing** — struct declarations generate clean positional constructors (`constructor(X$ = 0, Y$ = 0)`), precomputing zero values for omitted fields and eliminating options-bag heap allocations. Struct pointers unbox directly (`&s` -> `s`, `*ptr` -> `ptr`, `ptr.X` -> `ptr.X`), avoiding `{ value: s }` boxing wrappers while preserving boxed wrappers strictly for address-taken primitives. Pointer dereference assignments (`*ptr = other`) compile to in-place mutation via `Object.assign()`.
+- **WebGL2 & WebGPU static typings in standard library** — added comprehensive standard library interfaces in `src/typechecker/stdlib/web.js` for `ArrayBuffer`, `DataView`, TypedArrays (`Float32Array`, `Uint8Array`, etc.), `WebGLRenderingContext`, `WebGL2RenderingContext`, `GPUDevice`, `GPUQueue`, and `GPUAdapter`, including over 40 WebGL constants, camelCase/PascalCase method aliases, and open interface fallback.
+- **Bidirectional slice ↔ TypedArray assignability** — Go numeric slices can be passed directly to APIs expecting TypedArrays (e.g. `[]float32` <-> `Float32Array`), with compile-time type validation against mismatched element types.
+- **Turn-key project scaffolding (`gofront init`)** — scaffolds a complete, production-ready frontend project with `index.html`, `main.go`, `package.json` scripts, `biome.json`, and `.devcontainer`.
+- **Semantic CLI subcommands (`gofront dev` & `gofront build`)** — added `gofront dev` (integrated watch, compile, asset sync, and dev server with live reload) and `gofront build` (clean, compile, minify, and vendor bundling).
+- **Resilient live-reload & compiler error overlay** — HTML-injected SSE live reload with heartbeat pings that survive compile errors, paired with an interactive in-browser error modal displaying compiler and typecheck diagnostics with source code carets.
+- **Node polyfills for Rolldown vendor bundling** — automatically detects and activates `@rolldown/plugin-node-polyfills` to bundle npm dependencies requiring Node built-ins.
+- **Offline PWA service worker generation (`gofront build --pwa`)** — automated pre-cache manifest generation and `sw.js` creation with cache-first asset strategy and HTML registration snippet.
+- **Reference showcase & zero-allocation benchmark** — added 3D rotating colored cube demo in `example/webgl/` with WebGL2 shader pipeline and continuous 60+ FPS animation loop, verified with Playwright E2E. Added a 100,000-iteration ray-triangle intersection benchmark (`test/e2e/perf/zero-alloc.js`) and `npm run test:perf` verifying 0 per-iteration heap allocations.
+
+### Changed
+- **Optimized `__equal` runtime helper** — `__equal` checks `ArrayBuffer.isView()` to perform fast element-by-element comparisons on TypedArrays without object key allocations.
+- **Removed redundant placeholder types** — removed redundant `ANY` declarations for `ArrayBuffer`, `Uint8Array`, `WebGLRenderingContext`, and `GPUDevice` from `src/typechecker/stdlib/core.js` in favor of full typings in `src/typechecker/stdlib/web.js`.
+- **E2E global setup** — updated `test/e2e/global-setup.js` to execute `npm run build:all`.
+
 ## [1.2.3] - 2026-09-24
 
 ### Fixed

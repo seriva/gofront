@@ -7,14 +7,26 @@ export const HELPER_LEN = `var __len = __len || function(a) {
   return a?.length ?? 0;
 };`;
 
-export const HELPER_APPEND =
-	"var __append = __append || function(a, ...b) { return a ? [...a, ...b] : b; };";
+export const HELPER_APPEND = `var __append = __append || function(a, ...b) {
+  if (a && ArrayBuffer.isView(a)) {
+    const res = new a.constructor(a.length + b.length);
+    res.set(a);
+    res.set(b, a.length);
+    return res;
+  }
+  return a ? [...a, ...b] : b;
+};`;
 
 export const HELPER_S = "var __s = __s || function(a) { return a || []; };";
 
 export const HELPER_EQUAL = `var __equal = __equal || function __equal(a, b) {
   if (a === b) return true;
   if (a === null || b === null) return false;
+  if (ArrayBuffer.isView(a) && ArrayBuffer.isView(b)) {
+    if (a.byteLength !== b.byteLength || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+  }
   if (Array.isArray(a) && Array.isArray(b)) {
     if (a.length !== b.length) return false;
     for (let i = 0; i < a.length; i++) if (!__equal(a[i], b[i])) return false;

@@ -14,9 +14,14 @@ import { fileURLToPath } from "node:url";
 import { handlePrep } from "../../../src/cli-core.js";
 import {
 	bundleVendor,
+	findNodePolyfills,
 	generateVendorEntry,
 	getExportNames,
+	isNodeBuiltinError,
+	loadNodePolyfillsPlugin,
 	loadVendorConfig,
+	NODE_BUILTINS,
+	NODE_POLYFILLS_TIP,
 } from "../../../src/vendor.js";
 import {
 	assert,
@@ -471,6 +476,72 @@ test("gofront prep --minify executes via CLI and copies assets", () => {
 		const { code, stderr } = cli(["prep", dir, "--minify"]);
 		assertEqual(code, 0);
 		assertContains(stderr, "copied 1 assets");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+section("vendor — Rolldown Node polyfills");
+
+test("findNodePolyfills and NODE_BUILTINS constants", () => {
+	assertEqual(findNodePolyfills("."), null);
+	assert(NODE_BUILTINS.includes("buffer"));
+	assert(NODE_BUILTINS.includes("path"));
+	assertContains(NODE_POLYFILLS_TIP, "@rolldown/plugin-node-polyfills");
+});
+
+test("isNodeBuiltinError detects missing Node built-in imports", () => {
+	assert(isNodeBuiltinError('Could not resolve "buffer"'));
+	assert(isNodeBuiltinError("Cannot find module 'events'"));
+	assert(isNodeBuiltinError("Unresolved import node:path"));
+	assert(isNodeBuiltinError('Failed to resolve "stream"'));
+	assert(!isNodeBuiltinError("Syntax error on line 10"));
+	assert(!isNodeBuiltinError("Could not resolve 'lodash'"));
+});
+
+test("loadNodePolyfillsPlugin returns null when not installed or disabled", async () => {
+	const resNull = await loadNodePolyfillsPlugin(".", null);
+	assertEqual(resNull, null);
+
+	const dummyPlugin = { name: "custom-polyfill" };
+	const resCustom = await loadNodePolyfillsPlugin(".", () => dummyPlugin);
+	assertEqual(resCustom, dummyPlugin);
+});
+
+test("bundleVendor warns with NODE_POLYFILLS_TIP on Node builtin error without plugin", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-poly-warn-"));
+	try {
+		writeFileSync(
+			join(dir, "package.json"),
+			JSON.stringify({
+				dependencies: { marked: "^18.0.0" },
+			}),
+		);
+
+		const warnings = [];
+		const mockBundler = {
+			name: "mock-rolldown",
+			bundle: async () => {
+				throw new Error('Could not resolve "buffer" from index.js');
+			},
+		};
+
+		let threw = false;
+		try {
+			await bundleVendor(dir, {
+				bundler: mockBundler,
+				dest: "vendor.js",
+				logger: { warn: (msg) => warnings.push(msg) },
+			});
+		} catch {
+			threw = true;
+		}
+
+		assert(threw, "expected bundleVendor to throw bundler error");
+		assert(
+			warnings.some((w) => w.includes("@rolldown/plugin-node-polyfills")),
+			"expected warning with NODE_POLYFILLS_TIP",
+		);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}

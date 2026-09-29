@@ -59,12 +59,13 @@ ${exports.join(",\n")}
 }
 
 export function findBundler(projectDir) {
-	const pkgPath = join(projectDir, "package.json");
+	const root = resolve(projectDir);
+	const pkgPath = join(root, "package.json");
 	let req;
 	if (existsSync(pkgPath)) {
 		req = createRequire(pkgPath);
 	} else {
-		req = createRequire(join(projectDir, "dummy.js"));
+		req = createRequire(join(root, "dummy.js"));
 	}
 
 	try {
@@ -162,47 +163,135 @@ export function resolveDestinationPaths(projectRoot, dest) {
 	});
 }
 
-async function runBundler(
+export const NODE_BUILTINS = [
+	"buffer",
+	"events",
+	"path",
+	"util",
+	"process",
+	"stream",
+	"crypto",
+	"fs",
+	"os",
+	"http",
+	"https",
+	"net",
+	"tls",
+	"zlib",
+	"url",
+	"assert",
+	"child_process",
+];
+
+export const NODE_POLYFILLS_TIP =
+	"gofront: tip: npm package requires Node built-ins. Install @rolldown/plugin-node-polyfills:\n  npm install --save-dev @rolldown/plugin-node-polyfills";
+
+export function isNodeBuiltinError(errorMsg) {
+	if (typeof errorMsg !== "string") return false;
+	const lower = errorMsg.toLowerCase();
+	return NODE_BUILTINS.some(
+		(mod) =>
+			lower.includes(`"${mod}"`) ||
+			lower.includes(`'${mod}'`) ||
+			lower.includes(`node:${mod}`) ||
+			lower.includes(`module '${mod}'`) ||
+			lower.includes(`resolve "${mod}"`) ||
+			lower.includes(`resolve '${mod}'`),
+	);
+}
+
+export function findNodePolyfills(projectDir) {
+	const root = resolve(projectDir);
+	const pkgPath = join(root, "package.json");
+	let req;
+	if (existsSync(pkgPath)) {
+		req = createRequire(pkgPath);
+	} else {
+		req = createRequire(join(root, "dummy.js"));
+	}
+
+	try {
+		const path = req.resolve("@rolldown/plugin-node-polyfills");
+		return { name: "node-polyfills", path };
+	} catch {}
+
+	return null;
+}
+
+export async function loadNodePolyfillsPlugin(projectRoot, customPlugin) {
+	if (customPlugin !== undefined) {
+		if (customPlugin === null) return null;
+		return typeof customPlugin === "function" ? customPlugin() : customPlugin;
+	}
+	const info = findNodePolyfills(projectRoot);
+	if (!info) return null;
+	try {
+		const mod = await import(pathToFileURL(info.path).href);
+		const fn =
+			mod.nodePolyfills || mod.default?.nodePolyfills || mod.default || mod;
+		return typeof fn === "function" ? fn() : mod;
+	} catch {
+		return null;
+	}
+}
+
+async function bundleWithRolldown(
+	bundlerInfo,
+	{ projectRoot, entryFile, destPath, minify, nodePolyfillsPlugin },
+) {
+	const rolldownModule =
+		bundlerInfo.instance ??
+		(await import(pathToFileURL(bundlerInfo.path).href));
+	const rolldownFn =
+		rolldownModule.rolldown ||
+		rolldownModule.default?.rolldown ||
+		rolldownModule.default;
+
+	const plugins = [];
+	if (nodePolyfillsPlugin) {
+		plugins.push(nodePolyfillsPlugin);
+	}
+
+	const bundle = await rolldownFn({
+		input: entryFile,
+		cwd: projectRoot,
+		plugins,
+	});
+	await bundle.write({
+		file: destPath,
+		format: "esm",
+		minify: Boolean(minify),
+	});
+	await bundle.close();
+}
+
+async function bundleWithEsbuild(
 	bundlerInfo,
 	{ projectRoot, entryFile, destPath, minify },
 ) {
-	if (bundlerInfo.name === "rolldown") {
-		const rolldownModule =
-			bundlerInfo.instance ??
-			(await import(pathToFileURL(bundlerInfo.path).href));
-		const rolldownFn =
-			rolldownModule.rolldown ||
-			rolldownModule.default?.rolldown ||
-			rolldownModule.default;
+	const esbuildModule =
+		bundlerInfo.instance ??
+		(await import(pathToFileURL(bundlerInfo.path).href));
+	const buildFn =
+		esbuildModule.build || esbuildModule.default?.build || esbuildModule;
 
-		const bundle = await rolldownFn({
-			input: entryFile,
-			cwd: projectRoot,
-		});
-		await bundle.write({
-			file: destPath,
-			format: "esm",
-			minify: Boolean(minify),
-		});
-		await bundle.close();
+	await buildFn({
+		entryPoints: [entryFile],
+		bundle: true,
+		format: "esm",
+		outfile: destPath,
+		absWorkingDir: projectRoot,
+		minify: Boolean(minify),
+	});
+}
+
+async function runBundler(bundlerInfo, options) {
+	if (bundlerInfo.name === "rolldown") {
+		await bundleWithRolldown(bundlerInfo, options);
 		return;
 	}
-
 	if (bundlerInfo.name === "esbuild") {
-		const esbuildModule =
-			bundlerInfo.instance ??
-			(await import(pathToFileURL(bundlerInfo.path).href));
-		const buildFn =
-			esbuildModule.build || esbuildModule.default?.build || esbuildModule;
-
-		await buildFn({
-			entryPoints: [entryFile],
-			bundle: true,
-			format: "esm",
-			outfile: destPath,
-			absWorkingDir: projectRoot,
-			minify: Boolean(minify),
-		});
+		await bundleWithEsbuild(bundlerInfo, options);
 	}
 }
 
@@ -227,8 +316,9 @@ export async function bundleVendor(projectDir = ".", options = {}) {
 
 	const destPaths = resolveDestinationPaths(projectRoot, dest);
 	const bundlerInfo = options.bundler ?? findBundler(projectRoot);
+	const warn = options.logger?.warn ?? console.warn;
 	if (!bundlerInfo) {
-		console.warn(
+		warn(
 			"gofront: no bundler found (rolldown or esbuild). Run 'npm install --save-dev rolldown' to enable vendor bundling.",
 		);
 		return {
@@ -245,18 +335,36 @@ export async function bundleVendor(projectDir = ".", options = {}) {
 		mkdirSync(dirname(p), { recursive: true });
 	}
 
+	const customPlugin =
+		options.nodePolyfillsPlugin ??
+		bundlerInfo.nodePolyfillsPlugin ??
+		(options.nodePolyfills === false ? null : undefined);
+	const polyfillPlugin = await loadNodePolyfillsPlugin(
+		projectRoot,
+		customPlugin,
+	);
+
 	if (typeof bundlerInfo.bundle === "function") {
-		await bundlerInfo.bundle({
-			projectRoot,
-			packages,
-			dest: destPaths.length === 1 ? destPaths[0] : destPaths,
-			minify: Boolean(minify),
-		});
+		try {
+			await bundlerInfo.bundle({
+				projectRoot,
+				packages,
+				dest: destPaths.length === 1 ? destPaths[0] : destPaths,
+				minify: Boolean(minify),
+				nodePolyfillsPlugin: polyfillPlugin,
+			});
+		} catch (err) {
+			if (!polyfillPlugin && isNodeBuiltinError(err.message)) {
+				warn(NODE_POLYFILLS_TIP);
+			}
+			throw err;
+		}
 		return {
 			bundled: packages,
 			bundler: bundlerInfo.name ?? "custom",
 			dest,
 			minify: Boolean(minify),
+			nodePolyfills: Boolean(polyfillPlugin),
 		};
 	}
 
@@ -273,11 +381,17 @@ export async function bundleVendor(projectDir = ".", options = {}) {
 			entryFile,
 			destPath: destPaths[0],
 			minify,
+			nodePolyfillsPlugin: polyfillPlugin,
 		});
 
 		for (let i = 1; i < destPaths.length; i++) {
 			copyFileSync(destPaths[0], destPaths[i]);
 		}
+	} catch (err) {
+		if (!polyfillPlugin && isNodeBuiltinError(err.message)) {
+			warn(NODE_POLYFILLS_TIP);
+		}
+		throw err;
 	} finally {
 		if (existsSync(entryFile)) {
 			rmSync(entryFile, { force: true });
@@ -289,5 +403,6 @@ export async function bundleVendor(projectDir = ".", options = {}) {
 		bundler: bundlerInfo.name,
 		dest,
 		minify: Boolean(minify),
+		nodePolyfills: Boolean(polyfillPlugin),
 	};
 }

@@ -1,7 +1,16 @@
 // Extended standard library type definitions — gom, maps, regexp, rand, utf8,
 // path, strings.Builder / bytes.Buffer types, and built-in functions.
 
-import { ANY, BOOL, ERROR, FLOAT64, INT, STRING, VOID } from "../types.js";
+import {
+	ANY,
+	BOOL,
+	ERROR,
+	FLOAT64,
+	INT,
+	STRING,
+	UINT8,
+	VOID,
+} from "../types.js";
 
 export function setupExtendedGlobals(globals, types) {
 	const GOM_NODE_T = {
@@ -209,7 +218,7 @@ export function setupExtendedGlobals(globals, types) {
 		},
 	});
 
-	const BYTE_SLICE_T = { kind: "slice", elem: INT };
+	const BYTE_SLICE_T = { kind: "slice", elem: UINT8 };
 	const _builderBase = [
 		["WriteString", { kind: "func", params: [STRING], returns: [INT, ERROR] }],
 		["WriteByte", { kind: "func", params: [INT], returns: [ERROR] }],

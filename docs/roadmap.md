@@ -8,6 +8,28 @@ features (e.g. `docs/v0.0.5/`).
 
 ---
 
+## v1.3.0
+
+**Theme: High-performance engine support & modern dev environment.**
+This release covers two complementary tracks:
+1. **Zero-Allocation Codegen & TypedArray Buffers:** High-performance code generation (`for range` loops, `Float32Array`/`Uint8Array` slice mapping, `.subarray()` zero-copy slicing, positional struct constructors, struct pointer unboxing, and WebGL2/WebGPU typings). Design document in [`docs/v1.3.0/zero-allocation-and-typed-arrays-plan.md`](v1.3.0/zero-allocation-and-typed-arrays-plan.md).
+2. **Modern Dev Environment & Tooling:** Scaffolding overhaul (`gofront init`), semantic CLI commands (`gofront dev`, `gofront build`), resilient HTML-injected live reload, browser compiler error overlay, Node polyfills for Rolldown vendor bundling, and optional offline PWA service worker generation. Design document in [`docs/v1.3.0/dev-environment-and-tooling-plan.md`](v1.3.0/dev-environment-and-tooling-plan.md).
+
+| Area | Difficulty | Status | Notes |
+|---|---|---|---|
+| Zero-alloc `for range` loops | Low | ✓ | Emit indexed `for` loops without `.entries()` iterator tuple allocation. See [plan](v1.3.0/zero-allocation-and-typed-arrays-plan.md). |
+| TypedArray slice mapping | Medium | ✓ | Map `[]float32`/`[]byte`/`[]uint32` to `Float32Array`/`Uint8Array`/`Uint32Array` in `make()`, literals, and builtins. See [plan](v1.3.0/zero-allocation-and-typed-arrays-plan.md). |
+| Zero-copy sub-slicing | Low | ✓ | Emit `.subarray()` on TypedArrays instead of `.slice()`. See [plan](v1.3.0/zero-allocation-and-typed-arrays-plan.md). |
+| Positional struct constructors & pointer unboxing | Medium | ✓ | Emit positional constructor calls `new Point(x, y)` and unbox struct pointers (`&s` -> `s`) to eliminate wrapper allocations. See [plan](v1.3.0/zero-allocation-and-typed-arrays-plan.md). |
+| WebGL2 & WebGPU static typings | Medium | ✓ | Provide real method signatures and constants in typechecker stdlib instead of `ANY`. See [plan](v1.3.0/zero-allocation-and-typed-arrays-plan.md). |
+| Turn-key project scaffolding | Low | ✓ | `gofront init` creates full browser project (`index.html`, `main.go`, `package.json` scripts, `biome.json`, `.devcontainer`). See [plan](v1.3.0/dev-environment-and-tooling-plan.md). |
+| Semantic `dev` & `build` subcommands | Low | ✓ | Top-level `gofront dev` (watch + compile + asset sync + serve) and `gofront build` (clean + compile + minify + vendor). See [plan](v1.3.0/dev-environment-and-tooling-plan.md). |
+| HTML live reload & error overlay | Medium | ✓ | Inject SSE live-reload script into HTML stream (survives compile errors), with keep-alive pings and interactive compiler error overlay. See [plan](v1.3.0/dev-environment-and-tooling-plan.md). |
+| Rolldown Node polyfills | Low | ✓ | Auto-detect `@rolldown/plugin-node-polyfills` in `bundleVendor` so npm packages with Node built-ins run in browser. See [plan](v1.3.0/dev-environment-and-tooling-plan.md). |
+| Offline PWA Service Worker | Low | ✓ | Automated `sw.js` pre-cache manifest generation via `gofront build --pwa`. See [plan](v1.3.0/dev-environment-and-tooling-plan.md). |
+
+---
+
 ## v1.2.3
 
 **Theme: Bug fix.** Fix minifier literal folding regex corrupting hyphenated numbers inside SVG path strings.
