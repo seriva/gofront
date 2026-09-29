@@ -870,6 +870,18 @@ func main() {
 	assertEqual(runJs(js), "0 1 2");
 });
 
+test("package-level var initialized with const declared afterwards executes without TDZ", () => {
+	const { js, errors } = compile(`package main
+var InitialSize = DefaultCap * 2
+const DefaultCap = 16
+
+func main() {
+  println(InitialSize)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "32");
+});
+
 // ── Unimplemented Go features ─────────────────────────────────
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

@@ -127,14 +127,16 @@ export class CodeGen {
 
 	_emitVarConstDecls(program) {
 		for (const d of program.decls) {
-			if (d.kind === "VarDecl") {
-				this._currentSrcFileIdx = d._srcFileIdx ?? 0;
-				this.genVarDecl(d);
-				this.blank();
-			}
 			if (d.kind === "ConstDecl") {
 				this._currentSrcFileIdx = d._srcFileIdx ?? 0;
 				this.genConstDecl(d);
+				this.blank();
+			}
+		}
+		for (const d of program.decls) {
+			if (d.kind === "VarDecl") {
+				this._currentSrcFileIdx = d._srcFileIdx ?? 0;
+				this.genVarDecl(d);
 				this.blank();
 			}
 		}

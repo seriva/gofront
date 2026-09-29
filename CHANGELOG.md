@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.3.5] - 2026-09-29
+
+### Fixed
+- **Multi-file forward type reference resolution** — Pre-registered named type declarations (`!decl.isAlias`) in Pass 0 across package compilation units before resolving underlying types and generic type parameters. Struct fields referencing types defined in subsequent or alphabetically later source files (e.g. `Transform` referencing `Vec3` across `transform.go` and `vec3.go`) now resolve cleanly without undefined type errors. Single-file typechecking now unifies with `checkAll` for consistent declaration resolution semantics across both single- and multi-file packages.
+- **Function assignability to named function types** — Implemented `_checkFuncAssignable` in assignability analysis, allowing function literals and closures to be assigned directly to named function types (e.g. `type RayFilter func(...) bool` and `var GlobalFilter RayFilter = func(...) bool { ... }`), validating parameter types, arity, and return types against the target signature.
+- **Constant declaration hoisting in code generation** — Updated `_emitVarConstDecls` in `src/codegen/index.js` to emit package-level `const` declarations before `var` declarations in generated JavaScript. This ensures package-level variables initialized using constants (including constants declared in sibling files or later in the source) evaluate safely at module evaluation time without JavaScript Temporal Dead Zone (`ReferenceError: Cannot access '...' before initialization`) runtime crashes.
+
 ## [1.3.4] - 2026-09-29
 
 ### Fixed
