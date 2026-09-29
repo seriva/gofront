@@ -26,9 +26,11 @@ import {
 	HELPER_EQUAL,
 	HELPER_ERROR,
 	HELPER_ERROR_IS,
+	HELPER_IFACE_BOX,
 	HELPER_LEN,
 	HELPER_PATH_CLEAN,
 	HELPER_S,
+	HELPER_SCLONE,
 	HELPER_SPRINTF,
 	HELPER_TESTING,
 	HELPER_TIME_FMT,
@@ -38,6 +40,46 @@ import { buildSourceMap } from "./source-map.js";
 import { statementGenMethods } from "./statements.js";
 import { stdlibGenMethods } from "./stdlib/index.js";
 import { templGenMethods } from "./templ.js";
+
+// Valid Go identifiers that cannot be used as JS bindings; emitted with a `$` suffix.
+const JS_RESERVED = new Set([
+	"arguments",
+	"await",
+	"catch",
+	"class",
+	"debugger",
+	"delete",
+	"do",
+	"enum",
+	"eval",
+	"export",
+	"extends",
+	"finally",
+	"function",
+	"implements",
+	"in",
+	"instanceof",
+	"let",
+	"new",
+	"null",
+	"private",
+	"protected",
+	"public",
+	"static",
+	"super",
+	"this",
+	"throw",
+	"try",
+	"typeof",
+	"undefined",
+	"void",
+	"while",
+	"with",
+	"yield",
+]);
+
+const jsSafeName = (n) =>
+	typeof n === "string" && JS_RESERVED.has(n) ? `${n}$` : n;
 
 export class CodeGen {
 	// jsImports:       Map<importPath, string[]> — npm package imports to emit at top of file
@@ -74,6 +116,10 @@ export class CodeGen {
 		this._usesTimeFmt = false;
 		this._usesTimeParse = false;
 		this._usesTesting = false;
+		this._usesSClone = false;
+		this._usesIfaceBox = false;
+		// Per-function context for Go value semantics (see _withFnCtx)
+		this._fnCtx = null;
 		// Iterator (range-over-func) context
 		this._inIteratorBody = false;
 		this._iterDepth = 0;
@@ -153,6 +199,7 @@ export class CodeGen {
 
 	generate(program, options = {}) {
 		const isTest = options.isTest ?? false;
+		this._renameReservedIdents(program.decls);
 		const methods = this._collectDecls(program);
 		this._emitJsImports();
 		this._emitTypeDecls(program, methods);
@@ -187,6 +234,82 @@ export class CodeGen {
 			}
 		}
 		return initNames;
+	}
+
+	_renameParams(params) {
+		for (const p of params ?? []) p.name = jsSafeName(p.name);
+	}
+
+	_renameNamedReturns(node) {
+		for (const r of node.returnType?._namedReturns ?? [])
+			r.name = jsSafeName(r.name);
+	}
+
+	_renameSignature(node) {
+		this._renameParams(node.params);
+		this._renameNamedReturns(node);
+	}
+
+	_renameIdentNode(node) {
+		if (!node._isStructKey && node._type?.kind !== "builtin")
+			node.name = jsSafeName(node.name);
+	}
+
+	_renameFuncDeclNode(node) {
+		node.name = jsSafeName(node.name);
+		this._renameSignature(node);
+	}
+
+	_renameMethodDeclNode(node) {
+		node.recvName = jsSafeName(node.recvName);
+		this._renameSignature(node);
+	}
+
+	_renameDeclSpecs(node) {
+		for (const spec of node.decls ?? [])
+			spec.names = spec.names.map(jsSafeName);
+	}
+
+	_renameTypeSwitchNode(node) {
+		node.assign = jsSafeName(node.assign);
+	}
+
+	_markStructKeys(node) {
+		const isStruct =
+			this._isStructType(node._type) ||
+			node.elems?.some((e) => e._positionalField);
+		if (!isStruct) return;
+		for (const e of node.elems ?? [])
+			if (e.kind === "KeyValueExpr" && e.key?.kind === "Ident")
+				e.key._isStructKey = true;
+	}
+
+	static _RENAME_HANDLERS = {
+		Ident: "_renameIdentNode",
+		FuncDecl: "_renameFuncDeclNode",
+		MethodDecl: "_renameMethodDeclNode",
+		FuncLit: "_renameSignature",
+		TemplDecl: "_renameSignature",
+		VarDecl: "_renameDeclSpecs",
+		ConstDecl: "_renameDeclSpecs",
+		TypeSwitchStmt: "_renameTypeSwitchNode",
+		CompositeLit: "_markStructKeys",
+	};
+
+	_renameReservedIdents(node) {
+		if (!node || typeof node !== "object") return;
+		if (Array.isArray(node)) {
+			for (const n of node) this._renameReservedIdents(n);
+			return;
+		}
+		if (node._jsRenamed) return;
+		node._jsRenamed = true;
+		const handler = CodeGen._RENAME_HANDLERS[node.kind];
+		if (handler) this[handler](node);
+		for (const key of Object.keys(node)) {
+			if (key.startsWith("_")) continue;
+			this._renameReservedIdents(node[key]);
+		}
 	}
 
 	// Collects struct names, method map, and named wrapper names from program decls.
@@ -236,6 +359,8 @@ export class CodeGen {
 			[this._usesLen, HELPER_LEN],
 			[this._usesAppend, HELPER_APPEND],
 			[this._usesSliceGuard, HELPER_S],
+			[this._usesSClone, HELPER_SCLONE],
+			[this._usesIfaceBox, HELPER_IFACE_BOX],
 			[this._usesEqual, HELPER_EQUAL],
 			[this._usesCmul, HELPER_CMUL],
 			[this._usesCdiv, HELPER_CDIV],
@@ -357,18 +482,44 @@ export class CodeGen {
 		this.line(`constructor(${params}) {`);
 		this.indented(() => {
 			const first = binding(fields[0]);
-			const isFirstObj = fields[0].zero === "{}" || fields[0].zero === "null";
-			const optCheck = isFirstObj
-				? `("${fields[0].name}" in ${first})`
-				: "true";
-			this.line(
-				`if (typeof ${first} === "object" && ${first} !== null && ${first}.constructor === Object && ${optCheck}) { Object.assign(this, ${first}); return; }`,
-			);
+			// Legacy `new T({...})` support; only unambiguous when field 0 is a primitive.
+			if (/^(0|""|false)$/.test(fields[0].zero)) {
+				const pattern = fields
+					.map((f) => `${f.name}: ${binding(f)} = ${f.zero}`)
+					.join(", ");
+				this.line(
+					`if (typeof ${first} === "object" && ${first} !== null && ${first}.constructor === Object) ({ ${pattern} } = ${first});`,
+				);
+			}
 			for (const f of fields) {
 				this.line(`this.${f.name} = ${binding(f)};`);
 			}
 		});
 		this.line("}");
+	}
+
+	_genStructClone(name, structTypeAst, fields) {
+		const resolved = this.checker?.types.get(name)?.underlying;
+		const astTypes = new Map();
+		for (const f of structTypeAst?.fields ?? [])
+			for (const n of f.names ?? []) astTypes.set(n, f.type);
+		const args = fields.map((f) => {
+			const t =
+				resolved?.fields?.get(f.name) ??
+				this._typeFromNode(astTypes.get(f.name));
+			return this._cloneJs(t, `this.${f.name}`);
+		});
+		this.blank();
+		this.line(`__clone() { return new ${name}(${args.join(", ")}); }`);
+	}
+
+	_structDefinesValue(name, fields, methodDecls) {
+		if (fields.some((f) => f.name === "value")) return true;
+		if (methodDecls.some((m) => m.name === "value")) return true;
+		const resolved = this.checker?.types.get(name)?.underlying;
+		return Boolean(
+			resolved?.fields?.has?.("value") || resolved?.methods?.has?.("value"),
+		);
 	}
 
 	genStruct(name, structTypeAst, methodDecls) {
@@ -382,11 +533,15 @@ export class CodeGen {
 				this.genMethod(m);
 			}
 			this._genEmbeddedMethodStubs(name, methodDecls);
+			this._genStructClone(name, structTypeAst, fields);
 		});
 		this.line("}");
-		this.line(
-			`Object.defineProperty(${name}.prototype, "value", { get() { return this; }, set(v) { Object.assign(this, v); }, configurable: true });`,
-		);
+		// Lets generic `p.value` dereferences resolve to the struct itself.
+		if (!this._structDefinesValue(name, fields, methodDecls)) {
+			this.line(
+				`Object.defineProperty(${name}.prototype, "value", { get() { return this; }, set(v) { Object.assign(this, v); }, configurable: true });`,
+			);
+		}
 	}
 
 	_genSingleEmbedStubs(embed, declared) {
@@ -421,20 +576,38 @@ export class CodeGen {
 		this._boxedVars = new Set();
 		this._scanAddressTaken(decl.body);
 		const prevUnwrapped = this._unwrappedRecv;
-		this.indented(() => {
-			if (decl.recvName && decl.recvName !== "_") {
-				if (recvField) {
-					this.line(`const ${decl.recvName} = this.${recvField};`);
-					this._unwrappedRecv = decl.recvName;
-				} else {
-					this.line(`const ${decl.recvName} = this;`);
+		this._withFnCtx(decl.body, () =>
+			this.indented(() => {
+				if (decl.recvName && decl.recvName !== "_") {
+					if (recvField) {
+						this.line(`const ${decl.recvName} = this.${recvField};`);
+						this._unwrappedRecv = decl.recvName;
+					} else {
+						this.line(`const ${decl.recvName} = ${this._receiverValue(decl)};`);
+					}
 				}
-			}
-			this._withNamedReturns(decl, () => this._genBody(decl.body));
-		});
+				this._emitParamCopies(decl.params);
+				this._withNamedReturns(decl, () => this._genBody(decl.body));
+			}),
+		);
 		this._unwrappedRecv = prevUnwrapped;
 		this._boxedVars = prevBoxed;
 		this.line("}");
+	}
+
+	// Value receivers are copies in Go; only materialize the copy when the body mutates it.
+	_receiverValue(decl) {
+		const name = decl.recvName;
+		if (decl.recvPointer || !this.structNames.has(decl.recvType.name)) {
+			this._markOwnership(name, false);
+			return "this";
+		}
+		if (this._fnMutates(name)) {
+			this._markOwnership(name, true);
+			return "this.__clone()";
+		}
+		this._markOwnership(name, false);
+		return "this";
 	}
 
 	// Returns the wrapper field name ("_fn", "_items", "_map") if `type` is a named
@@ -470,8 +643,11 @@ export class CodeGen {
 		const prevBoxed = this._boxedVars;
 		this._boxedVars = new Set();
 		this._scanAddressTaken(decl.body);
-		this.indented(() =>
-			this._withNamedReturns(decl, () => this._genBody(decl.body)),
+		this._withFnCtx(decl.body, () =>
+			this.indented(() => {
+				this._emitParamCopies(decl.params);
+				this._withNamedReturns(decl, () => this._genBody(decl.body));
+			}),
 		);
 		this._boxedVars = prevBoxed;
 		this.line("}");
@@ -483,8 +659,10 @@ export class CodeGen {
 		if (named) {
 			// Emit zero-value declarations for named return vars
 			for (const { name, type } of named) {
-				if (name)
+				if (name) {
+					this._markOwnership(name, true);
 					this.line(`let ${name} = ${this.zeroValueForTypeNode(type)};`);
+				}
 			}
 			this.namedReturnVars = named.map((r) => r.name).filter(Boolean);
 		} else {
@@ -565,8 +743,11 @@ export class CodeGen {
 	genVarDecl(decl) {
 		for (const spec of decl.decls) {
 			if (spec.value) {
-				const vals = spec.value.map((v) => {
-					const js = this.genExpr(v);
+				const paired = spec.value.length === spec.names.length;
+				const vals = spec.value.map((v, i) => {
+					const js = paired
+						? this._genDeclValue(spec.names[i], v)
+						: this.genExpr(v);
 					// Wrap numeric values assigned to complex-typed vars
 					if (
 						spec.type?.name === "complex128" ||
@@ -590,6 +771,7 @@ export class CodeGen {
 			} else {
 				const zero = spec.type ? this.zeroValueForTypeNode(spec.type) : "null";
 				for (const name of spec.names) {
+					this._markOwnership(name, true);
 					const val = this._boxedVars.has(name) ? `{ value: ${zero} }` : zero;
 					this.line(`let ${name} = ${val};`);
 				}

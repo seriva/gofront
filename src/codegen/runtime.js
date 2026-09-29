@@ -3,7 +3,7 @@
 // multiple compiled files bundled together can safely repeat the declaration.
 
 export const HELPER_LEN = `var __len = __len || function(a) {
-  if (a && typeof a === 'object' && !Array.isArray(a)) return Object.keys(a).length;
+  if (a && typeof a === 'object' && !Array.isArray(a) && !ArrayBuffer.isView(a)) return Object.keys(a).length;
   return a?.length ?? 0;
 };`;
 
@@ -18,6 +18,27 @@ export const HELPER_APPEND = `var __append = __append || function(a, ...b) {
 };`;
 
 export const HELPER_S = "var __s = __s || function(a) { return a || []; };";
+
+// Copy of a struct value whose class is not statically known.
+export const HELPER_SCLONE = `var __sclone = __sclone || function(x) {
+  if (x === null || typeof x !== "object") return x;
+  if (typeof x.__clone === "function") return x.__clone();
+  return Object.assign(Object.create(Object.getPrototypeOf(x)), x);
+};`;
+
+// Interface boxing: tag struct values (__v) vs struct pointers (__p) so type
+// switches can tell T from *T; tags are non-enumerable so __equal/JSON ignore them.
+export const HELPER_IFACE_BOX = `var __ifv = __ifv || function(x) {
+  if (x === null || typeof x !== "object") return x;
+  const c = typeof x.__clone === "function" ? x.__clone() : Object.assign(Object.create(Object.getPrototypeOf(x)), x);
+  Object.defineProperty(c, "__v", { value: true, configurable: true });
+  return c;
+};
+var __ifp = __ifp || function(x) {
+  if (x !== null && typeof x === "object" && x.__p !== true && Object.isExtensible(x))
+    Object.defineProperty(x, "__p", { value: true, configurable: true });
+  return x;
+};`;
 
 export const HELPER_EQUAL = `var __equal = __equal || function __equal(a, b) {
   if (a === b) return true;

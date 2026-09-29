@@ -28,12 +28,17 @@ const BUILDER_COMMON = {
 export const builderMethods = {
 	_genBuilderCall(typeName, method, expr) {
 		const recv = expr.func.expr;
-		const recvJs = this.genExpr(recv);
-		const base = `(${recvJs}?.value ?? ${recvJs})`;
+		const base = this._unboxWriter(this.genExpr(recv));
 		const args = expr.args.map((a) => this.genExpr(a));
 		const isStr = typeName === "strings.Builder";
 		const table = isStr ? BUILDER_STR : BUILDER_BYTES;
 		const gen = table[method] ?? BUILDER_COMMON[method];
 		return gen ? gen(base, args) : undefined;
+	},
+
+	// Accepts a Builder/Buffer or a pointer box around one; evaluates `js` once.
+	_unboxWriter(js) {
+		if (/^[\w$.]+$/.test(js)) return `(${js}?.value ?? ${js})`;
+		return `((__w) => __w?.value ?? __w)(${js})`;
 	},
 };

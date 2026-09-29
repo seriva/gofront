@@ -29,7 +29,7 @@ export const declarationParseMethods = {
 				this.check(T.IDENT) && !this.isReceiverTerminator(this.peek2())
 					? this.advance().value
 					: "_";
-			this.match(T.STAR); // pointer receiver: (c *Counter) — strip *, treat same as value receiver
+			const recvPointer = Boolean(this.match(T.STAR));
 			const recvType = this.parseTypeName();
 			this.expect(T.RPAREN);
 			const name = this.expect(T.IDENT).value;
@@ -40,6 +40,7 @@ export const declarationParseMethods = {
 				kind: "MethodDecl",
 				recvName,
 				recvType,
+				recvPointer,
 				name,
 				params,
 				returnType,

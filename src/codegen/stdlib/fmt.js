@@ -80,12 +80,12 @@ export const fmtMethods = {
 		const sprintfCall = this._buildFprintSprintfCall(fn, rest.length, restJs);
 		if (targetTypeName === "strings.Builder") {
 			const w = this.genExpr(writerArg);
-			const base = `(${w}?.value ?? ${w})`;
+			const base = this._unboxWriter(w);
 			return `(${base}._buf += ${sprintfCall})`;
 		}
 		if (targetTypeName === "bytes.Buffer") {
 			const w = this.genExpr(writerArg);
-			const base = `(${w}?.value ?? ${w})`;
+			const base = this._unboxWriter(w);
 			return `((__b,__s)=>{ __b._buf.push(...new TextEncoder().encode(__s)); })(${base}, ${sprintfCall})`;
 		}
 		// Generic io.Writer fallback — call .WriteString if available

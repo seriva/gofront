@@ -58,42 +58,45 @@ const NS_CONSTANTS = {
 	utf8: { RuneError: "0xFFFD", MaxRune: "0x10FFFF", UTFMax: "4" },
 };
 
-const BINARY_OP_PREC = {
+// JavaScript precedence of the operators emitted for Go binary expressions.
+const JS_OP_PREC = {
 	"||": 1,
 	"&&": 2,
-	"==": 3,
-	"!=": 3,
-	"<": 3,
-	">": 3,
-	"<=": 3,
-	">=": 3,
-	"+": 4,
-	"-": 4,
-	"|": 4,
+	"|": 3,
 	"^": 4,
-	"*": 5,
-	"/": 5,
-	"%": 5,
-	"<<": 5,
-	">>": 5,
 	"&": 5,
-	"&^": 5,
+	"==": 6,
+	"!=": 6,
+	"===": 6,
+	"!==": 6,
+	"<": 7,
+	">": 7,
+	"<=": 7,
+	">=": 7,
+	"<<": 8,
+	">>": 8,
+	">>>": 8,
+	"+": 9,
+	"-": 9,
+	"*": 10,
+	"/": 10,
+	"%": 10,
 };
 
-function formatBinaryOperand(genExpr, child, parentOp, isRight) {
-	const code = genExpr(child);
-	if (child.kind !== "BinaryExpr") return code;
-	const parentPrec = BINARY_OP_PREC[parentOp] || 0;
-	const childPrec = BINARY_OP_PREC[child.op] || 0;
-	return (isRight ? childPrec <= parentPrec : childPrec < parentPrec)
-		? `(${code})`
-		: code;
+function wrapForJsOp(code, childOp, parentOp, isRight) {
+	if (!childOp) return code;
+	const p = JS_OP_PREC[parentOp];
+	const c = JS_OP_PREC[childOp];
+	return (isRight ? c <= p : c < p) ? `(${code})` : code;
 }
 
-function formatUnaryOperand(genExpr, child) {
-	const code = genExpr(child);
-	return child.kind === "BinaryExpr" ? `(${code})` : code;
-}
+const WEB_PASCAL_ALIAS_TYPES = new Set([
+	"WebGLRenderingContext",
+	"WebGL2RenderingContext",
+	"GPUDevice",
+	"GPUQueue",
+	"GPUAdapter",
+]);
 
 const INT_TYPE_NAMES = new Set([
 	"int",
@@ -200,6 +203,16 @@ const EXPR_GEN_DELEGATE = {
 /** @type {ThisType<CodeGen>} */
 export const expressionGenMethods = {
 	genExpr(expr) {
+		if (expr._ifaceBox && !expr._ifaceBoxing) {
+			expr._ifaceBoxing = true;
+			try {
+				this._usesIfaceBox = true;
+				const fn = expr._ifaceBox === "ptr" ? "__ifp" : "__ifv";
+				return `${fn}(${this.genExpr(expr)})`;
+			} finally {
+				expr._ifaceBoxing = false;
+			}
+		}
 		switch (expr.kind) {
 			case "BasicLit":
 				if (expr.litKind === "STRING") return JSON.stringify(expr.value);
@@ -253,6 +266,204 @@ export const expressionGenMethods = {
 		return this._isStructType(expr._type);
 	},
 
+	// ── Go value semantics for structs and arrays ─────────────────
+
+	_aggregateBase(t) {
+		if (!t) return null;
+		const b =
+			t.kind === "named"
+				? (t.underlying ?? this.checker?.types.get(t.name)?.underlying)
+				: t;
+		return b?.kind === "struct" || b?.kind === "array" ? b : null;
+	},
+
+	_structClassName(t) {
+		const name =
+			typeof t?.name === "string" ? t.name.replace(/\[.*$/, "") : null;
+		return name && this.structNames.has(name) ? name : null;
+	},
+
+	// Pseudo type object for an AST type node (used where no checker type is available).
+	_typeFromNode(node) {
+		if (!node) return null;
+		if (node.kind === "TypeName" && this.structNames.has(node.name))
+			return { kind: "named", name: node.name, underlying: { kind: "struct" } };
+		if (node.kind === "ArrayType")
+			return { kind: "array", elem: this._typeFromNode(node.elem) };
+		return null;
+	},
+
+	_cloneJs(t, js) {
+		const base = this._aggregateBase(t);
+		if (!base) return js;
+		if (base.kind === "struct") {
+			if (this._structClassName(t) || this._structClassName(base))
+				return `${js}.__clone()`;
+			this._usesSClone = true;
+			return `__sclone(${js})`;
+		}
+		const elemClone = this._cloneJs(base.elem, "__e");
+		return elemClone === "__e"
+			? `${js}?.slice()`
+			: `${js}?.map((__e) => ${elemClone})`;
+	},
+
+	_isAddressableExpr(e) {
+		switch (e?.kind) {
+			case "Ident":
+				return e.name !== "_" && !e._isTypeRef;
+			case "SelectorExpr":
+				return !e._isMethodValue && !e._isMethodExpr;
+			case "IndexExpr":
+				return true;
+			case "UnaryExpr":
+				return e.op === "*";
+			case "TypeAssertExpr":
+				return !e._commaOk;
+			default:
+				return false;
+		}
+	},
+
+	// Emits `expr` as a Go value: struct/array operands that alias existing storage are copied.
+	genValueExpr(expr) {
+		const js = this.genExpr(expr);
+		if (expr._ifaceBox) return js;
+		if (!this._aggregateBase(expr._type) || !this._isAddressableExpr(expr))
+			return js;
+		return this._cloneJs(expr._type, js);
+	},
+
+	_rootIdentName(e) {
+		while (e) {
+			if (e.kind === "Ident") return e.name;
+			if (e.kind === "SelectorExpr" || e.kind === "IndexExpr") e = e.expr;
+			else if (e.kind === "UnaryExpr" && e.op === "*") e = e.operand;
+			else return null;
+		}
+		return null;
+	},
+
+	// True when `node` itself (not its children) writes to variable `name`.
+	_nodeWritesVar(node, name) {
+		const root = (e) => this._rootIdentName(e) === name;
+		switch (node.kind) {
+			case "AssignStmt":
+				return node.lhs.some(root);
+			case "DefineStmt":
+				return node.lhs.some((e) => e._redecl && e.name === name);
+			case "IncDecStmt":
+				return root(node.expr);
+			case "SelectorExpr":
+				return Boolean(
+					node._isMethodValue && node._type?._ptrRecv && root(node.expr),
+				);
+			default:
+				return false;
+		}
+	},
+
+	// True when `node` may modify (or take the address of) the value held by variable `name`.
+	_nodeMutatesVar(node, name, addrOnly = false) {
+		if (!node || typeof node !== "object") return false;
+		if (Array.isArray(node))
+			return node.some((n) => this._nodeMutatesVar(n, name, addrOnly));
+		if (
+			node.kind === "UnaryExpr" &&
+			node.op === "&" &&
+			this._rootIdentName(node.operand) === name
+		)
+			return true;
+		if (!addrOnly && this._nodeWritesVar(node, name)) return true;
+		for (const key of Object.keys(node)) {
+			if (key.startsWith("_")) continue;
+			if (this._nodeMutatesVar(node[key], name, addrOnly)) return true;
+		}
+		return false;
+	},
+
+	_fnMutates(name, addrOnly = false) {
+		const ctx = this._fnCtx;
+		if (!ctx) return true;
+		const key = `${addrOnly ? "&" : ""}${name}`;
+		if (!ctx.mut.has(key))
+			ctx.mut.set(key, this._nodeMutatesVar(ctx.body, name, addrOnly));
+		return ctx.mut.get(key);
+	},
+
+	_withFnCtx(body, fn) {
+		const prev = this._fnCtx;
+		this._fnCtx = {
+			body,
+			mut: new Map(),
+			owned: new Set(),
+			borrowed: new Set(),
+		};
+		try {
+			fn();
+		} finally {
+			this._fnCtx = prev;
+		}
+	},
+
+	_markOwnership(name, owned) {
+		if (!this._fnCtx || !name || name === "_") return;
+		(owned ? this._fnCtx.owned : this._fnCtx.borrowed).add(name);
+	},
+
+	// Value for a newly declared local: addressable aggregates are copied (Go value semantics).
+	_genDeclValue(name, rhsNode) {
+		this._markOwnership(name, true);
+		return this.genValueExpr(rhsNode);
+	},
+
+	// Copies aggregate params/receivers that the function body mutates.
+	_emitParamCopies(params) {
+		for (const p of params) {
+			if (p.variadic || !p.name || p.name === "_") continue;
+			const t = this._typeFromNode(p.type);
+			if (!t || this._boxedVars.has(p.name)) continue;
+			if (this._fnMutates(p.name)) {
+				this.line(`${p.name} = ${this._cloneJs(t, p.name)};`);
+				this._markOwnership(p.name, true);
+			} else {
+				this._markOwnership(p.name, false);
+			}
+		}
+	},
+
+	// An owned local can be returned without a copy unless something else may still write it.
+	_genReturnValue(v) {
+		const ctx = this._fnCtx;
+		if (
+			v.kind === "Ident" &&
+			ctx?.owned.has(v.name) &&
+			!ctx.borrowed.has(v.name) &&
+			!this._fnMutates(v.name, true) &&
+			!this._closureMutates(v.name)
+		)
+			return this.genExpr(v);
+		return this.genValueExpr(v);
+	},
+
+	_closureMutates(name) {
+		const ctx = this._fnCtx;
+		const key = `λ${name}`;
+		if (!ctx.mut.has(key)) {
+			const walk = (node) => {
+				if (!node || typeof node !== "object") return false;
+				if (Array.isArray(node)) return node.some(walk);
+				if (node.kind === "FuncLit")
+					return this._nodeMutatesVar(node.body, name);
+				return Object.keys(node).some(
+					(k) => !k.startsWith("_") && walk(node[k]),
+				);
+			};
+			ctx.mut.set(key, walk(ctx.body));
+		}
+		return ctx.mut.get(key);
+	},
+
 	_genUnaryExpr(expr) {
 		const op = expr.op === "^" ? "~" : expr.op; // bitwise NOT
 		// Address-of: &x
@@ -287,7 +498,11 @@ export const expressionGenMethods = {
 			if (op === "-") return `{ re: -${inner}.re, im: -${inner}.im }`;
 			return inner;
 		}
-		return `${op}${formatUnaryOperand((e) => this.genExpr(e), expr.operand)}`;
+		const code = this.genExpr(expr.operand);
+		const needsParens =
+			this._emittedBinaryOp(expr.operand) !== null ||
+			((op === "-" || op === "+") && /^[-+]/.test(code));
+		return needsParens ? `${op}(${code})` : `${op}${code}`;
 	},
 
 	_genSelectorExpr(expr) {
@@ -302,9 +517,25 @@ export const expressionGenMethods = {
 		if (this.bundledPackages.has(base)) return expr.field;
 		if (expr.expr._type?.kind === "pointer" && expr.field !== "value")
 			return this._genPointerSelectorField(expr, base);
-		const sel = `${base}.${expr.field}`;
+		const sel = `${base}.${this._jsMemberName(expr)}`;
 		if (expr._isMethodValue && !expr._callee) return `${sel}.bind(${base})`;
 		return sel;
+	},
+
+	// PascalCase aliases of Web API methods (gl.ClearColor) map to the real camelCase member.
+	_jsMemberName(expr) {
+		const f = expr.field;
+		const t = expr.expr._type;
+		if (
+			t?.kind === "named" &&
+			WEB_PASCAL_ALIAS_TYPES.has(t.name) &&
+			/^[A-Z]/.test(f) &&
+			/[a-z]/.test(f)
+		) {
+			const camel = f[0].toLowerCase() + f.slice(1);
+			if (t.underlying?.methods?.has(camel)) return camel;
+		}
+		return f;
 	},
 
 	_genPointerSelectorField(expr, base) {
@@ -366,7 +597,12 @@ export const expressionGenMethods = {
 		this._boxedVars = new Set(prevBoxed); // inherit parent's boxed vars (closures)
 		this._scanAddressTaken(expr.body);
 		this.out = [];
-		this.indented(() => this._genBody(expr.body));
+		this._withFnCtx(expr.body, () =>
+			this.indented(() => {
+				this._emitParamCopies(expr.params);
+				this._genBody(expr.body);
+			}),
+		);
 		const body = this.out.join("\n");
 		this.out = saved;
 		this._boxedVars = prevBoxed;
@@ -500,7 +736,9 @@ export const expressionGenMethods = {
 			const sliceJS = `${this.genExpr(expr.args[0])}.${wrapField}`;
 			const elems = expr.args
 				.slice(1)
-				.map((a) => (a._spread ? `...${this.genExpr(a)}` : this.genExpr(a)));
+				.map((a) =>
+					a._spread ? `...${this.genExpr(a)}` : this.genValueExpr(a),
+				);
 			if (elems.length === 0) return this.genExpr(expr.args[0]);
 			this._usesAppend = true;
 			return `new ${retType.name}(__append(${sliceJS}, ${elems.join(", ")}))`;
@@ -508,9 +746,17 @@ export const expressionGenMethods = {
 		const slice = this.genExpr(expr.args[0]);
 		const elems = expr.args
 			.slice(1)
-			.map((a) => (a._spread ? `...${this.genExpr(a)}` : this.genExpr(a)));
+			.map((a) => (a._spread ? `...${this.genExpr(a)}` : this.genValueExpr(a)));
 		if (elems.length === 0) return slice;
 		this._usesAppend = true;
+		const sliceType = expr._type ?? expr.args[0]._type;
+		const typedCtor = isTypedArraySlice(sliceType)
+			? typedArrayConstructorForElem(
+					(sliceType.kind === "named" ? sliceType.underlying : sliceType).elem,
+				)
+			: null;
+		if (typedCtor)
+			return `__append((${slice}) ?? new ${typedCtor}(0), ${elems.join(", ")})`;
 		return `__append(${slice}, ${elems.join(", ")})`;
 	},
 
@@ -585,9 +831,9 @@ export const expressionGenMethods = {
 						e.key.litKind === "STRING"
 							? JSON.stringify(e.key.value)
 							: `[${this.genExpr(e.key)}]`;
-					return `${k}: ${this.genExpr(e.value)}`;
+					return `${k}: ${this.genValueExpr(e.value)}`;
 				}
-				return this.genExpr(e);
+				return this.genValueExpr(e);
 			})
 			.join(", ");
 	},
@@ -616,7 +862,9 @@ export const expressionGenMethods = {
 					: null);
 			const idx = name ? fields.findIndex((f) => f.name === name) : i;
 			if (idx >= 0 && idx < fields.length) {
-				values[idx] = this.genExpr(e.kind === "KeyValueExpr" ? e.value : e);
+				values[idx] = this.genValueExpr(
+					e.kind === "KeyValueExpr" ? e.value : e,
+				);
 				if (idx > maxIdx) maxIdx = idx;
 			}
 		}
@@ -631,7 +879,7 @@ export const expressionGenMethods = {
 				(ce) => (ce._positionalField ?? ce.key?.name) === ef,
 			);
 			values[idx] = match
-				? this.genExpr(match.value ?? match)
+				? this.genValueExpr(match.value ?? match)
 				: fields[idx].zero;
 		} else {
 			values[idx] = `${this.genExpr(e.value)}.${ef}`;
@@ -655,7 +903,7 @@ export const expressionGenMethods = {
 			} else {
 				const idx = fields.findIndex((f) => f.name === k);
 				if (idx >= 0) {
-					values[idx] = this.genExpr(e.value);
+					values[idx] = this.genValueExpr(e.value);
 					if (idx > maxIdx) maxIdx = idx;
 				}
 			}
@@ -695,9 +943,7 @@ export const expressionGenMethods = {
 		}
 		if (this._isSliceOrArrayType(t)) {
 			const elems = expr.elems
-				.map((e) =>
-					e.kind === "KeyValueExpr" ? this.genExpr(e.value) : this.genExpr(e),
-				)
+				.map((e) => this.genValueExpr(e.kind === "KeyValueExpr" ? e.value : e))
 				.join(", ");
 			const elemNode =
 				t.kind === "SliceType" || t.kind === "ArrayType" ? t.elem : null;
@@ -734,13 +980,13 @@ export const expressionGenMethods = {
 			const fields = expr.elems
 				.map((e) => {
 					if (e._positionalField)
-						return `${e._positionalField}: ${this.genExpr(e)}`;
-					return `${e.key.name ?? this.genExpr(e.key)}: ${this.genExpr(e.value)}`;
+						return `${e._positionalField}: ${this.genValueExpr(e)}`;
+					return `${e.key.name ?? this.genExpr(e.key)}: ${this.genValueExpr(e.value)}`;
 				})
 				.join(", ");
 			return `{ ${fields} }`;
 		}
-		const elems = expr.elems.map((e) => this.genExpr(e)).join(", ");
+		const elems = expr.elems.map((e) => this.genValueExpr(e)).join(", ");
 		if (isTypedArraySlice(expr._type)) {
 			const typedCtor = typedArrayConstructorForElem(expr._type.elem);
 			if (typedCtor) return `new ${typedCtor}([${elems}])`;
@@ -759,18 +1005,16 @@ export const expressionGenMethods = {
 							e.key.litKind === "STRING"
 								? JSON.stringify(e.key.value)
 								: `[${this.genExpr(e.key)}]`;
-						return `${k}: ${this.genExpr(e.value)}`;
+						return `${k}: ${this.genValueExpr(e.value)}`;
 					}
-					return this.genExpr(e);
+					return this.genValueExpr(e);
 				})
 				.join(", ");
 			return `new ${typeName}({ ${entries} })`;
 		}
 		// Default: slice
 		const elems = expr.elems
-			.map((e) =>
-				e.kind === "KeyValueExpr" ? this.genExpr(e.value) : this.genExpr(e),
-			)
+			.map((e) => this.genValueExpr(e.kind === "KeyValueExpr" ? e.value : e))
 			.join(", ");
 		return `new ${typeName}([${elems}])`;
 	},
@@ -833,8 +1077,20 @@ export const expressionGenMethods = {
 			}
 			case "SliceType":
 				return "null";
-			case "ArrayType":
-				return "[]";
+			case "ArrayType": {
+				const n = Number(typeNode.size?.value ?? 0) || 0;
+				const ctor = typeNode.elem?.name
+					? typedArrayConstructorForElem({
+							kind: "basic",
+							name: typeNode.elem.name,
+						})
+					: null;
+				return this._arrayZero(
+					n,
+					ctor,
+					this.zeroValueForTypeNode(typeNode.elem),
+				);
+			}
 			case "MapType":
 				return "{}";
 			case "PointerType":
@@ -854,6 +1110,14 @@ export const expressionGenMethods = {
 		}
 	},
 
+	_arrayZero(n, ctor, elemZero) {
+		if (ctor) return `new ${ctor}(${n})`;
+		if (n === 0) return "[]";
+		if (/^(new |\{|\[|Array)/.test(elemZero))
+			return `Array.from({ length: ${n} }, () => ${elemZero})`;
+		return `new Array(${n}).fill(${elemZero})`;
+	},
+
 	// zeroValueForType operates on typechecker type objects (not AST type nodes).
 	zeroValueForType(t) {
 		if (!t) return "null";
@@ -862,6 +1126,12 @@ export const expressionGenMethods = {
 				return this._zeroForBasicName(t.name) ?? "null";
 			case "slice":
 				return "null";
+			case "array":
+				return this._arrayZero(
+					Number(t.size ?? 0) || 0,
+					typedArrayConstructorForElem(t.elem),
+					this.zeroValueForType(t.elem),
+				);
 			case "map":
 				return "{}";
 			case "struct": {
@@ -888,8 +1158,17 @@ export const expressionGenMethods = {
 			if (name === "nil") return `${val} === null`;
 			if (name === "error")
 				return `(typeof ${val} === "object" && ${val} !== null && typeof ${val}.Error === "function")`;
-			if (this.structNames.has(name)) return `${val} instanceof ${name}`;
+			if (this.structNames.has(name))
+				return `(${val} instanceof ${name} && ${val}.__p !== true)`;
 			return "true"; // unknown type — can't check at runtime
+		}
+		if (
+			typeNode.kind === "PointerType" &&
+			typeNode.base?.kind === "TypeName" &&
+			this.structNames.has(typeNode.base.name)
+		) {
+			const name = typeNode.base.name;
+			return `(${val} instanceof ${name} && ${val}.__v !== true)`;
 		}
 		return "true";
 	},
@@ -948,39 +1227,72 @@ export const expressionGenMethods = {
 		)
 			return this._genComplexBinary(expr);
 
-		const l = formatBinaryOperand(
-			(e) => this.genExpr(e),
-			expr.left,
-			expr.op,
-			false,
-		);
-		const r = formatBinaryOperand(
-			(e) => this.genExpr(e),
-			expr.right,
-			expr.op,
-			true,
-		);
+		if (this._isStructEquality(expr)) {
+			this._usesEqual = true;
+			const cmp = `__equal(${this.genExpr(expr.left)}, ${this.genExpr(expr.right)})`;
+			return expr.op === "==" ? cmp : `!${cmp}`;
+		}
 
-		if (
+		const jsOp = this._emittedBinaryOp(expr) ?? "/";
+		const operand = (child, isRight) =>
+			wrapForJsOp(
+				this.genExpr(child),
+				this._emittedBinaryOp(child),
+				jsOp,
+				isRight,
+			);
+		const l = operand(expr.left, false);
+
+		if (expr.op === "&^") {
+			const rCode = this.genExpr(expr.right);
+			const r =
+				this._emittedBinaryOp(expr.right) !== null ? `(${rCode})` : rCode;
+			return `${l} & ~${r}`;
+		}
+		const r = operand(expr.right, true);
+		if (this._isIntDivision(expr)) return `Math.trunc(${l} / ${r})`;
+		return `${l} ${jsOp} ${r}`;
+	},
+
+	_isStructEquality(expr) {
+		return (
+			(expr.op === "==" || expr.op === "!=") &&
+			this._isStructOrArrayType(expr.left._type)
+		);
+	},
+
+	_isIntDivision(expr) {
+		return (
 			expr.op === "/" &&
 			this.isIntType(expr.left._type) &&
 			this.isIntType(expr.right._type)
+		);
+	},
+
+	_isNilLiteral(expr) {
+		return (
+			(expr.kind === "Ident" && expr.name === "nil") ||
+			(expr.kind === "BasicLit" && expr.value === "null")
+		);
+	},
+
+	// Top-level JS operator a BinaryExpr compiles to, or null when the output is atomic.
+	_emittedBinaryOp(expr) {
+		if (expr?.kind !== "BinaryExpr") return null;
+		if (
+			isComplex(expr._type) ||
+			isComplex(expr.left._type) ||
+			isComplex(expr.right._type)
 		)
-			return `Math.trunc(${l} / ${r})`;
-		if (expr.op === "&^") return `${l} & ~${r}`;
+			return null;
+		if (this._isStructEquality(expr) || this._isIntDivision(expr)) return null;
+		if (expr.op === "&^") return "&";
 		if (expr.op === "==" || expr.op === "!=") {
-			if (this._isStructOrArrayType(expr.left._type)) {
-				this._usesEqual = true;
-				const cmp = `__equal(${l}, ${r})`;
-				return expr.op === "==" ? cmp : `!${cmp}`;
-			}
-			if (l === "null" || r === "null") {
-				const op = expr.op === "==" ? "==" : "!=";
-				return `${l} ${op} ${r}`;
-			}
+			if (this._isNilLiteral(expr.left) || this._isNilLiteral(expr.right))
+				return expr.op;
+			return expr.op === "==" ? "===" : "!==";
 		}
-		const op = expr.op === "==" ? "===" : expr.op === "!=" ? "!==" : expr.op;
-		return `${l} ${op} ${r}`;
+		return expr.op;
 	},
 
 	_genTypeConversion(expr) {
@@ -1032,13 +1344,14 @@ export const expressionGenMethods = {
 		const typedCtor = typedArrayConstructorForElem(
 			t.elem ? { kind: "basic", name: t.elem.name } : null,
 		);
+		const fromString = this._isStringSource(expr.expr._type);
 		if (typedCtor) {
-			return `new ${typedCtor}(${inner})`;
+			return fromString
+				? `${typedCtor}.from(${inner}, __c => __c.codePointAt(0))`
+				: `new ${typedCtor}(${inner})`;
 		}
-		if (elem === "rune" || elem === "int32" || elem === "int") {
-			if (this._isStringSource(expr.expr._type))
-				return `Array.from(${inner}, __c => __c.codePointAt(0))`;
-		}
+		if ((elem === "rune" || elem === "int32" || elem === "int") && fromString)
+			return `Array.from(${inner}, __c => __c.codePointAt(0))`;
 		return `Array.from(${inner})`;
 	},
 
@@ -1060,19 +1373,25 @@ export const expressionGenMethods = {
 			case "string":
 				return this._genStringConversion(expr.expr._type, inner);
 			case "int":
-			case "int8":
-			case "int16":
-			case "int32":
 			case "int64":
 			case "uint":
-			case "uint8":
-			case "uint16":
-			case "uint32":
 			case "uint64":
 			case "uintptr":
-			case "byte":
-			case "rune":
 				return `Math.trunc(Number(${inner}))`;
+			case "int8":
+				return `(Number(${inner}) << 24 >> 24)`;
+			case "int16":
+				return `(Number(${inner}) << 16 >> 16)`;
+			case "int32":
+			case "rune":
+				return `(Number(${inner}) | 0)`;
+			case "uint8":
+			case "byte":
+				return `(Number(${inner}) & 0xFF)`;
+			case "uint16":
+				return `(Number(${inner}) & 0xFFFF)`;
+			case "uint32":
+				return `(Number(${inner}) >>> 0)`;
 			case "float32":
 				return `Math.fround(Number(${inner}))`;
 			case "float64":

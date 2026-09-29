@@ -148,8 +148,17 @@ export const statementCheckMethods = {
 		for (let i = 0; i < lhsTypes.length; i++) {
 			if (stmt.lhs[i]?.kind === "Ident" && stmt.lhs[i]?.name === "_") continue;
 			const r = rhsFlat[i] ?? ANY;
-			if (!isAny(lhsTypes[i]) && !isAny(r))
+			if (stmt.rhs.length === lhsTypes.length && lhsTypes[i] && r)
+				this._markIfaceBox(
+					this.resolveType(lhsTypes[i]),
+					this.resolveType(r),
+					stmt.rhs[i],
+				);
+			if (!isAny(lhsTypes[i]) && !isAny(r)) {
+				this._skipIfaceMark = true;
 				this.assertAssignable(lhsTypes[i], r, stmt.lhs[i]);
+				this._skipIfaceMark = false;
+			}
 		}
 	},
 

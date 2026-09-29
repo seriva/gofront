@@ -15,6 +15,7 @@ import {
 import {
 	basename,
 	dirname,
+	extname,
 	isAbsolute,
 	join,
 	relative,
@@ -28,6 +29,10 @@ import { minify } from "./minifier.js";
 import { generatePwa } from "./pwa.js";
 import { runTests } from "./test-runner.js";
 import { bundleVendor } from "./vendor.js";
+
+const GOFRONT_VERSION = JSON.parse(
+	readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+).version;
 
 export function runCompile(inputPath, isDir, options) {
 	const {
@@ -127,6 +132,7 @@ node_modules/
 				check: "gofront check",
 			},
 			dependencies: {},
+			devDependencies: { gofront: `^${GOFRONT_VERSION}` },
 		},
 		null,
 		2,
@@ -417,16 +423,21 @@ function isSubdirectory(parent, child) {
 	);
 }
 
-function cleanOutputDir(outDir, projectRoot, srcDir) {
+function cleanOutputDir(outDir, project, srcDir) {
 	const resolvedOut = resolve(outDir);
-	const resolvedRoot = resolve(projectRoot);
-	const resolvedSrc = resolve(srcDir);
+	const resolvedRoot = resolve(project.projectRoot);
+	const protectedDirs = [
+		resolvedRoot,
+		resolve(srcDir),
+		resolve(project.serveDir),
+	];
 
+	// Only ever delete a directory inside the project that holds no sources.
 	const isSafe =
-		resolvedOut !== resolvedRoot &&
-		resolvedOut !== resolvedSrc &&
-		!isSubdirectory(resolvedOut, resolvedRoot) &&
-		!isSubdirectory(resolvedOut, resolvedSrc);
+		isSubdirectory(resolvedRoot, resolvedOut) &&
+		protectedDirs.every(
+			(p) => p !== resolvedOut && !isSubdirectory(resolvedOut, p),
+		);
 
 	if (isSafe && existsSync(resolvedOut)) {
 		rmSync(resolvedOut, { recursive: true, force: true });
@@ -434,7 +445,86 @@ function cleanOutputDir(outDir, projectRoot, srcDir) {
 	mkdirSync(resolvedOut, { recursive: true });
 }
 
-function copyReleaseAssets(project, outDir, assetConfig) {
+const STATIC_ASSET_EXTS = new Set([
+	".html",
+	".css",
+	".js",
+	".mjs",
+	".json",
+	".webmanifest",
+	".png",
+	".jpg",
+	".jpeg",
+	".gif",
+	".svg",
+	".webp",
+	".avif",
+	".ico",
+	".woff",
+	".woff2",
+	".ttf",
+	".otf",
+	".mp3",
+	".wav",
+	".ogg",
+	".mp4",
+	".webm",
+	".txt",
+	".xml",
+	".wasm",
+]);
+
+const ROOT_CONFIG_EXTS = new Set([".js", ".mjs", ".json"]);
+
+// Whether a file in the served directory is a web asset worth copying to the build output.
+function isStaticAsset(name, atProjectRoot) {
+	const ext = extname(name).toLowerCase();
+	if (!STATIC_ASSET_EXTS.has(ext)) return false;
+	// At the project root, .js/.json files are tooling config, not web assets.
+	if (atProjectRoot && ROOT_CONFIG_EXTS.has(ext))
+		return name === "manifest.json";
+	return true;
+}
+
+// Copies static web assets (css, images, fonts, ...) from the served directory into the build output.
+function copyServeDirAssets(project, outDir, srcDir) {
+	const serveDir = resolve(project.serveDir);
+	const out = resolve(outDir);
+	if (!existsSync(serveDir) || serveDir === out) return 0;
+	const isRoot = serveDir === resolve(project.projectRoot);
+	const skipDirs = [out, resolve(srcDir)];
+	const devOutput = resolve(project.devOutputFile);
+	const skipFiles = new Set([devOutput, `${devOutput}.map`]);
+	let copied = 0;
+
+	const copyFile = (full) => {
+		const dest = join(out, relative(serveDir, full));
+		if (existsSync(dest)) return;
+		mkdirSync(dirname(dest), { recursive: true });
+		copyFileSync(full, dest);
+		copied++;
+	};
+	const walk = (dir) => {
+		for (const entry of readdirSync(dir, { withFileTypes: true })) {
+			if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
+			const full = join(dir, entry.name);
+			if (entry.isDirectory()) {
+				if (!skipDirs.some((d) => d === full || isSubdirectory(d, full)))
+					walk(full);
+			} else if (
+				entry.isFile() &&
+				!skipFiles.has(full) &&
+				isStaticAsset(entry.name, isRoot)
+			) {
+				copyFile(full);
+			}
+		}
+	};
+	walk(serveDir);
+	return copied;
+}
+
+function copyReleaseAssets(project, outDir, srcDir, assetConfig) {
 	const assetResult = copyAssets(project.projectRoot, assetConfig);
 
 	const candidates = [
@@ -449,6 +539,7 @@ function copyReleaseAssets(project, outDir, assetConfig) {
 			break;
 		}
 	}
+	copyServeDirAssets(project, outDir, srcDir);
 	return assetResult;
 }
 
@@ -486,7 +577,7 @@ export async function handleBuild(targetDir = ".", options = {}) {
 	const outDir = options.outDir ? resolve(options.outDir) : project.outDir;
 	const srcDir = options.srcDir ? resolve(options.srcDir) : project.srcDir;
 
-	cleanOutputDir(outDir, project.projectRoot, srcDir);
+	cleanOutputDir(outDir, project, srcDir);
 
 	const isDir = statSync(srcDir).isDirectory();
 	const outputFile = join(outDir, "app.js");
@@ -507,15 +598,20 @@ export async function handleBuild(targetDir = ".", options = {}) {
 	let vendor = null;
 	try {
 		vendor = await bundleVendor(project.projectRoot, {
-			dest: join(outDir, "vendor.js"),
 			minify: doMinify,
 			...options.vendorConfig,
+			dest: join(outDir, "vendor.js"),
 		});
 	} catch (e) {
 		console.warn(`gofront: vendor bundle warning: ${e.message}`);
 	}
 
-	const assets = copyReleaseAssets(project, outDir, options.assetConfig);
+	const assets = copyReleaseAssets(
+		project,
+		outDir,
+		srcDir,
+		options.assetConfig,
+	);
 
 	let pwa = null;
 	if (options.pwa) {
@@ -654,7 +750,11 @@ function setupDevWatchers(config) {
 		},
 		() => {
 			clearTimeout(htmlDebounce);
-			htmlDebounce = setTimeout(() => config.devServer.notify(), 50);
+			// Typed reload keeps a pending build error visible after the page reloads.
+			htmlDebounce = setTimeout(
+				() => config.devServer.notify({ type: "reload" }),
+				50,
+			);
 		},
 	);
 	if (serveWatcher) watchers.push(serveWatcher);
@@ -687,8 +787,11 @@ export async function handleDev(targetDir = ".", options = {}) {
 
 	copyAssets(project.projectRoot, options.assetConfig);
 
-	const devServer = createDevServer(serveDir, port, options);
 	const isDir = statSync(srcDir).isDirectory();
+	const devServer = createDevServer(serveDir, port, {
+		...options,
+		silent: true,
+	});
 	let initialError = null;
 
 	try {
@@ -700,6 +803,7 @@ export async function handleDev(targetDir = ".", options = {}) {
 		writeFileSync(outputFile, `${result.js}\n`);
 	} catch (err) {
 		initialError = err;
+		devServer.notifyError(err);
 	}
 
 	let watcherController = null;
@@ -721,6 +825,7 @@ export async function handleDev(targetDir = ".", options = {}) {
 	return {
 		devServer,
 		project,
+		port,
 		serveDir,
 		srcDir,
 		outputFile,

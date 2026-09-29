@@ -185,10 +185,53 @@ export class TypeChecker {
 				}
 			}
 		}
+		const all = [];
 		for (const p of programs) {
-			this._setCurrentFile(p);
-			for (const d of p.decls) if (d.kind === "TypeDecl") this.collectType(d);
+			for (const d of p.decls) if (d.kind === "TypeDecl") all.push({ p, d });
 		}
+		// Collect in dependency order so aliases, generics, embedded and by-value
+		// field types declared later (or in other files) are ready when needed.
+		let pending = all;
+		while (pending.length > 0) {
+			const pendingNames = new Map(pending.map((x) => [x.d.name, x.d]));
+			const ready = pending.filter(
+				(x) => !this._typeDeclBlocked(x.d, pendingNames),
+			);
+			const batch = ready.length > 0 ? ready : pending;
+			for (const { p, d } of batch) {
+				this._setCurrentFile(p);
+				this.collectType(d);
+			}
+			pending =
+				ready.length > 0 ? pending.filter((x) => !ready.includes(x)) : [];
+		}
+	}
+
+	_typeDeclBlocked(decl, pendingNames) {
+		const visit = (node, indirect) => {
+			if (!node || typeof node !== "object") return false;
+			if (Array.isArray(node)) return node.some((n) => visit(n, indirect));
+			if (
+				(node.kind === "TypeName" || node.kind === "GenericTypeName") &&
+				node.name !== decl.name
+			) {
+				const dep = pendingNames.get(node.name);
+				if (dep && (!indirect || dep.isAlias || dep.typeParams)) return true;
+			}
+			const nextIndirect =
+				indirect ||
+				[
+					"PointerType",
+					"SliceType",
+					"MapType",
+					"FuncType",
+					"ChanType",
+				].includes(node.kind);
+			return Object.keys(node).some(
+				(k) => !k.startsWith("_") && visit(node[k], nextIndirect),
+			);
+		};
+		return visit(decl.type, false);
 	}
 
 	_collectFuncsPass(programs) {
@@ -390,6 +433,7 @@ export class TypeChecker {
 	}
 
 	_attachMethod(decl, funcType) {
+		funcType._ptrRecv = Boolean(decl.recvPointer);
 		const recvNamedType = this.types.get(decl.recvType.name);
 		if (recvNamedType?._generic)
 			this._attachGenericMethod(recvNamedType, decl, funcType);
