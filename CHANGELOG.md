@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.3.2] - 2026-09-29
+
+### Fixed
+- **Multi-file package compilation in directory checks and project resolution** — `resolveSrcDir` in `src/cli-core.js` previously collapsed any directory containing `main.go` into single-file compilation (`main.go`). It now checks whether other `.go` files exist in that directory, compiling the complete package directory when multiple Go files are present so symbols across sibling files are properly resolved during `gofront check` and compilation.
+- **`gofront test` auto-detection from project root** — `handleTest` in `src/cli-core.js` now auto-detects `project.srcDir` when executed without explicit target arguments from a project root, eliminating the need to pass `src` explicitly to find test suites.
+
+### Added
+- **`serveDir` file watching for live reloads in `gofront dev`** — when `serveDir` is distinct from the watch target directory, `handleDev` now also watches `serveDir` for `.css` (triggering hot-reload without page refresh) and `.html` (triggering full page reload).
+
 ## [1.3.1] - 2026-09-29
 
 ### Fixed

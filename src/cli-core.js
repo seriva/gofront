@@ -222,8 +222,22 @@ export function parseTestArgs(argv) {
 	};
 }
 
-export function handleTest(targetDir, options = {}) {
-	return runTests(targetDir, options);
+export function handleTest(targetDir = ".", options = {}) {
+	let testTarget = targetDir;
+	try {
+		const project = detectProject(targetDir);
+		const targetPath = resolve(targetDir);
+		if (
+			statSync(targetPath).isDirectory() &&
+			targetPath === project.projectRoot &&
+			project.srcDir !== project.projectRoot
+		) {
+			testTarget = statSync(project.srcDir).isDirectory()
+				? project.srcDir
+				: dirname(project.srcDir);
+		}
+	} catch {}
+	return runTests(testTarget, options);
 }
 
 // ── Project detection ─────────────────────────────────────────
@@ -257,7 +271,17 @@ function resolveSrcDir(projectRoot, config) {
 		return join(projectRoot, "src");
 	}
 	if (existsSync(join(projectRoot, "main.go"))) {
-		return join(projectRoot, "main.go");
+		try {
+			const entries = readdirSync(projectRoot);
+			const srcFiles = entries.filter(
+				(e) =>
+					(e.endsWith(".go") || e.endsWith(".templ")) &&
+					!e.endsWith("_test.go"),
+			);
+			if (srcFiles.length === 1 && srcFiles[0] === "main.go") {
+				return join(projectRoot, "main.go");
+			}
+		} catch {}
 	}
 	return projectRoot;
 }
@@ -539,6 +563,117 @@ export function parseDevArgs(argv) {
 	};
 }
 
+function buildDevOnce(
+	{ srcDir, isDir, outputFile, sourceMap, devServer },
+	changedFile = null,
+) {
+	try {
+		const startMs = performance.now();
+		const result = runCompile(srcDir, isDir, {
+			outputFile,
+			sourceMap: sourceMap ?? true,
+		});
+		mkdirSync(dirname(outputFile), { recursive: true });
+		writeFileSync(outputFile, `${result.js}\n`);
+		const elapsedMs = (performance.now() - startMs).toFixed(0);
+		const note = changedFile ? ` — ${changedFile} changed` : "";
+		console.error(`gofront: OK — wrote ${outputFile} (${elapsedMs}ms${note})`);
+		devServer.notify();
+	} catch (e) {
+		console.error("gofront: ERROR");
+		for (const line of e.message.split("\n")) console.error(`  ${line}`);
+		devServer.notifyError(e);
+	}
+}
+
+function createSrcWatcher(watchTarget, onCss, onRebuild) {
+	try {
+		return watch(watchTarget, { recursive: true }, (_event, filename) => {
+			if (!filename) return;
+			if (filename.endsWith(".css")) {
+				onCss(filename);
+			} else if (filename.endsWith(".go") || filename.endsWith(".templ")) {
+				onRebuild(filename);
+			}
+		});
+	} catch {
+		return null;
+	}
+}
+
+function createServeWatcher(serveDir, watchTarget, onCss, onHtml) {
+	if (!existsSync(serveDir) || resolve(serveDir) === resolve(watchTarget)) {
+		return null;
+	}
+	try {
+		return watch(serveDir, { recursive: true }, (_event, filename) => {
+			if (!filename) return;
+			if (filename.endsWith(".css")) {
+				onCss(filename);
+			} else if (filename.endsWith(".html")) {
+				onHtml();
+			}
+		});
+	} catch {
+		return null;
+	}
+}
+
+function setupDevWatchers(config) {
+	let debounce = null;
+	let cssDebounce = null;
+	let htmlDebounce = null;
+
+	const handleCss = (filename) => {
+		try {
+			copyAssets(config.project.projectRoot, config.assetConfig);
+		} catch {}
+		config.devServer.notifyCss(filename);
+	};
+
+	const watchers = [];
+	const srcWatcher = createSrcWatcher(
+		config.watchTarget,
+		(fn) => {
+			clearTimeout(cssDebounce);
+			cssDebounce = setTimeout(() => handleCss(fn), 50);
+		},
+		(fn) => {
+			clearTimeout(debounce);
+			debounce = setTimeout(() => buildDevOnce(config, fn), 80);
+		},
+	);
+	if (srcWatcher) watchers.push(srcWatcher);
+
+	const serveWatcher = createServeWatcher(
+		config.serveDir,
+		config.watchTarget,
+		(fn) => {
+			clearTimeout(cssDebounce);
+			cssDebounce = setTimeout(() => handleCss(fn), 50);
+		},
+		() => {
+			clearTimeout(htmlDebounce);
+			htmlDebounce = setTimeout(() => config.devServer.notify(), 50);
+		},
+	);
+	if (serveWatcher) watchers.push(serveWatcher);
+
+	return {
+		watchers,
+		close: () => {
+			clearTimeout(debounce);
+			clearTimeout(cssDebounce);
+			clearTimeout(htmlDebounce);
+			for (const w of watchers) {
+				try {
+					w?.close();
+				} catch {}
+			}
+		},
+	};
+}
+
 export async function handleDev(targetDir = ".", options = {}) {
 	const project = detectProject(targetDir);
 	const port = options.port ?? project.port ?? 3000;
@@ -567,51 +702,19 @@ export async function handleDev(targetDir = ".", options = {}) {
 		initialError = err;
 	}
 
-	let watcher = null;
+	let watcherController = null;
 	if (options.watch !== false) {
 		const watchTarget = isDir ? srcDir : dirname(srcDir);
-		let debounce = null;
-		let cssDebounce = null;
-
-		function buildOnce(changedFile = null) {
-			try {
-				const startMs = performance.now();
-				const result = runCompile(srcDir, isDir, {
-					outputFile,
-					sourceMap: options.sourceMap ?? true,
-				});
-				mkdirSync(dirname(outputFile), { recursive: true });
-				writeFileSync(outputFile, `${result.js}\n`);
-				const elapsedMs = (performance.now() - startMs).toFixed(0);
-				const note = changedFile ? ` — ${changedFile} changed` : "";
-				console.error(
-					`gofront: OK — wrote ${outputFile} (${elapsedMs}ms${note})`,
-				);
-				devServer.notify();
-			} catch (e) {
-				console.error(`gofront: ERROR`);
-				for (const line of e.message.split("\n")) console.error(`  ${line}`);
-				devServer.notifyError(e);
-			}
-		}
-
-		function handleCss(filename) {
-			try {
-				copyAssets(project.projectRoot, options.assetConfig);
-			} catch {}
-			devServer.notifyCss(filename);
-		}
-
-		watcher = watch(watchTarget, { recursive: true }, (_event, filename) => {
-			if (!filename) return;
-			if (filename.endsWith(".css")) {
-				clearTimeout(cssDebounce);
-				cssDebounce = setTimeout(() => handleCss(filename), 50);
-				return;
-			}
-			if (!filename.endsWith(".go") && !filename.endsWith(".templ")) return;
-			clearTimeout(debounce);
-			debounce = setTimeout(() => buildOnce(filename), 80);
+		watcherController = setupDevWatchers({
+			watchTarget,
+			srcDir,
+			isDir,
+			outputFile,
+			sourceMap: options.sourceMap,
+			devServer,
+			project,
+			serveDir,
+			assetConfig: options.assetConfig,
 		});
 	}
 
@@ -623,7 +726,7 @@ export async function handleDev(targetDir = ".", options = {}) {
 		outputFile,
 		initialError,
 		close: async () => {
-			if (watcher) watcher.close();
+			watcherController?.close();
 			await devServer.close();
 		},
 	};
