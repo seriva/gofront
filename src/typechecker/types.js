@@ -44,6 +44,19 @@ export const LOG_OPS = new Set(["&&", "||"]);
 // ── Built-in types ───────────────────────────────────────────
 
 export const INT = { kind: "basic", name: "int" };
+export const INT8 = { kind: "basic", name: "int8" };
+export const INT16 = { kind: "basic", name: "int16" };
+export const INT32 = { kind: "basic", name: "int32" };
+export const INT64 = { kind: "basic", name: "int64" };
+export const UINT = { kind: "basic", name: "uint" };
+export const UINT8 = { kind: "basic", name: "uint8" };
+export const BYTE = UINT8;
+export const UINT16 = { kind: "basic", name: "uint16" };
+export const UINT32 = { kind: "basic", name: "uint32" };
+export const UINT64 = { kind: "basic", name: "uint64" };
+export const UINTPTR = { kind: "basic", name: "uintptr" };
+export const RUNE = INT;
+export const FLOAT32 = { kind: "basic", name: "float32" };
 export const FLOAT64 = { kind: "basic", name: "float64" };
 export const STRING = { kind: "basic", name: "string" };
 export const BOOL = { kind: "basic", name: "bool" };
@@ -73,29 +86,46 @@ export const UNTYPED_COMPLEX = { kind: "untyped", base: "complex128" };
 
 export const BASIC_TYPES = {
 	int: INT,
+	int8: INT8,
+	int16: INT16,
+	int32: INT32,
+	int64: INT64,
+	uint: UINT,
+	uint8: UINT8,
+	uint16: UINT16,
+	uint32: UINT32,
+	uint64: UINT64,
+	uintptr: UINTPTR,
+	byte: UINT8,
+	rune: RUNE,
+	float32: FLOAT32,
 	float64: FLOAT64,
+	complex64: COMPLEX64,
+	complex128: COMPLEX128,
 	string: STRING,
 	bool: BOOL,
 	any: ANY,
-	byte: INT,
-	rune: INT,
-	// Sized integer / float aliases — all map to int or float64 at runtime
-	uint: INT,
-	int8: INT,
-	int16: INT,
-	int32: INT,
-	int64: INT,
-	uint8: INT,
-	uint16: INT,
-	uint32: INT,
-	uint64: INT,
-	uintptr: INT,
-	float32: FLOAT64,
-	complex64: COMPLEX64,
-	complex128: COMPLEX128,
 };
 
 export const COMPARABLE = { kind: "basic", name: "comparable" };
+
+export const SIZED_INT_NAMES = [
+	"int",
+	"int8",
+	"int16",
+	"int32",
+	"int64",
+	"uint",
+	"uint8",
+	"uint16",
+	"uint32",
+	"uint64",
+	"uintptr",
+	"byte",
+	"rune",
+];
+
+export const SIZED_FLOAT_NAMES = ["float32", "float64"];
 
 function makeBasicPredicate(...names) {
 	const set = new Set(names);
@@ -109,9 +139,40 @@ function makeBasicPredicate(...names) {
 	return pred;
 }
 
-export const isNumeric = makeBasicPredicate("int", "float64");
+export const isNumeric = makeBasicPredicate(
+	...SIZED_INT_NAMES,
+	...SIZED_FLOAT_NAMES,
+);
+export const isInteger = makeBasicPredicate(...SIZED_INT_NAMES);
+export const isFloat = makeBasicPredicate(...SIZED_FLOAT_NAMES);
 export const isString = makeBasicPredicate("string");
 export const isBool = makeBasicPredicate("bool");
+
+// ── TypedArray mappings ──────────────────────────────────────
+export const TYPED_ARRAY_CONSTRUCTORS = {
+	float32: "Float32Array",
+	float64: "Float64Array",
+	uint8: "Uint8Array",
+	byte: "Uint8Array",
+	int8: "Int8Array",
+	uint16: "Uint16Array",
+	int16: "Int16Array",
+	uint32: "Uint32Array",
+	int32: "Int32Array",
+};
+
+export function typedArrayConstructorForElem(elemType) {
+	if (!elemType) return null;
+	const name = elemType.kind === "basic" ? elemType.name : null;
+	return name ? (TYPED_ARRAY_CONSTRUCTORS[name] ?? null) : null;
+}
+
+export function isTypedArraySlice(type) {
+	if (!type) return false;
+	const base = type.kind === "named" ? type.underlying : type;
+	if (base?.kind !== "slice") return false;
+	return typedArrayConstructorForElem(base.elem) !== null;
+}
 
 export function isComplex(t) {
 	if (!t) return false;

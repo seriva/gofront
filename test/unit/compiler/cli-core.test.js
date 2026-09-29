@@ -161,13 +161,37 @@ test("maybeMinify with mangle produces shorter output", () => {
 
 section("cli-core — handleInit");
 
-test("handleInit creates main.go in existing directory", () => {
+test("handleInit scaffolds project structure in existing directory", () => {
 	const dir = mkdtempSync(join(tmpdir(), "gofront-init-cc-"));
-	const mainPath = join(dir, "main.go");
 	try {
 		const result = handleInit(dir);
-		assert(existsSync(mainPath), "expected main.go to be created");
-		assert(result.mainPath === mainPath, "expected returned mainPath");
+		const mainPath = join(dir, "app", "src", "main.go");
+		const indexPath = join(dir, "app", "index.html");
+		const pkgPath = join(dir, "package.json");
+		const gitignorePath = join(dir, ".gitignore");
+		const devcontainerPath = join(dir, ".devcontainer");
+
+		assert(existsSync(mainPath), "expected app/src/main.go to be created");
+		assert(existsSync(indexPath), "expected app/index.html to be created");
+		assert(existsSync(pkgPath), "expected package.json to be created");
+		assert(existsSync(gitignorePath), "expected .gitignore to be created");
+		assert(
+			!existsSync(devcontainerPath),
+			"expected NO .devcontainer to be created",
+		);
+
+		assertEqual(result.mainPath, mainPath);
+		assert(
+			result.files.includes(mainPath),
+			"expected files list to include mainPath",
+		);
+
+		const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+		assertEqual(pkg.scripts.dev, "gofront dev");
+		assertEqual(pkg.scripts.build, "gofront build");
+		assertEqual(pkg.scripts.test, "gofront test");
+		assertEqual(pkg.scripts.check, "gofront check");
+		assertEqual(Object.keys(pkg.dependencies).length, 0);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -178,13 +202,20 @@ test("handleInit creates directory if it does not exist", () => {
 	const newDir = join(base, "myproject");
 	try {
 		handleInit(newDir);
-		assert(existsSync(join(newDir, "main.go")), "expected main.go in new dir");
+		assert(
+			existsSync(join(newDir, "app", "src", "main.go")),
+			"expected main.go in new dir",
+		);
+		assert(
+			existsSync(join(newDir, "app", "index.html")),
+			"expected index.html in new dir",
+		);
 	} finally {
 		rmSync(base, { recursive: true, force: true });
 	}
 });
 
-test("handleInit throws if main.go already exists", () => {
+test("handleInit throws if main.go or package.json already exists", () => {
 	const dir = mkdtempSync(join(tmpdir(), "gofront-init-exists-cc-"));
 	writeFileSync(join(dir, "main.go"), "package main\n");
 	let threw = false;
@@ -199,12 +230,15 @@ test("handleInit throws if main.go already exists", () => {
 	assert(threw, "expected throw when main.go already exists");
 });
 
-test("handleInit written file contains func main", () => {
+test("handleInit written file contains func main and valid html", () => {
 	const dir = mkdtempSync(join(tmpdir(), "gofront-init-content-"));
 	try {
 		handleInit(dir);
-		const content = readFileSync(join(dir, "main.go"), "utf8");
+		const content = readFileSync(join(dir, "app", "src", "main.go"), "utf8");
 		assertContains(content, "func main()");
+		const html = readFileSync(join(dir, "app", "index.html"), "utf8");
+		assertContains(html, '<div id="app"></div>');
+		assertContains(html, '<script type="module" src="app.js"></script>');
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}

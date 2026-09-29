@@ -7,7 +7,6 @@ import {
 	CMP_OPS,
 	COMPLEX128,
 	FLOAT64,
-	INT,
 	isAny,
 	isComplex,
 	isComplexOrNumeric,
@@ -17,6 +16,8 @@ import {
 	isString,
 	isUntyped,
 	LOG_OPS,
+	SIZED_FLOAT_NAMES,
+	SIZED_INT_NAMES,
 	STRING,
 	typeStr,
 	UNTYPED_COMPLEX,
@@ -28,8 +29,18 @@ import {
 
 // Untyped constant assignability: maps source.base → Set of compatible target.name values
 const UNTYPED_COMPAT = {
-	int: new Set(["int", "float64", "complex128", "complex64"]),
-	float64: new Set(["float64", "int", "complex128", "complex64"]),
+	int: new Set([
+		...SIZED_INT_NAMES,
+		...SIZED_FLOAT_NAMES,
+		"complex128",
+		"complex64",
+	]),
+	float64: new Set([
+		...SIZED_FLOAT_NAMES,
+		...SIZED_INT_NAMES,
+		"complex128",
+		"complex64",
+	]),
 	string: new Set(["string"]),
 	bool: new Set(["bool"]),
 	complex128: new Set(["complex128", "complex64"]),
@@ -92,16 +103,23 @@ export const assignabilityMethods = {
 	},
 
 	_binaryResultTypeNumeric(lt, rt) {
-		const lFloat = (lt.kind === "untyped" ? lt.base : lt.name) === "float64";
-		const rFloat = (rt.kind === "untyped" ? rt.base : rt.name) === "float64";
+		const lName = lt.kind === "untyped" ? lt.base : lt.name;
+		const rName = rt.kind === "untyped" ? rt.base : rt.name;
+		const lFloat = lName === "float32" || lName === "float64";
+		const rFloat = rName === "float32" || rName === "float64";
 		const isFloat = lFloat || rFloat;
 		if (lt.kind === "untyped" && rt.kind === "untyped")
 			return isFloat ? UNTYPED_FLOAT : UNTYPED_INT;
 		if (lt.kind === "untyped")
-			return isFloat && rt.name !== "float64" ? FLOAT64 : rt;
+			return isFloat && rt.name !== "float64" && rt.name !== "float32"
+				? FLOAT64
+				: rt;
 		if (rt.kind === "untyped")
-			return isFloat && lt.name !== "float64" ? FLOAT64 : lt;
-		return isFloat ? FLOAT64 : INT;
+			return isFloat && lt.name !== "float64" && lt.name !== "float32"
+				? FLOAT64
+				: lt;
+		if (lt.name === "float32" && rt.name === "float32") return lt;
+		return isFloat ? FLOAT64 : lt;
 	},
 
 	_checkComplexCmpOp(op, lt, rt, node) {
@@ -151,6 +169,7 @@ export const assignabilityMethods = {
 		if (isUntyped(source) && this._isUntypedAssignable(target, source)) return;
 		if (this._isNumericCoercible(target, source)) return;
 		if (this._checkArrayAssignable(target, source, node)) return;
+		if (this._checkTypedArrayAssignable(target, source, node)) return;
 		if (typeStr(target) !== typeStr(source))
 			this._assertAssignableTypeMismatch(target, source, node);
 	},
@@ -219,6 +238,40 @@ export const assignabilityMethods = {
 			this.err(`Cannot assign ${typeStr(source)} to ${typeStr(target)}`, node);
 			return true;
 		}
+		return false;
+	},
+
+	_checkTypedArrayAssignable(target, source, node) {
+		const isTa = (t) => t?.underlying?._isTypedArray || t?._isTypedArray;
+		const getSlice = (t) =>
+			t?.kind === "slice"
+				? t
+				: t?.underlying?.kind === "slice"
+					? t.underlying
+					: null;
+		const targetTa = isTa(target);
+		const sourceTa = isTa(source);
+		const targetSlice = getSlice(target);
+		const sourceSlice = getSlice(source);
+
+		if ((targetTa && sourceSlice) || (targetSlice && sourceTa)) {
+			const taElem = targetTa
+				? (target.underlying?._elemType ?? target._elemType)
+				: (source.underlying?._elemType ?? source._elemType);
+			const slElem = targetSlice ? targetSlice.elem : sourceSlice.elem;
+			if (typeStr(taElem) === typeStr(slElem)) return true;
+			this.err(`Cannot assign ${typeStr(source)} to ${typeStr(target)}`, node);
+			return true;
+		}
+
+		if (targetTa && sourceTa) {
+			const tElem = target.underlying?._elemType ?? target._elemType;
+			const sElem = source.underlying?._elemType ?? source._elemType;
+			if (typeStr(tElem) === typeStr(sElem)) return true;
+			this.err(`Cannot assign ${typeStr(source)} to ${typeStr(target)}`, node);
+			return true;
+		}
+
 		return false;
 	},
 

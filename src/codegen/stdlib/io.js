@@ -14,8 +14,7 @@ export const ioMethods = {
 					(writerType?.kind === "pointer" ? writerType.base?.name : null);
 				const w = this.genExpr(writerArg);
 				const s = this.genExpr(expr.args[1]);
-				const isPtr = writerType?.kind === "pointer";
-				const base = isPtr ? `${w}.value` : w;
+				const base = `(${w}?.value ?? ${w})`;
 				if (typeName === "strings.Builder") {
 					return `((b,s) => { b._buf += s; return [s.length, null]; })(${base}, ${s})`;
 				}
