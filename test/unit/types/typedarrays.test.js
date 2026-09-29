@@ -43,7 +43,7 @@ test("BASIC_TYPES maps sized types to distinct singletons", () => {
 
 test("typedArrayConstructorForElem maps all sized numeric types", () => {
 	assertEqual(typedArrayConstructorForElem(FLOAT32), "Float32Array");
-	assertEqual(typedArrayConstructorForElem(FLOAT64), "Float64Array");
+	assertEqual(typedArrayConstructorForElem(FLOAT64), null);
 	assertEqual(typedArrayConstructorForElem(UINT8), "Uint8Array");
 	assertEqual(typedArrayConstructorForElem(BYTE), "Uint8Array");
 	assertEqual(typedArrayConstructorForElem(INT8), "Int8Array");
@@ -63,7 +63,7 @@ test("isTypedArraySlice recognizes only sized numeric slice types", () => {
 	const makeSlice = (elem) => ({ kind: "slice", elem });
 
 	assert(isTypedArraySlice(makeSlice(FLOAT32)));
-	assert(isTypedArraySlice(makeSlice(FLOAT64)));
+	assert(!isTypedArraySlice(makeSlice(FLOAT64)));
 	assert(isTypedArraySlice(makeSlice(UINT8)));
 	assert(isTypedArraySlice(makeSlice(BYTE)));
 	assert(isTypedArraySlice(makeSlice(INT8)));

@@ -161,9 +161,10 @@ func main() {
 	gl.DrawArrays(gl.TRIANGLES, 0, 3)
 }`);
 	assertEqual(errors.length, 0);
-	assert(js.includes("gl.CreateShader"));
-	assert(js.includes("gl.BufferData"));
-	assert(js.includes("gl.DrawArrays"));
+	assert(js.includes("gl.createShader"), "PascalCase alias emits camelCase");
+	assert(js.includes("gl.bufferData"));
+	assert(js.includes("gl.drawArrays"));
+	assert(!js.includes("gl.CreateShader"));
 });
 
 test("WebGL camelCase method aliases are supported", () => {
@@ -202,7 +203,8 @@ func main() {
 }`);
 	assertEqual(errors.length, 0);
 	assert(js.includes("dev.queue"));
-	assert(js.includes("q.Submit"));
+	assert(js.includes("q.submit"));
+	assert(js.includes("dev.createBuffer"));
 });
 
 test("TypedArray buffer manipulation executes correctly at runtime", () => {

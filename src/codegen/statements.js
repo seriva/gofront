@@ -1,6 +1,6 @@
 // CodeGen statement methods — installed as a mixin on CodeGen.prototype.
 
-import { isComplex } from "../typechecker/types.js";
+import { isComplex, isNumeric } from "../typechecker/types.js";
 
 /** @typedef {import('./index.js').CodeGen} CodeGen */
 
@@ -122,14 +122,20 @@ export const statementGenMethods = {
 
 	_genDefineMixedRedecl(lhs, rhs, redecls) {
 		if (rhs.length === 1 && lhs.length > 1) {
-			const tmp = "__t";
-			this.line(`let ${tmp} = ${rhs[0]};`);
+			this._tmpCounter = (this._tmpCounter ?? 0) + 1;
+			const tmp = `__t${this._tmpCounter}`;
+			this.line(`const ${tmp} = ${rhs[0]};`);
 			for (let i = 0; i < lhs.length; i++) {
+				if (lhs[i] === "_") continue;
 				const prefix = redecls[i] ? "" : "let ";
 				this.line(`${prefix}${lhs[i]} = ${tmp}[${i}];`);
 			}
 		} else {
 			for (let i = 0; i < lhs.length; i++) {
+				if (lhs[i] === "_") {
+					this.line(`${rhs[i]};`);
+					continue;
+				}
 				const prefix = redecls[i] ? "" : "let ";
 				this.line(`${prefix}${lhs[i]} = ${rhs[i]};`);
 			}
@@ -142,7 +148,13 @@ export const statementGenMethods = {
 			this._genCommaOkMapIndex(stmt, rhsNode, true);
 			return;
 		}
-		const rhs = stmt.rhs.map((e) => this.genExpr(e));
+		const paired = stmt.rhs.length === stmt.lhs.length;
+		const rhs = stmt.rhs.map((e, i) => {
+			const l = paired ? stmt.lhs[i] : null;
+			if (!l || l.name === "_") return this.genExpr(e);
+			if (l._redecl) return this.genValueExpr(e);
+			return this._genDeclValue(l.name, e);
+		});
 		const lhs = stmt.lhs.map((e) => e.name ?? this.genExpr(e));
 		const redecls = stmt.lhs.map((e) => !!e._redecl);
 		const anyRedecl = redecls.some((r) => r);
@@ -150,7 +162,8 @@ export const statementGenMethods = {
 			this._genDefineSingleVar(lhs, rhs, redecls);
 		} else if (!anyRedecl) {
 			const rhsStr = rhs.length === 1 ? rhs[0] : `[${rhs.join(", ")}]`;
-			this.line(`let [${lhs.join(", ")}] = ${rhsStr};`);
+			const names = lhs.map((n) => (n === "_" ? "" : n));
+			this.line(`let [${names.join(", ")}] = ${rhsStr};`);
 		} else {
 			this._genDefineMixedRedecl(lhs, rhs, redecls);
 		}
@@ -218,7 +231,12 @@ export const statementGenMethods = {
 			this._genStructDerefAssign(stmt);
 			return;
 		}
-		const rhs = stmt.rhs.map((e) => this.genExpr(e));
+		const paired = stmt.rhs.length === stmt.lhs.length && stmt.op === "=";
+		const rhs = stmt.rhs.map((e, i) =>
+			paired && stmt.lhs[i].name !== "_"
+				? this.genValueExpr(e)
+				: this.genExpr(e),
+		);
 		this._markIndexLvalues(stmt.lhs);
 		const lhs = stmt.lhs.map((e) => this._genAssignLhsExpr(e));
 		const pairs = lhs.map((l, i) => ({ l, r: rhs[i] ?? rhs[0] }));
@@ -243,7 +261,14 @@ export const statementGenMethods = {
 
 	_genStructDerefAssign(stmt) {
 		const target = this.genExpr(stmt.lhs[0].operand);
-		const source = this.genExpr(stmt.rhs[0]);
+		const rhsNode = stmt.rhs[0];
+		const fields = this._aggregateBase(rhsNode._type)?.fields;
+		const shallowOk =
+			fields instanceof Map &&
+			![...fields.values()].some((t) => this._aggregateBase(t));
+		const source = shallowOk
+			? this.genExpr(rhsNode)
+			: this.genValueExpr(rhsNode);
 		this.line(`Object.assign(${target}, ${source});`);
 	},
 
@@ -293,7 +318,7 @@ export const statementGenMethods = {
 		}
 		const vals =
 			stmt.values.length > 0
-				? stmt.values.map((v) => this.genExpr(v))
+				? stmt.values.map((v) => this._genReturnValue(v))
 				: (this.namedReturnVars ?? []);
 		const stored = vals.length === 1 ? vals[0] : `[${vals.join(", ")}]`;
 		this.line(
@@ -318,10 +343,10 @@ export const statementGenMethods = {
 				this.line("return;");
 			}
 		} else if (stmt.values.length === 1) {
-			this.line(`return ${this.genExpr(stmt.values[0])};`);
+			this.line(`return ${this._genReturnValue(stmt.values[0])};`);
 		} else {
 			this.line(
-				`return [${stmt.values.map((v) => this.genExpr(v)).join(", ")}];`,
+				`return [${stmt.values.map((v) => this._genReturnValue(v)).join(", ")}];`,
 			);
 		}
 	},
@@ -425,12 +450,7 @@ export const statementGenMethods = {
 	},
 
 	_isIntRangeType(iterType) {
-		return (
-			(iterType?.kind === "basic" &&
-				(iterType.name === "int" || iterType.name === "float64")) ||
-			(iterType?.kind === "untyped" &&
-				(iterType.base === "int" || iterType.base === "float64"))
-		);
+		return isNumeric(iterType);
 	},
 
 	_isMapRangeType(iterType) {
@@ -447,47 +467,152 @@ export const statementGenMethods = {
 		);
 	},
 
-	_emitSliceLoopHeader(rawIdx, iteree, isAssign, d) {
+	_rangeVarTarget(e, isAssign) {
+		if (e.kind === "Ident") {
+			if (e.name === "_") return null;
+			const boxed = this._boxedVars.has(e.name);
+			if (isAssign) return boxed ? `${e.name}.value = ` : `${e.name} = `;
+			return boxed ? { name: e.name, boxed } : { name: e.name };
+		}
+		this._markIndexLvalues([e]);
+		return `${this._genAssignLhsExpr(e)} = `;
+	},
+
+	_emitRangeVar(e, valueJs, isAssign) {
+		if (!e) return;
+		const target = this._rangeVarTarget(e, isAssign);
+		if (target === null) return;
+		if (typeof target === "string") {
+			this.line(`${target}${valueJs};`);
+			return;
+		}
+		const v = target.boxed ? `{ value: ${valueJs} }` : valueJs;
+		this.line(`let ${target.name} = ${v};`);
+	},
+
+	// True when the body re-declares one of `names` at its top level (legal Go shadowing).
+	_bodyRedeclares(body, names) {
+		if (names.length === 0) return false;
+		for (const s of body.stmts ?? []) {
+			if (s.kind === "DefineStmt" && s.lhs.some((e) => names.includes(e.name)))
+				return true;
+			if (
+				(s.kind === "VarDecl" || s.kind === "ConstDecl") &&
+				s.decls?.some((d) => d.names?.some((n) => names.includes(n)))
+			)
+				return true;
+		}
+		return false;
+	},
+
+	// Range value variable: aliases the element unless the body writes the variable or the collection.
+	_rangeElemValue(stmt, valNode, js, isAssign) {
+		const iterNode = stmt.init.rhs[0].expr;
+		const iterType = iterNode._type;
+		const base = iterType?.kind === "named" ? iterType.underlying : iterType;
+		const elemType = base?.elem;
+		if (!valNode || !this._aggregateBase(elemType)) return js;
+		if (isAssign || valNode.kind !== "Ident")
+			return this._cloneJs(elemType, js);
+		if (valNode.name === "_") return js;
+		const root = this._rootIdentName(iterNode);
+		const mutated =
+			this._fnMutates(valNode.name) ||
+			(root !== null && this._nodeMutatesVar(stmt.body, root));
+		this._markOwnership(valNode.name, mutated);
+		return mutated ? this._cloneJs(elemType, js) : js;
+	},
+
+	_genSliceRangeFor(stmt, iteree, isAssign) {
+		this._loopDepth = this._loopDepth ?? 0;
+		const d = this._loopDepth++;
+		const [idxNode, valNode] = stmt.init.lhs;
+		const i = `__i${d}`;
 		const arr = `__arr${d}`;
 		const len = `__len${d}`;
-		const hasIdx = rawIdx && rawIdx !== "_";
-		if (isAssign && hasIdx) {
-			this.line(`const ${arr} = ${iteree};`);
-			this.line(`const ${len} = ${arr} ? ${arr}.length : 0;`);
-			this.line(`for (${rawIdx} = 0; ${rawIdx} < ${len}; ${rawIdx}++) {`);
-		} else {
-			const idx = hasIdx ? rawIdx : `__i${d}`;
-			this.line(
-				`for (let ${idx} = 0, ${arr} = ${iteree}, ${len} = ${arr} ? ${arr}.length : 0; ${idx} < ${len}; ${idx}++) {`,
-			);
-		}
-	},
-
-	_emitSliceValAssign(rawIdx, rawVal, isAssign, d) {
-		if (!rawVal || rawVal === "_") return;
-		const idx = rawIdx && rawIdx !== "_" ? rawIdx : `__i${d}`;
-		const kw = isAssign ? "" : "let ";
-		this.line(`${kw}${rawVal} = __arr${d}[${idx}];`);
-	},
-
-	_genSliceRangeFor(stmt, iteree, lhs, isAssign) {
-		this._loopDepth = this._loopDepth ?? 0;
-		const d = this._loopDepth;
-		this._loopDepth++;
-		this._emitSliceLoopHeader(lhs[0], iteree, isAssign, d);
+		this.line(
+			`for (let ${i} = 0, ${arr} = ${iteree}, ${len} = ${arr} ? ${arr}.length : 0; ${i} < ${len}; ${i}++) {`,
+		);
 		this.indented(() => {
-			this._emitSliceValAssign(lhs[0], lhs[1], isAssign, d);
-			this.genBlock(stmt.body);
+			this._emitRangeVar(idxNode, i, isAssign);
+			this._emitRangeVar(
+				valNode,
+				this._rangeElemValue(stmt, valNode, `${arr}[${i}]`, isAssign),
+				isAssign,
+			);
+			const declared = isAssign
+				? []
+				: [idxNode, valNode]
+						.filter((e) => e?.kind === "Ident" && e.name !== "_")
+						.map((e) => e.name);
+			if (this._bodyRedeclares(stmt.body, declared)) {
+				this.line("{");
+				this.indented(() => this.genBlock(stmt.body));
+				this.line("}");
+			} else {
+				this.genBlock(stmt.body);
+			}
 		});
 		this.line("}");
 		this._loopDepth--;
 	},
 
-	_genIntRangeFor(rawVar, iteree, body) {
-		const v = rawVar === "_" ? "_$" : rawVar;
-		this.line(`for (let ${v} = 0; ${v} < ${iteree}; ${v}++) {`);
-		this.indented(() => this.genBlock(body));
+	// Whether `for i := range n` can be emitted as a plain `for (let i = 0; …)` without hidden registers.
+	_isSimpleIntRange(stmt, name, isAssign) {
+		if (isAssign) return false;
+		if (!name || name === "_") return true;
+		return !this._boxedVars.has(name) && !this._nodeAssigns(stmt.body, name);
+	},
+
+	_genIntRangeBody(stmt, name, isAssign) {
+		const wrap = !isAssign && name && this._bodyRedeclares(stmt.body, [name]);
+		if (!wrap) return this.genBlock(stmt.body);
+		this.line("{");
+		this.indented(() => this.genBlock(stmt.body));
 		this.line("}");
+	},
+
+	_genIntRangeFor(stmt, iteree, isAssign) {
+		const varNode = stmt.init.lhs[0];
+		const name = varNode?.kind === "Ident" ? varNode.name : null;
+		if (this._isSimpleIntRange(stmt, name, isAssign)) {
+			const v = !name || name === "_" ? "_$" : name;
+			this.line(`for (let ${v} = 0; ${v} < ${iteree}; ${v}++) {`);
+			this.indented(() => this.genBlock(stmt.body));
+			this.line("}");
+			return;
+		}
+		this._loopDepth = this._loopDepth ?? 0;
+		const d = this._loopDepth++;
+		const i = `__i${d}`;
+		const n = `__n${d}`;
+		this.line(`for (let ${i} = 0, ${n} = ${iteree}; ${i} < ${n}; ${i}++) {`);
+		this.indented(() => {
+			this._emitRangeVar(varNode, i, isAssign);
+			this._genIntRangeBody(stmt, name, isAssign);
+		});
+		this.line("}");
+		this._loopDepth--;
+	},
+
+	// True when `node` contains an assignment or ++/-- targeting identifier `name`.
+	_nodeAssigns(node, name) {
+		if (!node || typeof node !== "object") return false;
+		if (Array.isArray(node))
+			return node.some((n) => this._nodeAssigns(n, name));
+		if (
+			(node.kind === "AssignStmt" &&
+				node.lhs.some((e) => e.kind === "Ident" && e.name === name)) ||
+			(node.kind === "IncDecStmt" &&
+				node.expr.kind === "Ident" &&
+				node.expr.name === name)
+		)
+			return true;
+		for (const key of Object.keys(node)) {
+			if (key.startsWith("_")) continue;
+			if (this._nodeAssigns(node[key], name)) return true;
+		}
+		return false;
 	},
 
 	_genIterFor(init, iterType, iteree, lhs, body) {
@@ -515,12 +640,12 @@ export const statementGenMethods = {
 			: this.genExpr(range.expr);
 
 		if (lhs.length <= 1 && this._isIntRangeType(iterType)) {
-			this._genIntRangeFor(lhs[0], iteree, stmt.body);
+			this._genIntRangeFor(stmt, iteree, init.kind === "AssignStmt");
 			return;
 		}
 
 		if (!this._isMapRangeType(iterType) && !this._isStringRangeType(iterType)) {
-			this._genSliceRangeFor(stmt, iteree, lhs, init.kind === "AssignStmt");
+			this._genSliceRangeFor(stmt, iteree, init.kind === "AssignStmt");
 			return;
 		}
 

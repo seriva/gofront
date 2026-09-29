@@ -31,7 +31,7 @@ function Filter(items, pred) {
 }
 
 var __len = __len || function(a) {
-  if (a && typeof a === 'object' && !Array.isArray(a)) return Object.keys(a).length;
+  if (a && typeof a === 'object' && !Array.isArray(a) && !ArrayBuffer.isView(a)) return Object.keys(a).length;
   return a?.length ?? 0;
 };
 var __append = __append || function(a, ...b) {
@@ -97,7 +97,7 @@ var __error = __error || function(msg, cause) {
 
 class Todo {
   constructor(id$ = 0, text$ = "", done$ = false, priority$ = 0) {
-    if (typeof id$ === "object" && id$ !== null && id$.constructor === Object && true) { Object.assign(this, id$); return; }
+    if (typeof id$ === "object" && id$ !== null && id$.constructor === Object) ({ id: id$ = 0, text: text$ = "", done: done$ = false, priority: priority$ = 0 } = id$);
     this.id = id$;
     this.text = text$;
     this.done = done$;
@@ -113,8 +113,19 @@ class Todo {
     const t = this;
     return new Todo(t.id, t.text, done, t.priority);
   }
+
+  __clone() { return new Todo(this.id, this.text, this.done, this.priority); }
 }
 Object.defineProperty(Todo.prototype, "value", { get() { return this; }, set(v) { Object.assign(this, v); }, configurable: true });
+
+const maxTodoLen = 120;
+
+const FilterAll = 0;
+const FilterActive = 1;
+const FilterCompleted = 2;
+
+const PriorityNormal = 0;
+const PriorityHigh = 1;
 
 let todos = [];
 
@@ -133,15 +144,6 @@ let syncMsg = "";
 let syncCls = "";
 
 let errorMsg = "";
-
-const maxTodoLen = 120;
-
-const FilterAll = 0;
-const FilterActive = 1;
-const FilterCompleted = 2;
-
-const PriorityNormal = 0;
-const PriorityHigh = 1;
 
 async function submitInput() {
   let input = document.querySelector(".todo-input");
@@ -454,7 +456,7 @@ async function loadTodos() {
     loaded = __append(loaded, new Todo(item.id, item.text, item.done, item.priority));
   }
   if (__len(loaded) > 0) {
-    let last = loaded[__len(loaded) - 1];
+    let last = loaded[__len(loaded) - 1].__clone();
     nextId = last.id + 1;
   }
   todos = loaded;
@@ -494,7 +496,7 @@ function toggleTodo(id) {
     if (t.id === id) {
       next = __append(next, t.withDone(!t.done));
     } else {
-      next = __append(next, t);
+      next = __append(next, t.__clone());
     }
   }
   todos = next;
@@ -525,9 +527,9 @@ function moveTodo(fromId, toId, after) {
   for (let __i0 = 0, __arr0 = todos, __len0 = __arr0 ? __arr0.length : 0; __i0 < __len0; __i0++) {
     let t = __arr0[__i0];
     if (t.id === fromId) {
-      item = t;
+      item = t.__clone();
     } else {
-      rest = __append(rest, t);
+      rest = __append(rest, t.__clone());
     }
   }
   let result = null;
@@ -535,17 +537,17 @@ function moveTodo(fromId, toId, after) {
   for (let __i0 = 0, __arr0 = rest, __len0 = __arr0 ? __arr0.length : 0; __i0 < __len0; __i0++) {
     let t = __arr0[__i0];
     if (!after && t.id === toId) {
-      result = __append(result, item);
+      result = __append(result, item.__clone());
       inserted = true;
     }
-    result = __append(result, t);
+    result = __append(result, t.__clone());
     if (after && t.id === toId) {
-      result = __append(result, item);
+      result = __append(result, item.__clone());
       inserted = true;
     }
   }
   if (!inserted) {
-    result = __append(result, item);
+    result = __append(result, item.__clone());
   }
   todos = result;
 }
