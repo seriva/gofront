@@ -452,6 +452,24 @@ func main() {
 	assertEqual(runJs(js), "yes");
 });
 
+test("operator precedence: multiplication over addition preserves parens", () => {
+	const js = compile(`package main
+func main() {
+	x := 2 * (3 + 4)
+	console.log(x)
+}`).js;
+	assertEqual(runJs(js), "14");
+});
+
+test("operator precedence: right-hand subtraction preserves parens", () => {
+	const js = compile(`package main
+func main() {
+	x := 10 - (4 - 2)
+	console.log(x)
+}`).js;
+	assertEqual(runJs(js), "8");
+});
+
 // ═════════════════════════════════════════════════════════════
 // compiler.js — additional error paths
 // ═════════════════════════════════════════════════════════════

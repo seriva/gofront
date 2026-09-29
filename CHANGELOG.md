@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.3.3] - 2026-09-29
+
+### Fixed
+- **Operator precedence parenthesis preservation in binary expression codegen** — `_genBinaryExpr` in `src/codegen/expressions.js` previously emitted left and right operands without considering operator precedence, causing parenthesized subexpressions with lower precedence (such as `2 * (3 + 4)` or `a + t * (b - a)`) to be emitted without grouping parentheses and evaluated incorrectly under JavaScript operator precedence rules. It now checks the operator precedence table and wraps child binary expressions in parentheses when required.
+
 ## [1.3.2] - 2026-09-29
 
 ### Fixed
