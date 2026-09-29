@@ -14,6 +14,7 @@ import {
 	isNumeric,
 	isPointer,
 	isString,
+	isTypedArraySlice,
 	isUntyped,
 	LOG_OPS,
 	SIZED_FLOAT_NAMES,
@@ -157,6 +158,7 @@ export const assignabilityMethods = {
 		if (!target || !source) return;
 		target = this.resolveType(target);
 		source = this.resolveType(source);
+		this._markIfaceBox(target, source, node);
 		if (this._assertAssignableEarlyReturn(target, source)) return;
 		if (isPointer(target) && isPointer(source)) {
 			this.assertAssignable(
@@ -173,6 +175,29 @@ export const assignabilityMethods = {
 		if (this._checkFuncAssignable(target, source, node)) return;
 		if (typeStr(target) !== typeStr(source))
 			this._assertAssignableTypeMismatch(target, source, node);
+	},
+
+	// Tags struct values / struct pointers flowing into an interface so codegen can
+	// tell `T` from `*T` at runtime (both compile to the same class instance).
+	_markIfaceBox(target, source, node) {
+		if (this._skipIfaceMark) return;
+		if (!node || typeof node !== "object" || !target || !source) return;
+		if (target.kind === "typeParam") return;
+		const tBase = this.resolveType(
+			target.kind === "named" ? target.underlying : target,
+		);
+		if (!isAny(target) && tBase?.kind !== "interface") return;
+		const structOf = (t) => {
+			const r = this.resolveType(t);
+			const b = r?.kind === "named" ? this.resolveType(r.underlying) : r;
+			return b?.kind === "struct";
+		};
+		const sBase = this.resolveType(
+			source.kind === "named" ? source.underlying : source,
+		);
+		if (sBase?.kind === "struct") node._ifaceBox = "value";
+		else if (sBase?.kind === "pointer" && structOf(sBase.base))
+			node._ifaceBox = "ptr";
 	},
 
 	_assertAssignableEarlyReturn(target, source) {
@@ -212,9 +237,13 @@ export const assignabilityMethods = {
 
 	_isNumericCoercible(target, source) {
 		if (target.kind !== "basic" || source.kind !== "basic") return false;
+		const pair = `${target.name}:${source.name}`;
 		return (
-			(target.name === "float64" && source.name === "int") ||
-			(target.name === "int" && source.name === "float64")
+			pair === "float64:int" ||
+			pair === "int:float64" ||
+			// rune was historically int in GoFront; keep rune/int interchangeable.
+			pair === "int:int32" ||
+			pair === "int32:int"
 		);
 	},
 
@@ -259,8 +288,9 @@ export const assignabilityMethods = {
 			const taElem = targetTa
 				? (target.underlying?._elemType ?? target._elemType)
 				: (source.underlying?._elemType ?? source._elemType);
-			const slElem = targetSlice ? targetSlice.elem : sourceSlice.elem;
-			if (typeStr(taElem) === typeStr(slElem)) return true;
+			const slice = targetSlice ?? sourceSlice;
+			if (isTypedArraySlice(slice) && typeStr(taElem) === typeStr(slice.elem))
+				return true;
 			this.err(`Cannot assign ${typeStr(source)} to ${typeStr(target)}`, node);
 			return true;
 		}

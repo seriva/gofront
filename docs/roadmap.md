@@ -8,6 +8,23 @@ features (e.g. `docs/v0.0.5/`).
 
 ---
 
+## v1.3.6
+
+**Theme: Post-1.3.0 correctness.** No new language features. Fix the review findings against the 1.3.x releases: wrong JavaScript operator precedence, struct value aliasing, TypedArray mapping edge cases, Web API emission, and CLI safety.
+
+| Area | Difficulty | Status | Notes |
+|---|---|---|---|
+| JS operator precedence | Medium | ✓ | Parenthesise by *JavaScript* precedence and the emitted operator (`&^` → `& ~`, integer `/` → `Math.trunc`); separate adjacent unary operators (`- -a`). |
+| Struct value semantics | High | ✓ | Copy struct/array values on assignment, call, return, `append`, and `range` via generated `__clone()`; box values in interfaces so `case T` / `case *T` are distinguished. |
+| `[]float64` → plain array | Low | ✓ | Revert the 1.3.0 `Float64Array` mapping; `rune` becomes an alias of `int32` (`Int32Array`); sized integer conversions wrap. |
+| TypedArray edge cases | Low | ✓ | `append` to nil typed slice, `[]rune(str)` code-point decoding, `__len` on typed arrays, assignment-form `for i, v = range` loops. |
+| Web API emission | Medium | ✓ | PascalCase → camelCase member emission, WebGL1/WebGL2 split, trailing optional parameters, single-evaluation `io.Writer` receivers. |
+| JS reserved identifiers | Low | ✓ | Rename Go identifiers that are JS reserved words (`in` → `in$`). |
+| Type alias forward refs | Low | ✓ | Collect type declarations in dependency order. |
+| CLI hardening | Low | ✓ | `cleanOutputDir` containment check, static asset copy on `build`, `localhost` default and error replay for `dev`, PWA offline fallback, vendor polyfill only for rolldown, `init` devDependency. |
+
+---
+
 ## v1.3.2
 
 **Theme: CLI polish and multi-file package resolution.** Fix multi-file package directory checks, auto-detect project test target, and add `serveDir` live-reload watcher to `gofront dev`.

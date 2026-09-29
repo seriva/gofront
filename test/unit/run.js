@@ -18,6 +18,8 @@ import "./language/range-iter.test.js";
 import "./language/loops.test.js";
 import "./language/pointers.test.js";
 import "./language/struct_unboxing.test.js";
+import "./language/value-semantics.test.js";
+import "./language/codegen-regressions.test.js";
 import "./language/named-type-methods.test.js";
 import "./types/errors.test.js";
 import "./types/checks.test.js";

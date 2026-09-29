@@ -31,7 +31,7 @@ function Filter(items, pred) {
 }
 
 var __len = __len || function(a) {
-  if (a && typeof a === 'object' && !Array.isArray(a)) return Object.keys(a).length;
+  if (a && typeof a === 'object' && !Array.isArray(a) && !ArrayBuffer.isView(a)) return Object.keys(a).length;
   return a?.length ?? 0;
 };
 var __append = __append || function(a, ...b) {
@@ -42,6 +42,17 @@ var __append = __append || function(a, ...b) {
     return res;
   }
   return a ? [...a, ...b] : b;
+};
+var __ifv = __ifv || function(x) {
+  if (x === null || typeof x !== "object") return x;
+  const c = typeof x.__clone === "function" ? x.__clone() : Object.assign(Object.create(Object.getPrototypeOf(x)), x);
+  Object.defineProperty(c, "__v", { value: true, configurable: true });
+  return c;
+};
+var __ifp = __ifp || function(x) {
+  if (x !== null && typeof x === "object" && x.__p !== true && Object.isExtensible(x))
+    Object.defineProperty(x, "__p", { value: true, configurable: true });
+  return x;
 };
 var __sprintf = __sprintf || function(f, ...a) {
   let i = 0;
@@ -97,7 +108,7 @@ var __error = __error || function(msg, cause) {
 
 class Todo {
   constructor(id$ = 0, text$ = "", done$ = false, priority$ = 0) {
-    if (typeof id$ === "object" && id$ !== null && id$.constructor === Object && true) { Object.assign(this, id$); return; }
+    if (typeof id$ === "object" && id$ !== null && id$.constructor === Object) ({ id: id$ = 0, text: text$ = "", done: done$ = false, priority: priority$ = 0 } = id$);
     this.id = id$;
     this.text = text$;
     this.done = done$;
@@ -113,21 +124,24 @@ class Todo {
     const t = this;
     return new Todo(t.id, t.text, done, t.priority);
   }
+
+  __clone() { return new Todo(this.id, this.text, this.done, this.priority); }
 }
 Object.defineProperty(Todo.prototype, "value", { get() { return this; }, set(v) { Object.assign(this, v); }, configurable: true });
 
 class Stats {
   constructor(remaining$ = 0, completed$ = 0) {
-    if (typeof remaining$ === "object" && remaining$ !== null && remaining$.constructor === Object && true) { Object.assign(this, remaining$); return; }
+    if (typeof remaining$ === "object" && remaining$ !== null && remaining$.constructor === Object) ({ remaining: remaining$ = 0, completed: completed$ = 0 } = remaining$);
     this.remaining = remaining$;
     this.completed = completed$;
   }
+
+  __clone() { return new Stats(this.remaining, this.completed); }
 }
 Object.defineProperty(Stats.prototype, "value", { get() { return this; }, set(v) { Object.assign(this, v); }, configurable: true });
 
 class AppElements {
   constructor(input$ = null, addBtn$ = null, priorityBtn$ = null, list$ = null, footer$ = null, badge$ = null, syncStatus$ = null, inputRow$ = null, countSpan$ = null, filterArea$ = null) {
-    if (typeof input$ === "object" && input$ !== null && input$.constructor === Object && ("input" in input$)) { Object.assign(this, input$); return; }
     this.input = input$;
     this.addBtn = addBtn$;
     this.priorityBtn = priorityBtn$;
@@ -139,10 +153,19 @@ class AppElements {
     this.countSpan = countSpan$;
     this.filterArea = filterArea$;
   }
+
+  __clone() { return new AppElements(this.input, this.addBtn, this.priorityBtn, this.list, this.footer, this.badge, this.syncStatus, this.inputRow, this.countSpan, this.filterArea); }
 }
 Object.defineProperty(AppElements.prototype, "value", { get() { return this; }, set(v) { Object.assign(this, v); }, configurable: true });
 
 const maxTodoLen = 120;
+
+const FilterAll = 0;
+const FilterActive = 1;
+const FilterCompleted = 2;
+
+const PriorityNormal = 0;
+const PriorityHigh = 1;
 
 let syncBaseClass = "";
 
@@ -171,13 +194,6 @@ let visibleSignal = null;
 let statsSignal = null;
 
 let highCountSignal = null;
-
-const FilterAll = 0;
-const FilterActive = 1;
-const FilterCompleted = 2;
-
-const PriorityNormal = 0;
-const PriorityHigh = 1;
 
 function validateTodo(text) {
   if (!HasText(text)) {
@@ -607,7 +623,7 @@ function initStore() {
         remaining++;
       }
     }
-    return new Stats(remaining, completed);
+    return __ifv(new Stats(remaining, completed));
   }, "stats");
   highCountSignal = Signals.computed(function() {
     let urgent = Filter(todosSignal.get(), function(t) {
@@ -750,17 +766,17 @@ function moveTodo(fromId, toId, after) {
   for (let __i0 = 0, __arr0 = rest, __len0 = __arr0 ? __arr0.length : 0; __i0 < __len0; __i0++) {
     let t = __arr0[__i0];
     if (!after && t.id === toId) {
-      result = __append(result, item);
+      result = __append(result, item.__clone());
       inserted = true;
     }
-    result = __append(result, t);
+    result = __append(result, t.__clone());
     if (after && t.id === toId) {
-      result = __append(result, item);
+      result = __append(result, item.__clone());
       inserted = true;
     }
   }
   if (!inserted) {
-    result = __append(result, item);
+    result = __append(result, item.__clone());
   }
   todosSignal.set(result);
 }

@@ -23,6 +23,25 @@ const func = (params, returns = [VOID], variadic = false) => ({
 	variadic,
 });
 
+// Last parameter is optional (modelled as variadic).
+const optLast = (params, returns = [VOID]) => func(params, returns, true);
+
+const WEBGL2_ONLY_CONSTANTS = new Set([
+	"UNIFORM_BUFFER",
+	"HALF_FLOAT",
+	"RGBA8",
+	"RGBA32F",
+]);
+
+const WEBGL2_ONLY_METHODS = new Set([
+	"VertexAttribIPointer",
+	"DrawArraysInstanced",
+	"DrawElementsInstanced",
+	"CreateVertexArray",
+	"BindVertexArray",
+	"DeleteVertexArray",
+]);
+
 const WEBGL_CONSTANTS_LIST = {
 	ARRAY_BUFFER: 0x8892,
 	ELEMENT_ARRAY_BUFFER: 0x8893,
@@ -113,7 +132,7 @@ function buildArrayBufferType() {
 		methods,
 	};
 	named.underlying = iface;
-	methods.set("slice", func([INT, INT], [named]));
+	methods.set("slice", optLast([INT, INT], [named]));
 	return named;
 }
 
@@ -126,20 +145,20 @@ function buildDataViewType(arrayBufferType) {
 	const methods = new Map([
 		["getInt8", func([INT], [INT8])],
 		["getUint8", func([INT], [UINT8])],
-		["getInt16", func([INT, BOOL], [INT16])],
-		["getUint16", func([INT, BOOL], [UINT16])],
-		["getInt32", func([INT, BOOL], [INT32])],
-		["getUint32", func([INT, BOOL], [UINT32])],
-		["getFloat32", func([INT, BOOL], [FLOAT32])],
-		["getFloat64", func([INT, BOOL], [FLOAT64])],
+		["getInt16", optLast([INT, BOOL], [INT16])],
+		["getUint16", optLast([INT, BOOL], [UINT16])],
+		["getInt32", optLast([INT, BOOL], [INT32])],
+		["getUint32", optLast([INT, BOOL], [UINT32])],
+		["getFloat32", optLast([INT, BOOL], [FLOAT32])],
+		["getFloat64", optLast([INT, BOOL], [FLOAT64])],
 		["setInt8", func([INT, INT8])],
 		["setUint8", func([INT, UINT8])],
-		["setInt16", func([INT, INT16, BOOL])],
-		["setUint16", func([INT, UINT16, BOOL])],
-		["setInt32", func([INT, INT32, BOOL])],
-		["setUint32", func([INT, UINT32, BOOL])],
-		["setFloat32", func([INT, FLOAT32, BOOL])],
-		["setFloat64", func([INT, FLOAT64, BOOL])],
+		["setInt16", optLast([INT, INT16, BOOL])],
+		["setUint16", optLast([INT, UINT16, BOOL])],
+		["setInt32", optLast([INT, INT32, BOOL])],
+		["setUint32", optLast([INT, UINT32, BOOL])],
+		["setFloat32", optLast([INT, FLOAT32, BOOL])],
+		["setFloat64", optLast([INT, FLOAT64, BOOL])],
 	]);
 	const named = { kind: "named", name: "DataView", underlying: null };
 	named.underlying = { kind: "interface", name: "DataView", fields, methods };
@@ -164,15 +183,16 @@ function buildTypedArrayType(name, elemType, arrayBufferType) {
 		_isTypedArray: true,
 	};
 	named.underlying = iface;
-	methods.set("subarray", func([INT, INT], [named]));
-	methods.set("slice", func([INT, INT], [named]));
-	methods.set("set", func([ANY, INT], [VOID]));
+	methods.set("subarray", optLast([INT, INT], [named]));
+	methods.set("slice", optLast([INT, INT], [named]));
+	methods.set("set", optLast([ANY, INT], [VOID]));
 	return named;
 }
 
-function createWebGLMethods() {
+function createWebGLMethods(isWebGL2) {
 	const methods = new Map();
 	const add = (name, fn) => {
+		if (!isWebGL2 && WEBGL2_ONLY_METHODS.has(name)) return;
 		methods.set(name, fn);
 		const camel = name[0].toLowerCase() + name.slice(1);
 		if (camel !== name) methods.set(camel, fn);
@@ -296,7 +316,7 @@ function createWebGPUMethods() {
 	addDev("CreateShaderModule", func([ANY], [ANY]));
 	addDev("CreateRenderPipeline", func([ANY], [ANY]));
 	addDev("CreateComputePipeline", func([ANY], [ANY]));
-	addDev("CreateCommandEncoder", func([ANY], [ANY]));
+	addDev("CreateCommandEncoder", optLast([ANY], [ANY]));
 	addDev("CreateBindGroup", func([ANY], [ANY]));
 	addDev("CreateBindGroupLayout", func([ANY], [ANY]));
 	addDev("CreatePipelineLayout", func([ANY], [ANY]));
@@ -307,7 +327,7 @@ function createWebGPUMethods() {
 		const camel = name[0].toLowerCase() + name.slice(1);
 		if (camel !== name) adapterMethods.set(camel, fn);
 	};
-	addAdapt("RequestDevice", func([ANY], [ANY]));
+	addAdapt("RequestDevice", optLast([ANY], [ANY]));
 
 	return { queueMethods, deviceMethods, adapterMethods };
 }
@@ -339,21 +359,29 @@ export function setupWebGlobals(globals, types) {
 	}
 
 	// WebGL constants map
-	const constFields = new Map();
+	const constFields2 = new Map();
 	for (const [k] of Object.entries(WEBGL_CONSTANTS_LIST)) {
-		constFields.set(k, INT);
+		constFields2.set(k, INT);
+	}
+	const constFields1 = new Map(
+		[...constFields2].filter(([k]) => !WEBGL2_ONLY_CONSTANTS.has(k)),
+	);
+	const webgl2Only = new Set(WEBGL2_ONLY_CONSTANTS);
+	for (const m of WEBGL2_ONLY_METHODS) {
+		webgl2Only.add(m);
+		webgl2Only.add(m[0].toLowerCase() + m.slice(1));
 	}
 
-	const webglMethods = createWebGLMethods();
 	const webglContext = {
 		kind: "named",
 		name: "WebGLRenderingContext",
 		underlying: {
 			kind: "interface",
 			name: "WebGLRenderingContext",
-			fields: constFields,
-			methods: webglMethods,
+			fields: constFields1,
+			methods: createWebGLMethods(false),
 			_isOpen: true,
+			_excluded: webgl2Only,
 		},
 	};
 	const webgl2Context = {
@@ -362,8 +390,8 @@ export function setupWebGlobals(globals, types) {
 		underlying: {
 			kind: "interface",
 			name: "WebGL2RenderingContext",
-			fields: constFields,
-			methods: webglMethods,
+			fields: constFields2,
+			methods: createWebGLMethods(true),
 			_isOpen: true,
 		},
 	};

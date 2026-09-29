@@ -411,6 +411,8 @@ export const resolveMethods = {
 	_fieldTypeInterface(base, baseType, field, node) {
 		if (base.methods?.has(field)) return base.methods.get(field);
 		if (base.fields?.has(field)) return base.fields.get(field);
+		if (base._excluded?.has(field))
+			return this.err(`No member '${field}' on ${typeStr(baseType)}`, node);
 		if (base._isOpen) return ANY;
 		return this.err(`No method '${field}' on ${typeStr(baseType)}`, node);
 	},

@@ -140,13 +140,15 @@ function isInsideDir(root, target) {
 	return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }
 
-function handleSseRequest(req, res, clients) {
+function handleSseRequest(req, res, clients, lastError = null) {
 	res.writeHead(200, {
 		"Content-Type": "text/event-stream",
 		"Cache-Control": "no-cache",
 		Connection: "keep-alive",
 	});
 	res.write(": connected\n\n");
+	if (lastError)
+		res.write(`event: build-error\ndata: ${JSON.stringify(lastError)}\n\n`);
 	clients.add(res);
 	req.on?.("close", () => clients.delete(res));
 }
@@ -216,7 +218,7 @@ export function handleDevRequest(
 	options = {},
 ) {
 	if (req.url === "/_gofront/events") {
-		handleSseRequest(req, res, clients);
+		handleSseRequest(req, res, clients, options.getLastError?.() ?? null);
 		return;
 	}
 
@@ -312,15 +314,19 @@ function closeServer(server, clients, timer) {
 export function createDevServer(serveDir, port = 3000, options = {}) {
 	const clients = new Set();
 	const heartbeatMs = options.heartbeatInterval ?? 15000;
+	const host = options.host ?? "localhost";
+	// Kept so browsers that connect (or reload) after a failed build still see the overlay.
+	let lastError = null;
+	const requestOptions = { ...options, getLastError: () => lastError };
 
 	const server = createServer((req, res) => {
-		handleDevRequest(req, res, serveDir, clients, options);
+		handleDevRequest(req, res, serveDir, clients, requestOptions);
 	});
 
 	server.on("error", (err) => handleServerError(err, port));
-	server.listen(port, () => {
+	server.listen(port, host, () => {
 		const actualPort = server.address()?.port ?? port;
-		if (port !== 0) {
+		if (port !== 0 && !options.silent) {
 			console.error(`gofront: dev server → http://localhost:${actualPort}`);
 		}
 	});
@@ -329,17 +335,23 @@ export function createDevServer(serveDir, port = 3000, options = {}) {
 		heartbeatMs > 0 ? setInterval(() => sendPings(clients), heartbeatMs) : null;
 	heartbeatTimer?.unref?.();
 
-	const notify = createNotify(clients);
+	const broadcastNotify = createNotify(clients);
+	const notify = (arg) => {
+		if (!arg?.type) lastError = null;
+		broadcastNotify(arg);
+	};
+	const notifyError = (err) => {
+		lastError = buildErrorPayload(err);
+		broadcastToClients(clients, "build-error", lastError);
+	};
 
 	return {
 		broadcast: (event, data) => broadcastToClients(clients, event, data),
 		notify,
 		notifyCss: (file) =>
 			broadcastToClients(clients, "css-update", { type: "css-update", file }),
-		notifyError: (err) =>
-			broadcastToClients(clients, "build-error", buildErrorPayload(err)),
-		notifyBuildError: (err) =>
-			broadcastToClients(clients, "build-error", buildErrorPayload(err)),
+		notifyError,
+		notifyBuildError: notifyError,
 		ping: () => sendPings(clients),
 		clients,
 		server,

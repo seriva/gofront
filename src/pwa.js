@@ -86,7 +86,9 @@ self.addEventListener("fetch", (event) => {
 				return response;
 			}).catch(() => {
 				if (event.request.headers?.get?.("accept")?.includes("text/html")) {
-					return caches.match("./") || caches.match("./index.html");
+					return caches
+						.match("./")
+						.then((r) => r || caches.match("./index.html"));
 				}
 			});
 		}),

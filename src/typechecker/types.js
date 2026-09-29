@@ -55,7 +55,7 @@ export const UINT16 = { kind: "basic", name: "uint16" };
 export const UINT32 = { kind: "basic", name: "uint32" };
 export const UINT64 = { kind: "basic", name: "uint64" };
 export const UINTPTR = { kind: "basic", name: "uintptr" };
-export const RUNE = INT;
+export const RUNE = INT32;
 export const FLOAT32 = { kind: "basic", name: "float32" };
 export const FLOAT64 = { kind: "basic", name: "float64" };
 export const STRING = { kind: "basic", name: "string" };
@@ -149,9 +149,9 @@ export const isString = makeBasicPredicate("string");
 export const isBool = makeBasicPredicate("bool");
 
 // ── TypedArray mappings ──────────────────────────────────────
+// []float64 deliberately stays a plain Array for JSON / JS-library interop.
 export const TYPED_ARRAY_CONSTRUCTORS = {
 	float32: "Float32Array",
-	float64: "Float64Array",
 	uint8: "Uint8Array",
 	byte: "Uint8Array",
 	int8: "Int8Array",
@@ -159,6 +159,7 @@ export const TYPED_ARRAY_CONSTRUCTORS = {
 	int16: "Int16Array",
 	uint32: "Uint32Array",
 	int32: "Int32Array",
+	rune: "Int32Array",
 };
 
 export function typedArrayConstructorForElem(elemType) {

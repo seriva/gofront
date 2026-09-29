@@ -227,9 +227,12 @@ export async function loadNodePolyfillsPlugin(projectRoot, customPlugin) {
 	if (!info) return null;
 	try {
 		const mod = await import(pathToFileURL(info.path).href);
-		const fn =
-			mod.nodePolyfills || mod.default?.nodePolyfills || mod.default || mod;
-		return typeof fn === "function" ? fn() : mod;
+		const fn = [
+			mod.nodePolyfills,
+			mod.default?.nodePolyfills,
+			mod.default,
+		].find((f) => typeof f === "function");
+		return fn ? fn() : null;
 	} catch {
 		return null;
 	}
@@ -339,10 +342,12 @@ export async function bundleVendor(projectDir = ".", options = {}) {
 		options.nodePolyfillsPlugin ??
 		bundlerInfo.nodePolyfillsPlugin ??
 		(options.nodePolyfills === false ? null : undefined);
-	const polyfillPlugin = await loadNodePolyfillsPlugin(
-		projectRoot,
-		customPlugin,
-	);
+	// The polyfill plugin is a Rolldown plugin; esbuild cannot use it.
+	const supportsPlugins =
+		typeof bundlerInfo.bundle === "function" || bundlerInfo.name === "rolldown";
+	const polyfillPlugin = supportsPlugins
+		? await loadNodePolyfillsPlugin(projectRoot, customPlugin)
+		: null;
 
 	if (typeof bundlerInfo.bundle === "function") {
 		try {

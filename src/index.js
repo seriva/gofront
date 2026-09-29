@@ -162,8 +162,14 @@ if (args[0] === "dev") {
 	const devOptions = parseDevArgs(args.slice(1));
 	try {
 		const dev = await handleDev(devOptions.targetDir, devOptions);
-		const port = dev.port ?? devOptions.port ?? 3000;
-		console.error(`gofront: dev server running → http://localhost:${port}`);
+		if (dev.initialError) {
+			console.error("gofront: ERROR");
+			for (const line of dev.initialError.message.split("\n"))
+				console.error(`  ${line}`);
+		} else {
+			console.error(`gofront: OK — wrote ${dev.outputFile}`);
+		}
+		console.error(`gofront: dev server running → http://localhost:${dev.port}`);
 		console.error(`gofront: watching ${dev.srcDir} for changes...`);
 
 		const shutdown = async () => {

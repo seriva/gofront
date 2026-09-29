@@ -15,6 +15,7 @@ import {
 	isNumeric,
 	isString,
 	NIL,
+	RUNE,
 	Scope,
 	STRING,
 	TAINTED_ANY,
@@ -39,6 +40,17 @@ const BUILTIN_CHECK = {
 		if (isArray(st)) {
 			s.err(`cannot append to array (type ${typeStr(st)})`, e);
 			return st;
+		}
+		const sb = s.resolveType(st?.kind === "named" ? st.underlying : st);
+		if (sb?.kind === "slice") {
+			for (let i = 1; i < e.args.length; i++) {
+				if (!e.args[i]._spread && at[i])
+					s._markIfaceBox(
+						s.resolveType(sb.elem),
+						s.resolveType(at[i]),
+						e.args[i],
+					);
+			}
 		}
 		return st;
 	},
@@ -379,7 +391,7 @@ export const expressionCheckMethods = {
 	},
 
 	_rangeCollTypeTuple(resolved, collType) {
-		if (isString(resolved)) return { kind: "tuple", types: [INT, INT] };
+		if (isString(resolved)) return { kind: "tuple", types: [INT, RUNE] };
 		if (resolved?.kind === "slice" || resolved?.kind === "array")
 			return { kind: "tuple", types: [INT, resolved.elem ?? ANY] };
 		if (resolved?.kind === "map")

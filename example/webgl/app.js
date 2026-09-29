@@ -1,3 +1,7 @@
+const vertexShaderSource = "#version 300 es\nin vec3 a_position;\nin vec3 a_color;\n\nuniform mat4 u_mvp;\nout vec3 v_color;\n\nvoid main() {\n    gl_Position = u_mvp * vec4(a_position, 1.0);\n    v_color = a_color;\n}";
+
+const fragmentShaderSource = "#version 300 es\nprecision mediump float;\n\nin vec3 v_color;\nout vec4 fragColor;\n\nvoid main() {\n    fragColor = vec4(v_color, 1.0);\n}";
+
 let gl = null;
 let program = null;
 let uMvpLoc = null;
@@ -9,10 +13,6 @@ let rotXMatrix = new Float32Array(16);
 let tmpMatrix = new Float32Array(16);
 let angleX = 0.0;
 let angleY = 0.0;
-
-const vertexShaderSource = "#version 300 es\nin vec3 a_position;\nin vec3 a_color;\n\nuniform mat4 u_mvp;\nout vec3 v_color;\n\nvoid main() {\n    gl_Position = u_mvp * vec4(a_position, 1.0);\n    v_color = a_color;\n}";
-
-const fragmentShaderSource = "#version 300 es\nprecision mediump float;\n\nin vec3 v_color;\nout vec4 fragColor;\n\nvoid main() {\n    fragColor = vec4(v_color, 1.0);\n}";
 
 function mat4Identity(out) {
   for (let i = 0; i < 16; i++) {
