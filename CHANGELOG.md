@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.3.4] - 2026-09-29
+
+### Fixed
+- **Operator precedence parenthesis preservation in unary expression codegen** — `_genUnaryExpr` in `src/codegen/expressions.js` previously emitted unary expressions (such as unary minus `-` or bitwise NOT `~`) directly concatenated with operand expressions without checking if the operand is a binary expression. Because unary operators have higher precedence than binary operators in JavaScript, compound negations like `-(a + b)` were emitted as `-a + b` and evaluated incorrectly. Unary expression codegen now wraps child binary expression operands in parentheses (`-(a + b)`).
+
 ## [1.3.3] - 2026-09-29
 
 ### Fixed

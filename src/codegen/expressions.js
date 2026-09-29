@@ -90,6 +90,11 @@ function formatBinaryOperand(genExpr, child, parentOp, isRight) {
 		: code;
 }
 
+function formatUnaryOperand(genExpr, child) {
+	const code = genExpr(child);
+	return child.kind === "BinaryExpr" ? `(${code})` : code;
+}
+
 const INT_TYPE_NAMES = new Set([
 	"int",
 	"uint",
@@ -282,7 +287,7 @@ export const expressionGenMethods = {
 			if (op === "-") return `{ re: -${inner}.re, im: -${inner}.im }`;
 			return inner;
 		}
-		return `${op}${this.genExpr(expr.operand)}`;
+		return `${op}${formatUnaryOperand((e) => this.genExpr(e), expr.operand)}`;
 	},
 
 	_genSelectorExpr(expr) {
