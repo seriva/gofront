@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GoFront — 3D WebGL2 Showcase (Zero-Allocation)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      background-color: #0d0f12;
+      color: #e4e7eb;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem 1rem;
+    }
+    .header {
+      text-align: center;
+      margin-bottom: 1.5rem;
+    }
+    .title {
+      font-size: 1.75rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, #00add8 0%, #007d9c 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 0.5rem;
+    }
+    .subtitle {
+      font-size: 0.95rem;
+      color: #9ba3af;
+      max-width: 520px;
+      line-height: 1.5;
+    }
+    .badge-bar {
+      display: flex;
+      gap: 0.75rem;
+      margin-top: 0.75rem;
+      justify-content: center;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+    }
+    .badge {
+      background: rgba(0, 173, 216, 0.1);
+      border: 1px solid rgba(0, 173, 216, 0.3);
+      color: #00add8;
+      padding: 0.25rem 0.6rem;
+      border-radius: 9999px;
+    }
+    .badge-green {
+      background: rgba(16, 185, 129, 0.1);
+      border-color: rgba(16, 185, 129, 0.3);
+      color: #10b981;
+    }
+    .canvas-card {
+      background: #16191f;
+      border: 1px solid #232730;
+      border-radius: 12px;
+      padding: 1rem;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    canvas {
+      width: 500px;
+      height: 500px;
+      border-radius: 8px;
+      background: #000;
+      display: block;
+    }
+    .footer-bar {
+      display: flex;
+      justify-content: space-between;
+      width: 100%;
+      margin-top: 1rem;
+      padding: 0 0.5rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.82rem;
+      color: #717d8f;
+    }
+    .footer-bar strong {
+      color: #e4e7eb;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1 class="title">GoFront WebGL2 Showcase</h1>
+    <p class="subtitle">
+      Zero-Allocation 3D Cube rendered via native WebGL2 static typings and First-Class TypedArray buffers.
+    </p>
+    <div class="badge-bar">
+      <span class="badge badge-green">0 B Heap / Frame</span>
+      <span class="badge">Float32Array &amp; Uint16Array</span>
+      <span class="badge">Steady 60+ FPS</span>
+    </div>
+  </div>
+
+  <div class="canvas-card">
+    <canvas id="glcanvas" width="600" height="600"></canvas>
+    <div class="footer-bar">
+      <div>Engine: <strong>GoFront v1.3.0</strong></div>
+      <div>Context: <strong>WebGL 2.0</strong></div>
+      <div>Allocations: <strong>0 B/frame</strong></div>
+    </div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

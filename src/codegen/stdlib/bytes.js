@@ -27,7 +27,7 @@ const BYTES_DISPATCH = {
 	Split: (a) => `${__bs}(${a[0]}).split(${__bs}(${a[1]})).map(p => ${__sb}(p))`,
 	Join: (a) => `${__sb}(${a[0]}.map(p => ${__bs}(p)).join(${__bs}(${a[1]})))`,
 	ReplaceAll: (a) =>
-		`((b, o, n) => { const r = []; let i = 0; while (i <= b.length - o.length) { if (o.every((v, j) => b[i + j] === v)) { r.push(...n); i += o.length; } else r.push(b[i++]); } return r.concat(b.slice(i)); })(${a[0]}, ${a[1]}, ${a[2]})`,
+		`((b, o, n) => { const r = []; let i = 0; while (i <= b.length - o.length) { if (o.length > 0 && o.every((v, j) => b[i + j] === v)) { r.push(...n); i += o.length; } else { r.push(b[i++]); } } for (; i < b.length; i++) r.push(b[i]); return ArrayBuffer.isView(b) ? new Uint8Array(r) : r; })(${a[0]}, ${a[1]}, ${a[2]})`,
 	TrimPrefix: (a) =>
 		`((b, p) => p.every((v, i) => b[i] === v) ? b.slice(p.length) : b.slice())(${a[0]}, ${a[1]})`,
 	TrimSuffix: (a) =>

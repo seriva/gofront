@@ -1,6 +1,9 @@
-// CodeGen expression methods and helpers — installed as a mixin on CodeGen.prototype.
-
-import { ERROR, isComplex } from "../typechecker/types.js";
+import {
+	ERROR,
+	isComplex,
+	isTypedArraySlice,
+	typedArrayConstructorForElem,
+} from "../typechecker/types.js";
 
 /** @typedef {import('./index.js').CodeGen} CodeGen */
 
@@ -109,9 +112,21 @@ const BUILTIN_GEN = {
 	},
 	copy: (s, e) => {
 		const [dst, src] = e.args.map((a) => s.genExpr(a));
-		return `((__cd,__cs)=>{const n=Math.min(__cd.length,__cs.length);__cd.splice(0,n,...__cs.slice(0,n));return n;})(${dst},${src})`;
+		return `((__cd, __cs) => { if (!__cd || !__cs) return 0; const n = Math.min(__cd.length, __cs.length); if (__cd.set) { __cd.set(__cs.length === n ? __cs : (__cs.subarray ? __cs.subarray(0, n) : __cs.slice(0, n))); } else { __cd.splice(0, n, ...(__cs.slice ? __cs.slice(0, n) : __cs.subarray(0, n))); } return n; })(${dst}, ${src})`;
 	},
-	new: (s, e) => `{ value: ${s.zeroValueForExpr(e.args[0])} }`,
+	new: (s, e) => {
+		const arg = e.args[0];
+		const typeName = arg.name ?? s.getTypeName(arg);
+		if (typeName && s.structNames.has(typeName)) {
+			return `new ${typeName}()`;
+		}
+		const t = arg._type;
+		if (s._isStructType(t)) {
+			const name = t.name ?? (t.kind === "named" ? t.name : null);
+			if (name) return `new ${name}()`;
+		}
+		return `{ value: ${s.zeroValueForExpr(arg)} }`;
+	},
 	print: (s, e) => `console.log(${e.args.map((a) => s.genExpr(a)).join(", ")})`,
 	println: (s, e) =>
 		`console.log(${e.args.map((a) => s.genExpr(a)).join(", ")})`,
@@ -171,6 +186,36 @@ export const expressionGenMethods = {
 		}
 	},
 
+	_isStructType(t) {
+		if (!t) return false;
+		if (t.name && this.structNames.has(t.name)) return true;
+		const base =
+			t.kind === "named"
+				? (t.underlying ?? this.checker?.types.get(t.name)?.underlying)
+				: t;
+		if (base?.name && this.structNames.has(base.name)) return true;
+		return base?.kind === "struct";
+	},
+
+	_isStructPointerType(t) {
+		if (!t) return false;
+		const pt =
+			t.kind === "named"
+				? (t.underlying ?? this.checker?.types.get(t.name)?.underlying)
+				: t;
+		if (pt?.kind !== "pointer") return false;
+		return this._isStructType(pt.base);
+	},
+
+	_isStructExpr(expr) {
+		if (!expr) return false;
+		if (expr.kind === "CompositeLit") {
+			const typeName = expr.typeExpr ? this.getTypeName(expr.typeExpr) : null;
+			if (typeName && this.structNames.has(typeName)) return true;
+		}
+		return this._isStructType(expr._type);
+	},
+
 	_genUnaryExpr(expr) {
 		const op = expr.op === "^" ? "~" : expr.op; // bitwise NOT
 		// Address-of: &x
@@ -183,11 +228,22 @@ export const expressionGenMethods = {
 					return this.genExpr(expr.operand);
 				}
 			}
-			// For non-boxed vars (structs, etc.), wrap in { value: x }
+			if (
+				this._isStructType(expr.operand._type) ||
+				this._isStructExpr(expr.operand)
+			) {
+				return this.genExpr(expr.operand);
+			}
+			// For non-boxed vars (primitives, etc.), wrap in { value: x }
 			return `{ value: ${this.genExpr(expr.operand)} }`;
 		}
-		// Dereference: *p → p.value
-		if (op === "*") return `${this.genExpr(expr.operand)}.value`;
+		// Dereference: *p
+		if (op === "*") {
+			if (this._isStructPointerType(expr.operand._type)) {
+				return this.genExpr(expr.operand);
+			}
+			return `${this.genExpr(expr.operand)}.value`;
+		}
 		// Unary minus/plus on complex
 		if ((op === "-" || op === "+") && isComplex(expr.operand._type)) {
 			const inner = this.genExpr(expr.operand);
@@ -215,6 +271,11 @@ export const expressionGenMethods = {
 	},
 
 	_genPointerSelectorField(expr, base) {
+		if (this._isStructPointerType(expr.expr._type)) {
+			const sel = `${base}.${expr.field}`;
+			if (expr._isMethodValue && !expr._callee) return `${sel}.bind(${base})`;
+			return sel;
+		}
 		const sel = `${base}.value.${expr.field}`;
 		if (expr._isMethodValue && !expr._callee)
 			return `${sel}.bind(${base}.value)`;
@@ -253,10 +314,11 @@ export const expressionGenMethods = {
 		const base = this.genExpr(expr.expr);
 		const lo = expr.low ? this.genExpr(expr.low) : "";
 		const hi = expr.high ? this.genExpr(expr.high) : "";
-		if (!lo && !hi) return `${base}.slice()`;
-		if (!hi) return `${base}.slice(${lo})`;
-		if (!lo) return `${base}.slice(0, ${hi})`;
-		return `${base}.slice(${lo}, ${hi})`;
+		const method = isTypedArraySlice(expr.expr._type) ? "subarray" : "slice";
+		if (!lo && !hi) return `${base}.${method}()`;
+		if (!hi) return `${base}.${method}(${lo})`;
+		if (!lo) return `${base}.${method}(0, ${hi})`;
+		return `${base}.${method}(${lo}, ${hi})`;
 	},
 
 	_genFuncLit(expr) {
@@ -423,10 +485,21 @@ export const expressionGenMethods = {
 		const resolvedKind = typeArg._type?.kind;
 		if (typeNode.kind === "SliceType" || resolvedKind === "slice") {
 			const n = expr.args[1] ? this.genExpr(expr.args[1]) : "0";
-			// Use the proper zero value for the element type (e.g. new Point() not 0)
 			const elemNode = typeNode.kind === "SliceType" ? typeNode.elem : null;
 			const elemResolved =
 				typeArg._type?.kind === "slice" ? typeArg._type.elem : null;
+			const typedCtor =
+				typedArrayConstructorForElem(elemResolved) ??
+				(elemNode?.name
+					? typedArrayConstructorForElem({
+							kind: "basic",
+							name: elemNode.name,
+						})
+					: null);
+			if (typedCtor) {
+				return `new ${typedCtor}(${n})`;
+			}
+			// Use the proper zero value for the element type (e.g. new Point() not 0)
 			let zero = "null";
 			if (elemResolved) {
 				zero = this.zeroValueForType(elemResolved);
@@ -495,17 +568,93 @@ export const expressionGenMethods = {
 		return `[${expr.elems.map((e) => this.genExpr(e)).join(", ")}]`;
 	},
 
+	_fillPositionalStructElems(fields, expr, values) {
+		let maxIdx = -1;
+		for (let i = 0; i < expr.elems.length; i++) {
+			const e = expr.elems[i];
+			const name =
+				e._positionalField ??
+				(e.kind === "KeyValueExpr"
+					? (e.key.name ?? this.genExpr(e.key))
+					: null);
+			const idx = name ? fields.findIndex((f) => f.name === name) : i;
+			if (idx >= 0 && idx < fields.length) {
+				values[idx] = this.genExpr(e.kind === "KeyValueExpr" ? e.value : e);
+				if (idx > maxIdx) maxIdx = idx;
+			}
+		}
+		return maxIdx;
+	},
+
+	_fillEmbedField(fields, ef, e, values) {
+		const idx = fields.findIndex((f) => f.name === ef);
+		if (idx < 0) return -1;
+		if (e.value.kind === "CompositeLit") {
+			const match = e.value.elems.find(
+				(ce) => (ce._positionalField ?? ce.key?.name) === ef,
+			);
+			values[idx] = match
+				? this.genExpr(match.value ?? match)
+				: fields[idx].zero;
+		} else {
+			values[idx] = `${this.genExpr(e.value)}.${ef}`;
+		}
+		return idx;
+	},
+
+	_fillKeyedStructElems(fields, expr, values) {
+		let maxIdx = -1;
+		for (const e of expr.elems) {
+			if (e.kind !== "KeyValueExpr") continue;
+			const k = e.key.name ?? this.genExpr(e.key);
+			if (e._isEmbedInit) {
+				const embedType = this.checker?.types.get(k)?.underlying;
+				const embedFields =
+					embedType?.kind === "struct" ? [...embedType.fields.keys()] : [];
+				for (const ef of embedFields) {
+					const idx = this._fillEmbedField(fields, ef, e, values);
+					if (idx > maxIdx) maxIdx = idx;
+				}
+			} else {
+				const idx = fields.findIndex((f) => f.name === k);
+				if (idx >= 0) {
+					values[idx] = this.genExpr(e.value);
+					if (idx > maxIdx) maxIdx = idx;
+				}
+			}
+		}
+		return maxIdx;
+	},
+
+	_genPositionalStructLit(typeName, expr) {
+		const fields = this.getStructFields(typeName);
+		if (!fields || fields.length === 0 || expr.elems.length === 0) {
+			return `new ${typeName}()`;
+		}
+		const values = fields.map((f) => f.zero);
+		const hasPositional = expr.elems.some(
+			(e) => e._positionalField || e.kind !== "KeyValueExpr",
+		);
+		const maxExplicitIdx = hasPositional
+			? this._fillPositionalStructElems(fields, expr, values)
+			: this._fillKeyedStructElems(fields, expr, values);
+		if (maxExplicitIdx < 0) {
+			return `new ${typeName}()`;
+		}
+		const args = values.slice(0, maxExplicitIdx + 1);
+		return `new ${typeName}(${args.join(", ")})`;
+	},
+
 	genCompositeLit(expr) {
 		const t = expr.typeExpr;
 		if (t === null) return this._genImplicitCompositeLit(expr);
 		const typeName = this.getTypeName(t);
 		if (typeName && this.structNames.has(typeName))
-			return `new ${typeName}({ ${this._genStructFields(expr.elems)} })`;
+			return this._genPositionalStructLit(typeName, expr);
 		if (typeName && this.namedWrapperNames.has(typeName))
 			return this._genNamedWrapperLit(typeName, expr);
 		if (expr.elems.some((e) => e._positionalField)) {
-			if (typeName)
-				return `new ${typeName}({ ${this._genStructFields(expr.elems)} })`;
+			if (typeName) return this._genPositionalStructLit(typeName, expr);
 		}
 		if (this._isSliceOrArrayType(t)) {
 			const elems = expr.elems
@@ -513,6 +662,23 @@ export const expressionGenMethods = {
 					e.kind === "KeyValueExpr" ? this.genExpr(e.value) : this.genExpr(e),
 				)
 				.join(", ");
+			const elemNode =
+				t.kind === "SliceType" || t.kind === "ArrayType" ? t.elem : null;
+			const elemResolved =
+				expr._type?.kind === "slice" || expr._type?.kind === "array"
+					? expr._type.elem
+					: null;
+			const typedCtor =
+				typedArrayConstructorForElem(elemResolved) ??
+				(elemNode?.name
+					? typedArrayConstructorForElem({
+							kind: "basic",
+							name: elemNode.name,
+						})
+					: null);
+			if (typedCtor) {
+				return `new ${typedCtor}([${elems}])`;
+			}
 			return `[${elems}]`;
 		}
 		if (this._isMapTypeNode(t))
@@ -522,12 +688,12 @@ export const expressionGenMethods = {
 
 	_genImplicitCompositeLit(expr) {
 		const typeName = expr._type?.name ?? expr._type?.underlying?.name;
+		if (typeName && this.structNames.has(typeName)) {
+			return this._genPositionalStructLit(typeName, expr);
+		}
 		const hasPositional = expr.elems.some((e) => e._positionalField);
 		const hasKeyed = expr.elems.some((e) => e.kind === "KeyValueExpr");
 		if (hasPositional || hasKeyed) {
-			if (typeName && this.structNames.has(typeName)) {
-				return `new ${typeName}({ ${this._genStructFields(expr.elems)} })`;
-			}
 			const fields = expr.elems
 				.map((e) => {
 					if (e._positionalField)
@@ -537,7 +703,12 @@ export const expressionGenMethods = {
 				.join(", ");
 			return `{ ${fields} }`;
 		}
-		return `[${expr.elems.map((e) => this.genExpr(e)).join(", ")}]`;
+		const elems = expr.elems.map((e) => this.genExpr(e)).join(", ");
+		if (isTypedArraySlice(expr._type)) {
+			const typedCtor = typedArrayConstructorForElem(expr._type.elem);
+			if (typedCtor) return `new ${typedCtor}([${elems}])`;
+		}
+		return `[${elems}]`;
 	},
 
 	_genNamedWrapperLit(typeName, expr) {
@@ -804,8 +975,17 @@ export const expressionGenMethods = {
 
 	_genSliceTypeConversion(expr, inner, t) {
 		const elem = t.elem?.name;
-		if (elem === "byte" || elem === "uint8")
-			return `Array.from(new TextEncoder().encode(${inner}))`;
+		if (elem === "byte" || elem === "uint8") {
+			if (this._isStringSource(expr.expr._type))
+				return `new TextEncoder().encode(${inner})`;
+			return `new Uint8Array(${inner})`;
+		}
+		const typedCtor = typedArrayConstructorForElem(
+			t.elem ? { kind: "basic", name: t.elem.name } : null,
+		);
+		if (typedCtor) {
+			return `new ${typedCtor}(${inner})`;
+		}
 		if (elem === "rune" || elem === "int32" || elem === "int") {
 			if (this._isStringSource(expr.expr._type))
 				return `Array.from(${inner}, __c => __c.codePointAt(0))`;
@@ -813,20 +993,39 @@ export const expressionGenMethods = {
 		return `Array.from(${inner})`;
 	},
 
+	_genStringConversion(srcType, inner) {
+		if (srcType && this.isIntType(srcType))
+			return `String.fromCodePoint(${inner})`;
+		if (srcType?.kind === "slice") {
+			const elem = srcType.elem?.name;
+			if (elem === "byte" || elem === "uint8")
+				return `new TextDecoder().decode(new Uint8Array(${inner}))`;
+			if (elem === "rune" || elem === "int" || elem === "int32")
+				return `Array.from(${inner}, c => String.fromCodePoint(c)).join("")`;
+		}
+		return `String(${inner})`;
+	},
+
 	_genPrimitiveConversion(expr, inner, target) {
 		switch (target) {
-			case "string": {
-				const srcType = expr.expr._type;
-				if (srcType && this.isIntType(srcType))
-					return `String.fromCodePoint(${inner})`;
-				if (srcType?.kind === "slice" && srcType.elem?.name === "int")
-					return `${inner}.map(c => String.fromCharCode(c)).join("")`;
-				return `String(${inner})`;
-			}
+			case "string":
+				return this._genStringConversion(expr.expr._type, inner);
 			case "int":
+			case "int8":
+			case "int16":
+			case "int32":
+			case "int64":
+			case "uint":
+			case "uint8":
+			case "uint16":
+			case "uint32":
+			case "uint64":
+			case "uintptr":
 			case "byte":
 			case "rune":
 				return `Math.trunc(Number(${inner}))`;
+			case "float32":
+				return `Math.fround(Number(${inner}))`;
 			case "float64":
 				return `Number(${inner})`;
 			case "bool":

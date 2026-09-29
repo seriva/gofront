@@ -1,7 +1,16 @@
 // Core standard library type definitions — browser globals, fmt, strings, bytes,
 // strconv, sort, math, errors, time, unicode, os, slices, html, io.
 
-import { ANY, BOOL, ERROR, FLOAT64, INT, STRING, VOID } from "../types.js";
+import {
+	ANY,
+	BOOL,
+	ERROR,
+	FLOAT64,
+	INT,
+	STRING,
+	UINT8,
+	VOID,
+} from "../types.js";
 
 const TIME_T = { kind: "named", name: "time.Time", underlying: ANY };
 
@@ -64,14 +73,8 @@ export function setupCoreGlobals(globals, types) {
 		"Blob",
 		"File",
 		"FileReader",
-		"ArrayBuffer",
-		"Uint8Array",
 		"TextEncoder",
 		"TextDecoder",
-		"WebGLRenderingContext",
-		"WebGL2RenderingContext",
-		"GPUDevice",
-		"GPUAdapter",
 	];
 	for (const g of browserGlobals) globals.define(g, ANY);
 
@@ -220,7 +223,7 @@ export function setupCoreGlobals(globals, types) {
 		},
 	});
 
-	const BYTE_SLICE = { kind: "slice", elem: INT };
+	const BYTE_SLICE = { kind: "slice", elem: UINT8 };
 	const byFn1 = (ret) => ({
 		kind: "func",
 		params: [BYTE_SLICE],
@@ -320,13 +323,13 @@ export function setupCoreGlobals(globals, types) {
 			Unquote: { kind: "func", params: [STRING], returns: [STRING, ERROR] },
 			AppendInt: {
 				kind: "func",
-				params: [{ kind: "slice", elem: INT }, INT, INT],
-				returns: [{ kind: "slice", elem: INT }],
+				params: [BYTE_SLICE, INT, INT],
+				returns: [BYTE_SLICE],
 			},
 			AppendFloat: {
 				kind: "func",
-				params: [{ kind: "slice", elem: INT }, FLOAT64, INT, INT, INT],
-				returns: [{ kind: "slice", elem: INT }],
+				params: [BYTE_SLICE, FLOAT64, INT, INT, INT],
+				returns: [BYTE_SLICE],
 			},
 		},
 	});
@@ -570,7 +573,7 @@ export function setupCoreGlobals(globals, types) {
 		},
 	});
 
-	const BYTE_SLICE_IO = { kind: "slice", elem: INT };
+	const BYTE_SLICE_IO = { kind: "slice", elem: UINT8 };
 	globals.define("io", {
 		kind: "namespace",
 		name: "io",

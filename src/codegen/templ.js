@@ -208,7 +208,7 @@ export const templGenMethods = {
 
 	_genTemplRangeFor(forStmt, templBody, mountParent) {
 		const init = forStmt.init;
-		if (!init?.rhs?.[0] || init.rhs[0].kind !== "RangeExpr") {
+		if (init?.rhs?.[0]?.kind !== "RangeExpr") {
 			// Plain for loop (cond-only or three-clause)
 			const condJs = forStmt.cond ? this.genExpr(forStmt.cond) : "true";
 			this.line(`while (${condJs}) {`);
