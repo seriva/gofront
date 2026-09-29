@@ -58,6 +58,38 @@ const NS_CONSTANTS = {
 	utf8: { RuneError: "0xFFFD", MaxRune: "0x10FFFF", UTFMax: "4" },
 };
 
+const BINARY_OP_PREC = {
+	"||": 1,
+	"&&": 2,
+	"==": 3,
+	"!=": 3,
+	"<": 3,
+	">": 3,
+	"<=": 3,
+	">=": 3,
+	"+": 4,
+	"-": 4,
+	"|": 4,
+	"^": 4,
+	"*": 5,
+	"/": 5,
+	"%": 5,
+	"<<": 5,
+	">>": 5,
+	"&": 5,
+	"&^": 5,
+};
+
+function formatBinaryOperand(genExpr, child, parentOp, isRight) {
+	const code = genExpr(child);
+	if (child.kind !== "BinaryExpr") return code;
+	const parentPrec = BINARY_OP_PREC[parentOp] || 0;
+	const childPrec = BINARY_OP_PREC[child.op] || 0;
+	return (isRight ? childPrec <= parentPrec : childPrec < parentPrec)
+		? `(${code})`
+		: code;
+}
+
 const INT_TYPE_NAMES = new Set([
 	"int",
 	"uint",
@@ -910,8 +942,20 @@ export const expressionGenMethods = {
 			isComplex(expr.right._type)
 		)
 			return this._genComplexBinary(expr);
-		const l = this.genExpr(expr.left);
-		const r = this.genExpr(expr.right);
+
+		const l = formatBinaryOperand(
+			(e) => this.genExpr(e),
+			expr.left,
+			expr.op,
+			false,
+		);
+		const r = formatBinaryOperand(
+			(e) => this.genExpr(e),
+			expr.right,
+			expr.op,
+			true,
+		);
+
 		if (
 			expr.op === "/" &&
 			this.isIntType(expr.left._type) &&
