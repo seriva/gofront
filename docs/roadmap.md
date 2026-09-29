@@ -8,6 +8,16 @@ features (e.g. `docs/v0.0.5/`).
 
 ---
 
+## v1.3.1
+
+**Theme: Bug fix.** Fix CLI routing fall-through in `gofront dev` causing crash on startup.
+
+| Area | Difficulty | Status | Notes |
+|---|---|---|---|
+| CLI `dev` process lifecycle | Low | ✓ | Await pending lifecycle promise so `gofront dev` holds process without falling through to file compile. |
+
+---
+
 ## v1.3.0
 
 **Theme: High-performance engine support & modern dev environment.**

@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.3.1] - 2026-09-29
+
+### Fixed
+- **`gofront dev` CLI fall-through to single-shot compilation** — `gofront dev` in `src/index.js` previously executed without an unresolved wait state, falling through to legacy single-shot compilation which attempted to stat the string `"dev"` as a directory (`cannot access 'dev': ENOENT`). The dev command now awaits a pending promise while running the server and watcher, properly holding the process until SIGINT/SIGTERM triggers graceful shutdown.
+
 ## [1.3.0] - 2026-09-29
 
 ### Added
