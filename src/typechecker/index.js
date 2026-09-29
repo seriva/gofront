@@ -140,26 +140,7 @@ export class TypeChecker {
 	}
 
 	check(program) {
-		this._setCurrentFile(program);
-		// Pass 1: collect type declarations
-		for (const decl of program.decls) {
-			if (decl.kind === "TypeDecl") this.collectType(decl);
-		}
-		// Pass 2: collect function / method signatures
-		for (const decl of program.decls) {
-			if (decl.kind === "FuncDecl" || decl.kind === "MethodDecl") {
-				this.collectFunc(decl);
-			} else if (decl.kind === "TemplDecl") {
-				this._collectTemplDecl(decl);
-			}
-		}
-		// Pass 2.1: Promote embedded methods
-		this._promoteEmbeddedMethods();
-		// Pass 3: check bodies
-		for (const decl of program.decls) {
-			this.checkTopDecl(decl, this.globals);
-		}
-		return this.errors;
+		return this.checkAll([program]);
 	}
 
 	// Pre-declare a package-level var so other files can reference its name
@@ -195,6 +176,15 @@ export class TypeChecker {
 	}
 
 	_collectTypesPass(programs) {
+		for (const p of programs) {
+			for (const d of p.decls) {
+				if (d.kind === "TypeDecl" && !d.isAlias && !this.types.has(d.name)) {
+					const placeholder = { kind: "named", name: d.name, underlying: null };
+					this.types.set(d.name, placeholder);
+					this.globals.define(d.name, placeholder);
+				}
+			}
+		}
 		for (const p of programs) {
 			this._setCurrentFile(p);
 			for (const d of p.decls) if (d.kind === "TypeDecl") this.collectType(d);
@@ -274,14 +264,15 @@ export class TypeChecker {
 				return t;
 			});
 			const underlying = this.resolveTypeNode(decl.type, typeScope);
-			const named = {
-				kind: "named",
-				name: decl.name,
-				underlying,
-				_generic: {
-					typeParams: typeParamTypes,
-					declNode: decl,
-				},
+			const existing = this.types.get(decl.name);
+			const named =
+				existing?.kind === "named"
+					? existing
+					: { kind: "named", name: decl.name };
+			named.underlying = underlying;
+			named._generic = {
+				typeParams: typeParamTypes,
+				declNode: decl,
 			};
 			if (underlying.kind === "struct") {
 				underlying.name = decl.name;
@@ -298,7 +289,12 @@ export class TypeChecker {
 			this.globals.define(decl.name, underlying);
 			return;
 		}
-		const named = { kind: "named", name: decl.name, underlying };
+		const existing = this.types.get(decl.name);
+		const named =
+			existing?.kind === "named"
+				? existing
+				: { kind: "named", name: decl.name };
+		named.underlying = underlying;
 		if (underlying.kind === "struct") {
 			underlying.name = decl.name;
 			underlying.methods = new Map();

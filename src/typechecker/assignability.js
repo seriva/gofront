@@ -170,6 +170,7 @@ export const assignabilityMethods = {
 		if (this._isNumericCoercible(target, source)) return;
 		if (this._checkArrayAssignable(target, source, node)) return;
 		if (this._checkTypedArrayAssignable(target, source, node)) return;
+		if (this._checkFuncAssignable(target, source, node)) return;
 		if (typeStr(target) !== typeStr(source))
 			this._assertAssignableTypeMismatch(target, source, node);
 	},
@@ -272,6 +273,21 @@ export const assignabilityMethods = {
 			return true;
 		}
 
+		return false;
+	},
+
+	_checkFuncAssignable(target, source, node) {
+		const tFunc = target.kind === "named" ? target.underlying : target;
+		const sFunc = source.kind === "named" ? source.underlying : source;
+		if (tFunc?.kind === "func" && sFunc?.kind === "func") {
+			if (!this._implementsMethod(tFunc, sFunc)) {
+				this.err(
+					`Cannot assign ${typeStr(source)} to ${typeStr(target)}`,
+					node,
+				);
+			}
+			return true;
+		}
 		return false;
 	},
 
