@@ -1,7 +1,7 @@
 # Zero-Allocation Codegen & TypedArray Buffers — Design Plan
 
 **Version:** v1.3.0  
-**Status:** Approved Draft  
+**Status:** Implemented & Verified  
 
 ---
 
@@ -229,17 +229,14 @@ Because GoFront already emits structs as ES6 classes (which are reference types 
 Currently, `WebGL2RenderingContext` and `GPUDevice` are defined as `ANY` in `typechecker/stdlib/core.js`.
 WebGL2 defines over 400 methods (`UseProgram`, `UniformMatrix4fv`, `VertexAttribPointer`, `CreateShader`, `Clear`, `TexImage2D`, `CreateVertexArray`, etc.). Replacing `ANY` with an interface containing only 5 methods would break type checking in downstream renderers.
 
-#### Solution: Two-Tier Type Surface
+#### Solution: Two-Tier Type Surface & WebGL Stdlib (`src/typechecker/stdlib/web.js`)
 1. **TypedArray Builtins:**
    Define `ArrayBuffer`, `DataView`, `Float32Array`, `Float64Array`, `Uint8Array`, `Uint16Array`, `Uint32Array`, `Int32Array`, `Int16Array`, `Int8Array` with methods: `subarray`, `byteLength`, `byteOffset`, `buffer`, `set`, `slice`.
 2. **Comprehensive WebGL2 / WebGPU Interfaces:**
-   - Leverage GoFront's existing `.d.ts` parser (`src/resolver.js` / `src/compiler.js`) to load standard browser definitions from `WebGL2RenderingContext` and `GPUDevice`.
-   - Ensure buffer upload APIs strictly accept TypedArrays and `ArrayBuffer`:
-     ```go
-     BufferData(target int, data any, usage int)
-     BufferSubData(target int, offset int, data any)
-     ```
-   - For any methods not yet statically indexed, provide an open interface fallback rather than throwing false type errors during compilation.
+   - Standard browser DOM casing: WebGL methods are exposed via browser-standard camelCase (`viewport`, `clearColor`, `createShader`, `shaderSource`, `compileShader`, `createProgram`, `attachShader`, `linkProgram`, `useProgram`, `createBuffer`, `bindBuffer`, `bufferData`, `createVertexArray`, `bindVertexArray`, `vertexAttribPointer`, `enableVertexAttribArray`, `drawArrays`, `drawElements`, `getUniformLocation`, `uniformMatrix4fv`, `clear`).
+   - Constant definitions: `ARRAY_BUFFER`, `ELEMENT_ARRAY_BUFFER`, `STATIC_DRAW`, `DYNAMIC_DRAW`, `TRIANGLES`, `COLOR_BUFFER_BIT`, `DEPTH_BUFFER_BIT`, `VERTEX_SHADER`, `FRAGMENT_SHADER`, etc.
+   - Open interface fallback: Interfaces specify `_isOpen: true` to permit calls to extended/vendor methods without triggering false compile-time type errors.
+   - Bidirectional slice ↔ TypedArray assignability (`_isTypedArrayAssignable` in `src/typechecker/assignability.js`): `[]float32` passes directly into WebGL methods accepting `Float32Array`, and vice versa.
 
 ---
 
@@ -263,20 +260,22 @@ In hot loops (such as ray-triangle intersection returning `(hit bool, dist float
 To validate zero allocations, TypedArray buffer uploads, and WebGL2 static typings in a real browser context before tackling SimpleFPS, provide a standalone reference application in `example/webgl/`:
 
 #### Architecture & Implementation
-- **Canvas & WebGL2 Initialization:** Initializes canvas and requests `"webgl2"` context via GoFront's static `WebGL2RenderingContext` typings.
-- **Shader Pipeline:** Compiles vertex and fragment shaders for basic 3D lighting/coloring and perspective projection.
+- **Canvas & WebGL2 Initialization:** Initializes `<canvas id="glcanvas" width="600" height="600">` and requests `"webgl2"` context via GoFront's static `WebGL2RenderingContext` typings.
+- **Shader Pipeline:** Compiles GLSL ES 3.0 vertex and fragment shaders for 3D interpolated RGB coloring and perspective projection.
 - **TypedArray Buffers:**
-  - Vertex positions and colors defined as `[]float32` (`Float32Array`).
-  - Face indices defined as `[]uint16` (`Uint16Array`).
-  - Uploaded via `gl.BufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW)` without intermediate conversions or copies.
+  - 24 vertices with interleaved positions and RGB colors defined as `[]float32` (`Float32Array`).
+  - 36 element indices defined as `[]uint16` (`Uint16Array`).
+  - Uploaded via `gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW)` and `gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW)` without intermediate conversions or copies.
 - **Matrix Math & Uniforms:**
-  - Computes Model-View-Projection (MVP) transformation matrix using flat `[16]float32` / `Float32Array`.
-  - Transferred directly to the GPU via `gl.UniformMatrix4fv(mvpLoc, false, mvpMatrix)`.
+  - Computes Model-View-Projection (MVP) transformation matrix using in-place column-major scratch `[]float32` buffers (`mat4Perspective`, `mat4Translate`, `mat4RotateX`, `mat4RotateY`, `mat4Multiply`).
+  - Transferred directly to the GPU via `gl.uniformMatrix4fv(mvpLoc, false, mvpMatrix)`.
 - **Zero-Allocation Render Loop:**
   - Runs on `requestAnimationFrame`.
-  - Updates rotation angles and recalculates MVP matrix in-place.
-  - Clears buffer and calls `gl.DrawElements(gl.TRIANGLES, ...)`.
+  - Updates rotation angles and recalculates MVP matrix in-place into preallocated scratch buffers.
+  - Clears buffer and calls `gl.drawElements(gl.TRIANGLES, 36, gl.UNSIGNED_SHORT, 0)`.
   - Generates **0 heap allocations per frame** in the steady-state render loop.
+- **Automated Verification:**
+  - Playwright E2E test (`test/e2e/webgl.spec.js`) verifies canvas visibility, 600x600 dimensions, continuous animation loop over 500ms, and 0 WebGL/runtime console errors.
 
 ---
 
@@ -284,44 +283,44 @@ To validate zero allocations, TypedArray buffer uploads, and WebGL2 static typin
 
 ### Phase 1: Sized Numeric Types & Decoupling in Typechecker
 - **Target Files:** `src/typechecker/types.js`, `src/typechecker/assignability.js`
-- [ ] **Task 1.1 — Decouple Sized Types:** Define distinct basic type singletons for `FLOAT32`, `FLOAT64`, `UINT8` (`BYTE`), `UINT16`, `UINT32`, `INT8`, `INT16`, and `INT32` instead of collapsing them to generic `FLOAT64` and `INT`.
-- [ ] **Task 1.2 — Numeric Predicates & Assignability:** Update `isNumeric()` to recognize all sized basic types. Update `UNTYPED_COMPAT` in `assignability.js` so untyped numeric constants cleanly assign to sized numeric variables.
-- [ ] **Task 1.3 — TypedArray Type Identification Helpers:** Add `isTypedArraySlice(type)` and `typedArrayConstructorForElem(elemType)` helpers to query whether a slice element type maps to a JavaScript TypedArray.
+- [x] **Task 1.1 — Decouple Sized Types:** Define distinct basic type singletons for `FLOAT32`, `FLOAT64`, `UINT8` (`BYTE`), `UINT16`, `UINT32`, `INT8`, `INT16`, and `INT32` instead of collapsing them to generic `FLOAT64` and `INT`.
+- [x] **Task 1.2 — Numeric Predicates & Assignability:** Update `isNumeric()` to recognize all sized basic types. Update `UNTYPED_COMPAT` in `assignability.js` so untyped numeric constants cleanly assign to sized numeric variables.
+- [x] **Task 1.3 — TypedArray Type Identification Helpers:** Add `isTypedArraySlice(type)` and `typedArrayConstructorForElem(elemType)` helpers to query whether a slice element type maps to a JavaScript TypedArray.
 
 ### Phase 2: Zero-Allocation `for range` Loops
 - **Target Files:** `src/codegen/statements.js`
-- [ ] **Task 2.1 — Indexed Loop Transformation:** In `_genForRange` / `_genRangeIterExpr`, detect slice and array types and emit indexed loops instead of `.entries()` iterator tuples.
-- [ ] **Task 2.2 — Nil Slice Guard:** Emit `__len${depth} = __arr${depth} ? __arr${depth}.length : 0` to prevent runtime crashes when ranging over unallocated/nil slices.
-- [ ] **Task 2.3 — Variable Hygiene & Reassignment:** Emit `let v = __arr[i]` for loop value copies to allow reassignment within the loop body. Skip element assignment entirely if the value variable is blank identifier `_`.
-- [ ] **Task 2.4 — Assignment Statement Form:** Support `for i, v = range arr` (`AssignStmt`) by avoiding `let` variable redeclarations.
-- [ ] **Task 2.5 — Nested Scoping:** Append loop nesting depth to temp register identifiers (`__arr${depth}`, `__len${depth}`) to prevent collisions in nested loops.
+- [x] **Task 2.1 — Indexed Loop Transformation:** In `_genForRange` / `_genRangeIterExpr`, detect slice and array types and emit indexed loops instead of `.entries()` iterator tuples.
+- [x] **Task 2.2 — Nil Slice Guard:** Emit `__len${depth} = __arr${depth} ? __arr${depth}.length : 0` to prevent runtime crashes when ranging over unallocated/nil slices.
+- [x] **Task 2.3 — Variable Hygiene & Reassignment:** Emit `let v = __arr[i]` for loop value copies to allow reassignment within the loop body. Skip element assignment entirely if the value variable is blank identifier `_`.
+- [x] **Task 2.4 — Assignment Statement Form:** Support `for i, v = range arr` (`AssignStmt`) by avoiding `let` variable redeclarations.
+- [x] **Task 2.5 — Nested Scoping:** Append loop nesting depth to temp register identifiers (`__arr${depth}`, `__len${depth}`) to prevent collisions in nested loops.
 
 ### Phase 3: First-Class TypedArray Slices & Sub-slicing
 - **Target Files:** `src/codegen/expressions.js`, `src/codegen/runtime.js`
-- [ ] **Task 3.1 — Typed `make()` Allocation:** Emit `new Float32Array(n)` when compiling `make([]float32, n)` (and respective constructors for `uint8`, `uint32`, etc.).
-- [ ] **Task 3.2 — Slice Literals:** Compile slice literals of sized numeric types (`[]float32{...}`) to `new Float32Array([...])`.
-- [ ] **Task 3.3 — Zero-Copy Slicing:** When sub-slicing a TypedArray slice (`s[low:high]`), emit `s.subarray(low, high)` rather than `.slice()`.
-- [ ] **Task 3.4 — Runtime Builtins (`copy`, `append`, `__equal`):**
+- [x] **Task 3.1 — Typed `make()` Allocation:** Emit `new Float32Array(n)` when compiling `make([]float32, n)` (and respective constructors for `uint8`, `uint32`, etc.).
+- [x] **Task 3.2 — Slice Literals:** Compile slice literals of sized numeric types (`[]float32{...}`) to `new Float32Array([...])`.
+- [x] **Task 3.3 — Zero-Copy Slicing:** When sub-slicing a TypedArray slice (`s[low:high]`), emit `s.subarray(low, high)` rather than `.slice()`.
+- [x] **Task 3.4 — Runtime Builtins (`copy`, `append`, `__equal`):**
   - Compile `copy(dst, src)` on TypedArrays to `dst.set(src.subarray(0, count))`.
   - Implement `__typedAppend(target, ...items)` using capacity doubling and `.set()` buffer transfer.
   - Update `__equal` to compare TypedArrays efficiently using `ArrayBuffer.isView` byte-by-byte comparison.
 
 ### Phase 4: Struct Pointer Unboxing & Positional Constructors
 - **Target Files:** `src/codegen/index.js`, `src/codegen/expressions.js`, `src/codegen/statements.js`
-- [ ] **Task 4.1 — Positional Struct Constructors:** Generate `class Struct { constructor(f1 = 0, f2 = 0) { ... } }` and instantiate via `new Struct(...)`, precomputing zero values for omitted fields.
-- [ ] **Task 4.2 — Pointer Unboxing (`&s` -> `s`):** Eliminate `{ value: s }` heap wrappers for struct pointers. Pass struct instances directly by object reference.
-- [ ] **Task 4.3 — Pointer Member Access Codegen:** Compile struct pointer dereferences `ptr.Field` directly to `ptr.Field` without intermediate `.value`.
+- [x] **Task 4.1 — Positional Struct Constructors:** Generate `class Struct { constructor(f1 = 0, f2 = 0) { ... } }` and instantiate via `new Struct(...)`, precomputing zero values for omitted fields.
+- [x] **Task 4.2 — Pointer Unboxing (`&s` -> `s`):** Eliminate `{ value: s }` heap wrappers for struct pointers. Pass struct instances directly by object reference.
+- [x] **Task 4.3 — Pointer Member Access Codegen:** Compile struct pointer dereferences `ptr.Field` directly to `ptr.Field` without intermediate `.value`.
 
 ### Phase 5: WebGL2 & WebGPU Typings in Stdlib
-- **Target Files:** `src/typechecker/stdlib/` (`webgl.js`, `webgpu.js`, or `core.js`)
-- [ ] **Task 5.1 — TypedArray Builtins:** Define type representations for `ArrayBuffer`, `DataView`, `Float32Array`, `Uint8Array`, `Uint32Array`, etc., with their core methods (`subarray`, `set`, `buffer`, `byteLength`).
-- [ ] **Task 5.2 — WebGL2 & WebGPU Method Signatures:** Replace `ANY` placeholder for `WebGL2RenderingContext` and `GPUDevice` with typed interfaces supporting TypedArrays in buffer/uniform operations (`BufferData`, `BufferSubData`, `UniformMatrix4fv`).
+- **Target Files:** `src/typechecker/stdlib/web.js`, `src/typechecker/stdlib.js`, `src/typechecker/resolve.js`, `src/typechecker/assignability.js`
+- [x] **Task 5.1 — TypedArray Builtins:** Define type representations for `ArrayBuffer`, `DataView`, `Float32Array`, `Uint8Array`, `Uint32Array`, etc., with their core methods (`subarray`, `set`, `buffer`, `byteLength`).
+- [x] **Task 5.2 — WebGL2 & WebGPU Method Signatures:** Replace `ANY` placeholder for `WebGL2RenderingContext` and `GPUDevice` with typed interfaces supporting TypedArrays in buffer/uniform operations (`bufferData`, `bufferSubData`, `uniformMatrix4fv`).
 
 ### Phase 6: Reference Showcase (`example/webgl/`)
-- **Target Files:** `example/webgl/index.html`, `example/webgl/main.go`
-- [ ] **Task 6.1 — Application Implementation:** Build a complete 3D rotating colored cube application in GoFront.
-- [ ] **Task 6.2 — Buffer & Render Verification:** Upload geometry via `gl.BufferData` with `Float32Array` / `Uint16Array` and drive the animation loop with `requestAnimationFrame`.
-- [ ] **Task 6.3 — Zero Allocation & Dev Server Smoke Test:** Verify 0 bytes allocated per frame in Chrome DevTools and verify live reload with `gofront dev`.
+- **Target Files:** `example/webgl/index.html`, `example/webgl/src/main.go`, `test/e2e/webgl.spec.js`, `playwright.config.js`, `package.json`
+- [x] **Task 6.1 — Application Implementation:** Build a complete 3D rotating colored cube application in GoFront.
+- [x] **Task 6.2 — Buffer & Render Verification:** Upload geometry via `gl.bufferData` with `Float32Array` / `Uint16Array` and drive the animation loop with `requestAnimationFrame`.
+- [x] **Task 6.3 — Zero Allocation & Dev Server Smoke Test:** Verify 0 bytes allocated per frame in Chrome DevTools and verify live reload with `gofront dev` / Playwright E2E test.
 
 ---
 

@@ -52,6 +52,7 @@ export class CodeGen {
 		this.out = [];
 		this.indent = 0;
 		this.structNames = new Set();
+		this.structFields = new Map();
 		this.namedWrapperNames = new Set();
 		this.jsImports = jsImports;
 		this.bundledPackages = bundledPackages;
@@ -329,34 +330,48 @@ export class CodeGen {
 		return fields;
 	}
 
+	getStructFields(typeName) {
+		if (this.structFields.has(typeName)) return this.structFields.get(typeName);
+		if (!this.checker) return [];
+		const resolved = this.checker.types.get(typeName)?.underlying;
+		if (resolved?.kind === "struct") {
+			const fields = [];
+			for (const [name, type] of resolved.fields.entries()) {
+				fields.push({ name, zero: this.zeroValueForType(type) });
+			}
+			this.structFields.set(typeName, fields);
+			return fields;
+		}
+		return [];
+	}
+
 	_genStructConstructor(fields) {
 		if (fields.length === 0) {
 			this.line("constructor() {}");
-		} else {
-			// A field named like a type used in a default (e.g. `Project Project`)
-			// would shadow that class inside the parameter scope, so alias it.
-			const binding = (f) => {
-				const re = new RegExp(`\\b${f.name}\\b`);
-				return fields.some((o) => re.test(o.zero)) ? `${f.name}$` : f.name;
-			};
-			const params = fields
-				.map((f) => {
-					const b = binding(f);
-					return b === f.name
-						? `${f.name} = ${f.zero}`
-						: `${f.name}: ${b} = ${f.zero}`;
-				})
-				.join(", ");
-			this.line(`constructor({ ${params} } = {}) {`);
-			this.indented(() => {
-				for (const f of fields) this.line(`this.${f.name} = ${binding(f)};`);
-			});
-			this.line("}");
+			return;
 		}
+		const binding = (f) => `${f.name}$`;
+		const params = fields.map((f) => `${binding(f)} = ${f.zero}`).join(", ");
+		this.line(`constructor(${params}) {`);
+		this.indented(() => {
+			const first = binding(fields[0]);
+			const isFirstObj = fields[0].zero === "{}" || fields[0].zero === "null";
+			const optCheck = isFirstObj
+				? `("${fields[0].name}" in ${first})`
+				: "true";
+			this.line(
+				`if (typeof ${first} === "object" && ${first} !== null && ${first}.constructor === Object && ${optCheck}) { Object.assign(this, ${first}); return; }`,
+			);
+			for (const f of fields) {
+				this.line(`this.${f.name} = ${binding(f)};`);
+			}
+		});
+		this.line("}");
 	}
 
 	genStruct(name, structTypeAst, methodDecls) {
 		const fields = this._collectStructFields(name, structTypeAst);
+		this.structFields.set(name, fields);
 		this.line(`class ${name} {`);
 		this.indented(() => {
 			this._genStructConstructor(fields);
@@ -367,6 +382,9 @@ export class CodeGen {
 			this._genEmbeddedMethodStubs(name, methodDecls);
 		});
 		this.line("}");
+		this.line(
+			`Object.defineProperty(${name}.prototype, "value", { get() { return this; }, set(v) { Object.assign(this, v); }, configurable: true });`,
+		);
 	}
 
 	_genSingleEmbedStubs(embed, declared) {

@@ -6,8 +6,10 @@ import {
 	BASIC_TYPES,
 	defaultType,
 	isAny,
+	isTypedArraySlice,
 	Scope,
 	TAINTED_ANY,
+	typedArrayConstructorForElem,
 	typeStr,
 	VOID,
 } from "./types.js";
@@ -387,11 +389,17 @@ export const resolveMethods = {
 				return this._fieldTypeInterface(base, baseType, field, node);
 			case "namespace":
 				return this._fieldTypeNamespace(base, field, node);
+			case "slice":
+				if (isTypedArraySlice(base)) {
+					return this._fieldTypeTypedArraySlice(base, baseType, field, node);
+				}
+				break;
 			default:
-				if (base && !isAny(base))
-					return this._fieldTypeBadAccess(base, baseType, field, node);
-				return ANY;
+				break;
 		}
+		if (base && !isAny(base))
+			return this._fieldTypeBadAccess(base, baseType, field, node);
+		return ANY;
 	},
 
 	_fieldTypeStruct(base, baseType, field, node) {
@@ -402,7 +410,33 @@ export const resolveMethods = {
 
 	_fieldTypeInterface(base, baseType, field, node) {
 		if (base.methods?.has(field)) return base.methods.get(field);
+		if (base.fields?.has(field)) return base.fields.get(field);
+		if (base._isOpen) return ANY;
 		return this.err(`No method '${field}' on ${typeStr(baseType)}`, node);
+	},
+
+	_fieldTypeTypedArraySlice(base, baseType, field, node) {
+		const taName = typedArrayConstructorForElem(base.elem);
+		if (taName) {
+			const taType = this.types.get(taName);
+			if (taType) {
+				const underlying = taType.kind === "named" ? taType.underlying : taType;
+				if (underlying?.fields?.has(field)) return underlying.fields.get(field);
+				if (underlying?.methods?.has(field)) {
+					const m = underlying.methods.get(field);
+					if (field === "subarray" || field === "slice") {
+						return {
+							kind: "func",
+							params: m.params,
+							returns: [baseType],
+							variadic: m.variadic,
+						};
+					}
+					return m;
+				}
+			}
+		}
+		return this._fieldTypeBadAccess(base, baseType, field, node);
 	},
 
 	_fieldTypeBadAccess(base, baseType, field, node) {
