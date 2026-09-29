@@ -172,6 +172,7 @@ if (args[0] === "dev") {
 		};
 		process.on("SIGINT", shutdown);
 		process.on("SIGTERM", shutdown);
+		await new Promise(() => {});
 	} catch (e) {
 		console.error(`gofront: ${e.message}`);
 		process.exit(1);
