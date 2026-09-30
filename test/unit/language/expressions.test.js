@@ -7,6 +7,8 @@ import {
 	assertErrorContains,
 	assertThrows,
 	compile,
+	Lexer,
+	Parser,
 	runJs,
 	section,
 	test,
@@ -600,6 +602,39 @@ func main() {
 }`);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "7");
+});
+
+// ── Composite literals as call arguments ─────────────────────
+
+section("Composite literals as call arguments");
+
+test("[]pkg.Type{...} call argument parses as a composite literal", () => {
+	const src = `package main
+import "./other"
+func main() {
+  use([]other.Item{other.Item{N: 1}}, []*other.Item{})
+}`;
+	const tokens = new Lexer(src, "x.go").tokenize();
+	const ast = new Parser(tokens, "x.go", src).parse();
+	const call = ast.decls.find((d) => d.kind === "FuncDecl").body.stmts[0].expr;
+	assertEqual(call.kind, "CallExpr");
+	assertEqual(call.args.length, 2);
+	assertEqual(call.args[0].kind, "CompositeLit");
+	assertEqual(call.args[1].kind, "CompositeLit");
+});
+
+test("[]int{...} and make([]pkg.Type, n) call arguments still parse", () => {
+	const { js, errors } = compile(`package main
+func sum(xs []int) int {
+  t := 0
+  for _, x := range xs { t += x }
+  return t
+}
+func main() {
+  println(sum([]int{1, 2, 3}), len(make([]int, 4)))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "6 4");
 });
 
 // ── Entry point ───────────────────────────────────────────────
