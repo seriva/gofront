@@ -19,6 +19,21 @@ export const HELPER_APPEND = `var __append = __append || function(a, ...b) {
 
 export const HELPER_S = "var __s = __s || function(a) { return a || []; };";
 
+// In-place stable sort driven by Go's less(i, j) index comparator. The
+// comparator reads the live slice, so elements are moved as it runs
+// (binary insertion: O(n log n) compares, O(n^2) moves, fine for typed arrays).
+export const HELPER_SORT_SLICE = `var __sortSlice = __sortSlice || function(s, less) {
+  if (!s) return;
+  for (let i = 1; i < s.length; i++) {
+    let lo = 0, hi = i;
+    while (lo < hi) { const mid = (lo + hi) >>> 1; if (less(i, mid)) hi = mid; else lo = mid + 1; }
+    if (lo === i) continue;
+    const v = s[i];
+    for (let k = i; k > lo; k--) s[k] = s[k - 1];
+    s[lo] = v;
+  }
+};`;
+
 // Copy of a struct value whose class is not statically known.
 export const HELPER_SCLONE = `var __sclone = __sclone || function(x) {
   if (x === null || typeof x !== "object") return x;

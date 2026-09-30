@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+- **`*T` did not satisfy interfaces** — passing or assigning a pointer-to-struct variable (`s := &Shape{}`, `use(s)`) to an interface parameter reported `*Shape does not implement Sizer` even when `Shape` had every method. The satisfaction check now looks through the pointer to the struct's method set, as in Go (`*T` has both value- and pointer-receiver methods).
+- **Diamond local imports bundled the shared package multiple times** — when `main` imported `./a` and `./b`, and both imported `../base`, the `base` package was inlined once per import path, producing `Identifier 'X' has already been declared` at runtime. Local packages are now tracked by resolved directory across the recursive compile and emitted exactly once.
+- **Imported struct literals emitted plain objects** — `pkg.T{}`, `&pkg.T{X: 1}`, and `var v pkg.T` for a struct type from a bundled local package produced `{ X: 1 }` / `null` instead of `new T(…)`, so methods were missing and address-taken values crashed with `Cannot set properties of undefined`. Codegen now de-qualifies bundled package names when resolving struct classes and zero values.
+- **Type-only use of an import reported "imported and not used"** — a package referenced solely through `pkg.T` in type positions (parameters, `var`, composite literals) was flagged unused. Resolving a qualified type name now marks the package as used.
+- **`sort.Slice` / `sort.SliceStable` / `sort.SliceIsSorted` passed elements to `less`** — the comparator received `(a, b)` values instead of Go's `(i, j)` indices, so the idiomatic `func(i, j int) bool { return s[i] < s[j] }` read `undefined`. `Slice`/`SliceStable` now use an in-place, stable, index-driven sort (`__sortSlice` helper) and `SliceIsSorted` checks adjacent indices.
+- **`math.Round` rounded halves toward +Infinity** — `math.Round(-3.5)` returned `-3` because it mapped straight to `Math.round`. It now rounds half away from zero (`-4`), matching Go.
+
 ## [1.3.7] - 2026-09-30
 
 ### Fixed

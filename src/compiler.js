@@ -85,6 +85,7 @@ export function resolveImports(
 	jsImports,
 	bundledPackages,
 	preambles,
+	bundledDirs = new Set(),
 ) {
 	const fromDir = dirname(resolve(fromFile));
 	const allImports = programs.flatMap((p) => p.imports);
@@ -130,8 +131,13 @@ export function resolveImports(
 					);
 					continue;
 				}
-				const dep = compileDir(depDir);
-				preambles.push(dep.js);
+				// Diamond imports: a package reached through several paths is
+				// compiled for its symbols each time but emitted only once.
+				const depKey = resolve(depDir);
+				const alreadyBundled = bundledDirs.has(depKey);
+				bundledDirs.add(depKey);
+				const dep = compileDir(depDir, { bundledDirs });
+				if (!alreadyBundled) preambles.push(dep.js);
 				if (alias === "_") continue;
 				if (alias === ".") {
 					checker.addDefinitions(dep.exportedTypes, dep.exportedSymbols);
@@ -260,6 +266,7 @@ export function compileFiles(files, options = {}) {
 		jsImports,
 		bundledPackages,
 		preambles,
+		options.bundledDirs ?? new Set(),
 	);
 
 	// ── 3. Type-check ─────────────────────────────────────────────

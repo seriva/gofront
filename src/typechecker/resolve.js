@@ -88,7 +88,12 @@ export const resolveMethods = {
 					if (fromScope?.kind === "typeParam") return fromScope;
 				}
 				const named = this.types.get(node.name);
-				if (named) return named;
+				if (named) {
+					// `pkg.T` in a type position counts as using the import.
+					const dot = node.name.indexOf(".");
+					if (dot > 0) this.globals.lookup(node.name.slice(0, dot));
+					return named;
+				}
 				return this.err(`Unknown type '${node.name}'`, node);
 			}
 			case "GenericTypeName": {
