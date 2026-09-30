@@ -13,6 +13,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Type-only use of an import reported "imported and not used"** — a package referenced solely through `pkg.T` in type positions (parameters, `var`, composite literals) was flagged unused. Resolving a qualified type name now marks the package as used.
 - **`sort.Slice` / `sort.SliceStable` / `sort.SliceIsSorted` passed elements to `less`** — the comparator received `(a, b)` values instead of Go's `(i, j)` indices, so the idiomatic `func(i, j int) bool { return s[i] < s[j] }` read `undefined`. `Slice`/`SliceStable` now use an in-place, stable, index-driven sort (`__sortSlice` helper) and `SliceIsSorted` checks adjacent indices.
 - **`math.Round` rounded halves toward +Infinity** — `math.Round(-3.5)` returned `-3` because it mapped straight to `Math.round`. It now rounds half away from zero (`-4`), matching Go.
+- **`xs[d.Field]` with an uppercase selector was parsed as a generic instantiation** — indexing a slice, array, map or string with a qualified name such as `pose.Positions[j.Index]` or `list[cfg.Count]` hit the parser's type-argument heuristic and type-checked as `Generic[TypeArg]`, reporting a bogus error or silently returning the base type. The typechecker now recognises an indexable base with a single plain/qualified "type arg" and rewrites the node into an `IndexExpr`.
+- **`[]pkg.Type{…}` as a call argument failed to parse** — the composite-literal lookahead in call arguments stopped at the `.` in a qualified element type, so `f([]other.Item{…})` or `New([]*anim.Pose{p})` reported `expected ')' (got {`. The lookahead now skips `.` tokens.
 
 ## [1.3.7] - 2026-09-30
 

@@ -352,6 +352,7 @@ export const expressionParserMethods = {
 			if (
 				tt === T.MAP ||
 				tt === T.IDENT ||
+				tt === T.DOT || // qualified types: []pkg.Type{...}
 				tt === T.STAR ||
 				tt === T.INT ||
 				tt === T.FLOAT ||
