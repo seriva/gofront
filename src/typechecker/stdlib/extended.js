@@ -5,6 +5,7 @@ import {
 	ANY,
 	BOOL,
 	ERROR,
+	FLOAT32,
 	FLOAT64,
 	INT,
 	STRING,
@@ -256,7 +257,7 @@ export function setupExtendedGlobals(globals, types) {
 		members: {
 			Intn: { kind: "func", params: [INT], returns: [INT] },
 			Float64: { kind: "func", params: [], returns: [FLOAT64] },
-			Float32: { kind: "func", params: [], returns: [FLOAT64] },
+			Float32: { kind: "func", params: [], returns: [FLOAT32] },
 			Int: { kind: "func", params: [], returns: [INT] },
 			Int63: { kind: "func", params: [], returns: [INT] },
 			Int63n: { kind: "func", params: [INT], returns: [INT] },
