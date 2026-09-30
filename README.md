@@ -79,7 +79,7 @@ identifier, literal, `)`, `]`, `}`, or certain keywords (`return`, `break`, `con
 `fallthrough`). This is why Go doesn't need explicit semicolons — and neither does
 GoFront.
 
-### 2. Parser (`src/parser.js`)
+### 2. Parser (`src/parser/`)
 
 A hand-written recursive-descent parser. No parser generators, no grammar files — just
 straightforward top-down parsing. Produces an AST where every node is a plain JS object
@@ -88,7 +88,7 @@ with a `kind` field (`"FuncDecl"`, `"IfStmt"`, `"BinaryExpr"`, etc.).
 Operator precedence is handled via a Pratt-style expression parser with numeric
 precedence levels.
 
-### 3. Type Checker (`src/typechecker.js`)
+### 3. Type Checker (`src/typechecker/`)
 
 Three-pass type checker operating on the AST:
 
@@ -103,7 +103,7 @@ Types are plain JS objects (`{ kind: "basic", name: "int" }`, `{ kind: "slice",
 elem: ... }`, etc.). The special `any` type acts as a recovery/escape hatch — any
 operation on it is silently permitted, preventing cascading errors.
 
-### 4. Code Generator (`src/codegen.js`)
+### 4. Code Generator (`src/codegen/`)
 
 Walks the typed AST and emits clean, readable JavaScript. No intermediate representation
 — the codegen writes directly to an output buffer with indentation tracking.
@@ -123,10 +123,11 @@ readable and debuggable — no name mangling, no opaque wrappers.
 
 | Go | JavaScript | Notes |
 |---|---|---|
-| `struct` | ES6 `class` | Single destructured-object constructor: `new Point({ X: 1, Y: 2 })` |
-| Methods | Class instance methods | Receiver is `this` |
+| `struct` | ES6 `class` | Positional constructor with zero-value defaults: `new Point(1, 2)`; a generated `__clone()` gives struct values Go copy semantics on assignment, call, return, `append`, and `range` |
+| Methods | Class instance methods | Receiver is `this` (typed `*T` for pointer receivers) |
 | Embedded structs | Flattened fields + delegation stubs | `Greet(...a) { return Base.prototype.Greet.call(this, ...a); }` |
-| `[]T` (slice) | `Array` | `append` → spread, `len` → `.length` |
+| `[]T` (slice) | `Array` | `append` → `__append`, `len` → `__len` |
+| `[]float32`, `[]int8`…`[]int32`, `[]uint8`/`[]byte`…`[]uint32`, `[]rune` | TypedArray (`Float32Array`, `Int32Array`, `Uint8Array`, …) | `[]float64` and `[]int` stay plain `Array`; slicing → `.subarray` |
 | `map[K]V` | Plain object `{}` | Key access via `[]`, iteration via `Object.entries()` |
 | `nil` | `null` | |
 | `error` | `__error` object | `error("msg")` → `__error("msg")`, `.Error()` → real method call. `toString()` for string context compat |

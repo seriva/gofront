@@ -2,6 +2,7 @@
 
 import { fileURLToPath } from "node:url";
 import {
+	assert,
 	assertEqual,
 	assertErrorContains,
 	compile,
@@ -36,6 +37,24 @@ func main() {
   console.log(c.Get())
 }`);
 	assertEqual(runJs(js), "3");
+});
+
+test("pointer receiver is typed *T: appending it to []*T does not clone", () => {
+	const { js, errors } = compile(`package main
+type Node struct { N int }
+func (n *Node) Push(q []*Node) []*Node {
+  q = append(q, n)
+  return q
+}
+func main() {
+  n := &Node{N: 1}
+  q := n.Push(nil)
+  n.N = 2
+  console.log(q[0].N, q[0] == n)
+}`);
+	assertEqual(errors.length, 0);
+	assert(!js.includes("n.__clone()"), "pointer receiver must not be cloned");
+	assertEqual(runJs(js), "2 true");
 });
 
 test("field named after its own struct type does not shadow the class", () => {

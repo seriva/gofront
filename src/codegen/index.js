@@ -319,6 +319,15 @@ export class CodeGen {
 			if (d.kind === "TypeDecl" && d.type.kind === "StructType")
 				this.structNames.add(d.name);
 		}
+		// Structs from bundled GoFront packages are inlined under their bare name.
+		// Skip aliases (key differs from the type's own name) — no class is emitted for them.
+		if (this.checker) {
+			for (const [name, t] of this.checker.types) {
+				if (name.includes(".") || t?.name !== name) continue;
+				if (t.kind === "named" && t.underlying?.kind === "struct")
+					this.structNames.add(name);
+			}
+		}
 	}
 
 	_collectMethodMap(program) {

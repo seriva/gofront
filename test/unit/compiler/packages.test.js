@@ -1,6 +1,6 @@
 // GoFront test suite — multi-file packages, examples, npm resolver
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -411,6 +411,36 @@ test("compileFiles with sourceMap appends sourceMappingURL comment", () => {
 	try {
 		const { js } = compileFiles([file], { sourceMap: true, outputDir: dir });
 		assertContains(js, "sourceMappingURL=data:application/json;base64,");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("omitted field of imported struct type is zero-initialised, not null", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-import-zero-"));
+	try {
+		mkdirSync(join(dir, "geo"));
+		writeFileSync(
+			join(dir, "geo", "v.go"),
+			`package geo
+type V struct{ X float32 }
+func NewV() *V { return &V{} }
+`,
+		);
+		writeFileSync(
+			join(dir, "main.go"),
+			`package main
+import "./geo"
+type C struct{ P geo.V; N int }
+func main() {
+  c := &C{N: 1}
+  console.log(c.P.X, geo.NewV().X)
+}
+`,
+		);
+		const { js, errors } = compileDir(dir);
+		assertEqual(errors?.length ?? 0, 0);
+		assertEqual(runJs(js), "0 0");
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
