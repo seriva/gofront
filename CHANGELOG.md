@@ -15,6 +15,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`math.Round` rounded halves toward +Infinity** — `math.Round(-3.5)` returned `-3` because it mapped straight to `Math.round`. It now rounds half away from zero (`-4`), matching Go.
 - **`xs[d.Field]` with an uppercase selector was parsed as a generic instantiation** — indexing a slice, array, map or string with a qualified name such as `pose.Positions[j.Index]` or `list[cfg.Count]` hit the parser's type-argument heuristic and type-checked as `Generic[TypeArg]`, reporting a bogus error or silently returning the base type. The typechecker now recognises an indexable base with a single plain/qualified "type arg" and rewrites the node into an `IndexExpr`.
 - **`[]pkg.Type{…}` as a call argument failed to parse** — the composite-literal lookahead in call arguments stopped at the `.` in a qualified element type, so `f([]other.Item{…})` or `New([]*anim.Pose{p})` reported `expected ')' (got {`. The lookahead now skips `.` tokens.
+- **`rand.Float32()` was typed as `float64`** — assigning its result to a `float32` variable or field reported a type mismatch. It now returns `float32` as in Go.
+- **Repeated blank multi-assignment redeclared `__t`** — two or more statements such as `_, n = f()` (or comma-ok type assertions `v, ok = x.(T)`) in the same scope each emitted `let __t = …`, producing `Identifier '__t' has already been declared` at runtime. Codegen now emits a unique `const __tN` per statement.
 
 ## [1.3.7] - 2026-09-30
 
