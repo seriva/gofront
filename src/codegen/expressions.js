@@ -1028,14 +1028,26 @@ export const expressionGenMethods = {
 
 	getTypeName(typeNode) {
 		if (!typeNode) return null;
-		if (typeNode.kind === "TypeName") return typeNode.name;
+		if (typeNode.kind === "TypeName") return this._dequalify(typeNode.name);
 		if (typeNode.kind === "GenericTypeName") return typeNode.name;
 		if (typeNode.kind === "Ident") return typeNode.name;
 		if (typeNode.kind === "InstantiationExpr")
 			return this.getTypeName(typeNode.expr);
-		if (typeNode.kind === "SelectorExpr")
-			return `${this.getTypeName(typeNode.expr)}.${typeNode.field}`;
+		if (typeNode.kind === "SelectorExpr") {
+			const base = this.getTypeName(typeNode.expr);
+			if (this.bundledPackages.has(base)) return typeNode.field;
+			return `${base}.${typeNode.field}`;
+		}
 		return null;
+	},
+
+	// Bundled GoFront packages are inlined, so `pkg.T` names the class `T`.
+	_dequalify(name) {
+		const dot = name.indexOf(".");
+		if (dot < 0) return name;
+		return this.bundledPackages.has(name.slice(0, dot))
+			? name.slice(dot + 1)
+			: name;
 	},
 
 	isIntType(t) {
@@ -1063,6 +1075,7 @@ export const expressionGenMethods = {
 	_zeroForNamedType(name) {
 		if (name === "strings.Builder") return '{ _buf: "" }';
 		if (name === "bytes.Buffer") return "{ _buf: [] }";
+		name = this._dequalify(name);
 		if (this.structNames.has(name)) return `new ${name}()`;
 		return "null";
 	},

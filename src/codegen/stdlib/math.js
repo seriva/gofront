@@ -6,7 +6,6 @@ const MATH1 = {
 	Abs: "abs",
 	Floor: "floor",
 	Ceil: "ceil",
-	Round: "round",
 	Sqrt: "sqrt",
 	Cbrt: "cbrt",
 	Log: "log",
@@ -29,6 +28,8 @@ const MATH2 = {
 	Hypot: "hypot",
 };
 const MATH_EXTRA = {
+	// Go rounds half away from zero; Math.round rounds half toward +Infinity.
+	Round: ([x]) => `(Math.sign(${x}) * Math.round(Math.abs(${x})))`,
 	Mod: ([x, y]) => `${x} % ${y}`,
 	Inf: ([x]) => `(${x} >= 0 ? Infinity : -Infinity)`,
 	IsNaN: ([x]) => `Number.isNaN(${x})`,

@@ -31,6 +31,7 @@ import {
 	HELPER_PATH_CLEAN,
 	HELPER_S,
 	HELPER_SCLONE,
+	HELPER_SORT_SLICE,
 	HELPER_SPRINTF,
 	HELPER_TESTING,
 	HELPER_TIME_FMT,
@@ -113,6 +114,7 @@ export class CodeGen {
 		this._usesError = false;
 		this._usesErrorIs = false;
 		this._usesPathClean = false;
+		this._usesSortSlice = false;
 		this._usesTimeFmt = false;
 		this._usesTimeParse = false;
 		this._usesTesting = false;
@@ -377,6 +379,7 @@ export class CodeGen {
 			[this._usesError, HELPER_ERROR],
 			[this._usesErrorIs, HELPER_ERROR_IS],
 			[this._usesPathClean, HELPER_PATH_CLEAN],
+			[this._usesSortSlice, HELPER_SORT_SLICE],
 			[this._usesTimeFmt, HELPER_TIME_FMT],
 			[this._usesTimeParse, HELPER_TIME_PARSE],
 			[needsTesting, HELPER_TESTING],

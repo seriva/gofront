@@ -478,6 +478,48 @@ func main() {}`);
 
 section("Interface satisfaction — strict signature checks");
 
+test("pointer to struct with pointer-receiver methods satisfies interface via variable", () => {
+	const { errors, js } = compile(`package main
+type Sizer interface { Area() int }
+type Shape struct { V int }
+func (s *Shape) Area() int { return s.V }
+func use(z Sizer) int { return z.Area() }
+func newShape() *Shape { return &Shape{V: 3} }
+func main() {
+  s := newShape()
+  var z Sizer = s
+  console.log(use(s), z.Area())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "3 3");
+});
+
+test("pointer to struct with value-receiver methods satisfies interface", () => {
+	const { errors } = compile(`package main
+type Namer interface { Name() string }
+type Dog struct {}
+func (d Dog) Name() string { return "rex" }
+func greet(n Namer) {}
+func main() {
+  d := &Dog{}
+  greet(d)
+}`);
+	assertEqual(errors.length, 0);
+});
+
+test("pointer to struct missing a method does not satisfy interface", () => {
+	const { errors } = compile(`package main
+type Sizer interface { Area() int; Perimeter() int }
+type Shape struct { V int }
+func (s *Shape) Area() int { return s.V }
+func use(z Sizer) {}
+func main() {
+  s := &Shape{V: 3}
+  use(s)
+}`);
+	assertErrorContains(errors, "does not implement");
+});
+
 test("interface not satisfied when method has wrong parameter type", () => {
 	const { errors } = compile(`package main
 type Greeter interface { Greet(name string) }
