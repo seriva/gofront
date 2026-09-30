@@ -253,8 +253,9 @@ export const statementGenMethods = {
 	_genCommaOkTypeAssert(stmt) {
 		const val = this.genExpr(stmt.rhs[0]);
 		const [vName, okName] = stmt.lhs.map((e) => e.name ?? this.genExpr(e));
-		const tmp = "__ta";
-		this.line(`let ${tmp} = ${val};`);
+		this._tmpCounter = (this._tmpCounter ?? 0) + 1;
+		const tmp = `__ta${this._tmpCounter}`;
+		this.line(`const ${tmp} = ${val};`);
 		if (vName !== "_") this.line(`${vName} = ${tmp}[0];`);
 		if (okName !== "_") this.line(`${okName} = ${tmp}[1];`);
 	},
@@ -273,8 +274,9 @@ export const statementGenMethods = {
 	},
 
 	_genMultiAssignWithBlanks(stmt, lhs, rhs, rhsStr) {
-		const tmp = "__t";
-		this.line(`let ${tmp} = ${rhsStr};`);
+		this._tmpCounter = (this._tmpCounter ?? 0) + 1;
+		const tmp = `__t${this._tmpCounter}`;
+		this.line(`const ${tmp} = ${rhsStr};`);
 		for (let i = 0; i < lhs.length; i++) {
 			if (lhs[i] !== "_") {
 				const src = rhs.length === 1 ? `${tmp}[${i}]` : rhs[i];
