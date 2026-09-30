@@ -343,6 +343,8 @@ export const assignabilityMethods = {
 	},
 
 	implements(srcType, iface, _node) {
+		// *T has the full method set of T (value + pointer receivers).
+		if (srcType?.kind === "pointer") srcType = this.resolveType(srcType.base);
 		let base = srcType.kind === "named" ? srcType.underlying : srcType;
 		base = this.resolveType(base);
 		const methodMap =

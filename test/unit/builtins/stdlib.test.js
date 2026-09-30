@@ -323,11 +323,51 @@ test("sort.Slice with custom comparator", () => {
 	const { js, errors } = compile(`package main
 func main() {
 	nums := []int{3, 1, 4}
-	sort.Slice(nums, func(a int, b int) bool { return a > b })
+	sort.Slice(nums, func(i int, j int) bool { return nums[i] > nums[j] })
 	console.log(nums)
 }`);
 	assertEqual(errors.length, 0);
 	assertContains(runJs(js), "4,3,1");
+});
+
+test("sort.Slice less receives indices, not elements", () => {
+	const { js, errors } = compile(`package main
+type P struct { Name string; Score int }
+func main() {
+	ps := []P{{"a", 2}, {"b", 9}, {"c", 5}, {"d", 1}, {"e", 7}, {"f", 3}, {"g", 8}}
+	sort.Slice(ps, func(i, j int) bool { return ps[i].Score > ps[j].Score })
+	out := ""
+	for _, p := range ps { out += p.Name }
+	println(out)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js).trim(), "bgecfad");
+});
+
+test("sort.SliceStable keeps equal elements in input order", () => {
+	const { js, errors } = compile(`package main
+type P struct { Name string; Key int }
+func main() {
+	ps := []P{{"a", 1}, {"b", 0}, {"c", 1}, {"d", 0}, {"e", 1}}
+	sort.SliceStable(ps, func(i, j int) bool { return ps[i].Key < ps[j].Key })
+	out := ""
+	for _, p := range ps { out += p.Name }
+	println(out)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js).trim(), "bdace");
+});
+
+test("sort.SliceIsSorted uses index comparator", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	a := []int{1, 2, 2, 5}
+	b := []int{3, 1}
+	println(sort.SliceIsSorted(a, func(i, j int) bool { return a[i] < a[j] }))
+	println(sort.SliceIsSorted(b, func(i, j int) bool { return b[i] < b[j] }))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js).trim(), "true\nfalse");
 });
 
 // ═════════════════════════════════════════════════════════════
@@ -355,6 +395,18 @@ func main() {
 }`);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "3\n4\n4");
+});
+
+test("math.Round rounds half away from zero like Go", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(math.Round(-3.5))
+	console.log(math.Round(-2.5))
+	console.log(math.Round(2.5))
+	console.log(math.Round(-0.4))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "-4\n-3\n3\n0");
 });
 
 test("math.Abs", () => {

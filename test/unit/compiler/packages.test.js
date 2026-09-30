@@ -402,6 +402,96 @@ func main() {
 	}
 });
 
+test("diamond local imports bundle the shared package only once", () => {
+	// main → ./a, ./b; a → ../base; b → ../base
+	const dir = mkdtempSync(join(tmpdir(), "gofront-diamond-"));
+	try {
+		for (const sub of ["base", "a", "b"]) mkdirSync(join(dir, sub));
+		writeFileSync(
+			join(dir, "base", "base.go"),
+			`package base
+type Thing struct{ V int }
+func Make(v int) *Thing { return &Thing{V: v} }
+`,
+		);
+		writeFileSync(
+			join(dir, "a", "a.go"),
+			`package a
+import "../base"
+func Twice(v int) int { return base.Make(v).V * 2 }
+`,
+		);
+		writeFileSync(
+			join(dir, "b", "b.go"),
+			`package b
+import "../base"
+func Thrice(v int) int { return base.Make(v).V * 3 }
+`,
+		);
+		writeFileSync(
+			join(dir, "main.go"),
+			`package main
+import (
+  "./a"
+  "./b"
+  "./base"
+)
+func main() {
+  println(a.Twice(2) + b.Thrice(2) + base.Make(1).V)
+}
+`,
+		);
+		const { js } = compileDir(dir);
+		assertEqual((js.match(/^class Thing\b/gm) ?? []).length, 1);
+		assertEqual(runJs(js).trim(), "11");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("imported struct literals, zero values and &T{} construct the class", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-import-lit-"));
+	try {
+		mkdirSync(join(dir, "geo"));
+		writeFileSync(
+			join(dir, "geo", "geo.go"),
+			`package geo
+type Vec struct{ X, Y float32 }
+func (v *Vec) Sum() float32 { return v.X + v.Y }
+`,
+		);
+		writeFileSync(
+			join(dir, "main.go"),
+			`package main
+import "./geo"
+
+var scratch = &geo.Vec{}
+
+func fill(out *geo.Vec) { out.X = 1; out.Y = 2 }
+
+func main() {
+	fill(scratch)
+	println(scratch.Sum())
+	local := &geo.Vec{X: 4}
+	println(local.Sum())
+	var zero geo.Vec
+	fill(&zero)
+	println(zero.Sum())
+	val := geo.Vec{X: 7, Y: 1}
+	p := &val
+	println(p.Sum())
+}
+`,
+		);
+		const { js } = compileDir(dir);
+		assertContains(js, "let scratch = new Vec()");
+		assertContains(js, "let zero = new Vec()");
+		assertEqual(runJs(js).trim(), "3\n4\n3\n8");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
 section("compileFiles — sourceMap");
 
 test("compileFiles with sourceMap appends sourceMappingURL comment", () => {
