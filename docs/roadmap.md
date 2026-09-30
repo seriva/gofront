@@ -8,6 +8,17 @@ features (e.g. `docs/v0.0.5/`).
 
 ---
 
+## v1.3.7
+
+**Theme: Type-checker and codegen fixes surfaced by the SimpleFPS port.** No new language features.
+
+| Area | Difficulty | Status | Notes |
+|---|---|---|---|
+| Pointer receiver typing | Low | ✓ | Receiver of `func (n *Node) M()` is typed `*Node`, so storing it in `[]*Node` no longer clones and `return n` type-checks. |
+| Imported struct zero values | Low | ✓ | Omitted fields of a struct type from another bundled package are zero-initialised (`new V()`) instead of `null`. |
+
+---
+
 ## v1.3.6
 
 **Theme: Post-1.3.0 correctness.** No new language features. Fix the review findings against the 1.3.x releases: wrong JavaScript operator precedence, struct value aliasing, TypedArray mapping edge cases, Web API emission, and CLI safety.

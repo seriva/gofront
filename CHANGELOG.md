@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.3.7] - 2026-09-30
+
+### Fixed
+- **Pointer receivers were typed as `T` instead of `*T`** — inside `func (n *Node) M()`, the receiver `n` was given the struct value type, so `append(q, n)` with `q []*Node` emitted `n.__clone()` (breaking aliasing and allocating per call) and `[]*Node{n}` was a type error. The receiver is now typed `*Node`.
+- **Omitted fields of imported struct types were `null`** — a composite literal `C{N: 1}` where `C` has a field of a struct type from another bundled package (`P geo.V`) left `P` as `null` instead of `new V()`. Codegen now recognises struct types from bundled packages as classes when emitting zero values.
+
 ## [1.3.6] - 2026-09-29
 
 ### Changed

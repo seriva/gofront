@@ -505,7 +505,10 @@ export class TypeChecker {
 		const recvNamedType = this.types.get(recvTypeName);
 		this._injectGenericReceiverTypeParams(inner, recvNamedType);
 		const recvType = this.resolveTypeNodeName(decl.recvType, outer);
-		inner.define(decl.recvName, recvType);
+		inner.define(
+			decl.recvName,
+			decl.recvPointer ? { kind: "pointer", base: recvType } : recvType,
+		);
 		for (const p of decl.params) {
 			inner.define(p.name, this.resolveTypeNode(p.type, inner));
 		}
