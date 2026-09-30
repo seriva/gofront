@@ -430,7 +430,37 @@ export const expressionCheckMethods = {
 			}
 			return this.instantiateGenericFunc(baseType, typeArgs);
 		}
+		// The parser's type-arg heuristic mistakes `xs[d.Field]` (uppercase field
+		// selector as index) for a generic instantiation. When the base is an
+		// indexable value and the sole "type arg" is a plain/qualified name,
+		// rewrite the node in place into an IndexExpr and check that instead.
+		const indexExpr = this._instantiationAsIndex(expr, baseType);
+		if (indexExpr) return this._checkIndexExpr(indexExpr, scope);
 		return baseType;
+	},
+
+	_instantiationAsIndex(expr, baseType) {
+		if (!baseType || expr.typeArgs.length !== 1) return null;
+		const ta = expr.typeArgs[0];
+		if (ta.kind !== "TypeName") return null;
+		const btu =
+			baseType.kind === "named"
+				? (this.resolveType(baseType.underlying) ?? baseType.underlying)
+				: baseType;
+		const indexable =
+			btu?.kind === "slice" ||
+			btu?.kind === "array" ||
+			btu?.kind === "map" ||
+			isString(baseType);
+		if (!indexable) return null;
+		const parts = ta.name.split(".");
+		let index = { kind: "Ident", name: parts[0], _line: expr._line };
+		for (let i = 1; i < parts.length; i++)
+			index = { kind: "SelectorExpr", expr: index, field: parts[i] };
+		expr.kind = "IndexExpr";
+		expr.index = index;
+		delete expr.typeArgs;
+		return expr;
 	},
 
 	_constIntValue(expr) {

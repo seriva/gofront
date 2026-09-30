@@ -439,6 +439,21 @@ func main() {}`);
 	assertErrorContains(errors, "No method");
 });
 
+test("slice indexed by uppercase field selector as call arg is an index, not type args", () => {
+	const { js, errors } = compile(`package main
+type D struct{ Parent int }
+type Mat = []float32
+func first(m Mat) float32 { return m[0] }
+func main() {
+	gm := make([]Mat, 2)
+	gm[1] = Mat{7}
+	d := D{Parent: 1}
+	console.log(first(gm[d.Parent]), len(gm[d.Parent]))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "7 1");
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
