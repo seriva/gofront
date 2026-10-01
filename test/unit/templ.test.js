@@ -152,6 +152,34 @@ templ DisabledInput() {
 	);
 });
 
+test("svg subtree uses the SVG namespace and class attribute", () => {
+	const { js } = compilePkg({
+		"main.go": `package main
+func main() {
+	gom.Mount("#app", Icon("icon big"))
+}`,
+		"icon.templ": `package main
+templ Icon(cls string) {
+	<div>
+		<svg class={ cls } viewBox="0 0 24 24">
+			<path class="stroke" d="M0 0h24v24H0z"></path>
+		</svg>
+		<span class="after">x</span>
+	</div>
+}`,
+	});
+	const { document } = runInDom(js, '<div id="app"></div>');
+	const svg = document.querySelector("#app svg");
+	const path = document.querySelector("#app path");
+	const span = document.querySelector("#app span");
+	assertEqual(svg.namespaceURI, "http://www.w3.org/2000/svg");
+	assertEqual(path.namespaceURI, "http://www.w3.org/2000/svg");
+	assertEqual(svg.getAttribute("class"), "icon big");
+	assertEqual(path.getAttribute("class"), "stroke");
+	assertEqual(span.namespaceURI, "http://www.w3.org/1999/xhtml");
+	assertEqual(span.className, "after");
+});
+
 test("self-closing tag", () => {
 	const { js } = compilePkg({
 		"main.go": `package main

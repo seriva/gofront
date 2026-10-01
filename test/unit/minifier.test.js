@@ -94,6 +94,15 @@ test("preserves regex literals", () => {
 	assertContains(out, "/\\p{L}+/u");
 });
 
+test("treats / after ) and ] as division", () => {
+	const code =
+		"let a = (x * Math.PI) / 180.0 * f;\nlet b = arr[0] / 2;\nlet c = 1;";
+	const out = minify(code);
+	assertContains(out, "(x*Math.PI)/180.0*f");
+	assertContains(out, "arr[0]/2");
+	assertContains(out, "let c=1");
+});
+
 test("preserves IIFE parens", () => {
 	const code = "(function() { let x = 1; })();";
 	const out = minify(code);
