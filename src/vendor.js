@@ -12,6 +12,7 @@ import {
 import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { loadProjectConfig } from "./project-config.js";
 
 export function getExportNames(pkgName, globals = {}) {
 	const base = pkgName.replace(/^@[^/]+\//, "");
@@ -111,15 +112,7 @@ export function loadVendorConfig(projectDir) {
 		} catch {}
 	}
 
-	const gfjPath = join(projectDir, "gofront.json");
-	let gfj = {};
-	if (existsSync(gfjPath)) {
-		try {
-			gfj = JSON.parse(readFileSync(gfjPath, "utf8"));
-		} catch {}
-	}
-
-	const vendorConfig = gfj.vendor ?? pkg.vendor ?? null;
+	const vendorConfig = loadProjectConfig(projectDir).vendor ?? null;
 	const dependencies = Object.keys(pkg.dependencies ?? {});
 
 	let dest = null;
