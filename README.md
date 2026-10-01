@@ -387,6 +387,8 @@ gofront <file.go>                compile single file → stdout
 gofront <dir>                    compile all *.go in directory → stdout
 gofront <input> -o out.js        write output to file (prints elapsed compile time e.g. "15ms")
 gofront <input> --check                    type-check only
+gofront check <dir>/...                    type-check every package under <dir> (Go-style `./...`)
+gofront test <dir>/... [--dom]             run tests for every package under <dir>
 gofront <input> --watch                    watch for changes and recompile
 gofront <input> -o out.js --serve          watch + serve with live reload (default port 3000)
 gofront <input> -o out.js --serve --port 8080  use a custom port
