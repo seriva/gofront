@@ -92,21 +92,36 @@ export const templGenMethods = {
 	_genTemplElement(node, p) {
 		const { tag, attrs, children } = node;
 		const elVar = this._freshVar("e");
-		this.line(
-			`const ${elVar} = document.createElement(${JSON.stringify(tag)});`,
-		);
+		// <svg> and its descendants must be created in the SVG namespace.
+		const isSvg = tag === "svg" || this._templSvgDepth > 0;
+		if (isSvg) {
+			this.line(
+				`const ${elVar} = document.createElementNS("http://www.w3.org/2000/svg", ${JSON.stringify(tag)});`,
+			);
+		} else {
+			this.line(
+				`const ${elVar} = document.createElement(${JSON.stringify(tag)});`,
+			);
+		}
+		this._templSvgDepth = (this._templSvgDepth || 0) + (isSvg ? 1 : 0);
 		for (const attr of attrs) {
-			this._genTemplAttr(attr, elVar);
+			this._genTemplAttr(attr, elVar, isSvg);
 		}
 		this._genTemplNodes(children, elVar);
+		if (isSvg) this._templSvgDepth--;
 		this.line(`${p}.appendChild(${elVar});`);
 	},
 
-	_genTemplAttr(attr, el) {
+	_genTemplAttr(attr, el, isSvg) {
 		const { name } = attr;
+		// SVGElement.className is a read-only SVGAnimatedString.
+		const setClass = (js) =>
+			isSvg
+				? `${el}.setAttribute("class", ${js});`
+				: `${el}.className = ${js};`;
 		if (attr.kind === "static") {
 			if (name === "class") {
-				this.line(`${el}.className = ${JSON.stringify(attr.value)};`);
+				this.line(setClass(JSON.stringify(attr.value)));
 			} else {
 				this.line(
 					`${el}.setAttribute(${JSON.stringify(name)}, ${JSON.stringify(attr.value)});`,
@@ -115,7 +130,7 @@ export const templGenMethods = {
 		} else if (attr.kind === "expr") {
 			const exprJs = this._genTemplTokenExpr(attr.tokens);
 			if (name === "class") {
-				this.line(`${el}.className = ${exprJs};`);
+				this.line(setClass(exprJs));
 			} else {
 				this.line(
 					`${el}.setAttribute(${JSON.stringify(name)}, String(${exprJs}));`,
