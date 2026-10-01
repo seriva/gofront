@@ -137,6 +137,18 @@ export const resolveMethods = {
 					{ kind: "TypeName", name: node.name },
 					scope,
 				);
+			case "SelectorExpr":
+				// `pkg.T{}` composite literal — the parser keeps the type as a
+				// SelectorExpr; resolve it like a qualified TypeName.
+				if (node.expr?.kind === "Ident" && typeof node.field === "string") {
+					const qualified = `${node.expr.name}.${node.field}`;
+					if (this.types.has(qualified))
+						return this.resolveTypeNode(
+							{ kind: "TypeName", name: qualified },
+							scope,
+						);
+				}
+				return ANY;
 			case "ArrayType":
 				return this._resolveArrayTypeNode(node, scope);
 			case "FuncType":
