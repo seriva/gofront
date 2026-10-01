@@ -17,6 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`[]pkg.Type{…}` as a call argument failed to parse** — the composite-literal lookahead in call arguments stopped at the `.` in a qualified element type, so `f([]other.Item{…})` or `New([]*anim.Pose{p})` reported `expected ')' (got {`. The lookahead now skips `.` tokens.
 - **`rand.Float32()` was typed as `float64`** — assigning its result to a `float32` variable or field reported a type mismatch. It now returns `float32` as in Go.
 - **Repeated blank multi-assignment redeclared `__t`** — two or more statements such as `_, n = f()` (or comma-ok type assertions `v, ok = x.(T)`) in the same scope each emitted `let __t = …`, producing `Identifier '__t' has already been declared` at runtime. Codegen now emits a unique `const __tN` per statement.
+- **Type assertion on a call expression evaluated the call twice** — `f().(T)` and `v, ok := f().(T)` emitted the call once inside the runtime type check and again for the result (`typeof f() === "number" ? f() : …`), so side effects ran twice and the two values could differ (e.g. `performance.now().(float64)`). When the operand contains a call it is now evaluated once via an IIFE parameter.
 
 ## [1.3.7] - 2026-09-30
 

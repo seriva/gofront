@@ -495,6 +495,22 @@ func main() {
 	assertContains(out, "0 false");
 });
 
+test("type assertion on a call expression evaluates the call once", () => {
+	const { js, errors } = compile(`package main
+var calls int
+func next() any {
+	calls++
+	return calls
+}
+func main() {
+	v := next().(int)
+	w, ok := next().(int)
+	println(v, w, ok, calls)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js).trim(), "1 2 true 2");
+});
+
 // ── for range string yields rune integers ────────────────────
 
 section("for range string yields rune integers");
