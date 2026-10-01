@@ -462,12 +462,29 @@ function _collectVarLocalDecls(tokens, i, declaredLocals) {
 		collectDestructured(tokens, next.idx, declaredLocals);
 }
 
+function _matchingParen(tokens, openIdx) {
+	let depth = 1;
+	for (let i = openIdx + 1; i < tokens.length; i++) {
+		const v = tokens[i].value;
+		if (v === "(") depth++;
+		else if (v === ")" && --depth === 0) return i;
+	}
+	return -1;
+}
+
+// A `(` opens a parameter list only when its `)` is followed by a body `{` or `=>`;
+// otherwise `name(...)` is a call and its arguments may be free globals.
 function _collectParamDecls(tokens, i, declaredLocals) {
 	const prev = findPrevNonWsToken(tokens, i);
 	if (
-		prev &&
-		(prev.value === "function" || prev.type === "ident" || prev.value === ")")
+		!prev ||
+		(prev.value !== "function" && prev.type !== "ident" && prev.value !== ")")
 	)
+		return;
+	const close = _matchingParen(tokens, i);
+	if (close < 0) return;
+	const after = nextNonWs(tokens, close);
+	if (after && (after.tok.value === "{" || after.tok.value === "=>"))
 		collectParams(tokens, i, declaredLocals);
 }
 
@@ -519,6 +536,33 @@ const MANGLE_GLOBALS = new Set([
 	"Infinity",
 	"TextEncoder",
 	"TextDecoder",
+	"globalThis",
+	"Reflect",
+	"Proxy",
+	"WeakMap",
+	"WeakSet",
+	"ArrayBuffer",
+	"DataView",
+	"Int8Array",
+	"Uint8Array",
+	"Uint8ClampedArray",
+	"Int16Array",
+	"Uint16Array",
+	"Int32Array",
+	"Uint32Array",
+	"Float32Array",
+	"Float64Array",
+	"BigInt64Array",
+	"BigUint64Array",
+	"Image",
+	"URL",
+	"Event",
+	"fetch",
+	"navigator",
+	"performance",
+	"localStorage",
+	"requestAnimationFrame",
+	"cancelAnimationFrame",
 	"setTimeout",
 	"setInterval",
 	"clearTimeout",

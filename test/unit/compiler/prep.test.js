@@ -120,7 +120,7 @@ test("loadVendorConfig respects explicit vendor string in package.json", () => {
 		writeFileSync(
 			join(dir, "package.json"),
 			JSON.stringify({
-				vendor: "public/vendor.js",
+				gofront: { vendor: "public/vendor.js" },
 				dependencies: { marked: "^18.0.0" },
 			}),
 		);
@@ -138,9 +138,11 @@ test("loadVendorConfig parses minify flag and multi-dest array", () => {
 		writeFileSync(
 			join(dir, "package.json"),
 			JSON.stringify({
-				vendor: {
-					dest: ["app/vendor.js", "public/vendor.js"],
-					minify: true,
+				gofront: {
+					vendor: {
+						dest: ["app/vendor.js", "public/vendor.js"],
+						minify: true,
+					},
 				},
 				dependencies: { marked: "^18.0.0" },
 			}),
@@ -164,7 +166,7 @@ test("loadVendorConfig reads globals; gofront.json overrides package.json", () =
 		writeFileSync(
 			join(dir, "package.json"),
 			JSON.stringify({
-				vendor: { globals: { "fuse.js": ["Fuse"] } },
+				gofront: { vendor: { globals: { "fuse.js": ["Fuse"] } } },
 				dependencies: { "fuse.js": "^7.0.0", prismjs: "^1.0.0" },
 			}),
 		);
@@ -187,7 +189,7 @@ test("loadVendorConfig rejects invalid globals shapes", () => {
 	try {
 		writeFileSync(
 			join(dir, "package.json"),
-			JSON.stringify({ vendor: { globals: { prismjs: 42 } } }),
+			JSON.stringify({ gofront: { vendor: { globals: { prismjs: 42 } } } }),
 		);
 		let msg = "";
 		try {
@@ -208,7 +210,7 @@ test("handlePrep preserves vendor.minify from package.json when CLI flag omitted
 		writeFileSync(
 			join(dir, "package.json"),
 			JSON.stringify({
-				vendor: { minify: true },
+				gofront: { vendor: { minify: true } },
 				dependencies: { marked: "^18.0.0" },
 			}),
 		);
@@ -379,7 +381,9 @@ test("handlePrep orchestrates asset copy and vendor bundling", async () => {
 		writeFileSync(
 			join(dir, "package.json"),
 			JSON.stringify({
-				assetCopy: [{ source: "logo.png", dest: "assets/logo.png" }],
+				gofront: {
+					assetCopy: [{ source: "logo.png", dest: "assets/logo.png" }],
+				},
 				dependencies: { marked: "^18.0.0" },
 			}),
 		);
@@ -413,7 +417,9 @@ test("gofront prep executes via CLI and copies assets", () => {
 		writeFileSync(
 			join(dir, "package.json"),
 			JSON.stringify({
-				assetCopy: [{ source: "font.woff2", dest: "fonts/font.woff2" }],
+				gofront: {
+					assetCopy: [{ source: "font.woff2", dest: "fonts/font.woff2" }],
+				},
 			}),
 		);
 		writeFileSync(join(dir, "font.woff2"), "woff-content");
@@ -433,7 +439,9 @@ test("gofront --copy-assets flag copies static assets during build", () => {
 		writeFileSync(
 			join(dir, "package.json"),
 			JSON.stringify({
-				assetCopy: [{ source: "logo.svg", dest: "dist/logo.svg" }],
+				gofront: {
+					assetCopy: [{ source: "logo.svg", dest: "dist/logo.svg" }],
+				},
 			}),
 		);
 		writeFileSync(join(dir, "logo.svg"), "<svg></svg>");
@@ -468,7 +476,9 @@ test("gofront prep --minify executes via CLI and copies assets", () => {
 		writeFileSync(
 			join(dir, "package.json"),
 			JSON.stringify({
-				assetCopy: [{ source: "icon.svg", dest: "assets/icon.svg" }],
+				gofront: {
+					assetCopy: [{ source: "icon.svg", dest: "assets/icon.svg" }],
+				},
 			}),
 		);
 		writeFileSync(join(dir, "icon.svg"), "<svg></svg>");

@@ -238,6 +238,24 @@ test("mangling does not collide with existing unrenamed identifiers", () => {
 	assertContains(out, "function t(k)");
 });
 
+test("mangling does not treat call arguments as parameter declarations", () => {
+	const code =
+		"function f(){let img=Reflect.construct(Image,[]);let v=make(SomeGlobal,[img]);return v}";
+	const out = minify(code, { mangle: true });
+	assertContains(out, "Reflect.construct(Image,[");
+	assertContains(out, "make(SomeGlobal,[");
+	assert(!out.includes("let img="), "should still mangle locals");
+});
+
+test("mangling still renames method and arrow parameters", () => {
+	const code =
+		"class A{Run(firstArg,secondArg){return firstArg+secondArg}}const g=(alpha)=>{return alpha};";
+	const out = minify(code, { mangle: true });
+	assert(!out.includes("firstArg"), "method params should be mangled");
+	assert(!out.includes("secondArg"), "method params should be mangled");
+	assertContains(out, "class A{Run(");
+});
+
 // ── Stage 4: Literal folding ─────────────────────────────────
 
 section("Minifier — Stage 4: Literal folding");

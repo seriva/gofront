@@ -26,6 +26,7 @@ import { copyAssets } from "./asset-manager.js";
 import { compileDir, compileSingleFile } from "./compiler.js";
 import { createDevServer } from "./dev-server.js";
 import { minify } from "./minifier.js";
+import { loadProjectConfig } from "./project-config.js";
 import { generatePwa } from "./pwa.js";
 import { runTests } from "./test-runner.js";
 import { bundleVendor } from "./vendor.js";
@@ -314,25 +315,6 @@ export function findPackageDirs(root) {
 
 // ── Project detection ─────────────────────────────────────────
 
-function loadProjectConfig(projectRoot) {
-	const gofrontJson = join(projectRoot, "gofront.json");
-	if (existsSync(gofrontJson)) {
-		try {
-			return JSON.parse(readFileSync(gofrontJson, "utf8"));
-		} catch {}
-	}
-	const pkgJson = join(projectRoot, "package.json");
-	if (existsSync(pkgJson)) {
-		try {
-			const pkg = JSON.parse(readFileSync(pkgJson, "utf8"));
-			if (pkg.gofront && typeof pkg.gofront === "object") {
-				return pkg.gofront;
-			}
-		} catch {}
-	}
-	return {};
-}
-
 function resolveSrcDir(projectRoot, config) {
 	const src = config.src || config.input;
 	if (src) return isAbsolute(src) ? src : resolve(projectRoot, src);
@@ -562,10 +544,23 @@ const STATIC_ASSET_EXTS = new Set([
 
 const ROOT_CONFIG_EXTS = new Set([".js", ".mjs", ".json"]);
 
+// Builds the asset extension whitelist: defaults plus any `assetExtensions` from project config.
+export function resolveAssetExtensions(config = {}) {
+	const exts = new Set(STATIC_ASSET_EXTS);
+	const extra = config.assetExtensions;
+	if (!Array.isArray(extra)) return exts;
+	for (const raw of extra) {
+		if (typeof raw !== "string" || raw.trim() === "") continue;
+		const ext = raw.trim().toLowerCase();
+		exts.add(ext.startsWith(".") ? ext : `.${ext}`);
+	}
+	return exts;
+}
+
 // Whether a file in the served directory is a web asset worth copying to the build output.
-function isStaticAsset(name, atProjectRoot) {
+function isStaticAsset(name, atProjectRoot, exts = STATIC_ASSET_EXTS) {
 	const ext = extname(name).toLowerCase();
-	if (!STATIC_ASSET_EXTS.has(ext)) return false;
+	if (!exts.has(ext)) return false;
 	// At the project root, .js/.json files are tooling config, not web assets.
 	if (atProjectRoot && ROOT_CONFIG_EXTS.has(ext))
 		return name === "manifest.json";
@@ -578,6 +573,7 @@ function copyServeDirAssets(project, outDir, srcDir) {
 	const out = resolve(outDir);
 	if (!existsSync(serveDir) || serveDir === out) return 0;
 	const isRoot = serveDir === resolve(project.projectRoot);
+	const exts = resolveAssetExtensions(project.config);
 	const skipDirs = [out, resolve(srcDir)];
 	const devOutput = resolve(project.devOutputFile);
 	const skipFiles = new Set([devOutput, `${devOutput}.map`]);
@@ -600,7 +596,7 @@ function copyServeDirAssets(project, outDir, srcDir) {
 			} else if (
 				entry.isFile() &&
 				!skipFiles.has(full) &&
-				isStaticAsset(entry.name, isRoot)
+				isStaticAsset(entry.name, isRoot, exts)
 			) {
 				copyFile(full);
 			}

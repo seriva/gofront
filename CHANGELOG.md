@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **`assetExtensions` project option** — `gofront build` only mirrored files from `serveDir` whose extension was on a built-in web-asset whitelist, so projects shipping custom binary formats (`.bmesh`, `.mat`, `.arena`, …) silently lost them from the release output and the PWA precache. `gofront.json` / `package.json` `"gofront"` now accept `"assetExtensions": [".bmesh", "mat"]` (dot optional, case-insensitive) to extend the whitelist.
+
+### Changed
+- **Single project-config location** — `vendor` and `assetCopy` are now read exclusively from the gofront project config (`gofront.json` or the `"gofront"` object in `package.json`), alongside `src`, `serveDir`, `outDir`, `output`, `port` and `assetExtensions`. Top-level `"vendor"` / `"assetCopy"` keys in `package.json` are no longer consulted; move them under `"gofront": { … }`.
+
+### Fixed
+- **Minifier `--mangle` renamed free globals used as call arguments** — the parameter-declaration scan treated any `(…)` following an identifier as a parameter list, so `foo(bar, baz)` registered `bar` and `baz` as "parameters" of the enclosing function and renamed only some of their occurrences, producing `ReferenceError: j47 is not defined` in release builds. Only parenthesised lists directly followed by `{` or `=>` (functions, methods, arrows) are treated as parameter declarations now.
+
 ## [1.3.9] - 2026-10-01
 
 ### Fixed

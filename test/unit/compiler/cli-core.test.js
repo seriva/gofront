@@ -3,6 +3,7 @@
 import {
 	chmodSync,
 	existsSync,
+	mkdirSync,
 	mkdtempSync,
 	readFileSync,
 	rmSync,
@@ -13,10 +14,12 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	formatPrepSummary,
+	handleBuild,
 	handleInit,
 	maybeMinify,
 	parsePrepArgs,
 	parseTestArgs,
+	resolveAssetExtensions,
 	runCompile,
 } from "../../../src/cli-core.js";
 import {
@@ -276,6 +279,57 @@ test("parseTestArgs: -run value is not mistaken for the target dir", () => {
 
 test("parseTestArgs: trailing -run without value yields null", () => {
 	assertEqual(parseTestArgs(["-run"]).run, null);
+});
+
+section("cli-core — assetExtensions");
+
+test("resolveAssetExtensions returns defaults when config has none", () => {
+	const exts = resolveAssetExtensions({});
+	assert(exts.has(".css"), "expected default .css");
+	assert(exts.has(".webp"), "expected default .webp");
+	assert(!exts.has(".bmesh"), "did not expect .bmesh by default");
+});
+
+test("resolveAssetExtensions merges, normalizes and ignores junk entries", () => {
+	const exts = resolveAssetExtensions({
+		assetExtensions: [".bmesh", "MAT", " .arena ", "", 42, null],
+	});
+	assert(exts.has(".css"), "defaults must be preserved");
+	assert(exts.has(".bmesh"), "expected .bmesh");
+	assert(exts.has(".mat"), "expected dot-prefixed lowercased .mat");
+	assert(exts.has(".arena"), "expected trimmed .arena");
+	assertEqual(exts.has(""), false);
+});
+
+test("handleBuild copies custom assetExtensions from the serve dir", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-assetext-"));
+	const outDir = join(dir, "public");
+	try {
+		writeFileSync(
+			join(dir, "package.json"),
+			JSON.stringify({ gofront: { assetExtensions: [".bmesh", "mat"] } }),
+		);
+		mkdirSync(join(dir, "app", "src"), { recursive: true });
+		mkdirSync(join(dir, "app", "resources"), { recursive: true });
+		writeFileSync(join(dir, "app", "index.html"), "<html></html>");
+		writeFileSync(
+			join(dir, "app", "src", "main.go"),
+			`package main\nfunc main() { console.log("ok") }\n`,
+		);
+		writeFileSync(join(dir, "app", "resources", "level.bmesh"), "bin");
+		writeFileSync(join(dir, "app", "resources", "level.mat"), "mat");
+		writeFileSync(join(dir, "app", "resources", "tex.webp"), "img");
+		writeFileSync(join(dir, "app", "resources", "notes.unknown"), "x");
+
+		await handleBuild(dir, { outDir });
+
+		assert(existsSync(join(outDir, "resources", "level.bmesh")));
+		assert(existsSync(join(outDir, "resources", "level.mat")));
+		assert(existsSync(join(outDir, "resources", "tex.webp")));
+		assertEqual(existsSync(join(outDir, "resources", "notes.unknown")), false);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
 });
 
 section("cli-core — parsePrepArgs & formatPrepSummary");
