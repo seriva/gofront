@@ -1,14 +1,7 @@
 // Native static asset manager for GoFront projects.
 // Zero-dependency file and directory copier using node:fs.
 
-import {
-	copyFileSync,
-	cpSync,
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	statSync,
-} from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, statSync } from "node:fs";
 import {
 	basename,
 	dirname,
@@ -18,25 +11,11 @@ import {
 	resolve,
 	sep,
 } from "node:path";
+import { loadProjectConfig } from "./project-config.js";
 
 export function loadAssetConfig(projectDir) {
-	const gofrontJsonPath = join(projectDir, "gofront.json");
-	if (existsSync(gofrontJsonPath)) {
-		try {
-			const parsed = JSON.parse(readFileSync(gofrontJsonPath, "utf8"));
-			if (Array.isArray(parsed.assetCopy)) return parsed.assetCopy;
-		} catch {}
-	}
-
-	const pkgJsonPath = join(projectDir, "package.json");
-	if (existsSync(pkgJsonPath)) {
-		try {
-			const parsed = JSON.parse(readFileSync(pkgJsonPath, "utf8"));
-			if (Array.isArray(parsed.assetCopy)) return parsed.assetCopy;
-		} catch {}
-	}
-
-	return [];
+	const entries = loadProjectConfig(projectDir).assetCopy;
+	return Array.isArray(entries) ? entries : [];
 }
 
 function copyFileAsset(srcPath, destPath, dest) {

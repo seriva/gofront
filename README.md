@@ -401,7 +401,23 @@ gofront init [dir]                         scaffold a new project
 gofront --version / -v                     print version
 gofront --help / -h                        print this help
 ```
+### Project configuration
 
+`gofront dev`, `build`, `prep`, `check` and `test` read optional settings from a `gofront.json`
+file or a `"gofront": { … }` object in `package.json`:
+
+| Key | Default | Description |
+|---|---|---|
+| `src` | `app/src`, `src` or `main.go` | Package directory (or single file) to compile |
+| `serveDir` | `app`, `.` or `public` (first with `index.html`) | Directory served by `dev` and mirrored into the build |
+| `outDir` | `public` | Release output directory for `build` |
+| `output` | `app/app.js` | Dev-mode compiled bundle path |
+| `port` | `3000` | Dev server port |
+| `assetExtensions` | `[]` | Extra file extensions (e.g. `[".bmesh", ".mat"]`) copied from `serveDir` into `outDir` on `build`, in addition to the built-in web asset list (html, css, js, json, images, fonts, audio, video, wasm) |
+| `vendor` | `app/vendor.js` | Vendor bundle written by `prep`/`build` from `package.json` `dependencies`. Either a destination path string or `{ "dest": string \| string[], "packages": string[], "minify": boolean, "globals": { "<pkg>": string \| string[] } }` |
+| `assetCopy` | `[]` | Static files copied by `prep`/`build`: `[{ "source": "node_modules/x/font.woff2", "dest": "app/fonts/font.woff2" }]` |
+
+All settings live in this one place — top-level `"vendor"` / `"assetCopy"` keys in `package.json` are not read.
 ---
 
 ## Multi-file packages

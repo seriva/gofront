@@ -124,13 +124,15 @@ test("throws error when destination attempts directory traversal", () => {
 
 section("asset-manager — configuration loading");
 
-test("reads assetCopy configuration from package.json", () => {
+test('reads assetCopy configuration from package.json "gofront" key', () => {
 	const dir = mkdtempSync(join(tmpdir(), "gofront-asset-pkg-"));
 	try {
 		writeFileSync(
 			join(dir, "package.json"),
 			JSON.stringify({
-				assetCopy: [{ source: "icon.svg", dest: "public/icon.svg" }],
+				gofront: {
+					assetCopy: [{ source: "icon.svg", dest: "public/icon.svg" }],
+				},
 			}),
 		);
 		writeFileSync(join(dir, "icon.svg"), "<svg></svg>");
@@ -177,6 +179,23 @@ test("returns empty result when no assetCopy config is present", () => {
 		assertEqual(result.copied, 0);
 		assertEqual(result.skipped, 0);
 		assertEqual(result.items.length, 0);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test('ignores top-level assetCopy outside the package.json "gofront" key', () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-asset-toplevel-"));
+	try {
+		writeFileSync(
+			join(dir, "package.json"),
+			JSON.stringify({
+				assetCopy: [{ source: "icon.svg", dest: "public/icon.svg" }],
+			}),
+		);
+		writeFileSync(join(dir, "icon.svg"), "<svg/>");
+		assertEqual(loadAssetConfig(dir).length, 0);
+		assertEqual(copyAssets(dir).copied, 0);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
