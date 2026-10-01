@@ -117,10 +117,14 @@ const REGEX_CONTEXT_VALUES = new Set([
 	"||",
 ]);
 
+// Ops after which `/` is division, not a regex start
+const DIVISION_AFTER_OPS = new Set([")", "]", "++", "--"]);
+
 function _isRegexContext(tokens) {
 	const prev = lastNonWhitespaceToken(tokens);
 	if (!prev) return true;
-	return prev.type === "op" || REGEX_CONTEXT_VALUES.has(prev.value);
+	if (prev.type === "op") return !DIVISION_AFTER_OPS.has(prev.value);
+	return REGEX_CONTEXT_VALUES.has(prev.value);
 }
 
 function _scanRegexLiteral(code, i, len) {
@@ -129,6 +133,7 @@ function _scanRegexLiteral(code, i, len) {
 	let inCharClass = false;
 	while (j < len) {
 		const rc = code[j];
+		if (rc === "\n") break;
 		if (escaped) {
 			escaped = false;
 		} else if (rc === "\\") {

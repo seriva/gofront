@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.3.9] - 2026-10-01
+
+### Fixed
+- **Minifier treated `/` after `)` or `]` as the start of a regex literal** — an expression such as `(x * Math.PI) / 180.0` made the tokenizer scan a "regex" that ran to the end of the file, so everything after the first such division was emitted verbatim: `gofront build` produced a bundle that was only minified up to that point and the remainder was unminified, unmangled source. `/` following `)`, `]`, `++` or `--` is now a division operator, and a regex literal scan stops at a newline so a misdetection can no longer swallow the rest of the bundle.
+- **`<svg>` in `.templ` files was created in the HTML namespace** — `<svg>` and its descendants (`<path>`, `<circle>`, …) were emitted with `document.createElement`, producing inert `HTMLUnknownElement`s that never rendered. Elements inside an `<svg>` subtree are now created with `document.createElementNS("http://www.w3.org/2000/svg", …)`, and `class` attributes on them are set via `setAttribute("class", …)` since `SVGElement.className` is a read-only `SVGAnimatedString`.
+
 ## [1.3.8] - 2026-10-01
 
 ### Added
