@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.3.10] - 2026-10-01
+
 ### Added
 - **`assetExtensions` project option** — `gofront build` only mirrored files from `serveDir` whose extension was on a built-in web-asset whitelist, so projects shipping custom binary formats (`.bmesh`, `.mat`, `.arena`, …) silently lost them from the release output and the PWA precache. `gofront.json` / `package.json` `"gofront"` now accept `"assetExtensions": [".bmesh", "mat"]` (dot optional, case-insensitive) to extend the whitelist.
 
