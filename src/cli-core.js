@@ -229,6 +229,9 @@ export function parseTestArgs(argv) {
 }
 
 export function handleTest(targetDir = ".", options = {}) {
+	const pattern = parsePackagePattern(targetDir);
+	if (pattern) return runTestsRecursive(pattern, options);
+
 	let testTarget = targetDir;
 	try {
 		const project = detectProject(targetDir);
@@ -244,6 +247,69 @@ export function handleTest(targetDir = ".", options = {}) {
 		}
 	} catch {}
 	return runTests(testTarget, options);
+}
+
+async function runTestsRecursive(rootDir, options) {
+	const dirs = findPackageDirs(rootDir);
+	if (dirs.length === 0) {
+		throw new Error(`No .go files found under ${rootDir}`);
+	}
+	let exitCode = 0;
+	let stdout = "";
+	let stderr = "";
+	for (const dir of dirs) {
+		const result = await runTests(dir, options);
+		if (result.exitCode !== 0) exitCode = result.exitCode;
+		if (options.captureOutput) {
+			stdout += result.stdout ?? "";
+			stderr += result.stderr ?? "";
+		}
+	}
+	return options.captureOutput
+		? { exitCode, stdout, stderr, packages: dirs }
+		: { exitCode, packages: dirs };
+}
+
+// ── Package patterns (`dir/...`) ──────────────────────────────
+
+// Returns the root directory of a Go-style recursive pattern (`./...`,
+// `app/src/...`), or null when the argument is a plain path.
+export function parsePackagePattern(arg) {
+	if (arg === "...") return resolve(".");
+	if (!arg.endsWith("/...")) return null;
+	return resolve(arg.slice(0, -4) || ".");
+}
+
+const SKIPPED_DIRS = new Set(["node_modules", "dist", "public"]);
+
+// Lists every directory under root (inclusive) that contains .go or .templ
+// files, in sorted order, skipping hidden directories and build output.
+export function findPackageDirs(root) {
+	const out = [];
+	const walk = (dir) => {
+		let entries;
+		try {
+			entries = readdirSync(dir, { withFileTypes: true });
+		} catch {
+			return;
+		}
+		entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+		if (
+			entries.some(
+				(e) =>
+					e.isFile() && (e.name.endsWith(".go") || e.name.endsWith(".templ")),
+			)
+		) {
+			out.push(dir);
+		}
+		for (const e of entries) {
+			if (!e.isDirectory()) continue;
+			if (e.name.startsWith(".") || SKIPPED_DIRS.has(e.name)) continue;
+			walk(join(dir, e.name));
+		}
+	};
+	walk(resolve(root));
+	return out;
 }
 
 // ── Project detection ─────────────────────────────────────────
@@ -357,6 +423,26 @@ export function parseCheckArgs(argv) {
 }
 
 export function handleCheck(targetDir = ".", options = {}) {
+	const pattern = parsePackagePattern(targetDir);
+	if (pattern) {
+		const dirs = findPackageDirs(pattern);
+		if (dirs.length === 0) {
+			throw new Error(`No .go files found under ${targetDir}`);
+		}
+		const startMs = performance.now();
+		const packages = [];
+		for (const dir of dirs) {
+			const pkgStart = performance.now();
+			runCompile(dir, true, { ...options });
+			packages.push({
+				dir,
+				elapsedMs: (performance.now() - pkgStart).toFixed(0),
+			});
+		}
+		const elapsedMs = (performance.now() - startMs).toFixed(0);
+		return { target: targetDir, compileTarget: pattern, elapsedMs, packages };
+	}
+
 	const project = detectProject(targetDir);
 	const targetPath = resolve(targetDir);
 	let isDir = false;

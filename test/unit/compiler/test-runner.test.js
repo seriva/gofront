@@ -2,11 +2,11 @@
 // Tests for file filtering (*_test.go), testing package stdlib, discovery,
 // harness generation, and test execution.
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { handleTest } from "../../../src/cli-core.js";
+import { handleCheck, handleTest } from "../../../src/cli-core.js";
 import {
 	compileDir,
 	compilePackageTests,
@@ -457,6 +457,64 @@ test("handleTest reports [no test files] for directories without tests", async (
 		const result = await handleTest(dir, { captureOutput: true });
 		assertEqual(result.exitCode, 0);
 		assertContains(result.stdout, "[no test files]");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("handleTest with dir/... runs every package below the root", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-recursive-tests-"));
+	try {
+		mkdirSync(join(dir, "a"));
+		mkdirSync(join(dir, "b", "deep"), { recursive: true });
+		mkdirSync(join(dir, "node_modules", "x"), { recursive: true });
+		writeFileSync(join(dir, "root.go"), "package root\n");
+		writeFileSync(
+			join(dir, "a", "a_test.go"),
+			`package a
+import "testing"
+func TestA(t *testing.T) {}
+`,
+		);
+		writeFileSync(
+			join(dir, "b", "deep", "deep_test.go"),
+			`package deep
+import "testing"
+func TestDeep(t *testing.T) { t.Error("deep failure") }
+`,
+		);
+		writeFileSync(join(dir, "node_modules", "x", "x.go"), "package x\n");
+
+		const result = await handleTest(`${dir}/...`, { captureOutput: true });
+		assertEqual(result.exitCode, 1);
+		assertEqual(result.packages.length, 3);
+		assert(!result.packages.some((p) => p.includes("node_modules")));
+		assertContains(result.stdout, "[no test files]");
+		assertContains(result.stdout, "ok");
+		assertContains(result.stdout, "deep failure");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("handleCheck with dir/... type-checks every package below the root", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-recursive-check-"));
+	try {
+		mkdirSync(join(dir, "ok"));
+		mkdirSync(join(dir, "bad"));
+		writeFileSync(
+			join(dir, "ok", "ok.go"),
+			"package ok\nfunc F() int { return 1 }\n",
+		);
+
+		const good = handleCheck(`${dir}/...`);
+		assertEqual(good.packages.length, 1);
+
+		writeFileSync(
+			join(dir, "bad", "bad.go"),
+			'package bad\nfunc F() int { return "x" }\n',
+		);
+		assertThrows(() => handleCheck(`${dir}/...`));
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
