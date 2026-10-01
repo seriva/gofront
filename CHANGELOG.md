@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.3.8] - 2026-10-01
+
+### Added
+- **Recursive package patterns for `check` and `test`** — `gofront check app/src/...` and `gofront test app/src/...` (also `./...`) walk every directory under the root that contains `.go`/`.templ` files and run it as a separate package, skipping hidden directories, `node_modules`, `dist` and `public`. `check` prints one `OK` line per package plus a total; `test` prints Go-style `ok` / `?  [no test files]` / `FAIL` per package and exits non-zero if any package fails. Replaces hand-maintained `&&` chains of per-package commands in `package.json`.
+
 ### Fixed
 - **`*T` did not satisfy interfaces** — passing or assigning a pointer-to-struct variable (`s := &Shape{}`, `use(s)`) to an interface parameter reported `*Shape does not implement Sizer` even when `Shape` had every method. The satisfaction check now looks through the pointer to the struct's method set, as in Go (`*T` has both value- and pointer-receiver methods).
 - **Diamond local imports bundled the shared package multiple times** — when `main` imported `./a` and `./b`, and both imported `../base`, the `base` package was inlined once per import path, producing `Identifier 'X' has already been declared` at runtime. Local packages are now tracked by resolved directory across the recursive compile and emitted exactly once.
@@ -18,6 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`rand.Float32()` was typed as `float64`** — assigning its result to a `float32` variable or field reported a type mismatch. It now returns `float32` as in Go.
 - **Repeated blank multi-assignment redeclared `__t`** — two or more statements such as `_, n = f()` (or comma-ok type assertions `v, ok = x.(T)`) in the same scope each emitted `let __t = …`, producing `Identifier '__t' has already been declared` at runtime. Codegen now emits a unique `const __tN` per statement.
 - **Type assertion on a call expression evaluated the call twice** — `f().(T)` and `v, ok := f().(T)` emitted the call once inside the runtime type check and again for the result (`typeof f() === "number" ? f() : …`), so side effects ran twice and the two values could differ (e.g. `performance.now().(float64)`). When the operand contains a call it is now evaluated once via an IIFE parameter.
+- **`v := pkg.T{}` was typed `any`** — a short-variable declaration initialised from a qualified composite literal left `v` untyped (the parser keeps `pkg.T` as a `SelectorExpr`), so `&v` was boxed as `{value}` and writes made through the pointer were lost; `var v pkg.T` was unaffected. Type resolution now treats a `SelectorExpr` type node like a qualified type name.
 
 ## [1.3.7] - 2026-09-30
 

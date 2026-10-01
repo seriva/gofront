@@ -19,7 +19,7 @@ const _require = createRequire(import.meta.url);
 const { version } = _require("../package.json");
 
 import { mkdirSync, statSync, watch, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import { copyAssets } from "./asset-manager.js";
 import {
 	formatBuildSummary,
@@ -56,8 +56,8 @@ GoFront — a Go-inspired language that compiles to JavaScript
 Usage:
   gofront dev [dir] [options]    Start dev server with live reload (default port 3000)
   gofront build [dir] [options]  Build production bundle (-o <dir>, --pwa, --minify)
-  gofront check [dir]            Type-check only
-  gofront test [dir] [--dom]     Run unit tests (-v verbose, -run <regex>)
+  gofront check [dir|dir/...]    Type-check only (dir/... recurses into every package)
+  gofront test [dir|dir/...] [--dom]  Run unit tests (-v verbose, -run <regex>)
   gofront prep [dir] [--minify]  Copy static assets and bundle vendor dependencies
   gofront init [dir]             Scaffold a new GoFront project
   gofront <file.go>              Compile single file and print to stdout
@@ -131,8 +131,19 @@ if (args[0] === "test") {
 if (args[0] === "check") {
 	const { targetDir } = parseCheckArgs(args.slice(1));
 	try {
-		const { elapsedMs } = handleCheck(targetDir);
-		console.error(`gofront: ${targetDir} — OK (${elapsedMs}ms)`);
+		const { elapsedMs, packages } = handleCheck(targetDir);
+		if (packages) {
+			for (const pkg of packages) {
+				console.error(
+					`gofront: ${relative(process.cwd(), pkg.dir) || "."} — OK (${pkg.elapsedMs}ms)`,
+				);
+			}
+			console.error(
+				`gofront: ${packages.length} packages — OK (${elapsedMs}ms)`,
+			);
+		} else {
+			console.error(`gofront: ${targetDir} — OK (${elapsedMs}ms)`);
+		}
 		process.exit(0);
 	} catch (e) {
 		console.error(`gofront: ${e.message}`);
