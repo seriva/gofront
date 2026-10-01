@@ -4,6 +4,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer } from "node:http";
 import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { colors, log } from "./colors.js";
 
 export const MIME = {
 	".html": "text/html; charset=utf-8",
@@ -275,9 +276,9 @@ function createNotify(clients) {
 
 function handleServerError(err, port) {
 	if (err.code === "EADDRINUSE") {
-		console.error(`gofront: port ${port} already in use — try --port <number>`);
+		log.fail(`port ${port} already in use — try --port <number>`);
 	} else {
-		console.error(`gofront: dev server error: ${err.message}`);
+		log.fail(`dev server error: ${err.message}`);
 	}
 	process.exit(1);
 }
@@ -327,7 +328,7 @@ export function createDevServer(serveDir, port = 3000, options = {}) {
 	server.listen(port, host, () => {
 		const actualPort = server.address()?.port ?? port;
 		if (port !== 0 && !options.silent) {
-			console.error(`gofront: dev server → http://localhost:${actualPort}`);
+			log.info(`dev server → ${colors.cyan(`http://localhost:${actualPort}`)}`);
 		}
 	});
 

@@ -227,7 +227,10 @@ export const assignabilityMethods = {
 
 	_isUntypedAssignable(target, source) {
 		if (isUntyped(target)) return true;
-		if (target.kind !== "basic") return false;
+		// Named types with a basic underlying type (`type Mode string`) accept
+		// untyped constants of that kind, as in Go.
+		if (target.kind === "named") target = this.resolveType(target.underlying);
+		if (target?.kind !== "basic") return false;
 		return (
 			(UNTYPED_COMPAT[source.base]?.has(target.name) ?? false) ||
 			(isComplex(target) &&
@@ -347,6 +350,14 @@ export const assignabilityMethods = {
 		if (srcType?.kind === "pointer") srcType = this.resolveType(srcType.base);
 		let base = srcType.kind === "named" ? srcType.underlying : srcType;
 		base = this.resolveType(base);
+		// Interface → interface: the source's method set must cover the target's.
+		if (base?.kind === "interface") {
+			for (const [name, required] of iface.methods) {
+				if (!this._implementsMethod(required, base.methods.get(name)))
+					return false;
+			}
+			return true;
+		}
 		const methodMap =
 			base?.kind === "struct"
 				? base.methods

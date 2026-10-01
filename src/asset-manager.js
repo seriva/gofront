@@ -11,6 +11,7 @@ import {
 	resolve,
 	sep,
 } from "node:path";
+import { log } from "./colors.js";
 import { loadProjectConfig } from "./project-config.js";
 
 export function loadAssetConfig(projectDir) {
@@ -50,7 +51,7 @@ function copyAssetEntry(entry, projectRoot) {
 
 	const srcPath = resolve(projectRoot, source);
 	if (!existsSync(srcPath)) {
-		console.warn(`gofront: asset source '${source}' not found — skipping`);
+		log.warn(`asset source '${source}' not found — skipping`);
 		return {
 			status: "skipped",
 			item: { source, dest, status: "skipped", reason: "source not found" },
@@ -73,7 +74,7 @@ function copyAssetEntry(entry, projectRoot) {
 			item: { source, dest: targetFile, type: "file", status: "copied" },
 		};
 	} catch (err) {
-		console.warn(`gofront: failed to copy asset '${source}': ${err.message}`);
+		log.warn(`failed to copy asset '${source}': ${err.message}`);
 		return {
 			status: "failed",
 			item: { source, dest, status: "failed", reason: err.message },

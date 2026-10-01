@@ -38,6 +38,7 @@ import {
 	parseTestArgs,
 	runCompile,
 } from "./cli-core.js";
+import { colors, formatDiagnostic, log, ms, stamp } from "./colors.js";
 import { createDevServer } from "./dev-server.js";
 
 // ── Parse CLI args ───────────────────────────────────────────
@@ -85,10 +86,9 @@ if (args[0] === "prep" || args[0] === "vendor") {
 	const { targetDir, vendorConfig } = parsePrepArgs(args.slice(1));
 	try {
 		const result = await handlePrep(resolve(targetDir), { vendorConfig });
-		for (const line of formatPrepSummary(result))
-			console.error(`gofront: ${line}`);
+		for (const line of formatPrepSummary(result)) log.info(line);
 	} catch (e) {
-		console.error(`gofront: ${e.message}`);
+		log.fail(e.message);
 		process.exit(1);
 	}
 	process.exit(0);
@@ -103,12 +103,12 @@ if (args[0] === "init") {
 	try {
 		({ mainPath } = handleInit(targetDir));
 	} catch (e) {
-		console.error(`gofront: ${e.message}`);
+		log.fail(e.message);
 		process.exit(1);
 	}
-	console.error(`gofront: created ${mainPath}`);
-	console.error(
-		`gofront: run  gofront ${targetArg === "." ? "main.go" : `${targetArg}/main.go`}  to compile`,
+	log.info(`created ${colors.cyan(mainPath)}`);
+	log.info(
+		`run  ${colors.cyan(`gofront ${targetArg === "." ? "main.go" : `${targetArg}/main.go`}`)}  to compile`,
 	);
 	process.exit(0);
 }
@@ -121,7 +121,7 @@ if (args[0] === "test") {
 		const result = await handleTest(targetDir, testOptions);
 		process.exit(result.exitCode);
 	} catch (e) {
-		console.error(`gofront: ${e.message}`);
+		log.fail(e.message);
 		process.exit(1);
 	}
 }
@@ -132,21 +132,21 @@ if (args[0] === "check") {
 	const { targetDir } = parseCheckArgs(args.slice(1));
 	try {
 		const { elapsedMs, packages } = handleCheck(targetDir);
+		const okLine = (label, t) =>
+			log.info(`${colors.cyan(label)} — ${colors.green("OK")} ${ms(t)}`);
 		if (packages) {
 			for (const pkg of packages) {
-				console.error(
-					`gofront: ${relative(process.cwd(), pkg.dir) || "."} — OK (${pkg.elapsedMs}ms)`,
-				);
+				okLine(relative(process.cwd(), pkg.dir) || ".", pkg.elapsedMs);
 			}
-			console.error(
-				`gofront: ${packages.length} packages — OK (${elapsedMs}ms)`,
+			log.info(
+				`${colors.bold(`${packages.length} packages`)} — ${colors.bold(colors.green("OK"))} ${ms(elapsedMs)}`,
 			);
 		} else {
-			console.error(`gofront: ${targetDir} — OK (${elapsedMs}ms)`);
+			okLine(targetDir, elapsedMs);
 		}
 		process.exit(0);
 	} catch (e) {
-		console.error(`gofront: ${e.message}`);
+		log.fail(e.message);
 		process.exit(1);
 	}
 }
@@ -158,11 +158,15 @@ if (args[0] === "build") {
 	try {
 		const result = await handleBuild(buildOptions.targetDir, buildOptions);
 		for (const line of formatBuildSummary(result)) {
-			console.error(`gofront: ${line}`);
+			log.info(
+				line
+					.replace(/^build complete/, colors.green("build complete"))
+					.replace(/\(([\d.]+ kB)\)$/, (_, s) => colors.dim(`(${s})`)),
+			);
 		}
 		process.exit(0);
 	} catch (e) {
-		console.error(`gofront: ${e.message}`);
+		log.fail(e.message);
 		process.exit(1);
 	}
 }
@@ -174,14 +178,14 @@ if (args[0] === "dev") {
 	try {
 		const dev = await handleDev(devOptions.targetDir, devOptions);
 		if (dev.initialError) {
-			console.error("gofront: ERROR");
-			for (const line of dev.initialError.message.split("\n"))
-				console.error(`  ${line}`);
+			log.error(dev.initialError.message);
 		} else {
-			console.error(`gofront: OK — wrote ${dev.outputFile}`);
+			log.ok(`— wrote ${colors.cyan(dev.outputFile)}`);
 		}
-		console.error(`gofront: dev server running → http://localhost:${dev.port}`);
-		console.error(`gofront: watching ${dev.srcDir} for changes...`);
+		log.info(
+			`dev server running → ${colors.cyan(`http://localhost:${dev.port}`)}`,
+		);
+		log.info(`watching ${colors.cyan(dev.srcDir)} for changes...`);
 
 		const shutdown = async () => {
 			await dev.close();
@@ -191,7 +195,7 @@ if (args[0] === "dev") {
 		process.on("SIGTERM", shutdown);
 		await new Promise(() => {});
 	} catch (e) {
-		console.error(`gofront: ${e.message}`);
+		log.fail(e.message);
 		process.exit(1);
 	}
 }
@@ -218,7 +222,7 @@ let isDir = false;
 try {
 	isDir = statSync(inputPath).isDirectory();
 } catch (e) {
-	console.error(`gofront: cannot access '${inputArg}': ${e.message}`);
+	log.fail(`cannot access '${inputArg}': ${e.message}`);
 	process.exit(1);
 }
 
@@ -235,7 +239,7 @@ if (!watchMode) {
 			dumpAst,
 		});
 	} catch (e) {
-		console.error(`gofront: ${e.message}`);
+		log.fail(e.message);
 		process.exit(1);
 	}
 
@@ -250,7 +254,9 @@ if (!watchMode) {
 
 	if (checkOnly) {
 		const elapsedMs = (performance.now() - startMs).toFixed(0);
-		console.error(`gofront: ${inputArg} — OK (${elapsedMs}ms)`);
+		log.info(
+			`${colors.cyan(inputArg)} — ${colors.green("OK")} ${ms(elapsedMs)}`,
+		);
 		process.exit(0);
 	}
 
@@ -262,7 +268,7 @@ if (!watchMode) {
 			sourceMap,
 		});
 	} catch (e) {
-		console.error(`gofront: minify failed: ${e.message}`);
+		log.fail(`minify failed: ${e.message}`);
 		process.exit(1);
 	}
 
@@ -272,9 +278,9 @@ if (!watchMode) {
 		try {
 			mkdirSync(dirname(resolve(outputFile)), { recursive: true });
 			writeFileSync(outputFile, `${js}\n`);
-			console.error(`gofront: wrote ${outputFile} (${elapsedMs}ms)`);
+			log.info(`wrote ${colors.cyan(outputFile)} ${ms(elapsedMs)}`);
 		} catch (e) {
-			console.error(`gofront: cannot write '${outputFile}': ${e.message}`);
+			log.fail(`cannot write '${outputFile}': ${e.message}`);
 			process.exit(1);
 		}
 	} else {
@@ -286,10 +292,10 @@ if (!watchMode) {
 			const projectDir = resolve(".");
 			const { copied, skipped } = copyAssets(projectDir);
 			if (copied > 0 || skipped > 0) {
-				console.error(`gofront: copied ${copied} assets (${skipped} skipped)`);
+				log.info(`copied ${copied} assets (${skipped} skipped)`);
 			}
 		} catch (e) {
-			console.error(`gofront: asset copy failed: ${e.message}`);
+			log.warn(`asset copy failed: ${e.message}`);
 		}
 	}
 
@@ -298,15 +304,11 @@ if (!watchMode) {
 
 // ── Watch mode ───────────────────────────────────────────────
 
-function timestamp() {
-	return new Date().toLocaleTimeString();
-}
-
 // Start dev server before first build so the browser can connect immediately
 let devServer = null;
 if (serveMode) {
 	if (!outputFile) {
-		console.error("gofront: --serve requires -o <output file>");
+		log.fail("--serve requires -o <output file>");
 		process.exit(1);
 	}
 	const serveDir = dirname(resolve(outputFile));
@@ -324,17 +326,18 @@ function buildOnce(changedFile = null) {
 		});
 		const elapsedMs = (performance.now() - startMs).toFixed(0);
 		const changeNote = changedFile ? ` — ${changedFile} changed` : "";
+		const timing = colors.dim(`(${elapsedMs}ms${changeNote})`);
 		if (outputFile) {
 			writeFileSync(outputFile, `${js}\n`);
 			console.error(
-				`[${timestamp()}] gofront: OK — wrote ${outputFile} (${elapsedMs}ms${changeNote})`,
+				`${stamp()} ${colors.bold("gofront:")} ${colors.green("OK")} — wrote ${colors.cyan(outputFile)} ${timing}`,
 			);
 		} else {
 			// Clear screen then print
 			process.stdout.write("\x1Bc");
 			console.log(js);
 			console.error(
-				`[${timestamp()}] gofront: OK (${elapsedMs}ms${changeNote})`,
+				`${stamp()} ${colors.bold("gofront:")} ${colors.green("OK")} ${timing}`,
 			);
 		}
 
@@ -342,14 +345,17 @@ function buildOnce(changedFile = null) {
 			try {
 				copyAssets(resolve("."));
 			} catch (e) {
-				console.error(`gofront: asset copy failed: ${e.message}`);
+				log.warn(`asset copy failed: ${e.message}`);
 			}
 		}
 
 		devServer?.notify();
 	} catch (e) {
-		console.error(`[${timestamp()}] gofront: ERROR`);
-		for (const line of e.message.split("\n")) console.error(`  ${line}`);
+		console.error(
+			`${stamp()} ${colors.bold("gofront:")} ${colors.bold(colors.red("ERROR"))}`,
+		);
+		for (const line of formatDiagnostic(e.message).split("\n"))
+			console.error(`  ${line}`);
 		devServer?.notifyError?.(e);
 	}
 }
@@ -365,7 +371,7 @@ function handleCssWatch(filename) {
 		try {
 			copyAssets(resolve("."));
 		} catch (e) {
-			console.error(`gofront: asset copy failed: ${e.message}`);
+			log.warn(`asset copy failed: ${e.message}`);
 		}
 	}
 	devServer?.notifyCss?.(filename);
@@ -385,4 +391,6 @@ watch(watchTarget, { recursive: true }, (_event, filename) => {
 	debounce = setTimeout(() => buildOnce(filename), 80);
 });
 
-console.error(`[${timestamp()}] gofront: watching ${inputArg} ...`);
+console.error(
+	`${stamp()} ${colors.bold("gofront:")} watching ${colors.cyan(inputArg)} ...`,
+);
