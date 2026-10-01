@@ -6,6 +6,7 @@ import { statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { basename, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { colorEnabled, createColors, formatDiagnostic } from "./colors.js";
 import { compilePackageTests, gwFilesIn } from "./compiler.js";
 
 export function isTestFunc(decl) {
@@ -38,6 +39,7 @@ export function generateTestHarness(bundleJs, testNames, options = {}) {
 	const runRegex = options.run ? options.run : null;
 	const verbose = Boolean(options.verbose);
 	const dom = Boolean(options.dom);
+	const color = Boolean(options.color);
 	const pkgName = options.pkgName ?? "main";
 	// The harness runs from stdin with cwd = project dir, so a bare "jsdom"
 	// import only works if the project has it locally. Use the resolved path.
@@ -86,6 +88,12 @@ async function __runGoFrontSuite() {
   const runFilter = ${runRegex ? `new RegExp(${JSON.stringify(runRegex)})` : "null"};
   const verbose = ${verbose};
   const pkgName = ${JSON.stringify(pkgName)};
+  const paint = ${color}
+    ? (code) => (s) => "\\x1b[" + code + "m" + s + "\\x1b[0m"
+    : () => (s) => s;
+  const red = paint(31), green = paint(32), yellow = paint(33), dim = paint(2), bold = paint(1);
+  const PASS = green("PASS"), FAIL = bold(red("FAIL")), SKIP = yellow("SKIP");
+  const okLine = (name, t) => console.log(green("ok  ") + "\\t" + name + "\\t" + dim(t + "s"));
 
   const testsToRun = runFilter
     ? allTests.filter((name) => runFilter.test(name))
@@ -93,10 +101,10 @@ async function __runGoFrontSuite() {
 
   if (testsToRun.length === 0) {
     if (allTests.length > 0 && runFilter) {
-      console.log("testing: warning: no tests to run matching " + ${JSON.stringify(runRegex)});
+      console.log(yellow("testing: warning: no tests to run matching " + ${JSON.stringify(runRegex)}));
     }
-    console.log("PASS");
-    console.log("ok  \\t" + pkgName + "\\t0.000s");
+    console.log(PASS);
+    okLine(pkgName, "0.000");
     process.exit(0);
   }
 
@@ -108,17 +116,17 @@ async function __runGoFrontSuite() {
   // Go-style streaming report. In non-verbose mode only failures and skips are
   // shown, so the "=== RUN" header is emitted late for failures.
   const report = (t) => {
-    const elapsed = ((now() - t._start) / 1000).toFixed(2);
+    const elapsed = dim("(" + ((now() - t._start) / 1000).toFixed(2) + "s)");
     if (t.skipped) {
-      console.log("--- SKIP: " + t._name + " (" + elapsed + "s)");
+      console.log("--- " + SKIP + ": " + t._name + " " + elapsed);
       for (const log of t._logs) console.log("    " + log);
     } else if (t.failed) {
-      if (!verbose) console.log("=== RUN   " + t._name);
-      for (const log of t._logs) console.log("    " + log);
-      console.log("--- FAIL: " + t._name + " (" + elapsed + "s)");
+      if (!verbose) console.log(dim("=== RUN   ") + t._name);
+      for (const log of t._logs) console.log("    " + red(log));
+      console.log("--- " + FAIL + ": " + t._name + " " + elapsed);
     } else if (verbose) {
       for (const log of t._logs) console.log("    " + log);
-      console.log("--- PASS: " + t._name + " (" + elapsed + "s)");
+      console.log("--- " + PASS + ": " + t._name + " " + elapsed);
     }
   };
 
@@ -130,7 +138,7 @@ async function __runGoFrontSuite() {
   };
 
   globalThis.__onSubtestStart = (name) => {
-    if (verbose) console.log("=== RUN   " + name);
+    if (verbose) console.log(dim("=== RUN   ") + name);
   };
   globalThis.__onSubtestEnd = report;
 
@@ -141,13 +149,13 @@ ${testNames.map((n) => `    ${JSON.stringify(n)}: typeof ${n} !== "undefined" ? 
   for (const name of testsToRun) {
     const fn = __testRegistry[name] ?? (typeof globalThis[name] === "function" ? globalThis[name] : null);
     if (typeof fn !== "function") {
-      console.error("testing: cannot find test function " + name);
+      console.error(red("testing: cannot find test function " + name));
       totalFailures++;
       continue;
     }
 
     const t = new __GoFront_T(name);
-    if (verbose) console.log("=== RUN   " + name);
+    if (verbose) console.log(dim("=== RUN   ") + name);
 
     try {
       const res = fn(t);
@@ -164,12 +172,12 @@ ${testNames.map((n) => `    ${JSON.stringify(n)}: typeof ${n} !== "undefined" ? 
   const suiteElapsed = ((now() - suiteStart) / 1000).toFixed(3);
 
   if (totalFailures > 0) {
-    console.log("FAIL");
-    console.log("FAIL\\t" + pkgName + "\\t" + suiteElapsed + "s");
+    console.log(FAIL);
+    console.log(FAIL + "\\t" + pkgName + "\\t" + dim(suiteElapsed + "s"));
     process.exit(1);
   } else {
-    console.log("PASS");
-    console.log("ok  \\t" + pkgName + "\\t" + suiteElapsed + "s");
+    console.log(PASS);
+    okLine(pkgName, suiteElapsed);
     process.exit(0);
   }
 }
@@ -215,8 +223,15 @@ function reportEmptyTests(label, reason, options) {
 		return { exitCode: 0, stdout: out, stderr: "", noTests: true };
 	}
 	const dest = options.stdout ?? process.stdout;
-	dest.write(out);
+	dest.write(colorsFor(options, dest).dim(out));
 	return { exitCode: 0, noTests: true };
+}
+
+// Color is decided here because the harness child writes to a pipe, not a TTY.
+function colorsFor(options, stream) {
+	const enabled =
+		options.color ?? (!options.captureOutput && colorEnabled(stream));
+	return createColors(enabled);
 }
 
 function spawnTestRunner(resolvedDir, harnessJs, testCount, options) {
@@ -289,12 +304,16 @@ export async function runTests(targetDir, options = {}) {
 	try {
 		compiled = compilePackageTests(resolvedDir, options);
 	} catch (err) {
-		const out = `FAIL\t${basename(resolvedDir)} [build failed]\n${err?.message ?? String(err)}\n`;
+		const msg = err?.message ?? String(err);
 		if (options.captureOutput) {
+			const out = `FAIL\t${basename(resolvedDir)} [build failed]\n${msg}\n`;
 			return { exitCode: 1, stdout: "", stderr: out };
 		}
 		const dest = options.stderr ?? process.stderr;
-		dest.write(out);
+		const c = colorsFor(options, dest);
+		dest.write(
+			`${c.bold(c.red("FAIL"))}\t${basename(resolvedDir)} ${c.red("[build failed]")}\n${formatDiagnostic(msg, c)}\n`,
+		);
 		return { exitCode: 1 };
 	}
 
@@ -309,6 +328,7 @@ export async function runTests(targetDir, options = {}) {
 		...options,
 		pkgName,
 		jsdomPath,
+		color: colorsFor(options, options.stdout ?? process.stdout).enabled,
 	});
 
 	return spawnTestRunner(resolvedDir, harnessJs, testNames.length, options);

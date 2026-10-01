@@ -520,6 +520,60 @@ func main() {
 	assertErrorContains(errors, "does not implement");
 });
 
+test("interface value satisfies a narrower interface", () => {
+	const { errors } = compile(`package main
+type Drawable interface { Draw() int }
+type Entity interface { Draw() int; Update() bool }
+func use(d Drawable) int { return d.Draw() }
+func main() {
+  var e Entity
+  var d Drawable = e
+  use(e)
+  _ = d
+}`);
+	assertEqual(errors.length, 0);
+});
+
+test("interface value does not satisfy an interface with extra methods", () => {
+	const { errors } = compile(`package main
+type Drawable interface { Draw() int }
+type Entity interface { Draw() int; Update() bool }
+func main() {
+  var d Drawable
+  var e Entity = d
+  _ = e
+}`);
+	assertErrorContains(errors, "does not implement");
+});
+
+test("untyped constants are assignable to named basic types", () => {
+	const { errors } = compile(`package main
+type Mode string
+type Level int
+const ModeAll Mode = "all"
+func use(m Mode, l Level) bool { return m == "opaque" || l == 3 }
+func main() {
+  var m Mode = "lines"
+  var l Level = 2
+  switch m {
+  case ModeAll, "lines":
+  }
+  _ = use("all", l)
+  _ = map[Mode]int{"x": 1}
+}`);
+	assertEqual(errors.length, 0);
+});
+
+test("untyped constant of the wrong kind is rejected for a named basic type", () => {
+	const { errors } = compile(`package main
+type Mode string
+func main() {
+  var m Mode = 3
+  _ = m
+}`);
+	assertErrorContains(errors, "Cannot assign");
+});
+
 test("interface not satisfied when method has wrong parameter type", () => {
 	const { errors } = compile(`package main
 type Greeter interface { Greet(name string) }

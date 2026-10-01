@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.3.11] - 2026-10-01
+
+### Added
+- **Colored CLI output** — `gofront check`, `build`, `dev`, `prep`, `test` and the raw compile/watch modes now color their terminal output: green `OK`/`PASS`, red `ERROR`/`FAIL`, yellow `SKIP`/warnings, dimmed timings and source gutters, and a red caret under the offending column in `Type error`/`Parse error`/`Lex error` diagnostics. Colors are enabled only when writing to a TTY and honour `NO_COLOR` / `FORCE_COLOR`; captured or piped output stays plain.
+
+### Fixed
+- **Untyped constants were rejected for named basic types** — `type Mode string` followed by `var m Mode = "all"`, `m == "opaque"`, or passing a string literal to a `Mode` parameter reported `Cannot assign untyped string to Mode`. Untyped constant assignability now unwraps named types to their underlying basic type, matching Go.
+- **Interface values did not satisfy narrower interfaces** — the typechecker only inspected struct and pointer-to-struct types when checking interface implementation, so assigning an interface value to a narrower interface (e.g. `var d Drawable = e` where `Entity` includes all of `Drawable`'s methods) or passing it to a function accepting a narrower interface reported `<SourceInterface> does not implement <TargetInterface>`. The assignability check now verifies that the source interface's method set covers the target interface's method set, matching standard Go interface satisfaction.
+
 ## [1.3.10] - 2026-10-01
 
 ### Added

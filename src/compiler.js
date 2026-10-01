@@ -20,6 +20,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { CodeGen } from "./codegen/index.js";
+import { log } from "./colors.js";
 import { parseDts } from "./dts-parser.js";
 import { Lexer } from "./lexer.js";
 import { Parser } from "./parser/index.js";
@@ -126,8 +127,8 @@ export function resolveImports(
 				seenLocalPaths.add(path);
 				const depDir = resolveGwDir(path, fromFile);
 				if (!depDir) {
-					console.error(
-						`gofront: warning: cannot find local package '${path}' relative to ${fromDir}`,
+					log.warn(
+						`cannot find local package '${path}' relative to ${fromDir}`,
 					);
 					continue;
 				}
