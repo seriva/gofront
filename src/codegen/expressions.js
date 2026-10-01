@@ -610,16 +610,23 @@ export const expressionGenMethods = {
 	},
 
 	_genTypeAssertExpr(expr) {
-		const val = this.genExpr(expr.expr);
+		const src = this.genExpr(expr.expr);
+		// The operand appears in both the check and the result; hoist calls so
+		// they run once.
+		const hoist = this._hasCallExpr(expr.expr);
+		const val = hoist ? "__v" : src;
 		const check = this._typeCheckExpr(expr.type, val);
+		const wrap = (body) => (hoist ? `((__v) => ${body})(${src})` : body);
 		if (!expr._commaOk) {
 			// plain assertion: panic if check fails (matches Go behavior)
-			if (check === "true") return val; // can't check at runtime — pass through
-			return `(${check} ? ${val} : (() => { throw new Error("interface conversion: type assertion failed"); })())`;
+			if (check === "true") return src; // can't check at runtime — pass through
+			return wrap(
+				`(${check} ? ${val} : (() => { throw new Error("interface conversion: type assertion failed"); })())`,
+			);
 		}
 		// comma-ok: emit [value-or-zero, runtimeTypeCheck]
 		const zero = this.zeroValueForTypeNode(expr.type);
-		return `(${check} ? [${val}, true] : [${zero}, false])`;
+		return wrap(`(${check} ? [${val}, true] : [${zero}, false])`);
 	},
 
 	_genTypeConversionCall(expr) {
