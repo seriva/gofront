@@ -23,6 +23,7 @@ import {
 	sep,
 } from "node:path";
 import { copyAssets } from "./asset-manager.js";
+import { colors, log } from "./colors.js";
 import { compileDir, compileSingleFile } from "./compiler.js";
 import { createDevServer } from "./dev-server.js";
 import { minify } from "./minifier.js";
@@ -685,7 +686,7 @@ export async function handleBuild(targetDir = ".", options = {}) {
 			dest: join(outDir, "vendor.js"),
 		});
 	} catch (e) {
-		console.warn(`gofront: vendor bundle warning: ${e.message}`);
+		log.warn(`vendor bundle: ${e.message}`);
 	}
 
 	const assets = copyReleaseAssets(
@@ -755,11 +756,12 @@ function buildDevOnce(
 		writeFileSync(outputFile, `${result.js}\n`);
 		const elapsedMs = (performance.now() - startMs).toFixed(0);
 		const note = changedFile ? ` — ${changedFile} changed` : "";
-		console.error(`gofront: OK — wrote ${outputFile} (${elapsedMs}ms${note})`);
+		log.ok(
+			`— wrote ${colors.cyan(outputFile)} ${colors.dim(`(${elapsedMs}ms${note})`)}`,
+		);
 		devServer.notify();
 	} catch (e) {
-		console.error("gofront: ERROR");
-		for (const line of e.message.split("\n")) console.error(`  ${line}`);
+		log.error(e.message);
 		devServer.notifyError(e);
 	}
 }
