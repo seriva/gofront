@@ -109,8 +109,9 @@ Walks the typed AST and emits clean, readable JavaScript. No intermediate repres
 — the codegen writes directly to an output buffer with indentation tracking.
 
 Runtime helpers (`__len`, `__append`, `__s`, `__sprintf`, `__equal`, `__cmul`, `__cdiv`,
-`__error`, `__errorIs`, `__timeFmt`, `__timeParse`, `__pathClean`) are tree-shaken: only
-emitted when actually used. Optional inline source maps are supported via VLQ-encoded mappings.
+`__error`, `__errorIs`, `__timeFmt`, `__timeParse`, `__pathClean`, `__sortSlice`,
+`__sclone`, `__ifv`, `__ifp`) are tree-shaken: only emitted when actually used. Optional
+inline source maps are supported via VLQ-encoded mappings.
 
 ---
 
@@ -191,10 +192,11 @@ The type checker enforces correctness; JavaScript doesn't need to know.
 
 ---
 
-## Examples — Todo App
+## Examples
 
-There are four example apps — all implement the same todo app to show different aspects
-of GoFront.
+There are five example apps. Four implement the same todo app to show different aspects
+of GoFront; the fifth is a WebGL2 3D showcase demonstrating typed graphics APIs and
+zero-allocation rendering.
 
 ### Simple (vanilla DOM)
 
@@ -223,6 +225,10 @@ Same app rebuilt with [reactive.js](https://github.com/seriva/microtastic), a ti
 signals-based reactive framework. Demonstrates how GoFront integrates with external JS
 libraries via `.d.ts` type declarations — the entire reactive API surface is typed via a
 hand-written `browser.d.ts` shim and exercised from GoFront source.
+
+> **Note:** Microtastic is now archived. This example is kept as a reference for
+> `.d.ts` interop with third-party signal libraries. For new projects, use the native
+> `.templ` or `gom` approaches shown below.
 
 ```
 example/reactive/
@@ -368,6 +374,21 @@ attributes, `@Component()` calls inside templates, `if / else if / else` chains,
 `switch` blocks, `for range` loops, and `@templ.Raw()` for trusted HTML injection —
 all inside template bodies.
 
+### WebGL2 (3D showcase)
+
+A 3D rotating colored cube rendered with WebGL2 shaders. Demonstrates GoFront's static
+WebGL2 typings, `Float32Array` / `Uint16Array` slice mapping, zero-allocation `for range`
+loops, and continuous `requestAnimationFrame` rendering — all with zero per-frame heap
+allocations.
+
+```
+example/webgl/
+  src/
+    main.go       ← shaders, mat4 math, vertex/index buffers, render loop
+  app.js          ← generated output
+  index.html      ← canvas element
+```
+
 ### Build and run
 
 ```sh
@@ -375,6 +396,7 @@ npm run build:simple      # → example/simple/app.js
 npm run build:reactive    # → example/reactive/app.js
 npm run build:gom         # → example/gom/app.js
 npm run build:templ       # → example/templ/app.js
+npm run build:webgl       # → example/webgl/app.js
 # open the respective index.html in a browser
 ```
 
@@ -383,23 +405,33 @@ npm run build:templ       # → example/templ/app.js
 ## CLI
 
 ```
-gofront <file.go>                compile single file → stdout
-gofront <dir>                    compile all *.go in directory → stdout
-gofront <input> -o out.js        write output to file (prints elapsed compile time e.g. "15ms")
-gofront <input> --check                    type-check only
-gofront check <dir>/...                    type-check every package under <dir> (Go-style `./...`)
-gofront test <dir>/... [--dom]             run tests for every package under <dir>
-gofront <input> --watch                    watch for changes and recompile
-gofront <input> -o out.js --serve          watch + serve with live reload (default port 3000)
-gofront <input> -o out.js --serve --port 8080  use a custom port
-gofront <input> --source-map               append inline source map (single file or directory; multi-file packages emit per-file mappings)
-gofront <input> --minify                   minify output (built-in minifier)
-gofront <input> --minify --mangle          minify and rename local identifiers
-gofront <file.go> --ast                    dump AST (debug)
-gofront <file.go> --tokens                 dump tokens (debug)
-gofront init [dir]                         scaffold a new project
-gofront --version / -v                     print version
-gofront --help / -h                        print this help
+gofront dev [dir]                            watch + compile + asset sync + live reload (default port 3000)
+gofront dev [dir] --port 8080                use a custom port
+gofront build [dir]                          clean + compile + minify + vendor → production output
+gofront build [dir] --pwa                    also generate offline service worker (sw.js) + precache manifest
+gofront build [dir] --source-map             include inline source maps in the release bundle
+gofront build [dir] --no-minify              skip minification
+gofront build [dir] --no-mangle              minify but keep original identifiers
+gofront prep [dir] [--minify]                run asset copying + vendor bundling only (alias: gofront vendor)
+gofront check <dir>                          type-check a single package
+gofront check <dir>/...                      type-check every package under <dir> (Go-style `./...`)
+gofront test <dir> [--dom]                   run tests for a single package
+gofront test <dir>/... [--dom] [-v] [-run <regex>]  run tests recursively
+gofront <file.go>                            compile single file → stdout
+gofront <dir>                                compile all *.go in directory → stdout
+gofront <input> -o out.js                    write output to file (prints elapsed compile time)
+gofront <input> -o out.js --copy-assets      compile + copy static assets
+gofront <input> --check                      type-check only (single file / directory)
+gofront <input> --watch                      watch for changes and recompile
+gofront <input> -o out.js --serve            watch + serve with live reload (legacy; prefer gofront dev)
+gofront <input> --source-map                 append inline source map
+gofront <input> --minify                     minify output (built-in minifier)
+gofront <input> --minify --mangle            minify and rename local identifiers
+gofront <file.go> --ast                      dump AST (debug)
+gofront <file.go> --tokens                   dump tokens (debug)
+gofront init [dir]                           scaffold a new project
+gofront --version / -v                       print version
+gofront --help / -h                          print this help
 ```
 ### Project configuration
 
@@ -574,6 +606,7 @@ signatures into GoFront's internal type representation.
 | `os` | `Exit`, `Args`, `Getenv` |
 | `io` | `Writer`, `Reader`, `ReadWriter`, `Closer` interface types; `ReadAll`, `EOF`, `Discard`, `WriteString` |
 | `gom` | Browser-native declarative DOM component library. **Types**: `Node` (interface), `NodeFunc`, `Group`. **Core**: `El(tag, children...)`, `Text(s)`, `Mount(sel, node)`, `MountTo(sel, node)`. **Attributes**: `Attr`, `Class`, `Href`, `Type`, `Src`, `Placeholder`, `DataAttr`, `Style`, `For`, `Name`, `Value`, `Target`, `Rel`, `Alt`, `Title`, `Draggable`, `Role`, `AriaLabel`, `StyleAttr`; boolean: `Disabled`, `Checked`, `Selected`, `Readonly`. **Logic**: `If(cond, node)`, `Map(slice, fn)`. **Elements**: full HTML element set (`Div`, `Span`, `Button`, `Input`, `Ul`, `Li`, `Table`, `Form`, `Img`, `A`, `H1`–`H6`, …) |
+| `testing` | **`testing.T`**: `Error`, `Errorf`, `Fatal`, `Fatalf`, `Fail`, `Failed`, `FailNow`, `Log`, `Logf`, `Skip`, `Skipf`, `Skipped`, `Helper`, `Run`, `Name`. **Package functions**: `Short()`, `Verbose()`. Tests are `func TestXxx(t *testing.T)` in `*_test.go` files, excluded from normal compilation and run via `gofront test`. |
 
 ### Packages & imports
 
@@ -604,7 +637,7 @@ These features are intentional additions for the JavaScript platform:
 | Feature | Purpose |
 |---|---|
 | `async func` / `await` | First-class async syntax for frontend work. |
-| Browser globals (`document`, `console`, etc.) | Predeclared as `any` for practical DOM access. |
+| Browser globals (`document`, `console`, etc.) | Predeclared as `any` for practical DOM access. `WebGL2RenderingContext`, `WebGLRenderingContext`, `GPUDevice`, `GPUAdapter`, `GPUQueue`, `ArrayBuffer`, `DataView`, and TypedArrays have full static typings with method-level checking. |
 | `.d.ts` type imports (`import "js:./types.d.ts"`) | Type-safe interop with JavaScript libraries. |
 | npm package resolution | Import types from `node_modules/` and `@types/` automatically. |
 
@@ -646,28 +679,33 @@ you know exactly what to expect.
 
 See [`docs/roadmap.md`](docs/roadmap.md) for the full roadmap and release history.
 Design documents for planned features are organised by release under `docs/v*/`
-(e.g. [`docs/v0.0.8/`](docs/v0.0.8/), [`docs/v0.0.9/`](docs/v0.0.9/)).
+(e.g. [`docs/v0.0.8/`](docs/v0.0.8/), [`docs/v1.2.0/`](docs/v1.2.0/), [`docs/v1.3.0/`](docs/v1.3.0/)).
 
 ---
 
 ## Tests
 
 ```sh
-npm run test:unit   # unit tests only (~1100 tests, no browser required)
-npm run test:e2e    # E2E tests (Playwright, headless Chromium)
-npm run test:all    # both
+npm run test:unit          # unit tests only (~1400 tests, no browser required)
+npm run test:perf          # zero-allocation benchmark (100k ray-triangle intersections, 0 bytes/frame)
+npm run test:examples      # GoFront-native unit tests across all example apps
+npm run test:examples:dom  # same, with JSDOM for DOM/gom/templ component testing
+npm run test:e2e           # E2E tests (Playwright, headless Chromium)
+npm run test:all           # all of the above
 ```
 
-**Unit tests** (~1118) cover language features, type errors, edge cases, DOM (jsdom),
+**Unit tests** (~1,396) cover language features, type errors, edge cases, DOM (jsdom),
 external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string
 formatting, map iteration order, integer overflow semantics, unused variable detection,
 unused import detection, semantic difference verification, stdlib shim packages, generics,
-and `.templ` file compilation (element rendering, interpolation, boolean attrs, component
-calls, `if/else/else-if` chains, `for range`, `switch/case/default`, `@templ.Raw()` raw
-HTML injection, mixed `.go`+`.templ` packages).
+the `testing` framework itself, and `.templ` file compilation (element rendering,
+interpolation, boolean attrs, component calls, `if/else/else-if` chains, `for range`,
+`switch/case/default`, `@templ.Raw()` raw HTML injection, SVG namespace handling, mixed
+`.go`+`.templ` packages).
 
-**E2E tests** (~104, Playwright) run all four example apps in a real browser and verify
+**E2E tests** (~104, Playwright) run all five example apps in a real browser and verify
 CRUD, filtering, priority mode, persistence (reload), drag-and-drop reordering, and sync
 status. Per-app suites check app-specific behaviour: scoped styles, stats bar, loading
-placeholder, `gom.If` conditional rendering, and templ-specific features (`if/else`
-priority hint, `for` loop rendering, conditional bool attributes).
+placeholder, `gom.If` conditional rendering, templ-specific features (`if/else`
+priority hint, `for` loop rendering, conditional bool attributes), and the WebGL2 cube
+rendering.

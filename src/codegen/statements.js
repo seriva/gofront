@@ -96,7 +96,11 @@ export const statementGenMethods = {
 		}
 		// Record source mapping: first output line this statement produced
 		if (srcLine != null && this.out.length > _line0) {
-			this._srcMappings.push({ genLine: _line0, srcLine: srcLine - 1 });
+			this._srcMappings.push({
+				genLine: _line0,
+				srcLine: srcLine - 1,
+				srcFileIdx: this._currentSrcFileIdx,
+			});
 		}
 	},
 

@@ -5,7 +5,10 @@ import "js:./browser.d.ts"
 // ── Input handling ────────────────────────────────────────────
 
 async func submitInput() {
-	input := document.querySelector(".todo-input")
+	input := refs["input"]
+	if input == nil {
+		return
+	}
 	text := strings.TrimSpace(input.value)
 
 	err := validateTodo(text)
@@ -15,7 +18,9 @@ async func submitInput() {
 		await sleep(2500)
 		errorMsg = ""
 		render()
-		document.querySelector(".todo-input").focus()
+		if refs["input"] != nil {
+			refs["input"].focus()
+		}
 		return
 	}
 
@@ -29,7 +34,9 @@ async func submitInput() {
 		highPriority = false
 	}
 	render()
-	document.querySelector(".todo-input").focus()
+	if refs["input"] != nil {
+		refs["input"].focus()
+	}
 	await triggerSave()
 }
 
@@ -168,5 +175,7 @@ async func main() {
 	}
 
 	render()
-	document.querySelector(".todo-input").focus()
+	if refs["input"] != nil {
+		refs["input"].focus()
+	}
 }

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
-import { compileFiles } from "../../../src/compiler.js";
+import { compileFiles, compileSingleFile } from "../../../src/compiler.js";
 import {
 	assert,
 	assertContains,
@@ -548,6 +548,104 @@ test("compileFiles with sourceMap embeds source content", () => {
 			Array.isArray(map.sourcesContent) && map.sourcesContent.length > 0,
 			"expected sourcesContent in source map",
 		);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("compileFiles with subpackage imports includes all packages in source map", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-multism-"));
+	try {
+		mkdirSync(join(dir, "math"));
+		writeFileSync(
+			join(dir, "math", "calc.go"),
+			`package math\nfunc Add(a, b int) int { return a + b }\n`,
+		);
+		const mainFile = join(dir, "main.go");
+		writeFileSync(
+			mainFile,
+			`package main\nimport "./math"\nfunc main() { console.log(math.Add(1, 2)) }\n`,
+		);
+		const { js } = compileFiles([mainFile], {
+			sourceMap: true,
+			outputDir: dir,
+		});
+		const b64 = js.split("base64,")[1].trim();
+		const map = JSON.parse(Buffer.from(b64, "base64").toString("utf8"));
+		assert(
+			map.sources.includes("math/calc.go"),
+			`expected math/calc.go in map.sources: ${JSON.stringify(map.sources)}`,
+		);
+		assert(
+			map.sources.includes("main.go"),
+			`expected main.go in map.sources: ${JSON.stringify(map.sources)}`,
+		);
+		assertEqual(map.sourcesContent.length, map.sources.length);
+		assert(map.sourcesContent.some((c) => c.includes("func Add")));
+		assert(map.sourcesContent.some((c) => c.includes("math.Add(1, 2)")));
+		const matches = js.match(/\/\/# sourceMappingURL=/g);
+		assertEqual(matches?.length, 1);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("compileSingleFile with subpackage includes all packages in source map", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-singlesm-"));
+	try {
+		mkdirSync(join(dir, "greet"));
+		writeFileSync(
+			join(dir, "greet", "hello.go"),
+			`package greet\nfunc Hello() string { return "hello" }\n`,
+		);
+		const mainFile = join(dir, "main.go");
+		writeFileSync(
+			mainFile,
+			`package main\nimport "./greet"\nfunc main() { console.log(greet.Hello()) }\n`,
+		);
+		const { js } = compileSingleFile(mainFile, {
+			sourceMap: true,
+			outputFile: join(dir, "out.js"),
+		});
+		const b64 = js.split("base64,")[1].trim();
+		const map = JSON.parse(Buffer.from(b64, "base64").toString("utf8"));
+		assert(
+			map.sources.includes("greet/hello.go"),
+			`expected greet/hello.go in map.sources: ${JSON.stringify(map.sources)}`,
+		);
+		assert(
+			map.sources.includes("main.go"),
+			`expected main.go in map.sources: ${JSON.stringify(map.sources)}`,
+		);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("multi-file package maps methods in second file to second file in source map", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-multifile-"));
+	try {
+		const typeFile = join(dir, "types.go");
+		const methodFile = join(dir, "methods.go");
+		writeFileSync(
+			typeFile,
+			`package main\ntype User struct{ Name string }\nfunc main() {}\n`,
+		);
+		writeFileSync(
+			methodFile,
+			`package main\nfunc (u *User) Greet() string { return "Hi " + u.Name }\n`,
+		);
+		const { js } = compileFiles([typeFile, methodFile], {
+			sourceMap: true,
+			outputDir: dir,
+		});
+		const b64 = js.split("base64,")[1].trim();
+		const map = JSON.parse(Buffer.from(b64, "base64").toString("utf8"));
+		assertEqual(
+			JSON.stringify(map.sources),
+			JSON.stringify(["types.go", "methods.go"]),
+		);
+		assert(map.mappings.length > 0, "expected mappings to not be empty");
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}

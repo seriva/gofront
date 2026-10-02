@@ -146,9 +146,9 @@ export const gomMethods = {
 			case "Style":
 				return `((s)=>({Mount(p){const e=document.createElement("style");e.textContent=s;p.appendChild(e);}})) (${args[0]})`;
 			case "Mount":
-				return `((sel,n)=>{const e=document.querySelector(sel);e.innerHTML="";n.Mount(e)})(${args[0]},${args[1]})`;
+				return `((sel,n,r)=>{const e=document.querySelector(sel);e.innerHTML="";n.Mount(e,r)})(${args[0]},${args[1]},${args[2] ?? "undefined"})`;
 			case "MountTo":
-				return `((sel,n)=>{const e=document.querySelector(sel);n.Mount(e)})(${args[0]},${args[1]})`;
+				return `((sel,n,r)=>{const e=document.querySelector(sel);n.Mount(e,r)})(${args[0]},${args[1]},${args[2] ?? "undefined"})`;
 		}
 		return undefined;
 	},
