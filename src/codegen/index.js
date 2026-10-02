@@ -27,6 +27,7 @@ import {
 	HELPER_ERROR,
 	HELPER_ERROR_IS,
 	HELPER_IFACE_BOX,
+	HELPER_INJECT_STYLES,
 	HELPER_LEN,
 	HELPER_PATH_CLEAN,
 	HELPER_S,
@@ -97,6 +98,7 @@ export class CodeGen {
 		this.structNames = new Set();
 		this.structFields = new Map();
 		this.namedWrapperNames = new Set();
+		this.collectedCss = [];
 		this.jsImports = jsImports;
 		this.bundledPackages = bundledPackages;
 		this.namedReturnVars = null; // names of current function's named return vars
@@ -191,6 +193,10 @@ export class CodeGen {
 	}
 
 	_callInitAndMain(initNames, program, isTest = false) {
+		if (this.collectedCss.length > 0) {
+			const uniqueCss = [...new Set(this.collectedCss)];
+			this.line(`__injectStyles(${JSON.stringify(uniqueCss.join("\n\n"))});`);
+		}
 		for (const name of initNames) this.line(`${name}();`);
 		if (
 			!isTest &&
@@ -201,6 +207,14 @@ export class CodeGen {
 
 	generate(program, options = {}) {
 		const isTest = options.isTest ?? false;
+		// Ensure _pkgName is set on all decls (generateAll sets it for
+		// multi-file; for single-file compiles we derive it from the AST).
+		const pkgName = program.pkg?.name;
+		if (pkgName) {
+			for (const d of program.decls) {
+				if (!d._pkgName) d._pkgName = pkgName;
+			}
+		}
 		this._renameReservedIdents(program.decls);
 		const methods = this._collectDecls(program);
 		this._emitJsImports();
@@ -227,7 +241,7 @@ export class CodeGen {
 		return this.out.join("\n");
 	}
 
-	// Emits FuncDecl and TemplDecl nodes; returns renamed init function names.
+	// Emits FuncDecl, TemplDecl, and CssDecl nodes; returns renamed init function names.
 	_emitFuncDecls(program) {
 		let initCount = 0;
 		const initNames = [];
@@ -246,6 +260,10 @@ export class CodeGen {
 			} else if (d.kind === "TemplDecl") {
 				this._currentSrcFileIdx = d._srcFileIdx ?? 0;
 				this.genTemplDecl(d);
+				this.blank();
+			} else if (d.kind === "CssDecl") {
+				this._currentSrcFileIdx = d._srcFileIdx ?? 0;
+				this.genCssDecl(d);
 				this.blank();
 			}
 		}
@@ -306,6 +324,7 @@ export class CodeGen {
 		MethodDecl: "_renameMethodDeclNode",
 		FuncLit: "_renameSignature",
 		TemplDecl: "_renameSignature",
+		CssDecl: "_renameSignature",
 		VarDecl: "_renameDeclSpecs",
 		ConstDecl: "_renameDeclSpecs",
 		TypeSwitchStmt: "_renameTypeSwitchNode",
@@ -381,6 +400,7 @@ export class CodeGen {
 	_prependHelpers(isTest = false) {
 		const needsTesting = isTest || this._usesTesting;
 		const HELPER_MAP = [
+			[this.collectedCss.length > 0, HELPER_INJECT_STYLES],
 			[this._usesLen, HELPER_LEN],
 			[this._usesAppend, HELPER_APPEND],
 			[this._usesSliceGuard, HELPER_S],
@@ -414,10 +434,15 @@ export class CodeGen {
 		for (let i = 0; i < programs.length; i++) {
 			for (const decl of programs[i].decls) {
 				decl._srcFileIdx = i;
+				decl._pkgName = programs[i].pkg?.name;
 			}
 		}
 		const merged = { decls: programs.flatMap((p) => p.decls) };
 		return this.generate(merged, options);
+	}
+
+	getCss() {
+		return [...new Set(this.collectedCss)].join("\n\n");
 	}
 
 	getMappings() {

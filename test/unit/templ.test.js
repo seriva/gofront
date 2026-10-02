@@ -1,5 +1,5 @@
 // GoFront test suite — .templ file support
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,7 +19,10 @@ import {
 function compilePkg(files) {
 	const dir = mkdtempSync(join(tmpdir(), "gofront-templ-"));
 	for (const [name, content] of Object.entries(files)) {
-		writeFileSync(join(dir, name), content);
+		const fullPath = join(dir, name);
+		const parent = fullPath.slice(0, fullPath.lastIndexOf("/"));
+		mkdirSync(parent, { recursive: true });
+		writeFileSync(fullPath, content);
 	}
 	return compileDir(dir);
 }
@@ -610,6 +613,154 @@ templ Bad() {
 	<div>
 		<p>unclosed
 }`,
+			}),
+		"unclosed",
+	);
+});
+
+// ── css declarations ──────────────────────────────────────────
+
+section("templ — css declarations");
+
+test("basic css declaration generates scoped class and function", () => {
+	const { js } = compilePkg({
+		"main.go": `package main
+func main() {
+	gom.Mount("#app", Card())
+}`,
+		"card.templ": `package main
+
+css cardStyle() {
+	background: #111;
+	color: #eee;
+}
+
+templ Card() {
+	<div class={ cardStyle() }>Card content</div>
+}`,
+	});
+	const { document } = runInDom(js, '<div id="app"></div>');
+	const el = document.querySelector("#app div");
+	assert(el.className.startsWith("gfc_cardStyle_"));
+	assertEqual(el.textContent, "Card content");
+	const style = document.getElementById("gofront-styles");
+	assert(style !== null);
+	assertContains(style.textContent, el.className);
+	assertContains(style.textContent, "background: #111;");
+});
+
+test("css declaration with CSS nesting and pseudo selectors", () => {
+	const { js } = compilePkg({
+		"main.go": `package main
+func main() {
+	gom.Mount("#app", Btn())
+}`,
+		"btn.templ": `package main
+
+css btnStyle() {
+	background: red;
+	&:hover {
+		background: blue;
+	}
+	@media (max-width: 600px) {
+		padding: 4px;
+	}
+}
+
+templ Btn() {
+	<button class={ btnStyle() }>Click</button>
+}`,
+	});
+	const { document } = runInDom(js, '<div id="app"></div>');
+	const el = document.querySelector("#app button");
+	assert(el.className.startsWith("gfc_btnStyle_"));
+	const style = document.getElementById("gofront-styles");
+	assertContains(style.textContent, "&:hover");
+	assertContains(style.textContent, "@media (max-width: 600px)");
+});
+
+test("css declaration preserves strings with braces and comments", () => {
+	const { js } = compilePkg({
+		"main.go": `package main
+func main() {
+	gom.Mount("#app", Box())
+}`,
+		"box.templ": `package main
+
+css boxStyle() {
+	/* comment with { nested } braces */
+	content: "{ hello }";
+	color: 'white';
+}
+
+templ Box() {
+	<div class={ boxStyle() }>Box</div>
+}`,
+	});
+	const { document } = runInDom(js, '<div id="app"></div>');
+	const el = document.querySelector("#app div");
+	assert(el.className.startsWith("gfc_boxStyle_"));
+	const style = document.getElementById("gofront-styles");
+	assertContains(style.textContent, 'content: "{ hello }";');
+});
+
+test("css declaration can be combined with other classes", () => {
+	const { js } = compilePkg({
+		"main.go": `package main
+func main() {
+	gom.Mount("#app", Item())
+}`,
+		"item.templ": `package main
+
+css itemStyle() {
+	border: 1px solid green;
+}
+
+templ Item() {
+	<div class={ "custom-item " + itemStyle() }>Item</div>
+}`,
+	});
+	const { document } = runInDom(js, '<div id="app"></div>');
+	const el = document.querySelector("#app div");
+	assert(el.className.includes("custom-item"));
+	assert(el.className.includes("gfc_itemStyle_"));
+});
+
+test("css declaration exported across packages", () => {
+	const { js } = compilePkg({
+		"main.go": `package main
+import "./ui"
+func main() {
+	gom.Mount("#app", Card())
+}`,
+		"ui/theme.templ": `package ui
+
+css CardStyle() {
+	padding: 16px;
+}`,
+		"card.templ": `package main
+import "./ui"
+
+templ Card() {
+	<div class={ ui.CardStyle() }>Card</div>
+}`,
+	});
+	const { document } = runInDom(js, '<div id="app"></div>');
+	const el = document.querySelector("#app div");
+	assert(el.className.startsWith("gfc_CardStyle_"));
+	const style = document.getElementById("gofront-styles");
+	assertContains(style.textContent, "padding: 16px;");
+});
+
+test("unclosed css block throws parse error", () => {
+	assertThrows(
+		() =>
+			compilePkg({
+				"main.go": "package main\nfunc main() {}",
+				"bad.templ": `package main
+css broken() {
+	color: red;
+`,
 			}),
 		"unclosed",
 	);

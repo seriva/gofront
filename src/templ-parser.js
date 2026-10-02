@@ -42,7 +42,36 @@ export class TemplParser extends Parser {
 
 	parseTopDecl() {
 		if (this.check(TT.TEMPL_KW)) return this.parseTemplDecl();
+		if (this.check(TT.CSS_KW)) return this.parseCssDecl();
 		return super.parseTopDecl();
+	}
+
+	// ── CssDecl ───────────────────────────────────────────────────
+
+	parseCssDecl() {
+		const _line = this.peek().line;
+		this.advance(); // consume CSS_KW
+
+		const name = this.expect(T.IDENT).value;
+
+		// Parse parameter list (standard Go params: LPAREN...RPAREN)
+		const params = this.parseParamList();
+
+		// Optional semicolon between ) and {
+		this.semi();
+
+		// Consume opening {
+		this.expect(T.LBRACE);
+
+		// Consume CSS_BODY
+		const bodyToken = this.expect(TT.CSS_BODY);
+		const cssText = bodyToken.value;
+
+		// Consume closing }
+		this.expect(T.RBRACE);
+		this.semi();
+
+		return { kind: "CssDecl", name, params, cssText, _line };
 	}
 
 	// ── TemplDecl ─────────────────────────────────────────────────
