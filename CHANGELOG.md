@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **`css` declarations in `.templ` files** — `css Name() { ... }` declarations colocate scoped CSS rules alongside `.templ` components matching the [templ.guide](https://templ.guide/syntax-and-usage/css-style-management) specification. Declarations compile to zero-overhead functions returning deterministic scoped class names (`gfc_<name>_<hash>`) and automatically inject the scoped CSS into `<head>` via a `<style id="gofront-styles">` element at app initialization. Nested selectors (`&`, media queries, keyframes) and comments are supported.
+- **`.templ` files in local packages** — package resolution (`resolver.js`) now discovers packages containing only `.templ` files, and the typechecker marks package imports referenced within `.templ` templates as used.
+
 ## [1.3.12] - 2026-10-02
 
 ### Added

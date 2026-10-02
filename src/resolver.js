@@ -65,7 +65,9 @@ export function resolveGwDir(importPath, fromFile) {
 	const fromDir = dirname(resolve(fromFile));
 	const dir = resolve(fromDir, importPath);
 	if (!existsSync(dir)) return null;
-	const gwFiles = readdirSync(dir).filter((f) => f.endsWith(".go"));
+	const gwFiles = readdirSync(dir).filter(
+		(f) => f.endsWith(".go") || f.endsWith(".templ"),
+	);
 	return gwFiles.length > 0 ? dir : null;
 }
 

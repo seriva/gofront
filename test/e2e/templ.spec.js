@@ -22,6 +22,19 @@ test("@templ.Raw injected a style tag into head", async ({ page }) => {
 	expect(styleCount).toBeGreaterThan(0);
 });
 
+test("templ css declaration scopes class and injects into head", async ({
+	page,
+}) => {
+	const card = page.locator(".card");
+	await expect(card).toBeVisible();
+	const classAttr = await card.getAttribute("class");
+	expect(classAttr).toContain("gfc_cardStyle_");
+	const gofrontStyles = page.locator("#gofront-styles");
+	await expect(gofrontStyles).toBeAttached();
+	const styleText = await gofrontStyles.textContent();
+	expect(styleText).toContain("box-shadow");
+});
+
 test("high-badge absent when no urgent todos", async ({ page }) => {
 	await expect(page.locator(S.highBadge)).not.toBeVisible();
 });

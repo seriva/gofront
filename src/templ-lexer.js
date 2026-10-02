@@ -35,6 +35,8 @@ export const TT = {
 	TEMPL_CASE: "TEMPL_CASE", // case expr:
 	TEMPL_DEFAULT: "TEMPL_DEFAULT", // default:
 	TEMPL_END: "TEMPL_END", // closing } of if/for/switch/templ body
+	CSS_KW: "css",
+	CSS_BODY: "CSS_BODY",
 };
 
 // Describes a parsed HTML attribute
@@ -123,6 +125,13 @@ export class TemplLexer {
 				continue;
 			}
 
+			// Detect `css` keyword at identifier boundaries
+			if (this._matchKeyword("css")) {
+				this.tokens.push(new Token(TT.CSS_KW, "css", this.line, this.col));
+				this._lexCssDecl();
+				continue;
+			}
+
 			// Everything else: scan to end of top-level declaration using the
 			// raw Go lexer, accumulating tokens until the next `templ` keyword
 			// or EOF.
@@ -135,7 +144,7 @@ export class TemplLexer {
 
 	// ── Go chunk lexing ──────────────────────────────────────────
 
-	// Scan ahead to find the next `templ ` keyword at top level (not inside
+	// Scan ahead to find the next `templ ` or `css ` keyword at top level (not inside
 	// braces/parens/strings/comments). Collect all source text up to that
 	// point, lex it as normal Go, and append the tokens.
 	_lexGoChunk() {
@@ -143,8 +152,12 @@ export class TemplLexer {
 		let depth = 0; // brace depth
 
 		while (!this.eof()) {
-			// Check for `templ` keyword at top level (depth === 0)
-			if (depth === 0 && this._peekKeyword("templ")) break;
+			// Check for `templ` or `css` keyword at top level (depth === 0)
+			if (
+				depth === 0 &&
+				(this._peekKeyword("templ") || this._peekKeyword("css"))
+			)
+				break;
 
 			const ch = this.peek();
 
@@ -220,6 +233,97 @@ export class TemplLexer {
 
 		// HTML body
 		this._lexHtmlBody(1);
+	}
+
+	// ── CSS declaration lexing ───────────────────────────────────
+
+	_lexCssDecl() {
+		this.skipWhitespace();
+
+		// Name (identifier)
+		const nameStart = this.pos;
+		while (!this.eof() && /\w/.test(this.peek())) this.advance();
+		const name = this.src.slice(nameStart, this.pos);
+		if (!name) this.err("expected name after 'css'");
+		this.tokens.push(new Token(T.IDENT, name, this.line, this.col));
+
+		this.skipWhitespace();
+
+		// Parameter list (balanced parens)
+		if (this.peek() !== "(") this.err("expected '(' after css name");
+		const paramStart = this.pos;
+		this._skipBalanced("(", ")");
+		const paramSrc = this.src.slice(paramStart, this.pos);
+		for (const t of this._goTokens(paramSrc)) this.tokens.push(t);
+
+		this.skipWhitespace();
+
+		// Opening { of body
+		if (this.peek() !== "{") this.err("expected '{' after css params");
+		this.advance(); // consume {
+		this.tokens.push(new Token(T.LBRACE, "{", this.line, this.col));
+
+		this._lexCssBody();
+	}
+
+	_skipCssString(quote) {
+		this.advance(); // consume opening quote
+		while (!this.eof()) {
+			const ch = this.peek();
+			if (ch === "\\") {
+				this.advance();
+				if (!this.eof()) this.advance();
+				continue;
+			}
+			if (ch === quote) {
+				this.advance();
+				return;
+			}
+			if (ch === "\n") {
+				this.err("unterminated string in css block");
+			}
+			this.advance();
+		}
+		this.err("unterminated string in css block");
+	}
+
+	_lexCssBody() {
+		const start = this.pos;
+		let depth = 1;
+		while (!this.eof()) {
+			const ch = this.peek();
+			// Skip CSS comments /* ... */
+			if (ch === "/" && this.peek(1) === "*") {
+				this.advance();
+				this.advance();
+				this.skipBlockComment();
+				continue;
+			}
+			// Skip strings
+			if (ch === '"' || ch === "'") {
+				this._skipCssString(ch);
+				continue;
+			}
+			if (ch === "{") {
+				depth++;
+				this.advance();
+			} else if (ch === "}") {
+				depth--;
+				if (depth === 0) {
+					const cssText = this.src.slice(start, this.pos);
+					this.tokens.push(
+						new Token(TT.CSS_BODY, cssText, this.line, this.col),
+					);
+					this.advance(); // consume closing }
+					this.tokens.push(new Token(T.RBRACE, "}", this.line, this.col));
+					return;
+				}
+				this.advance();
+			} else {
+				this.advance();
+			}
+		}
+		this.err("unclosed css block");
 	}
 
 	// Lex the HTML body of a templ declaration.

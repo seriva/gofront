@@ -283,6 +283,12 @@ example/templ/
 `.templ` syntax at a glance:
 
 ```go
+css cardStyle() {
+    background: #ffffff;
+    border-radius: 8px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
 templ TodoItem(t Todo) {
     <li class={ todoItemClass(t) } draggable="true" data-id={ t.id }>
         <input type="checkbox" checked?={ t.done }/>
@@ -294,7 +300,7 @@ templ TodoItem(t Todo) {
 }
 
 templ AppView() {
-    <div class="card">
+    <div class={ cardStyle() }>
         @Header(highCount(), syncMsg, syncCls)
         @TodoList(visibleTodos())
     </div>
@@ -302,6 +308,7 @@ templ AppView() {
 ```
 
 Key syntax features:
+- `css Name() { ... }` — scoped CSS declarations (templ.guide spec); compiles to a deterministic scoped class name (`gfc_<name>_<hash>`) and injects styles automatically into `<head>`
 - `{ expr }` — interpolate any Go expression (strings auto-cast, others use `String()`)
 - `attr={ expr }` — dynamic attribute value (expression)
 - `attr?={ expr }` — boolean attribute (present/absent based on truthiness)
@@ -369,8 +376,8 @@ parity with the other examples (priority mode, validation, localStorage persiste
 sync status, drag-and-drop reordering).
 
 The templ example additionally demonstrates: **`.templ` file compilation**, template
-components with parameters, `{ expr }` interpolation, `attr?={}` conditional boolean
-attributes, `@Component()` calls inside templates, `if / else if / else` chains,
+components with parameters, scoped `css` declarations (`css Name() { ... }`), `{ expr }` interpolation,
+`attr?={}` conditional boolean attributes, `@Component()` calls inside templates, `if / else if / else` chains,
 `switch` blocks, `for range` loops, and `@templ.Raw()` for trusted HTML injection —
 all inside template bodies.
 
@@ -620,7 +627,7 @@ signatures into GoFront's internal type representation.
 | Unused import detection | ✓ |
 | External `.d.ts` types | ✓ |
 | npm package type resolution | ✓ |
-| `.templ` files in packages | ✓ — mix `.go` and `.templ` files freely; templ components visible across the whole package |
+| `.templ` files in packages | ✓ — mix `.go` and `.templ` files freely; templ components and `css` declarations visible across the whole package |
 
 ---
 
@@ -694,18 +701,18 @@ npm run test:e2e           # E2E tests (Playwright, headless Chromium)
 npm run test:all           # all of the above
 ```
 
-**Unit tests** (~1,396) cover language features, type errors, edge cases, DOM (jsdom),
+**Unit tests** (~1,400+) cover language features, type errors, edge cases, DOM (jsdom),
 external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string
 formatting, map iteration order, integer overflow semantics, unused variable detection,
 unused import detection, semantic difference verification, stdlib shim packages, generics,
 the `testing` framework itself, and `.templ` file compilation (element rendering,
-interpolation, boolean attrs, component calls, `if/else/else-if` chains, `for range`,
-`switch/case/default`, `@templ.Raw()` raw HTML injection, SVG namespace handling, mixed
-`.go`+`.templ` packages).
+interpolation, boolean attrs, component calls, scoped `css` declarations with class hashing,
+`if/else/else-if` chains, `for range`, `switch/case/default`, `@templ.Raw()` raw HTML injection,
+SVG namespace handling, mixed `.go`+`.templ` packages).
 
-**E2E tests** (~104, Playwright) run all five example apps in a real browser and verify
+**E2E tests** (~105, Playwright) run all five example apps in a real browser and verify
 CRUD, filtering, priority mode, persistence (reload), drag-and-drop reordering, and sync
 status. Per-app suites check app-specific behaviour: scoped styles, stats bar, loading
-placeholder, `gom.If` conditional rendering, templ-specific features (`if/else`
-priority hint, `for` loop rendering, conditional bool attributes), and the WebGL2 cube
+placeholder, `gom.If` conditional rendering, templ-specific features (scoped `css` injection,
+`if/else` priority hint, `for` loop rendering, conditional bool attributes), and the WebGL2 cube
 rendering.
