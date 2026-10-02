@@ -310,7 +310,7 @@ export function compileSingleFile(inputPath, options = {}) {
 		attachSourceMap(merged, outputDir);
 	}
 
-	return { js: merged.js };
+	return { js: merged.js, css: cg.getCss() };
 }
 
 export function compileDir(dir, options = {}) {
@@ -398,9 +398,15 @@ export function compileFiles(files, options = {}) {
 		attachSourceMap(merged, outputDir);
 	}
 
+	const mainCss = codegen.getCss();
+	const allCss = [...preambles.map((p) => p.css).filter(Boolean), mainCss]
+		.filter(Boolean)
+		.join("\n\n");
+
 	return {
 		pkgName,
 		js: merged.js,
+		css: allCss,
 		programs,
 		exportedSymbols: checker.getExportedSymbols(),
 		exportedTypes: checker.getExportedTypes(),

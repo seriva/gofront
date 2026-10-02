@@ -26,6 +26,35 @@ export const templGenMethods = {
 		this.line("}");
 	},
 
+	genCssDecl(decl) {
+		if (decl.params && decl.params.length > 0) {
+			throw new Error(
+				`css ${decl.name}: parameterized css declarations are not yet supported`,
+			);
+		}
+		const className = this.getCssClassName(decl);
+		const scopedCss = `.${className} {\n${decl.cssText.trim()}\n}`;
+		this.collectedCss.push(scopedCss);
+
+		this.line(`function ${decl.name}() {`);
+		this.indented(() => {
+			this.line(`return ${JSON.stringify(className)};`);
+		});
+		this.line("}");
+	},
+
+	getCssClassName(decl) {
+		if (decl._className) return decl._className;
+		let h = 2166136261 >>> 0;
+		const str = `${decl._pkgName || ""}_${decl.name}_${decl.cssText}`;
+		for (let i = 0; i < str.length; i++) {
+			h = Math.imul(h ^ str.charCodeAt(i), 16777619) >>> 0;
+		}
+		const hash = (h >>> 0).toString(36);
+		decl._className = `gfc_${decl.name}_${hash}`;
+		return decl._className;
+	},
+
 	// Emit mount statements for an array of TemplNodes into parent variable `p`.
 	_genTemplNodes(nodes, p) {
 		if (!nodes || nodes.length === 0) return;

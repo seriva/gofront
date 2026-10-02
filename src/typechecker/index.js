@@ -241,6 +241,7 @@ export class TypeChecker {
 				if (d.kind === "FuncDecl" || d.kind === "MethodDecl")
 					this.collectFunc(d);
 				else if (d.kind === "TemplDecl") this._collectTemplDecl(d);
+				else if (d.kind === "CssDecl") this._collectCssDecl(d);
 			}
 		}
 	}
@@ -267,7 +268,11 @@ export class TypeChecker {
 		for (const p of programs) {
 			this._setCurrentFile(p);
 			for (const d of p.decls) {
-				if (d.kind === "FuncDecl" || d.kind === "MethodDecl") {
+				if (
+					d.kind === "FuncDecl" ||
+					d.kind === "MethodDecl" ||
+					d.kind === "TemplDecl"
+				) {
 					this.checkTopDecl(d, this.globals);
 				}
 			}
@@ -457,9 +462,69 @@ export class TypeChecker {
 				this.checkConstDecl(decl, scope);
 				break;
 			case "TypeDecl":
+			case "CssDecl":
+				break;
 			case "TemplDecl":
-				break; // already collected / no body to check
+				this._markTemplNodesUsed(decl.body);
+				break;
 		}
+	}
+
+	_markTokensUsed(tokens) {
+		if (!tokens) return;
+		for (const t of tokens) {
+			if (t.type === "IDENT" || t.type?.name === "IDENT") {
+				this.globals.lookup(t.value);
+			}
+		}
+	}
+
+	_markTemplNodesUsed(nodes) {
+		if (!nodes) return;
+		for (const n of nodes) {
+			if (n.kind === "TemplElement") {
+				for (const a of n.attrs || []) {
+					if (a.tokens) this._markTokensUsed(a.tokens);
+				}
+				this._markTemplNodesUsed(n.children);
+			} else if (n.kind === "TemplExpr" || n.kind === "TemplComponent") {
+				this._markTokensUsed(n.tokens);
+			} else if (n.kind === "TemplIf") {
+				this._markTokensUsed(n.condTokens);
+				this._markTemplNodesUsed(n.then);
+				this._markTemplNodesUsed(n.else_);
+			} else if (n.kind === "TemplFor") {
+				this._markTokensUsed(n.stmtTokens);
+				this._markTemplNodesUsed(n.body);
+			} else if (n.kind === "TemplSwitch") {
+				this._markTokensUsed(n.exprTokens);
+				for (const c of n.cases || []) {
+					this._markTokensUsed(c.caseTokens);
+					this._markTemplNodesUsed(c.body);
+				}
+			}
+		}
+	}
+
+	_collectCssDecl(decl) {
+		const paramTypes = (decl.params || []).map((p) =>
+			this.resolveTypeNode(p.type, this.globals),
+		);
+		const stringType = this.types.get("string") ?? {
+			kind: "basic",
+			name: "string",
+		};
+		const funcType = {
+			kind: "func",
+			params: paramTypes,
+			returns: [stringType],
+			variadic: false,
+			async: false,
+		};
+		if (this.globals.symbols.has(decl.name) && decl.name !== "init") {
+			this.err(`${decl.name} redeclared in this block`, decl);
+		}
+		this.globals.define(decl.name, funcType);
 	}
 
 	_collectTemplDecl(decl) {

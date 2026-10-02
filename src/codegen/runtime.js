@@ -312,3 +312,14 @@ var __GoFront_T = __GoFront_T || class {
   }
 };
 var __testing_T = __GoFront_T;`;
+
+export const HELPER_INJECT_STYLES = `var __injectStyles = __injectStyles || function(css) {
+  if (typeof document === "undefined" || !document || !document.head || !css) return;
+  let s = document.getElementById("gofront-styles");
+  if (!s) {
+    s = document.createElement("style");
+    s.id = "gofront-styles";
+    document.head.appendChild(s);
+  }
+  s.textContent += "\\n" + css;
+};`;

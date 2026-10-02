@@ -8,6 +8,19 @@ features (e.g. `docs/v0.0.5/`).
 
 ---
 
+## v1.4.0
+
+**Theme: Component-colocated CSS in `.templ` files.** Add native support for official [templ.guide](https://templ.guide) `css Name() { ... }` declarations, scoped class generation, and static stylesheet extraction. Design document in [`docs/v1.4.0/templ-css-plan.md`](v1.4.0/templ-css-plan.md).
+
+| Area | Difficulty | Status | Notes |
+|---|---|---|---|
+| `css` declaration lexing | Medium | ✅ Done | Add `TT.CSS_KW` and nested brace CSS scanning in `TemplLexer`. |
+| `CssDecl` AST node & parsing | Low | ✅ Done | Parse top-level `css Name() { ... }` in `TemplParser`. |
+| Type-checker registration | Low | ✅ Done | Register `css` declarations as `func() string` in package scope. |
+| Scoped class codegen & CSS extraction | Medium | ✅ Done | Hash class names (`gfc_<name>_<hash>`), emit class function, and collect static CSS into bundle. |
+
+---
+
 ## v1.3.7
 
 **Theme: Type-checker and codegen fixes surfaced by the SimpleFPS port.** No new language features.

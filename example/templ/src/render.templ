@@ -4,6 +4,14 @@ import "./utils"
 
 // ── Styles injection ──────────────────────────────────────────
 
+css cardStyle() {
+	box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+}
+
+css badgeStyle() {
+	letter-spacing: 0.04em;
+}
+
 templ AppStyles() {
 	@templ.Raw("<style>" + appStyles() + "</style>")
 }
@@ -15,7 +23,7 @@ templ TodoItem(t Todo) {
 		<input type="checkbox" class="todo-cb" data-action="toggle" data-todo-id={ t.id } checked?={ t.done }/>
 		<span class="todo-text">{ t.text }</span>
 		if t.isUrgent() {
-			<span class="badge">urgent</span>
+			<span class={ "badge " + badgeStyle() }>urgent</span>
 		}
 		<button class="del-btn" type="button" data-action="delete" data-todo-id={ t.id }>✕</button>
 	</li>
@@ -118,7 +126,7 @@ templ StatsBar(n int) {
 // ── App root ──────────────────────────────────────────────────
 
 templ AppView() {
-	<div class="card">
+	<div class={ "card " + cardStyle() }>
 		@Header(highCount(), syncMsg, syncCls)
 		@InputRow(highPriority, errorMsg)
 		<div class="list-divider"></div>
