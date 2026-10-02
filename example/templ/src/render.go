@@ -75,6 +75,8 @@ func completedCount() int {
 
 // ── Render ────────────────────────────────────────────────────
 
+var refs = map[string]any{}
+
 func render() {
-	gom.Mount("#app", AppView())
+	gom.Mount("#app", AppView(), refs)
 }

@@ -368,9 +368,14 @@ export class TemplLexer {
 				const exprTokens = this._readGoExprInBraces();
 				attrs.push({ kind: "expr", name: attrName, tokens: exprTokens });
 			} else if (this.peek() === '"') {
-				// Static string attribute
+				// Static string attribute (or ref capture)
 				const value = this._readQuotedString();
-				attrs.push({ kind: "static", name: attrName, value });
+				if (attrName === "ref") {
+					// ref="fieldName" — element reference capture, not a DOM attribute
+					attrs.push({ kind: "ref", value });
+				} else {
+					attrs.push({ kind: "static", name: attrName, value });
+				}
 			} else {
 				// Unquoted attribute value
 				let val = "";

@@ -96,7 +96,7 @@ templ Header(hc int, msg string, cls string) {
 
 templ InputRow(highPri bool, errMsg string) {
 	<div class="input-row">
-		<input class={ inputClass(highPri) } type="text" placeholder={ inputPlaceholder(highPri) } autocomplete="off"/>
+		<input ref="input" class={ inputClass(highPri) } type="text" placeholder={ inputPlaceholder(highPri) } autocomplete="off"/>
 		<button class={ priorityBtnClass(highPri) } type="button" data-action="priority">{ priorityBtnText(highPri) }</button>
 		<button class="add-btn" type="button" data-action="add">Add</button>
 		if errMsg != "" {

@@ -127,6 +127,8 @@ const FilterCompleted = 2;
 const PriorityNormal = 0;
 const PriorityHigh = 1;
 
+let refs = {  };
+
 let todos = [];
 
 let nextId = 0;
@@ -146,7 +148,10 @@ let syncCls = "";
 let errorMsg = "";
 
 async function submitInput() {
-  let input = document.querySelector(".todo-input");
+  let input = (refs["input"] ?? null);
+  if (input == null) {
+    return;
+  }
   let text = input.value.trim();
   let err = validateTodo(text);
   if (err != null) {
@@ -155,7 +160,9 @@ async function submitInput() {
     await sleep(2500);
     errorMsg = "";
     render();
-    document.querySelector(".todo-input").focus();
+    if ((refs["input"] ?? null) != null) {
+      (refs["input"] ?? null).focus();
+    }
     return;
   }
   errorMsg = "";
@@ -168,7 +175,9 @@ async function submitInput() {
     highPriority = false;
   }
   render();
-  document.querySelector(".todo-input").focus();
+  if ((refs["input"] ?? null) != null) {
+    (refs["input"] ?? null).focus();
+  }
   await triggerSave();
 }
 
@@ -294,7 +303,7 @@ function setupEvents() {
 }
 
 async function main() {
-  ((sel,n)=>{const e=document.querySelector(sel);n.Mount(e)})("head",AppStyles());
+  ((sel,n,r)=>{const e=document.querySelector(sel);n.Mount(e,r)})("head",AppStyles(),undefined);
   render();
   setupEvents();
   let loadErr = await loadTodos();
@@ -307,7 +316,9 @@ async function main() {
     toggleTodo(0);
   }
   render();
-  document.querySelector(".todo-input").focus();
+  if ((refs["input"] ?? null) != null) {
+    (refs["input"] ?? null).focus();
+  }
 }
 
 function todoItemClass(t) {
@@ -380,17 +391,17 @@ function completedCount() {
 }
 
 function render() {
-  ((sel,n)=>{const e=document.querySelector(sel);e.innerHTML="";n.Mount(e)})("#app",AppView());
+  ((sel,n,r)=>{const e=document.querySelector(sel);e.innerHTML="";n.Mount(e,r)})("#app",AppView(),refs);
 }
 
 function AppStyles() {
-  return {Mount(___p) {
+  return {Mount(___p, ___refs) {
     ___p.insertAdjacentHTML("beforeend", "<style>" + appStyles() + "</style>");
   }};
 }
 
 function TodoItem(t) {
-  return {Mount(___p) {
+  return {Mount(___p, ___refs) {
     const ___e1 = document.createElement("li");
     ___e1.className = todoItemClass(t);
     ___e1.setAttribute("draggable", "true");
@@ -424,7 +435,7 @@ function TodoItem(t) {
 }
 
 function TodoList(visible) {
-  return {Mount(___p) {
+  return {Mount(___p, ___refs) {
     const ___e6 = document.createElement("ul");
     ___e6.className = "todo-list";
     if (__len(visible) === 0) {
@@ -434,7 +445,7 @@ function TodoList(visible) {
       ___e6.appendChild(___e7);
     } else {
       for (const t of visible) {
-        (TodoItem(t)).Mount(___e6);
+        (TodoItem(t)).Mount(___e6, ___refs);
       }
     }
     ___p.appendChild(___e6);
@@ -442,7 +453,7 @@ function TodoList(visible) {
 }
 
 function FilterButton(f, active) {
-  return {Mount(___p) {
+  return {Mount(___p, ___refs) {
     const ___e8 = document.createElement("button");
     ___e8.className = filterBtnClass(f, active);
     ___e8.setAttribute("data-action", "filter");
@@ -463,18 +474,18 @@ function FilterButton(f, active) {
 }
 
 function FilterBar(activeFilter) {
-  return {Mount(___p) {
+  return {Mount(___p, ___refs) {
     const ___e9 = document.createElement("div");
     ___e9.className = "filter-bar";
-    (FilterButton(FilterAll, activeFilter)).Mount(___e9);
-    (FilterButton(FilterActive, activeFilter)).Mount(___e9);
-    (FilterButton(FilterCompleted, activeFilter)).Mount(___e9);
+    (FilterButton(FilterAll, activeFilter)).Mount(___e9, ___refs);
+    (FilterButton(FilterActive, activeFilter)).Mount(___e9, ___refs);
+    (FilterButton(FilterCompleted, activeFilter)).Mount(___e9, ___refs);
     ___p.appendChild(___e9);
   }};
 }
 
 function Footer(todos, activeFilter) {
-  return {Mount(___p) {
+  return {Mount(___p, ___refs) {
     const ___e10 = document.createElement("footer");
     ___e10.className = "footer";
     if (__len(todos) > 0) {
@@ -482,7 +493,7 @@ function Footer(todos, activeFilter) {
       ___e11.className = "count";
       ___e11.appendChild(document.createTextNode(String(footerCountText())));
       ___e10.appendChild(___e11);
-      (FilterBar(activeFilter)).Mount(___e10);
+      (FilterBar(activeFilter)).Mount(___e10, ___refs);
       if (completedCount() > 0) {
         const ___e12 = document.createElement("button");
         ___e12.className = "clear-btn";
@@ -499,7 +510,7 @@ function Footer(todos, activeFilter) {
 }
 
 function SyncStatus(msg, cls) {
-  return {Mount(___p) {
+  return {Mount(___p, ___refs) {
     const ___e13 = document.createElement("span");
     ___e13.className = syncStatusClass(cls);
     ___e13.appendChild(document.createTextNode(String(msg)));
@@ -508,7 +519,7 @@ function SyncStatus(msg, cls) {
 }
 
 function Header(hc, msg, cls) {
-  return {Mount(___p) {
+  return {Mount(___p, ___refs) {
     const ___e14 = document.createElement("header");
     ___e14.className = "header";
     const ___e15 = document.createElement("div");
@@ -527,7 +538,7 @@ function Header(hc, msg, cls) {
       ___e18.appendChild(document.createTextNode("urgent"));
       ___e15.appendChild(___e18);
     }
-    (SyncStatus(msg, cls)).Mount(___e15);
+    (SyncStatus(msg, cls)).Mount(___e15, ___refs);
     ___e14.appendChild(___e15);
     const ___e19 = document.createElement("p");
     ___e19.className = "tagline";
@@ -546,10 +557,11 @@ function Header(hc, msg, cls) {
 }
 
 function InputRow(highPri, errMsg) {
-  return {Mount(___p) {
+  return {Mount(___p, ___refs) {
     const ___e22 = document.createElement("div");
     ___e22.className = "input-row";
     const ___e23 = document.createElement("input");
+    if(___refs)___refs["input"]=___e23;
     ___e23.className = inputClass(highPri);
     ___e23.setAttribute("type", "text");
     ___e23.setAttribute("placeholder", String(inputPlaceholder(highPri)));
@@ -583,7 +595,7 @@ function InputRow(highPri, errMsg) {
 }
 
 function StatsBar(n) {
-  return {Mount(___p) {
+  return {Mount(___p, ___refs) {
     const ___e28 = document.createElement("div");
     ___e28.className = "stats-bar";
     const ___e29 = document.createElement("span");
@@ -599,17 +611,17 @@ function StatsBar(n) {
 }
 
 function AppView() {
-  return {Mount(___p) {
+  return {Mount(___p, ___refs) {
     const ___e31 = document.createElement("div");
     ___e31.className = "card";
-    (Header(highCount(), syncMsg, syncCls)).Mount(___e31);
-    (InputRow(highPriority, errorMsg)).Mount(___e31);
+    (Header(highCount(), syncMsg, syncCls)).Mount(___e31, ___refs);
+    (InputRow(highPriority, errorMsg)).Mount(___e31, ___refs);
     const ___e32 = document.createElement("div");
     ___e32.className = "list-divider";
     ___e31.appendChild(___e32);
-    (TodoList(visibleTodos())).Mount(___e31);
-    (Footer(todos, filter)).Mount(___e31);
-    (StatsBar(__len(todos))).Mount(___e31);
+    (TodoList(visibleTodos())).Mount(___e31, ___refs);
+    (Footer(todos, filter)).Mount(___e31, ___refs);
+    (StatsBar(__len(todos))).Mount(___e31, ___refs);
     ___p.appendChild(___e31);
   }};
 }

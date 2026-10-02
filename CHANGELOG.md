@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.3.12] - 2026-10-02
+
+### Added
+- **`ref` attribute in `.templ` templates** — elements in `.templ` files can now specify `ref="name"` to capture direct DOM element references at mount time without runtime DOM querying. The captured elements are populated into an optional `refs map[string]any` parameter passed to `gom.Mount(selector, node, [refs])` or `gom.MountTo(selector, node, [refs])`. `ref` attributes are stripped from output HTML and forwarded through nested `@Component()` invocations.
+- **Multi-package source-map resolution** — source maps for builds that inline subpackage dependencies now correctly map line numbers and embed sources for all bundled packages instead of only the entry package.
+
 ## [1.3.11] - 2026-10-01
 
 ### Added
