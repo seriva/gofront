@@ -53,8 +53,18 @@ export function setupExtendedGlobals(globals, types) {
 		DataAttr: { kind: "func", params: [STRING, STRING], returns: [GOM_NODE_T] },
 		If: { kind: "func", params: [BOOL, GOM_NODE_T], returns: [GOM_NODE_T] },
 		Map: { kind: "func", params: [ANY, ANY], returns: [GOM_NODE_T] },
-		Mount: { kind: "func", params: [STRING, GOM_NODE_T], returns: [VOID] },
-		MountTo: { kind: "func", params: [STRING, GOM_NODE_T], returns: [VOID] },
+		Mount: {
+			kind: "func",
+			params: [STRING, GOM_NODE_T, ANY],
+			variadic: true,
+			returns: [VOID],
+		},
+		MountTo: {
+			kind: "func",
+			params: [STRING, GOM_NODE_T, ANY],
+			variadic: true,
+			returns: [VOID],
+		},
 	};
 	for (const name of [
 		"Div",

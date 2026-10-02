@@ -25,7 +25,10 @@ export function buildSourceMap(sources, mappings, sourcesContent) {
 	let prevSrcLine = 0;
 	let prevSrcFile = 0;
 	const maxGen = mappings.reduce((m, e) => Math.max(m, e.genLine), -1);
-	const byLine = new Map(mappings.map((e) => [e.genLine, e]));
+	const byLine = new Map();
+	for (const m of mappings) {
+		if (!byLine.has(m.genLine)) byLine.set(m.genLine, m);
+	}
 	for (let g = 0; g <= maxGen; g++) {
 		const entry = byLine.get(g);
 		if (entry) {
@@ -47,7 +50,7 @@ export function buildSourceMap(sources, mappings, sourcesContent) {
 	}
 	const map = {
 		version: 3,
-		sources,
+		sources: sources.map((s) => s.replace(/\\/g, "/")),
 		names: [],
 		mappings: lines.join(";"),
 	};

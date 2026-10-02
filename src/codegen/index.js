@@ -208,8 +208,22 @@ export class CodeGen {
 		this._emitVarConstDecls(program);
 		const initNames = this._emitFuncDecls(program);
 		this._callInitAndMain(initNames, program, isTest);
-		this._prependHelpers(isTest);
-		while (this.out[0] === "") this.out.shift();
+		const prependedLines = this._prependHelpers(isTest);
+		return this._finalizeOutput(prependedLines);
+	}
+
+	_finalizeOutput(prependedLines) {
+		let shiftedLines = 0;
+		while (this.out[0] === "") {
+			this.out.shift();
+			shiftedLines++;
+		}
+		const netShift = prependedLines - shiftedLines;
+		if (netShift !== 0) {
+			for (const m of this._srcMappings) {
+				m.genLine = Math.max(0, m.genLine + netShift);
+			}
+		}
 		return this.out.join("\n");
 	}
 
@@ -385,7 +399,13 @@ export class CodeGen {
 			[needsTesting, HELPER_TESTING],
 		];
 		const helpers = HELPER_MAP.filter(([flag]) => flag).map(([, h]) => h);
-		if (helpers.length > 0) this.out.unshift(...helpers, "");
+		if (helpers.length > 0) {
+			const helperLines = helpers.flatMap((h) => h.split("\n"));
+			helperLines.push("");
+			this.out.unshift(...helperLines);
+			return helperLines.length;
+		}
+		return 0;
 	}
 
 	// Generate a single bundle from multiple programs (same-package multi-file).
@@ -398,6 +418,10 @@ export class CodeGen {
 		}
 		const merged = { decls: programs.flatMap((p) => p.decls) };
 		return this.generate(merged, options);
+	}
+
+	getMappings() {
+		return this._srcMappings;
 	}
 
 	// Returns a source map JSON string for the last generate() call.
@@ -581,9 +605,11 @@ export class CodeGen {
 	}
 
 	genMethod(decl, recvField = null) {
+		const prevFileIdx = this._currentSrcFileIdx;
+		if (decl._srcFileIdx != null) this._currentSrcFileIdx = decl._srcFileIdx;
 		const params = decl.params.map((p) => p.name).join(", ");
 		const asyncPrefix = decl.async ? "async " : "";
-		this.line(`${asyncPrefix}${decl.name}(${params}) {`);
+		this.line(`${asyncPrefix}${decl.name}(${params}) {`, decl._line ?? null);
 		const prevBoxed = this._boxedVars;
 		this._boxedVars = new Set();
 		this._scanAddressTaken(decl.body);
@@ -605,6 +631,7 @@ export class CodeGen {
 		this._unwrappedRecv = prevUnwrapped;
 		this._boxedVars = prevBoxed;
 		this.line("}");
+		this._currentSrcFileIdx = prevFileIdx;
 	}
 
 	// Value receivers are copies in Go; only materialize the copy when the body mutates it.
@@ -648,10 +675,7 @@ export class CodeGen {
 			.join(", ");
 		const asyncPrefix = decl.async ? "async " : "";
 		const srcLine = decl._line ?? null;
-		this.line(
-			`${asyncPrefix}function ${name}(${params}) {`,
-			srcLine ? srcLine - 1 : null,
-		);
+		this.line(`${asyncPrefix}function ${name}(${params}) {`, srcLine);
 		const prevBoxed = this._boxedVars;
 		this._boxedVars = new Set();
 		this._scanAddressTaken(decl.body);

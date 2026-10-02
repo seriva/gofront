@@ -294,7 +294,7 @@ function setupEvents() {
 }
 
 async function main() {
-  ((sel,n)=>{const e=document.querySelector(sel);n.Mount(e)})("head",((s)=>({Mount(p){const e=document.createElement("style");e.textContent=s;p.appendChild(e);}})) (appStyles()));
+  ((sel,n,r)=>{const e=document.querySelector(sel);n.Mount(e,r)})("head",((s)=>({Mount(p){const e=document.createElement("style");e.textContent=s;p.appendChild(e);}})) (appStyles()),undefined);
   render();
   setupEvents();
   let loadErr = await loadTodos();
@@ -398,7 +398,7 @@ function appView() {
 }
 
 function render() {
-  ((sel,n)=>{const e=document.querySelector(sel);e.innerHTML="";n.Mount(e)})("#app",appView());
+  ((sel,n,r)=>{const e=document.querySelector(sel);e.innerHTML="";n.Mount(e,r)})("#app",appView(),undefined);
 }
 
 function validateTodo(text) {

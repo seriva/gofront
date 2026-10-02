@@ -20,6 +20,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { CodeGen } from "./codegen/index.js";
+import { buildSourceMap } from "./codegen/source-map.js";
 import { log } from "./colors.js";
 import { parseDts } from "./dts-parser.js";
 import { Lexer } from "./lexer.js";
@@ -74,6 +75,87 @@ export function gwFilesIn(dir, { includeTests = false } = {}) {
 		.map((f) => join(dir, f));
 }
 
+function normalizeChunk(c) {
+	if (typeof c === "string") {
+		return { js: c, sourceFiles: [], sourcesContent: [], mappings: [] };
+	}
+	return c;
+}
+
+function appendChunkMappings(dest, mappings, localToUnifiedIdx, lineOffset) {
+	if (!mappings) return;
+	for (const m of mappings) {
+		dest.push({
+			genLine: m.genLine + lineOffset,
+			srcLine: m.srcLine,
+			srcFileIdx: localToUnifiedIdx[m.srcFileIdx ?? 0] ?? 0,
+		});
+	}
+}
+
+function mergeCompilationChunks(chunks) {
+	const activeChunks = chunks
+		.filter(Boolean)
+		.map(normalizeChunk)
+		.filter((c) => c.js.length > 0);
+
+	if (activeChunks.length === 0) {
+		return { js: "", sourceFiles: [], sourcesContent: [], mappings: [] };
+	}
+
+	const unifiedSources = [];
+	const unifiedSourcesContent = [];
+	const fileIdxMap = new Map();
+
+	function getOrAddFile(filePath, content) {
+		const key = resolve(filePath);
+		let idx = fileIdxMap.get(key);
+		if (idx === undefined) {
+			idx = unifiedSources.length;
+			fileIdxMap.set(key, idx);
+			unifiedSources.push(key);
+			unifiedSourcesContent.push(content);
+		}
+		return idx;
+	}
+
+	const combinedJsParts = [];
+	const mergedMappings = [];
+	let currentLineOffset = 0;
+
+	for (const chunk of activeChunks) {
+		combinedJsParts.push(chunk.js);
+		const localToUnifiedIdx = (chunk.sourceFiles ?? []).map((file, i) =>
+			getOrAddFile(file, chunk.sourcesContent?.[i] ?? ""),
+		);
+		appendChunkMappings(
+			mergedMappings,
+			chunk.mappings,
+			localToUnifiedIdx,
+			currentLineOffset,
+		);
+		currentLineOffset += chunk.js.split("\n").length;
+	}
+
+	return {
+		js: combinedJsParts.join("\n"),
+		sourceFiles: unifiedSources,
+		sourcesContent: unifiedSourcesContent,
+		mappings: mergedMappings,
+	};
+}
+
+function attachSourceMap(merged, outputDir) {
+	const relativeSources = merged.sourceFiles.map((f) => relative(outputDir, f));
+	const mapJson = buildSourceMap(
+		relativeSources,
+		merged.mappings,
+		merged.sourcesContent,
+	);
+	const b64 = Buffer.from(mapJson).toString("base64");
+	merged.js += `\n//# sourceMappingURL=data:application/json;base64,${b64}`;
+}
+
 // ── Import resolution ─────────────────────────────────────────
 //
 // Shared by compileFiles (multi-file) and the single-file path in index.js.
@@ -87,6 +169,7 @@ export function resolveImports(
 	bundledPackages,
 	preambles,
 	bundledDirs = new Set(),
+	options = {},
 ) {
 	const fromDir = dirname(resolve(fromFile));
 	const allImports = programs.flatMap((p) => p.imports);
@@ -137,8 +220,12 @@ export function resolveImports(
 				const depKey = resolve(depDir);
 				const alreadyBundled = bundledDirs.has(depKey);
 				bundledDirs.add(depKey);
-				const dep = compileDir(depDir, { bundledDirs });
-				if (!alreadyBundled) preambles.push(dep.js);
+				const dep = compileDir(depDir, {
+					...options,
+					bundledDirs,
+					isDependency: true,
+				});
+				if (!alreadyBundled) preambles.push(dep);
 				if (alias === "_") continue;
 				if (alias === ".") {
 					checker.addDefinitions(dep.exportedTypes, dep.exportedSymbols);
@@ -181,6 +268,10 @@ export function compileSingleFile(inputPath, options = {}) {
 	ast._source = source;
 	if (dumpAst) return { ast };
 
+	const outputDir =
+		options.outputDir ??
+		(outputFile ? dirname(resolve(outputFile)) : resolve("."));
+
 	const checker = new TypeChecker();
 	const jsImports = new Map();
 	const bundledPackages = new Set();
@@ -193,6 +284,8 @@ export function compileSingleFile(inputPath, options = {}) {
 		jsImports,
 		bundledPackages,
 		preambles,
+		options.bundledDirs ?? new Set(),
+		{ ...options, outputDir },
 	);
 
 	const errors = checker.check(ast);
@@ -202,18 +295,22 @@ export function compileSingleFile(inputPath, options = {}) {
 	}
 
 	const cg = new CodeGen(checker, jsImports, bundledPackages);
-	let js = cg.generate(ast);
+	const mainJs = cg.generate(ast);
 
-	if (sourceMap) {
-		const outputDir = outputFile ? dirname(resolve(outputFile)) : resolve(".");
-		const srcPath = relative(outputDir, inputPath);
-		const map = cg.getSourceMap(srcPath, [source]);
-		const b64 = Buffer.from(map).toString("base64");
-		js += `\n//# sourceMappingURL=data:application/json;base64,${b64}`;
+	const mainChunk = {
+		js: mainJs,
+		sourceFiles: [resolve(inputPath)],
+		sourcesContent: [source],
+		mappings: cg.getMappings(),
+	};
+
+	const merged = mergeCompilationChunks([...preambles, mainChunk]);
+
+	if (sourceMap && !options.isDependency) {
+		attachSourceMap(merged, outputDir);
 	}
 
-	const output = preambles.length > 0 ? `${preambles.join("\n")}\n${js}` : js;
-	return { js: output };
+	return { js: merged.js };
 }
 
 export function compileDir(dir, options = {}) {
@@ -230,6 +327,9 @@ export function compilePackageTests(dir, options = {}) {
 
 export function compileFiles(files, options = {}) {
 	const fromDir = options.fromDir ?? dirname(resolve(files[0]));
+	const outputDir =
+		options.outputDir ??
+		(options.outputFile ? dirname(resolve(options.outputFile)) : fromDir);
 
 	// ── 1. Parse ─────────────────────────────────────────────────
 	const parseErrors = [];
@@ -257,7 +357,7 @@ export function compileFiles(files, options = {}) {
 	const checker = new TypeChecker();
 	const jsImports = new Map(); // npm imports → exported names (for ESM emit)
 	const bundledPackages = new Set(); // package names whose code is inlined
-	const preambles = []; // JS code from compiled sub-packages
+	const preambles = []; // JS code / chunks from compiled sub-packages
 
 	const dummyFromFile = join(fromDir, "_dummy.go");
 	resolveImports(
@@ -268,6 +368,7 @@ export function compileFiles(files, options = {}) {
 		bundledPackages,
 		preambles,
 		options.bundledDirs ?? new Set(),
+		{ ...options, outputDir },
 	);
 
 	// ── 3. Type-check ─────────────────────────────────────────────
@@ -284,22 +385,27 @@ export function compileFiles(files, options = {}) {
 		isTest: options.isTest ?? false,
 	});
 
-	let js = preambles.length > 0 ? `${preambles.join("\n")}\n${mainJs}` : mainJs;
+	const mainChunk = {
+		js: mainJs,
+		sourceFiles: files.map((f) => resolve(f)),
+		sourcesContent: files.map((f) => readFileSync(f, "utf8")),
+		mappings: codegen.getMappings(),
+	};
 
-	if (options.sourceMap) {
-		const outputDir = options.outputDir ?? fromDir;
-		const sourceFiles = files.map((f) => relative(outputDir, f));
-		const sourcesContent = files.map((f) => readFileSync(f, "utf8"));
-		const map = codegen.getSourceMap(sourceFiles, sourcesContent);
-		const b64 = Buffer.from(map).toString("base64");
-		js += `\n//# sourceMappingURL=data:application/json;base64,${b64}`;
+	const merged = mergeCompilationChunks([...preambles, mainChunk]);
+
+	if (options.sourceMap && !options.isDependency) {
+		attachSourceMap(merged, outputDir);
 	}
 
 	return {
 		pkgName,
-		js,
+		js: merged.js,
 		programs,
 		exportedSymbols: checker.getExportedSymbols(),
 		exportedTypes: checker.getExportedTypes(),
+		sourceFiles: merged.sourceFiles,
+		sourcesContent: merged.sourcesContent,
+		mappings: merged.mappings,
 	};
 }

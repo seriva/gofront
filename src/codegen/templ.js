@@ -17,7 +17,7 @@ export const templGenMethods = {
 			.join(", ");
 		this.line(`function ${decl.name}(${params}) {`);
 		this.indented(() => {
-			this.line(`return {Mount(___p) {`);
+			this.line(`return {Mount(___p, ___refs) {`);
 			this.indented(() => {
 				this._genTemplNodes(decl.body, "___p");
 			});
@@ -85,7 +85,7 @@ export const templGenMethods = {
 			return this.line(`${p}.insertAdjacentHTML("beforeend", ${argJs});`);
 		}
 		return this.line(
-			`(${this._genTemplTokenCallExpr(node.tokens)}).Mount(${p});`,
+			`(${this._genTemplTokenCallExpr(node.tokens)}).Mount(${p}, ___refs);`,
 		);
 	},
 
@@ -119,7 +119,10 @@ export const templGenMethods = {
 			isSvg
 				? `${el}.setAttribute("class", ${js});`
 				: `${el}.className = ${js};`;
-		if (attr.kind === "static") {
+		if (attr.kind === "ref") {
+			// ref="key" — capture element into the refs map at mount time
+			this.line(`if(___refs)___refs[${JSON.stringify(attr.value)}]=${el};`);
+		} else if (attr.kind === "static") {
 			if (name === "class") {
 				this.line(setClass(JSON.stringify(attr.value)));
 			} else {
