@@ -8,6 +8,52 @@ features (e.g. `docs/v0.0.5/`).
 
 ---
 
+## v2.1.0
+
+**Theme: Complete hybrid JS + WebAssembly.** Finishes the per-package target model (`//gofront:target js | wasm | both`) on the native engine: the remaining language features in WASM, boundary v2, shared linear-memory buffers, `example/hybrid`, and full simplefps physics in WASM. Pending a positive v1.5.0 go/no-go. Whole-app WASM is a documented future extension. Design document in [`docs/v2.1.0/wasm-backend.md`](v2.1.0/wasm-backend.md).
+
+| Area | Difficulty | Status | Notes |
+|---|---|---|---|
+| Remaining language features in WASM | High | Draft | Non-empty interfaces (itabs, `ref.test`), generics (monomorphisation), insertion-ordered maps, `defer`/`recover` (EH encoding decision), remaining stdlib subset. |
+| Boundary v2 | High | Draft | WASM → JS closures, interface proxies both ways; `RaycastProvider` across the boundary. |
+| Shared buffers & `example/hybrid` | Medium | Draft | `gofront/shared` linear-memory TypedArray views; new particle-sim example with E2E. |
+| simplefps full split & benchmarks | Medium | Draft | `physics` (`DynamicBody`, `FPSController`) moves to `wasm`; optional `wasm-opt`; README target guide; published benchmarks. |
+
+---
+
+## v2.0.0
+
+**Theme: Native Go Compiler Engine & Hybrid NPM Distribution.** Rewrite GoFront's compiler core and CLI in native Go with byte-identical JS **and WASM** output to v1.5.0, a measured sub-10ms rebuild target, and no Node prerequisite for `dev`/`build`/`check` (Node still used for vendor bundling and `gofront test`). npm distribution via platform binaries. Ports the v1.5.0 `lower` step and WASM backend as-is. Design document in [`docs/v2.0.0/native-go-engine.md`](v2.0.0/native-go-engine.md).
+
+| Area | Difficulty | Status | Notes |
+|---|---|---|---|
+| Differential testing oracle & baseline | Medium | Draft | Engine switch in `test/unit/helpers.js`, long-lived `gofront oracle` JSON process, shared `runtime/js/` helpers, JS-engine timing baseline. |
+| Lexer & tokens | Medium | Draft | Port `lexer`, `templ-lexer`, `tokens` with Go ASI and `//gofront:` directives; position/column parity. |
+| Parser & AST | High | Draft | Port parser incl. generics, labels, `async`/`await`, `.templ` and `css` blocks; identical parse diagnostics. |
+| Type checker | High | Draft | Port multi-pass checker (types → funcs → embedding → vars/consts → bodies), generics, package-target rules, stdlib/Web typings, `.d.ts` + npm resolution. |
+| Lowering & JS core codegen | High | Draft | Port `src/lower/` (from v1.5.0) and the JS backend incl. strict numeric mode; byte-identical JS + source maps. |
+| Stdlib & templ codegen | High | Draft | Port all 21 stdlib codegen modules, templ DOM codegen and scoped CSS. |
+| WASM backend port | High | Draft | Port `src/backend/wasm/` (IR, encoder, WAT, facades, loader); byte-identical `.wasm` as an oracle gate; `runtime/wasm` shared as GoFront source. |
+| CLI, dev server & minifier | Medium | Draft | Full CLI surface incl. legacy flags, project config, assets, PWA, SSE live reload + CSS hot swap, minifier, `.wasm` serving. |
+| Hybrid NPM packaging & cutover | Medium | Draft | `@gofront/*` platform binaries, Node delegation for `prep`/`vendor`/`test`, beta opt-in → default flip. |
+
+---
+
+## v1.5.0
+
+**Theme: WASM MVP — hybrid targets in the JS compiler.** First per-package WebAssembly (WasmGC) output in the existing compiler, so the hybrid model is validated with real numbers before the native rewrite. Extracts a shared `src/lower/` step (JS output byte-identical), adds `//gofront:target wasm | both` with targeted diagnostics, JS strict numeric mode for `both` packages, a core-subset WASM backend with a dependency-free encoder, and generated JS facades. Ends with the simplefps `mathx`/`collision` split and a go/no-go raycast benchmark. Design document in [`docs/v1.5.0/wasm-mvp-plan.md`](v1.5.0/wasm-mvp-plan.md).
+
+| Area | Difficulty | Status | Notes |
+|---|---|---|---|
+| `src/lower/` extraction | High | Draft | Move ownership/clone elision, boxing, range/defer shapes, embedding into side tables; add captures + escape analyses. All suites byte-identical to v1.4.0. |
+| Package targets & diagnostics | Medium | Draft | `//gofront:target` directives in the lexer, import rules, `both` mutable-state rule, targeted errors + per-package summary. |
+| JS strict numeric mode | Medium | Draft | `Math.fround`, `\|0`/`>>>0`, `Math.imul`, Go shift and div-by-zero semantics for `both` packages. |
+| WASM backend (core subset) | High | Draft | Encoder + `--emit-wat`; scalars, structs, pointers, methods, arrays, slices, strings (JS String Builtins), `any`, closures, `panic`; `math` natives/imports. |
+| Boundary v1 & tooling | High | Draft | Facades (values, handles, copy-in/out + retention check, numeric slices, `any`, JS → WASM callbacks), loader, single `app.wasm`, dev/build/test integration (`both` tests run on both targets). |
+| simplefps split & go/no-go benchmark | Medium | Draft | `mathx` (both) + `collision` (wasm: trimesh, octree, ray); real Möller–Trumbore + octree raycast benchmark, JS-only vs. hybrid. |
+
+---
+
 ## v1.4.0
 
 **Theme: Component-colocated CSS in `.templ` files.** Add native support for official [templ.guide](https://templ.guide) `css Name() { ... }` declarations, scoped class generation, and static stylesheet extraction. Design document in [`docs/v1.4.0/templ-css-plan.md`](v1.4.0/templ-css-plan.md).
