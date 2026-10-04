@@ -1,10 +1,11 @@
 # Hybrid JS + WebAssembly Target — Design Plan
 
-**Version:** v2.1.0 (design spans v1.5.0 → v2.1.0, see [Phased Roadmap](#phased-roadmap))  
-**Status:** Draft (revised 2026-10-03: hybrid per-package targets. MVP pulled forward into v1.5.0. Whole-app WASM moved to [Future](#future-whole-app-wasm).)  
-**Depends on:** [`docs/v1.5.0/wasm-mvp-plan.md`](../v1.5.0/wasm-mvp-plan.md) (MVP in the JS compiler) and [`docs/v2.0.0/native-go-engine.md`](../v2.0.0/native-go-engine.md) (native engine, `types.Info`, ported `lower` → `backend` interface).
+**Version:** v1.6.0 (design spans v1.5.0 → v1.6.0, see [Phased Roadmap](#phased-roadmap))  
+**Status:** Draft (revised 2026-10-04: full hybrid completed in the JS compiler as v1.6.0, before the v2.0.0 Go port. Whole-app WASM moved to [Future](#future-whole-app-wasm).)  
+**Depends on:** [`docs/v1.5.0/wasm-mvp-plan.md`](../v1.5.0/wasm-mvp-plan.md) (MVP: `src/lower/`, targets, strict mode, encoder, core subset, boundary v1).  
+**Followed by:** [`docs/v2.0.0/native-go-engine.md`](../v2.0.0/native-go-engine.md), which ports the finished JS + WASM compiler to Go with byte-identical output.
 
-This document is the **full design** of the hybrid model. v1.5.0 implements a core subset in the JS compiler, v2.0.0 ports it to Go, and v2.1.0 completes it.
+This document is the **full design** of the hybrid model. v1.5.0 implements a core subset in the JS compiler and v1.6.0 completes it there, still in the JS compiler (`src/backend/wasm/`). v2.0.0 then ports the whole thing to Go without new features.
 
 ---
 
@@ -26,13 +27,14 @@ Starting hybrid also keeps options open. Moving more packages to WASM later, up 
 
 ---
 
-## Out of Scope (v2.1.0)
+## Out of Scope (v1.6.0)
 
 - **DOM, browser globals, `js:`/npm imports, `.templ`, `gom` inside WASM packages.** That is the [whole-app future](#future-whole-app-wasm).
 - **`async`/`await` in WASM packages.** WASM code is synchronous. Async orchestration stays in JS.
 - **Linear-memory runtime / custom GC.** WasmGC for all objects. Linear memory is used only for explicit [shared buffers](#shared-buffers-zero-copy).
 - **WASI / server targets, DWARF.** Browser only. WASM source maps are a stretch goal.
 - **Goroutines, channels, `reflect`, `unsafe`.** Same as the JS target.
+- **Porting to Go.** That is v2.0.0. v1.6.0 lives entirely in the JS compiler.
 
 ---
 
@@ -141,7 +143,7 @@ A `both` package runs as two separate implementations of the same code, so they 
 
 Strings (JS strings in both targets, see below) and map iteration order (insertion order in both targets) already agree. The remaining known divergence is `int64` beyond 2⁵³, documented as unsupported in `both` packages.
 
-Strict mode could become a general opt-in for `js` packages later (`//gofront:strict`). That's out of scope for v2.1.0.
+Strict mode could become a general opt-in for `js` packages later (`//gofront:strict`). That's out of scope for v1.6.0.
 
 ---
 
@@ -193,7 +195,7 @@ For every `wasm` package imported by `js` code, the compiler generates a **JS fa
 | shared buffers | zero-copy (see below) |
 | func values (callbacks) | **JS → WASM:** JS function held as `externref`, called through a generic invoke import. **WASM → JS:** closure wrapped in a cached JS function calling an exported trampoline. Covers `OnBounce`-style hooks. |
 | interfaces | **JS-implemented value passed into WASM:** proxy with a generated itab whose methods call back into JS (`RaycastProvider` implemented by a JS type). **WASM value passed to JS:** a facade object with the interface's methods. Type assertions on proxies are limited to the interface itself. |
-| maps | not allowed in exported signatures in v2.1.0. Use slices or methods. |
+| maps | not allowed in exported signatures in v1.6.0. Use slices or methods. |
 
 **Design rule: keep the boundary coarse and per-frame.** One `world.Step(dt)`, a few controller updates and a handful of raycasts per frame are cheap. Fine-grained calls such as `Vec3.Add` from JS into WASM thousands of times per frame are exactly what `both` packages exist to avoid. `gofront check` can report boundary call sites inside loops in `js` packages as **hints**, not errors.
 
@@ -210,7 +212,7 @@ var Transforms = shared.NewFloat32(maxEntities * 16) // in a wasm package
 // js side:   gl.uniformMatrix4fv(loc, false, physics.Transforms.Subarray(i*16, i*16+16))
 ```
 
-- `shared.Float32`, `shared.Int32`, `shared.Uint8`, … are fixed-size, allocated once from a bump allocator in exported linear memory, and live for the whole program (no freeing in v2.1.0).
+- `shared.Float32`, `shared.Int32`, `shared.Uint8`, … are fixed-size, allocated once from a bump allocator in exported linear memory, and live for the whole program (no freeing in v1.6.0).
 - **WASM side:** loads and stores at a base offset. Index syntax and `len` are supported. `append` and reslicing beyond the bounds are rejected.
 - **JS side:** a live TypedArray view. Views are refreshed if memory grows, so the allocation size is fixed at startup by default.
 - **In pure-JS builds or `both` packages compiled for JS:** a plain TypedArray. Code is portable across targets.
@@ -229,7 +231,7 @@ var Transforms = shared.NewFloat32(maxEntities * 16) // in a wasm package
   - `wasm` packages: tests are compiled to WASM and run in Node.
   - **`both` packages: tests run twice (JS and WASM) and the results must match.** This is the built-in determinism check.
   - `js` packages that import `wasm` packages: the hybrid bundle runs under Node (with JSDOM for `--dom`).
-- **Tooling:** dependency-free binary encoder (`internal/backend/wasm/encode`), `--emit-wat`, `WebAssembly.validate` on every module in tests, golden WAT tests, per-example size budget in CI.
+- **Tooling:** dependency-free binary encoder (`src/backend/wasm/encode.js`), `--emit-wat`, `WebAssembly.validate` on every module in tests, golden WAT tests, per-example size budget in CI.
 
 ---
 
@@ -237,7 +239,7 @@ var Transforms = shared.NewFloat32(maxEntities * 16) // in a wasm package
 
 Required: **GC, typed function references, reference types, multi-value, bulk memory, sign-extension, exception handling.** Optional: JS String Builtins (polyfilled). JSPI is not used.
 
-Exact minimum browser versions and the EH encoding (`exnref` vs. legacy) are fixed in Phase H0 and documented in the README. The loader feature-detects and reports a clear error. The README states whether a JS-only fallback build is recommended. Node for WASM tests: the minimum version with GC + EH on by default, checked at startup.
+Exact minimum browser versions and the EH encoding (`exnref` vs. legacy) are fixed in v1.5.0 (the EH encoding in v1.6.0, when `recover` lands) and documented in the README. The loader feature-detects and reports a clear error. The README states whether a JS-only fallback build is recommended. Node for WASM tests: the minimum version with GC + EH on by default, checked at startup.
 
 ---
 
@@ -245,11 +247,11 @@ Exact minimum browser versions and the EH encoding (`exnref` vs. legacy) are fix
 
 Current imports: `physics` is the only pure leaf (imports `math` only). `rendering`, `scene`, `game` and `animation` use `physics.Vec3`/`Mat4`/`BoundingBox` about 300 times. `animation` imports `systems` for `NewBinaryReader`.
 
-| Package | v1.5.0 | v2.1.0 (end state) | Contents |
+| Package | v1.5.0 | v1.6.0 (end state) | Contents |
 |---|---|---|---|
 | `engine/mathx` (new) | `both` | `both` | `Vec3`, `Mat4`, `Quat`, `Transform`, `BoundingBox` (moved from `physics`) |
 | `engine/collision` (new) | `wasm` | `wasm` | `Trimesh`, `Octree`, `Ray` + raycasting (moved from `physics`). Needs only the v1.5 core subset (`any` fields, JS callbacks). |
-| `engine/physics` | `js` | `wasm` | `DynamicBody`, `FPSController`. Blocked on non-empty interfaces (`RaycastProvider`) and WASM → JS closures until v2.1. |
+| `engine/physics` | `js` | `wasm` | `DynamicBody`, `FPSController`. Blocked on non-empty interfaces (`RaycastProvider`) and WASM → JS closures until v1.6. |
 | `engine/rendering`, `scene`, `systems`, `assets`, `game` | `js` | `js` | Import `mathx` instead of `physics` for math types |
 | `engine/animation` | `js` | `js` → candidate | Candidate for `wasm` (skinning → `shared` bone matrices) once the binary-reader dependency is moved to `assets` |
 
@@ -259,7 +261,7 @@ The per-frame boundary in the end state: controller and body updates, raycasts f
 
 ## Testing & Verification
 
-- **Unit fixtures:** runtime tests in the WASM subset run under both targets through the v2.0.0 oracle (`GOFRONT_TARGET=wasm`). JS-strict and WASM outputs must match exactly. Normal JS mode differs only in the documented cases.
+- **Unit fixtures:** runtime tests in the WASM subset run under both targets through the `compileHybrid()` test helper introduced in v1.5.0. JS-strict and WASM outputs must match exactly. Normal JS mode differs only in the documented cases.
 - **Boundary fixtures:** every row of the boundary table, in both directions, including panics, callbacks, interface proxies, copy-in/out and retention errors.
 - **Diagnostic fixtures:** every row of the [target diagnostics](#target-diagnostics) table, with exact message, position, caret and per-package summary line.
 - **`example/hybrid` (new):** a particle/n-body simulation in a `wasm` package, rendered to canvas from JS through a `shared.Float32`, with `.templ` controls. Playwright E2E.
@@ -276,22 +278,22 @@ The per-frame boundary in the end state: controller and body updates, raycasts f
 | Boundary design is subtle (copy-in/out, retention, proxies) | Compiler-owned glue, escape analysis, exhaustive boundary fixtures |
 | Strict mode slows `both` packages on the JS side | Applies only to `both` packages. Measured. `Math.fround`/`\|0` are JIT intrinsics. |
 | Users split in the wrong place and make the boundary chatty | Boundary-in-loop hints, documented guidance, `simplefps` as the reference split |
-| Shared-buffer lifetime (no free) | Fixed-size, program-lifetime buffers in v2.1.0. Freeing/pools later if needed. |
+| Shared-buffer lifetime (no free) | Fixed-size, program-lifetime buffers in v1.6.0. Freeing/pools later if needed. |
 | Platform support varies | Fixed baseline, feature detection, clear error |
 
 ---
 
 ## Phased Roadmap
 
-The hybrid design is delivered over three releases:
+The hybrid design is delivered over three releases. Both WASM releases land in the JS compiler, so the feature is complete before the rewrite:
 
 | Release | Delivers | Plan |
 |---|---|---|
 | **v1.5.0** (JS compiler) | `src/lower/` extraction, targets + diagnostics, JS strict mode, encoder + WAT, core subset (scalars, structs, pointers, methods, arrays, slices, strings, `any`, closures, `panic`), boundary v1 (values, handles, copy-in/out + retention check, numeric slices, `any`, JS → WASM callbacks), simplefps `mathx` (both) + `collision` (wasm), **go/no-go benchmark** | [`docs/v1.5.0/wasm-mvp-plan.md`](../v1.5.0/wasm-mvp-plan.md) |
-| **v2.0.0** (Go engine) | Port of everything above to Go, with **byte-identical `.wasm` output** as an oracle gate | [`docs/v2.0.0/native-go-engine.md`](../v2.0.0/native-go-engine.md) |
-| **v2.1.0** (this document) | The rest of the hybrid, in the native engine (phases below) | — |
+| **v1.6.0** (JS compiler, this document) | The rest of the hybrid (phases below) | — |
+| **v2.0.0** (Go engine) | Port of the complete JS + WASM compiler to Go, with **byte-identical JS and `.wasm` output** as oracle gates. No new WASM features. | [`docs/v2.0.0/native-go-engine.md`](../v2.0.0/native-go-engine.md) |
 
-**v2.1.0 phases** (pending a positive v1.5.0 go/no-go):
+**v1.6.0 phases** (pending a positive v1.5.0 go/no-go):
 
 | Phase | Scope | Exit criterion |
 |---|---|---|
@@ -322,4 +324,4 @@ Expectations from the earlier whole-app analysis still apply: DOM-heavy UI is li
 2. **`int` width.** `i64` (Go-correct, chosen) vs. `i32`. Revisit only if benchmarks show a cost.
 3. **Strict mode scope.** Keep it only for `both` packages, or offer `//gofront:strict` for any JS package?
 4. **`shared` buffer API.** Index syntax via compiler special-casing (proposed) vs. plain methods (`At`/`Set`). Program-lifetime only, or add pools/free later?
-5. **Interface proxies.** Worth the complexity in v2.1.0, or require `RaycastProvider`-style interfaces to be implemented on the WASM side (moving `Trimesh` usage into `physics`)?
+5. **Interface proxies.** Worth the complexity in v1.6.0, or require `RaycastProvider`-style interfaces to be implemented on the WASM side (moving `Trimesh` usage into `physics`)?

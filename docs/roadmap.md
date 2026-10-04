@@ -8,22 +8,9 @@ features (e.g. `docs/v0.0.5/`).
 
 ---
 
-## v2.1.0
-
-**Theme: Complete hybrid JS + WebAssembly.** Finishes the per-package target model (`//gofront:target js | wasm | both`) on the native engine: the remaining language features in WASM, boundary v2, shared linear-memory buffers, `example/hybrid`, and full simplefps physics in WASM. Pending a positive v1.5.0 go/no-go. Whole-app WASM is a documented future extension. Design document in [`docs/v2.1.0/wasm-backend.md`](v2.1.0/wasm-backend.md).
-
-| Area | Difficulty | Status | Notes |
-|---|---|---|---|
-| Remaining language features in WASM | High | Draft | Non-empty interfaces (itabs, `ref.test`), generics (monomorphisation), insertion-ordered maps, `defer`/`recover` (EH encoding decision), remaining stdlib subset. |
-| Boundary v2 | High | Draft | WASM → JS closures, interface proxies both ways; `RaycastProvider` across the boundary. |
-| Shared buffers & `example/hybrid` | Medium | Draft | `gofront/shared` linear-memory TypedArray views; new particle-sim example with E2E. |
-| simplefps full split & benchmarks | Medium | Draft | `physics` (`DynamicBody`, `FPSController`) moves to `wasm`; optional `wasm-opt`; README target guide; published benchmarks. |
-
----
-
 ## v2.0.0
 
-**Theme: Native Go Compiler Engine & Hybrid NPM Distribution.** Rewrite GoFront's compiler core and CLI in native Go with byte-identical JS **and WASM** output to v1.5.0, a measured sub-10ms rebuild target, and no Node prerequisite for `dev`/`build`/`check` (Node still used for vendor bundling and `gofront test`). npm distribution via platform binaries. Ports the v1.5.0 `lower` step and WASM backend as-is. Design document in [`docs/v2.0.0/native-go-engine.md`](v2.0.0/native-go-engine.md).
+**Theme: Native Go Compiler Engine & Hybrid NPM Distribution.** Rewrite GoFront's compiler core and CLI in native Go with byte-identical JS **and WASM** output to v1.6.0, a measured sub-10ms rebuild target, and no Node prerequisite for `dev`/`build`/`check` (Node still used for vendor bundling and `gofront test`). npm distribution via platform binaries. Pure port: ports the `lower` step and the complete v1.6.0 hybrid WASM backend as-is, no new features. Design document in [`docs/v2.0.0/native-go-engine.md`](v2.0.0/native-go-engine.md).
 
 | Area | Difficulty | Status | Notes |
 |---|---|---|---|
@@ -33,9 +20,22 @@ features (e.g. `docs/v0.0.5/`).
 | Type checker | High | Draft | Port multi-pass checker (types → funcs → embedding → vars/consts → bodies), generics, package-target rules, stdlib/Web typings, `.d.ts` + npm resolution. |
 | Lowering & JS core codegen | High | Draft | Port `src/lower/` (from v1.5.0) and the JS backend incl. strict numeric mode; byte-identical JS + source maps. |
 | Stdlib & templ codegen | High | Draft | Port all 21 stdlib codegen modules, templ DOM codegen and scoped CSS. |
-| WASM backend port | High | Draft | Port `src/backend/wasm/` (IR, encoder, WAT, facades, loader); byte-identical `.wasm` as an oracle gate; `runtime/wasm` shared as GoFront source. |
+| WASM backend port | High | Draft | Port the complete v1.6.0 `src/backend/wasm/` (IR, encoder, WAT, facades, loader, interfaces, generics, maps, `defer`/`recover`, boundary v2, shared buffers); byte-identical `.wasm` as an oracle gate; `runtime/wasm` shared as GoFront source. |
 | CLI, dev server & minifier | Medium | Draft | Full CLI surface incl. legacy flags, project config, assets, PWA, SSE live reload + CSS hot swap, minifier, `.wasm` serving. |
 | Hybrid NPM packaging & cutover | Medium | Draft | `@gofront/*` platform binaries, Node delegation for `prep`/`vendor`/`test`, beta opt-in → default flip. |
+
+---
+
+## v1.6.0
+
+**Theme: Complete hybrid JS + WebAssembly.** Finishes the per-package target model (`//gofront:target js | wasm | both`) in the existing JS compiler (`src/backend/wasm/`), so the whole hybrid is done before the v2.0.0 rewrite: the remaining language features in WASM, boundary v2, shared linear-memory buffers, `example/hybrid`, and full simplefps physics in WASM. Pending a positive v1.5.0 go/no-go. Whole-app WASM is a documented future extension. Design document in [`docs/v1.6.0/wasm-hybrid-plan.md`](v1.6.0/wasm-hybrid-plan.md).
+
+| Area | Difficulty | Status | Notes |
+|---|---|---|---|
+| Remaining language features in WASM | High | Draft | Non-empty interfaces (itabs, `ref.test`), generics (monomorphisation), insertion-ordered maps, `defer`/`recover` (EH encoding decision), remaining stdlib subset. |
+| Boundary v2 | High | Draft | WASM → JS closures, interface proxies both ways; `RaycastProvider` across the boundary. |
+| Shared buffers & `example/hybrid` | Medium | Draft | `gofront/shared` linear-memory TypedArray views; new particle-sim example with E2E. |
+| simplefps full split & benchmarks | Medium | Draft | `physics` (`DynamicBody`, `FPSController`) moves to `wasm`; optional `wasm-opt`; README target guide; published benchmarks. |
 
 ---
 

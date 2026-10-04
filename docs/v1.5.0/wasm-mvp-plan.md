@@ -3,7 +3,7 @@
 **Version:** v1.5.0  
 **Status:** Draft (2026-10-03)  
 **Baseline:** v1.4.0 JS compiler (`src/`)  
-**Continues in:** [`docs/v2.0.0/native-go-engine.md`](../v2.0.0/native-go-engine.md) (port to Go) → [`docs/v2.1.0/wasm-backend.md`](../v2.1.0/wasm-backend.md) (full hybrid)
+**Continues in:** [`docs/v1.6.0/wasm-hybrid-plan.md`](../v1.6.0/wasm-hybrid-plan.md) (full hybrid, still in the JS compiler) → [`docs/v2.0.0/native-go-engine.md`](../v2.0.0/native-go-engine.md) (port of the finished compiler to Go)
 
 ---
 
@@ -31,7 +31,7 @@ Concretely, v1.5.0 delivers:
 
 ---
 
-## Out of Scope (deferred to v2.1.0)
+## Out of Scope (deferred to v1.6.0)
 
 - **Non-empty interfaces**, itabs and interface proxies across the boundary. simplefps's `RaycastProvider`, so `DynamicBody`/`FPSController` stay in a `js` package for now.
 - **Generics in WASM packages** (monomorphisation).
@@ -39,7 +39,7 @@ Concretely, v1.5.0 delivers:
 - **`defer` / `recover`.** `panic` exists (bounds checks, explicit `panic`), but it can't be recovered inside WASM. It reaches JS as a thrown error.
 - **WASM → JS closures** (passing a WASM closure to JS as a callback). The JS → WASM direction *is* in scope.
 - **Shared linear-memory buffers** (`gofront/shared`), `example/hybrid`, `wasm-opt` integration.
-- **DOM, `.templ`, `gom`, `js:` imports, `async`** in WASM packages. These are permanently rejected in v1.x, and the [future whole-app design](../v2.1.0/wasm-backend.md#future-whole-app-wasm) relaxes them later.
+- **DOM, `.templ`, `gom`, `js:` imports, `async`** in WASM packages. These are permanently rejected in v1.x, and the [future whole-app design](../v1.6.0/wasm-hybrid-plan.md#future-whole-app-wasm) relaxes them later.
 - **WASM source maps.**
 - **Porting to Go.** That is v2.0.0, which then ports this backend too.
 
@@ -73,7 +73,7 @@ Today the analyses are spread through codegen and stored as `_`-prefixed fields 
   - `wasm` imports `wasm`, `both` and the supported stdlib.
   - `both` imports only `both` and the supported stdlib.
 - **`both` packages:** package-level `var`s may not be written after init.
-- **Diagnostics:** exactly the [target diagnostics table](../v2.1.0/wasm-backend.md#target-diagnostics), plus the **per-package summary line**. Features deferred to v2.1 get a distinct message: `'defer' is not yet supported in wasm packages (planned)`.
+- **Diagnostics:** exactly the [target diagnostics table](../v1.6.0/wasm-hybrid-plan.md#target-diagnostics), plus the **per-package summary line**. Features deferred to v1.6 get a distinct message: `'defer' is not yet supported in wasm packages (planned)`.
 
 ### 3. JS strict numeric mode (`both` packages only)
 
@@ -118,7 +118,7 @@ runtime/wasm/*.go   runtime written in GoFront (slice growth, string helpers, pa
 | `any` / `interface{}` | `anyref`. Assertions and type switches on **concrete types** via `ref.test`/`ref.cast`. Holds JS values opaquely. |
 | Func values & closures | `(struct funcref, anyref env)` + `call_ref`. Captured-mutated vars boxed (`lower/captures.js`). |
 | `if`/`for`/`switch`/labels/`fallthrough`, multi-value returns | structured control flow, native multi-value |
-| `panic`, bounds/nil/div-zero checks | `throw` with one exception tag. **No `try` blocks are needed in v1.5**, so the exception-handling encoding question (`exnref` vs. legacy) waits until v2.1 brings `recover`. |
+| `panic`, bounds/nil/div-zero checks | `throw` with one exception tag. **No `try` blocks are needed in v1.5**, so the exception-handling encoding question (`exnref` vs. legacy) waits until v1.6 brings `recover`. |
 | `print`/`println`, `fmt.Println` | imported `console.log` |
 | Stdlib | `math`, `math/bits`, `errors.New`, `strconv.Itoa/FormatFloat`, `fmt.Sprintf` (subset via runtime) |
 
@@ -177,7 +177,7 @@ From an inspection of `engine/physics`:
 |---|---|---|
 | `engine/mathx` (new) | `both` | `vec3`, `mat4`, `quat`, `transform`, `boundingbox` (moved from `physics`) |
 | `engine/collision` (new) | `wasm` | `trimesh`, `octree`, `ray` (moved from `physics`) |
-| `engine/physics` | `js` (for v1.5) | `dynamicbody`, `fpscontroller`. Imports `mathx` + `collision`. Moves to `wasm` in v2.1 once interfaces land. |
+| `engine/physics` | `js` (for v1.5) | `dynamicbody`, `fpscontroller`. Imports `mathx` + `collision`. Moves to `wasm` in v1.6 once interfaces land. |
 | `rendering`, `scene`, `systems`, `assets`, `animation`, `game` | `js` | import `mathx` instead of `physics` for math types |
 
 The boundary per frame is then raycasts (gameplay, bodies, controller), each a single call into `collision`.
@@ -228,4 +228,4 @@ The boundary per frame is then raycasts (gameplay, bodies, controller), each a s
 | **5** | Boundary v1 facades, loader, single-module linking, `compiler.js`/CLI/dev/test integration | Hybrid sample project builds, runs and tests green |
 | **6** | simplefps split, `collision` in WASM, raycast benchmark, README/CHANGELOG | simplefps runs hybrid. **Go/no-go benchmark published.** |
 
-**After Phase 6:** if the benchmark and determinism results justify it, v2.1.0 completes the hybrid. If not, the WASM backend stays as a documented experimental target, and v2.0.0 ports it as-is without further investment.
+**After Phase 6:** if the benchmark and determinism results justify it, v1.6.0 completes the hybrid in the JS compiler, and v2.0.0 ports the finished result. If not, the WASM backend stays as a documented experimental target, v1.6.0 is dropped or repurposed, and v2.0.0 ports the v1.5 subset as-is without further investment.
