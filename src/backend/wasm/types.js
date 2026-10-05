@@ -1,20 +1,57 @@
 // src/backend/wasm/types.js
 // Maps GoFront types to WasmGC types and manages type registry.
 
-export function toWasmType(goType, checker = null) {
+export function toWasmType(goType, checker = null, mod = null) {
 	if (!goType) return "i32";
 
-	// TypeName AST node
-	if (goType.kind === "TypeName") {
-		return toWasmType({ kind: "basic", name: goType.name }, checker);
+	// Pointer AST nodes
+	if (goType.kind === "PointerType") {
+		return toWasmType({ kind: "pointer", base: goType.base }, checker, mod);
 	}
-	if (goType.kind === "Ident") {
-		return toWasmType({ kind: "basic", name: goType.name }, checker);
+	if (goType.kind === "StarExpr") {
+		return toWasmType(
+			{ kind: "pointer", base: goType.expr ?? goType.operand },
+			checker,
+			mod,
+		);
+	}
+
+	// Slice and Array AST nodes
+	if (goType.kind === "SliceType") {
+		return toWasmType({ kind: "slice", elem: goType.elem }, checker, mod);
+	}
+	if (goType.kind === "ArrayType") {
+		return toWasmType({ kind: "array", elem: goType.elem }, checker, mod);
+	}
+
+	// TypeName AST node
+	if (goType.kind === "TypeName" || goType.kind === "Ident") {
+		if (mod?.getStructType(goType.name)) {
+			return {
+				kind: "ref",
+				nullable: true,
+				typeIndex: mod.getStructType(goType.name).typeIndex,
+			};
+		}
+		const resolved = checker?.types?.get(goType.name);
+		if (resolved) {
+			return toWasmType(resolved, checker, mod);
+		}
+		return toWasmType({ kind: "basic", name: goType.name }, checker, mod);
 	}
 
 	// Unwrap named types
-	if (goType.kind === "named" && goType.underlying) {
-		return toWasmType(goType.underlying, checker);
+	if (goType.kind === "named") {
+		if (mod?.getStructType(goType.name)) {
+			return {
+				kind: "ref",
+				nullable: true,
+				typeIndex: mod.getStructType(goType.name).typeIndex,
+			};
+		}
+		if (goType.underlying) {
+			return toWasmType(goType.underlying, checker, mod);
+		}
 	}
 
 	// Untyped constants
@@ -75,22 +112,68 @@ export function toWasmType(goType, checker = null) {
 
 	if (goType.kind === "pointer") {
 		// Struct pointer or boxed scalar
+		if (goType.base) {
+			const baseWType = toWasmType(goType.base, checker, mod);
+			if (
+				typeof baseWType === "object" &&
+				baseWType !== null &&
+				baseWType.kind === "ref"
+			) {
+				return baseWType;
+			}
+			if (mod?.getBoxType) {
+				const box = mod.getBoxType(goType.base);
+				if (box)
+					return { kind: "ref", nullable: true, typeIndex: box.typeIndex };
+			}
+		}
 		return { kind: "ref", nullable: true, heapType: "any" };
 	}
 
 	if (goType.kind === "slice") {
+		if (mod?.getSliceType && goType.elem) {
+			const sliceInfo = mod.getSliceType(goType.elem);
+			return {
+				kind: "ref",
+				nullable: true,
+				typeIndex: sliceInfo.typeIndex,
+			};
+		}
 		return { kind: "ref", nullable: true, heapType: "struct" };
 	}
 
 	if (goType.kind === "array") {
+		if (mod?.getArrayType && goType.elem) {
+			const arrInfo = mod.getArrayType(goType.elem);
+			return {
+				kind: "ref",
+				nullable: true,
+				typeIndex: arrInfo.typeIndex,
+			};
+		}
 		return { kind: "ref", nullable: true, heapType: "array" };
 	}
 
 	if (goType.kind === "struct") {
+		if (goType.name && mod?.getStructType(goType.name)) {
+			return {
+				kind: "ref",
+				nullable: true,
+				typeIndex: mod.getStructType(goType.name).typeIndex,
+			};
+		}
 		return { kind: "ref", nullable: true, heapType: "struct" };
 	}
 
-	if (goType.kind === "func") {
+	if (isFuncType(goType, checker)) {
+		if (mod) {
+			const closureInfo = mod.getClosureType(goType);
+			return {
+				kind: "ref",
+				nullable: true,
+				typeIndex: closureInfo.typeIndex,
+			};
+		}
 		return "funcref";
 	}
 
@@ -99,6 +182,87 @@ export function toWasmType(goType, checker = null) {
 	}
 
 	return "i32";
+}
+
+export function isStructType(goType, checker = null, mod = null) {
+	if (!goType) return false;
+	if (goType.kind === "TypeName" || goType.kind === "Ident") {
+		if (mod?.getStructType?.(goType.name)) return true;
+		const resolved = checker?.types?.get(goType.name);
+		if (resolved) return isStructType(resolved, checker, mod);
+	}
+	if (goType.kind === "named") {
+		if (mod?.getStructType?.(goType.name)) return true;
+		if (goType.underlying) return isStructType(goType.underlying, checker, mod);
+	}
+	return goType.kind === "struct" || goType.kind === "StructType";
+}
+
+export function isPointerToStruct(goType, checker = null, mod = null) {
+	if (!goType) return false;
+	if (goType.kind === "PointerType" || goType.kind === "pointer") {
+		return isStructType(goType.base, checker, mod);
+	}
+	if (goType.kind === "StarExpr") {
+		return isStructType(goType.expr ?? goType.operand, checker, mod);
+	}
+	return false;
+}
+
+export function isSliceType(goType, checker = null) {
+	if (!goType) return false;
+	if (goType.kind === "TypeName" || goType.kind === "Ident") {
+		const resolved = checker?.types?.get(goType.name);
+		if (resolved) return isSliceType(resolved, checker);
+	}
+	if (goType.kind === "named" && goType.underlying) {
+		return isSliceType(goType.underlying, checker);
+	}
+	return goType.kind === "slice" || goType.kind === "SliceType";
+}
+
+export function isArrayType(goType, checker = null) {
+	if (!goType) return false;
+	if (goType.kind === "TypeName" || goType.kind === "Ident") {
+		const resolved = checker?.types?.get(goType.name);
+		if (resolved) return isArrayType(resolved, checker);
+	}
+	if (goType.kind === "named" && goType.underlying) {
+		return isArrayType(goType.underlying, checker);
+	}
+	return goType.kind === "array" || goType.kind === "ArrayType";
+}
+
+export function isStringType(goType, checker = null) {
+	if (!goType) return false;
+	if (goType.kind === "TypeName" || goType.kind === "Ident") {
+		const resolved = checker?.types?.get(goType.name);
+		if (resolved) return isStringType(resolved, checker);
+		return goType.name === "string";
+	}
+	if (goType.kind === "named") {
+		if (goType.name === "string") return true;
+		if (goType.underlying) return isStringType(goType.underlying, checker);
+	}
+	if (goType.kind === "basic") return goType.name === "string";
+	if (goType.kind === "untyped") return goType.base === "string";
+	return false;
+}
+
+export function isAnyType(goType, checker = null) {
+	if (!goType) return false;
+	if (goType.kind === "TypeName" || goType.kind === "Ident") {
+		const resolved = checker?.types?.get(goType.name);
+		if (resolved) return isAnyType(resolved, checker);
+		return goType.name === "any" || goType.name === "interface{}";
+	}
+	if (goType.kind === "named") {
+		if (goType.name === "any" || goType.name === "interface{}") return true;
+		if (goType.underlying) return isAnyType(goType.underlying, checker);
+	}
+	if (goType.kind === "basic") return goType.name === "any";
+	if (goType.kind === "interface") return true;
+	return false;
 }
 
 export function isNarrowInt(goType) {
@@ -170,4 +334,73 @@ export function isInt(goType) {
 		);
 	}
 	return false;
+}
+
+export function isFuncType(goType, checker = null) {
+	if (!goType) return false;
+	if (goType.kind === "TypeName" || goType.kind === "Ident") {
+		const resolved = checker?.types?.get(goType.name);
+		if (resolved) return isFuncType(resolved, checker);
+	}
+	if (goType.kind === "named" && goType.underlying) {
+		return isFuncType(goType.underlying, checker);
+	}
+	return (
+		goType.kind === "func" ||
+		goType.kind === "FuncType" ||
+		goType.kind === "FuncLit" ||
+		goType.kind === "FuncDecl"
+	);
+}
+
+export function getFuncSignature(goType, checker = null) {
+	if (!goType) return { params: [], returns: [] };
+	if (goType.kind === "TypeName" || goType.kind === "Ident") {
+		const resolved = checker?.types?.get(goType.name);
+		if (resolved) return getFuncSignature(resolved, checker);
+	}
+	if (goType.kind === "named" && goType.underlying) {
+		return getFuncSignature(goType.underlying, checker);
+	}
+	if (
+		goType.kind === "FuncType" ||
+		goType.kind === "FuncLit" ||
+		goType.kind === "FuncDecl"
+	) {
+		const params = (goType.params ?? []).map((p) => p.type ?? p);
+		const returns = [];
+		if (goType.returnType) {
+			if (
+				goType.returnType.kind === "TupleType" ||
+				goType.returnType.kind === "tuple"
+			) {
+				returns.push(...(goType.returnType.types ?? []));
+			} else {
+				returns.push(goType.returnType);
+			}
+		} else if (goType.returns) {
+			for (const r of goType.returns) {
+				if ((r?.kind === "tuple" || r?.kind === "TupleType") && r.types) {
+					returns.push(...r.types);
+				} else {
+					returns.push(r);
+				}
+			}
+		}
+		return { params, returns };
+	}
+	if (goType.kind === "func") {
+		const rawReturns =
+			goType.returns ?? (goType.returnType ? [goType.returnType] : []);
+		const returns = [];
+		for (const r of rawReturns) {
+			if ((r?.kind === "tuple" || r?.kind === "TupleType") && r.types) {
+				returns.push(...r.types);
+			} else {
+				returns.push(r);
+			}
+		}
+		return { params: goType.params ?? [], returns };
+	}
+	return { params: [], returns: [] };
 }

@@ -162,6 +162,8 @@ const OPCODES = {
 	call_indirect: 0x11,
 	return_call: 0x12,
 	return_call_indirect: 0x13,
+	call_ref: 0x14,
+	return_call_ref: 0x15,
 	drop: 0x1a,
 	select: 0x1b,
 
@@ -316,6 +318,7 @@ const OPCODES = {
 
 	"ref.null": 0xd0,
 	"ref.is_null": 0xd1,
+	"ref.func": 0xd2,
 	"ref.eq": 0xd3,
 	"ref.as_non_null": 0xd4,
 };
@@ -342,15 +345,19 @@ const GC_OPCODES = {
 	"struct.set": 0x05,
 	"array.new": 0x06,
 	"array.new_default": 0x07,
+	"array.new_fixed": 0x08,
 	"array.get": 0x0b,
 	"array.get_s": 0x0c,
 	"array.get_u": 0x0d,
 	"array.set": 0x0e,
 	"array.len": 0x0f,
+	"array.copy": 0x11,
 	"ref.test": 0x14,
 	"ref.test_null": 0x15,
 	"ref.cast": 0x16,
 	"ref.cast_null": 0x17,
+	"any.convert_extern": 0x1a,
+	"extern.convert_any": 0x1b,
 };
 
 export function encodeInstruction(inst) {
@@ -368,6 +375,23 @@ export function encodeInstruction(inst) {
 	if (GC_OPCODES[op] !== undefined) {
 		const subOp = GC_OPCODES[op];
 		const bytes = [0xfb, ...encodeU32LEB(subOp)];
+		if (op === "array.copy") {
+			bytes.push(...encodeU32LEB(inst.typeIndexDst ?? inst.typeIndex ?? 0));
+			bytes.push(...encodeU32LEB(inst.typeIndexSrc ?? inst.typeIndex ?? 0));
+			return bytes;
+		}
+		if (op === "array.new_fixed") {
+			bytes.push(...encodeU32LEB(inst.typeIndex ?? 0));
+			bytes.push(...encodeU32LEB(inst.size ?? inst.count ?? 0));
+			return bytes;
+		}
+		if (
+			op === "array.len" ||
+			op === "any.convert_extern" ||
+			op === "extern.convert_any"
+		) {
+			return bytes;
+		}
 		if (inst.typeIndex !== undefined) {
 			bytes.push(...encodeU32LEB(inst.typeIndex));
 		}
@@ -413,6 +437,13 @@ export function encodeInstruction(inst) {
 					...encodeU32LEB(inst.tableIndex ?? 0),
 				];
 
+			case "call_ref":
+			case "return_call_ref":
+				return [byte, ...encodeU32LEB(inst.typeIndex ?? 0)];
+
+			case "ref.func":
+				return [byte, ...encodeU32LEB(inst.funcIndex ?? inst.index ?? 0)];
+
 			case "local.get":
 			case "local.set":
 			case "local.tee":
@@ -435,7 +466,12 @@ export function encodeInstruction(inst) {
 				return [byte, ...encodeF64(inst.value ?? 0)];
 
 			case "ref.null": {
-				const ht = inst.heapType ?? "any";
+				const ht =
+					inst.heapType !== undefined
+						? inst.heapType
+						: inst.typeIndex !== undefined
+							? inst.typeIndex
+							: "any";
 				if (typeof ht === "number") {
 					return [byte, ...encodeI32LEB(ht)];
 				}
@@ -616,6 +652,33 @@ export function encodeExportSection(exports) {
 	);
 }
 
+function sameValType(a, b) {
+	if (a === b) return true;
+	if (
+		typeof a === "object" &&
+		typeof b === "object" &&
+		a !== null &&
+		b !== null
+	) {
+		return (
+			a.kind === b.kind &&
+			a.nullable === b.nullable &&
+			a.typeIndex === b.typeIndex &&
+			a.heapType === b.heapType
+		);
+	}
+	return false;
+}
+
+export function encodeElementSection(elements) {
+	if (!elements || elements.length === 0) return [];
+	const segment = [0x03, 0x00, ...encodeVector(elements, encodeU32LEB)];
+	return encodeSection(
+		9,
+		encodeVector([segment], (bytes) => bytes),
+	);
+}
+
 export function encodeCodeSection(funcs) {
 	if (!funcs || funcs.length === 0) return [];
 	return encodeSection(
@@ -625,10 +688,18 @@ export function encodeCodeSection(funcs) {
 			const rawLocals = fn.locals ?? [];
 			const compressedLocals = [];
 			for (const loc of rawLocals) {
-				const locType = typeof loc === "string" ? loc : loc.type;
+				const locType =
+					typeof loc === "string"
+						? loc
+						: loc.type !== undefined
+							? loc.type
+							: loc;
 				if (
 					compressedLocals.length > 0 &&
-					compressedLocals[compressedLocals.length - 1].type === locType
+					sameValType(
+						compressedLocals[compressedLocals.length - 1].type,
+						locType,
+					)
 				) {
 					compressedLocals[compressedLocals.length - 1].count++;
 				} else {
@@ -673,6 +744,7 @@ export function encodeModule(mod) {
 	const tagSec = encodeTagSection(mod.tags);
 	const globalSec = encodeGlobalSection(mod.globals);
 	const exportSec = encodeExportSection(mod.exports);
+	const elemSec = encodeElementSection(mod.elements);
 	const codeSec = encodeCodeSection(mod.funcs);
 
 	const allBytes = [
@@ -684,6 +756,7 @@ export function encodeModule(mod) {
 		...tagSec,
 		...globalSec,
 		...exportSec,
+		...elemSec,
 		...codeSec,
 	];
 
