@@ -33,6 +33,7 @@ const BUILTIN_PACKAGES = new Set([
 	"strconv",
 	"sort",
 	"math",
+	"math/bits",
 	"math/rand",
 	"errors",
 	"time",

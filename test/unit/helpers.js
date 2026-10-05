@@ -4,6 +4,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 import { JSDOM } from "jsdom";
+import { instantiateWasm } from "../../src/backend/wasm/glue.js";
+import { compileWasm } from "../../src/backend/wasm/index.js";
 import { CodeGen } from "../../src/codegen/index.js";
 import { compileDir } from "../../src/compiler.js";
 import { DtsParser, parseDts } from "../../src/dts-parser.js";
@@ -12,7 +14,16 @@ import { Parser } from "../../src/parser/index.js";
 import { resolveAll } from "../../src/resolver.js";
 import { TypeChecker } from "../../src/typechecker/index.js";
 
-export { compileDir, DtsParser, join, Lexer, Parser, parseDts };
+export {
+	compileDir,
+	compileWasm,
+	DtsParser,
+	instantiateWasm,
+	join,
+	Lexer,
+	Parser,
+	parseDts,
+};
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -127,6 +138,129 @@ export function runInDom(
 	});
 	vm.runInContext(stripImports(js), ctx);
 	return { lines, document: window.document };
+}
+
+export function runWasm(
+	wasmBytes,
+	{ stringTable = [], extraImports = {} } = {},
+) {
+	const lines = [];
+	const { exports, instance, module } = instantiateWasm(wasmBytes, {
+		stringTable,
+		stdout: (msg) => lines.push(msg),
+		extraImports,
+	});
+	return { exports, lines, instance, module };
+}
+
+export function compileHybrid(source, options = {}) {
+	const { js, errors: jsErrors } = compile(source, {
+		strict: true,
+		...options,
+	});
+	if (jsErrors && jsErrors.length > 0) {
+		throw new Error(
+			`JS compile failed:\n${jsErrors.map((e) => e.message).join("\n")}`,
+		);
+	}
+
+	const {
+		wasm,
+		stringTable,
+		wat,
+		errors: wasmErrors,
+	} = compileWasm(source, options);
+	if (wasmErrors && wasmErrors.length > 0) {
+		throw new Error(
+			`WASM compile failed:\n${wasmErrors.map((e) => e.message).join("\n")}`,
+		);
+	}
+
+	return {
+		js,
+		wasm,
+		wat,
+		stringTable,
+		run(fnName = "Main", args = []) {
+			const jsLines = [];
+			let jsRes;
+			let jsErr = null;
+			const jsCtx = vm.createContext({
+				Math,
+				JSON,
+				String,
+				Number,
+				Boolean,
+				Array,
+				Object,
+				console: {
+					log: (...a) => jsLines.push(a.map(String).join(" ")),
+				},
+			});
+			try {
+				vm.runInContext(stripImports(js), jsCtx);
+				if (typeof jsCtx[fnName] === "function") {
+					jsRes = jsCtx[fnName](...args);
+				}
+			} catch (e) {
+				jsErr = e;
+			}
+
+			const wasmLines = [];
+			let wasmRes;
+			let wasmErr = null;
+			try {
+				const { exports } = instantiateWasm(wasm, {
+					stringTable,
+					stdout: (msg) => wasmLines.push(msg),
+				});
+				if (typeof exports[fnName] === "function") {
+					wasmRes = exports[fnName](...args);
+				}
+			} catch (e) {
+				wasmErr = e;
+			}
+
+			if (jsErr || wasmErr) {
+				if (!jsErr) {
+					throw new Error(
+						`WASM threw "${wasmErr.message}" but JS did not throw`,
+					);
+				}
+				if (!wasmErr) {
+					throw new Error(`JS threw "${jsErr.message}" but WASM did not throw`);
+				}
+				if (jsErr.message !== wasmErr.message) {
+					throw new Error(
+						`Error message mismatch:\n  JS:   ${jsErr.message}\n  WASM: ${wasmErr.message}`,
+					);
+				}
+			} else {
+				const jsOut = jsLines.join("\n");
+				const wasmOut = wasmLines.join("\n");
+				if (jsOut !== wasmOut) {
+					throw new Error(
+						`Output mismatch:\n  JS:   ${JSON.stringify(jsOut)}\n  WASM: ${JSON.stringify(wasmOut)}`,
+					);
+				}
+				if (typeof jsRes === "number" && typeof wasmRes === "bigint") {
+					if (BigInt(jsRes) !== wasmRes) {
+						throw new Error(`Return mismatch: JS ${jsRes} vs WASM ${wasmRes}`);
+					}
+				} else if (jsRes !== wasmRes) {
+					throw new Error(
+						`Return mismatch: JS ${JSON.stringify(jsRes)} vs WASM ${JSON.stringify(wasmRes)}`,
+					);
+				}
+			}
+
+			return {
+				jsRes,
+				wasmRes,
+				output: wasmLines.join("\n"),
+			};
+		},
+	};
 }
 
 // ── Test harness ─────────────────────────────────────────────

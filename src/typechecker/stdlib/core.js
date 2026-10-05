@@ -9,6 +9,8 @@ import {
 	INT,
 	STRING,
 	UINT8,
+	UINT32,
+	UINT64,
 	VOID,
 } from "../types.js";
 
@@ -425,6 +427,21 @@ export function setupCoreGlobals(globals, types) {
 			SmallestNonzeroFloat64: FLOAT64,
 			MaxInt: INT,
 			MinInt: INT,
+		},
+	});
+
+	globals.define("bits", {
+		kind: "namespace",
+		name: "bits",
+		members: {
+			LeadingZeros32: { kind: "func", params: [UINT32], returns: [INT] },
+			TrailingZeros32: { kind: "func", params: [UINT32], returns: [INT] },
+			OnesCount32: { kind: "func", params: [UINT32], returns: [INT] },
+			RotateLeft32: { kind: "func", params: [UINT32, INT], returns: [UINT32] },
+			LeadingZeros64: { kind: "func", params: [UINT64], returns: [INT] },
+			TrailingZeros64: { kind: "func", params: [UINT64], returns: [INT] },
+			OnesCount64: { kind: "func", params: [UINT64], returns: [INT] },
+			RotateLeft64: { kind: "func", params: [UINT64, INT], returns: [UINT64] },
 		},
 	});
 
