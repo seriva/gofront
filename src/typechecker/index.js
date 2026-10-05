@@ -28,6 +28,14 @@ import {
 	VOID,
 } from "./types.js";
 
+function rootIdentName(e) {
+	if (!e) return null;
+	if (e.kind === "Ident") return e.name;
+	if (e.kind === "SelectorExpr" || e.kind === "IndexExpr")
+		return rootIdentName(e.expr);
+	return null;
+}
+
 // Re-export for consumers that import from typechecker.js
 export { TypeCheckError, typeStr };
 
@@ -36,6 +44,10 @@ export class TypeChecker {
 		this.types = new Map(); // named types
 		this.globals = new Scope();
 		this.errors = [];
+		this.target = "js";
+		this.pkgName = null;
+		this.blockers = new Map();
+		this.summary = null;
 		this._currentFile = null; // filename of file currently being checked
 		this._currentSource = null;
 		this._loopDepth = 0; // for break/continue validation
@@ -117,12 +129,71 @@ export class TypeChecker {
 		return new Map(this.types);
 	}
 
-	err(msg, node) {
+	recordBlocker(category, item = null) {
+		if (!this.blockers.has(category)) {
+			this.blockers.set(category, []);
+		}
+		this.blockers.get(category).push(item);
+	}
+
+	getSummary() {
+		if (this.blockers.size === 0) return null;
+		let total = 0;
+		const parts = [];
+		for (const [category, items] of this.blockers) {
+			const validItems = items.filter(
+				(x) => x !== null && x !== undefined && x !== "",
+			);
+			const uniqueItems = [...new Set(validItems)];
+			const count = uniqueItems.length > 0 ? uniqueItems.length : items.length;
+			total += count;
+			const itemsStr =
+				uniqueItems.length > 0 ? ` (${uniqueItems.join(", ")})` : "";
+			let label = category;
+			if (category === "js package import") {
+				label = count === 1 ? "js package import" : "js package imports";
+			} else if (category === "wasm package import") {
+				label = count === 1 ? "wasm package import" : "wasm package imports";
+			} else if (category === "browser global") {
+				label = count === 1 ? "browser global" : "browser globals";
+			} else if (category === "async function") {
+				label = count === 1 ? "async function" : "async functions";
+			} else if (category === ".templ file") {
+				label = count === 1 ? ".templ file" : ".templ files";
+			} else if (category === "css declaration") {
+				label = count === 1 ? "css declaration" : "css declarations";
+			} else if (category === "js: import") {
+				label = count === 1 ? "js: import" : "js: imports";
+			} else if (category === "gom usage") {
+				label = "gom usage";
+			} else if (category === "mutable package variable") {
+				label =
+					count === 1
+						? "mutable package variable"
+						: "mutable package variables";
+			} else if (category === "unsupported stdlib import") {
+				label =
+					count === 1
+						? "unsupported stdlib import"
+						: "unsupported stdlib imports";
+			} else if (category === "planned feature") {
+				label = count === 1 ? "planned feature" : "planned features";
+			} else if (category === "defer statement") {
+				label = count === 1 ? "defer statement" : "defer statements";
+			}
+			parts.push(`${count} ${label}${itemsStr}`);
+		}
+		const noun = total === 1 ? "blocker" : "blockers";
+		return `package '${this.pkgName}' cannot be wasm: ${total} ${noun} — ${parts.join(", ")}`;
+	}
+
+	err(msg, node, hint = null) {
 		const e = new TypeCheckError(
 			msg,
 			node,
 			this._currentFile,
 			this._currentSource,
+			hint,
 		);
 		this.errors.push(e);
 		return TAINTED_ANY; // tainted recovery type — suppresses downstream cascade errors
@@ -163,16 +234,136 @@ export class TypeChecker {
 		}
 	}
 
-	// Like check() but operates over multiple programs (same-package multi-file).
-	// All passes run across all files before moving to the next pass,
-	// so every file sees every other file's declarations.
 	checkAll(programs) {
+		if (programs.length > 0) {
+			if (!this.target || this.target === "js") {
+				const pTarget = programs.find((p) => p.target)?.target;
+				if (pTarget) this.target = pTarget;
+			}
+			if (!this.pkgName) {
+				this.pkgName = programs[0].pkg?.name ?? null;
+			}
+		}
+
+		if (this.target === "wasm" || this.target === "both") {
+			for (const p of programs) {
+				if (p._filename?.endsWith(".templ")) {
+					this._setCurrentFile(p);
+					const fileName = p._filename.split("/").pop();
+					this.recordBlocker(".templ file", fileName);
+					this.err(
+						`.templ files are not allowed in wasm packages; move '${fileName}' to a js package`,
+						p.pkg,
+					);
+				}
+			}
+		}
+
 		this._collectTypesPass(programs);
 		this._collectFuncsPass(programs);
 		this._promoteEmbeddedMethods();
 		this._collectVarsConstsPass(programs);
 		this._checkTopDeclsPass(programs);
+
+		if (this.target === "both") {
+			this._checkMutablePackageVars(programs);
+		}
+
+		if (this.blockers.size > 0) {
+			const summaryLine = this.getSummary();
+			this.summary = summaryLine;
+			this.errors.push({ message: summaryLine, isSummary: true });
+		}
+
 		return this.errors;
+	}
+
+	_checkMutablePackageVars(programs) {
+		const pkgVars = new Set();
+		for (const p of programs) {
+			for (const d of p.decls) {
+				if (d.kind === "VarDecl") {
+					for (const spec of d.decls) {
+						for (const name of spec.names) {
+							if (name !== "_") pkgVars.add(name);
+						}
+					}
+				}
+			}
+		}
+		if (pkgVars.size === 0) return;
+
+		const checkFn = (fnDecl, file, src) => {
+			const locals = new Set();
+			if (fnDecl.recvName && fnDecl.recvName !== "_")
+				locals.add(fnDecl.recvName);
+			for (const p of fnDecl.params ?? []) {
+				if (p.name && p.name !== "_") locals.add(p.name);
+			}
+
+			const walk = (node) => {
+				if (!node || typeof node !== "object") return;
+				if (Array.isArray(node)) {
+					for (const item of node) walk(item);
+					return;
+				}
+				if (node.kind === "VarDecl") {
+					for (const spec of node.decls ?? []) {
+						for (const name of spec.names ?? []) {
+							if (name !== "_") locals.add(name);
+						}
+					}
+				} else if (node.kind === "DefineStmt") {
+					for (const e of node.lhs ?? []) {
+						if (e.kind === "Ident" && e.name !== "_") locals.add(e.name);
+					}
+				} else if (node.kind === "RangeStmt") {
+					if (node.key?.name && node.key.name !== "_")
+						locals.add(node.key.name);
+					if (node.value?.name && node.value.name !== "_")
+						locals.add(node.value.name);
+				} else if (node.kind === "AssignStmt") {
+					for (const e of node.lhs) {
+						const root = rootIdentName(e);
+						if (root && pkgVars.has(root) && !locals.has(root)) {
+							this._currentFile = file;
+							this._currentSource = src;
+							this.recordBlocker("mutable package variable", root);
+							this.err(
+								`package-level variable '${root}' is mutated; not allowed in 'both' packages (each target gets its own copy)`,
+								node,
+							);
+						}
+					}
+				} else if (node.kind === "IncDecStmt") {
+					const root = rootIdentName(node.expr);
+					if (root && pkgVars.has(root) && !locals.has(root)) {
+						this._currentFile = file;
+						this._currentSource = src;
+						this.recordBlocker("mutable package variable", root);
+						this.err(
+							`package-level variable '${root}' is mutated; not allowed in 'both' packages (each target gets its own copy)`,
+							node,
+						);
+					}
+				}
+				for (const key of Object.keys(node)) {
+					if (key.startsWith("_")) continue;
+					walk(node[key]);
+				}
+			};
+			walk(fnDecl.body);
+		};
+
+		for (const p of programs) {
+			if (p._filename?.endsWith("_test.go")) continue;
+			for (const d of p.decls) {
+				if ((d.kind === "FuncDecl" || d.kind === "MethodDecl") && d.body) {
+					if (d.name === "init" && d.kind === "FuncDecl") continue;
+					checkFn(d, p._filename, p._source);
+				}
+			}
+		}
 	}
 
 	_collectTypesPass(programs) {
@@ -507,6 +698,10 @@ export class TypeChecker {
 	}
 
 	_collectCssDecl(decl) {
+		if (this.target === "wasm" || this.target === "both") {
+			this.recordBlocker("css declaration");
+			this.err("css declarations are not allowed in wasm packages", decl);
+		}
 		const paramTypes = (decl.params || []).map((p) =>
 			this.resolveTypeNode(p.type, this.globals),
 		);
@@ -551,6 +746,16 @@ export class TypeChecker {
 	}
 
 	checkFuncDecl(decl, outer) {
+		if (
+			(this.target === "wasm" || this.target === "both") &&
+			(decl.async || decl.isAsync)
+		) {
+			this.recordBlocker("async function", decl.name);
+			this.err(
+				"async functions are not supported in wasm packages; keep async code in a js package",
+				decl,
+			);
+		}
 		const inner = new Scope(outer);
 		this._injectTypeParams(decl, inner, outer);
 		for (const p of decl.params) {
@@ -562,6 +767,16 @@ export class TypeChecker {
 	}
 
 	checkMethodDecl(decl, outer) {
+		if (
+			(this.target === "wasm" || this.target === "both") &&
+			(decl.async || decl.isAsync)
+		) {
+			this.recordBlocker("async function", decl.name);
+			this.err(
+				"async functions are not supported in wasm packages; keep async code in a js package",
+				decl,
+			);
+		}
 		const inner = new Scope(outer);
 		const recvTypeName =
 			decl.recvType.kind === "GenericTypeName"

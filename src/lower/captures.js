@@ -64,6 +64,22 @@ export function collectReferencedNames(node, localDecls, refs = new Set()) {
 		return refs;
 	}
 
+	if (node.kind === "FuncLit") {
+		const innerLocals = new Set(localDecls);
+		for (const p of node.params ?? []) {
+			if (p.name && p.name !== "_") innerLocals.add(p.name);
+		}
+		for (const r of node.returnType?._namedReturns ?? []) {
+			if (r.name && r.name !== "_") innerLocals.add(r.name);
+		}
+		collectDeclaredNames(node.body, innerLocals);
+		for (const key of Object.keys(node)) {
+			if (key.startsWith("_")) continue;
+			collectReferencedNames(node[key], innerLocals, refs);
+		}
+		return refs;
+	}
+
 	if (
 		node.kind === "Ident" &&
 		!localDecls.has(node.name) &&

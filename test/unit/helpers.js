@@ -23,7 +23,11 @@ export const FIXTURES = join(__dirname, "fixtures");
 
 export function compile(
 	source,
-	{ fromFile = join(FIXTURES, "_dummy.go") } = {},
+	{
+		fromFile = join(FIXTURES, "_dummy.go"),
+		strict = false,
+		target = null,
+	} = {},
 ) {
 	const filename = fromFile.split("/").pop();
 	const tokens = new Lexer(source, filename).tokenize();
@@ -32,6 +36,11 @@ export function compile(
 	const checker = new TypeChecker();
 	const fromDir = dirname(resolve(fromFile));
 	const jsImports = new Map();
+
+	const pkgTarget = target ?? ast.target ?? "js";
+	ast.target = pkgTarget;
+	checker.target = pkgTarget;
+	checker.pkgName = ast.pkg?.name ?? "main";
 
 	for (const imp of ast.imports) {
 		for (const { path } of imp.imports) {
@@ -52,7 +61,11 @@ export function compile(
 	const errors = checker.check(ast);
 	if (errors.length > 0) return { js: null, errors };
 
-	const js = new CodeGen(checker, jsImports).generate(ast);
+	const isStrict = Boolean(strict || pkgTarget === "both");
+	const js = new CodeGen(checker, jsImports, new Set(), {
+		target: pkgTarget,
+		strict: isStrict,
+	}).generate(ast);
 	return { js, errors: [] };
 }
 
