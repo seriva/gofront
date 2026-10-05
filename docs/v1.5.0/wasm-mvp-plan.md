@@ -227,8 +227,8 @@ The boundary per frame is then raycasts (gameplay, bodies, controller), each a s
 - [x] **Phase 1b — New analyses:** Implement `lower/captures.js` (closure envs) and `lower/escape.js` (pointer retention). Dedicated AST analysis unit tests pass.
 
 ### Phase 2: Package Targets & Diagnostics
-- [ ] **Phase 2a — Target directives & rules:** `//gofront:target` in lexer, target import rules, package summary diagnostic line. Target and negative diagnostic tests pass.
-- [ ] **Phase 2b — JS strict numeric mode:** JS strict numeric mode for `both` packages (`Math.fround`, `|0`, `Math.imul`, Go shifts, div-zero). Parity tests pass against normal JS.
+- [x] **Phase 2a — Target directives & rules:** `//gofront:target` in lexer, target import rules, package summary diagnostic line. Target and negative diagnostic tests pass.
+- [x] **Phase 2b — JS strict numeric mode:** JS strict numeric mode for `both` packages (`Math.fround`, `|0`, `Math.imul`, Go shifts, div-zero). Parity tests pass against normal JS.
 
 ### Phase 3: Core WASM Backend & Scalars
 - [ ] **Phase 3a — Minimal binary encoder & WAT writer:** LEB128, headers, type/func/export/code sections (`encode.js`, `wat.js`). Hardcoded `add(i32, i32)` passes `WebAssembly.validate()` & runs.

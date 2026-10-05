@@ -25,10 +25,16 @@ import { log } from "./colors.js";
 import { parseDts } from "./dts-parser.js";
 import { Lexer } from "./lexer.js";
 import { Parser } from "./parser/index.js";
-import { isLocalPath, resolveAll, resolveGwDir } from "./resolver.js";
+import {
+	isBuiltinPackage,
+	isLocalPath,
+	resolveAll,
+	resolveGwDir,
+} from "./resolver.js";
 import { TemplLexer } from "./templ-lexer.js";
 import { TemplParser } from "./templ-parser.js";
 import { TypeChecker } from "./typechecker/index.js";
+import { WASM_SUPPORTED_STDLIB } from "./typechecker/types.js";
 
 // ── Parse cache ──────────────────────────────────────────────
 
@@ -173,6 +179,55 @@ export function resolveImports(
 ) {
 	const fromDir = dirname(resolve(fromFile));
 	const allImports = programs.flatMap((p) => p.imports);
+	const pkgTarget = checker.target ?? "js";
+	const pkgName = checker.pkgName ?? programs[0]?.pkg?.name ?? "main";
+
+	// Validate target rules on non-local imports
+	if (pkgTarget === "wasm" || pkgTarget === "both") {
+		for (const p of programs) {
+			const saved = [checker._currentFile, checker._currentSource];
+			checker._currentFile = p._filename ?? null;
+			checker._currentSource = p._source ?? null;
+			for (const imp of p.imports) {
+				for (const { path, _line, _col, line, col } of imp.imports) {
+					const impNode = {
+						_line,
+						_col,
+						line: line ?? _line,
+						col: col ?? _col ?? 1,
+					};
+					if (path.startsWith("js:")) {
+						checker.recordBlocker("js: import", path);
+						checker.err(
+							"js: imports are not allowed in wasm packages",
+							impNode,
+						);
+					} else if (path === "gom") {
+						checker.recordBlocker("gom usage", "gom");
+						checker.err(
+							"package 'gom' is not available in wasm packages",
+							impNode,
+						);
+					} else if (!isLocalPath(path)) {
+						if (!isBuiltinPackage(path)) {
+							checker.recordBlocker("js: import", path);
+							checker.err(
+								"js: imports are not allowed in wasm packages",
+								impNode,
+							);
+						} else if (!WASM_SUPPORTED_STDLIB.has(path)) {
+							checker.recordBlocker("unsupported stdlib import", path);
+							checker.err(
+								`'${path}' is not yet available in wasm packages`,
+								impNode,
+							);
+						}
+					}
+				}
+			}
+			[checker._currentFile, checker._currentSource] = saved;
+		}
+	}
 
 	// js: prefix — local .d.ts files
 	for (const imp of allImports) {
@@ -205,7 +260,7 @@ export function resolveImports(
 	const seenLocalPaths = new Set();
 	for (const p of programs) {
 		for (const imp of p.imports) {
-			for (const { path, alias, _line } of imp.imports) {
+			for (const { path, alias, _line, _col, line, col } of imp.imports) {
 				if (!isLocalPath(path) || seenLocalPaths.has(path)) continue;
 				seenLocalPaths.add(path);
 				const depDir = resolveGwDir(path, fromFile);
@@ -226,6 +281,44 @@ export function resolveImports(
 					isDependency: true,
 				});
 				if (!alreadyBundled) preambles.push(dep);
+
+				// Target import rules for local packages
+				const impNode = {
+					_line,
+					_col,
+					line: line ?? _line,
+					col: col ?? _col ?? 1,
+				};
+				if (pkgTarget === "wasm" && dep.target === "js") {
+					const saved = [checker._currentFile, checker._currentSource];
+					checker._currentFile = p._filename ?? null;
+					checker._currentSource = p._source ?? null;
+					checker.recordBlocker("js package import", dep.pkgName);
+					checker.err(
+						`package '${pkgName}' (wasm) cannot import '${dep.pkgName}' (js)`,
+						impNode,
+					);
+					[checker._currentFile, checker._currentSource] = saved;
+				} else if (pkgTarget === "both") {
+					const saved = [checker._currentFile, checker._currentSource];
+					checker._currentFile = p._filename ?? null;
+					checker._currentSource = p._source ?? null;
+					if (dep.target === "js") {
+						checker.recordBlocker("js package import", dep.pkgName);
+						checker.err(
+							`package '${pkgName}' (both) cannot import '${dep.pkgName}' (js)`,
+							impNode,
+						);
+					} else if (dep.target === "wasm") {
+						checker.recordBlocker("wasm package import", dep.pkgName);
+						checker.err(
+							`package '${pkgName}' (both) can only import 'both' packages; '${dep.pkgName}' is wasm`,
+							impNode,
+						);
+					}
+					[checker._currentFile, checker._currentSource] = saved;
+				}
+
 				if (alias === "_") continue;
 				if (alias === ".") {
 					checker.addDefinitions(dep.exportedTypes, dep.exportedSymbols);
@@ -277,6 +370,11 @@ export function compileSingleFile(inputPath, options = {}) {
 	const bundledPackages = new Set();
 	const preambles = [];
 
+	const pkgTarget = ast.target ?? options.target ?? "js";
+	ast.target = pkgTarget;
+	checker.target = pkgTarget;
+	checker.pkgName = ast.pkg?.name ?? "main";
+
 	resolveImports(
 		[ast],
 		inputPath,
@@ -294,7 +392,11 @@ export function compileSingleFile(inputPath, options = {}) {
 		throw new Error(errors.map((e) => e.message).join("\n"));
 	}
 
-	const cg = new CodeGen(checker, jsImports, bundledPackages);
+	const isStrict = Boolean(options.strict || pkgTarget === "both");
+	const cg = new CodeGen(checker, jsImports, bundledPackages, {
+		target: pkgTarget,
+		strict: isStrict,
+	});
 	const mainJs = cg.generate(ast);
 
 	const mainChunk = {
@@ -310,7 +412,7 @@ export function compileSingleFile(inputPath, options = {}) {
 		attachSourceMap(merged, outputDir);
 	}
 
-	return { js: merged.js, css: cg.getCss() };
+	return { js: merged.js, css: cg.getCss(), target: pkgTarget };
 }
 
 export function compileDir(dir, options = {}) {
@@ -353,8 +455,32 @@ export function compileFiles(files, options = {}) {
 		);
 	const pkgName = pkgNames[0];
 
+	// Validate target directives across files in this package
+	const declaredTargets = new Map();
+	for (const p of programs) {
+		if (p.target) {
+			if (!declaredTargets.has(p.target)) declaredTargets.set(p.target, []);
+			declaredTargets.get(p.target).push(p._filename);
+		}
+	}
+	if (declaredTargets.size > 1) {
+		const list = [...declaredTargets.entries()]
+			.map(([t, fList]) => `${t} (${fList.join(", ")})`)
+			.join(" vs ");
+		throw new Error(
+			`Conflicting //gofront:target directives in package '${pkgName}': ${list}`,
+		);
+	}
+	const pkgTarget =
+		declaredTargets.size === 1
+			? declaredTargets.keys().next().value
+			: (options.target ?? "js");
+	for (const p of programs) p.target = pkgTarget;
+
 	// ── 2. Resolve imports ────────────────────────────────────────
 	const checker = new TypeChecker();
+	checker.target = pkgTarget;
+	checker.pkgName = pkgName;
 	const jsImports = new Map(); // npm imports → exported names (for ESM emit)
 	const bundledPackages = new Set(); // package names whose code is inlined
 	const preambles = []; // JS code / chunks from compiled sub-packages
@@ -380,7 +506,11 @@ export function compileFiles(files, options = {}) {
 	}
 
 	// ── 4. Code generation ────────────────────────────────────────
-	const codegen = new CodeGen(checker, jsImports, bundledPackages);
+	const isStrict = Boolean(options.strict || pkgTarget === "both");
+	const codegen = new CodeGen(checker, jsImports, bundledPackages, {
+		target: pkgTarget,
+		strict: isStrict,
+	});
 	const mainJs = codegen.generateAll(programs, {
 		isTest: options.isTest ?? false,
 	});
@@ -405,6 +535,7 @@ export function compileFiles(files, options = {}) {
 
 	return {
 		pkgName,
+		target: pkgTarget,
 		js: merged.js,
 		css: allCss,
 		programs,
