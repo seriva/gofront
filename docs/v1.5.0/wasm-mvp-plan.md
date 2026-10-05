@@ -237,10 +237,10 @@ The boundary per frame is then raycasts (gameplay, bodies, controller), each a s
 - [x] **Phase 3c — Traps & Math imports:** `panic` tag, div-zero & nil guards, and JS `Math` imports (`math.Sin/Cos/...`). Parity tests and math tests pass.
 
 ### Phase 4: Types & Runtime Constructs
-- [ ] **Phase 4a — Structs, pointers & methods:** `struct.new`, `struct.get/set`, and rec groups. `mathx.Vec3` operations and methods run in WASM.
-- [ ] **Phase 4b — Arrays & slices:** `(array (mut T))`, slice header struct, `len`/`cap`/indexing, `runtime/wasm/slice.go` (`append`). Slice manipulation & growth fixtures pass.
-- [ ] **Phase 4c — Strings & any:** JS String Builtins (`externref`) + `anyref` with concrete casts (`ref.test`/`ref.cast`). String concatenation/comparison and `any` fixtures pass.
-- [ ] **Phase 4d — Closures:** `(struct funcref, anyref env)` + `call_ref`, boxed environments via `captures.js`. Closure and callback fixtures pass.
+- [x] **Phase 4a — Structs, pointers & methods:** `struct.new`, `struct.get/set`, and rec groups. `mathx.Vec3` operations and methods run in WASM.
+- [x] **Phase 4b — Arrays & slices:** `(array (mut T))`, slice header struct, `len`/`cap`/indexing, `runtime/wasm/slice.go` (`append`). Slice manipulation & growth fixtures pass.
+- [x] **Phase 4c — Strings & any:** JS String Builtins (`externref`) + `anyref` with concrete casts (`ref.test`/`ref.cast`). String concatenation/comparison and `any` fixtures pass.
+- [x] **Phase 4d — Closures:** `(struct funcref, anyref env)` + `call_ref`, boxed environments via `captures.js`. Closure and callback fixtures pass.
 
 ### Phase 5: Boundary & Tooling Integration
 - [ ] **Phase 5a — Boundary v1 (Values):** Facades for primitives and struct values (`mathx.Vec3` <-> JS class). Struct passing across boundary matches JS-only results.

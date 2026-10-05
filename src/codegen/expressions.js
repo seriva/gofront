@@ -177,7 +177,7 @@ const TYPEOF_NUMBER_NAMES = new Set([...INT_TYPE_NAMES, "float32", "float64"]);
 const BUILTIN_GEN = {
 	append: (s, e) => s.genAppend(e),
 	len: (s, e) => s._genBuiltinLen(e),
-	cap: (s, e) => `${s.genExpr(e.args[0])}.length`,
+	cap: (s, e) => `(${s.genExpr(e.args[0])}?.length ?? 0)`,
 	make: (s, e) => s.genMake(e),
 	delete: (s, e) => {
 		const [m, k] = e.args.map((a) => s.genExpr(a));

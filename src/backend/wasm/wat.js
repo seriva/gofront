@@ -19,7 +19,10 @@ function formatTypeEntry(t, id) {
 	const typeId = id !== undefined ? ` $t${id}` : "";
 	if (t.form === "rec") {
 		const inners = t.types
-			.map((sub, i) => `    ${formatTypeEntry(sub, `${id}_${i}`)}`)
+			.map(
+				(sub, i) =>
+					`    ${formatTypeEntry(sub, typeof id === "number" ? id + i : `${id}_${i}`)}`,
+			)
 			.join("\n");
 		return `(rec\n${inners}\n  )`;
 	}
@@ -67,7 +70,12 @@ function formatInstruction(inst) {
 		case "return_call":
 			return `${op} ${inst.funcIndex ?? inst.index ?? 0}`;
 		case "call_indirect":
-			return `${op} (type ${inst.typeIndex ?? 0})`;
+			return `${op} (type $t${inst.typeIndex ?? 0})`;
+		case "call_ref":
+		case "return_call_ref":
+			return `${op} (type $t${inst.typeIndex ?? 0})`;
+		case "ref.func":
+			return `ref.func ${inst.funcIndex ?? inst.index ?? 0}`;
 		case "local.get":
 		case "local.set":
 		case "local.tee":
@@ -83,13 +91,33 @@ function formatInstruction(inst) {
 		case "throw":
 			return `${op} ${inst.tagIndex ?? inst.index ?? 0}`;
 		case "struct.new":
+			return `struct.new ${inst.typeIndex !== undefined ? `$t${inst.typeIndex}` : 0}`;
 		case "struct.get":
+		case "struct.get_s":
+		case "struct.get_u":
 		case "struct.set":
-			return `${op} ${inst.typeIndex ?? 0} ${inst.fieldIndex ?? 0}`.trim();
+			return `${op} ${inst.typeIndex !== undefined ? `$t${inst.typeIndex}` : 0} ${inst.fieldIndex ?? 0}`;
 		case "array.new":
+		case "array.new_default":
 		case "array.get":
+		case "array.get_s":
+		case "array.get_u":
 		case "array.set":
-			return `${op} ${inst.typeIndex ?? 0}`;
+			return `${op} ${inst.typeIndex !== undefined ? `$t${inst.typeIndex}` : 0}`;
+		case "array.new_fixed":
+			return `${op} ${inst.typeIndex !== undefined ? `$t${inst.typeIndex}` : 0} ${inst.size ?? inst.count ?? 0}`;
+		case "array.copy":
+			return `${op} ${inst.typeIndexDst !== undefined ? `$t${inst.typeIndexDst}` : `$t${inst.typeIndex ?? 0}`} ${inst.typeIndexSrc !== undefined ? `$t${inst.typeIndexSrc}` : `$t${inst.typeIndex ?? 0}`}`;
+		case "array.len":
+			return "array.len";
+		case "ref.test":
+		case "ref.test_null":
+		case "ref.cast":
+		case "ref.cast_null":
+			return `${op} ${inst.typeIndex !== undefined ? `$t${inst.typeIndex}` : 0}`;
+		case "any.convert_extern":
+		case "extern.convert_any":
+			return op;
 		default:
 			return op;
 	}
@@ -100,8 +128,15 @@ export function emitWat(mod) {
 
 	// 1. Types
 	if (mod.types && mod.types.length > 0) {
+		let typeIdx = 0;
 		for (let i = 0; i < mod.types.length; i++) {
-			lines.push(`  ${formatTypeEntry(mod.types[i], i)}`);
+			const entry = mod.types[i];
+			lines.push(`  ${formatTypeEntry(entry, typeIdx)}`);
+			if (entry.form === "rec") {
+				typeIdx += entry.types.length;
+			} else {
+				typeIdx += 1;
+			}
 		}
 	}
 
@@ -136,6 +171,13 @@ export function emitWat(mod) {
 				.join(" ");
 			lines.push(`  (global $g${i} ${typeStr} ${initStr})`);
 		}
+	}
+
+	// 5. Elements (declarative for ref.func)
+	if (mod.elements && mod.elements.length > 0) {
+		lines.push(
+			`  (elem declare func ${mod.elements.map((idx) => `$f${idx}`).join(" ")})`,
+		);
 	}
 
 	// Map exports by kind & index
@@ -173,7 +215,7 @@ export function emitWat(mod) {
 			// Locals
 			if (fn.locals && fn.locals.length > 0) {
 				const locTypes = fn.locals.map((l) =>
-					typeof l === "string" ? l : l.type,
+					l && typeof l === "object" && "type" in l && !l.kind ? l.type : l,
 				);
 				lines.push(`    (local ${locTypes.map(formatValType).join(" ")})`);
 			}

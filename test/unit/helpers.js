@@ -248,8 +248,10 @@ export function compileHybrid(source, options = {}) {
 						throw new Error(`Return mismatch: JS ${jsRes} vs WASM ${wasmRes}`);
 					}
 				} else if (jsRes !== wasmRes) {
+					const fmt = (v) =>
+						typeof v === "bigint" ? v + "n" : JSON.stringify(v);
 					throw new Error(
-						`Return mismatch: JS ${JSON.stringify(jsRes)} vs WASM ${JSON.stringify(wasmRes)}`,
+						`Return mismatch: JS ${fmt(jsRes)} vs WASM ${fmt(wasmRes)}`,
 					);
 				}
 			}
@@ -335,10 +337,15 @@ export function assert(cond, msg) {
 }
 
 export function assertEqual(actual, expected) {
-	if (actual !== expected)
-		throw new Error(
-			`expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
-		);
+	if (typeof actual === "bigint" && typeof expected === "number") {
+		if (actual === BigInt(expected)) return;
+	} else if (typeof actual === "number" && typeof expected === "bigint") {
+		if (BigInt(actual) === expected) return;
+	}
+	if (actual !== expected) {
+		const fmt = (v) => (typeof v === "bigint" ? v + "n" : JSON.stringify(v));
+		throw new Error(`expected ${fmt(expected)}, got ${fmt(actual)}`);
+	}
 }
 
 export function assertContains(haystack, needle) {
