@@ -61,8 +61,9 @@ Today the analyses are spread through codegen and stored as `_`-prefixed fields 
 | **New:** captured-and-mutated variables (needed by WASM closures) | — | `lower/captures.js` |
 | **New:** pointer-retention escape analysis (boundary rule) | — | `lower/escape.js` |
 
-- The JS codegen reads the side tables instead of recomputing.
-- **Safety net:** the ~1,400 unit tests, `test:examples` and E2E must produce byte-identical JS before any WASM work lands. Do this as its own PR series.
+- **Two-step implementation:**
+  - **1a. Extract existing side-tables (zero behavior change):** Move ownership/clone elision, boxing, range, functions, and embedding to `src/lower/`. JS codegen reads side tables. *Safety net:* All ~1,400 existing tests and E2E must be byte-identical to v1.4.0.
+  - **1b. Add new analyses:** Implement `captures.js` (tracked mutated variables for WASM closure env boxing) and `escape.js` (pointer retention across the WASM boundary). Unused by JS codegen, tested via targeted AST analysis tests.
 - **Bonus:** v2.0.0 then *ports* a clean `lower` instead of untangling codegen during the port.
 
 ### 2. Package targets & diagnostics
@@ -221,11 +222,22 @@ The boundary per frame is then raycasts (gameplay, bodies, controller), each a s
 
 | Phase | Scope | Exit criterion |
 |---|---|---|
-| **1** | `src/lower/` extraction (incl. new `captures` + `escape` analyses, unused by JS) | All suites byte-identical to v1.4.0 |
-| **2** | Directives in lexer, targets + import rules + diagnostics + summary, JS strict mode | Diagnostic and strict-mode tests pass |
-| **3** | Encoder, WAT, module IR, scalars, control flow, functions, `panic`, `math` | Numeric fixtures: WASM == JS-strict |
-| **4** | Structs, pointers, methods, embedding, arrays, slices, strings, `any`, closures | All subset fixtures pass. `mathx` tests pass on both targets. |
-| **5** | Boundary v1 facades, loader, single-module linking, `compiler.js`/CLI/dev/test integration | Hybrid sample project builds, runs and tests green |
-| **6** | simplefps split, `collision` in WASM, raycast benchmark, README/CHANGELOG | simplefps runs hybrid. **Go/no-go benchmark published.** |
+| **1a** | Side-table extraction: move ownership, boxing, range, functions, embedding to `src/lower/` | All ~1,400 tests, `test:examples`, E2E byte-identical to v1.4.0 |
+| **1b** | New analyses: `lower/captures.js` (closure envs) and `lower/escape.js` (pointer retention) | Dedicated AST analysis unit tests pass |
+| **2a** | `//gofront:target` in lexer, target import rules, package summary diagnostic line | Target and negative diagnostic tests pass |
+| **2b** | JS strict numeric mode for `both` packages (`Math.fround`, `\|0`, `Math.imul`, Go shifts, div-zero) | Strict mode parity tests pass against normal JS |
+| **3a** | Minimal binary encoder (`encode.js`) & WAT writer (`wat.js`): LEB128, headers, type/func/export/code sections | Hardcoded `add(i32, i32)` passes `WebAssembly.validate()` & runs |
+| **3b** | Module IR & scalar emission (`emit.js`): `i32/i64/f32/f64`, locals, Go arithmetic & control flow (`block/loop/br_if`) | Numeric & loop fixtures: WASM == JS-strict |
+| **3c** | Traps (`panic` tag, div-zero & nil guards) and JS `Math` imports (`math.Sin/Cos/...`) | Panic message parity tests and math tests pass |
+| **4a** | Structs, pointers, methods & rec groups (`struct.new`, `struct.get/set`) | `mathx.Vec3` operations and methods run in WASM |
+| **4b** | Arrays & Slices: `(array (mut T))`, slice header struct, `len`/`cap`/indexing, `runtime/wasm/slice.go` (`append`) | Slice manipulation & growth fixtures pass |
+| **4c** | Strings & `any`: JS String Builtins (`externref`) + `anyref` with concrete casts (`ref.test`/`ref.cast`) | String concatenation/comparison and `any` fixtures pass |
+| **4d** | Closures: `(struct funcref, anyref env)` + `call_ref`, boxed environments via `captures.js` | Closure and callback fixtures pass |
+| **5a** | Boundary v1: Facades for primitives and struct values (`mathx.Vec3` <-> JS class) | Struct passing across boundary matches JS-only results |
+| **5b** | Boundary v1: Slices (TypedArray copy) and opaque handles (`*collision.Trimesh` with stable identity) | Handle identity & TypedArray slice tests pass |
+| **5c** | Loader, single `app.wasm` linking, `compiler.js` pipeline, dev-server MIME, dual-target test runner | Hybrid sample project builds, serves, and passes dual-target tests |
+| **6a** | simplefps split: `engine/mathx` (`both`) and `engine/collision` (`wasm`) | `mathx` passes on both targets, `collision` passes in WASM |
+| **6b** | Raycast benchmark harness (`test/e2e/perf/raycast-bench.js`, 100k+ triangles, 100k rays) | Automated benchmark produces repeatable rays/s & alloc numbers |
+| **6c** | Full game verification (manual play at 60 FPS) & publish benchmark in README / CHANGELOG | simplefps runs hybrid. **Go/no-go benchmark published.** |
 
 **After Phase 6:** if the benchmark and determinism results justify it, v1.6.0 completes the hybrid in the JS compiler, and v2.0.0 ports the finished result. If not, the WASM backend stays as a documented experimental target, v1.6.0 is dropped or repurposed, and v2.0.0 ports the v1.5 subset as-is without further investment.
