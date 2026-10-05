@@ -309,18 +309,40 @@ The ~1,400 unit tests are JS test files that call `Lexer`, `Parser`, `TypeChecke
 
 ---
 
-## Phased Implementation Roadmap
+## Implementation Tasks
 
-| Phase | Scope | Deliverables | Exit criterion |
-|---|---|---|---|
-| **0** | Oracle & baseline | `helpers.js` engine switch, `gofront oracle` protocol stub, shared `runtime/js/`, JS-engine timing baseline (cold `check`/`build`, warm rebuild) on all examples + `simplefps` | Harness runs the full suite against the JS engine through the switch |
-| **1** | Tokens & lexer | `internal/token`, `internal/lexer` (ASI, templ/css modes) | 100% token parity |
-| **2** | Parser | `internal/ast`, `internal/parser` incl. generics, labels, templ/css | All parse-error diagnostics identical. AST debug dump available. |
-| **3** | Type checker | `internal/types`, `internal/check`, `internal/stdlib` typings, `internal/dts`, `internal/resolve` | 100% diagnostic parity on all type-check tests |
-| **4** | Lowering & JS core | Port `src/lower/` → `internal/lower` (ownership, boxing, captures, escape, range/defer shapes), `backend` interface, `backend/js` core language + strict numeric mode + runtime helpers + source maps | Byte-identical JS for all core-language and strict-mode tests |
-| **5** | Stdlib & templ codegen | All 21 stdlib codegen modules, templ DOM codegen, scoped CSS | Byte-identical JS + CSS for builtins, stdlib, templ tests |
-| **5b** | WASM backend port | `internal/backend/wasm` (module IR, type mapping incl. interfaces/generics/maps, emission incl. `defer`/`recover`, encoder, WAT, facades incl. callbacks + interface proxies, `gofront/shared` buffers, loader), package targets + diagnostics, `runtime/wasm` compiled by the native engine | Byte-identical `.wasm` + WAT for all v1.5.0/v1.6.0 WASM fixtures. Hybrid + boundary fixtures pass. `example/hybrid` builds identically. |
-| **6** | CLI & dev server | `cmd/gofront`, `internal/cli` (config, assets, PWA), `internal/devserver`, `internal/minify`, Node delegation for `prep`/`vendor`/`test` | CLI unit tests pass. `test:examples` + `test:examples:dom` pass. |
-| **7** | npm packaging | Launcher `bin/gofront.js`, `@gofront/*` platform packages, release CI (goreleaser or equivalent) | `npm i -g gofront` and `npx gofront` run the native binary on Linux/macOS/Windows |
-| **8** | Full verification | Playwright E2E on all six examples (incl. `example/hybrid`), `simplefps` hybrid build + tests + manual 60 FPS check | All suites green on native engine |
-| **9** | Performance & cutover | Benchmarks vs Phase 0 baseline, profile hot spots, beta → default flip | Targets met or documented. Default engine = native. |
+<!-- Native Go engine implementation roadmap -->
+
+### Phase 0: Oracle & Baseline
+- [ ] **Task 0.1 — Test harness & oracle stub:** `helpers.js` engine switch, `gofront oracle` protocol stub, shared `runtime/js/`.
+- [ ] **Task 0.2 — Timing baseline:** Cold `check`/`build` and warm rebuild baselines on all examples and `simplefps`.
+
+### Phase 1: Tokens & Lexer
+- [ ] **Task 1.1 — Native lexer:** `internal/token` and `internal/lexer` with Go ASI, `.templ`, and scoped `css` modes (100% token parity).
+
+### Phase 2: Parser & AST
+- [ ] **Task 2.1 — Native parser:** `internal/ast` and `internal/parser` supporting generics, labels, `.templ`, and `css` blocks with identical diagnostics.
+
+### Phase 3: Type Checker
+- [ ] **Task 3.1 — Native checker:** `internal/types`, `internal/check`, `internal/stdlib` typings, `internal/dts`, and `internal/resolve` (100% diagnostic parity).
+
+### Phase 4: Lowering & JS Core Backend
+- [ ] **Task 4.1 — Lowering port:** Port `src/lower/` → `internal/lower` (ownership, boxing, captures, escape, range/defer shapes).
+- [ ] **Task 4.2 — JS core codegen:** `internal/backend/js` with strict numeric mode, runtime helpers, and source maps (byte-identical JS).
+
+### Phase 5: Codegen & Backends
+- [ ] **Task 5.1 — Stdlib & templ codegen:** All 21 stdlib modules, templ DOM codegen, and scoped CSS (byte-identical JS + CSS).
+- [ ] **Task 5.2 — WASM backend port:** `internal/backend/wasm` (IR, types, encoder, WAT, facades, `runtime/wasm` build) matching v1.6.0 `.wasm` output byte-for-byte.
+
+### Phase 6: CLI & Tooling
+- [ ] **Task 6.1 — CLI binary & dev server:** `cmd/gofront`, config, assets, PWA, dev server, and minifier with Node delegation for `prep`/`vendor`/`test`.
+
+### Phase 7: Distribution Packaging
+- [ ] **Task 7.1 — npm platform packages:** Thin launcher `bin/gofront.js`, `@gofront/*` platform packages, and CI release automation.
+
+### Phase 8: Verification & Parity
+- [ ] **Task 8.1 — Full suite verification:** Playwright E2E on all six examples and `simplefps` hybrid build + tests + manual 60 FPS check.
+
+### Phase 9: Benchmarks & Default Cutover
+- [ ] **Task 9.1 — Performance audit & cutover:** Measure vs Phase 0 baseline, profile hot spots, flip default engine to native Go binary.
+
