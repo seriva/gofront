@@ -9,6 +9,7 @@ import { colors, log } from "./colors.js";
 export const MIME = {
 	".html": "text/html; charset=utf-8",
 	".js": "application/javascript; charset=utf-8",
+	".wasm": "application/wasm",
 	".css": "text/css; charset=utf-8",
 	".json": "application/json; charset=utf-8",
 	".go": "text/plain; charset=utf-8",
@@ -193,6 +194,7 @@ function sendStaticFile(res, filePath, shouldInject) {
 			const body = shouldInject ? injectLiveReload(data) : data;
 			res.writeHead(200, {
 				"Content-Type": MIME[".html"],
+				"X-Content-Type-Options": "nosniff",
 				"Cache-Control": "no-cache, no-store, must-revalidate",
 			});
 			res.end(body);
@@ -202,6 +204,7 @@ function sendStaticFile(res, filePath, shouldInject) {
 		const data = readFileSync(filePath);
 		res.writeHead(200, {
 			"Content-Type": MIME[ext] ?? "application/octet-stream",
+			"X-Content-Type-Options": "nosniff",
 			"Cache-Control": "no-cache, no-store, must-revalidate",
 		});
 		res.end(data);

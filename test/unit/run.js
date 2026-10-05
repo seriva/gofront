@@ -48,6 +48,7 @@ import "./templ.test.js";
 import "./dom.test.js";
 import "./lexer-parser.test.js";
 import "./minifier.test.js";
+import "./lower.test.js";
 
 import { summarize } from "./helpers.js";
 

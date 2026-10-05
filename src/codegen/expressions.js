@@ -1,4 +1,11 @@
 import {
+	closureMutates,
+	fnMutates,
+	nodeMutatesVar,
+	nodeWritesVar,
+	rootIdentName,
+} from "../lower/index.js";
+import {
 	ERROR,
 	isComplex,
 	isTypedArraySlice,
@@ -335,60 +342,21 @@ export const expressionGenMethods = {
 	},
 
 	_rootIdentName(e) {
-		while (e) {
-			if (e.kind === "Ident") return e.name;
-			if (e.kind === "SelectorExpr" || e.kind === "IndexExpr") e = e.expr;
-			else if (e.kind === "UnaryExpr" && e.op === "*") e = e.operand;
-			else return null;
-		}
-		return null;
+		return rootIdentName(e);
 	},
 
 	// True when `node` itself (not its children) writes to variable `name`.
 	_nodeWritesVar(node, name) {
-		const root = (e) => this._rootIdentName(e) === name;
-		switch (node.kind) {
-			case "AssignStmt":
-				return node.lhs.some(root);
-			case "DefineStmt":
-				return node.lhs.some((e) => e._redecl && e.name === name);
-			case "IncDecStmt":
-				return root(node.expr);
-			case "SelectorExpr":
-				return Boolean(
-					node._isMethodValue && node._type?._ptrRecv && root(node.expr),
-				);
-			default:
-				return false;
-		}
+		return nodeWritesVar(node, name);
 	},
 
 	// True when `node` may modify (or take the address of) the value held by variable `name`.
 	_nodeMutatesVar(node, name, addrOnly = false) {
-		if (!node || typeof node !== "object") return false;
-		if (Array.isArray(node))
-			return node.some((n) => this._nodeMutatesVar(n, name, addrOnly));
-		if (
-			node.kind === "UnaryExpr" &&
-			node.op === "&" &&
-			this._rootIdentName(node.operand) === name
-		)
-			return true;
-		if (!addrOnly && this._nodeWritesVar(node, name)) return true;
-		for (const key of Object.keys(node)) {
-			if (key.startsWith("_")) continue;
-			if (this._nodeMutatesVar(node[key], name, addrOnly)) return true;
-		}
-		return false;
+		return nodeMutatesVar(node, name, addrOnly);
 	},
 
 	_fnMutates(name, addrOnly = false) {
-		const ctx = this._fnCtx;
-		if (!ctx) return true;
-		const key = `${addrOnly ? "&" : ""}${name}`;
-		if (!ctx.mut.has(key))
-			ctx.mut.set(key, this._nodeMutatesVar(ctx.body, name, addrOnly));
-		return ctx.mut.get(key);
+		return fnMutates(this._fnCtx?.body, name, addrOnly, this._fnCtx?.mut);
 	},
 
 	_withFnCtx(body, fn) {
@@ -447,21 +415,7 @@ export const expressionGenMethods = {
 	},
 
 	_closureMutates(name) {
-		const ctx = this._fnCtx;
-		const key = `λ${name}`;
-		if (!ctx.mut.has(key)) {
-			const walk = (node) => {
-				if (!node || typeof node !== "object") return false;
-				if (Array.isArray(node)) return node.some(walk);
-				if (node.kind === "FuncLit")
-					return this._nodeMutatesVar(node.body, name);
-				return Object.keys(node).some(
-					(k) => !k.startsWith("_") && walk(node[k]),
-				);
-			};
-			ctx.mut.set(key, walk(ctx.body));
-		}
-		return ctx.mut.get(key);
+		return closureMutates(this._fnCtx?.body, name, this._fnCtx?.mut);
 	},
 
 	_genUnaryExpr(expr) {
