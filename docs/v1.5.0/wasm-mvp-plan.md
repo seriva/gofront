@@ -146,7 +146,8 @@ For each imported `wasm` package, the backend generates a facade with the same A
 
 ### 6. CLI & tooling integration
 
-- **`compiler.js`:** builds the package graph with targets. `both` packages go through both backends. Facades are emitted for the boundary. Outputs are `{ js, css, wasm, wat? }`.
+- **Backend architecture (`src/backend/`):** move `src/codegen/` → `src/backend/js/` to establish symmetric backends alongside `src/backend/wasm/`. Update Sentrux layer `backend` at order 2. Maintain a transitional re-export shim in `src/codegen/index.js` to ensure zero breaking changes.
+- **`compiler.js`:** builds the package graph with targets. Dispatches symmetrically to `backend/js` and `backend/wasm`. `both` packages go through both backends. Facades are emitted for the boundary. Outputs are `{ js, css, wasm, wat? }`.
 - **`build`:** writes `app.wasm` next to the bundle. The PWA precache includes it.
 - **`dev`:** `dev-server.js` serves `.wasm` as `application/wasm`. Live reload rebuilds both outputs.
 - **`--emit-wat`:** writes `app.wat` for debugging.
@@ -231,9 +232,9 @@ The boundary per frame is then raycasts (gameplay, bodies, controller), each a s
 - [x] **Phase 2b — JS strict numeric mode:** JS strict numeric mode for `both` packages (`Math.fround`, `|0`, `Math.imul`, Go shifts, div-zero). Parity tests pass against normal JS.
 
 ### Phase 3: Core WASM Backend & Scalars
-- [ ] **Phase 3a — Minimal binary encoder & WAT writer:** LEB128, headers, type/func/export/code sections (`encode.js`, `wat.js`). Hardcoded `add(i32, i32)` passes `WebAssembly.validate()` & runs.
-- [ ] **Phase 3b — Module IR & scalar emission:** `i32/i64/f32/f64`, locals, Go arithmetic & control flow (`block/loop/br_if`). Numeric & loop fixtures: WASM == JS-strict.
-- [ ] **Phase 3c — Traps & Math imports:** `panic` tag, div-zero & nil guards, and JS `Math` imports (`math.Sin/Cos/...`). Parity tests and math tests pass.
+- [x] **Phase 3a — Minimal binary encoder & WAT writer:** LEB128, headers, type/func/export/code sections (`encode.js`, `wat.js`). Hardcoded `add(i32, i32)` passes `WebAssembly.validate()` & runs.
+- [x] **Phase 3b — Module IR & scalar emission:** `i32/i64/f32/f64`, locals, Go arithmetic & control flow (`block/loop/br_if`). Numeric & loop fixtures: WASM == JS-strict.
+- [x] **Phase 3c — Traps & Math imports:** `panic` tag, div-zero & nil guards, and JS `Math` imports (`math.Sin/Cos/...`). Parity tests and math tests pass.
 
 ### Phase 4: Types & Runtime Constructs
 - [ ] **Phase 4a — Structs, pointers & methods:** `struct.new`, `struct.get/set`, and rec groups. `mathx.Vec3` operations and methods run in WASM.
@@ -244,7 +245,10 @@ The boundary per frame is then raycasts (gameplay, bodies, controller), each a s
 ### Phase 5: Boundary & Tooling Integration
 - [ ] **Phase 5a — Boundary v1 (Values):** Facades for primitives and struct values (`mathx.Vec3` <-> JS class). Struct passing across boundary matches JS-only results.
 - [ ] **Phase 5b — Boundary v1 (Slices & Handles):** TypedArray copy for slices and opaque handles (`*collision.Trimesh` with stable identity). Identity & slice tests pass.
-- [ ] **Phase 5c — Tooling & linking:** Loader, single `app.wasm` linking, `compiler.js` pipeline, dev-server MIME, dual-target test runner. Hybrid sample project builds, serves, and passes dual-target tests.
+- [ ] **Phase 5c — Tooling & linking:**
+  - Backend restructuring: migrate `src/codegen/` → `src/backend/js/` (with transition re-export shim in `src/codegen/index.js`), update `.sentrux/config.toml` layer order 2 (`backend`).
+  - Loader, single `app.wasm` linking, `compiler.js` pipeline dispatching to `backend/js` and `backend/wasm`, dev-server MIME, dual-target test runner.
+  - Hybrid sample project builds, serves, and passes dual-target tests.
 
 ### Phase 6: simplefps Validation & Go/No-Go Benchmark
 - [ ] **Phase 6a — simplefps split:** `engine/mathx` (`both`) and `engine/collision` (`wasm`). `mathx` passes on both targets, `collision` passes in WASM.

@@ -1,6 +1,7 @@
 // CodeGen stdlib call generation — installed as a mixin on CodeGen.prototype.
 // One file per Go package under ./stdlib/. This index merges them.
 
+import { bitsMethods } from "./bits.js";
 import { builderMethods } from "./builder.js";
 import { bytesMethods } from "./bytes.js";
 import { errorsMethods } from "./errors.js";
@@ -34,6 +35,7 @@ const STDLIB_METHOD_MAP = {
 	strconv: "_genStrconv",
 	sort: "_genSort",
 	math: "_genMath",
+	bits: "_genBits",
 	unicode: "_genUnicode",
 	os: "_genOs",
 	errors: "_genErrors",
@@ -76,6 +78,7 @@ const dispatchMethods = {
 
 /** @type {ThisType<CodeGen>} */
 export const stdlibGenMethods = {
+	...bitsMethods,
 	...builderMethods,
 	...bytesMethods,
 	...errorsMethods,
