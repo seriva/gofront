@@ -85,22 +85,11 @@ export const BROWSER_GLOBALS = new Set([
 	"sessionStorage",
 ]);
 
-export const WASM_SUPPORTED_STDLIB = new Set([
-	"math",
-	"math/bits",
-	"errors",
-	"strconv",
-	"fmt",
-	"testing",
-	"strings",
-	"slices",
-	"maps",
-	"sort",
-	"unicode",
-	"unicode/utf8",
-	"bytes",
-	"math/rand",
-]);
+// Stdlib packages the WASM backend can emit. Extend as src/backend/wasm/emit.js gains support;
+// anything not listed is rejected at import with "not yet available in wasm packages".
+export const WASM_SUPPORTED_STDLIB = new Set(["math", "math/bits", "testing"]);
+
+export const VALID_TARGETS = new Set(["js", "wasm", "both"]);
 
 // ── Static operator sets (module-level for reuse) ────────────
 export const CMP_OPS = new Set(["==", "!=", "<", ">", "<=", ">="]);

@@ -63,24 +63,16 @@ export const statementGenMethods = {
 				this.genTypeDeclWithMethods(stmt, []);
 				break;
 			case "IncDecStmt": {
-				if (this.strict) {
-					const tName = this._typeName(stmt.expr._type);
-					const isSimpleLhs =
-						stmt.expr.kind === "Ident" ||
-						(stmt.expr.kind === "SelectorExpr" &&
-							stmt.expr.expr.kind === "Ident");
-					if (isSimpleLhs && this._isStrictAtomicOp("+", tName)) {
-						const exprJs = this.genExpr(stmt.expr);
-						const res = this._genStrictBinary(
-							stmt.op === "++" ? "+" : "-",
-							exprJs,
-							"1",
-							stmt.expr._type,
-						);
-						this.line(`${exprJs} = ${res};`, srcLine);
-						break;
-					}
-				}
+				if (
+					this.strict &&
+					this._genStrictCompound(
+						stmt.expr,
+						stmt.op === "++" ? "+" : "-",
+						"1",
+						srcLine,
+					)
+				)
+					break;
 				this.line(`${this.genExpr(stmt.expr)}${stmt.op};`, srcLine);
 				break;
 			}
@@ -274,27 +266,20 @@ export const statementGenMethods = {
 		if (active.length === 0) {
 			if (rhs.length > 0) this.line(`${rhs[0]};`);
 		} else if (lhs.length === 1) {
-			if (this.strict && stmt.op !== "=") {
-				const baseOp = stmt.op.slice(0, -1);
-				const tName = this._typeName(stmt.lhs[0]._type);
-				const isSimpleLhs =
-					stmt.lhs[0].kind === "Ident" ||
-					(stmt.lhs[0].kind === "SelectorExpr" &&
-						stmt.lhs[0].expr.kind === "Ident");
-				if (isSimpleLhs && this._isStrictAtomicOp(baseOp, tName)) {
-					const res = this._genStrictBinary(
-						baseOp,
-						active[0].l,
-						active[0].r,
-						stmt.lhs[0]._type,
-					);
-					this.line(`${active[0].l} = ${res};`);
-				} else {
-					this.line(`${active[0].l} ${stmt.op} ${active[0].r};`);
-				}
-			} else {
-				this.line(`${active[0].l} ${stmt.op} ${active[0].r};`);
+			if (
+				this.strict &&
+				stmt.op !== "=" &&
+				this._genStrictCompound(
+					stmt.lhs[0],
+					stmt.op.slice(0, -1),
+					active[0].r,
+					null,
+					active[0].l,
+				)
+			) {
+				return;
 			}
+			this.line(`${active[0].l} ${stmt.op} ${active[0].r};`);
 		} else {
 			this._genAssignMulti(stmt, lhs, rhs, active, pairs);
 		}

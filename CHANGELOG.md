@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **`src/lower/` analysis layer** — ownership/clone elision, address-taken boxing, range shape, function structure (named returns, `defer`), embedded-method stubs, closure captures and pointer escape analysis now live in `src/lower/` as side tables keyed by AST node. JS output is unchanged; the WASM backend consumes the tables.
+- **Package targets** — `//gofront:target js|wasm|both` before the `package` clause selects a compilation target per package. `wasm` packages may only import `wasm`/`both` packages and the stdlib subset the backend implements (`math`, `math/bits`, `testing`); `both` packages may only import `both` packages, may not use `gom`, and may not mutate package-level variables (direct assignment, `++`/`--`, `&x`, and pointer-receiver method calls are all detected, with shadowing respected). Violations end with a summary line such as `package 'p' cannot be both: 3 blockers — …`. Unknown target values and directives placed after the `package` clause are rejected.
+- **Strict numeric mode for `both` packages** — arithmetic on sized integer and `float32` types is emitted with Go wrap/`Math.fround`/`Math.imul` semantics, integer division by zero panics, and shift counts ≥ width yield 0. Compound assignment and `++`/`--` are covered for any lvalue (locals, struct fields, slice/array elements) with the index expression evaluated exactly once.
+- **WasmGC backend (experimental)** — `src/backend/wasm/` compiles `wasm` packages to WebAssembly GC modules with JS glue: structs, pointers, arrays/slices (`append`), strings, maps, interfaces, closures (including closures inside methods), `defer`/`panic`/`recover`, and `math`. Requires a WasmGC-capable runtime (Node ≥ 22 / recent Chrome, Firefox, Safari).
+
+### Changed
+- **`cap(x)` on a nil slice** — now emits `(x?.length ?? 0)` so `cap` of a nil slice returns 0 instead of throwing, matching `len`.
+
 ## [1.4.0] - 2026-10-02
 
 ### Added

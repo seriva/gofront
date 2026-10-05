@@ -62,8 +62,8 @@ Today the analyses are spread through codegen and stored as `_`-prefixed fields 
 | **New:** pointer-retention escape analysis (boundary rule) | — | `lower/escape.js` |
 
 - **Two-step implementation:**
-  - **1a. Extract existing side-tables (zero behavior change):** Move ownership/clone elision, boxing, range, functions, and embedding to `src/lower/`. JS codegen reads side tables. *Safety net:* All ~1,400 existing tests and E2E must be byte-identical to v1.4.0.
-  - **1b. Add new analyses:** Implement `captures.js` (tracked mutated variables for WASM closure env boxing) and `escape.js` (pointer retention across the WASM boundary). Unused by JS codegen, tested via targeted AST analysis tests.
+  - **1a. Extract existing side-tables (zero behavior change):** Move ownership/clone elision, boxing, range, functions, and embedding to `src/lower/`. The WASM backend reads the side tables; JS codegen keeps using the same `_`-prefixed node fields (the `lower/` passes are the shared source of those decisions, JS codegen is not rewired in 1.5). *Safety net:* All ~1,400 existing tests and E2E must be byte-identical to v1.4.0.
+  - **1b. Add new analyses:** Implement `captures.js` (tracked mutated variables for WASM closure env boxing) and `escape.js` (pointer retention across the WASM boundary). Unused by JS codegen, tested via targeted AST analysis tests. `escape.js` is intra-procedural: it flags pointer parameters stored into struct fields, globals, closures or returned, but does not follow a pointer through a call into another function.
 - **Bonus:** v2.0.0 then *ports* a clean `lower` instead of untangling codegen during the port.
 
 ### 2. Package targets & diagnostics
@@ -238,7 +238,7 @@ The boundary per frame is then raycasts (gameplay, bodies, controller), each a s
 
 ### Phase 4: Types & Runtime Constructs
 - [x] **Phase 4a — Structs, pointers & methods:** `struct.new`, `struct.get/set`, and rec groups. `mathx.Vec3` operations and methods run in WASM.
-- [x] **Phase 4b — Arrays & slices:** `(array (mut T))`, slice header struct, `len`/`cap`/indexing, `runtime/wasm/slice.go` (`append`). Slice manipulation & growth fixtures pass.
+- [x] **Phase 4b — Arrays & slices:** `(array (mut T))`, slice header struct, `len`/`cap`/indexing, `append` with growth. Slice manipulation & growth fixtures pass. *(Deviation: `append` is emitted directly by `emit.js` instead of a GoFront-written `runtime/wasm/slice.go`; the Go-source runtime is deferred.)*
 - [x] **Phase 4c — Strings & any:** JS String Builtins (`externref`) + `anyref` with concrete casts (`ref.test`/`ref.cast`). String concatenation/comparison and `any` fixtures pass.
 - [x] **Phase 4d — Closures:** `(struct funcref, anyref env)` + `call_ref`, boxed environments via `captures.js`. Closure and callback fixtures pass.
 

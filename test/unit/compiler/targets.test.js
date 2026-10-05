@@ -1,5 +1,9 @@
 // GoFront test suite — package targets and diagnostics
 
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { compileSingleFile } from "../../../src/compiler.js";
 import { Lexer } from "../../../src/lexer.js";
 import { Parser } from "../../../src/parser/index.js";
 import { TypeChecker } from "../../../src/typechecker/index.js";
@@ -11,6 +15,24 @@ import {
 	section,
 	test,
 } from "../helpers.js";
+
+// Writes `files` into a temp dir, compiles main.go (or the only file) and returns the error text.
+function compileTemp(files) {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-targets-"));
+	try {
+		for (const [rel, src] of Object.entries(files)) {
+			mkdirSync(dirname(join(dir, rel)), { recursive: true });
+			writeFileSync(join(dir, rel), src);
+		}
+		const entry = files["main.go"] ? "main.go" : Object.keys(files)[0];
+		compileSingleFile(join(dir, entry));
+		return "";
+	} catch (e) {
+		return e.message;
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
 
 section("compiler — target directives & lexer/parser");
 
@@ -137,6 +159,114 @@ func Touch(scratch int) int {
 `;
 	const { errors } = compile(src);
 	assertEqual(errors.length, 0);
+});
+
+test("both package detects indirect package-variable mutation", () => {
+	const src = `//gofront:target both
+package mathx
+
+type V struct{ X int32 }
+
+func (v *V) Bump() { v.X++ }
+
+var G V
+var N int32
+var M int32
+
+func Touch() {
+	G.Bump()
+	p := &N
+	*p = 5
+	if true {
+		M := int32(1)
+		M++
+	}
+	M = 2
+}
+`;
+	const { errors } = compile(src);
+	const msg = errors.map((e) => e.message).join("\n");
+	assertContains(msg, "package-level variable 'G' is mutated");
+	assertContains(msg, "package-level variable 'N' is mutated");
+	assertContains(msg, "package-level variable 'M' is mutated");
+	assertContains(msg, "cannot be both: 3 blockers");
+	assert(
+		errors.every((e) => e instanceof Error),
+		"summary must be an Error instance",
+	);
+});
+
+test("unknown //gofront:target value is rejected", () => {
+	const src = `//gofront:target foo
+package m
+
+func F() int32 { return 1 }
+`;
+	const { errors } = compile(src);
+	assertEqual(errors.length, 1);
+	assertContains(
+		errors[0].message,
+		"unknown //gofront:target 'foo' (expected js, wasm or both)",
+	);
+});
+
+test("//gofront:target after the package clause is rejected", () => {
+	const src = `package m
+//gofront:target wasm
+
+func F() int32 { return 1 }
+`;
+	const { errors } = compile(src);
+	assertEqual(errors.length, 1);
+	assertContains(
+		errors[0].message,
+		"//gofront:target must appear before the package clause",
+	);
+});
+
+test("wasm package rejects stdlib the backend does not implement", () => {
+	const src = `//gofront:target wasm
+package m
+
+import "strings"
+
+func F() int { return len(strings.ToUpper("a")) }
+`;
+	const err = compileTemp({ "m.go": src });
+	assertContains(err, "'strings' is not yet available in wasm packages");
+	assertContains(err, "1 unsupported stdlib import (strings)");
+});
+
+test("wasm package cannot import a js package", () => {
+	const err = compileTemp({
+		"main.go": `//gofront:target wasm
+package main
+
+import "./ui"
+
+func Main() int { return ui.N }
+`,
+		"ui/ui.go": "package ui\n\nvar N = 1\n",
+	});
+	assertContains(err, "package 'main' (wasm) cannot import 'ui' (js)");
+});
+
+test("both package cannot import a wasm package", () => {
+	const err = compileTemp({
+		"main.go": `//gofront:target both
+package mathx
+
+import "./col"
+
+var N = col.N
+`,
+		"col/col.go": "//gofront:target wasm\npackage col\n\nvar N = 2\n",
+	});
+	assertContains(
+		err,
+		"package 'mathx' (both) can only import 'both' packages; 'col' is wasm",
+	);
+	assertContains(err, "1 blocker — 1 wasm package import (col)");
 });
 
 test("typechecker generates summary diagnostic line with blockers count", () => {

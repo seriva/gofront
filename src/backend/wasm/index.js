@@ -595,6 +595,7 @@ export function compileWasmModule(
 					_recvTypeName: recvTypeName,
 					_methodName: d.name,
 					_exportName: `${recvTypeName}_${d.name}`,
+					_sourceDecl: d,
 				};
 				funcDecls.push(normFn);
 			}

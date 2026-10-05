@@ -363,3 +363,31 @@ func (i Inner) SharedMethod() int { return 42 }
 	assert.strictEqual(outerStubs.length, 1);
 	assert.strictEqual(outerStubs[0].methodName, "SharedMethod");
 });
+
+test("lower: analyzes MethodDecl bodies and excludes declared methods from embedded stubs", () => {
+	const { ast, checker } = parseSnippet(`
+type Inner struct{}
+func (i Inner) Method() int { return 1 }
+
+type Outer struct { Inner }
+func (o Outer) Method() int { return 2 }
+
+type Counter struct{ n int }
+func (c *Counter) Run() {
+	step := 1
+	f := func() { c.n += step; step++ }
+	f()
+}
+`);
+	const res = lower(ast, checker);
+	assert.strictEqual(res.embeddedStubs.get("Outer").length, 0);
+
+	const run = ast.decls.find(
+		(d) => d.kind === "MethodDecl" && d.name === "Run",
+	);
+	const caps = res.captures.get(run);
+	assert.ok(caps, "MethodDecl must have a captures entry");
+	assert.ok(caps.mutatedCaptures.has("step"));
+	assert.ok(res.ownership.has(run));
+	assert.ok(res.functions.has(run));
+});

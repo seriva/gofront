@@ -368,6 +368,32 @@ func Main() int {
 	assertEqual(res.jsRes, 44);
 });
 
+section("WASM Closures — Closures Inside Methods");
+
+test("Closure in a method captures receiver and mutated local", () => {
+	const src = `
+package main
+
+type Counter struct{ n int32 }
+
+func (c *Counter) Run() int32 {
+	step := int32(2)
+	add := func() { c.n += step; step++ }
+	add()
+	add()
+	return c.n + step
+}
+
+func Main() int32 {
+	c := &Counter{}
+	return c.Run()
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.wasmRes, 9);
+	assertEqual(res.jsRes, 9);
+});
+
 section("WASM Closures — Nil Closure Trapping");
 
 test("Calling nil function pointer traps with runtime panic", () => {

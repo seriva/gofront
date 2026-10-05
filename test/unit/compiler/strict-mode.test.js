@@ -144,3 +144,38 @@ func main() {
 	assertEqual(errors.length, 0);
 	assertThrows(() => runJs(js), "integer divide by zero");
 });
+
+test("strict compound assignment and ++ apply to indexed and nested lvalues", () => {
+	const src = `//gofront:target both
+package main
+
+type In struct{ F float32 }
+type Out struct{ In In }
+
+func idx(calls *int32) int32 {
+	*calls++
+	return 0
+}
+
+func main() {
+	s := []float32{0}
+	for i := 0; i < 10; i++ {
+		s[0] += 0.1
+	}
+	o := &Out{}
+	o.In.F += 0.1
+	b := []int8{127}
+	b[0]++
+	var calls int32
+	u := []uint8{255}
+	u[idx(&calls)] += 1
+	println(s[0], o.In.F, b[0], u[0], calls)
+}
+`;
+	const { js, errors } = compile(src);
+	assertEqual(errors.length, 0);
+	assertContains(js, "Math.fround(__o1[__k1] + 0.1)");
+	assertContains(js, "o.In.F = Math.fround(o.In.F + 0.1)");
+	// float32 accumulation differs from float64; int8 wraps; uint8 wraps; index evaluated once.
+	assertEqual(runJs(js), "1.0000001192092896 0.10000000149011612 -128 0 1");
+});
