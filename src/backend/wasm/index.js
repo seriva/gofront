@@ -7,16 +7,26 @@ import { Parser } from "../../parser/index.js";
 import { TypeChecker } from "../../typechecker/index.js";
 import { FunctionEmitter } from "./emit.js";
 import { encodeModule } from "./encode.js";
-import { toWasmType } from "./types.js";
+import { getFuncSignature, toWasmType } from "./types.js";
 import { emitWat } from "./wat.js";
 
 export class ModuleEmitter {
-	constructor(checker, lowerResult = null) {
+	constructor(checker, lowerResult = null, programs = []) {
 		this.checker = checker;
 		this.lowerResult = lowerResult;
 
 		this.types = []; // type entries
 		this.typeCache = new Map(); // signature string -> index
+
+		this.structTypes = new Map(); // name -> struct info
+		this.boxTypes = new Map(); // wType key -> box info
+		this.arrayTypes = new Map(); // wType key -> array info
+		this.sliceTypes = new Map(); // wType key -> slice info
+		this.closureTypes = new Map(); // key -> closure info
+		this.envTypes = new Map(); // key -> env info
+
+		this.elements = []; // declarative elements for ref.func
+		this.elementSet = new Set();
 
 		this.imports = []; // import entries
 		this.importCache = new Map(); // key -> func index
@@ -28,17 +38,354 @@ export class ModuleEmitter {
 		this.funcs = []; // internal func definitions
 		this.funcMap = new Map(); // name -> global func index
 		this.funcParamTypes = new Map(); // name -> param types array
+		this.funcParamGoTypes = new Map(); // name -> param Go types array
 
 		this.exports = []; // export entries
 		this.stringTable = []; // string literals
 		this.stringCache = new Map();
 
+		if (programs && programs.length > 0) {
+			this.initTypes(programs);
+		}
+
+		this._importsLocked = false;
+		this._initRuntimeImports();
+	}
+
+	initTypes(programs) {
+		const progs = Array.isArray(programs) ? programs : [programs];
+		const rawStructs = [];
+		const seen = new Set();
+
+		for (const p of progs) {
+			for (const d of p.decls ?? []) {
+				if (d.kind === "TypeDecl" && d.type?.kind === "StructType") {
+					if (!seen.has(d.name)) {
+						seen.add(d.name);
+						rawStructs.push({ name: d.name, astFields: d.type.fields ?? [] });
+					}
+				}
+			}
+		}
+
+		if (this.checker?.types) {
+			for (const [name, t] of this.checker.types.entries()) {
+				if (t.kind === "named" && t.underlying?.kind === "struct") {
+					if (!seen.has(name)) {
+						seen.add(name);
+						rawStructs.push({ name, structType: t.underlying });
+					}
+				}
+			}
+		}
+
+		if (rawStructs.length === 0) return;
+
+		for (let i = 0; i < rawStructs.length; i++) {
+			const s = rawStructs[i];
+			this.structTypes.set(s.name, {
+				name: s.name,
+				typeIndex: i,
+				fields: [],
+				fieldIndexMap: new Map(),
+				embeds: [],
+			});
+		}
+
+		const structEntries = [];
+		for (let i = 0; i < rawStructs.length; i++) {
+			const s = rawStructs[i];
+			const info = this.structTypes.get(s.name);
+			const resolvedStruct = this.checker?.types?.get(s.name)?.underlying;
+
+			const fields = [];
+			const fieldIndexMap = new Map();
+			const embeds = [];
+
+			if (s.astFields && s.astFields.length > 0) {
+				let fIdx = 0;
+				for (const f of s.astFields) {
+					const names = f.embedded
+						? [f.type.name]
+						: f.names?.length
+							? f.names
+							: f.name
+								? [f.name]
+								: [];
+					for (const n of names) {
+						const wType = toWasmType(f.type, this.checker, this);
+						fields.push({
+							name: n,
+							goType: f.type,
+							wType,
+							embedded: Boolean(f.embedded),
+						});
+						fieldIndexMap.set(n, fIdx);
+						if (f.embedded) {
+							embeds.push({
+								name: n,
+								fieldIndex: fIdx,
+							});
+						}
+						fIdx++;
+					}
+				}
+			} else if (resolvedStruct?.fields) {
+				let fIdx = 0;
+				for (const [fName, fType] of resolvedStruct.fields.entries()) {
+					const wType = toWasmType(fType, this.checker, this);
+					fields.push({ name: fName, goType: fType, wType });
+					fieldIndexMap.set(fName, fIdx);
+					fIdx++;
+				}
+				if (resolvedStruct?._embeds) {
+					for (const embed of resolvedStruct._embeds) {
+						const embedName = embed.kind === "named" ? embed.name : null;
+						if (embedName && fieldIndexMap.has(embedName)) {
+							embeds.push({
+								name: embedName,
+								fieldIndex: fieldIndexMap.get(embedName),
+							});
+						}
+					}
+				}
+			}
+
+			info.fields = fields;
+			info.fieldIndexMap = fieldIndexMap;
+			info.embeds = embeds;
+
+			const typeEntry = {
+				form: "struct",
+				fields: fields.map((f) => ({ type: f.wType, mutable: true })),
+			};
+			info.typeEntry = typeEntry;
+			structEntries.push(typeEntry);
+		}
+
+		this.types.push({ form: "rec", types: structEntries });
+	}
+
+	getStructType(name) {
+		return this.structTypes.get(name) ?? null;
+	}
+
+	getBoxType(goType) {
+		const wType = toWasmType(goType, this.checker, this);
+		const key = typeof wType === "string" ? wType : JSON.stringify(wType);
+		if (this.boxTypes.has(key)) {
+			return this.boxTypes.get(key);
+		}
+		const typeIndex = this._getTotalTypeCount();
+		const typeEntry = {
+			form: "struct",
+			fields: [{ type: wType, mutable: true }],
+		};
+		this.types.push(typeEntry);
+		const boxInfo = { typeIndex, typeEntry, wType };
+		this.boxTypes.set(key, boxInfo);
+		return boxInfo;
+	}
+
+	getArrayType(elemGoType) {
+		const elemWType = toWasmType(elemGoType, this.checker, this);
+		const key =
+			typeof elemWType === "string" ? elemWType : JSON.stringify(elemWType);
+		if (this.arrayTypes.has(key)) {
+			return this.arrayTypes.get(key);
+		}
+		const typeIndex = this._getTotalTypeCount();
+		const typeEntry = {
+			form: "array",
+			elemType: elemWType,
+			mutable: true,
+		};
+		this.types.push(typeEntry);
+		const arrInfo = { typeIndex, typeEntry, elemWType, elemGoType };
+		this.arrayTypes.set(key, arrInfo);
+		return arrInfo;
+	}
+
+	getSliceType(elemGoType) {
+		const elemWType = toWasmType(elemGoType, this.checker, this);
+		const key =
+			typeof elemWType === "string" ? elemWType : JSON.stringify(elemWType);
+		if (this.sliceTypes.has(key)) {
+			return this.sliceTypes.get(key);
+		}
+		const arrInfo = this.getArrayType(elemGoType);
+		const typeIndex = this._getTotalTypeCount();
+		const typeEntry = {
+			form: "struct",
+			fields: [
+				{
+					type: {
+						kind: "ref",
+						nullable: true,
+						typeIndex: arrInfo.typeIndex,
+					},
+					mutable: true,
+				},
+				{ type: "i32", mutable: true }, // offset
+				{ type: "i32", mutable: true }, // len
+				{ type: "i32", mutable: true }, // cap
+			],
+		};
+		this.types.push(typeEntry);
+		const sliceInfo = {
+			typeIndex,
+			typeEntry,
+			arrInfo,
+			elemWType,
+			elemGoType,
+		};
+		this.sliceTypes.set(key, sliceInfo);
+		return sliceInfo;
+	}
+
+	getClosureType(goType) {
+		const sig = getFuncSignature(goType, this.checker);
+		const paramWTypes = sig.params
+			.map((p) => toWasmType(p, this.checker, this))
+			.filter(Boolean);
+		const returnWTypes = sig.returns
+			.map((r) => toWasmType(r, this.checker, this))
+			.filter(Boolean);
+
+		const key = `${paramWTypes.map((p) => (typeof p === "object" ? JSON.stringify(p) : p)).join(",")}=>${returnWTypes.map((r) => (typeof r === "object" ? JSON.stringify(r) : r)).join(",")}`;
+		if (this.closureTypes.has(key)) {
+			return this.closureTypes.get(key);
+		}
+
+		// 1. Function signature type index: (param anyref, ...paramWTypes) -> (...returnWTypes)
+		const funcTypeIndex = this.getTypeIndex(
+			["anyref", ...paramWTypes],
+			returnWTypes,
+		);
+
+		// 2. Closure struct type index: struct { fn: (ref funcTypeIndex), env: anyref }
+		const typeIndex = this._getTotalTypeCount();
+		const typeEntry = {
+			form: "struct",
+			fields: [
+				{
+					type: {
+						kind: "ref",
+						nullable: false,
+						typeIndex: funcTypeIndex,
+					},
+					mutable: false,
+				},
+				{
+					type: "anyref",
+					mutable: true,
+				},
+			],
+		};
+		this.types.push(typeEntry);
+
+		const closureInfo = {
+			typeIndex,
+			typeEntry,
+			funcTypeIndex,
+			paramWTypes,
+			returnWTypes,
+			sig,
+		};
+		this.closureTypes.set(key, closureInfo);
+		return closureInfo;
+	}
+
+	getEnvType(fieldTypes) {
+		const key = fieldTypes
+			.map((f) =>
+				typeof f.wType === "object" ? JSON.stringify(f.wType) : f.wType,
+			)
+			.join(",");
+		if (this.envTypes.has(key)) {
+			return this.envTypes.get(key);
+		}
+		const typeIndex = this._getTotalTypeCount();
+		const typeEntry = {
+			form: "struct",
+			fields: fieldTypes.map((f) => ({ type: f.wType, mutable: true })),
+		};
+		this.types.push(typeEntry);
+		const envInfo = { typeIndex, typeEntry, fieldTypes };
+		this.envTypes.set(key, envInfo);
+		return envInfo;
+	}
+
+	addRefFuncElement(funcIdx) {
+		if (!this.elementSet.has(funcIdx)) {
+			this.elementSet.add(funcIdx);
+			this.elements.push(funcIdx);
+		}
+	}
+
+	_getTotalTypeCount() {
+		let count = 0;
+		for (const entry of this.types) {
+			if (entry.form === "rec") count += entry.types.length;
+			else count += 1;
+		}
+		return count;
+	}
+
+	_initRuntimeImports() {
 		this._initPanicTag();
-		this.getStringImportIndex(); // Pre-register env.str at index 0
+
+		// String built-ins
+		this.getStringImportIndex(); // env.str
+		this.getStringLenImportIndex(); // env.str_len
+		this.getStringConcatImportIndex(); // env.str_concat
+		this.getStringCmpImportIndex("=="); // env.str_eq
+		this.getStringCmpImportIndex("!="); // env.str_ne
+		this.getStringCmpImportIndex("<"); // env.str_lt
+		this.getStringCmpImportIndex("<="); // env.str_le
+		this.getStringCmpImportIndex(">"); // env.str_gt
+		this.getStringCmpImportIndex(">="); // env.str_ge
+		this.getStringGetImportIndex(); // env.str_get
+		this.getStringSliceImportIndex(); // env.str_slice
+		this.getStringFromCodePointImportIndex(); // env.str_from_code_point
+		this.getStringCodePointAtImportIndex(); // env.str_code_point_at
+		this.getIsStringImportIndex(); // env.is_string
+
+		// Logging built-ins
+		this.getPrintlnEmptyIndex(); // env.println_empty
+		const logTypes = ["i32", "i64", "f32", "f64", "externref", "anyref"];
+		for (const t of logTypes) {
+			this.getLogImportIndex(t, false, false); // env.print_*
+			this.getLogImportIndex(t, true, false); // env.println_*
+		}
+		this.getLogImportIndex("i32", false, true); // env.print_bool
+		this.getLogImportIndex("i32", true, true); // env.println_bool
+
+		// Math built-ins
+		const unaryMath = [
+			"sin",
+			"cos",
+			"tan",
+			"asin",
+			"acos",
+			"atan",
+			"exp",
+			"log",
+			"log2",
+			"log10",
+			"round",
+		];
+		for (const m of unaryMath) {
+			this.getMathImportIndex(m, false);
+		}
+		const binaryMath = ["atan2", "pow"];
+		for (const m of binaryMath) {
+			this.getMathImportIndex(m, true);
+		}
 	}
 
 	_initPanicTag() {
-		// Type 0: (externref) -> ()
+		// Type: (externref) -> ()
 		const typeIdx = this.getTypeIndex(["externref"], []);
 		// Tag 0
 		this.tags.push({ typeIndex: typeIdx });
@@ -47,11 +394,11 @@ export class ModuleEmitter {
 	}
 
 	getTypeIndex(params, results) {
-		const key = `${params.join(",")}=>${results.join(",")}`;
+		const key = `${params.map((p) => (typeof p === "object" ? JSON.stringify(p) : p)).join(",")}=>${results.map((r) => (typeof r === "object" ? JSON.stringify(r) : r)).join(",")}`;
 		if (this.typeCache.has(key)) {
 			return this.typeCache.get(key);
 		}
-		const idx = this.types.length;
+		const idx = this._getTotalTypeCount();
 		this.types.push({ form: "func", params, results });
 		this.typeCache.set(key, idx);
 		return idx;
@@ -71,6 +418,9 @@ export class ModuleEmitter {
 		const key = `${module}.${name}`;
 		if (this.importCache.has(key)) {
 			return this.importCache.get(key);
+		}
+		if (this._importsLocked) {
+			throw new Error(`Unexpected import added after lock: ${key}`);
 		}
 		const typeIndex = this.getTypeIndex(params, results);
 		const globalFuncIdx = this.imports.filter((i) => i.kind === "func").length;
@@ -113,9 +463,82 @@ export class ModuleEmitter {
 					["externref"],
 					[],
 				);
+			case "anyref":
+				return this.getOrAddFuncImport("env", `${prefix}_any`, ["anyref"], []);
 			default:
 				return this.getOrAddFuncImport("env", `${prefix}_i32`, ["i32"], []);
 		}
+	}
+
+	getStringLenImportIndex() {
+		return this.getOrAddFuncImport("env", "str_len", ["externref"], ["i32"]);
+	}
+
+	getStringConcatImportIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"str_concat",
+			["externref", "externref"],
+			["externref"],
+		);
+	}
+
+	getStringCmpImportIndex(op) {
+		const opMap = {
+			"==": "str_eq",
+			"!=": "str_ne",
+			"<": "str_lt",
+			"<=": "str_le",
+			">": "str_gt",
+			">=": "str_ge",
+		};
+		const fn = opMap[op] ?? "str_eq";
+		return this.getOrAddFuncImport(
+			"env",
+			fn,
+			["externref", "externref"],
+			["i32"],
+		);
+	}
+
+	getStringGetImportIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"str_get",
+			["externref", "i32"],
+			["i32"],
+		);
+	}
+
+	getStringSliceImportIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"str_slice",
+			["externref", "i32", "i32"],
+			["externref"],
+		);
+	}
+
+	getStringFromCodePointImportIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"str_from_code_point",
+			["i32"],
+			["externref"],
+		);
+	}
+
+	getStringCodePointAtImportIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"str_code_point_at",
+			["externref", "i32"],
+			["i32"],
+		);
+	}
+
+	getIsStringImportIndex() {
+		return this.getOrAddFuncImport("env", "is_string", ["anyref"], ["i32"]);
 	}
 
 	getMathImportIndex(jsName, isBinary = false) {
@@ -131,6 +554,10 @@ export class ModuleEmitter {
 		return this.funcParamTypes.get(name) ?? [];
 	}
 
+	getFuncParamGoTypes(name) {
+		return this.funcParamGoTypes.get(name) ?? [];
+	}
+
 	resolveGlobal(name) {
 		return this.globalCache.get(name) ?? null;
 	}
@@ -143,17 +570,147 @@ export function compileWasmModule(
 	options = {},
 ) {
 	const progs = Array.isArray(programs) ? programs : [programs];
-	const mod = new ModuleEmitter(checker, lowerResult);
+	const mod = new ModuleEmitter(checker, lowerResult, progs);
 
-	// 1. Collect all functions and package-level globals
+	// 1. Collect all functions, methods, and package-level globals
 	const funcDecls = [];
 	for (const p of progs) {
 		for (const d of p.decls ?? []) {
 			if (d.kind === "FuncDecl") {
 				funcDecls.push(d);
+			} else if (d.kind === "MethodDecl") {
+				const recvTypeName =
+					d.recvType?.name ??
+					(d.recvType?.kind === "TypeName" ? d.recvType.name : "Recv");
+				const recvGoType = d.recvPointer
+					? { kind: "pointer", base: { kind: "named", name: recvTypeName } }
+					: { kind: "named", name: recvTypeName };
+				const normFn = {
+					kind: "FuncDecl",
+					name: `${recvTypeName}.${d.name}`,
+					params: [{ name: d.recvName, type: recvGoType }, ...(d.params ?? [])],
+					returnType: d.returnType,
+					body: d.body,
+					_isMethod: true,
+					_recvTypeName: recvTypeName,
+					_methodName: d.name,
+					_exportName: `${recvTypeName}_${d.name}`,
+				};
+				funcDecls.push(normFn);
 			}
 		}
 	}
+
+	// 1b. Scan and lift all closures (FuncLits)
+	let closureCounter = 0;
+	const closures = [];
+
+	function scanClosures(node, rootFn) {
+		if (!node || typeof node !== "object") return;
+		if (Array.isArray(node)) {
+			for (const item of node) scanClosures(item, rootFn);
+			return;
+		}
+		if (node.kind === "FuncLit") {
+			closureCounter++;
+			const closureName = `_closure$${closureCounter}`;
+			node._liftedName = closureName;
+			node._rootFuncDecl = rootFn;
+
+			const liftedFn = {
+				kind: "FuncDecl",
+				name: closureName,
+				params: [
+					{ name: "__env", type: { kind: "basic", name: "any" } },
+					...(node.params ?? []),
+				],
+				returnType: node.returnType,
+				body: node.body,
+				_isClosure: true,
+				_funcLit: node,
+				_rootFuncDecl: rootFn,
+			};
+			node._liftedFn = liftedFn;
+			closures.push(liftedFn);
+
+			scanClosures(node.body, rootFn);
+			return;
+		}
+		for (const key of Object.keys(node)) {
+			if (key.startsWith("_")) continue;
+			scanClosures(node[key], rootFn);
+		}
+	}
+
+	for (const fn of funcDecls) {
+		fn._rootFuncDecl = fn;
+		if (fn.body) {
+			scanClosures(fn.body, fn);
+		}
+	}
+	funcDecls.push(...closures);
+
+	// 1c. Add trampolines for named functions (for when they are passed as function values)
+	const topLevelFuncs = new Map();
+	for (const fn of funcDecls) {
+		if (
+			!fn._isClosure &&
+			!fn._isMethod &&
+			fn.name !== "main" &&
+			!fn.name.startsWith("_")
+		) {
+			topLevelFuncs.set(fn.name, fn);
+		}
+	}
+	mod.topLevelFuncMap = topLevelFuncs;
+
+	const trampolines = [];
+	for (const [name, targetFn] of topLevelFuncs.entries()) {
+		const trampName = `_tramp$${name}`;
+		const callExpr = {
+			kind: "CallExpr",
+			func: { kind: "Ident", name: targetFn.name },
+			args: (targetFn.params ?? []).map((p) => ({
+				kind: "Ident",
+				name: p.name,
+				_type: p.type,
+			})),
+			_type: targetFn.returnType ?? { kind: "basic", name: "void" },
+		};
+		const bodyStmts = targetFn.returnType
+			? [
+					{
+						kind: "ReturnStmt",
+						values: [callExpr],
+					},
+				]
+			: [
+					{ kind: "ExprStmt", expr: callExpr },
+					{ kind: "ReturnStmt", values: [] },
+				];
+
+		const trampFn = {
+			kind: "FuncDecl",
+			name: trampName,
+			params: [
+				{ name: "__env", type: { kind: "basic", name: "any" } },
+				...(targetFn.params ?? []),
+			],
+			returnType: targetFn.returnType,
+			body: {
+				kind: "Block",
+				stmts: bodyStmts,
+				list: bodyStmts,
+			},
+			_isClosure: true,
+			_isTrampoline: true,
+			_targetFuncName: name,
+			_rootFuncDecl: targetFn,
+		};
+		trampolines.push(trampFn);
+	}
+	funcDecls.push(...trampolines);
+
 	_collectPackageGlobals(progs, mod, checker);
 
 	// 2. Pre-scan for needed imports so import func indices are fixed
@@ -162,26 +719,40 @@ export function compileWasmModule(
 	}
 
 	const importFuncCount = mod.imports.filter((i) => i.kind === "func").length;
+	mod._importsLocked = true;
 
 	// 3. Register all internal functions and their type signatures
 	for (let i = 0; i < funcDecls.length; i++) {
 		const fn = funcDecls[i];
 		const globalIdx = importFuncCount + i;
 		mod.funcMap.set(fn.name, globalIdx);
+		if (fn._isClosure) {
+			if (fn._funcLit) {
+				fn._funcLit._globalFuncIndex = globalIdx;
+			}
+			mod.addRefFuncElement(globalIdx);
+		}
 
 		const paramTypes = (fn.params ?? []).map((p) =>
-			toWasmType(p.type, checker),
+			toWasmType(p.type, checker, mod),
 		);
 		mod.funcParamTypes.set(fn.name, paramTypes);
+		mod.funcParamGoTypes.set(
+			fn.name,
+			(fn.params ?? []).map((p) => p.type),
+		);
 		const returnTypes = [];
 		if (fn.returnType) {
-			if (fn.returnType.kind === "TupleType") {
+			if (
+				fn.returnType.kind === "TupleType" ||
+				fn.returnType.kind === "tuple"
+			) {
 				for (const t of fn.returnType.types) {
-					const wt = toWasmType(t, checker);
+					const wt = toWasmType(t, checker, mod);
 					if (wt) returnTypes.push(wt);
 				}
 			} else {
-				const wt = toWasmType(fn.returnType, checker);
+				const wt = toWasmType(fn.returnType, checker, mod);
 				if (wt) returnTypes.push(wt);
 			}
 		}
@@ -194,9 +765,17 @@ export function compileWasmModule(
 		if (
 			options.exportAll ||
 			fn.name === "main" ||
-			(fn.name[0] >= "A" && fn.name[0] <= "Z")
+			(fn.name[0] >= "A" && fn.name[0] <= "Z") ||
+			(fn._isMethod && fn._methodName[0] >= "A" && fn._methodName[0] <= "Z")
 		) {
 			mod.exports.push({ name: fn.name, kind: "func", index: globalIdx });
+			if (fn._isMethod && fn._exportName) {
+				mod.exports.push({
+					name: fn._exportName,
+					kind: "func",
+					index: globalIdx,
+				});
+			}
 		}
 	}
 
@@ -204,7 +783,7 @@ export function compileWasmModule(
 	for (const fn of funcDecls) {
 		const emitter = new FunctionEmitter(mod, fn, fn._globalFuncIndex);
 		if (fn.body) {
-			emitter.emitBlock(fn.body);
+			emitter.emitFunctionBody(fn.body);
 		}
 		// If last instruction is not return, auto-emit return or unreachable
 		const body = emitter.body;
@@ -228,6 +807,7 @@ export function compileWasmModule(
 		imports: mod.imports,
 		tags: mod.tags,
 		globals: mod.globals,
+		elements: mod.elements,
 		funcs: mod.funcs,
 		exports: mod.exports,
 	};
@@ -343,24 +923,59 @@ function _collectPackageGlobals(progs, mod, checker) {
 				for (let i = 0; i < names.length; i++) {
 					const name = names[i];
 					const rawType = spec.type ?? values[i]?._type;
-					const wType = toWasmType(rawType, checker);
+					const wType = toWasmType(rawType, checker, mod);
 					const gIdx = mod.globals.length;
-					let initInst = { op: `${wType}.const`, value: 0 };
-					if (wType === "i64") initInst = { op: "i64.const", value: 0n };
+					let initInsts = [{ op: `${wType}.const`, value: 0 }];
+					if (wType === "i64") initInsts = [{ op: "i64.const", value: 0n }];
 					else if (wType === "f32" || wType === "f64")
-						initInst = { op: `${wType}.const`, value: 0.0 };
+						initInsts = [{ op: `${wType}.const`, value: 0.0 }];
 					else if (
 						wType === "externref" ||
 						wType === "anyref" ||
 						typeof wType === "object"
 					) {
-						initInst = {
-							op: "ref.null",
-							heapType:
-								typeof wType === "object"
-									? (wType.heapType ?? "any")
-									: wType.replace("ref", ""),
-						};
+						if (
+							typeof wType === "object" &&
+							typeof wType.typeIndex === "number" &&
+							rawType?.kind !== "pointer"
+						) {
+							const structInfo = Array.from(mod.structTypes.values()).find(
+								(s) => s.typeIndex === wType.typeIndex,
+							);
+							if (structInfo) {
+								initInsts = [];
+								for (const f of structInfo.fields) {
+									if (f.wType === "i64")
+										initInsts.push({ op: "i64.const", value: 0n });
+									else if (f.wType === "f32" || f.wType === "f64")
+										initInsts.push({ op: `${f.wType}.const`, value: 0.0 });
+									else if (typeof f.wType === "object")
+										initInsts.push({
+											op: "ref.null",
+											heapType: f.wType.typeIndex ?? "any",
+										});
+									else initInsts.push({ op: "i32.const", value: 0 });
+								}
+								initInsts.push({
+									op: "struct.new",
+									typeIndex: structInfo.typeIndex,
+								});
+							} else {
+								initInsts = [
+									{ op: "ref.null", heapType: wType.typeIndex ?? "any" },
+								];
+							}
+						} else {
+							initInsts = [
+								{
+									op: "ref.null",
+									heapType:
+										typeof wType === "object"
+											? (wType.heapType ?? wType.typeIndex ?? "any")
+											: wType.replace("ref", ""),
+								},
+							];
+						}
 					}
 
 					let litNode = values?.[i];
@@ -377,7 +992,7 @@ function _collectPackageGlobals(progs, mod, checker) {
 
 					if (litNode && litNode.kind === "BasicLit") {
 						if (litNode.litKind === "INT") {
-							initInst =
+							initInsts = [
 								wType === "i64"
 									? {
 											op: "i64.const",
@@ -386,23 +1001,28 @@ function _collectPackageGlobals(progs, mod, checker) {
 									: {
 											op: "i32.const",
 											value: (sign * Number(litNode.value)) | 0,
-										};
+										},
+							];
 						} else if (litNode.litKind === "FLOAT") {
-							initInst = {
-								op: `${wType}.const`,
-								value: sign * Number(litNode.value),
-							};
+							initInsts = [
+								{
+									op: `${wType}.const`,
+									value: sign * Number(litNode.value),
+								},
+							];
 						} else if (litNode.litKind === "BOOL") {
-							initInst = {
-								op: "i32.const",
-								value: litNode.value === "true" ? 1 : 0,
-							};
+							initInsts = [
+								{
+									op: "i32.const",
+									value: litNode.value === "true" ? 1 : 0,
+								},
+							];
 						}
 					}
 					mod.globals.push({
 						type: wType,
 						mutable: true,
-						init: [initInst],
+						init: initInsts,
 					});
 					mod.globalCache.set(name, { index: gIdx, type: wType });
 				}

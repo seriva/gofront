@@ -23,11 +23,25 @@ export function createWasmImports({
 	const env = {
 		panicTag: tag,
 		str: (idx) => stringTable[idx] ?? "",
+		str_len: (s) => (s ? s.length : 0),
+		str_concat: (a, b) => (a ?? "") + (b ?? ""),
+		str_eq: (a, b) => (a === b ? 1 : 0),
+		str_ne: (a, b) => (a !== b ? 1 : 0),
+		str_lt: (a, b) => ((a ?? "") < (b ?? "") ? 1 : 0),
+		str_le: (a, b) => ((a ?? "") <= (b ?? "") ? 1 : 0),
+		str_gt: (a, b) => ((a ?? "") > (b ?? "") ? 1 : 0),
+		str_ge: (a, b) => ((a ?? "") >= (b ?? "") ? 1 : 0),
+		str_get: (s, idx) => (s ? s.charCodeAt(idx) : 0),
+		str_slice: (s, low, high) => (s ? s.slice(low, high) : ""),
+		str_from_code_point: (c) => String.fromCodePoint(c),
+		str_code_point_at: (s, idx) => (s ? s.codePointAt(idx) : 0),
+		is_string: (v) => (typeof v === "string" ? 1 : 0),
 		print_i32: (v) => lineBuf.push(String(v)),
 		print_i64: (v) => lineBuf.push(String(v)),
 		print_f32: (v) => lineBuf.push(String(v)),
 		print_f64: (v) => lineBuf.push(String(v)),
 		print_str: (s) => lineBuf.push(String(s)),
+		print_any: (v) => lineBuf.push(String(v)),
 		print_bool: (b) => lineBuf.push(b !== 0 ? "true" : "false"),
 		println_i32: (v) => {
 			lineBuf.push(String(v));
@@ -47,6 +61,10 @@ export function createWasmImports({
 		},
 		println_str: (s) => {
 			lineBuf.push(String(s));
+			flushLine();
+		},
+		println_any: (v) => {
+			lineBuf.push(String(v));
 			flushLine();
 		},
 		println_bool: (b) => {
