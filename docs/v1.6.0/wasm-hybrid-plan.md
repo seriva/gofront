@@ -293,14 +293,32 @@ The hybrid design is delivered over three releases. Both WASM releases land in t
 | **v1.6.0** (JS compiler, this document) | The rest of the hybrid (phases below) | — |
 | **v2.0.0** (Go engine) | Port of the complete JS + WASM compiler to Go, with **byte-identical JS and `.wasm` output** as oracle gates. No new WASM features. | [`docs/v2.0.0/native-go-engine.md`](../v2.0.0/native-go-engine.md) |
 
-**v1.6.0 phases** (pending a positive v1.5.0 go/no-go):
+---
 
-| Phase | Scope | Exit criterion |
-|---|---|---|
-| **H4** | Non-empty interfaces (itabs, `ref.test` dispatch), generics (monomorphisation), maps (insertion-ordered runtime), `defer`/`recover` (fixes the EH encoding: `exnref` vs. legacy), remaining stdlib subset | Language-feature fixtures pass on WASM == JS-strict |
-| **H5** | Boundary v2: WASM → JS closures, interface proxies both ways, maps decision | `RaycastProvider` works across the boundary. `physics` (`DynamicBody`, `FPSController`) moves to `wasm` and its full test suite passes. |
-| **H6** | `gofront/shared` linear-memory buffers; `example/hybrid` | `example/hybrid` E2E green |
-| **H7** | simplefps final split (`physics` + `collision` in WASM, animation candidate), optional `wasm-opt`, WASM source maps (stretch), benchmarks, README target guide | simplefps runs hybrid with full physics in WASM. Benchmarks published. |
+## Implementation Tasks
+
+<!-- v1.6.0 execution tasks (pending positive v1.5.0 go/no-go benchmark) -->
+
+### Phase H4: Language Completeness in WASM
+- [ ] **Task H4.1 — Non-empty interfaces:** Itabs and `ref.test` dynamic dispatch.
+- [ ] **Task H4.2 — Generics:** Monomorphisation of generic types and functions for WASM target.
+- [ ] **Task H4.3 — Maps & stdlib:** Insertion-ordered map runtime and remaining stdlib subset in WASM.
+- [ ] **Task H4.4 — Defer & recover:** Exception handling emission (`exnref` vs legacy EH encoding). Language fixtures pass on WASM == JS-strict.
+
+### Phase H5: Boundary v2 (Proxies & Closures)
+- [ ] **Task H5.1 — WASM to JS closures:** Passing WASM closures across boundary into JS callers.
+- [ ] **Task H5.2 — Interface proxies:** Two-way interface proxies (`RaycastProvider` crosses boundary).
+- [ ] **Task H5.3 — Physics migration:** Move `physics` (`DynamicBody`, `FPSController`) to `wasm` with full test suite passing.
+
+### Phase H6: Shared Memory & Hybrid Example
+- [ ] **Task H6.1 — Linear-memory buffers:** Implement `gofront/shared` TypedArray zero-copy views.
+- [ ] **Task H6.2 — `example/hybrid` app:** Build and verify hybrid sample application with Playwright E2E.
+
+### Phase H7: simplefps Full Split & Verification
+- [ ] **Task H7.1 — simplefps final split:** Physics and collision in WASM, animation candidate.
+- [ ] **Task H7.2 — Optimization & tooling:** Optional `wasm-opt` pipeline integration and WASM source maps.
+- [ ] **Task H7.3 — Documentation & benchmarks:** Target guide in README and published comparative benchmarks.
+
 
 ---
 
