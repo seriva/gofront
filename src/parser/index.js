@@ -115,6 +115,7 @@ export class Parser {
 			imports,
 			decls,
 			target: this.tokens?.target ?? null,
+			_targetDirective: this.tokens?.targetDirective ?? null,
 			_filename: this.filename,
 			_source: this.source,
 		};

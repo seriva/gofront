@@ -113,6 +113,20 @@ Runtime helpers (`__len`, `__append`, `__s`, `__sprintf`, `__equal`, `__cmul`, `
 `__sclone`, `__ifv`, `__ifp`) are tree-shaken: only emitted when actually used. Optional
 inline source maps are supported via VLQ-encoded mappings.
 
+### 5. Lowering & WASM backend (`src/lower/`, `src/backend/wasm/`) — experimental
+
+`src/lower/` runs analyses shared by both backends (ownership/clone elision, address-taken
+boxing, range shape, named returns/`defer`, embedded-method stubs, closure captures, pointer
+escape) and stores the results in side tables keyed by AST node.
+
+A package that starts with `//gofront:target wasm` (before the `package` clause) is compiled
+by `src/backend/wasm/` to a WebAssembly GC module plus JS glue instead of JavaScript.
+`//gofront:target both` marks a package that must compile under either backend: it may only
+import other `both` packages, may not use `gom`, may not mutate package-level variables, and
+its JS output uses strict Go numeric semantics (sized-integer wrapping, `float32` rounding,
+integer divide-by-zero panics). Running WASM output requires a WasmGC-capable runtime
+(Node ≥ 22 or a current Chrome/Firefox/Safari).
+
 ---
 
 ## Go → JavaScript mapping

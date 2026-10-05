@@ -49,7 +49,7 @@ export function lower(programOrPrograms, checker = null) {
 	const methodMap = new Map();
 	for (const program of programs) {
 		for (const d of program?.decls ?? []) {
-			if (d.kind === "FuncDecl" && d.recvType?.name) {
+			if (d.kind === "MethodDecl" && d.recvType?.name) {
 				const recvTypeName = d.recvType.name;
 				if (!methodMap.has(recvTypeName)) methodMap.set(recvTypeName, []);
 				methodMap.get(recvTypeName).push(d);
@@ -62,8 +62,7 @@ export function lower(programOrPrograms, checker = null) {
 		if (!program?.decls) continue;
 
 		for (const d of program.decls) {
-			if (d.kind === "FuncDecl") {
-				// Lower function / method
+			if (d.kind === "FuncDecl" || d.kind === "MethodDecl") {
 				if (d.body) {
 					const boxed = scanAddressTaken(d.body, new Set());
 					res.boxedVars.set(d, boxed);

@@ -21,8 +21,11 @@ export class FunctionEmitter {
 		this.funcIndex = funcIndex;
 
 		this.rootFuncDecl = this.funcDecl._rootFuncDecl ?? this.funcDecl;
+		// Methods are normalized into synthetic FuncDecls; lower() keyed on the original MethodDecl.
 		this.captureAnalysis =
-			this.mod.lowerResult?.captures?.get(this.rootFuncDecl) ?? null;
+			this.mod.lowerResult?.captures?.get(
+				this.rootFuncDecl._sourceDecl ?? this.rootFuncDecl,
+			) ?? null;
 		this.mutatedCaptures = this.captureAnalysis?.mutatedCaptures ?? new Set();
 
 		this.capturedNames = this.funcDecl._funcLit
@@ -2791,7 +2794,7 @@ export class FunctionEmitter {
 		}
 	}
 
-	emitFuncLit(funcLit, targetWasmType = null) {
+	emitFuncLit(funcLit) {
 		const liftedFn = funcLit._liftedFn;
 		const globalFuncIdx = liftedFn._globalFuncIndex;
 		const closureInfo = this.mod.getClosureType(funcLit._type ?? funcLit);
