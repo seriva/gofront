@@ -14,6 +14,32 @@ import {
 
 /** @typedef {import('./index.js').CodeGen} CodeGen */
 
+export const STRICT_NUMERIC_TYPES = new Set([
+	"float32",
+	"int8",
+	"int16",
+	"int32",
+	"rune",
+	"uint8",
+	"byte",
+	"uint16",
+	"uint32",
+]);
+
+export const STRICT_OPS = new Set([
+	"+",
+	"-",
+	"*",
+	"/",
+	"%",
+	"&",
+	"|",
+	"^",
+	"&^",
+	"<<",
+	">>",
+]);
+
 // Namespace constants: pkg.Field → JS literal
 const NS_CONSTANTS = {
 	math: {
@@ -1207,6 +1233,18 @@ export const expressionGenMethods = {
 			return expr.op === "==" ? cmp : `!${cmp}`;
 		}
 
+		if (this.strict) {
+			const tName = this._typeName(expr._type);
+			if (
+				(this._isStrictAtomicOp(expr.op, tName) && STRICT_OPS.has(expr.op)) ||
+				(this.isIntType(expr._type) && (expr.op === "/" || expr.op === "%"))
+			) {
+				const l = this.genExpr(expr.left);
+				const r = this.genExpr(expr.right);
+				return this._genStrictBinary(expr.op, l, r, expr._type);
+			}
+		}
+
 		const jsOp = this._emittedBinaryOp(expr) ?? "/";
 		const operand = (child, isRight) =>
 			wrapForJsOp(
@@ -1375,5 +1413,101 @@ export const expressionGenMethods = {
 			default:
 				return inner;
 		}
+	},
+
+	_typeName(t) {
+		if (!t) return null;
+		if (t.kind === "untyped") return t.base;
+		if (t.kind === "named") return this._typeName(t.underlying);
+		if (t.kind === "basic") return t.name;
+		return null;
+	},
+
+	_isStrictAtomicOp(_op, typeName) {
+		return STRICT_NUMERIC_TYPES.has(typeName);
+	},
+
+	_genStrictBinary(op, l, r, type) {
+		const tName = this._typeName(type);
+		if (tName === "float32") {
+			return `Math.fround(${l} ${op} ${r})`;
+		}
+		if (tName === "int32" || tName === "rune") {
+			if (op === "*") return `Math.imul(${l}, ${r})`;
+			if (op === "/")
+				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : (Math.trunc((${l}) / (${r})) | 0))`;
+			if (op === "%")
+				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : (((${l}) % (${r})) | 0))`;
+			if (op === "<<" || op === ">>") {
+				return `((${r}) >= 32 ? (${op === ">>" ? `((${l}) < 0 ? -1 : 0)` : "0"}) : ((${l}) ${op} (${r}))) | 0`;
+			}
+			if (op === "&^") return `((${l}) & ~(${r})) | 0`;
+			return `((${l} ${op} ${r}) | 0)`;
+		}
+		if (tName === "uint32") {
+			if (op === "/")
+				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : (Math.trunc((${l}) / (${r})) >>> 0))`;
+			if (op === "%")
+				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : (((${l}) % (${r})) >>> 0))`;
+			if (op === "<<" || op === ">>") {
+				const jsOp = op === ">>" ? ">>>" : "<<";
+				return `((${r}) >= 32 ? 0 : ((${l}) ${jsOp} (${r}))) >>> 0`;
+			}
+			if (op === "&^") return `((${l}) & ~(${r})) >>> 0`;
+			return `((${l} ${op} ${r}) >>> 0)`;
+		}
+		if (tName === "int8") {
+			if (op === "/")
+				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : ((Math.trunc((${l}) / (${r})) << 24) >> 24))`;
+			if (op === "%")
+				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : (((((${l}) % (${r})) << 24) >> 24)))`;
+			if (op === "<<" || op === ">>") {
+				return `((${r}) >= 8 ? (${op === ">>" ? `((${l}) < 0 ? -1 : 0)` : "0"}) : (((${l}) ${op} (${r})) << 24 >> 24))`;
+			}
+			if (op === "&^") return `((((${l}) & ~(${r})) << 24) >> 24)`;
+			return `((((${l} ${op} ${r})) << 24) >> 24)`;
+		}
+		if (tName === "int16") {
+			if (op === "/")
+				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : ((Math.trunc((${l}) / (${r})) << 16) >> 16))`;
+			if (op === "%")
+				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : (((((${l}) % (${r})) << 16) >> 16)))`;
+			if (op === "<<" || op === ">>") {
+				return `((${r}) >= 16 ? (${op === ">>" ? `((${l}) < 0 ? -1 : 0)` : "0"}) : (((${l}) ${op} (${r})) << 16 >> 16))`;
+			}
+			if (op === "&^") return `((((${l}) & ~(${r})) << 16) >> 16)`;
+			return `((((${l} ${op} ${r})) << 16) >> 16)`;
+		}
+		if (tName === "uint8" || tName === "byte") {
+			if (op === "/")
+				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : (Math.trunc((${l}) / (${r})) & 0xFF))`;
+			if (op === "%")
+				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : (((${l}) % (${r})) & 0xFF))`;
+			if (op === "<<" || op === ">>") {
+				const jsOp = op === ">>" ? ">>>" : "<<";
+				return `((${r}) >= 8 ? 0 : (((${l}) ${jsOp} (${r})) & 0xFF))`;
+			}
+			if (op === "&^") return `(((${l}) & ~(${r})) & 0xFF)`;
+			return `((${l} ${op} ${r}) & 0xFF)`;
+		}
+		if (tName === "uint16") {
+			if (op === "/")
+				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : (Math.trunc((${l}) / (${r})) & 0xFFFF))`;
+			if (op === "%")
+				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : (((${l}) % (${r})) & 0xFFFF))`;
+			if (op === "<<" || op === ">>") {
+				const jsOp = op === ">>" ? ">>>" : "<<";
+				return `((${r}) >= 16 ? 0 : (((${l}) ${jsOp} (${r})) & 0xFFFF))`;
+			}
+			if (op === "&^") return `(((${l}) & ~(${r})) & 0xFFFF)`;
+			return `((${l} ${op} ${r}) & 0xFFFF)`;
+		}
+		if (this.isIntType(type)) {
+			if (op === "/")
+				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : Math.trunc((${l}) / (${r})))`;
+			if (op === "%")
+				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : ((${l}) % (${r})))`;
+		}
+		return `${l} ${op} ${r}`;
 	},
 };

@@ -96,8 +96,11 @@ export class CodeGen {
 		checker = null,
 		jsImports = new Map(),
 		bundledPackages = new Set(),
+		options = {},
 	) {
 		this.checker = checker;
+		this.target = options.target ?? "js";
+		this.strict = Boolean(options.strict || this.target === "both");
 		this.out = [];
 		this.indent = 0;
 		this.structNames = new Set();
