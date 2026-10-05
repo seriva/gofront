@@ -1,7 +1,7 @@
 # WASM MVP (Hybrid Targets in the JS Compiler) — Design Plan
 
 **Version:** v1.5.0  
-**Status:** Draft (2026-10-03)  
+**Status:** In Progress (2026-10-05)  
 **Baseline:** v1.4.0 JS compiler (`src/`)  
 **Continues in:** [`docs/v1.6.0/wasm-hybrid-plan.md`](../v1.6.0/wasm-hybrid-plan.md) (full hybrid, still in the JS compiler) → [`docs/v2.0.0/native-go-engine.md`](../v2.0.0/native-go-engine.md) (port of the finished compiler to Go)
 
@@ -218,26 +218,37 @@ The boundary per frame is then raycasts (gameplay, bodies, controller), each a s
 
 ---
 
-## Phases
+---
 
-| Phase | Scope | Exit criterion |
-|---|---|---|
-| **1a** | Side-table extraction: move ownership, boxing, range, functions, embedding to `src/lower/` | All ~1,400 tests, `test:examples`, E2E byte-identical to v1.4.0 |
-| **1b** | New analyses: `lower/captures.js` (closure envs) and `lower/escape.js` (pointer retention) | Dedicated AST analysis unit tests pass |
-| **2a** | `//gofront:target` in lexer, target import rules, package summary diagnostic line | Target and negative diagnostic tests pass |
-| **2b** | JS strict numeric mode for `both` packages (`Math.fround`, `\|0`, `Math.imul`, Go shifts, div-zero) | Strict mode parity tests pass against normal JS |
-| **3a** | Minimal binary encoder (`encode.js`) & WAT writer (`wat.js`): LEB128, headers, type/func/export/code sections | Hardcoded `add(i32, i32)` passes `WebAssembly.validate()` & runs |
-| **3b** | Module IR & scalar emission (`emit.js`): `i32/i64/f32/f64`, locals, Go arithmetic & control flow (`block/loop/br_if`) | Numeric & loop fixtures: WASM == JS-strict |
-| **3c** | Traps (`panic` tag, div-zero & nil guards) and JS `Math` imports (`math.Sin/Cos/...`) | Panic message parity tests and math tests pass |
-| **4a** | Structs, pointers, methods & rec groups (`struct.new`, `struct.get/set`) | `mathx.Vec3` operations and methods run in WASM |
-| **4b** | Arrays & Slices: `(array (mut T))`, slice header struct, `len`/`cap`/indexing, `runtime/wasm/slice.go` (`append`) | Slice manipulation & growth fixtures pass |
-| **4c** | Strings & `any`: JS String Builtins (`externref`) + `anyref` with concrete casts (`ref.test`/`ref.cast`) | String concatenation/comparison and `any` fixtures pass |
-| **4d** | Closures: `(struct funcref, anyref env)` + `call_ref`, boxed environments via `captures.js` | Closure and callback fixtures pass |
-| **5a** | Boundary v1: Facades for primitives and struct values (`mathx.Vec3` <-> JS class) | Struct passing across boundary matches JS-only results |
-| **5b** | Boundary v1: Slices (TypedArray copy) and opaque handles (`*collision.Trimesh` with stable identity) | Handle identity & TypedArray slice tests pass |
-| **5c** | Loader, single `app.wasm` linking, `compiler.js` pipeline, dev-server MIME, dual-target test runner | Hybrid sample project builds, serves, and passes dual-target tests |
-| **6a** | simplefps split: `engine/mathx` (`both`) and `engine/collision` (`wasm`) | `mathx` passes on both targets, `collision` passes in WASM |
-| **6b** | Raycast benchmark harness (`test/e2e/perf/raycast-bench.js`, 100k+ triangles, 100k rays) | Automated benchmark produces repeatable rays/s & alloc numbers |
-| **6c** | Full game verification (manual play at 60 FPS) & publish benchmark in README / CHANGELOG | simplefps runs hybrid. **Go/no-go benchmark published.** |
+## Implementation Tasks
+
+### Phase 1: Shared Lowering & Analyses (`src/lower/`)
+- [x] **Phase 1a — Side-table extraction:** Move ownership, boxing, range, functions, embedding to `src/lower/`. All ~1,400 tests, `test:examples`, E2E byte-identical to v1.4.0.
+- [x] **Phase 1b — New analyses:** Implement `lower/captures.js` (closure envs) and `lower/escape.js` (pointer retention). Dedicated AST analysis unit tests pass.
+
+### Phase 2: Package Targets & Diagnostics
+- [ ] **Phase 2a — Target directives & rules:** `//gofront:target` in lexer, target import rules, package summary diagnostic line. Target and negative diagnostic tests pass.
+- [ ] **Phase 2b — JS strict numeric mode:** JS strict numeric mode for `both` packages (`Math.fround`, `|0`, `Math.imul`, Go shifts, div-zero). Parity tests pass against normal JS.
+
+### Phase 3: Core WASM Backend & Scalars
+- [ ] **Phase 3a — Minimal binary encoder & WAT writer:** LEB128, headers, type/func/export/code sections (`encode.js`, `wat.js`). Hardcoded `add(i32, i32)` passes `WebAssembly.validate()` & runs.
+- [ ] **Phase 3b — Module IR & scalar emission:** `i32/i64/f32/f64`, locals, Go arithmetic & control flow (`block/loop/br_if`). Numeric & loop fixtures: WASM == JS-strict.
+- [ ] **Phase 3c — Traps & Math imports:** `panic` tag, div-zero & nil guards, and JS `Math` imports (`math.Sin/Cos/...`). Parity tests and math tests pass.
+
+### Phase 4: Types & Runtime Constructs
+- [ ] **Phase 4a — Structs, pointers & methods:** `struct.new`, `struct.get/set`, and rec groups. `mathx.Vec3` operations and methods run in WASM.
+- [ ] **Phase 4b — Arrays & slices:** `(array (mut T))`, slice header struct, `len`/`cap`/indexing, `runtime/wasm/slice.go` (`append`). Slice manipulation & growth fixtures pass.
+- [ ] **Phase 4c — Strings & any:** JS String Builtins (`externref`) + `anyref` with concrete casts (`ref.test`/`ref.cast`). String concatenation/comparison and `any` fixtures pass.
+- [ ] **Phase 4d — Closures:** `(struct funcref, anyref env)` + `call_ref`, boxed environments via `captures.js`. Closure and callback fixtures pass.
+
+### Phase 5: Boundary & Tooling Integration
+- [ ] **Phase 5a — Boundary v1 (Values):** Facades for primitives and struct values (`mathx.Vec3` <-> JS class). Struct passing across boundary matches JS-only results.
+- [ ] **Phase 5b — Boundary v1 (Slices & Handles):** TypedArray copy for slices and opaque handles (`*collision.Trimesh` with stable identity). Identity & slice tests pass.
+- [ ] **Phase 5c — Tooling & linking:** Loader, single `app.wasm` linking, `compiler.js` pipeline, dev-server MIME, dual-target test runner. Hybrid sample project builds, serves, and passes dual-target tests.
+
+### Phase 6: simplefps Validation & Go/No-Go Benchmark
+- [ ] **Phase 6a — simplefps split:** `engine/mathx` (`both`) and `engine/collision` (`wasm`). `mathx` passes on both targets, `collision` passes in WASM.
+- [ ] **Phase 6b — Raycast benchmark harness:** `test/e2e/perf/raycast-bench.js` (100k+ triangles, 100k rays). Automated benchmark produces repeatable rays/s & alloc numbers.
+- [ ] **Phase 6c — Verification & publish:** Full game verification (manual play at 60 FPS) & publish benchmark in README / CHANGELOG. simplefps runs hybrid. **Go/no-go benchmark published.**
 
 **After Phase 6:** if the benchmark and determinism results justify it, v1.6.0 completes the hybrid in the JS compiler, and v2.0.0 ports the finished result. If not, the WASM backend stays as a documented experimental target, v1.6.0 is dropped or repurposed, and v2.0.0 ports the v1.5 subset as-is without further investment.
