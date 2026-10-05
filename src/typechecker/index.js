@@ -25,6 +25,7 @@ import {
 	TAINTED_ANY,
 	TypeCheckError,
 	typeStr,
+	VALID_TARGETS,
 	VOID,
 } from "./types.js";
 
@@ -141,50 +142,21 @@ export class TypeChecker {
 		let total = 0;
 		const parts = [];
 		for (const [category, items] of this.blockers) {
-			const validItems = items.filter(
-				(x) => x !== null && x !== undefined && x !== "",
-			);
-			const uniqueItems = [...new Set(validItems)];
+			const uniqueItems = [
+				...new Set(items.filter((x) => x != null && x !== "")),
+			];
 			const count = uniqueItems.length > 0 ? uniqueItems.length : items.length;
 			total += count;
 			const itemsStr =
 				uniqueItems.length > 0 ? ` (${uniqueItems.join(", ")})` : "";
-			let label = category;
-			if (category === "js package import") {
-				label = count === 1 ? "js package import" : "js package imports";
-			} else if (category === "wasm package import") {
-				label = count === 1 ? "wasm package import" : "wasm package imports";
-			} else if (category === "browser global") {
-				label = count === 1 ? "browser global" : "browser globals";
-			} else if (category === "async function") {
-				label = count === 1 ? "async function" : "async functions";
-			} else if (category === ".templ file") {
-				label = count === 1 ? ".templ file" : ".templ files";
-			} else if (category === "css declaration") {
-				label = count === 1 ? "css declaration" : "css declarations";
-			} else if (category === "js: import") {
-				label = count === 1 ? "js: import" : "js: imports";
-			} else if (category === "gom usage") {
-				label = "gom usage";
-			} else if (category === "mutable package variable") {
-				label =
-					count === 1
-						? "mutable package variable"
-						: "mutable package variables";
-			} else if (category === "unsupported stdlib import") {
-				label =
-					count === 1
-						? "unsupported stdlib import"
-						: "unsupported stdlib imports";
-			} else if (category === "planned feature") {
-				label = count === 1 ? "planned feature" : "planned features";
-			} else if (category === "defer statement") {
-				label = count === 1 ? "defer statement" : "defer statements";
-			}
+			// "gom usage" is a mass noun; everything else pluralises on the last word.
+			const label =
+				count === 1 || category === "gom usage" ? category : `${category}s`;
 			parts.push(`${count} ${label}${itemsStr}`);
 		}
 		const noun = total === 1 ? "blocker" : "blockers";
-		return `package '${this.pkgName}' cannot be wasm: ${total} ${noun} — ${parts.join(", ")}`;
+		const what = this.target === "both" ? "both" : "wasm";
+		return `package '${this.pkgName}' cannot be ${what}: ${total} ${noun} — ${parts.join(", ")}`;
 	}
 
 	err(msg, node, hint = null) {
@@ -235,6 +207,21 @@ export class TypeChecker {
 	}
 
 	checkAll(programs) {
+		for (const p of programs) {
+			const d = p._targetDirective;
+			if (!d) continue;
+			this._setCurrentFile(p);
+			if (!VALID_TARGETS.has(d.value)) {
+				this.err(
+					`unknown //gofront:target '${d.value}' (expected js, wasm or both)`,
+					d,
+				);
+				p.target = null;
+				if (this.target === d.value) this.target = "js";
+			} else if (!d.beforePackage) {
+				this.err("//gofront:target must appear before the package clause", d);
+			}
+		}
 		if (programs.length > 0) {
 			if (!this.target || this.target === "js") {
 				const pTarget = programs.find((p) => p.target)?.target;
@@ -272,7 +259,9 @@ export class TypeChecker {
 		if (this.blockers.size > 0) {
 			const summaryLine = this.getSummary();
 			this.summary = summaryLine;
-			this.errors.push({ message: summaryLine, isSummary: true });
+			const summaryErr = new Error(summaryLine);
+			summaryErr.isSummary = true;
+			this.errors.push(summaryErr);
 		}
 
 		return this.errors;
@@ -293,13 +282,34 @@ export class TypeChecker {
 		}
 		if (pkgVars.size === 0) return;
 
-		const checkFn = (fnDecl, file, src) => {
-			const locals = new Set();
-			if (fnDecl.recvName && fnDecl.recvName !== "_")
-				locals.add(fnDecl.recvName);
-			for (const p of fnDecl.params ?? []) {
-				if (p.name && p.name !== "_") locals.add(p.name);
-			}
+		const SCOPE_KINDS = new Set([
+			"Block",
+			"FuncLit",
+			"ForStmt",
+			"IfStmt",
+			"SwitchStmt",
+			"TypeSwitchStmt",
+			"CaseClause",
+		]);
+
+		const report = (root, node) => {
+			this.recordBlocker("mutable package variable", root);
+			this.err(
+				`package-level variable '${root}' is mutated; not allowed in 'both' packages (each target gets its own copy)`,
+				node,
+			);
+		};
+
+		const checkBody = (body, initialLocals) => {
+			const scopes = [new Set(initialLocals)];
+			const isLocal = (name) => scopes.some((s) => s.has(name));
+			const declare = (name) => {
+				if (name && name !== "_") scopes[scopes.length - 1].add(name);
+			};
+			const flag = (e, node) => {
+				const root = rootIdentName(e);
+				if (root && pkgVars.has(root) && !isLocal(root)) report(root, node);
+			};
 
 			const walk = (node) => {
 				if (!node || typeof node !== "object") return;
@@ -307,60 +317,65 @@ export class TypeChecker {
 					for (const item of node) walk(item);
 					return;
 				}
-				if (node.kind === "VarDecl") {
-					for (const spec of node.decls ?? []) {
-						for (const name of spec.names ?? []) {
-							if (name !== "_") locals.add(name);
-						}
-					}
-				} else if (node.kind === "DefineStmt") {
-					for (const e of node.lhs ?? []) {
-						if (e.kind === "Ident" && e.name !== "_") locals.add(e.name);
-					}
-				} else if (node.kind === "RangeStmt") {
-					if (node.key?.name && node.key.name !== "_")
-						locals.add(node.key.name);
-					if (node.value?.name && node.value.name !== "_")
-						locals.add(node.value.name);
-				} else if (node.kind === "AssignStmt") {
-					for (const e of node.lhs) {
-						const root = rootIdentName(e);
-						if (root && pkgVars.has(root) && !locals.has(root)) {
-							this._currentFile = file;
-							this._currentSource = src;
-							this.recordBlocker("mutable package variable", root);
-							this.err(
-								`package-level variable '${root}' is mutated; not allowed in 'both' packages (each target gets its own copy)`,
-								node,
-							);
-						}
-					}
-				} else if (node.kind === "IncDecStmt") {
-					const root = rootIdentName(node.expr);
-					if (root && pkgVars.has(root) && !locals.has(root)) {
-						this._currentFile = file;
-						this._currentSource = src;
-						this.recordBlocker("mutable package variable", root);
-						this.err(
-							`package-level variable '${root}' is mutated; not allowed in 'both' packages (each target gets its own copy)`,
-							node,
-						);
-					}
+				const opensScope = SCOPE_KINDS.has(node.kind);
+				if (opensScope) scopes.push(new Set());
+				switch (node.kind) {
+					case "FuncLit":
+						for (const p of node.params ?? []) declare(p.name);
+						for (const r of node.returnType?._namedReturns ?? [])
+							declare(r.name);
+						break;
+					case "VarDecl":
+						for (const spec of node.decls ?? [])
+							for (const name of spec.names ?? []) declare(name);
+						break;
+					case "DefineStmt":
+						for (const e of node.lhs ?? [])
+							if (e.kind === "Ident") declare(e.name);
+						break;
+					case "TypeSwitchStmt":
+						declare(node.assign);
+						break;
+					case "AssignStmt":
+						for (const e of node.lhs) flag(e, node);
+						break;
+					case "IncDecStmt":
+						flag(node.expr, node);
+						break;
+					case "UnaryExpr":
+						if (node.op === "&") flag(node.operand, node);
+						break;
+					case "SelectorExpr":
+						// Pointer-receiver method call or value: `G.Bump()` mutates G.
+						if (node._isMethodValue && node._type?._ptrRecv)
+							flag(node.expr, node);
+						break;
 				}
 				for (const key of Object.keys(node)) {
 					if (key.startsWith("_")) continue;
 					walk(node[key]);
 				}
+				if (opensScope) scopes.pop();
 			};
-			walk(fnDecl.body);
+			walk(body);
 		};
 
 		for (const p of programs) {
 			if (p._filename?.endsWith("_test.go")) continue;
+			this._currentFile = p._filename;
+			this._currentSource = p._source;
 			for (const d of p.decls) {
 				if ((d.kind === "FuncDecl" || d.kind === "MethodDecl") && d.body) {
 					if (d.name === "init" && d.kind === "FuncDecl") continue;
-					checkFn(d, p._filename, p._source);
+					const locals = [];
+					if (d.recvName) locals.push(d.recvName);
+					for (const prm of d.params ?? []) if (prm.name) locals.push(prm.name);
+					for (const r of d.returnType?._namedReturns ?? [])
+						if (r.name) locals.push(r.name);
+					checkBody(d.body, locals);
+				} else if (d.kind === "VarDecl") {
+					// Closures in package-level initializers run after init.
+					for (const spec of d.decls ?? []) checkBody(spec.value, []);
 				}
 			}
 		}

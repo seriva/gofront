@@ -8,7 +8,7 @@ no_god_files = false   # test/unit/run.js is an intentional test orchestrator
 
 # Compiler pipeline — lower order = higher in the stack (can import higher-order layers).
 # Rule: a layer can only import from layers with HIGHER order numbers.
-# cli(0) → support(1) → codegen(2) → lower(3) → typechecker(4) → parser(5) → lexer(6) → types(7)
+# cli(0) → support(1) → codegen(2, incl. backend/wasm) → lower(3) → typechecker(4) → parser(5) → lexer(6) → types(7)
 
 [[layers]]
 name  = "cli"
@@ -22,7 +22,7 @@ order = 1
 
 [[layers]]
 name  = "codegen"
-paths = ["src/codegen/*", "src/codegen/stdlib/*"]
+paths = ["src/codegen/*", "src/codegen/stdlib/*", "src/backend/wasm/*"]
 order = 2
 
 [[layers]]
