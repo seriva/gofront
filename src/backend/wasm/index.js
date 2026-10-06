@@ -10,10 +10,20 @@ import {
 	collectBoundaryMeta,
 	generateFacade,
 	scanBoundaryImports,
+	wTypeKey,
 } from "./boundary.js";
 import { FunctionEmitter } from "./emit.js";
 import { encodeModule, isGoFrontWasm } from "./encode.js";
-import { getFuncSignature, isTestingT, toWasmType } from "./types.js";
+import { hasGenerics, monomorphise } from "./monomorph.js";
+import {
+	getFuncSignature,
+	getMapKeyValTypes,
+	getReceiverTypeName,
+	isMapType,
+	isNonEmptyInterface,
+	isTestingT,
+	toWasmType,
+} from "./types.js";
 import { emitWat } from "./wat.js";
 
 export { isGoFrontWasm };
@@ -37,6 +47,9 @@ export class ModuleEmitter {
 		this.arrayTypes = new Map(); // wType key -> array info
 		this.sliceTypes = new Map(); // wType key -> slice info
 		this.sliceTypesByIndex = new Map(); // typeIndex -> slice info
+		this.mapTypes = new Map(); // wType key -> map info
+		this.mapTypesByIndex = new Map(); // typeIndex -> map info
+		this.mapBucketsType = null; // shared (array (mut i32))
 		this.closureTypes = new Map(); // key -> closure info
 		this.envTypes = new Map(); // key -> env info
 
@@ -308,6 +321,107 @@ export class ModuleEmitter {
 		return this.sliceTypesByIndex?.get(typeIndex) ?? null;
 	}
 
+	getMapType(keyGoType, valGoType) {
+		const keyWType = toWasmType(keyGoType, this.checker, this);
+		const valWType = toWasmType(valGoType, this.checker, this);
+		const key = `${wTypeKey(keyWType)}:${wTypeKey(valWType)}`;
+		if (this.mapTypes.has(key)) {
+			return this.mapTypes.get(key);
+		}
+
+		if (!this.mapBucketsType) {
+			const typeIndex = this._getTotalTypeCount();
+			this._pushType({
+				form: "array",
+				elemType: "i32",
+				mutable: true,
+			});
+			this.mapBucketsType = { typeIndex };
+		}
+
+		const entryTypeIndex = this._getTotalTypeCount();
+		this._pushType({
+			form: "struct",
+			fields: [
+				{ type: keyWType, mutable: true }, // 0: key
+				{ type: valWType, mutable: true }, // 1: val
+				{ type: "i32", mutable: true }, // 2: next (bucket chain)
+				{ type: "i32", mutable: true }, // 3: order_prev (insertion order)
+				{ type: "i32", mutable: true }, // 4: order_next (insertion order)
+				{ type: "i32", mutable: true }, // 5: active (1 = active, 0 = deleted)
+			],
+		});
+
+		const entriesTypeIndex = this._getTotalTypeCount();
+		this._pushType({
+			form: "array",
+			elemType: { kind: "ref", nullable: true, typeIndex: entryTypeIndex },
+			mutable: true,
+		});
+
+		const mapTypeIndex = this._getTotalTypeCount();
+		this._pushType({
+			form: "struct",
+			fields: [
+				{
+					type: {
+						kind: "ref",
+						nullable: true,
+						typeIndex: this.mapBucketsType.typeIndex,
+					},
+					mutable: true,
+				}, // 0: buckets
+				{
+					type: {
+						kind: "ref",
+						nullable: true,
+						typeIndex: entriesTypeIndex,
+					},
+					mutable: true,
+				}, // 1: entries
+				{ type: "i32", mutable: true }, // 2: len
+				{ type: "i32", mutable: true }, // 3: cap
+				{ type: "i32", mutable: true }, // 4: count
+				{ type: "i32", mutable: true }, // 5: head
+				{ type: "i32", mutable: true }, // 6: tail
+				{ type: "i32", mutable: true }, // 7: free_head
+				{ type: "i32", mutable: true }, // 8: num_buckets
+			],
+		});
+
+		const suffix = key.replace(/[^a-zA-Z0-9_]/g, "_");
+		const mapInfo = {
+			key,
+			suffix,
+			typeIndex: mapTypeIndex,
+			entryTypeIndex,
+			entriesTypeIndex,
+			bucketsTypeIndex: this.mapBucketsType.typeIndex,
+			keyWType,
+			valWType,
+			keyGoType,
+			valGoType,
+			wType: { kind: "ref", nullable: true, typeIndex: mapTypeIndex },
+			makeFuncName: `__map_make_${suffix}`,
+			getFuncName: `__map_get_${suffix}`,
+			getOkFuncName: `__map_get_ok_${suffix}`,
+			setFuncName: `__map_set_${suffix}`,
+			deleteFuncName: `__map_delete_${suffix}`,
+			lenFuncName: `__map_len_${suffix}`,
+			clearFuncName: `__map_clear_${suffix}`,
+			keysFuncName: `__map_keys_${suffix}`,
+			valuesFuncName: `__map_values_${suffix}`,
+			cloneFuncName: `__map_clone_${suffix}`,
+		};
+		this.mapTypes.set(key, mapInfo);
+		this.mapTypesByIndex.set(mapTypeIndex, mapInfo);
+		return mapInfo;
+	}
+
+	getMapTypeByIndex(typeIndex) {
+		return this.mapTypesByIndex?.get(typeIndex) ?? null;
+	}
+
 	getClosureType(goType) {
 		const sig = getFuncSignature(goType, this.checker);
 		const paramWTypes = sig.params
@@ -402,6 +516,7 @@ export class ModuleEmitter {
 		this.getPanicImportIndex(); // env.panic
 		this.internString("runtime error: index out of range");
 		this.internString("runtime error: slice bounds out of range");
+		this.internString("assignment to entry in nil map");
 
 		// String built-ins
 		this.getStringImportIndex(); // env.str
@@ -417,6 +532,22 @@ export class ModuleEmitter {
 		this.getStringSliceImportIndex(); // env.str_slice
 		this.getStringFromCodePointImportIndex(); // env.str_from_code_point
 		this.getStringCodePointAtImportIndex(); // env.str_code_point_at
+		this.getStringHashImportIndex(); // env.str_hash
+		this.getStringToUpperImportIndex();
+		this.getStringToLowerImportIndex();
+		this.getStringTrimSpaceImportIndex();
+		this.getStringContainsImportIndex();
+		this.getStringHasPrefixImportIndex();
+		this.getStringHasSuffixImportIndex();
+		this.getStringIndexImportIndex();
+		this.getStringLastIndexImportIndex();
+		this.getStringRepeatImportIndex();
+		this.getStringReplaceAllImportIndex();
+		this.getStringEqualFoldImportIndex();
+		this.getStringCountImportIndex();
+		this.getStrFromI64ImportIndex();
+		this.getStrFromI32ImportIndex();
+		this.getStrFromF64ImportIndex();
 		this.getIsStringImportIndex(); // env.is_string
 
 		// Logging built-ins
@@ -594,9 +725,15 @@ export class ModuleEmitter {
 					["externref"],
 					[],
 				);
-			case "anyref":
-				return this.getOrAddFuncImport("env", `${prefix}_any`, ["anyref"], []);
 			default:
+				if (typeof wType === "object") {
+					return this.getOrAddFuncImport(
+						"env",
+						`${prefix}_any`,
+						["anyref"],
+						[],
+					);
+				}
 				return this.getOrAddFuncImport("env", `${prefix}_i32`, ["i32"], []);
 		}
 	}
@@ -672,6 +809,145 @@ export class ModuleEmitter {
 		return this.getOrAddFuncImport("env", "is_string", ["anyref"], ["i32"]);
 	}
 
+	getStringHashImportIndex() {
+		return this.getOrAddFuncImport("env", "str_hash", ["externref"], ["i32"]);
+	}
+
+	getStringToUpperImportIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"str_to_upper",
+			["externref"],
+			["externref"],
+		);
+	}
+
+	getStringToLowerImportIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"str_to_lower",
+			["externref"],
+			["externref"],
+		);
+	}
+
+	getStringTrimSpaceImportIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"str_trim_space",
+			["externref"],
+			["externref"],
+		);
+	}
+
+	getStringContainsImportIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"str_contains",
+			["externref", "externref"],
+			["i32"],
+		);
+	}
+
+	getStringHasPrefixImportIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"str_has_prefix",
+			["externref", "externref"],
+			["i32"],
+		);
+	}
+
+	getStringHasSuffixImportIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"str_has_suffix",
+			["externref", "externref"],
+			["i32"],
+		);
+	}
+
+	getStringIndexImportIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"str_index",
+			["externref", "externref"],
+			["i32"],
+		);
+	}
+
+	getStringLastIndexImportIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"str_last_index",
+			["externref", "externref"],
+			["i32"],
+		);
+	}
+
+	getStringRepeatImportIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"str_repeat",
+			["externref", "i32"],
+			["externref"],
+		);
+	}
+
+	getStringReplaceAllImportIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"str_replace_all",
+			["externref", "externref", "externref"],
+			["externref"],
+		);
+	}
+
+	getStringEqualFoldImportIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"str_equal_fold",
+			["externref", "externref"],
+			["i32"],
+		);
+	}
+
+	getStringCountImportIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"str_count",
+			["externref", "externref"],
+			["i32"],
+		);
+	}
+
+	getStrFromI64ImportIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"str_from_i64",
+			["i64"],
+			["externref"],
+		);
+	}
+
+	getStrFromI32ImportIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"str_from_i32",
+			["i32"],
+			["externref"],
+		);
+	}
+
+	getStrFromF64ImportIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"str_from_f64",
+			["f64"],
+			["externref"],
+		);
+	}
+
 	getMathImportIndex(jsName, isBinary = false) {
 		const params = isBinary ? ["f64", "f64"] : ["f64"];
 		return this.getOrAddFuncImport("Math", jsName, params, ["f64"]);
@@ -699,6 +975,218 @@ export class ModuleEmitter {
 
 	isNonLiteralConst(name) {
 		return this.nonLiteralConsts.has(name);
+	}
+
+	findInterfaceCandidates(ifaceType, methodName) {
+		const candidates = [];
+		const seenKeys = new Set();
+		const _ifaceResolved =
+			this.checker?.resolveType?.(
+				ifaceType?.kind === "named" ? ifaceType.underlying : ifaceType,
+			) ?? ifaceType;
+
+		// 1. Struct types
+		for (const [sName, sInfo] of this.structTypes.entries()) {
+			const directMethodName = `${sName}.${methodName}`;
+			if (this.funcMap.has(directMethodName)) {
+				const fIdx = this.resolveFuncIndex(directMethodName);
+				const paramGoTypes = this.getFuncParamGoTypes(directMethodName);
+				const paramWTypes = this.getFuncParamTypes(directMethodName);
+				const recvGoType = paramGoTypes[0];
+				const isPtrRecv = recvGoType?.kind === "pointer";
+
+				if (isPtrRecv) {
+					const key = `ptr:${sName}`;
+					if (!seenKeys.has(key)) {
+						seenKeys.add(key);
+						candidates.push({
+							recvTypeName: sName,
+							testTypeIndex: sInfo.typeIndex,
+							isBoxedValue: false,
+							needsValueDeref: false,
+							embedPath: null,
+							funcIndex: fIdx,
+							targetParamTypes: paramWTypes,
+							structInfo: sInfo,
+						});
+					}
+				} else {
+					// Value receiver: both *sName and sName match
+					const ptrKey = `ptr:${sName}`;
+					if (!seenKeys.has(ptrKey)) {
+						seenKeys.add(ptrKey);
+						candidates.push({
+							recvTypeName: sName,
+							testTypeIndex: sInfo.typeIndex,
+							isBoxedValue: false,
+							needsValueDeref: true,
+							embedPath: null,
+							funcIndex: fIdx,
+							targetParamTypes: paramWTypes,
+							targetRecvWType: paramWTypes[0],
+							structInfo: sInfo,
+						});
+					}
+					const box = this.getBoxType({ kind: "named", name: sName });
+					const valKey = `val:${sName}`;
+					if (box && !seenKeys.has(valKey)) {
+						seenKeys.add(valKey);
+						candidates.push({
+							recvTypeName: sName,
+							testTypeIndex: box.typeIndex,
+							isBoxedValue: true,
+							needsValueDeref: false,
+							embedPath: null,
+							funcIndex: fIdx,
+							targetParamTypes: paramWTypes,
+							targetRecvWType: paramWTypes[0],
+							structInfo: sInfo,
+						});
+					}
+				}
+			}
+
+			// Promoted methods on sName
+			if (sInfo.embeds && sInfo.embeds.length > 0) {
+				for (const embed of sInfo.embeds) {
+					const embedMethodName = `${embed.name}.${methodName}`;
+					if (this.funcMap.has(embedMethodName)) {
+						const fIdx = this.resolveFuncIndex(embedMethodName);
+						const paramGoTypes = this.getFuncParamGoTypes(embedMethodName);
+						const paramWTypes = this.getFuncParamTypes(embedMethodName);
+						const isPtrRecv = paramGoTypes[0]?.kind === "pointer";
+						const embedSInfo = this.getStructType(embed.name);
+
+						const ptrKey = `ptr:${sName}`;
+						if (!seenKeys.has(ptrKey)) {
+							seenKeys.add(ptrKey);
+							candidates.push({
+								recvTypeName: sName,
+								testTypeIndex: sInfo.typeIndex,
+								isBoxedValue: false,
+								needsValueDeref: !isPtrRecv,
+								embedPath: [
+									{
+										parentTypeIndex: sInfo.typeIndex,
+										fieldIndex: embed.fieldIndex,
+									},
+								],
+								funcIndex: fIdx,
+								targetParamTypes: paramWTypes,
+								targetRecvWType: paramWTypes[0],
+								structInfo: embedSInfo,
+							});
+						}
+
+						if (!isPtrRecv) {
+							const box = this.getBoxType({ kind: "named", name: sName });
+							const valKey = `val:${sName}`;
+							if (box && !seenKeys.has(valKey)) {
+								seenKeys.add(valKey);
+								candidates.push({
+									recvTypeName: sName,
+									testTypeIndex: box.typeIndex,
+									isBoxedValue: true,
+									needsValueDeref: false,
+									embedPath: [
+										{
+											parentTypeIndex: sInfo.typeIndex,
+											fieldIndex: embed.fieldIndex,
+										},
+									],
+									funcIndex: fIdx,
+									targetParamTypes: paramWTypes,
+									targetRecvWType: paramWTypes[0],
+									structInfo: embedSInfo,
+								});
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// 2. Named non-struct types
+		for (const [fnName, fIdx] of this.funcMap.entries()) {
+			if (fnName.endsWith(`.${methodName}`)) {
+				const rName = fnName.slice(0, fnName.length - methodName.length - 1);
+				if (!this.structTypes.has(rName)) {
+					const box = this.getBoxType({ kind: "named", name: rName });
+					const key = `named:${rName}`;
+					if (box && !seenKeys.has(key)) {
+						seenKeys.add(key);
+						const paramWTypes = this.getFuncParamTypes(fnName);
+						candidates.push({
+							recvTypeName: rName,
+							testTypeIndex: box.typeIndex,
+							isBoxedValue: true,
+							needsValueDeref: false,
+							embedPath: null,
+							funcIndex: fIdx,
+							targetParamTypes: paramWTypes,
+						});
+					}
+				}
+			}
+		}
+
+		return candidates;
+	}
+
+	getTypesImplementingInterface(ifaceType) {
+		const candidates = [];
+		const seen = new Set();
+		const ifaceResolved =
+			this.checker?.resolveType?.(
+				ifaceType?.kind === "named" ? ifaceType.underlying : ifaceType,
+			) ?? ifaceType;
+
+		// 1. Struct types
+		for (const [sName, sInfo] of this.structTypes.entries()) {
+			const namedType = this.checker?.types?.get(sName) ?? {
+				kind: "named",
+				name: sName,
+			};
+			const ptrType = { kind: "pointer", base: namedType };
+
+			// Check pointer to struct
+			if (this.checker?.implements?.(ptrType, ifaceResolved)) {
+				if (!seen.has(sInfo.typeIndex)) {
+					seen.add(sInfo.typeIndex);
+					candidates.push({ name: `*${sName}`, typeIndex: sInfo.typeIndex });
+				}
+			}
+
+			// Check struct value (boxed)
+			if (this.checker?.implements?.(namedType, ifaceResolved)) {
+				const box = this.getBoxType(namedType);
+				if (box && !seen.has(box.typeIndex)) {
+					seen.add(box.typeIndex);
+					candidates.push({ name: sName, typeIndex: box.typeIndex });
+				}
+			}
+		}
+
+		// 2. Named non-struct types that have methods
+		if (this.checker?.types) {
+			for (const [tName, tVal] of this.checker.types.entries()) {
+				if (
+					tVal?.kind === "named" &&
+					tVal.underlying?.kind !== "struct" &&
+					tVal.underlying?.kind !== "interface"
+				) {
+					if (this.checker.implements(tVal, ifaceResolved)) {
+						const box = this.getBoxType(tVal);
+						if (box && !seen.has(box.typeIndex)) {
+							seen.add(box.typeIndex);
+							candidates.push({ name: tName, typeIndex: box.typeIndex });
+						}
+					}
+				}
+			}
+		}
+
+		return candidates;
 	}
 }
 
@@ -768,9 +1256,20 @@ export function compileWasmModule(
 	lowerResult = null,
 	options = {},
 ) {
-	const progs = Array.isArray(programs) ? programs : [programs];
-	const resolvedLowerResult = lowerResult ?? lower(progs, checker);
-	const mod = new ModuleEmitter(checker, resolvedLowerResult, progs, {
+	let progs = Array.isArray(programs) ? programs : [programs];
+	let resolvedChecker = checker;
+	let resolvedLowerResult = lowerResult;
+
+	if (hasGenerics(progs)) {
+		const mono = monomorphise(progs, checker);
+		progs = mono.programs;
+		resolvedChecker = mono.checker;
+		resolvedLowerResult = lower(progs, resolvedChecker);
+	} else if (!resolvedLowerResult) {
+		resolvedLowerResult = lower(progs, resolvedChecker);
+	}
+
+	const mod = new ModuleEmitter(resolvedChecker, resolvedLowerResult, progs, {
 		bundledPackages: options.bundledPackages,
 	});
 
@@ -956,7 +1455,308 @@ export function compileWasmModule(
 	};
 	funcDecls.push(sliceBoundsPanicFn);
 
-	// 1d. Boundary metadata (exported surface of wasm packages)
+	// 1d. Interface dispatchers
+	const interfaceCalls = new Map();
+
+	function scanInterfaceCalls(node) {
+		if (!node || typeof node !== "object") return;
+		if (Array.isArray(node)) {
+			for (const item of node) scanInterfaceCalls(item);
+			return;
+		}
+		if (node.kind === "CallExpr" && node.func?.kind === "SelectorExpr") {
+			const recvType = node.func.expr?._type;
+			if (isNonEmptyInterface(recvType, checker)) {
+				let ifaceName = getReceiverTypeName(recvType, node.func.expr);
+				if (!ifaceName) ifaceName = "anon";
+				const methodName = node.func.field;
+				const key = `${ifaceName}.${methodName}`;
+				if (!interfaceCalls.has(key)) {
+					interfaceCalls.set(key, {
+						ifaceName,
+						ifaceType: recvType,
+						methodName,
+						callNode: node,
+					});
+				}
+			}
+		}
+		for (const key of Object.keys(node)) {
+			if (key.startsWith("_")) continue;
+			scanInterfaceCalls(node[key]);
+		}
+	}
+
+	for (const fn of funcDecls) {
+		if (fn.body) scanInterfaceCalls(fn.body);
+	}
+
+	for (const p of progs) {
+		for (const d of p.decls ?? []) {
+			if (d.kind === "TypeDecl") {
+				const resolved = checker?.types?.get(d.name) ?? d.type;
+				const underlying =
+					resolved?.kind === "named"
+						? resolved.underlying
+						: d.type?.kind === "InterfaceType"
+							? d.type
+							: resolved;
+				if (isNonEmptyInterface(underlying, checker)) {
+					const ifaceName = d.name;
+					const methods =
+						underlying.methods instanceof Map
+							? Array.from(underlying.methods.entries())
+							: Array.isArray(underlying.methods)
+								? underlying.methods.map((m) => [m.name ?? m, m])
+								: [];
+					for (const [mName, mSig] of methods) {
+						const key = `${ifaceName}.${mName}`;
+						if (!interfaceCalls.has(key)) {
+							interfaceCalls.set(key, {
+								ifaceName,
+								ifaceType: resolved,
+								methodName: mName,
+								methodSig: mSig,
+							});
+						}
+					}
+				}
+			}
+		}
+	}
+
+	for (const [, info] of interfaceCalls.entries()) {
+		let methodSig = info.methodSig;
+		if (!methodSig) {
+			const ifaceResolved =
+				checker?.resolveType?.(
+					info.ifaceType?.kind === "named"
+						? info.ifaceType.underlying
+						: info.ifaceType,
+				) ?? info.ifaceType;
+			if (ifaceResolved?.methods instanceof Map) {
+				methodSig = ifaceResolved.methods.get(info.methodName);
+			}
+		}
+
+		const params = [{ name: "__recv", type: { kind: "basic", name: "any" } }];
+		if (methodSig?.params) {
+			for (let p = 0; p < methodSig.params.length; p++) {
+				params.push({ name: `__arg${p}`, type: methodSig.params[p] });
+			}
+		} else if (info.callNode?.args) {
+			for (let p = 0; p < info.callNode.args.length; p++) {
+				params.push({
+					name: `__arg${p}`,
+					type: info.callNode.args[p]._type ?? {
+						kind: "basic",
+						name: "any",
+					},
+				});
+			}
+		}
+
+		let returnType = null;
+		if (methodSig?.returns) {
+			if (methodSig.returns.length === 1) returnType = methodSig.returns[0];
+			else if (methodSig.returns.length > 1)
+				returnType = { kind: "tuple", types: methodSig.returns };
+		} else if (info.callNode?._type) {
+			returnType = info.callNode._type;
+		}
+
+		const dispFn = {
+			kind: "FuncDecl",
+			name: `__dispatch_${info.ifaceName}_${info.methodName}`,
+			params,
+			returnType,
+			body: { kind: "Block", stmts: [], list: [] },
+			_isInterfaceDispatcher: true,
+			_ifaceName: info.ifaceName,
+			_ifaceType: info.ifaceType,
+			_methodName: info.methodName,
+			_rootFuncDecl: null,
+		};
+		funcDecls.push(dispFn);
+	}
+
+	// 1e. Map helpers
+	function scanMapTypes(node) {
+		if (!node || typeof node !== "object") return;
+		if (Array.isArray(node)) {
+			for (const item of node) scanMapTypes(item);
+			return;
+		}
+		if (node._type && isMapType(node._type, checker)) {
+			const { keyGoType, valGoType } = getMapKeyValTypes(node._type, checker);
+			if (keyGoType && valGoType) {
+				mod.getMapType(keyGoType, valGoType);
+			}
+		}
+		if (node.kind === "MapType") {
+			const keyGoType = node.key;
+			const valGoType = node.value ?? node.elem;
+			if (keyGoType && valGoType) {
+				mod.getMapType(keyGoType, valGoType);
+			}
+		}
+		for (const key of Object.keys(node)) {
+			if (key.startsWith("_")) continue;
+			scanMapTypes(node[key]);
+		}
+	}
+
+	for (const fn of funcDecls) {
+		if (fn.params) scanMapTypes(fn.params);
+		if (fn.returnType) scanMapTypes(fn.returnType);
+		if (fn.body) scanMapTypes(fn.body);
+	}
+	for (const p of progs) {
+		for (const d of p.decls ?? []) {
+			scanMapTypes(d);
+		}
+	}
+
+	for (const mapInfo of mod.mapTypes.values()) {
+		// make
+		funcDecls.push({
+			kind: "FuncDecl",
+			name: mapInfo.makeFuncName,
+			params: [{ name: "cap", type: { kind: "basic", name: "int32" } }],
+			returnType: mapInfo.wType,
+			body: { kind: "Block", stmts: [], list: [] },
+			_isMapHelper: true,
+			_mapHelperKind: "make",
+			_mapInfo: mapInfo,
+			_rootFuncDecl: null,
+		});
+		// get
+		funcDecls.push({
+			kind: "FuncDecl",
+			name: mapInfo.getFuncName,
+			params: [
+				{ name: "m", type: mapInfo.wType },
+				{ name: "k", type: mapInfo.keyGoType },
+			],
+			returnType: mapInfo.valGoType,
+			body: { kind: "Block", stmts: [], list: [] },
+			_isMapHelper: true,
+			_mapHelperKind: "get",
+			_mapInfo: mapInfo,
+			_rootFuncDecl: null,
+		});
+		// get_ok
+		funcDecls.push({
+			kind: "FuncDecl",
+			name: mapInfo.getOkFuncName,
+			params: [
+				{ name: "m", type: mapInfo.wType },
+				{ name: "k", type: mapInfo.keyGoType },
+			],
+			returnType: {
+				kind: "tuple",
+				types: [mapInfo.valGoType, { kind: "basic", name: "bool" }],
+			},
+			body: { kind: "Block", stmts: [], list: [] },
+			_isMapHelper: true,
+			_mapHelperKind: "get_ok",
+			_mapInfo: mapInfo,
+			_rootFuncDecl: null,
+		});
+		// set
+		funcDecls.push({
+			kind: "FuncDecl",
+			name: mapInfo.setFuncName,
+			params: [
+				{ name: "m", type: mapInfo.wType },
+				{ name: "k", type: mapInfo.keyGoType },
+				{ name: "v", type: mapInfo.valGoType },
+			],
+			returnType: null,
+			body: { kind: "Block", stmts: [], list: [] },
+			_isMapHelper: true,
+			_mapHelperKind: "set",
+			_mapInfo: mapInfo,
+			_rootFuncDecl: null,
+		});
+		// delete
+		funcDecls.push({
+			kind: "FuncDecl",
+			name: mapInfo.deleteFuncName,
+			params: [
+				{ name: "m", type: mapInfo.wType },
+				{ name: "k", type: mapInfo.keyGoType },
+			],
+			returnType: null,
+			body: { kind: "Block", stmts: [], list: [] },
+			_isMapHelper: true,
+			_mapHelperKind: "delete",
+			_mapInfo: mapInfo,
+			_rootFuncDecl: null,
+		});
+		// len
+		funcDecls.push({
+			kind: "FuncDecl",
+			name: mapInfo.lenFuncName,
+			params: [{ name: "m", type: mapInfo.wType }],
+			returnType: { kind: "basic", name: "int32" },
+			body: { kind: "Block", stmts: [], list: [] },
+			_isMapHelper: true,
+			_mapHelperKind: "len",
+			_mapInfo: mapInfo,
+			_rootFuncDecl: null,
+		});
+		// clear
+		funcDecls.push({
+			kind: "FuncDecl",
+			name: mapInfo.clearFuncName,
+			params: [{ name: "m", type: mapInfo.wType }],
+			returnType: null,
+			body: { kind: "Block", stmts: [], list: [] },
+			_isMapHelper: true,
+			_mapHelperKind: "clear",
+			_mapInfo: mapInfo,
+			_rootFuncDecl: null,
+		});
+		// keys
+		funcDecls.push({
+			kind: "FuncDecl",
+			name: mapInfo.keysFuncName,
+			params: [{ name: "m", type: mapInfo.wType }],
+			returnType: { kind: "slice", elem: mapInfo.keyGoType },
+			body: { kind: "Block", stmts: [], list: [] },
+			_isMapHelper: true,
+			_mapHelperKind: "keys",
+			_mapInfo: mapInfo,
+			_rootFuncDecl: null,
+		});
+		// values
+		funcDecls.push({
+			kind: "FuncDecl",
+			name: mapInfo.valuesFuncName,
+			params: [{ name: "m", type: mapInfo.wType }],
+			returnType: { kind: "slice", elem: mapInfo.valGoType },
+			body: { kind: "Block", stmts: [], list: [] },
+			_isMapHelper: true,
+			_mapHelperKind: "values",
+			_mapInfo: mapInfo,
+			_rootFuncDecl: null,
+		});
+		// clone
+		funcDecls.push({
+			kind: "FuncDecl",
+			name: mapInfo.cloneFuncName,
+			params: [{ name: "m", type: mapInfo.wType }],
+			returnType: mapInfo.wType,
+			body: { kind: "Block", stmts: [], list: [] },
+			_isMapHelper: true,
+			_mapHelperKind: "clone",
+			_mapInfo: mapInfo,
+			_rootFuncDecl: null,
+		});
+	}
+
+	// 1f. Boundary metadata (exported surface of wasm packages)
 	const boundaryMeta = options.boundary
 		? collectBoundaryMeta(progs, funcDecls, mod)
 		: null;
@@ -1038,6 +1838,10 @@ export function compileWasmModule(
 			emitter.pushInstruction({ op: "i32.const", value: strIdx });
 			emitter.pushInstruction({ op: "call", funcIndex: funcIdx });
 			emitter.emitPanicThrow();
+		} else if (fn._isInterfaceDispatcher) {
+			emitter.emitInterfaceDispatcher(fn);
+		} else if (fn._isMapHelper) {
+			emitter.emitMapHelper(fn);
 		} else if (fn.body) {
 			emitter.emitFunctionBody(fn.body);
 		}

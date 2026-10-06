@@ -16,6 +16,22 @@ export function isTestingT(goType) {
 
 export function toWasmType(goType, checker = null, mod = null) {
 	if (!goType) return "i32";
+	if (typeof goType === "string") {
+		if (
+			goType === "i32" ||
+			goType === "i64" ||
+			goType === "f32" ||
+			goType === "f64" ||
+			goType === "anyref" ||
+			goType === "externref" ||
+			goType === "funcref"
+		) {
+			return goType;
+		}
+	}
+	if (typeof goType === "object" && goType.kind === "ref") {
+		return goType;
+	}
 	if (isTestingT(goType)) return "externref";
 
 	// Pointer AST nodes
@@ -30,12 +46,19 @@ export function toWasmType(goType, checker = null, mod = null) {
 		);
 	}
 
-	// Slice and Array AST nodes
+	// Slice, Array, and Map AST nodes
 	if (goType.kind === "SliceType") {
 		return toWasmType({ kind: "slice", elem: goType.elem }, checker, mod);
 	}
 	if (goType.kind === "ArrayType") {
 		return toWasmType({ kind: "array", elem: goType.elem }, checker, mod);
+	}
+	if (goType.kind === "MapType") {
+		return toWasmType(
+			{ kind: "map", key: goType.key, value: goType.value ?? goType.elem },
+			checker,
+			mod,
+		);
 	}
 
 	// TypeName AST node
@@ -168,6 +191,20 @@ export function toWasmType(goType, checker = null, mod = null) {
 		return { kind: "ref", nullable: true, heapType: "array" };
 	}
 
+	if (goType.kind === "map") {
+		const key = goType.key;
+		const val = goType.value ?? goType.elem;
+		if (mod?.getMapType && key && val) {
+			const mapInfo = mod.getMapType(key, val);
+			return {
+				kind: "ref",
+				nullable: true,
+				typeIndex: mapInfo.typeIndex,
+			};
+		}
+		return { kind: "ref", nullable: true, heapType: "struct" };
+	}
+
 	if (goType.kind === "struct") {
 		if (goType.name && mod?.getStructType(goType.name)) {
 			return {
@@ -247,6 +284,41 @@ export function isArrayType(goType, checker = null) {
 	return goType.kind === "array" || goType.kind === "ArrayType";
 }
 
+export function isMapType(goType, checker = null) {
+	if (!goType) return false;
+	if (goType.kind === "TypeName" || goType.kind === "Ident") {
+		const resolved = checker?.types?.get(goType.name);
+		if (resolved) return isMapType(resolved, checker);
+	}
+	if (goType.kind === "named" && goType.underlying) {
+		return isMapType(goType.underlying, checker);
+	}
+	return goType.kind === "map" || goType.kind === "MapType";
+}
+
+export function getMapKeyValTypes(goType, checker = null) {
+	if (!goType) return { keyGoType: null, valGoType: null };
+	if (goType.kind === "TypeName" || goType.kind === "Ident") {
+		const resolved = checker?.types?.get(goType.name);
+		if (resolved) return getMapKeyValTypes(resolved, checker);
+	}
+	if (goType.kind === "named" && goType.underlying) {
+		return getMapKeyValTypes(goType.underlying, checker);
+	}
+	if (goType.kind === "map" || goType.kind === "MapType") {
+		const key = goType.key ?? goType.keyType;
+		const val =
+			goType.value ?? goType.elem ?? goType.valueType ?? goType.valType;
+		return {
+			keyGoType: key,
+			valGoType: val,
+			keyType: key,
+			valType: val,
+		};
+	}
+	return { keyGoType: null, valGoType: null, keyType: null, valType: null };
+}
+
 export function isStringType(goType, checker = null) {
 	if (!goType) return false;
 	if (goType.kind === "TypeName" || goType.kind === "Ident") {
@@ -277,6 +349,58 @@ export function isAnyType(goType, checker = null) {
 	if (goType.kind === "basic") return goType.name === "any";
 	if (goType.kind === "interface") return true;
 	return false;
+}
+
+export function isInterfaceType(goType, checker = null) {
+	if (!goType) return false;
+	if (goType.kind === "interface" || goType.kind === "InterfaceType")
+		return true;
+	if (goType.kind === "TypeName" || goType.kind === "Ident") {
+		if (goType.name === "any" || goType.name === "interface{}") return true;
+		const resolved = checker?.types?.get(goType.name);
+		if (resolved) return isInterfaceType(resolved, checker);
+	}
+	if (goType.kind === "named") {
+		if (goType.name === "any" || goType.name === "interface{}") return true;
+		if (goType.underlying) return isInterfaceType(goType.underlying, checker);
+		const resolved = checker?.types?.get(goType.name);
+		if (resolved) return isInterfaceType(resolved, checker);
+	}
+	return false;
+}
+
+export function isNonEmptyInterface(goType, checker = null) {
+	if (!goType) return false;
+	if (goType.name === "any" || goType.name === "interface{}") return false;
+	if (goType.kind === "TypeName" || goType.kind === "Ident") {
+		const resolved = checker?.types?.get(goType.name);
+		if (resolved) return isNonEmptyInterface(resolved, checker);
+	}
+	if (goType.kind === "named") {
+		if (goType.name === "any" || goType.name === "interface{}") return false;
+		if (goType.underlying)
+			return isNonEmptyInterface(goType.underlying, checker);
+		const resolved = checker?.types?.get(goType.name);
+		if (resolved) return isNonEmptyInterface(resolved, checker);
+	}
+	if (goType.kind === "interface" || goType.kind === "InterfaceType") {
+		if (goType.methods instanceof Map) return goType.methods.size > 0;
+		if (Array.isArray(goType.methods)) return goType.methods.length > 0;
+		if (goType.methods instanceof Set) return goType.methods.size > 0;
+		return false;
+	}
+	return false;
+}
+
+export function getReceiverTypeName(recvType, _node = null) {
+	if (recvType) {
+		let t = recvType;
+		while (t.kind === "pointer") t = t.base;
+		if (t.name) return t.name;
+		if (t.kind === "named") return t.name;
+		if (t.kind === "TypeName" || t.kind === "Ident") return t.name;
+	}
+	return null;
 }
 
 export function isNarrowInt(goType) {

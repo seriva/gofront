@@ -300,9 +300,9 @@ The hybrid design is delivered over three releases. Both WASM releases land in t
 <!-- v1.6.0 execution tasks (pending positive v1.5.0 go/no-go benchmark) -->
 
 ### Phase H4: Language Completeness in WASM
-- [ ] **Task H4.1 — Non-empty interfaces:** Itabs and `ref.test` dynamic dispatch.
-- [ ] **Task H4.2 — Generics:** Monomorphisation of generic types and functions for WASM target.
-- [ ] **Task H4.3 — Maps & stdlib:** Insertion-ordered map runtime and remaining stdlib subset in WASM.
+- [x] **Task H4.1 — Non-empty interfaces:** Itabs and `ref.test` dynamic dispatch.
+- [x] **Task H4.2 — Generics:** Monomorphisation of generic types and functions for WASM target.
+- [x] **Task H4.3 — Maps & stdlib:** Insertion-ordered map runtime and remaining stdlib subset in WASM.
 - [ ] **Task H4.4 — Defer & recover:** Exception handling emission (`exnref` vs legacy EH encoding). Language fixtures pass on WASM == JS-strict.
 
 ### Phase H5: Boundary v2 (WASM Closures & Boundary Discipline)

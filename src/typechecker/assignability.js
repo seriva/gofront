@@ -346,6 +346,7 @@ export const assignabilityMethods = {
 	},
 
 	implements(srcType, iface, _node) {
+		const isPtr = srcType?.kind === "pointer";
 		// *T has the full method set of T (value + pointer receivers).
 		if (srcType?.kind === "pointer") srcType = this.resolveType(srcType.base);
 		let base = srcType.kind === "named" ? srcType.underlying : srcType;
@@ -366,7 +367,10 @@ export const assignabilityMethods = {
 					: null;
 		if (!methodMap) return false;
 		for (const [name, required] of iface.methods) {
-			if (!this._implementsMethod(required, methodMap.get(name))) return false;
+			const actual = methodMap.get(name);
+			if (!actual) return false;
+			if (!isPtr && actual._ptrRecv) return false;
+			if (!this._implementsMethod(required, actual)) return false;
 		}
 		return true;
 	},
