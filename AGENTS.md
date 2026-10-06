@@ -30,7 +30,7 @@
 
 ## Project Identity
 
-GoFront is a Go-inspired language that compiles to JavaScript. The compiler is a pure Node.js ESM project (zero runtime dependencies) that takes `.go` and `.templ` source files through Lexer → Parser → TypeChecker → CodeGen to produce JavaScript output.
+GoFront is a Go-inspired language that compiles to JavaScript and WebAssembly (WasmGC). The compiler is a pure Node.js ESM project (zero runtime dependencies) that takes `.go` and `.templ` source files through Lexer → Parser → TypeChecker → Lowering → Backend (JS / WASM) to produce ES modules and linked WebAssembly modules (`app.wasm`).
 
 ## Tech Stack
 
@@ -43,13 +43,15 @@ GoFront is a Go-inspired language that compiles to JavaScript. The compiler is a
 
 ## Architecture
 
-The compiler pipeline lives in `src/` and flows strictly downward: `index.js` (CLI) → `cli-core.js` → `compiler.js` → `lexer.js` / `parser.js` → `typechecker.js` → `codegen.js`. Parser, TypeChecker, and CodeGen each have a subdirectory splitting concerns (declarations, types, statements, expressions). Standard library type knowledge lives in `typechecker/stdlib/`, package resolution in `resolver.js`, and `.d.ts` support in `dts-parser.js`. Tests live in `test/unit/` (organized by domain: `language/`, `types/`, `builtins/`, `compiler/`) and `test/e2e/`. Examples in `example/` (simple, reactive, gom, templ) serve as E2E fixtures and documentation.
+The compiler pipeline lives in `src/` and flows strictly downward: `index.js` (CLI) → `cli-core.js` → `compiler.js` → `lexer.js` / `parser/` → `typechecker/` → `lower/` → `backend/` (`backend/js/`, `backend/wasm/`). `parser/`, `typechecker/`, `lower/`, and `backend/js/` split concerns across declarations, types, statements, and expressions. The WebAssembly backend in `backend/wasm/` includes a dependency-free binary encoder (`encoder.js`), WAT emitter (`wat.js`), and runtime boundary facade generator (`boundary.js`). Standard library type knowledge lives in `typechecker/stdlib/`, package resolution in `resolver.js`, and `.d.ts` support in `dts-parser.js`. Tests live in `test/unit/` (organized by domain: `language/`, `types/`, `builtins/`, `compiler/`, `wasm/`) and `test/e2e/`. Examples in `example/` (simple, reactive, gom, templ, webgl) serve as E2E fixtures and documentation.
 
 ## Core Rules & Anti-Patterns
 
-- **Four Stages:** Every language feature must touch Lexer → Parser → TypeChecker → CodeGen. Add the AST node, type-check it, emit JS for it, and throw on unhandled kinds. Never skip a stage or use partial implementations.
+- **Pipeline Stages:** Every language feature must touch Lexer → Parser → TypeChecker → Lowering → Backend (JS and/or WASM). Add the AST node, type-check it, lower it, emit code for it, and throw on unhandled kinds. Never skip a stage or use partial implementations.
+- **Dual Targets:** Respect package targets (`//gofront:target js | wasm | both`). Packages targeted for `both` or `wasm` must obey strict numeric wrapping and WASM boundary rules.
 - **Negative Tests Verify Messages:** Use `assertErrorContains(errors, "substring")` — never just `assert(errors.length > 0)`. Always write failing positive + negative tests first.
 - **Never modify `src/index.js` for logic.** It is the CLI entry point only — business logic belongs in `cli-core.js` or deeper.
-- **Never add runtime dependencies.** The compiler must remain zero-dependency; all stdlib support compiles to inline JS.
+- **Never add runtime dependencies.** The compiler must remain zero-dependency; all stdlib support compiles to inline JS or WASM opcodes.
 - **Never commit without `npm run check` passing.** This runs Biome lint, Sentrux quality gate, and GoFront type-checks on the examples.
+
 
