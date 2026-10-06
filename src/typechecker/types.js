@@ -13,7 +13,7 @@
 //   { kind: 'named',     name: string, underlying: Type }
 
 export class TypeCheckError extends Error {
-	constructor(msg, node, filename, sourceCode) {
+	constructor(msg, node, filename, sourceCode, hint = null) {
 		const lineNum = node?.line || node?._line;
 		const colNum = node?.col || node?._col;
 		const loc = filename
@@ -23,6 +23,7 @@ export class TypeCheckError extends Error {
 			: lineNum
 				? ` at line ${lineNum}:${colNum ?? 1}`
 				: "";
+		const hintText = hint ? `\n  ${hint}` : "";
 		let lineContext = "";
 		if (lineNum && sourceCode) {
 			const lines = sourceCode.split("\n");
@@ -33,9 +34,62 @@ export class TypeCheckError extends Error {
 				lineContext = `\n${prefix}${lineStr}\n${" ".repeat(prefix.length)}${caretPad}^`;
 			}
 		}
-		super(`Type error${loc}: ${msg}${lineContext}`);
+		super(`Type error${loc}: ${msg}${hintText}${lineContext}`);
+		this.line = lineNum;
+		this.col = colNum;
 	}
 }
+
+export const BROWSER_GLOBALS = new Set([
+	"console",
+	"document",
+	"window",
+	"navigator",
+	"location",
+	"history",
+	"screen",
+	"performance",
+	"crypto",
+	"indexedDB",
+	"fetch",
+	"setTimeout",
+	"setInterval",
+	"clearTimeout",
+	"clearInterval",
+	"requestAnimationFrame",
+	"cancelAnimationFrame",
+	"Math",
+	"JSON",
+	"Date",
+	"RegExp",
+	"Promise",
+	"Error",
+	"Symbol",
+	"String",
+	"Number",
+	"Boolean",
+	"Array",
+	"Object",
+	"parseInt",
+	"parseFloat",
+	"isNaN",
+	"isFinite",
+	"encodeURIComponent",
+	"decodeURIComponent",
+	"atob",
+	"btoa",
+	"alert",
+	"confirm",
+	"prompt",
+	"localStorage",
+	"sessionStorage",
+]);
+
+// Stdlib packages the WASM backend can emit. Extend as src/backend/wasm/emit.js gains support;
+// anything not listed is rejected at import with "not yet available in wasm packages".
+export const WASM_SUPPORTED_STDLIB = new Set(["math", "math/bits", "testing"]);
+
+export const VALID_TARGETS = new Set(["js", "wasm", "both"]);
 
 // ── Static operator sets (module-level for reuse) ────────────
 export const CMP_OPS = new Set(["==", "!=", "<", ">", "<=", ">="]);

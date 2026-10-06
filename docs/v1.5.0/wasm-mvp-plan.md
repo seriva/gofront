@@ -1,9 +1,9 @@
 # WASM MVP (Hybrid Targets in the JS Compiler) — Design Plan
 
 **Version:** v1.5.0  
-**Status:** Draft (2026-10-03)  
+**Status:** Completed (2026-10-06) — go/no-go number publishes with v1.5.1  
 **Baseline:** v1.4.0 JS compiler (`src/`)  
-**Continues in:** [`docs/v1.6.0/wasm-hybrid-plan.md`](../v1.6.0/wasm-hybrid-plan.md) (full hybrid, still in the JS compiler) → [`docs/v2.0.0/native-go-engine.md`](../v2.0.0/native-go-engine.md) (port of the finished compiler to Go)
+**Continues in:** [`docs/v1.5.1/wasm-codegen-perf-plan.md`](../v1.5.1/wasm-codegen-perf-plan.md) (codegen performance, gates Phase 6c) → [`docs/v1.6.0/wasm-hybrid-plan.md`](../v1.6.0/wasm-hybrid-plan.md) (full hybrid, still in the JS compiler) → [`docs/v2.0.0/native-go-engine.md`](../v2.0.0/native-go-engine.md) (port of the finished compiler to Go)
 
 ---
 
@@ -61,8 +61,9 @@ Today the analyses are spread through codegen and stored as `_`-prefixed fields 
 | **New:** captured-and-mutated variables (needed by WASM closures) | — | `lower/captures.js` |
 | **New:** pointer-retention escape analysis (boundary rule) | — | `lower/escape.js` |
 
-- The JS codegen reads the side tables instead of recomputing.
-- **Safety net:** the ~1,400 unit tests, `test:examples` and E2E must produce byte-identical JS before any WASM work lands. Do this as its own PR series.
+- **Two-step implementation:**
+  - **1a. Extract existing side-tables (zero behavior change):** Move ownership/clone elision, boxing, range, functions, and embedding to `src/lower/`. The WASM backend reads the side tables; JS codegen keeps using the same `_`-prefixed node fields (the `lower/` passes are the shared source of those decisions, JS codegen is not rewired in 1.5). *Safety net:* All ~1,400 existing tests and E2E must be byte-identical to v1.4.0.
+  - **1b. Add new analyses:** Implement `captures.js` (tracked mutated variables for WASM closure env boxing) and `escape.js` (pointer retention across the WASM boundary). Unused by JS codegen, tested via targeted AST analysis tests. `escape.js` is intra-procedural: it flags pointer parameters stored into struct fields, globals, closures or returned, but does not follow a pointer through a call into another function.
 - **Bonus:** v2.0.0 then *ports* a clean `lower` instead of untangling codegen during the port.
 
 ### 2. Package targets & diagnostics
@@ -145,7 +146,8 @@ For each imported `wasm` package, the backend generates a facade with the same A
 
 ### 6. CLI & tooling integration
 
-- **`compiler.js`:** builds the package graph with targets. `both` packages go through both backends. Facades are emitted for the boundary. Outputs are `{ js, css, wasm, wat? }`.
+- **Backend architecture (`src/backend/`):** move `src/codegen/` → `src/backend/js/` to establish symmetric backends alongside `src/backend/wasm/`. Update Sentrux layer `backend` at order 2. (Transitional shim `src/codegen/index.js` retired in Phase 5.1).
+- **`compiler.js`:** builds the package graph with targets. Dispatches symmetrically to `backend/js` and `backend/wasm`. `both` packages go through both backends. Facades are emitted for the boundary. Outputs are `{ js, css, wasm, wat? }`.
 - **`build`:** writes `app.wasm` next to the bundle. The PWA precache includes it.
 - **`dev`:** `dev-server.js` serves `.wasm` as `application/wasm`. Live reload rebuilds both outputs.
 - **`--emit-wat`:** writes `app.wat` for debugging.
@@ -190,7 +192,7 @@ The boundary per frame is then raycasts (gameplay, bodies, controller), each a s
 - **Narrow integer wrap:** `int8(127) + 1 == -128` in WASM and JS-strict. Normal JS mode is unchanged (documented semantic difference).
 - **`float32` rounding:** every intermediate is rounded in both WASM and JS-strict, including compound assignment and `++`.
 - **Integer division by zero:** panics in WASM and JS-strict. `MinInt32 / -1` wraps (Go) and must not trap (WASM `i32.div_s` traps, so emit a guarded sequence).
-- **Nil pointer dereference:** WASM `struct.get` on null traps. The backend emits an explicit check so the panic message matches the JS backend's.
+- **Nil pointer dereference:** WASM `struct.get` on null traps. v1.5.0 emits an explicit check so the panic message matches the JS backend's; [v1.5.1](../v1.5.1/wasm-codegen-perf-plan.md) replaces this with the trap plus a message translation at the boundary.
 - **Recursive struct types** (`OctreeNode` children): emitted in one recursive type group.
 - **Struct values inside slices:** element reads copy unless `lower` elides the copy, matching JS semantics exactly.
 - **Handle identity:** the same WASM object always maps to the same facade instance. Verify early whether WasmGC refs work as `WeakMap` keys in all target engines. Fallback: store the facade back-reference in an `externref` field.
@@ -217,15 +219,58 @@ The boundary per frame is then raycasts (gameplay, bodies, controller), each a s
 
 ---
 
-## Phases
+---
 
-| Phase | Scope | Exit criterion |
-|---|---|---|
-| **1** | `src/lower/` extraction (incl. new `captures` + `escape` analyses, unused by JS) | All suites byte-identical to v1.4.0 |
-| **2** | Directives in lexer, targets + import rules + diagnostics + summary, JS strict mode | Diagnostic and strict-mode tests pass |
-| **3** | Encoder, WAT, module IR, scalars, control flow, functions, `panic`, `math` | Numeric fixtures: WASM == JS-strict |
-| **4** | Structs, pointers, methods, embedding, arrays, slices, strings, `any`, closures | All subset fixtures pass. `mathx` tests pass on both targets. |
-| **5** | Boundary v1 facades, loader, single-module linking, `compiler.js`/CLI/dev/test integration | Hybrid sample project builds, runs and tests green |
-| **6** | simplefps split, `collision` in WASM, raycast benchmark, README/CHANGELOG | simplefps runs hybrid. **Go/no-go benchmark published.** |
+## Implementation Tasks
+
+### Phase 1: Shared Lowering & Analyses (`src/lower/`)
+- [x] **Phase 1a — Side-table extraction:** Move ownership, boxing, range, functions, embedding to `src/lower/`. All ~1,400 tests, `test:examples`, E2E byte-identical to v1.4.0.
+- [x] **Phase 1b — New analyses:** Implement `lower/captures.js` (closure envs) and `lower/escape.js` (pointer retention). Dedicated AST analysis unit tests pass.
+
+### Phase 2: Package Targets & Diagnostics
+- [x] **Phase 2a — Target directives & rules:** `//gofront:target` in lexer, target import rules, package summary diagnostic line. Target and negative diagnostic tests pass.
+- [x] **Phase 2b — JS strict numeric mode:** JS strict numeric mode for `both` packages (`Math.fround`, `|0`, `Math.imul`, Go shifts, div-zero). Parity tests pass against normal JS.
+
+### Phase 3: Core WASM Backend & Scalars
+- [x] **Phase 3a — Minimal binary encoder & WAT writer:** LEB128, headers, type/func/export/code sections (`encode.js`, `wat.js`). Hardcoded `add(i32, i32)` passes `WebAssembly.validate()` & runs.
+- [x] **Phase 3b — Module IR & scalar emission:** `i32/i64/f32/f64`, locals, Go arithmetic & control flow (`block/loop/br_if`). Numeric & loop fixtures: WASM == JS-strict.
+- [x] **Phase 3c — Traps & Math imports:** `panic` tag, div-zero & nil guards, and JS `Math` imports (`math.Sin/Cos/...`). Parity tests and math tests pass.
+
+### Phase 4: Types & Runtime Constructs
+- [x] **Phase 4a — Structs, pointers & methods:** `struct.new`, `struct.get/set`, and rec groups. `mathx.Vec3` operations and methods run in WASM.
+- [x] **Phase 4b — Arrays & slices:** `(array (mut T))`, slice header struct, `len`/`cap`/indexing, `append` with growth. Slice manipulation & growth fixtures pass. *(Deviation: `append` is emitted directly by `emit.js` instead of a GoFront-written `runtime/wasm/slice.go`; the Go-source runtime is deferred.)*
+- [x] **Phase 4c — Strings & any:** JS String Builtins (`externref`) + `anyref` with concrete casts (`ref.test`/`ref.cast`). String concatenation/comparison and `any` fixtures pass.
+- [x] **Phase 4d — Closures:** `(struct funcref, anyref env)` + `call_ref`, boxed environments via `captures.js`. Closure and callback fixtures pass.
+
+### Phase 5: Boundary & Tooling Integration
+- [x] **Phase 5a — Boundary v1 (Values):** Facades for primitives and struct values (`mathx.Vec3` <-> JS class). Struct passing across boundary matches JS-only results.
+- [x] **Phase 5b — Boundary v1 (Slices & Handles):** TypedArray copy for slices and opaque handles (`*collision.Trimesh` with stable identity). Identity & slice tests pass.
+- [x] **Phase 5c — Tooling & linking:**
+  - Backend restructuring: migrate `src/codegen/` → `src/backend/js/` (with transition re-export shim in `src/codegen/index.js`), update `.sentrux/config.toml` layer order 2 (`backend`).
+  - Loader, single `app.wasm` linking, `compiler.js` pipeline dispatching to `backend/js` and `backend/wasm`, dev-server MIME, dual-target test runner.
+  - Hybrid sample project builds, serves, and passes dual-target tests.
+
+  Boundary v1 limitations (deferred): maps, `error`, non-empty interfaces and pointers to non-structs are rejected at the boundary with a "planned" diagnostic; slices are copied in but not back; `*T` fields inside `both` struct values lose identity; `t.Run` subtests are not available in wasm test packages; non-literal package constants are not exposed.
+
+### Phase 5.1: Backend Structure Cleanups & Encapsulation
+- [x] **Phase 5.1a — Codegen shim removal:**
+  - Delete `src/codegen/index.js` and remove the obsolete `src/codegen/` directory.
+  - Remove `src/codegen/*` path pattern from `.sentrux/rules.toml` (layer order 2 `backend`).
+  - Remove transitional shim test in `test/unit/compiler/cli-core.test.js`.
+  - Update `README.md`, `CHANGELOG.md`, and plan docs to reflect complete removal of `src/codegen/`.
+- [x] **Phase 5.1b — Backend barrel encapsulation:**
+  - Re-export `buildSourceMap` from `src/backend/js/index.js`; update `src/compiler.js` to import from barrel instead of deep-importing `source-map.js`.
+  - Re-export `isGoFrontWasm` from `src/backend/wasm/index.js`; update `src/cli-core.js` to import from barrel instead of deep-importing `encode.js`.
+- [x] **Phase 5.1c — Linter & formatting hygiene:**
+  - Remove unused variables (`isArr`, `idx`) and apply optional chaining in `src/backend/wasm/emit.js`.
+  - Format `src/backend/wasm/index.js` and ensure `biome check .` / `npm run check` passes.
+- [x] **Phase 5.1d — Sentrux gate & verification:**
+  - Update Sentrux quality baseline (`sentrux gate --save`) after complexity review.
+  - Verify all unit tests, linters, and architectural rules pass (`npm test`, `npm run check`).
+
+### Phase 6: simplefps Validation & Go/No-Go Benchmark
+- [x] **Phase 6a — simplefps split:** `engine/mathx` (`both`) and `engine/collision` (`wasm`). `mathx` passes on both targets, `collision` passes in WASM.
+- [x] **Phase 6b — Raycast benchmark harness:** `test/e2e/perf/raycast-bench.js` (100k+ triangles, 100k rays). Automated benchmark produces repeatable rays/s & alloc numbers. (`npm run bench:raycast`; fixture under `test/e2e/perf/raycast/` is a snapshot of simplefps `engine/{mathx,collision}`.)
+- [x] **Phase 6c — Verification & publish:** simplefps runs hybrid and is verified (`check`, `test`, `test:dom`, `test:perf` zero-alloc gate, `test:e2e`, `build` → `app.wasm`). The benchmark number is **deferred to [v1.5.1](../v1.5.1/wasm-codegen-perf-plan.md)**: the 6b baseline is hybrid = 0.65× JS (16,678 vs 25,660 rays/s) and the cause is emitter output quality, so the go/no-go is published — together with the manual 60 FPS play check — after the codegen work (v1.5.1 Task 6), not before.
 
 **After Phase 6:** if the benchmark and determinism results justify it, v1.6.0 completes the hybrid in the JS compiler, and v2.0.0 ports the finished result. If not, the WASM backend stays as a documented experimental target, v1.6.0 is dropped or repurposed, and v2.0.0 ports the v1.5 subset as-is without further investment.

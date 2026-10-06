@@ -39,18 +39,33 @@ features (e.g. `docs/v0.0.5/`).
 
 ---
 
+## v1.5.1
+
+**Theme: WASM codegen performance.** The Phase 6b raycast benchmark came back at hybrid = 0.65× JS, with the time inside the emitted WASM rather than at the boundary or in allocation. This release tightens the emitter output on the measured hot paths — immutable slice headers with a shared empty header, i32 bounds checks and induction variables, trap-based nil dereference, leaf methods small enough for V8 to inline, scratch globals cached in locals — until the hybrid build is at least as fast as the JS build. No language features; the go/no-go publish (v1.5.0 Phase 6c) waits on this. Design document in [`docs/v1.5.1/wasm-codegen-perf-plan.md`](v1.5.1/wasm-codegen-perf-plan.md).
+
+| Area | Difficulty | Status | Notes |
+|---|---|---|---|
+| Baseline & tooling | Low | ✅ Done | `--wasm-opt` ceiling flag on `bench:raycast` (done); hot-function instruction-count report. |
+| Immutable slice headers | Medium | ✅ Done | Non-`mut` header fields, shared empty header per element type, null arm removed from every slice site. |
+| i32 indices | Medium | ✅ Done | `br_if` bounds check, i32 induction-variable fast path for `for i := a; i < len(x); i++`. |
+| Trap-based nil deref | Medium | ✅ Done | Drop `_emitNilCheck`; boundary maps `WebAssembly.RuntimeError` to the Go panic message. |
+| Inlining & peepholes | Low | ✅ Done | `local.tee` peephole; `Vec3.*`/`GetVertex` under V8's default inlining budget. |
+| Scratch globals in locals | Low | ✅ Done | Cache never-reassigned package globals at function entry. |
+
+---
+
 ## v1.5.0
 
 **Theme: WASM MVP — hybrid targets in the JS compiler.** First per-package WebAssembly (WasmGC) output in the existing compiler, so the hybrid model is validated with real numbers before the native rewrite. Extracts a shared `src/lower/` step (JS output byte-identical), adds `//gofront:target wasm | both` with targeted diagnostics, JS strict numeric mode for `both` packages, a core-subset WASM backend with a dependency-free encoder, and generated JS facades. Ends with the simplefps `mathx`/`collision` split and a go/no-go raycast benchmark. Design document in [`docs/v1.5.0/wasm-mvp-plan.md`](v1.5.0/wasm-mvp-plan.md).
 
 | Area | Difficulty | Status | Notes |
 |---|---|---|---|
-| `src/lower/` extraction | High | Draft | Move ownership/clone elision, boxing, range/defer shapes, embedding into side tables; add captures + escape analyses. All suites byte-identical to v1.4.0. |
-| Package targets & diagnostics | Medium | Draft | `//gofront:target` directives in the lexer, import rules, `both` mutable-state rule, targeted errors + per-package summary. |
-| JS strict numeric mode | Medium | Draft | `Math.fround`, `\|0`/`>>>0`, `Math.imul`, Go shift and div-by-zero semantics for `both` packages. |
-| WASM backend (core subset) | High | Draft | Encoder + `--emit-wat`; scalars, structs, pointers, methods, arrays, slices, strings (JS String Builtins), `any`, closures, `panic`; `math` natives/imports. |
-| Boundary v1 & tooling | High | Draft | Facades (values, handles, copy-in/out + retention check, numeric slices, `any`, JS → WASM callbacks), loader, single `app.wasm`, dev/build/test integration (`both` tests run on both targets). |
-| simplefps split & go/no-go benchmark | Medium | Draft | `mathx` (both) + `collision` (wasm: trimesh, octree, ray); real Möller–Trumbore + octree raycast benchmark, JS-only vs. hybrid. |
+| `src/lower/` extraction | High | ✅ Done | Move ownership/clone elision, boxing, range/defer shapes, embedding into side tables; add captures + escape analyses. All suites byte-identical to v1.4.0. |
+| Package targets & diagnostics | Medium | ✅ Done | `//gofront:target` directives in the lexer, import rules, `both` mutable-state rule, targeted errors + per-package summary. |
+| JS strict numeric mode | Medium | ✅ Done | `Math.fround`, `\|0`/`>>>0`, `Math.imul`, Go shift and div-by-zero semantics for `both` packages. |
+| WASM backend (core subset) | High | ✅ Done | Encoder + `--emit-wat`; scalars, structs, pointers, methods, arrays, slices, strings (JS String Builtins), `any`, closures, `panic`; `math` natives/imports. |
+| Boundary v1 & tooling | High | ✅ Done | Facades (values, handles, copy-in/out + retention check, numeric slices, `any`, JS → WASM callbacks), loader, single `app.wasm`, dev/build/test integration (`both` tests run on both targets). |
+| simplefps split & go/no-go benchmark | Medium | ✅ Done (publish in v1.5.1) | `mathx` (both) + `collision` (wasm: trimesh, octree, ray); `npm run bench:raycast` Möller–Trumbore + octree raycast, JS-only vs. hybrid. Baseline hybrid = 0.65× JS; final number published after v1.5.1. |
 
 ---
 

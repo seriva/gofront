@@ -1,7 +1,7 @@
 # templ CSS Declarations (`css` blocks) — Design Plan
 
 **Version:** v1.4.0
-**Status:** In Progress (2026-10-02)
+**Status:** Completed (2026-10-02)
 
 ---
 
@@ -177,6 +177,23 @@ All compiled CSS rules across all `.templ` files in the package (and bundled loc
 5. **Class Combinations:** Multiple classes on one element:
    `<div class={ "custom-class " + cardStyle() }>` works naturally via string concatenation.
 6. **Sub-package Dependencies:** When package A imports package B and both contain `css` declarations, all styles are collected in dependency order and deduplicated.
+
+---
+
+## Implementation Tasks
+
+### Phase 1: Lexer & Parser
+- [x] **Task 1.1 — CSS keyword and body tokens:** Add `TT.CSS_KW` and `TT.CSS_BODY` brace-counting scanning in `src/templ-lexer.js`.
+- [x] **Task 1.2 — `CssDecl` AST node:** Parse top-level `css Name() { ... }` declarations in `src/templ-parser.js`.
+
+### Phase 2: Type Checking & Scope
+- [x] **Task 2.1 — Scope registration:** Register `css` declarations as package-scoped callables returning `string` in `src/typechecker/index.js`.
+- [x] **Task 2.2 — Attribute integration:** Validate `cssName()` calls in `class={ ... }` and `gom.Class(...)`.
+
+### Phase 3: CodeGen & Stylesheet Emission
+- [x] **Task 3.1 — Scoped class hashing:** Emit deterministic `gfc_<name>_<hash>` class identifiers.
+- [x] **Task 3.2 — Scoped stylesheet generation:** Emit scoped CSS rules and runtime injection via `<style id="gofront-styles">`.
+- [x] **Task 3.3 — CLI build integration:** Collect extracted styles into build output in `compiler.js` and `cli-core.js`.
 
 ---
 

@@ -1,10 +1,13 @@
 // GoFront test helpers — shared across all test files
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import vm from "node:vm";
 import { JSDOM } from "jsdom";
-import { CodeGen } from "../../src/codegen/index.js";
+import { CodeGen } from "../../src/backend/js/index.js";
+import { instantiateWasm } from "../../src/backend/wasm/glue.js";
+import { compileWasm } from "../../src/backend/wasm/index.js";
 import { compileDir } from "../../src/compiler.js";
 import { DtsParser, parseDts } from "../../src/dts-parser.js";
 import { Lexer } from "../../src/lexer.js";
@@ -12,7 +15,16 @@ import { Parser } from "../../src/parser/index.js";
 import { resolveAll } from "../../src/resolver.js";
 import { TypeChecker } from "../../src/typechecker/index.js";
 
-export { compileDir, DtsParser, join, Lexer, Parser, parseDts };
+export {
+	compileDir,
+	compileWasm,
+	DtsParser,
+	instantiateWasm,
+	join,
+	Lexer,
+	Parser,
+	parseDts,
+};
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -23,7 +35,11 @@ export const FIXTURES = join(__dirname, "fixtures");
 
 export function compile(
 	source,
-	{ fromFile = join(FIXTURES, "_dummy.go") } = {},
+	{
+		fromFile = join(FIXTURES, "_dummy.go"),
+		strict = false,
+		target = null,
+	} = {},
 ) {
 	const filename = fromFile.split("/").pop();
 	const tokens = new Lexer(source, filename).tokenize();
@@ -32,6 +48,11 @@ export function compile(
 	const checker = new TypeChecker();
 	const fromDir = dirname(resolve(fromFile));
 	const jsImports = new Map();
+
+	const pkgTarget = target ?? ast.target ?? "js";
+	ast.target = pkgTarget;
+	checker.target = pkgTarget;
+	checker.pkgName = ast.pkg?.name ?? "main";
 
 	for (const imp of ast.imports) {
 		for (const { path } of imp.imports) {
@@ -52,7 +73,11 @@ export function compile(
 	const errors = checker.check(ast);
 	if (errors.length > 0) return { js: null, errors };
 
-	const js = new CodeGen(checker, jsImports).generate(ast);
+	const isStrict = Boolean(strict || pkgTarget === "both");
+	const js = new CodeGen(checker, jsImports, new Set(), {
+		target: pkgTarget,
+		strict: isStrict,
+	}).generate(ast);
 	return { js, errors: [] };
 }
 
@@ -114,6 +139,167 @@ export function runInDom(
 	});
 	vm.runInContext(stripImports(js), ctx);
 	return { lines, document: window.document };
+}
+
+export function runWasm(
+	wasmBytes,
+	{ stringTable = [], extraImports = {} } = {},
+) {
+	const lines = [];
+	const { exports, instance, module } = instantiateWasm(wasmBytes, {
+		stringTable,
+		stdout: (msg) => lines.push(msg),
+		extraImports,
+	});
+	return { exports, lines, instance, module };
+}
+
+export function compileHybrid(source, options = {}) {
+	const { js, errors: jsErrors } = compile(source, {
+		strict: true,
+		...options,
+	});
+	if (jsErrors && jsErrors.length > 0) {
+		throw new Error(
+			`JS compile failed:\n${jsErrors.map((e) => e.message).join("\n")}`,
+		);
+	}
+
+	const {
+		wasm,
+		stringTable,
+		wat,
+		errors: wasmErrors,
+	} = compileWasm(source, options);
+	if (wasmErrors && wasmErrors.length > 0) {
+		throw new Error(
+			`WASM compile failed:\n${wasmErrors.map((e) => e.message).join("\n")}`,
+		);
+	}
+
+	return {
+		js,
+		wasm,
+		wat,
+		stringTable,
+		run(fnName = "Main", args = []) {
+			const jsLines = [];
+			let jsRes;
+			let jsErr = null;
+			const jsCtx = vm.createContext({
+				Math,
+				JSON,
+				String,
+				Number,
+				Boolean,
+				Array,
+				Object,
+				console: {
+					log: (...a) => jsLines.push(a.map(String).join(" ")),
+				},
+			});
+			try {
+				vm.runInContext(stripImports(js), jsCtx);
+				if (typeof jsCtx[fnName] === "function") {
+					jsRes = jsCtx[fnName](...args);
+				}
+			} catch (e) {
+				jsErr = e;
+			}
+
+			const wasmLines = [];
+			let wasmRes;
+			let wasmErr = null;
+			try {
+				const { exports } = instantiateWasm(wasm, {
+					stringTable,
+					stdout: (msg) => wasmLines.push(msg),
+				});
+				if (typeof exports[fnName] === "function") {
+					wasmRes = exports[fnName](...args);
+				}
+			} catch (e) {
+				wasmErr = e;
+			}
+
+			if (jsErr || wasmErr) {
+				if (!jsErr) {
+					throw new Error(
+						`WASM threw "${wasmErr.message}" but JS did not throw`,
+					);
+				}
+				if (!wasmErr) {
+					throw new Error(`JS threw "${jsErr.message}" but WASM did not throw`);
+				}
+				if (jsErr.message !== wasmErr.message) {
+					throw new Error(
+						`Error message mismatch:\n  JS:   ${jsErr.message}\n  WASM: ${wasmErr.message}`,
+					);
+				}
+			} else {
+				const jsOut = jsLines.join("\n");
+				const wasmOut = wasmLines.join("\n");
+				if (jsOut !== wasmOut) {
+					throw new Error(
+						`Output mismatch:\n  JS:   ${JSON.stringify(jsOut)}\n  WASM: ${JSON.stringify(wasmOut)}`,
+					);
+				}
+				if (typeof jsRes === "number" && typeof wasmRes === "bigint") {
+					if (BigInt(jsRes) !== wasmRes) {
+						throw new Error(`Return mismatch: JS ${jsRes} vs WASM ${wasmRes}`);
+					}
+				} else if (jsRes !== wasmRes) {
+					const fmt = (v) =>
+						typeof v === "bigint" ? `${v}n` : JSON.stringify(v);
+					throw new Error(
+						`Return mismatch: JS ${fmt(jsRes)} vs WASM ${fmt(wasmRes)}`,
+					);
+				}
+			}
+
+			return {
+				jsRes,
+				wasmRes,
+				output: wasmLines.join("\n"),
+			};
+		},
+	};
+}
+
+// ── Hybrid projects (JS root + wasm/both packages) ───────────
+//
+// `files` maps relative paths (e.g. "mathx/vec.go", "main.go") to sources.
+// Compiles the root directory through the real compiler pipeline, embeds the
+// linked app.wasm bytes and imports the resulting ES module so the test can
+// call the facade's exports directly.  `exports` lists the top-level names to
+// re-export from the bundle.
+
+export async function compileHybridProject(files, { exports = [] } = {}) {
+	const root = mkdtempSync(join(tmpdir(), "gofront-hybrid-"));
+	for (const [rel, src] of Object.entries(files)) {
+		const full = join(root, rel);
+		mkdirSync(dirname(full), { recursive: true });
+		writeFileSync(full, src);
+	}
+	const result = compileDir(root);
+	const parts = [];
+	if (result.wasm) {
+		parts.push(
+			`globalThis.__GOFRONT_WASM_BYTES = new Uint8Array([${Array.from(result.wasm).join(",")}]);`,
+		);
+	}
+	parts.push("const __out = [];");
+	// Module-scoped `console` shadow so concurrently running tests don't share output.
+	parts.push(
+		"const console = { log: (...a) => __out.push(a.map((x) => String(x)).join(' ')) };",
+	);
+	parts.push(stripImports(result.js));
+	parts.push(`export const __lines = __out;`);
+	if (exports.length > 0) parts.push(`export { ${exports.join(", ")} };`);
+	const bundlePath = join(root, "bundle.mjs");
+	writeFileSync(bundlePath, parts.join("\n"));
+	const mod = await import(`${pathToFileURL(bundlePath).href}?t=${Date.now()}`);
+	return { ...result, mod, lines: mod.__lines, root };
 }
 
 // ── Test harness ─────────────────────────────────────────────
@@ -188,10 +374,15 @@ export function assert(cond, msg) {
 }
 
 export function assertEqual(actual, expected) {
-	if (actual !== expected)
-		throw new Error(
-			`expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
-		);
+	if (typeof actual === "bigint" && typeof expected === "number") {
+		if (actual === BigInt(expected)) return;
+	} else if (typeof actual === "number" && typeof expected === "bigint") {
+		if (BigInt(actual) === expected) return;
+	}
+	if (actual !== expected) {
+		const fmt = (v) => (typeof v === "bigint" ? `${v}n` : JSON.stringify(v));
+		throw new Error(`expected ${fmt(expected)}, got ${fmt(actual)}`);
+	}
 }
 
 export function assertContains(haystack, needle) {
