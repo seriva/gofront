@@ -1,6 +1,13 @@
 // src/backend/wasm/glue.js
 // Runtime imports and JS glue for executing GoFront WASM modules.
 
+import { WASM_IMPORTS_JS } from "./boundary.js";
+
+// The import table is authored once as source text (it is spliced into the
+// production bundle by the facade); evaluate that same text here so tests
+// exercise exactly what ships.  The text is a compile-time constant.
+const makeImports = new Function(`${WASM_IMPORTS_JS}\nreturn __gfw_imports;`)();
+
 export function createWasmImports({
 	stringTable = [],
 	panicTag = null,
@@ -8,98 +15,12 @@ export function createWasmImports({
 	extra = {},
 } = {}) {
 	const tag = panicTag ?? new WebAssembly.Tag({ parameters: ["externref"] });
-
-	let lineBuf = [];
-	const flushLine = () => {
-		const str = lineBuf.join(" ");
-		lineBuf = [];
-		if (stdout) {
-			stdout(str);
-		} else {
-			console.log(str);
-		}
-	};
-
-	const env = {
-		panicTag: tag,
-		str: (idx) => stringTable[idx] ?? "",
-		str_len: (s) => (s ? s.length : 0),
-		str_concat: (a, b) => (a ?? "") + (b ?? ""),
-		str_eq: (a, b) => (a === b ? 1 : 0),
-		str_ne: (a, b) => (a !== b ? 1 : 0),
-		str_lt: (a, b) => ((a ?? "") < (b ?? "") ? 1 : 0),
-		str_le: (a, b) => ((a ?? "") <= (b ?? "") ? 1 : 0),
-		str_gt: (a, b) => ((a ?? "") > (b ?? "") ? 1 : 0),
-		str_ge: (a, b) => ((a ?? "") >= (b ?? "") ? 1 : 0),
-		str_get: (s, idx) => (s ? s.charCodeAt(idx) : 0),
-		str_slice: (s, low, high) => (s ? s.slice(low, high) : ""),
-		str_from_code_point: (c) => String.fromCodePoint(c),
-		str_code_point_at: (s, idx) => (s ? s.codePointAt(idx) : 0),
-		is_string: (v) => (typeof v === "string" ? 1 : 0),
-		print_i32: (v) => lineBuf.push(String(v)),
-		print_i64: (v) => lineBuf.push(String(v)),
-		print_f32: (v) => lineBuf.push(String(v)),
-		print_f64: (v) => lineBuf.push(String(v)),
-		print_str: (s) => lineBuf.push(String(s)),
-		print_any: (v) => lineBuf.push(String(v)),
-		print_bool: (b) => lineBuf.push(b !== 0 ? "true" : "false"),
-		println_i32: (v) => {
-			lineBuf.push(String(v));
-			flushLine();
-		},
-		println_i64: (v) => {
-			lineBuf.push(String(v));
-			flushLine();
-		},
-		println_f32: (v) => {
-			lineBuf.push(String(v));
-			flushLine();
-		},
-		println_f64: (v) => {
-			lineBuf.push(String(v));
-			flushLine();
-		},
-		println_str: (s) => {
-			lineBuf.push(String(s));
-			flushLine();
-		},
-		println_any: (v) => {
-			lineBuf.push(String(v));
-			flushLine();
-		},
-		println_bool: (b) => {
-			lineBuf.push(b !== 0 ? "true" : "false");
-			flushLine();
-		},
-		println_empty: () => flushLine(),
-		...extra.env,
-	};
-
-	const mathImports = {
-		sin: Math.sin,
-		cos: Math.cos,
-		tan: Math.tan,
-		asin: Math.asin,
-		acos: Math.acos,
-		atan: Math.atan,
-		atan2: Math.atan2,
-		pow: Math.pow,
-		exp: Math.exp,
-		log: Math.log,
-		log2: Math.log2,
-		log10: Math.log10,
-		round: Math.round,
-		...extra.Math,
-	};
-
-	return {
-		imports: {
-			env,
-			Math: mathImports,
-			...extra,
-		},
-		panicTag: tag,
-	};
+	const write = stdout ?? ((s) => console.log(s));
+	const { env: _ignored, Math: extraMath, ...extraModules } = extra;
+	const imports = makeImports(stringTable, extra.env ?? {}, tag, write);
+	Object.assign(imports.Math, extraMath);
+	Object.assign(imports, extraModules);
+	return { imports, panicTag: tag };
 }
 
 export function instantiateWasm(

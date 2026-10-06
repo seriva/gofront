@@ -6,8 +6,13 @@ import { statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { basename, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { HELPER_SPRINTF, HELPER_TESTING } from "./backend/js/runtime.js";
 import { colorEnabled, createColors, formatDiagnostic } from "./colors.js";
-import { compilePackageTests, gwFilesIn } from "./compiler.js";
+import {
+	compilePackageTests,
+	compilePackageTestsWasm,
+	gwFilesIn,
+} from "./compiler.js";
 
 export function isTestFunc(decl) {
 	if (decl.kind !== "FuncDecl") return false;
@@ -78,7 +83,16 @@ globalThis.document = globalThis.document ?? null;
 `
 }
 globalThis.__gofront_verbose = ${verbose};
-
+${
+	options.wasmBytes
+		? `
+// ── WASM module (tests run inside app.wasm; *testing.T stays in JS) ──
+${HELPER_SPRINTF}
+${HELPER_TESTING}
+globalThis.__GOFRONT_WASM_BYTES = Uint8Array.from(atob(${JSON.stringify(Buffer.from(options.wasmBytes).toString("base64"))}), (c) => c.charCodeAt(0));
+`
+		: ""
+}
 // ── Compiled Package Bundle ──
 ${bundleJs}
 // ─────────────────────────────
@@ -281,6 +295,44 @@ function spawnTestRunner(resolvedDir, harnessJs, testCount, options) {
 	});
 }
 
+function reportBuildFailure(err, resolvedDir, options) {
+	const msg = err?.message ?? String(err);
+	if (options.captureOutput) {
+		const out = `FAIL\t${basename(resolvedDir)} [build failed]\n${msg}\n`;
+		return { exitCode: 1, stdout: "", stderr: out };
+	}
+	const dest = options.stderr ?? process.stderr;
+	const c = colorsFor(options, dest);
+	dest.write(
+		`${c.bold(c.red("FAIL"))}\t${basename(resolvedDir)} ${c.red("[build failed]")}\n${formatDiagnostic(msg, c)}\n`,
+	);
+	return { exitCode: 1 };
+}
+
+// `both` packages run twice (JS and wasm) so the two backends are kept in
+// agreement; output of both runs is concatenated.
+async function runDualTarget(compiled, resolvedDir, runHarness, options) {
+	let wasmCompiled;
+	try {
+		wasmCompiled = compilePackageTestsWasm(resolvedDir, options);
+	} catch (err) {
+		return reportBuildFailure(err, resolvedDir, options);
+	}
+	const label = compiled.pkgName;
+	const jsRun = await runHarness(compiled.js, `${label} [js]`, null);
+	const wasmRun = await runHarness(
+		wasmCompiled.js,
+		`${label} [wasm]`,
+		wasmCompiled.wasm,
+	);
+	return {
+		exitCode: jsRun.exitCode !== 0 ? jsRun.exitCode : wasmRun.exitCode,
+		stdout: jsRun.stdout + wasmRun.stdout,
+		stderr: jsRun.stderr + wasmRun.stderr,
+		testCount: jsRun.testCount + wasmRun.testCount,
+	};
+}
+
 export async function runTests(targetDir, options = {}) {
 	let resolvedDir = resolve(targetDir);
 	try {
@@ -304,17 +356,7 @@ export async function runTests(targetDir, options = {}) {
 	try {
 		compiled = compilePackageTests(resolvedDir, options);
 	} catch (err) {
-		const msg = err?.message ?? String(err);
-		if (options.captureOutput) {
-			const out = `FAIL\t${basename(resolvedDir)} [build failed]\n${msg}\n`;
-			return { exitCode: 1, stdout: "", stderr: out };
-		}
-		const dest = options.stderr ?? process.stderr;
-		const c = colorsFor(options, dest);
-		dest.write(
-			`${c.bold(c.red("FAIL"))}\t${basename(resolvedDir)} ${c.red("[build failed]")}\n${formatDiagnostic(msg, c)}\n`,
-		);
-		return { exitCode: 1 };
+		return reportBuildFailure(err, resolvedDir, options);
 	}
 
 	const { pkgName, js, programs } = compiled;
@@ -324,12 +366,27 @@ export async function runTests(targetDir, options = {}) {
 		return reportEmptyTests(pkgName, "no tests to run", options);
 	}
 
-	const harnessJs = generateTestHarness(js, testNames, {
-		...options,
-		pkgName,
-		jsdomPath,
-		color: colorsFor(options, options.stdout ?? process.stdout).enabled,
-	});
+	const runHarness = (bundleJs, label, wasmBytes) =>
+		spawnTestRunner(
+			resolvedDir,
+			generateTestHarness(bundleJs, testNames, {
+				...options,
+				pkgName: label,
+				jsdomPath,
+				wasmBytes,
+				color: colorsFor(options, options.stdout ?? process.stdout).enabled,
+			}),
+			testNames.length,
+			options,
+		);
 
-	return spawnTestRunner(resolvedDir, harnessJs, testNames.length, options);
+	// `wasm` packages run inside the linked app.wasm.
+	if (compiled.target === "both") {
+		return runDualTarget(compiled, resolvedDir, runHarness, options);
+	}
+	return runHarness(
+		js,
+		pkgName,
+		compiled.target === "wasm" ? compiled.wasm : null,
+	);
 }

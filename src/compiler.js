@@ -19,11 +19,13 @@
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
-import { CodeGen } from "./codegen/index.js";
-import { buildSourceMap } from "./codegen/source-map.js";
+import { CodeGen } from "./backend/js/index.js";
+import { buildSourceMap } from "./backend/js/source-map.js";
+import { compileWasmModule } from "./backend/wasm/index.js";
 import { log } from "./colors.js";
 import { parseDts } from "./dts-parser.js";
 import { Lexer } from "./lexer.js";
+import { lower } from "./lower/index.js";
 import { Parser } from "./parser/index.js";
 import {
 	isBuiltinPackage,
@@ -160,6 +162,147 @@ function attachSourceMap(merged, outputDir) {
 	);
 	const b64 = Buffer.from(mapJson).toString("base64");
 	merged.js += `\n//# sourceMappingURL=data:application/json;base64,${b64}`;
+}
+
+// ── WASM linking ──────────────────────────────────────────────
+//
+// Every `wasm`/`both` package reached during a build registers a unit in the
+// shared `options.wasmUnits` array.  The root compile links all units into a
+// single `app.wasm` and splices the generated JS facade into the bundle where
+// the first wasm package's JS would have been.
+
+const WASM_MARKER_RE = /^\/\*__GOFRONT_WASM_UNIT:[^*]*\*\/$/m;
+
+function wasmMarker(pkgName) {
+	return `/*__GOFRONT_WASM_UNIT:${pkgName}*/`;
+}
+
+function registerWasmUnit(options, unit) {
+	const units = options.wasmUnits;
+	if (!units) return;
+	if (units.some((u) => u.key === unit.key)) return;
+	units.push(unit);
+}
+
+// Registers a `wasm`/`both` package as a link unit and returns the target the
+// package's own code is emitted for.  `options.wasmTests` runs a `both`
+// package's tests through the wasm backend (the package is then treated as
+// `wasm` for linking so its test functions are exposed by the facade).
+function registerPackageUnit(options, unit) {
+	const { pkgTarget, programs } = unit;
+	if (pkgTarget !== "wasm" && pkgTarget !== "both") return pkgTarget;
+	const emitTarget =
+		options.wasmTests && options.isTest && pkgTarget === "both"
+			? "wasm"
+			: pkgTarget;
+	registerWasmUnit(options, {
+		...unit,
+		target: emitTarget,
+		programs:
+			emitTarget === pkgTarget
+				? programs
+				: programs.map((p) => ({ ...p, target: emitTarget })),
+	});
+	return emitTarget;
+}
+
+function linkWasmUnits(units, { emitWat = false, rootTarget = "js" } = {}) {
+	if (!units.some((u) => u.target === "wasm")) return null;
+	checkLinkCollisions(units);
+
+	const types = new Map();
+	const bundledPackages = new Set();
+	const programs = [];
+	for (const u of units) {
+		for (const [k, v] of u.types) types.set(k, v);
+		for (const b of u.bundledPackages) bundledPackages.add(b);
+		programs.push(...u.programs);
+	}
+	const checker = { types };
+	const lowerRes = lower(programs, checker);
+	return compileWasmModule(programs, checker, lowerRes, {
+		boundary: true,
+		bundledPackages,
+		emitWat,
+		callMain: rootTarget === "wasm",
+	});
+}
+
+// The linked module is one flat namespace (like the JS bundle), so a top-level
+// name declared by two different packages would silently resolve to whichever
+// was emitted last.  Reject it up front.
+function topLevelDeclNames(decl) {
+	switch (decl.kind) {
+		case "FuncDecl":
+			return [decl.name];
+		case "MethodDecl":
+			return [`${decl.recvType?.name ?? "?"}.${decl.name}`];
+		case "TypeDecl":
+			return [decl.name];
+		case "VarDecl":
+		case "ConstDecl":
+			return (decl.decls ?? []).flatMap((spec) => spec.names ?? []);
+		default:
+			return [];
+	}
+}
+
+function checkLinkCollisions(units) {
+	const owner = new Map(); // name -> pkgName
+	const errors = [];
+	for (const u of units) {
+		for (const p of u.programs) {
+			for (const d of p.decls ?? []) {
+				for (const name of topLevelDeclNames(d)) {
+					if (name === "_") continue;
+					const prev = owner.get(name);
+					if (prev === undefined) owner.set(name, u.pkgName);
+					else if (prev !== u.pkgName)
+						errors.push(
+							`cannot link wasm packages: '${name}' is declared in both '${prev}' and '${u.pkgName}' (linked wasm packages share one namespace)`,
+						);
+				}
+			}
+		}
+	}
+	if (errors.length > 0) throw new Error([...new Set(errors)].join("\n"));
+}
+
+// Replaces the first wasm marker with the facade (dropping the others) and
+// shifts source-map lines that follow it.
+function spliceFacade(merged, facade) {
+	const lines = merged.js.split("\n");
+	const first = lines.findIndex((l) => WASM_MARKER_RE.test(l));
+	if (first < 0) {
+		merged.js = `${facade}\n${merged.js}`;
+		const shift = facade.split("\n").length;
+		for (const m of merged.mappings) m.genLine += shift;
+		return;
+	}
+	const facadeLines = facade.split("\n");
+	const delta = facadeLines.length - 1;
+	for (const m of merged.mappings) {
+		if (m.genLine > first) m.genLine += delta;
+	}
+	const out = [...lines.slice(0, first), ...facadeLines];
+	for (let i = first + 1; i < lines.length; i++) {
+		if (!WASM_MARKER_RE.test(lines[i])) out.push(lines[i]);
+	}
+	merged.js = out.join("\n");
+}
+
+// Root compiles only: link every registered unit into app.wasm and splice the
+// facade into the merged bundle.  Returns `{ wasm, wat }` (nulls when there
+// is nothing to link).
+function linkIntoBundle(options, merged, pkgTarget) {
+	if (options.isDependency) return { wasm: null, wat: null };
+	const linked = linkWasmUnits(options.wasmUnits, {
+		emitWat: options.emitWat,
+		rootTarget: pkgTarget,
+	});
+	if (!linked) return { wasm: null, wat: null };
+	spliceFacade(merged, linked.facade);
+	return { wasm: linked.wasm, wat: linked.wat ?? null };
 }
 
 // ── Import resolution ─────────────────────────────────────────
@@ -346,6 +489,7 @@ export function compileSingleFile(inputPath, options = {}) {
 		dumpTokens = false,
 		dumpAst = false,
 	} = options;
+	options = { ...options, wasmUnits: options.wasmUnits ?? [] };
 
 	let source;
 	try {
@@ -392,27 +536,40 @@ export function compileSingleFile(inputPath, options = {}) {
 		throw new Error(errors.map((e) => e.message).join("\n"));
 	}
 
+	if (pkgTarget === "wasm" || pkgTarget === "both") {
+		registerWasmUnit(options, {
+			key: resolve(inputPath),
+			pkgName: checker.pkgName,
+			target: pkgTarget,
+			programs: [ast],
+			types: checker.types,
+			bundledPackages,
+		});
+	}
+
 	const isStrict = Boolean(options.strict || pkgTarget === "both");
 	const cg = new CodeGen(checker, jsImports, bundledPackages, {
 		target: pkgTarget,
 		strict: isStrict,
 	});
-	const mainJs = cg.generate(ast);
+	const mainJs =
+		pkgTarget === "wasm" ? wasmMarker(checker.pkgName) : cg.generate(ast);
 
 	const mainChunk = {
 		js: mainJs,
 		sourceFiles: [resolve(inputPath)],
 		sourcesContent: [source],
-		mappings: cg.getMappings(),
+		mappings: pkgTarget === "wasm" ? [] : cg.getMappings(),
 	};
 
 	const merged = mergeCompilationChunks([...preambles, mainChunk]);
+	const { wasm, wat } = linkIntoBundle(options, merged, pkgTarget);
 
 	if (sourceMap && !options.isDependency) {
 		attachSourceMap(merged, outputDir);
 	}
 
-	return { js: merged.js, css: cg.getCss(), target: pkgTarget };
+	return { js: merged.js, css: cg.getCss(), target: pkgTarget, wasm, wat };
 }
 
 export function compileDir(dir, options = {}) {
@@ -427,7 +584,15 @@ export function compilePackageTests(dir, options = {}) {
 	return compileFiles(files, { ...options, fromDir: dir, isTest: true });
 }
 
+// Compiles a `both` package's tests through the wasm backend (the JS run uses
+// compilePackageTests).  Returns null for packages that are not `both`.
+export function compilePackageTestsWasm(dir, options = {}) {
+	const res = compilePackageTests(dir, { ...options, wasmTests: true });
+	return res.target === "both" ? res : null;
+}
+
 export function compileFiles(files, options = {}) {
+	options = { ...options, wasmUnits: options.wasmUnits ?? [] };
 	const fromDir = options.fromDir ?? dirname(resolve(files[0]));
 	const outputDir =
 		options.outputDir ??
@@ -506,23 +671,36 @@ export function compileFiles(files, options = {}) {
 	}
 
 	// ── 4. Code generation ────────────────────────────────────────
+	const emitTarget = registerPackageUnit(options, {
+		key: resolve(fromDir),
+		pkgName,
+		pkgTarget,
+		programs,
+		types: checker.types,
+		bundledPackages,
+	});
+
 	const isStrict = Boolean(options.strict || pkgTarget === "both");
 	const codegen = new CodeGen(checker, jsImports, bundledPackages, {
 		target: pkgTarget,
 		strict: isStrict,
 	});
-	const mainJs = codegen.generateAll(programs, {
-		isTest: options.isTest ?? false,
-	});
+	const mainJs =
+		emitTarget === "wasm"
+			? wasmMarker(pkgName)
+			: codegen.generateAll(programs, {
+					isTest: options.isTest ?? false,
+				});
 
 	const mainChunk = {
 		js: mainJs,
 		sourceFiles: files.map((f) => resolve(f)),
 		sourcesContent: files.map((f) => readFileSync(f, "utf8")),
-		mappings: codegen.getMappings(),
+		mappings: emitTarget === "wasm" ? [] : codegen.getMappings(),
 	};
 
 	const merged = mergeCompilationChunks([...preambles, mainChunk]);
+	const { wasm, wat } = linkIntoBundle(options, merged, pkgTarget);
 
 	if (options.sourceMap && !options.isDependency) {
 		attachSourceMap(merged, outputDir);
@@ -538,6 +716,8 @@ export function compileFiles(files, options = {}) {
 		target: pkgTarget,
 		js: merged.js,
 		css: allCss,
+		wasm,
+		wat,
 		programs,
 		exportedSymbols: checker.getExportedSymbols(),
 		exportedTypes: checker.getExportedTypes(),

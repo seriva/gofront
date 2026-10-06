@@ -4,13 +4,13 @@ import {
 	nodeMutatesVar,
 	nodeWritesVar,
 	rootIdentName,
-} from "../lower/index.js";
+} from "../../lower/index.js";
 import {
 	ERROR,
 	isComplex,
 	isTypedArraySlice,
 	typedArrayConstructorForElem,
-} from "../typechecker/types.js";
+} from "../../typechecker/types.js";
 
 /** @typedef {import('./index.js').CodeGen} CodeGen */
 

@@ -243,12 +243,14 @@ The boundary per frame is then raycasts (gameplay, bodies, controller), each a s
 - [x] **Phase 4d — Closures:** `(struct funcref, anyref env)` + `call_ref`, boxed environments via `captures.js`. Closure and callback fixtures pass.
 
 ### Phase 5: Boundary & Tooling Integration
-- [ ] **Phase 5a — Boundary v1 (Values):** Facades for primitives and struct values (`mathx.Vec3` <-> JS class). Struct passing across boundary matches JS-only results.
-- [ ] **Phase 5b — Boundary v1 (Slices & Handles):** TypedArray copy for slices and opaque handles (`*collision.Trimesh` with stable identity). Identity & slice tests pass.
-- [ ] **Phase 5c — Tooling & linking:**
+- [x] **Phase 5a — Boundary v1 (Values):** Facades for primitives and struct values (`mathx.Vec3` <-> JS class). Struct passing across boundary matches JS-only results.
+- [x] **Phase 5b — Boundary v1 (Slices & Handles):** TypedArray copy for slices and opaque handles (`*collision.Trimesh` with stable identity). Identity & slice tests pass.
+- [x] **Phase 5c — Tooling & linking:**
   - Backend restructuring: migrate `src/codegen/` → `src/backend/js/` (with transition re-export shim in `src/codegen/index.js`), update `.sentrux/config.toml` layer order 2 (`backend`).
   - Loader, single `app.wasm` linking, `compiler.js` pipeline dispatching to `backend/js` and `backend/wasm`, dev-server MIME, dual-target test runner.
   - Hybrid sample project builds, serves, and passes dual-target tests.
+
+  Boundary v1 limitations (deferred): maps, `error`, non-empty interfaces and pointers to non-structs are rejected at the boundary with a "planned" diagnostic; slices are copied in but not back; `*T` fields inside `both` struct values lose identity; `t.Run` subtests are not available in wasm test packages; non-literal package constants are not exposed.
 
 ### Phase 6: simplefps Validation & Go/No-Go Benchmark
 - [ ] **Phase 6a — simplefps split:** `engine/mathx` (`both`) and `engine/collision` (`wasm`). `mathx` passes on both targets, `collision` passes in WASM.
