@@ -18,12 +18,13 @@ import { createRequire } from "node:module";
 const _require = createRequire(import.meta.url);
 const { version } = _require("../package.json");
 
-import { mkdirSync, statSync, watch, writeFileSync } from "node:fs";
+import { statSync, watch } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { copyAssets } from "./asset-manager.js";
 import {
 	formatBuildSummary,
 	formatPrepSummary,
+	formatWrittenDesc,
 	handleBuild,
 	handleCheck,
 	handleDev,
@@ -37,6 +38,7 @@ import {
 	parsePrepArgs,
 	parseTestArgs,
 	runCompile,
+	writeCompileOutput,
 } from "./cli-core.js";
 import { colors, formatDiagnostic, log, ms, stamp } from "./colors.js";
 import { createDevServer } from "./dev-server.js";
@@ -56,14 +58,14 @@ GoFront — a Go-inspired language that compiles to JavaScript
 
 Usage:
   gofront dev [dir] [options]    Start dev server with live reload (default port 3000)
-  gofront build [dir] [options]  Build production bundle (-o <dir>, --pwa, --minify)
+  gofront build [dir] [options]  Build production bundle (-o <dir>, --pwa, --minify, --emit-wat)
   gofront check [dir|dir/...]    Type-check only (dir/... recurses into every package)
   gofront test [dir|dir/...] [--dom]  Run unit tests (-v verbose, -run <regex>)
   gofront prep [dir] [--minify]  Copy static assets and bundle vendor dependencies
   gofront init [dir]             Scaffold a new GoFront project
   gofront <file.go>              Compile single file and print to stdout
   gofront <dir>  (or gofront .)  Compile all *.go in directory as one bundle
-  gofront <input> -o out.js      Compile and write to file
+  gofront <input> -o out.js      Compile and write to file (wasm packages also emit app.wasm)
   gofront <input> --check        Type-check only
   gofront <input> --watch        Watch for changes and recompile
   gofront <input> -o out.js --serve          Watch + serve with live reload (default port 3000)
@@ -180,7 +182,7 @@ if (args[0] === "dev") {
 		if (dev.initialError) {
 			log.error(dev.initialError.message);
 		} else {
-			log.ok(`— wrote ${colors.cyan(dev.outputFile)}`);
+			log.ok(`— wrote ${formatWrittenDesc(dev.written, dev.outputFile)}`);
 		}
 		log.info(
 			`dev server running → ${colors.cyan(`http://localhost:${dev.port}`)}`,
@@ -276,15 +278,21 @@ if (!watchMode) {
 
 	if (outputFile) {
 		try {
-			mkdirSync(dirname(resolve(outputFile)), { recursive: true });
-			writeFileSync(outputFile, `${js}\n`);
-			log.info(`wrote ${colors.cyan(outputFile)} ${ms(elapsedMs)}`);
+			const written = writeCompileOutput(resolve(outputFile), result, js);
+			log.info(
+				`wrote ${formatWrittenDesc(written, outputFile)} ${ms(elapsedMs)}`,
+			);
 		} catch (e) {
 			log.fail(`cannot write '${outputFile}': ${e.message}`);
 			process.exit(1);
 		}
 	} else {
 		console.log(js);
+		if (result.wasm) {
+			log.warn(
+				"wasm packages were linked but app.wasm needs -o <file> to be written",
+			);
+		}
 	}
 
 	if (copyAssetsFlag) {
@@ -328,9 +336,9 @@ function buildOnce(changedFile = null) {
 		const changeNote = changedFile ? ` — ${changedFile} changed` : "";
 		const timing = colors.dim(`(${elapsedMs}ms${changeNote})`);
 		if (outputFile) {
-			writeFileSync(outputFile, `${js}\n`);
+			const written = writeCompileOutput(resolve(outputFile), result, js);
 			console.error(
-				`${stamp()} ${colors.bold("gofront:")} ${colors.green("OK")} — wrote ${colors.cyan(outputFile)} ${timing}`,
+				`${stamp()} ${colors.bold("gofront:")} ${colors.green("OK")} — wrote ${formatWrittenDesc(written, outputFile)} ${timing}`,
 			);
 		} else {
 			// Clear screen then print

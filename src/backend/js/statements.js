@@ -1,6 +1,13 @@
-// CodeGen statement methods — installed as a mixin on CodeGen.prototype.
-
-import { isComplex, isNumeric } from "../typechecker/types.js";
+import {
+	bodyRedeclares,
+	isIntRangeType,
+	isMapRangeType,
+	isRangeFor,
+	isSimpleIntRange,
+	isStringRangeType,
+	nodeAssigns,
+} from "../../lower/index.js";
+import { isComplex } from "../../typechecker/types.js";
 
 /** @typedef {import('./index.js').CodeGen} CodeGen */
 
@@ -55,9 +62,20 @@ export const statementGenMethods = {
 			case "TypeDecl":
 				this.genTypeDeclWithMethods(stmt, []);
 				break;
-			case "IncDecStmt":
-				this.line(`${this.genExpr(stmt.expr)}${stmt.op};`);
+			case "IncDecStmt": {
+				if (
+					this.strict &&
+					this._genStrictCompound(
+						stmt.expr,
+						stmt.op === "++" ? "+" : "-",
+						"1",
+						srcLine,
+					)
+				)
+					break;
+				this.line(`${this.genExpr(stmt.expr)}${stmt.op};`, srcLine);
 				break;
+			}
 			case "ExprStmt":
 				this.line(`${this.genExpr(stmt.expr)};`);
 				break;
@@ -248,6 +266,19 @@ export const statementGenMethods = {
 		if (active.length === 0) {
 			if (rhs.length > 0) this.line(`${rhs[0]};`);
 		} else if (lhs.length === 1) {
+			if (
+				this.strict &&
+				stmt.op !== "=" &&
+				this._genStrictCompound(
+					stmt.lhs[0],
+					stmt.op.slice(0, -1),
+					active[0].r,
+					null,
+					active[0].l,
+				)
+			) {
+				return;
+			}
 			this.line(`${active[0].l} ${stmt.op} ${active[0].r};`);
 		} else {
 			this._genAssignMulti(stmt, lhs, rhs, active, pairs);
@@ -449,28 +480,19 @@ export const statementGenMethods = {
 	},
 
 	isRangeFor(stmt) {
-		if (!stmt.init) return false;
-		const init = stmt.init;
-		if (init.kind !== "DefineStmt" && init.kind !== "AssignStmt") return false;
-		return init.rhs?.[0]?.kind === "RangeExpr";
+		return isRangeFor(stmt);
 	},
 
 	_isIntRangeType(iterType) {
-		return isNumeric(iterType);
+		return isIntRangeType(iterType);
 	},
 
 	_isMapRangeType(iterType) {
-		return (
-			iterType?.kind === "map" ||
-			(iterType?.kind === "named" && iterType.underlying?.kind === "map")
-		);
+		return isMapRangeType(iterType);
 	},
 
 	_isStringRangeType(iterType) {
-		return (
-			(iterType?.kind === "basic" && iterType.name === "string") ||
-			(iterType?.kind === "untyped" && iterType.base === "string")
-		);
+		return isStringRangeType(iterType);
 	},
 
 	_rangeVarTarget(e, isAssign) {
@@ -498,17 +520,7 @@ export const statementGenMethods = {
 
 	// True when the body re-declares one of `names` at its top level (legal Go shadowing).
 	_bodyRedeclares(body, names) {
-		if (names.length === 0) return false;
-		for (const s of body.stmts ?? []) {
-			if (s.kind === "DefineStmt" && s.lhs.some((e) => names.includes(e.name)))
-				return true;
-			if (
-				(s.kind === "VarDecl" || s.kind === "ConstDecl") &&
-				s.decls?.some((d) => d.names?.some((n) => names.includes(n)))
-			)
-				return true;
-		}
-		return false;
+		return bodyRedeclares(body, names);
 	},
 
 	// Range value variable: aliases the element unless the body writes the variable or the collection.
@@ -565,9 +577,7 @@ export const statementGenMethods = {
 
 	// Whether `for i := range n` can be emitted as a plain `for (let i = 0; …)` without hidden registers.
 	_isSimpleIntRange(stmt, name, isAssign) {
-		if (isAssign) return false;
-		if (!name || name === "_") return true;
-		return !this._boxedVars.has(name) && !this._nodeAssigns(stmt.body, name);
+		return isSimpleIntRange(stmt, name, isAssign, this._boxedVars);
 	},
 
 	_genIntRangeBody(stmt, name, isAssign) {
@@ -603,22 +613,7 @@ export const statementGenMethods = {
 
 	// True when `node` contains an assignment or ++/-- targeting identifier `name`.
 	_nodeAssigns(node, name) {
-		if (!node || typeof node !== "object") return false;
-		if (Array.isArray(node))
-			return node.some((n) => this._nodeAssigns(n, name));
-		if (
-			(node.kind === "AssignStmt" &&
-				node.lhs.some((e) => e.kind === "Ident" && e.name === name)) ||
-			(node.kind === "IncDecStmt" &&
-				node.expr.kind === "Ident" &&
-				node.expr.name === name)
-		)
-			return true;
-		for (const key of Object.keys(node)) {
-			if (key.startsWith("_")) continue;
-			if (this._nodeAssigns(node[key], name)) return true;
-		}
-		return false;
+		return nodeAssigns(node, name);
 	},
 
 	_genIterFor(init, iterType, iteree, lhs, body) {

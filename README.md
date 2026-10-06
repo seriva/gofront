@@ -4,8 +4,8 @@ Go for the backend: simple, type-safe, no nonsense. JavaScript for the frontend:
 everywhere, no setup. The problem is JavaScript's loose typing — and TypeScript never
 quite felt like home either.
 
-So I built GoFront. Go syntax and type safety, compiling to plain ES modules. One language
-front and back, no runtime, no framework, no tsconfig.json.
+So I built GoFront. Go syntax and type safety, compiling to plain ES modules and
+WebAssembly (WasmGC). One language front and back, no runtime, no framework, no tsconfig.json.
 
 With built-in support for declarative DOM rendering via the [`gom`](https://www.gomponents.com) standard library, JSX-like [`.templ`](https://templ.guide/) files, and seamless integration with external JavaScript libraries through TypeScript definition files (`.d.ts`), GoFront is designed specifically as a frontend development target. Build complex, reactive user interfaces entirely in Go.
 
@@ -54,15 +54,16 @@ Requires Node.js 20+.
 
 ## How it works
 
-GoFront is a four-stage compiler written in pure Node.js (no dependencies). Every stage
-operates on the same AST (abstract syntax tree), running in a single pass per stage:
+GoFront is a five-stage compiler written in pure Node.js (no dependencies). Every stage
+operates on the AST (abstract syntax tree):
 
 ```
 source text (.go files)
   → Lexer          tokenize + Go-style semicolon insertion
   → Parser         recursive-descent → AST
   → Type Checker   annotate AST with types + collect errors
-  → Code Gen       AST → JavaScript string
+  → Lowering       ownership/clone elision, escape analysis, capture analysis
+  → Code Gen       AST → JavaScript ES module or WebAssembly GC module (.wasm)
 
 source text (.templ files)
   → TemplLexer     dual-mode: Go mode for declarations, HTML mode inside templ bodies
@@ -103,7 +104,7 @@ Types are plain JS objects (`{ kind: "basic", name: "int" }`, `{ kind: "slice",
 elem: ... }`, etc.). The special `any` type acts as a recovery/escape hatch — any
 operation on it is silently permitted, preventing cascading errors.
 
-### 4. Code Generator (`src/codegen/`)
+### 4. Code Generator (`src/backend/js/`)
 
 Walks the typed AST and emits clean, readable JavaScript. No intermediate representation
 — the codegen writes directly to an output buffer with indentation tracking.
@@ -112,6 +113,66 @@ Runtime helpers (`__len`, `__append`, `__s`, `__sprintf`, `__equal`, `__cmul`, `
 `__error`, `__errorIs`, `__timeFmt`, `__timeParse`, `__pathClean`, `__sortSlice`,
 `__sclone`, `__ifv`, `__ifp`) are tree-shaken: only emitted when actually used. Optional
 inline source maps are supported via VLQ-encoded mappings.
+
+### 5. Lowering & WASM backend (`src/lower/`, `src/backend/wasm/`) — experimental
+
+`src/lower/` runs analyses shared by both backends (ownership/clone elision, address-taken
+boxing, range shape, named returns/`defer`, embedded-method stubs, closure captures, pointer
+escape) and stores the results in side tables keyed by AST node.
+
+A package that starts with `//gofront:target wasm` (before the `package` clause) is compiled
+by `src/backend/wasm/` to a WebAssembly GC module instead of JavaScript.
+`//gofront:target both` marks a package that must compile under either backend: it may only
+import other `both` packages, may not use `gom`, may not mutate package-level variables, and
+its JS output uses strict Go numeric semantics (sized-integer wrapping, `float32` rounding,
+integer divide-by-zero panics). Running WASM output requires a WasmGC-capable runtime
+(Node ≥ 22 or a current Chrome/Firefox/Safari).
+
+**Hybrid builds.** Every `wasm`/`both` package a build reaches is linked into a single
+`app.wasm`, written next to `app.js` by `gofront build`, `gofront dev` and `-o`. The JS
+bundle contains a generated facade in place of the wasm packages: exported functions,
+methods, literal constants and structs are callable from JS code as if they were compiled
+to JS. Primitives convert directly, strings and `any` pass through, `both` struct values
+are copied into their JS class, `wasm` structs become opaque handle classes with stable
+identity, slices/arrays are copied element-wise (TypedArrays accepted) and func values are
+wrapped in both directions. Maps, `error`, non-empty interfaces and pointers to non-structs
+are not yet supported at the boundary and are rejected at compile time. The loader fetches
+`app.wasm` relative to the page (override with `globalThis.__GOFRONT_WASM_URL`, or
+pre-supply bytes via `globalThis.__GOFRONT_WASM_BYTES`). `--emit-wat` additionally writes
+a textual `app.wat`.
+
+```
+                     GoFront Source Code
+     ┌───────────────────────┬───────────────────────┐
+     │  //gofront:target js  │ //gofront:target wasm │
+     │  UI, DOM, WebGL, Game │ Collision, Raycasting │
+     └───────────┬───────────┴───────────┬───────────┘
+                 │                       │
+                 │   GoFront Compiler    │
+                 ▼                       ▼
+           ┌───────────┐           ┌───────────┐
+           │  app.js   │ ◄───────► │ app.wasm  │
+           └─────┬─────┘  Boundary └─────┬─────┘
+                 │         Facade        │
+                 ▼                       ▼
+            DOM & Browser          Tight Loops & Math
+          Dynamic & Ergonomic      Predictable & Fast
+```
+
+`gofront test` runs the tests of a `wasm` package inside the linked module (`*testing.T`
+stays a JS object) and runs the tests of a `both` package twice — once per backend,
+reported as `pkg [js]` and `pkg [wasm]` — so both must agree.
+
+**Performance.** Splitting an app into high-level JavaScript orchestration and low-level WebAssembly compute delivers the best of both worlds. On a real-world Möller–Trumbore raycast benchmark (131,072 triangles, 100,000 rays; `npm run bench:raycast`):
+
+| Target | Throughput | Allocation | Engine Stability |
+| :--- | :--- | :--- | :--- |
+| **Pure JS** | `26,720 rays/s` ▰▰▰▰▰▰▰▰▱▱ | `6.20 B / ray` | Subject to periodic V8 young-gen GC pauses |
+| **Hybrid WASM** | `31,293 rays/s` ▰▰▰▰▰▰▰▰▰▰ | `0.86 B / ray` | **Near-zero alloc (7.2× less)**, smooth 60 FPS |
+
+- **+17.1% higher throughput:** Direct WasmGC typed arrays, local-cached scratch globals, and hardware-trapped nil dereferences outperform JIT compiled JS.
+- **86% memory churn reduction:** Dropping allocations from 6.2 B/ray to 0.86 B/ray prevents garbage collection pauses from causing micro-stutter in 60 FPS loops.
+- **Minimal boundary overhead:** The boundary trampoline consumes only ~0.5% of total runtime, ensuring batch computations cross between JS and WASM with virtually zero penalty.
 
 ---
 
@@ -412,13 +473,14 @@ npm run build:webgl       # → example/webgl/app.js
 ## CLI
 
 ```
-gofront dev [dir]                            watch + compile + asset sync + live reload (default port 3000)
+gofront dev [dir]                            watch + compile + asset sync + live reload (hybrid projects emit app.wasm; default port 3000)
 gofront dev [dir] --port 8080                use a custom port
-gofront build [dir]                          clean + compile + minify + vendor → production output
+gofront build [dir]                          clean + compile + minify + vendor → production output (hybrid projects emit app.wasm)
 gofront build [dir] --pwa                    also generate offline service worker (sw.js) + precache manifest
 gofront build [dir] --source-map             include inline source maps in the release bundle
 gofront build [dir] --no-minify              skip minification
 gofront build [dir] --no-mangle              minify but keep original identifiers
+gofront build [dir] --emit-wat               also write app.wat next to app.wasm (hybrid projects)
 gofront prep [dir] [--minify]                run asset copying + vendor bundling only (alias: gofront vendor)
 gofront check <dir>                          type-check a single package
 gofront check <dir>/...                      type-check every package under <dir> (Go-style `./...`)
@@ -426,7 +488,8 @@ gofront test <dir> [--dom]                   run tests for a single package
 gofront test <dir>/... [--dom] [-v] [-run <regex>]  run tests recursively
 gofront <file.go>                            compile single file → stdout
 gofront <dir>                                compile all *.go in directory → stdout
-gofront <input> -o out.js                    write output to file (prints elapsed compile time)
+gofront <input> -o out.js                    write output to file (prints elapsed compile time; hybrid projects also write app.wasm)
+gofront <input> -o out.js --emit-wat         also write app.wat
 gofront <input> -o out.js --copy-assets      compile + copy static assets
 gofront <input> --check                      type-check only (single file / directory)
 gofront <input> --watch                      watch for changes and recompile

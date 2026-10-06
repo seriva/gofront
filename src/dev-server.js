@@ -1,7 +1,7 @@
 // Minimal dev server for gofront --serve watch mode.
 // Serves static files and pushes reload / error / css-update events via SSE.
 
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { createServer } from "node:http";
 import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { colors, log } from "./colors.js";
@@ -9,8 +9,10 @@ import { colors, log } from "./colors.js";
 export const MIME = {
 	".html": "text/html; charset=utf-8",
 	".js": "application/javascript; charset=utf-8",
+	".wasm": "application/wasm",
 	".css": "text/css; charset=utf-8",
 	".json": "application/json; charset=utf-8",
+	".map": "application/json; charset=utf-8",
 	".go": "text/plain; charset=utf-8",
 	".svg": "image/svg+xml",
 	".png": "image/png",
@@ -151,7 +153,11 @@ function handleSseRequest(req, res, clients, lastError = null) {
 	if (lastError)
 		res.write(`event: build-error\ndata: ${JSON.stringify(lastError)}\n\n`);
 	clients.add(res);
-	req.on?.("close", () => clients.delete(res));
+	const cleanup = () => clients.delete(res);
+	req.on?.("close", cleanup);
+	res.on?.("close", cleanup);
+	res.on?.("finish", cleanup);
+	res.on?.("error", cleanup);
 }
 
 function resolveStaticPath(serveDir, urlPath) {
@@ -161,49 +167,73 @@ function resolveStaticPath(serveDir, urlPath) {
 			: urlPath.startsWith("/")
 				? urlPath
 				: `/${urlPath}`;
-	const filePath = resolve(serveDir, `.${cleanPath}`);
-	if (!isInsideDir(resolve(serveDir), filePath)) return { forbidden: true };
+	const rootPath = existsSync(serveDir)
+		? realpathSync(resolve(serveDir))
+		: resolve(serveDir);
+	const filePath = resolve(rootPath, `.${cleanPath}`);
+	if (!isInsideDir(rootPath, filePath)) return { forbidden: true };
 
 	if (existsSync(filePath)) {
-		const stat = statSync(filePath);
+		const realTarget = realpathSync(filePath);
+		if (!isInsideDir(rootPath, realTarget)) return { forbidden: true };
+		const stat = statSync(realTarget);
 		if (stat.isDirectory()) {
-			const dirIndex = join(filePath, "index.html");
-			if (existsSync(dirIndex)) return { filePath: dirIndex };
-			const rootIndex = join(serveDir, "index.html");
-			if (existsSync(rootIndex)) return { filePath: rootIndex };
+			const dirIndex = join(realTarget, "index.html");
+			if (
+				existsSync(dirIndex) &&
+				isInsideDir(rootPath, realpathSync(dirIndex))
+			) {
+				return { filePath: dirIndex };
+			}
+			const rootIndex = join(rootPath, "index.html");
+			if (
+				existsSync(rootIndex) &&
+				isInsideDir(rootPath, realpathSync(rootIndex))
+			) {
+				return { filePath: rootIndex };
+			}
 			return { notFound: true };
 		}
-		return { filePath };
+		return { filePath: realTarget };
 	}
 
 	// SPA fallback: clean paths with no file extension fall back to index.html
 	if (!extname(cleanPath)) {
-		const indexPath = join(serveDir, "index.html");
+		const indexPath = join(rootPath, "index.html");
 		if (existsSync(indexPath)) return { filePath: indexPath };
 	}
 
 	return { notFound: true };
 }
 
-function sendStaticFile(res, filePath, shouldInject) {
+function sendStaticFile(res, filePath, shouldInject, req = null) {
 	try {
 		const ext = extname(filePath);
+		const isHead = req?.method === "HEAD";
 		if (ext === ".html") {
 			const data = readFileSync(filePath, "utf8");
 			const body = shouldInject ? injectLiveReload(data) : data;
 			res.writeHead(200, {
 				"Content-Type": MIME[".html"],
+				"X-Content-Type-Options": "nosniff",
 				"Cache-Control": "no-cache, no-store, must-revalidate",
 			});
-			res.end(body);
+			if (isHead) res.end();
+			else res.end(body);
 			return;
 		}
 
 		const data = readFileSync(filePath);
 		res.writeHead(200, {
 			"Content-Type": MIME[ext] ?? "application/octet-stream",
-			"Cache-Control": "no-cache, no-store, must-revalidate",
+			"X-Content-Type-Options": "nosniff",
+			"Cache-Control":
+				ext === ".wasm" ? "no-store" : "no-cache, no-store, must-revalidate",
 		});
+		if (isHead) {
+			res.end();
+			return;
+		}
 		res.end(data);
 	} catch {
 		res.writeHead(500, { "Content-Type": "text/plain" });
@@ -218,7 +248,18 @@ export function handleDevRequest(
 	clients = new Set(),
 	options = {},
 ) {
+	if (req.method && req.method !== "GET" && req.method !== "HEAD") {
+		res.writeHead(405, { "Content-Type": "text/plain", Allow: "GET, HEAD" });
+		res.end("Method Not Allowed");
+		return;
+	}
+
 	if (req.url === "/_gofront/events") {
+		if (req.method && req.method !== "GET") {
+			res.writeHead(405, { "Content-Type": "text/plain", Allow: "GET" });
+			res.end("Method Not Allowed");
+			return;
+		}
 		handleSseRequest(req, res, clients, options.getLastError?.() ?? null);
 		return;
 	}
@@ -240,7 +281,7 @@ export function handleDevRequest(
 		return;
 	}
 
-	sendStaticFile(res, resolved.filePath, options.injectReload ?? true);
+	sendStaticFile(res, resolved.filePath, options.injectReload ?? true, req);
 }
 
 function broadcastToClients(clients, event, payload) {
