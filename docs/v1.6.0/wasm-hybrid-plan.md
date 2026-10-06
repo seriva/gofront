@@ -17,7 +17,7 @@ Let one GoFront app run **partly as JavaScript and partly as WebAssembly (WasmGC
 - **Engine code compiles to WASM:** simulation, collision, spatial structures, pathfinding, procedural generation. It gets Go-correct integers, real `float32` and predictable performance.
 - **The compiler owns the boundary.** It sees both sides, so it generates all the glue. Importing code is written the same way whatever the target of the imported package.
 
-Starting hybrid also keeps options open. Moving more packages to WASM later, up to a whole app, is an extension of the same machinery, not a rewrite.
+The hybrid architecture is the optimal end-state for browser apps: it leaves UI and DOM in native JS (avoiding the severe host-call penalty of WASM DOM manipulation), while accelerating compute and simulation in WasmGC. Whole-app WASM remains an extension for headless or pure Canvas/WebGL applications where no DOM is present.
 
 **Done means:**
 - `simplefps` runs with its simulation in WASM and its rendering/UI in JS.
@@ -194,7 +194,7 @@ For every `wasm` package imported by `js` code, the compiler generates a **JS fa
 | other slices | element-wise copy |
 | shared buffers | zero-copy (see below) |
 | func values (callbacks) | **JS → WASM:** JS function held as `externref`, called through a generic invoke import. **WASM → JS:** closure wrapped in a cached JS function calling an exported trampoline. Covers `OnBounce`-style hooks. |
-| interfaces | **JS-implemented value passed into WASM:** proxy with a generated itab whose methods call back into JS (`RaycastProvider` implemented by a JS type). **WASM value passed to JS:** a facade object with the interface's methods. Type assertions on proxies are limited to the interface itself. |
+| interfaces | **WASM value passed to JS:** a facade object with the interface's methods calling WASM exports. **JS-implemented value passed into WASM:** not supported via dynamic itab proxies; keep provider implementations in WASM or pass typed function callbacks (`func`). Avoids slow double-boundary hops. |
 | maps | not allowed in exported signatures in v1.6.0. Use slices or methods. |
 
 **Design rule: keep the boundary coarse and per-frame.** One `world.Step(dt)`, a few controller updates and a handful of raycasts per frame are cheap. Fine-grained calls such as `Vec3.Add` from JS into WASM thousands of times per frame are exactly what `both` packages exist to avoid. `gofront check` can report boundary call sites inside loops in `js` packages as **hints**, not errors.
@@ -251,7 +251,7 @@ Current imports: `physics` is the only pure leaf (imports `math` only). `renderi
 |---|---|---|---|
 | `engine/mathx` (new) | `both` | `both` | `Vec3`, `Mat4`, `Quat`, `Transform`, `BoundingBox` (moved from `physics`) |
 | `engine/collision` (new) | `wasm` | `wasm` | `Trimesh`, `Octree`, `Ray` + raycasting (moved from `physics`). Needs only the v1.5 core subset (`any` fields, JS callbacks). |
-| `engine/physics` | `js` | `wasm` | `DynamicBody`, `FPSController`. Blocked on non-empty interfaces (`RaycastProvider`) and WASM → JS closures until v1.6. |
+| `engine/physics` | `js` | `wasm` | `DynamicBody`, `FPSController`. Blocked on WASM → JS closures (`OnBounce`) and internal non-empty interface dispatch until v1.6 (in v1.6, `physics` queries `collision` directly in WASM). |
 | `engine/rendering`, `scene`, `systems`, `assets`, `game` | `js` | `js` | Import `mathx` instead of `physics` for math types |
 | `engine/animation` | `js` | `js` → candidate | Candidate for `wasm` (skinning → `shared` bone matrices) once the binary-reader dependency is moved to `assets` |
 
@@ -305,9 +305,9 @@ The hybrid design is delivered over three releases. Both WASM releases land in t
 - [ ] **Task H4.3 — Maps & stdlib:** Insertion-ordered map runtime and remaining stdlib subset in WASM.
 - [ ] **Task H4.4 — Defer & recover:** Exception handling emission (`exnref` vs legacy EH encoding). Language fixtures pass on WASM == JS-strict.
 
-### Phase H5: Boundary v2 (Proxies & Closures)
-- [ ] **Task H5.1 — WASM to JS closures:** Passing WASM closures across boundary into JS callers.
-- [ ] **Task H5.2 — Interface proxies:** Two-way interface proxies (`RaycastProvider` crosses boundary).
+### Phase H5: Boundary v2 (WASM Closures & Boundary Discipline)
+- [ ] **Task H5.1 — WASM to JS closures:** Passing WASM closures across boundary into JS callers via cached trampolines.
+- [ ] **Task H5.2 — Boundary interface resolution:** Resolve boundary interfaces by keeping provider implementations on the WASM side or passing function callbacks, avoiding cross-boundary dynamic itab proxies.
 - [ ] **Task H5.3 — Physics migration:** Move `physics` (`DynamicBody`, `FPSController`) to `wasm` with full test suite passing.
 
 ### Phase H6: Shared Memory & Hybrid Example
@@ -322,17 +322,17 @@ The hybrid design is delivered over three releases. Both WASM releases land in t
 
 ---
 
-## Future: Whole-App WASM
+## Future: Whole-App WASM (Headless & Canvas-Only)
 
-The hybrid design is the foundation. Allowing more in `wasm` packages leads step by step to a whole app in WASM:
+The per-package hybrid model is the intentional, permanent end-state for browser applications with DOM UI:
+- **DOM / `.templ` in WASM is an architectural anti-pattern:** browsers have no direct WASM DOM API, so every element and attribute mutation must call an imported JS host function. Native JS JIT code with inline caches is strictly faster, lighter, and has lower latency for DOM rendering.
+- **Where Whole-App WASM is actually valuable:**
+  1. **Canvas / WebGL-only apps:** Games and visualizations that bypass the DOM entirely, rendering to a canvas via WebGL/WebGPU through typed `js:` imports and `shared` memory buffers.
+  2. **Headless & Server/WASI runtimes:** Compiling GoFront packages for Node/Bun server execution, microbenchmarks, or WASI targets where no browser DOM exists.
+  3. **`async`/`await` in WASM:** Lowering async functions to resumable state machines that return Promises (without requiring JSPI).
+  4. **`gofront build --target wasm`:** Mode for compiling headless or pure-canvas projects where every package targets WASM, leaving only the bootstrap loader in JS.
 
-1. **Typed `js:` imports in `wasm` packages:** generated per-member imports for fully typed APIs (WebGL/WebGPU, `.d.ts`/npm), JS objects as `externref`. This would let `rendering` move to WASM.
-2. **Typed DOM:** generate DOM typings from TypeScript's `lib.dom.d.ts` with the existing `.d.ts` parser. Also improves the JS target. Untyped `any` access gets a slower dynamic fallback (`get`/`set`/`call` imports + coercions inserted by `lower`).
-3. **`async`/`await` in WASM:** GoFront marks async explicitly, so async funcs can be lowered to resumable state machines that return Promises, with no JSPI dependency. JSPI can replace this later as an optimisation.
-4. **`.templ`/`gom` in WASM:** the same DOM construction sequence through typed imports, with an optional command-buffer batch to cut boundary crossings.
-5. **`gofront build --target wasm`:** shorthand for "every package `wasm`", leaving only the loader in JS.
-
-Expectations from the earlier whole-app analysis still apply: DOM-heavy UI is likely no faster in WASM, so per-package choice stays the recommended model.
+For general web development, DOM, `.templ`, CSS, and browser events remain permanently in JS by design.
 
 ---
 
@@ -342,4 +342,4 @@ Expectations from the earlier whole-app analysis still apply: DOM-heavy UI is li
 2. **`int` width.** `i64` (Go-correct, chosen) vs. `i32`. Revisit only if benchmarks show a cost.
 3. **Strict mode scope.** Keep it only for `both` packages, or offer `//gofront:strict` for any JS package?
 4. **`shared` buffer API.** Index syntax via compiler special-casing (proposed) vs. plain methods (`At`/`Set`). Program-lifetime only, or add pools/free later?
-5. **Interface proxies.** Worth the complexity in v1.6.0, or require `RaycastProvider`-style interfaces to be implemented on the WASM side (moving `Trimesh` usage into `physics`)?
+5. **Interface proxies (Resolved).** Do not implement dynamic two-way cross-boundary itab proxies. Calling from WASM into a JS-implemented interface introduces high runtime cost and a double boundary hop (WASM → JS proxy → WASM static mesh). Instead, provider interfaces live on the WASM side (e.g. `physics` queries `collision.Trimesh` directly), or cross the boundary via typed callback functions (`func`).

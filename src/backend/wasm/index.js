@@ -374,6 +374,7 @@ export class ModuleEmitter {
 
 	_initRuntimeImports() {
 		this._initPanicTag();
+		this.getPanicImportIndex(); // env.panic
 
 		// String built-ins
 		this.getStringImportIndex(); // env.str
@@ -476,6 +477,14 @@ export class ModuleEmitter {
 
 	getStringImportIndex() {
 		return this.getOrAddFuncImport("env", "str", ["i32"], ["externref"]);
+	}
+
+	// Panics are raised by a JS import that throws a plain `Error`, so wasm
+	// frames unwind without a wasm `throw` and the JS caller needs no
+	// try/catch guard around exports.  (V8 cannot inline JS→wasm calls made
+	// inside a try block, and a non-inlined call boxes every float argument.)
+	getPanicImportIndex() {
+		return this.getOrAddFuncImport("env", "panic", ["externref"], []);
 	}
 
 	getPrintlnEmptyIndex() {

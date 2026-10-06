@@ -85,9 +85,15 @@ function formatInstruction(inst) {
 			return `${op} ${inst.globalIndex ?? inst.index ?? 0}`;
 		case "i32.const":
 		case "i64.const":
-		case "f32.const":
-		case "f64.const":
 			return `${op} ${inst.value ?? 0}`;
+		case "f32.const":
+		case "f64.const": {
+			const v = inst.value ?? 0;
+			if (Number.isNaN(v)) return `${op} nan`;
+			if (v === Infinity) return `${op} inf`;
+			if (v === -Infinity) return `${op} -inf`;
+			return `${op} ${v}`;
+		}
 		case "throw":
 			return `${op} ${inst.tagIndex ?? inst.index ?? 0}`;
 		case "struct.new":
@@ -194,6 +200,10 @@ export function emitWat(mod) {
 		const importFuncCount = (mod.imports ?? []).filter(
 			(i) => i.kind === "func",
 		).length;
+		// Type indices count every member of a rec group, not the group entry.
+		const flatTypes = (mod.types ?? []).flatMap((t) =>
+			t.form === "rec" ? t.types : [t],
+		);
 
 		for (let i = 0; i < mod.funcs.length; i++) {
 			const fn = mod.funcs[i];
@@ -201,7 +211,7 @@ export function emitWat(mod) {
 			const expNames = exportsByFunc.get(globalFuncIdx) ?? [];
 			const expStr = expNames.map((n) => ` (export "${n}")`).join("");
 
-			const typeEntry = mod.types ? mod.types[fn.typeIndex] : null;
+			const typeEntry = flatTypes[fn.typeIndex] ?? null;
 			let sigStr = ` (type $t${fn.typeIndex ?? 0})`;
 			if (typeEntry && typeEntry.form === "func") {
 				const params = (typeEntry.params ?? []).map(formatValType).join(" ");
