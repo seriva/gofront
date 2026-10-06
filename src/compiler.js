@@ -19,8 +19,7 @@
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
-import { CodeGen } from "./backend/js/index.js";
-import { buildSourceMap } from "./backend/js/source-map.js";
+import { buildSourceMap, CodeGen } from "./backend/js/index.js";
 import { compileWasmModule } from "./backend/wasm/index.js";
 import { log } from "./colors.js";
 import { parseDts } from "./dts-parser.js";

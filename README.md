@@ -107,7 +107,6 @@ operation on it is silently permitted, preventing cascading errors.
 
 Walks the typed AST and emits clean, readable JavaScript. No intermediate representation
 — the codegen writes directly to an output buffer with indentation tracking.
-(`src/codegen/index.js` remains as a re-export shim for the old import path.)
 
 Runtime helpers (`__len`, `__append`, `__s`, `__sprintf`, `__equal`, `__cmul`, `__cdiv`,
 `__error`, `__errorIs`, `__timeFmt`, `__timeParse`, `__pathClean`, `__sortSlice`,

@@ -22,7 +22,7 @@ order = 1
 
 [[layers]]
 name  = "backend"
-paths = ["src/codegen/*", "src/backend/js/*", "src/backend/js/stdlib/*", "src/backend/wasm/*"]
+paths = ["src/backend/js/*", "src/backend/js/stdlib/*", "src/backend/wasm/*"]
 order = 2
 
 [[layers]]
