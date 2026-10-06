@@ -59,6 +59,7 @@ import "./wasm/structs.test.js";
 import "./wasm/slices.test.js";
 import "./wasm/strings_any.test.js";
 import "./wasm/closures.test.js";
+import "./wasm/boundary.test.js";
 
 import { summarize } from "./helpers.js";
 

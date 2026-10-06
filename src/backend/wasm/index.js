@@ -5,18 +5,30 @@ import { Lexer } from "../../lexer.js";
 import { lower } from "../../lower/index.js";
 import { Parser } from "../../parser/index.js";
 import { TypeChecker } from "../../typechecker/index.js";
+import {
+	addBoundaryHelpers,
+	collectBoundaryMeta,
+	generateFacade,
+	scanBoundaryImports,
+} from "./boundary.js";
 import { FunctionEmitter } from "./emit.js";
 import { encodeModule } from "./encode.js";
-import { getFuncSignature, toWasmType } from "./types.js";
+import { getFuncSignature, isTestingT, toWasmType } from "./types.js";
 import { emitWat } from "./wat.js";
 
 export class ModuleEmitter {
-	constructor(checker, lowerResult = null, programs = []) {
+	constructor(checker, lowerResult = null, programs = [], options = {}) {
 		this.checker = checker;
 		this.lowerResult = lowerResult;
+		// Local package names whose code is linked into this module; selectors
+		// like `mathx.NewVec3` are de-qualified to `NewVec3` by the emitter.
+		this.bundledPackages = options.bundledPackages ?? new Set();
+		this.constCache = new Map(); // name -> BasicLit (package-level literal consts)
+		this.nonLiteralConsts = new Set(); // package-level consts the backend cannot evaluate yet
 
 		this.types = []; // type entries
 		this.typeCache = new Map(); // signature string -> index
+		this._openRec = null; // rec group receiving new types while structs are resolved
 
 		this.structTypes = new Map(); // name -> struct info
 		this.boxTypes = new Map(); // wType key -> box info
@@ -56,43 +68,68 @@ export class ModuleEmitter {
 		const progs = Array.isArray(programs) ? programs : [programs];
 		const rawStructs = [];
 		const seen = new Set();
+		const aliases = []; // qualified key (pkg.T) -> unqualified struct name
 
 		for (const p of progs) {
 			for (const d of p.decls ?? []) {
 				if (d.kind === "TypeDecl" && d.type?.kind === "StructType") {
 					if (!seen.has(d.name)) {
 						seen.add(d.name);
-						rawStructs.push({ name: d.name, astFields: d.type.fields ?? [] });
+						rawStructs.push({
+							name: d.name,
+							astFields: d.type.fields ?? [],
+							pkgName: p.pkg?.name ?? "main",
+							pkgTarget: p.target ?? "wasm",
+						});
 					}
 				}
 			}
 		}
 
 		if (this.checker?.types) {
-			for (const [name, t] of this.checker.types.entries()) {
+			for (const [key, t] of this.checker.types.entries()) {
 				if (t.kind === "named" && t.underlying?.kind === "struct") {
+					const name = t.name ?? key;
 					if (!seen.has(name)) {
 						seen.add(name);
 						rawStructs.push({ name, structType: t.underlying });
 					}
+					if (key !== name) aliases.push([key, name]);
 				}
 			}
 		}
 
 		if (rawStructs.length === 0) return;
 
+		// Field resolution may create array/slice/box types; they join this rec
+		// group so struct indices (base + i) stay valid and may be referenced
+		// from the auxiliary types in any order.
+		const base = this._getTotalTypeCount();
+		const structEntries = rawStructs.map(() => ({
+			form: "struct",
+			fields: [],
+		}));
+		this.types.push({ form: "rec", types: structEntries });
+		this._openRec = structEntries;
+
 		for (let i = 0; i < rawStructs.length; i++) {
 			const s = rawStructs[i];
 			this.structTypes.set(s.name, {
 				name: s.name,
-				typeIndex: i,
+				typeIndex: base + i,
 				fields: [],
 				fieldIndexMap: new Map(),
 				embeds: [],
+				pkgName: s.pkgName ?? null,
+				pkgTarget: s.pkgTarget ?? "wasm",
 			});
 		}
+		// `mathx.Vec3` resolves to the same struct info as `Vec3` once linked.
+		for (const [key, name] of aliases) {
+			if (!this.structTypes.has(key))
+				this.structTypes.set(key, this.structTypes.get(name));
+		}
 
-		const structEntries = [];
 		for (let i = 0; i < rawStructs.length; i++) {
 			const s = rawStructs[i];
 			const info = this.structTypes.get(s.name);
@@ -155,15 +192,16 @@ export class ModuleEmitter {
 			info.fieldIndexMap = fieldIndexMap;
 			info.embeds = embeds;
 
-			const typeEntry = {
-				form: "struct",
-				fields: fields.map((f) => ({ type: f.wType, mutable: true })),
-			};
+			const typeEntry = structEntries[i];
+			typeEntry.fields = fields.map((f) => ({ type: f.wType, mutable: true }));
 			info.typeEntry = typeEntry;
-			structEntries.push(typeEntry);
 		}
 
-		this.types.push({ form: "rec", types: structEntries });
+		this._openRec = null;
+	}
+
+	_pushType(typeEntry) {
+		(this._openRec ?? this.types).push(typeEntry);
 	}
 
 	getStructType(name) {
@@ -181,7 +219,7 @@ export class ModuleEmitter {
 			form: "struct",
 			fields: [{ type: wType, mutable: true }],
 		};
-		this.types.push(typeEntry);
+		this._pushType(typeEntry);
 		const boxInfo = { typeIndex, typeEntry, wType };
 		this.boxTypes.set(key, boxInfo);
 		return boxInfo;
@@ -200,7 +238,7 @@ export class ModuleEmitter {
 			elemType: elemWType,
 			mutable: true,
 		};
-		this.types.push(typeEntry);
+		this._pushType(typeEntry);
 		const arrInfo = { typeIndex, typeEntry, elemWType, elemGoType };
 		this.arrayTypes.set(key, arrInfo);
 		return arrInfo;
@@ -231,7 +269,7 @@ export class ModuleEmitter {
 				{ type: "i32", mutable: true }, // cap
 			],
 		};
-		this.types.push(typeEntry);
+		this._pushType(typeEntry);
 		const sliceInfo = {
 			typeIndex,
 			typeEntry,
@@ -282,7 +320,7 @@ export class ModuleEmitter {
 				},
 			],
 		};
-		this.types.push(typeEntry);
+		this._pushType(typeEntry);
 
 		const closureInfo = {
 			typeIndex,
@@ -310,7 +348,7 @@ export class ModuleEmitter {
 			form: "struct",
 			fields: fieldTypes.map((f) => ({ type: f.wType, mutable: true })),
 		};
-		this.types.push(typeEntry);
+		this._pushType(typeEntry);
 		const envInfo = { typeIndex, typeEntry, fieldTypes };
 		this.envTypes.set(key, envInfo);
 		return envInfo;
@@ -399,7 +437,7 @@ export class ModuleEmitter {
 			return this.typeCache.get(key);
 		}
 		const idx = this._getTotalTypeCount();
-		this.types.push({ form: "func", params, results });
+		this._pushType({ form: "func", params, results });
 		this.typeCache.set(key, idx);
 		return idx;
 	}
@@ -440,6 +478,53 @@ export class ModuleEmitter {
 
 	getPrintlnEmptyIndex() {
 		return this.getOrAddFuncImport("env", "println_empty", [], []);
+	}
+
+	// `*testing.T` method calls: args are pushed one by one to a JS-side
+	// buffer, then `testing_call(t, methodNameStrIdx)` invokes the method.
+	getTestingArgImportIndex(wType, isBool = false) {
+		if (isBool)
+			return this.getOrAddFuncImport("env", "testing_arg_bool", ["i32"], []);
+		const suffix =
+			wType === "externref" ? "str" : wType === "anyref" ? "any" : wType;
+		if (!["i32", "i64", "f32", "f64", "str", "any"].includes(suffix)) {
+			throw new Error(
+				"only primitive, string and any arguments are supported for testing.T methods in wasm packages",
+			);
+		}
+		return this.getOrAddFuncImport(
+			"env",
+			`testing_arg_${suffix}`,
+			[suffix === "str" ? "externref" : suffix === "any" ? "anyref" : wType],
+			[],
+		);
+	}
+
+	getTestingCallImportIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"testing_call",
+			["externref", "i32"],
+			[],
+		);
+	}
+
+	getTestingNameImportIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"testing_name",
+			["externref"],
+			["externref"],
+		);
+	}
+
+	getTestingFlagImportIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"testing_flag",
+			["externref", "i32"],
+			["i32"],
+		);
 	}
 
 	getLogImportIndex(wType, isLast = false, isBool = false) {
@@ -561,6 +646,14 @@ export class ModuleEmitter {
 	resolveGlobal(name) {
 		return this.globalCache.get(name) ?? null;
 	}
+
+	resolveConst(name) {
+		return this.constCache.get(name) ?? null;
+	}
+
+	isNonLiteralConst(name) {
+		return this.nonLiteralConsts.has(name);
+	}
 }
 
 export function compileWasmModule(
@@ -570,13 +663,19 @@ export function compileWasmModule(
 	options = {},
 ) {
 	const progs = Array.isArray(programs) ? programs : [programs];
-	const mod = new ModuleEmitter(checker, lowerResult, progs);
+	const mod = new ModuleEmitter(checker, lowerResult, progs, {
+		bundledPackages: options.bundledPackages,
+	});
 
 	// 1. Collect all functions, methods, and package-level globals
 	const funcDecls = [];
 	for (const p of progs) {
+		const pkgName = p.pkg?.name ?? "main";
+		const pkgTarget = p.target ?? "wasm";
 		for (const d of p.decls ?? []) {
 			if (d.kind === "FuncDecl") {
+				d._pkgName = pkgName;
+				d._pkgTarget = pkgTarget;
 				funcDecls.push(d);
 			} else if (d.kind === "MethodDecl") {
 				const recvTypeName =
@@ -596,6 +695,8 @@ export function compileWasmModule(
 					_methodName: d.name,
 					_exportName: `${recvTypeName}_${d.name}`,
 					_sourceDecl: d,
+					_pkgName: pkgName,
+					_pkgTarget: pkgTarget,
 				};
 				funcDecls.push(normFn);
 			}
@@ -712,12 +813,22 @@ export function compileWasmModule(
 	}
 	funcDecls.push(...trampolines);
 
-	_collectPackageGlobals(progs, mod, checker);
+	const pendingInits = _collectPackageGlobals(progs, mod, checker);
+	_collectPackageConsts(progs, mod);
+	const globalInitFn =
+		pendingInits.length > 0 ? _makeGlobalInitFunc(pendingInits) : null;
+	if (globalInitFn) funcDecls.push(globalInitFn);
+
+	// 1d. Boundary metadata (exported surface of wasm packages)
+	const boundaryMeta = options.boundary
+		? collectBoundaryMeta(progs, funcDecls, mod)
+		: null;
 
 	// 2. Pre-scan for needed imports so import func indices are fixed
 	for (const fn of funcDecls) {
 		_scanImportsInBody(fn.body, mod);
 	}
+	if (boundaryMeta) scanBoundaryImports(mod, boundaryMeta);
 
 	const importFuncCount = mod.imports.filter((i) => i.kind === "func").length;
 	mod._importsLocked = true;
@@ -764,10 +875,11 @@ export function compileWasmModule(
 
 		// Export if public (capitalized) or main
 		if (
-			options.exportAll ||
-			fn.name === "main" ||
-			(fn.name[0] >= "A" && fn.name[0] <= "Z") ||
-			(fn._isMethod && fn._methodName[0] >= "A" && fn._methodName[0] <= "Z")
+			!fn._isGlobalInit &&
+			(options.exportAll ||
+				fn.name === "main" ||
+				(fn.name[0] >= "A" && fn.name[0] <= "Z") ||
+				(fn._isMethod && fn._methodName[0] >= "A" && fn._methodName[0] <= "Z"))
 		) {
 			mod.exports.push({ name: fn.name, kind: "func", index: globalIdx });
 			if (fn._isMethod && fn._exportName) {
@@ -803,6 +915,16 @@ export function compileWasmModule(
 		});
 	}
 
+	// 5. Boundary marshalling helpers + JS facade
+	let facade = null;
+	if (boundaryMeta) {
+		addBoundaryHelpers(mod, boundaryMeta);
+		facade = generateFacade(boundaryMeta, {
+			stringTable: mod.stringTable,
+			callMain: Boolean(options.callMain) && mod.funcMap.has("main"),
+		});
+	}
+
 	const moduleIR = {
 		types: mod.types,
 		imports: mod.imports,
@@ -811,6 +933,7 @@ export function compileWasmModule(
 		elements: mod.elements,
 		funcs: mod.funcs,
 		exports: mod.exports,
+		start: globalInitFn ? globalInitFn._globalFuncIndex : null,
 	};
 
 	const wasmBytes = encodeModule(moduleIR);
@@ -821,7 +944,33 @@ export function compileWasmModule(
 		wat: watText,
 		stringTable: mod.stringTable,
 		moduleIR,
+		facade,
 	};
+}
+
+// Package-level `const` declarations with literal values (iota is already
+// substituted by the parser). Non-literal constant expressions are not
+// supported by the wasm backend yet.
+function _collectPackageConsts(progs, mod) {
+	for (const p of progs) {
+		for (const d of p.decls ?? []) {
+			if (d.kind !== "ConstDecl") continue;
+			for (const spec of d.decls ?? []) {
+				for (let i = 0; i < spec.names.length; i++) {
+					let lit = spec.value?.[i];
+					if (
+						lit?.kind === "UnaryExpr" &&
+						lit.op === "-" &&
+						lit.operand?.kind === "BasicLit"
+					) {
+						lit = { ...lit.operand, value: `-${lit.operand.value}` };
+					}
+					if (lit?.kind === "BasicLit") mod.constCache.set(spec.names[i], lit);
+					else if (lit) mod.nonLiteralConsts.add(spec.names[i]);
+				}
+			}
+		}
+	}
 }
 
 function _scanImportsInBody(node, mod) {
@@ -870,6 +1019,25 @@ function _scanImportsInBody(node, mod) {
 				const isBinary = func.field === "Atan2" || func.field === "Pow";
 				mod.getMathImportIndex(jsMathMap[func.field], isBinary);
 			}
+		} else if (
+			func.kind === "SelectorExpr" &&
+			isTestingT(func.expr?._type) &&
+			func.field
+		) {
+			mod.internString(func.field);
+			if (func.field === "Name") mod.getTestingNameImportIndex();
+			else if (func.field === "Failed" || func.field === "Skipped")
+				mod.getTestingFlagImportIndex();
+			else if (func.field !== "Run") {
+				mod.getTestingCallImportIndex();
+				for (const arg of args) {
+					mod.getTestingArgImportIndex(
+						toWasmType(arg._type, mod.checker),
+						arg._type?.name === "bool" ||
+							(arg.kind === "BasicLit" && arg.litKind === "BOOL"),
+					);
+				}
+			}
 		}
 	}
 
@@ -915,6 +1083,7 @@ export function compileWasm(source, options = {}) {
 }
 
 function _collectPackageGlobals(progs, mod, checker) {
+	const pending = []; // non-constant initializers, run by the start function
 	for (const p of progs) {
 		for (const d of p.decls ?? []) {
 			if (d.kind !== "VarDecl") continue;
@@ -991,8 +1160,10 @@ function _collectPackageGlobals(progs, mod, checker) {
 						sign = -1;
 					}
 
+					let isConstInit = false;
 					if (litNode && litNode.kind === "BasicLit") {
 						if (litNode.litKind === "INT") {
+							isConstInit = true;
 							initInsts = [
 								wType === "i64"
 									? {
@@ -1005,6 +1176,7 @@ function _collectPackageGlobals(progs, mod, checker) {
 										},
 							];
 						} else if (litNode.litKind === "FLOAT") {
+							isConstInit = true;
 							initInsts = [
 								{
 									op: `${wType}.const`,
@@ -1012,6 +1184,7 @@ function _collectPackageGlobals(progs, mod, checker) {
 								},
 							];
 						} else if (litNode.litKind === "BOOL") {
+							isConstInit = true;
 							initInsts = [
 								{
 									op: "i32.const",
@@ -1020,14 +1193,42 @@ function _collectPackageGlobals(progs, mod, checker) {
 							];
 						}
 					}
+					if (values[i] && !isConstInit && names.length === values.length) {
+						pending.push({ name, expr: values[i] });
+					}
 					mod.globals.push({
 						type: wType,
 						mutable: true,
 						init: initInsts,
 					});
-					mod.globalCache.set(name, { index: gIdx, type: wType });
+					mod.globalCache.set(name, {
+						index: gIdx,
+						type: wType,
+						goType: rawType,
+					});
 				}
 			}
 		}
 	}
+	return pending;
+}
+
+// Synthesises `__init_globals()` assigning every non-constant package-level
+// initializer in declaration order; registered as the module start function.
+function _makeGlobalInitFunc(pending) {
+	const stmts = pending.map(({ name, expr }) => ({
+		kind: "AssignStmt",
+		lhs: [{ kind: "Ident", name, _type: expr._type }],
+		op: "=",
+		rhs: [expr],
+	}));
+	stmts.push({ kind: "ReturnStmt", values: [] });
+	return {
+		kind: "FuncDecl",
+		name: "__init_globals",
+		params: [],
+		returnType: null,
+		body: { kind: "Block", stmts, list: stmts },
+		_isGlobalInit: true,
+	};
 }

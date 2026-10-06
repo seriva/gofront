@@ -103,10 +103,11 @@ Types are plain JS objects (`{ kind: "basic", name: "int" }`, `{ kind: "slice",
 elem: ... }`, etc.). The special `any` type acts as a recovery/escape hatch — any
 operation on it is silently permitted, preventing cascading errors.
 
-### 4. Code Generator (`src/codegen/`)
+### 4. Code Generator (`src/backend/js/`)
 
 Walks the typed AST and emits clean, readable JavaScript. No intermediate representation
 — the codegen writes directly to an output buffer with indentation tracking.
+(`src/codegen/index.js` remains as a re-export shim for the old import path.)
 
 Runtime helpers (`__len`, `__append`, `__s`, `__sprintf`, `__equal`, `__cmul`, `__cdiv`,
 `__error`, `__errorIs`, `__timeFmt`, `__timeParse`, `__pathClean`, `__sortSlice`,
@@ -120,12 +121,29 @@ boxing, range shape, named returns/`defer`, embedded-method stubs, closure captu
 escape) and stores the results in side tables keyed by AST node.
 
 A package that starts with `//gofront:target wasm` (before the `package` clause) is compiled
-by `src/backend/wasm/` to a WebAssembly GC module plus JS glue instead of JavaScript.
+by `src/backend/wasm/` to a WebAssembly GC module instead of JavaScript.
 `//gofront:target both` marks a package that must compile under either backend: it may only
 import other `both` packages, may not use `gom`, may not mutate package-level variables, and
 its JS output uses strict Go numeric semantics (sized-integer wrapping, `float32` rounding,
 integer divide-by-zero panics). Running WASM output requires a WasmGC-capable runtime
 (Node ≥ 22 or a current Chrome/Firefox/Safari).
+
+**Hybrid builds.** Every `wasm`/`both` package a build reaches is linked into a single
+`app.wasm`, written next to `app.js` by `gofront build`, `gofront dev` and `-o`. The JS
+bundle contains a generated facade in place of the wasm packages: exported functions,
+methods, literal constants and structs are callable from JS code as if they were compiled
+to JS. Primitives convert directly, strings and `any` pass through, `both` struct values
+are copied into their JS class, `wasm` structs become opaque handle classes with stable
+identity, slices/arrays are copied element-wise (TypedArrays accepted) and func values are
+wrapped in both directions. Maps, `error`, non-empty interfaces and pointers to non-structs
+are not yet supported at the boundary and are rejected at compile time. The loader fetches
+`app.wasm` relative to the page (override with `globalThis.__GOFRONT_WASM_URL`, or
+pre-supply bytes via `globalThis.__GOFRONT_WASM_BYTES`). `--emit-wat` additionally writes
+a textual `app.wat`.
+
+`gofront test` runs the tests of a `wasm` package inside the linked module (`*testing.T`
+stays a JS object) and runs the tests of a `both` package twice — once per backend,
+reported as `pkg [js]` and `pkg [wasm]` — so both must agree.
 
 ---
 
@@ -433,6 +451,7 @@ gofront build [dir] --pwa                    also generate offline service worke
 gofront build [dir] --source-map             include inline source maps in the release bundle
 gofront build [dir] --no-minify              skip minification
 gofront build [dir] --no-mangle              minify but keep original identifiers
+gofront build [dir] --emit-wat               also write app.wat next to app.wasm (hybrid projects)
 gofront prep [dir] [--minify]                run asset copying + vendor bundling only (alias: gofront vendor)
 gofront check <dir>                          type-check a single package
 gofront check <dir>/...                      type-check every package under <dir> (Go-style `./...`)
@@ -440,7 +459,8 @@ gofront test <dir> [--dom]                   run tests for a single package
 gofront test <dir>/... [--dom] [-v] [-run <regex>]  run tests recursively
 gofront <file.go>                            compile single file → stdout
 gofront <dir>                                compile all *.go in directory → stdout
-gofront <input> -o out.js                    write output to file (prints elapsed compile time)
+gofront <input> -o out.js                    write output to file (prints elapsed compile time; hybrid projects also write app.wasm)
+gofront <input> -o out.js --emit-wat         also write app.wat
 gofront <input> -o out.js --copy-assets      compile + copy static assets
 gofront <input> --check                      type-check only (single file / directory)
 gofront <input> --watch                      watch for changes and recompile
