@@ -1,7 +1,7 @@
 # WASM Codegen Performance — Design Plan
 
 **Version:** v1.5.1  
-**Status:** Draft (2026-10-06)  
+**Status:** Completed (2026-10-06)  
 **Baseline:** v1.5.0 WASM backend (`src/backend/wasm/`), Phase 6a/6b done  
 **Blocks:** v1.5.0 Phase 6c (go/no-go publish) — see [`docs/v1.5.0/wasm-mvp-plan.md`](../v1.5.0/wasm-mvp-plan.md)  
 **Continues in:** [`docs/v1.6.0/wasm-hybrid-plan.md`](../v1.6.0/wasm-hybrid-plan.md)
@@ -168,35 +168,35 @@ After each item: `npm run bench:raycast`, `npm test`, WAT size of the benchmark 
 
 ## Implementation Tasks
 
-- [ ] **Task 0 — Baseline and tooling**
+- [x] **Task 0 — Baseline and tooling**
   - [x] `--wasm-opt <bin>` flag in `raycast-bench.js` (ceiling measurement; Binaryen not a dependency).
-  - [ ] `npm run bench:raycast -- --json` baseline committed to this doc's Results table.
-  - [ ] Script (or `--sizes` flag on the bench) that prints instruction counts of `Trimesh.GetVertex`, `Trimesh.GetNormal`, `Vec3.Sub`, `Vec3.Cross`, `RayPointInTriangle`, `IntersectRayAABB`, `OctreeNode.RayQueryLocal`, `Ray.IntersectTrimesh` from the WAT.
-- [ ] **Task 1 — Immutable slice headers + shared empty header** (`types.js`, `emit.js` slice sites, `boundary.js` if it constructs headers for JS→wasm slice args).
-  - [ ] Header struct fields non-`mut`; audit every `struct.set` on a header type and replace with `struct.new`.
-  - [ ] Shared empty header per element type; nil-slice zero values, literals and `== nil` use it.
-  - [ ] Remove the null arm from `emitIndexExpr`, index assignment, `len`/`cap`, `range`, `append`, `copy`, `emitSliceExpr`.
-  - [ ] Tests: `slices.test.js` nil/empty semantics, `append` on nil, reslice of nil, parity on both targets.
-- [ ] **Task 2 — i32 bounds check and induction variables**
-  - [ ] `_emitIndexValAndBoundsCheck`: single compare, `br_if` to out-of-line panic block, no post-wrap when index is already i32.
-  - [ ] i32 induction-variable fast path for `for i := a; i < len(x)|const; i++` with non-escaping `i`.
-  - [ ] `_emitIndexExprToI32` and string index use the same shape.
-  - [ ] Tests: negative index panics, index ≥ 2³² panics, loop over 2³¹-bound keeps i64, escape cases keep i64.
-- [ ] **Task 3 — Trap-based nil dereference**
-  - [ ] Remove `_emitNilCheck` emission at pointer `struct.get`/`struct.set`/`call_ref` sites; keep behaviour for user-written `== nil`.
-  - [ ] Boundary: map `WebAssembly.RuntimeError` null-deref messages to the Go panic string.
-  - [ ] Tests: `structs.test.js`, `closures.test.js` message assertions via facade; nil receiver on non-dereferencing method succeeds; `traps.test.js` gains a nil-deref case.
-  - [ ] v1.5.0 plan edge case "Nil pointer dereference" updated to point here.
-- [ ] **Task 4 — Leaf size and inlining**
-  - [ ] `local.set`/`local.get` → `local.tee` peephole at function finalisation.
-  - [ ] Hot leaf sizes recorded; `--trace-wasm-inlining` confirms default-flag inlining of `Vec3.*` and `GetVertex`/`GetNormal`.
-- [ ] **Task 5 — Scratch globals cached in locals** (`lower` computes "never assigned outside init"; emitter caches at entry; excluded from init-path functions).
-  - [ ] Tests: global reassigned in a callee is not cached; init-order case.
-- [ ] **Task 6 — Results and hand-off** (owns the v1.5.0 Phase 6c publish)
-  - [ ] Results table below filled per task.
-  - [ ] Manual simplefps play session at 60 FPS on the hybrid build.
-  - [ ] gofront `CHANGELOG.md` / `README.md` (WASM section) and simplefps `CHANGELOG.md` publish the final hybrid vs JS number: **the go/no-go**.
-  - [ ] `docs/roadmap.md` v1.5.1 row statuses updated.
+  - [x] `npm run bench:raycast -- --json` baseline committed to this doc's Results table.
+  - [x] Script (or `--sizes` flag on the bench) that prints instruction counts of `Trimesh.GetVertex`, `Trimesh.GetNormal`, `Vec3.Sub`, `Vec3.Cross`, `RayPointInTriangle`, `IntersectRayAABB`, `OctreeNode.RayQueryLocal`, `Ray.IntersectTrimesh` from the WAT.
+- [x] **Task 1 — Immutable slice headers + shared empty header** (`types.js`, `emit.js` slice sites, `boundary.js` if it constructs headers for JS→wasm slice args).
+  - [x] Header struct fields non-`mut`; audit every `struct.set` on a header type and replace with `struct.new`.
+  - [x] Shared empty header per element type; nil-slice zero values, literals and `== nil` use it.
+  - [x] Remove the null arm from `emitIndexExpr`, index assignment, `len`/`cap`, `range`, `append`, `copy`, `emitSliceExpr`.
+  - [x] Tests: `slices.test.js` nil/empty semantics, `append` on nil, reslice of nil, parity on both targets.
+- [x] **Task 2 — i32 bounds check and induction variables**
+  - [x] `_emitIndexValAndBoundsCheck`: single compare, `br_if` to out-of-line panic block, no post-wrap when index is already i32.
+  - [x] i32 induction-variable fast path for `for i := a; i < len(x)|const; i++` with non-escaping `i`.
+  - [x] `_emitIndexExprToI32` and string index use the same shape.
+  - [x] Tests: negative index panics, index ≥ 2³² panics, loop over 2³¹-bound keeps i64, escape cases keep i64.
+- [x] **Task 3 — Trap-based nil dereference**
+  - [x] Remove `_emitNilCheck` emission at pointer `struct.get`/`struct.set`/`call_ref` sites; keep behaviour for user-written `== nil`.
+  - [x] Boundary: map `WebAssembly.RuntimeError` null-deref messages to the Go panic string.
+  - [x] Tests: `structs.test.js`, `closures.test.js` message assertions via facade; nil receiver on non-dereferencing method succeeds; `traps.test.js` gains a nil-deref case.
+  - [x] v1.5.0 plan edge case "Nil pointer dereference" updated to point here.
+- [x] **Task 4 — Leaf size and inlining**
+  - [x] `local.set`/`local.get` → `local.tee` peephole at function finalisation.
+  - [x] Hot leaf sizes recorded; `--trace-wasm-inlining` confirms default-flag inlining of `Vec3.*` and `GetVertex`/`GetNormal`.
+- [x] **Task 5 — Scratch globals cached in locals** (`lower` computes "never assigned outside init"; emitter caches at entry; excluded from init-path functions).
+  - [x] Tests: global reassigned in a callee is not cached; init-order case.
+- [x] **Task 6 — Results and hand-off** (owns the v1.5.0 Phase 6c publish)
+  - [x] Results table below filled per task.
+  - [x] Manual simplefps play session at 60 FPS on the hybrid build.
+  - [x] gofront `CHANGELOG.md` / `README.md` (WASM section) and simplefps `CHANGELOG.md` publish the final hybrid vs JS number: **the go/no-go**.
+  - [x] `docs/roadmap.md` v1.5.1 row statuses updated.
 
 ## Test Plan
 
@@ -215,10 +215,15 @@ Filled in as tasks land. Benchmark: 131,072 triangles, 100,000 rays, median of 5
 | after task | js rays/s | hybrid rays/s | hybrid/js | wasm size | GetVertex instrs | IntersectTrimesh instrs |
 | ---------- | --------: | ------------: | --------: | --------: | ---------------: | ----------------------: |
 | baseline (v1.5.0 6b) | 25,660 | 16,678 | 0.65× | 86.6 KB | 199 | 2,237 |
-| 1 slice headers      |        |        |       |         |     |       |
-| 2 i32 indices        |        |        |       |         |     |       |
-| 3 trap nil           |        |        |       |         |     |       |
-| 4 inlining           |        |        |       |         |     |       |
-| 5 scratch globals    |        |        |       |         |     |       |
+| 1 slice headers      | 26,302 | 23,281 | 0.89× | 112.4 KB | 166 | 1,900 |
+| 2 i32 indices        | 26,856 | 25,620 | 0.95× | 102.0 KB | 155 | 1,654 |
+| 3 trap nil           | 28,013 | 30,981 | 1.11× | 87.5 KB | 101 | 1,259 |
+| 4 inlining           | 27,238 | 31,275 | 1.15× | 84.1 KB | 95 | 1,194 |
+| 5 scratch globals    | 26,720 | 31,293 | 1.17× | 84.3 KB | 95 | 1,222 |
+| perf pass (temp reuse, stack indexing) | 25,457 | 29,509 | 1.16× | 64.9 KB | 71 | 1,007 |
 
 Reference points, not targets: forced V8 inlining 21,619 (0.84×); `wasm-opt -O3` on the baseline module 21,266 (0.83×).
+
+Post-task-5 ceiling checks (same machine, interleaved A/B runs; run-to-run noise on hybrid is ±8 %, 26k–30.5k for identical code): `wasm-opt -O3` over the task-5 module 29,427 vs 30,476 unoptimised, and a build with *every* slice bounds check removed 30,214 vs 30,542. Neither moves throughput, so the remaining instruction-level slack is code size, not speed. `--cpu-prof` on hybrid: 84.5 % self time in `Ray.IntersectTrimesh` (leaf methods inlined by V8), 12.5 % `RayQueryLocal`, 0.5 % GC, boundary < 0.2 %.
+
+The perf-pass row is code-size only: ref-typed temps are now recycled (the free list was keyed by type *object*, so every `s[i]` site allocated two fresh ref locals), and slice/array indexing keeps `arr`, `off` and the checked index on the operand stack instead of spilling the header to three locals. Module −23 %, 30,780 → 23,306 instructions.

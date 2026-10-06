@@ -384,3 +384,309 @@ func Main() int64 {
 	}
 	assertEqual(caught, true);
 });
+
+section("WASM Slices — Immutable Headers & Nil Semantics (v1.5.1 Task 1)");
+
+test("nil and empty slice semantics parity", () => {
+	const src = `
+package main
+
+func Main() int64 {
+	var nilS []int64
+	emptyS := make([]int64, 0)
+	litEmptyS := []int64{}
+
+	var score int64
+	if nilS == nil { score += 1 }
+	if nilS != nil { score += 10 }
+	if emptyS == nil { score += 100 }
+	if emptyS != nil { score += 1000 }
+	if litEmptyS == nil { score += 10000 }
+	if litEmptyS != nil { score += 100000 }
+
+	// len and cap
+	score += int64(len(nilS) + cap(nilS))
+	score += int64(len(emptyS) + cap(emptyS))
+	score += int64(len(litEmptyS) + cap(litEmptyS))
+
+	return score
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, 101001n);
+	assertEqual(wasmRes, jsRes);
+});
+
+test("append on nil slice and multiple appends", () => {
+	const src = `
+package main
+
+func Main() int64 {
+	var s1 []int64
+	s2 := append(s1, 10)
+	s3 := append(s1, 20, 30)
+
+	// Ensure s1 is still nil and uncorrupted
+	var isNil int64
+	if s1 == nil { isNil = 1 }
+
+	return isNil*10000 + s2[0]*100 + s3[0] + s3[1]
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, 11050n);
+	assertEqual(wasmRes, jsRes);
+});
+
+test("reslice of nil slice produces nil slice", () => {
+	const src = `
+package main
+
+func Main() int64 {
+	var s []int64
+	sub := s[:0]
+	sub2 := s[0:0]
+
+	var res int64
+	if sub == nil { res += 1 }
+	if sub2 == nil { res += 10 }
+	res += int64(len(sub) + cap(sub) + len(sub2) + cap(sub2))
+	return res
+}
+`;
+	const h = compileHybrid(src);
+	const { exports } = runWasm(h.wasm, { stringTable: h.stringTable });
+	const wasmRes = exports.Main();
+	assertEqual(wasmRes, 11n);
+});
+
+section(
+	"WASM Slices — i32 Bounds Check and Induction Variables (v1.5.1 Task 2)",
+);
+
+test("negative dynamic index panics with out of range", () => {
+	const src = `
+package main
+
+func Main() int64 {
+	s := []int64{10, 20, 30}
+	idx := -1
+	return s[idx]
+}
+`;
+	const h = compileHybrid(src);
+	let caught = false;
+	try {
+		const { exports } = runWasm(h.wasm, { stringTable: h.stringTable });
+		exports.Main();
+	} catch (e) {
+		caught = true;
+		assertEqual(e.message.includes("index out of range"), true);
+	}
+	assertEqual(caught, true);
+});
+
+test("index >= 2^32 panics with out of range for slice and string", () => {
+	const src = `
+package main
+
+func Main(which int64) int64 {
+	idx := int64(1) << 33 // 8589934592 > 2^32
+	if which == 0 {
+		s := []int64{10, 20, 30}
+		return s[idx]
+	}
+	str := "hello world"
+	return int64(str[idx])
+}
+`;
+	const h = compileHybrid(src);
+	const { exports } = runWasm(h.wasm, { stringTable: h.stringTable });
+
+	let caughtSlice = false;
+	try {
+		exports.Main(0n);
+	} catch (e) {
+		caughtSlice = true;
+		assertEqual(e.message.includes("index out of range"), true);
+	}
+	assertEqual(caughtSlice, true);
+
+	let caughtStr = false;
+	try {
+		exports.Main(1n);
+	} catch (e) {
+		caughtStr = true;
+		assertEqual(e.message.includes("index out of range"), true);
+	}
+	assertEqual(caughtStr, true);
+});
+
+test("loop over 2^31 bound keeps i64 and computes correctly", () => {
+	const src = `
+package main
+
+func Main() int64 {
+	var sum int64
+	// Bound is 3000000002 > 2^31 - 1 (2147483647)
+	bound := int64(3000000002)
+	for i := int64(3000000000); i < bound; i++ {
+		sum += i
+	}
+	return sum
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	// 3000000000 + 3000000001 = 6000000001
+	assertEqual(wasmRes, 6000000001n);
+	assertEqual(wasmRes, jsRes);
+});
+
+test("induction variable escaping address-taken keeps i64 and behaves correctly", () => {
+	const src = `
+package main
+
+func Main() int64 {
+	var sum int64
+	for i := 0; i < 5; i++ {
+		p := &i
+		sum += int64(*p)
+	}
+	return sum
+}
+`;
+	const h = compileHybrid(src);
+	const { exports } = runWasm(h.wasm, { stringTable: h.stringTable });
+	// 0 + 1 + 2 + 3 + 4 = 10
+	assertEqual(exports.Main(), 10n);
+});
+
+test("induction variable captured in closure keeps i64 and behaves correctly", () => {
+	const src = `
+package main
+
+func Main() int64 {
+	var sum int64
+	for i := 0; i < 4; i++ {
+		fn := func() int64 {
+			return int64(i)
+		}
+		sum += fn()
+	}
+	return sum
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	// 0 + 1 + 2 + 3 = 6
+	assertEqual(wasmRes, 6n);
+	assertEqual(wasmRes, jsRes);
+});
+
+test("loop variable mutated in loop body keeps i64 and behaves correctly", () => {
+	const src = `
+package main
+
+func Main() int64 {
+	var sum int64
+	for i := 0; i < 10; i++ {
+		sum += int64(i)
+		i++ // extra step in body
+	}
+	return sum
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	// i visits 0, 2, 4, 6, 8 -> sum = 20
+	assertEqual(wasmRes, 20n);
+	assertEqual(wasmRes, jsRes);
+});
+
+test("narrow-int index expressions that are not locals use the i32 path", () => {
+	const src = `
+package main
+
+type S struct {
+	B  uint8
+	I8 int8
+	U16 uint16
+}
+
+func idx16() int16 { return 3 }
+
+func Main() int64 {
+	s := &S{B: 2, I8: 1, U16: 1}
+	sl := []int64{1, 2, 3, 4, 5, 6}
+	var arr [4]int64
+	arr[s.I8+1] = 7
+	str := "abc"
+	return sl[s.B*2] + sl[idx16()+1] + arr[2] + int64(str[s.U16])
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	// sl[4]=5, sl[4]=5, arr[2]=7, 'b'=98 -> 115
+	assertEqual(wasmRes, 115n);
+	assertEqual(wasmRes, jsRes);
+});
+
+test("int32 package global as index and as comparison operand", () => {
+	const src = `
+package main
+
+var g int32 = 1
+
+func Main() int64 {
+	sl := []int64{10, 20, 30}
+	g = 2
+	if g < 3 {
+		return sl[g]
+	}
+	return -1
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, 30n);
+	assertEqual(wasmRes, jsRes);
+});
+
+test("range loop variables restore shadowed outer bindings", () => {
+	const src = `
+package main
+
+func Main() int64 {
+	i := 100
+	v := int64(1000)
+	sl := []int64{1, 2, 3}
+	for i := range sl {
+		_ = i
+	}
+	for i := range 3 {
+		_ = i
+	}
+	for i, v := range sl {
+		_ = i
+		_ = v
+	}
+	return int64(i) + v
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, 1100n);
+	assertEqual(wasmRes, jsRes);
+});
+
+test("induction variable with <= literal bound near MaxInt32 stays i64", () => {
+	const src = `
+package main
+
+func Main() int64 {
+	n := 0
+	for i := 2147483646; i <= 2147483647; i++ {
+		n++
+	}
+	return int64(n)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, 2n);
+	assertEqual(wasmRes, jsRes);
+});

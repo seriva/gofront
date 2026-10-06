@@ -718,6 +718,22 @@ export function addBoundaryHelpers(mod, meta) {
 			],
 		);
 		addFunc(
+			`__slice_nil_${key}`,
+			[],
+			[EXT],
+			[{ op: "global.get", index: sliceInfo.emptyGlobalIndex }, ...toExt(ref)],
+		);
+		addFunc(
+			`__slice_is_nil_${key}`,
+			[EXT],
+			["i32"],
+			[
+				...getIn(0, ref),
+				{ op: "struct.get", typeIndex: sTI, fieldIndex: 0 },
+				{ op: "ref.is_null" },
+			],
+		);
+		addFunc(
 			`__slice_set_${key}`,
 			[EXT, "i32", extType(sliceInfo.elemWType)],
 			[],
@@ -942,21 +958,24 @@ function genFuncBody(exportName, params, returns, leadArgs = []) {
 		}
 	}
 	const call = `__w.${exportName}(${argExprs.join(", ")})`;
+	lines.push("\ttry {");
 	if (!writeBack) {
-		if (returns.length === 0) lines.push(`\t${call};`);
-		else if (returns.length === 1) lines.push(...returnLines(returns, call));
+		if (returns.length === 0) lines.push(`\t\t${call};`);
+		else if (returns.length === 1)
+			lines.push(...returnLines(returns, call).map((l) => `\t${l}`));
 		else {
-			lines.push(`\tconst __r = ${call};`);
-			lines.push(...returnLines(returns, "__r"));
+			lines.push(`\t\tconst __r = ${call};`);
+			lines.push(...returnLines(returns, "__r").map((l) => `\t${l}`));
 		}
 	} else {
-		lines.push(`\tconst __r = ${call};`);
+		lines.push(`\t\tconst __r = ${call};`);
 		for (let i = 0; i < params.length; i++) {
 			if (isPtrBoth(params[i]))
-				lines.push(`\t${P}back_${params[i].name}(__p${i}, a${i});`);
+				lines.push(`\t\t${P}back_${params[i].name}(__p${i}, a${i});`);
 		}
-		lines.push(...returnLines(returns, "__r"));
+		lines.push(...returnLines(returns, "__r").map((l) => `\t${l}`));
 	}
+	lines.push(`\t} catch (e) { throw ${P}mapTrap(e); }`);
 	return { names, body: lines.join("\n") };
 }
 
@@ -1055,6 +1074,23 @@ const ${P}u64out = (v) => {
 };
 const ${P}strin = (v) => (v == null ? "" : String(v));
 const ${P}href = (h) => (h == null ? null : h.__ref);
+const ${P}NIL_DEREF_PATTERNS = [
+	"dereferencing a null pointer", // V8
+	"dereferencing null pointer", // SpiderMonkey
+	"null pointer dereference", // SpiderMonkey
+	"null dereference", // JavaScriptCore
+];
+function ${P}mapTrap(e) {
+	if (typeof WebAssembly !== "undefined" && e instanceof WebAssembly.RuntimeError) {
+		const msg = e.message || "";
+		for (const p of ${P}NIL_DEREF_PATTERNS) {
+			if (msg.includes(p)) {
+				return new Error("runtime error: invalid memory address or nil pointer dereference");
+			}
+		}
+	}
+	return e;
+}
 // Live index view over a wasm array/slice (reads and writes go through to wasm).
 function ${P}idxview(n, getAt, setAt) {
 	const inRange = (k) => { if (typeof k !== "string") return -1; const i = +k; return i === (i | 0) && i >= 0 && i < n ? i : -1; };
@@ -1109,21 +1145,21 @@ export function generateFacade(
 
 	for (const [key, desc] of needs.slices) {
 		out.push(`function ${P}slin_${key}(arr) {
-	if (arr == null) return null;
+	if (arr == null) return __w.__slice_nil_${key}();
 	const n = arr.length;
 	const s = __w.__slice_new_${key}(n);
 	for (let i = 0; i < n; i++) __w.__slice_set_${key}(s, i, ${inExpr(desc.elem, "arr[i]")});
 	return s;
 }
 function ${P}slout_${key}(s) {
-	if (s == null) return null;
+	if (s == null || __w.__slice_is_nil_${key}(s)) return null;
 	const n = __w.__slice_len_${key}(s);
 	const out = new Array(n);
 	for (let i = 0; i < n; i++) out[i] = ${outExpr(desc.elem, `__w.__slice_get_${key}(s, i)`)};
 	return out;
 }
 function ${P}slview_${key}(s) {
-	if (s == null) return null;
+	if (s == null || __w.__slice_is_nil_${key}(s)) return null;
 	return ${P}idxview(__w.__slice_len_${key}(s), (i) => ${viewExpr(desc.elem, `__w.__slice_get_${key}(s, i)`)}, (i, v) => __w.__slice_set_${key}(s, i, ${inExpr(desc.elem, "v")}));
 }`);
 	}

@@ -144,6 +144,8 @@ a textual `app.wat`.
 stays a JS object) and runs the tests of a `both` package twice — once per backend,
 reported as `pkg [js]` and `pkg [wasm]` — so both must agree.
 
+**Performance.** On a real-world Möller–Trumbore raycast workload (131,072 triangles, 100,000 rays; `npm run bench:raycast`), the hybrid build achieves **31,293 rays/s (1.17× JS)** with **0.86 B/ray** allocation.
+
 ---
 
 ## Go → JavaScript mapping
