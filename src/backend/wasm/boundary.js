@@ -3,8 +3,15 @@
 // and the generated JS facade that exposes a wasm package to JS callers.
 //
 // Boundary v1 rules (docs/v1.5.0/wasm-mvp-plan.md, Phase 5):
-//   - primitives: bool <-> i32, narrow ints <-> i32, int/int64 <-> i64 (BigInt
-//     inside, Number outside), floats direct, string externref, any anyref.
+//   - primitives: bool <-> i32, narrow ints <-> i32, int/int64 <-> f64 at the
+//     boundary (i64 inside; exact for |v| <= 2^53, which the facade already
+//     enforces, and keeps BigInt boxing off hot paths), floats direct,
+//     string externref, any anyref (crossing as externref).
+//   - every GC reference (struct/array/closure/anyref) crosses as externref
+//     and exports are bound to module-level consts: V8 only inlines JS->wasm
+//     calls (floats unboxed) for const callees with i32/i64/f32/f64/externref
+//     signatures outside try/catch.  Panics are raised through `env.panic`
+//     (a JS Error) rather than a wasm `throw`, so no guard wrapper is needed.
 //   - struct values from `both` packages: copied field-by-field into the JS
 //     copy class (`new T(...)`); `*T` params are copied in and written back.
 //   - struct values from `wasm` packages: opaque handles with stable identity
@@ -132,6 +139,12 @@ function normalizeAstType(t) {
 			return { kind: "array", elem: t.elem, size: t.size };
 		case "FuncType":
 			return funcSigFromAst(t);
+		case "InterfaceType":
+			return {
+				kind: "interface",
+				name: t.name,
+				methods: new Set((t.methods ?? []).map((m) => m.name ?? m)),
+			};
 		default:
 			return t;
 	}
@@ -446,10 +459,58 @@ export function scanBoundaryImports(mod, meta) {
 		mod.getOrAddFuncImport(
 			"env",
 			`__invoke$${key}`,
-			["externref", ...desc.closureInfo.paramWTypes],
-			desc.closureInfo.returnWTypes,
+			["externref", ...desc.closureInfo.paramWTypes.map(extType)],
+			desc.closureInfo.returnWTypes.map(extType),
 		);
 	}
+}
+
+// Boundary representation of a wasm value type.  i64 crosses as f64 so JS
+// never sees (or allocates) a BigInt for Go `int`; every GC reference (struct,
+// array, closure, anyref) crosses as externref.  V8 only inlines the
+// JS→wasm wrapper (passing f32/f64 unboxed) when the signature holds nothing
+// but i32/i64/f32/f64/externref: a single anyref or `(ref $T)` in the
+// signature costs a 16-byte HeapNumber per float argument and result.
+function isGcRef(wType) {
+	return wType === "anyref" || (typeof wType === "object" && wType !== null);
+}
+function extType(wType) {
+	if (wType === "i64") return "f64";
+	if (isGcRef(wType)) return "externref";
+	return wType;
+}
+function needsConv(wTypes) {
+	return wTypes.some((w) => w === "i64" || isGcRef(w));
+}
+// Instructions converting the value on the stack from its boundary form.
+function fromExt(wType) {
+	if (wType === "i64") return [{ op: "i64.trunc_sat_f64_s" }];
+	if (wType === "anyref") return [{ op: "any.convert_extern" }];
+	if (isGcRef(wType)) {
+		const out = [{ op: "any.convert_extern" }];
+		if (wType.typeIndex !== undefined)
+			out.push({ op: "ref.cast_null", typeIndex: wType.typeIndex });
+		return out;
+	}
+	return [];
+}
+// Instructions converting the value on the stack to its boundary form.
+function toExt(wType) {
+	if (wType === "i64") return [{ op: "f64.convert_i64_s" }];
+	if (isGcRef(wType)) return [{ op: "extern.convert_any" }];
+	return [];
+}
+// Rewrites the values on top of the stack (types `wTypes`) with `conv`,
+// spilling through locals starting at `localBase` when more than one.
+function convertResults(wTypes, conv, localBase) {
+	if (wTypes.length === 0 || !needsConv(wTypes)) return [];
+	if (wTypes.length === 1) return conv(wTypes[0]);
+	const out = [];
+	for (let i = wTypes.length - 1; i >= 0; i--)
+		out.push({ op: "local.set", index: localBase + i });
+	for (let i = 0; i < wTypes.length; i++)
+		out.push({ op: "local.get", index: localBase + i }, ...conv(wTypes[i]));
+	return out;
 }
 
 function zeroInstr(wType) {
@@ -467,17 +528,36 @@ function zeroInstr(wType) {
 	return { op: "i32.const", value: 0 };
 }
 
+// Type entry at a flat type index (rec groups hold several entries each).
+function typeAt(mod, index) {
+	if (index === undefined) return null;
+	let i = 0;
+	for (const entry of mod.types) {
+		const group = entry.form === "rec" ? entry.types : [entry];
+		if (index < i + group.length) return group[index - i];
+		i += group.length;
+	}
+	return null;
+}
+
 // Post user functions: appends marshalling helper functions and exports them.
 export function addBoundaryHelpers(mod, meta) {
 	const needs = meta._needs ?? collectNeeds(meta);
 	const importFuncCount = mod.imports.filter((i) => i.kind === "func").length;
 
-	const addFunc = (name, params, results, body, exported = true) => {
+	const addFunc = (
+		name,
+		params,
+		results,
+		body,
+		exported = true,
+		locals = [],
+	) => {
 		const idx = importFuncCount + mod.funcs.length;
 		const typeIndex = mod.getTypeIndex(params, results);
 		mod.funcs.push({
 			typeIndex,
-			locals: [],
+			locals,
 			body: [...body, { op: "return" }],
 		});
 		mod.funcMap.set(name, idx);
@@ -485,6 +565,9 @@ export function addBoundaryHelpers(mod, meta) {
 		return idx;
 	};
 	const get = (i) => ({ op: "local.get", index: i });
+	// Parameter `i` converted from its boundary form.
+	const getIn = (i, wType) => [get(i), ...fromExt(wType)];
+	const EXT = "externref";
 
 	for (const [name, { info }] of needs.structs) {
 		const ref = toRef(info);
@@ -492,47 +575,58 @@ export function addBoundaryHelpers(mod, meta) {
 		const fieldWTypes = info.fields.map((f) => f.wType);
 		addFunc(
 			`__new_${name}`,
-			fieldWTypes,
-			[ref],
+			fieldWTypes.map(extType),
+			[EXT],
 			[
-				...fieldWTypes.map((_, i) => get(i)),
+				...fieldWTypes.flatMap((w, i) => getIn(i, w)),
 				{ op: "struct.new", typeIndex: ti },
+				...toExt(ref),
 			],
 		);
 		addFunc(
 			`__zero_${name}`,
 			[],
-			[ref],
+			[EXT],
 			[
 				...fieldWTypes.map((w) => zeroInstr(w)),
 				{ op: "struct.new", typeIndex: ti },
+				...toExt(ref),
 			],
 		);
 		addFunc(
 			`__clone_${name}`,
-			[ref],
-			[ref],
+			[EXT],
+			[EXT],
 			[
 				...fieldWTypes.flatMap((_, i) => [
-					get(0),
+					...getIn(0, ref),
 					{ op: "struct.get", typeIndex: ti, fieldIndex: i },
 				]),
 				{ op: "struct.new", typeIndex: ti },
+				...toExt(ref),
 			],
 		);
 		for (let i = 0; i < info.fields.length; i++) {
 			const f = info.fields[i];
 			addFunc(
 				`__get_${name}_${f.name}`,
-				[ref],
-				[f.wType],
-				[get(0), { op: "struct.get", typeIndex: ti, fieldIndex: i }],
+				[EXT],
+				[extType(f.wType)],
+				[
+					...getIn(0, ref),
+					{ op: "struct.get", typeIndex: ti, fieldIndex: i },
+					...toExt(f.wType),
+				],
 			);
 			addFunc(
 				`__set_${name}_${f.name}`,
-				[ref, f.wType],
+				[EXT, extType(f.wType)],
 				[],
-				[get(0), get(1), { op: "struct.set", typeIndex: ti, fieldIndex: i }],
+				[
+					...getIn(0, ref),
+					...getIn(1, f.wType),
+					{ op: "struct.set", typeIndex: ti, fieldIndex: i },
+				],
 			);
 		}
 	}
@@ -543,29 +637,38 @@ export function addBoundaryHelpers(mod, meta) {
 		addFunc(
 			`__array_new_${key}`,
 			["i32"],
-			[ref],
-			[get(0), { op: "array.new_default", typeIndex: arrInfo.typeIndex }],
+			[EXT],
+			[
+				get(0),
+				{ op: "array.new_default", typeIndex: arrInfo.typeIndex },
+				...toExt(ref),
+			],
 		);
 		addFunc(
 			`__array_len_${key}`,
-			[ref],
+			[EXT],
 			["i32"],
-			[get(0), { op: "array.len" }],
+			[...getIn(0, ref), { op: "array.len" }],
 		);
 		addFunc(
 			`__array_get_${key}`,
-			[ref, "i32"],
-			[arrInfo.elemWType],
-			[get(0), get(1), { op: "array.get", typeIndex: arrInfo.typeIndex }],
+			[EXT, "i32"],
+			[extType(arrInfo.elemWType)],
+			[
+				...getIn(0, ref),
+				get(1),
+				{ op: "array.get", typeIndex: arrInfo.typeIndex },
+				...toExt(arrInfo.elemWType),
+			],
 		);
 		addFunc(
 			`__array_set_${key}`,
-			[ref, "i32", arrInfo.elemWType],
+			[EXT, "i32", extType(arrInfo.elemWType)],
 			[],
 			[
-				get(0),
+				...getIn(0, ref),
 				get(1),
-				get(2),
+				...getIn(2, arrInfo.elemWType),
 				{ op: "array.set", typeIndex: arrInfo.typeIndex },
 			],
 		);
@@ -577,9 +680,9 @@ export function addBoundaryHelpers(mod, meta) {
 		const arrTI = sliceInfo.arrInfo.typeIndex;
 		const sTI = sliceInfo.typeIndex;
 		const elemAddr = [
-			get(0),
+			...getIn(0, ref),
 			{ op: "struct.get", typeIndex: sTI, fieldIndex: 0 },
-			get(0),
+			...getIn(0, ref),
 			{ op: "struct.get", typeIndex: sTI, fieldIndex: 1 },
 			get(1),
 			{ op: "i32.add" },
@@ -587,7 +690,7 @@ export function addBoundaryHelpers(mod, meta) {
 		addFunc(
 			`__slice_new_${key}`,
 			["i32"],
-			[ref],
+			[EXT],
 			[
 				get(0),
 				{ op: "array.new_default", typeIndex: arrTI },
@@ -595,31 +698,42 @@ export function addBoundaryHelpers(mod, meta) {
 				get(0),
 				get(0),
 				{ op: "struct.new", typeIndex: sTI },
+				...toExt(ref),
 			],
 		);
 		addFunc(
 			`__slice_len_${key}`,
-			[ref],
+			[EXT],
 			["i32"],
-			[get(0), { op: "struct.get", typeIndex: sTI, fieldIndex: 2 }],
+			[...getIn(0, ref), { op: "struct.get", typeIndex: sTI, fieldIndex: 2 }],
 		);
 		addFunc(
 			`__slice_get_${key}`,
-			[ref, "i32"],
-			[sliceInfo.elemWType],
-			[...elemAddr, { op: "array.get", typeIndex: arrTI }],
+			[EXT, "i32"],
+			[extType(sliceInfo.elemWType)],
+			[
+				...elemAddr,
+				{ op: "array.get", typeIndex: arrTI },
+				...toExt(sliceInfo.elemWType),
+			],
 		);
 		addFunc(
 			`__slice_set_${key}`,
-			[ref, "i32", sliceInfo.elemWType],
+			[EXT, "i32", extType(sliceInfo.elemWType)],
 			[],
-			[...elemAddr, get(2), { op: "array.set", typeIndex: arrTI }],
+			[
+				...elemAddr,
+				...getIn(2, sliceInfo.elemWType),
+				{ op: "array.set", typeIndex: arrTI },
+			],
 		);
 	}
 
 	for (const [key, desc] of needs.funcs) {
 		const ci = desc.closureInfo;
 		const invokeIdx = mod.importCache.get(`env.__invoke$${key}`);
+		const nParams = ci.paramWTypes.length;
+		// Thunk: wasm closure body calling the JS callback (boundary forms out, back in).
 		const thunkIdx = addFunc(
 			`__jsthunk$${key}`,
 			["anyref", ...ci.paramWTypes],
@@ -627,37 +741,72 @@ export function addBoundaryHelpers(mod, meta) {
 			[
 				get(0),
 				{ op: "extern.convert_any" },
-				...ci.paramWTypes.map((_, i) => get(i + 1)),
+				...ci.paramWTypes.flatMap((w, i) => [get(i + 1), ...toExt(w)]),
 				{ op: "call", funcIndex: invokeIdx },
+				...convertResults(ci.returnWTypes, fromExt, nParams + 1),
 			],
 			false,
+			ci.returnWTypes.length > 1 ? ci.returnWTypes.map(extType) : [],
 		);
 		mod.addRefFuncElement(thunkIdx);
 		addFunc(
 			`__wrap_fn$${key}`,
-			["externref"],
-			[desc.wType],
+			[EXT],
+			[EXT],
 			[
 				{ op: "ref.func", funcIndex: thunkIdx },
 				get(0),
 				{ op: "any.convert_extern" },
 				{ op: "struct.new", typeIndex: ci.typeIndex },
+				...toExt(desc.wType),
 			],
 		);
+		// JS calling a wasm closure (boundary forms in, results out).
 		addFunc(
 			`__call_fn$${key}`,
-			[desc.wType, ...ci.paramWTypes],
-			ci.returnWTypes,
+			[EXT, ...ci.paramWTypes.map(extType)],
+			ci.returnWTypes.map(extType),
 			[
-				get(0),
+				...getIn(0, desc.wType),
 				{ op: "struct.get", typeIndex: ci.typeIndex, fieldIndex: 1 },
-				...ci.paramWTypes.map((_, i) => get(i + 1)),
-				get(0),
+				...ci.paramWTypes.flatMap((w, i) => getIn(i + 1, w)),
+				...getIn(0, desc.wType),
 				{ op: "struct.get", typeIndex: ci.typeIndex, fieldIndex: 0 },
 				{ op: "call_ref", typeIndex: ci.funcTypeIndex },
+				...convertResults(ci.returnWTypes, toExt, nParams + 1),
 			],
+			true,
+			ci.returnWTypes.length > 1 ? ci.returnWTypes : [],
 		);
 	}
+
+	// Exported user functions / methods whose signature carries i64 or GC refs
+	// get a trampoline (`__x_<export>`) with the boundary signature; the facade
+	// calls that instead of the raw export.
+	const addTrampoline = (entry) => {
+		const fnIdx = mod.funcMap.get(entry.exportName);
+		if (fnIdx === undefined) return;
+		const sig = typeAt(mod, mod.funcs[fnIdx - importFuncCount]?.typeIndex);
+		if (sig?.form !== "func") return;
+		const paramW = sig.params;
+		const resultW = sig.results;
+		if (!needsConv(paramW) && !needsConv(resultW)) return;
+		entry.callName = `__x_${entry.exportName}`;
+		addFunc(
+			entry.callName,
+			paramW.map(extType),
+			resultW.map(extType),
+			[
+				...paramW.flatMap((w, i) => getIn(i, w)),
+				{ op: "call", funcIndex: fnIdx },
+				...convertResults(resultW, toExt, paramW.length),
+			],
+			true,
+			resultW.length > 1 ? resultW : [],
+		);
+	};
+	for (const s of meta.structs) for (const m of s.methods) addTrampoline(m);
+	for (const f of meta.funcs) addTrampoline(f);
 }
 
 // ── JS facade generation ─────────────────────────────────────
@@ -829,6 +978,7 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 	const targ = (v) => { targs.push(v); };
 	const env = {
 		"panicTag": tag,
+		"panic": (msg) => { throw new Error(String(msg)); },
 		"str": (i) => stringTable[i] ?? "",
 		"str_len": (s) => (s ? s.length : 0),
 		"str_concat": (a, b) => (a ?? "") + (b ?? ""),
@@ -866,22 +1016,6 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 
 // Runtime loader emitted at the top of the facade.
 export const WASM_LOADER_JS = `${WASM_IMPORTS_JS}
-function ${P}guard(exports, tag) {
-	const out = {};
-	for (const name of Object.keys(exports)) {
-		const val = exports[name];
-		// Marshalling helpers (\`__*\`) are hot and cannot panic; call them raw.
-		if (typeof val !== "function" || name.startsWith("__")) { out[name] = val; continue; }
-		out[name] = (...args) => {
-			try { return val(...args); }
-			catch (e) {
-				if (tag && e instanceof WebAssembly.Exception && e.is(tag)) throw new Error(String(e.getArg(tag, 0)));
-				throw e;
-			}
-		};
-	}
-	return out;
-}
 async function ${P}fetch(url) {
 	const res = await fetch(url);
 	if (!res.ok) throw new Error("GoFront: failed to fetch " + url + " (" + res.status + ")");
@@ -903,23 +1037,22 @@ async function ${P}load(stringTable, extraEnv) {
 	}
 	const tag = new WebAssembly.Tag({ "parameters": ["externref"] });
 	const imports = ${P}imports(stringTable, extraEnv, tag, (s) => console.log(s));
-	let result;
-	try {
-		result = await ${P}instantiate(imports);
-	} catch (e) {
-		// Package-level initializers run in the start function, before the module's own tag is reachable.
-		if (e instanceof WebAssembly.Exception) throw new Error("GoFront: panic during package initialization of app.wasm");
-		throw e;
-	}
-	const instance = result.instance;
-	return ${P}guard(instance.exports, instance.exports.panicTag ?? tag);
+	// Panics arrive as plain JS Errors thrown by env.panic (also from the
+	// start function while package-level initializers run), so exports are
+	// returned raw: no try/catch wrapper, which keeps JS→wasm calls inlinable.
+	const result = await ${P}instantiate(imports);
+	return result.instance.exports;
 }
-const ${P}i64in = (v) => typeof v === "bigint" ? v : BigInt(Math.trunc(v));
+// Go int/int64 cross the boundary as f64 (exact within the safe-integer range).
+const ${P}i64in = (v) => (typeof v === "bigint" ? Number(v) : +v);
 const ${P}i64out = (v) => {
 	if (v > ${P}MAX || v < -${P}MAX) throw new RangeError("GoFront: int64 value " + v + " exceeds the safe JS integer range");
-	return Number(v);
+	return v;
 };
-const ${P}u64out = (v) => ${P}i64out(BigInt.asUintN(64, v));
+const ${P}u64out = (v) => {
+	if (v < 0 || v > ${P}MAX) throw new RangeError("GoFront: uint64 value exceeds the safe JS integer range");
+	return v;
+};
 const ${P}strin = (v) => (v == null ? "" : String(v));
 const ${P}href = (h) => (h == null ? null : h.__ref);
 // Live index view over a wasm array/slice (reads and writes go through to wasm).
@@ -1045,12 +1178,36 @@ ${indent(body, "\t")}
 	for (const c of meta.consts) out.push(`const ${c.name} = ${c.value};`);
 
 	for (const f of meta.funcs) {
-		const { names, body } = genFuncBody(f.exportName, f.params, f.returns);
+		const { names, body } = genFuncBody(
+			f.callName ?? f.exportName,
+			f.params,
+			f.returns,
+		);
 		out.push(`function ${f.name}(${names.join(", ")}) {\n${body}\n}`);
 	}
 
 	if (callMain) out.push("__w.main();");
-	return out.join("\n");
+	return bindExports(out.join("\n"));
+}
+
+// Rewrites `__w.name(...)` into calls through module-level `const` bindings.
+// V8 only inlines a JS→wasm call (and so passes f32/f64 arguments unboxed)
+// when the callee is a compile-time constant; a property load off the exports
+// object is not, and every float argument then costs a 16-byte HeapNumber.
+function bindExports(src) {
+	const loadLine = "const __w = await ";
+	const at = src.indexOf(loadLine);
+	if (at < 0) return src;
+	const eol = src.indexOf("\n", at);
+	const head = src.slice(0, eol + 1);
+	let tail = src.slice(eol + 1);
+	const names = new Set();
+	tail = tail.replace(/__w\.([A-Za-z_$][\w$]*)/g, (_, n) => {
+		names.add(n);
+		return `__w$${n}`;
+	});
+	const binds = [...names].map((n) => `const __w$${n} = __w.${n};`).join("\n");
+	return `${head}${binds}\n${tail}`;
 }
 
 function genBothStruct(out, name, fields) {
@@ -1070,8 +1227,8 @@ function genBothStruct(out, name, fields) {
 		outExpr(f.desc, `__w.__get_${name}_${f.name}(r)`),
 	);
 	const viewProps = fields.map((f) => {
-		const got = `__w.__get_${name}_${f.name}(r)`;
-		return `"${f.name}": { "enumerable": true, "get": () => ${viewExpr(f.desc, got)}, "set": (v) => __w.__set_${name}_${f.name}(r, ${inExpr(f.desc, "v")}) }`;
+		const got = `__w.__get_${name}_${f.name}(this.__ref)`;
+		return `"${f.name}": { "enumerable": true, "get"() { return ${viewExpr(f.desc, got)}; }, "set"(v) { __w.__set_${name}_${f.name}(this.__ref, ${inExpr(f.desc, "v")}); } }`;
 	});
 	out.push(`function ${P}to_${name}(o, isValue, m) {
 	if (o == null) return isValue ? __w.__zero_${name}() : null;
@@ -1084,10 +1241,19 @@ function ${P}from_${name}(r) {
 	if (r == null) return null;
 	return new ${name}(${fromArgs.join(", ")});
 }
+// Live views share one prototype and are cached per wasm object so hot paths
+// (\`h.Pos.X = 1\` in a frame loop) do not allocate a wrapper per access.  The
+// prototype is built on first use: the facade may precede the \`both\`
+// package's own JS (and so the \`${name}\` class) in the bundle.
+let ${P}vp_${name} = null;
+const ${P}vc_${name} = new WeakMap();
 function ${P}view_${name}(r) {
 	if (r == null) return null;
-	const o = Object.create(${name}.prototype);
-	Object.defineProperties(o, { ${viewProps.join(", ")} });
+	let o = ${P}vc_${name}.get(r);
+	if (!o) {
+		if (${P}vp_${name} === null) ${P}vp_${name} = Object.create(${name}.prototype, { ${viewProps.join(", ")} });
+		o = Object.create(${P}vp_${name}); o.__ref = r; ${P}vc_${name}.set(r, o);
+	}
 	return o;
 }
 function ${P}back_${name}(r, o) {
@@ -1128,9 +1294,12 @@ class ${name} {
 	}
 	for (const m of methods) {
 		const recv = m.ptrRecv ? "this.__ref" : `__w.__clone_${name}(this.__ref)`;
-		const { names, body } = genFuncBody(m.exportName, m.params, m.returns, [
-			recv,
-		]);
+		const { names, body } = genFuncBody(
+			m.callName ?? m.exportName,
+			m.params,
+			m.returns,
+			[recv],
+		);
 		lines.push(
 			`\t${m.name}(${names.join(", ")}) {\n${indent(body, "\t")}\n\t}`,
 		);

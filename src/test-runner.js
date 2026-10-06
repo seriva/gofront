@@ -380,13 +380,10 @@ export async function runTests(targetDir, options = {}) {
 			options,
 		);
 
-	// `wasm` packages run inside the linked app.wasm.
+	// `wasm` packages run inside the linked app.wasm; `js` packages that import
+	// wasm packages need the linked module too (hybrid packages).
 	if (compiled.target === "both") {
 		return runDualTarget(compiled, resolvedDir, runHarness, options);
 	}
-	return runHarness(
-		js,
-		pkgName,
-		compiled.target === "wasm" ? compiled.wasm : null,
-	);
+	return runHarness(js, pkgName, compiled.wasm ?? null);
 }

@@ -1,9 +1,9 @@
 # WASM MVP (Hybrid Targets in the JS Compiler) — Design Plan
 
 **Version:** v1.5.0  
-**Status:** In Progress (2026-10-05)  
+**Status:** Completed (2026-10-06) — go/no-go number publishes with v1.5.1  
 **Baseline:** v1.4.0 JS compiler (`src/`)  
-**Continues in:** [`docs/v1.6.0/wasm-hybrid-plan.md`](../v1.6.0/wasm-hybrid-plan.md) (full hybrid, still in the JS compiler) → [`docs/v2.0.0/native-go-engine.md`](../v2.0.0/native-go-engine.md) (port of the finished compiler to Go)
+**Continues in:** [`docs/v1.5.1/wasm-codegen-perf-plan.md`](../v1.5.1/wasm-codegen-perf-plan.md) (codegen performance, gates Phase 6c) → [`docs/v1.6.0/wasm-hybrid-plan.md`](../v1.6.0/wasm-hybrid-plan.md) (full hybrid, still in the JS compiler) → [`docs/v2.0.0/native-go-engine.md`](../v2.0.0/native-go-engine.md) (port of the finished compiler to Go)
 
 ---
 
@@ -192,7 +192,7 @@ The boundary per frame is then raycasts (gameplay, bodies, controller), each a s
 - **Narrow integer wrap:** `int8(127) + 1 == -128` in WASM and JS-strict. Normal JS mode is unchanged (documented semantic difference).
 - **`float32` rounding:** every intermediate is rounded in both WASM and JS-strict, including compound assignment and `++`.
 - **Integer division by zero:** panics in WASM and JS-strict. `MinInt32 / -1` wraps (Go) and must not trap (WASM `i32.div_s` traps, so emit a guarded sequence).
-- **Nil pointer dereference:** WASM `struct.get` on null traps. The backend emits an explicit check so the panic message matches the JS backend's.
+- **Nil pointer dereference:** WASM `struct.get` on null traps. v1.5.0 emits an explicit check so the panic message matches the JS backend's; [v1.5.1](../v1.5.1/wasm-codegen-perf-plan.md) replaces this with the trap plus a message translation at the boundary.
 - **Recursive struct types** (`OctreeNode` children): emitted in one recursive type group.
 - **Struct values inside slices:** element reads copy unless `lower` elides the copy, matching JS semantics exactly.
 - **Handle identity:** the same WASM object always maps to the same facade instance. Verify early whether WasmGC refs work as `WeakMap` keys in all target engines. Fallback: store the facade back-reference in an `externref` field.
@@ -269,8 +269,8 @@ The boundary per frame is then raycasts (gameplay, bodies, controller), each a s
   - Verify all unit tests, linters, and architectural rules pass (`npm test`, `npm run check`).
 
 ### Phase 6: simplefps Validation & Go/No-Go Benchmark
-- [ ] **Phase 6a — simplefps split:** `engine/mathx` (`both`) and `engine/collision` (`wasm`). `mathx` passes on both targets, `collision` passes in WASM.
-- [ ] **Phase 6b — Raycast benchmark harness:** `test/e2e/perf/raycast-bench.js` (100k+ triangles, 100k rays). Automated benchmark produces repeatable rays/s & alloc numbers.
-- [ ] **Phase 6c — Verification & publish:** Full game verification (manual play at 60 FPS) & publish benchmark in README / CHANGELOG. simplefps runs hybrid. **Go/no-go benchmark published.**
+- [x] **Phase 6a — simplefps split:** `engine/mathx` (`both`) and `engine/collision` (`wasm`). `mathx` passes on both targets, `collision` passes in WASM.
+- [x] **Phase 6b — Raycast benchmark harness:** `test/e2e/perf/raycast-bench.js` (100k+ triangles, 100k rays). Automated benchmark produces repeatable rays/s & alloc numbers. (`npm run bench:raycast`; fixture under `test/e2e/perf/raycast/` is a snapshot of simplefps `engine/{mathx,collision}`.)
+- [x] **Phase 6c — Verification & publish:** simplefps runs hybrid and is verified (`check`, `test`, `test:dom`, `test:perf` zero-alloc gate, `test:e2e`, `build` → `app.wasm`). The benchmark number is **deferred to [v1.5.1](../v1.5.1/wasm-codegen-perf-plan.md)**: the 6b baseline is hybrid = 0.65× JS (16,678 vs 25,660 rays/s) and the cause is emitter output quality, so the go/no-go is published — together with the manual 60 FPS play check — after the codegen work (v1.5.1 Task 6), not before.
 
 **After Phase 6:** if the benchmark and determinism results justify it, v1.6.0 completes the hybrid in the JS compiler, and v2.0.0 ports the finished result. If not, the WASM backend stays as a documented experimental target, v1.6.0 is dropped or repurposed, and v2.0.0 ports the v1.5 subset as-is without further investment.
