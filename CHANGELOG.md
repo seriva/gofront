@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-10-06
+
 ### Added
 - **`src/lower/` analysis layer** — ownership/clone elision, address-taken boxing, range shape, function structure (named returns, `defer`), embedded-method stubs, closure captures and pointer escape analysis now live in `src/lower/` as side tables keyed by AST node. JS output is unchanged; the WASM backend consumes the tables.
 - **Package targets** — `//gofront:target js|wasm|both` before the `package` clause selects a compilation target per package. `wasm` packages may only import `wasm`/`both` packages and the stdlib subset the backend implements (`math`, `math/bits`, `testing`); `both` packages may only import `both` packages, may not use `gom`, and may not mutate package-level variables (direct assignment, `++`/`--`, `&x`, and pointer-receiver method calls are all detected, with shadowing respected). Violations end with a summary line such as `package 'p' cannot be both: 3 blockers — …`. Unknown target values and directives placed after the `package` clause are rejected.
