@@ -43,11 +43,23 @@ import "./compiler/asset-manager.test.js";
 import "./compiler/prep.test.js";
 import "./compiler/pwa.test.js";
 import "./compiler/test-runner.test.js";
+import "./compiler/targets.test.js";
+import "./compiler/strict-mode.test.js";
 import "./builtins/gom.test.js";
 import "./templ.test.js";
 import "./dom.test.js";
 import "./lexer-parser.test.js";
 import "./minifier.test.js";
+import "./lower.test.js";
+import "./wasm/encode.test.js";
+import "./wasm/wat.test.js";
+import "./wasm/scalars.test.js";
+import "./wasm/traps.test.js";
+import "./wasm/structs.test.js";
+import "./wasm/slices.test.js";
+import "./wasm/strings_any.test.js";
+import "./wasm/closures.test.js";
+import "./wasm/boundary.test.js";
 
 import { summarize } from "./helpers.js";
 

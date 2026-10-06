@@ -114,6 +114,8 @@ export class Parser {
 			pkg,
 			imports,
 			decls,
+			target: this.tokens?.target ?? null,
+			_targetDirective: this.tokens?.targetDirective ?? null,
 			_filename: this.filename,
 			_source: this.source,
 		};
@@ -130,7 +132,9 @@ export class Parser {
 		this.expect(T.IMPORT);
 		const imports = [];
 		const parseOne = () => {
-			const _line = this.peek().line;
+			const tok = this.peek();
+			const _line = tok.line;
+			const _col = tok.col;
 			let alias = null;
 			if (this.check(T.IDENT)) {
 				alias = this.advance().value;
@@ -138,8 +142,9 @@ export class Parser {
 				alias = ".";
 				this.advance();
 			}
-			const path = this.expect(T.STRING).value;
-			return { path, alias, _line };
+			const pathTok = this.expect(T.STRING);
+			const path = pathTok.value;
+			return { path, alias, _line, _col, line: pathTok.line, col: pathTok.col };
 		};
 		if (this.match(T.LPAREN)) {
 			while (!this.check(T.RPAREN) && !this.check(T.EOF)) {

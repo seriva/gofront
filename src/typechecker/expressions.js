@@ -3,6 +3,7 @@
 import {
 	ANY,
 	BOOL,
+	BROWSER_GLOBALS,
 	COMPLEX128,
 	ERROR,
 	FLOAT64,
@@ -126,6 +127,26 @@ export const expressionCheckMethods = {
 				const t = scope.lookup(expr.name);
 				if (!t) return this.err(`Undefined: '${expr.name}'`, expr);
 				if (this.types.has(expr.name)) expr._isTypeRef = true;
+				if (
+					(this.target === "wasm" || this.target === "both") &&
+					BROWSER_GLOBALS.has(expr.name) &&
+					scope.lookup(expr.name) === this.globals.lookup(expr.name)
+				) {
+					this.recordBlocker("browser global", expr.name);
+					this.err(
+						`'${expr.name}' is not available in wasm packages`,
+						expr,
+						`(package '${this.pkgName}' is //gofront:target ${this.target} — browser globals are only available in js packages)`,
+					);
+				}
+				if (
+					(this.target === "wasm" || this.target === "both") &&
+					expr.name === "gom" &&
+					scope.lookup(expr.name) === this.globals.lookup(expr.name)
+				) {
+					this.recordBlocker("gom usage", "gom");
+					this.err("package 'gom' is not available in wasm packages", expr);
+				}
 				return t;
 			}
 			case "BinaryExpr": {
@@ -136,8 +157,16 @@ export const expressionCheckMethods = {
 					return this.binaryResultType(expr.op, ANY, ANY, expr);
 				return this.binaryResultType(expr.op, lt, rt, expr);
 			}
-			case "AwaitExpr":
+			case "AwaitExpr": {
+				if (this.target === "wasm" || this.target === "both") {
+					this.recordBlocker("async function");
+					this.err(
+						"async functions are not supported in wasm packages; keep async code in a js package",
+						expr,
+					);
+				}
 				return this.checkExpr(expr.expr, scope);
+			}
 			case "InstantiationExpr":
 				return this._checkInstantiationExpr(expr, scope);
 			default: {
@@ -280,6 +309,16 @@ export const expressionCheckMethods = {
 	},
 
 	_checkFuncLit(expr, scope) {
+		if (
+			(this.target === "wasm" || this.target === "both") &&
+			(expr.async || expr.isAsync)
+		) {
+			this.recordBlocker("async function");
+			this.err(
+				"async functions are not supported in wasm packages; keep async code in a js package",
+				expr,
+			);
+		}
 		const inner = new Scope(scope);
 		for (const p of expr.params)
 			inner.define(p.name, p.type ? this.resolveTypeNode(p.type, scope) : ANY);

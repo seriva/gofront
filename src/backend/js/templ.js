@@ -2,8 +2,8 @@
 // Mounts an HTML/expression tree onto a parent DOM node by emitting plain
 // document.createElement / appendChild / setAttribute calls.
 
-import { Parser } from "../parser/index.js";
-import { T, Token } from "../tokens.js";
+import { Parser } from "../../parser/index.js";
+import { T, Token } from "../../tokens.js";
 
 /** @typedef {import('./index.js').CodeGen} CodeGen */
 

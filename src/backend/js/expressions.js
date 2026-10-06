@@ -1,11 +1,77 @@
 import {
+	closureMutates,
+	fnMutates,
+	nodeMutatesVar,
+	nodeWritesVar,
+	rootIdentName,
+} from "../../lower/index.js";
+import {
 	ERROR,
 	isComplex,
 	isTypedArraySlice,
 	typedArrayConstructorForElem,
-} from "../typechecker/types.js";
+} from "../../typechecker/types.js";
 
 /** @typedef {import('./index.js').CodeGen} CodeGen */
+
+export const STRICT_NUMERIC_TYPES = new Set([
+	"float32",
+	"int8",
+	"int16",
+	"int32",
+	"rune",
+	"uint8",
+	"byte",
+	"uint16",
+	"uint32",
+]);
+
+export const STRICT_OPS = new Set([
+	"+",
+	"-",
+	"*",
+	"/",
+	"%",
+	"&",
+	"|",
+	"^",
+	"&^",
+	"<<",
+	">>",
+]);
+
+// Splits a generated JS lvalue at its outermost trailing access:
+// `a.b[i]` → { obj: "a.b", key: "i" }, `a.b.c` → { obj: "a.b", prop: "c" }.
+function splitLastAccess(js) {
+	if (js.endsWith("]")) {
+		let depth = 0;
+		let quote = null;
+		for (let i = js.length - 1; i >= 0; i--) {
+			const ch = js[i];
+			if (quote) {
+				if (ch === quote && js[i - 1] !== "\\") quote = null;
+				continue;
+			}
+			if (ch === '"' || ch === "'" || ch === "`") quote = ch;
+			else if (ch === "]" || ch === ")") depth++;
+			else if (ch === "[" || ch === "(") {
+				depth--;
+				if (depth === 0 && ch === "[" && i > 0)
+					return { obj: js.slice(0, i), key: js.slice(i + 1, -1) };
+			}
+		}
+		return null;
+	}
+	const m = /^(.*[^.])\.([A-Za-z_$][\w$]*)$/s.exec(js);
+	if (!m) return null;
+	// Only split when the dot is at nesting depth 0, e.g. not inside `f(a.b)`.
+	let depth = 0;
+	for (const ch of m[1]) {
+		if (ch === "(" || ch === "[") depth++;
+		else if (ch === ")" || ch === "]") depth--;
+	}
+	return depth === 0 ? { obj: m[1], prop: m[2] } : null;
+}
 
 // Namespace constants: pkg.Field → JS literal
 const NS_CONSTANTS = {
@@ -144,7 +210,7 @@ const TYPEOF_NUMBER_NAMES = new Set([...INT_TYPE_NAMES, "float32", "float64"]);
 const BUILTIN_GEN = {
 	append: (s, e) => s.genAppend(e),
 	len: (s, e) => s._genBuiltinLen(e),
-	cap: (s, e) => `${s.genExpr(e.args[0])}.length`,
+	cap: (s, e) => `(${s.genExpr(e.args[0])}?.length ?? 0)`,
 	make: (s, e) => s.genMake(e),
 	delete: (s, e) => {
 		const [m, k] = e.args.map((a) => s.genExpr(a));
@@ -335,60 +401,21 @@ export const expressionGenMethods = {
 	},
 
 	_rootIdentName(e) {
-		while (e) {
-			if (e.kind === "Ident") return e.name;
-			if (e.kind === "SelectorExpr" || e.kind === "IndexExpr") e = e.expr;
-			else if (e.kind === "UnaryExpr" && e.op === "*") e = e.operand;
-			else return null;
-		}
-		return null;
+		return rootIdentName(e);
 	},
 
 	// True when `node` itself (not its children) writes to variable `name`.
 	_nodeWritesVar(node, name) {
-		const root = (e) => this._rootIdentName(e) === name;
-		switch (node.kind) {
-			case "AssignStmt":
-				return node.lhs.some(root);
-			case "DefineStmt":
-				return node.lhs.some((e) => e._redecl && e.name === name);
-			case "IncDecStmt":
-				return root(node.expr);
-			case "SelectorExpr":
-				return Boolean(
-					node._isMethodValue && node._type?._ptrRecv && root(node.expr),
-				);
-			default:
-				return false;
-		}
+		return nodeWritesVar(node, name);
 	},
 
 	// True when `node` may modify (or take the address of) the value held by variable `name`.
 	_nodeMutatesVar(node, name, addrOnly = false) {
-		if (!node || typeof node !== "object") return false;
-		if (Array.isArray(node))
-			return node.some((n) => this._nodeMutatesVar(n, name, addrOnly));
-		if (
-			node.kind === "UnaryExpr" &&
-			node.op === "&" &&
-			this._rootIdentName(node.operand) === name
-		)
-			return true;
-		if (!addrOnly && this._nodeWritesVar(node, name)) return true;
-		for (const key of Object.keys(node)) {
-			if (key.startsWith("_")) continue;
-			if (this._nodeMutatesVar(node[key], name, addrOnly)) return true;
-		}
-		return false;
+		return nodeMutatesVar(node, name, addrOnly);
 	},
 
 	_fnMutates(name, addrOnly = false) {
-		const ctx = this._fnCtx;
-		if (!ctx) return true;
-		const key = `${addrOnly ? "&" : ""}${name}`;
-		if (!ctx.mut.has(key))
-			ctx.mut.set(key, this._nodeMutatesVar(ctx.body, name, addrOnly));
-		return ctx.mut.get(key);
+		return fnMutates(this._fnCtx?.body, name, addrOnly, this._fnCtx?.mut);
 	},
 
 	_withFnCtx(body, fn) {
@@ -447,21 +474,7 @@ export const expressionGenMethods = {
 	},
 
 	_closureMutates(name) {
-		const ctx = this._fnCtx;
-		const key = `λ${name}`;
-		if (!ctx.mut.has(key)) {
-			const walk = (node) => {
-				if (!node || typeof node !== "object") return false;
-				if (Array.isArray(node)) return node.some(walk);
-				if (node.kind === "FuncLit")
-					return this._nodeMutatesVar(node.body, name);
-				return Object.keys(node).some(
-					(k) => !k.startsWith("_") && walk(node[k]),
-				);
-			};
-			ctx.mut.set(key, walk(ctx.body));
-		}
-		return ctx.mut.get(key);
+		return closureMutates(this._fnCtx?.body, name, this._fnCtx?.mut);
 	},
 
 	_genUnaryExpr(expr) {
@@ -1253,6 +1266,12 @@ export const expressionGenMethods = {
 			return expr.op === "==" ? cmp : `!${cmp}`;
 		}
 
+		if (this.strict && this._needsStrictOp(expr.op, expr._type)) {
+			const l = this.genExpr(expr.left);
+			const r = this.genExpr(expr.right);
+			return this._genStrictBinary(expr.op, l, r, expr._type);
+		}
+
 		const jsOp = this._emittedBinaryOp(expr) ?? "/";
 		const operand = (child, isRight) =>
 			wrapForJsOp(
@@ -1421,5 +1440,143 @@ export const expressionGenMethods = {
 			default:
 				return inner;
 		}
+	},
+
+	_typeName(t) {
+		if (!t) return null;
+		if (t.kind === "untyped") return t.base;
+		if (t.kind === "named") return this._typeName(t.underlying);
+		if (t.kind === "basic") return t.name;
+		return null;
+	},
+
+	_isStrictAtomicOp(_op, typeName) {
+		return STRICT_NUMERIC_TYPES.has(typeName);
+	},
+
+	_needsStrictOp(op, type) {
+		if (!STRICT_OPS.has(op)) return false;
+		if (this._isStrictAtomicOp(op, this._typeName(type))) return true;
+		return this.isIntType(type) && (op === "/" || op === "%");
+	},
+
+	// Emits `lhs = strict(lhs op rhs)` for any lvalue shape; returns false when not applicable.
+	// Indexed / nested targets are split into object + key temps so sub-expressions run once.
+	_genStrictCompound(lhsNode, op, rhsJs, srcLine = null, lhsJs = null) {
+		const type = lhsNode._type;
+		if (!this._needsStrictOp(op, type)) return false;
+		if (lhsNode.kind === "IndexExpr" && lhsNode.expr?._type?.kind === "map")
+			return false;
+		const l = lhsJs ?? this._genAssignLhsExpr(lhsNode);
+		if (/^[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*)*$/.test(l)) {
+			this.line(
+				`${l} = ${this._genStrictBinary(op, l, rhsJs, type)};`,
+				srcLine,
+			);
+			return true;
+		}
+		const split = splitLastAccess(l);
+		if (!split) return false;
+		this._tmpCounter = (this._tmpCounter ?? 0) + 1;
+		const o = `__o${this._tmpCounter}`;
+		if (split.key != null) {
+			const k = `__k${this._tmpCounter}`;
+			const target = `${o}[${k}]`;
+			this.line(
+				`{ const ${o} = ${split.obj}, ${k} = ${split.key}; ${target} = ${this._genStrictBinary(op, target, rhsJs, type)}; }`,
+				srcLine,
+			);
+		} else {
+			const target = `${o}.${split.prop}`;
+			this.line(
+				`{ const ${o} = ${split.obj}; ${target} = ${this._genStrictBinary(op, target, rhsJs, type)}; }`,
+				srcLine,
+			);
+		}
+		return true;
+	},
+
+	_genStrictBinary(op, l, r, type) {
+		const tName = this._typeName(type);
+		if (tName === "float32") {
+			return `Math.fround(${l} ${op} ${r})`;
+		}
+		if (tName === "int32" || tName === "rune") {
+			if (op === "*") return `Math.imul(${l}, ${r})`;
+			if (op === "/")
+				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : (Math.trunc((${l}) / (${r})) | 0))`;
+			if (op === "%")
+				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : (((${l}) % (${r})) | 0))`;
+			if (op === "<<" || op === ">>") {
+				return `((${r}) >= 32 ? (${op === ">>" ? `((${l}) < 0 ? -1 : 0)` : "0"}) : ((${l}) ${op} (${r}))) | 0`;
+			}
+			if (op === "&^") return `((${l}) & ~(${r})) | 0`;
+			return `((${l} ${op} ${r}) | 0)`;
+		}
+		if (tName === "uint32") {
+			if (op === "/")
+				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : (Math.trunc((${l}) / (${r})) >>> 0))`;
+			if (op === "%")
+				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : (((${l}) % (${r})) >>> 0))`;
+			if (op === "<<" || op === ">>") {
+				const jsOp = op === ">>" ? ">>>" : "<<";
+				return `((${r}) >= 32 ? 0 : ((${l}) ${jsOp} (${r}))) >>> 0`;
+			}
+			if (op === "&^") return `((${l}) & ~(${r})) >>> 0`;
+			return `((${l} ${op} ${r}) >>> 0)`;
+		}
+		if (tName === "int8") {
+			if (op === "/")
+				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : ((Math.trunc((${l}) / (${r})) << 24) >> 24))`;
+			if (op === "%")
+				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : (((((${l}) % (${r})) << 24) >> 24)))`;
+			if (op === "<<" || op === ">>") {
+				return `((${r}) >= 8 ? (${op === ">>" ? `((${l}) < 0 ? -1 : 0)` : "0"}) : (((${l}) ${op} (${r})) << 24 >> 24))`;
+			}
+			if (op === "&^") return `((((${l}) & ~(${r})) << 24) >> 24)`;
+			return `((((${l} ${op} ${r})) << 24) >> 24)`;
+		}
+		if (tName === "int16") {
+			if (op === "/")
+				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : ((Math.trunc((${l}) / (${r})) << 16) >> 16))`;
+			if (op === "%")
+				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : (((((${l}) % (${r})) << 16) >> 16)))`;
+			if (op === "<<" || op === ">>") {
+				return `((${r}) >= 16 ? (${op === ">>" ? `((${l}) < 0 ? -1 : 0)` : "0"}) : (((${l}) ${op} (${r})) << 16 >> 16))`;
+			}
+			if (op === "&^") return `((((${l}) & ~(${r})) << 16) >> 16)`;
+			return `((((${l} ${op} ${r})) << 16) >> 16)`;
+		}
+		if (tName === "uint8" || tName === "byte") {
+			if (op === "/")
+				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : (Math.trunc((${l}) / (${r})) & 0xFF))`;
+			if (op === "%")
+				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : (((${l}) % (${r})) & 0xFF))`;
+			if (op === "<<" || op === ">>") {
+				const jsOp = op === ">>" ? ">>>" : "<<";
+				return `((${r}) >= 8 ? 0 : (((${l}) ${jsOp} (${r})) & 0xFF))`;
+			}
+			if (op === "&^") return `(((${l}) & ~(${r})) & 0xFF)`;
+			return `((${l} ${op} ${r}) & 0xFF)`;
+		}
+		if (tName === "uint16") {
+			if (op === "/")
+				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : (Math.trunc((${l}) / (${r})) & 0xFFFF))`;
+			if (op === "%")
+				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : (((${l}) % (${r})) & 0xFFFF))`;
+			if (op === "<<" || op === ">>") {
+				const jsOp = op === ">>" ? ">>>" : "<<";
+				return `((${r}) >= 16 ? 0 : (((${l}) ${jsOp} (${r})) & 0xFFFF))`;
+			}
+			if (op === "&^") return `(((${l}) & ~(${r})) & 0xFFFF)`;
+			return `((${l} ${op} ${r}) & 0xFFFF)`;
+		}
+		if (this.isIntType(type)) {
+			if (op === "/")
+				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : Math.trunc((${l}) / (${r})))`;
+			if (op === "%")
+				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : ((${l}) % (${r})))`;
+		}
+		return `${l} ${op} ${r}`;
 	},
 };

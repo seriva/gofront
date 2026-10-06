@@ -111,6 +111,8 @@ export class Lexer {
 		this.col = 1;
 		this.tokens = [];
 		this.filename = filename;
+		this.target = null;
+		this.targetDirective = null;
 	}
 
 	// ── Primitives ──────────────────────────────────────────────
@@ -150,8 +152,22 @@ export class Lexer {
 			if (ch === " " || ch === "\t" || ch === "\r") {
 				this.advance();
 			} else if (ch === "/" && this.peek(1) === "/") {
+				const start = this.pos;
+				const line = this.line,
+					col = this.col;
 				while (this.pos < this.src.length && this.peek() !== "\n")
 					this.advance();
+				const comment = this.src.slice(start, this.pos);
+				const match = comment.match(/^\/\/gofront:target\s+(\S+)/);
+				if (match) {
+					this.target = match[1];
+					this.targetDirective = {
+						value: match[1],
+						line,
+						col,
+						beforePackage: this.tokens.length === 0,
+					};
+				}
 			} else if (ch === "/" && this.peek(1) === "*") {
 				const startLine = this.line,
 					startCol = this.col;
@@ -472,6 +488,8 @@ export class Lexer {
 
 		if (this.shouldSemi()) this.push(T.SEMICOLON, ";", this.line, this.col);
 		this.push(T.EOF, "", this.line, this.col);
+		this.tokens.target = this.target;
+		this.tokens.targetDirective = this.targetDirective;
 		return this.tokens;
 	}
 	_readPlusOp(l, c) {

@@ -219,6 +219,8 @@ function _scanNumber(code, i, len) {
 	} else {
 		j = _scanDecimalNumber(code, j, len);
 	}
+	// BigInt literal suffix (`123n`)
+	if (j < len && code[j] === "n") j++;
 	return j;
 }
 

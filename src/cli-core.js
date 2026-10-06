@@ -23,6 +23,7 @@ import {
 	sep,
 } from "node:path";
 import { copyAssets } from "./asset-manager.js";
+import { isGoFrontWasm } from "./backend/wasm/index.js";
 import { colors, log } from "./colors.js";
 import { compileDir, compileSingleFile } from "./compiler.js";
 import { createDevServer } from "./dev-server.js";
@@ -42,11 +43,12 @@ export function runCompile(inputPath, isDir, options) {
 		outputFile = null,
 		dumpTokens = false,
 		dumpAst = false,
+		emitWat = false,
 	} = options ?? {};
 
 	if (isDir) {
 		const outputDir = outputFile ? dirname(resolve(outputFile)) : resolve(".");
-		return compileDir(inputPath, { sourceMap, outputDir });
+		return compileDir(inputPath, { sourceMap, outputDir, emitWat });
 	}
 
 	return compileSingleFile(inputPath, {
@@ -54,7 +56,47 @@ export function runCompile(inputPath, isDir, options) {
 		outputFile,
 		dumpTokens,
 		dumpAst,
+		emitWat,
 	});
+}
+
+// Writes the JS bundle plus, when the project links wasm packages, the
+// sibling `app.wasm` (and `app.wat` when requested).  Stale wasm artifacts
+// are removed so a project that drops its wasm packages serves clean output —
+// but only when the existing file is one GoFront produced (recognised by its
+// `gofront` custom section), so a hand-placed `app.wasm` is left alone.
+export function writeCompileOutput(outputFile, result, js = result.js) {
+	mkdirSync(dirname(outputFile), { recursive: true });
+	writeFileSync(outputFile, `${js}\n`);
+	const wasmFile = join(dirname(outputFile), "app.wasm");
+	const watFile = join(dirname(outputFile), "app.wat");
+	const written = [outputFile];
+	let ownsWasm = Boolean(result.wasm);
+	if (result.wasm) {
+		writeFileSync(wasmFile, result.wasm);
+		written.push(wasmFile);
+	} else if (existsSync(wasmFile)) {
+		if (isGoFrontWasm(readFileSync(wasmFile))) {
+			rmSync(wasmFile);
+			ownsWasm = true;
+		}
+	}
+	if (result.wat) {
+		writeFileSync(watFile, result.wat);
+		written.push(watFile);
+	} else if (ownsWasm && existsSync(watFile)) {
+		rmSync(watFile);
+	}
+	return written;
+}
+
+export function formatWrittenDesc(written, outputFile = written?.[0] ?? "") {
+	if (!written || written.length <= 1) return colors.cyan(outputFile);
+	const extras = written
+		.slice(1)
+		.map((p) => colors.cyan(basename(p)))
+		.join(" + ");
+	return `${colors.cyan(outputFile)} + ${extras}`;
 }
 
 export function maybeMinify(js, options) {
@@ -460,6 +502,7 @@ export function parseBuildArgs(argv) {
 	const sourceMap = argv.includes("--source-map");
 	const noMinify = argv.includes("--no-minify");
 	const noMangle = argv.includes("--no-mangle");
+	const emitWat = argv.includes("--emit-wat");
 
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
@@ -477,6 +520,7 @@ export function parseBuildArgs(argv) {
 		outDir,
 		pwa,
 		sourceMap,
+		emitWat,
 		minify: !noMinify,
 		mangle: !noMangle && !noMinify,
 	};
@@ -667,6 +711,7 @@ export async function handleBuild(targetDir = ".", options = {}) {
 	const compileResult = runCompile(srcDir, isDir, {
 		outputFile,
 		sourceMap: options.sourceMap ?? false,
+		emitWat: options.emitWat ?? false,
 	});
 
 	const doMinify = options.minify ?? true;
@@ -676,7 +721,7 @@ export async function handleBuild(targetDir = ".", options = {}) {
 		mangle: doMangle,
 		sourceMap: options.sourceMap ?? false,
 	});
-	writeFileSync(outputFile, `${js}\n`);
+	writeCompileOutput(outputFile, compileResult, js);
 
 	let vendor = null;
 	try {
@@ -752,12 +797,11 @@ function buildDevOnce(
 			outputFile,
 			sourceMap: sourceMap ?? true,
 		});
-		mkdirSync(dirname(outputFile), { recursive: true });
-		writeFileSync(outputFile, `${result.js}\n`);
+		const written = writeCompileOutput(outputFile, result);
 		const elapsedMs = (performance.now() - startMs).toFixed(0);
 		const note = changedFile ? ` — ${changedFile} changed` : "";
 		log.ok(
-			`— wrote ${colors.cyan(outputFile)} ${colors.dim(`(${elapsedMs}ms${note})`)}`,
+			`— wrote ${formatWrittenDesc(written, outputFile)} ${colors.dim(`(${elapsedMs}ms${note})`)}`,
 		);
 		devServer.notify();
 	} catch (e) {
@@ -878,13 +922,13 @@ export async function handleDev(targetDir = ".", options = {}) {
 	});
 	let initialError = null;
 
+	let written = null;
 	try {
 		const result = runCompile(srcDir, isDir, {
 			outputFile,
 			sourceMap: options.sourceMap ?? true,
 		});
-		mkdirSync(dirname(outputFile), { recursive: true });
-		writeFileSync(outputFile, `${result.js}\n`);
+		written = writeCompileOutput(outputFile, result);
 	} catch (err) {
 		initialError = err;
 		devServer.notifyError(err);
@@ -914,6 +958,7 @@ export async function handleDev(targetDir = ".", options = {}) {
 		srcDir,
 		outputFile,
 		initialError,
+		written,
 		close: async () => {
 			watcherController?.close();
 			await devServer.close();

@@ -1,6 +1,6 @@
 // Code generator: walks the typed AST and emits clean JavaScript.
 //
-// Split into sub-modules under codegen/:
+// Split into sub-modules under backend/js/:
 //   source-map.js    — VLQ encoder and source map builder
 //   statements.js    — genBlock, genStmt, genFor, genSwitch, etc.
 //   expressions.js   — genExpr, genCall, genCompositeLit, helpers
@@ -17,7 +17,12 @@
 //   - make(map[K]V)    → {}
 //   - for range        → for...of with .entries()
 
-import { isComplex, isNumeric } from "../typechecker/types.js";
+import {
+	computeEmbeddedStubs,
+	isReferenceType,
+	scanAddressTaken,
+} from "../../lower/index.js";
+import { isComplex, isNumeric } from "../../typechecker/types.js";
 import { expressionGenMethods } from "./expressions.js";
 import {
 	HELPER_APPEND,
@@ -42,6 +47,8 @@ import { buildSourceMap } from "./source-map.js";
 import { statementGenMethods } from "./statements.js";
 import { stdlibGenMethods } from "./stdlib/index.js";
 import { templGenMethods } from "./templ.js";
+
+export { buildSourceMap };
 
 // Valid Go identifiers that cannot be used as JS bindings; emitted with a `$` suffix.
 const JS_RESERVED = new Set([
@@ -91,8 +98,11 @@ export class CodeGen {
 		checker = null,
 		jsImports = new Map(),
 		bundledPackages = new Set(),
+		options = {},
 	) {
 		this.checker = checker;
+		this.target = options.target ?? "js";
+		this.strict = Boolean(options.strict || this.target === "both");
 		this.out = [];
 		this.indent = 0;
 		this.structNames = new Set();
@@ -621,12 +631,13 @@ export class CodeGen {
 	}
 
 	_genEmbeddedMethodStubs(name, methodDecls) {
-		if (!this.checker) return;
-		const resolvedType = this.checker.types.get(name)?.underlying;
-		if (resolvedType?.kind !== "struct" || !resolvedType._embeds) return;
-		const declared = new Set(methodDecls.map((m) => m.name));
-		for (const embed of resolvedType._embeds)
-			this._genSingleEmbedStubs(embed, declared);
+		const stubs = computeEmbeddedStubs(name, methodDecls, this.checker);
+		for (const stub of stubs) {
+			this.blank();
+			this.line(
+				`${stub.methodName}(...__a) { return ${stub.embedName}.prototype.${stub.methodName}.call(this, ...__a); }`,
+			);
+		}
 	}
 
 	genMethod(decl, recvField = null) {
@@ -767,36 +778,11 @@ export class CodeGen {
 
 	// Scan AST node for _addressTaken idents on scalars and populate _boxedVars.
 	_scanAddressTaken(node) {
-		if (!node || typeof node !== "object") return;
-		if (Array.isArray(node)) {
-			for (const child of node) this._scanAddressTaken(child);
-			return;
-		}
-		// &x — the operand ident will have _addressTaken set by typechecker
-		if (node.kind === "Ident" && node._addressTaken) {
-			// Check if the type is a scalar (needs boxing) vs reference type (no boxing)
-			const t = node._type;
-			if (t && !this._isReferenceType(t)) {
-				this._boxedVars.add(node.name);
-			}
-		}
-		// Recurse into FuncLit too — closures may take address of outer vars
-		for (const key of Object.keys(node)) {
-			if (key.startsWith("_")) continue;
-			this._scanAddressTaken(node[key]);
-		}
+		scanAddressTaken(node, this._boxedVars);
 	}
 
 	_isReferenceType(t) {
-		if (!t) return false;
-		const base = t.kind === "named" ? t.underlying : t;
-		return (
-			base?.kind === "struct" ||
-			base?.kind === "slice" ||
-			base?.kind === "map" ||
-			base?.kind === "func" ||
-			base?.kind === "interface"
-		);
+		return isReferenceType(t);
 	}
 
 	// ── Variable / const declarations ────────────────────────────
