@@ -1,7 +1,13 @@
 // test/unit/wasm/scalars.test.js
 // Tests for Phase 3b: scalar types, arithmetic, shifts, and control flow in WASM vs JS-strict.
 
-import { assertEqual, compileHybrid, section, test } from "../helpers.js";
+import {
+	assertEqual,
+	compileHybrid,
+	compileWasm,
+	section,
+	test,
+} from "../helpers.js";
 
 section("WASM Scalars — Arithmetic & Parity");
 
@@ -367,4 +373,169 @@ func Main() {
 	const hybrid = compileHybrid(src);
 	const res = hybrid.run("Main");
 	assertEqual(res.output, "neg_int: -42\nneg_float: -3.5");
+});
+
+section("WASM Globals — Caching & Init Order (v1.5.1 Task 5)");
+
+test("Global reassigned in a callee is not cached: caller observes mutation across callee call", () => {
+	const src = `
+package main
+
+var counter int32 = 10
+
+func Increment() {
+    counter++
+}
+
+func TestCaller() int32 {
+    a := counter
+    Increment()
+    b := counter
+    return a + b
+}
+
+func Main() {
+    println("sum:", TestCaller())
+}
+`;
+
+	const hybrid = compileHybrid(src);
+	const res = hybrid.run("Main");
+	assertEqual(res.output, "sum: 21");
+});
+
+test("Never-assigned global is cached in local at function entry", () => {
+	const src = `
+package main
+
+var scratch int32 = 42
+
+func UseScratch() int32 {
+    a := scratch
+    b := scratch
+    return a + b
+}
+
+func Main() {
+    println("cached:", UseScratch())
+}
+`;
+
+	const hybrid = compileHybrid(src);
+	const res = hybrid.run("Main");
+	assertEqual(res.output, "cached: 84");
+});
+
+test("Init-order case: function called from package var initializer reads globals without stale cache", () => {
+	const src = `
+package main
+
+var seed int32 = 100
+var computed int32 = initCompute()
+
+func initCompute() int32 {
+    return seed + 23
+}
+
+func Main() {
+    println("computed:", computed)
+}
+`;
+
+	const hybrid = compileHybrid(src);
+	const res = hybrid.run("Main");
+	assertEqual(res.output, "computed: 123");
+});
+
+test("Init-order case: helper called from func init() reads updated global", () => {
+	const src = `
+package main
+
+var config int32 = 0
+var result int32 = 0
+
+func init() {
+    config = 50
+    setup()
+}
+
+func setup() {
+    result = config
+}
+
+func Main() {
+    println("result:", result)
+}
+`;
+
+	const hybrid = compileHybrid(src);
+	const res = hybrid.run("Main");
+	assertEqual(res.output, "result: 50");
+});
+
+test("Scratch struct global: field mutation preserves cached reference", () => {
+	const src = `
+package main
+
+type Vec struct {
+    X float32
+    Y float32
+}
+
+func (v *Vec) Set(x, y float32) {
+    v.X = x
+    v.Y = y
+}
+
+func (v *Vec) Sum() float32 {
+    return v.X + v.Y
+}
+
+var scratch Vec
+
+func Compute() float32 {
+    scratch.Set(3.0, 4.0)
+    return scratch.Sum()
+}
+
+func Main() {
+    println("sum:", Compute())
+}
+`;
+
+	const hybrid = compileHybrid(src);
+	const res = hybrid.run("Main");
+	assertEqual(res.output, "sum: 7");
+});
+
+test("Closures and trampolines cache only the globals their own body reads", () => {
+	const src = `
+package main
+
+type V struct{ X float64 }
+
+var inClosure = &V{X: 2}
+var inRoot = &V{X: 3}
+var alsoRoot = &V{X: 4}
+
+func Main() float64 {
+    f := func() float64 { return inClosure.X }
+    return f() + inRoot.X + alsoRoot.X
+}
+`;
+	const { wat } = compileWasm(src, { emitWat: true });
+	const funcBody = (name) => {
+		const re = new RegExp(
+			`\\(func \\$f\\d+ \\(export "${name.replace(/\$/g, "\\$")}"\\)[\\s\\S]*?\\n  \\)`,
+		);
+		return wat.match(re)?.[0] ?? "";
+	};
+	const count = (body) => (body.match(/global\.get/g) ?? []).length;
+	assertEqual(count(funcBody("Main")), 2);
+	assertEqual(count(funcBody("_closure$1")), 1);
+	assertEqual(count(funcBody("_tramp$Main")), 0);
+
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, 9);
+	assertEqual(wasmRes, jsRes);
 });

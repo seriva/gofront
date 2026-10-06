@@ -90,6 +90,15 @@ export function writeCompileOutput(outputFile, result, js = result.js) {
 	return written;
 }
 
+export function formatWrittenDesc(written, outputFile = written?.[0] ?? "") {
+	if (!written || written.length <= 1) return colors.cyan(outputFile);
+	const extras = written
+		.slice(1)
+		.map((p) => colors.cyan(basename(p)))
+		.join(" + ");
+	return `${colors.cyan(outputFile)} + ${extras}`;
+}
+
 export function maybeMinify(js, options) {
 	const {
 		minify: doMinify = false,
@@ -788,11 +797,11 @@ function buildDevOnce(
 			outputFile,
 			sourceMap: sourceMap ?? true,
 		});
-		writeCompileOutput(outputFile, result);
+		const written = writeCompileOutput(outputFile, result);
 		const elapsedMs = (performance.now() - startMs).toFixed(0);
 		const note = changedFile ? ` — ${changedFile} changed` : "";
 		log.ok(
-			`— wrote ${colors.cyan(outputFile)} ${colors.dim(`(${elapsedMs}ms${note})`)}`,
+			`— wrote ${formatWrittenDesc(written, outputFile)} ${colors.dim(`(${elapsedMs}ms${note})`)}`,
 		);
 		devServer.notify();
 	} catch (e) {
@@ -913,12 +922,13 @@ export async function handleDev(targetDir = ".", options = {}) {
 	});
 	let initialError = null;
 
+	let written = null;
 	try {
 		const result = runCompile(srcDir, isDir, {
 			outputFile,
 			sourceMap: options.sourceMap ?? true,
 		});
-		writeCompileOutput(outputFile, result);
+		written = writeCompileOutput(outputFile, result);
 	} catch (err) {
 		initialError = err;
 		devServer.notifyError(err);
@@ -948,6 +958,7 @@ export async function handleDev(targetDir = ".", options = {}) {
 		srcDir,
 		outputFile,
 		initialError,
+		written,
 		close: async () => {
 			watcherController?.close();
 			await devServer.close();
