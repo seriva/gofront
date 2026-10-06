@@ -1,15 +1,66 @@
+# GoFront
+[![npm version](https://img.shields.io/npm/v/gofront.svg)](https://www.npmjs.com/package/gofront) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+
+> Go syntax and type safety, compiling to a seamless hybrid of JavaScript (ES modules) and WebAssembly (WasmGC).
+
 ## About
 
 Go for the backend: simple, type-safe, no nonsense. JavaScript for the frontend: runs
 everywhere, no setup. The problem is JavaScript's loose typing — and TypeScript never
 quite felt like home either.
 
-So I built GoFront. Go syntax and type safety, compiling to plain ES modules and
-WebAssembly (WasmGC). One language front and back, no runtime, no framework, no tsconfig.json.
+So I built GoFront. Go syntax and type safety, compiling to a **seamless hybrid of
+JavaScript (ES modules) and WebAssembly (WasmGC)**. One language across the entire
+stack, no runtime, no framework, no tsconfig.json.
 
-With built-in support for declarative DOM rendering via the [`gom`](https://www.gomponents.com) standard library, JSX-like [`.templ`](https://templ.guide/) files, and seamless integration with external JavaScript libraries through TypeScript definition files (`.d.ts`), GoFront is designed specifically as a frontend development target. Build complex, reactive user interfaces entirely in Go.
+### Why Hybrid?
+
+Traditional web architectures force a painful choice:
+- **Pure JavaScript:** Excellent DOM ergonomics and dynamic UI, but plagued by IEEE-754 float quirks, JIT deoptimizations, and garbage-collection micro-stutters during heavy compute.
+- **Pure WebAssembly:** Predictable, high-performance execution for tight loops and math, but manipulating the DOM across host calls is notoriously slow, awkward, and requires heavy glue-code runtimes.
+
+**GoFront gives you the best of both worlds in a single codebase:**
+- **UI and DOM stay in JavaScript:** `.templ`, `gom`, event listeners, and browser APIs compile to native ES modules with zero-cost DOM access.
+- **Compute runs in WebAssembly:** Simulation, physics, collision detection, and tight math loops compile to WasmGC with true integers, real `float32`, and near-zero memory churn.
+- **The compiler owns the boundary:** It sees both sides and generates all the glue automatically. You write standard Go imports (`import "./physics"`) and the compiler handles the rest.
 
 Probably not useful. Definitely fun to build.
+
+```go
+// physics/sim.go — compiled to WebAssembly (WasmGC)
+//gofront:target wasm
+package physics
+
+type Body struct {
+    X, Y, VX, VY float32
+}
+
+func Step(b *Body, dt float32) {
+    b.X += b.VX * dt
+    b.Y += b.VY * dt
+}
+```
+
+```go
+// main.go — compiled to clean JavaScript (ES module)
+//gofront:target js
+package main
+
+import (
+    "./physics"
+    "gom"
+)
+
+var body = physics.Body{X: 0, Y: 0, VX: 10, VY: 5}
+
+func onTick() {
+    physics.Step(&body, 0.016) // calls directly into WasmGC with zero manual glue code
+    render()
+}
+```
+
+With built-in support for declarative DOM rendering via the [`gom`](https://www.gomponents.com) standard library, JSX-like [`.templ`](https://templ.guide/) files, and seamless integration with external JavaScript libraries through TypeScript definition files (`.d.ts`), GoFront is designed specifically as a frontend development target. Build complex, reactive user interfaces entirely in Go.
 
 ```go
 package main
@@ -35,221 +86,25 @@ func main() {
 }
 ```
 
-Compiles to clean, readable JavaScript — no runtime, no framework.
+Compiles to clean, readable JavaScript and WebAssembly — no runtime, no framework.
 
 GoFront source files use the `.go` extension so editors automatically apply Go syntax
 highlighting, bracket matching, and indentation rules without any extra configuration.
 
 ---
 
-## Install
+## Install & Quick Start
 
 ```sh
 npm install -g gofront
+mkdir my-app && cd my-app
+gofront init
+gofront dev
 ```
 
-Requires Node.js 20+.
+Then open `http://localhost:3000` — the page live-reloads on every save.
 
----
-
-## How it works
-
-GoFront is a five-stage compiler written in pure Node.js (no dependencies). Every stage
-operates on the AST (abstract syntax tree):
-
-```
-source text (.go files)
-  → Lexer          tokenize + Go-style semicolon insertion
-  → Parser         recursive-descent → AST
-  → Type Checker   annotate AST with types + collect errors
-  → Lowering       ownership/clone elision, escape analysis, capture analysis
-  → Code Gen       AST → JavaScript ES module or WebAssembly GC module (.wasm)
-
-source text (.templ files)
-  → TemplLexer     dual-mode: Go mode for declarations, HTML mode inside templ bodies
-  → TemplParser    extends Parser; produces TemplDecl AST nodes with TemplNode children
-  → Type Checker   registers each templ component as func(...) gom.Node
-  → Code Gen       TemplDecl → direct DOM calls (createElement / setAttribute / appendChild)
-```
-
-### 1. Lexer (`src/lexer.js`)
-
-Tokenises the source into a stream of tokens. Implements Go's semicolon insertion rules:
-a semicolon is automatically inserted after a line's final token if that token is an
-identifier, literal, `)`, `]`, `}`, or certain keywords (`return`, `break`, `continue`,
-`fallthrough`). This is why Go doesn't need explicit semicolons — and neither does
-GoFront.
-
-### 2. Parser (`src/parser/`)
-
-A hand-written recursive-descent parser. No parser generators, no grammar files — just
-straightforward top-down parsing. Produces an AST where every node is a plain JS object
-with a `kind` field (`"FuncDecl"`, `"IfStmt"`, `"BinaryExpr"`, etc.).
-
-Operator precedence is handled via a Pratt-style expression parser with numeric
-precedence levels.
-
-### 3. Type Checker (`src/typechecker/`)
-
-Three-pass type checker operating on the AST:
-
-1. **Pass 1 — collect types**: register all `type` declarations (structs, interfaces,
-   named types) so they can be referenced before definition.
-2. **Pass 2 — collect functions & vars**: register function signatures and package-level
-   variables. Resolve embedded struct fields and promote methods.
-3. **Pass 3 — check bodies**: walk every function body, infer expression types, verify
-   assignments and call arguments, and report errors with source location.
-
-Types are plain JS objects (`{ kind: "basic", name: "int" }`, `{ kind: "slice",
-elem: ... }`, etc.). The special `any` type acts as a recovery/escape hatch — any
-operation on it is silently permitted, preventing cascading errors.
-
-### 4. Code Generator (`src/backend/js/`)
-
-Walks the typed AST and emits clean, readable JavaScript. No intermediate representation
-— the codegen writes directly to an output buffer with indentation tracking.
-
-Runtime helpers (`__len`, `__append`, `__s`, `__sprintf`, `__equal`, `__cmul`, `__cdiv`,
-`__error`, `__errorIs`, `__timeFmt`, `__timeParse`, `__pathClean`, `__sortSlice`,
-`__sclone`, `__ifv`, `__ifp`) are tree-shaken: only emitted when actually used. Optional
-inline source maps are supported via VLQ-encoded mappings.
-
-### 5. Lowering & WASM backend (`src/lower/`, `src/backend/wasm/`) — experimental
-
-`src/lower/` runs analyses shared by both backends (ownership/clone elision, address-taken
-boxing, range shape, named returns/`defer`, embedded-method stubs, closure captures, pointer
-escape) and stores the results in side tables keyed by AST node.
-
-A package that starts with `//gofront:target wasm` (before the `package` clause) is compiled
-by `src/backend/wasm/` to a WebAssembly GC module instead of JavaScript.
-`//gofront:target both` marks a package that must compile under either backend: it may only
-import other `both` packages, may not use `gom`, may not mutate package-level variables, and
-its JS output uses strict Go numeric semantics (sized-integer wrapping, `float32` rounding,
-integer divide-by-zero panics). Running WASM output requires a WasmGC-capable runtime
-(Node ≥ 22 or a current Chrome/Firefox/Safari).
-
-**Hybrid builds.** Every `wasm`/`both` package a build reaches is linked into a single
-`app.wasm`, written next to `app.js` by `gofront build`, `gofront dev` and `-o`. The JS
-bundle contains a generated facade in place of the wasm packages: exported functions,
-methods, literal constants and structs are callable from JS code as if they were compiled
-to JS. Primitives convert directly, strings and `any` pass through, `both` struct values
-are copied into their JS class, `wasm` structs become opaque handle classes with stable
-identity, slices/arrays are copied element-wise (TypedArrays accepted) and func values are
-wrapped in both directions. Maps, `error`, non-empty interfaces and pointers to non-structs
-are not yet supported at the boundary and are rejected at compile time. The loader fetches
-`app.wasm` relative to the page (override with `globalThis.__GOFRONT_WASM_URL`, or
-pre-supply bytes via `globalThis.__GOFRONT_WASM_BYTES`). `--emit-wat` additionally writes
-a textual `app.wat`.
-
-```
-                     GoFront Source Code
-     ┌───────────────────────┬───────────────────────┐
-     │  //gofront:target js  │ //gofront:target wasm │
-     │  UI, DOM, WebGL, Game │ Collision, Raycasting │
-     └───────────┬───────────┴───────────┬───────────┘
-                 │                       │
-                 │   GoFront Compiler    │
-                 ▼                       ▼
-           ┌───────────┐           ┌───────────┐
-           │  app.js   │ ◄───────► │ app.wasm  │
-           └─────┬─────┘  Boundary └─────┬─────┘
-                 │         Facade        │
-                 ▼                       ▼
-            DOM & Browser          Tight Loops & Math
-          Dynamic & Ergonomic      Predictable & Fast
-```
-
-`gofront test` runs the tests of a `wasm` package inside the linked module (`*testing.T`
-stays a JS object) and runs the tests of a `both` package twice — once per backend,
-reported as `pkg [js]` and `pkg [wasm]` — so both must agree.
-
-**Performance.** Splitting an app into high-level JavaScript orchestration and low-level WebAssembly compute delivers the best of both worlds. On a real-world Möller–Trumbore raycast benchmark (131,072 triangles, 100,000 rays; `npm run bench:raycast`):
-
-| Target | Throughput | Allocation | Engine Stability |
-| :--- | :--- | :--- | :--- |
-| **Pure JS** | `26,720 rays/s` ▰▰▰▰▰▰▰▰▱▱ | `6.20 B / ray` | Subject to periodic V8 young-gen GC pauses |
-| **Hybrid WASM** | `31,293 rays/s` ▰▰▰▰▰▰▰▰▰▰ | `0.86 B / ray` | **Near-zero alloc (7.2× less)**, smooth 60 FPS |
-
-- **+17.1% higher throughput:** Direct WasmGC typed arrays, local-cached scratch globals, and hardware-trapped nil dereferences outperform JIT compiled JS.
-- **86% memory churn reduction:** Dropping allocations from 6.2 B/ray to 0.86 B/ray prevents garbage collection pauses from causing micro-stutter in 60 FPS loops.
-- **Minimal boundary overhead:** The boundary trampoline consumes only ~0.5% of total runtime, ensuring batch computations cross between JS and WASM with virtually zero penalty.
-
----
-
-## Go → JavaScript mapping
-
-Every Go construct compiles to a specific JavaScript pattern. The output is designed to be
-readable and debuggable — no name mangling, no opaque wrappers.
-
-### Data structures
-
-| Go | JavaScript | Notes |
-|---|---|---|
-| `struct` | ES6 `class` | Positional constructor with zero-value defaults: `new Point(1, 2)`; a generated `__clone()` gives struct values Go copy semantics on assignment, call, return, `append`, and `range` |
-| Methods | Class instance methods | Receiver is `this` (typed `*T` for pointer receivers) |
-| Embedded structs | Flattened fields + delegation stubs | `Greet(...a) { return Base.prototype.Greet.call(this, ...a); }` |
-| `[]T` (slice) | `Array` | `append` → `__append`, `len` → `__len` |
-| `[]float32`, `[]int8`…`[]int32`, `[]uint8`/`[]byte`…`[]uint32`, `[]rune` | TypedArray (`Float32Array`, `Int32Array`, `Uint8Array`, …) | `[]float64` and `[]int` stay plain `Array`; slicing → `.subarray` |
-| `map[K]V` | Plain object `{}` | Key access via `[]`, iteration via `Object.entries()` |
-| `nil` | `null` | |
-| `error` | `__error` object | `error("msg")` → `__error("msg")`, `.Error()` → real method call. `toString()` for string context compat |
-| Pointers (`*T`) | `{ value: T }` | `new(T)` allocates a boxed zero value |
-
-### Functions
-
-| Go | JavaScript |
-|---|---|
-| `func f(a int) int` | `function f(a)` |
-| Multiple returns `return a, b` | `return [a, b]` — destructured at call site: `let [a, b] = f()` |
-| Named returns | Variables pre-declared; bare `return` returns them |
-| Variadic `func f(xs ...int)` | `function f(...xs)` |
-| `func` literal (closure) | Arrow or function expression |
-| `async func` / `await` | `async function` / `await` |
-| `init()` | Emitted as `(function() { ... })()` immediately-invoked |
-| `defer` | `try { ... } finally { deferred() }` |
-
-### Control flow
-
-| Go | JavaScript |
-|---|---|
-| `for init; cond; post {}` | `for (init; cond; post) {}` |
-| `for cond {}` | `while (cond) {}` |
-| `for {}` | `while (true) {}` |
-| `for i, v := range slice` | `for (const [i, v] of arr.entries())` |
-| `for k, v := range map` | `for (const [k, v] of Object.entries(m))` |
-| `for i, r := range str` | `for (const [i, r] of Array.from(s, (c, i) => [i, c.codePointAt(0)]))` — `r` is a rune integer |
-| `for i := range n` | `for (let i = 0; i < n; i++)` |
-| `switch` / `fallthrough` | `switch` / case fall-through |
-| `switch v := x.(type)` | `if/else if` with `typeof` / `instanceof` checks |
-| `panic(msg)` | `throw new Error(msg)` |
-| `recover()` | Captured in `defer` via `try/catch` |
-
-### Builtins
-
-| Go | JavaScript |
-|---|---|
-| `len(x)` | `__len(x)` (tree-shaken helper) or `Object.keys(x).length` for maps |
-| `cap(x)` | `x.length` |
-| `append(s, elems...)` | `[...s, ...elems]` |
-| `copy(dst, src)` | Inline splice helper |
-| `make([]T, n)` | `new Array(n).fill(zero)` |
-| `make(map[K]V)` | `{}` |
-| `delete(m, k)` | `delete m[k]` |
-| `new(T)` | `{ value: zeroOf(T) }` |
-| `min` / `max` | `Math.min` / `Math.max` |
-| `clear(x)` | `.length = 0` (slice) or delete-loop (map) |
-| `print` / `println` | `console.log` |
-| `complex(r, i)` | `{ re: r, im: i }` |
-| `real(z)` / `imag(z)` | `z.re` / `z.im` |
-| `fmt.Sprintf` | `__sprintf` tree-shaken helper |
-
-### Type system at runtime
-
-All type checking happens at compile time. At runtime, types are erased — there are no
-type tags, no reflection, no runtime overhead. Sized integers (`int8`–`int64`,
-`uint8`–`uint64`) are all `number` at runtime. `float32` is `number`. Generic type
-parameters are erased completely — `func Map[T, U any](...)` compiles to `function Map(...)`.
-The type checker enforces correctness; JavaScript doesn't need to know.
+Requires Node.js 20+ (WasmGC requires Node ≥ 22 or a modern browser).
 
 ---
 
@@ -378,6 +233,8 @@ Key syntax features:
 - `for _, v := range slice { }` — loop rendering inside template bodies
 - `switch expr { case v: ... default: ... }` — switch rendering inside template bodies
 - `@templ.Raw(htmlStr)` — inject raw/trusted HTML (uses `insertAdjacentHTML`)
+- `ref="name"` — capture the element at mount time into an optional `refs map[string]any`
+  passed as `gom.Mount("#app", AppView(), refs)`; no `querySelector` needed afterwards
 - Components are called like regular functions (`AppView()`, `TodoItem(t)`) and return
   a `gom.Node`-compatible object, so `gom.Mount("#app", AppView())` works directly.
 
@@ -470,278 +327,95 @@ npm run build:webgl       # → example/webgl/app.js
 
 ---
 
-## CLI
+## The Hybrid Architecture: JS + WasmGC
+
+GoFront apps can run **partly as JavaScript and partly as WebAssembly (WasmGC)**, chosen per package:
 
 ```
-gofront dev [dir]                            watch + compile + asset sync + live reload (hybrid projects emit app.wasm; default port 3000)
-gofront dev [dir] --port 8080                use a custom port
-gofront build [dir]                          clean + compile + minify + vendor → production output (hybrid projects emit app.wasm)
-gofront build [dir] --pwa                    also generate offline service worker (sw.js) + precache manifest
-gofront build [dir] --source-map             include inline source maps in the release bundle
-gofront build [dir] --no-minify              skip minification
-gofront build [dir] --no-mangle              minify but keep original identifiers
-gofront build [dir] --emit-wat               also write app.wat next to app.wasm (hybrid projects)
-gofront prep [dir] [--minify]                run asset copying + vendor bundling only (alias: gofront vendor)
-gofront check <dir>                          type-check a single package
-gofront check <dir>/...                      type-check every package under <dir> (Go-style `./...`)
-gofront test <dir> [--dom]                   run tests for a single package
-gofront test <dir>/... [--dom] [-v] [-run <regex>]  run tests recursively
-gofront <file.go>                            compile single file → stdout
-gofront <dir>                                compile all *.go in directory → stdout
-gofront <input> -o out.js                    write output to file (prints elapsed compile time; hybrid projects also write app.wasm)
-gofront <input> -o out.js --emit-wat         also write app.wat
-gofront <input> -o out.js --copy-assets      compile + copy static assets
-gofront <input> --check                      type-check only (single file / directory)
-gofront <input> --watch                      watch for changes and recompile
-gofront <input> -o out.js --serve            watch + serve with live reload (legacy; prefer gofront dev)
-gofront <input> --source-map                 append inline source map
-gofront <input> --minify                     minify output (built-in minifier)
-gofront <input> --minify --mangle            minify and rename local identifiers
-gofront <file.go> --ast                      dump AST (debug)
-gofront <file.go> --tokens                   dump tokens (debug)
-gofront init [dir]                           scaffold a new project
-gofront --version / -v                       print version
-gofront --help / -h                          print this help
-```
-### Project configuration
-
-`gofront dev`, `build`, `prep`, `check` and `test` read optional settings from a `gofront.json`
-file or a `"gofront": { … }` object in `package.json`:
-
-| Key | Default | Description |
-|---|---|---|
-| `src` | `app/src`, `src` or `main.go` | Package directory (or single file) to compile |
-| `serveDir` | `app`, `.` or `public` (first with `index.html`) | Directory served by `dev` and mirrored into the build |
-| `outDir` | `public` | Release output directory for `build` |
-| `output` | `app/app.js` | Dev-mode compiled bundle path |
-| `port` | `3000` | Dev server port |
-| `assetExtensions` | `[]` | Extra file extensions (e.g. `[".bmesh", ".mat"]`) copied from `serveDir` into `outDir` on `build`, in addition to the built-in web asset list (html, css, js, json, images, fonts, audio, video, wasm) |
-| `vendor` | `app/vendor.js` | Vendor bundle written by `prep`/`build` from `package.json` `dependencies`. Either a destination path string or `{ "dest": string \| string[], "packages": string[], "minify": boolean, "globals": { "<pkg>": string \| string[] } }` |
-| `assetCopy` | `[]` | Static files copied by `prep`/`build`: `[{ "source": "node_modules/x/font.woff2", "dest": "app/fonts/font.woff2" }]` |
-
-All settings live in this one place — top-level `"vendor"` / `"assetCopy"` keys in `package.json` are not read.
----
-
-## Multi-file packages
-
-All `.go` files in a directory share the same namespace and are compiled as one unit.
-The compiler (`src/compiler.js`) orchestrates this:
-
-1. Parse each `.go` file in the directory into a separate AST.
-2. Resolve imports: `js:` d.ts files, npm packages (via `node_modules/` and `@types/`),
-   and local GoFront sub-packages (`import "./subpkg"`) which are compiled recursively.
-3. Run the type checker across all ASTs as a single unit — types, functions, and
-   variables declared in one file are visible in all other files of the same package.
-4. Generate code for each AST and concatenate. Sub-package code is inlined as a preamble.
-
-```
-myapp/
-  types.go     ← type Point struct { X, Y int }
-  utils.go     ← func distance(a, b Point) float64 { ... }
-  main.go      ← func main() { ... }
+                     GoFront Source Code
+     ┌───────────────────────┬───────────────────────┐
+     │  //gofront:target js  │ //gofront:target wasm │
+     │  UI, DOM, WebGL, Game │ Collision, Raycasting │
+     └───────────┬───────────┴───────────┬───────────┘
+                 │                       │
+                 │   GoFront Compiler    │
+                 ▼                       ▼
+           ┌───────────┐           ┌───────────┐
+           │  app.js   │ ◄───────► │ app.wasm  │
+           └─────┬─────┘  Boundary └─────┬─────┘
+                 │         Facade        │
+                 ▼                       ▼
+            DOM & Browser          Tight Loops & Math
+          Dynamic & Ergonomic      Predictable & Fast
 ```
 
-```sh
-gofront myapp -o myapp/bundle.js
-```
+### Package Targets
 
-Cross-package imports are supported via relative paths:
+Each package declares its target at the top of any of its source files (before the `package` clause):
 
 ```go
-import "./mathpkg"
-
-func main() {
-    x := math.Add(1, 2)   // math package inlined into the bundle
-}
+//gofront:target wasm     // compiled to WebAssembly only
+//gofront:target both     // compiled to both JS and WASM; each side uses its own copy
+package physics           // no directive = js (default)
 ```
 
----
-
-## Type checking
-
-GoFront performs static type checking before emitting any code, accurately tracking source
-locations in error messages across multiple files:
-
-```go
-func greet(name string) {
-    console.log("Hello, " + name)
-}
-
-greet(42)
-// → Type error in src/main.go at line 5:7: cannot use int as string
-//     5 | greet(42)
-//           ^
-```
-
-External TypeScript type definitions are supported via `js:` imports:
-
-```go
-import "js:./dom.d.ts"
-```
-
-npm package types are resolved automatically from `node_modules/` and `@types/`.
-The resolver (`src/resolver.js`) walks up the directory tree to find `node_modules`,
-checks `package.json` `"types"` / `"typings"` fields, falls back to `index.d.ts`,
-then tries `@types/`. The `.d.ts` parser (`src/dts-parser.js`) extracts type
-signatures into GoFront's internal type representation.
-
----
-
-## Language features
-
-### Core language
-
-| Feature | Status |
-|---|---|
-| Variables (`var`, `:=` short re-declaration) | ✓ |
-| Constants (`const`, `iota`, untyped constants) | ✓ |
-| Functions, multiple returns, named returns, variadic | ✓ |
-| `init()` functions | ✓ |
-| Closures / function literals | ✓ |
-| `async func` / `await` expressions | ✓ |
-| `defer`, `panic()` / `recover()` | ✓ |
-| `print` / `println` builtins | ✓ — compile to `console.log` |
-
-### Types & data structures
-
-| Feature | Status |
-|---|---|
-| Structs + methods (value & pointer receivers) | ✓ |
-| Embedded structs (flattened fields + promoted methods) | ✓ |
-| Anonymous struct types | ✓ — compile to plain JS objects |
-| Interfaces (with embedding) | ✓ |
-| Slices (`append`, `len`, `make`) | ✓ |
-| Maps (`make`, `delete`, comma-ok) | ✓ |
-| Arrays with compile-time enforcement | ✓ — reject `append`, bounds checking, size matching, `[...]T` inference, compile-time `len()` |
-| Slice → array conversion (`[N]T(slice)`) | ✓ — Go 1.20 |
-| Pointers (`&x`, `*p`, `new(T)`) | ✓ — scalar locals boxed as `{ value: T }` for shared mutation |
-| `error` type | ✓ — interface `{ Error() string }`; custom error types, `errors.Is`/`Unwrap`, `%w` wrapping |
-| Complex numbers (`complex64`, `complex128`, `3i`) | ✓ — `complex()`, `real()`, `imag()` builtins; `__cmul`/`__cdiv` helpers |
-| Type definitions, type aliases (`type A = B`) | ✓ |
-| Methods on named non-struct types | ✓ — `type T func(...)` or `type T []E` with methods; emitted as ES6 wrapper classes; satisfies interfaces |
-| Type conversions, type assertions (plain & comma-ok) | ✓ |
-| Type switch (`switch v := x.(type)`) | ✓ — compiles to `if/else if` with `typeof` / `instanceof` |
-| Sized integers (`int8`–`int64`, `uint8`–`uint64`, `float32`) | ✓ — mapped to `number` at runtime |
-| Generics (`func F[T any]`, `type S[T any] struct`) | ✓ — type erasure to JS; generic functions, structs, constraints (`any`, `comparable`, interfaces, unions), type inference |
-| Struct field tags | ✓ — parsed and ignored (no reflection) |
-| Struct and array equality (`a == b`) | ✓ — deep comparison via `__equal` helper |
-
-### Control flow
-
-| Feature | Status |
-|---|---|
-| `if` / `else if` / `else` (with init statement) | ✓ |
-| `for` (C-style, condition-only, infinite, `range`) | ✓ |
-| `range` over slice, map, string, integer | ✓ |
-| Range over iterator functions (Go 1.23) | ✓ — `func(yield func(K, V) bool)` protocol; break/continue/return propagation |
-| `switch` / `fallthrough` (with init statement) | ✓ |
-| `break` / `continue` / labeled variants | ✓ |
-| Terminating statement analysis | ✓ — missing `return` in non-void functions is a type error |
-
-### Expressions & literals
-
-| Feature | Status |
-|---|---|
-| Arithmetic, comparison, logical, bitwise operators | ✓ — includes `&^` (bit clear) |
-| Compound assignment, increment / decrement | ✓ |
-| Slice expressions (`s[lo:hi]`, `s[lo:hi:max]`) | ✓ |
-| Variadic spread (`f(slice...)`, `append(a, b...)`) | ✓ |
-| Positional struct literals (`Point{1, 2}`) | ✓ |
-| Method expressions (`T.Method`) / method values (`x.Method`) | ✓ |
-| Multi-value function forwarding (`f(g())`) | ✓ |
-| Raw string literals (backticks), rune literals | ✓ |
-| Numeric separators (`1_000_000`), binary/octal/hex literals | ✓ |
-| `[]byte(s)` / `[]rune(s)` conversions | ✓ |
-
-### Standard library shims
-
-| Package | Functions |
-|---|---|
-| `fmt` | `Sprintf`, `Printf`, `Println`, `Print`, `Errorf`, `Fprintf`, `Fprintln`, `Fprint` — format verbs: `%v`, `%d`, `%s`, `%t`, `%x`, `%o`, `%b`, `%q`, `%e`, `%g`, `%w`, width/precision; **scanning**: `Sscan`, `Sscanln`, `Sscanf` |
-| `strings` | `Contains`, `HasPrefix`, `HasSuffix`, `Index`, `LastIndex`, `Count`, `Repeat`, `Replace`, `ReplaceAll`, `ToUpper`, `ToLower`, `TrimSpace`, `Trim`, `TrimPrefix`, `TrimSuffix`, `TrimLeft`, `TrimRight`, `Split`, `Join`, `EqualFold`, `Fields`, `Cut`, `CutPrefix`, `CutSuffix`, `SplitN`, `SplitAfter`, `SplitAfterN`, `IndexAny`, `LastIndexAny`, `ContainsAny`, `ContainsRune`, `IndexRune`, `IndexByte`, `LastIndexByte`, `Map`, `Title`, `ToTitle`, `TrimFunc`, `TrimLeftFunc`, `TrimRightFunc`, `IndexFunc`, `LastIndexFunc`, `NewReplacer`; **`Builder`** type; **`NewReader`** → reader shim |
-| `bytes` | `Contains`, `HasPrefix`, `HasSuffix`, `Index`, `Join`, `Split`, `Replace`, `ToUpper`, `ToLower`, `TrimSpace`, `Equal`, `Count`, `Repeat`, `ReplaceAll`, `TrimPrefix`, `TrimSuffix`, `TrimLeft`, `TrimRight`, `TrimFunc`, `IndexByte`, `LastIndex`, `LastIndexByte`, `Fields`, `Cut`, `ContainsAny`, `ContainsRune`, `Map`, `SplitN`; **`Buffer`** type; **`NewReader`** → reader shim |
-| `strconv` | `Itoa`, `Atoi`, `FormatBool`, `FormatInt`, `FormatFloat`, `ParseFloat`, `ParseInt`, `ParseBool`, `Quote`, `Unquote`, `AppendInt`, `AppendFloat` |
-| `sort` | `Ints`, `Float64s`, `Strings`, `Slice`, `SliceStable`, `SliceIsSorted`, `Search`, `IntsAreSorted`, `Float64sAreSorted`, `StringsAreSorted` |
-| `math` | `Abs`, `Floor`, `Ceil`, `Round`, `Sqrt`, `Cbrt`, `Pow`, `Log`, `Log2`, `Log10`, `Sin`, `Cos`, `Tan`, `Atan`, `Atan2`, `Asin`, `Acos`, `Exp`, `Exp2`, `Trunc`, `Hypot`, `Signbit`, `Copysign`, `Dim`, `Remainder`, `Min`, `Max`, `Mod`, `Inf`, `IsNaN`, `IsInf`, `NaN` + `Pi`, `E`, `MaxFloat64`, `SmallestNonzeroFloat64`, `MaxInt`, `MinInt` |
-| `math/rand` | `Intn`, `Float64`, `Float32`, `Int`, `Int63`, `Int63n`, `Int31`, `Int31n`, `Seed` (no-op), `Shuffle`, `Perm` |
-| `errors` | `New`, `Is`, `Unwrap` — custom error types via interface satisfaction |
-| `time` | `Now` → `time.Time`, `Since`, `Sleep`, `Parse`, `Unix`, `Date`; **`time.Time`** methods: `Format`, `String`, `Year`, `Month`, `Day`, `Hour`, `Minute`, `Second`, `Weekday`, `Unix`, `UnixMilli`, `Add`, `Sub`, `Before`, `After`, `Equal`; layout constants: `RFC3339`, `RFC3339Nano`, `DateOnly`, `TimeOnly`, `DateTime`; duration constants: `Millisecond`, `Second`, `Minute`, `Hour`; month/weekday constants |
-| `html` | `EscapeString`, `UnescapeString` |
-| `maps` | `Keys`, `Values`, `Clone`, `Copy`, `Equal`, `EqualFunc`, `Delete`, `DeleteFunc` |
-| `slices` | `Contains`, `Index`, `Equal`, `Compare`, `Sort`, `SortFunc`, `SortStableFunc`, `IsSorted`, `IsSortedFunc`, `Reverse`, `Max`, `Min`, `MaxFunc`, `MinFunc`, `Clone`, `Compact`, `CompactFunc`, `Concat`, `Delete`, `DeleteFunc`, `Insert`, `Replace`, `Grow`, `Clip` |
-| `regexp` | `MustCompile`, `Compile`, `MatchString`, `QuoteMeta`; **`*Regexp`** methods: `MatchString`, `FindString`, `FindStringIndex`, `FindAllString`, `FindStringSubmatch`, `FindAllStringSubmatch`, `ReplaceAllString`, `ReplaceAllLiteralString`, `Split`, `String`. Inline flags (`(?i)`, `(?m)`, `(?s)`) are extracted automatically into the JS `RegExp` constructor. |
-| `unicode` | `IsLetter`, `IsDigit`, `IsSpace`, `IsUpper`, `IsLower`, `IsPunct`, `IsControl`, `IsPrint`, `IsGraphic`, `ToUpper`, `ToLower` |
-| `unicode/utf8` | `RuneCountInString`, `RuneLen`, `ValidString`, `ValidRune`, `DecodeRuneInString`, `DecodeLastRuneInString`, `FullRuneInString`; constants `RuneError`, `MaxRune`, `UTFMax` |
-| `path` | `Base`, `Dir`, `Ext`, `Join`, `Clean`, `IsAbs`, `Split`, `Match`; `"path/filepath"` is an alias |
-| `os` | `Exit`, `Args`, `Getenv` |
-| `io` | `Writer`, `Reader`, `ReadWriter`, `Closer` interface types; `ReadAll`, `EOF`, `Discard`, `WriteString` |
-| `gom` | Browser-native declarative DOM component library. **Types**: `Node` (interface), `NodeFunc`, `Group`. **Core**: `El(tag, children...)`, `Text(s)`, `Mount(sel, node)`, `MountTo(sel, node)`. **Attributes**: `Attr`, `Class`, `Href`, `Type`, `Src`, `Placeholder`, `DataAttr`, `Style`, `For`, `Name`, `Value`, `Target`, `Rel`, `Alt`, `Title`, `Draggable`, `Role`, `AriaLabel`, `StyleAttr`; boolean: `Disabled`, `Checked`, `Selected`, `Readonly`. **Logic**: `If(cond, node)`, `Map(slice, fn)`. **Elements**: full HTML element set (`Div`, `Span`, `Button`, `Input`, `Ul`, `Li`, `Table`, `Form`, `Img`, `A`, `H1`–`H6`, …) |
-| `testing` | **`testing.T`**: `Error`, `Errorf`, `Fatal`, `Fatalf`, `Fail`, `Failed`, `FailNow`, `Log`, `Logf`, `Skip`, `Skipf`, `Skipped`, `Helper`, `Run`, `Name`. **Package functions**: `Short()`, `Verbose()`. Tests are `func TestXxx(t *testing.T)` in `*_test.go` files, excluded from normal compilation and run via `gofront test`. |
-
-### Packages & imports
-
-| Feature | Status |
-|---|---|
-| Multi-file packages | ✓ |
-| Cross-package imports | ✓ |
-| Import aliases (`import m "./pkg"`) | ✓ |
-| Side-effect imports (`import _ "pkg"`) | ✓ |
-| Dot imports (`import . "pkg"`) | ✓ |
-| Unused import detection | ✓ |
-| External `.d.ts` types | ✓ |
-| npm package type resolution | ✓ |
-| `.templ` files in packages | ✓ — mix `.go` and `.templ` files freely; templ components and `css` declarations visible across the whole package |
-
----
-
-## Go Compatibility
-
-GoFront implements a practical subset of the
-[Go Language Specification](https://go.dev/ref/spec) (go1.26). It is not aiming for
-byte-level parity — it is a Go-inspired language for the JavaScript platform.
-
-### GoFront extensions (not in Go)
-
-These features are intentional additions for the JavaScript platform:
-
-| Feature | Purpose |
-|---|---|
-| `async func` / `await` | First-class async syntax for frontend work. |
-| Browser globals (`document`, `console`, etc.) | Predeclared as `any` for practical DOM access. `WebGL2RenderingContext`, `WebGLRenderingContext`, `GPUDevice`, `GPUAdapter`, `GPUQueue`, `ArrayBuffer`, `DataView`, and TypedArrays have full static typings with method-level checking. |
-| `.d.ts` type imports (`import "js:./types.d.ts"`) | Type-safe interop with JavaScript libraries. |
-| npm package resolution | Import types from `node_modules/` and `@types/` automatically. |
-
-### What's not implemented
-
-| Feature | Reason | Prospect |
-|---|---|---|
-| `goto` | No clean JS translation. Rare in idiomatic Go. | Not planned. |
-| Goroutines / channels / `select` | Go's concurrency model has no JS equivalent. A userland scheduler defeats the "no runtime" goal. | Out of scope. |
-| `unsafe`, `reflect`, `cgo` | Require memory model or runtime type metadata that JS cannot provide. | Out of scope. |
-
-### Semantic differences
-
-These features are implemented but behave differently due to fundamental JS runtime
-constraints. These are **not bugs** — they are deliberate trade-offs documented here so
-you know exactly what to expect.
-
-| Feature | GoFront | Go | Why |
+| Target | Compiled to | May import | Best for |
 |---|---|---|---|
-| Map iteration order | Insertion-order (`Object.entries`) | Randomised | JS objects preserve insertion order. |
-| Integer overflow | IEEE 754 float64 semantics | Wraps at type boundary (e.g. `int32`) | All JS numbers are float64. |
-| Integer precision | Safe up to 2⁵³ | Full width per type (`int64` = 64 bits) | JS `number` limitation. |
-| `cap()` | Always equals `len()` | May exceed `len()` | JS arrays have no separate capacity. |
-| Fixed-size arrays (`[n]T`) | Compile-time enforcement (bounds, append rejected, size matching); plain JS arrays at runtime | Fixed at compile time, value-type copy semantics | Runtime enforcement adds overhead; compile-time checks catch most errors. |
-| `nil` | Maps to `null` | Typed nil (distinct per type) | JS has no typed nil concept. |
-| `rune` / `byte` | Treated as `int` | Distinct types with UTF-8 encoding | JS strings are UTF-16. |
-| `range` over string | Rune integers via `.codePointAt()` | Runes (UTF-8 code points) | Close match — indices are byte-sequential, values are code points. |
-| `len()` on strings | JS `.length` (UTF-16 code units) | Byte count (UTF-8) | Matching Go would require `TextEncoder` on every call. |
-| `error` type | Interface `{ Error() string }` with `__error` runtime objects | Interface `{ Error() string }` | Close match. Custom error types, `errors.Is`/`Unwrap`, `%w` wrapping all work. `toString()` added for JS string context compat. |
-| `defer` | `try`/`finally` with a defer stack | Runtime stack unwinding | Covers most cases but not identical to Go internals. |
-| Struct field tags | Parsed, silently discarded | Available via `reflect` | No reflection = no use for tag values. |
-| Pointers (`&x`, `*p`) | Address-taken scalars boxed as `{ value: T }`; structs/slices/maps are reference types (no boxing) | True memory indirection | Shared mutation works for scalars; struct fields and slice elements not yet addressable. |
-| Three-index slice (`a[lo:hi:max]`) | `max` is parsed but ignored | Sets result capacity | JS arrays have no capacity. |
-| Exported / unexported | Enforced for GoFront packages; external `.d.ts`/npm namespaces are exempt | Access enforced uniformly | External JS APIs use lowercase names by convention. |
+| `js` (default) | JavaScript ES module | anything | DOM manipulation, UI components (`gom`, `.templ`), browser APIs, `async`/`await` |
+| `wasm` | WebAssembly GC module | `wasm`, `both`, stdlib (WASM subset) | Physics, spatial indexing, raycasting, simulation, tight numeric loops |
+| `both` | JS *and* WASM | `both`, stdlib (WASM subset) | Shared math/utility libraries (e.g. `mathx`, `vec3`). Strict Go numeric semantics; no package-level mutable state |
+
+- **Zero Boundary Overhead for Shared Types:** `both` packages never create a boundary overhead — JS callers use the JS copy and WASM callers use the WASM copy.
+- **Strict Go Numeric Semantics:** Code compiled to `wasm` (and JS emitted for `both` packages) follows strict Go numeric rules: sized-integer wrapping, true `float32` rounding, and integer divide-by-zero panics.
+
+### Seamless Compile-Time Boundary
+
+Every `wasm` and `both` package an application imports is automatically linked into a single `app.wasm` module, emitted right alongside `app.js` by `gofront build`, `gofront dev`, and `-o`.
+
+The compiler analyzes both sides of the boundary and synthesizes a facade into `app.js`:
+- **Functions & Methods:** WASM functions, methods, and literal constants can be invoked directly from JS code as if they were native JS functions.
+- **Primitives & Strings:** Numbers, booleans, strings, and `any` pass through or convert directly across the boundary.
+- **Structs & Memory:**
+  - `both` struct values cross by copy into their matching JS classes (with write-back for `*T` parameters).
+  - `wasm` structs become opaque handle classes with stable identity. Reading aggregate fields through handles (`b.Pos.X`, `b.Tags[0]`) provides live views into WASM memory.
+- **Slices & Arrays:** Slices and arrays copy element-wise in both directions; TypedArrays (`Float32Array`, `Int32Array`, etc.) are natively accepted.
+- **Closures:** Function values and callbacks cross the boundary transparently in both directions.
+- **WASM Loader:** The generated JS bundle automatically fetches `app.wasm` relative to the page (customizable via `globalThis.__GOFRONT_WASM_URL` or `globalThis.__GOFRONT_WASM_BYTES`).
+- **WAT Inspection:** Passing `--emit-wat` writes human-readable `app.wat` alongside the binary module.
+
+### Real-World Benchmark: 3D Raycasting
+
+Splitting an app into high-level JavaScript orchestration and low-level WebAssembly compute delivers the best of both worlds. On a real-world Möller–Trumbore raycast benchmark (131,072 triangles, 100,000 rays; run via `npm run bench:raycast`):
+
+| Target | Throughput | Allocation | Engine Stability |
+| :--- | :--- | :--- | :--- |
+| **Pure JS** | `26,720 rays/s` ▰▰▰▰▰▰▰▰▱▱ | `6.20 B / ray` | Subject to periodic V8 young-gen GC pauses |
+| **Hybrid WASM** | `31,293 rays/s` ▰▰▰▰▰▰▰▰▰▰ | `0.86 B / ray` | **Near-zero alloc (7.2× less)**, smooth 60 FPS |
+
+- **+17.1% higher throughput:** Direct WasmGC typed arrays, local-cached scratch globals, and hardware-trapped nil dereferences outperform JIT-compiled JS.
+- **86% memory churn reduction:** Dropping allocations from 6.2 B/ray to 0.86 B/ray prevents garbage collection pauses from causing micro-stutter in 60 FPS loops.
+- **Minimal boundary overhead:** The boundary trampoline consumes only ~0.5% of total runtime, ensuring batch computations cross between JS and WASM with virtually zero penalty.
+
+For the full rules — `both`-package restrictions, strict numeric mode, which types can cross the boundary, loader overrides, and how `gofront test` runs hybrid packages — see the **[Hybrid JS + WebAssembly Guide](docs/hybrid-wasm.md)**.
+
+---
+
+## Usage & Tooling
+
+GoFront includes a fully-featured CLI for building, dev-serving (with live reload), and type-checking your projects.
+
+For detailed command flags, project configuration (`gofront.json`), multi-file package resolution, and type-checking rules, see the **[Usage & Tooling Guide](docs/usage.md)**.
+
+---
+
+## Documentation
+
+* [Usage & Tooling Guide](docs/usage.md) — CLI, project config, testing, multi-file packages
+* [Hybrid JS + WebAssembly Guide](docs/hybrid-wasm.md) — package targets, `both` rules, boundary types, loader
+* [Language Features & Stdlib](docs/language-support.md) — what is implemented, stdlib shims
+* [Go to JS Mapping](docs/compilation-mapping.md) — what each construct compiles to
+* [Go Compatibility Differences](docs/go-compatibility.md) — where GoFront deliberately differs from Go
+* [Compiler Architecture & Internals](docs/architecture.md) — pipeline stages and source layout
 
 ---
 
@@ -756,15 +430,16 @@ Design documents for planned features are organised by release under `docs/v*/`
 ## Tests
 
 ```sh
-npm run test:unit          # unit tests only (~1400 tests, no browser required)
+npm run test:unit          # unit tests only (~1600 tests, no browser required)
 npm run test:perf          # zero-allocation benchmark (100k ray-triangle intersections, 0 bytes/frame)
+npm run bench:raycast      # Möller–Trumbore raycast benchmark comparing pure JS vs hybrid WASM
 npm run test:examples      # GoFront-native unit tests across all example apps
 npm run test:examples:dom  # same, with JSDOM for DOM/gom/templ component testing
 npm run test:e2e           # E2E tests (Playwright, headless Chromium)
 npm run test:all           # all of the above
 ```
 
-**Unit tests** (~1,400+) cover language features, type errors, edge cases, DOM (jsdom),
+**Unit tests** (~1,600+) cover language features, type errors, edge cases, DOM (jsdom),
 external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string
 formatting, map iteration order, integer overflow semantics, unused variable detection,
 unused import detection, semantic difference verification, stdlib shim packages, generics,
