@@ -191,7 +191,7 @@ export function toWasmType(goType, checker = null, mod = null) {
 		return "funcref";
 	}
 
-	if (goType.kind === "interface") {
+	if (goType.kind === "interface" || goType.kind === "InterfaceType") {
 		return "anyref";
 	}
 

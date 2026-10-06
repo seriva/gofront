@@ -219,8 +219,8 @@ The output must match the v1.6.0 engine. The oracle enforces this. Mappings that
 | `init()` | IIFE in declaration order. |
 | `async`/`await` | Passed through. |
 
-- **Stdlib codegen.** Port of the 21 modules in `src/codegen/stdlib/` (`fmt`, `strings`, `builder`, `bytes`, `strconv`, `math`, `rand`, `time`, `slices`, `maps`, `sort`, `errors`, `path`, `regexp`, `html`, `io`, `os`, `unicode`, `utf8`, `testing`, `gom`). By volume this is one of the largest parts of the port and gets its own phase.
-- **Runtime helpers.** `__len __append __s __sortSlice __sclone __ifv/__ifp __equal __cmul __cdiv __sprintf __error __errorIs __pathClean __timeFmt __timeParse __injectStyles` and the testing helpers (`__GoFront_FailNow`, …). Emitted only when used. **Move them out of `src/codegen/runtime.js` into `runtime/js/*.js` files** that both engines load: the JS engine via `readFileSync`, the Go engine via `//go:embed`. Then they cannot drift while the two engines coexist.
+- **Stdlib codegen.** Port of the 21 modules in `src/backend/js/stdlib/` (`fmt`, `strings`, `builder`, `bytes`, `strconv`, `math`, `rand`, `time`, `slices`, `maps`, `sort`, `errors`, `path`, `regexp`, `html`, `io`, `os`, `unicode`, `utf8`, `testing`, `gom`). By volume this is one of the largest parts of the port and gets its own phase.
+- **Runtime helpers.** `__len __append __s __sortSlice __sclone __ifv/__ifp __equal __cmul __cdiv __sprintf __error __errorIs __pathClean __timeFmt __timeParse __injectStyles` and the testing helpers (`__GoFront_FailNow`, …). Emitted only when used. **Move them out of `src/backend/js/runtime.js` into `runtime/js/*.js` files** that both engines load: the JS engine via `readFileSync`, the Go engine via `//go:embed`. Then they cannot drift while the two engines coexist.
 - **templ.** `{ Mount(___p, ___refs) { … } }` objects building DOM via `document.createElement`, SVG via `createElementNS`.
 - **Scoped CSS.** 32-bit FNV-1a over `` `${pkg}_${name}_${cssText}` ``, base-36 → `gfc_<name>_<hash>`. A class accessor function is emitted. CSS is returned as a separate `css` output (static extraction, merged across sub-packages) plus the `__injectStyles` path.
 - **Source maps.** VLQ mappings, merged across preambles, inline (`--source-map`) with `sourcesContent`.
@@ -232,7 +232,7 @@ A port of the complete `src/backend/wasm/` as shipped in v1.6.0, **without new f
 - **Module IR and WasmGC type mapping:** rec groups, slices, JS-string-backed strings, insertion-ordered maps, interfaces/itabs, closures, monomorphised generics.
 - **Instruction emission:** structured control flow, `panic` + `defer`/`recover` (exception handling, with the encoding chosen in v1.6.0), `ref.test`/`ref.cast` type switches.
 - **Binary encoder** (byte buffer + LEB128 + sections) and **WAT printer**.
-- **Facade + loader generation** for the JS ↔ WASM boundary: values, handles, copy-in/out + retention check, numeric slices, `any`, callbacks both ways, interface proxies, `gofront/shared` linear-memory buffers.
+- **Facade + loader generation** for the JS ↔ WASM boundary: values, handles, copy-in/out + retention check, numeric slices, `any`, callbacks both ways, `gofront/shared` linear-memory buffers (cross-boundary interface proxies dropped in v1.6 in favor of WASM-side provider dispatch and func callbacks).
 - **JS strict numeric mode** for `both` packages lives in `backend/js`.
 - **Runtime:** `runtime/wasm/*.go` is GoFront source, so both engines compile the *same files*. It was placed there in v1.5.0, like `runtime/js/`.
 

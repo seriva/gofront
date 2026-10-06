@@ -41,6 +41,7 @@
 		"test:all": "npm run test:unit && npm run test:perf && npm run test:examples && npm run test:examples:dom && npm run test:e2e",
 		"test:unit": "node test/unit/run.js",
 		"test:perf": "node test/e2e/perf/zero-alloc.js",
+		"bench:raycast": "node --expose-gc test/e2e/perf/raycast-bench.js",
 		"test:examples": "node src/index.js test example/simple/src && node src/index.js test example/simple/src/utils && node src/index.js test example/reactive/src && node src/index.js test example/reactive/src/utils && node src/index.js test example/gom/src && node src/index.js test example/gom/src/utils && node src/index.js test example/templ/src && node src/index.js test example/templ/src/utils",
 		"test:examples:dom": "node src/index.js test --dom example/simple/src && node src/index.js test --dom example/gom/src && node src/index.js test --dom example/templ/src",
 		"test:coverage": "c8 --include='src/**' --reporter=text --reporter=lcov node test/unit/run.js",

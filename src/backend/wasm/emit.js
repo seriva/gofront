@@ -15,6 +15,41 @@ import {
 	toWasmType,
 } from "./types.js";
 
+// Go `math` package constants; BigInt entries are integer-typed.  Float
+// literals are the shortest decimal that round-trips to Go's float64 value.
+const MATH_CONSTS = {
+	E: Math.E,
+	Pi: Math.PI,
+	Phi: 1.618033988749895,
+	Sqrt2: Math.SQRT2,
+	SqrtE: 1.6487212707001282,
+	SqrtPi: 1.7724538509055159,
+	SqrtPhi: 1.272019649514069,
+	Ln2: Math.LN2,
+	Log2E: Math.LOG2E,
+	Ln10: Math.LN10,
+	Log10E: Math.LOG10E,
+	MaxFloat32: 3.4028234663852886e38,
+	SmallestNonzeroFloat32: 1.401298464324817e-45,
+	MaxFloat64: Number.MAX_VALUE,
+	SmallestNonzeroFloat64: Number.MIN_VALUE,
+	MaxInt: 9223372036854775807n,
+	MinInt: -9223372036854775808n,
+	MaxInt8: 127n,
+	MinInt8: -128n,
+	MaxInt16: 32767n,
+	MinInt16: -32768n,
+	MaxInt32: 2147483647n,
+	MinInt32: -2147483648n,
+	MaxInt64: 9223372036854775807n,
+	MinInt64: -9223372036854775808n,
+	MaxUint8: 255n,
+	MaxUint16: 65535n,
+	MaxUint32: 4294967295n,
+	MaxUint: 18446744073709551615n,
+	MaxUint64: 18446744073709551615n,
+};
+
 export class FunctionEmitter {
 	constructor(moduleEmitter, funcDecl, funcIndex) {
 		this.mod = moduleEmitter;
@@ -1225,6 +1260,15 @@ export class FunctionEmitter {
 		this.releaseTemp(okTmp, "i32");
 	}
 
+	_structNameOf(goType) {
+		if (!goType) return null;
+		if (goType.kind === "PointerType" || goType.kind === "pointer")
+			return this._structNameOf(goType.base);
+		if (goType.kind === "StarExpr")
+			return this._structNameOf(goType.expr ?? goType.operand);
+		return goType.name ?? null;
+	}
+
 	_emitTypeTest(targetGoType) {
 		if (!targetGoType) {
 			this.pushInstruction("drop");
@@ -1252,18 +1296,10 @@ export class FunctionEmitter {
 			return;
 		}
 
-		const isStruct =
-			isStructType(targetGoType, this.mod.checker, this.mod) &&
-			!isPointerToStruct(targetGoType, this.mod.checker, this.mod);
-		if (isStruct) {
-			const sName =
-				targetGoType?.name ??
-				(targetGoType?.kind === "named"
-					? targetGoType.name
-					: targetGoType?.kind === "Ident" || targetGoType?.kind === "TypeName"
-						? targetGoType.name
-						: null);
-			const sInfo = this.mod.getStructType(sName);
+		// `*T` lives in `any` as the bare struct ref; a `T` value as a boxed
+		// clone (see emitExpr).  Fall through to the scalar box for values.
+		if (isPointerToStruct(targetGoType, this.mod.checker, this.mod)) {
+			const sInfo = this.mod.getStructType(this._structNameOf(targetGoType));
 			if (sInfo) {
 				this.pushInstruction({ op: "ref.test", typeIndex: sInfo.typeIndex });
 				return;
@@ -1314,22 +1350,25 @@ export class FunctionEmitter {
 			return;
 		}
 
-		const isStruct =
-			isStructType(targetGoType, this.mod.checker, this.mod) &&
-			!isPointerToStruct(targetGoType, this.mod.checker, this.mod);
-		if (isStruct) {
-			const sName =
-				targetGoType?.name ??
-				(targetGoType?.kind === "named"
-					? targetGoType.name
-					: targetGoType?.kind === "Ident" || targetGoType?.kind === "TypeName"
-						? targetGoType.name
-						: null);
-			const sInfo = this.mod.getStructType(sName);
+		if (isPointerToStruct(targetGoType, this.mod.checker, this.mod)) {
+			const sInfo = this.mod.getStructType(this._structNameOf(targetGoType));
 			if (sInfo) {
 				this.pushInstruction({
 					op: "ref.cast_null",
 					typeIndex: sInfo.typeIndex,
+				});
+				return;
+			}
+		}
+		if (isStructType(targetGoType, this.mod.checker, this.mod)) {
+			const sInfo = this.mod.getStructType(this._structNameOf(targetGoType));
+			const box = this.mod.getBoxType(targetGoType);
+			if (sInfo && box) {
+				this.pushInstruction({ op: "ref.cast_null", typeIndex: box.typeIndex });
+				this.pushInstruction({
+					op: "struct.get",
+					typeIndex: box.typeIndex,
+					fieldIndex: 0,
 				});
 				this.emitCloneStruct(sInfo, targetWType);
 				return;
@@ -2673,14 +2712,21 @@ export class FunctionEmitter {
 				return;
 			}
 
+			// `*T` in an interface is the struct ref itself (no allocation: the
+			// hot Go pattern `var c Collider = &tm`).  A struct *value* is a
+			// cloned ref wrapped in a one-field box so T and *T stay distinct
+			// for type switches and assertions.
+			if (isPointerToStruct(goType, this.mod.checker, this.mod)) {
+				this._emitRawExpr(expr, this.toWasmType(goType));
+				return;
+			}
 			if (isStructType(goType, this.mod.checker, this.mod)) {
-				const isVal = !isPointerToStruct(goType, this.mod.checker, this.mod);
 				const structWType = this.toWasmType(goType);
 				this._emitRawExpr(expr, structWType);
 				const isFresh =
 					expr.kind === "CompositeLit" ||
 					(expr.kind === "UnaryExpr" && expr.op === "*");
-				if (isVal && !isFresh) {
+				if (!isFresh) {
 					const sInfo =
 						this._resolveStructInfo(expr) ??
 						this.mod.getStructType(goType?.name);
@@ -2688,6 +2734,8 @@ export class FunctionEmitter {
 						this.emitCloneStruct(sInfo, structWType);
 					}
 				}
+				const box = this.mod.getBoxType(goType);
+				this.pushInstruction({ op: "struct.new", typeIndex: box.typeIndex });
 				return;
 			}
 
@@ -2770,6 +2818,8 @@ export class FunctionEmitter {
 			case "SelectorExpr": {
 				const deq = this._dequalify(expr);
 				if (deq) this.emitIdent(deq, targetWasmType);
+				else if (this._isMathConst(expr))
+					this.emitMathConst(expr.field, targetWasmType);
 				else this.emitSelectorExpr(expr);
 				break;
 			}
@@ -4328,7 +4378,17 @@ export class FunctionEmitter {
 		const funcIdx = this.mod.getStringImportIndex();
 		this.pushInstruction({ op: "i32.const", value: strIdx });
 		this.pushInstruction({ op: "call", funcIndex: funcIdx });
-		this.pushInstruction({ op: "throw", tagIndex: 0 });
+		this.emitPanicThrow();
+	}
+
+	// Consumes the externref message on the stack and raises the panic via
+	// `env.panic`; `unreachable` tells the validator control never returns.
+	emitPanicThrow() {
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getPanicImportIndex(),
+		});
+		this.pushInstruction("unreachable");
 	}
 
 	_getSliceElemType(t) {
@@ -5080,7 +5140,7 @@ export class FunctionEmitter {
 				this.pushInstruction({ op: "i32.const", value: strIdx });
 				this.pushInstruction({ op: "call", funcIndex: funcIdx });
 			}
-			this.pushInstruction({ op: "throw", tagIndex: 0 });
+			this.emitPanicThrow();
 			return;
 		}
 
@@ -5290,6 +5350,43 @@ export class FunctionEmitter {
 		this.releaseTemp(closureTmp, closureWType);
 	}
 
+	_isMathConst(expr) {
+		return (
+			expr.expr?.kind === "Ident" &&
+			expr.expr.name === "math" &&
+			!this.resolveLocal("math") &&
+			!this.mod.resolveGlobal("math") &&
+			MATH_CONSTS[expr.field] !== undefined
+		);
+	}
+
+	emitMathConst(name, targetWasmType) {
+		const v = MATH_CONSTS[name];
+		const wType = targetWasmType ?? (typeof v === "bigint" ? "i64" : "f64");
+		switch (wType) {
+			case "i32":
+				this.pushInstruction({ op: "i32.const", value: Number(v) | 0 });
+				return;
+			case "i64":
+				this.pushInstruction({
+					op: "i64.const",
+					value: BigInt.asIntN(
+						64,
+						typeof v === "bigint" ? v : BigInt(Math.trunc(v)),
+					),
+				});
+				return;
+			case "f32":
+				this.pushInstruction({
+					op: "f32.const",
+					value: Math.fround(Number(v)),
+				});
+				return;
+			default:
+				this.pushInstruction({ op: "f64.const", value: Number(v) });
+		}
+	}
+
 	emitMathCall(name, args) {
 		// Native WASM instructions
 		switch (name) {
@@ -5328,6 +5425,54 @@ export class FunctionEmitter {
 				this.emitExpr(args[1], "f64");
 				this.pushInstruction("f64.copysign");
 				return;
+			case "Inf":
+				// Go: Inf(sign) is +Inf when sign >= 0; copysign with the converted
+				// sign gives exactly that (0 converts to +0.0).
+				this.pushInstruction({ op: "f64.const", value: Infinity });
+				this.emitExpr(args[0], "i64");
+				this.pushInstruction("f64.convert_i64_s");
+				this.pushInstruction("f64.copysign");
+				return;
+			case "NaN":
+				this.pushInstruction({ op: "f64.const", value: NaN });
+				return;
+			case "IsNaN": {
+				const tmp = this.acquireTemp("f64");
+				this.emitExpr(args[0], "f64");
+				this.pushInstruction({ op: "local.tee", index: tmp });
+				this.pushInstruction({ op: "local.get", index: tmp });
+				this.pushInstruction("f64.ne");
+				this.releaseTemp(tmp, "f64");
+				return;
+			}
+			case "IsInf": {
+				// IsInf(f, sign): sign > 0 → f == +Inf, sign < 0 → f == -Inf, else |f| == Inf.
+				const f = this.acquireTemp("f64");
+				const s = this.acquireTemp("i64");
+				this.emitExpr(args[0], "f64");
+				this.pushInstruction({ op: "local.set", index: f });
+				this.emitExpr(args[1], "i64");
+				this.pushInstruction({ op: "local.set", index: s });
+				// (s >= 0 && f == +Inf) || (s <= 0 && f == -Inf)
+				this.pushInstruction({ op: "local.get", index: s });
+				this.pushInstruction({ op: "i64.const", value: 0n });
+				this.pushInstruction("i64.ge_s");
+				this.pushInstruction({ op: "local.get", index: f });
+				this.pushInstruction({ op: "f64.const", value: Infinity });
+				this.pushInstruction("f64.eq");
+				this.pushInstruction("i32.and");
+				this.pushInstruction({ op: "local.get", index: s });
+				this.pushInstruction({ op: "i64.const", value: 0n });
+				this.pushInstruction("i64.le_s");
+				this.pushInstruction({ op: "local.get", index: f });
+				this.pushInstruction({ op: "f64.const", value: -Infinity });
+				this.pushInstruction("f64.eq");
+				this.pushInstruction("i32.and");
+				this.pushInstruction("i32.or");
+				this.releaseTemp(s, "i64");
+				this.releaseTemp(f, "f64");
+				return;
+			}
 		}
 
 		// Imported JS Math functions
