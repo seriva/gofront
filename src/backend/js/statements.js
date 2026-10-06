@@ -31,27 +31,35 @@ export const statementGenMethods = {
 	},
 
 	// Shared helper for comma-ok map index in both DefineStmt and AssignStmt.
-	// isDefine=true  → emit `let v = m[k]; let ok = k in m;`
-	// isDefine=false → emit `v = k in m ? m[k] : zero; ok = k in m;`
 	_genCommaOkMapIndex(stmt, rhsNode, isDefine) {
 		const mapExpr = this.genExpr(rhsNode.expr);
 		const keyExpr = this.genExpr(rhsNode.index);
 		const [vName, okName] = stmt.lhs.map((e) => e.name ?? this.genExpr(e));
 		const decl = isDefine ? "let " : "";
-		if (vName !== "_") {
-			if (isDefine) {
+		if (isDefine && !this.strict) {
+			if (vName !== "_") {
 				this.line(`let ${vName} = ${mapExpr}[${keyExpr}];`);
-			} else {
-				const zero = rhsNode._mapValueType
-					? this.zeroValueForType(rhsNode._mapValueType)
-					: "undefined";
-				this.line(
-					`${vName} = (${keyExpr}) in ${mapExpr} ? ${mapExpr}[${keyExpr}] : ${zero};`,
-				);
 			}
+			if (okName !== "_") {
+				this.line(`let ${okName} = (${keyExpr}) in ${mapExpr};`);
+			}
+			return;
 		}
-		if (okName !== "_")
-			this.line(`${decl}${okName} = (${keyExpr}) in ${mapExpr};`);
+		const zero = rhsNode._mapValueType
+			? this.zeroValueForType(rhsNode._mapValueType)
+			: "undefined";
+		this._tmpCounter = (this._tmpCounter ?? 0) + 1;
+		const mTmp = `__m${this._tmpCounter}`;
+		const kTmp = `__k${this._tmpCounter}`;
+		this.line(`const ${mTmp} = ${mapExpr}, ${kTmp} = ${keyExpr};`);
+		if (vName !== "_") {
+			this.line(
+				`${decl}${vName} = (${mTmp} && (${kTmp} in ${mTmp})) ? ${mTmp}[${kTmp}] : ${zero};`,
+			);
+		}
+		if (okName !== "_") {
+			this.line(`${decl}${okName} = Boolean(${mTmp} && (${kTmp} in ${mTmp}));`);
+		}
 	},
 
 	genStmt(stmt) {
@@ -63,6 +71,33 @@ export const statementGenMethods = {
 				this.genTypeDeclWithMethods(stmt, []);
 				break;
 			case "IncDecStmt": {
+				if (stmt.expr.kind === "IndexExpr" && stmt.expr._mapValueType) {
+					const zero = this.zeroValueForType(stmt.expr._mapValueType);
+					const wrapField = this._namedWrapperField(
+						stmt.expr.expr._type,
+						stmt.expr.expr,
+					);
+					const base = wrapField
+						? `${this.genExpr(stmt.expr.expr)}.${wrapField}`
+						: this.genExpr(stmt.expr.expr);
+					const idx = this.genExpr(stmt.expr.index);
+					const op = stmt.op === "++" ? "+" : "-";
+					if (
+						this._hasCallExpr(stmt.expr.expr) ||
+						this._hasCallExpr(stmt.expr.index)
+					) {
+						this.line(
+							`((__m, __k) => { __m[__k] = (__m[__k] ?? ${zero}) ${op} 1; })(${base}, ${idx});`,
+							srcLine,
+						);
+					} else {
+						this.line(
+							`${base}[${idx}] = (${base}[${idx}] ?? ${zero}) ${op} 1;`,
+							srcLine,
+						);
+					}
+					break;
+				}
 				if (
 					this.strict &&
 					this._genStrictCompound(
@@ -266,6 +301,35 @@ export const statementGenMethods = {
 		if (active.length === 0) {
 			if (rhs.length > 0) this.line(`${rhs[0]};`);
 		} else if (lhs.length === 1) {
+			if (
+				stmt.op !== "=" &&
+				stmt.lhs[0].kind === "IndexExpr" &&
+				stmt.lhs[0]._mapValueType
+			) {
+				const zero = this.zeroValueForType(stmt.lhs[0]._mapValueType);
+				const wrapField = this._namedWrapperField(
+					stmt.lhs[0].expr._type,
+					stmt.lhs[0].expr,
+				);
+				const base = wrapField
+					? `${this.genExpr(stmt.lhs[0].expr)}.${wrapField}`
+					: this.genExpr(stmt.lhs[0].expr);
+				const idx = this.genExpr(stmt.lhs[0].index);
+				const binOp = stmt.op.slice(0, -1);
+				if (
+					this._hasCallExpr(stmt.lhs[0].expr) ||
+					this._hasCallExpr(stmt.lhs[0].index)
+				) {
+					this.line(
+						`((__m, __k) => { __m[__k] = (__m[__k] ?? ${zero}) ${binOp} (${active[0].r}); })(${base}, ${idx});`,
+					);
+				} else {
+					this.line(
+						`${base}[${idx}] = (${base}[${idx}] ?? ${zero}) ${binOp} (${active[0].r});`,
+					);
+				}
+				return;
+			}
 			if (
 				this.strict &&
 				stmt.op !== "=" &&

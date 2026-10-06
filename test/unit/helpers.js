@@ -186,6 +186,7 @@ export function compileHybrid(source, options = {}) {
 			const jsLines = [];
 			let jsRes;
 			let jsErr = null;
+			let stdoutBuf = "";
 			const jsCtx = vm.createContext({
 				Math,
 				JSON,
@@ -194,14 +195,37 @@ export function compileHybrid(source, options = {}) {
 				Boolean,
 				Array,
 				Object,
+				process: {
+					stdout: {
+						write: (s) => {
+							stdoutBuf += s;
+							if (stdoutBuf.includes("\n")) {
+								const lines = stdoutBuf.split("\n");
+								stdoutBuf = lines.pop();
+								for (const l of lines) jsLines.push(l);
+							}
+						},
+					},
+				},
 				console: {
-					log: (...a) => jsLines.push(a.map(String).join(" ")),
+					log: (...a) => {
+						if (stdoutBuf) {
+							jsLines.push(stdoutBuf + a.map(String).join(" "));
+							stdoutBuf = "";
+						} else {
+							jsLines.push(a.map(String).join(" "));
+						}
+					},
 				},
 			});
 			try {
 				vm.runInContext(stripImports(js), jsCtx);
 				if (typeof jsCtx[fnName] === "function") {
 					jsRes = jsCtx[fnName](...args);
+				}
+				if (stdoutBuf) {
+					jsLines.push(stdoutBuf);
+					stdoutBuf = "";
 				}
 			} catch (e) {
 				jsErr = e;

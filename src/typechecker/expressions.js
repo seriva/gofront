@@ -467,6 +467,9 @@ export const expressionCheckMethods = {
 					: null;
 				if (constraint) this.checkConstraint(typeArgs[i], constraint, expr);
 			}
+			expr._typeArgs = typeArgs;
+			if (expr.expr) expr.expr._typeArgs = typeArgs;
+			expr._genericFnType = baseType;
 			return this.instantiateGenericFunc(baseType, typeArgs);
 		}
 		// The parser's type-arg heuristic mistakes `xs[d.Field]` (uppercase field
@@ -576,6 +579,42 @@ export const expressionCheckMethods = {
 
 		this._checkCallArgs(fnType, argTypes, expr);
 
+		if (expr.func.kind === "SelectorExpr") {
+			const pkg = expr.func.expr?.name;
+			const fn = expr.func.field;
+			if (pkg === "maps") {
+				const mapType =
+					argTypes[0]?.kind === "named" ? argTypes[0].underlying : argTypes[0];
+				if (fn === "Keys" && mapType?.key) {
+					return { kind: "slice", elem: mapType.key };
+				}
+				if (fn === "Values") {
+					const v = mapType?.value ?? mapType?.elem;
+					if (v) return { kind: "slice", elem: v };
+				}
+				if (fn === "Clone" && mapType) {
+					return argTypes[0];
+				}
+			} else if (pkg === "slices") {
+				const sliceType =
+					argTypes[0]?.kind === "named" ? argTypes[0].underlying : argTypes[0];
+				if (
+					(fn === "Clone" ||
+						fn === "Compact" ||
+						fn === "CompactFunc" ||
+						fn === "Delete" ||
+						fn === "DeleteFunc" ||
+						fn === "Insert" ||
+						fn === "Replace" ||
+						fn === "Grow" ||
+						fn === "Clip") &&
+					sliceType
+				) {
+					return argTypes[0];
+				}
+			}
+		}
+
 		const ret = fnType.returns;
 		if (!ret || ret.length === 0) return VOID;
 		if (ret.length === 1) return ret[0];
@@ -599,6 +638,10 @@ export const expressionCheckMethods = {
 				: null;
 			if (constraint) this.checkConstraint(typeArgs[i], constraint, expr);
 		}
+		expr._typeArgs = typeArgs;
+		if (expr.func) expr.func._typeArgs = typeArgs;
+		expr._genericFnType = fnType;
+		if (expr.func) expr.func._genericFnType = fnType;
 		return this.instantiateGenericFunc(fnType, typeArgs);
 	},
 

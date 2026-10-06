@@ -86,6 +86,8 @@ export const resolveMethods = {
 				if (scope) {
 					const fromScope = scope.lookup(node.name);
 					if (fromScope?.kind === "typeParam") return fromScope;
+					if (scope !== this.globals && scope.symbols.has(node.name))
+						return fromScope;
 				}
 				const named = this.types.get(node.name);
 				if (named) {
@@ -99,12 +101,16 @@ export const resolveMethods = {
 			case "GenericTypeName": {
 				const base = this.types.get(node.name);
 				if (!base) return this.err(`Unknown type '${node.name}'`, node);
-				if (base.kind === "named" && base._generic)
-					return this.instantiateGenericType(
+				if (base.kind === "named" && base._generic) {
+					const res = this.instantiateGenericType(
 						base._generic,
 						node.typeArgs,
 						scope,
 					);
+					node._typeArgs = res.typeArgs;
+					node._genericType = base;
+					return res;
+				}
 				return this.err(`Type '${node.name}' is not generic`, node);
 			}
 			case "TypeParam": {
@@ -272,6 +278,7 @@ export const resolveMethods = {
 		const instantiated = this.substituteType(underlying, map);
 		if (instantiated.kind === "struct") {
 			instantiated.name = generic.declNode.name;
+			instantiated.typeArgs = typeArgs;
 			if (!instantiated.methods) instantiated.methods = new Map();
 			if (generic.methods) {
 				for (const [mName, mType] of generic.methods)
@@ -281,6 +288,7 @@ export const resolveMethods = {
 		return {
 			kind: "named",
 			name: generic.declNode.name,
+			typeArgs,
 			underlying: instantiated,
 		};
 	},
