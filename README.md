@@ -4,8 +4,8 @@ Go for the backend: simple, type-safe, no nonsense. JavaScript for the frontend:
 everywhere, no setup. The problem is JavaScript's loose typing — and TypeScript never
 quite felt like home either.
 
-So I built GoFront. Go syntax and type safety, compiling to plain ES modules. One language
-front and back, no runtime, no framework, no tsconfig.json.
+So I built GoFront. Go syntax and type safety, compiling to plain ES modules and
+WebAssembly (WasmGC). One language front and back, no runtime, no framework, no tsconfig.json.
 
 With built-in support for declarative DOM rendering via the [`gom`](https://www.gomponents.com) standard library, JSX-like [`.templ`](https://templ.guide/) files, and seamless integration with external JavaScript libraries through TypeScript definition files (`.d.ts`), GoFront is designed specifically as a frontend development target. Build complex, reactive user interfaces entirely in Go.
 
@@ -54,15 +54,16 @@ Requires Node.js 20+.
 
 ## How it works
 
-GoFront is a four-stage compiler written in pure Node.js (no dependencies). Every stage
-operates on the same AST (abstract syntax tree), running in a single pass per stage:
+GoFront is a five-stage compiler written in pure Node.js (no dependencies). Every stage
+operates on the AST (abstract syntax tree):
 
 ```
 source text (.go files)
   → Lexer          tokenize + Go-style semicolon insertion
   → Parser         recursive-descent → AST
   → Type Checker   annotate AST with types + collect errors
-  → Code Gen       AST → JavaScript string
+  → Lowering       ownership/clone elision, escape analysis, capture analysis
+  → Code Gen       AST → JavaScript ES module or WebAssembly GC module (.wasm)
 
 source text (.templ files)
   → TemplLexer     dual-mode: Go mode for declarations, HTML mode inside templ bodies
@@ -445,9 +446,9 @@ npm run build:webgl       # → example/webgl/app.js
 ## CLI
 
 ```
-gofront dev [dir]                            watch + compile + asset sync + live reload (default port 3000)
+gofront dev [dir]                            watch + compile + asset sync + live reload (hybrid projects emit app.wasm; default port 3000)
 gofront dev [dir] --port 8080                use a custom port
-gofront build [dir]                          clean + compile + minify + vendor → production output
+gofront build [dir]                          clean + compile + minify + vendor → production output (hybrid projects emit app.wasm)
 gofront build [dir] --pwa                    also generate offline service worker (sw.js) + precache manifest
 gofront build [dir] --source-map             include inline source maps in the release bundle
 gofront build [dir] --no-minify              skip minification
