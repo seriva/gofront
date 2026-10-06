@@ -45,12 +45,12 @@ features (e.g. `docs/v0.0.5/`).
 
 | Area | Difficulty | Status | Notes |
 |---|---|---|---|
-| Baseline & tooling | Low | In Progress | `--wasm-opt` ceiling flag on `bench:raycast` (done); hot-function instruction-count report. |
-| Immutable slice headers | Medium | Draft | Non-`mut` header fields, shared empty header per element type, null arm removed from every slice site. |
-| i32 indices | Medium | Draft | `br_if` bounds check, i32 induction-variable fast path for `for i := a; i < len(x); i++`. |
-| Trap-based nil deref | Medium | Draft | Drop `_emitNilCheck`; boundary maps `WebAssembly.RuntimeError` to the Go panic message. |
-| Inlining & peepholes | Low | Draft | `local.tee` peephole; `Vec3.*`/`GetVertex` under V8's default inlining budget. |
-| Scratch globals in locals | Low | Draft | Cache never-reassigned package globals at function entry. |
+| Baseline & tooling | Low | ✅ Done | `--wasm-opt` ceiling flag on `bench:raycast` (done); hot-function instruction-count report. |
+| Immutable slice headers | Medium | ✅ Done | Non-`mut` header fields, shared empty header per element type, null arm removed from every slice site. |
+| i32 indices | Medium | ✅ Done | `br_if` bounds check, i32 induction-variable fast path for `for i := a; i < len(x); i++`. |
+| Trap-based nil deref | Medium | ✅ Done | Drop `_emitNilCheck`; boundary maps `WebAssembly.RuntimeError` to the Go panic message. |
+| Inlining & peepholes | Low | ✅ Done | `local.tee` peephole; `Vec3.*`/`GetVertex` under V8's default inlining budget. |
+| Scratch globals in locals | Low | ✅ Done | Cache never-reassigned package globals at function entry. |
 
 ---
 

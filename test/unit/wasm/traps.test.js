@@ -1,7 +1,14 @@
 // test/unit/wasm/traps.test.js
 // Tests for Phase 3c: Traps, Panics, and Math / Math/bits imports.
 
-import { assertEqual, compileHybrid, section, test } from "../helpers.js";
+import {
+	assertEqual,
+	compileHybrid,
+	compileWasm,
+	runWasm,
+	section,
+	test,
+} from "../helpers.js";
 
 section("WASM Traps — Division by Zero & Integer Wraps");
 
@@ -179,4 +186,38 @@ func Main() {
 
 	const hybrid = compileHybrid(src);
 	hybrid.run("Main");
+});
+
+test("Nil pointer dereference traps and surfaces as standard Error in JS caller", () => {
+	const src = `
+package main
+
+type Point struct {
+	X int
+	Y int
+}
+
+func Deref(p *Point) int {
+	return p.X + p.Y
+}
+
+func Main() {
+	var p *Point
+	Deref(p)
+}
+`;
+
+	const { wasm, stringTable } = compileWasm(src);
+	let caught = false;
+	try {
+		const { exports } = runWasm(wasm, { stringTable });
+		exports.Main();
+	} catch (e) {
+		caught = true;
+		assertEqual(
+			e.message,
+			"runtime error: invalid memory address or nil pointer dereference",
+		);
+	}
+	assertEqual(caught, true);
 });

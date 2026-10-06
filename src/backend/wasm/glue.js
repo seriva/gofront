@@ -23,6 +23,24 @@ export function createWasmImports({
 	return { imports, panicTag: tag };
 }
 
+const NIL_DEREF_PATTERNS = [
+	"dereferencing a null pointer", // V8
+	"dereferencing null pointer", // SpiderMonkey
+	"null pointer dereference", // SpiderMonkey
+	"null dereference", // JavaScriptCore
+];
+
+function isNilDerefTrap(e) {
+	if (
+		typeof WebAssembly !== "undefined" &&
+		e instanceof WebAssembly.RuntimeError
+	) {
+		const msg = e.message || "";
+		return NIL_DEREF_PATTERNS.some((p) => msg.includes(p));
+	}
+	return false;
+}
+
 export function instantiateWasm(
 	wasmBytes,
 	{ stringTable = [], stdout = null, extraImports = {} } = {},
@@ -53,6 +71,11 @@ export function instantiateWasm(
 							const msg = e.getArg(tag, 0);
 							throw new Error(String(msg));
 						}
+						if (isNilDerefTrap(e)) {
+							throw new Error(
+								"runtime error: invalid memory address or nil pointer dereference",
+							);
+						}
 						if (e instanceof TypeError && e.message.includes("to a BigInt")) {
 							let coercedAny = false;
 							for (let j = 0; j < cur.length; j++) {
@@ -69,6 +92,11 @@ export function instantiateWasm(
 										) {
 											const msg = inner.getArg(tag, 0);
 											throw new Error(String(msg));
+										}
+										if (isNilDerefTrap(inner)) {
+											throw new Error(
+												"runtime error: invalid memory address or nil pointer dereference",
+											);
 										}
 										if (
 											inner instanceof TypeError &&

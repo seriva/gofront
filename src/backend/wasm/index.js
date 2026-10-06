@@ -36,6 +36,7 @@ export class ModuleEmitter {
 		this.boxTypes = new Map(); // wType key -> box info
 		this.arrayTypes = new Map(); // wType key -> array info
 		this.sliceTypes = new Map(); // wType key -> slice info
+		this.sliceTypesByIndex = new Map(); // typeIndex -> slice info
 		this.closureTypes = new Map(); // key -> closure info
 		this.envTypes = new Map(); // key -> env info
 
@@ -264,23 +265,47 @@ export class ModuleEmitter {
 						nullable: true,
 						typeIndex: arrInfo.typeIndex,
 					},
-					mutable: true,
+					mutable: false,
 				},
-				{ type: "i32", mutable: true }, // offset
-				{ type: "i32", mutable: true }, // len
-				{ type: "i32", mutable: true }, // cap
+				{ type: "i32", mutable: false }, // offset
+				{ type: "i32", mutable: false }, // len
+				{ type: "i32", mutable: false }, // cap
 			],
 		};
 		this._pushType(typeEntry);
+
+		const emptyGlobalIndex = this.globals.length;
+		this.globals.push({
+			type: {
+				kind: "ref",
+				nullable: true,
+				typeIndex,
+			},
+			mutable: false,
+			init: [
+				{ op: "ref.null", heapType: arrInfo.typeIndex },
+				{ op: "i32.const", value: 0 },
+				{ op: "i32.const", value: 0 },
+				{ op: "i32.const", value: 0 },
+				{ op: "struct.new", typeIndex },
+			],
+		});
+
 		const sliceInfo = {
 			typeIndex,
 			typeEntry,
 			arrInfo,
 			elemWType,
 			elemGoType,
+			emptyGlobalIndex,
 		};
 		this.sliceTypes.set(key, sliceInfo);
+		this.sliceTypesByIndex.set(typeIndex, sliceInfo);
 		return sliceInfo;
+	}
+
+	getSliceTypeByIndex(typeIndex) {
+		return this.sliceTypesByIndex?.get(typeIndex) ?? null;
 	}
 
 	getClosureType(goType) {
@@ -375,6 +400,8 @@ export class ModuleEmitter {
 	_initRuntimeImports() {
 		this._initPanicTag();
 		this.getPanicImportIndex(); // env.panic
+		this.internString("runtime error: index out of range");
+		this.internString("runtime error: slice bounds out of range");
 
 		// String built-ins
 		this.getStringImportIndex(); // env.str
@@ -485,6 +512,14 @@ export class ModuleEmitter {
 	// inside a try block, and a non-inlined call boxes every float argument.)
 	getPanicImportIndex() {
 		return this.getOrAddFuncImport("env", "panic", ["externref"], []);
+	}
+
+	getBoundsPanicFuncIndex() {
+		return this.resolveFuncIndex("__bounds_panic");
+	}
+
+	getSliceBoundsPanicFuncIndex() {
+		return this.resolveFuncIndex("__slice_bounds_panic");
 	}
 
 	getPrintlnEmptyIndex() {
@@ -667,6 +702,66 @@ export class ModuleEmitter {
 	}
 }
 
+export function peepholeOptimize(instructions) {
+	let changed = true;
+	let current = instructions;
+	while (changed) {
+		changed = false;
+		const next = [];
+		for (let i = 0; i < current.length; i++) {
+			const c = current[i];
+			const n = current[i + 1];
+
+			// Pattern 1: local.get X; local.set X -> nothing
+			if (
+				c?.op === "local.get" &&
+				n?.op === "local.set" &&
+				c.index === n.index
+			) {
+				changed = true;
+				i++; // skip both
+				continue;
+			}
+
+			// Pattern 2: local.set X; local.get X -> local.tee X
+			if (
+				c?.op === "local.set" &&
+				n?.op === "local.get" &&
+				c.index === n.index
+			) {
+				changed = true;
+				next.push({ op: "local.tee", index: c.index });
+				i++; // skip n (local.get)
+				continue;
+			}
+
+			// Pattern 3: local.tee X; local.set X -> local.set X
+			if (
+				c?.op === "local.tee" &&
+				n?.op === "local.set" &&
+				c.index === n.index
+			) {
+				changed = true;
+				next.push({ op: "local.set", index: c.index });
+				i++;
+				continue;
+			}
+
+			// Pattern 4: local.tee X; drop -> local.set X
+			if (c?.op === "local.tee" && (n === "drop" || n?.op === "drop")) {
+				changed = true;
+				next.push({ op: "local.set", index: c.index });
+				i++;
+				continue;
+			}
+
+			next.push(c);
+		}
+		current = next;
+	}
+	return current;
+}
+
 export function compileWasmModule(
 	programs,
 	checker,
@@ -674,12 +769,15 @@ export function compileWasmModule(
 	options = {},
 ) {
 	const progs = Array.isArray(programs) ? programs : [programs];
-	const mod = new ModuleEmitter(checker, lowerResult, progs, {
+	const resolvedLowerResult = lowerResult ?? lower(progs, checker);
+	const mod = new ModuleEmitter(checker, resolvedLowerResult, progs, {
 		bundledPackages: options.bundledPackages,
 	});
 
 	// 1. Collect all functions, methods, and package-level globals
 	const funcDecls = [];
+	let initCount = 0;
+	const initNames = [];
 	for (const p of progs) {
 		const pkgName = p.pkg?.name ?? "main";
 		const pkgTarget = p.target ?? "wasm";
@@ -687,6 +785,12 @@ export function compileWasmModule(
 			if (d.kind === "FuncDecl") {
 				d._pkgName = pkgName;
 				d._pkgTarget = pkgTarget;
+				if (d.name === "init" || d.name.startsWith("init$")) {
+					const renamed = initCount === 0 ? "init" : `init$${initCount}`;
+					d.name = renamed;
+					initNames.push(renamed);
+					initCount++;
+				}
 				funcDecls.push(d);
 			} else if (d.kind === "MethodDecl") {
 				const recvTypeName =
@@ -827,8 +931,30 @@ export function compileWasmModule(
 	const pendingInits = _collectPackageGlobals(progs, mod, checker);
 	_collectPackageConsts(progs, mod);
 	const globalInitFn =
-		pendingInits.length > 0 ? _makeGlobalInitFunc(pendingInits) : null;
+		pendingInits.length > 0 || initNames.length > 0
+			? _makeGlobalInitFunc(pendingInits, initNames)
+			: null;
 	if (globalInitFn) funcDecls.push(globalInitFn);
+
+	const boundsPanicFn = {
+		kind: "FuncDecl",
+		name: "__bounds_panic",
+		params: [],
+		returnType: null,
+		_isRuntimePanic: true,
+		_panicMsg: "runtime error: index out of range",
+	};
+	funcDecls.push(boundsPanicFn);
+
+	const sliceBoundsPanicFn = {
+		kind: "FuncDecl",
+		name: "__slice_bounds_panic",
+		params: [],
+		returnType: null,
+		_isRuntimePanic: true,
+		_panicMsg: "runtime error: slice bounds out of range",
+	};
+	funcDecls.push(sliceBoundsPanicFn);
 
 	// 1d. Boundary metadata (exported surface of wasm packages)
 	const boundaryMeta = options.boundary
@@ -906,18 +1032,30 @@ export function compileWasmModule(
 	// 4. Emit function bodies
 	for (const fn of funcDecls) {
 		const emitter = new FunctionEmitter(mod, fn, fn._globalFuncIndex);
-		if (fn.body) {
+		if (fn._isRuntimePanic) {
+			const strIdx = mod.internString(fn._panicMsg);
+			const funcIdx = mod.getStringImportIndex();
+			emitter.pushInstruction({ op: "i32.const", value: strIdx });
+			emitter.pushInstruction({ op: "call", funcIndex: funcIdx });
+			emitter.emitPanicThrow();
+		} else if (fn.body) {
 			emitter.emitFunctionBody(fn.body);
 		}
-		// If last instruction is not return, auto-emit return or unreachable
-		const body = emitter.body;
-		if (body.length === 0 || body[body.length - 1].op !== "return") {
+		// If last instruction is not return or unreachable, auto-emit return or unreachable
+		let body = emitter.body;
+		if (
+			body.length === 0 ||
+			(body[body.length - 1].op !== "return" &&
+				body[body.length - 1].op !== "unreachable")
+		) {
 			if (emitter.returnTypes.length === 0) {
 				body.push({ op: "return" });
 			} else {
 				body.push({ op: "unreachable" });
 			}
 		}
+
+		body = peepholeOptimize(body);
 
 		mod.funcs.push({
 			typeIndex: fn._typeIndex,
@@ -1115,7 +1253,15 @@ function _collectPackageGlobals(progs, mod, checker) {
 						wType === "anyref" ||
 						typeof wType === "object"
 					) {
-						if (
+						const sliceInfo =
+							typeof wType === "object" && typeof wType.typeIndex === "number"
+								? mod.getSliceTypeByIndex(wType.typeIndex)
+								: null;
+						if (sliceInfo) {
+							initInsts = [
+								{ op: "global.get", index: sliceInfo.emptyGlobalIndex },
+							];
+						} else if (
 							typeof wType === "object" &&
 							typeof wType.typeIndex === "number" &&
 							rawType?.kind !== "pointer"
@@ -1130,12 +1276,23 @@ function _collectPackageGlobals(progs, mod, checker) {
 										initInsts.push({ op: "i64.const", value: 0n });
 									else if (f.wType === "f32" || f.wType === "f64")
 										initInsts.push({ op: `${f.wType}.const`, value: 0.0 });
-									else if (typeof f.wType === "object")
-										initInsts.push({
-											op: "ref.null",
-											heapType: f.wType.typeIndex ?? "any",
-										});
-									else initInsts.push({ op: "i32.const", value: 0 });
+									else if (typeof f.wType === "object") {
+										const fieldSlice =
+											typeof f.wType.typeIndex === "number"
+												? mod.getSliceTypeByIndex(f.wType.typeIndex)
+												: null;
+										if (fieldSlice) {
+											initInsts.push({
+												op: "global.get",
+												index: fieldSlice.emptyGlobalIndex,
+											});
+										} else {
+											initInsts.push({
+												op: "ref.null",
+												heapType: f.wType.typeIndex ?? "any",
+											});
+										}
+									} else initInsts.push({ op: "i32.const", value: 0 });
 								}
 								initInsts.push({
 									op: "struct.new",
@@ -1225,14 +1382,25 @@ function _collectPackageGlobals(progs, mod, checker) {
 }
 
 // Synthesises `__init_globals()` assigning every non-constant package-level
-// initializer in declaration order; registered as the module start function.
-function _makeGlobalInitFunc(pending) {
+// initializer in declaration order and invoking package `init()` functions;
+// registered as the module start function.
+function _makeGlobalInitFunc(pending, initNames = []) {
 	const stmts = pending.map(({ name, expr }) => ({
 		kind: "AssignStmt",
 		lhs: [{ kind: "Ident", name, _type: expr._type }],
 		op: "=",
 		rhs: [expr],
 	}));
+	for (const initName of initNames) {
+		stmts.push({
+			kind: "ExprStmt",
+			expr: {
+				kind: "CallExpr",
+				func: { kind: "Ident", name: initName },
+				args: [],
+			},
+		});
+	}
 	stmts.push({ kind: "ReturnStmt", values: [] });
 	return {
 		kind: "FuncDecl",

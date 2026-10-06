@@ -24,6 +24,7 @@ import { copyAssets } from "./asset-manager.js";
 import {
 	formatBuildSummary,
 	formatPrepSummary,
+	formatWrittenDesc,
 	handleBuild,
 	handleCheck,
 	handleDev,
@@ -181,7 +182,7 @@ if (args[0] === "dev") {
 		if (dev.initialError) {
 			log.error(dev.initialError.message);
 		} else {
-			log.ok(`— wrote ${colors.cyan(dev.outputFile)}`);
+			log.ok(`— wrote ${formatWrittenDesc(dev.written, dev.outputFile)}`);
 		}
 		log.info(
 			`dev server running → ${colors.cyan(`http://localhost:${dev.port}`)}`,
@@ -277,8 +278,10 @@ if (!watchMode) {
 
 	if (outputFile) {
 		try {
-			writeCompileOutput(resolve(outputFile), result, js);
-			log.info(`wrote ${colors.cyan(outputFile)} ${ms(elapsedMs)}`);
+			const written = writeCompileOutput(resolve(outputFile), result, js);
+			log.info(
+				`wrote ${formatWrittenDesc(written, outputFile)} ${ms(elapsedMs)}`,
+			);
 		} catch (e) {
 			log.fail(`cannot write '${outputFile}': ${e.message}`);
 			process.exit(1);
@@ -333,9 +336,9 @@ function buildOnce(changedFile = null) {
 		const changeNote = changedFile ? ` — ${changedFile} changed` : "";
 		const timing = colors.dim(`(${elapsedMs}ms${changeNote})`);
 		if (outputFile) {
-			writeCompileOutput(resolve(outputFile), result, js);
+			const written = writeCompileOutput(resolve(outputFile), result, js);
 			console.error(
-				`${stamp()} ${colors.bold("gofront:")} ${colors.green("OK")} — wrote ${colors.cyan(outputFile)} ${timing}`,
+				`${stamp()} ${colors.bold("gofront:")} ${colors.green("OK")} — wrote ${formatWrittenDesc(written, outputFile)} ${timing}`,
 			);
 		} else {
 			// Clear screen then print

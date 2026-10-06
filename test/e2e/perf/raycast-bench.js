@@ -46,7 +46,49 @@ const RUNS = Number(flag("runs", 5));
 const MODE = flag("mode", "both");
 const WASM_OPT = flag("wasm-opt", null);
 const JSON_OUT = args.includes("--json");
+const SIZES = args.includes("--sizes");
 const gc = globalThis.gc ?? null;
+
+const HOT_FUNCTIONS = [
+	"Trimesh.GetVertex",
+	"Trimesh.GetNormal",
+	"Vec3.Sub",
+	"Vec3.Cross",
+	"RayPointInTriangle",
+	"IntersectRayAABB",
+	"OctreeNode.RayQueryLocal",
+	"Ray.IntersectTrimesh",
+];
+
+function countWatInstructions(wat, funcName) {
+	const escaped = funcName.replace(".", "\\.");
+	const re = new RegExp(
+		`\\(func \\$f\\d+[^\\n]*\\(export "${escaped}"\\)[\\s\\S]*?\\n  \\)`,
+	);
+	const match = wat.match(re);
+	if (!match) return null;
+	const lines = match[0].split("\n").filter((l) => {
+		const trimmed = l.trim();
+		return (
+			trimmed &&
+			!trimmed.startsWith(";;") &&
+			!trimmed.startsWith("(func") &&
+			!trimmed.startsWith("(local") &&
+			trimmed !== ")"
+		);
+	});
+	return lines.length;
+}
+
+function getSizes() {
+	const compiled = compileVariant(false, { emitWat: true });
+	const wasmBytes = compiled.wasm?.length ?? 0;
+	const counts = {};
+	for (const fn of HOT_FUNCTIONS) {
+		counts[fn] = countWatInstructions(compiled.wat, fn);
+	}
+	return { wasmBytes, counts };
+}
 
 function optimiseWasm(wasm) {
 	if (!WASM_OPT || !wasm) return wasm;
@@ -77,7 +119,7 @@ function optimiseWasm(wasm) {
 // ── Compile both variants ────────────────────────────────────────
 // Each variant gets its own copy of the fixture: the JS-only one with the
 // `//gofront:target` directives stripped so every package lands in JS.
-function compileVariant(forceJs) {
+function compileVariant(forceJs, options = {}) {
 	const dir = mkdtempSync(join(tmpdir(), "gofront-raycast-"));
 	try {
 		cpSync(FIXTURE, dir, { recursive: true });
@@ -92,7 +134,7 @@ function compileVariant(forceJs) {
 				}
 			}
 		}
-		return compileDir(join(dir, "collision"));
+		return compileDir(join(dir, "collision"), options);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -259,6 +301,22 @@ async function bench(label, forceJs, mesh, rays) {
 	};
 }
 
+if (SIZES && (args.length === 1 || (args.length === 2 && JSON_OUT))) {
+	const { wasmBytes, counts } = getSizes();
+	if (JSON_OUT) {
+		console.log(JSON.stringify({ wasmBytes, counts }, null, 2));
+	} else {
+		console.log(
+			`WASM size: ${(wasmBytes / 1024).toFixed(1)} KB (${wasmBytes.toLocaleString("en-US")} bytes)`,
+		);
+		console.log("Hot function instruction counts:");
+		for (const [fn, cnt] of Object.entries(counts)) {
+			console.log(`  ${fn.padEnd(26)} ${cnt !== null ? cnt : "not found"}`);
+		}
+	}
+	process.exit(0);
+}
+
 // ── Run ──────────────────────────────────────────────────────────
 const mesh = buildMesh();
 const rays = buildRays();
@@ -304,5 +362,12 @@ if (JSON_OUT) {
 		console.log(
 			`speedup  ${(hy.raysPerSec / js.raysPerSec).toFixed(2)}× (hybrid vs js)`,
 		);
+	}
+	if (SIZES) {
+		const { counts } = getSizes();
+		console.log("\nHot function instruction counts:");
+		for (const [fn, cnt] of Object.entries(counts)) {
+			console.log(`  ${fn.padEnd(26)} ${cnt !== null ? cnt : "not found"}`);
+		}
 	}
 }

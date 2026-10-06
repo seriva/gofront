@@ -298,3 +298,25 @@ func Main() int {
 	}
 	assertEqual(threw, true);
 });
+
+test("Nil method receiver that is never dereferenced succeeds in WASM", () => {
+	const src = `
+package main
+
+type Helper struct {
+	dummy int
+}
+
+func (h *Helper) Answer() int64 {
+	return 42
+}
+
+func Main() int64 {
+	var h *Helper
+	return h.Answer()
+}
+`;
+	const { wasm, stringTable } = compileWasm(src);
+	const { exports } = runWasm(wasm, { stringTable });
+	assertEqual(exports.Main(), 42n);
+});

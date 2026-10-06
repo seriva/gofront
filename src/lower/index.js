@@ -6,6 +6,7 @@ export * from "./captures.js";
 export * from "./embedding.js";
 export * from "./escape.js";
 export * from "./functions.js";
+export * from "./globals.js";
 export * from "./ownership.js";
 export * from "./range.js";
 
@@ -14,6 +15,7 @@ import { analyzeCaptures } from "./captures.js";
 import { computeEmbeddedStubs } from "./embedding.js";
 import { paramEscapes } from "./escape.js";
 import { extractNamedReturns, hasDefer } from "./functions.js";
+import { computeGlobalAnalysis } from "./globals.js";
 import { OwnershipContext } from "./ownership.js";
 
 export class LowerResult {
@@ -30,6 +32,12 @@ export class LowerResult {
 		this.captures = new Map();
 		// Map<ASTNode, Set<string>>
 		this.escapes = new Map();
+		// Set<string>
+		this.neverAssignedGlobals = new Set();
+		// Set<string>
+		this.initPathFunctions = new Set();
+		// Map<ASTNode, Array<string>>
+		this.cachedGlobalsByFunc = new Map();
 	}
 }
 
@@ -95,6 +103,13 @@ export function lower(programOrPrograms, checker = null) {
 			}
 		}
 	}
+
+	// 3. Compute package-level global analysis
+	const { neverAssignedGlobals, initPathFunctions, cachedGlobalsByFunc } =
+		computeGlobalAnalysis(programs, checker);
+	res.neverAssignedGlobals = neverAssignedGlobals;
+	res.initPathFunctions = initPathFunctions;
+	res.cachedGlobalsByFunc = cachedGlobalsByFunc;
 
 	return res;
 }

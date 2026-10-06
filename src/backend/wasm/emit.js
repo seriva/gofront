@@ -73,6 +73,7 @@ export class FunctionEmitter {
 			: [];
 
 		this.locals = new Map(); // name -> { index, type, goType, isParam, isBoxed, boxInfo }
+		this.cachedGlobals = new Map(); // globalName -> { index, globalInfo }
 		this.localTypes = []; // list of additional local types (beyond params)
 		this.controlStack = []; // stack of { type: 'block'|'loop', label: string }
 		this.body = []; // emitted instructions
@@ -109,7 +110,98 @@ export class FunctionEmitter {
 
 		this._boxMutatedParams();
 
+		this._cacheScratchGlobals();
+
+		const needsOobBlock = this._needsOobBlock(body);
+		if (needsOobBlock) {
+			this.pushInstruction({ op: "block", blockType: "void" });
+			this.pushControl("oob");
+		}
+
 		this.emitBlock(body);
+
+		if (needsOobBlock) {
+			const lastOp = this.body[this.body.length - 1]?.op;
+			if (lastOp !== "return" && lastOp !== "unreachable") {
+				if (this.returnTypes.length === 0) {
+					this.pushInstruction({ op: "return" });
+				} else {
+					this.pushInstruction({ op: "unreachable" });
+				}
+			}
+			this.pushInstruction("end");
+
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getBoundsPanicFuncIndex(),
+			});
+			this.pushInstruction("unreachable");
+		}
+	}
+
+	_cacheScratchGlobals() {
+		if (this.funcDecl._isTrampoline) return;
+		const byFunc = this.mod.lowerResult?.cachedGlobalsByFunc;
+		const names =
+			byFunc?.get(this.rootFuncDecl) ??
+			byFunc?.get(this.rootFuncDecl._sourceDecl) ??
+			[];
+		// The list is per root function and covers nested closures; each body
+		// only pays for the globals it reads itself.
+		for (const name of names) {
+			if (!this._bodyReadsIdent(this.funcDecl.body, name)) continue;
+			const globalInfo = this.mod.resolveGlobal(name);
+			if (!globalInfo) continue;
+
+			const localIdx = this.allocLocal(
+				`__cache$${name}`,
+				globalInfo.type,
+				globalInfo.goType,
+				true,
+			);
+			this.cachedGlobals.set(name, { index: localIdx, globalInfo });
+			this.pushInstruction({ op: "global.get", index: globalInfo.index });
+			this.pushInstruction({ op: "local.set", index: localIdx });
+		}
+	}
+
+	// Like _findIdentInAST but stops at FuncLit boundaries (closures are emitted
+	// as separate functions with their own entry).
+	_bodyReadsIdent(node, name) {
+		if (!node || typeof node !== "object") return false;
+		if (Array.isArray(node)) {
+			return node.some((item) => this._bodyReadsIdent(item, name));
+		}
+		if (node.kind === "FuncLit") return false;
+		if (node.kind === "Ident") return node.name === name;
+		for (const key of Object.keys(node)) {
+			if (key.startsWith("_")) continue;
+			if (this._bodyReadsIdent(node[key], name)) return true;
+		}
+		return false;
+	}
+
+	_needsOobBlock(node) {
+		if (!node || typeof node !== "object") return false;
+		if (Array.isArray(node)) {
+			return node.some((item) => this._needsOobBlock(item));
+		}
+		if (node.kind === "FuncLit") return false;
+		if (node.kind === "IndexExpr") {
+			const baseGoType = node.expr?._type ?? this._resolveExprGoType(node.expr);
+			if (
+				baseGoType &&
+				(baseGoType.kind === "map" || baseGoType.name === "map")
+			) {
+				return false;
+			}
+			return true;
+		}
+		for (const key of Object.keys(node)) {
+			if (key.startsWith("_")) continue;
+			if (this._needsOobBlock(node[key])) return true;
+		}
+		return false;
 	}
 
 	_findCapturedVarGoType(name) {
@@ -356,6 +448,13 @@ export class FunctionEmitter {
 		if (!t && expr.kind === "Ident") {
 			const local = this.resolveLocal(expr.name);
 			if (local) t = local.goType;
+			if (!t && this.cachedGlobals.has(expr.name)) {
+				t = this.cachedGlobals.get(expr.name).globalInfo.goType;
+			}
+			if (!t) {
+				const global = this.mod.resolveGlobal(expr.name);
+				if (global) t = global.goType;
+			}
 		}
 		if (!t) return null;
 		while (
@@ -399,19 +498,6 @@ export class FunctionEmitter {
 			}
 		}
 		return null;
-	}
-
-	_emitNilCheck(wType) {
-		const tmp = this.acquireTemp(wType);
-		this.pushInstruction({ op: "local.tee", index: tmp });
-		this.pushInstruction("ref.is_null");
-		this.pushInstruction({ op: "if", blockType: "void" });
-		this.emitPanic(
-			"runtime error: invalid memory address or nil pointer dereference",
-		);
-		this.pushInstruction("end");
-		this.pushInstruction({ op: "local.get", index: tmp });
-		this.releaseTemp(tmp, wType);
 	}
 
 	emitCloneStruct(structInfo, baseWType) {
@@ -518,6 +604,25 @@ export class FunctionEmitter {
 				}
 				return;
 			}
+			if (
+				(goType &&
+					goType.kind !== "pointer" &&
+					isSliceType(goType, this.mod.checker)) ||
+				(typeof wType.typeIndex === "number" &&
+					this.mod.getSliceTypeByIndex(wType.typeIndex))
+			) {
+				const elemType = goType ? this._getSliceElemType(goType) : null;
+				const sliceInfo = elemType
+					? this.mod.getSliceType(elemType)
+					: this.mod.getSliceTypeByIndex(wType.typeIndex);
+				if (sliceInfo) {
+					this.pushInstruction({
+						op: "global.get",
+						index: sliceInfo.emptyGlobalIndex,
+					});
+					return;
+				}
+			}
 			this.pushInstruction({
 				op: "ref.null",
 				heapType: wType.typeIndex ?? "any",
@@ -541,9 +646,19 @@ export class FunctionEmitter {
 		return this.acquireTemp(wasmType);
 	}
 
+	// Temps are keyed by a canonical string so ref-typed temps (fresh object
+	// literals at every call site) are actually recycled across sites.
+	_tempKey(wasmType) {
+		if (typeof wasmType === "string") return wasmType;
+		const nn = wasmType.nullable === false ? "!" : "";
+		if (typeof wasmType.typeIndex === "number")
+			return `r${wasmType.typeIndex}${nn}`;
+		return `h${wasmType.heapType ?? "any"}${nn}`;
+	}
+
 	acquireTemp(wasmType) {
 		if (!this.freeTemps) this.freeTemps = new Map();
-		const list = this.freeTemps.get(wasmType);
+		const list = this.freeTemps.get(this._tempKey(wasmType));
 		if (list && list.length > 0) {
 			return list.pop();
 		}
@@ -552,10 +667,11 @@ export class FunctionEmitter {
 
 	releaseTemp(idx, wasmType) {
 		if (!this.freeTemps) this.freeTemps = new Map();
-		let list = this.freeTemps.get(wasmType);
+		const key = this._tempKey(wasmType);
+		let list = this.freeTemps.get(key);
 		if (!list) {
 			list = [];
-			this.freeTemps.set(wasmType, list);
+			this.freeTemps.set(key, list);
 		}
 		list.push(idx);
 	}
@@ -564,18 +680,28 @@ export class FunctionEmitter {
 		return this.locals.get(name) ?? null;
 	}
 
+	// The control stack mirrors every block/loop/if so `br_if` depths to the
+	// function-level out-of-bounds block stay correct inside nested structures
+	// that never call pushControl (struct equality, string slicing, ...).
 	pushInstruction(inst) {
+		const op = typeof inst === "string" ? inst : inst.op;
+		if (op === "block" || op === "loop" || op === "if") {
+			this.controlStack.push({ op, role: null, label: null });
+		} else if (op === "end") {
+			this.controlStack.pop();
+		}
 		this.body.push(typeof inst === "string" ? { op: inst } : inst);
 	}
 
 	// ── Control Stack ──────────────────────────────────────────
 
+	// Tags the innermost open block as a break/continue/oob target.
 	pushControl(role, label = null) {
-		this.controlStack.push({ role, label });
-	}
-
-	popControl() {
-		return this.controlStack.pop();
+		const top = this.controlStack[this.controlStack.length - 1];
+		if (top) {
+			top.role = role;
+			top.label = label;
+		}
 	}
 
 	resolveBranchDepth(targetLabel, isContinue = false) {
@@ -598,6 +724,16 @@ export class FunctionEmitter {
 			}
 		}
 		return 0;
+	}
+
+	resolveBranchDepthToOob() {
+		for (let i = this.controlStack.length - 1; i >= 0; i--) {
+			const ctrl = this.controlStack[i];
+			if (ctrl.role === "oob") {
+				return this.controlStack.length - 1 - i;
+			}
+		}
+		return null;
 	}
 
 	// ── Statements ─────────────────────────────────────────────
@@ -937,9 +1073,6 @@ export class FunctionEmitter {
 			const baseWType = this.toWasmType(l.expr._type);
 
 			this.emitExpr(l.expr, baseWType);
-			if (l.expr._type?.kind === "pointer") {
-				this._emitNilCheck(baseWType);
-			}
 			for (let i = 0; i < path.length - 1; i++) {
 				const step = path[i];
 				this.pushInstruction({
@@ -977,7 +1110,6 @@ export class FunctionEmitter {
 				const tmpL = this.acquireTemp(baseWType);
 				const tmpR = this.acquireTemp(baseWType);
 				this.emitExpr(l.operand, baseWType);
-				this._emitNilCheck(baseWType);
 				this.pushInstruction({ op: "local.set", index: tmpL });
 				this.emitExpr(r, baseWType);
 				this.pushInstruction({ op: "local.set", index: tmpR });
@@ -1007,7 +1139,6 @@ export class FunctionEmitter {
 			};
 			const boxTmp = this.acquireTemp(baseWType);
 			this.emitExpr(l.operand, baseWType);
-			this._emitNilCheck(baseWType);
 			this.pushInstruction({ op: "local.set", index: boxTmp });
 			this.pushInstruction({ op: "local.get", index: boxTmp });
 			this.emitExpr(r, box.wType);
@@ -1036,83 +1167,7 @@ export class FunctionEmitter {
 			const arrInfo = this.mod.getArrayType(elemGoType);
 			const sliceInfo = isSlice ? this.mod.getSliceType(elemGoType) : null;
 
-			const arrTmp = this.acquireTemp({
-				kind: "ref",
-				nullable: true,
-				typeIndex: arrInfo.typeIndex,
-			});
-			const offTmp = this.acquireTemp("i32");
-			const lenTmp = this.acquireTemp("i32");
-
-			if (isSlice) {
-				const sliceWType = {
-					kind: "ref",
-					nullable: true,
-					typeIndex: sliceInfo.typeIndex,
-				};
-				const sliceTmp = this.acquireTemp(sliceWType);
-				this.emitExpr(baseNode, sliceWType);
-				this.pushInstruction({ op: "local.set", index: sliceTmp });
-
-				this.pushInstruction({ op: "local.get", index: sliceTmp });
-				this.pushInstruction("ref.is_null");
-				this.pushInstruction({ op: "if", blockType: "void" });
-				this.pushInstruction({ op: "i32.const", value: 0 });
-				this.pushInstruction({ op: "local.set", index: lenTmp });
-				this.pushInstruction({ op: "i32.const", value: 0 });
-				this.pushInstruction({ op: "local.set", index: offTmp });
-				this.pushInstruction({ op: "ref.null", heapType: arrInfo.typeIndex });
-				this.pushInstruction({ op: "local.set", index: arrTmp });
-				this.pushInstruction("else");
-				this.pushInstruction({ op: "local.get", index: sliceTmp });
-				this.pushInstruction({
-					op: "struct.get",
-					typeIndex: sliceInfo.typeIndex,
-					fieldIndex: 2,
-				});
-				this.pushInstruction({ op: "local.set", index: lenTmp });
-				this.pushInstruction({ op: "local.get", index: sliceTmp });
-				this.pushInstruction({
-					op: "struct.get",
-					typeIndex: sliceInfo.typeIndex,
-					fieldIndex: 1,
-				});
-				this.pushInstruction({ op: "local.set", index: offTmp });
-				this.pushInstruction({ op: "local.get", index: sliceTmp });
-				this.pushInstruction({
-					op: "struct.get",
-					typeIndex: sliceInfo.typeIndex,
-					fieldIndex: 0,
-				});
-				this.pushInstruction({ op: "local.set", index: arrTmp });
-				this.pushInstruction("end");
-				this.releaseTemp(sliceTmp, sliceWType);
-			} else {
-				const arrWType = {
-					kind: "ref",
-					nullable: true,
-					typeIndex: arrInfo.typeIndex,
-				};
-				this.emitExpr(baseNode, arrWType);
-				if (isPtrToArr) {
-					this._emitNilCheck(arrWType);
-				}
-				this.pushInstruction({ op: "local.set", index: arrTmp });
-				this.pushInstruction({ op: "local.get", index: arrTmp });
-				this.pushInstruction("array.len");
-				this.pushInstruction({ op: "local.set", index: lenTmp });
-				this.pushInstruction({ op: "i32.const", value: 0 });
-				this.pushInstruction({ op: "local.set", index: offTmp });
-			}
-
-			const idxTmp = this.acquireTemp("i32");
-			this._emitIndexValAndBoundsCheck(l.index, lenTmp, idxTmp);
-
-			const targetIdxTmp = this.acquireTemp("i32");
-			this.pushInstruction({ op: "local.get", index: offTmp });
-			this.pushInstruction({ op: "local.get", index: idxTmp });
-			this.pushInstruction("i32.add");
-			this.pushInstruction({ op: "local.set", index: targetIdxTmp });
+			this._emitElemAddr(baseNode, l.index, sliceInfo, arrInfo);
 
 			const isValStruct =
 				isStructType(elemGoType, this.mod.checker, this.mod) &&
@@ -1120,7 +1175,6 @@ export class FunctionEmitter {
 			const isFresh =
 				r.kind === "CompositeLit" || (r.kind === "UnaryExpr" && r.op === "*");
 
-			const valTmp = this.acquireTemp(arrInfo.elemWType);
 			this.emitExpr(r, arrInfo.elemWType);
 			if (isValStruct && !isFresh) {
 				const sInfo = this._resolveStructInfo(r) ?? this._resolveStructInfo(l);
@@ -1128,24 +1182,9 @@ export class FunctionEmitter {
 					this.emitCloneStruct(sInfo, arrInfo.elemWType);
 				}
 			}
-			this.pushInstruction({ op: "local.set", index: valTmp });
 
-			this.pushInstruction({ op: "local.get", index: arrTmp });
-			this.pushInstruction({ op: "local.get", index: targetIdxTmp });
-			this.pushInstruction({ op: "local.get", index: valTmp });
 			this.pushInstruction({
 				op: "array.set",
-				typeIndex: arrInfo.typeIndex,
-			});
-
-			this.releaseTemp(valTmp, arrInfo.elemWType);
-			this.releaseTemp(targetIdxTmp, "i32");
-			this.releaseTemp(idxTmp, "i32");
-			this.releaseTemp(lenTmp, "i32");
-			this.releaseTemp(offTmp, "i32");
-			this.releaseTemp(arrTmp, {
-				kind: "ref",
-				nullable: true,
 				typeIndex: arrInfo.typeIndex,
 			});
 			return;
@@ -1439,9 +1478,6 @@ export class FunctionEmitter {
 
 			const baseTmp = this.acquireTemp(baseWType);
 			this.emitExpr(l.expr, baseWType);
-			if (l.expr._type?.kind === "pointer") {
-				this._emitNilCheck(baseWType);
-			}
 			for (let i = 0; i < path.length - 1; i++) {
 				const step = path[i];
 				this.pushInstruction({
@@ -1488,86 +1524,17 @@ export class FunctionEmitter {
 			const arrInfo = this.mod.getArrayType(elemGoType);
 			const sliceInfo = isSlice ? this.mod.getSliceType(elemGoType) : null;
 			const targetType = arrInfo.elemWType;
-
-			const arrTmp = this.acquireTemp({
+			const arrWType = {
 				kind: "ref",
 				nullable: true,
 				typeIndex: arrInfo.typeIndex,
-			});
-			const offTmp = this.acquireTemp("i32");
-			const lenTmp = this.acquireTemp("i32");
+			};
 
-			if (isSlice) {
-				const sliceWType = {
-					kind: "ref",
-					nullable: true,
-					typeIndex: sliceInfo.typeIndex,
-				};
-				const sliceTmp = this.acquireTemp(sliceWType);
-				this.emitExpr(baseNode, sliceWType);
-				this.pushInstruction({ op: "local.set", index: sliceTmp });
-
-				this.pushInstruction({ op: "local.get", index: sliceTmp });
-				this.pushInstruction("ref.is_null");
-				this.pushInstruction({ op: "if", blockType: "void" });
-				this.pushInstruction({ op: "i32.const", value: 0 });
-				this.pushInstruction({ op: "local.set", index: lenTmp });
-				this.pushInstruction({ op: "i32.const", value: 0 });
-				this.pushInstruction({ op: "local.set", index: offTmp });
-				this.pushInstruction({ op: "ref.null", heapType: arrInfo.typeIndex });
-				this.pushInstruction({ op: "local.set", index: arrTmp });
-				this.pushInstruction("else");
-				this.pushInstruction({ op: "local.get", index: sliceTmp });
-				this.pushInstruction({
-					op: "struct.get",
-					typeIndex: sliceInfo.typeIndex,
-					fieldIndex: 2,
-				});
-				this.pushInstruction({ op: "local.set", index: lenTmp });
-				this.pushInstruction({ op: "local.get", index: sliceTmp });
-				this.pushInstruction({
-					op: "struct.get",
-					typeIndex: sliceInfo.typeIndex,
-					fieldIndex: 1,
-				});
-				this.pushInstruction({ op: "local.set", index: offTmp });
-				this.pushInstruction({ op: "local.get", index: sliceTmp });
-				this.pushInstruction({
-					op: "struct.get",
-					typeIndex: sliceInfo.typeIndex,
-					fieldIndex: 0,
-				});
-				this.pushInstruction({ op: "local.set", index: arrTmp });
-				this.pushInstruction("end");
-				this.releaseTemp(sliceTmp, sliceWType);
-			} else {
-				const arrWType = {
-					kind: "ref",
-					nullable: true,
-					typeIndex: arrInfo.typeIndex,
-				};
-				this.emitExpr(baseNode, arrWType);
-				if (isPtrToArr) {
-					this._emitNilCheck(arrWType);
-				}
-				this.pushInstruction({ op: "local.set", index: arrTmp });
-				this.pushInstruction({ op: "local.get", index: arrTmp });
-				this.pushInstruction("array.len");
-				this.pushInstruction({ op: "local.set", index: lenTmp });
-				this.pushInstruction({ op: "i32.const", value: 0 });
-				this.pushInstruction({ op: "local.set", index: offTmp });
-			}
-
-			const idxTmp = this.acquireTemp("i32");
-			this._emitIndexValAndBoundsCheck(l.index, lenTmp, idxTmp);
-
+			this._emitElemAddr(baseNode, l.index, sliceInfo, arrInfo);
+			const arrTmp = this.acquireTemp(arrWType);
 			const targetIdxTmp = this.acquireTemp("i32");
-			this.pushInstruction({ op: "local.get", index: offTmp });
-			this.pushInstruction({ op: "local.get", index: idxTmp });
-			this.pushInstruction("i32.add");
 			this.pushInstruction({ op: "local.set", index: targetIdxTmp });
-
-			this.pushInstruction({ op: "local.get", index: arrTmp });
+			this.pushInstruction({ op: "local.tee", index: arrTmp });
 			this.pushInstruction({ op: "local.get", index: targetIdxTmp });
 
 			this.pushInstruction({ op: "local.get", index: arrTmp });
@@ -1586,14 +1553,7 @@ export class FunctionEmitter {
 			});
 
 			this.releaseTemp(targetIdxTmp, "i32");
-			this.releaseTemp(idxTmp, "i32");
-			this.releaseTemp(lenTmp, "i32");
-			this.releaseTemp(offTmp, "i32");
-			this.releaseTemp(arrTmp, {
-				kind: "ref",
-				nullable: true,
-				typeIndex: arrInfo.typeIndex,
-			});
+			this.releaseTemp(arrTmp, arrWType);
 			return;
 		}
 
@@ -1686,9 +1646,6 @@ export class FunctionEmitter {
 
 			const baseTmp = this.acquireTemp(baseWType);
 			this.emitExpr(expr.expr, baseWType);
-			if (expr.expr._type?.kind === "pointer") {
-				this._emitNilCheck(baseWType);
-			}
 			for (let i = 0; i < path.length - 1; i++) {
 				const step = path[i];
 				this.pushInstruction({
@@ -1748,86 +1705,17 @@ export class FunctionEmitter {
 			const arrInfo = this.mod.getArrayType(elemGoType);
 			const sliceInfo = isSlice ? this.mod.getSliceType(elemGoType) : null;
 			const targetType = arrInfo.elemWType;
-
-			const arrTmp = this.acquireTemp({
+			const arrWType = {
 				kind: "ref",
 				nullable: true,
 				typeIndex: arrInfo.typeIndex,
-			});
-			const offTmp = this.acquireTemp("i32");
-			const lenTmp = this.acquireTemp("i32");
+			};
 
-			if (isSlice) {
-				const sliceWType = {
-					kind: "ref",
-					nullable: true,
-					typeIndex: sliceInfo.typeIndex,
-				};
-				const sliceTmp = this.acquireTemp(sliceWType);
-				this.emitExpr(baseNode, sliceWType);
-				this.pushInstruction({ op: "local.set", index: sliceTmp });
-
-				this.pushInstruction({ op: "local.get", index: sliceTmp });
-				this.pushInstruction("ref.is_null");
-				this.pushInstruction({ op: "if", blockType: "void" });
-				this.pushInstruction({ op: "i32.const", value: 0 });
-				this.pushInstruction({ op: "local.set", index: lenTmp });
-				this.pushInstruction({ op: "i32.const", value: 0 });
-				this.pushInstruction({ op: "local.set", index: offTmp });
-				this.pushInstruction({ op: "ref.null", heapType: arrInfo.typeIndex });
-				this.pushInstruction({ op: "local.set", index: arrTmp });
-				this.pushInstruction("else");
-				this.pushInstruction({ op: "local.get", index: sliceTmp });
-				this.pushInstruction({
-					op: "struct.get",
-					typeIndex: sliceInfo.typeIndex,
-					fieldIndex: 2,
-				});
-				this.pushInstruction({ op: "local.set", index: lenTmp });
-				this.pushInstruction({ op: "local.get", index: sliceTmp });
-				this.pushInstruction({
-					op: "struct.get",
-					typeIndex: sliceInfo.typeIndex,
-					fieldIndex: 1,
-				});
-				this.pushInstruction({ op: "local.set", index: offTmp });
-				this.pushInstruction({ op: "local.get", index: sliceTmp });
-				this.pushInstruction({
-					op: "struct.get",
-					typeIndex: sliceInfo.typeIndex,
-					fieldIndex: 0,
-				});
-				this.pushInstruction({ op: "local.set", index: arrTmp });
-				this.pushInstruction("end");
-				this.releaseTemp(sliceTmp, sliceWType);
-			} else {
-				const arrWType = {
-					kind: "ref",
-					nullable: true,
-					typeIndex: arrInfo.typeIndex,
-				};
-				this.emitExpr(baseNode, arrWType);
-				if (isPtrToArr) {
-					this._emitNilCheck(arrWType);
-				}
-				this.pushInstruction({ op: "local.set", index: arrTmp });
-				this.pushInstruction({ op: "local.get", index: arrTmp });
-				this.pushInstruction("array.len");
-				this.pushInstruction({ op: "local.set", index: lenTmp });
-				this.pushInstruction({ op: "i32.const", value: 0 });
-				this.pushInstruction({ op: "local.set", index: offTmp });
-			}
-
-			const idxTmp = this.acquireTemp("i32");
-			this._emitIndexValAndBoundsCheck(expr.index, lenTmp, idxTmp);
-
+			this._emitElemAddr(baseNode, expr.index, sliceInfo, arrInfo);
+			const arrTmp = this.acquireTemp(arrWType);
 			const targetIdxTmp = this.acquireTemp("i32");
-			this.pushInstruction({ op: "local.get", index: offTmp });
-			this.pushInstruction({ op: "local.get", index: idxTmp });
-			this.pushInstruction("i32.add");
 			this.pushInstruction({ op: "local.set", index: targetIdxTmp });
-
-			this.pushInstruction({ op: "local.get", index: arrTmp });
+			this.pushInstruction({ op: "local.tee", index: arrTmp });
 			this.pushInstruction({ op: "local.get", index: targetIdxTmp });
 
 			this.pushInstruction({ op: "local.get", index: arrTmp });
@@ -1858,14 +1746,7 @@ export class FunctionEmitter {
 			});
 
 			this.releaseTemp(targetIdxTmp, "i32");
-			this.releaseTemp(idxTmp, "i32");
-			this.releaseTemp(lenTmp, "i32");
-			this.releaseTemp(offTmp, "i32");
-			this.releaseTemp(arrTmp, {
-				kind: "ref",
-				nullable: true,
-				typeIndex: arrInfo.typeIndex,
-			});
+			this.releaseTemp(arrTmp, arrWType);
 			return;
 		}
 
@@ -1956,7 +1837,6 @@ export class FunctionEmitter {
 			}
 		}
 		this.pushInstruction("end");
-		this.popControl();
 	}
 
 	emitRangeForStmt(stmt) {
@@ -1966,6 +1846,19 @@ export class FunctionEmitter {
 		const lhs = stmt.init?.lhs ?? [];
 		const iterExpr = rangeExpr.expr;
 		const iterType = iterExpr._type;
+
+		// `for i := range` shadows any outer `i`; restore the outer binding afterwards.
+		const shadowed = isAssign
+			? []
+			: lhs
+					.filter((l) => l && l.name !== "_")
+					.map((l) => [l.name, this.locals.get(l.name)]);
+		const restoreShadowed = () => {
+			for (const [name, prev] of shadowed) {
+				if (prev) this.locals.set(name, prev);
+				else this.locals.delete(name);
+			}
+		};
 
 		if (isIntRangeType(iterType)) {
 			const limitTmp = this.acquireTemp("i32");
@@ -1978,11 +1871,17 @@ export class FunctionEmitter {
 			let idxLocalInfo = null;
 			if (lhs[0] && lhs[0].name !== "_") {
 				if (!isAssign) {
-					const lIdx = this.allocLocal(lhs[0].name, "i64", {
+					const bodyBlock = stmt.body ?? stmt.block;
+					const isNonEscaping =
+						!this.mutatedCaptures?.has(lhs[0].name) &&
+						!this.capturedNames?.includes(lhs[0].name) &&
+						!this._varMutatesOrEscapes(bodyBlock, lhs[0].name);
+					const wType = isNonEscaping ? "i32" : "i64";
+					const lIdx = this.allocLocal(lhs[0].name, wType, {
 						kind: "basic",
 						name: "int",
 					});
-					idxLocalInfo = { index: lIdx, type: "i64" };
+					idxLocalInfo = { index: lIdx, type: wType };
 				} else {
 					idxLocalInfo =
 						this.resolveLocal(lhs[0].name) ??
@@ -2012,7 +1911,9 @@ export class FunctionEmitter {
 			// Assign loop var if present
 			if (idxLocalInfo) {
 				this.pushInstruction({ op: "local.get", index: idxTmp });
-				this.pushInstruction("i64.extend_i32_s");
+				if (idxLocalInfo.type === "i64") {
+					this.pushInstruction("i64.extend_i32_s");
+				}
 				if (this.resolveLocal(lhs[0].name)) {
 					this.pushInstruction({
 						op: "local.set",
@@ -2034,7 +1935,6 @@ export class FunctionEmitter {
 
 			// End continue
 			this.pushInstruction("end");
-			this.popControl();
 
 			// Post: idx++
 			this.pushInstruction({ op: "local.get", index: idxTmp });
@@ -2047,14 +1947,13 @@ export class FunctionEmitter {
 
 			// End loop
 			this.pushInstruction("end");
-			this.popControl();
 
 			// End break
 			this.pushInstruction("end");
-			this.popControl();
 
 			this.releaseTemp(idxTmp, "i32");
 			this.releaseTemp(limitTmp, "i32");
+			restoreShadowed();
 			return;
 		}
 
@@ -2177,7 +2076,6 @@ export class FunctionEmitter {
 
 			// End continue block
 			this.pushInstruction("end");
-			this.popControl();
 
 			// Advance idxTmp: idx += (rune > 0xffff ? 2 : 1)
 			this.pushInstruction({ op: "local.get", index: idxTmp });
@@ -2197,11 +2095,9 @@ export class FunctionEmitter {
 
 			// End loop
 			this.pushInstruction("end");
-			this.popControl();
 
 			// End break block
 			this.pushInstruction("end");
-			this.popControl();
 
 			this.releaseTemp(runeTmp, "i32");
 			this.releaseTemp(idxTmp, "i32");
@@ -2244,16 +2140,6 @@ export class FunctionEmitter {
 			this.pushInstruction({ op: "local.set", index: sliceTmp });
 
 			this.pushInstruction({ op: "local.get", index: sliceTmp });
-			this.pushInstruction("ref.is_null");
-			this.pushInstruction({ op: "if", blockType: "void" });
-			this.pushInstruction({ op: "ref.null", heapType: arrInfo.typeIndex });
-			this.pushInstruction({ op: "local.set", index: arrTmp });
-			this.pushInstruction({ op: "i32.const", value: 0 });
-			this.pushInstruction({ op: "local.set", index: offTmp });
-			this.pushInstruction({ op: "i32.const", value: 0 });
-			this.pushInstruction({ op: "local.set", index: lenTmp });
-			this.pushInstruction("else");
-			this.pushInstruction({ op: "local.get", index: sliceTmp });
 			this.pushInstruction({
 				op: "struct.get",
 				typeIndex: sliceInfo.typeIndex,
@@ -2274,13 +2160,9 @@ export class FunctionEmitter {
 				fieldIndex: 2,
 			});
 			this.pushInstruction({ op: "local.set", index: lenTmp });
-			this.pushInstruction("end");
 			this.releaseTemp(sliceTmp, sliceWType);
 		} else {
 			this.emitExpr(iterExpr, arrWType);
-			if (isPtrToArr) {
-				this._emitNilCheck(arrWType);
-			}
 			this.pushInstruction({ op: "local.set", index: arrTmp });
 			this.pushInstruction({ op: "i32.const", value: 0 });
 			this.pushInstruction({ op: "local.set", index: offTmp });
@@ -2296,11 +2178,17 @@ export class FunctionEmitter {
 		let idxLocalInfo = null;
 		if (lhs[0] && lhs[0].name !== "_") {
 			if (!isAssign) {
-				const lIdx = this.allocLocal(lhs[0].name, "i64", {
+				const bodyBlock = stmt.body ?? stmt.block;
+				const isNonEscaping =
+					!this.mutatedCaptures?.has(lhs[0].name) &&
+					!this.capturedNames?.includes(lhs[0].name) &&
+					!this._varMutatesOrEscapes(bodyBlock, lhs[0].name);
+				const wType = isNonEscaping ? "i32" : "i64";
+				const lIdx = this.allocLocal(lhs[0].name, wType, {
 					kind: "basic",
 					name: "int",
 				});
-				idxLocalInfo = { index: lIdx, type: "i64" };
+				idxLocalInfo = { index: lIdx, type: wType };
 			} else {
 				idxLocalInfo =
 					this.resolveLocal(lhs[0].name) ?? this.mod.resolveGlobal(lhs[0].name);
@@ -2344,7 +2232,9 @@ export class FunctionEmitter {
 		// Assign idx
 		if (idxLocalInfo) {
 			this.pushInstruction({ op: "local.get", index: idxTmp });
-			this.pushInstruction("i64.extend_i32_s");
+			if (idxLocalInfo.type === "i64") {
+				this.pushInstruction("i64.extend_i32_s");
+			}
 			if (this.resolveLocal(lhs[0].name)) {
 				this.pushInstruction({ op: "local.set", index: idxLocalInfo.index });
 			} else {
@@ -2392,7 +2282,6 @@ export class FunctionEmitter {
 
 		// End continue
 		this.pushInstruction("end");
-		this.popControl();
 
 		// Post: idx++
 		this.pushInstruction({ op: "local.get", index: idxTmp });
@@ -2405,16 +2294,16 @@ export class FunctionEmitter {
 
 		// End loop
 		this.pushInstruction("end");
-		this.popControl();
 
 		// End break
 		this.pushInstruction("end");
-		this.popControl();
 
 		this.releaseTemp(idxTmp, "i32");
 		this.releaseTemp(lenTmp, "i32");
 		this.releaseTemp(offTmp, "i32");
 		this.releaseTemp(arrTmp, arrWType);
+
+		restoreShadowed();
 	}
 
 	emitForStmt(stmt) {
@@ -2423,7 +2312,25 @@ export class FunctionEmitter {
 			return;
 		}
 
-		if (stmt.init) this.emitStmt(stmt.init);
+		const iv = this._detectInductionVar(stmt);
+		let prevLocal = null;
+		let ivLocalInfo = null;
+
+		if (iv) {
+			prevLocal = this.locals.get(iv.name);
+			const lIdx = this.allocLocal(
+				iv.name,
+				"i32",
+				{ kind: "basic", name: "int" },
+				false,
+			);
+			ivLocalInfo = this.locals.get(iv.name);
+			ivLocalInfo.isInductionVar = true;
+			this.emitExpr(iv.initExpr, "i32");
+			this.pushInstruction({ op: "local.set", index: lIdx });
+		} else if (stmt.init) {
+			this.emitStmt(stmt.init);
+		}
 
 		// Outer block for break
 		this.pushInstruction({ op: "block", blockType: "void" });
@@ -2451,9 +2358,13 @@ export class FunctionEmitter {
 
 		// End inner continue block
 		this.pushInstruction("end");
-		this.popControl();
 
-		if (stmt.post) {
+		if (iv) {
+			this.pushInstruction({ op: "local.get", index: ivLocalInfo.index });
+			this.pushInstruction({ op: "i32.const", value: iv.step });
+			this.pushInstruction("i32.add");
+			this.pushInstruction({ op: "local.set", index: ivLocalInfo.index });
+		} else if (stmt.post) {
 			this.emitStmt(stmt.post);
 		}
 
@@ -2462,11 +2373,175 @@ export class FunctionEmitter {
 
 		// End loop
 		this.pushInstruction("end");
-		this.popControl();
 
 		// End outer break block
 		this.pushInstruction("end");
-		this.popControl();
+
+		if (iv) {
+			if (prevLocal) {
+				this.locals.set(iv.name, prevLocal);
+			} else {
+				this.locals.delete(iv.name);
+			}
+		}
+	}
+
+	_detectInductionVar(stmt) {
+		if (stmt.init?.kind !== "DefineStmt") return null;
+		const lhs = stmt.init.lhs ?? [];
+		if (lhs.length !== 1 || lhs[0].kind !== "Ident") return null;
+		const varName = lhs[0].name;
+		if (!varName || varName === "_") return null;
+
+		const rhs = stmt.init.rhs ?? [];
+		if (rhs.length !== 1) return null;
+		const initRhs = rhs[0];
+
+		// Initial value must be a non-negative integer literal < 2^31 or i32 expr
+		let initOk = false;
+		if (initRhs.kind === "BasicLit" && initRhs.litKind === "INT") {
+			const val = BigInt(initRhs.value);
+			if (val >= 0n && val < 2147483648n) initOk = true;
+		} else if (this.toWasmType(initRhs._type) === "i32") {
+			initOk = true;
+		}
+		if (!initOk) return null;
+
+		// Post statement must increment varName by a constant > 0
+		let step = null;
+		if (stmt.post) {
+			if (
+				stmt.post.kind === "IncDecStmt" &&
+				stmt.post.expr?.kind === "Ident" &&
+				stmt.post.expr.name === varName &&
+				stmt.post.op === "++"
+			) {
+				step = 1;
+			} else if (
+				stmt.post.kind === "CompoundAssignStmt" &&
+				stmt.post.lhs?.length === 1 &&
+				stmt.post.lhs[0].kind === "Ident" &&
+				stmt.post.lhs[0].name === varName &&
+				stmt.post.op === "+=" &&
+				stmt.post.rhs?.length === 1 &&
+				stmt.post.rhs[0].kind === "BasicLit" &&
+				stmt.post.rhs[0].litKind === "INT"
+			) {
+				const sVal = BigInt(stmt.post.rhs[0].value);
+				if (sVal > 0n && sVal < 2147483648n) step = Number(sVal);
+			}
+		}
+		if (step === null) return null;
+
+		// Condition must bound varName (< bound or <= bound) where bound < 2^31
+		const boundNode = this._findInductionBound(stmt.cond, varName);
+		if (!boundNode) return null;
+		// The last `i += step` must not wrap i32: i can reach bound + step - 1.
+		if (
+			boundNode.kind === "BasicLit" &&
+			BigInt(boundNode.value) + BigInt(step) > 2147483647n
+		) {
+			return null;
+		}
+
+		// Check escaping and mutation in body
+		if (this.mutatedCaptures?.has(varName)) return null;
+		if (this.capturedNames?.includes(varName)) return null;
+
+		const bodyBlock = stmt.body ?? stmt.block;
+		if (bodyBlock && this._varMutatesOrEscapes(bodyBlock, varName)) {
+			return null;
+		}
+
+		return { name: varName, initExpr: initRhs, step };
+	}
+
+	_findInductionBound(cond, varName) {
+		if (!cond) return null;
+		if (cond.kind === "BinaryExpr") {
+			if (
+				(cond.op === "<" || cond.op === "<=") &&
+				cond.left?.kind === "Ident" &&
+				cond.left.name === varName
+			) {
+				const right = cond.right;
+				if (
+					right?.kind === "CallExpr" &&
+					right.func?.kind === "Ident" &&
+					(right.func.name === "len" || right.func.name === "cap")
+				) {
+					return right;
+				}
+				if (right?.kind === "BasicLit" && right.litKind === "INT") {
+					const val = BigInt(right.value);
+					if (val >= 0n && val < 2147483648n) return right;
+					return null;
+				}
+				if (this.toWasmType(right?._type) === "i32") {
+					return right;
+				}
+				return null;
+			}
+			if (cond.op === "&&") {
+				return (
+					this._findInductionBound(cond.left, varName) ??
+					this._findInductionBound(cond.right, varName)
+				);
+			}
+		}
+		return null;
+	}
+
+	_varMutatesOrEscapes(node, varName) {
+		if (!node || typeof node !== "object") return false;
+		if (Array.isArray(node)) {
+			return node.some((item) => this._varMutatesOrEscapes(item, varName));
+		}
+		if (
+			node.kind === "UnaryExpr" &&
+			node.op === "&" &&
+			node.operand?.kind === "Ident" &&
+			node.operand.name === varName
+		) {
+			return true;
+		}
+		if (node.kind === "FuncLit") {
+			if (this._findIdentInAST(node, varName)) return true;
+		}
+		if (node.kind === "AssignStmt" || node.kind === "CompoundAssignStmt") {
+			const lhs = node.lhs ?? [];
+			for (const l of lhs) {
+				if (l.kind === "Ident" && l.name === varName) return true;
+			}
+		}
+		if (node.kind === "IncDecStmt") {
+			if (node.expr?.kind === "Ident" && node.expr.name === varName)
+				return true;
+		}
+		if (node.kind === "DefineStmt") {
+			const lhs = node.lhs ?? [];
+			for (const l of lhs) {
+				if (l.kind === "Ident" && l.name === varName) return true;
+			}
+		}
+		for (const key of Object.keys(node)) {
+			if (key.startsWith("_")) continue;
+			if (this._varMutatesOrEscapes(node[key], varName)) return true;
+		}
+		return false;
+	}
+
+	_findIdentInAST(node, name) {
+		if (!node || typeof node !== "object") return false;
+		if (Array.isArray(node)) {
+			return node.some((item) => this._findIdentInAST(item, name));
+		}
+		if (node.kind === "Ident" && node.name === name) return true;
+		for (const key of Object.keys(node)) {
+			if (key.startsWith("_")) continue;
+			if (this._findIdentInAST(node[key], name)) return true;
+		}
+		return false;
 	}
 
 	emitSwitchStmt(stmt) {
@@ -2547,7 +2622,6 @@ export class FunctionEmitter {
 		}
 
 		this.pushInstruction("end");
-		this.popControl();
 	}
 
 	emitTypeSwitchStmt(stmt) {
@@ -2636,7 +2710,6 @@ export class FunctionEmitter {
 		}
 
 		this.pushInstruction("end");
-		this.popControl();
 	}
 
 	emitBranchStmt(stmt) {
@@ -2779,6 +2852,9 @@ export class FunctionEmitter {
 		if (expr.kind === "Ident") {
 			const local = this.resolveLocal(expr.name);
 			if (local) return local.goType;
+			if (this.cachedGlobals.has(expr.name)) {
+				return this.cachedGlobals.get(expr.name).globalInfo.goType;
+			}
 			const global = this.mod.resolveGlobal(expr.name);
 			if (global) return global.goType;
 		}
@@ -3070,9 +3146,6 @@ export class FunctionEmitter {
 
 		const baseWType = this.toWasmType(expr.expr._type);
 		this.emitExpr(expr.expr, baseWType);
-		if (expr.expr._type?.kind === "pointer") {
-			this._emitNilCheck(baseWType);
-		}
 
 		for (let i = 0; i < path.length; i++) {
 			const step = path[i];
@@ -3098,28 +3171,20 @@ export class FunctionEmitter {
 		if (isStr) {
 			const strTmp = this.acquireTemp("externref");
 			this.emitExpr(baseNode, "externref");
-			this.pushInstruction({ op: "local.set", index: strTmp });
+			this.pushInstruction({ op: "local.tee", index: strTmp });
 
-			const lenTmp = this.acquireTemp("i32");
-			this.pushInstruction({ op: "local.get", index: strTmp });
-			this.pushInstruction({
-				op: "call",
-				funcIndex: this.mod.getStringLenImportIndex(),
+			this._emitCheckedIndex(expr.index, () => {
+				this.pushInstruction({ op: "local.get", index: strTmp });
+				this.pushInstruction({
+					op: "call",
+					funcIndex: this.mod.getStringLenImportIndex(),
+				});
 			});
-			this.pushInstruction({ op: "local.set", index: lenTmp });
-
-			const idxTmp = this.acquireTemp("i32");
-			this._emitIndexValAndBoundsCheck(expr.index, lenTmp, idxTmp);
-
-			this.pushInstruction({ op: "local.get", index: strTmp });
-			this.pushInstruction({ op: "local.get", index: idxTmp });
 			this.pushInstruction({
 				op: "call",
 				funcIndex: this.mod.getStringGetImportIndex(),
 			});
 
-			this.releaseTemp(idxTmp, "i32");
-			this.releaseTemp(lenTmp, "i32");
 			this.releaseTemp(strTmp, "externref");
 
 			if ((targetWasmType ?? "i64") === "i64") {
@@ -3142,110 +3207,11 @@ export class FunctionEmitter {
 		const arrInfo = this.mod.getArrayType(elemGoType);
 		const sliceInfo = isSlice ? this.mod.getSliceType(elemGoType) : null;
 
-		if (isSlice) {
-			const sliceWType = {
-				kind: "ref",
-				nullable: true,
-				typeIndex: sliceInfo.typeIndex,
-			};
-			const sliceTmp = this.acquireTemp(sliceWType);
-			this.emitExpr(baseNode, sliceWType);
-			this.pushInstruction({ op: "local.set", index: sliceTmp });
-
-			const lenTmp = this.acquireTemp("i32");
-			const offTmp = this.acquireTemp("i32");
-			const arrTmp = this.acquireTemp({
-				kind: "ref",
-				nullable: true,
-				typeIndex: arrInfo.typeIndex,
-			});
-
-			this.pushInstruction({ op: "local.get", index: sliceTmp });
-			this.pushInstruction("ref.is_null");
-			this.pushInstruction({ op: "if", blockType: "void" });
-			this.pushInstruction({ op: "i32.const", value: 0 });
-			this.pushInstruction({ op: "local.set", index: lenTmp });
-			this.pushInstruction({ op: "i32.const", value: 0 });
-			this.pushInstruction({ op: "local.set", index: offTmp });
-			this.pushInstruction({ op: "ref.null", heapType: arrInfo.typeIndex });
-			this.pushInstruction({ op: "local.set", index: arrTmp });
-			this.pushInstruction("else");
-			this.pushInstruction({ op: "local.get", index: sliceTmp });
-			this.pushInstruction({
-				op: "struct.get",
-				typeIndex: sliceInfo.typeIndex,
-				fieldIndex: 2,
-			});
-			this.pushInstruction({ op: "local.set", index: lenTmp });
-			this.pushInstruction({ op: "local.get", index: sliceTmp });
-			this.pushInstruction({
-				op: "struct.get",
-				typeIndex: sliceInfo.typeIndex,
-				fieldIndex: 1,
-			});
-			this.pushInstruction({ op: "local.set", index: offTmp });
-			this.pushInstruction({ op: "local.get", index: sliceTmp });
-			this.pushInstruction({
-				op: "struct.get",
-				typeIndex: sliceInfo.typeIndex,
-				fieldIndex: 0,
-			});
-			this.pushInstruction({ op: "local.set", index: arrTmp });
-			this.pushInstruction("end");
-
-			const idxTmp = this.acquireTemp("i32");
-			this._emitIndexValAndBoundsCheck(expr.index, lenTmp, idxTmp);
-
-			this.pushInstruction({ op: "local.get", index: arrTmp });
-			this.pushInstruction({ op: "local.get", index: offTmp });
-			this.pushInstruction({ op: "local.get", index: idxTmp });
-			this.pushInstruction("i32.add");
-			this.pushInstruction({
-				op: "array.get",
-				typeIndex: arrInfo.typeIndex,
-			});
-
-			this.releaseTemp(idxTmp, "i32");
-			this.releaseTemp(arrTmp, {
-				kind: "ref",
-				nullable: true,
-				typeIndex: arrInfo.typeIndex,
-			});
-			this.releaseTemp(offTmp, "i32");
-			this.releaseTemp(lenTmp, "i32");
-			this.releaseTemp(sliceTmp, sliceWType);
-		} else {
-			const arrWType = {
-				kind: "ref",
-				nullable: true,
-				typeIndex: arrInfo.typeIndex,
-			};
-			const arrTmp = this.acquireTemp(arrWType);
-			this.emitExpr(baseNode, arrWType);
-			if (isPtrToArr) {
-				this._emitNilCheck(arrWType);
-			}
-			this.pushInstruction({ op: "local.set", index: arrTmp });
-
-			const lenTmp = this.acquireTemp("i32");
-			this.pushInstruction({ op: "local.get", index: arrTmp });
-			this.pushInstruction("array.len");
-			this.pushInstruction({ op: "local.set", index: lenTmp });
-
-			const idxTmp = this.acquireTemp("i32");
-			this._emitIndexValAndBoundsCheck(expr.index, lenTmp, idxTmp);
-
-			this.pushInstruction({ op: "local.get", index: arrTmp });
-			this.pushInstruction({ op: "local.get", index: idxTmp });
-			this.pushInstruction({
-				op: "array.get",
-				typeIndex: arrInfo.typeIndex,
-			});
-
-			this.releaseTemp(idxTmp, "i32");
-			this.releaseTemp(lenTmp, "i32");
-			this.releaseTemp(arrTmp, arrWType);
-		}
+		this._emitElemAddr(baseNode, expr.index, sliceInfo, arrInfo);
+		this.pushInstruction({
+			op: "array.get",
+			typeIndex: arrInfo.typeIndex,
+		});
 	}
 
 	emitSliceExpr(expr) {
@@ -3303,7 +3269,11 @@ export class FunctionEmitter {
 			this.pushInstruction("i32.or");
 
 			this.pushInstruction({ op: "if", blockType: "void" });
-			this.emitPanic("runtime error: slice bounds out of range");
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getSliceBoundsPanicFuncIndex(),
+			});
+			this.pushInstruction("unreachable");
 			this.pushInstruction("end");
 
 			this.pushInstruction({ op: "local.get", index: strTmp });
@@ -3355,18 +3325,6 @@ export class FunctionEmitter {
 			this.pushInstruction({ op: "local.set", index: sliceTmp });
 
 			this.pushInstruction({ op: "local.get", index: sliceTmp });
-			this.pushInstruction("ref.is_null");
-			this.pushInstruction({ op: "if", blockType: "void" });
-			this.pushInstruction({ op: "i32.const", value: 0 });
-			this.pushInstruction({ op: "local.set", index: srcLenTmp });
-			this.pushInstruction({ op: "i32.const", value: 0 });
-			this.pushInstruction({ op: "local.set", index: srcCapTmp });
-			this.pushInstruction({ op: "i32.const", value: 0 });
-			this.pushInstruction({ op: "local.set", index: srcOffTmp });
-			this.pushInstruction({ op: "ref.null", heapType: arrInfo.typeIndex });
-			this.pushInstruction({ op: "local.set", index: arrTmp });
-			this.pushInstruction("else");
-			this.pushInstruction({ op: "local.get", index: sliceTmp });
 			this.pushInstruction({
 				op: "struct.get",
 				typeIndex: sliceInfo.typeIndex,
@@ -3394,7 +3352,6 @@ export class FunctionEmitter {
 				fieldIndex: 0,
 			});
 			this.pushInstruction({ op: "local.set", index: arrTmp });
-			this.pushInstruction("end");
 			this.releaseTemp(sliceTmp, sliceWType);
 		} else {
 			const arrWType = {
@@ -3403,9 +3360,6 @@ export class FunctionEmitter {
 				typeIndex: arrInfo.typeIndex,
 			};
 			this.emitExpr(baseNode, arrWType);
-			if (isPtrToArr) {
-				this._emitNilCheck(arrWType);
-			}
 			this.pushInstruction({ op: "local.set", index: arrTmp });
 			this.pushInstruction({ op: "local.get", index: arrTmp });
 			this.pushInstruction("array.len");
@@ -3453,7 +3407,11 @@ export class FunctionEmitter {
 		this.pushInstruction("i32.or");
 
 		this.pushInstruction({ op: "if", blockType: "void" });
-		this.emitPanic("runtime error: slice bounds out of range");
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getSliceBoundsPanicFuncIndex(),
+		});
+		this.pushInstruction("unreachable");
 		this.pushInstruction("end");
 
 		this.pushInstruction({ op: "local.get", index: arrTmp });
@@ -3581,40 +3539,155 @@ export class FunctionEmitter {
 		this.releaseTemp(lenTmp, "i32");
 	}
 
-	_emitIndexValAndBoundsCheck(indexNode, lenTmp, idxTmp32) {
-		const idxGoType = indexNode._type;
-		const idxWType = this.toWasmType(idxGoType);
-		if (idxWType === "i64") {
-			const idx64 = this.acquireTemp("i64");
-			this.emitExpr(indexNode, "i64");
-			this.pushInstruction({ op: "local.set", index: idx64 });
+	// True when `expr` can be evaluated as an i32 without losing information:
+	// i32-backed locals (induction variables, narrow ints), small literals,
+	// `len`/`cap`, +/-/* over such operands, or any expression whose Go type
+	// already lowers to i32. Everything else goes through the i64 path.
+	_isI32IndexExpr(expr) {
+		if (!expr) return false;
+		switch (expr.kind) {
+			case "Ident": {
+				const local = this.resolveLocal(expr.name);
+				if (local) return local.type === "i32";
+				break;
+			}
+			case "BasicLit":
+				if (expr.litKind === "INT") {
+					const v = BigInt(expr.value);
+					return v >= 0n && v < 2147483648n;
+				}
+				break;
+			case "ParenExpr":
+				return this._isI32IndexExpr(expr.expr);
+			case "BinaryExpr":
+				if (
+					(expr.op === "+" || expr.op === "-" || expr.op === "*") &&
+					this._isI32IndexExpr(expr.left) &&
+					this._isI32IndexExpr(expr.right)
+				) {
+					return true;
+				}
+				break;
+			case "CallExpr":
+				if (
+					expr.func?.kind === "Ident" &&
+					(expr.func.name === "len" || expr.func.name === "cap")
+				) {
+					return true;
+				}
+				break;
+		}
+		return this.toWasmType(expr._type) === "i32";
+	}
 
-			this.pushInstruction({ op: "local.get", index: idx64 });
-			this.pushInstruction({ op: "local.get", index: lenTmp });
-			this.pushInstruction("i64.extend_i32_u");
-			this.pushInstruction("i64.ge_u");
-			this.pushInstruction({ op: "if", blockType: "void" });
-			this.emitPanic("runtime error: index out of range");
-			this.pushInstruction("end");
-
-			this.pushInstruction({ op: "local.get", index: idx64 });
-			this.pushInstruction("i32.wrap_i64");
-			this.pushInstruction({ op: "local.set", index: idxTmp32 });
-			this.releaseTemp(idx64, "i64");
+	_emitBoundsBranch() {
+		const oobDepth = this.resolveBranchDepthToOob();
+		if (oobDepth !== null) {
+			this.pushInstruction({ op: "br_if", depth: oobDepth });
 		} else {
-			this.emitExpr(indexNode, "i32");
-			this.pushInstruction({ op: "local.set", index: idxTmp32 });
-
-			this.pushInstruction({ op: "local.get", index: idxTmp32 });
-			this.pushInstruction({ op: "local.get", index: lenTmp });
-			this.pushInstruction("i32.ge_u");
 			this.pushInstruction({ op: "if", blockType: "void" });
-			this.emitPanic("runtime error: index out of range");
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getBoundsPanicFuncIndex(),
+			});
+			this.pushInstruction("unreachable");
 			this.pushInstruction("end");
 		}
 	}
 
+	// Pushes the bounds-checked i32 index onto the stack. `emitLen` must push
+	// the i32 length. Constant and plain-local indexes are re-emitted instead
+	// of spilled; everything else goes through one temp.
+	_emitCheckedIndex(indexNode, emitLen) {
+		const simple =
+			(indexNode.kind === "BasicLit" && indexNode.litKind === "INT") ||
+			(indexNode.kind === "Ident" && this.resolveLocal(indexNode.name));
+		if (this._isI32IndexExpr(indexNode)) {
+			this.emitExpr(indexNode, "i32");
+			let tmp = null;
+			if (simple) {
+				this.emitExpr(indexNode, "i32");
+			} else {
+				tmp = this.acquireTemp("i32");
+				this.pushInstruction({ op: "local.tee", index: tmp });
+				this.pushInstruction({ op: "local.get", index: tmp });
+			}
+			emitLen();
+			this.pushInstruction("i32.ge_u");
+			this._emitBoundsBranch();
+			if (tmp !== null) this.releaseTemp(tmp, "i32");
+			return;
+		}
+
+		const idx64 = this.acquireTemp("i64");
+		this.emitExpr(indexNode, "i64");
+		this.pushInstruction({ op: "local.tee", index: idx64 });
+		emitLen();
+		this.pushInstruction("i64.extend_i32_u");
+		this.pushInstruction("i64.ge_u");
+		this._emitBoundsBranch();
+		this.pushInstruction({ op: "local.get", index: idx64 });
+		this.pushInstruction("i32.wrap_i64");
+		this.releaseTemp(idx64, "i64");
+	}
+
+	// Leaves `[arr, off+idx]` on the stack for `base[idx]` over a slice or
+	// (pointer to) array, with the bounds check already emitted.
+	_emitElemAddr(baseNode, indexNode, sliceInfo, arrInfo) {
+		if (sliceInfo) {
+			const sliceWType = {
+				kind: "ref",
+				nullable: true,
+				typeIndex: sliceInfo.typeIndex,
+			};
+			const sliceTmp = this.acquireTemp(sliceWType);
+			this.emitExpr(baseNode, sliceWType);
+			this.pushInstruction({ op: "local.tee", index: sliceTmp });
+			this.pushInstruction({
+				op: "struct.get",
+				typeIndex: sliceInfo.typeIndex,
+				fieldIndex: 0,
+			});
+			this.pushInstruction({ op: "local.get", index: sliceTmp });
+			this.pushInstruction({
+				op: "struct.get",
+				typeIndex: sliceInfo.typeIndex,
+				fieldIndex: 1,
+			});
+			this._emitCheckedIndex(indexNode, () => {
+				this.pushInstruction({ op: "local.get", index: sliceTmp });
+				this.pushInstruction({
+					op: "struct.get",
+					typeIndex: sliceInfo.typeIndex,
+					fieldIndex: 2,
+				});
+			});
+			this.pushInstruction("i32.add");
+			this.releaseTemp(sliceTmp, sliceWType);
+			return;
+		}
+
+		const arrWType = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: arrInfo.typeIndex,
+		};
+		const arrTmp = this.acquireTemp(arrWType);
+		this.emitExpr(baseNode, arrWType);
+		this.pushInstruction({ op: "local.tee", index: arrTmp });
+		this._emitCheckedIndex(indexNode, () => {
+			this.pushInstruction({ op: "local.get", index: arrTmp });
+			this.pushInstruction("array.len");
+		});
+		this.releaseTemp(arrTmp, arrWType);
+	}
+
 	_emitIndexExprToI32(node, tmp32) {
+		if (this._isI32IndexExpr(node)) {
+			this.emitExpr(node, "i32");
+			this.pushInstruction({ op: "local.set", index: tmp32 });
+			return;
+		}
 		const wType = this.toWasmType(node._type);
 		if (wType === "i64") {
 			this.emitExpr(node, "i64");
@@ -3665,6 +3738,25 @@ export class FunctionEmitter {
 
 		if (lit.litKind === "NIL") {
 			const effectiveType = targetWasmType ?? this.toWasmType(lit._type);
+			if (
+				(lit._type && isSliceType(lit._type, this.mod.checker)) ||
+				(effectiveType &&
+					typeof effectiveType === "object" &&
+					typeof effectiveType.typeIndex === "number" &&
+					this.mod.getSliceTypeByIndex(effectiveType.typeIndex))
+			) {
+				const elemType = lit._type ? this._getSliceElemType(lit._type) : null;
+				const sliceInfo = elemType
+					? this.mod.getSliceType(elemType)
+					: this.mod.getSliceTypeByIndex(effectiveType.typeIndex);
+				if (sliceInfo) {
+					this.pushInstruction({
+						op: "global.get",
+						index: sliceInfo.emptyGlobalIndex,
+					});
+					return;
+				}
+			}
 			const heapType =
 				typeof effectiveType === "object" && effectiveType !== null
 					? (effectiveType.typeIndex ?? effectiveType.heapType ?? "any")
@@ -3695,6 +3787,27 @@ export class FunctionEmitter {
 		}
 		if (ident.name === "nil") {
 			const effectiveType = targetWasmType ?? this.toWasmType(ident._type);
+			if (
+				(ident._type && isSliceType(ident._type, this.mod.checker)) ||
+				(effectiveType &&
+					typeof effectiveType === "object" &&
+					typeof effectiveType.typeIndex === "number" &&
+					this.mod.getSliceTypeByIndex(effectiveType.typeIndex))
+			) {
+				const elemType = ident._type
+					? this._getSliceElemType(ident._type)
+					: null;
+				const sliceInfo = elemType
+					? this.mod.getSliceType(elemType)
+					: this.mod.getSliceTypeByIndex(effectiveType.typeIndex);
+				if (sliceInfo) {
+					this.pushInstruction({
+						op: "global.get",
+						index: sliceInfo.emptyGlobalIndex,
+					});
+					return;
+				}
+			}
 			const heapType =
 				typeof effectiveType === "object" && effectiveType !== null
 					? (effectiveType.typeIndex ?? effectiveType.heapType ?? "any")
@@ -3712,15 +3825,36 @@ export class FunctionEmitter {
 					typeIndex: localInfo.boxInfo.typeIndex,
 					fieldIndex: 0,
 				});
-				return;
+			} else {
+				this.pushInstruction({ op: "local.get", index: localInfo.index });
 			}
-			this.pushInstruction({ op: "local.get", index: localInfo.index });
+			if (localInfo.type === "i32" && targetWasmType === "i64") {
+				this.pushInstruction("i64.extend_i32_s");
+			} else if (localInfo.type === "i64" && targetWasmType === "i32") {
+				this.pushInstruction("i32.wrap_i64");
+			}
+			return;
+		}
+
+		if (this.cachedGlobals.has(ident.name)) {
+			const cached = this.cachedGlobals.get(ident.name);
+			this.pushInstruction({ op: "local.get", index: cached.index });
+			if (cached.globalInfo.type === "i32" && targetWasmType === "i64") {
+				this.pushInstruction("i64.extend_i32_s");
+			} else if (cached.globalInfo.type === "i64" && targetWasmType === "i32") {
+				this.pushInstruction("i32.wrap_i64");
+			}
 			return;
 		}
 
 		const globalInfo = this.mod.resolveGlobal(ident.name);
 		if (globalInfo) {
 			this.pushInstruction({ op: "global.get", index: globalInfo.index });
+			if (globalInfo.type === "i32" && targetWasmType === "i64") {
+				this.pushInstruction("i64.extend_i32_s");
+			} else if (globalInfo.type === "i64" && targetWasmType === "i32") {
+				this.pushInstruction("i32.wrap_i64");
+			}
 			return;
 		}
 
@@ -3851,7 +3985,6 @@ export class FunctionEmitter {
 				if (structInfo) {
 					const baseWType = this.toWasmType(operand._type);
 					this.emitExpr(operand, baseWType);
-					this._emitNilCheck(baseWType);
 					this.emitCloneStruct(structInfo, baseWType);
 					return;
 				}
@@ -3862,7 +3995,6 @@ export class FunctionEmitter {
 					typeIndex: box.typeIndex,
 				};
 				this.emitExpr(operand, baseWType);
-				this._emitNilCheck(baseWType);
 				this.pushInstruction({
 					op: "struct.get",
 					typeIndex: box.typeIndex,
@@ -3927,6 +4059,26 @@ export class FunctionEmitter {
 
 		if ((op === "==" || op === "!=") && (isNil(left) || isNil(right))) {
 			const nonNil = isNil(right) ? left : right;
+			if (isSliceType(nonNil._type, this.mod.checker)) {
+				const elemType = this._getSliceElemType(nonNil._type);
+				const sliceInfo = this.mod.getSliceType(elemType);
+				const sliceWType = {
+					kind: "ref",
+					nullable: true,
+					typeIndex: sliceInfo.typeIndex,
+				};
+				this.emitExpr(nonNil, sliceWType);
+				this.pushInstruction({
+					op: "struct.get",
+					typeIndex: sliceInfo.typeIndex,
+					fieldIndex: 0,
+				});
+				this.pushInstruction("ref.is_null");
+				if (op === "!=") {
+					this.pushInstruction("i32.eqz");
+				}
+				return;
+			}
 			const nonNilWType = this.toWasmType(nonNil._type);
 			this.emitExpr(nonNil, nonNilWType);
 			this.pushInstruction("ref.is_null");
@@ -3937,8 +4089,22 @@ export class FunctionEmitter {
 		}
 
 		const leftType = left._type;
+		const isLeftI32 = this._isI32IndexExpr(left);
+		const isRightI32 = this._isI32IndexExpr(right);
+		const leftGoType = left._type ?? this._resolveExprGoType(left);
+		const isIntType =
+			!leftGoType ||
+			(leftGoType.kind === "basic" &&
+				(leftGoType.name === "int" ||
+					leftGoType.name === "untyped int" ||
+					leftGoType.name === "int32" ||
+					leftGoType.name === "uint32"));
+		const cmpI32 = isIntType && isLeftI32 && isRightI32;
+
 		const wType = isCmp
-			? this.toWasmType(leftType)
+			? cmpI32
+				? "i32"
+				: this.toWasmType(leftType)
 			: (targetWasmType ?? this.toWasmType(leftType));
 
 		this.emitExpr(left, wType);
@@ -4435,23 +4601,12 @@ export class FunctionEmitter {
 					nullable: true,
 					typeIndex: sliceInfo.typeIndex,
 				};
-				const sliceTmp = this.acquireTemp(sliceWType);
 				this.emitExpr(arg, sliceWType);
-				this.pushInstruction({ op: "local.set", index: sliceTmp });
-
-				this.pushInstruction({ op: "local.get", index: sliceTmp });
-				this.pushInstruction("ref.is_null");
-				this.pushInstruction({ op: "if", blockType: "i32" });
-				this.pushInstruction({ op: "i32.const", value: 0 });
-				this.pushInstruction("else");
-				this.pushInstruction({ op: "local.get", index: sliceTmp });
 				this.pushInstruction({
 					op: "struct.get",
 					typeIndex: sliceInfo.typeIndex,
 					fieldIndex: 2,
 				});
-				this.pushInstruction("end");
-				this.releaseTemp(sliceTmp, sliceWType);
 				if ((targetWasmType ?? "i64") === "i64") {
 					this.pushInstruction("i64.extend_i32_u");
 				}
@@ -4470,9 +4625,6 @@ export class FunctionEmitter {
 					typeIndex: arrInfo.typeIndex,
 				};
 				this.emitExpr(arg, arrWType);
-				if (argType?.kind === "pointer") {
-					this._emitNilCheck(arrWType);
-				}
 				this.pushInstruction("array.len");
 				if ((targetWasmType ?? "i64") === "i64") {
 					this.pushInstruction("i64.extend_i32_u");
@@ -4518,23 +4670,12 @@ export class FunctionEmitter {
 					nullable: true,
 					typeIndex: sliceInfo.typeIndex,
 				};
-				const sliceTmp = this.acquireTemp(sliceWType);
 				this.emitExpr(arg, sliceWType);
-				this.pushInstruction({ op: "local.set", index: sliceTmp });
-
-				this.pushInstruction({ op: "local.get", index: sliceTmp });
-				this.pushInstruction("ref.is_null");
-				this.pushInstruction({ op: "if", blockType: "i32" });
-				this.pushInstruction({ op: "i32.const", value: 0 });
-				this.pushInstruction("else");
-				this.pushInstruction({ op: "local.get", index: sliceTmp });
 				this.pushInstruction({
 					op: "struct.get",
 					typeIndex: sliceInfo.typeIndex,
 					fieldIndex: 3,
 				});
-				this.pushInstruction("end");
-				this.releaseTemp(sliceTmp, sliceWType);
 				if ((targetWasmType ?? "i64") === "i64") {
 					this.pushInstruction("i64.extend_i32_u");
 				}
@@ -4553,9 +4694,6 @@ export class FunctionEmitter {
 					typeIndex: arrInfo.typeIndex,
 				};
 				this.emitExpr(arg, arrWType);
-				if (argType?.kind === "pointer") {
-					this._emitNilCheck(arrWType);
-				}
 				this.pushInstruction("array.len");
 				if ((targetWasmType ?? "i64") === "i64") {
 					this.pushInstruction("i64.extend_i32_u");
@@ -4701,18 +4839,6 @@ export class FunctionEmitter {
 			const oldCapTmp = this.acquireTemp("i32");
 
 			this.pushInstruction({ op: "local.get", index: sTmp });
-			this.pushInstruction("ref.is_null");
-			this.pushInstruction({ op: "if", blockType: "void" });
-			this.pushInstruction({ op: "ref.null", heapType: arrInfo.typeIndex });
-			this.pushInstruction({ op: "local.set", index: oldArrTmp });
-			this.pushInstruction({ op: "i32.const", value: 0 });
-			this.pushInstruction({ op: "local.set", index: oldOffTmp });
-			this.pushInstruction({ op: "i32.const", value: 0 });
-			this.pushInstruction({ op: "local.set", index: oldLenTmp });
-			this.pushInstruction({ op: "i32.const", value: 0 });
-			this.pushInstruction({ op: "local.set", index: oldCapTmp });
-			this.pushInstruction("else");
-			this.pushInstruction({ op: "local.get", index: sTmp });
 			this.pushInstruction({
 				op: "struct.get",
 				typeIndex: sliceInfo.typeIndex,
@@ -4740,7 +4866,6 @@ export class FunctionEmitter {
 				fieldIndex: 3,
 			});
 			this.pushInstruction({ op: "local.set", index: oldCapTmp });
-			this.pushInstruction("end");
 			this.releaseTemp(sTmp, sliceWType);
 
 			const newArrTmp = this.acquireTemp(arrWType);
@@ -4757,16 +4882,6 @@ export class FunctionEmitter {
 				const s2OffTmp = this.acquireTemp("i32");
 				const s2LenTmp = this.acquireTemp("i32");
 
-				this.pushInstruction({ op: "local.get", index: s2Tmp });
-				this.pushInstruction("ref.is_null");
-				this.pushInstruction({ op: "if", blockType: "void" });
-				this.pushInstruction({ op: "ref.null", heapType: arrInfo.typeIndex });
-				this.pushInstruction({ op: "local.set", index: s2ArrTmp });
-				this.pushInstruction({ op: "i32.const", value: 0 });
-				this.pushInstruction({ op: "local.set", index: s2OffTmp });
-				this.pushInstruction({ op: "i32.const", value: 0 });
-				this.pushInstruction({ op: "local.set", index: s2LenTmp });
-				this.pushInstruction("else");
 				this.pushInstruction({ op: "local.get", index: s2Tmp });
 				this.pushInstruction({
 					op: "struct.get",
@@ -4788,7 +4903,6 @@ export class FunctionEmitter {
 					fieldIndex: 2,
 				});
 				this.pushInstruction({ op: "local.set", index: s2LenTmp });
-				this.pushInstruction("end");
 				this.releaseTemp(s2Tmp, sliceWType);
 
 				this.pushInstruction({ op: "local.get", index: oldLenTmp });
@@ -5010,14 +5124,6 @@ export class FunctionEmitter {
 			this.pushInstruction({ op: "i32.const", value: 0 });
 			this.pushInstruction({ op: "local.set", index: nTmp });
 
-			this.pushInstruction({ op: "local.get", index: dstTmp });
-			this.pushInstruction("ref.is_null");
-			this.pushInstruction({ op: "local.get", index: srcTmp });
-			this.pushInstruction("ref.is_null");
-			this.pushInstruction("i32.or");
-			this.pushInstruction({ op: "if", blockType: "void" });
-			this.pushInstruction("else");
-
 			const dstLenTmp = this.acquireTemp("i32");
 			this.pushInstruction({ op: "local.get", index: dstTmp });
 			this.pushInstruction({
@@ -5081,7 +5187,6 @@ export class FunctionEmitter {
 			this.pushInstruction({ op: "local.get", index: nTmp });
 			this._emitArrayCopy(arrInfo, elemGoType);
 
-			this.pushInstruction("end");
 			this.pushInstruction("end");
 
 			this.releaseTemp(srcTmp, sliceWType);
@@ -5183,9 +5288,6 @@ export class FunctionEmitter {
 								targetParamTypes = this.mod.getFuncParamTypes(embedMethodName);
 								const baseWType = this.toWasmType(recvType);
 								this.emitExpr(func.expr, baseWType);
-								if (recvType?.kind === "pointer") {
-									this._emitNilCheck(baseWType);
-								}
 								this.pushInstruction({
 									op: "struct.get",
 									typeIndex: structInfo.typeIndex,
@@ -5216,12 +5318,6 @@ export class FunctionEmitter {
 						func.expr.kind === "CompositeLit" ||
 						(func.expr.kind === "UnaryExpr" && func.expr.op === "*");
 					this.emitExpr(func.expr, recvWType);
-					if (
-						recvType?.kind === "pointer" ||
-						recvType?.kind === "PointerType"
-					) {
-						this._emitNilCheck(recvWType);
-					}
 					if (isValRecv && !isFreshRecv) {
 						const sInfo = this._resolveStructInfo(func.expr);
 						if (sInfo) {
@@ -5296,14 +5392,6 @@ export class FunctionEmitter {
 		const closureTmp = this.acquireTemp(closureWType);
 		this.emitExpr(func, closureWType);
 		this.pushInstruction({ op: "local.set", index: closureTmp });
-
-		this.pushInstruction({ op: "local.get", index: closureTmp });
-		this.pushInstruction("ref.is_null");
-		this.pushInstruction({ op: "if", blockType: "void" });
-		this.emitPanic(
-			"runtime error: invalid memory address or nil pointer dereference",
-		);
-		this.pushInstruction("end");
 
 		// Push param 0: env (anyref)
 		this.pushInstruction({ op: "local.get", index: closureTmp });
