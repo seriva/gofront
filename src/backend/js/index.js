@@ -48,6 +48,8 @@ import { statementGenMethods } from "./statements.js";
 import { stdlibGenMethods } from "./stdlib/index.js";
 import { templGenMethods } from "./templ.js";
 
+export { buildSourceMap };
+
 // Valid Go identifiers that cannot be used as JS bindings; emitted with a `$` suffix.
 const JS_RESERVED = new Set([
 	"arguments",

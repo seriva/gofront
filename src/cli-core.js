@@ -23,7 +23,7 @@ import {
 	sep,
 } from "node:path";
 import { copyAssets } from "./asset-manager.js";
-import { isGoFrontWasm } from "./backend/wasm/encode.js";
+import { isGoFrontWasm } from "./backend/wasm/index.js";
 import { colors, log } from "./colors.js";
 import { compileDir, compileSingleFile } from "./compiler.js";
 import { createDevServer } from "./dev-server.js";
