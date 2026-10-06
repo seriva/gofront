@@ -28,7 +28,7 @@ features (e.g. `docs/v0.0.5/`).
 
 ## v1.6.0
 
-**Theme: Complete hybrid JS + WebAssembly.** Finishes the per-package target model (`//gofront:target js | wasm | both`) in the existing JS compiler (`src/backend/wasm/`), so the whole hybrid is done before the v2.0.0 rewrite: the remaining language features in WASM, boundary v2, shared linear-memory buffers, `example/hybrid`, and full simplefps physics in WASM. Pending a positive v1.5.0 go/no-go. Whole-app WASM is a documented future extension. Design document in [`docs/v1.6.0/wasm-hybrid-plan.md`](v1.6.0/wasm-hybrid-plan.md).
+**Theme: Complete hybrid JS + WebAssembly.** Finishes the per-package target model (`//gofront:target js | wasm | both`) in the existing JS compiler (`src/backend/wasm/`), so the whole hybrid is done before the v2.0.0 rewrite: the remaining language features in WASM, boundary v2, shared linear-memory buffers, `example/hybrid`, and full simplefps physics in WASM. Unblocked by the v1.5.1 go/no-go (hybrid = 1.17× JS, GO). Whole-app WASM is a documented future extension. Design document in [`docs/v1.6.0/wasm-hybrid-plan.md`](v1.6.0/wasm-hybrid-plan.md).
 
 | Area | Difficulty | Status | Notes |
 |---|---|---|---|
@@ -65,7 +65,7 @@ features (e.g. `docs/v0.0.5/`).
 | JS strict numeric mode | Medium | ✅ Done | `Math.fround`, `\|0`/`>>>0`, `Math.imul`, Go shift and div-by-zero semantics for `both` packages. |
 | WASM backend (core subset) | High | ✅ Done | Encoder + `--emit-wat`; scalars, structs, pointers, methods, arrays, slices, strings (JS String Builtins), `any`, closures, `panic`; `math` natives/imports. |
 | Boundary v1 & tooling | High | ✅ Done | Facades (values, handles, copy-in/out + retention check, numeric slices, `any`, JS → WASM callbacks), loader, single `app.wasm`, dev/build/test integration (`both` tests run on both targets). |
-| simplefps split & go/no-go benchmark | Medium | ✅ Done (publish in v1.5.1) | `mathx` (both) + `collision` (wasm: trimesh, octree, ray); `npm run bench:raycast` Möller–Trumbore + octree raycast, JS-only vs. hybrid. Baseline hybrid = 0.65× JS; final number published after v1.5.1. |
+| simplefps split & go/no-go benchmark | Medium | ✅ Done | `mathx` (both) + `collision` (wasm: trimesh, octree, ray); `npm run bench:raycast` Möller–Trumbore + octree raycast, JS-only vs. hybrid. Baseline hybrid = 0.65× JS; after v1.5.1 codegen work 1.17× JS at 0.86 B/ray — **GO**. |
 
 ---
 
