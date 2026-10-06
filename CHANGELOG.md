@@ -17,7 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 - **`cap(x)` on a nil slice** — now emits `(x?.length ?? 0)` so `cap` of a nil slice returns 0 instead of throwing, matching `len`.
-- **`src/codegen/` → `src/backend/js/`** — the JS code generator now lives beside the wasm backend; `src/codegen/index.js` remains as a re-export shim for `CodeGen`.
+- **`src/codegen/` → `src/backend/js/`** — the JS code generator now lives beside the wasm backend; the `src/codegen/` directory is gone. Each backend's `index.js` is the only import surface (`buildSourceMap`, `isGoFrontWasm` are re-exported from there).
 
 ### Fixed
 - **Struct type indices in wasm modules** — structs whose fields needed auxiliary types (slices, arrays, boxes, closures) were assigned stale type indices, producing invalid modules; all struct and auxiliary types now live in one recursive type group.

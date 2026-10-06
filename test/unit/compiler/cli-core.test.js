@@ -420,12 +420,6 @@ export const __lines = __out;
 	}
 });
 
-test("src/codegen/index.js shim re-exports the JS backend", async () => {
-	const shim = await import("../../../src/codegen/index.js");
-	const real = await import("../../../src/backend/js/index.js");
-	assert(shim.CodeGen === real.CodeGen, "shim must re-export CodeGen");
-});
-
 test("writeCompileOutput removes only GoFront-produced stale wasm artifacts", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "gofront-stale-wasm-"));
 	const outDir = join(dir, "public");

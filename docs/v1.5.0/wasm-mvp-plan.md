@@ -146,7 +146,7 @@ For each imported `wasm` package, the backend generates a facade with the same A
 
 ### 6. CLI & tooling integration
 
-- **Backend architecture (`src/backend/`):** move `src/codegen/` → `src/backend/js/` to establish symmetric backends alongside `src/backend/wasm/`. Update Sentrux layer `backend` at order 2. Maintain a transitional re-export shim in `src/codegen/index.js` to ensure zero breaking changes.
+- **Backend architecture (`src/backend/`):** move `src/codegen/` → `src/backend/js/` to establish symmetric backends alongside `src/backend/wasm/`. Update Sentrux layer `backend` at order 2. (Transitional shim `src/codegen/index.js` retired in Phase 5.1).
 - **`compiler.js`:** builds the package graph with targets. Dispatches symmetrically to `backend/js` and `backend/wasm`. `both` packages go through both backends. Facades are emitted for the boundary. Outputs are `{ js, css, wasm, wat? }`.
 - **`build`:** writes `app.wasm` next to the bundle. The PWA precache includes it.
 - **`dev`:** `dev-server.js` serves `.wasm` as `application/wasm`. Live reload rebuilds both outputs.
@@ -251,6 +251,22 @@ The boundary per frame is then raycasts (gameplay, bodies, controller), each a s
   - Hybrid sample project builds, serves, and passes dual-target tests.
 
   Boundary v1 limitations (deferred): maps, `error`, non-empty interfaces and pointers to non-structs are rejected at the boundary with a "planned" diagnostic; slices are copied in but not back; `*T` fields inside `both` struct values lose identity; `t.Run` subtests are not available in wasm test packages; non-literal package constants are not exposed.
+
+### Phase 5.1: Backend Structure Cleanups & Encapsulation
+- [x] **Phase 5.1a — Codegen shim removal:**
+  - Delete `src/codegen/index.js` and remove the obsolete `src/codegen/` directory.
+  - Remove `src/codegen/*` path pattern from `.sentrux/rules.toml` (layer order 2 `backend`).
+  - Remove transitional shim test in `test/unit/compiler/cli-core.test.js`.
+  - Update `README.md`, `CHANGELOG.md`, and plan docs to reflect complete removal of `src/codegen/`.
+- [x] **Phase 5.1b — Backend barrel encapsulation:**
+  - Re-export `buildSourceMap` from `src/backend/js/index.js`; update `src/compiler.js` to import from barrel instead of deep-importing `source-map.js`.
+  - Re-export `isGoFrontWasm` from `src/backend/wasm/index.js`; update `src/cli-core.js` to import from barrel instead of deep-importing `encode.js`.
+- [x] **Phase 5.1c — Linter & formatting hygiene:**
+  - Remove unused variables (`isArr`, `idx`) and apply optional chaining in `src/backend/wasm/emit.js`.
+  - Format `src/backend/wasm/index.js` and ensure `biome check .` / `npm run check` passes.
+- [x] **Phase 5.1d — Sentrux gate & verification:**
+  - Update Sentrux quality baseline (`sentrux gate --save`) after complexity review.
+  - Verify all unit tests, linters, and architectural rules pass (`npm test`, `npm run check`).
 
 ### Phase 6: simplefps Validation & Go/No-Go Benchmark
 - [ ] **Phase 6a — simplefps split:** `engine/mathx` (`both`) and `engine/collision` (`wasm`). `mathx` passes on both targets, `collision` passes in WASM.

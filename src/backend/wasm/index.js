@@ -12,9 +12,11 @@ import {
 	scanBoundaryImports,
 } from "./boundary.js";
 import { FunctionEmitter } from "./emit.js";
-import { encodeModule } from "./encode.js";
+import { encodeModule, isGoFrontWasm } from "./encode.js";
 import { getFuncSignature, isTestingT, toWasmType } from "./types.js";
 import { emitWat } from "./wat.js";
+
+export { isGoFrontWasm };
 
 export class ModuleEmitter {
 	constructor(checker, lowerResult = null, programs = [], options = {}) {
