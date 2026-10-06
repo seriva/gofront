@@ -1,8 +1,22 @@
 // src/backend/wasm/types.js
 // Maps GoFront types to WasmGC types and manages type registry.
 
+// `*testing.T` is a JS-side object (the harness's __GoFront_T) passed through
+// the boundary as an opaque externref.
+export function isTestingT(goType) {
+	if (!goType) return false;
+	const base =
+		goType.kind === "pointer" || goType.kind === "PointerType"
+			? goType.base
+			: goType.kind === "StarExpr"
+				? (goType.expr ?? goType.operand)
+				: null;
+	return base?.name === "testing.T";
+}
+
 export function toWasmType(goType, checker = null, mod = null) {
 	if (!goType) return "i32";
+	if (isTestingT(goType)) return "externref";
 
 	// Pointer AST nodes
 	if (goType.kind === "PointerType") {

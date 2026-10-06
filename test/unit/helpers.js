@@ -1,12 +1,13 @@
 // GoFront test helpers — shared across all test files
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import vm from "node:vm";
 import { JSDOM } from "jsdom";
+import { CodeGen } from "../../src/backend/js/index.js";
 import { instantiateWasm } from "../../src/backend/wasm/glue.js";
 import { compileWasm } from "../../src/backend/wasm/index.js";
-import { CodeGen } from "../../src/codegen/index.js";
 import { compileDir } from "../../src/compiler.js";
 import { DtsParser, parseDts } from "../../src/dts-parser.js";
 import { Lexer } from "../../src/lexer.js";
@@ -249,7 +250,7 @@ export function compileHybrid(source, options = {}) {
 					}
 				} else if (jsRes !== wasmRes) {
 					const fmt = (v) =>
-						typeof v === "bigint" ? v + "n" : JSON.stringify(v);
+						typeof v === "bigint" ? `${v}n` : JSON.stringify(v);
 					throw new Error(
 						`Return mismatch: JS ${fmt(jsRes)} vs WASM ${fmt(wasmRes)}`,
 					);
@@ -263,6 +264,42 @@ export function compileHybrid(source, options = {}) {
 			};
 		},
 	};
+}
+
+// ── Hybrid projects (JS root + wasm/both packages) ───────────
+//
+// `files` maps relative paths (e.g. "mathx/vec.go", "main.go") to sources.
+// Compiles the root directory through the real compiler pipeline, embeds the
+// linked app.wasm bytes and imports the resulting ES module so the test can
+// call the facade's exports directly.  `exports` lists the top-level names to
+// re-export from the bundle.
+
+export async function compileHybridProject(files, { exports = [] } = {}) {
+	const root = mkdtempSync(join(tmpdir(), "gofront-hybrid-"));
+	for (const [rel, src] of Object.entries(files)) {
+		const full = join(root, rel);
+		mkdirSync(dirname(full), { recursive: true });
+		writeFileSync(full, src);
+	}
+	const result = compileDir(root);
+	const parts = [];
+	if (result.wasm) {
+		parts.push(
+			`globalThis.__GOFRONT_WASM_BYTES = new Uint8Array([${Array.from(result.wasm).join(",")}]);`,
+		);
+	}
+	parts.push("const __out = [];");
+	// Module-scoped `console` shadow so concurrently running tests don't share output.
+	parts.push(
+		"const console = { log: (...a) => __out.push(a.map((x) => String(x)).join(' ')) };",
+	);
+	parts.push(stripImports(result.js));
+	parts.push(`export const __lines = __out;`);
+	if (exports.length > 0) parts.push(`export { ${exports.join(", ")} };`);
+	const bundlePath = join(root, "bundle.mjs");
+	writeFileSync(bundlePath, parts.join("\n"));
+	const mod = await import(`${pathToFileURL(bundlePath).href}?t=${Date.now()}`);
+	return { ...result, mod, lines: mod.__lines, root };
 }
 
 // ── Test harness ─────────────────────────────────────────────
@@ -343,7 +380,7 @@ export function assertEqual(actual, expected) {
 		if (BigInt(actual) === expected) return;
 	}
 	if (actual !== expected) {
-		const fmt = (v) => (typeof v === "bigint" ? v + "n" : JSON.stringify(v));
+		const fmt = (v) => (typeof v === "bigint" ? `${v}n` : JSON.stringify(v));
 		throw new Error(`expected ${fmt(expected)}, got ${fmt(actual)}`);
 	}
 }

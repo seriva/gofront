@@ -11,6 +11,7 @@ import {
 	isSliceType,
 	isStringType,
 	isStructType,
+	isTestingT,
 	toWasmType,
 } from "./types.js";
 
@@ -291,6 +292,27 @@ export class FunctionEmitter {
 			});
 		}
 		return idx;
+	}
+
+	// `pkg.Name` where `pkg` is a linked local package -> `Name` (the module is
+	// flat, like the JS bundle). Returns a replacement Ident or null.
+	_dequalify(expr) {
+		if (
+			expr?.kind === "SelectorExpr" &&
+			expr.expr?.kind === "Ident" &&
+			this.mod.bundledPackages?.has(expr.expr.name) &&
+			!this.resolveLocal(expr.expr.name) &&
+			!this.mod.resolveGlobal(expr.expr.name)
+		) {
+			return {
+				kind: "Ident",
+				name: expr.field,
+				_type: expr._type,
+				_line: expr._line,
+				_col: expr._col,
+			};
+		}
+		return null;
 	}
 
 	_resolveStructInfo(expr) {
@@ -809,7 +831,7 @@ export class FunctionEmitter {
 			let localInfo = this.resolveLocal(l.name);
 			if (!localInfo && op === ":=") {
 				const wType = this.toWasmType(r._type);
-				const idx = this.allocLocal(l.name, wType, r._type);
+				this.allocLocal(l.name, wType, r._type);
 				localInfo = this.locals.get(l.name);
 			}
 			if (localInfo) {
@@ -967,7 +989,6 @@ export class FunctionEmitter {
 			const baseNode = l.expr;
 			const baseType = baseNode._type;
 			const isSlice = isSliceType(baseType, this.mod.checker);
-			const isArr = isArrayType(baseType, this.mod.checker);
 			const isPtrToArr =
 				baseType?.kind === "pointer" &&
 				isArrayType(baseType.base, this.mod.checker);
@@ -1105,7 +1126,7 @@ export class FunctionEmitter {
 				let localInfo = this.resolveLocal(l.name);
 				if (!localInfo && op === ":=") {
 					const wType = this.toWasmType(tupleTypes[i]);
-					const idx = this.allocLocal(l.name, wType, tupleTypes[i]);
+					this.allocLocal(l.name, wType, tupleTypes[i]);
 					localInfo = this.locals.get(l.name);
 				}
 				dests.push(localInfo ?? this.mod.resolveGlobal(l.name) ?? null);
@@ -1416,7 +1437,6 @@ export class FunctionEmitter {
 			const baseNode = l.expr;
 			const baseType = baseNode._type;
 			const isSlice = isSliceType(baseType, this.mod.checker);
-			const isArr = isArrayType(baseType, this.mod.checker);
 			const isPtrToArr =
 				baseType?.kind === "pointer" &&
 				isArrayType(baseType.base, this.mod.checker);
@@ -1544,7 +1564,7 @@ export class FunctionEmitter {
 		const globalInfo = !localInfo ? this.mod.resolveGlobal(l.name) : null;
 		if (!localInfo && !globalInfo) return;
 
-		if (localInfo && localInfo.isBoxed) {
+		if (localInfo?.isBoxed) {
 			const boxInfo = localInfo.boxInfo;
 			const targetType = boxInfo.wType;
 			if (baseOp === "/" || baseOp === "%") {
@@ -1677,7 +1697,6 @@ export class FunctionEmitter {
 			const baseNode = expr.expr;
 			const baseType = baseNode._type;
 			const isSlice = isSliceType(baseType, this.mod.checker);
-			const isArr = isArrayType(baseType, this.mod.checker);
 			const isPtrToArr =
 				baseType?.kind === "pointer" &&
 				isArrayType(baseType.base, this.mod.checker);
@@ -1816,7 +1835,7 @@ export class FunctionEmitter {
 			const globalInfo = !localInfo ? this.mod.resolveGlobal(expr.name) : null;
 			if (!localInfo && !globalInfo) return;
 
-			if (localInfo && localInfo.isBoxed) {
+			if (localInfo?.isBoxed) {
 				const boxInfo = localInfo.boxInfo;
 				const innerWType = boxInfo.wType;
 				this.pushInstruction({ op: "local.get", index: localInfo.index });
@@ -2154,7 +2173,6 @@ export class FunctionEmitter {
 
 		// Slice or Array range
 		const isSlice = isSliceType(iterType, this.mod.checker);
-		const isArr = isArrayType(iterType, this.mod.checker);
 		const isPtrToArr =
 			iterType?.kind === "pointer" &&
 			isArrayType(iterType.base, this.mod.checker);
@@ -2749,9 +2767,12 @@ export class FunctionEmitter {
 				this.emitCompositeLit(expr);
 				break;
 
-			case "SelectorExpr":
-				this.emitSelectorExpr(expr);
+			case "SelectorExpr": {
+				const deq = this._dequalify(expr);
+				if (deq) this.emitIdent(deq, targetWasmType);
+				else this.emitSelectorExpr(expr);
 				break;
+			}
 
 			case "IndexExpr":
 				this.emitIndexExpr(expr, targetWasmType);
@@ -3565,6 +3586,9 @@ export class FunctionEmitter {
 			const n = Number(lit.value);
 			if (wType === "i32") {
 				this.pushInstruction({ op: "i32.const", value: n | 0 });
+			} else if (wType === "f64" || wType === "f32") {
+				// Untyped integer constant in a float context (`x * 2`).
+				this.pushInstruction({ op: `${wType}.const`, value: n });
 			} else {
 				this.pushInstruction({ op: "i64.const", value: BigInt(lit.value) });
 			}
@@ -3648,6 +3672,20 @@ export class FunctionEmitter {
 		if (globalInfo) {
 			this.pushInstruction({ op: "global.get", index: globalInfo.index });
 			return;
+		}
+
+		const constLit = this.mod.resolveConst(ident.name);
+		if (constLit) {
+			this.emitBasicLit(
+				constLit,
+				targetWasmType ?? this.toWasmType(ident._type),
+			);
+			return;
+		}
+		if (this.mod.isNonLiteralConst(ident.name)) {
+			throw new Error(
+				`constant '${ident.name}' has a non-literal value, which the wasm backend does not support yet (planned)`,
+			);
 		}
 
 		const trampName = `_tramp$${ident.name}`;
@@ -4318,6 +4356,11 @@ export class FunctionEmitter {
 	}
 
 	emitCallExpr(call, targetWasmType = null) {
+		const deqFunc = this._dequalify(call.func);
+		if (deqFunc) {
+			this.emitCallExpr({ ...call, func: deqFunc }, targetWasmType);
+			return;
+		}
 		const { func, args } = call;
 
 		// Built-in len
@@ -5053,6 +5096,12 @@ export class FunctionEmitter {
 			return;
 		}
 
+		// 4b. *testing.T methods → JS harness via env.testing_* imports
+		if (func.kind === "SelectorExpr" && isTestingT(func.expr?._type)) {
+			this.emitTestingCall(func, args);
+			return;
+		}
+
 		// 5. Method call on struct or pointer: receiver.Method(args...)
 		if (func.kind === "SelectorExpr") {
 			const recvType = func.expr._type;
@@ -5309,6 +5358,53 @@ export class FunctionEmitter {
 		}
 
 		throw new Error(`Unsupported math function: math.${name}`);
+	}
+
+	// `t.Method(args...)` on a `*testing.T`: the receiver is a JS object held
+	// as externref.  Arguments are pushed to a JS-side buffer one at a time
+	// (typed imports), then `testing_call(t, nameIdx)` dispatches by name.
+	emitTestingCall(func, args) {
+		const method = func.field;
+		const nameIdx = this.mod.internString(method);
+		if (method === "Run") {
+			throw new Error(
+				"t.Run is not yet supported in wasm test packages (planned)",
+			);
+		}
+		if (method === "Name") {
+			this.emitExpr(func.expr, "externref");
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getTestingNameImportIndex(),
+			});
+			return;
+		}
+		if (method === "Failed" || method === "Skipped") {
+			this.emitExpr(func.expr, "externref");
+			this.pushInstruction({ op: "i32.const", value: nameIdx });
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getTestingFlagImportIndex(),
+			});
+			return;
+		}
+		for (const arg of args) {
+			const isBool =
+				arg._type?.name === "bool" ||
+				(arg.kind === "BasicLit" && arg.litKind === "BOOL");
+			const wType = toWasmType(arg._type, this.mod.checker);
+			this.emitExpr(arg, wType);
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getTestingArgImportIndex(wType, isBool),
+			});
+		}
+		this.emitExpr(func.expr, "externref");
+		this.pushInstruction({ op: "i32.const", value: nameIdx });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getTestingCallImportIndex(),
+		});
 	}
 
 	emitBitsCall(name, args) {

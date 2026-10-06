@@ -1,4 +1,4 @@
-// src/codegen/stdlib/bits.js
+// src/backend/js/stdlib/bits.js
 // CodeGen for Go `math/bits` package.
 
 /** @typedef {import('../index.js').CodeGen} CodeGen */

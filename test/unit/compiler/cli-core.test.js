@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
 	formatPrepSummary,
 	handleBuild,
@@ -21,6 +21,7 @@ import {
 	parseTestArgs,
 	resolveAssetExtensions,
 	runCompile,
+	writeCompileOutput,
 } from "../../../src/cli-core.js";
 import {
 	assert,
@@ -327,6 +328,129 @@ test("handleBuild copies custom assetExtensions from the serve dir", async () =>
 		assert(existsSync(join(outDir, "resources", "level.mat")));
 		assert(existsSync(join(outDir, "resources", "tex.webp")));
 		assertEqual(existsSync(join(outDir, "resources", "notes.unknown")), false);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+section("cli-core — hybrid (js + wasm) project build");
+
+const HYBRID_FILES = {
+	"app/index.html": "<html></html>",
+	"app/src/main.go": `package main
+
+import "./physics"
+
+func main() {
+	b := physics.NewBody(1.5)
+	physics.Kick(b, 2)
+	console.log("speed", b.Vel, "mass", b.Mass)
+}
+`,
+	"app/src/physics/physics.go": `//gofront:target wasm
+package physics
+
+type Body struct {
+	Vel  float64
+	Mass float64
+}
+
+func NewBody(mass float64) *Body { return &Body{Mass: mass} }
+
+func Kick(b *Body, dv float64) { b.Vel += dv }
+`,
+};
+
+function writeHybrid(dir) {
+	for (const [rel, src] of Object.entries(HYBRID_FILES)) {
+		mkdirSync(join(dir, rel, ".."), { recursive: true });
+		writeFileSync(join(dir, rel), src);
+	}
+}
+
+test("handleBuild writes app.js + app.wasm for a hybrid project (no .wat by default)", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-hybrid-build-"));
+	const outDir = join(dir, "public");
+	try {
+		writeHybrid(dir);
+		await handleBuild(dir, { outDir });
+		assert(existsSync(join(outDir, "app.js")), "expected app.js");
+		assert(existsSync(join(outDir, "app.wasm")), "expected app.wasm");
+		assertEqual(existsSync(join(outDir, "app.wat")), false);
+		const wasm = readFileSync(join(outDir, "app.wasm"));
+		assertEqual(Array.from(wasm.subarray(0, 4)).join(","), "0,97,115,109");
+		const js = readFileSync(join(outDir, "app.js"), "utf8");
+		assertContains(js, "__gfw_load(");
+		assertContains(js, "class Body");
+		assert(!js.includes("__GOFRONT_WASM_UNIT"), "marker must be spliced out");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("handleBuild --emit-wat also writes app.wat; minified bundle still runs", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-hybrid-wat-"));
+	const outDir = join(dir, "public");
+	try {
+		writeHybrid(dir);
+		await handleBuild(dir, { outDir, emitWat: true, minify: true });
+		const wat = readFileSync(join(outDir, "app.wat"), "utf8");
+		assertContains(wat, "(module");
+		assertContains(wat, '(export "Kick"');
+
+		// Run the built bundle with the wasm bytes preloaded (no fetch in Node).
+		const js = readFileSync(join(outDir, "app.js"), "utf8");
+		const wasm = readFileSync(join(outDir, "app.wasm"));
+		const lines = [];
+		const runner = join(dir, "run.mjs");
+		writeFileSync(
+			runner,
+			`globalThis.__GOFRONT_WASM_BYTES = new Uint8Array(${JSON.stringify(Array.from(wasm))});
+const __out = [];
+const console = { log: (...a) => __out.push(a.join(" ")) };
+${js}
+export const __lines = __out;
+`,
+		);
+		const mod = await import(`${pathToFileURL(runner).href}?t=${Date.now()}`);
+		lines.push(...mod.__lines);
+		assertEqual(lines[0], "speed 2 mass 1.5");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("src/codegen/index.js shim re-exports the JS backend", async () => {
+	const shim = await import("../../../src/codegen/index.js");
+	const real = await import("../../../src/backend/js/index.js");
+	assert(shim.CodeGen === real.CodeGen, "shim must re-export CodeGen");
+});
+
+test("writeCompileOutput removes only GoFront-produced stale wasm artifacts", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-stale-wasm-"));
+	const outDir = join(dir, "public");
+	const out = join(outDir, "app.js");
+	try {
+		// 1. A hybrid build produces app.wasm + app.wat ...
+		writeHybrid(dir);
+		await handleBuild(dir, { outDir, emitWat: true });
+		assert(existsSync(join(outDir, "app.wasm")));
+		assert(existsSync(join(outDir, "app.wat")));
+		// ... and a JS-only rebuild cleans both up.
+		writeCompileOutput(out, { js: "// js only" });
+		assertEqual(existsSync(join(outDir, "app.wasm")), false);
+		assertEqual(existsSync(join(outDir, "app.wat")), false);
+
+		// 2. A foreign app.wasm (valid header, no gofront section) is left alone,
+		//    together with its .wat.
+		writeFileSync(
+			join(outDir, "app.wasm"),
+			new Uint8Array([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0]),
+		);
+		writeFileSync(join(outDir, "app.wat"), "(module)");
+		writeCompileOutput(out, { js: "// js only" });
+		assert(existsSync(join(outDir, "app.wasm")), "foreign app.wasm kept");
+		assert(existsSync(join(outDir, "app.wat")), "foreign app.wat kept");
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}

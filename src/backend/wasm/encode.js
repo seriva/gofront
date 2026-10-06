@@ -734,6 +734,25 @@ export function encodeCodeSection(funcs) {
 
 // ── Top-level Module Encoder ─────────────────────────────────
 
+// Custom section placed right after the header; `isGoFrontWasm` keys off it.
+export const GOFRONT_SECTION_NAME = "gofront";
+const GOFRONT_SECTION_BYTES = [
+	0x00,
+	...encodeU32LEB(1 + GOFRONT_SECTION_NAME.length),
+	...encodeString(GOFRONT_SECTION_NAME),
+];
+
+// True when `bytes` start with the wasm header followed by our custom section.
+export function isGoFrontWasm(bytes) {
+	const expected = [0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
+	expected.push(...GOFRONT_SECTION_BYTES);
+	if (!bytes || bytes.length < expected.length) return false;
+	for (let i = 0; i < expected.length; i++) {
+		if (bytes[i] !== expected[i]) return false;
+	}
+	return true;
+}
+
 export function encodeModule(mod) {
 	const magic = [0x00, 0x61, 0x73, 0x6d]; // \0asm
 	const version = [0x01, 0x00, 0x00, 0x00]; // version 1
@@ -744,18 +763,24 @@ export function encodeModule(mod) {
 	const tagSec = encodeTagSection(mod.tags);
 	const globalSec = encodeGlobalSection(mod.globals);
 	const exportSec = encodeExportSection(mod.exports);
+	const startSec =
+		typeof mod.start === "number"
+			? encodeSection(8, encodeU32LEB(mod.start))
+			: [];
 	const elemSec = encodeElementSection(mod.elements);
 	const codeSec = encodeCodeSection(mod.funcs);
 
 	const allBytes = [
 		...magic,
 		...version,
+		...GOFRONT_SECTION_BYTES,
 		...typeSec,
 		...importSec,
 		...funcSec,
 		...tagSec,
 		...globalSec,
 		...exportSec,
+		...startSec,
 		...elemSec,
 		...codeSec,
 	];

@@ -235,6 +235,11 @@ export function emitWat(mod) {
 		}
 	}
 
+	// 7. Start function
+	if (typeof mod.start === "number") {
+		lines.push(`  (start $f${mod.start})`);
+	}
+
 	lines.push(")");
 	return `${lines.join("\n")}\n`;
 }

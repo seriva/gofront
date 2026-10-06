@@ -6,8 +6,8 @@ import {
 	isSimpleIntRange,
 	isStringRangeType,
 	nodeAssigns,
-} from "../lower/index.js";
-import { isComplex } from "../typechecker/types.js";
+} from "../../lower/index.js";
+import { isComplex } from "../../typechecker/types.js";
 
 /** @typedef {import('./index.js').CodeGen} CodeGen */
 

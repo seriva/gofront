@@ -940,3 +940,150 @@ test("runTests non-verbose output matches Go-style snapshot", async () => {
 		rmSync(dir, { recursive: true, force: true });
 	}
 });
+
+section("test-runner — dual-target (wasm / both packages)");
+
+test("runTests runs a wasm package's tests inside app.wasm", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-wasm-test-"));
+	try {
+		writeFileSync(
+			join(dir, "calc.go"),
+			`//gofront:target wasm
+package calc
+func Add(a, b int) int { return a + b }
+`,
+		);
+		writeFileSync(
+			join(dir, "calc_test.go"),
+			`package calc
+import "testing"
+func TestAdd(t *testing.T) {
+  if Add(1, 2) != 3 {
+    t.Errorf("Add(1,2) = %d, want 3", Add(1, 2))
+  }
+  t.Log("name:", t.Name())
+}
+func TestFails(t *testing.T) {
+  t.Errorf("got %v and %s and %t", 2.5, "str", true)
+  if !t.Failed() {
+    t.Fatal("Failed() should be true")
+  }
+}
+func TestSkips(t *testing.T) {
+  t.Skip("not today")
+}
+`,
+		);
+		const result = await runTests(dir, { captureOutput: true, verbose: true });
+		assertEqual(result.exitCode, 1);
+		assertContains(result.stdout, "--- PASS: TestAdd");
+		assertContains(result.stdout, "name: TestAdd");
+		assertContains(result.stdout, "got 2.5 and str and true");
+		assertContains(result.stdout, "--- FAIL: TestFails");
+		assertContains(result.stdout, "--- SKIP: TestSkips");
+		assertContains(result.stdout, "not today");
+		assert(!result.stdout.includes("Failed() should be true"));
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("runTests runs a both package's tests on JS and wasm", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-both-test-"));
+	try {
+		writeFileSync(
+			join(dir, "vec.go"),
+			`//gofront:target both
+package vec
+type V struct{ X, Y float64 }
+func (v V) Dot(o V) float64 { return v.X*o.X + v.Y*o.Y }
+func Scale(v V, k float64) V { return V{v.X * k, v.Y * k} }
+`,
+		);
+		writeFileSync(
+			join(dir, "vec_test.go"),
+			`package vec
+import "testing"
+func TestDot(t *testing.T) {
+  v := V{1, 2}
+  if v.Dot(V{3, 4}) != 11 {
+    t.Fatalf("dot = %v", v.Dot(V{3, 4}))
+  }
+  s := Scale(v, 2)
+  if s.X != 2 || s.Y != 4 {
+    t.Errorf("scale = %v,%v", s.X, s.Y)
+  }
+}
+`,
+		);
+		const result = await runTests(dir, { captureOutput: true });
+		assertEqual(result.exitCode, 0);
+		assertEqual(result.testCount, 2);
+		assertContains(result.stdout, "ok  \tvec [js]");
+		assertContains(result.stdout, "ok  \tvec [wasm]");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("runTests reports a both package failing on either target", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-both-fail-"));
+	try {
+		writeFileSync(
+			join(dir, "n.go"),
+			`//gofront:target both
+package n
+func Twice(x int) int { return x * 2 }
+`,
+		);
+		writeFileSync(
+			join(dir, "n_test.go"),
+			`package n
+import "testing"
+func TestTwice(t *testing.T) {
+  if Twice(4) != 9 {
+    t.Errorf("Twice(4) = %d", Twice(4))
+  }
+}
+`,
+		);
+		const result = await runTests(dir, { captureOutput: true });
+		assertEqual(result.exitCode, 1);
+		assertContains(result.stdout, "FAIL\tn [js]");
+		assertContains(result.stdout, "FAIL\tn [wasm]");
+		assertEqual(result.stdout.split("Twice(4) = 8").length, 3);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("wasm test packages reject t.Run with a planned message", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-wasm-run-"));
+	try {
+		writeFileSync(
+			join(dir, "r.go"),
+			`//gofront:target wasm
+package r
+func One() int { return 1 }
+`,
+		);
+		writeFileSync(
+			join(dir, "r_test.go"),
+			`package r
+import "testing"
+func TestSub(t *testing.T) {
+  t.Run("inner", func(t *testing.T) { if One() != 1 { t.Fail() } })
+}
+`,
+		);
+		const result = await runTests(dir, { captureOutput: true });
+		assertEqual(result.exitCode, 1);
+		assertContains(result.stderr, "[build failed]");
+		assertContains(
+			result.stderr,
+			"t.Run is not yet supported in wasm test packages",
+		);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
