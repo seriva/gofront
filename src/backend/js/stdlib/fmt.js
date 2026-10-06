@@ -30,7 +30,7 @@ export const fmtMethods = {
 			case "Printf":
 			case "Print":
 				this._usesSprintf = true;
-				return `process?.stdout?.write(__sprintf(${fmtArgs}))`;
+				return `(typeof process !== "undefined" && process?.stdout?.write ? process.stdout.write(__sprintf(${fmtArgs})) : console.log(__sprintf(${fmtArgs})))`;
 			case "Println":
 				this._usesSprintf = true;
 				return `console.log(__sprintf(${fmtArgs}))`;

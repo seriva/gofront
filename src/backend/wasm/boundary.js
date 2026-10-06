@@ -989,11 +989,24 @@ function indent(text, prefix) {
 // quoted, helpers prefixed with `__`.
 export const WASM_IMPORTS_JS = `const ${P}MAX = 9007199254740991n;
 function ${P}imports(stringTable, extraEnv, tag, write) {
-	let buf = [];
+	let lineBuf = "";
 	let targs = [];
-	const flush = () => { const s = buf.join(" "); buf = []; write(s); };
-	const print = (v) => { buf.push(String(v)); };
-	const println = (v) => { buf.push(String(v)); flush(); };
+	const flush = () => { write(lineBuf); lineBuf = ""; };
+	const print = (v) => {
+		const s = String(v);
+		if (lineBuf.length > 0 && !lineBuf.endsWith(" ") && !s.startsWith(" ")) {
+			lineBuf += " ";
+		}
+		lineBuf += s;
+	};
+	const println = (v) => {
+		const s = String(v);
+		if (lineBuf.length > 0 && !lineBuf.endsWith(" ") && !s.startsWith(" ")) {
+			lineBuf += " ";
+		}
+		lineBuf += s;
+		flush();
+	};
 	const targ = (v) => { targs.push(v); };
 	const env = {
 		"panicTag": tag,
@@ -1011,6 +1024,33 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		"str_slice": (s, a, b) => (s ? s.slice(a, b) : ""),
 		"str_from_code_point": (c) => String.fromCodePoint(c),
 		"str_code_point_at": (s, i) => (s ? s.codePointAt(i) : 0),
+		"str_hash": (s) => {
+			if (!s) return 0;
+			let h = 0;
+			for (let i = 0; i < s.length; i++) {
+				h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+			}
+			return h;
+		},
+		"str_to_upper": (s) => (s ? s.toUpperCase() : ""),
+		"str_to_lower": (s) => (s ? s.toLowerCase() : ""),
+		"str_trim_space": (s) => (s ? s.trim() : ""),
+		"str_contains": (s, sub) => (s && sub !== undefined ? (s.includes(sub) ? 1 : 0) : 0),
+		"str_has_prefix": (s, pre) => (s && pre !== undefined ? (s.startsWith(pre) ? 1 : 0) : 0),
+		"str_has_suffix": (s, suf) => (s && suf !== undefined ? (s.endsWith(suf) ? 1 : 0) : 0),
+		"str_index": (s, sub) => (s ? s.indexOf(sub) : -1),
+		"str_last_index": (s, sub) => (s ? s.lastIndexOf(sub) : -1),
+		"str_repeat": (s, n) => (s && n > 0 ? s.repeat(Number(n)) : ""),
+		"str_replace_all": (s, o, n) => (s ? s.replaceAll(o, n) : ""),
+		"str_equal_fold": (a, b) => ((a ?? "").toLowerCase() === (b ?? "").toLowerCase() ? 1 : 0),
+		"str_count": (s, sep) => {
+			if (!s) return sep === "" ? 1 : 0;
+			if (sep === "") return s.length + 1;
+			return s.split(sep).length - 1;
+		},
+		"str_from_i64": (n) => String(n),
+		"str_from_i32": (n) => String(n),
+		"str_from_f64": (f) => String(f),
 		"is_string": (v) => (typeof v === "string" ? 1 : 0),
 		"print_i32": print, "print_i64": print, "print_f32": print, "print_f64": print,
 		"print_str": print, "print_any": print,

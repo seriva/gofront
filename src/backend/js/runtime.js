@@ -87,6 +87,9 @@ export const HELPER_CDIV = `var __cdiv = __cdiv || function(a, b) {
 };`;
 
 export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
+  if (typeof f !== "string" || !/%[#+\\- 0]*[0-9]*\\.?([0-9]*)[sdvftxXqobeEgGw%]/.test(f)) {
+    return (f === undefined && a.length === 0) ? "" : [f, ...a].map(v => v == null ? "<nil>" : typeof v === "object" ? (typeof v.Error === "function" ? v.Error() : JSON.stringify(v)) : String(v)).join(" ");
+  }
   let i = 0;
   return f.replace(/%([#+\\- 0]*)([0-9]*)\\.?([0-9]*)[sdvftxXqobeEgGw%]/g, (m) => {
     if (m === "%%") return "%";
