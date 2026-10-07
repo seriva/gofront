@@ -443,6 +443,22 @@ export const statementGenMethods = {
 			} else {
 				this.line("return;");
 			}
+		} else if (this.namedReturnVars?.length > 0) {
+			const vars = this.namedReturnVars;
+			if (stmt.values.length === 1 && vars.length === 1) {
+				this.line(`${vars[0]} = ${this._genReturnValue(stmt.values[0])};`);
+			} else if (stmt.values.length === 1 && vars.length > 1) {
+				const val = this._genReturnValue(stmt.values[0]);
+				this.line(`[${vars.join(", ")}] = ${val};`);
+			} else if (stmt.values.length > 1 && stmt.values.length === vars.length) {
+				const temps = stmt.values.map((v) => this._genReturnValue(v));
+				this.line(`[${vars.join(", ")}] = [${temps.join(", ")}];`);
+			}
+			this.line(
+				vars.length === 1
+					? `return ${vars[0]};`
+					: `return [${vars.join(", ")}];`,
+			);
 		} else if (stmt.values.length === 1) {
 			this.line(`return ${this._genReturnValue(stmt.values[0])};`);
 		} else {

@@ -43,13 +43,6 @@ export const statementCheckMethods = {
 				this.checkExpr(stmt.expr, scope);
 				break;
 			case "DeferStmt":
-				if (this.target === "wasm" || this.target === "both") {
-					this.recordBlocker("defer statement");
-					this.err(
-						"'defer' is not yet supported in wasm packages (planned)",
-						stmt,
-					);
-				}
 				if (stmt.call.kind !== "CallExpr")
 					this.err("defer requires a function call", stmt.call);
 				this.checkExpr(stmt.call, scope);
