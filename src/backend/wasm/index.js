@@ -2,7 +2,7 @@
 // WASM Backend compiler entry point: lowered AST + types -> Module IR -> binary / WAT.
 
 import { Lexer } from "../../lexer.js";
-import { lower } from "../../lower/index.js";
+import { lower, normalizeDefers } from "../../lower/index.js";
 import { Parser } from "../../parser/index.js";
 import { TypeChecker } from "../../typechecker/index.js";
 import {
@@ -513,6 +513,7 @@ export class ModuleEmitter {
 
 	_initRuntimeImports() {
 		this._initPanicTag();
+		this._initPanicGlobal();
 		this.getPanicImportIndex(); // env.panic
 		this.internString("runtime error: index out of range");
 		this.internString("runtime error: slice bounds out of range");
@@ -590,6 +591,96 @@ export class ModuleEmitter {
 		this.tags.push({ typeIndex: typeIdx });
 		// Export tag 0 as "panicTag"
 		this.exports.push({ name: "panicTag", kind: "tag", index: 0 });
+	}
+
+	getPanicNodeTypeIndex() {
+		if (this.panicNodeTypeIndex !== undefined) {
+			return this.panicNodeTypeIndex;
+		}
+		const typeIndex = this._getTotalTypeCount();
+		const typeEntry = {
+			form: "rec",
+			types: [
+				{
+					form: "struct",
+					fields: [
+						{
+							type: "anyref",
+							mutable: true,
+						},
+						{
+							type: "i32",
+							mutable: true,
+						},
+						{
+							type: {
+								kind: "ref",
+								nullable: true,
+								typeIndex,
+							},
+							mutable: true,
+						},
+					],
+				},
+			],
+		};
+		this._pushType(typeEntry);
+		this.panicNodeTypeIndex = typeIndex;
+		return typeIndex;
+	}
+
+	_initPanicGlobal() {
+		const pType = this.getPanicNodeTypeIndex();
+		const gIdx = this.globals.length;
+		this.globals.push({
+			type: { kind: "ref", nullable: true, typeIndex: pType },
+			mutable: true,
+			init: [{ op: "ref.null", typeIndex: pType }],
+		});
+		this.panicGlobalIndex = gIdx;
+		this.exports.push({ name: "__panic", kind: "global", index: gIdx });
+	}
+
+	getPanicGlobalIndex() {
+		return this.panicGlobalIndex;
+	}
+
+	getDeferNodeTypeIndex() {
+		if (this.deferNodeTypeIndex !== undefined) {
+			return this.deferNodeTypeIndex;
+		}
+		const deferClosureSig = { kind: "Signature", params: [], results: [] };
+		const deferClosureInfo = this.getClosureType(deferClosureSig);
+		const typeIndex = this._getTotalTypeCount();
+		const typeEntry = {
+			form: "rec",
+			types: [
+				{
+					form: "struct",
+					fields: [
+						{
+							type: {
+								kind: "ref",
+								nullable: true,
+								typeIndex: deferClosureInfo.typeIndex,
+							},
+							mutable: false,
+						},
+						{
+							type: {
+								kind: "ref",
+								nullable: true,
+								typeIndex,
+							},
+							mutable: true,
+						},
+					],
+				},
+			],
+		};
+		this._pushType(typeEntry);
+		this.deferNodeTypeIndex = typeIndex;
+		return typeIndex;
 	}
 
 	getTypeIndex(params, results) {
@@ -1257,6 +1348,7 @@ export function compileWasmModule(
 	options = {},
 ) {
 	let progs = Array.isArray(programs) ? programs : [programs];
+	normalizeDefers(progs);
 	let resolvedChecker = checker;
 	let resolvedLowerResult = lowerResult;
 
@@ -1454,6 +1546,15 @@ export function compileWasmModule(
 		_panicMsg: "runtime error: slice bounds out of range",
 	};
 	funcDecls.push(sliceBoundsPanicFn);
+
+	const pushPanicFn = {
+		kind: "FuncDecl",
+		name: "__push_panic",
+		params: [{ name: "msg", type: { kind: "basic", name: "string" } }],
+		returnType: null,
+		_isPushPanic: true,
+	};
+	funcDecls.push(pushPanicFn);
 
 	// 1d. Interface dispatchers
 	const interfaceCalls = new Map();
@@ -1827,6 +1928,16 @@ export function compileWasmModule(
 				});
 			}
 		}
+		if (
+			fn._isPushPanic &&
+			!mod.exports.some((e) => e.name === "__push_panic")
+		) {
+			mod.exports.push({
+				name: "__push_panic",
+				kind: "func",
+				index: globalIdx,
+			});
+		}
 	}
 
 	// 4. Emit function bodies
@@ -1837,7 +1948,21 @@ export function compileWasmModule(
 			const funcIdx = mod.getStringImportIndex();
 			emitter.pushInstruction({ op: "i32.const", value: strIdx });
 			emitter.pushInstruction({ op: "call", funcIndex: funcIdx });
+			emitter.pushInstruction("any.convert_extern");
 			emitter.emitPanicThrow();
+		} else if (fn._isPushPanic) {
+			const panicNodeTypeIndex = mod.getPanicNodeTypeIndex();
+			const panicGlobal = mod.getPanicGlobalIndex();
+			emitter.pushInstruction({ op: "local.get", index: 0 });
+			emitter.pushInstruction("any.convert_extern");
+			emitter.pushInstruction({ op: "i32.const", value: 0 });
+			emitter.pushInstruction({ op: "global.get", index: panicGlobal });
+			emitter.pushInstruction({
+				op: "struct.new",
+				typeIndex: panicNodeTypeIndex,
+			});
+			emitter.pushInstruction({ op: "global.set", index: panicGlobal });
+			emitter.pushInstruction("return");
 		} else if (fn._isInterfaceDispatcher) {
 			emitter.emitInterfaceDispatcher(fn);
 		} else if (fn._isMapHelper) {

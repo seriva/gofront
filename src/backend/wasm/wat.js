@@ -96,6 +96,26 @@ function formatInstruction(inst) {
 		}
 		case "throw":
 			return `${op} ${inst.tagIndex ?? inst.index ?? 0}`;
+		case "throw_ref":
+			return "throw_ref";
+		case "try_table": {
+			const bt = inst.blockType ?? inst.resultType;
+			const res = bt && bt !== "void" ? ` (result ${formatValType(bt)})` : "";
+			const catches = (inst.catches ?? [])
+				.map((c) => {
+					const k = c.kind ?? c.op;
+					if (k === "catch")
+						return `(catch ${c.tagIndex ?? 0} ${c.label ?? 0})`;
+					if (k === "catch_ref")
+						return `(catch_ref ${c.tagIndex ?? 0} ${c.label ?? 0})`;
+					if (k === "catch_all") return `(catch_all ${c.label ?? 0})`;
+					if (k === "catch_all_ref") return `(catch_all_ref ${c.label ?? 0})`;
+					return "";
+				})
+				.filter(Boolean)
+				.join(" ");
+			return `${op}${res}${catches ? ` ${catches}` : ""}`;
+		}
 		case "struct.new":
 			return `struct.new ${inst.typeIndex !== undefined ? `$t${inst.typeIndex}` : 0}`;
 		case "struct.get":

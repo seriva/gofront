@@ -101,6 +101,8 @@ export const ValType = {
 	nullref: 0x71,
 	nullfuncref: 0x73,
 	nullexternref: 0x72,
+	exnref: 0x69,
+	nullexnref: 0x75,
 };
 
 export function encodeValType(type) {
@@ -153,6 +155,7 @@ const OPCODES = {
 	if: 0x04,
 	else: 0x05,
 	throw: 0x08,
+	throw_ref: 0x0a,
 	end: 0x0b,
 	br: 0x0c,
 	br_if: 0x0d,
@@ -164,6 +167,7 @@ const OPCODES = {
 	return_call_indirect: 0x13,
 	call_ref: 0x14,
 	return_call_ref: 0x15,
+	try_table: 0x1f,
 	drop: 0x1a,
 	select: 0x1b,
 
@@ -424,6 +428,40 @@ export function encodeInstruction(inst) {
 
 			case "throw":
 				return [byte, ...encodeU32LEB(inst.tagIndex ?? inst.index ?? 0)];
+
+			case "throw_ref":
+				return [byte];
+
+			case "try_table": {
+				const blockTypeBytes = encodeBlockType(
+					inst.blockType ?? inst.resultType,
+				);
+				const catches = inst.catches ?? [];
+				const catchBytes = encodeVector(catches, (c) => {
+					const kind = c.kind ?? c.op;
+					switch (kind) {
+						case "catch":
+							return [
+								0x00,
+								...encodeU32LEB(c.tagIndex ?? c.tag ?? 0),
+								...encodeU32LEB(c.label ?? c.depth ?? 0),
+							];
+						case "catch_ref":
+							return [
+								0x01,
+								...encodeU32LEB(c.tagIndex ?? c.tag ?? 0),
+								...encodeU32LEB(c.label ?? c.depth ?? 0),
+							];
+						case "catch_all":
+							return [0x02, ...encodeU32LEB(c.label ?? c.depth ?? 0)];
+						case "catch_all_ref":
+							return [0x03, ...encodeU32LEB(c.label ?? c.depth ?? 0)];
+						default:
+							throw new Error(`Unknown catch kind: ${kind}`);
+					}
+				});
+				return [byte, ...blockTypeBytes, ...catchBytes];
+			}
 
 			case "call":
 			case "return_call":

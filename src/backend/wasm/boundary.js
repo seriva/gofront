@@ -1010,7 +1010,15 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 	const targ = (v) => { targs.push(v); };
 	const env = {
 		"panicTag": tag,
-		"panic": (msg) => { throw new Error(String(msg)); },
+		"panic": (msg) => {
+			let str;
+			try {
+				str = String(msg);
+			} catch {
+				str = "[panic object]";
+			}
+			throw new Error(str);
+		},
 		"str": (i) => stringTable[i] ?? "",
 		"str_len": (s) => (s ? s.length : 0),
 		"str_concat": (a, b) => (a ?? "") + (b ?? ""),
@@ -1169,7 +1177,9 @@ export function generateFacade(
 				.map((d, i) => inExpr(d, `__r[${i}]`))
 				.join(", ")}];`;
 		const sig = ["fn", ...names].join(", ");
-		out.push(`${P}env["__invoke$${key}"] = (${sig}) => { ${body} };`);
+		out.push(
+			`${P}env["__invoke$${key}"] = (${sig}) => { try { ${body} } catch (__e) { if (__w && __w.__push_panic) __w.__push_panic(__e.message ?? String(__e)); throw __e; } };`,
+		);
 	}
 	out.push(
 		`const __w = await ${P}load(${JSON.stringify(stringTable)}, ${P}env);`,
