@@ -317,11 +317,7 @@ example/webgl/
 ### Build and run
 
 ```sh
-npm run build:simple      # → example/simple/app.js
-npm run build:reactive    # → example/reactive/app.js
-npm run build:gom         # → example/gom/app.js
-npm run build:templ       # → example/templ/app.js
-npm run build:webgl       # → example/webgl/app.js
+npm run build             # compile all example applications
 # open the respective index.html in a browser
 ```
 
@@ -385,7 +381,7 @@ The compiler analyzes both sides of the boundary and synthesizes a facade into `
 
 ### Real-World Benchmark: 3D Raycasting
 
-Splitting an app into high-level JavaScript orchestration and low-level WebAssembly compute delivers the best of both worlds. On a real-world Möller–Trumbore raycast benchmark (131,072 triangles, 100,000 rays; run via `npm run bench:raycast`):
+Splitting an app into high-level JavaScript orchestration and low-level WebAssembly compute delivers the best of both worlds. On a real-world Möller–Trumbore raycast benchmark (131,072 triangles, 100,000 rays; run via `npm run bench`):
 
 | Target | Throughput | Allocation | Engine Stability |
 | :--- | :--- | :--- | :--- |
@@ -430,13 +426,9 @@ Design documents for planned features are organised by release under `docs/v*/`
 ## Tests
 
 ```sh
-npm run test:unit          # unit tests only (~1600 tests, no browser required)
-npm run test:perf          # zero-allocation benchmark (100k ray-triangle intersections, 0 bytes/frame)
-npm run bench:raycast      # Möller–Trumbore raycast benchmark comparing pure JS vs hybrid WASM
-npm run test:examples      # GoFront-native unit tests across all example apps
-npm run test:examples:dom  # same, with JSDOM for DOM/gom/templ component testing
-npm run test:e2e           # E2E tests (Playwright, headless Chromium)
-npm run test:all           # all of the above
+npm test                  # unit, zero-alloc perf, and example tests (~1600+ tests, no browser required)
+npm run test:e2e          # E2E browser tests (Playwright, headless Chromium)
+npm run bench             # Möller–Trumbore raycast benchmark comparing pure JS vs hybrid WASM
 ```
 
 **Unit tests** (~1,600+) cover language features, type errors, edge cases, DOM (jsdom),

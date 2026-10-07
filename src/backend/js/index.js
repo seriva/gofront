@@ -726,22 +726,27 @@ export class CodeGen {
 	}
 
 	_withNamedReturns(decl, fn) {
+		const prevDecl = this._currentDecl;
+		this._currentDecl = decl;
 		const named = decl.returnType?._namedReturns;
 		const prev = this.namedReturnVars;
 		if (named) {
 			// Emit zero-value declarations for named return vars
-			for (const { name, type } of named) {
-				if (name) {
-					this._markOwnership(name, true);
-					this.line(`let ${name} = ${this.zeroValueForTypeNode(type)};`);
-				}
+			for (let i = 0; i < named.length; i++) {
+				const { name, type } = named[i];
+				const varName = !name || name === "_" ? `__ret_blank$${i}` : name;
+				this._markOwnership(varName, true);
+				this.line(`let ${varName} = ${this.zeroValueForTypeNode(type)};`);
 			}
-			this.namedReturnVars = named.map((r) => r.name).filter(Boolean);
+			this.namedReturnVars = named.map((r, i) =>
+				!r.name || r.name === "_" ? `__ret_blank$${i}` : r.name,
+			);
 		} else {
 			this.namedReturnVars = null;
 		}
 		fn();
 		this.namedReturnVars = prev;
+		this._currentDecl = prevDecl;
 	}
 
 	// Emit a function body, wrapping in try/catch/finally for defer if needed.
@@ -752,16 +757,28 @@ export class CodeGen {
 		}
 		this.line("const __defers = [];");
 		this.line("let __panic = null;");
+		this.line("let __hasPanic = false;");
 		this.line("try {");
 		this.indented(() => this.genBlock(body));
 		this.line("} catch (__err) {");
-		this.indented(() => this.line("__panic = __err;"));
+		this.indented(() => {
+			this.line("__hasPanic = true;");
+			this.line("__panic = __err;");
+		});
 		this.line("} finally {");
 		this.indented(() => {
 			this.line(
 				"for (let __i = __defers.length - 1; __i >= 0; __i--) __defers[__i]();",
 			);
-			this.line("if (__panic !== null) throw __panic;");
+			this.line("if (__hasPanic && __panic !== null) throw __panic;");
+			if (this.namedReturnVars?.length > 0) {
+				const vars = this.namedReturnVars;
+				this.line(
+					vars.length === 1
+						? `return ${vars[0]};`
+						: `return [${vars.join(", ")}];`,
+				);
+			}
 		});
 		this.line("}");
 		// If a recover() cleared __panic, execution reaches here.
@@ -772,6 +789,10 @@ export class CodeGen {
 				vars.length === 1
 					? `return ${vars[0]};`
 					: `return [${vars.join(", ")}];`,
+			);
+		} else if (this._currentDecl?.returnType) {
+			this.line(
+				`return ${this.zeroValueForTypeNode(this._currentDecl.returnType)};`,
 			);
 		}
 	}

@@ -95,7 +95,7 @@ func Render() {
 	assertContains(msg, "package 'gom' is not available in wasm packages");
 });
 
-test("wasm package rejects defer statements with planned message", () => {
+test("wasm package allows defer statements", () => {
 	const src = `//gofront:target wasm
 package physics
 
@@ -104,12 +104,7 @@ func Cleanup() {
 }
 `;
 	const { errors } = compile(src);
-	assert(errors.length > 0);
-	const msg = errors.map((e) => e.message).join("\n");
-	assertContains(
-		msg,
-		"'defer' is not yet supported in wasm packages (planned)",
-	);
+	assert(!errors || errors.length === 0);
 });
 
 test("wasm package rejects async function declarations and await", () => {

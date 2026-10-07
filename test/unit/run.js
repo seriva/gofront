@@ -63,6 +63,7 @@ import "./wasm/boundary.test.js";
 import "./wasm/interfaces.test.js";
 import "./wasm/generics.test.js";
 import "./wasm/maps.test.js";
+import "./wasm/defer_recover.test.js";
 
 import { summarize } from "./helpers.js";
 

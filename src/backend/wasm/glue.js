@@ -30,6 +30,14 @@ const NIL_DEREF_PATTERNS = [
 	"null dereference", // JavaScriptCore
 ];
 
+function safeString(v) {
+	try {
+		return String(v);
+	} catch {
+		return "[panic object]";
+	}
+}
+
 function isNilDerefTrap(e) {
 	if (
 		typeof WebAssembly !== "undefined" &&
@@ -67,9 +75,12 @@ export function instantiateWasm(
 					try {
 						return val(...cur);
 					} catch (e) {
+						if (instance.exports.__panic) {
+							instance.exports.__panic.value = null;
+						}
 						if (tag && e instanceof WebAssembly.Exception && e.is(tag)) {
 							const msg = e.getArg(tag, 0);
-							throw new Error(String(msg));
+							throw new Error(safeString(msg));
 						}
 						if (isNilDerefTrap(e)) {
 							throw new Error(
@@ -91,7 +102,7 @@ export function instantiateWasm(
 											inner.is(tag)
 										) {
 											const msg = inner.getArg(tag, 0);
-											throw new Error(String(msg));
+											throw new Error(safeString(msg));
 										}
 										if (isNilDerefTrap(inner)) {
 											throw new Error(

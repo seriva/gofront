@@ -55,6 +55,9 @@ var __ifp = __ifp || function(x) {
   return x;
 };
 var __sprintf = __sprintf || function(f, ...a) {
+  if (typeof f !== "string" || !/%[#+\- 0]*[0-9]*\.?([0-9]*)[sdvftxXqobeEgGw%]/.test(f)) {
+    return (f === undefined && a.length === 0) ? "" : [f, ...a].map(v => v == null ? "<nil>" : typeof v === "object" ? (typeof v.Error === "function" ? v.Error() : JSON.stringify(v)) : String(v)).join(" ");
+  }
   let i = 0;
   return f.replace(/%([#+\- 0]*)([0-9]*)\.?([0-9]*)[sdvftxXqobeEgGw%]/g, (m) => {
     if (m === "%%") return "%";
@@ -208,8 +211,12 @@ function validateTodo(text) {
 async function submitInput(input, inputValue) {
   const __defers = [];
   let __panic = null;
+  let __hasPanic = false;
   try {
-    __defers.push(() => { input.focus(); });
+    let __defrecv$1 = input;
+    __defers.push(() => { (function() {
+      __defrecv$1.focus();
+    })(); });
     let err = validateTodo(inputValue.get());
     if (err != null) {
       errorSignal.set(err.Error());
@@ -231,10 +238,11 @@ async function submitInput(input, inputValue) {
     }
     await triggerSave();
   } catch (__err) {
+    __hasPanic = true;
     __panic = __err;
   } finally {
     for (let __i = __defers.length - 1; __i >= 0; __i--) __defers[__i]();
-    if (__panic !== null) throw __panic;
+    if (__hasPanic && __panic !== null) throw __panic;
   }
 }
 
@@ -667,6 +675,7 @@ function safeJsonParse(raw) {
   let err = null;
   const __defers = [];
   let __panic = null;
+  let __hasPanic = false;
   try {
     __defers.push(() => { (function() {
       {
@@ -677,12 +686,15 @@ function safeJsonParse(raw) {
       }
     })(); });
     result = JSON.parse(raw);
-    return [result, null];
+    [result, err] = [result, null];
+    return [result, err];
   } catch (__err) {
+    __hasPanic = true;
     __panic = __err;
   } finally {
     for (let __i = __defers.length - 1; __i >= 0; __i--) __defers[__i]();
-    if (__panic !== null) throw __panic;
+    if (__hasPanic && __panic !== null) throw __panic;
+    return [result, err];
   }
   return [result, err];
 }

@@ -1,6 +1,7 @@
 // src/backend/wasm/emit.js
 // AST statements and expressions -> WebAssembly instructions.
 
+import { hasDefer } from "../../lower/functions.js";
 import { isIntRangeType, isRangeFor } from "../../lower/range.js";
 import {
 	getMapKeyValTypes,
@@ -101,6 +102,14 @@ export class FunctionEmitter {
 		}
 
 		this._initParams();
+
+		this.hasDefer = false;
+		this.namedReturnVars = null;
+		this.returnTempLocals = null;
+		this.defersLocalIndex = null;
+		this.panicExnLocalIndex = null;
+		this.hasPanicLocalIndex = null;
+		this.curClosureLocalIndex = null;
 	}
 
 	emitFunctionBody(body) {
@@ -115,6 +124,42 @@ export class FunctionEmitter {
 		this._boxMutatedParams();
 
 		this._cacheScratchGlobals();
+
+		const hasDef = hasDefer(body);
+		this.hasDefer = hasDef;
+
+		if (hasDef) {
+			this._emitFunctionBodyWithDefer(body);
+			return;
+		}
+
+		const namedReturns = this.funcDecl.returnType?._namedReturns;
+		if (namedReturns && namedReturns.length > 0) {
+			this.namedReturnVars = [];
+			for (let i = 0; i < namedReturns.length; i++) {
+				const r = namedReturns[i];
+				const isBlank = !r.name || r.name === "_";
+				const varName = isBlank ? `__ret_blank$${i}` : r.name;
+				const wType = this.toWasmType(r.type);
+				const localIdx = this.allocLocal(varName, wType, r.type, isBlank);
+				this.namedReturnVars.push({
+					name: varName,
+					localIdx,
+					type: wType,
+					goType: r.type,
+					isBlank,
+				});
+				this.emitZeroValue(r.type, wType);
+				const localInfo = this.locals.get(varName);
+				if (localInfo?.isBoxed) {
+					this.pushInstruction({
+						op: "struct.new",
+						typeIndex: localInfo.boxInfo.typeIndex,
+					});
+				}
+				this.pushInstruction({ op: "local.set", index: localIdx });
+			}
+		}
 
 		const needsOobBlock = this._needsOobBlock(body);
 		if (needsOobBlock) {
@@ -141,6 +186,291 @@ export class FunctionEmitter {
 			});
 			this.pushInstruction("unreachable");
 		}
+	}
+
+	_emitFunctionBodyWithDefer(body) {
+		const namedReturns = this.funcDecl.returnType?._namedReturns;
+		if (namedReturns && namedReturns.length > 0) {
+			this.namedReturnVars = [];
+			for (let i = 0; i < namedReturns.length; i++) {
+				const r = namedReturns[i];
+				const isBlank = !r.name || r.name === "_";
+				const varName = isBlank ? `__ret_blank$${i}` : r.name;
+				const wType = this.toWasmType(r.type);
+				const localIdx = this.allocLocal(varName, wType, r.type, isBlank);
+				this.namedReturnVars.push({
+					name: varName,
+					localIdx,
+					type: wType,
+					goType: r.type,
+					isBlank,
+				});
+				this.emitZeroValue(r.type, wType);
+				const localInfo = this.locals.get(varName);
+				if (localInfo?.isBoxed) {
+					this.pushInstruction({
+						op: "struct.new",
+						typeIndex: localInfo.boxInfo.typeIndex,
+					});
+				}
+				this.pushInstruction({ op: "local.set", index: localIdx });
+			}
+		} else if (this.returnTypes.length > 0) {
+			this.returnTempLocals = [];
+			for (let i = 0; i < this.returnTypes.length; i++) {
+				const wType = this.returnTypes[i];
+				const localIdx = this.allocLocal(`__ret$${i}`, wType, null, true);
+				this.returnTempLocals.push(localIdx);
+				this.emitZeroValue(null, wType);
+				this.pushInstruction({ op: "local.set", index: localIdx });
+			}
+		}
+
+		const deferNodeTypeIndex = this.mod.getDeferNodeTypeIndex();
+		const deferClosureSig = { kind: "Signature", params: [], results: [] };
+		const deferClosureInfo = this.mod.getClosureType(deferClosureSig);
+
+		this.defersLocalIndex = this.allocLocal(
+			"__defers",
+			{ kind: "ref", nullable: true, typeIndex: deferNodeTypeIndex },
+			null,
+			true,
+		);
+		this.pushInstruction({ op: "ref.null", typeIndex: deferNodeTypeIndex });
+		this.pushInstruction({ op: "local.set", index: this.defersLocalIndex });
+
+		this.panicExnLocalIndex = this.allocLocal(
+			"__panicExn",
+			"exnref",
+			null,
+			true,
+		);
+
+		this.hasPanicLocalIndex = this.allocLocal("__hasPanic", "i32", null, true);
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: this.hasPanicLocalIndex });
+
+		this.curClosureLocalIndex = this.allocLocal(
+			"__curClosure",
+			{ kind: "ref", nullable: true, typeIndex: deferClosureInfo.typeIndex },
+			null,
+			true,
+		);
+
+		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushControl("runDefers");
+
+		this.pushInstruction({ op: "block", blockType: "exnref" });
+		this.pushControl("catchHandler");
+
+		this.pushInstruction({
+			op: "try_table",
+			blockType: "void",
+			catches: [{ kind: "catch_all_ref", label: 0 }],
+		});
+		this.pushControl("try_table");
+
+		const needsOobBlock = this._needsOobBlock(body);
+		if (needsOobBlock) {
+			this.pushInstruction({ op: "block", blockType: "void" });
+			this.pushControl("oob");
+		}
+
+		this.emitBlock(body);
+
+		if (needsOobBlock) {
+			const lastOp = this.body[this.body.length - 1]?.op;
+			if (lastOp !== "return" && lastOp !== "unreachable") {
+				this.pushInstruction({
+					op: "br",
+					depth: this.resolveBranchDepthToRole("runDefers"),
+				});
+			}
+			this.pushInstruction("end");
+
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getBoundsPanicFuncIndex(),
+			});
+			this.pushInstruction("unreachable");
+		}
+
+		// Close try_table
+		this.pushInstruction("end");
+
+		// If execution reached end of try_table without return, jump to runDefers
+		this.pushInstruction({
+			op: "br",
+			depth: this.resolveBranchDepthToRole("runDefers"),
+		});
+
+		// Close catchHandler
+		this.pushInstruction("end"); // stack has exnref!
+
+		// Catch handler body:
+		this.pushInstruction({ op: "local.set", index: this.panicExnLocalIndex });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction({ op: "local.set", index: this.hasPanicLocalIndex });
+
+		// Close runDefers block
+		this.pushInstruction("end");
+
+		// Run defers loop
+		this.emitRunDefers();
+
+		// Check if unrecovered panic
+		this.emitCheckUnrecoveredPanic();
+
+		// Return values
+		if (this.namedReturnVars?.length > 0) {
+			for (const nr of this.namedReturnVars) {
+				const loc = this.locals.get(nr.name);
+				if (loc.isBoxed) {
+					this.pushInstruction({ op: "local.get", index: loc.index });
+					this.pushInstruction({
+						op: "struct.get",
+						typeIndex: loc.boxInfo.typeIndex,
+						fieldIndex: 0,
+					});
+				} else {
+					this.pushInstruction({ op: "local.get", index: loc.index });
+				}
+			}
+			this.pushInstruction("return");
+		} else if (this.returnTempLocals?.length > 0) {
+			for (const retLoc of this.returnTempLocals) {
+				this.pushInstruction({ op: "local.get", index: retLoc });
+			}
+			this.pushInstruction("return");
+		} else {
+			this.pushInstruction("return");
+		}
+	}
+
+	emitRunDefers() {
+		const deferNodeTypeIndex = this.mod.getDeferNodeTypeIndex();
+		const deferClosureSig = { kind: "Signature", params: [], results: [] };
+		const deferClosureInfo = this.mod.getClosureType(deferClosureSig);
+
+		this.pushInstruction({ op: "loop", blockType: "void" });
+		this.pushControl("deferLoop");
+		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushControl("exitDefers");
+
+		// If defers is null -> break out of loop
+		this.pushInstruction({ op: "local.get", index: this.defersLocalIndex });
+		this.pushInstruction({ op: "ref.is_null" });
+		this.pushInstruction({ op: "br_if", depth: 0 }); // break to exitDefers
+
+		// curClosure = defers.fn (field 0)
+		this.pushInstruction({ op: "local.get", index: this.defersLocalIndex });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: deferNodeTypeIndex,
+			fieldIndex: 0,
+		});
+		this.pushInstruction({ op: "local.set", index: this.curClosureLocalIndex });
+
+		// defers = defers.next (field 1)
+		this.pushInstruction({ op: "local.get", index: this.defersLocalIndex });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: deferNodeTypeIndex,
+			fieldIndex: 1,
+		});
+		this.pushInstruction({ op: "local.set", index: this.defersLocalIndex });
+
+		// Call curClosure: curClosure.fn(curClosure.env)
+		this.pushInstruction({ op: "local.get", index: this.curClosureLocalIndex });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: deferClosureInfo.typeIndex,
+			fieldIndex: 1,
+		});
+		this.pushInstruction({ op: "local.get", index: this.curClosureLocalIndex });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: deferClosureInfo.typeIndex,
+			fieldIndex: 0,
+		});
+		this.pushInstruction({
+			op: "call_ref",
+			typeIndex: deferClosureInfo.funcTypeIndex,
+		});
+
+		// Continue loop (br 1 = deferLoop)
+		this.pushInstruction({ op: "br", depth: 1 });
+
+		this.pushInstruction("end");
+		this.pushInstruction("end");
+	}
+
+	emitCheckUnrecoveredPanic() {
+		const panicNodeTypeIndex = this.mod.getPanicNodeTypeIndex();
+		const panicGlobal = this.mod.getPanicGlobalIndex();
+
+		// if (hasPanic)
+		this.pushInstruction({ op: "local.get", index: this.hasPanicLocalIndex });
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushControl("ifHasPanic");
+
+		// if (__panic != null)
+		this.pushInstruction({ op: "global.get", index: panicGlobal });
+		this.pushInstruction({ op: "ref.is_null" });
+		this.pushInstruction({ op: "i32.eqz" });
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushControl("ifHasNode");
+
+		// if (__panic.recovered == 1)
+		this.pushInstruction({ op: "global.get", index: panicGlobal });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: panicNodeTypeIndex,
+			fieldIndex: 1, // recovered
+		});
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction({ op: "i32.eq" });
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushControl("ifRecovered");
+
+		// Pop recovered node: __panic = __panic.prev
+		this.pushInstruction({ op: "global.get", index: panicGlobal });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: panicNodeTypeIndex,
+			fieldIndex: 2, // prev
+		});
+		this.pushInstruction({ op: "global.set", index: panicGlobal });
+
+		this.pushInstruction("else");
+
+		// Still unrecovered! Rethrow!
+		this.pushInstruction({ op: "local.get", index: this.panicExnLocalIndex });
+		this.pushInstruction({ op: "throw_ref" });
+
+		this.pushInstruction("end"); // ifRecovered
+
+		this.pushInstruction("else");
+
+		// __panic is null but hasPanic was 1 (e.g. unhandled host exception)
+		this.pushInstruction({ op: "local.get", index: this.panicExnLocalIndex });
+		this.pushInstruction({ op: "throw_ref" });
+
+		this.pushInstruction("end"); // ifHasNode
+
+		this.pushInstruction("end"); // ifHasPanic
+	}
+
+	emitDeferStmt(stmt) {
+		const funcLit = stmt.call.func;
+		this.emitFuncLit(funcLit);
+		// Stack has closure struct: (ref $deferClosure)
+		this.pushInstruction({ op: "local.get", index: this.defersLocalIndex });
+		this.pushInstruction({
+			op: "struct.new",
+			typeIndex: this.mod.getDeferNodeTypeIndex(),
+		});
+		this.pushInstruction({ op: "local.set", index: this.defersLocalIndex });
 	}
 
 	_cacheScratchGlobals() {
@@ -2520,7 +2850,7 @@ export class FunctionEmitter {
 	// that never call pushControl (struct equality, string slicing, ...).
 	pushInstruction(inst) {
 		const op = typeof inst === "string" ? inst : inst.op;
-		if (op === "block" || op === "loop" || op === "if") {
+		if (op === "block" || op === "loop" || op === "if" || op === "try_table") {
 			this.controlStack.push({ op, role: null, label: null });
 		} else if (op === "end") {
 			this.controlStack.pop();
@@ -2565,6 +2895,16 @@ export class FunctionEmitter {
 		for (let i = this.controlStack.length - 1; i >= 0; i--) {
 			const ctrl = this.controlStack[i];
 			if (ctrl.role === "oob") {
+				return this.controlStack.length - 1 - i;
+			}
+		}
+		return null;
+	}
+
+	resolveBranchDepthToRole(targetRole) {
+		for (let i = this.controlStack.length - 1; i >= 0; i--) {
+			const ctrl = this.controlStack[i];
+			if (ctrl.role === targetRole) {
 				return this.controlStack.length - 1 - i;
 			}
 		}
@@ -2616,6 +2956,10 @@ export class FunctionEmitter {
 
 			case "BranchStmt":
 				this.emitBranchStmt(stmt);
+				break;
+
+			case "DeferStmt":
+				this.emitDeferStmt(stmt);
 				break;
 
 			case "ExprStmt":
@@ -5032,6 +5376,101 @@ export class FunctionEmitter {
 
 	emitReturnStmt(stmt) {
 		const values = stmt.values ?? [];
+		if (this.hasDefer) {
+			if (this.namedReturnVars?.length > 0) {
+				if (values.length === 0) {
+					// Naked return: named return vars already hold their values
+				} else if (values.length === 1 && this.namedReturnVars.length > 1) {
+					// Multi-value call: leaves results on stack
+					this.emitExpr(values[0]);
+					for (let i = this.namedReturnVars.length - 1; i >= 0; i--) {
+						this._assignToNamedReturnVar(this.namedReturnVars[i]);
+					}
+				} else {
+					// Evaluate all values into temporary locals first
+					const temps = [];
+					for (let i = 0; i < values.length; i++) {
+						const val = values[i];
+						const targetWType = this.returnTypes[i] ?? null;
+						const isValStruct =
+							isStructType(val._type, this.mod.checker, this.mod) &&
+							!isPointerToStruct(val._type, this.mod.checker, this.mod);
+						const isFresh =
+							val.kind === "CompositeLit" ||
+							(val.kind === "UnaryExpr" && val.op === "*");
+						this.emitExpr(val, targetWType);
+						if (isValStruct && !isFresh) {
+							const sInfo = this._resolveStructInfo(val);
+							if (sInfo) {
+								this.emitCloneStruct(sInfo, targetWType);
+							}
+						}
+						const tmp = this.acquireTemp(targetWType);
+						this.pushInstruction({ op: "local.set", index: tmp });
+						temps.push({ tmp, type: targetWType });
+					}
+					for (let i = 0; i < temps.length; i++) {
+						this.pushInstruction({ op: "local.get", index: temps[i].tmp });
+						this._assignToNamedReturnVar(this.namedReturnVars[i]);
+						this.releaseTemp(temps[i].tmp, temps[i].type);
+					}
+				}
+			} else if (this.returnTempLocals?.length > 0) {
+				if (values.length === 1 && this.returnTempLocals.length > 1) {
+					this.emitExpr(values[0]);
+					for (let i = this.returnTempLocals.length - 1; i >= 0; i--) {
+						this.pushInstruction({
+							op: "local.set",
+							index: this.returnTempLocals[i],
+						});
+					}
+				} else {
+					for (let i = 0; i < values.length; i++) {
+						const val = values[i];
+						const targetWType = this.returnTypes[i] ?? null;
+						const isValStruct =
+							isStructType(val._type, this.mod.checker, this.mod) &&
+							!isPointerToStruct(val._type, this.mod.checker, this.mod);
+						const isFresh =
+							val.kind === "CompositeLit" ||
+							(val.kind === "UnaryExpr" && val.op === "*");
+						this.emitExpr(val, targetWType);
+						if (isValStruct && !isFresh) {
+							const sInfo = this._resolveStructInfo(val);
+							if (sInfo) {
+								this.emitCloneStruct(sInfo, targetWType);
+							}
+						}
+						this.pushInstruction({
+							op: "local.set",
+							index: this.returnTempLocals[i],
+						});
+					}
+				}
+			}
+			const depth = this.resolveBranchDepthToRole("runDefers");
+			this.pushInstruction({ op: "br", depth });
+			return;
+		}
+
+		if (values.length === 0 && this.namedReturnVars?.length > 0) {
+			for (const nr of this.namedReturnVars) {
+				const loc = this.locals.get(nr.name);
+				if (loc.isBoxed) {
+					this.pushInstruction({ op: "local.get", index: loc.index });
+					this.pushInstruction({
+						op: "struct.get",
+						typeIndex: loc.boxInfo.typeIndex,
+						fieldIndex: 0,
+					});
+				} else {
+					this.pushInstruction({ op: "local.get", index: loc.index });
+				}
+			}
+			this.pushInstruction("return");
+			return;
+		}
+
 		for (let i = 0; i < values.length; i++) {
 			const val = values[i];
 			const targetWType = this.returnTypes[i] ?? null;
@@ -5050,6 +5489,24 @@ export class FunctionEmitter {
 			}
 		}
 		this.pushInstruction("return");
+	}
+
+	_assignToNamedReturnVar(nr) {
+		const loc = this.locals.get(nr.name);
+		if (loc.isBoxed) {
+			const valTmp = this.acquireTemp(loc.boxInfo.wType);
+			this.pushInstruction({ op: "local.set", index: valTmp });
+			this.pushInstruction({ op: "local.get", index: loc.index });
+			this.pushInstruction({ op: "local.get", index: valTmp });
+			this.pushInstruction({
+				op: "struct.set",
+				typeIndex: loc.boxInfo.typeIndex,
+				fieldIndex: 0,
+			});
+			this.releaseTemp(valTmp, loc.boxInfo.wType);
+		} else {
+			this.pushInstruction({ op: "local.set", index: loc.index });
+		}
 	}
 
 	emitExprStmt(stmt) {
@@ -6914,17 +7371,37 @@ export class FunctionEmitter {
 		const funcIdx = this.mod.getStringImportIndex();
 		this.pushInstruction({ op: "i32.const", value: strIdx });
 		this.pushInstruction({ op: "call", funcIndex: funcIdx });
+		this.pushInstruction("any.convert_extern");
 		this.emitPanicThrow();
 	}
 
-	// Consumes the externref message on the stack and raises the panic via
+	// Consumes the anyref message on the stack, pushes a PanicNode, and raises the panic via
 	// `env.panic`; `unreachable` tells the validator control never returns.
 	emitPanicThrow() {
+		const panicNodeTypeIndex = this.mod.getPanicNodeTypeIndex();
+		const panicGlobal = this.mod.getPanicGlobalIndex();
+		const tmpVal = this.acquireTemp("anyref");
+		this.pushInstruction({ op: "local.set", index: tmpVal });
+
+		// Push PanicNode: (struct.new $PanicNode val (i32.const 0) (global.get panicGlobal))
+		this.pushInstruction({ op: "local.get", index: tmpVal });
+		this.pushInstruction({ op: "i32.const", value: 0 }); // recovered = 0
+		this.pushInstruction({ op: "global.get", index: panicGlobal }); // prev
+		this.pushInstruction({
+			op: "struct.new",
+			typeIndex: panicNodeTypeIndex,
+		});
+		this.pushInstruction({ op: "global.set", index: panicGlobal });
+
+		// Prepare externref for env.panic
+		this.pushInstruction({ op: "local.get", index: tmpVal });
+		this.pushInstruction("extern.convert_any");
 		this.pushInstruction({
 			op: "call",
 			funcIndex: this.mod.getPanicImportIndex(),
 		});
 		this.pushInstruction("unreachable");
+		this.releaseTemp(tmpVal, "anyref");
 	}
 
 	_getSliceElemType(t) {
@@ -7651,25 +8128,111 @@ export class FunctionEmitter {
 
 	_emitBuiltinPanic(call) {
 		const { args } = call;
-		const arg = args[0];
+		const arg = args?.[0];
 		if (!arg) {
 			const strIdx = this.mod.internString("");
 			const funcIdx = this.mod.getStringImportIndex();
 			this.pushInstruction({ op: "i32.const", value: strIdx });
 			this.pushInstruction({ op: "call", funcIndex: funcIdx });
-		} else if (
-			(arg.kind === "BasicLit" && arg.litKind === "STRING") ||
-			toWasmType(arg._type, this.mod.checker) === "externref"
-		) {
-			this.emitExpr(arg, "externref");
+			this.pushInstruction("any.convert_extern");
 		} else {
-			const strVal = arg.value !== undefined ? String(arg.value) : "panic";
-			const strIdx = this.mod.internString(strVal);
-			const funcIdx = this.mod.getStringImportIndex();
-			this.pushInstruction({ op: "i32.const", value: strIdx });
-			this.pushInstruction({ op: "call", funcIndex: funcIdx });
+			const goType = this._resolveExprGoType(arg);
+			const wType = toWasmType(goType, this.mod.checker);
+			if (
+				isStringType(goType, this.mod.checker) ||
+				(arg.kind === "BasicLit" && arg.litKind === "STRING") ||
+				wType === "externref"
+			) {
+				this.emitExpr(arg, "externref");
+				this.pushInstruction("any.convert_extern");
+			} else if (wType === "i64") {
+				this.emitExpr(arg, "i64");
+				this.pushInstruction({
+					op: "call",
+					funcIndex: this.mod.getStrFromI64ImportIndex(),
+				});
+				this.pushInstruction("any.convert_extern");
+			} else if (wType === "i32") {
+				this.emitExpr(arg, "i32");
+				this.pushInstruction({
+					op: "call",
+					funcIndex: this.mod.getStrFromI32ImportIndex(),
+				});
+				this.pushInstruction("any.convert_extern");
+			} else if (wType === "f64" || wType === "f32") {
+				if (wType === "f32") {
+					this.emitExpr(arg, "f32");
+					this.pushInstruction("f64.promote_f32");
+				} else {
+					this.emitExpr(arg, "f64");
+				}
+				this.pushInstruction({
+					op: "call",
+					funcIndex: this.mod.getStrFromF64ImportIndex(),
+				});
+				this.pushInstruction("any.convert_extern");
+			} else {
+				this.emitExpr(arg, "anyref");
+			}
 		}
 		this.emitPanicThrow();
+	}
+
+	_emitBuiltinRecover(_call, targetWasmType) {
+		const panicNodeTypeIndex = this.mod.getPanicNodeTypeIndex();
+		const panicGlobal = this.mod.getPanicGlobalIndex();
+		const tmp = this.acquireTemp("anyref");
+
+		// tmp = null
+		this.pushInstruction({ op: "ref.null", heapType: "any" });
+		this.pushInstruction({ op: "local.set", index: tmp });
+
+		// if (__panic != null)
+		this.pushInstruction({ op: "global.get", index: panicGlobal });
+		this.pushInstruction({ op: "ref.is_null" });
+		this.pushInstruction({ op: "i32.eqz" });
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushControl("ifHasPanicNode");
+
+		// if (__panic.recovered == 0)
+		this.pushInstruction({ op: "global.get", index: panicGlobal });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: panicNodeTypeIndex,
+			fieldIndex: 1, // recovered
+		});
+		this.pushInstruction({ op: "i32.eqz" });
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushControl("ifNotYetRecovered");
+
+		// __panic.recovered = 1
+		this.pushInstruction({ op: "global.get", index: panicGlobal });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction({
+			op: "struct.set",
+			typeIndex: panicNodeTypeIndex,
+			fieldIndex: 1,
+		});
+
+		// tmp = __panic.val
+		this.pushInstruction({ op: "global.get", index: panicGlobal });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: panicNodeTypeIndex,
+			fieldIndex: 0, // val
+		});
+		this.pushInstruction({ op: "local.set", index: tmp });
+
+		this.pushInstruction("end"); // ifNotYetRecovered
+
+		this.pushInstruction("end"); // ifHasPanicNode
+
+		this.pushInstruction({ op: "local.get", index: tmp });
+		this.releaseTemp(tmp, "anyref");
+
+		if (targetWasmType === "externref") {
+			this.pushInstruction("extern.convert_any");
+		}
 	}
 
 	_emitBuiltinCall(call, targetWasmType) {
@@ -7706,6 +8269,9 @@ export class FunctionEmitter {
 				return true;
 			case "panic":
 				this._emitBuiltinPanic(call);
+				return true;
+			case "recover":
+				this._emitBuiltinRecover(call, targetWasmType);
 				return true;
 			default:
 				return false;
