@@ -54,10 +54,31 @@ var __ifp = __ifp || function(x) {
     Object.defineProperty(x, "__p", { value: true, configurable: true });
   return x;
 };
-var __sprintf = __sprintf || function(f, ...a) {
-  if (typeof f !== "string" || !/%[#+\- 0]*[0-9]*\.?([0-9]*)[sdvftxXqobeEgGw%]/.test(f)) {
-    return (f === undefined && a.length === 0) ? "" : [f, ...a].map(v => v == null ? "<nil>" : typeof v === "object" ? (typeof v.Error === "function" ? v.Error() : JSON.stringify(v)) : String(v)).join(" ");
+var __gopanic = __gopanic || { stack: [], armed: false };
+var __runDefers = __runDefers || function(defers, frame) {
+  for (let i = defers.length - 1; i >= 0; i--) {
+    __gopanic.armed = true;
+    try { defers[i](); }
+    catch (e) {
+      if (frame.pn !== null) __gopanic.stack.pop();
+      frame.pn = { err: e, recovered: false };
+      __gopanic.stack.push(frame.pn);
+    } finally { __gopanic.armed = false; }
   }
+  if (frame.pn !== null) {
+    __gopanic.stack.pop();
+    if (!frame.pn.recovered) throw frame.pn.err;
+  }
+};
+var __recover = __recover || function(ok) {
+  if (!ok) return null;
+  const s = __gopanic.stack;
+  const top = s.length > 0 ? s[s.length - 1] : null;
+  if (top === null || top.recovered) return null;
+  top.recovered = true;
+  return top.err?.message ?? String(top.err);
+};
+var __sprintf = __sprintf || function(f, ...a) {
   let i = 0;
   return f.replace(/%([#+\- 0]*)([0-9]*)\.?([0-9]*)[sdvftxXqobeEgGw%]/g, (m) => {
     if (m === "%%") return "%";
@@ -210,11 +231,11 @@ function validateTodo(text) {
 
 async function submitInput(input, inputValue) {
   const __defers = [];
-  let __panic = null;
-  let __hasPanic = false;
+  const __frame = { pn: null };
   try {
     let __defrecv$1 = input;
     __defers.push(() => { (function() {
+      const __recoverOk = __gopanic.armed; __gopanic.armed = false;
       __defrecv$1.focus();
     })(); });
     let err = validateTodo(inputValue.get());
@@ -238,11 +259,10 @@ async function submitInput(input, inputValue) {
     }
     await triggerSave();
   } catch (__err) {
-    __hasPanic = true;
-    __panic = __err;
+    __frame.pn = { err: __err, recovered: false };
+    __gopanic.stack.push(__frame.pn);
   } finally {
-    for (let __i = __defers.length - 1; __i >= 0; __i--) __defers[__i]();
-    if (__hasPanic && __panic !== null) throw __panic;
+    __runDefers(__defers, __frame);
   }
 }
 
@@ -674,12 +694,12 @@ function safeJsonParse(raw) {
   let result = null;
   let err = null;
   const __defers = [];
-  let __panic = null;
-  let __hasPanic = false;
+  const __frame = { pn: null };
   try {
     __defers.push(() => { (function() {
+      const __recoverOk = __gopanic.armed; __gopanic.armed = false;
       {
-        let r = (typeof __panic !== "undefined" && __panic !== null ? (() => { const __r = __panic.message ?? String(__panic); __panic = null; return __r; })() : null);
+        let r = __recover(__recoverOk);
         if (r != null) {
           err = __error(__sprintf("%v", r));
         }
@@ -689,11 +709,10 @@ function safeJsonParse(raw) {
     [result, err] = [result, null];
     return [result, err];
   } catch (__err) {
-    __hasPanic = true;
-    __panic = __err;
+    __frame.pn = { err: __err, recovered: false };
+    __gopanic.stack.push(__frame.pn);
   } finally {
-    for (let __i = __defers.length - 1; __i >= 0; __i--) __defers[__i]();
-    if (__hasPanic && __panic !== null) throw __panic;
+    __runDefers(__defers, __frame);
     return [result, err];
   }
   return [result, err];
