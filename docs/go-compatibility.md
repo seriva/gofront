@@ -37,6 +37,8 @@ divide-by-zero panics) — see the [hybrid guide](hybrid-wasm.md#strict-numeric-
 | Feature | GoFront | Go | Why |
 |---|---|---|---|
 | Map iteration order | Insertion-order (`Object.entries`) | Randomised | JS objects preserve insertion order. |
+| Map keys | Keys are stringified: struct keys collapse to `"[object Object]"`, `NaN` equals itself and `-0` equals `0` | Field-wise struct equality, `NaN != NaN` | JS objects only have string keys. `wasm` packages hash struct keys field-wise and follow Go's float key rules. |
+| `defer` / `recover()` | `try`/`finally` defer stack plus a panic stack; `recover()` only works when called directly by a deferred function; a panic inside a deferred function replaces the in-flight one | Same | Matches Go for the common cases; panic *values* are surfaced as `Error.message` strings. |
 | Integer arithmetic | IEEE 754 float64 semantics; `a + b` never wraps | Wraps at type width | All JS numbers are float64. Conversions do truncate: `uint8(300) == 44`, `int8(200) == -56`. |
 | Integer precision | Safe up to 2⁵³ | Full width per type (`int64` = 64 bits) | JS `number` limitation. |
 | `cap()` | Always equals `len()` | May exceed `len()` | JS arrays have no separate capacity. |
@@ -46,7 +48,6 @@ divide-by-zero panics) — see the [hybrid guide](hybrid-wasm.md#strict-numeric-
 | `range` over string | Rune integers via `.codePointAt()` | Runes (UTF-8 code points) | Close match — values are code points, but indices are sequential rune positions (0, 1, 2, …), not byte offsets. |
 | `len()` on strings | JS `.length` (UTF-16 code units) | Byte count (UTF-8) | Matching Go would require `TextEncoder` on every call. Use `utf8.RuneCountInString` for character counts. |
 | `error` type | Interface `{ Error() string }` with `__error` runtime objects | Interface `{ Error() string }` | Close match. Custom error types, `errors.Is`/`Unwrap`, `%w` wrapping all work. `toString()` added for JS string context compat. |
-| `defer` | `try`/`finally` with a defer stack | Runtime stack unwinding | Covers most cases but not identical to Go internals. |
 | Struct field tags | Parsed, silently discarded | Available via `reflect` | No reflection = no use for tag values. |
 | Pointers (`&x`, `*p`) | Struct pointers are the object itself; address-taken scalars are boxed as `{ value: T }`; slices and maps are references | True memory indirection | Shared mutation works for scalars and structs. **`&s.Field` and `&xs[i]` compile to a detached copy** — writes through such a pointer do not reach the original. |
 | Three-index slice (`a[lo:hi:max]`) | `max` is parsed but ignored | Sets result capacity | JS arrays have no capacity. |

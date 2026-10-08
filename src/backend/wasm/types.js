@@ -296,8 +296,9 @@ export function isMapType(goType, checker = null) {
 	return goType.kind === "map" || goType.kind === "MapType";
 }
 
+// Returns `{ keyType, valType }` (Go types) for a map type, or nulls.
 export function getMapKeyValTypes(goType, checker = null) {
-	if (!goType) return { keyGoType: null, valGoType: null };
+	if (!goType) return { keyType: null, valType: null };
 	if (goType.kind === "TypeName" || goType.kind === "Ident") {
 		const resolved = checker?.types?.get(goType.name);
 		if (resolved) return getMapKeyValTypes(resolved, checker);
@@ -309,14 +310,9 @@ export function getMapKeyValTypes(goType, checker = null) {
 		const key = goType.key ?? goType.keyType;
 		const val =
 			goType.value ?? goType.elem ?? goType.valueType ?? goType.valType;
-		return {
-			keyGoType: key,
-			valGoType: val,
-			keyType: key,
-			valType: val,
-		};
+		return { keyType: key, valType: val };
 	}
-	return { keyGoType: null, valGoType: null, keyType: null, valType: null };
+	return { keyType: null, valType: null };
 }
 
 export function isStringType(goType, checker = null) {

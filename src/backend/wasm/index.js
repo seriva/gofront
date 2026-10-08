@@ -2,7 +2,7 @@
 // WASM Backend compiler entry point: lowered AST + types -> Module IR -> binary / WAT.
 
 import { Lexer } from "../../lexer.js";
-import { lower, normalizeDefers } from "../../lower/index.js";
+import { lower } from "../../lower/index.js";
 import { Parser } from "../../parser/index.js";
 import { TypeChecker } from "../../typechecker/index.js";
 import {
@@ -645,6 +645,24 @@ export class ModuleEmitter {
 		return this.panicGlobalIndex;
 	}
 
+	// `__deferArmed` is set to 1 immediately before a deferred closure is
+	// invoked and cleared by that closure's prologue.  recover() only takes
+	// effect when the current frame observed the flag, which gives Go's
+	// "recover must be called directly by the deferred function" rule.
+	getDeferArmedGlobalIndex() {
+		if (this.deferArmedGlobalIndex !== undefined) {
+			return this.deferArmedGlobalIndex;
+		}
+		const gIdx = this.globals.length;
+		this.globals.push({
+			type: "i32",
+			mutable: true,
+			init: [{ op: "i32.const", value: 0 }],
+		});
+		this.deferArmedGlobalIndex = gIdx;
+		return gIdx;
+	}
+
 	getDeferNodeTypeIndex() {
 		if (this.deferNodeTypeIndex !== undefined) {
 			return this.deferNodeTypeIndex;
@@ -1068,13 +1086,12 @@ export class ModuleEmitter {
 		return this.nonLiteralConsts.has(name);
 	}
 
-	findInterfaceCandidates(ifaceType, methodName) {
+	// Interface method dispatch is a `ref.test` chain over every concrete type
+	// that declares `methodName` (no itabs); the static interface type is not
+	// needed to build the candidate list.
+	findInterfaceCandidates(_ifaceType, methodName) {
 		const candidates = [];
 		const seenKeys = new Set();
-		const _ifaceResolved =
-			this.checker?.resolveType?.(
-				ifaceType?.kind === "named" ? ifaceType.underlying : ifaceType,
-			) ?? ifaceType;
 
 		// 1. Struct types
 		for (const [sName, sInfo] of this.structTypes.entries()) {
@@ -1348,7 +1365,6 @@ export function compileWasmModule(
 	options = {},
 ) {
 	let progs = Array.isArray(programs) ? programs : [programs];
-	normalizeDefers(progs);
 	let resolvedChecker = checker;
 	let resolvedLowerResult = lowerResult;
 
@@ -1689,9 +1705,9 @@ export function compileWasmModule(
 			return;
 		}
 		if (node._type && isMapType(node._type, checker)) {
-			const { keyGoType, valGoType } = getMapKeyValTypes(node._type, checker);
-			if (keyGoType && valGoType) {
-				mod.getMapType(keyGoType, valGoType);
+			const { keyType, valType } = getMapKeyValTypes(node._type, checker);
+			if (keyType && valType) {
+				mod.getMapType(keyType, valType);
 			}
 		}
 		if (node.kind === "MapType") {

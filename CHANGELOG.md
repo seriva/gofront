@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- **`recover()` follows Go's scoping rules in both backends** — `recover()` only stops a panic when called directly by a deferred function (including `defer handlePanic()` and deferred method calls whose body calls `recover()`); a `recover()` reached through a helper or nested closure returns `nil`. A panic raised inside a deferred function replaces the in-flight panic. Earlier the JS backend's `recover()` returned the panic value from anywhere in the deferred call chain and the wasm backend disagreed.
+- **Deferred call evaluation** — receivers and arguments of a deferred call are evaluated at the `defer` statement, except for pointer-receiver methods on addressable values (`defer b.Add(1)`, `defer s.b.Add(1)`), which observe later mutations exactly as in Go. `defer` normalisation now runs once in `lower/` for both backends.
+- **`fmt.Print`/`fmt.Println`/`print`** — no longer treat the first operand as a format string; operands are joined like Go (`Println` with spaces, `Print` with spaces only between non-string operands). Use `Printf`/`Sprintf` for formatting.
+- **Nil interface method calls (strict / `both`)** — `x.Method()` on a nil interface value now panics with `runtime error: invalid memory address or nil pointer dereference` in the JS backend, matching wasm.
+
+### Fixed
+- **Wasm map keys** — struct keys hash and compare field-wise, `-0.0` and `+0.0` share a key, and `NaN` keys never match (Go semantics). Array and interface keys report a `(planned)` diagnostic instead of silently comparing by reference.
+- **Generic struct literals inside generic functions** — `Pair[K, V]{...}` inside a generic body is now monomorphised; the type-parameter substitution map was dropped on nested AST nodes.
+- **Type lookup shadowing** — a local *value* named like a type (`T := 5; var x T`) now reports `Unknown type 'T'` instead of resolving to the value's type.
+- **`maps.Keys`/`maps.Values`/`maps.Clone` and `slices.*` return types** are derived from the argument type instead of hardcoded lookups.
+
 ## [1.5.1] - 2026-10-06
 
 ### Added

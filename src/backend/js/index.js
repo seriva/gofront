@@ -19,7 +19,9 @@
 
 import {
 	computeEmbeddedStubs,
+	hasDirectRecover,
 	isReferenceType,
+	normalizeDefers,
 	scanAddressTaken,
 } from "../../lower/index.js";
 import { isComplex, isNumeric } from "../../typechecker/types.js";
@@ -34,6 +36,8 @@ import {
 	HELPER_IFACE_BOX,
 	HELPER_INJECT_STYLES,
 	HELPER_LEN,
+	HELPER_NIL_CALL,
+	HELPER_PANIC,
 	HELPER_PATH_CLEAN,
 	HELPER_S,
 	HELPER_SCLONE,
@@ -217,6 +221,10 @@ export class CodeGen {
 
 	generate(program, options = {}) {
 		const isTest = options.isTest ?? false;
+		// Defer lowering (argument/receiver hoisting, recover-target marking) is
+		// idempotent and owned by the backends: the wasm path runs it via
+		// `lower()`, the JS path here.
+		normalizeDefers(program);
 		// Ensure _pkgName is set on all decls (generateAll sets it for
 		// multi-file; for single-file compiles we derive it from the AST).
 		const pkgName = program.pkg?.name;
@@ -419,6 +427,8 @@ export class CodeGen {
 			[this._usesEqual, HELPER_EQUAL],
 			[this._usesCmul, HELPER_CMUL],
 			[this._usesCdiv, HELPER_CDIV],
+			[this._usesPanicRt, HELPER_PANIC],
+			[this._usesNilCall, HELPER_NIL_CALL],
 			[this._usesSprintf || needsTesting, HELPER_SPRINTF],
 			[this._usesError, HELPER_ERROR],
 			[this._usesErrorIs, HELPER_ERROR_IS],
@@ -661,7 +671,7 @@ export class CodeGen {
 					}
 				}
 				this._emitParamCopies(decl.params);
-				this._withNamedReturns(decl, () => this._genBody(decl.body));
+				this._withNamedReturns(decl, () => this._genBody(decl.body, decl));
 			}),
 		);
 		this._unwrappedRecv = prevUnwrapped;
@@ -718,7 +728,7 @@ export class CodeGen {
 		this._withFnCtx(decl.body, () =>
 			this.indented(() => {
 				this._emitParamCopies(decl.params);
-				this._withNamedReturns(decl, () => this._genBody(decl.body));
+				this._withNamedReturns(decl, () => this._genBody(decl.body, decl));
 			}),
 		);
 		this._boxedVars = prevBoxed;
@@ -750,27 +760,39 @@ export class CodeGen {
 	}
 
 	// Emit a function body, wrapping in try/catch/finally for defer if needed.
-	_genBody(body) {
+	// `fnNode` is the enclosing FuncDecl/MethodDecl/FuncLit; it decides whether
+	// the recover-arming prologue is needed (see HELPER_PANIC).
+	_genBody(body, fnNode = null) {
+		const prevRecoverOk = this._recoverOkInScope;
+		this._recoverOkInScope = false;
+		const isTarget = Boolean(fnNode?._isDeferTarget);
+		const forwards = isTarget && Boolean(fnNode._deferForward);
+		if (!forwards && (isTarget || hasDirectRecover(body))) {
+			this._usesPanicRt = true;
+			this.line(
+				"const __recoverOk = __gopanic.armed; __gopanic.armed = false;",
+			);
+			this._recoverOkInScope = true;
+		}
 		if (!body._hasDefer) {
 			this.genBlock(body);
+			this._recoverOkInScope = prevRecoverOk;
 			return;
 		}
+		this._usesPanicRt = true;
 		this.line("const __defers = [];");
-		this.line("let __panic = null;");
-		this.line("let __hasPanic = false;");
+		this.line("const __frame = { pn: null };");
 		this.line("try {");
 		this.indented(() => this.genBlock(body));
 		this.line("} catch (__err) {");
 		this.indented(() => {
-			this.line("__hasPanic = true;");
-			this.line("__panic = __err;");
+			this.line("__frame.pn = { err: __err, recovered: false };");
+			this.line("__gopanic.stack.push(__frame.pn);");
 		});
 		this.line("} finally {");
 		this.indented(() => {
-			this.line(
-				"for (let __i = __defers.length - 1; __i >= 0; __i--) __defers[__i]();",
-			);
-			this.line("if (__hasPanic && __panic !== null) throw __panic;");
+			// Runs defers LIFO and rethrows an unrecovered panic.
+			this.line("__runDefers(__defers, __frame);");
 			if (this.namedReturnVars?.length > 0) {
 				const vars = this.namedReturnVars;
 				this.line(
@@ -781,7 +803,7 @@ export class CodeGen {
 			}
 		});
 		this.line("}");
-		// If a recover() cleared __panic, execution reaches here.
+		// If a recover() cleared the panic, execution reaches here.
 		// Return named return vars so deferred mutations are visible to the caller.
 		if (this.namedReturnVars?.length > 0) {
 			const vars = this.namedReturnVars;
@@ -795,6 +817,7 @@ export class CodeGen {
 				`return ${this.zeroValueForTypeNode(this._currentDecl.returnType)};`,
 			);
 		}
+		this._recoverOkInScope = prevRecoverOk;
 	}
 
 	// Scan AST node for _addressTaken idents on scalars and populate _boxedVars.

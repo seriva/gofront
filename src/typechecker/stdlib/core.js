@@ -540,6 +540,14 @@ export function setupCoreGlobals(globals, types) {
 		},
 	});
 
+	// Slice helpers that return a slice of the same type as their first argument.
+	const sameSlice = (params, extra = {}) => ({
+		kind: "func",
+		params,
+		returns: [ANY],
+		_derivedReturn: "arg0",
+		...extra,
+	});
 	globals.define("slices", {
 		kind: "namespace",
 		name: "slices",
@@ -558,26 +566,16 @@ export function setupCoreGlobals(globals, types) {
 			Min: { kind: "func", params: [ANY], returns: [ANY] },
 			MaxFunc: { kind: "func", params: [ANY, ANY], returns: [ANY] },
 			MinFunc: { kind: "func", params: [ANY, ANY], returns: [ANY] },
-			Clone: { kind: "func", params: [ANY], returns: [ANY] },
-			Compact: { kind: "func", params: [ANY], returns: [ANY] },
-			CompactFunc: { kind: "func", params: [ANY, ANY], returns: [ANY] },
+			Clone: sameSlice([ANY]),
+			Compact: sameSlice([ANY]),
+			CompactFunc: sameSlice([ANY, ANY]),
 			Concat: { kind: "func", params: [ANY], returns: [ANY], variadic: true },
-			Delete: { kind: "func", params: [ANY, INT, INT], returns: [ANY] },
-			DeleteFunc: { kind: "func", params: [ANY, ANY], returns: [ANY] },
-			Insert: {
-				kind: "func",
-				params: [ANY, INT, ANY],
-				returns: [ANY],
-				variadic: true,
-			},
-			Replace: {
-				kind: "func",
-				params: [ANY, INT, INT, ANY],
-				returns: [ANY],
-				variadic: true,
-			},
-			Grow: { kind: "func", params: [ANY, INT], returns: [ANY] },
-			Clip: { kind: "func", params: [ANY], returns: [ANY] },
+			Delete: sameSlice([ANY, INT, INT]),
+			DeleteFunc: sameSlice([ANY, ANY]),
+			Insert: sameSlice([ANY, INT, ANY], { variadic: true }),
+			Replace: sameSlice([ANY, INT, INT, ANY], { variadic: true }),
+			Grow: sameSlice([ANY, INT]),
+			Clip: sameSlice([ANY]),
 		},
 	});
 

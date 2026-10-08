@@ -31,6 +31,36 @@ export function hasDefer(body) {
 
 let defargCounter = 0;
 
+/**
+ * True when `body` contains a direct `recover()` call (not nested inside a
+ * FuncLit).  Used to decide which functions may legitimately observe an
+ * in-flight panic: Go only honours recover() when it is called directly by
+ * a deferred function.
+ */
+export function hasDirectRecover(body) {
+	if (!body) return false;
+	if (body._hasDirectRecover != null) return Boolean(body._hasDirectRecover);
+	const walk = (node) => {
+		if (!node || typeof node !== "object") return false;
+		if (Array.isArray(node)) return node.some(walk);
+		if (node.kind === "FuncLit") return false;
+		if (
+			node.kind === "CallExpr" &&
+			node.func?.kind === "Ident" &&
+			node.func.name === "recover"
+		)
+			return true;
+		for (const key of Object.keys(node)) {
+			if (key.startsWith("_")) continue;
+			if (walk(node[key])) return true;
+		}
+		return false;
+	};
+	const result = walk(body);
+	body._hasDirectRecover = result;
+	return result;
+}
+
 const BUILTIN_FUNC_NAMES = new Set([
 	"println",
 	"print",
@@ -56,67 +86,108 @@ export function normalizeDefers(programOrPrograms) {
 		: [programOrPrograms];
 
 	const pkgFuncNames = new Set(BUILTIN_FUNC_NAMES);
+	// Package-level funcs/methods whose body calls recover() directly.  A
+	// `defer f()` whose callee is one of these must keep recover armed when the
+	// synthesized wrapper forwards the call.
+	const recoverFuncs = new Set();
 	for (const program of programs) {
 		for (const d of program?.decls ?? []) {
 			if (d.kind === "FuncDecl") pkgFuncNames.add(d.name);
+			if (
+				(d.kind === "FuncDecl" || d.kind === "MethodDecl") &&
+				hasDirectRecover(d.body)
+			)
+				recoverFuncs.add(d.name);
 		}
 	}
+	const ctx = { pkgFuncNames, recoverFuncs };
 
 	for (const program of programs) {
 		if (!program?.decls) continue;
 		for (const d of program.decls) {
-			if (d.body) normalizeBlockDefers(d.body, pkgFuncNames);
+			if (d.body) normalizeBlockDefers(d.body, ctx);
 		}
 	}
 }
 
-function normalizeBlockDefers(node, pkgFuncNames) {
+function normalizeBlockDefers(node, ctx) {
 	if (!node || typeof node !== "object") return;
 	if (Array.isArray(node)) {
 		for (let i = 0; i < node.length; i++) {
 			const item = node[i];
 			if (item && item.kind === "DeferStmt") {
-				const inserted = normalizeDeferStmt(item, node, i, pkgFuncNames);
+				const inserted = normalizeDeferStmt(item, node, i, ctx);
 				i += inserted;
 			} else {
-				normalizeBlockDefers(item, pkgFuncNames);
+				normalizeBlockDefers(item, ctx);
 			}
 		}
 		return;
 	}
 
 	if (node.kind === "FuncLit") {
-		normalizeBlockDefers(node.body, pkgFuncNames);
+		normalizeBlockDefers(node.body, ctx);
 		return;
 	}
 
 	for (const key of Object.keys(node)) {
 		if (key.startsWith("_")) continue;
-		normalizeBlockDefers(node[key], pkgFuncNames);
+		normalizeBlockDefers(node[key], ctx);
 	}
 }
 
-function normalizeDeferStmt(
-	stmt,
-	parentList = null,
-	index = -1,
-	pkgFuncNames = null,
-) {
+// Does the deferred callee possibly call recover() directly?  Known package
+// funcs/methods are looked up; unknown callees (closure variables, func
+// values) are assumed to, so recover stays armed through the wrapper.
+function deferCalleeMayRecover(funcExpr, ctx) {
+	if (!ctx) return false;
+	if (funcExpr.kind === "Ident") {
+		if (BUILTIN_FUNC_NAMES.has(funcExpr.name)) return false;
+		if (ctx.pkgFuncNames.has(funcExpr.name))
+			return ctx.recoverFuncs.has(funcExpr.name);
+		return true;
+	}
+	if (funcExpr.kind === "SelectorExpr") {
+		if (funcExpr.expr?._type?.kind === "namespace") return false;
+		return ctx.recoverFuncs.has(funcExpr.field);
+	}
+	if (funcExpr.kind === "FuncLit") return hasDirectRecover(funcExpr.body);
+	return true;
+}
+
+function normalizeDeferStmt(stmt, parentList = null, index = -1, ctx = null) {
 	if (stmt.call?.kind !== "CallExpr") return 0;
 	const call = stmt.call;
 	const isZeroArgFuncLit =
 		call.func?.kind === "FuncLit" && (!call.args || call.args.length === 0);
-	if (isZeroArgFuncLit) return 0;
+	if (isZeroArgFuncLit) {
+		// The FuncLit itself is the deferred function: recover() inside it is
+		// honoured.
+		call.func._isDeferTarget = true;
+		normalizeBlockDefers(call.func.body, ctx);
+		return 0;
+	}
+	const pkgFuncNames = ctx?.pkgFuncNames ?? null;
 
 	const tempStmts = [];
 	let funcExpr = call.func;
 
-	// Hoist method receiver if call.func is a method call (e.g. defer r.Close())
+	// Hoist method receiver if call.func is a method call (e.g. defer r.Close()).
+	// Skipped for pointer-receiver methods on an addressable (non-pointer)
+	// operand: Go evaluates `&recv` at defer time, so the deferred call must
+	// observe later mutations of the original variable — copying the struct
+	// into a temp would break that.  The receiver expression itself is then
+	// re-evaluated at run time, which matches Go for the common `defer x.M()`
+	// / `defer s.f.M()` cases.
+	const recvIsAddressableValue =
+		call.func?._type?._ptrRecv === true &&
+		call.func.expr?._type?.kind !== "pointer";
 	if (
 		parentList &&
 		index >= 0 &&
 		call.func?.kind === "SelectorExpr" &&
-		call.func.expr?._type?.kind !== "namespace"
+		call.func.expr?._type?.kind !== "namespace" &&
+		!recvIsAddressableValue
 	) {
 		const recv = call.func.expr;
 		defargCounter++;
@@ -222,7 +293,13 @@ function normalizeDeferStmt(
 			_hasDefer: false,
 		},
 		_type: { kind: "FuncType", params: [], returnType: null },
+		_isDeferTarget: true,
+		// The wrapper only forwards to the real deferred callee; when that
+		// callee may call recover() directly, recover must stay armed across
+		// the wrapper frame.
+		_deferForward: deferCalleeMayRecover(call.func, ctx),
 	};
+	if (call.func?.kind === "FuncLit") normalizeBlockDefers(call.func.body, ctx);
 	stmt.call = {
 		kind: "CallExpr",
 		func: synthFuncLit,
