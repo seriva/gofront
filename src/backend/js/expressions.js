@@ -233,12 +233,17 @@ const BUILTIN_GEN = {
 		}
 		return `{ value: ${s.zeroValueForExpr(arg)} }`;
 	},
-	print: (s, e) => `console.log(${e.args.map((a) => s.genExpr(a)).join(", ")})`,
+	// `print` writes without a trailing newline (Go semantics); the wasm glue
+	// buffers the same way, so output parity holds across backends.
+	print: (s, e) =>
+		`((__s) => (typeof process !== "undefined" && process?.stdout?.write ? process.stdout.write(__s) : console.log(__s)))([${e.args.map((a) => s.genExpr(a)).join(", ")}].map(String).join(" "))`,
 	println: (s, e) =>
 		`console.log(${e.args.map((a) => s.genExpr(a)).join(", ")})`,
 	panic: (s, e) => `(() => { throw new Error(${s.genExpr(e.args[0])}); })()`,
-	recover: () =>
-		`(typeof __panic !== "undefined" && __panic !== null ? (() => { const __r = __panic.message ?? String(__panic); __panic = null; return __r; })() : null)`,
+	recover: (s) => {
+		s._usesPanicRt = true;
+		return `__recover(${s._recoverOkInScope ? "__recoverOk" : "false"})`;
+	},
 	error: (s, e) => {
 		s._usesError = true;
 		return `__error(${s.genExpr(e.args[0])})`;
@@ -613,7 +618,7 @@ export const expressionGenMethods = {
 		this._withFnCtx(expr.body, () =>
 			this.indented(() => {
 				this._emitParamCopies(expr.params);
-				this._genBody(expr.body);
+				this._genBody(expr.body, expr);
 			}),
 		);
 		const body = this.out.join("\n");
@@ -706,8 +711,12 @@ export const expressionGenMethods = {
 	},
 
 	_genSelectorCall(expr) {
-		if (this._isErrorMethodCall(expr))
-			return `${this.genExpr(expr.func.expr)}.Error()`;
+		if (this._isErrorMethodCall(expr)) {
+			const recv = this.genExpr(expr.func.expr);
+			if (!this.strict) return `${recv}.Error()`;
+			this._usesNilCall = true;
+			return `__nilcall(${recv}).Error()`;
+		}
 		if (expr.func.expr.kind === "Ident") {
 			const ns = expr.func.expr.name;
 			const fn = expr.func.field;
@@ -716,7 +725,25 @@ export const expressionGenMethods = {
 		}
 		const recvType = expr.func.expr._type;
 		const recvName = this._resolveRecvName(recvType);
-		return this._genReceiverTypeCall(recvName, expr);
+		const typed = this._genReceiverTypeCall(recvName, expr);
+		if (typed !== undefined) return typed;
+		if (this.strict && this._isInterfaceType(recvType)) {
+			// Go panics with a nil-dereference runtime error; JS would throw a
+			// TypeError with a different message.
+			this._usesNilCall = true;
+			const recv = this.genExpr(expr.func.expr);
+			const args = expr.args
+				.map((a) => (a._spread ? `...${this.genExpr(a)}` : this.genExpr(a)))
+				.join(", ");
+			return `__nilcall(${recv}).${expr.func.field}(${args})`;
+		}
+		return undefined;
+	},
+
+	_isInterfaceType(t) {
+		if (!t) return false;
+		if (t.kind === "interface") return true;
+		return t.kind === "named" && t.underlying?.kind === "interface";
 	},
 
 	_genBuiltinLen(expr) {

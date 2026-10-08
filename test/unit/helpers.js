@@ -11,7 +11,6 @@ import { compileWasm } from "../../src/backend/wasm/index.js";
 import { compileDir } from "../../src/compiler.js";
 import { DtsParser, parseDts } from "../../src/dts-parser.js";
 import { Lexer } from "../../src/lexer.js";
-import { normalizeDefers } from "../../src/lower/functions.js";
 import { Parser } from "../../src/parser/index.js";
 import { resolveAll } from "../../src/resolver.js";
 import { TypeChecker } from "../../src/typechecker/index.js";
@@ -75,7 +74,6 @@ export function compile(
 	if (errors.length > 0) return { js: null, errors };
 
 	const isStrict = Boolean(strict || pkgTarget === "both");
-	normalizeDefers([ast]);
 	const js = new CodeGen(checker, jsImports, new Set(), {
 		target: pkgTarget,
 		strict: isStrict,

@@ -24,7 +24,6 @@ import { compileWasmModule } from "./backend/wasm/index.js";
 import { log } from "./colors.js";
 import { parseDts } from "./dts-parser.js";
 import { Lexer } from "./lexer.js";
-import { normalizeDefers } from "./lower/functions.js";
 import { lower } from "./lower/index.js";
 import { Parser } from "./parser/index.js";
 import {
@@ -547,7 +546,6 @@ export function compileSingleFile(inputPath, options = {}) {
 		});
 	}
 
-	normalizeDefers([ast]);
 	const isStrict = Boolean(options.strict || pkgTarget === "both");
 	const cg = new CodeGen(checker, jsImports, bundledPackages, {
 		target: pkgTarget,
@@ -681,7 +679,6 @@ export function compileFiles(files, options = {}) {
 		bundledPackages,
 	});
 
-	normalizeDefers(programs);
 	const isStrict = Boolean(options.strict || pkgTarget === "both");
 	const codegen = new CodeGen(checker, jsImports, bundledPackages, {
 		target: pkgTarget,

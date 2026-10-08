@@ -86,8 +86,6 @@ export const resolveMethods = {
 				if (scope) {
 					const fromScope = scope.lookup(node.name);
 					if (fromScope?.kind === "typeParam") return fromScope;
-					if (scope !== this.globals && scope.symbols.has(node.name))
-						return fromScope;
 				}
 				const named = this.types.get(node.name);
 				if (named) {
@@ -272,8 +270,10 @@ export const resolveMethods = {
 		const typeArgs = typeArgNodes.map((n) => this.resolveTypeNode(n, scope));
 		for (let i = 0; i < generic.typeParams.length; i++)
 			map.set(generic.typeParams[i].name, typeArgs[i] ?? ANY);
+		// Resolve the declaration with its type params in scope (as typeParams,
+		// never as value symbols), then substitute the concrete arguments.
 		const typeScope = new Scope(this.globals);
-		for (const [name, type] of map) typeScope.define(name, type);
+		for (const tp of generic.typeParams) typeScope.define(tp.name, tp);
 		const underlying = this.resolveTypeNode(generic.declNode.type, typeScope);
 		const instantiated = this.substituteType(underlying, map);
 		if (instantiated.kind === "struct") {

@@ -146,12 +146,24 @@ export function cloneAst(node) {
 /**
  * Replaces references to type parameters in AST nodes with concrete types.
  */
-function substituteTypesInAst(node, typeSubstMap, onGenericUsage) {
+function substituteTypesInAst(
+	node,
+	typeSubstMap,
+	onGenericUsage,
+	genericTypes = null,
+	genericFuncs = null,
+) {
 	if (!node || typeof node !== "object") return node;
 
 	if (Array.isArray(node)) {
 		for (let i = 0; i < node.length; i++) {
-			node[i] = substituteTypesInAst(node[i], typeSubstMap, onGenericUsage);
+			node[i] = substituteTypesInAst(
+				node[i],
+				typeSubstMap,
+				onGenericUsage,
+				genericTypes,
+				genericFuncs,
+			);
 		}
 		return node;
 	}
@@ -262,7 +274,13 @@ function substituteTypesInAst(node, typeSubstMap, onGenericUsage) {
 	// Recurse child properties
 	for (const key of Object.keys(node)) {
 		if (key.startsWith("_")) continue;
-		node[key] = substituteTypesInAst(node[key], typeSubstMap, onGenericUsage);
+		node[key] = substituteTypesInAst(
+			node[key],
+			typeSubstMap,
+			onGenericUsage,
+			genericTypes,
+			genericFuncs,
+		);
 	}
 
 	return node;

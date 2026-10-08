@@ -64,6 +64,7 @@ import "./wasm/interfaces.test.js";
 import "./wasm/generics.test.js";
 import "./wasm/maps.test.js";
 import "./wasm/defer_recover.test.js";
+import "./wasm/go_semantics.test.js";
 
 import { summarize } from "./helpers.js";
 
