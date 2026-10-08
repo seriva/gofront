@@ -579,46 +579,34 @@ export const expressionCheckMethods = {
 
 		this._checkCallArgs(fnType, argTypes, expr);
 
-		if (expr.func.kind === "SelectorExpr") {
-			const pkg = expr.func.expr?.name;
-			const fn = expr.func.field;
-			if (pkg === "maps") {
-				const mapType =
-					argTypes[0]?.kind === "named" ? argTypes[0].underlying : argTypes[0];
-				if (fn === "Keys" && mapType?.key) {
-					return { kind: "slice", elem: mapType.key };
-				}
-				if (fn === "Values") {
-					const v = mapType?.value ?? mapType?.elem;
-					if (v) return { kind: "slice", elem: v };
-				}
-				if (fn === "Clone" && mapType) {
-					return argTypes[0];
-				}
-			} else if (pkg === "slices") {
-				const sliceType =
-					argTypes[0]?.kind === "named" ? argTypes[0].underlying : argTypes[0];
-				if (
-					(fn === "Clone" ||
-						fn === "Compact" ||
-						fn === "CompactFunc" ||
-						fn === "Delete" ||
-						fn === "DeleteFunc" ||
-						fn === "Insert" ||
-						fn === "Replace" ||
-						fn === "Grow" ||
-						fn === "Clip") &&
-					sliceType
-				) {
-					return argTypes[0];
-				}
-			}
+		// Pseudo-generic stdlib helpers (maps.Keys, slices.Clone, ...) declare
+		// how their result derives from the first argument.
+		if (fnType._derivedReturn) {
+			const derived = this._derivedReturnType(fnType._derivedReturn, argTypes);
+			if (derived) return derived;
 		}
 
 		const ret = fnType.returns;
 		if (!ret || ret.length === 0) return VOID;
 		if (ret.length === 1) return ret[0];
 		return { kind: "tuple", types: ret };
+	},
+
+	_derivedReturnType(mode, argTypes) {
+		const arg = argTypes[0];
+		const under = arg?.kind === "named" ? arg.underlying : arg;
+		switch (mode) {
+			case "arg0":
+				return under ? arg : null;
+			case "keysOfArg0":
+				return under?.key ? { kind: "slice", elem: under.key } : null;
+			case "valuesOfArg0": {
+				const v = under?.value ?? under?.elem;
+				return v ? { kind: "slice", elem: v } : null;
+			}
+			default:
+				return null;
+		}
 	},
 
 	_resolveGenericFnType(fnType, argTypes, expr, scope) {

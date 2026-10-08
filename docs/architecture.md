@@ -75,7 +75,12 @@ a WebAssembly GC module:
 |---|---|
 | `index.js` | `ModuleEmitter` — lowers the typed AST into module IR (types, functions, imports, exports) |
 | `types.js` | GoFront types → WasmGC types; recursive structs share one `rec` group |
-| `emit.js` | `FunctionEmitter` — statements and expressions → instructions |
+| `emit.js` | `FunctionEmitter` core — prologue/epilogue, defer/recover frames, locals, control stack; composed from the mixins below |
+| `emit-stmts.js` | statements (decls, assignment, `if`/`for`/`switch`/`range`, `return`) |
+| `emit-exprs.js` | expressions (literals, operators, indexing, slicing, conversions) |
+| `emit-builtins.js` | `panic`/`recover`, Go builtins (`len`, `append`, `make`, …) and call dispatch |
+| `emit-maps.js` | map runtime helpers (key hash/eq, get/set/delete, iteration) and zero values |
+| `emit-stdlib.js` | natively implemented stdlib (`math`, `math/bits`, `maps`, `slices`, `strings`, `strconv`, `fmt`, `testing`) |
 | `encode.js` | Module IR → binary (`LEB128`, sections, `gofront` custom section) — no dependencies |
 | `wat.js` | Module IR → WAT text for `--emit-wat` and golden tests |
 | `glue.js` | JS imports (`Math`, string builtins, console, panic) and the `instantiateWasm()` loader |

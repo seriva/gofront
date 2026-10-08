@@ -55,6 +55,13 @@ var __ifp = __ifp || function(x) {
   return x;
 };`;
 
+// Nil-interface method call guard (strict mode only): matches Go's panic
+// message instead of a JS TypeError.
+export const HELPER_NIL_CALL = `var __nilcall = __nilcall || function(x) {
+  if (x == null) throw new Error("runtime error: invalid memory address or nil pointer dereference");
+  return x;
+};`;
+
 export const HELPER_EQUAL = `var __equal = __equal || function __equal(a, b) {
   if (a === b) return true;
   if (a === null || b === null) return false;
@@ -86,10 +93,36 @@ export const HELPER_CDIV = `var __cdiv = __cdiv || function(a, b) {
   return { re: (a.re * b.re + a.im * b.im) / d, im: (a.im * b.re - a.re * b.im) / d };
 };`;
 
-export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
-  if (typeof f !== "string" || !/%[#+\\- 0]*[0-9]*\\.?([0-9]*)[sdvftxXqobeEgGw%]/.test(f)) {
-    return (f === undefined && a.length === 0) ? "" : [f, ...a].map(v => v == null ? "<nil>" : typeof v === "object" ? (typeof v.Error === "function" ? v.Error() : JSON.stringify(v)) : String(v)).join(" ");
+// Panic/defer runtime.  \`stack\` holds the in-flight panic of every frame
+// currently running its defers; \`armed\` is set right before a deferred
+// function is invoked and consumed by that function's prologue, so recover()
+// only takes effect when called directly by the deferred function (Go spec).
+export const HELPER_PANIC = `var __gopanic = __gopanic || { stack: [], armed: false };
+var __runDefers = __runDefers || function(defers, frame) {
+  for (let i = defers.length - 1; i >= 0; i--) {
+    __gopanic.armed = true;
+    try { defers[i](); }
+    catch (e) {
+      if (frame.pn !== null) __gopanic.stack.pop();
+      frame.pn = { err: e, recovered: false };
+      __gopanic.stack.push(frame.pn);
+    } finally { __gopanic.armed = false; }
   }
+  if (frame.pn !== null) {
+    __gopanic.stack.pop();
+    if (!frame.pn.recovered) throw frame.pn.err;
+  }
+};
+var __recover = __recover || function(ok) {
+  if (!ok) return null;
+  const s = __gopanic.stack;
+  const top = s.length > 0 ? s[s.length - 1] : null;
+  if (top === null || top.recovered) return null;
+  top.recovered = true;
+  return top.err?.message ?? String(top.err);
+};`;
+
+export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
   let i = 0;
   return f.replace(/%([#+\\- 0]*)([0-9]*)\\.?([0-9]*)[sdvftxXqobeEgGw%]/g, (m) => {
     if (m === "%%") return "%";

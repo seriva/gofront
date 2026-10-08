@@ -162,14 +162,14 @@ Strict mode could become a general opt-in for `js` packages later (`//gofront:st
 | `[]T` | `(struct (ref $arr) i32 off, i32 len, i32 cap)` | real slices: `cap`, 3-index, amortised `append` |
 | `string` | JS string as `externref` via JS String Builtins (`wasm:js-string`), polyfilled through imports where unavailable | same semantics as JS (`len` = UTF-16 units), zero-copy across the boundary |
 | `map[K]V` | insertion-ordered hash map (runtime) | same iteration order as JS |
-| interface | `(struct i32 typeId, (ref null $itab), anyref data)` | |
+| interface | boxed value as `anyref` (concrete struct ref, or box for scalars); method calls dispatch via `ref.test` chains over the candidate implementing types, no itab | the "itab" design in H4.1 was replaced by static candidate sets: cheaper for the small type sets of game code, no runtime tables |
 | func values / closures | `(struct funcref, anyref env)` + `call_ref` | |
 | generics | monomorphised (deduplicated by layout) | JS stays erased |
 
 - **Control flow:** structured (`block`/`loop`/`br`/`br_table`). No `goto` means no relooper. `fallthrough` becomes nested blocks.
 - **Multiple results:** native multi-value.
 - **`panic`:** an exception tag.
-- **`defer`:** a defer list in `try_table` + `catch_all_ref`, rethrowing unless `recover()` ran.
+- **`defer`:** a defer list in `try_table` + `catch_all_ref`, rethrowing unless `recover()` ran. Each deferred call runs under its own `try_table` so a panic raised in a defer replaces the in-flight one (Go semantics). `recover()` is armed only for the frame that is a direct defer target (an `armed` global copied into a local in the prologue); a `recover()` reached through a helper or nested closure returns `nil`. The JS backend mirrors this with `__gopanic.armed` / `__recover(ok)`, and `lower/functions.js` normalises `defer` for both backends.
 - **Panics crossing the boundary:** a panic escaping a WASM export becomes a JS `Error` the JS side can `recover`. A JS panic thrown inside a callback invoked from WASM unwinds through WASM `defer`s.
 - **Type switches:** `ref.test`/`ref.cast` for concrete structs, `typeId` otherwise.
 - **Runtime** (`runtime/wasm/*.go`): written in GoFront and compiled by this backend. Maps, string helpers, `strconv`/`fmt` formatting, slice growth. Tree-shaken. Transcendental `math` (`Sin`, `Atan2`, `Pow`, …) is imported from JS `Math`, which also matches JS-target results exactly.
@@ -300,7 +300,7 @@ The hybrid design is delivered over three releases. Both WASM releases land in t
 <!-- v1.6.0 execution tasks (pending positive v1.5.0 go/no-go benchmark) -->
 
 ### Phase H4: Language Completeness in WASM
-- [x] **Task H4.1 — Non-empty interfaces:** Itabs and `ref.test` dynamic dispatch.
+- [x] **Task H4.1 — Non-empty interfaces:** `ref.test` dynamic dispatch over static candidate sets (itabs were not needed).
 - [x] **Task H4.2 — Generics:** Monomorphisation of generic types and functions for WASM target.
 - [x] **Task H4.3 — Maps & stdlib:** Insertion-ordered map runtime and remaining stdlib subset in WASM.
 - [x] **Task H4.4 — Defer & recover:** Exception handling emission (`exnref` vs legacy EH encoding). Language fixtures pass on WASM == JS-strict.

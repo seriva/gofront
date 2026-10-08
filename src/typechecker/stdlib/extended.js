@@ -160,9 +160,24 @@ export function setupExtendedGlobals(globals, types) {
 		kind: "namespace",
 		name: "maps",
 		members: {
-			Keys: { kind: "func", params: [ANY], returns: [ANY] },
-			Values: { kind: "func", params: [ANY], returns: [ANY] },
-			Clone: { kind: "func", params: [ANY], returns: [ANY] },
+			Keys: {
+				kind: "func",
+				params: [ANY],
+				returns: [ANY],
+				_derivedReturn: "keysOfArg0",
+			},
+			Values: {
+				kind: "func",
+				params: [ANY],
+				returns: [ANY],
+				_derivedReturn: "valuesOfArg0",
+			},
+			Clone: {
+				kind: "func",
+				params: [ANY],
+				returns: [ANY],
+				_derivedReturn: "arg0",
+			},
 			Copy: { kind: "func", params: [ANY, ANY], returns: [VOID] },
 			Equal: { kind: "func", params: [ANY, ANY], returns: [BOOL] },
 			EqualFunc: { kind: "func", params: [ANY, ANY, ANY], returns: [BOOL] },
