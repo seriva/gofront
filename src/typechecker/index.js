@@ -524,6 +524,7 @@ export class TypeChecker {
 					? existing
 					: { kind: "named", name: decl.name };
 			named.underlying = underlying;
+			named._target = this.target;
 			named._generic = {
 				typeParams: typeParamTypes,
 				declNode: decl,
@@ -549,6 +550,7 @@ export class TypeChecker {
 				? existing
 				: { kind: "named", name: decl.name };
 		named.underlying = underlying;
+		named._target = this.target;
 		if (underlying.kind === "struct") {
 			underlying.name = decl.name;
 			underlying.methods = new Map();

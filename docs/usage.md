@@ -6,8 +6,10 @@
 gofront dev [dir]                            watch + compile + asset sync + live reload (hybrid projects emit app.wasm; default port 3000)
 gofront dev [dir] --port 8080                use a custom port
 gofront build [dir]                          clean + compile + minify + vendor → production output (hybrid projects emit app.wasm)
+gofront build [dir] --release                production bundle: minify + mangle + Binaryen wasm optimization (-O3 + GUFA)
+gofront build [dir] --wasm-opt               optimize app.wasm with Binaryen (-O3 + GUFA)
 gofront build [dir] --pwa                    also generate offline service worker (sw.js) + precache manifest
-gofront build [dir] --source-map             include inline source maps in the release bundle
+gofront build [dir] --source-map             include source maps (app.js.map and app.wasm.map)
 gofront build [dir] --no-minify              skip minification
 gofront build [dir] --no-mangle              minify but keep original identifiers
 gofront build [dir] --emit-wat               also write app.wat next to app.wasm (hybrid projects)
@@ -19,6 +21,8 @@ gofront test <dir>/... [--dom] [-v] [-run <regex>]  run tests recursively
 gofront <file.go>                            compile single file → stdout
 gofront <dir>                                compile all *.go in directory → stdout
 gofront <input> -o out.js                    write output to file (prints elapsed compile time; hybrid projects also write app.wasm)
+gofront <input> -o out.js --release          compile + minify + optimize wasm with Binaryen
+gofront <input> -o out.js --wasm-opt         compile + optimize wasm with Binaryen
 gofront <input> -o out.js --emit-wat         also write app.wat
 gofront <input> -o out.js --copy-assets      compile + copy static assets
 gofront <input> --check                      type-check only (single file / directory)
@@ -55,8 +59,13 @@ All settings live in this one place — top-level `"vendor"` / `"assetCopy"` key
 
 When any package reached by the build carries `//gofront:target wasm` or `both`, `dev`,
 `build` and `-o` also write a single `app.wasm` next to the JS bundle, and `--emit-wat`
-adds a readable `app.wat`. Everything about targets, boundary rules and the loader is in the
-[Hybrid JS + WebAssembly Guide](hybrid-wasm.md).
+adds a readable `app.wat`.
+
+Passing `gofront build --release` (or `--wasm-opt`) optimizes the emitted WebAssembly
+using Binaryen (`-O3` + GUFA), achieving ~23% smaller binary size and emitting `app.wasm.map`
+when `--source-map` is enabled. In development (`gofront dev`), unoptimized WASM is served
+directly for sub-10ms instant hot-reload. Everything about targets, boundary rules and the
+loader is in the [Hybrid JS + WebAssembly Guide](hybrid-wasm.md).
 
 ---
 

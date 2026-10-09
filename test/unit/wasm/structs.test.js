@@ -320,3 +320,40 @@ func Main() int64 {
 	const { exports } = runWasm(wasm, { stringTable });
 	assertEqual(exports.Main(), 42n);
 });
+
+section("WASM Structs — package-level zero values");
+
+test("package-level struct var zero-inits nested struct, any and string fields", () => {
+	const src = `
+package main
+
+type Vec3 struct {
+	X, Y, Z float64
+}
+
+type Result struct {
+	Point  Vec3
+	Hit    bool
+	Shape  any
+	Label  string
+	Next   *Result
+	Normal Vec3
+}
+
+var scratch Result
+
+func Main() int {
+	scratch.Point.X = 2
+	scratch.Normal.Y = 3
+	n := 0
+	if scratch.Shape == nil && scratch.Next == nil && len(scratch.Label) == 0 {
+		n = 1
+	}
+	return n + int(scratch.Point.X) + int(scratch.Normal.Y)
+}
+`;
+	const hybrid = compileHybrid(src);
+	const res = hybrid.run("Main");
+	assertEqual(res.wasmRes, 6n);
+	assertEqual(res.jsRes, 6);
+});

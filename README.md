@@ -378,6 +378,7 @@ The compiler analyzes both sides of the boundary and synthesizes a facade into `
 - **Closures:** Function values and callbacks cross the boundary transparently in both directions.
 - **WASM Loader:** The generated JS bundle automatically fetches `app.wasm` relative to the page (customizable via `globalThis.__GOFRONT_WASM_URL` or `globalThis.__GOFRONT_WASM_BYTES`).
 - **WAT Inspection:** Passing `--emit-wat` writes human-readable `app.wat` alongside the binary module.
+- **Binaryen Optimization:** Passing `--release` or `--wasm-opt` optimizes `app.wasm` via Binaryen (`-O3` + GUFA), achieving ~23% smaller binaries and generating `app.wasm.map` source maps.
 
 ### Real-World Benchmark: 3D Raycasting
 

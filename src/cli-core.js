@@ -44,11 +44,12 @@ export function runCompile(inputPath, isDir, options) {
 		dumpTokens = false,
 		dumpAst = false,
 		emitWat = false,
+		wasmOpt = false,
 	} = options ?? {};
 
 	if (isDir) {
 		const outputDir = outputFile ? dirname(resolve(outputFile)) : resolve(".");
-		return compileDir(inputPath, { sourceMap, outputDir, emitWat });
+		return compileDir(inputPath, { sourceMap, outputDir, emitWat, wasmOpt });
 	}
 
 	return compileSingleFile(inputPath, {
@@ -57,6 +58,7 @@ export function runCompile(inputPath, isDir, options) {
 		dumpTokens,
 		dumpAst,
 		emitWat,
+		wasmOpt,
 	});
 }
 
@@ -70,15 +72,23 @@ export function writeCompileOutput(outputFile, result, js = result.js) {
 	writeFileSync(outputFile, `${js}\n`);
 	const wasmFile = join(dirname(outputFile), "app.wasm");
 	const watFile = join(dirname(outputFile), "app.wat");
+	const wasmMapFile = join(dirname(outputFile), "app.wasm.map");
 	const written = [outputFile];
 	let ownsWasm = Boolean(result.wasm);
 	if (result.wasm) {
 		writeFileSync(wasmFile, result.wasm);
 		written.push(wasmFile);
+		if (result.wasmSourceMap) {
+			writeFileSync(wasmMapFile, result.wasmSourceMap);
+			written.push(wasmMapFile);
+		} else if (existsSync(wasmMapFile)) {
+			rmSync(wasmMapFile);
+		}
 	} else if (existsSync(wasmFile)) {
 		if (isGoFrontWasm(readFileSync(wasmFile))) {
 			rmSync(wasmFile);
 			ownsWasm = true;
+			if (existsSync(wasmMapFile)) rmSync(wasmMapFile);
 		}
 	}
 	if (result.wat) {
@@ -503,6 +513,9 @@ export function parseBuildArgs(argv) {
 	const noMinify = argv.includes("--no-minify");
 	const noMangle = argv.includes("--no-mangle");
 	const emitWat = argv.includes("--emit-wat");
+	const release = argv.includes("--release");
+	const noWasmOpt = argv.includes("--no-wasm-opt");
+	const wasmOpt = !noWasmOpt && (argv.includes("--wasm-opt") || release);
 
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
@@ -523,6 +536,8 @@ export function parseBuildArgs(argv) {
 		emitWat,
 		minify: !noMinify,
 		mangle: !noMangle && !noMinify,
+		release,
+		wasmOpt,
 	};
 }
 
@@ -684,11 +699,18 @@ function collectOutputFiles(outDir) {
 	return files;
 }
 
-export function formatBuildSummary({ outDir, elapsedMs, files, pwa }) {
+export function formatBuildSummary({ outDir, elapsedMs, files, pwa, wasmOpt }) {
 	const lines = [`build complete in ${elapsedMs}ms → ${outDir}`];
 	for (const f of files) {
 		const sizeKb = (f.size / 1024).toFixed(1);
 		lines.push(`  ${f.name} (${sizeKb} kB)`);
+	}
+	if (wasmOpt && wasmOpt.originalSize > 0) {
+		const origKb = (wasmOpt.originalSize / 1024).toFixed(1);
+		const optKb = (wasmOpt.optimizedSize / 1024).toFixed(1);
+		lines.push(
+			`  wasm-opt: app.wasm ${origKb} kB → ${optKb} kB (-${wasmOpt.percentSaved}%) [${wasmOpt.engine}]`,
+		);
 	}
 	if (pwa) {
 		lines.push(
@@ -712,6 +734,7 @@ export async function handleBuild(targetDir = ".", options = {}) {
 		outputFile,
 		sourceMap: options.sourceMap ?? false,
 		emitWat: options.emitWat ?? false,
+		wasmOpt: options.wasmOpt ?? false,
 	});
 
 	const doMinify = options.minify ?? true;
@@ -757,6 +780,7 @@ export async function handleBuild(targetDir = ".", options = {}) {
 		assets,
 		vendor,
 		pwa,
+		wasmOpt: compileResult.wasmOptInfo,
 	};
 }
 

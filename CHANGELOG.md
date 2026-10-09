@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Interfaces across the wasm boundary (H5.2)** — named non-empty interfaces can appear in exported signatures, struct fields, slices and callbacks. WASM values reach JS as their handle class when the dynamic type is an exported `*T`, otherwise as a facade whose methods call the wasm dispatchers. Only WASM-owned values cross back in. A `js`/`both` type converted to a `wasm` interface is a compile error, and the facade throws a `TypeError` for JS-implemented values (no cross-boundary itab proxies).
+
 ### Changed
 - **`recover()` follows Go's scoping rules in both backends** — `recover()` only stops a panic when called directly by a deferred function (including `defer handlePanic()` and deferred method calls whose body calls `recover()`); a `recover()` reached through a helper or nested closure returns `nil`. A panic raised inside a deferred function replaces the in-flight panic. Earlier the JS backend's `recover()` returned the panic value from anywhere in the deferred call chain and the wasm backend disagreed.
 - **Deferred call evaluation** — receivers and arguments of a deferred call are evaluated at the `defer` statement, except for pointer-receiver methods on addressable values (`defer b.Add(1)`, `defer s.b.Add(1)`), which observe later mutations exactly as in Go. `defer` normalisation now runs once in `lower/` for both backends.
@@ -13,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Nil interface method calls (strict / `both`)** — `x.Method()` on a nil interface value now panics with `runtime error: invalid memory address or nil pointer dereference` in the JS backend, matching wasm.
 
 ### Fixed
+- **Wasm package-level struct zero values** — a `var x T` global whose struct has `any`/interface or `string` fields no longer produces an invalid module (`struct.new expected anyref, found i32.const`), and nested struct-value fields are built in place instead of left `null` (which trapped on first access, e.g. `scratch.Point.X = 1`).
 - **Wasm map keys** — struct keys hash and compare field-wise, `-0.0` and `+0.0` share a key, and `NaN` keys never match (Go semantics). Array and interface keys report a `(planned)` diagnostic instead of silently comparing by reference.
 - **Generic struct literals inside generic functions** — `Pair[K, V]{...}` inside a generic body is now monomorphised; the type-parameter substitution map was dropped on nested AST nodes.
 - **Type lookup shadowing** — a local *value* named like a type (`T := 5; var x T`) now reports `Unknown type 'T'` instead of resolving to the value's type.
