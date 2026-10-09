@@ -20,7 +20,12 @@
 //     TypedArray inputs accepted). No copy-back for slices.
 //   - func values: JS callbacks wrapped into wasm closures via thunks; wasm
 //     closures exposed to JS as callable functions.
-//   - maps, non-empty interfaces, error, pointers to non-structs: rejected
+//   - named non-empty interfaces (Task H5.2): wasm values reach JS as their
+//     handle class / live view when the dynamic type is an exported `*T`,
+//     otherwise as a facade whose methods call the wasm dispatchers.  Only
+//     wasm-owned values (`__ref`) go back in; JS-implemented values are
+//     rejected (no cross-boundary itab proxies).
+//   - maps, anonymous interfaces, error, pointers to non-structs: rejected
 //     with a compile error (planned for a later boundary version).
 //   - `*testing.T`: the harness's JS test object, passed as an opaque
 //     externref (test methods are routed back to JS via `env.testing_*`).
@@ -108,7 +113,7 @@ export function classifyType(goType, mod) {
 		case "func":
 			return classifyFunc(t, mod);
 		case "interface":
-			return classifyInterface(t);
+			return classifyInterface(t, mod);
 		default:
 			return {
 				k: "unsupported",
@@ -216,31 +221,66 @@ function classifyArray(t, mod) {
 	};
 }
 
-function classifyFunc(t, mod) {
+function classifySig(t, mod) {
 	const params = (t.params ?? []).map((p) => classifyType(p, mod));
 	const returns = (t.returns ?? [])
 		.map((r) => classifyType(r, mod))
 		.filter((d) => d.k !== "void");
 	const bad = [...params, ...returns].find((d) => d.k === "unsupported");
-	if (bad) return bad;
+	return bad ?? { params, returns };
+}
+
+function classifyFunc(t, mod) {
+	const sig = classifySig(t, mod);
+	if (sig.k === "unsupported") return sig;
 	const closureInfo = mod.getClosureType(t);
 	return {
 		k: "func",
-		params,
-		returns,
+		params: sig.params,
+		returns: sig.returns,
 		closureInfo,
 		key: `c${closureInfo.typeIndex}`,
 		wType: { kind: "ref", nullable: true, typeIndex: closureInfo.typeIndex },
 	};
 }
 
-function classifyInterface(t) {
+function classifyInterface(t, mod) {
 	if (t.name === "error") return { k: "unsupported", what: "error" };
 	if (!t.methods || t.methods.size === 0) return { k: "any", wType: "anyref" };
-	return {
-		k: "unsupported",
-		what: `interface${t.name ? ` '${t.name}'` : ""}`,
+	if (!t.name || !(t.methods instanceof Map))
+		return { k: "unsupported", what: "anonymous interface" };
+	mod._boundaryIfaces ??= new Map();
+	return mod._boundaryIfaces.get(t.name) ?? classifyNamedInterface(t, mod);
+}
+
+function classifyNamedInterface(t, mod) {
+	const desc = {
+		k: "iface",
+		name: t.name,
+		key: t.name,
+		wType: "anyref",
+		methods: [],
+		concrete: [],
 	};
+	// Cached before the walk so self-referencing method signatures terminate.
+	mod._boundaryIfaces.set(t.name, desc);
+	for (const [mName, sigType] of t.methods) {
+		const sig = classifySig(sigType, mod);
+		if (sig.k === "unsupported") {
+			const err = {
+				k: "unsupported",
+				what: `${sig.what} (in method ${t.name}.${mName})`,
+			};
+			mod._boundaryIfaces.set(t.name, err);
+			return err;
+		}
+		desc.methods.push({
+			name: mName,
+			dispatch: `__dispatch_${t.name}_${mName}`,
+			...sig,
+		});
+	}
+	return desc;
 }
 
 // ── Export metadata ──────────────────────────────────────────
@@ -418,9 +458,32 @@ function visitNeed(desc, needs, errors, mod) {
 			needs.funcs.set(desc.key, desc);
 			visitSignatureNeeds(desc, needs, errors, mod);
 			return;
+		case "iface":
+			if (needs.ifaces.has(desc.key)) return;
+			needs.ifaces.set(desc.key, desc);
+			for (const m of desc.methods) visitSignatureNeeds(m, needs, errors, mod);
+			return;
 		default:
 			return;
 	}
+}
+
+// Exported `*T` types (already on the boundary surface) whose JS class exposes
+// every interface method: such values reach JS as the handle / live view
+// itself, so type switches and identity still work.  `__itag` matches by
+// `ref.test`, so a struct is only chosen for values that really hold it.
+function concreteCandidates(desc, needs, meta, mod) {
+	const out = [];
+	for (const [name, { info }] of needs.structs) {
+		const both = info.pkgTarget === "both";
+		const names = both
+			? [...(mod.checker?.types?.get(name)?.underlying?.methods?.keys() ?? [])]
+			: (meta.structByName.get(name)?.methods ?? []).map((m) => m.name);
+		const have = new Set(names);
+		if (!desc.methods.every((m) => have.has(m.name))) continue;
+		out.push({ name, typeIndex: info.typeIndex, both });
+	}
+	return out;
 }
 
 function visitSignatureNeeds(sig, needs, errors, mod) {
@@ -437,6 +500,7 @@ function collectNeeds(meta) {
 		slices: new Map(), // key -> desc
 		arrays: new Map(), // key -> desc
 		funcs: new Map(), // key -> desc
+		ifaces: new Map(), // interface name -> desc
 	};
 	const errors = [];
 	for (const s of meta.structs) {
@@ -446,6 +510,8 @@ function collectNeeds(meta) {
 	}
 	for (const f of meta.funcs) visitSignatureNeeds(f, needs, errors, mod);
 	if (errors.length > 0) throw new Error([...new Set(errors)].join("\n"));
+	for (const desc of needs.ifaces.values())
+		desc.concrete = concreteCandidates(desc, needs, meta, mod);
 	return needs;
 }
 
@@ -823,6 +889,68 @@ export function addBoundaryHelpers(mod, meta) {
 	};
 	for (const s of meta.structs) for (const m of s.methods) addTrampoline(m);
 	for (const f of meta.funcs) addTrampoline(f);
+	for (const desc of needs.ifaces.values())
+		addIfaceHelpers(desc, mod, addFunc, addTrampoline);
+}
+
+// `(externref) -> i32`: `ref.test`s param 0 against each type index and
+// returns `resultFor(i)` for the first match, 0 otherwise.
+function refTestChain(typeIndices, resultFor) {
+	const body = typeIndices.flatMap((ti, i) => [
+		{ op: "local.get", index: 0 },
+		{ op: "any.convert_extern" },
+		{ op: "ref.test", typeIndex: ti },
+		{ op: "if", blockType: "void" },
+		{ op: "i32.const", value: resultFor(i) },
+		{ op: "return" },
+		{ op: "end" },
+	]);
+	body.push({ op: "i32.const", value: 0 });
+	return body;
+}
+
+// Type indices (incl. unexported and boxed-value types) whose method set
+// covers the interface, from the same candidate search the dispatchers use.
+function implementingTypeIndices(desc, mod) {
+	let acc = null;
+	for (const m of desc.methods) {
+		const have = new Set(
+			mod.findInterfaceCandidates(null, m.name).map((c) => c.testTypeIndex),
+		);
+		acc = acc === null ? have : new Set([...acc].filter((t) => have.has(t)));
+	}
+	return [...(acc ?? [])];
+}
+
+// Interfaces: method calls go through the existing `ref.test` dispatchers;
+// `__impl$<I>` tells whether a wasm value implements I (guards JS inputs);
+// `__itag$<I>` reports which exported `*T` (1-based) a value holds, 0 if none.
+function addIfaceHelpers(desc, mod, addFunc, addTrampoline) {
+	for (const m of desc.methods) {
+		const entry = { exportName: m.dispatch };
+		addTrampoline(entry);
+		if (!entry.callName)
+			throw new Error(
+				`internal: no wasm dispatcher for interface method ${desc.name}.${m.name}`,
+			);
+		m.callName = entry.callName;
+	}
+	addFunc(
+		`__impl$${desc.key}`,
+		["externref"],
+		["i32"],
+		refTestChain(implementingTypeIndices(desc, mod), () => 1),
+	);
+	if (desc.concrete.length === 0) return;
+	addFunc(
+		`__itag$${desc.key}`,
+		["externref"],
+		["i32"],
+		refTestChain(
+			desc.concrete.map((c) => c.typeIndex),
+			(i) => i + 1,
+		),
+	);
 }
 
 // ── JS facade generation ─────────────────────────────────────
@@ -848,13 +976,17 @@ function inExpr(desc, v) {
 		case "struct":
 			if (desc.info.pkgTarget === "both")
 				return `${P}to_${desc.name}(${v}, ${desc.ptr ? "false" : "true"})`;
-			return desc.ptr ? `${P}href(${v})` : `${P}hval_${desc.name}(${v})`;
+			return desc.ptr
+				? `${P}href_${desc.name}(${v})`
+				: `${P}hval_${desc.name}(${v})`;
 		case "slice":
 			return `${P}slin_${desc.key}(${v})`;
 		case "array":
 			return `${P}arrin_${desc.key}(${v})`;
 		case "func":
 			return `${P}fnin_${desc.key}(${v})`;
+		case "iface":
+			return `${P}ifin_${desc.key}(${v})`;
 		default:
 			return v;
 	}
@@ -881,6 +1013,8 @@ function outExpr(desc, v) {
 			return `${P}arrout_${desc.key}(${v})`;
 		case "func":
 			return `${P}fnout_${desc.key}(${v})`;
+		case "iface":
+			return `${P}ifout_${desc.key}(${v})`;
 		default:
 			return v;
 	}
@@ -1122,6 +1256,11 @@ const ${P}u64out = (v) => {
 };
 const ${P}strin = (v) => (v == null ? "" : String(v));
 const ${P}href = (h) => (h == null ? null : h.__ref);
+// Tags a struct pointer held in an interface (same marker as the JS backend's __ifp).
+const ${P}ptag = (h) => {
+	if (h !== null && h.__p !== true && Object.isExtensible(h)) Object.defineProperty(h, "__p", { "value": true, "configurable": true });
+	return h;
+};
 const ${P}NIL_DEREF_PATTERNS = [
 	"dereferencing a null pointer", // V8
 	"dereferencing null pointer", // SpiderMonkey
@@ -1167,7 +1306,10 @@ export function generateFacade(
 	out.push(`const ${P}env = {};`);
 	for (const [key, desc] of needs.funcs) {
 		const names = desc.params.map((_, i) => `a${i}`);
-		const call = `fn(${desc.params.map((d, i) => outExpr(d, names[i])).join(", ")})`;
+		const args = desc.params.map((d, i) =>
+			isPtrBoth(d) ? `${P}view_${d.name}(${names[i]})` : outExpr(d, names[i]),
+		);
+		const call = `fn(${args.join(", ")})`;
 		let body;
 		if (desc.returns.length === 0) body = `${call};`;
 		else if (desc.returns.length === 1)
@@ -1246,20 +1388,34 @@ function ${P}arrview_${key}(a) {
 			desc.returns,
 			["c"],
 		);
-		out.push(`const ${P}fnmap_${key} = new WeakMap();
+		out.push(`const ${P}fn_j2w_${key} = new WeakMap();
+const ${P}fn_w2j_${key} = new WeakMap();
 function ${P}fnin_${key}(fn) {
 	if (fn == null) return null;
-	let c = ${P}fnmap_${key}.get(fn);
-	if (!c) { c = __w.__wrap_fn$${key}(fn); ${P}fnmap_${key}.set(fn, c); }
+	let c = ${P}fn_j2w_${key}.get(fn);
+	if (!c) {
+		c = __w.__wrap_fn$${key}(fn);
+		${P}fn_j2w_${key}.set(fn, c);
+		${P}fn_w2j_${key}.set(c, fn);
+	}
 	return c;
 }
 function ${P}fnout_${key}(c) {
 	if (c == null) return null;
-	return (${names.join(", ")}) => {
+	let fn = ${P}fn_w2j_${key}.get(c);
+	if (!fn) {
+		fn = (${names.join(", ")}) => {
 ${indent(body, "\t")}
-	};
+		};
+		fn.__ref = c;
+		${P}fn_w2j_${key}.set(c, fn);
+		${P}fn_j2w_${key}.set(fn, c);
+	}
+	return fn;
 }`);
 	}
+
+	for (const [key, desc] of needs.ifaces) genIfaceFacade(out, key, desc);
 
 	for (const c of meta.consts) out.push(`const ${c.name} = ${c.value};`);
 
@@ -1348,21 +1504,66 @@ ${backLines.join("\n")}
 }`);
 }
 
+function genIfaceFacade(out, key, desc) {
+	const methods = desc.methods.map((m) => {
+		const { names, body } = genFuncBody(m.callName, m.params, m.returns, [
+			"this.__ref",
+		]);
+		return `\t${m.name}(${names.join(", ")}) {\n${indent(body, "\t")}\n\t}`;
+	});
+	const cases = desc.concrete.map((c, i) => {
+		const wrap = c.both ? `${P}view_${c.name}(r)` : `${c.name}.__wrap(r)`;
+		return `\t\tcase ${i + 1}: return ${P}ptag(${wrap});`;
+	});
+	const tag =
+		cases.length > 0
+			? `\tswitch (__w.__itag$${key}(r)) {\n${cases.join("\n")}\n\t}\n`
+			: "";
+	const msg = `GoFront: a JS-implemented value cannot cross into wasm as interface '${desc.name}'; implement it in a wasm package or pass a func callback`;
+	const implMsg = `GoFront: wasm value does not implement interface '${desc.name}'`;
+	out.push(`class ${P}I_${key} {
+	constructor(r) { this.__ref = r; }
+${methods.join("\n")}
+}
+const ${P}ic_${key} = new WeakMap();
+function ${P}ifout_${key}(r) {
+	if (r == null) return null;
+${tag}	let o = ${P}ic_${key}.get(r);
+	if (!o) { o = new ${P}I_${key}(r); ${P}ic_${key}.set(r, o); }
+	return o;
+}
+function ${P}ifin_${key}(v) {
+	if (v == null) return null;
+	if (v.__ref === undefined) throw new TypeError(${JSON.stringify(msg)});
+	if (!__w.__impl$${key}(v.__ref)) throw new TypeError(${JSON.stringify(implMsg)});
+	return v.__ref;
+}`);
+}
+
 function genHandleStruct(out, name, fields, methods) {
 	// `$`-suffixed params keep the mangler from renaming the matching getters.
 	const ctorParams = fields.map((f) => `${f.name}$ = ${zeroExpr(f.desc)}`);
 	const ctorArgs = fields.map((f) => inExpr(f.desc, `${f.name}$`));
+	const fromArgs = fields.map((f) => `o.${f.name}`);
+	const ptrMsg = `GoFront: expected a ${name} handle for a *${name} parameter (use ${name}.from(obj) to create one)`;
 	const lines = [
 		`const ${P}h_${name} = new WeakMap();
 function ${P}hval_${name}(h) {
 	if (h == null) return __w.__zero_${name}();
-	return __w.__clone_${name}(h.__ref);
+	if (h.__ref !== undefined) return __w.__clone_${name}(h.__ref);
+	return ${name}.from(h).__ref;
+}
+function ${P}href_${name}(h) {
+	if (h == null) return null;
+	if (h.__ref !== undefined) return h.__ref;
+	throw new TypeError(${JSON.stringify(ptrMsg)});
 }
 class ${name} {
 	constructor(${ctorParams.join(", ")}) {
 		this.__ref = __w.__new_${name}(${ctorArgs.join(", ")});
 		${P}h_${name}.set(this.__ref, this);
 	}
+	static from(o) { return new ${name}(${fromArgs.join(", ")}); }
 	static __wrap(ref) {
 		if (ref == null) return null;
 		let h = ${P}h_${name}.get(ref);

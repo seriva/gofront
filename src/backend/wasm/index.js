@@ -15,6 +15,7 @@ import {
 import { FunctionEmitter } from "./emit.js";
 import { encodeModule, isGoFrontWasm } from "./encode.js";
 import { hasGenerics, monomorphise } from "./monomorph.js";
+import { hasNativeWasmOpt, optimizeWasm } from "./optimize.js";
 import {
 	getFuncSignature,
 	getMapKeyValTypes,
@@ -26,7 +27,7 @@ import {
 } from "./types.js";
 import { emitWat } from "./wat.js";
 
-export { isGoFrontWasm };
+export { hasNativeWasmOpt, isGoFrontWasm, optimizeWasm };
 
 export class ModuleEmitter {
 	constructor(checker, lowerResult = null, programs = [], options = {}) {
@@ -2176,6 +2177,46 @@ export function compileWasm(source, options = {}) {
 	return { ...res, errors: [] };
 }
 
+function _isPointerGoType(t, mod) {
+	if (!t) return false;
+	if (t.kind === "pointer" || t.kind === "PointerType" || t.kind === "StarExpr")
+		return true;
+	// `type P *T` used as a field type: look through the name.
+	const named =
+		t.kind === "named" || t.kind === "TypeName" || t.kind === "Ident";
+	const under = named
+		? (t.underlying ?? mod.checker?.types?.get(t.name)?.underlying)
+		: null;
+	return under ? _isPointerGoType(under, mod) : false;
+}
+
+// Constant-expression zero value of a struct global. Nested struct values are
+// built in place: a null ref would trap on the first field access.
+function _zeroStructConst(structInfo, mod) {
+	const out = [];
+	for (const f of structInfo.fields) out.push(..._zeroFieldConst(f, mod));
+	out.push({ op: "struct.new", typeIndex: structInfo.typeIndex });
+	return out;
+}
+
+function _zeroFieldConst(f, mod) {
+	const w = f.wType;
+	if (w === "i64") return [{ op: "i64.const", value: 0n }];
+	if (w === "f32" || w === "f64") return [{ op: `${w}.const`, value: 0 }];
+	if (w === "externref") return [{ op: "ref.null", heapType: "extern" }];
+	if (w === "anyref") return [{ op: "ref.null", heapType: "any" }];
+	if (typeof w !== "object" || w === null)
+		return [{ op: "i32.const", value: 0 }];
+	const ti = w.typeIndex;
+	const slice = typeof ti === "number" ? mod.getSliceTypeByIndex(ti) : null;
+	if (slice) return [{ op: "global.get", index: slice.emptyGlobalIndex }];
+	if (typeof ti === "number" && !_isPointerGoType(f.goType, mod)) {
+		for (const s of mod.structTypes.values())
+			if (s.typeIndex === ti) return _zeroStructConst(s, mod);
+	}
+	return [{ op: "ref.null", heapType: ti ?? "any" }];
+}
+
 function _collectPackageGlobals(progs, mod, checker) {
 	const pending = []; // non-constant initializers, run by the start function
 	for (const p of progs) {
@@ -2215,34 +2256,7 @@ function _collectPackageGlobals(progs, mod, checker) {
 								(s) => s.typeIndex === wType.typeIndex,
 							);
 							if (structInfo) {
-								initInsts = [];
-								for (const f of structInfo.fields) {
-									if (f.wType === "i64")
-										initInsts.push({ op: "i64.const", value: 0n });
-									else if (f.wType === "f32" || f.wType === "f64")
-										initInsts.push({ op: `${f.wType}.const`, value: 0.0 });
-									else if (typeof f.wType === "object") {
-										const fieldSlice =
-											typeof f.wType.typeIndex === "number"
-												? mod.getSliceTypeByIndex(f.wType.typeIndex)
-												: null;
-										if (fieldSlice) {
-											initInsts.push({
-												op: "global.get",
-												index: fieldSlice.emptyGlobalIndex,
-											});
-										} else {
-											initInsts.push({
-												op: "ref.null",
-												heapType: f.wType.typeIndex ?? "any",
-											});
-										}
-									} else initInsts.push({ op: "i32.const", value: 0 });
-								}
-								initInsts.push({
-									op: "struct.new",
-									typeIndex: structInfo.typeIndex,
-								});
+								initInsts = _zeroStructConst(structInfo, mod);
 							} else {
 								initInsts = [
 									{ op: "ref.null", heapType: wType.typeIndex ?? "any" },

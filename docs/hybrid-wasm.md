@@ -79,12 +79,11 @@ copies agree bit-for-bit:
 ## What `wasm` packages support
 
 The backend (`src/backend/wasm/`) implements: structs, pointers, methods, arrays, slices
-(`append`, slicing, `copy`), strings, maps, empty interfaces (`any`), closures (including
+(`append`, slicing, `copy`), strings, maps, interfaces, generics, closures (including
 closures inside methods), `defer`/`panic`/`recover`, and `math`/`math/bits`.
 
 Not yet supported inside `wasm` code (each reports a `… (planned)` diagnostic):
 
-- Non-empty interfaces and generics.
 - Referencing a **non-literal** package constant (`const X = f()`); literal constants are
   inlined.
 - `t.Run` subtests in `wasm` test packages.
@@ -115,8 +114,9 @@ compile error.
 | Struct from a `wasm` package (`T`, `*T`) | Opaque **handle** class with stable identity. Scalar fields are read/written through accessors; aggregate fields (`b.Pos.X = 1`, `b.Tags[0] = 2`) are live views, so writes reach WASM memory. |
 | `[]T`, `[N]T` | Copied element-wise in both directions. TypedArray inputs (`Float32Array`, `Int32Array`, …) are accepted. |
 | `func` values | Wrapped in both directions, so callbacks work either way. |
+| Named non-empty interfaces | **WASM → JS:** an exported `*T` arrives as its handle class (or `both` live view); other dynamic types arrive as a facade object whose methods call into WASM. **JS → WASM:** only WASM-owned values (handles, facades) are accepted. A `js` type implementing a `wasm` interface is a compile error (`type '*tri' (js) cannot implement wasm interface 'Shape' across the boundary; …`); keep implementations in WASM or pass a `func` callback. |
 | `*testing.T` | Stays a JS object; `t.Errorf`, `t.Fatal`, `t.Log`, `t.Skip`, `t.Name`, `t.Failed`, … are routed back to the harness. |
-| `map`, `error`, non-empty interfaces, pointers to non-structs, anonymous structs, exported non-literal constants | **Rejected** with `… is not yet supported across the wasm boundary (planned)`. |
+| `map`, `error`, anonymous interfaces, pointers to non-structs, anonymous structs, exported non-literal constants | **Rejected** with `… is not yet supported across the wasm boundary (planned)`. |
 
 ### Panics and traps
 
@@ -148,6 +148,17 @@ module carries a `gofront` custom section; stale `app.wasm`/`app.wat` files are 
 removed by a rebuild when they carry that section, so hand-placed modules are never
 deleted.
 
+### Optimization pipeline (Binaryen)
+
+`gofront build --release` (or `--wasm-opt`) optimizes `app.wasm` through Binaryen:
+
+- **Zero setup:** Uses the `wasm-opt` CLI shipped by the optional `binaryen` npm package (run through node, no native toolchain) and automatically prefers a native `wasm-opt` binary if present on `PATH`. If neither is available, `--release`/`--wasm-opt` fail with an actionable error; plain `gofront build` is unaffected.
+- **WasmGC feature flags:** Configured for `GC`, `ReferenceTypes`, `BulkMemory`, `Multivalue`, `ExceptionHandling`, `MutableGlobals`, `NontrappingFPToInt`, and `TailCall`.
+- **Optimization passes:** Level `-O3` combined with GUFA (`--gufa`: devirtualization, type refinement, function inlining, dead type/code elimination).
+- **Size savings & validation:** Typically yields **~23% binary size reduction** and validates module structure post-optimization.
+- **Source maps:** Passing `--source-map` emits a matching `app.wasm.map` and embeds the `sourceMappingURL` section.
+- **Instant dev reload:** `gofront dev` bypasses optimization for sub-10ms instant hot-reload.
+
 ---
 
 ## Testing hybrid packages
@@ -167,8 +178,7 @@ main guard that strict numeric mode is doing its job.
 
 ## Benchmarking
 
-`npm run bench:raycast` compiles a snapshot of the simplefps `mathx` (`both`) and
-`collision` (`wasm`) packages twice — all-JS and hybrid — casts 100k rays through 131k
-triangles and reports rays/s and bytes allocated per ray. Pass `--wasm-opt <path>` to also
-measure the ceiling with Binaryen (not a dependency). Results are noisy (±8%); always
-compare interleaved runs.
+`npm run bench` (or `test/e2e/perf/raycast-bench.js`) compiles a snapshot of the simplefps
+`mathx` (`both`) and `collision` (`wasm`) packages twice — all-JS and hybrid — casts 100k rays
+through 131k triangles and reports rays/s, allocation per ray, and binary size.
+Pass `--wasm-opt` to run the built-in Binaryen optimization pipeline over the emitted module.

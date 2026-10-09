@@ -159,6 +159,7 @@ export const assignabilityMethods = {
 		target = this.resolveType(target);
 		source = this.resolveType(source);
 		this._markIfaceBox(target, source, node);
+		this._checkWasmIfaceProvider(target, source, node);
 		if (this._assertAssignableEarlyReturn(target, source)) return;
 		if (isPointer(target) && isPointer(source)) {
 			this.assertAssignable(
@@ -198,6 +199,24 @@ export const assignabilityMethods = {
 		if (sBase?.kind === "struct") node._ifaceBox = "value";
 		else if (sBase?.kind === "pointer" && structOf(sBase.base))
 			node._ifaceBox = "ptr";
+	},
+
+	// A js package cannot provide an implementation of a wasm interface: the
+	// value would cross into wasm, and JS-implemented proxies are not supported.
+	_checkWasmIfaceProvider(target, source, node) {
+		if (this.target !== "js" || target?.kind !== "named") return;
+		if (target._target !== "wasm" || !source) return;
+		const iface = this.resolveType(target.underlying);
+		if (iface?.kind !== "interface" || !(iface.methods?.size > 0)) return;
+		const ptr = source.kind === "pointer";
+		const src = ptr ? this.resolveType(source.base) : source;
+		if (src?.kind !== "named" || src._target === "wasm") return;
+		if (this.resolveType(src.underlying)?.kind === "interface") return;
+		if (!this.implements(source, iface, node)) return;
+		this.err(
+			`type '${ptr ? "*" : ""}${src.name}' (${src._target ?? "js"}) cannot implement wasm interface '${target.name}' across the boundary; implement it in a wasm package or pass a func callback`,
+			node,
+		);
 	},
 
 	_assertAssignableEarlyReturn(target, source) {

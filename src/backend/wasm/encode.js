@@ -396,6 +396,26 @@ export function encodeInstruction(inst) {
 		) {
 			return bytes;
 		}
+		if (
+			op === "ref.cast" ||
+			op === "ref.cast_null" ||
+			op === "ref.test" ||
+			op === "ref.test_null"
+		) {
+			const ht =
+				inst.heapType !== undefined
+					? inst.heapType
+					: inst.typeIndex !== undefined
+						? inst.typeIndex
+						: "any";
+			if (typeof ht === "number") {
+				bytes.push(...encodeI32LEB(ht));
+			} else {
+				const code = ValType[ht] ?? ValType[`${ht}ref`] ?? 0x6e;
+				bytes.push(code);
+			}
+			return bytes;
+		}
 		if (inst.typeIndex !== undefined) {
 			bytes.push(...encodeU32LEB(inst.typeIndex));
 		}
@@ -774,7 +794,7 @@ export function encodeCodeSection(funcs) {
 
 // Custom section placed right after the header; `isGoFrontWasm` keys off it.
 export const GOFRONT_SECTION_NAME = "gofront";
-const GOFRONT_SECTION_BYTES = [
+export const GOFRONT_SECTION_BYTES = [
 	0x00,
 	...encodeU32LEB(1 + GOFRONT_SECTION_NAME.length),
 	...encodeString(GOFRONT_SECTION_NAME),

@@ -35,7 +35,7 @@ features (e.g. `docs/v0.0.5/`).
 | Remaining language features in WASM | High | Draft | Non-empty interfaces (itabs, `ref.test`), generics (monomorphisation), insertion-ordered maps, `defer`/`recover` (EH encoding decision), remaining stdlib subset. |
 | Boundary v2 | High | Draft | WASM → JS closures, interface proxies both ways; `RaycastProvider` across the boundary. |
 | Shared buffers & `example/hybrid` | Medium | Draft | `gofront/shared` linear-memory TypedArray views; new particle-sim example with E2E. |
-| simplefps full split & benchmarks | Medium | Draft | `physics` (`DynamicBody`, `FPSController`) moves to `wasm`; optional `wasm-opt`; README target guide; published benchmarks. |
+| simplefps full split & benchmarks | Medium | Draft | `physics` (`DynamicBody`, `FPSController`) moves to `wasm`; built-in Binaryen (`binaryen` npm package) optimization pipeline for `--release`; README target guide; published benchmarks. |
 
 ---
 

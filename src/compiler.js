@@ -20,7 +20,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { buildSourceMap, CodeGen } from "./backend/js/index.js";
-import { compileWasmModule } from "./backend/wasm/index.js";
+import { compileWasmModule, optimizeWasm } from "./backend/wasm/index.js";
 import { log } from "./colors.js";
 import { parseDts } from "./dts-parser.js";
 import { Lexer } from "./lexer.js";
@@ -562,13 +562,35 @@ export function compileSingleFile(inputPath, options = {}) {
 	};
 
 	const merged = mergeCompilationChunks([...preambles, mainChunk]);
-	const { wasm, wat } = linkIntoBundle(options, merged, pkgTarget);
+	let { wasm, wat } = linkIntoBundle(options, merged, pkgTarget);
+	let wasmOptInfo = null;
+	let wasmSourceMap = null;
+
+	if (wasm && options.wasmOpt) {
+		const opt = optimizeWasm(wasm, {
+			sourceMap: Boolean(sourceMap && !options.isDependency),
+			sourceMapUrl: "app.wasm.map",
+			emitWat: Boolean(options.emitWat),
+		});
+		wasm = opt.wasm;
+		if (opt.wat) wat = opt.wat;
+		wasmOptInfo = opt;
+		wasmSourceMap = opt.sourceMap;
+	}
 
 	if (sourceMap && !options.isDependency) {
 		attachSourceMap(merged, outputDir);
 	}
 
-	return { js: merged.js, css: cg.getCss(), target: pkgTarget, wasm, wat };
+	return {
+		js: merged.js,
+		css: cg.getCss(),
+		target: pkgTarget,
+		wasm,
+		wat,
+		wasmOptInfo,
+		wasmSourceMap,
+	};
 }
 
 export function compileDir(dir, options = {}) {
@@ -699,7 +721,21 @@ export function compileFiles(files, options = {}) {
 	};
 
 	const merged = mergeCompilationChunks([...preambles, mainChunk]);
-	const { wasm, wat } = linkIntoBundle(options, merged, pkgTarget);
+	let { wasm, wat } = linkIntoBundle(options, merged, pkgTarget);
+	let wasmOptInfo = null;
+	let wasmSourceMap = null;
+
+	if (wasm && options.wasmOpt) {
+		const opt = optimizeWasm(wasm, {
+			sourceMap: Boolean(options.sourceMap && !options.isDependency),
+			sourceMapUrl: "app.wasm.map",
+			emitWat: Boolean(options.emitWat),
+		});
+		wasm = opt.wasm;
+		if (opt.wat) wat = opt.wat;
+		wasmOptInfo = opt;
+		wasmSourceMap = opt.sourceMap;
+	}
 
 	if (options.sourceMap && !options.isDependency) {
 		attachSourceMap(merged, outputDir);
@@ -717,6 +753,8 @@ export function compileFiles(files, options = {}) {
 		css: allCss,
 		wasm,
 		wat,
+		wasmOptInfo,
+		wasmSourceMap,
 		programs,
 		exportedSymbols: checker.getExportedSymbols(),
 		exportedTypes: checker.getExportedTypes(),
