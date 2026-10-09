@@ -586,12 +586,19 @@ func Try() error { return nil }`,
 		"error",
 	));
 
-test("non-empty interface parameters are rejected at the boundary", () =>
+test("anonymous non-empty interface parameters are rejected at the boundary", () =>
 	expectBoundaryError(
-		`type Shape interface { Area() float64 }
+		`func Touch() {}
+func Measure(s interface{ Area() float64 }) float64 { return s.Area() }`,
+		"anonymous interface",
+	));
+
+test("interface methods with unsupported signatures are rejected at the boundary", () =>
+	expectBoundaryError(
+		`type Shape interface { Tags() map[string]int }
 func Touch() {}
-func Measure(s Shape) float64 { return s.Area() }`,
-		"interface 'Shape'",
+func Measure(s Shape) int { return len(s.Tags()) }`,
+		"map (in method Shape.Tags)",
 	));
 
 test("exported struct fields are validated too", () =>
@@ -658,4 +665,601 @@ func main() { println(a.A(), b.B()) }
 `,
 		},
 		"'helper' is declared in both 'a' and 'b'",
+	));
+
+section(
+	"WASM Boundary v2 — WASM to JS closures & cached trampolines (Task H5.1)",
+);
+
+const CLOSURE_PKG_WASM = `//gofront:target wasm
+package clospkg
+
+import "../mathx"
+
+var savedHook func(int) int
+
+func MakeCounter() func() int {
+	c := 0
+	return func() int {
+		c++
+		return c
+	}
+}
+
+func SetHook(f func(int) int) {
+	savedHook = f
+}
+
+func GetHook() func(int) int {
+	return savedHook
+}
+
+func ApplyHook(x int) int {
+	if savedHook != nil {
+		return savedHook(x)
+	}
+	return 0
+}
+
+func CurriedAdd(a int) func(int) func(int) int {
+	return func(b int) func(int) int {
+		return func(c int) int {
+			return a + b + c
+		}
+	}
+}
+
+func DivModClosure(divisor int) func(int) (int, int) {
+	return func(n int) (int, int) {
+		return n / divisor, n % divisor
+	}
+}
+
+func FailingClosure() func(int) int {
+	return func(x int) int {
+		if x < 0 {
+			panic("closure negative")
+		}
+		return x * 2
+	}
+}
+
+func GetOps() []func(int) int {
+	return []func(int) int{
+		func(x int) int { return x + 10 },
+		func(x int) int { return x * 5 },
+	}
+}
+
+type DynamicBody struct {
+	Pos      mathx.Vec3
+	Mass     float64
+	OnBounce func(hp, hn *mathx.Vec3, speed float32)
+}
+
+func NewDynamicBody(pos mathx.Vec3, mass float64) *DynamicBody {
+	return &DynamicBody{Pos: pos, Mass: mass}
+}
+
+func (b *DynamicBody) Bounce(hp, hn *mathx.Vec3, speed float32) {
+	if b.OnBounce != nil {
+		b.OnBounce(hp, hn, speed)
+	}
+}
+
+func (b *DynamicBody) SetDefaultBounce() {
+	b.OnBounce = func(hp, hn *mathx.Vec3, speed float32) {
+		hp.X += float64(speed * 2)
+		hn.Y += float64(speed)
+	}
+}
+`;
+
+test("WASM closure returned to JS is wrapped in a cached trampoline with stable identity", async () => {
+	const res = await compileHybridProject(
+		{
+			"mathx/vec.go": MATHX_BOTH,
+			"clospkg/clospkg.go": CLOSURE_PKG_WASM,
+			"main.go": `package main
+
+import "./clospkg"
+
+func main() {
+	c := clospkg.MakeCounter()
+	println(c(), c())
+}
+`,
+		},
+		{
+			exports: [
+				"MakeCounter",
+				"SetHook",
+				"GetHook",
+				"ApplyHook",
+				"CurriedAdd",
+				"DivModClosure",
+				"FailingClosure",
+				"GetOps",
+				"DynamicBody",
+				"NewDynamicBody",
+			],
+		},
+	);
+	assertEqual(res.lines.join("\n"), "1 2");
+
+	// 1. Calling MakeCounter from JS returns a function with __ref
+	const c = res.mod.MakeCounter();
+	assertEqual(typeof c, "function");
+	assert(c.__ref !== undefined, "trampoline carries wasm reference");
+	assertEqual(c(), 1);
+	assertEqual(c(), 2);
+	assertEqual(c(), 3);
+
+	// 2. Roundtripping through WASM preserves stable function identity
+	res.mod.SetHook(c);
+	const retrieved = res.mod.GetHook();
+	assertEqual(retrieved, c);
+	assertEqual(retrieved(), 4);
+
+	// 3. Applying the hook from WASM executes the closure
+	assertEqual(res.mod.ApplyHook(100), 5); // counter advances to 5
+});
+
+test("JS callbacks passed to WASM roundtrip with stable identity", async () => {
+	const res = await compileHybridProject(
+		{
+			"mathx/vec.go": MATHX_BOTH,
+			"clospkg/clospkg.go": CLOSURE_PKG_WASM,
+			"main.go": `package main
+
+import "./clospkg"
+
+func main() { _ = clospkg.SetHook }
+`,
+		},
+		{ exports: ["SetHook", "GetHook", "ApplyHook"] },
+	);
+
+	const myJsCb = (x) => x * 10;
+	res.mod.SetHook(myJsCb);
+
+	// Reading back the hook returns the exact same JS function reference
+	const got = res.mod.GetHook();
+	assertEqual(got, myJsCb);
+
+	// WASM calling the hook runs the JS callback
+	assertEqual(res.mod.ApplyHook(7), 70);
+});
+
+test("WASM struct field closures (DynamicBody.OnBounce style) with live calls & copy-in/copy-out writeback", async () => {
+	const res = await compileHybridProject(
+		{
+			"mathx/vec.go": MATHX_BOTH,
+			"clospkg/clospkg.go": CLOSURE_PKG_WASM,
+			"main.go": `package main
+
+import "./clospkg"
+
+func main() { _ = clospkg.NewDynamicBody }
+`,
+		},
+		{ exports: ["DynamicBody", "NewDynamicBody", "Vec3"] },
+	);
+
+	const b = res.mod.NewDynamicBody(new res.mod.Vec3(0, 0, 0), 1);
+	assertEqual(b.OnBounce, null);
+
+	// Assign JS callback to struct field
+	const log = [];
+	b.OnBounce = (hp, _hn, speed) => {
+		log.push({ x: hp.X, speed });
+		hp.X += speed * 3;
+	};
+
+	// Identity preserved on reading back
+	assertEqual(typeof b.OnBounce, "function");
+
+	// WASM invokes Bounce, callback runs and mutates *mathx.Vec3
+	const hp = new res.mod.Vec3(10, 0, 0);
+	const hn = new res.mod.Vec3(0, 1, 0);
+	b.Bounce(hp, hn, 2);
+
+	assertEqual(log.length, 1);
+	assertEqual(log[0].x, 10);
+	assertEqual(log[0].speed, 2);
+	// copy-in / copy-out writeback verified
+	assertEqual(hp.X, 16);
+
+	// WASM assigns its own closure to OnBounce
+	b.SetDefaultBounce();
+	const bounceTramp1 = b.OnBounce;
+	const bounceTramp2 = b.OnBounce;
+	assertEqual(bounceTramp1, bounceTramp2); // cached trampoline stable identity
+	assertEqual(typeof bounceTramp1, "function");
+	assert(bounceTramp1.__ref !== undefined, "has underlying wasm ref");
+
+	// Calling the WASM closure trampoline directly from JS
+	bounceTramp1(hp, hn, 5);
+	assertEqual(hp.X, 26); // 16 + 5*2 = 26
+	assertEqual(hn.Y, 6); // 1 + 5 = 6
+
+	// Transfer closure from b to b2 without double wrapping
+	const b2 = res.mod.NewDynamicBody(new res.mod.Vec3(), 2);
+	b2.OnBounce = bounceTramp1;
+	assertEqual(b2.OnBounce, bounceTramp1); // stable identity across bodies
+	b2.Bounce(hp, hn, 1);
+	assertEqual(hp.X, 28); // 26 + 1*2 = 28
+
+	// Clear callback sets to nil
+	b.OnBounce = null;
+	assertEqual(b.OnBounce, null);
+	b.Bounce(hp, hn, 10);
+	assertEqual(hp.X, 28); // unchanged since OnBounce was nil
+});
+
+test("Panic inside WASM closure called from JS propagates as Error", async () => {
+	const res = await compileHybridProject(
+		{
+			"mathx/vec.go": MATHX_BOTH,
+			"clospkg/clospkg.go": CLOSURE_PKG_WASM,
+			"main.go": `package main
+
+import "./clospkg"
+
+func main() { _ = clospkg.FailingClosure }
+`,
+		},
+		{ exports: ["FailingClosure"] },
+	);
+
+	const f = res.mod.FailingClosure();
+	assertEqual(f(5), 10);
+
+	let err = null;
+	try {
+		f(-1);
+	} catch (e) {
+		err = e;
+	}
+	assert(err instanceof Error, "expected Error from closure panic");
+	assertEqual(err.message, "closure negative");
+});
+
+test("Higher-order WASM closures across boundary", async () => {
+	const res = await compileHybridProject(
+		{
+			"mathx/vec.go": MATHX_BOTH,
+			"clospkg/clospkg.go": CLOSURE_PKG_WASM,
+			"main.go": `package main
+
+import "./clospkg"
+
+func main() { _ = clospkg.CurriedAdd }
+`,
+		},
+		{ exports: ["CurriedAdd", "SetHook", "GetHook", "ApplyHook"] },
+	);
+
+	const add10 = res.mod.CurriedAdd(10);
+	const add10_20 = add10(20);
+	assertEqual(add10_20(30), 60);
+
+	// Boundary identity preservation & round-trip of higher-order closures
+	res.mod.SetHook(add10_20);
+	assertEqual(res.mod.GetHook(), add10_20);
+	assertEqual(res.mod.GetHook(), res.mod.GetHook());
+	assertEqual(res.mod.ApplyHook(30), 60);
+});
+
+test("WASM closure returning multiple values across boundary", async () => {
+	const res = await compileHybridProject(
+		{
+			"mathx/vec.go": MATHX_BOTH,
+			"clospkg/clospkg.go": CLOSURE_PKG_WASM,
+			"main.go": `package main
+
+import "./clospkg"
+
+func main() { _ = clospkg.DivModClosure }
+`,
+		},
+		{ exports: ["DivModClosure"] },
+	);
+
+	const dm = res.mod.DivModClosure(10);
+	const [q, r] = dm(42);
+	assertEqual(q, 4);
+	assertEqual(r, 2);
+});
+
+test("Slice of WASM closures crosses boundary with cached trampolines", async () => {
+	const res = await compileHybridProject(
+		{
+			"mathx/vec.go": MATHX_BOTH,
+			"clospkg/clospkg.go": CLOSURE_PKG_WASM,
+			"main.go": `package main
+
+import "./clospkg"
+
+func main() { _ = clospkg.GetOps }
+`,
+		},
+		{ exports: ["GetOps"] },
+	);
+
+	const ops = res.mod.GetOps();
+	assertEqual(ops.length, 2);
+	assertEqual(ops[0](5), 15);
+	assertEqual(ops[1](5), 25);
+});
+
+test("WASM struct `from` factory builds a handle from a plain JS object with closure", async () => {
+	const res = await compileHybridProject(
+		{
+			"mathx/vec.go": MATHX_BOTH,
+			"clospkg/clospkg.go": CLOSURE_PKG_WASM,
+			"main.go": `package main
+
+import "./clospkg"
+
+func main() { _ = clospkg.NewDynamicBody }
+`,
+		},
+		{ exports: ["DynamicBody", "Vec3"] },
+	);
+
+	const b = res.mod.DynamicBody.from({
+		Pos: new res.mod.Vec3(1, 2, 3),
+		Mass: 5,
+		OnBounce: (hp, _hn, s) => {
+			hp.X += s;
+		},
+	});
+	assertEqual(b.Mass, 5);
+	assertEqual(b.Pos.X, 1);
+	assertEqual(typeof b.OnBounce, "function");
+
+	const hp = new res.mod.Vec3(10, 0, 0);
+	const hn = new res.mod.Vec3(0, 1, 0);
+	b.Bounce(hp, hn, 4);
+	assertEqual(hp.X, 14);
+});
+
+test("WASM struct constructor is positional; plain objects are rejected for *T and copied for T", async () => {
+	const res = await compileHybridProject(
+		{
+			"boxpkg/box.go": `//gofront:target wasm
+package boxpkg
+
+type Box struct {
+	Val any
+	N   int
+}
+
+func GetVal(b *Box) any { return b.Val }
+func Bump(b *Box) { b.N++ }
+func Sum(b Box) int { return b.N + 1 }
+`,
+			"main.go": `package main
+import "./boxpkg"
+
+func main() { _ = boxpkg.GetVal }
+`,
+		},
+		{ exports: ["Box", "GetVal", "Bump", "Sum"] },
+	);
+
+	// A plain object as the first positional argument is the field value, never
+	// a keyed initialiser.
+	const payload = { Val: 42 };
+	const b = new res.mod.Box(payload);
+	assertEqual(b.Val, payload);
+	assertEqual(res.mod.GetVal(b), payload);
+	assertEqual(res.mod.Box.from({ Val: 42, N: 2 }).N, 2);
+
+	// *T parameters require a handle: a plain object would be a silent copy.
+	assertThrows(
+		() => res.mod.Bump({ N: 1 }),
+		"expected a Box handle for a *Box parameter",
+	);
+	// T (value) parameters copy a plain object field-wise.
+	assertEqual(res.mod.Sum({ N: 4 }), 5);
+});
+
+section("WASM Boundary v2 — interface resolution (Task H5.2)");
+
+const SHAPES_WASM = `//gofront:target wasm
+package shapes
+
+type Shape interface {
+	Area() float64
+	Scale(f float64) Shape
+}
+
+type Circle struct {
+	R float64
+}
+
+func (c *Circle) Area() float64 { return 3 * c.R * c.R }
+func (c *Circle) Scale(f float64) Shape { return &Circle{R: c.R * f} }
+
+type square struct {
+	s float64
+}
+
+func (q *square) Area() float64 { return q.s * q.s }
+func (q *square) Scale(f float64) Shape { return &square{s: q.s * f} }
+
+type rect struct {
+	w, h float64
+}
+
+func (r rect) Area() float64          { return r.w * r.h }
+func (r rect) Scale(f float64) Shape { return rect{w: r.w * f, h: r.h * f} }
+
+type Scene struct {
+	Main Shape
+}
+
+var kept Shape
+
+func NewCircle(r float64) Shape { return &Circle{R: r} }
+func NewSquare(s float64) Shape { return &square{s: s} }
+func NewRect(w, h float64) Shape { return rect{w: w, h: h} }
+
+func Keep(s Shape) { kept = s }
+func Kept() Shape  { return kept }
+
+func Measure(s Shape) float64 {
+	if s == nil {
+		return -1
+	}
+	return s.Area()
+}
+
+func All() []Shape {
+	return []Shape{&Circle{R: 1}, &square{s: 2}, rect{w: 1, h: 5}}
+}
+
+func Visit(f func(s Shape) float64) float64 {
+	return f(&square{s: 4})
+}
+
+func Broken() Shape { return &broken{} }
+
+type broken struct{}
+
+func (b *broken) Area() float64      { panic("no area") }
+func (b *broken) Scale(f float64) Shape { return b }
+`;
+
+const SHAPES_EXPORTS = [
+	"Circle",
+	"Scene",
+	"NewCircle",
+	"NewSquare",
+	"NewRect",
+	"Keep",
+	"Kept",
+	"Measure",
+	"All",
+	"Visit",
+	"Broken",
+];
+
+async function compileShapes(main = "func main() { _ = shapes.Measure }") {
+	return compileHybridProject(
+		{
+			"shapes/shapes.go": SHAPES_WASM,
+			"main.go": `package main
+
+import "./shapes"
+
+${main}
+`,
+		},
+		{ exports: SHAPES_EXPORTS },
+	);
+}
+
+test("exported *T held in an interface reaches JS as its handle class", async () => {
+	const res = await compileShapes();
+	const c = res.mod.NewCircle(2);
+	assert(c instanceof res.mod.Circle, "expected Circle handle");
+	assertEqual(c.R, 2);
+	assertEqual(c.Area(), 12);
+	assertEqual(c.__p, true);
+	const big = c.Scale(2);
+	assert(big instanceof res.mod.Circle, "Scale returns a Circle handle");
+	assertEqual(big.Area(), 48);
+	// The handle goes back in as the same wasm object.
+	res.mod.Keep(c);
+	assertEqual(res.mod.Kept(), c);
+	c.R = 3;
+	assertEqual(res.mod.Measure(c), 27);
+});
+
+test("unexported and boxed dynamic types reach JS as an interface facade", async () => {
+	const res = await compileShapes();
+	const q = res.mod.NewSquare(3);
+	assert(!(q instanceof res.mod.Circle), "square is not a Circle");
+	assertEqual(q.Area(), 9);
+	assertEqual(q.Scale(2).Area(), 36);
+	res.mod.Keep(q);
+	assertEqual(res.mod.Kept(), q, "facade identity is stable per wasm object");
+	assertEqual(res.mod.Measure(q), 9);
+
+	const r = res.mod.NewRect(2, 3);
+	assertEqual(r.Area(), 6);
+	assertEqual(r.Scale(2).Area(), 24);
+	assertEqual(res.mod.Measure(r), 6);
+	assertEqual(res.mod.Measure(null), -1);
+});
+
+test("interfaces cross inside slices, struct fields and callbacks", async () => {
+	const res = await compileShapes();
+	const all = res.mod.All();
+	assertEqual(all.map((s) => s.Area()).join(","), "3,4,5");
+	assert(all[0] instanceof res.mod.Circle, "slice element keeps handle class");
+
+	const scene = new res.mod.Scene();
+	assertEqual(scene.Main, null);
+	scene.Main = res.mod.NewSquare(5);
+	assertEqual(scene.Main.Area(), 25);
+
+	assertEqual(
+		res.mod.Visit((s) => s.Area() + 1),
+		17,
+	);
+});
+
+test("a panic in a wasm method called through the facade is a JS Error", async () => {
+	const res = await compileShapes();
+	const b = res.mod.Broken();
+	assertThrows(() => b.Area(), "no area");
+});
+
+test("JS-implemented values are rejected when crossing into wasm", async () => {
+	const res = await compileShapes();
+	assertThrows(
+		() => res.mod.Measure({ Area: () => 1, Scale: () => null }),
+		"a JS-implemented value cannot cross into wasm as interface 'Shape'",
+	);
+	// A wasm handle of an unrelated type is rejected too, instead of trapping
+	// inside the dispatcher.
+	assertThrows(
+		() => res.mod.Measure(new res.mod.Scene()),
+		"wasm value does not implement interface 'Shape'",
+	);
+	// Unexported implementers (facade values) still pass.
+	assertEqual(res.mod.Measure(res.mod.NewSquare(3)), 9);
+});
+
+test("GoFront JS code uses wasm interfaces (calls, round-trip)", async () => {
+	const res = await compileShapes(`func main() {
+	var s shapes.Shape = &shapes.Circle{R: 1}
+	println(s.Area(), shapes.Measure(s))
+	q := shapes.NewSquare(2)
+	println(q.Area(), shapes.Measure(q.Scale(2)))
+}`);
+	assertEqual(res.lines.join("\n"), "3 3\n4 16");
+});
+
+test("a JS type implementing a wasm interface is a compile error", () =>
+	expectCompileError(
+		{
+			"shapes/shapes.go": SHAPES_WASM,
+			"main.go": `package main
+
+import "./shapes"
+
+type tri struct{}
+
+func (t *tri) Area() float64              { return 1 }
+func (t *tri) Scale(f float64) shapes.Shape { return t }
+
+func main() { println(shapes.Measure(&tri{})) }
+`,
+		},
+		"type '*tri' (js) cannot implement wasm interface 'Shape' across the boundary; implement it in a wasm package or pass a func callback",
 	));

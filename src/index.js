@@ -58,7 +58,7 @@ GoFront — a Go-inspired language that compiles to JavaScript
 
 Usage:
   gofront dev [dir] [options]    Start dev server with live reload (default port 3000)
-  gofront build [dir] [options]  Build production bundle (-o <dir>, --pwa, --minify, --emit-wat)
+  gofront build [dir] [options]  Build production bundle (-o <dir>, --pwa, --minify, --emit-wat, --release, --wasm-opt)
   gofront check [dir|dir/...]    Type-check only (dir/... recurses into every package)
   gofront test [dir|dir/...] [--dom]  Run unit tests (-v verbose, -run <regex>)
   gofront prep [dir] [--minify]  Copy static assets and bundle vendor dependencies
@@ -66,6 +66,8 @@ Usage:
   gofront <file.go>              Compile single file and print to stdout
   gofront <dir>  (or gofront .)  Compile all *.go in directory as one bundle
   gofront <input> -o out.js      Compile and write to file (wasm packages also emit app.wasm)
+  gofront <input> --release      Production build with minification and Binaryen wasm optimization
+  gofront <input> --wasm-opt     Optimize wasm output with Binaryen (-O3 + GUFA)
   gofront <input> --check        Type-check only
   gofront <input> --watch        Watch for changes and recompile
   gofront <input> -o out.js --serve          Watch + serve with live reload (default port 3000)
@@ -212,8 +214,12 @@ const sourceMap = args.includes("--source-map");
 const serveMode = args.includes("--serve");
 const watchMode = args.includes("--watch") || serveMode;
 const copyAssetsFlag = args.includes("--copy-assets");
-const minifyOutput = args.includes("--minify");
-const mangleOutput = args.includes("--mangle");
+const releaseMode = args.includes("--release");
+const wasmOpt =
+	!args.includes("--no-wasm-opt") &&
+	(args.includes("--wasm-opt") || releaseMode);
+const minifyOutput = args.includes("--minify") || releaseMode;
+const mangleOutput = args.includes("--mangle") || releaseMode;
 const portFlag = args.indexOf("--port");
 const servePort = portFlag !== -1 ? parseInt(args[portFlag + 1], 10) : 3000;
 
@@ -239,6 +245,7 @@ if (!watchMode) {
 			outputFile,
 			dumpTokens,
 			dumpAst,
+			wasmOpt,
 		});
 	} catch (e) {
 		log.fail(e.message);
@@ -282,6 +289,13 @@ if (!watchMode) {
 			log.info(
 				`wrote ${formatWrittenDesc(written, outputFile)} ${ms(elapsedMs)}`,
 			);
+			if (result.wasmOptInfo && result.wasmOptInfo.originalSize > 0) {
+				const origKb = (result.wasmOptInfo.originalSize / 1024).toFixed(1);
+				const optKb = (result.wasmOptInfo.optimizedSize / 1024).toFixed(1);
+				log.info(
+					`wasm-opt: app.wasm ${origKb} kB → ${optKb} kB (-${result.wasmOptInfo.percentSaved}%) [${result.wasmOptInfo.engine}]`,
+				);
+			}
 		} catch (e) {
 			log.fail(`cannot write '${outputFile}': ${e.message}`);
 			process.exit(1);

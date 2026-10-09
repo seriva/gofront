@@ -194,7 +194,7 @@ For every `wasm` package imported by `js` code, the compiler generates a **JS fa
 | other slices | element-wise copy |
 | shared buffers | zero-copy (see below) |
 | func values (callbacks) | **JS → WASM:** JS function held as `externref`, called through a generic invoke import. **WASM → JS:** closure wrapped in a cached JS function calling an exported trampoline. Covers `OnBounce`-style hooks. |
-| interfaces | **WASM value passed to JS:** a facade object with the interface's methods calling WASM exports. **JS-implemented value passed into WASM:** not supported via dynamic itab proxies; keep provider implementations in WASM or pass typed function callbacks (`func`). Avoids slow double-boundary hops. |
+| interfaces | **WASM value passed to JS:** the handle class (or `both` live view) when the dynamic type is an exported `*T` whose JS class has every method; otherwise a facade object with the interface's methods calling WASM exports. Identity is stable per WASM object. **JS-implemented value passed into WASM:** not supported via dynamic itab proxies. `check` rejects a `js`/`both` type converted to a `wasm` interface, and the facade throws a `TypeError` for anything without a WASM ref or whose WASM type does not implement the interface. Values that reach the interface through `any` (e.g. stored in an `any` field and type-asserted on the WASM side) bypass the `check` diagnostic and are only caught by that runtime check. Keep provider implementations in WASM or pass typed function callbacks (`func`). Avoids slow double-boundary hops. Named interfaces only. |
 | maps | not allowed in exported signatures in v1.6.0. Use slices or methods. |
 
 **Design rule: keep the boundary coarse and per-frame.** One `world.Step(dt)`, a few controller updates and a handful of raycasts per frame are cheap. Fine-grained calls such as `Vec3.Add` from JS into WASM thousands of times per frame are exactly what `both` packages exist to avoid. `gofront check` can report boundary call sites inside loops in `js` packages as **hints**, not errors.
@@ -223,15 +223,20 @@ var Transforms = shared.NewFloat32(maxEntities * 16) // in a wasm package
 
 - **`build`:** `app.js` (JS packages + generated facades + loader) + `app.wasm` (all `wasm`/`both` code, one module) + `app.css`.
   - The loader uses `WebAssembly.instantiateStreaming` with top-level `await` before `main()`.
-  - Optional `wasm-opt` (Binaryen, GC + EH) when it is on `PATH`.
+  - **Binaryen optimization pipeline (`binaryen` npm package):**
+    - Built-in release optimization through the `wasm-opt` CLI shipped by the optional `binaryen` npm package (a JS-wrapped WebAssembly build run as a node child process; no native toolchain required).
+    - Integrated into `gofront build --release` (or `--wasm-opt`).
+    - Configures WasmGC features (`GC`, `ReferenceTypes`, `BulkMemory`, `Multivalue`, `ExceptionHandling`), optimization level (`-O3`), and GUFA (`--gufa`: devirtualization, type refinement, inlining, and dead type/code elimination).
+    - Prefers a native `wasm-opt` binary if available on `PATH` for fastest execution, falling back to the `binaryen` npm package's `wasm-opt`.
+    - Validates the optimized module with `WebAssembly.validate` prior to writing output.
   - The PWA precache includes `app.wasm`.
-- **`dev`:** serves `.wasm` as `application/wasm`. Rebuilds both outputs. Live reload as today.
+- **`dev`:** serves `.wasm` as `application/wasm`. Rebuilds both outputs directly via `src/backend/wasm/encode.js` without Binaryen optimization for sub-10ms instant hot reloads.
 - **`check`:** target and import-rule diagnostics, WASM-subset errors, boundary-retention errors, boundary-in-loop hints.
 - **`test`:**
   - `wasm` packages: tests are compiled to WASM and run in Node.
   - **`both` packages: tests run twice (JS and WASM) and the results must match.** This is the built-in determinism check.
   - `js` packages that import `wasm` packages: the hybrid bundle runs under Node (with JSDOM for `--dom`).
-- **Tooling:** dependency-free binary encoder (`src/backend/wasm/encode.js`), `--emit-wat`, `WebAssembly.validate` on every module in tests, golden WAT tests, per-example size budget in CI.
+- **Tooling:** dependency-free binary encoder (`src/backend/wasm/encode.js`), built-in Binaryen optimizer pipeline (`src/backend/wasm/optimize.js`), `--emit-wat`, `WebAssembly.validate` on every module in tests, golden WAT tests, per-example size budget in CI.
 
 ---
 
@@ -251,7 +256,7 @@ Current imports: `physics` is the only pure leaf (imports `math` only). `renderi
 |---|---|---|---|
 | `engine/mathx` (new) | `both` | `both` | `Vec3`, `Mat4`, `Quat`, `Transform`, `BoundingBox` (moved from `physics`) |
 | `engine/collision` (new) | `wasm` | `wasm` | `Trimesh`, `Octree`, `Ray` + raycasting (moved from `physics`). Needs only the v1.5 core subset (`any` fields, JS callbacks). |
-| `engine/physics` | `js` | `wasm` | `DynamicBody`, `FPSController`. Blocked on WASM → JS closures (`OnBounce`) and internal non-empty interface dispatch until v1.6 (in v1.6, `physics` queries `collision` directly in WASM). |
+| `engine/physics` | `js` | `wasm` | `DynamicBody`, `FPSController`. Done in H5.3: the static-world provider is `collision.StaticWorld` (WASM), so controller/body raycasts never cross the boundary; the controller owns a `CameraPose` value that the game copies in/out per frame; `OnBounce`/`OnRest`/`OnLand`/`OnJump` call back into JS. |
 | `engine/rendering`, `scene`, `systems`, `assets`, `game` | `js` | `js` | Import `mathx` instead of `physics` for math types |
 | `engine/animation` | `js` | `js` → candidate | Candidate for `wasm` (skinning → `shared` bone matrices) once the binary-reader dependency is moved to `assets` |
 
@@ -306,9 +311,9 @@ The hybrid design is delivered over three releases. Both WASM releases land in t
 - [x] **Task H4.4 — Defer & recover:** Exception handling emission (`exnref` vs legacy EH encoding). Language fixtures pass on WASM == JS-strict.
 
 ### Phase H5: Boundary v2 (WASM Closures & Boundary Discipline)
-- [ ] **Task H5.1 — WASM to JS closures:** Passing WASM closures across boundary into JS callers via cached trampolines.
-- [ ] **Task H5.2 — Boundary interface resolution:** Resolve boundary interfaces by keeping provider implementations on the WASM side or passing function callbacks, avoiding cross-boundary dynamic itab proxies.
-- [ ] **Task H5.3 — Physics migration:** Move `physics` (`DynamicBody`, `FPSController`) to `wasm` with full test suite passing.
+- [x] **Task H5.1 — WASM to JS closures:** Passing WASM closures across boundary into JS callers via cached trampolines.
+- [x] **Task H5.2 — Boundary interface resolution:** Resolve boundary interfaces by keeping provider implementations on the WASM side or passing function callbacks, avoiding cross-boundary dynamic itab proxies.
+- [x] **Task H5.3 — Physics migration:** Move `physics` (`DynamicBody`, `FPSController`) to `wasm` with full test suite passing.
 
 ### Phase H6: Shared Memory & Hybrid Example
 - [ ] **Task H6.1 — Linear-memory buffers:** Implement `gofront/shared` TypedArray zero-copy views.
@@ -316,8 +321,13 @@ The hybrid design is delivered over three releases. Both WASM releases land in t
 
 ### Phase H7: simplefps Full Split & Verification
 - [ ] **Task H7.1 — simplefps final split:** Physics and collision in WASM, animation candidate.
-- [ ] **Task H7.2 — Optimization & tooling:** Optional `wasm-opt` pipeline integration and WASM source maps.
-- [ ] **Task H7.3 — Documentation & benchmarks:** Target guide in README and published comparative benchmarks.
+- [x] **Task H7.2 — Binaryen optimization pipeline & tooling:**
+  - Add `binaryen` npm package as an `optionalDependency` (cross-platform, no native build tools); `--release`/`--wasm-opt` fail with an actionable error when neither it nor a native `wasm-opt` is present.
+  - Implement optimizer wrapper (`src/backend/wasm/optimize.js`) configuring WasmGC feature flags (`Features.GC`, `Features.ReferenceTypes`, `Features.BulkMemory`, `Features.Multivalue`, `Features.ExceptionHandling`), optimization levels (`-O3`), and GUFA (`--gufa`).
+  - Wire `--release` / `--wasm-opt` flags into `gofront build` CLI; detect native `wasm-opt` on `PATH` with fallback to `binaryen` npm module.
+  - Assert module validity post-optimization via `WebAssembly.validate` and report size reduction metrics in CLI verbose output.
+  - WASM source maps.
+- [ ] **Task H7.3 — Documentation & benchmarks:** Target guide in README and published comparative benchmarks (reporting unoptimized vs `wasm-opt` binary size and raycast/fps throughput).
 
 
 ---
