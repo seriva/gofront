@@ -65,8 +65,9 @@ inline source maps are supported via VLQ-encoded mappings.
 ### 5. Lowering & WASM backend (`src/lower/`, `src/backend/wasm/`)
 
 `src/lower/` runs analysis passes shared by both backends (ownership/clone elision, address-taken
-boxing, range shape, named returns/`defer`, embedded-method stubs, closure captures, and pointer
-escape analysis) and stores the results in side tables keyed by AST node.
+boxing, range shape, named returns/`defer`, embedded-method stubs, closure captures, global
+immutability/init-path analysis, and pointer escape analysis) and stores the results in side tables
+keyed by AST node.
 
 When a package targets WebAssembly (`//gofront:target wasm` or `both`), `src/backend/wasm/` emits
 a WebAssembly GC module:
@@ -74,12 +75,20 @@ a WebAssembly GC module:
 | File | Role |
 |---|---|
 | `index.js` | `ModuleEmitter` — lowers the typed AST into module IR (types, functions, imports, exports) |
+| `monomorph.js` | Monomorphisation of generic functions and struct types for the WASM target |
 | `types.js` | GoFront types → WasmGC types; recursive structs share one `rec` group |
-| `emit.js` | `FunctionEmitter` — statements and expressions → instructions |
-| `encode.js` | Module IR → binary (`LEB128`, sections, `gofront` custom section) — no dependencies |
+| `emit.js` | `FunctionEmitter` core — prologue/epilogue, defer/recover frames, locals, control stack; composed from the mixins below |
+| `emit-stmts.js` | statements (decls, assignment, `if`/`for`/`switch`/`range`, `return`) |
+| `emit-exprs.js` | expressions (literals, operators, indexing, slicing, conversions) |
+| `emit-builtins.js` | `panic`/`recover`, Go builtins (`len`, `append`, `make`, …) and call dispatch |
+| `emit-maps.js` | map runtime helpers (key hash/eq, get/set/delete, iteration) and zero values |
+| `emit-shared.js` | `gofront/shared` linear-memory buffer allocation, load/store indexing, `Subarray` and `copy` |
+| `emit-stdlib.js` | natively implemented stdlib (`math`, `math/bits`, `maps`, `slices`, `strings`, `strconv`, `fmt`, `testing`, `errors`, `sort`, `unicode/utf8`) |
+| `encode.js` | Module IR → binary (`LEB128`, sections, `gofront` custom section, `app.wasm.map` source maps) — no dependencies |
+| `optimize.js` | Binaryen (`wasm-opt`) optimization pipeline (`-O3` + `--gufa`) and source map pass-through for `--release` / `--wasm-opt` |
 | `wat.js` | Module IR → WAT text for `--emit-wat` and golden tests |
 | `glue.js` | JS imports (`Math`, string builtins, console, panic) and the `instantiateWasm()` loader |
-| `boundary.js` | The JS facade spliced into `app.js`: handle classes, copy-in/out, live views, trap mapping |
+| `boundary.js` | The JS facade spliced into `app.js`: handle classes, copy-in/out, live views, `gofront/shared` views, trap mapping |
 
 `compiler.js` links every `wasm`/`both` unit reached by a build into a single `app.wasm` and
 rejects top-level name collisions between them.
@@ -98,6 +107,7 @@ reported as `pkg [js]` and `pkg [wasm]` — ensuring both backends produce ident
 src/
   index.js            CLI entry: argument routing, file I/O, watch mode
   cli-core.js         dev / build / check / test / prep / init command implementations
+  colors.js           ANSI color helpers and diagnostic formatting
   compiler.js         compileDir / compileSingleFile: parse → check → lower → emit, package linking
   resolver.js         import resolution: local packages, npm types, .d.ts, builtin package list
   project-config.js   gofront.json / package.json "gofront" settings

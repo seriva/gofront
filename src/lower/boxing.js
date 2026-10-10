@@ -1,6 +1,8 @@
 // src/lower/boxing.js
 // Identifies address-taken scalar variables that require heap boxing ({ value: x }).
 
+import { forEachChild } from "./walk.js";
+
 export function isReferenceType(t) {
 	if (!t) return false;
 	const base = t.kind === "named" ? t.underlying : t;
@@ -28,9 +30,6 @@ export function scanAddressTaken(node, boxedVars = new Set()) {
 		}
 	}
 	// Recurse into FuncLit too — closures may take address of outer vars
-	for (const key of Object.keys(node)) {
-		if (key.startsWith("_")) continue;
-		scanAddressTaken(node[key], boxedVars);
-	}
+	forEachChild(node, (child) => scanAddressTaken(child, boxedVars));
 	return boxedVars;
 }

@@ -95,7 +95,7 @@ func Render() {
 	assertContains(msg, "package 'gom' is not available in wasm packages");
 });
 
-test("wasm package rejects defer statements with planned message", () => {
+test("wasm package allows defer statements", () => {
 	const src = `//gofront:target wasm
 package physics
 
@@ -104,12 +104,7 @@ func Cleanup() {
 }
 `;
 	const { errors } = compile(src);
-	assert(errors.length > 0);
-	const msg = errors.map((e) => e.message).join("\n");
-	assertContains(
-		msg,
-		"'defer' is not yet supported in wasm packages (planned)",
-	);
+	assert(!errors || errors.length === 0);
 });
 
 test("wasm package rejects async function declarations and await", () => {
@@ -228,13 +223,41 @@ test("wasm package rejects stdlib the backend does not implement", () => {
 	const src = `//gofront:target wasm
 package m
 
-import "strings"
+import "regexp"
 
-func F() int { return len(strings.ToUpper("a")) }
+func F() bool { return regexp.MustCompile("a").MatchString("a") }
 `;
 	const err = compileTemp({ "m.go": src });
-	assertContains(err, "'strings' is not yet available in wasm packages");
-	assertContains(err, "1 unsupported stdlib import (strings)");
+	assertContains(err, "'regexp' is not yet available in wasm packages");
+	assertContains(err, "1 unsupported stdlib import (regexp)");
+});
+
+test("wasm package rejects stdlib members the backend does not implement", () => {
+	const src = `//gofront:target wasm
+package m
+
+import "strings"
+
+func F() string { return strings.Map(func(r rune) rune { return r }, "a") }
+`;
+	const err = compileTemp({ "m.go": src });
+	assertContains(err, "'strings.Map' is not yet available in wasm packages");
+	assertContains(err, "move this call to a JS package");
+});
+
+test("wasm package accepts supported strings/strconv members", () => {
+	const src = `//gofront:target wasm
+package m
+
+import (
+	"strconv"
+	"strings"
+)
+
+func F(s string) string { return strings.ToUpper(strings.TrimSpace(s)) + strconv.Itoa(len(s)) }
+`;
+	const err = compileTemp({ "m.go": src });
+	assertEqual(err, "");
 });
 
 test("wasm package cannot import a js package", () => {
@@ -267,6 +290,44 @@ var N = col.N
 		"package 'mathx' (both) can only import 'both' packages; 'col' is wasm",
 	);
 	assertContains(err, "1 blocker — 1 wasm package import (col)");
+});
+
+test("js package calling a wasm package inside a loop gets a boundary hint", () => {
+	const warnings = [];
+	const origErr = console.error;
+	console.error = (msg) => warnings.push(String(msg));
+	let err;
+	try {
+		err = compileTemp({
+			"main.go": `package main
+
+import "./phys"
+
+func Main() int32 {
+	var total int32
+	for i := int32(0); i < 10; i++ {
+		total += phys.Step(i)
+	}
+	return total + phys.Step(1)
+}
+`,
+			"phys/phys.go":
+				"//gofront:target wasm\npackage phys\n\nfunc Step(x int32) int32 { return x * 2 }\n",
+		});
+	} finally {
+		console.error = origErr;
+	}
+	assertEqual(err, "");
+	const text = warnings.join("\n");
+	assertContains(
+		text,
+		"'phys.Step' crosses the JS→WASM boundary inside a loop",
+	);
+	assertContains(text, "move the loop into the wasm package");
+	assertEqual(
+		warnings.filter((w) => w.includes("crosses the JS→WASM boundary")).length,
+		1,
+	);
 });
 
 test("typechecker generates summary diagnostic line with blockers count", () => {

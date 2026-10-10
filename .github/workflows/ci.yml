@@ -67,7 +67,7 @@ jobs:
         run: npm run check
 
       - name: Run tests
-        run: npm run test:all
+        run: npm test && npm run test:e2e
 
   publish:
     needs: test
@@ -117,8 +117,8 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Build reactive example
-        run: npm run build:reactive
+      - name: Build examples
+        run: npm run build
 
       - name: Prepare pages artifact
         run: |

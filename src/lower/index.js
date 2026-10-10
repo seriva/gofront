@@ -9,16 +9,17 @@ export * from "./functions.js";
 export * from "./globals.js";
 export * from "./ownership.js";
 export * from "./range.js";
+export * from "./walk.js";
 
 import { scanAddressTaken } from "./boxing.js";
 import { analyzeCaptures } from "./captures.js";
 import { computeEmbeddedStubs } from "./embedding.js";
 import { paramEscapes } from "./escape.js";
-import { extractNamedReturns, hasDefer } from "./functions.js";
+import { extractNamedReturns, hasDefer, normalizeDefers } from "./functions.js";
 import { computeGlobalAnalysis } from "./globals.js";
 import { OwnershipContext } from "./ownership.js";
 
-export class LowerResult {
+class LowerResult {
 	constructor() {
 		// Map<ASTNode (FuncDecl, MethodDecl, FuncLit), Set<string>>
 		this.boxedVars = new Map();
@@ -52,6 +53,8 @@ export function lower(programOrPrograms, checker = null) {
 	const programs = Array.isArray(programOrPrograms)
 		? programOrPrograms
 		: [programOrPrograms];
+
+	normalizeDefers(programs);
 
 	// 1. Aggregate methods across all files in the package
 	const methodMap = new Map();

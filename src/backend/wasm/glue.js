@@ -1,14 +1,16 @@
 // src/backend/wasm/glue.js
 // Runtime imports and JS glue for executing GoFront WASM modules.
 
-import { WASM_IMPORTS_JS } from "./boundary.js";
+import { WASM_IMPORTS_JS, WASM_STDLIB_JS } from "./boundary.js";
 
 // The import table is authored once as source text (it is spliced into the
 // production bundle by the facade); evaluate that same text here so tests
 // exercise exactly what ships.  The text is a compile-time constant.
-const makeImports = new Function(`${WASM_IMPORTS_JS}\nreturn __gfw_imports;`)();
+const makeImports = new Function(
+	`${WASM_IMPORTS_JS}\n${WASM_STDLIB_JS}\nreturn __gfw_imports;`,
+)();
 
-export function createWasmImports({
+function createWasmImports({
 	stringTable = [],
 	panicTag = null,
 	stdout = null,
@@ -29,6 +31,14 @@ const NIL_DEREF_PATTERNS = [
 	"null pointer dereference", // SpiderMonkey
 	"null dereference", // JavaScriptCore
 ];
+
+function safeString(v) {
+	try {
+		return String(v);
+	} catch {
+		return "[panic object]";
+	}
+}
 
 function isNilDerefTrap(e) {
 	if (
@@ -53,6 +63,7 @@ export function instantiateWasm(
 
 	const module = new WebAssembly.Module(wasmBytes);
 	const instance = new WebAssembly.Instance(module, imports);
+	imports.__bind?.(instance.exports);
 
 	// The module exports its panic tag if defined internally, or uses the imported one
 	const tag = instance.exports.panicTag ?? defaultPanicTag;
@@ -67,9 +78,12 @@ export function instantiateWasm(
 					try {
 						return val(...cur);
 					} catch (e) {
+						if (instance.exports.__panic) {
+							instance.exports.__panic.value = null;
+						}
 						if (tag && e instanceof WebAssembly.Exception && e.is(tag)) {
 							const msg = e.getArg(tag, 0);
-							throw new Error(String(msg));
+							throw new Error(safeString(msg));
 						}
 						if (isNilDerefTrap(e)) {
 							throw new Error(
@@ -91,7 +105,7 @@ export function instantiateWasm(
 											inner.is(tag)
 										) {
 											const msg = inner.getArg(tag, 0);
-											throw new Error(String(msg));
+											throw new Error(safeString(msg));
 										}
 										if (isNilDerefTrap(inner)) {
 											throw new Error(

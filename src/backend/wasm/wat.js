@@ -83,6 +83,21 @@ function formatInstruction(inst) {
 		case "global.get":
 		case "global.set":
 			return `${op} ${inst.globalIndex ?? inst.index ?? 0}`;
+		case "i32.load":
+		case "i64.load":
+		case "f32.load":
+		case "f64.load":
+		case "i32.load8_s":
+		case "i32.load8_u":
+		case "i32.load16_s":
+		case "i32.load16_u":
+		case "i32.store":
+		case "i64.store":
+		case "f32.store":
+		case "f64.store":
+		case "i32.store8":
+		case "i32.store16":
+			return inst.offset ? `${op} offset=${inst.offset}` : op;
 		case "i32.const":
 		case "i64.const":
 			return `${op} ${inst.value ?? 0}`;
@@ -96,6 +111,26 @@ function formatInstruction(inst) {
 		}
 		case "throw":
 			return `${op} ${inst.tagIndex ?? inst.index ?? 0}`;
+		case "throw_ref":
+			return "throw_ref";
+		case "try_table": {
+			const bt = inst.blockType ?? inst.resultType;
+			const res = bt && bt !== "void" ? ` (result ${formatValType(bt)})` : "";
+			const catches = (inst.catches ?? [])
+				.map((c) => {
+					const k = c.kind ?? c.op;
+					if (k === "catch")
+						return `(catch ${c.tagIndex ?? 0} ${c.label ?? 0})`;
+					if (k === "catch_ref")
+						return `(catch_ref ${c.tagIndex ?? 0} ${c.label ?? 0})`;
+					if (k === "catch_all") return `(catch_all ${c.label ?? 0})`;
+					if (k === "catch_all_ref") return `(catch_all_ref ${c.label ?? 0})`;
+					return "";
+				})
+				.filter(Boolean)
+				.join(" ");
+			return `${op}${res}${catches ? ` ${catches}` : ""}`;
+		}
 		case "struct.new":
 			return `struct.new ${inst.typeIndex !== undefined ? `$t${inst.typeIndex}` : 0}`;
 		case "struct.get":
@@ -119,8 +154,15 @@ function formatInstruction(inst) {
 		case "ref.test":
 		case "ref.test_null":
 		case "ref.cast":
-		case "ref.cast_null":
-			return `${op} ${inst.typeIndex !== undefined ? `$t${inst.typeIndex}` : 0}`;
+		case "ref.cast_null": {
+			const ht =
+				inst.typeIndex !== undefined
+					? `$t${inst.typeIndex}`
+					: inst.heapType !== undefined
+						? String(inst.heapType)
+						: 0;
+			return `${op} ${ht}`;
+		}
 		case "any.convert_extern":
 		case "extern.convert_any":
 			return op;
@@ -164,6 +206,11 @@ export function emitWat(mod) {
 		for (let i = 0; i < mod.tags.length; i++) {
 			lines.push(`  (tag $tag${i} (type $t${mod.tags[i].typeIndex ?? 0}))`);
 		}
+	}
+
+	if (mod.memory) {
+		const max = mod.memory.max != null ? ` ${mod.memory.max}` : "";
+		lines.push(`  (memory $mem ${mod.memory.min}${max})`);
 	}
 
 	// 4. Globals

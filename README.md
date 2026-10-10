@@ -110,9 +110,10 @@ Requires Node.js 20+ (WasmGC requires Node ≥ 22 or a modern browser).
 
 ## Examples
 
-There are five example apps. Four implement the same todo app to show different aspects
+There are six example apps. Four implement the same todo app to show different aspects
 of GoFront; the fifth is a WebGL2 3D showcase demonstrating typed graphics APIs and
-zero-allocation rendering.
+zero-allocation rendering; the sixth is a hybrid JS + WasmGC particle simulation
+communicating across the boundary via zero-copy `gofront/shared` buffers.
 
 ### Simple (vanilla DOM)
 
@@ -314,14 +315,28 @@ example/webgl/
   index.html      ← canvas element
 ```
 
+### Hybrid (JS + WasmGC particle simulation)
+
+A particle simulation stepped inside a `wasm` package (`sim`) and rendered to a 2D canvas
+from JavaScript through a zero-copy `gofront/shared` `Float32` buffer, paired with `.templ`
+UI controls.
+
+```
+example/hybrid/
+  src/
+    controls.templ ← UI controls (step, reset, gravity toggle, particle count)
+    main.go        ← canvas rendering loop reading sim.Positions + DOM event wiring
+    sim/
+      sim.go       ← //gofront:target wasm · particle physics & shared.NewFloat32 buffer
+  app.js           ← generated JS bundle + boundary facade
+  app.wasm         ← generated WasmGC module
+  index.html       ← canvas + controls shell
+```
+
 ### Build and run
 
 ```sh
-npm run build:simple      # → example/simple/app.js
-npm run build:reactive    # → example/reactive/app.js
-npm run build:gom         # → example/gom/app.js
-npm run build:templ       # → example/templ/app.js
-npm run build:webgl       # → example/webgl/app.js
+npm run build             # compile all example applications
 # open the respective index.html in a browser
 ```
 
@@ -368,6 +383,14 @@ package physics           // no directive = js (default)
 - **Zero Boundary Overhead for Shared Types:** `both` packages never create a boundary overhead — JS callers use the JS copy and WASM callers use the WASM copy.
 - **Strict Go Numeric Semantics:** Code compiled to `wasm` (and JS emitted for `both` packages) follows strict Go numeric rules: sized-integer wrapping, true `float32` rounding, and integer divide-by-zero panics.
 
+**Choosing a target for a package** — the questions to ask, in order:
+
+1. **Does it touch the browser** (DOM, WebGPU, `fetch`, PeerJS, `gom`, `.templ`)? → `js`. There is no other option.
+2. **Is it a leaf that only imports `math`/`mathx`-style helpers and spends its time in numeric loops?** → candidate for `wasm`. Profile first; moving code that is not hot buys nothing.
+3. **What crosses the boundary per frame?** Scalars, handles and `shared` buffers are free; a slice result (`[]Mat4`, `[]float32`) is copied out on every call. If the package's main output is a slice the renderer reads each frame, it will measure at parity with JS — write that output into a `gofront/shared` buffer instead.
+4. **Do two `wasm` packages (or JS and WASM) both need the same types?** → make that package `both`, so neither side pays a boundary call for it.
+5. **Can't decide?** Compile both ways and measure: `gofront build --js-only` gives the all-JS build, or pin per-package targets in `gofront.json` (`"targets": { "engine/physics": "wasm" }`) without editing source. Ship with `--release` so `wasm-opt` shrinks `app.wasm` (~21–23%).
+
 ### Seamless Compile-Time Boundary
 
 Every `wasm` and `both` package an application imports is automatically linked into a single `app.wasm` module, emitted right alongside `app.js` by `gofront build`, `gofront dev`, and `-o`.
@@ -379,13 +402,15 @@ The compiler analyzes both sides of the boundary and synthesizes a facade into `
   - `both` struct values cross by copy into their matching JS classes (with write-back for `*T` parameters).
   - `wasm` structs become opaque handle classes with stable identity. Reading aggregate fields through handles (`b.Pos.X`, `b.Tags[0]`) provides live views into WASM memory.
 - **Slices & Arrays:** Slices and arrays copy element-wise in both directions; TypedArrays (`Float32Array`, `Int32Array`, etc.) are natively accepted.
-- **Closures:** Function values and callbacks cross the boundary transparently in both directions.
-- **WASM Loader:** The generated JS bundle automatically fetches `app.wasm` relative to the page (customizable via `globalThis.__GOFRONT_WASM_URL` or `globalThis.__GOFRONT_WASM_BYTES`).
+- **Closures & Interfaces:** Function values, callbacks, and named non-empty interfaces cross the boundary transparently.
+- **Shared Linear-Memory Buffers:** `gofront/shared` (`shared.NewFloat32`, etc.) exposes zero-copy TypedArray views over linear memory for bulk per-frame data.
+- **WASM Loader:** The generated JS bundle automatically fetches `app.wasm` relative to `app.js` (`import.meta.url`, customizable via `globalThis.__GOFRONT_WASM_URL` or `globalThis.__GOFRONT_WASM_BYTES`).
 - **WAT Inspection:** Passing `--emit-wat` writes human-readable `app.wat` alongside the binary module.
+- **Binaryen Optimization:** Passing `--release` or `--wasm-opt` optimizes `app.wasm` via Binaryen (`-O3` + GUFA), achieving ~23% smaller binaries and generating `app.wasm.map` source maps.
 
 ### Real-World Benchmark: 3D Raycasting
 
-Splitting an app into high-level JavaScript orchestration and low-level WebAssembly compute delivers the best of both worlds. On a real-world Möller–Trumbore raycast benchmark (131,072 triangles, 100,000 rays; run via `npm run bench:raycast`):
+Splitting an app into high-level JavaScript orchestration and low-level WebAssembly compute delivers the best of both worlds. On a real-world Möller–Trumbore raycast benchmark (131,072 triangles, 100,000 rays; run via `npm run bench`):
 
 | Target | Throughput | Allocation | Engine Stability |
 | :--- | :--- | :--- | :--- |
@@ -395,6 +420,17 @@ Splitting an app into high-level JavaScript orchestration and low-level WebAssem
 - **+17.1% higher throughput:** Direct WasmGC typed arrays, local-cached scratch globals, and hardware-trapped nil dereferences outperform JIT-compiled JS.
 - **86% memory churn reduction:** Dropping allocations from 6.2 B/ray to 0.86 B/ray prevents garbage collection pauses from causing micro-stutter in 60 FPS loops.
 - **Minimal boundary overhead:** The boundary trampoline consumes only ~0.5% of total runtime, ensuring batch computations cross between JS and WASM with virtually zero penalty.
+
+**Full application: [simplefps](https://github.com/seriva/simplefps).** The game ships `mathx` as `both`, `collision`, `physics` and `animation` as `wasm`, and everything else (WebGPU renderer, scene, UI) as `js`. Its `npm run bench` compiles `physics` and `animation` once with `--js-only` and once hybrid and runs the same workload against both (Node 25):
+
+| Workload | Pure JS | Hybrid WASM | Ratio |
+| :--- | :--- | :--- | :--- |
+| Closest-hit raycasts, 2048-triangle octree (200k casts) | ~240k casts/s | ~263k casts/s | **1.11–1.15×** |
+| FPS-controller fixed step across the boundary (pose in → `Update` + `MoveWithCamera` + `SyncCamera` → pose out, 50k frames) | ~46k frames/s | ~108k frames/s | **2.4×**, 0.2 B/frame |
+| 64-joint skinned-character frame (`AnimationPlayer.Update` + `ComputeSkinningMatrices` + palette copy-out via `gofront/shared`) | ~141k frames/s | ~179k frames/s | **1.27×** |
+| `app.wasm` (`mathx` + `collision` + `physics` + `animation`) | — | 98.5 kB unoptimised → **79.7 kB** with `--release` | −19% |
+
+The controller step is where WASM wins most: each fixed step issues several raycasts, and keeping `physics` next to `collision` means those never cross the boundary — only the camera pose does. `animation` is the cautionary tale for step 3: compiled as `wasm` while `ComputeSkinningMatrices` still returned a `[]Mat4`, it measured at parity with JS (the slice was copied out every frame); writing the palette into a `gofront/shared` buffer instead turned that into a 1.27× win.
 
 For the full rules — `both`-package restrictions, strict numeric mode, which types can cross the boundary, loader overrides, and how `gofront test` runs hybrid packages — see the **[Hybrid JS + WebAssembly Guide](docs/hybrid-wasm.md)**.
 
@@ -423,34 +459,31 @@ For detailed command flags, project configuration (`gofront.json`), multi-file p
 
 See [`docs/roadmap.md`](docs/roadmap.md) for the full roadmap and release history.
 Design documents for planned features are organised by release under `docs/v*/`
-(e.g. [`docs/v0.0.8/`](docs/v0.0.8/), [`docs/v1.2.0/`](docs/v1.2.0/), [`docs/v1.3.0/`](docs/v1.3.0/)).
+(e.g. [`docs/v0.0.8/`](docs/v0.0.8/), [`docs/v1.2.0/`](docs/v1.2.0/), [`docs/v1.3.0/`](docs/v1.3.0/), [`docs/v1.6.0/`](docs/v1.6.0/)).
 
 ---
 
 ## Tests
 
 ```sh
-npm run test:unit          # unit tests only (~1600 tests, no browser required)
-npm run test:perf          # zero-allocation benchmark (100k ray-triangle intersections, 0 bytes/frame)
-npm run bench:raycast      # Möller–Trumbore raycast benchmark comparing pure JS vs hybrid WASM
-npm run test:examples      # GoFront-native unit tests across all example apps
-npm run test:examples:dom  # same, with JSDOM for DOM/gom/templ component testing
-npm run test:e2e           # E2E tests (Playwright, headless Chromium)
-npm run test:all           # all of the above
+npm test                  # unit, zero-alloc perf, and example tests (~1,800+ tests, no browser required)
+npm run test:e2e          # E2E browser tests (Playwright, headless Chromium)
+npm run bench             # Möller–Trumbore raycast benchmark comparing pure JS vs hybrid WASM
 ```
 
-**Unit tests** (~1,600+) cover language features, type errors, edge cases, DOM (jsdom),
+**Unit tests** (~1,800+) cover language features, type errors, edge cases, DOM (jsdom),
 external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string
 formatting, map iteration order, integer overflow semantics, unused variable detection,
 unused import detection, semantic difference verification, stdlib shim packages, generics,
-the `testing` framework itself, and `.templ` file compilation (element rendering,
+the `testing` framework itself, the WasmGC backend and JS↔WASM boundary, `gofront/shared`
+linear-memory buffers, Binaryen optimization, and `.templ` file compilation (element rendering,
 interpolation, boolean attrs, component calls, scoped `css` declarations with class hashing,
 `if/else/else-if` chains, `for range`, `switch/case/default`, `@templ.Raw()` raw HTML injection,
 SVG namespace handling, mixed `.go`+`.templ` packages).
 
-**E2E tests** (~105, Playwright) run all five example apps in a real browser and verify
+**E2E tests** (~110, Playwright) run all six example apps in a real browser and verify
 CRUD, filtering, priority mode, persistence (reload), drag-and-drop reordering, and sync
 status. Per-app suites check app-specific behaviour: scoped styles, stats bar, loading
 placeholder, `gom.If` conditional rendering, templ-specific features (scoped `css` injection,
-`if/else` priority hint, `for` loop rendering, conditional bool attributes), and the WebGL2 cube
-rendering.
+`if/else` priority hint, `for` loop rendering, conditional bool attributes), the WebGL2 cube
+rendering, and the hybrid JS + WasmGC particle simulation.

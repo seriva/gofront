@@ -198,13 +198,14 @@ func main() {
 	assertEqual(runJs(js), "100%");
 });
 
-test("fmt.Println logs formatted string", () => {
+test("fmt.Println does not treat its first operand as a format string", () => {
 	const { js, errors } = compile(`package main
 func main() {
   fmt.Println("count: %d items", 5)
+  fmt.Println("a", 1, true)
 }`);
 	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "count: 5 items");
+	assertEqual(runJs(js), "count: %d items 5\na 1 true");
 });
 
 test("fmt.Errorf creates error from format", () => {

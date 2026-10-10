@@ -6,6 +6,7 @@
 
 import { collectDeclaredNames } from "./captures.js";
 import { rootIdentName } from "./ownership.js";
+import { forEachChild } from "./walk.js";
 
 /**
  * Checks whether an expression evaluates to one of the target pointer variables
@@ -15,7 +16,7 @@ import { rootIdentName } from "./ownership.js";
  * @param {Set<string>} targetNames Set of identifier names being tracked
  * @returns {boolean}
  */
-export function evaluatesToPointer(expr, targetNames) {
+function evaluatesToPointer(expr, targetNames) {
 	if (!expr || typeof expr !== "object") return false;
 	if (expr.kind === "Ident") {
 		return targetNames.has(expr.name);
@@ -144,10 +145,7 @@ export function paramEscapes(body, paramName) {
 					captured = true;
 					return;
 				}
-				for (const k of Object.keys(cNode)) {
-					if (k.startsWith("_")) continue;
-					checkClosure(cNode[k]);
-				}
+				forEachChild(cNode, checkClosure);
 			};
 			checkClosure(node.body);
 			if (captured) {
@@ -158,10 +156,7 @@ export function paramEscapes(body, paramName) {
 			return;
 		}
 
-		for (const key of Object.keys(node)) {
-			if (key.startsWith("_")) continue;
-			walk(node[key]);
-		}
+		forEachChild(node, walk);
 	};
 
 	walk(body);

@@ -4,6 +4,7 @@
 import {
 	ANY,
 	BASIC_TYPES,
+	COMPARABLE,
 	defaultType,
 	isAny,
 	isTypedArraySlice,
@@ -12,6 +13,7 @@ import {
 	typedArrayConstructorForElem,
 	typeStr,
 	VOID,
+	WASM_STDLIB_MEMBERS,
 } from "./types.js";
 
 /** @typedef {import('./index.js').TypeChecker} TypeChecker */
@@ -81,8 +83,7 @@ export const resolveMethods = {
 		switch (node.kind) {
 			case "TypeName": {
 				if (BASIC_TYPES[node.name]) return BASIC_TYPES[node.name];
-				if (node.name === "comparable")
-					return { kind: "basic", name: "comparable" };
+				if (node.name === "comparable") return COMPARABLE;
 				if (scope) {
 					const fromScope = scope.lookup(node.name);
 					if (fromScope?.kind === "typeParam") return fromScope;
@@ -99,12 +100,16 @@ export const resolveMethods = {
 			case "GenericTypeName": {
 				const base = this.types.get(node.name);
 				if (!base) return this.err(`Unknown type '${node.name}'`, node);
-				if (base.kind === "named" && base._generic)
-					return this.instantiateGenericType(
+				if (base.kind === "named" && base._generic) {
+					const res = this.instantiateGenericType(
 						base._generic,
 						node.typeArgs,
 						scope,
 					);
+					node._typeArgs = res.typeArgs;
+					node._genericType = base;
+					return res;
+				}
 				return this.err(`Type '${node.name}' is not generic`, node);
 			}
 			case "TypeParam": {
@@ -266,12 +271,15 @@ export const resolveMethods = {
 		const typeArgs = typeArgNodes.map((n) => this.resolveTypeNode(n, scope));
 		for (let i = 0; i < generic.typeParams.length; i++)
 			map.set(generic.typeParams[i].name, typeArgs[i] ?? ANY);
+		// Resolve the declaration with its type params in scope (as typeParams,
+		// never as value symbols), then substitute the concrete arguments.
 		const typeScope = new Scope(this.globals);
-		for (const [name, type] of map) typeScope.define(name, type);
+		for (const tp of generic.typeParams) typeScope.define(tp.name, tp);
 		const underlying = this.resolveTypeNode(generic.declNode.type, typeScope);
 		const instantiated = this.substituteType(underlying, map);
 		if (instantiated.kind === "struct") {
 			instantiated.name = generic.declNode.name;
+			instantiated.typeArgs = typeArgs;
 			if (!instantiated.methods) instantiated.methods = new Map();
 			if (generic.methods) {
 				for (const [mName, mType] of generic.methods)
@@ -281,6 +289,7 @@ export const resolveMethods = {
 		return {
 			kind: "named",
 			name: generic.declNode.name,
+			typeArgs,
 			underlying: instantiated,
 		};
 	},
@@ -406,6 +415,9 @@ export const resolveMethods = {
 				return this._fieldTypeInterface(base, baseType, field, node);
 			case "namespace":
 				return this._fieldTypeNamespace(base, field, node);
+			case "shared":
+				if (base.methods?.has(field)) return base.methods.get(field);
+				return this.err(`No method '${field}' on ${typeStr(baseType)}`, node);
 			case "slice":
 				if (isTypedArraySlice(base)) {
 					return this._fieldTypeTypedArraySlice(base, baseType, field, node);
@@ -475,7 +487,24 @@ export const resolveMethods = {
 				`cannot refer to unexported name ${base.name}.${field}`,
 				node,
 			);
-		if (field in base.members) return base.members[field];
+		if (field in base.members) {
+			if (
+				(this.target === "wasm" || this.target === "both") &&
+				WASM_STDLIB_MEMBERS.has(base.name)
+			) {
+				const allowed = WASM_STDLIB_MEMBERS.get(base.name);
+				if (allowed && !allowed.has(field)) {
+					const name = `${base.name}.${field}`;
+					this.recordBlocker("unsupported stdlib member", name);
+					return this.err(
+						`'${name}' is not yet available in wasm packages`,
+						node,
+						"move this call to a JS package, or use a supported alternative",
+					);
+				}
+			}
+			return base.members[field];
+		}
 		return this.err(`No member '${field}' in namespace ${base.name}`, node);
 	},
 };

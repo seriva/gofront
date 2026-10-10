@@ -29,6 +29,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import v8 from "node:v8";
+import { optimizeWasm } from "../../../src/backend/wasm/optimize.js";
 import { compileDir } from "../../../src/compiler.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -44,7 +45,8 @@ const TRIS_WANTED = Number(flag("tris", 100_352));
 const RAYS = Number(flag("rays", 100_000));
 const RUNS = Number(flag("runs", 5));
 const MODE = flag("mode", "both");
-const WASM_OPT = flag("wasm-opt", null);
+const WASM_OPT =
+	flag("wasm-opt", null) ?? (args.includes("--wasm-opt") ? "binaryen" : null);
 const JSON_OUT = args.includes("--json");
 const SIZES = args.includes("--sizes");
 const gc = globalThis.gc ?? null;
@@ -92,6 +94,9 @@ function getSizes() {
 
 function optimiseWasm(wasm) {
 	if (!WASM_OPT || !wasm) return wasm;
+	if (WASM_OPT === "binaryen" || WASM_OPT === true) {
+		return optimizeWasm(wasm).wasm;
+	}
 	const dir = mkdtempSync(join(tmpdir(), "gofront-wasmopt-"));
 	const input = join(dir, "in.wasm");
 	const output = join(dir, "out.wasm");
