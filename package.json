@@ -1,6 +1,6 @@
 {
 	"name": "gofront",
-	"version": "1.5.1",
+	"version": "1.6.0",
 	"author": "Luuk van Venrooij",
 	"license": "MIT",
 	"repository": {
@@ -17,6 +17,9 @@
 		"compiler",
 		"transpiler",
 		"javascript",
+		"webassembly",
+		"wasm",
+		"wasmgc",
 		"frontend",
 		"type-safe"
 	],

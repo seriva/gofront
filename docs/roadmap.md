@@ -32,11 +32,11 @@ features (e.g. `docs/v0.0.5/`).
 
 | Area | Difficulty | Status | Notes |
 |---|---|---|---|
-| Remaining language features in WASM | High | Draft | Non-empty interfaces (itabs, `ref.test`), generics (monomorphisation), insertion-ordered maps, `defer`/`recover` (EH encoding decision), remaining stdlib subset. |
-| Boundary v2 | High | Draft | WASM → JS closures, interface proxies both ways; `RaycastProvider` across the boundary. |
-| Shared buffers & `example/hybrid` | Medium | Draft | `gofront/shared` linear-memory TypedArray views; new particle-sim example with E2E. |
+| Remaining language features in WASM | High | ✅ Done | Non-empty interfaces (`ref.test` candidate dispatch), generics (monomorphisation), insertion-ordered maps, `defer`/`recover` (`try_table` + `exnref` with Go scoping rules), wider stdlib (`errors`, `fmt`, `strings`, `strconv`, `unicode/utf8`, `slices`, `maps`, `sort`), `t.Run` subtests. |
+| Boundary v2 | High | ✅ Done | WASM ↔ JS closures, named non-empty interfaces across the boundary (handles and facades; provider interfaces kept WASM-side), handle method trampolines, boundary-in-loop warnings. |
+| Shared buffers & `example/hybrid` | Medium | ✅ Done | `gofront/shared` zero-copy linear-memory TypedArray views; `example/hybrid` particle simulation with `.templ` controls and Playwright E2E; `import.meta.url` loader; `--js-only` and `gofront.json` `targets` overrides. |
 | simplefps full split & benchmarks | Medium | ✅ Done | `physics` (`DynamicBody`, `FPSController`) and `animation` (skinning via `gofront/shared`) in `wasm`; `BinaryReader`/`ParseBinaryAnimation` moved to `assets`; Binaryen pipeline for `--release`; README target guide; simplefps `npm run bench`: raycasts 1.15×, controller step 2.4×, skinning 1.27×, `app.wasm` 98.5 → 79.7 kB. |
-| Codebase consolidation | Low | Draft | Zero-functional-change cleanup before the v2.0.0 port: single watch-mode path (`index.js` → `handleDev`), WASM emitter helpers (slice grow/unpack, value-struct copy), shared `lower/` AST traversal, JS helper registry, trimmed export surface. Output byte-identical; ~500 lines removed. |
+| Codebase consolidation | Low | ✅ Done | Zero-functional-change cleanup before the v2.0.0 port: single watch-mode path (`index.js` → `handleDev`), WASM emitter helpers (slice grow/unpack, value-struct copy), shared `lower/` AST traversal, JS helper registry, trimmed export surface. Output byte-identical; ~500 lines removed. |
 
 ---
 

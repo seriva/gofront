@@ -78,7 +78,7 @@ packages is listed in the [hybrid guide](hybrid-wasm.md#what-wasm-packages-suppo
 | `sort` | `Ints`, `Float64s`, `Strings`, `Slice`, `SliceStable`, `SliceIsSorted`, `Search`, `IntsAreSorted`, `Float64sAreSorted`, `StringsAreSorted` |
 | `math` | `Abs`, `Floor`, `Ceil`, `Round`, `Sqrt`, `Cbrt`, `Pow`, `Log`, `Log2`, `Log10`, `Sin`, `Cos`, `Tan`, `Atan`, `Atan2`, `Asin`, `Acos`, `Exp`, `Exp2`, `Trunc`, `Hypot`, `Signbit`, `Copysign`, `Dim`, `Remainder`, `Min`, `Max`, `Mod`, `Inf`, `IsNaN`, `IsInf`, `NaN` + `Pi`, `E`, `MaxFloat64`, `SmallestNonzeroFloat64`, `MaxInt`, `MinInt` |
 | `math/rand` | `Intn`, `Float64`, `Float32`, `Int`, `Int63`, `Int63n`, `Int31`, `Int31n`, `Seed` (no-op), `Shuffle`, `Perm` |
-| `math/bits` | `LeadingZeros32`, `TrailingZeros32`, `OnesCount32`, `RotateLeft32`, `LeadingZeros64`, `TrailingZeros64`, `OnesCount64`, `RotateLeft64` — also available in `wasm` packages |
+| `math/bits` | `LeadingZeros32`, `TrailingZeros32`, `OnesCount32`, `RotateLeft32`, `LeadingZeros64`, `TrailingZeros64`, `OnesCount64`, `RotateLeft64` |
 | `errors` | `New`, `Is`, `Unwrap` — custom error types via interface satisfaction |
 | `time` | `Now` → `time.Time`, `Since`, `Sleep`, `Parse`, `Unix`, `Date`; **`time.Time`** methods: `Format`, `String`, `Year`, `Month`, `Day`, `Hour`, `Minute`, `Second`, `Weekday`, `Unix`, `UnixMilli`, `Add`, `Sub`, `Before`, `After`, `Equal`; layout constants: `RFC3339`, `RFC3339Nano`, `DateOnly`, `TimeOnly`, `DateTime`; duration constants: `Millisecond`, `Second`, `Minute`, `Hour`; month/weekday constants |
 | `html` | `EscapeString`, `UnescapeString` |
@@ -91,6 +91,7 @@ packages is listed in the [hybrid guide](hybrid-wasm.md#what-wasm-packages-suppo
 | `os` | `Exit`, `Args`, `Getenv` |
 | `io` | `Writer`, `Reader`, `ReadWriter`, `Closer` interface types; `ReadAll`, `EOF`, `Discard`, `WriteString` |
 | `gom` | Browser-native declarative DOM component library. **Types**: `Node` (interface), `NodeFunc`, `Group`. **Core**: `El(tag, children...)`, `Text(s)`, `Mount(sel, node[, refs])`, `MountTo(sel, node[, refs])` — the optional `refs map[string]any` receives elements marked `ref="name"` in `.templ` templates. **Attributes**: `Attr`, `Class`, `Href`, `Type`, `Src`, `Placeholder`, `DataAttr`, `Style`, `For`, `Name`, `Value`, `Target`, `Rel`, `Alt`, `Title`, `Draggable`, `Role`, `AriaLabel`, `StyleAttr`; boolean: `Disabled`, `Checked`, `Selected`, `Readonly`. **Logic**: `If(cond, node)`, `Map(slice, fn)`. **Elements**: full HTML element set (`Div`, `Span`, `Button`, `Input`, `Ul`, `Li`, `Table`, `Form`, `Img`, `A`, `H1`–`H6`, …) |
+| `gofront/shared` | Fixed-size linear-memory buffers for zero-copy JS↔WASM sharing (`Float32`, `Float64`, `Int8`, `Int16`, `Int32`, `Uint8`, `Uint16`, `Uint32` via `shared.NewXxx(n)` and `.Subarray(lo, hi)`). Lowered to plain TypedArrays in `--js-only` builds. See the [hybrid guide](hybrid-wasm.md#shared-linear-memory-buffers-gofrontshared). |
 | `testing` | **`testing.T`**: `Error`, `Errorf`, `Fatal`, `Fatalf`, `Fail`, `Failed`, `FailNow`, `Log`, `Logf`, `Skip`, `Skipf`, `Skipped`, `Helper`, `Run`, `Name`. **Package functions**: `Short()`, `Verbose()`. Tests are `func TestXxx(t *testing.T)` in `*_test.go` files, excluded from normal compilation and run via `gofront test`. |
 
 ### Packages & imports

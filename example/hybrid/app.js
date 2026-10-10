@@ -2,6 +2,7 @@ const __gfw_MAX = 9007199254740991n;
 function __gfw_imports(stringTable, extraEnv, tag, write) {
 	let lineBuf = "";
 	let targs = [];
+	const late = { exports: null };
 	const flush = () => { write(lineBuf); lineBuf = ""; };
 	const print = (v) => {
 		const s = String(v);
@@ -86,11 +87,29 @@ function __gfw_imports(stringTable, extraEnv, tag, write) {
 		"testing_name": (t) => t.Name(),
 		"testing_flag": (t, i) => (t[stringTable[i]]() ? 1 : 0),
 	};
+	// Stdlib imports (strings/strconv/utf8/fmt/t.Run) are a separate block so
+	// modules that never call them do not ship it (see WASM_STDLIB_JS).
+	if (typeof __gfw_stdlib === "function") {
+		Object.assign(env, __gfw_stdlib(stringTable, {
+			"take": () => { const a = targs; targs = []; return a; },
+			"printf": (s) => {
+				lineBuf += s;
+				const nl = lineBuf.lastIndexOf("\n");
+				if (nl >= 0) { write(lineBuf.slice(0, nl)); lineBuf = lineBuf.slice(nl + 1); }
+			},
+			"late": late,
+		}));
+	}
 	Object.assign(env, extraEnv);
 	const m = {};
-	for (const k of ["sin", "cos", "tan", "asin", "acos", "atan", "atan2", "pow", "exp", "log", "log2", "log10", "round"]) m[k] = Math[k];
-	return { "env": env, "Math": m };
+	for (const k of ["sin", "cos", "tan", "asin", "acos", "atan", "atan2", "pow", "exp", "log", "log2", "log10", "cbrt", "hypot"]) m[k] = Math[k];
+	m.mod = (x, y) => x % y;
+	// Go rounds half away from zero; Math.round rounds half toward +Infinity.
+	m.round = (x) => Math.sign(x) * Math.round(Math.abs(x));
+	// Exports are needed by imports that call back into the module (t.Run).
+	return { "env": env, "Math": m, "__bind": (ex) => { late.exports = ex; } };
 }
+
 async function __gfw_fetch(url) {
 	const res = await fetch(url);
 	if (!res.ok) throw new Error("GoFront: failed to fetch " + url + " (" + res.status + ")");
@@ -117,6 +136,7 @@ async function __gfw_load(stringTable, extraEnv) {
 	// start function while package-level initializers run), so exports are
 	// returned raw: no try/catch wrapper, which keeps JS→wasm calls inlinable.
 	const result = await __gfw_instantiate(imports);
+	imports.__bind(result.instance.exports);
 	return result.instance.exports;
 }
 // Go int/int64 cross the boundary as f64 (exact within the safe-integer range).
