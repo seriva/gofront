@@ -4,6 +4,7 @@
 import {
 	ANY,
 	BASIC_TYPES,
+	COMPARABLE,
 	defaultType,
 	isAny,
 	isTypedArraySlice,
@@ -81,8 +82,7 @@ export const resolveMethods = {
 		switch (node.kind) {
 			case "TypeName": {
 				if (BASIC_TYPES[node.name]) return BASIC_TYPES[node.name];
-				if (node.name === "comparable")
-					return { kind: "basic", name: "comparable" };
+				if (node.name === "comparable") return COMPARABLE;
 				if (scope) {
 					const fromScope = scope.lookup(node.name);
 					if (fromScope?.kind === "typeParam") return fromScope;

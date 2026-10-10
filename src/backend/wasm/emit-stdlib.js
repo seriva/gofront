@@ -39,6 +39,15 @@ const MATH_CONSTS = {
 	MaxUint64: 18446744073709551615n,
 };
 
+// `math` functions that map 1:1 onto a single-operand f64 instruction.
+const MATH_F64_UNARY = {
+	Sqrt: "f64.sqrt",
+	Floor: "f64.floor",
+	Ceil: "f64.ceil",
+	Trunc: "f64.trunc",
+	Abs: "f64.abs",
+};
+
 export class StdlibEmitter {
 	_isMathConst(expr) {
 		return (
@@ -79,27 +88,13 @@ export class StdlibEmitter {
 
 	emitMathCall(name, args) {
 		// Native WASM instructions
+		const unaryOp = MATH_F64_UNARY[name];
+		if (unaryOp) {
+			this.emitExpr(args[0], "f64");
+			this.pushInstruction(unaryOp);
+			return;
+		}
 		switch (name) {
-			case "Sqrt":
-				this.emitExpr(args[0], "f64");
-				this.pushInstruction("f64.sqrt");
-				return;
-			case "Floor":
-				this.emitExpr(args[0], "f64");
-				this.pushInstruction("f64.floor");
-				return;
-			case "Ceil":
-				this.emitExpr(args[0], "f64");
-				this.pushInstruction("f64.ceil");
-				return;
-			case "Trunc":
-				this.emitExpr(args[0], "f64");
-				this.pushInstruction("f64.trunc");
-				return;
-			case "Abs":
-				this.emitExpr(args[0], "f64");
-				this.pushInstruction("f64.abs");
-				return;
 			case "Min":
 				this.emitExpr(args[0], "f64");
 				this.emitExpr(args[1], "f64");
@@ -333,29 +328,11 @@ export class StdlibEmitter {
 		const lenTmp = this.acquireTemp("i32");
 		const iLoc = this.acquireTemp("i32");
 
-		this.pushInstruction({ op: "local.get", index: sliceTmp });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: sliceInfo.typeIndex,
-			fieldIndex: 0,
+		this._emitSliceUnpack(sliceTmp, sliceInfo, {
+			arr: arrTmp,
+			off: offTmp,
+			len: lenTmp,
 		});
-		this.pushInstruction({ op: "local.set", index: arrTmp });
-
-		this.pushInstruction({ op: "local.get", index: sliceTmp });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: sliceInfo.typeIndex,
-			fieldIndex: 1,
-		});
-		this.pushInstruction({ op: "local.set", index: offTmp });
-
-		this.pushInstruction({ op: "local.get", index: sliceTmp });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: sliceInfo.typeIndex,
-			fieldIndex: 2,
-		});
-		this.pushInstruction({ op: "local.set", index: lenTmp });
 
 		this.pushInstruction({ op: "i32.const", value: 0 });
 		this.pushInstruction({ op: "local.set", index: iLoc });
@@ -1024,29 +1001,11 @@ export class StdlibEmitter {
 		const offTmp = this.acquireTemp("i32");
 		const lenTmp = this.acquireTemp("i32");
 
-		this.pushInstruction({ op: "local.get", index: sliceTmp });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: sliceInfo.typeIndex,
-			fieldIndex: 0,
+		this._emitSliceUnpack(sliceTmp, sliceInfo, {
+			arr: arrTmp,
+			off: offTmp,
+			len: lenTmp,
 		});
-		this.pushInstruction({ op: "local.set", index: arrTmp });
-
-		this.pushInstruction({ op: "local.get", index: sliceTmp });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: sliceInfo.typeIndex,
-			fieldIndex: 1,
-		});
-		this.pushInstruction({ op: "local.set", index: offTmp });
-
-		this.pushInstruction({ op: "local.get", index: sliceTmp });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: sliceInfo.typeIndex,
-			fieldIndex: 2,
-		});
-		this.pushInstruction({ op: "local.set", index: lenTmp });
 
 		// if len <= 1 -> br 0
 		this.pushInstruction({ op: "local.get", index: lenTmp });
@@ -1199,29 +1158,11 @@ export class StdlibEmitter {
 		const offTmp = this.acquireTemp("i32");
 		const lenTmp = this.acquireTemp("i32");
 
-		this.pushInstruction({ op: "local.get", index: sliceTmp });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: sliceInfo.typeIndex,
-			fieldIndex: 0,
+		this._emitSliceUnpack(sliceTmp, sliceInfo, {
+			arr: arrTmp,
+			off: offTmp,
+			len: lenTmp,
 		});
-		this.pushInstruction({ op: "local.set", index: arrTmp });
-
-		this.pushInstruction({ op: "local.get", index: sliceTmp });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: sliceInfo.typeIndex,
-			fieldIndex: 1,
-		});
-		this.pushInstruction({ op: "local.set", index: offTmp });
-
-		this.pushInstruction({ op: "local.get", index: sliceTmp });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: sliceInfo.typeIndex,
-			fieldIndex: 2,
-		});
-		this.pushInstruction({ op: "local.set", index: lenTmp });
 
 		const iLoc = this.acquireTemp("i32");
 		const jLoc = this.acquireTemp("i32");
@@ -1354,27 +1295,11 @@ export class StdlibEmitter {
 		const iLoc = this.acquireTemp("i32");
 		const itemTmp = this.acquireTemp(arrInfo.elemWType);
 
-		this.pushInstruction({ op: "local.get", index: sliceTmp });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: sliceInfo.typeIndex,
-			fieldIndex: 0,
+		this._emitSliceUnpack(sliceTmp, sliceInfo, {
+			arr: arrTmp,
+			off: offTmp,
+			len: lenTmp,
 		});
-		this.pushInstruction({ op: "local.set", index: arrTmp });
-		this.pushInstruction({ op: "local.get", index: sliceTmp });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: sliceInfo.typeIndex,
-			fieldIndex: 1,
-		});
-		this.pushInstruction({ op: "local.set", index: offTmp });
-		this.pushInstruction({ op: "local.get", index: sliceTmp });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: sliceInfo.typeIndex,
-			fieldIndex: 2,
-		});
-		this.pushInstruction({ op: "local.set", index: lenTmp });
 
 		this.pushInstruction({ op: "i32.const", value: 0 });
 		this.pushInstruction({ op: "local.set", index: iLoc });
@@ -1471,27 +1396,11 @@ export class StdlibEmitter {
 		const iLoc = this.acquireTemp("i32");
 		const itemTmp = this.acquireTemp(arrInfo.elemWType);
 
-		this.pushInstruction({ op: "local.get", index: sliceTmp });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: sliceInfo.typeIndex,
-			fieldIndex: 0,
+		this._emitSliceUnpack(sliceTmp, sliceInfo, {
+			arr: arrTmp,
+			off: offTmp,
+			len: lenTmp,
 		});
-		this.pushInstruction({ op: "local.set", index: arrTmp });
-		this.pushInstruction({ op: "local.get", index: sliceTmp });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: sliceInfo.typeIndex,
-			fieldIndex: 1,
-		});
-		this.pushInstruction({ op: "local.set", index: offTmp });
-		this.pushInstruction({ op: "local.get", index: sliceTmp });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: sliceInfo.typeIndex,
-			fieldIndex: 2,
-		});
-		this.pushInstruction({ op: "local.set", index: lenTmp });
 
 		this.pushInstruction({ op: "i32.const", value: 0 });
 		this.pushInstruction({ op: "local.set", index: iLoc });

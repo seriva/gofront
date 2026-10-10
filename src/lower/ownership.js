@@ -1,6 +1,8 @@
 // src/lower/ownership.js
 // Tracks variable ownership, mutation and clone elision for Go value semantics.
 
+import { forEachChild, someChild } from "./walk.js";
+
 export function rootIdentName(e) {
 	while (e) {
 		if (e.kind === "Ident") return e.name;
@@ -42,11 +44,7 @@ export function nodeMutatesVar(node, name, addrOnly = false) {
 	)
 		return true;
 	if (!addrOnly && nodeWritesVar(node, name)) return true;
-	for (const key of Object.keys(node)) {
-		if (key.startsWith("_")) continue;
-		if (nodeMutatesVar(node[key], name, addrOnly)) return true;
-	}
-	return false;
+	return someChild(node, (child) => nodeMutatesVar(child, name, addrOnly));
 }
 
 // Single-pass collector of all mutated or address-taken variables in an AST node.
@@ -85,10 +83,7 @@ export function collectMutatedVars(
 		}
 	}
 
-	for (const key of Object.keys(node)) {
-		if (key.startsWith("_")) continue;
-		collectMutatedVars(node[key], mutated, addrOnly);
-	}
+	forEachChild(node, (child) => collectMutatedVars(child, mutated, addrOnly));
 	return mutated;
 }
 
@@ -112,7 +107,7 @@ export function closureMutates(body, name, cache = null) {
 		if (!node || typeof node !== "object") return false;
 		if (Array.isArray(node)) return node.some(walk);
 		if (node.kind === "FuncLit") return nodeMutatesVar(node.body, name);
-		return Object.keys(node).some((k) => !k.startsWith("_") && walk(node[k]));
+		return someChild(node, walk);
 	};
 	const res = walk(body);
 	if (cache) cache.set(key, res);

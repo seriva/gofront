@@ -59,7 +59,7 @@ ${exports.join(",\n")}
 `;
 }
 
-export function findBundler(projectDir) {
+function findBundler(projectDir) {
 	const root = resolve(projectDir);
 	const pkgPath = join(root, "package.json");
 	let req;
@@ -136,7 +136,7 @@ export function loadVendorConfig(projectDir) {
 	return { dest, packages, minify, globals };
 }
 
-export function resolveDestinationPaths(projectRoot, dest) {
+function resolveDestinationPaths(projectRoot, dest) {
 	const destList = Array.isArray(dest) ? dest : [dest];
 	if (destList.length === 0) {
 		throw new Error(

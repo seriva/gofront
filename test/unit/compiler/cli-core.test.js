@@ -17,6 +17,7 @@ import {
 	handleBuild,
 	handleInit,
 	maybeMinify,
+	parseLegacyArgs,
 	parsePrepArgs,
 	parseTestArgs,
 	resolveAssetExtensions,
@@ -280,6 +281,73 @@ test("parseTestArgs: -run value is not mistaken for the target dir", () => {
 
 test("parseTestArgs: trailing -run without value yields null", () => {
 	assertEqual(parseTestArgs(["-run"]).run, null);
+});
+
+section("cli-core — parseLegacyArgs");
+
+test("parseLegacyArgs defaults: no flags", () => {
+	const o = parseLegacyArgs(["main.go"]);
+	assertEqual(o.inputArg, "main.go");
+	assertEqual(o.outputFile, null);
+	assertEqual(o.checkOnly, false);
+	assertEqual(o.watch, false);
+	assertEqual(o.serve, false);
+	assertEqual(o.minify, false);
+	assertEqual(o.mangle, false);
+	assertEqual(o.wasmOpt, false);
+	assertEqual(o.sourceMap, false);
+	assertEqual(o.copyAssets, false);
+	assertEqual(o.port, 3000);
+});
+
+test("parseLegacyArgs: -o, --port and boolean flags", () => {
+	const o = parseLegacyArgs([
+		"src",
+		"-o",
+		"out.js",
+		"--port",
+		"8080",
+		"--check",
+		"--ast",
+		"--tokens",
+		"--source-map",
+		"--copy-assets",
+	]);
+	assertEqual(o.outputFile, "out.js");
+	assertEqual(o.port, 8080);
+	assertEqual(o.checkOnly, true);
+	assertEqual(o.dumpAst, true);
+	assertEqual(o.dumpTokens, true);
+	assertEqual(o.sourceMap, true);
+	assertEqual(o.copyAssets, true);
+});
+
+test("parseLegacyArgs: --release implies --minify --mangle --wasm-opt", () => {
+	const o = parseLegacyArgs(["src", "--release"]);
+	assertEqual(o.release, true);
+	assertEqual(o.minify, true);
+	assertEqual(o.mangle, true);
+	assertEqual(o.wasmOpt, true);
+});
+
+test("parseLegacyArgs: --no-wasm-opt wins over --release / --wasm-opt", () => {
+	assertEqual(
+		parseLegacyArgs(["src", "--release", "--no-wasm-opt"]).wasmOpt,
+		false,
+	);
+	assertEqual(
+		parseLegacyArgs(["src", "--wasm-opt", "--no-wasm-opt"]).wasmOpt,
+		false,
+	);
+	assertEqual(parseLegacyArgs(["src", "--wasm-opt"]).wasmOpt, true);
+});
+
+test("parseLegacyArgs: --serve implies --watch", () => {
+	const o = parseLegacyArgs(["src", "-o", "out.js", "--serve"]);
+	assertEqual(o.serve, true);
+	assertEqual(o.watch, true);
+	assertEqual(parseLegacyArgs(["src", "--watch"]).serve, false);
+	assertEqual(parseLegacyArgs(["src", "--watch"]).watch, true);
 });
 
 section("cli-core — assetExtensions");

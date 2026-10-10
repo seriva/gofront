@@ -397,11 +397,11 @@ export const statementGenMethods = {
 				result = `{ re: ${lhsStr}.re - ${rhsExpr}.re, im: ${lhsStr}.im - ${rhsExpr}.im }`;
 				break;
 			case "*":
-				this._usesCmul = true;
+				this.useHelper("cmul");
 				result = `__cmul(${lhsStr}, ${rhsExpr})`;
 				break;
 			case "/":
-				this._usesCdiv = true;
+				this.useHelper("cdiv");
 				result = `__cdiv(${lhsStr}, ${rhsExpr})`;
 				break;
 			default:
@@ -742,7 +742,7 @@ export const statementGenMethods = {
 			if (lhs.length === 1) return `Array.from(${iteree}).keys()`;
 			return `Array.from(${iteree}, (__c, __i) => [__i, __c.codePointAt(0)])`;
 		}
-		this._usesSliceGuard = true;
+		this.useHelper("sliceGuard");
 		if (lhs.length === 1) return `__s(${iteree}).keys()`;
 		return `__s(${iteree}).entries()`;
 	},

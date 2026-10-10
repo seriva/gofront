@@ -29,7 +29,7 @@ import { emitWat } from "./wat.js";
 
 export { hasNativeWasmOpt, isGoFrontWasm, optimizeWasm };
 
-export class ModuleEmitter {
+class ModuleEmitter {
 	constructor(checker, lowerResult = null, programs = [], options = {}) {
 		this.checker = checker;
 		this.lowerResult = lowerResult;
@@ -1299,7 +1299,7 @@ export class ModuleEmitter {
 	}
 }
 
-export function peepholeOptimize(instructions) {
+function peepholeOptimize(instructions) {
 	let changed = true;
 	let current = instructions;
 	while (changed) {

@@ -328,7 +328,7 @@ async function runTestsRecursive(rootDir, options) {
 
 // Returns the root directory of a Go-style recursive pattern (`./...`,
 // `app/src/...`), or null when the argument is a plain path.
-export function parsePackagePattern(arg) {
+function parsePackagePattern(arg) {
 	if (arg === "...") return resolve(".");
 	if (!arg.endsWith("/...")) return null;
 	return resolve(arg.slice(0, -4) || ".");
@@ -338,7 +338,7 @@ const SKIPPED_DIRS = new Set(["node_modules", "dist", "public"]);
 
 // Lists every directory under root (inclusive) that contains .go or .templ
 // files, in sorted order, skipping hidden directories and build output.
-export function findPackageDirs(root) {
+function findPackageDirs(root) {
 	const out = [];
 	const walk = (dir) => {
 		let entries;
@@ -428,7 +428,7 @@ function resolveDevOutputFile(projectRoot, serveDir, config) {
 	return join(serveDir, "app.js");
 }
 
-export function detectProject(dir = ".") {
+function detectProject(dir = ".") {
 	const projectRoot = resolve(dir);
 	const config = loadProjectConfig(projectRoot);
 	const srcDir = resolveSrcDir(projectRoot, config);
@@ -786,6 +786,33 @@ export async function handleBuild(targetDir = ".", options = {}) {
 
 export { generatePwa };
 
+// ── legacy `gofront <input> [flags]` command ──────────────────
+
+export function parseLegacyArgs(argv) {
+	const outputFlag = argv.indexOf("-o");
+	const portFlag = argv.indexOf("--port");
+	const serve = argv.includes("--serve");
+	const release = argv.includes("--release");
+	return {
+		inputArg: argv[0],
+		outputFile: outputFlag !== -1 ? (argv[outputFlag + 1] ?? null) : null,
+		checkOnly: argv.includes("--check"),
+		dumpAst: argv.includes("--ast"),
+		dumpTokens: argv.includes("--tokens"),
+		sourceMap: argv.includes("--source-map"),
+		serve,
+		watch: argv.includes("--watch") || serve,
+		copyAssets: argv.includes("--copy-assets"),
+		release,
+		wasmOpt:
+			!argv.includes("--no-wasm-opt") &&
+			(argv.includes("--wasm-opt") || release),
+		minify: argv.includes("--minify") || release,
+		mangle: argv.includes("--mangle") || release,
+		port: portFlag !== -1 ? parseInt(argv[portFlag + 1], 10) : 3000,
+	};
+}
+
 // ── dev command ───────────────────────────────────────────────
 
 export function parseDevArgs(argv) {
@@ -811,26 +838,38 @@ export function parseDevArgs(argv) {
 	};
 }
 
-function buildDevOnce(
-	{ srcDir, isDir, outputFile, sourceMap, devServer },
+// Compiles once and writes the output when an output file is configured.
+// Returns the build info; throws on compile errors.
+function runDevBuild(
+	{ srcDir, isDir, outputFile, sourceMap, minify, mangle },
 	changedFile = null,
 ) {
+	const startMs = performance.now();
+	const result = runCompile(srcDir, isDir, { outputFile, sourceMap });
+	const js = maybeMinify(result.js, { minify, mangle, sourceMap });
+	const written = outputFile
+		? writeCompileOutput(outputFile, result, js)
+		: null;
+	const elapsedMs = (performance.now() - startMs).toFixed(0);
+	return { result, js, written, outputFile, elapsedMs, changedFile };
+}
+
+function reportDevBuild({ written, outputFile, elapsedMs, changedFile }) {
+	const note = changedFile ? ` — ${changedFile} changed` : "";
+	log.ok(
+		`— wrote ${formatWrittenDesc(written, outputFile)} ${colors.dim(`(${elapsedMs}ms${note})`)}`,
+	);
+}
+
+function buildDevOnce(config, changedFile = null) {
 	try {
-		const startMs = performance.now();
-		const result = runCompile(srcDir, isDir, {
-			outputFile,
-			sourceMap: sourceMap ?? true,
-		});
-		const written = writeCompileOutput(outputFile, result);
-		const elapsedMs = (performance.now() - startMs).toFixed(0);
-		const note = changedFile ? ` — ${changedFile} changed` : "";
-		log.ok(
-			`— wrote ${formatWrittenDesc(written, outputFile)} ${colors.dim(`(${elapsedMs}ms${note})`)}`,
-		);
-		devServer.notify();
+		const info = runDevBuild(config, changedFile);
+		(config.onBuild ?? reportDevBuild)(info);
+		config.devServer?.notify();
 	} catch (e) {
-		log.error(e.message);
-		devServer.notifyError(e);
+		if (config.onError) config.onError(e);
+		else log.error(e.message);
+		config.devServer?.notifyError(e);
 	}
 }
 
@@ -873,10 +912,12 @@ function setupDevWatchers(config) {
 	let htmlDebounce = null;
 
 	const handleCss = (filename) => {
-		try {
-			copyAssets(config.project.projectRoot, config.assetConfig);
-		} catch {}
-		config.devServer.notifyCss(filename);
+		if (config.copyAssets) {
+			try {
+				copyAssets(config.project.projectRoot, config.assetConfig);
+			} catch {}
+		}
+		config.devServer?.notifyCss(filename);
 	};
 
 	const watchers = [];
@@ -893,22 +934,24 @@ function setupDevWatchers(config) {
 	);
 	if (srcWatcher) watchers.push(srcWatcher);
 
-	const serveWatcher = createServeWatcher(
-		config.serveDir,
-		config.watchTarget,
-		(fn) => {
-			clearTimeout(cssDebounce);
-			cssDebounce = setTimeout(() => handleCss(fn), 50);
-		},
-		() => {
-			clearTimeout(htmlDebounce);
-			// Typed reload keeps a pending build error visible after the page reloads.
-			htmlDebounce = setTimeout(
-				() => config.devServer.notify({ type: "reload" }),
-				50,
-			);
-		},
-	);
+	const serveWatcher = config.devServer
+		? createServeWatcher(
+				config.serveDir,
+				config.watchTarget,
+				(fn) => {
+					clearTimeout(cssDebounce);
+					cssDebounce = setTimeout(() => handleCss(fn), 50);
+				},
+				() => {
+					clearTimeout(htmlDebounce);
+					// Typed reload keeps a pending build error visible after the page reloads.
+					htmlDebounce = setTimeout(
+						() => config.devServer.notify({ type: "reload" }),
+						50,
+					);
+				},
+			)
+		: null;
 	if (serveWatcher) watchers.push(serveWatcher);
 
 	return {
@@ -926,6 +969,12 @@ function setupDevWatchers(config) {
 	};
 }
 
+// Options beyond the `dev` subcommand's own (used by the legacy `--watch` path):
+//   serve: false        → no dev server (watch + rebuild only)
+//   outputFile: null    → never write; the compiled JS is passed to `onBuild`
+//   copyAssets: false   → skip the initial and per-CSS-change asset copy
+//   minify / mangle     → applied to every build
+//   onBuild / onError   → replace the default log lines
 export async function handleDev(targetDir = ".", options = {}) {
 	const project = detectProject(targetDir);
 	const port = options.port ?? project.port ?? 3000;
@@ -933,43 +982,57 @@ export async function handleDev(targetDir = ".", options = {}) {
 		? resolve(options.serveDir)
 		: project.serveDir;
 	const srcDir = options.srcDir ? resolve(options.srcDir) : project.srcDir;
-	const outputFile = options.outputFile
-		? resolve(options.outputFile)
-		: project.devOutputFile;
+	const outputFile =
+		options.outputFile === null
+			? null
+			: options.outputFile
+				? resolve(options.outputFile)
+				: project.devOutputFile;
+	const doCopyAssets = options.copyAssets ?? true;
 
-	copyAssets(project.projectRoot, options.assetConfig);
+	if (doCopyAssets) copyAssets(project.projectRoot, options.assetConfig);
 
 	const isDir = statSync(srcDir).isDirectory();
-	const devServer = createDevServer(serveDir, port, {
-		...options,
-		silent: true,
-	});
+	const devServer =
+		options.serve === false
+			? null
+			: createDevServer(serveDir, port, {
+					...options,
+					silent: options.silent ?? true,
+				});
+	const buildConfig = {
+		srcDir,
+		isDir,
+		outputFile,
+		sourceMap: options.sourceMap ?? true,
+		minify: options.minify ?? false,
+		mangle: options.mangle ?? false,
+		devServer,
+		onBuild: options.onBuild,
+		onError: options.onError,
+	};
 	let initialError = null;
 
 	let written = null;
 	try {
-		const result = runCompile(srcDir, isDir, {
-			outputFile,
-			sourceMap: options.sourceMap ?? true,
-		});
-		written = writeCompileOutput(outputFile, result);
+		const info = runDevBuild(buildConfig);
+		written = info.written;
+		options.onBuild?.(info);
 	} catch (err) {
 		initialError = err;
-		devServer.notifyError(err);
+		options.onError?.(err);
+		devServer?.notifyError(err);
 	}
 
 	let watcherController = null;
 	if (options.watch !== false) {
 		const watchTarget = isDir ? srcDir : dirname(srcDir);
 		watcherController = setupDevWatchers({
+			...buildConfig,
 			watchTarget,
-			srcDir,
-			isDir,
-			outputFile,
-			sourceMap: options.sourceMap,
-			devServer,
 			project,
 			serveDir,
+			copyAssets: doCopyAssets,
 			assetConfig: options.assetConfig,
 		});
 	}
@@ -985,7 +1048,7 @@ export async function handleDev(targetDir = ".", options = {}) {
 		written,
 		close: async () => {
 			watcherController?.close();
-			await devServer.close();
+			await devServer?.close();
 		},
 	};
 }
