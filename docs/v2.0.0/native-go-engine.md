@@ -2,14 +2,14 @@
 
 **Version:** v2.0.0  
 **Status:** Draft (revised 2026-10-03)  
-**Baseline Spec:** v1.6.0: the v1.4.0 language (incl. `.templ` scoped `css`) plus the complete hybrid JS + WASM compiler (`src/lower/`, package targets, JS strict mode, full WASM backend, boundary, shared buffers). See [`docs/v1.5.0/wasm-mvp-plan.md`](../v1.5.0/wasm-mvp-plan.md) and [`docs/v1.6.0/wasm-hybrid-plan.md`](../v1.6.0/wasm-hybrid-plan.md).  
-**Prerequisite:** v1.6.0 released. The port starts from a feature-complete JS compiler and adds no features.
+**Baseline Spec:** v1.6.1: the v1.4.0 language (incl. `.templ` scoped `css`) plus the complete hybrid JS + WASM compiler (`src/lower/`, package targets, JS strict mode, full WASM backend, boundary, shared buffers, and the full non-browser language + stdlib in WASM). See [`docs/v1.5.0/wasm-mvp-plan.md`](../v1.5.0/wasm-mvp-plan.md), [`docs/v1.6.0/wasm-hybrid-plan.md`](../v1.6.0/wasm-hybrid-plan.md) and [`docs/v1.6.1/wasm-gaps-plan.md`](../v1.6.1/wasm-gaps-plan.md).  
+**Prerequisite:** v1.6.1 released. The port starts from a feature-complete JS compiler and adds no features.
 
 ---
 
 ## Goal
 
-Rewrite GoFront's compiler core and CLI from Node.js into a native Go binary (`cmd/gofront`) that produces **the same JavaScript output, the same WebAssembly output, the same diagnostics, and the same CLI behaviour** as the v1.6.0 JS engine.
+Rewrite GoFront's compiler core and CLI from Node.js into a native Go binary (`cmd/gofront`) that produces **the same JavaScript output, the same WebAssembly output, the same diagnostics, and the same CLI behaviour** as the v1.6.1 JS engine.
 
 Motivation:
 
@@ -17,7 +17,7 @@ Motivation:
 2. **No Node.js for the core loop.** `dev`, `build` (without vendor deps) and `check` run from one static binary (`go install github.com/seriva/gofront/cmd/gofront@latest` or a GitHub release). See [Node.js dependency matrix](#nodejs-dependency-matrix) for the commands that still need Node.
 3. **Unchanged npm workflow.** `npm i -g gofront` / `npx gofront` keep working. As with `esbuild` and `biome`, the npm package becomes a thin launcher that runs a prebuilt platform binary (`@gofront/linux-x64`, `@gofront/darwin-arm64`, `@gofront/windows-x64`, …) installed through `optionalDependencies`.
 4. **Maintainability.** Statically typed AST/type structs and exhaustive type switches replace ad-hoc JS objects whose fields get mutated during compilation (`_type`, `_lvalue`, `_className`).
-5. **Multiple backends.** v1.5.0 and v1.6.0 build the shared lowering step (`src/lower/`) and the complete WASM backend in the JS compiler. The port carries both over as `internal/lower` + `internal/backend/{js,wasm}`. Future backend work (e.g. [whole-app WASM](../v1.6.0/wasm-hybrid-plan.md#future-whole-app-wasm)) then happens in Go.
+5. **Multiple backends.** v1.5.0–v1.6.1 build the shared lowering step (`src/lower/`) and the complete WASM backend in the JS compiler. The port carries both over as `internal/lower` + `internal/backend/{js,wasm}`, so later backend work happens in Go.
 
 **Done means:** every test in the existing unit, examples, and E2E suites (JS and hybrid) passes against the native engine, `simplefps` builds and runs as a hybrid app, and the npm package ships the native binary by default.
 
@@ -25,7 +25,7 @@ Motivation:
 
 ## Out of Scope
 
-- **Language changes.** v2.0.0 is a port. New syntax, semantics, stdlib surface or WASM features wait for later releases. Known v1.6.0 quirks are ported *as-is* and logged in an issue list for v2.x.
+- **Language changes.** v2.0.0 is a port. New syntax, semantics, stdlib surface or WASM features wait for later releases. Known v1.6.1 quirks are ported *as-is* and logged in an issue list for v2.x.
 - **Rewriting vendor bundling.** `gofront prep` / `vendor` (and the vendor step of `build`) keep using [`src/vendor.js`](../../src/vendor.js), which loads Rolldown or esbuild from the consumer's devDependencies.
 - **Running JS without Node.** `gofront test` runs compiled JS (and JSDOM with `--dom`) in Node. It is not ported to an embedded engine (see [Rejected alternatives](#rejected-alternatives)).
 - **Using `go/parser` / `go/ast` / `go/types`.** They implement the Go spec exactly and reject GoFront extensions (`async`/`await`, `.templ`, `css`, `js:` imports, browser globals). GoFront keeps its own hand-written parser and checker. `go/constant` and `math/big` *may* be used for constant evaluation (see §5).
@@ -62,7 +62,7 @@ If Node is missing, the native binary prints a clear message naming the command 
  │ • Go ASI    │          │ • Go exprs  │       │ • 4 passes       │              │ • clone      │                │ • js             │
  │ • templ/css │          │ • generics  │       │ • generics       │              │   elision    │                │ • wasm (full     │
  │ • directives│          │ • templ/css │       │ • stdlib + web   │              │ • boxing     │                │   hybrid, from   │
- └─────────────┘          └─────────────┘       │ • .d.ts types    │              │ • captures   │                │   v1.6.0)        │
+ └─────────────┘          └─────────────┘       │ • .d.ts types    │              │ • captures   │                │   v1.6.1)        │
                                                 │ • pkg targets    │              │ • escape     │                └────────┬─────────┘
                                                 └──────────────────┘              │ • range/defer│                         │
                                                                                   └──────────────┘                         ▼
@@ -71,7 +71,7 @@ If Node is missing, the native binary prints a clear message naming the command 
 
 - **`Info` side table.** The checker writes results into a `types.Info` (similar to `go/types`) rather than mutating AST nodes, e.g. `Types map[ast.Expr]TypeAndValue`, `Defs`, `Uses`, `Boxed map[*ast.Ident]bool`, `Instances` and package targets.
 - **`lower`.** A **port** of `src/lower/` (introduced in v1.5.0, where it already produces side tables instead of AST mutations): clone elision (ownership/mutation analysis), address-taken boxing, captured-and-mutated variables, pointer-retention escape analysis, embedded promotion, range-loop shape, `defer`/`recover` structure, named-return pre-declaration. The port is mechanical, since the design work happened in v1.5.0.
-- **`backend` interface.** `Emit(pkg *lower.Package) (Output, error)`. v2.0.0 ships `backend/js` and `backend/wasm` (the complete v1.6.0 backend, ported as-is).
+- **`backend` interface.** `Emit(pkg *lower.Package) (Output, error)`. v2.0.0 ships `backend/js` and `backend/wasm` (the complete v1.6.1 backend, ported as-is).
 
 ### Repository Layout
 
@@ -95,7 +95,7 @@ internal/minify         minifier/mangler
 internal/devserver      HTTP + SSE live reload, watcher
 internal/cli            command parsing, project config, assets, PWA
 runtime/js/*.js         JS runtime helpers (single source of truth, see §6)
-runtime/wasm/*.go       WASM runtime written in GoFront (shared by both engines)
+runtime/js/wasm/*.js    WASM host imports + boundary glue (single source of truth, see §6b)
 test/oracle/            differential harness
 ```
 
@@ -199,7 +199,7 @@ Prefer table-driven definitions (Go struct literals or `//go:embed`ed data) over
 
 ### 6. JavaScript Backend (`internal/backend/js`)
 
-The output must match the v1.6.0 engine. The oracle enforces this. Mappings that need care:
+The output must match the v1.6.1 engine. The oracle enforces this. Mappings that need care:
 
 | Area | Current behaviour to reproduce |
 |---|---|
@@ -227,14 +227,15 @@ The output must match the v1.6.0 engine. The oracle enforces this. Mappings that
 
 ### 6b. WASM Backend Port (`internal/backend/wasm`)
 
-A port of the complete `src/backend/wasm/` as shipped in v1.6.0, **without new features**. Design and scope: [`docs/v1.5.0/wasm-mvp-plan.md`](../v1.5.0/wasm-mvp-plan.md) (core) and [`docs/v1.6.0/wasm-hybrid-plan.md`](../v1.6.0/wasm-hybrid-plan.md) (complete hybrid).
+A port of the complete `src/backend/wasm/` as shipped in v1.6.1, **without new features**. Design and scope: [`docs/v1.5.0/wasm-mvp-plan.md`](../v1.5.0/wasm-mvp-plan.md) (core), [`docs/v1.6.0/wasm-hybrid-plan.md`](../v1.6.0/wasm-hybrid-plan.md) (complete hybrid) and [`docs/v1.6.1/wasm-gaps-plan.md`](../v1.6.1/wasm-gaps-plan.md) (remaining language, boundary and stdlib gaps).
 
 - **Module IR and WasmGC type mapping:** rec groups, slices, JS-string-backed strings, insertion-ordered maps, interfaces/itabs, closures, monomorphised generics.
 - **Instruction emission:** structured control flow, `panic` + `defer`/`recover` (exception handling, with the encoding chosen in v1.6.0), `ref.test`/`ref.cast` type switches.
 - **Binary encoder** (byte buffer + LEB128 + sections) and **WAT printer**.
-- **Facade + loader generation** for the JS ↔ WASM boundary: values, handles, copy-in/out + retention check, numeric slices, `any`, callbacks both ways, `gofront/shared` linear-memory buffers (cross-boundary interface proxies dropped in v1.6 in favor of WASM-side provider dispatch and func callbacks).
+- **Facade + loader generation** for the JS ↔ WASM boundary: values, handles, copy-in/out + retention check, numeric slices and maps, `any`, `error`, named and anonymous interface facades, pointer-to-scalar boxes, `time.Time`, callbacks both ways, `gofront/shared` linear-memory buffers. JS types implementing WASM interfaces stay rejected.
+- **WASM stdlib:** the inline emitters in `emit-stdlib.js` and the synthetic runtime helpers (`emitRuntimeHelper`) are ported as Go code.
 - **JS strict numeric mode** for `both` packages lives in `backend/js`.
-- **Runtime:** `runtime/wasm/*.go` is GoFront source, so both engines compile the *same files*. It was placed there in v1.5.0, like `runtime/js/`.
+- **Host imports:** the JS side of the module (`WASM_IMPORTS_JS`, `WASM_STDLIB_JS` in `boundary.js`) moves to `runtime/js/wasm/*.js` in Phase 0, like the JS runtime helpers, so both engines embed the *same files*.
 
 ### 7. Packages & Resolution (`internal/resolve`, `internal/dts`)
 
@@ -273,7 +274,7 @@ The ~1,800+ unit tests are JS test files that call `Lexer`, `Parser`, `TypeCheck
   2. **Diagnostics:** message, file, line, column, caret. Byte-identical.
   3. **Emitted JS + CSS:** byte-identical. A normalising comparison (parse both with a JS parser, compare ASTs) is allowed only as a temporary escape hatch, and every use is tracked.
   4. **Emitted WASM:** `.wasm` byte-identical, with the WAT dump compared alongside for readable diffs. Facade/loader JS is covered by gate 3. There is no escape hatch: the encoder is deterministic, so any difference is a bug.
-  5. **Runtime behaviour:** the existing `vm` execution assertions and the v1.5.0/v1.6.0 hybrid fixtures (JS-strict == WASM, boundary, shared buffers) run unchanged against native output.
+  5. **Runtime behaviour:** the existing `vm` execution assertions and the v1.5.0–v1.6.1 hybrid fixtures (JS-strict == WASM, boundary, shared buffers, stdlib parity) run unchanged against native output.
 - **AST dumps** are a debugging aid, not a gate. The JS AST carries codegen-time mutations (`_type`, `_lvalue`, `_className`) that the Go design deliberately drops, so forcing structural JSON parity would hold the new design hostage to the old one.
 - Tests that probe internals (e.g. constructing `TypeChecker` directly) are tagged `js-only`, or get an oracle op added. The harness reports the number of skipped tests so it stays visible.
 - **Beyond unit tests:** `npm run test:examples`, `test:examples:dom`, `test:e2e` (Playwright on all six examples) and the `simplefps` build + test suite all run with the native binary in CI.
@@ -294,7 +295,7 @@ The ~1,800+ unit tests are JS test files that call `Lexer`, `Parser`, `TypeCheck
 | Risk | Mitigation |
 |---|---|
 | Clone-elision / boxing analyses are subtle | Already extracted into `src/lower/` in v1.5.0 with side tables, so the port is mechanical. The oracle on emitted JS + WASM catches any divergence. |
-| The complete WASM backend substantially enlarges the port | Ported as-is (no new features). Byte-identical `.wasm` gate. Runtime shared as GoFront source. Its own phase (5b), so it can't stall the JS path. |
+| The complete WASM backend substantially enlarges the port | Ported as-is (no new features). Byte-identical `.wasm` gate. Host imports shared via `runtime/js/wasm/`. Its own task (5.2), so it can't stall the JS path. |
 | Column/position semantics (UTF-16 vs bytes) differ silently | Settle in Phase 1 with dedicated non-ASCII fixtures. |
 | Stdlib codegen volume underestimated | Separate phase, table-driven port, per-package oracle runs. |
 | Performance target not met (e.g. I/O- or watcher-bound) | Phase 0 baseline + Phase 9 benchmarks. The target is a measured goal, not a promise. |
@@ -314,7 +315,7 @@ The ~1,800+ unit tests are JS test files that call `Lexer`, `Parser`, `TypeCheck
 <!-- Native Go engine implementation roadmap -->
 
 ### Phase 0: Oracle & Baseline
-- [ ] **Task 0.1 — Test harness & oracle stub:** `helpers.js` engine switch, `gofront oracle` protocol stub, shared `runtime/js/`.
+- [ ] **Task 0.1 — Test harness & oracle stub:** `helpers.js` engine switch, `gofront oracle` protocol stub, shared `runtime/js/` (incl. `runtime/js/wasm/` host imports).
 - [ ] **Task 0.2 — Timing baseline:** Cold `check`/`build` and warm rebuild baselines on all examples and `simplefps`.
 
 ### Phase 1: Tokens & Lexer
@@ -332,7 +333,7 @@ The ~1,800+ unit tests are JS test files that call `Lexer`, `Parser`, `TypeCheck
 
 ### Phase 5: Codegen & Backends
 - [ ] **Task 5.1 — Stdlib & templ codegen:** All 23 stdlib modules, templ DOM codegen, and scoped CSS (byte-identical JS + CSS).
-- [ ] **Task 5.2 — WASM backend port:** `internal/backend/wasm` (IR, types, encoder, WAT, facades, `runtime/wasm` build) matching v1.6.0 `.wasm` output byte-for-byte.
+- [ ] **Task 5.2 — WASM backend port:** `internal/backend/wasm` (IR, types, encoder, WAT, facades, WASM stdlib + runtime helpers) matching v1.6.1 `.wasm` output byte-for-byte.
 
 ### Phase 6: CLI & Tooling
 - [ ] **Task 6.1 — CLI binary & dev server:** `cmd/gofront`, config, assets, PWA, dev server, and minifier with Node delegation for `prep`/`vendor`/`test`.
