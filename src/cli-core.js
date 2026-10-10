@@ -912,7 +912,7 @@ export function parseLegacyArgs(argv) {
 
 export function parseDevArgs(argv) {
 	let port = null;
-	let outputFile = null;
+	let outputFile; // undefined → fall back to project.devOutputFile
 	const positional = [];
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
@@ -921,7 +921,7 @@ export function parseDevArgs(argv) {
 		} else if (arg.startsWith("--port=")) {
 			port = parseInt(arg.slice(arg.indexOf("=") + 1), 10);
 		} else if (arg === "-o" || arg === "--output") {
-			outputFile = argv[++i] ?? null;
+			outputFile = argv[++i];
 		} else if (arg === "--target") {
 			i++;
 		} else if (!arg.startsWith("-")) {

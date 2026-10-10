@@ -43,16 +43,17 @@ import {
 	HELPER_SCLONE,
 	HELPER_SORT_SLICE,
 	HELPER_SPRINTF,
+	HELPER_STRCONV,
 	HELPER_TESTING,
 	HELPER_TIME_FMT,
 	HELPER_TIME_PARSE,
 } from "./runtime.js";
-import { buildSourceMap } from "./source-map.js";
+import { buildSourceMap, buildWasmSourceMap } from "./source-map.js";
 import { statementGenMethods } from "./statements.js";
 import { stdlibGenMethods } from "./stdlib/index.js";
 import { templGenMethods } from "./templ.js";
 
-export { buildSourceMap };
+export { buildSourceMap, buildWasmSourceMap };
 
 // Valid Go identifiers that cannot be used as JS bindings; emitted with a `$` suffix.
 const JS_RESERVED = new Set([
@@ -110,6 +111,7 @@ const HELPER_MAP = [
 	["sprintf", HELPER_SPRINTF],
 	["error", HELPER_ERROR],
 	["errorIs", HELPER_ERROR_IS],
+	["strconv", HELPER_STRCONV],
 	["pathClean", HELPER_PATH_CLEAN],
 	["sortSlice", HELPER_SORT_SLICE],
 	["timeFmt", HELPER_TIME_FMT],

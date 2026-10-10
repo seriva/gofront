@@ -19,7 +19,11 @@
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
-import { buildSourceMap, CodeGen } from "./backend/js/index.js";
+import {
+	buildSourceMap,
+	buildWasmSourceMap,
+	CodeGen,
+} from "./backend/js/index.js";
 import { compileWasmModule, optimizeWasm } from "./backend/wasm/index.js";
 import { log } from "./colors.js";
 import { parseDts } from "./dts-parser.js";
@@ -67,6 +71,9 @@ function parseGoFrontFile(filePath) {
 		? new TemplParser(tokens, filename, source).parse()
 		: new Parser(tokens, filename, source).parse();
 	ast._source = source;
+	ast._path = resolve(filePath);
+	// compileFiles overwrites `target` with the resolved one; keep the directive.
+	ast._declaredTarget = ast.target;
 	_parseCache.set(filePath, { mtime, ast });
 	return ast;
 }
@@ -163,6 +170,48 @@ function attachSourceMap(merged, outputDir) {
 	merged.js += `\n//# sourceMappingURL=data:application/json;base64,${b64}`;
 }
 
+const WASM_MAP_URL = "app.wasm.map";
+
+// Function-level `app.wasm.map` (sources relative to the output dir).
+function buildWasmMap(info, outputDir) {
+	if (!info || info.mappings.length === 0) return null;
+	return buildWasmSourceMap(
+		info.sources.map((f) => relative(outputDir, f)),
+		info.mappings,
+	);
+}
+
+// Shared tail of compileFiles / compileSingleFile: link `app.wasm`, run
+// wasm-opt when requested and produce the wasm source map.
+function finishWasm(options, merged, pkgTarget, outputDir) {
+	const wantMap = Boolean(options.sourceMap && !options.isDependency);
+	let { wasm, wat, sourceMapInfo } = linkIntoBundle(
+		options,
+		merged,
+		pkgTarget,
+		{
+			sourceMappingURL: wantMap ? WASM_MAP_URL : null,
+		},
+	);
+	let wasmOptInfo = null;
+	let wasmSourceMap =
+		wantMap && wasm ? buildWasmMap(sourceMapInfo, outputDir) : null;
+
+	if (wasm && options.wasmOpt) {
+		const opt = optimizeWasm(wasm, {
+			sourceMap: Boolean(wasmSourceMap),
+			inputSourceMap: wasmSourceMap,
+			sourceMapUrl: WASM_MAP_URL,
+			emitWat: Boolean(options.emitWat),
+		});
+		wasm = opt.wasm;
+		if (opt.wat) wat = opt.wat;
+		wasmOptInfo = opt;
+		if (opt.sourceMap) wasmSourceMap = opt.sourceMap;
+	}
+	return { wasm, wat, wasmOptInfo, wasmSourceMap };
+}
+
 // ── WASM linking ──────────────────────────────────────────────
 //
 // Every `wasm`/`both` package reached during a build registers a unit in the
@@ -205,7 +254,10 @@ function registerPackageUnit(options, unit) {
 	return emitTarget;
 }
 
-function linkWasmUnits(units, { emitWat = false, rootTarget = "js" } = {}) {
+function linkWasmUnits(
+	units,
+	{ emitWat = false, rootTarget = "js", sourceMappingURL = null } = {},
+) {
 	if (!units.some((u) => u.target === "wasm")) return null;
 	checkLinkCollisions(units);
 
@@ -224,6 +276,7 @@ function linkWasmUnits(units, { emitWat = false, rootTarget = "js" } = {}) {
 		bundledPackages,
 		emitWat,
 		callMain: rootTarget === "wasm",
+		sourceMappingURL,
 	});
 }
 
@@ -291,17 +344,23 @@ function spliceFacade(merged, facade) {
 }
 
 // Root compiles only: link every registered unit into app.wasm and splice the
-// facade into the merged bundle.  Returns `{ wasm, wat }` (nulls when there
-// is nothing to link).
-function linkIntoBundle(options, merged, pkgTarget) {
-	if (options.isDependency) return { wasm: null, wat: null };
+// facade into the merged bundle.  Returns `{ wasm, wat, sourceMapInfo }`
+// (nulls when there is nothing to link).
+function linkIntoBundle(options, merged, pkgTarget, { sourceMappingURL } = {}) {
+	const none = { wasm: null, wat: null, sourceMapInfo: null };
+	if (options.isDependency) return none;
 	const linked = linkWasmUnits(options.wasmUnits, {
 		emitWat: options.emitWat,
 		rootTarget: pkgTarget,
+		sourceMappingURL,
 	});
-	if (!linked) return { wasm: null, wat: null };
+	if (!linked) return none;
 	spliceFacade(merged, linked.facade);
-	return { wasm: linked.wasm, wat: linked.wat ?? null };
+	return {
+		wasm: linked.wasm,
+		wat: linked.wat ?? null,
+		sourceMapInfo: linked.sourceMapInfo ?? null,
+	};
 }
 
 // ── Import resolution ─────────────────────────────────────────
@@ -477,6 +536,7 @@ function resolveImports(
 					nameUsed,
 					dep.exportedSymbols,
 					dep.exportedTypes,
+					dep.target,
 				);
 				checker.trackImport(nameUsed, { _line }, p._filename, p._source);
 			}
@@ -530,6 +590,7 @@ export function compileSingleFile(inputPath, options = {}) {
 
 	const ast = new Parser(tokens, basename(inputPath), source).parse();
 	ast._source = source;
+	ast._path = resolve(inputPath);
 	if (dumpAst) return { ast };
 
 	const outputDir =
@@ -566,6 +627,7 @@ export function compileSingleFile(inputPath, options = {}) {
 	if (errors.length > 0) {
 		throw new Error(errors.map((e) => e.message).join("\n"));
 	}
+	for (const w of checker.warnings) log.warn(w);
 
 	if (pkgTarget === "wasm" || pkgTarget === "both") {
 		registerWasmUnit(options, {
@@ -594,21 +656,12 @@ export function compileSingleFile(inputPath, options = {}) {
 	};
 
 	const merged = mergeCompilationChunks([...preambles, mainChunk]);
-	let { wasm, wat } = linkIntoBundle(options, merged, pkgTarget);
-	let wasmOptInfo = null;
-	let wasmSourceMap = null;
-
-	if (wasm && options.wasmOpt) {
-		const opt = optimizeWasm(wasm, {
-			sourceMap: Boolean(sourceMap && !options.isDependency),
-			sourceMapUrl: "app.wasm.map",
-			emitWat: Boolean(options.emitWat),
-		});
-		wasm = opt.wasm;
-		if (opt.wat) wat = opt.wat;
-		wasmOptInfo = opt;
-		wasmSourceMap = opt.sourceMap;
-	}
+	const { wasm, wat, wasmOptInfo, wasmSourceMap } = finishWasm(
+		{ ...options, sourceMap },
+		merged,
+		pkgTarget,
+		outputDir,
+	);
 
 	if (sourceMap && !options.isDependency) {
 		attachSourceMap(merged, outputDir);
@@ -680,9 +733,10 @@ export function compileFiles(files, options = {}) {
 	// Validate target directives across files in this package
 	const declaredTargets = new Map();
 	for (const p of programs) {
-		if (p.target) {
-			if (!declaredTargets.has(p.target)) declaredTargets.set(p.target, []);
-			declaredTargets.get(p.target).push(p._filename);
+		const declared = p._declaredTarget;
+		if (declared) {
+			if (!declaredTargets.has(declared)) declaredTargets.set(declared, []);
+			declaredTargets.get(declared).push(p._filename);
 		}
 	}
 	if (declaredTargets.size > 1) {
@@ -729,6 +783,7 @@ export function compileFiles(files, options = {}) {
 		const msgs = errors.map((e) => e.message).join("\n");
 		throw new Error(msgs);
 	}
+	for (const w of checker.warnings) log.warn(w);
 
 	// ── 4. Code generation ────────────────────────────────────────
 	const emitTarget = registerPackageUnit(options, {
@@ -760,21 +815,12 @@ export function compileFiles(files, options = {}) {
 	};
 
 	const merged = mergeCompilationChunks([...preambles, mainChunk]);
-	let { wasm, wat } = linkIntoBundle(options, merged, pkgTarget);
-	let wasmOptInfo = null;
-	let wasmSourceMap = null;
-
-	if (wasm && options.wasmOpt) {
-		const opt = optimizeWasm(wasm, {
-			sourceMap: Boolean(options.sourceMap && !options.isDependency),
-			sourceMapUrl: "app.wasm.map",
-			emitWat: Boolean(options.emitWat),
-		});
-		wasm = opt.wasm;
-		if (opt.wat) wat = opt.wat;
-		wasmOptInfo = opt;
-		wasmSourceMap = opt.sourceMap;
-	}
+	const { wasm, wat, wasmOptInfo, wasmSourceMap } = finishWasm(
+		options,
+		merged,
+		pkgTarget,
+		outputDir,
+	);
 
 	if (options.sourceMap && !options.isDependency) {
 		attachSourceMap(merged, outputDir);

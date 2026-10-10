@@ -57,3 +57,35 @@ export function buildSourceMap(sources, mappings, sourcesContent) {
 	if (sourcesContent) map.sourcesContent = sourcesContent;
 	return JSON.stringify(map);
 }
+
+// WASM source maps use the convention "generated line 0, generated column =
+// byte offset into the module".  `mappings` is Array<{ offset, srcFileIdx,
+// srcLine }> (0-based line), one segment per function body (function-level
+// granularity); DevTools shows the Go file/line for each wasm function.
+export function buildWasmSourceMap(sources, mappings, sourcesContent) {
+	const sorted = [...mappings].sort((a, b) => a.offset - b.offset);
+	const segments = [];
+	let prevOffset = 0;
+	let prevSrcFile = 0;
+	let prevSrcLine = 0;
+	for (const m of sorted) {
+		const fileIdx = m.srcFileIdx ?? 0;
+		segments.push(
+			vlqEncode(m.offset - prevOffset) +
+				vlqEncode(fileIdx - prevSrcFile) +
+				vlqEncode(m.srcLine - prevSrcLine) +
+				vlqEncode(0),
+		);
+		prevOffset = m.offset;
+		prevSrcFile = fileIdx;
+		prevSrcLine = m.srcLine;
+	}
+	const map = {
+		version: 3,
+		sources: sources.map((s) => s.replace(/\\/g, "/")),
+		names: [],
+		mappings: segments.join(","),
+	};
+	if (sourcesContent) map.sourcesContent = sourcesContent;
+	return JSON.stringify(map);
+}

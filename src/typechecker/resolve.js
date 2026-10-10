@@ -13,6 +13,7 @@ import {
 	typedArrayConstructorForElem,
 	typeStr,
 	VOID,
+	WASM_STDLIB_MEMBERS,
 } from "./types.js";
 
 /** @typedef {import('./index.js').TypeChecker} TypeChecker */
@@ -486,7 +487,24 @@ export const resolveMethods = {
 				`cannot refer to unexported name ${base.name}.${field}`,
 				node,
 			);
-		if (field in base.members) return base.members[field];
+		if (field in base.members) {
+			if (
+				(this.target === "wasm" || this.target === "both") &&
+				WASM_STDLIB_MEMBERS.has(base.name)
+			) {
+				const allowed = WASM_STDLIB_MEMBERS.get(base.name);
+				if (allowed && !allowed.has(field)) {
+					const name = `${base.name}.${field}`;
+					this.recordBlocker("unsupported stdlib member", name);
+					return this.err(
+						`'${name}' is not yet available in wasm packages`,
+						node,
+						"move this call to a JS package, or use a supported alternative",
+					);
+				}
+			}
+			return base.members[field];
+		}
 		return this.err(`No member '${field}' in namespace ${base.name}`, node);
 	},
 };

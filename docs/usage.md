@@ -109,7 +109,7 @@ gofront test app/src --dom         # run under JSDOM: document/window available 
 - `--dom` requires `jsdom` to be installed (it is a devDependency of GoFront itself; add it to
   your project when using a global install).
 - Packages targeting `wasm` run inside the linked module, and `both` packages run once per
-  backend (`pkg [js]`, `pkg [wasm]`). `t.Run` is not available in `wasm` test packages yet.
+  backend (`pkg [js]`, `pkg [wasm]`). `t.Run` subtests work in `wasm` test packages too.
   See the [hybrid guide](hybrid-wasm.md#testing-hybrid-packages).
 
 ---

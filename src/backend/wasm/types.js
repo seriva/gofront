@@ -3,6 +3,9 @@
 
 import { SHARED_KINDS } from "../../typechecker/stdlib/shared.js";
 
+// Name of the runtime's error struct (`errors.New`, `fmt.Errorf`, strconv).
+export const ERROR_STRUCT = "__errorString";
+
 // `*testing.T` is a JS-side object (the harness's __GoFront_T) passed through
 // the boundary as an opaque externref.
 export function isTestingT(goType) {
@@ -388,6 +391,23 @@ export function isInterfaceType(goType, checker = null) {
 		const resolved = checker?.types?.get(goType.name);
 		if (resolved) return isInterfaceType(resolved, checker);
 	}
+	return false;
+}
+
+// The built-in `error` interface (checker ERROR type or its name).
+export function isErrorType(goType) {
+	if (!goType) return false;
+	if (goType.kind === "interface") return goType.name === "error";
+	if (
+		(goType.kind === "named" ||
+			goType.kind === "TypeName" ||
+			goType.kind === "Ident") &&
+		goType.name === "error"
+	) {
+		return true;
+	}
+	if (goType.kind === "named" && goType.underlying)
+		return isErrorType(goType.underlying);
 	return false;
 }
 

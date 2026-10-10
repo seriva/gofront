@@ -364,6 +364,14 @@ package physics           // no directive = js (default)
 - **Zero Boundary Overhead for Shared Types:** `both` packages never create a boundary overhead — JS callers use the JS copy and WASM callers use the WASM copy.
 - **Strict Go Numeric Semantics:** Code compiled to `wasm` (and JS emitted for `both` packages) follows strict Go numeric rules: sized-integer wrapping, true `float32` rounding, and integer divide-by-zero panics.
 
+**Choosing a target for a package** — the questions to ask, in order:
+
+1. **Does it touch the browser** (DOM, WebGPU, `fetch`, PeerJS, `gom`, `.templ`)? → `js`. There is no other option.
+2. **Is it a leaf that only imports `math`/`mathx`-style helpers and spends its time in numeric loops?** → candidate for `wasm`. Profile first; moving code that is not hot buys nothing.
+3. **What crosses the boundary per frame?** Scalars, handles and `shared` buffers are free; a slice result (`[]Mat4`, `[]float32`) is copied out on every call. If the package's main output is a slice the renderer reads each frame, it will measure at parity with JS — write that output into a `gofront/shared` buffer instead.
+4. **Do two `wasm` packages (or JS and WASM) both need the same types?** → make that package `both`, so neither side pays a boundary call for it.
+5. **Can't decide?** Compile both ways and measure: `gofront build --js-only` gives the all-JS build, or pin per-package targets in `gofront.json` (`"targets": { "engine/physics": "wasm" }`) without editing source. Ship with `--release` so `wasm-opt` shrinks `app.wasm` (~21–23%).
+
 ### Seamless Compile-Time Boundary
 
 Every `wasm` and `both` package an application imports is automatically linked into a single `app.wasm` module, emitted right alongside `app.js` by `gofront build`, `gofront dev`, and `-o`.
@@ -392,6 +400,17 @@ Splitting an app into high-level JavaScript orchestration and low-level WebAssem
 - **+17.1% higher throughput:** Direct WasmGC typed arrays, local-cached scratch globals, and hardware-trapped nil dereferences outperform JIT-compiled JS.
 - **86% memory churn reduction:** Dropping allocations from 6.2 B/ray to 0.86 B/ray prevents garbage collection pauses from causing micro-stutter in 60 FPS loops.
 - **Minimal boundary overhead:** The boundary trampoline consumes only ~0.5% of total runtime, ensuring batch computations cross between JS and WASM with virtually zero penalty.
+
+**Full application: [simplefps](https://github.com/seriva/simplefps).** The game ships `mathx` as `both`, `collision`, `physics` and `animation` as `wasm`, and everything else (WebGPU renderer, scene, UI) as `js`. Its `npm run bench` compiles `physics` and `animation` once with `--js-only` and once hybrid and runs the same workload against both (Node 25):
+
+| Workload | Pure JS | Hybrid WASM | Ratio |
+| :--- | :--- | :--- | :--- |
+| Closest-hit raycasts, 2048-triangle octree (200k casts) | ~240k casts/s | ~263k casts/s | **1.11–1.15×** |
+| FPS-controller fixed step across the boundary (pose in → `Update` + `MoveWithCamera` + `SyncCamera` → pose out, 50k frames) | ~46k frames/s | ~108k frames/s | **2.4×**, 0.2 B/frame |
+| 64-joint skinned-character frame (`AnimationPlayer.Update` + `ComputeSkinningMatrices` + palette copy-out via `gofront/shared`) | ~141k frames/s | ~179k frames/s | **1.27×** |
+| `app.wasm` (`mathx` + `collision` + `physics` + `animation`) | — | 98.5 kB unoptimised → **79.7 kB** with `--release` | −19% |
+
+The controller step is where WASM wins most: each fixed step issues several raycasts, and keeping `physics` next to `collision` means those never cross the boundary — only the camera pose does. `animation` is the cautionary tale for step 3: compiled as `wasm` while `ComputeSkinningMatrices` still returned a `[]Mat4`, it measured at parity with JS (the slice was copied out every frame); writing the palette into a `gofront/shared` buffer instead turned that into a 1.27× win.
 
 For the full rules — `both`-package restrictions, strict numeric mode, which types can cross the boundary, loader overrides, and how `gofront test` runs hybrid packages — see the **[Hybrid JS + WebAssembly Guide](docs/hybrid-wasm.md)**.
 

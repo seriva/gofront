@@ -798,57 +798,69 @@ function encodeElementSection(elements) {
 	);
 }
 
-function encodeCodeSection(funcs) {
+// Encodes the code section.  `bodyOffsets` (when given) receives, per
+// function, the offset of the body's first instruction relative to the start
+// of the section bytes returned.
+function encodeCodeSection(funcs, bodyOffsets = null) {
 	if (!funcs || funcs.length === 0) return [];
-	return encodeSection(
-		10,
-		encodeVector(funcs, (fn) => {
-			// Compress locals: [type1, type1, type2] -> [{ count: 2, type: type1 }, { count: 1, type: type2 }]
-			const rawLocals = fn.locals ?? [];
-			const compressedLocals = [];
-			for (const loc of rawLocals) {
-				const locType =
-					typeof loc === "string"
-						? loc
-						: loc.type !== undefined
-							? loc.type
-							: loc;
-				if (
-					compressedLocals.length > 0 &&
-					sameValType(
-						compressedLocals[compressedLocals.length - 1].type,
-						locType,
-					)
-				) {
-					compressedLocals[compressedLocals.length - 1].count++;
-				} else {
-					compressedLocals.push({ count: 1, type: locType });
-				}
-			}
-
-			const localsBytes = encodeVector(compressedLocals, (group) => [
-				...encodeU32LEB(group.count),
-				...encodeValType(group.type),
-			]);
-
-			const bodyInsts = fn.body ?? [];
-			const bodyBytes = [];
-			for (const inst of bodyInsts) {
-				const chunk = encodeInstruction(inst);
-				for (let i = 0; i < chunk.length; i++) bodyBytes.push(chunk[i]);
-			}
-			// Ensure terminating end opcode (0x0B)
+	const relOffsets = [];
+	const payload = encodeVector(funcs, (fn) => {
+		// Compress locals: [type1, type1, type2] -> [{ count: 2, type: type1 }, { count: 1, type: type2 }]
+		const rawLocals = fn.locals ?? [];
+		const compressedLocals = [];
+		for (const loc of rawLocals) {
+			const locType =
+				typeof loc === "string" ? loc : loc.type !== undefined ? loc.type : loc;
 			if (
-				bodyInsts.length === 0 ||
-				bodyInsts[bodyInsts.length - 1].op !== "end"
+				compressedLocals.length > 0 &&
+				sameValType(compressedLocals[compressedLocals.length - 1].type, locType)
 			) {
-				bodyBytes.push(0x0b);
+				compressedLocals[compressedLocals.length - 1].count++;
+			} else {
+				compressedLocals.push({ count: 1, type: locType });
 			}
+		}
 
-			const fullBody = [...localsBytes, ...bodyBytes];
-			return [...encodeU32LEB(fullBody.length), ...fullBody];
-		}),
-	);
+		const localsBytes = encodeVector(compressedLocals, (group) => [
+			...encodeU32LEB(group.count),
+			...encodeValType(group.type),
+		]);
+
+		const bodyInsts = fn.body ?? [];
+		const bodyBytes = [];
+		for (const inst of bodyInsts) {
+			const chunk = encodeInstruction(inst);
+			for (let i = 0; i < chunk.length; i++) bodyBytes.push(chunk[i]);
+		}
+		// Ensure terminating end opcode (0x0B)
+		if (
+			bodyInsts.length === 0 ||
+			bodyInsts[bodyInsts.length - 1].op !== "end"
+		) {
+			bodyBytes.push(0x0b);
+		}
+
+		const fullBody = [...localsBytes, ...bodyBytes];
+		const sizeBytes = encodeU32LEB(fullBody.length);
+		// Offset of the first instruction within this entry + entry length.
+		relOffsets.push([
+			sizeBytes.length + localsBytes.length,
+			sizeBytes.length + fullBody.length,
+		]);
+		return [...sizeBytes, ...fullBody];
+	});
+	if (bodyOffsets) {
+		// Section-relative: id + size LEB + count LEB + preceding entries.
+		let cursor =
+			1 +
+			encodeU32LEB(payload.length).length +
+			encodeU32LEB(funcs.length).length;
+		for (const [first, len] of relOffsets) {
+			bodyOffsets.push(cursor + first);
+			cursor += len;
+		}
+	}
+	return encodeSection(10, payload);
 }
 
 // ── Top-level Module Encoder ─────────────────────────────────
@@ -872,6 +884,10 @@ export function isGoFrontWasm(bytes) {
 	return true;
 }
 
+// Encodes the module.  When `mod.sourceMappingURL` is set a trailing
+// `sourceMappingURL` custom section is appended, and `mod.codeOffsets` is
+// filled with the absolute byte offset of every function body (aligned with
+// `mod.funcs`) so a function-level source map can be built.
 export function encodeModule(mod) {
 	const magic = [0x00, 0x61, 0x73, 0x6d]; // \0asm
 	const version = [0x01, 0x00, 0x00, 0x00]; // version 1
@@ -888,7 +904,8 @@ export function encodeModule(mod) {
 			? encodeSection(8, encodeU32LEB(mod.start))
 			: [];
 	const elemSec = encodeElementSection(mod.elements);
-	const codeSec = encodeCodeSection(mod.funcs);
+	const sectionOffsets = [];
+	const codeSec = encodeCodeSection(mod.funcs, sectionOffsets);
 
 	const allBytes = [
 		...magic,
@@ -903,8 +920,18 @@ export function encodeModule(mod) {
 		...exportSec,
 		...startSec,
 		...elemSec,
-		...codeSec,
 	];
+	const codeStart = allBytes.length;
+	mod.codeOffsets = sectionOffsets.map((o) => codeStart + o);
+	allBytes.push(...codeSec);
+	if (mod.sourceMappingURL) {
+		allBytes.push(
+			...encodeSection(0, [
+				...encodeString("sourceMappingURL"),
+				...encodeString(mod.sourceMappingURL),
+			]),
+		);
+	}
 
 	return new Uint8Array(allBytes);
 }

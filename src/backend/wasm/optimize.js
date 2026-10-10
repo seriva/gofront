@@ -7,7 +7,8 @@
 // - WasmGC feature flag configuration (GC, ReferenceTypes, BulkMemory, Multivalue, ExceptionHandling, etc.)
 // - Optimization levels (-O3 by default) + GUFA (Grand Unified Flow Analysis)
 // - Post-optimization module validation (WebAssembly.validate)
-// - WASM source map emission and GoFront custom section preservation
+// - WASM source map passthrough (`-ism` the encoder's function-level map,
+//   `-osm` the remapped one) and GoFront custom section preservation
 
 import { execFileSync, spawnSync } from "node:child_process";
 import {
@@ -102,6 +103,11 @@ function runWasmOpt(
 			args.push("--gufa");
 		}
 		if (options.sourceMap) {
+			if (options.inputSourceMap) {
+				const mapInput = join(dir, "in.wasm.map");
+				writeFileSync(mapInput, options.inputSourceMap);
+				args.push("-ism", mapInput);
+			}
 			args.push("-osm", mapOutput);
 			if (options.sourceMapUrl) {
 				args.push("-osu", options.sourceMapUrl);

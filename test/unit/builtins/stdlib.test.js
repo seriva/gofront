@@ -173,7 +173,7 @@ func main() {
 	console.log(n, err)
 }`);
 	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "0 invalid syntax");
+	assertEqual(runJs(js), '0 strconv.Atoi: parsing "abc": invalid syntax');
 });
 
 test("strconv.FormatBool", () => {
@@ -205,7 +205,10 @@ func main() {
 	console.log(v2, err2)
 }`);
 	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "true null\nfalse invalid syntax");
+	assertEqual(
+		runJs(js),
+		'true null\nfalse strconv.ParseBool: parsing "nope": invalid syntax',
+	);
 });
 
 test("strconv.ParseInt", () => {

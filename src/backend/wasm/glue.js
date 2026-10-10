@@ -1,12 +1,14 @@
 // src/backend/wasm/glue.js
 // Runtime imports and JS glue for executing GoFront WASM modules.
 
-import { WASM_IMPORTS_JS } from "./boundary.js";
+import { WASM_IMPORTS_JS, WASM_STDLIB_JS } from "./boundary.js";
 
 // The import table is authored once as source text (it is spliced into the
 // production bundle by the facade); evaluate that same text here so tests
 // exercise exactly what ships.  The text is a compile-time constant.
-const makeImports = new Function(`${WASM_IMPORTS_JS}\nreturn __gfw_imports;`)();
+const makeImports = new Function(
+	`${WASM_IMPORTS_JS}\n${WASM_STDLIB_JS}\nreturn __gfw_imports;`,
+)();
 
 function createWasmImports({
 	stringTable = [],
@@ -61,6 +63,7 @@ export function instantiateWasm(
 
 	const module = new WebAssembly.Module(wasmBytes);
 	const instance = new WebAssembly.Instance(module, imports);
+	imports.__bind?.(instance.exports);
 
 	// The module exports its panic tag if defined internally, or uses the imported one
 	const tag = instance.exports.panicTag ?? defaultPanicTag;
