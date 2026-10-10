@@ -101,14 +101,14 @@ export const INT = { kind: "basic", name: "int" };
 export const INT8 = { kind: "basic", name: "int8" };
 export const INT16 = { kind: "basic", name: "int16" };
 export const INT32 = { kind: "basic", name: "int32" };
-export const INT64 = { kind: "basic", name: "int64" };
+const INT64 = { kind: "basic", name: "int64" };
 export const UINT = { kind: "basic", name: "uint" };
 export const UINT8 = { kind: "basic", name: "uint8" };
 export const BYTE = UINT8;
 export const UINT16 = { kind: "basic", name: "uint16" };
 export const UINT32 = { kind: "basic", name: "uint32" };
 export const UINT64 = { kind: "basic", name: "uint64" };
-export const UINTPTR = { kind: "basic", name: "uintptr" };
+const UINTPTR = { kind: "basic", name: "uintptr" };
 export const RUNE = INT32;
 export const FLOAT32 = { kind: "basic", name: "float32" };
 export const FLOAT64 = { kind: "basic", name: "float64" };
@@ -135,7 +135,7 @@ export const UNTYPED_BOOL = { kind: "untyped", base: "bool" };
 
 // ── Complex types ────────────────────────────────────────────
 export const COMPLEX128 = { kind: "basic", name: "complex128" };
-export const COMPLEX64 = { kind: "basic", name: "complex64" };
+const COMPLEX64 = { kind: "basic", name: "complex64" };
 export const UNTYPED_COMPLEX = { kind: "untyped", base: "complex128" };
 
 export const BASIC_TYPES = {
@@ -204,7 +204,7 @@ export const isBool = makeBasicPredicate("bool");
 
 // ── TypedArray mappings ──────────────────────────────────────
 // []float64 deliberately stays a plain Array for JSON / JS-library interop.
-export const TYPED_ARRAY_CONSTRUCTORS = {
+const TYPED_ARRAY_CONSTRUCTORS = {
 	float32: "Float32Array",
 	uint8: "Uint8Array",
 	byte: "Uint8Array",

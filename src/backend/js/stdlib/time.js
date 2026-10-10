@@ -35,11 +35,11 @@ export const timeMethods = {
 		const recvJs = this.genExpr(recv);
 		const args = expr.args.map((a) => this.genExpr(a));
 		if (method === "Format") {
-			this._usesTimeFmt = true;
+			this.useHelper("timeFmt");
 			return `__timeFmt(${recvJs}._d, ${args[0]})`;
 		}
 		if (method === "String") {
-			this._usesTimeFmt = true;
+			this.useHelper("timeFmt");
 			return `__timeFmt(${recvJs}._d, "2006-01-02T15:04:05Z07:00")`;
 		}
 		const gen = TIME_METHOD_DISPATCH[method];
@@ -48,7 +48,7 @@ export const timeMethods = {
 
 	_genTime(fn, a) {
 		if (fn === "Parse") {
-			this._usesTimeParse = true;
+			this.useHelper("timeParse");
 			return `__timeParse(${a()[0]}, ${a()[1]})`;
 		}
 		const gen = TIME_DISPATCH[fn];

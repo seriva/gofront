@@ -8,7 +8,7 @@ import { WASM_IMPORTS_JS } from "./boundary.js";
 // exercise exactly what ships.  The text is a compile-time constant.
 const makeImports = new Function(`${WASM_IMPORTS_JS}\nreturn __gfw_imports;`)();
 
-export function createWasmImports({
+function createWasmImports({
 	stringTable = [],
 	panicTag = null,
 	stdout = null,

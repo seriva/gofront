@@ -213,8 +213,13 @@ var Transforms = shared.NewFloat32(maxEntities * 16) // in a wasm package
 ```
 
 - `shared.Float32`, `shared.Int32`, `shared.Uint8`, … are fixed-size, allocated once from a bump allocator in exported linear memory, and live for the whole program (no freeing in v1.6.0).
+- **Allocation discipline:** `shared.New*` calls are intended for package-level / startup allocations. The compiler rejects or warns on allocations in runtime loops to prevent unbounded linear memory growth.
+- **Detached ArrayBuffer hazard:** Calling `memory.grow` in WebAssembly detaches existing JavaScript `ArrayBuffer` instances and typed array views, throwing a `TypeError` if JS code accesses a cached view. To guarantee safety:
+  - Linear memory size is configured and fixed at startup (defaulting to sufficient pages for all static shared buffers, avoiding `memory.grow` in v1.6.0).
+  - JS facade accessors verify view validity and refresh if `buffer.detached` is ever encountered.
+- **Linear memory vs. GC slice distinction:** `shared.Float32` is a linear-memory buffer, whereas Go `[]float32` in WasmGC is an object slice referencing a GC array. The compiler explicitly rejects passing a `shared` buffer to functions expecting GC slices (`cannot use shared.Float32 as []float32: linear-memory buffer cannot be passed as a GC slice without an explicit copy`), preventing confusing internal type errors.
 - **WASM side:** loads and stores at a base offset. Index syntax and `len` are supported. `append` and reslicing beyond the bounds are rejected.
-- **JS side:** a live TypedArray view. Views are refreshed if memory grows, so the allocation size is fixed at startup by default.
+- **JS side:** a live TypedArray view.
 - **In pure-JS builds or `both` packages compiled for JS:** a plain TypedArray. Code is portable across targets.
 
 ---
@@ -223,6 +228,8 @@ var Transforms = shared.NewFloat32(maxEntities * 16) // in a wasm package
 
 - **`build`:** `app.js` (JS packages + generated facades + loader) + `app.wasm` (all `wasm`/`both` code, one module) + `app.css`.
   - The loader uses `WebAssembly.instantiateStreaming` with top-level `await` before `main()`.
+  - **Asset URL Resolution (`import.meta.url`):** The loader resolves `app.wasm` relative to `import.meta.url` (`new URL("app.wasm", import.meta.url).href`) with fallback to `globalThis.__GOFRONT_WASM_URL` or `"app.wasm"`. This ensures correct asset resolution when `app.js` is served from nested routes (e.g. `/game/play`), CDN origins, or subdirectories where relative `fetch("app.wasm")` would otherwise resolve against `document.baseURI` and 404.
+  - **Target overrides & JS fallback builds:** Support `--js-only` (or `gofront build --target js`) and `gofront.json` `"targets"` config overrides to compile all packages to JavaScript. This enables zero-code-change A/B performance benchmarking and provides a fallback release build for browsers lacking WasmGC (Safari < 18.2 / iOS 17).
   - **Binaryen optimization pipeline (`binaryen` npm package):**
     - Built-in release optimization through the `wasm-opt` CLI shipped by the optional `binaryen` npm package (a JS-wrapped WebAssembly build run as a node child process; no native toolchain required).
     - Integrated into `gofront build --release` (or `--wasm-opt`).
@@ -244,7 +251,11 @@ var Transforms = shared.NewFloat32(maxEntities * 16) // in a wasm package
 
 Required: **GC, typed function references, reference types, multi-value, bulk memory, sign-extension, exception handling.** Optional: JS String Builtins (polyfilled). JSPI is not used.
 
-Exact minimum browser versions and the EH encoding (`exnref` vs. legacy) are fixed in v1.5.0 (the EH encoding in v1.6.0, when `recover` lands) and documented in the README. The loader feature-detects and reports a clear error. The README states whether a JS-only fallback build is recommended. Node for WASM tests: the minimum version with GC + EH on by default, checked at startup.
+Exact minimum browser versions and the EH encoding (`exnref` vs. legacy) are fixed in v1.5.0 (the EH encoding in v1.6.0, when `recover` lands) and documented in the README (Chrome 119+, Firefox 120+, Safari 18.2+). The loader feature-detects and reports a clear error. The README states whether a JS-only fallback build is recommended. Node for WASM tests: the minimum version with GC + EH on by default, checked at startup.
+
+### Concurrency & Web Workers Constraint
+
+WasmGC object references and boundary handles (`externref`) **cannot** be transferred or cloned across Web Workers via `postMessage` under current browser specifications. Simulation or physics running in a Web Worker must either manage its own isolated WASM runtime instance or communicate strictly via linear memory (`ArrayBuffer` / `SharedArrayBuffer` when cross-origin isolated).
 
 ---
 
@@ -258,7 +269,7 @@ Current imports: `physics` is the only pure leaf (imports `math` only). `renderi
 | `engine/collision` (new) | `wasm` | `wasm` | `Trimesh`, `Octree`, `Ray` + raycasting (moved from `physics`). Needs only the v1.5 core subset (`any` fields, JS callbacks). |
 | `engine/physics` | `js` | `wasm` | `DynamicBody`, `FPSController`. Done in H5.3: the static-world provider is `collision.StaticWorld` (WASM), so controller/body raycasts never cross the boundary; the controller owns a `CameraPose` value that the game copies in/out per frame; `OnBounce`/`OnRest`/`OnLand`/`OnJump` call back into JS. |
 | `engine/rendering`, `scene`, `systems`, `assets`, `game` | `js` | `js` | Import `mathx` instead of `physics` for math types |
-| `engine/animation` | `js` | `js` → candidate | Candidate for `wasm` (skinning → `shared` bone matrices) once the binary-reader dependency is moved to `assets` |
+| `engine/animation` | `js` | `js` → candidate | Candidate for `wasm` (skinning → `shared` bone matrices) once the `NewBinaryReader` dependency in `systems` is extracted to `assets` or `mathx` (`wasm` packages cannot import `js` packages) |
 
 The per-frame boundary in the end state: controller and body updates, raycasts from gameplay, and `OnBounce` callbacks back into JS (sound). That is a small, coarse set.
 
@@ -317,10 +328,15 @@ The hybrid design is delivered over three releases. Both WASM releases land in t
 
 ### Phase H6: Shared Memory & Hybrid Example
 - [ ] **Task H6.1 — Linear-memory buffers:** Implement `gofront/shared` TypedArray zero-copy views.
+  - Sizing fixed at startup to avoid `memory.grow` and detached `ArrayBuffer` runtime hazards; JS facade getters verify view validity.
+  - Typechecker diagnostics enforcing startup/package-level allocation discipline and rejecting implicit `shared.*` -> GC slice parameter conversions without explicit copy.
 - [ ] **Task H6.2 — `example/hybrid` app:** Build and verify hybrid sample application with Playwright E2E.
+- [ ] **Task H6.3 — Asset loader URL resolution & target overrides:**
+  - Robust `import.meta.url` relative resolution for `app.wasm` in `src/backend/wasm/boundary.js` so subpath routes and CDN setups do not 404.
+  - CLI flag `--js-only` (or `gofront build --target js`) and `gofront.json` `"targets"` config overrides for zero-code-change A/B benchmarking and Safari < 18.2 fallback builds.
 
 ### Phase H7: simplefps Full Split & Verification
-- [ ] **Task H7.1 — simplefps final split:** Physics and collision in WASM, animation candidate.
+- [ ] **Task H7.1 — simplefps final split:** Physics and collision in WASM; extract `NewBinaryReader` from `systems` to `assets` and migrate `animation` to WASM candidate.
 - [x] **Task H7.2 — Binaryen optimization pipeline & tooling:**
   - Add `binaryen` npm package as an `optionalDependency` (cross-platform, no native build tools); `--release`/`--wasm-opt` fail with an actionable error when neither it nor a native `wasm-opt` is present.
   - Implement optimizer wrapper (`src/backend/wasm/optimize.js`) configuring WasmGC feature flags (`Features.GC`, `Features.ReferenceTypes`, `Features.BulkMemory`, `Features.Multivalue`, `Features.ExceptionHandling`), optimization levels (`-O3`), and GUFA (`--gufa`).
@@ -328,6 +344,22 @@ The hybrid design is delivered over three releases. Both WASM releases land in t
   - Assert module validity post-optimization via `WebAssembly.validate` and report size reduction metrics in CLI verbose output.
   - WASM source maps.
 - [ ] **Task H7.3 — Documentation & benchmarks:** Target guide in README and published comparative benchmarks (reporting unoptimized vs `wasm-opt` binary size and raycast/fps throughput).
+
+### Phase H8: Codebase Consolidation (zero functional change)
+
+Pre-port cleanup from the 2026-10-09 codebase review. Every task is a pure refactor: all 1702 unit tests, `npm run check`, and the E2E suite must pass unchanged, and `example/*` output (JS and `.wasm`) must stay byte-identical. Smaller, deduplicated source is also a direct win for the v2.0.0 Go port (less to translate). ~500 lines expected to go.
+
+- [x] **Task H8.1 — Single watch-mode implementation:** Legacy `--watch` / `--serve` path in `src/index.js` (`buildOnce`, `handleCssWatch`, debounce + `fs.watch` setup, ~90 lines) duplicates `buildDevOnce` / `setupDevWatchers` in `src/cli-core.js`. Delegate to `handleDev` (already accepts `srcDir`, `outputFile`, `port`, `sourceMap`); keep the legacy CLI output format (`stamp()` + clear-screen when no `-o`). Restores the "`index.js` is CLI entry only" rule.
+- [x] **Task H8.2 — Legacy flag parser in `cli-core`:** Replace the ad-hoc `args.includes(...)` / `indexOf("-o")` block in `src/index.js` with `parseLegacyArgs(argv)` in `src/cli-core.js`, next to the other `parse*Args` functions, with unit tests (`--release` implies `--minify --mangle --wasm-opt`, `--no-wasm-opt` wins, `--serve` implies `--watch`).
+- [x] **Task H8.3 — WASM emitter helpers:** Collapse the three hand-expanded patterns in `src/backend/wasm/`:
+  - `_emitGrowSlice(...)` for the capacity-growth sequence duplicated verbatim in both branches of `_emitBuiltinAppend` (`emit-builtins.js`, ~60 lines each).
+  - `_emitCopyIfValueStruct(node, goType, wType)` for the 15 `isValStruct && !isFresh → emitCloneStruct` sites in `emit-stmts.js`, `emit-exprs.js`, `emit-builtins.js`; all sites use the same `_resolveStructInfo(node) ?? getStructType(goType.name)` fallback.
+  - `_emitSliceUnpack(sliceTmp, sliceInfo)` returning `{ arr, off, len, cap }` temps for the ~20 `local.get → struct.get N → local.set` unpack sequences.
+  - Unary `math` switch in `emit-stdlib.js` (`Sqrt`/`Floor`/`Ceil`/`Trunc`/`Abs`) → `MATH_F64_UNARY` table.
+- [x] **Task H8.4 — Shared AST child traversal in `src/lower/`:** Add `forEachChild(node, fn)` and `someChild(node, pred)` to `lower/index.js` and replace the 15 hand-rolled `for (key of Object.keys(node)) { if (key.startsWith("_")) continue; … }` loops in `boxing.js`, `captures.js`, `escape.js`, `functions.js`, `globals.js`, `ownership.js`, `range.js`. Skip side-table keys by a precomputed `Set` rather than a `startsWith` per key (hot path of the lowering pass).
+- [x] **Task H8.5 — JS backend helper registry:** Replace the 40 scattered `this._usesXxx = true` flags (13 files) + constructor field list + `HELPER_MAP` entry per helper with `this.useHelper(name)` writing into a `Set`; `HELPER_MAP` iterates the set. Adding a runtime helper becomes a one-line change.
+- [x] **Task H8.6 — Export surface & dead code:** Drop `export` from the 47 symbols nothing imports (17 section encoders in `encode.js`, `classifyType`, `WASM_LOADER_JS`, `peepholeOptimize`, `ModuleEmitter`, `typeKey`, `cloneAst`, `evaluatesToPointer`, `LowerResult`, `INT64`/`UINTPTR`/`COMPLEX64`, …). Delete the two fully dead symbols: `COMPARABLE` in `typechecker/types.js` (resolve.js builds the literal inline — use the constant there instead) and `resetNativeWasmOptCheck` in `backend/wasm/optimize.js`. Re-run `sentrux check` to confirm coupling metrics improve.
+- [x] **Task H8.7 — Hygiene:** `package.json` description → "compiles to JavaScript and WebAssembly"; remove the empty untracked `gen/` and `dist/` directories; keep `files: ["src/"]` as the single npm whitelist and drop the redundant `.npmignore`.
 
 
 ---
@@ -348,8 +380,8 @@ For general web development, DOM, `.templ`, CSS, and browser events remain perma
 
 ## Open Questions
 
-1. **Directive vs. config.** Should package targets also be settable in `gofront.json` (`"targets": { "engine/physics": "wasm" }`), so one codebase can build JS-only or hybrid without code edits? A config override would also make A/B benchmarking trivial.
+1. **Directive vs. config (Resolved).** Package targets can be overridden in `gofront.json` (`"targets": { "engine/physics": "wasm" }`) or via `--js-only`, making automated A/B comparative benchmarking and Safari < 18.2 fallback builds trivial without editing source code comments.
 2. **`int` width.** `i64` (Go-correct, chosen) vs. `i32`. Revisit only if benchmarks show a cost.
 3. **Strict mode scope.** Keep it only for `both` packages, or offer `//gofront:strict` for any JS package?
-4. **`shared` buffer API.** Index syntax via compiler special-casing (proposed) vs. plain methods (`At`/`Set`). Program-lifetime only, or add pools/free later?
+4. **`shared` buffer API (Resolved).** Index syntax via compiler base-offset emission. Fixed startup allocation in v1.6.0 avoids detached `ArrayBuffer` traps. Slices and shared buffers are distinct types to preserve GC slice semantics.
 5. **Interface proxies (Resolved).** Do not implement dynamic two-way cross-boundary itab proxies. Calling from WASM into a JS-implemented interface introduces high runtime cost and a double boundary hop (WASM → JS proxy → WASM static mesh). Instead, provider interfaces live on the WASM side (e.g. `physics` queries `collision.Trimesh` directly), or cross the boundary via typed callback functions (`func`).

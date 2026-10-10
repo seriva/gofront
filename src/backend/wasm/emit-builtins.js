@@ -7,7 +7,6 @@ import {
 	isArrayType,
 	isMapType,
 	isNonEmptyInterface,
-	isPointerToStruct,
 	isSliceType,
 	isStringType,
 	isStructType,
@@ -333,6 +332,78 @@ export class BuiltinsEmitter {
 		}
 	}
 
+	// With `newLen` already computed: when it exceeds the old capacity, allocate
+	// a doubled (min 2, at least newLen) backing array and copy the old elements
+	// into it at offset 0; otherwise reuse the old array, offset and capacity.
+	_emitGrowSlice({
+		arrInfo,
+		elemGoType,
+		oldArrTmp,
+		oldOffTmp,
+		oldLenTmp,
+		oldCapTmp,
+		newArrTmp,
+		newOffTmp,
+		newLenTmp,
+		newCapTmp,
+	}) {
+		this.pushInstruction({ op: "local.get", index: newLenTmp });
+		this.pushInstruction({ op: "local.get", index: oldCapTmp });
+		this.pushInstruction("i32.gt_u");
+		this.pushInstruction({ op: "if", blockType: "void" });
+
+		this.pushInstruction({ op: "local.get", index: oldCapTmp });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("i32.shl");
+		this.pushInstruction({ op: "local.set", index: newCapTmp });
+
+		this.pushInstruction({ op: "local.get", index: newLenTmp });
+		this.pushInstruction({ op: "local.get", index: newCapTmp });
+		this.pushInstruction("i32.gt_u");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: newLenTmp });
+		this.pushInstruction({ op: "local.set", index: newCapTmp });
+		this.pushInstruction("end");
+
+		this.pushInstruction({ op: "local.get", index: newCapTmp });
+		this.pushInstruction({ op: "i32.const", value: 2 });
+		this.pushInstruction("i32.lt_u");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "i32.const", value: 2 });
+		this.pushInstruction({ op: "local.set", index: newCapTmp });
+		this.pushInstruction("end");
+
+		this.pushInstruction({ op: "local.get", index: newCapTmp });
+		this.pushInstruction({
+			op: "array.new_default",
+			typeIndex: arrInfo.typeIndex,
+		});
+		this.pushInstruction({ op: "local.set", index: newArrTmp });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: newOffTmp });
+
+		this.pushInstruction({ op: "local.get", index: oldLenTmp });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction("i32.gt_u");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: newArrTmp });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.get", index: oldArrTmp });
+		this.pushInstruction({ op: "local.get", index: oldOffTmp });
+		this.pushInstruction({ op: "local.get", index: oldLenTmp });
+		this._emitArrayCopy(arrInfo, elemGoType);
+		this.pushInstruction("end");
+
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "local.get", index: oldArrTmp });
+		this.pushInstruction({ op: "local.set", index: newArrTmp });
+		this.pushInstruction({ op: "local.get", index: oldOffTmp });
+		this.pushInstruction({ op: "local.set", index: newOffTmp });
+		this.pushInstruction({ op: "local.get", index: oldCapTmp });
+		this.pushInstruction({ op: "local.set", index: newCapTmp });
+		this.pushInstruction("end");
+	}
+
 	_emitBuiltinAppend(call) {
 		const { args } = call;
 		const sNode = args[0];
@@ -360,40 +431,30 @@ export class BuiltinsEmitter {
 		const oldLenTmp = this.acquireTemp("i32");
 		const oldCapTmp = this.acquireTemp("i32");
 
-		this.pushInstruction({ op: "local.get", index: sTmp });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: sliceInfo.typeIndex,
-			fieldIndex: 0,
+		this._emitSliceUnpack(sTmp, sliceInfo, {
+			arr: oldArrTmp,
+			off: oldOffTmp,
+			len: oldLenTmp,
+			cap: oldCapTmp,
 		});
-		this.pushInstruction({ op: "local.set", index: oldArrTmp });
-		this.pushInstruction({ op: "local.get", index: sTmp });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: sliceInfo.typeIndex,
-			fieldIndex: 1,
-		});
-		this.pushInstruction({ op: "local.set", index: oldOffTmp });
-		this.pushInstruction({ op: "local.get", index: sTmp });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: sliceInfo.typeIndex,
-			fieldIndex: 2,
-		});
-		this.pushInstruction({ op: "local.set", index: oldLenTmp });
-		this.pushInstruction({ op: "local.get", index: sTmp });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: sliceInfo.typeIndex,
-			fieldIndex: 3,
-		});
-		this.pushInstruction({ op: "local.set", index: oldCapTmp });
 		this.releaseTemp(sTmp, sliceWType);
 
 		const newArrTmp = this.acquireTemp(arrWType);
 		const newOffTmp = this.acquireTemp("i32");
 		const newCapTmp = this.acquireTemp("i32");
 		const newLenTmp = this.acquireTemp("i32");
+		const growArgs = {
+			arrInfo,
+			elemGoType,
+			oldArrTmp,
+			oldOffTmp,
+			oldLenTmp,
+			oldCapTmp,
+			newArrTmp,
+			newOffTmp,
+			newLenTmp,
+			newCapTmp,
+		};
 
 		if (args.length === 2 && args[1]._spread) {
 			const s2Tmp = this.acquireTemp(sliceWType);
@@ -404,27 +465,11 @@ export class BuiltinsEmitter {
 			const s2OffTmp = this.acquireTemp("i32");
 			const s2LenTmp = this.acquireTemp("i32");
 
-			this.pushInstruction({ op: "local.get", index: s2Tmp });
-			this.pushInstruction({
-				op: "struct.get",
-				typeIndex: sliceInfo.typeIndex,
-				fieldIndex: 0,
+			this._emitSliceUnpack(s2Tmp, sliceInfo, {
+				arr: s2ArrTmp,
+				off: s2OffTmp,
+				len: s2LenTmp,
 			});
-			this.pushInstruction({ op: "local.set", index: s2ArrTmp });
-			this.pushInstruction({ op: "local.get", index: s2Tmp });
-			this.pushInstruction({
-				op: "struct.get",
-				typeIndex: sliceInfo.typeIndex,
-				fieldIndex: 1,
-			});
-			this.pushInstruction({ op: "local.set", index: s2OffTmp });
-			this.pushInstruction({ op: "local.get", index: s2Tmp });
-			this.pushInstruction({
-				op: "struct.get",
-				typeIndex: sliceInfo.typeIndex,
-				fieldIndex: 2,
-			});
-			this.pushInstruction({ op: "local.set", index: s2LenTmp });
 			this.releaseTemp(s2Tmp, sliceWType);
 
 			this.pushInstruction({ op: "local.get", index: oldLenTmp });
@@ -432,61 +477,7 @@ export class BuiltinsEmitter {
 			this.pushInstruction("i32.add");
 			this.pushInstruction({ op: "local.set", index: newLenTmp });
 
-			this.pushInstruction({ op: "local.get", index: newLenTmp });
-			this.pushInstruction({ op: "local.get", index: oldCapTmp });
-			this.pushInstruction("i32.gt_u");
-			this.pushInstruction({ op: "if", blockType: "void" });
-
-			this.pushInstruction({ op: "local.get", index: oldCapTmp });
-			this.pushInstruction({ op: "i32.const", value: 1 });
-			this.pushInstruction("i32.shl");
-			this.pushInstruction({ op: "local.set", index: newCapTmp });
-
-			this.pushInstruction({ op: "local.get", index: newLenTmp });
-			this.pushInstruction({ op: "local.get", index: newCapTmp });
-			this.pushInstruction("i32.gt_u");
-			this.pushInstruction({ op: "if", blockType: "void" });
-			this.pushInstruction({ op: "local.get", index: newLenTmp });
-			this.pushInstruction({ op: "local.set", index: newCapTmp });
-			this.pushInstruction("end");
-
-			this.pushInstruction({ op: "local.get", index: newCapTmp });
-			this.pushInstruction({ op: "i32.const", value: 2 });
-			this.pushInstruction("i32.lt_u");
-			this.pushInstruction({ op: "if", blockType: "void" });
-			this.pushInstruction({ op: "i32.const", value: 2 });
-			this.pushInstruction({ op: "local.set", index: newCapTmp });
-			this.pushInstruction("end");
-
-			this.pushInstruction({ op: "local.get", index: newCapTmp });
-			this.pushInstruction({
-				op: "array.new_default",
-				typeIndex: arrInfo.typeIndex,
-			});
-			this.pushInstruction({ op: "local.set", index: newArrTmp });
-			this.pushInstruction({ op: "i32.const", value: 0 });
-			this.pushInstruction({ op: "local.set", index: newOffTmp });
-
-			this.pushInstruction({ op: "local.get", index: oldLenTmp });
-			this.pushInstruction({ op: "i32.const", value: 0 });
-			this.pushInstruction("i32.gt_u");
-			this.pushInstruction({ op: "if", blockType: "void" });
-			this.pushInstruction({ op: "local.get", index: newArrTmp });
-			this.pushInstruction({ op: "i32.const", value: 0 });
-			this.pushInstruction({ op: "local.get", index: oldArrTmp });
-			this.pushInstruction({ op: "local.get", index: oldOffTmp });
-			this.pushInstruction({ op: "local.get", index: oldLenTmp });
-			this._emitArrayCopy(arrInfo, elemGoType);
-			this.pushInstruction("end");
-
-			this.pushInstruction("else");
-			this.pushInstruction({ op: "local.get", index: oldArrTmp });
-			this.pushInstruction({ op: "local.set", index: newArrTmp });
-			this.pushInstruction({ op: "local.get", index: oldOffTmp });
-			this.pushInstruction({ op: "local.set", index: newOffTmp });
-			this.pushInstruction({ op: "local.get", index: oldCapTmp });
-			this.pushInstruction({ op: "local.set", index: newCapTmp });
-			this.pushInstruction("end");
+			this._emitGrowSlice(growArgs);
 
 			this.pushInstruction({ op: "local.get", index: s2LenTmp });
 			this.pushInstruction({ op: "i32.const", value: 0 });
@@ -512,70 +503,10 @@ export class BuiltinsEmitter {
 			this.pushInstruction("i32.add");
 			this.pushInstruction({ op: "local.set", index: newLenTmp });
 
-			this.pushInstruction({ op: "local.get", index: newLenTmp });
-			this.pushInstruction({ op: "local.get", index: oldCapTmp });
-			this.pushInstruction("i32.gt_u");
-			this.pushInstruction({ op: "if", blockType: "void" });
-
-			this.pushInstruction({ op: "local.get", index: oldCapTmp });
-			this.pushInstruction({ op: "i32.const", value: 1 });
-			this.pushInstruction("i32.shl");
-			this.pushInstruction({ op: "local.set", index: newCapTmp });
-
-			this.pushInstruction({ op: "local.get", index: newLenTmp });
-			this.pushInstruction({ op: "local.get", index: newCapTmp });
-			this.pushInstruction("i32.gt_u");
-			this.pushInstruction({ op: "if", blockType: "void" });
-			this.pushInstruction({ op: "local.get", index: newLenTmp });
-			this.pushInstruction({ op: "local.set", index: newCapTmp });
-			this.pushInstruction("end");
-
-			this.pushInstruction({ op: "local.get", index: newCapTmp });
-			this.pushInstruction({ op: "i32.const", value: 2 });
-			this.pushInstruction("i32.lt_u");
-			this.pushInstruction({ op: "if", blockType: "void" });
-			this.pushInstruction({ op: "i32.const", value: 2 });
-			this.pushInstruction({ op: "local.set", index: newCapTmp });
-			this.pushInstruction("end");
-
-			this.pushInstruction({ op: "local.get", index: newCapTmp });
-			this.pushInstruction({
-				op: "array.new_default",
-				typeIndex: arrInfo.typeIndex,
-			});
-			this.pushInstruction({ op: "local.set", index: newArrTmp });
-			this.pushInstruction({ op: "i32.const", value: 0 });
-			this.pushInstruction({ op: "local.set", index: newOffTmp });
-
-			this.pushInstruction({ op: "local.get", index: oldLenTmp });
-			this.pushInstruction({ op: "i32.const", value: 0 });
-			this.pushInstruction("i32.gt_u");
-			this.pushInstruction({ op: "if", blockType: "void" });
-			this.pushInstruction({ op: "local.get", index: newArrTmp });
-			this.pushInstruction({ op: "i32.const", value: 0 });
-			this.pushInstruction({ op: "local.get", index: oldArrTmp });
-			this.pushInstruction({ op: "local.get", index: oldOffTmp });
-			this.pushInstruction({ op: "local.get", index: oldLenTmp });
-			this._emitArrayCopy(arrInfo, elemGoType);
-			this.pushInstruction("end");
-
-			this.pushInstruction("else");
-			this.pushInstruction({ op: "local.get", index: oldArrTmp });
-			this.pushInstruction({ op: "local.set", index: newArrTmp });
-			this.pushInstruction({ op: "local.get", index: oldOffTmp });
-			this.pushInstruction({ op: "local.set", index: newOffTmp });
-			this.pushInstruction({ op: "local.get", index: oldCapTmp });
-			this.pushInstruction({ op: "local.set", index: newCapTmp });
-			this.pushInstruction("end");
+			this._emitGrowSlice(growArgs);
 
 			for (let i = 0; i < k; i++) {
 				const elemNode = args[1 + i];
-				const isValStruct =
-					isStructType(elemGoType, this.mod.checker, this.mod) &&
-					!isPointerToStruct(elemGoType, this.mod.checker, this.mod);
-				const isFresh =
-					elemNode.kind === "CompositeLit" ||
-					(elemNode.kind === "UnaryExpr" && elemNode.op === "*");
 
 				this.pushInstruction({ op: "local.get", index: newArrTmp });
 				this.pushInstruction({ op: "local.get", index: newOffTmp });
@@ -586,12 +517,7 @@ export class BuiltinsEmitter {
 					this.pushInstruction("i32.add");
 				}
 				this.emitExpr(elemNode, arrInfo.elemWType);
-				if (isValStruct && !isFresh) {
-					const sInfo = this._resolveStructInfo(elemNode);
-					if (sInfo) {
-						this.emitCloneStruct(sInfo, arrInfo.elemWType);
-					}
-				}
+				this._emitCopyIfValueStruct(elemNode, elemGoType, arrInfo.elemWType);
 				this.pushInstruction({
 					op: "array.set",
 					typeIndex: arrInfo.typeIndex,
@@ -990,19 +916,8 @@ export class BuiltinsEmitter {
 				for (let i = 0; i < args.length; i++) {
 					const pType = targetParamTypes[i + 1] ?? null;
 					const pGoType = paramGoTypes[i + 1] ?? null;
-					const isValParam =
-						isStructType(pGoType, this.mod.checker, this.mod) &&
-						!isPointerToStruct(pGoType, this.mod.checker, this.mod);
-					const isFreshArg =
-						args[i].kind === "CompositeLit" ||
-						(args[i].kind === "UnaryExpr" && args[i].op === "*");
 					this.emitExpr(args[i], pType);
-					if (isValParam && !isFreshArg) {
-						const sInfo = this._resolveStructInfo(args[i]);
-						if (sInfo) {
-							this.emitCloneStruct(sInfo, pType);
-						}
-					}
+					this._emitCopyIfValueStruct(args[i], pGoType, pType);
 				}
 				this.pushInstruction({ op: "call", funcIndex: targetFuncIdx });
 				return true;
@@ -1047,36 +962,14 @@ export class BuiltinsEmitter {
 			if (targetFuncIdx !== null) {
 				const recvWType = targetParamTypes[0] ?? null;
 				const recvGoType = this.mod.getFuncParamGoTypes(methodName)[0] ?? null;
-				const isValRecv =
-					isStructType(recvGoType, this.mod.checker, this.mod) &&
-					!isPointerToStruct(recvGoType, this.mod.checker, this.mod);
-				const isFreshRecv =
-					func.expr.kind === "CompositeLit" ||
-					(func.expr.kind === "UnaryExpr" && func.expr.op === "*");
 				this.emitExpr(func.expr, recvWType);
-				if (isValRecv && !isFreshRecv) {
-					const sInfo = this._resolveStructInfo(func.expr);
-					if (sInfo) {
-						this.emitCloneStruct(sInfo, recvWType);
-					}
-				}
+				this._emitCopyIfValueStruct(func.expr, recvGoType, recvWType);
 				const paramGoTypes = this.mod.getFuncParamGoTypes(methodName);
 				for (let i = 0; i < args.length; i++) {
 					const pType = targetParamTypes[i + 1] ?? null;
 					const pGoType = paramGoTypes[i + 1] ?? null;
-					const isValParam =
-						isStructType(pGoType, this.mod.checker, this.mod) &&
-						!isPointerToStruct(pGoType, this.mod.checker, this.mod);
-					const isFreshArg =
-						args[i].kind === "CompositeLit" ||
-						(args[i].kind === "UnaryExpr" && args[i].op === "*");
 					this.emitExpr(args[i], pType);
-					if (isValParam && !isFreshArg) {
-						const sInfo = this._resolveStructInfo(args[i]);
-						if (sInfo) {
-							this.emitCloneStruct(sInfo, pType);
-						}
-					}
+					this._emitCopyIfValueStruct(args[i], pGoType, pType);
 				}
 				this.pushInstruction({ op: "call", funcIndex: targetFuncIdx });
 				return true;
@@ -1099,19 +992,8 @@ export class BuiltinsEmitter {
 					const arg = args[i];
 					const pType = paramTypes[i] ?? null;
 					const pGoType = paramGoTypes[i] ?? null;
-					const isValParam =
-						isStructType(pGoType, this.mod.checker, this.mod) &&
-						!isPointerToStruct(pGoType, this.mod.checker, this.mod);
-					const isFreshArg =
-						arg.kind === "CompositeLit" ||
-						(arg.kind === "UnaryExpr" && arg.op === "*");
 					this.emitExpr(arg, pType);
-					if (isValParam && !isFreshArg) {
-						const sInfo = this._resolveStructInfo(arg);
-						if (sInfo) {
-							this.emitCloneStruct(sInfo, pType);
-						}
-					}
+					this._emitCopyIfValueStruct(arg, pGoType, pType);
 				}
 				this.pushInstruction({ op: "call", funcIndex: targetFuncIdx });
 				return true;
@@ -1147,19 +1029,8 @@ export class BuiltinsEmitter {
 			const arg = args[i];
 			const pWType = closureInfo.paramWTypes[i] ?? null;
 			const pGoType = closureInfo.sig.params[i] ?? null;
-			const isValParam =
-				isStructType(pGoType, this.mod.checker, this.mod) &&
-				!isPointerToStruct(pGoType, this.mod.checker, this.mod);
-			const isFreshArg =
-				arg.kind === "CompositeLit" ||
-				(arg.kind === "UnaryExpr" && arg.op === "*");
 			this.emitExpr(arg, pWType);
-			if (isValParam && !isFreshArg) {
-				const sInfo = this._resolveStructInfo(arg);
-				if (sInfo) {
-					this.emitCloneStruct(sInfo, pWType);
-				}
-			}
+			this._emitCopyIfValueStruct(arg, pGoType, pWType);
 		}
 
 		// Push funcref

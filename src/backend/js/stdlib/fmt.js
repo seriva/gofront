@@ -15,11 +15,11 @@ export const fmtMethods = {
 		const fmtArgs = expr.args.map((e) => this.genExpr(e)).join(", ");
 		switch (fn) {
 			case "Sprintf":
-				this._usesSprintf = true;
+				this.useHelper("sprintf");
 				return `__sprintf(${fmtArgs})`;
 			case "Errorf": {
-				this._usesSprintf = true;
-				this._usesError = true;
+				this.useHelper("sprintf");
+				this.useHelper("error");
 				const fmtStr = expr.args[0];
 				if (fmtStr?.kind === "BasicLit" && fmtStr.value?.includes("%w")) {
 					const lastArg = this.genExpr(expr.args[expr.args.length - 1]);
@@ -28,13 +28,13 @@ export const fmtMethods = {
 				return `__error(__sprintf(${fmtArgs}))`;
 			}
 			case "Printf":
-				this._usesSprintf = true;
+				this.useHelper("sprintf");
 				return this._genStdoutWrite(`__sprintf(${fmtArgs})`);
 			case "Print":
-				this._usesSprintf = true;
+				this.useHelper("sprintf");
 				return this._genStdoutWrite(this._genPrintOperands(expr, "", ""));
 			case "Println":
-				this._usesSprintf = true;
+				this.useHelper("sprintf");
 				// console.log supplies the trailing newline.
 				return `console.log(${this._genPrintOperands(expr, " ", "")})`;
 			case "Fprintf":
@@ -72,7 +72,7 @@ export const fmtMethods = {
 	},
 
 	_genFmtFprint(fn, expr) {
-		this._usesSprintf = true;
+		this.useHelper("sprintf");
 		const writerArg = expr.args[0];
 		const rest = expr.args.slice(1);
 		const restJs = rest.map((e) => this.genExpr(e)).join(", ");

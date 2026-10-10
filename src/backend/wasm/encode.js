@@ -64,12 +64,12 @@ export function encodeF64(val) {
 	return Array.from(new Uint8Array(buf));
 }
 
-export function encodeString(str) {
+function encodeString(str) {
 	const utf8 = new TextEncoder().encode(str);
 	return [...encodeU32LEB(utf8.length), ...utf8];
 }
 
-export function encodeVector(items, encodeItem) {
+function encodeVector(items, encodeItem) {
 	const count = encodeU32LEB(items.length);
 	const bytes = [];
 	for (const item of items) {
@@ -83,7 +83,7 @@ export function encodeVector(items, encodeItem) {
 
 // ── Value Types & Heap Types ─────────────────────────────────
 
-export const ValType = {
+const ValType = {
 	i32: 0x7f,
 	i64: 0x7e,
 	f32: 0x7d,
@@ -105,7 +105,7 @@ export const ValType = {
 	nullexnref: 0x75,
 };
 
-export function encodeValType(type) {
+function encodeValType(type) {
 	if (typeof type === "number") {
 		return [type];
 	}
@@ -131,7 +131,7 @@ export function encodeValType(type) {
 	throw new Error(`Invalid valtype specification: ${JSON.stringify(type)}`);
 }
 
-export function encodeBlockType(blockType) {
+function encodeBlockType(blockType) {
 	if (!blockType || blockType === "void") {
 		return [0x40];
 	}
@@ -364,7 +364,7 @@ const GC_OPCODES = {
 	"extern.convert_any": 0x1b,
 };
 
-export function encodeInstruction(inst) {
+function encodeInstruction(inst) {
 	if (typeof inst === "string") {
 		inst = { op: inst };
 	}
@@ -552,7 +552,7 @@ function encodeSection(id, payload) {
 	return [id, ...encodeU32LEB(payload.length), ...payload];
 }
 
-export function encodeTypeEntry(t) {
+function encodeTypeEntry(t) {
 	if (t.form === "rec") {
 		// Recursive type group: 0x4E, count, types
 		const count = encodeU32LEB(t.types.length);
@@ -591,12 +591,12 @@ export function encodeTypeEntry(t) {
 	];
 }
 
-export function encodeTypeSection(types) {
+function encodeTypeSection(types) {
 	if (!types || types.length === 0) return [];
 	return encodeSection(1, encodeVector(types, encodeTypeEntry));
 }
 
-export function encodeImportSection(imports) {
+function encodeImportSection(imports) {
 	if (!imports || imports.length === 0) return [];
 	return encodeSection(
 		2,
@@ -639,7 +639,7 @@ export function encodeImportSection(imports) {
 	);
 }
 
-export function encodeFunctionSection(funcs) {
+function encodeFunctionSection(funcs) {
 	if (!funcs || funcs.length === 0) return [];
 	return encodeSection(
 		3,
@@ -647,7 +647,7 @@ export function encodeFunctionSection(funcs) {
 	);
 }
 
-export function encodeTagSection(tags) {
+function encodeTagSection(tags) {
 	if (!tags || tags.length === 0) return [];
 	return encodeSection(
 		13,
@@ -655,7 +655,7 @@ export function encodeTagSection(tags) {
 	);
 }
 
-export function encodeGlobalSection(globals) {
+function encodeGlobalSection(globals) {
 	if (!globals || globals.length === 0) return [];
 	return encodeSection(
 		6,
@@ -679,7 +679,7 @@ export function encodeGlobalSection(globals) {
 	);
 }
 
-export function encodeExportSection(exports) {
+function encodeExportSection(exports) {
 	if (!exports || exports.length === 0) return [];
 	return encodeSection(
 		7,
@@ -728,7 +728,7 @@ function sameValType(a, b) {
 	return false;
 }
 
-export function encodeElementSection(elements) {
+function encodeElementSection(elements) {
 	if (!elements || elements.length === 0) return [];
 	const segment = [0x03, 0x00, ...encodeVector(elements, encodeU32LEB)];
 	return encodeSection(
@@ -737,7 +737,7 @@ export function encodeElementSection(elements) {
 	);
 }
 
-export function encodeCodeSection(funcs) {
+function encodeCodeSection(funcs) {
 	if (!funcs || funcs.length === 0) return [];
 	return encodeSection(
 		10,
@@ -793,7 +793,7 @@ export function encodeCodeSection(funcs) {
 // ── Top-level Module Encoder ─────────────────────────────────
 
 // Custom section placed right after the header; `isGoFrontWasm` keys off it.
-export const GOFRONT_SECTION_NAME = "gofront";
+const GOFRONT_SECTION_NAME = "gofront";
 export const GOFRONT_SECTION_BYTES = [
 	0x00,
 	...encodeU32LEB(1 + GOFRONT_SECTION_NAME.length),

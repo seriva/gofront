@@ -1,6 +1,8 @@
 // src/lower/functions.js
 // Analyzes function signatures, named returns and defer structures.
 
+import { forEachChild, someChild } from "./walk.js";
+
 export function extractNamedReturns(decl) {
 	const named = decl?.returnType?._namedReturns;
 	if (!named || named.length === 0) return null;
@@ -19,11 +21,7 @@ export function hasDefer(body) {
 		if (Array.isArray(node)) return node.some(walk);
 		if (node.kind === "DeferStmt") return true;
 		if (node.kind === "FuncLit") return false; // separate function boundary
-		for (const key of Object.keys(node)) {
-			if (key.startsWith("_")) continue;
-			if (walk(node[key])) return true;
-		}
-		return false;
+		return someChild(node, walk);
 	};
 
 	return walk(body);
@@ -50,11 +48,7 @@ export function hasDirectRecover(body) {
 			node.func.name === "recover"
 		)
 			return true;
-		for (const key of Object.keys(node)) {
-			if (key.startsWith("_")) continue;
-			if (walk(node[key])) return true;
-		}
-		return false;
+		return someChild(node, walk);
 	};
 	const result = walk(body);
 	body._hasDirectRecover = result;
@@ -130,10 +124,7 @@ function normalizeBlockDefers(node, ctx) {
 		return;
 	}
 
-	for (const key of Object.keys(node)) {
-		if (key.startsWith("_")) continue;
-		normalizeBlockDefers(node[key], ctx);
-	}
+	forEachChild(node, (child) => normalizeBlockDefers(child, ctx));
 }
 
 // Does the deferred callee possibly call recover() directly?  Known package

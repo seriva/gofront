@@ -286,7 +286,7 @@ export const templGenMethods = {
 		if (valName === "_")
 			return `for (const [${keyName}] of Object.entries(${iterJs})) {`;
 		// Default to .entries() for arrays, Object.entries for objects
-		this._usesSliceGuard = true;
+		this.useHelper("sliceGuard");
 		return `for (const [${keyName}, ${valName}] of __s(${iterJs}).entries()) {`;
 	},
 

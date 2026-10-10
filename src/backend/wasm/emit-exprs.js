@@ -287,21 +287,8 @@ export class ExprsEmitter {
 				for (const elem of lit.elems) {
 					this.pushInstruction({ op: "local.get", index: mTmp });
 					this.emitExpr(elem.key, mapInfo.keyWType);
-					const isValStruct =
-						isStructType(valType, this.mod.checker, this.mod) &&
-						!isPointerToStruct(valType, this.mod.checker, this.mod);
-					const isFresh =
-						elem.value.kind === "CompositeLit" ||
-						(elem.value.kind === "UnaryExpr" && elem.value.op === "*");
 					this.emitExpr(elem.value, mapInfo.valWType);
-					if (isValStruct && !isFresh) {
-						const sInfo =
-							this._resolveStructInfo(elem.value) ??
-							this._resolveStructInfo({ _type: valType });
-						if (sInfo) {
-							this.emitCloneStruct(sInfo, mapInfo.valWType);
-						}
-					}
+					this._emitCopyIfValueStruct(elem.value, valType, mapInfo.valWType);
 					this.pushInstruction({
 						op: "call",
 						funcIndex: this.mod.resolveFuncIndex(mapInfo.setFuncName),
@@ -333,19 +320,8 @@ export class ExprsEmitter {
 				return;
 			}
 			for (const elem of lit.elems) {
-				const isValStruct =
-					isStructType(elem._type, this.mod.checker, this.mod) &&
-					!isPointerToStruct(elem._type, this.mod.checker, this.mod);
-				const isFresh =
-					elem.kind === "CompositeLit" ||
-					(elem.kind === "UnaryExpr" && elem.op === "*");
 				this.emitExpr(elem, sliceInfo.elemWType);
-				if (isValStruct && !isFresh) {
-					const sInfo = this._resolveStructInfo(elem);
-					if (sInfo) {
-						this.emitCloneStruct(sInfo, sliceInfo.elemWType);
-					}
-				}
+				this._emitCopyIfValueStruct(elem, elem._type, sliceInfo.elemWType);
 			}
 			this.pushInstruction({
 				op: "array.new_fixed",
@@ -368,19 +344,8 @@ export class ExprsEmitter {
 			const count = lit.elems?.length ?? 0;
 			const targetSize = this._getArraySize(litType, count);
 			for (const elem of lit.elems ?? []) {
-				const isValStruct =
-					isStructType(elem._type, this.mod.checker, this.mod) &&
-					!isPointerToStruct(elem._type, this.mod.checker, this.mod);
-				const isFresh =
-					elem.kind === "CompositeLit" ||
-					(elem.kind === "UnaryExpr" && elem.op === "*");
 				this.emitExpr(elem, arrInfo.elemWType);
-				if (isValStruct && !isFresh) {
-					const sInfo = this._resolveStructInfo(elem);
-					if (sInfo) {
-						this.emitCloneStruct(sInfo, arrInfo.elemWType);
-					}
-				}
+				this._emitCopyIfValueStruct(elem, elem._type, arrInfo.elemWType);
 			}
 			for (let i = count; i < targetSize; i++) {
 				this.emitZeroValue(elemType, arrInfo.elemWType);

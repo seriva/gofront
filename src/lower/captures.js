@@ -3,6 +3,7 @@
 // are mutated and thus require heap-allocated environment cells for WASM closures.
 
 import { collectMutatedVars, nodeMutatesVar } from "./ownership.js";
+import { forEachChild } from "./walk.js";
 
 /**
  * Result of capture analysis on a function or closure.
@@ -41,17 +42,14 @@ export function collectDeclaredNames(node, names = new Set()) {
 	// Do not descend into nested functions when collecting local declarations
 	if (node.kind === "FuncLit") return names;
 
-	for (const key of Object.keys(node)) {
-		if (key.startsWith("_")) continue;
-		collectDeclaredNames(node[key], names);
-	}
+	forEachChild(node, (child) => collectDeclaredNames(child, names));
 	return names;
 }
 
 /**
  * Finds all identifier references in a node that are not shadowed by inner declarations.
  */
-export function collectReferencedNames(node, localDecls, refs = new Set()) {
+function collectReferencedNames(node, localDecls, refs = new Set()) {
 	if (!node || typeof node !== "object") return refs;
 	if (Array.isArray(node)) {
 		for (const item of node) collectReferencedNames(item, localDecls, refs);
@@ -73,10 +71,9 @@ export function collectReferencedNames(node, localDecls, refs = new Set()) {
 			if (r.name && r.name !== "_") innerLocals.add(r.name);
 		}
 		collectDeclaredNames(node.body, innerLocals);
-		for (const key of Object.keys(node)) {
-			if (key.startsWith("_")) continue;
-			collectReferencedNames(node[key], innerLocals, refs);
-		}
+		forEachChild(node, (child) =>
+			collectReferencedNames(child, innerLocals, refs),
+		);
 		return refs;
 	}
 
@@ -89,10 +86,9 @@ export function collectReferencedNames(node, localDecls, refs = new Set()) {
 	}
 
 	// For nested closures, free variables are also referenced
-	for (const key of Object.keys(node)) {
-		if (key.startsWith("_")) continue;
-		collectReferencedNames(node[key], localDecls, refs);
-	}
+	forEachChild(node, (child) =>
+		collectReferencedNames(child, localDecls, refs),
+	);
 	return refs;
 }
 
@@ -168,10 +164,7 @@ export function analyzeCaptures(fnDecl) {
 			return;
 		}
 
-		for (const key of Object.keys(node)) {
-			if (key.startsWith("_")) continue;
-			walkClosures(node[key], scopeStack);
-		}
+		forEachChild(node, (child) => walkClosures(child, scopeStack));
 	};
 
 	walkClosures(fnDecl.body, [rootScope]);

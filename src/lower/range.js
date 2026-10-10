@@ -2,6 +2,7 @@
 // Classifies for-range loop shapes and variable scoping/redelcarations.
 
 import { isNumeric } from "../typechecker/types.js";
+import { someChild } from "./walk.js";
 
 export function isRangeFor(stmt) {
 	if (!stmt?.init) return false;
@@ -40,11 +41,7 @@ export function nodeAssigns(node, name) {
 			node.expr.name === name)
 	)
 		return true;
-	for (const key of Object.keys(node)) {
-		if (key.startsWith("_")) continue;
-		if (nodeAssigns(node[key], name)) return true;
-	}
-	return false;
+	return someChild(node, (child) => nodeAssigns(child, name));
 }
 
 // True when the body re-declares one of `names` at its top level (legal Go shadowing).
