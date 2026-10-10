@@ -11,6 +11,7 @@ import { StdlibEmitter } from "./emit-stdlib.js";
 import { StmtsEmitter } from "./emit-stmts.js";
 import {
 	isArrayType,
+	isPointerToStruct,
 	isSliceType,
 	isStringType,
 	isStructType,
@@ -915,6 +916,42 @@ export class FunctionEmitter {
 			typeIndex: structInfo.typeIndex,
 		});
 		this.releaseTemp(tmp, baseWType);
+	}
+
+	// Go copies structs on assignment.  After `node` has been emitted (value on
+	// the stack), clone it unless it is already a fresh temporary
+	// (composite literal or `*p` deref) or not a value struct at all.
+	_emitCopyIfValueStruct(node, goType, wType) {
+		if (
+			!isStructType(goType, this.mod.checker, this.mod) ||
+			isPointerToStruct(goType, this.mod.checker, this.mod)
+		)
+			return;
+		if (
+			node.kind === "CompositeLit" ||
+			(node.kind === "UnaryExpr" && node.op === "*")
+		)
+			return;
+		const sInfo =
+			this._resolveStructInfo(node) ?? this.mod.getStructType(goType?.name);
+		if (sInfo) this.emitCloneStruct(sInfo, wType);
+	}
+
+	// Unpacks slice header fields (0 arr, 1 off, 2 len, 3 cap) from the slice
+	// held in `sliceTmp` into the given temps; fields without a temp are skipped.
+	_emitSliceUnpack(sliceTmp, sliceInfo, { arr, off, len, cap }) {
+		const parts = [arr, off, len, cap];
+		for (let fieldIndex = 0; fieldIndex < parts.length; fieldIndex++) {
+			const tmp = parts[fieldIndex];
+			if (tmp === undefined || tmp === null) continue;
+			this.pushInstruction({ op: "local.get", index: sliceTmp });
+			this.pushInstruction({
+				op: "struct.get",
+				typeIndex: sliceInfo.typeIndex,
+				fieldIndex,
+			});
+			this.pushInstruction({ op: "local.set", index: tmp });
+		}
 	}
 
 	_getReceiverTypeName(recvType, node = null) {

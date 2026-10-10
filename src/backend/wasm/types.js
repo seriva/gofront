@@ -399,27 +399,6 @@ export function getReceiverTypeName(recvType, _node = null) {
 	return null;
 }
 
-export function isNarrowInt(goType) {
-	if (!goType) return false;
-	if (goType.kind === "TypeName" || goType.kind === "Ident") {
-		return isNarrowInt({ kind: "basic", name: goType.name });
-	}
-	if (goType.kind === "named" && goType.underlying) {
-		return isNarrowInt(goType.underlying);
-	}
-	if (goType.kind === "basic") {
-		switch (goType.name) {
-			case "int8":
-			case "int16":
-			case "uint8":
-			case "uint16":
-			case "byte":
-				return true;
-		}
-	}
-	return false;
-}
-
 export function isSigned(goType) {
 	if (!goType) return true;
 	if (goType.kind === "TypeName" || goType.kind === "Ident") {
@@ -447,27 +426,6 @@ export function isFloat(goType) {
 		goType.kind === "basic" &&
 		(goType.name === "float32" || goType.name === "float64")
 	);
-}
-
-export function isInt(goType) {
-	if (!goType) return false;
-	if (goType.kind === "TypeName" || goType.kind === "Ident") {
-		return isInt({ kind: "basic", name: goType.name });
-	}
-	if (goType.kind === "named" && goType.underlying) {
-		return isInt(goType.underlying);
-	}
-	if (goType.kind === "untyped") return goType.base === "int";
-	if (goType.kind === "basic") {
-		return (
-			goType.name.startsWith("int") ||
-			goType.name.startsWith("uint") ||
-			goType.name === "byte" ||
-			goType.name === "rune" ||
-			goType.name === "uintptr"
-		);
-	}
-	return false;
 }
 
 export function isFuncType(goType, checker = null) {

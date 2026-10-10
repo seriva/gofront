@@ -30,21 +30,8 @@ export class StmtsEmitter {
 				const localInfo = this.locals.get(name);
 				if (values?.[i]) {
 					const r = values[i];
-					const isValStruct =
-						isStructType(rawType, this.mod.checker, this.mod) &&
-						!isPointerToStruct(rawType, this.mod.checker, this.mod);
-					const isFresh =
-						r.kind === "CompositeLit" ||
-						(r.kind === "UnaryExpr" && r.op === "*");
 					this.emitExpr(r, wType);
-					if (isValStruct && !isFresh) {
-						const sInfo =
-							this._resolveStructInfo(r) ??
-							this.mod.getStructType(rawType?.name);
-						if (sInfo) {
-							this.emitCloneStruct(sInfo, wType);
-						}
-					}
+					this._emitCopyIfValueStruct(r, rawType, wType);
 					if (localInfo?.isBoxed) {
 						this.pushInstruction({
 							op: "struct.new",
@@ -116,18 +103,8 @@ export class StmtsEmitter {
 		const wType = this.toWasmType(r._type);
 		const idx = this.allocLocal(l.name, wType, r._type);
 		const localInfo = this.locals.get(l.name);
-		const isValStruct =
-			isStructType(r._type, this.mod.checker, this.mod) &&
-			!isPointerToStruct(r._type, this.mod.checker, this.mod);
-		const isFresh =
-			r.kind === "CompositeLit" || (r.kind === "UnaryExpr" && r.op === "*");
 		this.emitExpr(r, wType);
-		if (isValStruct && !isFresh) {
-			const sInfo = this._resolveStructInfo(r);
-			if (sInfo) {
-				this.emitCloneStruct(sInfo, wType);
-			}
-		}
+		this._emitCopyIfValueStruct(r, r._type, wType);
 		if (localInfo?.isBoxed) {
 			this.pushInstruction({
 				op: "struct.new",
@@ -253,37 +230,14 @@ export class StmtsEmitter {
 					});
 					return;
 				}
-				const isValStruct =
-					isStructType(localInfo.goType, this.mod.checker, this.mod) &&
-					!isPointerToStruct(localInfo.goType, this.mod.checker, this.mod);
-				const isFresh =
-					r.kind === "CompositeLit" || (r.kind === "UnaryExpr" && r.op === "*");
 				this.emitExpr(r, localInfo.type);
-				if (isValStruct && !isFresh) {
-					const sInfo =
-						this._resolveStructInfo(r) ?? this._resolveStructInfo(l);
-					if (sInfo) {
-						this.emitCloneStruct(sInfo, localInfo.type);
-					}
-				}
+				this._emitCopyIfValueStruct(r, localInfo.goType, localInfo.type);
 				this.pushInstruction({ op: "local.set", index: localInfo.index });
 			} else {
 				const globalInfo = this.mod.resolveGlobal(l.name);
 				if (globalInfo) {
-					const isValStruct =
-						isStructType(globalInfo.goType, this.mod.checker, this.mod) &&
-						!isPointerToStruct(globalInfo.goType, this.mod.checker, this.mod);
-					const isFresh =
-						r.kind === "CompositeLit" ||
-						(r.kind === "UnaryExpr" && r.op === "*");
 					this.emitExpr(r, globalInfo.type);
-					if (isValStruct && !isFresh) {
-						const sInfo =
-							this._resolveStructInfo(r) ?? this._resolveStructInfo(l);
-						if (sInfo) {
-							this.emitCloneStruct(sInfo, globalInfo.type);
-						}
-					}
+					this._emitCopyIfValueStruct(r, globalInfo.goType, globalInfo.type);
 					this.pushInstruction({
 						op: "global.set",
 						index: globalInfo.index,
@@ -318,20 +272,12 @@ export class StmtsEmitter {
 					fieldIndex: step.fieldIndex,
 				});
 			}
-			const isValStruct =
-				isStructType(lastStep.field.goType, this.mod.checker, this.mod) &&
-				!isPointerToStruct(lastStep.field.goType, this.mod.checker, this.mod);
-			const isFresh =
-				r.kind === "CompositeLit" || (r.kind === "UnaryExpr" && r.op === "*");
 			this.emitExpr(r, lastStep.field.wType);
-			if (isValStruct && !isFresh) {
-				const sInfo =
-					this._resolveStructInfo(r) ??
-					this.mod.getStructType(lastStep.field.goType?.name);
-				if (sInfo) {
-					this.emitCloneStruct(sInfo, lastStep.field.wType);
-				}
-			}
+			this._emitCopyIfValueStruct(
+				r,
+				lastStep.field.goType,
+				lastStep.field.wType,
+			);
 			this.pushInstruction({
 				op: "struct.set",
 				typeIndex: lastStep.structInfo.typeIndex,
@@ -399,20 +345,8 @@ export class StmtsEmitter {
 				const mapInfo = this.mod.getMapType(keyType, valType);
 				this.emitExpr(baseNode, mapInfo.wType);
 				this.emitExpr(l.index, mapInfo.keyWType);
-				const isValStruct =
-					isStructType(valType, this.mod.checker, this.mod) &&
-					!isPointerToStruct(valType, this.mod.checker, this.mod);
-				const isFresh =
-					r.kind === "CompositeLit" || (r.kind === "UnaryExpr" && r.op === "*");
 				this.emitExpr(r, mapInfo.valWType);
-				if (isValStruct && !isFresh) {
-					const sInfo =
-						this._resolveStructInfo(r) ??
-						this._resolveStructInfo({ _type: valType });
-					if (sInfo) {
-						this.emitCloneStruct(sInfo, mapInfo.valWType);
-					}
-				}
+				this._emitCopyIfValueStruct(r, valType, mapInfo.valWType);
 				this.pushInstruction({
 					op: "call",
 					funcIndex: this.mod.resolveFuncIndex(mapInfo.setFuncName),
@@ -435,19 +369,8 @@ export class StmtsEmitter {
 
 			this._emitElemAddr(baseNode, l.index, sliceInfo, arrInfo);
 
-			const isValStruct =
-				isStructType(elemGoType, this.mod.checker, this.mod) &&
-				!isPointerToStruct(elemGoType, this.mod.checker, this.mod);
-			const isFresh =
-				r.kind === "CompositeLit" || (r.kind === "UnaryExpr" && r.op === "*");
-
 			this.emitExpr(r, arrInfo.elemWType);
-			if (isValStruct && !isFresh) {
-				const sInfo = this._resolveStructInfo(r) ?? this._resolveStructInfo(l);
-				if (sInfo) {
-					this.emitCloneStruct(sInfo, arrInfo.elemWType);
-				}
-			}
+			this._emitCopyIfValueStruct(r, elemGoType, arrInfo.elemWType);
 
 			this.pushInstruction({
 				op: "array.set",
@@ -1831,27 +1754,11 @@ export class StmtsEmitter {
 			this.emitExpr(iterExpr, sliceWType);
 			this.pushInstruction({ op: "local.set", index: sliceTmp });
 
-			this.pushInstruction({ op: "local.get", index: sliceTmp });
-			this.pushInstruction({
-				op: "struct.get",
-				typeIndex: sliceInfo.typeIndex,
-				fieldIndex: 0,
+			this._emitSliceUnpack(sliceTmp, sliceInfo, {
+				arr: arrTmp,
+				off: offTmp,
+				len: lenTmp,
 			});
-			this.pushInstruction({ op: "local.set", index: arrTmp });
-			this.pushInstruction({ op: "local.get", index: sliceTmp });
-			this.pushInstruction({
-				op: "struct.get",
-				typeIndex: sliceInfo.typeIndex,
-				fieldIndex: 1,
-			});
-			this.pushInstruction({ op: "local.set", index: offTmp });
-			this.pushInstruction({ op: "local.get", index: sliceTmp });
-			this.pushInstruction({
-				op: "struct.get",
-				typeIndex: sliceInfo.typeIndex,
-				fieldIndex: 2,
-			});
-			this.pushInstruction({ op: "local.set", index: lenTmp });
 			this.releaseTemp(sliceTmp, sliceWType);
 		} else {
 			this.emitExpr(iterExpr, arrWType);
@@ -2428,19 +2335,8 @@ export class StmtsEmitter {
 					for (let i = 0; i < values.length; i++) {
 						const val = values[i];
 						const targetWType = this.returnTypes[i] ?? null;
-						const isValStruct =
-							isStructType(val._type, this.mod.checker, this.mod) &&
-							!isPointerToStruct(val._type, this.mod.checker, this.mod);
-						const isFresh =
-							val.kind === "CompositeLit" ||
-							(val.kind === "UnaryExpr" && val.op === "*");
 						this.emitExpr(val, targetWType);
-						if (isValStruct && !isFresh) {
-							const sInfo = this._resolveStructInfo(val);
-							if (sInfo) {
-								this.emitCloneStruct(sInfo, targetWType);
-							}
-						}
+						this._emitCopyIfValueStruct(val, val._type, targetWType);
 						const tmp = this.acquireTemp(targetWType);
 						this.pushInstruction({ op: "local.set", index: tmp });
 						temps.push({ tmp, type: targetWType });
@@ -2464,19 +2360,8 @@ export class StmtsEmitter {
 					for (let i = 0; i < values.length; i++) {
 						const val = values[i];
 						const targetWType = this.returnTypes[i] ?? null;
-						const isValStruct =
-							isStructType(val._type, this.mod.checker, this.mod) &&
-							!isPointerToStruct(val._type, this.mod.checker, this.mod);
-						const isFresh =
-							val.kind === "CompositeLit" ||
-							(val.kind === "UnaryExpr" && val.op === "*");
 						this.emitExpr(val, targetWType);
-						if (isValStruct && !isFresh) {
-							const sInfo = this._resolveStructInfo(val);
-							if (sInfo) {
-								this.emitCloneStruct(sInfo, targetWType);
-							}
-						}
+						this._emitCopyIfValueStruct(val, val._type, targetWType);
 						this.pushInstruction({
 							op: "local.set",
 							index: this.returnTempLocals[i],
@@ -2510,19 +2395,8 @@ export class StmtsEmitter {
 		for (let i = 0; i < values.length; i++) {
 			const val = values[i];
 			const targetWType = this.returnTypes[i] ?? null;
-			const isValStruct =
-				isStructType(val._type, this.mod.checker, this.mod) &&
-				!isPointerToStruct(val._type, this.mod.checker, this.mod);
-			const isFresh =
-				val.kind === "CompositeLit" ||
-				(val.kind === "UnaryExpr" && val.op === "*");
 			this.emitExpr(val, targetWType);
-			if (isValStruct && !isFresh) {
-				const sInfo = this._resolveStructInfo(val);
-				if (sInfo) {
-					this.emitCloneStruct(sInfo, targetWType);
-				}
-			}
+			this._emitCopyIfValueStruct(val, val._type, targetWType);
 		}
 		this.pushInstruction("return");
 	}

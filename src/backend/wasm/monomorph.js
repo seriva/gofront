@@ -33,7 +33,7 @@ export function hasGenerics(programs) {
 /**
  * Returns a stable identifier-safe string key for any Go type or AST type node.
  */
-export function typeKey(t) {
+function typeKey(t) {
 	if (!t) return "any";
 	if (typeof t === "string") return t;
 	if (t.kind === "basic") return t.name;
@@ -78,7 +78,7 @@ export function typeKey(t) {
 /**
  * Converts a Go type representation or AST type node into a concrete AST type node.
  */
-export function typeToTypeNode(t) {
+function typeToTypeNode(t) {
 	if (!t) return { kind: "TypeName", name: "any" };
 	if (typeof t === "string") return { kind: "TypeName", name: t };
 	if (
@@ -127,13 +127,13 @@ export function typeToTypeNode(t) {
 	return { kind: "TypeName", name: t.name ?? "any" };
 }
 
-export function getSpecializedName(baseName, typeArgs) {
+function getSpecializedName(baseName, typeArgs) {
 	if (!typeArgs || typeArgs.length === 0) return baseName;
 	const keys = typeArgs.map(typeKey).join("$");
 	return `${baseName}$${keys}`;
 }
 
-export function cloneAst(node) {
+function cloneAst(node) {
 	if (!node || typeof node !== "object") return node;
 	if (Array.isArray(node)) return node.map(cloneAst);
 	const copy = {};

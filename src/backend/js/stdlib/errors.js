@@ -7,11 +7,11 @@ export const errorsMethods = {
 	_genErrors(fn, a) {
 		const args = a();
 		if (fn === "New") {
-			this._usesError = true;
+			this.useHelper("error");
 			return `__error(${args[0]})`;
 		}
 		if (fn === "Is") {
-			this._usesErrorIs = true;
+			this.useHelper("errorIs");
 			return `__errorIs(${args[0]}, ${args[1]})`;
 		}
 		if (fn === "Unwrap") return `(${args[0]}?._cause ?? null)`;

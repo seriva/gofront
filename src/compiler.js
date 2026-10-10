@@ -309,7 +309,7 @@ function linkIntoBundle(options, merged, pkgTarget) {
 // Shared by compileFiles (multi-file) and the single-file path in index.js.
 // Mutates checker, jsImports, bundledPackages, and preambles in place.
 
-export function resolveImports(
+function resolveImports(
 	programs,
 	fromFile,
 	checker,

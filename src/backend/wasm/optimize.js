@@ -31,7 +31,7 @@ let _npmWasmOptPath = null;
 
 const _require = createRequire(import.meta.url);
 
-export function getNpmWasmOptPath() {
+function getNpmWasmOptPath() {
 	if (_npmWasmOptPath === null) {
 		try {
 			_npmWasmOptPath = _require.resolve("binaryen/bin/wasm-opt");
@@ -52,10 +52,6 @@ export function hasNativeWasmOpt() {
 		}
 	}
 	return _nativeWasmOptAvailable;
-}
-
-export function resetNativeWasmOptCheck() {
-	_nativeWasmOptAvailable = null;
 }
 
 // Injects GoFront custom section right after the 8-byte WASM header so that
@@ -161,7 +157,7 @@ function runWasmOpt(
 	}
 }
 
-export function optimizeWithNative(wasmBytes, options = {}) {
+function optimizeWithNative(wasmBytes, options = {}) {
 	return runWasmOpt("wasm-opt", [], wasmBytes, options, "native");
 }
 

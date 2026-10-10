@@ -72,7 +72,7 @@ export function resolveGwDir(importPath, fromFile) {
 	return gwFiles.length > 0 ? dir : null;
 }
 
-export function resolveImport(importPath, fromFile) {
+function resolveImport(importPath, fromFile) {
 	const fromDir = dirname(resolve(fromFile));
 	const nodeModules = findNodeModules(fromDir);
 

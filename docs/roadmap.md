@@ -36,6 +36,7 @@ features (e.g. `docs/v0.0.5/`).
 | Boundary v2 | High | Draft | WASM → JS closures, interface proxies both ways; `RaycastProvider` across the boundary. |
 | Shared buffers & `example/hybrid` | Medium | Draft | `gofront/shared` linear-memory TypedArray views; new particle-sim example with E2E. |
 | simplefps full split & benchmarks | Medium | Draft | `physics` (`DynamicBody`, `FPSController`) moves to `wasm`; built-in Binaryen (`binaryen` npm package) optimization pipeline for `--release`; README target guide; published benchmarks. |
+| Codebase consolidation | Low | Draft | Zero-functional-change cleanup before the v2.0.0 port: single watch-mode path (`index.js` → `handleDev`), WASM emitter helpers (slice grow/unpack, value-struct copy), shared `lower/` AST traversal, JS helper registry, trimmed export surface. Output byte-identical; ~500 lines removed. |
 
 ---
 

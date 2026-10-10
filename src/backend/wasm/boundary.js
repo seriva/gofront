@@ -84,7 +84,7 @@ function funcSigFromAst(t) {
 
 // Classifies a Go type (AST node or checker type) for boundary marshalling.
 // Returns a descriptor `{ k, ... }`; `k === "unsupported"` carries `what`.
-export function classifyType(goType, mod) {
+function classifyType(goType, mod) {
 	if (!goType) return { k: "void" };
 	if (isTestingT(goType)) return { k: "extern", wType: "externref" };
 
@@ -1216,7 +1216,7 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 }`;
 
 // Runtime loader emitted at the top of the facade.
-export const WASM_LOADER_JS = `${WASM_IMPORTS_JS}
+const WASM_LOADER_JS = `${WASM_IMPORTS_JS}
 async function ${P}fetch(url) {
 	const res = await fetch(url);
 	if (!res.ok) throw new Error("GoFront: failed to fetch " + url + " (" + res.status + ")");

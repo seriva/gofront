@@ -94,6 +94,29 @@ const JS_RESERVED = new Set([
 const jsSafeName = (n) =>
 	typeof n === "string" && JS_RESERVED.has(n) ? `${n}$` : n;
 
+// Runtime helpers by registry name, in output order.  Mark one as needed with
+// `this.useHelper(name)`; `_prependHelpers` emits every marked entry.
+const HELPER_MAP = [
+	["len", HELPER_LEN],
+	["append", HELPER_APPEND],
+	["sliceGuard", HELPER_S],
+	["sclone", HELPER_SCLONE],
+	["ifaceBox", HELPER_IFACE_BOX],
+	["equal", HELPER_EQUAL],
+	["cmul", HELPER_CMUL],
+	["cdiv", HELPER_CDIV],
+	["panicRt", HELPER_PANIC],
+	["nilCall", HELPER_NIL_CALL],
+	["sprintf", HELPER_SPRINTF],
+	["error", HELPER_ERROR],
+	["errorIs", HELPER_ERROR_IS],
+	["pathClean", HELPER_PATH_CLEAN],
+	["sortSlice", HELPER_SORT_SLICE],
+	["timeFmt", HELPER_TIME_FMT],
+	["timeParse", HELPER_TIME_PARSE],
+	["testing", HELPER_TESTING],
+];
+
 export class CodeGen {
 	// jsImports:       Map<importPath, string[]> — npm package imports to emit at top of file
 	// bundledPackages: Set<string>               — GoFront package names bundled inline;
@@ -120,22 +143,7 @@ export class CodeGen {
 		this._currentSrcFileIdx = 0; // updated as each top-level decl is generated
 		this._boxedVars = new Set(); // address-taken scalar variables that need boxing
 		// Runtime helper usage tracking — only emit helpers that are actually used
-		this._usesLen = false;
-		this._usesAppend = false;
-		this._usesSliceGuard = false;
-		this._usesSprintf = false;
-		this._usesEqual = false;
-		this._usesCmul = false;
-		this._usesCdiv = false;
-		this._usesError = false;
-		this._usesErrorIs = false;
-		this._usesPathClean = false;
-		this._usesSortSlice = false;
-		this._usesTimeFmt = false;
-		this._usesTimeParse = false;
-		this._usesTesting = false;
-		this._usesSClone = false;
-		this._usesIfaceBox = false;
+		this._helpers = new Set();
 		// Per-function context for Go value semantics (see _withFnCtx)
 		this._fnCtx = null;
 		// Iterator (range-over-func) context
@@ -415,30 +423,21 @@ export class CodeGen {
 		return methods;
 	}
 
+	/** Marks a runtime helper (key of HELPER_MAP) as needed by the output. */
+	useHelper(name) {
+		this._helpers.add(name);
+	}
+
 	_prependHelpers(isTest = false) {
-		const needsTesting = isTest || this._usesTesting;
-		const HELPER_MAP = [
-			[this.collectedCss.length > 0, HELPER_INJECT_STYLES],
-			[this._usesLen, HELPER_LEN],
-			[this._usesAppend, HELPER_APPEND],
-			[this._usesSliceGuard, HELPER_S],
-			[this._usesSClone, HELPER_SCLONE],
-			[this._usesIfaceBox, HELPER_IFACE_BOX],
-			[this._usesEqual, HELPER_EQUAL],
-			[this._usesCmul, HELPER_CMUL],
-			[this._usesCdiv, HELPER_CDIV],
-			[this._usesPanicRt, HELPER_PANIC],
-			[this._usesNilCall, HELPER_NIL_CALL],
-			[this._usesSprintf || needsTesting, HELPER_SPRINTF],
-			[this._usesError, HELPER_ERROR],
-			[this._usesErrorIs, HELPER_ERROR_IS],
-			[this._usesPathClean, HELPER_PATH_CLEAN],
-			[this._usesSortSlice, HELPER_SORT_SLICE],
-			[this._usesTimeFmt, HELPER_TIME_FMT],
-			[this._usesTimeParse, HELPER_TIME_PARSE],
-			[needsTesting, HELPER_TESTING],
-		];
-		const helpers = HELPER_MAP.filter(([flag]) => flag).map(([, h]) => h);
+		if (isTest || this._helpers.has("testing")) {
+			this.useHelper("sprintf");
+			this.useHelper("testing");
+		}
+		const helpers = [];
+		if (this.collectedCss.length > 0) helpers.push(HELPER_INJECT_STYLES);
+		for (const [name, src] of HELPER_MAP) {
+			if (this._helpers.has(name)) helpers.push(src);
+		}
 		if (helpers.length > 0) {
 			const helperLines = helpers.flatMap((h) => h.split("\n"));
 			helperLines.push("");
@@ -768,7 +767,7 @@ export class CodeGen {
 		const isTarget = Boolean(fnNode?._isDeferTarget);
 		const forwards = isTarget && Boolean(fnNode._deferForward);
 		if (!forwards && (isTarget || hasDirectRecover(body))) {
-			this._usesPanicRt = true;
+			this.useHelper("panicRt");
 			this.line(
 				"const __recoverOk = __gopanic.armed; __gopanic.armed = false;",
 			);
@@ -779,7 +778,7 @@ export class CodeGen {
 			this._recoverOkInScope = prevRecoverOk;
 			return;
 		}
-		this._usesPanicRt = true;
+		this.useHelper("panicRt");
 		this.line("const __defers = [];");
 		this.line("const __frame = { pn: null };");
 		this.line("try {");
