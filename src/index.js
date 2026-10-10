@@ -54,7 +54,7 @@ if (args[0] === "--version" || args[0] === "-v") {
 if (args.length === 0 || args[0] === "--help" || args[0] === "-h") {
 	console.log(
 		`
-GoFront — a Go-inspired language that compiles to JavaScript
+GoFront — a Go-inspired language that compiles to JavaScript and WebAssembly
 
 Usage:
   gofront dev [dir] [options]    Start dev server with live reload (default port 3000)

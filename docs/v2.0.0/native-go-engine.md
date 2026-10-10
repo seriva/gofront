@@ -190,9 +190,9 @@ type External  struct{ /* JS type from .d.ts or browser globals; TAINTED_ANY sem
 
 **Constant evaluation.** Untyped constants keep arbitrary precision (`go/constant` is fine). Where the JS engine's behaviour differs (overflow detection, float formatting), match the JS engine first and log the difference.
 
-**Built-in registry (`internal/stdlib`)**, ported from `src/typechecker/stdlib/{core,extended,web}.js`:
+**Built-in registry (`internal/stdlib`)**, ported from `src/typechecker/stdlib/{core,extended,web,shared}.js`:
 - Builtins: `len cap append copy make new delete panic recover clear min max print println complex real imag`.
-- Packages: `fmt strings bytes strconv sort math math/rand time slices maps errors path path/filepath regexp html io os unicode unicode/utf8 testing gom`.
+- Packages: `fmt strings bytes strconv sort math math/bits math/rand time slices maps errors path path/filepath regexp html io os unicode unicode/utf8 testing gom gofront/shared`.
 - Browser and graphics: `document`, `window`, `console` and friends (as `any`), plus full typings for `WebGLRenderingContext`, `WebGL2RenderingContext`, `GPUDevice`, `GPUAdapter`, `GPUQueue`, `ArrayBuffer`, `DataView` and all TypedArrays.
 
 Prefer table-driven definitions (Go struct literals or `//go:embed`ed data) over hand-written per-function code.
@@ -219,7 +219,7 @@ The output must match the v1.6.0 engine. The oracle enforces this. Mappings that
 | `init()` | IIFE in declaration order. |
 | `async`/`await` | Passed through. |
 
-- **Stdlib codegen.** Port of the 21 modules in `src/backend/js/stdlib/` (`fmt`, `strings`, `builder`, `bytes`, `strconv`, `math`, `rand`, `time`, `slices`, `maps`, `sort`, `errors`, `path`, `regexp`, `html`, `io`, `os`, `unicode`, `utf8`, `testing`, `gom`). By volume this is one of the largest parts of the port and gets its own phase.
+- **Stdlib codegen.** Port of the 23 modules in `src/backend/js/stdlib/` (`fmt`, `strings`, `builder`, `bytes`, `strconv`, `math`, `bits`, `rand`, `time`, `slices`, `maps`, `sort`, `errors`, `path`, `regexp`, `html`, `io`, `os`, `unicode`, `utf8`, `testing`, `gom`, `shared`). By volume this is one of the largest parts of the port and gets its own phase.
 - **Runtime helpers.** `__len __append __s __sortSlice __sclone __ifv/__ifp __equal __cmul __cdiv __sprintf __error __errorIs __pathClean __timeFmt __timeParse __injectStyles` and the testing helpers (`__GoFront_FailNow`, …). Emitted only when used. **Move them out of `src/backend/js/runtime.js` into `runtime/js/*.js` files** that both engines load: the JS engine via `readFileSync`, the Go engine via `//go:embed`. Then they cannot drift while the two engines coexist.
 - **templ.** `{ Mount(___p, ___refs) { … } }` objects building DOM via `document.createElement`, SVG via `createElementNS`.
 - **Scoped CSS.** 32-bit FNV-1a over `` `${pkg}_${name}_${cssText}` ``, base-36 → `gfc_<name>_<hash>`. A class accessor function is emitted. CSS is returned as a separate `css` output (static extraction, merged across sub-packages) plus the `__injectStyles` path.
@@ -260,14 +260,14 @@ A port of the complete `src/backend/wasm/` as shipped in v1.6.0, **without new f
 
 ## Differential Testing Oracle
 
-The ~1,400 unit tests are JS test files that call `Lexer`, `Parser`, `TypeChecker`, `CodeGen` and `compileDir` directly through [`test/unit/helpers.js`](../../test/unit/helpers.js), then run the output in `node:vm`. The oracle hooks in **at the helper layer**, so the existing tests become the parity suite without being rewritten.
+The ~1,800+ unit tests are JS test files that call `Lexer`, `Parser`, `TypeChecker`, `CodeGen` and `compileDir` directly through [`test/unit/helpers.js`](../../test/unit/helpers.js), then run the output in `node:vm`. The oracle hooks in **at the helper layer**, so the existing tests become the parity suite without being rewritten.
 
 ```
  test/unit/*.test.js ──► helpers.js ──┬── GOFRONT_ENGINE=js      → src/* (reference)
                                       └── GOFRONT_ENGINE=native  → gofront oracle (stdin/stdout JSON, long-lived)
 ```
 
-- **`gofront oracle` (hidden subcommand):** a long-lived process that reads JSON requests (`{op: "compile" | "tokens" | "check" | "compileDir", source, file, opts}`) and writes JSON responses (`{js, css, errors, tokens, mappings}`). One process per test run instead of 1,400 spawns.
+- **`gofront oracle` (hidden subcommand):** a long-lived process that reads JSON requests (`{op: "compile" | "tokens" | "check" | "compileDir", source, file, opts}`) and writes JSON responses (`{js, css, errors, tokens, mappings}`). One process per test run instead of 1,800+ spawns.
 - **Comparison gates, in order of strictness:**
   1. **Tokens:** kind, literal, position, inserted semicolons. Canonical dump via `--tokens`.
   2. **Diagnostics:** message, file, line, column, caret. Byte-identical.
@@ -276,7 +276,7 @@ The ~1,400 unit tests are JS test files that call `Lexer`, `Parser`, `TypeChecke
   5. **Runtime behaviour:** the existing `vm` execution assertions and the v1.5.0/v1.6.0 hybrid fixtures (JS-strict == WASM, boundary, shared buffers) run unchanged against native output.
 - **AST dumps** are a debugging aid, not a gate. The JS AST carries codegen-time mutations (`_type`, `_lvalue`, `_className`) that the Go design deliberately drops, so forcing structural JSON parity would hold the new design hostage to the old one.
 - Tests that probe internals (e.g. constructing `TypeChecker` directly) are tagged `js-only`, or get an oracle op added. The harness reports the number of skipped tests so it stays visible.
-- **Beyond unit tests:** `npm run test:examples`, `test:examples:dom`, `test:e2e` (Playwright on all five examples) and the `simplefps` build + test suite all run with the native binary in CI.
+- **Beyond unit tests:** `npm run test:examples`, `test:examples:dom`, `test:e2e` (Playwright on all six examples) and the `simplefps` build + test suite all run with the native binary in CI.
 
 ---
 
@@ -331,7 +331,7 @@ The ~1,400 unit tests are JS test files that call `Lexer`, `Parser`, `TypeChecke
 - [ ] **Task 4.2 — JS core codegen:** `internal/backend/js` with strict numeric mode, runtime helpers, and source maps (byte-identical JS).
 
 ### Phase 5: Codegen & Backends
-- [ ] **Task 5.1 — Stdlib & templ codegen:** All 21 stdlib modules, templ DOM codegen, and scoped CSS (byte-identical JS + CSS).
+- [ ] **Task 5.1 — Stdlib & templ codegen:** All 23 stdlib modules, templ DOM codegen, and scoped CSS (byte-identical JS + CSS).
 - [ ] **Task 5.2 — WASM backend port:** `internal/backend/wasm` (IR, types, encoder, WAT, facades, `runtime/wasm` build) matching v1.6.0 `.wasm` output byte-for-byte.
 
 ### Phase 6: CLI & Tooling
