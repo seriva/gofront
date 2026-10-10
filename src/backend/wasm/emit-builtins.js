@@ -80,6 +80,10 @@ export class BuiltinsEmitter {
 	_emitBuiltinLen(call, targetWasmType) {
 		const arg = call.args[0];
 		const argType = arg._type ?? this._resolveExprGoType(arg);
+		if (this._sharedInfo(argType)) {
+			this.emitSharedLen(arg, targetWasmType);
+			return;
+		}
 		if (isMapType(argType, this.mod.checker)) {
 			const { keyType, valType } = getMapKeyValTypes(argType, this.mod.checker);
 			const mapInfo = this.mod.getMapType(keyType, valType);
@@ -548,6 +552,10 @@ export class BuiltinsEmitter {
 		const { args } = call;
 		const dstNode = args[0];
 		const srcNode = args[1];
+		if (this._sharedInfo(dstNode._type) || this._sharedInfo(srcNode._type)) {
+			this.emitSharedCopy(dstNode, srcNode, targetWasmType);
+			return;
+		}
 		const elemGoType =
 			this._getSliceElemType(dstNode._type) ??
 			this._getSliceElemType(srcNode._type);
@@ -894,6 +902,9 @@ export class BuiltinsEmitter {
 			case "fmt":
 				this.emitFmtCall(func.field, args);
 				return true;
+			case "shared":
+				this.emitSharedNew(func.field, args);
+				return true;
 			default:
 				return false;
 		}
@@ -904,6 +915,11 @@ export class BuiltinsEmitter {
 		if (func.kind !== "SelectorExpr") return false;
 
 		const recvType = func.expr._type ?? this._resolveExprGoType(func.expr);
+		const recvShared = this._sharedInfo(recvType);
+		if (recvShared && func.field === "Subarray") {
+			this.emitSharedSubarray(func.expr, args, recvShared);
+			return true;
+		}
 		const recvTypeName = this._getReceiverTypeName(recvType, func.expr);
 		if (isNonEmptyInterface(recvType, this.mod.checker)) {
 			const ifaceName = recvTypeName ?? "anon";

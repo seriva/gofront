@@ -27,10 +27,14 @@
 //     rejected (no cross-boundary itab proxies).
 //   - maps, anonymous interfaces, error, pointers to non-structs: rejected
 //     with a compile error (planned for a later boundary version).
+//   - `gofront/shared` buffers (Task H6.1): `(base, len)` views over the
+//     module's exported linear memory; JS sees a zero-copy TypedArray over
+//     `memory.buffer`.  Only TypedArrays that already alias that memory (ones
+//     handed out by this facade) may be passed back in.
 //   - `*testing.T`: the harness's JS test object, passed as an opaque
 //     externref (test methods are routed back to JS via `env.testing_*`).
 
-import { isTestingT } from "./types.js";
+import { getSharedInfo, isTestingT } from "./types.js";
 
 // ── Type classification ──────────────────────────────────────
 
@@ -100,6 +104,8 @@ function classifyType(goType, mod) {
 	switch (t.kind) {
 		case "named":
 			return classifyNamed(t, mod);
+		case "shared":
+			return classifyShared(t, mod);
 		case "untyped":
 			return classifyBasic(t.base);
 		case "basic":
@@ -186,6 +192,17 @@ function classifyPointer(t, mod) {
 	if (base.k === "struct" && !base.ptr) return { ...base, ptr: true };
 	const what = base.k === "unsupported" ? base.what : (t.base?.name ?? base.k);
 	return { k: "unsupported", what: `pointer to ${what}` };
+}
+
+function classifyShared(t, mod) {
+	const info = getSharedInfo(t, mod.checker);
+	return {
+		k: "shared",
+		key: info.key,
+		ctor: info.ctor,
+		bytes: info.bytes,
+		wType: mod.getSharedType().wType,
+	};
 }
 
 function classifySlice(t, mod) {
@@ -331,6 +348,7 @@ export function collectBoundaryMeta(progs, funcDecls, mod) {
 		structs: [],
 		funcs: [],
 		consts: [],
+		vars: [], // exported package-level shared buffers of wasm packages
 		structByName: new Map(),
 		_mod: mod,
 	};
@@ -344,6 +362,8 @@ export function collectBoundaryMeta(progs, funcDecls, mod) {
 				collectStructDecl(d, pkgName, pkgTarget, meta, mod);
 			} else if (d.kind === "ConstDecl" && pkgTarget === "wasm") {
 				collectConstDecl(d, pkgName, meta, errors);
+			} else if (d.kind === "VarDecl" && pkgTarget === "wasm") {
+				collectSharedVarDecl(d, meta, mod);
 			}
 		}
 	}
@@ -388,6 +408,22 @@ function collectConstDecl(d, pkgName, meta, errors) {
 function checkDesc(desc, where, errors) {
 	if (desc.k === "unsupported") errors.push(unsupportedMsg(where, desc.what));
 	return desc;
+}
+
+// Exported `var Buf = shared.NewFloat32(n)` globals are exposed to JS as
+// TypedArray views (read once after instantiation; sizing is fixed).
+function collectSharedVarDecl(d, meta, mod) {
+	for (const spec of d.decls ?? d.specs ?? [d]) {
+		const names = spec.names ?? (spec.name ? [spec.name] : []);
+		const values = spec.value ?? (spec.init ? [spec.init] : []);
+		for (let i = 0; i < names.length; i++) {
+			const name = names[i];
+			if (!isExported(name)) continue;
+			const goType = spec.type ?? values[i]?._type;
+			if (!getSharedInfo(goType, mod.checker)) continue;
+			meta.vars.push({ name, desc: classifyType(goType, mod) });
+		}
+	}
 }
 
 function collectMethodMeta(fn, meta, errors, mod) {
@@ -463,6 +499,9 @@ function visitNeed(desc, needs, errors, mod) {
 			needs.ifaces.set(desc.key, desc);
 			for (const m of desc.methods) visitSignatureNeeds(m, needs, errors, mod);
 			return;
+		case "shared":
+			needs.shared = true;
+			return;
 		default:
 			return;
 	}
@@ -501,6 +540,7 @@ function collectNeeds(meta) {
 		arrays: new Map(), // key -> desc
 		funcs: new Map(), // key -> desc
 		ifaces: new Map(), // interface name -> desc
+		shared: false, // any shared buffer on the surface
 	};
 	const errors = [];
 	for (const s of meta.structs) {
@@ -509,6 +549,7 @@ function collectNeeds(meta) {
 		for (const m of s.methods) visitSignatureNeeds(m, needs, errors, mod);
 	}
 	for (const f of meta.funcs) visitSignatureNeeds(f, needs, errors, mod);
+	for (const v of meta.vars ?? []) visitNeed(v.desc, needs, errors, mod);
 	if (errors.length > 0) throw new Error([...new Set(errors)].join("\n"));
 	for (const desc of needs.ifaces.values())
 		desc.concrete = concreteCandidates(desc, needs, meta, mod);
@@ -891,6 +932,39 @@ export function addBoundaryHelpers(mod, meta) {
 	for (const f of meta.funcs) addTrampoline(f);
 	for (const desc of needs.ifaces.values())
 		addIfaceHelpers(desc, mod, addFunc, addTrampoline);
+
+	if (needs.shared) {
+		const { wType, typeIndex } = mod.getSharedType();
+		addFunc(
+			"__shared_base",
+			[EXT],
+			["i32"],
+			[...getIn(0, wType), { op: "struct.get", typeIndex, fieldIndex: 0 }],
+		);
+		addFunc(
+			"__shared_len",
+			[EXT],
+			["i32"],
+			[...getIn(0, wType), { op: "struct.get", typeIndex, fieldIndex: 1 }],
+		);
+		// JS-side views (e.g. a `subarray`) go back in as a fresh (base, len).
+		addFunc(
+			"__shared_make",
+			["i32", "i32"],
+			[EXT],
+			[get(0), get(1), { op: "struct.new", typeIndex }, ...toExt(wType)],
+		);
+		for (const v of meta.vars ?? []) {
+			const g = mod.resolveGlobal(v.name);
+			if (!g) continue;
+			addFunc(
+				`__var_${v.name}`,
+				[],
+				[EXT],
+				[{ op: "global.get", index: g.index }, ...toExt(wType)],
+			);
+		}
+	}
 }
 
 // `(externref) -> i32`: `ref.test`s param 0 against each type index and
@@ -987,6 +1061,8 @@ function inExpr(desc, v) {
 			return `${P}fnin_${desc.key}(${v})`;
 		case "iface":
 			return `${P}ifin_${desc.key}(${v})`;
+		case "shared":
+			return `${P}shin(${v}, ${desc.ctor})`;
 		default:
 			return v;
 	}
@@ -1015,6 +1091,8 @@ function outExpr(desc, v) {
 			return `${P}fnout_${desc.key}(${v})`;
 		case "iface":
 			return `${P}ifout_${desc.key}(${v})`;
+		case "shared":
+			return `${P}shout(${v}, ${desc.ctor})`;
 		default:
 			return v;
 	}
@@ -1225,7 +1303,8 @@ async function ${P}fetch(url) {
 async function ${P}instantiate(imports) {
 	const bytes = globalThis.__GOFRONT_WASM_BYTES;
 	if (bytes) return WebAssembly.instantiate(bytes, imports);
-	const url = globalThis.__GOFRONT_WASM_URL ?? "app.wasm";
+	// Resolve relative to the bundle so the app works from any page path.
+	const url = globalThis.__GOFRONT_WASM_URL ?? new URL("app.wasm", import.meta.url).href;
 	if (typeof WebAssembly.instantiateStreaming === "function") {
 		try { return await WebAssembly.instantiateStreaming(fetch(url), imports); }
 		catch { /* fall through: wrong MIME type or no streaming support */ }
@@ -1417,7 +1496,32 @@ ${indent(body, "\t")}
 
 	for (const [key, desc] of needs.ifaces) genIfaceFacade(out, key, desc);
 
+	if (needs.shared) {
+		// Zero-copy TypedArray views over the exported memory.  Memory never
+		// grows after the start function (allocation is startup-only), but the
+		// cached view is still re-validated against the live buffer.
+		out.push(`const ${P}shc = new WeakMap();
+function ${P}shout(r, Ctor) {
+	if (r == null) return null;
+	let v = ${P}shc.get(r);
+	if (!v || v.buffer !== __w.memory.buffer) {
+		v = new Ctor(__w.memory.buffer, __w.__shared_base(r), __w.__shared_len(r));
+		${P}shc.set(r, v);
+	}
+	return v;
+}
+function ${P}shin(v, Ctor) {
+	if (v == null) return null;
+	if (!(v instanceof Ctor) || v.buffer !== __w.memory.buffer) throw new TypeError("GoFront: expected a " + Ctor.name + " view over the wasm shared memory");
+	return __w.__shared_make(v.byteOffset, v.length);
+}`);
+	}
+
 	for (const c of meta.consts) out.push(`const ${c.name} = ${c.value};`);
+	for (const v of meta.vars ?? [])
+		out.push(
+			`const ${v.name} = ${P}shout(__w.__var_${v.name}(), ${v.desc.ctor});`,
+		);
 
 	for (const f of meta.funcs) {
 		const { names, body } = genFuncBody(

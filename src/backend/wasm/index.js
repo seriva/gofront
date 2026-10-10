@@ -759,6 +759,32 @@ class ModuleEmitter {
 		return this.resolveFuncIndex("__bounds_panic");
 	}
 
+	// `gofront/shared` buffers are `(base i32, len i32)` views over the single
+	// exported linear memory, bump-allocated by `__shared_new` during start.
+	getSharedType() {
+		if (this.sharedType) return this.sharedType;
+		const typeIndex = this._getTotalTypeCount();
+		const typeEntry = {
+			form: "struct",
+			fields: [
+				{ type: "i32", mutable: false }, // byte base
+				{ type: "i32", mutable: false }, // element count
+			],
+		};
+		this._pushType(typeEntry);
+		this.memory = { min: 1 };
+		this.exports.push({ name: "memory", kind: "memory", index: 0 });
+		const topGlobalIndex = this.globals.length;
+		this.globals.push({
+			type: "i32",
+			mutable: true,
+			init: [{ op: "i32.const", value: 0 }],
+		});
+		const wType = { kind: "ref", nullable: true, typeIndex };
+		this.sharedType = { typeIndex, typeEntry, wType, topGlobalIndex };
+		return this.sharedType;
+	}
+
 	getSliceBoundsPanicFuncIndex() {
 		return this.resolveFuncIndex("__slice_bounds_panic");
 	}
@@ -1874,6 +1900,51 @@ export function compileWasmModule(
 		});
 	}
 
+	// 1e2. `gofront/shared` linear-memory helpers (only when imported).
+	const usesShared = progs.some((p) =>
+		(p.imports ?? []).some((decl) =>
+			(decl.imports ?? [decl]).some((imp) => imp.path === "gofront/shared"),
+		),
+	);
+	if (usesShared) {
+		const sharedWType = mod.getSharedType().wType;
+		const i32 = { kind: "basic", name: "int32" };
+		funcDecls.push({
+			kind: "FuncDecl",
+			name: "__shared_len_panic",
+			params: [],
+			returnType: null,
+			_isRuntimePanic: true,
+			_panicMsg: "runtime error: shared buffer length out of range",
+		});
+		funcDecls.push({
+			kind: "FuncDecl",
+			name: "__shared_new",
+			params: [
+				{ name: "len", type: i32 },
+				{ name: "bytes", type: i32 },
+			],
+			returnType: sharedWType,
+			body: { kind: "Block", stmts: [], list: [] },
+			_isSharedHelper: "new",
+			_rootFuncDecl: null,
+		});
+		funcDecls.push({
+			kind: "FuncDecl",
+			name: "__shared_sub",
+			params: [
+				{ name: "buf", type: sharedWType },
+				{ name: "lo", type: i32 },
+				{ name: "hi", type: i32 },
+				{ name: "bytes", type: i32 },
+			],
+			returnType: sharedWType,
+			body: { kind: "Block", stmts: [], list: [] },
+			_isSharedHelper: "sub",
+			_rootFuncDecl: null,
+		});
+	}
+
 	// 1f. Boundary metadata (exported surface of wasm packages)
 	const boundaryMeta = options.boundary
 		? collectBoundaryMeta(progs, funcDecls, mod)
@@ -1984,6 +2055,8 @@ export function compileWasmModule(
 			emitter.emitInterfaceDispatcher(fn);
 		} else if (fn._isMapHelper) {
 			emitter.emitMapHelper(fn);
+		} else if (fn._isSharedHelper) {
+			emitter.emitSharedHelper(fn);
 		} else if (fn.body) {
 			emitter.emitFunctionBody(fn.body);
 		}
@@ -2028,6 +2101,7 @@ export function compileWasmModule(
 		elements: mod.elements,
 		funcs: mod.funcs,
 		exports: mod.exports,
+		memory: mod.memory ?? null,
 		start: globalInitFn ? globalInitFn._globalFuncIndex : null,
 	};
 

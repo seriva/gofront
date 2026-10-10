@@ -177,6 +177,23 @@ const OPCODES = {
 	"global.get": 0x23,
 	"global.set": 0x24,
 
+	"i32.load": 0x28,
+	"i64.load": 0x29,
+	"f32.load": 0x2a,
+	"f64.load": 0x2b,
+	"i32.load8_s": 0x2c,
+	"i32.load8_u": 0x2d,
+	"i32.load16_s": 0x2e,
+	"i32.load16_u": 0x2f,
+	"i32.store": 0x36,
+	"i64.store": 0x37,
+	"f32.store": 0x38,
+	"f64.store": 0x39,
+	"i32.store8": 0x3a,
+	"i32.store16": 0x3b,
+	"memory.size": 0x3f,
+	"memory.grow": 0x40,
+
 	"i32.const": 0x41,
 	"i64.const": 0x42,
 	"f32.const": 0x43,
@@ -364,11 +381,40 @@ const GC_OPCODES = {
 	"extern.convert_any": 0x1b,
 };
 
+// Natural alignment (log2) per load/store opcode; memarg = align, offset.
+const MEM_ALIGN = {
+	"i32.load": 2,
+	"i64.load": 3,
+	"f32.load": 2,
+	"f64.load": 3,
+	"i32.load8_s": 0,
+	"i32.load8_u": 0,
+	"i32.load16_s": 1,
+	"i32.load16_u": 1,
+	"i32.store": 2,
+	"i64.store": 3,
+	"f32.store": 2,
+	"f64.store": 3,
+	"i32.store8": 0,
+	"i32.store16": 1,
+};
+
 function encodeInstruction(inst) {
 	if (typeof inst === "string") {
 		inst = { op: inst };
 	}
 	const { op } = inst;
+
+	if (MEM_ALIGN[op] !== undefined) {
+		return [
+			OPCODES[op],
+			...encodeU32LEB(inst.align ?? MEM_ALIGN[op]),
+			...encodeU32LEB(inst.offset ?? 0),
+		];
+	}
+	if (op === "memory.size" || op === "memory.grow") {
+		return [OPCODES[op], 0x00];
+	}
 
 	// 1. Check saturating truncations (0xFC prefix)
 	if (SAT_TRUNC_OPCODES[op] !== undefined) {
@@ -655,6 +701,21 @@ function encodeTagSection(tags) {
 	);
 }
 
+// Single linear memory: `{ min, max }` in 64 KiB pages.  `max` is optional;
+// the shared-buffer runtime only grows the memory inside the start function,
+// before any JS TypedArray view exists.
+function encodeMemorySection(memory) {
+	if (!memory) return [];
+	const limits =
+		memory.max != null
+			? [0x01, ...encodeU32LEB(memory.min), ...encodeU32LEB(memory.max)]
+			: [0x00, ...encodeU32LEB(memory.min)];
+	return encodeSection(
+		5,
+		encodeVector([limits], (b) => b),
+	);
+}
+
 function encodeGlobalSection(globals) {
 	if (!globals || globals.length === 0) return [];
 	return encodeSection(
@@ -818,6 +879,7 @@ export function encodeModule(mod) {
 	const typeSec = encodeTypeSection(mod.types);
 	const importSec = encodeImportSection(mod.imports);
 	const funcSec = encodeFunctionSection(mod.funcs);
+	const memorySec = encodeMemorySection(mod.memory);
 	const tagSec = encodeTagSection(mod.tags);
 	const globalSec = encodeGlobalSection(mod.globals);
 	const exportSec = encodeExportSection(mod.exports);
@@ -835,6 +897,7 @@ export function encodeModule(mod) {
 		...typeSec,
 		...importSec,
 		...funcSec,
+		...memorySec,
 		...tagSec,
 		...globalSec,
 		...exportSec,

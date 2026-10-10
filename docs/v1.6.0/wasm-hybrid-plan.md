@@ -215,12 +215,12 @@ var Transforms = shared.NewFloat32(maxEntities * 16) // in a wasm package
 - `shared.Float32`, `shared.Int32`, `shared.Uint8`, … are fixed-size, allocated once from a bump allocator in exported linear memory, and live for the whole program (no freeing in v1.6.0).
 - **Allocation discipline:** `shared.New*` calls are intended for package-level / startup allocations. The compiler rejects or warns on allocations in runtime loops to prevent unbounded linear memory growth.
 - **Detached ArrayBuffer hazard:** Calling `memory.grow` in WebAssembly detaches existing JavaScript `ArrayBuffer` instances and typed array views, throwing a `TypeError` if JS code accesses a cached view. To guarantee safety:
-  - Linear memory size is configured and fixed at startup (defaulting to sufficient pages for all static shared buffers, avoiding `memory.grow` in v1.6.0).
-  - JS facade accessors verify view validity and refresh if `buffer.detached` is ever encountered.
-- **Linear memory vs. GC slice distinction:** `shared.Float32` is a linear-memory buffer, whereas Go `[]float32` in WasmGC is an object slice referencing a GC array. The compiler explicitly rejects passing a `shared` buffer to functions expecting GC slices (`cannot use shared.Float32 as []float32: linear-memory buffer cannot be passed as a GC slice without an explicit copy`), preventing confusing internal type errors.
+  - All `shared.New*` allocations run inside the module start function (package-level initializers and `init()`), which is the only place the bump allocator may call `memory.grow`. By the time JS obtains its first view, the memory has reached its final size and never grows again.
+  - JS facade accessors verify view validity against the live `memory.buffer` and refresh the view if it ever differs.
+- **Linear memory vs. GC slice distinction:** `shared.Float32` is a linear-memory buffer, whereas Go `[]float32` in WasmGC is an object slice referencing a GC array. The compiler explicitly rejects passing a `shared` buffer to functions expecting GC slices (`cannot use shared.Float32 as []float32: linear-memory buffer cannot be passed as a GC slice without an explicit copy`), preventing confusing internal type errors. `copy(dst, src)` is the explicit copy and requires identical element types on both sides.
 - **WASM side:** loads and stores at a base offset. Index syntax and `len` are supported. `append` and reslicing beyond the bounds are rejected.
 - **JS side:** a live TypedArray view.
-- **In pure-JS builds or `both` packages compiled for JS:** a plain TypedArray. Code is portable across targets.
+- **In pure-JS builds (`--js-only`) and `js` packages:** a plain TypedArray, so the same code compiles on either target. `both` packages may not import `gofront/shared`: the JS copy has no linear memory to share, so a buffer created there could never be the same memory the WASM copy sees.
 
 ---
 
@@ -327,11 +327,11 @@ The hybrid design is delivered over three releases. Both WASM releases land in t
 - [x] **Task H5.3 — Physics migration:** Move `physics` (`DynamicBody`, `FPSController`) to `wasm` with full test suite passing.
 
 ### Phase H6: Shared Memory & Hybrid Example
-- [ ] **Task H6.1 — Linear-memory buffers:** Implement `gofront/shared` TypedArray zero-copy views.
-  - Sizing fixed at startup to avoid `memory.grow` and detached `ArrayBuffer` runtime hazards; JS facade getters verify view validity.
-  - Typechecker diagnostics enforcing startup/package-level allocation discipline and rejecting implicit `shared.*` -> GC slice parameter conversions without explicit copy.
-- [ ] **Task H6.2 — `example/hybrid` app:** Build and verify hybrid sample application with Playwright E2E.
-- [ ] **Task H6.3 — Asset loader URL resolution & target overrides:**
+- [x] **Task H6.1 — Linear-memory buffers:** Implement `gofront/shared` TypedArray zero-copy views.
+  - Memory grows only inside the start function (allocation is startup-only), so no JS view can ever be detached; JS facade getters still verify view validity.
+  - Typechecker diagnostics enforcing startup/package-level allocation discipline, rejecting implicit `shared.*` -> GC slice parameter conversions without explicit copy, and requiring identical element types in `copy()`.
+- [x] **Task H6.2 — `example/hybrid` app:** Build and verify hybrid sample application with Playwright E2E.
+- [x] **Task H6.3 — Asset loader URL resolution & target overrides:**
   - Robust `import.meta.url` relative resolution for `app.wasm` in `src/backend/wasm/boundary.js` so subpath routes and CDN setups do not 404.
   - CLI flag `--js-only` (or `gofront build --target js`) and `gofront.json` `"targets"` config overrides for zero-code-change A/B benchmarking and Safari < 18.2 fallback builds.
 
@@ -383,5 +383,5 @@ For general web development, DOM, `.templ`, CSS, and browser events remain perma
 1. **Directive vs. config (Resolved).** Package targets can be overridden in `gofront.json` (`"targets": { "engine/physics": "wasm" }`) or via `--js-only`, making automated A/B comparative benchmarking and Safari < 18.2 fallback builds trivial without editing source code comments.
 2. **`int` width.** `i64` (Go-correct, chosen) vs. `i32`. Revisit only if benchmarks show a cost.
 3. **Strict mode scope.** Keep it only for `both` packages, or offer `//gofront:strict` for any JS package?
-4. **`shared` buffer API (Resolved).** Index syntax via compiler base-offset emission. Fixed startup allocation in v1.6.0 avoids detached `ArrayBuffer` traps. Slices and shared buffers are distinct types to preserve GC slice semantics.
+4. **`shared` buffer API (Resolved).** Index syntax via compiler base-offset emission. Startup-only allocation in v1.6.0 avoids detached `ArrayBuffer` traps. Slices and shared buffers are distinct types to preserve GC slice semantics; `gofront/shared` is `wasm`-package only (not `both`).
 5. **Interface proxies (Resolved).** Do not implement dynamic two-way cross-boundary itab proxies. Calling from WASM into a JS-implemented interface introduces high runtime cost and a double boundary hop (WASM → JS proxy → WASM static mesh). Instead, provider interfaces live on the WASM side (e.g. `physics` queries `collision.Trimesh` directly), or cross the boundary via typed callback functions (`func`).

@@ -1,6 +1,8 @@
 // src/backend/wasm/types.js
 // Maps GoFront types to WasmGC types and manages type registry.
 
+import { SHARED_KINDS } from "../../typechecker/stdlib/shared.js";
+
 // `*testing.T` is a JS-side object (the harness's __GoFront_T) passed through
 // the boundary as an opaque externref.
 export function isTestingT(goType) {
@@ -167,6 +169,16 @@ export function toWasmType(goType, checker = null, mod = null) {
 		return { kind: "ref", nullable: true, heapType: "any" };
 	}
 
+	if (goType.kind === "shared") {
+		if (mod?.getSharedType)
+			return {
+				kind: "ref",
+				nullable: true,
+				typeIndex: mod.getSharedType().typeIndex,
+			};
+		return { kind: "ref", nullable: true, heapType: "struct" };
+	}
+
 	if (goType.kind === "slice") {
 		if (mod?.getSliceType && goType.elem) {
 			const sliceInfo = mod.getSliceType(goType.elem);
@@ -270,6 +282,20 @@ export function isSliceType(goType, checker = null) {
 		return isSliceType(goType.underlying, checker);
 	}
 	return goType.kind === "slice" || goType.kind === "SliceType";
+}
+
+// `gofront/shared` linear-memory buffer: returns the SHARED_KINDS entry
+// (elem, ctor, bytes, key) or null.
+export function getSharedInfo(goType, checker = null) {
+	if (!goType) return null;
+	if (goType.kind === "TypeName" || goType.kind === "Ident") {
+		const resolved = checker?.types?.get(goType.name);
+		return resolved ? getSharedInfo(resolved, checker) : null;
+	}
+	if (goType.kind === "named" && goType.underlying)
+		return getSharedInfo(goType.underlying, checker);
+	if (goType.kind !== "shared") return null;
+	return { name: goType.shared, ...SHARED_KINDS[goType.shared] };
 }
 
 export function isArrayType(goType, checker = null) {

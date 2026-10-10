@@ -83,6 +83,21 @@ function formatInstruction(inst) {
 		case "global.get":
 		case "global.set":
 			return `${op} ${inst.globalIndex ?? inst.index ?? 0}`;
+		case "i32.load":
+		case "i64.load":
+		case "f32.load":
+		case "f64.load":
+		case "i32.load8_s":
+		case "i32.load8_u":
+		case "i32.load16_s":
+		case "i32.load16_u":
+		case "i32.store":
+		case "i64.store":
+		case "f32.store":
+		case "f64.store":
+		case "i32.store8":
+		case "i32.store16":
+			return inst.offset ? `${op} offset=${inst.offset}` : op;
 		case "i32.const":
 		case "i64.const":
 			return `${op} ${inst.value ?? 0}`;
@@ -184,6 +199,11 @@ export function emitWat(mod) {
 		for (let i = 0; i < mod.tags.length; i++) {
 			lines.push(`  (tag $tag${i} (type $t${mod.tags[i].typeIndex ?? 0}))`);
 		}
+	}
+
+	if (mod.memory) {
+		const max = mod.memory.max != null ? ` ${mod.memory.max}` : "";
+		lines.push(`  (memory $mem ${mod.memory.min}${max})`);
 	}
 
 	// 4. Globals

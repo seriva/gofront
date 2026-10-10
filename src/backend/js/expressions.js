@@ -707,6 +707,10 @@ export const expressionGenMethods = {
 			return this._genTimeMethodCall(expr.func.field, expr);
 		if (recvName === "testing.T")
 			return this._genTestingMethodCall(expr.func.field, expr);
+		if (recvName?.startsWith("shared.") && expr.func.field === "Subarray") {
+			const args = expr.args.map((a) => this.genExpr(a)).join(", ");
+			return `${this.genExpr(expr.func.expr)}.subarray(${args})`;
+		}
 		return undefined;
 	},
 
