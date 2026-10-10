@@ -1,7 +1,7 @@
 # Hybrid JS + WebAssembly Target — Design Plan
 
 **Version:** v1.6.0 (design spans v1.5.0 → v1.6.0, see [Phased Roadmap](#phased-roadmap))  
-**Status:** Completed (2026-10-10) — full hybrid completed in the JS compiler as v1.6.0, before the v2.0.0 Go port. Whole-app WASM moved to [Future](#future-whole-app-wasm).  
+**Status:** Completed (2026-10-10) — full hybrid completed in the JS compiler as v1.6.0, before the v2.0.0 Go port. Remaining gaps closed in [v1.6.1](../v1.6.1/wasm-gaps-plan.md).  
 **Depends on:** [`docs/v1.5.0/wasm-mvp-plan.md`](../v1.5.0/wasm-mvp-plan.md) (MVP: `src/lower/`, targets, strict mode, encoder, core subset, boundary v1).  
 **Followed by:** [`docs/v2.0.0/native-go-engine.md`](../v2.0.0/native-go-engine.md), which ports the finished JS + WASM compiler to Go with byte-identical output.
 
@@ -17,7 +17,7 @@ Let one GoFront app run **partly as JavaScript and partly as WebAssembly (WasmGC
 - **Engine code compiles to WASM:** simulation, collision, spatial structures, pathfinding, procedural generation. It gets Go-correct integers, real `float32` and predictable performance.
 - **The compiler owns the boundary.** It sees both sides, so it generates all the glue. Importing code is written the same way whatever the target of the imported package.
 
-The hybrid architecture is the optimal end-state for browser apps: it leaves UI and DOM in native JS (avoiding the severe host-call penalty of WASM DOM manipulation), while accelerating compute and simulation in WasmGC. Whole-app WASM remains an extension for headless or pure Canvas/WebGL applications where no DOM is present.
+The hybrid architecture is the intended, permanent end-state: it leaves UI and DOM in native JS (avoiding the severe host-call penalty of WASM DOM manipulation), while accelerating compute and simulation in WasmGC. Compiling a whole app to WASM is not a goal.
 
 **Done means:**
 - `simplefps` runs with its simulation in WASM and its rendering/UI in JS.
@@ -29,7 +29,7 @@ The hybrid architecture is the optimal end-state for browser apps: it leaves UI 
 
 ## Out of Scope (v1.6.0)
 
-- **DOM, browser globals, `js:`/npm imports, `.templ`, `gom` inside WASM packages.** That is the [whole-app future](#future-whole-app-wasm).
+- **DOM, browser globals, `js:`/npm imports, `.templ`, `gom` inside WASM packages.** Browser-facing code stays in `js` packages by design.
 - **`async`/`await` in WASM packages.** WASM code is synchronous. Async orchestration stays in JS.
 - **Linear-memory runtime / custom GC.** WasmGC for all objects. Linear memory is used only for explicit [shared buffers](#shared-buffers-zero-copy).
 - **WASI / server targets, DWARF, statement-level WASM source maps.** Browser only (function-level `app.wasm.map` shipped in H7.2).
@@ -103,7 +103,7 @@ Type error in engine/physics/dynamicbody.go at line 5:5: 'document' is not avail
 package 'animation' cannot be wasm: 3 blockers — 1 js package import (systems), 1 browser global (console), 1 async function
 ```
 
-These are **"not yet" rules, not "never" rules.** The [whole-app future](#future-whole-app-wasm) relaxes them step by step. Some then become "allowed, crosses the boundary" hints instead of errors. In `js` packages nothing changes.
+Browser-facing rules (DOM, `.templ`, `gom`, `js:` imports, `async`) are permanent: that code belongs in `js` packages. The stdlib "not yet" rules are closed in [v1.6.1](../v1.6.1/wasm-gaps-plan.md). In `js` packages nothing changes.
 
 ### How UI and engine packages talk
 
@@ -362,20 +362,6 @@ Pre-port cleanup from the 2026-10-09 codebase review. Every task is a pure refac
 - [x] **Task H8.6 — Export surface & dead code:** Drop `export` from the 47 symbols nothing imports (17 section encoders in `encode.js`, `classifyType`, `WASM_LOADER_JS`, `peepholeOptimize`, `ModuleEmitter`, `typeKey`, `cloneAst`, `evaluatesToPointer`, `LowerResult`, `INT64`/`UINTPTR`/`COMPLEX64`, …). Delete the two fully dead symbols: `COMPARABLE` in `typechecker/types.js` (resolve.js builds the literal inline — use the constant there instead) and `resetNativeWasmOptCheck` in `backend/wasm/optimize.js`. Re-run `sentrux check` to confirm coupling metrics improve.
 - [x] **Task H8.7 — Hygiene:** `package.json` description → "compiles to JavaScript and WebAssembly"; remove the empty untracked `gen/` and `dist/` directories; keep `files: ["src/"]` as the single npm whitelist and drop the redundant `.npmignore`.
 
-
----
-
-## Future: Whole-App WASM (Headless & Canvas-Only)
-
-The per-package hybrid model is the intentional, permanent end-state for browser applications with DOM UI:
-- **DOM / `.templ` in WASM is an architectural anti-pattern:** browsers have no direct WASM DOM API, so every element and attribute mutation must call an imported JS host function. Native JS JIT code with inline caches is strictly faster, lighter, and has lower latency for DOM rendering.
-- **Where Whole-App WASM is actually valuable:**
-  1. **Canvas / WebGL-only apps:** Games and visualizations that bypass the DOM entirely, rendering to a canvas via WebGL/WebGPU through typed `js:` imports and `shared` memory buffers.
-  2. **Headless & Server/WASI runtimes:** Compiling GoFront packages for Node/Bun server execution, microbenchmarks, or WASI targets where no browser DOM exists.
-  3. **`async`/`await` in WASM:** Lowering async functions to resumable state machines that return Promises (without requiring JSPI).
-  4. **`gofront build --target wasm`:** Mode for compiling headless or pure-canvas projects where every package targets WASM, leaving only the bootstrap loader in JS.
-
-For general web development, DOM, `.templ`, CSS, and browser events remain permanently in JS by design.
 
 ---
 

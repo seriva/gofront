@@ -10,7 +10,7 @@ features (e.g. `docs/v0.0.5/`).
 
 ## v2.0.0
 
-**Theme: Native Go Compiler Engine & Hybrid NPM Distribution.** Rewrite GoFront's compiler core and CLI in native Go with byte-identical JS **and WASM** output to v1.6.0, a measured sub-10ms rebuild target, and no Node prerequisite for `dev`/`build`/`check` (Node still used for vendor bundling and `gofront test`). npm distribution via platform binaries. Pure port: ports the `lower` step and the complete v1.6.0 hybrid WASM backend as-is, no new features. Design document in [`docs/v2.0.0/native-go-engine.md`](v2.0.0/native-go-engine.md).
+**Theme: Native Go Compiler Engine & Hybrid NPM Distribution.** Rewrite GoFront's compiler core and CLI in native Go with byte-identical JS **and WASM** output to v1.6.1, a measured sub-10ms rebuild target, and no Node prerequisite for `dev`/`build`/`check` (Node still used for vendor bundling and `gofront test`). npm distribution via platform binaries. Pure port: ports the `lower` step and the complete v1.6.1 hybrid WASM backend as-is, no new features. Design document in [`docs/v2.0.0/native-go-engine.md`](v2.0.0/native-go-engine.md).
 
 | Area | Difficulty | Status | Notes |
 |---|---|---|---|
@@ -20,15 +20,29 @@ features (e.g. `docs/v0.0.5/`).
 | Type checker | High | Draft | Port multi-pass checker (types → funcs → embedding → vars/consts → bodies), generics, package-target rules, stdlib/Web typings, `.d.ts` + npm resolution. |
 | Lowering & JS core codegen | High | Draft | Port `src/lower/` (from v1.5.0) and the JS backend incl. strict numeric mode; byte-identical JS + source maps. |
 | Stdlib & templ codegen | High | Draft | Port all 21 stdlib codegen modules, templ DOM codegen and scoped CSS. |
-| WASM backend port | High | Draft | Port the complete v1.6.0 `src/backend/wasm/` (IR, encoder, WAT, facades, loader, interfaces, generics, maps, `defer`/`recover`, boundary v2, shared buffers); byte-identical `.wasm` as an oracle gate; `runtime/wasm` shared as GoFront source. |
+| WASM backend port | High | Draft | Port the complete v1.6.1 `src/backend/wasm/` (IR, encoder, WAT, facades, loader, interfaces, generics, maps, `defer`/`recover`, boundary, shared buffers, WASM stdlib); byte-identical `.wasm` as an oracle gate; host imports shared via `runtime/js/wasm/`. |
 | CLI, dev server & minifier | Medium | Draft | Full CLI surface incl. legacy flags, project config, assets, PWA, SSE live reload + CSS hot swap, minifier, `.wasm` serving. |
 | Hybrid NPM packaging & cutover | Medium | Draft | `@gofront/*` platform binaries, Node delegation for `prep`/`vendor`/`test`, beta opt-in → default flip. |
 
 ---
 
+## v1.6.1
+
+**Theme: Close the WASM gaps.** Makes the `wasm`/`both` subset cover all of the language and stdlib that doesn't touch browser or host APIs: non-literal constants, array/interface map keys, the remaining boundary types (incl. anonymous interfaces), missing stdlib members, and the `unicode`, `math/rand`, `bytes`, `io`, `path`, `html` and `time` (minus `Sleep`) packages. Browser-facing code stays in `js` packages by design; only `os`, `regexp` and `time.Sleep` remain JS-only. Design document in [`docs/v1.6.1/wasm-gaps-plan.md`](v1.6.1/wasm-gaps-plan.md).
+
+| Area | Difficulty | Status | Notes |
+|---|---|---|---|
+| Language features | Medium | Draft | Non-literal package constants (fold or `start` global), array- and interface-typed map keys with Go's unhashable panic. |
+| Boundary types | Medium | Draft | `error`, `map` (copied as JS `Map`), pointer-to-scalar boxes, anonymous structs and interfaces, exported non-literal constants, `time.Time`. |
+| `strings` / `strconv` / `math` | Medium | Draft | `Cut*`, `SplitN`/`SplitAfter*`, `Map`, `*Func` variants, `NewReplacer`, `Builder`, `NewReader`; `Unquote`, `AppendInt`/`AppendFloat`; `math.Remainder`. |
+| `slices` & `fmt` | Medium | Draft | Remaining `slices` members (inline, `call_ref` for `*Func`); composite `%v`/`%+v` matching the JS backend; `Fprint*`, `Sscan*`. |
+| New packages | Medium | Draft | `unicode`, `math/rand`, `bytes` (incl. `Buffer`), `io`, `path`/`path/filepath`, `html`, `time` (except `Sleep`; clock via import). |
+
+---
+
 ## v1.6.0
 
-**Theme: Complete hybrid JS + WebAssembly.** Finishes the per-package target model (`//gofront:target js | wasm | both`) in the existing JS compiler (`src/backend/wasm/`), so the whole hybrid is done before the v2.0.0 rewrite: the remaining language features in WASM, boundary v2, shared linear-memory buffers, `example/hybrid`, and full simplefps physics in WASM. Unblocked by the v1.5.1 go/no-go (hybrid = 1.17× JS, GO). Whole-app WASM is a documented future extension. Design document in [`docs/v1.6.0/wasm-hybrid-plan.md`](v1.6.0/wasm-hybrid-plan.md).
+**Theme: Complete hybrid JS + WebAssembly.** Finishes the per-package target model (`//gofront:target js | wasm | both`) in the existing JS compiler (`src/backend/wasm/`), so the whole hybrid is done before the v2.0.0 rewrite: the remaining language features in WASM, boundary v2, shared linear-memory buffers, `example/hybrid`, and full simplefps physics in WASM. Unblocked by the v1.5.1 go/no-go (hybrid = 1.17× JS, GO). Design document in [`docs/v1.6.0/wasm-hybrid-plan.md`](v1.6.0/wasm-hybrid-plan.md).
 
 | Area | Difficulty | Status | Notes |
 |---|---|---|---|

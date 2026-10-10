@@ -39,7 +39,7 @@ Concretely, v1.5.0 delivers:
 - **`defer` / `recover`.** `panic` exists (bounds checks, explicit `panic`), but it can't be recovered inside WASM. It reaches JS as a thrown error.
 - **WASM → JS closures** (passing a WASM closure to JS as a callback). The JS → WASM direction *is* in scope.
 - **Shared linear-memory buffers** (`gofront/shared`), `example/hybrid`, `wasm-opt` integration.
-- **DOM, `.templ`, `gom`, `js:` imports, `async`** in WASM packages. These are permanently rejected in v1.x, and the [future whole-app design](../v1.6.0/wasm-hybrid-plan.md#future-whole-app-wasm) relaxes them later.
+- **DOM, `.templ`, `gom`, `js:` imports, `async`** in WASM packages. These are permanently rejected: browser-facing code stays in `js` packages.
 - **WASM source maps.**
 - **Porting to Go.** That is v2.0.0, which then ports this backend too.
 
