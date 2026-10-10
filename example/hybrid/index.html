@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GoFront — Hybrid JS + WasmGC Particles</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0d0f12;
+      color: #e4e7eb;
+      font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem 1rem;
+      gap: 1rem;
+    }
+    h1 {
+      font-size: 1.5rem;
+      background: linear-gradient(135deg, #00add8 0%, #007d9c 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .subtitle { color: #9ba3af; font-size: 0.9rem; max-width: 560px; text-align: center; line-height: 1.5; }
+    .card {
+      background: #16191f;
+      border: 1px solid #232730;
+      border-radius: 12px;
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+    canvas { display: block; background: #000; border-radius: 8px; width: 640px; height: 480px; }
+    .row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; font-size: 0.85rem; }
+    .label { color: #9ba3af; margin-right: 0.25rem; }
+    .btn {
+      background: rgba(0, 173, 216, 0.08);
+      border: 1px solid rgba(0, 173, 216, 0.3);
+      color: #00add8;
+      padding: 0.3rem 0.7rem;
+      border-radius: 6px;
+      cursor: pointer;
+      font: inherit;
+    }
+    .btn:hover { background: rgba(0, 173, 216, 0.18); }
+    .btn.active { background: #00add8; color: #0d0f12; }
+    .stats { color: #717d8f; font-family: ui-monospace, 'JetBrains Mono', monospace; font-size: 0.8rem; }
+    .stats strong { color: #e4e7eb; }
+    .hint { margin-left: auto; }
+  </style>
+</head>
+<body>
+  <h1>GoFront Hybrid: JS + WasmGC</h1>
+  <p class="subtitle">
+    The particle physics runs in a <code>//gofront:target wasm</code> package. Its
+    <code>gofront/shared</code> buffers are exposed to the JS side as zero-copy
+    <code>Float32Array</code> views, which the canvas renderer reads every frame.
+  </p>
+  <div class="card">
+    <canvas id="sim" width="640" height="480"></canvas>
+    <div id="controls"></div>
+  </div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

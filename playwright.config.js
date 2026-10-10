@@ -29,6 +29,11 @@ export default defineConfig({
 			use: { baseURL: "http://127.0.0.2:3004" },
 			testMatch: ["**/shared.spec.js", "**/templ.spec.js"],
 		},
+		{
+			name: "hybrid",
+			use: { baseURL: "http://127.0.0.2:3005" },
+			testMatch: ["**/hybrid.spec.js"],
+		},
 	],
 	webServer: [
 		{
@@ -49,6 +54,11 @@ export default defineConfig({
 		{
 			command: "npx serve example/templ -l 3004 -n",
 			url: "http://127.0.0.2:3004",
+			reuseExistingServer: !process.env.CI,
+		},
+		{
+			command: "npx serve example/hybrid -l 3005 -n",
+			url: "http://127.0.0.2:3005",
 			reuseExistingServer: !process.env.CI,
 		},
 	],

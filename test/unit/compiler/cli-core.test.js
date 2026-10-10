@@ -15,10 +15,15 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
 	formatPrepSummary,
 	handleBuild,
+	handleCheck,
 	handleInit,
+	handleTest,
 	maybeMinify,
+	parseBuildArgs,
+	parseCheckArgs,
 	parseLegacyArgs,
 	parsePrepArgs,
+	parseTargetFlag,
 	parseTestArgs,
 	resolveAssetExtensions,
 	runCompile,
@@ -513,6 +518,157 @@ test("writeCompileOutput removes only GoFront-produced stale wasm artifacts", as
 		writeCompileOutput(out, { js: "// js only" });
 		assert(existsSync(join(outDir, "app.wasm")), "foreign app.wasm kept");
 		assert(existsSync(join(outDir, "app.wat")), "foreign app.wat kept");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+section("cli-core — target overrides (--js-only, gofront.json targets)");
+
+test("parseTargetFlag / parseBuildArgs recognise --js-only and --target js", () => {
+	assertEqual(parseTargetFlag(["--js-only"]), "js");
+	assertEqual(parseTargetFlag(["--target", "js"]), "js");
+	assertEqual(parseTargetFlag(["--target=js"]), "js");
+	assertEqual(parseTargetFlag(["app"]), null);
+	let threw = false;
+	try {
+		parseTargetFlag(["--target", "wasm"]);
+	} catch (e) {
+		threw = true;
+		assertContains(e.message, "unsupported --target 'wasm'");
+	}
+	assert(threw, "expected --target wasm to be rejected");
+
+	const build = parseBuildArgs(["myapp", "--target", "js"]);
+	assertEqual(build.targetDir, "myapp");
+	assertEqual(build.forceTarget, "js");
+	assertEqual(parseBuildArgs(["--js-only"]).forceTarget, "js");
+	assertEqual(parseBuildArgs([]).forceTarget, null);
+	assertEqual(parseLegacyArgs(["src", "--js-only"]).forceTarget, "js");
+});
+
+test("parseCheckArgs / parseTestArgs: --target value is not a positional", () => {
+	const check = parseCheckArgs(["--target", "js", "src"]);
+	assertEqual(check.targetDir, "src");
+	assertEqual(check.forceTarget, "js");
+	assertEqual(parseCheckArgs(["--js-only"]).targetDir, ".");
+	const t = parseTestArgs(["--target", "js", "pkg", "-v"]);
+	assertEqual(t.targetDir, "pkg");
+	assertEqual(t.forceTarget, "js");
+	assertEqual(t.verbose, true);
+	assertEqual(parseTestArgs(["pkg"]).forceTarget, null);
+});
+
+test("check (plain and dir/...) and test honour gofront.json targets", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-targets-check-"));
+	try {
+		writeHybrid(dir);
+		// An invalid override only surfaces if the override is actually applied
+		// to the sub-package, with keys resolved against the project src root.
+		writeFileSync(
+			join(dir, "gofront.json"),
+			JSON.stringify({ targets: { physics: "native" } }),
+		);
+		const expectInvalid = async (fn) => {
+			let threw = false;
+			try {
+				await fn();
+			} catch (e) {
+				threw = true;
+				assertContains(e.message, "invalid target 'native'");
+			}
+			assert(threw, "expected invalid target error");
+		};
+		await expectInvalid(() => handleCheck(dir));
+		await expectInvalid(() => handleCheck(`${dir}/...`));
+		// --js-only wins over the config.
+		handleCheck(dir, { forceTarget: "js" });
+		// test: the build failure is reported per package rather than thrown.
+		writeFileSync(
+			join(dir, "app/src/physics/physics_test.go"),
+			`package physics
+
+import "testing"
+
+func TestKick(t *testing.T) {
+	b := NewBody(1)
+	Kick(b, 2)
+	if b.Vel != 2 {
+		t.Errorf("got %v", b.Vel)
+	}
+}
+`,
+		);
+		const res = await handleTest(`${dir}/...`, { captureOutput: true });
+		assertContains(res.stderr, "invalid target 'native'");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("handleBuild --js-only compiles a hybrid project to JS only", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-js-only-"));
+	const outDir = join(dir, "public");
+	try {
+		writeHybrid(dir);
+		await handleBuild(dir, { outDir, forceTarget: "js" });
+		assert(existsSync(join(outDir, "app.js")), "expected app.js");
+		assertEqual(existsSync(join(outDir, "app.wasm")), false);
+		const js = readFileSync(join(outDir, "app.js"), "utf8");
+		assert(!js.includes("__gfw_load("), "no wasm loader in a JS-only build");
+		assertContains(js, "function Kick");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("gofront.json targets override the //gofront:target directive", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-targets-cfg-"));
+	const outDir = join(dir, "public");
+	try {
+		writeHybrid(dir);
+		// The physics package declares wasm; the config forces it back to js.
+		writeFileSync(
+			join(dir, "gofront.json"),
+			JSON.stringify({ targets: { physics: "js" } }),
+		);
+		await handleBuild(dir, { outDir });
+		assertEqual(existsSync(join(outDir, "app.wasm")), false);
+
+		// And the other way round: a plain package promoted to wasm by config.
+		writeFileSync(
+			join(dir, "app/src/physics/physics.go"),
+			HYBRID_FILES["app/src/physics/physics.go"].replace(
+				"//gofront:target wasm\n",
+				"",
+			),
+		);
+		writeFileSync(
+			join(dir, "gofront.json"),
+			JSON.stringify({ targets: { physics: "wasm" } }),
+		);
+		await handleBuild(dir, { outDir });
+		assert(
+			existsSync(join(outDir, "app.wasm")),
+			"config promoted physics to wasm",
+		);
+
+		// Invalid values are reported.
+		writeFileSync(
+			join(dir, "gofront.json"),
+			JSON.stringify({ targets: { physics: "native" } }),
+		);
+		let threw = false;
+		try {
+			await handleBuild(dir, { outDir });
+		} catch (e) {
+			threw = true;
+			assertContains(
+				e.message,
+				"invalid target 'native' for package 'physics'",
+			);
+		}
+		assert(threw, "expected invalid target error");
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}

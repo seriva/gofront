@@ -13,6 +13,7 @@ gofront build [dir] --source-map             include source maps (app.js.map and
 gofront build [dir] --no-minify              skip minification
 gofront build [dir] --no-mangle              minify but keep original identifiers
 gofront build [dir] --emit-wat               also write app.wat next to app.wasm (hybrid projects)
+gofront build [dir] --js-only                compile every package to JS (alias --target js; also for dev/check/-o)
 gofront prep [dir] [--minify]                run asset copying + vendor bundling only (alias: gofront vendor)
 gofront check <dir>                          type-check a single package
 gofront check <dir>/...                      type-check every package under <dir> (Go-style `./...`)
@@ -52,6 +53,7 @@ file or a `"gofront": { … }` object in `package.json`:
 | `assetExtensions` | `[]` | Extra file extensions (e.g. `[".bmesh", ".mat"]`) copied from `serveDir` into `outDir` on `build`, in addition to the built-in web asset list (html, css, js, json, images, fonts, audio, video, wasm) |
 | `vendor` | `app/vendor.js` | Vendor bundle written by `prep`/`build` from `package.json` `dependencies`. Either a destination path string or `{ "dest": string \| string[], "packages": string[], "minify": boolean, "globals": { "<pkg>": string \| string[] } }` |
 | `assetCopy` | `[]` | Static files copied by `prep`/`build`: `[{ "source": "node_modules/x/font.woff2", "dest": "app/fonts/font.woff2" }]` |
+| `targets` | `{}` | Per-package target overrides keyed by directory relative to `src` (`"."` = root package): `{ "engine/physics": "wasm" }`. Replaces the package's `//gofront:target` directive |
 
 All settings live in this one place — top-level `"vendor"` / `"assetCopy"` keys in `package.json` are not read.
 
@@ -59,7 +61,7 @@ All settings live in this one place — top-level `"vendor"` / `"assetCopy"` key
 
 When any package reached by the build carries `//gofront:target wasm` or `both`, `dev`,
 `build` and `-o` also write a single `app.wasm` next to the JS bundle, and `--emit-wat`
-adds a readable `app.wat`.
+adds a readable `app.wat`. `--js-only` forces a pure-JS build regardless of directives.
 
 Passing `gofront build --release` (or `--wasm-opt`) optimizes the emitted WebAssembly
 using Binaryen (`-O3` + GUFA), achieving ~23% smaller binary size and emitting `app.wasm.map`

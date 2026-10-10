@@ -45,11 +45,24 @@ export function runCompile(inputPath, isDir, options) {
 		dumpAst = false,
 		emitWat = false,
 		wasmOpt = false,
+		forceTarget = null,
+		targetOverrides = null,
+		rootDir = null,
 	} = options ?? {};
+	const targetOpts = {};
+	if (forceTarget) targetOpts.forceTarget = forceTarget;
+	if (targetOverrides) targetOpts.targetOverrides = targetOverrides;
+	if (rootDir) targetOpts.rootDir = rootDir;
 
 	if (isDir) {
 		const outputDir = outputFile ? dirname(resolve(outputFile)) : resolve(".");
-		return compileDir(inputPath, { sourceMap, outputDir, emitWat, wasmOpt });
+		return compileDir(inputPath, {
+			sourceMap,
+			outputDir,
+			emitWat,
+			wasmOpt,
+			...targetOpts,
+		});
 	}
 
 	return compileSingleFile(inputPath, {
@@ -59,7 +72,65 @@ export function runCompile(inputPath, isDir, options) {
 		dumpAst,
 		emitWat,
 		wasmOpt,
+		...targetOpts,
 	});
+}
+
+// `--js-only` / `--target js` compile every package to JavaScript (A/B
+// benchmarking, fallback builds for browsers without WasmGC).
+export function parseTargetFlag(argv) {
+	if (argv.includes("--js-only")) return "js";
+	for (let i = 0; i < argv.length; i++) {
+		const arg = argv[i];
+		const value =
+			arg === "--target"
+				? argv[i + 1]
+				: arg.startsWith("--target=")
+					? arg.slice("--target=".length)
+					: null;
+		if (value === null || value === undefined) continue;
+		if (value !== "js")
+			throw new Error(
+				`unsupported --target '${value}' (only 'js' is supported; package targets come from //gofront:target directives or gofront.json "targets")`,
+			);
+		return "js";
+	}
+	return null;
+}
+
+// Per-package target overrides from `gofront.json` (`"targets": { "engine/physics": "wasm" }`).
+function projectTargetOverrides(project) {
+	const t = project?.config?.targets;
+	return t && typeof t === "object" ? t : null;
+}
+
+// Override keys are relative to the project's source root, so every command
+// (build, dev, check, test — including `dir/...`) must resolve them against
+// the same `rootDir` or a sub-package would see itself as ".".
+function projectTargetOptions(project, options = {}) {
+	const targetOverrides =
+		options.targetOverrides ?? projectTargetOverrides(project);
+	if (!targetOverrides) return {};
+	return {
+		targetOverrides,
+		rootDir: options.rootDir ?? project.srcDir,
+	};
+}
+
+// Removes `--target <value>` / `--target=<value>` / `--js-only` so the value
+// is not mistaken for a positional argument.
+function stripTargetFlag(argv) {
+	const out = [];
+	for (let i = 0; i < argv.length; i++) {
+		const arg = argv[i];
+		if (arg === "--target") {
+			i++;
+			continue;
+		}
+		if (arg.startsWith("--target=") || arg === "--js-only") continue;
+		out.push(arg);
+	}
+	return out;
 }
 
 // Writes the JS bundle plus, when the project links wasm packages, the
@@ -264,10 +335,11 @@ export function formatPrepSummary({ assets, vendor }) {
 export function parseTestArgs(argv) {
 	let run = null;
 	const positional = [];
-	for (let i = 0; i < argv.length; i++) {
-		const arg = argv[i];
+	const rest = stripTargetFlag(argv);
+	for (let i = 0; i < rest.length; i++) {
+		const arg = rest[i];
 		if (arg === "-run" || arg === "--run") {
-			run = argv[++i] ?? null;
+			run = rest[++i] ?? null;
 		} else if (arg.startsWith("-run=") || arg.startsWith("--run=")) {
 			run = arg.slice(arg.indexOf("=") + 1);
 		} else if (!arg.startsWith("-")) {
@@ -279,16 +351,24 @@ export function parseTestArgs(argv) {
 		verbose: argv.includes("-v"),
 		dom: argv.includes("--dom"),
 		run,
+		forceTarget: parseTargetFlag(argv),
 	};
 }
 
 export function handleTest(targetDir = ".", options = {}) {
 	const pattern = parsePackagePattern(targetDir);
-	if (pattern) return runTestsRecursive(pattern, options);
+	if (pattern) {
+		const project = detectProject(pattern);
+		return runTestsRecursive(pattern, {
+			...options,
+			...projectTargetOptions(project, options),
+		});
+	}
 
 	let testTarget = targetDir;
+	let project = null;
 	try {
-		const project = detectProject(targetDir);
+		project = detectProject(targetDir);
 		const targetPath = resolve(targetDir);
 		if (
 			statSync(targetPath).isDirectory() &&
@@ -300,7 +380,10 @@ export function handleTest(targetDir = ".", options = {}) {
 				: dirname(project.srcDir);
 		}
 	} catch {}
-	return runTests(testTarget, options);
+	return runTests(testTarget, {
+		...options,
+		...projectTargetOptions(project, options),
+	});
 }
 
 async function runTestsRecursive(rootDir, options) {
@@ -451,9 +534,10 @@ function detectProject(dir = ".") {
 // ── check command ─────────────────────────────────────────────
 
 export function parseCheckArgs(argv) {
-	const positional = argv.filter((a) => !a.startsWith("-"));
+	const positional = stripTargetFlag(argv).filter((a) => !a.startsWith("-"));
 	return {
 		targetDir: positional[0] ?? ".",
+		forceTarget: parseTargetFlag(argv),
 	};
 }
 
@@ -464,11 +548,12 @@ export function handleCheck(targetDir = ".", options = {}) {
 		if (dirs.length === 0) {
 			throw new Error(`No .go files found under ${targetDir}`);
 		}
+		const targetOpts = projectTargetOptions(detectProject(pattern), options);
 		const startMs = performance.now();
 		const packages = [];
 		for (const dir of dirs) {
 			const pkgStart = performance.now();
-			runCompile(dir, true, { ...options });
+			runCompile(dir, true, { ...options, ...targetOpts });
 			packages.push({
 				dir,
 				elapsedMs: (performance.now() - pkgStart).toFixed(0),
@@ -498,7 +583,10 @@ export function handleCheck(targetDir = ".", options = {}) {
 
 	const targetIsDir = statSync(compileTarget).isDirectory();
 	const startMs = performance.now();
-	runCompile(compileTarget, targetIsDir, { ...options });
+	runCompile(compileTarget, targetIsDir, {
+		...options,
+		...projectTargetOptions(project, options),
+	});
 	const elapsedMs = (performance.now() - startMs).toFixed(0);
 	return { target: targetDir, compileTarget, elapsedMs };
 }
@@ -516,6 +604,7 @@ export function parseBuildArgs(argv) {
 	const release = argv.includes("--release");
 	const noWasmOpt = argv.includes("--no-wasm-opt");
 	const wasmOpt = !noWasmOpt && (argv.includes("--wasm-opt") || release);
+	const forceTarget = parseTargetFlag(argv);
 
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
@@ -523,6 +612,8 @@ export function parseBuildArgs(argv) {
 			outDir = argv[++i] ?? null;
 		} else if (arg.startsWith("--out-dir=")) {
 			outDir = arg.slice(arg.indexOf("=") + 1);
+		} else if (arg === "--target") {
+			i++;
 		} else if (!arg.startsWith("-")) {
 			positional.push(arg);
 		}
@@ -538,6 +629,7 @@ export function parseBuildArgs(argv) {
 		mangle: !noMangle && !noMinify,
 		release,
 		wasmOpt,
+		forceTarget,
 	};
 }
 
@@ -735,6 +827,8 @@ export async function handleBuild(targetDir = ".", options = {}) {
 		sourceMap: options.sourceMap ?? false,
 		emitWat: options.emitWat ?? false,
 		wasmOpt: options.wasmOpt ?? false,
+		forceTarget: options.forceTarget ?? null,
+		...projectTargetOptions(project, options),
 	});
 
 	const doMinify = options.minify ?? true;
@@ -800,6 +894,7 @@ export function parseLegacyArgs(argv) {
 		dumpAst: argv.includes("--ast"),
 		dumpTokens: argv.includes("--tokens"),
 		sourceMap: argv.includes("--source-map"),
+		forceTarget: parseTargetFlag(argv),
 		serve,
 		watch: argv.includes("--watch") || serve,
 		copyAssets: argv.includes("--copy-assets"),
@@ -827,6 +922,8 @@ export function parseDevArgs(argv) {
 			port = parseInt(arg.slice(arg.indexOf("=") + 1), 10);
 		} else if (arg === "-o" || arg === "--output") {
 			outputFile = argv[++i] ?? null;
+		} else if (arg === "--target") {
+			i++;
 		} else if (!arg.startsWith("-")) {
 			positional.push(arg);
 		}
@@ -835,17 +932,34 @@ export function parseDevArgs(argv) {
 		targetDir: positional[0] ?? ".",
 		port: Number.isNaN(port) ? null : port,
 		outputFile,
+		forceTarget: parseTargetFlag(argv),
 	};
 }
 
 // Compiles once and writes the output when an output file is configured.
 // Returns the build info; throws on compile errors.
 function runDevBuild(
-	{ srcDir, isDir, outputFile, sourceMap, minify, mangle },
+	{
+		srcDir,
+		isDir,
+		outputFile,
+		sourceMap,
+		minify,
+		mangle,
+		forceTarget,
+		targetOverrides,
+		rootDir,
+	},
 	changedFile = null,
 ) {
 	const startMs = performance.now();
-	const result = runCompile(srcDir, isDir, { outputFile, sourceMap });
+	const result = runCompile(srcDir, isDir, {
+		outputFile,
+		sourceMap,
+		forceTarget,
+		targetOverrides,
+		rootDir,
+	});
 	const js = maybeMinify(result.js, { minify, mangle, sourceMap });
 	const written = outputFile
 		? writeCompileOutput(outputFile, result, js)
@@ -1007,6 +1121,8 @@ export async function handleDev(targetDir = ".", options = {}) {
 		sourceMap: options.sourceMap ?? true,
 		minify: options.minify ?? false,
 		mangle: options.mangle ?? false,
+		forceTarget: options.forceTarget ?? null,
+		...projectTargetOptions(project, options),
 		devServer,
 		onBuild: options.onBuild,
 		onError: options.onError,

@@ -414,6 +414,9 @@ export const resolveMethods = {
 				return this._fieldTypeInterface(base, baseType, field, node);
 			case "namespace":
 				return this._fieldTypeNamespace(base, field, node);
+			case "shared":
+				if (base.methods?.has(field)) return base.methods.get(field);
+				return this.err(`No method '${field}' on ${typeStr(baseType)}`, node);
 			case "slice":
 				if (isTypedArraySlice(base)) {
 					return this._fieldTypeTypedArraySlice(base, baseType, field, node);

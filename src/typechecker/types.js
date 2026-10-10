@@ -87,7 +87,12 @@ export const BROWSER_GLOBALS = new Set([
 
 // Stdlib packages the WASM backend can emit. Extend as src/backend/wasm/emit.js gains support;
 // anything not listed is rejected at import with "not yet available in wasm packages".
-export const WASM_SUPPORTED_STDLIB = new Set(["math", "math/bits", "testing"]);
+export const WASM_SUPPORTED_STDLIB = new Set([
+	"math",
+	"math/bits",
+	"testing",
+	"gofront/shared",
+]);
 
 export const VALID_TARGETS = new Set(["js", "wasm", "both"]);
 
@@ -294,6 +299,8 @@ export function typeStr(t) {
 			return `untyped ${t.base}`;
 		case "slice":
 			return `[]${typeStr(t.elem)}`;
+		case "shared":
+			return `shared.${t.shared}`;
 		case "array":
 			return `[${t.size ?? "..."}]${typeStr(t.elem)}`;
 		case "map":
