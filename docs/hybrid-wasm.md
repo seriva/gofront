@@ -116,7 +116,55 @@ compile error.
 | `func` values | Wrapped in both directions, so callbacks work either way. |
 | Named non-empty interfaces | **WASM → JS:** an exported `*T` arrives as its handle class (or `both` live view); other dynamic types arrive as a facade object whose methods call into WASM. **JS → WASM:** only WASM-owned values (handles, facades) are accepted. A `js` type implementing a `wasm` interface is a compile error (`type '*tri' (js) cannot implement wasm interface 'Shape' across the boundary; …`); keep implementations in WASM or pass a `func` callback. |
 | `*testing.T` | Stays a JS object; `t.Errorf`, `t.Fatal`, `t.Log`, `t.Skip`, `t.Name`, `t.Failed`, … are routed back to the harness. |
+| `shared.Float32`, `shared.Int32`, … (`gofront/shared`) | **Zero-copy** TypedArray view over the module's linear memory in both directions (see below). |
 | `map`, `error`, anonymous interfaces, pointers to non-structs, anonymous structs, exported non-literal constants | **Rejected** with `… is not yet supported across the wasm boundary (planned)`. |
+
+### Shared linear-memory buffers (`gofront/shared`)
+
+Slices are copied across the boundary. For large numeric data that both sides touch every
+frame (particle positions, vertex buffers, audio samples) a `wasm` package can allocate
+**shared buffers** instead:
+
+```go
+//gofront:target wasm
+package sim
+
+import "gofront/shared"
+
+const Max = 4096
+
+var Positions = shared.NewFloat32(Max * 2) // x,y pairs
+var Flags = shared.NewUint8(Max)
+
+func Step(dt float32) {
+	for i := range Positions {
+		Positions[i] += dt
+	}
+}
+```
+
+```js
+// JS side — a Float32Array aliasing the wasm memory; no copy per frame.
+for (let i = 0; i < sim.Positions.length; i += 2) {
+	ctx.fillRect(sim.Positions[i], sim.Positions[i + 1], 2, 2);
+}
+```
+
+- Element types: `Float32`, `Float64`, `Int8`, `Int16`, `Int32`, `Uint8`, `Uint16`, `Uint32`
+  (`shared.NewXxx(n)`). Buffers support indexing, `len`, `range`, `copy` to/from slices and
+  `b.Subarray(lo, hi)` (an aliasing sub-view, bounds-checked).
+- **Allocation only at startup**: `shared.NewXxx` may appear in package-level `var`
+  initialisers and `init()` only. The memory is sized once, so views handed to JS never
+  detach; the facade still re-creates a cached view if the buffer changed.
+- A shared buffer is **not** a slice: passing it where `[]float32` is expected (or vice
+  versa), slicing it with `b[lo:hi]`, `append` and `cap` are compile errors — use `copy`
+  or `Subarray` explicitly.
+- `gofront/shared` is only available in `wasm` packages (`both` packages have no linear
+  memory on the JS side). In a `--js-only` build the buffers become plain TypedArrays.
+- JS → WASM parameters must be a view of the right type over the module's memory
+  (`sim.Positions.subarray(0, 8)` is fine); anything else throws a `TypeError`.
+
+`example/hybrid` is a complete particle demo built this way.
 
 ### Panics and traps
 
@@ -126,8 +174,9 @@ facade.
 
 ### Loading `app.wasm`
 
-The generated `app.js` fetches `app.wasm` relative to the page. Override this before the
-bundle runs when needed:
+The generated `app.js` fetches `app.wasm` relative to **itself** (`import.meta.url`), so
+the bundle keeps working under sub-path routes and when served from a CDN. Override this
+before the bundle runs when needed:
 
 ```html
 <script>
@@ -140,6 +189,20 @@ bundle runs when needed:
 
 `gofront dev` serves `.wasm` with `application/wasm` and `Cache-Control: no-store`, and
 `gofront build --pwa` precaches it alongside the other assets.
+
+### Overriding targets without touching code
+
+- `gofront build --js-only` (alias `--target js`; also accepted by `dev`, `check` and the
+  legacy `gofront <src> -o …` form) compiles **every** package to JavaScript — no
+  `app.wasm` is produced. Use it for A/B benchmarking or as a fallback build for browsers
+  without WasmGC.
+- `gofront.json` can pin targets per package, keyed by the package directory relative to
+  the source root (`"."` for the root package). An entry replaces the package's
+  `//gofront:target` directive:
+
+  ```json
+  { "targets": { "engine/physics": "wasm", "engine/debug": "js" } }
+  ```
 
 ### Inspecting the module
 

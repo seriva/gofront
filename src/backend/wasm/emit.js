@@ -7,6 +7,7 @@ import { hasDefer, hasDirectRecover } from "../../lower/functions.js";
 import { BuiltinsEmitter } from "./emit-builtins.js";
 import { ExprsEmitter } from "./emit-exprs.js";
 import { MapsEmitter } from "./emit-maps.js";
+import { SharedEmitter } from "./emit-shared.js";
 import { StdlibEmitter } from "./emit-stdlib.js";
 import { StmtsEmitter } from "./emit-stmts.js";
 import {
@@ -1348,3 +1349,4 @@ copyMethods(FunctionEmitter, StmtsEmitter);
 copyMethods(FunctionEmitter, ExprsEmitter);
 copyMethods(FunctionEmitter, BuiltinsEmitter);
 copyMethods(FunctionEmitter, StdlibEmitter);
+copyMethods(FunctionEmitter, SharedEmitter);

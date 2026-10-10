@@ -31,7 +31,7 @@
 		"gofront": "./src/index.js"
 	},
 	"scripts": {
-		"build": "node src/index.js example/simple/src -o example/simple/app.js && node src/index.js example/reactive/src -o example/reactive/app.js && node src/index.js example/gom/src -o example/gom/app.js && node src/index.js example/templ/src -o example/templ/app.js && node src/index.js example/webgl/src -o example/webgl/app.js",
+		"build": "node src/index.js example/simple/src -o example/simple/app.js && node src/index.js example/reactive/src -o example/reactive/app.js && node src/index.js example/gom/src -o example/gom/app.js && node src/index.js example/templ/src -o example/templ/app.js && node src/index.js example/webgl/src -o example/webgl/app.js && node src/index.js example/hybrid/src -o example/hybrid/app.js",
 		"test": "node test/unit/run.js && node test/e2e/perf/zero-alloc.js && node src/index.js test --dom example/...",
 		"test:e2e": "playwright test",
 		"test:coverage": "c8 --include='src/**' --reporter=text --reporter=lcov node test/unit/run.js",

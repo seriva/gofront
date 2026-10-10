@@ -1,6 +1,7 @@
 // Assignability, binary result types, and interface satisfaction.
 // Installed as a mixin on TypeChecker.prototype.
 
+import { sharedInfo } from "./stdlib/shared.js";
 import {
 	ANY,
 	BOOL,
@@ -239,6 +240,23 @@ export const assignabilityMethods = {
 					`${typeStr(source)} does not implement ${typeStr(target)}`,
 					node,
 				);
+			return;
+		}
+		const sBase = this.resolveType(
+			source.kind === "named" ? source.underlying : source,
+		);
+		if (sharedInfo(source) && tBase?.kind === "slice") {
+			this.err(
+				`cannot use ${typeStr(source)} as ${typeStr(target)}: a linear-memory buffer cannot be passed as a GC slice without an explicit copy`,
+				node,
+			);
+			return;
+		}
+		if (tBase?.kind === "shared" && sBase?.kind === "slice") {
+			this.err(
+				`cannot use ${typeStr(source)} as ${typeStr(target)}: a GC slice cannot be used as a shared buffer; copy its elements into one allocated with shared.New${tBase.shared}`,
+				node,
+			);
 			return;
 		}
 		this.err(`Cannot assign ${typeStr(source)} to ${typeStr(target)}`, node);

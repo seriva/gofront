@@ -49,6 +49,7 @@ const BUILTIN_PACKAGES = new Set([
 	"path",
 	"path/filepath",
 	"testing",
+	"gofront/shared",
 ]);
 
 // Returns true for local relative paths (start with ./ or ../)

@@ -444,6 +444,12 @@ export class ExprsEmitter {
 			return;
 		}
 
+		const sharedInfo = this._sharedInfo(baseType);
+		if (sharedInfo) {
+			this.emitSharedIndexExpr(expr, sharedInfo, targetWasmType);
+			return;
+		}
+
 		const isSlice = isSliceType(baseType, this.mod.checker);
 		const isArr = isArrayType(baseType, this.mod.checker);
 		const isPtrToArr =

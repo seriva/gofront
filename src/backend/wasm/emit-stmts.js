@@ -354,6 +354,12 @@ export class StmtsEmitter {
 				return;
 			}
 
+			const sharedInfo = this._sharedInfo(baseType);
+			if (sharedInfo) {
+				this.emitSharedIndexAssign(l, r, sharedInfo);
+				return;
+			}
+
 			const isSlice = isSliceType(baseType, this.mod.checker);
 			const isPtrToArr =
 				baseType?.kind === "pointer" &&
@@ -877,6 +883,15 @@ export class StmtsEmitter {
 				return;
 			}
 
+			const sharedInfo = this._sharedInfo(baseType);
+			if (sharedInfo) {
+				this.emitSharedIndexUpdate(l, sharedInfo, (elemW, elemGoType) => {
+					this.emitExpr(r, elemW);
+					this.emitBinaryOp(baseOp, elemW, elemGoType);
+				});
+				return;
+			}
+
 			const isSlice = isSliceType(baseType, this.mod.checker);
 			const isPtrToArr =
 				baseType?.kind === "pointer" &&
@@ -1103,6 +1118,19 @@ export class StmtsEmitter {
 
 				this.releaseTemp(kTmp, mapInfo.keyWType);
 				this.releaseTemp(mTmp, mapInfo.wType);
+				return;
+			}
+
+			const sharedInfo = this._sharedInfo(baseType);
+			if (sharedInfo) {
+				this.emitSharedIndexUpdate(expr, sharedInfo, (elemW) => {
+					if (elemW === "f32" || elemW === "f64") {
+						this.pushInstruction({ op: `${elemW}.const`, value: 1.0 });
+					} else {
+						this.pushInstruction({ op: "i32.const", value: 1 });
+					}
+					this.pushInstruction(`${elemW}.${op === "++" ? "add" : "sub"}`);
+				});
 				return;
 			}
 
@@ -1717,6 +1745,13 @@ export class StmtsEmitter {
 			this.releaseTemp(nextIdxTmp, "i32");
 			this.releaseTemp(currIdxTmp, "i32");
 			this.releaseTemp(mapTmp, mapInfo.wType);
+			restoreShadowed();
+			return;
+		}
+
+		const sharedInfo = this._sharedInfo(iterType);
+		if (sharedInfo) {
+			this._emitSharedRange(stmt, iterExpr, sharedInfo, lhs, isAssign);
 			restoreShadowed();
 			return;
 		}

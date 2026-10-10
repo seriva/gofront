@@ -18,7 +18,7 @@
 // de-qualifies it because the dependency is inlined.
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { buildSourceMap, CodeGen } from "./backend/js/index.js";
 import { compileWasmModule, optimizeWasm } from "./backend/wasm/index.js";
 import { log } from "./colors.js";
@@ -350,6 +350,11 @@ function resolveImports(
 							"package 'gom' is not available in wasm packages",
 							impNode,
 						);
+					} else if (path === "gofront/shared" && pkgTarget === "both") {
+						checker.err(
+							"'gofront/shared' requires a wasm-only package (//gofront:target wasm): a both package has no linear memory on the JS side",
+							impNode,
+						);
 					} else if (!isLocalPath(path)) {
 						if (!isBuiltinPackage(path)) {
 							checker.recordBlocker("js: import", path);
@@ -481,6 +486,29 @@ function resolveImports(
 
 // ── Main entry points ─────────────────────────────────────────
 
+// Package target after build-time overrides (Task H6.3): `forceTarget`
+// (`--js-only`) compiles every package to JS; `targetOverrides` maps package
+// directories relative to the root source dir (`"engine/physics"`, `"."` for
+// the root) to a target, replacing the `//gofront:target` directive.
+const PACKAGE_TARGETS = new Set(["js", "wasm", "both"]);
+
+export function resolvePackageTarget(declared, pkgDir, options = {}) {
+	if (options.forceTarget) return options.forceTarget;
+	const overrides = options.targetOverrides;
+	if (!overrides || !options.rootDir) return declared;
+	const rel = relative(resolve(options.rootDir), resolve(pkgDir))
+		.split(sep)
+		.join("/");
+	const key = rel === "" ? "." : rel;
+	const t = overrides[key] ?? (key === "." ? overrides[""] : undefined);
+	if (t === undefined) return declared;
+	if (!PACKAGE_TARGETS.has(t))
+		throw new Error(
+			`gofront.json: invalid target '${t}' for package '${key}' (expected js, wasm or both)`,
+		);
+	return t;
+}
+
 export function compileSingleFile(inputPath, options = {}) {
 	const {
 		sourceMap = false,
@@ -513,7 +541,11 @@ export function compileSingleFile(inputPath, options = {}) {
 	const bundledPackages = new Set();
 	const preambles = [];
 
-	const pkgTarget = ast.target ?? options.target ?? "js";
+	const pkgTarget = resolvePackageTarget(
+		ast.target ?? options.target ?? "js",
+		dirname(resolve(inputPath)),
+		options,
+	);
 	ast.target = pkgTarget;
 	checker.target = pkgTarget;
 	checker.pkgName = ast.pkg?.name ?? "main";
@@ -613,8 +645,12 @@ export function compilePackageTestsWasm(dir, options = {}) {
 }
 
 export function compileFiles(files, options = {}) {
-	options = { ...options, wasmUnits: options.wasmUnits ?? [] };
 	const fromDir = options.fromDir ?? dirname(resolve(files[0]));
+	options = {
+		...options,
+		wasmUnits: options.wasmUnits ?? [],
+		rootDir: options.rootDir ?? fromDir,
+	};
 	const outputDir =
 		options.outputDir ??
 		(options.outputFile ? dirname(resolve(options.outputFile)) : fromDir);
@@ -657,10 +693,13 @@ export function compileFiles(files, options = {}) {
 			`Conflicting //gofront:target directives in package '${pkgName}': ${list}`,
 		);
 	}
-	const pkgTarget =
+	const pkgTarget = resolvePackageTarget(
 		declaredTargets.size === 1
 			? declaredTargets.keys().next().value
-			: (options.target ?? "js");
+			: (options.target ?? "js"),
+		fromDir,
+		options,
+	);
 	for (const p of programs) p.target = pkgTarget;
 
 	// ── 2. Resolve imports ────────────────────────────────────────

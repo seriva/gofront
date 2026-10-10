@@ -779,7 +779,10 @@ export class TypeChecker {
 			inner.define(p.name, this.resolveTypeNode(p.type, inner));
 		}
 		const returnType = this._setupFuncReturnType(decl, inner, outer);
+		const savedSharedAlloc = this._sharedAllocOk;
+		this._sharedAllocOk = decl.name === "init";
 		this._runFuncBody(decl, inner, returnType);
+		this._sharedAllocOk = savedSharedAlloc;
 		this._checkMissingReturn(decl, returnType, "function");
 	}
 
@@ -872,6 +875,8 @@ export class TypeChecker {
 	}
 
 	checkVarDecl(decl, scope) {
+		const savedSharedAlloc = this._sharedAllocOk;
+		this._sharedAllocOk = scope === this.globals;
 		for (const spec of decl.decls) {
 			let type = spec.type ? this.resolveTypeNode(spec.type, scope) : null;
 			if (spec.value) {
@@ -885,6 +890,7 @@ export class TypeChecker {
 			if (!type) type = ANY;
 			for (const name of spec.names) scope.defineLocal(name, type);
 		}
+		this._sharedAllocOk = savedSharedAlloc;
 	}
 
 	checkConstDecl(decl, scope) {

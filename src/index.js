@@ -58,7 +58,7 @@ GoFront — a Go-inspired language that compiles to JavaScript
 
 Usage:
   gofront dev [dir] [options]    Start dev server with live reload (default port 3000)
-  gofront build [dir] [options]  Build production bundle (-o <dir>, --pwa, --minify, --emit-wat, --release, --wasm-opt)
+  gofront build [dir] [options]  Build production bundle (-o <dir>, --pwa, --minify, --emit-wat, --release, --wasm-opt, --js-only)
   gofront check [dir|dir/...]    Type-check only (dir/... recurses into every package)
   gofront test [dir|dir/...] [--dom]  Run unit tests (-v verbose, -run <regex>)
   gofront prep [dir] [--minify]  Copy static assets and bundle vendor dependencies
@@ -133,9 +133,9 @@ if (args[0] === "test") {
 // ── check subcommand ──────────────────────────────────────────
 
 if (args[0] === "check") {
-	const { targetDir } = parseCheckArgs(args.slice(1));
+	const { targetDir, forceTarget } = parseCheckArgs(args.slice(1));
 	try {
-		const { elapsedMs, packages } = handleCheck(targetDir);
+		const { elapsedMs, packages } = handleCheck(targetDir, { forceTarget });
 		const okLine = (label, t) =>
 			log.info(`${colors.cyan(label)} — ${colors.green("OK")} ${ms(t)}`);
 		if (packages) {
@@ -218,6 +218,7 @@ const {
 	minify: minifyOutput,
 	mangle: mangleOutput,
 	port: servePort,
+	forceTarget,
 } = parseLegacyArgs(args);
 
 // ── Determine input mode ─────────────────────────────────────
@@ -254,6 +255,7 @@ if (!watchMode) {
 			dumpTokens,
 			dumpAst,
 			wasmOpt,
+			forceTarget,
 		});
 	} catch (e) {
 		log.fail(e.message);
@@ -343,6 +345,7 @@ try {
 		minify: minifyOutput,
 		mangle: mangleOutput,
 		copyAssets: copyAssetsFlag,
+		forceTarget,
 		onBuild: ({ js, written, elapsedMs, changedFile }) => {
 			const changeNote = changedFile ? ` — ${changedFile} changed` : "";
 			const timing = colors.dim(`(${elapsedMs}ms${changeNote})`);
