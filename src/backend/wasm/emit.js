@@ -973,17 +973,43 @@ export class FunctionEmitter {
 	}
 
 	emitInterfaceDispatcher(fn) {
-		const candidates = this.mod.findInterfaceCandidates(
+		let candidates = this.mod.findInterfaceCandidates(
 			fn._ifaceType,
 			fn._methodName,
 		);
 		const recvLocal = 0; // __recv is local 0
+		// Soft dispatchers (errors.Unwrap) return nil instead of panicking when
+		// the receiver is nil or has no such method.
+		const soft = Boolean(fn._softDispatch);
+		if (soft) {
+			// Only methods with the dispatcher's own result shape are callable
+			// (e.g. `Unwrap() []error` is not an `Unwrap() error`).
+			const want = this.mod.funcReturnTypesByIdx.get(fn._globalFuncIndex);
+			const key = (ts) =>
+				ts
+					.map((t) => (typeof t === "object" ? JSON.stringify(t) : t))
+					.join(",");
+			candidates = candidates.filter((c) => {
+				const got = this.mod.funcReturnTypesByIdx.get(c.funcIndex);
+				return (
+					got !== undefined && want !== undefined && key(got) === key(want)
+				);
+			});
+		}
+		const emitMiss = (msg) => {
+			if (soft) {
+				this.pushInstruction({ op: "ref.null", heapType: "any" });
+				this.pushInstruction("return");
+			} else {
+				this.emitPanic(msg);
+			}
+		};
 
 		// 1. Nil check
 		this.pushInstruction({ op: "local.get", index: recvLocal });
 		this.pushInstruction("ref.is_null");
 		this.pushInstruction({ op: "if", blockType: "void" });
-		this.emitPanic(
+		emitMiss(
 			"runtime error: invalid memory address or nil pointer dereference",
 		);
 		this.pushInstruction("end");
@@ -1043,9 +1069,7 @@ export class FunctionEmitter {
 			this.pushInstruction("end");
 		}
 
-		this.emitPanic(
-			"interface conversion: nil or unmatched type for method call",
-		);
+		emitMiss("interface conversion: nil or unmatched type for method call");
 	}
 
 	_getArraySize(t, defaultSize = 0) {

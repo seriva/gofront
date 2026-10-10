@@ -224,6 +224,35 @@ func main() { println(prims.AddInt(1, 1)) }
 	assertEqual(caught.message, "kaboom");
 });
 
+test("handle methods with int params/results take Numbers, not BigInts", async () => {
+	const res = await compileHybridProject(
+		{
+			"counter/counter.go": `//gofront:target wasm
+package counter
+
+type Counter struct{ N int }
+
+func New(n int) *Counter { return &Counter{N: n} }
+func (c *Counter) Add(d int) int { c.N += d; return c.N }
+func (c *Counter) Set(i int, v float32) float32 { c.N = i; return v * 2 }
+`,
+			"main.go": `package main
+
+import "./counter"
+
+func main() { println(counter.New(1).Add(2)) }
+`,
+		},
+		{ exports: ["New"] },
+	);
+	assertEqual(res.lines[0], "3");
+	const c = res.mod.New(5);
+	assertEqual(c.Add(7), 12);
+	assertEqual(typeof c.Add(0), "number");
+	assertEqual(c.Set(3, 1.5), 3);
+	assertEqual(c.N, 3);
+});
+
 section("WASM Boundary v1 — struct values from both packages (5a)");
 
 test("both-struct values cross by copy; *T params write back", async () => {

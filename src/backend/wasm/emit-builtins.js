@@ -897,10 +897,19 @@ export class BuiltinsEmitter {
 				this.emitStringsCall(func.field, args, targetWasmType);
 				return true;
 			case "strconv":
-				this.emitStrconvCall(func.field, args, targetWasmType);
+				this.emitStrconvCall(func.field, args);
 				return true;
 			case "fmt":
 				this.emitFmtCall(func.field, args);
+				return true;
+			case "errors":
+				this.emitErrorsCall(func.field, args);
+				return true;
+			case "utf8":
+				this.emitUtf8Call(func.field, args, targetWasmType);
+				return true;
+			case "sort":
+				this.emitSortCall(func.field, args, targetWasmType);
 				return true;
 			case "shared":
 				this.emitSharedNew(func.field, args);

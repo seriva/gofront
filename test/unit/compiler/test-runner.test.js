@@ -13,9 +13,11 @@ import {
 	gwFilesIn,
 } from "../../../src/compiler.js";
 import {
+	checkWasmRuntime,
 	discoverTests,
 	generateTestHarness,
 	isTestFunc,
+	MIN_WASM_NODE_MAJOR,
 	resolveJsdomPath,
 	runTests,
 } from "../../../src/test-runner.js";
@@ -943,6 +945,16 @@ test("runTests non-verbose output matches Go-style snapshot", async () => {
 
 section("test-runner — dual-target (wasm / both packages)");
 
+test("checkWasmRuntime rejects Node versions without WasmGC with a clear hint", () => {
+	checkWasmRuntime(`v${MIN_WASM_NODE_MAJOR}.0.0`);
+	checkWasmRuntime(process.version);
+	assertThrows(
+		() => checkWasmRuntime("v20.11.1"),
+		`running wasm packages requires Node ${MIN_WASM_NODE_MAJOR}+ (WasmGC); found v20.11.1`,
+	);
+	assertThrows(() => checkWasmRuntime("v18.0.0"), "--js-only");
+});
+
 test("runTests runs a wasm package's tests inside app.wasm", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "gofront-wasm-test-"));
 	try {
@@ -1057,7 +1069,7 @@ func TestTwice(t *testing.T) {
 	}
 });
 
-test("wasm test packages reject t.Run with a planned message", async () => {
+test("wasm test packages support t.Run subtests", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "gofront-wasm-run-"));
 	try {
 		writeFileSync(
@@ -1072,17 +1084,18 @@ func One() int { return 1 }
 			`package r
 import "testing"
 func TestSub(t *testing.T) {
-  t.Run("inner", func(t *testing.T) { if One() != 1 { t.Fail() } })
+  ok := t.Run("inner", func(t *testing.T) { if One() != 1 { t.Fail() } })
+  if !ok { t.Error("inner should pass") }
+  t.Run("bad", func(t *testing.T) { t.Errorf("one is %d", One()) })
 }
 `,
 		);
-		const result = await runTests(dir, { captureOutput: true });
+		const result = await runTests(dir, { captureOutput: true, verbose: true });
 		assertEqual(result.exitCode, 1);
-		assertContains(result.stderr, "[build failed]");
-		assertContains(
-			result.stderr,
-			"t.Run is not yet supported in wasm test packages",
-		);
+		assertContains(result.stdout, "--- PASS: TestSub/inner");
+		assertContains(result.stdout, "--- FAIL: TestSub/bad");
+		assertContains(result.stdout, "one is 1");
+		assert(!result.stdout.includes("inner should pass"));
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}

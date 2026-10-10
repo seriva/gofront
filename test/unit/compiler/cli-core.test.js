@@ -21,6 +21,7 @@ import {
 	maybeMinify,
 	parseBuildArgs,
 	parseCheckArgs,
+	parseDevArgs,
 	parseLegacyArgs,
 	parsePrepArgs,
 	parseTargetFlag,
@@ -67,6 +68,60 @@ test("runCompile single file with sourceMap appends sourceMappingURL", () => {
 	try {
 		const result = runCompile(file, false, { sourceMap: true, outputDir: dir });
 		assertContains(result.js, "sourceMappingURL=data:application/json;base64,");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("wasm packages with sourceMap write a function-level app.wasm.map", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-cc-wsm-"));
+	writeFileSync(
+		join(dir, "m.go"),
+		`//gofront:target wasm
+package main
+
+func Add(a, b int) int { return a + b }
+
+func Mul(a, b int) int {
+	f := func(x int) int { return x * b }
+	return f(a)
+}
+
+func main() {}
+`,
+	);
+	const out = join(dir, "out", "app.js");
+	try {
+		const result = runCompile(dir, true, { sourceMap: true, outputFile: out });
+		writeCompileOutput(out, result);
+		const mapFile = join(dir, "out", "app.wasm.map");
+		assert(existsSync(mapFile), "expected app.wasm.map");
+		const map = JSON.parse(readFileSync(mapFile, "utf8"));
+		assertEqual(map.version, 3);
+		assertEqual(map.sources.join(), "../m.go");
+		// One segment per function with a source position: Add, Mul, main and
+		// the lifted closure (generated line 0, column = byte offset).
+		assertEqual(map.mappings.split(",").length, 4);
+		assert(
+			!map.mappings.includes(";"),
+			"wasm maps use a single generated line",
+		);
+		const wasm = readFileSync(join(dir, "out", "app.wasm"));
+		assert(
+			wasm.includes(Buffer.from("sourceMappingURL")),
+			"module must carry a sourceMappingURL custom section",
+		);
+		assert(WebAssembly.validate(wasm), "module must validate");
+
+		// Without --source-map the map is removed again and no URL section is emitted.
+		const plain = runCompile(dir, true, { outputFile: out });
+		writeCompileOutput(out, plain);
+		assert(!existsSync(mapFile), "stale app.wasm.map must be removed");
+		assert(
+			!readFileSync(join(dir, "out", "app.wasm")).includes(
+				Buffer.from("sourceMappingURL"),
+			),
+		);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -353,6 +408,20 @@ test("parseLegacyArgs: --serve implies --watch", () => {
 	assertEqual(o.watch, true);
 	assertEqual(parseLegacyArgs(["src", "--watch"]).serve, false);
 	assertEqual(parseLegacyArgs(["src", "--watch"]).watch, true);
+});
+
+section("cli-core — parseDevArgs");
+
+test("parseDevArgs: no -o leaves outputFile undefined (project default)", () => {
+	// `null` means "do not write a bundle" in handleDev; the absence of the
+	// flag must fall through to project.devOutputFile instead.
+	const o = parseDevArgs(["app/src", "--port=4000"]);
+	assertEqual(o.outputFile, undefined);
+	assertEqual("outputFile" in o, true);
+	assertEqual(o.targetDir, "app/src");
+	assertEqual(o.port, 4000);
+	assertEqual(parseDevArgs(["-o", "out/app.js"]).outputFile, "out/app.js");
+	assertEqual(parseDevArgs(["--output", "x.js"]).outputFile, "x.js");
 });
 
 section("cli-core — assetExtensions");
