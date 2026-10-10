@@ -20,12 +20,12 @@ const PATH_DISPATCH = {
 export const pathMethods = {
 	_genPath(fn, a, expr) {
 		if (fn === "Join") {
-			this._usesPathClean = true;
+			this.useHelper("pathClean");
 			const allArgs = expr.args.map((e) => this.genExpr(e)).join(", ");
 			return `__pathClean([${allArgs}].filter(x => x !== "").join("/"))`;
 		}
 		if (fn === "Clean") {
-			this._usesPathClean = true;
+			this.useHelper("pathClean");
 			return `__pathClean(${a()[0]})`;
 		}
 		const gen = PATH_DISPATCH[fn];

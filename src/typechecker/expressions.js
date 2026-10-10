@@ -1,5 +1,6 @@
 // TypeChecker expression-checking methods — installed as a mixin on TypeChecker.prototype.
 
+import { sharedInfo } from "./stdlib/shared.js";
 import {
 	ANY,
 	BOOL,
@@ -42,6 +43,13 @@ const BUILTIN_CHECK = {
 			s.err(`cannot append to array (type ${typeStr(st)})`, e);
 			return st;
 		}
+		if (sharedInfo(st)) {
+			s.err(
+				`cannot append to ${typeStr(st)}: shared buffers have a fixed size`,
+				e,
+			);
+			return st;
+		}
 		const sb = s.resolveType(st?.kind === "named" ? st.underlying : st);
 		if (sb?.kind === "slice") {
 			for (let i = 1; i < e.args.length; i++) {
@@ -55,7 +63,7 @@ const BUILTIN_CHECK = {
 		}
 		return st;
 	},
-	copy: () => INT,
+	copy: (s, _n, e, at) => s._checkBuiltinCopy(e, at),
 	delete: () => VOID,
 	make: (s, _n, e, _at, sc) => {
 		if (e.args.length < 1) return ANY;
@@ -291,8 +299,40 @@ export const expressionCheckMethods = {
 			expr._mapValueType = btu.value;
 			return btu.value;
 		}
+		if (btu.kind === "shared") {
+			expr._sharedElem = btu.elem;
+			const idx = this._constIntValue(expr.index);
+			if (idx !== null && idx < 0)
+				this.err(`invalid index ${idx} (index must not be negative)`, expr);
+			return btu.elem;
+		}
 		if (isString(bt)) return INT;
 		return this.err(`Cannot index type ${typeStr(bt)}`, expr);
+	},
+
+	// copy(dst, src): element types must be identical when either side is a
+	// shared buffer (the wasm emitter uses one element type for both sides).
+	_checkBuiltinCopy(e, at) {
+		const elemOf = (t) => {
+			const u = this.resolveType(t?.kind === "named" ? t.underlying : t);
+			return u?.kind === "slice" || u?.kind === "shared" ? u.elem : null;
+		};
+		const [dt, st] = at;
+		if (!sharedInfo(dt) && !sharedInfo(st)) return INT;
+		const de = elemOf(dt);
+		const se = elemOf(st);
+		if (!de || !se) {
+			this.err(
+				`copy: cannot copy between ${typeStr(dt)} and ${typeStr(st)}`,
+				e,
+			);
+		} else if (typeStr(de) !== typeStr(se)) {
+			this.err(
+				`copy: element types differ (${typeStr(dt)} vs ${typeStr(st)})`,
+				e,
+			);
+		}
+		return INT;
 	},
 
 	_checkSliceExpr(expr, scope) {
@@ -305,10 +345,25 @@ export const expressionCheckMethods = {
 		if (bt.kind === "slice" || bt.kind === "array")
 			return { kind: "slice", elem: bt.elem };
 		if (isString(bt)) return STRING;
+		if (sharedInfo(bt))
+			return this.err(
+				`Cannot slice type ${typeStr(bt)}: use .Subarray(lo, hi) to create a view of a shared buffer`,
+				expr,
+			);
 		return this.err(`Cannot slice type ${typeStr(bt)}`, expr);
 	},
 
 	_checkFuncLit(expr, scope) {
+		const savedSharedAlloc = this._sharedAllocOk;
+		this._sharedAllocOk = false;
+		try {
+			return this._checkFuncLitBody(expr, scope);
+		} finally {
+			this._sharedAllocOk = savedSharedAlloc;
+		}
+	},
+
+	_checkFuncLitBody(expr, scope) {
 		if (
 			(this.target === "wasm" || this.target === "both") &&
 			(expr.async || expr.isAsync)
@@ -431,7 +486,11 @@ export const expressionCheckMethods = {
 
 	_rangeCollTypeTuple(resolved, collType) {
 		if (isString(resolved)) return { kind: "tuple", types: [INT, RUNE] };
-		if (resolved?.kind === "slice" || resolved?.kind === "array")
+		if (
+			resolved?.kind === "slice" ||
+			resolved?.kind === "array" ||
+			resolved?.kind === "shared"
+		)
 			return { kind: "tuple", types: [INT, resolved.elem ?? ANY] };
 		if (resolved?.kind === "map")
 			return {
@@ -467,6 +526,9 @@ export const expressionCheckMethods = {
 					: null;
 				if (constraint) this.checkConstraint(typeArgs[i], constraint, expr);
 			}
+			expr._typeArgs = typeArgs;
+			if (expr.expr) expr.expr._typeArgs = typeArgs;
+			expr._genericFnType = baseType;
 			return this.instantiateGenericFunc(baseType, typeArgs);
 		}
 		// The parser's type-arg heuristic mistakes `xs[d.Field]` (uppercase field
@@ -546,6 +608,8 @@ export const expressionCheckMethods = {
 
 	checkCall(expr, scope) {
 		let fnType = this.checkExpr(expr.func, scope);
+		this._checkSharedAllocSite(expr, scope);
+		this._checkBoundaryCallInLoop(expr, scope);
 		if (fnType.kind === "builtin") {
 			const argTypes = expr.args.map((a, i) => {
 				// new(T) — first arg is a type name, not a value expression
@@ -576,10 +640,77 @@ export const expressionCheckMethods = {
 
 		this._checkCallArgs(fnType, argTypes, expr);
 
+		// Pseudo-generic stdlib helpers (maps.Keys, slices.Clone, ...) declare
+		// how their result derives from the first argument.
+		if (fnType._derivedReturn) {
+			const derived = this._derivedReturnType(fnType._derivedReturn, argTypes);
+			if (derived) return derived;
+		}
+
 		const ret = fnType.returns;
 		if (!ret || ret.length === 0) return VOID;
 		if (ret.length === 1) return ret[0];
 		return { kind: "tuple", types: ret };
+	},
+
+	// `shared.NewXxx(n)` allocates from a linear memory that is sized once at
+	// startup (no memory.grow → no detached TypedArray views on the JS side).
+	// Allocation is therefore only legal in package-level var initializers and
+	// init(), which both run inside the module start function.
+	// JS→WASM calls copy non-shared arguments across the boundary on every
+	// call. Inside a loop that dominates the per-iteration cost, so hint that
+	// the loop belongs on the WASM side (or the data in gofront/shared).
+	_checkBoundaryCallInLoop(expr, scope) {
+		if (this._loopDepth === 0 || this.target !== "js") return;
+		const fn = expr.func;
+		if (fn.kind !== "SelectorExpr" || fn.expr.kind !== "Ident") return;
+		const ns = scope.lookup(fn.expr.name);
+		if (ns?.kind !== "namespace" || ns._target !== "wasm") return;
+		const member = ns.members[fn.field];
+		if (member?.kind !== "func") return;
+		this.warn(
+			`'${fn.expr.name}.${fn.field}' crosses the JS→WASM boundary inside a loop`,
+			fn.expr, // CallExpr nodes carry no position; the callee Ident does
+			"hint: each call copies its arguments; move the loop into the wasm package or pass gofront/shared buffers",
+		);
+	},
+
+	_checkSharedAllocSite(expr, scope) {
+		const f = expr.func;
+		if (
+			f.kind !== "SelectorExpr" ||
+			f.expr.kind !== "Ident" ||
+			f.expr.name !== "shared" ||
+			!f.field.startsWith("New") ||
+			scope.lookup("shared") !== this.globals.lookup("shared")
+		)
+			return;
+		if (this._sharedAllocOk) return;
+		const why =
+			this.target === "wasm"
+				? "shared buffers are allocated once at startup"
+				: "shared buffers are allocated once at startup so the code stays portable to wasm packages";
+		this.err(
+			`shared.${f.field} must be called from a package-level var initializer or init(); ${why}`,
+			expr,
+		);
+	},
+
+	_derivedReturnType(mode, argTypes) {
+		const arg = argTypes[0];
+		const under = arg?.kind === "named" ? arg.underlying : arg;
+		switch (mode) {
+			case "arg0":
+				return under ? arg : null;
+			case "keysOfArg0":
+				return under?.key ? { kind: "slice", elem: under.key } : null;
+			case "valuesOfArg0": {
+				const v = under?.value ?? under?.elem;
+				return v ? { kind: "slice", elem: v } : null;
+			}
+			default:
+				return null;
+		}
 	},
 
 	_resolveGenericFnType(fnType, argTypes, expr, scope) {
@@ -599,6 +730,10 @@ export const expressionCheckMethods = {
 				: null;
 			if (constraint) this.checkConstraint(typeArgs[i], constraint, expr);
 		}
+		expr._typeArgs = typeArgs;
+		if (expr.func) expr.func._typeArgs = typeArgs;
+		expr._genericFnType = fnType;
+		if (expr.func) expr.func._genericFnType = fnType;
 		return this.instantiateGenericFunc(fnType, typeArgs);
 	},
 
@@ -650,6 +785,11 @@ export const expressionCheckMethods = {
 		if (name === "len") {
 			const size = this._constLenFromType(argTypes[0]);
 			if (size != null) expr._constLen = size;
+		} else if (sharedInfo(argTypes[0])) {
+			this.err(
+				`cannot use cap() on ${typeStr(argTypes[0])}: shared buffers have a fixed size; use len()`,
+				expr,
+			);
 		}
 		return INT;
 	},

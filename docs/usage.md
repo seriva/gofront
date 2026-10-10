@@ -6,11 +6,14 @@
 gofront dev [dir]                            watch + compile + asset sync + live reload (hybrid projects emit app.wasm; default port 3000)
 gofront dev [dir] --port 8080                use a custom port
 gofront build [dir]                          clean + compile + minify + vendor → production output (hybrid projects emit app.wasm)
+gofront build [dir] --release                production bundle: minify + mangle + Binaryen wasm optimization (-O3 + GUFA)
+gofront build [dir] --wasm-opt               optimize app.wasm with Binaryen (-O3 + GUFA)
 gofront build [dir] --pwa                    also generate offline service worker (sw.js) + precache manifest
-gofront build [dir] --source-map             include inline source maps in the release bundle
+gofront build [dir] --source-map             include source maps (app.js.map and app.wasm.map)
 gofront build [dir] --no-minify              skip minification
 gofront build [dir] --no-mangle              minify but keep original identifiers
 gofront build [dir] --emit-wat               also write app.wat next to app.wasm (hybrid projects)
+gofront build [dir] --js-only                compile every package to JS (alias --target js; also for dev/check/-o)
 gofront prep [dir] [--minify]                run asset copying + vendor bundling only (alias: gofront vendor)
 gofront check <dir>                          type-check a single package
 gofront check <dir>/...                      type-check every package under <dir> (Go-style `./...`)
@@ -19,6 +22,8 @@ gofront test <dir>/... [--dom] [-v] [-run <regex>]  run tests recursively
 gofront <file.go>                            compile single file → stdout
 gofront <dir>                                compile all *.go in directory → stdout
 gofront <input> -o out.js                    write output to file (prints elapsed compile time; hybrid projects also write app.wasm)
+gofront <input> -o out.js --release          compile + minify + optimize wasm with Binaryen
+gofront <input> -o out.js --wasm-opt         compile + optimize wasm with Binaryen
 gofront <input> -o out.js --emit-wat         also write app.wat
 gofront <input> -o out.js --copy-assets      compile + copy static assets
 gofront <input> --check                      type-check only (single file / directory)
@@ -48,6 +53,7 @@ file or a `"gofront": { … }` object in `package.json`:
 | `assetExtensions` | `[]` | Extra file extensions (e.g. `[".bmesh", ".mat"]`) copied from `serveDir` into `outDir` on `build`, in addition to the built-in web asset list (html, css, js, json, images, fonts, audio, video, wasm) |
 | `vendor` | `app/vendor.js` | Vendor bundle written by `prep`/`build` from `package.json` `dependencies`. Either a destination path string or `{ "dest": string \| string[], "packages": string[], "minify": boolean, "globals": { "<pkg>": string \| string[] } }` |
 | `assetCopy` | `[]` | Static files copied by `prep`/`build`: `[{ "source": "node_modules/x/font.woff2", "dest": "app/fonts/font.woff2" }]` |
+| `targets` | `{}` | Per-package target overrides keyed by directory relative to `src` (`"."` = root package): `{ "engine/physics": "wasm" }`. Replaces the package's `//gofront:target` directive |
 
 All settings live in this one place — top-level `"vendor"` / `"assetCopy"` keys in `package.json` are not read.
 
@@ -55,8 +61,13 @@ All settings live in this one place — top-level `"vendor"` / `"assetCopy"` key
 
 When any package reached by the build carries `//gofront:target wasm` or `both`, `dev`,
 `build` and `-o` also write a single `app.wasm` next to the JS bundle, and `--emit-wat`
-adds a readable `app.wat`. Everything about targets, boundary rules and the loader is in the
-[Hybrid JS + WebAssembly Guide](hybrid-wasm.md).
+adds a readable `app.wat`. `--js-only` forces a pure-JS build regardless of directives.
+
+Passing `gofront build --release` (or `--wasm-opt`) optimizes the emitted WebAssembly
+using Binaryen (`-O3` + GUFA), achieving ~23% smaller binary size and emitting `app.wasm.map`
+when `--source-map` is enabled. In development (`gofront dev`), unoptimized WASM is served
+directly for sub-10ms instant hot-reload. Everything about targets, boundary rules and the
+loader is in the [Hybrid JS + WebAssembly Guide](hybrid-wasm.md).
 
 ---
 
@@ -98,7 +109,7 @@ gofront test app/src --dom         # run under JSDOM: document/window available 
 - `--dom` requires `jsdom` to be installed (it is a devDependency of GoFront itself; add it to
   your project when using a global install).
 - Packages targeting `wasm` run inside the linked module, and `both` packages run once per
-  backend (`pkg [js]`, `pkg [wasm]`). `t.Run` is not available in `wasm` test packages yet.
+  backend (`pkg [js]`, `pkg [wasm]`). `t.Run` subtests work in `wasm` test packages too.
   See the [hybrid guide](hybrid-wasm.md#testing-hybrid-packages).
 
 ---

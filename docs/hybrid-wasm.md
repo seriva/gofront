@@ -23,8 +23,8 @@ package collision
 | Target | Output | May import | Use for |
 |---|---|---|---|
 | `js` (default) | ES module | anything | DOM, `gom`, `.templ`, browser APIs, `async`/`await` |
-| `wasm` | WasmGC module | `wasm` and `both` packages, `math`, `math/bits`, `testing` | Physics, spatial indexing, raycasting, tight numeric loops |
-| `both` | ES module **and** WasmGC | `both` packages, `math`, `math/bits`, `testing` | Shared math/utility code (`vec3`, `mathx`, …) used from both sides |
+| `wasm` | WasmGC module | `wasm` and `both` packages, the [WASM stdlib subset](#what-wasm-packages-support) | Physics, spatial indexing, raycasting, tight numeric loops |
+| `both` | ES module **and** WasmGC | `both` packages, the WASM stdlib subset | Shared math/utility code (`vec3`, `mathx`, …) used from both sides |
 
 Rules of thumb:
 
@@ -34,6 +34,12 @@ Rules of thumb:
   boundary crossing happens for those calls.
 - Keep the boundary coarse: one call that casts 100 rays is cheap; 100 calls that cast
   one ray each are not.
+- Watch what comes *out*: scalars, handles and `gofront/shared` buffers are free, but a
+  slice result is copied on every call. A package whose main per-frame output is a
+  `[]T` the JS side reads (e.g. skinning matrices) will measure at parity with JS; write
+  that output into a shared buffer and return a count instead.
+- Measure before committing: `gofront build --js-only` or a `gofront.json` `targets`
+  override compiles the same code either way without editing source.
 
 ### Diagnostics
 
@@ -44,6 +50,11 @@ per-package summary such as:
 ```
 package 'mathx' cannot be both: 3 blockers — mutates package variable 'scratch' (vec3.go:12), …
 ```
+
+A `js` package that calls into a `wasm` package from inside a `for`/`range` body gets a
+non-fatal warning (`'phys.Step' crosses the JS→WASM boundary inside a loop`): every call
+copies its arguments, so the loop usually belongs on the WASM side, or the data in a
+`gofront/shared` buffer.
 
 ---
 
@@ -79,15 +90,24 @@ copies agree bit-for-bit:
 ## What `wasm` packages support
 
 The backend (`src/backend/wasm/`) implements: structs, pointers, methods, arrays, slices
-(`append`, slicing, `copy`), strings, maps, empty interfaces (`any`), closures (including
-closures inside methods), `defer`/`panic`/`recover`, and `math`/`math/bits`.
+(`append`, slicing, `copy`), strings, maps, interfaces, generics, closures (including
+closures inside methods), `defer`/`panic`/`recover`, and `error` values.
 
-Not yet supported inside `wasm` code (each reports a `… (planned)` diagnostic):
+The stdlib subset available in `wasm`/`both` packages is `math`, `math/bits`, `errors`
+(`New`, `Is`, `Unwrap`), `fmt` (`Sprintf`, `Printf`, `Println`, `Errorf` over primitive,
+string, `error` and `any` operands — format slices and structs field by field), `strings`,
+`strconv`, `unicode/utf8`, `slices`, `maps`, `sort`, `testing` and `gofront/shared`. Any other
+import, or a member the backend has not implemented yet, reports
+`'strings.Map' is not yet available in wasm packages` with a hint to move the call to a JS
+package. The `math`
+functions without a native WASM instruction (`Sin`, `Cos`, `Atan2`, `Pow`, `Mod`, `Hypot`,
+`Cbrt`, `Round`, …) are imported from JS `Math` with Go semantics (`Round` rounds half away
+from zero; `Mod` keeps the sign of the dividend).
 
-- Non-empty interfaces and generics.
+Not yet supported inside `wasm` code (reports a `… (planned)` diagnostic):
+
 - Referencing a **non-literal** package constant (`const X = f()`); literal constants are
   inlined.
-- `t.Run` subtests in `wasm` test packages.
 
 Package-level variables with non-literal initialisers are initialised from a WASM `start`
 function, so they are ready before any export is called.
@@ -115,8 +135,57 @@ compile error.
 | Struct from a `wasm` package (`T`, `*T`) | Opaque **handle** class with stable identity. Scalar fields are read/written through accessors; aggregate fields (`b.Pos.X = 1`, `b.Tags[0] = 2`) are live views, so writes reach WASM memory. |
 | `[]T`, `[N]T` | Copied element-wise in both directions. TypedArray inputs (`Float32Array`, `Int32Array`, …) are accepted. |
 | `func` values | Wrapped in both directions, so callbacks work either way. |
+| Named non-empty interfaces | **WASM → JS:** an exported `*T` arrives as its handle class (or `both` live view); other dynamic types arrive as a facade object whose methods call into WASM. **JS → WASM:** only WASM-owned values (handles, facades) are accepted. A `js` type implementing a `wasm` interface is a compile error (`type '*tri' (js) cannot implement wasm interface 'Shape' across the boundary; …`); keep implementations in WASM or pass a `func` callback. |
 | `*testing.T` | Stays a JS object; `t.Errorf`, `t.Fatal`, `t.Log`, `t.Skip`, `t.Name`, `t.Failed`, … are routed back to the harness. |
-| `map`, `error`, non-empty interfaces, pointers to non-structs, anonymous structs, exported non-literal constants | **Rejected** with `… is not yet supported across the wasm boundary (planned)`. |
+| `shared.Float32`, `shared.Int32`, … (`gofront/shared`) | **Zero-copy** TypedArray view over the module's linear memory in both directions (see below). |
+| `map`, `error`, anonymous interfaces, pointers to non-structs, anonymous structs, exported non-literal constants | **Rejected** with `… is not yet supported across the wasm boundary (planned)`. |
+
+### Shared linear-memory buffers (`gofront/shared`)
+
+Slices are copied across the boundary. For large numeric data that both sides touch every
+frame (particle positions, vertex buffers, audio samples) a `wasm` package can allocate
+**shared buffers** instead:
+
+```go
+//gofront:target wasm
+package sim
+
+import "gofront/shared"
+
+const Max = 4096
+
+var Positions = shared.NewFloat32(Max * 2) // x,y pairs
+var Flags = shared.NewUint8(Max)
+
+func Step(dt float32) {
+	for i := range Positions {
+		Positions[i] += dt
+	}
+}
+```
+
+```js
+// JS side — a Float32Array aliasing the wasm memory; no copy per frame.
+for (let i = 0; i < sim.Positions.length; i += 2) {
+	ctx.fillRect(sim.Positions[i], sim.Positions[i + 1], 2, 2);
+}
+```
+
+- Element types: `Float32`, `Float64`, `Int8`, `Int16`, `Int32`, `Uint8`, `Uint16`, `Uint32`
+  (`shared.NewXxx(n)`). Buffers support indexing, `len`, `range`, `copy` to/from slices and
+  `b.Subarray(lo, hi)` (an aliasing sub-view, bounds-checked).
+- **Allocation only at startup**: `shared.NewXxx` may appear in package-level `var`
+  initialisers and `init()` only. The memory is sized once, so views handed to JS never
+  detach; the facade still re-creates a cached view if the buffer changed.
+- A shared buffer is **not** a slice: passing it where `[]float32` is expected (or vice
+  versa), slicing it with `b[lo:hi]`, `append` and `cap` are compile errors — use `copy`
+  or `Subarray` explicitly.
+- `gofront/shared` is only available in `wasm` packages (`both` packages have no linear
+  memory on the JS side). In a `--js-only` build the buffers become plain TypedArrays.
+- JS → WASM parameters must be a view of the right type over the module's memory
+  (`sim.Positions.subarray(0, 8)` is fine); anything else throws a `TypeError`.
+
+`example/hybrid` is a complete particle demo built this way.
 
 ### Panics and traps
 
@@ -126,8 +195,9 @@ facade.
 
 ### Loading `app.wasm`
 
-The generated `app.js` fetches `app.wasm` relative to the page. Override this before the
-bundle runs when needed:
+The generated `app.js` fetches `app.wasm` relative to **itself** (`import.meta.url`), so
+the bundle keeps working under sub-path routes and when served from a CDN. Override this
+before the bundle runs when needed:
 
 ```html
 <script>
@@ -141,12 +211,37 @@ bundle runs when needed:
 `gofront dev` serves `.wasm` with `application/wasm` and `Cache-Control: no-store`, and
 `gofront build --pwa` precaches it alongside the other assets.
 
+### Overriding targets without touching code
+
+- `gofront build --js-only` (alias `--target js`; also accepted by `dev`, `check` and the
+  legacy `gofront <src> -o …` form) compiles **every** package to JavaScript — no
+  `app.wasm` is produced. Use it for A/B benchmarking or as a fallback build for browsers
+  without WasmGC.
+- `gofront.json` can pin targets per package, keyed by the package directory relative to
+  the source root (`"."` for the root package). An entry replaces the package's
+  `//gofront:target` directive:
+
+  ```json
+  { "targets": { "engine/physics": "wasm", "engine/debug": "js" } }
+  ```
+
 ### Inspecting the module
 
 `--emit-wat` (with `build` or `-o`) also writes a human-readable `app.wat`. Every emitted
 module carries a `gofront` custom section; stale `app.wasm`/`app.wat` files are only
 removed by a rebuild when they carry that section, so hand-placed modules are never
 deleted.
+
+### Optimization pipeline (Binaryen)
+
+`gofront build --release` (or `--wasm-opt`) optimizes `app.wasm` through Binaryen:
+
+- **Zero setup:** Uses the `wasm-opt` CLI shipped by the optional `binaryen` npm package (run through node, no native toolchain) and automatically prefers a native `wasm-opt` binary if present on `PATH`. If neither is available, `--release`/`--wasm-opt` fail with an actionable error; plain `gofront build` is unaffected.
+- **WasmGC feature flags:** Configured for `GC`, `ReferenceTypes`, `BulkMemory`, `Multivalue`, `ExceptionHandling`, `MutableGlobals`, `NontrappingFPToInt`, and `TailCall`.
+- **Optimization passes:** Level `-O3` combined with GUFA (`--gufa`: devirtualization, type refinement, function inlining, dead type/code elimination).
+- **Size savings & validation:** Typically yields **~23% binary size reduction** and validates module structure post-optimization.
+- **Source maps:** Passing `--source-map` emits a function-level `app.wasm.map` (one mapping per function body, resolved `sources`) and embeds the `sourceMappingURL` custom section. With `--release`/`--wasm-opt` the map is handed to Binaryen (`-ism`) so offsets stay correct after optimisation.
+- **Instant dev reload:** `gofront dev` bypasses optimization for sub-10ms instant hot-reload.
 
 ---
 
@@ -157,8 +252,11 @@ deleted.
 | Package target | How tests run | Reported as |
 |---|---|---|
 | `js` | In Node (optionally JSDOM with `--dom`) | `pkg` |
-| `wasm` | Inside the linked `app.wasm`; `*testing.T` stays in JS | `pkg` |
+| `wasm` | Inside the linked `app.wasm`; `*testing.T` stays in JS (`t.Run` subtests included) | `pkg` |
 | `both` | Twice — once per backend; both must pass | `pkg [js]` and `pkg [wasm]` |
+
+Running `wasm`/`both` tests needs Node 22+ (WasmGC); older runtimes fail the build step
+with `running wasm packages requires Node 22+ (WasmGC)` and a `--js-only` hint.
 
 A `both` package whose two copies disagree therefore fails its own test suite, which is the
 main guard that strict numeric mode is doing its job.
@@ -167,8 +265,12 @@ main guard that strict numeric mode is doing its job.
 
 ## Benchmarking
 
-`npm run bench:raycast` compiles a snapshot of the simplefps `mathx` (`both`) and
-`collision` (`wasm`) packages twice — all-JS and hybrid — casts 100k rays through 131k
-triangles and reports rays/s and bytes allocated per ray. Pass `--wasm-opt <path>` to also
-measure the ceiling with Binaryen (not a dependency). Results are noisy (±8%); always
-compare interleaved runs.
+`npm run bench` (or `test/e2e/perf/raycast-bench.js`) compiles a snapshot of the simplefps
+`mathx` (`both`) and `collision` (`wasm`) packages twice — all-JS and hybrid — casts 100k rays
+through 131k triangles and reports rays/s, allocation per ray, and binary size.
+Pass `--wasm-opt` to run the built-in Binaryen optimization pipeline over the emitted module.
+
+For a whole-application comparison, simplefps's `npm run bench` (`tests/perf/js-vs-wasm.js`)
+compiles its `physics` and `animation` packages with `forceTarget: "js"` and hybrid and times
+raycasts, the FPS-controller fixed step and a skinned-character frame across the boundary;
+the results are tabulated in the README under *Real-World Benchmark*.

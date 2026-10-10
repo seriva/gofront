@@ -49,6 +49,7 @@ const BUILTIN_PACKAGES = new Set([
 	"path",
 	"path/filepath",
 	"testing",
+	"gofront/shared",
 ]);
 
 // Returns true for local relative paths (start with ./ or ../)
@@ -72,7 +73,7 @@ export function resolveGwDir(importPath, fromFile) {
 	return gwFiles.length > 0 ? dir : null;
 }
 
-export function resolveImport(importPath, fromFile) {
+function resolveImport(importPath, fromFile) {
 	const fromDir = dirname(resolve(fromFile));
 	const nodeModules = findNodeModules(fromDir);
 

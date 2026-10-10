@@ -85,9 +85,206 @@ export const BROWSER_GLOBALS = new Set([
 	"sessionStorage",
 ]);
 
-// Stdlib packages the WASM backend can emit. Extend as src/backend/wasm/emit.js gains support;
-// anything not listed is rejected at import with "not yet available in wasm packages".
-export const WASM_SUPPORTED_STDLIB = new Set(["math", "math/bits", "testing"]);
+// Stdlib packages the WASM backend can emit. Extend as src/backend/wasm/emit-stdlib.js
+// gains support; anything not listed is rejected at import with "not yet available in
+// wasm packages".
+export const WASM_SUPPORTED_STDLIB = new Set([
+	"math",
+	"math/bits",
+	"errors",
+	"fmt",
+	"strings",
+	"strconv",
+	"unicode/utf8",
+	"slices",
+	"maps",
+	"sort",
+	"testing",
+	"gofront/shared",
+]);
+
+// Per-namespace member subset the WASM backend implements. `null` means every
+// member the checker knows about. Members outside the set are rejected in
+// wasm/both packages with "'strings.Split' is not yet available in wasm packages".
+export const WASM_STDLIB_MEMBERS = new Map([
+	[
+		"math",
+		new Set([
+			"Sqrt",
+			"Floor",
+			"Ceil",
+			"Trunc",
+			"Abs",
+			"Min",
+			"Max",
+			"Copysign",
+			"Dim",
+			"Inf",
+			"NaN",
+			"IsNaN",
+			"IsInf",
+			"Signbit",
+			"Sin",
+			"Cos",
+			"Tan",
+			"Asin",
+			"Acos",
+			"Atan",
+			"Atan2",
+			"Pow",
+			"Mod",
+			"Hypot",
+			"Cbrt",
+			"Exp",
+			"Exp2",
+			"Log",
+			"Log2",
+			"Log10",
+			"Round",
+			// constants
+			"E",
+			"Pi",
+			"Phi",
+			"Sqrt2",
+			"SqrtE",
+			"SqrtPi",
+			"SqrtPhi",
+			"Ln2",
+			"Log2E",
+			"Ln10",
+			"Log10E",
+			"MaxFloat32",
+			"SmallestNonzeroFloat32",
+			"MaxFloat64",
+			"SmallestNonzeroFloat64",
+			"MaxInt",
+			"MinInt",
+			"MaxInt8",
+			"MinInt8",
+			"MaxInt16",
+			"MinInt16",
+			"MaxInt32",
+			"MinInt32",
+			"MaxInt64",
+			"MinInt64",
+			"MaxUint8",
+			"MaxUint16",
+			"MaxUint32",
+			"MaxUint",
+			"MaxUint64",
+		]),
+	],
+	[
+		"bits",
+		new Set([
+			"LeadingZeros32",
+			"LeadingZeros64",
+			"TrailingZeros32",
+			"TrailingZeros64",
+			"OnesCount32",
+			"OnesCount64",
+			"RotateLeft32",
+			"RotateLeft64",
+		]),
+	],
+	["errors", new Set(["New", "Is", "Unwrap"])],
+	[
+		"utf8",
+		new Set([
+			"RuneCountInString",
+			"RuneLen",
+			"ValidString",
+			"ValidRune",
+			"DecodeRuneInString",
+			"DecodeLastRuneInString",
+			"FullRuneInString",
+			"RuneError",
+			"MaxRune",
+			"UTFMax",
+		]),
+	],
+	[
+		"sort",
+		new Set([
+			"Ints",
+			"Float64s",
+			"Strings",
+			"Slice",
+			"SliceStable",
+			"SliceIsSorted",
+			"Search",
+			"IntsAreSorted",
+			"Float64sAreSorted",
+			"StringsAreSorted",
+		]),
+	],
+	["fmt", new Set(["Sprintf", "Errorf", "Printf", "Println", "Print"])],
+	[
+		"strings",
+		new Set([
+			"Contains",
+			"ContainsAny",
+			"ContainsRune",
+			"HasPrefix",
+			"HasSuffix",
+			"Index",
+			"IndexAny",
+			"IndexByte",
+			"IndexRune",
+			"LastIndex",
+			"LastIndexByte",
+			"Count",
+			"Repeat",
+			"Replace",
+			"ReplaceAll",
+			"ToUpper",
+			"ToLower",
+			"Title",
+			"ToTitle",
+			"TrimSpace",
+			"Trim",
+			"TrimLeft",
+			"TrimRight",
+			"TrimPrefix",
+			"TrimSuffix",
+			"EqualFold",
+			"Split",
+			"Fields",
+			"Join",
+		]),
+	],
+	[
+		"strconv",
+		new Set([
+			"Itoa",
+			"Atoi",
+			"FormatInt",
+			"FormatFloat",
+			"FormatBool",
+			"ParseInt",
+			"ParseFloat",
+			"ParseBool",
+			"Quote",
+		]),
+	],
+	[
+		"slices",
+		new Set(["Sort", "Reverse", "Contains", "Index", "Equal", "Clone"]),
+	],
+	[
+		"maps",
+		new Set([
+			"Keys",
+			"Values",
+			"Clone",
+			"Copy",
+			"Equal",
+			"EqualFunc",
+			"Delete",
+			"DeleteFunc",
+		]),
+	],
+]);
 
 export const VALID_TARGETS = new Set(["js", "wasm", "both"]);
 
@@ -101,14 +298,14 @@ export const INT = { kind: "basic", name: "int" };
 export const INT8 = { kind: "basic", name: "int8" };
 export const INT16 = { kind: "basic", name: "int16" };
 export const INT32 = { kind: "basic", name: "int32" };
-export const INT64 = { kind: "basic", name: "int64" };
+const INT64 = { kind: "basic", name: "int64" };
 export const UINT = { kind: "basic", name: "uint" };
 export const UINT8 = { kind: "basic", name: "uint8" };
 export const BYTE = UINT8;
 export const UINT16 = { kind: "basic", name: "uint16" };
 export const UINT32 = { kind: "basic", name: "uint32" };
 export const UINT64 = { kind: "basic", name: "uint64" };
-export const UINTPTR = { kind: "basic", name: "uintptr" };
+const UINTPTR = { kind: "basic", name: "uintptr" };
 export const RUNE = INT32;
 export const FLOAT32 = { kind: "basic", name: "float32" };
 export const FLOAT64 = { kind: "basic", name: "float64" };
@@ -135,7 +332,7 @@ export const UNTYPED_BOOL = { kind: "untyped", base: "bool" };
 
 // ── Complex types ────────────────────────────────────────────
 export const COMPLEX128 = { kind: "basic", name: "complex128" };
-export const COMPLEX64 = { kind: "basic", name: "complex64" };
+const COMPLEX64 = { kind: "basic", name: "complex64" };
 export const UNTYPED_COMPLEX = { kind: "untyped", base: "complex128" };
 
 export const BASIC_TYPES = {
@@ -204,7 +401,7 @@ export const isBool = makeBasicPredicate("bool");
 
 // ── TypedArray mappings ──────────────────────────────────────
 // []float64 deliberately stays a plain Array for JSON / JS-library interop.
-export const TYPED_ARRAY_CONSTRUCTORS = {
+const TYPED_ARRAY_CONSTRUCTORS = {
 	float32: "Float32Array",
 	uint8: "Uint8Array",
 	byte: "Uint8Array",
@@ -294,6 +491,8 @@ export function typeStr(t) {
 			return `untyped ${t.base}`;
 		case "slice":
 			return `[]${typeStr(t.elem)}`;
+		case "shared":
+			return `shared.${t.shared}`;
 		case "array":
 			return `[${t.size ?? "..."}]${typeStr(t.elem)}`;
 		case "map":

@@ -3,6 +3,7 @@
 // and computes functions that participate in the package initialization call path.
 
 import { isReferenceType } from "./boxing.js";
+import { forEachChild, someChild } from "./walk.js";
 
 /**
  * Computes:
@@ -117,11 +118,9 @@ function scanReassignments(node, packageGlobals, reassigned, insideInit) {
 		}
 	}
 	checkAddressTaken(node, packageGlobals, reassigned);
-	for (const k of Object.keys(node)) {
-		if (!k.startsWith("_")) {
-			scanReassignments(node[k], packageGlobals, reassigned, insideInit);
-		}
-	}
+	forEachChild(node, (child) =>
+		scanReassignments(child, packageGlobals, reassigned, insideInit),
+	);
 }
 
 function addCallTarget(call, called) {
@@ -145,9 +144,7 @@ function findCalledFunctions(node, called = new Set()) {
 		return called;
 	}
 	if (node.kind === "CallExpr") addCallTarget(node, called);
-	for (const k of Object.keys(node)) {
-		if (!k.startsWith("_")) findCalledFunctions(node[k], called);
-	}
+	forEachChild(node, (child) => findCalledFunctions(child, called));
 	return called;
 }
 
@@ -244,9 +241,7 @@ function scanReadIdents(node, readSet) {
 		readSet.add(node.name);
 		return;
 	}
-	for (const k of Object.keys(node)) {
-		if (!k.startsWith("_")) scanReadIdents(node[k], readSet);
-	}
+	forEachChild(node, (child) => scanReadIdents(child, readSet));
 }
 
 function isLocallyDeclared(node, name) {
@@ -265,10 +260,7 @@ function isLocallyDeclared(node, name) {
 				return true;
 		}
 	}
-	for (const k of Object.keys(node)) {
-		if (!k.startsWith("_") && isLocallyDeclared(node[k], name)) return true;
-	}
-	return false;
+	return someChild(node, (child) => isLocallyDeclared(child, name));
 }
 
 function getGlobalsToCache(fn, neverAssignedGlobals, initPathFunctions) {

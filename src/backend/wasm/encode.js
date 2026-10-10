@@ -64,12 +64,12 @@ export function encodeF64(val) {
 	return Array.from(new Uint8Array(buf));
 }
 
-export function encodeString(str) {
+function encodeString(str) {
 	const utf8 = new TextEncoder().encode(str);
 	return [...encodeU32LEB(utf8.length), ...utf8];
 }
 
-export function encodeVector(items, encodeItem) {
+function encodeVector(items, encodeItem) {
 	const count = encodeU32LEB(items.length);
 	const bytes = [];
 	for (const item of items) {
@@ -83,7 +83,7 @@ export function encodeVector(items, encodeItem) {
 
 // ── Value Types & Heap Types ─────────────────────────────────
 
-export const ValType = {
+const ValType = {
 	i32: 0x7f,
 	i64: 0x7e,
 	f32: 0x7d,
@@ -101,9 +101,11 @@ export const ValType = {
 	nullref: 0x71,
 	nullfuncref: 0x73,
 	nullexternref: 0x72,
+	exnref: 0x69,
+	nullexnref: 0x75,
 };
 
-export function encodeValType(type) {
+function encodeValType(type) {
 	if (typeof type === "number") {
 		return [type];
 	}
@@ -129,7 +131,7 @@ export function encodeValType(type) {
 	throw new Error(`Invalid valtype specification: ${JSON.stringify(type)}`);
 }
 
-export function encodeBlockType(blockType) {
+function encodeBlockType(blockType) {
 	if (!blockType || blockType === "void") {
 		return [0x40];
 	}
@@ -153,6 +155,7 @@ const OPCODES = {
 	if: 0x04,
 	else: 0x05,
 	throw: 0x08,
+	throw_ref: 0x0a,
 	end: 0x0b,
 	br: 0x0c,
 	br_if: 0x0d,
@@ -164,6 +167,7 @@ const OPCODES = {
 	return_call_indirect: 0x13,
 	call_ref: 0x14,
 	return_call_ref: 0x15,
+	try_table: 0x1f,
 	drop: 0x1a,
 	select: 0x1b,
 
@@ -172,6 +176,23 @@ const OPCODES = {
 	"local.tee": 0x22,
 	"global.get": 0x23,
 	"global.set": 0x24,
+
+	"i32.load": 0x28,
+	"i64.load": 0x29,
+	"f32.load": 0x2a,
+	"f64.load": 0x2b,
+	"i32.load8_s": 0x2c,
+	"i32.load8_u": 0x2d,
+	"i32.load16_s": 0x2e,
+	"i32.load16_u": 0x2f,
+	"i32.store": 0x36,
+	"i64.store": 0x37,
+	"f32.store": 0x38,
+	"f64.store": 0x39,
+	"i32.store8": 0x3a,
+	"i32.store16": 0x3b,
+	"memory.size": 0x3f,
+	"memory.grow": 0x40,
 
 	"i32.const": 0x41,
 	"i64.const": 0x42,
@@ -360,11 +381,40 @@ const GC_OPCODES = {
 	"extern.convert_any": 0x1b,
 };
 
-export function encodeInstruction(inst) {
+// Natural alignment (log2) per load/store opcode; memarg = align, offset.
+const MEM_ALIGN = {
+	"i32.load": 2,
+	"i64.load": 3,
+	"f32.load": 2,
+	"f64.load": 3,
+	"i32.load8_s": 0,
+	"i32.load8_u": 0,
+	"i32.load16_s": 1,
+	"i32.load16_u": 1,
+	"i32.store": 2,
+	"i64.store": 3,
+	"f32.store": 2,
+	"f64.store": 3,
+	"i32.store8": 0,
+	"i32.store16": 1,
+};
+
+function encodeInstruction(inst) {
 	if (typeof inst === "string") {
 		inst = { op: inst };
 	}
 	const { op } = inst;
+
+	if (MEM_ALIGN[op] !== undefined) {
+		return [
+			OPCODES[op],
+			...encodeU32LEB(inst.align ?? MEM_ALIGN[op]),
+			...encodeU32LEB(inst.offset ?? 0),
+		];
+	}
+	if (op === "memory.size" || op === "memory.grow") {
+		return [OPCODES[op], 0x00];
+	}
 
 	// 1. Check saturating truncations (0xFC prefix)
 	if (SAT_TRUNC_OPCODES[op] !== undefined) {
@@ -390,6 +440,26 @@ export function encodeInstruction(inst) {
 			op === "any.convert_extern" ||
 			op === "extern.convert_any"
 		) {
+			return bytes;
+		}
+		if (
+			op === "ref.cast" ||
+			op === "ref.cast_null" ||
+			op === "ref.test" ||
+			op === "ref.test_null"
+		) {
+			const ht =
+				inst.heapType !== undefined
+					? inst.heapType
+					: inst.typeIndex !== undefined
+						? inst.typeIndex
+						: "any";
+			if (typeof ht === "number") {
+				bytes.push(...encodeI32LEB(ht));
+			} else {
+				const code = ValType[ht] ?? ValType[`${ht}ref`] ?? 0x6e;
+				bytes.push(code);
+			}
 			return bytes;
 		}
 		if (inst.typeIndex !== undefined) {
@@ -424,6 +494,40 @@ export function encodeInstruction(inst) {
 
 			case "throw":
 				return [byte, ...encodeU32LEB(inst.tagIndex ?? inst.index ?? 0)];
+
+			case "throw_ref":
+				return [byte];
+
+			case "try_table": {
+				const blockTypeBytes = encodeBlockType(
+					inst.blockType ?? inst.resultType,
+				);
+				const catches = inst.catches ?? [];
+				const catchBytes = encodeVector(catches, (c) => {
+					const kind = c.kind ?? c.op;
+					switch (kind) {
+						case "catch":
+							return [
+								0x00,
+								...encodeU32LEB(c.tagIndex ?? c.tag ?? 0),
+								...encodeU32LEB(c.label ?? c.depth ?? 0),
+							];
+						case "catch_ref":
+							return [
+								0x01,
+								...encodeU32LEB(c.tagIndex ?? c.tag ?? 0),
+								...encodeU32LEB(c.label ?? c.depth ?? 0),
+							];
+						case "catch_all":
+							return [0x02, ...encodeU32LEB(c.label ?? c.depth ?? 0)];
+						case "catch_all_ref":
+							return [0x03, ...encodeU32LEB(c.label ?? c.depth ?? 0)];
+						default:
+							throw new Error(`Unknown catch kind: ${kind}`);
+					}
+				});
+				return [byte, ...blockTypeBytes, ...catchBytes];
+			}
 
 			case "call":
 			case "return_call":
@@ -494,7 +598,7 @@ function encodeSection(id, payload) {
 	return [id, ...encodeU32LEB(payload.length), ...payload];
 }
 
-export function encodeTypeEntry(t) {
+function encodeTypeEntry(t) {
 	if (t.form === "rec") {
 		// Recursive type group: 0x4E, count, types
 		const count = encodeU32LEB(t.types.length);
@@ -533,12 +637,12 @@ export function encodeTypeEntry(t) {
 	];
 }
 
-export function encodeTypeSection(types) {
+function encodeTypeSection(types) {
 	if (!types || types.length === 0) return [];
 	return encodeSection(1, encodeVector(types, encodeTypeEntry));
 }
 
-export function encodeImportSection(imports) {
+function encodeImportSection(imports) {
 	if (!imports || imports.length === 0) return [];
 	return encodeSection(
 		2,
@@ -581,7 +685,7 @@ export function encodeImportSection(imports) {
 	);
 }
 
-export function encodeFunctionSection(funcs) {
+function encodeFunctionSection(funcs) {
 	if (!funcs || funcs.length === 0) return [];
 	return encodeSection(
 		3,
@@ -589,7 +693,7 @@ export function encodeFunctionSection(funcs) {
 	);
 }
 
-export function encodeTagSection(tags) {
+function encodeTagSection(tags) {
 	if (!tags || tags.length === 0) return [];
 	return encodeSection(
 		13,
@@ -597,7 +701,22 @@ export function encodeTagSection(tags) {
 	);
 }
 
-export function encodeGlobalSection(globals) {
+// Single linear memory: `{ min, max }` in 64 KiB pages.  `max` is optional;
+// the shared-buffer runtime only grows the memory inside the start function,
+// before any JS TypedArray view exists.
+function encodeMemorySection(memory) {
+	if (!memory) return [];
+	const limits =
+		memory.max != null
+			? [0x01, ...encodeU32LEB(memory.min), ...encodeU32LEB(memory.max)]
+			: [0x00, ...encodeU32LEB(memory.min)];
+	return encodeSection(
+		5,
+		encodeVector([limits], (b) => b),
+	);
+}
+
+function encodeGlobalSection(globals) {
 	if (!globals || globals.length === 0) return [];
 	return encodeSection(
 		6,
@@ -621,7 +740,7 @@ export function encodeGlobalSection(globals) {
 	);
 }
 
-export function encodeExportSection(exports) {
+function encodeExportSection(exports) {
 	if (!exports || exports.length === 0) return [];
 	return encodeSection(
 		7,
@@ -670,7 +789,7 @@ function sameValType(a, b) {
 	return false;
 }
 
-export function encodeElementSection(elements) {
+function encodeElementSection(elements) {
 	if (!elements || elements.length === 0) return [];
 	const segment = [0x03, 0x00, ...encodeVector(elements, encodeU32LEB)];
 	return encodeSection(
@@ -679,64 +798,76 @@ export function encodeElementSection(elements) {
 	);
 }
 
-export function encodeCodeSection(funcs) {
+// Encodes the code section.  `bodyOffsets` (when given) receives, per
+// function, the offset of the body's first instruction relative to the start
+// of the section bytes returned.
+function encodeCodeSection(funcs, bodyOffsets = null) {
 	if (!funcs || funcs.length === 0) return [];
-	return encodeSection(
-		10,
-		encodeVector(funcs, (fn) => {
-			// Compress locals: [type1, type1, type2] -> [{ count: 2, type: type1 }, { count: 1, type: type2 }]
-			const rawLocals = fn.locals ?? [];
-			const compressedLocals = [];
-			for (const loc of rawLocals) {
-				const locType =
-					typeof loc === "string"
-						? loc
-						: loc.type !== undefined
-							? loc.type
-							: loc;
-				if (
-					compressedLocals.length > 0 &&
-					sameValType(
-						compressedLocals[compressedLocals.length - 1].type,
-						locType,
-					)
-				) {
-					compressedLocals[compressedLocals.length - 1].count++;
-				} else {
-					compressedLocals.push({ count: 1, type: locType });
-				}
-			}
-
-			const localsBytes = encodeVector(compressedLocals, (group) => [
-				...encodeU32LEB(group.count),
-				...encodeValType(group.type),
-			]);
-
-			const bodyInsts = fn.body ?? [];
-			const bodyBytes = [];
-			for (const inst of bodyInsts) {
-				const chunk = encodeInstruction(inst);
-				for (let i = 0; i < chunk.length; i++) bodyBytes.push(chunk[i]);
-			}
-			// Ensure terminating end opcode (0x0B)
+	const relOffsets = [];
+	const payload = encodeVector(funcs, (fn) => {
+		// Compress locals: [type1, type1, type2] -> [{ count: 2, type: type1 }, { count: 1, type: type2 }]
+		const rawLocals = fn.locals ?? [];
+		const compressedLocals = [];
+		for (const loc of rawLocals) {
+			const locType =
+				typeof loc === "string" ? loc : loc.type !== undefined ? loc.type : loc;
 			if (
-				bodyInsts.length === 0 ||
-				bodyInsts[bodyInsts.length - 1].op !== "end"
+				compressedLocals.length > 0 &&
+				sameValType(compressedLocals[compressedLocals.length - 1].type, locType)
 			) {
-				bodyBytes.push(0x0b);
+				compressedLocals[compressedLocals.length - 1].count++;
+			} else {
+				compressedLocals.push({ count: 1, type: locType });
 			}
+		}
 
-			const fullBody = [...localsBytes, ...bodyBytes];
-			return [...encodeU32LEB(fullBody.length), ...fullBody];
-		}),
-	);
+		const localsBytes = encodeVector(compressedLocals, (group) => [
+			...encodeU32LEB(group.count),
+			...encodeValType(group.type),
+		]);
+
+		const bodyInsts = fn.body ?? [];
+		const bodyBytes = [];
+		for (const inst of bodyInsts) {
+			const chunk = encodeInstruction(inst);
+			for (let i = 0; i < chunk.length; i++) bodyBytes.push(chunk[i]);
+		}
+		// Ensure terminating end opcode (0x0B)
+		if (
+			bodyInsts.length === 0 ||
+			bodyInsts[bodyInsts.length - 1].op !== "end"
+		) {
+			bodyBytes.push(0x0b);
+		}
+
+		const fullBody = [...localsBytes, ...bodyBytes];
+		const sizeBytes = encodeU32LEB(fullBody.length);
+		// Offset of the first instruction within this entry + entry length.
+		relOffsets.push([
+			sizeBytes.length + localsBytes.length,
+			sizeBytes.length + fullBody.length,
+		]);
+		return [...sizeBytes, ...fullBody];
+	});
+	if (bodyOffsets) {
+		// Section-relative: id + size LEB + count LEB + preceding entries.
+		let cursor =
+			1 +
+			encodeU32LEB(payload.length).length +
+			encodeU32LEB(funcs.length).length;
+		for (const [first, len] of relOffsets) {
+			bodyOffsets.push(cursor + first);
+			cursor += len;
+		}
+	}
+	return encodeSection(10, payload);
 }
 
 // ── Top-level Module Encoder ─────────────────────────────────
 
 // Custom section placed right after the header; `isGoFrontWasm` keys off it.
-export const GOFRONT_SECTION_NAME = "gofront";
-const GOFRONT_SECTION_BYTES = [
+const GOFRONT_SECTION_NAME = "gofront";
+export const GOFRONT_SECTION_BYTES = [
 	0x00,
 	...encodeU32LEB(1 + GOFRONT_SECTION_NAME.length),
 	...encodeString(GOFRONT_SECTION_NAME),
@@ -753,6 +884,10 @@ export function isGoFrontWasm(bytes) {
 	return true;
 }
 
+// Encodes the module.  When `mod.sourceMappingURL` is set a trailing
+// `sourceMappingURL` custom section is appended, and `mod.codeOffsets` is
+// filled with the absolute byte offset of every function body (aligned with
+// `mod.funcs`) so a function-level source map can be built.
 export function encodeModule(mod) {
 	const magic = [0x00, 0x61, 0x73, 0x6d]; // \0asm
 	const version = [0x01, 0x00, 0x00, 0x00]; // version 1
@@ -760,6 +895,7 @@ export function encodeModule(mod) {
 	const typeSec = encodeTypeSection(mod.types);
 	const importSec = encodeImportSection(mod.imports);
 	const funcSec = encodeFunctionSection(mod.funcs);
+	const memorySec = encodeMemorySection(mod.memory);
 	const tagSec = encodeTagSection(mod.tags);
 	const globalSec = encodeGlobalSection(mod.globals);
 	const exportSec = encodeExportSection(mod.exports);
@@ -768,7 +904,8 @@ export function encodeModule(mod) {
 			? encodeSection(8, encodeU32LEB(mod.start))
 			: [];
 	const elemSec = encodeElementSection(mod.elements);
-	const codeSec = encodeCodeSection(mod.funcs);
+	const sectionOffsets = [];
+	const codeSec = encodeCodeSection(mod.funcs, sectionOffsets);
 
 	const allBytes = [
 		...magic,
@@ -777,13 +914,24 @@ export function encodeModule(mod) {
 		...typeSec,
 		...importSec,
 		...funcSec,
+		...memorySec,
 		...tagSec,
 		...globalSec,
 		...exportSec,
 		...startSec,
 		...elemSec,
-		...codeSec,
 	];
+	const codeStart = allBytes.length;
+	mod.codeOffsets = sectionOffsets.map((o) => codeStart + o);
+	allBytes.push(...codeSec);
+	if (mod.sourceMappingURL) {
+		allBytes.push(
+			...encodeSection(0, [
+				...encodeString("sourceMappingURL"),
+				...encodeString(mod.sourceMappingURL),
+			]),
+		);
+	}
 
 	return new Uint8Array(allBytes);
 }

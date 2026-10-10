@@ -15,7 +15,7 @@ export const testingMethods = {
 	},
 
 	_genTestingMethodCall(method, expr) {
-		this._usesTesting = true;
+		this.useHelper("testing");
 		const recv = expr.func.expr;
 		const t = this.genExpr(recv);
 		const args = expr.args
@@ -27,7 +27,7 @@ export const testingMethods = {
 			method === "Logf" ||
 			method === "Skipf"
 		) {
-			this._usesSprintf = true;
+			this.useHelper("sprintf");
 		}
 		return `${t}.${method}(${args})`;
 	},

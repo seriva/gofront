@@ -45,6 +45,7 @@ export class TypeChecker {
 		this.types = new Map(); // named types
 		this.globals = new Scope();
 		this.errors = [];
+		this.warnings = []; // non-fatal diagnostics (e.g. boundary-call-in-loop hints)
 		this.target = "js";
 		this.pkgName = null;
 		this.blockers = new Map();
@@ -77,7 +78,8 @@ export class TypeChecker {
 	// Add an imported GoFront package as a qualified namespace.
 	// e.g. addPackageNamespace('utils', symbolsMap, typesMap)
 	// lets callers type-check `utils.Foo` via SelectorExpr.
-	addPackageNamespace(pkgName, symbols, types) {
+	// `target` is the imported package's compile target ("js"/"wasm"/"both").
+	addPackageNamespace(pkgName, symbols, types, target = null) {
 		const members = {};
 		for (const [name, type] of symbols) members[name] = type;
 		// _gofront: true marks this as a GoFront package — exported identifier rules apply
@@ -86,6 +88,7 @@ export class TypeChecker {
 			name: pkgName,
 			members,
 			_gofront: true,
+			_target: target,
 		});
 		for (const [name, type] of types) {
 			this.types.set(name, type);
@@ -169,6 +172,21 @@ export class TypeChecker {
 		);
 		this.errors.push(e);
 		return TAINTED_ANY; // tainted recovery type — suppresses downstream cascade errors
+	}
+
+	// Non-fatal diagnostic: formatted like an error but collected separately so
+	// the build still succeeds. The compiler prints these as warnings.
+	warn(msg, node, hint = null) {
+		const e = new TypeCheckError(
+			msg,
+			node,
+			this._currentFile,
+			this._currentSource,
+			hint,
+		);
+		// `log.warn` adds the "warning:" label, so strip the error one here:
+		// "Type error in main.go at line 3:5: msg" → "main.go at line 3:5: msg".
+		this.warnings.push(e.message.replace(/^Type error(?: in)?[: ]\s*/, ""));
 	}
 
 	_reportUnused(scope, node) {
@@ -524,6 +542,7 @@ export class TypeChecker {
 					? existing
 					: { kind: "named", name: decl.name };
 			named.underlying = underlying;
+			named._target = this.target;
 			named._generic = {
 				typeParams: typeParamTypes,
 				declNode: decl,
@@ -549,6 +568,7 @@ export class TypeChecker {
 				? existing
 				: { kind: "named", name: decl.name };
 		named.underlying = underlying;
+		named._target = this.target;
 		if (underlying.kind === "struct") {
 			underlying.name = decl.name;
 			underlying.methods = new Map();
@@ -777,7 +797,10 @@ export class TypeChecker {
 			inner.define(p.name, this.resolveTypeNode(p.type, inner));
 		}
 		const returnType = this._setupFuncReturnType(decl, inner, outer);
+		const savedSharedAlloc = this._sharedAllocOk;
+		this._sharedAllocOk = decl.name === "init";
 		this._runFuncBody(decl, inner, returnType);
+		this._sharedAllocOk = savedSharedAlloc;
 		this._checkMissingReturn(decl, returnType, "function");
 	}
 
@@ -870,6 +893,8 @@ export class TypeChecker {
 	}
 
 	checkVarDecl(decl, scope) {
+		const savedSharedAlloc = this._sharedAllocOk;
+		this._sharedAllocOk = scope === this.globals;
 		for (const spec of decl.decls) {
 			let type = spec.type ? this.resolveTypeNode(spec.type, scope) : null;
 			if (spec.value) {
@@ -883,6 +908,7 @@ export class TypeChecker {
 			if (!type) type = ANY;
 			for (const name of spec.names) scope.defineLocal(name, type);
 		}
+		this._sharedAllocOk = savedSharedAlloc;
 	}
 
 	checkConstDecl(decl, scope) {

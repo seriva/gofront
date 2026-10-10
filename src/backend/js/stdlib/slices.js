@@ -41,7 +41,7 @@ const SLICES_DISPATCH = {
 export const slicesMethods = {
 	_genSlices(fn, a) {
 		if (fn === "Equal") {
-			this._usesEqual = true;
+			this.useHelper("equal");
 			const [a1, b1] = a();
 			return `__equal(${a1}, ${b1})`;
 		}
