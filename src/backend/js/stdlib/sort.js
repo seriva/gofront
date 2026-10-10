@@ -23,7 +23,7 @@ const SORT_DISPATCH = {
 /** @type {ThisType<CodeGen>} */
 export const sortMethods = {
 	_genSort(fn, a) {
-		if (fn === "Slice" || fn === "SliceStable") this._usesSortSlice = true;
+		if (fn === "Slice" || fn === "SliceStable") this.useHelper("sortSlice");
 		const gen = SORT_DISPATCH[fn];
 		return gen ? gen(a()) : undefined;
 	},

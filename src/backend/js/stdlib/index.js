@@ -15,6 +15,7 @@ import { osMethods } from "./os.js";
 import { pathMethods } from "./path.js";
 import { randMethods } from "./rand.js";
 import { regexpMethods } from "./regexp.js";
+import { sharedMethods } from "./shared.js";
 import { slicesMethods } from "./slices.js";
 import { sortMethods } from "./sort.js";
 import { strconvMethods } from "./strconv.js";
@@ -49,6 +50,7 @@ const STDLIB_METHOD_MAP = {
 	utf8: "_genUtf8",
 	path: "_genPath",
 	testing: "_genTesting",
+	shared: "_genShared",
 };
 
 const dispatchMethods = {
@@ -92,6 +94,7 @@ export const stdlibGenMethods = {
 	...pathMethods,
 	...randMethods,
 	...regexpMethods,
+	...sharedMethods,
 	...slicesMethods,
 	...sortMethods,
 	...strconvMethods,

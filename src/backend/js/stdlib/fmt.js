@@ -15,11 +15,11 @@ export const fmtMethods = {
 		const fmtArgs = expr.args.map((e) => this.genExpr(e)).join(", ");
 		switch (fn) {
 			case "Sprintf":
-				this._usesSprintf = true;
+				this.useHelper("sprintf");
 				return `__sprintf(${fmtArgs})`;
 			case "Errorf": {
-				this._usesSprintf = true;
-				this._usesError = true;
+				this.useHelper("sprintf");
+				this.useHelper("error");
 				const fmtStr = expr.args[0];
 				if (fmtStr?.kind === "BasicLit" && fmtStr.value?.includes("%w")) {
 					const lastArg = this.genExpr(expr.args[expr.args.length - 1]);
@@ -28,12 +28,15 @@ export const fmtMethods = {
 				return `__error(__sprintf(${fmtArgs}))`;
 			}
 			case "Printf":
+				this.useHelper("sprintf");
+				return this._genStdoutWrite(`__sprintf(${fmtArgs})`);
 			case "Print":
-				this._usesSprintf = true;
-				return `process?.stdout?.write(__sprintf(${fmtArgs}))`;
+				this.useHelper("sprintf");
+				return this._genStdoutWrite(this._genPrintOperands(expr, "", ""));
 			case "Println":
-				this._usesSprintf = true;
-				return `console.log(__sprintf(${fmtArgs}))`;
+				this.useHelper("sprintf");
+				// console.log supplies the trailing newline.
+				return `console.log(${this._genPrintOperands(expr, " ", "")})`;
 			case "Fprintf":
 			case "Fprintln":
 			case "Fprint":
@@ -69,7 +72,7 @@ export const fmtMethods = {
 	},
 
 	_genFmtFprint(fn, expr) {
-		this._usesSprintf = true;
+		this.useHelper("sprintf");
 		const writerArg = expr.args[0];
 		const rest = expr.args.slice(1);
 		const restJs = rest.map((e) => this.genExpr(e)).join(", ");
@@ -93,8 +96,23 @@ export const fmtMethods = {
 		return `${w}.WriteString(${sprintfCall})`;
 	},
 
+	_genStdoutWrite(strJs) {
+		return `((__s) => (typeof process !== "undefined" && process?.stdout?.write ? process.stdout.write(__s) : console.log(__s)))(${strJs})`;
+	},
+
+	// Formats Print/Println operands with %v so the first operand is never
+	// mistaken for a format string.
+	_genPrintOperands(expr, sep, suffix) {
+		const argc = expr.args.length;
+		if (argc === 0) return JSON.stringify(suffix);
+		const fmt = Array(argc).fill("%v").join(sep) + suffix;
+		const args = expr.args.map((e) => this.genExpr(e)).join(", ");
+		return `__sprintf(${JSON.stringify(fmt)}, ${args})`;
+	},
+
 	_buildFprintSprintfCall(fn, argc, restJs) {
 		if (fn === "Fprintf") return `__sprintf(${restJs})`;
+		if (argc === 0) return fn === "Fprintln" ? '"\\n"' : '""';
 		const sep = fn === "Fprintln" ? " " : "";
 		const suffix = fn === "Fprintln" ? "\\n" : "";
 		const fmt = Array(argc).fill("%v").join(sep) + suffix;

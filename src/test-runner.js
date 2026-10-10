@@ -14,6 +14,19 @@ import {
 	gwFilesIn,
 } from "./compiler.js";
 
+// WasmGC + exception handling (what the wasm backend emits) ship enabled by
+// default from Node 22 (V8 11.9+). Older runtimes fail at instantiate time
+// with an opaque CompileError, so check up front and explain.
+export const MIN_WASM_NODE_MAJOR = 22;
+
+export function checkWasmRuntime(version = process.version) {
+	const major = Number.parseInt(version.replace(/^v/, ""), 10);
+	if (Number.isNaN(major) || major >= MIN_WASM_NODE_MAJOR) return;
+	throw new Error(
+		`running wasm packages requires Node ${MIN_WASM_NODE_MAJOR}+ (WasmGC); found ${version}\n  hint: upgrade Node, or compile with --js-only to run the JS backend instead`,
+	);
+}
+
 export function isTestFunc(decl) {
 	if (decl.kind !== "FuncDecl") return false;
 	if (!decl.name.startsWith("Test")) return false;
@@ -382,6 +395,13 @@ export async function runTests(targetDir, options = {}) {
 
 	// `wasm` packages run inside the linked app.wasm; `js` packages that import
 	// wasm packages need the linked module too (hybrid packages).
+	if (compiled.target === "both" || compiled.wasm) {
+		try {
+			checkWasmRuntime();
+		} catch (err) {
+			return reportBuildFailure(err, resolvedDir, options);
+		}
+	}
 	if (compiled.target === "both") {
 		return runDualTarget(compiled, resolvedDir, runHarness, options);
 	}

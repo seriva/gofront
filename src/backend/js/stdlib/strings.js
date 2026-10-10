@@ -21,7 +21,10 @@ const STRINGS_M2 = {
 const STRINGS_DISPATCH = {
 	Count: ([s, s2]) =>
 		`((s, sep) => sep === "" ? s.length + 1 : s.split(sep).length - 1)(${s}, ${s2})`,
-	Replace: ([s, s2, s3]) => `${s}.replace(${s2}, ${s3})`,
+	Replace: ([s, s2, s3, n]) =>
+		n === undefined
+			? `${s}.replace(${s2}, ${s3})`
+			: `((str, o, nw, cnt) => { if (cnt < 0) return str.replaceAll(o, nw); let r = ""; let i = 0; for (; cnt > 0; cnt--) { const j = str.indexOf(o, i); if (j < 0) break; r += str.slice(i, j) + nw; i = j + o.length; if (o.length === 0) { if (i >= str.length) break; r += str[i]; i++; } } return r + str.slice(i); })(${s}, ${s2}, ${s3}, ${n})`,
 	ReplaceAll: ([s, s2, s3]) => `${s}.replaceAll(${s2}, ${s3})`,
 	Trim: ([s, s2]) =>
 		`${s}.replace(new RegExp(\`^[\${${s2}}]+|[\${${s2}}]+$\`, "g"), "")`,

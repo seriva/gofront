@@ -1,0 +1,37 @@
+package main
+
+// ── Controls (rendered with templ, mounted into #controls) ────
+
+func countBtnClass(n int, active int) string {
+	if n == active {
+		return "btn active"
+	}
+	return "btn"
+}
+
+func pauseLabel(paused bool) string {
+	if paused {
+		return "Resume"
+	}
+	return "Pause"
+}
+
+templ CountButton(n int, active int) {
+	<button class={ countBtnClass(n, active) } type="button" data-action="count" data-count={ n }>{ n }</button>
+}
+
+templ Controls(target int, paused bool, live int) {
+	<div class="row">
+		<span class="label">Particles</span>
+		@CountButton(512, target)
+		@CountButton(2048, target)
+		@CountButton(4096, target)
+		<button class="btn" type="button" data-action="pause">{ pauseLabel(paused) }</button>
+		<button class="btn" type="button" data-action="reset">Reset</button>
+	</div>
+	<div class="row stats">
+		<span><strong id="live-count">{ live }</strong> live</span>
+		<span ref="fps">— fps</span>
+		<span class="hint">Move the mouse over the canvas to steer the attractor.</span>
+	</div>
+}

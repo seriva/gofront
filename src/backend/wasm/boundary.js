@@ -20,12 +20,22 @@
 //     TypedArray inputs accepted). No copy-back for slices.
 //   - func values: JS callbacks wrapped into wasm closures via thunks; wasm
 //     closures exposed to JS as callable functions.
-//   - maps, non-empty interfaces, error, pointers to non-structs: rejected
+//   - named non-empty interfaces (Task H5.2): wasm values reach JS as their
+//     handle class / live view when the dynamic type is an exported `*T`,
+//     otherwise as a facade whose methods call the wasm dispatchers.  Only
+//     wasm-owned values (`__ref`) go back in; JS-implemented values are
+//     rejected (no cross-boundary itab proxies).
+//   - maps, anonymous interfaces, error, pointers to non-structs: rejected
 //     with a compile error (planned for a later boundary version).
+//   - `gofront/shared` buffers (Task H6.1): `(base, len)` views over the
+//     module's exported linear memory; JS sees a zero-copy TypedArray over
+//     `memory.buffer`.  Only TypedArrays that already alias that memory (ones
+//     handed out by this facade) may be passed back in.
 //   - `*testing.T`: the harness's JS test object, passed as an opaque
 //     externref (test methods are routed back to JS via `env.testing_*`).
 
-import { isTestingT } from "./types.js";
+import { HELPER_SPRINTF, HELPER_STRCONV } from "../js/runtime.js";
+import { getSharedInfo, isTestingT } from "./types.js";
 
 // ── Type classification ──────────────────────────────────────
 
@@ -79,7 +89,7 @@ function funcSigFromAst(t) {
 
 // Classifies a Go type (AST node or checker type) for boundary marshalling.
 // Returns a descriptor `{ k, ... }`; `k === "unsupported"` carries `what`.
-export function classifyType(goType, mod) {
+function classifyType(goType, mod) {
 	if (!goType) return { k: "void" };
 	if (isTestingT(goType)) return { k: "extern", wType: "externref" };
 
@@ -95,6 +105,8 @@ export function classifyType(goType, mod) {
 	switch (t.kind) {
 		case "named":
 			return classifyNamed(t, mod);
+		case "shared":
+			return classifyShared(t, mod);
 		case "untyped":
 			return classifyBasic(t.base);
 		case "basic":
@@ -108,7 +120,7 @@ export function classifyType(goType, mod) {
 		case "func":
 			return classifyFunc(t, mod);
 		case "interface":
-			return classifyInterface(t);
+			return classifyInterface(t, mod);
 		default:
 			return {
 				k: "unsupported",
@@ -183,6 +195,17 @@ function classifyPointer(t, mod) {
 	return { k: "unsupported", what: `pointer to ${what}` };
 }
 
+function classifyShared(t, mod) {
+	const info = getSharedInfo(t, mod.checker);
+	return {
+		k: "shared",
+		key: info.key,
+		ctor: info.ctor,
+		bytes: info.bytes,
+		wType: mod.getSharedType().wType,
+	};
+}
+
 function classifySlice(t, mod) {
 	const elem = classifyType(t.elem, mod);
 	if (elem.k === "unsupported") return elem;
@@ -216,31 +239,66 @@ function classifyArray(t, mod) {
 	};
 }
 
-function classifyFunc(t, mod) {
+function classifySig(t, mod) {
 	const params = (t.params ?? []).map((p) => classifyType(p, mod));
 	const returns = (t.returns ?? [])
 		.map((r) => classifyType(r, mod))
 		.filter((d) => d.k !== "void");
 	const bad = [...params, ...returns].find((d) => d.k === "unsupported");
-	if (bad) return bad;
+	return bad ?? { params, returns };
+}
+
+function classifyFunc(t, mod) {
+	const sig = classifySig(t, mod);
+	if (sig.k === "unsupported") return sig;
 	const closureInfo = mod.getClosureType(t);
 	return {
 		k: "func",
-		params,
-		returns,
+		params: sig.params,
+		returns: sig.returns,
 		closureInfo,
 		key: `c${closureInfo.typeIndex}`,
 		wType: { kind: "ref", nullable: true, typeIndex: closureInfo.typeIndex },
 	};
 }
 
-function classifyInterface(t) {
+function classifyInterface(t, mod) {
 	if (t.name === "error") return { k: "unsupported", what: "error" };
 	if (!t.methods || t.methods.size === 0) return { k: "any", wType: "anyref" };
-	return {
-		k: "unsupported",
-		what: `interface${t.name ? ` '${t.name}'` : ""}`,
+	if (!t.name || !(t.methods instanceof Map))
+		return { k: "unsupported", what: "anonymous interface" };
+	mod._boundaryIfaces ??= new Map();
+	return mod._boundaryIfaces.get(t.name) ?? classifyNamedInterface(t, mod);
+}
+
+function classifyNamedInterface(t, mod) {
+	const desc = {
+		k: "iface",
+		name: t.name,
+		key: t.name,
+		wType: "anyref",
+		methods: [],
+		concrete: [],
 	};
+	// Cached before the walk so self-referencing method signatures terminate.
+	mod._boundaryIfaces.set(t.name, desc);
+	for (const [mName, sigType] of t.methods) {
+		const sig = classifySig(sigType, mod);
+		if (sig.k === "unsupported") {
+			const err = {
+				k: "unsupported",
+				what: `${sig.what} (in method ${t.name}.${mName})`,
+			};
+			mod._boundaryIfaces.set(t.name, err);
+			return err;
+		}
+		desc.methods.push({
+			name: mName,
+			dispatch: `__dispatch_${t.name}_${mName}`,
+			...sig,
+		});
+	}
+	return desc;
 }
 
 // ── Export metadata ──────────────────────────────────────────
@@ -291,6 +349,7 @@ export function collectBoundaryMeta(progs, funcDecls, mod) {
 		structs: [],
 		funcs: [],
 		consts: [],
+		vars: [], // exported package-level shared buffers of wasm packages
 		structByName: new Map(),
 		_mod: mod,
 	};
@@ -304,6 +363,8 @@ export function collectBoundaryMeta(progs, funcDecls, mod) {
 				collectStructDecl(d, pkgName, pkgTarget, meta, mod);
 			} else if (d.kind === "ConstDecl" && pkgTarget === "wasm") {
 				collectConstDecl(d, pkgName, meta, errors);
+			} else if (d.kind === "VarDecl" && pkgTarget === "wasm") {
+				collectSharedVarDecl(d, meta, mod);
 			}
 		}
 	}
@@ -350,6 +411,22 @@ function checkDesc(desc, where, errors) {
 	return desc;
 }
 
+// Exported `var Buf = shared.NewFloat32(n)` globals are exposed to JS as
+// TypedArray views (read once after instantiation; sizing is fixed).
+function collectSharedVarDecl(d, meta, mod) {
+	for (const spec of d.decls ?? d.specs ?? [d]) {
+		const names = spec.names ?? (spec.name ? [spec.name] : []);
+		const values = spec.value ?? (spec.init ? [spec.init] : []);
+		for (let i = 0; i < names.length; i++) {
+			const name = names[i];
+			if (!isExported(name)) continue;
+			const goType = spec.type ?? values[i]?._type;
+			if (!getSharedInfo(goType, mod.checker)) continue;
+			meta.vars.push({ name, desc: classifyType(goType, mod) });
+		}
+	}
+}
+
 function collectMethodMeta(fn, meta, errors, mod) {
 	if (!isExported(fn._methodName)) return;
 	const s = meta.structByName.get(fn._recvTypeName);
@@ -358,6 +435,7 @@ function collectMethodMeta(fn, meta, errors, mod) {
 	s.methods.push({
 		name: fn._methodName,
 		exportName: fn._exportName,
+		fnName: fn.name,
 		ptrRecv: fn.params[0].type?.kind === "pointer",
 		params: fn.params
 			.slice(1)
@@ -418,9 +496,35 @@ function visitNeed(desc, needs, errors, mod) {
 			needs.funcs.set(desc.key, desc);
 			visitSignatureNeeds(desc, needs, errors, mod);
 			return;
+		case "iface":
+			if (needs.ifaces.has(desc.key)) return;
+			needs.ifaces.set(desc.key, desc);
+			for (const m of desc.methods) visitSignatureNeeds(m, needs, errors, mod);
+			return;
+		case "shared":
+			needs.shared = true;
+			return;
 		default:
 			return;
 	}
+}
+
+// Exported `*T` types (already on the boundary surface) whose JS class exposes
+// every interface method: such values reach JS as the handle / live view
+// itself, so type switches and identity still work.  `__itag` matches by
+// `ref.test`, so a struct is only chosen for values that really hold it.
+function concreteCandidates(desc, needs, meta, mod) {
+	const out = [];
+	for (const [name, { info }] of needs.structs) {
+		const both = info.pkgTarget === "both";
+		const names = both
+			? [...(mod.checker?.types?.get(name)?.underlying?.methods?.keys() ?? [])]
+			: (meta.structByName.get(name)?.methods ?? []).map((m) => m.name);
+		const have = new Set(names);
+		if (!desc.methods.every((m) => have.has(m.name))) continue;
+		out.push({ name, typeIndex: info.typeIndex, both });
+	}
+	return out;
 }
 
 function visitSignatureNeeds(sig, needs, errors, mod) {
@@ -437,6 +541,8 @@ function collectNeeds(meta) {
 		slices: new Map(), // key -> desc
 		arrays: new Map(), // key -> desc
 		funcs: new Map(), // key -> desc
+		ifaces: new Map(), // interface name -> desc
+		shared: false, // any shared buffer on the surface
 	};
 	const errors = [];
 	for (const s of meta.structs) {
@@ -445,7 +551,10 @@ function collectNeeds(meta) {
 		for (const m of s.methods) visitSignatureNeeds(m, needs, errors, mod);
 	}
 	for (const f of meta.funcs) visitSignatureNeeds(f, needs, errors, mod);
+	for (const v of meta.vars ?? []) visitNeed(v.desc, needs, errors, mod);
 	if (errors.length > 0) throw new Error([...new Set(errors)].join("\n"));
+	for (const desc of needs.ifaces.values())
+		desc.concrete = concreteCandidates(desc, needs, meta, mod);
 	return needs;
 }
 
@@ -800,7 +909,8 @@ export function addBoundaryHelpers(mod, meta) {
 	// get a trampoline (`__x_<export>`) with the boundary signature; the facade
 	// calls that instead of the raw export.
 	const addTrampoline = (entry) => {
-		const fnIdx = mod.funcMap.get(entry.exportName);
+		// Methods are keyed `T.M` in funcMap but exported as `T_M`.
+		const fnIdx = mod.funcMap.get(entry.fnName ?? entry.exportName);
 		if (fnIdx === undefined) return;
 		const sig = typeAt(mod, mod.funcs[fnIdx - importFuncCount]?.typeIndex);
 		if (sig?.form !== "func") return;
@@ -823,6 +933,101 @@ export function addBoundaryHelpers(mod, meta) {
 	};
 	for (const s of meta.structs) for (const m of s.methods) addTrampoline(m);
 	for (const f of meta.funcs) addTrampoline(f);
+	for (const desc of needs.ifaces.values())
+		addIfaceHelpers(desc, mod, addFunc, addTrampoline);
+
+	if (needs.shared) {
+		const { wType, typeIndex } = mod.getSharedType();
+		addFunc(
+			"__shared_base",
+			[EXT],
+			["i32"],
+			[...getIn(0, wType), { op: "struct.get", typeIndex, fieldIndex: 0 }],
+		);
+		addFunc(
+			"__shared_len",
+			[EXT],
+			["i32"],
+			[...getIn(0, wType), { op: "struct.get", typeIndex, fieldIndex: 1 }],
+		);
+		// JS-side views (e.g. a `subarray`) go back in as a fresh (base, len).
+		addFunc(
+			"__shared_make",
+			["i32", "i32"],
+			[EXT],
+			[get(0), get(1), { op: "struct.new", typeIndex }, ...toExt(wType)],
+		);
+		for (const v of meta.vars ?? []) {
+			const g = mod.resolveGlobal(v.name);
+			if (!g) continue;
+			addFunc(
+				`__var_${v.name}`,
+				[],
+				[EXT],
+				[{ op: "global.get", index: g.index }, ...toExt(wType)],
+			);
+		}
+	}
+}
+
+// `(externref) -> i32`: `ref.test`s param 0 against each type index and
+// returns `resultFor(i)` for the first match, 0 otherwise.
+function refTestChain(typeIndices, resultFor) {
+	const body = typeIndices.flatMap((ti, i) => [
+		{ op: "local.get", index: 0 },
+		{ op: "any.convert_extern" },
+		{ op: "ref.test", typeIndex: ti },
+		{ op: "if", blockType: "void" },
+		{ op: "i32.const", value: resultFor(i) },
+		{ op: "return" },
+		{ op: "end" },
+	]);
+	body.push({ op: "i32.const", value: 0 });
+	return body;
+}
+
+// Type indices (incl. unexported and boxed-value types) whose method set
+// covers the interface, from the same candidate search the dispatchers use.
+function implementingTypeIndices(desc, mod) {
+	let acc = null;
+	for (const m of desc.methods) {
+		const have = new Set(
+			mod.findInterfaceCandidates(null, m.name).map((c) => c.testTypeIndex),
+		);
+		acc = acc === null ? have : new Set([...acc].filter((t) => have.has(t)));
+	}
+	return [...(acc ?? [])];
+}
+
+// Interfaces: method calls go through the existing `ref.test` dispatchers;
+// `__impl$<I>` tells whether a wasm value implements I (guards JS inputs);
+// `__itag$<I>` reports which exported `*T` (1-based) a value holds, 0 if none.
+function addIfaceHelpers(desc, mod, addFunc, addTrampoline) {
+	for (const m of desc.methods) {
+		const entry = { exportName: m.dispatch };
+		addTrampoline(entry);
+		if (!entry.callName)
+			throw new Error(
+				`internal: no wasm dispatcher for interface method ${desc.name}.${m.name}`,
+			);
+		m.callName = entry.callName;
+	}
+	addFunc(
+		`__impl$${desc.key}`,
+		["externref"],
+		["i32"],
+		refTestChain(implementingTypeIndices(desc, mod), () => 1),
+	);
+	if (desc.concrete.length === 0) return;
+	addFunc(
+		`__itag$${desc.key}`,
+		["externref"],
+		["i32"],
+		refTestChain(
+			desc.concrete.map((c) => c.typeIndex),
+			(i) => i + 1,
+		),
+	);
 }
 
 // ── JS facade generation ─────────────────────────────────────
@@ -848,13 +1053,19 @@ function inExpr(desc, v) {
 		case "struct":
 			if (desc.info.pkgTarget === "both")
 				return `${P}to_${desc.name}(${v}, ${desc.ptr ? "false" : "true"})`;
-			return desc.ptr ? `${P}href(${v})` : `${P}hval_${desc.name}(${v})`;
+			return desc.ptr
+				? `${P}href_${desc.name}(${v})`
+				: `${P}hval_${desc.name}(${v})`;
 		case "slice":
 			return `${P}slin_${desc.key}(${v})`;
 		case "array":
 			return `${P}arrin_${desc.key}(${v})`;
 		case "func":
 			return `${P}fnin_${desc.key}(${v})`;
+		case "iface":
+			return `${P}ifin_${desc.key}(${v})`;
+		case "shared":
+			return `${P}shin(${v}, ${desc.ctor})`;
 		default:
 			return v;
 	}
@@ -881,6 +1092,10 @@ function outExpr(desc, v) {
 			return `${P}arrout_${desc.key}(${v})`;
 		case "func":
 			return `${P}fnout_${desc.key}(${v})`;
+		case "iface":
+			return `${P}ifout_${desc.key}(${v})`;
+		case "shared":
+			return `${P}shout(${v}, ${desc.ctor})`;
 		default:
 			return v;
 	}
@@ -989,15 +1204,37 @@ function indent(text, prefix) {
 // quoted, helpers prefixed with `__`.
 export const WASM_IMPORTS_JS = `const ${P}MAX = 9007199254740991n;
 function ${P}imports(stringTable, extraEnv, tag, write) {
-	let buf = [];
+	let lineBuf = "";
 	let targs = [];
-	const flush = () => { const s = buf.join(" "); buf = []; write(s); };
-	const print = (v) => { buf.push(String(v)); };
-	const println = (v) => { buf.push(String(v)); flush(); };
+	const late = { exports: null };
+	const flush = () => { write(lineBuf); lineBuf = ""; };
+	const print = (v) => {
+		const s = String(v);
+		if (lineBuf.length > 0 && !lineBuf.endsWith(" ") && !s.startsWith(" ")) {
+			lineBuf += " ";
+		}
+		lineBuf += s;
+	};
+	const println = (v) => {
+		const s = String(v);
+		if (lineBuf.length > 0 && !lineBuf.endsWith(" ") && !s.startsWith(" ")) {
+			lineBuf += " ";
+		}
+		lineBuf += s;
+		flush();
+	};
 	const targ = (v) => { targs.push(v); };
 	const env = {
 		"panicTag": tag,
-		"panic": (msg) => { throw new Error(String(msg)); },
+		"panic": (msg) => {
+			let str;
+			try {
+				str = String(msg);
+			} catch {
+				str = "[panic object]";
+			}
+			throw new Error(str);
+		},
 		"str": (i) => stringTable[i] ?? "",
 		"str_len": (s) => (s ? s.length : 0),
 		"str_concat": (a, b) => (a ?? "") + (b ?? ""),
@@ -1011,6 +1248,33 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		"str_slice": (s, a, b) => (s ? s.slice(a, b) : ""),
 		"str_from_code_point": (c) => String.fromCodePoint(c),
 		"str_code_point_at": (s, i) => (s ? s.codePointAt(i) : 0),
+		"str_hash": (s) => {
+			if (!s) return 0;
+			let h = 0;
+			for (let i = 0; i < s.length; i++) {
+				h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+			}
+			return h;
+		},
+		"str_to_upper": (s) => (s ? s.toUpperCase() : ""),
+		"str_to_lower": (s) => (s ? s.toLowerCase() : ""),
+		"str_trim_space": (s) => (s ? s.trim() : ""),
+		"str_contains": (s, sub) => (s && sub !== undefined ? (s.includes(sub) ? 1 : 0) : 0),
+		"str_has_prefix": (s, pre) => (s && pre !== undefined ? (s.startsWith(pre) ? 1 : 0) : 0),
+		"str_has_suffix": (s, suf) => (s && suf !== undefined ? (s.endsWith(suf) ? 1 : 0) : 0),
+		"str_index": (s, sub) => (s ? s.indexOf(sub) : -1),
+		"str_last_index": (s, sub) => (s ? s.lastIndexOf(sub) : -1),
+		"str_repeat": (s, n) => (s && n > 0 ? s.repeat(Number(n)) : ""),
+		"str_replace_all": (s, o, n) => (s ? s.replaceAll(o, n) : ""),
+		"str_equal_fold": (a, b) => ((a ?? "").toLowerCase() === (b ?? "").toLowerCase() ? 1 : 0),
+		"str_count": (s, sep) => {
+			if (!s) return sep === "" ? 1 : 0;
+			if (sep === "") return s.length + 1;
+			return s.split(sep).length - 1;
+		},
+		"str_from_i64": (n) => String(n),
+		"str_from_i32": (n) => String(n),
+		"str_from_f64": (f) => String(f),
 		"is_string": (v) => (typeof v === "string" ? 1 : 0),
 		"print_i32": print, "print_i64": print, "print_f32": print, "print_f64": print,
 		"print_str": print, "print_any": print,
@@ -1027,14 +1291,107 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		"testing_name": (t) => t.Name(),
 		"testing_flag": (t, i) => (t[stringTable[i]]() ? 1 : 0),
 	};
+	// Stdlib imports (strings/strconv/utf8/fmt/t.Run) are a separate block so
+	// modules that never call them do not ship it (see WASM_STDLIB_JS).
+	if (typeof ${P}stdlib === "function") {
+		Object.assign(env, ${P}stdlib(stringTable, {
+			"take": () => { const a = targs; targs = []; return a; },
+			"printf": (s) => {
+				lineBuf += s;
+				const nl = lineBuf.lastIndexOf("\\n");
+				if (nl >= 0) { write(lineBuf.slice(0, nl)); lineBuf = lineBuf.slice(nl + 1); }
+			},
+			"late": late,
+		}));
+	}
 	Object.assign(env, extraEnv);
 	const m = {};
-	for (const k of ["sin", "cos", "tan", "asin", "acos", "atan", "atan2", "pow", "exp", "log", "log2", "log10", "round"]) m[k] = Math[k];
-	return { "env": env, "Math": m };
+	for (const k of ["sin", "cos", "tan", "asin", "acos", "atan", "atan2", "pow", "exp", "log", "log2", "log10", "cbrt", "hypot"]) m[k] = Math[k];
+	m.mod = (x, y) => x % y;
+	// Go rounds half away from zero; Math.round rounds half toward +Infinity.
+	m.round = (x) => Math.sign(x) * Math.round(Math.abs(x));
+	// Exports are needed by imports that call back into the module (t.Run).
+	return { "env": env, "Math": m, "__bind": (ex) => { late.exports = ex; } };
+}`;
+
+// JS side of the STDLIB_IMPORTS table (index.js); emitted only when the
+// module imports one of the packages that use it.
+export const WASM_STDLIB_JS = `${HELPER_SPRINTF}
+${HELPER_STRCONV}
+function ${P}stdlib(stringTable, io) {
+	let parts = [];
+	let strconvErr = null;
+	let decodeSize = 0;
+	return {
+		"testing_run": (t, name, fn) => (t.Run(name, (sub) => { io.late.exports.__testing_run_cb(fn, sub); }) ? 1 : 0),
+		"fmt_sprintf": (f) => __sprintf(f ?? "", ...io.take()),
+		"fmt_printf": (f) => { io.printf(__sprintf(f ?? "", ...io.take())); },
+		"str_trim": (s, c) => ${P}trim(s ?? "", c ?? "", true, true),
+		"str_trim_left": (s, c) => ${P}trim(s ?? "", c ?? "", true, false),
+		"str_trim_right": (s, c) => ${P}trim(s ?? "", c ?? "", false, true),
+		"str_trim_prefix": (s, p) => (s && p && s.startsWith(p) ? s.slice(p.length) : (s ?? "")),
+		"str_trim_suffix": (s, p) => (s && p && s.endsWith(p) ? s.slice(0, s.length - p.length) : (s ?? "")),
+		"str_replace": (s, o, n, cnt) => {
+			s = s ?? ""; o = o ?? ""; n = n ?? "";
+			if (cnt < 0) return s.replaceAll(o, n);
+			let out = "", from = 0;
+			for (let k = 0; k < cnt; k++) {
+				const at = s.indexOf(o, from);
+				if (at < 0) break;
+				out += s.slice(from, at) + n;
+				from = at + o.length;
+				if (o === "") { if (from >= s.length) break; out += s[from]; from++; }
+			}
+			return out + s.slice(from);
+		},
+		"str_contains_rune": (s, r) => ((s ?? "").includes(String.fromCodePoint(r)) ? 1 : 0),
+		"str_contains_any": (s, cs) => { for (const c of (cs ?? "")) if ((s ?? "").includes(c)) return 1; return 0; },
+		"str_index_byte": (s, b) => (s ?? "").indexOf(String.fromCharCode(b)),
+		"str_index_rune": (s, r) => (s ?? "").indexOf(String.fromCodePoint(r)),
+		"str_index_any": (s, cs) => { s = s ?? ""; let best = -1; for (const c of (cs ?? "")) { const i = s.indexOf(c); if (i >= 0 && (best < 0 || i < best)) best = i; } return best; },
+		"str_last_index_byte": (s, b) => (s ?? "").lastIndexOf(String.fromCharCode(b)),
+		"str_title": (s) => (s ?? "").replace(/(^|[^\\p{L}\\p{N}_'])(\\p{Ll})/gu, (m, a, b) => a + b.toUpperCase()),
+		"str_split": (s, sep) => { parts = (s ?? "").split(sep ?? ""); return parts.length; },
+		"str_fields": (s) => { parts = (s ?? "").split(/\\s+/).filter((p) => p !== ""); return parts.length; },
+		"str_part": (i) => parts[i] ?? "",
+		"strconv_atoi": (s) => { const r = __strconv_atoi(s ?? ""); strconvErr = r[1]; return r[0]; },
+		"strconv_parse_int": (s, base, bits) => { const r = __strconv_parse_int(s ?? "", base, bits); strconvErr = r[1]; return r[0]; },
+		"strconv_parse_float": (s) => { const r = __strconv_parse_float(s ?? ""); strconvErr = r[1]; return r[0]; },
+		"strconv_parse_bool": (s) => { const r = __strconv_parse_bool(s ?? ""); strconvErr = r[1]; return r[0] ? 1 : 0; },
+		"strconv_err": () => strconvErr,
+		"strconv_format_float": (f, fmtc, prec, _bits) => __strconv_format_float(f, fmtc, prec),
+		"strconv_format_int": (n, base) => n.toString(base),
+		"strconv_quote": (s) => JSON.stringify(s ?? ""),
+		"utf8_rune_count": (s) => { let n = 0; for (const _ of (s ?? "")) n++; return n; },
+		"utf8_rune_len": (r) => (r < 0 || r > 0x10ffff || (r >= 0xd800 && r <= 0xdfff) ? -1 : r < 0x80 ? 1 : r < 0x800 ? 2 : r < 0x10000 ? 3 : 4),
+		"utf8_valid_string": (s) => (s ?? "").isWellFormed ? ((s ?? "").isWellFormed() ? 1 : 0) : (/[\\uD800-\\uDFFF]/.test((s ?? "").replace(/[\\uD800-\\uDBFF][\\uDC00-\\uDFFF]/g, "")) ? 0 : 1),
+		"utf8_decode_rune": (s, last) => {
+			s = s ?? "";
+			if (s.length === 0) { decodeSize = 0; return 0xfffd; }
+			let cp;
+			if (last) { const tail = s.codePointAt(s.length - 1); cp = (tail >= 0xdc00 && tail <= 0xdfff && s.length >= 2) ? s.codePointAt(s.length - 2) : tail; }
+			else cp = s.codePointAt(0);
+			if (cp >= 0xd800 && cp <= 0xdfff) { decodeSize = 1; return 0xfffd; }
+			// Size is in UTF-16 code units, matching the JS backend (strings are JS strings).
+			decodeSize = cp > 0xffff ? 2 : 1;
+			return cp;
+		},
+		"utf8_decode_size": () => decodeSize,
+		"utf8_full_rune": (s) => { s = s ?? ""; if (s.length === 0) return 0; const c = s.charCodeAt(0); return (c >= 0xd800 && c <= 0xdbff && s.length < 2) ? 0 : 1; },
+	};
+}
+function ${P}trim(s, cutset, left, right) {
+	const cs = Array.from(cutset);
+	const chars = Array.from(s);
+	let a = 0, b = chars.length;
+	if (left) while (a < b && cs.includes(chars[a])) a++;
+	if (right) while (b > a && cs.includes(chars[b - 1])) b--;
+	return chars.slice(a, b).join("");
 }`;
 
 // Runtime loader emitted at the top of the facade.
-export const WASM_LOADER_JS = `${WASM_IMPORTS_JS}
+const wasmLoaderJs = (stdlibEnv) => `${WASM_IMPORTS_JS}
+${stdlibEnv ? WASM_STDLIB_JS : ""}
 async function ${P}fetch(url) {
 	const res = await fetch(url);
 	if (!res.ok) throw new Error("GoFront: failed to fetch " + url + " (" + res.status + ")");
@@ -1043,7 +1400,8 @@ async function ${P}fetch(url) {
 async function ${P}instantiate(imports) {
 	const bytes = globalThis.__GOFRONT_WASM_BYTES;
 	if (bytes) return WebAssembly.instantiate(bytes, imports);
-	const url = globalThis.__GOFRONT_WASM_URL ?? "app.wasm";
+	// Resolve relative to the bundle so the app works from any page path.
+	const url = globalThis.__GOFRONT_WASM_URL ?? new URL("app.wasm", import.meta.url).href;
 	if (typeof WebAssembly.instantiateStreaming === "function") {
 		try { return await WebAssembly.instantiateStreaming(fetch(url), imports); }
 		catch { /* fall through: wrong MIME type or no streaming support */ }
@@ -1060,6 +1418,7 @@ async function ${P}load(stringTable, extraEnv) {
 	// start function while package-level initializers run), so exports are
 	// returned raw: no try/catch wrapper, which keeps JS→wasm calls inlinable.
 	const result = await ${P}instantiate(imports);
+	imports.__bind(result.instance.exports);
 	return result.instance.exports;
 }
 // Go int/int64 cross the boundary as f64 (exact within the safe-integer range).
@@ -1074,6 +1433,11 @@ const ${P}u64out = (v) => {
 };
 const ${P}strin = (v) => (v == null ? "" : String(v));
 const ${P}href = (h) => (h == null ? null : h.__ref);
+// Tags a struct pointer held in an interface (same marker as the JS backend's __ifp).
+const ${P}ptag = (h) => {
+	if (h !== null && h.__p !== true && Object.isExtensible(h)) Object.defineProperty(h, "__p", { "value": true, "configurable": true });
+	return h;
+};
 const ${P}NIL_DEREF_PATTERNS = [
 	"dereferencing a null pointer", // V8
 	"dereferencing null pointer", // SpiderMonkey
@@ -1110,16 +1474,19 @@ function ${P}idxview(n, getAt, setAt) {
 // Generates the JS facade for the linked wasm module.
 export function generateFacade(
 	meta,
-	{ stringTable = [], callMain = false } = {},
+	{ stringTable = [], callMain = false, stdlibEnv = true } = {},
 ) {
 	const needs = meta._needs ?? collectNeeds(meta);
-	const out = [WASM_LOADER_JS];
+	const out = [wasmLoaderJs(stdlibEnv)];
 
 	// JS callback imports (registered before instantiation; bodies run after).
 	out.push(`const ${P}env = {};`);
 	for (const [key, desc] of needs.funcs) {
 		const names = desc.params.map((_, i) => `a${i}`);
-		const call = `fn(${desc.params.map((d, i) => outExpr(d, names[i])).join(", ")})`;
+		const args = desc.params.map((d, i) =>
+			isPtrBoth(d) ? `${P}view_${d.name}(${names[i]})` : outExpr(d, names[i]),
+		);
+		const call = `fn(${args.join(", ")})`;
 		let body;
 		if (desc.returns.length === 0) body = `${call};`;
 		else if (desc.returns.length === 1)
@@ -1129,7 +1496,9 @@ export function generateFacade(
 				.map((d, i) => inExpr(d, `__r[${i}]`))
 				.join(", ")}];`;
 		const sig = ["fn", ...names].join(", ");
-		out.push(`${P}env["__invoke$${key}"] = (${sig}) => { ${body} };`);
+		out.push(
+			`${P}env["__invoke$${key}"] = (${sig}) => { try { ${body} } catch (__e) { if (__w && __w.__push_panic) __w.__push_panic(__e.message ?? String(__e)); throw __e; } };`,
+		);
 	}
 	out.push(
 		`const __w = await ${P}load(${JSON.stringify(stringTable)}, ${P}env);`,
@@ -1196,22 +1565,61 @@ function ${P}arrview_${key}(a) {
 			desc.returns,
 			["c"],
 		);
-		out.push(`const ${P}fnmap_${key} = new WeakMap();
+		out.push(`const ${P}fn_j2w_${key} = new WeakMap();
+const ${P}fn_w2j_${key} = new WeakMap();
 function ${P}fnin_${key}(fn) {
 	if (fn == null) return null;
-	let c = ${P}fnmap_${key}.get(fn);
-	if (!c) { c = __w.__wrap_fn$${key}(fn); ${P}fnmap_${key}.set(fn, c); }
+	let c = ${P}fn_j2w_${key}.get(fn);
+	if (!c) {
+		c = __w.__wrap_fn$${key}(fn);
+		${P}fn_j2w_${key}.set(fn, c);
+		${P}fn_w2j_${key}.set(c, fn);
+	}
 	return c;
 }
 function ${P}fnout_${key}(c) {
 	if (c == null) return null;
-	return (${names.join(", ")}) => {
+	let fn = ${P}fn_w2j_${key}.get(c);
+	if (!fn) {
+		fn = (${names.join(", ")}) => {
 ${indent(body, "\t")}
-	};
+		};
+		fn.__ref = c;
+		${P}fn_w2j_${key}.set(c, fn);
+		${P}fn_j2w_${key}.set(fn, c);
+	}
+	return fn;
+}`);
+	}
+
+	for (const [key, desc] of needs.ifaces) genIfaceFacade(out, key, desc);
+
+	if (needs.shared) {
+		// Zero-copy TypedArray views over the exported memory.  Memory never
+		// grows after the start function (allocation is startup-only), but the
+		// cached view is still re-validated against the live buffer.
+		out.push(`const ${P}shc = new WeakMap();
+function ${P}shout(r, Ctor) {
+	if (r == null) return null;
+	let v = ${P}shc.get(r);
+	if (!v || v.buffer !== __w.memory.buffer) {
+		v = new Ctor(__w.memory.buffer, __w.__shared_base(r), __w.__shared_len(r));
+		${P}shc.set(r, v);
+	}
+	return v;
+}
+function ${P}shin(v, Ctor) {
+	if (v == null) return null;
+	if (!(v instanceof Ctor) || v.buffer !== __w.memory.buffer) throw new TypeError("GoFront: expected a " + Ctor.name + " view over the wasm shared memory");
+	return __w.__shared_make(v.byteOffset, v.length);
 }`);
 	}
 
 	for (const c of meta.consts) out.push(`const ${c.name} = ${c.value};`);
+	for (const v of meta.vars ?? [])
+		out.push(
+			`const ${v.name} = ${P}shout(__w.__var_${v.name}(), ${v.desc.ctor});`,
+		);
 
 	for (const f of meta.funcs) {
 		const { names, body } = genFuncBody(
@@ -1298,21 +1706,66 @@ ${backLines.join("\n")}
 }`);
 }
 
+function genIfaceFacade(out, key, desc) {
+	const methods = desc.methods.map((m) => {
+		const { names, body } = genFuncBody(m.callName, m.params, m.returns, [
+			"this.__ref",
+		]);
+		return `\t${m.name}(${names.join(", ")}) {\n${indent(body, "\t")}\n\t}`;
+	});
+	const cases = desc.concrete.map((c, i) => {
+		const wrap = c.both ? `${P}view_${c.name}(r)` : `${c.name}.__wrap(r)`;
+		return `\t\tcase ${i + 1}: return ${P}ptag(${wrap});`;
+	});
+	const tag =
+		cases.length > 0
+			? `\tswitch (__w.__itag$${key}(r)) {\n${cases.join("\n")}\n\t}\n`
+			: "";
+	const msg = `GoFront: a JS-implemented value cannot cross into wasm as interface '${desc.name}'; implement it in a wasm package or pass a func callback`;
+	const implMsg = `GoFront: wasm value does not implement interface '${desc.name}'`;
+	out.push(`class ${P}I_${key} {
+	constructor(r) { this.__ref = r; }
+${methods.join("\n")}
+}
+const ${P}ic_${key} = new WeakMap();
+function ${P}ifout_${key}(r) {
+	if (r == null) return null;
+${tag}	let o = ${P}ic_${key}.get(r);
+	if (!o) { o = new ${P}I_${key}(r); ${P}ic_${key}.set(r, o); }
+	return o;
+}
+function ${P}ifin_${key}(v) {
+	if (v == null) return null;
+	if (v.__ref === undefined) throw new TypeError(${JSON.stringify(msg)});
+	if (!__w.__impl$${key}(v.__ref)) throw new TypeError(${JSON.stringify(implMsg)});
+	return v.__ref;
+}`);
+}
+
 function genHandleStruct(out, name, fields, methods) {
 	// `$`-suffixed params keep the mangler from renaming the matching getters.
 	const ctorParams = fields.map((f) => `${f.name}$ = ${zeroExpr(f.desc)}`);
 	const ctorArgs = fields.map((f) => inExpr(f.desc, `${f.name}$`));
+	const fromArgs = fields.map((f) => `o.${f.name}`);
+	const ptrMsg = `GoFront: expected a ${name} handle for a *${name} parameter (use ${name}.from(obj) to create one)`;
 	const lines = [
 		`const ${P}h_${name} = new WeakMap();
 function ${P}hval_${name}(h) {
 	if (h == null) return __w.__zero_${name}();
-	return __w.__clone_${name}(h.__ref);
+	if (h.__ref !== undefined) return __w.__clone_${name}(h.__ref);
+	return ${name}.from(h).__ref;
+}
+function ${P}href_${name}(h) {
+	if (h == null) return null;
+	if (h.__ref !== undefined) return h.__ref;
+	throw new TypeError(${JSON.stringify(ptrMsg)});
 }
 class ${name} {
 	constructor(${ctorParams.join(", ")}) {
 		this.__ref = __w.__new_${name}(${ctorArgs.join(", ")});
 		${P}h_${name}.set(this.__ref, this);
 	}
+	static from(o) { return new ${name}(${fromArgs.join(", ")}); }
 	static __wrap(ref) {
 		if (ref == null) return null;
 		let h = ${P}h_${name}.get(ref);
