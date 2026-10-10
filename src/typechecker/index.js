@@ -45,6 +45,7 @@ export class TypeChecker {
 		this.types = new Map(); // named types
 		this.globals = new Scope();
 		this.errors = [];
+		this.warnings = []; // non-fatal diagnostics (e.g. boundary-call-in-loop hints)
 		this.target = "js";
 		this.pkgName = null;
 		this.blockers = new Map();
@@ -77,7 +78,8 @@ export class TypeChecker {
 	// Add an imported GoFront package as a qualified namespace.
 	// e.g. addPackageNamespace('utils', symbolsMap, typesMap)
 	// lets callers type-check `utils.Foo` via SelectorExpr.
-	addPackageNamespace(pkgName, symbols, types) {
+	// `target` is the imported package's compile target ("js"/"wasm"/"both").
+	addPackageNamespace(pkgName, symbols, types, target = null) {
 		const members = {};
 		for (const [name, type] of symbols) members[name] = type;
 		// _gofront: true marks this as a GoFront package — exported identifier rules apply
@@ -86,6 +88,7 @@ export class TypeChecker {
 			name: pkgName,
 			members,
 			_gofront: true,
+			_target: target,
 		});
 		for (const [name, type] of types) {
 			this.types.set(name, type);
@@ -169,6 +172,21 @@ export class TypeChecker {
 		);
 		this.errors.push(e);
 		return TAINTED_ANY; // tainted recovery type — suppresses downstream cascade errors
+	}
+
+	// Non-fatal diagnostic: formatted like an error but collected separately so
+	// the build still succeeds. The compiler prints these as warnings.
+	warn(msg, node, hint = null) {
+		const e = new TypeCheckError(
+			msg,
+			node,
+			this._currentFile,
+			this._currentSource,
+			hint,
+		);
+		// `log.warn` adds the "warning:" label, so strip the error one here:
+		// "Type error in main.go at line 3:5: msg" → "main.go at line 3:5: msg".
+		this.warnings.push(e.message.replace(/^Type error(?: in)?[: ]\s*/, ""));
 	}
 
 	_reportUnused(scope, node) {

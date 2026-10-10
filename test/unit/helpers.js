@@ -145,6 +145,7 @@ export function runWasm(
 	wasmBytes,
 	{ stringTable = [], extraImports = {} } = {},
 ) {
+	assertValidWasm(wasmBytes);
 	const lines = [];
 	const { exports, instance, module } = instantiateWasm(wasmBytes, {
 		stringTable,
@@ -152,6 +153,21 @@ export function runWasm(
 		extraImports,
 	});
 	return { exports, lines, instance, module };
+}
+
+// Every module produced in tests must pass the engine's validator — a
+// module that instantiates lazily could otherwise hide an encoding bug in a
+// function the test never calls.
+export function assertValidWasm(bytes) {
+	if (!WebAssembly.validate(bytes)) {
+		let detail = "";
+		try {
+			new WebAssembly.Module(bytes);
+		} catch (e) {
+			detail = `: ${e.message}`;
+		}
+		throw new Error(`WebAssembly.validate failed${detail}`);
+	}
 }
 
 export function compileHybrid(source, options = {}) {
@@ -176,6 +192,7 @@ export function compileHybrid(source, options = {}) {
 			`WASM compile failed:\n${wasmErrors.map((e) => e.message).join("\n")}`,
 		);
 	}
+	assertValidWasm(wasm);
 
 	return {
 		js,
@@ -308,6 +325,7 @@ export async function compileHybridProject(files, { exports = [] } = {}) {
 	const result = compileDir(root);
 	const parts = [];
 	if (result.wasm) {
+		assertValidWasm(result.wasm);
 		parts.push(
 			`globalThis.__GOFRONT_WASM_BYTES = new Uint8Array([${Array.from(result.wasm).join(",")}]);`,
 		);

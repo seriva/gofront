@@ -13,10 +13,12 @@ import {
 	wTypeKey,
 } from "./boundary.js";
 import { FunctionEmitter } from "./emit.js";
+import { BINARY_MATH_IMPORTS } from "./emit-stdlib.js";
 import { encodeModule, isGoFrontWasm } from "./encode.js";
 import { hasGenerics, monomorphise } from "./monomorph.js";
 import { hasNativeWasmOpt, optimizeWasm } from "./optimize.js";
 import {
+	ERROR_STRUCT,
 	getFuncSignature,
 	getMapKeyValTypes,
 	getReceiverTypeName,
@@ -28,6 +30,72 @@ import {
 import { emitWat } from "./wat.js";
 
 export { hasNativeWasmOpt, isGoFrontWasm, optimizeWasm };
+
+const ERROR_PRODUCING_PKGS = new Set(["errors", "fmt", "strconv"]);
+// Packages whose calls lower to the `env.*` imports in STDLIB_IMPORTS (the
+// matching JS lives in WASM_STDLIB_JS).  Only modules importing one of them
+// declare the imports and ship that JS block.
+const STDLIB_ENV_PKGS = new Set([
+	"strings",
+	"strconv",
+	"unicode/utf8",
+	"fmt",
+	"testing",
+]);
+
+function importsAnyOf(programs, pkgs) {
+	return (programs ?? []).some((p) =>
+		(p.imports ?? []).some((decl) =>
+			(decl.imports ?? [decl]).some((imp) => pkgs.has(imp.path)),
+		),
+	);
+}
+
+// [name, params, results] for `env.*` imports backing stdlib calls; the JS
+// side lives in WASM_STDLIB_JS (boundary.js).  All are registered eagerly
+// (when any STDLIB_ENV_PKGS package is imported) because the import table is
+// locked before function bodies are emitted.
+const S = "externref";
+const STDLIB_IMPORTS = [
+	// strings
+	["str_trim", [S, S], [S]],
+	["str_trim_left", [S, S], [S]],
+	["str_trim_right", [S, S], [S]],
+	["str_trim_prefix", [S, S], [S]],
+	["str_trim_suffix", [S, S], [S]],
+	["str_replace", [S, S, S, "i32"], [S]],
+	["str_contains_rune", [S, "i32"], ["i32"]],
+	["str_contains_any", [S, S], ["i32"]],
+	["str_index_byte", [S, "i32"], ["i32"]],
+	["str_index_rune", [S, "i32"], ["i32"]],
+	["str_index_any", [S, S], ["i32"]],
+	["str_last_index_byte", [S, "i32"], ["i32"]],
+	["str_title", [S], [S]],
+	["str_split", [S, S], ["i32"]],
+	["str_fields", [S], ["i32"]],
+	["str_part", ["i32"], [S]],
+	// strconv
+	["strconv_atoi", [S], ["i64"]],
+	["strconv_parse_int", [S, "i32", "i32"], ["i64"]],
+	["strconv_parse_float", [S], ["f64"]],
+	["strconv_parse_bool", [S], ["i32"]],
+	["strconv_err", [], [S]],
+	["strconv_format_float", ["f64", "i32", "i32", "i32"], [S]],
+	["strconv_format_int", ["i64", "i32"], [S]],
+	["strconv_quote", [S], [S]],
+	// unicode/utf8
+	["utf8_rune_count", [S], ["i32"]],
+	["utf8_rune_len", ["i32"], ["i32"]],
+	["utf8_valid_string", [S], ["i32"]],
+	["utf8_decode_rune", [S, "i32"], ["i32"]],
+	["utf8_decode_size", [], ["i32"]],
+	["utf8_full_rune", [S], ["i32"]],
+	// fmt (arguments travel through the testing_arg_* buffer)
+	["fmt_sprintf", [S], [S]],
+	["fmt_printf", [S], []],
+	// testing.T.Run: the harness calls back into the exported __testing_run_cb
+	["testing_run", [S, S, "anyref"], ["i32"]],
+];
 
 class ModuleEmitter {
 	constructor(checker, lowerResult = null, programs = [], options = {}) {
@@ -68,10 +136,17 @@ class ModuleEmitter {
 		this.funcMap = new Map(); // name -> global func index
 		this.funcParamTypes = new Map(); // name -> param types array
 		this.funcParamGoTypes = new Map(); // name -> param Go types array
+		this.funcReturnTypesByIdx = new Map(); // global func index -> result wasm types
 
 		this.exports = []; // export entries
 		this.stringTable = []; // string literals
 		this.stringCache = new Map();
+
+		// `errors.New` / `fmt.Errorf` / strconv parse failures allocate the
+		// runtime's own error struct; it joins the struct rec group so the
+		// `error.Error` dispatcher can `ref.test` it like any user type.
+		this.hasErrorType = importsAnyOf(programs, ERROR_PRODUCING_PKGS);
+		this.usesStdlibEnv = importsAnyOf(programs, STDLIB_ENV_PKGS);
 
 		if (programs && programs.length > 0) {
 			this.initTypes(programs);
@@ -86,6 +161,20 @@ class ModuleEmitter {
 		const rawStructs = [];
 		const seen = new Set();
 		const aliases = []; // qualified key (pkg.T) -> unqualified struct name
+
+		if (this.hasErrorType) {
+			seen.add(ERROR_STRUCT);
+			rawStructs.push({
+				name: ERROR_STRUCT,
+				structType: {
+					kind: "struct",
+					fields: new Map([
+						["msg", { kind: "basic", name: "string" }],
+						["cause", { kind: "basic", name: "any" }],
+					]),
+				},
+			});
+		}
 
 		for (const p of progs) {
 			for (const d of p.decls ?? []) {
@@ -150,7 +239,8 @@ class ModuleEmitter {
 		for (let i = 0; i < rawStructs.length; i++) {
 			const s = rawStructs[i];
 			const info = this.structTypes.get(s.name);
-			const resolvedStruct = this.checker?.types?.get(s.name)?.underlying;
+			const resolvedStruct =
+				s.structType ?? this.checker?.types?.get(s.name)?.underlying;
 
 			const fields = [];
 			const fieldIndexMap = new Map();
@@ -551,6 +641,18 @@ class ModuleEmitter {
 		this.getStrFromI32ImportIndex();
 		this.getStrFromF64ImportIndex();
 		this.getIsStringImportIndex(); // env.is_string
+		this.getTestingCallImportIndex();
+		this.getTestingNameImportIndex();
+		this.getTestingFlagImportIndex();
+		for (const t of ["i32", "i64", "f32", "f64", "externref", "anyref"]) {
+			this.getTestingArgImportIndex(t, false);
+		}
+		this.getTestingArgImportIndex("i32", true);
+		if (this.usesStdlibEnv) {
+			for (const [name, params, results] of STDLIB_IMPORTS) {
+				this.getOrAddFuncImport("env", name, params, results);
+			}
+		}
 
 		// Logging built-ins
 		this.getPrintlnEmptyIndex(); // env.println_empty
@@ -575,12 +677,12 @@ class ModuleEmitter {
 			"log2",
 			"log10",
 			"round",
+			"cbrt",
 		];
 		for (const m of unaryMath) {
 			this.getMathImportIndex(m, false);
 		}
-		const binaryMath = ["atan2", "pow"];
-		for (const m of binaryMath) {
+		for (const m of BINARY_MATH_IMPORTS) {
 			this.getMathImportIndex(m, true);
 		}
 	}
@@ -802,7 +904,7 @@ class ModuleEmitter {
 			wType === "externref" ? "str" : wType === "anyref" ? "any" : wType;
 		if (!["i32", "i64", "f32", "f64", "str", "any"].includes(suffix)) {
 			throw new Error(
-				"only primitive, string and any arguments are supported for testing.T methods in wasm packages",
+				"only primitive, string, error and any arguments are supported for fmt and testing.T calls in wasm packages (format slices/structs field by field)",
 			);
 		}
 		return this.getOrAddFuncImport(
@@ -1087,6 +1189,22 @@ class ModuleEmitter {
 	getMathImportIndex(jsName, isBinary = false) {
 		const params = isBinary ? ["f64", "f64"] : ["f64"];
 		return this.getOrAddFuncImport("Math", jsName, params, ["f64"]);
+	}
+
+	// Imports from the STDLIB_IMPORTS table (strings/strconv/utf8/fmt/testing.Run).
+	getStdlibImportIndex(name) {
+		const idx = this.importCache.get(`env.${name}`);
+		if (idx === undefined) throw new Error(`Unknown runtime import: ${name}`);
+		return idx;
+	}
+
+	// Closure type of `func(*testing.T)` (the t.Run body).
+	getTestingRunClosureType() {
+		return this.getClosureType({
+			kind: "func",
+			params: [{ kind: "pointer", base: { kind: "named", name: "testing.T" } }],
+			returns: [],
+		});
 	}
 
 	resolveFuncIndex(name) {
@@ -1419,6 +1537,7 @@ export function compileWasmModule(
 			if (d.kind === "FuncDecl") {
 				d._pkgName = pkgName;
 				d._pkgTarget = pkgTarget;
+				d._srcFile = p._path ?? p._filename ?? null;
 				if (d.name === "init" || d.name.startsWith("init$")) {
 					const renamed = initCount === 0 ? "init" : `init$${initCount}`;
 					d.name = renamed;
@@ -1446,6 +1565,8 @@ export function compileWasmModule(
 					_sourceDecl: d,
 					_pkgName: pkgName,
 					_pkgTarget: pkgTarget,
+					_srcFile: p._path ?? p._filename ?? null,
+					_line: d._line,
 				};
 				funcDecls.push(normFn);
 			}
@@ -1480,6 +1601,8 @@ export function compileWasmModule(
 				_isClosure: true,
 				_funcLit: node,
 				_rootFuncDecl: rootFn,
+				_srcFile: rootFn?._srcFile ?? null,
+				_line: typeof node._line === "number" ? node._line : rootFn?._line,
 			};
 			node._liftedFn = liftedFn;
 			closures.push(liftedFn);
@@ -1600,129 +1723,7 @@ export function compileWasmModule(
 	funcDecls.push(pushPanicFn);
 
 	// 1d. Interface dispatchers
-	const interfaceCalls = new Map();
-
-	function scanInterfaceCalls(node) {
-		if (!node || typeof node !== "object") return;
-		if (Array.isArray(node)) {
-			for (const item of node) scanInterfaceCalls(item);
-			return;
-		}
-		if (node.kind === "CallExpr" && node.func?.kind === "SelectorExpr") {
-			const recvType = node.func.expr?._type;
-			if (isNonEmptyInterface(recvType, checker)) {
-				let ifaceName = getReceiverTypeName(recvType, node.func.expr);
-				if (!ifaceName) ifaceName = "anon";
-				const methodName = node.func.field;
-				const key = `${ifaceName}.${methodName}`;
-				if (!interfaceCalls.has(key)) {
-					interfaceCalls.set(key, {
-						ifaceName,
-						ifaceType: recvType,
-						methodName,
-						callNode: node,
-					});
-				}
-			}
-		}
-		for (const key of Object.keys(node)) {
-			if (key.startsWith("_")) continue;
-			scanInterfaceCalls(node[key]);
-		}
-	}
-
-	for (const fn of funcDecls) {
-		if (fn.body) scanInterfaceCalls(fn.body);
-	}
-
-	for (const p of progs) {
-		for (const d of p.decls ?? []) {
-			if (d.kind === "TypeDecl") {
-				const resolved = checker?.types?.get(d.name) ?? d.type;
-				const underlying =
-					resolved?.kind === "named"
-						? resolved.underlying
-						: d.type?.kind === "InterfaceType"
-							? d.type
-							: resolved;
-				if (isNonEmptyInterface(underlying, checker)) {
-					const ifaceName = d.name;
-					const methods =
-						underlying.methods instanceof Map
-							? Array.from(underlying.methods.entries())
-							: Array.isArray(underlying.methods)
-								? underlying.methods.map((m) => [m.name ?? m, m])
-								: [];
-					for (const [mName, mSig] of methods) {
-						const key = `${ifaceName}.${mName}`;
-						if (!interfaceCalls.has(key)) {
-							interfaceCalls.set(key, {
-								ifaceName,
-								ifaceType: resolved,
-								methodName: mName,
-								methodSig: mSig,
-							});
-						}
-					}
-				}
-			}
-		}
-	}
-
-	for (const [, info] of interfaceCalls.entries()) {
-		let methodSig = info.methodSig;
-		if (!methodSig) {
-			const ifaceResolved =
-				checker?.resolveType?.(
-					info.ifaceType?.kind === "named"
-						? info.ifaceType.underlying
-						: info.ifaceType,
-				) ?? info.ifaceType;
-			if (ifaceResolved?.methods instanceof Map) {
-				methodSig = ifaceResolved.methods.get(info.methodName);
-			}
-		}
-
-		const params = [{ name: "__recv", type: { kind: "basic", name: "any" } }];
-		if (methodSig?.params) {
-			for (let p = 0; p < methodSig.params.length; p++) {
-				params.push({ name: `__arg${p}`, type: methodSig.params[p] });
-			}
-		} else if (info.callNode?.args) {
-			for (let p = 0; p < info.callNode.args.length; p++) {
-				params.push({
-					name: `__arg${p}`,
-					type: info.callNode.args[p]._type ?? {
-						kind: "basic",
-						name: "any",
-					},
-				});
-			}
-		}
-
-		let returnType = null;
-		if (methodSig?.returns) {
-			if (methodSig.returns.length === 1) returnType = methodSig.returns[0];
-			else if (methodSig.returns.length > 1)
-				returnType = { kind: "tuple", types: methodSig.returns };
-		} else if (info.callNode?._type) {
-			returnType = info.callNode._type;
-		}
-
-		const dispFn = {
-			kind: "FuncDecl",
-			name: `__dispatch_${info.ifaceName}_${info.methodName}`,
-			params,
-			returnType,
-			body: { kind: "Block", stmts: [], list: [] },
-			_isInterfaceDispatcher: true,
-			_ifaceName: info.ifaceName,
-			_ifaceType: info.ifaceType,
-			_methodName: info.methodName,
-			_rootFuncDecl: null,
-		};
-		funcDecls.push(dispFn);
-	}
+	_collectInterfaceDispatchers(progs, funcDecls, mod, checker);
 
 	// 1e. Map helpers
 	function scanMapTypes(node) {
@@ -1945,6 +1946,118 @@ export function compileWasmModule(
 		});
 	}
 
+	// 1e3. Runtime helpers: error values, interface equality, t.Run callback.
+	mod.usesTestingRun = funcDecls.some((fn) => _usesTestingRun(fn.body));
+	mod.usesAnyEq = _usesAnyEq(funcDecls, mod);
+	const ANY_T = { kind: "basic", name: "any" };
+	const STR_T = { kind: "basic", name: "string" };
+	const BOOL_T = { kind: "basic", name: "bool" };
+	const helper = (name, params, returnType, kind, extra = {}) => ({
+		kind: "FuncDecl",
+		name,
+		params,
+		returnType,
+		body: { kind: "Block", stmts: [], list: [] },
+		_isRuntimeHelper: kind,
+		_rootFuncDecl: null,
+		...extra,
+	});
+	if (mod.usesAnyEq) {
+		funcDecls.push(
+			helper(
+				"__any_eq",
+				[
+					{ name: "a", type: ANY_T },
+					{ name: "b", type: ANY_T },
+				],
+				BOOL_T,
+				"any_eq",
+			),
+		);
+	}
+	if (mod.hasErrorType) {
+		const errPtr = {
+			kind: "pointer",
+			base: { kind: "named", name: ERROR_STRUCT },
+		};
+		funcDecls.push(
+			helper(
+				`${ERROR_STRUCT}.Error`,
+				[{ name: "e", type: errPtr }],
+				STR_T,
+				"error_msg",
+				{
+					_isMethod: true,
+					_recvTypeName: ERROR_STRUCT,
+					_methodName: "Error",
+				},
+			),
+			helper(
+				`${ERROR_STRUCT}.Unwrap`,
+				[{ name: "e", type: errPtr }],
+				ANY_T,
+				"error_cause",
+				{
+					_isMethod: true,
+					_recvTypeName: ERROR_STRUCT,
+					_methodName: "Unwrap",
+				},
+			),
+			helper(
+				"__mk_error",
+				[
+					{ name: "msg", type: STR_T },
+					{ name: "cause", type: ANY_T },
+				],
+				ANY_T,
+				"mk_error",
+			),
+			helper("__error_str", [{ name: "e", type: ANY_T }], STR_T, "error_str"),
+			{
+				kind: "FuncDecl",
+				name: "__errors_unwrap",
+				params: [{ name: "__recv", type: ANY_T }],
+				returnType: ANY_T,
+				body: { kind: "Block", stmts: [], list: [] },
+				_isInterfaceDispatcher: true,
+				_softDispatch: true,
+				_ifaceName: "error",
+				_ifaceType: null,
+				_methodName: "Unwrap",
+				_rootFuncDecl: null,
+			},
+			helper(
+				"__errors_is",
+				[
+					{ name: "err", type: ANY_T },
+					{ name: "target", type: ANY_T },
+				],
+				BOOL_T,
+				"errors_is",
+			),
+		);
+	}
+	if (mod.usesTestingRun) {
+		funcDecls.push(
+			helper(
+				"__testing_run_cb",
+				[
+					{ name: "fn", type: ANY_T },
+					{
+						name: "t",
+						type: {
+							kind: "pointer",
+							base: { kind: "named", name: "testing.T" },
+						},
+					},
+				],
+				null,
+				"testing_run_cb",
+				{ _forceExport: true },
+			),
+		);
+	}
+
 	// 1f. Boundary metadata (exported surface of wasm packages)
 	const boundaryMeta = options.boundary
 		? collectBoundaryMeta(progs, funcDecls, mod)
@@ -1998,14 +2111,19 @@ export function compileWasmModule(
 		const typeIndex = mod.getTypeIndex(paramTypes, returnTypes);
 		fn._typeIndex = typeIndex;
 		fn._globalFuncIndex = globalIdx;
+		mod.funcReturnTypesByIdx.set(globalIdx, returnTypes);
 
 		// Export if public (capitalized) or main
 		if (
-			!fn._isGlobalInit &&
-			(options.exportAll ||
-				fn.name === "main" ||
-				(fn.name[0] >= "A" && fn.name[0] <= "Z") ||
-				(fn._isMethod && fn._methodName[0] >= "A" && fn._methodName[0] <= "Z"))
+			fn._forceExport ||
+			(!fn._isGlobalInit &&
+				!fn._isRuntimeHelper &&
+				(options.exportAll ||
+					fn.name === "main" ||
+					(fn.name[0] >= "A" && fn.name[0] <= "Z") ||
+					(fn._isMethod &&
+						fn._methodName[0] >= "A" &&
+						fn._methodName[0] <= "Z")))
 		) {
 			mod.exports.push({ name: fn.name, kind: "func", index: globalIdx });
 			if (fn._isMethod && fn._exportName) {
@@ -2057,6 +2175,8 @@ export function compileWasmModule(
 			emitter.emitMapHelper(fn);
 		} else if (fn._isSharedHelper) {
 			emitter.emitSharedHelper(fn);
+		} else if (fn._isRuntimeHelper) {
+			emitter.emitRuntimeHelper(fn);
 		} else if (fn.body) {
 			emitter.emitFunctionBody(fn.body);
 		}
@@ -2080,6 +2200,10 @@ export function compileWasmModule(
 			typeIndex: fn._typeIndex,
 			locals: emitter.localTypes,
 			body,
+			src:
+				fn._srcFile && typeof fn._line === "number"
+					? { file: fn._srcFile, line: fn._line }
+					: null,
 		});
 	}
 
@@ -2090,6 +2214,7 @@ export function compileWasmModule(
 		facade = generateFacade(boundaryMeta, {
 			stringTable: mod.stringTable,
 			callMain: Boolean(options.callMain) && mod.funcMap.has("main"),
+			stdlibEnv: mod.usesStdlibEnv,
 		});
 	}
 
@@ -2103,10 +2228,31 @@ export function compileWasmModule(
 		exports: mod.exports,
 		memory: mod.memory ?? null,
 		start: globalInitFn ? globalInitFn._globalFuncIndex : null,
+		sourceMappingURL: options.sourceMappingURL ?? null,
 	};
 
 	const wasmBytes = encodeModule(moduleIR);
 	const watText = options.emitWat ? emitWat(moduleIR) : null;
+
+	// Function-level source positions: `sources` are the absolute Go files,
+	// `mappings` pair each function body's byte offset with its 0-based line.
+	const sources = [];
+	const sourceIndex = new Map();
+	const mappings = [];
+	moduleIR.funcs.forEach((fn, i) => {
+		if (!fn.src) return;
+		let idx = sourceIndex.get(fn.src.file);
+		if (idx === undefined) {
+			idx = sources.length;
+			sources.push(fn.src.file);
+			sourceIndex.set(fn.src.file, idx);
+		}
+		mappings.push({
+			offset: moduleIR.codeOffsets[i],
+			srcFileIdx: idx,
+			srcLine: Math.max(0, fn.src.line - 1),
+		});
+	});
 
 	return {
 		wasm: wasmBytes,
@@ -2114,6 +2260,7 @@ export function compileWasmModule(
 		stringTable: mod.stringTable,
 		moduleIR,
 		facade,
+		sourceMapInfo: { sources, mappings },
 	};
 }
 
@@ -2140,6 +2287,50 @@ function _collectPackageConsts(progs, mod) {
 			}
 		}
 	}
+}
+
+// Depth-first search over AST nodes (skipping `_`-prefixed annotations).
+function _someNode(node, pred) {
+	if (!node || typeof node !== "object") return false;
+	if (Array.isArray(node)) return node.some((n) => _someNode(n, pred));
+	if (pred(node)) return true;
+	for (const key of Object.keys(node)) {
+		if (key.startsWith("_")) continue;
+		if (_someNode(node[key], pred)) return true;
+	}
+	return false;
+}
+
+function _usesTestingRun(node) {
+	return _someNode(
+		node,
+		(n) =>
+			n.kind === "CallExpr" &&
+			n.func?.kind === "SelectorExpr" &&
+			n.func.field === "Run" &&
+			isTestingT(n.func.expr?._type),
+	);
+}
+
+// `__any_eq` is only needed when some `==`/`!=` (or switch case) compares
+// anyref operands, a struct with an anyref field is compared, or the error
+// runtime (`errors.Is`) is present.  `_emitAnyEq` throws if this misses a
+// site, so a gap surfaces as a compile error rather than a bad module.
+function _usesAnyEq(funcDecls, mod) {
+	if (mod.hasErrorType) return true;
+	for (const info of mod.structTypes.values()) {
+		if (info.fields?.some((f) => f.wType === "anyref")) return true;
+	}
+	const isAnyRef = (n) =>
+		Boolean(n?._type) && toWasmType(n._type, mod.checker, mod) === "anyref";
+	return funcDecls.some((fn) =>
+		_someNode(fn.body, (n) => {
+			if (n.kind === "BinaryExpr" && (n.op === "==" || n.op === "!="))
+				return isAnyRef(n.left) || isAnyRef(n.right);
+			if (n.kind === "SwitchStmt" && n.tag) return isAnyRef(n.tag);
+			return false;
+		}),
+	);
 }
 
 function _scanImportsInBody(node, mod) {
@@ -2178,6 +2369,9 @@ function _scanImportsInBody(node, mod) {
 				Atan: "atan",
 				Atan2: "atan2",
 				Pow: "pow",
+				Mod: "mod",
+				Hypot: "hypot",
+				Cbrt: "cbrt",
 				Exp: "exp",
 				Log: "log",
 				Log2: "log2",
@@ -2185,7 +2379,7 @@ function _scanImportsInBody(node, mod) {
 				Round: "round",
 			};
 			if (jsMathMap[func.field]) {
-				const isBinary = func.field === "Atan2" || func.field === "Pow";
+				const isBinary = BINARY_MATH_IMPORTS.has(jsMathMap[func.field]);
 				mod.getMathImportIndex(jsMathMap[func.field], isBinary);
 			}
 		} else if (
@@ -2197,7 +2391,10 @@ function _scanImportsInBody(node, mod) {
 			if (func.field === "Name") mod.getTestingNameImportIndex();
 			else if (func.field === "Failed" || func.field === "Skipped")
 				mod.getTestingFlagImportIndex();
-			else if (func.field !== "Run") {
+			else if (func.field === "Run") {
+				// closure type for func(*testing.T) must exist before bodies are emitted
+				mod.getTestingRunClosureType();
+			} else {
 				mod.getTestingCallImportIndex();
 				for (const arg of args) {
 					mod.getTestingArgImportIndex(
@@ -2443,4 +2640,151 @@ function _makeGlobalInitFunc(pending, initNames = []) {
 		body: { kind: "Block", stmts, list: stmts },
 		_isGlobalInit: true,
 	};
+}
+
+function _scanInterfaceCallNodes(node, interfaceCalls, checker) {
+	if (!node || typeof node !== "object") return;
+	if (Array.isArray(node)) {
+		for (const item of node)
+			_scanInterfaceCallNodes(item, interfaceCalls, checker);
+		return;
+	}
+	if (node.kind === "CallExpr" && node.func?.kind === "SelectorExpr") {
+		const recvType = node.func.expr?._type;
+		if (isNonEmptyInterface(recvType, checker)) {
+			const ifaceName = getReceiverTypeName(recvType, node.func.expr) || "anon";
+			const methodName = node.func.field;
+			const key = `${ifaceName}.${methodName}`;
+			if (!interfaceCalls.has(key)) {
+				interfaceCalls.set(key, {
+					ifaceName,
+					ifaceType: recvType,
+					methodName,
+					callNode: node,
+				});
+			}
+		}
+	}
+	for (const key of Object.keys(node)) {
+		if (!key.startsWith("_"))
+			_scanInterfaceCallNodes(node[key], interfaceCalls, checker);
+	}
+}
+
+function _scanInterfaceTypeDecls(progs, interfaceCalls, checker) {
+	for (const p of progs) {
+		for (const d of p.decls ?? []) {
+			if (d.kind !== "TypeDecl") continue;
+			const resolved = checker?.types?.get(d.name) ?? d.type;
+			const underlying =
+				resolved?.kind === "named"
+					? resolved.underlying
+					: d.type?.kind === "InterfaceType"
+						? d.type
+						: resolved;
+			if (!isNonEmptyInterface(underlying, checker)) continue;
+			const methods =
+				underlying.methods instanceof Map
+					? Array.from(underlying.methods.entries())
+					: Array.isArray(underlying.methods)
+						? underlying.methods.map((m) => [m.name ?? m, m])
+						: [];
+			for (const [mName, mSig] of methods) {
+				const key = `${d.name}.${mName}`;
+				if (!interfaceCalls.has(key)) {
+					interfaceCalls.set(key, {
+						ifaceName: d.name,
+						ifaceType: resolved,
+						methodName: mName,
+						methodSig: mSig,
+					});
+				}
+			}
+		}
+	}
+}
+
+function _makeInterfaceDispatcher(info, checker) {
+	let methodSig = info.methodSig;
+	if (!methodSig) {
+		const ifaceResolved =
+			checker?.resolveType?.(
+				info.ifaceType?.kind === "named"
+					? info.ifaceType.underlying
+					: info.ifaceType,
+			) ?? info.ifaceType;
+		if (ifaceResolved?.methods instanceof Map) {
+			methodSig = ifaceResolved.methods.get(info.methodName);
+		}
+	}
+
+	const params = [{ name: "__recv", type: { kind: "basic", name: "any" } }];
+	if (methodSig?.params) {
+		for (let p = 0; p < methodSig.params.length; p++) {
+			params.push({ name: `__arg${p}`, type: methodSig.params[p] });
+		}
+	} else if (info.callNode?.args) {
+		for (let p = 0; p < info.callNode.args.length; p++) {
+			params.push({
+				name: `__arg${p}`,
+				type: info.callNode.args[p]._type ?? {
+					kind: "basic",
+					name: "any",
+				},
+			});
+		}
+	}
+
+	let returnType = info.callNode?._type ?? null;
+	if (methodSig?.returns) {
+		returnType =
+			methodSig.returns.length === 1
+				? methodSig.returns[0]
+				: methodSig.returns.length > 1
+					? { kind: "tuple", types: methodSig.returns }
+					: null;
+	}
+
+	return {
+		kind: "FuncDecl",
+		name: `__dispatch_${info.ifaceName}_${info.methodName}`,
+		params,
+		returnType,
+		body: { kind: "Block", stmts: [], list: [] },
+		_isInterfaceDispatcher: true,
+		_ifaceName: info.ifaceName,
+		_ifaceType: info.ifaceType,
+		_methodName: info.methodName,
+		_rootFuncDecl: null,
+	};
+}
+
+function _collectInterfaceDispatchers(progs, funcDecls, mod, checker) {
+	const interfaceCalls = new Map();
+	for (const fn of funcDecls) {
+		if (fn.body) _scanInterfaceCallNodes(fn.body, interfaceCalls, checker);
+	}
+	_scanInterfaceTypeDecls(progs, interfaceCalls, checker);
+
+	// `error.Error()` is reached implicitly by fmt verbs and errors.Is, so
+	// the dispatcher must exist even when user code never calls it.
+	if (mod.hasErrorType && !interfaceCalls.has("error.Error")) {
+		interfaceCalls.set("error.Error", {
+			ifaceName: "error",
+			ifaceType: checker?.types?.get("error") ?? {
+				kind: "interface",
+				name: "error",
+			},
+			methodName: "Error",
+			methodSig: {
+				kind: "func",
+				params: [],
+				returns: [{ kind: "basic", name: "string" }],
+			},
+		});
+	}
+
+	for (const info of interfaceCalls.values()) {
+		funcDecls.push(_makeInterfaceDispatcher(info, checker));
+	}
 }

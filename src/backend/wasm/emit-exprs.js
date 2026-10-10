@@ -155,6 +155,8 @@ export class ExprsEmitter {
 				if (deq) this.emitIdent(deq, targetWasmType);
 				else if (this._isMathConst(expr))
 					this.emitMathConst(expr.field, targetWasmType);
+				else if (this._isUtf8Const(expr))
+					this.emitUtf8Const(expr.field, targetWasmType);
 				else this.emitSelectorExpr(expr);
 				break;
 			}
@@ -1471,10 +1473,9 @@ export class ExprsEmitter {
 			} else if (isStringType(f.goType, this.mod.checker)) {
 				const cmpIdx = this.mod.getStringCmpImportIndex("==");
 				this.pushInstruction({ op: "call", funcIndex: cmpIdx });
-			} else if (
-				f.wType === "anyref" ||
-				(typeof f.wType === "object" && f.wType !== null)
-			) {
+			} else if (f.wType === "anyref") {
+				this._emitAnyEq();
+			} else if (typeof f.wType === "object" && f.wType !== null) {
 				this.pushInstruction("ref.eq");
 			} else {
 				this.pushInstruction(`${f.wType}.eq`);
@@ -1552,10 +1553,9 @@ export class ExprsEmitter {
 				if (isStringType(goType, this.mod.checker) || wType === "externref") {
 					const cmpIdx = this.mod.getStringCmpImportIndex("==");
 					this.pushInstruction({ op: "call", funcIndex: cmpIdx });
-				} else if (
-					wType === "anyref" ||
-					(typeof wType === "object" && wType !== null)
-				) {
+				} else if (wType === "anyref") {
+					this._emitAnyEq();
+				} else if (typeof wType === "object" && wType !== null) {
 					this.pushInstruction("ref.eq");
 				} else {
 					this.pushInstruction(`${wType}.eq`);
@@ -1565,10 +1565,10 @@ export class ExprsEmitter {
 				if (isStringType(goType, this.mod.checker) || wType === "externref") {
 					const cmpIdx = this.mod.getStringCmpImportIndex("!=");
 					this.pushInstruction({ op: "call", funcIndex: cmpIdx });
-				} else if (
-					wType === "anyref" ||
-					(typeof wType === "object" && wType !== null)
-				) {
+				} else if (wType === "anyref") {
+					this._emitAnyEq();
+					this.pushInstruction("i32.eqz");
+				} else if (typeof wType === "object" && wType !== null) {
 					this.pushInstruction("ref.eq");
 					this.pushInstruction("i32.eqz");
 				} else {

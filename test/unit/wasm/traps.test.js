@@ -121,6 +121,25 @@ func Main() {
 	assertEqual(res.output, "math: 84");
 });
 
+test("math.Mod/Round/Hypot/Cbrt match Go semantics on WASM and JS-strict", () => {
+	const src = `
+package main
+
+import "math"
+
+func Main() {
+    println("mod:", math.Mod(7.5, 2.0), math.Mod(-7.5, 2.0))
+    println("round:", math.Round(2.5), math.Round(-2.5), math.Round(0.4))
+    println("hypot:", math.Hypot(3.0, 4.0))
+    println("cbrt:", math.Cbrt(27.0))
+}
+`;
+
+	const hybrid = compileHybrid(src);
+	const res = hybrid.run("Main");
+	assertEqual(res.output, "mod: 1.5 -1.5\nround: 3 -3 0\nhypot: 5\ncbrt: 3");
+});
+
 test("math/bits bitwise operations map to instructions", () => {
 	const src = `
 package main

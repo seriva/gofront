@@ -154,8 +154,15 @@ function formatInstruction(inst) {
 		case "ref.test":
 		case "ref.test_null":
 		case "ref.cast":
-		case "ref.cast_null":
-			return `${op} ${inst.typeIndex !== undefined ? `$t${inst.typeIndex}` : 0}`;
+		case "ref.cast_null": {
+			const ht =
+				inst.typeIndex !== undefined
+					? `$t${inst.typeIndex}`
+					: inst.heapType !== undefined
+						? String(inst.heapType)
+						: 0;
+			return `${op} ${ht}`;
+		}
 		case "any.convert_extern":
 		case "extern.convert_any":
 			return op;

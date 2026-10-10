@@ -34,6 +34,7 @@
 //   - `*testing.T`: the harness's JS test object, passed as an opaque
 //     externref (test methods are routed back to JS via `env.testing_*`).
 
+import { HELPER_SPRINTF, HELPER_STRCONV } from "../js/runtime.js";
 import { getSharedInfo, isTestingT } from "./types.js";
 
 // ── Type classification ──────────────────────────────────────
@@ -434,6 +435,7 @@ function collectMethodMeta(fn, meta, errors, mod) {
 	s.methods.push({
 		name: fn._methodName,
 		exportName: fn._exportName,
+		fnName: fn.name,
 		ptrRecv: fn.params[0].type?.kind === "pointer",
 		params: fn.params
 			.slice(1)
@@ -907,7 +909,8 @@ export function addBoundaryHelpers(mod, meta) {
 	// get a trampoline (`__x_<export>`) with the boundary signature; the facade
 	// calls that instead of the raw export.
 	const addTrampoline = (entry) => {
-		const fnIdx = mod.funcMap.get(entry.exportName);
+		// Methods are keyed `T.M` in funcMap but exported as `T_M`.
+		const fnIdx = mod.funcMap.get(entry.fnName ?? entry.exportName);
 		if (fnIdx === undefined) return;
 		const sig = typeAt(mod, mod.funcs[fnIdx - importFuncCount]?.typeIndex);
 		if (sig?.form !== "func") return;
@@ -1203,6 +1206,7 @@ export const WASM_IMPORTS_JS = `const ${P}MAX = 9007199254740991n;
 function ${P}imports(stringTable, extraEnv, tag, write) {
 	let lineBuf = "";
 	let targs = [];
+	const late = { exports: null };
 	const flush = () => { write(lineBuf); lineBuf = ""; };
 	const print = (v) => {
 		const s = String(v);
@@ -1287,14 +1291,107 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		"testing_name": (t) => t.Name(),
 		"testing_flag": (t, i) => (t[stringTable[i]]() ? 1 : 0),
 	};
+	// Stdlib imports (strings/strconv/utf8/fmt/t.Run) are a separate block so
+	// modules that never call them do not ship it (see WASM_STDLIB_JS).
+	if (typeof ${P}stdlib === "function") {
+		Object.assign(env, ${P}stdlib(stringTable, {
+			"take": () => { const a = targs; targs = []; return a; },
+			"printf": (s) => {
+				lineBuf += s;
+				const nl = lineBuf.lastIndexOf("\\n");
+				if (nl >= 0) { write(lineBuf.slice(0, nl)); lineBuf = lineBuf.slice(nl + 1); }
+			},
+			"late": late,
+		}));
+	}
 	Object.assign(env, extraEnv);
 	const m = {};
-	for (const k of ["sin", "cos", "tan", "asin", "acos", "atan", "atan2", "pow", "exp", "log", "log2", "log10", "round"]) m[k] = Math[k];
-	return { "env": env, "Math": m };
+	for (const k of ["sin", "cos", "tan", "asin", "acos", "atan", "atan2", "pow", "exp", "log", "log2", "log10", "cbrt", "hypot"]) m[k] = Math[k];
+	m.mod = (x, y) => x % y;
+	// Go rounds half away from zero; Math.round rounds half toward +Infinity.
+	m.round = (x) => Math.sign(x) * Math.round(Math.abs(x));
+	// Exports are needed by imports that call back into the module (t.Run).
+	return { "env": env, "Math": m, "__bind": (ex) => { late.exports = ex; } };
+}`;
+
+// JS side of the STDLIB_IMPORTS table (index.js); emitted only when the
+// module imports one of the packages that use it.
+export const WASM_STDLIB_JS = `${HELPER_SPRINTF}
+${HELPER_STRCONV}
+function ${P}stdlib(stringTable, io) {
+	let parts = [];
+	let strconvErr = null;
+	let decodeSize = 0;
+	return {
+		"testing_run": (t, name, fn) => (t.Run(name, (sub) => { io.late.exports.__testing_run_cb(fn, sub); }) ? 1 : 0),
+		"fmt_sprintf": (f) => __sprintf(f ?? "", ...io.take()),
+		"fmt_printf": (f) => { io.printf(__sprintf(f ?? "", ...io.take())); },
+		"str_trim": (s, c) => ${P}trim(s ?? "", c ?? "", true, true),
+		"str_trim_left": (s, c) => ${P}trim(s ?? "", c ?? "", true, false),
+		"str_trim_right": (s, c) => ${P}trim(s ?? "", c ?? "", false, true),
+		"str_trim_prefix": (s, p) => (s && p && s.startsWith(p) ? s.slice(p.length) : (s ?? "")),
+		"str_trim_suffix": (s, p) => (s && p && s.endsWith(p) ? s.slice(0, s.length - p.length) : (s ?? "")),
+		"str_replace": (s, o, n, cnt) => {
+			s = s ?? ""; o = o ?? ""; n = n ?? "";
+			if (cnt < 0) return s.replaceAll(o, n);
+			let out = "", from = 0;
+			for (let k = 0; k < cnt; k++) {
+				const at = s.indexOf(o, from);
+				if (at < 0) break;
+				out += s.slice(from, at) + n;
+				from = at + o.length;
+				if (o === "") { if (from >= s.length) break; out += s[from]; from++; }
+			}
+			return out + s.slice(from);
+		},
+		"str_contains_rune": (s, r) => ((s ?? "").includes(String.fromCodePoint(r)) ? 1 : 0),
+		"str_contains_any": (s, cs) => { for (const c of (cs ?? "")) if ((s ?? "").includes(c)) return 1; return 0; },
+		"str_index_byte": (s, b) => (s ?? "").indexOf(String.fromCharCode(b)),
+		"str_index_rune": (s, r) => (s ?? "").indexOf(String.fromCodePoint(r)),
+		"str_index_any": (s, cs) => { s = s ?? ""; let best = -1; for (const c of (cs ?? "")) { const i = s.indexOf(c); if (i >= 0 && (best < 0 || i < best)) best = i; } return best; },
+		"str_last_index_byte": (s, b) => (s ?? "").lastIndexOf(String.fromCharCode(b)),
+		"str_title": (s) => (s ?? "").replace(/(^|[^\\p{L}\\p{N}_'])(\\p{Ll})/gu, (m, a, b) => a + b.toUpperCase()),
+		"str_split": (s, sep) => { parts = (s ?? "").split(sep ?? ""); return parts.length; },
+		"str_fields": (s) => { parts = (s ?? "").split(/\\s+/).filter((p) => p !== ""); return parts.length; },
+		"str_part": (i) => parts[i] ?? "",
+		"strconv_atoi": (s) => { const r = __strconv_atoi(s ?? ""); strconvErr = r[1]; return r[0]; },
+		"strconv_parse_int": (s, base, bits) => { const r = __strconv_parse_int(s ?? "", base, bits); strconvErr = r[1]; return r[0]; },
+		"strconv_parse_float": (s) => { const r = __strconv_parse_float(s ?? ""); strconvErr = r[1]; return r[0]; },
+		"strconv_parse_bool": (s) => { const r = __strconv_parse_bool(s ?? ""); strconvErr = r[1]; return r[0] ? 1 : 0; },
+		"strconv_err": () => strconvErr,
+		"strconv_format_float": (f, fmtc, prec, _bits) => __strconv_format_float(f, fmtc, prec),
+		"strconv_format_int": (n, base) => n.toString(base),
+		"strconv_quote": (s) => JSON.stringify(s ?? ""),
+		"utf8_rune_count": (s) => { let n = 0; for (const _ of (s ?? "")) n++; return n; },
+		"utf8_rune_len": (r) => (r < 0 || r > 0x10ffff || (r >= 0xd800 && r <= 0xdfff) ? -1 : r < 0x80 ? 1 : r < 0x800 ? 2 : r < 0x10000 ? 3 : 4),
+		"utf8_valid_string": (s) => (s ?? "").isWellFormed ? ((s ?? "").isWellFormed() ? 1 : 0) : (/[\\uD800-\\uDFFF]/.test((s ?? "").replace(/[\\uD800-\\uDBFF][\\uDC00-\\uDFFF]/g, "")) ? 0 : 1),
+		"utf8_decode_rune": (s, last) => {
+			s = s ?? "";
+			if (s.length === 0) { decodeSize = 0; return 0xfffd; }
+			let cp;
+			if (last) { const tail = s.codePointAt(s.length - 1); cp = (tail >= 0xdc00 && tail <= 0xdfff && s.length >= 2) ? s.codePointAt(s.length - 2) : tail; }
+			else cp = s.codePointAt(0);
+			if (cp >= 0xd800 && cp <= 0xdfff) { decodeSize = 1; return 0xfffd; }
+			// Size is in UTF-16 code units, matching the JS backend (strings are JS strings).
+			decodeSize = cp > 0xffff ? 2 : 1;
+			return cp;
+		},
+		"utf8_decode_size": () => decodeSize,
+		"utf8_full_rune": (s) => { s = s ?? ""; if (s.length === 0) return 0; const c = s.charCodeAt(0); return (c >= 0xd800 && c <= 0xdbff && s.length < 2) ? 0 : 1; },
+	};
+}
+function ${P}trim(s, cutset, left, right) {
+	const cs = Array.from(cutset);
+	const chars = Array.from(s);
+	let a = 0, b = chars.length;
+	if (left) while (a < b && cs.includes(chars[a])) a++;
+	if (right) while (b > a && cs.includes(chars[b - 1])) b--;
+	return chars.slice(a, b).join("");
 }`;
 
 // Runtime loader emitted at the top of the facade.
-const WASM_LOADER_JS = `${WASM_IMPORTS_JS}
+const wasmLoaderJs = (stdlibEnv) => `${WASM_IMPORTS_JS}
+${stdlibEnv ? WASM_STDLIB_JS : ""}
 async function ${P}fetch(url) {
 	const res = await fetch(url);
 	if (!res.ok) throw new Error("GoFront: failed to fetch " + url + " (" + res.status + ")");
@@ -1321,6 +1418,7 @@ async function ${P}load(stringTable, extraEnv) {
 	// start function while package-level initializers run), so exports are
 	// returned raw: no try/catch wrapper, which keeps JS→wasm calls inlinable.
 	const result = await ${P}instantiate(imports);
+	imports.__bind(result.instance.exports);
 	return result.instance.exports;
 }
 // Go int/int64 cross the boundary as f64 (exact within the safe-integer range).
@@ -1376,10 +1474,10 @@ function ${P}idxview(n, getAt, setAt) {
 // Generates the JS facade for the linked wasm module.
 export function generateFacade(
 	meta,
-	{ stringTable = [], callMain = false } = {},
+	{ stringTable = [], callMain = false, stdlibEnv = true } = {},
 ) {
 	const needs = meta._needs ?? collectNeeds(meta);
-	const out = [WASM_LOADER_JS];
+	const out = [wasmLoaderJs(stdlibEnv)];
 
 	// JS callback imports (registered before instantiation; bodies run after).
 	out.push(`const ${P}env = {};`);

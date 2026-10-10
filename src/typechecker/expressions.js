@@ -609,6 +609,7 @@ export const expressionCheckMethods = {
 	checkCall(expr, scope) {
 		let fnType = this.checkExpr(expr.func, scope);
 		this._checkSharedAllocSite(expr, scope);
+		this._checkBoundaryCallInLoop(expr, scope);
 		if (fnType.kind === "builtin") {
 			const argTypes = expr.args.map((a, i) => {
 				// new(T) — first arg is a type name, not a value expression
@@ -656,6 +657,24 @@ export const expressionCheckMethods = {
 	// startup (no memory.grow → no detached TypedArray views on the JS side).
 	// Allocation is therefore only legal in package-level var initializers and
 	// init(), which both run inside the module start function.
+	// JS→WASM calls copy non-shared arguments across the boundary on every
+	// call. Inside a loop that dominates the per-iteration cost, so hint that
+	// the loop belongs on the WASM side (or the data in gofront/shared).
+	_checkBoundaryCallInLoop(expr, scope) {
+		if (this._loopDepth === 0 || this.target !== "js") return;
+		const fn = expr.func;
+		if (fn.kind !== "SelectorExpr" || fn.expr.kind !== "Ident") return;
+		const ns = scope.lookup(fn.expr.name);
+		if (ns?.kind !== "namespace" || ns._target !== "wasm") return;
+		const member = ns.members[fn.field];
+		if (member?.kind !== "func") return;
+		this.warn(
+			`'${fn.expr.name}.${fn.field}' crosses the JS→WASM boundary inside a loop`,
+			fn.expr, // CallExpr nodes carry no position; the callee Ident does
+			"hint: each call copies its arguments; move the loop into the wasm package or pass gofront/shared buffers",
+		);
+	},
+
 	_checkSharedAllocSite(expr, scope) {
 		const f = expr.func;
 		if (
