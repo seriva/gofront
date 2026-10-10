@@ -4,9 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [1.6.0] - 2026-10-10
 
 ### Added
+- **Language completeness in `wasm` packages (H4.1–H4.4)** — non-empty interfaces with `ref.test` dynamic dispatch over static candidate sets; generic function and struct monomorphisation; insertion-ordered map runtime matching JS `Map` order; and full `defer`/`recover` exception handling (`try_table` + `exnref`).
+- **Binaryen optimization pipeline (H7.2)** — `gofront build --release` (or `--wasm-opt`) optimizes `app.wasm` through Binaryen (`-O3` + `--gufa`), preferring a native `wasm-opt` on `PATH` with fallback to the optional `binaryen` npm package, validating the result with `WebAssembly.validate`, and reporting binary size reduction (~19–23%).
 - **Wider stdlib in `wasm` packages** — `errors` (`New`, `Is`, `Unwrap`), `fmt` (`Sprintf`/`Printf`/`Println`/`Errorf` with primitive, string, `error` and `any` operands), `strings`, `strconv`, `unicode/utf8`, `slices`, `maps` and `sort` join `math`, `math/bits` and `testing`. `error` values are real wasm structs with `Error()`/`Unwrap()`, and `any == any` compares boxed scalars by value (by dynamic type first, so `any(3) == any(3.0)` is `false` in wasm but `true` in the JS backend — see `docs/go-compatibility.md`). Members the backend does not implement report `'strings.Map' is not yet available in wasm packages` with a hint to move the call to a JS package; unsupported `fmt`/`testing.T` operand types explain that slices and structs must be formatted field by field.
 - **`t.Run` in wasm test packages** — subtests run inside `app.wasm` with the subtest `*testing.T` routed back to the harness (`--- PASS: TestSub/inner`).
 - **WASM source maps** — `gofront build --source-map` also writes `app.wasm.map` (function-level mappings, resolved `sources`) and stamps a `sourceMappingURL` custom section into the module; with `--wasm-opt`/`--release` the map is passed through Binaryen (`-ism`) so offsets stay correct after optimisation.

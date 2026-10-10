@@ -1,7 +1,7 @@
 # Hybrid JS + WebAssembly Target — Design Plan
 
 **Version:** v1.6.0 (design spans v1.5.0 → v1.6.0, see [Phased Roadmap](#phased-roadmap))  
-**Status:** Draft (revised 2026-10-04: full hybrid completed in the JS compiler as v1.6.0, before the v2.0.0 Go port. Whole-app WASM moved to [Future](#future-whole-app-wasm).)  
+**Status:** Completed (2026-10-10) — full hybrid completed in the JS compiler as v1.6.0, before the v2.0.0 Go port. Whole-app WASM moved to [Future](#future-whole-app-wasm).  
 **Depends on:** [`docs/v1.5.0/wasm-mvp-plan.md`](../v1.5.0/wasm-mvp-plan.md) (MVP: `src/lower/`, targets, strict mode, encoder, core subset, boundary v1).  
 **Followed by:** [`docs/v2.0.0/native-go-engine.md`](../v2.0.0/native-go-engine.md), which ports the finished JS + WASM compiler to Go with byte-identical output.
 
@@ -32,7 +32,7 @@ The hybrid architecture is the optimal end-state for browser apps: it leaves UI 
 - **DOM, browser globals, `js:`/npm imports, `.templ`, `gom` inside WASM packages.** That is the [whole-app future](#future-whole-app-wasm).
 - **`async`/`await` in WASM packages.** WASM code is synchronous. Async orchestration stays in JS.
 - **Linear-memory runtime / custom GC.** WasmGC for all objects. Linear memory is used only for explicit [shared buffers](#shared-buffers-zero-copy).
-- **WASI / server targets, DWARF.** Browser only. WASM source maps are a stretch goal.
+- **WASI / server targets, DWARF, statement-level WASM source maps.** Browser only (function-level `app.wasm.map` shipped in H7.2).
 - **Goroutines, channels, `reflect`, `unsafe`.** Same as the JS target.
 - **Porting to Go.** That is v2.0.0. v1.6.0 lives entirely in the JS compiler.
 
@@ -69,7 +69,7 @@ Allowed:
 - Interfaces, type switches, closures, method values, generics
 - `defer`/`panic`/`recover`, labeled `break`/`continue`
 - `print`/`println`, routed to `console.log` through a runtime import so debugging works the same as in JS packages
-- Stdlib: `math`, `math/bits`, `errors`, `strings`, `strconv`, `unicode/utf8`, `slices`, `maps`, `sort`, `testing`; `fmt.Sprintf`/`Errorf`/`Println`
+- Stdlib: `math`, `math/bits`, `errors`, `strings`, `strconv`, `unicode/utf8`, `slices`, `maps`, `sort`, `testing`, `gofront/shared` (`wasm` packages); `fmt.Sprintf`/`Printf`/`Errorf`/`Println`
 
 ### Target diagnostics
 

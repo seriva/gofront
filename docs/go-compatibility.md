@@ -12,6 +12,7 @@ These features are intentional additions for the JavaScript platform:
 |---|---|
 | `async func` / `await` | First-class async syntax for frontend work. |
 | `//gofront:target js \| wasm \| both` | Per-package compilation target for hybrid JS + WebAssembly builds. See the [hybrid guide](hybrid-wasm.md). |
+| `gofront/shared` | Zero-copy linear-memory buffers shared as TypedArrays across the JS↔WASM boundary. |
 | `.templ` files and `css` declarations | JSX-like component templates with scoped CSS, compiled to direct DOM calls. |
 | `gom` built-in package | Declarative DOM node builders available without an import. |
 | Browser globals (`document`, `console`, etc.) | Predeclared as `any` for practical DOM access. `WebGL2RenderingContext`, `WebGLRenderingContext`, `GPUDevice`, `GPUAdapter`, `GPUQueue`, `ArrayBuffer`, `DataView`, and TypedArrays have full static typings with method-level checking. |
