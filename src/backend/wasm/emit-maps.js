@@ -6,6 +6,7 @@ import {
 	isArrayType,
 	isInterfaceType,
 	isPointerToStruct,
+	isSigned,
 	isStringType,
 	toWasmType,
 } from "./types.js";
@@ -327,13 +328,13 @@ export class MapsEmitter {
 		if (wType === "i64") {
 			this.pushInstruction({ op: "local.get", index: v1Loc });
 			this.pushInstruction({ op: "local.get", index: v2Loc });
-			this.pushInstruction("i64.lt_s");
+			this.pushInstruction(isSigned(elemGoType) ? "i64.lt_s" : "i64.lt_u");
 			return;
 		}
 		if (wType === "i32") {
 			this.pushInstruction({ op: "local.get", index: v1Loc });
 			this.pushInstruction({ op: "local.get", index: v2Loc });
-			this.pushInstruction("i32.lt_s");
+			this.pushInstruction(isSigned(elemGoType) ? "i32.lt_s" : "i32.lt_u");
 			return;
 		}
 		if (wType === "f32") {
