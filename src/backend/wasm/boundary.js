@@ -1642,6 +1642,8 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		flush();
 	};
 	const targ = (v) => { targs.push(v); };
+	let utf8Encoded = null;
+	let convBytes = null, convPos = 0;
 	const env = {
 		"panicTag": tag,
 		"panic": (msg) => {
@@ -1694,6 +1696,25 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		"str_from_i32": (n) => String(n),
 		"str_from_f64": (f) => String(f),
 		"is_string": (v) => (typeof v === "string" ? 1 : 0),
+		"str_to_bytes": (s) => {
+			utf8Encoded = new TextEncoder().encode(s ?? "");
+			return utf8Encoded.length;
+		},
+		"str_byte_at": (i) => (utf8Encoded ? (utf8Encoded[i] ?? 0) : 0),
+		"bytes_to_str_init": (len) => {
+			convBytes = new Uint8Array(len);
+			convPos = 0;
+		},
+		"bytes_to_str_push": (b) => {
+			if (convBytes && convPos < convBytes.length) {
+				convBytes[convPos++] = b & 0xFF;
+			}
+		},
+		"bytes_to_str_finish": () => {
+			const res = convBytes ? new TextDecoder().decode(convBytes) : "";
+			convBytes = null;
+			return res;
+		},
 		"print_i32": print, "print_i64": print, "print_f32": print, "print_f64": print,
 		"print_str": print, "print_any": print,
 		"print_bool": (b) => print(b !== 0 ? "true" : "false"),
@@ -1738,8 +1759,10 @@ export const WASM_STDLIB_JS = `${HELPER_SPRINTF}
 ${HELPER_STRCONV}
 function ${P}stdlib(stringTable, io) {
 	let parts = [];
-	let strconvErr = null;
+	let cutBefore = "", cutAfter = "";
+	let strconvErr = null, strconvErrKind = 0;
 	let decodeSize = 0;
+	let replacerTarget = "", replacerPairs = [];
 	return {
 		"testing_run": (t, name, fn) => (t.Run(name, (sub) => { io.late.exports.__testing_run_cb(fn, sub); }) ? 1 : 0),
 		"fmt_sprintf": (f) => __sprintf(f ?? "", ...io.take()),
@@ -1749,6 +1772,25 @@ function ${P}stdlib(stringTable, io) {
 		"str_trim_right": (s, c) => ${P}trim(s ?? "", c ?? "", false, true),
 		"str_trim_prefix": (s, p) => (s && p && s.startsWith(p) ? s.slice(p.length) : (s ?? "")),
 		"str_trim_suffix": (s, p) => (s && p && s.endsWith(p) ? s.slice(0, s.length - p.length) : (s ?? "")),
+		"str_cut": (s, sep) => {
+			const i = (s ?? "").indexOf(sep ?? "");
+			if (i < 0) { cutBefore = s ?? ""; cutAfter = ""; return 0; }
+			cutBefore = (s ?? "").slice(0, i);
+			cutAfter = (s ?? "").slice(i + (sep ?? "").length);
+			return 1;
+		},
+		"str_cut_before": () => cutBefore,
+		"str_cut_after": () => cutAfter,
+		"str_cut_prefix": (s, p) => {
+			s = s ?? ""; p = p ?? "";
+			if (s.startsWith(p)) { cutAfter = s.slice(p.length); return 1; }
+			cutAfter = s; return 0;
+		},
+		"str_cut_suffix": (s, suf) => {
+			s = s ?? ""; suf = suf ?? "";
+			if (s.endsWith(suf)) { cutBefore = s.slice(0, s.length - suf.length); return 1; }
+			cutBefore = s; return 0;
+		},
 		"str_replace": (s, o, n, cnt) => {
 			s = s ?? ""; o = o ?? ""; n = n ?? "";
 			if (cnt < 0) return s.replaceAll(o, n);
@@ -1768,18 +1810,168 @@ function ${P}stdlib(stringTable, io) {
 		"str_index_rune": (s, r) => (s ?? "").indexOf(String.fromCodePoint(r)),
 		"str_index_any": (s, cs) => { s = s ?? ""; let best = -1; for (const c of (cs ?? "")) { const i = s.indexOf(c); if (i >= 0 && (best < 0 || i < best)) best = i; } return best; },
 		"str_last_index_byte": (s, b) => (s ?? "").lastIndexOf(String.fromCharCode(b)),
+		"str_last_index_any": (s, cs) => {
+			s = s ?? ""; let best = -1;
+			for (const c of (cs ?? "")) {
+				const i = s.lastIndexOf(c);
+				if (i > best) best = i;
+			}
+			return best;
+		},
 		"str_title": (s) => (s ?? "").replace(/(^|[^\\p{L}\\p{N}_'])(\\p{Ll})/gu, (m, a, b) => a + b.toUpperCase()),
 		"str_split": (s, sep) => { parts = (s ?? "").split(sep ?? ""); return parts.length; },
+		"str_split_n": (s, sep, n) => {
+			s = s ?? ""; sep = sep ?? "";
+			if (n === 0) return -1;
+			if (n < 0) { parts = sep === "" ? [...s] : s.split(sep); return parts.length; }
+			if (sep === "") {
+				const chars = [...s];
+				if (chars.length <= n) { parts = chars; return parts.length; }
+				const r = chars.slice(0, n - 1);
+				r.push(chars.slice(n - 1).join(""));
+				parts = r;
+				return parts.length;
+			}
+			const r = [];
+			let cur = s;
+			for (let i = 1; i < n && cur.length; i++) {
+				const j = cur.indexOf(sep);
+				if (j < 0) break;
+				r.push(cur.slice(0, j));
+				cur = cur.slice(j + sep.length);
+			}
+			r.push(cur);
+			parts = r;
+			return parts.length;
+		},
+		"str_split_after": (s, sep) => {
+			s = s ?? ""; sep = sep ?? "";
+			if (sep === "") { parts = [...s]; return parts.length; }
+			const r = [];
+			let cur = s;
+			while (true) {
+				const j = cur.indexOf(sep);
+				if (j < 0) { r.push(cur); break; }
+				r.push(cur.slice(0, j + sep.length));
+				cur = cur.slice(j + sep.length);
+			}
+			parts = r;
+			return parts.length;
+		},
+		"str_split_after_n": (s, sep, n) => {
+			s = s ?? ""; sep = sep ?? "";
+			if (n === 0) return -1;
+			if (sep === "") {
+				const chars = [...s];
+				if (n < 0 || chars.length <= n) parts = chars;
+				else {
+					const r = chars.slice(0, n - 1);
+					r.push(chars.slice(n - 1).join(""));
+					parts = r;
+				}
+				return parts.length;
+			}
+			const r = [];
+			let cur = s;
+			for (let i = 1; (n < 0 || i < n) && cur.length; i++) {
+				const j = cur.indexOf(sep);
+				if (j < 0) break;
+				r.push(cur.slice(0, j + sep.length));
+				cur = cur.slice(j + sep.length);
+			}
+			r.push(cur);
+			parts = r;
+			return parts.length;
+		},
 		"str_fields": (s) => { parts = (s ?? "").split(/\\s+/).filter((p) => p !== ""); return parts.length; },
 		"str_part": (i) => parts[i] ?? "",
-		"strconv_atoi": (s) => { const r = __strconv_atoi(s ?? ""); strconvErr = r[1]; return r[0]; },
-		"strconv_parse_int": (s, base, bits) => { const r = __strconv_parse_int(s ?? "", base, bits); strconvErr = r[1]; return r[0]; },
-		"strconv_parse_float": (s) => { const r = __strconv_parse_float(s ?? ""); strconvErr = r[1]; return r[0]; },
-		"strconv_parse_bool": (s) => { const r = __strconv_parse_bool(s ?? ""); strconvErr = r[1]; return r[0] ? 1 : 0; },
+		"str_replacer_init": (s) => {
+			replacerTarget = s ?? "";
+			replacerPairs = [];
+		},
+		"str_replacer_add": (o, n) => {
+			replacerPairs.push([o ?? "", n ?? ""]);
+		},
+		"str_replacer_run": () => {
+			let s = replacerTarget;
+			if (!replacerPairs.length || s === "") return s;
+			let out = "";
+			let i = 0;
+			while (i < s.length) {
+				let matched = false;
+				for (let k = 0; k < replacerPairs.length; k++) {
+					const [oldStr, newStr] = replacerPairs[k];
+					if (oldStr.length > 0 && s.startsWith(oldStr, i)) {
+						out += newStr;
+						i += oldStr.length;
+						matched = true;
+						break;
+					}
+				}
+				if (!matched) {
+					out += s[i];
+					i++;
+				}
+			}
+			return out;
+		},
+		"strconv_atoi": (s) => {
+			const r = __strconv_atoi(s ?? "");
+			strconvErr = r[1];
+			strconvErrKind = r[1] ? (r[1].includes("invalid syntax") ? 1 : r[1].includes("value out of range") ? 2 : 0) : 0;
+			return r[0];
+		},
+		"strconv_parse_int": (s, base, bits) => {
+			const r = __strconv_parse_int(s ?? "", base, bits);
+			strconvErr = r[1];
+			strconvErrKind = r[1] ? (r[1].includes("invalid syntax") ? 1 : r[1].includes("value out of range") ? 2 : 0) : 0;
+			return r[0];
+		},
+		"strconv_parse_float": (s) => {
+			const r = __strconv_parse_float(s ?? "");
+			strconvErr = r[1];
+			strconvErrKind = r[1] ? (r[1].includes("invalid syntax") ? 1 : r[1].includes("value out of range") ? 2 : 0) : 0;
+			return r[0];
+		},
+		"strconv_parse_bool": (s) => {
+			const r = __strconv_parse_bool(s ?? "");
+			strconvErr = r[1];
+			strconvErrKind = r[1] ? (r[1].includes("invalid syntax") ? 1 : r[1].includes("value out of range") ? 2 : 0) : 0;
+			return r[0] ? 1 : 0;
+		},
 		"strconv_err": () => strconvErr,
+		"strconv_err_kind": () => strconvErrKind,
 		"strconv_format_float": (f, fmtc, prec, _bits) => __strconv_format_float(f, fmtc, prec),
 		"strconv_format_int": (n, base) => n.toString(base),
 		"strconv_quote": (s) => JSON.stringify(s ?? ""),
+		"strconv_unquote": (s) => {
+			s = s ?? "";
+			if (s.startsWith("\`") && s.endsWith("\`") && s.length >= 2) {
+				if (s.slice(1, -1).includes("\`")) {
+					strconvErr = "invalid syntax";
+					strconvErrKind = 1;
+					return "";
+				}
+				strconvErr = null;
+				strconvErrKind = 0;
+				return s.slice(1, -1);
+			}
+			try {
+				const v = JSON.parse(s);
+				if (typeof v !== "string") {
+					strconvErr = "invalid syntax";
+					strconvErrKind = 1;
+					return "";
+				}
+				strconvErr = null;
+				strconvErrKind = 0;
+				return v;
+			} catch (e) {
+				strconvErr = "invalid syntax";
+				strconvErrKind = 1;
+				return "";
+			}
+		},
 		"utf8_rune_count": (s) => { let n = 0; for (const _ of (s ?? "")) n++; return n; },
 		"utf8_rune_len": (r) => (r < 0 || r > 0x10ffff || (r >= 0xd800 && r <= 0xdfff) ? -1 : r < 0x80 ? 1 : r < 0x800 ? 2 : r < 0x10000 ? 3 : 4),
 		"utf8_valid_string": (s) => (s ?? "").isWellFormed ? ((s ?? "").isWellFormed() ? 1 : 0) : (/[\\uD800-\\uDFFF]/.test((s ?? "").replace(/[\\uD800-\\uDBFF][\\uDC00-\\uDFFF]/g, "")) ? 0 : 1),

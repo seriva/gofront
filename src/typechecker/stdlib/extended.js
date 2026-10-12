@@ -251,15 +251,25 @@ export function setupExtendedGlobals(globals, types) {
 		["Write", { kind: "func", params: [BYTE_SLICE_T], returns: [INT, ERROR] }],
 		["String", { kind: "func", params: [], returns: [STRING] }],
 		["Len", { kind: "func", params: [], returns: [INT] }],
+		["Cap", { kind: "func", params: [], returns: [INT] }],
 		["Reset", { kind: "func", params: [], returns: [VOID] }],
 		["Grow", { kind: "func", params: [INT], returns: [VOID] }],
 	];
+	const STR_SLICE_T = { kind: "slice", elem: STRING };
 	const _makeBuilderType = (name, extra = []) => ({
 		kind: "named",
 		name,
 		underlying: {
 			kind: "struct",
-			fields: new Map(),
+			fields: new Map(
+				name === "strings.Builder"
+					? [
+							["_buf", STR_SLICE_T],
+							["_len", INT],
+							["_self", ANY],
+						]
+					: [],
+			),
 			methods: new Map([..._builderBase, ...extra]),
 		},
 	});
@@ -275,6 +285,17 @@ export function setupExtendedGlobals(globals, types) {
 			["Bytes", { kind: "func", params: [], returns: [BYTE_SLICE_T] }],
 		]),
 	);
+	types.set("strings.Replacer", {
+		kind: "named",
+		name: "strings.Replacer",
+		underlying: {
+			kind: "struct",
+			fields: new Map([["_pairs", STR_SLICE_T]]),
+			methods: new Map([
+				["Replace", { kind: "func", params: [STRING], returns: [STRING] }],
+			]),
+		},
+	});
 
 	globals.define("rand", {
 		kind: "namespace",

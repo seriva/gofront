@@ -15,6 +15,10 @@ import {
 } from "../types.js";
 
 const TIME_T = { kind: "named", name: "time.Time", underlying: ANY };
+const REPLACER_T = {
+	kind: "pointer",
+	base: { kind: "named", name: "strings.Replacer" },
+};
 
 export function setupCoreGlobals(globals, types) {
 	const browserGlobals = [
@@ -218,10 +222,11 @@ export function setupCoreGlobals(globals, types) {
 			NewReplacer: {
 				kind: "func",
 				params: [STRING],
-				returns: [ANY],
+				returns: [REPLACER_T],
 				variadic: true,
 			},
 			NewReader: { kind: "func", params: [STRING], returns: [ANY] },
+			Builder: ANY,
 		},
 	});
 
@@ -333,6 +338,8 @@ export function setupCoreGlobals(globals, types) {
 				params: [BYTE_SLICE, FLOAT64, INT, INT, INT],
 				returns: [BYTE_SLICE],
 			},
+			ErrSyntax: ERROR,
+			ErrRange: ERROR,
 		},
 	});
 

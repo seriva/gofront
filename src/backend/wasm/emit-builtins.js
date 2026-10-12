@@ -930,6 +930,19 @@ export class BuiltinsEmitter {
 			return true;
 		}
 		const recvTypeName = this._getReceiverTypeName(recvType, func.expr);
+		if (
+			this._emitStdlibReceiverMethod(recvTypeName, func.field, func.expr, args)
+		) {
+			return true;
+		}
+		if (recvTypeName === "strings.Builder") {
+			this.emitBuilderMethodCall(func.field, func.expr, args);
+			return true;
+		}
+		if (recvTypeName === "strings.Replacer") {
+			this.emitReplacerMethodCall(func.field, func.expr, args);
+			return true;
+		}
 		if (isNonEmptyInterface(recvType, this.mod.checker)) {
 			const ifaceName = recvTypeName ?? "anon";
 			const dispatchName = `__dispatch_${ifaceName}_${func.field}`;
@@ -950,38 +963,15 @@ export class BuiltinsEmitter {
 		}
 		if (recvTypeName) {
 			const methodName = `${recvTypeName}.${func.field}`;
-			let targetFuncIdx = this.mod.resolveFuncIndex(methodName);
-			let targetParamTypes = this.mod.getFuncParamTypes(methodName);
+			const targetFuncIdx = this.mod.resolveFuncIndex(methodName);
+			const targetParamTypes = this.mod.getFuncParamTypes(methodName);
 
 			// If not found directly, check embedded structs
-			if (targetFuncIdx === null) {
-				const structInfo = this.mod.getStructType(recvTypeName);
-				if (structInfo) {
-					for (const embed of structInfo.embeds) {
-						const embedMethodName = `${embed.name}.${func.field}`;
-						const subIdx = this.mod.resolveFuncIndex(embedMethodName);
-						if (subIdx !== null) {
-							targetFuncIdx = subIdx;
-							targetParamTypes = this.mod.getFuncParamTypes(embedMethodName);
-							const baseWType = this.toWasmType(recvType);
-							this.emitExpr(func.expr, baseWType);
-							this.pushInstruction({
-								op: "struct.get",
-								typeIndex: structInfo.typeIndex,
-								fieldIndex: embed.fieldIndex,
-							});
-							for (let i = 0; i < args.length; i++) {
-								const pType = targetParamTypes[i + 1] ?? null;
-								this.emitExpr(args[i], pType);
-							}
-							this.pushInstruction({
-								op: "call",
-								funcIndex: targetFuncIdx,
-							});
-							return true;
-						}
-					}
-				}
+			if (
+				targetFuncIdx === null &&
+				this._emitEmbeddedMethodCall(recvTypeName, func, args, recvType)
+			) {
+				return true;
 			}
 
 			if (targetFuncIdx !== null) {
@@ -997,6 +987,47 @@ export class BuiltinsEmitter {
 					this._emitCopyIfValueStruct(args[i], pGoType, pType);
 				}
 				this.pushInstruction({ op: "call", funcIndex: targetFuncIdx });
+				return true;
+			}
+		}
+		return false;
+	}
+
+	_emitStdlibReceiverMethod(recvTypeName, field, expr, args) {
+		if (recvTypeName === "strings.Builder") {
+			this.emitBuilderMethodCall(field, expr, args);
+			return true;
+		}
+		if (recvTypeName === "strings.Replacer") {
+			this.emitReplacerMethodCall(field, expr, args);
+			return true;
+		}
+		return false;
+	}
+
+	_emitEmbeddedMethodCall(recvTypeName, func, args, recvType) {
+		const structInfo = this.mod.getStructType(recvTypeName);
+		if (!structInfo) return false;
+		for (const embed of structInfo.embeds) {
+			const embedMethodName = `${embed.name}.${func.field}`;
+			const subIdx = this.mod.resolveFuncIndex(embedMethodName);
+			if (subIdx !== null) {
+				const targetParamTypes = this.mod.getFuncParamTypes(embedMethodName);
+				const baseWType = this.toWasmType(recvType);
+				this.emitExpr(func.expr, baseWType);
+				this.pushInstruction({
+					op: "struct.get",
+					typeIndex: structInfo.typeIndex,
+					fieldIndex: embed.fieldIndex,
+				});
+				for (let i = 0; i < args.length; i++) {
+					const pType = targetParamTypes[i + 1] ?? null;
+					this.emitExpr(args[i], pType);
+				}
+				this.pushInstruction({
+					op: "call",
+					funcIndex: subIdx,
+				});
 				return true;
 			}
 		}
