@@ -6,8 +6,14 @@
 import {
 	ERROR_STRUCT,
 	getMapKeyValTypes,
+	goTypeKey,
+	isArrayType,
 	isErrorType,
+	isMapType,
+	isPointerToStruct,
 	isSigned,
+	isSliceType,
+	isStructType,
 	isUnhashableGoType,
 	toWasmType,
 } from "./types.js";
@@ -372,6 +378,527 @@ export class StdlibEmitter {
 	// the typed `testing_arg_*` imports.  Anything that may run user code (the
 	// argument itself, or `Error()` on an `error` operand) happens in the first
 	// phase: such code can call Sprintf and reset the JS-side argument buffer,
+	_isCompositeGoType(goType) {
+		if (!goType) return false;
+		if (isErrorType(goType) && this.mod.hasErrorType) return false;
+		if (goType.name === "string" || goType === "string") return false;
+		if (goType.name === "bool" || goType === "bool") return false;
+		return (
+			isSliceType(goType, this.mod.checker) ||
+			isArrayType(goType, this.mod.checker) ||
+			isMapType(goType, this.mod.checker) ||
+			isStructType(goType, this.mod.checker, this.mod) ||
+			isPointerToStruct(goType, this.mod.checker, this.mod) ||
+			goType.kind === "pointer" ||
+			goType.kind === "PointerType" ||
+			goType.kind === "StarExpr"
+		);
+	}
+
+	_emitScalarToExternref(goType, valTmp, valW) {
+		if (goType?.name === "string" || goType === "string") {
+			this.pushInstruction({ op: "local.get", index: valTmp });
+			this.releaseTemp(valTmp, valW);
+			return true;
+		}
+		if (goType?.name === "bool" || goType === "bool") {
+			this.pushInstruction({ op: "local.get", index: valTmp });
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getFmtBoxBoolIndex(),
+			});
+			this.releaseTemp(valTmp, valW);
+			return true;
+		}
+		if (isErrorType(goType) && this.mod.hasErrorType) {
+			this.pushInstruction({ op: "local.get", index: valTmp });
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.resolveFuncIndex("__error_str"),
+			});
+			this.releaseTemp(valTmp, valW);
+			return true;
+		}
+		if (valW === "i32" || valW === "i64") {
+			this.pushInstruction({ op: "local.get", index: valTmp });
+			const funcIndex =
+				valW === "i32"
+					? this.mod.getFmtBoxI32Index()
+					: this.mod.getFmtBoxI64Index();
+			this.pushInstruction({ op: "call", funcIndex });
+			this.releaseTemp(valTmp, valW);
+			return true;
+		}
+		if (valW === "f32" || valW === "f64") {
+			this.pushInstruction({ op: "local.get", index: valTmp });
+			if (valW === "f32") this.pushInstruction("f64.promote_f32");
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getFmtBoxF64Index(),
+			});
+			this.releaseTemp(valTmp, valW);
+			return true;
+		}
+		return false;
+	}
+
+	_emitSliceToExternref(goType, valTmp, valW, inCycle, nextSeen) {
+		const elemGoType = goType.elem ?? goType.underlying?.elem;
+		const sliceInfo = this.mod.getSliceType(elemGoType);
+		const arrInfo = this.mod.getArrayType(elemGoType);
+		const arrWType = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: arrInfo.typeIndex,
+		};
+		const resTmp = this.acquireTemp("externref");
+		const arrTmp = this.acquireTemp(arrWType);
+		const offTmp = this.acquireTemp("i32");
+		const lenTmp = this.acquireTemp("i32");
+		const idxTmp = this.acquireTemp("i32");
+
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getFmtNewArrayIndex(),
+		});
+		this.pushInstruction({ op: "local.set", index: resTmp });
+
+		if (inCycle) {
+			this.pushInstruction({ op: "local.get", index: resTmp });
+			this.releaseTemp(idxTmp, "i32");
+			this.releaseTemp(lenTmp, "i32");
+			this.releaseTemp(offTmp, "i32");
+			this.releaseTemp(arrTmp, arrWType);
+			this.releaseTemp(resTmp, "externref");
+			this.releaseTemp(valTmp, valW);
+			return;
+		}
+
+		this.pushInstruction({ op: "local.get", index: valTmp });
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction("else");
+
+		this._emitSliceUnpack(valTmp, sliceInfo, {
+			arr: arrTmp,
+			off: offTmp,
+			len: lenTmp,
+		});
+
+		this.pushInstruction({ op: "local.get", index: arrTmp });
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction({ op: "local.get", index: lenTmp });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction("i32.le_s");
+		this.pushInstruction("i32.or");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction("else");
+
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: idxTmp });
+
+		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushInstruction({ op: "loop", blockType: "void" });
+
+		this.pushInstruction({ op: "local.get", index: idxTmp });
+		this.pushInstruction({ op: "local.get", index: lenTmp });
+		this.pushInstruction("i32.ge_s");
+		this.pushInstruction({ op: "br_if", depth: 1 });
+
+		this.pushInstruction({ op: "local.get", index: resTmp });
+
+		this.pushInstruction({ op: "local.get", index: arrTmp });
+		this.pushInstruction({ op: "local.get", index: offTmp });
+		this.pushInstruction({ op: "local.get", index: idxTmp });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({
+			op: "array.get",
+			typeIndex: arrInfo.typeIndex,
+		});
+
+		this.emitToExternref(elemGoType, true, nextSeen);
+
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getFmtArrayPushIndex(),
+		});
+
+		this.pushInstruction({ op: "local.get", index: idxTmp });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: idxTmp });
+
+		this.pushInstruction({ op: "br", depth: 0 });
+		this.pushInstruction("end");
+		this.pushInstruction("end");
+
+		this.pushInstruction("end");
+		this.pushInstruction("end");
+
+		this.pushInstruction({ op: "local.get", index: resTmp });
+
+		this.releaseTemp(idxTmp, "i32");
+		this.releaseTemp(lenTmp, "i32");
+		this.releaseTemp(offTmp, "i32");
+		this.releaseTemp(arrTmp, arrWType);
+		this.releaseTemp(resTmp, "externref");
+		this.releaseTemp(valTmp, valW);
+	}
+
+	_emitArrayToExternref(goType, valTmp, valW, inCycle, nextSeen) {
+		const elemGoType = goType.elem ?? goType.underlying?.elem;
+		const arrInfo = this.mod.getArrayType(elemGoType);
+		const resTmp = this.acquireTemp("externref");
+		const lenTmp = this.acquireTemp("i32");
+		const idxTmp = this.acquireTemp("i32");
+
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getFmtNewArrayIndex(),
+		});
+		this.pushInstruction({ op: "local.set", index: resTmp });
+
+		if (inCycle) {
+			this.pushInstruction({ op: "local.get", index: resTmp });
+			this.releaseTemp(idxTmp, "i32");
+			this.releaseTemp(lenTmp, "i32");
+			this.releaseTemp(resTmp, "externref");
+			this.releaseTemp(valTmp, valW);
+			return;
+		}
+
+		this.pushInstruction({ op: "local.get", index: valTmp });
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction("else");
+
+		this.pushInstruction({ op: "local.get", index: valTmp });
+		this.pushInstruction("array.len");
+		this.pushInstruction({ op: "local.set", index: lenTmp });
+
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: idxTmp });
+
+		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushInstruction({ op: "loop", blockType: "void" });
+
+		this.pushInstruction({ op: "local.get", index: idxTmp });
+		this.pushInstruction({ op: "local.get", index: lenTmp });
+		this.pushInstruction("i32.ge_s");
+		this.pushInstruction({ op: "br_if", depth: 1 });
+
+		this.pushInstruction({ op: "local.get", index: resTmp });
+
+		this.pushInstruction({ op: "local.get", index: valTmp });
+		this.pushInstruction({ op: "local.get", index: idxTmp });
+		this.pushInstruction({
+			op: "array.get",
+			typeIndex: arrInfo.typeIndex,
+		});
+
+		this.emitToExternref(elemGoType, true, nextSeen);
+
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getFmtArrayPushIndex(),
+		});
+
+		this.pushInstruction({ op: "local.get", index: idxTmp });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: idxTmp });
+
+		this.pushInstruction({ op: "br", depth: 0 });
+		this.pushInstruction("end");
+		this.pushInstruction("end");
+
+		this.pushInstruction("end");
+
+		this.pushInstruction({ op: "local.get", index: resTmp });
+
+		this.releaseTemp(idxTmp, "i32");
+		this.releaseTemp(lenTmp, "i32");
+		this.releaseTemp(resTmp, "externref");
+		this.releaseTemp(valTmp, valW);
+	}
+
+	_emitMapToExternref(goType, valTmp, valW, inCycle, nextSeen) {
+		const { keyType, valType } = getMapKeyValTypes(goType, this.mod.checker);
+		const mapInfo = this.mod.getMapType(keyType, valType);
+		const resTmp = this.acquireTemp("externref");
+		const currIdxTmp = this.acquireTemp("i32");
+		const entryTmp = this.acquireTemp({
+			kind: "ref",
+			nullable: true,
+			typeIndex: mapInfo.entryTypeIndex,
+		});
+
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getFmtNewMapIndex(),
+		});
+		this.pushInstruction({ op: "local.set", index: resTmp });
+
+		if (inCycle) {
+			this.pushInstruction({ op: "local.get", index: resTmp });
+			this.releaseTemp(entryTmp, {
+				kind: "ref",
+				nullable: true,
+				typeIndex: mapInfo.entryTypeIndex,
+			});
+			this.releaseTemp(currIdxTmp, "i32");
+			this.releaseTemp(resTmp, "externref");
+			this.releaseTemp(valTmp, valW);
+			return;
+		}
+
+		this.pushInstruction({ op: "local.get", index: valTmp });
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction("else");
+
+		// currIdx = map.head (field 5)
+		this.pushInstruction({ op: "local.get", index: valTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: mapInfo.typeIndex,
+			fieldIndex: 5,
+		});
+		this.pushInstruction({ op: "local.set", index: currIdxTmp });
+
+		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushInstruction({ op: "loop", blockType: "void" });
+
+		this.pushInstruction({ op: "local.get", index: currIdxTmp });
+		this.pushInstruction({ op: "i32.const", value: -1 });
+		this.pushInstruction("i32.eq");
+		this.pushInstruction({ op: "br_if", depth: 1 });
+
+		this.pushInstruction({ op: "local.get", index: valTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: mapInfo.typeIndex,
+			fieldIndex: 1,
+		});
+		this.pushInstruction({ op: "local.get", index: currIdxTmp });
+		this.pushInstruction({
+			op: "array.get",
+			typeIndex: mapInfo.entriesTypeIndex,
+		});
+		this.pushInstruction({ op: "local.set", index: entryTmp });
+
+		this.pushInstruction({ op: "local.get", index: entryTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: mapInfo.entryTypeIndex,
+			fieldIndex: 5,
+		});
+		this.pushInstruction({ op: "if", blockType: "void" });
+
+		this.pushInstruction({ op: "local.get", index: resTmp });
+
+		this.pushInstruction({ op: "local.get", index: entryTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: mapInfo.entryTypeIndex,
+			fieldIndex: 0,
+		});
+		this.emitToExternref(keyType, true, nextSeen);
+
+		this.pushInstruction({ op: "local.get", index: entryTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: mapInfo.entryTypeIndex,
+			fieldIndex: 1,
+		});
+		this.emitToExternref(valType, true, nextSeen);
+
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getFmtMapSetIndex(),
+		});
+
+		this.pushInstruction("end");
+
+		this.pushInstruction({ op: "local.get", index: entryTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: mapInfo.entryTypeIndex,
+			fieldIndex: 4,
+		});
+		this.pushInstruction({ op: "local.set", index: currIdxTmp });
+
+		this.pushInstruction({ op: "br", depth: 0 });
+		this.pushInstruction("end");
+		this.pushInstruction("end");
+
+		this.pushInstruction("end");
+
+		this.pushInstruction({ op: "local.get", index: resTmp });
+
+		this.releaseTemp(entryTmp, {
+			kind: "ref",
+			nullable: true,
+			typeIndex: mapInfo.entryTypeIndex,
+		});
+		this.releaseTemp(currIdxTmp, "i32");
+		this.releaseTemp(resTmp, "externref");
+		this.releaseTemp(valTmp, valW);
+	}
+
+	_emitScalarPtrToExternref(valTmp, valW) {
+		const resTmp = this.acquireTemp("externref");
+		this.pushInstruction({ op: "local.get", index: valTmp });
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "ref.null", heapType: "extern" });
+		this.pushInstruction({ op: "local.set", index: resTmp });
+		this.pushInstruction("else");
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getFmtNewBoxIndex(),
+		});
+		this.pushInstruction({ op: "local.set", index: resTmp });
+		this.pushInstruction("end");
+
+		this.pushInstruction({ op: "local.get", index: resTmp });
+		this.releaseTemp(resTmp, "externref");
+		this.releaseTemp(valTmp, valW);
+	}
+
+	_emitStructToExternref(
+		goType,
+		valTmp,
+		valW,
+		isPtr,
+		isNested,
+		inCycle,
+		nextSeen,
+	) {
+		const structInfo =
+			this._resolveStructInfo({ _type: goType }) ??
+			(goType?.name ? this.mod.getStructType(goType.name) : null);
+		const resTmp = this.acquireTemp("externref");
+
+		this.pushInstruction({ op: "local.get", index: valTmp });
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		if (isPtr) {
+			this.pushInstruction({ op: "ref.null", heapType: "extern" });
+			this.pushInstruction({ op: "local.set", index: resTmp });
+		} else {
+			this.pushInstruction({ op: "ref.null", heapType: "any" });
+			this.pushInstruction({ op: "i32.const", value: 0 });
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getFmtNewStructIndex(),
+			});
+			this.pushInstruction({ op: "local.set", index: resTmp });
+		}
+		this.pushInstruction("else");
+
+		this.pushInstruction({ op: "local.get", index: valTmp });
+		this.pushInstruction({ op: "i32.const", value: isPtr ? 1 : 0 });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getFmtNewStructIndex(),
+		});
+		this.pushInstruction({ op: "local.set", index: resTmp });
+
+		if ((!isPtr || !isNested) && !inCycle && structInfo?.fields) {
+			for (let i = 0; i < structInfo.fields.length; i++) {
+				const f = structInfo.fields[i];
+				const fieldIndex =
+					structInfo.fieldIndexMap?.get(f.name) ?? f.fieldIndex ?? i;
+				this.pushInstruction({ op: "local.get", index: resTmp });
+				const strIdx = this.mod.internString(f.name);
+				this.pushInstruction({ op: "i32.const", value: strIdx });
+
+				this.pushInstruction({ op: "local.get", index: valTmp });
+				this.pushInstruction({
+					op: "struct.get",
+					typeIndex: structInfo.typeIndex,
+					fieldIndex,
+				});
+
+				this.emitToExternref(f.goType, true, nextSeen);
+
+				this.pushInstruction({
+					op: "call",
+					funcIndex: this.mod.getFmtStructSetIndex(),
+				});
+			}
+		}
+
+		this.pushInstruction("end");
+
+		this.pushInstruction({ op: "local.get", index: resTmp });
+
+		this.releaseTemp(resTmp, "externref");
+		this.releaseTemp(valTmp, valW);
+	}
+
+	emitToExternref(goType, isNested = false, seen = new Set()) {
+		const valW = toWasmType(goType, this.mod.checker, this.mod);
+		const valTmp = this.acquireTemp(valW);
+		this.pushInstruction({ op: "local.set", index: valTmp });
+
+		if (this._emitScalarToExternref(goType, valTmp, valW)) return;
+
+		const tKey = goType ? goTypeKey(goType) : null;
+		const inCycle = tKey !== null && seen.has(tKey);
+		const nextSeen = tKey !== null ? new Set(seen).add(tKey) : seen;
+
+		if (isSliceType(goType, this.mod.checker)) {
+			this._emitSliceToExternref(goType, valTmp, valW, inCycle, nextSeen);
+			return;
+		}
+
+		if (isArrayType(goType, this.mod.checker)) {
+			this._emitArrayToExternref(goType, valTmp, valW, inCycle, nextSeen);
+			return;
+		}
+
+		if (isMapType(goType, this.mod.checker)) {
+			this._emitMapToExternref(goType, valTmp, valW, inCycle, nextSeen);
+			return;
+		}
+
+		const isStructPtr = isPointerToStruct(goType, this.mod.checker, this.mod);
+		const isStruct =
+			isStructType(goType, this.mod.checker, this.mod) || isStructPtr;
+		const isScalarPtr =
+			!isStructPtr &&
+			(goType?.kind === "pointer" ||
+				goType?.kind === "PointerType" ||
+				goType?.kind === "StarExpr");
+
+		if (isScalarPtr) {
+			this._emitScalarPtrToExternref(valTmp, valW);
+			return;
+		}
+
+		if (isStruct) {
+			this._emitStructToExternref(
+				goType,
+				valTmp,
+				valW,
+				isStructPtr,
+				isNested,
+				inCycle,
+				nextSeen,
+			);
+			return;
+		}
+
+		this.pushInstruction({ op: "local.get", index: valTmp });
+		this.releaseTemp(valTmp, valW);
+	}
+
+	// Evaluates every argument into a temp first, then pushes them in order via
+	// the typed `testing_arg_*` imports.  Anything that may run user code (the
+	// argument itself, or `Error()` on an `error` operand) happens in the first
+	// phase: such code can call Sprintf and reset the JS-side argument buffer,
 	// so nothing may be pushed until every operand is fully evaluated.
 	// Returns the temps so the caller can still read an argument (fmt.Errorf's
 	// %w cause keeps the original error value in `errTmp`).
@@ -383,7 +910,7 @@ export class StdlibEmitter {
 				goType?.name === "bool" ||
 				(arg.kind === "BasicLit" && arg.litKind === "BOOL");
 			const isErr = isErrorType(goType) && this.mod.hasErrorType;
-			const valW = toWasmType(goType, this.mod.checker);
+			const valW = toWasmType(goType, this.mod.checker, this.mod);
 			if (isErr) {
 				const errTmp = this.acquireTemp("anyref");
 				const tmp = this.acquireTemp("externref");
@@ -395,6 +922,14 @@ export class StdlibEmitter {
 				});
 				this.pushInstruction({ op: "local.set", index: tmp });
 				temps.push({ tmp, wType: "externref", isBool: false, errTmp });
+				continue;
+			}
+			if (this._isCompositeGoType(goType)) {
+				const tmp = this.acquireTemp("externref");
+				this.emitExpr(arg, valW);
+				this.emitToExternref(goType, false);
+				this.pushInstruction({ op: "local.set", index: tmp });
+				temps.push({ tmp, wType: "externref", isBool: false, errTmp: null });
 				continue;
 			}
 			let wType = valW;
@@ -6205,6 +6740,17 @@ export class StdlibEmitter {
 						op: "call",
 						funcIndex: this.mod.resolveFuncIndex("__error_str"),
 					});
+					this.pushInstruction({
+						op: "call",
+						funcIndex: this.mod.getLogImportIndex("externref", isLast, false),
+					});
+					continue;
+				}
+				if (this._isCompositeGoType(goType)) {
+					const valW = toWasmType(goType, this.mod.checker, this.mod);
+					this.emitExpr(arg, valW);
+					this.emitToExternref(goType, false);
+					this._callStdlib("fmt_format_v");
 					this.pushInstruction({
 						op: "call",
 						funcIndex: this.mod.getLogImportIndex("externref", isLast, false),
