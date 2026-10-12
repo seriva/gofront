@@ -4,23 +4,28 @@
 
 const BUILDER_STR = {
 	WriteString: (b, a) => `(${b}._buf += ${a[0]}, [${a[0]}.length, null])`,
-	WriteByte: (b, a) => `(${b}._buf += String.fromCodePoint(${a[0]}))`,
-	Write: (b, a) => `(${b}._buf += String.fromCharCode(...${a[0]}))`,
+	WriteByte: (b, a) => `(${b}._buf += String.fromCodePoint(${a[0]}), null)`,
+	WriteRune: (b, a) =>
+		`((cp) => { const s = String.fromCodePoint(cp); ${b}._buf += s; return [new TextEncoder().encode(s).length, null]; })(${a[0]})`,
+	Write: (b, a) =>
+		`(${b}._buf += new TextDecoder().decode(new Uint8Array(${a[0]})), [${a[0]}.length, null])`,
 	String: (b) => `${b}._buf`,
 	Reset: (b) => `(${b}._buf = "")`,
 };
 const BUILDER_BYTES = {
 	WriteString: (b, a) =>
 		`(${b}._buf.push(...new TextEncoder().encode(${a[0]})), [${a[0]}.length, null])`,
-	WriteByte: (b, a) => `${b}._buf.push(${a[0]})`,
+	WriteByte: (b, a) => `(${b}._buf.push(${a[0]}), null)`,
+	WriteRune: (b, a) =>
+		`((cp) => { const bytes = new TextEncoder().encode(String.fromCodePoint(cp)); ${b}._buf.push(...bytes); return [bytes.length, null]; })(${a[0]})`,
 	Write: (b, a) => `(${b}._buf.push(...${a[0]}), [${a[0]}.length, null])`,
 	String: (b) => `new TextDecoder().decode(new Uint8Array(${b}._buf))`,
 	Reset: (b) => `(${b}._buf = [])`,
 };
 const BUILDER_COMMON = {
-	WriteRune: (b, a) => `(${b}._buf += String.fromCodePoint(${a[0]}))`,
 	Bytes: (b) => `${b}._buf.slice()`,
 	Len: (b) => `${b}._buf.length`,
+	Cap: (b) => `${b}._buf.length`,
 	Grow: () => "undefined",
 };
 

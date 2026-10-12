@@ -2,6 +2,7 @@
 // Tests for Phase 4c: Strings & Any in WASM and JS-strict parity.
 
 import {
+	assertContains,
 	assertEqual,
 	compileHybrid,
 	runWasm,
@@ -364,5 +365,414 @@ func Main() int64 {
 	// Eval(10) = 99 + 500 = 599
 	// Total = 110 + 120 + 599 = 829
 	assertEqual(wasmRes, 829n);
+	assertEqual(wasmRes, jsRes);
+});
+
+section("WASM stdlib Phase 3 — strings.Cut, CutPrefix, CutSuffix");
+
+test("strings.Cut, CutPrefix, CutSuffix", () => {
+	const src = `
+package main
+
+import "strings"
+
+func Main() string {
+	b1, a1, ok1 := strings.Cut("user:password", ":")
+	b2, a2, ok2 := strings.Cut("user-password", ":")
+	ap1, ok3 := strings.CutPrefix("hello world", "hello ")
+	ap2, ok4 := strings.CutPrefix("hello world", "bye ")
+	as1, ok5 := strings.CutSuffix("hello world", " world")
+	as2, ok6 := strings.CutSuffix("hello world", " bye")
+
+	out := ""
+	if ok1 { out += b1 + "|" + a1 + ";" }
+	if !ok2 { out += b2 + "|" + a2 + ";" }
+	if ok3 { out += ap1 + ";" }
+	if !ok4 { out += ap2 + ";" }
+	if ok5 { out += as1 + ";" }
+	if !ok6 { out += as2 }
+	return out
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(
+		wasmRes,
+		"user|password;user-password|;world;hello world;hello;hello world",
+	);
+	assertEqual(wasmRes, jsRes);
+});
+
+section("WASM stdlib Phase 3 — strings.SplitN, SplitAfter, SplitAfterN");
+
+test("strings.SplitN, SplitAfter, SplitAfterN with nil slices on n == 0", () => {
+	const src = `
+package main
+
+import "strings"
+
+func Main() string {
+	s0 := strings.SplitN("a:b:c:d", ":", 0)
+	s2 := strings.SplitN("a:b:c:d", ":", 2)
+	sNeg := strings.SplitN("a:b:c", ":", -1)
+	sa := strings.SplitAfter("a:b:c", ":")
+	san := strings.SplitAfterN("a:b:c:d", ":", 2)
+	san0 := strings.SplitAfterN("a:b:c", ":", 0)
+
+	out := ""
+	if s0 == nil { out += "nil0|" }
+	out += strings.Join(s2, ",") + "|"
+	out += strings.Join(sNeg, ",") + "|"
+	out += strings.Join(sa, ",") + "|"
+	out += strings.Join(san, ",")
+	if san0 == nil { out += "|nilsan0" }
+	return out
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "nil0|a,b:c:d|a,b,c|a:,b:,c|a:,b:c:d|nilsan0");
+	assertEqual(wasmRes, jsRes);
+});
+
+section("WASM stdlib Phase 3 — strings.LastIndexAny, IndexFunc, LastIndexFunc");
+
+test("strings.LastIndexAny, IndexFunc, LastIndexFunc", () => {
+	const src = `
+package main
+
+import "strings"
+
+func Main() int64 {
+	i1 := strings.LastIndexAny("gofront", "no")
+	i2 := strings.LastIndexAny("gofront", "xyz")
+	isO := func(r rune) bool { return r == 'o' }
+	i3 := strings.IndexFunc("gofront", isO)
+	i4 := strings.LastIndexFunc("gofront", isO)
+	i5 := strings.IndexFunc("xyz", isO)
+	return int64(i1*100000000 + (i2+2)*1000000 + i3*10000 + i4*100 + (i5+2))
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, jsRes);
+});
+
+section("WASM stdlib Phase 3 — strings.TrimFunc, TrimLeftFunc, TrimRightFunc");
+
+test("strings.TrimFunc, TrimLeftFunc, TrimRightFunc", () => {
+	const src = `
+package main
+
+import "strings"
+
+func Main() string {
+	isDash := func(r rune) bool { return r == '-' }
+	t := strings.TrimFunc("--hello--", isDash)
+	tl := strings.TrimLeftFunc("--hello--", isDash)
+	tr := strings.TrimRightFunc("--hello--", isDash)
+	return t + "|" + tl + "|" + tr
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "hello|hello--|--hello");
+	assertEqual(wasmRes, jsRes);
+});
+
+section("WASM stdlib Phase 3 — strings.Map (rune mapping & negative drop)");
+
+test("strings.Map drops rune on negative return", () => {
+	const src = `
+package main
+
+import "strings"
+
+func Main() string {
+	dropVowels := func(r rune) rune {
+		if r == 'a' || r == 'e' || r == 'i' || r == 'o' || r == 'u' {
+			return -1
+		}
+		if r >= 'a' && r <= 'z' {
+			return r - 32
+		}
+		return r
+	}
+	return strings.Map(dropVowels, "hello world!")
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "HLL WRLD!");
+	assertEqual(wasmRes, jsRes);
+});
+
+section("WASM stdlib Phase 3 — strings.NewReplacer & Replace");
+
+test("strings.NewReplacer and Replace", () => {
+	const src = `
+package main
+
+import "strings"
+
+func Main() string {
+	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
+	return r.Replace("<b>Tom & Jerry</b>")
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "&lt;b&gt;Tom &amp; Jerry&lt;/b&gt;");
+	assertEqual(wasmRes, jsRes);
+});
+
+section("WASM stdlib Phase 3 — strings.Builder");
+
+test("strings.Builder lifecycle: WriteString, WriteByte, WriteRune, Write, String, Len, Reset, Grow", () => {
+	const src = `
+package main
+
+import (
+	"strconv"
+	"strings"
+)
+
+func Main() string {
+	var b strings.Builder
+	b.WriteString("hello")
+	b.WriteByte(' ')
+	b.WriteRune('A')
+	b.Write([]byte(" world!"))
+	s1 := b.String()
+	l1 := b.Len()
+	b.Grow(100)
+	b.Reset()
+	s2 := b.String()
+	l2 := b.Len()
+	b.WriteString("after reset")
+	s3 := b.String()
+	return s1 + "|" + strconv.Itoa(l1) + "|" + s2 + "|" + strconv.Itoa(l2) + "|" + s3
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "hello A world!|14||0|after reset");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("strings.Builder copy-by-value after first write panics in WASM", () => {
+	const src = `
+package main
+
+import "strings"
+
+func Main() string {
+	var b1 strings.Builder
+	b1.WriteString("hello")
+	b2 := b1
+	b2.WriteString("world")
+	return b2.String()
+}
+`;
+	const { wasm, stringTable } = compileHybrid(src);
+	const { exports } = runWasm(wasm, { stringTable });
+	let threw = false;
+	try {
+		exports.Main();
+	} catch (e) {
+		threw = true;
+		assertContains(
+			e.message,
+			"strings: illegal use of non-zero Builder copied by value",
+		);
+	}
+	assertEqual(threw, true);
+});
+
+section("WASM stdlib Phase 3 — strconv additions");
+
+test("strconv.Unquote & ErrSyntax with errors.Is", () => {
+	const src = `
+package main
+
+import (
+	"errors"
+	"strconv"
+)
+
+func Main() string {
+	q := strconv.Quote("hello")
+	s1, err1 := strconv.Unquote(q)
+	if err1 != nil { return "err1" }
+
+	s2, err2 := strconv.Unquote("invalid")
+	isSyntax := errors.Is(err2, strconv.ErrSyntax)
+
+	res := s1 + "|" + s2 + "|"
+	if isSyntax { res += "syntax_ok" }
+	return res
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "hello||syntax_ok");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("strconv.AppendInt, AppendFloat, and byte slice conversions", () => {
+	const src = `
+package main
+
+import "strconv"
+
+func Main() string {
+	var b []byte
+	b = strconv.AppendInt(b, 42, 10)
+	b = append(b, ' ')
+	b = strconv.AppendFloat(b, 2.718, 'f', 2, 64)
+	return string(b)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "42 2.72");
+	assertEqual(wasmRes, jsRes);
+});
+
+section("WASM stdlib Phase 3 — Edge Cases & Regression Probes");
+
+test("strings.NewReplacer single-pass scanner & zero-value Replacer", () => {
+	const src = `
+package main
+
+import "strings"
+
+func Main() string {
+	r := strings.NewReplacer("ab", "1", "a", "2", "bc", "3")
+	s1 := r.Replace("abc")
+	var zero strings.Replacer
+	s2 := zero.Replace("hello")
+	return s1 + "|" + s2
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "1c|hello");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("[]byte(s) and string(b) UTF-8 multi-byte conversions without stdlib import", () => {
+	const src = `
+package main
+
+func Main() string {
+	b := []byte("世")
+	s := string(b)
+	b2 := []byte{0xe4, 0xb8, 0x96}
+	s2 := string(b2)
+	res := s + "|" + s2
+	if len(b) == 3 {
+		res += "|len3"
+	}
+	return res
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "世|世|len3");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("strings.Builder WriteByte, WriteRune, and Cap methods", () => {
+	const src = `
+package main
+
+import (
+	"strconv"
+	"strings"
+)
+
+func Main() string {
+	var b strings.Builder
+	c0 := b.Cap()
+	err1 := b.WriteByte(65)
+	n2, err2 := b.WriteRune(66)
+	c1 := b.Cap()
+	res := b.String() + "|" + strconv.Itoa(c0) + "|" + strconv.Itoa(c1)
+	if err1 == nil { res += "|e1_nil" }
+	if err2 == nil { res += "|e2_nil" }
+	if n2 == 1 { res += "|n2_1" }
+	return res
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "AB|0|2|e1_nil|e2_nil|n2_1");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("strings.SplitN with empty sep and strings.SplitAfter edge cases", () => {
+	const src = `
+package main
+
+import (
+	"strconv"
+	"strings"
+)
+
+func Main() string {
+	p1 := strings.SplitN("abc", "", 2)
+	p2 := strings.SplitN("abc", "", 1)
+	p3 := strings.SplitN("abc", "", 3)
+	after1 := strings.SplitAfter("", ":")
+	after2 := strings.SplitAfter("a:b:", ":")
+	after3 := strings.SplitAfterN("a:b:c", ":", 2)
+	return p1[0] + "," + p1[1] + "|" + p2[0] + "|" + p3[0] + "," + p3[1] + "," + p3[2] + "|" +
+		strconv.Itoa(len(after1)) + ":" + after1[0] + "|" +
+		strconv.Itoa(len(after2)) + ":" + after2[0] + after2[1] + "[" + after2[2] + "]|" +
+		after3[0] + "," + after3[1]
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "a,bc|abc|a,b,c|1:|3:a:b:[]|a:,b:c");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("strings.TrimFunc and TrimLeftFunc with astral surrogate pair characters", () => {
+	const src = `
+package main
+
+import "strings"
+
+func Main() string {
+	fn := func(r rune) bool {
+		return r == 0x1F680
+	}
+	s := strings.TrimFunc("🚀hello🚀", fn)
+	sL := strings.TrimLeftFunc("🚀hello🚀", fn)
+	sR := strings.TrimRightFunc("🚀hello🚀", fn)
+	return s + "|" + sL + "|" + sR
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "hello|hello🚀|🚀hello");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("strconv.ErrSyntax identity equality & errors.Is cause matching", () => {
+	const src = `
+package main
+
+import (
+	"errors"
+	"strconv"
+)
+
+func Main() string {
+	same := strconv.ErrSyntax == strconv.ErrSyntax
+	_, errAtoi := strconv.Atoi("notanumber")
+	isAtoi := errors.Is(errAtoi, strconv.ErrSyntax)
+	_, errParseInt := strconv.ParseInt("invalid", 10, 64)
+	isParseInt := errors.Is(errParseInt, strconv.ErrSyntax)
+	_, errUnquote := strconv.Unquote("badquote")
+	isUnquote := errors.Is(errUnquote, strconv.ErrSyntax)
+	res := ""
+	if same { res += "same_ok" }
+	if isAtoi { res += "|atoi_ok" }
+	if isParseInt { res += "|parseint_ok" }
+	if isUnquote { res += "|unquote_ok" }
+	return res
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "same_ok|atoi_ok|parseint_ok|unquote_ok");
 	assertEqual(wasmRes, jsRes);
 });

@@ -96,6 +96,11 @@ const STDLIB_IMPORTS = [
 	["str_trim_right", [S, S], [S]],
 	["str_trim_prefix", [S, S], [S]],
 	["str_trim_suffix", [S, S], [S]],
+	["str_cut", [S, S], ["i32"]],
+	["str_cut_before", [], [S]],
+	["str_cut_after", [], [S]],
+	["str_cut_prefix", [S, S], ["i32"]],
+	["str_cut_suffix", [S, S], ["i32"]],
 	["str_replace", [S, S, S, "i32"], [S]],
 	["str_contains_rune", [S, "i32"], ["i32"]],
 	["str_contains_any", [S, S], ["i32"]],
@@ -103,19 +108,28 @@ const STDLIB_IMPORTS = [
 	["str_index_rune", [S, "i32"], ["i32"]],
 	["str_index_any", [S, S], ["i32"]],
 	["str_last_index_byte", [S, "i32"], ["i32"]],
+	["str_last_index_any", [S, S], ["i32"]],
 	["str_title", [S], [S]],
 	["str_split", [S, S], ["i32"]],
+	["str_split_n", [S, S, "i32"], ["i32"]],
+	["str_split_after", [S, S], ["i32"]],
+	["str_split_after_n", [S, S, "i32"], ["i32"]],
 	["str_fields", [S], ["i32"]],
 	["str_part", ["i32"], [S]],
+	["str_replacer_init", [S], []],
+	["str_replacer_add", [S, S], []],
+	["str_replacer_run", [], [S]],
 	// strconv
 	["strconv_atoi", [S], ["i64"]],
 	["strconv_parse_int", [S, "i32", "i32"], ["i64"]],
 	["strconv_parse_float", [S], ["f64"]],
 	["strconv_parse_bool", [S], ["i32"]],
 	["strconv_err", [], [S]],
+	["strconv_err_kind", [], ["i32"]],
 	["strconv_format_float", ["f64", "i32", "i32", "i32"], [S]],
 	["strconv_format_int", ["i64", "i32"], [S]],
 	["strconv_quote", [S], [S]],
+	["strconv_unquote", [S], [S]],
 	// unicode/utf8
 	["utf8_rune_count", [S], ["i32"]],
 	["utf8_rune_len", ["i32"], ["i32"]],
@@ -748,6 +762,11 @@ class ModuleEmitter {
 		this.getStrFromI32ImportIndex();
 		this.getStrFromF64ImportIndex();
 		this.getIsStringImportIndex(); // env.is_string
+		this.getStrToBytesImportIndex();
+		this.getStrByteAtImportIndex();
+		this.getBytesToStrInitImportIndex();
+		this.getBytesToStrPushImportIndex();
+		this.getBytesToStrFinishImportIndex();
 		this.getTestingCallImportIndex();
 		this.getTestingNameImportIndex();
 		this.getTestingFlagImportIndex();
@@ -870,6 +889,21 @@ class ModuleEmitter {
 			init: [{ op: "i32.const", value: 0 }],
 		});
 		this.deferArmedGlobalIndex = gIdx;
+		return gIdx;
+	}
+
+	getStrconvErrGlobalIndex(field) {
+		if (!this.strconvErrGlobals) this.strconvErrGlobals = new Map();
+		if (this.strconvErrGlobals.has(field)) {
+			return this.strconvErrGlobals.get(field);
+		}
+		const gIdx = this.globals.length;
+		this.globals.push({
+			type: "anyref",
+			mutable: true,
+			init: [{ op: "ref.null", heapType: "any" }],
+		});
+		this.strconvErrGlobals.set(field, gIdx);
 		return gIdx;
 	}
 
@@ -1289,6 +1323,36 @@ class ModuleEmitter {
 			"env",
 			"str_from_f64",
 			["f64"],
+			["externref"],
+		);
+	}
+
+	getStrToBytesImportIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"str_to_bytes",
+			["externref"],
+			["i32"],
+		);
+	}
+
+	getStrByteAtImportIndex() {
+		return this.getOrAddFuncImport("env", "str_byte_at", ["i32"], ["i32"]);
+	}
+
+	getBytesToStrInitImportIndex() {
+		return this.getOrAddFuncImport("env", "bytes_to_str_init", ["i32"], []);
+	}
+
+	getBytesToStrPushImportIndex() {
+		return this.getOrAddFuncImport("env", "bytes_to_str_push", ["i32"], []);
+	}
+
+	getBytesToStrFinishImportIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"bytes_to_str_finish",
+			[],
 			["externref"],
 		);
 	}

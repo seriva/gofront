@@ -212,6 +212,8 @@ export function compileHybrid(source, options = {}) {
 				Boolean,
 				Array,
 				Object,
+				TextEncoder,
+				TextDecoder,
 				process: {
 					stdout: {
 						write: (s) => {
