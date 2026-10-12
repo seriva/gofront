@@ -35,7 +35,12 @@
 //     externref (test methods are routed back to JS via `env.testing_*`).
 
 import { HELPER_SPRINTF, HELPER_STRCONV } from "../js/runtime.js";
-import { getSharedInfo, isTestingT } from "./types.js";
+import {
+	anonIfaceName,
+	getInterfaceMethodList,
+	getSharedInfo,
+	isTestingT,
+} from "./types.js";
 
 // ── Type classification ──────────────────────────────────────
 
@@ -94,6 +99,7 @@ function classifyType(goType, mod) {
 	if (isTestingT(goType)) return { k: "extern", wType: "externref" };
 
 	if (goType.kind === "TypeName" || goType.kind === "Ident") {
+		if (goType.name === "error") return { k: "error", wType: "anyref" };
 		const info = mod.getStructType(goType.name);
 		if (info) return structDesc(info, false);
 		const resolved = mod.checker?.types?.get(goType.name);
@@ -117,6 +123,10 @@ function classifyType(goType, mod) {
 			return classifySlice(t, mod);
 		case "array":
 			return classifyArray(t, mod);
+		case "map":
+			return classifyMap(t, mod);
+		case "struct":
+			return classifyStruct(t, mod);
 		case "func":
 			return classifyFunc(t, mod);
 		case "interface":
@@ -130,11 +140,6 @@ function classifyType(goType, mod) {
 }
 
 const UNSUPPORTED_KINDS = {
-	map: "map",
-	MapType: "map",
-	struct: "anonymous struct",
-	StructType: "anonymous struct",
-	InterfaceType: "interface",
 	ChanType: "chan",
 	chan: "chan",
 };
@@ -149,13 +154,21 @@ function normalizeAstType(t) {
 			return { kind: "slice", elem: t.elem };
 		case "ArrayType":
 			return { kind: "array", elem: t.elem, size: t.size };
+		case "MapType":
+			return { kind: "map", key: t.key, val: t.value ?? t.elem };
 		case "FuncType":
 			return funcSigFromAst(t);
 		case "InterfaceType":
 			return {
 				kind: "interface",
 				name: t.name,
-				methods: new Set((t.methods ?? []).map((m) => m.name ?? m)),
+				methods: t.methods,
+			};
+		case "StructType":
+			return {
+				kind: "struct",
+				name: t.name,
+				fields: t.fields,
 			};
 		default:
 			return t;
@@ -169,7 +182,7 @@ const BASIC_DESCS = {
 	float64: { k: "f64", wType: "f64" },
 	string: { k: "string", wType: "externref" },
 	any: { k: "any", wType: "anyref" },
-	error: { k: "unsupported", what: "error" },
+	error: { k: "error", wType: "anyref" },
 };
 
 function classifyBasic(n) {
@@ -182,17 +195,104 @@ function classifyBasic(n) {
 }
 
 function classifyNamed(t, mod) {
+	if (t.name === "error") return { k: "error", wType: "anyref" };
 	const info = mod.getStructType(t.name);
 	if (info) return structDesc(info, false);
 	if (t.underlying) return classifyType(t.underlying, mod);
 	return { k: "unsupported", what: `named type '${t.name}'` };
 }
 
+function classifyAnonStruct(t, mod) {
+	const rawFields = [];
+	if (t.fields instanceof Map) {
+		for (const [k, v] of t.fields.entries())
+			rawFields.push({ name: k, goType: v });
+	} else if (Array.isArray(t.fields)) {
+		for (const f of t.fields) {
+			const names = f.names ?? (f.name ? [f.name] : []);
+			for (const n of names) rawFields.push({ name: n, goType: f.type });
+		}
+	}
+	const info = mod.getAnonStructType(rawFields);
+	const fields = [];
+	for (const f of info.fields) {
+		const fd = classifyType(f.goType, mod);
+		if (fd.k === "unsupported") return fd;
+		fields.push({ name: f.name, desc: fd });
+	}
+	return {
+		k: "anon_struct",
+		name: info.name,
+		key: info.name,
+		info,
+		fields,
+		wType: toRef(info),
+	};
+}
+
+function classifyStruct(t, mod) {
+	if (t.name) {
+		const info = mod.getStructType(t.name);
+		if (info) return structDesc(info, false);
+	}
+	return classifyAnonStruct(t, mod);
+}
+
 function classifyPointer(t, mod) {
 	const base = classifyType(t.base, mod);
+	if (base.k === "unsupported") return base;
 	if (base.k === "struct" && !base.ptr) return { ...base, ptr: true };
-	const what = base.k === "unsupported" ? base.what : (t.base?.name ?? base.k);
-	return { k: "unsupported", what: `pointer to ${what}` };
+	if (base.k === "anon_struct" && !base.ptr) return { ...base, ptr: true };
+	const boxInfo = mod.getBoxType(t.base);
+	const key = `${base.k}${base.unsigned ? "_u" : ""}_${boxInfo.typeIndex}`;
+	return {
+		k: "ptr_box",
+		base,
+		boxInfo,
+		key,
+		wType: { kind: "ref", nullable: true, typeIndex: boxInfo.typeIndex },
+	};
+}
+
+function isAllowedMapKey(kDesc) {
+	if (kDesc.k === "string" || kDesc.k === "bool") return true;
+	if (
+		kDesc.k === "i32" ||
+		kDesc.k === "i64" ||
+		kDesc.k === "f32" ||
+		kDesc.k === "f64"
+	)
+		return true;
+	return false;
+}
+
+function classifyMap(t, mod) {
+	const keyType = t.key;
+	const valType = t.val ?? t.value ?? t.elem;
+	const keyDesc = classifyType(keyType, mod);
+	if (keyDesc.k === "unsupported") return keyDesc;
+	const valDesc = classifyType(valType, mod);
+	if (valDesc.k === "unsupported") return valDesc;
+	if (!isAllowedMapKey(keyDesc)) {
+		return {
+			k: "unsupported",
+			what: `map with unsupported key type '${keyType?.name ?? keyDesc.k}'`,
+		};
+	}
+	const mapInfo = mod.getMapType(keyType, valType);
+	const keySliceDesc = classifySlice({ kind: "slice", elem: keyType }, mod);
+	const valSliceDesc = classifySlice({ kind: "slice", elem: valType }, mod);
+	const key = `m_${mapInfo.suffix}`;
+	return {
+		k: "map",
+		key,
+		mapInfo,
+		keyDesc,
+		valDesc,
+		keySliceDesc,
+		valSliceDesc,
+		wType: mapInfo.wType,
+	};
 }
 
 function classifyShared(t, mod) {
@@ -263,12 +363,50 @@ function classifyFunc(t, mod) {
 }
 
 function classifyInterface(t, mod) {
-	if (t.name === "error") return { k: "unsupported", what: "error" };
-	if (!t.methods || t.methods.size === 0) return { k: "any", wType: "anyref" };
-	if (!t.name || !(t.methods instanceof Map))
-		return { k: "unsupported", what: "anonymous interface" };
+	if (t.name === "error") return { k: "error", wType: "anyref" };
+	const mList = getInterfaceMethodList(t);
+	if (mList.length === 0) return { k: "any", wType: "anyref" };
 	mod._boundaryIfaces ??= new Map();
-	return mod._boundaryIfaces.get(t.name) ?? classifyNamedInterface(t, mod);
+	if (t.name && t.methods instanceof Map) {
+		return mod._boundaryIfaces.get(t.name) ?? classifyNamedInterface(t, mod);
+	}
+	return classifyAnonInterface(t, mod);
+}
+
+function classifyAnonInterface(t, mod) {
+	const key = anonIfaceName(t, mod.checker, mod);
+	if (mod._boundaryIfaces.has(key)) return mod._boundaryIfaces.get(key);
+	const mList = getInterfaceMethodList(t);
+	const desc = {
+		k: "iface",
+		name: key,
+		key,
+		wType: "anyref",
+		methods: [],
+		concrete: [],
+		isAnon: true,
+	};
+	mod._boundaryIfaces.set(key, desc);
+	for (const m of mList) {
+		const sig = classifySig(
+			{ kind: "func", params: m.params, returns: m.returns },
+			mod,
+		);
+		if (sig.k === "unsupported") {
+			const err = {
+				k: "unsupported",
+				what: `${sig.what} (in anonymous interface method ${m.name})`,
+			};
+			mod._boundaryIfaces.set(key, err);
+			return err;
+		}
+		desc.methods.push({
+			name: m.name,
+			dispatch: `__dispatch_${key}_${m.name}`,
+			...sig,
+		});
+	}
+	return desc;
 }
 
 function classifyNamedInterface(t, mod) {
@@ -325,7 +463,12 @@ function literalConst(spec, i) {
 	}
 	if (node?.kind !== "BasicLit") return null;
 	switch (node.litKind) {
-		case "INT":
+		case "INT": {
+			const bi = BigInt(`${sign}${node.value}`);
+			return bi > 9007199254740991n || bi < -9007199254740991n
+				? `${sign}${node.value}n`
+				: `${sign}${node.value}`;
+		}
 		case "FLOAT":
 			return `${sign}${node.value}`;
 		case "STRING":
@@ -394,14 +537,46 @@ function collectConstDecl(d, pkgName, meta, errors) {
 			const name = spec.names[i];
 			if (!isExported(name)) continue;
 			const value = literalConst(spec, i);
-			if (value !== null) meta.consts.push({ name, value });
-			else
+			if (value !== null) {
+				meta.consts.push({ name, value, dynamic: false });
+				continue;
+			}
+			const folded = meta._mod.constCache?.get(name);
+			if (folded) {
+				let val = null;
+				if (folded.litKind === "INT") {
+					const bi = BigInt(folded.value);
+					val =
+						bi > 9007199254740991n || bi < -9007199254740991n
+							? `${folded.value}n`
+							: folded.value;
+				} else if (folded.litKind === "FLOAT") {
+					val = folded.value;
+				} else if (folded.litKind === "STRING") {
+					val = JSON.stringify(String(folded.value));
+				} else if (folded.litKind === "BOOL") {
+					val = folded.value === "true" ? "true" : "false";
+				}
+				if (val !== null) {
+					meta.consts.push({ name, value: val, dynamic: false });
+					continue;
+				}
+			}
+			const glob = meta._mod.resolveGlobal(name);
+			const rawType = spec.type ?? spec.value?.[i]?._type ?? glob?.goType;
+			let desc = rawType ? classifyType(rawType, meta._mod) : null;
+			if (!desc || desc.k === "void") {
+				if (glob?.type) {
+					desc = { k: glob.type, wType: glob.type };
+				}
+			}
+			if (!desc || desc.k === "unsupported") {
 				errors.push(
-					unsupportedMsg(
-						`${pkgName}.${name}`,
-						"a constant with a non-literal value",
-					),
+					unsupportedMsg(`${pkgName}.${name}`, desc?.what ?? "unsupported"),
 				);
+			} else {
+				meta.consts.push({ name, dynamic: true, desc });
+			}
 		}
 	}
 }
@@ -483,6 +658,14 @@ function visitNeed(desc, needs, errors, mod) {
 		case "struct":
 			visitStructNeed(desc, needs, errors, mod);
 			return;
+		case "anon_struct":
+			if (needs.anonStructs.has(desc.name)) return;
+			needs.anonStructs.set(desc.name, desc);
+			for (const f of desc.fields) visitNeed(f.desc, needs, errors, mod);
+			return;
+		case "error":
+			needs.error = true;
+			return;
 		case "slice":
 		case "array": {
 			const map = desc.k === "slice" ? needs.slices : needs.arrays;
@@ -491,6 +674,19 @@ function visitNeed(desc, needs, errors, mod) {
 			visitNeed(desc.elem, needs, errors, mod);
 			return;
 		}
+		case "map":
+			if (needs.maps.has(desc.key)) return;
+			needs.maps.set(desc.key, desc);
+			visitNeed(desc.keyDesc, needs, errors, mod);
+			visitNeed(desc.valDesc, needs, errors, mod);
+			visitNeed(desc.keySliceDesc, needs, errors, mod);
+			visitNeed(desc.valSliceDesc, needs, errors, mod);
+			return;
+		case "ptr_box":
+			if (needs.boxes.has(desc.key)) return;
+			needs.boxes.set(desc.key, desc);
+			visitNeed(desc.base, needs, errors, mod);
+			return;
 		case "func":
 			if (needs.funcs.has(desc.key)) return;
 			needs.funcs.set(desc.key, desc);
@@ -538,10 +734,14 @@ function collectNeeds(meta) {
 	const mod = meta._mod;
 	const needs = {
 		structs: new Map(), // name -> { info, fields: [{ name, desc }] }
+		anonStructs: new Map(), // name -> desc
 		slices: new Map(), // key -> desc
 		arrays: new Map(), // key -> desc
+		maps: new Map(), // key -> desc
+		boxes: new Map(), // key -> desc
 		funcs: new Map(), // key -> desc
 		ifaces: new Map(), // interface name -> desc
+		error: false,
 		shared: false, // any shared buffer on the surface
 	};
 	const errors = [];
@@ -552,6 +752,9 @@ function collectNeeds(meta) {
 	}
 	for (const f of meta.funcs) visitSignatureNeeds(f, needs, errors, mod);
 	for (const v of meta.vars ?? []) visitNeed(v.desc, needs, errors, mod);
+	for (const c of meta.consts ?? []) {
+		if (c.dynamic) visitNeed(c.desc, needs, errors, mod);
+	}
 	if (errors.length > 0) throw new Error([...new Set(errors)].join("\n"));
 	for (const desc of needs.ifaces.values())
 		desc.concrete = concreteCandidates(desc, needs, meta, mod);
@@ -968,6 +1171,177 @@ export function addBoundaryHelpers(mod, meta) {
 			);
 		}
 	}
+
+	for (const [name, desc] of needs.anonStructs) {
+		const { info } = desc;
+		const ref = desc.wType;
+		const ti = info.typeIndex;
+		const fieldWTypes = info.fields.map((f) => f.wType);
+		addFunc(
+			`__new_${name}`,
+			fieldWTypes.map(extType),
+			[EXT],
+			[
+				...fieldWTypes.flatMap((w, i) => getIn(i, w)),
+				{ op: "struct.new", typeIndex: ti },
+				...toExt(ref),
+			],
+		);
+		addFunc(
+			`__zero_${name}`,
+			[],
+			[EXT],
+			[
+				...fieldWTypes.map((w) => zeroInstr(w)),
+				{ op: "struct.new", typeIndex: ti },
+				...toExt(ref),
+			],
+		);
+		for (let i = 0; i < info.fields.length; i++) {
+			const f = info.fields[i];
+			addFunc(
+				`__get_${name}_${f.name}`,
+				[EXT],
+				[extType(f.wType)],
+				[
+					...getIn(0, ref),
+					{ op: "struct.get", typeIndex: ti, fieldIndex: i },
+					...toExt(f.wType),
+				],
+			);
+			addFunc(
+				`__set_${name}_${f.name}`,
+				[EXT, extType(f.wType)],
+				[],
+				[
+					...getIn(0, ref),
+					...getIn(1, f.wType),
+					{ op: "struct.set", typeIndex: ti, fieldIndex: i },
+				],
+			);
+		}
+	}
+
+	for (const [key, desc] of needs.boxes) {
+		const { boxInfo } = desc;
+		const ref = desc.wType;
+		const ti = boxInfo.typeIndex;
+		const w = boxInfo.wType;
+		addFunc(
+			`__box_new_${key}`,
+			[extType(w)],
+			[EXT],
+			[...getIn(0, w), { op: "struct.new", typeIndex: ti }, ...toExt(ref)],
+		);
+		addFunc(
+			`__box_get_${key}`,
+			[EXT],
+			[extType(w)],
+			[
+				...getIn(0, ref),
+				{ op: "struct.get", typeIndex: ti, fieldIndex: 0 },
+				...toExt(w),
+			],
+		);
+		addFunc(
+			`__box_set_${key}`,
+			[EXT, extType(w)],
+			[],
+			[
+				...getIn(0, ref),
+				...getIn(1, w),
+				{ op: "struct.set", typeIndex: ti, fieldIndex: 0 },
+			],
+		);
+	}
+
+	for (const [key, desc] of needs.maps) {
+		const { mapInfo, keySliceDesc, valSliceDesc } = desc;
+		const makeIdx = mod.resolveFuncIndex(mapInfo.makeFuncName);
+		addFunc(
+			`__map_new_${key}`,
+			["i32"],
+			[EXT],
+			[get(0), { op: "call", funcIndex: makeIdx }, ...toExt(desc.wType)],
+		);
+		const setIdx = mod.resolveFuncIndex(mapInfo.setFuncName);
+		addFunc(
+			`__map_set_${key}`,
+			[EXT, extType(mapInfo.keyWType), extType(mapInfo.valWType)],
+			[],
+			[
+				...getIn(0, desc.wType),
+				...getIn(1, mapInfo.keyWType),
+				...getIn(2, mapInfo.valWType),
+				{ op: "call", funcIndex: setIdx },
+			],
+		);
+		const keysIdx = mod.resolveFuncIndex(mapInfo.keysFuncName);
+		addFunc(
+			`__map_keys_${key}`,
+			[EXT],
+			[EXT],
+			[
+				...getIn(0, desc.wType),
+				{ op: "call", funcIndex: keysIdx },
+				...toExt(keySliceDesc.wType),
+			],
+		);
+		const valuesIdx = mod.resolveFuncIndex(mapInfo.valuesFuncName);
+		addFunc(
+			`__map_values_${key}`,
+			[EXT],
+			[EXT],
+			[
+				...getIn(0, desc.wType),
+				{ op: "call", funcIndex: valuesIdx },
+				...toExt(valSliceDesc.wType),
+			],
+		);
+	}
+
+	if (needs.error) {
+		const errDispatcherIdx = mod.funcMap.get("__dispatch_error_Error");
+		if (errDispatcherIdx !== undefined) {
+			addFunc(
+				"__error_msg",
+				[EXT],
+				[EXT],
+				[
+					get(0),
+					{ op: "ref.is_null" },
+					{ op: "if", blockType: "externref" },
+					{ op: "ref.null", heapType: "extern" },
+					{ op: "else" },
+					...getIn(0, "anyref"),
+					{ op: "call", funcIndex: errDispatcherIdx },
+					...toExt("externref"),
+					{ op: "end" },
+				],
+			);
+		}
+		const errCandidates = mod
+			.findInterfaceCandidates(null, "Error")
+			.map((c) => c.testTypeIndex);
+		addFunc(
+			"__is_error",
+			[EXT],
+			["i32"],
+			refTestChain(errCandidates, () => 1),
+		);
+	}
+
+	for (const c of meta.consts ?? []) {
+		if (!c.dynamic) continue;
+		const g = mod.resolveGlobal(c.name);
+		if (!g) continue;
+		addFunc(
+			`__const_${c.name}`,
+			[],
+			[extType(c.desc.wType)],
+			[{ op: "global.get", index: g.index }, ...toExt(c.desc.wType)],
+		);
+	}
 }
 
 // `(externref) -> i32`: `ref.test`s param 0 against each type index and
@@ -1050,6 +1424,16 @@ function inExpr(desc, v) {
 			return `${P}strin(${v})`;
 		case "any":
 			return `(${v} === undefined ? null : ${v})`;
+		case "error":
+			return `${P}errin(${v})`;
+		case "map":
+			return `${P}mapin_${desc.key}(${v})`;
+		case "ptr_box":
+			return `${P}boxin_${desc.key}(${v})`;
+		case "anon_struct":
+			return desc.ptr
+				? `(${v} == null ? null : ${P}to_${desc.name}(${v}))`
+				: `${P}to_${desc.name}(${v})`;
 		case "struct":
 			if (desc.info.pkgTarget === "both")
 				return `${P}to_${desc.name}(${v}, ${desc.ptr ? "false" : "true"})`;
@@ -1082,6 +1466,16 @@ function outExpr(desc, v) {
 			return desc.unsigned ? `${P}u64out(${v})` : `${P}i64out(${v})`;
 		case "string":
 			return `(${v} ?? "")`;
+		case "error":
+			return `${P}errout(${v})`;
+		case "map":
+			return `${P}mapout_${desc.key}(${v})`;
+		case "ptr_box":
+			return `${P}boxout_${desc.key}(${v})`;
+		case "anon_struct":
+			return desc.ptr
+				? `(${v} == null ? null : ${P}from_${desc.name}(${v}))`
+				: `${P}from_${desc.name}(${v})`;
 		case "struct":
 			return desc.info.pkgTarget === "both"
 				? `${P}from_${desc.name}(${v})`
@@ -1112,6 +1506,14 @@ function zeroExpr(desc) {
 			return "0";
 		case "string":
 			return '""';
+		case "error":
+		case "map":
+		case "ptr_box":
+			return "null";
+		case "anon_struct":
+			return desc.ptr
+				? "null"
+				: `{ ${desc.fields.map((f) => `"${f.name}": ${zeroExpr(f.desc)}`).join(", ")} }`;
 		case "struct":
 			return desc.ptr ? "null" : `new ${desc.name}()`;
 		case "array":
@@ -1147,6 +1549,10 @@ function isBothStruct(d) {
 	return d.k === "struct" && d.info.pkgTarget === "both";
 }
 
+function isPtrWriteBack(d) {
+	return isPtrBoth(d) || d.k === "ptr_box" || (d.k === "anon_struct" && d.ptr);
+}
+
 function returnLines(returns, resultExpr) {
 	if (returns.length === 0) return [];
 	if (returns.length === 1)
@@ -1161,12 +1567,20 @@ function genFuncBody(exportName, params, returns, leadArgs = []) {
 	const names = params.map((_, i) => `a${i}`);
 	const lines = [];
 	const argExprs = [...leadArgs];
-	const writeBack = params.some(isPtrBoth);
-	if (writeBack) lines.push("\tconst __m = new Map();");
+	const writeBack = params.some(isPtrWriteBack);
+	if (params.some(isPtrBoth)) lines.push("\tconst __m = new Map();");
 	for (let i = 0; i < params.length; i++) {
 		const d = params[i];
 		if (isPtrBoth(d)) {
 			lines.push(`\tconst __p${i} = ${P}to_${d.name}(a${i}, false, __m);`);
+			argExprs.push(`__p${i}`);
+		} else if (d.k === "ptr_box") {
+			lines.push(`\tconst __p${i} = ${P}boxin_${d.key}(a${i});`);
+			argExprs.push(`__p${i}`);
+		} else if (d.k === "anon_struct" && d.ptr) {
+			lines.push(
+				`\tconst __p${i} = a${i} == null ? null : ${P}to_${d.name}(a${i});`,
+			);
 			argExprs.push(`__p${i}`);
 		} else {
 			argExprs.push(inExpr(d, names[i]));
@@ -1185,8 +1599,12 @@ function genFuncBody(exportName, params, returns, leadArgs = []) {
 	} else {
 		lines.push(`\t\tconst __r = ${call};`);
 		for (let i = 0; i < params.length; i++) {
-			if (isPtrBoth(params[i]))
-				lines.push(`\t\t${P}back_${params[i].name}(__p${i}, a${i});`);
+			const d = params[i];
+			if (isPtrBoth(d)) lines.push(`\t\t${P}back_${d.name}(__p${i}, a${i});`);
+			else if (d.k === "ptr_box")
+				lines.push(`\t\t${P}boxback_${d.key}(__p${i}, a${i});`);
+			else if (d.k === "anon_struct" && d.ptr)
+				lines.push(`\t\t${P}back_${d.name}(__p${i}, a${i});`);
 		}
 		lines.push(...returnLines(returns, "__r").map((l) => `\t${l}`));
 	}
@@ -1512,6 +1930,39 @@ export function generateFacade(
 		}
 	}
 
+	for (const [name, desc] of needs.anonStructs) {
+		out.push(`function ${P}to_${name}(o) {
+	if (o == null) return __w.__zero_${name}();
+	return __w.__new_${name}(${desc.fields.map((f) => inExpr(f.desc, `(o.${f.name} ?? ${zeroExpr(f.desc)})`)).join(", ")});
+}
+function ${P}from_${name}(r) {
+	if (r == null) return null;
+	return {
+${desc.fields.map((f) => `\t\t"${f.name}": ${outExpr(f.desc, `__w.__get_${name}_${f.name}(r)`)}`).join(",\n")}
+	};
+}
+function ${P}back_${name}(r, o) {
+	if (r == null || o == null) return;
+${desc.fields.map((f) => `\to.${f.name} = ${outExpr(f.desc, `__w.__get_${name}_${f.name}(r)`)};`).join("\n")}
+}`);
+	}
+
+	for (const [key, desc] of needs.boxes) {
+		out.push(`function ${P}boxin_${key}(b) {
+	if (b == null) return null;
+	const v = b.value !== undefined ? b.value : ${zeroExpr(desc.base)};
+	return __w.__box_new_${key}(${inExpr(desc.base, "v")});
+}
+function ${P}boxout_${key}(r) {
+	if (r == null) return null;
+	return { "value": ${outExpr(desc.base, `__w.__box_get_${key}(r)`)} };
+}
+function ${P}boxback_${key}(r, b) {
+	if (r == null || b == null) return;
+	b.value = ${outExpr(desc.base, `__w.__box_get_${key}(r)`)};
+}`);
+	}
+
 	for (const [key, desc] of needs.slices) {
 		out.push(`function ${P}slin_${key}(arr) {
 	if (arr == null) return __w.__slice_nil_${key}();
@@ -1530,8 +1981,34 @@ function ${P}slout_${key}(s) {
 function ${P}slview_${key}(s) {
 	if (s == null || __w.__slice_is_nil_${key}(s)) return null;
 	return ${P}idxview(__w.__slice_len_${key}(s), (i) => ${viewExpr(desc.elem, `__w.__slice_get_${key}(s, i)`)}, (i, v) => __w.__slice_set_${key}(s, i, ${inExpr(desc.elem, "v")}));
+} `);
+	}
+
+	for (const [key, desc] of needs.maps) {
+		out.push(`function ${P}mapin_${key}(m) {
+	if (m == null) return null;
+	const entries = m instanceof Map ? m.entries() : Object.entries(m);
+	const size = m instanceof Map ? m.size : Object.keys(m).length;
+	const r = __w.__map_new_${key}(size);
+	for (const [k, v] of entries) {
+		__w.__map_set_${key}(r, ${desc.keyDesc.k === "bool" ? `(k === "true" || k === true ? 1 : 0)` : inExpr(desc.keyDesc, "k")}, ${inExpr(desc.valDesc, "v")});
+	}
+	return r;
+}
+function ${P}mapout_${key}(m) {
+	if (m == null) return null;
+	const ks = ${P}slout_${desc.keySliceDesc.key}(__w.__map_keys_${key}(m));
+	const vs = ${P}slout_${desc.valSliceDesc.key}(__w.__map_values_${key}(m));
+	const out = new Map();
+	if (ks) {
+		for (let i = 0; i < ks.length; i++) {
+			out.set(ks[i], vs[i]);
+		}
+	}
+	return out;
 }`);
 	}
+
 	for (const [key, desc] of needs.arrays) {
 		out.push(`function ${P}arrzero_${key}(n) {
 	const out = new Array(n);
@@ -1555,7 +2032,7 @@ function ${P}arrout_${key}(a) {
 function ${P}arrview_${key}(a) {
 	if (a == null) return null;
 	return ${P}idxview(__w.__array_len_${key}(a), (i) => ${viewExpr(desc.elem, `__w.__array_get_${key}(a, i)`)}, (i, v) => __w.__array_set_${key}(a, i, ${inExpr(desc.elem, "v")}));
-}`);
+} `);
 	}
 
 	for (const [key, desc] of needs.funcs) {
@@ -1594,6 +2071,33 @@ ${indent(body, "\t")}
 
 	for (const [key, desc] of needs.ifaces) genIfaceFacade(out, key, desc);
 
+	if (needs.error) {
+		out.push(`class ${P}Error extends Error {
+	constructor(msg, ref) {
+		super(msg);
+		this.name = "GoError";
+		this.__ref = ref;
+	}
+}
+const ${P}err_w2j = new WeakMap();
+function ${P}errout(r) {
+	if (r == null) return null;
+	let e = ${P}err_w2j.get(r);
+	if (!e) {
+		const msg = __w.__error_msg ? (__w.__error_msg(r) ?? "") : "";
+		e = new ${P}Error(msg, r);
+		${P}err_w2j.set(r, e);
+	}
+	return e;
+}
+function ${P}errin(e) {
+	if (e == null) return null;
+	if (e.__ref === undefined) throw new TypeError("GoFront: expected a WASM-owned error");
+	if (!__w.__is_error(e.__ref)) throw new TypeError("GoFront: value does not implement error");
+	return e.__ref;
+}`);
+	}
+
 	if (needs.shared) {
 		// Zero-copy TypedArray views over the exported memory.  Memory never
 		// grows after the start function (allocation is startup-only), but the
@@ -1615,7 +2119,15 @@ function ${P}shin(v, Ctor) {
 }`);
 	}
 
-	for (const c of meta.consts) out.push(`const ${c.name} = ${c.value};`);
+	for (const c of meta.consts) {
+		if (c.dynamic) {
+			out.push(
+				`const ${c.name} = ${outExpr(c.desc, `__w.__const_${c.name}()`)};`,
+			);
+		} else {
+			out.push(`const ${c.name} = ${c.value};`);
+		}
+	}
 	for (const v of meta.vars ?? [])
 		out.push(
 			`const ${v.name} = ${P}shout(__w.__var_${v.name}(), ${v.desc.ctor});`,

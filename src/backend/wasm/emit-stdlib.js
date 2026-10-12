@@ -7,6 +7,7 @@ import {
 	ERROR_STRUCT,
 	getMapKeyValTypes,
 	isErrorType,
+	isUnhashableGoType,
 	toWasmType,
 } from "./types.js";
 
@@ -2790,40 +2791,63 @@ export class StdlibEmitter {
 				this.pushInstruction({ op: "i32.const", value: 0 });
 				this.pushInstruction("return");
 				this.pushInstruction("end");
-				// Boxed scalars compare by value (Go: any(3) == any(3)).
-				for (const wType of ["i32", "i64", "f32", "f64"]) {
-					const box = this.mod.getBoxType(wType);
+
+				// Check unhashable / uncomparable types
+				const checkUncomparable = (typeIndex) => {
+					this.pushInstruction({ op: "local.get", index: 0 });
+					this.pushInstruction({ op: "ref.test", typeIndex });
+					this.pushInstruction({ op: "local.get", index: 1 });
+					this.pushInstruction({ op: "ref.test", typeIndex });
+					this.pushInstruction("i32.or");
+					this.pushInstruction({ op: "if", blockType: "void" });
+					this.emitPanic("runtime error: comparing uncomparable type");
+					this.pushInstruction("end");
+				};
+				for (const s of this.mod.sliceTypes.values())
+					checkUncomparable(s.typeIndex);
+				for (const m of this.mod.mapTypes.values())
+					checkUncomparable(m.typeIndex);
+				for (const c of this.mod.closureTypes.values())
+					checkUncomparable(c.typeIndex);
+				for (const b of this.mod.ifaceBoxTypes.values()) {
+					if (isUnhashableGoType(b.goType, this.mod.checker))
+						checkUncomparable(b.typeIndex);
+				}
+				for (const a of this.mod.arrayTypes.values()) {
+					if (isUnhashableGoType(a.elemGoType, this.mod.checker))
+						checkUncomparable(a.typeIndex);
+				}
+
+				// Boxed values compare by value (Go: any(3) == any(3), struct values, etc.).
+				for (const box of this.mod.ifaceBoxTypes.values()) {
+					if (isUnhashableGoType(box.goType, this.mod.checker)) continue;
 					for (const idx of [0, 1]) {
 						this.pushInstruction({ op: "local.get", index: idx });
 						this.pushInstruction({ op: "ref.test", typeIndex: box.typeIndex });
 					}
 					this.pushInstruction("i32.and");
 					this.pushInstruction({ op: "if", blockType: "void" });
-					for (const idx of [0, 1]) {
-						this.pushInstruction({ op: "local.get", index: idx });
+					const f1 = this.allocLocal(null, box.wType);
+					const f2 = this.allocLocal(null, box.wType);
+					for (const [src, dst] of [
+						[0, f1],
+						[1, f2],
+					]) {
+						this.pushInstruction({ op: "local.get", index: src });
 						this.pushInstruction({ op: "ref.cast", typeIndex: box.typeIndex });
 						this.pushInstruction({
 							op: "struct.get",
 							typeIndex: box.typeIndex,
 							fieldIndex: 0,
 						});
+						this.pushInstruction({ op: "local.set", index: dst });
 					}
-					this.pushInstruction(`${wType}.eq`);
+					this.emitKeyEq(f1, f2, box.goType);
 					this.pushInstruction("return");
 					this.pushInstruction("end");
 				}
-				this.pushInstruction({ op: "local.get", index: 0 });
-				this.pushInstruction({ op: "ref.test", heapType: "eq" });
-				this.pushInstruction({ op: "local.get", index: 1 });
-				this.pushInstruction({ op: "ref.test", heapType: "eq" });
-				this.pushInstruction("i32.and");
-				this.pushInstruction({ op: "if", blockType: "i32" });
-				this.pushInstruction({ op: "local.get", index: 0 });
-				this.pushInstruction({ op: "ref.cast", heapType: "eq" });
-				this.pushInstruction({ op: "local.get", index: 1 });
-				this.pushInstruction({ op: "ref.cast", heapType: "eq" });
-				this.pushInstruction("ref.eq");
-				this.pushInstruction("else");
+
+				// Strings
 				this.pushInstruction({ op: "local.get", index: 0 });
 				this.pushInstruction({
 					op: "call",
@@ -2835,7 +2859,7 @@ export class StdlibEmitter {
 					funcIndex: this.mod.getIsStringImportIndex(),
 				});
 				this.pushInstruction("i32.and");
-				this.pushInstruction({ op: "if", blockType: "i32" });
+				this.pushInstruction({ op: "if", blockType: "void" });
 				this.pushInstruction({ op: "local.get", index: 0 });
 				this.pushInstruction("extern.convert_any");
 				this.pushInstruction({ op: "local.get", index: 1 });
@@ -2844,10 +2868,100 @@ export class StdlibEmitter {
 					op: "call",
 					funcIndex: this.mod.getStringCmpImportIndex("=="),
 				});
-				this.pushInstruction("else");
+				this.pushInstruction("return");
+				this.pushInstruction("end");
+
+				// Heap reference equality
+				this.pushInstruction({ op: "local.get", index: 0 });
+				this.pushInstruction({ op: "ref.test", heapType: "eq" });
+				this.pushInstruction({ op: "local.get", index: 1 });
+				this.pushInstruction({ op: "ref.test", heapType: "eq" });
+				this.pushInstruction("i32.and");
+				this.pushInstruction({ op: "if", blockType: "void" });
+				this.pushInstruction({ op: "local.get", index: 0 });
+				this.pushInstruction({ op: "ref.cast", heapType: "eq" });
+				this.pushInstruction({ op: "local.get", index: 1 });
+				this.pushInstruction({ op: "ref.cast", heapType: "eq" });
+				this.pushInstruction("ref.eq");
+				this.pushInstruction("return");
+				this.pushInstruction("end");
+
 				this.pushInstruction({ op: "i32.const", value: 0 });
+				this.pushInstruction("return");
+				return;
+			}
+			case "any_hash": {
+				this.pushInstruction({ op: "local.get", index: 0 });
+				this.pushInstruction("ref.is_null");
+				this.pushInstruction({ op: "if", blockType: "void" });
+				this.pushInstruction({ op: "i32.const", value: 0 });
+				this.pushInstruction("return");
 				this.pushInstruction("end");
+
+				// Check unhashable types
+				const checkUnhashable = (typeIndex) => {
+					this.pushInstruction({ op: "local.get", index: 0 });
+					this.pushInstruction({ op: "ref.test", typeIndex });
+					this.pushInstruction({ op: "if", blockType: "void" });
+					this.emitPanic("runtime error: hash of unhashable type");
+					this.pushInstruction("end");
+				};
+				for (const sliceInfo of this.mod.sliceTypes.values())
+					checkUnhashable(sliceInfo.typeIndex);
+				for (const mapInfo of this.mod.mapTypes.values())
+					checkUnhashable(mapInfo.typeIndex);
+				for (const closureInfo of this.mod.closureTypes.values())
+					checkUnhashable(closureInfo.typeIndex);
+				for (const box of this.mod.ifaceBoxTypes.values()) {
+					if (isUnhashableGoType(box.goType, this.mod.checker))
+						checkUnhashable(box.typeIndex);
+				}
+				for (const arrInfo of this.mod.arrayTypes.values()) {
+					if (isUnhashableGoType(arrInfo.elemGoType, this.mod.checker))
+						checkUnhashable(arrInfo.typeIndex);
+				}
+
+				// Check boxed values (scalars, struct values)
+				for (const box of this.mod.ifaceBoxTypes.values()) {
+					if (isUnhashableGoType(box.goType, this.mod.checker)) continue;
+					this.pushInstruction({ op: "local.get", index: 0 });
+					this.pushInstruction({ op: "ref.test", typeIndex: box.typeIndex });
+					this.pushInstruction({ op: "if", blockType: "void" });
+					const valLoc = this.allocLocal(null, box.wType);
+					this.pushInstruction({ op: "local.get", index: 0 });
+					this.pushInstruction({ op: "ref.cast", typeIndex: box.typeIndex });
+					this.pushInstruction({
+						op: "struct.get",
+						typeIndex: box.typeIndex,
+						fieldIndex: 0,
+					});
+					this.pushInstruction({ op: "local.set", index: valLoc });
+					this.pushInstruction({ op: "i32.const", value: box.typeIndex });
+					this.pushInstruction({ op: "i32.const", value: 31 });
+					this.pushInstruction("i32.mul");
+					this.emitKeyHash(valLoc, box.goType);
+					this.pushInstruction("i32.add");
+					this.pushInstruction("return");
+					this.pushInstruction("end");
+				}
+
+				// Check string
+				this.pushInstruction({ op: "local.get", index: 0 });
+				this.pushInstruction({
+					op: "call",
+					funcIndex: this.mod.getIsStringImportIndex(),
+				});
+				this.pushInstruction({ op: "if", blockType: "void" });
+				this.pushInstruction({ op: "local.get", index: 0 });
+				this.pushInstruction("extern.convert_any");
+				this.pushInstruction({
+					op: "call",
+					funcIndex: this.mod.getStringHashImportIndex(),
+				});
+				this.pushInstruction("return");
 				this.pushInstruction("end");
+
+				this.pushInstruction({ op: "i32.const", value: 0 });
 				this.pushInstruction("return");
 				return;
 			}

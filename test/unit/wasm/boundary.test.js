@@ -601,70 +601,338 @@ async function expectCompileError(files, expected) {
 	);
 }
 
-test("map parameters are rejected at the boundary", () =>
+test("maps with unsupported keys are rejected at the boundary", () =>
 	expectBoundaryError(
 		`func Touch() {}
-func Count(m map[string]int) int { return len(m) }`,
-		"map",
-	));
-
-test("error returns are rejected at the boundary", () =>
-	expectBoundaryError(
-		`func Touch() {}
-func Try() error { return nil }`,
-		"error",
-	));
-
-test("anonymous non-empty interface parameters are rejected at the boundary", () =>
-	expectBoundaryError(
-		`func Touch() {}
-func Measure(s interface{ Area() float64 }) float64 { return s.Area() }`,
-		"anonymous interface",
+func Lookup(m map[[]int]int) {}`,
+		"map with unsupported key type 'slice'",
 	));
 
 test("interface methods with unsupported signatures are rejected at the boundary", () =>
 	expectBoundaryError(
-		`type Shape interface { Tags() map[string]int }
+		`type BadIface interface { Bad() map[[]int]int }
 func Touch() {}
-func Measure(s Shape) int { return len(s.Tags()) }`,
-		"map (in method Shape.Tags)",
+func Use(b BadIface) {}`,
+		"map with unsupported key type 'slice' (in method BadIface.Bad)",
 	));
 
-test("exported struct fields are validated too", () =>
+test("exported struct fields with unsupported types are rejected at the boundary", () =>
 	expectBoundaryError(
-		`type Cfg struct { Opts map[string]int }
+		`type Cfg struct { Bad map[[]int]int }
 func Touch() {}`,
-		"map",
+		"map with unsupported key type 'slice'",
 	));
 
-test("exported non-literal consts are rejected at the boundary", () =>
-	expectBoundaryError(
-		`const Base = 10
-const Derived = Base * 2
-func Touch() {}`,
-		"pkg.Derived: a constant with a non-literal value",
-	));
+section("WASM Boundary v2 — Phase 2 types (Task H6.2)");
 
-test("referencing a non-literal const inside wasm reports a planned error", () =>
-	expectCompileError(
+test("error crossing the boundary preserves identity and message", async () => {
+	const res = await compileHybridProject(
 		{
-			"pkg/pkg.go": `//gofront:target wasm
-package pkg
+			"errpkg/errpkg.go": `//gofront:target wasm
+package errpkg
+import "errors"
 
-const base = 10
-const derived = base * 2
+var ErrStatic = errors.New("static error")
 
-func Touch() int { return derived }
+func MakeErr(msg string) error {
+	if msg == "" { return nil }
+	return errors.New(msg)
+}
+
+func GetStatic() error { return ErrStatic }
+
+func CheckStatic(err error) bool {
+	return errors.Is(err, ErrStatic)
+}
 `,
 			"main.go": `package main
-
-import "./pkg"
-
-func main() { println(pkg.Touch()) }
+import "./errpkg"
+func main() { _ = errpkg.MakeErr }
 `,
 		},
-		"constant 'derived' has a non-literal value, which the wasm backend does not support yet (planned)",
-	));
+		{ exports: ["MakeErr", "GetStatic", "CheckStatic"] },
+	);
+
+	assertEqual(res.mod.MakeErr(""), null);
+	const err = res.mod.MakeErr("boom");
+	assert(err instanceof Error, "must be Error instance");
+	assertEqual(err.message, "boom");
+	assert(err.__ref !== undefined, "must have __ref");
+
+	const stat = res.mod.GetStatic();
+	assertEqual(stat.message, "static error");
+	assertEqual(res.mod.CheckStatic(stat), true);
+	assertEqual(res.mod.CheckStatic(err), false);
+	assertEqual(res.mod.CheckStatic(null), false);
+
+	assertThrows(
+		() => res.mod.CheckStatic(new Error("static error")),
+		"GoFront: expected a WASM-owned error",
+	);
+});
+
+test("map crosses the boundary with insertion order and mutation isolation", async () => {
+	const res = await compileHybridProject(
+		{
+			"mappkg/mappkg.go": `//gofront:target wasm
+package mappkg
+
+var Storage = make(map[string]int)
+
+func SetVal(k string, v int) {
+	Storage[k] = v
+}
+
+func GetStorage() map[string]int {
+	return Storage
+}
+
+func OrderedMap() map[string]int {
+	m := make(map[string]int)
+	m["alpha"] = 1
+	m["beta"] = 2
+	m["gamma"] = 3
+	return m
+}
+
+func SumMap(m map[string]int) int {
+	total := 0
+	for _, v := range m {
+		total += v
+	}
+	return total
+}
+`,
+			"main.go": `package main
+import "./mappkg"
+func main() { _ = mappkg.OrderedMap }
+`,
+		},
+		{ exports: ["SetVal", "GetStorage", "OrderedMap", "SumMap"] },
+	);
+
+	const m = res.mod.OrderedMap();
+	assert(m instanceof Map, "must be JS Map");
+	assertEqual(m.size, 3);
+	assertEqual([...m.keys()].join(","), "alpha,beta,gamma");
+	assertEqual([...m.values()].join(","), "1,2,3");
+
+	// Mutation isolation
+	res.mod.SetVal("key", 100);
+	const s = res.mod.GetStorage();
+	assertEqual(s.get("key"), 100);
+	s.set("key", 999);
+	s.set("newKey", 555);
+	const s2 = res.mod.GetStorage();
+	assertEqual(s2.get("key"), 100);
+	assertEqual(s2.has("newKey"), false);
+
+	// Copy-in: plain object
+	assertEqual(res.mod.SumMap({ a: 10, b: 20 }), 30);
+	// Copy-in: Map
+	const inMap = new Map([
+		["x", 1],
+		["y", 2],
+		["z", 3],
+	]);
+	assertEqual(res.mod.SumMap(inMap), 6);
+});
+
+test("pointers to non-structs use copy-in/copy-out boxes with panic propagation", async () => {
+	const res = await compileHybridProject(
+		{
+			"ptrpkg/ptrpkg.go": `//gofront:target wasm
+package ptrpkg
+
+func Inc(p *int) {
+	*p++
+}
+
+func Scale(p *float64, f float64) {
+	*p *= f
+}
+
+func Trap(p *int, shouldTrap bool) {
+	if shouldTrap {
+		panic("kaboom")
+	}
+	*p += 50
+}
+`,
+			"main.go": `package main
+import "./ptrpkg"
+func main() { _ = ptrpkg.Inc }
+`,
+		},
+		{ exports: ["Inc", "Scale", "Trap"] },
+	);
+
+	const ibox = { value: 10 };
+	res.mod.Inc(ibox);
+	assertEqual(ibox.value, 11);
+
+	const fbox = { value: 3.5 };
+	res.mod.Scale(fbox, 2);
+	assertEqual(fbox.value, 7);
+
+	const tbox = { value: 20 };
+	assertThrows(() => res.mod.Trap(tbox, true), "kaboom");
+	assertEqual(tbox.value, 20); // write-back skipped on panic!
+
+	res.mod.Trap(tbox, false);
+	assertEqual(tbox.value, 70); // write-back succeeded
+});
+
+test("anonymous structs cross as plain JS objects with write-back for pointers", async () => {
+	const res = await compileHybridProject(
+		{
+			"anonpkg/anonpkg.go": `//gofront:target wasm
+package anonpkg
+
+func Swap(p struct{ A int; B string }) struct{ A int; B string } {
+	return struct{ A int; B string }{ A: p.A * 2, B: p.B + "!" }
+}
+
+func Mutate(p *struct{ Count int }) {
+	p.Count += 10
+}
+`,
+			"main.go": `package main
+import "./anonpkg"
+func main() { _ = anonpkg.Swap }
+`,
+		},
+		{ exports: ["Swap", "Mutate"] },
+	);
+
+	const out = res.mod.Swap({ A: 21, B: "hello" });
+	assertEqual(out.A, 42);
+	assertEqual(out.B, "hello!");
+
+	const pAnon = { Count: 5 };
+	res.mod.Mutate(pAnon);
+	assertEqual(pAnon.Count, 15);
+});
+
+test("anonymous interfaces share facade class and enforce WASM-owned values", async () => {
+	const res = await compileHybridProject(
+		{
+			"pkg1/pkg1.go": `//gofront:target wasm
+package pkg1
+
+type item1 struct { V float64 }
+func (i *item1) Val() float64 { return i.V }
+func GetIface1(v float64) interface{ Val() float64 } { return &item1{V: v} }
+func ConsumeVal(s interface{ Val() float64 }) float64 { return s.Val() }
+`,
+			"pkg2/pkg2.go": `//gofront:target wasm
+package pkg2
+
+type item2 struct { V float64 }
+func (i *item2) Val() float64 { return i.V }
+func GetIface2(v float64) interface{ Val() float64 } { return &item2{V: v} }
+`,
+			"main.go": `package main
+import "./pkg1"
+import "./pkg2"
+func main() { _ = pkg1.GetIface1; _ = pkg2.GetIface2 }
+`,
+		},
+		{ exports: ["GetIface1", "GetIface2", "ConsumeVal"] },
+	);
+
+	const if1 = res.mod.GetIface1(10);
+	const if2 = res.mod.GetIface2(20);
+	assertEqual(if1.constructor, if2.constructor);
+	assertEqual(if1.Val(), 10);
+	assertEqual(if2.Val(), 20);
+	assertEqual(res.mod.ConsumeVal(if1), 10);
+	assertEqual(res.mod.ConsumeVal(if2), 20);
+
+	assertThrows(
+		() => res.mod.ConsumeVal({ Val: () => 99 }),
+		"a JS-implemented value cannot cross into wasm",
+	);
+});
+
+test("exported non-literal constants are available on facade", async () => {
+	const res = await compileHybridProject(
+		{
+			"constpkg/constpkg.go": `//gofront:target wasm
+package constpkg
+
+const (
+	Base = 10
+	Multiplier = 3
+	Derived = Base * Multiplier
+	Str = "hello" + " " + "world"
+)
+func Touch() {}
+`,
+			"main.go": `package main
+import "./constpkg"
+func main() { constpkg.Touch() }
+`,
+		},
+		{ exports: ["Base", "Multiplier", "Derived", "Str"] },
+	);
+
+	assertEqual(res.mod.Base, 10);
+	assertEqual(res.mod.Multiplier, 3);
+	assertEqual(res.mod.Derived, 30);
+	assertEqual(res.mod.Str, "hello world");
+});
+
+test("anonymous structs with int32 vs bool fields do not collide across boundary", async () => {
+	const res = await compileHybridProject(
+		{
+			"anonpkg/anonpkg.go": `//gofront:target wasm
+package anonpkg
+
+func UseInt(p struct{ Val int32 }) int32 {
+	return p.Val + 1
+}
+
+func UseBool(p struct{ Val bool }) bool {
+	return !p.Val
+}
+`,
+			"main.go": `package main
+import "./anonpkg"
+func main() { _ = anonpkg.UseInt; _ = anonpkg.UseBool }
+`,
+		},
+		{ exports: ["UseInt", "UseBool"] },
+	);
+
+	assertEqual(res.mod.UseInt({ Val: 41 }), 42);
+	assertEqual(res.mod.UseBool({ Val: true }), false);
+	assertEqual(res.mod.UseBool({ Val: false }), true);
+});
+
+test("large integer constants exceeding MAX_SAFE_INTEGER export as BigInt without precision loss", async () => {
+	const res = await compileHybridProject(
+		{
+			"constpkg/constpkg.go": `//gofront:target wasm
+package constpkg
+
+const (
+	BigLit = 9007199254740993
+	BigFolded = 1 << 62
+)
+func Touch() {}
+`,
+			"main.go": `package main
+import "./constpkg"
+func main() { constpkg.Touch() }
+`,
+		},
+		{ exports: ["BigLit", "BigFolded"] },
+	);
+
+	assertEqual(res.mod.BigLit, 9007199254740993n);
+	assertEqual(res.mod.BigFolded, 4611686018427387904n);
+});
 
 section("WASM Boundary v1 — linking diagnostics (5c)");
 
