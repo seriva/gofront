@@ -220,13 +220,30 @@ export function toWasmType(goType, checker = null, mod = null) {
 		return { kind: "ref", nullable: true, heapType: "struct" };
 	}
 
-	if (goType.kind === "struct") {
+	if (goType.kind === "struct" || goType.kind === "StructType") {
 		if (goType.name && mod?.getStructType(goType.name)) {
 			return {
 				kind: "ref",
 				nullable: true,
 				typeIndex: mod.getStructType(goType.name).typeIndex,
 			};
+		}
+		if (mod?.getAnonStructType && goType.fields) {
+			const rawFields = [];
+			if (goType.fields instanceof Map) {
+				for (const [k, v] of goType.fields.entries()) {
+					rawFields.push({ name: k, goType: v });
+				}
+			} else if (Array.isArray(goType.fields)) {
+				for (const f of goType.fields) {
+					const names = f.names ?? (f.name ? [f.name] : []);
+					for (const n of names) rawFields.push({ name: n, goType: f.type });
+				}
+			}
+			if (rawFields.length > 0) {
+				const info = mod.getAnonStructType(rawFields);
+				return { kind: "ref", nullable: true, typeIndex: info.typeIndex };
+			}
 		}
 		return { kind: "ref", nullable: true, heapType: "struct" };
 	}
@@ -248,6 +265,96 @@ export function toWasmType(goType, checker = null, mod = null) {
 	}
 
 	return "i32";
+}
+
+export function getInterfaceMethodList(iface) {
+	if (!iface) return [];
+	if (iface.methods instanceof Map) {
+		return Array.from(iface.methods.entries()).map(([name, sig]) => ({
+			name,
+			params: (sig.params ?? []).map((p) => p.type ?? p),
+			returns: (sig.returns ?? []).map((r) => r.type ?? r),
+		}));
+	}
+	if (Array.isArray(iface.methods)) {
+		return iface.methods.map((m) => ({
+			name: m.name?.value ?? m.name ?? m,
+			params: (m.params ?? []).map((p) => p.type ?? p),
+			returns: m.returnType
+				? m.returnType.kind === "TupleType" || m.returnType.kind === "tuple"
+					? m.returnType.types
+					: [m.returnType]
+				: [],
+		}));
+	}
+	return [];
+}
+
+export function goTypeKey(t) {
+	if (!t) return "any";
+	if (typeof t === "string") {
+		if (t === "byte") return "uint8";
+		if (t === "rune") return "int32";
+		return t;
+	}
+	if (t.kind === "basic" || t.kind === "TypeName" || t.kind === "Ident") {
+		const name = t.name ?? "any";
+		if (name === "byte") return "uint8";
+		if (name === "rune") return "int32";
+		return name;
+	}
+	if (t.kind === "untyped") {
+		return t.base ?? "int";
+	}
+	if (t.kind === "pointer" || t.kind === "PointerType") {
+		return `ptr_${goTypeKey(t.base)}`;
+	}
+	if (t.kind === "StarExpr") {
+		return `ptr_${goTypeKey(t.expr ?? t.operand)}`;
+	}
+	if (t.kind === "slice" || t.kind === "SliceType") {
+		return `sl_${goTypeKey(t.elem)}`;
+	}
+	if (t.kind === "array" || t.kind === "ArrayType") {
+		const sz =
+			typeof t.size === "number" ? t.size : (t.size?.value ?? t.len ?? "");
+		return `arr_${sz}_${goTypeKey(t.elem)}`;
+	}
+	if (t.kind === "map" || t.kind === "MapType") {
+		return `map_${goTypeKey(t.key ?? t.keyType)}_${goTypeKey(t.value ?? t.val ?? t.elem ?? t.valueType ?? t.valType)}`;
+	}
+	if (t.kind === "struct" || t.kind === "StructType") {
+		if (t.name) return t.name;
+		const rawFields = [];
+		if (t.fields instanceof Map) {
+			for (const [k, v] of t.fields.entries())
+				rawFields.push(`${k}:${goTypeKey(v)}`);
+		} else if (Array.isArray(t.fields)) {
+			for (const f of t.fields) {
+				const names = f.names ?? (f.name ? [f.name] : []);
+				for (const n of names)
+					rawFields.push(`${n}:${goTypeKey(f.type ?? f.goType)}`);
+			}
+		}
+		return `struct_${rawFields.join("_")}`;
+	}
+	if (t.kind === "named") {
+		return t.name ?? (t.underlying ? goTypeKey(t.underlying) : "any");
+	}
+	if (t.name) return t.name;
+	return t.kind ?? "any";
+}
+
+export function anonIfaceName(iface, _checker = null, _mod = null) {
+	const methods = getInterfaceMethodList(iface);
+	methods.sort((a, b) => a.name.localeCompare(b.name));
+	const parts = methods.map((m) => {
+		const ps = m.params.map((p) => goTypeKey(p)).join("_");
+		const rs = m.returns.map((r) => goTypeKey(r)).join("_");
+		return `${m.name}_${ps}_${rs}`;
+	});
+	const key = parts.join("__").replace(/[^a-zA-Z0-9_]/g, "_");
+	return `anon_iface_${key}`;
 }
 
 export function isStructType(goType, checker = null, mod = null) {
@@ -378,6 +485,11 @@ export function isAnyType(goType, checker = null) {
 
 export function isInterfaceType(goType, checker = null) {
 	if (!goType) return false;
+	if (
+		goType.kind === "basic" &&
+		(goType.name === "any" || goType.name === "interface{}")
+	)
+		return true;
 	if (goType.kind === "interface" || goType.kind === "InterfaceType")
 		return true;
 	if (goType.kind === "TypeName" || goType.kind === "Ident") {
@@ -541,4 +653,43 @@ export function getFuncSignature(goType, checker = null) {
 		return { params: goType.params ?? [], returns };
 	}
 	return { params: [], returns: [] };
+}
+
+export function isUnhashableGoType(goType, checker = null, seen = new Set()) {
+	if (!goType) return false;
+	if (seen.has(goType)) return false;
+	seen.add(goType);
+	if (
+		isSliceType(goType, checker) ||
+		isMapType(goType, checker) ||
+		isFuncType(goType, checker)
+	) {
+		return true;
+	}
+	if (isArrayType(goType, checker)) {
+		const elem = goType.elem ?? goType.underlying?.elem;
+		return isUnhashableGoType(elem, checker, seen);
+	}
+	if (goType.kind === "struct" || goType.kind === "StructType") {
+		if (goType.fields instanceof Map) {
+			for (const f of goType.fields.values()) {
+				if (isUnhashableGoType(f, checker, seen)) return true;
+			}
+		} else if (Array.isArray(goType.fields)) {
+			for (const f of goType.fields) {
+				const fType = f.type ?? f.goType;
+				if (isUnhashableGoType(fType, checker, seen)) return true;
+			}
+		}
+	}
+	if (goType.kind === "TypeName" || goType.kind === "Ident") {
+		const resolved = checker?.types?.get(goType.name);
+		if (resolved && resolved !== goType) {
+			return isUnhashableGoType(resolved, checker, seen);
+		}
+	}
+	if (goType.kind === "named" && goType.underlying) {
+		return isUnhashableGoType(goType.underlying, checker, seen);
+	}
+	return false;
 }

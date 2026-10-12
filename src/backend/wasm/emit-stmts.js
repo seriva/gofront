@@ -693,7 +693,7 @@ export class StmtsEmitter {
 		}
 
 		// Scalar types
-		const box = this.mod.getBoxType(targetGoType);
+		const box = this.mod.getIfaceBoxType(targetGoType);
 		if (box) {
 			this.pushInstruction({ op: "ref.test", typeIndex: box.typeIndex });
 			return;
@@ -734,7 +734,7 @@ export class StmtsEmitter {
 		}
 		if (isStructType(targetGoType, this.mod.checker, this.mod)) {
 			const sInfo = this.mod.getStructType(this._structNameOf(targetGoType));
-			const box = this.mod.getBoxType(targetGoType);
+			const box = this.mod.getIfaceBoxType(targetGoType);
 			if (sInfo && box) {
 				this.pushInstruction({
 					op: "ref.cast_null",
@@ -775,7 +775,7 @@ export class StmtsEmitter {
 		}
 
 		// Scalar types
-		const box = this.mod.getBoxType(targetGoType);
+		const box = this.mod.getIfaceBoxType(targetGoType);
 		if (box) {
 			this.pushInstruction({
 				op: "ref.cast_null",
@@ -938,6 +938,38 @@ export class StmtsEmitter {
 			return;
 		}
 
+		if ((l.kind === "UnaryExpr" && l.op === "*") || l.kind === "StarExpr") {
+			const operand = l.operand ?? l.expr;
+			const box = this.mod.getBoxType(operand._type?.base ?? operand._type);
+			if (box) {
+				const baseWType = {
+					kind: "ref",
+					nullable: true,
+					typeIndex: box.typeIndex,
+				};
+				const boxTmp = this.acquireTemp(baseWType);
+				this.emitExpr(operand, baseWType);
+				this.pushInstruction({ op: "local.set", index: boxTmp });
+				this.pushInstruction({ op: "local.get", index: boxTmp });
+				this.pushInstruction({ op: "local.get", index: boxTmp });
+				this.pushInstruction({
+					op: "struct.get",
+					typeIndex: box.typeIndex,
+					fieldIndex: 0,
+				});
+				const targetType = box.wType;
+				this.emitExpr(r, targetType);
+				this.emitBinaryOp(baseOp, targetType, l._type ?? operand._type?.base);
+				this.pushInstruction({
+					op: "struct.set",
+					typeIndex: box.typeIndex,
+					fieldIndex: 0,
+				});
+				this.releaseTemp(boxTmp, baseWType);
+				return;
+			}
+		}
+
 		if (l.kind !== "Ident") return;
 
 		const localInfo = this.resolveLocal(l.name);
@@ -1015,6 +1047,56 @@ export class StmtsEmitter {
 
 	emitIncDecStmt(stmt) {
 		const { expr, op } = stmt;
+
+		if (
+			(expr.kind === "UnaryExpr" && expr.op === "*") ||
+			expr.kind === "StarExpr"
+		) {
+			const operand = expr.operand ?? expr.expr;
+			const structInfo = this._resolveStructInfo(operand);
+			if (!structInfo) {
+				const box = this.mod.getBoxType(operand._type?.base ?? operand._type);
+				if (box) {
+					const baseWType = {
+						kind: "ref",
+						nullable: true,
+						typeIndex: box.typeIndex,
+					};
+					const boxTmp = this.acquireTemp(baseWType);
+					this.emitExpr(operand, baseWType);
+					this.pushInstruction({ op: "local.set", index: boxTmp });
+					this.pushInstruction({ op: "local.get", index: boxTmp });
+					this.pushInstruction({ op: "local.get", index: boxTmp });
+					this.pushInstruction({
+						op: "struct.get",
+						typeIndex: box.typeIndex,
+						fieldIndex: 0,
+					});
+					const targetType = box.wType;
+					if (targetType === "i64") {
+						this.pushInstruction({ op: "i64.const", value: 1n });
+						this.pushInstruction(op === "++" ? "i64.add" : "i64.sub");
+					} else if (targetType === "f32") {
+						this.pushInstruction({ op: "f32.const", value: 1.0 });
+						this.pushInstruction(op === "++" ? "f32.add" : "f32.sub");
+					} else if (targetType === "f64") {
+						this.pushInstruction({ op: "f64.const", value: 1.0 });
+						this.pushInstruction(op === "++" ? "f64.add" : "f64.sub");
+					} else {
+						this.pushInstruction({ op: "i32.const", value: 1 });
+						this.pushInstruction(op === "++" ? "i32.add" : "i32.sub");
+						this.emitNarrowIntWrap(operand._type?.base ?? operand._type);
+					}
+					this.pushInstruction({
+						op: "struct.set",
+						typeIndex: box.typeIndex,
+						fieldIndex: 0,
+					});
+					this.releaseTemp(boxTmp, baseWType);
+					return;
+				}
+			}
+		}
 
 		if (expr.kind === "SelectorExpr") {
 			const structInfo = this._resolveStructInfo(expr.expr);

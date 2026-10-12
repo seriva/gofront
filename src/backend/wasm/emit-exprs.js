@@ -65,7 +65,11 @@ export class ExprsEmitter {
 						this.emitCloneStruct(sInfo, structWType);
 					}
 				}
-				const box = this.mod.getBoxType(goType);
+				const box = this.mod.getIfaceBoxType(goType);
+				this.pushInstruction({
+					op: "ref.null",
+					heapType: box.tagTypeIndex,
+				});
 				this.pushInstruction({ op: "struct.new", typeIndex: box.typeIndex });
 				return;
 			}
@@ -83,8 +87,12 @@ export class ExprsEmitter {
 
 			// Scalar type -> box into struct
 			const scalarType = goType ?? { kind: "basic", name: "int" };
-			const box = this.mod.getBoxType(scalarType);
+			const box = this.mod.getIfaceBoxType(scalarType);
 			this._emitRawExpr(expr, box.wType);
+			this.pushInstruction({
+				op: "ref.null",
+				heapType: box.tagTypeIndex,
+			});
 			this.pushInstruction({ op: "struct.new", typeIndex: box.typeIndex });
 			return;
 		}
@@ -363,7 +371,10 @@ export class ExprsEmitter {
 		const typeName =
 			lit.typeExpr?.name ??
 			(litType?.kind === "named" ? litType.name : litType?.name);
-		const structInfo = this.mod.getStructType(typeName);
+		let structInfo = typeName ? this.mod.getStructType(typeName) : null;
+		if (!structInfo) {
+			structInfo = this._resolveStructInfo(lit);
+		}
 		if (!structInfo) {
 			throw new Error(`Unknown struct in CompositeLit: ${typeName}`);
 		}
@@ -1157,11 +1168,6 @@ export class ExprsEmitter {
 				targetWasmType ?? this.toWasmType(ident._type),
 			);
 			return;
-		}
-		if (this.mod.isNonLiteralConst(ident.name)) {
-			throw new Error(
-				`constant '${ident.name}' has a non-literal value, which the wasm backend does not support yet (planned)`,
-			);
 		}
 
 		const trampName = `_tramp$${ident.name}`;

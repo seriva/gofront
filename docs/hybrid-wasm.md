@@ -138,7 +138,13 @@ compile error.
 | Named non-empty interfaces | **WASM → JS:** an exported `*T` arrives as its handle class (or `both` live view); other dynamic types arrive as a facade object whose methods call into WASM. **JS → WASM:** only WASM-owned values (handles, facades) are accepted. A `js` type implementing a `wasm` interface is a compile error (`type '*tri' (js) cannot implement wasm interface 'Shape' across the boundary; …`); keep implementations in WASM or pass a `func` callback. |
 | `*testing.T` | Stays a JS object; `t.Errorf`, `t.Fatal`, `t.Log`, `t.Skip`, `t.Name`, `t.Failed`, … are routed back to the harness. |
 | `shared.Float32`, `shared.Int32`, … (`gofront/shared`) | **Zero-copy** TypedArray view over the module's linear memory in both directions (see below). |
-| `map`, `error`, anonymous interfaces, pointers to non-structs, anonymous structs, exported non-literal constants | **Rejected** with `… is not yet supported across the wasm boundary (planned)`. |
+| `error` | **WASM → JS:** `Error` subclass carrying `.message` and the WASM reference (`__ref`). A nil error is `null`. **JS → WASM:** only WASM-owned error instances are accepted; identity is preserved (`errors.Is`). Non-WASM error throws `TypeError`. |
+| `map[K]V` (K = string, number, bool) | Copied both ways as a fresh JS `Map` in insertion order. Map parameters accept a plain JS object or a `Map`. Mutating the returned JS `Map` does not alter WASM state. |
+| Pointers to non-structs (`*float64`, `*int`, …) | Copy-in/copy-out box `{ value }`, written back after the call. Write-back is skipped on panic and the panic propagates. |
+| Anonymous structs | Copied as plain JS objects `{ [field]: value }` with the same field names. |
+| Anonymous interfaces (`interface{ … }`) | Keyed on the sorted method set; identical method sets share the same facade class. Same JS → WASM rule as named interfaces (only WASM-owned values). |
+| Exported non-literal constants | Exposed on the facade as module constants read once after the `start` function runs. |
+| `chan` | **Rejected** with `chan is not yet supported across the wasm boundary (planned)`. |
 
 ### Shared linear-memory buffers (`gofront/shared`)
 

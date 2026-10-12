@@ -12,16 +12,21 @@ import {
 	scanBoundaryImports,
 	wTypeKey,
 } from "./boundary.js";
+import { foldConstExpr } from "./const-fold.js";
 import { FunctionEmitter } from "./emit.js";
 import { BINARY_MATH_IMPORTS } from "./emit-stdlib.js";
 import { encodeModule, isGoFrontWasm } from "./encode.js";
 import { hasGenerics, monomorphise } from "./monomorph.js";
 import { hasNativeWasmOpt, optimizeWasm } from "./optimize.js";
 import {
+	anonIfaceName,
 	ERROR_STRUCT,
 	getFuncSignature,
+	getInterfaceMethodList,
 	getMapKeyValTypes,
 	getReceiverTypeName,
+	goTypeKey,
+	isInterfaceType,
 	isMapType,
 	isNonEmptyInterface,
 	isTestingT,
@@ -49,6 +54,34 @@ function importsAnyOf(programs, pkgs) {
 			(decl.imports ?? [decl]).some((imp) => pkgs.has(imp.path)),
 		),
 	);
+}
+
+function hasErrorUsage(programs) {
+	return (programs ?? []).some((p) => {
+		let found = false;
+		const scan = (n) => {
+			if (!n || found || typeof n !== "object") return;
+			if (Array.isArray(n)) {
+				for (const x of n) scan(x);
+				return;
+			}
+			if (
+				(n.kind === "Ident" ||
+					n.kind === "TypeName" ||
+					n.kind === "basic" ||
+					n.kind === "interface") &&
+				n.name === "error"
+			) {
+				found = true;
+				return;
+			}
+			for (const k of Object.keys(n)) {
+				if (!k.startsWith("_")) scan(n[k]);
+			}
+		};
+		scan(p);
+		return found;
+	});
 }
 
 // [name, params, results] for `env.*` imports backing stdlib calls; the JS
@@ -113,6 +146,7 @@ class ModuleEmitter {
 
 		this.structTypes = new Map(); // name -> struct info
 		this.boxTypes = new Map(); // wType key -> box info
+		this.ifaceBoxTypes = new Map(); // key -> iface box info
 		this.arrayTypes = new Map(); // wType key -> array info
 		this.sliceTypes = new Map(); // wType key -> slice info
 		this.sliceTypesByIndex = new Map(); // typeIndex -> slice info
@@ -145,7 +179,8 @@ class ModuleEmitter {
 		// `errors.New` / `fmt.Errorf` / strconv parse failures allocate the
 		// runtime's own error struct; it joins the struct rec group so the
 		// `error.Error` dispatcher can `ref.test` it like any user type.
-		this.hasErrorType = importsAnyOf(programs, ERROR_PRODUCING_PKGS);
+		this.hasErrorType =
+			importsAnyOf(programs, ERROR_PRODUCING_PKGS) || hasErrorUsage(programs);
 		this.usesStdlibEnv = importsAnyOf(programs, STDLIB_ENV_PKGS);
 
 		if (programs && programs.length > 0) {
@@ -315,20 +350,92 @@ class ModuleEmitter {
 		return this.structTypes.get(name) ?? null;
 	}
 
+	getAnonStructType(fields) {
+		const key = fields.map((f) => `${f.name}:${goTypeKey(f.goType)}`).join(";");
+		const name = `__anon_${key.replace(/[^a-zA-Z0-9_]/g, "_")}`;
+		if (this.structTypes.has(name)) {
+			return this.structTypes.get(name);
+		}
+		const fieldWTypes = fields.map((f) =>
+			toWasmType(f.goType, this.checker, this),
+		);
+		const typeIndex = this._getTotalTypeCount();
+		const typeEntry = {
+			form: "struct",
+			fields: fieldWTypes.map((t) => ({ type: t, mutable: true })),
+		};
+		this._pushType(typeEntry);
+		const info = {
+			name,
+			typeIndex,
+			typeEntry,
+			fields: fields.map((f, i) => ({
+				name: f.name,
+				wType: fieldWTypes[i],
+				goType: f.goType,
+				fieldIndex: i,
+			})),
+			fieldIndexMap: new Map(fields.map((f, i) => [f.name, i])),
+			embeds: [],
+			pkgName: null,
+			pkgTarget: "wasm",
+			isAnon: true,
+		};
+		this.structTypes.set(name, info);
+		return info;
+	}
+
 	getBoxType(goType) {
-		const wType = toWasmType(goType, this.checker, this);
-		const key = typeof wType === "string" ? wType : JSON.stringify(wType);
+		const key = goTypeKey(goType);
 		if (this.boxTypes.has(key)) {
 			return this.boxTypes.get(key);
 		}
+		const wType = toWasmType(goType, this.checker, this);
 		const typeIndex = this._getTotalTypeCount();
 		const typeEntry = {
 			form: "struct",
 			fields: [{ type: wType, mutable: true }],
 		};
 		this._pushType(typeEntry);
-		const boxInfo = { typeIndex, typeEntry, wType };
+		const boxInfo = { key, typeIndex, typeEntry, wType, goType };
 		this.boxTypes.set(key, boxInfo);
+		return boxInfo;
+	}
+
+	getIfaceBoxType(goType) {
+		const key = goTypeKey(goType);
+		if (this.ifaceBoxTypes.has(key)) {
+			return this.ifaceBoxTypes.get(key);
+		}
+		const wType = toWasmType(goType, this.checker, this);
+		const tagIndex = this.ifaceBoxTypes.size;
+		const tagTypeIndex = this._getTotalTypeCount();
+		const tagFields = [];
+		for (let i = 0; i < tagIndex; i++) {
+			tagFields.push({ type: "i32", mutable: false });
+		}
+		this._pushType({
+			form: "struct",
+			fields: tagFields,
+		});
+		const typeIndex = this._getTotalTypeCount();
+		const typeEntry = {
+			form: "struct",
+			fields: [
+				{ type: wType, mutable: true },
+				{
+					type: {
+						kind: "ref",
+						nullable: true,
+						typeIndex: tagTypeIndex,
+					},
+					mutable: false,
+				},
+			],
+		};
+		this._pushType(typeEntry);
+		const boxInfo = { key, typeIndex, typeEntry, wType, goType, tagTypeIndex };
+		this.ifaceBoxTypes.set(key, boxInfo);
 		return boxInfo;
 	}
 
@@ -1280,7 +1387,7 @@ class ModuleEmitter {
 							structInfo: sInfo,
 						});
 					}
-					const box = this.getBoxType({ kind: "named", name: sName });
+					const box = this.getIfaceBoxType({ kind: "named", name: sName });
 					const valKey = `val:${sName}`;
 					if (box && !seenKeys.has(valKey)) {
 						seenKeys.add(valKey);
@@ -1332,7 +1439,7 @@ class ModuleEmitter {
 						}
 
 						if (!isPtrRecv) {
-							const box = this.getBoxType({ kind: "named", name: sName });
+							const box = this.getIfaceBoxType({ kind: "named", name: sName });
 							const valKey = `val:${sName}`;
 							if (box && !seenKeys.has(valKey)) {
 								seenKeys.add(valKey);
@@ -1364,7 +1471,7 @@ class ModuleEmitter {
 			if (fnName.endsWith(`.${methodName}`)) {
 				const rName = fnName.slice(0, fnName.length - methodName.length - 1);
 				if (!this.structTypes.has(rName)) {
-					const box = this.getBoxType({ kind: "named", name: rName });
+					const box = this.getIfaceBoxType({ kind: "named", name: rName });
 					const key = `named:${rName}`;
 					if (box && !seenKeys.has(key)) {
 						seenKeys.add(key);
@@ -1412,7 +1519,7 @@ class ModuleEmitter {
 
 			// Check struct value (boxed)
 			if (this.checker?.implements?.(namedType, ifaceResolved)) {
-				const box = this.getBoxType(namedType);
+				const box = this.getIfaceBoxType(namedType);
 				if (box && !seen.has(box.typeIndex)) {
 					seen.add(box.typeIndex);
 					candidates.push({ name: sName, typeIndex: box.typeIndex });
@@ -1429,7 +1536,7 @@ class ModuleEmitter {
 					tVal.underlying?.kind !== "interface"
 				) {
 					if (this.checker.implements(tVal, ifaceResolved)) {
-						const box = this.getBoxType(tVal);
+						const box = this.getIfaceBoxType(tVal);
 						if (box && !seen.has(box.typeIndex)) {
 							seen.add(box.typeIndex);
 							candidates.push({ name: tName, typeIndex: box.typeIndex });
@@ -1685,8 +1792,8 @@ export function compileWasmModule(
 	}
 	funcDecls.push(...trampolines);
 
-	const pendingInits = _collectPackageGlobals(progs, mod, checker);
 	_collectPackageConsts(progs, mod);
+	const pendingInits = _collectPackageGlobals(progs, mod, checker);
 	const globalInitFn =
 		pendingInits.length > 0 || initNames.length > 0
 			? _makeGlobalInitFunc(pendingInits, initNames)
@@ -1972,6 +2079,23 @@ export function compileWasmModule(
 				],
 				BOOL_T,
 				"any_eq",
+			),
+		);
+	}
+	mod.usesAnyHash = false;
+	for (const info of mod.mapTypes.values()) {
+		if (isInterfaceType(info.keyGoType, checker)) {
+			mod.usesAnyHash = true;
+			break;
+		}
+	}
+	if (mod.usesAnyHash) {
+		funcDecls.push(
+			helper(
+				"__any_hash",
+				[{ name: "a", type: ANY_T }],
+				{ kind: "basic", name: "int32" },
+				"any_hash",
 			),
 		);
 	}
@@ -2264,29 +2388,42 @@ export function compileWasmModule(
 	};
 }
 
-// Package-level `const` declarations with literal values (iota is already
-// substituted by the parser). Non-literal constant expressions are not
-// supported by the wasm backend yet.
+// Package-level `const` declarations (iota is already substituted by the
+// parser).  Literals and expressions the folder can reduce become BasicLits in
+// `constCache`; whatever is left is recorded in `nonLiteralConsts` and later
+// becomes a global initialised by the start function.
 function _collectPackageConsts(progs, mod) {
+	const entries = [];
 	for (const p of progs) {
 		for (const d of p.decls ?? []) {
 			if (d.kind !== "ConstDecl") continue;
 			for (const spec of d.decls ?? []) {
 				for (let i = 0; i < spec.names.length; i++) {
-					let lit = spec.value?.[i];
-					if (
-						lit?.kind === "UnaryExpr" &&
-						lit.op === "-" &&
-						lit.operand?.kind === "BasicLit"
-					) {
-						lit = { ...lit.operand, value: `-${lit.operand.value}` };
-					}
-					if (lit?.kind === "BasicLit") mod.constCache.set(spec.names[i], lit);
-					else if (lit) mod.nonLiteralConsts.add(spec.names[i]);
+					if (spec.value?.[i])
+						entries.push({ name: spec.names[i], expr: spec.value[i] });
 				}
 			}
 		}
 	}
+	const resolve = (name) => mod.constCache.get(name) ?? null;
+	// Iterate to a fixpoint so a constant may refer to one declared later.
+	let pending = entries;
+	let progress = true;
+	while (progress && pending.length > 0) {
+		progress = false;
+		const rest = [];
+		for (const entry of pending) {
+			const lit = foldConstExpr(entry.expr, resolve);
+			if (lit) {
+				mod.constCache.set(entry.name, lit);
+				progress = true;
+			} else {
+				rest.push(entry);
+			}
+		}
+		pending = rest;
+	}
+	for (const entry of pending) mod.nonLiteralConsts.add(entry.name);
 }
 
 // Depth-first search over AST nodes (skipping `_`-prefixed annotations).
@@ -2318,6 +2455,9 @@ function _usesTestingRun(node) {
 // site, so a gap surfaces as a compile error rather than a bad module.
 function _usesAnyEq(funcDecls, mod) {
 	if (mod.hasErrorType) return true;
+	for (const info of mod.mapTypes.values()) {
+		if (isInterfaceType(info.keyGoType, mod.checker)) return true;
+	}
 	for (const info of mod.structTypes.values()) {
 		if (info.fields?.some((f) => f.wType === "anyref")) return true;
 	}
@@ -2490,14 +2630,18 @@ function _zeroFieldConst(f, mod) {
 
 function _collectPackageGlobals(progs, mod, checker) {
 	const pending = []; // non-constant initializers, run by the start function
+	const pendingConsts = []; // unfoldable consts; they run before any var
 	for (const p of progs) {
 		for (const d of p.decls ?? []) {
-			if (d.kind !== "VarDecl") continue;
+			const isConst = d.kind === "ConstDecl";
+			if (d.kind !== "VarDecl" && !isConst) continue;
 			for (const spec of d.decls ?? d.specs ?? [d]) {
 				const names = spec.names ?? (spec.name ? [spec.name] : []);
 				const values = spec.value ?? (spec.init ? [spec.init] : []);
 				for (let i = 0; i < names.length; i++) {
 					const name = names[i];
+					// Foldable consts live in `constCache`, not in a global.
+					if (isConst && !mod.isNonLiteralConst(name)) continue;
 					const rawType = spec.type ?? values[i]?._type;
 					const wType = toWasmType(rawType, checker, mod);
 					const gIdx = mod.globals.length;
@@ -2592,7 +2736,10 @@ function _collectPackageGlobals(progs, mod, checker) {
 						}
 					}
 					if (values[i] && !isConstInit && names.length === values.length) {
-						pending.push({ name, expr: values[i] });
+						(isConst ? pendingConsts : pending).push({
+							name,
+							expr: values[i],
+						});
 					}
 					mod.globals.push({
 						type: wType,
@@ -2608,7 +2755,26 @@ function _collectPackageGlobals(progs, mod, checker) {
 			}
 		}
 	}
-	return pending;
+	return [..._orderConstInits(pendingConsts), ...pending];
+}
+
+// Orders runtime-initialised consts so each runs after the consts it
+// references (Go allows a constant to use one declared later).
+function _orderConstInits(entries) {
+	const byName = new Map(entries.map((e) => [e.name, e]));
+	const ordered = [];
+	const state = new Map();
+	const visit = (entry) => {
+		if (state.has(entry.name)) return;
+		state.set(entry.name, true);
+		_someNode(entry.expr, (n) => {
+			if (n.kind === "Ident" && byName.has(n.name)) visit(byName.get(n.name));
+			return false;
+		});
+		ordered.push(entry);
+	};
+	for (const e of entries) visit(e);
+	return ordered;
 }
 
 // Synthesises `__init_globals()` assigning every non-constant package-level
@@ -2759,12 +2925,57 @@ function _makeInterfaceDispatcher(info, checker) {
 	};
 }
 
+function _scanFuncSigInterfaces(
+	progs,
+	funcDecls,
+	interfaceCalls,
+	checker,
+	mod,
+) {
+	const scanType = (t) => {
+		if (!t) return;
+		if (t.kind === "InterfaceType" || (t.kind === "interface" && !t.name)) {
+			const mList = getInterfaceMethodList(t);
+			if (mList.length === 0) return;
+			const ifaceName = anonIfaceName(t, checker, mod);
+			for (const m of mList) {
+				const key = `${ifaceName}.${m.name}`;
+				if (!interfaceCalls.has(key)) {
+					interfaceCalls.set(key, {
+						ifaceName,
+						ifaceType: t,
+						methodName: m.name,
+						methodSig: {
+							kind: "func",
+							params: m.params,
+							returns: m.returns,
+						},
+					});
+				}
+			}
+		}
+	};
+	for (const fn of funcDecls) {
+		for (const p of fn.params ?? []) scanType(p.type);
+		scanType(fn.returnType);
+	}
+	for (const p of progs) {
+		for (const d of p.decls ?? []) {
+			if (d.kind === "FuncDecl") {
+				for (const param of d.params ?? []) scanType(param.type);
+				scanType(d.returnType);
+			}
+		}
+	}
+}
+
 function _collectInterfaceDispatchers(progs, funcDecls, mod, checker) {
 	const interfaceCalls = new Map();
 	for (const fn of funcDecls) {
 		if (fn.body) _scanInterfaceCallNodes(fn.body, interfaceCalls, checker);
 	}
 	_scanInterfaceTypeDecls(progs, interfaceCalls, checker);
+	_scanFuncSigInterfaces(progs, funcDecls, interfaceCalls, checker, mod);
 
 	// `error.Error()` is reached implicitly by fmt verbs and errors.Is, so
 	// the dispatcher must exist even when user code never calls it.
