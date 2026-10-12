@@ -173,7 +173,9 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
 
 export const HELPER_ERROR = `var __error = __error || function(msg, cause) {
   return { Error() { return msg; }, toString() { return msg; }, _msg: msg, _cause: cause ?? null };
-};`;
+};
+var __strconv_err_syntax = __strconv_err_syntax || __error("invalid syntax");
+var __strconv_err_range = __strconv_err_range || __error("value out of range");`;
 
 export const HELPER_ERROR_IS = `var __errorIs = __errorIs || function(err, target) {
   while (err !== null && err !== undefined) {

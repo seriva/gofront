@@ -83,6 +83,10 @@ const NS_CONSTANTS = {
 		MaxInt: "Number.MAX_SAFE_INTEGER",
 		MinInt: "Number.MIN_SAFE_INTEGER",
 	},
+	strconv: {
+		ErrSyntax: "__strconv_err_syntax",
+		ErrRange: "__strconv_err_range",
+	},
 	io: {
 		EOF: '"EOF"',
 		Discard:
@@ -529,7 +533,10 @@ export const expressionGenMethods = {
 		}
 		if (expr.expr.kind === "Ident") {
 			const nsConst = NS_CONSTANTS[expr.expr.name]?.[expr.field];
-			if (nsConst !== undefined) return nsConst;
+			if (nsConst !== undefined) {
+				if (expr.expr.name === "strconv") this.useHelper("error");
+				return nsConst;
+			}
 		}
 		const base = this.genExpr(expr.expr);
 		if (this.bundledPackages.has(base)) return expr.field;
@@ -707,6 +714,11 @@ export const expressionGenMethods = {
 			return this._genTimeMethodCall(expr.func.field, expr);
 		if (recvName === "testing.T")
 			return this._genTestingMethodCall(expr.func.field, expr);
+		if (recvName === "strings.Replacer") {
+			const recv = this.genExpr(expr.func.expr);
+			const arg = this.genExpr(expr.args[0]);
+			return `(${recv} ? ${recv}.Replace(${arg}) : ${arg})`;
+		}
 		if (recvName?.startsWith("shared.") && expr.func.field === "Subarray") {
 			const args = expr.args.map((a) => this.genExpr(a)).join(", ");
 			return `${this.genExpr(expr.func.expr)}.subarray(${args})`;
@@ -1126,6 +1138,8 @@ export const expressionGenMethods = {
 	_zeroForNamedType(name) {
 		if (name === "strings.Builder") return '{ _buf: "" }';
 		if (name === "bytes.Buffer") return "{ _buf: [] }";
+		if (name === "strings.Replacer")
+			return "{ _p: [], Replace(s) { return s; } }";
 		name = this._dequalify(name);
 		if (this.structNames.has(name)) return `new ${name}()`;
 		return "null";

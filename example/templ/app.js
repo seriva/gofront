@@ -128,6 +128,8 @@ var __sprintf = __sprintf || function(f, ...a) {
 var __error = __error || function(msg, cause) {
   return { Error() { return msg; }, toString() { return msg; }, _msg: msg, _cause: cause ?? null };
 };
+var __strconv_err_syntax = __strconv_err_syntax || __error("invalid syntax");
+var __strconv_err_range = __strconv_err_range || __error("value out of range");
 
 class Todo {
   constructor(id$ = 0, text$ = "", done$ = false, priority$ = 0) {

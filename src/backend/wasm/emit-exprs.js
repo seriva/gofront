@@ -165,6 +165,8 @@ export class ExprsEmitter {
 					this.emitMathConst(expr.field, targetWasmType);
 				else if (this._isUtf8Const(expr))
 					this.emitUtf8Const(expr.field, targetWasmType);
+				else if (this._isStrconvConst(expr))
+					this.emitStrconvConst(expr.field, targetWasmType);
 				else this.emitSelectorExpr(expr);
 				break;
 			}
@@ -1848,6 +1850,24 @@ export class ExprsEmitter {
 			return;
 		}
 
+		if (
+			fromWType === "externref" &&
+			isSliceType(targetType, this.mod.checker) &&
+			(targetType.elem?.name === "byte" || targetType.elem?.name === "uint8")
+		) {
+			this._emitStringToByteSlice(targetType);
+			return;
+		}
+
+		if (
+			toWType === "externref" &&
+			isSliceType(fromType, this.mod.checker) &&
+			(fromType.elem?.name === "byte" || fromType.elem?.name === "uint8")
+		) {
+			this._emitByteSliceToString(fromType);
+			return;
+		}
+
 		if (toWType === "externref") {
 			if (fromWType === "i64") {
 				this.pushInstruction("i32.wrap_i64");
@@ -1910,5 +1930,150 @@ export class ExprsEmitter {
 				isSigned(targetType) ? "i64.trunc_sat_f32_s" : "i64.trunc_sat_f32_u",
 			);
 		}
+	}
+
+	_emitStringToByteSlice(targetType) {
+		const elemGo = targetType.elem;
+		const sliceInfo = this.mod.getSliceType(elemGo);
+		const arrInfo = sliceInfo.arrInfo;
+		const strTmp = this.acquireTemp("externref");
+		this.pushInstruction({ op: "local.set", index: strTmp });
+		const lenTmp = this.acquireTemp("i32");
+		this.pushInstruction({ op: "local.get", index: strTmp });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getStrToBytesImportIndex(),
+		});
+		this.pushInstruction({ op: "local.tee", index: lenTmp });
+		this.pushInstruction({
+			op: "array.new_default",
+			typeIndex: arrInfo.typeIndex,
+		});
+		const arrTmp = this.acquireTemp({
+			kind: "ref",
+			nullable: true,
+			typeIndex: arrInfo.typeIndex,
+		});
+		this.pushInstruction({ op: "local.set", index: arrTmp });
+		const iTmp = this.acquireTemp("i32");
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: iTmp });
+
+		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushInstruction({ op: "loop", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction({ op: "local.get", index: lenTmp });
+		this.pushInstruction("i32.ge_s");
+		this.pushInstruction({ op: "br_if", depth: 1 });
+
+		this.pushInstruction({ op: "local.get", index: arrTmp });
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getStrByteAtImportIndex(),
+		});
+		this.pushInstruction({ op: "array.set", typeIndex: arrInfo.typeIndex });
+
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: iTmp });
+		this.pushInstruction({ op: "br", depth: 0 });
+		this.pushInstruction("end");
+		this.pushInstruction("end");
+
+		this.pushInstruction({ op: "local.get", index: arrTmp });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.get", index: lenTmp });
+		this.pushInstruction({ op: "local.get", index: lenTmp });
+		this.pushInstruction({
+			op: "struct.new",
+			typeIndex: sliceInfo.typeIndex,
+		});
+
+		this.releaseTemp(arrTmp, {
+			kind: "ref",
+			nullable: true,
+			typeIndex: arrInfo.typeIndex,
+		});
+		this.releaseTemp(iTmp, "i32");
+		this.releaseTemp(lenTmp, "i32");
+		this.releaseTemp(strTmp, "externref");
+	}
+
+	_emitByteSliceToString(fromType) {
+		const elemGo = fromType.elem;
+		const sliceInfo = this.mod.getSliceType(elemGo);
+		const arrInfo = sliceInfo.arrInfo;
+		const sliceW = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: sliceInfo.typeIndex,
+		};
+		const arrW = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: arrInfo.typeIndex,
+		};
+		const sTmp = this.acquireTemp(sliceW);
+		this.pushInstruction({ op: "local.set", index: sTmp });
+		const arrTmp = this.acquireTemp(arrW);
+		const offTmp = this.acquireTemp("i32");
+		const lenTmp = this.acquireTemp("i32");
+		const capTmp = this.acquireTemp("i32");
+		this._emitSliceUnpack(sTmp, sliceInfo, {
+			arr: arrTmp,
+			off: offTmp,
+			len: lenTmp,
+			cap: capTmp,
+		});
+		this.releaseTemp(sTmp, sliceW);
+		this.releaseTemp(capTmp, "i32");
+
+		this.pushInstruction({ op: "local.get", index: lenTmp });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getBytesToStrInitImportIndex(),
+		});
+
+		const iTmp = this.acquireTemp("i32");
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: iTmp });
+
+		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushInstruction({ op: "loop", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction({ op: "local.get", index: lenTmp });
+		this.pushInstruction("i32.ge_s");
+		this.pushInstruction({ op: "br_if", depth: 1 });
+
+		this.pushInstruction({ op: "local.get", index: arrTmp });
+		this.pushInstruction({ op: "local.get", index: offTmp });
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "array.get", typeIndex: arrInfo.typeIndex });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getBytesToStrPushImportIndex(),
+		});
+
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: iTmp });
+		this.pushInstruction({ op: "br", depth: 0 });
+		this.pushInstruction("end");
+		this.pushInstruction("end");
+
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getBytesToStrFinishImportIndex(),
+		});
+
+		this.releaseTemp(iTmp, "i32");
+		this.releaseTemp(lenTmp, "i32");
+		this.releaseTemp(offTmp, "i32");
+		this.releaseTemp(arrTmp, arrW);
 	}
 }

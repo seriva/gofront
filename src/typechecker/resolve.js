@@ -381,6 +381,10 @@ export const resolveMethods = {
 			const found = this.types.get(t.alias);
 			if (found) return found;
 		}
+		if (t.kind === "named" && (!t.underlying || !t.methods)) {
+			const found = this.types.get(t.name);
+			if (found) return found;
+		}
 		return t;
 	},
 
@@ -432,7 +436,19 @@ export const resolveMethods = {
 	},
 
 	_fieldTypeStruct(base, baseType, field, node) {
-		if (base.fields?.has(field)) return base.fields.get(field);
+		if (base.fields?.has(field)) {
+			if (
+				field.startsWith("_") &&
+				(baseType?.name?.startsWith("strings.") ||
+					baseType?.name?.startsWith("bytes."))
+			) {
+				return this.err(
+					`Cannot refer to unexported field '${field}' on ${typeStr(baseType)}`,
+					node,
+				);
+			}
+			return base.fields.get(field);
+		}
 		if (base.methods?.has(field)) return base.methods.get(field);
 		return this.err(`No field '${field}' on ${typeStr(baseType)}`, node);
 	},

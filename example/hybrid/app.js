@@ -20,6 +20,8 @@ function __gfw_imports(stringTable, extraEnv, tag, write) {
 		flush();
 	};
 	const targ = (v) => { targs.push(v); };
+	let utf8Encoded = null;
+	let convBytes = null, convPos = 0;
 	const env = {
 		"panicTag": tag,
 		"panic": (msg) => {
@@ -72,6 +74,25 @@ function __gfw_imports(stringTable, extraEnv, tag, write) {
 		"str_from_i32": (n) => String(n),
 		"str_from_f64": (f) => String(f),
 		"is_string": (v) => (typeof v === "string" ? 1 : 0),
+		"str_to_bytes": (s) => {
+			utf8Encoded = new TextEncoder().encode(s ?? "");
+			return utf8Encoded.length;
+		},
+		"str_byte_at": (i) => (utf8Encoded ? (utf8Encoded[i] ?? 0) : 0),
+		"bytes_to_str_init": (len) => {
+			convBytes = new Uint8Array(len);
+			convPos = 0;
+		},
+		"bytes_to_str_push": (b) => {
+			if (convBytes && convPos < convBytes.length) {
+				convBytes[convPos++] = b & 0xFF;
+			}
+		},
+		"bytes_to_str_finish": () => {
+			const res = convBytes ? new TextDecoder().decode(convBytes) : "";
+			convBytes = null;
+			return res;
+		},
 		"print_i32": print, "print_i64": print, "print_f32": print, "print_f64": print,
 		"print_str": print, "print_any": print,
 		"print_bool": (b) => print(b !== 0 ? "true" : "false"),
@@ -189,7 +210,7 @@ function __gfw_idxview(n, getAt, setAt) {
 	});
 }
 const __gfw_env = {};
-const __w = await __gfw_load(["runtime error: index out of range","runtime error: slice bounds out of range","assignment to entry in nil map","runtime error: integer divide by zero","runtime error: shared buffer length out of range"], __gfw_env);
+const __w = await __gfw_load(["runtime error: index out of range","runtime error: slice bounds out of range","assignment to entry in nil map","runtime error: integer divide by zero","runtime error: shared buffer length out of range","runtime error: comparing uncomparable type"], __gfw_env);
 const __w$memory = __w.memory;
 const __w$__shared_base = __w.__shared_base;
 const __w$__shared_len = __w.__shared_len;
