@@ -873,6 +873,21 @@ export class FunctionEmitter {
 			if (this.mod.structTypes.has(t.name))
 				return this.mod.structTypes.get(t.name);
 		}
+		if (t.kind === "struct" || t.kind === "StructType") {
+			const rawFields = [];
+			if (t.fields instanceof Map) {
+				for (const [k, v] of t.fields.entries())
+					rawFields.push({ name: k, goType: v });
+			} else if (Array.isArray(t.fields)) {
+				for (const f of t.fields) {
+					const names = f.names ?? (f.name ? [f.name] : []);
+					for (const n of names) rawFields.push({ name: n, goType: f.type });
+				}
+			}
+			if (rawFields.length > 0 && this.mod.getAnonStructType) {
+				return this.mod.getAnonStructType(rawFields);
+			}
+		}
 		return null;
 	}
 
@@ -1080,6 +1095,18 @@ export class FunctionEmitter {
 		if (t.len?.value !== undefined) return Number(t.len.value);
 		if (t.underlying) return this._getArraySize(t.underlying, defaultSize);
 		return defaultSize;
+	}
+
+	_getArrayElemType(t) {
+		if (!t) return null;
+		if (t.elem) return t.elem;
+		if (t.underlying?.elem) return t.underlying.elem;
+		if (t.kind === "ArrayType") return t.elem;
+		if (t.name && this.mod.checker?.types?.has(t.name)) {
+			const resolved = this.mod.checker.types.get(t.name);
+			return this._getArrayElemType(resolved);
+		}
+		return null;
 	}
 
 	emitZeroValue(goType, wType) {
