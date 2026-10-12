@@ -43,15 +43,75 @@ export const HELPER_SCLONE = `var __sclone = __sclone || function(x) {
 
 // Interface boxing: tag struct values (__v) vs struct pointers (__p) so type
 // switches can tell T from *T; tags are non-enumerable so __equal/JSON ignore them.
-export const HELPER_IFACE_BOX = `var __ifv = __ifv || function(x) {
+export const HELPER_IFACE_BOX = `var __ifv = __ifv || function(x, ptrFields) {
   if (x === null || typeof x !== "object") return x;
   const c = typeof x.__clone === "function" ? x.__clone() : Object.assign(Object.create(Object.getPrototypeOf(x)), x);
   Object.defineProperty(c, "__v", { value: true, configurable: true });
+  if (Array.isArray(ptrFields)) {
+    for (const f of ptrFields) {
+      if (f.indexOf(".") !== -1) {
+        const parts = f.split(".");
+        let cur = c;
+        for (let j = 0; j < parts.length - 1; j++) cur = cur?.[parts[j]];
+        const last = parts[parts.length - 1];
+        if (cur?.[last] !== null && typeof cur?.[last] === "object") __ifp(cur[last]);
+      } else if (c[f] !== null && typeof c[f] === "object") {
+        __ifp(c[f], ptrFields);
+      }
+    }
+  }
   return c;
 };
-var __ifp = __ifp || function(x) {
-  if (x !== null && typeof x === "object" && x.__p !== true && Object.isExtensible(x))
+var __ifp = __ifp || function(x, ptrFields, seen) {
+  if (x === null || typeof x !== "object") return x;
+  if (x.__p !== true && Object.isExtensible(x))
     Object.defineProperty(x, "__p", { value: true, configurable: true });
+  if (Array.isArray(ptrFields)) {
+    seen = seen || new Set();
+    if (seen.has(x)) return x;
+    seen.add(x);
+    for (const f of ptrFields) {
+      if (f.indexOf(".") !== -1) {
+        const parts = f.split(".");
+        let cur = x;
+        for (let j = 0; j < parts.length - 1; j++) cur = cur?.[parts[j]];
+        const last = parts[parts.length - 1];
+        if (cur?.[last] !== null && typeof cur?.[last] === "object") __ifp(cur[last]);
+      } else if (x[f] !== null && typeof x[f] === "object") {
+        __ifp(x[f], ptrFields, seen);
+      }
+    }
+  }
+  return x;
+};
+var __ifm = __ifm || function(x) {
+  if (x === null || typeof x !== "object") x = {};
+  if (x.__map !== true && Object.isExtensible(x))
+    Object.defineProperty(x, "__map", { value: true, configurable: true });
+  return x;
+};
+var __ifpm = __ifpm || function(x) {
+  if (x === null || typeof x !== "object") x = {};
+  if (x.__map !== true && Object.isExtensible(x)) {
+    Object.defineProperty(x, "__map", { value: true, configurable: true });
+    Object.defineProperty(x, "__ptr_map", { value: true, configurable: true });
+  }
+  return x;
+};
+var __ifs = __ifs || function(x, ptrFields) {
+  if (x === null || x === undefined) x = [];
+  if (x.__slice !== true && Object.isExtensible(x))
+    Object.defineProperty(x, "__slice", { value: true, configurable: true });
+  if (Array.isArray(ptrFields) && Object.isExtensible(x))
+    Object.defineProperty(x, "__ptr_fields", { value: ptrFields, configurable: true });
+  return x;
+};
+var __ifps = __ifps || function(x) {
+  if (x === null || x === undefined) x = [];
+  if (x.__slice !== true && Object.isExtensible(x)) {
+    Object.defineProperty(x, "__slice", { value: true, configurable: true });
+    Object.defineProperty(x, "__ptr_slice", { value: true, configurable: true });
+  }
   return x;
 };`;
 
@@ -124,6 +184,107 @@ var __recover = __recover || function(ok) {
 
 export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
   let i = 0;
+  const ptrMap = new WeakMap();
+  let ptrCounter = 1;
+  const getPtr = (o) => {
+    let p = ptrMap.get(o);
+    if (!p) {
+      p = "0x" + (ptrCounter++).toString(16);
+      ptrMap.set(o, p);
+    }
+    return p;
+  };
+  const formatV = (val, isPlus, isTopLevel) => {
+    if (val === null || val === undefined) return "<nil>";
+    if (typeof val === "boolean") return String(val);
+    if (typeof val === "number" || typeof val === "bigint") return String(val);
+    if (typeof val === "string") return val;
+    if (typeof val === "object") {
+      if ("re" in val && "im" in val) {
+        const sign = val.im >= 0 ? "+" : "";
+        return "(" + val.re + sign + val.im + "i)";
+      }
+      if (typeof val.Error === "function") {
+        return String(val.Error());
+      }
+      if (Array.isArray(val) || ArrayBuffer.isView(val)) {
+        const isElemPtr = val.__ptr_slice === true;
+        const pf = val.__ptr_fields;
+        const parts = [];
+        for (let j = 0; j < val.length; j++) {
+          const item = val[j];
+          if (isElemPtr && item !== null && typeof item === "object" && item.__p !== true && Object.isExtensible(item)) {
+            __ifp(item);
+          } else if (Array.isArray(pf) && item !== null && typeof item === "object") {
+            for (const f of pf) {
+              if (f.indexOf(".") !== -1) {
+                const fparts = f.split(".");
+                let cur = item;
+                for (let k = 0; k < fparts.length - 1; k++) cur = cur?.[fparts[k]];
+                const last = fparts[fparts.length - 1];
+                if (cur?.[last] !== null && typeof cur?.[last] === "object") __ifp(cur[last]);
+              } else if (item[f] !== null && typeof item[f] === "object") {
+                __ifp(item[f]);
+              }
+            }
+          }
+          parts.push(formatV(item, isPlus, false));
+        }
+        return "[" + parts.join(" ") + "]";
+      }
+      if (val instanceof Map || val.__map === true) {
+        const isElemPtr = val.__ptr_map === true;
+        const parts = [];
+        if (val instanceof Map) {
+          const entries = Array.from(val.entries()).sort(([k1], [k2]) => {
+            if (typeof k1 === "number" && typeof k2 === "number") return k1 - k2;
+            const na = Number(k1), nb = Number(k2);
+            if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
+            return String(k1).localeCompare(String(k2));
+          });
+          for (const [k, v] of entries) {
+            if (isElemPtr && v !== null && typeof v === "object" && v.__p !== true && Object.isExtensible(v)) {
+              __ifp(v);
+            }
+            parts.push(formatV(k, isPlus, false) + ":" + formatV(v, isPlus, false));
+          }
+        } else {
+          const keys = Object.keys(val).sort((a, b) => {
+            const na = Number(a), nb = Number(b);
+            if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
+            return a.localeCompare(b);
+          });
+          for (const k of keys) {
+            const v = val[k];
+            if (isElemPtr && v !== null && typeof v === "object" && v.__p !== true && Object.isExtensible(v)) {
+              __ifp(v);
+            }
+            parts.push(formatV(k, isPlus, false) + ":" + formatV(v, isPlus, false));
+          }
+        }
+        return "map[" + parts.join(" ") + "]";
+      }
+      if ("value" in val && (val.__box === true || (!val.__struct && !("__v" in val) && Object.keys(val).length === 1 && (val.constructor === Object || val.constructor?.name === "Object")))) {
+        return getPtr(val);
+      }
+      const isPtr = val.__p === true;
+      if (isPtr) {
+        if (!isTopLevel) {
+          return getPtr(val);
+        }
+        getPtr(val);
+      }
+      const prefix = isPtr ? "&{" : "{";
+      const keys = Object.keys(val);
+      const parts = [];
+      for (const k of keys) {
+        const fv = formatV(val[k], isPlus, false);
+        parts.push(isPlus ? k + ":" + fv : fv);
+      }
+      return prefix + parts.join(" ") + "}";
+    }
+    return String(val);
+  };
   return f.replace(/%([#+\\- 0]*)([0-9]*)\\.?([0-9]*)[sdvftxXqobeEgGw%]/g, (m) => {
     if (m === "%%") return "%";
     const verb = m.slice(-1);
@@ -140,21 +301,8 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
       case "s": return pad(String(v == null ? "<nil>" : v), width, false);
       case "d": return pad(String(Math.trunc(Number(v))), width, zero);
       case "v": {
-        if (typeof v === "object" && v !== null) {
-          if ("re" in v && "im" in v) {
-            const sign = v.im >= 0 ? "+" : "";
-            return pad("(" + v.re + sign + v.im + "i)", width, false);
-          }
-          if (typeof v.Error === "function") {
-            return pad(String(v.Error()), width, false);
-          }
-          try {
-            return pad(JSON.stringify(v), width, false);
-          } catch {
-            return pad(String(v), width, false);
-          }
-        }
-        return pad(String(v == null ? "<nil>" : v), width, false);
+        const isPlus = flags?.includes("+") ?? false;
+        return pad(formatV(v, isPlus, true), width, false);
       }
       case "f": { const n = Number(v), p = prec !== "" ? parseInt(prec) : 6; return pad(n.toFixed(p), width, zero); }
       case "t": return pad(String(!!v), width, false);

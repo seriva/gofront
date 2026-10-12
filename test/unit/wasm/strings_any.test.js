@@ -776,3 +776,277 @@ func Main() string {
 	assertEqual(wasmRes, "same_ok|atoi_ok|parseint_ok|unquote_ok");
 	assertEqual(wasmRes, jsRes);
 });
+
+section("WASM fmt — composite %v and %+v parity (Phase 5)");
+
+test("fmt.Sprintf %v with slices and arrays", () => {
+	const src = `
+package main
+
+import "fmt"
+
+func Main() string {
+	s1 := []int{1, 2, 3}
+	s2 := []string{"hello", "world"}
+	s3 := []bool{true, false, true}
+	s4 := []float64{1.5, 2.5}
+	s5 := []int{}
+	var s6 []int
+	a1 := [3]int{10, 20, 30}
+	a2 := [2]string{"foo", "bar"}
+
+	return fmt.Sprintf("%v|%v|%v|%v|%v|%v|%v|%v", s1, s2, s3, s4, s5, s6, a1, a2)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(
+		wasmRes,
+		"[1 2 3]|[hello world]|[true false true]|[1.5 2.5]|[]|[]|[10 20 30]|[foo bar]",
+	);
+	assertEqual(wasmRes, jsRes);
+});
+
+test("fmt.Sprintf %v with maps", () => {
+	const src = `
+package main
+
+import "fmt"
+
+func Main() string {
+	m1 := map[string]int{"a": 1, "b": 2}
+	m2 := map[string]string{"foo": "bar"}
+	m3 := map[int]string{1: "one", 2: "two"}
+	m4 := map[string]int{}
+	var m5 map[string]int
+
+	return fmt.Sprintf("%v|%v|%v|%v|%v", m1, m2, m3, m4, m5)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(
+		wasmRes,
+		"map[a:1 b:2]|map[foo:bar]|map[1:one 2:two]|map[]|map[]",
+	);
+	assertEqual(wasmRes, jsRes);
+});
+
+test("fmt.Sprintf %v and %+v with structs and struct pointers", () => {
+	const src = `
+package main
+
+import "fmt"
+
+type Point struct {
+	X int
+	Y int
+}
+
+func Main() string {
+	p := Point{10, 20}
+	ptr := &Point{30, 40}
+	var nilPtr *Point
+
+	v1 := fmt.Sprintf("%v|%+v", p, p)
+	v2 := fmt.Sprintf("%v|%+v", ptr, ptr)
+	v3 := fmt.Sprintf("%v|%+v", nilPtr, nilPtr)
+	return v1 + "|" + v2 + "|" + v3
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "{10 20}|{X:10 Y:20}|&{30 40}|&{X:30 Y:40}|<nil>|<nil>");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("fmt.Sprintf %v and %+v with nested struct pointers and value structs", () => {
+	const src = `
+package main
+
+import "fmt"
+
+type Node struct {
+	Val  int
+	Next *Node
+}
+
+type Inner struct {
+	N int
+}
+
+type Outer struct {
+	Val int
+	In  Inner
+}
+
+func Main() string {
+	n := &Node{Val: 1, Next: &Node{Val: 2, Next: nil}}
+	nVal := Node{Val: 10, Next: &Node{Val: 20, Next: nil}}
+	o := Outer{Val: 100, In: Inner{N: 42}}
+	oPtr := &Outer{Val: 200, In: Inner{N: 84}}
+
+	s1 := fmt.Sprintf("%v|%+v", n, n)
+	s2 := fmt.Sprintf("%v|%+v", nVal, nVal)
+	s3 := fmt.Sprintf("%v|%+v", o, o)
+	s4 := fmt.Sprintf("%v|%+v", oPtr, oPtr)
+	return s1 + "|" + s2 + "|" + s3 + "|" + s4
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(
+		wasmRes,
+		"&{1 0x2}|&{Val:1 Next:0x2}|{10 0x1}|{Val:10 Next:0x1}|{100 {42}}|{Val:100 In:{N:42}}|&{200 {84}}|&{Val:200 In:{N:84}}",
+	);
+	assertEqual(wasmRes, jsRes);
+});
+
+test("fmt.Sprintf %v and %+v with slices and maps of structs and pointers", () => {
+	const src = `
+package main
+
+import "fmt"
+
+type Item struct {
+	Name string
+	Qty  int
+}
+
+func Main() string {
+	items := []Item{{"apple", 5}, {"banana", 10}}
+	itemPtrs := []*Item{&Item{"cherry", 15}, &Item{"date", 20}}
+	mItems := map[string]Item{"first": {"fig", 25}}
+
+	s1 := fmt.Sprintf("%v|%+v", items, items)
+	s2 := fmt.Sprintf("%v|%+v", itemPtrs, itemPtrs)
+	s3 := fmt.Sprintf("%v|%+v", mItems, mItems)
+	return s1 + "|" + s2 + "|" + s3
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(
+		wasmRes,
+		"[{apple 5} {banana 10}]|[{Name:apple Qty:5} {Name:banana Qty:10}]|[0x1 0x2]|[0x1 0x2]|map[first:{fig 25}]|map[first:{Name:fig Qty:25}]",
+	);
+	assertEqual(wasmRes, jsRes);
+});
+
+test("fmt.Sprintf %v with single-field struct named value", () => {
+	const src = `
+package main
+
+import "fmt"
+
+type Wrapper struct {
+	value int
+}
+
+func Main() string {
+	w := Wrapper{value: 42}
+	return fmt.Sprintf("%v|%+v", w, w)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "{42}|{value:42}");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("fmt.Sprintf %v with recursive tree struct", () => {
+	const src = `
+package main
+
+import "fmt"
+
+type Tree struct {
+	Val int
+	Children []Tree
+}
+
+func Main() string {
+	t := Tree{Val: 1, Children: []Tree{}}
+	return fmt.Sprintf("%v", t)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "{1 []}");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("fmt.Sprintf %v with pointer to scalar and nil pointer", () => {
+	const src = `
+package main
+
+import "fmt"
+
+func Main() string {
+	v := 42
+	ptr := &v
+	var nilPtr *int
+	return fmt.Sprintf("%v|%v", ptr, nilPtr)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "0x1|<nil>");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("fmt.Sprintf %v with map of struct pointers", () => {
+	const src = `
+package main
+
+import "fmt"
+
+type Point struct {
+	X int
+	Y int
+}
+
+func Main() string {
+	m := map[string]*Point{"p": &Point{1, 2}}
+	return fmt.Sprintf("%v", m)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "map[p:0x1]");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("fmt.Sprintf %v with sorted map integer keys", () => {
+	const src = `
+package main
+
+import "fmt"
+
+func Main() string {
+	m := map[int]string{10: "ten", 2: "two"}
+	return fmt.Sprintf("%v", m)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "map[2:two 10:ten]");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("fmt.Sprintf %+v with sibling struct pointer fields", () => {
+	const src = `
+package main
+
+import "fmt"
+
+type Sub struct {
+	P *int
+}
+
+type Pair struct {
+	A Sub
+	B Sub
+}
+
+func Main() string {
+	v1 := 10
+	v2 := 20
+	p := Pair{A: Sub{P: &v1}, B: Sub{P: &v2}}
+	return fmt.Sprintf("%+v", p)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "{A:{P:0x1} B:{P:0x2}}");
+	assertEqual(wasmRes, jsRes);
+});

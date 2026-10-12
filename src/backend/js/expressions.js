@@ -282,8 +282,22 @@ export const expressionGenMethods = {
 			expr._ifaceBoxing = true;
 			try {
 				this.useHelper("ifaceBox");
-				const fn = expr._ifaceBox === "ptr" ? "__ifp" : "__ifv";
-				return `${fn}(${this.genExpr(expr)})`;
+				const fn =
+					expr._ifaceBox === "ptr"
+						? "__ifp"
+						: expr._ifaceBox === "ptr_slice"
+							? "__ifps"
+							: expr._ifaceBox === "ptr_map"
+								? "__ifpm"
+								: expr._ifaceBox === "map"
+									? "__ifm"
+									: expr._ifaceBox === "slice"
+										? "__ifs"
+										: "__ifv";
+				const extra = expr._ifacePtrFields?.length
+					? `, ${JSON.stringify(expr._ifacePtrFields)}`
+					: "";
+				return `${fn}(${this.genExpr(expr)}${extra})`;
 			} finally {
 				expr._ifaceBoxing = false;
 			}
