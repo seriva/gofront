@@ -36,7 +36,13 @@ import { emitWat } from "./wat.js";
 
 export { hasNativeWasmOpt, isGoFrontWasm, optimizeWasm };
 
-const ERROR_PRODUCING_PKGS = new Set(["errors", "fmt", "strconv"]);
+const ERROR_PRODUCING_PKGS = new Set([
+	"errors",
+	"fmt",
+	"strconv",
+	"path",
+	"path/filepath",
+]);
 // Packages whose calls lower to the `env.*` imports in STDLIB_IMPORTS (the
 // matching JS lives in WASM_STDLIB_JS).  Only modules importing one of them
 // declare the imports and ship that JS block.
@@ -46,6 +52,25 @@ const STDLIB_ENV_PKGS = new Set([
 	"unicode/utf8",
 	"fmt",
 	"testing",
+	"unicode",
+	"math/rand",
+	"path",
+	"path/filepath",
+	"html",
+	"bytes",
+]);
+
+const RAND_HOST_METHODS = new Set([
+	"Float64",
+	"Float32",
+	"Int",
+	"Int31",
+	"Int63",
+	"Intn",
+	"Int31n",
+	"Int63n",
+	"Shuffle",
+	"Perm",
 ]);
 
 function importsAnyOf(programs, pkgs) {
@@ -143,6 +168,38 @@ const STDLIB_IMPORTS = [
 	["fmt_format_v", [S], [S]],
 	// testing.T.Run: the harness calls back into the exported __testing_run_cb
 	["testing_run", [S, S, "anyref"], ["i32"]],
+	// unicode
+	["unicode_is_letter", ["i32"], ["i32"]],
+	["unicode_is_digit", ["i32"], ["i32"]],
+	["unicode_is_space", ["i32"], ["i32"]],
+	["unicode_is_upper", ["i32"], ["i32"]],
+	["unicode_is_lower", ["i32"], ["i32"]],
+	["unicode_is_punct", ["i32"], ["i32"]],
+	["unicode_is_control", ["i32"], ["i32"]],
+	["unicode_is_print", ["i32"], ["i32"]],
+	["unicode_is_graphic", ["i32"], ["i32"]],
+	["unicode_to_upper", ["i32"], ["i32"]],
+	["unicode_to_lower", ["i32"], ["i32"]],
+	// html
+	["html_escape", [S], [S]],
+	["html_unescape", [S], [S]],
+	// path
+	["path_base", [S], [S]],
+	["path_dir", [S], [S]],
+	["path_ext", [S], [S]],
+	["path_is_abs", [S], ["i32"]],
+	["path_clean", [S], [S]],
+	["path_split", [S], []],
+	["path_split_dir", [], [S]],
+	["path_split_file", [], [S]],
+	["path_join_init", [], []],
+	["path_join_push", [S], []],
+	["path_join_run", [], [S]],
+	["path_match", [S, S], ["i32"]],
+	["path_match_has_err", [], ["i32"]],
+	["bytes_trim", [S, S, "i32", "i32"], []],
+	["bytes_trim_start", [], ["i32"]],
+	["bytes_trim_end", [], ["i32"]],
 ];
 
 class ModuleEmitter {
@@ -919,6 +976,21 @@ class ModuleEmitter {
 		return gIdx;
 	}
 
+	getPathErrGlobalIndex(field) {
+		if (!this.pathErrGlobals) this.pathErrGlobals = new Map();
+		if (this.pathErrGlobals.has(field)) {
+			return this.pathErrGlobals.get(field);
+		}
+		const gIdx = this.globals.length;
+		this.globals.push({
+			type: "anyref",
+			mutable: true,
+			init: [{ op: "ref.null", heapType: "any" }],
+		});
+		this.pathErrGlobals.set(field, gIdx);
+		return gIdx;
+	}
+
 	getDeferNodeTypeIndex() {
 		if (this.deferNodeTypeIndex !== undefined) {
 			return this.deferNodeTypeIndex;
@@ -1456,6 +1528,10 @@ class ModuleEmitter {
 	getMathImportIndex(jsName, isBinary = false) {
 		const params = isBinary ? ["f64", "f64"] : ["f64"];
 		return this.getOrAddFuncImport("Math", jsName, params, ["f64"]);
+	}
+
+	getMathRandomImportIndex() {
+		return this.getOrAddFuncImport("Math", "random", [], ["f64"]);
 	}
 
 	// Imports from the STDLIB_IMPORTS table (strings/strconv/utf8/fmt/testing.Run).
@@ -2682,6 +2758,12 @@ function _scanImportsInBody(node, mod) {
 				const isBinary = BINARY_MATH_IMPORTS.has(jsMathMap[func.field]);
 				mod.getMathImportIndex(jsMathMap[func.field], isBinary);
 			}
+		} else if (
+			func.kind === "SelectorExpr" &&
+			func.expr?.name === "rand" &&
+			RAND_HOST_METHODS.has(func.field)
+		) {
+			mod.getMathRandomImportIndex();
 		} else if (
 			func.kind === "SelectorExpr" &&
 			isTestingT(func.expr?._type) &&

@@ -4,6 +4,7 @@
 
 import {
 	assertEqual,
+	assertThrows,
 	compileHybrid,
 	runWasm,
 	section,
@@ -737,4 +738,337 @@ func Main() string {
 	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
 	assertEqual(wasmRes, "12345");
 	assertEqual(wasmRes, jsRes);
+});
+
+section("WASM stdlib — Phase 6: unicode, math/rand, html, path, bytes");
+
+test("unicode functions: ASCII and Unicode parity", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"unicode"
+)
+
+func Main() string {
+	res := fmt.Sprintf("%v|%v|%v|%v|%v|%v|%v|%v|%c|%c",
+		unicode.IsLetter('a') && unicode.IsLetter('Ж'),
+		unicode.IsDigit('5') && !unicode.IsDigit('a'),
+		unicode.IsSpace(' ') && unicode.IsSpace('\\n') && !unicode.IsSpace('a'),
+		unicode.IsUpper('A') && unicode.IsUpper('Ω') && !unicode.IsUpper('a'),
+		unicode.IsLower('a') && unicode.IsLower('ω') && !unicode.IsLower('A'),
+		unicode.IsPunct('!') && unicode.IsPunct('?') && !unicode.IsPunct('a'),
+		unicode.IsControl('\\n') && !unicode.IsControl('a'),
+		unicode.IsPrint('a') && unicode.IsPrint(' ') && !unicode.IsPrint(0),
+		unicode.ToUpper('g'),
+		unicode.ToLower('G'),
+	)
+	return res
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "true|true|true|true|true|true|true|true|G|g");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("math/rand functions: Float, Int, Seed, Shuffle, Perm", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"math/rand"
+)
+
+func Main() string {
+	rand.Seed(42)
+	f64 := rand.Float64()
+	f32 := rand.Float32()
+	n := rand.Intn(100)
+	i := rand.Int()
+	i31 := rand.Int31()
+	i63 := rand.Int63()
+
+	arr := []int{10, 20, 30, 40, 50}
+	rand.Shuffle(len(arr), func(i, j int) {
+		arr[i], arr[j] = arr[j], arr[i]
+	})
+
+	perm := rand.Perm(5)
+
+	return fmt.Sprintf("%v|%v|%v|%v|%v|%v|%d|%d",
+		f64 >= 0 && f64 < 1.0,
+		f32 >= 0 && f32 < 1.0,
+		n >= 0 && n < 100,
+		i >= 0,
+		i31 >= 0,
+		i63 >= 0,
+		len(arr),
+		len(perm),
+	)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "true|true|true|true|true|true|5|5");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("html EscapeString and UnescapeString", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"html"
+)
+
+func Main() string {
+	raw := "<b>Hello & 'World' \\"123\\"</b>"
+	esc := html.EscapeString(raw)
+	unesc := html.UnescapeString(esc)
+	unescHex := html.UnescapeString("&#x27;test&#x27;")
+	return fmt.Sprintf("%s|%s|%s", esc, unesc, unescHex)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(
+		wasmRes,
+		"&lt;b&gt;Hello &amp; &#39;World&#39; &#34;123&#34;&lt;/b&gt;|<b>Hello & 'World' \"123\"</b>|'test'",
+	);
+	assertEqual(wasmRes, jsRes);
+});
+
+test("path & filepath functions: Base, Dir, Ext, Clean, IsAbs, Join, Split, Match, ErrBadPattern", () => {
+	const src = `
+package main
+
+import (
+	"errors"
+	"fmt"
+	"path"
+	"path/filepath"
+)
+
+func Main() string {
+	b := path.Base("/a/b/c.txt")
+	d := path.Dir("/a/b/c.txt")
+	ext := path.Ext("/a/b/c.txt")
+	clean := path.Clean("/a/b/../c/./d")
+	abs := path.IsAbs("/a/b")
+	notAbs := path.IsAbs("a/b")
+	joined := path.Join("a", "b", "c")
+	emptyJoin := path.Join()
+	emptyClean := path.Clean("")
+	dir, file := path.Split("/foo/bar/baz.go")
+
+	matched, err := path.Match("*.txt", "foo.txt")
+	_, badErr := path.Match("[a-", "foo.txt")
+	isBad := errors.Is(badErr, path.ErrBadPattern)
+
+	fpBase := filepath.Base("/x/y/z.png")
+	fpJoined := filepath.Join("x", "y")
+
+	return fmt.Sprintf("%s|%s|%s|%s|%v|%v|%s|%s|%s|%s|%s|%v|%v|%v|%s|%s",
+		b, d, ext, clean, abs, notAbs, joined, emptyJoin, emptyClean, dir, file,
+		matched, err == nil, isBad, fpBase, fpJoined,
+	)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(
+		wasmRes,
+		"c.txt|/a/b|.txt|/a/c/d|true|false|a/b/c||.|/foo/bar/|baz.go|true|true|true|z.png|x/y",
+	);
+	assertEqual(wasmRes, jsRes);
+});
+
+test("bytes package functions: Equal, Contains, Prefixes, Trims, Split, Join, Replace, Cut, Fields", () => {
+	const src = `
+package main
+
+import (
+	"bytes"
+	"fmt"
+)
+
+func Main() string {
+	b1 := []byte("hello world")
+	b2 := []byte("hello")
+	eq := bytes.Equal(b1, b2)
+	hasP := bytes.HasPrefix(b1, b2)
+	hasS := bytes.HasSuffix(b1, []byte("world"))
+	idx := bytes.Index(b1, []byte("lo"))
+	idxB := bytes.IndexByte(b1, 'o')
+	lastIdxB := bytes.LastIndexByte(b1, 'o')
+	cnt := bytes.Count(b1, []byte("l"))
+	rep := string(bytes.Repeat([]byte("ab"), 3))
+	up := string(bytes.ToUpper([]byte("abc!")))
+	low := string(bytes.ToLower([]byte("ABC!")))
+	trimSp := string(bytes.TrimSpace([]byte("  xyz  ")))
+	trimPref := string(bytes.TrimPrefix([]byte("foobar"), []byte("foo")))
+	trimSuff := string(bytes.TrimSuffix([]byte("foobar"), []byte("bar")))
+	trim := string(bytes.Trim([]byte("xxfooxx"), "x"))
+	cutBefore, cutAfter, found := bytes.Cut(b1, []byte(" "))
+	replaced := string(bytes.ReplaceAll([]byte("a-b-c"), []byte("-"), []byte(":")))
+	split := bytes.Split([]byte("x,y,z"), []byte(","))
+	joined := string(bytes.Join(split, []byte(";")))
+	fields := bytes.Fields([]byte("one  two   three"))
+
+	return fmt.Sprintf("%v|%v|%v|%d|%d|%d|%d|%s|%s|%s|%s|%s|%s|%s|%s|%s|%v|%s|%d|%s|%d",
+		eq, hasP, hasS, idx, idxB, lastIdxB, cnt, rep, up, low, trimSp,
+		trimPref, trimSuff, trim, string(cutBefore), string(cutAfter), found,
+		replaced, len(split), joined, len(fields),
+	)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(
+		wasmRes,
+		"false|true|true|3|4|7|3|ababab|ABC!|abc!|xyz|bar|foo|foo|hello|world|true|a:b:c|3|x;y;z|3",
+	);
+	assertEqual(wasmRes, jsRes);
+});
+
+test("bytes.Buffer methods: WriteString, WriteByte, WriteRune, Write, String, Bytes, Len, Cap, Reset, Grow", () => {
+	const src = `
+package main
+
+import (
+	"bytes"
+	"fmt"
+)
+
+func Main() string {
+	var buf bytes.Buffer
+	buf.WriteString("hello")
+	buf.WriteByte(' ')
+	buf.WriteRune('世')
+	buf.WriteRune('界')
+	buf.Write([]byte("!"))
+
+	l := buf.Len()
+	s := buf.String()
+	b := buf.Bytes()
+	c := buf.Cap()
+
+	buf.Grow(50)
+	c2 := buf.Cap()
+
+	buf.Reset()
+	l2 := buf.Len()
+	s2 := buf.String()
+
+	return fmt.Sprintf("%d|%s|%d|%v|%v|%d|%s", l, s, len(b), c >= l, c2 >= l + 50, l2, s2)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "13|hello 世界!|13|true|true|0|");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("Phase 6 edge cases: composite literals, variadic Join, UTF-8 byte operations, invalid runes, caseless unicode", () => {
+	const src = `
+package main
+
+import (
+	"bytes"
+	"fmt"
+	"path"
+	"unicode"
+)
+
+func Main() string {
+	// 1. Composite literal bytes.Buffer{} and &bytes.Buffer{}
+	var b1 = bytes.Buffer{}
+	b1.WriteString("hello")
+	var b2 = &bytes.Buffer{}
+	b2.WriteString("world")
+
+	// 2. Variadic path.Join(parts...)
+	parts := []string{"usr", "local", "bin"}
+	joined := path.Join(parts...)
+
+	// 3. Multi-byte runes in bytes functions
+	bData := []byte("你好世界")
+	hasRune := bytes.ContainsRune(bData, '世')
+	hasAny := bytes.ContainsAny(bData, "界x")
+	trimmed := bytes.Trim([]byte("【你好世界】"), "【】")
+	trimmedLeft := bytes.TrimLeft([]byte("【你好"), "【")
+	trimmedRight := bytes.TrimRight([]byte("你好】"), "】")
+	trimmedFunc := bytes.TrimFunc([]byte("  你好  "), func(r rune) bool {
+		return unicode.IsSpace(r)
+	})
+	mapped := bytes.Map(func(r rune) rune {
+		if r == 'h' {
+			return 'H'
+		} else if r == 'e' {
+			return -1
+		}
+		return r
+	}, []byte("hello"))
+
+	// 4. Invalid rune in WriteRune
+	var b3 bytes.Buffer
+	b3.WriteRune(-1)
+
+	// 5. Caseless unicode
+	zhongUpper := unicode.IsUpper('中')
+	zhongLower := unicode.IsLower('中')
+
+	return fmt.Sprintf("%s|%s|%s|%v|%v|%s|%s|%s|%s|%s|%s|%v|%v",
+		b1.String(),
+		b2.String(),
+		joined,
+		hasRune,
+		hasAny,
+		string(trimmed),
+		string(trimmedLeft),
+		string(trimmedRight),
+		string(trimmedFunc),
+		string(mapped),
+		b3.String(),
+		zhongUpper,
+		zhongLower,
+	)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(
+		wasmRes,
+		"hello|world|usr/local/bin|true|true|你好世界|你好|你好|你好|Hllo|\uFFFD|false|false",
+	);
+	assertEqual(wasmRes, jsRes);
+});
+
+test("Phase 6 negative bounds panics parity", () => {
+	const testPanic = (goCode, expectedSubstring) => {
+		const src = `
+package main
+
+import (
+	"bytes"
+	"math/rand"
+)
+
+func Main() {
+	${goCode}
+}
+`;
+		const h = compileHybrid(src);
+		h.run("Main");
+		const wasmInst = runWasm(h.wasm, { stringTable: h.stringTable });
+		assertThrows(() => wasmInst.exports.Main(), expectedSubstring);
+	};
+
+	testPanic("rand.Intn(0)", "invalid argument to Intn");
+	testPanic("rand.Perm(-1)", "invalid argument to Perm");
+	testPanic(
+		"rand.Shuffle(-1, func(i, j int){})",
+		"invalid argument to Shuffle",
+	);
+	testPanic(
+		"var b bytes.Buffer; b.Grow(-1)",
+		"bytes.Buffer.Grow: negative count",
+	);
 });

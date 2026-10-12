@@ -167,6 +167,8 @@ export class ExprsEmitter {
 					this.emitUtf8Const(expr.field, targetWasmType);
 				else if (this._isStrconvConst(expr))
 					this.emitStrconvConst(expr.field, targetWasmType);
+				else if (this._isPathConst(expr))
+					this.emitPathConst(expr.field, targetWasmType);
 				else this.emitSelectorExpr(expr);
 				break;
 			}

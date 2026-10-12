@@ -285,7 +285,7 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
     }
     return String(val);
   };
-  return f.replace(/%([#+\\- 0]*)([0-9]*)\\.?([0-9]*)[sdvftxXqobeEgGw%]/g, (m) => {
+  return f.replace(/%([#+\\- 0]*)([0-9]*)\\.?([0-9]*)[sdvftxXqobeEgGwc%]/g, (m) => {
     if (m === "%%") return "%";
     const verb = m.slice(-1);
     const v = a[i++];
@@ -299,6 +299,7 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
     };
     switch (verb) {
       case "s": return pad(String(v == null ? "<nil>" : v), width, false);
+      case "c": return pad(String.fromCodePoint(Number(v)), width, false);
       case "d": return pad(String(Math.trunc(Number(v))), width, zero);
       case "v": {
         const isPlus = flags?.includes("+") ?? false;
@@ -323,7 +324,8 @@ export const HELPER_ERROR = `var __error = __error || function(msg, cause) {
   return { Error() { return msg; }, toString() { return msg; }, _msg: msg, _cause: cause ?? null };
 };
 var __strconv_err_syntax = __strconv_err_syntax || __error("invalid syntax");
-var __strconv_err_range = __strconv_err_range || __error("value out of range");`;
+var __strconv_err_range = __strconv_err_range || __error("value out of range");
+var __path_err_bad_pattern = __path_err_bad_pattern || __error("syntax error in pattern");`;
 
 export const HELPER_ERROR_IS = `var __errorIs = __errorIs || function(err, target) {
   while (err !== null && err !== undefined) {
@@ -414,6 +416,52 @@ export const HELPER_PATH_CLEAN = `var __pathClean = __pathClean || function(p) {
     return acc;
   }, []);
   return (abs ? "/" : "") + (parts.join("/") || ".");
+};
+var __pathMatch = __pathMatch || function(pat, name) {
+  let rx = "^";
+  let inClass = false;
+  let hasErr = false;
+  for (let i = 0; i < pat.length; i++) {
+    const c = pat[i];
+    if (inClass) {
+      if (c === "\\\\") {
+        if (i + 1 >= pat.length) { hasErr = true; break; }
+        rx += "\\\\" + pat[++i];
+      } else if (c === "]") {
+        inClass = false;
+        rx += "]";
+      } else {
+        if (/[.^$*+?()|{}\\[\\]\\\\]/.test(c) && c !== "-") {
+          rx += "\\\\" + c;
+        } else {
+          rx += c;
+        }
+      }
+    } else {
+      if (c === "\\\\") {
+        if (i + 1 >= pat.length) { hasErr = true; break; }
+        rx += "\\\\" + pat[++i];
+      } else if (c === "*") {
+        rx += "[^/]*";
+      } else if (c === "?") {
+        rx += "[^/]";
+      } else if (c === "[") {
+        inClass = true;
+        rx += "[";
+      } else if (/[.^$*+?()|{}\\[\\]\\\\]/.test(c)) {
+        rx += "\\\\" + c;
+      } else {
+        rx += c;
+      }
+    }
+  }
+  if (inClass || hasErr) return [false, true];
+  try {
+    const re = new RegExp(rx + "$");
+    return [re.test(name), false];
+  } catch (e) {
+    return [false, true];
+  }
 };`;
 
 export const HELPER_TIME_FMT = `var __timeFmt = __timeFmt || function(d, layout) {

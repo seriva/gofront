@@ -305,6 +305,7 @@ export function setupCoreGlobals(globals, types) {
 				returns: [{ kind: "slice", elem: BYTE_SLICE }],
 			},
 			NewReader: { kind: "func", params: [BYTE_SLICE], returns: [ANY] },
+			Buffer: ANY,
 		},
 	});
 

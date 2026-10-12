@@ -34,7 +34,11 @@
 //   - `*testing.T`: the harness's JS test object, passed as an opaque
 //     externref (test methods are routed back to JS via `env.testing_*`).
 
-import { HELPER_SPRINTF, HELPER_STRCONV } from "../js/runtime.js";
+import {
+	HELPER_PATH_CLEAN,
+	HELPER_SPRINTF,
+	HELPER_STRCONV,
+} from "../js/runtime.js";
 import {
 	anonIfaceName,
 	getInterfaceMethodList,
@@ -1766,7 +1770,7 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 	}
 	Object.assign(env, extraEnv);
 	const m = {};
-	for (const k of ["sin", "cos", "tan", "asin", "acos", "atan", "atan2", "pow", "exp", "log", "log2", "log10", "cbrt", "hypot"]) m[k] = Math[k];
+	for (const k of ["sin", "cos", "tan", "asin", "acos", "atan", "atan2", "pow", "exp", "log", "log2", "log10", "cbrt", "hypot", "random"]) m[k] = Math[k];
 	m.mod = (x, y) => x % y;
 	// Go rounds half away from zero; Math.round rounds half toward +Infinity.
 	m.round = (x) => Math.sign(x) * Math.round(Math.abs(x));
@@ -1778,12 +1782,17 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 // module imports one of the packages that use it.
 export const WASM_STDLIB_JS = `${HELPER_SPRINTF}
 ${HELPER_STRCONV}
+${HELPER_PATH_CLEAN}
 function ${P}stdlib(stringTable, io) {
 	let parts = [];
 	let cutBefore = "", cutAfter = "";
 	let strconvErr = null, strconvErrKind = 0;
 	let decodeSize = 0;
 	let replacerTarget = "", replacerPairs = [];
+	let splitDir = "", splitFile = "";
+	let joinParts = [];
+	let matchHasErr = 0;
+	let trimStart = 0, trimEnd = 0;
 	return {
 		"testing_run": (t, name, fn) => (t.Run(name, (sub) => { io.late.exports.__testing_run_cb(fn, sub); }) ? 1 : 0),
 		"fmt_sprintf": (f) => __sprintf(f ?? "", ...io.take()),
@@ -2010,6 +2019,70 @@ function ${P}stdlib(stringTable, io) {
 		},
 		"utf8_decode_size": () => decodeSize,
 		"utf8_full_rune": (s) => { s = s ?? ""; if (s.length === 0) return 0; const c = s.charCodeAt(0); return (c >= 0xd800 && c <= 0xdbff && s.length < 2) ? 0 : 1; },
+		// unicode
+		"unicode_is_letter": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{L}/u.test(c)) ? 1 : 0; },
+		"unicode_is_digit": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{Nd}/u.test(c)) ? 1 : 0; },
+		"unicode_is_space": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\s/u.test(c)) ? 1 : 0; },
+		"unicode_is_upper": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{Lu}/u.test(c)) ? 1 : 0; },
+		"unicode_is_lower": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{Ll}/u.test(c)) ? 1 : 0; },
+		"unicode_is_punct": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{P}/u.test(c)) ? 1 : 0; },
+		"unicode_is_control": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{Cc}/u.test(c)) ? 1 : 0; },
+		"unicode_is_print": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && !/\\p{Cc}/u.test(c)) ? 1 : 0; },
+		"unicode_is_graphic": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && !/\\p{Cc}/u.test(c)) ? 1 : 0; },
+		"unicode_to_upper": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return c ? (c.toUpperCase().codePointAt(0) ?? r) : r; },
+		"unicode_to_lower": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return c ? (c.toLowerCase().codePointAt(0) ?? r) : r; },
+		// html
+		"html_escape": (s) => (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&#34;").replace(/'/g, "&#39;"),
+		"html_unescape": (s) => (s ?? "")
+			.replace(/&#(x[0-9a-fA-F]+|[0-9]+);/g, (_, c) => String.fromCodePoint(c.startsWith("x") || c.startsWith("X") ? parseInt(c.slice(1), 16) : parseInt(c, 10)))
+			.replace(/&quot;/g, '"')
+			.replace(/&apos;/g, "'")
+			.replace(/&#39;/g, "'")
+			.replace(/&#34;/g, '"')
+			.replace(/&gt;/g, ">")
+			.replace(/&lt;/g, "<")
+			.replace(/&amp;/g, "&"),
+		// path
+		"path_base": (p) => { if (!p) return "."; const stripped = p.replace(/\\/+$/, ""); if (!stripped) return "/"; const i = stripped.lastIndexOf("/"); return i < 0 ? stripped : stripped.slice(i + 1) || "/"; },
+		"path_dir": (p) => { const s = p ?? ""; const i = s.lastIndexOf("/"); if (i < 0) return "."; const res = s.slice(0, i); return res === "" ? "/" : __pathClean(res); },
+		"path_ext": (p) => { const s = p ?? ""; const b = s.slice(s.lastIndexOf("/") + 1); const i = b.lastIndexOf("."); return i <= 0 ? "" : b.slice(i); },
+		"path_is_abs": (p) => (p ?? "").startsWith("/") ? 1 : 0,
+		"path_clean": (p) => __pathClean(p ?? ""),
+		"path_split": (p) => {
+			const s = p ?? "";
+			const i = s.lastIndexOf("/");
+			if (i < 0) { splitDir = ""; splitFile = s; }
+			else { splitDir = s.slice(0, i + 1); splitFile = s.slice(i + 1); }
+		},
+		"path_split_dir": () => splitDir,
+		"path_split_file": () => splitFile,
+		"path_join_init": () => { joinParts = []; },
+		"path_join_push": (s) => { if (s) joinParts.push(s); },
+		"path_join_run": () => {
+			if (joinParts.length === 0) return "";
+			const res = __pathClean(joinParts.join("/"));
+			joinParts = [];
+			return res;
+		},
+		"path_match": (pat, name) => {
+			const r = __pathMatch(pat ?? "", name ?? "");
+			matchHasErr = r[1] ? 1 : 0;
+			return r[0] ? 1 : 0;
+		},
+		"path_match_has_err": () => matchHasErr,
+		// bytes trim
+		"bytes_trim": (s, cutset, left, right) => {
+			const cs = new Set(Array.from(cutset ?? ""));
+			const chars = Array.from(s ?? "");
+			let a = 0, b = chars.length;
+			if (left) while (a < b && cs.has(chars[a])) a++;
+			if (right) while (b > a && cs.has(chars[b - 1])) b--;
+			const enc = new TextEncoder();
+			trimStart = a === 0 ? 0 : enc.encode(chars.slice(0, a).join("")).length;
+			trimEnd = b === chars.length ? enc.encode(s ?? "").length : enc.encode(chars.slice(0, b).join("")).length;
+		},
+		"bytes_trim_start": () => trimStart,
+		"bytes_trim_end": () => trimEnd,
 	};
 }
 function ${P}trim(s, cutset, left, right) {

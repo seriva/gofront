@@ -136,7 +136,7 @@ Key decisions:
 - [x] **Phase 3: `strings` and `strconv`.** Missing members, `Builder`, `NewReplacer`; JS imports in the loader glue ([`glue.js`](../../src/backend/wasm/glue.js)).
 - [x] **Phase 4: `slices` and `math.Remainder`.** Inline WASM implementations; `*Func` variants via `call_ref`.
 - [x] **Phase 5: `fmt` composite `%v`.** Slices, arrays, maps and structs, with output matching the JS backend.
-- [ ] **Phase 6: Pure packages.** `unicode`, `math/rand`, `bytes` (incl. `Buffer`), `path`/`path/filepath`, `html`.
+- [x] **Phase 6: Pure packages.** `unicode`, `math/rand`, `bytes` (incl. `Buffer`), `path`/`path/filepath`, `html`.
 - [ ] **Phase 7: `io` and readers/writers.** `io` interfaces and helpers, `fmt.Fprint*`, `fmt.Sscan*`, `strings.NewReader`, `bytes.NewReader`; `Builder`/`Buffer` as `io.Writer`.
 - [ ] **Phase 8: `time`.** `Duration`, `Time` struct and methods, `Parse`/`Format`, clock and timezone imports, boundary marshalling; `time.Sleep` keeps its targeted diagnostic.
 - [ ] **Phase 9: Docs and release.** Update `hybrid-wasm.md`, `language-support.md`, `go-compatibility.md`, the roadmap and the CHANGELOG. Re-run simplefps `npm run bench` to confirm there is no regression in `app.wasm` size or timings.

@@ -49,6 +49,7 @@ const STDLIB_METHOD_MAP = {
 	rand: "_genRand",
 	utf8: "_genUtf8",
 	path: "_genPath",
+	filepath: "_genPath",
 	testing: "_genTesting",
 	shared: "_genShared",
 };

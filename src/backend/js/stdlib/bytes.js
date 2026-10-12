@@ -21,7 +21,7 @@ const BYTES_DISPATCH = {
 	ToLower: (a) => `${__sb}(${__bs}(${a[0]}).toLowerCase())`,
 	TrimSpace: (a) => `${__sb}(${__bs}(${a[0]}).trim())`,
 	Trim: (a) =>
-		`${__sb}(${__bs}(${a[0]}).replace(new RegExp(\`^[\${${a[1]}}]+|[\${${a[1]}}]+$\`, "g"), ""))`,
+		`((b, c) => { const s = new TextDecoder().decode(new Uint8Array(b)); const cs = new Set(Array.from(c)); const chars = Array.from(s); let l = 0, r = chars.length; while (l < r && cs.has(chars[l])) l++; while (r > l && cs.has(chars[r - 1])) r--; return new TextEncoder().encode(chars.slice(l, r).join("")); })(${a[0]}, ${a[1]})`,
 	Equal: (a) =>
 		`((a, b) => { if (a.length !== b.length) return false; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false; return true; })(${a[0]}, ${a[1]})`,
 	Split: (a) => `${__bs}(${a[0]}).split(${__bs}(${a[1]})).map(p => ${__sb}(p))`,
@@ -33,11 +33,11 @@ const BYTES_DISPATCH = {
 	TrimSuffix: (a) =>
 		`((b, s) => s.length && s.every((v, i) => b[b.length - s.length + i] === v) ? b.slice(0, -s.length) : b.slice())(${a[0]}, ${a[1]})`,
 	TrimLeft: (a) =>
-		`((b, c) => { let i = 0; while (i < b.length && c.includes(String.fromCharCode(b[i]))) i++; return b.slice(i); })(${a[0]}, ${a[1]})`,
+		`((b, c) => { const s = new TextDecoder().decode(new Uint8Array(b)); const cs = new Set(Array.from(c)); const chars = Array.from(s); let l = 0, r = chars.length; while (l < r && cs.has(chars[l])) l++; return new TextEncoder().encode(chars.slice(l, r).join("")); })(${a[0]}, ${a[1]})`,
 	TrimRight: (a) =>
-		`((b, c) => { let i = b.length; while (i > 0 && c.includes(String.fromCharCode(b[i - 1]))) i--; return b.slice(0, i); })(${a[0]}, ${a[1]})`,
+		`((b, c) => { const s = new TextDecoder().decode(new Uint8Array(b)); const cs = new Set(Array.from(c)); const chars = Array.from(s); let l = 0, r = chars.length; while (r > l && cs.has(chars[r - 1])) r--; return new TextEncoder().encode(chars.slice(l, r).join("")); })(${a[0]}, ${a[1]})`,
 	TrimFunc: (a) =>
-		`((b, f) => { let l = 0, r = b.length; while (l < r && f(b[l])) l++; while (r > l && f(b[r - 1])) r--; return b.slice(l, r); })(${a[0]}, ${a[1]})`,
+		`((b, f) => { const s = new TextDecoder().decode(new Uint8Array(b)); const chars = Array.from(s); let l = 0, r = chars.length; while (l < r && f(chars[l].codePointAt(0))) l++; while (r > l && f(chars[r - 1].codePointAt(0))) r--; return new TextEncoder().encode(chars.slice(l, r).join("")); })(${a[0]}, ${a[1]})`,
 	IndexByte: (a) => `(${a[0]}).indexOf(${a[1]})`,
 	LastIndex: (a) =>
 		`((b, s) => { for (let i = b.length - s.length; i >= 0; i--) if (s.every((v, j) => b[i + j] === v)) return i; return -1; })(${a[0]}, ${a[1]})`,
@@ -47,9 +47,11 @@ const BYTES_DISPATCH = {
 	Cut: (a) =>
 		`((b, sep) => { for (let i = 0; i <= b.length - sep.length; i++) if (sep.every((v, j) => b[i + j] === v)) return [b.slice(0, i), b.slice(i + sep.length), true]; return [b.slice(), [], false]; })(${a[0]}, ${a[1]})`,
 	ContainsAny: (a) =>
-		`[...(${a[1]})].some(c => (${a[0]}).includes(c.charCodeAt(0)))`,
-	ContainsRune: (a) => `(${a[0]}).includes(${a[1]})`,
-	Map: (a) => `(${a[1]}).map(v => (${a[0]})(v))`,
+		`((b, chars) => { const s = new TextDecoder().decode(new Uint8Array(b)); for (const c of chars) if (s.includes(c)) return true; return false; })(${a[0]}, ${a[1]})`,
+	ContainsRune: (a) =>
+		`((b, r) => { const s = new TextDecoder().decode(new Uint8Array(b)); return s.includes(String.fromCodePoint(r < 0 || r > 0x10ffff || (r >= 0xd800 && r <= 0xdfff) ? 0xfffd : r)); })(${a[0]}, ${a[1]})`,
+	Map: (a) =>
+		`((f, b) => { const s = new TextDecoder().decode(new Uint8Array(b)); let res = ""; for (const c of s) { const r = f(c.codePointAt(0)); if (r >= 0) res += String.fromCodePoint(r); } return new TextEncoder().encode(res); })(${a[0]}, ${a[1]})`,
 	SplitN: (a) =>
 		`((b, sep, n) => { if (n === 0) return []; if (n < 0) return ((b, sep) => { const r = []; let i = 0; while (i <= b.length) { const j = b.findIndex((_, k) => k >= i && sep.every((v, l) => b[k + l] === sep[l])); if (j < 0 || j >= b.length) break; r.push(b.slice(i, j)); i = j + sep.length; } r.push(b.slice(i)); return r; })(b, sep); const r = []; let i = 0; for (let c = 1; c < n; c++) { const j = b.findIndex((_, k) => k >= i && sep.every((v, l) => b[k + l] === sep[l])); if (j < 0) break; r.push(b.slice(i, j)); i = j + sep.length; } r.push(b.slice(i)); return r; })(${a[0]}, ${a[1]}, ${a[2]})`,
 	NewReader: (a) =>

@@ -268,7 +268,9 @@ export function setupExtendedGlobals(globals, types) {
 							["_len", INT],
 							["_self", ANY],
 						]
-					: [],
+					: name === "bytes.Buffer"
+						? [["_buf", BYTE_SLICE_T]]
+						: [],
 			),
 			methods: new Map([..._builderBase, ...extra]),
 		},
@@ -282,6 +284,7 @@ export function setupExtendedGlobals(globals, types) {
 	types.set(
 		"bytes.Buffer",
 		_makeBuilderType("bytes.Buffer", [
+			["WriteRune", { kind: "func", params: [INT], returns: [INT, ERROR] }],
 			["Bytes", { kind: "func", params: [], returns: [BYTE_SLICE_T] }],
 		]),
 	);
@@ -361,7 +364,14 @@ export function setupExtendedGlobals(globals, types) {
 			IsAbs: { kind: "func", params: [STRING], returns: [BOOL] },
 			Split: { kind: "func", params: [STRING], returns: [STRING, STRING] },
 			Match: { kind: "func", params: [STRING, STRING], returns: [BOOL, ERROR] },
+			ErrBadPattern: ERROR,
 		},
+	});
+
+	globals.define("filepath", {
+		kind: "namespace",
+		name: "filepath",
+		members: globals.lookup("path").members,
 	});
 
 	const TESTING_T = {

@@ -162,6 +162,38 @@ export class StdlibEmitter {
 		this.pushInstruction({ op: "global.get", index: gIdx });
 	}
 
+	_isPathConst(expr) {
+		return (
+			expr.expr?.kind === "Ident" &&
+			(expr.expr.name === "path" || expr.expr.name === "filepath") &&
+			!this.resolveLocal(expr.expr.name) &&
+			!this.mod.resolveGlobal(expr.expr.name) &&
+			expr.field === "ErrBadPattern"
+		);
+	}
+
+	emitPathConst(field, _targetWasmType) {
+		const gIdx = this.mod.getPathErrGlobalIndex(field);
+		this.pushInstruction({ op: "global.get", index: gIdx });
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		const msg = "syntax error in pattern";
+		const strIdx = this.mod.internString(msg);
+		this.pushInstruction({ op: "i32.const", value: strIdx });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getStringImportIndex(),
+		});
+		this.pushInstruction({ op: "ref.null", heapType: "any" });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.resolveFuncIndex("__mk_error"),
+		});
+		this.pushInstruction({ op: "global.set", index: gIdx });
+		this.pushInstruction("end");
+		this.pushInstruction({ op: "global.get", index: gIdx });
+	}
+
 	emitMathCall(name, args) {
 		// Native WASM instructions
 		const unaryOp = MATH_F64_UNARY[name];

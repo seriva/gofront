@@ -9,6 +9,7 @@ import { ExprsEmitter } from "./emit-exprs.js";
 import { MapsEmitter } from "./emit-maps.js";
 import { SharedEmitter } from "./emit-shared.js";
 import { StdlibEmitter } from "./emit-stdlib.js";
+import { Phase6Emitter } from "./emit-stdlib-phase6.js";
 import { StmtsEmitter } from "./emit-stmts.js";
 import {
 	isArrayType,
@@ -1400,4 +1401,5 @@ copyMethods(FunctionEmitter, StmtsEmitter);
 copyMethods(FunctionEmitter, ExprsEmitter);
 copyMethods(FunctionEmitter, BuiltinsEmitter);
 copyMethods(FunctionEmitter, StdlibEmitter);
+copyMethods(FunctionEmitter, Phase6Emitter);
 copyMethods(FunctionEmitter, SharedEmitter);
