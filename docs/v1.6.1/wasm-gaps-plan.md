@@ -134,7 +134,7 @@ Key decisions:
 - [x] **Phase 1: Language features.** Non-literal constants (fold, or `start` global); array map keys; interface map keys with an unhashable panic. Remove the matching `(planned)` diagnostics.
 - [x] **Phase 2: Boundary.** `error` and `map` facades; pointer-to-scalar boxes; anonymous structs; anonymous interfaces; exported non-literal constants. Update the marshalling table in `hybrid-wasm.md`.
 - [x] **Phase 3: `strings` and `strconv`.** Missing members, `Builder`, `NewReplacer`; JS imports in the loader glue ([`glue.js`](../../src/backend/wasm/glue.js)).
-- [ ] **Phase 4: `slices` and `math.Remainder`.** Inline WASM implementations; `*Func` variants via `call_ref`.
+- [x] **Phase 4: `slices` and `math.Remainder`.** Inline WASM implementations; `*Func` variants via `call_ref`.
 - [ ] **Phase 5: `fmt` composite `%v`.** Slices, arrays, maps and structs, with output matching the JS backend.
 - [ ] **Phase 6: Pure packages.** `unicode`, `math/rand`, `bytes` (incl. `Buffer`), `path`/`path/filepath`, `html`.
 - [ ] **Phase 7: `io` and readers/writers.** `io` interfaces and helpers, `fmt.Fprint*`, `fmt.Sscan*`, `strings.NewReader`, `bytes.NewReader`; `Builder`/`Buffer` as `io.Writer`.

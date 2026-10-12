@@ -793,6 +793,59 @@ export class ExprsEmitter {
 		this.pushInstruction({ op: "local.set", index: dstArrTmp });
 
 		const iTmp = this.acquireTemp("i32");
+
+		// If copying within the same array and shifting right (dstOff > srcOff),
+		// copy backwards to prevent clobbering overlapping elements.
+		this.pushInstruction({ op: "local.get", index: dstArrTmp });
+		this.pushInstruction({ op: "local.get", index: srcArrTmp });
+		this.pushInstruction("ref.eq");
+		this.pushInstruction({ op: "local.get", index: dstOffTmp });
+		this.pushInstruction({ op: "local.get", index: srcOffTmp });
+		this.pushInstruction("i32.gt_u");
+		this.pushInstruction("i32.and");
+		this.pushInstruction({ op: "if", blockType: "void" });
+
+		// Backwards copy: i from lenTmp - 1 down to 0
+		this.pushInstruction({ op: "local.get", index: lenTmp });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("i32.sub");
+		this.pushInstruction({ op: "local.set", index: iTmp });
+
+		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushInstruction({ op: "loop", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction("i32.lt_s");
+		this.pushInstruction({ op: "br_if", depth: 1 });
+
+		this.pushInstruction({ op: "local.get", index: dstArrTmp });
+		this.pushInstruction({ op: "local.get", index: dstOffTmp });
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction("i32.add");
+
+		this.pushInstruction({ op: "local.get", index: srcArrTmp });
+		this.pushInstruction({ op: "local.get", index: srcOffTmp });
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "array.get", typeIndex: arrInfo.typeIndex });
+
+		if (sInfo) {
+			this.emitCloneStruct(sInfo, arrInfo.elemWType);
+		}
+
+		this.pushInstruction({ op: "array.set", typeIndex: arrInfo.typeIndex });
+
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("i32.sub");
+		this.pushInstruction({ op: "local.set", index: iTmp });
+		this.pushInstruction({ op: "br", depth: 0 });
+		this.pushInstruction("end");
+		this.pushInstruction("end");
+
+		this.pushInstruction("else");
+
+		// Forwards copy: i from 0 up to lenTmp - 1
 		this.pushInstruction({ op: "i32.const", value: 0 });
 		this.pushInstruction({ op: "local.set", index: iTmp });
 
@@ -826,6 +879,8 @@ export class ExprsEmitter {
 		this.pushInstruction({ op: "local.set", index: iTmp });
 		this.pushInstruction({ op: "br", depth: 0 });
 		this.pushInstruction("end");
+		this.pushInstruction("end");
+
 		this.pushInstruction("end");
 
 		this.releaseTemp(iTmp, "i32");
