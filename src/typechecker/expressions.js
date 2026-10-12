@@ -702,6 +702,8 @@ export const expressionCheckMethods = {
 		switch (mode) {
 			case "arg0":
 				return under ? arg : null;
+			case "elemOfArg0":
+				return under?.elem ?? null;
 			case "keysOfArg0":
 				return under?.key ? { kind: "slice", elem: under.key } : null;
 			case "valuesOfArg0": {

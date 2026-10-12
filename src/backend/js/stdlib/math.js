@@ -41,7 +41,8 @@ const MATH_EXTRA = {
 	Copysign: ([x, y]) =>
 		`(Math.abs(${x}) * (${y} < 0 || Object.is(${y}, -0) ? -1 : 1))`,
 	Dim: ([x, y]) => `Math.max(${x} - ${y}, 0)`,
-	Remainder: ([x, y]) => `(${x} - Math.round(${x} / ${y}) * ${y})`,
+	Remainder: ([x, y]) =>
+		`((x, y) => { if (isNaN(x) || isNaN(y) || y === 0 || !isFinite(x)) return NaN; if (!isFinite(y)) return x; const q = x / y; const r = Math.round(q); const diff = Math.abs(q - r); const n = (diff === 0.5 && (r % 2 !== 0)) ? (r < q ? r + 1 : r - 1) : r; return x - n * y; })(${x}, ${y})`,
 };
 
 /** @type {ThisType<CodeGen>} */

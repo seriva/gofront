@@ -236,12 +236,12 @@ test("wasm package rejects stdlib members the backend does not implement", () =>
 	const src = `//gofront:target wasm
 package m
 
-import "math"
+import "fmt"
 
-func F() float64 { return math.Remainder(1.0, 2.0) }
+func F() { fmt.Fprintf(nil, "x") }
 `;
 	const err = compileTemp({ "m.go": src });
-	assertContains(err, "'math.Remainder' is not yet available in wasm packages");
+	assertContains(err, "'fmt.Fprintf' is not yet available in wasm packages");
 	assertContains(err, "move this call to a JS package");
 });
 

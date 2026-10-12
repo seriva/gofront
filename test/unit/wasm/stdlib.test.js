@@ -2,7 +2,13 @@
 // WASM stdlib coverage: errors, fmt, strconv, strings, unicode/utf8, sort,
 // math extras and `any` equality — all checked for JS/WASM parity.
 
-import { assertEqual, compileHybrid, section, test } from "../helpers.js";
+import {
+	assertEqual,
+	compileHybrid,
+	runWasm,
+	section,
+	test,
+} from "../helpers.js";
 
 section("WASM stdlib — errors & fmt");
 
@@ -224,7 +230,7 @@ func Main() string {
 	assertEqual(wasmRes, jsRes);
 });
 
-test("math.Exp2 / Signbit / Dim", () => {
+test("math.Exp2 / Signbit / Dim / Remainder", () => {
 	const src = `
 package main
 
@@ -234,12 +240,467 @@ import (
 )
 
 func Main() string {
-	return fmt.Sprintf("%v %v %v %v", math.Exp2(3), math.Signbit(-1.0), math.Dim(5, 3), math.Dim(3, 5))
+	return fmt.Sprintf("%v %v %v %v %v %v %v",
+		math.Exp2(3), math.Signbit(-1.0), math.Dim(5, 3), math.Dim(3, 5),
+		math.Remainder(10.0, 3.0), math.Remainder(-10.0, 3.0), math.Remainder(9.0, 3.0))
 }
 `;
 	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
-	assertEqual(wasmRes, "8 true 2 0");
+	assertEqual(wasmRes, "8 true 2 0 1 -1 0");
 	assertEqual(wasmRes, jsRes);
+});
+
+section("WASM stdlib — slices (Phase 4)");
+
+test("slices.Compare", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+func Main() string {
+	c1 := slices.Compare([]int{1, 2, 3}, []int{1, 2, 3})
+	c2 := slices.Compare([]int{1, 2}, []int{1, 3})
+	c3 := slices.Compare([]int{1, 3}, []int{1, 2})
+	c4 := slices.Compare([]int{1, 2}, []int{1, 2, 3})
+	c5 := slices.Compare([]int{1, 2, 3}, []int{1, 2})
+	var nil1 []int
+	var nil2 []int
+	c6 := slices.Compare(nil1, nil2)
+	c7 := slices.Compare(nil1, []int{1})
+	c8 := slices.Compare([]int{1}, nil1)
+	return fmt.Sprintf("%d %d %d %d %d %d %d %d", c1, c2, c3, c4, c5, c6, c7, c8)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "0 -1 1 -1 1 0 -1 1");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("slices.SortFunc & SortStableFunc", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+type Item struct {
+	Name string
+	Val  int
+}
+
+func Main() string {
+	s := []int{5, 2, 8, 1, 9}
+	slices.SortFunc(s, func(a, b int) int { return a - b })
+
+	items := []Item{
+		{"a", 2},
+		{"b", 1},
+		{"c", 2},
+		{"d", 1},
+	}
+	slices.SortStableFunc(items, func(a, b Item) int { return a.Val - b.Val })
+
+	return fmt.Sprintf("%d %d %d %d %d %s%s%s%s", s[0], s[1], s[2], s[3], s[4], items[0].Name, items[1].Name, items[2].Name, items[3].Name)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "1 2 5 8 9 bdac");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("slices.IsSorted & IsSortedFunc", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+func Main() string {
+	b1 := slices.IsSorted([]int{1, 2, 3, 4})
+	b2 := slices.IsSorted([]int{1, 3, 2})
+	b3 := slices.IsSorted([]string{"apple", "banana", "cherry"})
+	b4 := slices.IsSorted([]string{"banana", "apple"})
+
+	cmp := func(a, b int) int { return b - a } // descending
+	b5 := slices.IsSortedFunc([]int{4, 3, 2, 1}, cmp)
+	b6 := slices.IsSortedFunc([]int{1, 2, 3, 4}, cmp)
+
+	return fmt.Sprintf("%v %v %v %v %v %v", b1, b2, b3, b4, b5, b6)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "true false true false true false");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("slices.Min, Max, MinFunc, MaxFunc", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+type Person struct {
+	Name string
+	Age  int
+}
+
+func Main() string {
+	nums := []int{3, 1, 4, 1, 5, 9, 2, 6}
+	minN := slices.Min(nums)
+	maxN := slices.Max(nums)
+
+	strs := []string{"cat", "zebra", "apple", "dog"}
+	minS := slices.Min(strs)
+	maxS := slices.Max(strs)
+
+	people := []Person{{"Alice", 30}, {"Bob", 20}, {"Charlie", 40}}
+	byAge := func(a, b Person) int { return a.Age - b.Age }
+	youngest := slices.MinFunc(people, byAge)
+	oldest := slices.MaxFunc(people, byAge)
+
+	return fmt.Sprintf("%d %d %s %s %s %s", minN, maxN, minS, maxS, youngest.Name, oldest.Name)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "1 9 apple zebra Bob Charlie");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("slices.Compact & CompactFunc", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"slices"
+	"strings"
+)
+
+func Main() string {
+	s1 := []int{1, 1, 2, 2, 2, 3, 4, 4, 1}
+	c1 := slices.Compact(s1)
+
+	s2 := []string{"a", "A", "b", "B", "b"}
+	c2 := slices.CompactFunc(s2, func(a, b string) bool {
+		return strings.EqualFold(a, b)
+	})
+
+	return fmt.Sprintf("%d %d %d %d %d %s %s", c1[0], c1[1], c1[2], c1[3], c1[4], c2[0], c2[1])
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "1 2 3 4 1 a b");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("slices.Concat", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+func Main() string {
+	a := []int{1, 2}
+	b := []int{3, 4}
+	c := []int{5}
+	res := slices.Concat(a, b, c)
+
+	var n1 []string
+	var n2 []string
+	res2 := slices.Concat(n1, []string{"hello"}, n2, []string{"world"})
+
+	return fmt.Sprintf("%d %d %d %d %d %s %s", res[0], res[1], res[2], res[3], res[4], res2[0], res2[1])
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "1 2 3 4 5 hello world");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("slices.Delete & DeleteFunc", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+func Main() string {
+	s1 := []int{1, 2, 3, 4, 5, 6}
+	s1 = slices.Delete(s1, 1, 4) // keeps s1[0] and s1[4:], so [1, 5, 6]
+
+	s2 := []int{1, 2, 3, 4, 5, 6, 7, 8}
+	s2 = slices.DeleteFunc(s2, func(n int) bool { return n%2 == 0 }) // delete evens
+
+	return fmt.Sprintf("%d %d %d %d %d %d %d", s1[0], s1[1], s1[2], s2[0], s2[1], s2[2], s2[3])
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "1 5 6 1 3 5 7");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("slices.Insert & Replace", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+func Main() string {
+	s := []int{1, 2, 5}
+	s = slices.Insert(s, 2, 3, 4) // [1 2 3 4 5]
+
+	s2 := []int{1, 2, 3, 4, 5}
+	s2 = slices.Replace(s2, 1, 4, 20, 30, 40) // [1 20 30 40 5]
+
+	return fmt.Sprintf("%d %d %d %d %d %d %d %d %d %d", s[0], s[1], s[2], s[3], s[4], s2[0], s2[1], s2[2], s2[3], s2[4])
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "1 2 3 4 5 1 20 30 40 5");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("slices.Grow & Clip", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+func Main() string {
+	s := []int{1, 2, 3}
+	s2 := slices.Grow(s, 10)
+	s2 = append(s2, 4)
+
+	s3 := slices.Clip(s2)
+
+	return fmt.Sprintf("%d %d %d %d %d", len(s2), len(s3), s2[0], s2[3], s3[3])
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "4 4 1 4 4");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("slices.Grow & Clip capacity behavior in WASM", () => {
+	const src = `
+package main
+
+import (
+	"slices"
+)
+
+func Main() int {
+	s := []int{1, 2, 3}
+	s2 := slices.Grow(s, 10)
+	if cap(s2) < len(s2)+10 {
+		return 1
+	}
+	s3 := slices.Clip(s2)
+	if len(s3) != cap(s3) {
+		return 2
+	}
+	return 0
+}
+`;
+	const { wasm, stringTable } = compileHybrid(src);
+	const { exports } = runWasm(wasm, { stringTable });
+	assertEqual(exports.Main(), 0);
+});
+
+test("slices unsigned integer comparisons (Compare, Min, Max, IsSorted)", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+func Main() string {
+	a := []uint32{0x80000000, 1}
+	c := slices.Compare([]uint32{0x80000000}, []uint32{1})
+	minU := slices.Min(a)
+	maxU := slices.Max(a)
+	sorted := slices.IsSorted([]uint32{1, 0x80000000})
+
+	a64 := []uint64{0x8000000000000000, 1}
+	c64 := slices.Compare([]uint64{0x8000000000000000}, []uint64{1})
+	min64 := slices.Min(a64)
+	max64 := slices.Max(a64)
+
+	return fmt.Sprintf("%d %d %d %v %d %d %d", c, minU, maxU, sorted, c64, min64, max64)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "1 1 2147483648 true 1 1 9223372036854776000");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("slices.Insert & Replace on struct values (in-place right shift)", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+type Point struct {
+	X int
+	Y int
+}
+
+func Main() string {
+	s := make([]Point, 3, 10)
+	s[0] = Point{1, 1}
+	s[1] = Point{2, 2}
+	s[2] = Point{3, 3}
+	s = slices.Insert(s, 0, Point{9, 9})
+
+	s2 := make([]Point, 4, 10)
+	s2[0] = Point{1, 1}
+	s2[1] = Point{2, 2}
+	s2[2] = Point{3, 3}
+	s2[3] = Point{4, 4}
+	s2 = slices.Replace(s2, 1, 2, Point{8, 8}, Point{9, 9})
+
+	return fmt.Sprintf("%d %d %d %d | %d %d %d %d %d",
+		s[0].X, s[1].X, s[2].X, s[3].X,
+		s2[0].X, s2[1].X, s2[2].X, s2[3].X, s2[4].X)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "9 1 2 3 | 1 8 9 3 4");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("slices.Concat with 0 arguments", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+func Main() string {
+	var s []int = slices.Concat()
+	return fmt.Sprintf("%v", s == nil)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "true");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("slices.SortFunc & SortStableFunc & Reverse on nil slices", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+func Main() string {
+	var s1 []int
+	slices.SortFunc(s1, func(a, b int) int { return a - b })
+	var s2 []int
+	slices.SortStableFunc(s2, func(a, b int) int { return a - b })
+	var s3 []int
+	slices.Sort(s3)
+	var s4 []int
+	slices.Reverse(s4)
+	return "ok"
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "ok");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("slices float NaN and signbit semantics (Compare, Min, Max, IsSorted)", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"math"
+	"slices"
+)
+
+func Main() string {
+	c1 := slices.Compare([]float64{math.NaN()}, []float64{math.NaN()})
+	c2 := slices.Compare([]float64{math.NaN()}, []float64{1.0})
+	c3 := slices.Compare([]float64{1.0}, []float64{math.NaN()})
+	sorted1 := slices.IsSorted([]float64{1.0, math.NaN(), 2.0})
+	min0 := slices.Min([]float64{0.0, -0.0})
+	max0 := slices.Max([]float64{-0.0, 0.0})
+	return fmt.Sprintf("%d %d %d %v %v %v", c1, c2, c3, sorted1, math.Signbit(min0), math.Signbit(max0))
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "0 -1 1 false true false");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("math.Remainder edge cases (half-integers and infinite y)", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"math"
+)
+
+func Main() string {
+	r1 := math.Remainder(5.0, 2.0)
+	r2 := math.Remainder(3.0, 2.0)
+	r3 := math.Remainder(2.5, 2.0)
+	r4 := math.Remainder(10.0, math.Inf(1))
+	return fmt.Sprintf("%v %v %v %v", r1, r2, r3, r4)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "1 -1 0.5 10");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("slices out of bounds error parity", () => {
+	const testPanics = [
+		`package main; import "slices"; func Main() { slices.Insert([]int{1, 2}, 5, 99) }`,
+		`package main; import "slices"; func Main() { slices.Delete([]int{1, 2}, 1, 5) }`,
+		`package main; import "slices"; func Main() { slices.Replace([]int{1, 2}, 1, 5, 99) }`,
+		`package main; import "slices"; func Main() { slices.Grow([]int{1, 2}, -1) }`,
+	];
+	for (const src of testPanics) {
+		const res = compileHybrid(src).run("Main");
+		// run() verifies both WASM and JS throw matching error messages
+		assertEqual(res.jsRes, undefined);
+		assertEqual(res.wasmRes, undefined);
+	}
 });
 
 section("WASM — any equality");
