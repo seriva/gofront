@@ -140,6 +140,7 @@ const STDLIB_IMPORTS = [
 	// fmt (arguments travel through the testing_arg_* buffer)
 	["fmt_sprintf", [S], [S]],
 	["fmt_printf", [S], []],
+	["fmt_format_v", [S], [S]],
 	// testing.T.Run: the harness calls back into the exported __testing_run_cb
 	["testing_run", [S, S, "anyref"], ["i32"]],
 ];
@@ -774,6 +775,17 @@ class ModuleEmitter {
 			this.getTestingArgImportIndex(t, false);
 		}
 		this.getTestingArgImportIndex("i32", true);
+		this.getFmtNewArrayIndex();
+		this.getFmtArrayPushIndex();
+		this.getFmtNewMapIndex();
+		this.getFmtMapSetIndex();
+		this.getFmtNewStructIndex();
+		this.getFmtStructSetIndex();
+		this.getFmtBoxI32Index();
+		this.getFmtBoxI64Index();
+		this.getFmtBoxF64Index();
+		this.getFmtBoxBoolIndex();
+		this.getFmtNewBoxIndex();
 		if (this.usesStdlibEnv) {
 			for (const [name, params, results] of STDLIB_IMPORTS) {
 				this.getOrAddFuncImport("env", name, params, results);
@@ -1034,6 +1046,90 @@ class ModuleEmitter {
 
 	getPrintlnEmptyIndex() {
 		return this.getOrAddFuncImport("env", "println_empty", [], []);
+	}
+
+	getFmtNewArrayIndex() {
+		return this.getOrAddFuncImport("env", "fmt_new_array", [], ["externref"]);
+	}
+
+	getFmtArrayPushIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"fmt_array_push",
+			["externref", "externref"],
+			[],
+		);
+	}
+
+	getFmtNewMapIndex() {
+		return this.getOrAddFuncImport("env", "fmt_new_map", [], ["externref"]);
+	}
+
+	getFmtMapSetIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"fmt_map_set",
+			["externref", "externref", "externref"],
+			[],
+		);
+	}
+
+	getFmtNewStructIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"fmt_new_struct",
+			["anyref", "i32"],
+			["externref"],
+		);
+	}
+
+	getFmtStructSetIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"fmt_struct_set",
+			["externref", "i32", "externref"],
+			[],
+		);
+	}
+
+	getFmtBoxI32Index() {
+		return this.getOrAddFuncImport(
+			"env",
+			"fmt_box_i32",
+			["i32"],
+			["externref"],
+		);
+	}
+
+	getFmtBoxI64Index() {
+		return this.getOrAddFuncImport(
+			"env",
+			"fmt_box_i64",
+			["i64"],
+			["externref"],
+		);
+	}
+
+	getFmtBoxF64Index() {
+		return this.getOrAddFuncImport(
+			"env",
+			"fmt_box_f64",
+			["f64"],
+			["externref"],
+		);
+	}
+
+	getFmtBoxBoolIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"fmt_box_bool",
+			["i32"],
+			["externref"],
+		);
+	}
+
+	getFmtNewBoxIndex() {
+		return this.getOrAddFuncImport("env", "fmt_new_box", [], ["externref"]);
 	}
 
 	// `*testing.T` method calls: args are pushed one by one to a JS-side

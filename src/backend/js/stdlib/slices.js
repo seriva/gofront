@@ -39,11 +39,11 @@ const SLICES_DISPATCH = {
 		`((s, f) => { s = s || []; let i = 0; while (i < s.length) { if (f(s[i])) { s.splice(i, 1); } else { i++; } } return s; })(${a[0]}, ${a[1]})`,
 	Insert: (a) => {
 		const items = a.slice(2);
-		return `((s, i, ...v) => { s = s || []; if (i < 0 || i > s.length) throw new Error("runtime error: slice bounds out of range"); s.splice(i, 0, ...v); return s; })(${a[0]}, ${a[1]}${items.length ? ", " + items.join(", ") : ""})`;
+		return `((s, i, ...v) => { s = s || []; if (i < 0 || i > s.length) throw new Error("runtime error: slice bounds out of range"); s.splice(i, 0, ...v); return s; })(${a[0]}, ${a[1]}${items.length ? `, ${items.join(", ")}` : ""})`;
 	},
 	Replace: (a) => {
 		const items = a.slice(3);
-		return `((s, i, j, ...v) => { s = s || []; if (i < 0 || j < i || j > s.length) throw new Error("runtime error: slice bounds out of range"); s.splice(i, j - i, ...v); return s; })(${a[0]}, ${a[1]}, ${a[2]}${items.length ? ", " + items.join(", ") : ""})`;
+		return `((s, i, j, ...v) => { s = s || []; if (i < 0 || j < i || j > s.length) throw new Error("runtime error: slice bounds out of range"); s.splice(i, j - i, ...v); return s; })(${a[0]}, ${a[1]}, ${a[2]}${items.length ? `, ${items.join(", ")}` : ""})`;
 	},
 	Grow: (a) =>
 		`((s, n) => { if (n < 0) throw new Error("runtime error: makeslice: len out of range"); return s ? s.slice() : []; })(${a[0]}, ${a[1]})`,

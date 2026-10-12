@@ -90,6 +90,12 @@ export function setupCoreGlobals(globals, types) {
 		returns: [ret],
 		variadic: true,
 	});
+	const fmtPrintVariadic = (ret) => ({
+		kind: "func",
+		params: [ANY],
+		returns: [ret],
+		variadic: true,
+	});
 	globals.define("fmt", {
 		kind: "namespace",
 		name: "fmt",
@@ -97,23 +103,23 @@ export function setupCoreGlobals(globals, types) {
 			Sprintf: fmtVariadic(STRING),
 			Errorf: fmtVariadic(ERROR),
 			Printf: fmtVariadic(VOID),
-			Println: fmtVariadic(VOID),
-			Print: fmtVariadic(VOID),
+			Println: fmtPrintVariadic(VOID),
+			Print: fmtPrintVariadic(VOID),
 			Fprintf: {
 				kind: "func",
-				params: [ANY, STRING],
+				params: [ANY, STRING, ANY],
 				returns: [INT, ERROR],
 				variadic: true,
 			},
 			Fprintln: {
 				kind: "func",
-				params: [ANY],
+				params: [ANY, ANY],
 				returns: [INT, ERROR],
 				variadic: true,
 			},
 			Fprint: {
 				kind: "func",
-				params: [ANY],
+				params: [ANY, ANY],
 				returns: [INT, ERROR],
 				variadic: true,
 			},

@@ -1624,6 +1624,7 @@ export const WASM_IMPORTS_JS = `const ${P}MAX = 9007199254740991n;
 function ${P}imports(stringTable, extraEnv, tag, write) {
 	let lineBuf = "";
 	let targs = [];
+	let fmtStructMap = new WeakMap();
 	const late = { exports: null };
 	const flush = () => { write(lineBuf); lineBuf = ""; };
 	const print = (v) => {
@@ -1722,11 +1723,31 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		"println_str": println, "println_any": println,
 		"println_bool": (b) => println(b !== 0 ? "true" : "false"),
 		"println_empty": flush,
+		"fmt_new_array": () => [],
+		"fmt_array_push": (arr, v) => { arr.push(v); },
+		"fmt_new_map": () => new Map(),
+		"fmt_map_set": (m, k, v) => { m.set(k, v); },
+		"fmt_new_struct": (ref, isPtr) => {
+			if (ref !== null && ref !== undefined && typeof ref === "object" && fmtStructMap.has(ref)) {
+				return fmtStructMap.get(ref);
+			}
+			const o = {};
+			Object.defineProperty(o, "__struct", { value: true, configurable: true });
+			if (isPtr !== 0) Object.defineProperty(o, "__p", { value: true, configurable: true });
+			if (ref !== null && ref !== undefined && typeof ref === "object") fmtStructMap.set(ref, o);
+			return o;
+		},
+		"fmt_struct_set": (o, k, v) => { o[typeof k === "number" ? stringTable[k] : k] = v; },
+		"fmt_box_i32": (v) => v,
+		"fmt_box_i64": (v) => (v > ${P}MAX || v < -${P}MAX ? v : Number(v)),
+		"fmt_box_f64": (v) => v,
+		"fmt_box_bool": (v) => v !== 0,
+		"fmt_new_box": () => ({ value: null, __p: true, __box: true }),
 		"testing_arg_i32": targ, "testing_arg_f32": targ, "testing_arg_f64": targ,
 		"testing_arg_str": targ, "testing_arg_any": targ,
 		"testing_arg_i64": (v) => targ(v > ${P}MAX || v < -${P}MAX ? v : Number(v)),
 		"testing_arg_bool": (v) => targ(v !== 0),
-		"testing_call": (t, i) => { const a = targs; targs = []; t[stringTable[i]](...a); },
+		"testing_call": (t, i) => { const a = targs; targs = []; fmtStructMap = new WeakMap(); t[stringTable[i]](...a); },
 		"testing_name": (t) => t.Name(),
 		"testing_flag": (t, i) => (t[stringTable[i]]() ? 1 : 0),
 	};
@@ -1734,7 +1755,7 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 	// modules that never call them do not ship it (see WASM_STDLIB_JS).
 	if (typeof ${P}stdlib === "function") {
 		Object.assign(env, ${P}stdlib(stringTable, {
-			"take": () => { const a = targs; targs = []; return a; },
+			"take": () => { const a = targs; targs = []; fmtStructMap = new WeakMap(); return a; },
 			"printf": (s) => {
 				lineBuf += s;
 				const nl = lineBuf.lastIndexOf("\\n");
@@ -1767,6 +1788,7 @@ function ${P}stdlib(stringTable, io) {
 		"testing_run": (t, name, fn) => (t.Run(name, (sub) => { io.late.exports.__testing_run_cb(fn, sub); }) ? 1 : 0),
 		"fmt_sprintf": (f) => __sprintf(f ?? "", ...io.take()),
 		"fmt_printf": (f) => { io.printf(__sprintf(f ?? "", ...io.take())); },
+		"fmt_format_v": (v) => { const res = __sprintf("%v", v); io.take(); return res; },
 		"str_trim": (s, c) => ${P}trim(s ?? "", c ?? "", true, true),
 		"str_trim_left": (s, c) => ${P}trim(s ?? "", c ?? "", true, false),
 		"str_trim_right": (s, c) => ${P}trim(s ?? "", c ?? "", false, true),

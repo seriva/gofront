@@ -757,13 +757,17 @@ export const expressionCheckMethods = {
 
 	_checkCallArgs(fnType, argTypes, expr) {
 		this._checkArgCount(fnType, argTypes, expr);
-		for (let i = 0; i < fnType.params.length && i < argTypes.length; i++) {
+		const maxLen = fnType.variadic
+			? argTypes.length
+			: Math.min(fnType.params.length, argTypes.length);
+		for (let i = 0; i < maxLen; i++) {
 			const paramIdx =
 				fnType.variadic && i >= fnType.params.length - 1
 					? fnType.params.length - 1
 					: i;
 			if (expr.args[i]?._spread) continue;
-			this.assertAssignable(fnType.params[paramIdx], argTypes[i], expr.args[i]);
+			const targetParam = fnType.params[paramIdx];
+			this.assertAssignable(targetParam, argTypes[i], expr.args[i]);
 		}
 	},
 
