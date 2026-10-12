@@ -87,6 +87,12 @@ const NS_CONSTANTS = {
 		ErrSyntax: "__strconv_err_syntax",
 		ErrRange: "__strconv_err_range",
 	},
+	path: {
+		ErrBadPattern: "__path_err_bad_pattern",
+	},
+	filepath: {
+		ErrBadPattern: "__path_err_bad_pattern",
+	},
 	io: {
 		EOF: '"EOF"',
 		Discard:
@@ -1007,10 +1013,38 @@ export const expressionGenMethods = {
 		return `new ${typeName}(${args.join(", ")})`;
 	},
 
+	_genSliceOrArrayLit(t, expr) {
+		const elems = expr.elems
+			.map((e) => this.genValueExpr(e.kind === "KeyValueExpr" ? e.value : e))
+			.join(", ");
+		const elemNode =
+			t.kind === "SliceType" || t.kind === "ArrayType" ? t.elem : null;
+		const elemResolved =
+			expr._type?.kind === "slice" || expr._type?.kind === "array"
+				? expr._type.elem
+				: null;
+		const typedCtor =
+			typedArrayConstructorForElem(elemResolved) ??
+			(elemNode?.name
+				? typedArrayConstructorForElem({
+						kind: "basic",
+						name: elemNode.name,
+					})
+				: null);
+		if (typedCtor) {
+			return `new ${typedCtor}([${elems}])`;
+		}
+		return `[${elems}]`;
+	},
+
 	genCompositeLit(expr) {
 		const t = expr.typeExpr;
 		if (t === null) return this._genImplicitCompositeLit(expr);
 		const typeName = this.getTypeName(t);
+		if (typeName === "bytes.Buffer" || typeName === "Buffer")
+			return "{ _buf: [] }";
+		if (typeName === "strings.Builder" || typeName === "Builder")
+			return '{ _buf: "" }';
 		if (typeName && this.structNames.has(typeName))
 			return this._genPositionalStructLit(typeName, expr);
 		if (typeName && this.namedWrapperNames.has(typeName))
@@ -1018,29 +1052,7 @@ export const expressionGenMethods = {
 		if (expr.elems.some((e) => e._positionalField)) {
 			if (typeName) return this._genPositionalStructLit(typeName, expr);
 		}
-		if (this._isSliceOrArrayType(t)) {
-			const elems = expr.elems
-				.map((e) => this.genValueExpr(e.kind === "KeyValueExpr" ? e.value : e))
-				.join(", ");
-			const elemNode =
-				t.kind === "SliceType" || t.kind === "ArrayType" ? t.elem : null;
-			const elemResolved =
-				expr._type?.kind === "slice" || expr._type?.kind === "array"
-					? expr._type.elem
-					: null;
-			const typedCtor =
-				typedArrayConstructorForElem(elemResolved) ??
-				(elemNode?.name
-					? typedArrayConstructorForElem({
-							kind: "basic",
-							name: elemNode.name,
-						})
-					: null);
-			if (typedCtor) {
-				return `new ${typedCtor}([${elems}])`;
-			}
-			return `[${elems}]`;
-		}
+		if (this._isSliceOrArrayType(t)) return this._genSliceOrArrayLit(t, expr);
 		if (this._isMapTypeNode(t))
 			return `{ ${this._genMapLitEntries(expr.elems)} }`;
 		return this._genFallbackCompositeLit(expr);

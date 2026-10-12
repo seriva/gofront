@@ -914,12 +914,28 @@ export class BuiltinsEmitter {
 			case "shared":
 				this.emitSharedNew(func.field, args);
 				return true;
+			case "unicode":
+				this.emitUnicodeCall(func.field, args, targetWasmType);
+				return true;
+			case "rand":
+				this.emitRandCall(func.field, args, targetWasmType);
+				return true;
+			case "bytes":
+				this.emitBytesCall(func.field, args, targetWasmType);
+				return true;
+			case "path":
+			case "filepath":
+				this.emitPathCall(func.field, args);
+				return true;
+			case "html":
+				this.emitHtmlCall(func.field, args);
+				return true;
 			default:
 				return false;
 		}
 	}
 
-	_emitMethodCall(call) {
+	_emitMethodCall(call, targetWasmType = null) {
 		const { func, args } = call;
 		if (func.kind !== "SelectorExpr") return false;
 
@@ -931,7 +947,13 @@ export class BuiltinsEmitter {
 		}
 		const recvTypeName = this._getReceiverTypeName(recvType, func.expr);
 		if (
-			this._emitStdlibReceiverMethod(recvTypeName, func.field, func.expr, args)
+			this._emitStdlibReceiverMethod(
+				recvTypeName,
+				func.field,
+				func.expr,
+				args,
+				targetWasmType,
+			)
 		) {
 			return true;
 		}
@@ -993,13 +1015,23 @@ export class BuiltinsEmitter {
 		return false;
 	}
 
-	_emitStdlibReceiverMethod(recvTypeName, field, expr, args) {
+	_emitStdlibReceiverMethod(
+		recvTypeName,
+		field,
+		expr,
+		args,
+		targetWasmType = null,
+	) {
 		if (recvTypeName === "strings.Builder") {
-			this.emitBuilderMethodCall(field, expr, args);
+			this.emitBuilderMethodCall(field, expr, args, targetWasmType);
 			return true;
 		}
 		if (recvTypeName === "strings.Replacer") {
 			this.emitReplacerMethodCall(field, expr, args);
+			return true;
+		}
+		if (recvTypeName === "bytes.Buffer") {
+			this.emitBytesBufferMethodCall(field, expr, args, targetWasmType);
 			return true;
 		}
 		return false;
@@ -1121,7 +1153,7 @@ export class BuiltinsEmitter {
 			return;
 		}
 
-		if (this._emitMethodCall(call)) {
+		if (this._emitMethodCall(call, targetWasmType)) {
 			return;
 		}
 

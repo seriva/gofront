@@ -3,10 +3,11 @@
 /** @typedef {import('../index.js').CodeGen} CodeGen */
 
 const BUILDER_STR = {
-	WriteString: (b, a) => `(${b}._buf += ${a[0]}, [${a[0]}.length, null])`,
+	WriteString: (b, a) =>
+		`((__s) => { ${b}._buf += __s; return [new TextEncoder().encode(__s).length, null]; })(${a[0]})`,
 	WriteByte: (b, a) => `(${b}._buf += String.fromCodePoint(${a[0]}), null)`,
 	WriteRune: (b, a) =>
-		`((cp) => { const s = String.fromCodePoint(cp); ${b}._buf += s; return [new TextEncoder().encode(s).length, null]; })(${a[0]})`,
+		`((cp) => { const r = (cp < 0 || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) ? 0xfffd : cp; const s = String.fromCodePoint(r); ${b}._buf += s; return [new TextEncoder().encode(s).length, null]; })(${a[0]})`,
 	Write: (b, a) =>
 		`(${b}._buf += new TextDecoder().decode(new Uint8Array(${a[0]})), [${a[0]}.length, null])`,
 	String: (b) => `${b}._buf`,
@@ -14,10 +15,10 @@ const BUILDER_STR = {
 };
 const BUILDER_BYTES = {
 	WriteString: (b, a) =>
-		`(${b}._buf.push(...new TextEncoder().encode(${a[0]})), [${a[0]}.length, null])`,
+		`((__s) => { const __b = new TextEncoder().encode(__s); ${b}._buf.push(...__b); return [__b.length, null]; })(${a[0]})`,
 	WriteByte: (b, a) => `(${b}._buf.push(${a[0]}), null)`,
 	WriteRune: (b, a) =>
-		`((cp) => { const bytes = new TextEncoder().encode(String.fromCodePoint(cp)); ${b}._buf.push(...bytes); return [bytes.length, null]; })(${a[0]})`,
+		`((cp) => { const r = (cp < 0 || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) ? 0xfffd : cp; const bytes = new TextEncoder().encode(String.fromCodePoint(r)); ${b}._buf.push(...bytes); return [bytes.length, null]; })(${a[0]})`,
 	Write: (b, a) => `(${b}._buf.push(...${a[0]}), [${a[0]}.length, null])`,
 	String: (b) => `new TextDecoder().decode(new Uint8Array(${b}._buf))`,
 	Reset: (b) => `(${b}._buf = [])`,
@@ -25,8 +26,9 @@ const BUILDER_BYTES = {
 const BUILDER_COMMON = {
 	Bytes: (b) => `${b}._buf.slice()`,
 	Len: (b) => `${b}._buf.length`,
-	Cap: (b) => `${b}._buf.length`,
-	Grow: () => "undefined",
+	Cap: (b) => `Math.max(${b}._cap ?? 0, ${b}._buf.length)`,
+	Grow: (b, a) =>
+		`((n) => { if (n < 0) throw new Error("bytes.Buffer.Grow: negative count"); ${b}._cap = Math.max(${b}._cap ?? 0, ${b}._buf.length) + n; })(${a[0]})`,
 };
 
 /** @type {ThisType<CodeGen>} */
