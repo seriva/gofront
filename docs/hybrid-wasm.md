@@ -90,27 +90,33 @@ copies agree bit-for-bit:
 ## What `wasm` packages support
 
 The backend (`src/backend/wasm/`) implements: structs, pointers, methods, arrays, slices
-(`append`, slicing, `copy`), strings, maps, interfaces, generics, closures (including
-closures inside methods), `defer`/`panic`/`recover`, and `error` values.
+(`append`, slicing, `copy`), strings, maps (including array-typed and interface-typed keys),
+interfaces (including anonymous interfaces), generics, closures (including closures inside methods),
+`defer`/`panic`/`recover`, `error` values, and non-literal package constants.
 
-The stdlib subset available in `wasm`/`both` packages is `math`, `math/bits`, `errors`
-(`New`, `Is`, `Unwrap`), `fmt` (`Sprintf`, `Printf`, `Println`, `Errorf` over primitive,
-string, `error` and `any` operands — format slices and structs field by field), `strings`,
-`strconv`, `unicode/utf8`, `slices`, `maps`, `sort`, `testing` and `gofront/shared`. Any other
-import, or a member the backend has not implemented yet, reports
-`'strings.Map' is not yet available in wasm packages` with a hint to move the call to a JS
-package. The `math`
-functions without a native WASM instruction (`Sin`, `Cos`, `Atan2`, `Pow`, `Mod`, `Hypot`,
+The stdlib packages available in `wasm`/`both` packages are:
+- `math`, `math/bits`, `math/rand` (seed is a no-op; uses JS `Math.random`)
+- `errors` (`New`, `Is`, `Unwrap`)
+- `fmt` (`Sprintf`, `Printf`, `Println`, `Errorf`, `Fprintf`, `Fprintln`, `Fprint`, `Sscan`, `Sscanln`, `Sscanf`, including `%v`/`%+v` composite formatting over slices, arrays, maps, and structs)
+- `strings` (including `Builder`, `NewReplacer`, `NewReader`, `Cut*`, `Split*`, `*Func`)
+- `bytes` (including `Buffer`, `NewReader`)
+- `strconv` (including `Unquote`, `AppendInt`, `AppendFloat`)
+- `unicode`, `unicode/utf8`
+- `slices`, `maps`, `sort`
+- `io` (`Reader`, `Writer`, `ReadWriter`, `Closer`, `ReadAll`, `Discard`, `WriteString`, `EOF`)
+- `path`, `path/filepath`
+- `html` (`EscapeString`, `UnescapeString`)
+- `time` (pure parts: `Duration`, `Time`, parsing, formatting, calendar arithmetic, clock; `time.Sleep` stays JS-only)
+- `testing` and `gofront/shared`.
+
+Any other import, or JS-only host API (`os`, `regexp`, `time.Sleep`), reports a targeted diagnostic
+(e.g. `'time.Sleep' is not yet available in wasm packages`) with a hint to keep the call in a JS package.
+The `math` functions without a native WASM instruction (`Sin`, `Cos`, `Atan2`, `Pow`, `Mod`, `Hypot`,
 `Cbrt`, `Round`, …) are imported from JS `Math` with Go semantics (`Round` rounds half away
 from zero; `Mod` keeps the sign of the dividend).
 
-Not yet supported inside `wasm` code (reports a `… (planned)` diagnostic):
-
-- Referencing a **non-literal** package constant (`const X = f()`); literal constants are
-  inlined.
-
-Package-level variables with non-literal initialisers are initialised from a WASM `start`
-function, so they are ready before any export is called.
+Package-level variables with non-literal initialisers and runtime-evaluated constants are initialised
+from a WASM `start` function, so they are ready before any export is called.
 
 ---
 
@@ -144,6 +150,8 @@ compile error.
 | Anonymous structs | Copied as plain JS objects `{ [field]: value }` with the same field names. |
 | Anonymous interfaces (`interface{ … }`) | Keyed on the sorted method set; identical method sets share the same facade class. Same JS → WASM rule as named interfaces (only WASM-owned values). |
 | Exported non-literal constants | Exposed on the facade as module constants read once after the `start` function runs. |
+| `time.Duration` | Nanoseconds crossing as a JS `Number` (`int64`). |
+| `time.Time` | Copied into the JS backend's `time.Time` object via Unix milliseconds (preserving timezone offset). Rounded to the JS shim's millisecond precision. |
 | `chan` | **Rejected** with `chan is not yet supported across the wasm boundary (planned)`. |
 
 ### Shared linear-memory buffers (`gofront/shared`)

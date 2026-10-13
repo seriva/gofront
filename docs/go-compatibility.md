@@ -26,6 +26,7 @@ These features are intentional additions for the JavaScript platform:
 | `goto` | No clean JS translation. Rare in idiomatic Go. | Not planned. |
 | Goroutines / channels / `select` | Go's concurrency model has no JS equivalent. A userland scheduler defeats the "no runtime" goal. | Out of scope. |
 | `unsafe`, `reflect`, `cgo` | Require memory model or runtime type metadata that JS cannot provide. | Out of scope. |
+| `time.Sleep` in `wasm`/`both` packages | Go's `time.Sleep` blocks OS threads; in GoFront `time.Sleep` is an async Promise helper for the single-threaded JS event loop. Synchronous WASM cannot block. | Supported in `js` packages via `await time.Sleep(...)`. |
 
 ### Semantic differences
 
@@ -54,6 +55,7 @@ divide-by-zero panics) — see the [hybrid guide](hybrid-wasm.md#strict-numeric-
 | Struct field tags | Parsed, silently discarded | Available via `reflect` | No reflection = no use for tag values. |
 | Pointers (`&x`, `*p`) | Struct pointers are the object itself; address-taken scalars are boxed as `{ value: T }`; slices and maps are references | True memory indirection | Shared mutation works for scalars and structs. **`&s.Field` and `&xs[i]` compile to a detached copy** — writes through such a pointer do not reach the original. |
 | Three-index slice (`a[lo:hi:max]`) | `max` is parsed but ignored | Sets result capacity | JS arrays have no capacity. |
+| `time.Time` boundary crossing | Round-trips across the JS↔WASM boundary via Unix milliseconds (matching JS `Date`); sub-millisecond nanoseconds are truncated | Nanosecond precision everywhere | The JS shim operates on millisecond timestamps. Times created in WASM retain nanoseconds internally until crossing the boundary. |
 | Exported / unexported | Enforced for GoFront packages; external `.d.ts`/npm namespaces are exempt | Access enforced uniformly | External JS APIs use lowercase names by convention. |
 
 ---
