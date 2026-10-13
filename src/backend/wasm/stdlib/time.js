@@ -210,8 +210,65 @@ export class TimeEmitter {
 			case "Day":
 				this._emitTimeMethodDay(expr, targetWasmType);
 				break;
+			case "IsZero":
+				this._emitTimeMethodIsZero(expr);
+				break;
+			case "UnixNano":
+				this._emitTimeMethodUnixNano(expr, targetWasmType);
+				break;
+			case "Nanosecond":
+				this._emitTimeMethodNanosecond(expr, targetWasmType);
+				break;
+			case "UTC":
+				this._emitTimeMethodUTC(expr);
+				break;
+			case "Local":
+				this._emitTimeMethodLocal(expr);
+				break;
 			default:
 				throw new Error(`Unsupported time.Time method '${field}'`);
+		}
+	}
+
+	emitDurationMethodCall(field, expr, _args, _targetWasmType) {
+		switch (field) {
+			case "Nanoseconds":
+				this.emitExpr(expr, "i64");
+				return;
+			case "Microseconds":
+				this.emitExpr(expr, "i64");
+				this.pushInstruction({ op: "i64.const", value: 1000n });
+				this.pushInstruction("i64.div_s");
+				return;
+			case "Milliseconds":
+				this.emitExpr(expr, "i64");
+				this.pushInstruction({ op: "i64.const", value: 1000000n });
+				this.pushInstruction("i64.div_s");
+				return;
+			case "Seconds":
+				this.emitExpr(expr, "i64");
+				this.pushInstruction("f64.convert_i64_s");
+				this.pushInstruction({ op: "f64.const", value: 1000000000.0 });
+				this.pushInstruction("f64.div");
+				return;
+			case "Minutes":
+				this.emitExpr(expr, "i64");
+				this.pushInstruction("f64.convert_i64_s");
+				this.pushInstruction({ op: "f64.const", value: 60000000000.0 });
+				this.pushInstruction("f64.div");
+				return;
+			case "Hours":
+				this.emitExpr(expr, "i64");
+				this.pushInstruction("f64.convert_i64_s");
+				this.pushInstruction({ op: "f64.const", value: 3600000000000.0 });
+				this.pushInstruction("f64.div");
+				return;
+			case "String":
+				this.emitExpr(expr, "i64");
+				this._callStdlib("time_duration_string");
+				return;
+			default:
+				throw new Error(`Unsupported time.Duration method '${field}'`);
 		}
 	}
 
@@ -712,6 +769,132 @@ export class TimeEmitter {
 		if (targetWasmType === "i32") {
 			this.pushInstruction("i32.wrap_i64");
 		}
+	}
+
+	_emitTimeMethodUnixNano(expr, targetWasmType) {
+		const timeInfo = this.mod.getStructType("time.Time");
+		const timeW = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: timeInfo.typeIndex,
+		};
+		this.emitExpr(expr, timeW);
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: timeInfo.typeIndex,
+			fieldIndex: 0,
+		});
+		if (targetWasmType === "i32") {
+			this.pushInstruction("i32.wrap_i64");
+		}
+	}
+
+	_emitTimeMethodIsZero(expr) {
+		const timeInfo = this.mod.getStructType("time.Time");
+		const timeW = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: timeInfo.typeIndex,
+		};
+		this.emitExpr(expr, timeW);
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: timeInfo.typeIndex,
+			fieldIndex: 0,
+		});
+		this.pushInstruction({ op: "i64.const", value: 0n });
+		this.pushInstruction("i64.eq");
+	}
+
+	_emitTimeMethodNanosecond(expr, targetWasmType) {
+		const timeInfo = this.mod.getStructType("time.Time");
+		const timeW = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: timeInfo.typeIndex,
+		};
+		this.emitExpr(expr, timeW);
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: timeInfo.typeIndex,
+			fieldIndex: 0,
+		});
+		this.pushInstruction({ op: "i64.const", value: 1000000000n });
+		this.pushInstruction("i64.rem_s");
+		const nsTmp = this.acquireTemp("i64");
+		this.pushInstruction({ op: "local.tee", index: nsTmp });
+		this.pushInstruction({ op: "i64.const", value: 0n });
+		this.pushInstruction("i64.lt_s");
+		this.pushInstruction({ op: "if", blockType: "i64" });
+		this.pushInstruction({ op: "local.get", index: nsTmp });
+		this.pushInstruction({ op: "i64.const", value: 1000000000n });
+		this.pushInstruction("i64.add");
+		this.pushInstruction({ op: "else" });
+		this.pushInstruction({ op: "local.get", index: nsTmp });
+		this.pushInstruction("end");
+		this.releaseTemp(nsTmp, "i64");
+		if (targetWasmType !== "i64") {
+			this.pushInstruction("i32.wrap_i64");
+		}
+	}
+
+	_emitTimeMethodUTC(expr) {
+		const timeInfo = this.mod.getStructType("time.Time");
+		const timeW = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: timeInfo.typeIndex,
+		};
+		this.emitExpr(expr, timeW);
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: timeInfo.typeIndex,
+			fieldIndex: 0,
+		});
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({
+			op: "struct.new",
+			typeIndex: timeInfo.typeIndex,
+		});
+	}
+
+	_emitTimeMethodLocal(expr) {
+		const timeInfo = this.mod.getStructType("time.Time");
+		const timeW = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: timeInfo.typeIndex,
+		};
+		const rTmp = this.acquireTemp(timeW);
+		this.emitExpr(expr, timeW);
+		this.pushInstruction({ op: "local.set", index: rTmp });
+
+		this.pushInstruction({ op: "local.get", index: rTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: timeInfo.typeIndex,
+			fieldIndex: 0,
+		});
+
+		this.pushInstruction({ op: "local.get", index: rTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: timeInfo.typeIndex,
+			fieldIndex: 0,
+		});
+		this.pushInstruction({ op: "i64.const", value: 1000000n });
+		this.pushInstruction("i64.div_s");
+		this.pushInstruction("f64.convert_i64_s");
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getTimezoneOffsetImportIndex(),
+		});
+
+		this.pushInstruction({
+			op: "struct.new",
+			typeIndex: timeInfo.typeIndex,
+		});
+		this.releaseTemp(rTmp, timeW);
 	}
 
 	_emitCivilDateFromDays(daysTmp, yTmp, mTmp, dTmp) {

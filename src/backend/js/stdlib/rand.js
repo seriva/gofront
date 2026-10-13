@@ -19,11 +19,13 @@ const RAND_DISPATCH = {
 		`((n, f) => { if (n < 0) throw new Error("invalid argument to Shuffle"); for (let i = n - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); f(i, j); } })(${a[0]}, ${a[1]})`,
 	Perm: (a) =>
 		`((n) => { if (n < 0) throw new Error("invalid argument to Perm"); const a = Array.from({length: n}, (_, i) => i); for (let i = n - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; })(${a[0]})`,
+	Read: (a) => `__crypto_rand_read(${a[0]})`,
 };
 
 /** @type {ThisType<CodeGen>} */
 export const randMethods = {
 	_genRand(fn, a) {
+		if (fn === "Read") this.useHelper("cryptoRand");
 		const gen = RAND_DISPATCH[fn];
 		return gen ? gen(a()) : undefined;
 	},

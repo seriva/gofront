@@ -36,6 +36,8 @@ const STRINGS_DISPATCH = {
 	TrimRight: ([s, s2]) => `${s}.replace(new RegExp(\`[\${${s2}}]+$\`), "")`,
 	EqualFold: ([s, s2]) => `${s}.toLowerCase() === ${s2}.toLowerCase()`,
 	Fields: ([s]) => `(${s}).trim() === '' ? [] : (${s}).trim().split(/\\s+/)`,
+	FieldsFunc: ([s, f]) =>
+		`((s, fn) => { const res = []; const runes = Array.from(s ?? ""); let cur = ""; for (const ch of runes) { const cp = ch.codePointAt(0); if (fn(cp)) { if (cur.length > 0) { res.push(cur); cur = ""; } } else { cur += ch; } } if (cur.length > 0) res.push(cur); return res; })(${s}, ${f})`,
 	Cut: ([s, s2]) =>
 		`((s, sep) => { const i = s.indexOf(sep); return i < 0 ? [s, "", false] : [s.slice(0, i), s.slice(i + sep.length), true]; })(${s}, ${s2})`,
 	CutPrefix: ([s, s2]) =>

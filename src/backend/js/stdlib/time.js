@@ -19,6 +19,21 @@ const TIME_METHOD_DISPATCH = {
 	Before: (r, a) => `(${r}._d < (${a[0]})._d)`,
 	After: (r, a) => `(${r}._d > (${a[0]})._d)`,
 	Equal: (r, a) => `(${r}._d.getTime() === (${a[0]})._d.getTime())`,
+	IsZero: (r) => `(!${r} || !${r}._d || ${r}._d.getTime() === 0)`,
+	UnixNano: (r) => `(${r}?._d ? Math.round(${r}._d.getTime() * 1000000) : 0)`,
+	Nanosecond: (r) => `(${r}?._d ? ${r}._d.getMilliseconds() * 1000000 : 0)`,
+	UTC: (r) => `({_d: ${r}?._d ?? new Date(0), _offset: 0})`,
+	Local: (r) => `({_d: ${r}?._d ?? new Date(0)})`,
+};
+
+const DURATION_METHOD_DISPATCH = {
+	Nanoseconds: (r) => `${r}`,
+	Microseconds: (r) => `Math.trunc(Number(${r}) / 1000)`,
+	Milliseconds: (r) => `Math.trunc(Number(${r}) / 1000000)`,
+	Seconds: (r) => `(Number(${r}) / 1000000000)`,
+	Minutes: (r) => `(Number(${r}) / 60000000000)`,
+	Hours: (r) => `(Number(${r}) / 3600000000000)`,
+	String: (r) => `__durationString(${r})`,
 };
 
 const TIME_DISPATCH = {
@@ -49,6 +64,16 @@ export const timeMethods = {
 		}
 		const gen = TIME_METHOD_DISPATCH[method];
 		return gen ? gen(recvJs, args) : undefined;
+	},
+
+	_genDurationMethodCall(method, expr) {
+		const recv = expr.func.expr;
+		const recvJs = this.genExpr(recv);
+		if (method === "String") {
+			this.useHelper("duration");
+		}
+		const gen = DURATION_METHOD_DISPATCH[method];
+		return gen ? gen(recvJs) : undefined;
 	},
 
 	_genTime(fn, a, expr) {

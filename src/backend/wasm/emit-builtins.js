@@ -940,6 +940,18 @@ export class BuiltinsEmitter {
 			case "time":
 				this.emitTimeCall(func.field, call, targetWasmType);
 				return true;
+			case "binary":
+				this.emitBinaryCall(func.field, call, targetWasmType);
+				return true;
+			case "sha256":
+				this.emitSha256Call(func.field, call, targetWasmType);
+				return true;
+			case "hex":
+				this.emitHexCall(func.field, call, targetWasmType);
+				return true;
+			case "base64":
+				this.emitBase64Call(func.field, call, targetWasmType);
+				return true;
 			default:
 				return false;
 		}
@@ -1054,6 +1066,50 @@ export class BuiltinsEmitter {
 		}
 		if (recvTypeName === "time.Time") {
 			this.emitTimeMethodCall(field, expr, args, targetWasmType);
+			return true;
+		}
+		if (recvTypeName === "time.Duration") {
+			this.emitDurationMethodCall(field, expr, args, targetWasmType);
+			return true;
+		}
+		if (recvTypeName === "io.LimitedReader") {
+			this.emitIoLimitedReaderMethodCall(field, expr, args, targetWasmType);
+			return true;
+		}
+		if (recvTypeName === "sync.Mutex" || recvTypeName === "sync.RWMutex") {
+			this.emitSyncMutexMethodCall(field, expr, args, targetWasmType);
+			return true;
+		}
+		if (recvTypeName === "sync.Once") {
+			this.emitSyncOnceMethodCall(field, expr, args, targetWasmType);
+			return true;
+		}
+		if (recvTypeName === "sync.WaitGroup") {
+			this.emitSyncWaitGroupMethodCall(field, expr, args, targetWasmType);
+			return true;
+		}
+		if (
+			recvTypeName === "binary.LittleEndian" ||
+			recvTypeName === "binary.BigEndian" ||
+			recvTypeName === "encoding/binary.LittleEndian" ||
+			recvTypeName === "encoding/binary.BigEndian" ||
+			recvTypeName === "binary.ByteOrder" ||
+			recvTypeName === "encoding/binary.ByteOrder"
+		) {
+			this.emitBinaryOrderMethodCall(
+				recvTypeName,
+				field,
+				expr,
+				args,
+				targetWasmType,
+			);
+			return true;
+		}
+		if (
+			recvTypeName === "base64.Encoding" ||
+			recvTypeName === "encoding/base64.Encoding"
+		) {
+			this.emitBase64EncodingMethodCall(field, expr, args, targetWasmType);
 			return true;
 		}
 		return false;

@@ -35,7 +35,12 @@
 //     externref (test methods are routed back to JS via `env.testing_*`).
 
 import {
+	HELPER_BASE64,
+	HELPER_DURATION,
+	HELPER_ERROR,
+	HELPER_HEX,
 	HELPER_PATH_CLEAN,
+	HELPER_SHA256,
 	HELPER_SPRINTF,
 	HELPER_STRCONV,
 } from "../js/runtime.js";
@@ -1847,7 +1852,7 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 	}
 	Object.assign(env, extraEnv);
 	const m = {};
-	for (const k of ["sin", "cos", "tan", "asin", "acos", "atan", "atan2", "pow", "exp", "log", "log2", "log10", "cbrt", "hypot", "random"]) m[k] = Math[k];
+	for (const k of ["sin", "cos", "tan", "asin", "acos", "atan", "atan2", "pow", "exp", "log", "log2", "log10", "cbrt", "hypot", "random", "sinh", "cosh", "tanh"]) m[k] = Math[k];
 	m.mod = (x, y) => x % y;
 	// Go rounds half away from zero; Math.round rounds half toward +Infinity.
 	m.round = (x) => Math.sign(x) * Math.round(Math.abs(x));
@@ -1857,9 +1862,14 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 
 // JS side of the STDLIB_IMPORTS table (index.js); emitted only when the
 // module imports one of the packages that use it.
-export const WASM_STDLIB_JS = `${HELPER_SPRINTF}
+export const WASM_STDLIB_JS = `${HELPER_ERROR}
+${HELPER_SPRINTF}
 ${HELPER_STRCONV}
 ${HELPER_PATH_CLEAN}
+${HELPER_DURATION}
+${HELPER_SHA256}
+${HELPER_HEX}
+${HELPER_BASE64}
 function ${P}stdlib(stringTable, io) {
 	let parts = [];
 	let cutBefore = "", cutAfter = "";
@@ -1873,6 +1883,10 @@ function ${P}stdlib(stringTable, io) {
 	let sscanTokens = [];
 	let sscanHasErr = 0, sscanErrMsg = "";
 	let timeParseErr = null, timeParseOffset = 0;
+	let rawBytes = new Uint8Array(0);
+	let rawPos = 0;
+	let hexErr = null;
+	let base64Err = null;
 	return {
 		"fmt_sscan_init": (s, mode) => {
 			sscanHasErr = 0;
@@ -2154,6 +2168,13 @@ function ${P}stdlib(stringTable, io) {
 		"strconv_err_kind": () => strconvErrKind,
 		"strconv_format_float": (f, fmtc, prec, _bits) => __strconv_format_float(f, fmtc, prec),
 		"strconv_format_int": (n, base) => n.toString(base),
+		"strconv_format_uint": (n, base) => BigInt.asUintN(64, BigInt(n)).toString(base),
+		"strconv_parse_uint": (s, base, bits) => {
+			const r = __strconv_parse_uint(s ?? "", base, bits);
+			strconvErr = r[1];
+			strconvErrKind = r[1] ? (r[1].includes("invalid syntax") ? 1 : r[1].includes("value out of range") ? 2 : 0) : 0;
+			return r[0];
+		},
 		"strconv_quote": (s) => JSON.stringify(s ?? ""),
 		"strconv_unquote": (s) => {
 			s = s ?? "";
@@ -2274,6 +2295,7 @@ function ${P}stdlib(stringTable, io) {
 		// time
 		"time_now_ms": () => (typeof globalThis.__GOFRONT_CLOCK === "function" ? globalThis.__GOFRONT_CLOCK() : Date.now()),
 		"time_timezone_offset": (ms) => -new Date(ms).getTimezoneOffset() * 60,
+		"time_duration_string": (d) => __durationString(d),
 		"time_parse": (layout, val) => {
 			try {
 				const d = new Date(val ?? "");
@@ -2324,6 +2346,53 @@ function ${P}stdlib(stringTable, io) {
 				}
 			});
 		},
+		"raw_bytes_init": (len) => {
+			rawBytes = new Uint8Array(len);
+			rawPos = 0;
+		},
+		"raw_bytes_push": (b) => {
+			if (rawPos < rawBytes.length) {
+				rawBytes[rawPos++] = b & 0xff;
+			}
+		},
+		"raw_bytes_len": () => rawBytes.length,
+		"raw_bytes_get": (i) => rawBytes[i] ?? 0,
+		"crypto_rand_fill": (len) => {
+			rawBytes = new Uint8Array(len);
+			if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+				crypto.getRandomValues(rawBytes);
+			} else {
+				for (let i = 0; i < len; i++) rawBytes[i] = Math.floor(Math.random() * 256);
+			}
+			return len;
+		},
+		"crypto_sha256_sum": () => {
+			const d = __sha256.Sum256(rawBytes);
+			rawBytes = new Uint8Array(d);
+			return 32;
+		},
+		"hex_encode_to_string": () => {
+			return __hex_encode_to_string(rawBytes);
+		},
+		"hex_decode_string": (s) => {
+			const [res, err] = __hex_decode_string(s ?? "");
+			hexErr = err ? (err.message ?? String(err)) : null;
+			rawBytes = new Uint8Array(res);
+			return rawBytes.length;
+		},
+		"hex_get_err": () => hexErr,
+		"base64_encode_to_string": (mode) => {
+			const enc = mode === 1 ? __base64_url : mode === 2 ? __base64_raw_std : mode === 3 ? __base64_raw_url : __base64_std;
+			return enc.EncodeToString(rawBytes);
+		},
+		"base64_decode_string": (mode, s) => {
+			const enc = mode === 1 ? __base64_url : mode === 2 ? __base64_raw_std : mode === 3 ? __base64_raw_url : __base64_std;
+			const [res, err] = enc.DecodeString(s ?? "");
+			base64Err = err ? (err.message ?? String(err)) : null;
+			rawBytes = new Uint8Array(res);
+			return rawBytes.length;
+		},
+		"base64_get_err": () => base64Err,
 	};
 }
 function ${P}trim(s, cutset, left, right) {

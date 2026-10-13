@@ -50,6 +50,12 @@ const BUILTIN_PACKAGES = new Set([
 	"path/filepath",
 	"testing",
 	"gofront/shared",
+	"sync",
+	"crypto/rand",
+	"crypto/sha256",
+	"encoding/binary",
+	"encoding/hex",
+	"encoding/base64",
 ]);
 
 // Returns true for local relative paths (start with ./ or ../)

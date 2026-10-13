@@ -47,6 +47,10 @@ const BYTES_DISPATCH = {
 	LastIndexByte: (a) => `(${a[0]}).lastIndexOf(${a[1]})`,
 	Fields: (a) =>
 		`((b) => { const s = String.fromCharCode(...b).trim(); return s === '' ? [] : s.split(/\\s+/).map(w => [...w].map(c => c.charCodeAt(0))); })(${a[0]})`,
+	FieldsFunc: (a) =>
+		`((b, fn) => { const s = new TextDecoder().decode(new Uint8Array(b ?? [])); const res = []; let cur = ""; for (const ch of s) { const cp = ch.codePointAt(0); if (fn(cp)) { if (cur.length > 0) { res.push(new TextEncoder().encode(cur)); cur = ""; } } else { cur += ch; } } if (cur.length > 0) res.push(new TextEncoder().encode(cur)); return res; })(${a[0]}, ${a[1]})`,
+	Clone: (a) =>
+		`(${a[0]} ? (${a[0]}.slice ? ${a[0]}.slice() : Array.from(${a[0]})) : null)`,
 	Cut: (a) =>
 		`((b, sep) => { for (let i = 0; i <= b.length - sep.length; i++) if (sep.every((v, j) => b[i + j] === v)) return [b.slice(0, i), b.slice(i + sep.length), true]; return [b.slice(), [], false]; })(${a[0]}, ${a[1]})`,
 	ContainsAny: (a) =>
