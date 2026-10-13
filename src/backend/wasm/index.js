@@ -42,6 +42,9 @@ const ERROR_PRODUCING_PKGS = new Set([
 	"strconv",
 	"path",
 	"path/filepath",
+	"io",
+	"strings",
+	"bytes",
 ]);
 // Packages whose calls lower to the `env.*` imports in STDLIB_IMPORTS (the
 // matching JS lives in WASM_STDLIB_JS).  Only modules importing one of them
@@ -58,6 +61,7 @@ const STDLIB_ENV_PKGS = new Set([
 	"path/filepath",
 	"html",
 	"bytes",
+	"io",
 ]);
 
 const RAND_HOST_METHODS = new Set([
@@ -74,9 +78,10 @@ const RAND_HOST_METHODS = new Set([
 ]);
 
 function importsAnyOf(programs, pkgs) {
+	const has = (p) => (pkgs instanceof Set ? pkgs.has(p) : pkgs.includes(p));
 	return (programs ?? []).some((p) =>
 		(p.imports ?? []).some((decl) =>
-			(decl.imports ?? [decl]).some((imp) => pkgs.has(imp.path)),
+			(decl.imports ?? [decl]).some((imp) => has(imp.path)),
 		),
 	);
 }
@@ -166,6 +171,11 @@ const STDLIB_IMPORTS = [
 	["fmt_sprintf", [S], [S]],
 	["fmt_printf", [S], []],
 	["fmt_format_v", [S], [S]],
+	["fmt_sscan_init", [S, "i32"], ["i32"]],
+	["fmt_sscan_token_str", ["i32"], [S]],
+	["fmt_sscan_token_i64", ["i32"], ["i64"]],
+	["fmt_sscan_token_f64", ["i32"], ["f64"]],
+	["fmt_sscan_token_bool", ["i32"], ["i32"]],
 	// testing.T.Run: the harness calls back into the exported __testing_run_cb
 	["testing_run", [S, S, "anyref"], ["i32"]],
 	// unicode
@@ -988,6 +998,36 @@ class ModuleEmitter {
 			init: [{ op: "ref.null", heapType: "any" }],
 		});
 		this.pathErrGlobals.set(field, gIdx);
+		return gIdx;
+	}
+
+	getIoErrGlobalIndex(field) {
+		if (!this.ioErrGlobals) this.ioErrGlobals = new Map();
+		if (this.ioErrGlobals.has(field)) {
+			return this.ioErrGlobals.get(field);
+		}
+		const gIdx = this.globals.length;
+		this.globals.push({
+			type: "anyref",
+			mutable: true,
+			init: [{ op: "ref.null", heapType: "any" }],
+		});
+		this.ioErrGlobals.set(field, gIdx);
+		return gIdx;
+	}
+
+	getIoDiscardGlobalIndex() {
+		if (this.ioDiscardGlobalIndex !== undefined) {
+			return this.ioDiscardGlobalIndex;
+		}
+		const discardInfo = this.getStructType("io.discard");
+		const gIdx = this.globals.length;
+		this.globals.push({
+			type: "anyref",
+			mutable: true,
+			init: [{ op: "ref.null", heapType: "any" }],
+		});
+		this.ioDiscardGlobalIndex = gIdx;
 		return gIdx;
 	}
 
@@ -2417,6 +2457,7 @@ export function compileWasmModule(
 			),
 		);
 	}
+	_registerPhase7SyntheticMethods(funcDecls, mod, STR_T, progs);
 
 	// 1f. Boundary metadata (exported surface of wasm packages)
 	const boundaryMeta = options.boundary
@@ -2478,6 +2519,7 @@ export function compileWasmModule(
 			fn._forceExport ||
 			(!fn._isGlobalInit &&
 				!fn._isRuntimeHelper &&
+				!fn._isPhase7Helper &&
 				(options.exportAll ||
 					fn.name === "main" ||
 					(fn.name[0] >= "A" && fn.name[0] <= "Z") ||
@@ -2537,6 +2579,8 @@ export function compileWasmModule(
 			emitter.emitSharedHelper(fn);
 		} else if (fn._isRuntimeHelper) {
 			emitter.emitRuntimeHelper(fn);
+		} else if (fn._isPhase7Helper) {
+			emitter.emitPhase7Helper(fn);
 		} else if (fn.body) {
 			emitter.emitFunctionBody(fn.body);
 		}
@@ -3237,7 +3281,259 @@ function _collectInterfaceDispatchers(progs, funcDecls, mod, checker) {
 		});
 	}
 
+	const hasPhase7 = importsAnyOf(progs, ["io", "fmt", "strings", "bytes"]);
+	if (hasPhase7) {
+		const byteSliceType = {
+			kind: "slice",
+			elem: { kind: "basic", name: "byte" },
+		};
+		const intErrReturns = [
+			{ kind: "basic", name: "int" },
+			{ kind: "interface", name: "error" },
+		];
+		if (!interfaceCalls.has("io.Reader.Read")) {
+			interfaceCalls.set("io.Reader.Read", {
+				ifaceName: "io.Reader",
+				ifaceType: checker?.types?.get("io.Reader"),
+				methodName: "Read",
+				methodSig: {
+					kind: "func",
+					params: [byteSliceType],
+					returns: intErrReturns,
+				},
+			});
+		}
+		if (!interfaceCalls.has("io.Writer.Write")) {
+			interfaceCalls.set("io.Writer.Write", {
+				ifaceName: "io.Writer",
+				ifaceType: checker?.types?.get("io.Writer"),
+				methodName: "Write",
+				methodSig: {
+					kind: "func",
+					params: [byteSliceType],
+					returns: intErrReturns,
+				},
+			});
+		}
+	}
+
 	for (const info of interfaceCalls.values()) {
 		funcDecls.push(_makeInterfaceDispatcher(info, checker));
+	}
+}
+
+function _registerPhase7SyntheticMethods(funcDecls, mod, strType, programs) {
+	const progs = Array.isArray(programs) ? programs : [programs];
+	const hasStrings = importsAnyOf(progs, ["strings"]);
+	const hasBytes = importsAnyOf(progs, ["bytes"]);
+	const hasIo = importsAnyOf(progs, ["io"]);
+
+	const BYTE_SLICE_T = {
+		kind: "slice",
+		elem: { kind: "basic", name: "byte" },
+	};
+	const INT_T = { kind: "basic", name: "int" };
+	const ERR_T = { kind: "interface", name: "error" };
+	const INT_ERR_RET = { kind: "tuple", types: [INT_T, ERR_T] };
+	const p7 = (name, params, returnType, kind, extra = {}) => ({
+		kind: "FuncDecl",
+		name,
+		params,
+		returnType,
+		body: { kind: "Block", stmts: [], list: [] },
+		_isPhase7Helper: kind,
+		_rootFuncDecl: null,
+		...extra,
+	});
+
+	if (hasStrings && mod.structTypes.has("strings.Builder")) {
+		const bPtr = {
+			kind: "pointer",
+			base: { kind: "named", name: "strings.Builder" },
+		};
+		funcDecls.push(
+			p7(
+				"strings.Builder.Write",
+				[
+					{ name: "b", type: bPtr },
+					{ name: "p", type: BYTE_SLICE_T },
+				],
+				INT_ERR_RET,
+				"builder_write",
+				{
+					_isMethod: true,
+					_recvTypeName: "strings.Builder",
+					_methodName: "Write",
+				},
+			),
+			p7(
+				"strings.Builder.WriteString",
+				[
+					{ name: "b", type: bPtr },
+					{ name: "s", type: strType },
+				],
+				INT_ERR_RET,
+				"builder_write_string",
+				{
+					_isMethod: true,
+					_recvTypeName: "strings.Builder",
+					_methodName: "WriteString",
+				},
+			),
+		);
+	}
+	if (hasBytes && mod.structTypes.has("bytes.Buffer")) {
+		const bPtr = {
+			kind: "pointer",
+			base: { kind: "named", name: "bytes.Buffer" },
+		};
+		funcDecls.push(
+			p7(
+				"bytes.Buffer.Write",
+				[
+					{ name: "b", type: bPtr },
+					{ name: "p", type: BYTE_SLICE_T },
+				],
+				INT_ERR_RET,
+				"buffer_write",
+				{
+					_isMethod: true,
+					_recvTypeName: "bytes.Buffer",
+					_methodName: "Write",
+				},
+			),
+			p7(
+				"bytes.Buffer.WriteString",
+				[
+					{ name: "b", type: bPtr },
+					{ name: "s", type: strType },
+				],
+				INT_ERR_RET,
+				"buffer_write_string",
+				{
+					_isMethod: true,
+					_recvTypeName: "bytes.Buffer",
+					_methodName: "WriteString",
+				},
+			),
+		);
+	}
+	if (hasStrings && mod.structTypes.has("strings.Reader")) {
+		const rPtr = {
+			kind: "pointer",
+			base: { kind: "named", name: "strings.Reader" },
+		};
+		funcDecls.push(
+			p7(
+				"strings.Reader.Read",
+				[
+					{ name: "r", type: rPtr },
+					{ name: "p", type: BYTE_SLICE_T },
+				],
+				INT_ERR_RET,
+				"strings_reader_read",
+				{
+					_isMethod: true,
+					_recvTypeName: "strings.Reader",
+					_methodName: "Read",
+				},
+			),
+			p7(
+				"strings.Reader.Len",
+				[{ name: "r", type: rPtr }],
+				INT_T,
+				"strings_reader_len",
+				{
+					_isMethod: true,
+					_recvTypeName: "strings.Reader",
+					_methodName: "Len",
+				},
+			),
+			p7(
+				"strings.Reader.Reset",
+				[
+					{ name: "r", type: rPtr },
+					{ name: "s", type: strType },
+				],
+				null,
+				"strings_reader_reset",
+				{
+					_isMethod: true,
+					_recvTypeName: "strings.Reader",
+					_methodName: "Reset",
+				},
+			),
+		);
+	}
+	if (hasBytes && mod.structTypes.has("bytes.Reader")) {
+		const rPtr = {
+			kind: "pointer",
+			base: { kind: "named", name: "bytes.Reader" },
+		};
+		funcDecls.push(
+			p7(
+				"bytes.Reader.Read",
+				[
+					{ name: "r", type: rPtr },
+					{ name: "p", type: BYTE_SLICE_T },
+				],
+				INT_ERR_RET,
+				"bytes_reader_read",
+				{ _isMethod: true, _recvTypeName: "bytes.Reader", _methodName: "Read" },
+			),
+			p7(
+				"bytes.Reader.Len",
+				[{ name: "r", type: rPtr }],
+				INT_T,
+				"bytes_reader_len",
+				{ _isMethod: true, _recvTypeName: "bytes.Reader", _methodName: "Len" },
+			),
+			p7(
+				"bytes.Reader.Reset",
+				[
+					{ name: "r", type: rPtr },
+					{ name: "b", type: BYTE_SLICE_T },
+				],
+				null,
+				"bytes_reader_reset",
+				{
+					_isMethod: true,
+					_recvTypeName: "bytes.Reader",
+					_methodName: "Reset",
+				},
+			),
+		);
+	}
+	if (hasIo && mod.structTypes.has("io.discard")) {
+		const dPtr = {
+			kind: "pointer",
+			base: { kind: "named", name: "io.discard" },
+		};
+		funcDecls.push(
+			p7(
+				"io.discard.Write",
+				[
+					{ name: "d", type: dPtr },
+					{ name: "p", type: BYTE_SLICE_T },
+				],
+				INT_ERR_RET,
+				"discard_write",
+				{ _isMethod: true, _recvTypeName: "io.discard", _methodName: "Write" },
+			),
+			p7(
+				"io.discard.WriteString",
+				[
+					{ name: "d", type: dPtr },
+					{ name: "s", type: strType },
+				],
+				INT_ERR_RET,
+				"discard_write_string",
+				{
+					_isMethod: true,
+					_recvTypeName: "io.discard",
+					_methodName: "WriteString",
+				},
+			),
+		);
 	}
 }

@@ -169,6 +169,8 @@ export class ExprsEmitter {
 					this.emitStrconvConst(expr.field, targetWasmType);
 				else if (this._isPathConst(expr))
 					this.emitPathConst(expr.field, targetWasmType);
+				else if (this._isIoConst(expr))
+					this.emitIoConst(expr.field, targetWasmType);
 				else this.emitSelectorExpr(expr);
 				break;
 			}

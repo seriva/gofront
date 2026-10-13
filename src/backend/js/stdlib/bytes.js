@@ -55,12 +55,13 @@ const BYTES_DISPATCH = {
 	SplitN: (a) =>
 		`((b, sep, n) => { if (n === 0) return []; if (n < 0) return ((b, sep) => { const r = []; let i = 0; while (i <= b.length) { const j = b.findIndex((_, k) => k >= i && sep.every((v, l) => b[k + l] === sep[l])); if (j < 0 || j >= b.length) break; r.push(b.slice(i, j)); i = j + sep.length; } r.push(b.slice(i)); return r; })(b, sep); const r = []; let i = 0; for (let c = 1; c < n; c++) { const j = b.findIndex((_, k) => k >= i && sep.every((v, l) => b[k + l] === sep[l])); if (j < 0) break; r.push(b.slice(i, j)); i = j + sep.length; } r.push(b.slice(i)); return r; })(${a[0]}, ${a[1]}, ${a[2]})`,
 	NewReader: (a) =>
-		`{_src: ${a[0]}, _pos: 0, Read(p) { const n = Math.min(p.length, this._src.length - this._pos); for (let i = 0; i < n; i++) p[i] = this._src[this._pos + i]; this._pos += n; return [n, n === 0 ? "EOF" : null]; }, Len() { return this._src.length - this._pos; }, Reset(b) { this._src = b; this._pos = 0; }}`,
+		`((b) => ({ _src: b, _pos: 0, Read(p) { if (this._pos >= this._src.length) return [0, __io_eof]; const n = Math.min(p.length, this._src.length - this._pos); for (let i = 0; i < n; i++) p[i] = this._src[this._pos + i]; this._pos += n; return [n, null]; }, Len() { return Math.max(0, this._src.length - this._pos); }, Reset(b2) { this._src = b2; this._pos = 0; } }))(${a[0]})`,
 };
 
 /** @type {ThisType<CodeGen>} */
 export const bytesMethods = {
 	_genBytes(fn, a) {
+		if (fn === "NewReader") this.useHelper("error");
 		const gen = BYTES_DISPATCH[fn];
 		return gen ? gen(a()) : undefined;
 	},

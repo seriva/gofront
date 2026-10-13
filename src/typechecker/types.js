@@ -105,6 +105,7 @@ export const WASM_SUPPORTED_STDLIB = new Set([
 	"path",
 	"path/filepath",
 	"html",
+	"io",
 	"testing",
 	"gofront/shared",
 ]);
@@ -225,7 +226,22 @@ export const WASM_STDLIB_MEMBERS = new Map([
 			"StringsAreSorted",
 		]),
 	],
-	["fmt", new Set(["Sprintf", "Errorf", "Printf", "Println", "Print"])],
+	[
+		"fmt",
+		new Set([
+			"Sprintf",
+			"Errorf",
+			"Printf",
+			"Println",
+			"Print",
+			"Fprintf",
+			"Fprintln",
+			"Fprint",
+			"Sscan",
+			"Sscanln",
+			"Sscanf",
+		]),
+	],
 	[
 		"strings",
 		new Set([
@@ -273,6 +289,8 @@ export const WASM_STDLIB_MEMBERS = new Map([
 			"TrimRightFunc",
 			"NewReplacer",
 			"Builder",
+			"NewReader",
+			"Reader",
 		]),
 	],
 	[
@@ -401,6 +419,8 @@ export const WASM_STDLIB_MEMBERS = new Map([
 			"Map",
 			"SplitN",
 			"Buffer",
+			"NewReader",
+			"Reader",
 		]),
 	],
 	[
@@ -432,6 +452,19 @@ export const WASM_STDLIB_MEMBERS = new Map([
 		]),
 	],
 	["html", new Set(["EscapeString", "UnescapeString"])],
+	[
+		"io",
+		new Set([
+			"Writer",
+			"Reader",
+			"ReadWriter",
+			"Closer",
+			"EOF",
+			"ReadAll",
+			"Discard",
+			"WriteString",
+		]),
+	],
 ]);
 
 export const VALID_TARGETS = new Set(["js", "wasm", "both"]);

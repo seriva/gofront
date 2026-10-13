@@ -894,12 +894,24 @@ export class BuiltinsEmitter {
 				this.emitSlicesCall(func.field, args, targetWasmType);
 				return true;
 			case "strings":
+				if (func.field === "NewReader") {
+					this.emitStringsNewReader(call, targetWasmType);
+					return true;
+				}
 				this.emitStringsCall(func.field, args, targetWasmType);
 				return true;
 			case "strconv":
 				this.emitStrconvCall(func.field, args);
 				return true;
 			case "fmt":
+				if (func.field.startsWith("Fprint")) {
+					this.emitFprintCall(func.field, call, targetWasmType);
+					return true;
+				}
+				if (func.field.startsWith("Sscan")) {
+					this.emitSscanCall(func.field, call, targetWasmType);
+					return true;
+				}
 				this.emitFmtCall(func.field, args);
 				return true;
 			case "errors":
@@ -921,6 +933,10 @@ export class BuiltinsEmitter {
 				this.emitRandCall(func.field, args, targetWasmType);
 				return true;
 			case "bytes":
+				if (func.field === "NewReader") {
+					this.emitBytesNewReader(call, targetWasmType);
+					return true;
+				}
 				this.emitBytesCall(func.field, args, targetWasmType);
 				return true;
 			case "path":
@@ -929,6 +945,9 @@ export class BuiltinsEmitter {
 				return true;
 			case "html":
 				this.emitHtmlCall(func.field, args);
+				return true;
+			case "io":
+				this.emitIoCall(func.field, call, targetWasmType);
 				return true;
 			default:
 				return false;
@@ -1032,6 +1051,14 @@ export class BuiltinsEmitter {
 		}
 		if (recvTypeName === "bytes.Buffer") {
 			this.emitBytesBufferMethodCall(field, expr, args, targetWasmType);
+			return true;
+		}
+		if (recvTypeName === "strings.Reader") {
+			this.emitStringsReaderMethodCall(field, expr, args, targetWasmType);
+			return true;
+		}
+		if (recvTypeName === "bytes.Reader") {
+			this.emitBytesReaderMethodCall(field, expr, args, targetWasmType);
 			return true;
 		}
 		return false;

@@ -166,7 +166,7 @@ const STRINGS_DISPATCH = {
 	LastIndexFunc: ([s, s2]) =>
 		`((s, f) => { for (let i = s.length - 1; i >= 0; i--) { const cp = s.codePointAt(i); if (f(cp)) return i; } return -1; })(${s}, ${s2})`,
 	NewReader: ([s]) =>
-		`{_src: ${s}, _pos: 0, Read(p) { const n = Math.min(p.length, this._src.length - this._pos); for (let i = 0; i < n; i++) p[i] = this._src.charCodeAt(this._pos + i); this._pos += n; return [n, n === 0 ? "EOF" : null]; }, Len() { return this._src.length - this._pos; }, Reset(s) { this._src = s; this._pos = 0; }}`,
+		`((s) => ({ _bytes: new TextEncoder().encode(s), _pos: 0, Read(p) { if (this._pos >= this._bytes.length) return [0, __io_eof]; const n = Math.min(p.length, this._bytes.length - this._pos); for (let i = 0; i < n; i++) p[i] = this._bytes[this._pos + i]; this._pos += n; return [n, null]; }, Len() { return Math.max(0, this._bytes.length - this._pos); }, Reset(s2) { this._bytes = new TextEncoder().encode(s2); this._pos = 0; } }))(${s})`,
 	NewReplacer: (args) =>
 		`((...pairs) => {
 			const p = [];
@@ -207,6 +207,7 @@ const STRINGS_DISPATCH = {
 /** @type {ThisType<CodeGen>} */
 export const stringsMethods = {
 	_genStrings(fn, a) {
+		if (fn === "NewReader") this.useHelper("error");
 		const args = a();
 		const [s, s2] = args;
 		if (STRINGS_M1[fn]) return `${s}.${STRINGS_M1[fn]}()`;

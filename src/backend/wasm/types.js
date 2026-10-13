@@ -142,6 +142,7 @@ export function toWasmType(goType, checker = null, mod = null) {
 				return "externref";
 
 			case "any":
+			case "error":
 				return "anyref";
 
 			case "void":

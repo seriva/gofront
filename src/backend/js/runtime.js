@@ -325,7 +325,8 @@ export const HELPER_ERROR = `var __error = __error || function(msg, cause) {
 };
 var __strconv_err_syntax = __strconv_err_syntax || __error("invalid syntax");
 var __strconv_err_range = __strconv_err_range || __error("value out of range");
-var __path_err_bad_pattern = __path_err_bad_pattern || __error("syntax error in pattern");`;
+var __path_err_bad_pattern = __path_err_bad_pattern || __error("syntax error in pattern");
+var __io_eof = __io_eof || __error("EOF");`;
 
 export const HELPER_ERROR_IS = `var __errorIs = __errorIs || function(err, target) {
   while (err !== null && err !== undefined) {

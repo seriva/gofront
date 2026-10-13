@@ -94,9 +94,9 @@ const NS_CONSTANTS = {
 		ErrBadPattern: "__path_err_bad_pattern",
 	},
 	io: {
-		EOF: '"EOF"',
+		EOF: "__io_eof",
 		Discard:
-			"{ WriteString(s) { return s.length; }, Write(b) { return b.length; } }",
+			"{ WriteString(s) { return [s.length, null]; }, Write(b) { return [b.length, null]; } }",
 	},
 	os: { Args: "process.argv" },
 	time: {
@@ -554,7 +554,12 @@ export const expressionGenMethods = {
 		if (expr.expr.kind === "Ident") {
 			const nsConst = NS_CONSTANTS[expr.expr.name]?.[expr.field];
 			if (nsConst !== undefined) {
-				if (expr.expr.name === "strconv") this.useHelper("error");
+				if (
+					expr.expr.name === "strconv" ||
+					(expr.expr.name === "io" && expr.field === "EOF")
+				) {
+					this.useHelper("error");
+				}
 				return nsConst;
 			}
 		}

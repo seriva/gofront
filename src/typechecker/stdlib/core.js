@@ -141,6 +141,12 @@ export function setupCoreGlobals(globals, types) {
 				returns: [INT, ERROR],
 				variadic: true,
 			},
+			Scan: {
+				kind: "func",
+				params: [ANY],
+				returns: [INT, ERROR],
+				variadic: true,
+			},
 		},
 	});
 
@@ -623,22 +629,71 @@ export function setupCoreGlobals(globals, types) {
 	});
 
 	const BYTE_SLICE_IO = { kind: "slice", elem: UINT8 };
+	const IO_WRITER = {
+		kind: "interface",
+		name: "io.Writer",
+		methods: new Map([
+			[
+				"Write",
+				{ kind: "func", params: [BYTE_SLICE_IO], returns: [INT, ERROR] },
+			],
+		]),
+	};
+	const IO_READER = {
+		kind: "interface",
+		name: "io.Reader",
+		methods: new Map([
+			[
+				"Read",
+				{ kind: "func", params: [BYTE_SLICE_IO], returns: [INT, ERROR] },
+			],
+		]),
+	};
+	const IO_CLOSER = {
+		kind: "interface",
+		name: "io.Closer",
+		methods: new Map([
+			["Close", { kind: "func", params: [], returns: [ERROR] }],
+		]),
+	};
+	const IO_READWRITER = {
+		kind: "interface",
+		name: "io.ReadWriter",
+		methods: new Map([
+			[
+				"Read",
+				{ kind: "func", params: [BYTE_SLICE_IO], returns: [INT, ERROR] },
+			],
+			[
+				"Write",
+				{ kind: "func", params: [BYTE_SLICE_IO], returns: [INT, ERROR] },
+			],
+		]),
+	};
 	globals.define("io", {
 		kind: "namespace",
 		name: "io",
 		members: {
-			Writer: ANY,
-			Reader: ANY,
+			Writer: IO_WRITER,
+			Reader: IO_READER,
+			Closer: IO_CLOSER,
+			ReadWriter: IO_READWRITER,
 			EOF: ERROR,
 			WriteString: {
 				kind: "func",
-				params: [ANY, STRING],
+				params: [IO_WRITER, STRING],
 				returns: [INT, ERROR],
 			},
-			ReadAll: { kind: "func", params: [ANY], returns: [BYTE_SLICE_IO, ERROR] },
-			Discard: ANY,
+			ReadAll: {
+				kind: "func",
+				params: [IO_READER],
+				returns: [BYTE_SLICE_IO, ERROR],
+			},
+			Discard: IO_WRITER,
 		},
 	});
-	types.set("io.Writer", ANY);
-	types.set("io.Reader", ANY);
+	types.set("io.Writer", IO_WRITER);
+	types.set("io.Reader", IO_READER);
+	types.set("io.Closer", IO_CLOSER);
+	types.set("io.ReadWriter", IO_READWRITER);
 }
