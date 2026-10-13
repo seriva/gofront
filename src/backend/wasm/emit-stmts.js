@@ -1857,8 +1857,9 @@ export class StmtsEmitter {
 			nullable: true,
 			typeIndex: arrInfo.typeIndex,
 		};
-		const arrTmp = this.acquireTemp(arrWType);
-		const offTmp = this.acquireTemp("i32");
+		const hasVal = Boolean(lhs[1] && lhs[1].name !== "_");
+		const arrTmp = hasVal ? this.acquireTemp(arrWType) : null;
+		const offTmp = hasVal ? this.acquireTemp("i32") : null;
 		const lenTmp = this.acquireTemp("i32");
 
 		if (isSlice) {
@@ -1871,18 +1872,26 @@ export class StmtsEmitter {
 			this.emitExpr(iterExpr, sliceWType);
 			this.pushInstruction({ op: "local.set", index: sliceTmp });
 
-			this._emitSliceUnpack(sliceTmp, sliceInfo, {
-				arr: arrTmp,
-				off: offTmp,
-				len: lenTmp,
-			});
+			if (hasVal) {
+				this._emitSliceUnpack(sliceTmp, sliceInfo, {
+					arr: arrTmp,
+					off: offTmp,
+					len: lenTmp,
+				});
+			} else {
+				this._emitSliceUnpack(sliceTmp, sliceInfo, {
+					len: lenTmp,
+				});
+			}
 			this.releaseTemp(sliceTmp, sliceWType);
 		} else {
 			this.emitExpr(iterExpr, arrWType);
-			this.pushInstruction({ op: "local.set", index: arrTmp });
-			this.pushInstruction({ op: "i32.const", value: 0 });
-			this.pushInstruction({ op: "local.set", index: offTmp });
-			this.pushInstruction({ op: "local.get", index: arrTmp });
+			if (hasVal) {
+				this.pushInstruction({ op: "local.set", index: arrTmp });
+				this.pushInstruction({ op: "i32.const", value: 0 });
+				this.pushInstruction({ op: "local.set", index: offTmp });
+				this.pushInstruction({ op: "local.get", index: arrTmp });
+			}
 			this.pushInstruction("array.len");
 			this.pushInstruction({ op: "local.set", index: lenTmp });
 		}
@@ -2016,8 +2025,8 @@ export class StmtsEmitter {
 
 		this.releaseTemp(idxTmp, "i32");
 		this.releaseTemp(lenTmp, "i32");
-		this.releaseTemp(offTmp, "i32");
-		this.releaseTemp(arrTmp, arrWType);
+		if (offTmp !== null) this.releaseTemp(offTmp, "i32");
+		if (arrTmp !== null) this.releaseTemp(arrTmp, arrWType);
 
 		restoreShadowed();
 	}

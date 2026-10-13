@@ -273,17 +273,45 @@ var __sprintf = __sprintf || function(f, ...a) {
     switch (verb) {
       case "s": return pad(String(v == null ? "<nil>" : v), width, false);
       case "c": return pad(String.fromCodePoint(Number(v)), width, false);
-      case "d": return pad(String(Math.trunc(Number(v))), width, zero);
+      case "d": return pad(String(typeof v === "bigint" ? v : Math.trunc(Number(v))), width, zero);
       case "v": {
         const isPlus = flags?.includes("+") ?? false;
         return pad(formatV(v, isPlus, true), width, false);
       }
       case "f": { const n = Number(v), p = prec !== "" ? parseInt(prec) : 6; return pad(n.toFixed(p), width, zero); }
       case "t": return pad(String(!!v), width, false);
-      case "x": return pad((Number(v) >>> 0).toString(16), width, zero);
-      case "X": return pad((Number(v) >>> 0).toString(16).toUpperCase(), width, zero);
-      case "o": return pad((Number(v) >>> 0).toString(8), width, zero);
-      case "b": return pad((Number(v) >>> 0).toString(2), width, zero);
+      case "x": {
+        let hex;
+        if (Array.isArray(v) || ArrayBuffer.isView(v)) {
+          hex = Array.from(v).map((b) => (Number(b) & 0xff).toString(16).padStart(2, "0")).join("");
+        } else if (typeof v === "string") {
+          hex = Array.from(v).map((c) => (c.codePointAt(0) ?? 0).toString(16)).join("");
+        } else if (typeof v === "bigint") {
+          hex = BigInt.asUintN(64, v).toString(16);
+        } else if (Math.abs(Number(v)) > 0xffffffff) {
+          hex = (Math.trunc(Number(v) / 0x100000000) >>> 0).toString(16) + (Number(v) >>> 0).toString(16).padStart(8, "0");
+        } else {
+          hex = (Number(v) >>> 0).toString(16);
+        }
+        return pad(hex, width, zero);
+      }
+      case "X": {
+        let hex;
+        if (Array.isArray(v) || ArrayBuffer.isView(v)) {
+          hex = Array.from(v).map((b) => (Number(b) & 0xff).toString(16).padStart(2, "0").toUpperCase()).join("");
+        } else if (typeof v === "string") {
+          hex = Array.from(v).map((c) => (c.codePointAt(0) ?? 0).toString(16).toUpperCase()).join("");
+        } else if (typeof v === "bigint") {
+          hex = BigInt.asUintN(64, v).toString(16).toUpperCase();
+        } else if (Math.abs(Number(v)) > 0xffffffff) {
+          hex = (Math.trunc(Number(v) / 0x100000000) >>> 0).toString(16).toUpperCase() + (Number(v) >>> 0).toString(16).padStart(8, "0").toUpperCase();
+        } else {
+          hex = (Number(v) >>> 0).toString(16).toUpperCase();
+        }
+        return pad(hex, width, zero);
+      }
+      case "o": return pad((typeof v === "bigint" ? BigInt.asUintN(64, v).toString(8) : (Number(v) >>> 0).toString(8)), width, zero);
+      case "b": return pad((typeof v === "bigint" ? BigInt.asUintN(64, v).toString(2) : (Number(v) >>> 0).toString(2)), width, zero);
       case "q": return pad('"' + String(v == null ? "" : v).replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"', width, false);
       case "e": case "E": { const n = Number(v), p = prec !== "" ? parseInt(prec) : 6; return pad(n.toExponential(p), width, zero); }
       case "g": case "G": { const n = Number(v); return pad(prec !== "" ? n.toPrecision(parseInt(prec)) : String(n), width, zero); }

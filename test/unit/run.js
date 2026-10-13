@@ -68,6 +68,7 @@ import "./wasm/go_semantics.test.js";
 import "./wasm/optimize.test.js";
 import "./wasm/shared.test.js";
 import "./wasm/stdlib.test.js";
+import "./wasm/gaps_postaudit.test.js";
 import "./wasm/golden.test.js";
 
 import { summarize } from "./helpers.js";

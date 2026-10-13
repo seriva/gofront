@@ -37,6 +37,7 @@ features (e.g. `docs/v0.0.5/`).
 | `strings` / `strconv` / `math` | Medium | ✅ Done | `Cut*`, `SplitN`/`SplitAfter*`, `Map`, `*Func` variants, `NewReplacer`, `Builder`, `NewReader`; `Unquote`, `AppendInt`/`AppendFloat`; `math.Remainder`. |
 | `slices` & `fmt` | Medium | ✅ Done | Remaining `slices` members (inline, `call_ref` for `*Func`); composite `%v`/`%+v` matching the JS backend; `Fprint*`, `Sscan*`. |
 | New packages | Medium | ✅ Done | `unicode`, `math/rand`, `bytes` (incl. `Buffer`), `io`, `path`/`path/filepath`, `html`, `time` (except `Sleep`; clock via import). |
+| Test suite optimization | Medium | In Progress | Deduplicate CLI tests (43 `spawnSync` → 3 smoke), `withTempDir` helper, table-driven error tests, unified JS/WASM stdlib parity tests, parallel execution (<5s target). Design doc: [`test-suite-optimization-plan.md`](v1.6.1/test-suite-optimization-plan.md). |
 
 ---
 

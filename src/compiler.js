@@ -203,6 +203,7 @@ function finishWasm(options, merged, pkgTarget, outputDir) {
 			inputSourceMap: wasmSourceMap,
 			sourceMapUrl: WASM_MAP_URL,
 			emitWat: Boolean(options.emitWat),
+			converge: Boolean(options.release),
 		});
 		wasm = opt.wasm;
 		if (opt.wat) wat = opt.wat;

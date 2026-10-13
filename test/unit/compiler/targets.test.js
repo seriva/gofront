@@ -232,7 +232,7 @@ func F() bool { return regexp.MustCompile("a").MatchString("a") }
 	assertContains(err, "1 unsupported stdlib import (regexp)");
 });
 
-test("wasm package rejects stdlib members the backend does not implement", () => {
+test("wasm package rejects removed fmt.Scan", () => {
 	const src = `//gofront:target wasm
 package m
 
@@ -241,8 +241,7 @@ import "fmt"
 func F() { fmt.Scan(nil) }
 `;
 	const err = compileTemp({ "m.go": src });
-	assertContains(err, "'fmt.Scan' is not yet available in wasm packages");
-	assertContains(err, "move this call to a JS package");
+	assertContains(err, "No member 'Scan' in namespace fmt");
 });
 
 test("wasm package rejects time.Sleep with targeted diagnostic", () => {
