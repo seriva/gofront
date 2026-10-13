@@ -24,10 +24,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - `fmt`: composite `%v` and `%+v` formatting for slices, arrays, maps, and structs matching JS backend format output; `Fprintf`, `Fprintln`, `Fprint` writing to `io.Writer`; `Sscan`, `Sscanln`, `Sscanf` scanning into pointers inside WASM.
   - `unicode`: `IsLetter`, `IsDigit`, `IsSpace`, `IsUpper`, `IsLower`, `IsPunct`, `IsControl`, `IsPrint`, `IsGraphic`, `ToUpper`, `ToLower` (inline ASCII fast path with JS Unicode table fallback).
   - `math/rand`: full pure set (`Intn`, `Float64`, `Float32`, `Int`, `Int63`, `Int63n`, `Int31`, `Int31n`, `Shuffle`, `Perm`, `Seed` as no-op) backed by `Math.random` host import.
-  - `bytes`: native WASM implementation of all byte-slice operations (`Contains`, `HasPrefix`, `HasSuffix`, `Index`, `Join`, `Split`, `Replace`, `ToUpper`, `ToLower`, `TrimSpace`, `Equal`, `Count`, `Repeat`, `ReplaceAll`, `TrimPrefix`, `TrimSuffix`, `TrimLeft`, `TrimRight`, `TrimFunc`, `IndexByte`, `LastIndex`, `LastIndexByte`, `Fields`, `Cut`, `ContainsAny`, `ContainsRune`, `Map`, `SplitN`) and `bytes.Buffer`.
-  - `io`: `Reader`, `Writer`, `ReadWriter`, `Closer` interfaces, `EOF` sentinel error value, `ReadAll`, `Discard`, `WriteString`; `strings.NewReader` and `bytes.NewReader` returning `io.Reader`.
-  - `path` & `path/filepath`: `Base`, `Dir`, `Ext`, `Join`, `Clean`, `IsAbs`, `Split`, `Match` in pure WASM over strings.
-  - `html`: `EscapeString`, `UnescapeString` in pure WASM.
+  - `bytes`: WASM implementation of byte-slice operations and `bytes.Buffer`, with native byte loops and host JS helper delegation for string cutset operations (`Trim`, `TrimLeft`, `TrimRight`, `ContainsAny`).
+  - `io`: `Reader`, `Writer`, `ReadWriter`, `Closer` interfaces, `EOF` sentinel error value, `ReadAll`, `Discard`, `WriteString`; `strings.NewReader` and `bytes.NewReader` returning native in-WASM `io.Reader`.
+  - `path` & `path/filepath`: `Base`, `Dir`, `Ext`, `Join`, `Clean`, `IsAbs`, `Split`, `Match` via host JS runtime shims in `boundary.js`.
+  - `html`: `EscapeString`, `UnescapeString` via host JS runtime shims in `boundary.js`.
   - `time`: `Duration` and its constants, `Time` struct and 16 methods (`Format`, `String`, `Year` .. `Second`, `Weekday`, `Unix`, `UnixMilli`, `Add`, `Sub`, `Before`, `After`, `Equal`), `Parse`, `Unix`, `Date`, layout/duration/calendar constants; `Now` and `Since` reading host clock (`Date.now`) and timezone offset imports.
 - **Targeted diagnostics** — `time.Sleep` in `wasm`/`both` packages reports `'time.Sleep' is not yet available in wasm packages` with a hint to keep the call in a JS package, preserving the boundary between synchronous WASM and async JS event loop.
 

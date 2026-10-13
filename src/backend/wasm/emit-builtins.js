@@ -65,18 +65,6 @@ export class BuiltinsEmitter {
 		return null;
 	}
 
-	_getArrayElemType(t) {
-		if (!t) return null;
-		if (t.elem) return t.elem;
-		if (t.underlying?.elem) return t.underlying.elem;
-		if (t.kind === "ArrayType") return t.elem;
-		if (t.name && this.mod.checker?.types?.has(t.name)) {
-			const resolved = this.mod.checker.types.get(t.name);
-			return this._getArrayElemType(resolved);
-		}
-		return null;
-	}
-
 	_emitBuiltinLen(call, targetWasmType) {
 		const arg = call.args[0];
 		const argType = arg._type ?? this._resolveExprGoType(arg);

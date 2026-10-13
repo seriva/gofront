@@ -299,7 +299,7 @@ export function setupExtendedGlobals(globals, types) {
 			]),
 		},
 	});
-	const _makeReaderType = (name, srcType) => ({
+	const _makeReaderType = (name, srcType, resetArgType = srcType) => ({
 		kind: "named",
 		name,
 		underlying: {
@@ -314,11 +314,14 @@ export function setupExtendedGlobals(globals, types) {
 					{ kind: "func", params: [BYTE_SLICE_T], returns: [INT, ERROR] },
 				],
 				["Len", { kind: "func", params: [], returns: [INT] }],
-				["Reset", { kind: "func", params: [srcType], returns: [VOID] }],
+				["Reset", { kind: "func", params: [resetArgType], returns: [VOID] }],
 			]),
 		},
 	});
-	types.set("strings.Reader", _makeReaderType("strings.Reader", STRING));
+	types.set(
+		"strings.Reader",
+		_makeReaderType("strings.Reader", BYTE_SLICE_T, STRING),
+	);
 	types.set("bytes.Reader", _makeReaderType("bytes.Reader", BYTE_SLICE_T));
 	types.set("io.discard", {
 		kind: "named",

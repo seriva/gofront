@@ -14,10 +14,10 @@ import {
 } from "./boundary.js";
 import { foldConstExpr } from "./const-fold.js";
 import { FunctionEmitter } from "./emit.js";
-import { BINARY_MATH_IMPORTS } from "./emit-stdlib.js";
 import { encodeModule, isGoFrontWasm } from "./encode.js";
 import { hasGenerics, monomorphise } from "./monomorph.js";
 import { hasNativeWasmOpt, optimizeWasm } from "./optimize.js";
+import { BINARY_MATH_IMPORTS } from "./stdlib/index.js";
 import {
 	anonIfaceName,
 	ERROR_STRUCT,
@@ -174,6 +174,9 @@ const STDLIB_IMPORTS = [
 	["fmt_printf", [S], []],
 	["fmt_format_v", [S], [S]],
 	["fmt_sscan_init", [S, "i32"], ["i32"]],
+	["fmt_sscanf_init", [S, S], ["i32"]],
+	["fmt_sscan_has_err", [], ["i32"]],
+	["fmt_sscan_err_msg", [], [S]],
 	["fmt_sscan_token_str", ["i32"], [S]],
 	["fmt_sscan_token_i64", ["i32"], ["i64"]],
 	["fmt_sscan_token_f64", ["i32"], ["f64"]],
@@ -2081,7 +2084,18 @@ export function compileWasmModule(
 	}
 	funcDecls.push(...trampolines);
 
-	_collectPackageConsts(progs, mod);
+	_collectPackageConsts(progs, mod, checker);
+	if (checker?.errors?.length > 0) {
+		if (options.boundary) {
+			throw new Error(checker.errors.map((e) => e.message).join("\n"));
+		}
+		return {
+			wasm: null,
+			facade: null,
+			stringTable: null,
+			errors: checker.errors,
+		};
+	}
 	const pendingInits = _collectPackageGlobals(progs, mod, checker);
 	const globalInitFn =
 		pendingInits.length > 0 || initNames.length > 0
@@ -2470,7 +2484,7 @@ export function compileWasmModule(
 			),
 		);
 	}
-	_registerPhase7SyntheticMethods(funcDecls, mod, STR_T, progs);
+	_registerIoSyntheticMethods(funcDecls, mod, STR_T, progs);
 
 	// 1f. Boundary metadata (exported surface of wasm packages)
 	const boundaryMeta = options.boundary
@@ -2532,6 +2546,7 @@ export function compileWasmModule(
 			fn._forceExport ||
 			(!fn._isGlobalInit &&
 				!fn._isRuntimeHelper &&
+				!fn._isIoHelper &&
 				!fn._isPhase7Helper &&
 				(options.exportAll ||
 					fn.name === "main" ||
@@ -2592,8 +2607,8 @@ export function compileWasmModule(
 			emitter.emitSharedHelper(fn);
 		} else if (fn._isRuntimeHelper) {
 			emitter.emitRuntimeHelper(fn);
-		} else if (fn._isPhase7Helper) {
-			emitter.emitPhase7Helper(fn);
+		} else if (fn._isIoHelper || fn._isPhase7Helper) {
+			emitter.emitIoHelper(fn);
 		} else if (fn.body) {
 			emitter.emitFunctionBody(fn.body);
 		}
@@ -2685,7 +2700,7 @@ export function compileWasmModule(
 // parser).  Literals and expressions the folder can reduce become BasicLits in
 // `constCache`; whatever is left is recorded in `nonLiteralConsts` and later
 // becomes a global initialised by the start function.
-function _collectPackageConsts(progs, mod) {
+function _collectPackageConsts(progs, mod, checker = null) {
 	const entries = [];
 	for (const p of progs) {
 		for (const d of p.decls ?? []) {
@@ -2693,7 +2708,12 @@ function _collectPackageConsts(progs, mod) {
 			for (const spec of d.decls ?? []) {
 				for (let i = 0; i < spec.names.length; i++) {
 					if (spec.value?.[i])
-						entries.push({ name: spec.names[i], expr: spec.value[i] });
+						entries.push({
+							name: spec.names[i],
+							expr: spec.value[i],
+							filename: p._filename,
+							source: p._source,
+						});
 				}
 			}
 		}
@@ -2706,7 +2726,25 @@ function _collectPackageConsts(progs, mod) {
 		progress = false;
 		const rest = [];
 		for (const entry of pending) {
-			const lit = foldConstExpr(entry.expr, resolve);
+			let lit = null;
+			try {
+				lit = foldConstExpr(entry.expr, resolve);
+			} catch (err) {
+				if (checker?.err) {
+					const savedFile = checker._currentFile;
+					const savedSource = checker._currentSource;
+					if (entry.filename) checker._currentFile = entry.filename;
+					if (entry.source) checker._currentSource = entry.source;
+					checker.err(err.message, entry.expr);
+					checker._currentFile = savedFile;
+					checker._currentSource = savedSource;
+				} else {
+					throw new Error(
+						`Constant expression error for '${entry.name}': ${err.message}`,
+					);
+				}
+				continue;
+			}
 			if (lit) {
 				mod.constCache.set(entry.name, lit);
 				progress = true;
@@ -2883,6 +2921,10 @@ export function compileWasm(source, options = {}) {
 		...options,
 		exportAll: options.exportAll ?? true,
 	});
+
+	if (checker.errors?.length > 0) {
+		return { wasm: null, errors: checker.errors };
+	}
 
 	return { ...res, errors: [] };
 }
@@ -3294,8 +3336,8 @@ function _collectInterfaceDispatchers(progs, funcDecls, mod, checker) {
 		});
 	}
 
-	const hasPhase7 = importsAnyOf(progs, ["io", "fmt", "strings", "bytes"]);
-	if (hasPhase7) {
+	const hasIo = importsAnyOf(progs, ["io", "fmt", "strings", "bytes"]);
+	if (hasIo) {
 		const byteSliceType = {
 			kind: "slice",
 			elem: { kind: "basic", name: "byte" },
@@ -3335,7 +3377,7 @@ function _collectInterfaceDispatchers(progs, funcDecls, mod, checker) {
 	}
 }
 
-function _registerPhase7SyntheticMethods(funcDecls, mod, strType, programs) {
+function _registerIoSyntheticMethods(funcDecls, mod, strType, programs) {
 	const progs = Array.isArray(programs) ? programs : [programs];
 	const hasStrings = importsAnyOf(progs, ["strings"]);
 	const hasBytes = importsAnyOf(progs, ["bytes"]);
@@ -3348,13 +3390,13 @@ function _registerPhase7SyntheticMethods(funcDecls, mod, strType, programs) {
 	const INT_T = { kind: "basic", name: "int" };
 	const ERR_T = { kind: "interface", name: "error" };
 	const INT_ERR_RET = { kind: "tuple", types: [INT_T, ERR_T] };
-	const p7 = (name, params, returnType, kind, extra = {}) => ({
+	const ioHelper = (name, params, returnType, kind, extra = {}) => ({
 		kind: "FuncDecl",
 		name,
 		params,
 		returnType,
 		body: { kind: "Block", stmts: [], list: [] },
-		_isPhase7Helper: kind,
+		_isIoHelper: kind,
 		_rootFuncDecl: null,
 		...extra,
 	});
@@ -3365,7 +3407,7 @@ function _registerPhase7SyntheticMethods(funcDecls, mod, strType, programs) {
 			base: { kind: "named", name: "strings.Builder" },
 		};
 		funcDecls.push(
-			p7(
+			ioHelper(
 				"strings.Builder.Write",
 				[
 					{ name: "b", type: bPtr },
@@ -3379,7 +3421,7 @@ function _registerPhase7SyntheticMethods(funcDecls, mod, strType, programs) {
 					_methodName: "Write",
 				},
 			),
-			p7(
+			ioHelper(
 				"strings.Builder.WriteString",
 				[
 					{ name: "b", type: bPtr },
@@ -3401,7 +3443,7 @@ function _registerPhase7SyntheticMethods(funcDecls, mod, strType, programs) {
 			base: { kind: "named", name: "bytes.Buffer" },
 		};
 		funcDecls.push(
-			p7(
+			ioHelper(
 				"bytes.Buffer.Write",
 				[
 					{ name: "b", type: bPtr },
@@ -3415,7 +3457,7 @@ function _registerPhase7SyntheticMethods(funcDecls, mod, strType, programs) {
 					_methodName: "Write",
 				},
 			),
-			p7(
+			ioHelper(
 				"bytes.Buffer.WriteString",
 				[
 					{ name: "b", type: bPtr },
@@ -3437,7 +3479,7 @@ function _registerPhase7SyntheticMethods(funcDecls, mod, strType, programs) {
 			base: { kind: "named", name: "strings.Reader" },
 		};
 		funcDecls.push(
-			p7(
+			ioHelper(
 				"strings.Reader.Read",
 				[
 					{ name: "r", type: rPtr },
@@ -3451,7 +3493,7 @@ function _registerPhase7SyntheticMethods(funcDecls, mod, strType, programs) {
 					_methodName: "Read",
 				},
 			),
-			p7(
+			ioHelper(
 				"strings.Reader.Len",
 				[{ name: "r", type: rPtr }],
 				INT_T,
@@ -3462,7 +3504,7 @@ function _registerPhase7SyntheticMethods(funcDecls, mod, strType, programs) {
 					_methodName: "Len",
 				},
 			),
-			p7(
+			ioHelper(
 				"strings.Reader.Reset",
 				[
 					{ name: "r", type: rPtr },
@@ -3484,7 +3526,7 @@ function _registerPhase7SyntheticMethods(funcDecls, mod, strType, programs) {
 			base: { kind: "named", name: "bytes.Reader" },
 		};
 		funcDecls.push(
-			p7(
+			ioHelper(
 				"bytes.Reader.Read",
 				[
 					{ name: "r", type: rPtr },
@@ -3494,14 +3536,14 @@ function _registerPhase7SyntheticMethods(funcDecls, mod, strType, programs) {
 				"bytes_reader_read",
 				{ _isMethod: true, _recvTypeName: "bytes.Reader", _methodName: "Read" },
 			),
-			p7(
+			ioHelper(
 				"bytes.Reader.Len",
 				[{ name: "r", type: rPtr }],
 				INT_T,
 				"bytes_reader_len",
 				{ _isMethod: true, _recvTypeName: "bytes.Reader", _methodName: "Len" },
 			),
-			p7(
+			ioHelper(
 				"bytes.Reader.Reset",
 				[
 					{ name: "r", type: rPtr },
@@ -3523,7 +3565,7 @@ function _registerPhase7SyntheticMethods(funcDecls, mod, strType, programs) {
 			base: { kind: "named", name: "io.discard" },
 		};
 		funcDecls.push(
-			p7(
+			ioHelper(
 				"io.discard.Write",
 				[
 					{ name: "d", type: dPtr },
@@ -3533,7 +3575,7 @@ function _registerPhase7SyntheticMethods(funcDecls, mod, strType, programs) {
 				"discard_write",
 				{ _isMethod: true, _recvTypeName: "io.discard", _methodName: "Write" },
 			),
-			p7(
+			ioHelper(
 				"io.discard.WriteString",
 				[
 					{ name: "d", type: dPtr },

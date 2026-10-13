@@ -556,11 +556,12 @@ export const expressionGenMethods = {
 		if (expr.expr.kind === "Ident") {
 			const nsConst = NS_CONSTANTS[expr.expr.name]?.[expr.field];
 			if (nsConst !== undefined) {
-				if (
-					expr.expr.name === "strconv" ||
-					(expr.expr.name === "io" && expr.field === "EOF")
-				) {
-					this.useHelper("error");
+				if (expr.expr.name === "strconv") {
+					this.useHelper("strconvError");
+				} else if (expr.expr.name === "path" || expr.expr.name === "filepath") {
+					if (expr.field === "ErrBadPattern") this.useHelper("pathError");
+				} else if (expr.expr.name === "io" && expr.field === "EOF") {
+					this.useHelper("ioEOF");
 				}
 				return nsConst;
 			}

@@ -3,10 +3,11 @@
 /** @typedef {import('../index.js').CodeGen} CodeGen */
 
 const _SSCAN_LOOP =
-	`let n = 0; for (let i = 0; i < ptrs.length && i < tokens.length; i++) { ` +
+	`let n = 0, err = null; for (let i = 0; i < ptrs.length && i < tokens.length; i++) { ` +
 	`const t = tokens[i]; const p = ptrs[i]; ` +
-	`if (typeof p.value === "number") { const v = Number(t); p.value = Number.isNaN(v) ? 0 : v; } ` +
-	`else if (typeof p.value === "boolean") p.value = t === "true"; ` +
+	`if (typeof p.value === "number") { const v = Number(t); if (Number.isNaN(v) || !/^[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?$/.test(t)) { err = __error("expected number"); break; } p.value = v; } ` +
+	`else if (typeof p.value === "bigint") { try { if (!/^[+-]?\\d+$/.test(t)) throw 1; p.value = BigInt(t); } catch { err = __error("expected integer"); break; } } ` +
+	`else if (typeof p.value === "boolean") { const tl = String(t).toLowerCase(); if (tl === "true" || tl === "1" || tl === "t") p.value = true; else if (tl === "false" || tl === "0" || tl === "f") p.value = false; else { err = __error("expected boolean"); break; } } ` +
 	`else p.value = t; n++; }`;
 
 /** @type {ThisType<CodeGen>} */
@@ -48,7 +49,7 @@ export const fmtMethods = {
 					.slice(1)
 					.map((e) => this.genExpr(e))
 					.join(", ");
-				return `((str, ...ptrs) => { const tokens = str.trim().split(/\\s+/).filter(Boolean); ${_SSCAN_LOOP} return [n, n < ptrs.length ? __error("unexpected EOF") : null]; })(${strArg}, ${restArgs})`;
+				return `((str, ...ptrs) => { const tokens = str.trim().split(/\\s+/).filter(Boolean); ${_SSCAN_LOOP} return [n, err ? err : (n < ptrs.length ? __error("unexpected EOF") : null)]; })(${strArg}, ${restArgs})`;
 			}
 			case "Sscanln": {
 				this.useHelper("error");
@@ -57,7 +58,7 @@ export const fmtMethods = {
 					.slice(1)
 					.map((e) => this.genExpr(e))
 					.join(", ");
-				return `((str, ...ptrs) => { const tokens = str.split("\\n")[0].trim().split(/\\s+/).filter(Boolean); ${_SSCAN_LOOP} return [n, n < ptrs.length ? __error("unexpected EOF") : null]; })(${strArg}, ${restArgs})`;
+				return `((str, ...ptrs) => { const tokens = str.split("\\n")[0].trim().split(/\\s+/).filter(Boolean); ${_SSCAN_LOOP} return [n, err ? err : (n < ptrs.length ? __error("unexpected EOF") : null)]; })(${strArg}, ${restArgs})`;
 			}
 			case "Sscanf": {
 				this.useHelper("error");
@@ -67,7 +68,45 @@ export const fmtMethods = {
 					.slice(2)
 					.map((e) => this.genExpr(e))
 					.join(", ");
-				return `((str, _fmt, ...ptrs) => { const tokens = str.trim().split(/\\s+/).filter(Boolean); ${_SSCAN_LOOP} return [n, n < ptrs.length ? __error("unexpected EOF") : null]; })(${strArg}, ${fmtArg}, ${restArgs})`;
+				return (
+					`((str, fmt, ...ptrs) => { ` +
+					`const s = String(str); const f = String(fmt); ` +
+					`let si = 0, fi = 0; const tokens = []; let parseErr = null; ` +
+					`while (fi < f.length) { ` +
+					`if (/\\s/.test(f[fi])) { ` +
+					`while (fi < f.length && /\\s/.test(f[fi])) fi++; ` +
+					`while (si < s.length && /\\s/.test(s[si])) si++; ` +
+					`continue; ` +
+					`} ` +
+					`if (f[fi] === "%") { ` +
+					`if (fi + 1 < f.length && f[fi + 1] === "%") { ` +
+					`if (s[si] !== "%") { parseErr = __error("input does not match format"); break; } ` +
+					`si++; fi += 2; continue; ` +
+					`} ` +
+					`const vm = f.slice(fi).match(/^%[vdsfqtxXbcoeEfFgG]/); ` +
+					`if (vm) { ` +
+					`const verb = vm[0]; fi += verb.length; ` +
+					`if (verb !== "%c") { while (si < s.length && /\\s/.test(s[si])) si++; } ` +
+					`if (si >= s.length) break; ` +
+					`let tokRe = /^\\S+/; ` +
+					`if (verb === "%d" || verb === "%i") tokRe = /^[+-]?\\d+/; ` +
+					`else if (verb === "%f" || verb === "%F" || verb === "%e" || verb === "%E" || verb === "%g" || verb === "%G") tokRe = /^[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?/; ` +
+					`else if (verb === "%t") tokRe = /^(?:true|false|1|0|t|f|T|F|TRUE|FALSE)/; ` +
+					`else if (verb === "%x" || verb === "%X") tokRe = /^[+-]?(?:0x)?[0-9a-fA-F]+/; ` +
+					`else if (verb === "%c") tokRe = /^[\\s\\S]/; ` +
+					`const m = s.slice(si).match(tokRe); ` +
+					`if (!m) { parseErr = __error("input does not match format"); break; } ` +
+					`tokens.push(m[0]); si += m[0].length; continue; ` +
+					`} ` +
+					`} ` +
+					`if (si >= s.length) break; ` +
+					`if (s[si] !== f[fi]) { parseErr = __error("input does not match format"); break; } ` +
+					`si++; fi++; ` +
+					`} ` +
+					`${_SSCAN_LOOP} ` +
+					`return [n, parseErr || err || (n < ptrs.length ? __error("unexpected EOF") : null)]; ` +
+					`})(${strArg}, ${fmtArg}, ${restArgs})`
+				);
 			}
 			default:
 				return undefined;

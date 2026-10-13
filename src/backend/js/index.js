@@ -35,15 +35,18 @@ import {
 	HELPER_ERROR_IS,
 	HELPER_IFACE_BOX,
 	HELPER_INJECT_STYLES,
+	HELPER_IO_EOF,
 	HELPER_LEN,
 	HELPER_NIL_CALL,
 	HELPER_PANIC,
 	HELPER_PATH_CLEAN,
+	HELPER_PATH_ERROR,
 	HELPER_S,
 	HELPER_SCLONE,
 	HELPER_SORT_SLICE,
 	HELPER_SPRINTF,
 	HELPER_STRCONV,
+	HELPER_STRCONV_ERROR,
 	HELPER_TESTING,
 	HELPER_TIME_FMT,
 	HELPER_TIME_PARSE,
@@ -111,6 +114,9 @@ const HELPER_MAP = [
 	["sprintf", HELPER_SPRINTF],
 	["error", HELPER_ERROR],
 	["errorIs", HELPER_ERROR_IS],
+	["strconvError", HELPER_STRCONV_ERROR],
+	["pathError", HELPER_PATH_ERROR],
+	["ioEOF", HELPER_IO_EOF],
 	["strconv", HELPER_STRCONV],
 	["pathClean", HELPER_PATH_CLEAN],
 	["sortSlice", HELPER_SORT_SLICE],
@@ -428,6 +434,9 @@ export class CodeGen {
 	/** Marks a runtime helper (key of HELPER_MAP) as needed by the output. */
 	useHelper(name) {
 		this._helpers.add(name);
+		if (name === "strconvError" || name === "pathError" || name === "ioEOF") {
+			this._helpers.add("error");
+		}
 	}
 
 	_prependHelpers(isTest = false) {
