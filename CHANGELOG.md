@@ -4,6 +4,38 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.6.1] - 2026-10-13
+
+### Added
+- **Language completeness in `wasm` packages** — package-level non-literal constants (`const X = len("abc") * 2` folded at compile time; runtime folded expressions initialized as module globals in the WASM `start` function); array-typed map keys (`map[[N]T]V`) hashed and compared element-wise; interface-typed map keys (`map[any]V`, `map[Interface]V`) hashed on dynamic type id plus value hash with dynamic type equality, raising Go's panic (`runtime error: hash of unhashable type ...`) on unhashable keys (slice, map, func).
+- **Expanded JS ↔ WASM boundary types** —
+  - `error`: crosses WASM → JS as an `Error` subclass carrying `.message` and WASM handle (`__ref`) so `errors.Is`/`Unwrap` retain identity; nil errors cross as `null`; JS → WASM accepts only WASM-owned error instances.
+  - `map[K]V` (K = string, number, bool): copied bidirectionally as a fresh JS `Map` in insertion order; accepts plain JS objects or `Map`s as parameters without mutating WASM state.
+  - Pointers to non-structs (`*float64`, `*int`, etc.): copy-in/copy-out box `{ value }` written back after call (write-back skipped on panic).
+  - Anonymous structs: copied as plain JS objects `{ [field]: value }` with matching field names.
+  - Anonymous interfaces (`interface{ ... }`): synthesized internal facade keyed on sorted method set with shared facade classes.
+  - Exported non-literal constants: exposed on the JS facade as module constants read once after module initialization.
+  - `time.Time` & `time.Duration`: `Duration` crosses as `Number` (`int64`); `Time` copies into the JS `time.Time` object via Unix milliseconds (preserving timezone offset).
+- **Wider stdlib in `wasm` packages** —
+  - `strings`: added `Cut`, `CutPrefix`, `CutSuffix`, `SplitN`, `SplitAfter`, `SplitAfterN`, `LastIndexAny`, `Map`, `IndexFunc`, `LastIndexFunc`, `TrimFunc`, `TrimLeftFunc`, `TrimRightFunc`, `NewReplacer` (+ `Replace`), and `Builder` (`WriteString`, `WriteByte`, `WriteRune`, `String`, `Len`, `Reset`, `Grow`) as an in-WASM struct.
+  - `strconv`: added `Unquote` (returns Go's `ErrSyntax`), `AppendInt`, `AppendFloat`.
+  - `math`: added `Remainder`.
+  - `slices`: added `Compare`, `SortFunc`, `SortStableFunc`, `IsSorted`, `IsSortedFunc`, `Min`, `Max`, `MinFunc`, `MaxFunc`, `Compact`, `CompactFunc`, `Concat`, `Delete`, `DeleteFunc`, `Insert`, `Replace`, `Grow`, `Clip`; all `*Func` callbacks run inline via `call_ref`.
+  - `fmt`: composite `%v` and `%+v` formatting for slices, arrays, maps, and structs matching JS backend format output; `Fprintf`, `Fprintln`, `Fprint` writing to `io.Writer`; `Sscan`, `Sscanln`, `Sscanf` scanning into pointers inside WASM.
+  - `unicode`: `IsLetter`, `IsDigit`, `IsSpace`, `IsUpper`, `IsLower`, `IsPunct`, `IsControl`, `IsPrint`, `IsGraphic`, `ToUpper`, `ToLower` (inline ASCII fast path with JS Unicode table fallback).
+  - `math/rand`: full pure set (`Intn`, `Float64`, `Float32`, `Int`, `Int63`, `Int63n`, `Int31`, `Int31n`, `Shuffle`, `Perm`, `Seed` as no-op) backed by `Math.random` host import.
+  - `bytes`: native WASM implementation of all byte-slice operations (`Contains`, `HasPrefix`, `HasSuffix`, `Index`, `Join`, `Split`, `Replace`, `ToUpper`, `ToLower`, `TrimSpace`, `Equal`, `Count`, `Repeat`, `ReplaceAll`, `TrimPrefix`, `TrimSuffix`, `TrimLeft`, `TrimRight`, `TrimFunc`, `IndexByte`, `LastIndex`, `LastIndexByte`, `Fields`, `Cut`, `ContainsAny`, `ContainsRune`, `Map`, `SplitN`) and `bytes.Buffer`.
+  - `io`: `Reader`, `Writer`, `ReadWriter`, `Closer` interfaces, `EOF` sentinel error value, `ReadAll`, `Discard`, `WriteString`; `strings.NewReader` and `bytes.NewReader` returning `io.Reader`.
+  - `path` & `path/filepath`: `Base`, `Dir`, `Ext`, `Join`, `Clean`, `IsAbs`, `Split`, `Match` in pure WASM over strings.
+  - `html`: `EscapeString`, `UnescapeString` in pure WASM.
+  - `time`: `Duration` and its constants, `Time` struct and 16 methods (`Format`, `String`, `Year` .. `Second`, `Weekday`, `Unix`, `UnixMilli`, `Add`, `Sub`, `Before`, `After`, `Equal`), `Parse`, `Unix`, `Date`, layout/duration/calendar constants; `Now` and `Since` reading host clock (`Date.now`) and timezone offset imports.
+- **Targeted diagnostics** — `time.Sleep` in `wasm`/`both` packages reports `'time.Sleep' is not yet available in wasm packages` with a hint to keep the call in a JS package, preserving the boundary between synchronous WASM and async JS event loop.
+
+### Fixed
+- **Layout token alternation order** — resolved two-digit layout tokens (`15`, `01`, `02`, `04`, `05`) matching after single-digit tokens (`1`, `2`, `3`, `4`, `5`) in `time.Format` and `time.Parse` layout regex.
+- **Operator precedence under negation** — wrapped `Before`, `After`, and `Equal` expressions in grouping parentheses in the JS backend `time` stdlib to ensure correct evaluation when negated with `!`.
+- **Selector type conversions** — fixed typechecker `_isTypeRef` resolution on namespace selectors (such as `time.Duration(x)`) and added `call._isTypeConversion` handler in WASM emitter.
+
 ## [1.6.0] - 2026-10-10
 
 ### Added
