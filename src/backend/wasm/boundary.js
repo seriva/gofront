@@ -1389,6 +1389,21 @@ export function addBoundaryHelpers(mod, meta) {
 					{ op: "end" },
 				],
 			);
+			addFunc(
+				"__time_offset",
+				[EXT],
+				["i32"],
+				[
+					get(0),
+					{ op: "ref.is_null" },
+					{ op: "if", blockType: "i32" },
+					{ op: "i32.const", value: 0 },
+					{ op: "else" },
+					...getIn(0, timeWType),
+					{ op: "struct.get", typeIndex: timeInfo.typeIndex, fieldIndex: 1 },
+					{ op: "end" },
+				],
+			);
 		}
 	}
 
@@ -1856,25 +1871,108 @@ function ${P}stdlib(stringTable, io) {
 	let matchHasErr = 0;
 	let trimStart = 0, trimEnd = 0;
 	let sscanTokens = [];
+	let sscanHasErr = 0, sscanErrMsg = "";
 	let timeParseErr = null, timeParseOffset = 0;
 	return {
 		"fmt_sscan_init": (s, mode) => {
+			sscanHasErr = 0;
+			sscanErrMsg = "";
 			const str = s ?? "";
 			sscanTokens = (mode === 1 ? str.split("\\n")[0] : str).trim().split(/\\s+/).filter(Boolean);
 			return sscanTokens.length;
 		},
+		"fmt_sscanf_init": (s, fmt) => {
+			sscanHasErr = 0;
+			sscanErrMsg = "";
+			const str = s ?? "";
+			const fmtStr = fmt ?? "";
+			let si = 0, fi = 0;
+			sscanTokens = [];
+			while (fi < fmtStr.length) {
+				if (/\\s/.test(fmtStr[fi])) {
+					while (fi < fmtStr.length && /\\s/.test(fmtStr[fi])) fi++;
+					while (si < str.length && /\\s/.test(str[si])) si++;
+					continue;
+				}
+				if (fmtStr[fi] === "%") {
+					if (fi + 1 < fmtStr.length && fmtStr[fi + 1] === "%") {
+						if (str[si] !== "%") {
+							sscanHasErr = 1;
+							sscanErrMsg = "input does not match format";
+							break;
+						}
+						si++;
+						fi += 2;
+						continue;
+					}
+					const vm = fmtStr.slice(fi).match(/^%[vdsfqtxXbcoeEfFgG]/);
+					if (vm) {
+						const verb = vm[0];
+						fi += verb.length;
+						if (verb !== "%c") {
+							while (si < str.length && /\\s/.test(str[si])) si++;
+						}
+						if (si >= str.length) break;
+						let tokRe = /^\\S+/;
+						if (verb === "%d" || verb === "%i") tokRe = /^[+-]?\\d+/;
+						else if (verb === "%f" || verb === "%F" || verb === "%e" || verb === "%E" || verb === "%g" || verb === "%G") tokRe = /^[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?/;
+						else if (verb === "%t") tokRe = /^(?:true|false|1|0|t|f|T|F|TRUE|FALSE)/;
+						else if (verb === "%x" || verb === "%X") tokRe = /^[+-]?(?:0x)?[0-9a-fA-F]+/;
+						else if (verb === "%c") tokRe = /^[\\s\\S]/;
+						const m = str.slice(si).match(tokRe);
+						if (!m) {
+							sscanHasErr = 1;
+							sscanErrMsg = "input does not match format";
+							break;
+						}
+						sscanTokens.push(m[0]);
+						si += m[0].length;
+						continue;
+					}
+				}
+				if (si >= str.length) break;
+				if (str[si] !== fmtStr[fi]) {
+					sscanHasErr = 1;
+					sscanErrMsg = "input does not match format";
+					break;
+				}
+				si++;
+				fi++;
+			}
+			return sscanTokens.length;
+		},
+		"fmt_sscan_has_err": () => sscanHasErr,
+		"fmt_sscan_err_msg": () => sscanErrMsg || "syntax error",
 		"fmt_sscan_token_str": (i) => sscanTokens[i] ?? "",
 		"fmt_sscan_token_i64": (i) => {
+			if (i >= sscanTokens.length) { sscanHasErr = 1; sscanErrMsg = "unexpected EOF"; return 0n; }
 			const t = sscanTokens[i];
-			try { return BigInt(Math.trunc(Number(t) || 0)); } catch { return 0n; }
+			if (!/^[+-]?\\d+$/.test(t)) {
+				sscanHasErr = 1;
+				sscanErrMsg = "expected integer";
+				return 0n;
+			}
+			try { return BigInt(t); } catch { sscanHasErr = 1; sscanErrMsg = "expected integer"; return 0n; }
 		},
 		"fmt_sscan_token_f64": (i) => {
+			if (i >= sscanTokens.length) { sscanHasErr = 1; sscanErrMsg = "unexpected EOF"; return 0; }
 			const t = sscanTokens[i];
-			return Number(t) || 0;
+			const n = Number(t);
+			if (Number.isNaN(n) || !/^[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?$/.test(t)) {
+				sscanHasErr = 1;
+				sscanErrMsg = "expected float";
+				return 0;
+			}
+			return n;
 		},
 		"fmt_sscan_token_bool": (i) => {
-			const t = sscanTokens[i];
-			return t === "true" ? 1 : 0;
+			if (i >= sscanTokens.length) { sscanHasErr = 1; sscanErrMsg = "unexpected EOF"; return 0; }
+			const t = sscanTokens[i]?.toLowerCase();
+			if (t === "true" || t === "1" || t === "t") return 1;
+			if (t === "false" || t === "0" || t === "f") return 0;
+			sscanHasErr = 1;
+			sscanErrMsg = "expected boolean";
+			return 0;
 		},
 		"testing_run": (t, name, fn) => (t.Run(name, (sub) => { io.late.exports.__testing_run_cb(fn, sub); }) ? 1 : 0),
 		"fmt_sprintf": (f) => __sprintf(f ?? "", ...io.take()),
@@ -2229,11 +2327,11 @@ function ${P}stdlib(stringTable, io) {
 	};
 }
 function ${P}trim(s, cutset, left, right) {
-	const cs = Array.from(cutset);
+	const cs = new Set(Array.from(cutset));
 	const chars = Array.from(s);
 	let a = 0, b = chars.length;
-	if (left) while (a < b && cs.includes(chars[a])) a++;
-	if (right) while (b > a && cs.includes(chars[b - 1])) b--;
+	if (left) while (a < b && cs.has(chars[a])) a++;
+	if (right) while (b > a && cs.has(chars[b - 1])) b--;
 	return chars.slice(a, b).join("");
 }`;
 
@@ -2536,7 +2634,8 @@ function ${P}errin(e) {
 		out.push(`function ${P}timeout(r) {
 	if (r == null) return null;
 	const ms = __w.__time_unix_milli ? __w.__time_unix_milli(r) : 0;
-	return { _d: new Date(ms) };
+	const off = __w.__time_offset ? __w.__time_offset(r) : 0;
+	return { _d: new Date(ms), _offset: off };
 }
 function ${P}timeout_ptr(r) {
 	return ${P}timeout(r);
@@ -2545,7 +2644,7 @@ function ${P}timein(v) {
 	if (v == null) return null;
 	const d = v._d ? v._d : (v instanceof Date ? v : new Date(v));
 	const ms = d.getTime();
-	const off = -d.getTimezoneOffset() * 60;
+	const off = typeof v?._offset === "number" ? v._offset : -d.getTimezoneOffset() * 60;
 	return __w.__time_make ? __w.__time_make(ms, off) : null;
 }
 function ${P}timein_ptr(v) {

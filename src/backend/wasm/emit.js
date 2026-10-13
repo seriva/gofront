@@ -8,11 +8,14 @@ import { BuiltinsEmitter } from "./emit-builtins.js";
 import { ExprsEmitter } from "./emit-exprs.js";
 import { MapsEmitter } from "./emit-maps.js";
 import { SharedEmitter } from "./emit-shared.js";
-import { StdlibEmitter } from "./emit-stdlib.js";
-import { Phase6Emitter } from "./emit-stdlib-phase6.js";
-import { Phase7Emitter } from "./emit-stdlib-phase7.js";
-import { Phase8Emitter } from "./emit-stdlib-phase8.js";
 import { StmtsEmitter } from "./emit-stmts.js";
+import {
+	BytesEmitter,
+	IoEmitter,
+	PurePackagesEmitter,
+	StdlibCoreEmitter,
+	TimeEmitter,
+} from "./stdlib/index.js";
 import {
 	isArrayType,
 	isPointerToStruct,
@@ -1395,6 +1398,13 @@ export class FunctionEmitter {
 function copyMethods(target, source) {
 	const descriptors = Object.getOwnPropertyDescriptors(source.prototype);
 	delete descriptors.constructor;
+	for (const key of Object.keys(descriptors)) {
+		if (key in target.prototype) {
+			throw new Error(
+				`Duplicate method "${key}" found while mixing ${source.name} into ${target.name}`,
+			);
+		}
+	}
 	Object.defineProperties(target.prototype, descriptors);
 }
 
@@ -1402,8 +1412,9 @@ copyMethods(FunctionEmitter, MapsEmitter);
 copyMethods(FunctionEmitter, StmtsEmitter);
 copyMethods(FunctionEmitter, ExprsEmitter);
 copyMethods(FunctionEmitter, BuiltinsEmitter);
-copyMethods(FunctionEmitter, StdlibEmitter);
-copyMethods(FunctionEmitter, Phase6Emitter);
-copyMethods(FunctionEmitter, Phase7Emitter);
-copyMethods(FunctionEmitter, Phase8Emitter);
+copyMethods(FunctionEmitter, StdlibCoreEmitter);
+copyMethods(FunctionEmitter, BytesEmitter);
+copyMethods(FunctionEmitter, PurePackagesEmitter);
+copyMethods(FunctionEmitter, IoEmitter);
+copyMethods(FunctionEmitter, TimeEmitter);
 copyMethods(FunctionEmitter, SharedEmitter);

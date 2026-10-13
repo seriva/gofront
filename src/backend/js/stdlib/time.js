@@ -51,10 +51,23 @@ export const timeMethods = {
 		return gen ? gen(recvJs, args) : undefined;
 	},
 
-	_genTime(fn, a) {
+	_genTime(fn, a, expr) {
 		if (fn === "Parse") {
 			this.useHelper("timeParse");
 			return `__timeParse(${a()[0]}, ${a()[1]})`;
+		}
+		if (fn === "Date") {
+			const args = a();
+			const locArg = expr?.args?.[7];
+			const isUtc =
+				(locArg?.kind === "SelectorExpr" &&
+					(locArg.sel?.name === "UTC" || locArg.field === "UTC")) ||
+				(locArg?.kind === "Ident" && locArg.name === "UTC") ||
+				args[7] === '"UTC"';
+			if (isUtc) {
+				return `{_d: new Date(Date.UTC(${args[0]}, ${args[1]} - 1, ${args[2]}, ${args[3]}, ${args[4]}, ${args[5]}, Math.round(Number(${args[6] || 0}) / 1000000))), _offset: 0}`;
+			}
+			return `{_d: new Date(${args[0]}, ${args[1]} - 1, ${args[2]}, ${args[3]}, ${args[4]}, ${args[5]}, Math.round(Number(${args[6] || 0}) / 1000000))}`;
 		}
 		const gen = TIME_DISPATCH[fn];
 		return gen ? gen(a()) : undefined;

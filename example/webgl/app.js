@@ -1,3 +1,75 @@
+var __ifv = __ifv || function(x, ptrFields) {
+  if (x === null || typeof x !== "object") return x;
+  const c = typeof x.__clone === "function" ? x.__clone() : Object.assign(Object.create(Object.getPrototypeOf(x)), x);
+  Object.defineProperty(c, "__v", { value: true, configurable: true });
+  if (Array.isArray(ptrFields)) {
+    for (const f of ptrFields) {
+      if (f.indexOf(".") !== -1) {
+        const parts = f.split(".");
+        let cur = c;
+        for (let j = 0; j < parts.length - 1; j++) cur = cur?.[parts[j]];
+        const last = parts[parts.length - 1];
+        if (cur?.[last] !== null && typeof cur?.[last] === "object") __ifp(cur[last]);
+      } else if (c[f] !== null && typeof c[f] === "object") {
+        __ifp(c[f], ptrFields);
+      }
+    }
+  }
+  return c;
+};
+var __ifp = __ifp || function(x, ptrFields, seen) {
+  if (x === null || typeof x !== "object") return x;
+  if (x.__p !== true && Object.isExtensible(x))
+    Object.defineProperty(x, "__p", { value: true, configurable: true });
+  if (Array.isArray(ptrFields)) {
+    seen = seen || new Set();
+    if (seen.has(x)) return x;
+    seen.add(x);
+    for (const f of ptrFields) {
+      if (f.indexOf(".") !== -1) {
+        const parts = f.split(".");
+        let cur = x;
+        for (let j = 0; j < parts.length - 1; j++) cur = cur?.[parts[j]];
+        const last = parts[parts.length - 1];
+        if (cur?.[last] !== null && typeof cur?.[last] === "object") __ifp(cur[last]);
+      } else if (x[f] !== null && typeof x[f] === "object") {
+        __ifp(x[f], ptrFields, seen);
+      }
+    }
+  }
+  return x;
+};
+var __ifm = __ifm || function(x) {
+  if (x === null || typeof x !== "object") x = {};
+  if (x.__map !== true && Object.isExtensible(x))
+    Object.defineProperty(x, "__map", { value: true, configurable: true });
+  return x;
+};
+var __ifpm = __ifpm || function(x) {
+  if (x === null || typeof x !== "object") x = {};
+  if (x.__map !== true && Object.isExtensible(x)) {
+    Object.defineProperty(x, "__map", { value: true, configurable: true });
+    Object.defineProperty(x, "__ptr_map", { value: true, configurable: true });
+  }
+  return x;
+};
+var __ifs = __ifs || function(x, ptrFields) {
+  if (x === null || x === undefined) x = [];
+  if (x.__slice !== true && Object.isExtensible(x))
+    Object.defineProperty(x, "__slice", { value: true, configurable: true });
+  if (Array.isArray(ptrFields) && Object.isExtensible(x))
+    Object.defineProperty(x, "__ptr_fields", { value: ptrFields, configurable: true });
+  return x;
+};
+var __ifps = __ifps || function(x) {
+  if (x === null || x === undefined) x = [];
+  if (x.__slice !== true && Object.isExtensible(x)) {
+    Object.defineProperty(x, "__slice", { value: true, configurable: true });
+    Object.defineProperty(x, "__ptr_slice", { value: true, configurable: true });
+  }
+  return x;
+};
+
 const vertexShaderSource = "#version 300 es\nin vec3 a_position;\nin vec3 a_color;\n\nuniform mat4 u_mvp;\nout vec3 v_color;\n\nvoid main() {\n    gl_Position = u_mvp * vec4(a_position, 1.0);\n    v_color = a_color;\n}";
 
 const fragmentShaderSource = "#version 300 es\nprecision mediump float;\n\nin vec3 v_color;\nout vec4 fragColor;\n\nvoid main() {\n    fragColor = vec4(v_color, 1.0);\n}";
@@ -115,10 +187,10 @@ function initGeometry() {
   gl.bindVertexArray(vao);
   let vbo = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
-  gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+  gl.bufferData(gl.ARRAY_BUFFER, __ifs(vertices), gl.STATIC_DRAW);
   let ibo = gl.createBuffer();
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
-  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, __ifs(indices), gl.STATIC_DRAW);
   let posLoc = gl.getAttribLocation(program, "a_position");
   gl.enableVertexAttribArray(posLoc);
   gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 24, 0);
@@ -138,7 +210,7 @@ function renderFrame(now) {
   mat4Multiply(tmpMatrix, viewMatrix, modelMatrix);
   mat4Multiply(mvpMatrix, projMatrix, tmpMatrix);
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-  gl.uniformMatrix4fv(uMvpLoc, false, mvpMatrix);
+  gl.uniformMatrix4fv(uMvpLoc, false, __ifs(mvpMatrix));
   gl.drawElements(gl.TRIANGLES, 36, gl.UNSIGNED_SHORT, 0);
   requestAnimationFrame(renderFrame);
 }

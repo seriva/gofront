@@ -185,6 +185,7 @@ var __recover = __recover || function(ok) {
 export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
   let i = 0;
   const ptrMap = new WeakMap();
+  const ptrSet = new WeakSet();
   let ptrCounter = 1;
   const getPtr = (o) => {
     let p = ptrMap.get(o);
@@ -193,6 +194,12 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
       ptrMap.set(o, p);
     }
     return p;
+  };
+  const markPtr = (o) => {
+    if (o !== null && typeof o === "object") ptrSet.add(o);
+  };
+  const isPointer = (o) => {
+    return o !== null && typeof o === "object" && (o.__p === true || ptrSet.has(o));
   };
   const formatV = (val, isPlus, isTopLevel) => {
     if (val === null || val === undefined) return "<nil>";
@@ -213,8 +220,8 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
         const parts = [];
         for (let j = 0; j < val.length; j++) {
           const item = val[j];
-          if (isElemPtr && item !== null && typeof item === "object" && item.__p !== true && Object.isExtensible(item)) {
-            __ifp(item);
+          if (isElemPtr && item !== null && typeof item === "object") {
+            markPtr(item);
           } else if (Array.isArray(pf) && item !== null && typeof item === "object") {
             for (const f of pf) {
               if (f.indexOf(".") !== -1) {
@@ -222,9 +229,9 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
                 let cur = item;
                 for (let k = 0; k < fparts.length - 1; k++) cur = cur?.[fparts[k]];
                 const last = fparts[fparts.length - 1];
-                if (cur?.[last] !== null && typeof cur?.[last] === "object") __ifp(cur[last]);
+                if (cur?.[last] !== null && typeof cur?.[last] === "object") markPtr(cur[last]);
               } else if (item[f] !== null && typeof item[f] === "object") {
-                __ifp(item[f]);
+                markPtr(item[f]);
               }
             }
           }
@@ -243,8 +250,8 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
             return String(k1).localeCompare(String(k2));
           });
           for (const [k, v] of entries) {
-            if (isElemPtr && v !== null && typeof v === "object" && v.__p !== true && Object.isExtensible(v)) {
-              __ifp(v);
+            if (isElemPtr && v !== null && typeof v === "object") {
+              markPtr(v);
             }
             parts.push(formatV(k, isPlus, false) + ":" + formatV(v, isPlus, false));
           }
@@ -256,8 +263,8 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
           });
           for (const k of keys) {
             const v = val[k];
-            if (isElemPtr && v !== null && typeof v === "object" && v.__p !== true && Object.isExtensible(v)) {
-              __ifp(v);
+            if (isElemPtr && v !== null && typeof v === "object") {
+              markPtr(v);
             }
             parts.push(formatV(k, isPlus, false) + ":" + formatV(v, isPlus, false));
           }
@@ -267,7 +274,7 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
       if ("value" in val && (val.__box === true || (!val.__struct && !("__v" in val) && Object.keys(val).length === 1 && (val.constructor === Object || val.constructor?.name === "Object")))) {
         return getPtr(val);
       }
-      const isPtr = val.__p === true;
+      const isPtr = isPointer(val);
       if (isPtr) {
         if (!isTopLevel) {
           return getPtr(val);
@@ -322,11 +329,14 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
 
 export const HELPER_ERROR = `var __error = __error || function(msg, cause) {
   return { Error() { return msg; }, toString() { return msg; }, _msg: msg, _cause: cause ?? null };
-};
-var __strconv_err_syntax = __strconv_err_syntax || __error("invalid syntax");
-var __strconv_err_range = __strconv_err_range || __error("value out of range");
-var __path_err_bad_pattern = __path_err_bad_pattern || __error("syntax error in pattern");
-var __io_eof = __io_eof || __error("EOF");`;
+};`;
+
+export const HELPER_STRCONV_ERROR = `var __strconv_err_syntax = __strconv_err_syntax || __error("invalid syntax");
+var __strconv_err_range = __strconv_err_range || __error("value out of range");`;
+
+export const HELPER_PATH_ERROR = `var __path_err_bad_pattern = __path_err_bad_pattern || __error("syntax error in pattern");`;
+
+export const HELPER_IO_EOF = `var __io_eof = __io_eof || __error("EOF");`;
 
 export const HELPER_ERROR_IS = `var __errorIs = __errorIs || function(err, target) {
   while (err !== null && err !== undefined) {

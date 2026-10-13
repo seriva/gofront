@@ -109,7 +109,7 @@ const BYTES_DISPATCH = {
 /** @type {ThisType<CodeGen>} */
 export const bytesMethods = {
 	_genBytes(fn, a) {
-		if (fn === "NewReader") this.useHelper("error");
+		if (fn === "NewReader") this.useHelper("ioEOF");
 		const gen = BYTES_DISPATCH[fn];
 		return gen ? gen(a()) : undefined;
 	},
