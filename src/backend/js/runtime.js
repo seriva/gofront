@@ -469,7 +469,7 @@ export const HELPER_TIME_FMT = `var __timeFmt = __timeFmt || function(d, layout)
   const pad = (n, w = 2) => String(n).padStart(w, "0");
   const DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
   const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-  return layout.replace(/2006|06|Monday|Mon|January|Jan|01|02|15|PM|04|05|Z07:00|\\.000|\\.999|1|2|3|4|5/g, t => {
+  return layout.replace(/2006|06|Monday|Mon|January|Jan|01|02|15|PM|pm|03|04|05|Z07:00|\\.000|\\.999|1|2|3|4|5/g, t => {
     switch (t) {
       case "2006": return d.getFullYear();
       case "06":   return String(d.getFullYear()).slice(-2);
@@ -483,6 +483,8 @@ export const HELPER_TIME_FMT = `var __timeFmt = __timeFmt || function(d, layout)
       case "2":  return String(d.getDate());
       case "15": return pad(d.getHours());
       case "PM": return d.getHours() < 12 ? "AM" : "PM";
+      case "pm": return d.getHours() < 12 ? "am" : "pm";
+      case "03": return pad(d.getHours() % 12 || 12);
       case "3":  return String(d.getHours() % 12 || 12);
       case "04": return pad(d.getMinutes());
       case "4":  return String(d.getMinutes());
