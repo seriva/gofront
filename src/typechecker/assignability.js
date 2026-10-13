@@ -428,12 +428,23 @@ export const assignabilityMethods = {
 		return true;
 	},
 
+	_unpackReturns(rList) {
+		if (
+			rList.length === 1 &&
+			(rList[0]?.kind === "tuple" || rList[0]?.kind === "TupleType") &&
+			rList[0].types
+		) {
+			return rList[0].types;
+		}
+		return rList;
+	},
+
 	_implementsMethod(required, actual) {
 		if (!actual) return false;
 		const rp = required.params ?? [],
 			ap = actual.params ?? [];
-		const rr = required.returns ?? [],
-			ar = actual.returns ?? [];
+		const rr = this._unpackReturns(required.returns ?? []),
+			ar = this._unpackReturns(actual.returns ?? []);
 		if (!this._sigParamsMatch(rp, ap)) return false;
 		if (!!required.variadic !== !!actual.variadic) return false;
 		return this._sigParamsMatch(rr, ar);

@@ -1793,7 +1793,26 @@ function ${P}stdlib(stringTable, io) {
 	let joinParts = [];
 	let matchHasErr = 0;
 	let trimStart = 0, trimEnd = 0;
+	let sscanTokens = [];
 	return {
+		"fmt_sscan_init": (s, mode) => {
+			const str = s ?? "";
+			sscanTokens = (mode === 1 ? str.split("\\n")[0] : str).trim().split(/\\s+/).filter(Boolean);
+			return sscanTokens.length;
+		},
+		"fmt_sscan_token_str": (i) => sscanTokens[i] ?? "",
+		"fmt_sscan_token_i64": (i) => {
+			const t = sscanTokens[i];
+			try { return BigInt(Math.trunc(Number(t) || 0)); } catch { return 0n; }
+		},
+		"fmt_sscan_token_f64": (i) => {
+			const t = sscanTokens[i];
+			return Number(t) || 0;
+		},
+		"fmt_sscan_token_bool": (i) => {
+			const t = sscanTokens[i];
+			return t === "true" ? 1 : 0;
+		},
 		"testing_run": (t, name, fn) => (t.Run(name, (sub) => { io.late.exports.__testing_run_cb(fn, sub); }) ? 1 : 0),
 		"fmt_sprintf": (f) => __sprintf(f ?? "", ...io.take()),
 		"fmt_printf": (f) => { io.printf(__sprintf(f ?? "", ...io.take())); },
@@ -2363,7 +2382,11 @@ ${indent(body, "\t")}
 	constructor(msg, ref) {
 		super(msg);
 		this.name = "GoError";
+		this._msg = msg;
 		this.__ref = ref;
+	}
+	Error() {
+		return this.message;
 	}
 }
 const ${P}err_w2j = new WeakMap();

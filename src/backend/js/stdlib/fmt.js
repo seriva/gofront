@@ -42,29 +42,32 @@ export const fmtMethods = {
 			case "Fprint":
 				return this._genFmtFprint(fn, expr);
 			case "Sscan": {
+				this.useHelper("error");
 				const strArg = this.genExpr(expr.args[0]);
 				const restArgs = expr.args
 					.slice(1)
 					.map((e) => this.genExpr(e))
 					.join(", ");
-				return `((str, ...ptrs) => { const tokens = str.trim().split(/\\s+/).filter(Boolean); ${_SSCAN_LOOP} return [n, n < ptrs.length ? "unexpected EOF" : null]; })(${strArg}, ${restArgs})`;
+				return `((str, ...ptrs) => { const tokens = str.trim().split(/\\s+/).filter(Boolean); ${_SSCAN_LOOP} return [n, n < ptrs.length ? __error("unexpected EOF") : null]; })(${strArg}, ${restArgs})`;
 			}
 			case "Sscanln": {
+				this.useHelper("error");
 				const strArg = this.genExpr(expr.args[0]);
 				const restArgs = expr.args
 					.slice(1)
 					.map((e) => this.genExpr(e))
 					.join(", ");
-				return `((str, ...ptrs) => { const tokens = str.split("\\n")[0].trim().split(/\\s+/).filter(Boolean); ${_SSCAN_LOOP} return [n, n < ptrs.length ? "unexpected EOF" : null]; })(${strArg}, ${restArgs})`;
+				return `((str, ...ptrs) => { const tokens = str.split("\\n")[0].trim().split(/\\s+/).filter(Boolean); ${_SSCAN_LOOP} return [n, n < ptrs.length ? __error("unexpected EOF") : null]; })(${strArg}, ${restArgs})`;
 			}
 			case "Sscanf": {
+				this.useHelper("error");
 				const strArg = this.genExpr(expr.args[0]);
 				const fmtArg = this.genExpr(expr.args[1]);
 				const restArgs = expr.args
 					.slice(2)
 					.map((e) => this.genExpr(e))
 					.join(", ");
-				return `((str, _fmt, ...ptrs) => { const tokens = str.trim().split(/\\s+/).filter(Boolean); ${_SSCAN_LOOP} return [n, n < ptrs.length ? "input does not match format" : null]; })(${strArg}, ${fmtArg}, ${restArgs})`;
+				return `((str, _fmt, ...ptrs) => { const tokens = str.trim().split(/\\s+/).filter(Boolean); ${_SSCAN_LOOP} return [n, n < ptrs.length ? __error("unexpected EOF") : null]; })(${strArg}, ${fmtArg}, ${restArgs})`;
 			}
 			default:
 				return undefined;
@@ -84,16 +87,16 @@ export const fmtMethods = {
 		if (targetTypeName === "strings.Builder") {
 			const w = this.genExpr(writerArg);
 			const base = this._unboxWriter(w);
-			return `(${base}._buf += ${sprintfCall})`;
+			return `((__b, __s) => { __b._buf += __s; return [__s.length, null]; })(${base}, ${sprintfCall})`;
 		}
 		if (targetTypeName === "bytes.Buffer") {
 			const w = this.genExpr(writerArg);
 			const base = this._unboxWriter(w);
-			return `((__b,__s)=>{ __b._buf.push(...new TextEncoder().encode(__s)); })(${base}, ${sprintfCall})`;
+			return `((__b, __s) => { const __bytes = new TextEncoder().encode(__s); __b._buf.push(...__bytes); return [__bytes.length, null]; })(${base}, ${sprintfCall})`;
 		}
 		// Generic io.Writer fallback — call .WriteString if available
 		const w = this.genExpr(writerArg);
-		return `${w}.WriteString(${sprintfCall})`;
+		return `((__w, __s) => typeof __w.WriteString === "function" ? __w.WriteString(__s) : __w.Write(new TextEncoder().encode(__s)))(${w}, ${sprintfCall})`;
 	},
 
 	_genStdoutWrite(strJs) {

@@ -1072,3 +1072,222 @@ func Main() {
 		"bytes.Buffer.Grow: negative count",
 	);
 });
+
+section("WASM stdlib — Phase 7: io, readers/writers, fmt.Fprint*, fmt.Sscan*");
+
+test("io.WriteString, io.Discard, and fmt.Fprint* writing to Builder and Buffer", () => {
+	const src = `
+package main
+
+import (
+	"bytes"
+	"fmt"
+	"io"
+	"strings"
+)
+
+func Main() string {
+	var sb strings.Builder
+	n1, err1 := io.WriteString(&sb, "hello")
+	n2, err2 := fmt.Fprintf(&sb, " %s %d", "world", 42)
+	n3, err3 := fmt.Fprintln(&sb)
+	n4, err4 := fmt.Fprint(&sb, "done")
+
+	var buf bytes.Buffer
+	n5, err5 := io.WriteString(&buf, "buf:")
+	n6, err6 := fmt.Fprintf(&buf, "val=%d", 100)
+
+	n7, err7 := io.WriteString(io.Discard, "discarded text")
+	n8, err8 := fmt.Fprintf(io.Discard, "discarded %d", 999)
+
+	return fmt.Sprintf("%s|%s|%d,%d,%d,%d,%d,%d,%d,%d|%t,%t,%t,%t,%t,%t,%t,%t",
+		sb.String(),
+		buf.String(),
+		n1, n2, n3, n4, n5, n6, n7, n8,
+		err1 == nil, err2 == nil, err3 == nil, err4 == nil,
+		err5 == nil, err6 == nil, err7 == nil, err8 == nil,
+	)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(
+		wasmRes,
+		"hello world 42\ndone|buf:val=100|5,9,1,4,4,7,14,13|true,true,true,true,true,true,true,true",
+	);
+	assertEqual(wasmRes, jsRes);
+});
+
+test("strings.NewReader, bytes.NewReader, and io.ReadAll", () => {
+	const src = `
+package main
+
+import (
+	"bytes"
+	"fmt"
+	"io"
+	"strings"
+)
+
+func Main() string {
+	sr := strings.NewReader("hello strings reader")
+	l1 := sr.Len()
+	buf1 := make([]byte, 5)
+	n1, err1 := sr.Read(buf1)
+	l2 := sr.Len()
+	sr.Reset("new content")
+	all1, err2 := io.ReadAll(sr)
+
+	br := bytes.NewReader([]byte("bytes reader content"))
+	l3 := br.Len()
+	buf2 := make([]byte, 5)
+	n2, err3 := br.Read(buf2)
+	l4 := br.Len()
+	br.Reset([]byte("reset bytes"))
+	all2, err4 := io.ReadAll(br)
+
+	return fmt.Sprintf("%d,%d,%s,%t,%s,%t|%d,%d,%s,%t,%s,%t",
+		l1, l2, string(buf1[:n1]), err1 == nil, string(all1), err2 == nil,
+		l3, l4, string(buf2[:n2]), err3 == nil, string(all2), err4 == nil,
+	)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(
+		wasmRes,
+		"20,15,hello,true,new content,true|20,15,bytes,true,reset bytes,true",
+	);
+	assertEqual(wasmRes, jsRes);
+});
+
+test("io.EOF sentinel comparison with == and errors.Is", () => {
+	const src = `
+package main
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"strings"
+)
+
+func Main() string {
+	sr := strings.NewReader("abc")
+	buf := make([]byte, 10)
+	n, err := sr.Read(buf)
+	n2, err2 := sr.Read(buf)
+
+	eqSelf := io.EOF == io.EOF
+	isSelf := errors.Is(io.EOF, io.EOF)
+	eqErr2 := err2 == io.EOF
+	isErr2 := errors.Is(err2, io.EOF)
+
+	return fmt.Sprintf("%d,%t|%d,%t|%t,%t,%t,%t",
+		n, err == nil,
+		n2, err2 != nil,
+		eqSelf, isSelf, eqErr2, isErr2,
+	)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "3,true|0,true|true,true,true,true");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("fmt.Sscan, fmt.Sscanln, fmt.Sscanf parsing and unexpected EOF parity", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+)
+
+func Main() string {
+	var a int
+	var b string
+	var c bool
+	n1, err1 := fmt.Sscan("123 hello true", &a, &b, &c)
+
+	var x int
+	var y string
+	n2, err2 := fmt.Sscanln("456 world", &x, &y)
+
+	var id int
+	var name string
+	n3, err3 := fmt.Sscanf("789 Alice", "%d %s", &id, &name)
+
+	var u1 int
+	var u2 string
+	n4, err4 := fmt.Sscanf("10", "%d %s", &u1, &u2)
+	err4Str := ""
+	if err4 != nil {
+		err4Str = err4.Error()
+	}
+
+	return fmt.Sprintf("%d,%d,%s,%t,%t|%d,%d,%s,%t|%d,%d,%s,%t|%d,%d,%s",
+		n1, a, b, c, err1 == nil,
+		n2, x, y, err2 == nil,
+		n3, id, name, err3 == nil,
+		n4, u1, err4Str,
+	)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(
+		wasmRes,
+		"3,123,hello,true,true|2,456,world,true|2,789,Alice,true|1,10,unexpected EOF",
+	);
+	assertEqual(wasmRes, jsRes);
+});
+
+test("Phase 7 edge cases: io.ReadAll (n > 0, EOF) and Builder copy check", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"io"
+)
+
+type OnceReader struct {
+	done bool
+}
+
+func (r *OnceReader) Read(p []byte) (int, error) {
+	if r.done {
+		return 0, io.EOF
+	}
+	r.done = true
+	p[0] = 72 // 'H'
+	p[1] = 105 // 'i'
+	return 2, io.EOF
+}
+
+func Main() string {
+	r := &OnceReader{}
+	data, err := io.ReadAll(r)
+	return fmt.Sprintf("len=%d data=%s err=%t", len(data), string(data), err == nil)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "len=2 data=Hi err=true");
+	assertEqual(wasmRes, jsRes);
+
+	const panicSrc = `
+package main
+
+import "strings"
+
+func Main() {
+	var b1 strings.Builder
+	b1.WriteString("hello")
+	b2 := b1
+	b2.WriteString("world")
+}
+`;
+	const h = compileHybrid(panicSrc);
+	const wasmInst = runWasm(h.wasm, { stringTable: h.stringTable });
+	assertThrows(
+		() => wasmInst.exports.Main(),
+		"strings: illegal use of non-zero Builder copied by value",
+	);
+});
