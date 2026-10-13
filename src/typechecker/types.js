@@ -106,6 +106,7 @@ export const WASM_SUPPORTED_STDLIB = new Set([
 	"path/filepath",
 	"html",
 	"io",
+	"time",
 	"testing",
 	"gofront/shared",
 ]);
@@ -465,6 +466,50 @@ export const WASM_STDLIB_MEMBERS = new Map([
 			"WriteString",
 		]),
 	],
+	[
+		"time",
+		new Set([
+			"Now",
+			"Since",
+			"Parse",
+			"Unix",
+			"Date",
+			"Duration",
+			"Nanosecond",
+			"Microsecond",
+			"Millisecond",
+			"Second",
+			"Minute",
+			"Hour",
+			"RFC3339",
+			"RFC3339Nano",
+			"DateOnly",
+			"TimeOnly",
+			"DateTime",
+			"UTC",
+			"Local",
+			"January",
+			"February",
+			"March",
+			"April",
+			"May",
+			"June",
+			"July",
+			"August",
+			"September",
+			"October",
+			"November",
+			"December",
+			"Sunday",
+			"Monday",
+			"Tuesday",
+			"Wednesday",
+			"Thursday",
+			"Friday",
+			"Saturday",
+			"Time",
+		]),
+	],
 ]);
 
 export const VALID_TARGETS = new Set(["js", "wasm", "both"]);
@@ -479,7 +524,7 @@ export const INT = { kind: "basic", name: "int" };
 export const INT8 = { kind: "basic", name: "int8" };
 export const INT16 = { kind: "basic", name: "int16" };
 export const INT32 = { kind: "basic", name: "int32" };
-const INT64 = { kind: "basic", name: "int64" };
+export const INT64 = { kind: "basic", name: "int64" };
 export const UINT = { kind: "basic", name: "uint" };
 export const UINT8 = { kind: "basic", name: "uint8" };
 export const BYTE = UINT8;

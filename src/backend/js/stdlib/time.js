@@ -12,16 +12,20 @@ const TIME_METHOD_DISPATCH = {
 	Weekday: (r) => `${r}._d.getDay()`,
 	Unix: (r) => `Math.floor(${r}._d.getTime() / 1000)`,
 	UnixMilli: (r) => `${r}._d.getTime()`,
-	Add: (r, a) => `{_d: new Date(${r}._d.getTime() + (${a[0]}))}`,
-	Sub: (r, a) => `${r}._d.getTime() - (${a[0]})._d.getTime()`,
-	Before: (r, a) => `${r}._d < (${a[0]})._d`,
-	After: (r, a) => `${r}._d > (${a[0]})._d`,
-	Equal: (r, a) => `${r}._d.getTime() === (${a[0]})._d.getTime()`,
+	Add: (r, a) =>
+		`{_d: new Date(${r}._d.getTime() + Math.round(Number(${a[0]}) / 1000000))}`,
+	Sub: (r, a) =>
+		`Math.round((${r}._d.getTime() - (${a[0]})._d.getTime()) * 1000000)`,
+	Before: (r, a) => `(${r}._d < (${a[0]})._d)`,
+	After: (r, a) => `(${r}._d > (${a[0]})._d)`,
+	Equal: (r, a) => `(${r}._d.getTime() === (${a[0]})._d.getTime())`,
 };
 
 const TIME_DISPATCH = {
-	Now: () => "{_d: new Date()}",
-	Since: (a) => `(Date.now() - (${a[0]})._d.getTime())`,
+	Now: () =>
+		'(typeof globalThis.__GOFRONT_CLOCK === "function" ? {_d: new Date(globalThis.__GOFRONT_CLOCK())} : {_d: new Date()})',
+	Since: (a) =>
+		`(Math.round(((typeof globalThis.__GOFRONT_CLOCK === "function" ? globalThis.__GOFRONT_CLOCK() : Date.now()) - (${a[0]})._d.getTime()) * 1000000))`,
 	Sleep: (a) => `await new Promise(r => setTimeout(r, ${a[0]} / 1000000))`,
 	Unix: (a) => `{_d: new Date((${a[0]}) * 1000)}`,
 	Date: (a) =>

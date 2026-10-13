@@ -1560,3 +1560,71 @@ func main() { println(shapes.Measure(&tri{})) }
 		},
 		"type '*tri' (js) cannot implement wasm interface 'Shape' across the boundary; implement it in a wasm package or pass a func callback",
 	));
+
+test("time.Time and time.Duration cross boundary with parity", async () => {
+	const res = await compileHybridProject({
+		"clock/clock.go": `//gofront:target wasm
+package clock
+
+import "time"
+
+func AddDuration(t time.Time, d time.Duration) time.Time {
+	return t.Add(d)
+}
+
+func Diff(a, b time.Time) time.Duration {
+	return a.Sub(b)
+}
+`,
+		"main.go": `package main
+
+import (
+	"time"
+	"./clock"
+)
+
+func main() {
+	t1 := time.Date(2024, time.January, 1, 12, 0, 0, 0, time.UTC)
+	t2 := clock.AddDuration(t1, 30*time.Minute)
+	diff := clock.Diff(t2, t1)
+	println(t2.Format(time.TimeOnly), diff == 30*time.Minute)
+}
+`,
+	});
+	assertEqual(res.lines.join("\n"), "12:30:00 true");
+});
+
+test("time boundary facade marshals Date objects and int64 durations directly from JS", async () => {
+	const res = await compileHybridProject(
+		{
+			"clock/clock.go": `//gofront:target wasm
+package clock
+
+import "time"
+
+func AddMinutes(t time.Time, m int64) time.Time {
+	return t.Add(time.Duration(m) * time.Minute)
+}
+
+func GetUnixMilli(t time.Time) int64 {
+	return t.UnixMilli()
+}
+`,
+			"main.go": `package main
+
+import "./clock"
+
+func main() {
+	_ = clock.AddMinutes
+}
+`,
+		},
+		{ exports: ["AddMinutes", "GetUnixMilli"] },
+	);
+	const d = new Date(1704067200000); // 2024-01-01 00:00:00 UTC
+	const resT = res.mod.AddMinutes({ _d: d }, 15);
+	assertEqual(resT._d instanceof Date, true);
+	assertEqual(resT._d.getTime(), 1704067200000 + 15 * 60 * 1000);
+	const milli = res.mod.GetUnixMilli(resT);
+	assertEqual(milli, BigInt(1704067200000 + 15 * 60 * 1000));
+});

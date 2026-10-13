@@ -7,6 +7,8 @@ import {
 	ERROR,
 	FLOAT64,
 	INT,
+	INT32,
+	INT64,
 	STRING,
 	UINT8,
 	UINT32,
@@ -14,7 +16,36 @@ import {
 	VOID,
 } from "../types.js";
 
-const TIME_T = { kind: "named", name: "time.Time", underlying: ANY };
+const DURATION_T = { kind: "named", name: "time.Duration", underlying: INT64 };
+const TIME_T = {
+	kind: "named",
+	name: "time.Time",
+	underlying: {
+		kind: "struct",
+		fields: new Map(),
+		methods: new Map(),
+	},
+};
+TIME_T.underlying.fields.set("_unixNano", INT64);
+TIME_T.underlying.fields.set("_offset", INT32);
+TIME_T.underlying.methods = new Map([
+	["Format", { kind: "func", params: [STRING], returns: [STRING] }],
+	["String", { kind: "func", params: [], returns: [STRING] }],
+	["Year", { kind: "func", params: [], returns: [INT] }],
+	["Month", { kind: "func", params: [], returns: [INT] }],
+	["Day", { kind: "func", params: [], returns: [INT] }],
+	["Hour", { kind: "func", params: [], returns: [INT] }],
+	["Minute", { kind: "func", params: [], returns: [INT] }],
+	["Second", { kind: "func", params: [], returns: [INT] }],
+	["Weekday", { kind: "func", params: [], returns: [INT] }],
+	["Unix", { kind: "func", params: [], returns: [INT64] }],
+	["UnixMilli", { kind: "func", params: [], returns: [INT64] }],
+	["Add", { kind: "func", params: [DURATION_T], returns: [TIME_T] }],
+	["Sub", { kind: "func", params: [TIME_T], returns: [DURATION_T] }],
+	["Before", { kind: "func", params: [TIME_T], returns: [BOOL] }],
+	["After", { kind: "func", params: [TIME_T], returns: [BOOL] }],
+	["Equal", { kind: "func", params: [TIME_T], returns: [BOOL] }],
+]);
 const REPLACER_T = {
 	kind: "pointer",
 	base: { kind: "named", name: "strings.Replacer" },
@@ -480,7 +511,7 @@ export function setupCoreGlobals(globals, types) {
 		name: "time",
 		members: {
 			Now: { kind: "func", params: [], returns: [TIME_T] },
-			Since: { kind: "func", params: [TIME_T], returns: [INT] },
+			Since: { kind: "func", params: [TIME_T], returns: [DURATION_T] },
 			Sleep: { kind: "func", params: [ANY], returns: [VOID], async: true },
 			Parse: {
 				kind: "func",
@@ -493,10 +524,14 @@ export function setupCoreGlobals(globals, types) {
 				params: [INT, INT, INT, INT, INT, INT, INT, ANY],
 				returns: [TIME_T],
 			},
-			Millisecond: INT,
-			Second: INT,
-			Minute: INT,
-			Hour: INT,
+			Duration: DURATION_T,
+			Nanosecond: DURATION_T,
+			Microsecond: DURATION_T,
+			Millisecond: DURATION_T,
+			Second: DURATION_T,
+			Minute: DURATION_T,
+			Hour: DURATION_T,
+			Time: TIME_T,
 			RFC3339: STRING,
 			RFC3339Nano: STRING,
 			DateOnly: STRING,
@@ -525,6 +560,7 @@ export function setupCoreGlobals(globals, types) {
 			Saturday: INT,
 		},
 	});
+	types.set("time.Duration", DURATION_T);
 	types.set("time.Time", TIME_T);
 
 	const runeToStr = { kind: "func", params: [INT], returns: [BOOL] };

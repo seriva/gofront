@@ -949,6 +949,9 @@ export class BuiltinsEmitter {
 			case "io":
 				this.emitIoCall(func.field, call, targetWasmType);
 				return true;
+			case "time":
+				this.emitTimeCall(func.field, call, targetWasmType);
+				return true;
 			default:
 				return false;
 		}
@@ -1061,6 +1064,10 @@ export class BuiltinsEmitter {
 			this.emitBytesReaderMethodCall(field, expr, args, targetWasmType);
 			return true;
 		}
+		if (recvTypeName === "time.Time") {
+			this.emitTimeMethodCall(field, expr, args, targetWasmType);
+			return true;
+		}
 		return false;
 	}
 
@@ -1166,6 +1173,14 @@ export class BuiltinsEmitter {
 	}
 
 	emitCallExpr(call, targetWasmType = null) {
+		if (call._isTypeConversion) {
+			this.emitTypeConversion({
+				targetType: call._conversionTargetType,
+				expr: call.args[0],
+			});
+			return;
+		}
+
 		const deqFunc = this._dequalify(call.func);
 		if (deqFunc) {
 			this.emitCallExpr({ ...call, func: deqFunc }, targetWasmType);

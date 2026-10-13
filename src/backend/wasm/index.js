@@ -45,6 +45,7 @@ const ERROR_PRODUCING_PKGS = new Set([
 	"io",
 	"strings",
 	"bytes",
+	"time",
 ]);
 // Packages whose calls lower to the `env.*` imports in STDLIB_IMPORTS (the
 // matching JS lives in WASM_STDLIB_JS).  Only modules importing one of them
@@ -62,6 +63,7 @@ const STDLIB_ENV_PKGS = new Set([
 	"html",
 	"bytes",
 	"io",
+	"time",
 ]);
 
 const RAND_HOST_METHODS = new Set([
@@ -210,6 +212,17 @@ const STDLIB_IMPORTS = [
 	["bytes_trim", [S, S, "i32", "i32"], []],
 	["bytes_trim_start", [], ["i32"]],
 	["bytes_trim_end", [], ["i32"]],
+	// time
+	["time_now_ms", [], ["f64"]],
+	["time_timezone_offset", ["f64"], ["i32"]],
+	["time_parse", [S, S], ["f64"]],
+	["time_parse_err", [], [S]],
+	["time_parse_offset", [], ["i32"]],
+	[
+		"time_format",
+		["i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", S],
+		[S],
+	],
 ];
 
 class ModuleEmitter {

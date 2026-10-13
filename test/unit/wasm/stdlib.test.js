@@ -1291,3 +1291,177 @@ func Main() {
 		"strings: illegal use of non-zero Builder copied by value",
 	);
 });
+
+section("WASM stdlib — Phase 8: time");
+
+test("time constants, Duration arithmetic and month/weekday constants", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"time"
+)
+
+func Main() string {
+	d := 2 * time.Hour + 30 * time.Minute + 15 * time.Second + 500 * time.Millisecond + 200 * time.Microsecond + 100 * time.Nanosecond
+	return fmt.Sprintf("%t|%t|%t|%t|%t|%d|%d|%d|%d|%d",
+		time.Second > time.Millisecond,
+		time.Minute > time.Second,
+		time.Hour > time.Minute,
+		time.Microsecond > time.Nanosecond,
+		d > 0,
+		time.January,
+		time.December,
+		time.Sunday,
+		time.Saturday,
+		int(time.Second / time.Millisecond),
+	)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "true|true|true|true|true|1|12|0|6|1000");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("time.Unix, time.Date, and time.Time component methods", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"time"
+)
+
+func Main() string {
+	t1 := time.Unix(0, 0)
+	t2 := time.Unix(1704067200, 0) // 2024-01-01 00:00:00 UTC
+	t3 := time.Date(2025, time.June, 15, 14, 30, 45, 0, time.UTC)
+	return fmt.Sprintf("%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d",
+		t1.Year(),
+		t2.Unix(),
+		t2.UnixMilli(),
+		t3.Year(),
+		t3.Month(),
+		t3.Day(),
+		t3.Hour(),
+		t3.Minute(),
+		t3.Second(),
+		t3.Weekday(),
+		t3.Unix(),
+	)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("time.Time methods: Add, Sub, Before, After, Equal", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"time"
+)
+
+func Main() string {
+	t1 := time.Unix(1000, 0)
+	t2 := time.Unix(2000, 0)
+	t3 := t1.Add(1000 * time.Second)
+	subDiff := t2.Sub(t1)
+	return fmt.Sprintf("%t|%t|%t|%t|%t|%t|%t",
+		t1.Before(t2),
+		t2.After(t1),
+		!t1.After(t2),
+		!t2.Before(t1),
+		t1.Equal(t1),
+		!t1.Equal(t2),
+		t3.Equal(t2) && subDiff == 1000*time.Second,
+	)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "true|true|true|true|true|true|true");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("time.Format and time.String formatting", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"time"
+)
+
+func Main() string {
+	t := time.Date(2024, time.January, 15, 10, 30, 45, 0, time.UTC)
+	sDate := t.Format(time.DateOnly)
+	sTime := t.Format(time.TimeOnly)
+	sFull := t.Format("2006-01-02 15:04:05")
+	sStr := t.String()
+	return fmt.Sprintf("%s|%s|%s|%t", sDate, sTime, sFull, len(sStr) > 0)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("time.Parse parses RFC3339 strings and reports errors", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"time"
+)
+
+func Main() string {
+	t, err := time.Parse(time.RFC3339, "2024-01-15T10:30:00Z")
+	tBad, errBad := time.Parse(time.RFC3339, "not-a-valid-timestamp")
+	return fmt.Sprintf("ok=%t yr=%d badErr=%t msg=%s zeroYr=%d",
+		err == nil,
+		t.Year(),
+		errBad != nil,
+		errBad.Error(),
+		tBad.Unix(),
+	)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(
+		wasmRes,
+		"ok=true yr=2024 badErr=true msg=parsing time: cannot parse zeroYr=0",
+	);
+	assertEqual(wasmRes, jsRes);
+});
+
+test("time.Now and time.Since with injected clock", () => {
+	const oldClock = globalThis.__GOFRONT_CLOCK;
+	try {
+		globalThis.__GOFRONT_CLOCK = () => 1704067200000; // 2024-01-01 00:00:00 UTC
+		const src = `
+package main
+
+import (
+	"fmt"
+	"time"
+)
+
+func Main() string {
+	t := time.Now()
+	elapsed := time.Since(t)
+	return fmt.Sprintf("yr=%d milli=%d elapsedZero=%t",
+		t.Year(),
+		t.UnixMilli(),
+		elapsed == 0,
+	)
+}
+`;
+		const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+		assertEqual(wasmRes, jsRes);
+	} finally {
+		globalThis.__GOFRONT_CLOCK = oldClock;
+	}
+});

@@ -469,7 +469,7 @@ export const HELPER_TIME_FMT = `var __timeFmt = __timeFmt || function(d, layout)
   const pad = (n, w = 2) => String(n).padStart(w, "0");
   const DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
   const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-  return layout.replace(/2006|06|Monday|Mon|January|Jan|01|1|02|2|15|PM|3|04|4|05|5|Z07:00|\\.000|\\.999/g, t => {
+  return layout.replace(/2006|06|Monday|Mon|January|Jan|01|02|15|PM|04|05|Z07:00|\\.000|\\.999|1|2|3|4|5/g, t => {
     switch (t) {
       case "2006": return d.getFullYear();
       case "06":   return String(d.getFullYear()).slice(-2);
@@ -505,7 +505,7 @@ export const HELPER_TIME_PARSE = `var __timeParse = __timeParse || function(layo
     if (isNaN(d.getTime())) throw 0;
     return [{ _d: d }, null];
   } catch {
-    return [{ _d: new Date(0) }, "parsing time: cannot parse"];
+    return [{ _d: new Date(0) }, { Error() { return "parsing time: cannot parse"; }, toString() { return "parsing time: cannot parse"; }, _msg: "parsing time: cannot parse", _cause: null }];
   }
 };`;
 

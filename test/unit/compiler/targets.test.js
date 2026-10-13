@@ -245,6 +245,19 @@ func F() { fmt.Scan(nil) }
 	assertContains(err, "move this call to a JS package");
 });
 
+test("wasm package rejects time.Sleep with targeted diagnostic", () => {
+	const src = `//gofront:target wasm
+package m
+
+import "time"
+
+func F() { time.Sleep(100 * time.Millisecond) }
+`;
+	const err = compileTemp({ "m.go": src });
+	assertContains(err, "'time.Sleep' is not yet available in wasm packages");
+	assertContains(err, "move this call to a JS package");
+});
+
 test("wasm package accepts supported strings/strconv members", () => {
 	const src = `//gofront:target wasm
 package m
