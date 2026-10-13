@@ -2,16 +2,16 @@
 // Unit tests for lowering analyses: captures, escape analysis, boxing, and side-tables.
 
 import assert from "node:assert";
-import { Lexer } from "../../src/lexer.js";
+import { Lexer } from "../../../src/lexer.js";
 import {
 	analyzeCaptures,
 	lower,
 	paramEscapes,
 	scanAddressTaken,
-} from "../../src/lower/index.js";
-import { Parser } from "../../src/parser/index.js";
-import { TypeChecker } from "../../src/typechecker/index.js";
-import { test } from "./helpers.js";
+} from "../../../src/lower/index.js";
+import { Parser } from "../../../src/parser/index.js";
+import { TypeChecker } from "../../../src/typechecker/index.js";
+import { test } from "../helpers.js";
 
 function parseSnippet(code) {
 	const source = `package main\n${code}`;

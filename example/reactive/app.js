@@ -944,17 +944,17 @@ function toggleTodo(id) {
 }
 
 function removeTodo(id) {
-  let cur = todosSignal.get();
-  todosSignal.set(((s, f) => { if (!s || s.length === 0) return s; let k = 0; for (let i = 0; i < s.length; i++) { if (!f(s[i])) s[k++] = s[i]; } return ArrayBuffer.isView(s) ? s.subarray(0, k) : (s.length = k, s); })(cur, function(t) {
+  let cur = __append([], ...todosSignal.get());
+  todosSignal.set(__ifs(((s, f) => { if (!s || s.length === 0) return s; let k = 0; for (let i = 0; i < s.length; i++) { if (!f(s[i])) s[k++] = s[i]; } return ArrayBuffer.isView(s) ? s.subarray(0, k) : (s.length = k, s); })(__ifs(cur), function(t) {
     return t.id === id;
-  }));
+  })));
 }
 
 function clearCompleted() {
-  let cur = todosSignal.get();
-  todosSignal.set(((s, f) => { if (!s || s.length === 0) return s; let k = 0; for (let i = 0; i < s.length; i++) { if (!f(s[i])) s[k++] = s[i]; } return ArrayBuffer.isView(s) ? s.subarray(0, k) : (s.length = k, s); })(cur, function(t) {
+  let cur = __append([], ...todosSignal.get());
+  todosSignal.set(__ifs(((s, f) => { if (!s || s.length === 0) return s; let k = 0; for (let i = 0; i < s.length; i++) { if (!f(s[i])) s[k++] = s[i]; } return ArrayBuffer.isView(s) ? s.subarray(0, k) : (s.length = k, s); })(__ifs(cur), function(t) {
     return t.done;
-  }));
+  })));
 }
 
 function setFilter(f) {

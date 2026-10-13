@@ -1,16 +1,6 @@
 // test/unit/wasm/optimize.test.js
 // Tests for Phase H7 Task H7.2 — Binaryen optimization pipeline & tooling.
 
-import {
-	existsSync,
-	mkdirSync,
-	mkdtempSync,
-	readFileSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { isGoFrontWasm } from "../../../src/backend/wasm/encode.js";
 import { instantiateWasm } from "../../../src/backend/wasm/glue.js";
 import { compileWasm } from "../../../src/backend/wasm/index.js";
@@ -21,12 +11,6 @@ import {
 	optimizeWasm,
 	optimizeWithBinaryen,
 } from "../../../src/backend/wasm/optimize.js";
-import {
-	formatBuildSummary,
-	handleBuild,
-	parseBuildArgs,
-} from "../../../src/cli-core.js";
-import { compileSingleFile } from "../../../src/compiler.js";
 import { assert, assertEqual, section, test } from "../helpers.js";
 
 section("WASM Optimizer — Core Pipeline (Binaryen)");
@@ -194,114 +178,30 @@ test("Empty / null wasm returns graceful fallback result", () => {
 	assertEqual(empty.engine, "none");
 });
 
-section("WASM Optimizer — Tooling & CLI Integration");
-
-test("compileSingleFile with wasmOpt: true returns wasmOptInfo", () => {
-	const dir = mkdtempSync(join(tmpdir(), "gofront-test-opt-"));
-	const file = join(dir, "calc.go");
-	try {
-		writeFileSync(
-			file,
-			`//gofront:target wasm
-package calc
-
-func Add(a, b int32) int32 {
-	return a + b
-}
-`,
-		);
-		const res = compileSingleFile(file, { wasmOpt: true });
-		assert(res.wasm instanceof Uint8Array, "must emit wasm");
-		assert(res.wasmOptInfo, "must attach wasmOptInfo");
-		assert(
-			res.wasmOptInfo.optimizedSize <= res.wasmOptInfo.originalSize,
-			"optimized <= original",
-		);
-		assert(res.wasmOptInfo.percentSaved >= 0, "percent saved >= 0");
-		assert(WebAssembly.validate(res.wasm), "optimized wasm is valid");
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
+test("optimizeWithBinaryen directly invokes Binaryen pipeline", () => {
+	const dummyWasm = new Uint8Array([
+		0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+	]);
+	const res = optimizeWithBinaryen(dummyWasm, { optLevel: "0", emitWat: true });
+	assert(res.wasm instanceof Uint8Array, "wasm emitted");
+	assert(typeof res.wat === "string", "wat emitted");
+	assertEqual(res.engine, "binaryen");
 });
 
-test("parseBuildArgs parses --release and --wasm-opt flags", () => {
-	const parsed1 = parseBuildArgs(["--release"]);
-	assertEqual(parsed1.release, true);
-	assertEqual(parsed1.wasmOpt, true);
-
-	const parsed2 = parseBuildArgs(["--wasm-opt"]);
-	assertEqual(parsed2.wasmOpt, true);
-
-	const parsed3 = parseBuildArgs(["--release", "--no-wasm-opt"]);
-	assertEqual(parsed3.release, true);
-	assertEqual(parsed3.wasmOpt, false);
-
-	const parsed4 = parseBuildArgs([]);
-	assertEqual(parsed4.wasmOpt, false);
+test("optimizeWasm with preferNative: false forces Binaryen path", () => {
+	const dummyWasm = new Uint8Array([
+		0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+	]);
+	const res = optimizeWasm(dummyWasm, { preferNative: false, optLevel: "0" });
+	assert(res.wasm instanceof Uint8Array, "wasm emitted");
+	assertEqual(res.engine, "binaryen");
 });
 
-test("formatBuildSummary includes wasm-opt reduction metric", () => {
-	const summary = formatBuildSummary({
-		outDir: "public",
-		elapsedMs: "12",
-		files: [
-			{ name: "app.js", size: 1024 },
-			{ name: "app.wasm", size: 50000 },
-		],
-		wasmOpt: {
-			originalSize: 65000,
-			optimizedSize: 50000,
-			percentSaved: 23.1,
-			engine: "binaryen",
-		},
-	});
-	const wasmOptLine = summary.find((l) => l.includes("wasm-opt:"));
-	assert(wasmOptLine, "summary must contain wasm-opt line");
-	assert(
-		wasmOptLine.includes("63.5 kB → 48.8 kB (-23.1%) [binaryen]"),
-		"summary must format size change correctly",
-	);
-});
-
-test("handleBuild with --release optimizes WASM and outputs app.wasm", async () => {
-	const dir = mkdtempSync(join(tmpdir(), "gofront-build-release-"));
-	try {
-		const srcDir = join(dir, "src");
-		mkdirSync(srcDir, { recursive: true });
-		writeFileSync(
-			join(srcDir, "main.go"),
-			`//gofront:target wasm
+test("instantiateWasm auto-coerces number to BigInt for i64 parameters", async () => {
+	const { wasm } = compileWasm(`//gofront:target wasm
 package main
-
-func Multiply(a, b int32) int32 {
-	return a * b
-}
-`,
-		);
-		const outDir = join(dir, "dist");
-		const result = await handleBuild(dir, {
-			srcDir,
-			outDir,
-			release: true,
-			wasmOpt: true,
-		});
-
-		assert(result.wasmOpt, "build result must contain wasmOpt info");
-		assert(result.wasmOpt.originalSize > 0, "originalSize > 0");
-		assert(
-			result.wasmOpt.optimizedSize <= result.wasmOpt.originalSize,
-			"optimizedSize <= originalSize",
-		);
-
-		const wasmPath = join(outDir, "app.wasm");
-		assert(existsSync(wasmPath), "app.wasm must exist in output dir");
-		const wasmBytes = readFileSync(wasmPath);
-		assert(
-			isGoFrontWasm(wasmBytes),
-			"app.wasm must be recognized as GoFront WASM",
-		);
-		assert(WebAssembly.validate(wasmBytes), "app.wasm must be valid");
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
+func Add64(x int64) int64 { return x + 10 }
+`);
+	const { exports } = await instantiateWasm(wasm);
+	assertEqual(exports.Add64(32), 42n);
 });

@@ -1,6 +1,6 @@
 // GoFront test suite — built-in minifier
 
-import { minify } from "../../src/minifier.js";
+import { minify } from "../../../src/minifier.js";
 import {
 	assert,
 	assertContains,
@@ -9,7 +9,7 @@ import {
 	runJs,
 	section,
 	test,
-} from "./helpers.js";
+} from "../helpers.js";
 
 // ── Stage 1: Comment and whitespace stripping ────────────────
 
@@ -110,65 +110,48 @@ test("preserves IIFE parens", () => {
 	assertContains(out, "})()");
 });
 
-test("preserves keyword spacing: return x", () => {
-	const code = "function f() { return x; }";
-	const out = minify(code);
-	assertContains(out, "return x");
-});
+const keywordSpacingCases = [
+	[
+		"preserves keyword spacing: return x",
+		"function f() { return x; }",
+		"return x",
+	],
+	["preserves keyword spacing: let a", "{ let a = 1; }", "let a"],
+	["preserves keyword spacing: const a", "{ const a = 1; }", "const a"],
+	["preserves keyword spacing: typeof x", "let t = typeof x;", "typeof x"],
+	["preserves keyword spacing: new X", "let o = new Point();", "new Point"],
+	[
+		"preserves keyword spacing: case value",
+		"switch(x){ case 1: break; }",
+		"case 1",
+	],
+	[
+		"preserves keyword spacing: instanceof",
+		"if (x instanceof Error) {}",
+		"instanceof Error",
+	],
+	[
+		"preserves keyword spacing: function name",
+		"function myFunc() { return 1; }",
+		"function myFunc",
+	],
+	[
+		"preserves keyword spacing: class name",
+		"class Point { constructor() {} }",
+		"class Point",
+	],
+	[
+		"preserves keyword spacing: extends",
+		"class Dog extends Animal { constructor() { super(); } }",
+		"extends Animal",
+	],
+];
 
-test("preserves keyword spacing: let a", () => {
-	const code = "{ let a = 1; }";
-	const out = minify(code);
-	assertContains(out, "let a");
-});
-
-test("preserves keyword spacing: const a", () => {
-	const code = "{ const a = 1; }";
-	const out = minify(code);
-	assertContains(out, "const a");
-});
-
-test("preserves keyword spacing: typeof x", () => {
-	const code = "let t = typeof x;";
-	const out = minify(code);
-	assertContains(out, "typeof x");
-});
-
-test("preserves keyword spacing: new X", () => {
-	const code = "let o = new Point();";
-	const out = minify(code);
-	assertContains(out, "new Point");
-});
-
-test("preserves keyword spacing: case value", () => {
-	const code = "switch(x){ case 1: break; }";
-	const out = minify(code);
-	assertContains(out, "case 1");
-});
-
-test("preserves keyword spacing: instanceof", () => {
-	const code = "if (x instanceof Error) {}";
-	const out = minify(code);
-	assertContains(out, "instanceof Error");
-});
-
-test("preserves keyword spacing: function name", () => {
-	const code = "function myFunc() { return 1; }";
-	const out = minify(code);
-	assertContains(out, "function myFunc");
-});
-
-test("preserves keyword spacing: class name", () => {
-	const code = "class Point { constructor() {} }";
-	const out = minify(code);
-	assertContains(out, "class Point");
-});
-
-test("preserves keyword spacing: extends", () => {
-	const code = "class Dog extends Animal { constructor() { super(); } }";
-	const out = minify(code);
-	assertContains(out, "extends Animal");
-});
+for (const [name, code, expected] of keywordSpacingCases) {
+	test(name, () => {
+		assertContains(minify(code), expected);
+	});
+}
 
 test("preserves keyword spacing: void, delete, in, of", () => {
 	const out1 = minify("void 0;");
@@ -260,63 +243,39 @@ test("mangling still renames method and arrow parameters", () => {
 
 section("Minifier — Stage 4: Literal folding");
 
-test("folds constant numeric addition", () => {
-	const code = "let x = 0 + 0;";
-	const out = minify(code);
-	assertContains(out, "let x=0");
-});
-
-test("folds constant numeric expressions", () => {
-	const code = "let x = 1 + 2;";
-	const out = minify(code);
-	assertContains(out, "let x=3");
-});
-
-test("folds constant multiplication", () => {
-	const code = "let x = 3 * 4;";
-	const out = minify(code);
-	assertContains(out, "let x=12");
-});
-
-test("does not fold non-constant expressions", () => {
-	const code = "let x = a + 2;";
-	const out = minify(code);
-	assertContains(out, "a+2");
-});
-
-test("preserves SVG path strings with minus-separated numbers", () => {
-	const code =
-		'let d = "M233.4 105.4c12.5-12.5 32.8-12.5 45.3 0l192-192c12.5-12.5";';
-	const out = minify(code);
-	assertContains(
-		out,
+const foldingCases = [
+	["folds constant numeric addition", "let x = 0 + 0;", "let x=0"],
+	["folds constant numeric expressions", "let x = 1 + 2;", "let x=3"],
+	["folds constant multiplication", "let x = 3 * 4;", "let x=12"],
+	["does not fold non-constant expressions", "let x = a + 2;", "a+2"],
+	[
+		"preserves SVG path strings with minus-separated numbers",
+		'let d = "M233.4 105.4c12.5-12.5 32.8-12.5 45.3 0l192-192c12.5-12.5";',
 		'"M233.4 105.4c12.5-12.5 32.8-12.5 45.3 0l192-192c12.5-12.5"',
-	);
-});
+	],
+	[
+		"preserves template literals with minus-separated numbers",
+		"let d = `M233.4 105.4c12.5-12.5 32.8-12.5`;",
+		"`M233.4 105.4c12.5-12.5 32.8-12.5`",
+	],
+	["folds chained constant additions", "let x = 1 + 2 + 3;", "let x=6"],
+	[
+		"preserves operator precedence in literal expressions",
+		"let x = 1 + 2 * 3;",
+		"let x=1+2*3",
+	],
+	[
+		"preserves unary minus with binary addition",
+		"let x = -1 + 2;",
+		"let x=-1+2",
+	],
+];
 
-test("preserves template literals with minus-separated numbers", () => {
-	const code = "let d = `M233.4 105.4c12.5-12.5 32.8-12.5`;";
-	const out = minify(code);
-	assertContains(out, "`M233.4 105.4c12.5-12.5 32.8-12.5`");
-});
-
-test("folds chained constant additions", () => {
-	const code = "let x = 1 + 2 + 3;";
-	const out = minify(code);
-	assertContains(out, "let x=6");
-});
-
-test("preserves operator precedence in literal expressions", () => {
-	const code = "let x = 1 + 2 * 3;";
-	const out = minify(code);
-	assertContains(out, "let x=1+2*3");
-});
-
-test("preserves unary minus with binary addition", () => {
-	const code = "let x = -1 + 2;";
-	const out = minify(code);
-	assertContains(out, "let x=-1+2");
-});
+for (const [name, code, expected] of foldingCases) {
+	test(name, () => {
+		assertContains(minify(code), expected);
+	});
+}
 
 // ── Round-trip tests ─────────────────────────────────────────
 

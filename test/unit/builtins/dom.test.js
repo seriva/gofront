@@ -12,7 +12,7 @@ import {
 	section,
 	summarize,
 	test,
-} from "./helpers.js";
+} from "../helpers.js";
 
 section("DOM (jsdom)");
 
