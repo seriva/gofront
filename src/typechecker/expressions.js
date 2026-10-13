@@ -266,6 +266,12 @@ export const expressionCheckMethods = {
 			if (this._isStructOrNamedMethod(baseType, base, expr.field))
 				expr._isMethodValue = true;
 		}
+		if (
+			baseType?.kind === "namespace" &&
+			this.types.has(`${baseType.name}.${expr.field}`)
+		) {
+			expr._isTypeRef = true;
+		}
 		return ft;
 	},
 

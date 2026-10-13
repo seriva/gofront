@@ -138,7 +138,7 @@ Key decisions:
 - [x] **Phase 5: `fmt` composite `%v`.** Slices, arrays, maps and structs, with output matching the JS backend.
 - [x] **Phase 6: Pure packages.** `unicode`, `math/rand`, `bytes` (incl. `Buffer`), `path`/`path/filepath`, `html`.
 - [x] **Phase 7: `io` and readers/writers.** `io` interfaces and helpers, `fmt.Fprint*`, `fmt.Sscan*`, `strings.NewReader`, `bytes.NewReader`; `Builder`/`Buffer` as `io.Writer`.
-- [ ] **Phase 8: `time`.** `Duration`, `Time` struct and methods, `Parse`/`Format`, clock and timezone imports, boundary marshalling; `time.Sleep` keeps its targeted diagnostic.
+- [x] **Phase 8: `time`.** `Duration`, `Time` struct and methods, `Parse`/`Format`, clock and timezone imports, boundary marshalling; `time.Sleep` keeps its targeted diagnostic.
 - [ ] **Phase 9: Docs and release.** Update `hybrid-wasm.md`, `language-support.md`, `go-compatibility.md`, the roadmap and the CHANGELOG. Re-run simplefps `npm run bench` to confirm there is no regression in `app.wasm` size or timings.
 
 ---

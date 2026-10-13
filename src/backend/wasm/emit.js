@@ -11,6 +11,7 @@ import { SharedEmitter } from "./emit-shared.js";
 import { StdlibEmitter } from "./emit-stdlib.js";
 import { Phase6Emitter } from "./emit-stdlib-phase6.js";
 import { Phase7Emitter } from "./emit-stdlib-phase7.js";
+import { Phase8Emitter } from "./emit-stdlib-phase8.js";
 import { StmtsEmitter } from "./emit-stmts.js";
 import {
 	isArrayType,
@@ -1404,4 +1405,5 @@ copyMethods(FunctionEmitter, BuiltinsEmitter);
 copyMethods(FunctionEmitter, StdlibEmitter);
 copyMethods(FunctionEmitter, Phase6Emitter);
 copyMethods(FunctionEmitter, Phase7Emitter);
+copyMethods(FunctionEmitter, Phase8Emitter);
 copyMethods(FunctionEmitter, SharedEmitter);

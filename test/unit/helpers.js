@@ -206,6 +206,7 @@ export function compileHybrid(source, options = {}) {
 			let stdoutBuf = "";
 			const jsCtx = vm.createContext({
 				Math,
+				Date,
 				JSON,
 				String,
 				Number,
@@ -214,6 +215,9 @@ export function compileHybrid(source, options = {}) {
 				Object,
 				TextEncoder,
 				TextDecoder,
+				get __GOFRONT_CLOCK() {
+					return globalThis.__GOFRONT_CLOCK;
+				},
 				process: {
 					stdout: {
 						write: (s) => {
