@@ -15,222 +15,226 @@ import {
 
 section("Type errors");
 
-test("undefined variable", () => {
-	const { errors } = compile(`package main
-func main() { console.log(notDefined) }`);
-	assertErrorContains(errors, "notDefined");
-});
-
-test("wrong argument count", () => {
-	const { errors } = compile(`package main
+const typeErrorCases = [
+	[
+		"undefined variable",
+		`package main
+func main() { console.log(notDefined) }`,
+		"notDefined",
+	],
+	[
+		"wrong argument count",
+		`package main
 func add(a int, b int) int { return a + b }
-func main() { add(1) }`);
-	assertErrorContains(errors, "argument");
-});
-
-test("too many arguments", () => {
-	const { errors } = compile(`package main
+func main() { add(1) }`,
+		"argument",
+	],
+	[
+		"too many arguments",
+		`package main
 func id(x int) int { return x }
-func main() { id(1, 2, 3) }`);
-	assertErrorContains(errors, "Too many arguments");
-});
-
-test("return type mismatch", () => {
-	const { errors } = compile(`package main
-func getNum() int { return "oops" }`);
-	assertErrorContains(errors, "Cannot assign");
-});
-
-test("field access on unknown type", () => {
-	const { errors } = compile(`package main
+func main() { id(1, 2, 3) }`,
+		"Too many arguments",
+	],
+	[
+		"return type mismatch",
+		`package main
+func getNum() int { return "oops" }`,
+		"Cannot assign",
+	],
+	[
+		"field access on unknown type",
+		`package main
 type Box struct { W float64 }
 func main() {
   b := Box{W: 1.0}
   console.log(b.Height)
-}`);
-	assertErrorContains(errors, "Height");
-});
-
-test("calling non-function", () => {
-	const { errors } = compile(`package main
+}`,
+		"Height",
+	],
+	[
+		"calling non-function",
+		`package main
 func main() {
   x := 42
   x()
-}`);
-	assertErrorContains(errors, "Cannot call non-function");
-});
-
-test("duplicate function declaration", () => {
-	const { errors } = compile(`package main
+}`,
+		"Cannot call non-function",
+	],
+	[
+		"duplicate function declaration",
+		`package main
 func foo() {}
-func foo() {}`);
-	assertErrorContains(errors, "foo");
-});
-
-// ═════════════════════════════════════════════════════════════
-// 3. DOM tests (jsdom)
-// ═════════════════════════════════════════════════════════════
-
-section("Type error negative tests");
-
-test("field access on int variable", () => {
-	const { errors } = compile(`package main
+func foo() {}`,
+		"foo",
+	],
+	[
+		"field access on int variable",
+		`package main
 func main() {
   x := 42
   console.log(x.Foo)
-}`);
-	assertErrorContains(errors, "Foo");
-});
-
-test("field access on string variable", () => {
-	const { errors } = compile(`package main
+}`,
+		"Foo",
+	],
+	[
+		"field access on string variable",
+		`package main
 func main() {
   s := "hello"
   console.log(s.Length)
-}`);
-	assertErrorContains(errors, "Length");
-});
-
-test("field access on bool variable", () => {
-	const { errors } = compile(`package main
+}`,
+		"Length",
+	],
+	[
+		"field access on bool variable",
+		`package main
 func main() {
   b := true
   console.log(b.Value)
-}`);
-	assertErrorContains(errors, "has no field");
-});
-
-test("field access on slice", () => {
-	const { errors } = compile(`package main
+}`,
+		"has no field",
+	],
+	[
+		"field access on slice",
+		`package main
 func main() {
   xs := []int{1, 2, 3}
   console.log(xs.Missing)
-}`);
-	assertErrorContains(errors, "has no field");
-});
-
-test("type mismatch in assign", () => {
-	const { errors } = compile(`package main
+}`,
+		"has no field",
+	],
+	[
+		"type mismatch in assign",
+		`package main
 func main() {
   var x int = "not an int"
-}`);
-	assertErrorContains(errors, "Cannot assign");
-});
-
-test("wrong return type from function", () => {
-	const { errors } = compile(`package main
+}`,
+		"Cannot assign",
+	],
+	[
+		"wrong return type from function",
+		`package main
 func name() string {
   return 42
-}`);
-	assertErrorContains(errors, "Cannot assign");
-});
-
-test("calling result of non-function expression", () => {
-	const { errors } = compile(`package main
+}`,
+		"Cannot assign",
+	],
+	[
+		"calling result of non-function expression",
+		`package main
 func main() {
   s := "hello"
   s()
-}`);
-	assertErrorContains(errors, "Cannot call non-function");
-});
-
-test("undefined field on struct", () => {
-	const { errors } = compile(`package main
+}`,
+		"Cannot call non-function",
+	],
+	[
+		"undefined field on struct",
+		`package main
 type Rect struct { W int; H int }
 func main() {
   r := Rect{W: 10, H: 5}
   console.log(r.Depth)
-}`);
-	assertErrorContains(errors, "Depth");
-});
-
-test("wrong number of values in multi-assign", () => {
-	const { errors } = compile(`package main
+}`,
+		"Depth",
+	],
+	[
+		"wrong number of values in multi-assign",
+		`package main
 func pair() (int, int) { return 1, 2 }
 func main() {
   a, b, c := pair()
-}`);
-	assertErrorContains(errors, "not used");
-});
-
-test("defer non-call expression is rejected", () => {
-	const { errors } = compile(`package main
+}`,
+		"not used",
+	],
+	[
+		"defer non-call expression is rejected",
+		`package main
 func main() {
   defer 42
-}`);
-	assertErrorContains(errors, "defer");
-});
-
-test("error.Error field access on non-error is rejected", () => {
-	const { errors } = compile(`package main
+}`,
+		"defer",
+	],
+	[
+		"error.Error field access on non-error is rejected",
+		`package main
 func main() {
   x := 42
   console.log(x.Error)
-}`);
-	assertErrorContains(errors, "has no field");
-});
-
-test("wrong argument type to function", () => {
-	const { errors } = compile(`package main
+}`,
+		"has no field",
+	],
+	[
+		"wrong argument type to function",
+		`package main
 func double(n int) int { return n * 2 }
-func main() { double("hello") }`);
-	assertErrorContains(errors, "Cannot assign");
-});
-
-test("wrong field type in struct literal", () => {
-	const { errors } = compile(`package main
+func main() { double("hello") }`,
+		"Cannot assign",
+	],
+	[
+		"wrong field type in struct literal",
+		`package main
 type Point struct { X int; Y int }
-func main() { _ := Point{X: "not an int", Y: 2} }`);
-	assertErrorContains(errors, "Cannot assign");
-});
-
-test("undefined type in var declaration", () => {
-	const { errors } = compile(`package main
-func main() { var x Phantom; _ = x }`);
-	assertErrorContains(errors, "Phantom");
-});
-
-test("undefined type in function parameter", () => {
-	const { errors } = compile(`package main
-func greet(x Ghost) {}`);
-	assertErrorContains(errors, "Ghost");
-});
-
-test("calling non-existent method on struct", () => {
-	const { errors } = compile(`package main
+func main() { _ := Point{X: "not an int", Y: 2} }`,
+		"Cannot assign",
+	],
+	[
+		"undefined type in var declaration",
+		`package main
+func main() { var x Phantom; _ = x }`,
+		"Phantom",
+	],
+	[
+		"undefined type in function parameter",
+		`package main
+func greet(x Ghost) {}`,
+		"Ghost",
+	],
+	[
+		"calling non-existent method on struct",
+		`package main
 type Rect struct { W int }
 func main() {
   r := Rect{W: 10}
   r.Fly()
-}`);
-	assertErrorContains(errors, "Fly");
-});
-
-test("interface not satisfied when method has wrong return type", () => {
-	const { errors } = compile(`package main
+}`,
+		"Fly",
+	],
+	[
+		"interface not satisfied when method has wrong return type",
+		`package main
 type Runner interface { Speed() int }
 type Dog struct{}
 func (d Dog) Speed() string { return "fast" }
 func race(r Runner) {}
-func main() { race(Dog{}) }`);
-	assertErrorContains(errors, "does not implement");
-});
-
-test("assigning wrong type to struct field", () => {
-	const { errors } = compile(`package main
+func main() { race(Dog{}) }`,
+		"does not implement",
+	],
+	[
+		"assigning wrong type to struct field",
+		`package main
 type Box struct { Count int }
 func main() {
   b := Box{}
   b.Count = "five"
-}`);
-	assertErrorContains(errors, "Cannot assign");
-});
+}`,
+		"Cannot assign",
+	],
+	[
+		"undefined type in struct field definition",
+		`package main
+type Widget struct { Child Ghost }`,
+		"Ghost",
+	],
+];
 
-test("undefined type in struct field definition", () => {
-	const { errors } = compile(`package main
-type Widget struct { Child Ghost }`);
-	assertErrorContains(errors, "Ghost");
-});
+for (const [name, code, expected] of typeErrorCases) {
+	test(name, () => {
+		const { errors } = compile(code);
+		assertErrorContains(errors, expected);
+	});
+}
 
 // ═════════════════════════════════════════════════════════════
 // Edge case tests

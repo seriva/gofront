@@ -11,31 +11,52 @@ import {
 	test,
 } from "../helpers.js";
 
-section("New type checks");
+section("Type validation checks");
 
-test("break outside loop and switch is an error", () => {
-	const { errors } = compile(`package main
-func main() {
-  break
-}`);
-	assertErrorContains(errors, "break");
-});
+const controlFlowErrorCases = [
+	[
+		"break outside loop and switch is an error",
+		"package main\nfunc main() {\n  break\n}",
+		"break",
+	],
+	[
+		"continue outside loop is an error",
+		"package main\nfunc main() {\n  continue\n}",
+		"continue",
+	],
+	[
+		"fallthrough outside switch is an error",
+		"package main\nfunc main() {\n  fallthrough\n}",
+		"fallthrough",
+	],
+	[
+		"labeled continue outside loop is an error",
+		"package main\nfunc main() {\nMyLabel:\n  continue MyLabel\n}",
+		"continue",
+	],
+	[
+		"labeled break outside loop and switch is an error",
+		"package main\nfunc main() {\nMyLabel:\n  break MyLabel\n}",
+		"break",
+	],
+	[
+		"reassigning a const is an error",
+		"package main\nconst MaxSize = 10\nfunc main() {\n  MaxSize = 20\n}",
+		"const",
+	],
+	[
+		"reassigning a local const is an error",
+		"package main\nfunc main() {\n  const x = 5\n  x = 10\n}",
+		"const",
+	],
+];
 
-test("continue outside loop is an error", () => {
-	const { errors } = compile(`package main
-func main() {
-  continue
-}`);
-	assertErrorContains(errors, "continue");
-});
-
-test("fallthrough outside switch is an error", () => {
-	const { errors } = compile(`package main
-func main() {
-  fallthrough
-}`);
-	assertErrorContains(errors, "fallthrough");
-});
+for (const [name, code, expected] of controlFlowErrorCases) {
+	test(name, () => {
+		const { errors } = compile(code);
+		assertErrorContains(errors, expected);
+	});
+}
 
 test("break inside for loop is valid", () => {
 	const { js, errors } = compile(`package main
@@ -73,42 +94,6 @@ func main() {
 }`);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "0\n2");
-});
-
-test("labeled continue outside loop is an error", () => {
-	const { errors } = compile(`package main
-func main() {
-MyLabel:
-  continue MyLabel
-}`);
-	assertErrorContains(errors, "continue");
-});
-
-test("labeled break outside loop and switch is an error", () => {
-	const { errors } = compile(`package main
-func main() {
-MyLabel:
-  break MyLabel
-}`);
-	assertErrorContains(errors, "break");
-});
-
-test("reassigning a const is an error", () => {
-	const { errors } = compile(`package main
-const MaxSize = 10
-func main() {
-  MaxSize = 20
-}`);
-	assertErrorContains(errors, "const");
-});
-
-test("reassigning a local const is an error", () => {
-	const { errors } = compile(`package main
-func main() {
-  const x = 5
-  x = 10
-}`);
-	assertErrorContains(errors, "const");
 });
 
 test("shadowing a const with a var in inner scope is allowed", () => {
@@ -574,55 +559,35 @@ func main() {
 	assertErrorContains(errors, "Cannot assign");
 });
 
-test("interface not satisfied when method has wrong parameter type", () => {
-	const { errors } = compile(`package main
-type Greeter interface { Greet(name string) }
-type Bot struct{}
-func (b Bot) Greet(name int) {}
-func hello(g Greeter) {}
-func main() { hello(Bot{}) }`);
-	assertErrorContains(errors, "does not implement");
-});
+const interfaceMismatchCases = [
+	[
+		"interface not satisfied when method has wrong parameter type",
+		`package main\ntype Greeter interface { Greet(name string) }\ntype Bot struct{}\nfunc (b Bot) Greet(name int) {}\nfunc hello(g Greeter) {}\nfunc main() { hello(Bot{}) }`,
+	],
+	[
+		"interface not satisfied when method has wrong parameter count",
+		`package main\ntype Runner interface { Run(speed int) }\ntype Dog struct{}\nfunc (d Dog) Run() {}\nfunc race(r Runner) {}\nfunc main() { race(Dog{}) }`,
+	],
+	[
+		"interface not satisfied when method has extra parameters",
+		`package main\ntype Pinger interface { Ping() }\ntype Bot struct{}\nfunc (b Bot) Ping(addr string) {}\nfunc check(p Pinger) {}\nfunc main() { check(Bot{}) }`,
+	],
+	[
+		"interface not satisfied when method has wrong second return type",
+		`package main\ntype Loader interface { Load() (string, error) }\ntype Cache struct{}\nfunc (c Cache) Load() (string, int) { return "x", 0 }\nfunc fetch(l Loader) {}\nfunc main() { fetch(Cache{}) }`,
+	],
+	[
+		"interface not satisfied when method has fewer return values",
+		`package main\ntype Loader interface { Load() (string, error) }\ntype Cache struct{}\nfunc (c Cache) Load() string { return "x" }\nfunc fetch(l Loader) {}\nfunc main() { fetch(Cache{}) }`,
+	],
+];
 
-test("interface not satisfied when method has wrong parameter count", () => {
-	const { errors } = compile(`package main
-type Runner interface { Run(speed int) }
-type Dog struct{}
-func (d Dog) Run() {}
-func race(r Runner) {}
-func main() { race(Dog{}) }`);
-	assertErrorContains(errors, "does not implement");
-});
-
-test("interface not satisfied when method has extra parameters", () => {
-	const { errors } = compile(`package main
-type Pinger interface { Ping() }
-type Bot struct{}
-func (b Bot) Ping(addr string) {}
-func check(p Pinger) {}
-func main() { check(Bot{}) }`);
-	assertErrorContains(errors, "does not implement");
-});
-
-test("interface not satisfied when method has wrong second return type", () => {
-	const { errors } = compile(`package main
-type Loader interface { Load() (string, error) }
-type Cache struct{}
-func (c Cache) Load() (string, int) { return "x", 0 }
-func fetch(l Loader) {}
-func main() { fetch(Cache{}) }`);
-	assertErrorContains(errors, "does not implement");
-});
-
-test("interface not satisfied when method has fewer return values", () => {
-	const { errors } = compile(`package main
-type Loader interface { Load() (string, error) }
-type Cache struct{}
-func (c Cache) Load() string { return "x" }
-func fetch(l Loader) {}
-func main() { fetch(Cache{}) }`);
-	assertErrorContains(errors, "does not implement");
-});
+for (const [name, code] of interfaceMismatchCases) {
+	test(name, () => {
+		const { errors } = compile(code);
+		assertErrorContains(errors, "does not implement");
+	});
+}
 
 test("interface satisfied when full signature matches", () => {
 	const { js, errors } = compile(`package main
@@ -928,42 +893,32 @@ func f() int {
 
 section("ANY cascade suppression");
 
-test("undefined var in call chain produces exactly 1 error", () => {
-	const { errors } = compile(`package main
-func main() {
-  x.Foo()
-}`);
-	assertEqual(errors.length, 1);
-	assertErrorContains(errors, "Undefined: 'x'");
-});
+const cascadeCases = [
+	[
+		"undefined var in call chain produces exactly 1 error",
+		"package main\nfunc main() {\n  x.Foo()\n}",
+	],
+	[
+		"undefined var in selector produces exactly 1 error",
+		"package main\nfunc main() {\n  _ = x.Foo\n}",
+	],
+	[
+		"undefined var in binary expr produces exactly 1 error",
+		'package main\nfunc main() {\n  var s string = x + "hello"\n  _ = s\n}',
+	],
+	[
+		"undefined var in index expr produces exactly 1 error",
+		"package main\nfunc main() {\n  _ = x[0]\n}",
+	],
+];
 
-test("undefined var in selector produces exactly 1 error", () => {
-	const { errors } = compile(`package main
-func main() {
-  _ = x.Foo
-}`);
-	assertEqual(errors.length, 1);
-	assertErrorContains(errors, "Undefined: 'x'");
-});
-
-test("undefined var in binary expr produces exactly 1 error", () => {
-	const { errors } = compile(`package main
-func main() {
-  var s string = x + "hello"
-  _ = s
-}`);
-	assertEqual(errors.length, 1);
-	assertErrorContains(errors, "Undefined: 'x'");
-});
-
-test("undefined var in index expr produces exactly 1 error", () => {
-	const { errors } = compile(`package main
-func main() {
-  _ = x[0]
-}`);
-	assertEqual(errors.length, 1);
-	assertErrorContains(errors, "Undefined: 'x'");
-});
+for (const [name, code] of cascadeCases) {
+	test(name, () => {
+		const { errors } = compile(code);
+		assertEqual(errors.length, 1);
+		assertErrorContains(errors, "Undefined: 'x'");
+	});
+}
 
 test("two independent undefined vars produce 2 errors", () => {
 	const { errors } = compile(`package main
