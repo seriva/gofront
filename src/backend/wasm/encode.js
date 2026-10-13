@@ -923,14 +923,17 @@ export function encodeModule(mod) {
 	];
 	const codeStart = allBytes.length;
 	mod.codeOffsets = sectionOffsets.map((o) => codeStart + o);
-	allBytes.push(...codeSec);
+	for (let i = 0; i < codeSec.length; i++) {
+		allBytes.push(codeSec[i]);
+	}
 	if (mod.sourceMappingURL) {
-		allBytes.push(
-			...encodeSection(0, [
-				...encodeString("sourceMappingURL"),
-				...encodeString(mod.sourceMappingURL),
-			]),
-		);
+		const smSec = encodeSection(0, [
+			...encodeString("sourceMappingURL"),
+			...encodeString(mod.sourceMappingURL),
+		]);
+		for (let i = 0; i < smSec.length; i++) {
+			allBytes.push(smSec[i]);
+		}
 	}
 
 	return new Uint8Array(allBytes);

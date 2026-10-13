@@ -83,7 +83,7 @@ a WebAssembly GC module:
 | `emit-builtins.js` | `panic`/`recover`, Go builtins (`len`, `append`, `make`, …) and call dispatch |
 | `emit-maps.js` | map runtime helpers (key hash/eq, get/set/delete, iteration) and zero values |
 | `emit-shared.js` | `gofront/shared` linear-memory buffer allocation, load/store indexing, `Subarray` and `copy` |
-| `emit-stdlib.js` | natively implemented stdlib (`math`, `math/bits`, `maps`, `slices`, `strings`, `strconv`, `fmt`, `testing`, `errors`, `sort`, `unicode/utf8`) |
+| `stdlib/` | natively implemented stdlib modules (`core.js`, `bytes.js`, `pure.js`, `io.js`, `time.js`, indexed by `index.js`) |
 | `encode.js` | Module IR → binary (`LEB128`, sections, `gofront` custom section, `app.wasm.map` source maps) — no dependencies |
 | `optimize.js` | Binaryen (`wasm-opt`) optimization pipeline (`-O3` + `--gufa`) and source map pass-through for `--release` / `--wasm-opt` |
 | `wat.js` | Module IR → WAT text for `--emit-wat` and golden tests |

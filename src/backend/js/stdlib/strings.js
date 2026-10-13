@@ -207,7 +207,7 @@ const STRINGS_DISPATCH = {
 /** @type {ThisType<CodeGen>} */
 export const stringsMethods = {
 	_genStrings(fn, a) {
-		if (fn === "NewReader") this.useHelper("error");
+		if (fn === "NewReader") this.useHelper("ioEOF");
 		const args = a();
 		const [s, s2] = args;
 		if (STRINGS_M1[fn]) return `${s}.${STRINGS_M1[fn]}()`;

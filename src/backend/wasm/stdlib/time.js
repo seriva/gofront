@@ -1,5 +1,5 @@
-// src/backend/wasm/emit-stdlib-phase8.js
-// FunctionEmitter mixin: Phase 8 time package.
+// src/backend/wasm/stdlib/time.js
+// FunctionEmitter mixin: time package.
 
 const TIME_CONST_NAMES = new Set([
 	"Nanosecond",
@@ -78,7 +78,7 @@ const WEEKDAY_VALS = {
 	Saturday: 6,
 };
 
-export class Phase8Emitter {
+export class TimeEmitter {
 	_isTimeConst(expr) {
 		return (
 			expr.expr?.kind === "Ident" &&
@@ -87,6 +87,17 @@ export class Phase8Emitter {
 			!this.mod.resolveGlobal("time") &&
 			TIME_CONST_NAMES.has(expr.field)
 		);
+	}
+
+	_isUtcExpr(expr) {
+		if (!expr) return false;
+		if (
+			expr.kind === "SelectorExpr" &&
+			(expr.sel?.name === "UTC" || expr.field === "UTC")
+		)
+			return true;
+		if (expr.kind === "Ident" && expr.name === "UTC") return true;
+		return false;
 	}
 
 	emitTimeConst(field, targetWasmType) {
@@ -442,12 +453,17 @@ export class Phase8Emitter {
 		this.pushInstruction({ op: "local.set", index: localSecTmp });
 
 		const offTmp = this.acquireTemp("i32");
-		this.pushInstruction({ op: "local.get", index: localSecTmp });
-		this.pushInstruction({ op: "i64.const", value: 1000n });
-		this.pushInstruction("i64.mul");
-		this.pushInstruction("f64.convert_i64_s");
-		this._callStdlib("time_timezone_offset");
-		this.pushInstruction({ op: "local.set", index: offTmp });
+		if (this._isUtcExpr(args[7])) {
+			this.pushInstruction({ op: "i32.const", value: 0 });
+			this.pushInstruction({ op: "local.set", index: offTmp });
+		} else {
+			this.pushInstruction({ op: "local.get", index: localSecTmp });
+			this.pushInstruction({ op: "i64.const", value: 1000n });
+			this.pushInstruction("i64.mul");
+			this.pushInstruction("f64.convert_i64_s");
+			this._callStdlib("time_timezone_offset");
+			this.pushInstruction({ op: "local.set", index: offTmp });
+		}
 
 		// unixSec = localSec - offset
 		this.pushInstruction({ op: "local.get", index: localSecTmp });

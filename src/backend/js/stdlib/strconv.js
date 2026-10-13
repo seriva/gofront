@@ -52,7 +52,10 @@ const USES_STRCONV = new Set([
 export const strconvMethods = {
 	_genStrconv(fn, a) {
 		const gen = STRCONV_DISPATCH[fn];
-		if (gen && USES_ERROR.has(fn)) this.useHelper("error");
+		if (gen && USES_ERROR.has(fn)) {
+			this.useHelper("error");
+			this.useHelper("strconvError");
+		}
 		if (gen && USES_STRCONV.has(fn)) this.useHelper("strconv");
 		return gen ? gen(a()) : undefined;
 	},

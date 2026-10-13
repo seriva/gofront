@@ -21,6 +21,7 @@ export const pathMethods = {
 	_genPath(fn, a, expr) {
 		if (fn === "Match") {
 			this.useHelper("error");
+			this.useHelper("pathError");
 			this.useHelper("pathClean");
 		}
 		if (fn === "Dir") {

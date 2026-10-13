@@ -1,9 +1,9 @@
-// src/backend/wasm/emit-stdlib-phase7.js
-// FunctionEmitter mixin: Phase 7 io, readers/writers, fmt.Fprint*, fmt.Sscan*.
+// src/backend/wasm/stdlib/io.js
+// FunctionEmitter mixin: io, readers/writers, fmt.Fprint*, fmt.Sscan*.
 
-import { toWasmType } from "./types.js";
+import { toWasmType } from "../types.js";
 
-export class Phase7Emitter {
+export class IoEmitter {
 	_isIoConst(expr) {
 		return (
 			expr.expr?.kind === "Ident" &&
@@ -296,6 +296,7 @@ export class Phase7Emitter {
 	emitStringsNewReader(call, _targetWasmType) {
 		const structInfo = this.mod.getStructType("strings.Reader");
 		this.emitExpr(call.args[0], "externref");
+		this._emitStringToByteSlice({ elem: { kind: "basic", name: "byte" } });
 		this.pushInstruction({ op: "i64.const", value: 0n });
 		this.pushInstruction({
 			op: "struct.new",
@@ -363,304 +364,8 @@ export class Phase7Emitter {
 		this.releaseTemp(rTmp, readerW);
 	}
 
-	_emitStringsReaderReadCore(rTmp, pTmp) {
-		const structInfo = this.mod.getStructType("strings.Reader");
-		const byteElemGo = { kind: "basic", name: "byte" };
-		const sliceInfo = this.mod.getSliceType(byteElemGo);
-		const arrW = {
-			kind: "ref",
-			nullable: true,
-			typeIndex: sliceInfo.arrInfo.typeIndex,
-		};
-
-		const pArrTmp = this.acquireTemp(arrW);
-		const pOffTmp = this.acquireTemp("i32");
-		const pLenTmp = this.acquireTemp("i32");
-		const pCapTmp = this.acquireTemp("i32");
-		this._emitSliceUnpack(pTmp, sliceInfo, {
-			arr: pArrTmp,
-			off: pOffTmp,
-			len: pLenTmp,
-			cap: pCapTmp,
-		});
-		this.releaseTemp(pCapTmp, "i32");
-
-		const resNTmp = this.acquireTemp("i64");
-		const resErrTmp = this.acquireTemp("anyref");
-
-		// if p.len == 0: (0, nil)
-		this.pushInstruction({ op: "local.get", index: pLenTmp });
-		this.pushInstruction("i32.eqz");
-		this.pushInstruction({ op: "if", blockType: "void" });
-		this.pushInstruction({ op: "i64.const", value: 0n });
-		this.pushInstruction({ op: "local.set", index: resNTmp });
-		this.pushInstruction({ op: "ref.null", heapType: "any" });
-		this.pushInstruction({ op: "local.set", index: resErrTmp });
-		this.pushInstruction("else");
-
-		// totalBytes = str_to_bytes(r._src)
-		this.pushInstruction({ op: "local.get", index: rTmp });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: structInfo.typeIndex,
-			fieldIndex: 0,
-		});
-		this.pushInstruction({
-			op: "call",
-			funcIndex: this.mod.getStrToBytesImportIndex(),
-		});
-		const totBytesTmp = this.acquireTemp("i32");
-		this.pushInstruction({ op: "local.set", index: totBytesTmp });
-
-		const posTmp = this.acquireTemp("i64");
-		this.pushInstruction({ op: "local.get", index: rTmp });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: structInfo.typeIndex,
-			fieldIndex: 1,
-		});
-		this.pushInstruction({ op: "local.set", index: posTmp });
-
-		// if pos >= totBytes: (0, io.EOF)
-		this.pushInstruction({ op: "local.get", index: posTmp });
-		this.pushInstruction({ op: "local.get", index: totBytesTmp });
-		this.pushInstruction("i64.extend_i32_u");
-		this.pushInstruction("i64.ge_s");
-		this.pushInstruction({ op: "if", blockType: "void" });
-		this.pushInstruction({ op: "i64.const", value: 0n });
-		this.pushInstruction({ op: "local.set", index: resNTmp });
-		this.emitIoConst("EOF", "anyref");
-		this.pushInstruction({ op: "local.set", index: resErrTmp });
-		this.pushInstruction("else");
-
-		// avail = totBytes - pos
-		const availTmp = this.acquireTemp("i32");
-		this.pushInstruction({ op: "local.get", index: totBytesTmp });
-		this.pushInstruction({ op: "local.get", index: posTmp });
-		this.pushInstruction("i32.wrap_i64");
-		this.pushInstruction("i32.sub");
-		this.pushInstruction({ op: "local.set", index: availTmp });
-
-		// n = min(p.len, avail)
-		const nTmp = this.acquireTemp("i32");
-		this.pushInstruction({ op: "local.get", index: pLenTmp });
-		this.pushInstruction({ op: "local.get", index: availTmp });
-		this.pushInstruction("i32.lt_s");
-		this.pushInstruction({ op: "if", blockType: "i32" });
-		this.pushInstruction({ op: "local.get", index: pLenTmp });
-		this.pushInstruction("else");
-		this.pushInstruction({ op: "local.get", index: availTmp });
-		this.pushInstruction("end");
-		this.pushInstruction({ op: "local.set", index: nTmp });
-
-		// loop k = 0 to n-1: p.arr[p.off + k] = str_byte_at(pos + k)
-		const kTmp = this.acquireTemp("i32");
-		this.pushInstruction({ op: "i32.const", value: 0 });
-		this.pushInstruction({ op: "local.set", index: kTmp });
-
-		this.pushInstruction({ op: "block", blockType: "void" });
-		this.pushInstruction({ op: "loop", blockType: "void" });
-		this.pushInstruction({ op: "local.get", index: kTmp });
-		this.pushInstruction({ op: "local.get", index: nTmp });
-		this.pushInstruction("i32.ge_s");
-		this.pushInstruction({ op: "br_if", depth: 1 });
-
-		this.pushInstruction({ op: "local.get", index: pArrTmp });
-		this.pushInstruction({ op: "local.get", index: pOffTmp });
-		this.pushInstruction({ op: "local.get", index: kTmp });
-		this.pushInstruction("i32.add");
-		this.pushInstruction({ op: "local.get", index: posTmp });
-		this.pushInstruction("i32.wrap_i64");
-		this.pushInstruction({ op: "local.get", index: kTmp });
-		this.pushInstruction("i32.add");
-		this.pushInstruction({
-			op: "call",
-			funcIndex: this.mod.getStrByteAtImportIndex(),
-		});
-		this.pushInstruction({
-			op: "array.set",
-			typeIndex: sliceInfo.arrInfo.typeIndex,
-		});
-
-		this.pushInstruction({ op: "local.get", index: kTmp });
-		this.pushInstruction({ op: "i32.const", value: 1 });
-		this.pushInstruction("i32.add");
-		this.pushInstruction({ op: "local.set", index: kTmp });
-		this.pushInstruction({ op: "br", depth: 0 });
-		this.pushInstruction("end");
-		this.pushInstruction("end");
-
-		// r._pos += n
-		this.pushInstruction({ op: "local.get", index: rTmp });
-		this.pushInstruction({ op: "local.get", index: posTmp });
-		this.pushInstruction({ op: "local.get", index: nTmp });
-		this.pushInstruction("i64.extend_i32_u");
-		this.pushInstruction("i64.add");
-		this.pushInstruction({
-			op: "struct.set",
-			typeIndex: structInfo.typeIndex,
-			fieldIndex: 1,
-		});
-
-		this.pushInstruction({ op: "local.get", index: nTmp });
-		this.pushInstruction("i64.extend_i32_u");
-		this.pushInstruction({ op: "local.set", index: resNTmp });
-		this.pushInstruction({ op: "ref.null", heapType: "any" });
-		this.pushInstruction({ op: "local.set", index: resErrTmp });
-
-		this.releaseTemp(kTmp, "i32");
-		this.releaseTemp(nTmp, "i32");
-		this.releaseTemp(availTmp, "i32");
-		this.pushInstruction("end");
-		this.releaseTemp(posTmp, "i64");
-		this.releaseTemp(totBytesTmp, "i32");
-		this.pushInstruction("end");
-
-		this.pushInstruction({ op: "local.get", index: resNTmp });
-		this.pushInstruction({ op: "local.get", index: resErrTmp });
-
-		this.releaseTemp(resErrTmp, "anyref");
-		this.releaseTemp(resNTmp, "i64");
-		this.releaseTemp(pLenTmp, "i32");
-		this.releaseTemp(pOffTmp, "i32");
-		this.releaseTemp(pArrTmp, arrW);
-	}
-
-	_emitStringsReaderLen(expr, targetWasmType) {
-		const structInfo = this.mod.getStructType("strings.Reader");
-		const readerW = {
-			kind: "ref",
-			nullable: true,
-			typeIndex: structInfo.typeIndex,
-		};
-		const rTmp = this.acquireTemp(readerW);
-		this.emitExpr(expr, readerW);
-		this.pushInstruction({ op: "local.set", index: rTmp });
-
-		this._emitStringsReaderLenCore(rTmp, targetWasmType);
-		this.releaseTemp(rTmp, readerW);
-	}
-
-	_emitStringsReaderLenCore(rTmp, targetWasmType) {
-		const structInfo = this.mod.getStructType("strings.Reader");
-		this.pushInstruction({ op: "local.get", index: rTmp });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: structInfo.typeIndex,
-			fieldIndex: 0,
-		});
-		this.pushInstruction({
-			op: "call",
-			funcIndex: this.mod.getStrToBytesImportIndex(),
-		});
-		this.pushInstruction("i64.extend_i32_u");
-		this.pushInstruction({ op: "local.get", index: rTmp });
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: structInfo.typeIndex,
-			fieldIndex: 1,
-		});
-		this.pushInstruction("i64.sub");
-		const resTmp = this.acquireTemp("i64");
-		this.pushInstruction({ op: "local.set", index: resTmp });
-
-		this.pushInstruction({ op: "local.get", index: resTmp });
-		this.pushInstruction({ op: "i64.const", value: 0n });
-		this.pushInstruction("i64.lt_s");
-		this.pushInstruction({ op: "if", blockType: "i64" });
-		this.pushInstruction({ op: "i64.const", value: 0n });
-		this.pushInstruction("else");
-		this.pushInstruction({ op: "local.get", index: resTmp });
-		this.pushInstruction("end");
-		if ((targetWasmType ?? "i64") === "i32") {
-			this.pushInstruction("i32.wrap_i64");
-		}
-		this.releaseTemp(resTmp, "i64");
-	}
-
-	_emitStringsReaderReset(expr, args) {
-		const structInfo = this.mod.getStructType("strings.Reader");
-		const readerW = {
-			kind: "ref",
-			nullable: true,
-			typeIndex: structInfo.typeIndex,
-		};
-		const rTmp = this.acquireTemp(readerW);
-		this.emitExpr(expr, readerW);
-		this.pushInstruction({ op: "local.set", index: rTmp });
-
-		const sTmp = this.acquireTemp("externref");
-		this.emitExpr(args[0], "externref");
-		this.pushInstruction({ op: "local.set", index: sTmp });
-
-		this._emitStringsReaderResetCore(rTmp, sTmp);
-		this.releaseTemp(sTmp, "externref");
-		this.releaseTemp(rTmp, readerW);
-	}
-
-	_emitStringsReaderResetCore(rTmp, sTmp) {
-		const structInfo = this.mod.getStructType("strings.Reader");
-		this.pushInstruction({ op: "local.get", index: rTmp });
-		this.pushInstruction({ op: "local.get", index: sTmp });
-		this.pushInstruction({
-			op: "struct.set",
-			typeIndex: structInfo.typeIndex,
-			fieldIndex: 0,
-		});
-		this.pushInstruction({ op: "local.get", index: rTmp });
-		this.pushInstruction({ op: "i64.const", value: 0n });
-		this.pushInstruction({
-			op: "struct.set",
-			typeIndex: structInfo.typeIndex,
-			fieldIndex: 1,
-		});
-	}
-
-	emitBytesReaderMethodCall(method, expr, args, targetWasmType) {
-		if (method === "Read") {
-			this._emitBytesReaderRead(expr, args);
-			return;
-		}
-		if (method === "Len") {
-			this._emitBytesReaderLen(expr, targetWasmType);
-			return;
-		}
-		if (method === "Reset") {
-			this._emitBytesReaderReset(expr, args);
-			return;
-		}
-		throw new Error(`Unsupported bytes.Reader method: ${method}`);
-	}
-
-	_emitBytesReaderRead(expr, args) {
-		const structInfo = this.mod.getStructType("bytes.Reader");
-		const readerW = {
-			kind: "ref",
-			nullable: true,
-			typeIndex: structInfo.typeIndex,
-		};
-		const rTmp = this.acquireTemp(readerW);
-		this.emitExpr(expr, readerW);
-		this.pushInstruction({ op: "local.set", index: rTmp });
-
-		const byteElemGo = { kind: "basic", name: "byte" };
-		const sliceInfo = this.mod.getSliceType(byteElemGo);
-		const sliceW = {
-			kind: "ref",
-			nullable: true,
-			typeIndex: sliceInfo.typeIndex,
-		};
-		const pTmp = this.acquireTemp(sliceW);
-		this.emitExpr(args[0], sliceW);
-		this.pushInstruction({ op: "local.set", index: pTmp });
-
-		this._emitBytesReaderReadCore(rTmp, pTmp);
-		this.releaseTemp(pTmp, sliceW);
-		this.releaseTemp(rTmp, readerW);
-	}
-
-	_emitBytesReaderReadCore(rTmp, pTmp) {
-		const structInfo = this.mod.getStructType("bytes.Reader");
+	_emitReaderReadCore(typeName, rTmp, pTmp) {
+		const structInfo = this.mod.getStructType(typeName);
 		const byteElemGo = { kind: "basic", name: "byte" };
 		const sliceInfo = this.mod.getSliceType(byteElemGo);
 		const arrW = {
@@ -810,23 +515,8 @@ export class Phase7Emitter {
 		this.releaseTemp(pArrTmp, arrW);
 	}
 
-	_emitBytesReaderLen(expr, targetWasmType) {
-		const structInfo = this.mod.getStructType("bytes.Reader");
-		const readerW = {
-			kind: "ref",
-			nullable: true,
-			typeIndex: structInfo.typeIndex,
-		};
-		const rTmp = this.acquireTemp(readerW);
-		this.emitExpr(expr, readerW);
-		this.pushInstruction({ op: "local.set", index: rTmp });
-
-		this._emitBytesReaderLenCore(rTmp, targetWasmType);
-		this.releaseTemp(rTmp, readerW);
-	}
-
-	_emitBytesReaderLenCore(rTmp, targetWasmType) {
-		const structInfo = this.mod.getStructType("bytes.Reader");
+	_emitReaderLenCore(typeName, rTmp, targetWasmType) {
+		const structInfo = this.mod.getStructType(typeName);
 		const byteElemGo = { kind: "basic", name: "byte" };
 		const sliceInfo = this.mod.getSliceType(byteElemGo);
 
@@ -864,6 +554,134 @@ export class Phase7Emitter {
 			this.pushInstruction("i32.wrap_i64");
 		}
 		this.releaseTemp(resTmp, "i64");
+	}
+
+	_emitStringsReaderReadCore(rTmp, pTmp) {
+		this._emitReaderReadCore("strings.Reader", rTmp, pTmp);
+	}
+
+	_emitStringsReaderLen(expr, targetWasmType) {
+		const structInfo = this.mod.getStructType("strings.Reader");
+		const readerW = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: structInfo.typeIndex,
+		};
+		const rTmp = this.acquireTemp(readerW);
+		this.emitExpr(expr, readerW);
+		this.pushInstruction({ op: "local.set", index: rTmp });
+
+		this._emitStringsReaderLenCore(rTmp, targetWasmType);
+		this.releaseTemp(rTmp, readerW);
+	}
+
+	_emitStringsReaderLenCore(rTmp, targetWasmType) {
+		this._emitReaderLenCore("strings.Reader", rTmp, targetWasmType);
+	}
+
+	_emitStringsReaderReset(expr, args) {
+		const structInfo = this.mod.getStructType("strings.Reader");
+		const readerW = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: structInfo.typeIndex,
+		};
+		const rTmp = this.acquireTemp(readerW);
+		this.emitExpr(expr, readerW);
+		this.pushInstruction({ op: "local.set", index: rTmp });
+
+		const sTmp = this.acquireTemp("externref");
+		this.emitExpr(args[0], "externref");
+		this.pushInstruction({ op: "local.set", index: sTmp });
+
+		this._emitStringsReaderResetCore(rTmp, sTmp);
+		this.releaseTemp(sTmp, "externref");
+		this.releaseTemp(rTmp, readerW);
+	}
+
+	_emitStringsReaderResetCore(rTmp, sTmp) {
+		const structInfo = this.mod.getStructType("strings.Reader");
+		this.pushInstruction({ op: "local.get", index: rTmp });
+		this.pushInstruction({ op: "local.get", index: sTmp });
+		this._emitStringToByteSlice({ elem: { kind: "basic", name: "byte" } });
+		this.pushInstruction({
+			op: "struct.set",
+			typeIndex: structInfo.typeIndex,
+			fieldIndex: 0,
+		});
+		this.pushInstruction({ op: "local.get", index: rTmp });
+		this.pushInstruction({ op: "i64.const", value: 0n });
+		this.pushInstruction({
+			op: "struct.set",
+			typeIndex: structInfo.typeIndex,
+			fieldIndex: 1,
+		});
+	}
+
+	emitBytesReaderMethodCall(method, expr, args, targetWasmType) {
+		if (method === "Read") {
+			this._emitBytesReaderRead(expr, args);
+			return;
+		}
+		if (method === "Len") {
+			this._emitBytesReaderLen(expr, targetWasmType);
+			return;
+		}
+		if (method === "Reset") {
+			this._emitBytesReaderReset(expr, args);
+			return;
+		}
+		throw new Error(`Unsupported bytes.Reader method: ${method}`);
+	}
+
+	_emitBytesReaderRead(expr, args) {
+		const structInfo = this.mod.getStructType("bytes.Reader");
+		const readerW = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: structInfo.typeIndex,
+		};
+		const rTmp = this.acquireTemp(readerW);
+		this.emitExpr(expr, readerW);
+		this.pushInstruction({ op: "local.set", index: rTmp });
+
+		const byteElemGo = { kind: "basic", name: "byte" };
+		const sliceInfo = this.mod.getSliceType(byteElemGo);
+		const sliceW = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: sliceInfo.typeIndex,
+		};
+		const pTmp = this.acquireTemp(sliceW);
+		this.emitExpr(args[0], sliceW);
+		this.pushInstruction({ op: "local.set", index: pTmp });
+
+		this._emitBytesReaderReadCore(rTmp, pTmp);
+		this.releaseTemp(pTmp, sliceW);
+		this.releaseTemp(rTmp, readerW);
+	}
+
+	_emitBytesReaderReadCore(rTmp, pTmp) {
+		this._emitReaderReadCore("bytes.Reader", rTmp, pTmp);
+	}
+
+	_emitBytesReaderLen(expr, targetWasmType) {
+		const structInfo = this.mod.getStructType("bytes.Reader");
+		const readerW = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: structInfo.typeIndex,
+		};
+		const rTmp = this.acquireTemp(readerW);
+		this.emitExpr(expr, readerW);
+		this.pushInstruction({ op: "local.set", index: rTmp });
+
+		this._emitBytesReaderLenCore(rTmp, targetWasmType);
+		this.releaseTemp(rTmp, readerW);
+	}
+
+	_emitBytesReaderLenCore(rTmp, targetWasmType) {
+		this._emitReaderLenCore("bytes.Reader", rTmp, targetWasmType);
 	}
 
 	_emitBytesReaderReset(expr, args) {
@@ -921,11 +739,6 @@ export class Phase7Emitter {
 		const targetName =
 			wType?.name ?? (wType?.kind === "pointer" ? wType.base?.name : null);
 		if (targetName === "strings.Builder") {
-			const strNode = {
-				kind: "BasicLit",
-				value: "",
-				_type: { kind: "basic", name: "string" },
-			};
 			// Builder.WriteString
 			const builderInfo = this.mod.getStructType("strings.Builder");
 			const builderW = {
@@ -1000,9 +813,15 @@ export class Phase7Emitter {
 		const mode = fn === "Sscanln" ? 1 : 0;
 		const ptrs = fn === "Sscanf" ? call.args.slice(2) : call.args.slice(1);
 
-		this.emitExpr(strArg, "externref");
-		this.pushInstruction({ op: "i32.const", value: mode });
-		this._callStdlib("fmt_sscan_init");
+		if (fn === "Sscanf") {
+			this.emitExpr(strArg, "externref");
+			this.emitExpr(call.args[1], "externref");
+			this._callStdlib("fmt_sscanf_init");
+		} else {
+			this.emitExpr(strArg, "externref");
+			this.pushInstruction({ op: "i32.const", value: mode });
+			this._callStdlib("fmt_sscan_init");
+		}
 		const totTokensTmp = this.acquireTemp("i32");
 		this.pushInstruction({ op: "local.set", index: totTokensTmp });
 
@@ -1016,6 +835,16 @@ export class Phase7Emitter {
 
 		// return (n: i64, err: anyref)
 		this.pushInstruction({ op: "local.get", index: nTmp });
+
+		this._callStdlib("fmt_sscan_has_err");
+		this.pushInstruction({ op: "if", blockType: "anyref" });
+		this._callStdlib("fmt_sscan_err_msg");
+		this.pushInstruction({ op: "ref.null", heapType: "any" });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.resolveFuncIndex("__mk_error"),
+		});
+		this.pushInstruction("else");
 		this.pushInstruction({ op: "local.get", index: nTmp });
 		this.pushInstruction({ op: "i64.const", value: BigInt(ptrs.length) });
 		this.pushInstruction("i64.lt_s");
@@ -1034,6 +863,7 @@ export class Phase7Emitter {
 		this.pushInstruction("else");
 		this.pushInstruction({ op: "ref.null", heapType: "any" });
 		this.pushInstruction("end");
+		this.pushInstruction("end");
 
 		this.releaseTemp(nTmp, "i64");
 		this.releaseTemp(totTokensTmp, "i32");
@@ -1045,12 +875,22 @@ export class Phase7Emitter {
 		this.pushInstruction("i32.lt_s");
 		this.pushInstruction({ op: "if", blockType: "void" });
 
+		this._callStdlib("fmt_sscan_has_err");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction("else");
+
 		this._emitSscanWriteToken(pExpr, tokenIdx);
 
+		this._callStdlib("fmt_sscan_has_err");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction("else");
 		this.pushInstruction({ op: "local.get", index: nTmp });
 		this.pushInstruction({ op: "i64.const", value: 1n });
 		this.pushInstruction("i64.add");
 		this.pushInstruction({ op: "local.set", index: nTmp });
+		this.pushInstruction("end");
+
+		this.pushInstruction("end");
 		this.pushInstruction("end");
 	}
 
@@ -1134,8 +974,9 @@ export class Phase7Emitter {
 		this._callStdlib("fmt_sscan_token_str");
 	}
 
-	emitPhase7Helper(fn) {
-		switch (fn._isPhase7Helper) {
+	emitIoHelper(fn) {
+		const kind = fn._isIoHelper ?? fn._isPhase7Helper;
+		switch (kind) {
 			case "builder_write":
 				this._emitHelperBuilderWrite(fn);
 				return;
@@ -1173,8 +1014,12 @@ export class Phase7Emitter {
 				this._emitHelperDiscardWriteString(fn);
 				return;
 			default:
-				throw new Error(`Unknown phase7 helper: ${fn._isPhase7Helper}`);
+				throw new Error(`Unknown io helper: ${kind}`);
 		}
+	}
+
+	emitPhase7Helper(fn) {
+		return this.emitIoHelper(fn);
 	}
 
 	_emitHelperBuilderWrite(_fn) {
