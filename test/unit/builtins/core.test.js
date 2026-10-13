@@ -261,10 +261,6 @@ func main() {
 	assertContains(js, "var __sprintf");
 });
 
-// ═════════════════════════════════════════════════════════════
-// New type checks
-// ═════════════════════════════════════════════════════════════
-
 section("recover()");
 
 test("recover catches a panic and returns the message", () => {

@@ -1,33 +1,22 @@
 // GoFront test suite — asset-manager unit tests
-import {
-	existsSync,
-	mkdirSync,
-	mkdtempSync,
-	readFileSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { copyAssets, loadAssetConfig } from "../../../src/asset-manager.js";
 import {
 	assert,
-	assertContains,
 	assertEqual,
+	assertThrows,
 	section,
 	summarize,
 	test,
+	withTempDir,
 } from "../helpers.js";
 
 section("asset-manager — file and directory copying");
 
 test("copies single file to explicit destination path", () => {
-	const dir = mkdtempSync(join(tmpdir(), "gofront-asset-file-"));
-	try {
-		const srcFile = join(dir, "source.txt");
-		writeFileSync(srcFile, "hello assets");
-
+	withTempDir({ "source.txt": "hello assets" }, (dir) => {
 		const result = copyAssets(dir, [
 			{ source: "source.txt", dest: "output/dest.txt" },
 		]);
@@ -37,17 +26,11 @@ test("copies single file to explicit destination path", () => {
 		const copiedFile = join(dir, "output", "dest.txt");
 		assert(existsSync(copiedFile), "expected copied file to exist");
 		assertEqual(readFileSync(copiedFile, "utf8"), "hello assets");
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
+	});
 });
 
 test("copies single file into destination directory ending with /", () => {
-	const dir = mkdtempSync(join(tmpdir(), "gofront-asset-dirslash-"));
-	try {
-		const srcFile = join(dir, "font.woff2");
-		writeFileSync(srcFile, "font-bytes");
-
+	withTempDir({ "font.woff2": "font-bytes" }, (dir) => {
 		const result = copyAssets(dir, [
 			{ source: "font.woff2", dest: "assets/fonts/" },
 		]);
@@ -56,40 +39,35 @@ test("copies single file into destination directory ending with /", () => {
 		const copiedFile = join(dir, "assets", "fonts", "font.woff2");
 		assert(existsSync(copiedFile), "expected font to be placed in fonts/");
 		assertEqual(readFileSync(copiedFile, "utf8"), "font-bytes");
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
+	});
 });
 
 test("copies directory tree recursively", () => {
-	const dir = mkdtempSync(join(tmpdir(), "gofront-asset-tree-"));
-	try {
-		const treeDir = join(dir, "node_modules", "pkg", "themes");
-		mkdirSync(join(treeDir, "sub"), { recursive: true });
-		writeFileSync(join(treeDir, "theme.css"), "/* theme */");
-		writeFileSync(join(treeDir, "sub", "subtheme.css"), "/* subtheme */");
+	withTempDir(
+		{
+			"node_modules/pkg/themes/theme.css": "/* theme */",
+			"node_modules/pkg/themes/sub/subtheme.css": "/* subtheme */",
+		},
+		(dir) => {
+			const result = copyAssets(dir, [
+				{ source: "node_modules/pkg/themes", dest: "dist/css/themes" },
+			]);
 
-		const result = copyAssets(dir, [
-			{ source: "node_modules/pkg/themes", dest: "dist/css/themes" },
-		]);
-
-		assertEqual(result.copied, 1);
-		const destTheme = join(dir, "dist", "css", "themes", "theme.css");
-		const destSub = join(dir, "dist", "css", "themes", "sub", "subtheme.css");
-		assert(existsSync(destTheme), "expected theme.css to exist in dest");
-		assert(existsSync(destSub), "expected subtheme.css to exist in dest");
-		assertEqual(readFileSync(destTheme, "utf8"), "/* theme */");
-		assertEqual(readFileSync(destSub, "utf8"), "/* subtheme */");
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
+			assertEqual(result.copied, 1);
+			const destTheme = join(dir, "dist", "css", "themes", "theme.css");
+			const destSub = join(dir, "dist", "css", "themes", "sub", "subtheme.css");
+			assert(existsSync(destTheme), "expected theme.css to exist in dest");
+			assert(existsSync(destSub), "expected subtheme.css to exist in dest");
+			assertEqual(readFileSync(destTheme, "utf8"), "/* theme */");
+			assertEqual(readFileSync(destSub, "utf8"), "/* subtheme */");
+		},
+	);
 });
 
 section("asset-manager — edge cases & error handling");
 
 test("gracefully skips non-existent source paths", () => {
-	const dir = mkdtempSync(join(tmpdir(), "gofront-asset-missing-"));
-	try {
+	withTempDir((dir) => {
 		const result = copyAssets(dir, [
 			{ source: "does/not/exist.png", dest: "app/img.png" },
 		]);
@@ -98,107 +76,84 @@ test("gracefully skips non-existent source paths", () => {
 		assertEqual(result.skipped, 1);
 		assertEqual(result.items[0].status, "skipped");
 		assertEqual(result.items[0].reason, "source not found");
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
+	});
 });
 
 test("throws error when destination attempts directory traversal", () => {
-	const dir = mkdtempSync(join(tmpdir(), "gofront-asset-trav-"));
-	try {
-		const srcFile = join(dir, "file.txt");
-		writeFileSync(srcFile, "data");
-
-		let threw = false;
-		try {
-			copyAssets(dir, [{ source: "file.txt", dest: "../outside.txt" }]);
-		} catch (err) {
-			threw = true;
-			assertContains(err.message, "outside project directory");
-		}
-		assert(threw, "expected copyAssets to throw on traversal attempt");
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
+	withTempDir({ "file.txt": "data" }, (dir) => {
+		assertThrows(
+			() => copyAssets(dir, [{ source: "file.txt", dest: "../outside.txt" }]),
+			"outside project directory",
+		);
+	});
 });
 
 section("asset-manager — configuration loading");
 
 test('reads assetCopy configuration from package.json "gofront" key', () => {
-	const dir = mkdtempSync(join(tmpdir(), "gofront-asset-pkg-"));
-	try {
-		writeFileSync(
-			join(dir, "package.json"),
-			JSON.stringify({
+	withTempDir(
+		{
+			"package.json": JSON.stringify({
 				gofront: {
 					assetCopy: [{ source: "icon.svg", dest: "public/icon.svg" }],
 				},
 			}),
-		);
-		writeFileSync(join(dir, "icon.svg"), "<svg></svg>");
+			"icon.svg": "<svg></svg>",
+		},
+		(dir) => {
+			const config = loadAssetConfig(dir);
+			assertEqual(config.length, 1);
+			assertEqual(config[0].source, "icon.svg");
 
-		const config = loadAssetConfig(dir);
-		assertEqual(config.length, 1);
-		assertEqual(config[0].source, "icon.svg");
-
-		const result = copyAssets(dir);
-		assertEqual(result.copied, 1);
-		assert(existsSync(join(dir, "public", "icon.svg")));
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
+			const result = copyAssets(dir);
+			assertEqual(result.copied, 1);
+			assert(existsSync(join(dir, "public", "icon.svg")));
+		},
+	);
 });
 
 test("reads assetCopy configuration from gofront.json", () => {
-	const dir = mkdtempSync(join(tmpdir(), "gofront-asset-gfj-"));
-	try {
-		writeFileSync(
-			join(dir, "gofront.json"),
-			JSON.stringify({
+	withTempDir(
+		{
+			"gofront.json": JSON.stringify({
 				assetCopy: [{ source: "logo.png", dest: "dist/logo.png" }],
 			}),
-		);
-		writeFileSync(join(dir, "logo.png"), "png-data");
+			"logo.png": "png-data",
+		},
+		(dir) => {
+			const config = loadAssetConfig(dir);
+			assertEqual(config.length, 1);
+			assertEqual(config[0].source, "logo.png");
 
-		const config = loadAssetConfig(dir);
-		assertEqual(config.length, 1);
-		assertEqual(config[0].source, "logo.png");
-
-		const result = copyAssets(dir);
-		assertEqual(result.copied, 1);
-		assert(existsSync(join(dir, "dist", "logo.png")));
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
+			const result = copyAssets(dir);
+			assertEqual(result.copied, 1);
+			assert(existsSync(join(dir, "dist", "logo.png")));
+		},
+	);
 });
 
 test("returns empty result when no assetCopy config is present", () => {
-	const dir = mkdtempSync(join(tmpdir(), "gofront-asset-empty-"));
-	try {
+	withTempDir((dir) => {
 		const result = copyAssets(dir);
 		assertEqual(result.copied, 0);
 		assertEqual(result.skipped, 0);
 		assertEqual(result.items.length, 0);
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
+	});
 });
 
 test('ignores top-level assetCopy outside the package.json "gofront" key', () => {
-	const dir = mkdtempSync(join(tmpdir(), "gofront-asset-toplevel-"));
-	try {
-		writeFileSync(
-			join(dir, "package.json"),
-			JSON.stringify({
+	withTempDir(
+		{
+			"package.json": JSON.stringify({
 				assetCopy: [{ source: "icon.svg", dest: "public/icon.svg" }],
 			}),
-		);
-		writeFileSync(join(dir, "icon.svg"), "<svg/>");
-		assertEqual(loadAssetConfig(dir).length, 0);
-		assertEqual(copyAssets(dir).copied, 0);
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
+			"icon.svg": "<svg/>",
+		},
+		(dir) => {
+			assertEqual(loadAssetConfig(dir).length, 0);
+			assertEqual(copyAssets(dir).copied, 0);
+		},
+	);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

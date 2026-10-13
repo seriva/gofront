@@ -13,7 +13,7 @@ import {
 	section,
 	summarize,
 	test,
-} from "./helpers.js";
+} from "../helpers.js";
 
 section("dts-parser — direct unit tests");
 

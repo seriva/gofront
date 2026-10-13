@@ -2,8 +2,6 @@
 
 import { fileURLToPath } from "node:url";
 import {
-	assert,
-	assertContains,
 	assertEqual,
 	compile,
 	runJs,
@@ -11,29 +9,6 @@ import {
 	summarize,
 	test,
 } from "../helpers.js";
-
-section("fmt.Sprintf format verbs");
-
-test("fmt.Sprintf %f formats float", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	console.log(fmt.Sprintf("%f", 3.14))
-}`);
-	assertEqual(errors.length, 0);
-	// Go %f defaults to 6 decimal places
-	assertEqual(runJs(js), "3.140000");
-});
-
-test("fmt.Printf emits to stdout", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	fmt.Printf("count: %d", 7)
-}`);
-	assertEqual(errors.length, 0);
-	// fmt.Printf writes to process.stdout — just verify it compiles and doesn't throw
-	assert(js !== null);
-	assertContains(js, "__sprintf");
-});
 
 // ── Bitwise operators as expressions ─────────────────────────
 
@@ -362,28 +337,6 @@ func main() {
 	console.log(len(m))
 }`).js;
 	assertEqual(runJs(js), "1");
-});
-
-// ── Standalone block statement ────────────────────────────────
-
-section("fmt.Print and fmt.Printf");
-
-test("fmt.Print compiles without error", () => {
-	const { errors, js } = compile(`package main
-func main() {
-	fmt.Print("hello %s", "world")
-}`);
-	assertEqual(errors.length, 0);
-	assertContains(js, "__sprintf");
-});
-
-test("fmt.Printf compiles without error", () => {
-	const { errors, js } = compile(`package main
-func main() {
-	fmt.Printf("value: %d", 42)
-}`);
-	assertEqual(errors.length, 0);
-	assertContains(js, "__sprintf");
 });
 
 // ═════════════════════════════════════════════════════════════
