@@ -299,6 +299,63 @@ export function setupExtendedGlobals(globals, types) {
 			]),
 		},
 	});
+	const _makeReaderType = (name, srcType) => ({
+		kind: "named",
+		name,
+		underlying: {
+			kind: "struct",
+			fields: new Map([
+				["_src", srcType],
+				["_pos", INT],
+			]),
+			methods: new Map([
+				[
+					"Read",
+					{ kind: "func", params: [BYTE_SLICE_T], returns: [INT, ERROR] },
+				],
+				["Len", { kind: "func", params: [], returns: [INT] }],
+				["Reset", { kind: "func", params: [srcType], returns: [VOID] }],
+			]),
+		},
+	});
+	types.set("strings.Reader", _makeReaderType("strings.Reader", STRING));
+	types.set("bytes.Reader", _makeReaderType("bytes.Reader", BYTE_SLICE_T));
+	types.set("io.discard", {
+		kind: "named",
+		name: "io.discard",
+		underlying: {
+			kind: "struct",
+			fields: new Map(),
+			methods: new Map([
+				[
+					"Write",
+					{ kind: "func", params: [BYTE_SLICE_T], returns: [INT, ERROR] },
+				],
+				[
+					"WriteString",
+					{ kind: "func", params: [STRING], returns: [INT, ERROR] },
+				],
+			]),
+		},
+	});
+	const stringsPkg = globals.lookup("strings");
+	if (stringsPkg?.members) {
+		stringsPkg.members.NewReader = {
+			kind: "func",
+			params: [STRING],
+			returns: [{ kind: "pointer", base: types.get("strings.Reader") }],
+		};
+		stringsPkg.members.Reader = types.get("strings.Reader");
+	}
+	const bytesPkg = globals.lookup("bytes");
+	if (bytesPkg?.members) {
+		bytesPkg.members.NewReader = {
+			kind: "func",
+			params: [BYTE_SLICE_T],
+			returns: [{ kind: "pointer", base: types.get("bytes.Reader") }],
+		};
+		bytesPkg.members.Reader = types.get("bytes.Reader");
+	}
 
 	globals.define("rand", {
 		kind: "namespace",

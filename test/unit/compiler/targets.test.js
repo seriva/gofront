@@ -238,10 +238,10 @@ package m
 
 import "fmt"
 
-func F() { fmt.Fprintf(nil, "x") }
+func F() { fmt.Scan(nil) }
 `;
 	const err = compileTemp({ "m.go": src });
-	assertContains(err, "'fmt.Fprintf' is not yet available in wasm packages");
+	assertContains(err, "'fmt.Scan' is not yet available in wasm packages");
 	assertContains(err, "move this call to a JS package");
 });
 
