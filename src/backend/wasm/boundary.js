@@ -2115,15 +2115,23 @@ function ${P}stdlib(stringTable, io) {
 		"unicode_to_lower": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return c ? (c.toLowerCase().codePointAt(0) ?? r) : r; },
 		// html
 		"html_escape": (s) => (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&#34;").replace(/'/g, "&#39;"),
-		"html_unescape": (s) => (s ?? "")
-			.replace(/&#(x[0-9a-fA-F]+|[0-9]+);/g, (_, c) => String.fromCodePoint(c.startsWith("x") || c.startsWith("X") ? parseInt(c.slice(1), 16) : parseInt(c, 10)))
-			.replace(/&quot;/g, '"')
-			.replace(/&apos;/g, "'")
-			.replace(/&#39;/g, "'")
-			.replace(/&#34;/g, '"')
-			.replace(/&gt;/g, ">")
-			.replace(/&lt;/g, "<")
-			.replace(/&amp;/g, "&"),
+		"html_unescape": (s) => (s ?? "").replace(/&(?:quot|apos|#39|#34|gt|lt|amp|#(?:[0-9]+|[xX][0-9a-fA-F]+));/g, (m) => {
+			switch (m) {
+				case "&quot;": case "&#34;": return '"';
+				case "&apos;": case "&#39;": return "'";
+				case "&gt;": return ">";
+				case "&lt;": return "<";
+				case "&amp;": return "&";
+				default: {
+					if (m.startsWith("&#")) {
+						const raw = m.slice(2, -1);
+						const cp = (raw.startsWith("x") || raw.startsWith("X")) ? parseInt(raw.slice(1), 16) : parseInt(raw, 10);
+						return (cp >= 0 && cp <= 0x10FFFF && !(cp >= 0xD800 && cp <= 0xDFFF)) ? String.fromCodePoint(cp) : "\\uFFFD";
+					}
+					return m;
+				}
+			}
+		}),
 		// path
 		"path_base": (p) => { if (!p) return "."; const stripped = p.replace(/\\/+$/, ""); if (!stripped) return "/"; const i = stripped.lastIndexOf("/"); return i < 0 ? stripped : stripped.slice(i + 1) || "/"; },
 		"path_dir": (p) => { const s = p ?? ""; const i = s.lastIndexOf("/"); if (i < 0) return "."; const res = s.slice(0, i); return res === "" ? "/" : __pathClean(res); },
@@ -2187,7 +2195,7 @@ function ${P}stdlib(stringTable, io) {
 			const DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
 			const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 			const pad = (n, w = 2) => String(n).padStart(w, "0");
-			return (layout ?? "").replace(/2006|06|Monday|Mon|January|Jan|01|02|15|PM|04|05|Z07:00|\\.000|\\.999|1|2|3|4|5/g, t => {
+			return (layout ?? "").replace(/2006|06|Monday|Mon|January|Jan|01|02|15|PM|pm|03|04|05|Z07:00|\\.000|\\.999|1|2|3|4|5/g, t => {
 				switch (t) {
 					case "2006": return String(y);
 					case "06":   return String(y).slice(-2);
@@ -2201,6 +2209,8 @@ function ${P}stdlib(stringTable, io) {
 					case "2":  return String(d);
 					case "15": return pad(hr);
 					case "PM": return hr < 12 ? "AM" : "PM";
+					case "pm": return hr < 12 ? "am" : "pm";
+					case "03": return pad(hr % 12 || 12);
 					case "3":  return String(hr % 12 || 12);
 					case "04": return pad(min);
 					case "4":  return String(min);

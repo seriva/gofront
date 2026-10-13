@@ -27,9 +27,10 @@ const TIME_DISPATCH = {
 	Since: (a) =>
 		`(Math.round(((typeof globalThis.__GOFRONT_CLOCK === "function" ? globalThis.__GOFRONT_CLOCK() : Date.now()) - (${a[0]})._d.getTime()) * 1000000))`,
 	Sleep: (a) => `await new Promise(r => setTimeout(r, ${a[0]} / 1000000))`,
-	Unix: (a) => `{_d: new Date((${a[0]}) * 1000)}`,
+	Unix: (a) =>
+		`{_d: new Date(Number(${a[0]}) * 1000 + Math.round(Number(${a[1] || 0}) / 1000000))}`,
 	Date: (a) =>
-		`{_d: new Date(${a[0]}, ${a[1]} - 1, ${a[2]}, ${a[3]}, ${a[4]}, ${a[5]})}`,
+		`{_d: new Date(${a[0]}, ${a[1]} - 1, ${a[2]}, ${a[3]}, ${a[4]}, ${a[5]}, Math.round(Number(${a[6] || 0}) / 1000000))}`,
 };
 
 /** @type {ThisType<CodeGen>} */
