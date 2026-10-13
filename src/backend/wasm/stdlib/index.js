@@ -11,6 +11,7 @@
 import { BytesEmitter } from "./bytes.js";
 import { BINARY_MATH_IMPORTS, StdlibCoreEmitter } from "./core.js";
 import { IoEmitter } from "./io.js";
+import { ExtendedPackagesEmitter } from "./packages.js";
 import { PurePackagesEmitter } from "./pure.js";
 import { TimeEmitter } from "./time.js";
 
@@ -18,6 +19,7 @@ import { TimeEmitter } from "./time.js";
 export {
 	BINARY_MATH_IMPORTS,
 	BytesEmitter,
+	ExtendedPackagesEmitter,
 	IoEmitter,
 	IoEmitter as Phase7Emitter,
 	PurePackagesEmitter,
@@ -34,4 +36,5 @@ export const stdlibEmitters = [
 	PurePackagesEmitter,
 	IoEmitter,
 	TimeEmitter,
+	ExtendedPackagesEmitter,
 ];

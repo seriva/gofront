@@ -8,8 +8,13 @@ import {
 	FLOAT32,
 	FLOAT64,
 	INT,
+	INT32,
+	INT64,
 	STRING,
 	UINT8,
+	UINT16,
+	UINT32,
+	UINT64,
 	VOID,
 } from "../types.js";
 
@@ -341,6 +346,31 @@ export function setupExtendedGlobals(globals, types) {
 			]),
 		},
 	});
+	const ioPkg = globals.lookup("io");
+	const IO_READER = ioPkg?.members?.Reader ?? {
+		kind: "interface",
+		name: "io.Reader",
+	};
+	types.set("io.LimitedReader", {
+		kind: "named",
+		name: "io.LimitedReader",
+		underlying: {
+			kind: "struct",
+			fields: new Map([
+				["R", IO_READER],
+				["N", INT64],
+			]),
+			methods: new Map([
+				[
+					"Read",
+					{ kind: "func", params: [BYTE_SLICE_T], returns: [INT, ERROR] },
+				],
+			]),
+		},
+	});
+	if (ioPkg?.members) {
+		ioPkg.members.LimitedReader = types.get("io.LimitedReader");
+	}
 	const stringsPkg = globals.lookup("strings");
 	if (stringsPkg?.members) {
 		stringsPkg.members.NewReader = {
@@ -378,6 +408,24 @@ export function setupExtendedGlobals(globals, types) {
 				kind: "func",
 				params: [INT],
 				returns: [{ kind: "slice", elem: INT }],
+			},
+			Read: {
+				kind: "func",
+				params: [{ kind: "slice", elem: UINT8 }],
+				returns: [INT, ERROR],
+			},
+			Reader: {
+				kind: "interface",
+				methods: new Map([
+					[
+						"Read",
+						{
+							kind: "func",
+							params: [{ kind: "slice", elem: UINT8 }],
+							returns: [INT, ERROR],
+						},
+					],
+				]),
 			},
 		},
 	});
@@ -491,6 +539,312 @@ export function setupExtendedGlobals(globals, types) {
 		},
 	});
 	types.set("testing.T", TESTING_T);
+
+	// ── sync ──────────────────────────────────────────────────────
+	const MUTEX_T = {
+		kind: "named",
+		name: "sync.Mutex",
+		underlying: { kind: "struct", fields: new Map([["state", INT32]]) },
+		methods: new Map([
+			["Lock", { kind: "func", params: [], returns: [VOID] }],
+			["Unlock", { kind: "func", params: [], returns: [VOID] }],
+			["TryLock", { kind: "func", params: [], returns: [BOOL] }],
+		]),
+	};
+	const RWMUTEX_T = {
+		kind: "named",
+		name: "sync.RWMutex",
+		underlying: { kind: "struct", fields: new Map([["state", INT32]]) },
+		methods: new Map([
+			["Lock", { kind: "func", params: [], returns: [VOID] }],
+			["Unlock", { kind: "func", params: [], returns: [VOID] }],
+			["RLock", { kind: "func", params: [], returns: [VOID] }],
+			["RUnlock", { kind: "func", params: [], returns: [VOID] }],
+			["TryLock", { kind: "func", params: [], returns: [BOOL] }],
+			["TryRLock", { kind: "func", params: [], returns: [BOOL] }],
+		]),
+	};
+	const ONCE_T = {
+		kind: "named",
+		name: "sync.Once",
+		underlying: { kind: "struct", fields: new Map([["done", UINT32]]) },
+		methods: new Map([
+			[
+				"Do",
+				{
+					kind: "func",
+					params: [{ kind: "func", params: [], returns: [VOID] }],
+					returns: [VOID],
+				},
+			],
+		]),
+	};
+	const WAITGROUP_T = {
+		kind: "named",
+		name: "sync.WaitGroup",
+		underlying: { kind: "struct", fields: new Map([["counter", INT]]) },
+		methods: new Map([
+			["Add", { kind: "func", params: [INT], returns: [VOID] }],
+			["Done", { kind: "func", params: [], returns: [VOID] }],
+			["Wait", { kind: "func", params: [], returns: [VOID] }],
+		]),
+	};
+	const LOCKER_T = {
+		kind: "interface",
+		methods: new Map([
+			["Lock", { kind: "func", params: [], returns: [VOID] }],
+			["Unlock", { kind: "func", params: [], returns: [VOID] }],
+		]),
+	};
+	globals.define("sync", {
+		kind: "namespace",
+		name: "sync",
+		members: {
+			Mutex: MUTEX_T,
+			RWMutex: RWMUTEX_T,
+			Once: ONCE_T,
+			WaitGroup: WAITGROUP_T,
+			Locker: LOCKER_T,
+		},
+	});
+	types.set("sync.Mutex", MUTEX_T);
+	types.set("sync.RWMutex", RWMUTEX_T);
+	types.set("sync.Once", ONCE_T);
+	types.set("sync.WaitGroup", WAITGROUP_T);
+	types.set("sync.Locker", LOCKER_T);
+
+	// ── crypto/sha256 ─────────────────────────────────────────────
+	const BYTE_SLICE = { kind: "slice", elem: UINT8 };
+	const HASH_T = {
+		kind: "interface",
+		methods: new Map([
+			["Write", { kind: "func", params: [BYTE_SLICE], returns: [INT, ERROR] }],
+			["Sum", { kind: "func", params: [BYTE_SLICE], returns: [BYTE_SLICE] }],
+			["Reset", { kind: "func", params: [], returns: [VOID] }],
+			["Size", { kind: "func", params: [], returns: [INT] }],
+			["BlockSize", { kind: "func", params: [], returns: [INT] }],
+		]),
+	};
+	const SHA256_DIGEST_T = {
+		kind: "named",
+		name: "sha256.digest",
+		underlying: { kind: "struct", fields: new Map([["buf", BYTE_SLICE]]) },
+		methods: new Map([
+			["Write", { kind: "func", params: [BYTE_SLICE], returns: [INT, ERROR] }],
+			["Sum", { kind: "func", params: [BYTE_SLICE], returns: [BYTE_SLICE] }],
+			["Reset", { kind: "func", params: [], returns: [VOID] }],
+			["Size", { kind: "func", params: [], returns: [INT] }],
+			["BlockSize", { kind: "func", params: [], returns: [INT] }],
+		]),
+	};
+	globals.define("sha256", {
+		kind: "namespace",
+		name: "sha256",
+		members: {
+			Size: INT,
+			BlockSize: INT,
+			Sum256: {
+				kind: "func",
+				params: [BYTE_SLICE],
+				returns: [{ kind: "array", len: 32, elem: UINT8 }],
+			},
+			New: { kind: "func", params: [], returns: [HASH_T] },
+		},
+	});
+	types.set("hash.Hash", HASH_T);
+	types.set("sha256.digest", SHA256_DIGEST_T);
+	types.set("crypto/sha256.digest", SHA256_DIGEST_T);
+
+	// ── encoding/binary ───────────────────────────────────────────
+	const BYTE_ORDER_METHODS = [
+		["Uint16", { kind: "func", params: [BYTE_SLICE], returns: [UINT16] }],
+		["Uint32", { kind: "func", params: [BYTE_SLICE], returns: [UINT32] }],
+		["Uint64", { kind: "func", params: [BYTE_SLICE], returns: [UINT64] }],
+		[
+			"PutUint16",
+			{ kind: "func", params: [BYTE_SLICE, UINT16], returns: [VOID] },
+		],
+		[
+			"PutUint32",
+			{ kind: "func", params: [BYTE_SLICE, UINT32], returns: [VOID] },
+		],
+		[
+			"PutUint64",
+			{ kind: "func", params: [BYTE_SLICE, UINT64], returns: [VOID] },
+		],
+		["String", { kind: "func", params: [], returns: [STRING] }],
+	];
+	const BYTE_ORDER_T = {
+		kind: "interface",
+		methods: new Map(BYTE_ORDER_METHODS),
+	};
+	const LITTLE_ENDIAN_METHODS = new Map([
+		...BYTE_ORDER_METHODS,
+		[
+			"AppendUint16",
+			{ kind: "func", params: [BYTE_SLICE, UINT16], returns: [BYTE_SLICE] },
+		],
+		[
+			"AppendUint32",
+			{ kind: "func", params: [BYTE_SLICE, UINT32], returns: [BYTE_SLICE] },
+		],
+		[
+			"AppendUint64",
+			{ kind: "func", params: [BYTE_SLICE, UINT64], returns: [BYTE_SLICE] },
+		],
+	]);
+	const LITTLE_ENDIAN_T = {
+		kind: "named",
+		name: "binary.LittleEndian",
+		underlying: {
+			kind: "struct",
+			fields: new Map([["order", INT32]]),
+			methods: LITTLE_ENDIAN_METHODS,
+		},
+		methods: LITTLE_ENDIAN_METHODS,
+	};
+	const BIG_ENDIAN_METHODS = new Map([
+		...BYTE_ORDER_METHODS,
+		[
+			"AppendUint16",
+			{ kind: "func", params: [BYTE_SLICE, UINT16], returns: [BYTE_SLICE] },
+		],
+		[
+			"AppendUint32",
+			{ kind: "func", params: [BYTE_SLICE, UINT32], returns: [BYTE_SLICE] },
+		],
+		[
+			"AppendUint64",
+			{ kind: "func", params: [BYTE_SLICE, UINT64], returns: [BYTE_SLICE] },
+		],
+	]);
+	const BIG_ENDIAN_T = {
+		kind: "named",
+		name: "binary.BigEndian",
+		underlying: {
+			kind: "struct",
+			fields: new Map([["order", INT32]]),
+			methods: BIG_ENDIAN_METHODS,
+		},
+		methods: BIG_ENDIAN_METHODS,
+	};
+	globals.define("binary", {
+		kind: "namespace",
+		name: "binary",
+		members: {
+			ByteOrder: BYTE_ORDER_T,
+			LittleEndian: LITTLE_ENDIAN_T,
+			BigEndian: BIG_ENDIAN_T,
+			Read: {
+				kind: "func",
+				params: [ANY, BYTE_ORDER_T, ANY],
+				returns: [ERROR],
+			},
+			Write: {
+				kind: "func",
+				params: [ANY, BYTE_ORDER_T, ANY],
+				returns: [ERROR],
+			},
+			Size: { kind: "func", params: [ANY], returns: [INT] },
+			AppendUint16: {
+				kind: "func",
+				params: [BYTE_SLICE, UINT16],
+				returns: [BYTE_SLICE],
+			},
+			AppendUint32: {
+				kind: "func",
+				params: [BYTE_SLICE, UINT32],
+				returns: [BYTE_SLICE],
+			},
+			AppendUint64: {
+				kind: "func",
+				params: [BYTE_SLICE, UINT64],
+				returns: [BYTE_SLICE],
+			},
+		},
+	});
+	types.set("encoding/binary.ByteOrder", BYTE_ORDER_T);
+	types.set("binary.ByteOrder", BYTE_ORDER_T);
+
+	// ── encoding/hex ──────────────────────────────────────────────
+	globals.define("hex", {
+		kind: "namespace",
+		name: "hex",
+		members: {
+			EncodeToString: { kind: "func", params: [BYTE_SLICE], returns: [STRING] },
+			DecodeString: {
+				kind: "func",
+				params: [STRING],
+				returns: [BYTE_SLICE, ERROR],
+			},
+			Encode: {
+				kind: "func",
+				params: [BYTE_SLICE, BYTE_SLICE],
+				returns: [INT],
+			},
+			Decode: {
+				kind: "func",
+				params: [BYTE_SLICE, BYTE_SLICE],
+				returns: [INT, ERROR],
+			},
+			EncodedLen: { kind: "func", params: [INT], returns: [INT] },
+			DecodedLen: { kind: "func", params: [INT], returns: [INT] },
+			ErrLength: ERROR,
+		},
+	});
+
+	// ── encoding/base64 ───────────────────────────────────────────
+	const BASE64_ENCODING_METHODS = new Map([
+		[
+			"EncodeToString",
+			{ kind: "func", params: [BYTE_SLICE], returns: [STRING] },
+		],
+		[
+			"DecodeString",
+			{ kind: "func", params: [STRING], returns: [BYTE_SLICE, ERROR] },
+		],
+		[
+			"Encode",
+			{ kind: "func", params: [BYTE_SLICE, BYTE_SLICE], returns: [VOID] },
+		],
+		[
+			"Decode",
+			{ kind: "func", params: [BYTE_SLICE, BYTE_SLICE], returns: [INT, ERROR] },
+		],
+		["EncodedLen", { kind: "func", params: [INT], returns: [INT] }],
+		["DecodedLen", { kind: "func", params: [INT], returns: [INT] }],
+		["WithPadding", { kind: "func", params: [INT], returns: [ANY] }],
+	]);
+	const BASE64_ENCODING_T = {
+		kind: "named",
+		name: "base64.Encoding",
+		underlying: {
+			kind: "struct",
+			fields: new Map([["mode", INT32]]),
+			methods: BASE64_ENCODING_METHODS,
+		},
+		methods: BASE64_ENCODING_METHODS,
+	};
+	globals.define("base64", {
+		kind: "namespace",
+		name: "base64",
+		members: {
+			Encoding: BASE64_ENCODING_T,
+			StdEncoding: BASE64_ENCODING_T,
+			URLEncoding: BASE64_ENCODING_T,
+			RawStdEncoding: BASE64_ENCODING_T,
+			RawURLEncoding: BASE64_ENCODING_T,
+			NewEncoding: {
+				kind: "func",
+				params: [STRING],
+				returns: [BASE64_ENCODING_T],
+			},
+			StdPadding: INT,
+			NoPadding: INT,
+		},
+	});
+	types.set("encoding/base64.Encoding", BASE64_ENCODING_T);
+	types.set("base64.Encoding", BASE64_ENCODING_T);
 
 	for (const name of [
 		"append",

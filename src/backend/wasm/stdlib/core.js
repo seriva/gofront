@@ -328,6 +328,22 @@ export class StdlibCoreEmitter {
 				this.releaseTemp(f, "f64");
 				return;
 			}
+			case "Float64bits":
+				this.emitExpr(args[0], "f64");
+				this.pushInstruction("i64.reinterpret_f64");
+				return;
+			case "Float64frombits":
+				this.emitExpr(args[0], "i64");
+				this.pushInstruction("f64.reinterpret_i64");
+				return;
+			case "Float32bits":
+				this.emitExpr(args[0], "f32");
+				this.pushInstruction("i32.reinterpret_f32");
+				return;
+			case "Float32frombits":
+				this.emitExpr(args[0], "i32");
+				this.pushInstruction("f32.reinterpret_i32");
+				return;
 		}
 
 		// Imported JS Math functions
@@ -348,6 +364,9 @@ export class StdlibCoreEmitter {
 			Log2: "log2",
 			Log10: "log10",
 			Round: "round",
+			Sinh: "sinh",
+			Cosh: "cosh",
+			Tanh: "tanh",
 		};
 
 		if (jsMathMap[name]) {
@@ -941,7 +960,15 @@ export class StdlibCoreEmitter {
 			const isBool =
 				goType?.name === "bool" ||
 				(arg.kind === "BasicLit" && arg.litKind === "BOOL");
-			const isErr = isErrorType(goType) && this.mod.hasErrorType;
+			const isErr =
+				this.mod.hasErrorType &&
+				(isErrorType(goType) ||
+					Boolean(
+						this.mod.checker?.implements?.(
+							goType,
+							this.mod.checker?.types?.get("error"),
+						),
+					));
 			const valW = toWasmType(goType, this.mod.checker, this.mod);
 			if (isErr) {
 				const errTmp = this.acquireTemp("anyref");
@@ -1056,9 +1083,197 @@ export class StdlibCoreEmitter {
 				return;
 			}
 
+			case "Len32":
+				this.pushInstruction({ op: "i32.const", value: 32 });
+				this.emitExpr(args[0], "i32");
+				this.pushInstruction("i32.clz");
+				this.pushInstruction("i32.sub");
+				this.pushInstruction("i64.extend_i32_u");
+				return;
+
+			case "Len64":
+				this.pushInstruction({ op: "i64.const", value: 64n });
+				this.emitExpr(args[0], "i64");
+				this.pushInstruction("i64.clz");
+				this.pushInstruction("i64.sub");
+				return;
+
+			case "ReverseBytes16": {
+				const xTmp = this.acquireTemp("i32");
+				this.emitExpr(args[0], "i32");
+				this.pushInstruction({ op: "local.tee", index: xTmp });
+				this.pushInstruction({ op: "i32.const", value: 8 });
+				this.pushInstruction("i32.shr_u");
+				this.pushInstruction({ op: "i32.const", value: 0xff });
+				this.pushInstruction("i32.and");
+				this.pushInstruction({ op: "local.get", index: xTmp });
+				this.pushInstruction({ op: "i32.const", value: 0xff });
+				this.pushInstruction("i32.and");
+				this.pushInstruction({ op: "i32.const", value: 8 });
+				this.pushInstruction("i32.shl");
+				this.pushInstruction("i32.or");
+				this.releaseTemp(xTmp, "i32");
+				return;
+			}
+
+			case "ReverseBytes32": {
+				this.emitExpr(args[0], "i32");
+				this._emitReverseBytes32Sequence();
+				return;
+			}
+
+			case "ReverseBytes64": {
+				const xTmp = this.acquireTemp("i64");
+				this.emitExpr(args[0], "i64");
+				this.pushInstruction({ op: "local.set", index: xTmp });
+
+				// lo 32 bits -> ReverseBytes32 -> extend to i64 -> shl 32
+				this.pushInstruction({ op: "local.get", index: xTmp });
+				this.pushInstruction("i32.wrap_i64");
+				this._emitReverseBytes32Sequence();
+				this.pushInstruction("i64.extend_i32_u");
+				this.pushInstruction({ op: "i64.const", value: 32n });
+				this.pushInstruction("i64.shl");
+
+				// hi 32 bits -> ReverseBytes32 -> extend to i64
+				this.pushInstruction({ op: "local.get", index: xTmp });
+				this.pushInstruction({ op: "i64.const", value: 32n });
+				this.pushInstruction("i64.shr_u");
+				this.pushInstruction("i32.wrap_i64");
+				this._emitReverseBytes32Sequence();
+				this.pushInstruction("i64.extend_i32_u");
+
+				this.pushInstruction("i64.or");
+				this.releaseTemp(xTmp, "i64");
+				return;
+			}
+
+			case "Reverse32": {
+				this.emitExpr(args[0], "i32");
+				this._emitReverse32Sequence();
+				return;
+			}
+
+			case "Reverse64": {
+				const xTmp = this.acquireTemp("i64");
+				this.emitExpr(args[0], "i64");
+				this.pushInstruction({ op: "local.set", index: xTmp });
+
+				// lo 32 bits -> Reverse32 -> extend to i64 -> shl 32
+				this.pushInstruction({ op: "local.get", index: xTmp });
+				this.pushInstruction("i32.wrap_i64");
+				this._emitReverse32Sequence();
+				this.pushInstruction("i64.extend_i32_u");
+				this.pushInstruction({ op: "i64.const", value: 32n });
+				this.pushInstruction("i64.shl");
+
+				// hi 32 bits -> Reverse32 -> extend to i64
+				this.pushInstruction({ op: "local.get", index: xTmp });
+				this.pushInstruction({ op: "i64.const", value: 32n });
+				this.pushInstruction("i64.shr_u");
+				this.pushInstruction("i32.wrap_i64");
+				this._emitReverse32Sequence();
+				this.pushInstruction("i64.extend_i32_u");
+
+				this.pushInstruction("i64.or");
+				this.releaseTemp(xTmp, "i64");
+				return;
+			}
+
 			default:
 				throw new Error(`Unsupported bits function: bits.${name}`);
 		}
+	}
+
+	_emitReverseBytes32Sequence() {
+		const v = this.acquireTemp("i32");
+		this.pushInstruction({ op: "local.set", index: v });
+		this.pushInstruction({ op: "local.get", index: v });
+		this.pushInstruction({ op: "i32.const", value: 24 });
+		this.pushInstruction("i32.shl");
+		this.pushInstruction({ op: "local.get", index: v });
+		this.pushInstruction({ op: "i32.const", value: 0xff00 });
+		this.pushInstruction("i32.and");
+		this.pushInstruction({ op: "i32.const", value: 8 });
+		this.pushInstruction("i32.shl");
+		this.pushInstruction("i32.or");
+		this.pushInstruction({ op: "local.get", index: v });
+		this.pushInstruction({ op: "i32.const", value: 8 });
+		this.pushInstruction("i32.shr_u");
+		this.pushInstruction({ op: "i32.const", value: 0xff00 });
+		this.pushInstruction("i32.and");
+		this.pushInstruction("i32.or");
+		this.pushInstruction({ op: "local.get", index: v });
+		this.pushInstruction({ op: "i32.const", value: 24 });
+		this.pushInstruction("i32.shr_u");
+		this.pushInstruction("i32.or");
+		this.releaseTemp(v, "i32");
+	}
+
+	_emitReverse32Sequence() {
+		const v = this.acquireTemp("i32");
+		this.pushInstruction({ op: "local.set", index: v });
+		// v = ((v >>> 1) & 0x55555555) | ((v & 0x55555555) << 1)
+		this.pushInstruction({ op: "local.get", index: v });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("i32.shr_u");
+		this.pushInstruction({ op: "i32.const", value: 0x55555555 });
+		this.pushInstruction("i32.and");
+		this.pushInstruction({ op: "local.get", index: v });
+		this.pushInstruction({ op: "i32.const", value: 0x55555555 });
+		this.pushInstruction("i32.and");
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("i32.shl");
+		this.pushInstruction("i32.or");
+		this.pushInstruction({ op: "local.set", index: v });
+		// v = ((v >>> 2) & 0x33333333) | ((v & 0x33333333) << 2)
+		this.pushInstruction({ op: "local.get", index: v });
+		this.pushInstruction({ op: "i32.const", value: 2 });
+		this.pushInstruction("i32.shr_u");
+		this.pushInstruction({ op: "i32.const", value: 0x33333333 });
+		this.pushInstruction("i32.and");
+		this.pushInstruction({ op: "local.get", index: v });
+		this.pushInstruction({ op: "i32.const", value: 0x33333333 });
+		this.pushInstruction("i32.and");
+		this.pushInstruction({ op: "i32.const", value: 2 });
+		this.pushInstruction("i32.shl");
+		this.pushInstruction("i32.or");
+		this.pushInstruction({ op: "local.set", index: v });
+		// v = ((v >>> 4) & 0x0f0f0f0f) | ((v & 0x0f0f0f0f) << 4)
+		this.pushInstruction({ op: "local.get", index: v });
+		this.pushInstruction({ op: "i32.const", value: 4 });
+		this.pushInstruction("i32.shr_u");
+		this.pushInstruction({ op: "i32.const", value: 0x0f0f0f0f });
+		this.pushInstruction("i32.and");
+		this.pushInstruction({ op: "local.get", index: v });
+		this.pushInstruction({ op: "i32.const", value: 0x0f0f0f0f });
+		this.pushInstruction("i32.and");
+		this.pushInstruction({ op: "i32.const", value: 4 });
+		this.pushInstruction("i32.shl");
+		this.pushInstruction("i32.or");
+		this.pushInstruction({ op: "local.set", index: v });
+		// v = ((v >>> 8) & 0x00ff00ff) | ((v & 0x00ff00ff) << 8)
+		this.pushInstruction({ op: "local.get", index: v });
+		this.pushInstruction({ op: "i32.const", value: 8 });
+		this.pushInstruction("i32.shr_u");
+		this.pushInstruction({ op: "i32.const", value: 0x00ff00ff });
+		this.pushInstruction("i32.and");
+		this.pushInstruction({ op: "local.get", index: v });
+		this.pushInstruction({ op: "i32.const", value: 0x00ff00ff });
+		this.pushInstruction("i32.and");
+		this.pushInstruction({ op: "i32.const", value: 8 });
+		this.pushInstruction("i32.shl");
+		this.pushInstruction("i32.or");
+		this.pushInstruction({ op: "local.set", index: v });
+		// return (v >>> 16) | (v << 16)
+		this.pushInstruction({ op: "local.get", index: v });
+		this.pushInstruction({ op: "i32.const", value: 16 });
+		this.pushInstruction("i32.shr_u");
+		this.pushInstruction({ op: "local.get", index: v });
+		this.pushInstruction({ op: "i32.const", value: 16 });
+		this.pushInstruction("i32.shl");
+		this.pushInstruction("i32.or");
+		this.releaseTemp(v, "i32");
 	}
 
 	emitSliceClear(arg, argType) {
@@ -1718,8 +1933,20 @@ export class StdlibCoreEmitter {
 			case "Contains":
 				this.emitSlicesContains(args);
 				return;
+			case "ContainsFunc":
+				this.emitSlicesContainsFunc(args);
+				return;
 			case "Index":
 				this.emitSlicesIndex(args, targetWasmType);
+				return;
+			case "IndexFunc":
+				this.emitSlicesIndexFunc(args, targetWasmType);
+				return;
+			case "BinarySearch":
+				this.emitSlicesBinarySearch(args);
+				return;
+			case "BinarySearchFunc":
+				this.emitSlicesBinarySearchFunc(args);
 				return;
 			case "Equal":
 				this.emitSlicesEqual(args);
@@ -2273,6 +2500,415 @@ export class StdlibCoreEmitter {
 		if ((targetWasmType ?? "i64") === "i64") {
 			this.pushInstruction("i64.extend_i32_s");
 		}
+	}
+
+	emitSlicesIndexFunc(args, targetWasmType) {
+		const sNode = args[0];
+		const fnNode = args[1];
+		const sType = sNode._type ?? this._resolveExprGoType(sNode);
+		const elemGoType = this._getSliceElemType(sType);
+		const sliceInfo = this.mod.getSliceType(elemGoType);
+		const arrInfo = sliceInfo.arrInfo;
+		const closureGoType = this._resolveExprGoType(fnNode);
+		const closureInfo = this.mod.getClosureType(closureGoType);
+
+		const sliceW = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: sliceInfo.typeIndex,
+		};
+		const closureW = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: closureInfo.typeIndex,
+		};
+
+		const sTmp = this.acquireTemp(sliceW);
+		const clTmp = this.acquireTemp(closureW);
+		this.emitExpr(sNode, sliceW);
+		this.pushInstruction({ op: "local.set", index: sTmp });
+		this.emitExpr(fnNode, closureW);
+		this.pushInstruction({ op: "local.set", index: clTmp });
+
+		const resLoc = this.acquireTemp("i32");
+		this.pushInstruction({ op: "i32.const", value: -1 });
+		this.pushInstruction({ op: "local.set", index: resLoc });
+
+		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: sTmp });
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction({ op: "br_if", depth: 0 });
+
+		const arrTmp = this.acquireTemp({
+			kind: "ref",
+			nullable: true,
+			typeIndex: arrInfo.typeIndex,
+		});
+		const offTmp = this.acquireTemp("i32");
+		const lenTmp = this.acquireTemp("i32");
+		const iLoc = this.acquireTemp("i32");
+		const itemTmp = this.acquireTemp(arrInfo.elemWType);
+
+		this._emitSliceUnpack(sTmp, sliceInfo, {
+			arr: arrTmp,
+			off: offTmp,
+			len: lenTmp,
+		});
+
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: iLoc });
+
+		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushInstruction({ op: "loop", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: iLoc });
+		this.pushInstruction({ op: "local.get", index: lenTmp });
+		this.pushInstruction("i32.ge_s");
+		this.pushInstruction({ op: "br_if", depth: 1 });
+
+		this.pushInstruction({ op: "local.get", index: arrTmp });
+		this.pushInstruction({ op: "local.get", index: offTmp });
+		this.pushInstruction({ op: "local.get", index: iLoc });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "array.get", typeIndex: arrInfo.typeIndex });
+		this.pushInstruction({ op: "local.set", index: itemTmp });
+
+		this.pushInstruction({ op: "local.get", index: clTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: closureInfo.typeIndex,
+			fieldIndex: 1,
+		});
+		this.pushInstruction({ op: "local.get", index: itemTmp });
+		if (closureInfo.paramWTypes?.[0] === "i64" && arrInfo.elemWType === "i32") {
+			this.pushInstruction("i64.extend_i32_s");
+		}
+		this.pushInstruction({ op: "local.get", index: clTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: closureInfo.typeIndex,
+			fieldIndex: 0,
+		});
+		this.pushInstruction({
+			op: "call_ref",
+			typeIndex: closureInfo.funcTypeIndex,
+		});
+
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: iLoc });
+		this.pushInstruction({ op: "local.set", index: resLoc });
+		this.pushInstruction({ op: "br", depth: 2 });
+		this.pushInstruction("end");
+
+		this.pushInstruction({ op: "local.get", index: iLoc });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: iLoc });
+		this.pushInstruction({ op: "br", depth: 0 });
+		this.pushInstruction("end");
+		this.pushInstruction("end");
+
+		this.releaseTemp(itemTmp, arrInfo.elemWType);
+		this.releaseTemp(iLoc, "i32");
+		this.releaseTemp(lenTmp, "i32");
+		this.releaseTemp(offTmp, "i32");
+		this.releaseTemp(arrTmp, {
+			kind: "ref",
+			nullable: true,
+			typeIndex: arrInfo.typeIndex,
+		});
+
+		this.pushInstruction("end"); // end null block
+
+		this.pushInstruction({ op: "local.get", index: resLoc });
+		this.releaseTemp(resLoc, "i32");
+		this.releaseTemp(clTmp, closureW);
+		this.releaseTemp(sTmp, sliceW);
+
+		if ((targetWasmType ?? "i64") === "i64") {
+			this.pushInstruction("i64.extend_i32_s");
+		}
+	}
+
+	emitSlicesContainsFunc(args) {
+		this.emitSlicesIndexFunc(args, "i32");
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction("i32.ge_s");
+	}
+
+	emitSlicesBinarySearch(args) {
+		const sNode = args[0];
+		const targetNode = args[1];
+		const sType = sNode._type ?? this._resolveExprGoType(sNode);
+		const elemGoType = this._getSliceElemType(sType);
+		const sliceInfo = this.mod.getSliceType(elemGoType);
+		const arrInfo = sliceInfo.arrInfo;
+
+		const sliceW = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: sliceInfo.typeIndex,
+		};
+		const sTmp = this.acquireTemp(sliceW);
+		const targetTmp = this.acquireTemp(arrInfo.elemWType);
+		this.emitExpr(sNode, sliceW);
+		this.pushInstruction({ op: "local.set", index: sTmp });
+		this.emitExpr(targetNode, arrInfo.elemWType);
+		this.pushInstruction({ op: "local.set", index: targetTmp });
+
+		const arrTmp = this.acquireTemp({
+			kind: "ref",
+			nullable: true,
+			typeIndex: arrInfo.typeIndex,
+		});
+		const offTmp = this.acquireTemp("i32");
+		const lenTmp = this.acquireTemp("i32");
+		const iTmp = this.acquireTemp("i32");
+		const jTmp = this.acquireTemp("i32");
+		const hTmp = this.acquireTemp("i32");
+		const valTmp = this.acquireTemp(arrInfo.elemWType);
+		const foundTmp = this.acquireTemp("i32");
+
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: iTmp });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: foundTmp });
+
+		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: sTmp });
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction({ op: "br_if", depth: 0 });
+
+		this._emitSliceUnpack(sTmp, sliceInfo, {
+			arr: arrTmp,
+			off: offTmp,
+			len: lenTmp,
+		});
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: iTmp });
+		this.pushInstruction({ op: "local.get", index: lenTmp });
+		this.pushInstruction({ op: "local.set", index: jTmp });
+
+		this.pushInstruction({ op: "loop", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction({ op: "local.get", index: jTmp });
+		this.pushInstruction("i32.lt_s");
+		this.pushInstruction({ op: "if", blockType: "void" });
+
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction({ op: "local.get", index: jTmp });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("i32.shr_u");
+		this.pushInstruction({ op: "local.set", index: hTmp });
+
+		this.pushInstruction({ op: "local.get", index: arrTmp });
+		this.pushInstruction({ op: "local.get", index: offTmp });
+		this.pushInstruction({ op: "local.get", index: hTmp });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "array.get", typeIndex: arrInfo.typeIndex });
+		this.pushInstruction({ op: "local.set", index: valTmp });
+
+		this.emitElemLt(valTmp, targetTmp, elemGoType);
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: hTmp });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: iTmp });
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "local.get", index: hTmp });
+		this.pushInstruction({ op: "local.set", index: jTmp });
+		this.pushInstruction("end");
+
+		this.pushInstruction({ op: "br", depth: 1 });
+		this.pushInstruction("end"); // if i < j
+		this.pushInstruction("end"); // loop
+
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction({ op: "local.get", index: lenTmp });
+		this.pushInstruction("i32.lt_s");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: arrTmp });
+		this.pushInstruction({ op: "local.get", index: offTmp });
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "array.get", typeIndex: arrInfo.typeIndex });
+		this.pushInstruction({ op: "local.set", index: valTmp });
+		this.emitKeyEq(valTmp, targetTmp, elemGoType);
+		this.pushInstruction({ op: "local.set", index: foundTmp });
+		this.pushInstruction("end");
+
+		this.pushInstruction("end"); // exit block
+
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction("i64.extend_i32_u");
+		this.pushInstruction({ op: "local.get", index: foundTmp });
+
+		this.releaseTemp(foundTmp, "i32");
+		this.releaseTemp(valTmp, arrInfo.elemWType);
+		this.releaseTemp(hTmp, "i32");
+		this.releaseTemp(jTmp, "i32");
+		this.releaseTemp(iTmp, "i32");
+		this.releaseTemp(lenTmp, "i32");
+		this.releaseTemp(offTmp, "i32");
+		this.releaseTemp(arrTmp, {
+			kind: "ref",
+			nullable: true,
+			typeIndex: arrInfo.typeIndex,
+		});
+		this.releaseTemp(targetTmp, arrInfo.elemWType);
+		this.releaseTemp(sTmp, sliceW);
+	}
+
+	emitSlicesBinarySearchFunc(args) {
+		const sNode = args[0];
+		const targetNode = args[1];
+		const cmpNode = args[2];
+		const sType = sNode._type ?? this._resolveExprGoType(sNode);
+		const elemGoType = this._getSliceElemType(sType);
+		const sliceInfo = this.mod.getSliceType(elemGoType);
+		const arrInfo = sliceInfo.arrInfo;
+		const closureGoType = this._resolveExprGoType(cmpNode);
+		const closureInfo = this.mod.getClosureType(closureGoType);
+
+		const sliceW = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: sliceInfo.typeIndex,
+		};
+		const closureW = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: closureInfo.typeIndex,
+		};
+		const sTmp = this.acquireTemp(sliceW);
+		const targetTmp = this.acquireTemp(
+			closureInfo.paramWTypes?.[1] ?? arrInfo.elemWType,
+		);
+		const clTmp = this.acquireTemp(closureW);
+
+		this.emitExpr(sNode, sliceW);
+		this.pushInstruction({ op: "local.set", index: sTmp });
+		this.emitExpr(
+			targetNode,
+			closureInfo.paramWTypes?.[1] ?? arrInfo.elemWType,
+		);
+		this.pushInstruction({ op: "local.set", index: targetTmp });
+		this.emitExpr(cmpNode, closureW);
+		this.pushInstruction({ op: "local.set", index: clTmp });
+
+		const arrTmp = this.acquireTemp({
+			kind: "ref",
+			nullable: true,
+			typeIndex: arrInfo.typeIndex,
+		});
+		const offTmp = this.acquireTemp("i32");
+		const lenTmp = this.acquireTemp("i32");
+		const iTmp = this.acquireTemp("i32");
+		const jTmp = this.acquireTemp("i32");
+		const hTmp = this.acquireTemp("i32");
+		const valTmp = this.acquireTemp(arrInfo.elemWType);
+		const foundTmp = this.acquireTemp("i32");
+
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: iTmp });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: foundTmp });
+
+		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: sTmp });
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction({ op: "br_if", depth: 0 });
+
+		this._emitSliceUnpack(sTmp, sliceInfo, {
+			arr: arrTmp,
+			off: offTmp,
+			len: lenTmp,
+		});
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: iTmp });
+		this.pushInstruction({ op: "local.get", index: lenTmp });
+		this.pushInstruction({ op: "local.set", index: jTmp });
+
+		this.pushInstruction({ op: "loop", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction({ op: "local.get", index: jTmp });
+		this.pushInstruction("i32.lt_s");
+		this.pushInstruction({ op: "if", blockType: "void" });
+
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction({ op: "local.get", index: jTmp });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("i32.shr_u");
+		this.pushInstruction({ op: "local.set", index: hTmp });
+
+		this.pushInstruction({ op: "local.get", index: arrTmp });
+		this.pushInstruction({ op: "local.get", index: offTmp });
+		this.pushInstruction({ op: "local.get", index: hTmp });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "array.get", typeIndex: arrInfo.typeIndex });
+		this.pushInstruction({ op: "local.set", index: valTmp });
+
+		this._emitCallCmp(clTmp, closureInfo, valTmp, targetTmp, arrInfo);
+		this._emitCmpIsNegative(closureInfo);
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: hTmp });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: iTmp });
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "local.get", index: hTmp });
+		this.pushInstruction({ op: "local.set", index: jTmp });
+		this.pushInstruction("end");
+
+		this.pushInstruction({ op: "br", depth: 1 });
+		this.pushInstruction("end"); // if i < j
+		this.pushInstruction("end"); // loop
+
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction({ op: "local.get", index: lenTmp });
+		this.pushInstruction("i32.lt_s");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: arrTmp });
+		this.pushInstruction({ op: "local.get", index: offTmp });
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "array.get", typeIndex: arrInfo.typeIndex });
+		this.pushInstruction({ op: "local.set", index: valTmp });
+		this._emitCallCmp(clTmp, closureInfo, valTmp, targetTmp, arrInfo);
+		if (closureInfo.returnWTypes?.[0] === "i32") {
+			this.pushInstruction("i32.eqz");
+		} else {
+			this.pushInstruction({ op: "i64.const", value: 0n });
+			this.pushInstruction("i64.eq");
+		}
+		this.pushInstruction({ op: "local.set", index: foundTmp });
+		this.pushInstruction("end");
+
+		this.pushInstruction("end"); // exit block
+
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction("i64.extend_i32_u");
+		this.pushInstruction({ op: "local.get", index: foundTmp });
+
+		this.releaseTemp(foundTmp, "i32");
+		this.releaseTemp(valTmp, arrInfo.elemWType);
+		this.releaseTemp(hTmp, "i32");
+		this.releaseTemp(jTmp, "i32");
+		this.releaseTemp(iTmp, "i32");
+		this.releaseTemp(lenTmp, "i32");
+		this.releaseTemp(offTmp, "i32");
+		this.releaseTemp(arrTmp, {
+			kind: "ref",
+			nullable: true,
+			typeIndex: arrInfo.typeIndex,
+		});
+		this.releaseTemp(clTmp, closureW);
+		this.releaseTemp(
+			targetTmp,
+			closureInfo.paramWTypes?.[1] ?? arrInfo.elemWType,
+		);
+		this.releaseTemp(sTmp, sliceW);
 	}
 
 	emitSlicesEqual(args) {
@@ -5250,6 +5886,9 @@ export class StdlibCoreEmitter {
 				this._emitCollectStringParts();
 				return;
 			}
+			case "FieldsFunc":
+				this.emitStringsFieldsFunc(args);
+				return;
 			case "SplitN": {
 				this.emitExpr(args[0], "externref");
 				this.emitExpr(args[1], "externref");
@@ -5499,6 +6138,12 @@ export class StdlibCoreEmitter {
 				this._callStdlib("strconv_format_int");
 				return;
 			}
+			case "FormatUint": {
+				this.emitExpr(args[0], "i64");
+				this._emitI32Arg(args[1]);
+				this._callStdlib("strconv_format_uint");
+				return;
+			}
 			case "FormatBool": {
 				// bool → "true"/"false" via the string table
 				this.emitExpr(args[0], "i32");
@@ -5552,6 +6197,24 @@ export class StdlibCoreEmitter {
 				this.releaseTemp(strTmp, "externref");
 				return;
 			}
+			case "AppendUint": {
+				this.emitExpr(args[1], "i64");
+				this._emitI32Arg(args[2]);
+				this._callStdlib("strconv_format_uint");
+				const strTmp = this.acquireTemp("externref");
+				this.pushInstruction({ op: "local.set", index: strTmp });
+				this._emitAppendStringToByteSlice(args[0], strTmp);
+				this.releaseTemp(strTmp, "externref");
+				return;
+			}
+			case "AppendBool": {
+				this.emitStrconvCall("FormatBool", [args[1]]);
+				const strTmp = this.acquireTemp("externref");
+				this.pushInstruction({ op: "local.set", index: strTmp });
+				this._emitAppendStringToByteSlice(args[0], strTmp);
+				this.releaseTemp(strTmp, "externref");
+				return;
+			}
 			case "AppendFloat": {
 				this.emitExpr(args[1], "f64");
 				this._emitI32Arg(args[2]);
@@ -5562,6 +6225,14 @@ export class StdlibCoreEmitter {
 				this.pushInstruction({ op: "local.set", index: strTmp });
 				this._emitAppendStringToByteSlice(args[0], strTmp);
 				this.releaseTemp(strTmp, "externref");
+				return;
+			}
+			case "ParseUint": {
+				this.emitExpr(args[0], "externref");
+				this._emitI32Arg(args[1]);
+				this._emitI32Arg(args[2]);
+				this._callStdlib("strconv_parse_uint");
+				this._emitStrconvError();
 				return;
 			}
 			case "Atoi":
@@ -5847,6 +6518,292 @@ export class StdlibCoreEmitter {
 		this.releaseTemp(cpTmp, "i32");
 		this.releaseTemp(resTmp, "i32");
 		this.releaseTemp(iTmp, "i32");
+		this.releaseTemp(lenTmp, "i32");
+		this.releaseTemp(clTmp, closureW);
+		this.releaseTemp(sTmp, "externref");
+	}
+
+	emitStringsFieldsFunc(args) {
+		const sNode = args[0];
+		const fNode = args[1];
+		const strGo = { kind: "basic", name: "string" };
+		const sliceInfo = this.mod.getSliceType(strGo);
+		const arrInfo = sliceInfo.arrInfo;
+
+		const closureGoType = this._resolveExprGoType(fNode);
+		const closureInfo = this.mod.getClosureType(closureGoType);
+		const closureW = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: closureInfo.typeIndex,
+		};
+
+		const sTmp = this.acquireTemp("externref");
+		const clTmp = this.acquireTemp(closureW);
+		this.emitExpr(sNode, "externref");
+		this.pushInstruction({ op: "local.set", index: sTmp });
+		this.emitExpr(fNode, closureW);
+		this.pushInstruction({ op: "local.set", index: clTmp });
+
+		const lenTmp = this.acquireTemp("i32");
+		this.pushInstruction({ op: "local.get", index: sTmp });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getStringLenImportIndex(),
+		});
+		this.pushInstruction({ op: "local.set", index: lenTmp });
+
+		// Pass 1: count fields
+		const wordCntTmp = this.acquireTemp("i32");
+		const inWordTmp = this.acquireTemp("i32");
+		const iTmp = this.acquireTemp("i32");
+		const cpTmp = this.acquireTemp("i32");
+		const stepTmp = this.acquireTemp("i32");
+		const isSepTmp = this.acquireTemp("i32");
+
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: wordCntTmp });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: inWordTmp });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: iTmp });
+
+		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushInstruction({ op: "loop", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction({ op: "local.get", index: lenTmp });
+		this.pushInstruction("i32.ge_s");
+		this.pushInstruction({ op: "br_if", depth: 1 });
+
+		// cp = s.codePointAt(i)
+		this.pushInstruction({ op: "local.get", index: sTmp });
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getStringCodePointAtImportIndex(),
+		});
+		this.pushInstruction({ op: "local.set", index: cpTmp });
+
+		// step = cp > 0xffff ? 2 : 1
+		this.pushInstruction({ op: "local.get", index: cpTmp });
+		this.pushInstruction({ op: "i32.const", value: 0xffff });
+		this.pushInstruction("i32.gt_u");
+		this.pushInstruction({ op: "if", blockType: "i32" });
+		this.pushInstruction({ op: "i32.const", value: 2 });
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("end");
+		this.pushInstruction({ op: "local.set", index: stepTmp });
+
+		// isSep = f(cp)
+		this.pushInstruction({ op: "local.get", index: clTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: closureInfo.typeIndex,
+			fieldIndex: 1,
+		});
+		this.pushInstruction({ op: "local.get", index: cpTmp });
+		if (closureInfo.paramWTypes[0] === "i64") {
+			this.pushInstruction("i64.extend_i32_u");
+		}
+		this.pushInstruction({ op: "local.get", index: clTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: closureInfo.typeIndex,
+			fieldIndex: 0,
+		});
+		this.pushInstruction({
+			op: "call_ref",
+			typeIndex: closureInfo.funcTypeIndex,
+		});
+		this.pushInstruction({ op: "local.set", index: isSepTmp });
+
+		// if isSep: inWord = 0 else: if !inWord { inWord = 1; wordCnt++; }
+		this.pushInstruction({ op: "local.get", index: isSepTmp });
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: inWordTmp });
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "local.get", index: inWordTmp });
+		this.pushInstruction("i32.eqz");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction({ op: "local.set", index: inWordTmp });
+		this.pushInstruction({ op: "local.get", index: wordCntTmp });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: wordCntTmp });
+		this.pushInstruction("end");
+		this.pushInstruction("end");
+
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction({ op: "local.get", index: stepTmp });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: iTmp });
+		this.pushInstruction({ op: "br", depth: 0 });
+		this.pushInstruction("end");
+		this.pushInstruction("end");
+
+		// Allocate result slice
+		const resArrTmp = this.acquireTemp({
+			kind: "ref",
+			nullable: true,
+			typeIndex: arrInfo.typeIndex,
+		});
+		this.pushInstruction({ op: "local.get", index: wordCntTmp });
+		this.pushInstruction({
+			op: "array.new_default",
+			typeIndex: arrInfo.typeIndex,
+		});
+		this.pushInstruction({ op: "local.set", index: resArrTmp });
+
+		// Pass 2: fill array
+		const wIdxTmp = this.acquireTemp("i32");
+		const fieldStartTmp = this.acquireTemp("i32");
+
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: wIdxTmp });
+		this.pushInstruction({ op: "i32.const", value: -1 });
+		this.pushInstruction({ op: "local.set", index: fieldStartTmp });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: iTmp });
+
+		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushInstruction({ op: "loop", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction({ op: "local.get", index: lenTmp });
+		this.pushInstruction("i32.ge_s");
+		this.pushInstruction({ op: "br_if", depth: 1 });
+
+		this.pushInstruction({ op: "local.get", index: sTmp });
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getStringCodePointAtImportIndex(),
+		});
+		this.pushInstruction({ op: "local.set", index: cpTmp });
+
+		this.pushInstruction({ op: "local.get", index: cpTmp });
+		this.pushInstruction({ op: "i32.const", value: 0xffff });
+		this.pushInstruction("i32.gt_u");
+		this.pushInstruction({ op: "if", blockType: "i32" });
+		this.pushInstruction({ op: "i32.const", value: 2 });
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("end");
+		this.pushInstruction({ op: "local.set", index: stepTmp });
+
+		this.pushInstruction({ op: "local.get", index: clTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: closureInfo.typeIndex,
+			fieldIndex: 1,
+		});
+		this.pushInstruction({ op: "local.get", index: cpTmp });
+		if (closureInfo.paramWTypes[0] === "i64") {
+			this.pushInstruction("i64.extend_i32_u");
+		}
+		this.pushInstruction({ op: "local.get", index: clTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: closureInfo.typeIndex,
+			fieldIndex: 0,
+		});
+		this.pushInstruction({
+			op: "call_ref",
+			typeIndex: closureInfo.funcTypeIndex,
+		});
+		this.pushInstruction({ op: "local.set", index: isSepTmp });
+
+		this.pushInstruction({ op: "local.get", index: isSepTmp });
+		this.pushInstruction({ op: "if", blockType: "void" });
+		// isSep: if fieldStart != -1: emit slice and reset fieldStart = -1
+		this.pushInstruction({ op: "local.get", index: fieldStartTmp });
+		this.pushInstruction({ op: "i32.const", value: -1 });
+		this.pushInstruction("i32.ne");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: resArrTmp });
+		this.pushInstruction({ op: "local.get", index: wIdxTmp });
+		this.pushInstruction({ op: "local.get", index: sTmp });
+		this.pushInstruction({ op: "local.get", index: fieldStartTmp });
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getStringSliceImportIndex(),
+		});
+		this.pushInstruction({
+			op: "array.set",
+			typeIndex: arrInfo.typeIndex,
+		});
+		this.pushInstruction({ op: "local.get", index: wIdxTmp });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: wIdxTmp });
+		this.pushInstruction({ op: "i32.const", value: -1 });
+		this.pushInstruction({ op: "local.set", index: fieldStartTmp });
+		this.pushInstruction("end");
+		this.pushInstruction("else");
+		// not sep: if fieldStart == -1: fieldStart = i
+		this.pushInstruction({ op: "local.get", index: fieldStartTmp });
+		this.pushInstruction({ op: "i32.const", value: -1 });
+		this.pushInstruction("i32.eq");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction({ op: "local.set", index: fieldStartTmp });
+		this.pushInstruction("end");
+		this.pushInstruction("end");
+
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction({ op: "local.get", index: stepTmp });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: iTmp });
+		this.pushInstruction({ op: "br", depth: 0 });
+		this.pushInstruction("end");
+		this.pushInstruction("end");
+
+		// If string ended inside a word: emit final slice
+		this.pushInstruction({ op: "local.get", index: fieldStartTmp });
+		this.pushInstruction({ op: "i32.const", value: -1 });
+		this.pushInstruction("i32.ne");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: resArrTmp });
+		this.pushInstruction({ op: "local.get", index: wIdxTmp });
+		this.pushInstruction({ op: "local.get", index: sTmp });
+		this.pushInstruction({ op: "local.get", index: fieldStartTmp });
+		this.pushInstruction({ op: "local.get", index: lenTmp });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getStringSliceImportIndex(),
+		});
+		this.pushInstruction({
+			op: "array.set",
+			typeIndex: arrInfo.typeIndex,
+		});
+		this.pushInstruction("end");
+
+		// Return slice struct: { arr, off: 0, len: wordCnt, cap: wordCnt }
+		this.pushInstruction({ op: "local.get", index: resArrTmp });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.get", index: wordCntTmp });
+		this.pushInstruction({ op: "local.get", index: wordCntTmp });
+		this.pushInstruction({
+			op: "struct.new",
+			typeIndex: sliceInfo.typeIndex,
+		});
+
+		this.releaseTemp(fieldStartTmp, "i32");
+		this.releaseTemp(wIdxTmp, "i32");
+		this.releaseTemp(resArrTmp, {
+			kind: "ref",
+			nullable: true,
+			typeIndex: arrInfo.typeIndex,
+		});
+		this.releaseTemp(isSepTmp, "i32");
+		this.releaseTemp(stepTmp, "i32");
+		this.releaseTemp(cpTmp, "i32");
+		this.releaseTemp(iTmp, "i32");
+		this.releaseTemp(inWordTmp, "i32");
+		this.releaseTemp(wordCntTmp, "i32");
 		this.releaseTemp(lenTmp, "i32");
 		this.releaseTemp(clTmp, closureW);
 		this.releaseTemp(sTmp, "externref");
@@ -6810,8 +7767,7 @@ export class StdlibCoreEmitter {
 				// `%w` wraps its operand as the cause (first %w only, like Go 1.13).
 				const wIdx = _wrapVerbIndex(format);
 				const cause = wIdx >= 0 ? temps[wIdx] : null;
-				const causeTmp =
-					cause?.errTmp ?? (cause?.wType === "anyref" ? cause.tmp : null);
+				const causeTmp = cause?.errTmp ?? cause?.tmp ?? null;
 				if (causeTmp !== null && causeTmp !== undefined) {
 					this.pushInstruction({ op: "local.get", index: causeTmp });
 				} else {
@@ -6853,9 +7809,361 @@ export class StdlibCoreEmitter {
 					funcIndex: this.mod.resolveFuncIndex("__errors_is"),
 				});
 				return;
+			case "As":
+				this._emitErrorsAs(args);
+				return;
+			case "Join":
+				this._emitErrorsJoin(args);
+				return;
 			default:
 				throw new Error(`Unsupported errors function: errors.${name}`);
 		}
+	}
+
+	_emitErrorsAs(args) {
+		const errTmp = this.acquireTemp("anyref");
+		const resLoc = this.acquireTemp("i32");
+		this.emitExpr(args[0], "anyref");
+		this.pushInstruction({ op: "local.set", index: errTmp });
+
+		let targetLocal = null;
+		if (
+			args[1].kind === "UnaryExpr" &&
+			args[1].op === "&" &&
+			args[1].operand?.kind === "Ident"
+		) {
+			targetLocal = this.resolveLocal(args[1].operand.name);
+		}
+
+		const targetGoType = args[1]._type ?? this._resolveExprGoType(args[1]);
+		const baseGoType = targetGoType?.base ?? targetGoType;
+		const concreteGoType = baseGoType?.base ?? baseGoType;
+		const sName = concreteGoType?.name;
+		const sInfo = sName
+			? (this.mod.getStructType(sName) ??
+				(concreteGoType.pkg
+					? this.mod.getStructType(`${concreteGoType.pkg}.${sName}`)
+					: null))
+			: null;
+		const box = this.mod.getBoxType(baseGoType);
+		const boxWType = box
+			? { kind: "ref", nullable: true, typeIndex: box.typeIndex }
+			: null;
+
+		let targetTmp = null;
+		if (!targetLocal) {
+			targetTmp = this.acquireTemp("anyref");
+			this.emitExpr(args[1], boxWType ?? "anyref");
+			this.pushInstruction({ op: "local.set", index: targetTmp });
+		}
+
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: resLoc });
+
+		this.pushInstruction({ op: "block", blockType: "void" });
+		if (targetTmp !== null) {
+			this.pushInstruction({ op: "local.get", index: targetTmp });
+			this.pushInstruction("ref.is_null");
+			this.pushInstruction({ op: "br_if", depth: 0 });
+		}
+
+		this.pushInstruction({ op: "loop", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: errTmp });
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction({ op: "br_if", depth: 1 });
+
+		if (sInfo) {
+			this.pushInstruction({ op: "local.get", index: errTmp });
+			this.pushInstruction({ op: "ref.test", typeIndex: sInfo.typeIndex });
+			this.pushInstruction({ op: "if", blockType: "void" });
+			if (targetLocal) {
+				if (targetLocal.isBoxed) {
+					this.pushInstruction({ op: "local.get", index: targetLocal.index });
+					this.pushInstruction({ op: "local.get", index: errTmp });
+					this.pushInstruction({ op: "ref.cast", typeIndex: sInfo.typeIndex });
+					this.pushInstruction({
+						op: "struct.set",
+						typeIndex: targetLocal.boxInfo.typeIndex,
+						fieldIndex: 0,
+					});
+				} else {
+					this.pushInstruction({ op: "local.get", index: errTmp });
+					this.pushInstruction({ op: "ref.cast", typeIndex: sInfo.typeIndex });
+					this.pushInstruction({ op: "local.set", index: targetLocal.index });
+				}
+			} else if (box && targetTmp !== null) {
+				this.pushInstruction({ op: "local.get", index: targetTmp });
+				this.pushInstruction({ op: "ref.cast", typeIndex: box.typeIndex });
+				this.pushInstruction({ op: "local.get", index: errTmp });
+				this.pushInstruction({ op: "ref.cast", typeIndex: sInfo.typeIndex });
+				this.pushInstruction({
+					op: "struct.set",
+					typeIndex: box.typeIndex,
+					fieldIndex: 0,
+				});
+			}
+			this.pushInstruction({ op: "i32.const", value: 1 });
+			this.pushInstruction({ op: "local.set", index: resLoc });
+			this.pushInstruction({ op: "br", depth: 2 });
+			this.pushInstruction("end");
+		}
+
+		this.pushInstruction({ op: "local.get", index: errTmp });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.resolveFuncIndex("__errors_unwrap"),
+		});
+		this.pushInstruction({ op: "local.set", index: errTmp });
+		this.pushInstruction({ op: "br", depth: 0 });
+		this.pushInstruction("end");
+		this.pushInstruction("end");
+
+		this.pushInstruction({ op: "local.get", index: resLoc });
+		this.releaseTemp(resLoc, "i32");
+		if (targetTmp !== null) {
+			this.releaseTemp(targetTmp, "anyref");
+		}
+		this.releaseTemp(errTmp, "anyref");
+	}
+
+	_emitErrorsJoin(args) {
+		const errSliceInfo = this.mod.getSliceType({
+			kind: "interface",
+			name: "error",
+		});
+		if (
+			args.length === 1 &&
+			(args[0]._type?.kind === "slice" || args[0].kind === "SliceLit")
+		) {
+			const sTmp = this.acquireTemp({
+				kind: "ref",
+				nullable: true,
+				typeIndex: errSliceInfo.typeIndex,
+			});
+			this.emitExpr(args[0], {
+				kind: "ref",
+				nullable: true,
+				typeIndex: errSliceInfo.typeIndex,
+			});
+			this.pushInstruction({ op: "local.set", index: sTmp });
+
+			this.pushInstruction({ op: "local.get", index: sTmp });
+			this.pushInstruction("ref.is_null");
+			this.pushInstruction({ op: "if", blockType: "void" });
+			this.pushInstruction({ op: "ref.null", heapType: "any" });
+			this.pushInstruction("return");
+			this.pushInstruction("end");
+
+			const arrTmp = this.acquireTemp({
+				kind: "ref",
+				nullable: true,
+				typeIndex: errSliceInfo.arrInfo.typeIndex,
+			});
+			const offTmp = this.acquireTemp("i32");
+			const lenTmp = this.acquireTemp("i32");
+			this._emitSliceUnpack(sTmp, errSliceInfo, {
+				arr: arrTmp,
+				off: offTmp,
+				len: lenTmp,
+			});
+
+			const iTmp = this.acquireTemp("i32");
+			const countTmp = this.acquireTemp("i32");
+			const strAccTmp = this.acquireTemp("externref");
+			const eTmp = this.acquireTemp("anyref");
+
+			this.pushInstruction({ op: "i32.const", value: 0 });
+			this.pushInstruction({ op: "local.set", index: countTmp });
+			this.pushInstruction({
+				op: "i32.const",
+				value: this.mod.internString(""),
+			});
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getStringImportIndex(),
+			});
+			this.pushInstruction({ op: "local.set", index: strAccTmp });
+			this.pushInstruction({ op: "i32.const", value: 0 });
+			this.pushInstruction({ op: "local.set", index: iTmp });
+
+			this.pushInstruction({ op: "block", blockType: "void" });
+			this.pushInstruction({ op: "loop", blockType: "void" });
+			this.pushInstruction({ op: "local.get", index: iTmp });
+			this.pushInstruction({ op: "local.get", index: lenTmp });
+			this.pushInstruction("i32.ge_s");
+			this.pushInstruction({ op: "br_if", depth: 1 });
+
+			this.pushInstruction({ op: "local.get", index: arrTmp });
+			this.pushInstruction({ op: "local.get", index: offTmp });
+			this.pushInstruction({ op: "local.get", index: iTmp });
+			this.pushInstruction("i32.add");
+			this.pushInstruction({
+				op: "array.get",
+				typeIndex: errSliceInfo.arrInfo.typeIndex,
+			});
+			this.pushInstruction({ op: "local.set", index: eTmp });
+
+			this.pushInstruction({ op: "local.get", index: eTmp });
+			this.pushInstruction("ref.is_null");
+			this.pushInstruction({ op: "if", blockType: "void" });
+			this.pushInstruction("else");
+
+			this.pushInstruction({ op: "local.get", index: countTmp });
+			this.pushInstruction({ op: "if", blockType: "void" });
+			this.pushInstruction({ op: "local.get", index: strAccTmp });
+			this.pushInstruction({
+				op: "i32.const",
+				value: this.mod.internString("\n"),
+			});
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getStringImportIndex(),
+			});
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getStringConcatImportIndex(),
+			});
+			this.pushInstruction({ op: "local.set", index: strAccTmp });
+			this.pushInstruction("end");
+
+			this.pushInstruction({ op: "local.get", index: strAccTmp });
+			this.pushInstruction({ op: "local.get", index: eTmp });
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.resolveFuncIndex("__error_str"),
+			});
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getStringConcatImportIndex(),
+			});
+			this.pushInstruction({ op: "local.set", index: strAccTmp });
+
+			this.pushInstruction({ op: "local.get", index: countTmp });
+			this.pushInstruction({ op: "i32.const", value: 1 });
+			this.pushInstruction("i32.add");
+			this.pushInstruction({ op: "local.set", index: countTmp });
+			this.pushInstruction("end");
+
+			this.pushInstruction({ op: "local.get", index: iTmp });
+			this.pushInstruction({ op: "i32.const", value: 1 });
+			this.pushInstruction("i32.add");
+			this.pushInstruction({ op: "local.set", index: iTmp });
+			this.pushInstruction({ op: "br", depth: 0 });
+			this.pushInstruction("end");
+			this.pushInstruction("end");
+
+			this.pushInstruction({ op: "local.get", index: countTmp });
+			this.pushInstruction("i32.eqz");
+			this.pushInstruction({ op: "if", blockType: "anyref" });
+			this.pushInstruction({ op: "ref.null", heapType: "any" });
+			this.pushInstruction("else");
+			this.pushInstruction({ op: "local.get", index: strAccTmp });
+			this.pushInstruction({ op: "ref.null", heapType: "any" });
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.resolveFuncIndex("__mk_error"),
+			});
+			this.pushInstruction("end");
+
+			this.releaseTemp(eTmp, "anyref");
+			this.releaseTemp(strAccTmp, "externref");
+			this.releaseTemp(countTmp, "i32");
+			this.releaseTemp(iTmp, "i32");
+			this.releaseTemp(lenTmp, "i32");
+			this.releaseTemp(offTmp, "i32");
+			this.releaseTemp(arrTmp, {
+				kind: "ref",
+				nullable: true,
+				typeIndex: errSliceInfo.arrInfo.typeIndex,
+			});
+			this.releaseTemp(sTmp, {
+				kind: "ref",
+				nullable: true,
+				typeIndex: errSliceInfo.typeIndex,
+			});
+			return;
+		}
+
+		if (args.length === 0) {
+			this.pushInstruction({ op: "ref.null", heapType: "any" });
+			return;
+		}
+
+		const countTmp = this.acquireTemp("i32");
+		const strAccTmp = this.acquireTemp("externref");
+		const eTmp = this.acquireTemp("anyref");
+
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: countTmp });
+		this.pushInstruction({ op: "i32.const", value: this.mod.internString("") });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getStringImportIndex(),
+		});
+		this.pushInstruction({ op: "local.set", index: strAccTmp });
+
+		for (const arg of args) {
+			this.emitExpr(arg, "anyref");
+			this.pushInstruction({ op: "local.set", index: eTmp });
+
+			this.pushInstruction({ op: "local.get", index: eTmp });
+			this.pushInstruction("ref.is_null");
+			this.pushInstruction({ op: "if", blockType: "void" });
+			this.pushInstruction("else");
+
+			this.pushInstruction({ op: "local.get", index: countTmp });
+			this.pushInstruction({ op: "if", blockType: "void" });
+			this.pushInstruction({ op: "local.get", index: strAccTmp });
+			this.pushInstruction({
+				op: "i32.const",
+				value: this.mod.internString("\n"),
+			});
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getStringImportIndex(),
+			});
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getStringConcatImportIndex(),
+			});
+			this.pushInstruction({ op: "local.set", index: strAccTmp });
+			this.pushInstruction("end");
+
+			this.pushInstruction({ op: "local.get", index: strAccTmp });
+			this.pushInstruction({ op: "local.get", index: eTmp });
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.resolveFuncIndex("__error_str"),
+			});
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getStringConcatImportIndex(),
+			});
+			this.pushInstruction({ op: "local.set", index: strAccTmp });
+
+			this.pushInstruction({ op: "local.get", index: countTmp });
+			this.pushInstruction({ op: "i32.const", value: 1 });
+			this.pushInstruction("i32.add");
+			this.pushInstruction({ op: "local.set", index: countTmp });
+			this.pushInstruction("end");
+		}
+
+		this.pushInstruction({ op: "local.get", index: countTmp });
+		this.pushInstruction("i32.eqz");
+		this.pushInstruction({ op: "if", blockType: "anyref" });
+		this.pushInstruction({ op: "ref.null", heapType: "any" });
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "local.get", index: strAccTmp });
+		this.pushInstruction({ op: "ref.null", heapType: "any" });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.resolveFuncIndex("__mk_error"),
+		});
+		this.pushInstruction("end");
+
+		this.releaseTemp(eTmp, "anyref");
+		this.releaseTemp(strAccTmp, "externref");
+		this.releaseTemp(countTmp, "i32");
 	}
 
 	emitUtf8Call(name, args, targetWasmType) {

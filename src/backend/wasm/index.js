@@ -46,6 +46,17 @@ const ERROR_PRODUCING_PKGS = new Set([
 	"strings",
 	"bytes",
 	"time",
+	"sync",
+	"crypto/rand",
+	"rand",
+	"crypto/sha256",
+	"sha256",
+	"encoding/binary",
+	"binary",
+	"encoding/hex",
+	"hex",
+	"encoding/base64",
+	"base64",
 ]);
 // Packages whose calls lower to the `env.*` imports in STDLIB_IMPORTS (the
 // matching JS lives in WASM_STDLIB_JS).  Only modules importing one of them
@@ -64,19 +75,17 @@ const STDLIB_ENV_PKGS = new Set([
 	"bytes",
 	"io",
 	"time",
-]);
-
-const RAND_HOST_METHODS = new Set([
-	"Float64",
-	"Float32",
-	"Int",
-	"Int31",
-	"Int63",
-	"Intn",
-	"Int31n",
-	"Int63n",
-	"Shuffle",
-	"Perm",
+	"sync",
+	"crypto/rand",
+	"rand",
+	"crypto/sha256",
+	"sha256",
+	"encoding/binary",
+	"binary",
+	"encoding/hex",
+	"hex",
+	"encoding/base64",
+	"base64",
 ]);
 
 function importsAnyOf(programs, pkgs) {
@@ -160,6 +169,8 @@ const STDLIB_IMPORTS = [
 	["strconv_err_kind", [], ["i32"]],
 	["strconv_format_float", ["f64", "i32", "i32", "i32"], [S]],
 	["strconv_format_int", ["i64", "i32"], [S]],
+	["strconv_format_uint", ["i64", "i32"], [S]],
+	["strconv_parse_uint", [S, "i32", "i32"], ["i64"]],
 	["strconv_quote", [S], [S]],
 	["strconv_unquote", [S], [S]],
 	// unicode/utf8
@@ -226,6 +237,24 @@ const STDLIB_IMPORTS = [
 		["i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", S],
 		[S],
 	],
+	["time_duration_string", ["i64"], [S]],
+	// raw binary buffer for crypto/rand, crypto/sha256, hex, base64
+	["raw_bytes_init", ["i32"], []],
+	["raw_bytes_push", ["i32"], []],
+	["raw_bytes_len", [], ["i32"]],
+	["raw_bytes_get", ["i32"], ["i32"]],
+	// crypto/rand
+	["crypto_rand_fill", ["i32"], ["i32"]],
+	// crypto/sha256
+	["crypto_sha256_sum", [], ["i32"]],
+	// encoding/hex
+	["hex_encode_to_string", [], [S]],
+	["hex_decode_string", [S], ["i32"]],
+	["hex_get_err", [], [S]],
+	// encoding/base64
+	["base64_encode_to_string", ["i32"], [S]],
+	["base64_decode_string", ["i32", S], ["i32"]],
+	["base64_get_err", [], [S]],
 ];
 
 class ModuleEmitter {
@@ -987,6 +1016,20 @@ class ModuleEmitter {
 		return gIdx;
 	}
 
+	getRandStateGlobalIndex() {
+		if (this.randStateGlobalIndex !== undefined) {
+			return this.randStateGlobalIndex;
+		}
+		const gIdx = this.globals.length;
+		this.globals.push({
+			type: "i64",
+			mutable: true,
+			init: [{ op: "i64.const", value: 1n }],
+		});
+		this.randStateGlobalIndex = gIdx;
+		return gIdx;
+	}
+
 	getStrconvErrGlobalIndex(field) {
 		if (!this.strconvErrGlobals) this.strconvErrGlobals = new Map();
 		if (this.strconvErrGlobals.has(field)) {
@@ -1036,7 +1079,7 @@ class ModuleEmitter {
 		if (this.ioDiscardGlobalIndex !== undefined) {
 			return this.ioDiscardGlobalIndex;
 		}
-		const discardInfo = this.getStructType("io.discard");
+		this.getStructType("io.discard");
 		const gIdx = this.globals.length;
 		this.globals.push({
 			type: "anyref",
@@ -2848,17 +2891,14 @@ function _scanImportsInBody(node, mod) {
 				Log2: "log2",
 				Log10: "log10",
 				Round: "round",
+				Sinh: "sinh",
+				Cosh: "cosh",
+				Tanh: "tanh",
 			};
 			if (jsMathMap[func.field]) {
 				const isBinary = BINARY_MATH_IMPORTS.has(jsMathMap[func.field]);
 				mod.getMathImportIndex(jsMathMap[func.field], isBinary);
 			}
-		} else if (
-			func.kind === "SelectorExpr" &&
-			func.expr?.name === "rand" &&
-			RAND_HOST_METHODS.has(func.field)
-		) {
-			mod.getMathRandomImportIndex();
 		} else if (
 			func.kind === "SelectorExpr" &&
 			isTestingT(func.expr?._type) &&
@@ -3587,6 +3627,28 @@ function _registerIoSyntheticMethods(funcDecls, mod, strType, programs) {
 					_isMethod: true,
 					_recvTypeName: "io.discard",
 					_methodName: "WriteString",
+				},
+			),
+		);
+	}
+	if (hasIo && mod.structTypes.has("io.LimitedReader")) {
+		const lrPtr = {
+			kind: "pointer",
+			base: { kind: "named", name: "io.LimitedReader" },
+		};
+		funcDecls.push(
+			ioHelper(
+				"io.LimitedReader.Read",
+				[
+					{ name: "l", type: lrPtr },
+					{ name: "p", type: BYTE_SLICE_T },
+				],
+				INT_ERR_RET,
+				"limited_reader_read",
+				{
+					_isMethod: true,
+					_recvTypeName: "io.LimitedReader",
+					_methodName: "Read",
 				},
 			),
 		);

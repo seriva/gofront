@@ -29,7 +29,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - `path` & `path/filepath`: `Base`, `Dir`, `Ext`, `Join`, `Clean`, `IsAbs`, `Split`, `Match` via host JS runtime shims in `boundary.js`.
   - `html`: `EscapeString`, `UnescapeString` via host JS runtime shims in `boundary.js`.
   - `time`: `Duration` and its constants, `Time` struct and 16 methods (`Format`, `String`, `Year` .. `Second`, `Weekday`, `Unix`, `UnixMilli`, `Add`, `Sub`, `Before`, `After`, `Equal`), `Parse`, `Unix`, `Date`, layout/duration/calendar constants; `Now` and `Since` reading host clock (`Date.now`) and timezone offset imports.
+- **New WASM & JS stdlib packages** —
+  - `encoding/binary`: `LittleEndian`, `BigEndian` decoding (`Uint16`, `Uint32`, `Uint64`, `PutUint16`, `PutUint32`, `PutUint64`, `AppendUint16`, `AppendUint32`, `AppendUint64`), `Read`, `Write`, and `Size`. Enables fast binary data parsing (3D meshes, models, audio, networking) across JS and WASM.
+  - `sync`: lightweight single-threaded concurrency shims (`sync.Mutex`, `sync.RWMutex`, `sync.Once` with `.Do()`, `sync.WaitGroup` with `.Add()`, `.Done()`, `.Wait()`).
+  - `crypto/rand` & `crypto/sha256`: `crypto/rand.Read` backed by host `crypto.getRandomValues()`; `crypto/sha256.Sum256` and `crypto/sha256.New` for asset caching and integrity checks.
+  - `encoding/hex`: `EncodeToString`, `DecodeString`, `EncodedLen`, `DecodedLen`, `Encode`, `Decode`.
+  - `encoding/base64`: `StdEncoding`, `URLEncoding`, `RawStdEncoding`, `RawURLEncoding` (`EncodeToString`, `DecodeString`, `EncodedLen`, `DecodedLen`), `NewEncoding`.
+- **Expanded standard library methods and functions** —
+  - `time`: `Duration` methods (`Seconds`, `Milliseconds`, `Microseconds`, `Nanoseconds`, `Minutes`, `Hours`, `String`); `time.Time` methods (`IsZero`, `UnixNano`, `Nanosecond`, `UTC`, `Local`).
+  - `slices`: `IndexFunc`, `ContainsFunc`, `BinarySearch`, `BinarySearchFunc`.
+  - `strconv`: `ParseUint`, `FormatUint`, `AppendUint`, `AppendBool`.
+  - `io`: `Copy`, `CopyN`, `LimitReader`.
+  - `math`: IEEE-754 bit reinterpretations (`Float64bits`, `Float64frombits`, `Float32bits`, `Float32frombits` as single-opcode WASM instructions), hyperbolic functions (`Sinh`, `Cosh`, `Tanh`), and 24 math constants (`MaxInt32`, `MinInt32`, `MaxInt64`, `MinInt64`, `MaxUint32`, `MaxFloat32`, `SmallestNonzeroFloat32`, `Phi`, `Sqrt2`, `SqrtE`, `SqrtPi`, `SqrtPhi`, `Ln2`, `Log2E`, `Ln10`, `Log10E`, etc.).
+  - `math/bits`: byte reversals (`ReverseBytes16`, `ReverseBytes32`, `ReverseBytes64`), `Len32`, `Len64`, `Reverse32`, `Reverse64`.
+  - `math/rand`: pure inline 64-bit PRNG in WASM with deterministic `rand.Seed` and `rand.Read` (eliminating host boundary overhead).
+  - `errors`: `errors.As` (chain traversal with dynamic type matching) and `errors.Join`.
+  - `strings` & `bytes`: `strings.FieldsFunc`, `bytes.FieldsFunc`, `bytes.Clone`.
+- **WASM codegen and optimizer improvements** —
+  - Disassemble optimized binary directly in single pass on `--emit-wat` without duplicate GUFA analysis.
+  - Enabled `--closed-world`, `--traps-never-happen`, and pass convergence (`--converge`) in release builds.
+  - Eliminated duplicate struct allocations on function call returns (`_emitCopyIfValueStruct`).
+  - Eliminated zero and overflow guards for constant divisors in `emitDivRem`, specializing powers-of-two to shifts and bitwise masks.
+  - Eliminated compile-time bounds checks for fixed-size arrays with constant in-bounds indices.
+  - Function-body compile-time constant folding via `foldConstExpr`.
+  - Direct `WriteString` dispatch on `strings.Builder` and `bytes.Buffer` in `io.WriteString` and `fmt.Fprint*`.
+  - Index-only slice range loop unpacking (omitting unused array and offset unpacks).
 - **Targeted diagnostics** — `time.Sleep` in `wasm`/`both` packages reports `'time.Sleep' is not yet available in wasm packages` with a hint to keep the call in a JS package, preserving the boundary between synchronous WASM and async JS event loop.
+
+### Removed
+- **`fmt.Scan`** — removed from typechecker stdlib definitions due to lack of standard input streams (`os.Stdin`) in frontend environments.
 
 ### Fixed
 - **Layout token alternation order** — resolved two-digit layout tokens (`15`, `01`, `02`, `04`, `05`) matching after single-digit tokens (`1`, `2`, `3`, `4`, `5`) in `time.Format` and `time.Parse` layout regex.

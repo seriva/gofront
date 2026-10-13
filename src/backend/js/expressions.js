@@ -78,10 +78,34 @@ const NS_CONSTANTS = {
 	math: {
 		Pi: "Math.PI",
 		E: "Math.E",
+		Phi: "1.618033988749895",
+		Sqrt2: "Math.SQRT2",
+		SqrtE: "1.6487212707001282",
+		SqrtPi: "1.7724538509055159",
+		SqrtPhi: "1.272019649514069",
+		Ln2: "Math.LN2",
+		Log2E: "Math.LOG2E",
+		Ln10: "Math.LN10",
+		Log10E: "Math.LOG10E",
+		MaxFloat32: "3.4028234663852886e38",
+		SmallestNonzeroFloat32: "1.401298464324817e-45",
 		MaxFloat64: "Number.MAX_VALUE",
 		SmallestNonzeroFloat64: "Number.MIN_VALUE",
 		MaxInt: "Number.MAX_SAFE_INTEGER",
 		MinInt: "Number.MIN_SAFE_INTEGER",
+		MaxInt8: "127",
+		MinInt8: "-128",
+		MaxInt16: "32767",
+		MinInt16: "-32768",
+		MaxInt32: "2147483647",
+		MinInt32: "-2147483648",
+		MaxInt64: "9223372036854775807",
+		MinInt64: "-9223372036854775808",
+		MaxUint8: "255",
+		MaxUint16: "65535",
+		MaxUint32: "4294967295",
+		MaxUint: "18446744073709551615",
+		MaxUint64: "18446744073709551615",
 	},
 	strconv: {
 		ErrSyntax: "__strconv_err_syntax",
@@ -97,6 +121,28 @@ const NS_CONSTANTS = {
 		EOF: "__io_eof",
 		Discard:
 			"{ WriteString(s) { return [s.length, null]; }, Write(b) { return [b.length, null]; } }",
+	},
+	sha256: {
+		Size: "32",
+		BlockSize: "64",
+	},
+	hex: {
+		ErrLength: '__error("encoding/hex: odd length hex string")',
+	},
+	base64: {
+		StdPadding: "61",
+		NoPadding: "-1",
+		StdEncoding: "__base64_std",
+		URLEncoding: "__base64_url",
+		RawStdEncoding: "__base64_raw_std",
+		RawURLEncoding: "__base64_raw_url",
+	},
+	binary: {
+		LittleEndian: "__binary_le",
+		BigEndian: "__binary_be",
+	},
+	rand: {
+		Reader: "__crypto_rand_reader",
 	},
 	os: { Args: "process.argv" },
 	time: {
@@ -562,6 +608,17 @@ export const expressionGenMethods = {
 					if (expr.field === "ErrBadPattern") this.useHelper("pathError");
 				} else if (expr.expr.name === "io" && expr.field === "EOF") {
 					this.useHelper("ioEOF");
+				} else if (expr.expr.name === "binary") {
+					this.useHelper("binary");
+				} else if (expr.expr.name === "hex") {
+					this.useHelper("hex");
+					this.useHelper("error");
+				} else if (expr.expr.name === "base64") {
+					this.useHelper("base64");
+				} else if (expr.expr.name === "rand" && expr.field === "Reader") {
+					this.useHelper("cryptoRand");
+				} else if (expr.expr.name === "sha256") {
+					this.useHelper("sha256");
 				}
 				return nsConst;
 			}
@@ -740,6 +797,8 @@ export const expressionGenMethods = {
 			return this._genRegexpMethodCall(expr.func.field, expr);
 		if (recvName === "time.Time")
 			return this._genTimeMethodCall(expr.func.field, expr);
+		if (recvName === "time.Duration")
+			return this._genDurationMethodCall(expr.func.field, expr);
 		if (recvName === "testing.T")
 			return this._genTestingMethodCall(expr.func.field, expr);
 		if (recvName === "strings.Replacer") {
@@ -750,6 +809,48 @@ export const expressionGenMethods = {
 		if (recvName?.startsWith("shared.") && expr.func.field === "Subarray") {
 			const args = expr.args.map((a) => this.genExpr(a)).join(", ");
 			return `${this.genExpr(expr.func.expr)}.subarray(${args})`;
+		}
+		if (recvName === "sync.Mutex" || recvName === "sync.RWMutex") {
+			if (expr.func.field === "TryLock" || expr.func.field === "TryRLock")
+				return "true";
+			return "(void 0)";
+		}
+		if (recvName === "sync.Once" && expr.func.field === "Do") {
+			const recv = this.genExpr(expr.func.expr);
+			const f = this.genExpr(expr.args[0]);
+			return `((o, fn) => { if (!o.done) { o.done = 1; fn(); } })(${recv}, ${f})`;
+		}
+		if (recvName === "sync.WaitGroup") {
+			const recv = this.genExpr(expr.func.expr);
+			if (expr.func.field === "Add") {
+				return `((wg, d) => { wg.counter = (wg.counter || 0) + d; })(${recv}, ${this.genExpr(expr.args[0])})`;
+			}
+			if (expr.func.field === "Done") {
+				return `((wg) => { wg.counter = (wg.counter || 0) - 1; })(${recv})`;
+			}
+			if (expr.func.field === "Wait") return "(void 0)";
+		}
+		if (
+			recvName === "binary.LittleEndian" ||
+			recvName === "binary.BigEndian" ||
+			recvName === "encoding/binary.LittleEndian" ||
+			recvName === "encoding/binary.BigEndian" ||
+			recvName === "binary.ByteOrder" ||
+			recvName === "encoding/binary.ByteOrder"
+		) {
+			this.useHelper("binary");
+			const recv = this.genExpr(expr.func.expr);
+			const args = expr.args.map((a) => this.genExpr(a)).join(", ");
+			return `${recv}.${expr.func.field}(${args})`;
+		}
+		if (
+			recvName === "base64.Encoding" ||
+			recvName === "encoding/base64.Encoding"
+		) {
+			this.useHelper("base64");
+			const recv = this.genExpr(expr.func.expr);
+			const args = expr.args.map((a) => this.genExpr(a)).join(", ");
+			return `${recv}.${expr.func.field}(${args})`;
 		}
 		return undefined;
 	},
@@ -1174,6 +1275,33 @@ export const expressionGenMethods = {
 		if (name === "bytes.Buffer") return "{ _buf: [] }";
 		if (name === "strings.Replacer")
 			return "{ _p: [], Replace(s) { return s; } }";
+		if (name === "sync.Mutex" || name === "sync.RWMutex") {
+			this.useHelper("sync");
+			return "__sync_mutex()";
+		}
+		if (name === "sync.Once") {
+			this.useHelper("sync");
+			return "__sync_once()";
+		}
+		if (name === "sync.WaitGroup") {
+			this.useHelper("sync");
+			return "__sync_waitgroup()";
+		}
+		if (
+			name === "binary.LittleEndian" ||
+			name === "encoding/binary.LittleEndian"
+		) {
+			this.useHelper("binary");
+			return "__binary_le";
+		}
+		if (name === "binary.BigEndian" || name === "encoding/binary.BigEndian") {
+			this.useHelper("binary");
+			return "__binary_be";
+		}
+		if (name === "base64.Encoding" || name === "encoding/base64.Encoding") {
+			this.useHelper("base64");
+			return "__base64_std";
+		}
 		name = this._dequalify(name);
 		if (this.structNames.has(name)) return `new ${name}()`;
 		return "null";

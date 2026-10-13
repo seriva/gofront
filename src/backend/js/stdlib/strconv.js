@@ -28,14 +28,22 @@ const STRCONV_DISPATCH = {
 		`((s) => { if (typeof s === "string" && s.startsWith("\`") && s.endsWith("\`") && s.length >= 2) { if (s.slice(1, -1).includes("\`")) return ["", __strconv_err_syntax]; return [s.slice(1, -1), null]; } try { const v = JSON.parse(s); if (typeof v !== "string") throw 0; return [v, null]; } catch(e) { return ["", __strconv_err_syntax]; } })(${a[0]})`,
 	AppendInt: (a) =>
 		`[...(${a[0]} ?? []), ...new TextEncoder().encode((${a[1]}).toString(${a[2]}))]`,
+	AppendUint: (a) =>
+		`[...(${a[0]} ?? []), ...new TextEncoder().encode((BigInt.asUintN(64, BigInt(${a[1]}))).toString(${a[2]}))]`,
+	AppendBool: (a) =>
+		`[...(${a[0]} ?? []), ...new TextEncoder().encode(String(${a[1]}))]`,
 	AppendFloat: (a) =>
 		`[...(${a[0]} ?? []), ...new TextEncoder().encode(__strconv_format_float(${a[1]}, typeof (${a[2]}) === "string" ? (${a[2]}).charCodeAt(0) : (${a[2]}), ${a[3]}))]`,
+	FormatUint: (a) => `(BigInt.asUintN(64, BigInt(${a[0]}))).toString(${a[1]})`,
+	ParseUint: (a) =>
+		parsed(`__strconv_parse_uint(${a[0]}, ${a[1]}, ${a[2] ?? 64})`, "r[0]"),
 };
 
 const USES_ERROR = new Set([
 	"Atoi",
 	"ParseFloat",
 	"ParseInt",
+	"ParseUint",
 	"ParseBool",
 	"Unquote",
 ]);
@@ -43,6 +51,7 @@ const USES_STRCONV = new Set([
 	"Atoi",
 	"ParseFloat",
 	"ParseInt",
+	"ParseUint",
 	"ParseBool",
 	"FormatFloat",
 	"AppendFloat",

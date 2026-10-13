@@ -215,6 +215,7 @@ export function compileHybrid(source, options = {}) {
 				Object,
 				TextEncoder,
 				TextDecoder,
+				crypto: globalThis.crypto,
 				get __GOFRONT_CLOCK() {
 					return globalThis.__GOFRONT_CLOCK;
 				},

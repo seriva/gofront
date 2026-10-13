@@ -802,6 +802,10 @@ export class BytesEmitter {
 				return this._emitBytesSplit(name, args, targetWasmType);
 			case "Fields":
 				return this._emitBytesFields(name, args, targetWasmType);
+			case "FieldsFunc":
+				return this._emitBytesFieldsFunc(args, targetWasmType);
+			case "Clone":
+				return this.emitSlicesClone(args);
 			case "Join":
 				return this._emitBytesJoin(name, args, targetWasmType);
 			default:
@@ -809,7 +813,7 @@ export class BytesEmitter {
 		}
 	}
 
-	_emitBytesEqual(name, args, targetWasmType) {
+	_emitBytesEqual(name, args, _targetWasmType) {
 		const byteGo = { kind: "basic", name: "byte" };
 		const sliceInfo = this.mod.getSliceType(byteGo);
 		const arrInfo = sliceInfo.arrInfo;
@@ -911,16 +915,14 @@ export class BytesEmitter {
 		}
 	}
 
-	_emitBytesPrefixSuffix(name, args, targetWasmType) {
+	_emitBytesPrefixSuffix(name, args, _targetWasmType) {
 		const byteGo = { kind: "basic", name: "byte" };
 		const sliceInfo = this.mod.getSliceType(byteGo);
-		const arrInfo = sliceInfo.arrInfo;
 		const sliceW = {
 			kind: "ref",
 			nullable: true,
 			typeIndex: sliceInfo.typeIndex,
 		};
-		const arrW = { kind: "ref", nullable: true, typeIndex: arrInfo.typeIndex };
 
 		switch (name) {
 			case "HasPrefix": {
@@ -1426,7 +1428,7 @@ export class BytesEmitter {
 		}
 	}
 
-	_emitBytesRepeat(name, args, targetWasmType) {
+	_emitBytesRepeat(name, args, _targetWasmType) {
 		const byteGo = { kind: "basic", name: "byte" };
 		const sliceInfo = this.mod.getSliceType(byteGo);
 		const arrInfo = sliceInfo.arrInfo;
@@ -1533,7 +1535,7 @@ export class BytesEmitter {
 		}
 	}
 
-	_emitBytesCase(name, args, targetWasmType) {
+	_emitBytesCase(name, args, _targetWasmType) {
 		const byteGo = { kind: "basic", name: "byte" };
 		const sliceInfo = this.mod.getSliceType(byteGo);
 		const arrInfo = sliceInfo.arrInfo;
@@ -1650,7 +1652,7 @@ export class BytesEmitter {
 		}
 	}
 
-	_emitBytesTrim(name, args, targetWasmType) {
+	_emitBytesTrim(name, args, _targetWasmType) {
 		const byteGo = { kind: "basic", name: "byte" };
 		const sliceInfo = this.mod.getSliceType(byteGo);
 		const arrInfo = sliceInfo.arrInfo;
@@ -2106,7 +2108,7 @@ export class BytesEmitter {
 		}
 	}
 
-	_emitBytesCut(name, args, targetWasmType) {
+	_emitBytesCut(name, args, _targetWasmType) {
 		const byteGo = { kind: "basic", name: "byte" };
 		const sliceInfo = this.mod.getSliceType(byteGo);
 		const arrInfo = sliceInfo.arrInfo;
@@ -2224,16 +2226,14 @@ export class BytesEmitter {
 		}
 	}
 
-	_emitBytesReplace(name, args, targetWasmType) {
+	_emitBytesReplace(name, args, _targetWasmType) {
 		const byteGo = { kind: "basic", name: "byte" };
 		const sliceInfo = this.mod.getSliceType(byteGo);
-		const arrInfo = sliceInfo.arrInfo;
 		const sliceW = {
 			kind: "ref",
 			nullable: true,
 			typeIndex: sliceInfo.typeIndex,
 		};
-		const arrW = { kind: "ref", nullable: true, typeIndex: arrInfo.typeIndex };
 
 		switch (name) {
 			case "Replace":
@@ -2269,7 +2269,7 @@ export class BytesEmitter {
 		}
 	}
 
-	_emitBytesMap(name, args, targetWasmType) {
+	_emitBytesMap(name, args, _targetWasmType) {
 		const byteGo = { kind: "basic", name: "byte" };
 		const sliceInfo = this.mod.getSliceType(byteGo);
 		const arrInfo = sliceInfo.arrInfo;
@@ -2660,16 +2660,14 @@ export class BytesEmitter {
 		}
 	}
 
-	_emitBytesJoin(name, args, targetWasmType) {
+	_emitBytesJoin(name, args, _targetWasmType) {
 		const byteGo = { kind: "basic", name: "byte" };
 		const sliceInfo = this.mod.getSliceType(byteGo);
-		const arrInfo = sliceInfo.arrInfo;
 		const sliceW = {
 			kind: "ref",
 			nullable: true,
 			typeIndex: sliceInfo.typeIndex,
 		};
-		const arrW = { kind: "ref", nullable: true, typeIndex: arrInfo.typeIndex };
 
 		switch (name) {
 			case "Join": {
@@ -3946,6 +3944,316 @@ export class BytesEmitter {
 		this.releaseTemp(bLen, "i32");
 		this.releaseTemp(bOff, "i32");
 		this.releaseTemp(bArr, arrW);
+	}
+
+	_emitBytesFieldsFunc(args, _targetWasmType) {
+		const byteGo = { kind: "basic", name: "byte" };
+		const sliceInfo = this.mod.getSliceType(byteGo);
+		const innerGo = { kind: "slice", elem: byteGo };
+		const outerSliceInfo = this.mod.getSliceType(innerGo);
+		const outerArrInfo = outerSliceInfo.arrInfo;
+		const outerArrW = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: outerArrInfo.typeIndex,
+		};
+		const outerSliceW = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: outerSliceInfo.typeIndex,
+		};
+		const arrInfo = sliceInfo.arrInfo;
+		const arrW = { kind: "ref", nullable: true, typeIndex: arrInfo.typeIndex };
+		const sliceW = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: sliceInfo.typeIndex,
+		};
+
+		const closureInfo = this.mod.getClosureType(
+			this._resolveExprGoType(args[1]),
+		);
+		const closureW = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: closureInfo.typeIndex,
+		};
+
+		const bTmp = this.acquireTemp(sliceW);
+		const clTmp = this.acquireTemp(closureW);
+		this.emitExpr(args[0], sliceW);
+		this.pushInstruction({ op: "local.set", index: bTmp });
+		this.emitExpr(args[1], closureW);
+		this.pushInstruction({ op: "local.set", index: clTmp });
+
+		const bArr = this.acquireTemp(arrW),
+			bOff = this.acquireTemp("i32"),
+			bLen = this.acquireTemp("i32"),
+			bCap = this.acquireTemp("i32");
+		this._emitSliceUnpack(bTmp, sliceInfo, {
+			arr: bArr,
+			off: bOff,
+			len: bLen,
+			cap: bCap,
+		});
+		this.releaseTemp(bTmp, sliceW);
+
+		// Pass 1: count words
+		const wordCntTmp = this.acquireTemp("i32");
+		const inWordTmp = this.acquireTemp("i32");
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: wordCntTmp });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: inWordTmp });
+
+		const iTmp = this.acquireTemp("i32");
+		const cpTmp = this.acquireTemp("i32");
+		const runeLenTmp = this.acquireTemp("i32");
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: iTmp });
+
+		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushInstruction({ op: "loop", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction({ op: "local.get", index: bLen });
+		this.pushInstruction("i32.ge_s");
+		this.pushInstruction({ op: "br_if", depth: 1 });
+
+		this._emitDecodeUtf8Rune({
+			arrTmp: bArr,
+			offTmp: bOff,
+			idxTmp: iTmp,
+			lenTmp: bLen,
+			outRuneTmp: cpTmp,
+			outLenTmp: runeLenTmp,
+			arrTypeIndex: arrInfo.typeIndex,
+		});
+
+		// Call f(cp)
+		this.pushInstruction({ op: "local.get", index: clTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: closureInfo.typeIndex,
+			fieldIndex: 1,
+		});
+		this.pushInstruction({ op: "local.get", index: cpTmp });
+		if (closureInfo.paramWTypes[0] === "i64") {
+			this.pushInstruction("i64.extend_i32_u");
+		}
+		this.pushInstruction({ op: "local.get", index: clTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: closureInfo.typeIndex,
+			fieldIndex: 0,
+		});
+		this.pushInstruction({
+			op: "call_ref",
+			typeIndex: closureInfo.funcTypeIndex,
+		});
+
+		// Stack has boolean i32 (1 if delimiter, 0 if not)
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: inWordTmp });
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "local.get", index: inWordTmp });
+		this.pushInstruction("i32.eqz");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: wordCntTmp });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: wordCntTmp });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction({ op: "local.set", index: inWordTmp });
+		this.pushInstruction("end");
+		this.pushInstruction("end");
+
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction({ op: "local.get", index: runeLenTmp });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: iTmp });
+		this.pushInstruction({ op: "br", depth: 0 });
+		this.pushInstruction("end");
+		this.pushInstruction("end");
+
+		this.releaseTemp(runeLenTmp, "i32");
+		this.releaseTemp(cpTmp, "i32");
+		this.releaseTemp(iTmp, "i32");
+
+		// If wordCnt == 0 return empty
+		this.pushInstruction({ op: "local.get", index: wordCntTmp });
+		this.pushInstruction("i32.eqz");
+		this.pushInstruction({ op: "if", blockType: outerSliceW });
+		this.pushInstruction({
+			op: "global.get",
+			index: outerSliceInfo.emptyGlobalIndex,
+		});
+		this.pushInstruction("else");
+
+		// Allocate outer array
+		const outerArrTmp = this.acquireTemp(outerArrW);
+		this.pushInstruction({ op: "local.get", index: wordCntTmp });
+		this.pushInstruction({
+			op: "array.new_default",
+			typeIndex: outerArrInfo.typeIndex,
+		});
+		this.pushInstruction({ op: "local.set", index: outerArrTmp });
+
+		// Pass 2: store words
+		const wIdxTmp = this.acquireTemp("i32");
+		const startTmp = this.acquireTemp("i32");
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: wIdxTmp });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: startTmp });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: inWordTmp });
+
+		const kTmp = this.acquireTemp("i32");
+		const cp2Tmp = this.acquireTemp("i32");
+		const runeLen2Tmp = this.acquireTemp("i32");
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: kTmp });
+
+		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushInstruction({ op: "loop", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: kTmp });
+		this.pushInstruction({ op: "local.get", index: bLen });
+		this.pushInstruction("i32.ge_s");
+		this.pushInstruction({ op: "br_if", depth: 1 });
+
+		this._emitDecodeUtf8Rune({
+			arrTmp: bArr,
+			offTmp: bOff,
+			idxTmp: kTmp,
+			lenTmp: bLen,
+			outRuneTmp: cp2Tmp,
+			outLenTmp: runeLen2Tmp,
+			arrTypeIndex: arrInfo.typeIndex,
+		});
+
+		// Call f(cp2)
+		this.pushInstruction({ op: "local.get", index: clTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: closureInfo.typeIndex,
+			fieldIndex: 1,
+		});
+		this.pushInstruction({ op: "local.get", index: cp2Tmp });
+		if (closureInfo.paramWTypes[0] === "i64") {
+			this.pushInstruction("i64.extend_i32_u");
+		}
+		this.pushInstruction({ op: "local.get", index: clTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: closureInfo.typeIndex,
+			fieldIndex: 0,
+		});
+		this.pushInstruction({
+			op: "call_ref",
+			typeIndex: closureInfo.funcTypeIndex,
+		});
+
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: inWordTmp });
+		this.pushInstruction({ op: "if", blockType: "void" });
+		// store word: b[start:k]
+		this.pushInstruction({ op: "local.get", index: outerArrTmp });
+		this.pushInstruction({ op: "local.get", index: wIdxTmp });
+		this.pushInstruction({ op: "local.get", index: bArr });
+		this.pushInstruction({ op: "local.get", index: bOff });
+		this.pushInstruction({ op: "local.get", index: startTmp });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.get", index: kTmp });
+		this.pushInstruction({ op: "local.get", index: startTmp });
+		this.pushInstruction("i32.sub");
+		this.pushInstruction({ op: "local.get", index: bCap });
+		this.pushInstruction({ op: "local.get", index: startTmp });
+		this.pushInstruction("i32.sub");
+		this.pushInstruction({
+			op: "struct.new",
+			typeIndex: sliceInfo.typeIndex,
+		});
+		this.pushInstruction({
+			op: "array.set",
+			typeIndex: outerArrInfo.typeIndex,
+		});
+		this.pushInstruction({ op: "local.get", index: wIdxTmp });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: wIdxTmp });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: inWordTmp });
+		this.pushInstruction("end");
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "local.get", index: inWordTmp });
+		this.pushInstruction("i32.eqz");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: kTmp });
+		this.pushInstruction({ op: "local.set", index: startTmp });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction({ op: "local.set", index: inWordTmp });
+		this.pushInstruction("end");
+		this.pushInstruction("end");
+
+		this.pushInstruction({ op: "local.get", index: kTmp });
+		this.pushInstruction({ op: "local.get", index: runeLen2Tmp });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: kTmp });
+		this.pushInstruction({ op: "br", depth: 0 });
+		this.pushInstruction("end");
+		this.pushInstruction("end");
+
+		this.releaseTemp(runeLen2Tmp, "i32");
+		this.releaseTemp(cp2Tmp, "i32");
+		this.releaseTemp(kTmp, "i32");
+
+		// If still inWord at end, store last word: b[start:bLen]
+		this.pushInstruction({ op: "local.get", index: inWordTmp });
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: outerArrTmp });
+		this.pushInstruction({ op: "local.get", index: wIdxTmp });
+		this.pushInstruction({ op: "local.get", index: bArr });
+		this.pushInstruction({ op: "local.get", index: bOff });
+		this.pushInstruction({ op: "local.get", index: startTmp });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.get", index: bLen });
+		this.pushInstruction({ op: "local.get", index: startTmp });
+		this.pushInstruction("i32.sub");
+		this.pushInstruction({ op: "local.get", index: bCap });
+		this.pushInstruction({ op: "local.get", index: startTmp });
+		this.pushInstruction("i32.sub");
+		this.pushInstruction({
+			op: "struct.new",
+			typeIndex: sliceInfo.typeIndex,
+		});
+		this.pushInstruction({
+			op: "array.set",
+			typeIndex: outerArrInfo.typeIndex,
+		});
+		this.pushInstruction("end");
+
+		this.pushInstruction({ op: "local.get", index: outerArrTmp });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.get", index: wordCntTmp });
+		this.pushInstruction({ op: "local.get", index: wordCntTmp });
+		this.pushInstruction({
+			op: "struct.new",
+			typeIndex: outerSliceInfo.typeIndex,
+		});
+
+		this.releaseTemp(startTmp, "i32");
+		this.releaseTemp(wIdxTmp, "i32");
+		this.releaseTemp(outerArrTmp, outerArrW);
+		this.pushInstruction("end"); // end else
+
+		this.releaseTemp(inWordTmp, "i32");
+		this.releaseTemp(wordCntTmp, "i32");
+		this.releaseTemp(bCap, "i32");
+		this.releaseTemp(bLen, "i32");
+		this.releaseTemp(bOff, "i32");
+		this.releaseTemp(bArr, arrW);
+		this.releaseTemp(clTmp, closureW);
 	}
 
 	_emitInternalBytesJoin(sTmp, sepTmp) {

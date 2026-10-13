@@ -162,36 +162,86 @@ export class PurePackagesEmitter {
 		this.releaseTemp(rTmp, "i32");
 	}
 
+	_emitRandNextU64() {
+		const gIdx = this.mod.getRandStateGlobalIndex();
+		const sTmp = this.acquireTemp("i64");
+		const zTmp = this.acquireTemp("i64");
+
+		// state = randState + 0x9e3779b97f4a7c15n
+		this.pushInstruction({ op: "global.get", index: gIdx });
+		this.pushInstruction({ op: "i64.const", value: 0x9e3779b97f4a7c15n });
+		this.pushInstruction("i64.add");
+		this.pushInstruction({ op: "local.tee", index: sTmp });
+		this.pushInstruction({ op: "global.set", index: gIdx });
+
+		// z = (state ^ (state >> 30)) * 0xbf58476d1ce4e5b9n
+		this.pushInstruction({ op: "local.get", index: sTmp });
+		this.pushInstruction({ op: "local.get", index: sTmp });
+		this.pushInstruction({ op: "i64.const", value: 30n });
+		this.pushInstruction("i64.shr_u");
+		this.pushInstruction("i64.xor");
+		this.pushInstruction({ op: "i64.const", value: 0xbf58476d1ce4e5b9n });
+		this.pushInstruction("i64.mul");
+		this.pushInstruction({ op: "local.set", index: zTmp });
+
+		// z = (z ^ (z >> 27)) * 0x94d049bb133111ebn
+		this.pushInstruction({ op: "local.get", index: zTmp });
+		this.pushInstruction({ op: "local.get", index: zTmp });
+		this.pushInstruction({ op: "i64.const", value: 27n });
+		this.pushInstruction("i64.shr_u");
+		this.pushInstruction("i64.xor");
+		this.pushInstruction({ op: "i64.const", value: 0x94d049bb133111ebn });
+		this.pushInstruction("i64.mul");
+		this.pushInstruction({ op: "local.set", index: zTmp });
+
+		// return z ^ (z >> 31)
+		this.pushInstruction({ op: "local.get", index: zTmp });
+		this.pushInstruction({ op: "local.get", index: zTmp });
+		this.pushInstruction({ op: "i64.const", value: 31n });
+		this.pushInstruction("i64.shr_u");
+		this.pushInstruction("i64.xor");
+
+		this.releaseTemp(zTmp, "i64");
+		this.releaseTemp(sTmp, "i64");
+	}
+
 	emitRandCall(name, args, targetWasmType) {
-		const randIdx = this.mod.getMathRandomImportIndex();
 		switch (name) {
 			case "Float64":
-				this.pushInstruction({ op: "call", funcIndex: randIdx });
+				this._emitRandNextU64();
+				this.pushInstruction({ op: "i64.const", value: 11n });
+				this.pushInstruction("i64.shr_u");
+				this.pushInstruction("f64.convert_i64_u");
+				this.pushInstruction({
+					op: "f64.const",
+					value: 1.1102230246251565e-16,
+				});
+				this.pushInstruction("f64.mul");
 				return;
 			case "Float32":
-				this.pushInstruction({ op: "call", funcIndex: randIdx });
-				this.pushInstruction("f32.demote_f64");
+				this._emitRandNextU64();
+				this.pushInstruction({ op: "i64.const", value: 40n });
+				this.pushInstruction("i64.shr_u");
+				this.pushInstruction("f32.convert_i64_u");
+				this.pushInstruction({ op: "f32.const", value: 5.9604644775390625e-8 });
+				this.pushInstruction("f32.mul");
 				return;
 			case "Int":
 			case "Int31": {
-				this.pushInstruction({ op: "call", funcIndex: randIdx });
-				this.pushInstruction({ op: "f64.const", value: 2147483647.0 });
-				this.pushInstruction("f64.mul");
+				this._emitRandNextU64();
+				this.pushInstruction({ op: "i64.const", value: 0x7fffffffn });
+				this.pushInstruction("i64.and");
 				if (targetWasmType === "i32") {
-					this.pushInstruction("i32.trunc_f64_s");
-				} else {
-					this.pushInstruction("i64.trunc_f64_s");
+					this.pushInstruction("i32.wrap_i64");
 				}
 				return;
 			}
 			case "Int63": {
-				this.pushInstruction({ op: "call", funcIndex: randIdx });
-				this.pushInstruction({ op: "f64.const", value: 9007199254740991.0 });
-				this.pushInstruction("f64.mul");
+				this._emitRandNextU64();
+				this.pushInstruction({ op: "i64.const", value: 0x7fffffffffffffffn });
+				this.pushInstruction("i64.and");
 				if (targetWasmType === "i32") {
-					this.pushInstruction("i32.trunc_f64_s");
-				} else {
-					this.pushInstruction("i64.trunc_f64_s");
+					this.pushInstruction("i32.wrap_i64");
 				}
 				return;
 			}
@@ -209,21 +259,21 @@ export class PurePackagesEmitter {
 				this.emitPanic(`invalid argument to ${name}`);
 				this.pushInstruction("end");
 
-				this.pushInstruction({ op: "call", funcIndex: randIdx });
+				this._emitRandNextU64();
+				this.pushInstruction({ op: "i64.const", value: 0x7fffffffffffffffn });
+				this.pushInstruction("i64.and");
 				this.pushInstruction({ op: "local.get", index: nTmp });
-				this.pushInstruction("f64.convert_i64_s");
-				this.pushInstruction("f64.mul");
+				this.pushInstruction("i64.rem_u");
 				if (targetWasmType === "i32") {
-					this.pushInstruction("i32.trunc_f64_s");
-				} else {
-					this.pushInstruction("i64.trunc_f64_s");
+					this.pushInstruction("i32.wrap_i64");
 				}
 				this.releaseTemp(nTmp, "i64");
 				return;
 			}
 			case "Seed": {
-				this.emitExpr(args[0]);
-				this.pushInstruction("drop");
+				const gIdx = this.mod.getRandStateGlobalIndex();
+				this.emitExpr(args[0], "i64");
+				this.pushInstruction({ op: "global.set", index: gIdx });
 				return;
 			}
 			case "Shuffle": {
@@ -266,14 +316,15 @@ export class PurePackagesEmitter {
 				this.pushInstruction("i32.le_s");
 				this.pushInstruction({ op: "br_if", depth: 1 });
 
-				// j = floor(random() * (i + 1))
-				this.pushInstruction({ op: "call", funcIndex: randIdx });
+				// j = rand() % (i + 1)
+				this._emitRandNextU64();
+				this.pushInstruction({ op: "i64.const", value: 0x7fffffffn });
+				this.pushInstruction("i64.and");
+				this.pushInstruction("i32.wrap_i64");
 				this.pushInstruction({ op: "local.get", index: iTmp });
 				this.pushInstruction({ op: "i32.const", value: 1 });
 				this.pushInstruction("i32.add");
-				this.pushInstruction("f64.convert_i32_s");
-				this.pushInstruction("f64.mul");
-				this.pushInstruction("i32.trunc_f64_s");
+				this.pushInstruction("i32.rem_u");
 				this.pushInstruction({ op: "local.set", index: jTmp });
 
 				// swap(i, j)
@@ -385,13 +436,15 @@ export class PurePackagesEmitter {
 				this.pushInstruction("i32.le_s");
 				this.pushInstruction({ op: "br_if", depth: 1 });
 
-				this.pushInstruction({ op: "call", funcIndex: randIdx });
+				// j = rand() % (i + 1)
+				this._emitRandNextU64();
+				this.pushInstruction({ op: "i64.const", value: 0x7fffffffn });
+				this.pushInstruction("i64.and");
+				this.pushInstruction("i32.wrap_i64");
 				this.pushInstruction({ op: "local.get", index: iTmp });
 				this.pushInstruction({ op: "i32.const", value: 1 });
 				this.pushInstruction("i32.add");
-				this.pushInstruction("f64.convert_i32_s");
-				this.pushInstruction("f64.mul");
-				this.pushInstruction("i32.trunc_f64_s");
+				this.pushInstruction("i32.rem_u");
 				this.pushInstruction({ op: "local.set", index: jTmp });
 
 				// swap arr[i], arr[j]
@@ -437,6 +490,86 @@ export class PurePackagesEmitter {
 				this.releaseTemp(iTmp, "i32");
 				this.releaseTemp(arrTmp, arrW);
 				this.releaseTemp(nTmp, "i32");
+				return;
+			}
+			case "Read": {
+				const sNode = args[0];
+				const byteGo = { kind: "basic", name: "byte" };
+				const sliceInfo = this.mod.getSliceType(byteGo);
+				const arrInfo = sliceInfo.arrInfo;
+				const sliceW = {
+					kind: "ref",
+					nullable: true,
+					typeIndex: sliceInfo.typeIndex,
+				};
+				const arrW = {
+					kind: "ref",
+					nullable: true,
+					typeIndex: arrInfo.typeIndex,
+				};
+
+				const sTmp = this.acquireTemp(sliceW);
+				this.emitExpr(sNode, sliceW);
+				this.pushInstruction({ op: "local.set", index: sTmp });
+
+				const arrTmp = this.acquireTemp(arrW);
+				const offTmp = this.acquireTemp("i32");
+				const lenTmp = this.acquireTemp("i32");
+				this._emitSliceUnpack(sTmp, sliceInfo, {
+					arr: arrTmp,
+					off: offTmp,
+					len: lenTmp,
+				});
+
+				// crypto_rand_fill(len)
+				this.pushInstruction({ op: "local.get", index: lenTmp });
+				this._callStdlib("crypto_rand_fill");
+				this.pushInstruction("drop");
+
+				const iLoc = this.acquireTemp("i32");
+				this.pushInstruction({ op: "i32.const", value: 0 });
+				this.pushInstruction({ op: "local.set", index: iLoc });
+
+				this.pushInstruction({ op: "block", blockType: "void" });
+				this.pushInstruction({ op: "loop", blockType: "void" });
+				this.pushInstruction({ op: "local.get", index: iLoc });
+				this.pushInstruction({ op: "local.get", index: lenTmp });
+				this.pushInstruction("i32.ge_s");
+				this.pushInstruction({ op: "br_if", depth: 1 });
+
+				// arr[off + i] = raw_bytes_get(i)
+				this.pushInstruction({ op: "local.get", index: arrTmp });
+				this.pushInstruction({ op: "local.get", index: offTmp });
+				this.pushInstruction({ op: "local.get", index: iLoc });
+				this.pushInstruction("i32.add");
+
+				this.pushInstruction({ op: "local.get", index: iLoc });
+				this._callStdlib("raw_bytes_get");
+
+				this.pushInstruction({
+					op: "array.set",
+					typeIndex: arrInfo.typeIndex,
+				});
+
+				// i++
+				this.pushInstruction({ op: "local.get", index: iLoc });
+				this.pushInstruction({ op: "i32.const", value: 1 });
+				this.pushInstruction("i32.add");
+				this.pushInstruction({ op: "local.set", index: iLoc });
+				this.pushInstruction({ op: "br", depth: 0 });
+				this.pushInstruction("end");
+				this.pushInstruction("end");
+
+				// return (len, nil)
+				this.pushInstruction({ op: "local.get", index: lenTmp });
+				this.pushInstruction("i64.extend_i32_u");
+				this.pushInstruction({ op: "ref.null", heapType: "any" });
+
+				this.releaseTemp(iLoc, "i32");
+				this.releaseTemp(lenTmp, "i32");
+				this.releaseTemp(offTmp, "i32");
+				this.releaseTemp(arrTmp, arrW);
+				this.releaseTemp(sTmp, sliceW);
 				return;
 			}
 			default:

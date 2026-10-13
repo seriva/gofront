@@ -31,7 +31,11 @@ function toLit(val) {
 		case INT:
 			return { kind: "BasicLit", litKind: INT, value: val.v.toString() };
 		case FLOAT:
-			return { kind: "BasicLit", litKind: FLOAT, value: String(val.v) };
+			return {
+				kind: "BasicLit",
+				litKind: FLOAT,
+				value: Object.is(val.v, -0) ? "-0" : String(val.v),
+			};
 		case STRING:
 			return { kind: "BasicLit", litKind: STRING, value: val.v };
 		default:

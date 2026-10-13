@@ -1,6 +1,7 @@
 // src/backend/wasm/emit-exprs.js
 // FunctionEmitter mixin: expression emission (literals, operators, indexing, conversions).
 
+import { foldConstExpr } from "./const-fold.js";
 import {
 	getMapKeyValTypes,
 	isAnyType,
@@ -129,6 +130,17 @@ export class ExprsEmitter {
 	}
 
 	_emitRawExpr(expr, targetWasmType = null) {
+		if (expr.kind === "BinaryExpr" || expr.kind === "UnaryExpr") {
+			const folded = foldConstExpr(expr, (name) =>
+				this.mod.pkgConsts?.get(name),
+			);
+			if (folded) {
+				folded._type = expr._type;
+				this.emitBasicLit(folded, targetWasmType);
+				return;
+			}
+		}
+
 		switch (expr.kind) {
 			case "BasicLit":
 				this.emitBasicLit(expr, targetWasmType);
@@ -173,6 +185,8 @@ export class ExprsEmitter {
 					this.emitIoConst(expr.field, targetWasmType);
 				else if (this._isTimeConst(expr))
 					this.emitTimeConst(expr.field, targetWasmType);
+				else if (this._isExtendedPkgConst?.(expr))
+					this.emitExtendedPkgConst(expr, targetWasmType);
 				else this.emitSelectorExpr(expr);
 				break;
 			}
@@ -1038,6 +1052,31 @@ export class ExprsEmitter {
 			nullable: true,
 			typeIndex: arrInfo.typeIndex,
 		};
+
+		const rawBaseType = baseNode._type ?? this._resolveExprGoType(baseNode);
+		const baseType =
+			rawBaseType?.kind === "pointer" ? rawBaseType.base : rawBaseType;
+		const arrayLen =
+			baseType?.kind === "array" ? (baseType.len ?? baseType.size) : null;
+		let constIdx = null;
+		if (indexNode.kind === "BasicLit" && indexNode.litKind === "INT") {
+			try {
+				const v = Number(indexNode.value);
+				if (Number.isInteger(v)) constIdx = v;
+			} catch {}
+		}
+		if (
+			arrayLen !== null &&
+			arrayLen !== undefined &&
+			constIdx !== null &&
+			constIdx >= 0 &&
+			constIdx < arrayLen
+		) {
+			this.emitExpr(baseNode, arrWType);
+			this.pushInstruction({ op: "i32.const", value: constIdx });
+			return;
+		}
+
 		const arrTmp = this.acquireTemp(arrWType);
 		this.emitExpr(baseNode, arrWType);
 		this.pushInstruction({ op: "local.tee", index: arrTmp });
@@ -1731,6 +1770,75 @@ export class ExprsEmitter {
 		}
 
 		const signed = isSigned(goType);
+
+		let constDivisor = null;
+		if (right.kind === "BasicLit" && right.litKind === "INT") {
+			try {
+				constDivisor = BigInt(right.value);
+			} catch {}
+		}
+
+		if (constDivisor !== null && constDivisor !== 0n && constDivisor !== -1n) {
+			// Specialize unsigned powers-of-two to shifts or bitwise masks
+			if (
+				!signed &&
+				constDivisor > 0n &&
+				(constDivisor & (constDivisor - 1n)) === 0n
+			) {
+				let k = 0n;
+				let temp = constDivisor;
+				while (temp > 1n) {
+					temp >>= 1n;
+					k++;
+				}
+				if (op === "/") {
+					this.emitExpr(left, wType);
+					this.pushInstruction({
+						op: `${wType}.const`,
+						value: wType === "i64" ? k : Number(k),
+					});
+					this.pushInstruction(`${wType}.shr_u`);
+				} else {
+					this.emitExpr(left, wType);
+					this.pushInstruction({
+						op: `${wType}.const`,
+						value:
+							wType === "i64" ? constDivisor - 1n : Number(constDivisor - 1n),
+					});
+					this.pushInstruction(`${wType}.and`);
+				}
+				if (wType === "i32") this.emitNarrowIntWrap(goType);
+				return;
+			}
+
+			// Constant divisor != 0 and != -1: no dynamic zero or overflow check needed
+			this.emitExpr(left, wType);
+			this.emitExpr(right, wType);
+			if (wType === "i32") {
+				this.pushInstruction(
+					op === "/"
+						? signed
+							? "i32.div_s"
+							: "i32.div_u"
+						: signed
+							? "i32.rem_s"
+							: "i32.rem_u",
+				);
+				this.emitNarrowIntWrap(goType);
+			} else {
+				this.pushInstruction(
+					op === "/"
+						? signed
+							? "i64.div_s"
+							: "i64.div_u"
+						: signed
+							? "i64.rem_s"
+							: "i64.rem_u",
+				);
+			}
+			return;
+		}
+
 		const tmpA = this.acquireTemp(wType);
 		const tmpB = this.acquireTemp(wType);
 

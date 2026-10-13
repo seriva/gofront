@@ -11,6 +11,7 @@ import { SharedEmitter } from "./emit-shared.js";
 import { StmtsEmitter } from "./emit-stmts.js";
 import {
 	BytesEmitter,
+	ExtendedPackagesEmitter,
 	IoEmitter,
 	PurePackagesEmitter,
 	StdlibCoreEmitter,
@@ -951,6 +952,7 @@ export class FunctionEmitter {
 			return;
 		if (
 			node.kind === "CompositeLit" ||
+			node.kind === "CallExpr" ||
 			(node.kind === "UnaryExpr" && node.op === "*")
 		)
 			return;
@@ -989,6 +991,10 @@ export class FunctionEmitter {
 			if (loc?.goType) {
 				return this._getReceiverTypeName(loc.goType);
 			}
+		}
+		if (node && node.kind === "SelectorExpr") {
+			const pkg = node.expr?.name;
+			if (pkg) return `${pkg}.${node.field}`;
 		}
 		return null;
 	}
@@ -1417,4 +1423,5 @@ copyMethods(FunctionEmitter, BytesEmitter);
 copyMethods(FunctionEmitter, PurePackagesEmitter);
 copyMethods(FunctionEmitter, IoEmitter);
 copyMethods(FunctionEmitter, TimeEmitter);
+copyMethods(FunctionEmitter, ExtendedPackagesEmitter);
 copyMethods(FunctionEmitter, SharedEmitter);

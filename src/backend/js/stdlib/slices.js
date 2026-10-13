@@ -4,7 +4,15 @@
 
 const SLICES_DISPATCH = {
 	Contains: (a) => `${a[0]}.includes(${a[1]})`,
+	ContainsFunc: (a) =>
+		`((s, f) => { s = s || []; for (let i = 0; i < s.length; i++) { if (f(s[i])) return true; } return false; })(${a[0]}, ${a[1]})`,
 	Index: (a) => `${a[0]}.indexOf(${a[1]})`,
+	IndexFunc: (a) =>
+		`((s, f) => { s = s || []; for (let i = 0; i < s.length; i++) { if (f(s[i])) return i; } return -1; })(${a[0]}, ${a[1]})`,
+	BinarySearch: (a) =>
+		`((s, target) => { s = s || []; let i = 0, j = s.length; while (i < j) { const h = (i + j) >>> 1; if (s[h] < target) i = h + 1; else j = h; } return [i, i < s.length && s[i] === target]; })(${a[0]}, ${a[1]})`,
+	BinarySearchFunc: (a) =>
+		`((s, target, cmp) => { s = s || []; let i = 0, j = s.length; while (i < j) { const h = (i + j) >>> 1; if (cmp(s[h], target) < 0) i = h + 1; else j = h; } return [i, i < s.length && cmp(s[i], target) === 0]; })(${a[0]}, ${a[1]}, ${a[2]})`,
 	Compare: (a) =>
 		`((a, b) => { a = a || []; b = b || []; for (let i = 0; i < a.length && i < b.length; i++) { const x = a[i], y = b[i]; const xN = typeof x === "number" && isNaN(x), yN = typeof y === "number" && isNaN(y); if (xN && yN) continue; if (xN) return -1; if (yN) return 1; if (x < y) return -1; if (x > y) return 1; } return a.length < b.length ? -1 : a.length > b.length ? 1 : 0; })(${a[0]}, ${a[1]})`,
 	Sort: (a) =>

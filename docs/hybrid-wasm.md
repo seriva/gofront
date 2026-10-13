@@ -95,18 +95,23 @@ interfaces (including anonymous interfaces), generics, closures (including closu
 `defer`/`panic`/`recover`, `error` values, and non-literal package constants.
 
 The stdlib packages available in `wasm`/`both` packages are:
-- `math`, `math/bits`, `math/rand` (seed is a no-op; uses JS `Math.random`)
-- `errors` (`New`, `Is`, `Unwrap`)
+- `math` (including 24 constants, `Float64bits`/`Float64frombits`, `Float32bits`/`Float32frombits`, `Sinh`, `Cosh`, `Tanh`, `Remainder`), `math/bits` (including `Len*`, `Reverse*`, `ReverseBytes*`), `math/rand` (pure inline 64-bit PRNG with deterministic `Seed`, `Read`, `Shuffle`, `Perm`)
+- `errors` (`New`, `Is`, `Unwrap`, `As`, `Join`)
 - `fmt` (`Sprintf`, `Printf`, `Println`, `Errorf`, `Fprintf`, `Fprintln`, `Fprint`, `Sscan`, `Sscanln`, `Sscanf`, including `%v`/`%+v` composite formatting over slices, arrays, maps, and structs)
-- `strings` (including `Builder`, `NewReplacer`, `NewReader`, `Cut*`, `Split*`, `*Func`)
-- `bytes` (including `Buffer`, `NewReader`)
-- `strconv` (including `Unquote`, `AppendInt`, `AppendFloat`)
+- `strings` (including `Builder`, `NewReplacer`, `NewReader`, `Cut*`, `Split*`, `*Func`, `FieldsFunc`)
+- `bytes` (including `Buffer`, `NewReader`, `FieldsFunc`, `Clone`)
+- `strconv` (including `Unquote`, `AppendInt`, `AppendFloat`, `AppendUint`, `AppendBool`, `ParseUint`, `FormatUint`)
 - `unicode`, `unicode/utf8`
-- `slices`, `maps`, `sort`
-- `io` (`Reader`, `Writer`, `ReadWriter`, `Closer`, `ReadAll`, `Discard`, `WriteString`, `EOF`)
+- `slices` (including `Compare`, `SortFunc`, `IndexFunc`, `ContainsFunc`, `BinarySearch`, `BinarySearchFunc`, `Min`, `Max`, `Compact`, `Concat`, `Delete`, `Insert`, `Replace`, `Grow`, `Clip`), `maps`, `sort`
+- `io` (`Reader`, `Writer`, `ReadWriter`, `Closer`, `ReadAll`, `Discard`, `WriteString`, `Copy`, `CopyN`, `LimitReader`, `EOF`)
 - `path`, `path/filepath`
 - `html` (`EscapeString`, `UnescapeString`)
-- `time` (pure parts: `Duration`, `Time`, parsing, formatting, calendar arithmetic, clock; `time.Sleep` stays JS-only)
+- `time` (pure parts: `Duration` with methods `.Seconds()`, `.Milliseconds()`, `.Minutes()`, `.Hours()`, `.String()`; `Time` with methods `.IsZero()`, `.UnixNano()`, `.Nanosecond()`, `.UTC()`, `.Local()`, calendar arithmetic, parsing, formatting; `time.Sleep` stays JS-only)
+- `sync` (`Mutex`, `RWMutex`, `Once`, `WaitGroup`)
+- `crypto/rand` (`Read`), `crypto/sha256` (`Sum256`, `New`)
+- `encoding/binary` (`LittleEndian`, `BigEndian`, `Read`, `Write`, `Append*`, `Size`)
+- `encoding/hex` (`EncodeToString`, `DecodeString`, `EncodedLen`, `DecodedLen`)
+- `encoding/base64` (`StdEncoding`, `URLEncoding`, `RawStdEncoding`, `RawURLEncoding`)
 - `testing` and `gofront/shared`.
 
 Any other import, or JS-only host API (`os`, `regexp`, `time.Sleep`), reports a targeted diagnostic
@@ -252,7 +257,7 @@ deleted.
 
 - **Zero setup:** Uses the `wasm-opt` CLI shipped by the optional `binaryen` npm package (run through node, no native toolchain) and automatically prefers a native `wasm-opt` binary if present on `PATH`. If neither is available, `--release`/`--wasm-opt` fail with an actionable error; plain `gofront build` is unaffected.
 - **WasmGC feature flags:** Configured for `GC`, `ReferenceTypes`, `BulkMemory`, `Multivalue`, `ExceptionHandling`, `MutableGlobals`, `NontrappingFPToInt`, and `TailCall`.
-- **Optimization passes:** Level `-O3` combined with GUFA (`--gufa`: devirtualization, type refinement, function inlining, dead type/code elimination).
+- **Optimization passes:** Level `-O3` combined with whole-program analysis (`--closed-world`: interface devirtualization, struct field pruning, type refinement), GUFA (`--gufa`), `--traps-never-happen` (allowing loads and instruction reordering without hardware trap preservation), and pass convergence (`--converge`) in release builds. Disassembly on `--emit-wat` translates the optimized binary directly in a single pass without re-running passes.
 - **Size savings & validation:** Typically yields **~23% binary size reduction** and validates module structure post-optimization.
 - **Source maps:** Passing `--source-map` emits a function-level `app.wasm.map` (one mapping per function body, resolved `sources`) and embeds the `sourceMappingURL` custom section. With `--release`/`--wasm-opt` the map is handed to Binaryen (`-ism`) so offsets stay correct after optimisation.
 - **Instant dev reload:** `gofront dev` bypasses optimization for sub-10ms instant hot-reload.
