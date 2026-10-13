@@ -20,15 +20,15 @@ export const ioMethods = {
 					return `((b,s) => { b._buf += s; return [s.length, null]; })(${base}, ${s})`;
 				}
 				if (typeName === "bytes.Buffer") {
-					return `((b,s) => { b._buf.push(...new TextEncoder().encode(s)); return [s.length, null]; })(${base}, ${s})`;
+					return `((b,s) => { const bytes = new TextEncoder().encode(s); for (let i = 0; i < bytes.length; i++) b._buf.push(bytes[i]); return [bytes.length, null]; })(${base}, ${s})`;
 				}
 				// Generic: auto-dereference pointer, then dispatch on concrete writer type.
 				// strings.Builder has { _buf: string }, bytes.Buffer has { _buf: [] }.
-				return `((b,s) => { const w = b?.value ?? b; if (typeof w.WriteString === "function") return w.WriteString(s); if (typeof w._buf === "string") { w._buf += s; return [s.length, null]; } if (Array.isArray(w._buf)) { w._buf.push(...new TextEncoder().encode(s)); return [s.length, null]; } if (typeof w.Write === "function") return w.Write(new TextEncoder().encode(s)); return [0, "io.WriteString: unsupported writer"]; })(${w}, ${s})`;
+				return `((b,s) => { const w = b?.value ?? b; if (typeof w.WriteString === "function") return w.WriteString(s); if (typeof w._buf === "string") { w._buf += s; return [s.length, null]; } if (Array.isArray(w._buf)) { const bytes = new TextEncoder().encode(s); for (let i = 0; i < bytes.length; i++) w._buf.push(bytes[i]); return [bytes.length, null]; } if (typeof w.Write === "function") return w.Write(new TextEncoder().encode(s)); return [0, "io.WriteString: unsupported writer"]; })(${w}, ${s})`;
 			}
 			case "ReadAll": {
 				const r = this.genExpr(expr.args[0]);
-				return `((r) => { const w = r?.value ?? r; const chunks = []; const buf = new Array(512); let err = null; while (!err) { const [n, e] = w.Read(buf); if (n > 0) chunks.push(...buf.slice(0, n)); err = e; } return [chunks, (err === "EOF" || err === __io_eof || err?._msg === "EOF") ? null : err]; })(${r})`;
+				return `((r) => { const w = r?.value ?? r; const chunks = []; const buf = new Uint8Array(512); let err = null; while (!err) { const [n, e] = w.Read(buf); if (n > 0) { for (let i = 0; i < n; i++) chunks.push(buf[i]); } if (n === 0 && !e) break; err = e; } return [new Uint8Array(chunks), (err === "EOF" || err === __io_eof || err?._msg === "EOF") ? null : err]; })(${r})`;
 			}
 		}
 		return undefined;

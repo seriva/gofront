@@ -5,7 +5,7 @@
 const _SSCAN_LOOP =
 	`let n = 0; for (let i = 0; i < ptrs.length && i < tokens.length; i++) { ` +
 	`const t = tokens[i]; const p = ptrs[i]; ` +
-	`if (typeof p.value === "number") p.value = Number(t); ` +
+	`if (typeof p.value === "number") { const v = Number(t); p.value = Number.isNaN(v) ? 0 : v; } ` +
 	`else if (typeof p.value === "boolean") p.value = t === "true"; ` +
 	`else p.value = t; n++; }`;
 
@@ -92,7 +92,7 @@ export const fmtMethods = {
 		if (targetTypeName === "bytes.Buffer") {
 			const w = this.genExpr(writerArg);
 			const base = this._unboxWriter(w);
-			return `((__b, __s) => { const __bytes = new TextEncoder().encode(__s); __b._buf.push(...__bytes); return [__bytes.length, null]; })(${base}, ${sprintfCall})`;
+			return `((__b, __s) => { const __bytes = new TextEncoder().encode(__s); for (let i = 0; i < __bytes.length; i++) __b._buf.push(__bytes[i]); return [__bytes.length, null]; })(${base}, ${sprintfCall})`;
 		}
 		// Generic io.Writer fallback — call .WriteString if available
 		const w = this.genExpr(writerArg);

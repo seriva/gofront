@@ -15,11 +15,12 @@ const BUILDER_STR = {
 };
 const BUILDER_BYTES = {
 	WriteString: (b, a) =>
-		`((__s) => { const __b = new TextEncoder().encode(__s); ${b}._buf.push(...__b); return [__b.length, null]; })(${a[0]})`,
+		`((buf, s) => { const bytes = new TextEncoder().encode(s); for (let i = 0; i < bytes.length; i++) buf._buf.push(bytes[i]); return [bytes.length, null]; })(${b}, ${a[0]})`,
 	WriteByte: (b, a) => `(${b}._buf.push(${a[0]}), null)`,
 	WriteRune: (b, a) =>
-		`((cp) => { const r = (cp < 0 || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) ? 0xfffd : cp; const bytes = new TextEncoder().encode(String.fromCodePoint(r)); ${b}._buf.push(...bytes); return [bytes.length, null]; })(${a[0]})`,
-	Write: (b, a) => `(${b}._buf.push(...${a[0]}), [${a[0]}.length, null])`,
+		`((buf, cp) => { const r = (cp < 0 || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) ? 0xfffd : cp; const bytes = new TextEncoder().encode(String.fromCodePoint(r)); for (let i = 0; i < bytes.length; i++) buf._buf.push(bytes[i]); return [bytes.length, null]; })(${b}, ${a[0]})`,
+	Write: (b, a) =>
+		`((buf, d) => { for (let i = 0; i < d.length; i++) buf._buf.push(d[i]); return [d.length, null]; })(${b}, ${a[0]})`,
 	String: (b) => `new TextDecoder().decode(new Uint8Array(${b}._buf))`,
 	Reset: (b) => `(${b}._buf = [])`,
 };

@@ -17,9 +17,12 @@ const BYTES_DISPATCH = {
 	Repeat: (a) => `${__sb}(${__bs}(${a[0]}).repeat(${a[1]}))`,
 	Replace: (a) =>
 		`((b, o, n, cnt) => { let s = ${__bs}(b), os = ${__bs}(o), ns = ${__bs}(n); if (cnt < 0) return ${__sb}(s.replaceAll(os, ns)); for (let i = 0; i < cnt; i++) s = s.replace(os, ns); return ${__sb}(s); })(${a[0]}, ${a[1]}, ${a[2]}, ${a[3]})`,
-	ToUpper: (a) => `${__sb}(${__bs}(${a[0]}).toUpperCase())`,
-	ToLower: (a) => `${__sb}(${__bs}(${a[0]}).toLowerCase())`,
-	TrimSpace: (a) => `${__sb}(${__bs}(${a[0]}).trim())`,
+	ToUpper: (a) =>
+		`new TextEncoder().encode(new TextDecoder().decode(new Uint8Array(${a[0]})).toUpperCase())`,
+	ToLower: (a) =>
+		`new TextEncoder().encode(new TextDecoder().decode(new Uint8Array(${a[0]})).toLowerCase())`,
+	TrimSpace: (a) =>
+		`new TextEncoder().encode(new TextDecoder().decode(new Uint8Array(${a[0]})).trim())`,
 	Trim: (a) =>
 		`((b, c) => { const s = new TextDecoder().decode(new Uint8Array(b)); const cs = new Set(Array.from(c)); const chars = Array.from(s); let l = 0, r = chars.length; while (l < r && cs.has(chars[l])) l++; while (r > l && cs.has(chars[r - 1])) r--; return new TextEncoder().encode(chars.slice(l, r).join("")); })(${a[0]}, ${a[1]})`,
 	Equal: (a) =>
@@ -53,7 +56,52 @@ const BYTES_DISPATCH = {
 	Map: (a) =>
 		`((f, b) => { const s = new TextDecoder().decode(new Uint8Array(b)); let res = ""; for (const c of s) { const r = f(c.codePointAt(0)); if (r >= 0) res += String.fromCodePoint(r); } return new TextEncoder().encode(res); })(${a[0]}, ${a[1]})`,
 	SplitN: (a) =>
-		`((b, sep, n) => { if (n === 0) return []; if (n < 0) return ((b, sep) => { const r = []; let i = 0; while (i <= b.length) { const j = b.findIndex((_, k) => k >= i && sep.every((v, l) => b[k + l] === sep[l])); if (j < 0 || j >= b.length) break; r.push(b.slice(i, j)); i = j + sep.length; } r.push(b.slice(i)); return r; })(b, sep); const r = []; let i = 0; for (let c = 1; c < n; c++) { const j = b.findIndex((_, k) => k >= i && sep.every((v, l) => b[k + l] === sep[l])); if (j < 0) break; r.push(b.slice(i, j)); i = j + sep.length; } r.push(b.slice(i)); return r; })(${a[0]}, ${a[1]}, ${a[2]})`,
+		`((b, sep, n) => {
+			if (n === 0) return null;
+			if (sep.length === 0) {
+				if (n < 0 || b.length <= n) {
+					const r = [];
+					for (let k = 0; k < b.length; k++) r.push(b.slice(k, k + 1));
+					return r;
+				}
+				const r = [];
+				for (let k = 0; k < n - 1; k++) r.push(b.slice(k, k + 1));
+				r.push(b.slice(n - 1));
+				return r;
+			}
+			const findNext = (start) => {
+				for (let k = start; k <= b.length - sep.length; k++) {
+					let match = true;
+					for (let l = 0; l < sep.length; l++) {
+						if (b[k + l] !== sep[l]) { match = false; break; }
+					}
+					if (match) return k;
+				}
+				return -1;
+			};
+			if (n < 0) {
+				const r = [];
+				let i = 0;
+				while (i <= b.length) {
+					const j = findNext(i);
+					if (j < 0) break;
+					r.push(b.slice(i, j));
+					i = j + sep.length;
+				}
+				r.push(b.slice(i));
+				return r;
+			}
+			const r = [];
+			let i = 0;
+			for (let c = 1; c < n; c++) {
+				const j = findNext(i);
+				if (j < 0) break;
+				r.push(b.slice(i, j));
+				i = j + sep.length;
+			}
+			r.push(b.slice(i));
+			return r;
+		})(${a[0]}, ${a[1]}, ${a[2]})`,
 	NewReader: (a) =>
 		`((b) => ({ _src: b, _pos: 0, Read(p) { if (this._pos >= this._src.length) return [0, __io_eof]; const n = Math.min(p.length, this._src.length - this._pos); for (let i = 0; i < n; i++) p[i] = this._src[this._pos + i]; this._pos += n; return [n, null]; }, Len() { return Math.max(0, this._src.length - this._pos); }, Reset(b2) { this._src = b2; this._pos = 0; } }))(${a[0]})`,
 };

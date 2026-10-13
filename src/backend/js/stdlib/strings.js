@@ -164,7 +164,7 @@ const STRINGS_DISPATCH = {
 	IndexFunc: ([s, s2]) =>
 		`((s, f) => { for (let i = 0; i < s.length; i++) { const cp = s.codePointAt(i); if (f(cp)) return i; if (cp > 0xFFFF) i++; } return -1; })(${s}, ${s2})`,
 	LastIndexFunc: ([s, s2]) =>
-		`((s, f) => { for (let i = s.length - 1; i >= 0; i--) { const cp = s.codePointAt(i); if (f(cp)) return i; } return -1; })(${s}, ${s2})`,
+		`((s, f) => { for (let i = s.length - 1; i >= 0; i--) { let cp = s.codePointAt(i); if (i > 0 && s.charCodeAt(i) >= 0xDC00 && s.charCodeAt(i) <= 0xDFFF && s.charCodeAt(i - 1) >= 0xD800 && s.charCodeAt(i - 1) <= 0xDBFF) { cp = s.codePointAt(i - 1); i--; } if (f(cp)) return i; } return -1; })(${s}, ${s2})`,
 	NewReader: ([s]) =>
 		`((s) => ({ _bytes: new TextEncoder().encode(s), _pos: 0, Read(p) { if (this._pos >= this._bytes.length) return [0, __io_eof]; const n = Math.min(p.length, this._bytes.length - this._pos); for (let i = 0; i < n; i++) p[i] = this._bytes[this._pos + i]; this._pos += n; return [n, null]; }, Len() { return Math.max(0, this._bytes.length - this._pos); }, Reset(s2) { this._bytes = new TextEncoder().encode(s2); this._pos = 0; } }))(${s})`,
 	NewReplacer: (args) =>

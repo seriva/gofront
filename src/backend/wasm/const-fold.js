@@ -84,9 +84,11 @@ function foldInts(op, a, b) {
 		case "*":
 			return { k: INT, v: a * b };
 		case "/":
-			return b === 0n ? null : { k: INT, v: a / b };
+			if (b === 0n) throw new Error("division by zero");
+			return { k: INT, v: a / b };
 		case "%":
-			return b === 0n ? null : { k: INT, v: a % b };
+			if (b === 0n) throw new Error("division by zero");
+			return { k: INT, v: a % b };
 		case "&":
 			return { k: INT, v: a & b };
 		case "|":
@@ -96,9 +98,11 @@ function foldInts(op, a, b) {
 		case "&^":
 			return { k: INT, v: a & ~b };
 		case "<<":
-			return b < 0n || b > 1024n ? null : { k: INT, v: a << b };
+			if (b < 0n) throw new Error("negative shift count");
+			return b > 1024n ? null : { k: INT, v: a << b };
 		case ">>":
-			return b < 0n || b > 1024n ? null : { k: INT, v: a >> b };
+			if (b < 0n) throw new Error("negative shift count");
+			return b > 1024n ? null : { k: INT, v: a >> b };
 		default: {
 			const r = compare(op, a, b);
 			return r === null ? null : { k: BOOL, v: r };
@@ -119,7 +123,7 @@ function foldFloats(op, a, b) {
 			v = a * b;
 			break;
 		case "/":
-			if (b === 0) return null;
+			if (b === 0) throw new Error("division by zero");
 			v = a / b;
 			break;
 		default: {
@@ -178,8 +182,8 @@ function foldExpr(expr, resolve) {
 			if (expr.args?.length !== 1) return null;
 			const s = foldExpr(expr.args[0], resolve);
 			if (s?.k !== STRING) return null;
-			// Go len() counts UTF-8 bytes.
-			return { k: INT, v: BigInt(new TextEncoder().encode(s.v).length) };
+			// Gofront strings across JS and WASM runtime use UTF-16 code units (s.length).
+			return { k: INT, v: BigInt(s.v.length) };
 		}
 		default:
 			return null;

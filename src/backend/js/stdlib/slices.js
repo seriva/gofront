@@ -26,27 +26,27 @@ const SLICES_DISPATCH = {
 		`((s, f) => { if (!s || s.length === 0) throw new Error("slices.MinFunc: empty list"); return s.reduce((m, x) => f(x, m) < 0 ? x : m); })(${a[0]}, ${a[1]})`,
 	Clone: (a) => `(${a[0]} ? ${a[0]}.slice() : null)`,
 	Compact: (a) =>
-		`((s) => { s = s || []; let i = 1; while (i < s.length) { if (s[i] === s[i-1]) { s.splice(i, 1); } else { i++; } } return s; })(${a[0]})`,
+		`((s) => { if (!s || s.length === 0) return s; let k = 1; for (let i = 1; i < s.length; i++) { if (s[i] !== s[k - 1]) s[k++] = s[i]; } return ArrayBuffer.isView(s) ? s.subarray(0, k) : (s.length = k, s); })(${a[0]})`,
 	CompactFunc: (a) =>
-		`((s, f) => { s = s || []; let i = 1; while (i < s.length) { if (f(s[i], s[i-1])) { s.splice(i, 1); } else { i++; } } return s; })(${a[0]}, ${a[1]})`,
+		`((s, f) => { if (!s || s.length === 0) return s; let k = 1; for (let i = 1; i < s.length; i++) { if (!f(s[i], s[k - 1])) s[k++] = s[i]; } return ArrayBuffer.isView(s) ? s.subarray(0, k) : (s.length = k, s); })(${a[0]}, ${a[1]})`,
 	Concat: (a) =>
 		a.length === 0
 			? "null"
-			: `[].concat(${a.map((x) => `(${x} || [])`).join(", ")})`,
+			: `((...slices) => { const nonNull = slices.filter(Boolean); if (nonNull.length === 0) return slices[0] === null ? null : []; if (ArrayBuffer.isView(nonNull[0])) { const totalLen = nonNull.reduce((sum, s) => sum + s.length, 0); const out = new nonNull[0].constructor(totalLen); let off = 0; for (const s of nonNull) { out.set(s, off); off += s.length; } return out; } return [].concat(...slices.map(s => s ? (ArrayBuffer.isView(s) ? Array.from(s) : s) : [])); })(${a.map((x) => `(${x})`).join(", ")})`,
 	Delete: (a) =>
-		`((s, i, j) => { s = s || []; if (i < 0 || j < i || j > s.length) throw new Error("runtime error: slice bounds out of range"); s.splice(i, j - i); return s; })(${a[0]}, ${a[1]}, ${a[2]})`,
+		`((s, i, j) => { if (!s && i === 0 && j === 0) return s; s = s || []; if (i < 0 || j < i || j > s.length) throw new Error("runtime error: slice bounds out of range"); if (ArrayBuffer.isView(s)) { s.copyWithin(i, j); return s.subarray(0, s.length - (j - i)); } s.splice(i, j - i); return s; })(${a[0]}, ${a[1]}, ${a[2]})`,
 	DeleteFunc: (a) =>
-		`((s, f) => { s = s || []; let i = 0; while (i < s.length) { if (f(s[i])) { s.splice(i, 1); } else { i++; } } return s; })(${a[0]}, ${a[1]})`,
+		`((s, f) => { if (!s || s.length === 0) return s; let k = 0; for (let i = 0; i < s.length; i++) { if (!f(s[i])) s[k++] = s[i]; } return ArrayBuffer.isView(s) ? s.subarray(0, k) : (s.length = k, s); })(${a[0]}, ${a[1]})`,
 	Insert: (a) => {
 		const items = a.slice(2);
-		return `((s, i, ...v) => { s = s || []; if (i < 0 || i > s.length) throw new Error("runtime error: slice bounds out of range"); s.splice(i, 0, ...v); return s; })(${a[0]}, ${a[1]}${items.length ? `, ${items.join(", ")}` : ""})`;
+		return `((s, i, ...v) => { if (!s && i === 0) s = []; if (!s || i < 0 || i > s.length) throw new Error("runtime error: slice bounds out of range"); if (ArrayBuffer.isView(s)) { const res = new s.constructor(s.length + v.length); res.set(s.subarray(0, i), 0); res.set(v, i); res.set(s.subarray(i), i + v.length); return res; } s.splice(i, 0, ...v); return s; })(${a[0]}, ${a[1]}${items.length ? `, ${items.join(", ")}` : ""})`;
 	},
 	Replace: (a) => {
 		const items = a.slice(3);
-		return `((s, i, j, ...v) => { s = s || []; if (i < 0 || j < i || j > s.length) throw new Error("runtime error: slice bounds out of range"); s.splice(i, j - i, ...v); return s; })(${a[0]}, ${a[1]}, ${a[2]}${items.length ? `, ${items.join(", ")}` : ""})`;
+		return `((s, i, j, ...v) => { if (!s && i === 0 && j === 0) s = []; if (!s || i < 0 || j < i || j > s.length) throw new Error("runtime error: slice bounds out of range"); if (ArrayBuffer.isView(s)) { const res = new s.constructor(s.length - (j - i) + v.length); res.set(s.subarray(0, i), 0); res.set(v, i); res.set(s.subarray(j), i + v.length); return res; } s.splice(i, j - i, ...v); return s; })(${a[0]}, ${a[1]}, ${a[2]}${items.length ? `, ${items.join(", ")}` : ""})`;
 	},
 	Grow: (a) =>
-		`((s, n) => { if (n < 0) throw new Error("runtime error: makeslice: len out of range"); return s ? s.slice() : []; })(${a[0]}, ${a[1]})`,
+		`((s, n) => { if (n < 0) throw new Error("runtime error: makeslice: len out of range"); if (!s) return []; return ArrayBuffer.isView(s) ? s.slice() : s.slice(); })(${a[0]}, ${a[1]})`,
 	Clip: (a) => `(${a[0]} ? ${a[0]}.slice() : null)`,
 };
 
