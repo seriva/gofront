@@ -7,6 +7,7 @@ import {
 	mkdtempSync,
 	readFileSync,
 	rmSync,
+	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -900,19 +901,21 @@ test("single file with local package import bundles dependency", () => {
 });
 
 test("single file with npm import emits import statement", () => {
-	const tmpGo = join(FIXTURES, "_npm_cli_tmp.go");
-	try {
-		writeFileSync(
-			tmpGo,
-			'package main\nimport "fake-lib"\nfunc main() { r := math.add(1.0, 2.0); console.log(r) }\n',
-		);
-		const res = runCompile(tmpGo, false, {});
-		assertContains(res.js, "from 'fake-lib'");
-	} finally {
-		try {
-			rmSync(tmpGo);
-		} catch {}
-	}
+	withTempDir(
+		{
+			"main.go":
+				'package main\nimport "fake-lib"\nfunc main() { r := math.add(1.0, 2.0); console.log(r) }\n',
+		},
+		(dir) => {
+			symlinkSync(
+				join(FIXTURES, "node_modules"),
+				join(dir, "node_modules"),
+				"junction",
+			);
+			const res = runCompile(join(dir, "main.go"), false, {});
+			assertContains(res.js, "from 'fake-lib'");
+		},
+	);
 });
 
 test("single file with unreadable js: import path throws", () => {
@@ -1054,6 +1057,55 @@ test("handleTest recursive error condition", async () => {
 	await assertRejects(
 		() => handleTest("nonexistent-dir/..."),
 		/No .go files found/,
+	);
+});
+
+test("handleTest auto-detects srcDir in project root", async () => {
+	await withTempDir(
+		{
+			"package.json": JSON.stringify({ gofront: { src: "src" } }),
+			"src/util.go": "package main\nfunc Add(a, b int) int { return a + b }\n",
+			"src/util_test.go":
+				'package main\nimport "testing"\nfunc TestAdd(t *testing.T) {\n\tif Add(1, 2) != 3 { t.Fatal("fail") }\n}\n',
+		},
+		async (dir) => {
+			const res = await handleTest(dir, { captureOutput: true });
+			assertEqual(res.exitCode, 0);
+			assertContains(res.stdout, "PASS");
+		},
+	);
+});
+
+test("handleTest on file target runs tests in containing package directory", async () => {
+	await withTempDir(
+		{
+			"main.go": "package main\nfunc main() {}\n",
+			"main_test.go":
+				'package main\nimport "testing"\nfunc TestFileTarget(t *testing.T) {}\n',
+		},
+		async (dir) => {
+			const res = await handleTest(join(dir, "main.go"), {
+				captureOutput: true,
+			});
+			assertEqual(res.exitCode, 0);
+			assertContains(res.stdout, "PASS");
+		},
+	);
+});
+
+test("handleTest with file config.src resolves cleanly to package directory", async () => {
+	await withTempDir(
+		{
+			"package.json": JSON.stringify({ gofront: { src: "src/main.go" } }),
+			"src/main.go": "package main\nfunc main() {}\n",
+			"src/main_test.go":
+				'package main\nimport "testing"\nfunc TestConfigSrcFile(t *testing.T) {}\n',
+		},
+		async (dir) => {
+			const res = await handleTest(dir, { captureOutput: true });
+			assertEqual(res.exitCode, 0);
+			assertContains(res.stdout, "PASS");
+		},
 	);
 });
 

@@ -56,7 +56,14 @@ export const HELPER_IFACE_BOX = `var __ifv = __ifv || function(x, ptrFields) {
         const last = parts[parts.length - 1];
         if (cur?.[last] !== null && typeof cur?.[last] === "object") __ifp(cur[last]);
       } else if (c[f] !== null && typeof c[f] === "object") {
-        __ifp(c[f], ptrFields);
+        __ifp(c[f]);
+      }
+    }
+  }
+  for (const k of Object.keys(c)) {
+    if (c[k] !== null && typeof c[k] === "object" && !Array.isArray(c[k]) && !ArrayBuffer.isView(c[k])) {
+      if (!c[k].__v && !c[k].__p && (!Array.isArray(ptrFields) || !ptrFields.includes(k))) {
+        Object.defineProperty(c[k], "__v", { value: true, configurable: true });
       }
     }
   }
@@ -78,20 +85,22 @@ var __ifp = __ifp || function(x, ptrFields, seen) {
         const last = parts[parts.length - 1];
         if (cur?.[last] !== null && typeof cur?.[last] === "object") __ifp(cur[last]);
       } else if (x[f] !== null && typeof x[f] === "object") {
-        __ifp(x[f], ptrFields, seen);
+        __ifp(x[f]);
       }
     }
   }
   return x;
 };
 var __ifm = __ifm || function(x) {
-  if (x === null || typeof x !== "object") x = {};
+  if (x === null || x === undefined) return x;
+  if (typeof x !== "object") return x;
   if (x.__map !== true && Object.isExtensible(x))
     Object.defineProperty(x, "__map", { value: true, configurable: true });
   return x;
 };
 var __ifpm = __ifpm || function(x) {
-  if (x === null || typeof x !== "object") x = {};
+  if (x === null || x === undefined) return x;
+  if (typeof x !== "object") return x;
   if (x.__map !== true && Object.isExtensible(x)) {
     Object.defineProperty(x, "__map", { value: true, configurable: true });
     Object.defineProperty(x, "__ptr_map", { value: true, configurable: true });
@@ -99,7 +108,7 @@ var __ifpm = __ifpm || function(x) {
   return x;
 };
 var __ifs = __ifs || function(x, ptrFields) {
-  if (x === null || x === undefined) x = [];
+  if (x === null || x === undefined) return x;
   if (x.__slice !== true && Object.isExtensible(x))
     Object.defineProperty(x, "__slice", { value: true, configurable: true });
   if (Array.isArray(ptrFields) && Object.isExtensible(x))
@@ -107,7 +116,7 @@ var __ifs = __ifs || function(x, ptrFields) {
   return x;
 };
 var __ifps = __ifps || function(x) {
-  if (x === null || x === undefined) x = [];
+  if (x === null || x === undefined) return x;
   if (x.__slice !== true && Object.isExtensible(x)) {
     Object.defineProperty(x, "__slice", { value: true, configurable: true });
     Object.defineProperty(x, "__ptr_slice", { value: true, configurable: true });
@@ -125,6 +134,7 @@ export const HELPER_NIL_CALL = `var __nilcall = __nilcall || function(x) {
 export const HELPER_EQUAL = `var __equal = __equal || function __equal(a, b) {
   if (a === b) return true;
   if (a === null || b === null) return false;
+  if (a instanceof Date && b instanceof Date) return a.getTime() === b.getTime();
   if (ArrayBuffer.isView(a) && ArrayBuffer.isView(b)) {
     if (a.byteLength !== b.byteLength || a.length !== b.length) return false;
     for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
@@ -207,6 +217,9 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
     if (typeof val === "number" || typeof val === "bigint") return String(val);
     if (typeof val === "string") return val;
     if (typeof val === "object") {
+      if (val._d instanceof Date) {
+        return typeof __timeFmt === "function" ? __timeFmt(val, "2006-01-02 15:04:05.999999999 -0700 MST") : String(val._d);
+      }
       if ("re" in val && "im" in val) {
         const sign = val.im >= 0 ? "+" : "";
         return "(" + val.re + sign + val.im + "i)";
@@ -271,7 +284,7 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
         }
         return "map[" + parts.join(" ") + "]";
       }
-      if ("value" in val && (val.__box === true || (!val.__struct && !("__v" in val) && Object.keys(val).length === 1 && (val.constructor === Object || val.constructor?.name === "Object")))) {
+      if ("value" in val && (val.__box === true || (!val.__struct && !("__v" in val) && Object.keys(val).length === 1 && (val.constructor === Object || !val.constructor || val.constructor?.name === "Object")))) {
         return getPtr(val);
       }
       const isPtr = isPointer(val);
@@ -319,7 +332,7 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
         if (Array.isArray(v) || ArrayBuffer.isView(v)) {
           hex = Array.from(v).map((b) => (Number(b) & 0xff).toString(16).padStart(2, "0")).join("");
         } else if (typeof v === "string") {
-          hex = Array.from(v).map((c) => (c.codePointAt(0) ?? 0).toString(16)).join("");
+          hex = Array.from(new TextEncoder().encode(v)).map((b) => b.toString(16).padStart(2, "0")).join("");
         } else if (typeof v === "bigint") {
           hex = BigInt.asUintN(64, v).toString(16);
         } else if (Math.abs(Number(v)) > 0xffffffff) {
@@ -334,7 +347,7 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
         if (Array.isArray(v) || ArrayBuffer.isView(v)) {
           hex = Array.from(v).map((b) => (Number(b) & 0xff).toString(16).padStart(2, "0").toUpperCase()).join("");
         } else if (typeof v === "string") {
-          hex = Array.from(v).map((c) => (c.codePointAt(0) ?? 0).toString(16).toUpperCase()).join("");
+          hex = Array.from(new TextEncoder().encode(v)).map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join("");
         } else if (typeof v === "bigint") {
           hex = BigInt.asUintN(64, v).toString(16).toUpperCase();
         } else if (Math.abs(Number(v)) > 0xffffffff) {
@@ -366,13 +379,30 @@ export const HELPER_PATH_ERROR = `var __path_err_bad_pattern = __path_err_bad_pa
 
 export const HELPER_IO_EOF = `var __io_eof = __io_eof || __error("EOF");`;
 
-export const HELPER_ERROR_IS = `var __errorIs = __errorIs || function(err, target) {
-  while (err !== null && err !== undefined) {
-    if (err === target) return true;
-    if (typeof err === "object" && typeof target === "object" &&
-        err._msg !== undefined && target._msg !== undefined &&
-        err._msg === target._msg) return true;
-    err = err?._cause ?? null;
+export const HELPER_ERROR_IS = `var __errorIs = __errorIs || function __errorIs(err, target) {
+  if (err === null || err === undefined) return false;
+  if (err === target) return true;
+  if (typeof err === "object" && typeof target === "object" &&
+      err._msg !== undefined && target._msg !== undefined &&
+      err._msg === target._msg) return true;
+  if (typeof err.Is === "function" && err.Is(target)) return true;
+  if (Array.isArray(err._errs)) {
+    for (const sub of err._errs) {
+      if (__errorIs(sub, target)) return true;
+    }
+  }
+  if (typeof err.Unwrap === "function") {
+    const unwrapped = err.Unwrap();
+    if (Array.isArray(unwrapped)) {
+      for (const sub of unwrapped) {
+        if (__errorIs(sub, target)) return true;
+      }
+    } else if (unwrapped !== null && unwrapped !== undefined) {
+      if (__errorIs(unwrapped, target)) return true;
+    }
+  }
+  if (err._cause !== undefined && err._cause !== null) {
+    return __errorIs(err._cause, target);
   }
   return false;
 };`;
@@ -394,6 +424,16 @@ export const HELPER_ERROR_AS = `var __errorAs = __errorAs || function(err, targe
     if (Array.isArray(cur._errs)) {
       for (const sub of cur._errs) {
         if (__errorAs(sub, target, matcher)) return true;
+      }
+    }
+    if (typeof cur.Unwrap === "function") {
+      const unwrapped = cur.Unwrap();
+      if (Array.isArray(unwrapped)) {
+        for (const sub of unwrapped) {
+          if (__errorAs(sub, target, matcher)) return true;
+        }
+      } else if (unwrapped !== null && unwrapped !== undefined) {
+        if (__errorAs(unwrapped, target, matcher)) return true;
       }
     }
     cur = cur?._cause ?? null;
@@ -525,43 +565,85 @@ export const HELPER_PATH_CLEAN = `var __pathClean = __pathClean || function(p) {
 };
 var __pathMatch = __pathMatch || function(pat, name) {
   let rx = "^";
-  let inClass = false;
   let hasErr = false;
-  for (let i = 0; i < pat.length; i++) {
+  let i = 0;
+  while (i < pat.length) {
     const c = pat[i];
-    if (inClass) {
-      if (c === "\\\\") {
-        if (i + 1 >= pat.length) { hasErr = true; break; }
-        rx += "\\\\" + pat[++i];
-      } else if (c === "]") {
-        inClass = false;
-        rx += "]";
-      } else {
-        if (/[.^$*+?()|{}\\[\\]\\\\]/.test(c) && c !== "-") {
-          rx += "\\\\" + c;
+    if (c === "\\\\") {
+      if (i + 1 >= pat.length) { hasErr = true; break; }
+      const next = pat[++i];
+      if (/[.^$*+?()|{}\\[\\]\\\\]/.test(next)) rx += "\\\\" + next;
+      else rx += next;
+      i++;
+    } else if (c === "*") {
+      rx += "[^/]*";
+      i++;
+    } else if (c === "?") {
+      rx += "[^/]";
+      i++;
+    } else if (c === "[") {
+      i++;
+      let negated = false;
+      if (i < pat.length && pat[i] === "^") {
+        negated = true;
+        i++;
+      }
+      if (i >= pat.length || pat[i] === "]") {
+        return [false, true];
+      }
+      let classContent = "";
+      let closed = false;
+      while (i < pat.length) {
+        let ch = pat[i];
+        if (ch === "]") {
+          closed = true;
+          i++;
+          break;
+        }
+        if (ch === "\\\\") {
+          if (i + 1 >= pat.length) { hasErr = true; break; }
+          ch = pat[++i];
+        }
+        if (ch === "/") {
+          return [false, true];
+        }
+        i++;
+        if (i + 1 < pat.length && pat[i] === "-" && pat[i + 1] !== "]") {
+          i++;
+          let end = pat[i];
+          if (end === "\\\\") {
+            if (i + 1 >= pat.length) { hasErr = true; break; }
+            end = pat[++i];
+          }
+          if (end === "/") return [false, true];
+          i++;
+          if (ch.charCodeAt(0) > end.charCodeAt(0)) return [false, true];
+          if (ch.charCodeAt(0) <= 47 && 47 <= end.charCodeAt(0)) return [false, true];
+          const isSpec = (c) => c === "-" || c === "^" || c === "\\\\" || c === "[" || c === "]";
+          const escCh = isSpec(ch) ? "\\\\" + ch : ch;
+          const escEnd = isSpec(end) ? "\\\\" + end : end;
+          classContent += escCh + "-" + escEnd;
         } else {
-          rx += c;
+          const isSpec = (c) => c === "-" || c === "^" || c === "\\\\" || c === "[" || c === "]";
+          const escCh = isSpec(ch) ? "\\\\" + ch : ch;
+          classContent += escCh;
         }
       }
-    } else {
-      if (c === "\\\\") {
-        if (i + 1 >= pat.length) { hasErr = true; break; }
-        rx += "\\\\" + pat[++i];
-      } else if (c === "*") {
-        rx += "[^/]*";
-      } else if (c === "?") {
-        rx += "[^/]";
-      } else if (c === "[") {
-        inClass = true;
-        rx += "[";
-      } else if (/[.^$*+?()|{}\\[\\]\\\\]/.test(c)) {
-        rx += "\\\\" + c;
+      if (!closed || hasErr) return [false, true];
+      if (negated) {
+        rx += "[^/" + classContent + "]";
       } else {
-        rx += c;
+        rx += "[" + classContent + "]";
       }
+    } else if (/[.^$*+?()|{}\\[\\]\\\\]/.test(c)) {
+      rx += "\\\\" + c;
+      i++;
+    } else {
+      rx += c;
+      i++;
     }
   }
-  if (inClass || hasErr) return [false, true];
+  if (hasErr) return [false, true];
   try {
     const re = new RegExp(rx + "$");
     return [re.test(name), false];
@@ -571,36 +653,68 @@ var __pathMatch = __pathMatch || function(pat, name) {
 };`;
 
 export const HELPER_TIME_FMT = `var __timeFmt = __timeFmt || function(d, layout) {
+  const dt = d instanceof Date ? d : (d?._d ?? d);
+  const isUtc = d?._offset === 0;
   const pad = (n, w = 2) => String(n).padStart(w, "0");
   const DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
   const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-  return layout.replace(/2006|06|Monday|Mon|January|Jan|01|02|15|PM|pm|03|04|05|Z07:00|\\.000|\\.999|1|2|3|4|5/g, t => {
+  const getFullYear = () => isUtc ? dt.getUTCFullYear() : dt.getFullYear();
+  const getMonth = () => isUtc ? dt.getUTCMonth() : dt.getMonth();
+  const getDate = () => isUtc ? dt.getUTCDate() : dt.getDate();
+  const getDay = () => isUtc ? dt.getUTCDay() : dt.getDay();
+  const getHours = () => isUtc ? dt.getUTCHours() : dt.getHours();
+  const getMinutes = () => isUtc ? dt.getUTCMinutes() : dt.getMinutes();
+  const getSeconds = () => isUtc ? dt.getUTCSeconds() : dt.getSeconds();
+  const getMilliseconds = () => isUtc ? dt.getUTCMilliseconds() : dt.getMilliseconds();
+  const getTimezoneOffset = () => isUtc ? 0 : dt.getTimezoneOffset();
+  return layout.replace(/2006|06|Monday|Mon|January|Jan|01|02|15|PM|pm|03|04|05|Z07:00|-07:00|-0700|MST|\\.(?:0+|9+)|1|2|3|4|5/g, t => {
+    if (t.startsWith(".")) {
+      const isZeroPad = t.includes("0");
+      const maxLen = t.length - 1;
+      const ms = getMilliseconds();
+      let frac = pad(ms, 3);
+      if (maxLen > 3) frac = frac.padEnd(maxLen, "0");
+      else frac = frac.slice(0, maxLen);
+      if (!isZeroPad) {
+        frac = frac.replace(/0+$/, "");
+        return frac.length > 0 ? "." + frac : "";
+      } else {
+        return "." + frac;
+      }
+    }
     switch (t) {
-      case "2006": return d.getFullYear();
-      case "06":   return String(d.getFullYear()).slice(-2);
-      case "Monday": return DAYS[d.getDay()];
-      case "Mon":    return DAYS[d.getDay()].slice(0, 3);
-      case "January": return MONTHS[d.getMonth()];
-      case "Jan":     return MONTHS[d.getMonth()].slice(0, 3);
-      case "01": return pad(d.getMonth() + 1);
-      case "1":  return String(d.getMonth() + 1);
-      case "02": return pad(d.getDate());
-      case "2":  return String(d.getDate());
-      case "15": return pad(d.getHours());
-      case "PM": return d.getHours() < 12 ? "AM" : "PM";
-      case "pm": return d.getHours() < 12 ? "am" : "pm";
-      case "03": return pad(d.getHours() % 12 || 12);
-      case "3":  return String(d.getHours() % 12 || 12);
-      case "04": return pad(d.getMinutes());
-      case "4":  return String(d.getMinutes());
-      case "05": return pad(d.getSeconds());
-      case "5":  return String(d.getSeconds());
+      case "2006": return getFullYear();
+      case "06":   return String(getFullYear()).slice(-2);
+      case "Monday": return DAYS[getDay()];
+      case "Mon":    return DAYS[getDay()].slice(0, 3);
+      case "January": return MONTHS[getMonth()];
+      case "Jan":     return MONTHS[getMonth()].slice(0, 3);
+      case "01": return pad(getMonth() + 1);
+      case "1":  return String(getMonth() + 1);
+      case "02": return pad(getDate());
+      case "2":  return String(getDate());
+      case "15": return pad(getHours());
+      case "PM": return getHours() < 12 ? "AM" : "PM";
+      case "pm": return getHours() < 12 ? "am" : "pm";
+      case "03": return pad(getHours() % 12 || 12);
+      case "3":  return String(getHours() % 12 || 12);
+      case "04": return pad(getMinutes());
+      case "4":  return String(getMinutes());
+      case "05": return pad(getSeconds());
+      case "5":  return String(getSeconds());
       case "Z07:00": {
-        const o = -d.getTimezoneOffset();
+        const o = -getTimezoneOffset();
         return o === 0 ? "Z" : (o > 0 ? "+" : "-") + pad(Math.floor(Math.abs(o) / 60)) + ":" + pad(Math.abs(o) % 60);
       }
-      case ".000": return "." + pad(d.getMilliseconds(), 3);
-      case ".999": return d.getMilliseconds() > 0 ? "." + String(d.getMilliseconds()).replace(/0+$/, "") : "";
+      case "-07:00": {
+        const o = -getTimezoneOffset();
+        return (o >= 0 ? "+" : "-") + pad(Math.floor(Math.abs(o) / 60)) + ":" + pad(Math.abs(o) % 60);
+      }
+      case "-0700": {
+        const o = -getTimezoneOffset();
+        return (o >= 0 ? "+" : "-") + pad(Math.floor(Math.abs(o) / 60)) + pad(Math.abs(o) % 60);
+      }
+      case "MST": return isUtc ? "UTC" : "LOCAL";
       default: return t;
     }
   });
@@ -744,14 +858,17 @@ export const HELPER_DURATION = `var __durationString = __durationString || funct
   const hr = totalSec / 3600n;
 
   if (hr > 0n) s += hr + "h";
-  if (min > 0n) s += min + "m";
+  const remAfterHr = d % 3600000000000n;
+  if (min > 0n || (hr > 0n && remAfterHr > 0n)) s += min + "m";
   if (totalSec > 0n) {
     const frac = d % 1000000000n;
-    if (frac === 0n) {
-      s += sec + "s";
-    } else {
-      let fracStr = frac.toString().padStart(9, "0").replace(/0+$/, "");
-      s += sec + "." + fracStr + "s";
+    if (sec > 0n || frac > 0n || (hr === 0n && min === 0n)) {
+      if (frac === 0n) {
+        s += sec + "s";
+      } else {
+        let fracStr = frac.toString().padStart(9, "0").replace(/0+$/, "");
+        s += sec + "." + fracStr + "s";
+      }
     }
   } else {
     const ms = (d / 1000000n) % 1000n;
@@ -793,12 +910,19 @@ var __sync_waitgroup = __sync_waitgroup || function() {
 
 export const HELPER_CRYPTO_RAND = `var __crypto_rand_read = __crypto_rand_read || function(b) {
   if (!b || b.length === 0) return [0, null];
-  const u8 = ArrayBuffer.isView(b) ? b : new Uint8Array(b);
+  const u8 = ArrayBuffer.isView(b) ? b : new Uint8Array(b.length);
   const c = typeof crypto !== "undefined" ? crypto : (typeof globalThis !== "undefined" ? globalThis.crypto : null);
+  const CHUNK = 65536;
   if (c && typeof c.getRandomValues === "function") {
-    c.getRandomValues(u8);
+    for (let offset = 0; offset < u8.length; offset += CHUNK) {
+      const slice = u8.subarray(offset, Math.min(offset + CHUNK, u8.length));
+      c.getRandomValues(slice);
+    }
   } else {
     for (let i = 0; i < u8.length; i++) u8[i] = Math.floor(Math.random() * 256);
+  }
+  if (!ArrayBuffer.isView(b)) {
+    for (let i = 0; i < u8.length; i++) b[i] = u8[i];
   }
   return [b.length, null];
 };
@@ -870,7 +994,7 @@ export const HELPER_SHA256 = `var __sha256 = __sha256 || (function() {
       out[i * 4 + 2] = (H[i] >>> 8) & 0xff;
       out[i * 4 + 3] = H[i] & 0xff;
     }
-    return Array.from(out);
+    return out;
   }
   class Hash {
     constructor() { this.Reset(); }
@@ -883,7 +1007,11 @@ export const HELPER_SHA256 = `var __sha256 = __sha256 || (function() {
     }
     Sum(b) {
       const d = digest(this.buf);
-      return b ? (Array.isArray(b) ? b.concat(d) : [...b, ...d]) : d;
+      if (!b || b.length === 0) return d;
+      const res = new Uint8Array(b.length + d.length);
+      res.set(b, 0);
+      res.set(d, b.length);
+      return res;
     }
     Size() { return 32; }
     BlockSize() { return 64; }
@@ -900,7 +1028,7 @@ export const HELPER_BINARY = `var __binary_le = __binary_le || {
   Uint64: function(b) {
     const lo = BigInt((b[0] | (b[1] << 8) | (b[2] << 16) | (b[3] << 24)) >>> 0);
     const hi = BigInt((b[4] | (b[5] << 8) | (b[6] << 16) | (b[7] << 24)) >>> 0);
-    return lo | (hi << 32n);
+    return Number(lo | (hi << 32n));
   },
   PutUint16: function(b, v) { b[0] = v & 0xff; b[1] = (v >> 8) & 0xff; },
   PutUint32: function(b, v) { b[0] = v & 0xff; b[1] = (v >> 8) & 0xff; b[2] = (v >> 16) & 0xff; b[3] = (v >>> 24) & 0xff; },
@@ -908,11 +1036,30 @@ export const HELPER_BINARY = `var __binary_le = __binary_le || {
     const bv = BigInt(v);
     for (let i = 0n; i < 8n; i++) b[Number(i)] = Number((bv >> (i * 8n)) & 0xffn);
   },
-  AppendUint16: function(b, v) { const s = b || []; return [...s, v & 0xff, (v >> 8) & 0xff]; },
-  AppendUint32: function(b, v) { const s = b || []; return [...s, v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff, (v >>> 24) & 0xff]; },
+  AppendUint16: function(b, v) {
+    const len = b ? b.length : 0;
+    const res = new Uint8Array(len + 2);
+    if (len > 0) res.set(b, 0);
+    res[len] = v & 0xff;
+    res[len + 1] = (v >> 8) & 0xff;
+    return res;
+  },
+  AppendUint32: function(b, v) {
+    const len = b ? b.length : 0;
+    const res = new Uint8Array(len + 4);
+    if (len > 0) res.set(b, 0);
+    res[len] = v & 0xff;
+    res[len + 1] = (v >> 8) & 0xff;
+    res[len + 2] = (v >> 16) & 0xff;
+    res[len + 3] = (v >>> 24) & 0xff;
+    return res;
+  },
   AppendUint64: function(b, v) {
-    const bv = BigInt(v); const res = [...(b || [])];
-    for (let i = 0n; i < 8n; i++) res.push(Number((bv >> (i * 8n)) & 0xffn));
+    const len = b ? b.length : 0;
+    const res = new Uint8Array(len + 8);
+    if (len > 0) res.set(b, 0);
+    const bv = BigInt(v);
+    for (let i = 0n; i < 8n; i++) res[len + Number(i)] = Number((bv >> (i * 8n)) & 0xffn);
     return res;
   },
   String: function() { return "LittleEndian"; }
@@ -923,7 +1070,7 @@ var __binary_be = __binary_be || {
   Uint64: function(b) {
     const hi = BigInt(((b[0] << 24) | (b[1] << 16) | (b[2] << 8) | b[3]) >>> 0);
     const lo = BigInt(((b[4] << 24) | (b[5] << 16) | (b[6] << 8) | b[7]) >>> 0);
-    return (hi << 32n) | lo;
+    return Number((hi << 32n) | lo);
   },
   PutUint16: function(b, v) { b[0] = (v >> 8) & 0xff; b[1] = v & 0xff; },
   PutUint32: function(b, v) { b[0] = (v >>> 24) & 0xff; b[1] = (v >> 16) & 0xff; b[2] = (v >> 8) & 0xff; b[3] = v & 0xff; },
@@ -931,11 +1078,30 @@ var __binary_be = __binary_be || {
     const bv = BigInt(v);
     for (let i = 0n; i < 8n; i++) b[Number(7n - i)] = Number((bv >> (i * 8n)) & 0xffn);
   },
-  AppendUint16: function(b, v) { const s = b || []; return [...s, (v >> 8) & 0xff, v & 0xff]; },
-  AppendUint32: function(b, v) { const s = b || []; return [...s, (v >>> 24) & 0xff, (v >> 16) & 0xff, (v >> 8) & 0xff, v & 0xff]; },
+  AppendUint16: function(b, v) {
+    const len = b ? b.length : 0;
+    const res = new Uint8Array(len + 2);
+    if (len > 0) res.set(b, 0);
+    res[len] = (v >> 8) & 0xff;
+    res[len + 1] = v & 0xff;
+    return res;
+  },
+  AppendUint32: function(b, v) {
+    const len = b ? b.length : 0;
+    const res = new Uint8Array(len + 4);
+    if (len > 0) res.set(b, 0);
+    res[len] = (v >>> 24) & 0xff;
+    res[len + 1] = (v >> 16) & 0xff;
+    res[len + 2] = (v >> 8) & 0xff;
+    res[len + 3] = v & 0xff;
+    return res;
+  },
   AppendUint64: function(b, v) {
-    const bv = BigInt(v); const res = [...(b || [])];
-    for (let i = 0n; i < 8n; i++) res.push(Number((bv >> ((7n - i) * 8n)) & 0xffn));
+    const len = b ? b.length : 0;
+    const res = new Uint8Array(len + 8);
+    if (len > 0) res.set(b, 0);
+    const bv = BigInt(v);
+    for (let i = 0n; i < 8n; i++) res[len + Number(i)] = Number((bv >> ((7n - i) * 8n)) & 0xffn);
     return res;
   },
   String: function() { return "BigEndian"; }
@@ -945,12 +1111,12 @@ var __binary_size = __binary_size || function(v) {
   if (Array.isArray(v) || ArrayBuffer.isView(v)) return v.length;
   if (v && typeof v === "object") {
     let s = 0;
-    for (const k of Object.keys(v)) { if (!k.startsWith("_")) s += __binary_size(v[k]); }
+    for (const k of Object.keys(v)) { if (!k.startsWith("_") && typeof v[k] !== "function") s += __binary_size(v[k]); }
     return s;
   }
   return -1;
 };
-var __binary_read = __binary_read || function(r, order, data, sz) {
+var __binary_read = __binary_read || function(r, order, data, sz, typeTag) {
   const targetR = r?.value ?? r;
   const readChunk = function(buf) {
     if (typeof targetR?.Read === "function") return targetR.Read(buf);
@@ -961,15 +1127,38 @@ var __binary_read = __binary_read || function(r, order, data, sz) {
     }
     return [0, __error("binary.Read: unsupported reader")];
   };
-  const target = data && typeof data === "object" && "value" in data ? data : null;
-  const s = sz || (target ? (typeof target.value === "bigint" ? 8 : 4) : __binary_size(data?.value ?? data));
+  const isBox = data && typeof data === "object" && Object.prototype.hasOwnProperty.call(data, "value") && (data.__box === true || (Object.keys(data).length <= 2 && (data.constructor === Object || !data.constructor || data.constructor?.name === "Object")));
+  const target = isBox ? data : null;
+  if (!target && data && typeof data === "object" && !Array.isArray(data) && !ArrayBuffer.isView(data)) {
+    for (const k of Object.keys(data)) {
+      if (k.startsWith("_") || typeof data[k] === "function") continue;
+      const fBox = { value: data[k], __box: true };
+      const err = __binary_read(r, order, fBox);
+      if (err) return err;
+      data[k] = fBox.value;
+    }
+    return null;
+  }
+  const s = sz || (target ? (typeof target.value === "bigint" ? 8 : (typeof target.value === "number" ? 4 : 4)) : __binary_size(data?.value ?? data));
   if (s <= 0) return __error("binary.Read: invalid type");
   const buf = new Uint8Array(s);
   const [n, err] = readChunk(buf);
   if (err) return err;
   if (n < s) return __io_eof;
   if (target) {
-    if (s === 1) target.value = buf[0];
+    const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    const isLe = order.String() === "LittleEndian";
+    if (typeTag === "float32") target.value = view.getFloat32(0, isLe);
+    else if (typeTag === "float64") target.value = view.getFloat64(0, isLe);
+    else if (typeTag === "int8") target.value = view.getInt8(0);
+    else if (typeTag === "uint8" || typeTag === "byte" || typeTag === "bool") target.value = view.getUint8(0);
+    else if (typeTag === "int16") target.value = view.getInt16(0, isLe);
+    else if (typeTag === "uint16") target.value = view.getUint16(0, isLe);
+    else if (typeTag === "int32" || typeTag === "rune") target.value = view.getInt32(0, isLe);
+    else if (typeTag === "uint32") target.value = view.getUint32(0, isLe);
+    else if (typeTag === "int64") target.value = Number(view.getBigInt64(0, isLe));
+    else if (typeTag === "uint64") target.value = Number(view.getBigUint64(0, isLe));
+    else if (s === 1) target.value = buf[0];
     else if (s === 2) target.value = order.Uint16(buf);
     else if (s === 4) target.value = order.Uint32(buf);
     else if (s === 8) target.value = order.Uint64(buf);
@@ -981,7 +1170,7 @@ var __binary_read = __binary_read || function(r, order, data, sz) {
   }
   return null;
 };
-var __binary_write = __binary_write || function(w, order, data, sz) {
+var __binary_write = __binary_write || function(w, order, data, sz, typeTag) {
   const targetW = w?.value ?? w;
   const writeChunk = function(chunk) {
     if (typeof targetW?.Write === "function") return targetW.Write(chunk);
@@ -995,11 +1184,24 @@ var __binary_write = __binary_write || function(w, order, data, sz) {
     }
     return [0, __error("binary.Write: unsupported writer")];
   };
-  const v = data?.value ?? data;
-  if (typeof v === "number" || typeof v === "bigint") {
-    const s = sz || (typeof v === "bigint" ? 8 : 4);
+  const isBox = data && typeof data === "object" && Object.prototype.hasOwnProperty.call(data, "value") && (data.__box === true || (Object.keys(data).length <= 2 && (data.constructor === Object || !data.constructor || data.constructor?.name === "Object")));
+  const v = isBox ? data.value : data;
+  if (!isBox && typeof data === "object" && data !== null && !Array.isArray(data) && !ArrayBuffer.isView(data)) {
+    for (const k of Object.keys(data)) {
+      if (k.startsWith("_") || typeof data[k] === "function") continue;
+      const err = __binary_write(w, order, data[k]);
+      if (err) return err;
+    }
+    return null;
+  }
+  if (typeof v === "number" || typeof v === "bigint" || typeof v === "boolean") {
+    const s = sz || (typeof v === "bigint" ? 8 : (typeTag === "float64" ? 8 : 4));
     const buf = new Uint8Array(s);
-    if (s === 1) buf[0] = Number(v) & 0xff;
+    const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    const isLe = order.String() === "LittleEndian";
+    if (typeTag === "float32") view.setFloat32(0, Number(v), isLe);
+    else if (typeTag === "float64") view.setFloat64(0, Number(v), isLe);
+    else if (s === 1) buf[0] = Number(v) & 0xff;
     else if (s === 2) order.PutUint16(buf, Number(v));
     else if (s === 4) order.PutUint32(buf, Number(v));
     else order.PutUint64(buf, v);
@@ -1020,12 +1222,14 @@ export const HELPER_HEX = `var __hex_encode_to_string = __hex_encode_to_string |
   return s;
 };
 var __hex_decode_string = __hex_decode_string || function(s) {
-  if (s.length % 2 !== 0) return [[], __error("encoding/hex: odd length hex string")];
-  const out = [];
+  if (s.length % 2 !== 0) return [new Uint8Array(0), __error("encoding/hex: odd length hex string")];
+  const out = new Uint8Array(s.length / 2);
   for (let i = 0; i < s.length; i += 2) {
-    const b = parseInt(s.slice(i, i + 2), 16);
-    if (isNaN(b)) return [out, __error("encoding/hex: invalid byte: " + s.slice(i, i + 2))];
-    out.push(b);
+    const pair = s.slice(i, i + 2);
+    if (!/^[0-9a-fA-F]{2}$/.test(pair)) {
+      return [out.subarray(0, i / 2), __error("encoding/hex: invalid byte: " + pair)];
+    }
+    out[i / 2] = parseInt(pair, 16);
   }
   return [out, null];
 };
@@ -1035,7 +1239,7 @@ var __hex_encode = __hex_encode || function(dst, src) {
   return hex.length;
 };
 var __hex_decode = __hex_decode || function(dst, src) {
-  const str = String.fromCharCode(...src);
+  const str = typeof src === "string" ? src : (src instanceof Uint8Array ? new TextDecoder().decode(src) : String.fromCharCode(...src));
   const [res, err] = __hex_decode_string(str);
   for (let i = 0; i < res.length; i++) dst[i] = res[i];
   return [res.length, err];
@@ -1069,28 +1273,38 @@ export const HELPER_BASE64 = `var __base64_make = __base64_make || function(alph
     },
     DecodeString: function(s) {
       let str = s.replace(/\\s+/g, "");
-      if (padChar) while (str.endsWith(padChar)) str = str.slice(0, -1);
+      if (padChar) {
+        if (str.length % 4 !== 0) return [new Uint8Array(0), __error("illegal base64 data at input byte " + str.length)];
+        if (str.endsWith(padChar + padChar)) {
+          if (str.endsWith(padChar + padChar + padChar)) return [new Uint8Array(0), __error("illegal base64 data at input byte " + (str.length - 3))];
+          str = str.slice(0, -2);
+          if (str.length % 4 !== 2) return [new Uint8Array(0), __error("illegal base64 data at input byte " + str.length)];
+        } else if (str.endsWith(padChar)) {
+          str = str.slice(0, -1);
+          if (str.length % 4 !== 3) return [new Uint8Array(0), __error("illegal base64 data at input byte " + str.length)];
+        }
+      }
       const out = [];
       let i = 0;
       for (; i + 3 < str.length; i += 4) {
         const c0 = decMap[str[i]], c1 = decMap[str[i+1]], c2 = decMap[str[i+2]], c3 = decMap[str[i+3]];
-        if (c0 === undefined || c1 === undefined || c2 === undefined || c3 === undefined) return [out, __error("illegal base64 data at input byte " + i)];
+        if (c0 === undefined || c1 === undefined || c2 === undefined || c3 === undefined) return [new Uint8Array(out), __error("illegal base64 data at input byte " + i)];
         const n = (c0 << 18) | (c1 << 12) | (c2 << 6) | c3;
         out.push((n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff);
       }
       const rem = str.length - i;
       if (rem === 2) {
         const c0 = decMap[str[i]], c1 = decMap[str[i+1]];
-        if (c0 === undefined || c1 === undefined) return [out, __error("illegal base64 data at input byte " + i)];
+        if (c0 === undefined || c1 === undefined) return [new Uint8Array(out), __error("illegal base64 data at input byte " + i)];
         out.push((c0 << 2) | (c1 >> 4));
       } else if (rem === 3) {
         const c0 = decMap[str[i]], c1 = decMap[str[i+1]], c2 = decMap[str[i+2]];
-        if (c0 === undefined || c1 === undefined || c2 === undefined) return [out, __error("illegal base64 data at input byte " + i)];
+        if (c0 === undefined || c1 === undefined || c2 === undefined) return [new Uint8Array(out), __error("illegal base64 data at input byte " + i)];
         out.push((c0 << 2) | (c1 >> 4), ((c1 & 15) << 4) | (c2 >> 2));
       } else if (rem === 1) {
-        return [out, __error("illegal base64 data at input byte " + i)];
+        return [new Uint8Array(out), __error("illegal base64 data at input byte " + i)];
       }
-      return [out, null];
+      return [new Uint8Array(out), null];
     },
     Encode: function(dst, src) {
       const s = this.EncodeToString(src);
@@ -1102,8 +1316,8 @@ export const HELPER_BASE64 = `var __base64_make = __base64_make || function(alph
       for (let i = 0; i < res.length; i++) dst[i] = res[i];
       return [res.length, err];
     },
-    EncodedLen: function(n) { return Math.ceil(n / 3) * 4; },
-    DecodedLen: function(n) { return Math.floor(n * 3 / 4); },
+    EncodedLen: function(n) { return padChar ? Math.ceil(n / 3) * 4 : Math.floor((n * 8 + 5) / 6); },
+    DecodedLen: function(n) { return padChar ? Math.floor(n * 3 / 4) : Math.floor(n * 6 / 8); },
     WithPadding: function(p) { return __base64_make(alphabet, p === -1 ? "" : String.fromCharCode(p)); }
   };
 };

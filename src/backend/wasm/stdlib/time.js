@@ -1,41 +1,6 @@
 // src/backend/wasm/stdlib/time.js
 // FunctionEmitter mixin: time package.
 
-const TIME_CONST_NAMES = new Set([
-	"Nanosecond",
-	"Microsecond",
-	"Millisecond",
-	"Second",
-	"Minute",
-	"Hour",
-	"RFC3339",
-	"RFC3339Nano",
-	"DateOnly",
-	"TimeOnly",
-	"DateTime",
-	"UTC",
-	"Local",
-	"January",
-	"February",
-	"March",
-	"April",
-	"May",
-	"June",
-	"July",
-	"August",
-	"September",
-	"October",
-	"November",
-	"December",
-	"Sunday",
-	"Monday",
-	"Tuesday",
-	"Wednesday",
-	"Thursday",
-	"Friday",
-	"Saturday",
-]);
-
 const DURATION_VALS = {
 	Nanosecond: 1n,
 	Microsecond: 1000n,
@@ -53,7 +18,7 @@ const LAYOUT_STRS = {
 	DateTime: "2006-01-02 15:04:05",
 };
 
-const MONTH_VALS = {
+const TIME_INT_CONSTS = {
 	January: 1,
 	February: 2,
 	March: 3,
@@ -66,9 +31,6 @@ const MONTH_VALS = {
 	October: 10,
 	November: 11,
 	December: 12,
-};
-
-const WEEKDAY_VALS = {
 	Sunday: 0,
 	Monday: 1,
 	Tuesday: 2,
@@ -80,12 +42,14 @@ const WEEKDAY_VALS = {
 
 export class TimeEmitter {
 	_isTimeConst(expr) {
+		const f = expr.field;
 		return (
-			expr.expr?.kind === "Ident" &&
-			expr.expr.name === "time" &&
-			!this.resolveLocal("time") &&
-			!this.mod.resolveGlobal("time") &&
-			TIME_CONST_NAMES.has(expr.field)
+			this._isPkgExpr(expr, "time") &&
+			(f in DURATION_VALS ||
+				f in LAYOUT_STRS ||
+				f in TIME_INT_CONSTS ||
+				f === "UTC" ||
+				f === "Local")
 		);
 	}
 
@@ -115,17 +79,8 @@ export class TimeEmitter {
 			);
 			return;
 		}
-		if (field in MONTH_VALS) {
-			const v = MONTH_VALS[field];
-			if (targetWasmType === "i64") {
-				this.pushInstruction({ op: "i64.const", value: BigInt(v) });
-			} else {
-				this.pushInstruction({ op: "i32.const", value: v });
-			}
-			return;
-		}
-		if (field in WEEKDAY_VALS) {
-			const v = WEEKDAY_VALS[field];
+		if (field in TIME_INT_CONSTS) {
+			const v = TIME_INT_CONSTS[field];
 			if (targetWasmType === "i64") {
 				this.pushInstruction({ op: "i64.const", value: BigInt(v) });
 			} else {
@@ -202,13 +157,13 @@ export class TimeEmitter {
 				this._emitTimeMethodWeekday(expr, targetWasmType);
 				break;
 			case "Year":
-				this._emitTimeMethodYear(expr, targetWasmType);
+				this._emitTimeMethodYMD(expr, targetWasmType, 0);
 				break;
 			case "Month":
-				this._emitTimeMethodMonth(expr, targetWasmType);
+				this._emitTimeMethodYMD(expr, targetWasmType, 1);
 				break;
 			case "Day":
-				this._emitTimeMethodDay(expr, targetWasmType);
+				this._emitTimeMethodYMD(expr, targetWasmType, 2);
 				break;
 			case "IsZero":
 				this._emitTimeMethodIsZero(expr);
@@ -731,19 +686,23 @@ export class TimeEmitter {
 		this.releaseTemp(rTmp, timeW);
 	}
 
-	_emitTimeMethodUnix(expr, targetWasmType) {
+	_emitTimeGetNano(expr) {
 		const timeInfo = this.mod.getStructType("time.Time");
-		const timeW = {
+		this.emitExpr(expr, {
 			kind: "ref",
 			nullable: true,
 			typeIndex: timeInfo.typeIndex,
-		};
-		this.emitExpr(expr, timeW);
+		});
 		this.pushInstruction({
 			op: "struct.get",
 			typeIndex: timeInfo.typeIndex,
 			fieldIndex: 0,
 		});
+		return timeInfo;
+	}
+
+	_emitTimeMethodUnix(expr, targetWasmType) {
+		this._emitTimeGetNano(expr);
 		this.pushInstruction({ op: "i64.const", value: 1000000000n });
 		this.pushInstruction("i64.div_s");
 		if (targetWasmType === "i32") {
@@ -752,18 +711,7 @@ export class TimeEmitter {
 	}
 
 	_emitTimeMethodUnixMilli(expr, targetWasmType) {
-		const timeInfo = this.mod.getStructType("time.Time");
-		const timeW = {
-			kind: "ref",
-			nullable: true,
-			typeIndex: timeInfo.typeIndex,
-		};
-		this.emitExpr(expr, timeW);
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: timeInfo.typeIndex,
-			fieldIndex: 0,
-		});
+		this._emitTimeGetNano(expr);
 		this.pushInstruction({ op: "i64.const", value: 1000000n });
 		this.pushInstruction("i64.div_s");
 		if (targetWasmType === "i32") {
@@ -772,53 +720,20 @@ export class TimeEmitter {
 	}
 
 	_emitTimeMethodUnixNano(expr, targetWasmType) {
-		const timeInfo = this.mod.getStructType("time.Time");
-		const timeW = {
-			kind: "ref",
-			nullable: true,
-			typeIndex: timeInfo.typeIndex,
-		};
-		this.emitExpr(expr, timeW);
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: timeInfo.typeIndex,
-			fieldIndex: 0,
-		});
+		this._emitTimeGetNano(expr);
 		if (targetWasmType === "i32") {
 			this.pushInstruction("i32.wrap_i64");
 		}
 	}
 
 	_emitTimeMethodIsZero(expr) {
-		const timeInfo = this.mod.getStructType("time.Time");
-		const timeW = {
-			kind: "ref",
-			nullable: true,
-			typeIndex: timeInfo.typeIndex,
-		};
-		this.emitExpr(expr, timeW);
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: timeInfo.typeIndex,
-			fieldIndex: 0,
-		});
+		this._emitTimeGetNano(expr);
 		this.pushInstruction({ op: "i64.const", value: 0n });
 		this.pushInstruction("i64.eq");
 	}
 
 	_emitTimeMethodNanosecond(expr, targetWasmType) {
-		const timeInfo = this.mod.getStructType("time.Time");
-		const timeW = {
-			kind: "ref",
-			nullable: true,
-			typeIndex: timeInfo.typeIndex,
-		};
-		this.emitExpr(expr, timeW);
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: timeInfo.typeIndex,
-			fieldIndex: 0,
-		});
+		this._emitTimeGetNano(expr);
 		this.pushInstruction({ op: "i64.const", value: 1000000000n });
 		this.pushInstruction("i64.rem_s");
 		const nsTmp = this.acquireTemp("i64");
@@ -839,18 +754,7 @@ export class TimeEmitter {
 	}
 
 	_emitTimeMethodUTC(expr) {
-		const timeInfo = this.mod.getStructType("time.Time");
-		const timeW = {
-			kind: "ref",
-			nullable: true,
-			typeIndex: timeInfo.typeIndex,
-		};
-		this.emitExpr(expr, timeW);
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: timeInfo.typeIndex,
-			fieldIndex: 0,
-		});
+		const timeInfo = this._emitTimeGetNano(expr);
 		this.pushInstruction({ op: "i32.const", value: 0 });
 		this.pushInstruction({
 			op: "struct.new",
@@ -1161,41 +1065,16 @@ export class TimeEmitter {
 		this._releaseTimeDecomposeParts(p);
 	}
 
-	_emitTimeMethodYear(expr, targetWasmType) {
+	_emitTimeMethodYMD(expr, targetWasmType, partIdx) {
 		const p = this._emitTimeDecomposeParts(expr);
 		const yTmp = this.acquireTemp("i32");
 		const mTmp = this.acquireTemp("i32");
 		const dTmp = this.acquireTemp("i32");
 		this._emitCivilDateFromDays(p.daysTmp, yTmp, mTmp, dTmp);
-		this.pushInstruction({ op: "local.get", index: yTmp });
-		if (targetWasmType === "i64") this.pushInstruction("i64.extend_i32_s");
-		this.releaseTemp(dTmp, "i32");
-		this.releaseTemp(mTmp, "i32");
-		this.releaseTemp(yTmp, "i32");
-		this._releaseTimeDecomposeParts(p);
-	}
-
-	_emitTimeMethodMonth(expr, targetWasmType) {
-		const p = this._emitTimeDecomposeParts(expr);
-		const yTmp = this.acquireTemp("i32");
-		const mTmp = this.acquireTemp("i32");
-		const dTmp = this.acquireTemp("i32");
-		this._emitCivilDateFromDays(p.daysTmp, yTmp, mTmp, dTmp);
-		this.pushInstruction({ op: "local.get", index: mTmp });
-		if (targetWasmType === "i64") this.pushInstruction("i64.extend_i32_s");
-		this.releaseTemp(dTmp, "i32");
-		this.releaseTemp(mTmp, "i32");
-		this.releaseTemp(yTmp, "i32");
-		this._releaseTimeDecomposeParts(p);
-	}
-
-	_emitTimeMethodDay(expr, targetWasmType) {
-		const p = this._emitTimeDecomposeParts(expr);
-		const yTmp = this.acquireTemp("i32");
-		const mTmp = this.acquireTemp("i32");
-		const dTmp = this.acquireTemp("i32");
-		this._emitCivilDateFromDays(p.daysTmp, yTmp, mTmp, dTmp);
-		this.pushInstruction({ op: "local.get", index: dTmp });
+		this.pushInstruction({
+			op: "local.get",
+			index: partIdx === 0 ? yTmp : partIdx === 1 ? mTmp : dTmp,
+		});
 		if (targetWasmType === "i64") this.pushInstruction("i64.extend_i32_s");
 		this.releaseTemp(dTmp, "i32");
 		this.releaseTemp(mTmp, "i32");

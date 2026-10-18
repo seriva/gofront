@@ -201,7 +201,7 @@ A comprehensive review of the stdlib across both JS and WASM identified the foll
 #### A. Optimizer Pipeline (`src/backend/wasm/optimize.js`)
 - [x] **Eliminate Double-Pass GUFA on `--emit-wat`**: When `--emit-wat` is passed, `runWasmOpt` currently runs `wasm-opt -O3 --gufa` twice from scratch (once for binary, once for WAT text). Instead, disassemble the already-optimized binary output directly (`wasm-opt out.wasm -S -o out.wat` without optimization passes). Cuts build time in half when `--emit-wat` is requested.
 - [x] **Whole-Program Optimization via `--closed-world`**: Enable Binaryen's `--closed-world` flag for WasmGC modules. Since GoFront modules are self-contained and types are not extended by host JS, this unlocks aggressive interface devirtualization, struct field pruning, and type refinement.
-- [x] **Instruction Reordering via `--traps-never-happen`**: Since GoFront explicitly emits Go panics for bounds checks and divide-by-zero, inform Binaryen that hardware WASM traps will not occur, allowing it to aggressively hoist loads and reorder instructions without trap-preservation overhead.
+- [x] **Instruction Reordering & Trap Preservation**: Hardware traps are preserved by default so nil pointer dereferences reliably trap and panic as expected in Go. `--traps-never-happen` is an explicit opt-in only when `trapsNeverHappen: true` is configured.
 - [x] **Pass Convergence in Release (`--converge`)**: Run Binaryen optimization passes until convergence in `--release` builds for maximum size reduction.
 
 #### B. Code Generation Emitters (`src/backend/wasm/emit*.js`)

@@ -245,7 +245,7 @@ export const assignabilityMethods = {
 				box: isPointer(valType) || isPointer(keyType) ? "ptr_map" : "map",
 			};
 		}
-		if (sBase?.kind === "slice" || sBase?.kind === "array") {
+		if (sBase?.kind === "slice") {
 			const elemType = this.resolveType(sBase.elem);
 			if (isPointer(elemType)) return { box: "ptr_slice" };
 			const elemBase =
@@ -254,7 +254,7 @@ export const assignabilityMethods = {
 					: elemType;
 			const pf =
 				elemBase?.kind === "struct" ? this._getStructPtrFields(elemBase) : [];
-			return { box: "slice", ptrFields: pf.length > 0 ? pf : null };
+			return pf.length > 0 ? { box: "slice", ptrFields: pf } : null;
 		}
 		return null;
 	},
