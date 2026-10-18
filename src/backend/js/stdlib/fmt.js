@@ -4,16 +4,29 @@
 
 const _SSCAN_LOOP =
 	`let n = 0, err = null; for (let i = 0; i < ptrs.length && i < tokens.length; i++) { ` +
-	`const t = tokens[i]; const p = ptrs[i]; ` +
-	`if (typeof p.value === "number") { const v = Number(t); if (Number.isNaN(v) || !/^[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?$/.test(t)) { err = __error("expected number"); break; } p.value = v; } ` +
+	`const item = tokens[i]; const t = typeof item === "object" && item !== null ? item.t : item; const verb = item?.verb; const p = ptrs[i]; ` +
+	`if (verb === "%c") { p.value = t.codePointAt ? t.codePointAt(0) : t; } ` +
+	`else if (verb === "%x" || verb === "%X") { const clean = t.replace(/^0[xX]/, ""); const v = parseInt(clean, 16); if (isNaN(v)) { err = __error("expected hex number"); break; } p.value = typeof p.value === "bigint" ? BigInt("0x" + clean) : v; } ` +
+	`else if (verb === "%o") { const clean = t.replace(/^0[oO]?/, ""); const v = parseInt(clean, 8); if (isNaN(v)) { err = __error("expected octal number"); break; } p.value = typeof p.value === "bigint" ? BigInt("0o" + clean) : v; } ` +
+	`else if (verb === "%b") { const clean = t.replace(/^0[bB]/, ""); const v = parseInt(clean, 2); if (isNaN(v)) { err = __error("expected binary number"); break; } p.value = typeof p.value === "bigint" ? BigInt("0b" + clean) : v; } ` +
+	`else if (typeof p.value === "number") { const v = Number(t); if (Number.isNaN(v) || !/^[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?$/.test(t)) { err = __error("expected number"); break; } p.value = v; } ` +
 	`else if (typeof p.value === "bigint") { try { if (!/^[+-]?\\d+$/.test(t)) throw 1; p.value = BigInt(t); } catch { err = __error("expected integer"); break; } } ` +
 	`else if (typeof p.value === "boolean") { const tl = String(t).toLowerCase(); if (tl === "true" || tl === "1" || tl === "t") p.value = true; else if (tl === "false" || tl === "0" || tl === "f") p.value = false; else { err = __error("expected boolean"); break; } } ` +
 	`else p.value = t; n++; }`;
 
 /** @type {ThisType<CodeGen>} */
 export const fmtMethods = {
+	_fmtArgJs(e) {
+		const js = this.genExpr(e);
+		const base =
+			e?._type?.kind === "named" ? (e._type.underlying ?? e._type) : e?._type;
+		return base?.kind === "slice" ? `(${js} ?? [])` : js;
+	},
+
 	_genFmt(fn, _a, expr) {
-		const fmtArgs = expr.args.map((e) => this.genExpr(e)).join(", ");
+		const fmtArgs = expr.args
+			.map((e, idx) => (idx === 0 ? this.genExpr(e) : this._fmtArgJs(e)))
+			.join(", ");
 		switch (fn) {
 			case "Sprintf":
 				this.useHelper("sprintf");
@@ -90,13 +103,15 @@ export const fmtMethods = {
 					`if (si >= s.length) break; ` +
 					`let tokRe = /^\\S+/; ` +
 					`if (verb === "%d" || verb === "%i") tokRe = /^[+-]?\\d+/; ` +
+					`else if (verb === "%o") tokRe = /^[+-]?(?:0[oO])?[0-7]+/; ` +
+					`else if (verb === "%b") tokRe = /^[+-]?(?:0[bB])?[01]+/; ` +
 					`else if (verb === "%f" || verb === "%F" || verb === "%e" || verb === "%E" || verb === "%g" || verb === "%G") tokRe = /^[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?/; ` +
 					`else if (verb === "%t") tokRe = /^(?:true|false|1|0|t|f|T|F|TRUE|FALSE)/; ` +
 					`else if (verb === "%x" || verb === "%X") tokRe = /^[+-]?(?:0x)?[0-9a-fA-F]+/; ` +
 					`else if (verb === "%c") tokRe = /^[\\s\\S]/; ` +
 					`const m = s.slice(si).match(tokRe); ` +
 					`if (!m) { parseErr = __error("input does not match format"); break; } ` +
-					`tokens.push(m[0]); si += m[0].length; continue; ` +
+					`tokens.push({ t: m[0], verb }); si += m[0].length; continue; ` +
 					`} ` +
 					`} ` +
 					`if (si >= s.length) break; ` +
@@ -117,7 +132,7 @@ export const fmtMethods = {
 		this.useHelper("sprintf");
 		const writerArg = expr.args[0];
 		const rest = expr.args.slice(1);
-		const restJs = rest.map((e) => this.genExpr(e)).join(", ");
+		const restJs = rest.map((e) => this._fmtArgJs(e)).join(", ");
 		const writerType = writerArg._type;
 		const targetTypeName =
 			writerType?.name ??
@@ -148,7 +163,7 @@ export const fmtMethods = {
 		const argc = expr.args.length;
 		if (argc === 0) return JSON.stringify(suffix);
 		const fmt = Array(argc).fill("%v").join(sep) + suffix;
-		const args = expr.args.map((e) => this.genExpr(e)).join(", ");
+		const args = expr.args.map((e) => this._fmtArgJs(e)).join(", ");
 		return `__sprintf(${JSON.stringify(fmt)}, ${args})`;
 	},
 

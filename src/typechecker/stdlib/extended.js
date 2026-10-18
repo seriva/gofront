@@ -291,6 +291,7 @@ export function setupExtendedGlobals(globals, types) {
 		_makeBuilderType("bytes.Buffer", [
 			["WriteRune", { kind: "func", params: [INT], returns: [INT, ERROR] }],
 			["Bytes", { kind: "func", params: [], returns: [BYTE_SLICE_T] }],
+			["Read", { kind: "func", params: [BYTE_SLICE_T], returns: [INT, ERROR] }],
 		]),
 	);
 	types.set("strings.Replacer", {
@@ -416,6 +417,7 @@ export function setupExtendedGlobals(globals, types) {
 			},
 			Reader: {
 				kind: "interface",
+				name: "io.Reader",
 				methods: new Map([
 					[
 						"Read",
@@ -591,6 +593,7 @@ export function setupExtendedGlobals(globals, types) {
 	};
 	const LOCKER_T = {
 		kind: "interface",
+		name: "sync.Locker",
 		methods: new Map([
 			["Lock", { kind: "func", params: [], returns: [VOID] }],
 			["Unlock", { kind: "func", params: [], returns: [VOID] }],
@@ -646,7 +649,7 @@ export function setupExtendedGlobals(globals, types) {
 			Sum256: {
 				kind: "func",
 				params: [BYTE_SLICE],
-				returns: [{ kind: "array", len: 32, elem: UINT8 }],
+				returns: [{ kind: "array", size: 32, elem: UINT8 }],
 			},
 			New: { kind: "func", params: [], returns: [HASH_T] },
 		},
@@ -765,6 +768,10 @@ export function setupExtendedGlobals(globals, types) {
 	});
 	types.set("encoding/binary.ByteOrder", BYTE_ORDER_T);
 	types.set("binary.ByteOrder", BYTE_ORDER_T);
+	types.set("encoding/binary.LittleEndian", LITTLE_ENDIAN_T);
+	types.set("binary.LittleEndian", LITTLE_ENDIAN_T);
+	types.set("encoding/binary.BigEndian", BIG_ENDIAN_T);
+	types.set("binary.BigEndian", BIG_ENDIAN_T);
 
 	// ── encoding/hex ──────────────────────────────────────────────
 	globals.define("hex", {

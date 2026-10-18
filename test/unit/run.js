@@ -12,7 +12,7 @@ import os from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
-import { summarize } from "./helpers.js";
+import { summarize, waitForPending } from "./helpers.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
@@ -59,6 +59,7 @@ export const TEST_FILES = [
 	"./compiler/minifier.test.js",
 	"./compiler/lower.test.js",
 	"./compiler/optimize-build.test.js",
+	"./compiler/semantics.test.js",
 	"./wasm/encode.test.js",
 	"./wasm/wat.test.js",
 	"./wasm/scalars.test.js",
@@ -83,6 +84,7 @@ export const TEST_FILES = [
 if (process.env.TEST_PARALLEL === "0") {
 	for (const file of TEST_FILES) {
 		await import(file);
+		await waitForPending();
 	}
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
@@ -128,16 +130,24 @@ const workers = Array.from(
 	},
 );
 
-async function runWorkerLoop(worker) {
+async function runWorkerLoop(initialWorker) {
+	let worker = initialWorker;
 	while (queue.length > 0) {
 		const file = queue.shift();
 		const fullPath = resolve(__dirname, file);
 
 		const t0 = performance.now();
+		let workerDied = false;
+
 		await new Promise((resolveTask) => {
-			const onMessage = (msg) => {
+			const cleanup = () => {
 				worker.off("message", onMessage);
 				worker.off("error", onError);
+				worker.off("exit", onExit);
+			};
+
+			const onMessage = (msg) => {
+				cleanup();
 
 				if (msg.stdout) process.stdout.write(msg.stdout);
 				if (msg.stderr) process.stderr.write(msg.stderr);
@@ -156,20 +166,48 @@ async function runWorkerLoop(worker) {
 			};
 
 			const onError = (err) => {
-				worker.off("message", onMessage);
-				worker.off("error", onError);
+				cleanup();
+				workerDied = true;
 				totalFailed++;
 				allFailures.push({ name: file, error: err?.stack || String(err) });
 				process.stderr.write(`Worker error in ${file}: ${err?.message}\n`);
 				resolveTask();
 			};
 
+			const onExit = (code) => {
+				cleanup();
+				if (code !== 0) {
+					workerDied = true;
+					totalFailed++;
+					allFailures.push({
+						name: file,
+						error: `Worker exited with code ${code}`,
+					});
+					process.stderr.write(`Worker exited with code ${code} in ${file}\n`);
+				}
+				resolveTask();
+			};
+
 			worker.on("message", onMessage);
 			worker.on("error", onError);
+			worker.on("exit", onExit);
 			worker.postMessage({ file: fullPath });
 		});
+
+		if (workerDied) {
+			try {
+				worker.terminate();
+			} catch {}
+			if (queue.length > 0) {
+				worker = new Worker(workerPath);
+			} else {
+				return;
+			}
+		}
 	}
-	worker.postMessage({ done: true });
+	try {
+		worker.postMessage({ done: true });
+	} catch {}
 }
 
 await Promise.all(workers.map(runWorkerLoop));

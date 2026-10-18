@@ -19,7 +19,7 @@ const BITS_MAP = {
 	OnesCount64: ([x]) =>
 		`((() => { let v = BigInt.asUintN(64, BigInt(${x})); let c = 0; while (v > 0n) { if (v & 1n) c++; v >>= 1n; } return c; })())`,
 	RotateLeft64: ([x, k]) =>
-		`((() => { const s = BigInt(${k}) & 63n; const v = BigInt.asUintN(64, BigInt(${x})); return BigInt.asUintN(64, (v << s) | (v >> ((64n - s) & 63n))); })())`,
+		`((() => { const s = BigInt(${k}) & 63n; const v = BigInt.asUintN(64, BigInt(${x})); return Number(BigInt.asUintN(64, (v << s) | (v >> ((64n - s) & 63n)))); })())`,
 
 	Len32: ([x]) => `((v => 32 - Math.clz32(v >>> 0))(${x}))`,
 	Len64: ([x]) =>
@@ -29,11 +29,11 @@ const BITS_MAP = {
 	ReverseBytes32: ([x]) =>
 		`((v => (((v & 0xff) << 24) | ((v & 0xff00) << 8) | ((v >>> 8) & 0xff00) | ((v >>> 24) & 0xff)) >>> 0)((${x}) >>> 0))`,
 	ReverseBytes64: ([x]) =>
-		`((() => { const v = BigInt.asUintN(64, BigInt(${x})); let r = 0n; for (let i = 0n; i < 8n; i++) r = (r << 8n) | ((v >> (i * 8n)) & 0xffn); return r; })())`,
+		`((() => { const v = BigInt.asUintN(64, BigInt(${x})); let r = 0n; for (let i = 0n; i < 8n; i++) r = (r << 8n) | ((v >> (i * 8n)) & 0xffn); return Number(r); })())`,
 	Reverse32: ([x]) =>
 		`((() => { let v = (${x}) >>> 0; v = ((v >>> 1) & 0x55555555) | ((v & 0x55555555) << 1); v = ((v >>> 2) & 0x33333333) | ((v & 0x33333333) << 2); v = ((v >>> 4) & 0x0f0f0f0f) | ((v & 0x0f0f0f0f) << 4); v = ((v >>> 8) & 0x00ff00ff) | ((v & 0x00ff00ff) << 8); return ((v >>> 16) | (v << 16)) >>> 0; })())`,
 	Reverse64: ([x]) =>
-		`((() => { const rev32 = (v) => { v = ((v >>> 1) & 0x55555555) | ((v & 0x55555555) << 1); v = ((v >>> 2) & 0x33333333) | ((v & 0x33333333) << 2); v = ((v >>> 4) & 0x0f0f0f0f) | ((v & 0x0f0f0f0f) << 4); v = ((v >>> 8) & 0x00ff00ff) | ((v & 0x00ff00ff) << 8); return ((v >>> 16) | (v << 16)) >>> 0; }; const v = BigInt.asUintN(64, BigInt(${x})); const lo = Number(v & 0xffffffffn); const hi = Number((v >> 32n) & 0xffffffffn); return (BigInt(rev32(lo)) << 32n) | BigInt(rev32(hi)); })())`,
+		`((() => { const rev32 = (v) => { v = ((v >>> 1) & 0x55555555) | ((v & 0x55555555) << 1); v = ((v >>> 2) & 0x33333333) | ((v & 0x33333333) << 2); v = ((v >>> 4) & 0x0f0f0f0f) | ((v & 0x0f0f0f0f) << 4); v = ((v >>> 8) & 0x00ff00ff) | ((v & 0x00ff00ff) << 8); return ((v >>> 16) | (v << 16)) >>> 0; }; const v = BigInt.asUintN(64, BigInt(${x})); const lo = Number(v & 0xffffffffn); const hi = Number((v >> 32n) & 0xffffffffn); return Number((BigInt(rev32(lo)) << 32n) | BigInt(rev32(hi))); })())`,
 };
 
 /** @type {ThisType<CodeGen>} */

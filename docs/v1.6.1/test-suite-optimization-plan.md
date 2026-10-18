@@ -1,7 +1,7 @@
 # Test Suite Optimization — Design Plan
 
 **Version:** v1.6.1  
-**Status:** In Progress (2026-10-13)  
+**Status:** Complete (2026-10-18)  
 **Depends on:** [`docs/v1.6.1/wasm-gaps-plan.md`](wasm-gaps-plan.md)  
 **Followed by:** [`docs/v2.0.0/native-go-engine.md`](../v2.0.0/native-go-engine.md)
 
@@ -115,16 +115,16 @@ Done means:
 
 ## Implementation Tasks
 
-- [ ] **Phase 1: CLI Deduplication.** Condense `compiler/cli.test.js` to 3–4 process smoke tests and route detailed flag assertions through `compiler/cli-core.test.js`. Verify ~10s speedup.
-- [ ] **Phase 2: Filesystem Helper.** Implement `withTempDir` in `test/unit/helpers.js` (sync & async support). Refactor `compiler/test-runner.test.js`, `compiler/packages.test.js`, and `compiler/asset-manager.test.js`.
-- [ ] **Phase 3: Table-Driven Refactoring.** Convert `types/errors.test.js`, `minifier.test.js`, and `types/checks.test.js` to table-driven test definitions.
-- [ ] **Phase 4: Stdlib Unification.**
-  - [ ] Relocate misplaced tests in `wasm/maps.test.js#L555-L640` and `builtins/operators.test.js`.
-  - [ ] Merge `wasm/gaps_postaudit.test.js` into standard stdlib suites.
-  - [ ] Migrate pure stdlib tests from `builtins/stdlib.test.js` to use `compileHybrid` for unified JS + WASM coverage.
-- [ ] **Phase 5: Reorganize Directory Hierarchy.** Move root test files (`dom.test.js`, `structs.test.js`, `templ.test.js`, `minifier.test.js`, `lower.test.js`, `lexer-parser.test.js`) into logical subdirectories and update `test/unit/run.js` imports.
-- [ ] **Phase 6: Parallel Execution.** Add parallel worker execution to `test/unit/run.js` or provide a `node --test` runner target.
-- [ ] **Phase 7: Verification & Gates.** Run full suite, verify total time <5s, confirm 100% pass rate, and verify coverage >= 93.9% with `npm run test:coverage`.
+- [x] **Phase 1: CLI Deduplication.** Condense `compiler/cli.test.js` to 3–4 process smoke tests and route detailed flag assertions through `compiler/cli-core.test.js`. Verify ~10s speedup.
+- [x] **Phase 2: Filesystem Helper.** Implement `withTempDir` in `test/unit/helpers.js` (sync & async support). Refactor `compiler/test-runner.test.js`, `compiler/packages.test.js`, and `compiler/asset-manager.test.js`.
+- [x] **Phase 3: Table-Driven Refactoring.** Convert `types/errors.test.js`, `minifier.test.js`, and `types/checks.test.js` to table-driven test definitions.
+- [x] **Phase 4: Stdlib Unification.**
+  - [x] Relocate misplaced tests in `wasm/maps.test.js#L555-L640` and `builtins/operators.test.js`.
+  - [x] Merge `wasm/gaps_postaudit.test.js` into standard stdlib suites.
+  - [x] Migrate pure stdlib tests from `builtins/stdlib.test.js` to use `compileHybrid` for unified JS + WASM coverage.
+- [x] **Phase 5: Reorganize Directory Hierarchy.** Move root test files (`dom.test.js`, `structs.test.js`, `templ.test.js`, `minifier.test.js`, `lower.test.js`, `lexer-parser.test.js`) into logical subdirectories and update `test/unit/run.js` imports.
+- [x] **Phase 6: Parallel Execution.** Add parallel worker execution to `test/unit/run.js` or provide a `node --test` runner target.
+- [x] **Phase 7: Verification & Gates.** Run full suite, verify total time <5s, confirm 100% pass rate, and verify coverage >= 93.9% with `npm run test:coverage`.
 
 ---
 
