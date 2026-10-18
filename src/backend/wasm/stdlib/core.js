@@ -76,21 +76,13 @@ export const BINARY_MATH_IMPORTS = new Set(["atan2", "pow", "mod", "hypot"]);
 export class StdlibCoreEmitter {
 	_isMathConst(expr) {
 		return (
-			expr.expr?.kind === "Ident" &&
-			expr.expr.name === "math" &&
-			!this.resolveLocal("math") &&
-			!this.mod.resolveGlobal("math") &&
-			MATH_CONSTS[expr.field] !== undefined
+			this._isPkgExpr(expr, "math") && MATH_CONSTS[expr.field] !== undefined
 		);
 	}
 
 	_isUtf8Const(expr) {
 		return (
-			expr.expr?.kind === "Ident" &&
-			expr.expr.name === "utf8" &&
-			!this.resolveLocal("utf8") &&
-			!this.mod.resolveGlobal("utf8") &&
-			UTF8_CONSTS[expr.field] !== undefined
+			this._isPkgExpr(expr, "utf8") && UTF8_CONSTS[expr.field] !== undefined
 		);
 	}
 
@@ -132,20 +124,15 @@ export class StdlibCoreEmitter {
 
 	_isStrconvConst(expr) {
 		return (
-			expr.expr?.kind === "Ident" &&
-			expr.expr.name === "strconv" &&
-			!this.resolveLocal("strconv") &&
-			!this.mod.resolveGlobal("strconv") &&
+			this._isPkgExpr(expr, "strconv") &&
 			(expr.field === "ErrSyntax" || expr.field === "ErrRange")
 		);
 	}
 
-	emitStrconvConst(field, _targetWasmType) {
-		const gIdx = this.mod.getStrconvErrGlobalIndex(field);
+	_emitLazyErrorGlobal(gIdx, msg) {
 		this.pushInstruction({ op: "global.get", index: gIdx });
 		this.pushInstruction("ref.is_null");
 		this.pushInstruction({ op: "if", blockType: "void" });
-		const msg = field === "ErrRange" ? "value out of range" : "invalid syntax";
 		const strIdx = this.mod.internString(msg);
 		this.pushInstruction({ op: "i32.const", value: strIdx });
 		this.pushInstruction({
@@ -162,36 +149,25 @@ export class StdlibCoreEmitter {
 		this.pushInstruction({ op: "global.get", index: gIdx });
 	}
 
+	emitStrconvConst(field, _targetWasmType) {
+		this._emitLazyErrorGlobal(
+			this.mod.getStrconvErrGlobalIndex(field),
+			field === "ErrRange" ? "value out of range" : "invalid syntax",
+		);
+	}
+
 	_isPathConst(expr) {
 		return (
-			expr.expr?.kind === "Ident" &&
-			(expr.expr.name === "path" || expr.expr.name === "filepath") &&
-			!this.resolveLocal(expr.expr.name) &&
-			!this.mod.resolveGlobal(expr.expr.name) &&
+			(this._isPkgExpr(expr, "path") || this._isPkgExpr(expr, "filepath")) &&
 			expr.field === "ErrBadPattern"
 		);
 	}
 
 	emitPathConst(field, _targetWasmType) {
-		const gIdx = this.mod.getPathErrGlobalIndex(field);
-		this.pushInstruction({ op: "global.get", index: gIdx });
-		this.pushInstruction("ref.is_null");
-		this.pushInstruction({ op: "if", blockType: "void" });
-		const msg = "syntax error in pattern";
-		const strIdx = this.mod.internString(msg);
-		this.pushInstruction({ op: "i32.const", value: strIdx });
-		this.pushInstruction({
-			op: "call",
-			funcIndex: this.mod.getStringImportIndex(),
-		});
-		this.pushInstruction({ op: "ref.null", heapType: "any" });
-		this.pushInstruction({
-			op: "call",
-			funcIndex: this.mod.resolveFuncIndex("__mk_error"),
-		});
-		this.pushInstruction({ op: "global.set", index: gIdx });
-		this.pushInstruction("end");
-		this.pushInstruction({ op: "global.get", index: gIdx });
+		this._emitLazyErrorGlobal(
+			this.mod.getPathErrGlobalIndex(field),
+			"syntax error in pattern",
+		);
 	}
 
 	emitMathCall(name, args) {
@@ -7396,7 +7372,7 @@ export class StdlibCoreEmitter {
 				this.pushInstruction({ op: "local.get", index: strTmp });
 				this.pushInstruction({
 					op: "call",
-					funcIndex: this.mod.getStringLenImportIndex(),
+					funcIndex: this.mod.getStrToBytesImportIndex(),
 				});
 				this.pushInstruction({ op: "local.set", index: lenTmp });
 

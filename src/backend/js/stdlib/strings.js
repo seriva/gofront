@@ -27,13 +27,15 @@ const STRINGS_DISPATCH = {
 			: `((str, o, nw, cnt) => { if (cnt < 0) return str.replaceAll(o, nw); let r = ""; let i = 0; for (; cnt > 0; cnt--) { const j = str.indexOf(o, i); if (j < 0) break; r += str.slice(i, j) + nw; i = j + o.length; if (o.length === 0) { if (i >= str.length) break; r += str[i]; i++; } } return r + str.slice(i); })(${s}, ${s2}, ${s3}, ${n})`,
 	ReplaceAll: ([s, s2, s3]) => `${s}.replaceAll(${s2}, ${s3})`,
 	Trim: ([s, s2]) =>
-		`${s}.replace(new RegExp(\`^[\${${s2}}]+|[\${${s2}}]+$\`, "g"), "")`,
+		`((str, cut) => { const cs = new Set(cut); let i = 0, j = str.length; while (i < j && cs.has(str[i])) i++; while (j > i && cs.has(str[j - 1])) j--; return str.slice(i, j); })(${s}, ${s2})`,
 	TrimPrefix: ([s, s2]) =>
 		`((s, pre) => s.startsWith(pre) ? s.slice(pre.length) : s)(${s}, ${s2})`,
 	TrimSuffix: ([s, s2]) =>
 		`((s, suf) => !suf.length || !s.endsWith(suf) ? s : s.slice(0, -suf.length))(${s}, ${s2})`,
-	TrimLeft: ([s, s2]) => `${s}.replace(new RegExp(\`^[\${${s2}}]+\`), "")`,
-	TrimRight: ([s, s2]) => `${s}.replace(new RegExp(\`[\${${s2}}]+$\`), "")`,
+	TrimLeft: ([s, s2]) =>
+		`((str, cut) => { const cs = new Set(cut); let i = 0; while (i < str.length && cs.has(str[i])) i++; return str.slice(i); })(${s}, ${s2})`,
+	TrimRight: ([s, s2]) =>
+		`((str, cut) => { const cs = new Set(cut); let j = str.length; while (j > 0 && cs.has(str[j - 1])) j--; return str.slice(0, j); })(${s}, ${s2})`,
 	EqualFold: ([s, s2]) => `${s}.toLowerCase() === ${s2}.toLowerCase()`,
 	Fields: ([s]) => `(${s}).trim() === '' ? [] : (${s}).trim().split(/\\s+/)`,
 	FieldsFunc: ([s, f]) =>
@@ -41,9 +43,9 @@ const STRINGS_DISPATCH = {
 	Cut: ([s, s2]) =>
 		`((s, sep) => { const i = s.indexOf(sep); return i < 0 ? [s, "", false] : [s.slice(0, i), s.slice(i + sep.length), true]; })(${s}, ${s2})`,
 	CutPrefix: ([s, s2]) =>
-		`(${s}).startsWith(${s2}) ? [(${s}).slice((${s2}).length), true] : [${s}, false]`,
+		`((str, pre) => str.startsWith(pre) ? [str.slice(pre.length), true] : [str, false])(${s}, ${s2})`,
 	CutSuffix: ([s, s2]) =>
-		`(${s}).endsWith(${s2}) ? [(${s}).slice(0, -(${s2}).length), true] : [${s}, false]`,
+		`((str, suf) => { if (suf === "") return [str, true]; return str.endsWith(suf) ? [str.slice(0, -suf.length), true] : [str, false]; })(${s}, ${s2})`,
 	SplitN: ([s, s2, s3]) =>
 		`((s, sep, n) => {
 			if (n === 0) return null;

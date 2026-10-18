@@ -175,8 +175,7 @@ export const typeParserMethods = {
 		this.expect(T.LBRACE);
 		const fields = [];
 		while (!this.check(T.RBRACE) && !this.check(T.EOF)) {
-			const names = [this.expect(T.IDENT).value];
-			while (this.match(T.COMMA)) names.push(this.expect(T.IDENT).value);
+			const names = this.parseIdentList();
 			// Check if this is an embedded field (just a type name)
 			// e.g., type T struct { Base }
 			if (this.check(T.SEMICOLON) || this.check(T.RBRACE)) {

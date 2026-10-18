@@ -268,7 +268,11 @@ export const expressionCheckMethods = {
 		}
 		if (
 			baseType?.kind === "namespace" &&
-			this.types.has(`${baseType.name}.${expr.field}`)
+			this.types.has(`${baseType.name}.${expr.field}`) &&
+			!(
+				baseType.name === "binary" &&
+				(expr.field === "LittleEndian" || expr.field === "BigEndian")
+			)
 		) {
 			expr._isTypeRef = true;
 		}
@@ -470,6 +474,81 @@ export const expressionCheckMethods = {
 		return targetType;
 	},
 
+	_checkConversionValidity(srcType, targetType, expr) {
+		if (!srcType || !targetType || isAny(srcType) || isAny(targetType)) return;
+		const srcResolved = srcType.kind === "named" ? srcType.underlying : srcType;
+		const tgtResolved =
+			targetType.kind === "named" ? targetType.underlying : targetType;
+
+		if (isNumeric(targetType) && isComplex(srcType)) {
+			this.err(
+				`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)} (use real() or imag())`,
+				expr,
+			);
+			return;
+		}
+		if (isComplex(targetType) && !isComplexOrNumeric(srcType)) {
+			this.err(
+				`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)}`,
+				expr,
+			);
+			return;
+		}
+		if (this._isMutualArraySlice(tgtResolved, srcResolved)) {
+			this._checkElemTypeCompatible(
+				tgtResolved.elem,
+				srcResolved.elem,
+				srcType,
+				targetType,
+				expr,
+			);
+			return;
+		}
+		if (this._isInvalidArrayConv(tgtResolved, srcResolved, srcType)) {
+			this.err(
+				`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)}`,
+				expr,
+			);
+			return;
+		}
+		if (typeStr(srcResolved) === typeStr(tgtResolved)) return;
+		if (isNumeric(srcResolved) && isNumeric(tgtResolved)) return;
+		if (
+			isString(srcResolved) &&
+			tgtResolved?.kind === "slice" &&
+			(tgtResolved.elem?.name === "byte" ||
+				tgtResolved.elem?.name === "rune" ||
+				tgtResolved.elem?.name === "uint8" ||
+				tgtResolved.elem?.name === "int32")
+		)
+			return;
+		if (
+			isString(tgtResolved) &&
+			(isNumeric(srcResolved) ||
+				(srcResolved?.kind === "slice" &&
+					(srcResolved.elem?.name === "byte" ||
+						srcResolved.elem?.name === "rune" ||
+						srcResolved.elem?.name === "uint8" ||
+						srcResolved.elem?.name === "int32")))
+		)
+			return;
+		if (srcResolved?.kind === "pointer" && tgtResolved?.kind === "pointer") {
+			const sBase =
+				srcResolved.base?.kind === "named"
+					? srcResolved.base.underlying
+					: srcResolved.base;
+			const tBase =
+				tgtResolved.base?.kind === "named"
+					? tgtResolved.base.underlying
+					: tgtResolved.base;
+			if (typeStr(sBase) === typeStr(tBase)) return;
+		}
+		this.err(
+			`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)}`,
+			expr,
+		);
+	},
+
 	_checkTypeAssertExpr(expr, scope) {
 		const srcType = this.checkExpr(expr.expr, scope);
 		const targetType = this.resolveTypeNode(expr.type, scope);
@@ -635,6 +714,14 @@ export const expressionCheckMethods = {
 		if (fnType.kind === "named" && expr.func._isTypeRef) {
 			expr._isTypeConversion = true;
 			expr._conversionTargetType = fnType;
+			if (expr.args.length !== 1) {
+				return this.err(
+					`cannot convert ${expr.args.length} arguments to type ${typeStr(fnType)}`,
+					expr,
+				);
+			}
+			const argType = argTypes[0];
+			this._checkConversionValidity(argType, fnType, expr);
 			return fnType;
 		}
 
@@ -773,7 +860,8 @@ export const expressionCheckMethods = {
 					: i;
 			if (expr.args[i]?._spread) continue;
 			const targetParam = fnType.params[paramIdx];
-			this.assertAssignable(targetParam, argTypes[i], expr.args[i]);
+			const node = expr._multiForward ? null : expr.args[i];
+			this.assertAssignable(targetParam, argTypes[i], node);
 		}
 	},
 

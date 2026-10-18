@@ -41,7 +41,14 @@ export class FunctionEmitter {
 			this.mod.lowerResult?.captures?.get(
 				this.rootFuncDecl._sourceDecl ?? this.rootFuncDecl,
 			) ?? null;
-		this.mutatedCaptures = this.captureAnalysis?.mutatedCaptures ?? new Set();
+		this.mutatedCaptures = new Set(this.captureAnalysis?.mutatedCaptures ?? []);
+		const lowerBoxed =
+			this.mod.lowerResult?.boxedVars?.get(
+				this.rootFuncDecl._sourceDecl ?? this.rootFuncDecl,
+			) ?? [];
+		for (const name of lowerBoxed) {
+			this.mutatedCaptures.add(name);
+		}
 
 		this.capturedNames = this.funcDecl._funcLit
 			? Array.from(
@@ -133,33 +140,7 @@ export class FunctionEmitter {
 			return;
 		}
 
-		const namedReturns = this.funcDecl.returnType?._namedReturns;
-		if (namedReturns && namedReturns.length > 0) {
-			this.namedReturnVars = [];
-			for (let i = 0; i < namedReturns.length; i++) {
-				const r = namedReturns[i];
-				const isBlank = !r.name || r.name === "_";
-				const varName = isBlank ? `__ret_blank$${i}` : r.name;
-				const wType = this.toWasmType(r.type);
-				const localIdx = this.allocLocal(varName, wType, r.type, isBlank);
-				this.namedReturnVars.push({
-					name: varName,
-					localIdx,
-					type: wType,
-					goType: r.type,
-					isBlank,
-				});
-				this.emitZeroValue(r.type, wType);
-				const localInfo = this.locals.get(varName);
-				if (localInfo?.isBoxed) {
-					this.pushInstruction({
-						op: "struct.new",
-						typeIndex: localInfo.boxInfo.typeIndex,
-					});
-				}
-				this.pushInstruction({ op: "local.set", index: localIdx });
-			}
-		}
+		this._initNamedReturns();
 
 		const needsOobBlock = this._needsOobBlock(body);
 		if (needsOobBlock) {
@@ -188,34 +169,38 @@ export class FunctionEmitter {
 		}
 	}
 
-	_emitFunctionBodyWithDefer(body) {
+	_initNamedReturns() {
 		const namedReturns = this.funcDecl.returnType?._namedReturns;
-		if (namedReturns && namedReturns.length > 0) {
-			this.namedReturnVars = [];
-			for (let i = 0; i < namedReturns.length; i++) {
-				const r = namedReturns[i];
-				const isBlank = !r.name || r.name === "_";
-				const varName = isBlank ? `__ret_blank$${i}` : r.name;
-				const wType = this.toWasmType(r.type);
-				const localIdx = this.allocLocal(varName, wType, r.type, isBlank);
-				this.namedReturnVars.push({
-					name: varName,
-					localIdx,
-					type: wType,
-					goType: r.type,
-					isBlank,
+		if (!namedReturns?.length) return false;
+		this.namedReturnVars = [];
+		for (let i = 0; i < namedReturns.length; i++) {
+			const r = namedReturns[i];
+			const isBlank = !r.name || r.name === "_";
+			const varName = isBlank ? `__ret_blank$${i}` : r.name;
+			const wType = this.toWasmType(r.type);
+			const localIdx = this.allocLocal(varName, wType, r.type, isBlank);
+			this.namedReturnVars.push({
+				name: varName,
+				localIdx,
+				type: wType,
+				goType: r.type,
+				isBlank,
+			});
+			this.emitZeroValue(r.type, wType);
+			const localInfo = this.locals.get(varName);
+			if (localInfo?.isBoxed) {
+				this.pushInstruction({
+					op: "struct.new",
+					typeIndex: localInfo.boxInfo.typeIndex,
 				});
-				this.emitZeroValue(r.type, wType);
-				const localInfo = this.locals.get(varName);
-				if (localInfo?.isBoxed) {
-					this.pushInstruction({
-						op: "struct.new",
-						typeIndex: localInfo.boxInfo.typeIndex,
-					});
-				}
-				this.pushInstruction({ op: "local.set", index: localIdx });
 			}
-		} else if (this.returnTypes.length > 0) {
+			this.pushInstruction({ op: "local.set", index: localIdx });
+		}
+		return true;
+	}
+
+	_emitFunctionBodyWithDefer(body) {
+		if (!this._initNamedReturns() && this.returnTypes.length > 0) {
 			this.returnTempLocals = [];
 			for (let i = 0; i < this.returnTypes.length; i++) {
 				const wType = this.returnTypes[i];
@@ -669,36 +654,27 @@ export class FunctionEmitter {
 		return null;
 	}
 
-	_unpackClosureEnv() {
+	_buildEnvFields(capturedNames) {
 		const envFields = [];
-		for (const name of this.capturedNames) {
+		for (const name of capturedNames) {
 			const isBoxed = this.mutatedCaptures.has(name);
 			const goType = this._findCapturedVarGoType(name);
-			if (isBoxed) {
-				const boxInfo = this.mod.getBoxType(goType);
-				envFields.push({
-					name,
-					goType,
-					isBoxed: true,
-					boxInfo,
-					wType: {
-						kind: "ref",
-						nullable: true,
-						typeIndex: boxInfo.typeIndex,
-					},
-				});
-			} else {
-				const wType = this.toWasmType(goType);
-				envFields.push({
-					name,
-					goType,
-					isBoxed: false,
-					boxInfo: null,
-					wType,
-				});
-			}
+			const boxInfo = isBoxed ? this.mod.getBoxType(goType) : null;
+			envFields.push({
+				name,
+				goType,
+				isBoxed,
+				boxInfo,
+				wType: isBoxed
+					? { kind: "ref", nullable: true, typeIndex: boxInfo.typeIndex }
+					: this.toWasmType(goType),
+			});
 		}
+		return envFields;
+	}
 
+	_unpackClosureEnv() {
+		const envFields = this._buildEnvFields(this.capturedNames);
 		const envInfo = this.mod.getEnvType(envFields);
 		this.envInfo = envInfo;
 		this.envFields = envFields;
@@ -1303,13 +1279,7 @@ export class FunctionEmitter {
 	}
 
 	resolveBranchDepthToOob() {
-		for (let i = this.controlStack.length - 1; i >= 0; i--) {
-			const ctrl = this.controlStack[i];
-			if (ctrl.role === "oob") {
-				return this.controlStack.length - 1 - i;
-			}
-		}
-		return null;
+		return this.resolveBranchDepthToRole("oob");
 	}
 
 	resolveBranchDepthToRole(targetRole) {
@@ -1398,6 +1368,13 @@ export class FunctionEmitter {
 				// ignore comments or unsupported stmts
 				break;
 		}
+	}
+
+	_isPkgExpr(expr, pkgName) {
+		if (expr.expr?.kind !== "Ident") return false;
+		const name = expr.expr.name;
+		if (pkgName !== undefined && name !== pkgName) return false;
+		return !this.resolveLocal(name) && !this.mod.resolveGlobal(name);
 	}
 }
 

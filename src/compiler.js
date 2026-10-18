@@ -823,8 +823,8 @@ export function compileFiles(files, options = {}) {
 
 	const mainChunk = {
 		js: mainJs,
-		sourceFiles: files.map((f) => resolve(f)),
-		sourcesContent: files.map((f) => readFileSync(f, "utf8")),
+		sourceFiles: programs.map((p) => p._path),
+		sourcesContent: programs.map((p) => p._source),
 		mappings: emitTarget === "wasm" ? [] : codegen.getMappings(),
 	};
 

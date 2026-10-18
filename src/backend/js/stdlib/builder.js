@@ -12,6 +12,11 @@ const BUILDER_STR = {
 		`(${b}._buf += new TextDecoder().decode(new Uint8Array(${a[0]})), [${a[0]}.length, null])`,
 	String: (b) => `${b}._buf`,
 	Reset: (b) => `(${b}._buf = "")`,
+	Len: (b) => `new TextEncoder().encode(${b}._buf).length`,
+	Cap: (b) =>
+		`Math.max(${b}._cap ?? 0, new TextEncoder().encode(${b}._buf).length)`,
+	Grow: (b, a) =>
+		`((n) => { if (n < 0) throw new Error("strings.Builder.Grow: negative count"); ${b}._cap = Math.max(${b}._cap ?? 0, new TextEncoder().encode(${b}._buf).length) + n; })(${a[0]})`,
 };
 const BUILDER_BYTES = {
 	WriteString: (b, a) =>
@@ -23,9 +28,11 @@ const BUILDER_BYTES = {
 		`((buf, d) => { for (let i = 0; i < d.length; i++) buf._buf.push(d[i]); return [d.length, null]; })(${b}, ${a[0]})`,
 	String: (b) => `new TextDecoder().decode(new Uint8Array(${b}._buf))`,
 	Reset: (b) => `(${b}._buf = [])`,
+	Read: (b, a) =>
+		`((buf, p) => { if (buf._buf.length === 0) return [0, __io_eof]; const n = Math.min(p.length, buf._buf.length); for (let i = 0; i < n; i++) p[i] = buf._buf.shift(); return [n, null]; })(${b}, ${a[0]})`,
 };
 const BUILDER_COMMON = {
-	Bytes: (b) => `${b}._buf.slice()`,
+	Bytes: (b) => `new Uint8Array(${b}._buf)`,
 	Len: (b) => `${b}._buf.length`,
 	Cap: (b) => `Math.max(${b}._cap ?? 0, ${b}._buf.length)`,
 	Grow: (b, a) =>
@@ -38,6 +45,10 @@ export const builderMethods = {
 		const recv = expr.func.expr;
 		const base = this._unboxWriter(this.genExpr(recv));
 		const args = expr.args.map((a) => this.genExpr(a));
+		if (method === "Read") {
+			this.useHelper("ioEOF");
+			this.useHelper("error");
+		}
 		const isStr = typeName === "strings.Builder";
 		const table = isStr ? BUILDER_STR : BUILDER_BYTES;
 		const gen = table[method] ?? BUILDER_COMMON[method];

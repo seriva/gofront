@@ -696,6 +696,39 @@ export const statementGenMethods = {
 		return nodeAssigns(node, name);
 	},
 
+	_genStringRangeFor(stmt, iteree, isAssign) {
+		this._loopDepth = this._loopDepth ?? 0;
+		const d = this._loopDepth++;
+		const [idxNode, valNode] = stmt.init.lhs;
+		const s = `__s${d}`;
+		const i = `__i${d}`;
+		const cp = `__cp${d}`;
+		this.line(
+			`for (let ${i} = 0, ${s} = Array.from(${iteree} ?? ""); ${i} < ${s}.length; ${i}++) {`,
+		);
+		this.indented(() => {
+			this._emitRangeVar(idxNode, i, isAssign);
+			if (valNode && valNode.name !== "_") {
+				this.line(`const ${cp} = ${s}[${i}].codePointAt(0);`);
+				this._emitRangeVar(valNode, cp, isAssign);
+			}
+			const declared = isAssign
+				? []
+				: [idxNode, valNode]
+						.filter((e) => e?.kind === "Ident" && e.name !== "_")
+						.map((e) => e.name);
+			if (this._bodyRedeclares(stmt.body, declared)) {
+				this.line("{");
+				this.indented(() => this.genBlock(stmt.body));
+				this.line("}");
+			} else {
+				this.genBlock(stmt.body);
+			}
+		});
+		this.line("}");
+		this._loopDepth--;
+	},
+
 	_genIterFor(init, iterType, iteree, lhs, body) {
 		const iterExpr = this._genRangeIterExpr(iterType, iteree, lhs);
 		const binding =
@@ -725,12 +758,17 @@ export const statementGenMethods = {
 			return;
 		}
 
-		if (!this._isMapRangeType(iterType) && !this._isStringRangeType(iterType)) {
-			this._genSliceRangeFor(stmt, iteree, init.kind === "AssignStmt");
+		if (this._isStringRangeType(iterType)) {
+			this._genStringRangeFor(stmt, iteree, init.kind === "AssignStmt");
 			return;
 		}
 
-		this._genIterFor(init, iterType, iteree, lhs, stmt.body);
+		if (this._isMapRangeType(iterType)) {
+			this._genIterFor(init, iterType, iteree, lhs, stmt.body);
+			return;
+		}
+
+		this._genSliceRangeFor(stmt, iteree, init.kind === "AssignStmt");
 	},
 
 	_genRangeIterExpr(iterType, iteree, lhs) {
@@ -738,23 +776,14 @@ export const statementGenMethods = {
 			if (lhs.length === 1) return `Object.keys(${iteree})`;
 			return `Object.entries(${iteree})`;
 		}
-		if (this._isStringRangeType(iterType)) {
-			if (lhs.length === 1) return `Array.from(${iteree}).keys()`;
-			return `Array.from(${iteree}, (__c, __i) => [__i, __c.codePointAt(0)])`;
-		}
 		this.useHelper("sliceGuard");
 		if (lhs.length === 1) return `__s(${iteree}).keys()`;
 		return `__s(${iteree}).entries()`;
 	},
 
-	genIteratorFor(stmt) {
-		const range = stmt.init.rhs[0];
-		const lhs = stmt.init.lhs.map((e) => e.name ?? this.genExpr(e));
-		let iteree = this.genExpr(range.expr);
-		const yieldParams = range._yieldParams;
-
-		// Wrap bare function expressions to avoid "Function statements require a name"
-		if (range.expr.kind === "FuncLit") {
+	_genIteratorLoop(itereeExpr, paramsStr, body) {
+		let iteree = this.genExpr(itereeExpr);
+		if (itereeExpr.kind === "FuncLit") {
 			iteree = `(${iteree})`;
 		}
 
@@ -763,17 +792,13 @@ export const statementGenMethods = {
 		const retFlag = `__returned${d}`;
 		const retVar = `__retVal${d}`;
 
-		// Yield callback param names (blank vars get _$N to avoid JS syntax error)
-		const cbParams = lhs.map((n, i) => (n === "_" ? `_$${i}` : n));
-
 		this.line("{");
 		this.indented(() => {
 			this.line(`let ${breakFlag} = false;`);
 			this.line(`let ${retFlag} = false;`);
 			this.line(`let ${retVar};`);
 
-			const params = yieldParams.length === 0 ? "" : cbParams.join(", ");
-			this.line(`${iteree}(function(${params}) {`);
+			this.line(`${iteree}(function(${paramsStr}) {`);
 			this.indented(() => {
 				this.line(`if (${breakFlag}) return false;`);
 				const prev = {
@@ -787,7 +812,7 @@ export const statementGenMethods = {
 				this._iterReturnFlag = retFlag;
 				this._iterReturnVar = retVar;
 
-				this.genBlock(stmt.body);
+				this.genBlock(body);
 
 				this._inIteratorBody = prev.in;
 				this._iterBreakFlag = prev.break;
@@ -803,54 +828,17 @@ export const statementGenMethods = {
 		this._iterDepth--;
 	},
 
+	genIteratorFor(stmt) {
+		const range = stmt.init.rhs[0];
+		const lhs = stmt.init.lhs.map((e) => e.name ?? this.genExpr(e));
+		const cbParams = lhs.map((n, i) => (n === "_" ? `_$${i}` : n));
+		const params = range._yieldParams.length === 0 ? "" : cbParams.join(", ");
+		this._genIteratorLoop(range.expr, params, stmt.body);
+	},
+
 	// 0-param iterator: for range iter { body }
 	genIteratorForCond(stmt) {
-		const range = stmt.cond;
-		let iteree = this.genExpr(range.expr);
-
-		if (range.expr.kind === "FuncLit") {
-			iteree = `(${iteree})`;
-		}
-
-		const d = this._iterDepth++;
-		const breakFlag = `__broke${d}`;
-		const retFlag = `__returned${d}`;
-		const retVar = `__retVal${d}`;
-
-		this.line("{");
-		this.indented(() => {
-			this.line(`let ${breakFlag} = false;`);
-			this.line(`let ${retFlag} = false;`);
-			this.line(`let ${retVar};`);
-
-			this.line(`${iteree}(function() {`);
-			this.indented(() => {
-				this.line(`if (${breakFlag}) return false;`);
-				const prev = {
-					in: this._inIteratorBody,
-					break: this._iterBreakFlag,
-					ret: this._iterReturnFlag,
-					retVar: this._iterReturnVar,
-				};
-				this._inIteratorBody = true;
-				this._iterBreakFlag = breakFlag;
-				this._iterReturnFlag = retFlag;
-				this._iterReturnVar = retVar;
-
-				this.genBlock(stmt.body);
-
-				this._inIteratorBody = prev.in;
-				this._iterBreakFlag = prev.break;
-				this._iterReturnFlag = prev.ret;
-				this._iterReturnVar = prev.retVar;
-
-				this.line("return true;");
-			});
-			this.line("});");
-			this.line(`if (${retFlag}) return ${retVar};`);
-		});
-		this.line("}");
-		this._iterDepth--;
+		this._genIteratorLoop(stmt.cond.expr, "", stmt.body);
 	},
 
 	// Inline a statement as a for-init/post string (no semicolon)

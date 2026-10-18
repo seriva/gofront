@@ -80,12 +80,7 @@ export class BuiltinsEmitter {
 				op: "call",
 				funcIndex: this.mod.resolveFuncIndex(mapInfo.lenFuncName),
 			});
-			if ((targetWasmType ?? "i64") === "i64") {
-				this.pushInstruction("i64.extend_i32_u");
-			}
-			return;
-		}
-		if (isSliceType(argType, this.mod.checker)) {
+		} else if (isSliceType(argType, this.mod.checker)) {
 			const elemType = this._getSliceElemType(argType);
 			const sliceInfo = this.mod.getSliceType(elemType);
 			const sliceWType = {
@@ -99,12 +94,7 @@ export class BuiltinsEmitter {
 				typeIndex: sliceInfo.typeIndex,
 				fieldIndex: 2,
 			});
-			if ((targetWasmType ?? "i64") === "i64") {
-				this.pushInstruction("i64.extend_i32_u");
-			}
-			return;
-		}
-		if (
+		} else if (
 			isArrayType(argType, this.mod.checker) ||
 			(argType?.kind === "pointer" &&
 				isArrayType(argType.base, this.mod.checker))
@@ -118,19 +108,13 @@ export class BuiltinsEmitter {
 			};
 			this.emitExpr(arg, arrWType);
 			this.pushInstruction("array.len");
-			if ((targetWasmType ?? "i64") === "i64") {
-				this.pushInstruction("i64.extend_i32_u");
-			}
-			return;
-		}
-		if (isStringType(argType, this.mod.checker)) {
+		} else if (isStringType(argType, this.mod.checker)) {
 			this.emitExpr(arg, "externref");
 			const lenIdx = this.mod.getStringLenImportIndex();
 			this.pushInstruction({ op: "call", funcIndex: lenIdx });
-			if ((targetWasmType ?? "i64") === "i64") {
-				this.pushInstruction("i64.extend_i32_u");
-			}
-			return;
+		}
+		if ((targetWasmType ?? "i64") === "i64") {
+			this.pushInstruction("i64.extend_i32_u");
 		}
 	}
 
@@ -165,12 +149,7 @@ export class BuiltinsEmitter {
 				typeIndex: sliceInfo.typeIndex,
 				fieldIndex: 3,
 			});
-			if ((targetWasmType ?? "i64") === "i64") {
-				this.pushInstruction("i64.extend_i32_u");
-			}
-			return;
-		}
-		if (
+		} else if (
 			isArrayType(argType, this.mod.checker) ||
 			(argType?.kind === "pointer" &&
 				isArrayType(argType.base, this.mod.checker))
@@ -184,10 +163,9 @@ export class BuiltinsEmitter {
 			};
 			this.emitExpr(arg, arrWType);
 			this.pushInstruction("array.len");
-			if ((targetWasmType ?? "i64") === "i64") {
-				this.pushInstruction("i64.extend_i32_u");
-			}
-			return;
+		}
+		if ((targetWasmType ?? "i64") === "i64") {
+			this.pushInstruction("i64.extend_i32_u");
 		}
 	}
 

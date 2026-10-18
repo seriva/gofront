@@ -452,7 +452,17 @@ export class CodeGen {
 	/** Marks a runtime helper (key of HELPER_MAP) as needed by the output. */
 	useHelper(name) {
 		this._helpers.add(name);
-		if (name === "strconvError" || name === "pathError" || name === "ioEOF") {
+		if (
+			name === "strconvError" ||
+			name === "pathError" ||
+			name === "ioEOF" ||
+			name === "base64" ||
+			name === "hex"
+		) {
+			this._helpers.add("error");
+		}
+		if (name === "binary") {
+			this.useHelper("ioEOF");
 			this._helpers.add("error");
 		}
 	}
@@ -597,7 +607,7 @@ export class CodeGen {
 					.map((f) => `${f.name}: ${binding(f)} = ${f.zero}`)
 					.join(", ");
 				this.line(
-					`if (typeof ${first} === "object" && ${first} !== null && ${first}.constructor === Object) ({ ${pattern} } = ${first});`,
+					`if (arguments.length === 1 && typeof ${first} === "object" && ${first} !== null && ${first}.constructor === Object) ({ ${pattern} } = ${first});`,
 				);
 			}
 			for (const f of fields) {

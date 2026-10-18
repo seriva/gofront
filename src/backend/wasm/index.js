@@ -1640,6 +1640,10 @@ class ModuleEmitter {
 		return idx;
 	}
 
+	getTimezoneOffsetImportIndex() {
+		return this.getStdlibImportIndex("time_timezone_offset");
+	}
+
 	// Closure type of `func(*testing.T)` (the t.Run body).
 	getTestingRunClosureType() {
 		return this.getClosureType({
@@ -3087,15 +3091,17 @@ function _collectPackageGlobals(progs, mod, checker) {
 					if (litNode && litNode.kind === "BasicLit") {
 						if (litNode.litKind === "INT") {
 							isConstInit = true;
+							const s = String(litNode.value);
+							const clean = /^0[0-7]+$/.test(s) ? `0o${s.slice(1)}` : s;
 							initInsts = [
 								wType === "i64"
 									? {
 											op: "i64.const",
-											value: BigInt(sign) * BigInt(litNode.value),
+											value: BigInt(sign) * BigInt(clean),
 										}
 									: {
 											op: "i32.const",
-											value: (sign * Number(litNode.value)) | 0,
+											value: (sign * Number(clean)) | 0,
 										},
 							];
 						} else if (litNode.litKind === "FLOAT") {
@@ -3376,7 +3382,20 @@ function _collectInterfaceDispatchers(progs, funcDecls, mod, checker) {
 		});
 	}
 
-	const hasIo = importsAnyOf(progs, ["io", "fmt", "strings", "bytes"]);
+	const hasIo = importsAnyOf(progs, [
+		"io",
+		"fmt",
+		"strings",
+		"bytes",
+		"crypto/sha256",
+		"sha256",
+		"encoding/binary",
+		"binary",
+		"encoding/hex",
+		"hex",
+		"encoding/base64",
+		"base64",
+	]);
 	if (hasIo) {
 		const byteSliceType = {
 			kind: "slice",
@@ -3509,6 +3528,20 @@ function _registerIoSyntheticMethods(funcDecls, mod, strType, programs) {
 					_isMethod: true,
 					_recvTypeName: "bytes.Buffer",
 					_methodName: "WriteString",
+				},
+			),
+			ioHelper(
+				"bytes.Buffer.Read",
+				[
+					{ name: "b", type: bPtr },
+					{ name: "p", type: BYTE_SLICE_T },
+				],
+				INT_ERR_RET,
+				"buffer_read",
+				{
+					_isMethod: true,
+					_recvTypeName: "bytes.Buffer",
+					_methodName: "Read",
 				},
 			),
 		);
@@ -3649,6 +3682,76 @@ function _registerIoSyntheticMethods(funcDecls, mod, strType, programs) {
 					_isMethod: true,
 					_recvTypeName: "io.LimitedReader",
 					_methodName: "Read",
+				},
+			),
+		);
+	}
+	const hasSha256 = importsAnyOf(progs, ["crypto/sha256", "sha256"]);
+	if (
+		hasSha256 &&
+		(mod.structTypes.has("sha256.digest") ||
+			mod.structTypes.has("crypto/sha256.digest"))
+	) {
+		const dPtr = {
+			kind: "pointer",
+			base: { kind: "named", name: "sha256.digest" },
+		};
+		funcDecls.push(
+			ioHelper(
+				"sha256.digest.Write",
+				[
+					{ name: "d", type: dPtr },
+					{ name: "p", type: BYTE_SLICE_T },
+				],
+				INT_ERR_RET,
+				"sha256_write",
+				{
+					_isMethod: true,
+					_recvTypeName: "sha256.digest",
+					_methodName: "Write",
+				},
+			),
+			ioHelper(
+				"sha256.digest.Sum",
+				[
+					{ name: "d", type: dPtr },
+					{ name: "b", type: BYTE_SLICE_T },
+				],
+				BYTE_SLICE_T,
+				"sha256_sum",
+				{ _isMethod: true, _recvTypeName: "sha256.digest", _methodName: "Sum" },
+			),
+			ioHelper(
+				"sha256.digest.Reset",
+				[{ name: "d", type: dPtr }],
+				null,
+				"sha256_reset",
+				{
+					_isMethod: true,
+					_recvTypeName: "sha256.digest",
+					_methodName: "Reset",
+				},
+			),
+			ioHelper(
+				"sha256.digest.Size",
+				[{ name: "d", type: dPtr }],
+				INT_T,
+				"sha256_size",
+				{
+					_isMethod: true,
+					_recvTypeName: "sha256.digest",
+					_methodName: "Size",
+				},
+			),
+			ioHelper(
+				"sha256.digest.BlockSize",
+				[{ name: "d", type: dPtr }],
+				INT_T,
+				"sha256_block_size",
+				{
+					_isMethod: true,
+					_recvTypeName: "sha256.digest",
+					_methodName: "BlockSize",
 				},
 			),
 		);

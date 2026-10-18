@@ -47,7 +47,7 @@ const MATH_EXTRA = {
 	Remainder: ([x, y]) =>
 		`((x, y) => { if (isNaN(x) || isNaN(y) || y === 0 || !isFinite(x)) return NaN; if (!isFinite(y)) return x; const q = x / y; const r = Math.round(q); const diff = Math.abs(q - r); const n = (diff === 0.5 && (r % 2 !== 0)) ? (r < q ? r + 1 : r - 1) : r; return x - n * y; })(${x}, ${y})`,
 	Float64bits: ([x]) =>
-		`((f) => { const b = new ArrayBuffer(8); new Float64Array(b)[0] = f; return new BigUint64Array(b)[0]; })(${x})`,
+		`((f) => { const b = new ArrayBuffer(8); new Float64Array(b)[0] = f; return Number(new BigUint64Array(b)[0]); })(${x})`,
 	Float64frombits: ([b]) =>
 		`((u) => { const buf = new ArrayBuffer(8); new BigUint64Array(buf)[0] = BigInt(u); return new Float64Array(buf)[0]; })(${b})`,
 	Float32bits: ([x]) =>

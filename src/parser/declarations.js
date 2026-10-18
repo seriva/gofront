@@ -261,8 +261,7 @@ export const declarationParseMethods = {
 	},
 
 	parseVarSpec() {
-		const names = [this.expect(T.IDENT).value];
-		while (this.match(T.COMMA)) names.push(this.expect(T.IDENT).value);
+		const names = this.parseIdentList();
 		let type = null;
 		let value = null;
 		if (
@@ -284,8 +283,7 @@ export const declarationParseMethods = {
 			let prevRawExprs = null; // raw AST (with iota Idents) from the previous spec
 			let prevType = null;
 			while (!this.check(T.RPAREN) && !this.check(T.EOF)) {
-				const names = [this.expect(T.IDENT).value];
-				while (this.match(T.COMMA)) names.push(this.expect(T.IDENT).value);
+				const names = this.parseIdentList();
 				let type = null;
 				let rawExprs; // before iota substitution
 				if (this.check(T.ASSIGN)) {
@@ -315,8 +313,7 @@ export const declarationParseMethods = {
 			}
 			this.expect(T.RPAREN);
 		} else {
-			const names = [this.expect(T.IDENT).value];
-			while (this.match(T.COMMA)) names.push(this.expect(T.IDENT).value);
+			const names = this.parseIdentList();
 			let type = null;
 			if (!this.check(T.ASSIGN)) type = this.parseType();
 			this.expect(T.ASSIGN);

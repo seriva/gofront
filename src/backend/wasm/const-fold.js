@@ -11,8 +11,11 @@ const BOOL = "BOOL";
 
 function fromLit(lit) {
 	switch (lit.litKind) {
-		case INT:
-			return { k: INT, v: BigInt(lit.value) };
+		case INT: {
+			const s = String(lit.value);
+			const clean = /^0[0-7]+$/.test(s) ? `0o${s.slice(1)}` : s;
+			return { k: INT, v: BigInt(clean) };
+		}
 		case FLOAT: {
 			const n = Number(lit.value);
 			return Number.isFinite(n) ? { k: FLOAT, v: n } : null;

@@ -21,8 +21,11 @@ export const errorsMethods = {
 			const baseGoType = targetGoType?.base ?? targetGoType;
 			const concreteGoType = baseGoType?.base ?? baseGoType;
 			const typeName = concreteGoType?.name;
+			if (concreteGoType?.kind === "interface" || typeName === "error") {
+				return `__errorAs(${args[0]}, ${args[1]}, (x) => x !== null && (typeof x === "object" ? typeof x.Error === "function" : true))`;
+			}
 			if (typeName) {
-				return `__errorAs(${args[0]}, ${args[1]}, (x) => x instanceof ${typeName} || x?.constructor?.name === "${typeName}" || x?.__struct === "${typeName}")`;
+				return `__errorAs(${args[0]}, ${args[1]}, (x) => (typeof ${typeName} === "function" && x instanceof ${typeName}) || x?.constructor?.name === "${typeName}" || x?.__struct === "${typeName}")`;
 			}
 			return `__errorAs(${args[0]}, ${args[1]})`;
 		}

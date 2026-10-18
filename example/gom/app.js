@@ -56,7 +56,14 @@ var __ifv = __ifv || function(x, ptrFields) {
         const last = parts[parts.length - 1];
         if (cur?.[last] !== null && typeof cur?.[last] === "object") __ifp(cur[last]);
       } else if (c[f] !== null && typeof c[f] === "object") {
-        __ifp(c[f], ptrFields);
+        __ifp(c[f]);
+      }
+    }
+  }
+  for (const k of Object.keys(c)) {
+    if (c[k] !== null && typeof c[k] === "object" && !Array.isArray(c[k]) && !ArrayBuffer.isView(c[k])) {
+      if (!c[k].__v && !c[k].__p && (!Array.isArray(ptrFields) || !ptrFields.includes(k))) {
+        Object.defineProperty(c[k], "__v", { value: true, configurable: true });
       }
     }
   }
@@ -78,20 +85,22 @@ var __ifp = __ifp || function(x, ptrFields, seen) {
         const last = parts[parts.length - 1];
         if (cur?.[last] !== null && typeof cur?.[last] === "object") __ifp(cur[last]);
       } else if (x[f] !== null && typeof x[f] === "object") {
-        __ifp(x[f], ptrFields, seen);
+        __ifp(x[f]);
       }
     }
   }
   return x;
 };
 var __ifm = __ifm || function(x) {
-  if (x === null || typeof x !== "object") x = {};
+  if (x === null || x === undefined) return x;
+  if (typeof x !== "object") return x;
   if (x.__map !== true && Object.isExtensible(x))
     Object.defineProperty(x, "__map", { value: true, configurable: true });
   return x;
 };
 var __ifpm = __ifpm || function(x) {
-  if (x === null || typeof x !== "object") x = {};
+  if (x === null || x === undefined) return x;
+  if (typeof x !== "object") return x;
   if (x.__map !== true && Object.isExtensible(x)) {
     Object.defineProperty(x, "__map", { value: true, configurable: true });
     Object.defineProperty(x, "__ptr_map", { value: true, configurable: true });
@@ -99,7 +108,7 @@ var __ifpm = __ifpm || function(x) {
   return x;
 };
 var __ifs = __ifs || function(x, ptrFields) {
-  if (x === null || x === undefined) x = [];
+  if (x === null || x === undefined) return x;
   if (x.__slice !== true && Object.isExtensible(x))
     Object.defineProperty(x, "__slice", { value: true, configurable: true });
   if (Array.isArray(ptrFields) && Object.isExtensible(x))
@@ -107,7 +116,7 @@ var __ifs = __ifs || function(x, ptrFields) {
   return x;
 };
 var __ifps = __ifps || function(x) {
-  if (x === null || x === undefined) x = [];
+  if (x === null || x === undefined) return x;
   if (x.__slice !== true && Object.isExtensible(x)) {
     Object.defineProperty(x, "__slice", { value: true, configurable: true });
     Object.defineProperty(x, "__ptr_slice", { value: true, configurable: true });
@@ -163,6 +172,9 @@ var __sprintf = __sprintf || function(f, ...a) {
     if (typeof val === "number" || typeof val === "bigint") return String(val);
     if (typeof val === "string") return val;
     if (typeof val === "object") {
+      if (val._d instanceof Date) {
+        return typeof __timeFmt === "function" ? __timeFmt(val, "2006-01-02 15:04:05.999999999 -0700 MST") : String(val._d);
+      }
       if ("re" in val && "im" in val) {
         const sign = val.im >= 0 ? "+" : "";
         return "(" + val.re + sign + val.im + "i)";
@@ -227,7 +239,7 @@ var __sprintf = __sprintf || function(f, ...a) {
         }
         return "map[" + parts.join(" ") + "]";
       }
-      if ("value" in val && (val.__box === true || (!val.__struct && !("__v" in val) && Object.keys(val).length === 1 && (val.constructor === Object || val.constructor?.name === "Object")))) {
+      if ("value" in val && (val.__box === true || (!val.__struct && !("__v" in val) && Object.keys(val).length === 1 && (val.constructor === Object || !val.constructor || val.constructor?.name === "Object")))) {
         return getPtr(val);
       }
       const isPtr = isPointer(val);
@@ -275,7 +287,7 @@ var __sprintf = __sprintf || function(f, ...a) {
         if (Array.isArray(v) || ArrayBuffer.isView(v)) {
           hex = Array.from(v).map((b) => (Number(b) & 0xff).toString(16).padStart(2, "0")).join("");
         } else if (typeof v === "string") {
-          hex = Array.from(v).map((c) => (c.codePointAt(0) ?? 0).toString(16)).join("");
+          hex = Array.from(new TextEncoder().encode(v)).map((b) => b.toString(16).padStart(2, "0")).join("");
         } else if (typeof v === "bigint") {
           hex = BigInt.asUintN(64, v).toString(16);
         } else if (Math.abs(Number(v)) > 0xffffffff) {
@@ -290,7 +302,7 @@ var __sprintf = __sprintf || function(f, ...a) {
         if (Array.isArray(v) || ArrayBuffer.isView(v)) {
           hex = Array.from(v).map((b) => (Number(b) & 0xff).toString(16).padStart(2, "0").toUpperCase()).join("");
         } else if (typeof v === "string") {
-          hex = Array.from(v).map((c) => (c.codePointAt(0) ?? 0).toString(16).toUpperCase()).join("");
+          hex = Array.from(new TextEncoder().encode(v)).map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join("");
         } else if (typeof v === "bigint") {
           hex = BigInt.asUintN(64, v).toString(16).toUpperCase();
         } else if (Math.abs(Number(v)) > 0xffffffff) {
@@ -316,7 +328,7 @@ var __error = __error || function(msg, cause) {
 
 class Todo {
   constructor(id$ = 0, text$ = "", done$ = false, priority$ = 0) {
-    if (typeof id$ === "object" && id$ !== null && id$.constructor === Object) ({ id: id$ = 0, text: text$ = "", done: done$ = false, priority: priority$ = 0 } = id$);
+    if (arguments.length === 1 && typeof id$ === "object" && id$ !== null && id$.constructor === Object) ({ id: id$ = 0, text: text$ = "", done: done$ = false, priority: priority$ = 0 } = id$);
     this.id = id$;
     this.text = text$;
     this.done = done$;
@@ -545,12 +557,12 @@ function todoListNode() {
   if (__len(visible) === 0) {
     return ((...c)=>({Mount(p){const e=document.createElement("ul");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))("todo-list"),((...c)=>({Mount(p){const e=document.createElement("li");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))("empty"),((s)=>({Mount(p){p.appendChild(document.createTextNode(s))}}))("Nothing here.")));
   }
-  return ((...c)=>({Mount(p){const e=document.createElement("ul");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))("todo-list"),((s,f)=>{const c=s.map(f);return{_items:c,Mount(p){c.forEach(n=>n.Mount(p))}}})(__ifs(visible),todoItemNode));
+  return ((...c)=>({Mount(p){const e=document.createElement("ul");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))("todo-list"),((s,f)=>{const c=s.map(f);return{_items:c,Mount(p){c.forEach(n=>n.Mount(p))}}})(visible,todoItemNode));
 }
 
 function filterBarNode() {
   let fs = [FilterAll, FilterActive, FilterCompleted];
-  return ((...c)=>({Mount(p){const e=document.createElement("div");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))("filter-bar"),((s,f)=>{const c=s.map(f);return{_items:c,Mount(p){c.forEach(n=>n.Mount(p))}}})(__ifs(fs),function(f) {
+  return ((...c)=>({Mount(p){const e=document.createElement("div");c.forEach(n=>n?.Mount?.(e));p.appendChild(e);}}))(((v)=>({Mount(e){e.className=v}}))("filter-bar"),((s,f)=>{const c=s.map(f);return{_items:c,Mount(p){c.forEach(n=>n.Mount(p))}}})(fs,function(f) {
     let cls = "filter-btn";
     if (f === filter) {
       cls = "filter-btn active";
@@ -725,13 +737,13 @@ function toggleTodo(id) {
 }
 
 function removeTodo(id) {
-  todos = ((s, f) => { if (!s || s.length === 0) return s; let k = 0; for (let i = 0; i < s.length; i++) { if (!f(s[i])) s[k++] = s[i]; } return ArrayBuffer.isView(s) ? s.subarray(0, k) : (s.length = k, s); })(__ifs(todos), function(t) {
+  todos = ((s, f) => { if (!s || s.length === 0) return s; let k = 0; for (let i = 0; i < s.length; i++) { if (!f(s[i])) s[k++] = s[i]; } return ArrayBuffer.isView(s) ? s.subarray(0, k) : (s.length = k, s); })(todos, function(t) {
     return t.id === id;
   });
 }
 
 function clearCompleted() {
-  todos = ((s, f) => { if (!s || s.length === 0) return s; let k = 0; for (let i = 0; i < s.length; i++) { if (!f(s[i])) s[k++] = s[i]; } return ArrayBuffer.isView(s) ? s.subarray(0, k) : (s.length = k, s); })(__ifs(todos), function(t) {
+  todos = ((s, f) => { if (!s || s.length === 0) return s; let k = 0; for (let i = 0; i < s.length; i++) { if (!f(s[i])) s[k++] = s[i]; } return ArrayBuffer.isView(s) ? s.subarray(0, k) : (s.length = k, s); })(todos, function(t) {
     return t.done;
   });
 }

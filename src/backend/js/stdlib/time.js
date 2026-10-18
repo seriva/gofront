@@ -3,13 +3,19 @@
 /** @typedef {import('../index.js').CodeGen} CodeGen */
 
 const TIME_METHOD_DISPATCH = {
-	Year: (r) => `${r}._d.getFullYear()`,
-	Month: (r) => `${r}._d.getMonth() + 1`,
-	Day: (r) => `${r}._d.getDate()`,
-	Hour: (r) => `${r}._d.getHours()`,
-	Minute: (r) => `${r}._d.getMinutes()`,
-	Second: (r) => `${r}._d.getSeconds()`,
-	Weekday: (r) => `${r}._d.getDay()`,
+	Year: (r) =>
+		`(${r}._offset === 0 ? ${r}._d.getUTCFullYear() : ${r}._d.getFullYear())`,
+	Month: (r) =>
+		`(${r}._offset === 0 ? ${r}._d.getUTCMonth() + 1 : ${r}._d.getMonth() + 1)`,
+	Day: (r) => `(${r}._offset === 0 ? ${r}._d.getUTCDate() : ${r}._d.getDate())`,
+	Hour: (r) =>
+		`(${r}._offset === 0 ? ${r}._d.getUTCHours() : ${r}._d.getHours())`,
+	Minute: (r) =>
+		`(${r}._offset === 0 ? ${r}._d.getUTCMinutes() : ${r}._d.getMinutes())`,
+	Second: (r) =>
+		`(${r}._offset === 0 ? ${r}._d.getUTCSeconds() : ${r}._d.getSeconds())`,
+	Weekday: (r) =>
+		`(${r}._offset === 0 ? ${r}._d.getUTCDay() : ${r}._d.getDay())`,
 	Unix: (r) => `Math.floor(${r}._d.getTime() / 1000)`,
 	UnixMilli: (r) => `${r}._d.getTime()`,
 	Add: (r, a) =>
@@ -19,11 +25,31 @@ const TIME_METHOD_DISPATCH = {
 	Before: (r, a) => `(${r}._d < (${a[0]})._d)`,
 	After: (r, a) => `(${r}._d > (${a[0]})._d)`,
 	Equal: (r, a) => `(${r}._d.getTime() === (${a[0]})._d.getTime())`,
-	IsZero: (r) => `(!${r} || !${r}._d || ${r}._d.getTime() === 0)`,
+	IsZero: (r) =>
+		`(!${r} || !${r}._d || ${r}._isZero === true || ${r}._d.getTime() === -62135596800000 || (${r}._d.getUTCFullYear() <= 1 && ${r}._d.getUTCMonth() === 0 && ${r}._d.getUTCDate() === 1 && ${r}._d.getUTCHours() === 0 && ${r}._d.getUTCMinutes() === 0 && ${r}._d.getUTCSeconds() === 0 && ${r}._d.getUTCMilliseconds() === 0))`,
 	UnixNano: (r) => `(${r}?._d ? Math.round(${r}._d.getTime() * 1000000) : 0)`,
-	Nanosecond: (r) => `(${r}?._d ? ${r}._d.getMilliseconds() * 1000000 : 0)`,
+	Nanosecond: (r) =>
+		`(${r}?._d ? (${r}._offset === 0 ? ${r}._d.getUTCMilliseconds() : ${r}._d.getMilliseconds()) * 1000000 : 0)`,
 	UTC: (r) => `({_d: ${r}?._d ?? new Date(0), _offset: 0})`,
 	Local: (r) => `({_d: ${r}?._d ?? new Date(0)})`,
+	AddDate: (r, a) =>
+		`({_d: new Date(${r}._d.getFullYear() + Number(${a[0]}), ${r}._d.getMonth() + Number(${a[1]}), ${r}._d.getDate() + Number(${a[2]}))})`,
+	Truncate: (r, a) =>
+		`({_d: new Date(Math.floor(${r}._d.getTime() / (Number(${a[0]}) / 1000000)) * (Number(${a[0]}) / 1000000))})`,
+	Round: (r, a) =>
+		`({_d: new Date(Math.round(${r}._d.getTime() / (Number(${a[0]}) / 1000000)) * (Number(${a[0]}) / 1000000))})`,
+	Date: (r) =>
+		`[${r}._offset === 0 ? ${r}._d.getUTCFullYear() : ${r}._d.getFullYear(), ${r}._offset === 0 ? ${r}._d.getUTCMonth() + 1 : ${r}._d.getMonth() + 1, ${r}._offset === 0 ? ${r}._d.getUTCDate() : ${r}._d.getDate()]`,
+	Clock: (r) =>
+		`[${r}._offset === 0 ? ${r}._d.getUTCHours() : ${r}._d.getHours(), ${r}._offset === 0 ? ${r}._d.getUTCMinutes() : ${r}._d.getMinutes(), ${r}._offset === 0 ? ${r}._d.getUTCSeconds() : ${r}._d.getSeconds()]`,
+	YearDay: (r) =>
+		`Math.floor((${r}._d - new Date(${r}._d.getFullYear(), 0, 0)) / 86400000)`,
+	Compare: (r, a) =>
+		`(${r}._d.getTime() < (${a[0]})._d.getTime() ? -1 : (${r}._d.getTime() > (${a[0]})._d.getTime() ? 1 : 0))`,
+	In: (r) => `${r}`,
+	Location: () => `null`,
+	Zone: (r) =>
+		`[${r}._offset === 0 ? "UTC" : "LOCAL", ${r}._offset === 0 ? 0 : -${r}._d.getTimezoneOffset() * 60]`,
 };
 
 const DURATION_METHOD_DISPATCH = {
@@ -44,6 +70,8 @@ const TIME_DISPATCH = {
 	Sleep: (a) => `await new Promise(r => setTimeout(r, ${a[0]} / 1000000))`,
 	Unix: (a) =>
 		`{_d: new Date(Number(${a[0]}) * 1000 + Math.round(Number(${a[1] || 0}) / 1000000))}`,
+	UnixMicro: (a) => `{_d: new Date(Math.round(Number(${a[0]}) / 1000))}`,
+	UnixMilli: (a) => `{_d: new Date(Number(${a[0]}))}`,
 	Date: (a) =>
 		`{_d: new Date(${a[0]}, ${a[1]} - 1, ${a[2]}, ${a[3]}, ${a[4]}, ${a[5]}, Math.round(Number(${a[6] || 0}) / 1000000))}`,
 };
@@ -56,11 +84,11 @@ export const timeMethods = {
 		const args = expr.args.map((a) => this.genExpr(a));
 		if (method === "Format") {
 			this.useHelper("timeFmt");
-			return `__timeFmt(${recvJs}._d, ${args[0]})`;
+			return `__timeFmt(${recvJs}, ${args[0]})`;
 		}
 		if (method === "String") {
 			this.useHelper("timeFmt");
-			return `__timeFmt(${recvJs}._d, "2006-01-02T15:04:05Z07:00")`;
+			return `__timeFmt(${recvJs}, "2006-01-02 15:04:05.999999999 -0700 MST")`;
 		}
 		const gen = TIME_METHOD_DISPATCH[method];
 		return gen ? gen(recvJs, args) : undefined;

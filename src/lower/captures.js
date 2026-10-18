@@ -2,7 +2,7 @@
 // Identifies free variables captured by closures and determines which ones
 // are mutated and thus require heap-allocated environment cells for WASM closures.
 
-import { collectMutatedVars, nodeMutatesVar } from "./ownership.js";
+import { collectMutatedVars } from "./ownership.js";
 import { forEachChild } from "./walk.js";
 
 /**
@@ -151,11 +151,7 @@ export function analyzeCaptures(fnDecl) {
 			result.capturesByClosure.set(node, captured);
 
 			for (const varName of captured) {
-				if (
-					mutatedVars.has(varName) ||
-					nodeMutatesVar(fnDecl.body, varName) ||
-					nodeMutatesVar(node.body, varName)
-				) {
+				if (mutatedVars.has(varName)) {
 					result.mutatedCaptures.add(varName);
 				}
 			}

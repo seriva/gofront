@@ -487,10 +487,12 @@ function literalConst(spec, i) {
 	if (node?.kind !== "BasicLit") return null;
 	switch (node.litKind) {
 		case "INT": {
-			const bi = BigInt(`${sign}${node.value}`);
+			const raw = String(node.value);
+			const clean = /^0[0-7]+$/.test(raw) ? `0o${raw.slice(1)}` : raw;
+			const bi = BigInt(`${sign}${clean}`);
 			return bi > 9007199254740991n || bi < -9007199254740991n
-				? `${sign}${node.value}n`
-				: `${sign}${node.value}`;
+				? `${sign}${clean}n`
+				: `${sign}${clean}`;
 		}
 		case "FLOAT":
 			return `${sign}${node.value}`;
@@ -568,11 +570,13 @@ function collectConstDecl(d, pkgName, meta, errors) {
 			if (folded) {
 				let val = null;
 				if (folded.litKind === "INT") {
-					const bi = BigInt(folded.value);
+					const s = String(folded.value);
+					const clean = /^0[0-7]+$/.test(s) ? `0o${s.slice(1)}` : s;
+					const bi = BigInt(clean);
 					val =
 						bi > 9007199254740991n || bi < -9007199254740991n
-							? `${folded.value}n`
-							: folded.value;
+							? `${clean}n`
+							: clean;
 				} else if (folded.litKind === "FLOAT") {
 					val = folded.value;
 				} else if (folded.litKind === "STRING") {
@@ -1887,6 +1891,7 @@ function ${P}stdlib(stringTable, io) {
 	let rawPos = 0;
 	let hexErr = null;
 	let base64Err = null;
+	let customBase64Encodings = [];
 	return {
 		"fmt_sscan_init": (s, mode) => {
 			sscanHasErr = 0;
@@ -1961,12 +1966,20 @@ function ${P}stdlib(stringTable, io) {
 		"fmt_sscan_token_i64": (i) => {
 			if (i >= sscanTokens.length) { sscanHasErr = 1; sscanErrMsg = "unexpected EOF"; return 0n; }
 			const t = sscanTokens[i];
-			if (!/^[+-]?\\d+$/.test(t)) {
-				sscanHasErr = 1;
-				sscanErrMsg = "expected integer";
-				return 0n;
+			if (/^[+-]?(?:0[xX])?[0-9a-fA-F]+$/.test(t)) {
+				try {
+					if (/^[+-]?[0-9a-fA-F]+$/.test(t) && /[a-fA-F]/.test(t)) {
+						return BigInt("0x" + t);
+					}
+					return BigInt(t);
+				} catch {}
 			}
-			try { return BigInt(t); } catch { sscanHasErr = 1; sscanErrMsg = "expected integer"; return 0n; }
+			if (t.length === 1) {
+				return BigInt(t.charCodeAt(0));
+			}
+			sscanHasErr = 1;
+			sscanErrMsg = "expected integer";
+			return 0n;
 		},
 		"fmt_sscan_token_f64": (i) => {
 			if (i >= sscanTokens.length) { sscanHasErr = 1; sscanErrMsg = "unexpected EOF"; return 0; }
@@ -2315,7 +2328,19 @@ function ${P}stdlib(stringTable, io) {
 			const DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
 			const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 			const pad = (n, w = 2) => String(n).padStart(w, "0");
-			return (layout ?? "").replace(/2006|06|Monday|Mon|January|Jan|01|02|15|PM|pm|03|04|05|Z07:00|\\.000|\\.999|1|2|3|4|5/g, t => {
+			return (layout ?? "").replace(/2006|06|Monday|Mon|January|Jan|01|02|15|PM|pm|03|04|05|Z07:00|\\.(?:0+|9+)|1|2|3|4|5/g, t => {
+				if (t.startsWith(".")) {
+					const isZeroPad = t.includes("0");
+					const maxLen = t.length - 1;
+					let frac = pad(ms % 1000, 3);
+					if (maxLen > 3) frac = frac.padEnd(maxLen, "0");
+					else frac = frac.slice(0, maxLen);
+					if (!isZeroPad) {
+						frac = frac.replace(/0+$/, "");
+						return frac.length > 0 ? "." + frac : "";
+					}
+					return "." + frac;
+				}
 				switch (t) {
 					case "2006": return String(y);
 					case "06":   return String(y).slice(-2);
@@ -2340,8 +2365,6 @@ function ${P}stdlib(stringTable, io) {
 						const o = Math.floor(offsetSec / 60);
 						return o === 0 ? "Z" : (o > 0 ? "+" : "-") + pad(Math.floor(Math.abs(o) / 60)) + ":" + pad(Math.abs(o) % 60);
 					}
-					case ".000": return "." + pad(ms % 1000, 3);
-					case ".999": return (ms % 1000) > 0 ? "." + String(ms % 1000).replace(/0+$/, "") : "";
 					default: return t;
 				}
 			});
@@ -2360,7 +2383,10 @@ function ${P}stdlib(stringTable, io) {
 		"crypto_rand_fill": (len) => {
 			rawBytes = new Uint8Array(len);
 			if (typeof crypto !== "undefined" && crypto.getRandomValues) {
-				crypto.getRandomValues(rawBytes);
+				const CHUNK = 65536;
+				for (let offset = 0; offset < len; offset += CHUNK) {
+					crypto.getRandomValues(rawBytes.subarray(offset, Math.min(offset + CHUNK, len)));
+				}
 			} else {
 				for (let i = 0; i < len; i++) rawBytes[i] = Math.floor(Math.random() * 256);
 			}
@@ -2381,13 +2407,18 @@ function ${P}stdlib(stringTable, io) {
 			return rawBytes.length;
 		},
 		"hex_get_err": () => hexErr,
+		"base64_new_encoding": (alphabet) => {
+			const id = customBase64Encodings.length + 4;
+			customBase64Encodings.push(__base64_make(alphabet ?? "", "="));
+			return id;
+		},
 		"base64_encode_to_string": (mode) => {
-			const enc = mode === 1 ? __base64_url : mode === 2 ? __base64_raw_std : mode === 3 ? __base64_raw_url : __base64_std;
-			return enc.EncodeToString(rawBytes);
+			const enc = mode === 1 ? __base64_url : mode === 2 ? __base64_raw_std : mode === 3 ? __base64_raw_url : mode >= 4 ? customBase64Encodings[mode - 4] : __base64_std;
+			return (enc ?? __base64_std).EncodeToString(rawBytes);
 		},
 		"base64_decode_string": (mode, s) => {
-			const enc = mode === 1 ? __base64_url : mode === 2 ? __base64_raw_std : mode === 3 ? __base64_raw_url : __base64_std;
-			const [res, err] = enc.DecodeString(s ?? "");
+			const enc = mode === 1 ? __base64_url : mode === 2 ? __base64_raw_std : mode === 3 ? __base64_raw_url : mode >= 4 ? customBase64Encodings[mode - 4] : __base64_std;
+			const [res, err] = (enc ?? __base64_std).DecodeString(s ?? "");
 			base64Err = err ? (err.message ?? String(err)) : null;
 			rawBytes = new Uint8Array(res);
 			return rawBytes.length;

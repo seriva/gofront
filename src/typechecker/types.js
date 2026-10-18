@@ -83,6 +83,23 @@ export const BROWSER_GLOBALS = new Set([
 	"prompt",
 	"localStorage",
 	"sessionStorage",
+	"WebSocket",
+	"Worker",
+	"HTMLElement",
+	"Element",
+	"Event",
+	"CustomEvent",
+	"URL",
+	"URLSearchParams",
+	"FormData",
+	"Headers",
+	"Request",
+	"Response",
+	"Blob",
+	"File",
+	"FileReader",
+	"TextEncoder",
+	"TextDecoder",
 ]);
 
 // Stdlib packages the WASM backend can emit. Extend as src/backend/wasm/emit-stdlib.js
@@ -115,6 +132,13 @@ export const WASM_SUPPORTED_STDLIB = new Set([
 	"encoding/binary",
 	"encoding/hex",
 	"encoding/base64",
+]);
+
+export const STDLIB_PACKAGES = new Set([
+	...WASM_SUPPORTED_STDLIB,
+	"os",
+	"gom",
+	"regexp",
 ]);
 
 // Per-namespace member subset the WASM backend implements. `null` means every
@@ -448,6 +472,7 @@ export const WASM_STDLIB_MEMBERS = new Map([
 			"FieldsFunc",
 			"Clone",
 			"Cut",
+			"ToTitle",
 			"ContainsAny",
 			"ContainsRune",
 			"Map",
@@ -494,6 +519,9 @@ export const WASM_STDLIB_MEMBERS = new Map([
 			"ReadWriter",
 			"Closer",
 			"EOF",
+			"ErrUnexpectedEOF",
+			"ErrShortWrite",
+			"ReadFull",
 			"ReadAll",
 			"Discard",
 			"WriteString",
@@ -509,6 +537,8 @@ export const WASM_STDLIB_MEMBERS = new Map([
 			"Since",
 			"Parse",
 			"Unix",
+			"UnixMicro",
+			"UnixMilli",
 			"Date",
 			"Duration",
 			"Nanosecond",
@@ -802,7 +832,9 @@ export function typeStr(t) {
 		case "map":
 			return `map[${typeStr(t.key)}]${typeStr(t.value)}`;
 		case "struct":
-			return t.name || "struct{...}";
+			return t.typeArgs && t.typeArgs.length > 0
+				? `${t.name || "struct"}[${t.typeArgs.map(typeStr).join(", ")}]`
+				: t.name || "struct{...}";
 		case "interface":
 			return t.name || "interface{...}";
 		case "namespace":
@@ -812,7 +844,9 @@ export function typeStr(t) {
 		case "tuple":
 			return `(${t.types.map(typeStr).join(", ")})`;
 		case "named":
-			return t.name;
+			return t.typeArgs && t.typeArgs.length > 0
+				? `${t.name}[${t.typeArgs.map(typeStr).join(", ")}]`
+				: t.name;
 		case "pointer":
 			return `*${typeStr(t.base)}`;
 		case "typeParam":

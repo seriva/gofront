@@ -141,6 +141,61 @@ test("gofront dev <dir> starts dev server and prints running url", () => {
 	);
 });
 
+test("--watch starts, builds, and emits 'watching' message", () => {
+	withTempDir(
+		{ "main.go": 'package main\nfunc main() { console.log("hi") }\n' },
+		(dir) => {
+			const file = join(dir, "main.go");
+			const r = spawnSync(process.execPath, [CLI, file, "--watch"], {
+				encoding: "utf8",
+				timeout: 900,
+			});
+			assert(r.stderr.includes("OK"), `expected OK in stderr: ${r.stderr}`);
+			assert(
+				r.stderr.includes("watching"),
+				`expected 'watching' in stderr: ${r.stderr}`,
+			);
+		},
+	);
+});
+
+test("--watch with compile error logs ERROR without exiting", () => {
+	withTempDir(
+		{ "bad.go": "package main\nfunc main() { notDefined }\n" },
+		(dir) => {
+			const file = join(dir, "bad.go");
+			const r = spawnSync(process.execPath, [CLI, file, "--watch"], {
+				encoding: "utf8",
+				timeout: 900,
+			});
+			assert(
+				r.stderr.includes("ERROR"),
+				`expected ERROR in stderr: ${r.stderr}`,
+			);
+		},
+	);
+});
+
+test("--watch -o writes output file on initial build", () => {
+	withTempDir(
+		{ "main.go": 'package main\nfunc main() { console.log("hi") }\n' },
+		(dir) => {
+			const file = join(dir, "main.go");
+			const outFile = join(dir, "out.js");
+			const r = spawnSync(
+				process.execPath,
+				[CLI, file, "--watch", "-o", outFile],
+				{ encoding: "utf8", timeout: 900 },
+			);
+			assert(r.stderr.includes("OK"), `expected OK in stderr: ${r.stderr}`);
+			assert(
+				r.stderr.includes("wrote"),
+				`expected 'wrote' in stderr: ${r.stderr}`,
+			);
+		},
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

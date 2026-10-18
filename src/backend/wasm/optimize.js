@@ -105,7 +105,7 @@ function runWasmOpt(
 		if (options.closedWorld !== false) {
 			args.push("--closed-world");
 		}
-		if (options.trapsNeverHappen !== false) {
+		if (options.trapsNeverHappen === true) {
 			args.push("--traps-never-happen");
 		}
 		if (options.converge) {
