@@ -26,6 +26,18 @@ features (e.g. `docs/v0.0.5/`).
 
 ---
 
+## v1.7.0
+
+**Theme: Typed data, typed JS libraries, faster math — without adding a runtime.** Compile-time `encoding/json` driven by struct tags (no `reflect`), TypeScript tuple returns mapped to Go multi-value results so React/Preact hooks work directly (`example/reactive` replaced by `example/preact`), and an opt-in `gofront/simd` package lowered to WASM `v128`, shipped only if it beats the scalar hybrid raycast by ≥ 1.3×. Design document in [`docs/v1.7.0/json-preact-simd-plan.md`](v1.7.0/json-preact-simd-plan.md).
+
+| Area | Difficulty | Status | Notes |
+|---|---|---|---|
+| `encoding/json` | Medium | Draft | Preserve struct tags; per-type generated encoders/decoders; Go-identical output and errors; JS packages only (diagnostic in wasm). |
+| `.d.ts` tuples & `example/preact` | Medium | Draft | `[A, B]` returns → `(A, B)`; vendored Preact TodoMVC replaces microtastic-based `example/reactive`. |
+| WASM SIMD (`gofront/simd`) | High | Draft | `F32x4` → `v128` in wasm, scalar fallback in js; `shared.Float32` load/store; go/no-go gate. |
+
+---
+
 ## v1.6.1
 
 **Theme: Close the WASM gaps.** Makes the `wasm`/`both` subset cover all of the language and stdlib that doesn't touch browser or host APIs: non-literal constants, array/interface map keys, the remaining boundary types (incl. anonymous interfaces), missing stdlib members, and the `unicode`, `math/rand`, `bytes`, `io`, `path`, `html` and `time` (minus `Sleep`) packages. Browser-facing code stays in `js` packages by design; only `os`, `regexp` and `time.Sleep` remain JS-only. Design document in [`docs/v1.6.1/wasm-gaps-plan.md`](v1.6.1/wasm-gaps-plan.md).
