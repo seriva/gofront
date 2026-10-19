@@ -102,6 +102,15 @@ function runWasmOpt(
 		if (options.gufa !== false) {
 			args.push("--gufa");
 		}
+		if (options.closedWorld !== false) {
+			args.push("--closed-world");
+		}
+		if (options.trapsNeverHappen === true) {
+			args.push("--traps-never-happen");
+		}
+		if (options.converge) {
+			args.push("--converge");
+		}
 		if (options.sourceMap) {
 			if (options.inputSourceMap) {
 				const mapInput = join(dir, "in.wasm.map");
@@ -124,8 +133,6 @@ function runWasmOpt(
 		if (options.emitWat) {
 			try {
 				const watArgs = [
-					`-O${level}`,
-					`--shrink-level=${shrinkLevel}`,
 					"--enable-gc",
 					"--enable-reference-types",
 					"--enable-exception-handling",
@@ -134,9 +141,11 @@ function runWasmOpt(
 					"--enable-mutable-globals",
 					"--enable-nontrapping-float-to-int",
 					"--enable-tail-call",
+					output,
+					"-S",
+					"-o",
+					watOutput,
 				];
-				if (options.gufa !== false) watArgs.push("--gufa");
-				watArgs.push(input, "-S", "-o", watOutput);
 				execFileSync(command, [...cmdArgs, ...watArgs], { stdio: "pipe" });
 				if (existsSync(watOutput)) {
 					wat = readFileSync(watOutput, "utf8");

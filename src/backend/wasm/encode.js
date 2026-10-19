@@ -52,20 +52,32 @@ export function encodeI64LEB(val) {
 	return bytes;
 }
 
+const _f32Arr = new Float32Array(1);
+const _f32Bytes = new Uint8Array(_f32Arr.buffer);
 export function encodeF32(val) {
-	const buf = new ArrayBuffer(4);
-	new DataView(buf).setFloat32(0, Number(val), true); // little-endian
-	return Array.from(new Uint8Array(buf));
+	_f32Arr[0] = Number(val);
+	return [_f32Bytes[0], _f32Bytes[1], _f32Bytes[2], _f32Bytes[3]];
 }
 
+const _f64Arr = new Float64Array(1);
+const _f64Bytes = new Uint8Array(_f64Arr.buffer);
 export function encodeF64(val) {
-	const buf = new ArrayBuffer(8);
-	new DataView(buf).setFloat64(0, Number(val), true); // little-endian
-	return Array.from(new Uint8Array(buf));
+	_f64Arr[0] = Number(val);
+	return [
+		_f64Bytes[0],
+		_f64Bytes[1],
+		_f64Bytes[2],
+		_f64Bytes[3],
+		_f64Bytes[4],
+		_f64Bytes[5],
+		_f64Bytes[6],
+		_f64Bytes[7],
+	];
 }
 
+const _textEncoder = new TextEncoder();
 function encodeString(str) {
-	const utf8 = new TextEncoder().encode(str);
+	const utf8 = _textEncoder.encode(str);
 	return [...encodeU32LEB(utf8.length), ...utf8];
 }
 
@@ -907,31 +919,45 @@ export function encodeModule(mod) {
 	const sectionOffsets = [];
 	const codeSec = encodeCodeSection(mod.funcs, sectionOffsets);
 
-	const allBytes = [
-		...magic,
-		...version,
-		...GOFRONT_SECTION_BYTES,
-		...typeSec,
-		...importSec,
-		...funcSec,
-		...memorySec,
-		...tagSec,
-		...globalSec,
-		...exportSec,
-		...startSec,
-		...elemSec,
+	const sections = [
+		magic,
+		version,
+		GOFRONT_SECTION_BYTES,
+		typeSec,
+		importSec,
+		funcSec,
+		memorySec,
+		tagSec,
+		globalSec,
+		exportSec,
+		startSec,
+		elemSec,
 	];
-	const codeStart = allBytes.length;
+	let totalLen = 0;
+	for (const s of sections) totalLen += s.length;
+	const codeStart = totalLen;
 	mod.codeOffsets = sectionOffsets.map((o) => codeStart + o);
-	allBytes.push(...codeSec);
+	totalLen += codeSec.length;
+	let smSec = null;
 	if (mod.sourceMappingURL) {
-		allBytes.push(
-			...encodeSection(0, [
-				...encodeString("sourceMappingURL"),
-				...encodeString(mod.sourceMappingURL),
-			]),
-		);
+		smSec = encodeSection(0, [
+			...encodeString("sourceMappingURL"),
+			...encodeString(mod.sourceMappingURL),
+		]);
+		totalLen += smSec.length;
 	}
 
-	return new Uint8Array(allBytes);
+	const out = new Uint8Array(totalLen);
+	let offset = 0;
+	for (const s of sections) {
+		out.set(s, offset);
+		offset += s.length;
+	}
+	out.set(codeSec, offset);
+	offset += codeSec.length;
+	if (smSec) {
+		out.set(smSec, offset);
+	}
+
+	return out;
 }

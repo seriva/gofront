@@ -203,11 +203,25 @@ export class Lexer {
 		const l = this.line,
 			c = this.col;
 		this.advance(); // opening "
-		const parts = [];
-		while (this.pos < this.src.length && this.peek() !== '"') {
-			if (this.peek() === "\n") this.err("Unterminated string literal");
-			if (this.peek() === "\\") {
-				this.advance();
+		let start = this.pos;
+		let parts = null;
+		while (this.pos < this.src.length) {
+			const ch = this.src[this.pos];
+			if (ch === '"') {
+				if (parts === null) {
+					const str = this.src.slice(start, this.pos);
+					this.advance(); // closing "
+					return str;
+				}
+				parts.push(this.src.slice(start, this.pos));
+				this.advance(); // closing "
+				return parts.join("");
+			}
+			if (ch === "\n") this.err("Unterminated string literal");
+			if (ch === "\\") {
+				if (parts === null) parts = [];
+				if (this.pos > start) parts.push(this.src.slice(start, this.pos));
+				this.advance(); // skip \
 				const esc = this.advance();
 				switch (esc) {
 					case "n":
@@ -231,14 +245,12 @@ export class Lexer {
 					default:
 						parts.push(`\\${esc}`);
 				}
+				start = this.pos;
 			} else {
-				parts.push(this.advance());
+				this.advance();
 			}
 		}
-		if (this.pos >= this.src.length)
-			throw new LexError("Unterminated string", l, c, this.filename, this.src);
-		this.advance(); // closing "
-		return parts.join("");
+		throw new LexError("Unterminated string", l, c, this.filename, this.src);
 	}
 
 	readRawString() {
@@ -383,39 +395,78 @@ export class Lexer {
 	_readDecimalExponent(n) {
 		n += this.advance(); // consume e/E
 		if (this.peek() === "+" || this.peek() === "-") n += this.advance();
-		while (this.pos < this.src.length && /[0-9_]/.test(this.peek())) {
-			const ch = this.advance();
-			if (ch !== "_") n += ch;
+		while (this.pos < this.src.length) {
+			const c = this.src.charCodeAt(this.pos);
+			if (c >= 48 && c <= 57) {
+				n += this.advance();
+			} else if (c === 95) {
+				this.advance();
+			} else {
+				break;
+			}
 		}
 		return n;
 	}
 
 	_readDecimalNumber(n) {
 		let isFloat = false;
-		while (this.pos < this.src.length && /[0-9_]/.test(this.peek())) {
-			const ch = this.advance();
-			if (ch !== "_") n += ch;
-		}
-		if (this.peek() === "." && /[0-9]/.test(this.peek(1))) {
-			isFloat = true;
-			n += this.advance();
-			while (this.pos < this.src.length && /[0-9_]/.test(this.peek())) {
-				const ch = this.advance();
-				if (ch !== "_") n += ch;
+		while (this.pos < this.src.length) {
+			const c = this.src.charCodeAt(this.pos);
+			if (c >= 48 && c <= 57) {
+				n += this.advance();
+			} else if (c === 95) {
+				this.advance(); // skip _
+			} else {
+				break;
 			}
 		}
-		if (this.peek() === "e" || this.peek() === "E") {
-			isFloat = true;
-			n = this._readDecimalExponent(n);
+		if (
+			this.pos + 1 < this.src.length &&
+			this.src.charCodeAt(this.pos) === 46
+		) {
+			const next = this.src.charCodeAt(this.pos + 1);
+			if (next >= 48 && next <= 57) {
+				isFloat = true;
+				n += this.advance();
+				while (this.pos < this.src.length) {
+					const c = this.src.charCodeAt(this.pos);
+					if (c >= 48 && c <= 57) {
+						n += this.advance();
+					} else if (c === 95) {
+						this.advance(); // skip _
+					} else {
+						break;
+					}
+				}
+			}
+		}
+		if (this.pos < this.src.length) {
+			const c = this.src.charCodeAt(this.pos);
+			if (c === 101 || c === 69) {
+				isFloat = true;
+				n = this._readDecimalExponent(n);
+			}
 		}
 		return { n, isFloat };
 	}
 
 	readIdent() {
-		let s = "";
-		while (this.pos < this.src.length && /[a-zA-Z0-9_]/.test(this.peek()))
-			s += this.advance();
-		return s;
+		const start = this.pos;
+		while (this.pos < this.src.length) {
+			const code = this.src.charCodeAt(this.pos);
+			if (
+				(code >= 97 && code <= 122) ||
+				(code >= 65 && code <= 90) ||
+				(code >= 48 && code <= 57) ||
+				code === 95
+			) {
+				this.pos++;
+			} else {
+				break;
+			}
+		}
+		this.col += this.pos - start;
+		return this.src.slice(start, this.pos);
 	}
 
 	// ── Semicolon insertion ──────────────────────────────────────

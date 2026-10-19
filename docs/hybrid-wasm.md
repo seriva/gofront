@@ -90,27 +90,38 @@ copies agree bit-for-bit:
 ## What `wasm` packages support
 
 The backend (`src/backend/wasm/`) implements: structs, pointers, methods, arrays, slices
-(`append`, slicing, `copy`), strings, maps, interfaces, generics, closures (including
-closures inside methods), `defer`/`panic`/`recover`, and `error` values.
+(`append`, slicing, `copy`), strings, maps (including array-typed and interface-typed keys),
+interfaces (including anonymous interfaces), generics, closures (including closures inside methods),
+`defer`/`panic`/`recover`, `error` values, and non-literal package constants.
 
-The stdlib subset available in `wasm`/`both` packages is `math`, `math/bits`, `errors`
-(`New`, `Is`, `Unwrap`), `fmt` (`Sprintf`, `Printf`, `Println`, `Errorf` over primitive,
-string, `error` and `any` operands — format slices and structs field by field), `strings`,
-`strconv`, `unicode/utf8`, `slices`, `maps`, `sort`, `testing` and `gofront/shared`. Any other
-import, or a member the backend has not implemented yet, reports
-`'strings.Map' is not yet available in wasm packages` with a hint to move the call to a JS
-package. The `math`
-functions without a native WASM instruction (`Sin`, `Cos`, `Atan2`, `Pow`, `Mod`, `Hypot`,
+The stdlib packages available in `wasm`/`both` packages are:
+- `math` (including 24 constants, `Float64bits`/`Float64frombits`, `Float32bits`/`Float32frombits`, `Sinh`, `Cosh`, `Tanh`, `Remainder`), `math/bits` (including `Len*`, `Reverse*`, `ReverseBytes*`), `math/rand` (pure inline 64-bit PRNG with deterministic `Seed`, `Read`, `Shuffle`, `Perm`)
+- `errors` (`New`, `Is`, `Unwrap`, `As`, `Join`)
+- `fmt` (`Sprintf`, `Printf`, `Println`, `Errorf`, `Fprintf`, `Fprintln`, `Fprint`, `Sscan`, `Sscanln`, `Sscanf`, including `%v`/`%+v` composite formatting over slices, arrays, maps, and structs)
+- `strings` (including `Builder`, `NewReplacer`, `NewReader`, `Cut*`, `Split*`, `*Func`, `FieldsFunc`)
+- `bytes` (including `Buffer`, `NewReader`, `FieldsFunc`, `Clone`)
+- `strconv` (including `Unquote`, `AppendInt`, `AppendFloat`, `AppendUint`, `AppendBool`, `ParseUint`, `FormatUint`)
+- `unicode`, `unicode/utf8`
+- `slices` (including `Compare`, `SortFunc`, `IndexFunc`, `ContainsFunc`, `BinarySearch`, `BinarySearchFunc`, `Min`, `Max`, `Compact`, `Concat`, `Delete`, `Insert`, `Replace`, `Grow`, `Clip`), `maps`, `sort`
+- `io` (`Reader`, `Writer`, `ReadWriter`, `Closer`, `ReadAll`, `Discard`, `WriteString`, `Copy`, `CopyN`, `LimitReader`, `EOF`)
+- `path`, `path/filepath`
+- `html` (`EscapeString`, `UnescapeString`)
+- `time` (pure parts: `Duration` with methods `.Seconds()`, `.Milliseconds()`, `.Minutes()`, `.Hours()`, `.String()`; `Time` with methods `.IsZero()`, `.UnixNano()`, `.Nanosecond()`, `.UTC()`, `.Local()`, calendar arithmetic, parsing, formatting; `time.Sleep` stays JS-only)
+- `sync` (`Mutex`, `RWMutex`, `Once`, `WaitGroup`)
+- `crypto/rand` (`Read`), `crypto/sha256` (`Sum256`, `New`)
+- `encoding/binary` (`LittleEndian`, `BigEndian`, `Read`, `Write`, `Append*`, `Size`)
+- `encoding/hex` (`EncodeToString`, `DecodeString`, `EncodedLen`, `DecodedLen`)
+- `encoding/base64` (`StdEncoding`, `URLEncoding`, `RawStdEncoding`, `RawURLEncoding`)
+- `testing` and `gofront/shared`.
+
+Any other import, or JS-only host API (`os`, `regexp`, `time.Sleep`), reports a targeted diagnostic
+(e.g. `'time.Sleep' is not yet available in wasm packages`) with a hint to keep the call in a JS package.
+The `math` functions without a native WASM instruction (`Sin`, `Cos`, `Atan2`, `Pow`, `Mod`, `Hypot`,
 `Cbrt`, `Round`, …) are imported from JS `Math` with Go semantics (`Round` rounds half away
 from zero; `Mod` keeps the sign of the dividend).
 
-Not yet supported inside `wasm` code (reports a `… (planned)` diagnostic):
-
-- Referencing a **non-literal** package constant (`const X = f()`); literal constants are
-  inlined.
-
-Package-level variables with non-literal initialisers are initialised from a WASM `start`
-function, so they are ready before any export is called.
+Package-level variables with non-literal initialisers and runtime-evaluated constants are initialised
+from a WASM `start` function, so they are ready before any export is called.
 
 ---
 
@@ -138,7 +149,15 @@ compile error.
 | Named non-empty interfaces | **WASM → JS:** an exported `*T` arrives as its handle class (or `both` live view); other dynamic types arrive as a facade object whose methods call into WASM. **JS → WASM:** only WASM-owned values (handles, facades) are accepted. A `js` type implementing a `wasm` interface is a compile error (`type '*tri' (js) cannot implement wasm interface 'Shape' across the boundary; …`); keep implementations in WASM or pass a `func` callback. |
 | `*testing.T` | Stays a JS object; `t.Errorf`, `t.Fatal`, `t.Log`, `t.Skip`, `t.Name`, `t.Failed`, … are routed back to the harness. |
 | `shared.Float32`, `shared.Int32`, … (`gofront/shared`) | **Zero-copy** TypedArray view over the module's linear memory in both directions (see below). |
-| `map`, `error`, anonymous interfaces, pointers to non-structs, anonymous structs, exported non-literal constants | **Rejected** with `… is not yet supported across the wasm boundary (planned)`. |
+| `error` | **WASM → JS:** `Error` subclass carrying `.message` and the WASM reference (`__ref`). A nil error is `null`. **JS → WASM:** only WASM-owned error instances are accepted; identity is preserved (`errors.Is`). Non-WASM error throws `TypeError`. |
+| `map[K]V` (K = string, number, bool) | Copied both ways as a fresh JS `Map` in insertion order. Map parameters accept a plain JS object or a `Map`. Mutating the returned JS `Map` does not alter WASM state. |
+| Pointers to non-structs (`*float64`, `*int`, …) | Copy-in/copy-out box `{ value }`, written back after the call. Write-back is skipped on panic and the panic propagates. |
+| Anonymous structs | Copied as plain JS objects `{ [field]: value }` with the same field names. |
+| Anonymous interfaces (`interface{ … }`) | Keyed on the sorted method set; identical method sets share the same facade class. Same JS → WASM rule as named interfaces (only WASM-owned values). |
+| Exported non-literal constants | Exposed on the facade as module constants read once after the `start` function runs. |
+| `time.Duration` | Nanoseconds crossing as a JS `Number` (`int64`). |
+| `time.Time` | Copied into the JS backend's `time.Time` object via Unix milliseconds (preserving timezone offset). Rounded to the JS shim's millisecond precision. |
+| `chan` | **Rejected** with `chan is not yet supported across the wasm boundary (planned)`. |
 
 ### Shared linear-memory buffers (`gofront/shared`)
 
@@ -238,7 +257,7 @@ deleted.
 
 - **Zero setup:** Uses the `wasm-opt` CLI shipped by the optional `binaryen` npm package (run through node, no native toolchain) and automatically prefers a native `wasm-opt` binary if present on `PATH`. If neither is available, `--release`/`--wasm-opt` fail with an actionable error; plain `gofront build` is unaffected.
 - **WasmGC feature flags:** Configured for `GC`, `ReferenceTypes`, `BulkMemory`, `Multivalue`, `ExceptionHandling`, `MutableGlobals`, `NontrappingFPToInt`, and `TailCall`.
-- **Optimization passes:** Level `-O3` combined with GUFA (`--gufa`: devirtualization, type refinement, function inlining, dead type/code elimination).
+- **Optimization passes:** Level `-O3` combined with whole-program analysis (`--closed-world`: interface devirtualization, struct field pruning, type refinement), GUFA (`--gufa`), and pass convergence (`--converge`) in release builds, retaining hardware trap preservation by default (traps on nil struct dereference). Disassembly on `--emit-wat` translates the optimized binary directly in a single pass without re-running passes.
 - **Size savings & validation:** Typically yields **~23% binary size reduction** and validates module structure post-optimization.
 - **Source maps:** Passing `--source-map` emits a function-level `app.wasm.map` (one mapping per function body, resolved `sources`) and embeds the `sourceMappingURL` custom section. With `--release`/`--wasm-opt` the map is handed to Binaryen (`-ism`) so offsets stay correct after optimisation.
 - **Instant dev reload:** `gofront dev` bypasses optimization for sub-10ms instant hot-reload.

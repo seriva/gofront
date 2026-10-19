@@ -15,6 +15,20 @@ const PARSE_STMT_DELEGATE = {
 	[T.LBRACE]: "parseBlock",
 };
 
+const ASSIGN_OPS = new Set([
+	T.ASSIGN,
+	T.PLUS_ASSIGN,
+	T.MINUS_ASSIGN,
+	T.STAR_ASSIGN,
+	T.SLASH_ASSIGN,
+	T.PERCENT_ASSIGN,
+	T.AMP_ASSIGN,
+	T.PIPE_ASSIGN,
+	T.CARET_ASSIGN,
+	T.LSHIFT_ASSIGN,
+	T.RSHIFT_ASSIGN,
+]);
+
 export const statementParserMethods = {
 	parseBlock() {
 		this.expect(T.LBRACE);
@@ -206,22 +220,13 @@ export const statementParserMethods = {
 		this.expect(T.LBRACE);
 		const cases = [];
 		while (!this.check(T.RBRACE) && !this.check(T.EOF)) {
-			if (this.check(T.CASE)) {
-				this.advance();
-				const list = this.parseExprList();
-				this.expect(T.COLON);
-				cases.push({ kind: "CaseClause", list, stmts: this._parseCaseBody() });
-			} else if (this.check(T.DEFAULT)) {
-				this.advance();
-				this.expect(T.COLON);
-				cases.push({
-					kind: "CaseClause",
-					list: null,
-					stmts: this._parseCaseBody(),
-				});
-			} else {
+			const isCase = this.match(T.CASE);
+			if (!isCase && !this.match(T.DEFAULT)) {
 				this.err("Expected case or default");
 			}
+			const list = isCase ? this.parseExprList() : null;
+			this.expect(T.COLON);
+			cases.push({ kind: "CaseClause", list, stmts: this._parseCaseBody() });
 		}
 		this.expect(T.RBRACE);
 		return { kind: "SwitchStmt", init, tag, cases };
@@ -244,18 +249,13 @@ export const statementParserMethods = {
 		this.expect(T.LBRACE);
 		const cases = [];
 		while (!this.check(T.RBRACE) && !this.check(T.EOF)) {
-			if (this.check(T.CASE)) {
-				this.advance();
-				const types = this._parseTypeSwitchTypeList();
-				this.expect(T.COLON);
-				cases.push({ types, stmts: this._parseCaseBody() });
-			} else if (this.check(T.DEFAULT)) {
-				this.advance();
-				this.expect(T.COLON);
-				cases.push({ types: null, stmts: this._parseCaseBody() });
-			} else {
+			const isCase = this.match(T.CASE);
+			if (!isCase && !this.match(T.DEFAULT)) {
 				this.err("Expected case or default");
 			}
+			const types = isCase ? this._parseTypeSwitchTypeList() : null;
+			this.expect(T.COLON);
+			cases.push({ types, stmts: this._parseCaseBody() });
 		}
 		this.expect(T.RBRACE);
 		return { kind: "TypeSwitchStmt", assign, expr, cases };
@@ -305,20 +305,7 @@ export const statementParserMethods = {
 		}
 
 		// x = expr  or  x += expr  etc.
-		const assignOps = [
-			T.ASSIGN,
-			T.PLUS_ASSIGN,
-			T.MINUS_ASSIGN,
-			T.STAR_ASSIGN,
-			T.SLASH_ASSIGN,
-			T.PERCENT_ASSIGN,
-			T.AMP_ASSIGN,
-			T.PIPE_ASSIGN,
-			T.CARET_ASSIGN,
-			T.LSHIFT_ASSIGN,
-			T.RSHIFT_ASSIGN,
-		];
-		if (assignOps.includes(t.type)) {
+		if (ASSIGN_OPS.has(t.type)) {
 			const op = this.advance().value;
 			const rhs = this.parseExprList();
 			return { kind: "AssignStmt", lhs: [first], op, rhs };

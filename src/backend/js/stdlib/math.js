@@ -19,6 +19,9 @@ const MATH1 = {
 	Acos: "acos",
 	Exp: "exp",
 	Trunc: "trunc",
+	Sinh: "sinh",
+	Cosh: "cosh",
+	Tanh: "tanh",
 };
 const MATH2 = {
 	Pow: "pow",
@@ -41,7 +44,16 @@ const MATH_EXTRA = {
 	Copysign: ([x, y]) =>
 		`(Math.abs(${x}) * (${y} < 0 || Object.is(${y}, -0) ? -1 : 1))`,
 	Dim: ([x, y]) => `Math.max(${x} - ${y}, 0)`,
-	Remainder: ([x, y]) => `(${x} - Math.round(${x} / ${y}) * ${y})`,
+	Remainder: ([x, y]) =>
+		`((x, y) => { if (isNaN(x) || isNaN(y) || y === 0 || !isFinite(x)) return NaN; if (!isFinite(y)) return x; const q = x / y; const r = Math.round(q); const diff = Math.abs(q - r); const n = (diff === 0.5 && (r % 2 !== 0)) ? (r < q ? r + 1 : r - 1) : r; return x - n * y; })(${x}, ${y})`,
+	Float64bits: ([x]) =>
+		`((f) => { const b = new ArrayBuffer(8); new Float64Array(b)[0] = f; return Number(new BigUint64Array(b)[0]); })(${x})`,
+	Float64frombits: ([b]) =>
+		`((u) => { const buf = new ArrayBuffer(8); new BigUint64Array(buf)[0] = BigInt(u); return new Float64Array(buf)[0]; })(${b})`,
+	Float32bits: ([x]) =>
+		`((f) => { const b = new ArrayBuffer(4); new Float32Array(b)[0] = f; return new Uint32Array(b)[0]; })(${x})`,
+	Float32frombits: ([b]) =>
+		`((u) => { const buf = new ArrayBuffer(4); new Uint32Array(buf)[0] = Number(u) >>> 0; return new Float32Array(buf)[0]; })(${b})`,
 };
 
 /** @type {ThisType<CodeGen>} */

@@ -205,6 +205,31 @@ export class StmtsEmitter {
 		}
 	}
 
+	_emitAssignToTarget(target, wasmType, goType, emitValue) {
+		const tempName = `__assign_tmp_${this.tempCounter++}`;
+		const effectiveGoType = goType ??
+			target._type ?? {
+				kind: "basic",
+				name: wasmType === "i64" ? "int64" : "int",
+			};
+		const effectiveWasmType = wasmType ?? this.toWasmType(effectiveGoType);
+		const tempIdx = this.allocLocal(
+			tempName,
+			effectiveWasmType,
+			effectiveGoType,
+			true,
+		);
+		emitValue();
+		this.pushInstruction({ op: "local.set", index: tempIdx });
+		const rNode = {
+			kind: "Ident",
+			name: tempName,
+			_type: effectiveGoType,
+		};
+		this._emitAssignSingle(target, rNode, "=");
+		this.locals.delete(tempName);
+	}
+
 	_emitAssignSingle(l, r, op) {
 		if (!r) return;
 		if (l.kind === "Ident") {
@@ -261,7 +286,11 @@ export class StmtsEmitter {
 				);
 			}
 			const lastStep = path[path.length - 1];
-			const baseWType = this.toWasmType(l.expr._type);
+			const exprGoType =
+				l.expr._type ??
+				this.resolveLocal(l.expr.name)?.goType ??
+				this._resolveExprGoType(l.expr);
+			const baseWType = this.toWasmType(exprGoType);
 
 			this.emitExpr(l.expr, baseWType);
 			for (let i = 0; i < path.length - 1; i++) {
@@ -314,7 +343,13 @@ export class StmtsEmitter {
 				this.releaseTemp(tmpL, baseWType);
 				return;
 			}
-			const box = this.mod.getBoxType(l.operand._type?.base ?? l.operand._type);
+			const operandGoType =
+				l.operand._type ??
+				(l.operand.kind === "Ident"
+					? this.resolveLocal(l.operand.name)?.goType
+					: null) ??
+				this._resolveExprGoType(l.operand);
+			const box = this.mod.getBoxType(operandGoType?.base ?? operandGoType);
 			const baseWType = {
 				kind: "ref",
 				nullable: true,
@@ -455,43 +490,59 @@ export class StmtsEmitter {
 
 		this.releaseTemp(anyTmp, "anyref");
 
-		// Assign val to valLhs
-		if (isDefine && valLhs.kind === "Ident" && valLhs.name !== "_") {
-			const idx = this.allocLocal(valLhs.name, targetWType, targetGoType);
-			this.pushInstruction({ op: "local.get", index: valTmp });
-			this.pushInstruction({ op: "local.set", index: idx });
-		} else if (valLhs.kind === "Ident" && valLhs.name !== "_") {
-			const local = this.resolveLocal(valLhs.name);
-			this.pushInstruction({ op: "local.get", index: valTmp });
-			if (local) {
-				this.pushInstruction({ op: "local.set", index: local.index });
-			} else {
-				const global = this.mod.resolveGlobal(valLhs.name);
-				this.pushInstruction({ op: "global.set", index: global.index });
-			}
-		}
-
-		// Assign ok to okLhs
-		if (isDefine && okLhs.kind === "Ident" && okLhs.name !== "_") {
-			const idx = this.allocLocal(okLhs.name, "i32", {
-				kind: "basic",
-				name: "bool",
-			});
-			this.pushInstruction({ op: "local.get", index: okTmp });
-			this.pushInstruction({ op: "local.set", index: idx });
-		} else if (okLhs.kind === "Ident" && okLhs.name !== "_") {
-			const local = this.resolveLocal(okLhs.name);
-			this.pushInstruction({ op: "local.get", index: okTmp });
-			if (local) {
-				this.pushInstruction({ op: "local.set", index: local.index });
-			} else {
-				const global = this.mod.resolveGlobal(okLhs.name);
-				this.pushInstruction({ op: "global.set", index: global.index });
-			}
-		}
+		this._emitStoreLhsFromTemp(
+			valLhs,
+			valTmp,
+			targetWType,
+			targetGoType,
+			isDefine,
+		);
+		this._emitStoreLhsFromTemp(
+			okLhs,
+			okTmp,
+			"i32",
+			{ kind: "basic", name: "bool" },
+			isDefine,
+		);
 
 		this.releaseTemp(valTmp, targetWType);
 		this.releaseTemp(okTmp, "i32");
+	}
+
+	_emitStoreLhsFromTemp(lhsNode, tempIdx, wType, goType, isDefine) {
+		if (lhsNode.kind !== "Ident" || lhsNode.name === "_") return;
+		if (isDefine) {
+			const idx = this.allocLocal(lhsNode.name, wType, goType);
+			const local = this.locals.get(lhsNode.name);
+			this.pushInstruction({ op: "local.get", index: tempIdx });
+			if (local?.isBoxed) {
+				this.pushInstruction({
+					op: "struct.new",
+					typeIndex: local.boxInfo.typeIndex,
+				});
+			}
+			this.pushInstruction({ op: "local.set", index: idx });
+			return;
+		}
+		const local = this.resolveLocal(lhsNode.name);
+		if (local) {
+			if (local.isBoxed) {
+				this.pushInstruction({ op: "local.get", index: local.index });
+				this.pushInstruction({ op: "local.get", index: tempIdx });
+				this.pushInstruction({
+					op: "struct.set",
+					typeIndex: local.boxInfo.typeIndex,
+					fieldIndex: 0,
+				});
+			} else {
+				this.pushInstruction({ op: "local.get", index: tempIdx });
+				this.pushInstruction({ op: "local.set", index: local.index });
+			}
+		} else {
+			const global = this.mod.resolveGlobal(lhsNode.name);
+			this.pushInstruction({ op: "local.get", index: tempIdx });
+			this.pushInstruction({ op: "global.set", index: global.index });
+		}
 	}
 
 	_emitCommaOkMapIndex(valLhs, okLhs, indexExpr, isDefine) {
@@ -512,82 +563,20 @@ export class StmtsEmitter {
 		this.pushInstruction({ op: "local.set", index: okTmp });
 		this.pushInstruction({ op: "local.set", index: valTmp });
 
-		// Assign val to valLhs
-		if (isDefine && valLhs.kind === "Ident" && valLhs.name !== "_") {
-			const idx = this.allocLocal(valLhs.name, mapInfo.valWType, valType);
-			const local = this.locals.get(valLhs.name);
-			if (local?.isBoxed) {
-				this.pushInstruction({ op: "local.get", index: valTmp });
-				this.pushInstruction({
-					op: "struct.new",
-					typeIndex: local.boxInfo.typeIndex,
-				});
-				this.pushInstruction({ op: "local.set", index: idx });
-			} else {
-				this.pushInstruction({ op: "local.get", index: valTmp });
-				this.pushInstruction({ op: "local.set", index: idx });
-			}
-		} else if (valLhs.kind === "Ident" && valLhs.name !== "_") {
-			const local = this.resolveLocal(valLhs.name);
-			if (local) {
-				if (local.isBoxed) {
-					this.pushInstruction({ op: "local.get", index: local.index });
-					this.pushInstruction({ op: "local.get", index: valTmp });
-					this.pushInstruction({
-						op: "struct.set",
-						typeIndex: local.boxInfo.typeIndex,
-						fieldIndex: 0,
-					});
-				} else {
-					this.pushInstruction({ op: "local.get", index: valTmp });
-					this.pushInstruction({ op: "local.set", index: local.index });
-				}
-			} else {
-				const global = this.mod.resolveGlobal(valLhs.name);
-				this.pushInstruction({ op: "local.get", index: valTmp });
-				this.pushInstruction({ op: "global.set", index: global.index });
-			}
-		}
-
-		// Assign ok to okLhs
-		if (isDefine && okLhs.kind === "Ident" && okLhs.name !== "_") {
-			const idx = this.allocLocal(okLhs.name, "i32", {
-				kind: "basic",
-				name: "bool",
-			});
-			const local = this.locals.get(okLhs.name);
-			if (local?.isBoxed) {
-				this.pushInstruction({ op: "local.get", index: okTmp });
-				this.pushInstruction({
-					op: "struct.new",
-					typeIndex: local.boxInfo.typeIndex,
-				});
-				this.pushInstruction({ op: "local.set", index: idx });
-			} else {
-				this.pushInstruction({ op: "local.get", index: okTmp });
-				this.pushInstruction({ op: "local.set", index: idx });
-			}
-		} else if (okLhs.kind === "Ident" && okLhs.name !== "_") {
-			const local = this.resolveLocal(okLhs.name);
-			if (local) {
-				if (local.isBoxed) {
-					this.pushInstruction({ op: "local.get", index: local.index });
-					this.pushInstruction({ op: "local.get", index: okTmp });
-					this.pushInstruction({
-						op: "struct.set",
-						typeIndex: local.boxInfo.typeIndex,
-						fieldIndex: 0,
-					});
-				} else {
-					this.pushInstruction({ op: "local.get", index: okTmp });
-					this.pushInstruction({ op: "local.set", index: local.index });
-				}
-			} else {
-				const global = this.mod.resolveGlobal(okLhs.name);
-				this.pushInstruction({ op: "local.get", index: okTmp });
-				this.pushInstruction({ op: "global.set", index: global.index });
-			}
-		}
+		this._emitStoreLhsFromTemp(
+			valLhs,
+			valTmp,
+			mapInfo.valWType,
+			valType,
+			isDefine,
+		);
+		this._emitStoreLhsFromTemp(
+			okLhs,
+			okTmp,
+			"i32",
+			{ kind: "basic", name: "bool" },
+			isDefine,
+		);
 
 		this.releaseTemp(valTmp, mapInfo.valWType);
 		this.releaseTemp(okTmp, "i32");
@@ -693,7 +682,7 @@ export class StmtsEmitter {
 		}
 
 		// Scalar types
-		const box = this.mod.getBoxType(targetGoType);
+		const box = this.mod.getIfaceBoxType(targetGoType);
 		if (box) {
 			this.pushInstruction({ op: "ref.test", typeIndex: box.typeIndex });
 			return;
@@ -734,17 +723,9 @@ export class StmtsEmitter {
 		}
 		if (isStructType(targetGoType, this.mod.checker, this.mod)) {
 			const sInfo = this.mod.getStructType(this._structNameOf(targetGoType));
-			const box = this.mod.getBoxType(targetGoType);
+			const box = this.mod.getIfaceBoxType(targetGoType);
 			if (sInfo && box) {
-				this.pushInstruction({
-					op: "ref.cast_null",
-					typeIndex: box.typeIndex,
-				});
-				this.pushInstruction({
-					op: "struct.get",
-					typeIndex: box.typeIndex,
-					fieldIndex: 0,
-				});
+				this._emitUnbox(box);
 				this.emitCloneStruct(sInfo, targetWType);
 				return;
 			}
@@ -775,19 +756,23 @@ export class StmtsEmitter {
 		}
 
 		// Scalar types
-		const box = this.mod.getBoxType(targetGoType);
+		const box = this.mod.getIfaceBoxType(targetGoType);
 		if (box) {
-			this.pushInstruction({
-				op: "ref.cast_null",
-				typeIndex: box.typeIndex,
-			});
-			this.pushInstruction({
-				op: "struct.get",
-				typeIndex: box.typeIndex,
-				fieldIndex: 0,
-			});
+			this._emitUnbox(box);
 			return;
 		}
+	}
+
+	_emitUnbox(box) {
+		this.pushInstruction({
+			op: "ref.cast_null",
+			typeIndex: box.typeIndex,
+		});
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: box.typeIndex,
+			fieldIndex: 0,
+		});
 	}
 
 	_emitCompoundAssign(lhs, rhs, op) {
@@ -938,6 +923,38 @@ export class StmtsEmitter {
 			return;
 		}
 
+		if ((l.kind === "UnaryExpr" && l.op === "*") || l.kind === "StarExpr") {
+			const operand = l.operand ?? l.expr;
+			const box = this.mod.getBoxType(operand._type?.base ?? operand._type);
+			if (box) {
+				const baseWType = {
+					kind: "ref",
+					nullable: true,
+					typeIndex: box.typeIndex,
+				};
+				const boxTmp = this.acquireTemp(baseWType);
+				this.emitExpr(operand, baseWType);
+				this.pushInstruction({ op: "local.set", index: boxTmp });
+				this.pushInstruction({ op: "local.get", index: boxTmp });
+				this.pushInstruction({ op: "local.get", index: boxTmp });
+				this.pushInstruction({
+					op: "struct.get",
+					typeIndex: box.typeIndex,
+					fieldIndex: 0,
+				});
+				const targetType = box.wType;
+				this.emitExpr(r, targetType);
+				this.emitBinaryOp(baseOp, targetType, l._type ?? operand._type?.base);
+				this.pushInstruction({
+					op: "struct.set",
+					typeIndex: box.typeIndex,
+					fieldIndex: 0,
+				});
+				this.releaseTemp(boxTmp, baseWType);
+				return;
+			}
+		}
+
 		if (l.kind !== "Ident") return;
 
 		const localInfo = this.resolveLocal(l.name);
@@ -1016,6 +1033,46 @@ export class StmtsEmitter {
 	emitIncDecStmt(stmt) {
 		const { expr, op } = stmt;
 
+		if (
+			(expr.kind === "UnaryExpr" && expr.op === "*") ||
+			expr.kind === "StarExpr"
+		) {
+			const operand = expr.operand ?? expr.expr;
+			const structInfo = this._resolveStructInfo(operand);
+			if (!structInfo) {
+				const box = this.mod.getBoxType(operand._type?.base ?? operand._type);
+				if (box) {
+					const baseWType = {
+						kind: "ref",
+						nullable: true,
+						typeIndex: box.typeIndex,
+					};
+					const boxTmp = this.acquireTemp(baseWType);
+					this.emitExpr(operand, baseWType);
+					this.pushInstruction({ op: "local.set", index: boxTmp });
+					this.pushInstruction({ op: "local.get", index: boxTmp });
+					this.pushInstruction({ op: "local.get", index: boxTmp });
+					this.pushInstruction({
+						op: "struct.get",
+						typeIndex: box.typeIndex,
+						fieldIndex: 0,
+					});
+					this._emitIncDecStep(
+						op,
+						box.wType,
+						operand._type?.base ?? operand._type,
+					);
+					this.pushInstruction({
+						op: "struct.set",
+						typeIndex: box.typeIndex,
+						fieldIndex: 0,
+					});
+					this.releaseTemp(boxTmp, baseWType);
+					return;
+				}
+			}
+		}
+
 		if (expr.kind === "SelectorExpr") {
 			const structInfo = this._resolveStructInfo(expr.expr);
 			if (!structInfo) return;
@@ -1046,20 +1103,7 @@ export class StmtsEmitter {
 				fieldIndex: lastStep.fieldIndex,
 			});
 
-			if (targetType === "i64") {
-				this.pushInstruction({ op: "i64.const", value: 1n });
-				this.pushInstruction(op === "++" ? "i64.add" : "i64.sub");
-			} else if (targetType === "f32") {
-				this.pushInstruction({ op: "f32.const", value: 1.0 });
-				this.pushInstruction(op === "++" ? "f32.add" : "f32.sub");
-			} else if (targetType === "f64") {
-				this.pushInstruction({ op: "f64.const", value: 1.0 });
-				this.pushInstruction(op === "++" ? "f64.add" : "f64.sub");
-			} else {
-				this.pushInstruction({ op: "i32.const", value: 1 });
-				this.pushInstruction(op === "++" ? "i32.add" : "i32.sub");
-				this.emitNarrowIntWrap(expr._type);
-			}
+			this._emitIncDecStep(op, targetType, expr._type);
 
 			this.pushInstruction({
 				op: "struct.set",
@@ -1096,20 +1140,7 @@ export class StmtsEmitter {
 					funcIndex: this.mod.resolveFuncIndex(mapInfo.getFuncName),
 				});
 
-				if (mapInfo.valWType === "i64") {
-					this.pushInstruction({ op: "i64.const", value: 1n });
-					this.pushInstruction(op === "++" ? "i64.add" : "i64.sub");
-				} else if (mapInfo.valWType === "f32") {
-					this.pushInstruction({ op: "f32.const", value: 1.0 });
-					this.pushInstruction(op === "++" ? "f32.add" : "f32.sub");
-				} else if (mapInfo.valWType === "f64") {
-					this.pushInstruction({ op: "f64.const", value: 1.0 });
-					this.pushInstruction(op === "++" ? "f64.add" : "f64.sub");
-				} else {
-					this.pushInstruction({ op: "i32.const", value: 1 });
-					this.pushInstruction(op === "++" ? "i32.add" : "i32.sub");
-					this.emitNarrowIntWrap(valType);
-				}
+				this._emitIncDecStep(op, mapInfo.valWType, valType);
 
 				this.pushInstruction({
 					op: "call",
@@ -1167,20 +1198,7 @@ export class StmtsEmitter {
 				typeIndex: arrInfo.typeIndex,
 			});
 
-			if (targetType === "i64") {
-				this.pushInstruction({ op: "i64.const", value: 1n });
-				this.pushInstruction(op === "++" ? "i64.add" : "i64.sub");
-			} else if (targetType === "f32") {
-				this.pushInstruction({ op: "f32.const", value: 1.0 });
-				this.pushInstruction(op === "++" ? "f32.add" : "f32.sub");
-			} else if (targetType === "f64") {
-				this.pushInstruction({ op: "f64.const", value: 1.0 });
-				this.pushInstruction(op === "++" ? "f64.add" : "f64.sub");
-			} else {
-				this.pushInstruction({ op: "i32.const", value: 1 });
-				this.pushInstruction(op === "++" ? "i32.add" : "i32.sub");
-				this.emitNarrowIntWrap(elemGoType);
-			}
+			this._emitIncDecStep(op, targetType, elemGoType);
 
 			this.pushInstruction({
 				op: "array.set",
@@ -1199,7 +1217,6 @@ export class StmtsEmitter {
 
 			if (localInfo?.isBoxed) {
 				const boxInfo = localInfo.boxInfo;
-				const innerWType = boxInfo.wType;
 				this.pushInstruction({ op: "local.get", index: localInfo.index });
 				this.pushInstruction({ op: "local.get", index: localInfo.index });
 				this.pushInstruction({
@@ -1207,20 +1224,7 @@ export class StmtsEmitter {
 					typeIndex: boxInfo.typeIndex,
 					fieldIndex: 0,
 				});
-				if (innerWType === "i64") {
-					this.pushInstruction({ op: "i64.const", value: 1n });
-					this.pushInstruction(op === "++" ? "i64.add" : "i64.sub");
-				} else if (innerWType === "f32") {
-					this.pushInstruction({ op: "f32.const", value: 1.0 });
-					this.pushInstruction(op === "++" ? "f32.add" : "f32.sub");
-				} else if (innerWType === "f64") {
-					this.pushInstruction({ op: "f64.const", value: 1.0 });
-					this.pushInstruction(op === "++" ? "f64.add" : "f64.sub");
-				} else {
-					this.pushInstruction({ op: "i32.const", value: 1 });
-					this.pushInstruction(op === "++" ? "i32.add" : "i32.sub");
-					this.emitNarrowIntWrap(localInfo.goType);
-				}
+				this._emitIncDecStep(op, boxInfo.wType, localInfo.goType);
 				this.pushInstruction({
 					op: "struct.set",
 					typeIndex: boxInfo.typeIndex,
@@ -1237,26 +1241,28 @@ export class StmtsEmitter {
 				this.pushInstruction({ op: "global.get", index: globalInfo.index });
 			}
 
-			if (targetType === "i64") {
-				this.pushInstruction({ op: "i64.const", value: 1n });
-				this.pushInstruction(op === "++" ? "i64.add" : "i64.sub");
-			} else if (targetType === "f32") {
-				this.pushInstruction({ op: "f32.const", value: 1.0 });
-				this.pushInstruction(op === "++" ? "f32.add" : "f32.sub");
-			} else if (targetType === "f64") {
-				this.pushInstruction({ op: "f64.const", value: 1.0 });
-				this.pushInstruction(op === "++" ? "f64.add" : "f64.sub");
-			} else {
-				this.pushInstruction({ op: "i32.const", value: 1 });
-				this.pushInstruction(op === "++" ? "i32.add" : "i32.sub");
-				this.emitNarrowIntWrap(expr._type);
-			}
+			this._emitIncDecStep(op, targetType, expr._type);
 
 			if (localInfo) {
 				this.pushInstruction({ op: "local.set", index: localInfo.index });
 			} else {
 				this.pushInstruction({ op: "global.set", index: globalInfo.index });
 			}
+		}
+	}
+
+	_emitIncDecStep(op, targetType, goType) {
+		const isAdd = op === "++";
+		if (targetType === "i64") {
+			this.pushInstruction({ op: "i64.const", value: 1n });
+			this.pushInstruction(isAdd ? "i64.add" : "i64.sub");
+		} else if (targetType === "f32" || targetType === "f64") {
+			this.pushInstruction({ op: `${targetType}.const`, value: 1.0 });
+			this.pushInstruction(`${targetType}.${isAdd ? "add" : "sub"}`);
+		} else {
+			this.pushInstruction({ op: "i32.const", value: 1 });
+			this.pushInstruction(isAdd ? "i32.add" : "i32.sub");
+			this.emitNarrowIntWrap(goType);
 		}
 	}
 
@@ -1775,8 +1781,9 @@ export class StmtsEmitter {
 			nullable: true,
 			typeIndex: arrInfo.typeIndex,
 		};
-		const arrTmp = this.acquireTemp(arrWType);
-		const offTmp = this.acquireTemp("i32");
+		const hasVal = Boolean(lhs[1] && lhs[1].name !== "_");
+		const arrTmp = hasVal ? this.acquireTemp(arrWType) : null;
+		const offTmp = hasVal ? this.acquireTemp("i32") : null;
 		const lenTmp = this.acquireTemp("i32");
 
 		if (isSlice) {
@@ -1789,18 +1796,26 @@ export class StmtsEmitter {
 			this.emitExpr(iterExpr, sliceWType);
 			this.pushInstruction({ op: "local.set", index: sliceTmp });
 
-			this._emitSliceUnpack(sliceTmp, sliceInfo, {
-				arr: arrTmp,
-				off: offTmp,
-				len: lenTmp,
-			});
+			if (hasVal) {
+				this._emitSliceUnpack(sliceTmp, sliceInfo, {
+					arr: arrTmp,
+					off: offTmp,
+					len: lenTmp,
+				});
+			} else {
+				this._emitSliceUnpack(sliceTmp, sliceInfo, {
+					len: lenTmp,
+				});
+			}
 			this.releaseTemp(sliceTmp, sliceWType);
 		} else {
 			this.emitExpr(iterExpr, arrWType);
-			this.pushInstruction({ op: "local.set", index: arrTmp });
-			this.pushInstruction({ op: "i32.const", value: 0 });
-			this.pushInstruction({ op: "local.set", index: offTmp });
-			this.pushInstruction({ op: "local.get", index: arrTmp });
+			if (hasVal) {
+				this.pushInstruction({ op: "local.set", index: arrTmp });
+				this.pushInstruction({ op: "i32.const", value: 0 });
+				this.pushInstruction({ op: "local.set", index: offTmp });
+				this.pushInstruction({ op: "local.get", index: arrTmp });
+			}
 			this.pushInstruction("array.len");
 			this.pushInstruction({ op: "local.set", index: lenTmp });
 		}
@@ -1934,8 +1949,8 @@ export class StmtsEmitter {
 
 		this.releaseTemp(idxTmp, "i32");
 		this.releaseTemp(lenTmp, "i32");
-		this.releaseTemp(offTmp, "i32");
-		this.releaseTemp(arrTmp, arrWType);
+		if (offTmp !== null) this.releaseTemp(offTmp, "i32");
+		if (arrTmp !== null) this.releaseTemp(arrTmp, arrWType);
 
 		restoreShadowed();
 	}
@@ -2185,74 +2200,53 @@ export class StmtsEmitter {
 		if (stmt.init) this.emitStmt(stmt.init);
 
 		const getCaseVals = (c) => c.list ?? c.values ?? [];
+		const nonDefaultCases = (stmt.cases ?? []).filter(
+			(c) => getCaseVals(c).length > 0,
+		);
+		const defaultCase = (stmt.cases ?? []).find(
+			(c) => getCaseVals(c).length === 0,
+		);
 
+		let tagGoType = null;
+		let tagWType = null;
+		let tagTmp = -1;
 		if (stmt.tag) {
-			const tagGoType = stmt.tag._type ?? this._resolveExprGoType(stmt.tag);
-			const tagWType = this.toWasmType(tagGoType);
-			const tagTmp = this.acquireTemp(tagWType);
+			tagGoType = stmt.tag._type ?? this._resolveExprGoType(stmt.tag);
+			tagWType = this.toWasmType(tagGoType);
+			tagTmp = this.acquireTemp(tagWType);
 			this.emitExpr(stmt.tag, tagWType);
 			this.pushInstruction({ op: "local.set", index: tagTmp });
+		}
 
-			const nonDefaultCases = (stmt.cases ?? []).filter(
-				(c) => getCaseVals(c).length > 0,
-			);
-			const defaultCase = (stmt.cases ?? []).find(
-				(c) => getCaseVals(c).length === 0,
-			);
-
-			let ifCount = 0;
-			for (const c of nonDefaultCases) {
-				const vals = getCaseVals(c);
-				for (let i = 0; i < vals.length; i++) {
+		let ifCount = 0;
+		for (const c of nonDefaultCases) {
+			const vals = getCaseVals(c);
+			for (let i = 0; i < vals.length; i++) {
+				if (stmt.tag) {
 					this.pushInstruction({ op: "local.get", index: tagTmp });
 					this.emitExpr(vals[i], tagWType);
 					this.emitBinaryOp("==", tagWType, tagGoType);
-					if (i > 0) this.pushInstruction("i32.or");
-				}
-				this.pushInstruction({ op: "if", blockType: "void" });
-				ifCount++;
-
-				for (const s of c.stmts ?? []) this.emitStmt(s);
-				this.pushInstruction("else");
-			}
-
-			if (defaultCase) {
-				for (const s of defaultCase.stmts ?? []) this.emitStmt(s);
-			}
-
-			for (let i = 0; i < ifCount; i++) {
-				this.pushInstruction("end");
-			}
-			this.releaseTemp(tagTmp, tagWType);
-		} else {
-			const nonDefaultCases = (stmt.cases ?? []).filter(
-				(c) => getCaseVals(c).length > 0,
-			);
-			const defaultCase = (stmt.cases ?? []).find(
-				(c) => getCaseVals(c).length === 0,
-			);
-
-			let ifCount = 0;
-			for (const c of nonDefaultCases) {
-				const vals = getCaseVals(c);
-				for (let i = 0; i < vals.length; i++) {
+				} else {
 					this.emitExpr(vals[i], "i32");
-					if (i > 0) this.pushInstruction("i32.or");
 				}
-				this.pushInstruction({ op: "if", blockType: "void" });
-				ifCount++;
-
-				for (const s of c.stmts ?? []) this.emitStmt(s);
-				this.pushInstruction("else");
+				if (i > 0) this.pushInstruction("i32.or");
 			}
+			this.pushInstruction({ op: "if", blockType: "void" });
+			ifCount++;
 
-			if (defaultCase) {
-				for (const s of defaultCase.stmts ?? []) this.emitStmt(s);
-			}
+			for (const s of c.stmts ?? []) this.emitStmt(s);
+			this.pushInstruction("else");
+		}
 
-			for (let i = 0; i < ifCount; i++) {
-				this.pushInstruction("end");
-			}
+		if (defaultCase) {
+			for (const s of defaultCase.stmts ?? []) this.emitStmt(s);
+		}
+
+		for (let i = 0; i < ifCount; i++) {
+			this.pushInstruction("end");
+		}
+		if (stmt.tag) {
+			this.releaseTemp(tagTmp, tagWType);
 		}
 
 		this.pushInstruction("end");

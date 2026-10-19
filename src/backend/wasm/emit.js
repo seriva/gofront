@@ -8,8 +8,15 @@ import { BuiltinsEmitter } from "./emit-builtins.js";
 import { ExprsEmitter } from "./emit-exprs.js";
 import { MapsEmitter } from "./emit-maps.js";
 import { SharedEmitter } from "./emit-shared.js";
-import { StdlibEmitter } from "./emit-stdlib.js";
 import { StmtsEmitter } from "./emit-stmts.js";
+import {
+	BytesEmitter,
+	ExtendedPackagesEmitter,
+	IoEmitter,
+	PurePackagesEmitter,
+	StdlibCoreEmitter,
+	TimeEmitter,
+} from "./stdlib/index.js";
 import {
 	isArrayType,
 	isPointerToStruct,
@@ -34,7 +41,14 @@ export class FunctionEmitter {
 			this.mod.lowerResult?.captures?.get(
 				this.rootFuncDecl._sourceDecl ?? this.rootFuncDecl,
 			) ?? null;
-		this.mutatedCaptures = this.captureAnalysis?.mutatedCaptures ?? new Set();
+		this.mutatedCaptures = new Set(this.captureAnalysis?.mutatedCaptures ?? []);
+		const lowerBoxed =
+			this.mod.lowerResult?.boxedVars?.get(
+				this.rootFuncDecl._sourceDecl ?? this.rootFuncDecl,
+			) ?? [];
+		for (const name of lowerBoxed) {
+			this.mutatedCaptures.add(name);
+		}
 
 		this.capturedNames = this.funcDecl._funcLit
 			? Array.from(
@@ -126,33 +140,7 @@ export class FunctionEmitter {
 			return;
 		}
 
-		const namedReturns = this.funcDecl.returnType?._namedReturns;
-		if (namedReturns && namedReturns.length > 0) {
-			this.namedReturnVars = [];
-			for (let i = 0; i < namedReturns.length; i++) {
-				const r = namedReturns[i];
-				const isBlank = !r.name || r.name === "_";
-				const varName = isBlank ? `__ret_blank$${i}` : r.name;
-				const wType = this.toWasmType(r.type);
-				const localIdx = this.allocLocal(varName, wType, r.type, isBlank);
-				this.namedReturnVars.push({
-					name: varName,
-					localIdx,
-					type: wType,
-					goType: r.type,
-					isBlank,
-				});
-				this.emitZeroValue(r.type, wType);
-				const localInfo = this.locals.get(varName);
-				if (localInfo?.isBoxed) {
-					this.pushInstruction({
-						op: "struct.new",
-						typeIndex: localInfo.boxInfo.typeIndex,
-					});
-				}
-				this.pushInstruction({ op: "local.set", index: localIdx });
-			}
-		}
+		this._initNamedReturns();
 
 		const needsOobBlock = this._needsOobBlock(body);
 		if (needsOobBlock) {
@@ -181,34 +169,38 @@ export class FunctionEmitter {
 		}
 	}
 
-	_emitFunctionBodyWithDefer(body) {
+	_initNamedReturns() {
 		const namedReturns = this.funcDecl.returnType?._namedReturns;
-		if (namedReturns && namedReturns.length > 0) {
-			this.namedReturnVars = [];
-			for (let i = 0; i < namedReturns.length; i++) {
-				const r = namedReturns[i];
-				const isBlank = !r.name || r.name === "_";
-				const varName = isBlank ? `__ret_blank$${i}` : r.name;
-				const wType = this.toWasmType(r.type);
-				const localIdx = this.allocLocal(varName, wType, r.type, isBlank);
-				this.namedReturnVars.push({
-					name: varName,
-					localIdx,
-					type: wType,
-					goType: r.type,
-					isBlank,
+		if (!namedReturns?.length) return false;
+		this.namedReturnVars = [];
+		for (let i = 0; i < namedReturns.length; i++) {
+			const r = namedReturns[i];
+			const isBlank = !r.name || r.name === "_";
+			const varName = isBlank ? `__ret_blank$${i}` : r.name;
+			const wType = this.toWasmType(r.type);
+			const localIdx = this.allocLocal(varName, wType, r.type, isBlank);
+			this.namedReturnVars.push({
+				name: varName,
+				localIdx,
+				type: wType,
+				goType: r.type,
+				isBlank,
+			});
+			this.emitZeroValue(r.type, wType);
+			const localInfo = this.locals.get(varName);
+			if (localInfo?.isBoxed) {
+				this.pushInstruction({
+					op: "struct.new",
+					typeIndex: localInfo.boxInfo.typeIndex,
 				});
-				this.emitZeroValue(r.type, wType);
-				const localInfo = this.locals.get(varName);
-				if (localInfo?.isBoxed) {
-					this.pushInstruction({
-						op: "struct.new",
-						typeIndex: localInfo.boxInfo.typeIndex,
-					});
-				}
-				this.pushInstruction({ op: "local.set", index: localIdx });
 			}
-		} else if (this.returnTypes.length > 0) {
+			this.pushInstruction({ op: "local.set", index: localIdx });
+		}
+		return true;
+	}
+
+	_emitFunctionBodyWithDefer(body) {
+		if (!this._initNamedReturns() && this.returnTypes.length > 0) {
 			this.returnTempLocals = [];
 			for (let i = 0; i < this.returnTypes.length; i++) {
 				const wType = this.returnTypes[i];
@@ -662,36 +654,27 @@ export class FunctionEmitter {
 		return null;
 	}
 
-	_unpackClosureEnv() {
+	_buildEnvFields(capturedNames) {
 		const envFields = [];
-		for (const name of this.capturedNames) {
+		for (const name of capturedNames) {
 			const isBoxed = this.mutatedCaptures.has(name);
 			const goType = this._findCapturedVarGoType(name);
-			if (isBoxed) {
-				const boxInfo = this.mod.getBoxType(goType);
-				envFields.push({
-					name,
-					goType,
-					isBoxed: true,
-					boxInfo,
-					wType: {
-						kind: "ref",
-						nullable: true,
-						typeIndex: boxInfo.typeIndex,
-					},
-				});
-			} else {
-				const wType = this.toWasmType(goType);
-				envFields.push({
-					name,
-					goType,
-					isBoxed: false,
-					boxInfo: null,
-					wType,
-				});
-			}
+			const boxInfo = isBoxed ? this.mod.getBoxType(goType) : null;
+			envFields.push({
+				name,
+				goType,
+				isBoxed,
+				boxInfo,
+				wType: isBoxed
+					? { kind: "ref", nullable: true, typeIndex: boxInfo.typeIndex }
+					: this.toWasmType(goType),
+			});
 		}
+		return envFields;
+	}
 
+	_unpackClosureEnv() {
+		const envFields = this._buildEnvFields(this.capturedNames);
 		const envInfo = this.mod.getEnvType(envFields);
 		this.envInfo = envInfo;
 		this.envFields = envFields;
@@ -873,6 +856,21 @@ export class FunctionEmitter {
 			if (this.mod.structTypes.has(t.name))
 				return this.mod.structTypes.get(t.name);
 		}
+		if (t.kind === "struct" || t.kind === "StructType") {
+			const rawFields = [];
+			if (t.fields instanceof Map) {
+				for (const [k, v] of t.fields.entries())
+					rawFields.push({ name: k, goType: v });
+			} else if (Array.isArray(t.fields)) {
+				for (const f of t.fields) {
+					const names = f.names ?? (f.name ? [f.name] : []);
+					for (const n of names) rawFields.push({ name: n, goType: f.type });
+				}
+			}
+			if (rawFields.length > 0 && this.mod.getAnonStructType) {
+				return this.mod.getAnonStructType(rawFields);
+			}
+		}
 		return null;
 	}
 
@@ -930,6 +928,7 @@ export class FunctionEmitter {
 			return;
 		if (
 			node.kind === "CompositeLit" ||
+			node.kind === "CallExpr" ||
 			(node.kind === "UnaryExpr" && node.op === "*")
 		)
 			return;
@@ -968,6 +967,10 @@ export class FunctionEmitter {
 			if (loc?.goType) {
 				return this._getReceiverTypeName(loc.goType);
 			}
+		}
+		if (node && node.kind === "SelectorExpr") {
+			const pkg = node.expr?.name;
+			if (pkg) return `${pkg}.${node.field}`;
 		}
 		return null;
 	}
@@ -1080,6 +1083,18 @@ export class FunctionEmitter {
 		if (t.len?.value !== undefined) return Number(t.len.value);
 		if (t.underlying) return this._getArraySize(t.underlying, defaultSize);
 		return defaultSize;
+	}
+
+	_getArrayElemType(t) {
+		if (!t) return null;
+		if (t.elem) return t.elem;
+		if (t.underlying?.elem) return t.underlying.elem;
+		if (t.kind === "ArrayType") return t.elem;
+		if (t.name && this.mod.checker?.types?.has(t.name)) {
+			const resolved = this.mod.checker.types.get(t.name);
+			return this._getArrayElemType(resolved);
+		}
+		return null;
 	}
 
 	emitZeroValue(goType, wType) {
@@ -1264,13 +1279,7 @@ export class FunctionEmitter {
 	}
 
 	resolveBranchDepthToOob() {
-		for (let i = this.controlStack.length - 1; i >= 0; i--) {
-			const ctrl = this.controlStack[i];
-			if (ctrl.role === "oob") {
-				return this.controlStack.length - 1 - i;
-			}
-		}
-		return null;
+		return this.resolveBranchDepthToRole("oob");
 	}
 
 	resolveBranchDepthToRole(targetRole) {
@@ -1360,11 +1369,25 @@ export class FunctionEmitter {
 				break;
 		}
 	}
+
+	_isPkgExpr(expr, pkgName) {
+		if (expr.expr?.kind !== "Ident") return false;
+		const name = expr.expr.name;
+		if (pkgName !== undefined && name !== pkgName) return false;
+		return !this.resolveLocal(name) && !this.mod.resolveGlobal(name);
+	}
 }
 
 function copyMethods(target, source) {
 	const descriptors = Object.getOwnPropertyDescriptors(source.prototype);
 	delete descriptors.constructor;
+	for (const key of Object.keys(descriptors)) {
+		if (key in target.prototype) {
+			throw new Error(
+				`Duplicate method "${key}" found while mixing ${source.name} into ${target.name}`,
+			);
+		}
+	}
 	Object.defineProperties(target.prototype, descriptors);
 }
 
@@ -1372,5 +1395,10 @@ copyMethods(FunctionEmitter, MapsEmitter);
 copyMethods(FunctionEmitter, StmtsEmitter);
 copyMethods(FunctionEmitter, ExprsEmitter);
 copyMethods(FunctionEmitter, BuiltinsEmitter);
-copyMethods(FunctionEmitter, StdlibEmitter);
+copyMethods(FunctionEmitter, StdlibCoreEmitter);
+copyMethods(FunctionEmitter, BytesEmitter);
+copyMethods(FunctionEmitter, PurePackagesEmitter);
+copyMethods(FunctionEmitter, IoEmitter);
+copyMethods(FunctionEmitter, TimeEmitter);
+copyMethods(FunctionEmitter, ExtendedPackagesEmitter);
 copyMethods(FunctionEmitter, SharedEmitter);

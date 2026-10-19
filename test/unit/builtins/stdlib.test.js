@@ -227,6 +227,43 @@ func main() {
 
 section("fmt.Sprintf expanded format verbs");
 
+test("fmt.Sprintf %f formats float", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(fmt.Sprintf("%f", 3.14))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "3.140000");
+});
+
+test("fmt.Printf emits to stdout", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	fmt.Printf("count: %d", 7)
+}`);
+	assertEqual(errors.length, 0);
+	assert(js !== null);
+	assertContains(js, "__sprintf");
+});
+
+test("fmt.Print compiles without error", () => {
+	const { errors, js } = compile(`package main
+func main() {
+	fmt.Print("hello %s", "world")
+}`);
+	assertEqual(errors.length, 0);
+	assertContains(js, "__sprintf");
+});
+
+test("fmt.Printf compiles without error", () => {
+	const { errors, js } = compile(`package main
+func main() {
+	fmt.Printf("value: %d", 42)
+}`);
+	assertEqual(errors.length, 0);
+	assertContains(js, "__sprintf");
+});
+
 test("fmt.Sprintf %t for booleans", () => {
 	const { js, errors } = compile(`package main
 func main() {

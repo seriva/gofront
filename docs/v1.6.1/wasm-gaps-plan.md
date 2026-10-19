@@ -1,7 +1,7 @@
 # WASM Gap Closing — Design Plan
 
 **Version:** v1.6.1
-**Status:** Draft
+**Status:** Complete
 **Depends on:** [`docs/v1.6.0/wasm-hybrid-plan.md`](../v1.6.0/wasm-hybrid-plan.md)
 **Followed by:** [`docs/v2.0.0/native-go-engine.md`](../v2.0.0/native-go-engine.md), which then ports the v1.6.1 WASM backend instead of v1.6.0.
 
@@ -85,16 +85,16 @@ New packages (none of them touch browser APIs):
 |---|---|
 | `unicode` | Full JS shim set (`IsLetter`, `IsDigit`, `IsSpace`, `IsUpper`, `IsLower`, `IsPunct`, `IsControl`, `IsPrint`, `IsGraphic`, `ToUpper`, `ToLower`). ASCII fast path inline; non-ASCII via JS import. |
 | `math/rand` | Full JS shim set. Calls `Math.random` through an import, the same source as the JS backend; `Seed` stays a no-op. `Shuffle`/`Perm` inline. |
-| `bytes` | Full JS shim set incl. `Buffer`, implemented over `[]byte` in WASM (no JS round-trip for byte slices). |
+| `bytes` | Full JS shim set incl. `Buffer`, implemented over `[]byte` in WASM (with host JS helper delegation for string cutset trims/ContainsAny). |
 | `io` | `Writer`, `Reader`, `ReadWriter`, `Closer` as ordinary WASM interfaces; `EOF` as a sentinel error value; `ReadAll`, `Discard`, `WriteString`. `strings.Builder` and `bytes.Buffer` implement `io.Writer`. |
-| `path` / `path/filepath` | Full JS shim set (`Base`, `Dir`, `Ext`, `Join`, `Clean`, `IsAbs`, `Split`, `Match`), inline WASM over strings. |
-| `html` | `EscapeString`, `UnescapeString`. Pure string transforms; no DOM access. |
+| `path` / `path/filepath` | Full JS shim set (`Base`, `Dir`, `Ext`, `Join`, `Clean`, `IsAbs`, `Split`, `Match`) via host JS runtime shims in `boundary.js`. |
+| `html` | `EscapeString`, `UnescapeString` via host JS runtime shims in `boundary.js`; no DOM access. |
 | `time` | Everything except `Sleep`: `Duration` and its constants, `Time` and its methods (`Format`, `String`, `Year` … `Weekday`, `Unix`, `UnixMilli`, `Add`, `Sub`, `Before`, `After`, `Equal`), `Parse`, `Unix`, `Date`, layout/month/weekday constants. `Now`/`Since` read the clock through one import (`Date.now`), and the local timezone offset through another, the same sources the JS shim uses. |
 
 Key decisions:
 - **`*Func` callbacks are called inline.** `strings.Map`, `IndexFunc`, `slices.SortFunc` and similar call the closure directly with `call_ref`, so there is no boundary crossing. Sorting reuses the `_emitCallLess` insertion/merge sort from `sort.Slice`.
 - **`strings.Builder` is a WASM struct.** It accumulates parts in a `[]string` and joins them on `String()`, which avoids one host call per write. The alternative of an externref to a JS builder was rejected: it would cross the boundary on every write inside hot loops.
-- **`bytes` is native WASM.** A JS round-trip would copy the whole `[]byte` on every call.
+- **`bytes` is implemented over `[]byte` in WASM** with `Buffer` and slice manipulation in bytecode, delegating to host JS shims for string cutset matching.
 - **`io` and `Fprint*` are pure WASM.** `Fprintf(w, …)` formats with the existing `Sprintf` path and calls `w.Write` through normal interface dispatch, so user types can be writers.
 - **`time.Time` is a WASM struct** (Unix nanos + offset), not a JS `Date` handle. Only `Now`, `Since` and the timezone offset are host imports; formatting and arithmetic run inline, so `time` is usable in hot paths.
 - **`fmt.Sscan*` writes through pointers inside WASM.** No boundary is involved; only the boundary rejects pointer-to-scalar today, and that is handled in [Boundary types](#2-boundary-types).
@@ -131,15 +131,15 @@ Key decisions:
 
 ## Implementation Tasks
 
-- [ ] **Phase 1: Language features.** Non-literal constants (fold, or `start` global); array map keys; interface map keys with an unhashable panic. Remove the matching `(planned)` diagnostics.
-- [ ] **Phase 2: Boundary.** `error` and `map` facades; pointer-to-scalar boxes; anonymous structs; anonymous interfaces; exported non-literal constants. Update the marshalling table in `hybrid-wasm.md`.
-- [ ] **Phase 3: `strings` and `strconv`.** Missing members, `Builder`, `NewReplacer`; JS imports in the loader glue ([`glue.js`](../../src/backend/wasm/glue.js)).
-- [ ] **Phase 4: `slices` and `math.Remainder`.** Inline WASM implementations; `*Func` variants via `call_ref`.
-- [ ] **Phase 5: `fmt` composite `%v`.** Slices, arrays, maps and structs, with output matching the JS backend.
-- [ ] **Phase 6: Pure packages.** `unicode`, `math/rand`, `bytes` (incl. `Buffer`), `path`/`path/filepath`, `html`.
-- [ ] **Phase 7: `io` and readers/writers.** `io` interfaces and helpers, `fmt.Fprint*`, `fmt.Sscan*`, `strings.NewReader`, `bytes.NewReader`; `Builder`/`Buffer` as `io.Writer`.
-- [ ] **Phase 8: `time`.** `Duration`, `Time` struct and methods, `Parse`/`Format`, clock and timezone imports, boundary marshalling; `time.Sleep` keeps its targeted diagnostic.
-- [ ] **Phase 9: Docs and release.** Update `hybrid-wasm.md`, `language-support.md`, `go-compatibility.md`, the roadmap and the CHANGELOG. Re-run simplefps `npm run bench` to confirm there is no regression in `app.wasm` size or timings.
+- [x] **Phase 1: Language features.** Non-literal constants (fold, or `start` global); array map keys; interface map keys with an unhashable panic. Remove the matching `(planned)` diagnostics.
+- [x] **Phase 2: Boundary.** `error` and `map` facades; pointer-to-scalar boxes; anonymous structs; anonymous interfaces; exported non-literal constants. Update the marshalling table in `hybrid-wasm.md`.
+- [x] **Phase 3: `strings` and `strconv`.** Missing members, `Builder`, `NewReplacer`; JS imports in the loader glue ([`glue.js`](../../src/backend/wasm/glue.js)).
+- [x] **Phase 4: `slices` and `math.Remainder`.** Inline WASM implementations; `*Func` variants via `call_ref`.
+- [x] **Phase 5: `fmt` composite `%v`.** Slices, arrays, maps and structs, with output matching the JS backend.
+- [x] **Phase 6: Pure packages.** `unicode`, `math/rand`, `bytes` (incl. `Buffer`), `path`/`path/filepath`, `html`.
+- [x] **Phase 7: `io` and readers/writers.** `io` interfaces and helpers, `fmt.Fprint*`, `fmt.Sscan*`, `strings.NewReader`, `bytes.NewReader`; `Builder`/`Buffer` as `io.Writer`.
+- [x] **Phase 8: `time`.** `Duration`, `Time` struct and methods, `Parse`/`Format`, clock and timezone imports, boundary marshalling; `time.Sleep` keeps its targeted diagnostic.
+- [x] **Phase 9: Docs and release.** Update `hybrid-wasm.md`, `language-support.md`, `go-compatibility.md`, the roadmap and the CHANGELOG. Re-run simplefps `npm run bench` to confirm there is no regression in `app.wasm` size or timings.
 
 ---
 
@@ -160,3 +160,54 @@ Key decisions:
   - Browser-facing code (DOM, `.templ`, `gom`, `js:` imports, `async`) keeps its existing targeted diagnostics.
   - A JS caller passing a non-WASM `error` into WASM gets a clear runtime error.
   - Hashing an unhashable interface key panics with Go's message.
+
+---
+
+## Post-Audit Findings & Future Gaps (Fixes, Removals, and Additions)
+
+A comprehensive review of the stdlib across both JS and WASM identified the following concrete fixes, removals, and additions for the next iteration:
+
+### 1. Fixes (Bugs & Architectural Traps)
+- [x] **`math` Constants Parity**: 24 constants (`MaxInt32`, `MinInt32`, `MaxInt64`, `MinInt64`, `MaxUint32`, `MaxFloat32`, `SmallestNonzeroFloat32`, `Phi`, `Sqrt2`, `SqrtE`, `SqrtPi`, `SqrtPhi`, `Ln2`, `Log2E`, `Ln10`, `Log10E`, etc.) are declared in `WASM_STDLIB_MEMBERS` and implemented in the WASM backend, but were omitted from `src/typechecker/stdlib/core.js` and `src/backend/js/expressions.js`. Compiling `math.MaxInt32` fails in both JS and WASM. Register them in the checker and JS backend.
+- [x] **`math/rand` in WASM (Boundary Overhead & No-op Seed)**: In WASM, `rand.Float64()`, `rand.Intn()`, etc. currently call imported JS `Math.random()` on every invocation, crossing the boundary thousands of times in tight loops and ignoring `rand.Seed`. Replace with an inline pure PRNG (e.g. PCG or XorShift) in WASM with zero host overhead and deterministic seeding.
+- [x] **`io.WriteString` on `strings.Builder` in WASM**: Currently converts the string to a `[]byte` slice and calls `w.Write`, allocating on every write instead of calling `WriteString` directly.
+- [x] **`testing` Namespace in `WASM_STDLIB_MEMBERS`**: Add `testing` to `WASM_STDLIB_MEMBERS` in `src/typechecker/types.js` for consistency with `WASM_SUPPORTED_STDLIB`.
+
+### 2. Removals
+- [x] **`fmt.Scan`**: Declared in `src/typechecker/stdlib/core.js`, but unhandled in JS codegen (returns `undefined`) and missing in WASM. Frontend environments have no standard input (`os.Stdin`). Remove from the typechecker.
+- [x] **Redundant Boundary Imports**: Avoid JS host imports for operations that can be emitted inline natively in WASM (e.g., ASCII checks, bit twiddling, pure PRNG).
+
+### 3. Additions
+#### A. Essential Methods on Existing Types
+- [x] **`time.Duration` Methods**: Attach `.Seconds()`, `.Milliseconds()`, `.Microseconds()`, `.Nanoseconds()`, `.Minutes()`, `.Hours()`, and `.String()`.
+- [x] **`time.Time` Methods**: Add `.IsZero()` (standard uninitialized check), `.UnixNano()`, `.Nanosecond()`, `.UTC()`, and `.Local()`.
+
+#### B. High-Frequency Functions in Existing Packages
+- [x] **`slices`**: `slices.IndexFunc`, `slices.ContainsFunc`, `slices.BinarySearch`, `slices.BinarySearchFunc`.
+- [x] **`strconv`**: `strconv.ParseUint`, `strconv.FormatUint`, `strconv.AppendUint`, `strconv.AppendBool`.
+- [x] **`io`**: `io.Copy(dst, src)`, `io.CopyN(dst, src, n)`, `io.LimitReader`.
+- [x] **`math`**: Bit reinterpretations (`Float64bits`, `Float64frombits`, `Float32bits`, `Float32frombits` — 1-opcode instructions in WASM), and hyperbolic functions (`Sinh`, `Cosh`, `Tanh`).
+- [x] **`math/bits`**: Endianness byte reversals (`ReverseBytes16`, `ReverseBytes32`, `ReverseBytes64`), `Len32`, `Len64`, `Reverse32`, `Reverse64`.
+- [x] **`errors`**: `errors.As` (chain traversal with dynamic type matching) and `errors.Join`.
+- [x] **`strings` & `bytes`**: `strings.FieldsFunc`, `bytes.FieldsFunc`, `bytes.Clone`.
+
+#### C. High-Impact New Packages (Especially for WASM / Engine Workloads)
+- [x] **`encoding/binary`** *(Top Priority for WASM)*: LittleEndian / BigEndian decoding and `binary.Read`/`Write`. Eliminates the need for hand-rolled JS `DataView` shims (e.g., in `simplefps/app/src/engine/assets/binaryreader.go`) and allows 3D mesh, model, audio, and network decoding to run at full speed inside WASM.
+- [x] **`sync` Shim (`sync.Once`, `sync.Mutex`)**: Lightweight single-threaded shims (`sync.Once.Do` bool check, no-op mutexes) to allow standard Go packages with thread-safety constructs to compile unmodified.
+- [x] **`crypto/rand` & `crypto/sha256`**: `rand.Read` via `crypto.getRandomValues()` and pure WASM SHA-256 for asset cache keys and packet integrity.
+- [x] **`encoding/hex` & `encoding/base64`**: Pure data encoding utilities for web and binary payloads.
+
+### 4. WASM Optimization Pipeline & Codegen Improvements
+#### A. Optimizer Pipeline (`src/backend/wasm/optimize.js`)
+- [x] **Eliminate Double-Pass GUFA on `--emit-wat`**: When `--emit-wat` is passed, `runWasmOpt` currently runs `wasm-opt -O3 --gufa` twice from scratch (once for binary, once for WAT text). Instead, disassemble the already-optimized binary output directly (`wasm-opt out.wasm -S -o out.wat` without optimization passes). Cuts build time in half when `--emit-wat` is requested.
+- [x] **Whole-Program Optimization via `--closed-world`**: Enable Binaryen's `--closed-world` flag for WasmGC modules. Since GoFront modules are self-contained and types are not extended by host JS, this unlocks aggressive interface devirtualization, struct field pruning, and type refinement.
+- [x] **Instruction Reordering & Trap Preservation**: Hardware traps are preserved by default so nil pointer dereferences reliably trap and panic as expected in Go. `--traps-never-happen` is an explicit opt-in only when `trapsNeverHappen: true` is configured.
+- [x] **Pass Convergence in Release (`--converge`)**: Run Binaryen optimization passes until convergence in `--release` builds for maximum size reduction.
+
+#### B. Code Generation Emitters (`src/backend/wasm/emit*.js`)
+- [x] **Eliminate Duplicate Struct Allocations on Function Returns**: In `_emitCopyIfValueStruct` (`emit.js`), skip cloning when assigning the result of a `CallExpr`. Functions returning struct values already allocate on the WasmGC heap; cloning the returned value immediately duplicates the allocation and increases GC pressure. Halves heap allocations for value-struct returning calls (vectors, matrices, complex types).
+- [x] **Zero & Overflow Guard Elimination for Constant Divisors**: In `emitDivRem` (`emit-exprs.js`), when the divisor is a constant literal (`N != 0 && N != -1`), eliminate the dynamic zero-check (`tmpB.eqz`) and `MinInt / -1` overflow guard. Saves ~15 instructions, 2 temporary locals, and 2 branches per constant division, helping keep hot functions within V8's 500-wire-byte inlining threshold. Specialize unsigned powers-of-two to shifts (`i32.shr_u`) or bitwise masks (`i32.and`).
+- [x] **Compile-Time Bounds Check Elimination for Constant-Indexed Arrays**: In `_emitElemAddr` (`emit-exprs.js`), when indexing a fixed-size array `[N]T` with a constant index `0 <= i < N`, omit the bounds check and emit `array.get` directly. Eliminates branches in matrix, vector, and coordinate operations.
+- [x] **Function-Body Constant Folding**: Hook `foldConstExpr` (`const-fold.js`) into `emitExpr` so constant operations inside function bodies (`24 * 60 * 60`, `1 << 8`, `10 + 20`) are evaluated at compile time rather than emitting runtime bytecode instructions.
+- [x] **Direct `WriteString` on `strings.Builder` and `bytes.Buffer`**: In `_emitWriterWrite` (`io.js`), invoke `WriteString` directly rather than converting strings to `[]byte` slices on every write.
+- [x] **Index-Only Slice Range Loops**: In `emitRangeForStmt` (`emit-stmts.js`), when looping with `for i := range slice` and the value element is omitted or `_`, only unpack `slice.len`, omitting the unpack of `arr` and `off`.

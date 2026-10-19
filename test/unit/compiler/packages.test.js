@@ -1,7 +1,3 @@
-// GoFront test suite — multi-file packages, examples, npm resolver
-
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
@@ -11,6 +7,7 @@ import {
 	assertContains,
 	assertEqual,
 	assertErrorContains,
+	assertThrows,
 	compile,
 	compileDir,
 	FIXTURES,
@@ -19,6 +16,7 @@ import {
 	section,
 	summarize,
 	test,
+	withTempDir,
 } from "../helpers.js";
 
 section("npm package resolver");
@@ -323,22 +321,15 @@ test("reactive utils.Plural formats correctly", () => {
 });
 
 test("multi-file package infers package-level var type across file sort order", () => {
-	const dir = mkdtempSync(join(tmpdir(), "gofront-multifile-var-"));
-	try {
-		const fileA = join(dir, "a_caller.go");
-		const fileZ = join(dir, "z_store.go");
-		writeFileSync(
-			fileA,
-			`package main
+	withTempDir(
+		{
+			"a_caller.go": `package main
 func checkMap(k string) (string, bool) {
   val, ok := cache[k]
   return val, ok
 }
 `,
-		);
-		writeFileSync(
-			fileZ,
-			`package main
+			"z_store.go": `package main
 var cache = map[string]string{"hit": "yes"}
 func main() {
   v, ok := checkMap("hit")
@@ -347,32 +338,30 @@ func main() {
   console.log(v2, ok2)
 }
 `,
-		);
-		const { js } = compileFiles([fileA, fileZ]);
-		// Should emit comma-ok map index, NOT destructuring [val, ok] = cache[k]
-		assert(
-			js.includes("in cache") || js.includes("cache[k]"),
-			"expected map comma-ok check",
-		);
-		assert(
-			!js.includes("let [val, ok] = cache[k]"),
-			"should not emit array destructuring for map index",
-		);
-		const output = runJs(js);
-		assertEqual(output, "yes true\nundefined false");
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
+		},
+		(dir) => {
+			const fileA = join(dir, "a_caller.go");
+			const fileZ = join(dir, "z_store.go");
+			const { js } = compileFiles([fileA, fileZ]);
+			// Should emit comma-ok map index, NOT destructuring [val, ok] = cache[k]
+			assert(
+				js.includes("in cache") || js.includes("cache[k]"),
+				"expected map comma-ok check",
+			);
+			assert(
+				!js.includes("let [val, ok] = cache[k]"),
+				"should not emit array destructuring for map index",
+			);
+			const output = runJs(js);
+			assertEqual(output, "yes true\nundefined false");
+		},
+	);
 });
 
 test("multi-file package resolves struct types declared across file sort order", () => {
-	const dir = mkdtempSync(join(tmpdir(), "gofront-multifile-type-"));
-	try {
-		const fileA = join(dir, "a_container.go");
-		const fileZ = join(dir, "z_element.go");
-		writeFileSync(
-			fileA,
-			`package main
+	withTempDir(
+		{
+			"a_container.go": `package main
 type Container struct {
   Item Element
 }
@@ -380,10 +369,7 @@ func (c *Container) GetValue() int {
   return c.Item.Value
 }
 `,
-		);
-		writeFileSync(
-			fileZ,
-			`package main
+			"z_element.go": `package main
 type Element struct {
   Value int
 }
@@ -393,44 +379,34 @@ func main() {
   println(c.GetValue())
 }
 `,
-		);
-		const { js } = compileFiles([fileA, fileZ]);
-		const output = runJs(js);
-		assertEqual(output.trim(), "42");
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
+		},
+		(dir) => {
+			const fileA = join(dir, "a_container.go");
+			const fileZ = join(dir, "z_element.go");
+			const { js } = compileFiles([fileA, fileZ]);
+			const output = runJs(js);
+			assertEqual(output.trim(), "42");
+		},
+	);
 });
 
 test("diamond local imports bundle the shared package only once", () => {
 	// main → ./a, ./b; a → ../base; b → ../base
-	const dir = mkdtempSync(join(tmpdir(), "gofront-diamond-"));
-	try {
-		for (const sub of ["base", "a", "b"]) mkdirSync(join(dir, sub));
-		writeFileSync(
-			join(dir, "base", "base.go"),
-			`package base
+	withTempDir(
+		{
+			"base/base.go": `package base
 type Thing struct{ V int }
 func Make(v int) *Thing { return &Thing{V: v} }
 `,
-		);
-		writeFileSync(
-			join(dir, "a", "a.go"),
-			`package a
+			"a/a.go": `package a
 import "../base"
 func Twice(v int) int { return base.Make(v).V * 2 }
 `,
-		);
-		writeFileSync(
-			join(dir, "b", "b.go"),
-			`package b
+			"b/b.go": `package b
 import "../base"
 func Thrice(v int) int { return base.Make(v).V * 3 }
 `,
-		);
-		writeFileSync(
-			join(dir, "main.go"),
-			`package main
+			"main.go": `package main
 import (
   "./a"
   "./b"
@@ -440,29 +416,23 @@ func main() {
   println(a.Twice(2) + b.Thrice(2) + base.Make(1).V)
 }
 `,
-		);
-		const { js } = compileDir(dir);
-		assertEqual((js.match(/^class Thing\b/gm) ?? []).length, 1);
-		assertEqual(runJs(js).trim(), "11");
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
+		},
+		(dir) => {
+			const { js } = compileDir(dir);
+			assertEqual((js.match(/^class Thing\b/gm) ?? []).length, 1);
+			assertEqual(runJs(js).trim(), "11");
+		},
+	);
 });
 
 test("imported struct literals, zero values and &T{} construct the class", () => {
-	const dir = mkdtempSync(join(tmpdir(), "gofront-import-lit-"));
-	try {
-		mkdirSync(join(dir, "geo"));
-		writeFileSync(
-			join(dir, "geo", "geo.go"),
-			`package geo
+	withTempDir(
+		{
+			"geo/geo.go": `package geo
 type Vec struct{ X, Y float32 }
 func (v *Vec) Sum() float32 { return v.X + v.Y }
 `,
-		);
-		writeFileSync(
-			join(dir, "main.go"),
-			`package main
+			"main.go": `package main
 import "./geo"
 
 var scratch = &geo.Vec{}
@@ -482,44 +452,37 @@ func main() {
 	println(p.Sum())
 }
 `,
-		);
-		const { js } = compileDir(dir);
-		assertContains(js, "let scratch = new Vec()");
-		assertContains(js, "let zero = new Vec()");
-		assertEqual(runJs(js).trim(), "3\n4\n3\n8");
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
+		},
+		(dir) => {
+			const { js } = compileDir(dir);
+			assertContains(js, "let scratch = new Vec()");
+			assertContains(js, "let zero = new Vec()");
+			assertEqual(runJs(js).trim(), "3\n4\n3\n8");
+		},
+	);
 });
 
 section("compileFiles — sourceMap");
 
 test("compileFiles with sourceMap appends sourceMappingURL comment", () => {
-	const dir = mkdtempSync(join(tmpdir(), "gofront-smfiles-"));
-	const file = join(dir, "main.go");
-	writeFileSync(file, `package main\nfunc main() { console.log("hi") }\n`);
-	try {
-		const { js } = compileFiles([file], { sourceMap: true, outputDir: dir });
-		assertContains(js, "sourceMappingURL=data:application/json;base64,");
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
+	withTempDir(
+		{ "main.go": `package main\nfunc main() { console.log("hi") }\n` },
+		(dir) => {
+			const file = join(dir, "main.go");
+			const { js } = compileFiles([file], { sourceMap: true, outputDir: dir });
+			assertContains(js, "sourceMappingURL=data:application/json;base64,");
+		},
+	);
 });
 
 test("omitted field of imported struct type is zero-initialised, not null", () => {
-	const dir = mkdtempSync(join(tmpdir(), "gofront-import-zero-"));
-	try {
-		mkdirSync(join(dir, "geo"));
-		writeFileSync(
-			join(dir, "geo", "v.go"),
-			`package geo
+	withTempDir(
+		{
+			"geo/v.go": `package geo
 type V struct{ X float32 }
 func NewV() *V { return &V{} }
 `,
-		);
-		writeFileSync(
-			join(dir, "main.go"),
-			`package main
+			"main.go": `package main
 import "./geo"
 type C struct{ P geo.V; N int }
 func main() {
@@ -527,133 +490,198 @@ func main() {
   console.log(c.P.X, geo.NewV().X)
 }
 `,
-		);
-		const { js, errors } = compileDir(dir);
-		assertEqual(errors?.length ?? 0, 0);
-		assertEqual(runJs(js), "0 0");
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
+		},
+		(dir) => {
+			const { js, errors } = compileDir(dir);
+			assertEqual(errors?.length ?? 0, 0);
+			assertEqual(runJs(js), "0 0");
+		},
+	);
 });
 
 test("compileFiles with sourceMap embeds source content", () => {
-	const dir = mkdtempSync(join(tmpdir(), "gofront-smcontent-"));
-	const file = join(dir, "main.go");
-	writeFileSync(file, `package main\nfunc main() { console.log("hi") }\n`);
-	try {
-		const { js } = compileFiles([file], { sourceMap: true, outputDir: dir });
-		const b64 = js.split("base64,")[1].trim();
-		const map = JSON.parse(Buffer.from(b64, "base64").toString("utf8"));
-		assert(
-			Array.isArray(map.sourcesContent) && map.sourcesContent.length > 0,
-			"expected sourcesContent in source map",
-		);
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
+	withTempDir(
+		{ "main.go": `package main\nfunc main() { console.log("hi") }\n` },
+		(dir) => {
+			const file = join(dir, "main.go");
+			const { js } = compileFiles([file], { sourceMap: true, outputDir: dir });
+			const b64 = js.split("base64,")[1].trim();
+			const map = JSON.parse(Buffer.from(b64, "base64").toString("utf8"));
+			assert(
+				Array.isArray(map.sourcesContent) && map.sourcesContent.length > 0,
+				"expected sourcesContent in source map",
+			);
+		},
+	);
 });
 
 test("compileFiles with subpackage imports includes all packages in source map", () => {
-	const dir = mkdtempSync(join(tmpdir(), "gofront-multism-"));
-	try {
-		mkdirSync(join(dir, "math"));
-		writeFileSync(
-			join(dir, "math", "calc.go"),
-			`package math\nfunc Add(a, b int) int { return a + b }\n`,
-		);
-		const mainFile = join(dir, "main.go");
-		writeFileSync(
-			mainFile,
-			`package main\nimport "./math"\nfunc main() { console.log(math.Add(1, 2)) }\n`,
-		);
-		const { js } = compileFiles([mainFile], {
-			sourceMap: true,
-			outputDir: dir,
-		});
-		const b64 = js.split("base64,")[1].trim();
-		const map = JSON.parse(Buffer.from(b64, "base64").toString("utf8"));
-		assert(
-			map.sources.includes("math/calc.go"),
-			`expected math/calc.go in map.sources: ${JSON.stringify(map.sources)}`,
-		);
-		assert(
-			map.sources.includes("main.go"),
-			`expected main.go in map.sources: ${JSON.stringify(map.sources)}`,
-		);
-		assertEqual(map.sourcesContent.length, map.sources.length);
-		assert(map.sourcesContent.some((c) => c.includes("func Add")));
-		assert(map.sourcesContent.some((c) => c.includes("math.Add(1, 2)")));
-		const matches = js.match(/\/\/# sourceMappingURL=/g);
-		assertEqual(matches?.length, 1);
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
+	withTempDir(
+		{
+			"math/calc.go": `package math\nfunc Add(a, b int) int { return a + b }\n`,
+			"main.go": `package main\nimport "./math"\nfunc main() { console.log(math.Add(1, 2)) }\n`,
+		},
+		(dir) => {
+			const mainFile = join(dir, "main.go");
+			const { js } = compileFiles([mainFile], {
+				sourceMap: true,
+				outputDir: dir,
+			});
+			const b64 = js.split("base64,")[1].trim();
+			const map = JSON.parse(Buffer.from(b64, "base64").toString("utf8"));
+			assert(
+				map.sources.includes("math/calc.go"),
+				`expected math/calc.go in map.sources: ${JSON.stringify(map.sources)}`,
+			);
+			assert(
+				map.sources.includes("main.go"),
+				`expected main.go in map.sources: ${JSON.stringify(map.sources)}`,
+			);
+			assertEqual(map.sourcesContent.length, map.sources.length);
+			assert(map.sourcesContent.some((c) => c.includes("func Add")));
+			assert(map.sourcesContent.some((c) => c.includes("math.Add(1, 2)")));
+			const matches = js.match(/\/\/# sourceMappingURL=/g);
+			assertEqual(matches?.length, 1);
+		},
+	);
 });
 
 test("compileSingleFile with subpackage includes all packages in source map", () => {
-	const dir = mkdtempSync(join(tmpdir(), "gofront-singlesm-"));
-	try {
-		mkdirSync(join(dir, "greet"));
-		writeFileSync(
-			join(dir, "greet", "hello.go"),
-			`package greet\nfunc Hello() string { return "hello" }\n`,
-		);
-		const mainFile = join(dir, "main.go");
-		writeFileSync(
-			mainFile,
-			`package main\nimport "./greet"\nfunc main() { console.log(greet.Hello()) }\n`,
-		);
-		const { js } = compileSingleFile(mainFile, {
-			sourceMap: true,
-			outputFile: join(dir, "out.js"),
-		});
-		const b64 = js.split("base64,")[1].trim();
-		const map = JSON.parse(Buffer.from(b64, "base64").toString("utf8"));
-		assert(
-			map.sources.includes("greet/hello.go"),
-			`expected greet/hello.go in map.sources: ${JSON.stringify(map.sources)}`,
-		);
-		assert(
-			map.sources.includes("main.go"),
-			`expected main.go in map.sources: ${JSON.stringify(map.sources)}`,
-		);
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
+	withTempDir(
+		{
+			"greet/hello.go": `package greet\nfunc Hello() string { return "hello" }\n`,
+			"main.go": `package main\nimport "./greet"\nfunc main() { console.log(greet.Hello()) }\n`,
+		},
+		(dir) => {
+			const mainFile = join(dir, "main.go");
+			const { js } = compileSingleFile(mainFile, {
+				sourceMap: true,
+				outputFile: join(dir, "out.js"),
+			});
+			const b64 = js.split("base64,")[1].trim();
+			const map = JSON.parse(Buffer.from(b64, "base64").toString("utf8"));
+			assert(
+				map.sources.includes("greet/hello.go"),
+				`expected greet/hello.go in map.sources: ${JSON.stringify(map.sources)}`,
+			);
+			assert(
+				map.sources.includes("main.go"),
+				`expected main.go in map.sources: ${JSON.stringify(map.sources)}`,
+			);
+		},
+	);
 });
 
 test("multi-file package maps methods in second file to second file in source map", () => {
-	const dir = mkdtempSync(join(tmpdir(), "gofront-multifile-"));
-	try {
-		const typeFile = join(dir, "types.go");
-		const methodFile = join(dir, "methods.go");
-		writeFileSync(
-			typeFile,
-			`package main\ntype User struct{ Name string }\nfunc main() {}\n`,
-		);
-		writeFileSync(
-			methodFile,
-			`package main\nfunc (u *User) Greet() string { return "Hi " + u.Name }\n`,
-		);
-		const { js } = compileFiles([typeFile, methodFile], {
-			sourceMap: true,
-			outputDir: dir,
-		});
-		const b64 = js.split("base64,")[1].trim();
-		const map = JSON.parse(Buffer.from(b64, "base64").toString("utf8"));
-		assertEqual(
-			JSON.stringify(map.sources),
-			JSON.stringify(["types.go", "methods.go"]),
-		);
-		assert(map.mappings.length > 0, "expected mappings to not be empty");
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
+	withTempDir(
+		{
+			"types.go": `package main\ntype User struct{ Name string }\nfunc main() {}\n`,
+			"methods.go": `package main\nfunc (u *User) Greet() string { return "Hi " + u.Name }\n`,
+		},
+		(dir) => {
+			const typeFile = join(dir, "types.go");
+			const methodFile = join(dir, "methods.go");
+			const { js } = compileFiles([typeFile, methodFile], {
+				sourceMap: true,
+				outputDir: dir,
+			});
+			const b64 = js.split("base64,")[1].trim();
+			const map = JSON.parse(Buffer.from(b64, "base64").toString("utf8"));
+			assertEqual(
+				JSON.stringify(map.sources),
+				JSON.stringify(["types.go", "methods.go"]),
+			);
+			assert(map.mappings.length > 0, "expected mappings to not be empty");
+		},
+	);
 });
 
-// ═════════════════════════════════════════════════════════════
-// CLI flags
-// ═════════════════════════════════════════════════════════════
+section("Package target directives & validation");
+
+test("conflicting //gofront:target directives in same package throws error", () => {
+	withTempDir(
+		{
+			"a.go": "//gofront:target js\npackage mypkg\nfunc A() {}\n",
+			"b.go": "//gofront:target wasm\npackage mypkg\nfunc B() {}\n",
+		},
+		(dir) => {
+			assertThrows(
+				() => compileDir(dir),
+				/Conflicting \/\/gofront:target directives in package 'mypkg'/,
+			);
+		},
+	);
+});
+
+test("//gofront:target wasm rejects js: imports and gom and external imports", () => {
+	withTempDir(
+		{
+			"main.go":
+				'//gofront:target wasm\npackage main\nimport _ "js:canvas"\nfunc main() {}\n',
+		},
+		(dir) => {
+			assertThrows(
+				() => compileDir(dir),
+				/js: imports are not allowed in wasm packages/,
+			);
+		},
+	);
+
+	withTempDir(
+		{
+			"main.go":
+				'//gofront:target wasm\npackage main\nimport "gom"\nfunc main() {}\n',
+		},
+		(dir) => {
+			assertThrows(
+				() => compileDir(dir),
+				/package 'gom' is not available in wasm packages/,
+			);
+		},
+	);
+
+	withTempDir(
+		{
+			"main.go":
+				'//gofront:target wasm\npackage main\nimport _ "some/external/pkg"\nfunc main() {}\n',
+		},
+		(dir) => {
+			assertThrows(
+				() => compileDir(dir),
+				/js: imports are not allowed in wasm packages/,
+			);
+		},
+	);
+});
+
+test("//gofront:target both cannot import js package", () => {
+	withTempDir(
+		{
+			"main.go":
+				'//gofront:target both\npackage main\nimport "./sub"\nfunc main() {}\n',
+			"sub/sub.go": "//gofront:target js\npackage sub\nfunc Sub() {}\n",
+		},
+		(dir) => {
+			assertThrows(() => compileDir(dir), /cannot import 'sub' \(js\)/);
+		},
+	);
+});
+
+test("//gofront:target both cannot import wasm package", () => {
+	withTempDir(
+		{
+			"main.go":
+				'//gofront:target both\npackage main\nimport "./sub"\nfunc main() {}\n',
+			"sub/sub.go": "//gofront:target wasm\npackage sub\nfunc Sub() {}\n",
+		},
+		(dir) => {
+			assertThrows(
+				() => compileDir(dir),
+				/can only import 'both' packages; 'sub' is wasm/,
+			);
+		},
+	);
+});
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);

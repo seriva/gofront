@@ -2,7 +2,14 @@
 // WASM stdlib coverage: errors, fmt, strconv, strings, unicode/utf8, sort,
 // math extras and `any` equality — all checked for JS/WASM parity.
 
-import { assertEqual, compileHybrid, section, test } from "../helpers.js";
+import {
+	assertEqual,
+	assertThrows,
+	compileHybrid,
+	runWasm,
+	section,
+	test,
+} from "../helpers.js";
 
 section("WASM stdlib — errors & fmt");
 
@@ -224,7 +231,7 @@ func Main() string {
 	assertEqual(wasmRes, jsRes);
 });
 
-test("math.Exp2 / Signbit / Dim", () => {
+test("math.Exp2 / Signbit / Dim / Remainder", () => {
 	const src = `
 package main
 
@@ -234,12 +241,467 @@ import (
 )
 
 func Main() string {
-	return fmt.Sprintf("%v %v %v %v", math.Exp2(3), math.Signbit(-1.0), math.Dim(5, 3), math.Dim(3, 5))
+	return fmt.Sprintf("%v %v %v %v %v %v %v",
+		math.Exp2(3), math.Signbit(-1.0), math.Dim(5, 3), math.Dim(3, 5),
+		math.Remainder(10.0, 3.0), math.Remainder(-10.0, 3.0), math.Remainder(9.0, 3.0))
 }
 `;
 	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
-	assertEqual(wasmRes, "8 true 2 0");
+	assertEqual(wasmRes, "8 true 2 0 1 -1 0");
 	assertEqual(wasmRes, jsRes);
+});
+
+section("WASM stdlib — slices (Phase 4)");
+
+test("slices.Compare", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+func Main() string {
+	c1 := slices.Compare([]int{1, 2, 3}, []int{1, 2, 3})
+	c2 := slices.Compare([]int{1, 2}, []int{1, 3})
+	c3 := slices.Compare([]int{1, 3}, []int{1, 2})
+	c4 := slices.Compare([]int{1, 2}, []int{1, 2, 3})
+	c5 := slices.Compare([]int{1, 2, 3}, []int{1, 2})
+	var nil1 []int
+	var nil2 []int
+	c6 := slices.Compare(nil1, nil2)
+	c7 := slices.Compare(nil1, []int{1})
+	c8 := slices.Compare([]int{1}, nil1)
+	return fmt.Sprintf("%d %d %d %d %d %d %d %d", c1, c2, c3, c4, c5, c6, c7, c8)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "0 -1 1 -1 1 0 -1 1");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("slices.SortFunc & SortStableFunc", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+type Item struct {
+	Name string
+	Val  int
+}
+
+func Main() string {
+	s := []int{5, 2, 8, 1, 9}
+	slices.SortFunc(s, func(a, b int) int { return a - b })
+
+	items := []Item{
+		{"a", 2},
+		{"b", 1},
+		{"c", 2},
+		{"d", 1},
+	}
+	slices.SortStableFunc(items, func(a, b Item) int { return a.Val - b.Val })
+
+	return fmt.Sprintf("%d %d %d %d %d %s%s%s%s", s[0], s[1], s[2], s[3], s[4], items[0].Name, items[1].Name, items[2].Name, items[3].Name)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "1 2 5 8 9 bdac");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("slices.IsSorted & IsSortedFunc", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+func Main() string {
+	b1 := slices.IsSorted([]int{1, 2, 3, 4})
+	b2 := slices.IsSorted([]int{1, 3, 2})
+	b3 := slices.IsSorted([]string{"apple", "banana", "cherry"})
+	b4 := slices.IsSorted([]string{"banana", "apple"})
+
+	cmp := func(a, b int) int { return b - a } // descending
+	b5 := slices.IsSortedFunc([]int{4, 3, 2, 1}, cmp)
+	b6 := slices.IsSortedFunc([]int{1, 2, 3, 4}, cmp)
+
+	return fmt.Sprintf("%v %v %v %v %v %v", b1, b2, b3, b4, b5, b6)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "true false true false true false");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("slices.Min, Max, MinFunc, MaxFunc", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+type Person struct {
+	Name string
+	Age  int
+}
+
+func Main() string {
+	nums := []int{3, 1, 4, 1, 5, 9, 2, 6}
+	minN := slices.Min(nums)
+	maxN := slices.Max(nums)
+
+	strs := []string{"cat", "zebra", "apple", "dog"}
+	minS := slices.Min(strs)
+	maxS := slices.Max(strs)
+
+	people := []Person{{"Alice", 30}, {"Bob", 20}, {"Charlie", 40}}
+	byAge := func(a, b Person) int { return a.Age - b.Age }
+	youngest := slices.MinFunc(people, byAge)
+	oldest := slices.MaxFunc(people, byAge)
+
+	return fmt.Sprintf("%d %d %s %s %s %s", minN, maxN, minS, maxS, youngest.Name, oldest.Name)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "1 9 apple zebra Bob Charlie");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("slices.Compact & CompactFunc", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"slices"
+	"strings"
+)
+
+func Main() string {
+	s1 := []int{1, 1, 2, 2, 2, 3, 4, 4, 1}
+	c1 := slices.Compact(s1)
+
+	s2 := []string{"a", "A", "b", "B", "b"}
+	c2 := slices.CompactFunc(s2, func(a, b string) bool {
+		return strings.EqualFold(a, b)
+	})
+
+	return fmt.Sprintf("%d %d %d %d %d %s %s", c1[0], c1[1], c1[2], c1[3], c1[4], c2[0], c2[1])
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "1 2 3 4 1 a b");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("slices.Concat", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+func Main() string {
+	a := []int{1, 2}
+	b := []int{3, 4}
+	c := []int{5}
+	res := slices.Concat(a, b, c)
+
+	var n1 []string
+	var n2 []string
+	res2 := slices.Concat(n1, []string{"hello"}, n2, []string{"world"})
+
+	return fmt.Sprintf("%d %d %d %d %d %s %s", res[0], res[1], res[2], res[3], res[4], res2[0], res2[1])
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "1 2 3 4 5 hello world");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("slices.Delete & DeleteFunc", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+func Main() string {
+	s1 := []int{1, 2, 3, 4, 5, 6}
+	s1 = slices.Delete(s1, 1, 4) // keeps s1[0] and s1[4:], so [1, 5, 6]
+
+	s2 := []int{1, 2, 3, 4, 5, 6, 7, 8}
+	s2 = slices.DeleteFunc(s2, func(n int) bool { return n%2 == 0 }) // delete evens
+
+	return fmt.Sprintf("%d %d %d %d %d %d %d", s1[0], s1[1], s1[2], s2[0], s2[1], s2[2], s2[3])
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "1 5 6 1 3 5 7");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("slices.Insert & Replace", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+func Main() string {
+	s := []int{1, 2, 5}
+	s = slices.Insert(s, 2, 3, 4) // [1 2 3 4 5]
+
+	s2 := []int{1, 2, 3, 4, 5}
+	s2 = slices.Replace(s2, 1, 4, 20, 30, 40) // [1 20 30 40 5]
+
+	return fmt.Sprintf("%d %d %d %d %d %d %d %d %d %d", s[0], s[1], s[2], s[3], s[4], s2[0], s2[1], s2[2], s2[3], s2[4])
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "1 2 3 4 5 1 20 30 40 5");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("slices.Grow & Clip", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+func Main() string {
+	s := []int{1, 2, 3}
+	s2 := slices.Grow(s, 10)
+	s2 = append(s2, 4)
+
+	s3 := slices.Clip(s2)
+
+	return fmt.Sprintf("%d %d %d %d %d", len(s2), len(s3), s2[0], s2[3], s3[3])
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "4 4 1 4 4");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("slices.Grow & Clip capacity behavior in WASM", () => {
+	const src = `
+package main
+
+import (
+	"slices"
+)
+
+func Main() int {
+	s := []int{1, 2, 3}
+	s2 := slices.Grow(s, 10)
+	if cap(s2) < len(s2)+10 {
+		return 1
+	}
+	s3 := slices.Clip(s2)
+	if len(s3) != cap(s3) {
+		return 2
+	}
+	return 0
+}
+`;
+	const { wasm, stringTable } = compileHybrid(src);
+	const { exports } = runWasm(wasm, { stringTable });
+	assertEqual(exports.Main(), 0);
+});
+
+test("slices unsigned integer comparisons (Compare, Min, Max, IsSorted)", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+func Main() string {
+	a := []uint32{0x80000000, 1}
+	c := slices.Compare([]uint32{0x80000000}, []uint32{1})
+	minU := slices.Min(a)
+	maxU := slices.Max(a)
+	sorted := slices.IsSorted([]uint32{1, 0x80000000})
+
+	a64 := []uint64{0x8000000000000000, 1}
+	c64 := slices.Compare([]uint64{0x8000000000000000}, []uint64{1})
+	min64 := slices.Min(a64)
+	max64 := slices.Max(a64)
+
+	return fmt.Sprintf("%d %d %d %v %d %d %d", c, minU, maxU, sorted, c64, min64, max64)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "1 1 2147483648 true 1 1 9223372036854776000");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("slices.Insert & Replace on struct values (in-place right shift)", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+type Point struct {
+	X int
+	Y int
+}
+
+func Main() string {
+	s := make([]Point, 3, 10)
+	s[0] = Point{1, 1}
+	s[1] = Point{2, 2}
+	s[2] = Point{3, 3}
+	s = slices.Insert(s, 0, Point{9, 9})
+
+	s2 := make([]Point, 4, 10)
+	s2[0] = Point{1, 1}
+	s2[1] = Point{2, 2}
+	s2[2] = Point{3, 3}
+	s2[3] = Point{4, 4}
+	s2 = slices.Replace(s2, 1, 2, Point{8, 8}, Point{9, 9})
+
+	return fmt.Sprintf("%d %d %d %d | %d %d %d %d %d",
+		s[0].X, s[1].X, s[2].X, s[3].X,
+		s2[0].X, s2[1].X, s2[2].X, s2[3].X, s2[4].X)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "9 1 2 3 | 1 8 9 3 4");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("slices.Concat with 0 arguments", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+func Main() string {
+	var s []int = slices.Concat()
+	return fmt.Sprintf("%v", s == nil)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "true");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("slices.SortFunc & SortStableFunc & Reverse on nil slices", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+func Main() string {
+	var s1 []int
+	slices.SortFunc(s1, func(a, b int) int { return a - b })
+	var s2 []int
+	slices.SortStableFunc(s2, func(a, b int) int { return a - b })
+	var s3 []int
+	slices.Sort(s3)
+	var s4 []int
+	slices.Reverse(s4)
+	return "ok"
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "ok");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("slices float NaN and signbit semantics (Compare, Min, Max, IsSorted)", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"math"
+	"slices"
+)
+
+func Main() string {
+	c1 := slices.Compare([]float64{math.NaN()}, []float64{math.NaN()})
+	c2 := slices.Compare([]float64{math.NaN()}, []float64{1.0})
+	c3 := slices.Compare([]float64{1.0}, []float64{math.NaN()})
+	sorted1 := slices.IsSorted([]float64{1.0, math.NaN(), 2.0})
+	min0 := slices.Min([]float64{0.0, -0.0})
+	max0 := slices.Max([]float64{-0.0, 0.0})
+	return fmt.Sprintf("%d %d %d %v %v %v", c1, c2, c3, sorted1, math.Signbit(min0), math.Signbit(max0))
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "0 -1 1 false true false");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("math.Remainder edge cases (half-integers and infinite y)", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"math"
+)
+
+func Main() string {
+	r1 := math.Remainder(5.0, 2.0)
+	r2 := math.Remainder(3.0, 2.0)
+	r3 := math.Remainder(2.5, 2.0)
+	r4 := math.Remainder(10.0, math.Inf(1))
+	return fmt.Sprintf("%v %v %v %v", r1, r2, r3, r4)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "1 -1 0.5 10");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("slices out of bounds error parity", () => {
+	const testPanics = [
+		`package main; import "slices"; func Main() { slices.Insert([]int{1, 2}, 5, 99) }`,
+		`package main; import "slices"; func Main() { slices.Delete([]int{1, 2}, 1, 5) }`,
+		`package main; import "slices"; func Main() { slices.Replace([]int{1, 2}, 1, 5, 99) }`,
+		`package main; import "slices"; func Main() { slices.Grow([]int{1, 2}, -1) }`,
+	];
+	for (const src of testPanics) {
+		const res = compileHybrid(src).run("Main");
+		// run() verifies both WASM and JS throw matching error messages
+		assertEqual(res.jsRes, undefined);
+		assertEqual(res.wasmRes, undefined);
+	}
 });
 
 section("WASM — any equality");
@@ -275,5 +737,1248 @@ func Main() string {
 `;
 	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
 	assertEqual(wasmRes, "12345");
+	assertEqual(wasmRes, jsRes);
+});
+
+section("WASM stdlib — Phase 6: unicode, math/rand, html, path, bytes");
+
+test("unicode functions: ASCII and Unicode parity", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"unicode"
+)
+
+func Main() string {
+	res := fmt.Sprintf("%v|%v|%v|%v|%v|%v|%v|%v|%c|%c",
+		unicode.IsLetter('a') && unicode.IsLetter('Ж'),
+		unicode.IsDigit('5') && !unicode.IsDigit('a'),
+		unicode.IsSpace(' ') && unicode.IsSpace('\\n') && !unicode.IsSpace('a'),
+		unicode.IsUpper('A') && unicode.IsUpper('Ω') && !unicode.IsUpper('a'),
+		unicode.IsLower('a') && unicode.IsLower('ω') && !unicode.IsLower('A'),
+		unicode.IsPunct('!') && unicode.IsPunct('?') && !unicode.IsPunct('a'),
+		unicode.IsControl('\\n') && !unicode.IsControl('a'),
+		unicode.IsPrint('a') && unicode.IsPrint(' ') && !unicode.IsPrint(0),
+		unicode.ToUpper('g'),
+		unicode.ToLower('G'),
+	)
+	return res
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "true|true|true|true|true|true|true|true|G|g");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("math/rand functions: Float, Int, Seed, Shuffle, Perm", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"math/rand"
+)
+
+func Main() string {
+	rand.Seed(42)
+	f64 := rand.Float64()
+	f32 := rand.Float32()
+	n := rand.Intn(100)
+	i := rand.Int()
+	i31 := rand.Int31()
+	i63 := rand.Int63()
+
+	arr := []int{10, 20, 30, 40, 50}
+	rand.Shuffle(len(arr), func(i, j int) {
+		arr[i], arr[j] = arr[j], arr[i]
+	})
+
+	perm := rand.Perm(5)
+
+	return fmt.Sprintf("%v|%v|%v|%v|%v|%v|%d|%d",
+		f64 >= 0 && f64 < 1.0,
+		f32 >= 0 && f32 < 1.0,
+		n >= 0 && n < 100,
+		i >= 0,
+		i31 >= 0,
+		i63 >= 0,
+		len(arr),
+		len(perm),
+	)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "true|true|true|true|true|true|5|5");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("html EscapeString and UnescapeString", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"html"
+)
+
+func Main() string {
+	raw := "<b>Hello & 'World' \\"123\\"</b>"
+	esc := html.EscapeString(raw)
+	unesc := html.UnescapeString(esc)
+	unescHex := html.UnescapeString("&#x27;test&#x27;")
+	return fmt.Sprintf("%s|%s|%s", esc, unesc, unescHex)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(
+		wasmRes,
+		"&lt;b&gt;Hello &amp; &#39;World&#39; &#34;123&#34;&lt;/b&gt;|<b>Hello & 'World' \"123\"</b>|'test'",
+	);
+	assertEqual(wasmRes, jsRes);
+});
+
+test("path & filepath functions: Base, Dir, Ext, Clean, IsAbs, Join, Split, Match, ErrBadPattern", () => {
+	const src = `
+package main
+
+import (
+	"errors"
+	"fmt"
+	"path"
+	"path/filepath"
+)
+
+func Main() string {
+	b := path.Base("/a/b/c.txt")
+	d := path.Dir("/a/b/c.txt")
+	ext := path.Ext("/a/b/c.txt")
+	clean := path.Clean("/a/b/../c/./d")
+	abs := path.IsAbs("/a/b")
+	notAbs := path.IsAbs("a/b")
+	joined := path.Join("a", "b", "c")
+	emptyJoin := path.Join()
+	emptyClean := path.Clean("")
+	dir, file := path.Split("/foo/bar/baz.go")
+
+	matched, err := path.Match("*.txt", "foo.txt")
+	_, badErr := path.Match("[a-", "foo.txt")
+	isBad := errors.Is(badErr, path.ErrBadPattern)
+
+	fpBase := filepath.Base("/x/y/z.png")
+	fpJoined := filepath.Join("x", "y")
+
+	return fmt.Sprintf("%s|%s|%s|%s|%v|%v|%s|%s|%s|%s|%s|%v|%v|%v|%s|%s",
+		b, d, ext, clean, abs, notAbs, joined, emptyJoin, emptyClean, dir, file,
+		matched, err == nil, isBad, fpBase, fpJoined,
+	)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(
+		wasmRes,
+		"c.txt|/a/b|.txt|/a/c/d|true|false|a/b/c||.|/foo/bar/|baz.go|true|true|true|z.png|x/y",
+	);
+	assertEqual(wasmRes, jsRes);
+});
+
+test("bytes package functions: Equal, Contains, Prefixes, Trims, Split, Join, Replace, Cut, Fields", () => {
+	const src = `
+package main
+
+import (
+	"bytes"
+	"fmt"
+)
+
+func Main() string {
+	b1 := []byte("hello world")
+	b2 := []byte("hello")
+	eq := bytes.Equal(b1, b2)
+	hasP := bytes.HasPrefix(b1, b2)
+	hasS := bytes.HasSuffix(b1, []byte("world"))
+	idx := bytes.Index(b1, []byte("lo"))
+	idxB := bytes.IndexByte(b1, 'o')
+	lastIdxB := bytes.LastIndexByte(b1, 'o')
+	cnt := bytes.Count(b1, []byte("l"))
+	rep := string(bytes.Repeat([]byte("ab"), 3))
+	up := string(bytes.ToUpper([]byte("abc!")))
+	low := string(bytes.ToLower([]byte("ABC!")))
+	trimSp := string(bytes.TrimSpace([]byte("  xyz  ")))
+	trimPref := string(bytes.TrimPrefix([]byte("foobar"), []byte("foo")))
+	trimSuff := string(bytes.TrimSuffix([]byte("foobar"), []byte("bar")))
+	trim := string(bytes.Trim([]byte("xxfooxx"), "x"))
+	cutBefore, cutAfter, found := bytes.Cut(b1, []byte(" "))
+	replaced := string(bytes.ReplaceAll([]byte("a-b-c"), []byte("-"), []byte(":")))
+	split := bytes.Split([]byte("x,y,z"), []byte(","))
+	joined := string(bytes.Join(split, []byte(";")))
+	fields := bytes.Fields([]byte("one  two   three"))
+
+	return fmt.Sprintf("%v|%v|%v|%d|%d|%d|%d|%s|%s|%s|%s|%s|%s|%s|%s|%s|%v|%s|%d|%s|%d",
+		eq, hasP, hasS, idx, idxB, lastIdxB, cnt, rep, up, low, trimSp,
+		trimPref, trimSuff, trim, string(cutBefore), string(cutAfter), found,
+		replaced, len(split), joined, len(fields),
+	)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(
+		wasmRes,
+		"false|true|true|3|4|7|3|ababab|ABC!|abc!|xyz|bar|foo|foo|hello|world|true|a:b:c|3|x;y;z|3",
+	);
+	assertEqual(wasmRes, jsRes);
+});
+
+test("bytes.Buffer methods: WriteString, WriteByte, WriteRune, Write, String, Bytes, Len, Cap, Reset, Grow", () => {
+	const src = `
+package main
+
+import (
+	"bytes"
+	"fmt"
+)
+
+func Main() string {
+	var buf bytes.Buffer
+	buf.WriteString("hello")
+	buf.WriteByte(' ')
+	buf.WriteRune('世')
+	buf.WriteRune('界')
+	buf.Write([]byte("!"))
+
+	l := buf.Len()
+	s := buf.String()
+	b := buf.Bytes()
+	c := buf.Cap()
+
+	buf.Grow(50)
+	c2 := buf.Cap()
+
+	buf.Reset()
+	l2 := buf.Len()
+	s2 := buf.String()
+
+	return fmt.Sprintf("%d|%s|%d|%v|%v|%d|%s", l, s, len(b), c >= l, c2 >= l + 50, l2, s2)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "13|hello 世界!|13|true|true|0|");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("Phase 6 edge cases: composite literals, variadic Join, UTF-8 byte operations, invalid runes, caseless unicode", () => {
+	const src = `
+package main
+
+import (
+	"bytes"
+	"fmt"
+	"path"
+	"unicode"
+)
+
+func Main() string {
+	// 1. Composite literal bytes.Buffer{} and &bytes.Buffer{}
+	var b1 = bytes.Buffer{}
+	b1.WriteString("hello")
+	var b2 = &bytes.Buffer{}
+	b2.WriteString("world")
+
+	// 2. Variadic path.Join(parts...)
+	parts := []string{"usr", "local", "bin"}
+	joined := path.Join(parts...)
+
+	// 3. Multi-byte runes in bytes functions
+	bData := []byte("你好世界")
+	hasRune := bytes.ContainsRune(bData, '世')
+	hasAny := bytes.ContainsAny(bData, "界x")
+	trimmed := bytes.Trim([]byte("【你好世界】"), "【】")
+	trimmedLeft := bytes.TrimLeft([]byte("【你好"), "【")
+	trimmedRight := bytes.TrimRight([]byte("你好】"), "】")
+	trimmedFunc := bytes.TrimFunc([]byte("  你好  "), func(r rune) bool {
+		return unicode.IsSpace(r)
+	})
+	mapped := bytes.Map(func(r rune) rune {
+		if r == 'h' {
+			return 'H'
+		} else if r == 'e' {
+			return -1
+		}
+		return r
+	}, []byte("hello"))
+
+	// 4. Invalid rune in WriteRune
+	var b3 bytes.Buffer
+	b3.WriteRune(-1)
+
+	// 5. Caseless unicode
+	zhongUpper := unicode.IsUpper('中')
+	zhongLower := unicode.IsLower('中')
+
+	return fmt.Sprintf("%s|%s|%s|%v|%v|%s|%s|%s|%s|%s|%s|%v|%v",
+		b1.String(),
+		b2.String(),
+		joined,
+		hasRune,
+		hasAny,
+		string(trimmed),
+		string(trimmedLeft),
+		string(trimmedRight),
+		string(trimmedFunc),
+		string(mapped),
+		b3.String(),
+		zhongUpper,
+		zhongLower,
+	)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(
+		wasmRes,
+		"hello|world|usr/local/bin|true|true|你好世界|你好|你好|你好|Hllo|\uFFFD|false|false",
+	);
+	assertEqual(wasmRes, jsRes);
+});
+
+test("Phase 6 negative bounds panics parity", () => {
+	const testPanic = (goCode, expectedSubstring) => {
+		const src = `
+package main
+
+import (
+	"bytes"
+	"math/rand"
+)
+
+func Main() {
+	${goCode}
+}
+`;
+		const h = compileHybrid(src);
+		h.run("Main");
+		const wasmInst = runWasm(h.wasm, { stringTable: h.stringTable });
+		assertThrows(() => wasmInst.exports.Main(), expectedSubstring);
+	};
+
+	testPanic("rand.Intn(0)", "invalid argument to Intn");
+	testPanic("rand.Perm(-1)", "invalid argument to Perm");
+	testPanic(
+		"rand.Shuffle(-1, func(i, j int){})",
+		"invalid argument to Shuffle",
+	);
+	testPanic(
+		"var b bytes.Buffer; b.Grow(-1)",
+		"bytes.Buffer.Grow: negative count",
+	);
+});
+
+section("WASM stdlib — Phase 7: io, readers/writers, fmt.Fprint*, fmt.Sscan*");
+
+test("io.WriteString, io.Discard, and fmt.Fprint* writing to Builder and Buffer", () => {
+	const src = `
+package main
+
+import (
+	"bytes"
+	"fmt"
+	"io"
+	"strings"
+)
+
+func Main() string {
+	var sb strings.Builder
+	n1, err1 := io.WriteString(&sb, "hello")
+	n2, err2 := fmt.Fprintf(&sb, " %s %d", "world", 42)
+	n3, err3 := fmt.Fprintln(&sb)
+	n4, err4 := fmt.Fprint(&sb, "done")
+
+	var buf bytes.Buffer
+	n5, err5 := io.WriteString(&buf, "buf:")
+	n6, err6 := fmt.Fprintf(&buf, "val=%d", 100)
+
+	n7, err7 := io.WriteString(io.Discard, "discarded text")
+	n8, err8 := fmt.Fprintf(io.Discard, "discarded %d", 999)
+
+	return fmt.Sprintf("%s|%s|%d,%d,%d,%d,%d,%d,%d,%d|%t,%t,%t,%t,%t,%t,%t,%t",
+		sb.String(),
+		buf.String(),
+		n1, n2, n3, n4, n5, n6, n7, n8,
+		err1 == nil, err2 == nil, err3 == nil, err4 == nil,
+		err5 == nil, err6 == nil, err7 == nil, err8 == nil,
+	)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(
+		wasmRes,
+		"hello world 42\ndone|buf:val=100|5,9,1,4,4,7,14,13|true,true,true,true,true,true,true,true",
+	);
+	assertEqual(wasmRes, jsRes);
+});
+
+test("strings.NewReader, bytes.NewReader, and io.ReadAll", () => {
+	const src = `
+package main
+
+import (
+	"bytes"
+	"fmt"
+	"io"
+	"strings"
+)
+
+func Main() string {
+	sr := strings.NewReader("hello strings reader")
+	l1 := sr.Len()
+	buf1 := make([]byte, 5)
+	n1, err1 := sr.Read(buf1)
+	l2 := sr.Len()
+	sr.Reset("new content")
+	all1, err2 := io.ReadAll(sr)
+
+	br := bytes.NewReader([]byte("bytes reader content"))
+	l3 := br.Len()
+	buf2 := make([]byte, 5)
+	n2, err3 := br.Read(buf2)
+	l4 := br.Len()
+	br.Reset([]byte("reset bytes"))
+	all2, err4 := io.ReadAll(br)
+
+	return fmt.Sprintf("%d,%d,%s,%t,%s,%t|%d,%d,%s,%t,%s,%t",
+		l1, l2, string(buf1[:n1]), err1 == nil, string(all1), err2 == nil,
+		l3, l4, string(buf2[:n2]), err3 == nil, string(all2), err4 == nil,
+	)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(
+		wasmRes,
+		"20,15,hello,true,new content,true|20,15,bytes,true,reset bytes,true",
+	);
+	assertEqual(wasmRes, jsRes);
+});
+
+test("io.EOF sentinel comparison with == and errors.Is", () => {
+	const src = `
+package main
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"strings"
+)
+
+func Main() string {
+	sr := strings.NewReader("abc")
+	buf := make([]byte, 10)
+	n, err := sr.Read(buf)
+	n2, err2 := sr.Read(buf)
+
+	eqSelf := io.EOF == io.EOF
+	isSelf := errors.Is(io.EOF, io.EOF)
+	eqErr2 := err2 == io.EOF
+	isErr2 := errors.Is(err2, io.EOF)
+
+	return fmt.Sprintf("%d,%t|%d,%t|%t,%t,%t,%t",
+		n, err == nil,
+		n2, err2 != nil,
+		eqSelf, isSelf, eqErr2, isErr2,
+	)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "3,true|0,true|true,true,true,true");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("fmt.Sscan, fmt.Sscanln, fmt.Sscanf parsing and unexpected EOF parity", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+)
+
+func Main() string {
+	var a int
+	var b string
+	var c bool
+	n1, err1 := fmt.Sscan("123 hello true", &a, &b, &c)
+
+	var x int
+	var y string
+	n2, err2 := fmt.Sscanln("456 world", &x, &y)
+
+	var id int
+	var name string
+	n3, err3 := fmt.Sscanf("789 Alice", "%d %s", &id, &name)
+
+	var u1 int
+	var u2 string
+	n4, err4 := fmt.Sscanf("10", "%d %s", &u1, &u2)
+	err4Str := ""
+	if err4 != nil {
+		err4Str = err4.Error()
+	}
+
+	return fmt.Sprintf("%d,%d,%s,%t,%t|%d,%d,%s,%t|%d,%d,%s,%t|%d,%d,%s",
+		n1, a, b, c, err1 == nil,
+		n2, x, y, err2 == nil,
+		n3, id, name, err3 == nil,
+		n4, u1, err4Str,
+	)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(
+		wasmRes,
+		"3,123,hello,true,true|2,456,world,true|2,789,Alice,true|1,10,unexpected EOF",
+	);
+	assertEqual(wasmRes, jsRes);
+});
+
+test("Phase 7 edge cases: io.ReadAll (n > 0, EOF) and Builder copy check", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"io"
+)
+
+type OnceReader struct {
+	done bool
+}
+
+func (r *OnceReader) Read(p []byte) (int, error) {
+	if r.done {
+		return 0, io.EOF
+	}
+	r.done = true
+	p[0] = 72 // 'H'
+	p[1] = 105 // 'i'
+	return 2, io.EOF
+}
+
+func Main() string {
+	r := &OnceReader{}
+	data, err := io.ReadAll(r)
+	return fmt.Sprintf("len=%d data=%s err=%t", len(data), string(data), err == nil)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "len=2 data=Hi err=true");
+	assertEqual(wasmRes, jsRes);
+
+	const panicSrc = `
+package main
+
+import "strings"
+
+func Main() {
+	var b1 strings.Builder
+	b1.WriteString("hello")
+	b2 := b1
+	b2.WriteString("world")
+}
+`;
+	const h = compileHybrid(panicSrc);
+	const wasmInst = runWasm(h.wasm, { stringTable: h.stringTable });
+	assertThrows(
+		() => wasmInst.exports.Main(),
+		"strings: illegal use of non-zero Builder copied by value",
+	);
+});
+
+section("WASM stdlib — Phase 8: time");
+
+test("time constants, Duration arithmetic and month/weekday constants", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"time"
+)
+
+func Main() string {
+	d := 2 * time.Hour + 30 * time.Minute + 15 * time.Second + 500 * time.Millisecond + 200 * time.Microsecond + 100 * time.Nanosecond
+	return fmt.Sprintf("%t|%t|%t|%t|%t|%d|%d|%d|%d|%d",
+		time.Second > time.Millisecond,
+		time.Minute > time.Second,
+		time.Hour > time.Minute,
+		time.Microsecond > time.Nanosecond,
+		d > 0,
+		time.January,
+		time.December,
+		time.Sunday,
+		time.Saturday,
+		int(time.Second / time.Millisecond),
+	)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "true|true|true|true|true|1|12|0|6|1000");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("time.Unix, time.Date, and time.Time component methods", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"time"
+)
+
+func Main() string {
+	t1 := time.Unix(0, 0)
+	t2 := time.Unix(1704067200, 0) // 2024-01-01 00:00:00 UTC
+	t3 := time.Date(2025, time.June, 15, 14, 30, 45, 0, time.UTC)
+	return fmt.Sprintf("%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d",
+		t1.Year(),
+		t2.Unix(),
+		t2.UnixMilli(),
+		t3.Year(),
+		t3.Month(),
+		t3.Day(),
+		t3.Hour(),
+		t3.Minute(),
+		t3.Second(),
+		t3.Weekday(),
+		t3.Unix(),
+	)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("time.Time methods: Add, Sub, Before, After, Equal", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"time"
+)
+
+func Main() string {
+	t1 := time.Unix(1000, 0)
+	t2 := time.Unix(2000, 0)
+	t3 := t1.Add(1000 * time.Second)
+	subDiff := t2.Sub(t1)
+	return fmt.Sprintf("%t|%t|%t|%t|%t|%t|%t",
+		t1.Before(t2),
+		t2.After(t1),
+		!t1.After(t2),
+		!t2.Before(t1),
+		t1.Equal(t1),
+		!t1.Equal(t2),
+		t3.Equal(t2) && subDiff == 1000*time.Second,
+	)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "true|true|true|true|true|true|true");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("time.Format and time.String formatting", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"time"
+)
+
+func Main() string {
+	t := time.Date(2024, time.January, 15, 10, 30, 45, 0, time.UTC)
+	sDate := t.Format(time.DateOnly)
+	sTime := t.Format(time.TimeOnly)
+	sFull := t.Format("2006-01-02 15:04:05")
+	sStr := t.String()
+	return fmt.Sprintf("%s|%s|%s|%t", sDate, sTime, sFull, len(sStr) > 0)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, jsRes);
+});
+
+test("time.Parse parses RFC3339 strings and reports errors", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"time"
+)
+
+func Main() string {
+	t, err := time.Parse(time.RFC3339, "2024-01-15T10:30:00Z")
+	tBad, errBad := time.Parse(time.RFC3339, "not-a-valid-timestamp")
+	return fmt.Sprintf("ok=%t yr=%d badErr=%t msg=%s zeroYr=%d",
+		err == nil,
+		t.Year(),
+		errBad != nil,
+		errBad.Error(),
+		tBad.Unix(),
+	)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(
+		wasmRes,
+		"ok=true yr=2024 badErr=true msg=parsing time: cannot parse zeroYr=0",
+	);
+	assertEqual(wasmRes, jsRes);
+});
+
+test("time.Now and time.Since with injected clock", () => {
+	const oldClock = globalThis.__GOFRONT_CLOCK;
+	try {
+		globalThis.__GOFRONT_CLOCK = () => 1704067200000; // 2024-01-01 00:00:00 UTC
+		const src = `
+package main
+
+import (
+	"fmt"
+	"time"
+)
+
+func Main() string {
+	t := time.Now()
+	elapsed := time.Since(t)
+	return fmt.Sprintf("yr=%d milli=%d elapsedZero=%t",
+		t.Year(),
+		t.UnixMilli(),
+		elapsed == 0,
+	)
+}
+`;
+		const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+		assertEqual(wasmRes, jsRes);
+	} finally {
+		globalThis.__GOFRONT_CLOCK = oldClock;
+	}
+});
+
+section("WASM Stdlib — strings, strconv & fmt (relocated)");
+
+test("strings package functions", () => {
+	const src = `
+package main
+
+import "strings"
+
+func Main() string {
+	if strings.ToUpper("hello") != "HELLO" {
+		return "fail toUpper"
+	}
+	if strings.ToLower("WORLD") != "world" {
+		return "fail toLower"
+	}
+	if strings.TrimSpace("   spaced   ") != "spaced" {
+		return "fail trimSpace"
+	}
+	if !strings.Contains("gopher", "ph") || strings.Contains("gopher", "xyz") {
+		return "fail contains"
+	}
+	if !strings.HasPrefix("abcdef", "abc") || strings.HasPrefix("abcdef", "bcd") {
+		return "fail hasPrefix"
+	}
+	if !strings.HasSuffix("abcdef", "def") || strings.HasSuffix("abcdef", "de") {
+		return "fail hasSuffix"
+	}
+	if strings.Index("banana", "na") != 2 || strings.LastIndex("banana", "na") != 4 {
+		return "fail index"
+	}
+	if strings.Repeat("ha", 3) != "hahaha" {
+		return "fail repeat"
+	}
+	if strings.ReplaceAll("foo bar foo", "foo", "qux") != "qux bar qux" {
+		return "fail replaceAll"
+	}
+	if !strings.EqualFold("GoFront", "gofront") {
+		return "fail equalFold"
+	}
+	if strings.Count("cheese", "e") != 3 {
+		return "fail count"
+	}
+	return "ok"
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "ok");
+	assertEqual(jsRes, wasmRes);
+});
+
+test("strconv.Itoa conversion", () => {
+	const src = `
+package main
+
+import "strconv"
+
+func Main() string {
+	s1 := strconv.Itoa(42)
+	s2 := strconv.Itoa(-100)
+	s3 := strconv.Itoa(0)
+	if s1 != "42" || s2 != "-100" || s3 != "0" {
+		return "fail itoa"
+	}
+	return "ok"
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "ok");
+	assertEqual(jsRes, wasmRes);
+});
+
+test("fmt.Println and fmt.Print output parity", () => {
+	const src = `
+package main
+
+import "fmt"
+
+func Main() {
+	fmt.Println("Hello", 123, true)
+	fmt.Print("Part1 ")
+	fmt.Println("Part2")
+}
+`;
+	compileHybrid(src).run("Main");
+});
+
+section("WASM Stdlib — math & math/bits (extended)");
+
+test("math bits reinterpretations and hyperbolics", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"math"
+)
+
+func Main() string {
+	b64 := math.Float64bits(1.0)
+	f64 := math.Float64frombits(b64)
+	b32 := math.Float32bits(1.0)
+	f32 := math.Float32frombits(b32)
+
+	sinh0 := math.Sinh(0)
+	cosh0 := math.Cosh(0)
+	tanh0 := math.Tanh(0)
+
+	return fmt.Sprintf("%x|%v|%x|%v|%v|%v|%v", b64, f64, b32, f32, sinh0, cosh0, tanh0)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, jsRes);
+	assertEqual(wasmRes, "3ff0000000000000|1|3f800000|1|0|1|0");
+});
+
+test("math/bits functions", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"math/bits"
+)
+
+func Main() string {
+	l32 := bits.Len32(0x10)
+	l64 := bits.Len64(0x100000000)
+	rb16 := bits.ReverseBytes16(0x1234)
+	rb32 := bits.ReverseBytes32(0x12345678)
+	rb64 := bits.ReverseBytes64(0x0000112233445566)
+	r32 := bits.Reverse32(0x80000001)
+	r64 := bits.Reverse64(0x0000000100000002)
+
+	return fmt.Sprintf("%d|%d|%x|%x|%x|%x|%x", l32, l64, rb16, rb32, rb64, r32, r64)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, jsRes);
+	assertEqual(
+		wasmRes,
+		"5|33|3412|78563412|6655443322110000|80000001|4000000080000000",
+	);
+});
+
+section("WASM Stdlib — errors & strconv (extended)");
+
+test("errors.Join and errors.As", () => {
+	const src = `
+package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+type MyErr struct {
+	Msg string
+}
+
+func (e *MyErr) Error() string {
+	return e.Msg
+}
+
+func Main() string {
+	e1 := errors.New("e1")
+	e2 := errors.New("e2")
+	joined := errors.Join(e1, e2)
+	joinedNil := errors.Join(nil, nil)
+
+	custom := &MyErr{Msg: "custom err"}
+	wrapped := fmt.Errorf("wrapped: %w", custom)
+	var target *MyErr
+	matched := errors.As(wrapped, &target)
+
+	return fmt.Sprintf("%v|%v|%v|%v", joined != nil, joinedNil == nil, matched, target != nil && target.Msg == "custom err")
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, jsRes);
+	assertEqual(wasmRes, "true|true|true|true");
+});
+
+test("strconv Uint functions and AppendBool", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"strconv"
+)
+
+func Main() string {
+	s := strconv.FormatUint(12345, 10)
+	u, err := strconv.ParseUint("12345", 10, 64)
+	if err != nil {
+		return "err: " + err.Error()
+	}
+
+	dst := []byte("val: ")
+	dst = strconv.AppendUint(dst, u, 10)
+	dst = append(dst, ' ')
+	dst = strconv.AppendBool(dst, true)
+
+	return fmt.Sprintf("%s|%d|%s", s, u, string(dst))
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, jsRes);
+	assertEqual(wasmRes, "12345|12345|val: 12345 true");
+});
+
+section("WASM Stdlib — slices, strings, bytes, io (extended)");
+
+test("slices IndexFunc, ContainsFunc, BinarySearch, BinarySearchFunc", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+func Main() string {
+	nums := []int{10, 20, 30, 40, 50}
+
+	idx := slices.IndexFunc(nums, func(x int) bool { return x == 30 })
+	has := slices.ContainsFunc(nums, func(x int) bool { return x == 99 })
+
+	pos, found := slices.BinarySearch(nums, 30)
+	posFunc, foundFunc := slices.BinarySearchFunc(nums, 40, func(a, b int) int {
+		return a - b
+	})
+
+	return fmt.Sprintf("%d|%v|%d|%v|%d|%v", idx, has, pos, found, posFunc, foundFunc)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, jsRes);
+	assertEqual(wasmRes, "2|false|2|true|3|true");
+});
+
+test("strings.FieldsFunc and bytes.FieldsFunc and bytes.Clone", () => {
+	const src = `
+package main
+
+import (
+	"bytes"
+	"fmt"
+	"strings"
+)
+
+func Main() string {
+	sParts := strings.FieldsFunc("foo,bar;baz", func(r rune) bool {
+		return r == ',' || r == ';'
+	})
+
+	bParts := bytes.FieldsFunc([]byte("hello,world;wasm"), func(r rune) bool {
+		return r == ',' || r == ';'
+	})
+
+	orig := []byte("clone me")
+	cloned := bytes.Clone(orig)
+	cloned[0] = 'C'
+
+	return fmt.Sprintf("%s|%s|%s|%s", strings.Join(sParts, "-"), string(bytes.Join(bParts, []byte("-"))), string(orig), string(cloned))
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, jsRes);
+	assertEqual(wasmRes, "foo-bar-baz|hello-world-wasm|clone me|Clone me");
+});
+
+test("io.LimitReader, io.Copy, io.CopyN", () => {
+	const src = `
+package main
+
+import (
+	"bytes"
+	"fmt"
+	"io"
+	"strings"
+)
+
+func Main() string {
+	src := strings.NewReader("hello world from gofront")
+	var dst bytes.Buffer
+
+	// Copy 5 bytes using LimitReader
+	lr := io.LimitReader(src, 5)
+	n1, err1 := io.Copy(&dst, lr)
+
+	// Copy next 6 bytes using CopyN
+	var dst2 bytes.Buffer
+	n2, err2 := io.CopyN(&dst2, src, 6)
+
+	// Copy remaining
+	var dst3 bytes.Buffer
+	n3, err3 := io.Copy(&dst3, src)
+
+	return fmt.Sprintf("%d:%v:%s|%d:%v:%s|%d:%v:%s",
+		n1, err1 == nil, dst.String(),
+		n2, err2 == nil, dst2.String(),
+		n3, err3 == nil, dst3.String(),
+	)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, jsRes);
+	assertEqual(wasmRes, "5:true:hello|6:true: world|13:true: from gofront");
+});
+
+section("WASM Stdlib — sync");
+
+test("sync.Mutex, sync.RWMutex, sync.Once, sync.WaitGroup", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"sync"
+)
+
+func Main() string {
+	var mu sync.Mutex
+	mu.Lock()
+	tl := mu.TryLock()
+	mu.Unlock()
+
+	var rw sync.RWMutex
+	rw.RLock()
+	rw.RUnlock()
+	rw.Lock()
+	rw.Unlock()
+
+	var once sync.Once
+	count := 0
+	f := func() {
+		count++
+	}
+	once.Do(f)
+	once.Do(f)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	wg.Done()
+	wg.Done()
+	wg.Wait()
+
+	return fmt.Sprintf("%v|%d", tl, count)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, jsRes);
+	assertEqual(wasmRes, "true|1");
+});
+
+section("WASM Stdlib — crypto/rand & crypto/sha256");
+
+test("crypto/rand.Read and crypto/sha256.Sum256", () => {
+	const src = `
+package main
+
+import (
+	"crypto/rand"
+	"crypto/sha256"
+	"fmt"
+)
+
+func Main() string {
+	b := make([]byte, 16)
+	n, err := rand.Read(b)
+
+	h := sha256.Sum256([]byte("hello world"))
+	sz := sha256.Size
+	bsz := sha256.BlockSize
+
+	return fmt.Sprintf("%d:%v:%d|%x|%d:%d", n, err == nil, len(b), h, sz, bsz)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, jsRes);
+	assertEqual(
+		wasmRes,
+		"16:true:16|b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9|32:64",
+	);
+});
+
+section("WASM Stdlib — encoding/binary");
+
+test("encoding/binary LittleEndian, BigEndian, Append, Size, Read, Write", () => {
+	const src = `
+package main
+
+import (
+	"bytes"
+	"encoding/binary"
+	"fmt"
+)
+
+func Main() string {
+	b := make([]byte, 8)
+	binary.LittleEndian.PutUint16(b, 0x1234)
+	u16 := binary.LittleEndian.Uint16(b)
+
+	binary.LittleEndian.PutUint32(b, 0x12345678)
+	u32 := binary.LittleEndian.Uint32(b)
+
+	binary.LittleEndian.PutUint64(b, 0x123456789abc)
+	u64 := binary.LittleEndian.Uint64(b)
+
+	binary.BigEndian.PutUint16(b, 0x1234)
+	be16 := binary.BigEndian.Uint16(b)
+
+	binary.BigEndian.PutUint32(b, 0x12345678)
+	be32 := binary.BigEndian.Uint32(b)
+
+	binary.BigEndian.PutUint64(b, 0x123456789abc)
+	be64 := binary.BigEndian.Uint64(b)
+
+	var app []byte
+	app = binary.LittleEndian.AppendUint16(app, 0x1234)
+	app = binary.LittleEndian.AppendUint32(app, 0x56789abc)
+
+	sz1 := binary.Size(uint32(0))
+	sz2 := binary.Size(uint64(0))
+
+	var readVal uint32
+	buf := bytes.NewReader([]byte{0x78, 0x56, 0x34, 0x12})
+	errRead := binary.Read(buf, binary.LittleEndian, &readVal)
+
+	var writeBuf bytes.Buffer
+	errWrite := binary.Write(&writeBuf, binary.LittleEndian, uint32(0x12345678))
+
+	return fmt.Sprintf("%x:%x:%x|%x:%x:%x|%x|%d:%d|%x:%v|%x:%v",
+		u16, u32, u64,
+		be16, be32, be64,
+		app,
+		sz1, sz2,
+		readVal, errRead == nil,
+		writeBuf.Bytes(), errWrite == nil,
+	)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, jsRes);
+	assertEqual(
+		wasmRes,
+		"1234:12345678:123456789abc|1234:12345678:123456789abc|3412bc9a7856|4:8|12345678:true|78563412:true",
+	);
+});
+
+section("WASM Stdlib — encoding/hex & encoding/base64");
+
+test("encoding/hex EncodeToString, DecodeString, EncodedLen, DecodedLen", () => {
+	const src = `
+package main
+
+import (
+	"encoding/hex"
+	"fmt"
+)
+
+func Main() string {
+	src := []byte("hello world")
+	enc := hex.EncodeToString(src)
+
+	dec, err := hex.DecodeString(enc)
+
+	_, badErr := hex.DecodeString("invalid-hex!")
+
+	el := hex.EncodedLen(len(src))
+	dl := hex.DecodedLen(len(enc))
+
+	return fmt.Sprintf("%s|%s:%v|%v|%d:%d", enc, string(dec), err == nil, badErr != nil, el, dl)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, jsRes);
+	assertEqual(wasmRes, "68656c6c6f20776f726c64|hello world:true|true|22:11");
+});
+
+test("encoding/base64 StdEncoding, URLEncoding, RawStdEncoding, RawURLEncoding", () => {
+	const src = `
+package main
+
+import (
+	"encoding/base64"
+	"fmt"
+)
+
+func Main() string {
+	data := []byte("hello?world>>123")
+
+	std := base64.StdEncoding.EncodeToString(data)
+	decStd, errStd := base64.StdEncoding.DecodeString(std)
+
+	url := base64.URLEncoding.EncodeToString(data)
+	decUrl, errUrl := base64.URLEncoding.DecodeString(url)
+
+	rawStd := base64.RawStdEncoding.EncodeToString(data)
+	rawUrl := base64.RawURLEncoding.EncodeToString(data)
+
+	el := base64.StdEncoding.EncodedLen(len(data))
+	dl := base64.StdEncoding.DecodedLen(len(std))
+
+	return fmt.Sprintf("%s|%s:%v|%s|%s:%v|%s|%s|%d:%d",
+		std, string(decStd), errStd == nil,
+		url, string(decUrl), errUrl == nil,
+		rawStd, rawUrl,
+		el, dl,
+	)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
 	assertEqual(wasmRes, jsRes);
 });

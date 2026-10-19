@@ -34,8 +34,22 @@
 //   - `*testing.T`: the harness's JS test object, passed as an opaque
 //     externref (test methods are routed back to JS via `env.testing_*`).
 
-import { HELPER_SPRINTF, HELPER_STRCONV } from "../js/runtime.js";
-import { getSharedInfo, isTestingT } from "./types.js";
+import {
+	HELPER_BASE64,
+	HELPER_DURATION,
+	HELPER_ERROR,
+	HELPER_HEX,
+	HELPER_PATH_CLEAN,
+	HELPER_SHA256,
+	HELPER_SPRINTF,
+	HELPER_STRCONV,
+} from "../js/runtime.js";
+import {
+	anonIfaceName,
+	getInterfaceMethodList,
+	getSharedInfo,
+	isTestingT,
+} from "./types.js";
 
 // ── Type classification ──────────────────────────────────────
 
@@ -94,6 +108,14 @@ function classifyType(goType, mod) {
 	if (isTestingT(goType)) return { k: "extern", wType: "externref" };
 
 	if (goType.kind === "TypeName" || goType.kind === "Ident") {
+		if (goType.name === "error") return { k: "error", wType: "anyref" };
+		if (goType.name === "time.Duration" || goType.name === "Duration")
+			return { k: "i64", unsigned: false, wType: "i64" };
+		if (goType.name === "time.Time" || goType.name === "Time") {
+			const info = mod.getStructType("time.Time");
+			if (info)
+				return { k: "time", name: "time.Time", info, wType: toRef(info) };
+		}
 		const info = mod.getStructType(goType.name);
 		if (info) return structDesc(info, false);
 		const resolved = mod.checker?.types?.get(goType.name);
@@ -117,6 +139,10 @@ function classifyType(goType, mod) {
 			return classifySlice(t, mod);
 		case "array":
 			return classifyArray(t, mod);
+		case "map":
+			return classifyMap(t, mod);
+		case "struct":
+			return classifyStruct(t, mod);
 		case "func":
 			return classifyFunc(t, mod);
 		case "interface":
@@ -130,11 +156,6 @@ function classifyType(goType, mod) {
 }
 
 const UNSUPPORTED_KINDS = {
-	map: "map",
-	MapType: "map",
-	struct: "anonymous struct",
-	StructType: "anonymous struct",
-	InterfaceType: "interface",
 	ChanType: "chan",
 	chan: "chan",
 };
@@ -149,13 +170,21 @@ function normalizeAstType(t) {
 			return { kind: "slice", elem: t.elem };
 		case "ArrayType":
 			return { kind: "array", elem: t.elem, size: t.size };
+		case "MapType":
+			return { kind: "map", key: t.key, val: t.value ?? t.elem };
 		case "FuncType":
 			return funcSigFromAst(t);
 		case "InterfaceType":
 			return {
 				kind: "interface",
 				name: t.name,
-				methods: new Set((t.methods ?? []).map((m) => m.name ?? m)),
+				methods: t.methods,
+			};
+		case "StructType":
+			return {
+				kind: "struct",
+				name: t.name,
+				fields: t.fields,
 			};
 		default:
 			return t;
@@ -169,7 +198,7 @@ const BASIC_DESCS = {
 	float64: { k: "f64", wType: "f64" },
 	string: { k: "string", wType: "externref" },
 	any: { k: "any", wType: "anyref" },
-	error: { k: "unsupported", what: "error" },
+	error: { k: "error", wType: "anyref" },
 };
 
 function classifyBasic(n) {
@@ -182,17 +211,111 @@ function classifyBasic(n) {
 }
 
 function classifyNamed(t, mod) {
+	if (t.name === "error") return { k: "error", wType: "anyref" };
+	if (t.name === "time.Duration")
+		return { k: "i64", unsigned: false, wType: "i64" };
+	if (t.name === "time.Time") {
+		const info = mod.getStructType("time.Time");
+		if (info) return { k: "time", name: "time.Time", info, wType: toRef(info) };
+	}
 	const info = mod.getStructType(t.name);
 	if (info) return structDesc(info, false);
 	if (t.underlying) return classifyType(t.underlying, mod);
 	return { k: "unsupported", what: `named type '${t.name}'` };
 }
 
+function classifyAnonStruct(t, mod) {
+	const rawFields = [];
+	if (t.fields instanceof Map) {
+		for (const [k, v] of t.fields.entries())
+			rawFields.push({ name: k, goType: v });
+	} else if (Array.isArray(t.fields)) {
+		for (const f of t.fields) {
+			const names = f.names ?? (f.name ? [f.name] : []);
+			for (const n of names) rawFields.push({ name: n, goType: f.type });
+		}
+	}
+	const info = mod.getAnonStructType(rawFields);
+	const fields = [];
+	for (const f of info.fields) {
+		const fd = classifyType(f.goType, mod);
+		if (fd.k === "unsupported") return fd;
+		fields.push({ name: f.name, desc: fd });
+	}
+	return {
+		k: "anon_struct",
+		name: info.name,
+		key: info.name,
+		info,
+		fields,
+		wType: toRef(info),
+	};
+}
+
+function classifyStruct(t, mod) {
+	if (t.name) {
+		const info = mod.getStructType(t.name);
+		if (info) return structDesc(info, false);
+	}
+	return classifyAnonStruct(t, mod);
+}
+
 function classifyPointer(t, mod) {
 	const base = classifyType(t.base, mod);
+	if (base.k === "unsupported") return base;
 	if (base.k === "struct" && !base.ptr) return { ...base, ptr: true };
-	const what = base.k === "unsupported" ? base.what : (t.base?.name ?? base.k);
-	return { k: "unsupported", what: `pointer to ${what}` };
+	if (base.k === "anon_struct" && !base.ptr) return { ...base, ptr: true };
+	if (base.k === "time" && !base.ptr) return { ...base, ptr: true };
+	const boxInfo = mod.getBoxType(t.base);
+	const key = `${base.k}${base.unsigned ? "_u" : ""}_${boxInfo.typeIndex}`;
+	return {
+		k: "ptr_box",
+		base,
+		boxInfo,
+		key,
+		wType: { kind: "ref", nullable: true, typeIndex: boxInfo.typeIndex },
+	};
+}
+
+function isAllowedMapKey(kDesc) {
+	if (kDesc.k === "string" || kDesc.k === "bool") return true;
+	if (
+		kDesc.k === "i32" ||
+		kDesc.k === "i64" ||
+		kDesc.k === "f32" ||
+		kDesc.k === "f64"
+	)
+		return true;
+	return false;
+}
+
+function classifyMap(t, mod) {
+	const keyType = t.key;
+	const valType = t.val ?? t.value ?? t.elem;
+	const keyDesc = classifyType(keyType, mod);
+	if (keyDesc.k === "unsupported") return keyDesc;
+	const valDesc = classifyType(valType, mod);
+	if (valDesc.k === "unsupported") return valDesc;
+	if (!isAllowedMapKey(keyDesc)) {
+		return {
+			k: "unsupported",
+			what: `map with unsupported key type '${keyType?.name ?? keyDesc.k}'`,
+		};
+	}
+	const mapInfo = mod.getMapType(keyType, valType);
+	const keySliceDesc = classifySlice({ kind: "slice", elem: keyType }, mod);
+	const valSliceDesc = classifySlice({ kind: "slice", elem: valType }, mod);
+	const key = `m_${mapInfo.suffix}`;
+	return {
+		k: "map",
+		key,
+		mapInfo,
+		keyDesc,
+		valDesc,
+		keySliceDesc,
+		valSliceDesc,
+		wType: mapInfo.wType,
+	};
 }
 
 function classifyShared(t, mod) {
@@ -263,12 +386,50 @@ function classifyFunc(t, mod) {
 }
 
 function classifyInterface(t, mod) {
-	if (t.name === "error") return { k: "unsupported", what: "error" };
-	if (!t.methods || t.methods.size === 0) return { k: "any", wType: "anyref" };
-	if (!t.name || !(t.methods instanceof Map))
-		return { k: "unsupported", what: "anonymous interface" };
+	if (t.name === "error") return { k: "error", wType: "anyref" };
+	const mList = getInterfaceMethodList(t);
+	if (mList.length === 0) return { k: "any", wType: "anyref" };
 	mod._boundaryIfaces ??= new Map();
-	return mod._boundaryIfaces.get(t.name) ?? classifyNamedInterface(t, mod);
+	if (t.name && t.methods instanceof Map) {
+		return mod._boundaryIfaces.get(t.name) ?? classifyNamedInterface(t, mod);
+	}
+	return classifyAnonInterface(t, mod);
+}
+
+function classifyAnonInterface(t, mod) {
+	const key = anonIfaceName(t, mod.checker, mod);
+	if (mod._boundaryIfaces.has(key)) return mod._boundaryIfaces.get(key);
+	const mList = getInterfaceMethodList(t);
+	const desc = {
+		k: "iface",
+		name: key,
+		key,
+		wType: "anyref",
+		methods: [],
+		concrete: [],
+		isAnon: true,
+	};
+	mod._boundaryIfaces.set(key, desc);
+	for (const m of mList) {
+		const sig = classifySig(
+			{ kind: "func", params: m.params, returns: m.returns },
+			mod,
+		);
+		if (sig.k === "unsupported") {
+			const err = {
+				k: "unsupported",
+				what: `${sig.what} (in anonymous interface method ${m.name})`,
+			};
+			mod._boundaryIfaces.set(key, err);
+			return err;
+		}
+		desc.methods.push({
+			name: m.name,
+			dispatch: `__dispatch_${key}_${m.name}`,
+			...sig,
+		});
+	}
+	return desc;
 }
 
 function classifyNamedInterface(t, mod) {
@@ -325,7 +486,14 @@ function literalConst(spec, i) {
 	}
 	if (node?.kind !== "BasicLit") return null;
 	switch (node.litKind) {
-		case "INT":
+		case "INT": {
+			const raw = String(node.value);
+			const clean = /^0[0-7]+$/.test(raw) ? `0o${raw.slice(1)}` : raw;
+			const bi = BigInt(`${sign}${clean}`);
+			return bi > 9007199254740991n || bi < -9007199254740991n
+				? `${sign}${clean}n`
+				: `${sign}${clean}`;
+		}
 		case "FLOAT":
 			return `${sign}${node.value}`;
 		case "STRING":
@@ -394,14 +562,48 @@ function collectConstDecl(d, pkgName, meta, errors) {
 			const name = spec.names[i];
 			if (!isExported(name)) continue;
 			const value = literalConst(spec, i);
-			if (value !== null) meta.consts.push({ name, value });
-			else
+			if (value !== null) {
+				meta.consts.push({ name, value, dynamic: false });
+				continue;
+			}
+			const folded = meta._mod.constCache?.get(name);
+			if (folded) {
+				let val = null;
+				if (folded.litKind === "INT") {
+					const s = String(folded.value);
+					const clean = /^0[0-7]+$/.test(s) ? `0o${s.slice(1)}` : s;
+					const bi = BigInt(clean);
+					val =
+						bi > 9007199254740991n || bi < -9007199254740991n
+							? `${clean}n`
+							: clean;
+				} else if (folded.litKind === "FLOAT") {
+					val = folded.value;
+				} else if (folded.litKind === "STRING") {
+					val = JSON.stringify(String(folded.value));
+				} else if (folded.litKind === "BOOL") {
+					val = folded.value === "true" ? "true" : "false";
+				}
+				if (val !== null) {
+					meta.consts.push({ name, value: val, dynamic: false });
+					continue;
+				}
+			}
+			const glob = meta._mod.resolveGlobal(name);
+			const rawType = spec.type ?? spec.value?.[i]?._type ?? glob?.goType;
+			let desc = rawType ? classifyType(rawType, meta._mod) : null;
+			if (!desc || desc.k === "void") {
+				if (glob?.type) {
+					desc = { k: glob.type, wType: glob.type };
+				}
+			}
+			if (!desc || desc.k === "unsupported") {
 				errors.push(
-					unsupportedMsg(
-						`${pkgName}.${name}`,
-						"a constant with a non-literal value",
-					),
+					unsupportedMsg(`${pkgName}.${name}`, desc?.what ?? "unsupported"),
 				);
+			} else {
+				meta.consts.push({ name, dynamic: true, desc });
+			}
 		}
 	}
 }
@@ -483,6 +685,17 @@ function visitNeed(desc, needs, errors, mod) {
 		case "struct":
 			visitStructNeed(desc, needs, errors, mod);
 			return;
+		case "anon_struct":
+			if (needs.anonStructs.has(desc.name)) return;
+			needs.anonStructs.set(desc.name, desc);
+			for (const f of desc.fields) visitNeed(f.desc, needs, errors, mod);
+			return;
+		case "error":
+			needs.error = true;
+			return;
+		case "time":
+			needs.time = true;
+			return;
 		case "slice":
 		case "array": {
 			const map = desc.k === "slice" ? needs.slices : needs.arrays;
@@ -491,6 +704,19 @@ function visitNeed(desc, needs, errors, mod) {
 			visitNeed(desc.elem, needs, errors, mod);
 			return;
 		}
+		case "map":
+			if (needs.maps.has(desc.key)) return;
+			needs.maps.set(desc.key, desc);
+			visitNeed(desc.keyDesc, needs, errors, mod);
+			visitNeed(desc.valDesc, needs, errors, mod);
+			visitNeed(desc.keySliceDesc, needs, errors, mod);
+			visitNeed(desc.valSliceDesc, needs, errors, mod);
+			return;
+		case "ptr_box":
+			if (needs.boxes.has(desc.key)) return;
+			needs.boxes.set(desc.key, desc);
+			visitNeed(desc.base, needs, errors, mod);
+			return;
 		case "func":
 			if (needs.funcs.has(desc.key)) return;
 			needs.funcs.set(desc.key, desc);
@@ -538,10 +764,15 @@ function collectNeeds(meta) {
 	const mod = meta._mod;
 	const needs = {
 		structs: new Map(), // name -> { info, fields: [{ name, desc }] }
+		anonStructs: new Map(), // name -> desc
 		slices: new Map(), // key -> desc
 		arrays: new Map(), // key -> desc
+		maps: new Map(), // key -> desc
+		boxes: new Map(), // key -> desc
 		funcs: new Map(), // key -> desc
 		ifaces: new Map(), // interface name -> desc
+		error: false,
+		time: false,
 		shared: false, // any shared buffer on the surface
 	};
 	const errors = [];
@@ -552,6 +783,9 @@ function collectNeeds(meta) {
 	}
 	for (const f of meta.funcs) visitSignatureNeeds(f, needs, errors, mod);
 	for (const v of meta.vars ?? []) visitNeed(v.desc, needs, errors, mod);
+	for (const c of meta.consts ?? []) {
+		if (c.dynamic) visitNeed(c.desc, needs, errors, mod);
+	}
 	if (errors.length > 0) throw new Error([...new Set(errors)].join("\n"));
 	for (const desc of needs.ifaces.values())
 		desc.concrete = concreteCandidates(desc, needs, meta, mod);
@@ -968,6 +1202,231 @@ export function addBoundaryHelpers(mod, meta) {
 			);
 		}
 	}
+
+	for (const [name, desc] of needs.anonStructs) {
+		const { info } = desc;
+		const ref = desc.wType;
+		const ti = info.typeIndex;
+		const fieldWTypes = info.fields.map((f) => f.wType);
+		addFunc(
+			`__new_${name}`,
+			fieldWTypes.map(extType),
+			[EXT],
+			[
+				...fieldWTypes.flatMap((w, i) => getIn(i, w)),
+				{ op: "struct.new", typeIndex: ti },
+				...toExt(ref),
+			],
+		);
+		addFunc(
+			`__zero_${name}`,
+			[],
+			[EXT],
+			[
+				...fieldWTypes.map((w) => zeroInstr(w)),
+				{ op: "struct.new", typeIndex: ti },
+				...toExt(ref),
+			],
+		);
+		for (let i = 0; i < info.fields.length; i++) {
+			const f = info.fields[i];
+			addFunc(
+				`__get_${name}_${f.name}`,
+				[EXT],
+				[extType(f.wType)],
+				[
+					...getIn(0, ref),
+					{ op: "struct.get", typeIndex: ti, fieldIndex: i },
+					...toExt(f.wType),
+				],
+			);
+			addFunc(
+				`__set_${name}_${f.name}`,
+				[EXT, extType(f.wType)],
+				[],
+				[
+					...getIn(0, ref),
+					...getIn(1, f.wType),
+					{ op: "struct.set", typeIndex: ti, fieldIndex: i },
+				],
+			);
+		}
+	}
+
+	for (const [key, desc] of needs.boxes) {
+		const { boxInfo } = desc;
+		const ref = desc.wType;
+		const ti = boxInfo.typeIndex;
+		const w = boxInfo.wType;
+		addFunc(
+			`__box_new_${key}`,
+			[extType(w)],
+			[EXT],
+			[...getIn(0, w), { op: "struct.new", typeIndex: ti }, ...toExt(ref)],
+		);
+		addFunc(
+			`__box_get_${key}`,
+			[EXT],
+			[extType(w)],
+			[
+				...getIn(0, ref),
+				{ op: "struct.get", typeIndex: ti, fieldIndex: 0 },
+				...toExt(w),
+			],
+		);
+		addFunc(
+			`__box_set_${key}`,
+			[EXT, extType(w)],
+			[],
+			[
+				...getIn(0, ref),
+				...getIn(1, w),
+				{ op: "struct.set", typeIndex: ti, fieldIndex: 0 },
+			],
+		);
+	}
+
+	for (const [key, desc] of needs.maps) {
+		const { mapInfo, keySliceDesc, valSliceDesc } = desc;
+		const makeIdx = mod.resolveFuncIndex(mapInfo.makeFuncName);
+		addFunc(
+			`__map_new_${key}`,
+			["i32"],
+			[EXT],
+			[get(0), { op: "call", funcIndex: makeIdx }, ...toExt(desc.wType)],
+		);
+		const setIdx = mod.resolveFuncIndex(mapInfo.setFuncName);
+		addFunc(
+			`__map_set_${key}`,
+			[EXT, extType(mapInfo.keyWType), extType(mapInfo.valWType)],
+			[],
+			[
+				...getIn(0, desc.wType),
+				...getIn(1, mapInfo.keyWType),
+				...getIn(2, mapInfo.valWType),
+				{ op: "call", funcIndex: setIdx },
+			],
+		);
+		const keysIdx = mod.resolveFuncIndex(mapInfo.keysFuncName);
+		addFunc(
+			`__map_keys_${key}`,
+			[EXT],
+			[EXT],
+			[
+				...getIn(0, desc.wType),
+				{ op: "call", funcIndex: keysIdx },
+				...toExt(keySliceDesc.wType),
+			],
+		);
+		const valuesIdx = mod.resolveFuncIndex(mapInfo.valuesFuncName);
+		addFunc(
+			`__map_values_${key}`,
+			[EXT],
+			[EXT],
+			[
+				...getIn(0, desc.wType),
+				{ op: "call", funcIndex: valuesIdx },
+				...toExt(valSliceDesc.wType),
+			],
+		);
+	}
+
+	if (needs.error) {
+		const errDispatcherIdx = mod.funcMap.get("__dispatch_error_Error");
+		if (errDispatcherIdx !== undefined) {
+			addFunc(
+				"__error_msg",
+				[EXT],
+				[EXT],
+				[
+					get(0),
+					{ op: "ref.is_null" },
+					{ op: "if", blockType: "externref" },
+					{ op: "ref.null", heapType: "extern" },
+					{ op: "else" },
+					...getIn(0, "anyref"),
+					{ op: "call", funcIndex: errDispatcherIdx },
+					...toExt("externref"),
+					{ op: "end" },
+				],
+			);
+		}
+		const errCandidates = mod
+			.findInterfaceCandidates(null, "Error")
+			.map((c) => c.testTypeIndex);
+		addFunc(
+			"__is_error",
+			[EXT],
+			["i32"],
+			refTestChain(errCandidates, () => 1),
+		);
+	}
+
+	if (needs.time) {
+		const timeInfo = mod.getStructType("time.Time");
+		if (timeInfo) {
+			const timeWType = toRef(timeInfo);
+			addFunc(
+				"__time_make",
+				["f64", "i32"],
+				[EXT],
+				[
+					get(0),
+					{ op: "f64.const", value: 1000000 },
+					{ op: "f64.mul" },
+					{ op: "i64.trunc_sat_f64_s" },
+					get(1),
+					{ op: "struct.new", typeIndex: timeInfo.typeIndex },
+					...toExt(timeWType),
+				],
+			);
+			addFunc(
+				"__time_unix_milli",
+				[EXT],
+				["f64"],
+				[
+					get(0),
+					{ op: "ref.is_null" },
+					{ op: "if", blockType: "f64" },
+					{ op: "f64.const", value: 0 },
+					{ op: "else" },
+					...getIn(0, timeWType),
+					{ op: "struct.get", typeIndex: timeInfo.typeIndex, fieldIndex: 0 },
+					{ op: "i64.const", value: 1000000n },
+					{ op: "i64.div_s" },
+					{ op: "f64.convert_i64_s" },
+					{ op: "end" },
+				],
+			);
+			addFunc(
+				"__time_offset",
+				[EXT],
+				["i32"],
+				[
+					get(0),
+					{ op: "ref.is_null" },
+					{ op: "if", blockType: "i32" },
+					{ op: "i32.const", value: 0 },
+					{ op: "else" },
+					...getIn(0, timeWType),
+					{ op: "struct.get", typeIndex: timeInfo.typeIndex, fieldIndex: 1 },
+					{ op: "end" },
+				],
+			);
+		}
+	}
+
+	for (const c of meta.consts ?? []) {
+		if (!c.dynamic) continue;
+		const g = mod.resolveGlobal(c.name);
+		if (!g) continue;
+		addFunc(
+			`__const_${c.name}`,
+			[],
+			[extType(c.desc.wType)],
+			[{ op: "global.get", index: g.index }, ...toExt(c.desc.wType)],
+		);
+	}
 }
 
 // `(externref) -> i32`: `ref.test`s param 0 against each type index and
@@ -1050,6 +1509,18 @@ function inExpr(desc, v) {
 			return `${P}strin(${v})`;
 		case "any":
 			return `(${v} === undefined ? null : ${v})`;
+		case "error":
+			return `${P}errin(${v})`;
+		case "time":
+			return desc.ptr ? `${P}timein_ptr(${v})` : `${P}timein(${v})`;
+		case "map":
+			return `${P}mapin_${desc.key}(${v})`;
+		case "ptr_box":
+			return `${P}boxin_${desc.key}(${v})`;
+		case "anon_struct":
+			return desc.ptr
+				? `(${v} == null ? null : ${P}to_${desc.name}(${v}))`
+				: `${P}to_${desc.name}(${v})`;
 		case "struct":
 			if (desc.info.pkgTarget === "both")
 				return `${P}to_${desc.name}(${v}, ${desc.ptr ? "false" : "true"})`;
@@ -1082,6 +1553,18 @@ function outExpr(desc, v) {
 			return desc.unsigned ? `${P}u64out(${v})` : `${P}i64out(${v})`;
 		case "string":
 			return `(${v} ?? "")`;
+		case "error":
+			return `${P}errout(${v})`;
+		case "time":
+			return desc.ptr ? `${P}timeout_ptr(${v})` : `${P}timeout(${v})`;
+		case "map":
+			return `${P}mapout_${desc.key}(${v})`;
+		case "ptr_box":
+			return `${P}boxout_${desc.key}(${v})`;
+		case "anon_struct":
+			return desc.ptr
+				? `(${v} == null ? null : ${P}from_${desc.name}(${v}))`
+				: `${P}from_${desc.name}(${v})`;
 		case "struct":
 			return desc.info.pkgTarget === "both"
 				? `${P}from_${desc.name}(${v})`
@@ -1112,6 +1595,15 @@ function zeroExpr(desc) {
 			return "0";
 		case "string":
 			return '""';
+		case "error":
+		case "time":
+		case "map":
+		case "ptr_box":
+			return "null";
+		case "anon_struct":
+			return desc.ptr
+				? "null"
+				: `{ ${desc.fields.map((f) => `"${f.name}": ${zeroExpr(f.desc)}`).join(", ")} }`;
 		case "struct":
 			return desc.ptr ? "null" : `new ${desc.name}()`;
 		case "array":
@@ -1147,6 +1639,10 @@ function isBothStruct(d) {
 	return d.k === "struct" && d.info.pkgTarget === "both";
 }
 
+function isPtrWriteBack(d) {
+	return isPtrBoth(d) || d.k === "ptr_box" || (d.k === "anon_struct" && d.ptr);
+}
+
 function returnLines(returns, resultExpr) {
 	if (returns.length === 0) return [];
 	if (returns.length === 1)
@@ -1161,12 +1657,20 @@ function genFuncBody(exportName, params, returns, leadArgs = []) {
 	const names = params.map((_, i) => `a${i}`);
 	const lines = [];
 	const argExprs = [...leadArgs];
-	const writeBack = params.some(isPtrBoth);
-	if (writeBack) lines.push("\tconst __m = new Map();");
+	const writeBack = params.some(isPtrWriteBack);
+	if (params.some(isPtrBoth)) lines.push("\tconst __m = new Map();");
 	for (let i = 0; i < params.length; i++) {
 		const d = params[i];
 		if (isPtrBoth(d)) {
 			lines.push(`\tconst __p${i} = ${P}to_${d.name}(a${i}, false, __m);`);
+			argExprs.push(`__p${i}`);
+		} else if (d.k === "ptr_box") {
+			lines.push(`\tconst __p${i} = ${P}boxin_${d.key}(a${i});`);
+			argExprs.push(`__p${i}`);
+		} else if (d.k === "anon_struct" && d.ptr) {
+			lines.push(
+				`\tconst __p${i} = a${i} == null ? null : ${P}to_${d.name}(a${i});`,
+			);
 			argExprs.push(`__p${i}`);
 		} else {
 			argExprs.push(inExpr(d, names[i]));
@@ -1185,8 +1689,12 @@ function genFuncBody(exportName, params, returns, leadArgs = []) {
 	} else {
 		lines.push(`\t\tconst __r = ${call};`);
 		for (let i = 0; i < params.length; i++) {
-			if (isPtrBoth(params[i]))
-				lines.push(`\t\t${P}back_${params[i].name}(__p${i}, a${i});`);
+			const d = params[i];
+			if (isPtrBoth(d)) lines.push(`\t\t${P}back_${d.name}(__p${i}, a${i});`);
+			else if (d.k === "ptr_box")
+				lines.push(`\t\t${P}boxback_${d.key}(__p${i}, a${i});`);
+			else if (d.k === "anon_struct" && d.ptr)
+				lines.push(`\t\t${P}back_${d.name}(__p${i}, a${i});`);
 		}
 		lines.push(...returnLines(returns, "__r").map((l) => `\t${l}`));
 	}
@@ -1206,6 +1714,7 @@ export const WASM_IMPORTS_JS = `const ${P}MAX = 9007199254740991n;
 function ${P}imports(stringTable, extraEnv, tag, write) {
 	let lineBuf = "";
 	let targs = [];
+	let fmtStructMap = new WeakMap();
 	const late = { exports: null };
 	const flush = () => { write(lineBuf); lineBuf = ""; };
 	const print = (v) => {
@@ -1224,6 +1733,8 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		flush();
 	};
 	const targ = (v) => { targs.push(v); };
+	let utf8Encoded = null;
+	let convBytes = null, convPos = 0;
 	const env = {
 		"panicTag": tag,
 		"panic": (msg) => {
@@ -1276,6 +1787,25 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		"str_from_i32": (n) => String(n),
 		"str_from_f64": (f) => String(f),
 		"is_string": (v) => (typeof v === "string" ? 1 : 0),
+		"str_to_bytes": (s) => {
+			utf8Encoded = new TextEncoder().encode(s ?? "");
+			return utf8Encoded.length;
+		},
+		"str_byte_at": (i) => (utf8Encoded ? (utf8Encoded[i] ?? 0) : 0),
+		"bytes_to_str_init": (len) => {
+			convBytes = new Uint8Array(len);
+			convPos = 0;
+		},
+		"bytes_to_str_push": (b) => {
+			if (convBytes && convPos < convBytes.length) {
+				convBytes[convPos++] = b & 0xFF;
+			}
+		},
+		"bytes_to_str_finish": () => {
+			const res = convBytes ? new TextDecoder().decode(convBytes) : "";
+			convBytes = null;
+			return res;
+		},
 		"print_i32": print, "print_i64": print, "print_f32": print, "print_f64": print,
 		"print_str": print, "print_any": print,
 		"print_bool": (b) => print(b !== 0 ? "true" : "false"),
@@ -1283,11 +1813,31 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		"println_str": println, "println_any": println,
 		"println_bool": (b) => println(b !== 0 ? "true" : "false"),
 		"println_empty": flush,
+		"fmt_new_array": () => [],
+		"fmt_array_push": (arr, v) => { arr.push(v); },
+		"fmt_new_map": () => new Map(),
+		"fmt_map_set": (m, k, v) => { m.set(k, v); },
+		"fmt_new_struct": (ref, isPtr) => {
+			if (ref !== null && ref !== undefined && typeof ref === "object" && fmtStructMap.has(ref)) {
+				return fmtStructMap.get(ref);
+			}
+			const o = {};
+			Object.defineProperty(o, "__struct", { value: true, configurable: true });
+			if (isPtr !== 0) Object.defineProperty(o, "__p", { value: true, configurable: true });
+			if (ref !== null && ref !== undefined && typeof ref === "object") fmtStructMap.set(ref, o);
+			return o;
+		},
+		"fmt_struct_set": (o, k, v) => { o[typeof k === "number" ? stringTable[k] : k] = v; },
+		"fmt_box_i32": (v) => v,
+		"fmt_box_i64": (v) => (v > ${P}MAX || v < -${P}MAX ? v : Number(v)),
+		"fmt_box_f64": (v) => v,
+		"fmt_box_bool": (v) => v !== 0,
+		"fmt_new_box": () => ({ value: null, __p: true, __box: true }),
 		"testing_arg_i32": targ, "testing_arg_f32": targ, "testing_arg_f64": targ,
 		"testing_arg_str": targ, "testing_arg_any": targ,
 		"testing_arg_i64": (v) => targ(v > ${P}MAX || v < -${P}MAX ? v : Number(v)),
 		"testing_arg_bool": (v) => targ(v !== 0),
-		"testing_call": (t, i) => { const a = targs; targs = []; t[stringTable[i]](...a); },
+		"testing_call": (t, i) => { const a = targs; targs = []; fmtStructMap = new WeakMap(); t[stringTable[i]](...a); },
 		"testing_name": (t) => t.Name(),
 		"testing_flag": (t, i) => (t[stringTable[i]]() ? 1 : 0),
 	};
@@ -1295,7 +1845,7 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 	// modules that never call them do not ship it (see WASM_STDLIB_JS).
 	if (typeof ${P}stdlib === "function") {
 		Object.assign(env, ${P}stdlib(stringTable, {
-			"take": () => { const a = targs; targs = []; return a; },
+			"take": () => { const a = targs; targs = []; fmtStructMap = new WeakMap(); return a; },
 			"printf": (s) => {
 				lineBuf += s;
 				const nl = lineBuf.lastIndexOf("\\n");
@@ -1306,7 +1856,7 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 	}
 	Object.assign(env, extraEnv);
 	const m = {};
-	for (const k of ["sin", "cos", "tan", "asin", "acos", "atan", "atan2", "pow", "exp", "log", "log2", "log10", "cbrt", "hypot"]) m[k] = Math[k];
+	for (const k of ["sin", "cos", "tan", "asin", "acos", "atan", "atan2", "pow", "exp", "log", "log2", "log10", "cbrt", "hypot", "random", "sinh", "cosh", "tanh"]) m[k] = Math[k];
 	m.mod = (x, y) => x % y;
 	// Go rounds half away from zero; Math.round rounds half toward +Infinity.
 	m.round = (x) => Math.sign(x) * Math.round(Math.abs(x));
@@ -1316,21 +1866,169 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 
 // JS side of the STDLIB_IMPORTS table (index.js); emitted only when the
 // module imports one of the packages that use it.
-export const WASM_STDLIB_JS = `${HELPER_SPRINTF}
+export const WASM_STDLIB_JS = `${HELPER_ERROR}
+${HELPER_SPRINTF}
 ${HELPER_STRCONV}
+${HELPER_PATH_CLEAN}
+${HELPER_DURATION}
+${HELPER_SHA256}
+${HELPER_HEX}
+${HELPER_BASE64}
 function ${P}stdlib(stringTable, io) {
 	let parts = [];
-	let strconvErr = null;
+	let cutBefore = "", cutAfter = "";
+	let strconvErr = null, strconvErrKind = 0;
 	let decodeSize = 0;
+	let replacerTarget = "", replacerPairs = [];
+	let splitDir = "", splitFile = "";
+	let joinParts = [];
+	let matchHasErr = 0;
+	let trimStart = 0, trimEnd = 0;
+	let sscanTokens = [];
+	let sscanHasErr = 0, sscanErrMsg = "";
+	let timeParseErr = null, timeParseOffset = 0;
+	let rawBytes = new Uint8Array(0);
+	let rawPos = 0;
+	let hexErr = null;
+	let base64Err = null;
+	let customBase64Encodings = [];
 	return {
+		"fmt_sscan_init": (s, mode) => {
+			sscanHasErr = 0;
+			sscanErrMsg = "";
+			const str = s ?? "";
+			sscanTokens = (mode === 1 ? str.split("\\n")[0] : str).trim().split(/\\s+/).filter(Boolean);
+			return sscanTokens.length;
+		},
+		"fmt_sscanf_init": (s, fmt) => {
+			sscanHasErr = 0;
+			sscanErrMsg = "";
+			const str = s ?? "";
+			const fmtStr = fmt ?? "";
+			let si = 0, fi = 0;
+			sscanTokens = [];
+			while (fi < fmtStr.length) {
+				if (/\\s/.test(fmtStr[fi])) {
+					while (fi < fmtStr.length && /\\s/.test(fmtStr[fi])) fi++;
+					while (si < str.length && /\\s/.test(str[si])) si++;
+					continue;
+				}
+				if (fmtStr[fi] === "%") {
+					if (fi + 1 < fmtStr.length && fmtStr[fi + 1] === "%") {
+						if (str[si] !== "%") {
+							sscanHasErr = 1;
+							sscanErrMsg = "input does not match format";
+							break;
+						}
+						si++;
+						fi += 2;
+						continue;
+					}
+					const vm = fmtStr.slice(fi).match(/^%[vdsfqtxXbcoeEfFgG]/);
+					if (vm) {
+						const verb = vm[0];
+						fi += verb.length;
+						if (verb !== "%c") {
+							while (si < str.length && /\\s/.test(str[si])) si++;
+						}
+						if (si >= str.length) break;
+						let tokRe = /^\\S+/;
+						if (verb === "%d" || verb === "%i") tokRe = /^[+-]?\\d+/;
+						else if (verb === "%f" || verb === "%F" || verb === "%e" || verb === "%E" || verb === "%g" || verb === "%G") tokRe = /^[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?/;
+						else if (verb === "%t") tokRe = /^(?:true|false|1|0|t|f|T|F|TRUE|FALSE)/;
+						else if (verb === "%x" || verb === "%X") tokRe = /^[+-]?(?:0x)?[0-9a-fA-F]+/;
+						else if (verb === "%c") tokRe = /^[\\s\\S]/;
+						const m = str.slice(si).match(tokRe);
+						if (!m) {
+							sscanHasErr = 1;
+							sscanErrMsg = "input does not match format";
+							break;
+						}
+						sscanTokens.push(m[0]);
+						si += m[0].length;
+						continue;
+					}
+				}
+				if (si >= str.length) break;
+				if (str[si] !== fmtStr[fi]) {
+					sscanHasErr = 1;
+					sscanErrMsg = "input does not match format";
+					break;
+				}
+				si++;
+				fi++;
+			}
+			return sscanTokens.length;
+		},
+		"fmt_sscan_has_err": () => sscanHasErr,
+		"fmt_sscan_err_msg": () => sscanErrMsg || "syntax error",
+		"fmt_sscan_token_str": (i) => sscanTokens[i] ?? "",
+		"fmt_sscan_token_i64": (i) => {
+			if (i >= sscanTokens.length) { sscanHasErr = 1; sscanErrMsg = "unexpected EOF"; return 0n; }
+			const t = sscanTokens[i];
+			if (/^[+-]?(?:0[xX])?[0-9a-fA-F]+$/.test(t)) {
+				try {
+					if (/^[+-]?[0-9a-fA-F]+$/.test(t) && /[a-fA-F]/.test(t)) {
+						return BigInt("0x" + t);
+					}
+					return BigInt(t);
+				} catch {}
+			}
+			if (t.length === 1) {
+				return BigInt(t.charCodeAt(0));
+			}
+			sscanHasErr = 1;
+			sscanErrMsg = "expected integer";
+			return 0n;
+		},
+		"fmt_sscan_token_f64": (i) => {
+			if (i >= sscanTokens.length) { sscanHasErr = 1; sscanErrMsg = "unexpected EOF"; return 0; }
+			const t = sscanTokens[i];
+			const n = Number(t);
+			if (Number.isNaN(n) || !/^[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?$/.test(t)) {
+				sscanHasErr = 1;
+				sscanErrMsg = "expected float";
+				return 0;
+			}
+			return n;
+		},
+		"fmt_sscan_token_bool": (i) => {
+			if (i >= sscanTokens.length) { sscanHasErr = 1; sscanErrMsg = "unexpected EOF"; return 0; }
+			const t = sscanTokens[i]?.toLowerCase();
+			if (t === "true" || t === "1" || t === "t") return 1;
+			if (t === "false" || t === "0" || t === "f") return 0;
+			sscanHasErr = 1;
+			sscanErrMsg = "expected boolean";
+			return 0;
+		},
 		"testing_run": (t, name, fn) => (t.Run(name, (sub) => { io.late.exports.__testing_run_cb(fn, sub); }) ? 1 : 0),
 		"fmt_sprintf": (f) => __sprintf(f ?? "", ...io.take()),
 		"fmt_printf": (f) => { io.printf(__sprintf(f ?? "", ...io.take())); },
+		"fmt_format_v": (v) => { const res = __sprintf("%v", v); io.take(); return res; },
 		"str_trim": (s, c) => ${P}trim(s ?? "", c ?? "", true, true),
 		"str_trim_left": (s, c) => ${P}trim(s ?? "", c ?? "", true, false),
 		"str_trim_right": (s, c) => ${P}trim(s ?? "", c ?? "", false, true),
 		"str_trim_prefix": (s, p) => (s && p && s.startsWith(p) ? s.slice(p.length) : (s ?? "")),
 		"str_trim_suffix": (s, p) => (s && p && s.endsWith(p) ? s.slice(0, s.length - p.length) : (s ?? "")),
+		"str_cut": (s, sep) => {
+			const i = (s ?? "").indexOf(sep ?? "");
+			if (i < 0) { cutBefore = s ?? ""; cutAfter = ""; return 0; }
+			cutBefore = (s ?? "").slice(0, i);
+			cutAfter = (s ?? "").slice(i + (sep ?? "").length);
+			return 1;
+		},
+		"str_cut_before": () => cutBefore,
+		"str_cut_after": () => cutAfter,
+		"str_cut_prefix": (s, p) => {
+			s = s ?? ""; p = p ?? "";
+			if (s.startsWith(p)) { cutAfter = s.slice(p.length); return 1; }
+			cutAfter = s; return 0;
+		},
+		"str_cut_suffix": (s, suf) => {
+			s = s ?? ""; suf = suf ?? "";
+			if (s.endsWith(suf)) { cutBefore = s.slice(0, s.length - suf.length); return 1; }
+			cutBefore = s; return 0;
+		},
 		"str_replace": (s, o, n, cnt) => {
 			s = s ?? ""; o = o ?? ""; n = n ?? "";
 			if (cnt < 0) return s.replaceAll(o, n);
@@ -1350,18 +2048,175 @@ function ${P}stdlib(stringTable, io) {
 		"str_index_rune": (s, r) => (s ?? "").indexOf(String.fromCodePoint(r)),
 		"str_index_any": (s, cs) => { s = s ?? ""; let best = -1; for (const c of (cs ?? "")) { const i = s.indexOf(c); if (i >= 0 && (best < 0 || i < best)) best = i; } return best; },
 		"str_last_index_byte": (s, b) => (s ?? "").lastIndexOf(String.fromCharCode(b)),
+		"str_last_index_any": (s, cs) => {
+			s = s ?? ""; let best = -1;
+			for (const c of (cs ?? "")) {
+				const i = s.lastIndexOf(c);
+				if (i > best) best = i;
+			}
+			return best;
+		},
 		"str_title": (s) => (s ?? "").replace(/(^|[^\\p{L}\\p{N}_'])(\\p{Ll})/gu, (m, a, b) => a + b.toUpperCase()),
 		"str_split": (s, sep) => { parts = (s ?? "").split(sep ?? ""); return parts.length; },
+		"str_split_n": (s, sep, n) => {
+			s = s ?? ""; sep = sep ?? "";
+			if (n === 0) return -1;
+			if (n < 0) { parts = sep === "" ? [...s] : s.split(sep); return parts.length; }
+			if (sep === "") {
+				const chars = [...s];
+				if (chars.length <= n) { parts = chars; return parts.length; }
+				const r = chars.slice(0, n - 1);
+				r.push(chars.slice(n - 1).join(""));
+				parts = r;
+				return parts.length;
+			}
+			const r = [];
+			let cur = s;
+			for (let i = 1; i < n && cur.length; i++) {
+				const j = cur.indexOf(sep);
+				if (j < 0) break;
+				r.push(cur.slice(0, j));
+				cur = cur.slice(j + sep.length);
+			}
+			r.push(cur);
+			parts = r;
+			return parts.length;
+		},
+		"str_split_after": (s, sep) => {
+			s = s ?? ""; sep = sep ?? "";
+			if (sep === "") { parts = [...s]; return parts.length; }
+			const r = [];
+			let cur = s;
+			while (true) {
+				const j = cur.indexOf(sep);
+				if (j < 0) { r.push(cur); break; }
+				r.push(cur.slice(0, j + sep.length));
+				cur = cur.slice(j + sep.length);
+			}
+			parts = r;
+			return parts.length;
+		},
+		"str_split_after_n": (s, sep, n) => {
+			s = s ?? ""; sep = sep ?? "";
+			if (n === 0) return -1;
+			if (sep === "") {
+				const chars = [...s];
+				if (n < 0 || chars.length <= n) parts = chars;
+				else {
+					const r = chars.slice(0, n - 1);
+					r.push(chars.slice(n - 1).join(""));
+					parts = r;
+				}
+				return parts.length;
+			}
+			const r = [];
+			let cur = s;
+			for (let i = 1; (n < 0 || i < n) && cur.length; i++) {
+				const j = cur.indexOf(sep);
+				if (j < 0) break;
+				r.push(cur.slice(0, j + sep.length));
+				cur = cur.slice(j + sep.length);
+			}
+			r.push(cur);
+			parts = r;
+			return parts.length;
+		},
 		"str_fields": (s) => { parts = (s ?? "").split(/\\s+/).filter((p) => p !== ""); return parts.length; },
 		"str_part": (i) => parts[i] ?? "",
-		"strconv_atoi": (s) => { const r = __strconv_atoi(s ?? ""); strconvErr = r[1]; return r[0]; },
-		"strconv_parse_int": (s, base, bits) => { const r = __strconv_parse_int(s ?? "", base, bits); strconvErr = r[1]; return r[0]; },
-		"strconv_parse_float": (s) => { const r = __strconv_parse_float(s ?? ""); strconvErr = r[1]; return r[0]; },
-		"strconv_parse_bool": (s) => { const r = __strconv_parse_bool(s ?? ""); strconvErr = r[1]; return r[0] ? 1 : 0; },
+		"str_replacer_init": (s) => {
+			replacerTarget = s ?? "";
+			replacerPairs = [];
+		},
+		"str_replacer_add": (o, n) => {
+			replacerPairs.push([o ?? "", n ?? ""]);
+		},
+		"str_replacer_run": () => {
+			let s = replacerTarget;
+			if (!replacerPairs.length || s === "") return s;
+			let out = "";
+			let i = 0;
+			while (i < s.length) {
+				let matched = false;
+				for (let k = 0; k < replacerPairs.length; k++) {
+					const [oldStr, newStr] = replacerPairs[k];
+					if (oldStr.length > 0 && s.startsWith(oldStr, i)) {
+						out += newStr;
+						i += oldStr.length;
+						matched = true;
+						break;
+					}
+				}
+				if (!matched) {
+					out += s[i];
+					i++;
+				}
+			}
+			return out;
+		},
+		"strconv_atoi": (s) => {
+			const r = __strconv_atoi(s ?? "");
+			strconvErr = r[1];
+			strconvErrKind = r[1] ? (r[1].includes("invalid syntax") ? 1 : r[1].includes("value out of range") ? 2 : 0) : 0;
+			return r[0];
+		},
+		"strconv_parse_int": (s, base, bits) => {
+			const r = __strconv_parse_int(s ?? "", base, bits);
+			strconvErr = r[1];
+			strconvErrKind = r[1] ? (r[1].includes("invalid syntax") ? 1 : r[1].includes("value out of range") ? 2 : 0) : 0;
+			return r[0];
+		},
+		"strconv_parse_float": (s) => {
+			const r = __strconv_parse_float(s ?? "");
+			strconvErr = r[1];
+			strconvErrKind = r[1] ? (r[1].includes("invalid syntax") ? 1 : r[1].includes("value out of range") ? 2 : 0) : 0;
+			return r[0];
+		},
+		"strconv_parse_bool": (s) => {
+			const r = __strconv_parse_bool(s ?? "");
+			strconvErr = r[1];
+			strconvErrKind = r[1] ? (r[1].includes("invalid syntax") ? 1 : r[1].includes("value out of range") ? 2 : 0) : 0;
+			return r[0] ? 1 : 0;
+		},
 		"strconv_err": () => strconvErr,
+		"strconv_err_kind": () => strconvErrKind,
 		"strconv_format_float": (f, fmtc, prec, _bits) => __strconv_format_float(f, fmtc, prec),
 		"strconv_format_int": (n, base) => n.toString(base),
+		"strconv_format_uint": (n, base) => BigInt.asUintN(64, BigInt(n)).toString(base),
+		"strconv_parse_uint": (s, base, bits) => {
+			const r = __strconv_parse_uint(s ?? "", base, bits);
+			strconvErr = r[1];
+			strconvErrKind = r[1] ? (r[1].includes("invalid syntax") ? 1 : r[1].includes("value out of range") ? 2 : 0) : 0;
+			return r[0];
+		},
 		"strconv_quote": (s) => JSON.stringify(s ?? ""),
+		"strconv_unquote": (s) => {
+			s = s ?? "";
+			if (s.startsWith("\`") && s.endsWith("\`") && s.length >= 2) {
+				if (s.slice(1, -1).includes("\`")) {
+					strconvErr = "invalid syntax";
+					strconvErrKind = 1;
+					return "";
+				}
+				strconvErr = null;
+				strconvErrKind = 0;
+				return s.slice(1, -1);
+			}
+			try {
+				const v = JSON.parse(s);
+				if (typeof v !== "string") {
+					strconvErr = "invalid syntax";
+					strconvErrKind = 1;
+					return "";
+				}
+				strconvErr = null;
+				strconvErrKind = 0;
+				return v;
+			} catch (e) {
+				strconvErr = "invalid syntax";
+				strconvErrKind = 1;
+				return "";
+			}
+		},
 		"utf8_rune_count": (s) => { let n = 0; for (const _ of (s ?? "")) n++; return n; },
 		"utf8_rune_len": (r) => (r < 0 || r > 0x10ffff || (r >= 0xd800 && r <= 0xdfff) ? -1 : r < 0x80 ? 1 : r < 0x800 ? 2 : r < 0x10000 ? 3 : 4),
 		"utf8_valid_string": (s) => (s ?? "").isWellFormed ? ((s ?? "").isWellFormed() ? 1 : 0) : (/[\\uD800-\\uDFFF]/.test((s ?? "").replace(/[\\uD800-\\uDBFF][\\uDC00-\\uDFFF]/g, "")) ? 0 : 1),
@@ -1378,14 +2233,205 @@ function ${P}stdlib(stringTable, io) {
 		},
 		"utf8_decode_size": () => decodeSize,
 		"utf8_full_rune": (s) => { s = s ?? ""; if (s.length === 0) return 0; const c = s.charCodeAt(0); return (c >= 0xd800 && c <= 0xdbff && s.length < 2) ? 0 : 1; },
+		// unicode
+		"unicode_is_letter": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{L}/u.test(c)) ? 1 : 0; },
+		"unicode_is_digit": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{Nd}/u.test(c)) ? 1 : 0; },
+		"unicode_is_space": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\s/u.test(c)) ? 1 : 0; },
+		"unicode_is_upper": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{Lu}/u.test(c)) ? 1 : 0; },
+		"unicode_is_lower": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{Ll}/u.test(c)) ? 1 : 0; },
+		"unicode_is_punct": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{P}/u.test(c)) ? 1 : 0; },
+		"unicode_is_control": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{Cc}/u.test(c)) ? 1 : 0; },
+		"unicode_is_print": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && !/\\p{Cc}/u.test(c)) ? 1 : 0; },
+		"unicode_is_graphic": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && !/\\p{Cc}/u.test(c)) ? 1 : 0; },
+		"unicode_to_upper": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return c ? (c.toUpperCase().codePointAt(0) ?? r) : r; },
+		"unicode_to_lower": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return c ? (c.toLowerCase().codePointAt(0) ?? r) : r; },
+		// html
+		"html_escape": (s) => (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&#34;").replace(/'/g, "&#39;"),
+		"html_unescape": (s) => (s ?? "").replace(/&(?:quot|apos|#39|#34|gt|lt|amp|#(?:[0-9]+|[xX][0-9a-fA-F]+));/g, (m) => {
+			switch (m) {
+				case "&quot;": case "&#34;": return '"';
+				case "&apos;": case "&#39;": return "'";
+				case "&gt;": return ">";
+				case "&lt;": return "<";
+				case "&amp;": return "&";
+				default: {
+					if (m.startsWith("&#")) {
+						const raw = m.slice(2, -1);
+						const cp = (raw.startsWith("x") || raw.startsWith("X")) ? parseInt(raw.slice(1), 16) : parseInt(raw, 10);
+						return (cp >= 0 && cp <= 0x10FFFF && !(cp >= 0xD800 && cp <= 0xDFFF)) ? String.fromCodePoint(cp) : "\\uFFFD";
+					}
+					return m;
+				}
+			}
+		}),
+		// path
+		"path_base": (p) => { if (!p) return "."; const stripped = p.replace(/\\/+$/, ""); if (!stripped) return "/"; const i = stripped.lastIndexOf("/"); return i < 0 ? stripped : stripped.slice(i + 1) || "/"; },
+		"path_dir": (p) => { const s = p ?? ""; const i = s.lastIndexOf("/"); if (i < 0) return "."; const res = s.slice(0, i); return res === "" ? "/" : __pathClean(res); },
+		"path_ext": (p) => { const s = p ?? ""; const b = s.slice(s.lastIndexOf("/") + 1); const i = b.lastIndexOf("."); return i <= 0 ? "" : b.slice(i); },
+		"path_is_abs": (p) => (p ?? "").startsWith("/") ? 1 : 0,
+		"path_clean": (p) => __pathClean(p ?? ""),
+		"path_split": (p) => {
+			const s = p ?? "";
+			const i = s.lastIndexOf("/");
+			if (i < 0) { splitDir = ""; splitFile = s; }
+			else { splitDir = s.slice(0, i + 1); splitFile = s.slice(i + 1); }
+		},
+		"path_split_dir": () => splitDir,
+		"path_split_file": () => splitFile,
+		"path_join_init": () => { joinParts = []; },
+		"path_join_push": (s) => { if (s) joinParts.push(s); },
+		"path_join_run": () => {
+			if (joinParts.length === 0) return "";
+			const res = __pathClean(joinParts.join("/"));
+			joinParts = [];
+			return res;
+		},
+		"path_match": (pat, name) => {
+			const r = __pathMatch(pat ?? "", name ?? "");
+			matchHasErr = r[1] ? 1 : 0;
+			return r[0] ? 1 : 0;
+		},
+		"path_match_has_err": () => matchHasErr,
+		// bytes trim
+		"bytes_trim": (s, cutset, left, right) => {
+			const cs = new Set(Array.from(cutset ?? ""));
+			const chars = Array.from(s ?? "");
+			let a = 0, b = chars.length;
+			if (left) while (a < b && cs.has(chars[a])) a++;
+			if (right) while (b > a && cs.has(chars[b - 1])) b--;
+			const enc = new TextEncoder();
+			trimStart = a === 0 ? 0 : enc.encode(chars.slice(0, a).join("")).length;
+			trimEnd = b === chars.length ? enc.encode(s ?? "").length : enc.encode(chars.slice(0, b).join("")).length;
+		},
+		"bytes_trim_start": () => trimStart,
+		"bytes_trim_end": () => trimEnd,
+		// time
+		"time_now_ms": () => (typeof globalThis.__GOFRONT_CLOCK === "function" ? globalThis.__GOFRONT_CLOCK() : Date.now()),
+		"time_timezone_offset": (ms) => -new Date(ms).getTimezoneOffset() * 60,
+		"time_duration_string": (d) => __durationString(d),
+		"time_parse": (layout, val) => {
+			try {
+				const d = new Date(val ?? "");
+				if (isNaN(d.getTime())) throw 0;
+				timeParseErr = null;
+				timeParseOffset = -d.getTimezoneOffset() * 60;
+				return d.getTime();
+			} catch {
+				timeParseErr = "parsing time: cannot parse";
+				timeParseOffset = 0;
+				return 0;
+			}
+		},
+		"time_parse_err": () => timeParseErr,
+		"time_parse_offset": () => timeParseOffset,
+		"time_format": (y, m, d, hr, min, sec, wd, ms, offsetSec, layout) => {
+			const DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+			const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+			const pad = (n, w = 2) => String(n).padStart(w, "0");
+			return (layout ?? "").replace(/2006|06|Monday|Mon|January|Jan|01|02|15|PM|pm|03|04|05|Z07:00|\\.(?:0+|9+)|1|2|3|4|5/g, t => {
+				if (t.startsWith(".")) {
+					const isZeroPad = t.includes("0");
+					const maxLen = t.length - 1;
+					let frac = pad(ms % 1000, 3);
+					if (maxLen > 3) frac = frac.padEnd(maxLen, "0");
+					else frac = frac.slice(0, maxLen);
+					if (!isZeroPad) {
+						frac = frac.replace(/0+$/, "");
+						return frac.length > 0 ? "." + frac : "";
+					}
+					return "." + frac;
+				}
+				switch (t) {
+					case "2006": return String(y);
+					case "06":   return String(y).slice(-2);
+					case "Monday": return DAYS[wd];
+					case "Mon":    return DAYS[wd].slice(0, 3);
+					case "January": return MONTHS[m - 1];
+					case "Jan":     return MONTHS[m - 1].slice(0, 3);
+					case "01": return pad(m);
+					case "1":  return String(m);
+					case "02": return pad(d);
+					case "2":  return String(d);
+					case "15": return pad(hr);
+					case "PM": return hr < 12 ? "AM" : "PM";
+					case "pm": return hr < 12 ? "am" : "pm";
+					case "03": return pad(hr % 12 || 12);
+					case "3":  return String(hr % 12 || 12);
+					case "04": return pad(min);
+					case "4":  return String(min);
+					case "05": return pad(sec);
+					case "5":  return String(sec);
+					case "Z07:00": {
+						const o = Math.floor(offsetSec / 60);
+						return o === 0 ? "Z" : (o > 0 ? "+" : "-") + pad(Math.floor(Math.abs(o) / 60)) + ":" + pad(Math.abs(o) % 60);
+					}
+					default: return t;
+				}
+			});
+		},
+		"raw_bytes_init": (len) => {
+			rawBytes = new Uint8Array(len);
+			rawPos = 0;
+		},
+		"raw_bytes_push": (b) => {
+			if (rawPos < rawBytes.length) {
+				rawBytes[rawPos++] = b & 0xff;
+			}
+		},
+		"raw_bytes_len": () => rawBytes.length,
+		"raw_bytes_get": (i) => rawBytes[i] ?? 0,
+		"crypto_rand_fill": (len) => {
+			rawBytes = new Uint8Array(len);
+			if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+				const CHUNK = 65536;
+				for (let offset = 0; offset < len; offset += CHUNK) {
+					crypto.getRandomValues(rawBytes.subarray(offset, Math.min(offset + CHUNK, len)));
+				}
+			} else {
+				for (let i = 0; i < len; i++) rawBytes[i] = Math.floor(Math.random() * 256);
+			}
+			return len;
+		},
+		"crypto_sha256_sum": () => {
+			const d = __sha256.Sum256(rawBytes);
+			rawBytes = new Uint8Array(d);
+			return 32;
+		},
+		"hex_encode_to_string": () => {
+			return __hex_encode_to_string(rawBytes);
+		},
+		"hex_decode_string": (s) => {
+			const [res, err] = __hex_decode_string(s ?? "");
+			hexErr = err ? (err.message ?? String(err)) : null;
+			rawBytes = new Uint8Array(res);
+			return rawBytes.length;
+		},
+		"hex_get_err": () => hexErr,
+		"base64_new_encoding": (alphabet) => {
+			const id = customBase64Encodings.length + 4;
+			customBase64Encodings.push(__base64_make(alphabet ?? "", "="));
+			return id;
+		},
+		"base64_encode_to_string": (mode) => {
+			const enc = mode === 1 ? __base64_url : mode === 2 ? __base64_raw_std : mode === 3 ? __base64_raw_url : mode >= 4 ? customBase64Encodings[mode - 4] : __base64_std;
+			return (enc ?? __base64_std).EncodeToString(rawBytes);
+		},
+		"base64_decode_string": (mode, s) => {
+			const enc = mode === 1 ? __base64_url : mode === 2 ? __base64_raw_std : mode === 3 ? __base64_raw_url : mode >= 4 ? customBase64Encodings[mode - 4] : __base64_std;
+			const [res, err] = (enc ?? __base64_std).DecodeString(s ?? "");
+			base64Err = err ? (err.message ?? String(err)) : null;
+			rawBytes = new Uint8Array(res);
+			return rawBytes.length;
+		},
+		"base64_get_err": () => base64Err,
 	};
 }
 function ${P}trim(s, cutset, left, right) {
-	const cs = Array.from(cutset);
+	const cs = new Set(Array.from(cutset));
 	const chars = Array.from(s);
 	let a = 0, b = chars.length;
-	if (left) while (a < b && cs.includes(chars[a])) a++;
-	if (right) while (b > a && cs.includes(chars[b - 1])) b--;
+	if (left) while (a < b && cs.has(chars[a])) a++;
+	if (right) while (b > a && cs.has(chars[b - 1])) b--;
 	return chars.slice(a, b).join("");
 }`;
 
@@ -1512,6 +2558,39 @@ export function generateFacade(
 		}
 	}
 
+	for (const [name, desc] of needs.anonStructs) {
+		out.push(`function ${P}to_${name}(o) {
+	if (o == null) return __w.__zero_${name}();
+	return __w.__new_${name}(${desc.fields.map((f) => inExpr(f.desc, `(o.${f.name} ?? ${zeroExpr(f.desc)})`)).join(", ")});
+}
+function ${P}from_${name}(r) {
+	if (r == null) return null;
+	return {
+${desc.fields.map((f) => `\t\t"${f.name}": ${outExpr(f.desc, `__w.__get_${name}_${f.name}(r)`)}`).join(",\n")}
+	};
+}
+function ${P}back_${name}(r, o) {
+	if (r == null || o == null) return;
+${desc.fields.map((f) => `\to.${f.name} = ${outExpr(f.desc, `__w.__get_${name}_${f.name}(r)`)};`).join("\n")}
+}`);
+	}
+
+	for (const [key, desc] of needs.boxes) {
+		out.push(`function ${P}boxin_${key}(b) {
+	if (b == null) return null;
+	const v = b.value !== undefined ? b.value : ${zeroExpr(desc.base)};
+	return __w.__box_new_${key}(${inExpr(desc.base, "v")});
+}
+function ${P}boxout_${key}(r) {
+	if (r == null) return null;
+	return { "value": ${outExpr(desc.base, `__w.__box_get_${key}(r)`)} };
+}
+function ${P}boxback_${key}(r, b) {
+	if (r == null || b == null) return;
+	b.value = ${outExpr(desc.base, `__w.__box_get_${key}(r)`)};
+}`);
+	}
+
 	for (const [key, desc] of needs.slices) {
 		out.push(`function ${P}slin_${key}(arr) {
 	if (arr == null) return __w.__slice_nil_${key}();
@@ -1530,8 +2609,34 @@ function ${P}slout_${key}(s) {
 function ${P}slview_${key}(s) {
 	if (s == null || __w.__slice_is_nil_${key}(s)) return null;
 	return ${P}idxview(__w.__slice_len_${key}(s), (i) => ${viewExpr(desc.elem, `__w.__slice_get_${key}(s, i)`)}, (i, v) => __w.__slice_set_${key}(s, i, ${inExpr(desc.elem, "v")}));
+} `);
+	}
+
+	for (const [key, desc] of needs.maps) {
+		out.push(`function ${P}mapin_${key}(m) {
+	if (m == null) return null;
+	const entries = m instanceof Map ? m.entries() : Object.entries(m);
+	const size = m instanceof Map ? m.size : Object.keys(m).length;
+	const r = __w.__map_new_${key}(size);
+	for (const [k, v] of entries) {
+		__w.__map_set_${key}(r, ${desc.keyDesc.k === "bool" ? `(k === "true" || k === true ? 1 : 0)` : inExpr(desc.keyDesc, "k")}, ${inExpr(desc.valDesc, "v")});
+	}
+	return r;
+}
+function ${P}mapout_${key}(m) {
+	if (m == null) return null;
+	const ks = ${P}slout_${desc.keySliceDesc.key}(__w.__map_keys_${key}(m));
+	const vs = ${P}slout_${desc.valSliceDesc.key}(__w.__map_values_${key}(m));
+	const out = new Map();
+	if (ks) {
+		for (let i = 0; i < ks.length; i++) {
+			out.set(ks[i], vs[i]);
+		}
+	}
+	return out;
 }`);
 	}
+
 	for (const [key, desc] of needs.arrays) {
 		out.push(`function ${P}arrzero_${key}(n) {
 	const out = new Array(n);
@@ -1555,7 +2660,7 @@ function ${P}arrout_${key}(a) {
 function ${P}arrview_${key}(a) {
 	if (a == null) return null;
 	return ${P}idxview(__w.__array_len_${key}(a), (i) => ${viewExpr(desc.elem, `__w.__array_get_${key}(a, i)`)}, (i, v) => __w.__array_set_${key}(a, i, ${inExpr(desc.elem, "v")}));
-}`);
+} `);
 	}
 
 	for (const [key, desc] of needs.funcs) {
@@ -1594,6 +2699,59 @@ ${indent(body, "\t")}
 
 	for (const [key, desc] of needs.ifaces) genIfaceFacade(out, key, desc);
 
+	if (needs.error) {
+		out.push(`class ${P}Error extends Error {
+	constructor(msg, ref) {
+		super(msg);
+		this.name = "GoError";
+		this._msg = msg;
+		this.__ref = ref;
+	}
+	Error() {
+		return this.message;
+	}
+}
+const ${P}err_w2j = new WeakMap();
+function ${P}errout(r) {
+	if (r == null) return null;
+	let e = ${P}err_w2j.get(r);
+	if (!e) {
+		const msg = __w.__error_msg ? (__w.__error_msg(r) ?? "") : "";
+		e = new ${P}Error(msg, r);
+		${P}err_w2j.set(r, e);
+	}
+	return e;
+}
+function ${P}errin(e) {
+	if (e == null) return null;
+	if (e.__ref === undefined) throw new TypeError("GoFront: expected a WASM-owned error");
+	if (!__w.__is_error(e.__ref)) throw new TypeError("GoFront: value does not implement error");
+	return e.__ref;
+}`);
+	}
+
+	if (needs.time) {
+		out.push(`function ${P}timeout(r) {
+	if (r == null) return null;
+	const ms = __w.__time_unix_milli ? __w.__time_unix_milli(r) : 0;
+	const off = __w.__time_offset ? __w.__time_offset(r) : 0;
+	return { _d: new Date(ms), _offset: off };
+}
+function ${P}timeout_ptr(r) {
+	return ${P}timeout(r);
+}
+function ${P}timein(v) {
+	if (v == null) return null;
+	const d = v._d ? v._d : (v instanceof Date ? v : new Date(v));
+	const ms = d.getTime();
+	const off = typeof v?._offset === "number" ? v._offset : -d.getTimezoneOffset() * 60;
+	return __w.__time_make ? __w.__time_make(ms, off) : null;
+}
+function ${P}timein_ptr(v) {
+	return ${P}timein(v);
+}`);
+	}
+
 	if (needs.shared) {
 		// Zero-copy TypedArray views over the exported memory.  Memory never
 		// grows after the start function (allocation is startup-only), but the
@@ -1615,7 +2773,15 @@ function ${P}shin(v, Ctor) {
 }`);
 	}
 
-	for (const c of meta.consts) out.push(`const ${c.name} = ${c.value};`);
+	for (const c of meta.consts) {
+		if (c.dynamic) {
+			out.push(
+				`const ${c.name} = ${outExpr(c.desc, `__w.__const_${c.name}()`)};`,
+			);
+		} else {
+			out.push(`const ${c.name} = ${c.value};`);
+		}
+	}
 	for (const v of meta.vars ?? [])
 		out.push(
 			`const ${v.name} = ${P}shout(__w.__var_${v.name}(), ${v.desc.ctor});`,

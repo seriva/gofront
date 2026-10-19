@@ -1,10 +1,16 @@
 // GoFront test helpers — shared across all test files
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import vm from "node:vm";
-import { JSDOM } from "jsdom";
 import { CodeGen } from "../../src/backend/js/index.js";
 import { instantiateWasm } from "../../src/backend/wasm/glue.js";
 import { compileWasm } from "../../src/backend/wasm/index.js";
@@ -25,6 +31,37 @@ export {
 	Parser,
 	parseDts,
 };
+
+export function withTempDir(files, fn) {
+	if (typeof files === "function") {
+		fn = files;
+		files = {};
+	}
+	const dir = mkdtempSync(join(tmpdir(), "gofront-test-"));
+	const cleanup = () => {
+		try {
+			rmSync(dir, { recursive: true, force: true });
+		} catch {}
+	};
+	try {
+		if (files) {
+			for (const [relPath, content] of Object.entries(files)) {
+				const fullPath = join(dir, relPath);
+				mkdirSync(dirname(fullPath), { recursive: true });
+				writeFileSync(fullPath, content);
+			}
+		}
+		const res = fn(dir);
+		if (res && typeof res.then === "function") {
+			return res.finally(cleanup);
+		}
+		cleanup();
+		return res;
+	} catch (err) {
+		cleanup();
+		throw err;
+	}
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -117,11 +154,17 @@ export function runJs(js, extraGlobals = {}) {
 	return lines.join("\n");
 }
 
+const _require = createRequire(import.meta.url);
+let _JSDOM;
+
 export function runInDom(
 	js,
 	html = "<!DOCTYPE html><html><body></body></html>",
 ) {
-	const dom = new JSDOM(html);
+	if (!_JSDOM) {
+		_JSDOM = _require("jsdom").JSDOM;
+	}
+	const dom = new _JSDOM(html);
 	const { window } = dom;
 	const lines = [];
 	const ctx = vm.createContext({
@@ -206,12 +249,19 @@ export function compileHybrid(source, options = {}) {
 			let stdoutBuf = "";
 			const jsCtx = vm.createContext({
 				Math,
+				Date,
 				JSON,
 				String,
 				Number,
 				Boolean,
 				Array,
 				Object,
+				TextEncoder,
+				TextDecoder,
+				crypto: globalThis.crypto,
+				get __GOFRONT_CLOCK() {
+					return globalThis.__GOFRONT_CLOCK;
+				},
 				process: {
 					stdout: {
 						write: (s) => {
@@ -317,31 +367,37 @@ export function compileHybrid(source, options = {}) {
 
 export async function compileHybridProject(files, { exports = [] } = {}) {
 	const root = mkdtempSync(join(tmpdir(), "gofront-hybrid-"));
-	for (const [rel, src] of Object.entries(files)) {
-		const full = join(root, rel);
-		mkdirSync(dirname(full), { recursive: true });
-		writeFileSync(full, src);
-	}
-	const result = compileDir(root);
-	const parts = [];
-	if (result.wasm) {
-		assertValidWasm(result.wasm);
+	try {
+		for (const [rel, src] of Object.entries(files)) {
+			const full = join(root, rel);
+			mkdirSync(dirname(full), { recursive: true });
+			writeFileSync(full, src);
+		}
+		const result = compileDir(root);
+		const parts = [];
+		if (result.wasm) {
+			assertValidWasm(result.wasm);
+			parts.push(
+				`globalThis.__GOFRONT_WASM_BYTES = new Uint8Array([${Array.from(result.wasm).join(",")}]);`,
+			);
+		}
+		parts.push("const __out = [];");
+		// Module-scoped `console` shadow so concurrently running tests don't share output.
 		parts.push(
-			`globalThis.__GOFRONT_WASM_BYTES = new Uint8Array([${Array.from(result.wasm).join(",")}]);`,
+			"const console = { log: (...a) => __out.push(a.map((x) => String(x)).join(' ')) };",
 		);
+		parts.push(stripImports(result.js));
+		parts.push(`export const __lines = __out;`);
+		if (exports.length > 0) parts.push(`export { ${exports.join(", ")} };`);
+		const bundlePath = join(root, "bundle.mjs");
+		writeFileSync(bundlePath, parts.join("\n"));
+		const mod = await import(
+			`${pathToFileURL(bundlePath).href}?t=${Date.now()}`
+		);
+		return { ...result, mod, lines: mod.__lines, root };
+	} finally {
+		rmSync(root, { recursive: true, force: true });
 	}
-	parts.push("const __out = [];");
-	// Module-scoped `console` shadow so concurrently running tests don't share output.
-	parts.push(
-		"const console = { log: (...a) => __out.push(a.map((x) => String(x)).join(' ')) };",
-	);
-	parts.push(stripImports(result.js));
-	parts.push(`export const __lines = __out;`);
-	if (exports.length > 0) parts.push(`export { ${exports.join(", ")} };`);
-	const bundlePath = join(root, "bundle.mjs");
-	writeFileSync(bundlePath, parts.join("\n"));
-	const mod = await import(`${pathToFileURL(bundlePath).href}?t=${Date.now()}`);
-	return { ...result, mod, lines: mod.__lines, root };
 }
 
 // ── Test harness ─────────────────────────────────────────────
@@ -444,10 +500,40 @@ export function assertThrows(fn, substring) {
 		msg = e.message ?? String(e);
 	}
 	if (!threw) throw new Error("expected function to throw, but it did not");
-	if (substring && !msg.includes(substring))
-		throw new Error(
-			`expected error containing ${JSON.stringify(substring)}\ngot: ${JSON.stringify(msg)}`,
-		);
+	if (substring) {
+		const matches =
+			substring instanceof RegExp
+				? substring.test(msg)
+				: msg.includes(substring);
+		if (!matches) {
+			throw new Error(
+				`expected error containing ${String(substring)}\ngot: ${JSON.stringify(msg)}`,
+			);
+		}
+	}
+}
+
+export async function assertRejects(fn, substring) {
+	let threw = false;
+	let msg = "";
+	try {
+		await fn();
+	} catch (e) {
+		threw = true;
+		msg = e.message ?? String(e);
+	}
+	if (!threw) throw new Error("expected function to reject, but it did not");
+	if (substring) {
+		const matches =
+			substring instanceof RegExp
+				? substring.test(msg)
+				: msg.includes(substring);
+		if (!matches) {
+			throw new Error(
+				`expected error containing ${String(substring)}\ngot: ${JSON.stringify(msg)}`,
+			);
+		}
+	}
 }
 
 export function assertErrorContains(errors, needle) {
@@ -458,8 +544,26 @@ export function assertErrorContains(errors, needle) {
 		);
 }
 
-export async function summarize() {
+export async function waitForPending() {
 	await Promise.all(pending);
+	flush();
+}
+
+export function resetTestStats() {
+	passed = 0;
+	failed = 0;
+	failures.length = 0;
+	pending.length = 0;
+	slots.length = 0;
+	flushed = 0;
+}
+
+export function getTestStats() {
+	return { passed, failed, failures: [...failures] };
+}
+
+export async function summarize() {
+	await waitForPending();
 	const total = passed + failed;
 	process.stdout.write(`\n${total} tests: \x1b[32m${passed} passed\x1b[0m`);
 	if (failed > 0) {

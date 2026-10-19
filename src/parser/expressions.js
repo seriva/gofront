@@ -25,6 +25,8 @@ const PREC = {
 	[T.AND_NOT]: 5,
 };
 
+const UNARY_OPS = new Set([T.NOT, T.MINUS, T.PLUS, T.CARET, T.AMP, T.STAR]);
+
 const TYPE_KEYWORDS = new Set([
 	"int",
 	"int8",
@@ -128,14 +130,7 @@ export const expressionParserMethods = {
 
 	parseUnary(noCompLit = false) {
 		const t = this.peek();
-		if (
-			t.type === T.NOT ||
-			t.type === T.MINUS ||
-			t.type === T.PLUS ||
-			t.type === T.CARET ||
-			t.type === T.AMP ||
-			t.type === T.STAR
-		) {
+		if (UNARY_OPS.has(t.type)) {
 			const op = this.advance().value;
 			return { kind: "UnaryExpr", op, operand: this.parseUnary(noCompLit) };
 		}

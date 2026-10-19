@@ -32,11 +32,12 @@ features (e.g. `docs/v0.0.5/`).
 
 | Area | Difficulty | Status | Notes |
 |---|---|---|---|
-| Language features | Medium | Draft | Non-literal package constants (fold or `start` global), array- and interface-typed map keys with Go's unhashable panic. |
-| Boundary types | Medium | Draft | `error`, `map` (copied as JS `Map`), pointer-to-scalar boxes, anonymous structs and interfaces, exported non-literal constants, `time.Time`. |
-| `strings` / `strconv` / `math` | Medium | Draft | `Cut*`, `SplitN`/`SplitAfter*`, `Map`, `*Func` variants, `NewReplacer`, `Builder`, `NewReader`; `Unquote`, `AppendInt`/`AppendFloat`; `math.Remainder`. |
-| `slices` & `fmt` | Medium | Draft | Remaining `slices` members (inline, `call_ref` for `*Func`); composite `%v`/`%+v` matching the JS backend; `Fprint*`, `Sscan*`. |
-| New packages | Medium | Draft | `unicode`, `math/rand`, `bytes` (incl. `Buffer`), `io`, `path`/`path/filepath`, `html`, `time` (except `Sleep`; clock via import). |
+| Language features | Medium | ✅ Done | Non-literal package constants (fold or `start` global), array- and interface-typed map keys with Go's unhashable panic. |
+| Boundary types | Medium | ✅ Done | `error`, `map` (copied as JS `Map`), pointer-to-scalar boxes, anonymous structs and interfaces, exported non-literal constants, `time.Time`, `time.Duration`. |
+| `strings` / `strconv` / `math` | Medium | ✅ Done | `Cut*`, `SplitN`/`SplitAfter*`, `Map`, `*Func` variants, `NewReplacer`, `Builder`, `NewReader`; `Unquote`, `AppendInt`/`AppendFloat`; `math.Remainder`. |
+| `slices` & `fmt` | Medium | ✅ Done | Remaining `slices` members (inline, `call_ref` for `*Func`); composite `%v`/`%+v` matching the JS backend; `Fprint*`, `Sscan*`. |
+| New packages | Medium | ✅ Done | `unicode`, `math/rand`, `bytes` (incl. `Buffer`), `io`, `path`/`path/filepath`, `html`, `time` (except `Sleep`; clock via import). |
+| Test suite optimization | Medium | ✅ Done | Deduplicate CLI tests (43 `spawnSync` → 3 smoke), `withTempDir` helper, table-driven error tests, unified JS/WASM stdlib parity tests, parallel execution (<5s target). Design doc: [`test-suite-optimization-plan.md`](v1.6.1/test-suite-optimization-plan.md). |
 
 ---
 

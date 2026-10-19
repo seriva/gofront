@@ -7,15 +7,19 @@ import {
 	mkdtempSync,
 	readFileSync,
 	rmSync,
+	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+	formatBuildSummary,
 	formatPrepSummary,
+	formatWrittenDesc,
 	handleBuild,
 	handleCheck,
+	handleDev,
 	handleInit,
 	handleTest,
 	maybeMinify,
@@ -31,13 +35,29 @@ import {
 	writeCompileOutput,
 } from "../../../src/cli-core.js";
 import {
+	colorEnabled,
+	createColors,
+	formatDiagnostic,
+	log,
+	ms,
+	stamp,
+} from "../../../src/colors.js";
+import {
+	clearParseCache,
+	compileDir as compileDirCached,
+	parseCacheSize,
+} from "../../../src/compiler.js";
+import {
 	assert,
 	assertContains,
 	assertEqual,
+	assertRejects,
+	assertThrows,
 	FIXTURES,
 	section,
 	summarize,
 	test,
+	withTempDir,
 } from "../helpers.js";
 
 section("cli-core — runCompile");
@@ -797,6 +817,334 @@ test("formatPrepSummary reports vendor-only with string dest", () => {
 	});
 	assertEqual(lines.length, 1);
 	assertEqual(lines[0], "bundled 1 vendor dependencies → vendor.js");
+});
+
+section("cli-core — parse cache");
+
+test("clearParseCache resets the cache to zero entries", () => {
+	withTempDir({ "main.go": "package main\nfunc main() {}\n" }, (dir) => {
+		compileDirCached(dir);
+		clearParseCache();
+		assert(parseCacheSize() === 0, "expected cache size 0 after clear");
+	});
+});
+
+test("compileDir populates the parse cache", () => {
+	clearParseCache();
+	withTempDir({ "main.go": "package main\nfunc main() {}\n" }, (dir) => {
+		compileDirCached(dir);
+		assert(
+			parseCacheSize() > 0,
+			"expected cache to be populated after compile",
+		);
+	});
+});
+
+test("second compileDir call reuses cache for unchanged files", () => {
+	clearParseCache();
+	withTempDir({ "main.go": "package main\nfunc main() {}\n" }, (dir) => {
+		compileDirCached(dir);
+		const sizeAfterFirst = parseCacheSize();
+		compileDirCached(dir);
+		assert(
+			parseCacheSize() === sizeAfterFirst,
+			"cache size should not grow on second compile of unchanged files",
+		);
+	});
+});
+
+section("cli-core — handleCheck");
+
+test("handleCheck returns elapsedMs on valid project directory", () => {
+	withTempDir(
+		{ "main.go": 'package main\nfunc main() { console.log("check ok") }\n' },
+		(dir) => {
+			const res = handleCheck(dir);
+			assert(res && res.elapsedMs !== undefined, "expected elapsedMs");
+		},
+	);
+});
+
+test("handleCheck throws on type error", () => {
+	withTempDir(
+		{ "main.go": "package main\nfunc main() { notFoundVar }\n" },
+		(dir) => {
+			assertThrows(() => handleCheck(dir), "notFoundVar");
+		},
+	);
+});
+
+test("handleCheck on multi-file package compiles all files", () => {
+	withTempDir(
+		{
+			"a.go": "package main\nvar Number = 42\n",
+			"main.go": "package main\nfunc main() { console.log(Number) }\n",
+		},
+		(dir) => {
+			const res = handleCheck(dir);
+			assert(res && res.elapsedMs !== undefined);
+		},
+	);
+});
+
+section("cli-core — runCompile & writeCompileOutput additional cases");
+
+test("single file with local package import bundles dependency", () => {
+	const res = runCompile(
+		join(FIXTURES, "multifile/withimport/main.go"),
+		false,
+		{},
+	);
+	assert(typeof res.js === "string");
+	assertContains(res.js, "function Add(");
+	assertContains(res.js, "function Square(");
+});
+
+test("single file with npm import emits import statement", () => {
+	withTempDir(
+		{
+			"main.go":
+				'package main\nimport "fake-lib"\nfunc main() { r := math.add(1.0, 2.0); console.log(r) }\n',
+		},
+		(dir) => {
+			symlinkSync(
+				join(FIXTURES, "node_modules"),
+				join(dir, "node_modules"),
+				"junction",
+			);
+			const res = runCompile(join(dir, "main.go"), false, {});
+			assertContains(res.js, "from 'fake-lib'");
+		},
+	);
+});
+
+test("single file with unreadable js: import path throws", () => {
+	withTempDir(
+		{
+			"bad_dts.go":
+				'package main\nimport "js:nonexistent.d.ts"\nfunc main() {}\n',
+		},
+		(dir) => {
+			assertThrows(() => runCompile(join(dir, "bad_dts.go"), false, {}));
+		},
+	);
+});
+
+test("writeCompileOutput throws on write failure", () => {
+	withTempDir((dir) => {
+		chmodSync(dir, 0o555);
+		try {
+			assertThrows(() =>
+				writeCompileOutput(
+					join(dir, "out.js"),
+					{ js: "console.log(1);" },
+					"console.log(1);",
+				),
+			);
+		} finally {
+			try {
+				chmodSync(dir, 0o755);
+			} catch {}
+		}
+	});
+});
+
+test("handleDev runs initial dev build and returns controller", async () => {
+	await withTempDir(
+		{
+			"src/main.go": 'package main\nfunc main() { console.log("dev test") }\n',
+			"public/index.html": "<html><body></body></html>",
+		},
+		async (dir) => {
+			const dev = await handleDev(dir, {
+				serve: false,
+				watch: false,
+				copyAssets: false,
+			});
+			assert(dev.written, "must have written info");
+			assertEqual(dev.initialError, null);
+			await dev.close();
+		},
+	);
+});
+
+test("handleDev with watch and serve starts watchers and closes cleanly", async () => {
+	await withTempDir(
+		{
+			"src/main.go": 'package main\nfunc main() { console.log("dev test") }\n',
+			"public/index.html": "<html><body></body></html>",
+		},
+		async (dir) => {
+			const dev = await handleDev(dir, {
+				serve: true,
+				watch: true,
+				port: 3912,
+				silent: true,
+				copyAssets: false,
+			});
+			assert(dev.devServer, "must create devServer");
+			await dev.close();
+		},
+	);
+});
+
+section("cli-core — colors and diagnostics formatting");
+
+test("formatDiagnostic colorizes labels, gutters, carets, warnings and no-color mode", () => {
+	const c = createColors(true);
+	const diag = formatDiagnostic(
+		"Type error in foo.go:1:2: invalid token\n 1 | x := 1\n   ^\nwarning: unused var\nplain text",
+		c,
+	);
+	assertContains(diag, "Type error");
+	assertContains(diag, "\x1b[");
+
+	const uncolored = formatDiagnostic(
+		"Type error in foo.go:1:2: invalid token\n 1 | x := 1",
+		createColors(false),
+	);
+	assertEqual(
+		uncolored,
+		"Type error in foo.go:1:2: invalid token\n 1 | x := 1",
+	);
+});
+
+test("colorEnabled, logging, and time stamp helpers", () => {
+	assert(typeof colorEnabled({ isTTY: false }) === "boolean");
+	assert(typeof colorEnabled({ isTTY: true }) === "boolean");
+	assert(typeof stamp() === "string");
+	assert(typeof ms(25) === "string");
+
+	// Exercise logger methods (silencing or letting stderr print)
+	log.info("info msg");
+	log.ok("ok msg");
+	log.warn("warn msg");
+	log.error("error msg");
+	log.fail("plain error");
+	log.fail("Parse error in test: syntax error\n 1 | syntax\n   ^");
+
+	assertContains(formatWrittenDesc(["dist/app.js"]), "dist/app.js");
+	assertContains(
+		formatWrittenDesc(["dist/app.js", "dist/app.wasm", "dist/app.wat"]),
+		"app.wasm",
+	);
+
+	const summaryWithPwa = formatBuildSummary({
+		outDir: "public",
+		elapsedMs: "10",
+		files: [{ name: "app.js", size: 100 }],
+		pwa: { assetsCount: 3, version: "v1.0" },
+	});
+	assert(summaryWithPwa.some((l) => l.includes("pwa: generated sw.js")));
+});
+
+test("handleCheck and parseBuildArgs error and edge conditions", () => {
+	assertThrows(
+		() => handleCheck("/nonexistent/directory/here"),
+		/cannot access/,
+	);
+	assertThrows(() => handleCheck("nonexistent-dir/..."), /No .go files found/);
+
+	const parsed = parseBuildArgs(["--out-dir=custom-dist"]);
+	assertEqual(parsed.outDir, "custom-dist");
+
+	const parsedDev = parseDevArgs(["--target", "js", "--port=8080"]);
+	assertEqual(parsedDev.port, 8080);
+	assertEqual(parsedDev.forceTarget, "js");
+});
+
+test("handleTest recursive error condition", async () => {
+	await assertRejects(
+		() => handleTest("nonexistent-dir/..."),
+		/No .go files found/,
+	);
+});
+
+test("handleTest auto-detects srcDir in project root", async () => {
+	await withTempDir(
+		{
+			"package.json": JSON.stringify({ gofront: { src: "src" } }),
+			"src/util.go": "package main\nfunc Add(a, b int) int { return a + b }\n",
+			"src/util_test.go":
+				'package main\nimport "testing"\nfunc TestAdd(t *testing.T) {\n\tif Add(1, 2) != 3 { t.Fatal("fail") }\n}\n',
+		},
+		async (dir) => {
+			const res = await handleTest(dir, { captureOutput: true });
+			assertEqual(res.exitCode, 0);
+			assertContains(res.stdout, "PASS");
+		},
+	);
+});
+
+test("handleTest on file target runs tests in containing package directory", async () => {
+	await withTempDir(
+		{
+			"main.go": "package main\nfunc main() {}\n",
+			"main_test.go":
+				'package main\nimport "testing"\nfunc TestFileTarget(t *testing.T) {}\n',
+		},
+		async (dir) => {
+			const res = await handleTest(join(dir, "main.go"), {
+				captureOutput: true,
+			});
+			assertEqual(res.exitCode, 0);
+			assertContains(res.stdout, "PASS");
+		},
+	);
+});
+
+test("handleTest with file config.src resolves cleanly to package directory", async () => {
+	await withTempDir(
+		{
+			"package.json": JSON.stringify({ gofront: { src: "src/main.go" } }),
+			"src/main.go": "package main\nfunc main() {}\n",
+			"src/main_test.go":
+				'package main\nimport "testing"\nfunc TestConfigSrcFile(t *testing.T) {}\n',
+		},
+		async (dir) => {
+			const res = await handleTest(dir, { captureOutput: true });
+			assertEqual(res.exitCode, 0);
+			assertContains(res.stdout, "PASS");
+		},
+	);
+});
+
+test("handleDev handles initial error and calls onError", async () => {
+	await withTempDir(
+		{ "main.go": "package main\ninvalid syntax here @@@\n" },
+		async (dir) => {
+			let errorReported = null;
+			const dev = await handleDev(dir, {
+				serve: false,
+				watch: false,
+				onError: (e) => {
+					errorReported = e;
+				},
+			});
+			assert(dev.initialError !== null, "expected initialError");
+			assert(errorReported !== null, "expected onError callback invocation");
+			await dev.close();
+		},
+	);
+});
+
+test("handleInit failure when target directory cannot be created", () => {
+	assertThrows(() => handleInit("/sys/forbidden-dir"), /cannot create/);
+});
+
+test("handleBuild warns when bundleVendor throws", async () => {
+	await withTempDir(
+		{ "main.go": "package main\nfunc main() {}\n" },
+		async (dir) => {
+			const res = await handleBuild(dir, {
+				outDir: join(dir, "dist"),
+				vendorConfig: {
+					packages: ["nonexistent-package-name-xyz"],
+				},
+			});
+			assert(res, "build completed");
+		},
+	);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

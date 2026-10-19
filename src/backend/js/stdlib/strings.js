@@ -27,27 +27,81 @@ const STRINGS_DISPATCH = {
 			: `((str, o, nw, cnt) => { if (cnt < 0) return str.replaceAll(o, nw); let r = ""; let i = 0; for (; cnt > 0; cnt--) { const j = str.indexOf(o, i); if (j < 0) break; r += str.slice(i, j) + nw; i = j + o.length; if (o.length === 0) { if (i >= str.length) break; r += str[i]; i++; } } return r + str.slice(i); })(${s}, ${s2}, ${s3}, ${n})`,
 	ReplaceAll: ([s, s2, s3]) => `${s}.replaceAll(${s2}, ${s3})`,
 	Trim: ([s, s2]) =>
-		`${s}.replace(new RegExp(\`^[\${${s2}}]+|[\${${s2}}]+$\`, "g"), "")`,
+		`((str, cut) => { const cs = new Set(cut); let i = 0, j = str.length; while (i < j && cs.has(str[i])) i++; while (j > i && cs.has(str[j - 1])) j--; return str.slice(i, j); })(${s}, ${s2})`,
 	TrimPrefix: ([s, s2]) =>
 		`((s, pre) => s.startsWith(pre) ? s.slice(pre.length) : s)(${s}, ${s2})`,
 	TrimSuffix: ([s, s2]) =>
 		`((s, suf) => !suf.length || !s.endsWith(suf) ? s : s.slice(0, -suf.length))(${s}, ${s2})`,
-	TrimLeft: ([s, s2]) => `${s}.replace(new RegExp(\`^[\${${s2}}]+\`), "")`,
-	TrimRight: ([s, s2]) => `${s}.replace(new RegExp(\`[\${${s2}}]+$\`), "")`,
+	TrimLeft: ([s, s2]) =>
+		`((str, cut) => { const cs = new Set(cut); let i = 0; while (i < str.length && cs.has(str[i])) i++; return str.slice(i); })(${s}, ${s2})`,
+	TrimRight: ([s, s2]) =>
+		`((str, cut) => { const cs = new Set(cut); let j = str.length; while (j > 0 && cs.has(str[j - 1])) j--; return str.slice(0, j); })(${s}, ${s2})`,
 	EqualFold: ([s, s2]) => `${s}.toLowerCase() === ${s2}.toLowerCase()`,
 	Fields: ([s]) => `(${s}).trim() === '' ? [] : (${s}).trim().split(/\\s+/)`,
+	FieldsFunc: ([s, f]) =>
+		`((s, fn) => { const res = []; const runes = Array.from(s ?? ""); let cur = ""; for (const ch of runes) { const cp = ch.codePointAt(0); if (fn(cp)) { if (cur.length > 0) { res.push(cur); cur = ""; } } else { cur += ch; } } if (cur.length > 0) res.push(cur); return res; })(${s}, ${f})`,
 	Cut: ([s, s2]) =>
 		`((s, sep) => { const i = s.indexOf(sep); return i < 0 ? [s, "", false] : [s.slice(0, i), s.slice(i + sep.length), true]; })(${s}, ${s2})`,
 	CutPrefix: ([s, s2]) =>
-		`(${s}).startsWith(${s2}) ? [(${s}).slice((${s2}).length), true] : [${s}, false]`,
+		`((str, pre) => str.startsWith(pre) ? [str.slice(pre.length), true] : [str, false])(${s}, ${s2})`,
 	CutSuffix: ([s, s2]) =>
-		`(${s}).endsWith(${s2}) ? [(${s}).slice(0, -(${s2}).length), true] : [${s}, false]`,
+		`((str, suf) => { if (suf === "") return [str, true]; return str.endsWith(suf) ? [str.slice(0, -suf.length), true] : [str, false]; })(${s}, ${s2})`,
 	SplitN: ([s, s2, s3]) =>
-		`((s, sep, n) => { if (n === 0) return []; if (n < 0) return s.split(sep); const r = []; let cur = s; for (let i = 1; i < n && cur.length; i++) { const j = cur.indexOf(sep); if (j < 0) break; r.push(cur.slice(0, j)); cur = cur.slice(j + sep.length); } r.push(cur); return r; })(${s}, ${s2}, ${s3})`,
+		`((s, sep, n) => {
+			if (n === 0) return null;
+			if (n < 0) return sep === "" ? [...s] : s.split(sep);
+			if (sep === "") {
+				const chars = [...s];
+				if (chars.length <= n) return chars;
+				const r = chars.slice(0, n - 1);
+				r.push(chars.slice(n - 1).join(""));
+				return r;
+			}
+			const r = [];
+			let cur = s;
+			for (let i = 1; i < n && cur.length; i++) {
+				const j = cur.indexOf(sep);
+				if (j < 0) break;
+				r.push(cur.slice(0, j));
+				cur = cur.slice(j + sep.length);
+			}
+			r.push(cur);
+			return r;
+		})(${s}, ${s2}, ${s3})`,
 	SplitAfter: ([s, s2]) =>
-		`((s, sep) => { if (sep === "") return [...s]; const r = []; let cur = s; while (cur.length) { const j = cur.indexOf(sep); if (j < 0) { r.push(cur); break; } r.push(cur.slice(0, j + sep.length)); cur = cur.slice(j + sep.length); } return r; })(${s}, ${s2})`,
+		`((s, sep) => {
+			if (sep === "") return [...s];
+			const r = [];
+			let cur = s;
+			while (true) {
+				const j = cur.indexOf(sep);
+				if (j < 0) { r.push(cur); break; }
+				r.push(cur.slice(0, j + sep.length));
+				cur = cur.slice(j + sep.length);
+			}
+			return r;
+		})(${s}, ${s2})`,
 	SplitAfterN: ([s, s2, s3]) =>
-		`((s, sep, n) => { if (n === 0) return []; if (n < 0 || sep === "") return ((s, sep) => { if (sep === "") return [...s]; const r = []; let cur = s; while (cur.length) { const j = cur.indexOf(sep); if (j < 0) { r.push(cur); break; } r.push(cur.slice(0, j + sep.length)); cur = cur.slice(j + sep.length); } return r; })(s, sep); const r = []; let cur = s; for (let i = 1; i < n && cur.length; i++) { const j = cur.indexOf(sep); if (j < 0) break; r.push(cur.slice(0, j + sep.length)); cur = cur.slice(j + sep.length); } r.push(cur); return r; })(${s}, ${s2}, ${s3})`,
+		`((s, sep, n) => {
+			if (n === 0) return null;
+			if (sep === "") {
+				const chars = [...s];
+				if (n < 0 || chars.length <= n) return chars;
+				const r = chars.slice(0, n - 1);
+				r.push(chars.slice(n - 1).join(""));
+				return r;
+			}
+			const r = [];
+			let cur = s;
+			for (let i = 1; (n < 0 || i < n) && cur.length; i++) {
+				const j = cur.indexOf(sep);
+				if (j < 0) break;
+				r.push(cur.slice(0, j + sep.length));
+				cur = cur.slice(j + sep.length);
+			}
+			r.push(cur);
+			return r;
+		})(${s}, ${s2}, ${s3})`,
 	IndexAny: ([s, s2]) =>
 		`((s, chars) => { let m = -1; for (const c of chars) { const i = s.indexOf(c); if (i >= 0 && (m < 0 || i < m)) m = i; } return m; })(${s}, ${s2})`,
 	LastIndexAny: ([s, s2]) =>
@@ -58,27 +112,106 @@ const STRINGS_DISPATCH = {
 	IndexByte: ([s, s2]) => `(${s}).indexOf(String.fromCharCode(${s2}))`,
 	LastIndexByte: ([s, s2]) => `(${s}).lastIndexOf(String.fromCharCode(${s2}))`,
 	Map: ([s, s2]) =>
-		`[...(${s2})].map(c => String.fromCodePoint((${s})(c.codePointAt(0)))).join("")`,
+		`((f, s) => { let out = ""; for (const c of s) { const r = f(c.codePointAt(0)); if (r >= 0) out += String.fromCodePoint(r); } return out; })(${s}, ${s2})`,
 	Title: ([s]) => `(${s}).replace(/\\b\\w/g, c => c.toUpperCase())`,
 	TrimFunc: ([s, s2]) =>
-		`((s, f) => { let l = 0, r = s.length; while (l < r && f(s.codePointAt(l))) l++; while (r > l && f(s.codePointAt(r - 1))) r--; return s.slice(l, r); })(${s}, ${s2})`,
+		`((s, f) => {
+			let l = 0, r = s.length;
+			while (l < r) {
+				const cp = s.codePointAt(l);
+				if (!f(cp)) break;
+				l += cp > 0xFFFF ? 2 : 1;
+			}
+			while (r > l) {
+				let cp, step;
+				if (r > 1 && s.charCodeAt(r - 1) >= 0xDC00 && s.charCodeAt(r - 1) <= 0xDFFF &&
+					s.charCodeAt(r - 2) >= 0xD800 && s.charCodeAt(r - 2) <= 0xDBFF) {
+					cp = s.codePointAt(r - 2);
+					step = 2;
+				} else {
+					cp = s.codePointAt(r - 1);
+					step = 1;
+				}
+				if (!f(cp)) break;
+				r -= step;
+			}
+			return s.slice(l, r);
+		})(${s}, ${s2})`,
 	TrimLeftFunc: ([s, s2]) =>
-		`((s, f) => { let l = 0; while (l < s.length && f(s.codePointAt(l))) l++; return s.slice(l); })(${s}, ${s2})`,
+		`((s, f) => {
+			let l = 0;
+			while (l < s.length) {
+				const cp = s.codePointAt(l);
+				if (!f(cp)) break;
+				l += cp > 0xFFFF ? 2 : 1;
+			}
+			return s.slice(l);
+		})(${s}, ${s2})`,
 	TrimRightFunc: ([s, s2]) =>
-		`((s, f) => { let r = s.length; while (r > 0 && f(s.codePointAt(r - 1))) r--; return s.slice(0, r); })(${s}, ${s2})`,
+		`((s, f) => {
+			let r = s.length;
+			while (r > 0) {
+				let cp, step;
+				if (r > 1 && s.charCodeAt(r - 1) >= 0xDC00 && s.charCodeAt(r - 1) <= 0xDFFF &&
+					s.charCodeAt(r - 2) >= 0xD800 && s.charCodeAt(r - 2) <= 0xDBFF) {
+					cp = s.codePointAt(r - 2);
+					step = 2;
+				} else {
+					cp = s.codePointAt(r - 1);
+					step = 1;
+				}
+				if (!f(cp)) break;
+				r -= step;
+			}
+			return s.slice(0, r);
+		})(${s}, ${s2})`,
 	IndexFunc: ([s, s2]) =>
 		`((s, f) => { for (let i = 0; i < s.length; i++) { const cp = s.codePointAt(i); if (f(cp)) return i; if (cp > 0xFFFF) i++; } return -1; })(${s}, ${s2})`,
 	LastIndexFunc: ([s, s2]) =>
-		`((s, f) => { for (let i = s.length - 1; i >= 0; i--) { const cp = s.codePointAt(i); if (f(cp)) return i; } return -1; })(${s}, ${s2})`,
+		`((s, f) => { for (let i = s.length - 1; i >= 0; i--) { let cp = s.codePointAt(i); if (i > 0 && s.charCodeAt(i) >= 0xDC00 && s.charCodeAt(i) <= 0xDFFF && s.charCodeAt(i - 1) >= 0xD800 && s.charCodeAt(i - 1) <= 0xDBFF) { cp = s.codePointAt(i - 1); i--; } if (f(cp)) return i; } return -1; })(${s}, ${s2})`,
 	NewReader: ([s]) =>
-		`{_src: ${s}, _pos: 0, Read(p) { const n = Math.min(p.length, this._src.length - this._pos); for (let i = 0; i < n; i++) p[i] = this._src.charCodeAt(this._pos + i); this._pos += n; return [n, n === 0 ? "EOF" : null]; }, Len() { return this._src.length - this._pos; }, Reset(s) { this._src = s; this._pos = 0; }}`,
+		`((s) => ({ _bytes: new TextEncoder().encode(s), _pos: 0, Read(p) { if (this._pos >= this._bytes.length) return [0, __io_eof]; const n = Math.min(p.length, this._bytes.length - this._pos); for (let i = 0; i < n; i++) p[i] = this._bytes[this._pos + i]; this._pos += n; return [n, null]; }, Len() { return Math.max(0, this._bytes.length - this._pos); }, Reset(s2) { this._bytes = new TextEncoder().encode(s2); this._pos = 0; } }))(${s})`,
 	NewReplacer: (args) =>
-		`((...pairs) => { const p = []; for (let i = 0; i < pairs.length; i += 2) p.push([pairs[i], pairs[i+1]]); return { _p: p, Replace(s) { let r = s; for (const [o, n] of this._p) r = r.split(o).join(n); return r; } }; })(${args.join(", ")})`,
+		`((...pairs) => {
+			const p = [];
+			for (let i = 0; i < pairs.length; i += 2) {
+				if (pairs[i] !== undefined && pairs[i+1] !== undefined) {
+					p.push([pairs[i], pairs[i+1]]);
+				}
+			}
+			return {
+				_p: p,
+				Replace(s) {
+					s = s ?? "";
+					if (!this._p || this._p.length === 0 || s === "") return s;
+					let out = "";
+					let i = 0;
+					while (i < s.length) {
+						let matched = false;
+						for (let k = 0; k < this._p.length; k++) {
+							const [oldStr, newStr] = this._p[k];
+							if (oldStr.length > 0 && s.startsWith(oldStr, i)) {
+								out += newStr;
+								i += oldStr.length;
+								matched = true;
+								break;
+							}
+						}
+						if (!matched) {
+							out += s[i];
+							i++;
+						}
+					}
+					return out;
+				}
+			};
+		})(${args.join(", ")})`,
 };
 
 /** @type {ThisType<CodeGen>} */
 export const stringsMethods = {
 	_genStrings(fn, a) {
+		if (fn === "NewReader") this.useHelper("ioEOF");
 		const args = a();
 		const [s, s2] = args;
 		if (STRINGS_M1[fn]) return `${s}.${STRINGS_M1[fn]}()`;

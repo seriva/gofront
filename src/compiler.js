@@ -38,7 +38,7 @@ import {
 } from "./resolver.js";
 import { TemplLexer } from "./templ-lexer.js";
 import { TemplParser } from "./templ-parser.js";
-import { TypeChecker } from "./typechecker/index.js";
+import { TypeCheckError, TypeChecker } from "./typechecker/index.js";
 import { WASM_SUPPORTED_STDLIB } from "./typechecker/types.js";
 
 // ── Parse cache ──────────────────────────────────────────────
@@ -203,6 +203,7 @@ function finishWasm(options, merged, pkgTarget, outputDir) {
 			inputSourceMap: wasmSourceMap,
 			sourceMapUrl: WASM_MAP_URL,
 			emitWat: Boolean(options.emitWat),
+			converge: Boolean(options.release),
 		});
 		wasm = opt.wasm;
 		if (opt.wat) wat = opt.wat;
@@ -269,7 +270,20 @@ function linkWasmUnits(
 		for (const b of u.bundledPackages) bundledPackages.add(b);
 		programs.push(...u.programs);
 	}
-	const checker = { types };
+	const checker = {
+		types,
+		errors: [],
+		err(msg, node) {
+			const e = new TypeCheckError(
+				msg,
+				node,
+				this._currentFile,
+				this._currentSource,
+			);
+			this.errors.push(e);
+			return e;
+		},
+	};
 	const lowerRes = lower(programs, checker);
 	return compileWasmModule(programs, checker, lowerRes, {
 		boundary: true,
@@ -809,8 +823,8 @@ export function compileFiles(files, options = {}) {
 
 	const mainChunk = {
 		js: mainJs,
-		sourceFiles: files.map((f) => resolve(f)),
-		sourcesContent: files.map((f) => readFileSync(f, "utf8")),
+		sourceFiles: programs.map((p) => p._path),
+		sourcesContent: programs.map((p) => p._source),
 		mappings: emitTarget === "wasm" ? [] : codegen.getMappings(),
 	};
 

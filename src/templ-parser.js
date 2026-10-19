@@ -48,55 +48,31 @@ export class TemplParser extends Parser {
 
 	// ── CssDecl ───────────────────────────────────────────────────
 
-	parseCssDecl() {
+	_parseDecl(kind, bodyFn) {
 		const _line = this.peek().line;
-		this.advance(); // consume CSS_KW
-
+		this.advance();
 		const name = this.expect(T.IDENT).value;
-
-		// Parse parameter list (standard Go params: LPAREN...RPAREN)
 		const params = this.parseParamList();
-
-		// Optional semicolon between ) and {
 		this.semi();
-
-		// Consume opening {
 		this.expect(T.LBRACE);
-
-		// Consume CSS_BODY
-		const bodyToken = this.expect(TT.CSS_BODY);
-		const cssText = bodyToken.value;
-
-		// Consume closing }
-		this.expect(T.RBRACE);
+		const extra = bodyFn();
 		this.semi();
-
-		return { kind: "CssDecl", name, params, cssText, _line };
+		return { kind, name, params, ...extra, _line };
 	}
 
-	// ── TemplDecl ─────────────────────────────────────────────────
+	parseCssDecl() {
+		return this._parseDecl("CssDecl", () => {
+			const bodyToken = this.expect(TT.CSS_BODY);
+			const cssText = bodyToken.value;
+			this.expect(T.RBRACE);
+			return { cssText };
+		});
+	}
 
 	parseTemplDecl() {
-		const _line = this.peek().line;
-		this.advance(); // consume TEMPL_KW
-
-		const name = this.expect(T.IDENT).value;
-
-		// Parse parameter list (standard Go params: LPAREN...RPAREN)
-		const params = this.parseParamList();
-
-		// Optional semicolon between ) and {
-		this.semi();
-
-		// Consume the opening { of the HTML body
-		this.expect(T.LBRACE);
-
-		// Parse the HTML body; parseHtmlChildren consumes the closing RBRACE
-		const body = this.parseHtmlChildren();
-
-		this.semi();
-
-		return { kind: "TemplDecl", name, params, body, _line };
+		return this._parseDecl("TemplDecl", () => ({
+			body: this.parseHtmlChildren(),
+		}));
 	}
 
 	// ── HTML node parsing ─────────────────────────────────────────
@@ -229,14 +205,15 @@ export class TemplParser extends Parser {
 			!this.check(T.RBRACE) &&
 			!this.check(T.EOF)
 		) {
-			if (this.check(TT.TEMPL_CASE)) {
+			if (this.check(TT.TEMPL_CASE) || this.check(TT.TEMPL_DEFAULT)) {
+				const isDefault = this.check(TT.TEMPL_DEFAULT);
 				const caseTok = this.advance();
 				const body = this.parseTemplCaseBody();
-				cases.push({ kind: "TemplCase", caseTokens: caseTok.value, body });
-			} else if (this.check(TT.TEMPL_DEFAULT)) {
-				this.advance();
-				const body = this.parseTemplCaseBody();
-				cases.push({ kind: "TemplCase", caseTokens: null, body });
+				cases.push({
+					kind: "TemplCase",
+					caseTokens: isDefault ? null : caseTok.value,
+					body,
+				});
 			} else {
 				this.advance(); // skip unexpected
 			}

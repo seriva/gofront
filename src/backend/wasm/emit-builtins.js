@@ -65,18 +65,6 @@ export class BuiltinsEmitter {
 		return null;
 	}
 
-	_getArrayElemType(t) {
-		if (!t) return null;
-		if (t.elem) return t.elem;
-		if (t.underlying?.elem) return t.underlying.elem;
-		if (t.kind === "ArrayType") return t.elem;
-		if (t.name && this.mod.checker?.types?.has(t.name)) {
-			const resolved = this.mod.checker.types.get(t.name);
-			return this._getArrayElemType(resolved);
-		}
-		return null;
-	}
-
 	_emitBuiltinLen(call, targetWasmType) {
 		const arg = call.args[0];
 		const argType = arg._type ?? this._resolveExprGoType(arg);
@@ -92,12 +80,7 @@ export class BuiltinsEmitter {
 				op: "call",
 				funcIndex: this.mod.resolveFuncIndex(mapInfo.lenFuncName),
 			});
-			if ((targetWasmType ?? "i64") === "i64") {
-				this.pushInstruction("i64.extend_i32_u");
-			}
-			return;
-		}
-		if (isSliceType(argType, this.mod.checker)) {
+		} else if (isSliceType(argType, this.mod.checker)) {
 			const elemType = this._getSliceElemType(argType);
 			const sliceInfo = this.mod.getSliceType(elemType);
 			const sliceWType = {
@@ -111,12 +94,7 @@ export class BuiltinsEmitter {
 				typeIndex: sliceInfo.typeIndex,
 				fieldIndex: 2,
 			});
-			if ((targetWasmType ?? "i64") === "i64") {
-				this.pushInstruction("i64.extend_i32_u");
-			}
-			return;
-		}
-		if (
+		} else if (
 			isArrayType(argType, this.mod.checker) ||
 			(argType?.kind === "pointer" &&
 				isArrayType(argType.base, this.mod.checker))
@@ -130,19 +108,13 @@ export class BuiltinsEmitter {
 			};
 			this.emitExpr(arg, arrWType);
 			this.pushInstruction("array.len");
-			if ((targetWasmType ?? "i64") === "i64") {
-				this.pushInstruction("i64.extend_i32_u");
-			}
-			return;
-		}
-		if (isStringType(argType, this.mod.checker)) {
+		} else if (isStringType(argType, this.mod.checker)) {
 			this.emitExpr(arg, "externref");
 			const lenIdx = this.mod.getStringLenImportIndex();
 			this.pushInstruction({ op: "call", funcIndex: lenIdx });
-			if ((targetWasmType ?? "i64") === "i64") {
-				this.pushInstruction("i64.extend_i32_u");
-			}
-			return;
+		}
+		if ((targetWasmType ?? "i64") === "i64") {
+			this.pushInstruction("i64.extend_i32_u");
 		}
 	}
 
@@ -177,12 +149,7 @@ export class BuiltinsEmitter {
 				typeIndex: sliceInfo.typeIndex,
 				fieldIndex: 3,
 			});
-			if ((targetWasmType ?? "i64") === "i64") {
-				this.pushInstruction("i64.extend_i32_u");
-			}
-			return;
-		}
-		if (
+		} else if (
 			isArrayType(argType, this.mod.checker) ||
 			(argType?.kind === "pointer" &&
 				isArrayType(argType.base, this.mod.checker))
@@ -196,10 +163,9 @@ export class BuiltinsEmitter {
 			};
 			this.emitExpr(arg, arrWType);
 			this.pushInstruction("array.len");
-			if ((targetWasmType ?? "i64") === "i64") {
-				this.pushInstruction("i64.extend_i32_u");
-			}
-			return;
+		}
+		if ((targetWasmType ?? "i64") === "i64") {
+			this.pushInstruction("i64.extend_i32_u");
 		}
 	}
 
@@ -894,12 +860,24 @@ export class BuiltinsEmitter {
 				this.emitSlicesCall(func.field, args, targetWasmType);
 				return true;
 			case "strings":
+				if (func.field === "NewReader") {
+					this.emitStringsNewReader(call, targetWasmType);
+					return true;
+				}
 				this.emitStringsCall(func.field, args, targetWasmType);
 				return true;
 			case "strconv":
 				this.emitStrconvCall(func.field, args);
 				return true;
 			case "fmt":
+				if (func.field.startsWith("Fprint")) {
+					this.emitFprintCall(func.field, call, targetWasmType);
+					return true;
+				}
+				if (func.field.startsWith("Sscan")) {
+					this.emitSscanCall(func.field, call, targetWasmType);
+					return true;
+				}
 				this.emitFmtCall(func.field, args);
 				return true;
 			case "errors":
@@ -914,12 +892,50 @@ export class BuiltinsEmitter {
 			case "shared":
 				this.emitSharedNew(func.field, args);
 				return true;
+			case "unicode":
+				this.emitUnicodeCall(func.field, args, targetWasmType);
+				return true;
+			case "rand":
+				this.emitRandCall(func.field, args, targetWasmType);
+				return true;
+			case "bytes":
+				if (func.field === "NewReader") {
+					this.emitBytesNewReader(call, targetWasmType);
+					return true;
+				}
+				this.emitBytesCall(func.field, args, targetWasmType);
+				return true;
+			case "path":
+			case "filepath":
+				this.emitPathCall(func.field, args);
+				return true;
+			case "html":
+				this.emitHtmlCall(func.field, args);
+				return true;
+			case "io":
+				this.emitIoCall(func.field, call, targetWasmType);
+				return true;
+			case "time":
+				this.emitTimeCall(func.field, call, targetWasmType);
+				return true;
+			case "binary":
+				this.emitBinaryCall(func.field, call, targetWasmType);
+				return true;
+			case "sha256":
+				this.emitSha256Call(func.field, call, targetWasmType);
+				return true;
+			case "hex":
+				this.emitHexCall(func.field, call, targetWasmType);
+				return true;
+			case "base64":
+				this.emitBase64Call(func.field, call, targetWasmType);
+				return true;
 			default:
 				return false;
 		}
 	}
 
-	_emitMethodCall(call) {
+	_emitMethodCall(call, targetWasmType = null) {
 		const { func, args } = call;
 		if (func.kind !== "SelectorExpr") return false;
 
@@ -930,6 +946,25 @@ export class BuiltinsEmitter {
 			return true;
 		}
 		const recvTypeName = this._getReceiverTypeName(recvType, func.expr);
+		if (
+			this._emitStdlibReceiverMethod(
+				recvTypeName,
+				func.field,
+				func.expr,
+				args,
+				targetWasmType,
+			)
+		) {
+			return true;
+		}
+		if (recvTypeName === "strings.Builder") {
+			this.emitBuilderMethodCall(func.field, func.expr, args);
+			return true;
+		}
+		if (recvTypeName === "strings.Replacer") {
+			this.emitReplacerMethodCall(func.field, func.expr, args);
+			return true;
+		}
 		if (isNonEmptyInterface(recvType, this.mod.checker)) {
 			const ifaceName = recvTypeName ?? "anon";
 			const dispatchName = `__dispatch_${ifaceName}_${func.field}`;
@@ -950,38 +985,15 @@ export class BuiltinsEmitter {
 		}
 		if (recvTypeName) {
 			const methodName = `${recvTypeName}.${func.field}`;
-			let targetFuncIdx = this.mod.resolveFuncIndex(methodName);
-			let targetParamTypes = this.mod.getFuncParamTypes(methodName);
+			const targetFuncIdx = this.mod.resolveFuncIndex(methodName);
+			const targetParamTypes = this.mod.getFuncParamTypes(methodName);
 
 			// If not found directly, check embedded structs
-			if (targetFuncIdx === null) {
-				const structInfo = this.mod.getStructType(recvTypeName);
-				if (structInfo) {
-					for (const embed of structInfo.embeds) {
-						const embedMethodName = `${embed.name}.${func.field}`;
-						const subIdx = this.mod.resolveFuncIndex(embedMethodName);
-						if (subIdx !== null) {
-							targetFuncIdx = subIdx;
-							targetParamTypes = this.mod.getFuncParamTypes(embedMethodName);
-							const baseWType = this.toWasmType(recvType);
-							this.emitExpr(func.expr, baseWType);
-							this.pushInstruction({
-								op: "struct.get",
-								typeIndex: structInfo.typeIndex,
-								fieldIndex: embed.fieldIndex,
-							});
-							for (let i = 0; i < args.length; i++) {
-								const pType = targetParamTypes[i + 1] ?? null;
-								this.emitExpr(args[i], pType);
-							}
-							this.pushInstruction({
-								op: "call",
-								funcIndex: targetFuncIdx,
-							});
-							return true;
-						}
-					}
-				}
+			if (
+				targetFuncIdx === null &&
+				this._emitEmbeddedMethodCall(recvTypeName, func, args, recvType)
+			) {
+				return true;
 			}
 
 			if (targetFuncIdx !== null) {
@@ -997,6 +1009,113 @@ export class BuiltinsEmitter {
 					this._emitCopyIfValueStruct(args[i], pGoType, pType);
 				}
 				this.pushInstruction({ op: "call", funcIndex: targetFuncIdx });
+				return true;
+			}
+		}
+		return false;
+	}
+
+	_emitStdlibReceiverMethod(
+		recvTypeName,
+		field,
+		expr,
+		args,
+		targetWasmType = null,
+	) {
+		if (recvTypeName === "strings.Builder") {
+			this.emitBuilderMethodCall(field, expr, args, targetWasmType);
+			return true;
+		}
+		if (recvTypeName === "strings.Replacer") {
+			this.emitReplacerMethodCall(field, expr, args);
+			return true;
+		}
+		if (recvTypeName === "bytes.Buffer") {
+			this.emitBytesBufferMethodCall(field, expr, args, targetWasmType);
+			return true;
+		}
+		if (recvTypeName === "strings.Reader") {
+			this.emitStringsReaderMethodCall(field, expr, args, targetWasmType);
+			return true;
+		}
+		if (recvTypeName === "bytes.Reader") {
+			this.emitBytesReaderMethodCall(field, expr, args, targetWasmType);
+			return true;
+		}
+		if (recvTypeName === "time.Time") {
+			this.emitTimeMethodCall(field, expr, args, targetWasmType);
+			return true;
+		}
+		if (recvTypeName === "time.Duration") {
+			this.emitDurationMethodCall(field, expr, args, targetWasmType);
+			return true;
+		}
+		if (recvTypeName === "io.LimitedReader") {
+			this.emitIoLimitedReaderMethodCall(field, expr, args, targetWasmType);
+			return true;
+		}
+		if (recvTypeName === "sync.Mutex" || recvTypeName === "sync.RWMutex") {
+			this.emitSyncMutexMethodCall(field, expr, args, targetWasmType);
+			return true;
+		}
+		if (recvTypeName === "sync.Once") {
+			this.emitSyncOnceMethodCall(field, expr, args, targetWasmType);
+			return true;
+		}
+		if (recvTypeName === "sync.WaitGroup") {
+			this.emitSyncWaitGroupMethodCall(field, expr, args, targetWasmType);
+			return true;
+		}
+		if (
+			recvTypeName === "binary.LittleEndian" ||
+			recvTypeName === "binary.BigEndian" ||
+			recvTypeName === "encoding/binary.LittleEndian" ||
+			recvTypeName === "encoding/binary.BigEndian" ||
+			recvTypeName === "binary.ByteOrder" ||
+			recvTypeName === "encoding/binary.ByteOrder"
+		) {
+			this.emitBinaryOrderMethodCall(
+				recvTypeName,
+				field,
+				expr,
+				args,
+				targetWasmType,
+			);
+			return true;
+		}
+		if (
+			recvTypeName === "base64.Encoding" ||
+			recvTypeName === "encoding/base64.Encoding"
+		) {
+			this.emitBase64EncodingMethodCall(field, expr, args, targetWasmType);
+			return true;
+		}
+		return false;
+	}
+
+	_emitEmbeddedMethodCall(recvTypeName, func, args, recvType) {
+		const structInfo = this.mod.getStructType(recvTypeName);
+		if (!structInfo) return false;
+		for (const embed of structInfo.embeds) {
+			const embedMethodName = `${embed.name}.${func.field}`;
+			const subIdx = this.mod.resolveFuncIndex(embedMethodName);
+			if (subIdx !== null) {
+				const targetParamTypes = this.mod.getFuncParamTypes(embedMethodName);
+				const baseWType = this.toWasmType(recvType);
+				this.emitExpr(func.expr, baseWType);
+				this.pushInstruction({
+					op: "struct.get",
+					typeIndex: structInfo.typeIndex,
+					fieldIndex: embed.fieldIndex,
+				});
+				for (let i = 0; i < args.length; i++) {
+					const pType = targetParamTypes[i + 1] ?? null;
+					this.emitExpr(args[i], pType);
+				}
+				this.pushInstruction({
+					op: "call",
+					funcIndex: subIdx,
+				});
 				return true;
 			}
 		}
@@ -1076,6 +1195,14 @@ export class BuiltinsEmitter {
 	}
 
 	emitCallExpr(call, targetWasmType = null) {
+		if (call._isTypeConversion) {
+			this.emitTypeConversion({
+				targetType: call._conversionTargetType,
+				expr: call.args[0],
+			});
+			return;
+		}
+
 		const deqFunc = this._dequalify(call.func);
 		if (deqFunc) {
 			this.emitCallExpr({ ...call, func: deqFunc }, targetWasmType);
@@ -1090,7 +1217,7 @@ export class BuiltinsEmitter {
 			return;
 		}
 
-		if (this._emitMethodCall(call)) {
+		if (this._emitMethodCall(call, targetWasmType)) {
 			return;
 		}
 

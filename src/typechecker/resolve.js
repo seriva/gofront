@@ -97,20 +97,29 @@ export const resolveMethods = {
 				}
 				return this.err(`Unknown type '${node.name}'`, node);
 			}
-			case "GenericTypeName": {
-				const base = this.types.get(node.name);
-				if (!base) return this.err(`Unknown type '${node.name}'`, node);
+			case "GenericTypeName":
+			case "InstantiationExpr":
+			case "IndexExpr": {
+				const name =
+					node.name ?? (node.expr?.kind === "Ident" ? node.expr.name : null);
+				const typeArgs = node.typeArgs ?? (node.index ? [node.index] : []);
+				const base = name
+					? this.types.get(name)
+					: node.expr
+						? this.resolveTypeNode(node.expr, scope)
+						: null;
+				if (!base) return this.err(`Unknown type '${name ?? "?"}'`, node);
 				if (base.kind === "named" && base._generic) {
 					const res = this.instantiateGenericType(
 						base._generic,
-						node.typeArgs,
+						typeArgs,
 						scope,
 					);
 					node._typeArgs = res.typeArgs;
 					node._genericType = base;
 					return res;
 				}
-				return this.err(`Type '${node.name}' is not generic`, node);
+				return this.err(`Type '${name ?? "?"}' is not generic`, node);
 			}
 			case "TypeParam": {
 				const constraint = node.constraint
@@ -291,6 +300,7 @@ export const resolveMethods = {
 			name: generic.declNode.name,
 			typeArgs,
 			underlying: instantiated,
+			methods: instantiated.methods,
 		};
 	},
 
@@ -381,6 +391,14 @@ export const resolveMethods = {
 			const found = this.types.get(t.alias);
 			if (found) return found;
 		}
+		if (
+			t.kind === "named" &&
+			(!t.typeArgs || t.typeArgs.length === 0) &&
+			(!t.underlying || !t.methods)
+		) {
+			const found = this.types.get(t.name);
+			if (found) return found;
+		}
 		return t;
 	},
 
@@ -432,7 +450,19 @@ export const resolveMethods = {
 	},
 
 	_fieldTypeStruct(base, baseType, field, node) {
-		if (base.fields?.has(field)) return base.fields.get(field);
+		if (base.fields?.has(field)) {
+			if (
+				field.startsWith("_") &&
+				(baseType?.name?.startsWith("strings.") ||
+					baseType?.name?.startsWith("bytes."))
+			) {
+				return this.err(
+					`Cannot refer to unexported field '${field}' on ${typeStr(baseType)}`,
+					node,
+				);
+			}
+			return base.fields.get(field);
+		}
 		if (base.methods?.has(field)) return base.methods.get(field);
 		return this.err(`No field '${field}' on ${typeStr(baseType)}`, node);
 	},

@@ -13,11 +13,6 @@
 //   gofront <file.go> --tokens     — dump tokens of first file (debug)
 //   gofront init [dir]             — scaffold a new GoFront project
 
-import { createRequire } from "node:module";
-
-const _require = createRequire(import.meta.url);
-const { version } = _require("../package.json");
-
 import { statSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { copyAssets } from "./asset-manager.js";
@@ -25,6 +20,7 @@ import {
 	formatBuildSummary,
 	formatPrepSummary,
 	formatWrittenDesc,
+	GOFRONT_VERSION,
 	handleBuild,
 	handleCheck,
 	handleDev,
@@ -47,7 +43,7 @@ import { colors, formatDiagnostic, log, ms, stamp } from "./colors.js";
 
 const args = process.argv.slice(2);
 if (args[0] === "--version" || args[0] === "-v") {
-	console.log(`gofront ${version}`);
+	console.log(`gofront ${GOFRONT_VERSION}`);
 	process.exit(0);
 }
 
