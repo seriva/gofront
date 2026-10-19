@@ -123,9 +123,9 @@ jobs:
       - name: Prepare pages artifact
         run: |
           mkdir _site
-          cp example/reactive/index.html _site/
-          cp example/reactive/app.js _site/
-          cp example/reactive/reactive.js _site/
+          cp example/preact/index.html _site/
+          cp example/preact/app.js _site/
+          cp example/preact/vendor.js _site/
 
       - name: Upload pages artifact
         uses: actions/upload-pages-artifact@v5

@@ -733,6 +733,169 @@ func main() {
 	assertEqual(runJs(js), "5 true\ndivision by zero");
 });
 
+section("Multi-value returns and assignment mismatch");
+
+test("assigning multi-value return to single variable with := fails typecheck", () => {
+	const { errors } = compile(`package main
+func getPair() (int, string) { return 1, "ok" }
+func main() {
+  x := getPair()
+}`);
+	assertErrorContains(
+		errors,
+		"assignment mismatch: 1 variable but returns 2 values",
+	);
+});
+
+test("assigning multi-value return to too many variables with := fails typecheck", () => {
+	const { errors } = compile(`package main
+func getPair() (int, string) { return 1, "ok" }
+func main() {
+  a, b, c := getPair()
+}`);
+	assertErrorContains(
+		errors,
+		"assignment mismatch: 3 variables but returns 2 values",
+	);
+});
+
+test("assigning multi-value return to single variable with var fails typecheck", () => {
+	const { errors } = compile(`package main
+func getPair() (int, string) { return 1, "ok" }
+func main() {
+  var x = getPair()
+}`);
+	assertErrorContains(
+		errors,
+		"assignment mismatch: 1 variable but returns 2 values",
+	);
+});
+
+test("assigning multi-value return to single variable with = fails typecheck", () => {
+	const { errors } = compile(`package main
+func getPair() (int, string) { return 1, "ok" }
+func main() {
+  var x int
+  x = getPair()
+}`);
+	assertErrorContains(
+		errors,
+		"assignment mismatch: 1 variable but returns 2 values",
+	);
+});
+
+test(".d.ts tuple return maps to multi-value return and enforces assignment count", () => {
+	// Valid tuple destructuring
+	const { js, errors } = compile(`package main
+import "js:tuple_test.d.ts"
+func main() {
+  count, setCount := useState(0)
+  setCount(1)
+  console.log(count)
+}`);
+	assertEqual(errors.length, 0);
+	assertContains(js, "let [count, setCount] = useState(0);");
+
+	// Invalid single-variable assignment
+	const { errors: errs } = compile(`package main
+import "js:tuple_test.d.ts"
+func main() {
+  x := useState(0)
+}`);
+	assertErrorContains(
+		errs,
+		"assignment mismatch: 1 variable but returns 2 values",
+	);
+
+	// Variadic call to h with 0, 1, and 2 children
+	const { errors: hErrors } = compile(`package main
+import "js:tuple_test.d.ts"
+func main() {
+  h("div", nil)
+  h("div", nil, "child1")
+  h("div", nil, "child1", "child2")
+}`);
+	assertEqual(hErrors.length, 0);
+});
+
+test("assignment mismatch arity checks on scalars (:=, =, var, excess values)", () => {
+	const c1 = compile(`package main
+func main() {
+  a, b := 1
+  _, _ = a, b
+}`);
+	assertErrorContains(
+		c1.errors,
+		"assignment mismatch: 2 variables but 1 value",
+	);
+
+	const c2 = compile(`package main
+func main() {
+  var a, b int
+  a, b = 1
+  _, _ = a, b
+}`);
+	assertErrorContains(
+		c2.errors,
+		"assignment mismatch: 2 variables but 1 value",
+	);
+
+	const c3 = compile(`package main
+func main() {
+  var a, b = 1
+  _, _ = a, b
+}`);
+	assertErrorContains(
+		c3.errors,
+		"assignment mismatch: 2 variables but 1 value",
+	);
+
+	const c4 = compile(`package main
+func main() {
+  a := 1, 2
+  _ = a
+}`);
+	assertErrorContains(
+		c4.errors,
+		"assignment mismatch: 1 variable but 2 values",
+	);
+});
+
+test("comma-ok map assignment typechecking and const assertions", () => {
+	const c1 = compile(`package main
+func main() {
+	m := map[string]int{"k": 1}
+	var v string
+	var ok int
+	v, ok = m["k"]
+	_ = v
+	_ = ok
+}`);
+	assertErrorContains(c1.errors, "Cannot assign int to string");
+	assertErrorContains(c1.errors, "Cannot assign bool to int");
+
+	const c2 = compile(`package main
+func main() {
+	m := map[string]int{"k": 1}
+	const ok = true
+	var v int
+	v, ok = m["k"]
+	_ = v
+}`);
+	assertErrorContains(c2.errors, "cannot assign to const 'ok'");
+
+	const c3 = compile(`package main
+func main() {
+	m := map[string]int{"k": 1}
+	var v int
+	var ok bool
+	v, ok = m["k"]
+	console.log(v, ok)
+}`);
+	assertEqual(c3.errors.length, 0);
+	assertEqual(runJs(c3.js), "1 true");
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

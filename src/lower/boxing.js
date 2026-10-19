@@ -6,12 +6,7 @@ import { forEachChild } from "./walk.js";
 export function isReferenceType(t) {
 	if (!t) return false;
 	const base = t.kind === "named" ? t.underlying : t;
-	return (
-		base?.kind === "struct" ||
-		base?.kind === "slice" ||
-		base?.kind === "map" ||
-		base?.kind === "func"
-	);
+	return base?.kind === "struct" || base?.kind === "func";
 }
 
 // Scan AST node for _addressTaken idents on scalars and populate a Set of boxed variable names.

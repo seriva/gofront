@@ -513,6 +513,8 @@ export const expressionCheckMethods = {
 		}
 		if (typeStr(srcResolved) === typeStr(tgtResolved)) return;
 		if (isNumeric(srcResolved) && isNumeric(tgtResolved)) return;
+		if (isString(srcResolved) && isString(tgtResolved)) return;
+		if (isBool(srcResolved) && isBool(tgtResolved)) return;
 		if (
 			isString(srcResolved) &&
 			tgtResolved?.kind === "slice" &&
@@ -987,21 +989,19 @@ export const expressionCheckMethods = {
 		for (const elem of expr.elems) {
 			if (elem.kind === "KeyValueExpr") {
 				const keyName = elem.key.name;
-				const fieldType = base.fields?.get(keyName);
+				const embed = base._embeds?.find((e) => {
+					const inner = e.kind === "pointer" ? e.base : e;
+					const name =
+						inner.kind === "named" ? inner.name.split(".").pop() : null;
+					return name === keyName;
+				});
+				if (embed) elem._isEmbedInit = true;
+				const fieldType = base.fields?.get(keyName) ?? embed;
 				if (fieldType) {
 					const vt = this.checkExpr(elem.value, scope);
 					this.assertAssignable(fieldType, vt, elem.value);
 				} else {
-					const embed = base._embeds?.find(
-						(e) => (e.kind === "named" ? e.name : null) === keyName,
-					);
-					if (embed) {
-						const vt = this.checkExpr(elem.value, scope);
-						this.assertAssignable(embed, vt, elem.value);
-						elem._isEmbedInit = true;
-					} else {
-						this.err(`Unknown field '${keyName}'`, elem.key);
-					}
+					this.err(`Unknown field '${keyName}'`, elem.key);
 				}
 			} else {
 				this.checkExpr(elem, scope);

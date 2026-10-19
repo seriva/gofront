@@ -85,12 +85,12 @@ Three features, each held to the **no runtime** rule ([roadmap](../roadmap.md#ou
 
 ### Tasks
 
-- [ ] **Task 1.1** — Preserve struct tags in parser AST (`field.tag`); support tags on embedded and pointer-embedded fields (`src/parser/types.js`); add `parseStructTag` utility with unit tests.
-- [ ] **Task 1.2** — JSON field resolution in typechecker (tag parsing, rename, omitempty, `-`, `-,`, embedded field promotion and collision resolution).
-- [ ] **Task 1.3** — `encoding/json` stdlib typechecker symbols (`Marshal`, `MarshalIndent`, `Unmarshal`, `Valid`, `RawMessage`).
-- [ ] **Task 1.4** — JS codegen: memoized per-type encoder/decoder emission in `src/backend/js/stdlib/json.js` handling `RawMessage`, BigInt/int64, nil vs empty, and sorted keys.
-- [ ] **Task 1.5** — WASM diagnostic for `json.*` in `wasm`/`both` packages.
-- [ ] **Task 1.6** — Tests (`test/unit/builtins/json.test.js`): golden outputs matching real Go; malformed inputs; non-pointer/nil targets; nested/embedded structs; `map[string]T`; `RawMessage`; `[]byte` base64 vs `RawMessage` verbatim; `omitempty` zero-value checks.
+- [x] **Task 1.1** — Preserve struct tags in parser AST (`field.tag`); support tags on embedded and pointer-embedded fields (`src/parser/types.js`); add `parseStructTag` utility with unit tests.
+- [x] **Task 1.2** — JSON field resolution in typechecker (tag parsing, rename, omitempty, `-`, `-,`, embedded field promotion and collision resolution).
+- [x] **Task 1.3** — `encoding/json` stdlib typechecker symbols (`Marshal`, `MarshalIndent`, `Unmarshal`, `Valid`, `RawMessage`).
+- [x] **Task 1.4** — JS codegen: memoized per-type encoder/decoder emission in `src/backend/js/stdlib/json.js` handling `RawMessage`, BigInt/int64, nil vs empty, and sorted keys.
+- [x] **Task 1.5** — WASM diagnostic for `json.*` in `wasm`/`both` packages.
+- [x] **Task 1.6** — Tests (`test/unit/builtins/json.test.js`): golden outputs matching real Go; malformed inputs; non-pointer/nil targets; nested/embedded structs; `map[string]T`; `RawMessage`; `[]byte` base64 vs `RawMessage` verbatim; `omitempty` zero-value checks.
 
 ---
 
@@ -121,11 +121,11 @@ Three features, each held to the **no runtime** rule ([roadmap](../roadmap.md#ou
 
 ### Tasks
 
-- [ ] **Task 2.1** — Tuple types in `src/dts-parser.js`; multi-value return mapping; typechecker single-variable assignment rejection; unit tests.
-- [ ] **Task 2.2** — Fix rest-parameter propagation (`variadic: true`) in `src/dts-parser.js` (`_parseFuncDecl`, `_parseMemberDefault`); unit tests with `h`-style variadic signatures.
-- [ ] **Task 2.3** — Support submodule vendor packaging (`preact/hooks`) and named export bindings in `src/vendor.js`; vendor Preact.
-- [ ] **Task 2.4** — Implement `example/preact` with `preact.d.ts` (TodoMVC parity: priorities, filters, async save, loading states).
-- [ ] **Task 2.5** — Retire `example/reactive` (`reactive.js`, `browser.d.ts`); update `package.json` build scripts, `playwright.config.js` (port 3002 webServer and test project), `test/e2e/reactive.spec.js` → `preact.spec.js`, CI workflows, and README.
+- [x] **Task 2.1** — Tuple types in `src/dts-parser.js`; multi-value return mapping; typechecker single-variable assignment rejection; unit tests.
+- [x] **Task 2.2** — Fix rest-parameter propagation (`variadic: true`) in `src/dts-parser.js` (`_parseFuncDecl`, `_parseMemberDefault`); unit tests with `h`-style variadic signatures.
+- [x] **Task 2.3** — Support submodule vendor packaging (`preact/hooks`) and named export bindings in `src/vendor.js`; vendor Preact.
+- [x] **Task 2.4** — Implement `example/preact` with `preact.d.ts` (TodoMVC parity: priorities, filters, async save, loading states).
+- [x] **Task 2.5** — Retire `example/reactive` (`reactive.js`, `browser.d.ts`); update `package.json` build scripts, `playwright.config.js` (port 3002 webServer and test project), `test/e2e/reactive.spec.js` → `preact.spec.js`, CI workflows, and README.
 
 ---
 

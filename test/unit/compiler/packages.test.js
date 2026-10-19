@@ -229,29 +229,26 @@ test("simple example exports expected functions", () => {
 	);
 });
 
-section("Example app — reactive (todo)");
+section("Example app — preact (todo)");
 
-test("reactive example compiles without errors", () => {
-	const exampleDir = join(ROOT, "example", "reactive", "src");
+test("preact example compiles without errors", () => {
+	const exampleDir = join(ROOT, "example", "preact", "src");
 	const result = compileDir(exampleDir);
 	assert(result.js && result.js.length > 0, "expected non-empty JS output");
 });
 
-test("reactive example exports expected functions", () => {
-	const exampleDir = join(ROOT, "example", "reactive", "src");
+test("preact example exports expected functions", () => {
+	const exampleDir = join(ROOT, "example", "preact", "src");
 	const result = compileDir(exampleDir);
 	assert(result.exportedSymbols.has("main"), "expected main to be exported");
+	assert(result.exportedSymbols.has("App"), "expected App to be exported");
 	assert(
-		result.exportedSymbols.has("initStore"),
-		"expected initStore to be exported",
+		result.exportedSymbols.has("TodoItem"),
+		"expected TodoItem to be exported",
 	);
 	assert(
-		result.exportedSymbols.has("createAppShell"),
-		"expected createAppShell to be exported",
-	);
-	assert(
-		result.exportedSymbols.has("setupReactiveDOM"),
-		"expected setupReactiveDOM to be exported",
+		result.exportedSymbols.has("Header"),
+		"expected Header to be exported",
 	);
 });
 
@@ -314,8 +311,8 @@ test("simple utils.Plural formats correctly", () => {
 	assert(result.js.includes("Plural"), "expected Plural in output");
 });
 
-test("reactive utils.Plural formats correctly", () => {
-	const utilsDir = join(ROOT, "example", "reactive", "src", "utils");
+test("preact utils.Plural formats correctly", () => {
+	const utilsDir = join(ROOT, "example", "preact", "src", "utils");
 	const result = compileDir(utilsDir);
 	assert(result.js.includes("Plural"), "expected Plural in output");
 });

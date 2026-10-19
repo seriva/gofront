@@ -136,45 +136,40 @@ example/simple/
   app.js          ← generated output
 ```
 
-### Reactive (signals + d.ts imports)
+### Preact (components, hooks + d.ts tuples)
 
-Same app rebuilt with [reactive.js](https://github.com/seriva/microtastic), a tiny
-signals-based reactive framework. Demonstrates how GoFront integrates with external JS
-libraries via `.d.ts` type declarations — the entire reactive API surface is typed via a
-hand-written `browser.d.ts` shim and exercised from GoFront source.
+Same app rebuilt with [Preact](https://preactjs.com), using function components and hooks (`useState`, `useEffect`, `useRef`). Demonstrates how GoFront integrates with external JS libraries via `.d.ts` type declarations — TypeScript tuple return signatures (`[T, (v: T) => void]`) map directly to Go multi-value returns, allowing idiomatic Go hook destructuring:
 
-> **Note:** Microtastic is now archived. This example is kept as a reference for
-> `.d.ts` interop with third-party signal libraries. For new projects, use the native
-> `.templ` or `gom` approaches shown below.
+```go
+func TodoItem(p TodoItemProps) VNode {
+    editing, setEditing := useState(false)
+    return h("li", map[string]any{"class": itemClass(p.Todo, editing)}, ...)
+}
+```
 
 ```
-example/reactive/
+example/preact/
   src/
-    types.go      ← Todo, Stats, AppElements structs
-    store.go      ← reactive state: Signals.create/computed/computedAsync/batch/update
-    render.go     ← Reactive.Component lifecycle · ctx.bind* · setupStatsBar
-    styles.go     ← per-section cssClass() scoped styles
-    main.go       ← async boot, Reactive.mount loading placeholder, signal.subscribe/once
+    types.go      ← Todo, Stats, and props structs
+    components.go ← TodoItem, Header, InputRow, Footer, StatsBar Preact components
+    main.go       ← App root component, async storage load, save, drag-and-drop
     utils/
       utils.go    ← Plural() · generic Filter
-    browser.d.ts  ← Signal · ComponentContext · Signals/Reactive namespaces · htmlTag
-  reactive.js     ← signals framework (from microtastic)
-  index.html      ← loads reactive.js, exposes helpers, imports app.js
+    preact.d.ts   ← VNode · h · render · useState · useEffect · useRef · sleep
+  vendor.js       ← bundled Preact & Preact hooks
+  index.html      ← loads vendor.js, imports app.js
   app.js          ← generated output
 ```
 
-The reactive example covers the full reactive.js API surface:
+The preact example covers:
 
 | Category | Features used |
 |---|---|
-| HTML helpers | `html` tagged template (via `htmlTag`), `trusted`, `join` |
-| CSS | `cssClass` scoped styles with nested `&` selectors |
-| Signals | `create`, `computed`, `computedAsync`, `batch`, `get`, `peek`, `set`, `update`, `subscribe`, `once` |
-| Reactive namespace | `mount` (loading placeholder), `createComponent`, `scan` |
-| Component context | `bind`, `bindAttr`, `bindBoolAttr`, `bindClass`, `bindText`, `bindStyle`, `bindMultiple`, `computed` |
-| Component lifecycle | `state`, `template`, `styles`, `mount`, `mountTo`, `appendTo`, `refs` (via `data-ref`) |
-| Component instance | `signal`, `effect`, `on` (auto-cleanup event listeners) |
-| Scan attributes | `data-model`, `data-text`, `data-html`, `data-if`, `data-visible`, `data-class-*`, `data-attr-*`, `data-bool-*`, `data-on-*`, `data-ref` |
+| Hyperscript | `h(type, props, ...children)` with variadic and array children |
+| Function components | Pure function components with Go struct props |
+| Hooks | `useState` with tuple destructuring (`state, setState := useState(init)`), `useEffect` |
+| Tuples | Multi-value returns from TypeScript `.d.ts` tuple types |
+| Vendoring | Bundled subpath packages (`preact/hooks`) with named global exports |
 
 ### templ (template files + direct DOM codegen)
 
@@ -276,17 +271,15 @@ Key types and functions (all accessed as `gom.*`, no import needed):
 
 ### Features demonstrated
 
-The simple and reactive examples cover: structs & methods, iota constants, named return
+The simple and preact examples cover: structs & methods, iota constants, named return
 values, closures, slices, `for range`, `switch`, cross-package imports, multi-file
 same-package compilation, `async`/`await`, `defer`/`recover`, localStorage persistence,
 DOM APIs, and generic utility functions (`Filter[T]`, `Map[T, U]`).
 
-The reactive example additionally demonstrates: external `.d.ts` type imports,
-`declare namespace` patterns for typing JS libraries, the full reactive signal graph
-(source signals → computed signals → async computed → DOM bindings), reactive UI with
-no `querySelector` or `getElementById` in application code, and `Reactive.Component`
-as the primary composition unit (state, template, styles, mount lifecycle, `data-ref`
-element refs, auto-cleanup event listeners).
+The preact example additionally demonstrates: external `.d.ts` type imports,
+TypeScript tuple return mapping to Go multi-value returns (`state, setState := useState(...)`),
+Preact function components with field-only struct props, hooks-driven reactive rendering,
+and npm dependency vendoring (`preact`, `preact/hooks`).
 
 The gom example additionally demonstrates: **the `gom` built-in stdlib package**,
 styles as nodes (`gom.Style` + `gom.MountTo`), `gom.Map` for list rendering, the

@@ -11,7 +11,6 @@ export const S = {
 	clearBtn: '[data-action="clear-completed"]',
 	badge: ".badge",
 	highBadge: ".high-badge",
-	// The reactive app's CSS scoping replaces the "sync-status" class with a
-	// scoped name via bindAttr, so we also match by data-ref for that app.
+	// Some apps may scope the "sync-status" class name, so we also match by data-ref.
 	syncStatus: '.sync-status, [data-ref="syncStatus"]',
 };

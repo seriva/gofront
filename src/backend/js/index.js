@@ -43,6 +43,7 @@ import {
 	HELPER_IFACE_BOX,
 	HELPER_INJECT_STYLES,
 	HELPER_IO_EOF,
+	HELPER_JSON,
 	HELPER_LEN,
 	HELPER_NIL_CALL,
 	HELPER_PANIC,
@@ -141,6 +142,7 @@ const HELPER_MAP = [
 	["binary", HELPER_BINARY],
 	["hex", HELPER_HEX],
 	["base64", HELPER_BASE64],
+	["json", HELPER_JSON],
 ];
 
 export class CodeGen {
@@ -168,6 +170,7 @@ export class CodeGen {
 		this._srcMappings = []; // { genLine, srcLine, srcFileIdx } for source map
 		this._currentSrcFileIdx = 0; // updated as each top-level decl is generated
 		this._boxedVars = new Set(); // address-taken scalar variables that need boxing
+		this._jsonCodecs = new Map(); // memoized JSON encoders and decoders
 		// Runtime helper usage tracking — only emit helpers that are actually used
 		this._helpers = new Set();
 		// Per-function context for Go value semantics (see _withFnCtx)
@@ -273,6 +276,7 @@ export class CodeGen {
 		this._emitTypeDecls(program, methods);
 		this._emitVarConstDecls(program);
 		const initNames = this._emitFuncDecls(program);
+		this._emitJsonCodecs();
 		this._callInitAndMain(initNames, program, isTest);
 		const prependedLines = this._prependHelpers(isTest);
 		return this._finalizeOutput(prependedLines);
@@ -457,9 +461,13 @@ export class CodeGen {
 			name === "pathError" ||
 			name === "ioEOF" ||
 			name === "base64" ||
-			name === "hex"
+			name === "hex" ||
+			name === "json"
 		) {
 			this._helpers.add("error");
+		}
+		if (name === "json") {
+			this.useHelper("base64");
 		}
 		if (name === "binary") {
 			this.useHelper("ioEOF");
@@ -660,6 +668,14 @@ export class CodeGen {
 			this.line(
 				`Object.defineProperty(${name}.prototype, "value", { get() { return this; }, set(v) { Object.assign(this, v); }, configurable: true });`,
 			);
+		}
+	}
+
+	_emitJsonCodecs() {
+		if (!this._jsonCodecs || this._jsonCodecs.size === 0) return;
+		for (const [, code] of this._jsonCodecs) {
+			this.line(code);
+			this.blank();
 		}
 	}
 
