@@ -109,10 +109,9 @@ export class DtsParser {
 
 	readIdent() {
 		this.skip();
-		let s = "";
-		while (!this.eof() && /[a-zA-Z0-9_$]/.test(this.ch()))
-			s += this.src[this.pos++];
-		return s;
+		const start = this.pos;
+		while (!this.eof() && /[a-zA-Z0-9_$]/.test(this.ch())) this.pos++;
+		return this.src.slice(start, this.pos);
 	}
 
 	consume(ch) {
@@ -171,14 +170,14 @@ export class DtsParser {
 	}
 
 	_trackBracketDepth(c, depths) {
-		const open = { "<": 0, "(": 1, "[": 2, "{": 3 };
-		const close = { ">": 0, ")": 1, "]": 2, "}": 3 };
-		if (c in open) {
-			depths[open[c]]++;
+		const oi = "<([{".indexOf(c);
+		if (oi >= 0) {
+			depths[oi]++;
 			return true;
 		}
-		if (c in close && depths[close[c]] > 0) {
-			depths[close[c]]--;
+		const ci = ">)]}".indexOf(c);
+		if (ci >= 0 && depths[ci] > 0) {
+			depths[ci]--;
 			return true;
 		}
 		return false;
@@ -392,7 +391,7 @@ export class DtsParser {
 		}
 	}
 
-	_parseMemberFuncDecl(out) {
+	_parseFuncDecl() {
 		const name = this.readIdent();
 		this.skipGenerics();
 		const params = this.parseParams();
@@ -403,12 +402,14 @@ export class DtsParser {
 			ret = this.parseType();
 		}
 		this.consume(";");
-		if (name)
-			out[name] = {
+		return {
+			name,
+			val: {
 				kind: "func",
 				params: params.map((p) => p.type),
 				returns: [ret],
-			};
+			},
+		};
 	}
 
 	_parseMemberNewSig() {
@@ -422,7 +423,7 @@ export class DtsParser {
 		this.consume(";");
 	}
 
-	_parseMemberTypeDecl(out) {
+	_parseTypeDecl() {
 		const name = this.readIdent();
 		this.skipGenerics();
 		this.skip();
@@ -432,10 +433,10 @@ export class DtsParser {
 			type = this.parseType();
 		}
 		this.consume(";");
-		if (name) out[name] = type;
+		return { name, type };
 	}
 
-	_parseMemberClassDecl(out) {
+	_parseClassDecl() {
 		const name = this.readIdent();
 		this.skipGenerics();
 		while (!this.eof() && this.ch() !== "{") this.pos++;
@@ -443,10 +444,20 @@ export class DtsParser {
 		const body = this.parseBody();
 		this.consume("}");
 		this.consume(";");
-		if (name) out[name] = { kind: "namespace", name, members: body };
+		return { name, ns: { kind: "namespace", name, members: body } };
 	}
 
-	_parseMemberVarDecl(out) {
+	_parseNamespaceDecl() {
+		const name = this.readIdent() || this._readStringLit();
+		this.skip();
+		this.consume("{");
+		const body = this.parseBody();
+		this.consume("}");
+		this.consume(";");
+		return { name, ns: { kind: "namespace", name, members: body } };
+	}
+
+	_parseVarDecl() {
 		const name = this.readIdent();
 		this.skip();
 		this.consume("?");
@@ -461,7 +472,7 @@ export class DtsParser {
 			this.skipTypeExpr();
 		}
 		this.consume(";");
-		if (name) out[name] = type;
+		return { name, type };
 	}
 
 	_parseMember(out) {
@@ -477,28 +488,29 @@ export class DtsParser {
 		}
 		this.skip();
 		switch (kw) {
-			case "function":
-				this._parseMemberFuncDecl(out);
+			case "function": {
+				const { name, val } = this._parseFuncDecl();
+				if (name) out[name] = val;
 				break;
+			}
 			case "new":
 				this._parseMemberNewSig();
 				break;
-			case "type":
-				this._parseMemberTypeDecl(out);
+			case "type": {
+				const { name, type } = this._parseTypeDecl();
+				if (name) out[name] = type;
 				break;
+			}
 			case "interface":
-			case "class":
-				this._parseMemberClassDecl(out);
+			case "class": {
+				const { name, ns } = this._parseClassDecl();
+				if (name) out[name] = ns;
 				break;
+			}
 			case "namespace":
 			case "module": {
-				const name = this.readIdent() || this._readStringLit();
-				this.skip();
-				this.consume("{");
-				const body = this.parseBody();
-				this.consume("}");
-				this.consume(";");
-				if (name) out[name] = { kind: "namespace", name, members: body };
+				const { name, ns } = this._parseNamespaceDecl();
+				if (name) out[name] = ns;
 				break;
 			}
 			case "enum": {
@@ -509,9 +521,11 @@ export class DtsParser {
 			}
 			case "const":
 			case "let":
-			case "var":
-				this._parseMemberVarDecl(out);
+			case "var": {
+				const { name, type } = this._parseVarDecl();
+				if (name) out[name] = type;
 				break;
+			}
 			default:
 				this._parseMemberDefault(kw, out);
 				break;
@@ -550,13 +564,15 @@ export class DtsParser {
 			this.consume(";");
 		}
 	}
+
 	_readStringLit() {
 		this.skip();
 		const c = this.ch();
 		if (c !== '"' && c !== "'") return null;
 		this.pos++;
-		let s = "";
-		while (!this.eof() && this.ch() !== c) s += this.src[this.pos++];
+		const start = this.pos;
+		while (!this.eof() && this.ch() !== c) this.pos++;
+		const s = this.src.slice(start, this.pos);
 		this.pos++;
 		return s;
 	}
@@ -612,85 +628,6 @@ export class DtsParser {
 		return { types, values };
 	}
 
-	_parseTopLevelTypeAlias(types) {
-		const name = this.readIdent();
-		this.skipGenerics();
-		this.skip();
-		let type = ANY;
-		if (this.ch() === "=") {
-			this.pos++;
-			type = this.parseType();
-		}
-		this.consume(";");
-		if (name) types.set(name, type);
-	}
-
-	_parseTopLevelClassDecl(kw, types, values) {
-		const name = this.readIdent();
-		this.skipGenerics();
-		while (!this.eof() && this.ch() !== "{") this.pos++;
-		this.consume("{");
-		const body = this.parseBody();
-		this.consume("}");
-		this.consume(";");
-		if (name) {
-			const ns = { kind: "namespace", name, members: body };
-			types.set(name, ns);
-			if (kw === "class") values.set(name, ns);
-		}
-	}
-
-	_parseTopLevelNamespaceDecl(types, values) {
-		const name = this.readIdent() || this._readStringLit();
-		this.skip();
-		this.consume("{");
-		const body = this.parseBody();
-		this.consume("}");
-		this.consume(";");
-		if (name) {
-			const ns = { kind: "namespace", name, members: body };
-			types.set(name, ns);
-			values.set(name, ns);
-		}
-	}
-
-	_parseTopLevelFuncDecl(values) {
-		const name = this.readIdent();
-		this.skipGenerics();
-		const params = this.parseParams();
-		this.skip();
-		let ret = VOID;
-		if (this.ch() === ":") {
-			this.pos++;
-			ret = this.parseType();
-		}
-		this.consume(";");
-		if (name)
-			values.set(name, {
-				kind: "func",
-				params: params.map((p) => p.type),
-				returns: [ret],
-			});
-	}
-
-	_parseTopLevelVarDecl(values) {
-		const name = this.readIdent();
-		this.skip();
-		this.consume("?");
-		let type = ANY;
-		if (this.ch() === ":") {
-			this.pos++;
-			type = this.parseType();
-		}
-		this.skip();
-		if (this.ch() === "=") {
-			this.pos++;
-			this.skipTypeExpr();
-		}
-		this.consume(";");
-		if (name) values.set(name, type);
-	}
-
 	_parseTopLevelDecl(kw, types, values) {
 		switch (kw) {
 			case "import":
@@ -698,17 +635,29 @@ export class DtsParser {
 				this.skipTypeExpr();
 				this.consume(";");
 				break;
-			case "type":
-				this._parseTopLevelTypeAlias(types);
+			case "type": {
+				const { name, type } = this._parseTypeDecl();
+				if (name) types.set(name, type);
 				break;
+			}
 			case "interface":
-			case "class":
-				this._parseTopLevelClassDecl(kw, types, values);
+			case "class": {
+				const { name, ns } = this._parseClassDecl();
+				if (name) {
+					types.set(name, ns);
+					if (kw === "class") values.set(name, ns);
+				}
 				break;
+			}
 			case "namespace":
-			case "module":
-				this._parseTopLevelNamespaceDecl(types, values);
+			case "module": {
+				const { name, ns } = this._parseNamespaceDecl();
+				if (name) {
+					types.set(name, ns);
+					values.set(name, ns);
+				}
 				break;
+			}
 			case "enum": {
 				const name = this.readIdent();
 				this.skipBlock();
@@ -719,14 +668,18 @@ export class DtsParser {
 				}
 				break;
 			}
-			case "function":
-				this._parseTopLevelFuncDecl(values);
+			case "function": {
+				const { name, val } = this._parseFuncDecl();
+				if (name) values.set(name, val);
 				break;
+			}
 			case "const":
 			case "let":
-			case "var":
-				this._parseTopLevelVarDecl(values);
+			case "var": {
+				const { name, type } = this._parseVarDecl();
+				if (name) values.set(name, type);
 				break;
+			}
 			default:
 				this.skipTypeExpr();
 				this.consume(";");

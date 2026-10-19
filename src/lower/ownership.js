@@ -89,19 +89,42 @@ export function collectMutatedVars(
 
 export function fnMutates(body, name, addrOnly = false, cache = null) {
 	if (!body) return true;
-	const key = `${addrOnly ? "&" : ""}${name}`;
 	if (cache) {
-		if (!cache.has(key)) {
-			cache.set(key, nodeMutatesVar(body, name, addrOnly));
+		const setKey = addrOnly ? "&*" : "*";
+		let set = cache.get(setKey);
+		if (!set) {
+			set = collectMutatedVars(body, new Set(), addrOnly);
+			cache.set(setKey, set);
 		}
-		return cache.get(key);
+		return set.has(name);
 	}
 	return nodeMutatesVar(body, name, addrOnly);
 }
 
+function collectClosureMutatedVars(node, mutated = new Set()) {
+	if (!node || typeof node !== "object") return mutated;
+	if (Array.isArray(node)) {
+		for (const item of node) collectClosureMutatedVars(item, mutated);
+		return mutated;
+	}
+	if (node.kind === "FuncLit") {
+		collectMutatedVars(node.body, mutated, false);
+		return mutated;
+	}
+	forEachChild(node, (child) => collectClosureMutatedVars(child, mutated));
+	return mutated;
+}
+
 export function closureMutates(body, name, cache = null) {
-	const key = `λ${name}`;
-	if (cache?.has(key)) return cache.get(key);
+	if (!body) return false;
+	if (cache) {
+		let set = cache.get("λ*");
+		if (!set) {
+			set = collectClosureMutatedVars(body, new Set());
+			cache.set("λ*", set);
+		}
+		return set.has(name);
+	}
 
 	const walk = (node) => {
 		if (!node || typeof node !== "object") return false;
@@ -109,9 +132,7 @@ export function closureMutates(body, name, cache = null) {
 		if (node.kind === "FuncLit") return nodeMutatesVar(node.body, name);
 		return someChild(node, walk);
 	};
-	const res = walk(body);
-	if (cache) cache.set(key, res);
-	return res;
+	return walk(body);
 }
 
 export class OwnershipContext {

@@ -182,24 +182,81 @@ export const assignabilityMethods = {
 	// Tags struct values / struct pointers flowing into an interface so codegen can
 	// tell `T` from `*T` at runtime (both compile to the same class instance).
 	_markIfaceBox(target, source, node) {
-		if (this._skipIfaceMark) return;
-		if (!node || typeof node !== "object" || !target || !source) return;
+		if (
+			this._skipIfaceMark ||
+			!node ||
+			typeof node !== "object" ||
+			!target ||
+			!source
+		)
+			return;
 		if (target.kind === "typeParam") return;
 		const tBase = this.resolveType(
 			target.kind === "named" ? target.underlying : target,
 		);
 		if (!isAny(target) && tBase?.kind !== "interface") return;
-		const structOf = (t) => {
-			const r = this.resolveType(t);
-			const b = r?.kind === "named" ? this.resolveType(r.underlying) : r;
-			return b?.kind === "struct";
-		};
 		const sBase = this.resolveType(
 			source.kind === "named" ? source.underlying : source,
 		);
-		if (sBase?.kind === "struct") node._ifaceBox = "value";
-		else if (sBase?.kind === "pointer" && structOf(sBase.base))
-			node._ifaceBox = "ptr";
+		const info = this._classifyIfaceBox(sBase);
+		if (!info) return;
+		node._ifaceBox = info.box;
+		if (info.ptrFields) node._ifacePtrFields = info.ptrFields;
+	},
+
+	_getStructPtrFields(st, prefix = "", seen = new Set()) {
+		if (st?.kind !== "struct" || !st?.fields) return [];
+		if (seen.has(st)) return [];
+		const nextSeen = new Set(seen);
+		nextSeen.add(st);
+		const ptrs = [];
+		for (const [fname, ftype] of st.fields.entries()) {
+			const full = prefix ? `${prefix}.${fname}` : fname;
+			const rf = this.resolveType(ftype);
+			const bf = rf?.kind === "named" ? this.resolveType(rf.underlying) : rf;
+			if (isPointer(bf)) {
+				ptrs.push(full);
+			} else if (bf?.kind === "struct") {
+				ptrs.push(...this._getStructPtrFields(bf, full, nextSeen));
+			}
+		}
+		return ptrs;
+	},
+
+	_classifyIfaceBox(sBase) {
+		if (sBase?.kind === "struct") {
+			const pf = this._getStructPtrFields(sBase);
+			return { box: "value", ptrFields: pf.length > 0 ? pf : null };
+		}
+		if (sBase?.kind === "pointer") {
+			const st = this.resolveType(
+				sBase.base?.kind === "named" ? sBase.base.underlying : sBase.base,
+			);
+			if (st?.kind === "struct") {
+				const pf = this._getStructPtrFields(st);
+				return { box: "ptr", ptrFields: pf.length > 0 ? pf : null };
+			}
+			return null;
+		}
+		if (sBase?.kind === "map") {
+			const valType = this.resolveType(sBase.value ?? sBase.val ?? sBase.elem);
+			const keyType = this.resolveType(sBase.key);
+			return {
+				box: isPointer(valType) || isPointer(keyType) ? "ptr_map" : "map",
+			};
+		}
+		if (sBase?.kind === "slice") {
+			const elemType = this.resolveType(sBase.elem);
+			if (isPointer(elemType)) return { box: "ptr_slice" };
+			const elemBase =
+				elemType?.kind === "named"
+					? this.resolveType(elemType.underlying)
+					: elemType;
+			const pf =
+				elemBase?.kind === "struct" ? this._getStructPtrFields(elemBase) : [];
+			return pf.length > 0 ? { box: "slice", ptrFields: pf } : null;
+		}
+		return null;
 	},
 
 	// A js package cannot provide an implementation of a wasm interface: the
@@ -371,12 +428,23 @@ export const assignabilityMethods = {
 		return true;
 	},
 
+	_unpackReturns(rList) {
+		if (
+			rList.length === 1 &&
+			(rList[0]?.kind === "tuple" || rList[0]?.kind === "TupleType") &&
+			rList[0].types
+		) {
+			return rList[0].types;
+		}
+		return rList;
+	},
+
 	_implementsMethod(required, actual) {
 		if (!actual) return false;
 		const rp = required.params ?? [],
 			ap = actual.params ?? [];
-		const rr = required.returns ?? [],
-			ar = actual.returns ?? [];
+		const rr = this._unpackReturns(required.returns ?? []),
+			ar = this._unpackReturns(actual.returns ?? []);
 		if (!this._sigParamsMatch(rp, ap)) return false;
 		if (!!required.variadic !== !!actual.variadic) return false;
 		return this._sigParamsMatch(rr, ar);
@@ -398,7 +466,7 @@ export const assignabilityMethods = {
 		}
 		const methodMap =
 			base?.kind === "struct"
-				? base.methods
+				? base.methods || srcType.methods
 				: srcType.kind === "named"
 					? srcType.methods
 					: null;

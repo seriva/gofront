@@ -245,15 +245,149 @@ func Main() int {
 	assertEqual(runWasm(wasm, { stringTable }).exports.Main(), 34n);
 });
 
-test("array and interface map keys report a planned limitation", () => {
-	assertThrows(
-		() =>
-			compileHybrid(`
+test("array map keys compare element-wise and match in wasm", () => {
+	const src = `
 package main
-func Main() int { m := map[[2]int]int{}; m[[2]int{1, 2}] = 1; return len(m) }
-`).run("Main"),
-		"planned",
-	);
+
+func Main() string {
+	m := map[[2]int]string{}
+	m[[2]int{1, 2}] = "first"
+	m[[2]int{3, 4}] = "second"
+	if m[[2]int{1, 2}] != "first" || m[[2]int{3, 4}] != "second" {
+		return "fail lookup"
+	}
+	if len(m) != 2 {
+		return "fail len"
+	}
+	return "ok"
+}
+`;
+	const { wasm, stringTable } = compileHybrid(src);
+	assertEqual(runWasm(wasm, { stringTable }).exports.Main(), "ok");
+});
+
+test("array map keys with -0 and +0 hash equal and NaN never matches", () => {
+	const src = `
+package main
+import "math"
+
+func Main() int {
+	m := map[[2]float64]int{}
+	m[[2]float64{0.0, 1.0}] = 1
+	m[[2]float64{math.Copysign(0, -1), 1.0}] = 2
+	m[[2]float64{math.NaN(), 1.0}] = 10
+	m[[2]float64{math.NaN(), 1.0}] = 20
+	// 0.0 and -0.0 should overwrite, so 1 key for (0, 1). Two NaNs produce 2 distinct keys. Total = 3.
+	return len(m)*10 + m[[2]float64{0.0, 1.0}]
+}
+`;
+	const { wasm, stringTable } = compileHybrid(src);
+	assertEqual(runWasm(wasm, { stringTable }).exports.Main(), 32n);
+});
+
+test("interface map keys support scalars, strings, and panics on unhashable dynamic types", () => {
+	const src = `
+package main
+
+func Main() string {
+	m := map[any]string{}
+	m[1] = "one"
+	m[2] = "two"
+	m["hello"] = "world"
+	if m[1] != "one" || m[2] != "two" || m["hello"] != "world" || len(m) != 3 {
+		return "fail lookup"
+	}
+	return "ok"
+}
+`;
+	const { wasm, stringTable } = compileHybrid(src);
+	assertEqual(runWasm(wasm, { stringTable }).exports.Main(), "ok");
+
+	const unhashableSrc = `
+package main
+
+func Main() {
+	m := map[any]int{}
+	m[[]int{1, 2}] = 42
+}
+`;
+	assertThrows(() => {
+		const { wasm: uWasm, stringTable: uStr } = compileHybrid(unhashableSrc);
+		runWasm(uWasm, { stringTable: uStr }).exports.Main();
+	}, "runtime error: hash of unhashable type");
+});
+
+test("boxed scalars in any and map[any] differentiate distinct types", () => {
+	const src = `
+package main
+
+func Main() string {
+	var a any = int32(1)
+	var b any = true
+	if a == b {
+		return "fail scalar equality"
+	}
+	m := map[any]string{}
+	m[int32(1)] = "int32"
+	m[true] = "bool"
+	if m[int32(1)] != "int32" || m[true] != "bool" || len(m) != 2 {
+		return "fail map differentiation"
+	}
+	return "ok"
+}
+`;
+	const { wasm, stringTable } = compileHybrid(src);
+	assertEqual(runWasm(wasm, { stringTable }).exports.Main(), "ok");
+});
+
+test("map[any] handles comparable structs and panics on unhashable structs", () => {
+	const src = `
+package main
+
+type Point struct {
+	X int
+	Y int
+}
+
+type WithSlice struct {
+	Nums []int
+}
+
+func Main() string {
+	m := map[any]int{}
+	m[Point{1, 2}] = 42
+	if m[Point{1, 2}] != 42 {
+		return "fail struct lookup"
+	}
+	// Pointer to unhashable struct is comparable and hashable by pointer address
+	ws := &WithSlice{Nums: []int{1, 2}}
+	m[ws] = 100
+	if m[ws] != 100 {
+		return "fail pointer to unhashable lookup"
+	}
+	return "ok"
+}
+`;
+	const { wasm, stringTable } = compileHybrid(src);
+	assertEqual(runWasm(wasm, { stringTable }).exports.Main(), "ok");
+
+	const unhashableStructSrc = `
+package main
+
+type WithSlice struct {
+	Nums []int
+}
+
+func Main() {
+	m := map[any]int{}
+	m[WithSlice{Nums: []int{1, 2}}] = 42
+}
+`;
+	assertThrows(() => {
+		const { wasm: uWasm, stringTable: uStr } =
+			compileHybrid(unhashableStructSrc);
+		runWasm(uWasm, { stringTable: uStr }).exports.Main();
+	}, "runtime error: hash of unhashable type");
 });
 
 section("Go semantics — generics and interfaces");
@@ -323,4 +457,62 @@ func Main() int {
 `);
 	assertEqual(errors.length > 0, true);
 	assertEqual(errors[0].message.includes("Unknown type 'T'"), true);
+});
+
+section("Go semantics — package constant expressions");
+
+test("constant expressions fold at compile time and match JS", () => {
+	const src = `
+package main
+
+const Base = 10
+const Derived = Base * 2
+const Early = 4
+const Later = Early + 1
+const Len = len("abc") * 2
+const Shift = 1 << 4
+const Ratio = 7 / 2.0
+const Greeting = "hi, " + "there"
+const Big = Shift > 8 && Base != 3
+
+func Main() string {
+	s := ""
+	if Big { s = Greeting }
+	return s + string(rune('0'+Derived/10)) + string(rune('0'+Later)) +
+		string(rune('0'+Len)) + string(rune('A'+Shift/4)) + string(rune('0'+int(Ratio)))
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, jsRes);
+	assertEqual(wasmRes, "hi, there256E3");
+});
+
+test("folded string constants are not start-function globals", () => {
+	const { wat } = compileHybrid(
+		`
+package main
+
+const N = len("abc") * 2
+
+func Main() int { return N }
+`,
+		{ emitWat: true },
+	);
+	assertEqual(wat.includes("(start"), false);
+});
+
+test("a constant that cannot be folded becomes a start-initialised global", () => {
+	const src = `
+package main
+
+import "math"
+
+const Tau = math.Pi * 2
+const Half = Tau / 2
+
+func Main() int { return int(Half * 100) }
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, jsRes);
+	assertEqual(wasmRes, 314);
 });

@@ -1,6 +1,7 @@
 // src/backend/wasm/emit-exprs.js
 // FunctionEmitter mixin: expression emission (literals, operators, indexing, conversions).
 
+import { foldConstExpr } from "./const-fold.js";
 import {
 	getMapKeyValTypes,
 	isAnyType,
@@ -65,8 +66,7 @@ export class ExprsEmitter {
 						this.emitCloneStruct(sInfo, structWType);
 					}
 				}
-				const box = this.mod.getBoxType(goType);
-				this.pushInstruction({ op: "struct.new", typeIndex: box.typeIndex });
+				this._emitBoxValue(this.mod.getIfaceBoxType(goType));
 				return;
 			}
 
@@ -83,13 +83,21 @@ export class ExprsEmitter {
 
 			// Scalar type -> box into struct
 			const scalarType = goType ?? { kind: "basic", name: "int" };
-			const box = this.mod.getBoxType(scalarType);
+			const box = this.mod.getIfaceBoxType(scalarType);
 			this._emitRawExpr(expr, box.wType);
-			this.pushInstruction({ op: "struct.new", typeIndex: box.typeIndex });
+			this._emitBoxValue(box);
 			return;
 		}
 
 		this._emitRawExpr(expr, targetWasmType);
+	}
+
+	_emitBoxValue(box) {
+		this.pushInstruction({
+			op: "ref.null",
+			heapType: box.tagTypeIndex,
+		});
+		this.pushInstruction({ op: "struct.new", typeIndex: box.typeIndex });
 	}
 
 	_resolveExprGoType(expr) {
@@ -121,6 +129,17 @@ export class ExprsEmitter {
 	}
 
 	_emitRawExpr(expr, targetWasmType = null) {
+		if (expr.kind === "BinaryExpr" || expr.kind === "UnaryExpr") {
+			const folded = foldConstExpr(expr, (name) =>
+				this.mod.pkgConsts?.get(name),
+			);
+			if (folded) {
+				folded._type = expr._type;
+				this.emitBasicLit(folded, targetWasmType);
+				return;
+			}
+		}
+
 		switch (expr.kind) {
 			case "BasicLit":
 				this.emitBasicLit(expr, targetWasmType);
@@ -157,6 +176,16 @@ export class ExprsEmitter {
 					this.emitMathConst(expr.field, targetWasmType);
 				else if (this._isUtf8Const(expr))
 					this.emitUtf8Const(expr.field, targetWasmType);
+				else if (this._isStrconvConst(expr))
+					this.emitStrconvConst(expr.field, targetWasmType);
+				else if (this._isPathConst(expr))
+					this.emitPathConst(expr.field, targetWasmType);
+				else if (this._isIoConst(expr))
+					this.emitIoConst(expr.field, targetWasmType);
+				else if (this._isTimeConst(expr))
+					this.emitTimeConst(expr.field, targetWasmType);
+				else if (this._isExtendedPkgConst?.(expr))
+					this.emitExtendedPkgConst(expr, targetWasmType);
 				else this.emitSelectorExpr(expr);
 				break;
 			}
@@ -218,35 +247,7 @@ export class ExprsEmitter {
 		if (capturedNames.length === 0) {
 			this.pushInstruction({ op: "ref.null", heapType: "any" });
 		} else {
-			const envFields = [];
-			for (const name of capturedNames) {
-				const isBoxed = this.mutatedCaptures.has(name);
-				const goType = this._findCapturedVarGoType(name);
-				if (isBoxed) {
-					const boxInfo = this.mod.getBoxType(goType);
-					envFields.push({
-						name,
-						goType,
-						isBoxed: true,
-						boxInfo,
-						wType: {
-							kind: "ref",
-							nullable: true,
-							typeIndex: boxInfo.typeIndex,
-						},
-					});
-				} else {
-					const wType = this.toWasmType(goType);
-					envFields.push({
-						name,
-						goType,
-						isBoxed: false,
-						boxInfo: null,
-						wType,
-					});
-				}
-			}
-
+			const envFields = this._buildEnvFields(capturedNames);
 			const envInfo = this.mod.getEnvType(envFields);
 
 			for (const field of envFields) {
@@ -363,7 +364,10 @@ export class ExprsEmitter {
 		const typeName =
 			lit.typeExpr?.name ??
 			(litType?.kind === "named" ? litType.name : litType?.name);
-		const structInfo = this.mod.getStructType(typeName);
+		let structInfo = typeName ? this.mod.getStructType(typeName) : null;
+		if (!structInfo) {
+			structInfo = this._resolveStructInfo(lit);
+		}
 		if (!structInfo) {
 			throw new Error(`Unknown struct in CompositeLit: ${typeName}`);
 		}
@@ -780,6 +784,59 @@ export class ExprsEmitter {
 		this.pushInstruction({ op: "local.set", index: dstArrTmp });
 
 		const iTmp = this.acquireTemp("i32");
+
+		// If copying within the same array and shifting right (dstOff > srcOff),
+		// copy backwards to prevent clobbering overlapping elements.
+		this.pushInstruction({ op: "local.get", index: dstArrTmp });
+		this.pushInstruction({ op: "local.get", index: srcArrTmp });
+		this.pushInstruction("ref.eq");
+		this.pushInstruction({ op: "local.get", index: dstOffTmp });
+		this.pushInstruction({ op: "local.get", index: srcOffTmp });
+		this.pushInstruction("i32.gt_u");
+		this.pushInstruction("i32.and");
+		this.pushInstruction({ op: "if", blockType: "void" });
+
+		// Backwards copy: i from lenTmp - 1 down to 0
+		this.pushInstruction({ op: "local.get", index: lenTmp });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("i32.sub");
+		this.pushInstruction({ op: "local.set", index: iTmp });
+
+		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushInstruction({ op: "loop", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction("i32.lt_s");
+		this.pushInstruction({ op: "br_if", depth: 1 });
+
+		this.pushInstruction({ op: "local.get", index: dstArrTmp });
+		this.pushInstruction({ op: "local.get", index: dstOffTmp });
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction("i32.add");
+
+		this.pushInstruction({ op: "local.get", index: srcArrTmp });
+		this.pushInstruction({ op: "local.get", index: srcOffTmp });
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "array.get", typeIndex: arrInfo.typeIndex });
+
+		if (sInfo) {
+			this.emitCloneStruct(sInfo, arrInfo.elemWType);
+		}
+
+		this.pushInstruction({ op: "array.set", typeIndex: arrInfo.typeIndex });
+
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("i32.sub");
+		this.pushInstruction({ op: "local.set", index: iTmp });
+		this.pushInstruction({ op: "br", depth: 0 });
+		this.pushInstruction("end");
+		this.pushInstruction("end");
+
+		this.pushInstruction("else");
+
+		// Forwards copy: i from 0 up to lenTmp - 1
 		this.pushInstruction({ op: "i32.const", value: 0 });
 		this.pushInstruction({ op: "local.set", index: iTmp });
 
@@ -813,6 +870,8 @@ export class ExprsEmitter {
 		this.pushInstruction({ op: "local.set", index: iTmp });
 		this.pushInstruction({ op: "br", depth: 0 });
 		this.pushInstruction("end");
+		this.pushInstruction("end");
+
 		this.pushInstruction("end");
 
 		this.releaseTemp(iTmp, "i32");
@@ -964,6 +1023,31 @@ export class ExprsEmitter {
 			nullable: true,
 			typeIndex: arrInfo.typeIndex,
 		};
+
+		const rawBaseType = baseNode._type ?? this._resolveExprGoType(baseNode);
+		const baseType =
+			rawBaseType?.kind === "pointer" ? rawBaseType.base : rawBaseType;
+		const arrayLen =
+			baseType?.kind === "array" ? (baseType.len ?? baseType.size) : null;
+		let constIdx = null;
+		if (indexNode.kind === "BasicLit" && indexNode.litKind === "INT") {
+			try {
+				const v = Number(indexNode.value);
+				if (Number.isInteger(v)) constIdx = v;
+			} catch {}
+		}
+		if (
+			arrayLen !== null &&
+			arrayLen !== undefined &&
+			constIdx !== null &&
+			constIdx >= 0 &&
+			constIdx < arrayLen
+		) {
+			this.emitExpr(baseNode, arrWType);
+			this.pushInstruction({ op: "i32.const", value: constIdx });
+			return;
+		}
+
 		const arrTmp = this.acquireTemp(arrWType);
 		this.emitExpr(baseNode, arrWType);
 		this.pushInstruction({ op: "local.tee", index: arrTmp });
@@ -998,14 +1082,16 @@ export class ExprsEmitter {
 			(lit.litKind === "INT" ? "i64" : lit.litKind === "FLOAT" ? "f64" : "i32");
 
 		if (lit.litKind === "INT") {
-			const n = Number(lit.value);
+			const s = String(lit.value);
+			const clean = /^0[0-7]+$/.test(s) ? `0o${s.slice(1)}` : s;
+			const n = Number(clean);
 			if (wType === "i32") {
 				this.pushInstruction({ op: "i32.const", value: n | 0 });
 			} else if (wType === "f64" || wType === "f32") {
 				// Untyped integer constant in a float context (`x * 2`).
 				this.pushInstruction({ op: `${wType}.const`, value: n });
 			} else {
-				this.pushInstruction({ op: "i64.const", value: BigInt(lit.value) });
+				this.pushInstruction({ op: "i64.const", value: BigInt(clean) });
 			}
 			return;
 		}
@@ -1029,31 +1115,7 @@ export class ExprsEmitter {
 		}
 
 		if (lit.litKind === "NIL") {
-			const effectiveType = targetWasmType ?? this.toWasmType(lit._type);
-			if (
-				(lit._type && isSliceType(lit._type, this.mod.checker)) ||
-				(effectiveType &&
-					typeof effectiveType === "object" &&
-					typeof effectiveType.typeIndex === "number" &&
-					this.mod.getSliceTypeByIndex(effectiveType.typeIndex))
-			) {
-				const elemType = lit._type ? this._getSliceElemType(lit._type) : null;
-				const sliceInfo = elemType
-					? this.mod.getSliceType(elemType)
-					: this.mod.getSliceTypeByIndex(effectiveType.typeIndex);
-				if (sliceInfo) {
-					this.pushInstruction({
-						op: "global.get",
-						index: sliceInfo.emptyGlobalIndex,
-					});
-					return;
-				}
-			}
-			const heapType =
-				typeof effectiveType === "object" && effectiveType !== null
-					? (effectiveType.typeIndex ?? effectiveType.heapType ?? "any")
-					: "any";
-			this.pushInstruction({ op: "ref.null", heapType });
+			this._emitNilValue(lit._type, targetWasmType);
 			return;
 		}
 
@@ -1068,6 +1130,42 @@ export class ExprsEmitter {
 		}
 	}
 
+	_emitNilValue(goType, targetWasmType) {
+		const effectiveType = targetWasmType ?? this.toWasmType(goType);
+		if (
+			(goType && isSliceType(goType, this.mod.checker)) ||
+			(effectiveType &&
+				typeof effectiveType === "object" &&
+				typeof effectiveType.typeIndex === "number" &&
+				this.mod.getSliceTypeByIndex(effectiveType.typeIndex))
+		) {
+			const elemType = goType ? this._getSliceElemType(goType) : null;
+			const sliceInfo = elemType
+				? this.mod.getSliceType(elemType)
+				: this.mod.getSliceTypeByIndex(effectiveType.typeIndex);
+			if (sliceInfo) {
+				this.pushInstruction({
+					op: "global.get",
+					index: sliceInfo.emptyGlobalIndex,
+				});
+				return;
+			}
+		}
+		const heapType =
+			typeof effectiveType === "object" && effectiveType !== null
+				? (effectiveType.typeIndex ?? effectiveType.heapType ?? "any")
+				: "any";
+		this.pushInstruction({ op: "ref.null", heapType });
+	}
+
+	_coerceIntWidth(srcType, targetWasmType) {
+		if (srcType === "i32" && targetWasmType === "i64") {
+			this.pushInstruction("i64.extend_i32_s");
+		} else if (srcType === "i64" && targetWasmType === "i32") {
+			this.pushInstruction("i32.wrap_i64");
+		}
+	}
+
 	emitIdent(ident, targetWasmType = null) {
 		if (ident.name === "true") {
 			this.pushInstruction({ op: "i32.const", value: 1 });
@@ -1078,33 +1176,7 @@ export class ExprsEmitter {
 			return;
 		}
 		if (ident.name === "nil") {
-			const effectiveType = targetWasmType ?? this.toWasmType(ident._type);
-			if (
-				(ident._type && isSliceType(ident._type, this.mod.checker)) ||
-				(effectiveType &&
-					typeof effectiveType === "object" &&
-					typeof effectiveType.typeIndex === "number" &&
-					this.mod.getSliceTypeByIndex(effectiveType.typeIndex))
-			) {
-				const elemType = ident._type
-					? this._getSliceElemType(ident._type)
-					: null;
-				const sliceInfo = elemType
-					? this.mod.getSliceType(elemType)
-					: this.mod.getSliceTypeByIndex(effectiveType.typeIndex);
-				if (sliceInfo) {
-					this.pushInstruction({
-						op: "global.get",
-						index: sliceInfo.emptyGlobalIndex,
-					});
-					return;
-				}
-			}
-			const heapType =
-				typeof effectiveType === "object" && effectiveType !== null
-					? (effectiveType.typeIndex ?? effectiveType.heapType ?? "any")
-					: "any";
-			this.pushInstruction({ op: "ref.null", heapType });
+			this._emitNilValue(ident._type, targetWasmType);
 			return;
 		}
 
@@ -1120,33 +1192,21 @@ export class ExprsEmitter {
 			} else {
 				this.pushInstruction({ op: "local.get", index: localInfo.index });
 			}
-			if (localInfo.type === "i32" && targetWasmType === "i64") {
-				this.pushInstruction("i64.extend_i32_s");
-			} else if (localInfo.type === "i64" && targetWasmType === "i32") {
-				this.pushInstruction("i32.wrap_i64");
-			}
+			this._coerceIntWidth(localInfo.type, targetWasmType);
 			return;
 		}
 
 		if (this.cachedGlobals.has(ident.name)) {
 			const cached = this.cachedGlobals.get(ident.name);
 			this.pushInstruction({ op: "local.get", index: cached.index });
-			if (cached.globalInfo.type === "i32" && targetWasmType === "i64") {
-				this.pushInstruction("i64.extend_i32_s");
-			} else if (cached.globalInfo.type === "i64" && targetWasmType === "i32") {
-				this.pushInstruction("i32.wrap_i64");
-			}
+			this._coerceIntWidth(cached.globalInfo.type, targetWasmType);
 			return;
 		}
 
 		const globalInfo = this.mod.resolveGlobal(ident.name);
 		if (globalInfo) {
 			this.pushInstruction({ op: "global.get", index: globalInfo.index });
-			if (globalInfo.type === "i32" && targetWasmType === "i64") {
-				this.pushInstruction("i64.extend_i32_s");
-			} else if (globalInfo.type === "i64" && targetWasmType === "i32") {
-				this.pushInstruction("i32.wrap_i64");
-			}
+			this._coerceIntWidth(globalInfo.type, targetWasmType);
 			return;
 		}
 
@@ -1157,11 +1217,6 @@ export class ExprsEmitter {
 				targetWasmType ?? this.toWasmType(ident._type),
 			);
 			return;
-		}
-		if (this.mod.isNonLiteralConst(ident.name)) {
-			throw new Error(
-				`constant '${ident.name}' has a non-literal value, which the wasm backend does not support yet (planned)`,
-			);
 		}
 
 		const trampName = `_tramp$${ident.name}`;
@@ -1256,6 +1311,13 @@ export class ExprsEmitter {
 				break;
 
 			case "&": {
+				if (operand.kind === "Ident") {
+					const loc = this.resolveLocal(operand.name);
+					if (loc?.isBoxed) {
+						this.pushInstruction({ op: "local.get", index: loc.index });
+						return;
+					}
+				}
 				if (operand.kind === "CompositeLit") {
 					this.emitExpr(operand);
 					return;
@@ -1526,6 +1588,26 @@ export class ExprsEmitter {
 				this.pushInstruction(`${wType}.mul`);
 				this.emitNarrowIntWrap(goType);
 				break;
+			case "/":
+				if (wType === "f32" || wType === "f64") {
+					this.pushInstruction(`${wType}.div`);
+				} else {
+					this.pushInstruction(signed ? `${wType}.div_s` : `${wType}.div_u`);
+					this.emitNarrowIntWrap(goType);
+				}
+				break;
+			case "%":
+				this.pushInstruction(signed ? `${wType}.rem_s` : `${wType}.rem_u`);
+				this.emitNarrowIntWrap(goType);
+				break;
+			case "<<":
+				this.pushInstruction(`${wType}.shl`);
+				this.emitNarrowIntWrap(goType);
+				break;
+			case ">>":
+				this.pushInstruction(signed ? `${wType}.shr_s` : `${wType}.shr_u`);
+				this.emitNarrowIntWrap(goType);
+				break;
 
 			case "&":
 				this.pushInstruction(`${wType}.and`);
@@ -1576,45 +1658,21 @@ export class ExprsEmitter {
 				}
 				break;
 			case "<":
-				if (isStringType(goType, this.mod.checker) || wType === "externref") {
-					const cmpIdx = this.mod.getStringCmpImportIndex("<");
-					this.pushInstruction({ op: "call", funcIndex: cmpIdx });
-				} else if (wType === "f32" || wType === "f64") {
-					this.pushInstruction(`${wType}.lt`);
-				} else {
-					this.pushInstruction(`${wType}.lt_${signed ? "s" : "u"}`);
-				}
-				break;
 			case "<=":
-				if (isStringType(goType, this.mod.checker) || wType === "externref") {
-					const cmpIdx = this.mod.getStringCmpImportIndex("<=");
-					this.pushInstruction({ op: "call", funcIndex: cmpIdx });
-				} else if (wType === "f32" || wType === "f64") {
-					this.pushInstruction(`${wType}.le`);
-				} else {
-					this.pushInstruction(`${wType}.le_${signed ? "s" : "u"}`);
-				}
-				break;
 			case ">":
+			case ">=": {
 				if (isStringType(goType, this.mod.checker) || wType === "externref") {
-					const cmpIdx = this.mod.getStringCmpImportIndex(">");
+					const cmpIdx = this.mod.getStringCmpImportIndex(op);
 					this.pushInstruction({ op: "call", funcIndex: cmpIdx });
-				} else if (wType === "f32" || wType === "f64") {
-					this.pushInstruction(`${wType}.gt`);
 				} else {
-					this.pushInstruction(`${wType}.gt_${signed ? "s" : "u"}`);
+					const name =
+						op === "<" ? "lt" : op === "<=" ? "le" : op === ">" ? "gt" : "ge";
+					const suffix =
+						wType === "f32" || wType === "f64" ? "" : `_${signed ? "s" : "u"}`;
+					this.pushInstruction(`${wType}.${name}${suffix}`);
 				}
 				break;
-			case ">=":
-				if (isStringType(goType, this.mod.checker) || wType === "externref") {
-					const cmpIdx = this.mod.getStringCmpImportIndex(">=");
-					this.pushInstruction({ op: "call", funcIndex: cmpIdx });
-				} else if (wType === "f32" || wType === "f64") {
-					this.pushInstruction(`${wType}.ge`);
-				} else {
-					this.pushInstruction(`${wType}.ge_${signed ? "s" : "u"}`);
-				}
-				break;
+			}
 
 			default:
 				throw new Error(`Unsupported binary operator: ${op}`);
@@ -1662,6 +1720,56 @@ export class ExprsEmitter {
 		}
 
 		const signed = isSigned(goType);
+		const is64 = wType === "i64";
+		const divOp = `${wType}.${op === "/" ? "div" : "rem"}_${signed ? "s" : "u"}`;
+
+		let constDivisor = null;
+		if (right.kind === "BasicLit" && right.litKind === "INT") {
+			try {
+				constDivisor = BigInt(right.value);
+			} catch {}
+		}
+
+		if (constDivisor !== null && constDivisor !== 0n && constDivisor !== -1n) {
+			// Specialize unsigned powers-of-two to shifts or bitwise masks
+			if (
+				!signed &&
+				constDivisor > 0n &&
+				(constDivisor & (constDivisor - 1n)) === 0n
+			) {
+				let k = 0n;
+				let temp = constDivisor;
+				while (temp > 1n) {
+					temp >>= 1n;
+					k++;
+				}
+				if (op === "/") {
+					this.emitExpr(left, wType);
+					this.pushInstruction({
+						op: `${wType}.const`,
+						value: is64 ? k : Number(k),
+					});
+					this.pushInstruction(`${wType}.shr_u`);
+				} else {
+					this.emitExpr(left, wType);
+					this.pushInstruction({
+						op: `${wType}.const`,
+						value: is64 ? constDivisor - 1n : Number(constDivisor - 1n),
+					});
+					this.pushInstruction(`${wType}.and`);
+				}
+				if (!is64) this.emitNarrowIntWrap(goType);
+				return;
+			}
+
+			// Constant divisor != 0 and != -1: no dynamic zero or overflow check needed
+			this.emitExpr(left, wType);
+			this.emitExpr(right, wType);
+			this.pushInstruction(divOp);
+			if (!is64) this.emitNarrowIntWrap(goType);
+			return;
+		}
+
 		const tmpA = this.acquireTemp(wType);
 		const tmpB = this.acquireTemp(wType);
 
@@ -1678,64 +1786,34 @@ export class ExprsEmitter {
 		this.emitPanic("runtime error: integer divide by zero");
 		this.pushInstruction("end");
 
-		if (wType === "i32") {
+		if (wType === "i32" || wType === "i64") {
 			if (signed) {
-				// MinInt32 / -1 wrap guard
+				const minVal = is64 ? -9223372036854775808n : -2147483648;
+				const negOne = is64 ? -1n : -1;
+				const zeroVal = is64 ? 0n : 0;
 				this.pushInstruction({ op: "local.get", index: tmpA });
-				this.pushInstruction({ op: "i32.const", value: -2147483648 });
-				this.pushInstruction("i32.eq");
+				this.pushInstruction({ op: `${wType}.const`, value: minVal });
+				this.pushInstruction(`${wType}.eq`);
 				this.pushInstruction({ op: "local.get", index: tmpB });
-				this.pushInstruction({ op: "i32.const", value: -1 });
-				this.pushInstruction("i32.eq");
+				this.pushInstruction({ op: `${wType}.const`, value: negOne });
+				this.pushInstruction(`${wType}.eq`);
 				this.pushInstruction("i32.and");
-				this.pushInstruction({ op: "if", blockType: "i32" });
-				if (op === "/") {
-					this.pushInstruction({ op: "i32.const", value: -2147483648 });
-				} else {
-					this.pushInstruction({ op: "i32.const", value: 0 });
-				}
-				this.pushInstruction("else");
-				this.pushInstruction({ op: "local.get", index: tmpA });
-				this.pushInstruction({ op: "local.get", index: tmpB });
-				this.pushInstruction(op === "/" ? "i32.div_s" : "i32.rem_s");
-				this.pushInstruction("end");
-			} else {
-				this.pushInstruction({ op: "local.get", index: tmpA });
-				this.pushInstruction({ op: "local.get", index: tmpB });
-				this.pushInstruction(op === "/" ? "i32.div_u" : "i32.rem_u");
-			}
-			this.emitNarrowIntWrap(goType);
-		} else if (wType === "i64") {
-			if (signed) {
-				this.pushInstruction({ op: "local.get", index: tmpA });
+				this.pushInstruction({ op: "if", blockType: wType });
 				this.pushInstruction({
-					op: "i64.const",
-					value: -9223372036854775808n,
+					op: `${wType}.const`,
+					value: op === "/" ? minVal : zeroVal,
 				});
-				this.pushInstruction("i64.eq");
-				this.pushInstruction({ op: "local.get", index: tmpB });
-				this.pushInstruction({ op: "i64.const", value: -1n });
-				this.pushInstruction("i64.eq");
-				this.pushInstruction("i32.and");
-				this.pushInstruction({ op: "if", blockType: "i64" });
-				if (op === "/") {
-					this.pushInstruction({
-						op: "i64.const",
-						value: -9223372036854775808n,
-					});
-				} else {
-					this.pushInstruction({ op: "i64.const", value: 0n });
-				}
 				this.pushInstruction("else");
 				this.pushInstruction({ op: "local.get", index: tmpA });
 				this.pushInstruction({ op: "local.get", index: tmpB });
-				this.pushInstruction(op === "/" ? "i64.div_s" : "i64.rem_s");
+				this.pushInstruction(divOp);
 				this.pushInstruction("end");
 			} else {
 				this.pushInstruction({ op: "local.get", index: tmpA });
 				this.pushInstruction({ op: "local.get", index: tmpB });
-				this.pushInstruction(op === "/" ? "i64.div_u" : "i64.rem_u");
+				this.pushInstruction(divOp);
 			}
+			if (!is64) this.emitNarrowIntWrap(goType);
 		}
 
 		this.releaseTemp(tmpB, wType);
@@ -1747,6 +1825,10 @@ export class ExprsEmitter {
 		const wType = targetWasmType ?? toWasmType(goType, this.mod.checker);
 		const signed = isSigned(goType);
 		const rightWType = toWasmType(right._type, this.mod.checker);
+		const is64 = wType === "i64";
+		const zeroVal = is64 ? 0n : 0;
+		const negOne = is64 ? -1n : -1;
+		const widthVal = is64 ? 64n : 32;
 
 		const tmpVal = this.acquireTemp(wType);
 		const tmpShift = this.acquireTemp(wType);
@@ -1762,68 +1844,34 @@ export class ExprsEmitter {
 		}
 		this.pushInstruction({ op: "local.set", index: tmpShift });
 
-		if (wType === "i32") {
-			this.pushInstruction({ op: "local.get", index: tmpShift });
-			this.pushInstruction({ op: "i32.const", value: 32 });
-			this.pushInstruction("i32.ge_u");
-			this.pushInstruction({ op: "if", blockType: "i32" });
+		this.pushInstruction({ op: "local.get", index: tmpShift });
+		this.pushInstruction({ op: `${wType}.const`, value: widthVal });
+		this.pushInstruction(`${wType}.ge_u`);
+		this.pushInstruction({ op: "if", blockType: wType });
 
-			if (op === ">>" && signed) {
-				this.pushInstruction({ op: "local.get", index: tmpVal });
-				this.pushInstruction({ op: "i32.const", value: 0 });
-				this.pushInstruction("i32.lt_s");
-				this.pushInstruction({ op: "if", blockType: "i32" });
-				this.pushInstruction({ op: "i32.const", value: -1 });
-				this.pushInstruction("else");
-				this.pushInstruction({ op: "i32.const", value: 0 });
-				this.pushInstruction("end");
-			} else {
-				this.pushInstruction({ op: "i32.const", value: 0 });
-			}
-
-			this.pushInstruction("else");
-
+		if (op === ">>" && signed) {
 			this.pushInstruction({ op: "local.get", index: tmpVal });
-			this.pushInstruction({ op: "local.get", index: tmpShift });
-			if (op === "<<") {
-				this.pushInstruction("i32.shl");
-			} else {
-				this.pushInstruction(signed ? "i32.shr_s" : "i32.shr_u");
-			}
-
+			this.pushInstruction({ op: `${wType}.const`, value: zeroVal });
+			this.pushInstruction(`${wType}.lt_s`);
+			this.pushInstruction({ op: "if", blockType: wType });
+			this.pushInstruction({ op: `${wType}.const`, value: negOne });
+			this.pushInstruction("else");
+			this.pushInstruction({ op: `${wType}.const`, value: zeroVal });
 			this.pushInstruction("end");
-			this.emitNarrowIntWrap(goType);
 		} else {
-			this.pushInstruction({ op: "local.get", index: tmpShift });
-			this.pushInstruction({ op: "i64.const", value: 64n });
-			this.pushInstruction("i64.ge_u");
-			this.pushInstruction({ op: "if", blockType: "i64" });
-
-			if (op === ">>" && signed) {
-				this.pushInstruction({ op: "local.get", index: tmpVal });
-				this.pushInstruction({ op: "i64.const", value: 0n });
-				this.pushInstruction("i64.lt_s");
-				this.pushInstruction({ op: "if", blockType: "i64" });
-				this.pushInstruction({ op: "i64.const", value: -1n });
-				this.pushInstruction("else");
-				this.pushInstruction({ op: "i64.const", value: 0n });
-				this.pushInstruction("end");
-			} else {
-				this.pushInstruction({ op: "i64.const", value: 0n });
-			}
-
-			this.pushInstruction("else");
-
-			this.pushInstruction({ op: "local.get", index: tmpVal });
-			this.pushInstruction({ op: "local.get", index: tmpShift });
-			if (op === "<<") {
-				this.pushInstruction("i64.shl");
-			} else {
-				this.pushInstruction(signed ? "i64.shr_s" : "i64.shr_u");
-			}
-
-			this.pushInstruction("end");
+			this.pushInstruction({ op: `${wType}.const`, value: zeroVal });
 		}
+
+		this.pushInstruction("else");
+
+		this.pushInstruction({ op: "local.get", index: tmpVal });
+		this.pushInstruction({ op: "local.get", index: tmpShift });
+		this.pushInstruction(
+			op === "<<" ? `${wType}.shl` : `${wType}.shr_${signed ? "s" : "u"}`,
+		);
+
+		this.pushInstruction("end");
+		if (!is64) this.emitNarrowIntWrap(goType);
 
 		this.releaseTemp(tmpShift, wType);
 		this.releaseTemp(tmpVal, wType);
@@ -1839,6 +1887,24 @@ export class ExprsEmitter {
 
 		if (fromWType === toWType) {
 			this.emitNarrowIntWrap(targetType);
+			return;
+		}
+
+		if (
+			fromWType === "externref" &&
+			isSliceType(targetType, this.mod.checker) &&
+			(targetType.elem?.name === "byte" || targetType.elem?.name === "uint8")
+		) {
+			this._emitStringToByteSlice(targetType);
+			return;
+		}
+
+		if (
+			toWType === "externref" &&
+			isSliceType(fromType, this.mod.checker) &&
+			(fromType.elem?.name === "byte" || fromType.elem?.name === "uint8")
+		) {
+			this._emitByteSliceToString(fromType);
 			return;
 		}
 
@@ -1858,51 +1924,173 @@ export class ExprsEmitter {
 			return;
 		}
 
+		const srcSign = isSigned(fromType) ? "s" : "u";
+		const dstSign = isSigned(targetType) ? "s" : "u";
 		if (fromWType === "i32" && toWType === "i64") {
-			this.pushInstruction(
-				isSigned(fromType) ? "i64.extend_i32_s" : "i64.extend_i32_u",
-			);
+			this.pushInstruction(`i64.extend_i32_${srcSign}`);
 		} else if (fromWType === "i64" && toWType === "i32") {
 			this.pushInstruction("i32.wrap_i64");
 			this.emitNarrowIntWrap(targetType);
-		} else if (fromWType === "i32" && toWType === "f32") {
-			this.pushInstruction(
-				isSigned(fromType) ? "f32.convert_i32_s" : "f32.convert_i32_u",
-			);
-		} else if (fromWType === "i32" && toWType === "f64") {
-			this.pushInstruction(
-				isSigned(fromType) ? "f64.convert_i32_s" : "f64.convert_i32_u",
-			);
-		} else if (fromWType === "i64" && toWType === "f32") {
-			this.pushInstruction(
-				isSigned(fromType) ? "f32.convert_i64_s" : "f32.convert_i64_u",
-			);
-		} else if (fromWType === "i64" && toWType === "f64") {
-			this.pushInstruction(
-				isSigned(fromType) ? "f64.convert_i64_s" : "f64.convert_i64_u",
-			);
+		} else if (
+			(fromWType === "i32" || fromWType === "i64") &&
+			(toWType === "f32" || toWType === "f64")
+		) {
+			this.pushInstruction(`${toWType}.convert_${fromWType}_${srcSign}`);
 		} else if (fromWType === "f32" && toWType === "f64") {
 			this.pushInstruction("f64.promote_f32");
 		} else if (fromWType === "f64" && toWType === "f32") {
 			this.pushInstruction("f32.demote_f64");
-		} else if (fromWType === "f64" && toWType === "i32") {
-			this.pushInstruction(
-				isSigned(targetType) ? "i32.trunc_sat_f64_s" : "i32.trunc_sat_f64_u",
-			);
-			this.emitNarrowIntWrap(targetType);
-		} else if (fromWType === "f32" && toWType === "i32") {
-			this.pushInstruction(
-				isSigned(targetType) ? "i32.trunc_sat_f32_s" : "i32.trunc_sat_f32_u",
-			);
-			this.emitNarrowIntWrap(targetType);
-		} else if (fromWType === "f64" && toWType === "i64") {
-			this.pushInstruction(
-				isSigned(targetType) ? "i64.trunc_sat_f64_s" : "i64.trunc_sat_f64_u",
-			);
-		} else if (fromWType === "f32" && toWType === "i64") {
-			this.pushInstruction(
-				isSigned(targetType) ? "i64.trunc_sat_f32_s" : "i64.trunc_sat_f32_u",
-			);
+		} else if (
+			(fromWType === "f32" || fromWType === "f64") &&
+			(toWType === "i32" || toWType === "i64")
+		) {
+			this.pushInstruction(`${toWType}.trunc_sat_${fromWType}_${dstSign}`);
+			if (toWType === "i32") this.emitNarrowIntWrap(targetType);
 		}
+	}
+
+	_emitStringToByteSlice(targetType) {
+		const elemGo = targetType.elem;
+		const sliceInfo = this.mod.getSliceType(elemGo);
+		const arrInfo = sliceInfo.arrInfo;
+		const strTmp = this.acquireTemp("externref");
+		this.pushInstruction({ op: "local.set", index: strTmp });
+		const lenTmp = this.acquireTemp("i32");
+		this.pushInstruction({ op: "local.get", index: strTmp });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getStrToBytesImportIndex(),
+		});
+		this.pushInstruction({ op: "local.tee", index: lenTmp });
+		this.pushInstruction({
+			op: "array.new_default",
+			typeIndex: arrInfo.typeIndex,
+		});
+		const arrTmp = this.acquireTemp({
+			kind: "ref",
+			nullable: true,
+			typeIndex: arrInfo.typeIndex,
+		});
+		this.pushInstruction({ op: "local.set", index: arrTmp });
+		const iTmp = this.acquireTemp("i32");
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: iTmp });
+
+		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushInstruction({ op: "loop", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction({ op: "local.get", index: lenTmp });
+		this.pushInstruction("i32.ge_s");
+		this.pushInstruction({ op: "br_if", depth: 1 });
+
+		this.pushInstruction({ op: "local.get", index: arrTmp });
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getStrByteAtImportIndex(),
+		});
+		this.pushInstruction({ op: "array.set", typeIndex: arrInfo.typeIndex });
+
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: iTmp });
+		this.pushInstruction({ op: "br", depth: 0 });
+		this.pushInstruction("end");
+		this.pushInstruction("end");
+
+		this.pushInstruction({ op: "local.get", index: arrTmp });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.get", index: lenTmp });
+		this.pushInstruction({ op: "local.get", index: lenTmp });
+		this.pushInstruction({
+			op: "struct.new",
+			typeIndex: sliceInfo.typeIndex,
+		});
+
+		this.releaseTemp(arrTmp, {
+			kind: "ref",
+			nullable: true,
+			typeIndex: arrInfo.typeIndex,
+		});
+		this.releaseTemp(iTmp, "i32");
+		this.releaseTemp(lenTmp, "i32");
+		this.releaseTemp(strTmp, "externref");
+	}
+
+	_emitByteSliceToString(fromType) {
+		const elemGo = fromType.elem;
+		const sliceInfo = this.mod.getSliceType(elemGo);
+		const arrInfo = sliceInfo.arrInfo;
+		const sliceW = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: sliceInfo.typeIndex,
+		};
+		const arrW = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: arrInfo.typeIndex,
+		};
+		const sTmp = this.acquireTemp(sliceW);
+		this.pushInstruction({ op: "local.set", index: sTmp });
+		const arrTmp = this.acquireTemp(arrW);
+		const offTmp = this.acquireTemp("i32");
+		const lenTmp = this.acquireTemp("i32");
+		const capTmp = this.acquireTemp("i32");
+		this._emitSliceUnpack(sTmp, sliceInfo, {
+			arr: arrTmp,
+			off: offTmp,
+			len: lenTmp,
+			cap: capTmp,
+		});
+		this.releaseTemp(sTmp, sliceW);
+		this.releaseTemp(capTmp, "i32");
+
+		this.pushInstruction({ op: "local.get", index: lenTmp });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getBytesToStrInitImportIndex(),
+		});
+
+		const iTmp = this.acquireTemp("i32");
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: iTmp });
+
+		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushInstruction({ op: "loop", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction({ op: "local.get", index: lenTmp });
+		this.pushInstruction("i32.ge_s");
+		this.pushInstruction({ op: "br_if", depth: 1 });
+
+		this.pushInstruction({ op: "local.get", index: arrTmp });
+		this.pushInstruction({ op: "local.get", index: offTmp });
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "array.get", typeIndex: arrInfo.typeIndex });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getBytesToStrPushImportIndex(),
+		});
+
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: iTmp });
+		this.pushInstruction({ op: "br", depth: 0 });
+		this.pushInstruction("end");
+		this.pushInstruction("end");
+
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getBytesToStrFinishImportIndex(),
+		});
+
+		this.releaseTemp(iTmp, "i32");
+		this.releaseTemp(lenTmp, "i32");
+		this.releaseTemp(offTmp, "i32");
+		this.releaseTemp(arrTmp, arrW);
 	}
 }

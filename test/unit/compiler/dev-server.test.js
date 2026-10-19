@@ -17,6 +17,7 @@ import {
 	section,
 	summarize,
 	test,
+	withTempDir,
 } from "../helpers.js";
 
 section("dev-server — static files & MIME types");
@@ -393,10 +394,8 @@ test("liveReloadClient contains error overlay, reconnect backoff, and CSS update
 	assertContains(liveReloadClient, "location.reload()");
 });
 
-test("createDevServer starts and closes cleanly", () => {
-	const dir = mkdtempSync(join(tmpdir(), "gofront-dev-srv-"));
-	try {
-		writeFileSync(join(dir, "index.html"), "<h1>Dev Server</h1>");
+test("createDevServer starts and closes cleanly and handles notification methods", () => {
+	withTempDir({ "index.html": "<h1>Dev Server</h1>" }, (dir) => {
 		const dev = createDevServer(dir, 0);
 		assert(dev.server !== undefined, "expected server instance");
 		assert(typeof dev.notify === "function", "expected notify function");
@@ -407,10 +406,20 @@ test("createDevServer starts and closes cleanly", () => {
 		assert(typeof dev.notifyCss === "function", "expected notifyCss function");
 		assert(typeof dev.ping === "function", "expected ping function");
 		assert(typeof dev.close === "function", "expected close function");
+
+		dev.notify();
+		dev.notify({ type: "reload" });
+		dev.notifyError("compile failed");
+		dev.notifyError({
+			message: "type error",
+			line: 10,
+			col: 5,
+			file: "app.go",
+		});
+		dev.ping();
+
 		dev.close();
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
+	});
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

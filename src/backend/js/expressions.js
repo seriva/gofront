@@ -40,6 +40,23 @@ const STRICT_OPS = new Set([
 	">>",
 ]);
 
+const NAMED_ZERO_TABLE = {
+	"time.Time": [null, "{ _d: new Date(0), _isZero: true }"],
+	"strings.Builder": [null, '{ _buf: "" }'],
+	"bytes.Buffer": [null, "{ _buf: [] }"],
+	"strings.Replacer": [null, "{ _p: [], Replace(s) { return s; } }"],
+	"sync.Mutex": ["sync", "__sync_mutex()"],
+	"sync.RWMutex": ["sync", "__sync_rwmutex()"],
+	"sync.Once": ["sync", "__sync_once()"],
+	"sync.WaitGroup": ["sync", "__sync_waitgroup()"],
+	"binary.LittleEndian": ["binary", "__binary_le"],
+	"encoding/binary.LittleEndian": ["binary", "__binary_le"],
+	"binary.BigEndian": ["binary", "__binary_be"],
+	"encoding/binary.BigEndian": ["binary", "__binary_be"],
+	"base64.Encoding": ["base64", "__base64_std"],
+	"encoding/base64.Encoding": ["base64", "__base64_std"],
+};
+
 // Splits a generated JS lvalue at its outermost trailing access:
 // `a.b[i]` → { obj: "a.b", key: "i" }, `a.b.c` → { obj: "a.b", prop: "c" }.
 function splitLastAccess(js) {
@@ -78,18 +95,76 @@ const NS_CONSTANTS = {
 	math: {
 		Pi: "Math.PI",
 		E: "Math.E",
+		Phi: "1.618033988749895",
+		Sqrt2: "Math.SQRT2",
+		SqrtE: "1.6487212707001282",
+		SqrtPi: "1.7724538509055159",
+		SqrtPhi: "1.272019649514069",
+		Ln2: "Math.LN2",
+		Log2E: "Math.LOG2E",
+		Ln10: "Math.LN10",
+		Log10E: "Math.LOG10E",
+		MaxFloat32: "3.4028234663852886e38",
+		SmallestNonzeroFloat32: "1.401298464324817e-45",
 		MaxFloat64: "Number.MAX_VALUE",
 		SmallestNonzeroFloat64: "Number.MIN_VALUE",
 		MaxInt: "Number.MAX_SAFE_INTEGER",
 		MinInt: "Number.MIN_SAFE_INTEGER",
+		MaxInt8: "127",
+		MinInt8: "-128",
+		MaxInt16: "32767",
+		MinInt16: "-32768",
+		MaxInt32: "2147483647",
+		MinInt32: "-2147483648",
+		MaxInt64: "9223372036854775807",
+		MinInt64: "-9223372036854775808",
+		MaxUint8: "255",
+		MaxUint16: "65535",
+		MaxUint32: "4294967295",
+		MaxUint: "18446744073709551615",
+		MaxUint64: "18446744073709551615",
+	},
+	strconv: {
+		ErrSyntax: "__strconv_err_syntax",
+		ErrRange: "__strconv_err_range",
+	},
+	path: {
+		ErrBadPattern: "__path_err_bad_pattern",
+	},
+	filepath: {
+		ErrBadPattern: "__path_err_bad_pattern",
 	},
 	io: {
-		EOF: '"EOF"',
+		EOF: "__io_eof",
 		Discard:
-			"{ WriteString(s) { return s.length; }, Write(b) { return b.length; } }",
+			"{ WriteString(s) { return [s.length, null]; }, Write(b) { return [b.length, null]; } }",
+	},
+	sha256: {
+		Size: "32",
+		BlockSize: "64",
+	},
+	hex: {
+		ErrLength: '__error("encoding/hex: odd length hex string")',
+	},
+	base64: {
+		StdPadding: "61",
+		NoPadding: "-1",
+		StdEncoding: "__base64_std",
+		URLEncoding: "__base64_url",
+		RawStdEncoding: "__base64_raw_std",
+		RawURLEncoding: "__base64_raw_url",
+	},
+	binary: {
+		LittleEndian: "__binary_le",
+		BigEndian: "__binary_be",
+	},
+	rand: {
+		Reader: "__crypto_rand_reader",
 	},
 	os: { Args: "process.argv" },
 	time: {
+		Nanosecond: "1",
+		Microsecond: "1000",
 		Millisecond: "1000000",
 		Second: "1000000000",
 		Minute: "60000000000",
@@ -278,8 +353,22 @@ export const expressionGenMethods = {
 			expr._ifaceBoxing = true;
 			try {
 				this.useHelper("ifaceBox");
-				const fn = expr._ifaceBox === "ptr" ? "__ifp" : "__ifv";
-				return `${fn}(${this.genExpr(expr)})`;
+				const fn =
+					expr._ifaceBox === "ptr"
+						? "__ifp"
+						: expr._ifaceBox === "ptr_slice"
+							? "__ifps"
+							: expr._ifaceBox === "ptr_map"
+								? "__ifpm"
+								: expr._ifaceBox === "map"
+									? "__ifm"
+									: expr._ifaceBox === "slice"
+										? "__ifs"
+										: "__ifv";
+				const extra = expr._ifacePtrFields?.length
+					? `, ${JSON.stringify(expr._ifacePtrFields)}`
+					: "";
+				return `${fn}(${this.genExpr(expr)}${extra})`;
 			} finally {
 				expr._ifaceBoxing = false;
 			}
@@ -500,6 +589,13 @@ export const expressionGenMethods = {
 			) {
 				return this.genExpr(expr.operand);
 			}
+			if (
+				expr.operand.kind === "SelectorExpr" ||
+				expr.operand.kind === "IndexExpr"
+			) {
+				const inner = this.genExpr(expr.operand);
+				return `{ get value() { return ${inner}; }, set value(v) { ${inner} = v; } }`;
+			}
 			// For non-boxed vars (primitives, etc.), wrap in { value: x }
 			return `{ value: ${this.genExpr(expr.operand)} }`;
 		}
@@ -529,7 +625,27 @@ export const expressionGenMethods = {
 		}
 		if (expr.expr.kind === "Ident") {
 			const nsConst = NS_CONSTANTS[expr.expr.name]?.[expr.field];
-			if (nsConst !== undefined) return nsConst;
+			if (nsConst !== undefined) {
+				if (expr.expr.name === "strconv") {
+					this.useHelper("strconvError");
+				} else if (expr.expr.name === "path" || expr.expr.name === "filepath") {
+					if (expr.field === "ErrBadPattern") this.useHelper("pathError");
+				} else if (expr.expr.name === "io" && expr.field === "EOF") {
+					this.useHelper("ioEOF");
+				} else if (expr.expr.name === "binary") {
+					this.useHelper("binary");
+				} else if (expr.expr.name === "hex") {
+					this.useHelper("hex");
+					this.useHelper("error");
+				} else if (expr.expr.name === "base64") {
+					this.useHelper("base64");
+				} else if (expr.expr.name === "rand" && expr.field === "Reader") {
+					this.useHelper("cryptoRand");
+				} else if (expr.expr.name === "sha256") {
+					this.useHelper("sha256");
+				}
+				return nsConst;
+			}
 		}
 		const base = this.genExpr(expr.expr);
 		if (this.bundledPackages.has(base)) return expr.field;
@@ -705,11 +821,60 @@ export const expressionGenMethods = {
 			return this._genRegexpMethodCall(expr.func.field, expr);
 		if (recvName === "time.Time")
 			return this._genTimeMethodCall(expr.func.field, expr);
+		if (recvName === "time.Duration")
+			return this._genDurationMethodCall(expr.func.field, expr);
 		if (recvName === "testing.T")
 			return this._genTestingMethodCall(expr.func.field, expr);
+		if (recvName === "strings.Replacer") {
+			const recv = this.genExpr(expr.func.expr);
+			const arg = this.genExpr(expr.args[0]);
+			return `(${recv} ? ${recv}.Replace(${arg}) : ${arg})`;
+		}
 		if (recvName?.startsWith("shared.") && expr.func.field === "Subarray") {
 			const args = expr.args.map((a) => this.genExpr(a)).join(", ");
 			return `${this.genExpr(expr.func.expr)}.subarray(${args})`;
+		}
+		if (recvName === "sync.Mutex" || recvName === "sync.RWMutex") {
+			if (expr.func.field === "TryLock" || expr.func.field === "TryRLock")
+				return "true";
+			return "(void 0)";
+		}
+		if (recvName === "sync.Once" && expr.func.field === "Do") {
+			const recv = this.genExpr(expr.func.expr);
+			const f = this.genExpr(expr.args[0]);
+			return `((o, fn) => { if (!o.done) { o.done = 1; fn(); } })(${recv}, ${f})`;
+		}
+		if (recvName === "sync.WaitGroup") {
+			const recv = this.genExpr(expr.func.expr);
+			if (expr.func.field === "Add") {
+				return `((wg, d) => { wg.counter = (wg.counter || 0) + d; })(${recv}, ${this.genExpr(expr.args[0])})`;
+			}
+			if (expr.func.field === "Done") {
+				return `((wg) => { wg.counter = (wg.counter || 0) - 1; })(${recv})`;
+			}
+			if (expr.func.field === "Wait") return "(void 0)";
+		}
+		if (
+			recvName === "binary.LittleEndian" ||
+			recvName === "binary.BigEndian" ||
+			recvName === "encoding/binary.LittleEndian" ||
+			recvName === "encoding/binary.BigEndian" ||
+			recvName === "binary.ByteOrder" ||
+			recvName === "encoding/binary.ByteOrder"
+		) {
+			this.useHelper("binary");
+			const recv = this.genExpr(expr.func.expr);
+			const args = expr.args.map((a) => this.genExpr(a)).join(", ");
+			return `${recv}.${expr.func.field}(${args})`;
+		}
+		if (
+			recvName === "base64.Encoding" ||
+			recvName === "encoding/base64.Encoding"
+		) {
+			this.useHelper("base64");
+			const recv = this.genExpr(expr.func.expr);
+			const args = expr.args.map((a) => this.genExpr(a)).join(", ");
+			return `${recv}.${expr.func.field}(${args})`;
 		}
 		return undefined;
 	},
@@ -981,10 +1146,38 @@ export const expressionGenMethods = {
 		return `new ${typeName}(${args.join(", ")})`;
 	},
 
+	_genSliceOrArrayLit(t, expr) {
+		const elems = expr.elems
+			.map((e) => this.genValueExpr(e.kind === "KeyValueExpr" ? e.value : e))
+			.join(", ");
+		const elemNode =
+			t.kind === "SliceType" || t.kind === "ArrayType" ? t.elem : null;
+		const elemResolved =
+			expr._type?.kind === "slice" || expr._type?.kind === "array"
+				? expr._type.elem
+				: null;
+		const typedCtor =
+			typedArrayConstructorForElem(elemResolved) ??
+			(elemNode?.name
+				? typedArrayConstructorForElem({
+						kind: "basic",
+						name: elemNode.name,
+					})
+				: null);
+		if (typedCtor) {
+			return `new ${typedCtor}([${elems}])`;
+		}
+		return `[${elems}]`;
+	},
+
 	genCompositeLit(expr) {
 		const t = expr.typeExpr;
 		if (t === null) return this._genImplicitCompositeLit(expr);
 		const typeName = this.getTypeName(t);
+		if (typeName === "bytes.Buffer" || typeName === "Buffer")
+			return "{ _buf: [] }";
+		if (typeName === "strings.Builder" || typeName === "Builder")
+			return '{ _buf: "" }';
 		if (typeName && this.structNames.has(typeName))
 			return this._genPositionalStructLit(typeName, expr);
 		if (typeName && this.namedWrapperNames.has(typeName))
@@ -992,29 +1185,7 @@ export const expressionGenMethods = {
 		if (expr.elems.some((e) => e._positionalField)) {
 			if (typeName) return this._genPositionalStructLit(typeName, expr);
 		}
-		if (this._isSliceOrArrayType(t)) {
-			const elems = expr.elems
-				.map((e) => this.genValueExpr(e.kind === "KeyValueExpr" ? e.value : e))
-				.join(", ");
-			const elemNode =
-				t.kind === "SliceType" || t.kind === "ArrayType" ? t.elem : null;
-			const elemResolved =
-				expr._type?.kind === "slice" || expr._type?.kind === "array"
-					? expr._type.elem
-					: null;
-			const typedCtor =
-				typedArrayConstructorForElem(elemResolved) ??
-				(elemNode?.name
-					? typedArrayConstructorForElem({
-							kind: "basic",
-							name: elemNode.name,
-						})
-					: null);
-			if (typedCtor) {
-				return `new ${typedCtor}([${elems}])`;
-			}
-			return `[${elems}]`;
-		}
+		if (this._isSliceOrArrayType(t)) return this._genSliceOrArrayLit(t, expr);
 		if (this._isMapTypeNode(t))
 			return `{ ${this._genMapLitEntries(expr.elems)} }`;
 		return this._genFallbackCompositeLit(expr);
@@ -1049,19 +1220,7 @@ export const expressionGenMethods = {
 		const namedType = this.checker?.types.get(typeName);
 		const u = namedType?.underlying;
 		if (u?.kind === "map") {
-			const entries = expr.elems
-				.map((e) => {
-					if (e.kind === "KeyValueExpr") {
-						const k =
-							e.key.litKind === "STRING"
-								? JSON.stringify(e.key.value)
-								: `[${this.genExpr(e.key)}]`;
-						return `${k}: ${this.genValueExpr(e.value)}`;
-					}
-					return this.genValueExpr(e);
-				})
-				.join(", ");
-			return `new ${typeName}({ ${entries} })`;
+			return `new ${typeName}({ ${this._genMapLitEntries(expr.elems)} })`;
 		}
 		// Default: slice
 		const elems = expr.elems
@@ -1124,8 +1283,11 @@ export const expressionGenMethods = {
 	},
 
 	_zeroForNamedType(name) {
-		if (name === "strings.Builder") return '{ _buf: "" }';
-		if (name === "bytes.Buffer") return "{ _buf: [] }";
+		const entry = NAMED_ZERO_TABLE[name];
+		if (entry) {
+			if (entry[0]) this.useHelper(entry[0]);
+			return entry[1];
+		}
 		name = this._dequalify(name);
 		if (this.structNames.has(name)) return `new ${name}()`;
 		return "null";
@@ -1397,24 +1559,17 @@ export const expressionGenMethods = {
 		return inner;
 	},
 
-	_isStringSource(srcType) {
-		return (
-			(srcType?.kind === "basic" && srcType?.name === "string") ||
-			(srcType?.kind === "untyped" && srcType?.base === "string")
-		);
-	},
-
 	_genSliceTypeConversion(expr, inner, t) {
 		const elem = t.elem?.name;
 		if (elem === "byte" || elem === "uint8") {
-			if (this._isStringSource(expr.expr._type))
+			if (this._isStringExprType(expr.expr._type))
 				return `new TextEncoder().encode(${inner})`;
 			return `new Uint8Array(${inner})`;
 		}
 		const typedCtor = typedArrayConstructorForElem(
 			t.elem ? { kind: "basic", name: t.elem.name } : null,
 		);
-		const fromString = this._isStringSource(expr.expr._type);
+		const fromString = this._isStringExprType(expr.expr._type);
 		if (typedCtor) {
 			return fromString
 				? `${typedCtor}.from(${inner}, __c => __c.codePointAt(0))`
@@ -1532,81 +1687,55 @@ export const expressionGenMethods = {
 		if (tName === "float32") {
 			return `Math.fround(${l} ${op} ${r})`;
 		}
-		if (tName === "int32" || tName === "rune") {
-			if (op === "*") return `Math.imul(${l}, ${r})`;
+		const divZero =
+			'(() => { throw new Error("runtime error: integer divide by zero"); })()';
+		if (tName === "int32" || tName === "rune" || tName === "uint32") {
+			const signed = tName !== "uint32";
+			const cast = signed ? "| 0" : ">>> 0";
+			if (signed && op === "*") return `Math.imul(${l}, ${r})`;
 			if (op === "/")
-				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : (Math.trunc((${l}) / (${r})) | 0))`;
+				return `((${r}) === 0 ? ${divZero} : (Math.trunc((${l}) / (${r})) ${cast}))`;
 			if (op === "%")
-				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : (((${l}) % (${r})) | 0))`;
+				return `((${r}) === 0 ? ${divZero} : (((${l}) % (${r})) ${cast}))`;
 			if (op === "<<" || op === ">>") {
-				return `((${r}) >= 32 ? (${op === ">>" ? `((${l}) < 0 ? -1 : 0)` : "0"}) : ((${l}) ${op} (${r}))) | 0`;
+				const ovf = signed && op === ">>" ? `((${l}) < 0 ? -1 : 0)` : "0";
+				const jsOp = !signed && op === ">>" ? ">>>" : op;
+				return `((${r}) >= 32 ? ${ovf} : ((${l}) ${jsOp} (${r}))) ${cast}`;
 			}
-			if (op === "&^") return `((${l}) & ~(${r})) | 0`;
-			return `((${l} ${op} ${r}) | 0)`;
+			if (op === "&^") return `((${l}) & ~(${r})) ${cast}`;
+			return `((${l} ${op} ${r}) ${cast})`;
 		}
-		if (tName === "uint32") {
+		if (tName === "int8" || tName === "int16") {
+			const bits = tName === "int8" ? 8 : 16;
+			const sh = 32 - bits;
 			if (op === "/")
-				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : (Math.trunc((${l}) / (${r})) >>> 0))`;
+				return `((${r}) === 0 ? ${divZero} : ((Math.trunc((${l}) / (${r})) << ${sh}) >> ${sh}))`;
 			if (op === "%")
-				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : (((${l}) % (${r})) >>> 0))`;
+				return `((${r}) === 0 ? ${divZero} : (((((${l}) % (${r})) << ${sh}) >> ${sh})))`;
+			if (op === "<<" || op === ">>") {
+				return `((${r}) >= ${bits} ? (${op === ">>" ? `((${l}) < 0 ? -1 : 0)` : "0"}) : (((${l}) ${op} (${r})) << ${sh} >> ${sh}))`;
+			}
+			if (op === "&^") return `((((${l}) & ~(${r})) << ${sh}) >> ${sh})`;
+			return `((((${l} ${op} ${r})) << ${sh}) >> ${sh})`;
+		}
+		if (tName === "uint8" || tName === "byte" || tName === "uint16") {
+			const bits = tName === "uint16" ? 16 : 8;
+			const mask = bits === 16 ? "0xFFFF" : "0xFF";
+			if (op === "/")
+				return `((${r}) === 0 ? ${divZero} : (Math.trunc((${l}) / (${r})) & ${mask}))`;
+			if (op === "%")
+				return `((${r}) === 0 ? ${divZero} : (((${l}) % (${r})) & ${mask}))`;
 			if (op === "<<" || op === ">>") {
 				const jsOp = op === ">>" ? ">>>" : "<<";
-				return `((${r}) >= 32 ? 0 : ((${l}) ${jsOp} (${r}))) >>> 0`;
+				return `((${r}) >= ${bits} ? 0 : (((${l}) ${jsOp} (${r})) & ${mask}))`;
 			}
-			if (op === "&^") return `((${l}) & ~(${r})) >>> 0`;
-			return `((${l} ${op} ${r}) >>> 0)`;
-		}
-		if (tName === "int8") {
-			if (op === "/")
-				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : ((Math.trunc((${l}) / (${r})) << 24) >> 24))`;
-			if (op === "%")
-				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : (((((${l}) % (${r})) << 24) >> 24)))`;
-			if (op === "<<" || op === ">>") {
-				return `((${r}) >= 8 ? (${op === ">>" ? `((${l}) < 0 ? -1 : 0)` : "0"}) : (((${l}) ${op} (${r})) << 24 >> 24))`;
-			}
-			if (op === "&^") return `((((${l}) & ~(${r})) << 24) >> 24)`;
-			return `((((${l} ${op} ${r})) << 24) >> 24)`;
-		}
-		if (tName === "int16") {
-			if (op === "/")
-				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : ((Math.trunc((${l}) / (${r})) << 16) >> 16))`;
-			if (op === "%")
-				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : (((((${l}) % (${r})) << 16) >> 16)))`;
-			if (op === "<<" || op === ">>") {
-				return `((${r}) >= 16 ? (${op === ">>" ? `((${l}) < 0 ? -1 : 0)` : "0"}) : (((${l}) ${op} (${r})) << 16 >> 16))`;
-			}
-			if (op === "&^") return `((((${l}) & ~(${r})) << 16) >> 16)`;
-			return `((((${l} ${op} ${r})) << 16) >> 16)`;
-		}
-		if (tName === "uint8" || tName === "byte") {
-			if (op === "/")
-				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : (Math.trunc((${l}) / (${r})) & 0xFF))`;
-			if (op === "%")
-				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : (((${l}) % (${r})) & 0xFF))`;
-			if (op === "<<" || op === ">>") {
-				const jsOp = op === ">>" ? ">>>" : "<<";
-				return `((${r}) >= 8 ? 0 : (((${l}) ${jsOp} (${r})) & 0xFF))`;
-			}
-			if (op === "&^") return `(((${l}) & ~(${r})) & 0xFF)`;
-			return `((${l} ${op} ${r}) & 0xFF)`;
-		}
-		if (tName === "uint16") {
-			if (op === "/")
-				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : (Math.trunc((${l}) / (${r})) & 0xFFFF))`;
-			if (op === "%")
-				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : (((${l}) % (${r})) & 0xFFFF))`;
-			if (op === "<<" || op === ">>") {
-				const jsOp = op === ">>" ? ">>>" : "<<";
-				return `((${r}) >= 16 ? 0 : (((${l}) ${jsOp} (${r})) & 0xFFFF))`;
-			}
-			if (op === "&^") return `(((${l}) & ~(${r})) & 0xFFFF)`;
-			return `((${l} ${op} ${r}) & 0xFFFF)`;
+			if (op === "&^") return `(((${l}) & ~(${r})) & ${mask})`;
+			return `((${l} ${op} ${r}) & ${mask})`;
 		}
 		if (this.isIntType(type)) {
 			if (op === "/")
-				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : Math.trunc((${l}) / (${r})))`;
-			if (op === "%")
-				return `((${r}) === 0 ? (() => { throw new Error("runtime error: integer divide by zero"); })() : ((${l}) % (${r})))`;
+				return `((${r}) === 0 ? ${divZero} : Math.trunc((${l}) / (${r})))`;
+			if (op === "%") return `((${r}) === 0 ? ${divZero} : ((${l}) % (${r})))`;
 		}
 		return `${l} ${op} ${r}`;
 	},

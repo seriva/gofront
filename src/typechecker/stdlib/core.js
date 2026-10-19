@@ -4,85 +4,101 @@
 import {
 	ANY,
 	BOOL,
+	BROWSER_GLOBALS,
 	ERROR,
+	FLOAT32,
 	FLOAT64,
 	INT,
+	INT8,
+	INT16,
+	INT32,
+	INT64,
 	STRING,
+	UINT,
 	UINT8,
+	UINT16,
 	UINT32,
 	UINT64,
 	VOID,
 } from "../types.js";
 
-const TIME_T = { kind: "named", name: "time.Time", underlying: ANY };
+const DURATION_T = {
+	kind: "named",
+	name: "time.Duration",
+	underlying: INT64,
+	methods: new Map([
+		["Nanoseconds", { kind: "func", params: [], returns: [INT64] }],
+		["Microseconds", { kind: "func", params: [], returns: [INT64] }],
+		["Milliseconds", { kind: "func", params: [], returns: [INT64] }],
+		["Seconds", { kind: "func", params: [], returns: [FLOAT64] }],
+		["Minutes", { kind: "func", params: [], returns: [FLOAT64] }],
+		["Hours", { kind: "func", params: [], returns: [FLOAT64] }],
+		["String", { kind: "func", params: [], returns: [STRING] }],
+	]),
+};
+const TIME_T = {
+	kind: "named",
+	name: "time.Time",
+	underlying: {
+		kind: "struct",
+		fields: new Map(),
+		methods: new Map(),
+	},
+};
+TIME_T.underlying.fields.set("_unixNano", INT64);
+TIME_T.underlying.fields.set("_offset", INT32);
+TIME_T.underlying.methods = new Map([
+	["Format", { kind: "func", params: [STRING], returns: [STRING] }],
+	["String", { kind: "func", params: [], returns: [STRING] }],
+	["Year", { kind: "func", params: [], returns: [INT] }],
+	["Month", { kind: "func", params: [], returns: [INT] }],
+	["Day", { kind: "func", params: [], returns: [INT] }],
+	["Hour", { kind: "func", params: [], returns: [INT] }],
+	["Minute", { kind: "func", params: [], returns: [INT] }],
+	["Second", { kind: "func", params: [], returns: [INT] }],
+	["Weekday", { kind: "func", params: [], returns: [INT] }],
+	["Unix", { kind: "func", params: [], returns: [INT64] }],
+	["UnixMilli", { kind: "func", params: [], returns: [INT64] }],
+	["UnixNano", { kind: "func", params: [], returns: [INT64] }],
+	["Nanosecond", { kind: "func", params: [], returns: [INT] }],
+	["IsZero", { kind: "func", params: [], returns: [BOOL] }],
+	["UTC", { kind: "func", params: [], returns: [TIME_T] }],
+	["Local", { kind: "func", params: [], returns: [TIME_T] }],
+	["Add", { kind: "func", params: [DURATION_T], returns: [TIME_T] }],
+	["Sub", { kind: "func", params: [TIME_T], returns: [DURATION_T] }],
+	["Before", { kind: "func", params: [TIME_T], returns: [BOOL] }],
+	["After", { kind: "func", params: [TIME_T], returns: [BOOL] }],
+	["Equal", { kind: "func", params: [TIME_T], returns: [BOOL] }],
+	["AddDate", { kind: "func", params: [INT, INT, INT], returns: [TIME_T] }],
+	["Truncate", { kind: "func", params: [DURATION_T], returns: [TIME_T] }],
+	["Round", { kind: "func", params: [DURATION_T], returns: [TIME_T] }],
+	["Date", { kind: "func", params: [], returns: [INT, INT, INT] }],
+	["Clock", { kind: "func", params: [], returns: [INT, INT, INT] }],
+	["YearDay", { kind: "func", params: [], returns: [INT] }],
+	["ISOWeek", { kind: "func", params: [], returns: [INT, INT] }],
+	["Compare", { kind: "func", params: [TIME_T], returns: [INT] }],
+	["In", { kind: "func", params: [ANY], returns: [TIME_T] }],
+	["Location", { kind: "func", params: [], returns: [ANY] }],
+	["Zone", { kind: "func", params: [], returns: [STRING, INT] }],
+]);
+TIME_T.methods = TIME_T.underlying.methods;
+const REPLACER_T = {
+	kind: "pointer",
+	base: { kind: "named", name: "strings.Replacer" },
+};
 
 export function setupCoreGlobals(globals, types) {
-	const browserGlobals = [
-		"console",
-		"document",
-		"window",
-		"navigator",
-		"location",
-		"history",
-		"screen",
-		"performance",
-		"crypto",
-		"indexedDB",
-		"fetch",
-		"setTimeout",
-		"setInterval",
-		"clearTimeout",
-		"clearInterval",
-		"requestAnimationFrame",
-		"cancelAnimationFrame",
-		"Math",
-		"JSON",
-		"Date",
-		"RegExp",
-		"Promise",
-		"Error",
-		"Symbol",
-		"String",
-		"Number",
-		"Boolean",
-		"Array",
-		"Object",
-		"parseInt",
-		"parseFloat",
-		"isNaN",
-		"isFinite",
-		"encodeURIComponent",
-		"decodeURIComponent",
-		"atob",
-		"btoa",
-		"alert",
-		"confirm",
-		"prompt",
-		"localStorage",
-		"sessionStorage",
-		"WebSocket",
-		"Worker",
-		"HTMLElement",
-		"Element",
-		"Event",
-		"CustomEvent",
-		"URL",
-		"URLSearchParams",
-		"FormData",
-		"Headers",
-		"Request",
-		"Response",
-		"Blob",
-		"File",
-		"FileReader",
-		"TextEncoder",
-		"TextDecoder",
-	];
-	for (const g of browserGlobals) globals.define(g, ANY);
+	for (const g of BROWSER_GLOBALS) globals.define(g, ANY);
 
 	const fmtVariadic = (ret) => ({
 		kind: "func",
 		params: [STRING, ANY],
+		returns: [ret],
+		variadic: true,
+	});
+	const fmtPrintVariadic = (ret) => ({
+		kind: "func",
+		params: [ANY],
 		returns: [ret],
 		variadic: true,
 	});
@@ -93,23 +109,23 @@ export function setupCoreGlobals(globals, types) {
 			Sprintf: fmtVariadic(STRING),
 			Errorf: fmtVariadic(ERROR),
 			Printf: fmtVariadic(VOID),
-			Println: fmtVariadic(VOID),
-			Print: fmtVariadic(VOID),
+			Println: fmtPrintVariadic(VOID),
+			Print: fmtPrintVariadic(VOID),
 			Fprintf: {
 				kind: "func",
-				params: [ANY, STRING],
+				params: [ANY, STRING, ANY],
 				returns: [INT, ERROR],
 				variadic: true,
 			},
 			Fprintln: {
 				kind: "func",
-				params: [ANY],
+				params: [ANY, ANY],
 				returns: [INT, ERROR],
 				variadic: true,
 			},
 			Fprint: {
 				kind: "func",
-				params: [ANY],
+				params: [ANY, ANY],
 				returns: [INT, ERROR],
 				variadic: true,
 			},
@@ -178,6 +194,7 @@ export function setupCoreGlobals(globals, types) {
 			},
 			EqualFold: strFn2(STRING, BOOL),
 			Fields: strFn1({ kind: "slice", elem: STRING }),
+			FieldsFunc: strFn2(ANY, { kind: "slice", elem: STRING }),
 			Cut: {
 				kind: "func",
 				params: [STRING, STRING],
@@ -218,10 +235,11 @@ export function setupCoreGlobals(globals, types) {
 			NewReplacer: {
 				kind: "func",
 				params: [STRING],
-				returns: [ANY],
+				returns: [REPLACER_T],
 				variadic: true,
 			},
 			NewReader: { kind: "func", params: [STRING], returns: [ANY] },
+			Builder: ANY,
 		},
 	});
 
@@ -253,6 +271,7 @@ export function setupCoreGlobals(globals, types) {
 			},
 			ToUpper: byFn1(BYTE_SLICE),
 			ToLower: byFn1(BYTE_SLICE),
+			ToTitle: byFn1(BYTE_SLICE),
 			TrimSpace: byFn1(BYTE_SLICE),
 			Trim: byFn2(STRING, BYTE_SLICE),
 			Equal: byFn2(BYTE_SLICE, BOOL),
@@ -280,6 +299,8 @@ export function setupCoreGlobals(globals, types) {
 			LastIndex: byFn2(BYTE_SLICE, INT),
 			LastIndexByte: byFn2(INT, INT),
 			Fields: byFn1({ kind: "slice", elem: BYTE_SLICE }),
+			FieldsFunc: byFn2(ANY, { kind: "slice", elem: BYTE_SLICE }),
+			Clone: byFn1(BYTE_SLICE),
 			Cut: {
 				kind: "func",
 				params: [BYTE_SLICE, BYTE_SLICE],
@@ -294,6 +315,7 @@ export function setupCoreGlobals(globals, types) {
 				returns: [{ kind: "slice", elem: BYTE_SLICE }],
 			},
 			NewReader: { kind: "func", params: [BYTE_SLICE], returns: [ANY] },
+			Buffer: ANY,
 		},
 	});
 
@@ -309,7 +331,8 @@ export function setupCoreGlobals(globals, types) {
 				returns: [STRING],
 			},
 			FormatBool: { kind: "func", params: [BOOL], returns: [STRING] },
-			FormatInt: { kind: "func", params: [INT, INT], returns: [STRING] },
+			FormatInt: { kind: "func", params: [INT64, INT], returns: [STRING] },
+			FormatUint: { kind: "func", params: [UINT64, INT], returns: [STRING] },
 			ParseFloat: {
 				kind: "func",
 				params: [STRING, INT],
@@ -320,12 +343,22 @@ export function setupCoreGlobals(globals, types) {
 				params: [STRING, INT, INT],
 				returns: [INT, ERROR],
 			},
+			ParseUint: {
+				kind: "func",
+				params: [STRING, INT, INT],
+				returns: [UINT64, ERROR],
+			},
 			ParseBool: { kind: "func", params: [STRING], returns: [BOOL, ERROR] },
 			Quote: { kind: "func", params: [STRING], returns: [STRING] },
 			Unquote: { kind: "func", params: [STRING], returns: [STRING, ERROR] },
 			AppendInt: {
 				kind: "func",
-				params: [BYTE_SLICE, INT, INT],
+				params: [BYTE_SLICE, INT64, INT],
+				returns: [BYTE_SLICE],
+			},
+			AppendUint: {
+				kind: "func",
+				params: [BYTE_SLICE, UINT64, INT],
 				returns: [BYTE_SLICE],
 			},
 			AppendFloat: {
@@ -333,6 +366,13 @@ export function setupCoreGlobals(globals, types) {
 				params: [BYTE_SLICE, FLOAT64, INT, INT, INT],
 				returns: [BYTE_SLICE],
 			},
+			AppendBool: {
+				kind: "func",
+				params: [BYTE_SLICE, BOOL],
+				returns: [BYTE_SLICE],
+			},
+			ErrSyntax: ERROR,
+			ErrRange: ERROR,
 		},
 	});
 
@@ -421,12 +461,43 @@ export function setupCoreGlobals(globals, types) {
 				params: [FLOAT64, FLOAT64],
 				returns: [FLOAT64],
 			},
+			Float64bits: { kind: "func", params: [FLOAT64], returns: [UINT64] },
+			Float64frombits: { kind: "func", params: [UINT64], returns: [FLOAT64] },
+			Float32bits: { kind: "func", params: [FLOAT32], returns: [UINT32] },
+			Float32frombits: { kind: "func", params: [UINT32], returns: [FLOAT32] },
+			Sinh: { kind: "func", params: [FLOAT64], returns: [FLOAT64] },
+			Cosh: { kind: "func", params: [FLOAT64], returns: [FLOAT64] },
+			Tanh: { kind: "func", params: [FLOAT64], returns: [FLOAT64] },
 			Pi: FLOAT64,
 			E: FLOAT64,
+			Phi: FLOAT64,
+			Sqrt2: FLOAT64,
+			SqrtE: FLOAT64,
+			SqrtPi: FLOAT64,
+			SqrtPhi: FLOAT64,
+			Ln2: FLOAT64,
+			Log2E: FLOAT64,
+			Ln10: FLOAT64,
+			Log10E: FLOAT64,
+			MaxFloat32: FLOAT32,
+			SmallestNonzeroFloat32: FLOAT32,
 			MaxFloat64: FLOAT64,
 			SmallestNonzeroFloat64: FLOAT64,
 			MaxInt: INT,
 			MinInt: INT,
+			MaxInt8: INT8,
+			MinInt8: INT8,
+			MaxInt16: INT16,
+			MinInt16: INT16,
+			MaxInt32: INT32,
+			MinInt32: INT32,
+			MaxInt64: INT64,
+			MinInt64: INT64,
+			MaxUint8: UINT8,
+			MaxUint16: UINT16,
+			MaxUint32: UINT32,
+			MaxUint: UINT,
+			MaxUint64: UINT64,
 		},
 	});
 
@@ -442,6 +513,13 @@ export function setupCoreGlobals(globals, types) {
 			TrailingZeros64: { kind: "func", params: [UINT64], returns: [INT] },
 			OnesCount64: { kind: "func", params: [UINT64], returns: [INT] },
 			RotateLeft64: { kind: "func", params: [UINT64, INT], returns: [UINT64] },
+			ReverseBytes16: { kind: "func", params: [UINT16], returns: [UINT16] },
+			ReverseBytes32: { kind: "func", params: [UINT32], returns: [UINT32] },
+			ReverseBytes64: { kind: "func", params: [UINT64], returns: [UINT64] },
+			Len32: { kind: "func", params: [UINT32], returns: [INT] },
+			Len64: { kind: "func", params: [UINT64], returns: [INT] },
+			Reverse32: { kind: "func", params: [UINT32], returns: [UINT32] },
+			Reverse64: { kind: "func", params: [UINT64], returns: [UINT64] },
 		},
 	});
 
@@ -452,6 +530,13 @@ export function setupCoreGlobals(globals, types) {
 			New: { kind: "func", params: [STRING], returns: [ERROR] },
 			Is: { kind: "func", params: [ERROR, ERROR], returns: [BOOL] },
 			Unwrap: { kind: "func", params: [ERROR], returns: [ERROR] },
+			As: { kind: "func", params: [ERROR, ANY], returns: [BOOL] },
+			Join: {
+				kind: "func",
+				params: [ERROR],
+				returns: [ERROR],
+				variadic: true,
+			},
 		},
 	});
 
@@ -460,23 +545,29 @@ export function setupCoreGlobals(globals, types) {
 		name: "time",
 		members: {
 			Now: { kind: "func", params: [], returns: [TIME_T] },
-			Since: { kind: "func", params: [TIME_T], returns: [INT] },
+			Since: { kind: "func", params: [TIME_T], returns: [DURATION_T] },
 			Sleep: { kind: "func", params: [ANY], returns: [VOID], async: true },
 			Parse: {
 				kind: "func",
 				params: [STRING, STRING],
 				returns: [TIME_T, ERROR],
 			},
-			Unix: { kind: "func", params: [INT, INT], returns: [TIME_T] },
+			Unix: { kind: "func", params: [INT64, INT64], returns: [TIME_T] },
+			UnixMicro: { kind: "func", params: [INT64], returns: [TIME_T] },
+			UnixMilli: { kind: "func", params: [INT64], returns: [TIME_T] },
 			Date: {
 				kind: "func",
 				params: [INT, INT, INT, INT, INT, INT, INT, ANY],
 				returns: [TIME_T],
 			},
-			Millisecond: INT,
-			Second: INT,
-			Minute: INT,
-			Hour: INT,
+			Duration: DURATION_T,
+			Nanosecond: DURATION_T,
+			Microsecond: DURATION_T,
+			Millisecond: DURATION_T,
+			Second: DURATION_T,
+			Minute: DURATION_T,
+			Hour: DURATION_T,
+			Time: TIME_T,
 			RFC3339: STRING,
 			RFC3339Nano: STRING,
 			DateOnly: STRING,
@@ -505,6 +596,7 @@ export function setupCoreGlobals(globals, types) {
 			Saturday: INT,
 		},
 	});
+	types.set("time.Duration", DURATION_T);
 	types.set("time.Time", TIME_T);
 
 	const runeToStr = { kind: "func", params: [INT], returns: [BOOL] };
@@ -553,7 +645,15 @@ export function setupCoreGlobals(globals, types) {
 		name: "slices",
 		members: {
 			Contains: { kind: "func", params: [ANY, ANY], returns: [BOOL] },
+			ContainsFunc: { kind: "func", params: [ANY, ANY], returns: [BOOL] },
 			Index: { kind: "func", params: [ANY, ANY], returns: [INT] },
+			IndexFunc: { kind: "func", params: [ANY, ANY], returns: [INT] },
+			BinarySearch: { kind: "func", params: [ANY, ANY], returns: [INT, BOOL] },
+			BinarySearchFunc: {
+				kind: "func",
+				params: [ANY, ANY, ANY],
+				returns: [INT, BOOL],
+			},
 			Equal: { kind: "func", params: [ANY, ANY], returns: [BOOL] },
 			Compare: { kind: "func", params: [ANY, ANY], returns: [INT] },
 			Sort: { kind: "func", params: [ANY], returns: [VOID] },
@@ -562,14 +662,34 @@ export function setupCoreGlobals(globals, types) {
 			IsSorted: { kind: "func", params: [ANY], returns: [BOOL] },
 			IsSortedFunc: { kind: "func", params: [ANY, ANY], returns: [BOOL] },
 			Reverse: { kind: "func", params: [ANY], returns: [VOID] },
-			Max: { kind: "func", params: [ANY], returns: [ANY] },
-			Min: { kind: "func", params: [ANY], returns: [ANY] },
-			MaxFunc: { kind: "func", params: [ANY, ANY], returns: [ANY] },
-			MinFunc: { kind: "func", params: [ANY, ANY], returns: [ANY] },
+			Max: {
+				kind: "func",
+				params: [ANY],
+				returns: [ANY],
+				_derivedReturn: "elemOfArg0",
+			},
+			Min: {
+				kind: "func",
+				params: [ANY],
+				returns: [ANY],
+				_derivedReturn: "elemOfArg0",
+			},
+			MaxFunc: {
+				kind: "func",
+				params: [ANY, ANY],
+				returns: [ANY],
+				_derivedReturn: "elemOfArg0",
+			},
+			MinFunc: {
+				kind: "func",
+				params: [ANY, ANY],
+				returns: [ANY],
+				_derivedReturn: "elemOfArg0",
+			},
 			Clone: sameSlice([ANY]),
 			Compact: sameSlice([ANY]),
 			CompactFunc: sameSlice([ANY, ANY]),
-			Concat: { kind: "func", params: [ANY], returns: [ANY], variadic: true },
+			Concat: sameSlice([ANY], { variadic: true }),
 			Delete: sameSlice([ANY, INT, INT]),
 			DeleteFunc: sameSlice([ANY, ANY]),
 			Insert: sameSlice([ANY, INT, ANY], { variadic: true }),
@@ -589,22 +709,93 @@ export function setupCoreGlobals(globals, types) {
 	});
 
 	const BYTE_SLICE_IO = { kind: "slice", elem: UINT8 };
+	const IO_WRITER = {
+		kind: "interface",
+		name: "io.Writer",
+		methods: new Map([
+			[
+				"Write",
+				{ kind: "func", params: [BYTE_SLICE_IO], returns: [INT, ERROR] },
+			],
+		]),
+	};
+	const IO_READER = {
+		kind: "interface",
+		name: "io.Reader",
+		methods: new Map([
+			[
+				"Read",
+				{ kind: "func", params: [BYTE_SLICE_IO], returns: [INT, ERROR] },
+			],
+		]),
+	};
+	const IO_CLOSER = {
+		kind: "interface",
+		name: "io.Closer",
+		methods: new Map([
+			["Close", { kind: "func", params: [], returns: [ERROR] }],
+		]),
+	};
+	const IO_READWRITER = {
+		kind: "interface",
+		name: "io.ReadWriter",
+		methods: new Map([
+			[
+				"Read",
+				{ kind: "func", params: [BYTE_SLICE_IO], returns: [INT, ERROR] },
+			],
+			[
+				"Write",
+				{ kind: "func", params: [BYTE_SLICE_IO], returns: [INT, ERROR] },
+			],
+		]),
+	};
 	globals.define("io", {
 		kind: "namespace",
 		name: "io",
 		members: {
-			Writer: ANY,
-			Reader: ANY,
+			Writer: IO_WRITER,
+			Reader: IO_READER,
+			Closer: IO_CLOSER,
+			ReadWriter: IO_READWRITER,
 			EOF: ERROR,
+			ErrUnexpectedEOF: ERROR,
+			ErrShortWrite: ERROR,
 			WriteString: {
 				kind: "func",
-				params: [ANY, STRING],
+				params: [IO_WRITER, STRING],
 				returns: [INT, ERROR],
 			},
-			ReadAll: { kind: "func", params: [ANY], returns: [BYTE_SLICE_IO, ERROR] },
-			Discard: ANY,
+			ReadFull: {
+				kind: "func",
+				params: [IO_READER, BYTE_SLICE_IO],
+				returns: [INT, ERROR],
+			},
+			ReadAll: {
+				kind: "func",
+				params: [IO_READER],
+				returns: [BYTE_SLICE_IO, ERROR],
+			},
+			LimitReader: {
+				kind: "func",
+				params: [IO_READER, INT64],
+				returns: [IO_READER],
+			},
+			Copy: {
+				kind: "func",
+				params: [IO_WRITER, IO_READER],
+				returns: [INT64, ERROR],
+			},
+			CopyN: {
+				kind: "func",
+				params: [IO_WRITER, IO_READER, INT64],
+				returns: [INT64, ERROR],
+			},
+			Discard: IO_WRITER,
 		},
 	});
-	types.set("io.Writer", ANY);
-	types.set("io.Reader", ANY);
+	types.set("io.Writer", IO_WRITER);
+	types.set("io.Reader", IO_READER);
+	types.set("io.Closer", IO_CLOSER);
+	types.set("io.ReadWriter", IO_READWRITER);
 }

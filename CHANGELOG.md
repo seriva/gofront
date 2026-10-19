@@ -4,6 +4,90 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.6.1] - 2026-10-18
+
+### Added
+- **Language completeness in `wasm` packages** — package-level non-literal constants (`const X = len("abc") * 2` folded at compile time; runtime folded expressions initialized as module globals in the WASM `start` function); array-typed map keys (`map[[N]T]V`) hashed and compared element-wise; interface-typed map keys (`map[any]V`, `map[Interface]V`) hashed on dynamic type id plus value hash with dynamic type equality, raising Go's panic (`runtime error: hash of unhashable type ...`) on unhashable keys (slice, map, func).
+- **Expanded JS ↔ WASM boundary types** —
+  - `error`: crosses WASM → JS as an `Error` subclass carrying `.message` and WASM handle (`__ref`) so `errors.Is`/`Unwrap` retain identity; nil errors cross as `null`; JS → WASM accepts only WASM-owned error instances.
+  - `map[K]V` (K = string, number, bool): copied bidirectionally as a fresh JS `Map` in insertion order; accepts plain JS objects or `Map`s as parameters without mutating WASM state.
+  - Pointers to non-structs (`*float64`, `*int`, etc.): copy-in/copy-out box `{ value }` written back after call (write-back skipped on panic).
+  - Anonymous structs: copied as plain JS objects `{ [field]: value }` with matching field names.
+  - Anonymous interfaces (`interface{ ... }`): synthesized internal facade keyed on sorted method set with shared facade classes.
+  - Exported non-literal constants: exposed on the JS facade as module constants read once after module initialization.
+  - `time.Time` & `time.Duration`: `Duration` crosses as `Number` (`int64`); `Time` copies into the JS `time.Time` object via Unix milliseconds (preserving timezone offset).
+- **Wider stdlib in `wasm` packages** —
+  - `strings`: added `Cut`, `CutPrefix`, `CutSuffix`, `SplitN`, `SplitAfter`, `SplitAfterN`, `LastIndexAny`, `Map`, `IndexFunc`, `LastIndexFunc`, `TrimFunc`, `TrimLeftFunc`, `TrimRightFunc`, `NewReplacer` (+ `Replace`), and `Builder` (`WriteString`, `WriteByte`, `WriteRune`, `String`, `Len`, `Reset`, `Grow`) as an in-WASM struct.
+  - `strconv`: added `Unquote` (returns Go's `ErrSyntax`), `AppendInt`, `AppendFloat`.
+  - `math`: added `Remainder`.
+  - `slices`: added `Compare`, `SortFunc`, `SortStableFunc`, `IsSorted`, `IsSortedFunc`, `Min`, `Max`, `MinFunc`, `MaxFunc`, `Compact`, `CompactFunc`, `Concat`, `Delete`, `DeleteFunc`, `Insert`, `Replace`, `Grow`, `Clip`; all `*Func` callbacks run inline via `call_ref`.
+  - `fmt`: composite `%v` and `%+v` formatting for slices, arrays, maps, and structs matching JS backend format output; `Fprintf`, `Fprintln`, `Fprint` writing to `io.Writer`; `Sscan`, `Sscanln`, `Sscanf` scanning into pointers inside WASM.
+  - `unicode`: `IsLetter`, `IsDigit`, `IsSpace`, `IsUpper`, `IsLower`, `IsPunct`, `IsControl`, `IsPrint`, `IsGraphic`, `ToUpper`, `ToLower` (inline ASCII fast path with JS Unicode table fallback).
+  - `math/rand`: full pure set (`Intn`, `Float64`, `Float32`, `Int`, `Int63`, `Int63n`, `Int31`, `Int31n`, `Shuffle`, `Perm`, `Seed` as no-op) backed by `Math.random` host import.
+  - `bytes`: WASM implementation of byte-slice operations and `bytes.Buffer`, with native byte loops and host JS helper delegation for string cutset operations (`Trim`, `TrimLeft`, `TrimRight`, `ContainsAny`).
+  - `io`: `Reader`, `Writer`, `ReadWriter`, `Closer` interfaces, `EOF` sentinel error value, `ReadAll`, `Discard`, `WriteString`; `strings.NewReader` and `bytes.NewReader` returning native in-WASM `io.Reader`.
+  - `path` & `path/filepath`: `Base`, `Dir`, `Ext`, `Join`, `Clean`, `IsAbs`, `Split`, `Match` via host JS runtime shims in `boundary.js`.
+  - `html`: `EscapeString`, `UnescapeString` via host JS runtime shims in `boundary.js`.
+  - `time`: `Duration` and its constants, `Time` struct and 16 methods (`Format`, `String`, `Year` .. `Second`, `Weekday`, `Unix`, `UnixMilli`, `Add`, `Sub`, `Before`, `After`, `Equal`), `Parse`, `Unix`, `Date`, layout/duration/calendar constants; `Now` and `Since` reading host clock (`Date.now`) and timezone offset imports.
+- **New WASM & JS stdlib packages** —
+  - `encoding/binary`: `LittleEndian`, `BigEndian` decoding (`Uint16`, `Uint32`, `Uint64`, `PutUint16`, `PutUint32`, `PutUint64`, `AppendUint16`, `AppendUint32`, `AppendUint64`), `Read`, `Write`, and `Size`. Enables fast binary data parsing (3D meshes, models, audio, networking) across JS and WASM.
+  - `sync`: lightweight single-threaded concurrency shims (`sync.Mutex`, `sync.RWMutex`, `sync.Once` with `.Do()`, `sync.WaitGroup` with `.Add()`, `.Done()`, `.Wait()`).
+  - `crypto/rand` & `crypto/sha256`: `crypto/rand.Read` backed by host `crypto.getRandomValues()`; `crypto/sha256.Sum256` and `crypto/sha256.New` for asset caching and integrity checks.
+  - `encoding/hex`: `EncodeToString`, `DecodeString`, `EncodedLen`, `DecodedLen`, `Encode`, `Decode`.
+  - `encoding/base64`: `StdEncoding`, `URLEncoding`, `RawStdEncoding`, `RawURLEncoding` (`EncodeToString`, `DecodeString`, `EncodedLen`, `DecodedLen`), `NewEncoding`.
+- **Expanded standard library methods and functions** —
+  - `time`: `Duration` methods (`Seconds`, `Milliseconds`, `Microseconds`, `Nanoseconds`, `Minutes`, `Hours`, `String`); `time.Time` methods (`IsZero`, `UnixNano`, `Nanosecond`, `UTC`, `Local`).
+  - `slices`: `IndexFunc`, `ContainsFunc`, `BinarySearch`, `BinarySearchFunc`.
+  - `strconv`: `ParseUint`, `FormatUint`, `AppendUint`, `AppendBool`.
+  - `io`: `Copy`, `CopyN`, `LimitReader`.
+  - `math`: IEEE-754 bit reinterpretations (`Float64bits`, `Float64frombits`, `Float32bits`, `Float32frombits` as single-opcode WASM instructions), hyperbolic functions (`Sinh`, `Cosh`, `Tanh`), and 24 math constants (`MaxInt32`, `MinInt32`, `MaxInt64`, `MinInt64`, `MaxUint32`, `MaxFloat32`, `SmallestNonzeroFloat32`, `Phi`, `Sqrt2`, `SqrtE`, `SqrtPi`, `SqrtPhi`, `Ln2`, `Log2E`, `Ln10`, `Log10E`, etc.).
+  - `math/bits`: byte reversals (`ReverseBytes16`, `ReverseBytes32`, `ReverseBytes64`), `Len32`, `Len64`, `Reverse32`, `Reverse64`.
+  - `math/rand`: pure inline 64-bit PRNG in WASM with deterministic `rand.Seed` and `rand.Read` (eliminating host boundary overhead).
+  - `errors`: `errors.As` (chain traversal with dynamic type matching) and `errors.Join`.
+  - `strings` & `bytes`: `strings.FieldsFunc`, `bytes.FieldsFunc`, `bytes.Clone`.
+- **WASM codegen and optimizer improvements** —
+  - Disassemble optimized binary directly in single pass on `--emit-wat` without duplicate GUFA analysis.
+  - Enabled `--closed-world` and pass convergence (`--converge`) in release builds while preserving hardware nil-pointer dereference traps by default.
+  - Eliminated duplicate struct allocations on function call returns (`_emitCopyIfValueStruct`).
+  - Eliminated zero and overflow guards for constant divisors in `emitDivRem`, specializing powers-of-two to shifts and bitwise masks.
+  - Eliminated compile-time bounds checks for fixed-size arrays with constant in-bounds indices.
+  - Function-body compile-time constant folding via `foldConstExpr`.
+  - Direct `WriteString` dispatch on `strings.Builder` and `bytes.Buffer` in `io.WriteString` and `fmt.Fprint*`.
+  - Index-only slice range loop unpacking (omitting unused array and offset unpacks).
+- **Performance & code minimization** —
+  - Compiler pipeline: slice-once scanning in `Lexer` and `TemplLexer`; pooled scratch buffers and single-pass sizing in WASM module encoder; eliminated redundant AST traversals in lowering analysis (`fnMutates`, `closureMutates`).
+  - Parser optimizations: module-level `ASSIGN_OPS` and `UNARY_OPS` Sets eliminating statement/expression array allocations; deduplicated identifier list parsing across struct and variable declarations.
+  - Runtime zero-allocation: indexed `codePointAt` string iteration without intermediate substring allocations; fast-path positional struct instantiation; consolidated JS iterator loops; deduplicated stdlib and WASM emitter helpers.
+- **Targeted diagnostics** — `time.Sleep` in `wasm`/`both` packages reports `'time.Sleep' is not yet available in wasm packages` with a hint to keep the call in a JS package, preserving the boundary between synchronous WASM and async JS event loop.
+
+### Removed
+- **`fmt.Scan`** — removed from typechecker stdlib definitions due to lack of standard input streams (`os.Stdin`) in frontend environments.
+
+### Fixed
+- **Generic struct type argument preservation** — fixed `resolveType()` clobbering instantiated generic types (e.g. `Box[int]`) with uninstantiated template types from `this.types`, restoring type safety and value-copy semantics in JS codegen.
+- **Interface boxing nil preservation & recursive ptrFields** — preserved `null` for nil slices and maps in `__ifs`/`__ifps`; prevented fixed-size arrays from being marked as slices in assignability; removed recursive `__ifp` mutation of child value struct fields.
+- **`[]byte` representation parity** — ensured stdlib methods (`sha256.Sum256`, `hex.DecodeString`, `base64.*.DecodeString`, `strconv.Append*`, `bytes.Buffer.Bytes()`, `bytes.*`) return `Uint8Array` rather than plain JS `Array` so `.subarray(...)` slicing succeeds.
+- **`uint64` scalar Number representation** — aligned `strconv.ParseUint`, `math.Float64bits`, `binary.*.Uint64`, and `bits.RotateLeft64` with Number representation, eliminating BigInt mixing errors and restoring `x.(uint64)` assertions.
+- **Helper dependencies in `useHelper`** — registered `"error"` and `"ioEOF"` in `useHelper` on `encoding/base64`, `encoding/hex`, and `encoding/binary` error code paths to prevent runtime `ReferenceError`.
+- **`errors.As` & `errors.Join`** — supported interface targets in `errors.As` without `instanceof error` crash; recursively inspected slice `_errs` produced by `errors.Join`; removed `interface` from `isReferenceType` in `src/lower/boxing.js` so address-taken interface targets box properly.
+- **`binary.Read` & `binary.Write`** — supported signed integers and float bitcasts in JS and WASM; implemented 1-byte integer branches, signed extension, pointer parameter targets (`p *uint32`, `p *int`), struct fields, and slice indices in WASM; implemented accessor box for struct fields and index targets in JS; registered `bytes.Buffer.Read` for `io.Reader` compliance in WASM.
+- **WASM stdlib integration** — fixed `time.Time.Local()` timezone lookup; registered `sha256.digest` methods with synthetic method dispatch; registered `binary.BigEndian`/`LittleEndian` struct types; implemented `sync.Locker`, `rand.Reader`, `hex`, and `base64` members.
+- **WASM optimizer nil-pointer traps** — removed `--traps-never-happen` from default optimization flags so nil pointer struct access triggers WebAssembly traps as expected in Go.
+- **WASM compound assignments** — routed `/=`, `%=`, `<<=`, `>>=` through specialized arithmetic/shift emitters for pointer dereferences `*p`, struct fields `s.f`, and index expressions `a[i]`.
+- **Qualified type conversions** — enforced arity and convertibility checks on `pkg.Type(...)` conversions, rejecting zero-argument calls (`time.Duration()`) and non-convertible types (`sync.Mutex(123)`).
+- **`time.Time` struct equality** — ensured `t1 == t2` and `fmt.Sprintf("%v", t)` compare and format Date objects without crashing in JS.
+- **Large random buffers** — chunked calls to `crypto.getRandomValues()` into 65,536-byte segments across JS runtime and WASM boundary shims.
+- **Multi-return forwarding into `any`** — permitted multi-return function calls to forward directly into function parameters of type `any` / `interface{}`.
+- **WASM `fmt.Sscan*` target writes** — routed `fmt.Sscan` writes through `_emitAssignToTarget` and included address-taken locals in WASM boxing analysis.
+- **JS `fmt.Sscanf` format verbs** — added handling for `%x`, `%X`, `%o`, `%b`, and `%c` runes and integers in JS `_SSCAN_LOOP`.
+- **Subsecond time formatting** — added support for subsecond format tokens (`.000`, `.999`, `.000000`) in JS and WASM time layout formatters.
+- **Edge cases in stdlib** — fixed empty separator handling in `bytes.Split`/`Replace`; implemented character class range matching in `path.Match`; corrected `base64.RawStdEncoding.EncodedLen`; prevented double evaluation in JS stdlib inline templates (`strings.TrimSpace`, `slices.Compact`).
+- **`sync.RWMutex` zero value & `strings.Builder.Len()`** — initialized `sync.RWMutex` zero values safely; updated nested anonymous struct formatting in `__sprintf`; fixed `strings.Builder.Len()` to return UTF-8 byte lengths in JS.
+- **Test runner & worker pool reliability** — added `await waitForPending()` to `TEST_PARALLEL=0` to ensure async tests settle deterministically; isolated CLI test temporary directories with symlinked `node_modules`; added worker recovery on exit/error in parallel pool.
+- **Layout token alternation order** — resolved two-digit layout tokens (`15`, `01`, `02`, `04`, `05`) matching after single-digit tokens (`1`, `2`, `3`, `4`, `5`) in `time.Format` and `time.Parse` layout regex.
+- **Operator precedence under negation** — wrapped `Before`, `After`, and `Equal` expressions in grouping parentheses in the JS backend `time` stdlib to ensure correct evaluation when negated with `!`.
+- **Selector type conversions** — fixed typechecker `_isTypeRef` resolution on namespace selectors (such as `time.Duration(x)`) and added `call._isTypeConversion` handler in WASM emitter.
+
 ## [1.6.0] - 2026-10-10
 
 ### Added

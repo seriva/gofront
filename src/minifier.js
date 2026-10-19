@@ -121,7 +121,7 @@ const REGEX_CONTEXT_VALUES = new Set([
 const DIVISION_AFTER_OPS = new Set([")", "]", "++", "--"]);
 
 function _isRegexContext(tokens) {
-	const prev = lastNonWhitespaceToken(tokens);
+	const prev = findPrevNonWs(tokens);
 	if (!prev) return true;
 	if (prev.type === "op") return !DIVISION_AFTER_OPS.has(prev.value);
 	return REGEX_CONTEXT_VALUES.has(prev.value);
@@ -323,14 +323,6 @@ function tokenize(code) {
 	return tokens;
 }
 
-function lastNonWhitespaceToken(tokens) {
-	for (let i = tokens.length - 1; i >= 0; i--) {
-		if (tokens[i].type !== "ws" && tokens[i].type !== "comment")
-			return tokens[i];
-	}
-	return null;
-}
-
 // ── Stage 1 & 2: Compress ────────────────────────────────────
 
 function isIdentLike(type) {
@@ -348,15 +340,6 @@ const SPACE_AFTER_KW_RIGHT_TYPES = new Set([
 ]);
 // Operator values that do NOT need a space after a keyword
 const NO_SPACE_AFTER_KW_OPS = new Set(["(", "[", "!", "-", "+"]);
-// Adjacent op pairs that would accidentally merge into a different operator
-const _INCREMENT_MERGE_PAIRS = new Set([
-	"+|+",
-	"-|-",
-	"+|++",
-	"-|--",
-	"++|+",
-	"--|−-",
-]);
 
 function _wouldMergeUnaryOps(left, right) {
 	return (
@@ -436,11 +419,7 @@ function compressTokens(tokens) {
 	return out;
 }
 
-function compress(code) {
-	return compressTokens(tokenize(code));
-}
-
-function findPrevNonWs(tokens, index) {
+function findPrevNonWs(tokens, index = tokens.length) {
 	for (let i = index - 1; i >= 0; i--) {
 		if (tokens[i].type !== "ws" && tokens[i].type !== "comment")
 			return tokens[i];
@@ -477,7 +456,7 @@ function _matchingParen(tokens, openIdx) {
 // A `(` opens a parameter list only when its `)` is followed by a body `{` or `=>`;
 // otherwise `name(...)` is a call and its arguments may be free globals.
 function _collectParamDecls(tokens, i, declaredLocals) {
-	const prev = findPrevNonWsToken(tokens, i);
+	const prev = findPrevNonWs(tokens, i);
 	if (
 		!prev ||
 		(prev.value !== "function" && prev.type !== "ident" && prev.value !== ")")
@@ -583,22 +562,7 @@ function _filterRenameCandidates(declaredLocals) {
 	}
 }
 
-function _applyRenaming(tokens, renameMap) {
-	let out = "";
-	for (let i = 0; i < tokens.length; i++) {
-		const tok = tokens[i];
-		if (tok.type === "ident" && renameMap.has(tok.value)) {
-			const prev = findPrevNonWsToken(tokens, i);
-			out += prev && prev.value === "." ? tok.value : renameMap.get(tok.value);
-		} else {
-			out += tok.value;
-		}
-	}
-	return out;
-}
-
-function mangle(code) {
-	const tokens = tokenize(code);
+function mangleTokens(tokens) {
 	const { declaredLocals } = _collectLocalDecls(tokens);
 	_filterRenameCandidates(declaredLocals);
 
@@ -612,7 +576,15 @@ function mangle(code) {
 	const nameGen = shortNameGeneratorFn(occupied);
 	const renameMap = new Map();
 	for (const name of declaredLocals) renameMap.set(name, nameGen());
-	return _applyRenaming(tokens, renameMap);
+	return tokens.map((tok, i) => {
+		if (tok.type === "ident" && renameMap.has(tok.value)) {
+			const prev = findPrevNonWs(tokens, i);
+			if (prev?.value !== ".") {
+				return { type: "ident", value: renameMap.get(tok.value) };
+			}
+		}
+		return tok;
+	});
 }
 
 function nextNonWs(tokens, index) {
@@ -620,14 +592,6 @@ function nextNonWs(tokens, index) {
 		if (tokens[i].type !== "ws" && tokens[i].type !== "comment") {
 			return { tok: tokens[i], idx: i };
 		}
-	}
-	return null;
-}
-
-function findPrevNonWsToken(tokens, index) {
-	for (let i = index - 1; i >= 0; i--) {
-		if (tokens[i].type !== "ws" && tokens[i].type !== "comment")
-			return tokens[i];
 	}
 	return null;
 }
@@ -647,7 +611,7 @@ function collectDestructured(tokens, startIdx, locals) {
 }
 
 function _isParamStart(tokens, i) {
-	const prev = findPrevNonWsToken(tokens, i);
+	const prev = findPrevNonWs(tokens, i);
 	return (
 		!prev ||
 		prev.value === "(" ||
@@ -839,28 +803,16 @@ function foldTokens(tokens) {
 	return current;
 }
 
-function foldLiterals(code) {
-	const tokens = tokenize(code);
-	return compressTokens(foldTokens(tokens));
-}
-
 // ── Public API ───────────────────────────────────────────────
 
 export function minify(code, options = {}) {
 	const { mangle: doMangle = false } = options;
-
-	// Stage 1 + 2: compress (strips comments, whitespace, compresses tokens)
-	let result = compress(code);
-
-	// Stage 4: literal folding
-	result = foldLiterals(result);
-
-	// Stage 3: mangling (optional)
+	let tokens = tokenize(code).filter(
+		(t) => t.type !== "ws" && t.type !== "comment",
+	);
+	tokens = foldTokens(tokens);
 	if (doMangle) {
-		result = mangle(result);
-		// Re-compress after mangling to clean up any leftover whitespace
-		result = compress(result);
+		tokens = mangleTokens(tokens);
 	}
-
-	return result;
+	return compressTokens(tokens);
 }
