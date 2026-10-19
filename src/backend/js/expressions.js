@@ -7,6 +7,7 @@ import {
 } from "../../lower/index.js";
 import {
 	ERROR,
+	isAny,
 	isComplex,
 	isTypedArraySlice,
 	typedArrayConstructorForElem,
@@ -706,9 +707,10 @@ export const expressionGenMethods = {
 	},
 
 	_isStringExprType(exprType) {
+		const t = exprType?.kind === "named" ? exprType.underlying : exprType;
 		return (
-			(exprType?.kind === "basic" && exprType.name === "string") ||
-			(exprType?.kind === "untyped" && exprType.base === "string")
+			(t?.kind === "basic" && t.name === "string") ||
+			(t?.kind === "untyped" && t.base === "string")
 		);
 	},
 
@@ -764,9 +766,28 @@ export const expressionGenMethods = {
 	},
 
 	_genTypeConversionCall(expr) {
-		const name = expr._conversionTargetType?.name;
+		const targetType = expr._conversionTargetType;
+		const name = targetType?.name;
 		const arg = this.genExpr(expr.args[0]);
 		if (name && this.namedWrapperNames.has(name)) return `new ${name}(${arg})`;
+		const isRaw =
+			targetType?.name === "json.RawMessage" ||
+			targetType?.name === "encoding/json.RawMessage";
+		const base =
+			targetType?.kind === "named" ? targetType.underlying : targetType;
+		if (base?.kind === "slice") {
+			const elem = base.elem?.name;
+			if (
+				(elem === "byte" || elem === "uint8") &&
+				this._isStringExprType(expr.args[0]?._type)
+			) {
+				const enc = `new TextEncoder().encode(${arg})`;
+				return isRaw ? `((u) => { u.__raw = true; return u; })(${enc})` : enc;
+			}
+			if (isRaw) {
+				return `((u) => { u.__raw = true; return u; })(${arg})`;
+			}
+		}
 		return arg;
 	},
 
@@ -1098,7 +1119,9 @@ export const expressionGenMethods = {
 				? this.genValueExpr(match.value ?? match)
 				: fields[idx].zero;
 		} else {
-			values[idx] = `${this.genExpr(e.value)}.${ef}`;
+			const valExpr = this.genExpr(e.value);
+			values[idx] =
+				`(${valExpr} != null ? ${valExpr}.${ef} : ${fields[idx].zero})`;
 		}
 		return idx;
 	},
@@ -1115,6 +1138,11 @@ export const expressionGenMethods = {
 				for (const ef of embedFields) {
 					const idx = this._fillEmbedField(fields, ef, e, values);
 					if (idx > maxIdx) maxIdx = idx;
+				}
+				const embedIdx = fields.findIndex((f) => f.name === k);
+				if (embedIdx >= 0) {
+					values[embedIdx] = this.genValueExpr(e.value);
+					if (embedIdx > maxIdx) maxIdx = embedIdx;
 				}
 			} else {
 				const idx = fields.findIndex((f) => f.name === k);
@@ -1139,11 +1167,11 @@ export const expressionGenMethods = {
 		const maxExplicitIdx = hasPositional
 			? this._fillPositionalStructElems(fields, expr, values)
 			: this._fillKeyedStructElems(fields, expr, values);
-		if (maxExplicitIdx < 0) {
-			return `new ${typeName}()`;
-		}
-		const args = values.slice(0, maxExplicitIdx + 1);
-		return `new ${typeName}(${args.join(", ")})`;
+		const inst =
+			maxExplicitIdx < 0
+				? `new ${typeName}()`
+				: `new ${typeName}(${values.slice(0, maxExplicitIdx + 1).join(", ")})`;
+		return inst;
 	},
 
 	_genSliceOrArrayLit(t, expr) {
@@ -1268,11 +1296,14 @@ export const expressionGenMethods = {
 	},
 
 	// Returns true if the AST node contains a function call (side-effect risk).
-	_hasCallExpr(node) {
+	_hasCallExpr(node, seen = new Set()) {
 		if (!node || typeof node !== "object") return false;
+		if (seen.has(node)) return false;
+		seen.add(node);
 		if (node.kind === "CallExpr") return true;
-		for (const v of Object.values(node)) {
-			if (v && typeof v === "object" && this._hasCallExpr(v)) return true;
+		for (const [k, v] of Object.entries(node)) {
+			if (k.startsWith("_") || k === "scope") continue;
+			if (v && typeof v === "object" && this._hasCallExpr(v, seen)) return true;
 		}
 		return false;
 	},
@@ -1564,6 +1595,8 @@ export const expressionGenMethods = {
 		if (elem === "byte" || elem === "uint8") {
 			if (this._isStringExprType(expr.expr._type))
 				return `new TextEncoder().encode(${inner})`;
+			if (isAny(expr.expr._type) || !expr.expr._type)
+				return `(typeof ${inner} === "string" ? new TextEncoder().encode(${inner}) : new Uint8Array(${inner}))`;
 			return `new Uint8Array(${inner})`;
 		}
 		const typedCtor = typedArrayConstructorForElem(
@@ -1581,10 +1614,10 @@ export const expressionGenMethods = {
 	},
 
 	_genStringConversion(srcType, inner) {
-		if (srcType && this.isIntType(srcType))
-			return `String.fromCodePoint(${inner})`;
-		if (srcType?.kind === "slice") {
-			const elem = srcType.elem?.name;
+		const base = srcType?.kind === "named" ? srcType.underlying : srcType;
+		if (base && this.isIntType(base)) return `String.fromCodePoint(${inner})`;
+		if (base?.kind === "slice") {
+			const elem = base.elem?.name;
 			if (elem === "byte" || elem === "uint8")
 				return `new TextDecoder().decode(new Uint8Array(${inner}))`;
 			if (elem === "rune" || elem === "int" || elem === "int32")

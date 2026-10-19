@@ -19,12 +19,17 @@ export function getExportNames(pkgName, globals = {}) {
 	const clean = base.replace(/[^a-zA-Z0-9_]/g, "_");
 	const names = new Set([pkgName, base, clean]);
 	const extra = globals[pkgName];
-	for (const name of Array.isArray(extra) ? extra : extra ? [extra] : [])
-		names.add(name);
+	for (const name of Array.isArray(extra)
+		? extra
+		: typeof extra === "string"
+			? [extra]
+			: []) {
+		if (typeof name === "string") names.add(name);
+	}
 	return [...names];
 }
 
-export function generateVendorEntry(packages, globals = {}) {
+export function generateVendorEntry(packages, globals = {}, namedExports = {}) {
 	const imports = [];
 	const assignments = [];
 	const exports = [];
@@ -37,6 +42,46 @@ export function generateVendorEntry(packages, globals = {}) {
 		for (const name of names) {
 			assignments.push(
 				`    window[${JSON.stringify(name)}] = ${id}.default || ${id};`,
+			);
+		}
+
+		// Named export global assignments (e.g. window.h = preact.h)
+		const pkgNamed = Object.create(null);
+		const rawNamed = namedExports[pkg];
+		const isSafeKey = (k) =>
+			typeof k === "string" &&
+			k !== "__proto__" &&
+			k !== "prototype" &&
+			k !== "constructor";
+
+		if (Array.isArray(rawNamed)) {
+			for (const name of rawNamed) {
+				if (isSafeKey(name)) pkgNamed[name] = name;
+			}
+		} else if (rawNamed && typeof rawNamed === "object") {
+			for (const [k, v] of Object.entries(rawNamed)) {
+				if (isSafeKey(k) && isSafeKey(v)) pkgNamed[k] = v;
+			}
+		}
+
+		if (typeof globals[pkg] === "object" && !Array.isArray(globals[pkg])) {
+			for (const [k, v] of Object.entries(globals[pkg])) {
+				if (isSafeKey(k) && isSafeKey(v)) pkgNamed[k] = v;
+			}
+		} else if (Array.isArray(globals[pkg])) {
+			for (const item of globals[pkg]) {
+				if (typeof item === "object" && item !== null) {
+					for (const [k, v] of Object.entries(item)) {
+						if (isSafeKey(k) && isSafeKey(v)) pkgNamed[k] = v;
+					}
+				}
+			}
+		}
+
+		for (const [globalName, exportName] of Object.entries(pkgNamed)) {
+			if (!isSafeKey(globalName) || !isSafeKey(exportName)) continue;
+			assignments.push(
+				`    window[${JSON.stringify(globalName)}] = ${id}[${JSON.stringify(exportName)}] !== undefined ? ${id}[${JSON.stringify(exportName)}] : (${id}.default ? ${id}.default[${JSON.stringify(exportName)}] : undefined);`,
 			);
 		}
 
@@ -82,8 +127,26 @@ function findBundler(projectDir) {
 	return null;
 }
 
-// Normalises `vendor.globals` ({ pkg: string | string[] }) to { pkg: string[] }.
-function normalizeGlobals(raw) {
+export function normalizeNamedExports(raw) {
+	if (raw === undefined || raw === null) return {};
+	if (typeof raw !== "object" || Array.isArray(raw)) return {};
+	const out = {};
+	for (const [pkg, value] of Object.entries(raw)) {
+		if (Array.isArray(value)) {
+			const map = {};
+			for (const name of value) {
+				if (typeof name === "string") map[name] = name;
+			}
+			out[pkg] = map;
+		} else if (typeof value === "object" && value !== null) {
+			out[pkg] = { ...value };
+		}
+	}
+	return out;
+}
+
+// Normalises `vendor.globals` ({ pkg: string | string[] | object })
+export function normalizeGlobals(raw) {
 	if (raw === undefined || raw === null) return {};
 	if (typeof raw !== "object" || Array.isArray(raw)) {
 		throw new Error(
@@ -92,13 +155,17 @@ function normalizeGlobals(raw) {
 	}
 	const out = {};
 	for (const [pkg, value] of Object.entries(raw)) {
-		const list = Array.isArray(value) ? value : [value];
-		if (list.some((v) => typeof v !== "string")) {
+		if (typeof value === "string") {
+			out[pkg] = [value];
+		} else if (Array.isArray(value)) {
+			out[pkg] = value;
+		} else if (typeof value === "object" && value !== null) {
+			out[pkg] = value;
+		} else {
 			throw new Error(
-				`gofront: vendor.globals[${JSON.stringify(pkg)}] must be a string or array of strings`,
+				`gofront: vendor.globals[${JSON.stringify(pkg)}] must be a string, array, or object`,
 			);
 		}
-		out[pkg] = list;
 	}
 	return out;
 }
@@ -119,6 +186,7 @@ export function loadVendorConfig(projectDir) {
 	let packages = dependencies;
 	let minify = false;
 	let globals = {};
+	let namedExports = {};
 
 	if (typeof vendorConfig === "string") {
 		dest = vendorConfig;
@@ -127,13 +195,16 @@ export function loadVendorConfig(projectDir) {
 		if (Array.isArray(vendorConfig.packages)) packages = vendorConfig.packages;
 		if (typeof vendorConfig.minify === "boolean") minify = vendorConfig.minify;
 		globals = normalizeGlobals(vendorConfig.globals);
+		namedExports = normalizeNamedExports(
+			vendorConfig.namedExports ?? vendorConfig.exports,
+		);
 	}
 
 	if (!dest) {
 		dest = existsSync(join(projectDir, "app")) ? "app/vendor.js" : "vendor.js";
 	}
 
-	return { dest, packages, minify, globals };
+	return { dest, packages, minify, globals, namedExports };
 }
 
 function resolveDestinationPaths(projectRoot, dest) {
@@ -299,6 +370,10 @@ export async function bundleVendor(projectDir = ".", options = {}) {
 	const dest = options.dest ?? config.dest;
 	const minify = options.minify ?? config.minify ?? false;
 	const globals = { ...config.globals, ...normalizeGlobals(options.globals) };
+	const namedExports = {
+		...config.namedExports,
+		...normalizeNamedExports(options.namedExports ?? options.exports),
+	};
 
 	if (!packages || packages.length === 0) {
 		return {
@@ -366,7 +441,7 @@ export async function bundleVendor(projectDir = ".", options = {}) {
 		};
 	}
 
-	const entryCode = generateVendorEntry(packages, globals);
+	const entryCode = generateVendorEntry(packages, globals, namedExports);
 	const entryFile = join(
 		projectRoot,
 		`.gofront-vendor-entry-${Date.now()}.mjs`,

@@ -12,6 +12,7 @@ import { gomMethods } from "./gom.js";
 import { hexMethods } from "./hex.js";
 import { htmlMethods } from "./html.js";
 import { ioMethods } from "./io.js";
+import { jsonMethods } from "./json.js";
 import { mapsMethods } from "./maps.js";
 import { mathMethods } from "./math.js";
 import { osMethods } from "./os.js";
@@ -62,6 +63,7 @@ const STDLIB_METHOD_MAP = {
 	binary: "_genBinary",
 	hex: "_genHex",
 	base64: "_genBase64",
+	json: "_genJson",
 };
 
 const dispatchMethods = {
@@ -119,5 +121,6 @@ export const stdlibGenMethods = {
 	...binaryMethods,
 	...hexMethods,
 	...base64Methods,
+	...jsonMethods,
 	...dispatchMethods,
 };
