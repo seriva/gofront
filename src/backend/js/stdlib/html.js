@@ -12,7 +12,7 @@ export const htmlMethods = {
 			}
 			case "UnescapeString": {
 				const [s] = a();
-				return `${s}.replace(/&#39;/g,"'").replace(/&#34;/g,'"').replace(/&gt;/g,">").replace(/&lt;/g,"<").replace(/&amp;/g,"&")`;
+				return `(${s}).replace(/&(?:quot|apos|#39|#34|gt|lt|amp|#(?:[0-9]+|[xX][0-9a-fA-F]+));/g, m => { switch (m) { case "&quot;": case "&#34;": return '"'; case "&apos;": case "&#39;": return "'"; case "&gt;": return ">"; case "&lt;": return "<"; case "&amp;": return "&"; default: { if (m.startsWith("&#")) { const raw = m.slice(2, -1); const cp = (raw.startsWith("x") || raw.startsWith("X")) ? parseInt(raw.slice(1), 16) : parseInt(raw, 10); return (cp >= 0 && cp <= 0x10FFFF && !(cp >= 0xD800 && cp <= 0xDFFF)) ? String.fromCodePoint(cp) : "\\uFFFD"; } return m; } } })`;
 			}
 		}
 		return undefined;

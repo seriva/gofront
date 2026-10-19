@@ -25,32 +25,7 @@ function findNodeModules(startDir) {
 	}
 }
 
-// Built-in stdlib package paths that are always available as globals — no resolution needed.
-const BUILTIN_PACKAGES = new Set([
-	"fmt",
-	"strings",
-	"bytes",
-	"strconv",
-	"sort",
-	"math",
-	"math/bits",
-	"math/rand",
-	"errors",
-	"time",
-	"unicode",
-	"unicode/utf8",
-	"os",
-	"slices",
-	"html",
-	"io",
-	"gom",
-	"maps",
-	"regexp",
-	"path",
-	"path/filepath",
-	"testing",
-	"gofront/shared",
-]);
+import { STDLIB_PACKAGES } from "./typechecker/types.js";
 
 // Returns true for local relative paths (start with ./ or ../)
 export function isLocalPath(importPath) {
@@ -58,7 +33,7 @@ export function isLocalPath(importPath) {
 }
 
 export function isBuiltinPackage(importPath) {
-	return BUILTIN_PACKAGES.has(importPath);
+	return STDLIB_PACKAGES.has(importPath);
 }
 
 // Resolve a local relative import path to an absolute directory of .go files.

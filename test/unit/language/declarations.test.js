@@ -16,7 +16,7 @@ import {
 	test,
 } from "../helpers.js";
 
-section("New features");
+section("Package init & redeclarations");
 
 test("init() functions execute before main in order", () => {
 	const { js, errors } = compileFile(join(FIXTURES, "init_test.go"));

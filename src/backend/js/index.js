@@ -28,22 +28,34 @@ import { isComplex, isNumeric } from "../../typechecker/types.js";
 import { expressionGenMethods } from "./expressions.js";
 import {
 	HELPER_APPEND,
+	HELPER_BASE64,
+	HELPER_BINARY,
 	HELPER_CDIV,
 	HELPER_CMUL,
+	HELPER_CRYPTO_RAND,
+	HELPER_DURATION,
 	HELPER_EQUAL,
 	HELPER_ERROR,
+	HELPER_ERROR_AS,
 	HELPER_ERROR_IS,
+	HELPER_ERROR_JOIN,
+	HELPER_HEX,
 	HELPER_IFACE_BOX,
 	HELPER_INJECT_STYLES,
+	HELPER_IO_EOF,
 	HELPER_LEN,
 	HELPER_NIL_CALL,
 	HELPER_PANIC,
 	HELPER_PATH_CLEAN,
+	HELPER_PATH_ERROR,
 	HELPER_S,
 	HELPER_SCLONE,
+	HELPER_SHA256,
 	HELPER_SORT_SLICE,
 	HELPER_SPRINTF,
 	HELPER_STRCONV,
+	HELPER_STRCONV_ERROR,
+	HELPER_SYNC,
 	HELPER_TESTING,
 	HELPER_TIME_FMT,
 	HELPER_TIME_PARSE,
@@ -111,12 +123,24 @@ const HELPER_MAP = [
 	["sprintf", HELPER_SPRINTF],
 	["error", HELPER_ERROR],
 	["errorIs", HELPER_ERROR_IS],
+	["errorAs", HELPER_ERROR_AS],
+	["errorJoin", HELPER_ERROR_JOIN],
+	["strconvError", HELPER_STRCONV_ERROR],
+	["pathError", HELPER_PATH_ERROR],
+	["ioEOF", HELPER_IO_EOF],
 	["strconv", HELPER_STRCONV],
 	["pathClean", HELPER_PATH_CLEAN],
 	["sortSlice", HELPER_SORT_SLICE],
 	["timeFmt", HELPER_TIME_FMT],
 	["timeParse", HELPER_TIME_PARSE],
+	["duration", HELPER_DURATION],
 	["testing", HELPER_TESTING],
+	["sync", HELPER_SYNC],
+	["cryptoRand", HELPER_CRYPTO_RAND],
+	["sha256", HELPER_SHA256],
+	["binary", HELPER_BINARY],
+	["hex", HELPER_HEX],
+	["base64", HELPER_BASE64],
 ];
 
 export class CodeGen {
@@ -428,6 +452,19 @@ export class CodeGen {
 	/** Marks a runtime helper (key of HELPER_MAP) as needed by the output. */
 	useHelper(name) {
 		this._helpers.add(name);
+		if (
+			name === "strconvError" ||
+			name === "pathError" ||
+			name === "ioEOF" ||
+			name === "base64" ||
+			name === "hex"
+		) {
+			this._helpers.add("error");
+		}
+		if (name === "binary") {
+			this.useHelper("ioEOF");
+			this._helpers.add("error");
+		}
 	}
 
 	_prependHelpers(isTest = false) {
@@ -570,7 +607,7 @@ export class CodeGen {
 					.map((f) => `${f.name}: ${binding(f)} = ${f.zero}`)
 					.join(", ");
 				this.line(
-					`if (typeof ${first} === "object" && ${first} !== null && ${first}.constructor === Object) ({ ${pattern} } = ${first});`,
+					`if (arguments.length === 1 && typeof ${first} === "object" && ${first} !== null && ${first}.constructor === Object) ({ ${pattern} } = ${first});`,
 				);
 			}
 			for (const f of fields) {

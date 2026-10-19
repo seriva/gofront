@@ -118,17 +118,15 @@ export class TemplLexer {
 				continue;
 			}
 
-			// Detect `templ` keyword at identifier boundaries
+			// Detect `templ` or `css` keyword at identifier boundaries
 			if (this._matchKeyword("templ")) {
 				this.tokens.push(new Token(TT.TEMPL_KW, "templ", this.line, this.col));
-				this._lexTemplDecl();
+				this._lexBlockDecl("templ");
 				continue;
 			}
-
-			// Detect `css` keyword at identifier boundaries
 			if (this._matchKeyword("css")) {
 				this.tokens.push(new Token(TT.CSS_KW, "css", this.line, this.col));
-				this._lexCssDecl();
+				this._lexBlockDecl("css");
 				continue;
 			}
 
@@ -201,24 +199,25 @@ export class TemplLexer {
 		for (const t of this._goTokens(chunk)) this.tokens.push(t);
 	}
 
-	// ── Templ declaration lexing ─────────────────────────────────
+	// ── Templ / CSS declaration lexing ───────────────────────────
 
-	// Called right after consuming `templ` keyword.
-	// Lexes: Name(params) { <HTML body> }
-	_lexTemplDecl() {
+	// Called right after consuming `templ` or `css` keyword.
+	// Lexes: Name(params) { <body> }
+	_lexBlockDecl(kw) {
 		this.skipWhitespace();
 
-		// Name
-		const nameStart = this.pos;
-		while (!this.eof() && /\w/.test(this.peek())) this.advance();
-		const name = this.src.slice(nameStart, this.pos);
-		if (!name) this.err("expected component name after 'templ'");
+		const name = this._readWord();
+		if (!name) {
+			this.err(
+				`expected ${kw === "templ" ? "component name" : "name"} after '${kw}'`,
+			);
+		}
 		this.tokens.push(new Token(T.IDENT, name, this.line, this.col));
 
 		this.skipWhitespace();
 
 		// Parameter list ( ... ) — lex as Go
-		if (this.peek() !== "(") this.err("expected '(' after templ name");
+		if (this.peek() !== "(") this.err(`expected '(' after ${kw} name`);
 		const paramStart = this.pos;
 		this._skipBalanced("(", ")");
 		const paramSrc = this.src.slice(paramStart, this.pos);
@@ -227,43 +226,12 @@ export class TemplLexer {
 		this.skipWhitespace();
 
 		// Opening { of body
-		if (this.peek() !== "{") this.err("expected '{' after templ params");
+		if (this.peek() !== "{") this.err(`expected '{' after ${kw} params`);
 		this.advance(); // consume {
 		this.tokens.push(new Token(T.LBRACE, "{", this.line, this.col));
 
-		// HTML body
-		this._lexHtmlBody(1);
-	}
-
-	// ── CSS declaration lexing ───────────────────────────────────
-
-	_lexCssDecl() {
-		this.skipWhitespace();
-
-		// Name (identifier)
-		const nameStart = this.pos;
-		while (!this.eof() && /\w/.test(this.peek())) this.advance();
-		const name = this.src.slice(nameStart, this.pos);
-		if (!name) this.err("expected name after 'css'");
-		this.tokens.push(new Token(T.IDENT, name, this.line, this.col));
-
-		this.skipWhitespace();
-
-		// Parameter list (balanced parens)
-		if (this.peek() !== "(") this.err("expected '(' after css name");
-		const paramStart = this.pos;
-		this._skipBalanced("(", ")");
-		const paramSrc = this.src.slice(paramStart, this.pos);
-		for (const t of this._goTokens(paramSrc)) this.tokens.push(t);
-
-		this.skipWhitespace();
-
-		// Opening { of body
-		if (this.peek() !== "{") this.err("expected '{' after css params");
-		this.advance(); // consume {
-		this.tokens.push(new Token(T.LBRACE, "{", this.line, this.col));
-
-		this._lexCssBody();
+		if (kw === "templ") this._lexHtmlBody(1);
+		else this._lexCssBody();
 	}
 
 	_skipCssString(quote) {
@@ -660,7 +628,7 @@ export class TemplLexer {
 	// ── HTML text content ─────────────────────────────────────────
 
 	_lexHtmlText() {
-		let text = "";
+		const start = this.pos;
 		const line = this.line;
 		while (!this.eof()) {
 			const c = this.peek();
@@ -674,9 +642,9 @@ export class TemplLexer {
 				(c === "d" && this._peekKeyword("default"))
 			)
 				break;
-			text += this.advance();
+			this.advance();
 		}
-		const trimmed = text.trim();
+		const trimmed = this.src.slice(start, this.pos).trim();
 		if (trimmed)
 			this.tokens.push(new Token(TT.HTML_TEXT, trimmed, line, this.col));
 	}
@@ -729,17 +697,15 @@ export class TemplLexer {
 	}
 
 	_readHtmlName() {
-		let name = "";
-		while (!this.eof() && /[a-zA-Z0-9_-]/.test(this.peek()))
-			name += this.advance();
-		return name;
+		const start = this.pos;
+		while (!this.eof() && /[a-zA-Z0-9_-]/.test(this.peek())) this.advance();
+		return this.src.slice(start, this.pos);
 	}
 
 	_readHtmlAttrName() {
-		let name = "";
-		while (!this.eof() && /[a-zA-Z0-9_:.-]/.test(this.peek()))
-			name += this.advance();
-		return name;
+		const start = this.pos;
+		while (!this.eof() && /[a-zA-Z0-9_:.-]/.test(this.peek())) this.advance();
+		return this.src.slice(start, this.pos);
 	}
 
 	_readQuotedString() {
@@ -756,9 +722,9 @@ export class TemplLexer {
 	}
 
 	_readWord() {
-		let w = "";
-		while (!this.eof() && /\w/.test(this.peek())) w += this.advance();
-		return w;
+		const start = this.pos;
+		while (!this.eof() && /\w/.test(this.peek())) this.advance();
+		return this.src.slice(start, this.pos);
 	}
 
 	_skipToOpenBrace() {

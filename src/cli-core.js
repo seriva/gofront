@@ -33,7 +33,7 @@ import { generatePwa } from "./pwa.js";
 import { runTests } from "./test-runner.js";
 import { bundleVendor } from "./vendor.js";
 
-const GOFRONT_VERSION = JSON.parse(
+export const GOFRONT_VERSION = JSON.parse(
 	readFileSync(new URL("../package.json", import.meta.url), "utf8"),
 ).version;
 

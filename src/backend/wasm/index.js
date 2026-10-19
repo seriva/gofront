@@ -12,16 +12,21 @@ import {
 	scanBoundaryImports,
 	wTypeKey,
 } from "./boundary.js";
+import { foldConstExpr } from "./const-fold.js";
 import { FunctionEmitter } from "./emit.js";
-import { BINARY_MATH_IMPORTS } from "./emit-stdlib.js";
 import { encodeModule, isGoFrontWasm } from "./encode.js";
 import { hasGenerics, monomorphise } from "./monomorph.js";
 import { hasNativeWasmOpt, optimizeWasm } from "./optimize.js";
+import { BINARY_MATH_IMPORTS } from "./stdlib/index.js";
 import {
+	anonIfaceName,
 	ERROR_STRUCT,
 	getFuncSignature,
+	getInterfaceMethodList,
 	getMapKeyValTypes,
 	getReceiverTypeName,
+	goTypeKey,
+	isInterfaceType,
 	isMapType,
 	isNonEmptyInterface,
 	isTestingT,
@@ -31,7 +36,28 @@ import { emitWat } from "./wat.js";
 
 export { hasNativeWasmOpt, isGoFrontWasm, optimizeWasm };
 
-const ERROR_PRODUCING_PKGS = new Set(["errors", "fmt", "strconv"]);
+const ERROR_PRODUCING_PKGS = new Set([
+	"errors",
+	"fmt",
+	"strconv",
+	"path",
+	"path/filepath",
+	"io",
+	"strings",
+	"bytes",
+	"time",
+	"sync",
+	"crypto/rand",
+	"rand",
+	"crypto/sha256",
+	"sha256",
+	"encoding/binary",
+	"binary",
+	"encoding/hex",
+	"hex",
+	"encoding/base64",
+	"base64",
+]);
 // Packages whose calls lower to the `env.*` imports in STDLIB_IMPORTS (the
 // matching JS lives in WASM_STDLIB_JS).  Only modules importing one of them
 // declare the imports and ship that JS block.
@@ -41,14 +67,62 @@ const STDLIB_ENV_PKGS = new Set([
 	"unicode/utf8",
 	"fmt",
 	"testing",
+	"unicode",
+	"math/rand",
+	"path",
+	"path/filepath",
+	"html",
+	"bytes",
+	"io",
+	"time",
+	"sync",
+	"crypto/rand",
+	"rand",
+	"crypto/sha256",
+	"sha256",
+	"encoding/binary",
+	"binary",
+	"encoding/hex",
+	"hex",
+	"encoding/base64",
+	"base64",
 ]);
 
 function importsAnyOf(programs, pkgs) {
+	const has = (p) => (pkgs instanceof Set ? pkgs.has(p) : pkgs.includes(p));
 	return (programs ?? []).some((p) =>
 		(p.imports ?? []).some((decl) =>
-			(decl.imports ?? [decl]).some((imp) => pkgs.has(imp.path)),
+			(decl.imports ?? [decl]).some((imp) => has(imp.path)),
 		),
 	);
+}
+
+function hasErrorUsage(programs) {
+	return (programs ?? []).some((p) => {
+		let found = false;
+		const scan = (n) => {
+			if (!n || found || typeof n !== "object") return;
+			if (Array.isArray(n)) {
+				for (const x of n) scan(x);
+				return;
+			}
+			if (
+				(n.kind === "Ident" ||
+					n.kind === "TypeName" ||
+					n.kind === "basic" ||
+					n.kind === "interface") &&
+				n.name === "error"
+			) {
+				found = true;
+				return;
+			}
+			for (const k of Object.keys(n)) {
+				if (!k.startsWith("_")) scan(n[k]);
+			}
+		};
+		scan(p);
+		return found;
+	});
 }
 
 // [name, params, results] for `env.*` imports backing stdlib calls; the JS
@@ -63,6 +137,11 @@ const STDLIB_IMPORTS = [
 	["str_trim_right", [S, S], [S]],
 	["str_trim_prefix", [S, S], [S]],
 	["str_trim_suffix", [S, S], [S]],
+	["str_cut", [S, S], ["i32"]],
+	["str_cut_before", [], [S]],
+	["str_cut_after", [], [S]],
+	["str_cut_prefix", [S, S], ["i32"]],
+	["str_cut_suffix", [S, S], ["i32"]],
 	["str_replace", [S, S, S, "i32"], [S]],
 	["str_contains_rune", [S, "i32"], ["i32"]],
 	["str_contains_any", [S, S], ["i32"]],
@@ -70,19 +149,30 @@ const STDLIB_IMPORTS = [
 	["str_index_rune", [S, "i32"], ["i32"]],
 	["str_index_any", [S, S], ["i32"]],
 	["str_last_index_byte", [S, "i32"], ["i32"]],
+	["str_last_index_any", [S, S], ["i32"]],
 	["str_title", [S], [S]],
 	["str_split", [S, S], ["i32"]],
+	["str_split_n", [S, S, "i32"], ["i32"]],
+	["str_split_after", [S, S], ["i32"]],
+	["str_split_after_n", [S, S, "i32"], ["i32"]],
 	["str_fields", [S], ["i32"]],
 	["str_part", ["i32"], [S]],
+	["str_replacer_init", [S], []],
+	["str_replacer_add", [S, S], []],
+	["str_replacer_run", [], [S]],
 	// strconv
 	["strconv_atoi", [S], ["i64"]],
 	["strconv_parse_int", [S, "i32", "i32"], ["i64"]],
 	["strconv_parse_float", [S], ["f64"]],
 	["strconv_parse_bool", [S], ["i32"]],
 	["strconv_err", [], [S]],
+	["strconv_err_kind", [], ["i32"]],
 	["strconv_format_float", ["f64", "i32", "i32", "i32"], [S]],
 	["strconv_format_int", ["i64", "i32"], [S]],
+	["strconv_format_uint", ["i64", "i32"], [S]],
+	["strconv_parse_uint", [S, "i32", "i32"], ["i64"]],
 	["strconv_quote", [S], [S]],
+	["strconv_unquote", [S], [S]],
 	// unicode/utf8
 	["utf8_rune_count", [S], ["i32"]],
 	["utf8_rune_len", ["i32"], ["i32"]],
@@ -93,8 +183,78 @@ const STDLIB_IMPORTS = [
 	// fmt (arguments travel through the testing_arg_* buffer)
 	["fmt_sprintf", [S], [S]],
 	["fmt_printf", [S], []],
+	["fmt_format_v", [S], [S]],
+	["fmt_sscan_init", [S, "i32"], ["i32"]],
+	["fmt_sscanf_init", [S, S], ["i32"]],
+	["fmt_sscan_has_err", [], ["i32"]],
+	["fmt_sscan_err_msg", [], [S]],
+	["fmt_sscan_token_str", ["i32"], [S]],
+	["fmt_sscan_token_i64", ["i32"], ["i64"]],
+	["fmt_sscan_token_f64", ["i32"], ["f64"]],
+	["fmt_sscan_token_bool", ["i32"], ["i32"]],
 	// testing.T.Run: the harness calls back into the exported __testing_run_cb
 	["testing_run", [S, S, "anyref"], ["i32"]],
+	// unicode
+	["unicode_is_letter", ["i32"], ["i32"]],
+	["unicode_is_digit", ["i32"], ["i32"]],
+	["unicode_is_space", ["i32"], ["i32"]],
+	["unicode_is_upper", ["i32"], ["i32"]],
+	["unicode_is_lower", ["i32"], ["i32"]],
+	["unicode_is_punct", ["i32"], ["i32"]],
+	["unicode_is_control", ["i32"], ["i32"]],
+	["unicode_is_print", ["i32"], ["i32"]],
+	["unicode_is_graphic", ["i32"], ["i32"]],
+	["unicode_to_upper", ["i32"], ["i32"]],
+	["unicode_to_lower", ["i32"], ["i32"]],
+	// html
+	["html_escape", [S], [S]],
+	["html_unescape", [S], [S]],
+	// path
+	["path_base", [S], [S]],
+	["path_dir", [S], [S]],
+	["path_ext", [S], [S]],
+	["path_is_abs", [S], ["i32"]],
+	["path_clean", [S], [S]],
+	["path_split", [S], []],
+	["path_split_dir", [], [S]],
+	["path_split_file", [], [S]],
+	["path_join_init", [], []],
+	["path_join_push", [S], []],
+	["path_join_run", [], [S]],
+	["path_match", [S, S], ["i32"]],
+	["path_match_has_err", [], ["i32"]],
+	["bytes_trim", [S, S, "i32", "i32"], []],
+	["bytes_trim_start", [], ["i32"]],
+	["bytes_trim_end", [], ["i32"]],
+	// time
+	["time_now_ms", [], ["f64"]],
+	["time_timezone_offset", ["f64"], ["i32"]],
+	["time_parse", [S, S], ["f64"]],
+	["time_parse_err", [], [S]],
+	["time_parse_offset", [], ["i32"]],
+	[
+		"time_format",
+		["i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", S],
+		[S],
+	],
+	["time_duration_string", ["i64"], [S]],
+	// raw binary buffer for crypto/rand, crypto/sha256, hex, base64
+	["raw_bytes_init", ["i32"], []],
+	["raw_bytes_push", ["i32"], []],
+	["raw_bytes_len", [], ["i32"]],
+	["raw_bytes_get", ["i32"], ["i32"]],
+	// crypto/rand
+	["crypto_rand_fill", ["i32"], ["i32"]],
+	// crypto/sha256
+	["crypto_sha256_sum", [], ["i32"]],
+	// encoding/hex
+	["hex_encode_to_string", [], [S]],
+	["hex_decode_string", [S], ["i32"]],
+	["hex_get_err", [], [S]],
+	// encoding/base64
+	["base64_encode_to_string", ["i32"], [S]],
+	["base64_decode_string", ["i32", S], ["i32"]],
+	["base64_get_err", [], [S]],
 ];
 
 class ModuleEmitter {
@@ -113,6 +273,7 @@ class ModuleEmitter {
 
 		this.structTypes = new Map(); // name -> struct info
 		this.boxTypes = new Map(); // wType key -> box info
+		this.ifaceBoxTypes = new Map(); // key -> iface box info
 		this.arrayTypes = new Map(); // wType key -> array info
 		this.sliceTypes = new Map(); // wType key -> slice info
 		this.sliceTypesByIndex = new Map(); // typeIndex -> slice info
@@ -145,7 +306,8 @@ class ModuleEmitter {
 		// `errors.New` / `fmt.Errorf` / strconv parse failures allocate the
 		// runtime's own error struct; it joins the struct rec group so the
 		// `error.Error` dispatcher can `ref.test` it like any user type.
-		this.hasErrorType = importsAnyOf(programs, ERROR_PRODUCING_PKGS);
+		this.hasErrorType =
+			importsAnyOf(programs, ERROR_PRODUCING_PKGS) || hasErrorUsage(programs);
 		this.usesStdlibEnv = importsAnyOf(programs, STDLIB_ENV_PKGS);
 
 		if (programs && programs.length > 0) {
@@ -315,20 +477,92 @@ class ModuleEmitter {
 		return this.structTypes.get(name) ?? null;
 	}
 
+	getAnonStructType(fields) {
+		const key = fields.map((f) => `${f.name}:${goTypeKey(f.goType)}`).join(";");
+		const name = `__anon_${key.replace(/[^a-zA-Z0-9_]/g, "_")}`;
+		if (this.structTypes.has(name)) {
+			return this.structTypes.get(name);
+		}
+		const fieldWTypes = fields.map((f) =>
+			toWasmType(f.goType, this.checker, this),
+		);
+		const typeIndex = this._getTotalTypeCount();
+		const typeEntry = {
+			form: "struct",
+			fields: fieldWTypes.map((t) => ({ type: t, mutable: true })),
+		};
+		this._pushType(typeEntry);
+		const info = {
+			name,
+			typeIndex,
+			typeEntry,
+			fields: fields.map((f, i) => ({
+				name: f.name,
+				wType: fieldWTypes[i],
+				goType: f.goType,
+				fieldIndex: i,
+			})),
+			fieldIndexMap: new Map(fields.map((f, i) => [f.name, i])),
+			embeds: [],
+			pkgName: null,
+			pkgTarget: "wasm",
+			isAnon: true,
+		};
+		this.structTypes.set(name, info);
+		return info;
+	}
+
 	getBoxType(goType) {
-		const wType = toWasmType(goType, this.checker, this);
-		const key = typeof wType === "string" ? wType : JSON.stringify(wType);
+		const key = goTypeKey(goType);
 		if (this.boxTypes.has(key)) {
 			return this.boxTypes.get(key);
 		}
+		const wType = toWasmType(goType, this.checker, this);
 		const typeIndex = this._getTotalTypeCount();
 		const typeEntry = {
 			form: "struct",
 			fields: [{ type: wType, mutable: true }],
 		};
 		this._pushType(typeEntry);
-		const boxInfo = { typeIndex, typeEntry, wType };
+		const boxInfo = { key, typeIndex, typeEntry, wType, goType };
 		this.boxTypes.set(key, boxInfo);
+		return boxInfo;
+	}
+
+	getIfaceBoxType(goType) {
+		const key = goTypeKey(goType);
+		if (this.ifaceBoxTypes.has(key)) {
+			return this.ifaceBoxTypes.get(key);
+		}
+		const wType = toWasmType(goType, this.checker, this);
+		const tagIndex = this.ifaceBoxTypes.size;
+		const tagTypeIndex = this._getTotalTypeCount();
+		const tagFields = [];
+		for (let i = 0; i < tagIndex; i++) {
+			tagFields.push({ type: "i32", mutable: false });
+		}
+		this._pushType({
+			form: "struct",
+			fields: tagFields,
+		});
+		const typeIndex = this._getTotalTypeCount();
+		const typeEntry = {
+			form: "struct",
+			fields: [
+				{ type: wType, mutable: true },
+				{
+					type: {
+						kind: "ref",
+						nullable: true,
+						typeIndex: tagTypeIndex,
+					},
+					mutable: false,
+				},
+			],
+		};
+		this._pushType(typeEntry);
+		const boxInfo = { key, typeIndex, typeEntry, wType, goType, tagTypeIndex };
+		this.ifaceBoxTypes.set(key, boxInfo);
 		return boxInfo;
 	}
 
@@ -641,6 +875,11 @@ class ModuleEmitter {
 		this.getStrFromI32ImportIndex();
 		this.getStrFromF64ImportIndex();
 		this.getIsStringImportIndex(); // env.is_string
+		this.getStrToBytesImportIndex();
+		this.getStrByteAtImportIndex();
+		this.getBytesToStrInitImportIndex();
+		this.getBytesToStrPushImportIndex();
+		this.getBytesToStrFinishImportIndex();
 		this.getTestingCallImportIndex();
 		this.getTestingNameImportIndex();
 		this.getTestingFlagImportIndex();
@@ -648,6 +887,17 @@ class ModuleEmitter {
 			this.getTestingArgImportIndex(t, false);
 		}
 		this.getTestingArgImportIndex("i32", true);
+		this.getFmtNewArrayIndex();
+		this.getFmtArrayPushIndex();
+		this.getFmtNewMapIndex();
+		this.getFmtMapSetIndex();
+		this.getFmtNewStructIndex();
+		this.getFmtStructSetIndex();
+		this.getFmtBoxI32Index();
+		this.getFmtBoxI64Index();
+		this.getFmtBoxF64Index();
+		this.getFmtBoxBoolIndex();
+		this.getFmtNewBoxIndex();
 		if (this.usesStdlibEnv) {
 			for (const [name, params, results] of STDLIB_IMPORTS) {
 				this.getOrAddFuncImport("env", name, params, results);
@@ -763,6 +1013,80 @@ class ModuleEmitter {
 			init: [{ op: "i32.const", value: 0 }],
 		});
 		this.deferArmedGlobalIndex = gIdx;
+		return gIdx;
+	}
+
+	getRandStateGlobalIndex() {
+		if (this.randStateGlobalIndex !== undefined) {
+			return this.randStateGlobalIndex;
+		}
+		const gIdx = this.globals.length;
+		this.globals.push({
+			type: "i64",
+			mutable: true,
+			init: [{ op: "i64.const", value: 1n }],
+		});
+		this.randStateGlobalIndex = gIdx;
+		return gIdx;
+	}
+
+	getStrconvErrGlobalIndex(field) {
+		if (!this.strconvErrGlobals) this.strconvErrGlobals = new Map();
+		if (this.strconvErrGlobals.has(field)) {
+			return this.strconvErrGlobals.get(field);
+		}
+		const gIdx = this.globals.length;
+		this.globals.push({
+			type: "anyref",
+			mutable: true,
+			init: [{ op: "ref.null", heapType: "any" }],
+		});
+		this.strconvErrGlobals.set(field, gIdx);
+		return gIdx;
+	}
+
+	getPathErrGlobalIndex(field) {
+		if (!this.pathErrGlobals) this.pathErrGlobals = new Map();
+		if (this.pathErrGlobals.has(field)) {
+			return this.pathErrGlobals.get(field);
+		}
+		const gIdx = this.globals.length;
+		this.globals.push({
+			type: "anyref",
+			mutable: true,
+			init: [{ op: "ref.null", heapType: "any" }],
+		});
+		this.pathErrGlobals.set(field, gIdx);
+		return gIdx;
+	}
+
+	getIoErrGlobalIndex(field) {
+		if (!this.ioErrGlobals) this.ioErrGlobals = new Map();
+		if (this.ioErrGlobals.has(field)) {
+			return this.ioErrGlobals.get(field);
+		}
+		const gIdx = this.globals.length;
+		this.globals.push({
+			type: "anyref",
+			mutable: true,
+			init: [{ op: "ref.null", heapType: "any" }],
+		});
+		this.ioErrGlobals.set(field, gIdx);
+		return gIdx;
+	}
+
+	getIoDiscardGlobalIndex() {
+		if (this.ioDiscardGlobalIndex !== undefined) {
+			return this.ioDiscardGlobalIndex;
+		}
+		this.getStructType("io.discard");
+		const gIdx = this.globals.length;
+		this.globals.push({
+			type: "anyref",
+			mutable: true,
+			init: [{ op: "ref.null", heapType: "any" }],
+		});
+		this.ioDiscardGlobalIndex = gIdx;
 		return gIdx;
 	}
 
@@ -893,6 +1217,90 @@ class ModuleEmitter {
 
 	getPrintlnEmptyIndex() {
 		return this.getOrAddFuncImport("env", "println_empty", [], []);
+	}
+
+	getFmtNewArrayIndex() {
+		return this.getOrAddFuncImport("env", "fmt_new_array", [], ["externref"]);
+	}
+
+	getFmtArrayPushIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"fmt_array_push",
+			["externref", "externref"],
+			[],
+		);
+	}
+
+	getFmtNewMapIndex() {
+		return this.getOrAddFuncImport("env", "fmt_new_map", [], ["externref"]);
+	}
+
+	getFmtMapSetIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"fmt_map_set",
+			["externref", "externref", "externref"],
+			[],
+		);
+	}
+
+	getFmtNewStructIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"fmt_new_struct",
+			["anyref", "i32"],
+			["externref"],
+		);
+	}
+
+	getFmtStructSetIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"fmt_struct_set",
+			["externref", "i32", "externref"],
+			[],
+		);
+	}
+
+	getFmtBoxI32Index() {
+		return this.getOrAddFuncImport(
+			"env",
+			"fmt_box_i32",
+			["i32"],
+			["externref"],
+		);
+	}
+
+	getFmtBoxI64Index() {
+		return this.getOrAddFuncImport(
+			"env",
+			"fmt_box_i64",
+			["i64"],
+			["externref"],
+		);
+	}
+
+	getFmtBoxF64Index() {
+		return this.getOrAddFuncImport(
+			"env",
+			"fmt_box_f64",
+			["f64"],
+			["externref"],
+		);
+	}
+
+	getFmtBoxBoolIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"fmt_box_bool",
+			["i32"],
+			["externref"],
+		);
+	}
+
+	getFmtNewBoxIndex() {
+		return this.getOrAddFuncImport("env", "fmt_new_box", [], ["externref"]);
 	}
 
 	// `*testing.T` method calls: args are pushed one by one to a JS-side
@@ -1186,9 +1594,43 @@ class ModuleEmitter {
 		);
 	}
 
+	getStrToBytesImportIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"str_to_bytes",
+			["externref"],
+			["i32"],
+		);
+	}
+
+	getStrByteAtImportIndex() {
+		return this.getOrAddFuncImport("env", "str_byte_at", ["i32"], ["i32"]);
+	}
+
+	getBytesToStrInitImportIndex() {
+		return this.getOrAddFuncImport("env", "bytes_to_str_init", ["i32"], []);
+	}
+
+	getBytesToStrPushImportIndex() {
+		return this.getOrAddFuncImport("env", "bytes_to_str_push", ["i32"], []);
+	}
+
+	getBytesToStrFinishImportIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"bytes_to_str_finish",
+			[],
+			["externref"],
+		);
+	}
+
 	getMathImportIndex(jsName, isBinary = false) {
 		const params = isBinary ? ["f64", "f64"] : ["f64"];
 		return this.getOrAddFuncImport("Math", jsName, params, ["f64"]);
+	}
+
+	getMathRandomImportIndex() {
+		return this.getOrAddFuncImport("Math", "random", [], ["f64"]);
 	}
 
 	// Imports from the STDLIB_IMPORTS table (strings/strconv/utf8/fmt/testing.Run).
@@ -1196,6 +1638,10 @@ class ModuleEmitter {
 		const idx = this.importCache.get(`env.${name}`);
 		if (idx === undefined) throw new Error(`Unknown runtime import: ${name}`);
 		return idx;
+	}
+
+	getTimezoneOffsetImportIndex() {
+		return this.getStdlibImportIndex("time_timezone_offset");
 	}
 
 	// Closure type of `func(*testing.T)` (the t.Run body).
@@ -1280,7 +1726,7 @@ class ModuleEmitter {
 							structInfo: sInfo,
 						});
 					}
-					const box = this.getBoxType({ kind: "named", name: sName });
+					const box = this.getIfaceBoxType({ kind: "named", name: sName });
 					const valKey = `val:${sName}`;
 					if (box && !seenKeys.has(valKey)) {
 						seenKeys.add(valKey);
@@ -1332,7 +1778,7 @@ class ModuleEmitter {
 						}
 
 						if (!isPtrRecv) {
-							const box = this.getBoxType({ kind: "named", name: sName });
+							const box = this.getIfaceBoxType({ kind: "named", name: sName });
 							const valKey = `val:${sName}`;
 							if (box && !seenKeys.has(valKey)) {
 								seenKeys.add(valKey);
@@ -1364,7 +1810,7 @@ class ModuleEmitter {
 			if (fnName.endsWith(`.${methodName}`)) {
 				const rName = fnName.slice(0, fnName.length - methodName.length - 1);
 				if (!this.structTypes.has(rName)) {
-					const box = this.getBoxType({ kind: "named", name: rName });
+					const box = this.getIfaceBoxType({ kind: "named", name: rName });
 					const key = `named:${rName}`;
 					if (box && !seenKeys.has(key)) {
 						seenKeys.add(key);
@@ -1412,7 +1858,7 @@ class ModuleEmitter {
 
 			// Check struct value (boxed)
 			if (this.checker?.implements?.(namedType, ifaceResolved)) {
-				const box = this.getBoxType(namedType);
+				const box = this.getIfaceBoxType(namedType);
 				if (box && !seen.has(box.typeIndex)) {
 					seen.add(box.typeIndex);
 					candidates.push({ name: sName, typeIndex: box.typeIndex });
@@ -1429,7 +1875,7 @@ class ModuleEmitter {
 					tVal.underlying?.kind !== "interface"
 				) {
 					if (this.checker.implements(tVal, ifaceResolved)) {
-						const box = this.getBoxType(tVal);
+						const box = this.getIfaceBoxType(tVal);
 						if (box && !seen.has(box.typeIndex)) {
 							seen.add(box.typeIndex);
 							candidates.push({ name: tName, typeIndex: box.typeIndex });
@@ -1685,8 +2131,19 @@ export function compileWasmModule(
 	}
 	funcDecls.push(...trampolines);
 
+	_collectPackageConsts(progs, mod, checker);
+	if (checker?.errors?.length > 0) {
+		if (options.boundary) {
+			throw new Error(checker.errors.map((e) => e.message).join("\n"));
+		}
+		return {
+			wasm: null,
+			facade: null,
+			stringTable: null,
+			errors: checker.errors,
+		};
+	}
 	const pendingInits = _collectPackageGlobals(progs, mod, checker);
-	_collectPackageConsts(progs, mod);
 	const globalInitFn =
 		pendingInits.length > 0 || initNames.length > 0
 			? _makeGlobalInitFunc(pendingInits, initNames)
@@ -1975,6 +2432,23 @@ export function compileWasmModule(
 			),
 		);
 	}
+	mod.usesAnyHash = false;
+	for (const info of mod.mapTypes.values()) {
+		if (isInterfaceType(info.keyGoType, checker)) {
+			mod.usesAnyHash = true;
+			break;
+		}
+	}
+	if (mod.usesAnyHash) {
+		funcDecls.push(
+			helper(
+				"__any_hash",
+				[{ name: "a", type: ANY_T }],
+				{ kind: "basic", name: "int32" },
+				"any_hash",
+			),
+		);
+	}
 	if (mod.hasErrorType) {
 		const errPtr = {
 			kind: "pointer",
@@ -2057,6 +2531,7 @@ export function compileWasmModule(
 			),
 		);
 	}
+	_registerIoSyntheticMethods(funcDecls, mod, STR_T, progs);
 
 	// 1f. Boundary metadata (exported surface of wasm packages)
 	const boundaryMeta = options.boundary
@@ -2118,6 +2593,8 @@ export function compileWasmModule(
 			fn._forceExport ||
 			(!fn._isGlobalInit &&
 				!fn._isRuntimeHelper &&
+				!fn._isIoHelper &&
+				!fn._isPhase7Helper &&
 				(options.exportAll ||
 					fn.name === "main" ||
 					(fn.name[0] >= "A" && fn.name[0] <= "Z") ||
@@ -2177,6 +2654,8 @@ export function compileWasmModule(
 			emitter.emitSharedHelper(fn);
 		} else if (fn._isRuntimeHelper) {
 			emitter.emitRuntimeHelper(fn);
+		} else if (fn._isIoHelper || fn._isPhase7Helper) {
+			emitter.emitIoHelper(fn);
 		} else if (fn.body) {
 			emitter.emitFunctionBody(fn.body);
 		}
@@ -2264,29 +2743,65 @@ export function compileWasmModule(
 	};
 }
 
-// Package-level `const` declarations with literal values (iota is already
-// substituted by the parser). Non-literal constant expressions are not
-// supported by the wasm backend yet.
-function _collectPackageConsts(progs, mod) {
+// Package-level `const` declarations (iota is already substituted by the
+// parser).  Literals and expressions the folder can reduce become BasicLits in
+// `constCache`; whatever is left is recorded in `nonLiteralConsts` and later
+// becomes a global initialised by the start function.
+function _collectPackageConsts(progs, mod, checker = null) {
+	const entries = [];
 	for (const p of progs) {
 		for (const d of p.decls ?? []) {
 			if (d.kind !== "ConstDecl") continue;
 			for (const spec of d.decls ?? []) {
 				for (let i = 0; i < spec.names.length; i++) {
-					let lit = spec.value?.[i];
-					if (
-						lit?.kind === "UnaryExpr" &&
-						lit.op === "-" &&
-						lit.operand?.kind === "BasicLit"
-					) {
-						lit = { ...lit.operand, value: `-${lit.operand.value}` };
-					}
-					if (lit?.kind === "BasicLit") mod.constCache.set(spec.names[i], lit);
-					else if (lit) mod.nonLiteralConsts.add(spec.names[i]);
+					if (spec.value?.[i])
+						entries.push({
+							name: spec.names[i],
+							expr: spec.value[i],
+							filename: p._filename,
+							source: p._source,
+						});
 				}
 			}
 		}
 	}
+	const resolve = (name) => mod.constCache.get(name) ?? null;
+	// Iterate to a fixpoint so a constant may refer to one declared later.
+	let pending = entries;
+	let progress = true;
+	while (progress && pending.length > 0) {
+		progress = false;
+		const rest = [];
+		for (const entry of pending) {
+			let lit = null;
+			try {
+				lit = foldConstExpr(entry.expr, resolve);
+			} catch (err) {
+				if (checker?.err) {
+					const savedFile = checker._currentFile;
+					const savedSource = checker._currentSource;
+					if (entry.filename) checker._currentFile = entry.filename;
+					if (entry.source) checker._currentSource = entry.source;
+					checker.err(err.message, entry.expr);
+					checker._currentFile = savedFile;
+					checker._currentSource = savedSource;
+				} else {
+					throw new Error(
+						`Constant expression error for '${entry.name}': ${err.message}`,
+					);
+				}
+				continue;
+			}
+			if (lit) {
+				mod.constCache.set(entry.name, lit);
+				progress = true;
+			} else {
+				rest.push(entry);
+			}
+		}
+		pending = rest;
+	}
+	for (const entry of pending) mod.nonLiteralConsts.add(entry.name);
 }
 
 // Depth-first search over AST nodes (skipping `_`-prefixed annotations).
@@ -2318,6 +2833,9 @@ function _usesTestingRun(node) {
 // site, so a gap surfaces as a compile error rather than a bad module.
 function _usesAnyEq(funcDecls, mod) {
 	if (mod.hasErrorType) return true;
+	for (const info of mod.mapTypes.values()) {
+		if (isInterfaceType(info.keyGoType, mod.checker)) return true;
+	}
 	for (const info of mod.structTypes.values()) {
 		if (info.fields?.some((f) => f.wType === "anyref")) return true;
 	}
@@ -2377,6 +2895,9 @@ function _scanImportsInBody(node, mod) {
 				Log2: "log2",
 				Log10: "log10",
 				Round: "round",
+				Sinh: "sinh",
+				Cosh: "cosh",
+				Tanh: "tanh",
 			};
 			if (jsMathMap[func.field]) {
 				const isBinary = BINARY_MATH_IMPORTS.has(jsMathMap[func.field]);
@@ -2445,6 +2966,10 @@ export function compileWasm(source, options = {}) {
 		exportAll: options.exportAll ?? true,
 	});
 
+	if (checker.errors?.length > 0) {
+		return { wasm: null, errors: checker.errors };
+	}
+
 	return { ...res, errors: [] };
 }
 
@@ -2490,14 +3015,18 @@ function _zeroFieldConst(f, mod) {
 
 function _collectPackageGlobals(progs, mod, checker) {
 	const pending = []; // non-constant initializers, run by the start function
+	const pendingConsts = []; // unfoldable consts; they run before any var
 	for (const p of progs) {
 		for (const d of p.decls ?? []) {
-			if (d.kind !== "VarDecl") continue;
+			const isConst = d.kind === "ConstDecl";
+			if (d.kind !== "VarDecl" && !isConst) continue;
 			for (const spec of d.decls ?? d.specs ?? [d]) {
 				const names = spec.names ?? (spec.name ? [spec.name] : []);
 				const values = spec.value ?? (spec.init ? [spec.init] : []);
 				for (let i = 0; i < names.length; i++) {
 					const name = names[i];
+					// Foldable consts live in `constCache`, not in a global.
+					if (isConst && !mod.isNonLiteralConst(name)) continue;
 					const rawType = spec.type ?? values[i]?._type;
 					const wType = toWasmType(rawType, checker, mod);
 					const gIdx = mod.globals.length;
@@ -2562,15 +3091,17 @@ function _collectPackageGlobals(progs, mod, checker) {
 					if (litNode && litNode.kind === "BasicLit") {
 						if (litNode.litKind === "INT") {
 							isConstInit = true;
+							const s = String(litNode.value);
+							const clean = /^0[0-7]+$/.test(s) ? `0o${s.slice(1)}` : s;
 							initInsts = [
 								wType === "i64"
 									? {
 											op: "i64.const",
-											value: BigInt(sign) * BigInt(litNode.value),
+											value: BigInt(sign) * BigInt(clean),
 										}
 									: {
 											op: "i32.const",
-											value: (sign * Number(litNode.value)) | 0,
+											value: (sign * Number(clean)) | 0,
 										},
 							];
 						} else if (litNode.litKind === "FLOAT") {
@@ -2592,7 +3123,10 @@ function _collectPackageGlobals(progs, mod, checker) {
 						}
 					}
 					if (values[i] && !isConstInit && names.length === values.length) {
-						pending.push({ name, expr: values[i] });
+						(isConst ? pendingConsts : pending).push({
+							name,
+							expr: values[i],
+						});
 					}
 					mod.globals.push({
 						type: wType,
@@ -2608,7 +3142,26 @@ function _collectPackageGlobals(progs, mod, checker) {
 			}
 		}
 	}
-	return pending;
+	return [..._orderConstInits(pendingConsts), ...pending];
+}
+
+// Orders runtime-initialised consts so each runs after the consts it
+// references (Go allows a constant to use one declared later).
+function _orderConstInits(entries) {
+	const byName = new Map(entries.map((e) => [e.name, e]));
+	const ordered = [];
+	const state = new Map();
+	const visit = (entry) => {
+		if (state.has(entry.name)) return;
+		state.set(entry.name, true);
+		_someNode(entry.expr, (n) => {
+			if (n.kind === "Ident" && byName.has(n.name)) visit(byName.get(n.name));
+			return false;
+		});
+		ordered.push(entry);
+	};
+	for (const e of entries) visit(e);
+	return ordered;
 }
 
 // Synthesises `__init_globals()` assigning every non-constant package-level
@@ -2759,12 +3312,57 @@ function _makeInterfaceDispatcher(info, checker) {
 	};
 }
 
+function _scanFuncSigInterfaces(
+	progs,
+	funcDecls,
+	interfaceCalls,
+	checker,
+	mod,
+) {
+	const scanType = (t) => {
+		if (!t) return;
+		if (t.kind === "InterfaceType" || (t.kind === "interface" && !t.name)) {
+			const mList = getInterfaceMethodList(t);
+			if (mList.length === 0) return;
+			const ifaceName = anonIfaceName(t, checker, mod);
+			for (const m of mList) {
+				const key = `${ifaceName}.${m.name}`;
+				if (!interfaceCalls.has(key)) {
+					interfaceCalls.set(key, {
+						ifaceName,
+						ifaceType: t,
+						methodName: m.name,
+						methodSig: {
+							kind: "func",
+							params: m.params,
+							returns: m.returns,
+						},
+					});
+				}
+			}
+		}
+	};
+	for (const fn of funcDecls) {
+		for (const p of fn.params ?? []) scanType(p.type);
+		scanType(fn.returnType);
+	}
+	for (const p of progs) {
+		for (const d of p.decls ?? []) {
+			if (d.kind === "FuncDecl") {
+				for (const param of d.params ?? []) scanType(param.type);
+				scanType(d.returnType);
+			}
+		}
+	}
+}
+
 function _collectInterfaceDispatchers(progs, funcDecls, mod, checker) {
 	const interfaceCalls = new Map();
 	for (const fn of funcDecls) {
 		if (fn.body) _scanInterfaceCallNodes(fn.body, interfaceCalls, checker);
 	}
 	_scanInterfaceTypeDecls(progs, interfaceCalls, checker);
+	_scanFuncSigInterfaces(progs, funcDecls, interfaceCalls, checker, mod);
 
 	// `error.Error()` is reached implicitly by fmt verbs and errors.Is, so
 	// the dispatcher must exist even when user code never calls it.
@@ -2784,7 +3382,378 @@ function _collectInterfaceDispatchers(progs, funcDecls, mod, checker) {
 		});
 	}
 
+	const hasIo = importsAnyOf(progs, [
+		"io",
+		"fmt",
+		"strings",
+		"bytes",
+		"crypto/sha256",
+		"sha256",
+		"encoding/binary",
+		"binary",
+		"encoding/hex",
+		"hex",
+		"encoding/base64",
+		"base64",
+	]);
+	if (hasIo) {
+		const byteSliceType = {
+			kind: "slice",
+			elem: { kind: "basic", name: "byte" },
+		};
+		const intErrReturns = [
+			{ kind: "basic", name: "int" },
+			{ kind: "interface", name: "error" },
+		];
+		if (!interfaceCalls.has("io.Reader.Read")) {
+			interfaceCalls.set("io.Reader.Read", {
+				ifaceName: "io.Reader",
+				ifaceType: checker?.types?.get("io.Reader"),
+				methodName: "Read",
+				methodSig: {
+					kind: "func",
+					params: [byteSliceType],
+					returns: intErrReturns,
+				},
+			});
+		}
+		if (!interfaceCalls.has("io.Writer.Write")) {
+			interfaceCalls.set("io.Writer.Write", {
+				ifaceName: "io.Writer",
+				ifaceType: checker?.types?.get("io.Writer"),
+				methodName: "Write",
+				methodSig: {
+					kind: "func",
+					params: [byteSliceType],
+					returns: intErrReturns,
+				},
+			});
+		}
+	}
+
 	for (const info of interfaceCalls.values()) {
 		funcDecls.push(_makeInterfaceDispatcher(info, checker));
+	}
+}
+
+function _registerIoSyntheticMethods(funcDecls, mod, strType, programs) {
+	const progs = Array.isArray(programs) ? programs : [programs];
+	const hasStrings = importsAnyOf(progs, ["strings"]);
+	const hasBytes = importsAnyOf(progs, ["bytes"]);
+	const hasIo = importsAnyOf(progs, ["io"]);
+
+	const BYTE_SLICE_T = {
+		kind: "slice",
+		elem: { kind: "basic", name: "byte" },
+	};
+	const INT_T = { kind: "basic", name: "int" };
+	const ERR_T = { kind: "interface", name: "error" };
+	const INT_ERR_RET = { kind: "tuple", types: [INT_T, ERR_T] };
+	const ioHelper = (name, params, returnType, kind, extra = {}) => ({
+		kind: "FuncDecl",
+		name,
+		params,
+		returnType,
+		body: { kind: "Block", stmts: [], list: [] },
+		_isIoHelper: kind,
+		_rootFuncDecl: null,
+		...extra,
+	});
+
+	if (hasStrings && mod.structTypes.has("strings.Builder")) {
+		const bPtr = {
+			kind: "pointer",
+			base: { kind: "named", name: "strings.Builder" },
+		};
+		funcDecls.push(
+			ioHelper(
+				"strings.Builder.Write",
+				[
+					{ name: "b", type: bPtr },
+					{ name: "p", type: BYTE_SLICE_T },
+				],
+				INT_ERR_RET,
+				"builder_write",
+				{
+					_isMethod: true,
+					_recvTypeName: "strings.Builder",
+					_methodName: "Write",
+				},
+			),
+			ioHelper(
+				"strings.Builder.WriteString",
+				[
+					{ name: "b", type: bPtr },
+					{ name: "s", type: strType },
+				],
+				INT_ERR_RET,
+				"builder_write_string",
+				{
+					_isMethod: true,
+					_recvTypeName: "strings.Builder",
+					_methodName: "WriteString",
+				},
+			),
+		);
+	}
+	if (hasBytes && mod.structTypes.has("bytes.Buffer")) {
+		const bPtr = {
+			kind: "pointer",
+			base: { kind: "named", name: "bytes.Buffer" },
+		};
+		funcDecls.push(
+			ioHelper(
+				"bytes.Buffer.Write",
+				[
+					{ name: "b", type: bPtr },
+					{ name: "p", type: BYTE_SLICE_T },
+				],
+				INT_ERR_RET,
+				"buffer_write",
+				{
+					_isMethod: true,
+					_recvTypeName: "bytes.Buffer",
+					_methodName: "Write",
+				},
+			),
+			ioHelper(
+				"bytes.Buffer.WriteString",
+				[
+					{ name: "b", type: bPtr },
+					{ name: "s", type: strType },
+				],
+				INT_ERR_RET,
+				"buffer_write_string",
+				{
+					_isMethod: true,
+					_recvTypeName: "bytes.Buffer",
+					_methodName: "WriteString",
+				},
+			),
+			ioHelper(
+				"bytes.Buffer.Read",
+				[
+					{ name: "b", type: bPtr },
+					{ name: "p", type: BYTE_SLICE_T },
+				],
+				INT_ERR_RET,
+				"buffer_read",
+				{
+					_isMethod: true,
+					_recvTypeName: "bytes.Buffer",
+					_methodName: "Read",
+				},
+			),
+		);
+	}
+	if (hasStrings && mod.structTypes.has("strings.Reader")) {
+		const rPtr = {
+			kind: "pointer",
+			base: { kind: "named", name: "strings.Reader" },
+		};
+		funcDecls.push(
+			ioHelper(
+				"strings.Reader.Read",
+				[
+					{ name: "r", type: rPtr },
+					{ name: "p", type: BYTE_SLICE_T },
+				],
+				INT_ERR_RET,
+				"strings_reader_read",
+				{
+					_isMethod: true,
+					_recvTypeName: "strings.Reader",
+					_methodName: "Read",
+				},
+			),
+			ioHelper(
+				"strings.Reader.Len",
+				[{ name: "r", type: rPtr }],
+				INT_T,
+				"strings_reader_len",
+				{
+					_isMethod: true,
+					_recvTypeName: "strings.Reader",
+					_methodName: "Len",
+				},
+			),
+			ioHelper(
+				"strings.Reader.Reset",
+				[
+					{ name: "r", type: rPtr },
+					{ name: "s", type: strType },
+				],
+				null,
+				"strings_reader_reset",
+				{
+					_isMethod: true,
+					_recvTypeName: "strings.Reader",
+					_methodName: "Reset",
+				},
+			),
+		);
+	}
+	if (hasBytes && mod.structTypes.has("bytes.Reader")) {
+		const rPtr = {
+			kind: "pointer",
+			base: { kind: "named", name: "bytes.Reader" },
+		};
+		funcDecls.push(
+			ioHelper(
+				"bytes.Reader.Read",
+				[
+					{ name: "r", type: rPtr },
+					{ name: "p", type: BYTE_SLICE_T },
+				],
+				INT_ERR_RET,
+				"bytes_reader_read",
+				{ _isMethod: true, _recvTypeName: "bytes.Reader", _methodName: "Read" },
+			),
+			ioHelper(
+				"bytes.Reader.Len",
+				[{ name: "r", type: rPtr }],
+				INT_T,
+				"bytes_reader_len",
+				{ _isMethod: true, _recvTypeName: "bytes.Reader", _methodName: "Len" },
+			),
+			ioHelper(
+				"bytes.Reader.Reset",
+				[
+					{ name: "r", type: rPtr },
+					{ name: "b", type: BYTE_SLICE_T },
+				],
+				null,
+				"bytes_reader_reset",
+				{
+					_isMethod: true,
+					_recvTypeName: "bytes.Reader",
+					_methodName: "Reset",
+				},
+			),
+		);
+	}
+	if (hasIo && mod.structTypes.has("io.discard")) {
+		const dPtr = {
+			kind: "pointer",
+			base: { kind: "named", name: "io.discard" },
+		};
+		funcDecls.push(
+			ioHelper(
+				"io.discard.Write",
+				[
+					{ name: "d", type: dPtr },
+					{ name: "p", type: BYTE_SLICE_T },
+				],
+				INT_ERR_RET,
+				"discard_write",
+				{ _isMethod: true, _recvTypeName: "io.discard", _methodName: "Write" },
+			),
+			ioHelper(
+				"io.discard.WriteString",
+				[
+					{ name: "d", type: dPtr },
+					{ name: "s", type: strType },
+				],
+				INT_ERR_RET,
+				"discard_write_string",
+				{
+					_isMethod: true,
+					_recvTypeName: "io.discard",
+					_methodName: "WriteString",
+				},
+			),
+		);
+	}
+	if (hasIo && mod.structTypes.has("io.LimitedReader")) {
+		const lrPtr = {
+			kind: "pointer",
+			base: { kind: "named", name: "io.LimitedReader" },
+		};
+		funcDecls.push(
+			ioHelper(
+				"io.LimitedReader.Read",
+				[
+					{ name: "l", type: lrPtr },
+					{ name: "p", type: BYTE_SLICE_T },
+				],
+				INT_ERR_RET,
+				"limited_reader_read",
+				{
+					_isMethod: true,
+					_recvTypeName: "io.LimitedReader",
+					_methodName: "Read",
+				},
+			),
+		);
+	}
+	const hasSha256 = importsAnyOf(progs, ["crypto/sha256", "sha256"]);
+	if (
+		hasSha256 &&
+		(mod.structTypes.has("sha256.digest") ||
+			mod.structTypes.has("crypto/sha256.digest"))
+	) {
+		const dPtr = {
+			kind: "pointer",
+			base: { kind: "named", name: "sha256.digest" },
+		};
+		funcDecls.push(
+			ioHelper(
+				"sha256.digest.Write",
+				[
+					{ name: "d", type: dPtr },
+					{ name: "p", type: BYTE_SLICE_T },
+				],
+				INT_ERR_RET,
+				"sha256_write",
+				{
+					_isMethod: true,
+					_recvTypeName: "sha256.digest",
+					_methodName: "Write",
+				},
+			),
+			ioHelper(
+				"sha256.digest.Sum",
+				[
+					{ name: "d", type: dPtr },
+					{ name: "b", type: BYTE_SLICE_T },
+				],
+				BYTE_SLICE_T,
+				"sha256_sum",
+				{ _isMethod: true, _recvTypeName: "sha256.digest", _methodName: "Sum" },
+			),
+			ioHelper(
+				"sha256.digest.Reset",
+				[{ name: "d", type: dPtr }],
+				null,
+				"sha256_reset",
+				{
+					_isMethod: true,
+					_recvTypeName: "sha256.digest",
+					_methodName: "Reset",
+				},
+			),
+			ioHelper(
+				"sha256.digest.Size",
+				[{ name: "d", type: dPtr }],
+				INT_T,
+				"sha256_size",
+				{
+					_isMethod: true,
+					_recvTypeName: "sha256.digest",
+					_methodName: "Size",
+				},
+			),
+			ioHelper(
+				"sha256.digest.BlockSize",
+				[{ name: "d", type: dPtr }],
+				INT_T,
+				"sha256_block_size",
+				{
+					_isMethod: true,
+					_recvTypeName: "sha256.digest",
+					_methodName: "BlockSize",
+				},
+			),
+		);
 	}
 }

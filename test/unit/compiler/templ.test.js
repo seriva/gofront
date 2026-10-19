@@ -1,30 +1,20 @@
-// GoFront test suite — .templ file support
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { compileDir } from "../../src/compiler.js";
 import {
 	assert,
 	assertContains,
 	assertEqual,
 	assertThrows,
+	compileDir,
 	runInDom,
 	section,
 	summarize,
 	test,
-} from "./helpers.js";
+	withTempDir,
+} from "../helpers.js";
 
-// Helper: creates a temp dir with given files and compiles it
+// Helper: creates a temp dir with given files, compiles it, and cleans up
 function compilePkg(files) {
-	const dir = mkdtempSync(join(tmpdir(), "gofront-templ-"));
-	for (const [name, content] of Object.entries(files)) {
-		const fullPath = join(dir, name);
-		const parent = fullPath.slice(0, fullPath.lastIndexOf("/"));
-		mkdirSync(parent, { recursive: true });
-		writeFileSync(fullPath, content);
-	}
-	return compileDir(dir);
+	return withTempDir(files, (dir) => compileDir(dir));
 }
 
 // ── Basic element rendering ───────────────────────────────────

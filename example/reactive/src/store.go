@@ -189,12 +189,12 @@ func toggleTodo(id int) {
 }
 
 func removeTodo(id int) {
-    cur := todosSignal.get()
+    cur := append([]Todo{}, todosSignal.get()...)
     todosSignal.set(slices.DeleteFunc(cur, func(t Todo) bool { return t.id == id }))
 }
 
 func clearCompleted() {
-    cur := todosSignal.get()
+    cur := append([]Todo{}, todosSignal.get()...)
     todosSignal.set(slices.DeleteFunc(cur, func(t Todo) bool { return t.done }))
 }
 

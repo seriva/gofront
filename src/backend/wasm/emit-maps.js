@@ -6,6 +6,7 @@ import {
 	isArrayType,
 	isInterfaceType,
 	isPointerToStruct,
+	isSigned,
 	isStringType,
 	toWasmType,
 } from "./types.js";
@@ -64,11 +65,7 @@ export class MapsEmitter {
 		return null;
 	}
 
-	_unsupportedMapKey(keyGoType) {
-		if (isArrayType(keyGoType, this.mod.checker))
-			return "array-typed map keys are not yet supported in wasm packages (planned)";
-		if (isInterfaceType(keyGoType, this.mod.checker))
-			return "interface-typed map keys are not yet supported in wasm packages (planned)";
+	_unsupportedMapKey(_keyGoType) {
 		return null;
 	}
 
@@ -79,6 +76,63 @@ export class MapsEmitter {
 				op: "call",
 				funcIndex: this.mod.getStringHashImportIndex(),
 			});
+			return;
+		}
+		if (isInterfaceType(keyGoType, this.mod.checker)) {
+			this.pushInstruction({ op: "local.get", index: keyLocal });
+			const hashIdx = this.mod.resolveFuncIndex("__any_hash");
+			this.pushInstruction({ op: "call", funcIndex: hashIdx });
+			return;
+		}
+		if (isArrayType(keyGoType, this.mod.checker)) {
+			const size = this._getArraySize(keyGoType);
+			if (size === 0) {
+				this.pushInstruction({ op: "i32.const", value: 17 });
+				return;
+			}
+			const elemGoType = this._getArrayElemType(keyGoType);
+			const arrInfo = this.mod.getArrayType(elemGoType);
+			const h = this.allocLocal(null, "i32");
+			this.pushInstruction({ op: "i32.const", value: 17 });
+			this.pushInstruction({ op: "local.set", index: h });
+
+			const idx = this.allocLocal(null, "i32");
+			this.pushInstruction({ op: "i32.const", value: 0 });
+			this.pushInstruction({ op: "local.set", index: idx });
+
+			const elemLoc = this.allocLocal(null, arrInfo.elemWType);
+
+			this.pushInstruction({ op: "block", blockType: "void" });
+			this.pushInstruction({ op: "loop", blockType: "void" });
+			this.pushInstruction({ op: "local.get", index: idx });
+			this.pushInstruction({ op: "i32.const", value: size });
+			this.pushInstruction("i32.ge_s");
+			this.pushInstruction({ op: "br_if", depth: 1 });
+
+			this.pushInstruction({ op: "local.get", index: keyLocal });
+			this.pushInstruction({ op: "local.get", index: idx });
+			this.pushInstruction({
+				op: "array.get",
+				typeIndex: arrInfo.typeIndex,
+			});
+			this.pushInstruction({ op: "local.set", index: elemLoc });
+
+			this.pushInstruction({ op: "local.get", index: h });
+			this.pushInstruction({ op: "i32.const", value: 31 });
+			this.pushInstruction("i32.mul");
+			this.emitKeyHash(elemLoc, elemGoType);
+			this.pushInstruction("i32.add");
+			this.pushInstruction({ op: "local.set", index: h });
+
+			this.pushInstruction({ op: "local.get", index: idx });
+			this.pushInstruction({ op: "i32.const", value: 1 });
+			this.pushInstruction("i32.add");
+			this.pushInstruction({ op: "local.set", index: idx });
+			this.pushInstruction({ op: "br", depth: 0 });
+			this.pushInstruction("end");
+			this.pushInstruction("end");
+
+			this.pushInstruction({ op: "local.get", index: h });
 			return;
 		}
 		const wType = toWasmType(keyGoType, this.mod.checker, this.mod);
@@ -113,20 +167,34 @@ export class MapsEmitter {
 			return;
 		}
 		// Floats: `x + 0.0` folds -0 onto +0 (they are equal keys in Go) and
-		// leaves NaN as NaN (never equal, so the hash value is irrelevant).
+		// NaN elements never match (f32.eq/f64.eq returns false in key comparison).
 		if (wType === "f32") {
+			this.pushInstruction({ op: "local.get", index: keyLocal });
+			this.pushInstruction({ op: "local.get", index: keyLocal });
+			this.pushInstruction("f32.ne");
+			this.pushInstruction({ op: "if", blockType: "i32" });
+			this.pushInstruction({ op: "i32.const", value: 0 });
+			this.pushInstruction("else");
 			this.pushInstruction({ op: "local.get", index: keyLocal });
 			this.pushInstruction({ op: "f32.const", value: 0 });
 			this.pushInstruction("f32.add");
 			this.pushInstruction("i32.reinterpret_f32");
+			this.pushInstruction("end");
 			return;
 		}
 		if (wType === "f64") {
+			this.pushInstruction({ op: "local.get", index: keyLocal });
+			this.pushInstruction({ op: "local.get", index: keyLocal });
+			this.pushInstruction("f64.ne");
+			this.pushInstruction({ op: "if", blockType: "i32" });
+			this.pushInstruction({ op: "i32.const", value: 0 });
+			this.pushInstruction("else");
 			this.pushInstruction({ op: "local.get", index: keyLocal });
 			this.pushInstruction({ op: "f64.const", value: 0 });
 			this.pushInstruction("f64.add");
 			this.pushInstruction("i64.reinterpret_f64");
 			this.pushInstruction("i32.wrap_i64");
+			this.pushInstruction("end");
 			return;
 		}
 		const structInfo = this._structInfoForGoType(keyGoType);
@@ -173,6 +241,74 @@ export class MapsEmitter {
 				op: "call",
 				funcIndex: this.mod.getStringCmpImportIndex("=="),
 			});
+			return;
+		}
+		if (isInterfaceType(keyGoType, this.mod.checker)) {
+			this.pushInstruction({ op: "local.get", index: k1Local });
+			this.pushInstruction({ op: "local.get", index: k2Local });
+			this._emitAnyEq();
+			return;
+		}
+		if (isArrayType(keyGoType, this.mod.checker)) {
+			const size = this._getArraySize(keyGoType);
+			if (size === 0) {
+				this.pushInstruction({ op: "i32.const", value: 1 });
+				return;
+			}
+			const elemGoType = this._getArrayElemType(keyGoType);
+			const arrInfo = this.mod.getArrayType(elemGoType);
+
+			const idx = this.allocLocal(null, "i32");
+			this.pushInstruction({ op: "i32.const", value: 0 });
+			this.pushInstruction({ op: "local.set", index: idx });
+
+			const eqRes = this.allocLocal(null, "i32");
+			this.pushInstruction({ op: "i32.const", value: 1 });
+			this.pushInstruction({ op: "local.set", index: eqRes });
+
+			const f1 = this.allocLocal(null, arrInfo.elemWType);
+			const f2 = this.allocLocal(null, arrInfo.elemWType);
+
+			this.pushInstruction({ op: "block", blockType: "void" });
+			this.pushInstruction({ op: "loop", blockType: "void" });
+			this.pushInstruction({ op: "local.get", index: idx });
+			this.pushInstruction({ op: "i32.const", value: size });
+			this.pushInstruction("i32.ge_s");
+			this.pushInstruction({ op: "br_if", depth: 1 });
+
+			this.pushInstruction({ op: "local.get", index: k1Local });
+			this.pushInstruction({ op: "local.get", index: idx });
+			this.pushInstruction({
+				op: "array.get",
+				typeIndex: arrInfo.typeIndex,
+			});
+			this.pushInstruction({ op: "local.set", index: f1 });
+
+			this.pushInstruction({ op: "local.get", index: k2Local });
+			this.pushInstruction({ op: "local.get", index: idx });
+			this.pushInstruction({
+				op: "array.get",
+				typeIndex: arrInfo.typeIndex,
+			});
+			this.pushInstruction({ op: "local.set", index: f2 });
+
+			this.emitKeyEq(f1, f2, elemGoType);
+			this.pushInstruction("i32.eqz");
+			this.pushInstruction({ op: "if", blockType: "void" });
+			this.pushInstruction({ op: "i32.const", value: 0 });
+			this.pushInstruction({ op: "local.set", index: eqRes });
+			this.pushInstruction({ op: "br", depth: 2 });
+			this.pushInstruction("end");
+
+			this.pushInstruction({ op: "local.get", index: idx });
+			this.pushInstruction({ op: "i32.const", value: 1 });
+			this.pushInstruction("i32.add");
+			this.pushInstruction({ op: "local.set", index: idx });
+			this.pushInstruction({ op: "br", depth: 0 });
+			this.pushInstruction("end");
+			this.pushInstruction("end");
+
+			this.pushInstruction({ op: "local.get", index: eqRes });
 			return;
 		}
 		const wType = toWasmType(keyGoType, this.mod.checker, this.mod);
@@ -251,13 +387,13 @@ export class MapsEmitter {
 		if (wType === "i64") {
 			this.pushInstruction({ op: "local.get", index: v1Loc });
 			this.pushInstruction({ op: "local.get", index: v2Loc });
-			this.pushInstruction("i64.lt_s");
+			this.pushInstruction(isSigned(elemGoType) ? "i64.lt_s" : "i64.lt_u");
 			return;
 		}
 		if (wType === "i32") {
 			this.pushInstruction({ op: "local.get", index: v1Loc });
 			this.pushInstruction({ op: "local.get", index: v2Loc });
-			this.pushInstruction("i32.lt_s");
+			this.pushInstruction(isSigned(elemGoType) ? "i32.lt_s" : "i32.lt_u");
 			return;
 		}
 		if (wType === "f32") {

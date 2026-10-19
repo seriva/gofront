@@ -73,14 +73,29 @@ export class Parser {
 		return this.peek2().type === type;
 	}
 
-	match(...types) {
-		for (const type of types) {
-			if (this.check(type)) {
+	match(t1, t2, t3, ...rest) {
+		const cur = this.peek().type;
+		if (
+			cur === t1 ||
+			(t2 !== undefined && cur === t2) ||
+			(t3 !== undefined && cur === t3)
+		) {
+			this.advance();
+			return true;
+		}
+		for (let i = 0; i < rest.length; i++) {
+			if (cur === rest[i]) {
 				this.advance();
 				return true;
 			}
 		}
 		return false;
+	}
+
+	parseIdentList() {
+		const names = [this.expect(T.IDENT).value];
+		while (this.match(T.COMMA)) names.push(this.expect(T.IDENT).value);
+		return names;
 	}
 
 	expect(type) {

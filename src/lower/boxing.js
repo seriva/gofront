@@ -10,8 +10,7 @@ export function isReferenceType(t) {
 		base?.kind === "struct" ||
 		base?.kind === "slice" ||
 		base?.kind === "map" ||
-		base?.kind === "func" ||
-		base?.kind === "interface"
+		base?.kind === "func"
 	);
 }
 
