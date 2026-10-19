@@ -139,12 +139,14 @@ export const STDLIB_PACKAGES = new Set([
 	"os",
 	"gom",
 	"regexp",
+	"encoding/json",
 ]);
 
 // Per-namespace member subset the WASM backend implements. `null` means every
 // member the checker knows about. Members outside the set are rejected in
 // wasm/both packages with "'strings.Split' is not yet available in wasm packages".
 export const WASM_STDLIB_MEMBERS = new Map([
+	["json", new Set()],
 	[
 		"math",
 		new Set([
@@ -839,8 +841,13 @@ export function typeStr(t) {
 			return t.name || "interface{...}";
 		case "namespace":
 			return t.name || "namespace{...}";
-		case "func":
-			return `func(${t.params.map(typeStr).join(", ")}) ${typeStr(t.returns[0] ?? VOID)}`;
+		case "func": {
+			const retStr =
+				t.returns.length > 1
+					? `(${t.returns.map(typeStr).join(", ")})`
+					: typeStr(t.returns[0] ?? VOID);
+			return `func(${t.params.map(typeStr).join(", ")}) ${retStr}`;
+		}
 		case "tuple":
 			return `(${t.types.map(typeStr).join(", ")})`;
 		case "named":

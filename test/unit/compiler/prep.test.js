@@ -86,10 +86,31 @@ test("generateVendorEntry creates valid import, window, and export code", () => 
 	assertContains(entry, "_dep_1 as prismjs");
 });
 
-test("generateVendorEntry without globals emits no package-specific aliases", () => {
-	const entry = generateVendorEntry(["prismjs"]);
-	assert(!entry.includes('window["Prism"]'), "no Prism alias without globals");
-	assertContains(entry, 'window["prismjs"] = _dep_0.default || _dep_0;');
+test("generateVendorEntry supports submodule packaging and named export assignments", () => {
+	const entry = generateVendorEntry(
+		["preact", "preact/hooks"],
+		{ preact: "preact", "preact/hooks": "preact_hooks" },
+		{
+			preact: ["h", "render"],
+			"preact/hooks": ["useState", "useEffect"],
+		},
+	);
+	assertContains(entry, 'import * as _dep_0 from "preact";');
+	assertContains(entry, 'import * as _dep_1 from "preact/hooks";');
+	assertContains(entry, 'window["preact"] = _dep_0.default || _dep_0;');
+	assertContains(entry, 'window["preact_hooks"] = _dep_1.default || _dep_1;');
+	assertContains(entry, 'window["h"] = _dep_0["h"] !== undefined');
+	assertContains(entry, 'window["render"] = _dep_0["render"] !== undefined');
+	assertContains(
+		entry,
+		'window["useState"] = _dep_1["useState"] !== undefined',
+	);
+	assertContains(
+		entry,
+		'window["useEffect"] = _dep_1["useEffect"] !== undefined',
+	);
+	assertContains(entry, "_dep_0 as preact");
+	assertContains(entry, "_dep_1 as preact_hooks");
 });
 
 section("vendor — configuration loading");

@@ -1,6 +1,9 @@
 package utils
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestPlural(t *testing.T) {
 	if Plural(1, "task") != "1 task" {

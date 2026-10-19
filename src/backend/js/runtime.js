@@ -1325,3 +1325,249 @@ var __base64_std = __base64_std || __base64_make("ABCDEFGHIJKLMNOPQRSTUVWXYZabcd
 var __base64_url = __base64_url || __base64_make("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_", "=");
 var __base64_raw_std = __base64_raw_std || __base64_make("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/", "");
 var __base64_raw_url = __base64_raw_url || __base64_make("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_", "");`;
+
+export const HELPER_JSON = `var __json_esc = __json_esc || function(s) {
+  if (typeof s !== "string") s = String(s);
+  return JSON.stringify(s)
+    .replace(/[<>&]/g, function(c) {
+      return c === "<" ? "\\\\u003c" : (c === ">" ? "\\\\u003e" : "\\\\u0026");
+    })
+    .replace(/\\u2028/g, "\\\\u2028")
+    .replace(/\\u2029/g, "\\\\u2029");
+};
+var __json_err = __json_err || function(msg) {
+  return typeof __error === "function" ? __error("json: " + msg) : new Error("json: " + msg);
+};
+var __json_type = __json_type || function(v) {
+  if (v === null) return "null";
+  if (Array.isArray(v)) return "array";
+  var t = typeof v;
+  if (t === "number" || t === "bigint") return "number";
+  if (t === "string") return "string";
+  if (t === "boolean") return "bool";
+  if (t === "object") return "object";
+  return t;
+};
+var __json_b64 = __json_b64 || function(u8) {
+  if (u8 === null || u8 === undefined) return "null";
+  if (typeof __base64_std !== "undefined") return '"' + __base64_std.EncodeToString(u8) + '"';
+  var bstr = "";
+  for (var i = 0; i < u8.length; i++) bstr += String.fromCharCode(u8[i]);
+  return '"' + (typeof btoa !== "undefined" ? btoa(bstr) : Buffer.from(u8).toString("base64")) + '"';
+};
+var __json_b64_dec = __json_b64_dec || function(str) {
+  if (typeof __base64_std !== "undefined") {
+    var res = __base64_std.DecodeString(str);
+    if (!res[1]) return res[0];
+  }
+  var bin = typeof atob !== "undefined" ? atob(str) : Buffer.from(str, "base64").toString("binary");
+  var u8 = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return u8;
+};
+var __json_is_zero = __json_is_zero || function(val, isStruct) {
+  if (isStruct) return false;
+  if (val === null || val === undefined || val === false || val === 0 || val === "") return true;
+  if (typeof val === "bigint") return val === 0n;
+  if (Array.isArray(val) || (ArrayBuffer.isView(val) && !val.__raw)) return val.length === 0;
+  if (val instanceof Map) return val.size === 0;
+  if (val && val.__map) return Object.keys(val).filter(function(k) { return !k.startsWith("__"); }).length === 0;
+  return false;
+};
+var __json_preserve_int64 = __json_preserve_int64 || function(str) {
+  return str.replace(/"(?:\\\\.|[^"\\\\])*"|(?<=[,:\\[{\\s]|^)(-?\\d{16,})(?=[,\\]}\\s]|$)/g, function(m, num) {
+    if (num) {
+      try {
+        var b = BigInt(num);
+        if (b > 9007199254740991n || b < -9007199254740991n) return '"' + num + '__bigint"';
+      } catch (e) {}
+    }
+    return m;
+  });
+};
+var __json_enc_any = __json_enc_any || function(v) {
+  if (v === null || v === undefined) return "null";
+  var t = typeof v;
+  if (t === "boolean") return v ? "true" : "false";
+  if (t === "number") {
+    if (!isFinite(v)) throw new Error("json: unsupported value: " + v);
+    return String(v);
+  }
+  if (t === "bigint") return v.toString();
+  if (t === "string") return __json_esc(v);
+  if ((typeof ArrayBuffer !== "undefined" && ArrayBuffer.isView(v)) || v instanceof Uint8Array) {
+    if (v.__raw) {
+      var s = (typeof v === "string" ? v : new TextDecoder().decode(v)).trim();
+      return s.length > 0 ? s : "null";
+    }
+    return __json_b64(v);
+  }
+  if (Array.isArray(v)) {
+    var items = [];
+    for (var i = 0; i < v.length; i++) items.push(__json_enc_any(v[i]));
+    return "[" + items.join(",") + "]";
+  }
+  if (v instanceof Map) {
+    var mkeys = Array.from(v.keys()).map(String).sort();
+    var mentries = [];
+    for (var mi = 0; mi < mkeys.length; mi++) {
+      mentries.push(__json_esc(mkeys[mi]) + ":" + __json_enc_any(v.get(mkeys[mi])));
+    }
+    return "{" + mentries.join(",") + "}";
+  }
+  if (typeof v.__json_enc === "function") return v.__json_enc();
+  if (typeof v === "object") {
+    var okeys = Object.keys(v).filter(function(k) { return !k.startsWith("__"); });
+    if (!v.__map && v.constructor && v.constructor !== Object && v.constructor.name !== "Object") {
+      okeys = okeys.filter(function(k) { return !(k.length > 0 && k[0] >= "a" && k[0] <= "z"); });
+    }
+    okeys.sort();
+    var oentries = [];
+    for (var oi = 0; oi < okeys.length; oi++) {
+      oentries.push(__json_esc(okeys[oi]) + ":" + __json_enc_any(v[okeys[oi]]));
+    }
+    return "{" + oentries.join(",") + "}";
+  }
+  return "null";
+};
+var __json_dec_any = __json_dec_any || function(parsed) {
+  if (parsed === null) return null;
+  if (typeof parsed === "string") {
+    if (parsed.endsWith("__bigint")) return BigInt(parsed.slice(0, -8));
+    return parsed;
+  }
+  if (typeof parsed === "number" || typeof parsed === "boolean") return parsed;
+  if (Array.isArray(parsed)) {
+    var outSlice = [];
+    for (var i = 0; i < parsed.length; i++) outSlice.push(__json_dec_any(parsed[i]));
+    return outSlice;
+  }
+  if (typeof parsed === "object") {
+    var outMap = { __map: true };
+    for (var k in parsed) {
+      if (Object.prototype.hasOwnProperty.call(parsed, k)) {
+        outMap[k] = __json_dec_any(parsed[k]);
+      }
+    }
+    return outMap;
+  }
+  return parsed;
+};
+var __json_dec_any_target = __json_dec_any_target || function(parsed, target, box) {
+  var out = __json_dec_any(parsed);
+  if (box) box.value = out;
+  else if (target && typeof target === "object") Object.assign(target, out);
+  return null;
+};
+var __json_enc_slice = __json_enc_slice || function(slice, elemEnc) {
+  if (slice === null || slice === undefined) return "null";
+  var items = [];
+  for (var i = 0; i < slice.length; i++) items.push(elemEnc(slice[i]));
+  return "[" + items.join(",") + "]";
+};
+var __json_enc_map = __json_enc_map || function(m, valEnc) {
+  if (m === null || m === undefined) return "null";
+  if (m instanceof Map) {
+    var mkeys = Array.from(m.keys()).map(String).sort();
+    var mentries = [];
+    for (var i = 0; i < mkeys.length; i++) {
+      mentries.push(__json_esc(mkeys[i]) + ":" + valEnc(m.get(mkeys[i])));
+    }
+    return "{" + mentries.join(",") + "}";
+  }
+  var keys = Object.keys(m).filter(function(k) { return !k.startsWith("__"); }).sort();
+  var entries = [];
+  for (var j = 0; j < keys.length; j++) {
+    entries.push(__json_esc(keys[j]) + ":" + valEnc(m[keys[j]]));
+  }
+  return "{" + entries.join(",") + "}";
+};
+var __json_marshal = __json_marshal || function(enc, val) {
+  try {
+    var str = enc(val);
+    return [new TextEncoder().encode(str), null];
+  } catch (e) {
+    return [new Uint8Array(0), typeof __error === "function" ? __error(e.message) : e];
+  }
+};
+var __json_indent = __json_indent || function(jsonStr, prefix, indent) {
+  var out = "";
+  var depth = 0;
+  var inString = false;
+  var escaped = false;
+  for (var i = 0; i < jsonStr.length; i++) {
+    var c = jsonStr[i];
+    if (inString) {
+      out += c;
+      if (escaped) escaped = false;
+      else if (c === "\\\\") escaped = true;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') { inString = true; out += c; continue; }
+    if (c === "{" || c === "[") {
+      out += c;
+      depth++;
+      var next = jsonStr[i + 1];
+      if ((c === "{" && next === "}") || (c === "[" && next === "]")) {
+        out += next;
+        i++;
+        depth--;
+        continue;
+      }
+      out += "\\n" + prefix + indent.repeat(depth);
+    } else if (c === "}" || c === "]") {
+      depth--;
+      out += "\\n" + prefix + indent.repeat(depth) + c;
+    } else if (c === ",") {
+      out += ",\\n" + prefix + indent.repeat(depth);
+    } else if (c === ":") {
+      out += ": ";
+    } else if (c !== " " && c !== "\\t" && c !== "\\n" && c !== "\\r") {
+      out += c;
+    }
+  }
+  return out;
+};
+var __json_marshal_indent = __json_marshal_indent || function(enc, val, prefix, indent) {
+  var res = __json_marshal(enc, val);
+  if (res[1]) return res;
+  var rawStr = new TextDecoder().decode(res[0]);
+  var formatted = __json_indent(rawStr, prefix, indent);
+  return [new TextEncoder().encode(formatted), null];
+};
+var __json_valid = __json_valid || function(data) {
+  try {
+    var s = typeof data === "string" ? data : new TextDecoder().decode(((typeof ArrayBuffer !== "undefined" && ArrayBuffer.isView(data)) || data instanceof Uint8Array) ? data : new Uint8Array(data));
+    JSON.parse(s);
+    return true;
+  } catch (e) {
+    return false;
+  }
+};
+var __json_unmarshal = __json_unmarshal || function(dec, data, target) {
+  if (target === null || target === undefined) {
+    return typeof __error === "function" ? __error("json: Unmarshal(nil)") : new Error("json: Unmarshal(nil)");
+  }
+  if (typeof target !== "object" || target.__v === true) {
+    return typeof __error === "function" ? __error("json: Unmarshal(non-pointer " + typeof target + ")") : new Error("json: Unmarshal(non-pointer " + typeof target + ")");
+  }
+  var str;
+  try {
+    str = typeof data === "string" ? data : new TextDecoder().decode(((typeof ArrayBuffer !== "undefined" && ArrayBuffer.isView(data)) || data instanceof Uint8Array) ? data : new Uint8Array(data));
+  } catch (e) {
+    return typeof __error === "function" ? __error("invalid UTF-8 data") : e;
+  }
+  var safeStr = __json_preserve_int64(str);
+  var parsed;
+  try {
+    parsed = JSON.parse(safeStr);
+  } catch (e) {
+    return typeof __error === "function" ? __error(e.message) : e;
+  }
+  var isBox = target && typeof target === "object" && Object.prototype.hasOwnProperty.call(target, "value");
+  var dest = isBox ? target.value : target;
+  var err = dec(parsed, dest, isBox ? target : null, data);
+  if (err) return err;
+  return null;
+};`;

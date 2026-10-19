@@ -15,9 +15,9 @@ export default defineConfig({
 			testMatch: ["**/shared.spec.js", "**/simple.spec.js"],
 		},
 		{
-			name: "reactive",
+			name: "preact",
 			use: { baseURL: "http://127.0.0.2:3002" },
-			testMatch: ["**/shared.spec.js", "**/reactive.spec.js"],
+			testMatch: ["**/shared.spec.js", "**/preact.spec.js"],
 		},
 		{
 			name: "gom",
@@ -42,7 +42,7 @@ export default defineConfig({
 			reuseExistingServer: !process.env.CI,
 		},
 		{
-			command: "npx serve example/reactive -l 3002 -n",
+			command: "npx serve example/preact -l 3002 -n",
 			url: "http://127.0.0.2:3002",
 			reuseExistingServer: !process.env.CI,
 		},
