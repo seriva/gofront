@@ -5,7 +5,7 @@
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/seriva/gofront.git"
+		"url": "git+https://github.com/seriva/gofront.git"
 	},
 	"bugs": {
 		"url": "https://github.com/seriva/gofront/issues"
@@ -31,7 +31,7 @@
 		"src/"
 	],
 	"bin": {
-		"gofront": "./src/index.js"
+		"gofront": "src/index.js"
 	},
 	"scripts": {
 		"build": "node src/index.js example/simple/src -o example/simple/app.js && node src/index.js example/preact/src -o example/preact/app.js && node src/index.js example/gom/src -o example/gom/app.js && node src/index.js example/templ/src -o example/templ/app.js && node src/index.js example/webgl/src -o example/webgl/app.js && node src/index.js example/hybrid/src -o example/hybrid/app.js",
