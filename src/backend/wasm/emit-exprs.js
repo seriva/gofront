@@ -9,6 +9,7 @@ import {
 	isFuncType,
 	isMapType,
 	isPointerToStruct,
+	isScalarType,
 	isSigned,
 	isSliceType,
 	isStringType,
@@ -1339,6 +1340,9 @@ export class ExprsEmitter {
 		if (!path || path.length === 0) return false;
 
 		const lastStep = path[path.length - 1];
+		if (!isScalarType(lastStep.field.goType, this.mod.checker, this.mod)) {
+			return false;
+		}
 		const baseWType = this.toWasmType(operand.expr._type);
 		this.emitExpr(operand.expr, baseWType);
 		for (let i = 0; i < path.length - 1; i++) {
@@ -1381,6 +1385,9 @@ export class ExprsEmitter {
 			: isPtrToArr
 				? baseType.base.elem
 				: baseType.elem;
+		if (!elemGoType || !isScalarType(elemGoType, this.mod.checker, this.mod)) {
+			return false;
+		}
 		const arrInfo = this.mod.getArrayType(elemGoType);
 		const sliceInfo = isSlice ? this.mod.getSliceType(elemGoType) : null;
 		this._emitElemAddr(baseNode, operand.index, sliceInfo, arrInfo);
@@ -1424,6 +1431,10 @@ export class ExprsEmitter {
 			return;
 		}
 		const opWType = this.toWasmType(operand._type);
+		if (!isScalarType(operand._type, this.mod.checker, this.mod)) {
+			this.emitExpr(operand, opWType);
+			return;
+		}
 		const box = this.mod.getBoxType(operand._type);
 		this.emitExpr(operand, opWType);
 		this.pushInstruction({
@@ -1448,6 +1459,11 @@ export class ExprsEmitter {
 				: null) ??
 			this._resolveExprGoType(operand);
 		const baseGoType = operandGoType?.base ?? operandGoType;
+		if (!isScalarType(baseGoType, this.mod.checker, this.mod)) {
+			const baseWType = this.toWasmType(baseGoType);
+			this.emitExpr(operand, baseWType);
+			return;
+		}
 		const box = this.mod.getBoxType(baseGoType);
 		const ptr = this.mod.getPtrType(baseGoType);
 		const acc = this.mod.getAccType(baseGoType);
@@ -1701,10 +1717,7 @@ export class ExprsEmitter {
 			g?.kind === "StarExpr";
 		if (!isPtr || (!g.base && !g.elem)) return null;
 		const base = g.base || g.elem;
-		if (
-			isStructType(base, this.mod.checker, this.mod) ||
-			isPointerToStruct(g, this.mod.checker, this.mod)
-		) {
+		if (!isScalarType(base, this.mod.checker, this.mod)) {
 			return null;
 		}
 		return {

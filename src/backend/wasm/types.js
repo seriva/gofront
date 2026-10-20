@@ -419,6 +419,24 @@ export function isPointerToStruct(goType, checker = null, mod = null) {
 	return false;
 }
 
+export function isScalarType(goType, checker = null, mod = null) {
+	if (!goType) return false;
+	if (
+		isStructType(goType, checker, mod) ||
+		isSliceType(goType, checker) ||
+		isArrayType(goType, checker) ||
+		isMapType(goType, checker) ||
+		isFuncType(goType, checker)
+	) {
+		return false;
+	}
+	const wType = toWasmType(goType, checker, mod);
+	if (typeof wType === "object" && wType !== null && wType.kind === "ref") {
+		return false;
+	}
+	return true;
+}
+
 export function isSliceType(goType, checker = null) {
 	if (!goType) return false;
 	if (goType.kind === "TypeName" || goType.kind === "Ident") {
