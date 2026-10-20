@@ -514,11 +514,16 @@ Every task below is sized for one focused session and names the files it touches
 
 Conventions used in the tasks:
 - *Parity test* = a `both` package run through `compileHybrid(src).run("Main")` from [`test/unit/helpers.js`](../../test/unit/helpers.js). It throws on any JS/WASM result mismatch, on an invalid module, and on a one-sided panic. `compileWasm` + `runWasm` is for WASM-only cases; `compile` + `errors` is for checker diagnostics.
-- *Conformance fixture* = `test/conformance/<pkg>/<name>.go` with a `main` that prints; expected output in `<name>.out` captured from real Go by `npm run conformance:update` (Phase 1).
+- *Conformance fixture* = `test/conformance/<pkg>/<name>.go` with a `main` that prints; expected output in `<name>.out` captured from real Go by `npm run conformance:update` (Phase 1.2).
 - *Go-source package* = files under `runtime/stdlib/<import path>/` starting with `//go:build gofront` and `//gofront:target both`. They follow [§1.1](#11-string-semantics-both-backends): index `[]byte`, not `string`.
-- Phases 2–6 are independent of each other once Phases 0 and 1 are done. Inside a phase, do tasks in order unless a task says otherwise.
+- Phases 2.1–6.2 are independent of each other once Phases 0.1–1.2 are done. Inside a phase, do tasks in order unless a task says otherwise.
 
-### Phase 0: WASM language parity
+> **Phase Sizing & Dev-Loop Bounds (1 Phase = 1 Dev-Loop)**:
+> - **1 Phase = 1 Dev-Loop**: Each phase creates a dedicated branch (`feat/portable-go-phase-<N>`), executes all tasks continuously, opens 1 PR into `feat/portable-go`, and runs an isolated 2-pass AI code review.
+> - **Phase Budget (3–5 Tasks)**: Phases are capped at 3–5 cohesive tasks with a net diff budget $\le$ 500 LOC so that AI reviews and tests are reliable and fast.
+> - **Continuous Execution**: Within each phase, the orchestrator loops continuously through all tasks without halting between checkboxes, committing each task atomically (`feat(<scope>): <task summary> (Task N.M)`).
+
+### Phase 0.1: Pointer type hierarchy & accessor refs
 
 - [ ] **Task 0.1a — Pointer type hierarchy, no behaviour change**
   - Files: `src/backend/wasm/types.js`, `src/backend/wasm/emit-exprs.js` (`case "&"`), `src/backend/wasm/wat.js`
@@ -544,6 +549,8 @@ Conventions used in the tasks:
   - Test: `test/unit/wasm/boundary.test.js` — an exported `wasm` function takes `*float64` pointing at a struct field; JS mutates `box.value`; the field changed.
   - Done when: boundary test passes; micro-benchmark of `*p` on `&x` is within 5% of v1.7.0 (record the numbers in [Performance and size](#performance-and-size)).
 
+### Phase 0.2: Range-over-func and generic named func types
+
 - [ ] **Task 0.2a — Range-over-func in WASM: body closure, `break`, `continue`**
   - Files: `src/backend/wasm/emit-stmts.js` (`RangeStmt` over func types), `src/lower/captures.js` if the body closure needs capture info
   - Do: lower `for k, v := range f` as the JS backend does: synthesize a closure for the body returning `i32` (1 = continue, 0 = stop), call `f` with it, keep a per-loop state local. Support `Seq` and `Seq2` shapes, plain `break` and `continue`.
@@ -561,6 +568,8 @@ Conventions used in the tasks:
   - Do: `type Seq[V any] func(yield func(V) bool)` instantiated as `Seq[int]` must map to the same closure type as its underlying func type; returning a `Seq[int]` from a function type-checks in the module.
   - Test: `test/unit/wasm/generics.test.js` — a function returning `Seq[int]` ranged over in a parity test; a generic `Map[A, B any](s Seq[A], f func(A) B) Seq[B]`.
   - Done when: `type error in return[0]` from the probe is gone and both tests pass.
+
+### Phase 0.3: Complex numbers in WASM and parity matrix
 
 - [ ] **Task 0.4a — Complex numbers in WASM: representation and arithmetic**
   - Files: `src/backend/wasm/types.js`, `src/backend/wasm/emit-exprs.js`, `src/backend/wasm/emit-builtins.js`
@@ -585,6 +594,8 @@ Conventions used in the tasks:
   - Do: parse the fixture comments from `language-support.md`; for each, compile as a `both` package via `compileHybrid` and run `Main`. Rows marked `diagnostic:` must produce that diagnostic on both targets. Any invalid module, internal error (`Unresolved identifier`, `Unsupported WASM instruction`, `Unknown struct`), or output mismatch fails with the row name.
   - Test: the generator itself; it must fail on the v1.7.0 tree for the rows that Phase 0 fixes (confirm before fixing, then watch the failures disappear task by task).
   - Done when: the matrix runs in `npm test` and lists its skipped rows (accepted differences) in the output.
+
+### Phase 0.4: Go-source stdlib loader & reachability
 
 - [ ] **Task 0.6a — Go-source stdlib loader (first package: `cmp`)**
   - Files: `src/resolver.js`, `src/compiler.js`, `src/typechecker/types.js` (`STDLIB_PACKAGES`), new `runtime/stdlib/cmp/cmp.go`
@@ -616,6 +627,8 @@ Conventions used in the tasks:
   - Test: `stdlib-go.test.js` — a program importing `cmp` but using nothing adds 0 bytes to `app.js` and to dev `app.wasm` compared with the same program without the import.
   - Done when: the zero-byte assertion holds for JS and WASM.
 
+### Phase 0.5: Array value semantics, universe scope & loop variables
+
 - [ ] **Task 0.8a — Array value semantics in WASM: always copy**
   - Files: `src/backend/wasm/emit-exprs.js`, `src/backend/wasm/emit-stmts.js`, `src/backend/wasm/emit-shared.js` (reuse the value-struct copy helper)
   - Do: insert `array.new` + `array.copy` on assignment, parameter passing, return, struct-field copy, store into slice/map/interface, and load from slice/map/struct field. Nested arrays copy deeply. `range` over an array iterates a copy.
@@ -640,6 +653,8 @@ Conventions used in the tasks:
   - Test: `test/unit/wasm/closures.test.js` — the `fs[0]()*100 + fs[1]()*10 + fs[2]()` parity test (`12`); a closure that writes `i`; an uncaptured loop emits no `struct.new` in the loop (assert on WAT).
   - Done when: parity test passes and `zero-alloc.js` still passes.
 
+### Phase 0.6: WASM builtins, conversions & constant folding
+
 - [ ] **Task 0.11 — `min`/`max` builtins in WASM**
   - Files: `src/backend/wasm/emit-builtins.js`
   - Do: integers via `select` on `lt_s`/`lt_u`; floats via `f32.min`/`f64.min` and `max`; strings via the existing compare import; variadic forms fold left; a single argument returns itself.
@@ -663,6 +678,8 @@ Conventions used in the tasks:
   - Do: when a node carries a folded constant, emit the literal (`1099511627776`, not `1 << 40`). Values outside ±2⁵³ in `js` packages emit the nearest `Number` and a compile warning `constant … exceeds JS Number precision`; in `both` packages the same rule applies to the JS copy.
   - Test: `constants.test.js` — parity tests for `1 << 40`, `1 << 62`, `math.MaxInt64 / 2`; the warning text for `1<<63 + 5`.
   - Done when: `float64(x * 1000)` with `x = 1 << 40` gives `1099511627776000` on both backends.
+
+### Phase 0.7: Type aliases, method expressions, panics & goto
 
 - [ ] **Task 0.14 — Generic type aliases**
   - Files: `src/typechecker/declarations.js`, `src/typechecker/resolve.js`
@@ -694,7 +711,7 @@ Conventions used in the tasks:
   - Test: `test/unit/language/control-flow.test.js` — the message appears for `js`, `wasm` and `both` packages; `Undefined: 'goto'` does not.
   - Done when: the parity matrix row for `goto` passes.
 
-### Phase 1: Manifest, coverage gate and conformance harness
+### Phase 1.1: Manifest generator and coverage gates
 
 - [ ] **Task 1.1a — Manifest generator**
   - Files: new `scripts/stdlib-manifest.js`, `package.json` (`manifest:update` script)
@@ -719,6 +736,8 @@ Conventions used in the tasks:
   - Do: print each checker signature in Go's `api` notation and compare with the manifest. Mismatches fail with both strings. Fix the mismatches found (start with `strconv.ParseInt` → `int64`).
   - Test: the gate itself; add a unit test for the signature printer on generics, variadics and methods.
   - Done when: zero signature mismatches for members marked `js`/`wasm`/`both`.
+
+### Phase 1.2: Conformance harness, documentation and reconciliation
 
 - [ ] **Task 1.3a — Conformance runner**
   - Files: new `test/conformance/run.js`, `test/conformance/README.md`, `package.json` (`conformance` script, included in `npm test`)
@@ -750,7 +769,7 @@ Conventions used in the tasks:
   - Test: `stdlib-coverage.test.js` has no unclassified failures.
   - Done when: the only remaining failures are members scheduled in later tasks, listed by task number in this document.
 
-### Phase 2: `iter`, `cmp` and iterator APIs
+### Phase 2.1: `iter` package and slices iterator members
 
 - [ ] **Task 2.1 — `iter` package**
   - Files: new `runtime/stdlib/iter/iter.go`, `src/typechecker/stdlib/` (diagnostic for `Pull`)
@@ -770,6 +789,8 @@ Conventions used in the tasks:
   - Test: `iter.test.js`; extend the `slices/iter.go` fixture.
   - Done when: fixture matches Go.
 
+### Phase 2.2: `maps`, strings/bytes sequences and migration
+
 - [ ] **Task 2.3 — `maps` iterator members and the breaking change**
   - Files: new `runtime/stdlib/maps/iter.go` (overlay), `src/typechecker/stdlib/core.js` (`maps.Keys`/`Values` removed from the emitter list), `src/typechecker/expressions.js` (hint diagnostic)
   - Do: `All`, `Keys`, `Values`, `Insert`, `Collect` over `iter.Seq`. `Keys`/`Values` now return `iter.Seq`; passing the result where a slice is expected reports the type error with the hint `use slices.Collect(maps.Keys(m)) for a slice`.
@@ -788,7 +809,7 @@ Conventions used in the tasks:
   - Test: `npm test`, `npm run check`, `npm run test:e2e`.
   - Done when: nothing in the repo or `simplefps` hits the new diagnostic.
 
-### Phase 3: Member completion
+### Phase 3.1: `fmt` and `os.Stdout` completion
 
 - [ ] **Task 3.1a — `fmt.Sprint`, `Sprintln`, `Append`, `Appendf`, `Appendln`**
   - Files: `src/typechecker/stdlib/core.js`, `src/backend/js/runtime.js`, `src/backend/wasm/emit-stdlib.js`
@@ -820,6 +841,8 @@ Conventions used in the tasks:
   - Test: `test/unit/builtins/stdlib.test.js` — `fmt.Fprintf(os.Stderr, "a"); fmt.Fprintln(os.Stderr, "b")` produces one `ab` line in both backends (use the harness `stdout` capture).
   - Done when: `os.Stdout` type-checks as `io.Writer` in `js`, `wasm` and `both` packages.
 
+### Phase 3.2: `io`, `sort`, `unicode` and `strconv` completion
+
 - [ ] **Task 3.1f — `fmt.Fscan`, `Fscanf`, `Fscanln`**
   - Files: `runtime/stdlib/fmt/scan.go` (overlay over `io.Reader` using `Sscan*`)
   - Do: read a line or token stream from an `io.Reader` and delegate to the existing `Sscan*` lowering.
@@ -850,6 +873,8 @@ Conventions used in the tasks:
   - Test: conformance fixture `strconv/errors.go` with `errors.Is(err, strconv.ErrRange)` and `errors.As(err, &numErr)`.
   - Done when: fixture matches Go.
 
+### Phase 3.3: `math`, `time` and strings/bytes buffer gaps
+
 - [ ] **Task 3.4a — `math` and `math/bits` gaps**
   - Files: `src/typechecker/stdlib/core.js`, `src/backend/js/stdlib/math.js`, `src/backend/js/stdlib/bits.js`, `src/backend/wasm/emit-stdlib.js`
   - Do: `Log1p`, `Expm1`, `Frexp`, `Ldexp`, `Modf`, `FMA`, `RoundToEven`, `Nextafter`, `Nextafter32`, `Gamma`, `Erf`; `bits.Add32/64`, `Sub32/64`, `Mul32/64`, `Div32/64`, `Rem32/64`, `LeadingZeros`/`TrailingZeros`/`OnesCount`/`Len` for `uint`/8/16, `RotateLeft`/8/16, `Reverse8/16`, `ReverseBytes`. `bits.Mul64` must be exact in both backends (split 32-bit multiply in JS).
@@ -867,6 +892,8 @@ Conventions used in the tasks:
   - Do: the named members plus whatever `bytes.Buffer`/`strings.Reader`/`bytes.Reader` methods the manifest lists as `todo` (`ReadRune`, `UnreadRune`, `ReadFrom`, `WriteTo`, `Seek`, `Next`, `Truncate`, `Grow`, `Cap`, `Available`).
   - Test: conformance fixtures `strings/members.go`, `bytes/buffer.go`.
   - Done when: fixtures match Go and no `todo` remains in `strings`/`bytes`.
+
+### Phase 3.4: `sync`, `testing` and remaining audit items
 
 - [ ] **Task 3.5 — `sync.Map`, `sync.Pool`, `OnceFunc`/`OnceValue`/`OnceValues`**
   - Files: new `runtime/stdlib/sync/extra.go` (overlay)
@@ -886,7 +913,7 @@ Conventions used in the tasks:
   - Test: one conformance fixture per package touched.
   - Done when: `stdlib-coverage.test.js` reports no `todo` in Phase 3 packages.
 
-### Phase 4: New pure packages (Go source)
+### Phase 4.1: `bufio` and `net/url` (Go source)
 
 - [ ] **Task 4.1a — `bufio.Reader`**
   - Files: new `runtime/stdlib/bufio/reader.go`
@@ -918,6 +945,8 @@ Conventions used in the tasks:
   - Test: conformance fixture `url/parse.go` (IPv6 host and port, `ResolveReference`, `Redacted`, malformed escapes returning `*url.Error`).
   - Done when: fixture matches Go.
 
+### Phase 4.2: `context`, container and hash
+
 - [ ] **Task 4.3a — `context` cancel tree and values**
   - Files: new `runtime/stdlib/context/context.go`, `src/typechecker/stdlib/` (`Done()` diagnostic)
   - Do: `Context` interface without `Done()`; `Background`, `TODO`, `WithCancel`, `WithCancelCause`, `WithValue`, `WithoutCancel`, `Cause`, `Canceled`, `CancelFunc`, `CancelCauseFunc`. `ctx.Done()` reports the channel diagnostic with the `ctx.Err()`/`context.AfterFunc` hint.
@@ -942,6 +971,8 @@ Conventions used in the tasks:
   - Test: conformance fixture `hash/sums.go` over ASCII and non-ASCII input (via `[]byte`).
   - Done when: fixture matches Go on both backends (strict `uint32` arithmetic makes JS bit-identical).
 
+### Phase 4.3: `crypto`, base32 and `sync/atomic`
+
 - [ ] **Task 4.6a — `crypto/md5`, `crypto/sha1`, `crypto/sha512`**
   - Files: new `runtime/stdlib/crypto/{md5,sha1,sha512}/*.go`
   - Do: `Sum*`, `New*`, `Size`, `BlockSize`, including `sha512/224`, `sha512/256`, `sha384`. sha512 needs `uint64` arithmetic: exact in WASM; in JS use `bits.Add64`/`Mul64`-style split limbs (document that it is slower in `js` packages).
@@ -959,6 +990,8 @@ Conventions used in the tasks:
   - Do: the member lists in [§7](#7-new-pure-packages-go-source). `atomic` is single-threaded; `Pointer[T]` and `Value` included.
   - Test: conformance fixtures `base32/codec.go`, `utf16/codec.go`, `atomic/ops.go`.
   - Done when: fixtures match Go.
+
+### Phase 4.4: `math/cmplx`, `csv`, `log` and `math/rand/v2`
 
 - [ ] **Task 4.8 — `math/cmplx` (after Task 0.4)**
   - Files: new `runtime/stdlib/math/cmplx/*.go`
@@ -984,7 +1017,7 @@ Conventions used in the tasks:
   - Test: conformance fixture `rand/pcg.go` with a fixed seed (PCG output must match Go exactly); unit test for `IntN(0)` panic message.
   - Done when: fixture matches Go.
 
-### Phase 5: `encoding/json` everywhere
+### Phase 5.1: WASM JSON scanner, encoders, decoders and unmarshaling
 
 - [ ] **Task 5.1a — WASM JSON scanner and per-type encoders**
   - Files: `src/backend/wasm/emit-stdlib.js` (or new `src/backend/wasm/stdlib/json.js`), `src/typechecker/resolve.js` (`resolveJsonFields` reused)
@@ -1003,6 +1036,8 @@ Conventions used in the tasks:
   - Do: `Unmarshaler` dispatch; exact `RawMessage` bytes; `any` decodes to `map[string]any`, `[]any`, `float64`, `string`, `bool`, `nil`.
   - Test: `json.test.js` — the corresponding JS cases as parity tests.
   - Done when: all pass.
+
+### Phase 5.2: JSON helpers, streaming I/O, enablement & benchmark
 
 - [ ] **Task 5.3 — `Number`, `Compact`/`Indent`/`HTMLEscape`, error types (both backends)**
   - Files: `src/backend/js/stdlib/json.js`, `src/backend/js/runtime.js`, WASM json emitter, `src/typechecker/stdlib/core.js`
@@ -1028,13 +1063,16 @@ Conventions used in the tasks:
   - Test: the benchmark runs under `npm run bench`.
   - Done when: numbers are recorded in this document.
 
-### Phase 6: SIMD completion
+### Phase 6.1: SIMD value type, opcodes, checker methods and Go overlay
 
 - [ ] **Task 6.1** — Check the method names against go1.26 `simd/archsimd` and freeze the `gofront/simd` API surface in this document.
 - [ ] **Task 6.2** — `F32x4` as a value type: boundary classification (removes the exported-API build blocker), `==`/`!=`, map keys, `fmt` on both backends (needs Task 3.1c for `%#v`), generic type arguments (array copies come from Task 0.8).
 - [ ] **Task 6.3** — Encoder and WAT support for comparisons, `bitselect`, `any_true`/`all_true`, `bitmask`, and the `ceil`/`floor`/`trunc`/`nearest` opcodes. Include multi-byte LEB128 sub-opcode tests and Binaryen validation of optimized and unoptimized modules.
 - [ ] **Task 6.4** — `Mask32x4` and the new `F32x4` methods (§10.2) in the checker, the WASM emitter and the JS fallback helpers.
 - [ ] **Task 6.5** — Go-source overlay with `Vec3x4`, `AABB4`, `Ray4`, constructors, `SelectVec3x4` and `IntersectRayAABB4`.
+
+### Phase 6.2: Memory helpers, boundary transport and benchmarks
+
 - [ ] **Task 6.6** — Memory helpers: `LoadVec3x4`/`StoreVec3x4`, `LoadAoS4`/`StoreAoS4` (`i8x16.shuffle` transpose), `LoadF32x4Slice`/`StoreF32x4Slice`, `Pad4`.
 - [ ] **Task 6.7** — Boundary transport for `F32x4`, `Mask32x4` and `[]F32x4` (§10.5). Update the marshalling table in `hybrid-wasm.md`.
 - [ ] **Task 6.8** — Check allocations in release builds. If `heap2local` leaves allocations in the SoA hot loop, add scalar replacement for non-escaping `gofront/simd` structs.
@@ -1043,11 +1081,14 @@ Conventions used in the tasks:
 
 Each Phase 6 task follows the same Files/Test/Done-when discipline: files are `src/typechecker/stdlib/simd.js`, `src/backend/wasm/stdlib/simd.js`, `src/backend/js/stdlib/simd.js`, `src/backend/wasm/encode.js`, `src/backend/wasm/wat.js`, `src/backend/wasm/boundary.js` and `runtime/stdlib/gofront/simd/`; tests go in `test/unit/wasm/simd.test.js`, `encode.test.js`, `wat.test.js` and `boundary.test.js`; every operation is checked against a scalar `[4]float32` reference on both backends.
 
-### Phase 7: Integration, docs and release
+### Phase 7.1: Example adoption and compatibility documentation
 
 - [ ] **Task 7.1** — Adopt WASM JSON in `example/hybrid` (load a level or config inside the `wasm` package). Add a CSV example to `example/simple`, and a `context`-cancelled `fetch` to `example/preact`.
 - [ ] **Task 7.2** — Update [`go-compatibility.md`](../go-compatibility.md): the scope rule, the excluded-package table, the string-semantics table from [§1.1](#11-string-semantics-both-backends), the `goto` and `//go:embed` rows, the strict-mode runtime-panic row, the `maps.Keys` change, `context` without `Done()`, `%p`, and the `crypto/*` caveat.
 - [ ] **Task 7.3** — Regenerate the stdlib tables in `language-support.md` and `hybrid-wasm.md`. Update [`architecture.md`](../architecture.md) with `runtime/stdlib/`, `scripts/`, `test/conformance/` and the manifest.
+
+### Phase 7.2: Baseline verification, release gates and changelog
+
 - [ ] **Task 7.4** — Confirm the [`v2.0.0`](../v2.0.0/native-go-engine.md) baseline against what v1.8.0 actually shipped (including the SIMD promotion decision and the final manifest), and declare the JS-engine feature freeze.
 - [ ] **Task 7.5** — Verification: `npm test`, `npm run check`, `npm run build`, `npm run test:e2e`, `npm run bench`, `npm run conformance`. Check for no regression in `app.wasm` size for apps that do not import new packages.
 - [ ] **Task 7.6** — `CHANGELOG.md` (with a breaking-changes section: `maps.Keys`/`Values`, strict-mode runtime panics, typed-constant overflow errors) and [`roadmap.md`](../roadmap.md).
