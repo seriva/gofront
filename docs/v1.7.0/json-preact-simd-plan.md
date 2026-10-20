@@ -153,23 +153,33 @@ Three features, each held to the **no runtime** rule ([roadmap](../roadmap.md#ou
 
 Port the raycast benchmark's ray–triangle test to `F32x4` (Möller–Trumbore with 4-wide edges) behind a flag. Ship if **≥ 1.3×** the scalar hybrid build in Node and headless Chromium. Otherwise move Phase 3 to v1.7.1 and keep the encoder groundwork.
 
+**Benchmark outcome (131,072 triangles, 100,000 rays × 3 runs):**
+- JS: 9,000 rays/s (11,111.5 ms/run, 12.7 MB alloc/run)
+- Hybrid (scalar): 11,797 rays/s (8,477.1 ms/run, 2,688 B alloc/run)
+- SIMD (`F32x4`): 12,072 rays/s (8,283.9 ms/run, 2,688 B alloc/run)
+- Speedup vs JS: 1.34×
+- Speedup vs scalar hybrid: **1.02×** (gate threshold was ≥ 1.30×)
+
+**Decision: NO-GO for general v1.7.0 stdlib promotion.**
+Octree node queries (`RayQueryLocal` and `IntersectRayAABB`) dominate runtime over per-triangle barycentric testing on 3-wide mesh data. The SIMD opcode encoding, Binaryen feature integration, `gofront/simd` type definitions, and lowering remain intact as experimental groundwork, while general stdlib promotion is deferred to v1.7.1 without blocking v1.7.0.
+
 ### Tasks
 
-- [ ] **Task 3.1** — `0xFD` opcode encoding with unsigned LEB128 sub-opcodes in `src/backend/wasm/encode.js` + WAT printing for `F32x4` ops; encoder unit tests.
-- [ ] **Task 3.2** — `gofront/simd` stdlib typechecker package; `v128` valtype mapping in locals, parameters, and struct fields; zero-value emission.
-- [ ] **Task 3.3** — WASM emitter lowering and JS scalar fallback with `Math.fround`; parity tests between WASM and JS targets.
-- [ ] **Task 3.4** — `shared.Float32` load/store lowering (`v128.load`/`v128.store`) with element offset calculation and bounds checking.
-- [ ] **Task 3.5** — Binaryen SIMD feature flag integration in `optimize.js` and `raycast-bench.js`; optimized/unoptimized module validation.
-- [ ] **Task 3.6** — SIMD raycast variant in `test/e2e/perf/raycast-bench.js`; record result; go/no-go decision recorded in this document.
+- [x] **Task 3.1** — `0xFD` opcode encoding with unsigned LEB128 sub-opcodes in `src/backend/wasm/encode.js` + WAT printing for `F32x4` ops; encoder unit tests.
+- [x] **Task 3.2** — `gofront/simd` stdlib typechecker package; `v128` valtype mapping in locals, parameters, and struct fields; zero-value emission.
+- [x] **Task 3.3** — WASM emitter lowering and JS scalar fallback with `Math.fround`; parity tests between WASM and JS targets.
+- [x] **Task 3.4** — `shared.Float32` load/store lowering (`v128.load`/`v128.store`) with element offset calculation and bounds checking.
+- [x] **Task 3.5** — Binaryen SIMD feature flag integration in `optimize.js` and `raycast-bench.js`; optimized/unoptimized module validation.
+- [x] **Task 3.6** — SIMD raycast variant in `test/e2e/perf/raycast-bench.js`; record result; go/no-go decision recorded in this document.
 
 ---
 
 ## Phase 4 — Verification & docs
 
-- [ ] **Task 4.1** — Full verification: `npm test`, `npm run check`, `npm run build`, `npm run test:e2e`, `npm run bench`.
-- [ ] **Task 4.2** — Verify Sentrux architectural layering: ensure new modules (`src/backend/js/stdlib/json.js`, `src/backend/wasm/stdlib/simd.js`) strictly adhere to layer import rules in `.sentrux/rules.toml`.
-- [ ] **Task 4.3** — SimpleFPS smoke test: replace manual JSON helpers (`jsonInt`, `jsonFloat` in `app/src/engine/assets/materialloader.go` and `resources.go`) with standard `json.Unmarshal`; if SIMD ships, test a hybrid build with one `F32x4` hot path at 60 FPS.
-- [ ] **Task 4.4** — Documentation: `docs/go-compatibility.md` (add `encoding/json`, `gofront/simd`, tuple returns), `docs/hybrid-wasm.md` (SIMD section), `docs/roadmap.md`, `README.md`, `CHANGELOG.md`.
+- [x] **Task 4.1** — Full verification: `npm test`, `npm run check`, `npm run build`, `npm run test:e2e`, `npm run bench`.
+- [x] **Task 4.2** — Verify Sentrux architectural layering: ensure new modules (`src/backend/js/stdlib/json.js`, `src/backend/wasm/stdlib/simd.js`) strictly adhere to layer import rules in `.sentrux/rules.toml`.
+- [x] **Task 4.3** — SimpleFPS smoke test: replace manual JSON helpers (`jsonInt`, `jsonFloat` in `app/src/engine/assets/materialloader.go` and `resources.go`) with standard `json.Unmarshal`; if SIMD ships, test a hybrid build with one `F32x4` hot path at 60 FPS.
+- [x] **Task 4.4** — Documentation: `docs/go-compatibility.md` (add `encoding/json`, `gofront/simd`, tuple returns), `docs/hybrid-wasm.md` (SIMD section), `docs/roadmap.md`, `README.md`, `CHANGELOG.md`.
 
 ---
 

@@ -930,6 +930,9 @@ export class BuiltinsEmitter {
 			case "base64":
 				this.emitBase64Call(func.field, call, targetWasmType);
 				return true;
+			case "simd":
+				this.emitSimdPackageCall(func.field, args, targetWasmType);
+				return true;
 			default:
 				return false;
 		}
@@ -946,6 +949,20 @@ export class BuiltinsEmitter {
 			return true;
 		}
 		const recvTypeName = this._getReceiverTypeName(recvType, func.expr);
+		if (
+			recvTypeName === "simd.F32x4" ||
+			recvTypeName === "gofront/simd.F32x4" ||
+			recvType?.kind === "simd" ||
+			recvType?.underlying?.kind === "simd" ||
+			recvType?.name === "simd.F32x4"
+		) {
+			return this.emitSimdMethodCall(
+				func.field,
+				func.expr,
+				args,
+				targetWasmType,
+			);
+		}
 		if (
 			this._emitStdlibReceiverMethod(
 				recvTypeName,

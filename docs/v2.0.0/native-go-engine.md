@@ -1,15 +1,15 @@
 # Native Go Compiler Engine — Design Plan
 
 **Version:** v2.0.0  
-**Status:** Draft (revised 2026-10-03)  
-**Baseline Spec:** v1.6.1: the v1.4.0 language (incl. `.templ` scoped `css`) plus the complete hybrid JS + WASM compiler (`src/lower/`, package targets, JS strict mode, full WASM backend, boundary, shared buffers, and the full non-browser language + stdlib in WASM). See [`docs/v1.5.0/wasm-mvp-plan.md`](../v1.5.0/wasm-mvp-plan.md), [`docs/v1.6.0/wasm-hybrid-plan.md`](../v1.6.0/wasm-hybrid-plan.md) and [`docs/v1.6.1/wasm-gaps-plan.md`](../v1.6.1/wasm-gaps-plan.md).  
-**Prerequisite:** v1.6.1 released. The port starts from a feature-complete JS compiler and adds no features.
+**Status:** Draft (revised 2026-10-19)  
+**Baseline Spec:** v1.7.1: the v1.4.0 language (incl. `.templ` scoped `css`), the complete hybrid JS + WASM compiler (`src/lower/`, package targets, JS strict mode, full WASM backend, boundary, shared buffers, and non-browser stdlib in WASM), v1.7.0 features (`encoding/json` compile-time codecs, `.d.ts` tuple returns, Preact integration), and v1.7.1 additions (SoA SIMD, `net/url`, `bufio`, `context`, WASM scalar pointer safety, boundary slice borrowing). See [`docs/v1.7.0/json-preact-simd-plan.md`](../v1.7.0/json-preact-simd-plan.md), [`docs/v1.7.1/simd-soa-plan.md`](../v1.7.1/simd-soa-plan.md), and [`docs/v1.7.1/stdlib-safety-boundary-plan.md`](../v1.7.1/stdlib-safety-boundary-plan.md).  
+**Prerequisite:** v1.7.1 released. The port starts from a feature-complete JS compiler and adds no features.
 
 ---
 
 ## Goal
 
-Rewrite GoFront's compiler core and CLI from Node.js into a native Go binary (`cmd/gofront`) that produces **the same JavaScript output, the same WebAssembly output, the same diagnostics, and the same CLI behaviour** as the v1.6.1 JS engine.
+Rewrite GoFront's compiler core and CLI from Node.js into a native Go binary (`cmd/gofront`) that produces **the same JavaScript output, the same WebAssembly output, the same diagnostics, and the same CLI behaviour** as the v1.7.1 JS engine.
 
 Motivation:
 

@@ -397,6 +397,7 @@ The compiler analyzes both sides of the boundary and synthesizes a facade into `
 - **Slices & Arrays:** Slices and arrays copy element-wise in both directions; TypedArrays (`Float32Array`, `Int32Array`, etc.) are natively accepted.
 - **Closures & Interfaces:** Function values, callbacks, and named non-empty interfaces cross the boundary transparently.
 - **Shared Linear-Memory Buffers:** `gofront/shared` (`shared.NewFloat32`, etc.) exposes zero-copy TypedArray views over linear memory for bulk per-frame data.
+- **WASM SIMD (`gofront/simd`):** Experimental 4-wide float vector type (`simd.F32x4`) compiling directly to native `v128` instructions with zero GC overhead, including `simd.LoadF32x4`/`StoreF32x4` for direct linear-memory access.
 - **WASM Loader:** The generated JS bundle automatically fetches `app.wasm` relative to `app.js` (`import.meta.url`, customizable via `globalThis.__GOFRONT_WASM_URL` or `globalThis.__GOFRONT_WASM_BYTES`).
 - **WAT Inspection:** Passing `--emit-wat` writes human-readable `app.wat` alongside the binary module.
 - **Binaryen Optimization:** Passing `--release` or `--wasm-opt` optimizes `app.wasm` via Binaryen (`-O3` + GUFA), achieving ~23% smaller binaries and generating `app.wasm.map` source maps.
@@ -459,17 +460,18 @@ Design documents for planned features are organised by release under `docs/v*/`
 ## Tests
 
 ```sh
-npm test                  # unit, zero-alloc perf, and example tests (~1,800+ tests, no browser required)
+npm test                  # unit, zero-alloc perf, and example tests (~1,920+ tests, no browser required)
 npm run test:e2e          # E2E browser tests (Playwright, headless Chromium)
 npm run bench             # Möller–Trumbore raycast benchmark comparing pure JS vs hybrid WASM
 ```
 
-**Unit tests** (~1,800+) cover language features, type errors, edge cases, DOM (jsdom),
-external `.d.ts`, npm resolver, multi-file compilation, embedded structs, string
-formatting, map iteration order, integer overflow semantics, unused variable detection,
+**Unit tests** (~1,920+) cover language features, type errors, edge cases, DOM (jsdom),
+external `.d.ts`, npm resolver, TypeScript tuple return signatures, multi-file compilation,
+embedded structs, string formatting, compile-time `encoding/json` serialization with struct tags,
+map iteration order, integer overflow semantics, unused variable detection,
 unused import detection, semantic difference verification, stdlib shim packages, generics,
 the `testing` framework itself, the WasmGC backend and JS↔WASM boundary, `gofront/shared`
-linear-memory buffers, Binaryen optimization, and `.templ` file compilation (element rendering,
+linear-memory buffers, `gofront/simd` vector arithmetic, Binaryen optimization, and `.templ` file compilation (element rendering,
 interpolation, boolean attrs, component calls, scoped `css` declarations with class hashing,
 `if/else/else-if` chains, `for range`, `switch/case/default`, `@templ.Raw()` raw HTML injection,
 SVG namespace handling, mixed `.go`+`.templ` packages).

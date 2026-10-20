@@ -10,11 +10,13 @@
 import { setupCoreGlobals } from "./stdlib/core.js";
 import { setupExtendedGlobals } from "./stdlib/extended.js";
 import { setupSharedGlobals } from "./stdlib/shared.js";
+import { setupSimdGlobals } from "./stdlib/simd.js";
 import { setupWebGlobals } from "./stdlib/web.js";
 
 export function setupGlobals(globals, types) {
 	setupCoreGlobals(globals, types);
 	setupExtendedGlobals(globals, types);
 	setupSharedGlobals(globals, types);
+	setupSimdGlobals(globals, types);
 	setupWebGlobals(globals, types);
 }

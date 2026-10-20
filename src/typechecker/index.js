@@ -57,6 +57,7 @@ export class TypeChecker {
 		this._typeSwitchDepth = 0; // for rejecting fallthrough in type switch
 		this._deferCount = 0; // tracks defer usage in current function body
 		this._imports = []; // tracked imports for unused-import detection
+		this._constExprs = new Map(); // name -> AST initializer expr
 		this._setupGlobals();
 		// Register error as a named type (interface)
 		this.types.set("error", ERROR);
@@ -220,7 +221,11 @@ export class TypeChecker {
 			const type = spec.type
 				? this.resolveTypeNode(spec.type, this.globals)
 				: ANY;
-			for (const name of spec.names) this.globals.defineConst(name, type);
+			for (let i = 0; i < spec.names.length; i++) {
+				const name = spec.names[i];
+				const expr = spec.value?.[i] ?? spec.value?.[0] ?? null;
+				this.globals.defineConst(name, type, expr);
+			}
 		}
 	}
 
@@ -936,7 +941,11 @@ export class TypeChecker {
 			const type = spec.type
 				? this.resolveTypeNode(spec.type, scope)
 				: (valTypes[0] ?? ANY);
-			for (const name of spec.names) scope.defineConst(name, type);
+			for (let i = 0; i < spec.names.length; i++) {
+				const name = spec.names[i];
+				const expr = spec.value?.[i] ?? spec.value?.[0] ?? null;
+				scope.defineConst(name, type, expr);
+			}
 		}
 	}
 

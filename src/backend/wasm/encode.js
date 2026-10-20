@@ -393,6 +393,49 @@ const GC_OPCODES = {
 	"extern.convert_any": 0x1b,
 };
 
+// 0xFD prefixed SIMD instructions (Wasm SIMD / v128)
+const SIMD_OPCODES = {
+	"v128.load": 0,
+	"v128.store": 11,
+	"v128.const": 12,
+	"i8x16.shuffle": 13,
+	"i8x16.swizzle": 14,
+	"i8x16.splat": 15,
+	"i16x8.splat": 16,
+	"i32x4.splat": 17,
+	"i64x2.splat": 18,
+	"f32x4.splat": 19,
+	"f64x2.splat": 20,
+	"i8x16.extract_lane_s": 21,
+	"i8x16.extract_lane_u": 22,
+	"i8x16.replace_lane": 23,
+	"i16x8.extract_lane_s": 24,
+	"i16x8.extract_lane_u": 25,
+	"i16x8.replace_lane": 26,
+	"i32x4.extract_lane": 27,
+	"i32x4.replace_lane": 28,
+	"i64x2.extract_lane": 29,
+	"i64x2.replace_lane": 30,
+	"f32x4.extract_lane": 31,
+	"f32x4.replace_lane": 32,
+	"v128.not": 77,
+	"v128.and": 78,
+	"v128.andnot": 79,
+	"v128.or": 80,
+	"v128.xor": 81,
+	"f32x4.abs": 224,
+	"f32x4.neg": 225,
+	"f32x4.sqrt": 227,
+	"f32x4.add": 228,
+	"f32x4.sub": 229,
+	"f32x4.mul": 230,
+	"f32x4.div": 231,
+	"f32x4.min": 232,
+	"f32x4.max": 233,
+	"f32x4.pmin": 234,
+	"f32x4.pmax": 235,
+};
+
 // Natural alignment (log2) per load/store opcode; memarg = align, offset.
 const MEM_ALIGN = {
 	"i32.load": 2,
@@ -431,6 +474,48 @@ function encodeInstruction(inst) {
 	// 1. Check saturating truncations (0xFC prefix)
 	if (SAT_TRUNC_OPCODES[op] !== undefined) {
 		return [0xfc, ...encodeU32LEB(SAT_TRUNC_OPCODES[op])];
+	}
+
+	// 2. Check SIMD opcodes (0xFD prefix)
+	if (SIMD_OPCODES[op] !== undefined) {
+		const subOp = SIMD_OPCODES[op];
+		const bytes = [0xfd, ...encodeU32LEB(subOp)];
+		if (op === "v128.load" || op === "v128.store") {
+			bytes.push(...encodeU32LEB(inst.align ?? 2));
+			bytes.push(...encodeU32LEB(inst.offset ?? 0));
+			return bytes;
+		}
+		if (op === "v128.const") {
+			const prefixLen = bytes.length;
+			if (inst.bytes) {
+				for (let i = 0; i < 16; i++) {
+					bytes.push(inst.bytes[i] ?? 0);
+				}
+			} else if (inst.values) {
+				const vals = inst.values.slice(0, 4);
+				for (const val of vals) {
+					bytes.push(...encodeF32(val));
+				}
+				while (bytes.length < prefixLen + 16) {
+					bytes.push(0);
+				}
+			} else {
+				for (let i = 0; i < 16; i++) bytes.push(0);
+			}
+			return bytes;
+		}
+		if (op === "i8x16.shuffle") {
+			const lanes = inst.lanes ?? inst.indices ?? [];
+			for (let i = 0; i < 16; i++) {
+				bytes.push(lanes[i] ?? 0);
+			}
+			return bytes;
+		}
+		if (op.includes("extract_lane") || op.includes("replace_lane")) {
+			bytes.push((inst.lane ?? inst.index ?? 0) & 0xff);
+			return bytes;
+		}
+		return bytes;
 	}
 
 	// 2. Check WasmGC opcodes (0xFB prefix)

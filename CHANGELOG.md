@@ -4,6 +4,42 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.7.0] - 2026-10-19
+
+### Added
+- **`encoding/json` standard library package (reflection-free compile-time codegen)**:
+  - `json.Marshal(v)` and `json.Unmarshal(data, &v)` implemented for `js` packages via static compile-time code generation without a runtime reflection engine.
+  - Struct field tag parsing and preservation: honors `json:"fieldName"`, `,omitempty`, `,string` (numbers/booleans encoded/decoded as JSON strings), `-` (ignored fields), and excludes unexported lowercase struct fields.
+  - Supports embedded struct field promotion with shallow field priority (conflicts at the same depth cancel each other).
+  - Specialized codecs for structs, maps, slices, primitives, pointers, `json.RawMessage`, and interfaces implementing `json.Marshaler` (`MarshalJSON() ([]byte, error)`) and `json.Unmarshaler` (`UnmarshalJSON([]byte) error`).
+  - Bit-for-bit parity with Go formatting: RFC 8259 compliant string escaping (`\u003c`, `\u003e`, `\u0026`), Go `strconv` shortest float representation, and Go-compliant error sentinels (`json.SyntaxError`, `json.UnmarshalTypeError`).
+  - Diagnostic rejection for `wasm` and `both` packages pointing to `js` packages.
+- **TypeScript `.d.ts` tuple return signatures to Go multi-value returns**:
+  - `src/dts-parser.js` parses TypeScript tuple types `[A, B]` (including labelled `[state: S, setState: Dispatch]`).
+  - In return position, maps to Go multi-value returns `(A, B)`.
+  - Typechecker enforces multi-value destination count matching Go compile rules (`assignment mismatch: 1 variable but returns 2 values`).
+  - JS backend codegen lowers multi-value returns directly to array destructuring (`let [a, b] = fn()`).
+- **Rest-parameter variadic propagation**:
+  - Fixed `_parseFuncDecl` and `_parseMemberDefault` in `src/dts-parser.js` to propagate `isRest` as `{ variadic: true }` to function types, enabling seamless calls to variadic library functions like `h(tag, props, ...children)`.
+- **Submodule vendor packaging and named global exports in `src/vendor.js`**:
+  - `gofront.vendor` supports subpath entries (e.g. `preact/hooks`) and named export global bindings (`window.h = preact.h`, `window.useState = preact_hooks.useState`).
+  - Preact and `preact/hooks` vendored with ambient `.d.ts` typings.
+- **`example/preact` TodoMVC application**:
+  - Complete TodoMVC example app using Preact function components, hooks (`useState`, `useEffect`), and Go struct props, replacing the retired `example/reactive`.
+  - Full feature parity with existing examples (filters, urgent priorities, localStorage async persistence, sync status, drag-and-drop).
+- **Experimental WASM SIMD (`gofront/simd`)**:
+  - Opt-in `gofront/simd` standard library package providing 4-wide 32-bit floating-point vector type `simd.F32x4` with Go value semantics: `simd.F32x4{a, b, c, d}`, `Splat`, `Add`, `Sub`, `Mul`, `Div`, `Min`, `Max`, `Dot3`, `Dot4`, `Lane(i)` (constant index $0 \le i \le 3$), `WithLane(i, f)`.
+  - Zero value zero-initialization: `(0, 0, 0, 0)` (`v128.const` zeros in WASM, frozen `[0, 0, 0, 0]` in JS).
+  - Direct linear memory buffer access: `simd.LoadF32x4(buf shared.Float32, i)` and `simd.StoreF32x4(buf, i, v)` with element offset calculation and bounds checking ($i + 4 \le \text{len}(buf)$) trapping on out-of-bounds.
+  - Native WebAssembly `0xFD` opcode encoding with unsigned LEB128 sub-opcodes for SIMD instructions; WAT printing support.
+  - Binaryen feature flag integration: bitmask 2014 ($2006 \mid 8$) with `--enable-simd` for release and optimization passes.
+  - JS scalar fallback using `Math.fround` for bit-level 32-bit float parity.
+  - JS↔WASM boundary diagnostic preventing direct `F32x4` parameter/return crossing (suggesting `gofront/shared.Float32`).
+  - Raycast benchmark gating evaluated: 1.02× over scalar hybrid (below $\ge 1.30\times$ promotion gate); groundwork retained as experimental and promotion deferred to v1.7.1.
+
+### Retired
+- **`example/reactive`** — retired in favor of `example/preact`, demonstrating standard ecosystem component and hook patterns with type-safe Go bindings.
+
 ## [1.6.1] - 2026-10-18
 
 ### Added
