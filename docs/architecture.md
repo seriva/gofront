@@ -59,8 +59,11 @@ Walks the typed AST and emits clean, readable JavaScript. No intermediate repres
 
 Runtime helpers (`__len`, `__append`, `__s`, `__sprintf`, `__equal`, `__cmul`, `__cdiv`,
 `__error`, `__errorIs`, `__timeFmt`, `__timeParse`, `__pathClean`, `__sortSlice`,
-`__sclone`, `__ifv`, `__ifp`) are tree-shaken: only emitted when actually used. Optional
-inline source maps are supported via VLQ-encoded mappings.
+`__sclone`, `__ifv`, `__ifp`, the `__json_*` encoding/json runtime and the `__simd_*` `gofront/simd`
+fallback) are tree-shaken: only emitted when actually used. `encoding/json` additionally emits
+one memoized encoder/decoder per reachable type, derived from the struct tags preserved by the
+parser and the field sets resolved by the type checker. Optional inline source maps are supported
+via VLQ-encoded mappings.
 
 ### 5. Lowering & WASM backend (`src/lower/`, `src/backend/wasm/`)
 
@@ -83,7 +86,7 @@ a WebAssembly GC module:
 | `emit-builtins.js` | `panic`/`recover`, Go builtins (`len`, `append`, `make`, …) and call dispatch |
 | `emit-maps.js` | map runtime helpers (key hash/eq, get/set/delete, iteration) and zero values |
 | `emit-shared.js` | `gofront/shared` linear-memory buffer allocation, load/store indexing, `Subarray` and `copy` |
-| `stdlib/` | natively implemented stdlib modules (`core.js`, `bytes.js`, `pure.js`, `io.js`, `time.js`, indexed by `index.js`) |
+| `stdlib/` | natively implemented stdlib modules (`core.js`, `bytes.js`, `pure.js`, `io.js`, `time.js`, `packages.js`, `simd.js`, indexed by `index.js`) |
 | `encode.js` | Module IR → binary (`LEB128`, sections, `gofront` custom section, `app.wasm.map` source maps) — no dependencies |
 | `optimize.js` | Binaryen (`wasm-opt`) optimization pipeline (`-O3` + `--gufa`) and source map pass-through for `--release` / `--wasm-opt` |
 | `wat.js` | Module IR → WAT text for `--emit-wat` and golden tests |

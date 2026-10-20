@@ -32,12 +32,12 @@ packages is listed in the [hybrid guide](hybrid-wasm.md#what-wasm-packages-suppo
 | `error` type | ✓ — interface `{ Error() string }`; custom error types, `errors.Is`/`Unwrap`, `%w` wrapping |
 | Complex numbers (`complex64`, `complex128`, `3i`) | ✓ — `complex()`, `real()`, `imag()` builtins; `__cmul`/`__cdiv` helpers |
 | Type definitions, type aliases (`type A = B`) | ✓ |
-| Methods on named non-struct types | ✓ — `type T func(...)` or `type T []E` with methods; emitted as ES6 wrapper classes; satisfies interfaces |
+| Methods on named non-struct types | ✓ — basic, slice, map and func types (`type Celsius float64`, `type Names []string`); value and pointer receivers; values stay plain JS values, methods dispatch statically, and values are boxed only inside interfaces; satisfies interfaces, type assertions and switches |
 | Type conversions, type assertions (plain & comma-ok) | ✓ |
 | Type switch (`switch v := x.(type)`) | ✓ — compiles to `if/else if` with `typeof` / `instanceof` |
 | Sized integers (`int8`–`int64`, `uint8`–`uint64`, `float32`) | ✓ — distinct types in the checker; `rune` = `int32`, `byte` = `uint8`; conversions truncate to width; arithmetic is float64 in `js` packages, exact in `wasm`/`both` |
 | Generics (`func F[T any]`, `type S[T any] struct`) | ✓ — type erasure to JS; generic functions, structs, constraints (`any`, `comparable`, interfaces, unions), type inference |
-| Struct field tags | ✓ — parsed and ignored (no reflection) |
+| Struct field tags | ✓ — parsed and preserved; `json:"…"` tags drive the compile-time `encoding/json` codecs (no reflection) |
 | Struct and array equality (`a == b`) | ✓ — deep comparison via `__equal` helper |
 
 ### Control flow
@@ -96,8 +96,10 @@ packages is listed in the [hybrid guide](hybrid-wasm.md#what-wasm-packages-suppo
 | `encoding/binary` | `LittleEndian`, `BigEndian` (`Uint16`, `Uint32`, `Uint64`, `PutUint16`, `PutUint32`, `PutUint64`, `AppendUint16`, `AppendUint32`, `AppendUint64`), `Read`, `Write`, `Size` |
 | `encoding/hex` | `EncodeToString`, `DecodeString`, `EncodedLen`, `DecodedLen`, `Encode`, `Decode` |
 | `encoding/base64` | `StdEncoding`, `URLEncoding`, `RawStdEncoding`, `RawURLEncoding` (`EncodeToString`, `DecodeString`, `EncodedLen`, `DecodedLen`), `NewEncoding` |
+| `encoding/json` | `Marshal`, `MarshalIndent`, `Unmarshal`, `Valid`, `RawMessage` — codecs generated per type at compile time from `json` struct tags (`omitempty`, `string`, `-`, embedded-field promotion); calls `MarshalJSON` / `UnmarshalJSON` methods. `js` packages only. No `Encoder`/`Decoder`, `Number` or typed error values (`*json.SyntaxError`, …) |
 | `gom` | Browser-native declarative DOM component library. **Types**: `Node` (interface), `NodeFunc`, `Group`. **Core**: `El(tag, children...)`, `Text(s)`, `Mount(sel, node[, refs])`, `MountTo(sel, node[, refs])` — the optional `refs map[string]any` receives elements marked `ref="name"` in `.templ` templates. **Attributes**: `Attr`, `Class`, `Href`, `Type`, `Src`, `Placeholder`, `DataAttr`, `Style`, `For`, `Name`, `Value`, `Target`, `Rel`, `Alt`, `Title`, `Draggable`, `Role`, `AriaLabel`, `StyleAttr`; boolean: `Disabled`, `Checked`, `Selected`, `Readonly`. **Logic**: `If(cond, node)`, `Map(slice, fn)`. **Elements**: full HTML element set (`Div`, `Span`, `Button`, `Input`, `Ul`, `Li`, `Table`, `Form`, `Img`, `A`, `H1`–`H6`, …) |
 | `gofront/shared` | Fixed-size linear-memory buffers for zero-copy JS↔WASM sharing (`Float32`, `Float64`, `Int8`, `Int16`, `Int32`, `Uint8`, `Uint16`, `Uint32` via `shared.NewXxx(n)` and `.Subarray(lo, hi)`). Lowered to plain TypedArrays in `--js-only` builds. See the [hybrid guide](hybrid-wasm.md#shared-linear-memory-buffers-gofrontshared). |
+| `gofront/simd` (experimental) | `F32x4` 4-lane `float32` vector: `F32x4{a, b, c, d}`, `Splat`, `NewF32x4`, `Add`, `Sub`, `Mul`, `Div`, `Min`, `Max`, `Dot3`, `Dot4`, `Lane`, `WithLane` (constant lane index); `LoadF32x4`/`StoreF32x4` on `shared.Float32`. WASM `v128` in `wasm` packages, `Math.fround` arrays in `js`. See the [hybrid guide](hybrid-wasm.md#wasm-simd-gofrontsimd-experimental). |
 | `testing` | **`testing.T`**: `Error`, `Errorf`, `Fatal`, `Fatalf`, `Fail`, `Failed`, `FailNow`, `Log`, `Logf`, `Skip`, `Skipf`, `Skipped`, `Helper`, `Run`, `Name`. **Package functions**: `Short()`, `Verbose()`. Tests are `func TestXxx(t *testing.T)` in `*_test.go` files, excluded from normal compilation and run via `gofront test`. |
 
 ### Packages & imports
@@ -110,7 +112,7 @@ packages is listed in the [hybrid guide](hybrid-wasm.md#what-wasm-packages-suppo
 | Side-effect imports (`import _ "pkg"`) | ✓ |
 | Dot imports (`import . "pkg"`) | ✓ |
 | Unused import detection | ✓ |
-| External `.d.ts` types | ✓ |
+| External `.d.ts` types | ✓ — TypeScript tuple returns map to Go multi-value results (`state, setState := useState(0)`); rest parameters become variadic |
 | npm package type resolution | ✓ |
 | `.templ` files in packages | ✓ — mix `.go` and `.templ` files freely; templ components and `css` declarations visible across the whole package |
 | `//gofront:target` directives | ✓ — per-package `js` / `wasm` / `both` targets; see the [hybrid guide](hybrid-wasm.md) |

@@ -138,7 +138,7 @@ example/simple/
 
 ### Preact (components, hooks + d.ts tuples)
 
-Same app rebuilt with [Preact](https://preactjs.com), using function components and hooks (`useState`, `useEffect`, `useRef`). Demonstrates how GoFront integrates with external JS libraries via `.d.ts` type declarations — TypeScript tuple return signatures (`[T, (v: T) => void]`) map directly to Go multi-value returns, allowing idiomatic Go hook destructuring:
+Same app rebuilt with [Preact](https://preactjs.com), using function components and hooks (`useState`, `useEffect`). Demonstrates how GoFront integrates with external JS libraries via `.d.ts` type declarations — TypeScript tuple return signatures (`[T, (v: T) => void]`) map directly to Go multi-value returns, allowing idiomatic Go hook destructuring:
 
 ```go
 func TodoItem(p TodoItemProps) VNode {
@@ -170,6 +170,7 @@ The preact example covers:
 | Hooks | `useState` with tuple destructuring (`state, setState := useState(init)`), `useEffect` |
 | Tuples | Multi-value returns from TypeScript `.d.ts` tuple types |
 | Vendoring | Bundled subpath packages (`preact/hooks`) with named global exports |
+| Typed persistence | `encoding/json` `Marshal`/`Unmarshal` of `[]Todo` to `localStorage`, driven by struct tags |
 
 ### templ (template files + direct DOM codegen)
 
@@ -274,7 +275,7 @@ Key types and functions (all accessed as `gom.*`, no import needed):
 The simple and preact examples cover: structs & methods, iota constants, named return
 values, closures, slices, `for range`, `switch`, cross-package imports, multi-file
 same-package compilation, `async`/`await`, `defer`/`recover`, localStorage persistence,
-DOM APIs, and generic utility functions (`Filter[T]`, `Map[T, U]`).
+DOM APIs, and generic utility functions (`Filter[T]`).
 
 The preact example additionally demonstrates: external `.d.ts` type imports,
 TypeScript tuple return mapping to Go multi-value returns (`state, setState := useState(...)`),

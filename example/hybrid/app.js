@@ -360,6 +360,14 @@ var __ifps = __ifps || function(x) {
   }
   return x;
 };
+var __ifeq = __ifeq || function(a, b) {
+  if (a === b) return true;
+  if (a === null || a === undefined || b === null || b === undefined) return a == null && b == null;
+  if (typeof a === "object" && typeof b === "object" && a.constructor === b.constructor && typeof a.__gfUnbox === "function") {
+    return a.__gfUnbox() === b.__gfUnbox();
+  }
+  return false;
+};
 var __sprintf = __sprintf || function(f, ...a) {
   let i = 0;
   const ptrMap = new WeakMap();
@@ -395,6 +403,7 @@ var __sprintf = __sprintf || function(f, ...a) {
       if (typeof val.Error === "function") {
         return String(val.Error());
       }
+      if (typeof val.__gfUnbox === "function") return formatV(val.__gfUnbox(), isPlus, isTopLevel);
       if (Array.isArray(val) || ArrayBuffer.isView(val)) {
         const isElemPtr = val.__ptr_slice === true;
         const pf = val.__ptr_fields;
@@ -476,7 +485,9 @@ var __sprintf = __sprintf || function(f, ...a) {
   return f.replace(/%([#+\- 0]*)([0-9]*)\.?([0-9]*)[sdvftxXqobeEgGwc%]/g, (m) => {
     if (m === "%%") return "%";
     const verb = m.slice(-1);
-    const v = a[i++];
+    let v = a[i++];
+    // Boxed named values format as their underlying value; Error() still applies to %v/%s/%q/%w.
+    if (v && typeof v.__gfUnbox === "function" && !(typeof v.Error === "function" && "vsqw".includes(verb))) v = v.__gfUnbox();
     const [, flags, width, prec] = m.match(/^%([#+\- 0]*)([0-9]*)\.?([0-9]*)/) || [];
     const zero = flags?.includes("0") && !flags?.includes("-");
     const pad = (s, w, z) => {
@@ -670,21 +681,22 @@ function setupEvents() {
     if (btn == null) {
       return;
     }
-    switch (btn.getAttribute("data-action")) {
-      case "count":
+    const __sw1 = btn.getAttribute("data-action");
+    switch (true) {
+      case __ifeq(__sw1, "count"):
       {
         target = Math.trunc(Number(btn.getAttribute("data-count")));
         Reset(target, canvasW, canvasH);
         render();
         break;
       }
-      case "pause":
+      case __ifeq(__sw1, "pause"):
       {
         paused = !paused;
         render();
         break;
       }
-      case "reset":
+      case __ifeq(__sw1, "reset"):
       {
         Reset(target, canvasW, canvasH);
         render();

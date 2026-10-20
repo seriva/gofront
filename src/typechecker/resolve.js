@@ -627,6 +627,7 @@ function _processJsonField(f, depth, path, visited, queue, candidates) {
 			goName: name,
 			type: f.type,
 			omitempty: tagInfo.omitempty,
+			quoted: tagInfo.options.includes("string"),
 			depth,
 			tagged: tagInfo.name !== null,
 			path: [...path, { name, isPtr: false }],

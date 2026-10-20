@@ -123,6 +123,14 @@ var __ifps = __ifps || function(x) {
   }
   return x;
 };
+var __ifeq = __ifeq || function(a, b) {
+  if (a === b) return true;
+  if (a === null || a === undefined || b === null || b === undefined) return a == null && b == null;
+  if (typeof a === "object" && typeof b === "object" && a.constructor === b.constructor && typeof a.__gfUnbox === "function") {
+    return a.__gfUnbox() === b.__gfUnbox();
+  }
+  return false;
+};
 var __error = __error || function(msg, cause) {
   return { Error() { return msg; }, toString() { return msg; }, _msg: msg, _cause: cause ?? null };
 };
@@ -218,6 +226,114 @@ var __json_esc = __json_esc || function(s) {
 var __json_err = __json_err || function(msg) {
   return typeof __error === "function" ? __error("json: " + msg) : new Error("json: " + msg);
 };
+// Decode error context, as in Go: innermost struct being decoded plus the path
+// of JSON field names from the root. Reset by every __json_unmarshal call.
+var __json_structs = __json_structs || [];
+var __json_path = __json_path || [];
+var __json_ctx = __json_ctx || function(typeName) {
+  if (__json_path.length > 0 && __json_structs.length > 0) {
+    return "Go struct field " + __json_structs[__json_structs.length - 1] + "." + __json_path.join(".") + " of type " + typeName;
+  }
+  return "Go value of type " + typeName;
+};
+// The JSON source text of a number, for "cannot unmarshal number <literal>" messages.
+var __json_lit = __json_lit || function(v, raw) {
+  if (raw !== undefined && raw !== null) return String(raw).trim();
+  return typeof v === "string" ? v.replace(/__bigint$/, "") : String(v);
+};
+var __json_float_decode = __json_float_decode || function(v, bits, ctxType, raw) {
+  var n = __json_number_value(v);
+  if (typeof n !== "number") return __json_err("cannot unmarshal " + __json_type(v) + " into " + __json_ctx(ctxType));
+  var f = bits === 32 ? Math.fround(n) : n;
+  if (!isFinite(f)) return __json_err("cannot unmarshal number " + __json_lit(v, raw) + " into " + __json_ctx(ctxType));
+  return f;
+};
+// []byte accepts a base64 string or (like Go) an array of uint8 values.
+var __json_bytes_decode = __json_bytes_decode || function(v) {
+  if (Array.isArray(v)) {
+    var u8 = new Uint8Array(v.length);
+    for (var i = 0; i < v.length; i++) {
+      var b = __json_int_decode(v[i], "uint8", "uint8", __json_raw_child(v, i));
+      if (b && b._msg) return b;
+      u8[i] = b;
+    }
+    return u8;
+  }
+  if (typeof v !== "string") return __json_err("cannot unmarshal " + __json_type(v) + " into " + __json_ctx("[]uint8"));
+  return __json_b64_dec(v);
+};
+var __json_esc_noh = __json_esc_noh || function(s) {
+  return JSON.stringify(String(s)).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+};
+var __json_syntax_msg = __json_syntax_msg || function(s) {
+  var t = String(s).trim();
+  if (t === "") return "unexpected end of JSON input";
+  var m;
+  try { JSON.parse(t); } catch (e) { m = String(e && e.message); }
+  if (m && /end of JSON input|Unterminated/.test(m)) return "unexpected end of JSON input";
+  var pos = m && /after JSON at position (\d+)/.exec(m);
+  if (pos) return "invalid character '" + t[Number(pos[1])] + "' after top-level value";
+  if ("{[\"-0123456789tfn".indexOf(t[0]) < 0) return "invalid character '" + t[0] + "' looking for beginning of value";
+  return "invalid character in JSON value";
+};
+// Validates and compacts JSON text, escaping <, >, & and U+2028/U+2029 inside strings.
+var __json_compact = __json_compact || function(s) {
+  try { JSON.parse(s); } catch (e) { return null; }
+  var out = "", inStr = false, esc = false;
+  for (var i = 0; i < s.length; i++) {
+    var c = s[i];
+    if (inStr) {
+      if (esc) { esc = false; out += c; continue; }
+      if (c === "\\") { esc = true; out += c; continue; }
+      if (c === '"') inStr = false;
+      if (c === "<") out += "\\u003c";
+      else if (c === ">") out += "\\u003e";
+      else if (c === "&") out += "\\u0026";
+      else if (c === "\u2028") out += "\\u2028";
+      else if (c === "\u2029") out += "\\u2029";
+      else out += c;
+      continue;
+    }
+    if (c === '"') { inStr = true; out += c; continue; }
+    if (c === " " || c === "\t" || c === "\n" || c === "\r") continue;
+    out += c;
+  }
+  return out;
+};
+var __json_marshaler_out = __json_marshaler_out || function(res, typeName) {
+  var err = res && res[1];
+  if (err) throw new Error("json: error calling MarshalJSON for type " + typeName + ": " + (typeof err.Error === "function" ? err.Error() : String(err)));
+  var b = res ? res[0] : null;
+  var s = b === null || b === undefined ? "" : (typeof b === "string" ? b : new TextDecoder().decode(b));
+  var c = __json_compact(s);
+  if (c === null) throw new Error("json: error calling MarshalJSON for type " + typeName + ": " + __json_syntax_msg(s));
+  return c;
+};
+// Keeps user errors returned by UnmarshalJSON intact while fitting the decoders'
+// "_msg"-tagged error protocol; __json_unmarshal unwraps __userErr.
+var __json_user_err = __json_user_err || function(e) {
+  if (e && e._msg !== undefined) return e;
+  return { _msg: e && typeof e.Error === "function" ? e.Error() : String(e), __userErr: e };
+};
+// Decodes the JSON string payload of a ,string field. Returns { v } or an error.
+var __json_unquote = __json_unquote || function(val, kind, typeStr) {
+  if (val === null) return { v: null, lit: "null" };
+  if (typeof val !== "string" || val.endsWith("__bigint")) {
+    return __json_err("invalid use of ,string struct tag, trying to unmarshal unquoted value into " + typeStr);
+  }
+  var invalid = function() {
+    return __json_err("invalid use of ,string struct tag, trying to unmarshal " + JSON.stringify(val) + " into " + typeStr);
+  };
+  var inner;
+  try { inner = JSON.parse(__json_preserve_int64(val)); } catch (e) {
+    if (kind !== "string" && kind !== "bool" && /^-?[0-9]/.test(val)) return __json_err("cannot unmarshal number " + val + " into " + __json_ctx(typeStr));
+    return invalid();
+  }
+  if (inner === null) return { v: null, lit: val };
+  if (kind === "string") return typeof inner === "string" ? { v: inner, lit: val } : invalid();
+  if (kind === "bool") return typeof inner === "number" ? invalid() : { v: inner, lit: val };
+  return typeof inner === "boolean" ? invalid() : { v: inner, lit: val };
+};
 var __json_type = __json_type || function(v) {
   if (v === null) return "null";
   if (Array.isArray(v)) return "array";
@@ -227,6 +343,138 @@ var __json_type = __json_type || function(v) {
   if (t === "boolean") return "bool";
   if (t === "object") return "object";
   return t;
+};
+var __json_raw_index = __json_raw_index || new WeakMap();
+var __json_parse_raw_node = __json_parse_raw_node || function(s) {
+  var i = 0;
+  function ws() { while (i < s.length && /[\t\n\r ]/.test(s[i])) i++; }
+  function stringEnd() {
+    i++;
+    while (i < s.length) {
+      if (s[i] === "\\") i += 2;
+      else if (s[i++] === '"') break;
+    }
+  }
+  function value() {
+    ws();
+    var start = i;
+    var node = { children: null };
+    if (s[i] === "{") {
+      i++;
+      node.children = new Map();
+      ws();
+      while (s[i] !== "}") {
+        var keyStart = i;
+        stringEnd();
+        var key = JSON.parse(s.slice(keyStart, i));
+        ws();
+        i++;
+        var child = value();
+        node.children.set(key, child);
+        ws();
+        if (s[i] === ",") { i++; ws(); }
+        else break;
+      }
+      i++;
+    } else if (s[i] === "[") {
+      i++;
+      node.children = new Map();
+      ws();
+      var index = 0;
+      while (s[i] !== "]") {
+        node.children.set(String(index++), value());
+        ws();
+        if (s[i] === ",") { i++; ws(); }
+        else break;
+      }
+      i++;
+    } else if (s[i] === '"') {
+      stringEnd();
+    } else {
+      while (i < s.length && !/[\t\n\r ,}\]]/.test(s[i])) i++;
+    }
+    node.raw = s.slice(start, i);
+    return node;
+  }
+  return value();
+};
+var __json_bind_raw = __json_bind_raw || function(value, node) {
+  if (value === null || typeof value !== "object" || !node?.children) return;
+  __json_raw_index.set(value, node.children);
+  for (const [key, child] of node.children) __json_bind_raw(value[key], child);
+};
+var __json_raw_child = __json_raw_child || function(parent, key) {
+  return __json_raw_index.get(parent)?.get(String(key))?.raw;
+};
+var __json_raw_bytes = __json_raw_bytes || function(raw) {
+  return new TextEncoder().encode(raw ?? "null");
+};
+var __json_match_field = __json_match_field || function(obj, tagName, fieldName) {
+  if (Object.prototype.hasOwnProperty.call(obj, tagName)) return tagName;
+  if (Object.prototype.hasOwnProperty.call(obj, fieldName)) return fieldName;
+  var tagFold = tagName.toLowerCase();
+  var fieldFold = fieldName.toLowerCase();
+  for (const key of Object.keys(obj)) {
+    var keyFold = key.toLowerCase();
+    if (keyFold === tagFold || keyFold === fieldFold) return key;
+  }
+  return null;
+};
+var __json_float32 = __json_float32 || function(v) {
+  var f = Math.fround(v);
+  if (!isFinite(f)) throw new Error("json: unsupported value: " + f);
+  if (Object.is(f, -0)) return "-0";
+  var candidate;
+  for (var precision = 1; precision <= 9; precision++) {
+    candidate = f.toPrecision(precision);
+    if (Math.fround(Number(candidate)) === f) break;
+  }
+  var n = Number(candidate);
+  var expText = n.toExponential();
+  var match = /e([+-]?)(\d+)$/.exec(expText);
+  var exponent = Number(match[2]) * (match[1] === "-" ? -1 : 1);
+  if (exponent < -6 || exponent >= 21) {
+    var mantissa = expText.slice(0, expText.indexOf("e"));
+    var sign = exponent >= 0 ? "+" : "-";
+    return mantissa + "e" + sign + String(Math.abs(exponent));
+  }
+  return n.toString();
+};
+var __json_number_value = __json_number_value || function(v) {
+  return typeof v === "string" && v.endsWith("__bigint") ? Number(v.slice(0, -8)) : v;
+};
+var __json_int_decode = __json_int_decode || function(v, typeName, ctxType, raw) {
+  var type = typeof v === "string" && v.endsWith("__bigint") ? "number" : __json_type(v);
+  var fail = function() {
+    return __json_err("cannot unmarshal " + (type === "number" ? "number " + __json_lit(v, raw) : type) + " into " + __json_ctx(ctxType));
+  };
+  if (type !== "number") return fail();
+  // Go parses integers with strconv.ParseInt: "1.0" and "1e2" are not integers.
+  if (raw !== undefined && raw !== null && !/^-?(0|[1-9][0-9]*)$/.test(String(raw).trim())) return fail();
+  var integer;
+  var signed = typeName === "int" || typeName.startsWith("int");
+  if (typeName === "int64" || typeName === "uint64") {
+    if (typeof v === "string" && v.endsWith("__bigint")) {
+      try { integer = BigInt(v.slice(0, -8)); } catch (_) {}
+    } else if (typeof v === "number" && Number.isSafeInteger(v)) {
+      integer = BigInt(v);
+    }
+    if (integer !== undefined) {
+      var min64 = typeName === "int64" ? -(1n << 63n) : 0n;
+      var max64 = typeName === "int64" ? (1n << 63n) - 1n : (1n << 64n) - 1n;
+      if (integer >= min64 && integer <= max64) return typeof v === "number" ? v : integer;
+    }
+    return fail();
+  }
+  if (typeof v === "number" && Number.isSafeInteger(v)) {
+    if (typeName === "int") return v;
+    var bits = typeName === "uint" ? 53 : Number(typeName.replace(/^(u?int|byte|rune)/, ""));
+    if (!bits) bits = typeName === "byte" ? 8 : typeName === "rune" ? 32 : 53;
+    var min = signed ? -(2 ** (bits - 1)) : 0;
+    var max = signed ? (2 ** (bits - 1)) - 1 : (2 ** bits) - 1;
+    if (v >= min && v <= max) return v;
+  }
+  return fail();
 };
 var __json_b64 = __json_b64 || function(u8) {
   if (u8 === null || u8 === undefined) return "null";
@@ -296,8 +544,17 @@ var __json_enc_any = __json_enc_any || function(v) {
     return "{" + mentries.join(",") + "}";
   }
   if (typeof v.__json_enc === "function") return v.__json_enc();
+  if (typeof v.MarshalJSON === "function" && !(v.__v === true && v.MarshalJSON.__ptrRecv)) {
+    return __json_marshaler_out(v.MarshalJSON(), v.constructor && v.constructor.name ? v.constructor.name : "value");
+  }
+  // Boxed named values (from an interface) encode as their value; *T boxes as the pointee.
+  if (typeof v.__gfUnbox === "function") {
+    var inner = v.__gfUnbox();
+    if (Object.prototype.hasOwnProperty.call(v, "_p")) inner = inner == null ? null : inner.value;
+    return __json_enc_any(inner);
+  }
   if (typeof v === "object") {
-    var okeys = Object.keys(v).filter(function(k) { return !k.startsWith("__"); });
+    var okeys = Object.keys(v).filter(function(k) { return !k.startsWith("__") || k === "__proto__"; });
     if (!v.__map && v.constructor && v.constructor !== Object && v.constructor.name !== "Object") {
       okeys = okeys.filter(function(k) { return !(k.length > 0 && k[0] >= "a" && k[0] <= "z"); });
     }
@@ -313,7 +570,7 @@ var __json_enc_any = __json_enc_any || function(v) {
 var __json_dec_any = __json_dec_any || function(parsed) {
   if (parsed === null) return null;
   if (typeof parsed === "string") {
-    if (parsed.endsWith("__bigint")) return BigInt(parsed.slice(0, -8));
+    if (parsed.endsWith("__bigint")) return Number(parsed.slice(0, -8));
     return parsed;
   }
   if (typeof parsed === "number" || typeof parsed === "boolean") return parsed;
@@ -323,7 +580,8 @@ var __json_dec_any = __json_dec_any || function(parsed) {
     return outSlice;
   }
   if (typeof parsed === "object") {
-    var outMap = { __map: true };
+    var outMap = Object.create(null);
+    outMap.__map = true;
     for (var k in parsed) {
       if (Object.prototype.hasOwnProperty.call(parsed, k)) {
         outMap[k] = __json_dec_any(parsed[k]);
@@ -336,7 +594,9 @@ var __json_dec_any = __json_dec_any || function(parsed) {
 var __json_dec_any_target = __json_dec_any_target || function(parsed, target, box) {
   var out = __json_dec_any(parsed);
   if (box) box.value = out;
-  else if (target && typeof target === "object") Object.assign(target, out);
+  else if (target && typeof target === "object") {
+    for (const k of Object.keys(out)) Object.defineProperty(target, k, { value: out[k], writable: true, enumerable: true, configurable: true });
+  }
   return null;
 };
 var __json_enc_slice = __json_enc_slice || function(slice, elemEnc) {
@@ -355,7 +615,7 @@ var __json_enc_map = __json_enc_map || function(m, valEnc) {
     }
     return "{" + mentries.join(",") + "}";
   }
-  var keys = Object.keys(m).filter(function(k) { return !k.startsWith("__"); }).sort();
+  var keys = Object.keys(m).filter(function(k) { return !k.startsWith("__") || k === "__proto__"; }).sort();
   var entries = [];
   for (var j = 0; j < keys.length; j++) {
     entries.push(__json_esc(keys[j]) + ":" + valEnc(m[keys[j]]));
@@ -426,6 +686,8 @@ var __json_valid = __json_valid || function(data) {
   }
 };
 var __json_unmarshal = __json_unmarshal || function(dec, data, target) {
+  __json_structs.length = 0;
+  __json_path.length = 0;
   if (target === null || target === undefined) {
     return typeof __error === "function" ? __error("json: Unmarshal(nil)") : new Error("json: Unmarshal(nil)");
   }
@@ -445,10 +707,12 @@ var __json_unmarshal = __json_unmarshal || function(dec, data, target) {
   } catch (e) {
     return typeof __error === "function" ? __error(e.message) : e;
   }
-  var isBox = target && typeof target === "object" && Object.prototype.hasOwnProperty.call(target, "value");
+  var rootRaw = __json_parse_raw_node(str);
+  __json_bind_raw(parsed, rootRaw);
+  var isBox = target && typeof target === "object" && (Object.prototype.hasOwnProperty.call(target, "value") || typeof target.__gfUnbox === "function");
   var dest = isBox ? target.value : target;
-  var err = dec(parsed, dest, isBox ? target : null, data);
-  if (err) return err;
+  var err = dec(parsed, dest, isBox ? target : null, data, rootRaw.raw);
+  if (err) return err.__userErr || err;
   return null;
 };
 
@@ -584,7 +848,7 @@ function itemClass(t, editing) {
   } else if (t.isUrgent()) {
     cls += " high";
   }
-  if (editing === true) {
+  if (__ifeq(editing, true)) {
     cls += " editing";
   }
   return cls;
@@ -600,16 +864,16 @@ function TodoItem(p) {
     badgeChild = h("span", __ifm({ "class": "badge" }), "urgent");
   }
   let textChild = null;
-  if (editing === true) {
+  if (__ifeq(editing, true)) {
     textChild = h("input", __ifm({ "type": "text", "class": "edit-input", "value": editText, "autoFocus": true, "onInput": function(e) {
       setEditText(e.target.value);
     }, "onKeyDown": function(e) {
-      if (e.key === "Enter") {
+      if (__ifeq(e.key, "Enter")) {
         if (p.OnEdit != null) {
           p.OnEdit(p.Todo.ID, String(editText));
         }
         setEditing(false);
-      } else if (e.key === "Escape") {
+      } else if (__ifeq(e.key, "Escape")) {
         setEditText(p.Todo.Text);
         setEditing(false);
       }
@@ -853,7 +1117,7 @@ function App() {
     };
     initLoad();
   }, []);
-  if (loaded !== true) {
+  if (!__ifeq(loaded, true)) {
     return h("div", __ifm({ "class": "loading-placeholder" }), h("div", __ifm({ "style": "font-size: 2rem; opacity: .4" }), "✓"), h("span", null, "Loading todos…"));
   }
   let doSave = function(newTodos) {
@@ -914,7 +1178,7 @@ function App() {
     }
     setErrorMsg("");
     let prio = PriorityNormal;
-    if (highPriority === true) {
+    if (__ifeq(highPriority, true)) {
       prio = PriorityHigh;
     }
     let newTodo = new Todo(nextId, val, false, prio);
@@ -922,13 +1186,13 @@ function App() {
     let next = __append([], ...currentTodos);
     next = __append(next, newTodo.__clone());
     setInputValue("");
-    if (highPriority === true) {
+    if (__ifeq(highPriority, true)) {
       setHighPriority(false);
     }
     doSave(next);
   };
   let onTogglePriority = function() {
-    if (highPriority === true) {
+    if (__ifeq(highPriority, true)) {
       setHighPriority(false);
     } else {
       setHighPriority(true);
@@ -1010,10 +1274,10 @@ function App() {
       itemElements = __append(itemElements, h(TodoItem, __ifv(new TodoItemProps(t.__clone(), onToggle, onDelete, onEdit, onDragStart(t), onDragOver(t), onDrop(t), onDragEnd))));
     }
   }
-  return h("div", __ifm({ "class": "card" }), h(Header, __ifv(new HeaderProps(urgent, String(syncMsg), String(syncCls)))), h(InputRow, __ifv(new InputRowProps(String(inputValue), highPriority === true, saving === true, String(errorMsg), function(e) {
+  return h("div", __ifm({ "class": "card" }), h(Header, __ifv(new HeaderProps(urgent, String(syncMsg), String(syncCls)))), h(InputRow, __ifv(new InputRowProps(String(inputValue), __ifeq(highPriority, true), __ifeq(saving, true), String(errorMsg), function(e) {
     setInputValue(e.target.value);
   }, function(e) {
-    if (e.key === "Enter") {
+    if (__ifeq(e.key, "Enter")) {
       onAdd();
     }
   }, onTogglePriority, onAdd))), h("div", __ifm({ "class": "list-divider" })), h("ul", __ifm({ "class": "todo-list" }), ...itemElements), h(Footer, __ifv(new FooterProps(__len(currentTodos), remaining, completed, f, onFilter, onClearCompleted))), h(StatsBar, __ifv(new StatsBarProps(__len(currentTodos), function() {
@@ -1050,50 +1314,73 @@ function filterLabel(f) {
 var __json_dec_Todo = typeof __json_dec_Todo !== "undefined" ? __json_dec_Todo : function __json_dec_Todo(parsed, target, box) {
   if (parsed === null) { if (box) box.value = null; return null; }
   if (typeof parsed !== "object" || Array.isArray(parsed)) {
-    return __json_err("cannot unmarshal " + __json_type(parsed) + " into Go value of type Todo");
+    return __json_err("cannot unmarshal " + __json_type(parsed) + " into " + __json_ctx("main.Todo"));
   }
-  if (Object.prototype.hasOwnProperty.call(parsed, "id")) {
-    var val = parsed["id"];
+  __json_structs.push("Todo");
+  try {
+  { var fieldKey = __json_match_field(parsed, "id", "ID"); if (fieldKey !== null) {
+    __json_path.push("id");
+    try {
+    var val = parsed[fieldKey];
+    var raw = __json_raw_child(parsed, fieldKey);
     if (val !== null) {
-      if (typeof val !== "number") return __json_err("cannot unmarshal " + __json_type(val) + " into Go struct field Todo.ID of type int");
-      target.ID = Math.trunc(val);
+      var dv = __json_int_decode(val, "int", "int", raw);
+      if (dv && dv._msg) return dv;
+      target.ID = dv;
     } else {
-      target.ID = null;
     }
+    } finally { __json_path.pop(); }
   }
-  if (Object.prototype.hasOwnProperty.call(parsed, "text")) {
-    var val = parsed["text"];
+  }
+  { var fieldKey = __json_match_field(parsed, "text", "Text"); if (fieldKey !== null) {
+    __json_path.push("text");
+    try {
+    var val = parsed[fieldKey];
+    var raw = __json_raw_child(parsed, fieldKey);
     if (val !== null) {
-      if (typeof val !== "string") return __json_err("cannot unmarshal " + __json_type(val) + " into Go struct field Todo.Text of type string");
-      target.Text = val;
+      var dv = (typeof val === "string" && !val.endsWith("__bigint") ? val : __json_err("cannot unmarshal " + __json_type(val) + " into " + __json_ctx("string")));
+      if (dv && dv._msg) return dv;
+      target.Text = dv;
     } else {
-      target.Text = null;
     }
+    } finally { __json_path.pop(); }
   }
-  if (Object.prototype.hasOwnProperty.call(parsed, "done")) {
-    var val = parsed["done"];
+  }
+  { var fieldKey = __json_match_field(parsed, "done", "Done"); if (fieldKey !== null) {
+    __json_path.push("done");
+    try {
+    var val = parsed[fieldKey];
+    var raw = __json_raw_child(parsed, fieldKey);
     if (val !== null) {
-      if (typeof val !== "boolean") return __json_err("cannot unmarshal " + __json_type(val) + " into Go struct field Todo.Done of type bool");
-      target.Done = val;
+      var dv = (typeof val === "boolean" ? val : __json_err("cannot unmarshal " + __json_type(val) + " into " + __json_ctx("bool")));
+      if (dv && dv._msg) return dv;
+      target.Done = dv;
     } else {
-      target.Done = null;
     }
+    } finally { __json_path.pop(); }
   }
-  if (Object.prototype.hasOwnProperty.call(parsed, "priority")) {
-    var val = parsed["priority"];
+  }
+  { var fieldKey = __json_match_field(parsed, "priority", "Priority"); if (fieldKey !== null) {
+    __json_path.push("priority");
+    try {
+    var val = parsed[fieldKey];
+    var raw = __json_raw_child(parsed, fieldKey);
     if (val !== null) {
-      if (typeof val !== "number") return __json_err("cannot unmarshal " + __json_type(val) + " into Go struct field Todo.Priority of type int");
-      target.Priority = Math.trunc(val);
+      var dv = __json_int_decode(val, "int", "int", raw);
+      if (dv && dv._msg) return dv;
+      target.Priority = dv;
     } else {
-      target.Priority = null;
     }
+    } finally { __json_path.pop(); }
   }
+  }
+  } finally { __json_structs.pop(); }
   return null;
 };
 
 var __json_dec_slice_Todo = typeof __json_dec_slice_Todo !== "undefined" ? __json_dec_slice_Todo : function __json_dec_slice_Todo(parsed, target, box) {
   if (parsed === null) { if (box) box.value = null; return null; }
-  if (!Array.isArray(parsed)) return __json_err("cannot unmarshal " + __json_type(parsed) + " into Go value of type []" + "Todo");
+  if (!Array.isArray(parsed)) return __json_err("cannot unmarshal " + __json_type(parsed) + " into " + __json_ctx("[]main.Todo"));
   var out = [];
   for (var i = 0; i < parsed.length; i++) {
     var item = (() => { var inst = new Todo(); var err = __json_dec_Todo(parsed[i], inst); return err || inst; })();

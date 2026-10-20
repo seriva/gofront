@@ -10,47 +10,49 @@ features (e.g. `docs/v0.0.5/`).
 
 ## v2.0.0
 
-**Theme: Native Go Compiler Engine & Hybrid NPM Distribution.** Rewrite GoFront's compiler core and CLI in native Go with byte-identical JS **and WASM** output to v1.6.1, a measured sub-10ms rebuild target, and no Node prerequisite for `dev`/`build`/`check` (Node still used for vendor bundling and `gofront test`). npm distribution via platform binaries. Pure port: ports the `lower` step and the complete v1.6.1 hybrid WASM backend as-is, no new features. Design document in [`docs/v2.0.0/native-go-engine.md`](v2.0.0/native-go-engine.md).
+**Theme: Native Go Compiler Engine & Hybrid NPM Distribution.** Rewrite GoFront's compiler core and CLI in native Go with byte-identical JS **and WASM** output to v1.8.0 (the last JS-engine feature release; the JS engine is feature-frozen from then on), a measured sub-10ms rebuild target, and no Node prerequisite for `dev`/`build`/`check` (Node still used for vendor bundling, `gofront test`, and as the Binaryen fallback when no native `wasm-opt` is installed). npm distribution via platform binaries. Pure port: ports the `lower` step and the complete v1.8.0 hybrid WASM backend as-is, no new features. The v1.8.0 Go-source stdlib (`runtime/stdlib/`) is embedded, not ported. Design document in [`docs/v2.0.0/native-go-engine.md`](v2.0.0/native-go-engine.md).
 
 | Area | Difficulty | Status | Notes |
 |---|---|---|---|
-| Differential testing oracle & baseline | Medium | Draft | Engine switch in `test/unit/helpers.js`, long-lived `gofront oracle` JSON process, shared `runtime/js/` helpers, JS-engine timing baseline. |
+| Differential testing oracle & baseline | Medium | Draft | Engine switch in `test/unit/helpers.js`, long-lived `gofront oracle` JSON process, shared `runtime/js/` helpers, JS-engine timing baseline; v1.8.0 parity matrix, conformance suite and manifest coverage test run on both engines. |
 | Lexer & tokens | Medium | Draft | Port `lexer`, `templ-lexer`, `tokens` with Go ASI and `//gofront:` directives; position/column parity. |
 | Parser & AST | High | Draft | Port parser incl. generics, labels, `async`/`await`, `.templ` and `css` blocks; identical parse diagnostics. |
-| Type checker | High | Draft | Port multi-pass checker (types → funcs → embedding → vars/consts → bodies), generics, package-target rules, stdlib/Web typings, `.d.ts` + npm resolution. |
+| Type checker | High | Draft | Port multi-pass checker (types → funcs → embedding → vars/consts → bodies), generics, package-target rules, universe-scope predeclared names, stdlib/Web typings, Go-source stdlib loading with overlays, `.d.ts` + npm resolution. |
 | Lowering & JS core codegen | High | Draft | Port `src/lower/` (from v1.5.0) and the JS backend incl. strict numeric mode; byte-identical JS + source maps. |
-| Stdlib & templ codegen | High | Draft | Port all 21 stdlib codegen modules, templ DOM codegen and scoped CSS. |
-| WASM backend port | High | Draft | Port the complete v1.6.1 `src/backend/wasm/` (IR, encoder, WAT, facades, loader, interfaces, generics, maps, `defer`/`recover`, boundary, shared buffers, WASM stdlib); byte-identical `.wasm` as an oracle gate; host imports shared via `runtime/js/wasm/`. |
+| Stdlib & templ codegen | High | Draft | Port the emitter-backed JS stdlib modules (incl. `encoding/json` codecs and the `gofront/simd` fallback), templ DOM codegen and scoped CSS. Go-source stdlib packages need no port. |
+| WASM backend port | High | Draft | Port the complete v1.8.0 `src/backend/wasm/` (IR, encoder, WAT, facades, loader, interfaces, generics, maps, `defer`/`recover`, boundary, shared buffers, SIMD, WASM stdlib incl. JSON codecs, Binaryen pipeline); byte-identical unoptimized `.wasm` as an oracle gate; host imports shared via `runtime/js/wasm/`. |
 | CLI, dev server & minifier | Medium | Draft | Full CLI surface incl. legacy flags, project config, assets, PWA, SSE live reload + CSS hot swap, minifier, `.wasm` serving. |
 | Hybrid NPM packaging & cutover | Medium | Draft | `@gofront/*` platform binaries, Node delegation for `prep`/`vendor`/`test`, beta opt-in → default flip. |
 
 ---
 
-## v1.7.1
+## v1.8.0
 
-**Theme: SIMD Promotion, Zero-Runtime Stdlib & Hybrid Boundary Polish.** Vectorized particle and vertex pipelines with 4-wide Structure-of-Arrays (SoA) layouts (targeting ≥ 1.3× throughput gate), compile-time WASM interior pointer diagnostics, zero-runtime standard library additions (`net/url`, `bufio`, `context`), and JS ↔ WASM boundary slice optimizations. Design documents in [`docs/v1.7.1/simd-soa-plan.md`](v1.7.1/simd-soa-plan.md) and [`docs/v1.7.1/stdlib-safety-boundary-plan.md`](v1.7.1/stdlib-safety-boundary-plan.md).
+**Theme: Portable Go completion.** Make GoFront as complete as possible inside its no-runtime and JS/WASM boundaries. Every language feature that works in `js` packages works in `wasm`/`both` (array value semantics, pointers to scalar fields and elements, per-iteration loop variables, range-over-func, generic func types and type aliases, complex numbers, `min`/`max`, exact constant folding, strict-mode runtime panics, shadowing of predeclared names). Pure packages are written once in GoFront Go and compiled for both targets. The release adds `encoding/json` in WASM, `bufio`, `net/url`, `context`, `encoding/csv`, `iter`/`cmp` with the Go 1.23 iterator APIs, and commonly imported pure packages (`container/*`, `hash/*`, `crypto/*` digests, `log`, `math/rand/v2`, …). A coverage manifest derived from Go's API files gates the result: every in-scope member is supported on both backends or excluded with a reason. `gofront/simd` is completed (masks, comparisons, select, rounding, shuffles, SoA `Vec3x4`/`AABB4`/`Ray4`, batch load/store, boundary transport). Promotion to stable is decided by a separate benchmark gate. Breaking: `maps.Keys`/`Values` return `iter.Seq`. Replaces the dropped v1.7.1 plans (only boundary slice borrowing is not carried over). Design document in [`docs/v1.8.0/portable-go-plan.md`](v1.8.0/portable-go-plan.md).
 
 | Area | Difficulty | Status | Notes |
 |---|---|---|---|
-| SIMD 4-wide data pipelines | Medium | Planned | Vectorized transformations, SoA vertex/particle benchmarks targeting ≥ 1.3× throughput gate. |
-| JS ↔ WASM SIMD boundary transport | Medium | Planned | Zero-copy vector passing across the boundary without manual `shared.Float32` indexing. |
-| WASM interior pointer safety | Low | Planned | Reject `&s.Field` and `&arr[i]` in `wasm`/`both` packages with actionable diagnostics (WasmGC lacks interior pointers). |
-| `net/url` stdlib package | Medium | Planned | URL string parsing, query escaping/unescaping, and `url.Values` across JS and WASM. |
-| `bufio` stdlib package | Medium | Planned | In-memory buffered I/O (`Scanner`, `Reader`, `Writer`) over `io.Reader`/`io.Writer`. |
-| `context` stdlib package | Low | Planned | Cooperative cancellation and deadline tokens (`Context`, `WithCancel`, `WithTimeout`) for async and frontend workflows. |
-| Read-only boundary slice borrowing | Medium | Planned | Avoid element-wise cloning when lowering escape analysis proves slice parameter is neither retained nor mutated. |
+| WASM language parity | High | Planned | Array value semantics, pointers to scalar fields/elements, per-iteration loop variables and JS constant folding (today all silently give wrong results), range-over-func and `[]rune` (today produce invalid modules), `min`/`max`, generic named func types and type aliases, complex numbers, strict-mode runtime panics; a parity matrix guarantees identical JS/WASM results or a targeted diagnostic. |
+| Go-source stdlib | High | Planned | Pure packages in `src/stdlib/go/` compiled into the caller's target with strict numerics; reachability-based emission, so unused imports cost 0 bytes. |
+| Coverage manifest & conformance | Medium | Planned | Manifest from go1.26 `api/*.txt`, coverage gate, generated stdlib docs, fixtures compared byte for byte against real Go output on JS and WASM. |
+| `iter`, `cmp` & iterator APIs | Medium | Planned | `slices`/`maps`/`strings`/`bytes` sequence members; `maps.Keys`/`Values` return `iter.Seq` (breaking, with a `slices.Collect` hint). |
+| Member completion | Medium | Planned | `fmt.Sprint`/`Stringer`/`%T`/`%#v`, `os.Stdout` as `io.Writer`, `sort.Sort`/`Interface`, `utf8` byte API, `io.MultiWriter`/`TeeReader`, `strconv.NumError`, `math`/`bits`/`time` gaps (incl. `time.Time` JSON), `sync.Map`/`Pool`, `testing` additions, and the rest of the signature-checked audit. |
+| `bufio`, `net/url`, `context` | Medium | Planned | Go-source packages on both backends; `context` without `Done()` (no channels), with `AfterFunc` for `AbortController` interop and cooperative deadlines in WASM. |
+| New pure packages | Medium | Planned | `container/*`, `hash/*`, `crypto/{sha1,sha512,md5,hmac,subtle}`, `encoding/base32`, `encoding/csv`, `unicode/utf16`, `math/cmplx`, `sync/atomic`, `log`, `math/rand/v2`. |
+| SIMD completion & promotion gate | High | Planned | `F32x4` as a full value type (exported API, `==`, map keys, `fmt`); `Mask32x4`, comparisons, `Select`, rounding, shuffles; SoA `Vec3x4`/`AABB4`/`Ray4` with `IntersectRayAABB4`; SoA/AoS load/store; copied boundary transport. Stable only if the particle benchmark is ≥ 1.30× over scalar WASM with zero allocations and the raycast does not regress. |
+| `encoding/json` everywhere | High | Planned | Pure-WASM per-type codecs (no host JSON) matching the v1.7.0 JS semantics; both backends gain `Encoder`/`Decoder`, `Number`, `Compact`/`Indent` and typed errors. |
 
 ---
 
 ## v1.7.0
 
-**Theme: Typed data, typed JS libraries, faster math — without adding a runtime.** Compile-time `encoding/json` driven by struct tags (no `reflect`), TypeScript tuple returns mapped to Go multi-value results so React/Preact hooks work directly (`example/reactive` replaced by `example/preact`), and an opt-in `gofront/simd` package lowered to WASM `v128`, shipped only if it beats the scalar hybrid raycast by ≥ 1.3×. Design document in [`docs/v1.7.0/json-preact-simd-plan.md`](v1.7.0/json-preact-simd-plan.md).
+**Theme: Typed data, typed JS libraries, faster math — without adding a runtime.** Compile-time `encoding/json` driven by struct tags (no `reflect`), TypeScript tuple returns mapped to Go multi-value results so React/Preact hooks work directly (`example/reactive` replaced by `example/preact`), and an opt-in `gofront/simd` package lowered to WASM `v128`, promoted to stable only if it beats the scalar hybrid raycast by ≥ 1.3× (it measured 1.02×, so it ships as experimental). Design document in [`docs/v1.7.0/json-preact-simd-plan.md`](v1.7.0/json-preact-simd-plan.md).
 
 | Area | Difficulty | Status | Notes |
 |---|---|---|---|
-| `encoding/json` | Medium | ✅ Done | Preserved struct tags; per-type generated compile-time encoders/decoders; Go-identical formatting and errors; `RawMessage`, `Marshaler`, `Unmarshaler`; JS packages only (diagnostic in wasm). |
+| `encoding/json` | Medium | ✅ Done | Preserved struct tags; per-type generated compile-time encoders/decoders; Go-identical formatting and error messages; `,string`, `RawMessage`, `MarshalJSON`, `UnmarshalJSON`; JS packages only (diagnostic in wasm). |
 | `.d.ts` tuples & `example/preact` | Medium | ✅ Done | TypeScript `[A, B]` returns → Go multi-value `(A, B)`; submodule vendor packaging (`preact/hooks`); TodoMVC reimplemented with function components and hooks; retired `example/reactive`. |
-| WASM SIMD (`gofront/simd`) | High | ✅ Experimental | `F32x4` → `v128` in wasm, scalar fallback in js; `shared.Float32` load/store; Binaryen feature integration. Raycast gate: 1.02× over scalar hybrid (below 1.30× threshold); groundwork retained as experimental, general promotion deferred to v1.7.1. |
+| WASM SIMD (`gofront/simd`) | High | ✅ Experimental | `F32x4` → `v128` in wasm, scalar fallback in js; `shared.Float32` load/store; Binaryen feature integration. Raycast gate: 1.02× over scalar hybrid (below 1.30× threshold); groundwork retained as experimental; completion and promotion moved to v1.8.0. |
 
 ---
 

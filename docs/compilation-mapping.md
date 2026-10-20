@@ -13,11 +13,13 @@ readable and debuggable — no name mangling, no opaque wrappers. This page desc
 | Embedded structs | Flattened fields + delegation stubs | `Greet(...a) { return Base.prototype.Greet.call(this, ...a); }` |
 | `[]T` (slice) | `Array` | `append` → `__append`, `len` → `__len` (both tree-shaken helpers) |
 | `[]float32`, `[]int8`…`[]int32`, `[]uint8`/`[]byte`…`[]uint32`, `[]rune` | TypedArray (`Float32Array`, `Int32Array`, `Uint8Array`, …) | `[]float64` and `[]int` stay plain `Array`; slicing → `.subarray`, `copy` → `.set` |
+| `simd.F32x4` | Frozen 4-element `Array` | Each lane rounded with `Math.fround`; operations go through tree-shaken `__simd_*` helpers |
 | `[N]T` (array) | `Array` | Copied with `.slice()` on assignment so arrays keep value semantics; bounds and size checked at compile time |
 | `map[K]V` | Plain object `{}` | Key access via `[]`, iteration via `Object.entries()` |
 | `nil` | `null` | `== nil` compiles to loose `== null` so JS `undefined` also counts as nil |
 | `error` | `__error` object | `error("msg")` → `__error("msg")`, `.Error()` → real method call. `toString()` for string context compat |
 | `*T` where `T` is a struct | The struct object itself | `&s` and `*p` are no-ops; struct instances are already references |
+| Named non-struct type with methods (`type Celsius float64`) | The underlying JS value | Methods compile to static class methods called with the receiver: `c.F()` → `Celsius.$F(c)`; pointer receivers get the `{ value }` box. Only when stored in an interface is the value boxed (`new Celsius(c)`, or `new Celsius$Ptr(p)` for `*T`) so dynamic calls, type assertions and `==` work |
 | `*T` where `T` is a scalar | `{ value: T }` box | `&x` boxes the variable, every read/write of `x` goes through `.value`; `new(T)` allocates a boxed zero value |
 
 ### Functions
@@ -26,6 +28,7 @@ readable and debuggable — no name mangling, no opaque wrappers. This page desc
 |---|---|
 | `func f(a int) int` | `function f(a)` |
 | Multiple returns `return a, b` | `return [a, b]` — destructured at call site: `let [a, b] = f()` |
+| `.d.ts` tuple return `[A, B]` | Treated as a Go multi-value result: `a, b := useState(0)` → `let [a, b] = useState(0)` |
 | Named returns | Variables pre-declared; bare `return` returns them |
 | Variadic `func f(xs ...int)` | `function f(...xs)` |
 | `func` literal (closure) | Arrow or function expression |
@@ -68,6 +71,7 @@ readable and debuggable — no name mangling, no opaque wrappers. This page desc
 | `complex(r, i)` | `{ re: r, im: i }` |
 | `real(z)` / `imag(z)` | `z.re` / `z.im` |
 | `fmt.Sprintf` | `__sprintf` tree-shaken helper |
+| `json.Marshal(v)` / `json.Unmarshal(b, &v)` | `__json_marshal(__json_enc_T, v)` / `__json_unmarshal(__json_dec_T, b, v)` — one encoder/decoder function generated per type from its `json` struct tags; `MarshalJSON`/`UnmarshalJSON` methods are called directly |
 
 ### Type system at runtime
 

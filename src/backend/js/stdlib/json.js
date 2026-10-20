@@ -42,11 +42,56 @@ function isByteSliceType(t) {
 	);
 }
 
+function isJsonNullAssignable(type) {
+	const base = unwrapNamed(type);
+	return (
+		base?.kind === "pointer" ||
+		base?.kind === "slice" ||
+		base?.kind === "map" ||
+		base?.kind === "interface" ||
+		(base?.kind === "basic" && base.name === "any")
+	);
+}
+
+// Field kinds the `,string` tag option applies to (Go: bool, ints, uints, floats, string).
+const QUOTABLE_KINDS = new Set([
+	"string",
+	"bool",
+	"int",
+	"int8",
+	"int16",
+	"int32",
+	"int64",
+	"uint",
+	"uint8",
+	"uint16",
+	"uint32",
+	"uint64",
+	"uintptr",
+	"byte",
+	"rune",
+	"float32",
+	"float64",
+]);
+
+// reflect's names for GoFront's basic aliases, used in decode error messages.
+const BASIC_DISPLAY = { any: "interface {}", byte: "uint8", rune: "int32" };
+
+// Basic kinds decoded by the typed scalar decoders.
+const SCALAR_KINDS = QUOTABLE_KINDS;
+
+// Methods live on the named type, or on its underlying struct for struct types.
+function lookupMethod(type, name) {
+	if (type?.kind !== "named") return null;
+	return type.methods?.get(name) ?? type.underlying?.methods?.get(name) ?? null;
+}
+
 export const jsonMethods = {
 	_genJson(fn, a, expr) {
 		this.useHelper("json");
 		this.useHelper("base64");
 		this.useHelper("error");
+		this._markJsonPtrRecvMarshalers();
 		const args = a();
 		if (fn === "Marshal") {
 			const argType = expr.args[0]?._type;
@@ -69,7 +114,7 @@ export const jsonMethods = {
 		return undefined;
 	},
 
-	_getJsonEncoder(type) {
+	_getJsonEncoder(type, addr = false) {
 		if (!type) return "__json_enc_any";
 		if (isRawMessageType(type)) {
 			const fnName = "__json_enc_RawMessage";
@@ -86,31 +131,39 @@ export const jsonMethods = {
 			return fnName;
 		}
 
+		// Go calls a pointer-receiver MarshalJSON only on addressable values.
+		const marshaler = this._jsonMarshalerInfo(type);
+		if (marshaler && (!marshaler.ptrRecv || addr)) {
+			return this._getMarshalerEncoder(type, marshaler);
+		}
+
 		const base = unwrapNamed(type);
 		if (isByteSliceType(type)) return "__json_b64";
 
 		if (base?.kind === "struct") {
+			const needsAddr = addr && this._jsonNeedsAddr(type);
 			const typeName = safeIdent((type.name ?? "AnonStruct").split(".").pop());
-			const fnName = `__json_enc_${typeName}`;
+			const fnName = `__json_enc_${typeName}${needsAddr ? "_addr" : ""}`;
 			if (!this._jsonCodecs.has(fnName)) {
 				this._jsonCodecs.set(fnName, "");
-				const code = this._buildStructEncoder(type, fnName);
+				const code = this._buildStructEncoder(type, fnName, needsAddr);
 				this._jsonCodecs.set(fnName, code);
 			}
 			return fnName;
 		}
 
 		if (type.kind === "pointer" && type.base) {
-			const innerEnc = this._getJsonEncoder(type.base);
-			if (innerEnc === "__json_enc_any") return "__json_enc_any";
-			const fnName = `${innerEnc}_ptr`;
+			const innerEnc = this._getJsonEncoder(type.base, true);
+			// Pointers to structs are the struct object; other pointers are { value } boxes.
+			const deref = unwrapNamed(type.base)?.kind === "struct" ? "v" : "v.value";
+			const fnName = `__json_enc_ptr_${safeIdent(typeCodecName(type.base, "val").split(".").pop())}`;
 			if (!this._jsonCodecs.has(fnName)) {
 				this._jsonCodecs.set(
 					fnName,
 					declareCodec(
 						fnName,
 						"v",
-						`  return (v === null || v === undefined) ? "null" : ${innerEnc}(v);`,
+						`  return (v === null || v === undefined) ? "null" : ${innerEnc}(${deref});`,
 					),
 				);
 			}
@@ -118,7 +171,7 @@ export const jsonMethods = {
 		}
 
 		if (base?.kind === "slice") {
-			const elemEnc = this._getJsonEncoder(base.elem);
+			const elemEnc = this._getJsonEncoder(base.elem, true);
 			const fnName = `__json_enc_slice_${safeIdent(typeCodecName(base.elem, "elem").split(".").pop())}`;
 			if (!this._jsonCodecs.has(fnName)) {
 				this._jsonCodecs.set(
@@ -135,7 +188,7 @@ export const jsonMethods = {
 
 		if (base?.kind === "map") {
 			const valType = base.value ?? base.elem;
-			const valEnc = this._getJsonEncoder(valType);
+			const valEnc = this._getJsonEncoder(valType, false);
 			const fnName = `__json_enc_map_${safeIdent(typeCodecName(valType, "val").split(".").pop())}`;
 			if (!this._jsonCodecs.has(fnName)) {
 				this._jsonCodecs.set(
@@ -151,6 +204,164 @@ export const jsonMethods = {
 		}
 
 		return "__json_enc_any";
+	},
+
+	// Tags pointer-receiver MarshalJSON methods so the dynamic `any` encoder can skip
+	// them for non-addressable values, as Go does.
+	_markJsonPtrRecvMarshalers() {
+		if (this._jsonPtrRecvMarked) return;
+		this._jsonPtrRecvMarked = true;
+		for (const [name, type] of this.checker?.types ?? []) {
+			if (name.includes(".") || type?.kind !== "named") continue;
+			if (!lookupMethod(type, "MarshalJSON")?._ptrRecv) continue;
+			const cls = safeIdent(name);
+			this._jsonCodecs.set(
+				`__json_ptrrecv_${cls}`,
+				`if (typeof ${cls} === "function" && ${cls}.prototype.MarshalJSON) ${cls}.prototype.MarshalJSON.__ptrRecv = true;`,
+			);
+		}
+	},
+
+	_jsonTypeName(type) {
+		const name = type?.name ?? "value";
+		if (name.includes(".")) return name;
+		const pkg = this.checker?.pkgName;
+		return pkg ? `${pkg}.${name}` : name;
+	},
+
+	_jsonClassName(type) {
+		return String(type?.name ?? "Object")
+			.split(".")
+			.pop();
+	},
+
+	// How to call `name` (MarshalJSON / UnmarshalJSON) on values of `type`, or null.
+	// Struct types dispatch on the instance; named non-struct types (raw values)
+	// call the static `T.$name(recv, ...)` with a { value } box for pointer receivers.
+	_jsonMethodInfo(type, name) {
+		const method = lookupMethod(type, name);
+		if (!method || isRawMessageType(type)) return null;
+		const isStruct = type.underlying?.kind === "struct";
+		if (!isStruct && !this._namedBoxInfo(type)) return null;
+		return {
+			ptrRecv: Boolean(method._ptrRecv),
+			isStruct,
+			cls: this._jsonClassName(type),
+		};
+	},
+
+	_jsonMarshalerInfo(type) {
+		return this._jsonMethodInfo(type, "MarshalJSON");
+	},
+
+	_jsonUnmarshalerInfo(type) {
+		return this._jsonMethodInfo(type, "UnmarshalJSON");
+	},
+
+	// UnmarshalJSON call for a target reachable through `addrExpr`: the struct
+	// instance for struct types, a { value } box otherwise.
+	_jsonUnmarshalCall(info, addrExpr, bytesExpr) {
+		if (info.isStruct) return `${addrExpr}.UnmarshalJSON(${bytesExpr})`;
+		const recv = info.ptrRecv ? addrExpr : `${addrExpr}.value`;
+		return `${info.cls}.$UnmarshalJSON(${recv}, ${bytesExpr})`;
+	},
+
+	// True when encoding an addressable `type` differs from a non-addressable one,
+	// i.e. it (or a value field inside it) has a pointer-receiver MarshalJSON.
+	_jsonNeedsAddr(type, seen = new Set()) {
+		if (!type || seen.has(type)) return false;
+		seen.add(type);
+		const marshaler = this._jsonMarshalerInfo(type);
+		if (marshaler) return marshaler.ptrRecv;
+		const base = unwrapNamed(type);
+		if (base?.kind !== "struct") return false;
+		const fields = this.checker?.resolveJsonFields(base) ?? [];
+		return fields.some((f) => this._jsonNeedsAddr(f.type, seen));
+	},
+
+	_getMarshalerEncoder(type, info) {
+		const fnName = `__json_enc_${safeIdent(info.cls)}_marshal`;
+		if (!this._jsonCodecs.has(fnName)) {
+			let call;
+			if (info.isStruct) {
+				call = `  if (v === null || v === undefined) return "null";\n  var res = v.MarshalJSON();`;
+			} else {
+				const recv = info.ptrRecv ? "{ value: v }" : "v";
+				call = `  var res = ${info.cls}.$MarshalJSON(${recv});`;
+			}
+			this._jsonCodecs.set(
+				fnName,
+				declareCodec(
+					fnName,
+					"v",
+					`${call}\n  return __json_marshaler_out(res, ${JSON.stringify(this._jsonTypeName(type))});`,
+				),
+			);
+		}
+		return fnName;
+	},
+
+	_getUnmarshalerDecoder(type) {
+		const info = this._jsonUnmarshalerInfo(type);
+		const fnName = `__json_dec_${safeIdent(info.cls)}_unmarshal`;
+		if (!this._jsonCodecs.has(fnName)) {
+			const bytes =
+				"__json_raw_bytes(rawStr !== undefined ? rawStr : JSON.stringify(parsed))";
+			const body = info.isStruct
+				? `  var inst = target && typeof target === "object" ? target : new ${info.cls}();\n  var err = ${this._jsonUnmarshalCall(info, "inst", bytes)};\n  if (err) return __json_user_err(err);\n  if (box) box.value = inst;\n  return null;`
+				: `  var addr = box || { value: target };\n  var err = ${this._jsonUnmarshalCall(info, "addr", bytes)};\n  if (err) return __json_user_err(err);\n  return null;`;
+			this._jsonCodecs.set(
+				fnName,
+				declareCodec(fnName, "parsed, target, box, rawData, rawStr", body),
+			);
+		}
+		return fnName;
+	},
+
+	_unmarshalerElemDecoder(elemType) {
+		const isPtr = elemType?.kind === "pointer";
+		const valueType = isPtr ? elemType.base : elemType;
+		const info = this._jsonUnmarshalerInfo(valueType);
+		if (!info) return null;
+		let make;
+		if (info.isStruct) {
+			make = (rawExpr) =>
+				`(() => { var inst = new ${info.cls}(); var uerr = ${this._jsonUnmarshalCall(info, "inst", `__json_raw_bytes(${rawExpr})`)}; return uerr ? __json_user_err(uerr) : inst; })()`;
+		} else {
+			// Pointer elements are the { value } box itself; value elements its value.
+			const zero = this.zeroValueForType(valueType);
+			const result = isPtr ? "__b" : "__b.value";
+			make = (rawExpr) =>
+				`(() => { var __b = { value: ${zero} }; var uerr = ${this._jsonUnmarshalCall(info, "__b", `__json_raw_bytes(${rawExpr})`)}; return uerr ? __json_user_err(uerr) : ${result}; })()`;
+		}
+		if (isPtr)
+			return (v, rawExpr) => `(${v} === null ? null : ${make(rawExpr)})`;
+		return (_v, rawExpr) => make(rawExpr);
+	},
+
+	// Returns the basic kind a `,string` field is quoted as, or null if the option does not apply.
+	_jsonQuotedKind(f) {
+		if (!f.quoted) return null;
+		const t = f.type?.kind === "pointer" ? f.type.base : f.type;
+		if (this._jsonMarshalerInfo(t)) return null;
+		const base = unwrapNamed(t);
+		return base?.kind === "basic" && QUOTABLE_KINDS.has(base.name)
+			? base.name
+			: null;
+	},
+
+	_genQuotedFieldEncoderExpr(f, kind) {
+		const isPtr = f.type?.kind === "pointer";
+		const basic = this._genBasicFieldExpr(kind);
+		const quote = (x) => {
+			const inner = basic(x);
+			return kind === "string"
+				? `__json_esc_noh(${inner})`
+				: `('"' + ${inner} + '"')`;
+		};
+		if (!isPtr) return quote;
+		return (v) =>
+			`(${v} === null || ${v} === undefined ? "null" : ${quote(`${v}.value`)})`;
 	},
 
 	_getBasicEncoder(basicName) {
@@ -174,6 +385,7 @@ export const jsonMethods = {
 			case "uint64":
 				return "(v => typeof v === 'bigint' ? v.toString() : String(v))";
 			case "float32":
+				return "__json_float32";
 			case "float64":
 				return "(v => { if (!isFinite(v)) throw new Error('json: unsupported value: ' + v); return String(v); })";
 			default:
@@ -181,7 +393,7 @@ export const jsonMethods = {
 		}
 	},
 
-	_buildStructEncoder(structType, fnName) {
+	_buildStructEncoder(structType, fnName, addr = false) {
 		const underlying = unwrapNamed(structType);
 		const fields = this.checker?.resolveJsonFields(underlying) ?? [];
 		const lines = [];
@@ -193,7 +405,7 @@ export const jsonMethods = {
 
 		for (const f of fields) {
 			const keyLiteral = JSON.stringify(`${JSON.stringify(f.jsonKey)}:`);
-			const encodeVal = this._genFieldEncoderExpr(f);
+			const encodeVal = this._genFieldEncoderExpr(f, addr);
 			const isStruct = unwrapNamed(f.type)?.kind === "struct";
 
 			this._emitFieldEncoderAccess(f, lines, (valName) => {
@@ -250,10 +462,20 @@ export const jsonMethods = {
 		}
 	},
 
-	_genFieldEncoderExpr(f) {
+	_genFieldEncoderExpr(f, addr = false) {
+		const quotedKind = this._jsonQuotedKind(f);
+		if (quotedKind) return this._genQuotedFieldEncoderExpr(f, quotedKind);
 		if (isRawMessageType(f.type)) {
 			return (v) =>
 				`((typeof ${v} === "string" ? ${v} : new TextDecoder().decode(${v})).trim() || "null")`;
+		}
+		// Marshalers and pointers go through the shared encoders.
+		const special =
+			f.type?.kind === "pointer" ||
+			(f.type?.kind === "named" && this._jsonMarshalerInfo(f.type));
+		if (special) {
+			const enc = this._getJsonEncoder(f.type, addr);
+			return (v) => `${enc}(${v})`;
 		}
 		if (isByteSliceType(f.type)) {
 			return (v) => `__json_b64(${v})`;
@@ -263,20 +485,15 @@ export const jsonMethods = {
 			return this._genBasicFieldExpr(base.name);
 		}
 		if (base?.kind === "struct") {
-			const enc = this._getJsonEncoder(f.type);
+			const enc = this._getJsonEncoder(f.type, addr);
 			return (v) => `${enc}(${v})`;
 		}
-		if (f.type?.kind === "pointer" && f.type.base) {
-			const enc = this._getJsonEncoder(f.type.base);
-			return (v) =>
-				`(${v} === null || ${v} === undefined ? "null" : ${enc}(${v}))`;
-		}
 		if (base?.kind === "slice") {
-			const enc = this._getJsonEncoder(base.elem);
+			const enc = this._getJsonEncoder(base.elem, true);
 			return (v) => `__json_enc_slice(${v}, ${enc})`;
 		}
 		if (base?.kind === "map") {
-			const enc = this._getJsonEncoder(base.value ?? base.elem);
+			const enc = this._getJsonEncoder(base.value ?? base.elem, false);
 			return (v) => `__json_enc_map(${v}, ${enc})`;
 		}
 		return (v) => `__json_enc_any(${v})`;
@@ -304,6 +521,7 @@ export const jsonMethods = {
 				return (v) =>
 					`(typeof ${v} === "bigint" ? ${v}.toString() : String(${v}))`;
 			case "float32":
+				return (v) => `__json_float32(${v})`;
 			case "float64":
 				return (v) =>
 					`(!isFinite(${v}) ? (() => { throw new Error("json: unsupported value: " + ${v}); })() : String(${v}))`;
@@ -317,6 +535,10 @@ export const jsonMethods = {
 		const baseType =
 			targetType.kind === "pointer" ? targetType.base : targetType;
 		if (!baseType) return "__json_dec_any_target";
+
+		if (this._jsonUnmarshalerInfo(baseType)) {
+			return this._getUnmarshalerDecoder(baseType);
+		}
 
 		if (isRawMessageType(baseType)) {
 			const fnName = "__json_dec_RawMessage";
@@ -341,7 +563,7 @@ export const jsonMethods = {
 					declareCodec(
 						fnName,
 						"parsed, target, box",
-						`  if (parsed === null) { if (box) box.value = null; return null; }\n  if (Array.isArray(parsed)) {\n    var u8 = new Uint8Array(parsed.length);\n    for (var i = 0; i < parsed.length; i++) {\n      if (typeof parsed[i] !== "number") return __json_err("cannot unmarshal " + __json_type(parsed[i]) + " into Go value of type byte");\n      u8[i] = Math.trunc(parsed[i]);\n    }\n    if (box) box.value = u8;\n    return null;\n  }\n  if (typeof parsed !== "string") return __json_err("cannot unmarshal " + __json_type(parsed) + " into Go value of type []byte");\n  var u8 = __json_b64_dec(parsed);\n  if (box) box.value = u8;\n  return null;`,
+						`  if (parsed === null) { if (box) box.value = null; return null; }\n  var u8 = __json_bytes_decode(parsed);\n  if (u8 && u8._msg) return u8;\n  if (box) box.value = u8;\n  return null;`,
 					),
 				);
 			}
@@ -362,81 +584,118 @@ export const jsonMethods = {
 			return fnName;
 		}
 
-		if (base?.kind === "slice") {
-			const elemTypeName = typeCodecName(base.elem, "elem");
-			const fnName = `__json_dec_slice_${safeIdent(elemTypeName.split(".").pop())}`;
-			if (!this._jsonCodecs.has(fnName)) {
-				const elemDec = this._genElemDecoder(base.elem);
-				const typedCtor = typedArrayConstructorForElem(base.elem);
-				const initOut = typedCtor ? `new ${typedCtor}(parsed.length)` : `[]`;
-				const setElem = typedCtor ? `out[i] = item;` : `out.push(item);`;
-				this._jsonCodecs.set(
-					fnName,
-					declareCodec(
-						fnName,
-						"parsed, target, box",
-						`  if (parsed === null) { if (box) box.value = null; return null; }\n  if (!Array.isArray(parsed)) return __json_err("cannot unmarshal " + __json_type(parsed) + " into Go value of type []" + ${JSON.stringify(elemTypeName)});\n  var out = ${initOut};\n  for (var i = 0; i < parsed.length; i++) {\n    var item = ${elemDec("parsed[i]")};\n    if (item && item._msg) return item;\n    ${setElem}\n  }\n  if (box) box.value = out;\n  return null;`,
-					),
-				);
-			}
-			return fnName;
-		}
-
-		if (base?.kind === "map") {
-			const valType = base.value ?? base.elem;
-			const valTypeName = typeCodecName(valType, "val");
-			const fnName = `__json_dec_map_${safeIdent(valTypeName.split(".").pop())}`;
-			if (!this._jsonCodecs.has(fnName)) {
-				const valDec = this._genElemDecoder(valType);
-				this._jsonCodecs.set(
-					fnName,
-					declareCodec(
-						fnName,
-						"parsed, target, box",
-						`  if (parsed === null) { if (box) box.value = null; return null; }\n  if (typeof parsed !== "object" || Array.isArray(parsed)) return __json_err("cannot unmarshal " + __json_type(parsed) + " into Go value of type map[string]" + ${JSON.stringify(valTypeName)});\n  var out = { __map: true };\n  for (var k in parsed) {\n    if (Object.prototype.hasOwnProperty.call(parsed, k)) {\n      var item = ${valDec("parsed[k]")};\n      if (item && item._msg) return item;\n      out[k] = item;\n    }\n  }\n  if (box) box.value = out;\n  return null;`,
-					),
-				);
-			}
-			return fnName;
-		}
+		if (base?.kind === "slice") return this._getSliceDecoder(base);
+		if (base?.kind === "map") return this._getMapDecoder(base);
+		// Top-level scalar targets (`json.Unmarshal(b, &n)`) are type-checked too.
+		if (base?.kind === "basic" && SCALAR_KINDS.has(base.name))
+			return this._getScalarDecoder(baseType, base);
 
 		return "__json_dec_any_target";
 	},
 
+	_getSliceDecoder(base) {
+		const elemTypeName = typeCodecName(base.elem, "elem");
+		const fnName = `__json_dec_slice_${safeIdent(elemTypeName.split(".").pop())}`;
+		if (!this._jsonCodecs.has(fnName)) {
+			const elemDec = this._genElemDecoder(base.elem);
+			const typedCtor = typedArrayConstructorForElem(base.elem);
+			const initOut = typedCtor ? `new ${typedCtor}(parsed.length)` : `[]`;
+			const setElem = typedCtor ? `out[i] = item;` : `out.push(item);`;
+			const display = JSON.stringify(`[]${this._jsonDisplayType(base.elem)}`);
+			this._jsonCodecs.set(
+				fnName,
+				declareCodec(
+					fnName,
+					"parsed, target, box",
+					`  if (parsed === null) { if (box) box.value = null; return null; }\n  if (!Array.isArray(parsed)) return __json_err("cannot unmarshal " + __json_type(parsed) + " into " + __json_ctx(${display}));\n  var out = ${initOut};\n  for (var i = 0; i < parsed.length; i++) {\n    var item = ${elemDec("parsed[i]", "__json_raw_child(parsed, i)")};\n    if (item && item._msg) return item;\n    ${setElem}\n  }\n  if (box) box.value = out;\n  return null;`,
+				),
+			);
+		}
+		return fnName;
+	},
+
+	_getMapDecoder(base) {
+		const valType = base.value ?? base.elem;
+		const valTypeName = typeCodecName(valType, "val");
+		const fnName = `__json_dec_map_${safeIdent(valTypeName.split(".").pop())}`;
+		if (!this._jsonCodecs.has(fnName)) {
+			const valDec = this._genElemDecoder(valType);
+			const display = JSON.stringify(
+				`map[string]${this._jsonDisplayType(valType)}`,
+			);
+			this._jsonCodecs.set(
+				fnName,
+				declareCodec(
+					fnName,
+					"parsed, target, box",
+					`  if (parsed === null) { if (box) box.value = null; return null; }\n  if (typeof parsed !== "object" || Array.isArray(parsed)) return __json_err("cannot unmarshal " + __json_type(parsed) + " into " + __json_ctx(${display}));\n  var out = Object.create(null); out.__map = true;\n  for (var k in parsed) {\n    if (Object.prototype.hasOwnProperty.call(parsed, k)) {\n      var item = ${valDec("parsed[k]", "__json_raw_child(parsed, k)")};\n      if (item && item._msg) return item;\n      out[k] = item;\n    }\n  }\n  if (box) box.value = out;\n  return null;`,
+				),
+			);
+		}
+		return fnName;
+	},
+
+	_getScalarDecoder(baseType, base) {
+		const display = this._jsonDisplayType(baseType);
+		const fnName = `__json_dec_scalar_${safeIdent(display)}`;
+		if (!this._jsonCodecs.has(fnName)) {
+			this._jsonCodecs.set(
+				fnName,
+				declareCodec(
+					fnName,
+					"parsed, target, box, rawData, rawStr",
+					`  if (parsed === null) return null;\n  var dv = ${this._jsonScalarDecodeExpr(base.name, display, "parsed", "rawStr")};\n  if (dv && dv._msg) return dv;\n  if (box) box.value = dv;\n  return null;`,
+				),
+			);
+		}
+		return fnName;
+	},
+
+	// Go-style display of a type in decode error messages (reflect's Type.String()).
+	_jsonDisplayType(t) {
+		if (!t) return "interface {}";
+		if (t.kind === "pointer") return `*${this._jsonDisplayType(t.base)}`;
+		if (t.kind === "named") return this._jsonTypeName(t);
+		if (t.kind === "basic") return BASIC_DISPLAY[t.name] ?? t.name;
+		if (t.kind === "slice") return `[]${this._jsonDisplayType(t.elem)}`;
+		if (t.kind === "map")
+			return `map[${this._jsonDisplayType(t.key)}]${this._jsonDisplayType(t.value ?? t.elem)}`;
+		return "interface {}";
+	},
+
+	// Decodes one parsed JSON scalar into `kind`; yields the value or an error (`_msg`).
+	_jsonScalarDecodeExpr(kind, display, v, rawExpr) {
+		const d = JSON.stringify(display);
+		const raw = rawExpr ?? "undefined";
+		switch (kind) {
+			case "string":
+				return `(typeof ${v} === "string" && !${v}.endsWith("__bigint") ? ${v} : __json_err("cannot unmarshal " + __json_type(${v}) + " into " + __json_ctx(${d})))`;
+			case "bool":
+				return `(typeof ${v} === "boolean" ? ${v} : __json_err("cannot unmarshal " + __json_type(${v}) + " into " + __json_ctx(${d})))`;
+			case "float32":
+				return `__json_float_decode(${v}, 32, ${d}, ${raw})`;
+			case "float64":
+				return `__json_float_decode(${v}, 64, ${d}, ${raw})`;
+			default:
+				return `__json_int_decode(${v}, ${JSON.stringify(kind)}, ${d}, ${raw})`;
+		}
+	},
+
 	_genElemDecoder(elemType) {
 		if (!elemType) return (v) => `__json_dec_any(${v})`;
+		const unmarshaler = this._unmarshalerElemDecoder(elemType);
+		if (unmarshaler) return unmarshaler;
+		if (isRawMessageType(elemType)) {
+			return (_v, rawExpr) => `__json_raw_bytes(${rawExpr})`;
+		}
+		if (isByteSliceType(elemType)) {
+			return (v) => `(${v} === null ? null : __json_bytes_decode(${v}))`;
+		}
 		const base = unwrapNamed(elemType);
-		if (base?.kind === "basic") {
-			switch (base.name) {
-				case "string":
-					return (v) =>
-						`(typeof ${v} === "string" ? ${v} : __json_err("cannot unmarshal " + __json_type(${v}) + " into Go value of type string"))`;
-				case "bool":
-					return (v) =>
-						`(typeof ${v} === "boolean" ? ${v} : __json_err("cannot unmarshal " + __json_type(${v}) + " into Go value of type bool"))`;
-				case "int":
-				case "int8":
-				case "int16":
-				case "int32":
-				case "uint":
-				case "uint8":
-				case "uint16":
-				case "uint32":
-				case "byte":
-				case "rune":
-					return (v) =>
-						`(typeof ${v} === "number" ? Math.trunc(${v}) : __json_err("cannot unmarshal " + __json_type(${v}) + " into Go value of type int"))`;
-				case "int64":
-				case "uint64":
-					return (v) =>
-						`(typeof ${v} === "string" && ${v}.endsWith("__bigint") ? BigInt(${v}.slice(0, -8)) : (typeof ${v} === "number" ? Math.trunc(${v}) : __json_err("cannot unmarshal " + __json_type(${v}) + " into Go value of type " + ${JSON.stringify(base.name)})))`;
-				case "float32":
-					return (v) =>
-						`(typeof ${v} === "number" ? Math.fround(Number(${v})) : __json_err("cannot unmarshal " + __json_type(${v}) + " into Go value of type float32"))`;
-				case "float64":
-					return (v) =>
-						`(typeof ${v} === "number" ? Number(${v}) : __json_err("cannot unmarshal " + __json_type(${v}) + " into Go value of type float64"))`;
-			}
+		if (base?.kind === "basic" && SCALAR_KINDS.has(base.name)) {
+			const display = this._jsonDisplayType(elemType);
+			return (v, rawExpr) =>
+				this._jsonScalarDecodeExpr(base.name, display, v, rawExpr);
 		}
 		if (elemType?.kind === "pointer" && elemType.base) {
 			const innerBase = unwrapNamed(elemType.base);
@@ -448,8 +707,8 @@ export const jsonMethods = {
 			}
 			if (innerBase?.kind === "basic") {
 				const basicDec = this._genElemDecoder(elemType.base);
-				return (v) =>
-					`(${v} === null ? null : (() => { var item = ${basicDec(v)}; return item && item._msg ? item : { value: item, __p: true }; })())`;
+				return (v, rawExpr) =>
+					`(${v} === null ? null : (() => { var item = ${basicDec(v, rawExpr)}; return item && item._msg ? item : { value: item, __p: true }; })())`;
 			}
 		}
 		if (base?.kind === "struct") {
@@ -474,41 +733,99 @@ export const jsonMethods = {
 		);
 		lines.push(`  if (typeof parsed !== "object" || Array.isArray(parsed)) {`);
 		lines.push(
-			`    return __json_err("cannot unmarshal " + __json_type(parsed) + " into Go value of type ${structName}");`,
+			`    return __json_err("cannot unmarshal " + __json_type(parsed) + " into " + __json_ctx(${JSON.stringify(this._jsonDisplayType(structType))}));`,
 		);
 		lines.push(`  }`);
+		// Go reports errors as "Go struct field <innermost struct>.<json key path>".
+		lines.push(`  __json_structs.push(${JSON.stringify(structName)});`);
+		lines.push(`  try {`);
 
 		for (const f of fields) {
 			const key = JSON.stringify(f.jsonKey);
+			const goName = JSON.stringify(f.goName);
 			lines.push(
-				`  if (Object.prototype.hasOwnProperty.call(parsed, ${key})) {`,
+				`  { var fieldKey = __json_match_field(parsed, ${key}, ${goName}); if (fieldKey !== null) {`,
 			);
-			lines.push(`    var val = parsed[${key}];`);
+			lines.push(`    __json_path.push(${key});`);
+			lines.push(`    try {`);
+			lines.push(`    var val = parsed[fieldKey];`);
+			lines.push(`    var raw = __json_raw_child(parsed, fieldKey);`);
+			const quotedKind = this._jsonQuotedKind(f);
+			if (quotedKind) {
+				const valueType = f.type?.kind === "pointer" ? f.type.base : f.type;
+				const typeStr = this._jsonDisplayType(valueType);
+				lines.push(
+					`    var q = __json_unquote(val, ${JSON.stringify(quotedKind)}, ${JSON.stringify(typeStr)}); if (q && q._msg) return q; val = q.v; raw = q.lit;`,
+				);
+			}
 			lines.push(`    if (val !== null) {`);
-			this._emitFieldDecoder(f, structName, lines);
+			this._emitFieldDecoder(f, structName, lines, "raw");
 			lines.push(`    } else {`);
-			this._emitFieldNull(f, lines);
+			this._emitFieldNull(f, lines, "raw");
 			lines.push(`    }`);
+			lines.push(`    } finally { __json_path.pop(); }`);
+			lines.push(`  }`);
 			lines.push(`  }`);
 		}
 
+		lines.push(`  } finally { __json_structs.pop(); }`);
 		lines.push(`  return null;`);
 		lines.push(`};`);
 		return lines.join("\n");
 	},
 
-	_emitFieldDecoder(f, structName, lines) {
+	_emitUnmarshalerField(f, lines, rawExpr) {
+		const isPtr = f.type?.kind === "pointer";
+		const valueType = isPtr ? f.type.base : f.type;
+		const info = this._jsonUnmarshalerInfo(valueType);
+		const bytes = `__json_raw_bytes(${rawExpr})`;
+		if (info.isStruct) {
+			lines.push(`      var sub = target.${f.goName};`);
+			lines.push(
+				`      if (!sub) { sub = new ${info.cls}(); target.${f.goName} = sub; }`,
+			);
+			lines.push(
+				`      var uerr = ${this._jsonUnmarshalCall(info, "sub", bytes)};`,
+			);
+		} else if (isPtr) {
+			lines.push(`      var sub = target.${f.goName};`);
+			lines.push(
+				`      if (!sub) { sub = { value: ${this.zeroValueForType(valueType)} }; target.${f.goName} = sub; }`,
+			);
+			lines.push(
+				`      var uerr = ${this._jsonUnmarshalCall(info, "sub", bytes)};`,
+			);
+		} else {
+			lines.push(
+				`      var addr = { get value() { return target.${f.goName}; }, set value(__v) { target.${f.goName} = __v; } };`,
+			);
+			lines.push(
+				`      var uerr = ${this._jsonUnmarshalCall(info, "addr", bytes)};`,
+			);
+		}
+		lines.push(`      if (uerr) return __json_user_err(uerr);`);
+		if (f.isEmbedded && info.isStruct) {
+			lines.push(`      Object.assign(target, sub);`);
+		}
+	},
+
+	_emitFieldDecoder(f, structName, lines, rawExpr) {
+		const valueType = f.type?.kind === "pointer" ? f.type.base : f.type;
+		if (this._jsonUnmarshalerInfo(valueType)) {
+			this._emitUnmarshalerField(f, lines, rawExpr);
+			return;
+		}
 		if (isRawMessageType(f.type)) {
 			lines.push(
-				`      var rawBytes = new TextEncoder().encode(JSON.stringify(val)); rawBytes.__raw = true;`,
+				`      var rawBytes = __json_raw_bytes(${rawExpr}); rawBytes.__raw = true;`,
 			);
 			this._emitAssign(f, "rawBytes", lines);
 			return;
 		}
 		if (isByteSliceType(f.type)) {
-			lines.push(
-				`      if (Array.isArray(val)) {\n        var u8arr = new Uint8Array(val.length);\n        for (var i = 0; i < val.length; i++) {\n          if (typeof val[i] !== "number") return __json_err("cannot unmarshal " + __json_type(val[i]) + " into Go struct field ${structName}.${f.goName} of type []byte");\n          u8arr[i] = Math.trunc(val[i]);\n        }\n        target.${f.goName} = u8arr;\n      } else if (typeof val === "string") {\n        var b64dec = __json_b64_dec(val); if (b64dec && b64dec._msg) return b64dec;\n        target.${f.goName} = b64dec;\n      } else if (val === null) {\n        target.${f.goName} = null;\n      } else {\n        return __json_err("cannot unmarshal " + __json_type(val) + " into Go struct field ${structName}.${f.goName} of type []byte");\n      }`,
-			);
+			lines.push(`      var u8v = __json_bytes_decode(val);`);
+			lines.push(`      if (u8v && u8v._msg) return u8v;`);
+			this._emitAssign(f, "u8v", lines);
 			return;
 		}
 
@@ -581,120 +898,31 @@ export const jsonMethods = {
 		this._emitAssign(f, "__json_dec_any(val)", lines);
 	},
 
-	_emitPointerBasicFieldDecoder(f, basicName, structName, lines) {
-		const typeName = f.type.base?.name ?? basicName;
-		switch (basicName) {
-			case "string":
-				lines.push(
-					`      if (typeof val !== "string") return __json_err("cannot unmarshal " + __json_type(val) + " into Go struct field ${structName}.${f.goName} of type *string");`,
-				);
-				this._emitAssign(f, "{ value: val, __p: true }", lines);
-				break;
-			case "bool":
-				lines.push(
-					`      if (typeof val !== "boolean") return __json_err("cannot unmarshal " + __json_type(val) + " into Go struct field ${structName}.${f.goName} of type *bool");`,
-				);
-				this._emitAssign(f, "{ value: val, __p: true }", lines);
-				break;
-			case "int":
-			case "int8":
-			case "int16":
-			case "int32":
-			case "uint":
-			case "uint8":
-			case "uint16":
-			case "uint32":
-			case "byte":
-			case "rune":
-				lines.push(
-					`      if (typeof val !== "number") return __json_err("cannot unmarshal " + __json_type(val) + " into Go struct field ${structName}.${f.goName} of type *${typeName}");`,
-				);
-				this._emitAssign(f, "{ value: Math.trunc(val), __p: true }", lines);
-				break;
-			case "int64":
-			case "uint64":
-				lines.push(
-					`      var bVal; if (typeof val === "string" && val.endsWith("__bigint")) bVal = BigInt(val.slice(0, -8)); else if (typeof val === "number") bVal = BigInt(Math.trunc(val)); else return __json_err("cannot unmarshal " + __json_type(val) + " into Go struct field ${structName}.${f.goName} of type *${typeName}");`,
-				);
-				this._emitAssign(f, "{ value: bVal, __p: true }", lines);
-				break;
-			case "float32":
-				lines.push(
-					`      if (typeof val !== "number") return __json_err("cannot unmarshal " + __json_type(val) + " into Go struct field ${structName}.${f.goName} of type *${typeName}");`,
-				);
-				this._emitAssign(
-					f,
-					"{ value: Math.fround(Number(val)), __p: true }",
-					lines,
-				);
-				break;
-			case "float64":
-				lines.push(
-					`      if (typeof val !== "number") return __json_err("cannot unmarshal " + __json_type(val) + " into Go struct field ${structName}.${f.goName} of type *${typeName}");`,
-				);
-				this._emitAssign(f, "{ value: Number(val), __p: true }", lines);
-				break;
+	// `*T` scalar fields: Go reports the element type in errors.
+	_emitPointerBasicFieldDecoder(f, basicName, _structName, lines) {
+		if (!SCALAR_KINDS.has(basicName)) {
+			this._emitAssign(f, "__json_dec_any(val)", lines);
+			return;
 		}
+		const display = this._jsonDisplayType(f.type.base);
+		lines.push(
+			`      var dv = ${this._jsonScalarDecodeExpr(basicName, display, "val", "raw")};`,
+		);
+		lines.push(`      if (dv && dv._msg) return dv;`);
+		this._emitAssign(f, "{ value: dv, __p: true }", lines);
 	},
 
-	_emitBasicFieldDecoder(f, basicName, structName, lines) {
-		const typeName = f.type.name ?? basicName;
-		switch (basicName) {
-			case "string":
-				lines.push(
-					`      if (typeof val !== "string") return __json_err("cannot unmarshal " + __json_type(val) + " into Go struct field ${structName}.${f.goName} of type string");`,
-				);
-				this._emitAssign(f, "val", lines);
-				break;
-			case "bool":
-				lines.push(
-					`      if (typeof val !== "boolean") return __json_err("cannot unmarshal " + __json_type(val) + " into Go struct field ${structName}.${f.goName} of type bool");`,
-				);
-				this._emitAssign(f, "val", lines);
-				break;
-			case "int":
-			case "int8":
-			case "int16":
-			case "int32":
-			case "uint":
-			case "uint8":
-			case "uint16":
-			case "uint32":
-			case "byte":
-			case "rune":
-				lines.push(
-					`      if (typeof val !== "number") return __json_err("cannot unmarshal " + __json_type(val) + " into Go struct field ${structName}.${f.goName} of type ${typeName}");`,
-				);
-				this._emitAssign(f, "Math.trunc(val)", lines);
-				break;
-			case "int64":
-			case "uint64":
-				lines.push(
-					`      if (typeof val === "string" && val.endsWith("__bigint")) {`,
-				);
-				this._emitAssign(f, "BigInt(val.slice(0, -8))", lines);
-				lines.push(`      } else if (typeof val === "number") {`);
-				this._emitAssign(f, "Math.trunc(val)", lines);
-				lines.push(
-					`      } else { return __json_err("cannot unmarshal " + __json_type(val) + " into Go struct field ${structName}.${f.goName} of type ${typeName}"); }`,
-				);
-				break;
-			case "float32":
-				lines.push(
-					`      if (typeof val !== "number") return __json_err("cannot unmarshal " + __json_type(val) + " into Go struct field ${structName}.${f.goName} of type ${typeName}");`,
-				);
-				this._emitAssign(f, "Math.fround(Number(val))", lines);
-				break;
-			case "float64":
-				lines.push(
-					`      if (typeof val !== "number") return __json_err("cannot unmarshal " + __json_type(val) + " into Go struct field ${structName}.${f.goName} of type ${typeName}");`,
-				);
-				this._emitAssign(f, "Number(val)", lines);
-				break;
-			default:
-				this._emitAssign(f, "__json_dec_any(val)", lines);
-				break;
+	_emitBasicFieldDecoder(f, basicName, _structName, lines) {
+		if (!SCALAR_KINDS.has(basicName)) {
+			this._emitAssign(f, "__json_dec_any(val)", lines);
+			return;
 		}
+		const display = this._jsonDisplayType(f.type);
+		lines.push(
+			`      var dv = ${this._jsonScalarDecodeExpr(basicName, display, "val", "raw")};`,
+		);
+		lines.push(`      if (dv && dv._msg) return dv;`);
+		this._emitAssign(f, "dv", lines);
 	},
 
 	_emitAssign(f, expr, lines) {
@@ -718,7 +946,20 @@ export const jsonMethods = {
 		lines.push(`      target.${f.goName} = ${expr};`);
 	},
 
-	_emitFieldNull(f, lines) {
+	_emitFieldNull(f, lines, rawExpr) {
+		// Go hands JSON null to UnmarshalJSON for non-pointer fields; nil pointers stay nil.
+		if (f.type?.kind !== "pointer" && this._jsonUnmarshalerInfo(f.type)) {
+			this._emitUnmarshalerField(f, lines, `"null"`);
+			return;
+		}
+		if (isRawMessageType(f.type)) {
+			lines.push(
+				`      var rawNull = __json_raw_bytes(${rawExpr}); rawNull.__raw = true;`,
+			);
+			this._emitAssign(f, "rawNull", lines);
+			return;
+		}
+		if (!isJsonNullAssignable(f.type)) return;
 		const path = f.path ?? [{ name: f.goName, isPtr: false }];
 		if (path.length === 1) {
 			lines.push(`      target.${f.goName} = null;`);

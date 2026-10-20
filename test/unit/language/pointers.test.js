@@ -305,6 +305,45 @@ func main() {
 	assertEqual(runJs(js), "42");
 });
 
+section(
+	"Address-taken variables from destructuring declarations and parameters",
+);
+
+test("address of variables declared together, by var, and of parameters", () => {
+	// Expected output captured from Go.
+	const { js, errors } = compile(`package main
+import "fmt"
+func pair() (int, int) { return 7, 8 }
+func bump(x int) int {
+	p := &x
+	*p += 1
+	return x
+}
+func main() {
+	a1, a2 := 1, 2
+	p := &a1
+	*p = 10
+	fmt.Println(a1, a2)
+	x1, x2 := pair()
+	q := &x2
+	*q += 100
+	fmt.Println(x1, x2)
+	var v1, v2 = 3, 4
+	r := &v2
+	*r = 40
+	fmt.Println(v1, v2)
+	var v = 3
+	pv := &v
+	*pv = 30
+	var a, b = pair()
+	pb := &b
+	*pb = 80
+	fmt.Println(v, a, b, bump(4))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), ["10 2", "7 108", "3 40", "30 7 80 5"].join("\n"));
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

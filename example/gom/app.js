@@ -123,6 +123,14 @@ var __ifps = __ifps || function(x) {
   }
   return x;
 };
+var __ifeq = __ifeq || function(a, b) {
+  if (a === b) return true;
+  if (a === null || a === undefined || b === null || b === undefined) return a == null && b == null;
+  if (typeof a === "object" && typeof b === "object" && a.constructor === b.constructor && typeof a.__gfUnbox === "function") {
+    return a.__gfUnbox() === b.__gfUnbox();
+  }
+  return false;
+};
 var __gopanic = __gopanic || { stack: [], armed: false };
 var __runDefers = __runDefers || function(defers, frame) {
   for (let i = defers.length - 1; i >= 0; i--) {
@@ -182,6 +190,7 @@ var __sprintf = __sprintf || function(f, ...a) {
       if (typeof val.Error === "function") {
         return String(val.Error());
       }
+      if (typeof val.__gfUnbox === "function") return formatV(val.__gfUnbox(), isPlus, isTopLevel);
       if (Array.isArray(val) || ArrayBuffer.isView(val)) {
         const isElemPtr = val.__ptr_slice === true;
         const pf = val.__ptr_fields;
@@ -263,7 +272,9 @@ var __sprintf = __sprintf || function(f, ...a) {
   return f.replace(/%([#+\- 0]*)([0-9]*)\.?([0-9]*)[sdvftxXqobeEgGwc%]/g, (m) => {
     if (m === "%%") return "%";
     const verb = m.slice(-1);
-    const v = a[i++];
+    let v = a[i++];
+    // Boxed named values format as their underlying value; Error() still applies to %v/%s/%q/%w.
+    if (v && typeof v.__gfUnbox === "function" && !(typeof v.Error === "function" && "vsqw".includes(verb))) v = v.__gfUnbox();
     const [, flags, width, prec] = m.match(/^%([#+\- 0]*)([0-9]*)\.?([0-9]*)/) || [];
     const zero = flags?.includes("0") && !flags?.includes("-");
     const pad = (s, w, z) => {
@@ -407,7 +418,7 @@ function setupEvents() {
   let app = document.querySelector("#app");
   app.addEventListener("click", function(e) {
     let action = e.target.getAttribute("data-action");
-    if (action == null || action === "") {
+    if (action == null || __ifeq(action, "")) {
       let btn = e.target.closest("[data-action]");
       if (btn == null) {
         return;
@@ -415,39 +426,40 @@ function setupEvents() {
       action = btn.getAttribute("data-action");
       e = __ifm({ "target": btn });
     }
-    switch (action) {
-      case "add":
+    const __sw1 = action;
+    switch (true) {
+      case __ifeq(__sw1, "add"):
       {
         submitInput();
         break;
       }
-      case "priority":
+      case __ifeq(__sw1, "priority"):
       {
         highPriority = !highPriority;
         render();
         break;
       }
-      case "delete":
+      case __ifeq(__sw1, "delete"):
       {
         removeTodo(Math.trunc(Number(e.target.getAttribute("data-todo-id"))));
         render();
         triggerSave();
         break;
       }
-      case "filter":
+      case __ifeq(__sw1, "filter"):
       {
         setFilter(Math.trunc(Number(e.target.getAttribute("data-filter"))));
         render();
         break;
       }
-      case "clear-completed":
+      case __ifeq(__sw1, "clear-completed"):
       {
         clearCompleted();
         render();
         triggerSave();
         break;
       }
-      case "filter-active":
+      case __ifeq(__sw1, "filter-active"):
       {
         setFilter(FilterActive);
         render();
@@ -456,12 +468,12 @@ function setupEvents() {
     }
   });
   app.addEventListener("keydown", function(e) {
-    if (e.target.matches(".todo-input") && e.key === "Enter") {
+    if (e.target.matches(".todo-input") && __ifeq(e.key, "Enter")) {
       submitInput();
     }
   });
   app.addEventListener("change", function(e) {
-    if (e.target.getAttribute("data-action") === "toggle") {
+    if (__ifeq(e.target.getAttribute("data-action"), "toggle")) {
       toggleTodo(Math.trunc(Number(e.target.getAttribute("data-todo-id"))));
       render();
       triggerSave();
