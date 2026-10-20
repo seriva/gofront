@@ -8,7 +8,13 @@ function formatValType(t) {
 		if (t.kind === "ref") {
 			const nullStr = t.nullable ? "null " : "";
 			const target =
-				t.typeIndex !== undefined ? `$t${t.typeIndex}` : (t.heapType ?? "any");
+				t.typeName !== undefined
+					? t.typeName.startsWith("$")
+						? t.typeName
+						: `$${t.typeName}`
+					: t.typeIndex !== undefined
+						? `$t${t.typeIndex}`
+						: (t.heapType ?? "any");
 			return `(ref ${nullStr}${target})`;
 		}
 	}
@@ -16,7 +22,11 @@ function formatValType(t) {
 }
 
 function formatTypeEntry(t, id) {
-	const typeId = id !== undefined ? ` $t${id}` : "";
+	const typeId = t.name
+		? ` ${t.name.startsWith("$") ? t.name : `$${t.name}`}`
+		: id !== undefined
+			? ` $t${id}`
+			: "";
 	if (t.form === "rec") {
 		const inners = t.types
 			.map(
@@ -26,6 +36,7 @@ function formatTypeEntry(t, id) {
 			.join("\n");
 		return `(rec\n${inners}\n  )`;
 	}
+	let body;
 	if (t.form === "struct") {
 		const fields = (t.fields ?? [])
 			.map((f) => {
@@ -33,19 +44,29 @@ function formatTypeEntry(t, id) {
 				return f.mutable ? `(field (mut ${inner}))` : `(field ${inner})`;
 			})
 			.join(" ");
-		return `(type${typeId} (struct ${fields}))`;
-	}
-	if (t.form === "array") {
+		body = fields ? `(struct ${fields})` : `(struct)`;
+	} else if (t.form === "array") {
 		const inner = formatValType(t.elemType ?? t.type);
 		const field = t.mutable ? `(mut ${inner})` : inner;
-		return `(type${typeId} (array ${field}))`;
+		body = `(array ${field})`;
+	} else {
+		// func
+		const params = (t.params ?? []).map(formatValType).join(" ");
+		const results = (t.results ?? []).map(formatValType).join(" ");
+		const paramStr = params ? ` (param ${params})` : "";
+		const resultStr = results ? ` (result ${results})` : "";
+		body = `(func${paramStr}${resultStr})`;
 	}
-	// func
-	const params = (t.params ?? []).map(formatValType).join(" ");
-	const results = (t.results ?? []).map(formatValType).join(" ");
-	const paramStr = params ? ` (param ${params})` : "";
-	const resultStr = results ? ` (result ${results})` : "";
-	return `(type${typeId} (func${paramStr}${resultStr}))`;
+
+	if (t.sub) {
+		const superStr = t.superType
+			? ` ${t.superType.startsWith("$") ? t.superType : `$${t.superType}`}`
+			: t.superTypeIndex !== undefined
+				? ` $t${t.superTypeIndex}`
+				: "";
+		return `(type${typeId} (sub${superStr} ${body}))`;
+	}
+	return `(type${typeId} ${body})`;
 }
 
 function formatInstruction(inst) {
@@ -169,12 +190,12 @@ function formatInstruction(inst) {
 			return `${op}${res}${catches ? ` ${catches}` : ""}`;
 		}
 		case "struct.new":
-			return `struct.new ${inst.typeIndex !== undefined ? `$t${inst.typeIndex}` : 0}`;
+			return `struct.new ${inst.typeName ? (inst.typeName.startsWith("$") ? inst.typeName : `$${inst.typeName}`) : inst.typeIndex !== undefined ? `$t${inst.typeIndex}` : 0}`;
 		case "struct.get":
 		case "struct.get_s":
 		case "struct.get_u":
 		case "struct.set":
-			return `${op} ${inst.typeIndex !== undefined ? `$t${inst.typeIndex}` : 0} ${inst.fieldIndex ?? 0}`;
+			return `${op} ${inst.typeName ? (inst.typeName.startsWith("$") ? inst.typeName : `$${inst.typeName}`) : inst.typeIndex !== undefined ? `$t${inst.typeIndex}` : 0} ${inst.fieldIndex ?? 0}`;
 		case "array.new":
 		case "array.new_default":
 		case "array.get":

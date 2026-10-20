@@ -2,7 +2,7 @@
 // Tests for WAT text generator.
 
 import { emitWat } from "../../../src/backend/wasm/wat.js";
-import { assert, section, test } from "../helpers.js";
+import { assert, compileWasm, section, test } from "../helpers.js";
 
 section("WASM WAT Writer");
 
@@ -122,4 +122,24 @@ test("Emits WAT for v128.const with partial bytes and integer extract_lane", () 
 	const wat = emitWat(mod);
 	assert(wat.includes("v128.const i32x4"), "WAT v128.const with short bytes");
 	assert(wat.includes("i32x4.extract_lane 0"), "WAT i32x4.extract_lane");
+});
+
+test("Emits WAT for module with *int containing $ptr_int and $box_int", () => {
+	const src = `//gofront:target wasm
+package main
+
+func f(x int) *int {
+	return &x
+}
+`;
+	const res = compileWasm(src, { emitWat: true });
+	assert(!res.errors || res.errors.length === 0, "No compile errors");
+	assert(
+		res.wat.includes("(type $ptr_int (sub"),
+		`WAT must contain (type $ptr_int (sub ...)), got:\n${res.wat}`,
+	);
+	assert(
+		res.wat.includes("(type $box_int (sub $ptr_int"),
+		`WAT must contain (type $box_int (sub $ptr_int ...)), got:\n${res.wat}`,
+	);
 });

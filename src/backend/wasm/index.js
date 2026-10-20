@@ -272,6 +272,7 @@ class ModuleEmitter {
 		this._openRec = null; // rec group receiving new types while structs are resolved
 
 		this.structTypes = new Map(); // name -> struct info
+		this.ptrTypes = new Map(); // key -> ptr supertype info
 		this.boxTypes = new Map(); // wType key -> box info
 		this.ifaceBoxTypes = new Map(); // key -> iface box info
 		this.arrayTypes = new Map(); // wType key -> array info
@@ -512,19 +513,53 @@ class ModuleEmitter {
 		return info;
 	}
 
+	getPtrType(goType) {
+		const key = goTypeKey(goType);
+		if (this.ptrTypes.has(key)) {
+			return this.ptrTypes.get(key);
+		}
+		const typeIndex = this._getTotalTypeCount();
+		const name = `$ptr_${key}`;
+		const typeEntry = {
+			form: "struct",
+			name,
+			sub: true,
+			fields: [],
+		};
+		this._pushType(typeEntry);
+		const ptrInfo = { key, name, typeIndex, typeEntry, goType };
+		this.ptrTypes.set(key, ptrInfo);
+		return ptrInfo;
+	}
+
 	getBoxType(goType) {
 		const key = goTypeKey(goType);
 		if (this.boxTypes.has(key)) {
 			return this.boxTypes.get(key);
 		}
+		const ptrInfo = this.getPtrType(goType);
 		const wType = toWasmType(goType, this.checker, this);
 		const typeIndex = this._getTotalTypeCount();
+		const name = `$box_${key}`;
 		const typeEntry = {
 			form: "struct",
+			name,
+			sub: true,
+			superType: ptrInfo.name,
+			superTypeIndex: ptrInfo.typeIndex,
 			fields: [{ type: wType, mutable: true }],
 		};
 		this._pushType(typeEntry);
-		const boxInfo = { key, typeIndex, typeEntry, wType, goType };
+		const boxInfo = {
+			key,
+			name,
+			typeIndex,
+			typeEntry,
+			ptrType: ptrInfo,
+			ptrTypeIndex: ptrInfo.typeIndex,
+			wType,
+			goType,
+		};
 		this.boxTypes.set(key, boxInfo);
 		return boxInfo;
 	}
