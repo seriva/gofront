@@ -30,6 +30,7 @@ import {
 	isInterfaceType,
 	isMapType,
 	isNonEmptyInterface,
+	isScalarType,
 	isSliceType,
 	isTestingT,
 	toWasmType,
@@ -4072,6 +4073,8 @@ function _checkSelectorAccessor(operand, currentFn, mod, checker, funcDecls) {
 	if (!path || path.length === 0) return;
 
 	const lastStep = path[path.length - 1];
+	if (!isScalarType(lastStep.field.goType, checker, mod)) return;
+
 	const h = mod.getStructAccessorHelpers(
 		lastStep.structInfo,
 		lastStep.fieldIndex,
@@ -4111,11 +4114,11 @@ function _checkIndexAccessor(operand, currentFn, mod, checker, funcDecls) {
 		: isPtrToArr
 			? baseType.base.elem
 			: baseType.elem;
-	if (elemGoType) {
-		const h = mod.getElemAccessorHelpers(elemGoType);
-		if (!funcDecls.includes(h.getterFn)) {
-			funcDecls.push(h.getterFn, h.setterFn);
-		}
+	if (!elemGoType || !isScalarType(elemGoType, checker, mod)) return;
+
+	const h = mod.getElemAccessorHelpers(elemGoType);
+	if (!funcDecls.includes(h.getterFn)) {
+		funcDecls.push(h.getterFn, h.setterFn);
 	}
 }
 

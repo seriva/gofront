@@ -360,3 +360,87 @@ func Main() int {
 	assertEqual(res.wasmRes, 11n);
 	assertEqual(res.jsRes, 11);
 });
+
+test("*p += 5 compound assignment on accessor ref to struct scalar field &s.X", () => {
+	const src = `
+package main
+
+type S struct {
+	X int
+	Y int
+}
+
+func Main() int {
+	s := S{X: 10, Y: 20}
+	p := &s.X
+	*p += 5
+	return s.X*100 + s.Y
+}
+`;
+	const hybrid = compileHybrid(src);
+	const res = hybrid.run("Main");
+	assertEqual(res.wasmRes, 1520n);
+	assertEqual(res.jsRes, 1520);
+});
+
+test("(*p)++ and (*p)-- increment/decrement on accessor ref to struct scalar field &s.X", () => {
+	const src = `
+package main
+
+type S struct {
+	X int
+	Y int
+}
+
+func Main() int {
+	s := S{X: 10, Y: 20}
+	p := &s.X
+	(*p)++
+	q := &s.Y
+	(*q)--
+	return s.X*100 + s.Y
+}
+`;
+	const hybrid = compileHybrid(src);
+	const res = hybrid.run("Main");
+	assertEqual(res.wasmRes, 1119n);
+	assertEqual(res.jsRes, 1119);
+});
+
+test("*p += 5 compound assignment on accessor ref to slice element &xs[1]", () => {
+	const src = `
+package main
+
+func Main() int {
+	xs := []int{10, 20, 30}
+	p := &xs[1]
+	*p += 5
+	return xs[0] + xs[1] + xs[2]
+}
+`;
+	const hybrid = compileHybrid(src);
+	const res = hybrid.run("Main");
+	assertEqual(res.wasmRes, 65n);
+	assertEqual(res.jsRes, 65);
+});
+
+test("&s.Slice takes address of struct slice field without invalid accessor ref", () => {
+	const src = `
+package main
+
+type S struct {
+	X     int
+	Slice []int
+}
+
+func Main() int {
+	s := S{X: 42, Slice: []int{1, 2, 3}}
+	p := &s.Slice
+	return s.X + len(*p) + (*p)[1]
+}
+`;
+	const hybrid = compileHybrid(src);
+	const res = hybrid.run("Main");
+	assertEqual(res.wasmRes, 47n);
+	assertEqual(res.jsRes, 47);
+});
