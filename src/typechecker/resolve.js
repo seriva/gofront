@@ -459,6 +459,7 @@ export const resolveMethods = {
 			case "namespace":
 				return this._fieldTypeNamespace(base, field, node);
 			case "shared":
+			case "simd":
 				if (base.methods?.has(field)) return base.methods.get(field);
 				return this.err(`No method '${field}' on ${typeStr(baseType)}`, node);
 			case "slice":

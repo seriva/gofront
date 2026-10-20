@@ -166,3 +166,130 @@ test("WasmGC struct and recursive rec groups validate", () => {
 	const bytes = encodeModule(mod);
 	assert(WebAssembly.validate(bytes), "GC rec group must pass validation");
 });
+
+section("WASM Encoder — SIMD (0xFD) Instructions");
+
+test("SIMD instruction encoding and execution (f32x4.splat, add, extract_lane)", () => {
+	// (func (export "add_simd") (result f32)
+	//   (f32x4.extract_lane 0
+	//     (f32x4.add
+	//       (f32x4.splat (f32.const 1.5))
+	//       (f32x4.splat (f32.const 2.5)))))
+	const mod = {
+		types: [{ form: "func", params: [], results: ["f32"] }],
+		funcs: [
+			{
+				typeIndex: 0,
+				locals: [],
+				body: [
+					{ op: "f32.const", value: 1.5 },
+					{ op: "f32x4.splat" },
+					{ op: "f32.const", value: 2.5 },
+					{ op: "f32x4.splat" },
+					{ op: "f32x4.add" },
+					{ op: "f32x4.extract_lane", lane: 0 },
+				],
+			},
+		],
+		exports: [{ name: "add_simd", kind: "func", index: 0 }],
+	};
+
+	const bytes = encodeModule(mod);
+	assert(
+		WebAssembly.validate(bytes),
+		"SIMD module must pass WebAssembly.validate()",
+	);
+	const instance = new WebAssembly.Instance(new WebAssembly.Module(bytes));
+	assertEqual(instance.exports.add_simd(), 4.0);
+});
+
+test("SIMD v128.const, replace_lane, and f32x4 arithmetic opcodes", () => {
+	// Tests LEB128 encoding of sub-opcodes > 127 (e.g. f32x4.add = 228 -> 0xE4 0x01)
+	const mod = {
+		types: [{ form: "func", params: [], results: ["f32"] }],
+		funcs: [
+			{
+				typeIndex: 0,
+				locals: ["v128"],
+				body: [
+					{ op: "v128.const", values: [1.0, 2.0, 3.0, 4.0] },
+					{ op: "f32.const", value: 10.0 },
+					{ op: "f32x4.replace_lane", lane: 2 },
+					{ op: "local.tee", index: 0 },
+					{ op: "local.get", index: 0 },
+					{ op: "f32x4.mul" },
+					{ op: "f32x4.extract_lane", lane: 2 },
+				],
+			},
+		],
+		exports: [{ name: "compute", kind: "func", index: 0 }],
+	};
+
+	const bytes = encodeModule(mod);
+	assert(
+		WebAssembly.validate(bytes),
+		"SIMD v128.const module must pass validation",
+	);
+	const instance = new WebAssembly.Instance(new WebAssembly.Module(bytes));
+	assertEqual(instance.exports.compute(), 100.0);
+});
+
+test("SIMD v128.load and v128.store encode with memarg", () => {
+	const mod = {
+		memory: { min: 1, max: 1 },
+		types: [{ form: "func", params: [], results: ["f32"] }],
+		funcs: [
+			{
+				typeIndex: 0,
+				locals: [],
+				body: [
+					// Store v128 at address 0
+					{ op: "i32.const", value: 0 },
+					{ op: "f32.const", value: 42.5 },
+					{ op: "f32x4.splat" },
+					{ op: "v128.store", align: 2, offset: 0 },
+					// Load back from address 0
+					{ op: "i32.const", value: 0 },
+					{ op: "v128.load", align: 2, offset: 0 },
+					{ op: "f32x4.extract_lane", lane: 1 },
+				],
+			},
+		],
+		exports: [{ name: "roundtrip", kind: "func", index: 0 }],
+	};
+
+	const bytes = encodeModule(mod);
+	assert(
+		WebAssembly.validate(bytes),
+		"SIMD load/store module must pass validation",
+	);
+	const instance = new WebAssembly.Instance(new WebAssembly.Module(bytes));
+	assertEqual(instance.exports.roundtrip(), 42.5);
+});
+
+test("SIMD integer extract and replace lane encoding (i32x4, i16x8, i8x16)", () => {
+	const mod = {
+		types: [{ form: "func", params: [], results: ["i32"] }],
+		funcs: [
+			{
+				typeIndex: 0,
+				locals: [],
+				body: [
+					{ op: "v128.const", bytes: new Array(16).fill(0) },
+					{ op: "i32.const", value: 123 },
+					{ op: "i32x4.replace_lane", lane: 2 },
+					{ op: "i32x4.extract_lane", lane: 2 },
+				],
+			},
+		],
+		exports: [{ name: "test_i32", kind: "func", index: 0 }],
+	};
+
+	const bytes = encodeModule(mod);
+	assert(
+		WebAssembly.validate(bytes),
+		"i32x4 extract/replace module must pass validation",
+	);
+	const instance = new WebAssembly.Instance(new WebAssembly.Module(bytes));
+	assertEqual(instance.exports.test_i32(), 123);
+});

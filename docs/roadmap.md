@@ -26,15 +26,31 @@ features (e.g. `docs/v0.0.5/`).
 
 ---
 
+## v1.7.1
+
+**Theme: SIMD Promotion, Zero-Runtime Stdlib & Hybrid Boundary Polish.** Vectorized particle and vertex pipelines with 4-wide Structure-of-Arrays (SoA) layouts (targeting ≥ 1.3× throughput gate), compile-time WASM interior pointer diagnostics, zero-runtime standard library additions (`net/url`, `bufio`, `context`), and JS ↔ WASM boundary slice optimizations. Design documents in [`docs/v1.7.1/simd-soa-plan.md`](v1.7.1/simd-soa-plan.md) and [`docs/v1.7.1/stdlib-safety-boundary-plan.md`](v1.7.1/stdlib-safety-boundary-plan.md).
+
+| Area | Difficulty | Status | Notes |
+|---|---|---|---|
+| SIMD 4-wide data pipelines | Medium | Planned | Vectorized transformations, SoA vertex/particle benchmarks targeting ≥ 1.3× throughput gate. |
+| JS ↔ WASM SIMD boundary transport | Medium | Planned | Zero-copy vector passing across the boundary without manual `shared.Float32` indexing. |
+| WASM interior pointer safety | Low | Planned | Reject `&s.Field` and `&arr[i]` in `wasm`/`both` packages with actionable diagnostics (WasmGC lacks interior pointers). |
+| `net/url` stdlib package | Medium | Planned | URL string parsing, query escaping/unescaping, and `url.Values` across JS and WASM. |
+| `bufio` stdlib package | Medium | Planned | In-memory buffered I/O (`Scanner`, `Reader`, `Writer`) over `io.Reader`/`io.Writer`. |
+| `context` stdlib package | Low | Planned | Cooperative cancellation and deadline tokens (`Context`, `WithCancel`, `WithTimeout`) for async and frontend workflows. |
+| Read-only boundary slice borrowing | Medium | Planned | Avoid element-wise cloning when lowering escape analysis proves slice parameter is neither retained nor mutated. |
+
+---
+
 ## v1.7.0
 
 **Theme: Typed data, typed JS libraries, faster math — without adding a runtime.** Compile-time `encoding/json` driven by struct tags (no `reflect`), TypeScript tuple returns mapped to Go multi-value results so React/Preact hooks work directly (`example/reactive` replaced by `example/preact`), and an opt-in `gofront/simd` package lowered to WASM `v128`, shipped only if it beats the scalar hybrid raycast by ≥ 1.3×. Design document in [`docs/v1.7.0/json-preact-simd-plan.md`](v1.7.0/json-preact-simd-plan.md).
 
 | Area | Difficulty | Status | Notes |
 |---|---|---|---|
-| `encoding/json` | Medium | Draft | Preserve struct tags; per-type generated encoders/decoders; Go-identical output and errors; JS packages only (diagnostic in wasm). |
-| `.d.ts` tuples & `example/preact` | Medium | Draft | `[A, B]` returns → `(A, B)`; vendored Preact TodoMVC replaces microtastic-based `example/reactive`. |
-| WASM SIMD (`gofront/simd`) | High | Draft | `F32x4` → `v128` in wasm, scalar fallback in js; `shared.Float32` load/store; go/no-go gate. |
+| `encoding/json` | Medium | ✅ Done | Preserved struct tags; per-type generated compile-time encoders/decoders; Go-identical formatting and errors; `RawMessage`, `Marshaler`, `Unmarshaler`; JS packages only (diagnostic in wasm). |
+| `.d.ts` tuples & `example/preact` | Medium | ✅ Done | TypeScript `[A, B]` returns → Go multi-value `(A, B)`; submodule vendor packaging (`preact/hooks`); TodoMVC reimplemented with function components and hooks; retired `example/reactive`. |
+| WASM SIMD (`gofront/simd`) | High | ✅ Experimental | `F32x4` → `v128` in wasm, scalar fallback in js; `shared.Float32` load/store; Binaryen feature integration. Raycast gate: 1.02× over scalar hybrid (below 1.30× threshold); groundwork retained as experimental, general promotion deferred to v1.7.1. |
 
 ---
 
