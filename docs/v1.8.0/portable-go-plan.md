@@ -509,7 +509,7 @@ Every task below is sized for one focused session and names the files it touches
 1. **Read** only the files under **Files** (plus the test helper). Do not refactor outside them.
 2. **Write the failing test** named under **Test** first. Negative tests assert the message with `assertErrorContains(errors, "…")`. A new test file must be added to `TEST_FILES` in [`test/unit/run.js`](../../test/unit/run.js).
 3. **Implement** until it passes. One file: `node test/unit/<dir>/<file>.test.js`. Everything: `npm test`.
-4. **Verify** the **Done when** line, run `npm run check`, tick the box in this file, and stop. One task per change; do not start the next one in the same diff.
+4. **Verify** the **Done when** line, run `npm run check`, tick the box in this file, and commit the task (`feat(<scope>): <task summary> (Task N.M)`). One task per git commit; do not combine multiple tasks in the same diff. In autonomous execution workflows (`/execute-plan`), proceed continuously to the next task in the phase without halting until the entire phase is complete and ready for the phase PR and code review.
 5. **Ask** when a step needs a decision this document does not make. Do not guess, and do not widen scope.
 
 Conventions used in the tasks:
