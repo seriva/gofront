@@ -1,7 +1,7 @@
 # GoFront v1.7.0 — Implementation Plan
 
 **Version:** v1.7.0
-**Status:** Draft (2026-10-19)
+**Status:** Complete (2026-10-20)
 **Depends on:** v1.6.1
 **Theme:** Typed data, typed JS libraries, faster math — without adding a runtime.
 
@@ -18,16 +18,17 @@ Three features, each held to the **no runtime** rule ([roadmap](../roadmap.md#ou
 ### Non-goals
 
 - Goroutines, channels, `select`. Out of scope by design: a userland scheduler is a runtime. Async stays `async`/`await` + Promises.
-- `reflect`, `json.Marshaler`/`Unmarshaler` interfaces, `json.Decoder`/`Encoder` streams.
-- `,string` tag directive (e.g. `json:",string"`) and cyclic object graph serialization.
+- `reflect`, `json.Decoder`/`Encoder` streams, `json.Number`, and typed error values (`*json.SyntaxError`, …).
+- Cyclic object graph serialization.
+- *(Originally also `json.Marshaler`/`Unmarshaler` and the `,string` tag option; both were added in Task 1.7.)*
 - Auto-vectorization of scalar code. SIMD is opt-in through `gofront/simd`.
 - `encoding/json` inside `wasm`/`both` packages. It gets a targeted diagnostic in 1.7.0. Asset and config loading lives in `js` packages already (simplefps `assets`).
 
 ### Success criteria
 
-- `json.Marshal`/`Unmarshal` output matches Go's `encoding/json` on the test corpus (key order, `omitempty`, `-`, `-,`, embedded fields, nil vs empty slices/maps, `RawMessage`, error messages).
+- `json.Marshal`/`Unmarshal` output matches Go's `encoding/json` on the test corpus (key order, `omitempty`, `-`, `-,`, embedded fields, nil vs empty slices/maps, exact `RawMessage` bytes, numeric range errors, error messages).
 - `example/preact` passes `shared.spec.js` + its own spec with vendored Preact and `preact/hooks`. No CDN fetches in CI.
-- SIMD ships only if the raycast benchmark shows **≥ 1.3×** over the scalar hybrid build. Otherwise it moves to v1.7.1 and the release ships without it.
+- SIMD promotion beyond experimental status requires the raycast benchmark to show **≥ 1.3×** over the scalar hybrid build. Otherwise retain the opt-in experimental API and defer general promotion.
 - All existing tests pass; `npm run check` clean; Sentrux layer architecture respected; quality not below the v1.6.1 baseline; `npm run bench` hybrid ≥ 11,500 rays/s.
 
 ---
@@ -77,9 +78,9 @@ Three features, each held to the **no runtime** rule ([roadmap](../roadmap.md#ou
   - `Unmarshal(data []byte, v any) error`:
     - `JSON.parse` once, then assigns into typed targets via generated decoder.
     - **Target check:** target must be a non-nil pointer; error `json: Unmarshal(non-pointer ...)` or `json: Unmarshal(nil ...)`.
-    - **Field matching:** exact tag match first, then exact field name. Case-insensitive fallback is skipped for bundle efficiency; unknown JSON keys are ignored.
-    - Numbers into `int*` truncate/coerce; into `any` become `float64`; JSON objects into `any` become `map[string]any`; JSON arrays into `any` become `[]any`.
-    - `json.RawMessage` targets receive the raw JSON slice bytes.
+    - **Field matching:** exact tag match first, then exact field name, then case-insensitive fallback; unknown JSON keys are ignored.
+    - Numbers into integer fields must be integral and in range; into `any` become `float64`; JSON objects into `any` become `map[string]any`; JSON arrays into `any` become `[]any`.
+    - `json.RawMessage` targets receive the original source bytes for the exact JSON value, including nested struct, slice, and map fields.
     - Error messages match Go shapes: `json: cannot unmarshal string into Go struct field T.x of type int`.
 - **WASM:** `json.*` in `wasm`/`both` packages reports `'json.Marshal' is not yet available in wasm packages` with hint to move to a `js` package.
 
@@ -91,6 +92,8 @@ Three features, each held to the **no runtime** rule ([roadmap](../roadmap.md#ou
 - [x] **Task 1.4** — JS codegen: memoized per-type encoder/decoder emission in `src/backend/js/stdlib/json.js` handling `RawMessage`, BigInt/int64, nil vs empty, and sorted keys.
 - [x] **Task 1.5** — WASM diagnostic for `json.*` in `wasm`/`both` packages.
 - [x] **Task 1.6** — Tests (`test/unit/builtins/json.test.js`): golden outputs matching real Go; malformed inputs; non-pointer/nil targets; nested/embedded structs; `map[string]T`; `RawMessage`; `[]byte` base64 vs `RawMessage` verbatim; `omitempty` zero-value checks.
+- [x] **Task 1.7** — Scope addition from the release documentation review (2026-10-20): `MarshalJSON` (value receivers on any named type; pointer receivers only on addressable values, as in Go; output validated, compacted and HTML-escaped; Go's `error calling MarshalJSON` messages), `UnmarshalJSON` (exact raw value bytes, `null` for non-pointer fields), the `,string` tag option, Go-identical decode error messages (number literal, JSON field path, element type; integer syntax and range checks for top-level targets and `[]byte` arrays), and a fix for pointer-to-scalar fields encoding as `NaN`/objects. Expected outputs captured from Go with `GOEXPERIMENT=nojsonv2` (go1.26 semantics).
+- [x] **Task 1.8** — Language fixes found by the same review, verified against Go output: named non-struct types with methods (raw values, static method dispatch, interface boxing, runtime-checked assertions and type switches, interface equality, `errors.Is`/`As`), runtime checks for assertions to interface types, boxing of address-taken variables from multi-variable declarations, `var` declarations and parameters, and Go's identical-underlying-type assignability for type literals.
 
 ---
 
@@ -160,8 +163,8 @@ Port the raycast benchmark's ray–triangle test to `F32x4` (Möller–Trumbore 
 - Speedup vs JS: 1.34×
 - Speedup vs scalar hybrid: **1.02×** (gate threshold was ≥ 1.30×)
 
-**Decision: NO-GO for general v1.7.0 stdlib promotion.**
-Octree node queries (`RayQueryLocal` and `IntersectRayAABB`) dominate runtime over per-triangle barycentric testing on 3-wide mesh data. The SIMD opcode encoding, Binaryen feature integration, `gofront/simd` type definitions, and lowering remain intact as experimental groundwork, while general stdlib promotion is deferred to v1.7.1 without blocking v1.7.0.
+**Decision: NO-GO for promotion beyond experimental status in v1.7.0.**
+Octree node queries (`RayQueryLocal` and `IntersectRayAABB`) dominate runtime over per-triangle barycentric testing on 3-wide mesh data. The SIMD opcode encoding, Binaryen feature integration, `gofront/simd` type definitions, and lowering remain available as an opt-in experimental API; general promotion was deferred to v1.7.1 and, after v1.7.1 was dropped, to [v1.8.0](../v1.8.0/portable-go-plan.md); it does not block the release.
 
 ### Tasks
 
@@ -187,13 +190,13 @@ Octree node queries (`RayQueryLocal` and `IntersectRayAABB`) dominate runtime ov
 
 | Risk | Mitigation |
 |---|---|
-| JSON edge cases diverge from Go (escaping, float formatting, embedding conflicts) | Golden files generated by real Go; float formatting via Go's `strconv` 'g'-shortest rules already used by `fmt` |
+| JSON edge cases diverge from Go (escaping, float formatting, embedding conflicts) | Golden files generated by real Go; float32 formatting uses shortest-round-trip digits and the `encoding/json` exponent thresholds |
 | `BigInt` serialization crash in JS | Codegen explicitly serializes 64-bit integers to JSON numeric literals without calling raw `JSON.stringify(bigint)` |
 | `RawMessage` base64 corruption | Generated encoder explicitly treats `RawMessage` as raw JSON bytes, bypassing standard `[]byte` base64 formatting |
 | Preact submodule export incompatibility | `src/vendor.js` supports entry points and explicit named exports mapping to window globals |
 | Tuple mapping allows invalid Go assignments | Typechecker enforces multi-value destination count matching Go compile rules |
 | WASM SIMD LEB128 encoding bugs | Explicit tests for multi-byte sub-opcodes (> 127) against Binaryen validation |
-| SIMD gain too small for 3-wide data | Go/no-go gate (≥ 1.3×); drops to v1.7.1 without blocking JSON/Preact |
+| SIMD gain too small for 3-wide data | Go/no-go gate (≥ 1.3×); promotion moves to a later release (now v1.8.0) without blocking JSON/Preact |
 | Sentrux architectural layering violation | Standalone stdlib modules located under `src/backend/` importing only allowed layer dependencies |
 
 ---

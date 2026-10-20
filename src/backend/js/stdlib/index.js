@@ -86,6 +86,12 @@ const dispatchMethods = {
 	// Dispatch table for stdlib namespace calls (pkg.Func → inline JS).
 	// Returns the generated JS string, or undefined if not handled.
 	_genStdlibCall(ns, fn, expr) {
+		// Stdlib shims take raw values; only fmt and errors use the interface box
+		// of a named value (Error() dispatch, error comparisons).
+		const isNamespace = expr.func?.expr?._type?.kind === "namespace";
+		if (isNamespace && ns !== "fmt" && ns !== "errors") {
+			for (const e of expr.args) if (e) e._noNamedBox = true;
+		}
 		const a = () => expr.args.map((e) => this.genExpr(e));
 		if (ns === "gom") return this._genGom(fn, expr);
 		const method = STDLIB_METHOD_MAP[ns];
