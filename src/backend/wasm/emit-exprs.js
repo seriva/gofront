@@ -1321,60 +1321,207 @@ export class ExprsEmitter {
 				}
 				break;
 
-			case "&": {
-				if (operand.kind === "Ident") {
-					const loc = this.resolveLocal(operand.name);
-					if (loc?.isBoxed) {
-						this.pushInstruction({ op: "local.get", index: loc.index });
-						return;
-					}
-				}
-				if (operand.kind === "CompositeLit") {
-					this.emitExpr(operand);
-					return;
-				}
-				const structInfo = this._resolveStructInfo(operand);
-				if (structInfo) {
-					this.emitExpr(operand);
-					return;
-				}
-				const opWType = this.toWasmType(operand._type);
-				const box = this.mod.getBoxType(operand._type);
-				this.emitExpr(operand, opWType);
-				this.pushInstruction({
-					op: "struct.new",
-					typeIndex: box.typeIndex,
-					typeName: box.name,
-				});
-				return;
-			}
+			case "&":
+				return this._emitAddressOf(operand);
 
-			case "*": {
-				const structInfo = this._resolveStructInfo(operand);
-				if (structInfo) {
-					const baseWType = this.toWasmType(operand._type);
-					this.emitExpr(operand, baseWType);
-					this.emitCloneStruct(structInfo, baseWType);
-					return;
-				}
-				const box = this.mod.getBoxType(operand._type?.base ?? operand._type);
-				const baseWType = {
-					kind: "ref",
-					nullable: true,
-					typeIndex: box.typeIndex,
-				};
-				this.emitExpr(operand, baseWType);
-				this.pushInstruction({
-					op: "struct.get",
-					typeIndex: box.typeIndex,
-					fieldIndex: 0,
-				});
-				return;
-			}
+			case "*":
+				return this._emitDerefExpr(operand);
 
 			default:
 				throw new Error(`Unsupported unary operator: ${op}`);
 		}
+	}
+
+	_emitSelectorAddressOf(operand) {
+		const baseStructInfo = this._resolveStructInfo(operand.expr);
+		if (!baseStructInfo) return false;
+		const path = this._resolveFieldPath(baseStructInfo, operand.field);
+		if (!path || path.length === 0) return false;
+
+		const lastStep = path[path.length - 1];
+		const baseWType = this.toWasmType(operand.expr._type);
+		this.emitExpr(operand.expr, baseWType);
+		for (let i = 0; i < path.length - 1; i++) {
+			this.pushInstruction({
+				op: "struct.get",
+				typeIndex: path[i].structInfo.typeIndex,
+				typeName: path[i].structInfo.name,
+				fieldIndex: path[i].fieldIndex,
+			});
+		}
+		const h = this.mod.getStructAccessorHelpers(
+			lastStep.structInfo,
+			lastStep.fieldIndex,
+		);
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		const getIdx = this.mod.resolveFuncIndex(h.getterName);
+		const setIdx = this.mod.resolveFuncIndex(h.setterName);
+		this.pushInstruction({ op: "ref.func", funcIndex: getIdx });
+		this.pushInstruction({ op: "ref.func", funcIndex: setIdx });
+		this.pushInstruction({
+			op: "struct.new",
+			typeIndex: h.accInfo.typeIndex,
+			typeName: h.accInfo.name,
+		});
+		return true;
+	}
+
+	_emitIndexAddressOf(operand) {
+		const baseNode = operand.expr;
+		const baseType = baseNode._type ?? this._resolveExprGoType(baseNode);
+		const isSlice = isSliceType(baseType, this.mod.checker);
+		const isArr = isArrayType(baseType, this.mod.checker);
+		const isPtrToArr =
+			baseType?.kind === "pointer" &&
+			isArrayType(baseType.base, this.mod.checker);
+		if (!isSlice && !isArr && !isPtrToArr) return false;
+
+		const elemGoType = isSlice
+			? baseType.elem
+			: isPtrToArr
+				? baseType.base.elem
+				: baseType.elem;
+		const arrInfo = this.mod.getArrayType(elemGoType);
+		const sliceInfo = isSlice ? this.mod.getSliceType(elemGoType) : null;
+		this._emitElemAddr(baseNode, operand.index, sliceInfo, arrInfo);
+		const h = this.mod.getElemAccessorHelpers(elemGoType);
+		const getIdx = this.mod.resolveFuncIndex(h.getterName);
+		const setIdx = this.mod.resolveFuncIndex(h.setterName);
+		this.pushInstruction({ op: "ref.func", funcIndex: getIdx });
+		this.pushInstruction({ op: "ref.func", funcIndex: setIdx });
+		this.pushInstruction({
+			op: "struct.new",
+			typeIndex: h.accInfo.typeIndex,
+			typeName: h.accInfo.name,
+		});
+		return true;
+	}
+
+	_emitAddressOf(operand) {
+		if (operand.kind === "Ident") {
+			const loc = this.resolveLocal(operand.name);
+			if (loc?.isBoxed) {
+				this.pushInstruction({ op: "local.get", index: loc.index });
+				return;
+			}
+		}
+		if (operand.kind === "CompositeLit") {
+			this.emitExpr(operand);
+			return;
+		}
+		const structInfo = this._resolveStructInfo(operand);
+		if (structInfo) {
+			this.emitExpr(operand);
+			return;
+		}
+		if (
+			operand.kind === "SelectorExpr" &&
+			this._emitSelectorAddressOf(operand)
+		) {
+			return;
+		}
+		if (operand.kind === "IndexExpr" && this._emitIndexAddressOf(operand)) {
+			return;
+		}
+		const opWType = this.toWasmType(operand._type);
+		const box = this.mod.getBoxType(operand._type);
+		this.emitExpr(operand, opWType);
+		this.pushInstruction({
+			op: "struct.new",
+			typeIndex: box.typeIndex,
+			typeName: box.name,
+		});
+	}
+
+	_emitDerefExpr(operand) {
+		const structInfo = this._resolveStructInfo(operand);
+		if (structInfo) {
+			const baseWType = this.toWasmType(operand._type);
+			this.emitExpr(operand, baseWType);
+			this.emitCloneStruct(structInfo, baseWType);
+			return;
+		}
+		const operandGoType =
+			operand._type ??
+			(operand.kind === "Ident"
+				? this.resolveLocal(operand.name)?.goType
+				: null) ??
+			this._resolveExprGoType(operand);
+		const baseGoType = operandGoType?.base ?? operandGoType;
+		const box = this.mod.getBoxType(baseGoType);
+		const ptr = this.mod.getPtrType(baseGoType);
+		const acc = this.mod.getAccType(baseGoType);
+		const ptrWType = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: ptr.typeIndex,
+			typeName: ptr.name,
+		};
+		const pTmp = this.acquireTemp(ptrWType);
+		this.emitExpr(operand, ptrWType);
+		this.pushInstruction({ op: "local.set", index: pTmp });
+		this.pushInstruction({ op: "local.get", index: pTmp });
+		this.pushInstruction({
+			op: "ref.test",
+			typeIndex: box.typeIndex,
+			typeName: box.name,
+		});
+		this.pushInstruction({ op: "if", blockType: box.wType });
+		this.pushInstruction({ op: "local.get", index: pTmp });
+		this.pushInstruction({
+			op: "ref.cast",
+			typeIndex: box.typeIndex,
+			typeName: box.name,
+		});
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: box.typeIndex,
+			typeName: box.name,
+			fieldIndex: 0,
+		});
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "local.get", index: pTmp });
+		this.pushInstruction({
+			op: "ref.cast",
+			typeIndex: acc.typeIndex,
+			typeName: acc.name,
+		});
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: acc.typeIndex,
+			typeName: acc.name,
+			fieldIndex: 0,
+		});
+		this.pushInstruction({ op: "local.get", index: pTmp });
+		this.pushInstruction({
+			op: "ref.cast",
+			typeIndex: acc.typeIndex,
+			typeName: acc.name,
+		});
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: acc.typeIndex,
+			typeName: acc.name,
+			fieldIndex: 1,
+		});
+		this.pushInstruction({ op: "local.get", index: pTmp });
+		this.pushInstruction({
+			op: "ref.cast",
+			typeIndex: acc.typeIndex,
+			typeName: acc.name,
+		});
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: acc.typeIndex,
+			typeName: acc.name,
+			fieldIndex: 2,
+		});
+		this.pushInstruction({
+			op: "call_ref",
+			typeIndex: acc.getFuncTypeIndex,
+		});
+		this.pushInstruction("end");
+		this.releaseTemp(pTmp, ptrWType);
 	}
 
 	emitBinaryExpr(expr, targetWasmType = null) {

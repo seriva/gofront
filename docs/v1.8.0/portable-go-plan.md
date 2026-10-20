@@ -531,7 +531,7 @@ Conventions used in the tasks:
   - Test: `npm test` (existing suite) and `test/unit/wasm/wat.test.js`: a module with `*int` contains `(type $ptr_int (sub …))` and `(type $box_int (sub $ptr_int …))`.
   - Done when: all existing tests pass and dev-mode `app.wasm` of `example/hybrid` changes only in the type section.
 
-- [ ] **Task 0.1b — Accessor refs for `&s.F` and `&xs[i]`**
+- [x] **Task 0.1b — Accessor refs for `&s.F` and `&xs[i]`**
   - Files: `src/backend/wasm/emit-exprs.js`, `src/backend/wasm/emit.js` (helper function emission), `src/backend/wasm/types.js`
   - Do: add the second subtype `$acc_T { anyref target, i32 index, ref $get_T, ref $set_T }`. `&s.F` (scalar `F`) emits `struct.new $acc_T` with a getter/setter pair generated once per (struct type, field); `&xs[i]` and `&arr[i]` bind the backing array and absolute index with one pair per element type. Struct-typed fields (`&s.Inner`) keep the direct struct reference.
   - Test: new `test/unit/wasm/pointers.test.js` — parity tests `set(&s.X, 7)`, `*(&xs[1]) = 9`, `&s.Inner.X`, `&arr[0].X`, `p := &xs[1]; xs = xs[1:]; *p = 9`.

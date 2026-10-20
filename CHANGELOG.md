@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **WASM accessor refs for fields and elements**: Added subtype `$acc_T` implementing scalar pointers to struct fields (`&s.F`) and slice/array elements (`&xs[i]`) with getter/setter helpers; updated dereference assignment (`*p = v`) to dispatch between box and accessor refs.
 - **WASM pointer type hierarchy**: Emitted abstract supertype `$ptr_T` with box struct `$box_T` as a subtype (`sub $ptr_T`) for scalar pointer types.
 
 ## [1.7.0] - 2026-10-20
