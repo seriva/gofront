@@ -24,8 +24,8 @@ import { join } from "node:path";
 import { GOFRONT_SECTION_BYTES, isGoFrontWasm } from "./encode.js";
 
 // Binaryen feature bitmask: GC (1024) | ReferenceTypes (256) | BulkMemory (16) | Multivalue (512) |
-// ExceptionHandling (64) | MutableGlobals (2) | NontrappingFPToInt (4) | TailCall (128) = 2006
-export const DEFAULT_WASM_FEATURES = 2006;
+// ExceptionHandling (64) | MutableGlobals (2) | NontrappingFPToInt (4) | TailCall (128) | SIMD (8) = 2014
+export const DEFAULT_WASM_FEATURES = 2014;
 
 let _nativeWasmOptAvailable = null;
 let _npmWasmOptPath = null;
@@ -98,6 +98,7 @@ function runWasmOpt(
 			"--enable-mutable-globals",
 			"--enable-nontrapping-float-to-int",
 			"--enable-tail-call",
+			"--enable-simd",
 		];
 		if (options.gufa !== false) {
 			args.push("--gufa");
@@ -141,6 +142,7 @@ function runWasmOpt(
 					"--enable-mutable-globals",
 					"--enable-nontrapping-float-to-int",
 					"--enable-tail-call",
+					"--enable-simd",
 					output,
 					"-S",
 					"-o",

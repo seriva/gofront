@@ -12,6 +12,7 @@ import { gomMethods } from "./gom.js";
 import { hexMethods } from "./hex.js";
 import { htmlMethods } from "./html.js";
 import { ioMethods } from "./io.js";
+import { jsonMethods } from "./json.js";
 import { mapsMethods } from "./maps.js";
 import { mathMethods } from "./math.js";
 import { osMethods } from "./os.js";
@@ -20,6 +21,7 @@ import { randMethods } from "./rand.js";
 import { regexpMethods } from "./regexp.js";
 import { sha256Methods } from "./sha256.js";
 import { sharedMethods } from "./shared.js";
+import { simdMethods } from "./simd.js";
 import { slicesMethods } from "./slices.js";
 import { sortMethods } from "./sort.js";
 import { strconvMethods } from "./strconv.js";
@@ -62,6 +64,8 @@ const STDLIB_METHOD_MAP = {
 	binary: "_genBinary",
 	hex: "_genHex",
 	base64: "_genBase64",
+	json: "_genJson",
+	simd: "_genSimd",
 };
 
 const dispatchMethods = {
@@ -82,6 +86,12 @@ const dispatchMethods = {
 	// Dispatch table for stdlib namespace calls (pkg.Func → inline JS).
 	// Returns the generated JS string, or undefined if not handled.
 	_genStdlibCall(ns, fn, expr) {
+		// Stdlib shims take raw values; only fmt and errors use the interface box
+		// of a named value (Error() dispatch, error comparisons).
+		const isNamespace = expr.func?.expr?._type?.kind === "namespace";
+		if (isNamespace && ns !== "fmt" && ns !== "errors") {
+			for (const e of expr.args) if (e) e._noNamedBox = true;
+		}
 		const a = () => expr.args.map((e) => this.genExpr(e));
 		if (ns === "gom") return this._genGom(fn, expr);
 		const method = STDLIB_METHOD_MAP[ns];
@@ -106,6 +116,7 @@ export const stdlibGenMethods = {
 	...randMethods,
 	...regexpMethods,
 	...sharedMethods,
+	...simdMethods,
 	...slicesMethods,
 	...sortMethods,
 	...strconvMethods,
@@ -119,5 +130,6 @@ export const stdlibGenMethods = {
 	...binaryMethods,
 	...hexMethods,
 	...base64Methods,
+	...jsonMethods,
 	...dispatchMethods,
 };

@@ -1,6 +1,7 @@
 // Type resolution methods — resolveTypeNode, resolveType, fieldType, generics.
 // Installed as a mixin on TypeChecker.prototype.
 
+import { parseJsonTag } from "../parser/struct-tag.js";
 import {
 	ANY,
 	BASIC_TYPES,
@@ -209,10 +210,28 @@ export const resolveMethods = {
 	_resolveStructType(node, scope) {
 		const fields = new Map();
 		const embeds = [];
+		const structFields = [];
 		for (const f of node.fields) {
 			const ft = this.resolveTypeNode(f.type, scope);
+			structFields.push({
+				names: f.names,
+				type: ft,
+				tag: f.tag ?? null,
+				embedded: Boolean(f.embedded),
+				astType: f.type,
+			});
 			if (f.embedded) {
-				const base = ft.kind === "named" ? ft.underlying : ft;
+				const inner = ft.kind === "pointer" ? ft.base : ft;
+				const embedName = (
+					f.astType?.name ??
+					f.type?.name ??
+					f.type?.base?.name ??
+					(inner.kind === "named" ? inner.name : "")
+				)
+					.split(".")
+					.pop();
+				if (embedName) fields.set(embedName, ft);
+				const base = inner.kind === "named" ? inner.underlying : inner;
 				if (base?.kind === "struct") {
 					for (const [k, v] of base.fields.entries()) fields.set(k, v);
 				}
@@ -221,7 +240,13 @@ export const resolveMethods = {
 				for (const n of f.names) fields.set(n, ft);
 			}
 		}
-		return { kind: "struct", fields, methods: new Map(), _embeds: embeds };
+		return {
+			kind: "struct",
+			fields,
+			methods: new Map(),
+			_embeds: embeds,
+			_structFields: structFields,
+		};
 	},
 
 	_resolveInterfaceType(node, scope) {
@@ -434,6 +459,7 @@ export const resolveMethods = {
 			case "namespace":
 				return this._fieldTypeNamespace(base, field, node);
 			case "shared":
+			case "simd":
 				if (base.methods?.has(field)) return base.methods.get(field);
 				return this.err(`No method '${field}' on ${typeStr(baseType)}`, node);
 			case "slice":
@@ -537,4 +563,127 @@ export const resolveMethods = {
 		}
 		return this.err(`No member '${field}' in namespace ${base.name}`, node);
 	},
+
+	resolveJsonFields(structType) {
+		return resolveJsonFields(structType);
+	},
 };
+
+function isExported(name) {
+	if (!name || typeof name !== "string") return false;
+	const code = name.charCodeAt(0);
+	return code >= 65 && code <= 90;
+}
+
+function _processJsonField(f, depth, path, visited, queue, candidates) {
+	const tagInfo = parseJsonTag(f.tag);
+	if (tagInfo.ignored) return;
+
+	if (f.embedded) {
+		const isPtr = f.type.kind === "pointer" || f.type.kind === "PointerType";
+		const inner = isPtr ? f.type.base : f.type;
+		const embedStruct = inner.kind === "named" ? inner.underlying : inner;
+		const embedName = (
+			f.astType?.name ??
+			f.astType?.base?.name ??
+			inner.name ??
+			""
+		)
+			.split(".")
+			.pop();
+
+		if (tagInfo.name !== null) {
+			if (isExported(embedName)) {
+				candidates.push({
+					jsonKey: tagInfo.name,
+					goName: embedName,
+					type: f.type,
+					omitempty: tagInfo.omitempty,
+					depth,
+					tagged: true,
+					isEmbedded: true,
+					path: [...path, { name: embedName, isPtr, typeName: embedName }],
+				});
+			}
+		} else if (embedStruct?.kind === "struct") {
+			if (!visited.has(embedStruct)) {
+				const nextVisited = new Set(visited);
+				nextVisited.add(embedStruct);
+				queue.push({
+					struct: embedStruct,
+					depth: depth + 1,
+					path: [...path, { name: embedName, isPtr, typeName: embedName }],
+					visited: nextVisited,
+				});
+			}
+		}
+		return;
+	}
+
+	for (const name of f.names) {
+		if (!isExported(name)) continue;
+		candidates.push({
+			jsonKey: tagInfo.name !== null ? tagInfo.name : name,
+			goName: name,
+			type: f.type,
+			omitempty: tagInfo.omitempty,
+			quoted: tagInfo.options.includes("string"),
+			depth,
+			tagged: tagInfo.name !== null,
+			path: [...path, { name, isPtr: false }],
+		});
+	}
+}
+
+function _resolveCandidateCollisions(candidates) {
+	const byKey = new Map();
+	for (const cand of candidates) {
+		if (!byKey.has(cand.jsonKey)) byKey.set(cand.jsonKey, []);
+		byKey.get(cand.jsonKey).push(cand);
+	}
+
+	const winningFields = [];
+	for (const [, group] of byKey.entries()) {
+		let minDepth = Infinity;
+		for (const c of group) {
+			if (c.depth < minDepth) minDepth = c.depth;
+		}
+
+		const atMin = group.filter((c) => c.depth === minDepth);
+		if (atMin.length === 1) {
+			winningFields.push(atMin[0]);
+		} else {
+			const tagged = atMin.filter((c) => c.tagged);
+			if (tagged.length === 1) winningFields.push(tagged[0]);
+		}
+	}
+
+	winningFields.sort((a, b) => candidates.indexOf(a) - candidates.indexOf(b));
+	return winningFields;
+}
+
+export function resolveJsonFields(structType) {
+	if (!structType) return [];
+	const underlying =
+		structType.kind === "named" ? structType.underlying : structType;
+	if (underlying?.kind !== "struct") return [];
+	if (underlying._jsonFields) return underlying._jsonFields;
+
+	const queue = [
+		{ struct: underlying, depth: 0, path: [], visited: new Set([underlying]) },
+	];
+	const candidates = [];
+
+	while (queue.length > 0) {
+		const { struct: curr, depth, path, visited } = queue.shift();
+		if (curr?.kind !== "struct") continue;
+
+		for (const f of curr._structFields || []) {
+			_processJsonField(f, depth, path, visited, queue, candidates);
+		}
+	}
+
+	const winning = _resolveCandidateCollisions(candidates);
+	underlying._jsonFields = winning;
+	return winning;
+}

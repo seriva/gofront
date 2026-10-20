@@ -98,6 +98,43 @@ function formatInstruction(inst) {
 		case "i32.store8":
 		case "i32.store16":
 			return inst.offset ? `${op} offset=${inst.offset}` : op;
+		case "v128.load":
+		case "v128.store": {
+			const parts = [op];
+			if (inst.offset) parts.push(`offset=${inst.offset}`);
+			if (inst.align !== undefined) parts.push(`align=${1 << inst.align}`);
+			return parts.join(" ");
+		}
+		case "v128.const": {
+			if (inst.values && inst.values.length === 4) {
+				return `${op} f32x4 ${inst.values.join(" ")}`;
+			}
+			if (inst.bytes) {
+				const b = new Uint8Array(16);
+				b.set(inst.bytes.slice(0, 16));
+				const dv = new DataView(b.buffer);
+				return `${op} i32x4 ${dv.getInt32(0, true)} ${dv.getInt32(4, true)} ${dv.getInt32(8, true)} ${dv.getInt32(12, true)}`;
+			}
+			return `${op} i32x4 0 0 0 0`;
+		}
+		case "i8x16.shuffle": {
+			const lanes = (inst.lanes ?? inst.indices ?? []).slice(0, 16);
+			while (lanes.length < 16) lanes.push(0);
+			return `${op} ${lanes.join(" ")}`;
+		}
+		case "i8x16.extract_lane_s":
+		case "i8x16.extract_lane_u":
+		case "i8x16.replace_lane":
+		case "i16x8.extract_lane_s":
+		case "i16x8.extract_lane_u":
+		case "i16x8.replace_lane":
+		case "i32x4.extract_lane":
+		case "i32x4.replace_lane":
+		case "i64x2.extract_lane":
+		case "i64x2.replace_lane":
+		case "f32x4.extract_lane":
+		case "f32x4.replace_lane":
+			return `${op} ${inst.lane ?? inst.index ?? 0}`;
 		case "i32.const":
 		case "i64.const":
 			return `${op} ${inst.value ?? 0}`;

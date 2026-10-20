@@ -41,8 +41,10 @@ import {
 	HELPER_ERROR_JOIN,
 	HELPER_HEX,
 	HELPER_IFACE_BOX,
+	HELPER_IFEQ,
 	HELPER_INJECT_STYLES,
 	HELPER_IO_EOF,
+	HELPER_JSON,
 	HELPER_LEN,
 	HELPER_NIL_CALL,
 	HELPER_PANIC,
@@ -51,6 +53,7 @@ import {
 	HELPER_S,
 	HELPER_SCLONE,
 	HELPER_SHA256,
+	HELPER_SIMD,
 	HELPER_SORT_SLICE,
 	HELPER_SPRINTF,
 	HELPER_STRCONV,
@@ -116,6 +119,7 @@ const HELPER_MAP = [
 	["sclone", HELPER_SCLONE],
 	["ifaceBox", HELPER_IFACE_BOX],
 	["equal", HELPER_EQUAL],
+	["ifeq", HELPER_IFEQ],
 	["cmul", HELPER_CMUL],
 	["cdiv", HELPER_CDIV],
 	["panicRt", HELPER_PANIC],
@@ -141,6 +145,8 @@ const HELPER_MAP = [
 	["binary", HELPER_BINARY],
 	["hex", HELPER_HEX],
 	["base64", HELPER_BASE64],
+	["json", HELPER_JSON],
+	["simd", HELPER_SIMD],
 ];
 
 export class CodeGen {
@@ -168,6 +174,7 @@ export class CodeGen {
 		this._srcMappings = []; // { genLine, srcLine, srcFileIdx } for source map
 		this._currentSrcFileIdx = 0; // updated as each top-level decl is generated
 		this._boxedVars = new Set(); // address-taken scalar variables that need boxing
+		this._jsonCodecs = new Map(); // memoized JSON encoders and decoders
 		// Runtime helper usage tracking — only emit helpers that are actually used
 		this._helpers = new Set();
 		// Per-function context for Go value semantics (see _withFnCtx)
@@ -273,6 +280,7 @@ export class CodeGen {
 		this._emitTypeDecls(program, methods);
 		this._emitVarConstDecls(program);
 		const initNames = this._emitFuncDecls(program);
+		this._emitJsonCodecs();
 		this._callInitAndMain(initNames, program, isTest);
 		const prependedLines = this._prependHelpers(isTest);
 		return this._finalizeOutput(prependedLines);
@@ -457,9 +465,13 @@ export class CodeGen {
 			name === "pathError" ||
 			name === "ioEOF" ||
 			name === "base64" ||
-			name === "hex"
+			name === "hex" ||
+			name === "json"
 		) {
 			this._helpers.add("error");
+		}
+		if (name === "json") {
+			this.useHelper("base64");
 		}
 		if (name === "binary") {
 			this.useHelper("ioEOF");
@@ -533,29 +545,61 @@ export class CodeGen {
 
 	genNamedTypeClass(name, methodDecls) {
 		const namedType = this.checker?.types.get(name);
-		const underlying = namedType?.underlying;
-		let field, ctorDefault;
-		if (underlying?.kind === "func") {
-			field = "_fn";
-			ctorDefault = "null";
-		} else if (underlying?.kind === "map") {
-			field = "_map";
-			ctorDefault = "{}";
-		} else {
-			field = "_items";
-			ctorDefault = "[]";
-		}
+		const field = this._namedBoxField(namedType?.underlying);
+		// Values of the type stay raw (number, string, array, map, function); the
+		// class is only the box used when a value is stored in an interface.
+		// Methods are static (`T.$M(recv, ...)`) so raw values can call them.
 		this.line(`class ${name} {`);
 		this.indented(() => {
-			this.line(
-				`constructor(${field} = ${ctorDefault}) { this.${field} = ${field}; }`,
-			);
+			this.line(`constructor(${field}) { this.${field} = ${field}; }`);
+			this.line(`__gfUnbox() { return this.${field}; }`);
 			for (const m of methodDecls) {
 				this.blank();
-				this.genMethod(m, field);
+				this.genMethod(m, { staticNamed: true });
+				if (!m.recvPointer) {
+					this.line(
+						`${m.name}(...__a) { return ${name}.$${m.name}(this.${field}, ...__a); }`,
+					);
+				}
 			}
 		});
 		this.line("}");
+		// Box for *T in an interface. It also proxies `.value` to the pointer, so
+		// helpers that write through a pointer argument (errors.As, json.Unmarshal)
+		// keep working. Pointer methods get the { value } box, value methods its value.
+		this.line(`class ${name}$Ptr {`);
+		this.indented(() => {
+			this.line("constructor(_p) { this._p = _p; }");
+			this.line("__gfUnbox() { return this._p; }");
+			this.line("get value() { return this._p.value; }");
+			this.line("set value(v) { this._p.value = v; }");
+			for (const m of methodDecls) {
+				const recv = m.recvPointer ? "this._p" : "this._p.value";
+				this.line(
+					`${m.name}(...__a) { return ${name}.$${m.name}(${recv}, ...__a); }`,
+				);
+			}
+		});
+		this.line("}");
+	}
+
+	_namedBoxField(underlying) {
+		if (underlying?.kind === "func") return "_fn";
+		if (underlying?.kind === "map") return "_map";
+		return "_items";
+	}
+
+	// Box/dispatch info for a named non-struct type with methods, or null.
+	_namedBoxInfo(type) {
+		if (type?.kind !== "named") return null;
+		const u = type.underlying;
+		if (!u || u.kind === "struct" || u.kind === "interface") return null;
+		const methods = type.methods ?? type._generic?.methods;
+		if (!methods || methods.size === 0) return null;
+		if (![...methods.values()].some((m) => Object.hasOwn(m ?? {}, "_ptrRecv")))
+			return null;
+		const cls = this._dequalify(type.name).replace(/\[.*$/, "");
+		return { cls, field: this._namedBoxField(u), methods };
 	}
 
 	_collectStructFields(name, structTypeAst) {
@@ -663,6 +707,14 @@ export class CodeGen {
 		}
 	}
 
+	_emitJsonCodecs() {
+		if (!this._jsonCodecs || this._jsonCodecs.size === 0) return;
+		for (const [, code] of this._jsonCodecs) {
+			this.line(code);
+			this.blank();
+		}
+	}
+
 	_genSingleEmbedStubs(embed, declared) {
 		const embedName = embed.kind === "named" ? embed.name : null;
 		if (!embedName) return;
@@ -688,34 +740,43 @@ export class CodeGen {
 		}
 	}
 
-	genMethod(decl, recvField = null) {
+	genMethod(decl, opts = null) {
 		const prevFileIdx = this._currentSrcFileIdx;
 		if (decl._srcFileIdx != null) this._currentSrcFileIdx = decl._srcFileIdx;
-		const params = decl.params.map((p) => p.name).join(", ");
-		const asyncPrefix = decl.async ? "async " : "";
-		this.line(`${asyncPrefix}${decl.name}(${params}) {`, decl._line ?? null);
+		const staticNamed = Boolean(opts?.staticNamed);
+		const recvParam =
+			decl.recvName && decl.recvName !== "_" ? decl.recvName : "__recv";
+		this.line(
+			this._methodSignature(decl, staticNamed, recvParam),
+			decl._line ?? null,
+		);
 		const prevBoxed = this._boxedVars;
 		this._boxedVars = new Set();
 		this._scanAddressTaken(decl.body);
-		const prevUnwrapped = this._unwrappedRecv;
 		this._withFnCtx(decl.body, () =>
 			this.indented(() => {
-				if (decl.recvName && decl.recvName !== "_") {
-					if (recvField) {
-						this.line(`const ${decl.recvName} = this.${recvField};`);
-						this._unwrappedRecv = decl.recvName;
-					} else {
-						this.line(`const ${decl.recvName} = ${this._receiverValue(decl)};`);
-					}
+				if (!staticNamed && decl.recvName && decl.recvName !== "_") {
+					this.line(`const ${decl.recvName} = ${this._receiverValue(decl)};`);
+				}
+				if (staticNamed && this._boxedVars.has(recvParam)) {
+					this.line(`${recvParam} = { value: ${recvParam} };`);
 				}
 				this._emitParamCopies(decl.params);
 				this._withNamedReturns(decl, () => this._genBody(decl.body, decl));
 			}),
 		);
-		this._unwrappedRecv = prevUnwrapped;
 		this._boxedVars = prevBoxed;
 		this.line("}");
 		this._currentSrcFileIdx = prevFileIdx;
+	}
+
+	// Static methods of named non-struct types take the receiver as first parameter.
+	_methodSignature(decl, staticNamed, recvParam) {
+		const params = decl.params.map((p) => p.name);
+		const asyncPrefix = decl.async ? "async " : "";
+		if (!staticNamed)
+			return `${asyncPrefix}${decl.name}(${params.join(", ")}) {`;
+		return `static ${asyncPrefix}$${decl.name}(${[recvParam, ...params].join(", ")}) {`;
 	}
 
 	// Value receivers are copies in Go; only materialize the copy when the body mutates it.
@@ -733,19 +794,10 @@ export class CodeGen {
 		return "this";
 	}
 
-	// Returns the wrapper field name ("_fn", "_items", "_map") if `type` is a named
-	// non-struct type emitted as a wrapper class, or null otherwise.
-	// Pass `expr` so we can skip unwrapping when the expression is the method receiver
-	// (which was already unwrapped to `this.<field>` at the top of the method body).
-	_namedWrapperField(type, expr = null) {
-		if (type?.kind !== "named") return null;
-		if (!this.namedWrapperNames.has(type.name)) return null;
-		if (expr?.kind === "Ident" && expr.name === this._unwrappedRecv)
-			return null;
-		const u = type.underlying;
-		if (u?.kind === "func") return "_fn";
-		if (u?.kind === "map") return "_map";
-		return "_items";
+	// Named non-struct values are kept raw in the JS backend, so there is no
+	// wrapper field to unwrap any more; kept for call-site compatibility.
+	_namedWrapperField(_type, _expr = null) {
+		return null;
 	}
 
 	// ── Function declarations ────────────────────────────────────
@@ -859,8 +911,35 @@ export class CodeGen {
 	}
 
 	// Scan AST node for _addressTaken idents on scalars and populate _boxedVars.
+	// A pointer-receiver method call on a named non-struct local (`l.Set(5)`)
+	// takes the variable's address too, so the variable must be boxed.
 	_scanAddressTaken(node) {
 		scanAddressTaken(node, this._boxedVars);
+		const visit = (n) => {
+			if (!n || typeof n !== "object") return;
+			if (Array.isArray(n)) {
+				for (const item of n) visit(item);
+				return;
+			}
+			if (n.kind === "CallExpr" && n.func?.kind === "SelectorExpr") {
+				const recv = n.func.expr;
+				if (
+					recv?.kind === "Ident" &&
+					this._namedPtrMethodOn(recv._type, n.func.field)
+				)
+					this._boxedVars.add(recv.name);
+			}
+			for (const key of Object.keys(n)) {
+				if (key.startsWith("_") || key === "kind") continue;
+				visit(n[key]);
+			}
+		};
+		visit(node);
+	}
+
+	_namedPtrMethodOn(type, method) {
+		const info = this._namedBoxInfo(type);
+		return Boolean(info?.methods.get(method)?._ptrRecv);
 	}
 
 	_isReferenceType(t) {
@@ -891,12 +970,7 @@ export class CodeGen {
 					}
 					return js;
 				});
-				if (spec.names.length === 1) {
-					this.line(`let ${spec.names[0]} = ${vals[0]};`);
-				} else {
-					// let [a, b] = [v1, v2]
-					this.line(`let [${spec.names.join(", ")}] = [${vals.join(", ")}];`);
-				}
+				this._emitVarBindings(spec.names, vals, paired);
 			} else {
 				const zero = spec.type ? this.zeroValueForTypeNode(spec.type) : "null";
 				for (const name of spec.names) {
@@ -906,6 +980,20 @@ export class CodeGen {
 				}
 			}
 		}
+	}
+
+	// `var a = v` / `var a, b = v1, v2` / `var a, b = f()`, boxing address-taken names.
+	_emitVarBindings(names, vals, paired) {
+		if (names.length === 1) {
+			const val = this._boxedVars.has(names[0])
+				? `{ value: ${vals[0]} }`
+				: vals[0];
+			this.line(`let ${names[0]} = ${val};`);
+			return;
+		}
+		const rhs = paired ? `[${vals.join(", ")}]` : vals[0];
+		this.line(`let [${names.join(", ")}] = ${rhs};`);
+		this._boxDeclaredNames(names);
 	}
 
 	genConstDecl(decl) {
