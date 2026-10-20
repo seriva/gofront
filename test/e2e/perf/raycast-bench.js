@@ -111,6 +111,7 @@ function optimiseWasm(wasm) {
 			"--enable-nontrapping-float-to-int",
 			"--enable-bulk-memory",
 			"--enable-tail-call",
+			"--enable-simd",
 			input,
 			"-o",
 			output,
@@ -121,14 +122,15 @@ function optimiseWasm(wasm) {
 	}
 }
 
-// ── Compile both variants ────────────────────────────────────────
+// ── Compile variants ─────────────────────────────────────────────
 // Each variant gets its own copy of the fixture: the JS-only one with the
-// `//gofront:target` directives stripped so every package lands in JS.
-function compileVariant(forceJs, options = {}) {
+// `//gofront:target` directives stripped so every package lands in JS, and
+// the SIMD variant with RayPointInTriangle ported to gofront/simd.
+function compileVariant(mode, options = {}) {
 	const dir = mkdtempSync(join(tmpdir(), "gofront-raycast-"));
 	try {
 		cpSync(FIXTURE, dir, { recursive: true });
-		if (forceJs) {
+		if (mode === "js" || mode === true) {
 			for (const pkg of readdirSync(dir)) {
 				for (const f of readdirSync(join(dir, pkg))) {
 					const p = join(dir, pkg, f);
@@ -138,6 +140,52 @@ function compileVariant(forceJs, options = {}) {
 					);
 				}
 			}
+		} else if (mode === "simd") {
+			const rayPath = join(dir, "collision", "ray.go");
+			let content = readFileSync(rayPath, "utf8");
+			content = content.replace(
+				'import "../mathx"',
+				'import (\n\t"gofront/simd"\n\t"../mathx"\n)',
+			);
+			const oldRayPointInTri = `func RayPointInTriangle(p, a, b, c *mathx.Vec3) bool {
+	_itV0.Sub(c, a)
+	_itV1.Sub(b, a)
+	_itV2.Sub(p, a)
+
+	dot00 := _itV0.Dot(&_itV0)
+	dot01 := _itV0.Dot(&_itV1)
+	dot02 := _itV0.Dot(&_itV2)
+	dot11 := _itV1.Dot(&_itV1)
+	dot12 := _itV1.Dot(&_itV2)
+
+	u := dot11*dot02 - dot01*dot12
+	v := dot00*dot12 - dot01*dot02
+	denom := dot00*dot11 - dot01*dot01
+	return u >= 0 && v >= 0 && (u+v) <= denom
+}`;
+			const newRayPointInTri = `func RayPointInTriangle(p, a, b, c *mathx.Vec3) bool {
+	pa := simd.F32x4{a.X, a.Y, a.Z, 0}
+	pb := simd.F32x4{b.X, b.Y, b.Z, 0}
+	pc := simd.F32x4{c.X, c.Y, c.Z, 0}
+	pp := simd.F32x4{p.X, p.Y, p.Z, 0}
+
+	v0 := pc.Sub(pa)
+	v1 := pb.Sub(pa)
+	v2 := pp.Sub(pa)
+
+	dot00 := v0.Dot3(v0)
+	dot01 := v0.Dot3(v1)
+	dot02 := v0.Dot3(v2)
+	dot11 := v1.Dot3(v1)
+	dot12 := v1.Dot3(v2)
+
+	u := dot11*dot02 - dot01*dot12
+	v := dot00*dot12 - dot01*dot02
+	denom := dot00*dot11 - dot01*dot01
+	return u >= 0 && v >= 0 && (u+v) <= denom
+}`;
+			content = content.replace(oldRayPointInTri, newRayPointInTri);
+			writeFileSync(rayPath, content);
 		}
 		return compileDir(join(dir, "collision"), options);
 	} finally {
@@ -147,8 +195,8 @@ function compileVariant(forceJs, options = {}) {
 
 // The facade awaits WASM instantiation at top level, so the bundle must be an
 // ES module; `__GOFRONT_WASM_BYTES` short-circuits the loader's fetch.
-async function loadVariant(forceJs) {
-	const compiled = compileVariant(forceJs);
+async function loadVariant(mode) {
+	const compiled = compileVariant(mode);
 	const js = compiled.js;
 	const wasm = optimiseWasm(compiled.wasm);
 	const dir = mkdtempSync(join(tmpdir(), "gofront-raycast-"));
@@ -244,8 +292,8 @@ const median = (xs) => {
 	return s[s.length >> 1];
 };
 
-async function bench(label, forceJs, mesh, rays) {
-	const { api, wasmBytes } = await loadVariant(forceJs);
+async function bench(label, mode, mesh, rays) {
+	const { api, wasmBytes } = await loadVariant(mode);
 	const { NewTrimesh, NewRay, Vec3, RayModeClosest } = api;
 
 	const t0 = performance.now();
@@ -326,10 +374,12 @@ if (SIZES && (args.length === 1 || (args.length === 2 && JSON_OUT))) {
 const mesh = buildMesh();
 const rays = buildRays();
 const results = [];
-if (MODE === "js" || MODE === "both")
-	results.push(await bench("js", true, mesh, rays));
-if (MODE === "hybrid" || MODE === "both")
-	results.push(await bench("hybrid", false, mesh, rays));
+if (MODE === "js" || MODE === "both" || MODE === "all")
+	results.push(await bench("js", "js", mesh, rays));
+if (MODE === "hybrid" || MODE === "both" || MODE === "all")
+	results.push(await bench("hybrid", "hybrid", mesh, rays));
+if (MODE === "simd" || MODE === "all")
+	results.push(await bench("simd", "simd", mesh, rays));
 
 for (const r of results) {
 	if (r.hits !== RAYS) {
@@ -362,10 +412,22 @@ if (JSON_OUT) {
 			`${r.label.padEnd(8)} ${fmt(r.raysPerSec).padStart(10)}   ${fmt(r.ms, 1).padStart(7)}   ${(`${fmt(r.allocBytes)} B`).padStart(10)}   ${(`${fmt(r.allocPerRay, 3)} B`).padStart(9)}   ${fmt(r.buildMs, 0).padStart(8)}   ${r.wasmBytes ? `${fmt(r.wasmBytes / 1024, 1)} KB` : "-"}`,
 		);
 	}
-	if (results.length === 2) {
-		const [js, hy] = results;
+	const js = results.find((r) => r.label === "js");
+	const hy = results.find((r) => r.label === "hybrid");
+	const si = results.find((r) => r.label === "simd");
+	if (js && hy) {
 		console.log(
 			`speedup  ${(hy.raysPerSec / js.raysPerSec).toFixed(2)}× (hybrid vs js)`,
+		);
+	}
+	if (hy && si) {
+		console.log(
+			`speedup  ${(si.raysPerSec / hy.raysPerSec).toFixed(2)}× (simd vs hybrid)`,
+		);
+	}
+	if (js && si) {
+		console.log(
+			`speedup  ${(si.raysPerSec / js.raysPerSec).toFixed(2)}× (simd vs js)`,
 		);
 	}
 	if (SIZES) {

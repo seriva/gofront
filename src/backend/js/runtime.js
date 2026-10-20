@@ -131,6 +131,17 @@ export const HELPER_NIL_CALL = `var __nilcall = __nilcall || function(x) {
   return x;
 };`;
 
+// Interface equality: named non-struct values are boxed in interfaces, so two
+// boxes are equal when they share a type and hold the same value (as in Go).
+export const HELPER_IFEQ = `var __ifeq = __ifeq || function(a, b) {
+  if (a === b) return true;
+  if (a === null || a === undefined || b === null || b === undefined) return a == null && b == null;
+  if (typeof a === "object" && typeof b === "object" && a.constructor === b.constructor && typeof a.__gfUnbox === "function") {
+    return a.__gfUnbox() === b.__gfUnbox();
+  }
+  return false;
+};`;
+
 export const HELPER_EQUAL = `var __equal = __equal || function __equal(a, b) {
   if (a === b) return true;
   if (a === null || b === null) return false;
@@ -227,6 +238,7 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
       if (typeof val.Error === "function") {
         return String(val.Error());
       }
+      if (typeof val.__gfUnbox === "function") return formatV(val.__gfUnbox(), isPlus, isTopLevel);
       if (Array.isArray(val) || ArrayBuffer.isView(val)) {
         const isElemPtr = val.__ptr_slice === true;
         const pf = val.__ptr_fields;
@@ -308,7 +320,9 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
   return f.replace(/%([#+\\- 0]*)([0-9]*)\\.?([0-9]*)[sdvftxXqobeEgGwc%]/g, (m) => {
     if (m === "%%") return "%";
     const verb = m.slice(-1);
-    const v = a[i++];
+    let v = a[i++];
+    // Boxed named values format as their underlying value; Error() still applies to %v/%s/%q/%w.
+    if (v && typeof v.__gfUnbox === "function" && !(typeof v.Error === "function" && "vsqw".includes(verb))) v = v.__gfUnbox();
     const [, flags, width, prec] = m.match(/^%([#+\\- 0]*)([0-9]*)\\.?([0-9]*)/) || [];
     const zero = flags?.includes("0") && !flags?.includes("-");
     const pad = (s, w, z) => {
@@ -382,6 +396,9 @@ export const HELPER_IO_EOF = `var __io_eof = __io_eof || __error("EOF");`;
 export const HELPER_ERROR_IS = `var __errorIs = __errorIs || function __errorIs(err, target) {
   if (err === null || err === undefined) return false;
   if (err === target) return true;
+  if (typeof err === "object" && typeof target === "object" && target !== null &&
+      typeof err.__gfUnbox === "function" && err.constructor === target.constructor &&
+      err.__gfUnbox() === target.__gfUnbox()) return true;
   if (typeof err === "object" && typeof target === "object" &&
       err._msg !== undefined && target._msg !== undefined &&
       err._msg === target._msg) return true;
@@ -407,7 +424,7 @@ export const HELPER_ERROR_IS = `var __errorIs = __errorIs || function __errorIs(
   return false;
 };`;
 
-export const HELPER_ERROR_AS = `var __errorAs = __errorAs || function(err, target, matcher) {
+export const HELPER_ERROR_AS = `var __errorAs = __errorAs || function(err, target, matcher, extract) {
   if (err === null || err === undefined || target === null || typeof target !== "object") return false;
   let cur = err;
   while (cur !== null && cur !== undefined) {
@@ -415,7 +432,7 @@ export const HELPER_ERROR_AS = `var __errorAs = __errorAs || function(err, targe
     if (typeof cur.As === "function" && cur.As(target)) return true;
     if (matcher ? matcher(unboxed) : (unboxed !== err && typeof unboxed === "object" && !("_msg" in unboxed && "_cause" in unboxed))) {
       if ("value" in target) {
-        target.value = unboxed;
+        target.value = extract ? extract(unboxed) : unboxed;
       } else {
         Object.assign(target, unboxed);
       }
@@ -423,17 +440,17 @@ export const HELPER_ERROR_AS = `var __errorAs = __errorAs || function(err, targe
     }
     if (Array.isArray(cur._errs)) {
       for (const sub of cur._errs) {
-        if (__errorAs(sub, target, matcher)) return true;
+        if (__errorAs(sub, target, matcher, extract)) return true;
       }
     }
     if (typeof cur.Unwrap === "function") {
       const unwrapped = cur.Unwrap();
       if (Array.isArray(unwrapped)) {
         for (const sub of unwrapped) {
-          if (__errorAs(sub, target, matcher)) return true;
+          if (__errorAs(sub, target, matcher, extract)) return true;
         }
       } else if (unwrapped !== null && unwrapped !== undefined) {
-        if (__errorAs(unwrapped, target, matcher)) return true;
+        if (__errorAs(unwrapped, target, matcher, extract)) return true;
       }
     }
     cur = cur?._cause ?? null;
@@ -1325,3 +1342,550 @@ var __base64_std = __base64_std || __base64_make("ABCDEFGHIJKLMNOPQRSTUVWXYZabcd
 var __base64_url = __base64_url || __base64_make("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_", "=");
 var __base64_raw_std = __base64_raw_std || __base64_make("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/", "");
 var __base64_raw_url = __base64_raw_url || __base64_make("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_", "");`;
+
+export const HELPER_JSON = `var __json_esc = __json_esc || function(s) {
+  if (typeof s !== "string") s = String(s);
+  return JSON.stringify(s)
+    .replace(/[<>&]/g, function(c) {
+      return c === "<" ? "\\\\u003c" : (c === ">" ? "\\\\u003e" : "\\\\u0026");
+    })
+    .replace(/\\u2028/g, "\\\\u2028")
+    .replace(/\\u2029/g, "\\\\u2029");
+};
+var __json_err = __json_err || function(msg) {
+  return typeof __error === "function" ? __error("json: " + msg) : new Error("json: " + msg);
+};
+// Decode error context, as in Go: innermost struct being decoded plus the path
+// of JSON field names from the root. Reset by every __json_unmarshal call.
+var __json_structs = __json_structs || [];
+var __json_path = __json_path || [];
+var __json_ctx = __json_ctx || function(typeName) {
+  if (__json_path.length > 0 && __json_structs.length > 0) {
+    return "Go struct field " + __json_structs[__json_structs.length - 1] + "." + __json_path.join(".") + " of type " + typeName;
+  }
+  return "Go value of type " + typeName;
+};
+// The JSON source text of a number, for "cannot unmarshal number <literal>" messages.
+var __json_lit = __json_lit || function(v, raw) {
+  if (raw !== undefined && raw !== null) return String(raw).trim();
+  return typeof v === "string" ? v.replace(/__bigint$/, "") : String(v);
+};
+var __json_float_decode = __json_float_decode || function(v, bits, ctxType, raw) {
+  var n = __json_number_value(v);
+  if (typeof n !== "number") return __json_err("cannot unmarshal " + __json_type(v) + " into " + __json_ctx(ctxType));
+  var f = bits === 32 ? Math.fround(n) : n;
+  if (!isFinite(f)) return __json_err("cannot unmarshal number " + __json_lit(v, raw) + " into " + __json_ctx(ctxType));
+  return f;
+};
+// []byte accepts a base64 string or (like Go) an array of uint8 values.
+var __json_bytes_decode = __json_bytes_decode || function(v) {
+  if (Array.isArray(v)) {
+    var u8 = new Uint8Array(v.length);
+    for (var i = 0; i < v.length; i++) {
+      var b = __json_int_decode(v[i], "uint8", "uint8", __json_raw_child(v, i));
+      if (b && b._msg) return b;
+      u8[i] = b;
+    }
+    return u8;
+  }
+  if (typeof v !== "string") return __json_err("cannot unmarshal " + __json_type(v) + " into " + __json_ctx("[]uint8"));
+  return __json_b64_dec(v);
+};
+var __json_esc_noh = __json_esc_noh || function(s) {
+  return JSON.stringify(String(s)).replace(/\\u2028/g, "\\\\u2028").replace(/\\u2029/g, "\\\\u2029");
+};
+var __json_syntax_msg = __json_syntax_msg || function(s) {
+  var t = String(s).trim();
+  if (t === "") return "unexpected end of JSON input";
+  var m;
+  try { JSON.parse(t); } catch (e) { m = String(e && e.message); }
+  if (m && /end of JSON input|Unterminated/.test(m)) return "unexpected end of JSON input";
+  var pos = m && /after JSON at position (\\d+)/.exec(m);
+  if (pos) return "invalid character '" + t[Number(pos[1])] + "' after top-level value";
+  if ("{[\\"-0123456789tfn".indexOf(t[0]) < 0) return "invalid character '" + t[0] + "' looking for beginning of value";
+  return "invalid character in JSON value";
+};
+// Validates and compacts JSON text, escaping <, >, & and U+2028/U+2029 inside strings.
+var __json_compact = __json_compact || function(s) {
+  try { JSON.parse(s); } catch (e) { return null; }
+  var out = "", inStr = false, esc = false;
+  for (var i = 0; i < s.length; i++) {
+    var c = s[i];
+    if (inStr) {
+      if (esc) { esc = false; out += c; continue; }
+      if (c === "\\\\") { esc = true; out += c; continue; }
+      if (c === '"') inStr = false;
+      if (c === "<") out += "\\\\u003c";
+      else if (c === ">") out += "\\\\u003e";
+      else if (c === "&") out += "\\\\u0026";
+      else if (c === "\\u2028") out += "\\\\u2028";
+      else if (c === "\\u2029") out += "\\\\u2029";
+      else out += c;
+      continue;
+    }
+    if (c === '"') { inStr = true; out += c; continue; }
+    if (c === " " || c === "\\t" || c === "\\n" || c === "\\r") continue;
+    out += c;
+  }
+  return out;
+};
+var __json_marshaler_out = __json_marshaler_out || function(res, typeName) {
+  var err = res && res[1];
+  if (err) throw new Error("json: error calling MarshalJSON for type " + typeName + ": " + (typeof err.Error === "function" ? err.Error() : String(err)));
+  var b = res ? res[0] : null;
+  var s = b === null || b === undefined ? "" : (typeof b === "string" ? b : new TextDecoder().decode(b));
+  var c = __json_compact(s);
+  if (c === null) throw new Error("json: error calling MarshalJSON for type " + typeName + ": " + __json_syntax_msg(s));
+  return c;
+};
+// Keeps user errors returned by UnmarshalJSON intact while fitting the decoders'
+// "_msg"-tagged error protocol; __json_unmarshal unwraps __userErr.
+var __json_user_err = __json_user_err || function(e) {
+  if (e && e._msg !== undefined) return e;
+  return { _msg: e && typeof e.Error === "function" ? e.Error() : String(e), __userErr: e };
+};
+// Decodes the JSON string payload of a ,string field. Returns { v } or an error.
+var __json_unquote = __json_unquote || function(val, kind, typeStr) {
+  if (val === null) return { v: null, lit: "null" };
+  if (typeof val !== "string" || val.endsWith("__bigint")) {
+    return __json_err("invalid use of ,string struct tag, trying to unmarshal unquoted value into " + typeStr);
+  }
+  var invalid = function() {
+    return __json_err("invalid use of ,string struct tag, trying to unmarshal " + JSON.stringify(val) + " into " + typeStr);
+  };
+  var inner;
+  try { inner = JSON.parse(__json_preserve_int64(val)); } catch (e) {
+    if (kind !== "string" && kind !== "bool" && /^-?[0-9]/.test(val)) return __json_err("cannot unmarshal number " + val + " into " + __json_ctx(typeStr));
+    return invalid();
+  }
+  if (inner === null) return { v: null, lit: val };
+  if (kind === "string") return typeof inner === "string" ? { v: inner, lit: val } : invalid();
+  if (kind === "bool") return typeof inner === "number" ? invalid() : { v: inner, lit: val };
+  return typeof inner === "boolean" ? invalid() : { v: inner, lit: val };
+};
+var __json_type = __json_type || function(v) {
+  if (v === null) return "null";
+  if (Array.isArray(v)) return "array";
+  var t = typeof v;
+  if (t === "number" || t === "bigint") return "number";
+  if (t === "string") return "string";
+  if (t === "boolean") return "bool";
+  if (t === "object") return "object";
+  return t;
+};
+var __json_raw_index = __json_raw_index || new WeakMap();
+var __json_parse_raw_node = __json_parse_raw_node || function(s) {
+  var i = 0;
+  function ws() { while (i < s.length && /[\\t\\n\\r ]/.test(s[i])) i++; }
+  function stringEnd() {
+    i++;
+    while (i < s.length) {
+      if (s[i] === "\\\\") i += 2;
+      else if (s[i++] === '"') break;
+    }
+  }
+  function value() {
+    ws();
+    var start = i;
+    var node = { children: null };
+    if (s[i] === "{") {
+      i++;
+      node.children = new Map();
+      ws();
+      while (s[i] !== "}") {
+        var keyStart = i;
+        stringEnd();
+        var key = JSON.parse(s.slice(keyStart, i));
+        ws();
+        i++;
+        var child = value();
+        node.children.set(key, child);
+        ws();
+        if (s[i] === ",") { i++; ws(); }
+        else break;
+      }
+      i++;
+    } else if (s[i] === "[") {
+      i++;
+      node.children = new Map();
+      ws();
+      var index = 0;
+      while (s[i] !== "]") {
+        node.children.set(String(index++), value());
+        ws();
+        if (s[i] === ",") { i++; ws(); }
+        else break;
+      }
+      i++;
+    } else if (s[i] === '"') {
+      stringEnd();
+    } else {
+      while (i < s.length && !/[\\t\\n\\r ,}\\]]/.test(s[i])) i++;
+    }
+    node.raw = s.slice(start, i);
+    return node;
+  }
+  return value();
+};
+var __json_bind_raw = __json_bind_raw || function(value, node) {
+  if (value === null || typeof value !== "object" || !node?.children) return;
+  __json_raw_index.set(value, node.children);
+  for (const [key, child] of node.children) __json_bind_raw(value[key], child);
+};
+var __json_raw_child = __json_raw_child || function(parent, key) {
+  return __json_raw_index.get(parent)?.get(String(key))?.raw;
+};
+var __json_raw_bytes = __json_raw_bytes || function(raw) {
+  return new TextEncoder().encode(raw ?? "null");
+};
+var __json_match_field = __json_match_field || function(obj, tagName, fieldName) {
+  if (Object.prototype.hasOwnProperty.call(obj, tagName)) return tagName;
+  if (Object.prototype.hasOwnProperty.call(obj, fieldName)) return fieldName;
+  var tagFold = tagName.toLowerCase();
+  var fieldFold = fieldName.toLowerCase();
+  for (const key of Object.keys(obj)) {
+    var keyFold = key.toLowerCase();
+    if (keyFold === tagFold || keyFold === fieldFold) return key;
+  }
+  return null;
+};
+var __json_float32 = __json_float32 || function(v) {
+  var f = Math.fround(v);
+  if (!isFinite(f)) throw new Error("json: unsupported value: " + f);
+  if (Object.is(f, -0)) return "-0";
+  var candidate;
+  for (var precision = 1; precision <= 9; precision++) {
+    candidate = f.toPrecision(precision);
+    if (Math.fround(Number(candidate)) === f) break;
+  }
+  var n = Number(candidate);
+  var expText = n.toExponential();
+  var match = /e([+-]?)(\\d+)$/.exec(expText);
+  var exponent = Number(match[2]) * (match[1] === "-" ? -1 : 1);
+  if (exponent < -6 || exponent >= 21) {
+    var mantissa = expText.slice(0, expText.indexOf("e"));
+    var sign = exponent >= 0 ? "+" : "-";
+    return mantissa + "e" + sign + String(Math.abs(exponent));
+  }
+  return n.toString();
+};
+var __json_number_value = __json_number_value || function(v) {
+  return typeof v === "string" && v.endsWith("__bigint") ? Number(v.slice(0, -8)) : v;
+};
+var __json_int_decode = __json_int_decode || function(v, typeName, ctxType, raw) {
+  var type = typeof v === "string" && v.endsWith("__bigint") ? "number" : __json_type(v);
+  var fail = function() {
+    return __json_err("cannot unmarshal " + (type === "number" ? "number " + __json_lit(v, raw) : type) + " into " + __json_ctx(ctxType));
+  };
+  if (type !== "number") return fail();
+  // Go parses integers with strconv.ParseInt: "1.0" and "1e2" are not integers.
+  if (raw !== undefined && raw !== null && !/^-?(0|[1-9][0-9]*)$/.test(String(raw).trim())) return fail();
+  var integer;
+  var signed = typeName === "int" || typeName.startsWith("int");
+  if (typeName === "int64" || typeName === "uint64") {
+    if (typeof v === "string" && v.endsWith("__bigint")) {
+      try { integer = BigInt(v.slice(0, -8)); } catch (_) {}
+    } else if (typeof v === "number" && Number.isSafeInteger(v)) {
+      integer = BigInt(v);
+    }
+    if (integer !== undefined) {
+      var min64 = typeName === "int64" ? -(1n << 63n) : 0n;
+      var max64 = typeName === "int64" ? (1n << 63n) - 1n : (1n << 64n) - 1n;
+      if (integer >= min64 && integer <= max64) return typeof v === "number" ? v : integer;
+    }
+    return fail();
+  }
+  if (typeof v === "number" && Number.isSafeInteger(v)) {
+    if (typeName === "int") return v;
+    var bits = typeName === "uint" ? 53 : Number(typeName.replace(/^(u?int|byte|rune)/, ""));
+    if (!bits) bits = typeName === "byte" ? 8 : typeName === "rune" ? 32 : 53;
+    var min = signed ? -(2 ** (bits - 1)) : 0;
+    var max = signed ? (2 ** (bits - 1)) - 1 : (2 ** bits) - 1;
+    if (v >= min && v <= max) return v;
+  }
+  return fail();
+};
+var __json_b64 = __json_b64 || function(u8) {
+  if (u8 === null || u8 === undefined) return "null";
+  if (typeof __base64_std !== "undefined") return '"' + __base64_std.EncodeToString(u8) + '"';
+  var bstr = "";
+  for (var i = 0; i < u8.length; i++) bstr += String.fromCharCode(u8[i]);
+  return '"' + (typeof btoa !== "undefined" ? btoa(bstr) : Buffer.from(u8).toString("base64")) + '"';
+};
+var __json_b64_dec = __json_b64_dec || function(str) {
+  if (typeof __base64_std !== "undefined") {
+    var res = __base64_std.DecodeString(str);
+    if (!res[1]) return res[0];
+  }
+  var bin = typeof atob !== "undefined" ? atob(str) : Buffer.from(str, "base64").toString("binary");
+  var u8 = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return u8;
+};
+var __json_is_zero = __json_is_zero || function(val, isStruct) {
+  if (isStruct) return false;
+  if (val === null || val === undefined || val === false || val === 0 || val === "") return true;
+  if (typeof val === "bigint") return val === 0n;
+  if (Array.isArray(val) || (ArrayBuffer.isView(val) && !val.__raw)) return val.length === 0;
+  if (val instanceof Map) return val.size === 0;
+  if (val && val.__map) return Object.keys(val).filter(function(k) { return !k.startsWith("__"); }).length === 0;
+  return false;
+};
+var __json_preserve_int64 = __json_preserve_int64 || function(str) {
+  return str.replace(/"(?:\\\\.|[^"\\\\])*"|(?<=[,:\\[{\\s]|^)(-?\\d{16,})(?=[,\\]}\\s]|$)/g, function(m, num) {
+    if (num) {
+      try {
+        var b = BigInt(num);
+        if (b > 9007199254740991n || b < -9007199254740991n) return '"' + num + '__bigint"';
+      } catch (e) {}
+    }
+    return m;
+  });
+};
+var __json_enc_any = __json_enc_any || function(v) {
+  if (v === null || v === undefined) return "null";
+  var t = typeof v;
+  if (t === "boolean") return v ? "true" : "false";
+  if (t === "number") {
+    if (!isFinite(v)) throw new Error("json: unsupported value: " + v);
+    return String(v);
+  }
+  if (t === "bigint") return v.toString();
+  if (t === "string") return __json_esc(v);
+  if ((typeof ArrayBuffer !== "undefined" && ArrayBuffer.isView(v)) || v instanceof Uint8Array) {
+    if (v.__raw) {
+      var s = (typeof v === "string" ? v : new TextDecoder().decode(v)).trim();
+      return s.length > 0 ? s : "null";
+    }
+    return __json_b64(v);
+  }
+  if (Array.isArray(v)) {
+    var items = [];
+    for (var i = 0; i < v.length; i++) items.push(__json_enc_any(v[i]));
+    return "[" + items.join(",") + "]";
+  }
+  if (v instanceof Map) {
+    var mkeys = Array.from(v.keys()).map(String).sort();
+    var mentries = [];
+    for (var mi = 0; mi < mkeys.length; mi++) {
+      mentries.push(__json_esc(mkeys[mi]) + ":" + __json_enc_any(v.get(mkeys[mi])));
+    }
+    return "{" + mentries.join(",") + "}";
+  }
+  if (typeof v.__json_enc === "function") return v.__json_enc();
+  if (typeof v.MarshalJSON === "function" && !(v.__v === true && v.MarshalJSON.__ptrRecv)) {
+    return __json_marshaler_out(v.MarshalJSON(), v.constructor && v.constructor.name ? v.constructor.name : "value");
+  }
+  // Boxed named values (from an interface) encode as their value; *T boxes as the pointee.
+  if (typeof v.__gfUnbox === "function") {
+    var inner = v.__gfUnbox();
+    if (Object.prototype.hasOwnProperty.call(v, "_p")) inner = inner == null ? null : inner.value;
+    return __json_enc_any(inner);
+  }
+  if (typeof v === "object") {
+    var okeys = Object.keys(v).filter(function(k) { return !k.startsWith("__") || k === "__proto__"; });
+    if (!v.__map && v.constructor && v.constructor !== Object && v.constructor.name !== "Object") {
+      okeys = okeys.filter(function(k) { return !(k.length > 0 && k[0] >= "a" && k[0] <= "z"); });
+    }
+    okeys.sort();
+    var oentries = [];
+    for (var oi = 0; oi < okeys.length; oi++) {
+      oentries.push(__json_esc(okeys[oi]) + ":" + __json_enc_any(v[okeys[oi]]));
+    }
+    return "{" + oentries.join(",") + "}";
+  }
+  return "null";
+};
+var __json_dec_any = __json_dec_any || function(parsed) {
+  if (parsed === null) return null;
+  if (typeof parsed === "string") {
+    if (parsed.endsWith("__bigint")) return Number(parsed.slice(0, -8));
+    return parsed;
+  }
+  if (typeof parsed === "number" || typeof parsed === "boolean") return parsed;
+  if (Array.isArray(parsed)) {
+    var outSlice = [];
+    for (var i = 0; i < parsed.length; i++) outSlice.push(__json_dec_any(parsed[i]));
+    return outSlice;
+  }
+  if (typeof parsed === "object") {
+    var outMap = Object.create(null);
+    outMap.__map = true;
+    for (var k in parsed) {
+      if (Object.prototype.hasOwnProperty.call(parsed, k)) {
+        outMap[k] = __json_dec_any(parsed[k]);
+      }
+    }
+    return outMap;
+  }
+  return parsed;
+};
+var __json_dec_any_target = __json_dec_any_target || function(parsed, target, box) {
+  var out = __json_dec_any(parsed);
+  if (box) box.value = out;
+  else if (target && typeof target === "object") {
+    for (const k of Object.keys(out)) Object.defineProperty(target, k, { value: out[k], writable: true, enumerable: true, configurable: true });
+  }
+  return null;
+};
+var __json_enc_slice = __json_enc_slice || function(slice, elemEnc) {
+  if (slice === null || slice === undefined) return "null";
+  var items = [];
+  for (var i = 0; i < slice.length; i++) items.push(elemEnc(slice[i]));
+  return "[" + items.join(",") + "]";
+};
+var __json_enc_map = __json_enc_map || function(m, valEnc) {
+  if (m === null || m === undefined) return "null";
+  if (m instanceof Map) {
+    var mkeys = Array.from(m.keys()).map(String).sort();
+    var mentries = [];
+    for (var i = 0; i < mkeys.length; i++) {
+      mentries.push(__json_esc(mkeys[i]) + ":" + valEnc(m.get(mkeys[i])));
+    }
+    return "{" + mentries.join(",") + "}";
+  }
+  var keys = Object.keys(m).filter(function(k) { return !k.startsWith("__") || k === "__proto__"; }).sort();
+  var entries = [];
+  for (var j = 0; j < keys.length; j++) {
+    entries.push(__json_esc(keys[j]) + ":" + valEnc(m[keys[j]]));
+  }
+  return "{" + entries.join(",") + "}";
+};
+var __json_marshal = __json_marshal || function(enc, val) {
+  try {
+    var str = enc(val);
+    return [new TextEncoder().encode(str), null];
+  } catch (e) {
+    return [new Uint8Array(0), typeof __error === "function" ? __error(e.message) : e];
+  }
+};
+var __json_indent = __json_indent || function(jsonStr, prefix, indent) {
+  var out = "";
+  var depth = 0;
+  var inString = false;
+  var escaped = false;
+  for (var i = 0; i < jsonStr.length; i++) {
+    var c = jsonStr[i];
+    if (inString) {
+      out += c;
+      if (escaped) escaped = false;
+      else if (c === "\\\\") escaped = true;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') { inString = true; out += c; continue; }
+    if (c === "{" || c === "[") {
+      out += c;
+      depth++;
+      var next = jsonStr[i + 1];
+      if ((c === "{" && next === "}") || (c === "[" && next === "]")) {
+        out += next;
+        i++;
+        depth--;
+        continue;
+      }
+      out += "\\n" + prefix + indent.repeat(depth);
+    } else if (c === "}" || c === "]") {
+      depth--;
+      out += "\\n" + prefix + indent.repeat(depth) + c;
+    } else if (c === ",") {
+      out += ",\\n" + prefix + indent.repeat(depth);
+    } else if (c === ":") {
+      out += ": ";
+    } else if (c !== " " && c !== "\\t" && c !== "\\n" && c !== "\\r") {
+      out += c;
+    }
+  }
+  return out;
+};
+var __json_marshal_indent = __json_marshal_indent || function(enc, val, prefix, indent) {
+  var res = __json_marshal(enc, val);
+  if (res[1]) return res;
+  var rawStr = new TextDecoder().decode(res[0]);
+  var formatted = __json_indent(rawStr, prefix, indent);
+  return [new TextEncoder().encode(formatted), null];
+};
+var __json_valid = __json_valid || function(data) {
+  try {
+    var s = typeof data === "string" ? data : new TextDecoder().decode(((typeof ArrayBuffer !== "undefined" && ArrayBuffer.isView(data)) || data instanceof Uint8Array) ? data : new Uint8Array(data));
+    JSON.parse(s);
+    return true;
+  } catch (e) {
+    return false;
+  }
+};
+var __json_unmarshal = __json_unmarshal || function(dec, data, target) {
+  __json_structs.length = 0;
+  __json_path.length = 0;
+  if (target === null || target === undefined) {
+    return typeof __error === "function" ? __error("json: Unmarshal(nil)") : new Error("json: Unmarshal(nil)");
+  }
+  if (typeof target !== "object" || target.__v === true) {
+    return typeof __error === "function" ? __error("json: Unmarshal(non-pointer " + typeof target + ")") : new Error("json: Unmarshal(non-pointer " + typeof target + ")");
+  }
+  var str;
+  try {
+    str = typeof data === "string" ? data : new TextDecoder().decode(((typeof ArrayBuffer !== "undefined" && ArrayBuffer.isView(data)) || data instanceof Uint8Array) ? data : new Uint8Array(data));
+  } catch (e) {
+    return typeof __error === "function" ? __error("invalid UTF-8 data") : e;
+  }
+  var safeStr = __json_preserve_int64(str);
+  var parsed;
+  try {
+    parsed = JSON.parse(safeStr);
+  } catch (e) {
+    return typeof __error === "function" ? __error(e.message) : e;
+  }
+  var rootRaw = __json_parse_raw_node(str);
+  __json_bind_raw(parsed, rootRaw);
+  var isBox = target && typeof target === "object" && (Object.prototype.hasOwnProperty.call(target, "value") || typeof target.__gfUnbox === "function");
+  var dest = isBox ? target.value : target;
+  var err = dec(parsed, dest, isBox ? target : null, data, rootRaw.raw);
+  if (err) return err.__userErr || err;
+  return null;
+};`;
+
+export const HELPER_SIMD = `var __simd_f32x4 = __simd_f32x4 || function(a, b, c, d) {
+  return Object.freeze([Math.fround(Number(a ?? 0)), Math.fround(Number(b ?? 0)), Math.fround(Number(c ?? 0)), Math.fround(Number(d ?? 0))]);
+};
+var __simd_splat = __simd_splat || function(v) {
+  var s = Math.fround(Number(v ?? 0));
+  return Object.freeze([s, s, s, s]);
+};
+var __simd_add = __simd_add || function(a, b) {
+  return Object.freeze([Math.fround(a[0] + b[0]), Math.fround(a[1] + b[1]), Math.fround(a[2] + b[2]), Math.fround(a[3] + b[3])]);
+};
+var __simd_sub = __simd_sub || function(a, b) {
+  return Object.freeze([Math.fround(a[0] - b[0]), Math.fround(a[1] - b[1]), Math.fround(a[2] - b[2]), Math.fround(a[3] - b[3])]);
+};
+var __simd_mul = __simd_mul || function(a, b) {
+  return Object.freeze([Math.fround(a[0] * b[0]), Math.fround(a[1] * b[1]), Math.fround(a[2] * b[2]), Math.fround(a[3] * b[3])]);
+};
+var __simd_div = __simd_div || function(a, b) {
+  return Object.freeze([Math.fround(a[0] / b[0]), Math.fround(a[1] / b[1]), Math.fround(a[2] / b[2]), Math.fround(a[3] / b[3])]);
+};
+var __simd_min = __simd_min || function(a, b) {
+  return Object.freeze([Math.fround(Math.min(a[0], b[0])), Math.fround(Math.min(a[1], b[1])), Math.fround(Math.min(a[2], b[2])), Math.fround(Math.min(a[3], b[3]))]);
+};
+var __simd_max = __simd_max || function(a, b) {
+  return Object.freeze([Math.fround(Math.max(a[0], b[0])), Math.fround(Math.max(a[1], b[1])), Math.fround(Math.max(a[2], b[2])), Math.fround(Math.max(a[3], b[3]))]);
+};
+var __simd_dot3 = __simd_dot3 || function(a, b) {
+  return Math.fround(Math.fround(Math.fround(a[0] * b[0]) + Math.fround(a[1] * b[1])) + Math.fround(a[2] * b[2]));
+};
+var __simd_dot4 = __simd_dot4 || function(a, b) {
+  return Math.fround(Math.fround(Math.fround(Math.fround(a[0] * b[0]) + Math.fround(a[1] * b[1])) + Math.fround(a[2] * b[2])) + Math.fround(a[3] * b[3]));
+};
+var __simd_with_lane = __simd_with_lane || function(a, i, v) {
+  var r = [a[0], a[1], a[2], a[3]];
+  r[i] = Math.fround(v);
+  return Object.freeze(r);
+};
+var __simd_load = __simd_load || function(buf, i) {
+  if (i < 0 || i + 4 > buf.length) throw new Error("panic: runtime error: index out of range");
+  return Object.freeze([Math.fround(buf[i]), Math.fround(buf[i + 1]), Math.fround(buf[i + 2]), Math.fround(buf[i + 3])]);
+};
+var __simd_store = __simd_store || function(buf, i, v) {
+  if (i < 0 || i + 4 > buf.length) throw new Error("panic: runtime error: index out of range");
+  buf[i] = v[0]; buf[i + 1] = v[1]; buf[i + 2] = v[2]; buf[i + 3] = v[3];
+};`;

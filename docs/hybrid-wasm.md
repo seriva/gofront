@@ -94,6 +94,16 @@ The backend (`src/backend/wasm/`) implements: structs, pointers, methods, arrays
 interfaces (including anonymous interfaces), generics, closures (including closures inside methods),
 `defer`/`panic`/`recover`, `error` values, and non-literal package constants.
 
+**Known limitations** (fixes planned for [v1.8.0](v1.8.0/portable-go-plan.md)); a `both` package's
+`[wasm]` test run is the quickest way to spot them:
+
+- Fixed-size arrays (`[N]T`) are not copied on assignment or when passed to a function, so the
+  copy aliases the original.
+- A pointer to a scalar struct field or slice/array element (`&s.X`, `&xs[i]`) points at a copy;
+  writes through it do not reach the original.
+- `for … range` over an iterator function and complex numbers (`complex`, `real`, `imag`) are
+  not supported in `wasm` packages.
+
 The stdlib packages available in `wasm`/`both` packages are:
 - `math` (including 24 constants, `Float64bits`/`Float64frombits`, `Float32bits`/`Float32frombits`, `Sinh`, `Cosh`, `Tanh`, `Remainder`), `math/bits` (including `Len*`, `Reverse*`, `ReverseBytes*`), `math/rand` (pure inline 64-bit PRNG with deterministic `Seed`, `Read`, `Shuffle`, `Perm`)
 - `errors` (`New`, `Is`, `Unwrap`, `As`, `Join`)
@@ -112,9 +122,9 @@ The stdlib packages available in `wasm`/`both` packages are:
 - `encoding/binary` (`LittleEndian`, `BigEndian`, `Read`, `Write`, `Append*`, `Size`)
 - `encoding/hex` (`EncodeToString`, `DecodeString`, `EncodedLen`, `DecodedLen`)
 - `encoding/base64` (`StdEncoding`, `URLEncoding`, `RawStdEncoding`, `RawURLEncoding`)
-- `testing` and `gofront/shared`.
+- `testing`, `gofront/shared`, and `gofront/simd` (experimental).
 
-Any other import, or JS-only host API (`os`, `regexp`, `time.Sleep`), reports a targeted diagnostic
+Any other import, or JS-only API (`os`, `regexp`, `encoding/json`, `time.Sleep`), reports a targeted diagnostic
 (e.g. `'time.Sleep' is not yet available in wasm packages`) with a hint to keep the call in a JS package.
 The `math` functions without a native WASM instruction (`Sin`, `Cos`, `Atan2`, `Pow`, `Mod`, `Hypot`,
 `Cbrt`, `Round`, …) are imported from JS `Math` with Go semantics (`Round` rounds half away
@@ -206,6 +216,28 @@ for (let i = 0; i < sim.Positions.length; i += 2) {
 
 `example/hybrid` is a complete particle demo built this way.
 
+### WASM SIMD (`gofront/simd`, experimental)
+
+`gofront/simd` provides 4-wide 32-bit floating-point SIMD vector operations lowering to native WebAssembly `v128` instructions without GC overhead.
+
+- **Types & Methods:**
+  - `simd.F32x4` — 4-lane `float32` vector value type: `simd.F32x4{a, b, c, d}`, `simd.Splat(f)`.
+  - Arithmetic & math: `v.Add(u)`, `v.Sub(u)`, `v.Mul(u)`, `v.Div(u)`, `v.Min(u)`, `v.Max(u)`.
+  - Dot products: `v.Dot3(u)`, `v.Dot4(u)`.
+  - Lane access: `v.Lane(i)` (where index `i` is a constant $0 \le i \le 3$), `v.WithLane(i, f)`.
+  - Zero value: `var v simd.F32x4` initializes to `(0, 0, 0, 0)` (`v128.const` zeros in WASM, frozen `[0, 0, 0, 0]` in JS).
+- **Direct Linear-Memory Load / Store:**
+  - `simd.LoadF32x4(buf shared.Float32, i)` — loads 4 consecutive floats from element offset `i` (`v128.load`).
+  - `simd.StoreF32x4(buf, i, v)` — stores vector `v` at element offset `i` (`v128.store`).
+  - Bounds checks enforce $i + 4 \le \text{len}(buf)$ and trap with a panic on out-of-bounds access.
+- **Lowering & Semantics:**
+  - **WASM:** compiles directly to unboxed `v128` locals, parameters, and struct fields using `0xFD` opcodes.
+  - **Current limits (planned for v1.8.0):** in `wasm`/`both` packages, `F32x4` cannot appear in exported struct fields or exported function signatures (they would cross the boundary), `==`/`!=` on `F32x4` is not supported, and `fmt` cannot format `F32x4` values. Keep `F32x4` in unexported types and functions, and compare or print lanes individually.
+  - **JS:** compiles to frozen 4-element arrays using `Math.fround` per lane for bit-level 32-bit float parity.
+  - **Boundary:** In v1.7.0, `F32x4` is restricted from crossing the JS↔WASM boundary directly (compile diagnostic advises passing data via `gofront/shared.Float32`).
+- **Benchmark & Gating:**
+  - Tested on the 131,072-triangle raycast benchmark: 1.34× faster than pure JS, but 1.02× over scalar hybrid (spatial octree traversal dominates runtime over 3-wide triangle checks). Per the release plan's $\ge 1.30\times$ gate, `gofront/simd` stays experimental; its completion and the promotion decision are planned for v1.8.0 ([`docs/v1.8.0/portable-go-plan.md`](v1.8.0/portable-go-plan.md)).
+
 ### Panics and traps
 
 A Go `panic` inside WASM surfaces in JS as a thrown `Error` carrying the panic message.
@@ -256,7 +288,7 @@ deleted.
 `gofront build --release` (or `--wasm-opt`) optimizes `app.wasm` through Binaryen:
 
 - **Zero setup:** Uses the `wasm-opt` CLI shipped by the optional `binaryen` npm package (run through node, no native toolchain) and automatically prefers a native `wasm-opt` binary if present on `PATH`. If neither is available, `--release`/`--wasm-opt` fail with an actionable error; plain `gofront build` is unaffected.
-- **WasmGC feature flags:** Configured for `GC`, `ReferenceTypes`, `BulkMemory`, `Multivalue`, `ExceptionHandling`, `MutableGlobals`, `NontrappingFPToInt`, and `TailCall`.
+- **WasmGC feature flags:** Configured for `GC`, `ReferenceTypes`, `BulkMemory`, `Multivalue`, `ExceptionHandling`, `MutableGlobals`, `NontrappingFPToInt`, `TailCall`, and `SIMD`.
 - **Optimization passes:** Level `-O3` combined with whole-program analysis (`--closed-world`: interface devirtualization, struct field pruning, type refinement), GUFA (`--gufa`), and pass convergence (`--converge`) in release builds, retaining hardware trap preservation by default (traps on nil struct dereference). Disassembly on `--emit-wat` translates the optimized binary directly in a single pass without re-running passes.
 - **Size savings & validation:** Typically yields **~23% binary size reduction** and validates module structure post-optimization.
 - **Source maps:** Passing `--source-map` emits a function-level `app.wasm.map` (one mapping per function body, resolved `sources`) and embeds the `sourceMappingURL` custom section. With `--release`/`--wasm-opt` the map is handed to Binaryen (`-ism`) so offsets stay correct after optimisation.

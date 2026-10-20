@@ -147,6 +147,11 @@ function classifyType(goType, mod) {
 			return classifyFunc(t, mod);
 		case "interface":
 			return classifyInterface(t, mod);
+		case "simd":
+			return {
+				k: "unsupported",
+				what: "simd.F32x4 cannot cross the JS↔WASM boundary in 1.7.0 (use shared.Float32 instead)",
+			};
 		default:
 			return {
 				k: "unsupported",
@@ -211,6 +216,16 @@ function classifyBasic(n) {
 }
 
 function classifyNamed(t, mod) {
+	if (
+		t.name === "simd.F32x4" ||
+		t.name === "F32x4" ||
+		t.underlying?.kind === "simd"
+	) {
+		return {
+			k: "unsupported",
+			what: "simd.F32x4 cannot cross the JS↔WASM boundary in 1.7.0 (use shared.Float32 instead)",
+		};
+	}
 	if (t.name === "error") return { k: "error", wType: "anyref" };
 	if (t.name === "time.Duration")
 		return { k: "i64", unsigned: false, wType: "i64" };
@@ -506,6 +521,9 @@ function literalConst(spec, i) {
 }
 
 function unsupportedMsg(where, what) {
+	if (typeof what === "string" && what.includes("boundary")) {
+		return `${where}: ${what}`;
+	}
 	return `${where}: ${what} is not yet supported across the wasm boundary (planned)`;
 }
 

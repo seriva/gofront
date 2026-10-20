@@ -57,6 +57,7 @@ export class TypeChecker {
 		this._typeSwitchDepth = 0; // for rejecting fallthrough in type switch
 		this._deferCount = 0; // tracks defer usage in current function body
 		this._imports = []; // tracked imports for unused-import detection
+		this._constExprs = new Map(); // name -> AST initializer expr
 		this._setupGlobals();
 		// Register error as a named type (interface)
 		this.types.set("error", ERROR);
@@ -220,7 +221,11 @@ export class TypeChecker {
 			const type = spec.type
 				? this.resolveTypeNode(spec.type, this.globals)
 				: ANY;
-			for (const name of spec.names) this.globals.defineConst(name, type);
+			for (let i = 0; i < spec.names.length; i++) {
+				const name = spec.names[i];
+				const expr = spec.value?.[i] ?? spec.value?.[0] ?? null;
+				this.globals.defineConst(name, type, expr);
+			}
 		}
 	}
 
@@ -510,7 +515,8 @@ export class TypeChecker {
 			const struct = type.underlying;
 			if (struct?.kind === "struct" && struct._embeds) {
 				for (const embed of struct._embeds) {
-					const base = embed.kind === "named" ? embed.underlying : embed;
+					const inner = embed.kind === "pointer" ? embed.base : embed;
+					const base = inner.kind === "named" ? inner.underlying : inner;
 					if (base?.kind !== "struct" || !base.methods) continue;
 					for (const [mName, mType] of base.methods.entries()) {
 						if (!struct.methods.has(mName)) struct.methods.set(mName, mType);
@@ -899,14 +905,31 @@ export class TypeChecker {
 			let type = spec.type ? this.resolveTypeNode(spec.type, scope) : null;
 			if (spec.value) {
 				const valTypes = spec.value.map((v) => this.checkExpr(v, scope));
-				if (!type) type = defaultType(valTypes[0]) ?? ANY;
-				for (let i = 0; i < spec.names.length; i++) {
-					const vt = valTypes[i] ?? ANY;
-					this.assertAssignable(type, vt, spec.value[i]);
+				const isTuple = valTypes.length === 1 && valTypes[0]?.kind === "tuple";
+				const valTypesFlat = isTuple ? valTypes[0].types : valTypes;
+				if (spec.names.length !== valTypesFlat.length) {
+					const vars =
+						spec.names.length === 1
+							? "1 variable"
+							: `${spec.names.length} variables`;
+					const vals = isTuple
+						? `returns ${valTypesFlat.length} values`
+						: valTypesFlat.length === 1
+							? "1 value"
+							: `${valTypesFlat.length} values`;
+					this.err(`assignment mismatch: ${vars} but ${vals}`, spec);
 				}
+				for (let i = 0; i < spec.names.length; i++) {
+					const vt = valTypesFlat[i] ?? ANY;
+					const varType = type ?? defaultType(vt) ?? ANY;
+					if (type)
+						this.assertAssignable(type, vt, spec.value[i] ?? spec.value[0]);
+					scope.defineLocal(spec.names[i], varType);
+				}
+			} else {
+				if (!type) type = ANY;
+				for (const name of spec.names) scope.defineLocal(name, type);
 			}
-			if (!type) type = ANY;
-			for (const name of spec.names) scope.defineLocal(name, type);
 		}
 		this._sharedAllocOk = savedSharedAlloc;
 	}
@@ -918,7 +941,11 @@ export class TypeChecker {
 			const type = spec.type
 				? this.resolveTypeNode(spec.type, scope)
 				: (valTypes[0] ?? ANY);
-			for (const name of spec.names) scope.defineConst(name, type);
+			for (let i = 0; i < spec.names.length; i++) {
+				const name = spec.names[i];
+				const expr = spec.value?.[i] ?? spec.value?.[0] ?? null;
+				scope.defineConst(name, type, expr);
+			}
 		}
 	}
 

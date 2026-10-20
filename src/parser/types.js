@@ -175,23 +175,80 @@ export const typeParserMethods = {
 		this.expect(T.LBRACE);
 		const fields = [];
 		while (!this.check(T.RBRACE) && !this.check(T.EOF)) {
-			const names = this.parseIdentList();
-			// Check if this is an embedded field (just a type name)
-			// e.g., type T struct { Base }
-			if (this.check(T.SEMICOLON) || this.check(T.RBRACE)) {
-				const typeName = names[0]; // assuming no comma list for embedded
+			// Embedded pointer field: *Base or *pkg.Base
+			if (this.check(T.STAR)) {
+				this.advance();
+				let typeName = this.expect(T.IDENT).value;
+				if (this.check(T.DOT)) {
+					this.advance();
+					typeName += `.${this.expect(T.IDENT).value}`;
+				}
+				const type = {
+					kind: "PointerType",
+					base: { kind: "TypeName", name: typeName },
+				};
+				let tag = null;
+				if (this.check(T.STRING)) {
+					tag = this.advance().value;
+				}
 				fields.push({
 					names: [],
-					type: { kind: "TypeName", name: typeName },
+					type,
 					embedded: true,
+					tag,
 				});
 				this.semi();
 				continue;
 			}
+
+			const names = this.parseIdentList();
+			// Check if this is a qualified embedded field: pkg.Base
+			if (names.length === 1 && this.check(T.DOT)) {
+				this.advance();
+				const typeName = `${names[0]}.${this.expect(T.IDENT).value}`;
+				let tag = null;
+				if (this.check(T.STRING)) {
+					tag = this.advance().value;
+				}
+				fields.push({
+					names: [],
+					type: { kind: "TypeName", name: typeName },
+					embedded: true,
+					tag,
+				});
+				this.semi();
+				continue;
+			}
+
+			// Embedded field (just a type name, e.g. Base), optionally tagged
+			if (
+				names.length === 1 &&
+				(this.check(T.SEMICOLON) ||
+					this.check(T.RBRACE) ||
+					this.check(T.STRING))
+			) {
+				const typeName = names[0];
+				let tag = null;
+				if (this.check(T.STRING)) {
+					tag = this.advance().value;
+				}
+				fields.push({
+					names: [],
+					type: { kind: "TypeName", name: typeName },
+					embedded: true,
+					tag,
+				});
+				this.semi();
+				continue;
+			}
+
 			const type = this.parseType();
 			// Consume optional struct tag (backtick string), e.g. `json:"name"`
-			if (this.check(T.STRING)) this.advance();
-			fields.push({ names, type });
+			let tag = null;
+			if (this.check(T.STRING)) {
+				tag = this.advance().value;
+			}
+			fields.push({ names, type, tag });
 			this.semi();
 		}
 		this.expect(T.RBRACE);
