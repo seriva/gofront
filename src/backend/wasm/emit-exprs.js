@@ -1353,7 +1353,7 @@ export class ExprsEmitter {
 			lastStep.structInfo,
 			lastStep.fieldIndex,
 		);
-		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "i32.const", value: lastStep.fieldIndex });
 		const getIdx = this.mod.resolveFuncIndex(h.getterName);
 		const setIdx = this.mod.resolveFuncIndex(h.setterName);
 		this.pushInstruction({ op: "ref.func", funcIndex: getIdx });
@@ -1648,6 +1648,195 @@ export class ExprsEmitter {
 		this.emitBinaryOp(op, wType, leftType);
 	}
 
+	_findScalarPtrByWType(wType, map) {
+		if (!map) return null;
+		for (const info of map.values()) {
+			if (info.typeIndex === wType.typeIndex || info.name === wType.typeName) {
+				return info;
+			}
+		}
+		return null;
+	}
+
+	_getScalarPtrFromWType(wType) {
+		if (!wType || typeof wType !== "object") return null;
+		const ptr = this._findScalarPtrByWType(wType, this.mod.ptrTypes);
+		if (ptr) {
+			return {
+				ptr,
+				box: this.mod.getBoxType(ptr.goType),
+				acc: this.mod.getAccType(ptr.goType),
+			};
+		}
+		const box = this._findScalarPtrByWType(wType, this.mod.boxTypes);
+		if (box) {
+			return {
+				ptr: this.mod.getPtrType(box.goType),
+				box,
+				acc: this.mod.getAccType(box.goType),
+			};
+		}
+		const acc = this._findScalarPtrByWType(wType, this.mod.accTypes);
+		if (acc) {
+			return {
+				ptr: this.mod.getPtrType(acc.goType),
+				box: this.mod.getBoxType(acc.goType),
+				acc,
+			};
+		}
+		return null;
+	}
+
+	_getScalarPtrFromGoType(goType) {
+		let g = goType;
+		if (g?.kind === "TypeName" && this.mod.checker?.types?.has(g.name)) {
+			g = this.mod.checker.types.get(g.name);
+		}
+		while (g?.kind === "named" && g.underlying) {
+			g = g.underlying;
+		}
+		const isPtr =
+			g?.kind === "pointer" ||
+			g?.kind === "PointerType" ||
+			g?.kind === "StarExpr";
+		if (!isPtr || (!g.base && !g.elem)) return null;
+		const base = g.base || g.elem;
+		if (
+			isStructType(base, this.mod.checker, this.mod) ||
+			isPointerToStruct(g, this.mod.checker, this.mod)
+		) {
+			return null;
+		}
+		return {
+			ptr: this.mod.getPtrType(base),
+			box: this.mod.getBoxType(base),
+			acc: this.mod.getAccType(base),
+		};
+	}
+
+	_getScalarPtrInfo(wType, goType = null) {
+		return (
+			this._getScalarPtrFromGoType(goType) ?? this._getScalarPtrFromWType(wType)
+		);
+	}
+
+	_isScalarPtrType(goType, wType = null) {
+		return this._getScalarPtrInfo(wType, goType) !== null;
+	}
+
+	_emitScalarPtrEq(ptrInfo) {
+		const ptrWType = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: ptrInfo.ptr.typeIndex,
+			typeName: ptrInfo.ptr.name,
+		};
+		const qTmp = this.acquireTemp(ptrWType);
+		const pTmp = this.acquireTemp(ptrWType);
+		this.pushInstruction({ op: "local.set", index: qTmp });
+		this.pushInstruction({ op: "local.set", index: pTmp });
+
+		const acc = ptrInfo.acc;
+
+		// 1. Fast path: ref.eq(p, q)
+		this.pushInstruction({ op: "local.get", index: pTmp });
+		this.pushInstruction({ op: "local.get", index: qTmp });
+		this.pushInstruction("ref.eq");
+		this.pushInstruction({ op: "if", blockType: "i32" });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("else");
+
+		// 2. Else: test if both p and q are $acc_T
+		this.pushInstruction({ op: "local.get", index: pTmp });
+		this.pushInstruction({
+			op: "ref.test",
+			typeIndex: acc.typeIndex,
+			typeName: acc.name,
+		});
+		this.pushInstruction({ op: "if", blockType: "i32" });
+		this.pushInstruction({ op: "local.get", index: qTmp });
+		this.pushInstruction({
+			op: "ref.test",
+			typeIndex: acc.typeIndex,
+			typeName: acc.name,
+		});
+		this.pushInstruction({ op: "if", blockType: "i32" });
+
+		// Both are $acc_T: cast and compare ref.eq(p.target, q.target)
+		this.pushInstruction({ op: "local.get", index: pTmp });
+		this.pushInstruction({
+			op: "ref.cast",
+			typeIndex: acc.typeIndex,
+			typeName: acc.name,
+		});
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: acc.typeIndex,
+			typeName: acc.name,
+			fieldIndex: 0,
+		});
+		this.pushInstruction({ op: "ref.cast", heapType: "eq" });
+		this.pushInstruction({ op: "local.get", index: qTmp });
+		this.pushInstruction({
+			op: "ref.cast",
+			typeIndex: acc.typeIndex,
+			typeName: acc.name,
+		});
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: acc.typeIndex,
+			typeName: acc.name,
+			fieldIndex: 0,
+		});
+		this.pushInstruction({ op: "ref.cast", heapType: "eq" });
+		this.pushInstruction("ref.eq");
+		this.pushInstruction({ op: "if", blockType: "i32" });
+
+		// Compare i32.eq(p.index, q.index)
+		this.pushInstruction({ op: "local.get", index: pTmp });
+		this.pushInstruction({
+			op: "ref.cast",
+			typeIndex: acc.typeIndex,
+			typeName: acc.name,
+		});
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: acc.typeIndex,
+			typeName: acc.name,
+			fieldIndex: 1,
+		});
+		this.pushInstruction({ op: "local.get", index: qTmp });
+		this.pushInstruction({
+			op: "ref.cast",
+			typeIndex: acc.typeIndex,
+			typeName: acc.name,
+		});
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: acc.typeIndex,
+			typeName: acc.name,
+			fieldIndex: 1,
+		});
+		this.pushInstruction("i32.eq");
+
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction("end"); // target eq if
+
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction("end"); // q is acc if
+
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction("end"); // p is acc if
+
+		this.pushInstruction("end"); // fast path if
+
+		this.releaseTemp(pTmp, ptrWType);
+		this.releaseTemp(qTmp, ptrWType);
+	}
+
 	_emitStructEq(structInfo) {
 		const bTmp = this.acquireTemp({
 			kind: "ref",
@@ -1699,6 +1888,9 @@ export class ExprsEmitter {
 				this.pushInstruction({ op: "call", funcIndex: cmpIdx });
 			} else if (f.wType === "anyref") {
 				this._emitAnyEq();
+			} else if (this._isScalarPtrType(f.goType, f.wType)) {
+				const ptrInfo = this._getScalarPtrInfo(f.wType, f.goType);
+				this._emitScalarPtrEq(ptrInfo);
 			} else if (typeof f.wType === "object" && f.wType !== null) {
 				this.pushInstruction("ref.eq");
 			} else {
@@ -1799,6 +1991,9 @@ export class ExprsEmitter {
 					this.pushInstruction({ op: "call", funcIndex: cmpIdx });
 				} else if (wType === "anyref") {
 					this._emitAnyEq();
+				} else if (this._isScalarPtrType(goType, wType)) {
+					const ptrInfo = this._getScalarPtrInfo(wType, goType);
+					this._emitScalarPtrEq(ptrInfo);
 				} else if (typeof wType === "object" && wType !== null) {
 					this.pushInstruction("ref.eq");
 				} else {
@@ -1811,6 +2006,10 @@ export class ExprsEmitter {
 					this.pushInstruction({ op: "call", funcIndex: cmpIdx });
 				} else if (wType === "anyref") {
 					this._emitAnyEq();
+					this.pushInstruction("i32.eqz");
+				} else if (this._isScalarPtrType(goType, wType)) {
+					const ptrInfo = this._getScalarPtrInfo(wType, goType);
+					this._emitScalarPtrEq(ptrInfo);
 					this.pushInstruction("i32.eqz");
 				} else if (typeof wType === "object" && wType !== null) {
 					this.pushInstruction("ref.eq");

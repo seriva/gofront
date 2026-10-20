@@ -1,7 +1,7 @@
 # Portable Go Completion — Design Plan
 
 **Version:** v1.8.0
-**Status:** Draft (2026-10-20)
+**Status:** In Progress (2026-10-20)
 **Depends on:** v1.7.0 ([`json-preact-simd-plan.md`](../v1.7.0/json-preact-simd-plan.md)), including the JS `encoding/json` hardening on the v1.7.0 branch.
 **Replaces:** the dropped v1.7.1 plans. Their stdlib items (`bufio`, `context`, `net/url`), the WASM interior-pointer problem and the SIMD completion and SoA work move here. Boundary slice borrowing (a performance optimisation, not a completeness item) is not part of this plan.
 **Followed by:** [`docs/v2.0.0/native-go-engine.md`](../v2.0.0/native-go-engine.md). v1.8.0 is the **last feature release of the JS engine** and the baseline for the v2.0.0 port. After it, only bug-fix releases (v1.8.x) ship.
@@ -537,7 +537,7 @@ Conventions used in the tasks:
   - Test: new `test/unit/wasm/pointers.test.js` — parity tests `set(&s.X, 7)`, `*(&xs[1]) = 9`, `&s.Inner.X`, `&arr[0].X`, `p := &xs[1]; xs = xs[1:]; *p = 9`.
   - Done when: those pass; `*p` is not yet dispatched (next task) so tests that read through accessor refs are added in 0.1c.
 
-- [ ] **Task 0.1c — `*p` dispatch and pointer identity**
+- [x] **Task 0.1c — `*p` dispatch and pointer identity**
   - Files: `src/backend/wasm/emit-exprs.js` (`case "*"`, assignment to deref, `==` on pointers)
   - Do: `*p` and `*p = v` emit `br_on_cast $box_T` first (fast path), else `call_ref` the getter/setter. `p == q` compares boxes by `ref.eq` and accessor refs by (target `ref.eq`, index `i32.eq`); a box never equals an accessor ref.
   - Test: `pointers.test.js` — read-back of every 0.1b case; `p == q` for two `&s.X`; `&xs[1]` after a reallocating `append` still writes the old backing array; a struct field of type `*int` holding an accessor ref survives a struct copy.

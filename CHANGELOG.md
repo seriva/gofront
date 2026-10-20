@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **WASM pointer dereference dispatch and accessor ref identity**: Dispatched pointer dereference expressions (`*p`) and assignments (`*p = v`) between box and accessor subtypes with getter/setter helpers; implemented scalar pointer identity comparisons (`==` and `!=`) comparing target references and indices across accessor refs, boxes, and struct equality fields in both WASM and JS.
 - **WASM accessor refs for fields and elements**: Added subtype `$acc_T` implementing scalar pointers to struct fields (`&s.F`) and slice/array elements (`&xs[i]`) with getter/setter helpers; updated dereference assignment (`*p = v`) to dispatch between box and accessor refs.
 - **WASM pointer type hierarchy**: Emitted abstract supertype `$ptr_T` with box struct `$box_T` as a subtype (`sub $ptr_T`) for scalar pointer types.
 
