@@ -621,12 +621,15 @@ export const expressionGenMethods = {
 			) {
 				return this.genExpr(expr.operand);
 			}
-			if (
-				expr.operand.kind === "SelectorExpr" ||
-				expr.operand.kind === "IndexExpr"
-			) {
-				const inner = this.genExpr(expr.operand);
-				return `{ get value() { return ${inner}; }, set value(v) { ${inner} = v; } }`;
+			if (expr.operand.kind === "IndexExpr") {
+				const obj = this.genExpr(expr.operand.expr);
+				const idx = this.genExpr(expr.operand.index);
+				return `((__o, __i) => ({ get value() { return __o[__i]; }, set value(v) { __o[__i] = v; } }))(${obj}, ${idx})`;
+			}
+			if (expr.operand.kind === "SelectorExpr") {
+				const obj = this.genExpr(expr.operand.expr);
+				const field = expr.operand.field;
+				return `((__o) => ({ get value() { return __o.${field}; }, set value(v) { __o.${field} = v; } }))(${obj})`;
 			}
 			// For non-boxed vars (primitives, etc.), wrap in { value: x }
 			return `{ value: ${this.genExpr(expr.operand)} }`;

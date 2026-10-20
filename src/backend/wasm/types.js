@@ -185,7 +185,17 @@ export function toWasmType(goType, checker = null, mod = null) {
 			) {
 				return baseWType;
 			}
-			if (mod?.getBoxType) {
+			if (mod?.getPtrType) {
+				const ptr = mod.getPtrType(goType.base);
+				if (mod.getBoxType) mod.getBoxType(goType.base);
+				if (ptr)
+					return {
+						kind: "ref",
+						nullable: true,
+						typeIndex: ptr.typeIndex,
+						typeName: ptr.name,
+					};
+			} else if (mod?.getBoxType) {
 				const box = mod.getBoxType(goType.base);
 				if (box)
 					return {
