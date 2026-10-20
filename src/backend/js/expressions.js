@@ -444,6 +444,29 @@ export const expressionGenMethods = {
 		return this._isStructType(pt.base);
 	},
 
+	_isScalarPointerType(t) {
+		if (!t) return false;
+		const pt =
+			t.kind === "named"
+				? (t.underlying ?? this.checker?.types.get(t.name)?.underlying)
+				: t;
+		if (pt?.kind !== "pointer") return false;
+		return !this._isStructType(pt.base);
+	},
+
+	_genPointerEquality(expr) {
+		if (expr.op !== "==" && expr.op !== "!=") return null;
+		if (
+			!this._isScalarPointerType(expr.left._type) &&
+			!this._isScalarPointerType(expr.right._type)
+		) {
+			return null;
+		}
+		this.useHelper("ptreq");
+		const cmp = `__ptreq(${this.genExpr(expr.left)}, ${this.genExpr(expr.right)})`;
+		return expr.op === "==" ? cmp : `!${cmp}`;
+	},
+
 	_isStructExpr(expr) {
 		if (!expr) return false;
 		if (expr.kind === "CompositeLit") {
@@ -624,12 +647,12 @@ export const expressionGenMethods = {
 			if (expr.operand.kind === "IndexExpr") {
 				const obj = this.genExpr(expr.operand.expr);
 				const idx = this.genExpr(expr.operand.index);
-				return `((__o, __i) => ({ get value() { return __o[__i]; }, set value(v) { __o[__i] = v; } }))(${obj}, ${idx})`;
+				return `((__o, __i) => Object.defineProperties({ get value() { return __o[__i]; }, set value(v) { __o[__i] = v; } }, { __target: { value: __o }, __index: { value: __i } }))(${obj}, ${idx})`;
 			}
 			if (expr.operand.kind === "SelectorExpr") {
 				const obj = this.genExpr(expr.operand.expr);
 				const field = expr.operand.field;
-				return `((__o) => ({ get value() { return __o.${field}; }, set value(v) { __o.${field} = v; } }))(${obj})`;
+				return `((__o) => Object.defineProperties({ get value() { return __o.${field}; }, set value(v) { __o.${field} = v; } }, { __target: { value: __o }, __index: { value: "${field}" } }))(${obj})`;
 			}
 			// For non-boxed vars (primitives, etc.), wrap in { value: x }
 			return `{ value: ${this.genExpr(expr.operand)} }`;
@@ -1714,6 +1737,9 @@ export const expressionGenMethods = {
 			const cmp = `__ifeq(${this._genIfaceOperand(expr.left)}, ${this._genIfaceOperand(expr.right)})`;
 			return expr.op === "==" ? cmp : `!${cmp}`;
 		}
+
+		const ptrCmp = this._genPointerEquality(expr);
+		if (ptrCmp !== null) return ptrCmp;
 
 		if (this.strict && this._needsStrictOp(expr.op, expr._type)) {
 			const l = this.genExpr(expr.left);
