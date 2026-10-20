@@ -330,7 +330,7 @@ This carries over the v1.7.1 SIMD plan, corrected for what WasmGC can and cannot
 
 #### 10.2 Operations
 
-Method names follow Go's experimental `simd/archsimd` names (go1.26, `GOEXPERIMENT=simd`) where an equivalent exists. Task 6.1 checks the names against that API before implementation starts.
+Method names follow Go's experimental `simd/archsimd` names (go1.26, `GOEXPERIMENT=simd`) where an equivalent exists. Task 6.1a checks the names against that API before implementation starts.
 
 | Group | API | WASM lowering |
 |---|---|---|
@@ -356,7 +356,7 @@ type Ray4 struct{ Origin, InvDir Vec3x4 }     // 4 rays (or 1 ray splatted)
 
 - **`Vec3x4` methods:** `Add`, `Sub`, `Mul`, `Scale(F32x4)`, `Dot` (returns `F32x4`), `Cross`, `LengthSquared`, `Length`, `Normalize`, `Min`, `Max`, and `simd.SelectVec3x4`. Constructors are `simd.SplatVec3(x, y, z)` and `simd.NewVec3x4(...)`.
 - **Ray–box test:** `simd.IntersectRayAABB4(r Ray4, b AABB4, tMax F32x4) (hit Mask32x4, tNear F32x4)` is the slab test, computed lane by lane. With a splatted ray it tests **one ray against four boxes**: four octree children at once, which attacks the v1.7.0 bottleneck where node AABB tests dominated. With a splatted box it tests a **4-ray packet against one box**.
-- **No allocations in hot loops.** A WasmGC struct of three `v128` fields allocates on the heap for every temporary. Release builds rely on Binaryen's `heap2local` pass to turn non-escaping temporaries into locals. The benchmark (§10.6) requires zero allocations per step in the hot loop. If release builds still allocate, Task 6.8 adds compiler-side scalar replacement for non-escaping `gofront/simd` structs (three `v128` locals) before the gate is measured.
+- **No allocations in hot loops.** A WasmGC struct of three `v128` fields allocates on the heap for every temporary. Release builds rely on Binaryen's `heap2local` pass to turn non-escaping temporaries into locals. The benchmark (§10.6) requires zero allocations per step in the hot loop. If release builds still allocate, Task 6.2c adds compiler-side scalar replacement for non-escaping `gofront/simd` structs (three `v128` locals) before the gate is measured.
 
 #### 10.4 Memory helpers
 
@@ -563,7 +563,7 @@ Conventions used in the tasks:
   - Test: `range_func.test.js` — every range-over-func edge case in [Edge Cases](#edge-cases).
   - Done when: all pass as parity tests and the panic message is identical on both backends.
 
-- [ ] **Task 0.3 — Generic named func types**
+- [ ] **Task 0.2c — Generic named func types**
   - Files: `src/backend/wasm/monomorph.js`, `src/backend/wasm/types.js`
   - Do: `type Seq[V any] func(yield func(V) bool)` instantiated as `Seq[int]` must map to the same closure type as its underlying func type; returning a `Seq[int]` from a function type-checks in the module.
   - Test: `test/unit/wasm/generics.test.js` — a function returning `Seq[int]` ranged over in a parity test; a generic `Map[A, B any](s Seq[A], f func(A) B) Seq[B]`.
@@ -571,25 +571,25 @@ Conventions used in the tasks:
 
 ### Phase 0.3: Complex numbers in WASM and parity matrix
 
-- [ ] **Task 0.4a — Complex numbers in WASM: representation and arithmetic**
+- [ ] **Task 0.3a — Complex numbers in WASM: representation and arithmetic**
   - Files: `src/backend/wasm/types.js`, `src/backend/wasm/emit-exprs.js`, `src/backend/wasm/emit-builtins.js`
   - Do: `complex64`/`complex128` as immutable structs `{re, im}` of `f32`/`f64`. `complex`, `real`, `imag`, `+ - * /`, unary `-`, conversions between the two widths, and complex literals (`3i`). Division uses the same algorithm as the JS `__cdiv` helper.
   - Test: new `test/unit/wasm/complex.test.js` — parity tests for arithmetic, `complex64` rounding, division by `0+0i` yielding `Inf`/`NaN` without a panic.
   - Done when: `Unresolved identifier: complex` is gone and the parity tests pass.
 
-- [ ] **Task 0.4b — Complex numbers: equality, map keys, `fmt`**
+- [ ] **Task 0.3b — Complex numbers: equality, map keys, `fmt`**
   - Files: `src/backend/wasm/emit-exprs.js` (`==`), `src/backend/wasm/emit-maps.js` (hash/eq), `src/backend/wasm/emit-stdlib.js` (`%v`/`%g`)
   - Do: `==`/`!=` compare both parts with float rules (`NaN` parts never equal); map keys hash both parts under the existing float-key rules; `%v` prints `(1+2i)` as Go does.
   - Test: `complex.test.js` — equality, a `map[complex128]int`, `fmt.Sprintf("%v %g", c, c)`.
   - Done when: both tests pass as parity tests.
 
-- [ ] **Task 0.5a — Language-support rows for the new parity items**
+- [ ] **Task 0.3c — Language-support rows for the new parity items**
   - Files: `docs/language-support.md`
   - Do: add rows (with a one-line fixture snippet in a `<!-- fixture: … -->` comment the generator can read) for: per-iteration loop variables, `min`/`max`/`clear`, `[]rune` conversions, constant expressions, generic type aliases, method expressions on pointer receivers, runtime panics (index, nil map, nil deref), `goto` (expected diagnostic). Correct the method-expression row.
   - Test: none (documentation).
   - Done when: every row in the Core/Types/Control-flow/Expressions tables has a fixture comment or an explicit `<!-- no-fixture: reason -->`.
 
-- [ ] **Task 0.5b — Parity matrix generator**
+- [ ] **Task 0.3d — Parity matrix generator**
   - Files: new `test/unit/language/parity-matrix.test.js`
   - Do: parse the fixture comments from `language-support.md`; for each, compile as a `both` package via `compileHybrid` and run `Main`. Rows marked `diagnostic:` must produce that diagnostic on both targets. Any invalid module, internal error (`Unresolved identifier`, `Unsupported WASM instruction`, `Unknown struct`), or output mismatch fails with the row name.
   - Test: the generator itself; it must fail on the v1.7.0 tree for the rows that Phase 0 fixes (confirm before fixing, then watch the failures disappear task by task).
@@ -597,31 +597,31 @@ Conventions used in the tasks:
 
 ### Phase 0.4: Go-source stdlib loader & reachability
 
-- [ ] **Task 0.6a — Go-source stdlib loader (first package: `cmp`)**
+- [ ] **Task 0.4a — Go-source stdlib loader (first package: `cmp`)**
   - Files: `src/resolver.js`, `src/compiler.js`, `src/typechecker/types.js` (`STDLIB_PACKAGES`), new `runtime/stdlib/cmp/cmp.go`
   - Do: resolve an import path to `runtime/stdlib/<path>/` before checking `STDLIB_PACKAGES`. Type-check and compile the package into the caller's target (`js`, `wasm`, or both) as if it were a user `both` package, with no boundary facade and no linked top-level names. Land `cmp` (`Ordered`, `Compare`, `Less`, `Or`) as the smoke package.
   - Test: new `test/unit/compiler/stdlib-go.test.js` — a `js` package and a `wasm` package importing `cmp`; `cmp.Compare(1.0, math.NaN())` parity; a `both` package using `cmp.Or`.
   - Done when: `import "cmp"` works in all three targets without any entry in `src/typechecker/stdlib/`.
 
-- [ ] **Task 0.6b — Overlays on emitter-backed packages (first overlay: `errors.ErrUnsupported`)**
+- [ ] **Task 0.4b — Overlays on emitter-backed packages (first overlay: `errors.ErrUnsupported`)**
   - Files: `src/resolver.js`, `src/typechecker/index.js` (namespace merge), new `runtime/stdlib/errors/overlay.go`
   - Do: a Go-source directory may extend an existing emitter-backed package; its declarations merge into the same namespace and must not collide with emitter members (collision = compiler error at load). Land `var ErrUnsupported = New("unsupported operation")`.
   - Test: `stdlib-go.test.js` — `errors.Is(err, errors.ErrUnsupported)` parity; a deliberate collision fixture reports `overlay redeclares errors.New`.
   - Done when: overlay members appear in `errors` on both backends and the collision diagnostic is tested.
 
-- [ ] **Task 0.6c — Name coexistence and call-site diagnostics**
+- [ ] **Task 0.4c — Name coexistence and call-site diagnostics**
   - Files: `src/resolver.js`, `src/typechecker/index.js`, `src/compiler.js` (error mapping)
   - Do: a user package named `heap` coexists with `container/heap` (qualified by import path everywhere, including the WASM function-name mangling). A type error inside a Go-source file is re-reported at the user's import or call site with the note `internal stdlib error in <path>; please report`, never as a path into `runtime/stdlib/`.
   - Test: `stdlib-go.test.js` — the coexistence fixture (use `cmp` plus a user package `cmp`); a temporarily broken overlay copied to a temp dir reports at the call site.
   - Done when: both tests pass.
 
-- [ ] **Task 0.6d — `//gofront:intrinsic` with the deadline timer**
+- [ ] **Task 0.4d — `//gofront:intrinsic` with the deadline timer**
   - Files: `src/parser/declarations.js` (directive), `src/typechecker/declarations.js`, `src/backend/js/statements.js`, `src/backend/wasm/emit-stdlib.js`
   - Do: a body-less func declaration preceded by `//gofront:intrinsic <name>` resolves to a backend-provided implementation. Only `deadline_timer(ns int64, fire func())` exists: JS arms `setTimeout`; WASM returns immediately (cooperative model). Any other name is a compile error `unknown intrinsic`.
   - Test: `stdlib-go.test.js` — a temp Go-source package calling the intrinsic compiles on both targets; an unknown intrinsic name is rejected.
-  - Done when: `context` (Task 4.3b) can be written without browser APIs.
+  - Done when: `context` (Task 4.2b) can be written without browser APIs.
 
-- [ ] **Task 0.7 — Reachability-based emission for Go-source packages**
+- [ ] **Task 0.4e — Reachability-based emission for Go-source packages**
   - Files: `src/lower/index.js` (or a new `src/lower/reachability.js`), `src/backend/js/index.js`, `src/backend/wasm/emit.js`
   - Do: starting from user exports, `init`, and `main`, mark reachable functions, methods (by name on reachable types) and package variables in Go-source packages; emit only those, in JS output and in dev-mode WASM. Emitter-backed packages are unaffected.
   - Test: `stdlib-go.test.js` — a program importing `cmp` but using nothing adds 0 bytes to `app.js` and to dev `app.wasm` compared with the same program without the import.
@@ -629,25 +629,25 @@ Conventions used in the tasks:
 
 ### Phase 0.5: Array value semantics, universe scope & loop variables
 
-- [ ] **Task 0.8a — Array value semantics in WASM: always copy**
+- [ ] **Task 0.5a — Array value semantics in WASM: always copy**
   - Files: `src/backend/wasm/emit-exprs.js`, `src/backend/wasm/emit-stmts.js`, `src/backend/wasm/emit-shared.js` (reuse the value-struct copy helper)
   - Do: insert `array.new` + `array.copy` on assignment, parameter passing, return, struct-field copy, store into slice/map/interface, and load from slice/map/struct field. Nested arrays copy deeply. `range` over an array iterates a copy.
   - Test: new `test/unit/wasm/arrays.test.js` — every array edge case in [Edge Cases](#edge-cases) as parity tests, including the map/slice load cases and `[N]simd.F32x4`.
-  - Done when: all pass; `npm run bench` numbers are recorded (regression expected, fixed in 0.8b).
+  - Done when: all pass; `npm run bench` numbers are recorded (regression expected, fixed in Task 0.5b).
 
-- [ ] **Task 0.8b — Clone elision for arrays**
-  - Files: `src/lower/ownership.js`, the emit sites from 0.8a
+- [ ] **Task 0.5b — Clone elision for arrays**
+  - Files: `src/lower/ownership.js`, the emit sites from Task 0.5a
   - Do: skip the copy when `ownership.js` proves the source is dead after the copy or never mutated on either side. Add the negative case to the analysis tests: a copy must stay when the source is mutated afterwards.
   - Test: `test/unit/compiler/lower.test.js` (elision decisions), `arrays.test.js` (behaviour unchanged).
   - Done when: `npm run bench` scalar raycast is within 3% of v1.7.0 and `test/e2e/perf/zero-alloc.js` passes.
 
-- [ ] **Task 0.9 — Predeclared names in the universe scope**
+- [ ] **Task 0.5c — Predeclared names in the universe scope**
   - Files: `src/typechecker/index.js` (scope setup), `src/typechecker/types.js` (browser-global list)
   - Do: browser globals and other predeclared names live in a universe scope below the package scope, so package and local declarations shadow them in every target. Shadowing a global in a `js` package hides it for that package.
   - Test: new `test/unit/types/shadowing.test.js` — `func Array()`, `var document int`, a local `len := 3`, in `js`, `wasm` and `both` packages; `Array redeclared` must not appear.
   - Done when: all pass and `npm run check` on `example/` is unchanged.
 
-- [ ] **Task 0.10 — Per-iteration loop variables in WASM**
+- [ ] **Task 0.5d — Per-iteration loop variables in WASM**
   - Files: `src/backend/wasm/emit-stmts.js` (three-clause `for`), `src/lower/captures.js`
   - Do: when a three-clause `for` variable is captured by a closure in the body, allocate a fresh box per iteration: copy the value in at the top of the body and back out before the post statement. Uncaptured variables keep a plain local.
   - Test: `test/unit/wasm/closures.test.js` — the `fs[0]()*100 + fs[1]()*10 + fs[2]()` parity test (`12`); a closure that writes `i`; an uncaptured loop emits no `struct.new` in the loop (assert on WAT).
@@ -655,25 +655,25 @@ Conventions used in the tasks:
 
 ### Phase 0.6: WASM builtins, conversions & constant folding
 
-- [ ] **Task 0.11 — `min`/`max` builtins in WASM**
+- [ ] **Task 0.6a — `min`/`max` builtins in WASM**
   - Files: `src/backend/wasm/emit-builtins.js`
   - Do: integers via `select` on `lt_s`/`lt_u`; floats via `f32.min`/`f64.min` and `max`; strings via the existing compare import; variadic forms fold left; a single argument returns itself.
   - Test: `test/unit/wasm/scalars.test.js` — the builtin edge cases in [Edge Cases](#edge-cases) as parity tests.
   - Done when: `Unresolved identifier: min` is gone and all cases pass.
 
-- [ ] **Task 0.12 — `[]rune` conversions in WASM**
+- [ ] **Task 0.6b — `[]rune` conversions in WASM**
   - Files: `src/backend/wasm/emit-exprs.js` (conversion), `src/backend/wasm/types.js`
   - Do: `[]rune(s)` produces a `(ref null $array_i32)` built from code points; `string(r)` and `string(r[i])` accept it; `len`, `append`, slicing work on it.
   - Test: `test/unit/wasm/strings_any.test.js` — the `[]rune` edge cases as parity tests.
   - Done when: the `local.tee expected (ref null 21)` module is valid and outputs match JS.
 
-- [ ] **Task 0.13a — Shared constant folder**
+- [ ] **Task 0.6c — Shared constant folder**
   - Files: move `src/backend/wasm/const-fold.js` to `src/lower/const-fold.js`; `src/backend/wasm/*` imports updated; `src/typechecker/expressions.js` (constant typing)
   - Do: a backend-independent evaluator for untyped constant expressions using `BigInt` for integers and `Number` for floats, covering `+ - * / % << >> & | ^ &^`, unary `- ^ !`, comparisons, and conversions. The checker attaches the folded value to the AST node. Typed constant overflow (`int32(1 << 40)`, `var x int8 = 200`) is a compile error with Go's `overflows` wording.
   - Test: new `test/unit/language/constants.test.js` — folded values for the constant edge cases; the two overflow diagnostics; WASM golden output unchanged (`test/unit/wasm/golden.test.js`).
   - Done when: the WASM backend uses the moved folder with no output change and the checker reports overflow.
 
-- [ ] **Task 0.13b — JS backend emits folded constants**
+- [ ] **Task 0.6d — JS backend emits folded constants**
   - Files: `src/backend/js/expressions.js`
   - Do: when a node carries a folded constant, emit the literal (`1099511627776`, not `1 << 40`). Values outside ±2⁵³ in `js` packages emit the nearest `Number` and a compile warning `constant … exceeds JS Number precision`; in `both` packages the same rule applies to the JS copy.
   - Test: `constants.test.js` — parity tests for `1 << 40`, `1 << 62`, `math.MaxInt64 / 2`; the warning text for `1<<63 + 5`.
@@ -681,31 +681,31 @@ Conventions used in the tasks:
 
 ### Phase 0.7: Type aliases, method expressions, panics & goto
 
-- [ ] **Task 0.14 — Generic type aliases**
+- [ ] **Task 0.7a — Generic type aliases**
   - Files: `src/typechecker/declarations.js`, `src/typechecker/resolve.js`
   - Do: `type A[P any] = T[P]` records type parameters on the alias; an instantiation `A[int]` substitutes into the aliased type and resolves to exactly that type (no new named type). Works in composite literals, parameter types and nested generics.
   - Test: `test/unit/types/generics.test.js` — the generic-alias edge cases; the `Unknown struct in CompositeLit` message must not appear.
   - Done when: the four edge cases pass as parity tests.
 
-- [ ] **Task 0.15 — Method expressions on pointer receivers**
+- [ ] **Task 0.7b — Method expressions on pointer receivers**
   - Files: `src/parser/expressions.js`, `src/typechecker/expressions.js`
   - Do: `(*T).M` parses as a method expression when `T` names a type; its type is `func(*T, args…) results`. Value form `T.M` keeps working. Both backends reuse the existing method-value lowering.
   - Test: `test/unit/language/expressions.test.js` — the method-expression edge cases as parity tests; the old `cannot dereference non-pointer type` message must not appear for this form.
   - Done when: all pass.
 
-- [ ] **Task 0.16a — Strict-mode runtime panics (checks everywhere)**
+- [ ] **Task 0.7c — Strict-mode runtime panics (checks everywhere)**
   - Files: `src/backend/js/expressions.js` (strict index/field access), `src/backend/js/runtime.js` (`__at`, `__set`, `__nilmap`, `__deref` helpers)
   - Do: in strict mode only, index reads/writes on slices, arrays and strings go through bounds-checked helpers that throw `runtime error: index out of range [i] with length n`; a write to a nil map throws `assignment to entry in nil map`; field access through a nil struct pointer throws `runtime error: invalid memory address or nil pointer dereference`. `recover()` returns the same message as WASM.
   - Test: new `test/unit/compiler/strict-panics.test.js` — the runtime-panic edge cases as parity tests; a `js` package is unchanged (no helpers in output).
   - Done when: all parity tests pass (benchmark regression expected, fixed next).
 
-- [ ] **Task 0.16b — Index-check elision**
+- [ ] **Task 0.7d — Index-check elision**
   - Files: `src/lower/` (new `bounds.js`), `src/backend/js/expressions.js`
   - Do: skip the helper for `for i := range xs` indices, `for i := 0; i < len(xs); i++` with no writes to `i`/`xs` in the body, and constant in-range indices into arrays.
   - Test: `strict-panics.test.js` — assert `__at` is absent from the generated JS for the elidable loops and present when the body reassigns `xs`.
   - Done when: `npm run bench` hybrid raycast is within 3% of v1.7.0. If not, extend the analysis; do not disable the checks.
 
-- [ ] **Task 0.17 — `goto` diagnostic**
+- [ ] **Task 0.7e — `goto` diagnostic**
   - Files: `src/lexer.js` (keyword), `src/parser/statements.js`, `src/typechecker/statements.js`
   - Do: parse `goto L` and labels so the error is targeted: `goto is not supported; restructure with labeled break/continue`.
   - Test: `test/unit/language/control-flow.test.js` — the message appears for `js`, `wasm` and `both` packages; `Undefined: 'goto'` does not.
@@ -725,13 +725,13 @@ Conventions used in the tasks:
   - Test: `manifest.test.js` — no `todo` entries remain for packages scheduled in Phases 2–5; every `excluded:` reason is one of the five categories.
   - Done when: `grep -c '"todo"'` on the manifest is 0 for scheduled packages.
 
-- [ ] **Task 1.2a — Coverage gate by name**
+- [ ] **Task 1.1c — Coverage gate by name**
   - Files: new `test/unit/types/stdlib-coverage.test.js`
   - Do: for each manifest entry with status `js`/`wasm`/`both`, assert the member exists in the checker namespace (and, for `wasm`/`both`, in `WASM_STDLIB_MEMBERS` or a Go-source package). For each `excluded:` entry, assert importing or referencing it yields the exclusion diagnostic. Replace the v1.6.1 JS-vs-WASM diff test.
   - Test: the gate itself; it must fail on the current tree with a list of missing members.
-  - Done when: the failure list equals the union of the Verified-gaps tables (reconcile differences in Task 1.5).
+  - Done when: the failure list equals the union of the Verified-gaps tables (reconcile differences in Task 1.2e).
 
-- [ ] **Task 1.2b — Coverage gate by signature**
+- [ ] **Task 1.1d — Coverage gate by signature**
   - Files: `test/unit/types/stdlib-coverage.test.js`, `src/typechecker/stdlib/` (signature printer helper)
   - Do: print each checker signature in Go's `api` notation and compare with the manifest. Mismatches fail with both strings. Fix the mismatches found (start with `strconv.ParseInt` → `int64`).
   - Test: the gate itself; add a unit test for the signature printer on generics, variadics and methods.
@@ -739,51 +739,51 @@ Conventions used in the tasks:
 
 ### Phase 1.2: Conformance harness, documentation and reconciliation
 
-- [ ] **Task 1.3a — Conformance runner**
+- [ ] **Task 1.2a — Conformance runner**
   - Files: new `test/conformance/run.js`, `test/conformance/README.md`, `package.json` (`conformance` script, included in `npm test`)
   - Do: for each `test/conformance/<pkg>/<name>.go`, compile as a `both` package, run `main` on JS and on WASM, and compare both outputs byte for byte with `<name>.out`. Missing `.out` is a failure with the `conformance:update` hint.
   - Test: one fixture per existing package (`strings`, `strconv`, `fmt`) with hand-verified `.out` files to bootstrap.
   - Done when: `npm run conformance` passes on the bootstrap fixtures on both backends.
 
-- [ ] **Task 1.3b — `conformance:update` with real Go**
+- [ ] **Task 1.2b — `conformance:update` with real Go**
   - Files: `test/conformance/update.js`, `package.json`
   - Do: run each fixture with `go run` (go1.26) and write `.out`. Fail clearly when `go` is missing. Fixtures are plain Go programs, so they compile with both toolchains.
   - Test: regenerate the bootstrap fixtures; the files must be unchanged.
   - Done when: the README documents the workflow and CI does not need `go`.
 
-- [ ] **Task 1.3c — Fixture lint for string semantics**
+- [ ] **Task 1.2c — Fixture lint for string semantics**
   - Files: `test/conformance/run.js`
   - Do: reject fixtures that apply `len(`, index `[`, or `range` to a string literal containing non-ASCII bytes, with the hint from [§1.1](#11-string-semantics-both-backends). `[]byte(...)` forms are allowed.
   - Test: a deliberately bad fixture in a temp dir is rejected.
   - Done when: the lint runs as part of `npm run conformance`.
 
-- [ ] **Task 1.4 — Generated stdlib docs**
+- [ ] **Task 1.2d — Generated stdlib docs**
   - Files: new `scripts/docs-stdlib.js`, `docs/language-support.md`, `docs/hybrid-wasm.md`, `package.json` (`docs:stdlib`, added to `check`)
   - Do: generate the package tables between `<!-- stdlib:begin -->` / `<!-- stdlib:end -->` markers from the manifest. `npm run check` fails when the committed tables differ from the generated ones.
   - Test: `manifest.test.js` — the generator is idempotent.
   - Done when: both docs carry generated tables and `npm run check` enforces freshness.
 
-- [ ] **Task 1.5 — Audit reconciliation**
+- [ ] **Task 1.2e — Audit reconciliation**
   - Files: this document ([Verified gaps](#verified-gaps-2026-10-20-v170-tree) and the task lists)
-  - Do: take the coverage-gate failure list; every member is either already in a Phase 2–5 task, added to Task 3.7, or marked `excluded:` with a reason in the manifest. Record the final counts (supported/excluded per package) here.
+  - Do: take the coverage-gate failure list; every member is either already in a Phase 2–5 task, added to Task 3.4c, or marked `excluded:` with a reason in the manifest. Record the final counts (supported/excluded per package) here.
   - Test: `stdlib-coverage.test.js` has no unclassified failures.
   - Done when: the only remaining failures are members scheduled in later tasks, listed by task number in this document.
 
 ### Phase 2.1: `iter` package and slices iterator members
 
-- [ ] **Task 2.1 — `iter` package**
+- [ ] **Task 2.1a — `iter` package**
   - Files: new `runtime/stdlib/iter/iter.go`, `src/typechecker/stdlib/` (diagnostic for `Pull`)
-  - Do: `Seq[V]`, `Seq2[K, V]` as generic named func types (needs Task 0.3). `iter.Pull`/`Pull2` report `requires coroutines; out of scope (no runtime)`.
+  - Do: `Seq[V]`, `Seq2[K, V]` as generic named func types (needs Task 0.2c). `iter.Pull`/`Pull2` report `requires coroutines; out of scope (no runtime)`.
   - Test: new `test/unit/builtins/iter.test.js` — parity tests ranging over `iter.Seq[int]` returned from a user function; the `Pull` diagnostic.
-  - Done when: both pass; `cmp` already landed in Task 0.6a.
+  - Done when: both pass; `cmp` already landed in Task 0.4a.
 
-- [ ] **Task 2.2a — `slices` iterator members: `All`, `Values`, `Backward`, `Collect`, `AppendSeq`**
+- [ ] **Task 2.1b — `slices` iterator members: `All`, `Values`, `Backward`, `Collect`, `AppendSeq`**
   - Files: new `runtime/stdlib/slices/iter.go` (overlay)
   - Do: implement over `iter.Seq`/`Seq2` in Go source.
   - Test: `iter.test.js` parity tests; conformance fixture `test/conformance/slices/iter.go`.
   - Done when: fixture output matches Go on both backends.
 
-- [ ] **Task 2.2b — `slices` iterator members: `Sorted`, `SortedFunc`, `SortedStableFunc`, `Chunk`**
+- [ ] **Task 2.1c — `slices` iterator members: `Sorted`, `SortedFunc`, `SortedStableFunc`, `Chunk`**
   - Files: `runtime/stdlib/slices/iter.go`
   - Do: `Sorted*` collect then call the existing sort lowering; `Chunk` panics on `n < 1` with Go's message.
   - Test: `iter.test.js`; extend the `slices/iter.go` fixture.
@@ -791,19 +791,19 @@ Conventions used in the tasks:
 
 ### Phase 2.2: `maps`, strings/bytes sequences and migration
 
-- [ ] **Task 2.3 — `maps` iterator members and the breaking change**
+- [ ] **Task 2.2a — `maps` iterator members and the breaking change**
   - Files: new `runtime/stdlib/maps/iter.go` (overlay), `src/typechecker/stdlib/core.js` (`maps.Keys`/`Values` removed from the emitter list), `src/typechecker/expressions.js` (hint diagnostic)
   - Do: `All`, `Keys`, `Values`, `Insert`, `Collect` over `iter.Seq`. `Keys`/`Values` now return `iter.Seq`; passing the result where a slice is expected reports the type error with the hint `use slices.Collect(maps.Keys(m)) for a slice`.
   - Test: `iter.test.js` — `for k := range maps.Keys(m)`; `sort.Strings(maps.Keys(m))` reports the hint; `slices.Sorted(maps.Keys(m))` on a WASM map with `NaN` keys keeps each entry.
   - Done when: all pass and `CHANGELOG.md` gets the breaking-change entry.
 
-- [ ] **Task 2.4 — `strings`/`bytes` sequence members**
+- [ ] **Task 2.2b — `strings`/`bytes` sequence members**
   - Files: new `runtime/stdlib/strings/iter.go`, `runtime/stdlib/bytes/iter.go` (overlays)
   - Do: `Lines`, `SplitSeq`, `SplitAfterSeq`, `FieldsSeq`, `FieldsFuncSeq`. `strings` versions work on `string` (splitting by substring is index-safe for ASCII separators; use `[]byte` internally per [§1.1](#11-string-semantics-both-backends)).
   - Test: conformance fixtures `strings/seq.go`, `bytes/seq.go`.
   - Done when: fixtures match Go.
 
-- [ ] **Task 2.5 — Migrate in-repo uses of `maps.Keys`/`Values`**
+- [ ] **Task 2.2c — Migrate in-repo uses of `maps.Keys`/`Values`**
   - Files: `example/`, `test/`, and a smoke build of `../simplefps`
   - Do: wrap with `slices.Collect` or range over the sequence directly.
   - Test: `npm test`, `npm run check`, `npm run test:e2e`.
@@ -843,31 +843,31 @@ Conventions used in the tasks:
 
 ### Phase 3.2: `io`, `sort`, `unicode` and `strconv` completion
 
-- [ ] **Task 3.1f — `fmt.Fscan`, `Fscanf`, `Fscanln`**
+- [ ] **Task 3.2a — `fmt.Fscan`, `Fscanf`, `Fscanln`**
   - Files: `runtime/stdlib/fmt/scan.go` (overlay over `io.Reader` using `Sscan*`)
   - Do: read a line or token stream from an `io.Reader` and delegate to the existing `Sscan*` lowering.
   - Test: conformance fixture `fmt/fscan.go` over `strings.NewReader`.
   - Done when: fixture matches Go.
 
-- [ ] **Task 3.2 — `sort` completion**
+- [ ] **Task 3.2b — `sort` completion**
   - Files: new `runtime/stdlib/sort/sort.go` (overlay)
   - Do: `Interface`, `Sort` (port of Go's pdqsort so equal-element order matches Go), `Stable` (insertion-merge as Go), `Reverse`, `IsSorted`, `SearchInts`/`SearchStrings`/`SearchFloat64s`, `IntSlice`/`StringSlice`/`Float64Slice`. No delegation to JS `Array.prototype.sort`.
   - Test: conformance fixture `sort/sort.go` including an unstable-order case that only matches with pdqsort.
   - Done when: fixture matches Go.
 
-- [ ] **Task 3.3a — `io` completion**
+- [ ] **Task 3.2c — `io` completion**
   - Files: new `runtime/stdlib/io/io.go` (overlay)
   - Do: `MultiReader`, `MultiWriter`, `TeeReader`, `NopCloser`, `ReadAtLeast`, `ReadFull`, `StringWriter`, `ByteReader`, `ByteWriter`, `RuneReader`, `ErrUnexpectedEOF`, `ErrShortWrite`, `SectionReader` if cheap.
   - Test: conformance fixture `io/io.go`.
   - Done when: fixture matches Go.
 
-- [ ] **Task 3.3b — `unicode/utf8` byte API and `unicode` predicates**
+- [ ] **Task 3.2d — `unicode/utf8` byte API and `unicode` predicates**
   - Files: new `runtime/stdlib/unicode/utf8/bytes.go`, `runtime/stdlib/unicode/tables.go` (general categories only)
   - Do: `EncodeRune`, `AppendRune`, `DecodeRune`, `DecodeLastRune`, `RuneCount`, `FullRune`, `Valid`; `unicode.IsNumber`, `IsSymbol`, `IsMark`, `IsTitle`, `SimpleFold`, `Is`/`In` over the general-category tables listed in the scope rule.
   - Test: conformance fixtures `utf8/bytes.go`, `unicode/categories.go`.
   - Done when: fixtures match Go and the table file is under 40 KB of source.
 
-- [ ] **Task 3.3c — `strconv.NumError`, `ErrRange`, `ErrSyntax`, quoting, and `errors.ErrUnsupported` usage**
+- [ ] **Task 3.2e — `strconv.NumError`, `ErrRange`, `ErrSyntax`, quoting, and `errors.ErrUnsupported` usage**
   - Files: `src/backend/js/stdlib/strconv.js`, `src/backend/wasm/stdlib/core.js`, new `runtime/stdlib/strconv/quote.go`
   - Do: `Parse*` return `*NumError{Func, Num, Err}` wrapping `ErrRange`/`ErrSyntax` with Go's message; `QuoteRune`, `QuoteToASCII`, `QuoteRuneToASCII`, `AppendQuote*`, `UnquoteChar`, `IsPrint`, `CanBackquote`.
   - Test: conformance fixture `strconv/errors.go` with `errors.Is(err, strconv.ErrRange)` and `errors.As(err, &numErr)`.
@@ -875,19 +875,19 @@ Conventions used in the tasks:
 
 ### Phase 3.3: `math`, `time` and strings/bytes buffer gaps
 
-- [ ] **Task 3.4a — `math` and `math/bits` gaps**
+- [ ] **Task 3.3a — `math` and `math/bits` gaps**
   - Files: `src/typechecker/stdlib/core.js`, `src/backend/js/stdlib/math.js`, `src/backend/js/stdlib/bits.js`, `src/backend/wasm/emit-stdlib.js`
   - Do: `Log1p`, `Expm1`, `Frexp`, `Ldexp`, `Modf`, `FMA`, `RoundToEven`, `Nextafter`, `Nextafter32`, `Gamma`, `Erf`; `bits.Add32/64`, `Sub32/64`, `Mul32/64`, `Div32/64`, `Rem32/64`, `LeadingZeros`/`TrailingZeros`/`OnesCount`/`Len` for `uint`/8/16, `RotateLeft`/8/16, `Reverse8/16`, `ReverseBytes`. `bits.Mul64` must be exact in both backends (split 32-bit multiply in JS).
   - Test: conformance fixtures `math/extra.go`, `bits/wide.go`.
   - Done when: fixtures match Go.
 
-- [ ] **Task 3.4b — `time` member completion**
+- [ ] **Task 3.3b — `time` member completion**
   - Files: `src/typechecker/stdlib/core.js`, `src/backend/js/stdlib/time.js`, `src/backend/wasm/stdlib/time.js`
   - Do: `ParseDuration`, `Duration.Truncate`/`Round`/`Abs`, `Time.AddDate`, `Truncate`, `Round`, `Compare`, `YearDay`, `ISOWeek`, `MarshalJSON`/`UnmarshalJSON`/`MarshalText`/`UnmarshalText` on `Time` and `Duration` JSON as integer nanoseconds, `FixedZone`, `Month.String`/`Weekday.String`. `AfterFunc`/`Timer.Stop`/`Reset` as JS-only with the existing `time.Sleep` diagnostic in WASM. `After`, `Tick`, `NewTicker`, `NewTimer` report the channel exclusion.
   - Test: conformance fixture `time/members.go` (no wall clock; fixed dates); unit tests for the JS-only and excluded diagnostics.
   - Done when: fixture matches Go and the diagnostics are tested.
 
-- [ ] **Task 3.4c — `strings.ToValidUTF8`, `bytes.NewBuffer`/`NewBufferString`, and `Buffer`/`Reader` method gaps**
+- [ ] **Task 3.3c — `strings.ToValidUTF8`, `bytes.NewBuffer`/`NewBufferString`, and `Buffer`/`Reader` method gaps**
   - Files: `src/typechecker/stdlib/core.js`, `src/backend/js/stdlib/bytes.js`, `src/backend/js/stdlib/strings.js`, `src/backend/wasm/stdlib/bytes.js`
   - Do: the named members plus whatever `bytes.Buffer`/`strings.Reader`/`bytes.Reader` methods the manifest lists as `todo` (`ReadRune`, `UnreadRune`, `ReadFrom`, `WriteTo`, `Seek`, `Next`, `Truncate`, `Grow`, `Cap`, `Available`).
   - Test: conformance fixtures `strings/members.go`, `bytes/buffer.go`.
@@ -895,19 +895,19 @@ Conventions used in the tasks:
 
 ### Phase 3.4: `sync`, `testing` and remaining audit items
 
-- [ ] **Task 3.5 — `sync.Map`, `sync.Pool`, `OnceFunc`/`OnceValue`/`OnceValues`**
+- [ ] **Task 3.4a — `sync.Map`, `sync.Pool`, `OnceFunc`/`OnceValue`/`OnceValues`**
   - Files: new `runtime/stdlib/sync/extra.go` (overlay)
   - Do: single-threaded implementations. `Pool.Get` returns `New()` when empty and `nil` when `New` is nil. `Map.Range` stops on `false`. `sync.Cond` reports the blocking exclusion.
   - Test: conformance fixture `sync/extra.go`.
   - Done when: fixture matches Go.
 
-- [ ] **Task 3.6 — `testing` additions**
+- [ ] **Task 3.4b — `testing` additions**
   - Files: `src/typechecker/stdlib/core.js`, `src/backend/js/stdlib/testing.js`, `src/cli-core.js` (test runner), `src/backend/wasm/boundary.js` (`*testing.T` routing)
-  - Do: `t.Cleanup` (LIFO, runs after `Fatal`), `t.Context()` (cancelled at test end; needs Task 4.3), `t.Setenv`, `t.Deadline`, `testing.B` with `N`, `ResetTimer`, `ReportAllocs`, `Loop`, run by `gofront test -bench`, `TestMain(m *testing.M)`. `t.Parallel` is a no-op; `TempDir`/`Chdir` report the host exclusion.
+  - Do: `t.Cleanup` (LIFO, runs after `Fatal`), `t.Context()` (cancelled at test end; needs Task 4.2a), `t.Setenv`, `t.Deadline`, `testing.B` with `N`, `ResetTimer`, `ReportAllocs`, `Loop`, run by `gofront test -bench`, `TestMain(m *testing.M)`. `t.Parallel` is a no-op; `TempDir`/`Chdir` report the host exclusion.
   - Test: `test/unit/compiler/test-runner.test.js` — Cleanup order, a benchmark that runs, `TestMain` that skips a test.
   - Done when: `gofront test` runs the new fixtures in `js` and `wasm` packages.
 
-- [ ] **Task 3.7 — Remaining audit items**
+- [ ] **Task 3.4c — Remaining audit items**
   - Files: as the manifest dictates
   - Do: every member still `todo` in a package already supported, in manifest order, one package per change. Pure members go into overlays; emitter members only when an instruction or helper is cheaper.
   - Test: one conformance fixture per package touched.
@@ -933,13 +933,13 @@ Conventions used in the tasks:
   - Test: conformance fixture `bufio/scanner.go` (final token without newline, `ErrFinalToken`, `ErrTooLong`).
   - Done when: fixture matches Go.
 
-- [ ] **Task 4.2a — `net/url` escaping and `Values`**
+- [ ] **Task 4.1d — `net/url` escaping and `Values`**
   - Files: new `runtime/stdlib/net/url/escape.go`, `values.go`
   - Do: `QueryEscape`, `QueryUnescape`, `PathEscape`, `PathUnescape`, `EscapeError`, `Values` (`Get`, `Set`, `Add`, `Del`, `Has`, `Encode` with sorted keys), `ParseQuery`. Work on `[]byte` so `"é"` escapes to `%C3%A9`.
   - Test: conformance fixture `url/escape.go` including non-ASCII input.
   - Done when: fixture matches Go.
 
-- [ ] **Task 4.2b — `net/url` parsing, `URL` methods, errors**
+- [ ] **Task 4.1e — `net/url` parsing, `URL` methods, errors**
   - Files: new `runtime/stdlib/net/url/url.go`
   - Do: `Parse`, `ParseRequestURI`, `URL` fields and methods from [§6](#6-bufio-neturl-and-context-go-source), `Userinfo`, `*Error`, `InvalidHostError`, `JoinPath`.
   - Test: conformance fixture `url/parse.go` (IPv6 host and port, `ResolveReference`, `Redacted`, malformed escapes returning `*url.Error`).
@@ -947,25 +947,25 @@ Conventions used in the tasks:
 
 ### Phase 4.2: `context`, container and hash
 
-- [ ] **Task 4.3a — `context` cancel tree and values**
+- [ ] **Task 4.2a — `context` cancel tree and values**
   - Files: new `runtime/stdlib/context/context.go`, `src/typechecker/stdlib/` (`Done()` diagnostic)
   - Do: `Context` interface without `Done()`; `Background`, `TODO`, `WithCancel`, `WithCancelCause`, `WithValue`, `WithoutCancel`, `Cause`, `Canceled`, `CancelFunc`, `CancelCauseFunc`. `ctx.Done()` reports the channel diagnostic with the `ctx.Err()`/`context.AfterFunc` hint.
   - Test: conformance fixture `context/cancel.go`; unit test for the `Done()` diagnostic.
   - Done when: cancelling a parent cancels every descendant; `WithoutCancel` children are not cancelled.
 
-- [ ] **Task 4.3b — `context` deadlines and `AfterFunc`**
-  - Files: `runtime/stdlib/context/deadline.go` (uses the Task 0.6d intrinsic)
+- [ ] **Task 4.2b — `context` deadlines and `AfterFunc`**
+  - Files: `runtime/stdlib/context/deadline.go` (uses the Task 0.4d intrinsic)
   - Do: `WithDeadline`, `WithDeadlineCause`, `WithTimeout`, `WithTimeoutCause`, `DeadlineExceeded`, `AfterFunc` (runs once; stop returns `false` once started). In WASM `Err()` compares the deadline with the clock import and cancels on first observation, firing `AfterFunc` callbacks.
   - Test: conformance fixture `context/deadline.go` with an injected clock; a WASM unit test that advances the fake clock import.
-  - Done when: both pass and `example/preact` can cancel a `fetch` through `AbortController` (used in Task 7.1).
+  - Done when: both pass and `example/preact` can cancel a `fetch` through `AbortController` (used in Task 7.1a).
 
-- [ ] **Task 4.4 — `container/heap`, `container/list`, `container/ring`**
+- [ ] **Task 4.2c — `container/heap`, `container/list`, `container/ring`**
   - Files: new `runtime/stdlib/container/{heap,list,ring}/*.go`
   - Do: full API of each.
   - Test: conformance fixtures `container/{heap,list,ring}.go`.
   - Done when: fixtures match Go.
 
-- [ ] **Task 4.5 — `hash`, `hash/crc32`, `hash/fnv`, `hash/adler32`**
+- [ ] **Task 4.2d — `hash`, `hash/crc32`, `hash/fnv`, `hash/adler32`**
   - Files: new `runtime/stdlib/hash/**.go`
   - Do: `hash.Hash`/`Hash32`/`Hash64`; crc32 with `IEEE`, `Castagnoli`, `Koopman` tables built at init; fnv 32/32a/64/64a; adler32.
   - Test: conformance fixture `hash/sums.go` over ASCII and non-ASCII input (via `[]byte`).
@@ -973,19 +973,19 @@ Conventions used in the tasks:
 
 ### Phase 4.3: `crypto`, base32 and `sync/atomic`
 
-- [ ] **Task 4.6a — `crypto/md5`, `crypto/sha1`, `crypto/sha512`**
+- [ ] **Task 4.3a — `crypto/md5`, `crypto/sha1`, `crypto/sha512`**
   - Files: new `runtime/stdlib/crypto/{md5,sha1,sha512}/*.go`
   - Do: `Sum*`, `New*`, `Size`, `BlockSize`, including `sha512/224`, `sha512/256`, `sha384`. sha512 needs `uint64` arithmetic: exact in WASM; in JS use `bits.Add64`/`Mul64`-style split limbs (document that it is slower in `js` packages).
   - Test: conformance fixture `crypto/digests.go` with the FIPS test vectors.
   - Done when: fixture matches Go.
 
-- [ ] **Task 4.6b — `crypto/hmac`, `crypto/subtle`, and the security note**
+- [ ] **Task 4.3b — `crypto/hmac`, `crypto/subtle`, and the security note**
   - Files: new `runtime/stdlib/crypto/{hmac,subtle}/*.go`, `docs/go-compatibility.md`
   - Do: `hmac.New`, `Equal`; `subtle.ConstantTimeCompare`, `ConstantTimeEq`, `ConstantTimeSelect`, `XORBytes`. Docs: not side-channel hardened; use Web Crypto in `js` packages for real cryptography.
   - Test: conformance fixture `crypto/hmac.go` (RFC 4231 vectors).
   - Done when: fixture matches Go and the doc row exists.
 
-- [ ] **Task 4.7 — `encoding/base32`, `unicode/utf16`, `sync/atomic`**
+- [ ] **Task 4.3c — `encoding/base32`, `unicode/utf16`, `sync/atomic`**
   - Files: new `runtime/stdlib/encoding/base32/`, `runtime/stdlib/unicode/utf16/`, `runtime/stdlib/sync/atomic/`
   - Do: the member lists in [§7](#7-new-pure-packages-go-source). `atomic` is single-threaded; `Pointer[T]` and `Value` included.
   - Test: conformance fixtures `base32/codec.go`, `utf16/codec.go`, `atomic/ops.go`.
@@ -993,25 +993,25 @@ Conventions used in the tasks:
 
 ### Phase 4.4: `math/cmplx`, `csv`, `log` and `math/rand/v2`
 
-- [ ] **Task 4.8 — `math/cmplx` (after Task 0.4)**
+- [ ] **Task 4.4a — `math/cmplx` (after Task 0.3a)**
   - Files: new `runtime/stdlib/math/cmplx/*.go`
   - Do: everything except functions needing `math/big`.
   - Test: conformance fixture `cmplx/funcs.go` with values printed via `%.6g` to avoid last-ulp differences.
   - Done when: fixture matches Go.
 
-- [ ] **Task 4.9 — `encoding/csv` (after Task 4.1a)**
+- [ ] **Task 4.4b — `encoding/csv` (after Task 4.1a)**
   - Files: new `runtime/stdlib/encoding/csv/{reader,writer}.go`
   - Do: as specified in [§8](#8-encodingcsv-go-source). Offsets count UTF-8 bytes.
   - Test: conformance fixtures `csv/reader.go`, `csv/writer.go` with the RFC 4180 cases and Go's `reader_test.go`/`writer_test.go` vectors.
   - Done when: fixtures match Go.
 
-- [ ] **Task 4.10 — `log` (after Task 3.1e)**
+- [ ] **Task 4.4c — `log` (after Task 3.1e)**
   - Files: new `runtime/stdlib/log/log.go`
   - Do: the member list in [§7](#7-new-pure-packages-go-source). Default output `os.Stderr`; `Fatal*` calls `os.Exit(1)` in JS and panics in WASM; `Lshortfile`/`Llongfile` print `???:0`.
   - Test: conformance fixture `log/log.go` with `SetFlags(0)` and a `bytes.Buffer` output; unit test for `Fatal` on both backends.
   - Done when: fixture matches Go.
 
-- [ ] **Task 4.11 — `math/rand/v2`**
+- [ ] **Task 4.4d — `math/rand/v2`**
   - Files: new `runtime/stdlib/math/rand/v2/*.go`
   - Do: `PCG` source (bit-exact with Go for a given seed), `Rand`, `New`, `N` (generic), `IntN`, `Int64N`, `Uint64N`, `Float64`, `Float32`, `Perm`, `Shuffle`, `NormFloat64`, `ExpFloat64`; top-level functions use the per-target random source. `ChaCha8` reports the deferred exclusion.
   - Test: conformance fixture `rand/pcg.go` with a fixed seed (PCG output must match Go exactly); unit test for `IntN(0)` panic message.
@@ -1031,7 +1031,7 @@ Conventions used in the tasks:
   - Test: `json.test.js` — `Unmarshal` corpus parity.
   - Done when: decoding cases pass as parity tests.
 
-- [ ] **Task 5.2 — `Unmarshaler`, `RawMessage`, and `any` decoding in WASM**
+- [ ] **Task 5.1c — `Unmarshaler`, `RawMessage`, and `any` decoding in WASM**
   - Files: as 5.1a
   - Do: `Unmarshaler` dispatch; exact `RawMessage` bytes; `any` decodes to `map[string]any`, `[]any`, `float64`, `string`, `bool`, `nil`.
   - Test: `json.test.js` — the corresponding JS cases as parity tests.
@@ -1039,25 +1039,25 @@ Conventions used in the tasks:
 
 ### Phase 5.2: JSON helpers, streaming I/O, enablement & benchmark
 
-- [ ] **Task 5.3 — `Number`, `Compact`/`Indent`/`HTMLEscape`, error types (both backends)**
+- [ ] **Task 5.2a — `Number`, `Compact`/`Indent`/`HTMLEscape`, error types (both backends)**
   - Files: `src/backend/js/stdlib/json.js`, `src/backend/js/runtime.js`, WASM json emitter, `src/typechecker/stdlib/core.js`
   - Do: as specified in [§9](#9-encodingjson-everywhere). Error types must work with `errors.As` and carry Go's `Offset`/field path.
   - Test: conformance fixture `json/errors.go` and `json/indent.go`.
   - Done when: fixtures match Go on both backends.
 
-- [ ] **Task 5.4 — `Encoder`/`Decoder` over `io.Writer`/`io.Reader` (both backends)**
+- [ ] **Task 5.2b — `Encoder`/`Decoder` over `io.Writer`/`io.Reader` (both backends)**
   - Files: new `runtime/stdlib/encoding/json/stream.go` (overlay, built on `bufio`)
   - Do: `NewEncoder`, `Encode`, `SetIndent`, `SetEscapeHTML`; `NewDecoder`, `Decode`, `More`, `UseNumber`, `DisallowUnknownFields`, `Buffered`, `InputOffset`. Multiple values in a stream, `io.EOF` at end, `io.ErrUnexpectedEOF` on truncation.
   - Test: conformance fixture `json/stream.go`.
   - Done when: fixture matches Go.
 
-- [ ] **Task 5.5 — Enable JSON in WASM**
+- [ ] **Task 5.2c — Enable JSON in WASM**
   - Files: `src/typechecker/types.js` (`WASM_STDLIB_MEMBERS` `["json", new Set()]` removed), `docs/go-compatibility.md`, `docs/hybrid-wasm.md`
   - Do: remove the rejection and its diagnostic; update the docs rows.
   - Test: the `json` diagnostic test is inverted; `npm test`.
   - Done when: `example/hybrid` can import `encoding/json` in its `wasm` package.
 
-- [ ] **Task 5.6 — JSON benchmark**
+- [ ] **Task 5.2d — JSON benchmark**
   - Files: new `test/e2e/perf/json-bench.js`
   - Do: encode and decode a 1 MB corpus in WASM and in the JS backend; record the result in [Performance and size](#performance-and-size). Gate: WASM ≤ 2× JS. A miss is documented with a follow-up; the feature still ships.
   - Test: the benchmark runs under `npm run bench`.
@@ -1065,33 +1065,33 @@ Conventions used in the tasks:
 
 ### Phase 6.1: SIMD value type, opcodes, checker methods and Go overlay
 
-- [ ] **Task 6.1** — Check the method names against go1.26 `simd/archsimd` and freeze the `gofront/simd` API surface in this document.
-- [ ] **Task 6.2** — `F32x4` as a value type: boundary classification (removes the exported-API build blocker), `==`/`!=`, map keys, `fmt` on both backends (needs Task 3.1c for `%#v`), generic type arguments (array copies come from Task 0.8).
-- [ ] **Task 6.3** — Encoder and WAT support for comparisons, `bitselect`, `any_true`/`all_true`, `bitmask`, and the `ceil`/`floor`/`trunc`/`nearest` opcodes. Include multi-byte LEB128 sub-opcode tests and Binaryen validation of optimized and unoptimized modules.
-- [ ] **Task 6.4** — `Mask32x4` and the new `F32x4` methods (§10.2) in the checker, the WASM emitter and the JS fallback helpers.
-- [ ] **Task 6.5** — Go-source overlay with `Vec3x4`, `AABB4`, `Ray4`, constructors, `SelectVec3x4` and `IntersectRayAABB4`.
+- [ ] **Task 6.1a** — Check the method names against go1.26 `simd/archsimd` and freeze the `gofront/simd` API surface in this document.
+- [ ] **Task 6.1b** — `F32x4` as a value type: boundary classification (removes the exported-API build blocker), `==`/`!=`, map keys, `fmt` on both backends (needs Task 3.1c for `%#v`), generic type arguments (array copies come from Task 0.5a).
+- [ ] **Task 6.1c** — Encoder and WAT support for comparisons, `bitselect`, `any_true`/`all_true`, `bitmask`, and the `ceil`/`floor`/`trunc`/`nearest` opcodes. Include multi-byte LEB128 sub-opcode tests and Binaryen validation of optimized and unoptimized modules.
+- [ ] **Task 6.1d** — `Mask32x4` and the new `F32x4` methods (§10.2) in the checker, the WASM emitter and the JS fallback helpers.
+- [ ] **Task 6.1e** — Go-source overlay with `Vec3x4`, `AABB4`, `Ray4`, constructors, `SelectVec3x4` and `IntersectRayAABB4`.
 
 ### Phase 6.2: Memory helpers, boundary transport and benchmarks
 
-- [ ] **Task 6.6** — Memory helpers: `LoadVec3x4`/`StoreVec3x4`, `LoadAoS4`/`StoreAoS4` (`i8x16.shuffle` transpose), `LoadF32x4Slice`/`StoreF32x4Slice`, `Pad4`.
-- [ ] **Task 6.7** — Boundary transport for `F32x4`, `Mask32x4` and `[]F32x4` (§10.5). Update the marshalling table in `hybrid-wasm.md`.
-- [ ] **Task 6.8** — Check allocations in release builds. If `heap2local` leaves allocations in the SoA hot loop, add scalar replacement for non-escaping `gofront/simd` structs.
-- [ ] **Task 6.9** — Particle kinematics benchmark (65,536 particles) and the `IntersectRayAABB4` raycast variant in `test/e2e/perf/`. Adopt SoA SIMD in the `example/hybrid` particle simulation.
-- [ ] **Task 6.10** — Apply the promotion rule (§10.6) and record the numbers and the decision in this document. Update `hybrid-wasm.md` and `go-compatibility.md` (stable or experimental, boundary rules, the zero-copy note).
+- [ ] **Task 6.2a** — Memory helpers: `LoadVec3x4`/`StoreVec3x4`, `LoadAoS4`/`StoreAoS4` (`i8x16.shuffle` transpose), `LoadF32x4Slice`/`StoreF32x4Slice`, `Pad4`.
+- [ ] **Task 6.2b** — Boundary transport for `F32x4`, `Mask32x4` and `[]F32x4` (§10.5). Update the marshalling table in `hybrid-wasm.md`.
+- [ ] **Task 6.2c** — Check allocations in release builds. If `heap2local` leaves allocations in the SoA hot loop, add scalar replacement for non-escaping `gofront/simd` structs.
+- [ ] **Task 6.2d** — Particle kinematics benchmark (65,536 particles) and the `IntersectRayAABB4` raycast variant in `test/e2e/perf/`. Adopt SoA SIMD in the `example/hybrid` particle simulation.
+- [ ] **Task 6.2e** — Apply the promotion rule (§10.6) and record the numbers and the decision in this document. Update `hybrid-wasm.md` and `go-compatibility.md` (stable or experimental, boundary rules, the zero-copy note).
 
 Each Phase 6 task follows the same Files/Test/Done-when discipline: files are `src/typechecker/stdlib/simd.js`, `src/backend/wasm/stdlib/simd.js`, `src/backend/js/stdlib/simd.js`, `src/backend/wasm/encode.js`, `src/backend/wasm/wat.js`, `src/backend/wasm/boundary.js` and `runtime/stdlib/gofront/simd/`; tests go in `test/unit/wasm/simd.test.js`, `encode.test.js`, `wat.test.js` and `boundary.test.js`; every operation is checked against a scalar `[4]float32` reference on both backends.
 
 ### Phase 7.1: Example adoption and compatibility documentation
 
-- [ ] **Task 7.1** — Adopt WASM JSON in `example/hybrid` (load a level or config inside the `wasm` package). Add a CSV example to `example/simple`, and a `context`-cancelled `fetch` to `example/preact`.
-- [ ] **Task 7.2** — Update [`go-compatibility.md`](../go-compatibility.md): the scope rule, the excluded-package table, the string-semantics table from [§1.1](#11-string-semantics-both-backends), the `goto` and `//go:embed` rows, the strict-mode runtime-panic row, the `maps.Keys` change, `context` without `Done()`, `%p`, and the `crypto/*` caveat.
-- [ ] **Task 7.3** — Regenerate the stdlib tables in `language-support.md` and `hybrid-wasm.md`. Update [`architecture.md`](../architecture.md) with `runtime/stdlib/`, `scripts/`, `test/conformance/` and the manifest.
+- [ ] **Task 7.1a** — Adopt WASM JSON in `example/hybrid` (load a level or config inside the `wasm` package). Add a CSV example to `example/simple`, and a `context`-cancelled `fetch` to `example/preact`.
+- [ ] **Task 7.1b** — Update [`go-compatibility.md`](../go-compatibility.md): the scope rule, the excluded-package table, the string-semantics table from [§1.1](#11-string-semantics-both-backends), the `goto` and `//go:embed` rows, the strict-mode runtime-panic row, the `maps.Keys` change, `context` without `Done()`, `%p`, and the `crypto/*` caveat.
+- [ ] **Task 7.1c** — Regenerate the stdlib tables in `language-support.md` and `hybrid-wasm.md`. Update [`architecture.md`](../architecture.md) with `runtime/stdlib/`, `scripts/`, `test/conformance/` and the manifest.
 
 ### Phase 7.2: Baseline verification, release gates and changelog
 
-- [ ] **Task 7.4** — Confirm the [`v2.0.0`](../v2.0.0/native-go-engine.md) baseline against what v1.8.0 actually shipped (including the SIMD promotion decision and the final manifest), and declare the JS-engine feature freeze.
-- [ ] **Task 7.5** — Verification: `npm test`, `npm run check`, `npm run build`, `npm run test:e2e`, `npm run bench`, `npm run conformance`. Check for no regression in `app.wasm` size for apps that do not import new packages.
-- [ ] **Task 7.6** — `CHANGELOG.md` (with a breaking-changes section: `maps.Keys`/`Values`, strict-mode runtime panics, typed-constant overflow errors) and [`roadmap.md`](../roadmap.md).
+- [ ] **Task 7.2a** — Confirm the [`v2.0.0`](../v2.0.0/native-go-engine.md) baseline against what v1.8.0 actually shipped (including the SIMD promotion decision and the final manifest), and declare the JS-engine feature freeze.
+- [ ] **Task 7.2b** — Verification: `npm test`, `npm run check`, `npm run build`, `npm run test:e2e`, `npm run bench`, `npm run conformance`. Check for no regression in `app.wasm` size for apps that do not import new packages.
+- [ ] **Task 7.2c** — `CHANGELOG.md` (with a breaking-changes section: `maps.Keys`/`Values`, strict-mode runtime panics, typed-constant overflow errors) and [`roadmap.md`](../roadmap.md).
 
 ---
 
@@ -1111,7 +1111,7 @@ Each Phase 6 task follows the same Files/Test/Done-when discipline: files are `s
 - **`test/unit/language/expressions.test.js`** (extended): pointer-receiver method expressions.
 - **`test/unit/compiler/strict-panics.test.js`:** runtime-panic parity cases and the `__at` elision assertions; a `js` package emits no helpers.
 - **`test/unit/language/control-flow.test.js`** (extended): the `goto` diagnostic in all targets.
-- **`test/unit/language/parity-matrix.test.js`:** one generated fixture per `language-support.md` row, including the rows added in Task 0.5a.
+- **`test/unit/language/parity-matrix.test.js`:** one generated fixture per `language-support.md` row, including the rows added in Task 0.3c.
 - **`test/unit/compiler/stdlib-go.test.js`:**
   - Go-source resolution and in-target compilation.
   - Name coexistence.
@@ -1132,7 +1132,7 @@ Each Phase 6 task follows the same Files/Test/Done-when discipline: files are `s
 
 ### Conformance (against real Go)
 - `test/conformance/{iter,cmp,slices,maps,sort,fmt,io,bufio,url,context,utf8,unicode,strconv,math,bits,time,strings,bytes,sync,container,hash,crypto,base32,utf16,cmplx,atomic,csv,json,log,rand}/`: output must match Go byte for byte on JS and on WASM. `context` fixtures avoid wall-clock timing and use an injected clock. `log` fixtures set `SetFlags(0)`. `rand` fixtures seed a `PCG` explicitly.
-- Fixtures obey [§1.1](#11-string-semantics-both-backends): no `len`, indexing or `range` on non-ASCII string literals. The runner lints this (Task 1.3c).
+- Fixtures obey [§1.1](#11-string-semantics-both-backends): no `len`, indexing or `range` on non-ASCII string literals. The runner lints this (Task 1.2c).
 - The JSON corpus covers:
   - Go's own `encoding/json` test vectors, limited to the supported surface.
   - Tag permutations, embedded promotion, `omitempty`, case folding.
@@ -1158,9 +1158,9 @@ Each Phase 6 task follows the same Files/Test/Done-when discipline: files are `s
 - A CSV bare quote returns `*csv.ParseError` wrapping `ErrBareQuote` with the line and column.
 
 ### Performance and size
-- Dev-mode `app.wasm` and `app.js` for `example/hybrid` without new imports must be byte-identical in size to v1.7.0. The only exceptions are code affected by the pointer fix (Task 0.1: addresses of scalar fields or elements), the array fix (Task 0.8: array copies that clone elision cannot remove), per-iteration boxes for captured loop variables (Task 0.10), and strict-mode index helpers that elision cannot remove (Task 0.16).
+- Dev-mode `app.wasm` and `app.js` for `example/hybrid` without new imports must be byte-identical in size to v1.7.0. The only exceptions are code affected by the pointer fix (Task 0.1: addresses of scalar fields or elements), the array fix (Task 0.5a: array copies that clone elision cannot remove), per-iteration boxes for captured loop variables (Task 0.5d), and strict-mode index helpers that elision cannot remove (Task 0.7c).
 - The pointer fast path: a micro-benchmark of `*p` on a boxed local (`&x`) must stay within 5% of v1.7.0.
-- The WASM JSON benchmark (Task 5.6) is recorded in this document.
-- `npm run bench` must show no regression in the hybrid raycast. Neither the array-copy fix (Task 0.8b) nor the strict-mode runtime checks (Task 0.16b) may slow the scalar raycast by more than 3% each; the analysis is extended until they do not, and the checks are never shipped disabled.
-- `test/e2e/perf/zero-alloc.js` must pass after Tasks 0.8, 0.10 and 0.16.
+- The WASM JSON benchmark (Task 5.2d) is recorded in this document.
+- `npm run bench` must show no regression in the hybrid raycast. Neither the array-copy fix (Task 0.5b) nor the strict-mode runtime checks (Task 0.7d) may slow the scalar raycast by more than 3% each; the analysis is extended until they do not, and the checks are never shipped disabled.
+- `test/e2e/perf/zero-alloc.js` must pass after Tasks 0.5a, 0.5d and 0.7c.
 - The SIMD particle and `IntersectRayAABB4` raycast results, with allocations per run, are recorded in §10.6 together with the promotion decision.
