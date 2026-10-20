@@ -94,7 +94,7 @@ function formatInstruction(inst) {
 			return `${op} (type $t${inst.typeIndex ?? 0})`;
 		case "call_ref":
 		case "return_call_ref":
-			return `${op} (type $t${inst.typeIndex ?? 0})`;
+			return `${op} ${inst.typeName ? (inst.typeName.startsWith("$") ? inst.typeName : `$${inst.typeName}`) : `$t${inst.typeIndex ?? 0}`}`;
 		case "ref.func":
 			return `ref.func ${inst.funcIndex ?? inst.index ?? 0}`;
 		case "local.get":
@@ -214,11 +214,15 @@ function formatInstruction(inst) {
 		case "ref.cast":
 		case "ref.cast_null": {
 			const ht =
-				inst.typeIndex !== undefined
-					? `$t${inst.typeIndex}`
-					: inst.heapType !== undefined
-						? String(inst.heapType)
-						: 0;
+				inst.typeName !== undefined
+					? inst.typeName.startsWith("$")
+						? inst.typeName
+						: `$${inst.typeName}`
+					: inst.typeIndex !== undefined
+						? `$t${inst.typeIndex}`
+						: inst.heapType !== undefined
+							? String(inst.heapType)
+							: 0;
 			return `${op} ${ht}`;
 		}
 		case "any.convert_extern":

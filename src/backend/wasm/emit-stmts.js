@@ -315,57 +315,8 @@ export class StmtsEmitter {
 			return;
 		}
 
-		if (l.kind === "UnaryExpr" && l.op === "*") {
-			const structInfo = this._resolveStructInfo(l.operand);
-			if (structInfo) {
-				const baseWType = this.toWasmType(l.operand._type);
-				const tmpL = this.acquireTemp(baseWType);
-				const tmpR = this.acquireTemp(baseWType);
-				this.emitExpr(l.operand, baseWType);
-				this.pushInstruction({ op: "local.set", index: tmpL });
-				this.emitExpr(r, baseWType);
-				this.pushInstruction({ op: "local.set", index: tmpR });
-				for (let i = 0; i < structInfo.fields.length; i++) {
-					this.pushInstruction({ op: "local.get", index: tmpL });
-					this.pushInstruction({ op: "local.get", index: tmpR });
-					this.pushInstruction({
-						op: "struct.get",
-						typeIndex: structInfo.typeIndex,
-						fieldIndex: i,
-					});
-					this.pushInstruction({
-						op: "struct.set",
-						typeIndex: structInfo.typeIndex,
-						fieldIndex: i,
-					});
-				}
-				this.releaseTemp(tmpR, baseWType);
-				this.releaseTemp(tmpL, baseWType);
-				return;
-			}
-			const operandGoType =
-				l.operand._type ??
-				(l.operand.kind === "Ident"
-					? this.resolveLocal(l.operand.name)?.goType
-					: null) ??
-				this._resolveExprGoType(l.operand);
-			const box = this.mod.getBoxType(operandGoType?.base ?? operandGoType);
-			const baseWType = {
-				kind: "ref",
-				nullable: true,
-				typeIndex: box.typeIndex,
-			};
-			const boxTmp = this.acquireTemp(baseWType);
-			this.emitExpr(l.operand, baseWType);
-			this.pushInstruction({ op: "local.set", index: boxTmp });
-			this.pushInstruction({ op: "local.get", index: boxTmp });
-			this.emitExpr(r, box.wType);
-			this.pushInstruction({
-				op: "struct.set",
-				typeIndex: box.typeIndex,
-				fieldIndex: 0,
-			});
-			this.releaseTemp(boxTmp, baseWType);
+		if ((l.kind === "UnaryExpr" && l.op === "*") || l.kind === "StarExpr") {
+			this._emitDerefAssign(l, r);
 			return;
 		}
 
@@ -419,6 +370,130 @@ export class StmtsEmitter {
 			});
 			return;
 		}
+	}
+
+	_emitStructDerefAssign(operand, r, structInfo) {
+		const baseWType = this.toWasmType(operand._type);
+		const tmpL = this.acquireTemp(baseWType);
+		const tmpR = this.acquireTemp(baseWType);
+		this.emitExpr(operand, baseWType);
+		this.pushInstruction({ op: "local.set", index: tmpL });
+		this.emitExpr(r, baseWType);
+		this.pushInstruction({ op: "local.set", index: tmpR });
+		for (let i = 0; i < structInfo.fields.length; i++) {
+			this.pushInstruction({ op: "local.get", index: tmpL });
+			this.pushInstruction({ op: "local.get", index: tmpR });
+			this.pushInstruction({
+				op: "struct.get",
+				typeIndex: structInfo.typeIndex,
+				fieldIndex: i,
+			});
+			this.pushInstruction({
+				op: "struct.set",
+				typeIndex: structInfo.typeIndex,
+				fieldIndex: i,
+			});
+		}
+		this.releaseTemp(tmpR, baseWType);
+		this.releaseTemp(tmpL, baseWType);
+	}
+
+	_emitDerefAssign(l, r) {
+		const operand = l.operand ?? l.expr;
+		const structInfo = this._resolveStructInfo(operand);
+		if (structInfo) {
+			this._emitStructDerefAssign(operand, r, structInfo);
+			return;
+		}
+		const operandGoType =
+			operand._type ??
+			(operand.kind === "Ident"
+				? this.resolveLocal(operand.name)?.goType
+				: null) ??
+			this._resolveExprGoType(operand);
+		const baseGoType = operandGoType?.base ?? operandGoType;
+		const box = this.mod.getBoxType(baseGoType);
+		const ptr = this.mod.getPtrType(baseGoType);
+		const acc = this.mod.getAccType(baseGoType);
+		const ptrWType = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: ptr.typeIndex,
+			typeName: ptr.name,
+		};
+		const ptrTmp = this.acquireTemp(ptrWType);
+		const valTmp = this.acquireTemp(box.wType);
+		this.emitExpr(operand, ptrWType);
+		this.pushInstruction({ op: "local.set", index: ptrTmp });
+		this.emitExpr(r, box.wType);
+		this.pushInstruction({ op: "local.set", index: valTmp });
+
+		this.pushInstruction({ op: "local.get", index: ptrTmp });
+		this.pushInstruction({
+			op: "ref.test",
+			typeIndex: box.typeIndex,
+			typeName: box.name,
+		});
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: ptrTmp });
+		this.pushInstruction({
+			op: "ref.cast",
+			typeIndex: box.typeIndex,
+			typeName: box.name,
+		});
+		this.pushInstruction({ op: "local.get", index: valTmp });
+		this.pushInstruction({
+			op: "struct.set",
+			typeIndex: box.typeIndex,
+			typeName: box.name,
+			fieldIndex: 0,
+		});
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "local.get", index: ptrTmp });
+		this.pushInstruction({
+			op: "ref.cast",
+			typeIndex: acc.typeIndex,
+			typeName: acc.name,
+		});
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: acc.typeIndex,
+			typeName: acc.name,
+			fieldIndex: 0,
+		});
+		this.pushInstruction({ op: "local.get", index: ptrTmp });
+		this.pushInstruction({
+			op: "ref.cast",
+			typeIndex: acc.typeIndex,
+			typeName: acc.name,
+		});
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: acc.typeIndex,
+			typeName: acc.name,
+			fieldIndex: 1,
+		});
+		this.pushInstruction({ op: "local.get", index: valTmp });
+		this.pushInstruction({ op: "local.get", index: ptrTmp });
+		this.pushInstruction({
+			op: "ref.cast",
+			typeIndex: acc.typeIndex,
+			typeName: acc.name,
+		});
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: acc.typeIndex,
+			typeName: acc.name,
+			fieldIndex: 3,
+		});
+		this.pushInstruction({
+			op: "call_ref",
+			typeIndex: acc.setFuncTypeIndex,
+		});
+		this.pushInstruction("end");
+
+		this.releaseTemp(valTmp, box.wType);
+		this.releaseTemp(ptrTmp, ptrWType);
 	}
 
 	_emitTupleAssign(lhsNodes, rhsNode, op) {
@@ -925,32 +1000,53 @@ export class StmtsEmitter {
 
 		if ((l.kind === "UnaryExpr" && l.op === "*") || l.kind === "StarExpr") {
 			const operand = l.operand ?? l.expr;
-			const box = this.mod.getBoxType(operand._type?.base ?? operand._type);
-			if (box) {
-				const baseWType = {
+			const operandGoType =
+				operand._type ??
+				(operand.kind === "Ident"
+					? this.resolveLocal(operand.name)?.goType
+					: null) ??
+				this._resolveExprGoType(operand);
+			const baseGoType = operandGoType?.base ?? operandGoType;
+			const box = this.mod.getBoxType(baseGoType);
+			const ptr = this.mod.getPtrType(baseGoType);
+			if (box && ptr) {
+				const ptrWType = {
 					kind: "ref",
 					nullable: true,
-					typeIndex: box.typeIndex,
+					typeIndex: ptr.typeIndex,
+					typeName: ptr.name,
 				};
-				const boxTmp = this.acquireTemp(baseWType);
-				this.emitExpr(operand, baseWType);
+				const boxTmp = this.acquireTemp(ptrWType);
+				this.emitExpr(operand, ptrWType);
 				this.pushInstruction({ op: "local.set", index: boxTmp });
 				this.pushInstruction({ op: "local.get", index: boxTmp });
+				this.pushInstruction({
+					op: "ref.cast",
+					typeIndex: box.typeIndex,
+					typeName: box.name,
+				});
 				this.pushInstruction({ op: "local.get", index: boxTmp });
+				this.pushInstruction({
+					op: "ref.cast",
+					typeIndex: box.typeIndex,
+					typeName: box.name,
+				});
 				this.pushInstruction({
 					op: "struct.get",
 					typeIndex: box.typeIndex,
+					typeName: box.name,
 					fieldIndex: 0,
 				});
 				const targetType = box.wType;
 				this.emitExpr(r, targetType);
-				this.emitBinaryOp(baseOp, targetType, l._type ?? operand._type?.base);
+				this.emitBinaryOp(baseOp, targetType, l._type ?? baseGoType);
 				this.pushInstruction({
 					op: "struct.set",
 					typeIndex: box.typeIndex,
+					typeName: box.name,
 					fieldIndex: 0,
 				});
-				this.releaseTemp(boxTmp, baseWType);
+				this.releaseTemp(boxTmp, ptrWType);
 				return;
 			}
 		}
@@ -1040,34 +1136,51 @@ export class StmtsEmitter {
 			const operand = expr.operand ?? expr.expr;
 			const structInfo = this._resolveStructInfo(operand);
 			if (!structInfo) {
-				const box = this.mod.getBoxType(operand._type?.base ?? operand._type);
-				if (box) {
-					const baseWType = {
+				const operandGoType =
+					operand._type ??
+					(operand.kind === "Ident"
+						? this.resolveLocal(operand.name)?.goType
+						: null) ??
+					this._resolveExprGoType(operand);
+				const baseGoType = operandGoType?.base ?? operandGoType;
+				const box = this.mod.getBoxType(baseGoType);
+				const ptr = this.mod.getPtrType(baseGoType);
+				if (box && ptr) {
+					const ptrWType = {
 						kind: "ref",
 						nullable: true,
-						typeIndex: box.typeIndex,
+						typeIndex: ptr.typeIndex,
+						typeName: ptr.name,
 					};
-					const boxTmp = this.acquireTemp(baseWType);
-					this.emitExpr(operand, baseWType);
+					const boxTmp = this.acquireTemp(ptrWType);
+					this.emitExpr(operand, ptrWType);
 					this.pushInstruction({ op: "local.set", index: boxTmp });
 					this.pushInstruction({ op: "local.get", index: boxTmp });
+					this.pushInstruction({
+						op: "ref.cast",
+						typeIndex: box.typeIndex,
+						typeName: box.name,
+					});
 					this.pushInstruction({ op: "local.get", index: boxTmp });
+					this.pushInstruction({
+						op: "ref.cast",
+						typeIndex: box.typeIndex,
+						typeName: box.name,
+					});
 					this.pushInstruction({
 						op: "struct.get",
 						typeIndex: box.typeIndex,
+						typeName: box.name,
 						fieldIndex: 0,
 					});
-					this._emitIncDecStep(
-						op,
-						box.wType,
-						operand._type?.base ?? operand._type,
-					);
+					this._emitIncDecStep(op, box.wType, baseGoType);
 					this.pushInstruction({
 						op: "struct.set",
 						typeIndex: box.typeIndex,
+						typeName: box.name,
 						fieldIndex: 0,
 					});
-					this.releaseTemp(boxTmp, baseWType);
+					this.releaseTemp(boxTmp, ptrWType);
 					return;
 				}
 			}
