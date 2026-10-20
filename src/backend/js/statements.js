@@ -184,8 +184,7 @@ export const statementGenMethods = {
 			this.line(`const ${tmp} = ${rhs[0]};`);
 			for (let i = 0; i < lhs.length; i++) {
 				if (lhs[i] === "_") continue;
-				const prefix = redecls[i] ? "" : "let ";
-				this.line(`${prefix}${lhs[i]} = ${tmp}[${i}];`);
+				this._genDefineSingleVar([lhs[i]], [`${tmp}[${i}]`], [redecls[i]]);
 			}
 		} else {
 			for (let i = 0; i < lhs.length; i++) {
@@ -193,9 +192,17 @@ export const statementGenMethods = {
 					this.line(`${rhs[i]};`);
 					continue;
 				}
-				const prefix = redecls[i] ? "" : "let ";
-				this.line(`${prefix}${lhs[i]} = ${rhs[i]};`);
+				this._genDefineSingleVar([lhs[i]], [rhs[i]], [redecls[i]]);
 			}
+		}
+	},
+
+	// Address-taken variables introduced by a destructuring declaration are
+	// re-bound to their { value } box.
+	_boxDeclaredNames(names) {
+		for (const n of names) {
+			if (n && n !== "_" && this._boxedVars.has(n))
+				this.line(`${n} = { value: ${n} };`);
 		}
 	},
 
@@ -221,6 +228,7 @@ export const statementGenMethods = {
 			const rhsStr = rhs.length === 1 ? rhs[0] : `[${rhs.join(", ")}]`;
 			const names = lhs.map((n) => (n === "_" ? "" : n));
 			this.line(`let [${names.join(", ")}] = ${rhsStr};`);
+			this._boxDeclaredNames(names);
 		} else {
 			this._genDefineMixedRedecl(lhs, rhs, redecls);
 		}
@@ -863,14 +871,29 @@ export const statementGenMethods = {
 		}
 	},
 
+	// Interface-typed tags may hold boxed named values; cases compare with __ifeq.
+	_switchTagAndCases(stmt) {
+		const tag = stmt.tag ? this.genExpr(stmt.tag) : "true";
+		if (!stmt.tag || !this._isIfaceType(stmt.tag._type))
+			return { tag, caseExpr: (e) => this.genExpr(e) };
+		this.useHelper("ifeq");
+		this._swCounter = (this._swCounter ?? 0) + 1;
+		const tmp = `__sw${this._swCounter}`;
+		this.line(`const ${tmp} = ${tag};`);
+		return {
+			tag: "true",
+			caseExpr: (e) => `__ifeq(${tmp}, ${this._genIfaceOperand(e)})`,
+		};
+	},
+
 	genSwitch(stmt) {
 		const genBody = () => {
-			const tag = stmt.tag ? this.genExpr(stmt.tag) : "true";
+			const { tag, caseExpr } = this._switchTagAndCases(stmt);
 			this.line(`switch (${tag}) {`);
 			this.indented(() => {
 				for (const c of stmt.cases) {
 					if (c.list) {
-						for (const e of c.list) this.line(`case ${this.genExpr(e)}:`);
+						for (const e of c.list) this.line(`case ${caseExpr(e)}:`);
 					} else {
 						this.line("default:");
 					}
@@ -926,6 +949,13 @@ export const statementGenMethods = {
 					.join(" || ");
 				this.line(`${first ? "if" : "else if"} (${cond}) {`);
 				this.indented(() => {
+					// A single named non-struct case binds the unboxed value.
+					if (
+						stmt.assign &&
+						c.types.length === 1 &&
+						this._isNamedBoxTypeNode(c.types[0])
+					)
+						this.line(`const ${stmt.assign} = __tsw.__gfUnbox();`);
 					for (const s of c.stmts) this.genStmt(s);
 				});
 				this.line("}");

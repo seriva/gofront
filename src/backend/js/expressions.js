@@ -7,6 +7,7 @@ import {
 } from "../../lower/index.js";
 import {
 	ERROR,
+	isAny,
 	isComplex,
 	isTypedArraySlice,
 	typedArrayConstructorForElem,
@@ -55,6 +56,8 @@ const NAMED_ZERO_TABLE = {
 	"encoding/binary.BigEndian": ["binary", "__binary_be"],
 	"base64.Encoding": ["base64", "__base64_std"],
 	"encoding/base64.Encoding": ["base64", "__base64_std"],
+	"simd.F32x4": [null, "Object.freeze([0, 0, 0, 0])"],
+	F32x4: [null, "Object.freeze([0, 0, 0, 0])"],
 };
 
 // Splits a generated JS lvalue at its outermost trailing access:
@@ -349,7 +352,8 @@ const EXPR_GEN_DELEGATE = {
 /** @type {ThisType<CodeGen>} */
 export const expressionGenMethods = {
 	genExpr(expr) {
-		if (expr._ifaceBox && !expr._ifaceBoxing) {
+		if (this._isNamedIfaceBox(expr)) return this._genNamedIfaceBoxExpr(expr);
+		if (expr._ifaceBox && !expr._ifaceBoxing && !this._isNamedBoxKind(expr)) {
 			expr._ifaceBoxing = true;
 			try {
 				this.useHelper("ifaceBox");
@@ -393,6 +397,29 @@ export const expressionGenMethods = {
 				if (m) return this[m](expr);
 				throw new Error(`CodeGen: unhandled expression kind '${expr.kind}'`);
 			}
+		}
+	},
+
+	_isNamedBoxKind(expr) {
+		return expr._ifaceBox === "named" || expr._ifaceBox === "named_ptr";
+	},
+
+	_isNamedIfaceBox(expr) {
+		return (
+			this._isNamedBoxKind(expr) && !expr._ifaceBoxing && !expr._noNamedBox
+		);
+	},
+
+	_genNamedIfaceBoxExpr(expr) {
+		expr._ifaceBoxing = true;
+		try {
+			return this._genNamedIfaceBox(
+				this.genExpr(expr),
+				expr._ifaceNamedType,
+				expr._ifaceBox === "named_ptr",
+			);
+		} finally {
+			expr._ifaceBoxing = false;
 		}
 	},
 
@@ -542,8 +569,13 @@ export const expressionGenMethods = {
 	_emitParamCopies(params) {
 		for (const p of params) {
 			if (p.variadic || !p.name || p.name === "_") continue;
+			if (this._boxedVars.has(p.name)) {
+				// Address-taken parameter: rebind it to a { value } box.
+				this.line(`${p.name} = { value: ${p.name} };`);
+				continue;
+			}
 			const t = this._typeFromNode(p.type);
-			if (!t || this._boxedVars.has(p.name)) continue;
+			if (!t) continue;
 			if (this._fnMutates(p.name)) {
 				this.line(`${p.name} = ${this._cloneJs(t, p.name)};`);
 				this._markOwnership(p.name, true);
@@ -621,8 +653,12 @@ export const expressionGenMethods = {
 
 	_genSelectorExpr(expr) {
 		if (expr._isMethodExpr) {
+			const namedExpr = this._namedMethodExprInfo(expr);
+			if (namedExpr) return `${namedExpr.cls}.$${expr.field}`;
 			return `((recv, ...args) => recv.${expr.field}(...args))`;
 		}
+		const namedValue = this._genNamedMethodValue(expr);
+		if (namedValue !== undefined) return namedValue;
 		if (expr.expr.kind === "Ident") {
 			const nsConst = NS_CONSTANTS[expr.expr.name]?.[expr.field];
 			if (nsConst !== undefined) {
@@ -672,6 +708,81 @@ export const expressionGenMethods = {
 		return f;
 	},
 
+	// ── Named non-struct types with methods: raw values, static dispatch ──
+
+	// Boxes a raw named value (or *T) entering an interface so dynamic dispatch works.
+	_genNamedIfaceBox(js, type, isPtr) {
+		const info = this._namedBoxInfo(type);
+		if (!info) return js;
+		return isPtr ? `new ${info.cls}$Ptr(${js})` : `new ${info.cls}(${js})`;
+	},
+
+	// Static target of `x.M` on a named non-struct type: its class and the
+	// receiver argument (the { value } box for pointer receivers).
+	_namedMethodTarget(sel) {
+		const recvType = sel.expr?._type;
+		const viaPtr = recvType?.kind === "pointer";
+		const info = this._namedBoxInfo(viaPtr ? recvType.base : recvType);
+		const method = info?.methods.get(sel.field);
+		if (!method) return null;
+		let recv;
+		if (method._ptrRecv) {
+			recv = viaPtr ? this.genExpr(sel.expr) : this._genAddressOfExpr(sel.expr);
+		} else {
+			recv = viaPtr
+				? `${this.genExpr(sel.expr)}.value`
+				: this.genExpr(sel.expr);
+		}
+		return { cls: info.cls, recv };
+	},
+
+	// `x.M` used as a value: binds the receiver now, as Go does.
+	_genNamedMethodValue(expr) {
+		if (!expr._isMethodValue || expr._callee) return undefined;
+		const target = this._namedMethodTarget(expr);
+		if (!target) return undefined;
+		return `((__r) => (...__a) => ${target.cls}.$${expr.field}(__r, ...__a))(${target.recv})`;
+	},
+
+	_genAddressOfExpr(operand) {
+		return this._genUnaryExpr({
+			kind: "UnaryExpr",
+			op: "&",
+			operand,
+			_type: { kind: "pointer", base: operand._type },
+		});
+	},
+
+	// `T.M` method expression on a named non-struct type.
+	_namedMethodExprInfo(sel) {
+		const t =
+			sel.expr?._type?.kind === "named"
+				? sel.expr._type
+				: this.checker?.types.get(sel.expr?.name);
+		const info = this._namedBoxInfo(t);
+		return info?.methods.has(sel.field) ? info : null;
+	},
+
+	_genNamedMethodCall(expr) {
+		const sel = expr.func;
+		if (sel._isMethodExpr) {
+			const info = this._namedMethodExprInfo(sel);
+			if (!info) return undefined;
+			return `${info.cls}.$${sel.field}(${this._genCallArgs(expr)})`;
+		}
+		const target = this._namedMethodTarget(sel);
+		if (!target) return undefined;
+		const args = this._genCallArgs(expr);
+		return `${target.cls}.$${sel.field}(${args ? `${target.recv}, ${args}` : target.recv})`;
+	},
+
+	_genCallArgs(expr) {
+		if (expr._multiForward) return `...${this.genExpr(expr.args[0])}`;
+		return expr.args
+			.map((a) => (a._spread ? `...${this.genExpr(a)}` : this.genExpr(a)))
+			.join(", ");
+	},
+
 	_genPointerSelectorField(expr, base) {
 		if (this._isStructPointerType(expr.expr._type)) {
 			const sel = `${base}.${expr.field}`;
@@ -706,9 +817,10 @@ export const expressionGenMethods = {
 	},
 
 	_isStringExprType(exprType) {
+		const t = exprType?.kind === "named" ? exprType.underlying : exprType;
 		return (
-			(exprType?.kind === "basic" && exprType.name === "string") ||
-			(exprType?.kind === "untyped" && exprType.base === "string")
+			(t?.kind === "basic" && t.name === "string") ||
+			(t?.kind === "untyped" && t.base === "string")
 		);
 	},
 
@@ -751,22 +863,104 @@ export const expressionGenMethods = {
 		const val = hoist ? "__v" : src;
 		const check = this._typeCheckExpr(expr.type, val);
 		const wrap = (body) => (hoist ? `((__v) => ${body})(${src})` : body);
+		// Named non-struct values sit in interfaces as boxes; the asserted value is raw.
+		const out = this._isNamedBoxTypeNode(expr.type)
+			? `${val}.__gfUnbox()`
+			: val;
 		if (!expr._commaOk) {
 			// plain assertion: panic if check fails (matches Go behavior)
 			if (check === "true") return src; // can't check at runtime — pass through
 			return wrap(
-				`(${check} ? ${val} : (() => { throw new Error("interface conversion: type assertion failed"); })())`,
+				`(${check} ? ${out} : (() => { throw new Error("interface conversion: type assertion failed"); })())`,
 			);
 		}
 		// comma-ok: emit [value-or-zero, runtimeTypeCheck]
 		const zero = this.zeroValueForTypeNode(expr.type);
-		return wrap(`(${check} ? [${val}, true] : [${zero}, false])`);
+		return wrap(`(${check} ? [${out}, true] : [${zero}, false])`);
+	},
+
+	_typeNameCheckExpr(name, val) {
+		if (TYPEOF_NUMBER_NAMES.has(name)) return `typeof ${val} === "number"`;
+		if (name === "string") return `typeof ${val} === "string"`;
+		if (name === "bool") return `typeof ${val} === "boolean"`;
+		if (name === "nil") return `${val} === null`;
+		if (name === "error")
+			return `(typeof ${val} === "object" && ${val} !== null && typeof ${val}.Error === "function")`;
+		if (this.structNames.has(name))
+			return `(${val} instanceof ${name} && ${val}.__p !== true)`;
+		const named = this.checker?.types.get(name);
+		const namedInfo = this._namedBoxInfo(named);
+		if (namedInfo) return `(${val} instanceof ${namedInfo.cls})`;
+		// User-declared interfaces: check the dynamic value has every method.
+		if (!name.includes(".") && named?.underlying?.kind === "interface")
+			return this._ifaceMethodCheck(val, [...named.underlying.methods.keys()]);
+		return "true"; // unknown type — can't check at runtime
+	},
+
+	// Anonymous interfaces and pointers to named non-struct types; null otherwise.
+	_namedOrIfaceCheckExpr(typeNode, val) {
+		if (typeNode.kind === "InterfaceType" && !(typeNode.embeds?.length > 0))
+			return this._ifaceMethodCheck(
+				val,
+				(typeNode.methods ?? []).map((m) => m.name),
+			);
+		if (typeNode.kind === "PointerType" && typeNode.base?.kind === "TypeName") {
+			const info = this._namedBoxInfo(
+				this.checker?.types.get(typeNode.base.name),
+			);
+			if (info) return `(${val} instanceof ${info.cls}$Ptr)`;
+		}
+		return null;
+	},
+
+	_ifaceMethodCheck(val, methodNames) {
+		const checks = methodNames.map((m) => `typeof ${val}.${m} === "function"`);
+		return `(${[`${val} != null`, ...checks].join(" && ")})`;
+	},
+
+	_isNamedBoxTypeNode(typeNode) {
+		if (typeNode?.kind === "TypeName")
+			return Boolean(
+				this._namedBoxInfo(this.checker?.types.get(typeNode.name)),
+			);
+		if (typeNode?.kind === "PointerType" && typeNode.base?.kind === "TypeName")
+			return Boolean(
+				this._namedBoxInfo(this.checker?.types.get(typeNode.base.name)),
+			);
+		return false;
 	},
 
 	_genTypeConversionCall(expr) {
-		const name = expr._conversionTargetType?.name;
+		const targetType = expr._conversionTargetType;
 		const arg = this.genExpr(expr.args[0]);
-		if (name && this.namedWrapperNames.has(name)) return `new ${name}(${arg})`;
+		const isRaw =
+			targetType?.name === "json.RawMessage" ||
+			targetType?.name === "encoding/json.RawMessage";
+		const base =
+			targetType?.kind === "named" ? targetType.underlying : targetType;
+		if (
+			targetType?.kind === "named" &&
+			base?.kind === "basic" &&
+			this._namedBoxInfo(targetType)
+		)
+			return this._genPrimitiveConversion(
+				{ expr: expr.args[0] },
+				arg,
+				base.name,
+			);
+		if (base?.kind === "slice") {
+			const elem = base.elem?.name;
+			if (
+				(elem === "byte" || elem === "uint8") &&
+				this._isStringExprType(expr.args[0]?._type)
+			) {
+				const enc = `new TextEncoder().encode(${arg})`;
+				return isRaw ? `((u) => { u.__raw = true; return u; })(${enc})` : enc;
+			}
+			if (isRaw) {
+				return `((u) => { u.__raw = true; return u; })(${arg})`;
+			}
+		}
 		return arg;
 	},
 
@@ -834,6 +1028,9 @@ export const expressionGenMethods = {
 			const args = expr.args.map((a) => this.genExpr(a)).join(", ");
 			return `${this.genExpr(expr.func.expr)}.subarray(${args})`;
 		}
+		if (recvName === "simd.F32x4" || recvName === "F32x4") {
+			return this._genSimdReceiverCall(expr);
+		}
 		if (recvName === "sync.Mutex" || recvName === "sync.RWMutex") {
 			if (expr.func.field === "TryLock" || expr.func.field === "TryRLock")
 				return "true";
@@ -879,6 +1076,35 @@ export const expressionGenMethods = {
 		return undefined;
 	},
 
+	_genSimdReceiverCall(expr) {
+		this.useHelper("simd");
+		const method = expr.func.field;
+		const recv = this.genExpr(expr.func.expr);
+		const helpers = {
+			Add: "__simd_add",
+			Sub: "__simd_sub",
+			Mul: "__simd_mul",
+			Div: "__simd_div",
+			Min: "__simd_min",
+			Max: "__simd_max",
+			Dot3: "__simd_dot3",
+			Dot4: "__simd_dot4",
+		};
+		if (helpers[method]) {
+			return `${helpers[method]}(${recv}, ${this.genExpr(expr.args[0])})`;
+		}
+		if (method === "Lane") {
+			return `${recv}[${this.genExpr(expr.args[0])}]`;
+		}
+		if (method === "WithLane") {
+			return `__simd_with_lane(${recv}, ${this.genExpr(expr.args[0])}, ${this.genExpr(expr.args[1])})`;
+		}
+		if (method === "Splat") {
+			return `__simd_splat(${this.genExpr(expr.args[0])})`;
+		}
+		return undefined;
+	},
+
 	_genSelectorCall(expr) {
 		if (this._isErrorMethodCall(expr)) {
 			const recv = this.genExpr(expr.func.expr);
@@ -896,6 +1122,8 @@ export const expressionGenMethods = {
 		const recvName = this._resolveRecvName(recvType);
 		const typed = this._genReceiverTypeCall(recvName, expr);
 		if (typed !== undefined) return typed;
+		const namedCall = this._genNamedMethodCall(expr);
+		if (namedCall !== undefined) return namedCall;
 		if (this.strict && this._isInterfaceType(recvType)) {
 			// Go panics with a nil-dereference runtime error; JS would throw a
 			// TypeError with a different message.
@@ -1098,7 +1326,9 @@ export const expressionGenMethods = {
 				? this.genValueExpr(match.value ?? match)
 				: fields[idx].zero;
 		} else {
-			values[idx] = `${this.genExpr(e.value)}.${ef}`;
+			const valExpr = this.genExpr(e.value);
+			values[idx] =
+				`(${valExpr} != null ? ${valExpr}.${ef} : ${fields[idx].zero})`;
 		}
 		return idx;
 	},
@@ -1115,6 +1345,11 @@ export const expressionGenMethods = {
 				for (const ef of embedFields) {
 					const idx = this._fillEmbedField(fields, ef, e, values);
 					if (idx > maxIdx) maxIdx = idx;
+				}
+				const embedIdx = fields.findIndex((f) => f.name === k);
+				if (embedIdx >= 0) {
+					values[embedIdx] = this.genValueExpr(e.value);
+					if (embedIdx > maxIdx) maxIdx = embedIdx;
 				}
 			} else {
 				const idx = fields.findIndex((f) => f.name === k);
@@ -1139,11 +1374,11 @@ export const expressionGenMethods = {
 		const maxExplicitIdx = hasPositional
 			? this._fillPositionalStructElems(fields, expr, values)
 			: this._fillKeyedStructElems(fields, expr, values);
-		if (maxExplicitIdx < 0) {
-			return `new ${typeName}()`;
-		}
-		const args = values.slice(0, maxExplicitIdx + 1);
-		return `new ${typeName}(${args.join(", ")})`;
+		const inst =
+			maxExplicitIdx < 0
+				? `new ${typeName}()`
+				: `new ${typeName}(${values.slice(0, maxExplicitIdx + 1).join(", ")})`;
+		return inst;
 	},
 
 	_genSliceOrArrayLit(t, expr) {
@@ -1178,6 +1413,14 @@ export const expressionGenMethods = {
 			return "{ _buf: [] }";
 		if (typeName === "strings.Builder" || typeName === "Builder")
 			return '{ _buf: "" }';
+		if (typeName === "simd.F32x4" || typeName === "F32x4") {
+			this.useHelper("simd");
+			const a = expr.elems[0] ? this.genExpr(expr.elems[0]) : "0";
+			const b = expr.elems[1] ? this.genExpr(expr.elems[1]) : "0";
+			const c = expr.elems[2] ? this.genExpr(expr.elems[2]) : "0";
+			const d = expr.elems[3] ? this.genExpr(expr.elems[3]) : "0";
+			return `__simd_f32x4(${a}, ${b}, ${c}, ${d})`;
+		}
 		if (typeName && this.structNames.has(typeName))
 			return this._genPositionalStructLit(typeName, expr);
 		if (typeName && this.namedWrapperNames.has(typeName))
@@ -1220,13 +1463,13 @@ export const expressionGenMethods = {
 		const namedType = this.checker?.types.get(typeName);
 		const u = namedType?.underlying;
 		if (u?.kind === "map") {
-			return `new ${typeName}({ ${this._genMapLitEntries(expr.elems)} })`;
+			return `{ ${this._genMapLitEntries(expr.elems)} }`;
 		}
 		// Default: slice
 		const elems = expr.elems
 			.map((e) => this.genValueExpr(e.kind === "KeyValueExpr" ? e.value : e))
 			.join(", ");
-		return `new ${typeName}([${elems}])`;
+		return `[${elems}]`;
 	},
 
 	// ── Helpers ───────────────────────────────────────────────────
@@ -1268,11 +1511,14 @@ export const expressionGenMethods = {
 	},
 
 	// Returns true if the AST node contains a function call (side-effect risk).
-	_hasCallExpr(node) {
+	_hasCallExpr(node, seen = new Set()) {
 		if (!node || typeof node !== "object") return false;
+		if (seen.has(node)) return false;
+		seen.add(node);
 		if (node.kind === "CallExpr") return true;
-		for (const v of Object.values(node)) {
-			if (v && typeof v === "object" && this._hasCallExpr(v)) return true;
+		for (const [k, v] of Object.entries(node)) {
+			if (k.startsWith("_") || k === "scope") continue;
+			if (v && typeof v === "object" && this._hasCallExpr(v, seen)) return true;
 		}
 		return false;
 	},
@@ -1288,6 +1534,15 @@ export const expressionGenMethods = {
 			if (entry[0]) this.useHelper(entry[0]);
 			return entry[1];
 		}
+		const named = this.checker?.types.get(name);
+		const u = named?.kind === "named" ? named.underlying : null;
+		if (
+			u &&
+			u.kind !== "struct" &&
+			u.kind !== "interface" &&
+			u.kind !== "named"
+		)
+			return this.zeroValueForType(u);
 		name = this._dequalify(name);
 		if (this.structNames.has(name)) return `new ${name}()`;
 		return "null";
@@ -1376,18 +1631,10 @@ export const expressionGenMethods = {
 	// Emit a JS boolean expression that checks whether `val` matches type node `t`.
 	_typeCheckExpr(typeNode, val) {
 		if (!typeNode) return "true";
-		if (typeNode.kind === "TypeName") {
-			const name = typeNode.name;
-			if (TYPEOF_NUMBER_NAMES.has(name)) return `typeof ${val} === "number"`;
-			if (name === "string") return `typeof ${val} === "string"`;
-			if (name === "bool") return `typeof ${val} === "boolean"`;
-			if (name === "nil") return `${val} === null`;
-			if (name === "error")
-				return `(typeof ${val} === "object" && ${val} !== null && typeof ${val}.Error === "function")`;
-			if (this.structNames.has(name))
-				return `(${val} instanceof ${name} && ${val}.__p !== true)`;
-			return "true"; // unknown type — can't check at runtime
-		}
+		if (typeNode.kind === "TypeName")
+			return this._typeNameCheckExpr(typeNode.name, val);
+		const extended = this._namedOrIfaceCheckExpr(typeNode, val);
+		if (extended) return extended;
 		if (
 			typeNode.kind === "PointerType" &&
 			typeNode.base?.kind === "TypeName" &&
@@ -1459,6 +1706,12 @@ export const expressionGenMethods = {
 			return expr.op === "==" ? cmp : `!${cmp}`;
 		}
 
+		if (this._isIfaceEquality(expr)) {
+			this.useHelper("ifeq");
+			const cmp = `__ifeq(${this._genIfaceOperand(expr.left)}, ${this._genIfaceOperand(expr.right)})`;
+			return expr.op === "==" ? cmp : `!${cmp}`;
+		}
+
 		if (this.strict && this._needsStrictOp(expr.op, expr._type)) {
 			const l = this.genExpr(expr.left);
 			const r = this.genExpr(expr.right);
@@ -1493,6 +1746,31 @@ export const expressionGenMethods = {
 		);
 	},
 
+	_isIfaceType(t) {
+		return isAny(t) || this._isInterfaceType(t);
+	},
+
+	// Interface comparisons go through __ifeq so boxed named values compare by
+	// dynamic type and value, as in Go (`err == ErrNotFound`).
+	_isIfaceEquality(expr) {
+		if (expr.op !== "==" && expr.op !== "!=") return false;
+		if (this._isNilLiteral(expr.left) || this._isNilLiteral(expr.right))
+			return false;
+		return (
+			this._isIfaceType(expr.left._type) || this._isIfaceType(expr.right._type)
+		);
+	},
+
+	// A concrete operand compared with an interface is converted to an interface first.
+	_genIfaceOperand(e) {
+		if (e._ifaceBox || this._isIfaceType(e._type)) return this.genExpr(e);
+		const isPtr = e._type?.kind === "pointer";
+		const named = isPtr ? e._type.base : e._type;
+		if (this._namedBoxInfo(named))
+			return this._genNamedIfaceBox(this.genExpr(e), named, isPtr);
+		return this.genExpr(e);
+	},
+
 	_isIntDivision(expr) {
 		return (
 			expr.op === "/" &&
@@ -1518,6 +1796,7 @@ export const expressionGenMethods = {
 		)
 			return null;
 		if (this._isStructEquality(expr) || this._isIntDivision(expr)) return null;
+		if (this._isIfaceEquality(expr)) return null;
 		if (expr.op === "&^") return "&";
 		if (expr.op === "==" || expr.op === "!=") {
 			if (this._isNilLiteral(expr.left) || this._isNilLiteral(expr.right))
@@ -1542,8 +1821,13 @@ export const expressionGenMethods = {
 			this.useHelper("error");
 			return `__error(${inner})`;
 		}
-		if (target && this.namedWrapperNames.has(target))
-			return `new ${target}(${inner})`;
+		if (target && this.namedWrapperNames.has(target)) {
+			const named = this.checker?.types.get(target);
+			const u = named?.underlying;
+			return u?.kind === "basic"
+				? this._genPrimitiveConversion(expr, inner, u.name)
+				: inner;
+		}
 		return this._genPrimitiveConversion(expr, inner, target);
 	},
 
@@ -1564,6 +1848,8 @@ export const expressionGenMethods = {
 		if (elem === "byte" || elem === "uint8") {
 			if (this._isStringExprType(expr.expr._type))
 				return `new TextEncoder().encode(${inner})`;
+			if (isAny(expr.expr._type) || !expr.expr._type)
+				return `(typeof ${inner} === "string" ? new TextEncoder().encode(${inner}) : new Uint8Array(${inner}))`;
 			return `new Uint8Array(${inner})`;
 		}
 		const typedCtor = typedArrayConstructorForElem(
@@ -1581,10 +1867,10 @@ export const expressionGenMethods = {
 	},
 
 	_genStringConversion(srcType, inner) {
-		if (srcType && this.isIntType(srcType))
-			return `String.fromCodePoint(${inner})`;
-		if (srcType?.kind === "slice") {
-			const elem = srcType.elem?.name;
+		const base = srcType?.kind === "named" ? srcType.underlying : srcType;
+		if (base && this.isIntType(base)) return `String.fromCodePoint(${inner})`;
+		if (base?.kind === "slice") {
+			const elem = base.elem?.name;
 			if (elem === "byte" || elem === "uint8")
 				return `new TextDecoder().decode(new Uint8Array(${inner}))`;
 			if (elem === "rune" || elem === "int" || elem === "int32")

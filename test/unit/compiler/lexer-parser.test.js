@@ -1,6 +1,10 @@
 // GoFront test suite — lexer, parser, dts-parser, codegen
 import { fileURLToPath } from "node:url";
 import {
+	parseJsonTag,
+	parseStructTag,
+} from "../../../src/parser/struct-tag.js";
+import {
 	assert,
 	assertContains,
 	assertEqual,
@@ -8,6 +12,7 @@ import {
 	compile,
 	DtsParser,
 	Lexer,
+	Parser,
 	parseDts,
 	runJs,
 	section,
@@ -79,6 +84,7 @@ function log(...args: any[]): void;
 	assert(values.has("log"), "expected log in values");
 	const fn = values.get("log");
 	assert(fn.kind === "func", "expected func kind");
+	assert(fn.variadic === true, "expected variadic true");
 });
 
 test("parseDts: function with optional parameter", () => {
@@ -635,10 +641,50 @@ test("parseDts: keyof type operator resolves to any", () => {
 	assertEqual(values.get("keys").name, "any");
 });
 
-test("parseDts: tuple type [T, U] resolves to any", () => {
-	const { values } = parseDts("declare var pair: [string, number];");
+test("parseDts: tuple type [T, U] resolves to []any in variable/parameter position", () => {
+	const { values } = parseDts(`
+declare var pair: [string, number];
+declare function takeTuple(t: [number, string]): void;
+`);
 	assert(values.has("pair"), "expected pair in values");
-	assertEqual(values.get("pair").name, "any");
+	assertEqual(values.get("pair").kind, "slice");
+	assertEqual(values.get("pair").elem.name, "any");
+
+	const fn = values.get("takeTuple");
+	assertEqual(fn.params[0].kind, "slice");
+	assertEqual(fn.params[0].elem.name, "any");
+});
+
+test("parseDts: tuple return type maps to multi-value return", () => {
+	const { values } = parseDts(`
+declare function useState(init: number): [number, (v: number) => void];
+`);
+	assert(values.has("useState"), "expected useState in values");
+	const fn = values.get("useState");
+	assertEqual(fn.kind, "func");
+	assertEqual(fn.returns.length, 2);
+	assertEqual(fn.returns[0].name, "float64");
+	assertEqual(fn.returns[1].name, "any");
+});
+
+test("parseDts: labelled tuple return maps to multi-value return", () => {
+	const { values } = parseDts(`
+declare function useTuple(): [state: string, setter: (val: string) => void];
+`);
+	const fn = values.get("useTuple");
+	assertEqual(fn.returns.length, 2);
+	assertEqual(fn.returns[0].name, "string");
+	assertEqual(fn.returns[1].name, "any");
+});
+
+test("parseDts: method with rest parameter propagates variadic: true", () => {
+	const { types } = parseDts(`
+interface Console {
+    log(...args: any[]): void;
+}
+`);
+	const consoleNs = types.get("Console");
+	assertEqual(consoleNs.members.log.variadic, true);
 });
 
 test("parseDts: string literal type resolves to string", () => {
@@ -810,6 +856,129 @@ func main() {
 	} catch (e) {
 		assertContains(e.message, ":");
 	}
+});
+
+// ═════════════════════════════════════════════════════════════
+// Struct tags — parser AST and reflect.StructTag parsing
+// ═════════════════════════════════════════════════════════════
+
+section("Struct tags — parseStructTag & parseJsonTag");
+
+test("parseStructTag parses basic key-value pairs", () => {
+	const tags = parseStructTag('json:"name" db:"id" xml:"user"');
+	assertEqual(tags.get("json"), "name");
+	assertEqual(tags.get("db"), "id");
+	assertEqual(tags.get("xml"), "user");
+	assertEqual(tags.size, 3);
+});
+
+test("parseStructTag handles empty, null, or malformed tags", () => {
+	assertEqual(parseStructTag("").size, 0);
+	assertEqual(parseStructTag(null).size, 0);
+	assertEqual(parseStructTag(undefined).size, 0);
+	assertEqual(parseStructTag("not a valid tag").size, 0);
+	assertEqual(parseStructTag('broken:"unterminated').size, 0);
+});
+
+test("parseStructTag unquotes escape sequences in tag values", () => {
+	const tags = parseStructTag('json:"hello \\"world\\"\\n"');
+	assertEqual(tags.get("json"), 'hello "world"\n');
+});
+
+test("parseJsonTag parses name, omitempty, and ignored directives", () => {
+	const t1 = parseJsonTag('json:"foo"');
+	assertEqual(t1.name, "foo");
+	assertEqual(t1.omitempty, false);
+	assertEqual(t1.ignored, false);
+
+	const t2 = parseJsonTag('json:"bar,omitempty"');
+	assertEqual(t2.name, "bar");
+	assertEqual(t2.omitempty, true);
+	assertEqual(t2.ignored, false);
+
+	const t3 = parseJsonTag('json:",omitempty"');
+	assertEqual(t3.name, null);
+	assertEqual(t3.omitempty, true);
+	assertEqual(t3.ignored, false);
+
+	const t4 = parseJsonTag('json:"-"');
+	assertEqual(t4.name, "-");
+	assertEqual(t4.omitempty, false);
+	assertEqual(t4.ignored, true);
+
+	const t5 = parseJsonTag('json:"-,"');
+	assertEqual(t5.name, "-");
+	assertEqual(t5.omitempty, false);
+	assertEqual(t5.ignored, false);
+
+	const t6 = parseJsonTag('json:"-,omitempty"');
+	assertEqual(t6.name, "-");
+	assertEqual(t6.omitempty, true);
+	assertEqual(t6.ignored, false);
+
+	const t7 = parseJsonTag('json:"name,unknownopt"');
+	assertEqual(t7.name, "name");
+	assertEqual(t7.omitempty, false);
+	assertEqual(t7.ignored, false);
+});
+
+section("Struct tags — parser AST preservation");
+
+test("parser preserves struct tag on regular fields", () => {
+	const src = `package main
+type User struct {
+	Name string \`json:"name,omitempty"\`
+	Age  int
+}
+`;
+	const p = new Parser(new Lexer(src).tokenize());
+	const file = p.parse();
+	const decl = file.decls[0];
+	assertEqual(decl.name, "User");
+	const fields = decl.type.fields;
+	assertEqual(fields[0].names[0], "Name");
+	assertEqual(fields[0].tag, 'json:"name,omitempty"');
+	assertEqual(fields[1].names[0], "Age");
+	assertEqual(fields[1].tag, null);
+});
+
+test("parser preserves struct tag on embedded and pointer-embedded fields", () => {
+	const src = `package main
+type User struct {
+	Base \`json:"base"\`
+	*pkg.PtrBase \`json:"ptr_base"\`
+	pkg.Other
+	*Local
+}
+`;
+	const p = new Parser(new Lexer(src).tokenize());
+	const file = p.parse();
+	const decl = file.decls[0];
+	const fields = decl.type.fields;
+
+	// Base `json:"base"`
+	assertEqual(fields[0].embedded, true);
+	assertEqual(fields[0].type.kind, "TypeName");
+	assertEqual(fields[0].type.name, "Base");
+	assertEqual(fields[0].tag, 'json:"base"');
+
+	// *pkg.PtrBase `json:"ptr_base"`
+	assertEqual(fields[1].embedded, true);
+	assertEqual(fields[1].type.kind, "PointerType");
+	assertEqual(fields[1].type.base.name, "pkg.PtrBase");
+	assertEqual(fields[1].tag, 'json:"ptr_base"');
+
+	// pkg.Other
+	assertEqual(fields[2].embedded, true);
+	assertEqual(fields[2].type.kind, "TypeName");
+	assertEqual(fields[2].type.name, "pkg.Other");
+	assertEqual(fields[2].tag, null);
+
+	// *Local
+	assertEqual(fields[3].embedded, true);
+	assertEqual(fields[3].type.kind, "PointerType");
+	assertEqual(fields[3].type.base.name, "Local");
+	assertEqual(fields[3].tag, null);
 });
 
 // ── Entry point ───────────────────────────────────────────────

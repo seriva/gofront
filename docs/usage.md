@@ -51,11 +51,40 @@ file or a `"gofront": { … }` object in `package.json`:
 | `output` | `app/app.js` | Dev-mode compiled bundle path |
 | `port` | `3000` | Dev server port |
 | `assetExtensions` | `[]` | Extra file extensions (e.g. `[".bmesh", ".mat"]`) copied from `serveDir` into `outDir` on `build`, in addition to the built-in web asset list (html, css, js, json, images, fonts, audio, video, wasm) |
-| `vendor` | `app/vendor.js` | Vendor bundle written by `prep`/`build` from `package.json` `dependencies`. Either a destination path string or `{ "dest": string \| string[], "packages": string[], "minify": boolean, "globals": { "<pkg>": string \| string[] } }` |
+| `vendor` | `app/vendor.js` | Vendor bundle written by `prep`/`build` from `package.json` `dependencies`. Either a destination path string or `{ "dest": string \| string[], "packages": string[], "minify": boolean, "globals": {…}, "namedExports": {…} }` — see [Vendoring npm packages](#vendoring-npm-packages) |
 | `assetCopy` | `[]` | Static files copied by `prep`/`build`: `[{ "source": "node_modules/x/font.woff2", "dest": "app/fonts/font.woff2" }]` |
 | `targets` | `{}` | Per-package target overrides keyed by directory relative to `src` (`"."` = root package): `{ "engine/physics": "wasm" }`. Replaces the package's `//gofront:target` directive |
 
 All settings live in this one place — top-level `"vendor"` / `"assetCopy"` keys in `package.json` are not read.
+
+### Vendoring npm packages
+
+`prep` and `build` bundle the listed `packages` (default: every `package.json` dependency)
+with Rolldown or esbuild from your devDependencies, and expose them as browser globals so
+GoFront code can call them through `.d.ts` declarations. Subpath entries such as
+`"preact/hooks"` are bundled as separate modules.
+
+- Each package's module namespace (or its default export) is assigned to `window` under
+  the package name, the name without its npm scope, and a sanitized identifier
+  (`preact/hooks` → `preact_hooks`).
+- `globals` adds names per package: a string or an array of extra global names, or an
+  object `{ "<global>": "<export>" }` binding individual exports.
+- `namedExports` binds individual exports as globals: an array of export names
+  (`["h", "render"]` → `window.h = preact.h`, …) or an object `{ "<global>": "<export>" }`.
+
+```json
+"gofront": {
+  "vendor": {
+    "dest": "app/vendor.js",
+    "packages": ["preact", "preact/hooks"],
+    "globals": { "preact/hooks": ["preact_hooks"] },
+    "namedExports": {
+      "preact": ["h", "render"],
+      "preact/hooks": ["useState", "useEffect"]
+    }
+  }
+}
+```
 
 ### Hybrid builds
 
@@ -176,6 +205,18 @@ The resolver (`src/resolver.js`) walks up the directory tree to find `node_modul
 checks `package.json` `"types"` / `"typings"` fields, falls back to `index.d.ts`,
 then tries `@types/`. The `.d.ts` parser (`src/dts-parser.js`) extracts type
 signatures into GoFront's internal type representation.
+
+A TypeScript tuple in return position maps to a Go multi-value result, and rest
+parameters become variadic parameters, so hook-style APIs read like Go:
+
+```ts
+declare function useState(initialState: any): [state: any, setState: (value: any) => void];
+declare function h(type: any, props?: any, ...children: any[]): VNode;
+```
+
+```go
+count, setCount := useState(0) // assigning to a single variable is a compile error
+```
 
 ---
 

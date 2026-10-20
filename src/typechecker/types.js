@@ -126,6 +126,7 @@ export const WASM_SUPPORTED_STDLIB = new Set([
 	"time",
 	"testing",
 	"gofront/shared",
+	"gofront/simd",
 	"sync",
 	"crypto/rand",
 	"crypto/sha256",
@@ -139,12 +140,14 @@ export const STDLIB_PACKAGES = new Set([
 	"os",
 	"gom",
 	"regexp",
+	"encoding/json",
 ]);
 
 // Per-namespace member subset the WASM backend implements. `null` means every
 // member the checker knows about. Members outside the set are rejected in
 // wasm/both packages with "'strings.Split' is not yet available in wasm packages".
 export const WASM_STDLIB_MEMBERS = new Map([
+	["json", new Set()],
 	[
 		"math",
 		new Set([
@@ -839,8 +842,13 @@ export function typeStr(t) {
 			return t.name || "interface{...}";
 		case "namespace":
 			return t.name || "namespace{...}";
-		case "func":
-			return `func(${t.params.map(typeStr).join(", ")}) ${typeStr(t.returns[0] ?? VOID)}`;
+		case "func": {
+			const retStr =
+				t.returns.length > 1
+					? `(${t.returns.map(typeStr).join(", ")})`
+					: typeStr(t.returns[0] ?? VOID);
+			return `func(${t.params.map(typeStr).join(", ")}) ${retStr}`;
+		}
 		case "tuple":
 			return `(${t.types.map(typeStr).join(", ")})`;
 		case "named":
@@ -887,6 +895,7 @@ export class Scope {
 		this.parent = parent;
 		this.symbols = new Map();
 		this._consts = new Set(); // names declared as const in this scope
+		this._constExprs = new Map(); // name -> AST initializer expr
 		this._locals = new Set(); // names declared as local variables (var / :=)
 		this._used = new Set(); // names referenced in this scope
 	}
@@ -897,9 +906,15 @@ export class Scope {
 		this.symbols.set(name, type);
 		if (name !== "_") this._locals.add(name);
 	}
-	defineConst(name, type) {
+	defineConst(name, type, expr = null) {
 		this.symbols.set(name, type);
 		this._consts.add(name);
+		if (expr) this._constExprs.set(name, expr);
+	}
+	lookupConstExpr(name) {
+		if (this._constExprs.has(name)) return this._constExprs.get(name);
+		if (this.parent) return this.parent.lookupConstExpr(name);
+		return null;
 	}
 	isConst(name) {
 		if (this._consts.has(name)) return true;

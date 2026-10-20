@@ -203,9 +203,48 @@ export class DtsParser {
 
 	// ── Type parsing ─────────────────────────────────────────────
 
+	_parseTupleElement() {
+		this.skip();
+		if (this.startsWith("...")) this.pos += 3;
+
+		const savedPos = this.pos;
+		const ident = this.readIdent();
+		if (ident) {
+			this.skip();
+			if (this.ch() === "?") {
+				this.pos++;
+				this.skip();
+			}
+			if (this.ch() === ":") {
+				this.pos++;
+				return this.parseType(false);
+			}
+		}
+		this.pos = savedPos;
+		return this.parseType(false);
+	}
+
+	_parseTupleType(inReturn) {
+		this.consume("[");
+		const elements = [];
+		while (!this.eof() && this.peek() !== "]") {
+			this.skip();
+			if (this.ch() === "]") break;
+			elements.push(this._parseTupleElement());
+			this.skip();
+			if (this.ch() !== ",") break;
+			this.pos++;
+		}
+		this.consume("]");
+		if (inReturn) {
+			return { kind: "tuple", types: elements };
+		}
+		return { kind: "slice", elem: ANY };
+	}
+
 	// Parse a TypeScript type expression and return a GoFront type.
 	// Always returns something; falls back to ANY for complex types.
-	parseType() {
+	parseType(inReturn = false) {
 		this.skip();
 
 		// Skip modifiers
@@ -226,13 +265,16 @@ export class DtsParser {
 		this.skip();
 		if (this.ch() === "|" || this.ch() === "&") this.pos++;
 
-		let base = this._parseBaseType();
+		let base = this._parseBaseType(inReturn);
 
 		this.skip();
 		// Array suffix: T[] or T[][]
 		while (this.startsWith("[]")) {
 			this.pos += 2;
-			base = { kind: "slice", elem: base };
+			base = {
+				kind: "slice",
+				elem: base.kind === "tuple" ? { kind: "slice", elem: ANY } : base,
+			};
 			this.skip();
 		}
 
@@ -285,14 +327,11 @@ export class DtsParser {
 		return { kind: "basic", name: "any", alias: name };
 	}
 
-	_parseBaseType() {
+	_parseBaseType(inReturn = false) {
 		this.skip();
 		const c = this.ch();
 		if (c === "[") {
-			this.pos++;
-			this.skipTypeExpr("]");
-			this.consume("]");
-			return ANY;
+			return this._parseTupleType(inReturn);
 		}
 		if (c === "{") {
 			this.skipBlock();
@@ -399,15 +438,24 @@ export class DtsParser {
 		let ret = VOID;
 		if (this.ch() === ":") {
 			this.pos++;
-			ret = this.parseType();
+			ret = this.parseType(true);
 		}
 		this.consume(";");
+		const isVariadic = params.some((p) => p.variadic);
 		return {
 			name,
 			val: {
 				kind: "func",
-				params: params.map((p) => p.type),
-				returns: [ret],
+				params: params.map((p) =>
+					p.variadic && p.type?.kind === "slice" ? p.type.elem : p.type,
+				),
+				returns:
+					ret.kind === "tuple"
+						? ret.types.length > 0
+							? ret.types
+							: [VOID]
+						: [ret],
+				...(isVariadic ? { variadic: true } : {}),
 			},
 		};
 	}
@@ -545,13 +593,22 @@ export class DtsParser {
 			let ret = VOID;
 			if (this.ch() === ":") {
 				this.pos++;
-				ret = this.parseType();
+				ret = this.parseType(true);
 			}
 			this.consume(";");
+			const isVariadic = params.some((p) => p.variadic);
 			out[name] = {
 				kind: "func",
-				params: params.map((p) => p.type),
-				returns: [ret],
+				params: params.map((p) =>
+					p.variadic && p.type?.kind === "slice" ? p.type.elem : p.type,
+				),
+				returns:
+					ret.kind === "tuple"
+						? ret.types.length > 0
+							? ret.types
+							: [VOID]
+						: [ret],
+				...(isVariadic ? { variadic: true } : {}),
 			};
 		} else if (this.ch() === ":") {
 			this.pos++;

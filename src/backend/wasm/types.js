@@ -27,6 +27,7 @@ export function toWasmType(goType, checker = null, mod = null) {
 			goType === "i64" ||
 			goType === "f32" ||
 			goType === "f64" ||
+			goType === "v128" ||
 			goType === "anyref" ||
 			goType === "externref" ||
 			goType === "funcref"
@@ -38,6 +39,16 @@ export function toWasmType(goType, checker = null, mod = null) {
 		return goType;
 	}
 	if (isTestingT(goType)) return "externref";
+
+	if (
+		goType.kind === "simd" ||
+		(goType.kind === "named" &&
+			(goType.name === "simd.F32x4" ||
+				goType.name === "F32x4" ||
+				goType.underlying?.kind === "simd"))
+	) {
+		return "v128";
+	}
 
 	// Pointer AST nodes
 	if (goType.kind === "PointerType") {
@@ -68,6 +79,9 @@ export function toWasmType(goType, checker = null, mod = null) {
 
 	// TypeName AST node
 	if (goType.kind === "TypeName" || goType.kind === "Ident") {
+		if (goType.name === "simd.F32x4" || goType.name === "F32x4") {
+			return "v128";
+		}
 		if (mod?.getStructType(goType.name)) {
 			return {
 				kind: "ref",
@@ -84,6 +98,13 @@ export function toWasmType(goType, checker = null, mod = null) {
 
 	// Unwrap named types
 	if (goType.kind === "named") {
+		if (
+			goType.name === "simd.F32x4" ||
+			goType.name === "F32x4" ||
+			goType.underlying?.kind === "simd"
+		) {
+			return "v128";
+		}
 		if (mod?.getStructType(goType.name)) {
 			return {
 				kind: "ref",

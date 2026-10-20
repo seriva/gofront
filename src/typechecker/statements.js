@@ -83,6 +83,29 @@ export const statementCheckMethods = {
 		}
 	},
 
+	_checkDefineCommaOkMap(stmt, scope) {
+		if (
+			stmt.lhs.length !== 2 ||
+			stmt.rhs.length !== 1 ||
+			stmt.rhs[0].kind !== "IndexExpr"
+		)
+			return false;
+		const mapBaseType = this.checkExpr(stmt.rhs[0].expr, scope);
+		const resolvedBase =
+			mapBaseType?.kind === "named" ? mapBaseType.underlying : mapBaseType;
+		if (resolvedBase?.kind !== "map") return false;
+		this.checkExpr(stmt.rhs[0].index, scope);
+		stmt._commaOkMap = true;
+		stmt.rhs[0]._mapValueType = resolvedBase.value;
+		this._declareDefineVars(stmt, [resolvedBase.value, BOOL], scope);
+		const allRedecl = stmt.lhs.every((e) => e._redecl || (e.name ?? e) === "_");
+		if (allRedecl && stmt.lhs.length > 0) {
+			this.err("no new variables on left side of :=", stmt.lhs[0]);
+		}
+		stmt._rhsTypes = [resolvedBase.value, BOOL];
+		return true;
+	},
+
 	_checkDefineStmt(stmt, scope) {
 		// comma-ok type assertion: n, ok := x.(T)
 		if (
@@ -92,10 +115,24 @@ export const statementCheckMethods = {
 		) {
 			stmt.rhs[0]._commaOk = true;
 		}
+		if (this._checkDefineCommaOkMap(stmt, scope)) return;
 		const rhs = stmt.rhs.map((e) => this.checkExpr(e, scope));
-		const rhsFlat =
-			rhs.length === 1 && rhs[0].kind === "tuple" ? rhs[0].types : rhs;
+		const isTuple = rhs.length === 1 && rhs[0]?.kind === "tuple";
+		const rhsFlat = isTuple ? rhs[0].types : rhs;
 		if (this._checkDefineCommaOkAssert(stmt, rhs, scope)) return;
+		if (
+			stmt.rhs[0]?.kind !== "RangeExpr" &&
+			stmt.lhs.length !== rhsFlat.length
+		) {
+			const vars =
+				stmt.lhs.length === 1 ? "1 variable" : `${stmt.lhs.length} variables`;
+			const vals = isTuple
+				? `returns ${rhsFlat.length} values`
+				: rhsFlat.length === 1
+					? "1 value"
+					: `${rhsFlat.length} values`;
+			this.err(`assignment mismatch: ${vars} but ${vals}`, stmt);
+		}
 		this._declareDefineVars(stmt, rhsFlat, scope);
 		const allRedecl = stmt.lhs.every((e) => e._redecl || (e.name ?? e) === "_");
 		if (allRedecl && stmt.lhs.length > 0) {
@@ -110,15 +147,15 @@ export const statementCheckMethods = {
 			stmt.rhs.length !== 1 ||
 			stmt.rhs[0].kind !== "IndexExpr"
 		)
-			return false;
+			return null;
 		const mapBaseType = this.checkExpr(stmt.rhs[0].expr, scope);
 		const resolvedBase =
 			mapBaseType?.kind === "named" ? mapBaseType.underlying : mapBaseType;
-		if (resolvedBase?.kind !== "map") return false;
+		if (resolvedBase?.kind !== "map") return null;
 		this.checkExpr(stmt.rhs[0].index, scope);
 		stmt._commaOkMap = true;
 		stmt.rhs[0]._mapValueType = resolvedBase.value;
-		return true;
+		return [resolvedBase.value, BOOL];
 	},
 
 	_checkConstAssignment(stmt, scope) {
@@ -163,12 +200,34 @@ export const statementCheckMethods = {
 	},
 
 	_checkAssignStmt(stmt, scope) {
-		if (this._checkAssignCommaOkMap(stmt, scope)) return;
+		const commaOkMapTypes = this._checkAssignCommaOkMap(stmt, scope);
 		if (this._isCommaOkTypeAssertAssign(stmt)) stmt.rhs[0]._commaOk = true;
 		this._checkConstAssignment(stmt, scope);
-		const rhs = stmt.rhs.map((e) => this.checkExpr(e, scope));
-		const rhsFlat =
-			rhs.length === 1 && rhs[0]?.kind === "tuple" ? rhs[0].types : rhs;
+		let rhsFlat;
+		if (commaOkMapTypes) {
+			rhsFlat = commaOkMapTypes;
+		} else {
+			const rhs = stmt.rhs.map((e) => this.checkExpr(e, scope));
+			const isTuple = rhs.length === 1 && rhs[0]?.kind === "tuple";
+			rhsFlat = isTuple ? rhs[0].types : rhs;
+			if (
+				!stmt.rhs[0]?._commaOk &&
+				stmt.rhs[0]?.kind !== "RangeExpr" &&
+				stmt.lhs.length !== rhsFlat.length
+			) {
+				const vars =
+					stmt.lhs.length === 1 ? "1 variable" : `${stmt.lhs.length} variables`;
+				const vals = isTuple
+					? `returns ${rhsFlat.length} values`
+					: rhsFlat.length === 1
+						? "1 value"
+						: `${rhsFlat.length} values`;
+				this.err(`assignment mismatch: ${vars} but ${vals}`, stmt);
+			}
+			if (stmt.rhs[0]?._commaOk) {
+				rhsFlat = [rhs[0], BOOL];
+			}
+		}
 		const lhsTypes = stmt.lhs.map((e) => this._checkAssignLhsType(e, scope));
 		this._checkAssignTypes(stmt, rhsFlat, lhsTypes);
 	},

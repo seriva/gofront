@@ -228,6 +228,7 @@ export const expressionCheckMethods = {
 	_isStructOrNamedMethod(baseType, base, field) {
 		return (
 			(base?.kind === "struct" && base.methods?.has(field)) ||
+			(base?.kind === "simd" && base.methods?.has(field)) ||
 			(baseType.kind === "named" && baseType.methods?.has(field))
 		);
 	},
@@ -513,6 +514,8 @@ export const expressionCheckMethods = {
 		}
 		if (typeStr(srcResolved) === typeStr(tgtResolved)) return;
 		if (isNumeric(srcResolved) && isNumeric(tgtResolved)) return;
+		if (isString(srcResolved) && isString(tgtResolved)) return;
+		if (isBool(srcResolved) && isBool(tgtResolved)) return;
 		if (
 			isString(srcResolved) &&
 			tgtResolved?.kind === "slice" &&
@@ -649,7 +652,8 @@ export const expressionCheckMethods = {
 		return expr;
 	},
 
-	_constIntValue(expr) {
+	_constIntValue(expr, scope = null) {
+		if (!expr) return null;
 		if (expr.kind === "BasicLit" && expr.litKind === "INT")
 			return Number(expr.value);
 		if (
@@ -659,6 +663,19 @@ export const expressionCheckMethods = {
 			expr.operand.litKind === "INT"
 		) {
 			return -Number(expr.operand.value);
+		}
+		if (expr.kind === "UnaryExpr" && expr.op === "+") {
+			return this._constIntValue(expr.operand, scope);
+		}
+		if (expr.kind === "Ident") {
+			const c =
+				scope?.lookupConstExpr?.(expr.name) ??
+				this.globals.lookupConstExpr?.(expr.name) ??
+				this._constExprs?.get(expr.name);
+			if (c) return this._constIntValue(c, scope);
+		}
+		if (expr.kind === "ParenExpr") {
+			return this._constIntValue(expr.expr, scope);
 		}
 		return null;
 	},
@@ -731,7 +748,7 @@ export const expressionCheckMethods = {
 			return this.err(`Cannot call non-function type ${typeStr(fnType)}`, expr);
 		}
 
-		this._checkCallArgs(fnType, argTypes, expr);
+		this._checkCallArgs(fnType, argTypes, expr, scope);
 
 		// Pseudo-generic stdlib helpers (maps.Keys, slices.Clone, ...) declare
 		// how their result derives from the first argument.
@@ -848,7 +865,7 @@ export const expressionCheckMethods = {
 			);
 	},
 
-	_checkCallArgs(fnType, argTypes, expr) {
+	_checkCallArgs(fnType, argTypes, expr, scope = null) {
 		this._checkArgCount(fnType, argTypes, expr);
 		const maxLen = fnType.variadic
 			? argTypes.length
@@ -862,6 +879,30 @@ export const expressionCheckMethods = {
 			const targetParam = fnType.params[paramIdx];
 			const node = expr._multiForward ? null : expr.args[i];
 			this.assertAssignable(targetParam, argTypes[i], node);
+		}
+
+		// Validate Lane and WithLane constant integer lane index
+		if (expr.func?.kind === "SelectorExpr") {
+			const recvType = expr.func.expr?._type;
+			const isSimd =
+				recvType?.name === "simd.F32x4" ||
+				recvType?.name === "F32x4" ||
+				recvType?.underlying?.kind === "simd";
+			if (
+				isSimd &&
+				(expr.func.field === "Lane" || expr.func.field === "WithLane")
+			) {
+				const laneArg = expr.args[0];
+				if (laneArg) {
+					const idx = this._constIntValue(laneArg, scope);
+					if (idx === null || idx < 0 || idx > 3) {
+						this.err(
+							"lane index must be a constant integer in range [0, 3]",
+							laneArg,
+						);
+					}
+				}
+			}
 		}
 	},
 
@@ -959,11 +1000,24 @@ export const expressionCheckMethods = {
 		this._inferArraySize(expr, typeNode, base);
 		if (base?.kind === "struct")
 			return this._checkStructCompositeLit(expr, scope, t, base);
+		if (base?.kind === "simd")
+			return this._checkSimdCompositeLit(expr, scope, t, base);
 		if (this._isSliceOrArray(base))
 			return this._checkSliceArrayCompositeLit(expr, scope, t, base, typeNode);
 		if (base?.kind === "map")
 			return this._checkMapCompositeLit(expr, scope, t, base);
 		return this._checkUnknownCompositeLit(expr, scope, t);
+	},
+
+	_checkSimdCompositeLit(expr, scope, t, base) {
+		if (expr.elems.length > 4) {
+			this.err("too many values in simd.F32x4 literal", expr);
+		}
+		for (const elem of expr.elems) {
+			const vt = this.checkExpr(elem, scope);
+			this.assertAssignable(base.elem ?? FLOAT32, vt, elem);
+		}
+		return t;
 	},
 
 	_checkStructPositionalElems(expr, scope, t, base) {
@@ -987,21 +1041,19 @@ export const expressionCheckMethods = {
 		for (const elem of expr.elems) {
 			if (elem.kind === "KeyValueExpr") {
 				const keyName = elem.key.name;
-				const fieldType = base.fields?.get(keyName);
+				const embed = base._embeds?.find((e) => {
+					const inner = e.kind === "pointer" ? e.base : e;
+					const name =
+						inner.kind === "named" ? inner.name.split(".").pop() : null;
+					return name === keyName;
+				});
+				if (embed) elem._isEmbedInit = true;
+				const fieldType = base.fields?.get(keyName) ?? embed;
 				if (fieldType) {
 					const vt = this.checkExpr(elem.value, scope);
 					this.assertAssignable(fieldType, vt, elem.value);
 				} else {
-					const embed = base._embeds?.find(
-						(e) => (e.kind === "named" ? e.name : null) === keyName,
-					);
-					if (embed) {
-						const vt = this.checkExpr(elem.value, scope);
-						this.assertAssignable(embed, vt, elem.value);
-						elem._isEmbedInit = true;
-					} else {
-						this.err(`Unknown field '${keyName}'`, elem.key);
-					}
+					this.err(`Unknown field '${keyName}'`, elem.key);
 				}
 			} else {
 				this.checkExpr(elem, scope);

@@ -275,6 +275,17 @@ export class ExprsEmitter {
 
 	emitCompositeLit(lit) {
 		const litType = lit._type ?? lit.typeExpr?._type ?? lit.typeExpr;
+		if (
+			litType?.kind === "simd" ||
+			litType?.name === "simd.F32x4" ||
+			litType?.underlying?.kind === "simd" ||
+			(lit.typeExpr?.kind === "SelectorExpr" &&
+				lit.typeExpr.field === "F32x4" &&
+				lit.typeExpr.expr?.name === "simd")
+		) {
+			this.emitSimdCompositeLit(lit);
+			return;
+		}
 		if (isMapType(litType, this.mod.checker)) {
 			const { keyType, valType } = getMapKeyValTypes(litType, this.mod.checker);
 			const mapInfo = this.mod.getMapType(keyType, valType);

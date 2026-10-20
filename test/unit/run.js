@@ -41,6 +41,7 @@ export const TEST_FILES = [
 	"./builtins/operators.test.js",
 	"./builtins/stdlib.test.js",
 	"./builtins/bytes.test.js",
+	"./builtins/json.test.js",
 	"./builtins/gom.test.js",
 	"./builtins/dom.test.js",
 	"./compiler/packages.test.js",
@@ -76,6 +77,7 @@ export const TEST_FILES = [
 	"./wasm/go_semantics.test.js",
 	"./wasm/optimize.test.js",
 	"./wasm/shared.test.js",
+	"./wasm/simd.test.js",
 	"./wasm/stdlib.test.js",
 	"./wasm/golden.test.js",
 ];

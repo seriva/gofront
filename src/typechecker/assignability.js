@@ -27,6 +27,16 @@ import {
 	UNTYPED_INT,
 } from "./types.js";
 
+// Unnamed type literal kinds for Go's "identical underlying types" assignability rule.
+const TYPE_LITERAL_KINDS = new Set([
+	"slice",
+	"map",
+	"func",
+	"pointer",
+	"array",
+	"struct",
+]);
+
 /** @typedef {import('./index.js').TypeChecker} TypeChecker */
 
 // Untyped constant assignability: maps source.base → Set of compatible target.name values
@@ -195,6 +205,12 @@ export const assignabilityMethods = {
 			target.kind === "named" ? target.underlying : target,
 		);
 		if (!isAny(target) && tBase?.kind !== "interface") return;
+		const named = this._namedMethodBoxSource(source);
+		if (named) {
+			node._ifaceBox = named.ptr ? "named_ptr" : "named";
+			node._ifaceNamedType = named.type;
+			return;
+		}
 		const sBase = this.resolveType(
 			source.kind === "named" ? source.underlying : source,
 		);
@@ -202,6 +218,24 @@ export const assignabilityMethods = {
 		if (!info) return;
 		node._ifaceBox = info.box;
 		if (info.ptrFields) node._ifacePtrFields = info.ptrFields;
+	},
+
+	// A named non-struct type with methods (or a pointer to one) entering an
+	// interface: the JS backend keeps such values raw and boxes them here so
+	// dynamic method dispatch works.
+	_namedMethodBoxSource(source) {
+		const isPtr = source?.kind === "pointer";
+		const t = isPtr ? source.base : source;
+		if (t?.kind !== "named") return null;
+		const u = this.resolveType(t.underlying);
+		if (!u || u.kind === "struct" || u.kind === "interface") return null;
+		const methods = t.methods ?? t._generic?.methods;
+		if (!methods || methods.size === 0) return null;
+		// Only user-declared types (methods carry _ptrRecv); stdlib named types
+		// such as time.Duration have no box class.
+		if (![...methods.values()].some((m) => Object.hasOwn(m ?? {}, "_ptrRecv")))
+			return null;
+		return { type: t, ptr: isPtr };
 	},
 
 	_getStructPtrFields(st, prefix = "", seen = new Set()) {
@@ -316,7 +350,18 @@ export const assignabilityMethods = {
 			);
 			return;
 		}
+		if (this._identicalUnderlyingLiteral(target, source, tBase, sBase)) return;
 		this.err(`Cannot assign ${typeStr(source)} to ${typeStr(target)}`, node);
+	},
+
+	// Identical underlying types are assignable when one side is an unnamed
+	// type literal (`var n Names = []string{...}`), as in Go.
+	_identicalUnderlyingLiteral(target, source, tBase, sBase) {
+		if ((target.kind === "named") === (source.kind === "named")) return false;
+		const unnamed = target.kind === "named" ? source : target;
+		return (
+			TYPE_LITERAL_KINDS.has(unnamed.kind) && typeStr(tBase) === typeStr(sBase)
+		);
 	},
 
 	_isUntypedAssignable(target, source) {

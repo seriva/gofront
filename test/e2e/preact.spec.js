@@ -13,10 +13,10 @@ test("stats bar mounts into #stats-bar", async ({ page }) => {
 });
 
 test("loading placeholder visible before todos load", async ({ page }) => {
-	// Re-navigate — the reactive app always shows a 200ms loading placeholder
+	// Re-navigate — the preact app always shows a 200ms loading placeholder
 	// because asyncLoadFromStorage has an intentional delay. page.goto returns
 	// when the load event fires (right after main() sets up the placeholder),
-	// while the 200ms computedAsync delay is still counting down.
+	// while the 200ms delay is still counting down.
 	await page.goto("/");
 	await expect(page.getByText("Loading todos")).toBeVisible({ timeout: 3000 });
 	await page.locator(S.addBtn).waitFor({ state: "visible", timeout: 10000 });
@@ -41,7 +41,7 @@ test("high-badge shows urgent count", async ({ page }) => {
 });
 
 test("sync status shows saving then saved cycle", async ({ page }) => {
-	// The reactive saveTodos has a 350ms sleep, making the intermediate
+	// The preact saveTodos has a 350ms sleep, making the intermediate
 	// "Saving…" state reliably visible — unlike simple/gom which save instantly.
 	const sync = page.locator(S.syncStatus);
 	await page.locator(S.input).fill("Saving cycle test");

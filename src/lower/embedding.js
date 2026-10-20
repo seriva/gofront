@@ -9,7 +9,8 @@ export function computeEmbeddedStubs(name, methodDecls, checker) {
 	const declared = new Set(methodDecls.map((m) => m.name));
 	const stubs = [];
 
-	for (const embed of resolvedType._embeds) {
+	for (const rawEmbed of resolvedType._embeds) {
+		const embed = rawEmbed.kind === "pointer" ? rawEmbed.base : rawEmbed;
 		const embedName = embed.kind === "named" ? embed.name : null;
 		if (!embedName) continue;
 		const embedBase = embed.kind === "named" ? embed.underlying : embed;

@@ -4,6 +4,50 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.7.0] - 2026-10-20
+
+### Added
+- **`encoding/json` standard library package (reflection-free compile-time codegen)**:
+  - `json.Marshal`, `json.MarshalIndent`, `json.Unmarshal` and `json.Valid` implemented for `js` packages via static compile-time code generation without a runtime reflection engine.
+  - Struct field tag parsing and preservation: honors `json:"fieldName"`, `,omitempty`, `,string` (strings, numbers and booleans encoded/decoded as JSON strings, with Go's `invalid use of ,string struct tag` errors), `-` and `-,`, and excludes unexported lowercase struct fields.
+  - Supports embedded struct field promotion with shallow field priority (conflicts at the same depth cancel each other).
+  - Specialized codecs for structs, maps, slices, primitives, pointers (including pointer-to-scalar fields), and `json.RawMessage` (exact source bytes, including nested values).
+  - `MarshalJSON() ([]byte, error)` methods are called on any named type with a value receiver, and with a pointer receiver only on addressable values (pointers, slice elements, fields of addressable structs), as in Go; their output is validated, compacted and HTML-escaped, and failures report `json: error calling MarshalJSON for type T: …`. `UnmarshalJSON([]byte) error` methods (pointer or value receivers, on struct and named non-struct types) receive the exact raw value bytes (including `null` for non-pointer fields); errors they return are passed through unchanged.
+  - Go decoding semantics: exact, then case-insensitive field-name matching; JSON `null` leaves scalars unchanged and sets pointers, slices, maps and interfaces to `nil`; integer targets reject fractional, exponent-form and out-of-range numbers (also for top-level targets and `[]byte` arrays); error messages match Go, including the number literal, the JSON field path (`Go struct field Inner.in.n`) and the element type of pointer fields.
+  - Go formatting parity: RFC 8259 string escaping with Go's HTML-safe escapes (`\u003c`, `\u003e`, `\u0026`), Go `strconv` shortest float representation (including `float32`), and Go-shaped error messages. Errors are plain `error` values; the typed `*json.SyntaxError`/`*json.UnmarshalTypeError`, `Encoder`/`Decoder` and `Number` are not implemented.
+  - Diagnostic rejection for `wasm` and `both` packages pointing to `js` packages.
+- **TypeScript `.d.ts` tuple return signatures to Go multi-value returns**:
+  - `src/dts-parser.js` parses TypeScript tuple types `[A, B]` (including labelled `[state: S, setState: Dispatch]`).
+  - In return position, maps to Go multi-value returns `(A, B)`.
+  - Typechecker enforces multi-value destination count matching Go compile rules (`assignment mismatch: 1 variable but returns 2 values`).
+  - JS backend codegen lowers multi-value returns directly to array destructuring (`let [a, b] = fn()`).
+- **Rest-parameter variadic propagation**:
+  - Fixed `_parseFuncDecl` and `_parseMemberDefault` in `src/dts-parser.js` to propagate `isRest` as `{ variadic: true }` to function types, enabling seamless calls to variadic library functions like `h(tag, props, ...children)`.
+- **Submodule vendor packaging and named global exports in `src/vendor.js`**:
+  - `gofront.vendor` supports subpath entries (e.g. `preact/hooks`) and named export global bindings (`window.h = preact.h`, `window.useState = preact_hooks.useState`).
+  - Preact and `preact/hooks` vendored with ambient `.d.ts` typings.
+- **`example/preact` TodoMVC application**:
+  - Complete TodoMVC example app using Preact function components, hooks (`useState`, `useEffect`), and Go struct props, replacing the retired `example/reactive`.
+  - Full feature parity with existing examples (filters, urgent priorities, localStorage async persistence, sync status, drag-and-drop).
+- **Experimental WASM SIMD (`gofront/simd`)**:
+  - Opt-in `gofront/simd` standard library package providing 4-wide 32-bit floating-point vector type `simd.F32x4` with Go value semantics: `simd.F32x4{a, b, c, d}`, `Splat`, `Add`, `Sub`, `Mul`, `Div`, `Min`, `Max`, `Dot3`, `Dot4`, `Lane(i)` (constant index $0 \le i \le 3$), `WithLane(i, f)`.
+  - Zero value zero-initialization: `(0, 0, 0, 0)` (`v128.const` zeros in WASM, frozen `[0, 0, 0, 0]` in JS).
+  - Direct linear memory buffer access: `simd.LoadF32x4(buf shared.Float32, i)` and `simd.StoreF32x4(buf, i, v)` with element offset calculation and bounds checking ($i + 4 \le \text{len}(buf)$) trapping on out-of-bounds.
+  - Native WebAssembly `0xFD` opcode encoding with unsigned LEB128 sub-opcodes for SIMD instructions; WAT printing support.
+  - Binaryen feature flag integration: bitmask 2014 ($2006 \mid 8$) with `--enable-simd` for release and optimization passes.
+  - JS scalar fallback using `Math.fround` for bit-level 32-bit float parity.
+  - JS↔WASM boundary diagnostic preventing direct `F32x4` parameter/return crossing (suggesting `gofront/shared.Float32`). In `wasm`/`both` packages this also rejects `F32x4` in exported struct fields and exported function signatures; `==` on `F32x4` and `fmt` formatting of `F32x4` are not yet supported there.
+  - Raycast benchmark gating evaluated: 1.02× over scalar hybrid (below $\ge 1.30\times$ promotion gate); groundwork retained as experimental and promotion deferred to v1.8.0.
+
+### Fixed
+- **Named non-struct types with methods** (`type Celsius float64`, `type Names []string`, `type Op func(int) int`, …) in `js` packages. Values were sometimes wrapper objects and sometimes raw values, so method calls threw `TypeError`, `==`/`<`, arithmetic and map keys compared objects, zero values were `null`, and pointer-receiver methods crashed. Values now stay raw everywhere: methods dispatch statically (`Celsius.$F(c)`), pointer receivers update the variable, field or element, and values are boxed only inside interfaces. Type assertions and type switches to these types (and to `*T`) are checked at runtime, interface comparisons and `switch` on interface values compare boxed values by type and value (`err == ErrNotFound` for `type MyErr string` sentinels), and `errors.Is`/`errors.As` handle them.
+- **Type assertions to interface types** — `v.(SomeInterface)` (user-declared or anonymous) and the matching type-switch cases now check that the dynamic value has the interface's methods instead of always succeeding.
+- **Address-taken variables declared together** — `a, b := 1, 2` followed by `&a`, `var a, b = …`, `var v = 3` with `&v`, and `&param` on a function parameter crashed with `Cannot create property 'value'`; `var a, b = f()` with a multi-value call destructured the wrong value.
+- **Assignability of identical underlying types** — `var n Names = []string{…}` and passing `[]string` where `Names` is expected were rejected; Go allows them when one side is an unnamed type literal.
+
+### Removed
+- **`example/reactive`** — retired in favor of `example/preact`, demonstrating standard ecosystem component and hook patterns with type-safe Go bindings.
+
 ## [1.6.1] - 2026-10-18
 
 ### Added

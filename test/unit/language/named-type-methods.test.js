@@ -200,6 +200,239 @@ func main() {
 	assertEqual(runJs(js), "ok");
 });
 
+// Values of named non-struct types stay raw in JS; methods dispatch statically and
+// the value is boxed only inside interfaces. Expected output captured from Go.
+section("Named non-struct types behave like their underlying values");
+
+test("named basic type: zero value, arithmetic, comparison and map keys", () => {
+	const { js, errors } = compile(`package main
+import "fmt"
+type Celsius float64
+func (c Celsius) F() float64 { return float64(c)*9/5 + 32 }
+func (c Celsius) Warmer(d Celsius) Celsius { return c + d }
+func main() {
+	var c Celsius = 100
+	d := c + 10
+	fmt.Println(c.F(), d.F(), c.Warmer(5).F(), (c * 2).F())
+	fmt.Println(c < d, c == Celsius(100), c == 100, float64(c)+1)
+	m := map[Celsius]string{c: "boil"}
+	fmt.Println(m[Celsius(100)], m[100], len(m))
+	var z Celsius
+	fmt.Println(float64(z), z == 0, z.F())
+	f := c.F
+	c = 0
+	fmt.Println(f(), Celsius.F(37))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(
+		runJs(js),
+		[
+			"212 230 221 392",
+			"true true true 101",
+			"boil boil 1",
+			"0 true 32",
+			"212 98.6",
+		].join("\n"),
+	);
+});
+
+test("pointer-receiver methods on named basic types update the variable", () => {
+	const { js, errors } = compile(`package main
+import "fmt"
+type Level int
+func (l *Level) Set(v int) { *l = Level(v) }
+func (l Level) Get() int   { return int(l) }
+func (l *Level) Inc()      { *l++ }
+type Box struct {
+	L  Level
+	PL *Level
+}
+func main() {
+	var l Level
+	l.Set(5)
+	l.Inc()
+	fmt.Println(l.Get(), int(l))
+	var b Box
+	b.L.Set(9)
+	b.L.Inc()
+	b.PL = &l
+	b.PL.Set(42)
+	fmt.Println(b.L.Get(), l.Get(), b.PL.Get())
+	levels := []Level{1, 2}
+	levels[1].Set(20)
+	fmt.Println(levels[0].Get(), levels[1].Get())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), ["6 6", "10 42 42", "1 20"].join("\n"));
+});
+
+test("named values in interfaces: dispatch, assertions and type switches", () => {
+	const { js, errors } = compile(`package main
+import "fmt"
+type Celsius float64
+func (c Celsius) F() float64 { return float64(c)*9/5 + 32 }
+type Level int
+func (l *Level) Set(v int) { *l = Level(v) }
+func (l Level) Get() int   { return int(l) }
+type Setter interface{ Set(v int) }
+type Getter interface{ Get() int }
+type Fer interface{ F() float64 }
+type Names []string
+func (n Names) Count() int { return len(n) }
+func kind(v any) string {
+	switch x := v.(type) {
+	case Celsius:
+		return fmt.Sprintf("Celsius %.1f", x.F())
+	case Level:
+		return fmt.Sprintf("Level %d", x.Get())
+	case *Level:
+		return fmt.Sprintf("*Level %d", x.Get())
+	case float64:
+		return "float64"
+	case Names:
+		return fmt.Sprintf("Names %d", x.Count())
+	default:
+		return "other"
+	}
+}
+func main() {
+	var fer Fer = Celsius(110)
+	fmt.Println(fer.F())
+	if cc, ok := fer.(Celsius); ok {
+		fmt.Println("assert", float64(cc)+0.5)
+	}
+	_, bad := fer.(interface{ Get() int })
+	fmt.Println(bad)
+	var l Level
+	var s Setter = &l
+	s.Set(77)
+	var g Getter = &l
+	fmt.Println(l.Get(), g.Get())
+	var g2 Getter = l
+	l.Set(1)
+	fmt.Println(g2.Get(), l.Get())
+	fmt.Println(kind(Celsius(20)), kind(Level(4)), kind(&l), kind(1.5), kind(Names{"x"}), kind("s"))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(
+		runJs(js),
+		[
+			"230",
+			"assert 110.5",
+			"false",
+			"77 77",
+			"77 1",
+			"Celsius 68.0 Level 4 *Level 1 float64 Names 1 other",
+		].join("\n"),
+	);
+});
+
+test("named string errors compare like Go values (==, switch, errors.Is, errors.As)", () => {
+	const { js, errors } = compile(`package main
+import (
+	"errors"
+	"fmt"
+)
+type MyErr string
+func (e MyErr) Error() string { return "myerr: " + string(e) }
+const ErrNotFound MyErr = "not found"
+func find(k string) error {
+	if k == "x" {
+		return ErrNotFound
+	}
+	if k == "y" {
+		return MyErr("other")
+	}
+	return nil
+}
+func main() {
+	err := find("x")
+	fmt.Println(err == ErrNotFound, err != nil, errors.Is(err, ErrNotFound), err.Error())
+	err2 := find("y")
+	fmt.Println(err2 == ErrNotFound, err2.Error(), find("z") == nil)
+	switch err {
+	case ErrNotFound:
+		fmt.Println("switch: not found")
+	default:
+		fmt.Println("switch: default")
+	}
+	var me MyErr
+	fmt.Println(errors.As(err, &me), string(me))
+	fmt.Println(err)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(
+		runJs(js),
+		[
+			"true true true myerr: not found",
+			"false myerr: other true",
+			"switch: not found",
+			"true not found",
+			"myerr: not found",
+		].join("\n"),
+	);
+});
+
+test("named slice, map and func types: nil, append, range and assignment from literals", () => {
+	const { js, errors } = compile(`package main
+import (
+	"fmt"
+	"strings"
+)
+type Names []string
+func (n Names) Count() int    { return len(n) }
+func (n Names) Join() string  { return strings.Join(n, "+") }
+func (n *Names) Add(s string) { *n = append(*n, s) }
+type Counts map[string]int
+func (c Counts) Total() int {
+	t := 0
+	for _, v := range c {
+		t += v
+	}
+	return t
+}
+type Op func(int) int
+func (o Op) Twice(x int) int { return o(o(x)) }
+func main() {
+	var n Names
+	fmt.Println(n == nil, n.Count(), len(n))
+	n = Names{"a", "b"}
+	n = append(n, "c")
+	n.Add("d")
+	fmt.Println(n.Count(), n.Join(), n[1], len(n))
+	plain := []string{"p", "q"}
+	n = plain
+	fmt.Println(Names(plain).Join(), n.Count())
+	cnt := Counts{"a": 1, "b": 2}
+	cnt["c"] = 3
+	fmt.Println(cnt.Total(), len(cnt))
+	op := Op(func(x int) int { return x * 3 })
+	fmt.Println(op(2), op.Twice(2))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(
+		runJs(js),
+		["true 0 0", "4 a+b+c+d b 4", "p+q 2", "6 3", "6 18"].join("\n"),
+	);
+});
+
+test("assigning an unnamed type literal to a named type with the same underlying type", () => {
+	const { errors } = compile(`package main
+type Names []string
+type Celsius float64
+func use(n Names) int { return len(n) }
+func main() {
+	var n Names = []string{"a"}
+	_ = use([]string{"b"})
+	_ = n
+	var f float64 = 1
+	var c Celsius = f
+	_ = c
+}`);
+	assertEqual(errors.length, 1);
+	assertErrorContains(errors, "Cannot assign float64 to Celsius");
+});
+
 section("Type errors");
 
 test("method on named type: wrong receiver type is a type error", () => {

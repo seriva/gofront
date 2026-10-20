@@ -853,6 +853,43 @@ export function setupExtendedGlobals(globals, types) {
 	types.set("encoding/base64.Encoding", BASE64_ENCODING_T);
 	types.set("base64.Encoding", BASE64_ENCODING_T);
 
+	// ── encoding/json ─────────────────────────────────────────────
+	const RAW_MESSAGE_T = {
+		kind: "named",
+		name: "json.RawMessage",
+		underlying: BYTE_SLICE,
+		methods: new Map(),
+	};
+	globals.define("json", {
+		kind: "namespace",
+		name: "json",
+		members: {
+			Marshal: {
+				kind: "func",
+				params: [ANY],
+				returns: [BYTE_SLICE, ERROR],
+			},
+			MarshalIndent: {
+				kind: "func",
+				params: [ANY, STRING, STRING],
+				returns: [BYTE_SLICE, ERROR],
+			},
+			Unmarshal: {
+				kind: "func",
+				params: [BYTE_SLICE, ANY],
+				returns: [ERROR],
+			},
+			Valid: {
+				kind: "func",
+				params: [BYTE_SLICE],
+				returns: [BOOL],
+			},
+			RawMessage: RAW_MESSAGE_T,
+		},
+	});
+	types.set("encoding/json.RawMessage", RAW_MESSAGE_T);
+	types.set("json.RawMessage", RAW_MESSAGE_T);
+
 	for (const name of [
 		"append",
 		"len",

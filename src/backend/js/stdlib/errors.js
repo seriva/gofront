@@ -24,6 +24,11 @@ export const errorsMethods = {
 			if (concreteGoType?.kind === "interface" || typeName === "error") {
 				return `__errorAs(${args[0]}, ${args[1]}, (x) => x !== null && (typeof x === "object" ? typeof x.Error === "function" : true))`;
 			}
+			// Named non-struct error types sit in interfaces as boxes; store the raw value.
+			const namedBox = this._namedBoxInfo(concreteGoType);
+			if (namedBox) {
+				return `__errorAs(${args[0]}, ${args[1]}, (x) => x instanceof ${namedBox.cls}, (x) => x.__gfUnbox())`;
+			}
 			if (typeName) {
 				return `__errorAs(${args[0]}, ${args[1]}, (x) => (typeof ${typeName} === "function" && x instanceof ${typeName}) || x?.constructor?.name === "${typeName}" || x?.__struct === "${typeName}")`;
 			}

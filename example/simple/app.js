@@ -43,6 +43,14 @@ var __append = __append || function(a, ...b) {
   }
   return a ? [...a, ...b] : b;
 };
+var __ifeq = __ifeq || function(a, b) {
+  if (a === b) return true;
+  if (a === null || a === undefined || b === null || b === undefined) return a == null && b == null;
+  if (typeof a === "object" && typeof b === "object" && a.constructor === b.constructor && typeof a.__gfUnbox === "function") {
+    return a.__gfUnbox() === b.__gfUnbox();
+  }
+  return false;
+};
 var __gopanic = __gopanic || { stack: [], armed: false };
 var __runDefers = __runDefers || function(defers, frame) {
   for (let i = defers.length - 1; i >= 0; i--) {
@@ -102,6 +110,7 @@ var __sprintf = __sprintf || function(f, ...a) {
       if (typeof val.Error === "function") {
         return String(val.Error());
       }
+      if (typeof val.__gfUnbox === "function") return formatV(val.__gfUnbox(), isPlus, isTopLevel);
       if (Array.isArray(val) || ArrayBuffer.isView(val)) {
         const isElemPtr = val.__ptr_slice === true;
         const pf = val.__ptr_fields;
@@ -183,7 +192,9 @@ var __sprintf = __sprintf || function(f, ...a) {
   return f.replace(/%([#+\- 0]*)([0-9]*)\.?([0-9]*)[sdvftxXqobeEgGwc%]/g, (m) => {
     if (m === "%%") return "%";
     const verb = m.slice(-1);
-    const v = a[i++];
+    let v = a[i++];
+    // Boxed named values format as their underlying value; Error() still applies to %v/%s/%q/%w.
+    if (v && typeof v.__gfUnbox === "function" && !(typeof v.Error === "function" && "vsqw".includes(verb))) v = v.__gfUnbox();
     const [, flags, width, prec] = m.match(/^%([#+\- 0]*)([0-9]*)\.?([0-9]*)/) || [];
     const zero = flags?.includes("0") && !flags?.includes("-");
     const pad = (s, w, z) => {
@@ -376,7 +387,7 @@ function setupEvents() {
     submitInput();
   });
   input.addEventListener("keydown", function(e) {
-    if (e.key === "Enter") {
+    if (__ifeq(e.key, "Enter")) {
       submitInput();
     }
   });
@@ -384,14 +395,14 @@ function setupEvents() {
     togglePriorityMode();
   });
   list.addEventListener("change", function(e) {
-    if (e.target.getAttribute("data-action") === "toggle") {
+    if (__ifeq(e.target.getAttribute("data-action"), "toggle")) {
       toggleTodo(Math.trunc(Number(e.target.getAttribute("data-todo-id"))));
       render();
       triggerSave();
     }
   });
   list.addEventListener("click", function(e) {
-    if (e.target.getAttribute("data-action") === "delete") {
+    if (__ifeq(e.target.getAttribute("data-action"), "delete")) {
       removeTodo(Math.trunc(Number(e.target.getAttribute("data-todo-id"))));
       render();
       triggerSave();
@@ -399,14 +410,15 @@ function setupEvents() {
   });
   footer.addEventListener("click", function(e) {
     let action = e.target.getAttribute("data-action");
-    switch (action) {
-      case "filter":
+    const __sw1 = action;
+    switch (true) {
+      case __ifeq(__sw1, "filter"):
       {
         setFilter(Math.trunc(Number(e.target.getAttribute("data-filter"))));
         render();
         break;
       }
-      case "clear-completed":
+      case __ifeq(__sw1, "clear-completed"):
       {
         clearCompleted();
         render();
