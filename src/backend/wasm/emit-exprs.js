@@ -1341,7 +1341,11 @@ export class ExprsEmitter {
 				const opWType = this.toWasmType(operand._type);
 				const box = this.mod.getBoxType(operand._type);
 				this.emitExpr(operand, opWType);
-				this.pushInstruction({ op: "struct.new", typeIndex: box.typeIndex });
+				this.pushInstruction({
+					op: "struct.new",
+					typeIndex: box.typeIndex,
+					typeName: box.name,
+				});
 				return;
 			}
 

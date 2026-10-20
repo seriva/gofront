@@ -188,7 +188,12 @@ export function toWasmType(goType, checker = null, mod = null) {
 			if (mod?.getBoxType) {
 				const box = mod.getBoxType(goType.base);
 				if (box)
-					return { kind: "ref", nullable: true, typeIndex: box.typeIndex };
+					return {
+						kind: "ref",
+						nullable: true,
+						typeIndex: box.typeIndex,
+						typeName: box.name,
+					};
 			}
 		}
 		return { kind: "ref", nullable: true, heapType: "any" };
