@@ -1,7 +1,7 @@
 # Portable Go Completion — Design Plan
 
 **Version:** v1.8.0
-**Status:** Draft (2026-10-20)
+**Status:** In Progress (2026-10-20)
 **Depends on:** v1.7.0 ([`json-preact-simd-plan.md`](../v1.7.0/json-preact-simd-plan.md)), including the JS `encoding/json` hardening on the v1.7.0 branch.
 **Replaces:** the dropped v1.7.1 plans. Their stdlib items (`bufio`, `context`, `net/url`), the WASM interior-pointer problem and the SIMD completion and SoA work move here. Boundary slice borrowing (a performance optimisation, not a completeness item) is not part of this plan.
 **Followed by:** [`docs/v2.0.0/native-go-engine.md`](../v2.0.0/native-go-engine.md). v1.8.0 is the **last feature release of the JS engine** and the baseline for the v2.0.0 port. After it, only bug-fix releases (v1.8.x) ship.
@@ -520,7 +520,7 @@ Conventions used in the tasks:
 
 ### Phase 0: WASM language parity
 
-- [ ] **Task 0.1a — Pointer type hierarchy, no behaviour change**
+- [x] **Task 0.1a — Pointer type hierarchy, no behaviour change**
   - Files: `src/backend/wasm/types.js`, `src/backend/wasm/emit-exprs.js` (`case "&"`), `src/backend/wasm/wat.js`
   - Do: for every scalar pointer type `*T`, emit an abstract supertype `$ptr_T` and make the existing box struct `$box_T` its subtype (`sub $ptr_T`). `&x`, `new(T)`, `*p`, `*p = v` keep using the box. WAT output must name both types.
   - Test: `npm test` (existing suite) and `test/unit/wasm/wat.test.js`: a module with `*int` contains `(type $ptr_int (sub …))` and `(type $box_int (sub $ptr_int …))`.
