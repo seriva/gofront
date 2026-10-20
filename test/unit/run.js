@@ -77,6 +77,7 @@ export const TEST_FILES = [
 	"./wasm/go_semantics.test.js",
 	"./wasm/optimize.test.js",
 	"./wasm/shared.test.js",
+	"./wasm/simd.test.js",
 	"./wasm/stdlib.test.js",
 	"./wasm/golden.test.js",
 ];

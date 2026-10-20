@@ -15,12 +15,17 @@ import { assert, assertEqual, section, test } from "../helpers.js";
 
 section("WASM Optimizer — Core Pipeline (Binaryen)");
 
-test("DEFAULT_WASM_FEATURES includes GC and ExceptionHandling bits", () => {
+test("DEFAULT_WASM_FEATURES includes GC, ExceptionHandling, and SIMD bits", () => {
 	assert(
 		typeof DEFAULT_WASM_FEATURES === "number",
 		"features bitmask is a number",
 	);
 	assert(DEFAULT_WASM_FEATURES > 0, "features bitmask is non-zero");
+	assert(
+		(DEFAULT_WASM_FEATURES & 8) !== 0,
+		"features bitmask includes SIMD (bit 8)",
+	);
+	assertEqual(DEFAULT_WASM_FEATURES, 2014);
 });
 
 test("hasNativeWasmOpt returns a boolean", () => {

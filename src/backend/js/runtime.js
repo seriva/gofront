@@ -1571,3 +1571,48 @@ var __json_unmarshal = __json_unmarshal || function(dec, data, target) {
   if (err) return err;
   return null;
 };`;
+
+export const HELPER_SIMD = `var __simd_f32x4 = __simd_f32x4 || function(a, b, c, d) {
+  return Object.freeze([Math.fround(Number(a ?? 0)), Math.fround(Number(b ?? 0)), Math.fround(Number(c ?? 0)), Math.fround(Number(d ?? 0))]);
+};
+var __simd_splat = __simd_splat || function(v) {
+  var s = Math.fround(Number(v ?? 0));
+  return Object.freeze([s, s, s, s]);
+};
+var __simd_add = __simd_add || function(a, b) {
+  return Object.freeze([Math.fround(a[0] + b[0]), Math.fround(a[1] + b[1]), Math.fround(a[2] + b[2]), Math.fround(a[3] + b[3])]);
+};
+var __simd_sub = __simd_sub || function(a, b) {
+  return Object.freeze([Math.fround(a[0] - b[0]), Math.fround(a[1] - b[1]), Math.fround(a[2] - b[2]), Math.fround(a[3] - b[3])]);
+};
+var __simd_mul = __simd_mul || function(a, b) {
+  return Object.freeze([Math.fround(a[0] * b[0]), Math.fround(a[1] * b[1]), Math.fround(a[2] * b[2]), Math.fround(a[3] * b[3])]);
+};
+var __simd_div = __simd_div || function(a, b) {
+  return Object.freeze([Math.fround(a[0] / b[0]), Math.fround(a[1] / b[1]), Math.fround(a[2] / b[2]), Math.fround(a[3] / b[3])]);
+};
+var __simd_min = __simd_min || function(a, b) {
+  return Object.freeze([Math.fround(Math.min(a[0], b[0])), Math.fround(Math.min(a[1], b[1])), Math.fround(Math.min(a[2], b[2])), Math.fround(Math.min(a[3], b[3]))]);
+};
+var __simd_max = __simd_max || function(a, b) {
+  return Object.freeze([Math.fround(Math.max(a[0], b[0])), Math.fround(Math.max(a[1], b[1])), Math.fround(Math.max(a[2], b[2])), Math.fround(Math.max(a[3], b[3]))]);
+};
+var __simd_dot3 = __simd_dot3 || function(a, b) {
+  return Math.fround(Math.fround(Math.fround(a[0] * b[0]) + Math.fround(a[1] * b[1])) + Math.fround(a[2] * b[2]));
+};
+var __simd_dot4 = __simd_dot4 || function(a, b) {
+  return Math.fround(Math.fround(Math.fround(Math.fround(a[0] * b[0]) + Math.fround(a[1] * b[1])) + Math.fround(a[2] * b[2])) + Math.fround(a[3] * b[3]));
+};
+var __simd_with_lane = __simd_with_lane || function(a, i, v) {
+  var r = [a[0], a[1], a[2], a[3]];
+  r[i] = Math.fround(v);
+  return Object.freeze(r);
+};
+var __simd_load = __simd_load || function(buf, i) {
+  if (i < 0 || i + 4 > buf.length) throw new Error("panic: runtime error: index out of range");
+  return Object.freeze([Math.fround(buf[i]), Math.fround(buf[i + 1]), Math.fround(buf[i + 2]), Math.fround(buf[i + 3])]);
+};
+var __simd_store = __simd_store || function(buf, i, v) {
+  if (i < 0 || i + 4 > buf.length) throw new Error("panic: runtime error: index out of range");
+  buf[i] = v[0]; buf[i + 1] = v[1]; buf[i + 2] = v[2]; buf[i + 3] = v[3];
+};`;

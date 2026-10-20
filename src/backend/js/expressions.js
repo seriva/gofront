@@ -56,6 +56,8 @@ const NAMED_ZERO_TABLE = {
 	"encoding/binary.BigEndian": ["binary", "__binary_be"],
 	"base64.Encoding": ["base64", "__base64_std"],
 	"encoding/base64.Encoding": ["base64", "__base64_std"],
+	"simd.F32x4": [null, "Object.freeze([0, 0, 0, 0])"],
+	F32x4: [null, "Object.freeze([0, 0, 0, 0])"],
 };
 
 // Splits a generated JS lvalue at its outermost trailing access:
@@ -855,6 +857,9 @@ export const expressionGenMethods = {
 			const args = expr.args.map((a) => this.genExpr(a)).join(", ");
 			return `${this.genExpr(expr.func.expr)}.subarray(${args})`;
 		}
+		if (recvName === "simd.F32x4" || recvName === "F32x4") {
+			return this._genSimdReceiverCall(expr);
+		}
 		if (recvName === "sync.Mutex" || recvName === "sync.RWMutex") {
 			if (expr.func.field === "TryLock" || expr.func.field === "TryRLock")
 				return "true";
@@ -896,6 +901,35 @@ export const expressionGenMethods = {
 			const recv = this.genExpr(expr.func.expr);
 			const args = expr.args.map((a) => this.genExpr(a)).join(", ");
 			return `${recv}.${expr.func.field}(${args})`;
+		}
+		return undefined;
+	},
+
+	_genSimdReceiverCall(expr) {
+		this.useHelper("simd");
+		const method = expr.func.field;
+		const recv = this.genExpr(expr.func.expr);
+		const helpers = {
+			Add: "__simd_add",
+			Sub: "__simd_sub",
+			Mul: "__simd_mul",
+			Div: "__simd_div",
+			Min: "__simd_min",
+			Max: "__simd_max",
+			Dot3: "__simd_dot3",
+			Dot4: "__simd_dot4",
+		};
+		if (helpers[method]) {
+			return `${helpers[method]}(${recv}, ${this.genExpr(expr.args[0])})`;
+		}
+		if (method === "Lane") {
+			return `${recv}[${this.genExpr(expr.args[0])}]`;
+		}
+		if (method === "WithLane") {
+			return `__simd_with_lane(${recv}, ${this.genExpr(expr.args[0])}, ${this.genExpr(expr.args[1])})`;
+		}
+		if (method === "Splat") {
+			return `__simd_splat(${this.genExpr(expr.args[0])})`;
 		}
 		return undefined;
 	},
@@ -1206,6 +1240,14 @@ export const expressionGenMethods = {
 			return "{ _buf: [] }";
 		if (typeName === "strings.Builder" || typeName === "Builder")
 			return '{ _buf: "" }';
+		if (typeName === "simd.F32x4" || typeName === "F32x4") {
+			this.useHelper("simd");
+			const a = expr.elems[0] ? this.genExpr(expr.elems[0]) : "0";
+			const b = expr.elems[1] ? this.genExpr(expr.elems[1]) : "0";
+			const c = expr.elems[2] ? this.genExpr(expr.elems[2]) : "0";
+			const d = expr.elems[3] ? this.genExpr(expr.elems[3]) : "0";
+			return `__simd_f32x4(${a}, ${b}, ${c}, ${d})`;
+		}
 		if (typeName && this.structNames.has(typeName))
 			return this._genPositionalStructLit(typeName, expr);
 		if (typeName && this.namedWrapperNames.has(typeName))

@@ -126,6 +126,7 @@ export const WASM_SUPPORTED_STDLIB = new Set([
 	"time",
 	"testing",
 	"gofront/shared",
+	"gofront/simd",
 	"sync",
 	"crypto/rand",
 	"crypto/sha256",
@@ -894,6 +895,7 @@ export class Scope {
 		this.parent = parent;
 		this.symbols = new Map();
 		this._consts = new Set(); // names declared as const in this scope
+		this._constExprs = new Map(); // name -> AST initializer expr
 		this._locals = new Set(); // names declared as local variables (var / :=)
 		this._used = new Set(); // names referenced in this scope
 	}
@@ -904,9 +906,15 @@ export class Scope {
 		this.symbols.set(name, type);
 		if (name !== "_") this._locals.add(name);
 	}
-	defineConst(name, type) {
+	defineConst(name, type, expr = null) {
 		this.symbols.set(name, type);
 		this._consts.add(name);
+		if (expr) this._constExprs.set(name, expr);
+	}
+	lookupConstExpr(name) {
+		if (this._constExprs.has(name)) return this._constExprs.get(name);
+		if (this.parent) return this.parent.lookupConstExpr(name);
+		return null;
 	}
 	isConst(name) {
 		if (this._consts.has(name)) return true;

@@ -255,7 +255,7 @@ var __json_is_zero = __json_is_zero || function(val, isStruct) {
   return false;
 };
 var __json_preserve_int64 = __json_preserve_int64 || function(str) {
-  return str.replace(/"(?:\\.|[^"\\])*"|(-?\d{16,})/g, function(m, num) {
+  return str.replace(/"(?:\\.|[^"\\])*"|(?<=[,:\[{\s]|^)(-?\d{16,})(?=[,\]}\s]|$)/g, function(m, num) {
     if (num) {
       try {
         var b = BigInt(num);

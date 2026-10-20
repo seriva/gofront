@@ -21,6 +21,7 @@ import { randMethods } from "./rand.js";
 import { regexpMethods } from "./regexp.js";
 import { sha256Methods } from "./sha256.js";
 import { sharedMethods } from "./shared.js";
+import { simdMethods } from "./simd.js";
 import { slicesMethods } from "./slices.js";
 import { sortMethods } from "./sort.js";
 import { strconvMethods } from "./strconv.js";
@@ -64,6 +65,7 @@ const STDLIB_METHOD_MAP = {
 	hex: "_genHex",
 	base64: "_genBase64",
 	json: "_genJson",
+	simd: "_genSimd",
 };
 
 const dispatchMethods = {
@@ -108,6 +110,7 @@ export const stdlibGenMethods = {
 	...randMethods,
 	...regexpMethods,
 	...sharedMethods,
+	...simdMethods,
 	...slicesMethods,
 	...sortMethods,
 	...strconvMethods,

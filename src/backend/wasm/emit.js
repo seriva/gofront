@@ -14,6 +14,7 @@ import {
 	ExtendedPackagesEmitter,
 	IoEmitter,
 	PurePackagesEmitter,
+	SimdEmitter,
 	StdlibCoreEmitter,
 	TimeEmitter,
 } from "./stdlib/index.js";
@@ -958,6 +959,11 @@ export class FunctionEmitter {
 		if (recvType) {
 			let t = recvType;
 			while (t.kind === "pointer") t = t.base;
+			if (t.kind === "SelectorExpr") {
+				const pkg = t.expr?.name;
+				if (pkg) return `${pkg}.${t.field}`;
+			}
+			if (t.kind === "simd") return "simd.F32x4";
 			if (t.name) return t.name;
 			if (t.kind === "named") return t.name;
 			if (t.kind === "TypeName" || t.kind === "Ident") return t.name;
@@ -1106,6 +1112,8 @@ export class FunctionEmitter {
 			this.pushInstruction({ op: "f32.const", value: 0.0 });
 		} else if (wType === "f64") {
 			this.pushInstruction({ op: "f64.const", value: 0.0 });
+		} else if (wType === "v128") {
+			this.pushInstruction({ op: "v128.const", bytes: new Array(16).fill(0) });
 		} else if (
 			typeof wType === "object" &&
 			wType !== null &&
@@ -1402,3 +1410,4 @@ copyMethods(FunctionEmitter, IoEmitter);
 copyMethods(FunctionEmitter, TimeEmitter);
 copyMethods(FunctionEmitter, ExtendedPackagesEmitter);
 copyMethods(FunctionEmitter, SharedEmitter);
+copyMethods(FunctionEmitter, SimdEmitter);

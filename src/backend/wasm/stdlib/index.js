@@ -13,6 +13,7 @@ import { BINARY_MATH_IMPORTS, StdlibCoreEmitter } from "./core.js";
 import { IoEmitter } from "./io.js";
 import { ExtendedPackagesEmitter } from "./packages.js";
 import { PurePackagesEmitter } from "./pure.js";
+import { SimdEmitter } from "./simd.js";
 import { TimeEmitter } from "./time.js";
 
 // Aliases for backwards compatibility
@@ -24,6 +25,7 @@ export {
 	IoEmitter as Phase7Emitter,
 	PurePackagesEmitter,
 	PurePackagesEmitter as Phase6Emitter,
+	SimdEmitter,
 	StdlibCoreEmitter,
 	StdlibCoreEmitter as StdlibEmitter,
 	TimeEmitter,
@@ -37,4 +39,5 @@ export const stdlibEmitters = [
 	IoEmitter,
 	TimeEmitter,
 	ExtendedPackagesEmitter,
+	SimdEmitter,
 ];

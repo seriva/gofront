@@ -52,6 +52,7 @@ import {
 	HELPER_S,
 	HELPER_SCLONE,
 	HELPER_SHA256,
+	HELPER_SIMD,
 	HELPER_SORT_SLICE,
 	HELPER_SPRINTF,
 	HELPER_STRCONV,
@@ -143,6 +144,7 @@ const HELPER_MAP = [
 	["hex", HELPER_HEX],
 	["base64", HELPER_BASE64],
 	["json", HELPER_JSON],
+	["simd", HELPER_SIMD],
 ];
 
 export class CodeGen {

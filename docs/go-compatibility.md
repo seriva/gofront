@@ -17,7 +17,9 @@ These features are intentional additions for the JavaScript platform:
 | `gom` built-in package | Declarative DOM node builders available without an import. |
 | Browser globals (`document`, `console`, etc.) | Predeclared as `any` for practical DOM access. `WebGL2RenderingContext`, `WebGLRenderingContext`, `GPUDevice`, `GPUAdapter`, `GPUQueue`, `ArrayBuffer`, `DataView`, and TypedArrays have full static typings with method-level checking. |
 | `.d.ts` type imports (`import "js:./types.d.ts"`) | Type-safe interop with JavaScript libraries. |
+| `.d.ts` tuple return mapping | TypeScript `[A, B]` in return position maps directly to Go multi-value return `(A, B)` (e.g. React/Preact hooks `state, setState := useState(...)`). |
 | npm package resolution | Import types from `node_modules/` and `@types/` automatically. |
+| `gofront/simd` (experimental) | Value-typed 4-wide float SIMD (`simd.F32x4`) compiling directly to native WASM `v128` instructions without GC overhead. |
 
 ### What's not implemented
 
@@ -52,7 +54,9 @@ divide-by-zero panics) — see the [hybrid guide](hybrid-wasm.md#strict-numeric-
 | `error` type | Interface `{ Error() string }` with `__error` runtime objects | Interface `{ Error() string }` | Close match. Custom error types, `errors.Is`/`Unwrap`, `%w` wrapping all work. `toString()` added for JS string context compat. |
 | `errors.Is` | Walks the `Unwrap` chain comparing by identity **or by message** for `errors.New`/`fmt.Errorf` values (both backends) | Identity (or `Is` method) only | Two distinct `errors.New("x")` sentinels compare equal. Use distinct messages or a custom error type when identity matters. |
 | `any == any` with numbers | `js` packages compare by JS value: `any(3) == any(3.0)` is `true`; `wasm` packages compare dynamic type first, so it is `false` | `false` (different dynamic types) | JS has a single `number` type. Compare after a type assertion in `both` packages to get identical results. |
-| Struct field tags | Parsed, silently discarded | Available via `reflect` | No reflection = no use for tag values. |
+| Struct field tags | Parsed and preserved for compile-time code generation (`encoding/json` honors `json:"..."` tags including `,omitempty`, `string`, `-`, and unexported field exclusion); general runtime reflection is not supported | Available via `reflect` | No reflection runtime; tags drive static compile-time code generation. |
+| `encoding/json` | Implemented via static compile-time code generation without runtime reflection (`js` packages). Supports structs, maps, slices, primitives, pointers, `json.Marshaler`, `json.Unmarshaler`, and `json.RawMessage`. Unsupported in `wasm` packages (reports compile diagnostic). | Standard library package with runtime reflection | Reflection-free compile-time specialization matches Go formatting and error semantics. |
+| `gofront/simd` | Experimental value-type 4-wide float SIMD (`simd.F32x4`). In WASM compiles to native `v128` instructions without GC allocation; in JS lowers to frozen 4-element arrays using `Math.fround` for 32-bit float parity. Does not cross JS↔WASM boundary in v1.7.0. | Not in Go standard library | High-performance vector math targeting WebAssembly SIMD. |
 | Pointers (`&x`, `*p`) | Struct pointers are the object itself; address-taken scalars are boxed as `{ value: T }`; slices and maps are references | True memory indirection | Shared mutation works for scalars and structs. Taking the address of a struct field (`&s.Field`) or slice/array element (`&xs[i]`) creates a property-accessor box in JS and routes through direct assignment in WASM, so writes through the pointer reach the underlying storage. |
 | Three-index slice (`a[lo:hi:max]`) | `max` is parsed but ignored | Sets result capacity | JS arrays have no capacity. |
 | `time.Time` boundary crossing | Round-trips across the JS↔WASM boundary via Unix milliseconds (matching JS `Date`); sub-millisecond nanoseconds are truncated | Nanosecond precision everywhere | The JS shim operates on millisecond timestamps. Times created in WASM retain nanoseconds internally until crossing the boundary. |
