@@ -5,9 +5,13 @@ import { STDLIB_PACKAGES } from "../../../src/typechecker/types.js";
 import {
 	assert,
 	assertEqual,
+	assertThrows,
+	compileDir,
 	compileHybridProject,
+	join,
 	section,
 	test,
+	withTempDir,
 } from "../helpers.js";
 
 // Builds `lib` once as `both` (JS code path) and once as `wasm` (linked
@@ -96,4 +100,47 @@ func Run() string { return cmp.Or("", "", "x", "y") + cmp.Or("", "") + "!" }
 		"main.go": `package main\n\nimport "./lib"\n\nfunc main() { println(lib.Run()) }\n`,
 	});
 	assertEqual(res.lines.join("\n"), "x!");
+});
+
+section("Go-source stdlib: overlays (errors.ErrUnsupported)");
+
+test("errors.Is(err, errors.ErrUnsupported) parity", async () => {
+	const out = await stdParity(`import (
+	"errors"
+	"fmt"
+)
+
+func Run() string {
+	err := fmt.Errorf("open: %w", errors.ErrUnsupported)
+	return fmt.Sprintf("%v %s", errors.Is(err, errors.ErrUnsupported), errors.ErrUnsupported.Error())
+}
+`);
+	assertEqual(out, "true unsupported operation");
+});
+
+test("an overlay that redeclares an emitter member is rejected", () => {
+	withTempDir(
+		{
+			"stdlib/errors/overlay.go": `//go:build gofront
+
+//gofront:target both
+
+package errors
+
+func New(text string) error { return nil }
+`,
+			"app/main.go": `package main
+
+import "errors"
+
+func main() { println(errors.New("x") != nil) }
+`,
+		},
+		(dir) => {
+			assertThrows(
+				() => compileDir(join(dir, "app"), { stdlibRoot: join(dir, "stdlib") }),
+				"overlay redeclares errors.New",
+			);
+		},
+	);
 });
