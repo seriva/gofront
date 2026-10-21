@@ -38,6 +38,14 @@ import {
 
 /** @typedef {import('./index.js').TypeChecker} TypeChecker */
 
+// min/max: the type of the first typed operand; with only untyped constants,
+// an untyped float if any operand is one (Go's "largest kind" rule).
+function minMaxType(at) {
+	const typed = at.find((t) => t && t.kind !== "untyped");
+	if (typed) return typed;
+	return at.find((t) => t?.base === "float64") ?? at[0] ?? ANY;
+}
+
 // Dispatch table for builtin function type checking.
 // Each value is (self, name, expr, argTypes, scope) => returnType.
 const BUILTIN_CHECK = {
@@ -87,8 +95,8 @@ const BUILTIN_CHECK = {
 	panic: () => VOID,
 	recover: () => ANY,
 	error: () => ERROR,
-	min: (_s, _n, _e, at) => at[0] ?? ANY,
-	max: (_s, _n, _e, at) => at[0] ?? ANY,
+	min: (_s, _n, _e, at) => minMaxType(at),
+	max: (_s, _n, _e, at) => minMaxType(at),
 	clear: () => VOID,
 	complex: (s, _n, e, at) => s._checkBuiltinComplex(e, at),
 	real: (s, n, e, at) => s._checkBuiltinRealImag(n, e, at),
