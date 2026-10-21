@@ -3,6 +3,7 @@
 // are mutated and thus require heap-allocated environment cells for WASM closures.
 
 import { collectMutatedVars } from "./ownership.js";
+import { getOrCreateIteratorFuncLit, isIteratorRangeFor } from "./range.js";
 import { forEachChild } from "./walk.js";
 
 /**
@@ -40,7 +41,7 @@ export function collectDeclaredNames(node, names = new Set()) {
 	}
 
 	// Do not descend into nested functions when collecting local declarations
-	if (node.kind === "FuncLit") return names;
+	if (node.kind === "FuncLit" || isIteratorRangeFor(node)) return names;
 
 	forEachChild(node, (child) => collectDeclaredNames(child, names));
 	return names;
@@ -92,6 +93,53 @@ function collectReferencedNames(node, localDecls, refs = new Set()) {
 	return refs;
 }
 
+function hasReturnInNode(n) {
+	let found = false;
+	const check = (x) => {
+		if (!x || typeof x !== "object" || found) return;
+		if (Array.isArray(x)) {
+			for (const elem of x) check(elem);
+			return;
+		}
+		if (x.kind === "ReturnStmt") {
+			found = true;
+			return;
+		}
+		if (x.kind === "FuncLit" && !x._isYieldClosure) return;
+		for (const k of Object.keys(x)) {
+			if (k.startsWith("_")) continue;
+			check(x[k]);
+		}
+	};
+	check(n);
+	return found;
+}
+
+function hasIteratorWithReturn(body) {
+	let found = false;
+	const check = (x) => {
+		if (!x || typeof x !== "object" || found) return;
+		if (Array.isArray(x)) {
+			for (const elem of x) check(elem);
+			return;
+		}
+		if (x.kind === "FuncLit") return;
+		if (isIteratorRangeFor(x)) {
+			const lit = getOrCreateIteratorFuncLit(x);
+			if (hasReturnInNode(lit?.body)) {
+				found = true;
+				return;
+			}
+		}
+		for (const k of Object.keys(x)) {
+			if (k.startsWith("_")) continue;
+			check(x[k]);
+		}
+	};
+	check(body);
+	return found;
+}
+
 /**
  * Analyzes a function or method declaration for closures and their captured variables.
  * @param {Object} fnDecl AST FuncDecl or FuncLit node
@@ -100,6 +148,26 @@ function collectReferencedNames(node, localDecls, refs = new Set()) {
 export function analyzeCaptures(fnDecl) {
 	const result = new CaptureAnalysis();
 	if (!fnDecl?.body) return result;
+
+	// Synthesize named returns if not already present, so iterator returns can share boxed slots
+	if (
+		fnDecl.returnType &&
+		!fnDecl.returnType._namedReturns &&
+		hasIteratorWithReturn(fnDecl.body)
+	) {
+		const ret = fnDecl.returnType;
+		if (ret.name !== "void") {
+			const types =
+				ret.kind === "TupleType" || ret.kind === "tuple" ? ret.types : [ret];
+			if (types && types.length > 0) {
+				fnDecl.returnType._namedReturns = types.map((t, i) => ({
+					name: `__retVal$${i}`,
+					type: { ...t, _namedReturns: undefined },
+					_synthesized: true,
+				}));
+			}
+		}
+	}
 
 	// Collect parameters, receiver and named returns of the root function
 	const rootScope = new Set();
@@ -117,6 +185,70 @@ export function analyzeCaptures(fnDecl) {
 	// Fast pre-collected set of all mutated variables in the entire function
 	const mutatedVars = collectMutatedVars(fnDecl.body);
 
+	const handleIteratorRange = (node, scopeStack) => {
+		const funcLit = getOrCreateIteratorFuncLit(node);
+		if (node._iterStateName) {
+			rootScope.add(node._iterStateName);
+			result.mutatedCaptures.add(node._iterStateName);
+		}
+		const rootNamed = fnDecl.returnType?._namedReturns ?? [];
+		const hasRet = hasReturnInNode(funcLit.body);
+		if (hasRet && rootNamed.length > 0) {
+			for (const r of rootNamed) {
+				if (r.name && r.name !== "_") {
+					rootScope.add(r.name);
+					result.mutatedCaptures.add(r.name);
+				}
+			}
+		}
+		walkClosures(funcLit, scopeStack);
+		const captured = result.capturesByClosure.get(funcLit) ?? new Set();
+		if (node._iterStateName) {
+			captured.add(node._iterStateName);
+		}
+		if (hasRet && rootNamed.length > 0) {
+			for (const r of rootNamed) {
+				if (r.name && r.name !== "_") {
+					captured.add(r.name);
+				}
+			}
+		}
+		result.capturesByClosure.set(funcLit, captured);
+	};
+
+	const handleFuncLit = (node, scopeStack) => {
+		const closureLocals = new Set();
+		for (const p of node.params ?? []) {
+			if (p.name && p.name !== "_") closureLocals.add(p.name);
+		}
+		for (const r of node.returnType?._namedReturns ?? []) {
+			if (r.name && r.name !== "_") closureLocals.add(r.name);
+		}
+		collectDeclaredNames(node.body, closureLocals);
+
+		const allOuterScope = new Set();
+		for (const scope of scopeStack) {
+			for (const name of scope) allOuterScope.add(name);
+		}
+
+		const allRefs = collectReferencedNames(node.body, closureLocals);
+		const captured = new Set();
+		for (const ref of allRefs) {
+			if (allOuterScope.has(ref)) {
+				captured.add(ref);
+			}
+		}
+		result.capturesByClosure.set(node, captured);
+
+		for (const varName of captured) {
+			if (mutatedVars.has(varName)) {
+				result.mutatedCaptures.add(varName);
+			}
+		}
+
+		walkClosures(node.body, [...scopeStack, closureLocals]);
+	};
+
 	// Traverse closures with lexical scope stack to properly handle arbitrary nesting
 	const walkClosures = (node, scopeStack) => {
 		if (!node || typeof node !== "object") return;
@@ -125,38 +257,13 @@ export function analyzeCaptures(fnDecl) {
 			return;
 		}
 
+		if (isIteratorRangeFor(node)) {
+			handleIteratorRange(node, scopeStack);
+			return;
+		}
+
 		if (node.kind === "FuncLit") {
-			const closureLocals = new Set();
-			for (const p of node.params ?? []) {
-				if (p.name && p.name !== "_") closureLocals.add(p.name);
-			}
-			for (const r of node.returnType?._namedReturns ?? []) {
-				if (r.name && r.name !== "_") closureLocals.add(r.name);
-			}
-			collectDeclaredNames(node.body, closureLocals);
-
-			// Visible outer variables from all enclosing ancestor scopes
-			const allOuterScope = new Set();
-			for (const scope of scopeStack) {
-				for (const name of scope) allOuterScope.add(name);
-			}
-
-			const allRefs = collectReferencedNames(node.body, closureLocals);
-			const captured = new Set();
-			for (const ref of allRefs) {
-				if (allOuterScope.has(ref)) {
-					captured.add(ref);
-				}
-			}
-			result.capturesByClosure.set(node, captured);
-
-			for (const varName of captured) {
-				if (mutatedVars.has(varName)) {
-					result.mutatedCaptures.add(varName);
-				}
-			}
-
-			walkClosures(node.body, [...scopeStack, closureLocals]);
+			handleFuncLit(node, scopeStack);
 			return;
 		}
 

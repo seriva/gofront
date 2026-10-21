@@ -130,6 +130,9 @@ export const statementGenMethods = {
 				this.line(`__defers.push(() => { ${this.genExpr(stmt.call)}; });`);
 				break;
 			case "LabeledStmt":
+				if (stmt.body && stmt.body.kind === "ForStmt") {
+					stmt.body.label = stmt.label;
+				}
 				this.line(`${stmt.label}:`);
 				this.genStmt(stmt.body);
 				break;
@@ -480,8 +483,12 @@ export const statementGenMethods = {
 		}
 	},
 
-	_genBranchStmt(stmt) {
-		if (this._inIteratorBody && !stmt.label) {
+	_genIteratorBranchStmt(stmt) {
+		if (!stmt.label) {
+			if (this._iterLoopDepth > 0) {
+				if (stmt.keyword !== "fallthrough") this.line(`${stmt.keyword};`);
+				return;
+			}
 			if (stmt.keyword === "break") {
 				this.line(`${this._iterBreakFlag} = true; return false;`);
 				return;
@@ -490,6 +497,29 @@ export const statementGenMethods = {
 				this.line("return true;");
 				return;
 			}
+			return;
+		}
+		if (this._innerLoopLabels?.has(stmt.label)) {
+			if (stmt.keyword !== "fallthrough")
+				this.line(`${stmt.keyword} ${stmt.label};`);
+			return;
+		}
+		if (
+			stmt.keyword === "continue" &&
+			stmt.label === this._currentIterLoopLabel
+		) {
+			this.line("return true;");
+			return;
+		}
+		this.line(
+			`${this._iterTargetFlag} = "${stmt.keyword}$${stmt.label}"; return false;`,
+		);
+	},
+
+	_genBranchStmt(stmt) {
+		if (this._inIteratorBody) {
+			this._genIteratorBranchStmt(stmt);
+			return;
 		}
 		if (stmt.keyword !== "fallthrough")
 			this.line(
@@ -550,25 +580,40 @@ export const statementGenMethods = {
 	},
 
 	genFor(stmt) {
-		if (this.isRangeFor(stmt)) {
-			if (stmt.init.rhs[0]._isIterator) this.genIteratorFor(stmt);
-			else this.genRangeFor(stmt);
-			return;
+		const isInner = this._inIteratorBody;
+		if (isInner) {
+			this._iterLoopDepth = (this._iterLoopDepth ?? 0) + 1;
+			if (stmt.label) {
+				this._innerLoopLabels = this._innerLoopLabels ?? new Set();
+				this._innerLoopLabels.add(stmt.label);
+			}
 		}
-		if (stmt.cond?.kind === "RangeExpr") {
-			this._genRangeExprFor(stmt);
-			return;
+		try {
+			if (this.isRangeFor(stmt)) {
+				if (stmt.init.rhs[0]._isIterator) this.genIteratorFor(stmt);
+				else this.genRangeFor(stmt);
+				return;
+			}
+			if (stmt.cond?.kind === "RangeExpr") {
+				this._genRangeExprFor(stmt);
+				return;
+			}
+			if (!stmt.init && !stmt.post) {
+				this._genSimpleWhileFor(stmt);
+				return;
+			}
+			const init = stmt.init ? this.stmtInline(stmt.init) : "";
+			const cond = stmt.cond ? this.genExpr(stmt.cond) : "";
+			const post = stmt.post ? this.stmtInline(stmt.post) : "";
+			this.line(`for (${init}; ${cond}; ${post}) {`);
+			this.indented(() => this.genBlock(stmt.body));
+			this.line("}");
+		} finally {
+			if (isInner) {
+				this._iterLoopDepth--;
+				if (stmt.label) this._innerLoopLabels.delete(stmt.label);
+			}
 		}
-		if (!stmt.init && !stmt.post) {
-			this._genSimpleWhileFor(stmt);
-			return;
-		}
-		const init = stmt.init ? this.stmtInline(stmt.init) : "";
-		const cond = stmt.cond ? this.genExpr(stmt.cond) : "";
-		const post = stmt.post ? this.stmtInline(stmt.post) : "";
-		this.line(`for (${init}; ${cond}; ${post}) {`);
-		this.indented(() => this.genBlock(stmt.body));
-		this.line("}");
 	},
 
 	isRangeFor(stmt) {
@@ -793,7 +838,28 @@ export const statementGenMethods = {
 		return `__s(${iteree}).entries()`;
 	},
 
-	_genIteratorLoop(itereeExpr, paramsStr, body) {
+	_emitIterTargetDispatch(targetFlag) {
+		const labels = this._functionLabels ?? [];
+		this.line(`if (${targetFlag}) {`);
+		this.indented(() => {
+			for (const lbl of labels) {
+				this.line(`if (${targetFlag} === "break$${lbl}") break ${lbl};`);
+				this.line(`if (${targetFlag} === "continue$${lbl}") continue ${lbl};`);
+			}
+			if (this._inIteratorBody) {
+				this.line(`${this._iterTargetFlag} = ${targetFlag}; return false;`);
+			}
+		});
+		this.line("}");
+	},
+
+	_genIteratorLoop(
+		itereeExpr,
+		paramsStr,
+		body,
+		assignPreamble = null,
+		loopLabel = null,
+	) {
 		let iteree = this.genExpr(itereeExpr);
 		if (itereeExpr.kind === "FuncLit") {
 			iteree = `(${iteree})`;
@@ -803,38 +869,61 @@ export const statementGenMethods = {
 		const breakFlag = `__broke${d}`;
 		const retFlag = `__returned${d}`;
 		const retVar = `__retVal${d}`;
+		const targetFlag = `__target${d}`;
 
 		this.line("{");
 		this.indented(() => {
 			this.line(`let ${breakFlag} = false;`);
 			this.line(`let ${retFlag} = false;`);
 			this.line(`let ${retVar};`);
+			this.line(`let ${targetFlag} = null;`);
 
 			this.line(`${iteree}(function(${paramsStr}) {`);
 			this.indented(() => {
-				this.line(`if (${breakFlag}) return false;`);
+				this.line(`if (${breakFlag} || ${retFlag} || ${targetFlag}) {`);
+				this.indented(() => {
+					if (this.strict) {
+						this.line(
+							`throw new Error("range function continued iteration after function for loop body returned false");`,
+						);
+					} else {
+						this.line("return false;");
+					}
+				});
+				this.line("}");
 				const prev = {
 					in: this._inIteratorBody,
 					break: this._iterBreakFlag,
 					ret: this._iterReturnFlag,
 					retVar: this._iterReturnVar,
+					target: this._iterTargetFlag,
+					loopLabel: this._currentIterLoopLabel,
+					loopDepth: this._iterLoopDepth,
 				};
 				this._inIteratorBody = true;
 				this._iterBreakFlag = breakFlag;
 				this._iterReturnFlag = retFlag;
 				this._iterReturnVar = retVar;
+				this._iterTargetFlag = targetFlag;
+				this._currentIterLoopLabel = loopLabel;
+				this._iterLoopDepth = 0;
 
+				if (assignPreamble) assignPreamble();
 				this.genBlock(body);
 
 				this._inIteratorBody = prev.in;
 				this._iterBreakFlag = prev.break;
 				this._iterReturnFlag = prev.ret;
 				this._iterReturnVar = prev.retVar;
+				this._iterTargetFlag = prev.target;
+				this._currentIterLoopLabel = prev.loopLabel;
+				this._iterLoopDepth = prev.loopDepth;
 
 				this.line("return true;");
 			});
 			this.line("});");
 			this.line(`if (${retFlag}) return ${retVar};`);
+			this._emitIterTargetDispatch(targetFlag);
 		});
 		this.line("}");
 		this._iterDepth--;
@@ -842,15 +931,71 @@ export const statementGenMethods = {
 
 	genIteratorFor(stmt) {
 		const range = stmt.init.rhs[0];
+		const isAssign = stmt.init.kind === "AssignStmt";
 		const lhs = stmt.init.lhs.map((e) => e.name ?? this.genExpr(e));
+		const yieldTypes = range._yieldParams ?? [];
+		if (isAssign) {
+			const cbParams = lhs.map((_, i) => `__p${i}`);
+			const params = yieldTypes.length === 0 ? "" : cbParams.join(", ");
+			const assignPreamble = () => {
+				for (let i = 0; i < lhs.length; i++) {
+					if (lhs[i] !== "_") {
+						const yType = yieldTypes[i];
+						const isStruct =
+							this._isStructType(yType) ||
+							this._isStructType(stmt.init.lhs[i]?._type);
+						if (isStruct) {
+							this.useHelper("sclone");
+							this.line(`${lhs[i]} = __sclone(${cbParams[i]});`);
+						} else {
+							this.line(`${lhs[i]} = ${cbParams[i]};`);
+						}
+					}
+				}
+			};
+			this._genIteratorLoop(
+				range.expr,
+				params,
+				stmt.body,
+				assignPreamble,
+				stmt.label ?? null,
+			);
+			return;
+		}
 		const cbParams = lhs.map((n, i) => (n === "_" ? `_$${i}` : n));
-		const params = range._yieldParams.length === 0 ? "" : cbParams.join(", ");
-		this._genIteratorLoop(range.expr, params, stmt.body);
+		const params = yieldTypes.length === 0 ? "" : cbParams.join(", ");
+		const clonePreamble = () => {
+			for (let i = 0; i < lhs.length; i++) {
+				if (lhs[i] !== "_") {
+					const yType = yieldTypes[i];
+					const isStruct =
+						this._isStructType(yType) ||
+						this._isStructType(stmt.init.lhs[i]?._type);
+					if (isStruct) {
+						this.useHelper("sclone");
+						this.line(`${cbParams[i]} = __sclone(${cbParams[i]});`);
+					}
+				}
+			}
+		};
+		this._genIteratorLoop(
+			range.expr,
+			params,
+			stmt.body,
+			clonePreamble,
+			stmt.label ?? null,
+		);
 	},
 
 	// 0-param iterator: for range iter { body }
 	genIteratorForCond(stmt) {
-		this._genIteratorLoop(stmt.cond.expr, "", stmt.body);
+		this._genIteratorLoop(
+			stmt.cond.expr,
+			"",
+			stmt.body,
+			null,
+			stmt.label ?? null,
+		);
 	},
 
 	// Inline a statement as a for-init/post string (no semicolon)
