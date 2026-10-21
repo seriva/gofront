@@ -78,6 +78,7 @@ export const TEST_FILES = [
 	"./wasm/optimize.test.js",
 	"./wasm/shared.test.js",
 	"./wasm/simd.test.js",
+	"./wasm/pointers.test.js",
 	"./wasm/stdlib.test.js",
 	"./wasm/golden.test.js",
 ];
