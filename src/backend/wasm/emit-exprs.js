@@ -1,6 +1,7 @@
 // src/backend/wasm/emit-exprs.js
 // FunctionEmitter mixin: expression emission (literals, operators, indexing, conversions).
 
+import { compositeLitIndices } from "../../typechecker/types.js";
 import { foldConstExpr } from "./const-fold.js";
 import {
 	getMapKeyValTypes,
@@ -81,6 +82,9 @@ export class ExprsEmitter {
 			) {
 				const refWType = this.toWasmType(goType);
 				this._emitRawExpr(expr, refWType);
+				// An array stored in an interface is a copy.
+				if (isArrayType(goType, this.mod.checker))
+					this._emitCopyIfValue(expr, goType, refWType);
 				return;
 			}
 
@@ -312,7 +316,7 @@ export class ExprsEmitter {
 					this.pushInstruction({ op: "local.get", index: mTmp });
 					this.emitExpr(elem.key, mapInfo.keyWType);
 					this.emitExpr(elem.value, mapInfo.valWType);
-					this._emitCopyIfValueStruct(elem.value, valType, mapInfo.valWType);
+					this._emitCopyIfValue(elem.value, valType, mapInfo.valWType);
 					this.pushInstruction({
 						op: "call",
 						funcIndex: this.mod.resolveFuncIndex(mapInfo.setFuncName),
@@ -345,7 +349,7 @@ export class ExprsEmitter {
 			}
 			for (const elem of lit.elems) {
 				this.emitExpr(elem, sliceInfo.elemWType);
-				this._emitCopyIfValueStruct(elem, elem._type, sliceInfo.elemWType);
+				this._emitCopyIfValue(elem, elem._type, sliceInfo.elemWType);
 			}
 			this.pushInstruction({
 				op: "array.new_fixed",
@@ -365,14 +369,23 @@ export class ExprsEmitter {
 		if (isArrayType(litType, this.mod.checker)) {
 			const elemType = litType.elem;
 			const arrInfo = this.mod.getArrayType(elemType);
-			const count = lit.elems?.length ?? 0;
+			const elems = lit.elems ?? [];
+			const indices = compositeLitIndices(elems);
+			const count = Math.max(-1, ...indices) + 1;
 			const targetSize = this._getArraySize(litType, count);
-			for (const elem of lit.elems ?? []) {
+			// Keyed elements (`[5]int{2: 7}`) go to their index; every other
+			// slot is the element zero value.
+			const slots = new Array(targetSize).fill(null);
+			elems.forEach((e, i) => {
+				slots[indices[i]] = e.kind === "KeyValueExpr" ? e.value : e;
+			});
+			for (const elem of slots) {
+				if (!elem) {
+					this.emitZeroValue(elemType, arrInfo.elemWType);
+					continue;
+				}
 				this.emitExpr(elem, arrInfo.elemWType);
-				this._emitCopyIfValueStruct(elem, elem._type, arrInfo.elemWType);
-			}
-			for (let i = count; i < targetSize; i++) {
-				this.emitZeroValue(elemType, arrInfo.elemWType);
+				this._emitCopyIfValue(elem, elem._type, arrInfo.elemWType);
 			}
 			this.pushInstruction({
 				op: "array.new_fixed",
@@ -408,13 +421,13 @@ export class ExprsEmitter {
 			const f = fields[i];
 			if (isKeyed) {
 				if (map.has(f.name)) {
-					this.emitExpr(map.get(f.name), f.wType);
+					this._emitFieldInit(map.get(f.name), f);
 				} else {
 					this.emitZeroValue(f.goType, f.wType);
 				}
 			} else {
 				if (i < (lit.elems?.length ?? 0)) {
-					this.emitExpr(lit.elems[i], f.wType);
+					this._emitFieldInit(lit.elems[i], f);
 				} else {
 					this.emitZeroValue(f.goType, f.wType);
 				}
@@ -425,6 +438,13 @@ export class ExprsEmitter {
 			op: "struct.new",
 			typeIndex: structInfo.typeIndex,
 		});
+	}
+
+	// A struct literal field initialiser; array values are copied in.
+	_emitFieldInit(value, f) {
+		this.emitExpr(value, f.wType);
+		if (f.goType?.kind !== "pointer" && isArrayType(f.goType, this.mod.checker))
+			this._emitCopyIfValue(value, f.goType, f.wType);
 	}
 
 	emitSelectorExpr(expr) {
@@ -767,8 +787,11 @@ export class ExprsEmitter {
 		const isValStruct =
 			isStructType(elemGoType, this.mod.checker, this.mod) &&
 			!isPointerToStruct(elemGoType, this.mod.checker, this.mod);
+		const isValArray =
+			elemGoType?.kind !== "pointer" &&
+			isArrayType(elemGoType, this.mod.checker);
 
-		if (!isValStruct) {
+		if (!isValStruct && !isValArray) {
 			this.pushInstruction({
 				op: "array.copy",
 				typeIndexDst: arrInfo.typeIndex,
@@ -841,7 +864,9 @@ export class ExprsEmitter {
 		this.pushInstruction("i32.add");
 		this.pushInstruction({ op: "array.get", typeIndex: arrInfo.typeIndex });
 
-		if (sInfo) {
+		if (isValArray) {
+			this.emitCopyArray(elemGoType);
+		} else if (sInfo) {
 			this.emitCloneStruct(sInfo, arrInfo.elemWType);
 		}
 
@@ -879,7 +904,9 @@ export class ExprsEmitter {
 		this.pushInstruction("i32.add");
 		this.pushInstruction({ op: "array.get", typeIndex: arrInfo.typeIndex });
 
-		if (sInfo) {
+		if (isValArray) {
+			this.emitCopyArray(elemGoType);
+		} else if (sInfo) {
 			this.emitCloneStruct(sInfo, arrInfo.elemWType);
 		}
 
@@ -2260,6 +2287,8 @@ export class ExprsEmitter {
 							(f.goType?.kind === "named" ? f.goType.name : null),
 					);
 				this._emitStructEq(sInfo);
+			} else if (this._isValueArray(f.goType)) {
+				this._emitArrayEq(f.goType);
 			} else if (isStringType(f.goType, this.mod.checker)) {
 				const cmpIdx = this.mod.getStringCmpImportIndex("==");
 				this.pushInstruction({ op: "call", funcIndex: cmpIdx });
@@ -2298,7 +2327,90 @@ export class ExprsEmitter {
 		});
 	}
 
+	_isValueArray(goType) {
+		return goType?.kind !== "pointer" && isArrayType(goType, this.mod.checker);
+	}
+
+	// Go array equality: element-wise (arrays are values).  Pops two arrays
+	// and pushes an i32.  A null array (a never-written slot) is the zero
+	// array.
+	_emitArrayEq(goType) {
+		const elemType = this._getArrayElemType(goType);
+		const arrInfo = this.mod.getArrayType(elemType);
+		const arrWType = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: arrInfo.typeIndex,
+		};
+		const bTmp = this.acquireTemp(arrWType);
+		const aTmp = this.acquireTemp(arrWType);
+		for (const tmp of [bTmp, aTmp]) {
+			this.pushInstruction({ op: "local.tee", index: tmp });
+			this.pushInstruction("ref.is_null");
+			this.pushInstruction({ op: "if", blockType: "void" });
+			this.emitZeroValue(goType, arrWType);
+			this.pushInstruction({ op: "local.set", index: tmp });
+			this.pushInstruction("end");
+		}
+		const i = this.acquireTemp("i32");
+		const resTmp = this.acquireTemp("i32");
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction({ op: "local.set", index: resTmp });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: i });
+		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushInstruction({ op: "loop", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: i });
+		this.pushInstruction({ op: "local.get", index: aTmp });
+		this.pushInstruction("array.len");
+		this.pushInstruction("i32.ge_u");
+		this.pushInstruction({ op: "br_if", depth: 1 });
+		for (const tmp of [aTmp, bTmp]) {
+			this.pushInstruction({ op: "local.get", index: tmp });
+			this.pushInstruction({ op: "local.get", index: i });
+			this.pushInstruction({ op: "array.get", typeIndex: arrInfo.typeIndex });
+		}
+		this._emitElemEq(elemType, arrInfo.elemWType);
+		this.pushInstruction("i32.eqz");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: resTmp });
+		this.pushInstruction({ op: "br", depth: 2 });
+		this.pushInstruction("end");
+		this.pushInstruction({ op: "local.get", index: i });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: i });
+		this.pushInstruction({ op: "br", depth: 0 });
+		this.pushInstruction("end");
+		this.pushInstruction("end");
+		this.pushInstruction({ op: "local.get", index: resTmp });
+		this.releaseTemp(resTmp, "i32");
+		this.releaseTemp(i, "i32");
+		this.releaseTemp(aTmp, arrWType);
+		this.releaseTemp(bTmp, arrWType);
+	}
+
+	// Equality of two array elements on the stack -> i32.
+	_emitElemEq(goType, wType) {
+		if (this._isValueArray(goType)) {
+			this._emitArrayEq(goType);
+		} else if (
+			isStructType(goType, this.mod.checker, this.mod) &&
+			!isPointerToStruct(goType, this.mod.checker, this.mod)
+		) {
+			this._emitStructEq(this._resolveStructInfo({ _type: goType }));
+		} else {
+			this.emitBinaryOp("==", wType, goType);
+		}
+	}
+
 	emitBinaryOp(op, wType, goType) {
+		if ((op === "==" || op === "!=") && this._isValueArray(goType)) {
+			this._emitArrayEq(goType);
+			if (op === "!=") this.pushInstruction("i32.eqz");
+			return;
+		}
 		if (isComplex(goType)) {
 			const is64 = isComplex64(goType);
 			const info = this.mod.getComplexType(is64 ? "complex64" : "complex128");

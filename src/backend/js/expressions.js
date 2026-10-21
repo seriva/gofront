@@ -6,6 +6,8 @@ import {
 	rootIdentName,
 } from "../../lower/index.js";
 import {
+	BROWSER_GLOBALS,
+	compositeLitIndices,
 	ERROR,
 	isAny,
 	isComplex,
@@ -14,6 +16,10 @@ import {
 } from "../../typechecker/types.js";
 
 /** @typedef {import('./index.js').CodeGen} CodeGen */
+
+// Array literals longer than this that leave most slots zero are emitted as
+// the zero array plus assignments (_genSparseArrayLit).
+const SPARSE_ARRAY_MIN = 32;
 
 const STRICT_NUMERIC_TYPES = new Set([
 	"float32",
@@ -311,7 +317,18 @@ const BUILTIN_GEN = {
 	},
 	copy: (s, e) => {
 		const [dst, src] = e.args.map((a) => s.genExpr(a));
-		return `((__cd, __cs) => { if (!__cd || !__cs) return 0; const n = Math.min(__cd.length, __cs.length); if (__cd.set) { __cd.set(__cs.length === n ? __cs : (__cs.subarray ? __cs.subarray(0, n) : __cs.slice(0, n))); } else { __cd.splice(0, n, ...(__cs.slice ? __cs.slice(0, n) : __cs.subarray(0, n))); } return n; })(${dst}, ${src})`;
+		// Array elements are values: the copied elements must not alias src.
+		const t = e.args[1]._type;
+		const elem = (t?.kind === "named" ? t.underlying : t)?.elem;
+		const clone =
+			s._aggregateBase(elem)?.kind === "array"
+				? s._cloneJs(elem, "__e")
+				: "__e";
+		const items =
+			clone === "__e"
+				? "(__cs.slice ? __cs.slice(0, n) : __cs.subarray(0, n))"
+				: `__cs.slice(0, n).map((__e) => ${clone})`;
+		return `((__cd, __cs) => { if (!__cd || !__cs) return 0; const n = Math.min(__cd.length, __cs.length); if (__cd.set) { __cd.set(__cs.length === n ? __cs : (__cs.subarray ? __cs.subarray(0, n) : __cs.slice(0, n))); } else { __cd.splice(0, n, ...${items}); } return n; })(${dst}, ${src})`;
 	},
 	new: (s, e) => {
 		const arg = e.args[0];
@@ -734,7 +751,10 @@ export const expressionGenMethods = {
 			}
 		}
 		const base = this.genExpr(expr.expr);
-		if (this.bundledPackages.has(base)) return expr.field;
+		// Bundled GoFront package member; browser-global names carry the `$`
+		// suffix of their declaration (see jsBindingName).
+		if (this.bundledPackages.has(base))
+			return BROWSER_GLOBALS.has(expr.field) ? `${expr.field}$` : expr.field;
 		if (expr.expr._type?.kind === "pointer" && expr.field !== "value")
 			return this._genPointerSelectorField(expr, base);
 		const sel = `${base}.${this._jsMemberName(expr)}`;
@@ -829,8 +849,28 @@ export const expressionGenMethods = {
 	_genCallArgs(expr) {
 		if (expr._multiForward) return `...${this.genExpr(expr.args[0])}`;
 		return expr.args
-			.map((a) => (a._spread ? `...${this.genExpr(a)}` : this.genExpr(a)))
+			.map((a, i) =>
+				a._spread
+					? `...${this.genExpr(a)}`
+					: this._callerCopiesArg(expr, i)
+						? this.genValueExpr(a)
+						: this.genExpr(a),
+			)
 			.join(", ");
+	},
+
+	// A callee copies its mutated array and struct parameters on entry, except
+	// when the parameter is a type parameter (generics are erased in JS) or
+	// part of a variadic rest array.  For those the caller passes aggregate
+	// (array and struct) arguments as copies.
+	_callerCopiesArg(expr, i) {
+		if (!this._aggregateBase(expr.args[i]._type)) return false;
+		let ft = expr.func?._type ?? expr.func?.expr?._type;
+		if (ft?.kind === "generic") ft = ft.underlying;
+		if (ft?.kind !== "func") return false;
+		const params = ft.params ?? [];
+		if (ft.variadic && i >= params.length - 1) return true;
+		return params[i]?.kind === "typeParam";
 	},
 
 	_genPointerSelectorField(expr, base) {
@@ -924,9 +964,12 @@ export const expressionGenMethods = {
 				`(${check} ? ${out} : (() => { throw new Error("interface conversion: type assertion failed"); })())`,
 			);
 		}
-		// comma-ok: emit [value-or-zero, runtimeTypeCheck]
+		// comma-ok: emit [value-or-zero, runtimeTypeCheck]; an asserted array
+		// is a copy of the boxed value.
 		const zero = this.zeroValueForTypeNode(expr.type);
-		return wrap(`(${check} ? [${out}, true] : [${zero}, false])`);
+		const arrT = this._typeFromNode(expr.type);
+		const okOut = arrT?.kind === "array" ? this._cloneJs(arrT, out) : out;
+		return wrap(`(${check} ? [${okOut}, true] : [${zero}, false])`);
 	},
 
 	_typeNameCheckExpr(name, val) {
@@ -1032,11 +1075,7 @@ export const expressionGenMethods = {
 		expr.func._callee = true;
 		const rawFn = this.genExpr(expr.func);
 		const fn = expr.func.kind === "FuncLit" ? `(${rawFn})` : rawFn;
-		if (expr._multiForward) return `${fn}(...${this.genExpr(expr.args[0])})`;
-		const args = expr.args
-			.map((a) => (a._spread ? `...${this.genExpr(a)}` : this.genExpr(a)))
-			.join(", ");
-		return `${fn}(${args})`;
+		return `${fn}(${this._genCallArgs(expr)})`;
 	},
 
 	_isErrorInterfaceType(t) {
@@ -1238,9 +1277,16 @@ export const expressionGenMethods = {
 			return `new ${retType.name}(__append(${sliceJS}, ${elems.join(", ")}))`;
 		}
 		const slice = this.genExpr(expr.args[0]);
+		// Spread elements of array type are values: append copies them.
+		const st = expr._type ?? expr.args[0]._type;
+		const elemT = (st?.kind === "named" ? st.underlying : st)?.elem;
+		const spreadOf = (a) =>
+			this._aggregateBase(elemT)?.kind === "array"
+				? `...(${this.genExpr(a)} ?? []).map((__e) => ${this._cloneJs(elemT, "__e")})`
+				: `...${this.genExpr(a)}`;
 		const elems = expr.args
 			.slice(1)
-			.map((a) => (a._spread ? `...${this.genExpr(a)}` : this.genValueExpr(a)));
+			.map((a) => (a._spread ? spreadOf(a) : this.genValueExpr(a)));
 		if (elems.length === 0) return slice;
 		this.useHelper("append");
 		const sliceType = expr._type ?? expr.args[0]._type;
@@ -1333,6 +1379,13 @@ export const expressionGenMethods = {
 	},
 
 	_genFallbackCompositeLit(expr) {
+		const at = this._litArrayType(expr);
+		if (at) {
+			// A named array type without methods (`type V [3]int; V{1}`).
+			const elems = this._genArrayLitElems(at, expr);
+			const ctor = typedArrayConstructorForElem(at.elem);
+			return ctor ? `new ${ctor}([${elems}])` : `[${elems}]`;
+		}
 		if (expr.elems.length > 0 && expr.elems[0]?.kind === "KeyValueExpr") {
 			const fields = expr.elems
 				.map(
@@ -1431,10 +1484,59 @@ export const expressionGenMethods = {
 		return inst;
 	},
 
-	_genSliceOrArrayLit(t, expr) {
-		const elems = expr.elems
+	// The array type of a literal (through named types), or null.
+	_litArrayType(expr) {
+		let t = expr._type;
+		while (t?.kind === "named") t = t.underlying;
+		return t?.kind === "array" && typeof t.size === "number" ? t : null;
+	},
+
+	// Elements of a literal of array type `at`, placed at their (keyed)
+	// indices, with every other slot the element zero value: `[3]int{1}` is
+	// `[1, 0, 0]` and `[5]int{2: 7}` is `[0, 0, 7, 0, 0]`, as in Go.
+	_genArrayLitElems(at, expr) {
+		const values = new Array(at.size).fill(null);
+		const indices = compositeLitIndices(expr.elems);
+		expr.elems.forEach((e, i) => {
+			values[indices[i]] = this.genValueExpr(
+				e.kind === "KeyValueExpr" ? e.value : e,
+			);
+		});
+		for (let i = 0; i < values.length; i++)
+			values[i] ??= this.zeroValueForType(at.elem);
+		return values.join(", ");
+	},
+
+	// A large array literal that leaves most slots zero (`[100000]byte{}`,
+	// `[65536]int{1: 2}`) starts from the zero array, as `var a [N]T` does,
+	// and assigns only the given elements instead of spelling out every
+	// slot.  Small or mostly-filled literals stay inline (null).
+	_genSparseArrayLit(expr) {
+		const at = this._litArrayType(expr);
+		if (!at || at.size <= SPARSE_ARRAY_MIN) return null;
+		if (expr.elems.length * 2 >= at.size) return null;
+		const zero = this.zeroValueForType(at);
+		if (expr.elems.length === 0) return zero;
+		const indices = compositeLitIndices(expr.elems);
+		const sets = expr.elems.map((e, i) => {
+			const v = this.genValueExpr(e.kind === "KeyValueExpr" ? e.value : e);
+			return `a$[${indices[i]}] = (${v})`;
+		});
+		return `((a$) => (${sets.join(", ")}, a$))(${zero})`;
+	},
+
+	_genLitElems(expr) {
+		const at = this._litArrayType(expr);
+		if (at) return this._genArrayLitElems(at, expr);
+		return expr.elems
 			.map((e) => this.genValueExpr(e.kind === "KeyValueExpr" ? e.value : e))
 			.join(", ");
+	},
+
+	_genSliceOrArrayLit(t, expr) {
+		const sparse = this._genSparseArrayLit(expr);
+		if (sparse) return sparse;
+		const elems = this._genLitElems(expr);
 		const elemNode =
 			t.kind === "SliceType" || t.kind === "ArrayType" ? t.elem : null;
 		const elemResolved =
@@ -1501,7 +1603,9 @@ export const expressionGenMethods = {
 				.join(", ");
 			return `{ ${fields} }`;
 		}
-		const elems = expr.elems.map((e) => this.genValueExpr(e)).join(", ");
+		const sparse = this._genSparseArrayLit(expr);
+		if (sparse) return sparse;
+		const elems = this._genLitElems(expr);
 		if (isTypedArraySlice(expr._type)) {
 			const typedCtor = typedArrayConstructorForElem(expr._type.elem);
 			if (typedCtor) return `new ${typedCtor}([${elems}])`;
@@ -1515,11 +1619,8 @@ export const expressionGenMethods = {
 		if (u?.kind === "map") {
 			return `{ ${this._genMapLitEntries(expr.elems)} }`;
 		}
-		// Default: slice
-		const elems = expr.elems
-			.map((e) => this.genValueExpr(e.kind === "KeyValueExpr" ? e.value : e))
-			.join(", ");
-		return `[${elems}]`;
+		// Default: slice or array
+		return `[${this._genLitElems(expr)}]`;
 	},
 
 	// ── Helpers ───────────────────────────────────────────────────
@@ -1894,7 +1995,8 @@ export const expressionGenMethods = {
 			const size = t.size?.value !== undefined ? Number(t.size.value) : t.size;
 			return `${inner}.slice(0, ${size})`;
 		}
-		return inner;
+		// Array-to-array conversion yields a new array value.
+		return this._cloneJs(expr.expr._type, inner);
 	},
 
 	_genSliceTypeConversion(expr, inner, t) {

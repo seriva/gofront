@@ -44,7 +44,11 @@ export { TypeCheckError, typeStr };
 export class TypeChecker {
 	constructor() {
 		this.types = new Map(); // named types
-		this.globals = new Scope();
+		// Go's universe scope: builtins, browser globals and built-in package
+		// namespaces.  Package declarations live in `globals` above it, so they
+		// shadow predeclared names (`func Array()`, `var document int`).
+		this.universe = new Scope();
+		this.globals = new Scope(this.universe);
 		this.errors = [];
 		this.warnings = []; // non-fatal diagnostics (e.g. boundary-call-in-loop hints)
 		this.target = "js";
@@ -59,21 +63,26 @@ export class TypeChecker {
 		this._deferCount = 0; // tracks defer usage in current function body
 		this._imports = []; // tracked imports for unused-import detection
 		this._constExprs = new Map(); // name -> AST initializer expr
+		this._externalNames = new Set(); // package-scope names from .d.ts / npm definitions
 		this._setupGlobals();
 		// Register error as a named type (interface)
 		this.types.set("error", ERROR);
 	}
 
 	_setupGlobals() {
-		setupGlobals(this.globals, this.types);
+		setupGlobals(this.universe, this.types);
 	}
 
-	addDefinitions(types, values) {
+	// `external` marks values as real JS names (.d.ts / npm definitions) that
+	// must not be renamed; dot-imported GoFront packages pass false so their
+	// browser-global-named members get the same `$` renaming as local ones.
+	addDefinitions(types, values, { external = true } = {}) {
 		for (const [name, type] of types) {
 			this.types.set(name, type);
 		}
 		for (const [name, type] of values) {
 			this.globals.define(name, type);
+			if (external) this._externalNames.add(name);
 		}
 	}
 
@@ -81,7 +90,9 @@ export class TypeChecker {
 	// e.g. addPackageNamespace('utils', symbolsMap, typesMap)
 	// lets callers type-check `utils.Foo` via SelectorExpr.
 	// `target` is the imported package's compile target ("js"/"wasm"/"both").
-	addPackageNamespace(pkgName, symbols, types, target = null) {
+	// `consts` maps the package's constant names to their integer value (or
+	// null when not an integer the folder knows).
+	addPackageNamespace(pkgName, symbols, types, target = null, consts = null) {
 		const members = {};
 		for (const [name, type] of symbols) members[name] = type;
 		// _gofront: true marks this as a GoFront package — exported identifier rules apply
@@ -91,6 +102,7 @@ export class TypeChecker {
 			members,
 			_gofront: true,
 			_target: target,
+			_consts: consts,
 		});
 		for (const [name, type] of types) {
 			this.types.set(name, type);
@@ -109,7 +121,7 @@ export class TypeChecker {
 	// Report any tracked imports whose package name was never referenced.
 	reportUnusedImports() {
 		for (const { name, node, filename, source } of this._imports) {
-			if (!this.globals._used.has(name)) {
+			if (!this.globals._used.has(name) && !this.universe._used.has(name)) {
 				const saved = [this._currentFile, this._currentSource];
 				this._currentFile = filename;
 				this._currentSource = source;
@@ -127,6 +139,15 @@ export class TypeChecker {
 			if (type?.kind === "builtin") continue; // skip built-ins
 			if (type === ANY && !name[0].match(/[A-Z]/)) continue; // skip browser globals
 			out.set(name, type);
+		}
+		return out;
+	}
+
+	getExportedConsts() {
+		const out = new Map();
+		for (const name of this.globals._consts) {
+			const expr = this.globals.lookupConstExpr(name);
+			out.set(name, expr ? this._constIntValue(expr, this.globals) : null);
 		}
 		return out;
 	}

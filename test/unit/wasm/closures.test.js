@@ -2,9 +2,12 @@
 // Tests for Phase 4d: Closures, Function Values, and Trampolines in WASM.
 
 import {
+	assert,
 	assertEqual,
+	compile,
 	compileHybrid,
 	compileWasm,
+	runJs,
 	runWasm,
 	section,
 	test,
@@ -419,4 +422,303 @@ func Main() int {
 		);
 	}
 	assertEqual(threwWasm, true);
+});
+
+section("WASM Closures — Per-iteration loop variables (Go 1.22)");
+
+test("closures in a three-clause for capture a distinct i per iteration", () => {
+	const src = `
+package main
+
+func Main() int {
+	var fs []func() int
+	for i := 0; i < 3; i++ {
+		fs = append(fs, func() int { return i })
+	}
+	return fs[0]()*100 + fs[1]()*10 + fs[2]()
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.jsRes, 12);
+});
+
+test("a closure writing i affects its own iteration and the post statement sees it", () => {
+	const src = `
+package main
+
+func Main() int {
+	s := 0
+	for i := 0; i < 10; i++ {
+		inc := func() { i += 2 }
+		inc()
+		s = s*10 + i
+	}
+	return s
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.jsRes, 2591);
+});
+
+test("a later write through one iteration's closure leaves the others alone", () => {
+	const src = `
+package main
+
+func Main() int {
+	var gets []func() int
+	var sets []func()
+	for i := 0; i < 3; i++ {
+		gets = append(gets, func() int { return i })
+		sets = append(sets, func() { i = 100 })
+	}
+	sets[0]()
+	return gets[0]()*100 + gets[1]()*10 + gets[2]()
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.jsRes, 10012);
+});
+
+test("continue still gets a fresh per-iteration variable", () => {
+	const src = `
+package main
+
+func Main() int {
+	var fs []func() int
+	for i := 0; i < 4; i++ {
+		if i%2 == 1 {
+			continue
+		}
+		fs = append(fs, func() int { return i })
+	}
+	return fs[0]()*10 + fs[1]()
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.jsRes, 2);
+});
+
+test("an uncaptured loop variable stays a plain local (no struct.new in the loop)", () => {
+	const src = `
+package main
+
+func Main() int {
+	s := 0
+	for i := 0; i < 10; i++ {
+		s += i
+	}
+	return s
+}
+`;
+	const res = compileHybrid(src, { emitWat: true });
+	assertEqual(res.run("Main").jsRes, 45);
+	const start = res.wat.indexOf('(export "Main")');
+	const main = res.wat.slice(start, res.wat.indexOf("\n  (func", start));
+	assert(
+		!main.includes("struct.new"),
+		`unexpected struct.new in Main:\n${main}`,
+	);
+});
+
+test("a hot uncaptured loop does not allocate when another loop captures the same name", () => {
+	const src = `
+package main
+
+func Main() int {
+	s := 0
+	for i := 0; i < 1000; i++ {
+		s += i * 2
+	}
+	f := func() int { return 0 }
+	for i := 0; i < 2; i++ {
+		f = func() int { return i }
+	}
+	return s + f()
+}
+`;
+	const res = compileHybrid(src, { emitWat: true });
+	assertEqual(res.run("Main").jsRes, 999001);
+	const start = res.wat.indexOf('(export "Main")');
+	const main = res.wat.slice(start, res.wat.indexOf("\n  (func", start));
+	const at = main.indexOf("loop");
+	const firstLoop = main.slice(at, main.indexOf("br 0", at));
+	assert(
+		!firstLoop.includes("struct.new"),
+		`first loop allocates:\n${firstLoop}`,
+	);
+});
+
+test("captured struct and array loop variables get a per-iteration copy", () => {
+	const src = `
+package main
+
+type Pt struct{ X int }
+
+func Main() int {
+	var fs []func() int
+	for p := (Pt{0}); p.X < 3; p.X++ {
+		fs = append(fs, func() int { return p.X })
+	}
+	var gs []func() int
+	for a := [1]int{0}; a[0] < 3; a[0]++ {
+		gs = append(gs, func() int { return a[0] })
+	}
+	return (fs[0]()*100+fs[1]()*10+fs[2]())*1000 + gs[0]()*100 + gs[1]()*10 + gs[2]()
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.jsRes, 12012);
+});
+
+section("Per-iteration loop variables — address-of (Go 1.22)");
+
+test("&i in a three-clause for points at a distinct i per iteration", () => {
+	const src = `
+package main
+
+func Main() int {
+	var ps []*int
+	for i := 0; i < 3; i++ {
+		ps = append(ps, &i)
+	}
+	return *ps[0]*100 + *ps[1]*10 + *ps[2]
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.jsRes, 12);
+});
+
+test("a write through &i is seen by the post statement", () => {
+	const src = `
+package main
+
+func Main() int {
+	s := 0
+	for i := 0; i < 10; i++ {
+		p := &i
+		*p += 2
+		s = s*10 + i
+	}
+	return s
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.jsRes, 2591);
+});
+
+test("&p of a struct loop variable points at a distinct struct per iteration", () => {
+	const src = `
+package main
+
+type P struct{ X int }
+
+func Main() int {
+	var ps []*P
+	for p := (P{0}); p.X < 3; p.X++ {
+		ps = append(ps, &p)
+	}
+	return ps[0].X*100 + ps[1].X*10 + ps[2].X
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.jsRes, 12);
+});
+
+test("&p.X of a struct loop variable points into that iteration's struct", () => {
+	const src = `
+package main
+
+type P struct{ X int }
+
+func Main() int {
+	var ps []*int
+	for p := (P{0}); p.X < 3; p.X++ {
+		ps = append(ps, &p.X)
+	}
+	return *ps[0]*100 + *ps[1]*10 + *ps[2]
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.jsRes, 12);
+});
+
+test("pointer-receiver method call on a loop var sees a distinct var per iteration", () => {
+	const src = `
+package main
+
+type P struct{ X int }
+
+func (p *P) Self() *P { return p }
+
+func Main() int {
+	var ps []*P
+	for p := (P{}); p.X < 3; p.X++ {
+		ps = append(ps, p.Self())
+	}
+	return ps[0].X*100 + ps[1].X*10 + ps[2].X
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.jsRes, 12);
+});
+
+// JS only: method values do not compile in WASM yet.
+test("pointer-receiver method value on a loop var binds that iteration's var (js)", () => {
+	const { js, errors } = compile(`
+package main
+
+type P struct{ X int }
+
+func (p *P) Get() int { return p.X }
+
+func main() {
+	var fs []func() int
+	for p := (P{}); p.X < 3; p.X++ {
+		fs = append(fs, p.Get)
+	}
+	println(fs[0]()*100 + fs[1]()*10 + fs[2]())
+}
+`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "12");
+});
+
+test("slicing an array loop var aliases that iteration's array", () => {
+	const src = `
+package main
+
+func Main() int {
+	var ss [][]int
+	for a := [2]int{}; a[0] < 3; a[0]++ {
+		ss = append(ss, a[:])
+	}
+	return ss[0][0]*100 + ss[1][0]*10 + ss[2][0]
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.jsRes, 12);
+});
+
+test("value-receiver method call keeps the loop var a plain local", () => {
+	const src = `
+package main
+
+type P struct{ X int }
+
+func (p P) Val() int { return p.X }
+
+func Main() int {
+	s := 0
+	for p := (P{}); p.X < 3; p.X++ {
+		s = s*10 + p.Val()
+	}
+	return s
+}
+`;
+	const hybrid = compileHybrid(src);
+	assertEqual(hybrid.run("Main").jsRes, 12);
+	assert(
+		hybrid.js.includes("for (let p = new P(); p.X < 3; p.X++)"),
+		"no per-iteration copy",
+	);
 });

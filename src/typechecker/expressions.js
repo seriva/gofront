@@ -7,6 +7,7 @@ import {
 	BROWSER_GLOBALS,
 	COMPLEX64,
 	COMPLEX128,
+	compositeLitIndices,
 	ERROR,
 	FLOAT32,
 	FLOAT64,
@@ -17,11 +18,13 @@ import {
 	isComplex,
 	isComplex64,
 	isComplexOrNumeric,
+	isInteger,
 	isNumeric,
 	isString,
 	NIL,
 	RUNE,
 	Scope,
+	SIZED_INT_NAMES,
 	STRING,
 	TAINTED_ANY,
 	typeStr,
@@ -138,6 +141,18 @@ export const expressionCheckMethods = {
 				const t = scope.lookup(expr.name);
 				if (!t) return this.err(`Undefined: '${expr.name}'`, expr);
 				if (this.types.has(expr.name)) expr._isTypeRef = true;
+				// A Go declaration that shadows a browser global: JS output renames
+				// it so generated code keeps reaching the real global.  Package
+				// namespaces (`import console "./util"`) are never renamed: JS
+				// selects their members directly (bundledPackages).
+				if (BROWSER_GLOBALS.has(expr.name) && t.kind !== "namespace") {
+					const owner = scope.lookupScope(expr.name);
+					if (
+						owner !== this.universe &&
+						!(owner === this.globals && this._externalNames.has(expr.name))
+					)
+						expr._shadowsGlobal = true;
+				}
 				// Go-source stdlib loading: record package-scope references so the
 				// loader can mangle them (see compiler.js loadStdlibPackage).
 				if (this._pkgRefs && scope.lookupScope(expr.name) === this.globals)
@@ -145,7 +160,7 @@ export const expressionCheckMethods = {
 				if (
 					(this.target === "wasm" || this.target === "both") &&
 					BROWSER_GLOBALS.has(expr.name) &&
-					scope.lookup(expr.name) === this.globals.lookup(expr.name)
+					scope.lookupScope(expr.name) === this.universe
 				) {
 					this.recordBlocker("browser global", expr.name);
 					this.err(
@@ -287,9 +302,9 @@ export const expressionCheckMethods = {
 		return ft;
 	},
 
-	_checkArrayBoundsExpr(btu, bt, expr) {
+	_checkArrayBoundsExpr(btu, bt, expr, scope) {
 		if (btu.kind !== "array" || btu.size == null) return;
-		const idx = this._constIntValue(expr.index);
+		const idx = this._constIntValue(expr.index, scope);
 		if (idx === null) return;
 		if (idx < 0)
 			this.err(`invalid array index ${idx} (index must not be negative)`, expr);
@@ -310,7 +325,7 @@ export const expressionCheckMethods = {
 				? (this.resolveType(bt.underlying) ?? bt.underlying)
 				: bt;
 		if (btu.kind === "slice" || btu.kind === "array") {
-			this._checkArrayBoundsExpr(btu, bt, expr);
+			this._checkArrayBoundsExpr(btu, bt, expr, scope);
 			return btu.elem;
 		}
 		if (btu.kind === "map") {
@@ -319,7 +334,7 @@ export const expressionCheckMethods = {
 		}
 		if (btu.kind === "shared") {
 			expr._sharedElem = btu.elem;
-			const idx = this._constIntValue(expr.index);
+			const idx = this._constIntValue(expr.index, scope);
 			if (idx !== null && idx < 0)
 				this.err(`invalid index ${idx} (index must not be negative)`, expr);
 			return btu.elem;
@@ -669,18 +684,15 @@ export const expressionCheckMethods = {
 		if (!expr) return null;
 		if (expr.kind === "BasicLit" && expr.litKind === "INT")
 			return Number(expr.value);
-		if (
-			expr.kind === "UnaryExpr" &&
-			expr.op === "-" &&
-			expr.operand?.kind === "BasicLit" &&
-			expr.operand.litKind === "INT"
-		) {
-			return -Number(expr.operand.value);
-		}
 		if (expr.kind === "UnaryExpr" && expr.op === "+") {
 			return this._constIntValue(expr.operand, scope);
 		}
+		const folded = this._constIntFold(expr, scope);
+		if (folded !== undefined) return folded;
 		if (expr.kind === "Ident") {
+			// A local variable shadowing a constant is not a constant.
+			const owner = scope?.lookupScope?.(expr.name);
+			if (owner && !owner._consts.has(expr.name)) return null;
 			const c =
 				scope?.lookupConstExpr?.(expr.name) ??
 				this.globals.lookupConstExpr?.(expr.name) ??
@@ -690,7 +702,189 @@ export const expressionCheckMethods = {
 		if (expr.kind === "ParenExpr") {
 			return this._constIntValue(expr.expr, scope);
 		}
+		if (expr.kind === "SelectorExpr" && expr.expr?.kind === "Ident") {
+			// `pkg.K`: integer constants exported by an imported GoFront package.
+			const ns = (scope ?? this.globals).lookup(expr.expr.name);
+			if (ns?.kind === "namespace") return ns._consts?.get(expr.field) ?? null;
+		}
 		return null;
+	},
+
+	// Operators and integer conversions for `_constIntValue`; undefined when
+	// `expr` is none of these.
+	_constIntFold(expr, scope) {
+		if (expr.kind === "UnaryExpr" && (expr.op === "-" || expr.op === "^")) {
+			const v = this._constIntValue(expr.operand, scope);
+			if (v === null) return null;
+			if (expr.op === "-") return -v;
+			return this._constComplement(v, expr.operand._type);
+		}
+		if (expr.kind === "BinaryExpr") return this._constIntBinary(expr, scope);
+		if (expr.kind === "CallExpr" && this._isIntConversion(expr)) {
+			const target =
+				expr._isTypeConversion && expr._conversionTargetType
+					? expr._conversionTargetType
+					: { kind: "basic", name: expr.func?.name };
+			return this._fitIntType(this._constIntValue(expr.args[0], scope), target);
+		}
+		if (
+			expr.kind === "TypeConversion" &&
+			this._isIntTypeNode(expr.targetType, scope)
+		) {
+			const target = this.resolveTypeNode(
+				expr.targetType,
+				scope ?? this.globals,
+			);
+			return this._fitIntType(this._constIntValue(expr.expr, scope), target);
+		}
+		return undefined;
+	},
+
+	// ^v in the operand's type: -v-1 when signed, max-v when unsigned; null
+	// for an unknown type or an unsigned width JS numbers cannot hold exactly.
+	_constComplement(v, t) {
+		if (t?.kind === "untyped")
+			return t.base === "int" || t.base === "rune" ? -v - 1 : null;
+		const u = t?.kind === "named" ? this.resolveType(t.underlying) : t;
+		const range = u?.kind === "basic" ? INT_RANGES[u.name] : null;
+		if (!range) return null;
+		if (range[0] < 0) return -v - 1;
+		return range[1] < 2 ** 53 ? range[1] - v : null;
+	},
+
+	// A converted constant folds only when it fits the target integer type.
+	_fitIntType(v, t) {
+		if (v === null) return null;
+		const u = t?.kind === "named" ? this.resolveType(t.underlying) : t;
+		const range = u?.kind === "basic" ? INT_RANGES[u.name] : null;
+		return range && v >= range[0] && v <= range[1] ? v : null;
+	},
+
+	// Integer constant folding for `_constIntValue`: both operands must fold.
+	_constIntBinary(expr, scope) {
+		const fold = CONST_INT_OPS[expr.op];
+		if (!fold) return null;
+		const l = this._constIntValue(expr.left, scope);
+		const r = this._constIntValue(expr.right, scope);
+		if (l === null || r === null) return null;
+		return fold(l, r);
+	},
+
+	// `int(K)`, `uint8(K)`, `MyInt(K)`: a conversion to an integer type.
+	_isIntConversion(expr) {
+		if (expr.args?.length !== 1) return false;
+		const target = expr._conversionTargetType;
+		if (expr._isTypeConversion && target)
+			return isInteger(target.kind === "named" ? target.underlying : target);
+		return (
+			expr.func?.kind === "Ident" && SIZED_INT_NAMES.includes(expr.func.name)
+		);
+	},
+
+	_isIntTypeNode(node, scope) {
+		if (node?.kind !== "TypeName") return false;
+		const t = this.resolveTypeNode(node, scope ?? this.globals);
+		return isInteger(t?.kind === "named" ? t.underlying : t);
+	},
+
+	// Keyed array literal indices (Go spec): each key must be a non-negative
+	// integer constant, and no index may appear twice.  The resolved index is
+	// stored on the KeyValueExpr as `_index` for compositeLitIndices.
+	_checkArrayLitKeys(expr, scope) {
+		const seen = new Set();
+		let next = 0;
+		let unknown = false;
+		for (const elem of expr.elems) {
+			if (elem.kind === "KeyValueExpr") {
+				this.checkExpr(elem.key, scope);
+				const idx =
+					this._constIntValue(elem.key, scope) ??
+					this._constIntegralFloat(elem.key, scope);
+				const text = constKeyText(elem.key);
+				if (idx === null && this._isConstExpr(elem.key, scope)) {
+					// Known limitation: a constant key the folder cannot evaluate
+					// (e.g. `len("abc")`, unsigned `^`) keeps the literal/positional
+					// index of compositeLitIndices; later indices are not
+					// duplicate-checked.
+					unknown = true;
+					next++;
+					continue;
+				}
+				if (idx === null)
+					this.err(`index ${text} must be integer constant`, elem.key);
+				else if (idx < 0)
+					this.err(
+						`index ${text} must be non-negative integer constant`,
+						elem.key,
+					);
+				else next = idx;
+				elem._index = next;
+			}
+			if (!unknown && seen.has(next))
+				this.err(`duplicate index ${next} in array or slice literal`, elem);
+			seen.add(next);
+			next++;
+		}
+	},
+
+	// An integral untyped float constant key (`2.0`, `const K = 2.0`).
+	_constIntegralFloat(e, scope) {
+		if (e?.kind === "ParenExpr") return this._constIntegralFloat(e.expr, scope);
+		if (e?.kind === "BasicLit" && e.litKind === "FLOAT") {
+			const v = Number(e.value);
+			return Number.isInteger(v) ? v : null;
+		}
+		if (e?.kind !== "Ident") return null;
+		const owner = (scope ?? this.globals).lookupScope(e.name);
+		if (!owner?._consts.has(e.name)) return null;
+		if (owner.symbols.get(e.name)?.kind === "basic") return null; // typed
+		const c = owner.lookupConstExpr(e.name);
+		return c ? this._constIntegralFloat(c, scope) : null;
+	},
+
+	// Whether `e` is a constant expression (whose value the folder may not
+	// know): literals, constants, operators, conversions and builtin calls.
+	_isConstExpr(e, scope) {
+		switch (e?.kind) {
+			case "BasicLit":
+				return true;
+			case "ParenExpr":
+				return this._isConstExpr(e.expr, scope);
+			case "UnaryExpr":
+				return (
+					["-", "+", "^", "!"].includes(e.op) &&
+					this._isConstExpr(e.operand, scope)
+				);
+			case "BinaryExpr":
+				return (
+					this._isConstExpr(e.left, scope) && this._isConstExpr(e.right, scope)
+				);
+			case "Ident":
+				return !!(scope ?? this.globals)
+					.lookupScope(e.name)
+					?._consts.has(e.name);
+			case "SelectorExpr": {
+				// Package members: constant unless the package says otherwise.
+				const ns =
+					e.expr?.kind === "Ident"
+						? (scope ?? this.globals).lookup(e.expr.name)
+						: null;
+				if (ns?.kind !== "namespace") return false;
+				return ns._consts ? ns._consts.has(e.field) : true;
+			}
+			case "TypeConversion":
+				return this._isConstExpr(e.expr, scope);
+			case "CallExpr":
+				if (e._isTypeConversion || this._isIntConversion(e))
+					return this._isConstExpr(e.args?.[0], scope);
+				return (
+					e.func?.kind === "Ident" &&
+					CONST_BUILTINS.has(e.func.name) &&
+					(scope ?? this.globals).lookup(e.func.name)?.kind === "builtin"
+				);
+			default:
+				return false;
+		}
 	},
 
 	_resolveCallArgTypes(expr, scope) {
@@ -1042,6 +1236,7 @@ export const expressionCheckMethods = {
 				: this.resolveTypeNode(expr.typeExpr, scope);
 		const base = t.kind === "named" ? t.underlying : t;
 		const typeNode = expr.typeExpr;
+		if (base?.kind === "array") this._checkArrayLitKeys(expr, scope);
 		this._inferArraySize(expr, typeNode, base);
 		if (base?.kind === "struct")
 			return this._checkStructCompositeLit(expr, scope, t, base);
@@ -1123,8 +1318,19 @@ export const expressionCheckMethods = {
 				const et = this.checkCompositeLit(elem, scope, base.elem);
 				elem._type = et;
 			} else if (elem.kind === "KeyValueExpr") {
-				const vt = this.checkExpr(elem.value, scope);
-				this.assertAssignable(base.elem, vt, elem.value);
+				if (
+					elem.value.kind === "CompositeLit" &&
+					elem.value.typeExpr === null
+				) {
+					elem.value._type = this.checkCompositeLit(
+						elem.value,
+						scope,
+						base.elem,
+					);
+				} else {
+					const vt = this.checkExpr(elem.value, scope);
+					this.assertAssignable(base.elem, vt, elem.value);
+				}
 			} else {
 				const et = this.checkExpr(elem, scope);
 				this.assertAssignable(base.elem, et, elem);
@@ -1168,15 +1374,74 @@ export const expressionCheckMethods = {
 	},
 };
 
-function computeMaxIndex(elems) {
-	let sequential = 0;
-	let maxKeyed = -1;
-	for (const e of elems) {
-		if (e.kind === "KeyValueExpr" && e.key?.value !== undefined) {
-			maxKeyed = Math.max(maxKeyed, Number(e.key.value));
-		} else {
-			sequential++;
-		}
+// Integer constant operators for `_constIntBinary`; null means not foldable.
+const CONST_INT_OPS = {
+	"+": (l, r) => l + r,
+	"-": (l, r) => l - r,
+	"*": (l, r) => l * r,
+	"/": (l, r) => (r === 0 ? null : Math.trunc(l / r)),
+	"%": (l, r) => (r === 0 ? null : l % r),
+	"<<": (l, r) => l * 2 ** r,
+	">>": (l, r) => Math.floor(l / 2 ** r),
+	"&": int32Op((l, r) => l & r),
+	"|": int32Op((l, r) => l | r),
+	"^": int32Op((l, r) => l ^ r),
+	"&^": int32Op((l, r) => l & ~r),
+};
+
+// Builtins whose calls may be constant expressions (`len("abc")`).
+const CONST_BUILTINS = new Set([
+	"len",
+	"cap",
+	"real",
+	"imag",
+	"complex",
+	"min",
+	"max",
+]);
+
+// JS bitwise operators are 32-bit: fold only operands in that range.
+function int32Op(f) {
+	return (l, r) => ((l | 0) === l && (r | 0) === r ? f(l, r) : null);
+}
+
+// Value ranges of the integer types for constant conversions.
+const INT_RANGES = {
+	int8: [-(2 ** 7), 2 ** 7 - 1],
+	int16: [-(2 ** 15), 2 ** 15 - 1],
+	int32: [-(2 ** 31), 2 ** 31 - 1],
+	rune: [-(2 ** 31), 2 ** 31 - 1],
+	int64: [-(2 ** 63), 2 ** 63 - 1],
+	int: [-(2 ** 63), 2 ** 63 - 1],
+	uint8: [0, 2 ** 8 - 1],
+	byte: [0, 2 ** 8 - 1],
+	uint16: [0, 2 ** 16 - 1],
+	uint32: [0, 2 ** 32 - 1],
+	uint64: [0, 2 ** 64 - 1],
+	uint: [0, 2 ** 64 - 1],
+	uintptr: [0, 2 ** 64 - 1],
+};
+
+// Source-like text of a literal key for diagnostics (`k`, `-1`, `K + 1`).
+function constKeyText(e) {
+	switch (e?.kind) {
+		case "Ident":
+			return e.name;
+		case "BasicLit":
+			return String(e.value);
+		case "UnaryExpr":
+			return `${e.op}${constKeyText(e.operand)}`;
+		case "BinaryExpr":
+			return `${constKeyText(e.left)} ${e.op} ${constKeyText(e.right)}`;
+		case "ParenExpr":
+			return `(${constKeyText(e.expr)})`;
+		case "SelectorExpr":
+			return `${constKeyText(e.expr)}.${e.field}`;
+		default:
+			return "expression";
 	}
-	return Math.max(sequential - 1, maxKeyed);
+}
+
+function computeMaxIndex(elems) {
+	return Math.max(-1, ...compositeLitIndices(elems));
 }
