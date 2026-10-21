@@ -6,6 +6,7 @@ import {
 	rootIdentName,
 } from "../../lower/index.js";
 import {
+	BROWSER_GLOBALS,
 	ERROR,
 	isAny,
 	isComplex,
@@ -745,7 +746,10 @@ export const expressionGenMethods = {
 			}
 		}
 		const base = this.genExpr(expr.expr);
-		if (this.bundledPackages.has(base)) return expr.field;
+		// Bundled GoFront package member; browser-global names carry the `$`
+		// suffix of their declaration (see jsBindingName).
+		if (this.bundledPackages.has(base))
+			return BROWSER_GLOBALS.has(expr.field) ? `${expr.field}$` : expr.field;
 		if (expr.expr._type?.kind === "pointer" && expr.field !== "value")
 			return this._genPointerSelectorField(expr, base);
 		const sel = `${base}.${this._jsMemberName(expr)}`;

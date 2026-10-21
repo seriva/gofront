@@ -24,7 +24,11 @@ import {
 	normalizeDefers,
 	scanAddressTaken,
 } from "../../lower/index.js";
-import { isComplex, isNumeric } from "../../typechecker/types.js";
+import {
+	BROWSER_GLOBALS,
+	isComplex,
+	isNumeric,
+} from "../../typechecker/types.js";
 import { expressionGenMethods } from "./expressions.js";
 import {
 	HELPER_APPEND,
@@ -110,6 +114,12 @@ const JS_RESERVED = new Set([
 
 const jsSafeName = (n) =>
 	typeof n === "string" && JS_RESERVED.has(n) ? `${n}$` : n;
+
+// Go declarations may shadow browser globals (Task 0.9).  The JS bundle is one
+// flat module scope, so such a binding gets a `$` suffix: generated code and
+// other packages keep reaching the real global (`Array.from`, `Object.keys`).
+const jsBindingName = (n) =>
+	typeof n === "string" && BROWSER_GLOBALS.has(n) ? `${n}$` : jsSafeName(n);
 
 // Runtime helpers by registry name, in output order.  Mark one as needed with
 // `this.useHelper(name)`; `_prependHelpers` emits every marked entry.
@@ -340,12 +350,12 @@ export class CodeGen {
 	}
 
 	_renameParams(params) {
-		for (const p of params ?? []) p.name = jsSafeName(p.name);
+		for (const p of params ?? []) p.name = jsBindingName(p.name);
 	}
 
 	_renameNamedReturns(node) {
 		for (const r of node.returnType?._namedReturns ?? [])
-			r.name = jsSafeName(r.name);
+			r.name = jsBindingName(r.name);
 	}
 
 	_renameSignature(node) {
@@ -354,27 +364,35 @@ export class CodeGen {
 	}
 
 	_renameIdentNode(node) {
-		if (!node._isStructKey && node._type?.kind !== "builtin")
-			node.name = jsSafeName(node.name);
+		if (node._isStructKey || node._type?.kind === "builtin") return;
+		node.name = node._shadowsGlobal
+			? jsBindingName(node.name)
+			: jsSafeName(node.name);
 	}
 
 	_renameFuncDeclNode(node) {
-		node.name = jsSafeName(node.name);
+		node.name = jsBindingName(node.name);
 		this._renameSignature(node);
 	}
 
 	_renameMethodDeclNode(node) {
-		node.recvName = jsSafeName(node.recvName);
+		node.recvName = jsBindingName(node.recvName);
 		this._renameSignature(node);
 	}
 
 	_renameDeclSpecs(node) {
 		for (const spec of node.decls ?? [])
-			spec.names = spec.names.map(jsSafeName);
+			spec.names = spec.names.map(jsBindingName);
+	}
+
+	// `document := 1` declares a binding that shadows the browser global.
+	_renameDefineNode(node) {
+		for (const l of node.lhs ?? [])
+			if (l.kind === "Ident" && !l._redecl) l.name = jsBindingName(l.name);
 	}
 
 	_renameTypeSwitchNode(node) {
-		node.assign = jsSafeName(node.assign);
+		node.assign = jsBindingName(node.assign);
 	}
 
 	_markStructKeys(node) {
@@ -394,6 +412,7 @@ export class CodeGen {
 		FuncLit: "_renameSignature",
 		TemplDecl: "_renameSignature",
 		CssDecl: "_renameSignature",
+		DefineStmt: "_renameDefineNode",
 		VarDecl: "_renameDeclSpecs",
 		ConstDecl: "_renameDeclSpecs",
 		TypeSwitchStmt: "_renameTypeSwitchNode",
