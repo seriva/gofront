@@ -633,25 +633,25 @@ Conventions used in the tasks:
 
 ### Phase 0.5: Array value semantics, universe scope & loop variables
 
-- [ ] **Task 0.8a — Array value semantics in WASM: always copy**
+- [x] **Task 0.8a — Array value semantics in WASM: always copy**
   - Files: `src/backend/wasm/emit-exprs.js`, `src/backend/wasm/emit-stmts.js`, `src/backend/wasm/emit-shared.js` (reuse the value-struct copy helper)
   - Do: insert `array.new` + `array.copy` on assignment, parameter passing, return, struct-field copy, store into slice/map/interface, and load from slice/map/struct field. Nested arrays copy deeply. `range` over an array iterates a copy.
   - Test: new `test/unit/wasm/arrays.test.js` — every array edge case in [Edge Cases](#edge-cases) as parity tests, including the map/slice load cases and `[N]simd.F32x4`.
   - Done when: all pass; `npm run bench` numbers are recorded (regression expected, fixed in Task 0.5b).
 
-- [ ] **Task 0.8b — Clone elision for arrays**
+- [x] **Task 0.8b — Clone elision for arrays**
   - Files: `src/lower/ownership.js`, the emit sites from Task 0.5a
   - Do: skip the copy when `ownership.js` proves the source is dead after the copy or never mutated on either side. Add the negative case to the analysis tests: a copy must stay when the source is mutated afterwards.
   - Test: `test/unit/compiler/lower.test.js` (elision decisions), `arrays.test.js` (behaviour unchanged).
   - Done when: `npm run bench` scalar raycast is within 3% of v1.7.0 and `test/e2e/perf/zero-alloc.js` passes.
 
-- [ ] **Task 0.9 — Predeclared names in the universe scope**
+- [x] **Task 0.9 — Predeclared names in the universe scope**
   - Files: `src/typechecker/index.js` (scope setup), `src/typechecker/types.js` (browser-global list)
   - Do: browser globals and other predeclared names live in a universe scope below the package scope, so package and local declarations shadow them in every target. Shadowing a global in a `js` package hides it for that package.
   - Test: new `test/unit/types/shadowing.test.js` — `func Array()`, `var document int`, a local `len := 3`, in `js`, `wasm` and `both` packages; `Array redeclared` must not appear.
   - Done when: all pass and `npm run check` on `example/` is unchanged.
 
-- [ ] **Task 0.10 — Per-iteration loop variables in WASM**
+- [x] **Task 0.10 — Per-iteration loop variables in WASM**
   - Files: `src/backend/wasm/emit-stmts.js` (three-clause `for`), `src/lower/captures.js`
   - Do: when a three-clause `for` variable is captured by a closure in the body, allocate a fresh box per iteration: copy the value in at the top of the body and back out before the post statement. Uncaptured variables keep a plain local.
   - Test: `test/unit/wasm/closures.test.js` — the `fs[0]()*100 + fs[1]()*10 + fs[2]()` parity test (`12`); a closure that writes `i`; an uncaptured loop emits no `struct.new` in the loop (assert on WAT).
@@ -676,6 +676,7 @@ Conventions used in the tasks:
   - Do: a backend-independent evaluator for untyped constant expressions using `BigInt` for integers and `Number` for floats, covering `+ - * / % << >> & | ^ &^`, unary `- ^ !`, comparisons, and conversions. The checker attaches the folded value to the AST node. Typed constant overflow (`int32(1 << 40)`, `var x int8 = 200`) is a compile error with Go's `overflows` wording.
   - Test: new `test/unit/language/constants.test.js` — folded values for the constant edge cases; the two overflow diagnostics; WASM golden output unchanged (`test/unit/wasm/golden.test.js`).
   - Done when: the WASM backend uses the moved folder with no output change and the checker reports overflow.
+  - Also (from the Phase 0.5 review): the checker's interim `_constIntValue` folder (32-bit bitwise ops, no unsigned `^` above 32 bits) is replaced by the shared folder. Keyed array literal keys that it cannot fold today (`len("abc")`, dot-imported constants) must resolve to their index instead of falling back to positional, and `a[^uint8(0)]` must give the same result in JS as in WASM.
 
 - [ ] **Task 0.13b — JS backend emits folded constants**
   - Files: `src/backend/js/expressions.js`
@@ -722,6 +723,34 @@ Conventions used in the tasks:
   - Do: JS output must produce the zero value of the instantiated type wherever a generic body uses a type parameter's zero value (`var zero T`, `*new(T)`, zero results), for generic functions and for methods of generic types, for example by passing zero values from the call site or storing them on generic instances. Accept unary `-`, `+` and `^` on type parameters whose constraint allows them.
   - Test: `test/unit/wasm/generics.test.js` — parity tests for `cmp.Or("", "x")`, `cmp.Or(0, 3)`, `Stack[int].Pop` on an empty stack, and `Abs[T Number](x T) T` using `-x`. Turn the WASM-only `cmp.Or` test in `stdlib-go.test.js` into a parity test and drop the Task 0.18 note from the `cmp` row in `language-support.md`.
   - Done when: those pass as parity tests.
+
+### Phase 0.9: Phase 0.5 review follow-ups
+
+The Phase 0.5 reviews (PR #29) found these bugs. None of them were introduced by Phase 0.5; they were already on `feat/portable-go`. They are grouped here so they are fixed deliberately rather than inside an unrelated phase.
+
+- [ ] **Task 0.19a — Slice aliasing and multi-value assignment**
+  - Files: `src/backend/js/expressions.js` (`_genSliceExpr`), `src/backend/js/statements.js` (for-init), `src/backend/wasm/emit-stmts.js` (assignment)
+  - Do: in JS, `b[:]`, `b[i:]` and `a[:]` on non-typed-array slices and arrays must alias the backing store as in Go, not `.slice()` a copy (`b := []int{1,2,3}; s := b[:]; s[0] = 9; b[0]` is 9). In WASM, `x, y = y, x` (and `a, b = b, a` for arrays) evaluates every right-hand side before assigning. In JS, `for i, j := 0, 10; …; i, j = i+1, j+1` emits valid code.
+  - Test: parity tests in `test/unit/wasm/arrays.test.js` and `test/unit/language/` for each case. Re-check the `closures.test.js` test "slicing an array loop var aliases…", which only passes in JS because of the copy.
+  - Done when: all pass as parity tests; `npm run bench` within 3%.
+
+- [ ] **Task 0.19b — Array type completion**
+  - Files: `src/backend/wasm/types.js`, `src/backend/wasm/emit-exprs.js`, `src/backend/js/expressions.js` (`_genImplicitCompositeLit`, `_genArrayLitElems`), `src/typechecker/expressions.js`
+  - Do: named array types (`type V [3]int`, its literals, comparison and methods) produce valid WASM. Pointers to arrays (`p := &a; p[i]; *p`) type-check and produce valid WASM. Keyed slice literals (`[]int{2: 7}`) work on both backends. Keyed nested literals with elided types (`[2][3]int{1: {2: 5}}`) produce arrays in JS. Keyed elements evaluate in source order on both backends. WASM array literals over 10000 elements do not hit the `array.new_fixed` limit.
+  - Test: parity tests in `test/unit/wasm/arrays.test.js`.
+  - Done when: all pass as parity tests.
+
+- [ ] **Task 0.19c — WASM scoping and method values**
+  - Files: `src/backend/wasm/emit-stmts.js`, `src/backend/wasm/emit.js` (locals), `src/backend/wasm/emit-exprs.js`
+  - Do: WASM locals are block-scoped, so an inner `x := 5` no longer writes the outer `x`. A range key or value variable that a closure captures and mutates produces a valid module. Method values on pointer receivers (`f := p.Get`) and promoted pointer-receiver methods on loop variables work in WASM.
+  - Test: parity tests in `test/unit/wasm/closures.test.js`.
+  - Done when: all pass as parity tests and `zero-alloc.js` still passes.
+
+- [ ] **Task 0.19d — Interop and naming leftovers**
+  - Files: `src/backend/js/index.js`, `src/backend/wasm/boundary.js`, `src/typechecker/stdlib/` (`slices`), `src/parser/declarations.js`
+  - Do: a type declaration named after a browser global (`type Array struct{}`, `type Error struct{}`) is renamed like other declarations, or rejected with a clear diagnostic; update the warning in `docs/go-compatibility.md`. Exported non-shared vars of a `wasm` package appear in the JS facade. `slices.Contains`/`Index` on struct slices compare by value in JS. The parser accepts `func mk() (Box[int], *Box[int])`.
+  - Test: `test/unit/types/shadowing.test.js`, `test/unit/wasm/boundary.test.js`, parser and stdlib tests for each case.
+  - Done when: all pass.
 
 ### Phase 1.1: Manifest generator and coverage gates
 
@@ -1172,6 +1201,9 @@ Each Phase 6 task follows the same Files/Test/Done-when discipline: files are `s
 ### Performance and size
 - Dev-mode `app.wasm` and `app.js` for `example/hybrid` without new imports must be byte-identical in size to v1.7.0. The only exceptions are code affected by the pointer fix (Task 0.1: addresses of scalar fields or elements), the array fix (Task 0.8: array copies that clone elision cannot remove), per-iteration boxes for captured loop variables (Task 0.10), and strict-mode index helpers that elision cannot remove (Task 0.16).
 - The pointer fast path: a micro-benchmark of `*p` on a boxed local (`&x`) must stay within 5% of v1.7.0. Measured on 100M read/write dereference iterations: median 155.66 ms (642.4 Mops/s), within 1.5% of baseline (153.2 ms / 652.7 Mops/s). Hybrid raycast benchmark: 11,840 rays/s (1.35× speedup over JS), 2,688 B alloc/run.
+- Array value semantics (Task 0.8a, copies always inserted, no elision yet), `npm run bench` on the same machine: base `feat/portable-go` hybrid 19,722 rays/s, 85,616 B alloc/run; after 0.8a hybrid 18,727 rays/s (−5.0%), 85,624 B alloc/run; dev `app.wasm` 67.9 KB in both.
+- Clone elision for arrays (Task 0.8b), interleaved `npm run bench --mode hybrid` runs on the same machine: base 18,881 / 17,632 rays/s (84,352 / 84,424 B alloc/run), after 0.8b 18,572 / 18,745 rays/s (84,552 / 84,800 B alloc/run): within noise and inside the 3% budget. The raycast fixture declares no fixed-size arrays in its hot path, so its module size and hot-function instruction counts (`--sizes`) are unchanged, and `example/hybrid` dev `app.wasm`/`app.js` are byte-identical to the base. The 0.8a −5% figure above was run-to-run noise.
+- After the Phase 0.5 review fixes: base 20,760 rays/s (85,832 B alloc/run) against branch 20,946 rays/s (85,512 B alloc/run); `example/hybrid` dev output and raycast `--sizes` are still identical to the base.
 - The WASM JSON benchmark (Task 5.6) is recorded in this document.
 - `npm run bench` must show no regression in the hybrid raycast. Neither the array-copy fix (Task 0.8b) nor the strict-mode runtime checks (Task 0.16b) may slow the scalar raycast by more than 3% each; the analysis is extended until they do not, and the checks are never shipped disabled.
 - `test/e2e/perf/zero-alloc.js` must pass after Tasks 0.5a, 0.5d and 0.7c.

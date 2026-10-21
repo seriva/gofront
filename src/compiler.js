@@ -1078,7 +1078,9 @@ function resolveImports(
 
 				if (alias === "_") continue;
 				if (alias === ".") {
-					checker.addDefinitions(dep.exportedTypes, dep.exportedSymbols);
+					checker.addDefinitions(dep.exportedTypes, dep.exportedSymbols, {
+						external: false,
+					});
 					continue;
 				}
 				const nameUsed = alias ?? dep.pkgName;
@@ -1088,6 +1090,7 @@ function resolveImports(
 					dep.exportedSymbols,
 					dep.exportedTypes,
 					dep.target,
+					dep.exportedConsts,
 				);
 				checker.trackImport(nameUsed, { _line }, p._filename, p._source);
 			}
@@ -1403,6 +1406,7 @@ export function compileFiles(files, options = {}) {
 		programs,
 		exportedSymbols: checker.getExportedSymbols(),
 		exportedTypes: checker.getExportedTypes(),
+		exportedConsts: checker.getExportedConsts(),
 		sourceFiles: merged.sourceFiles,
 		sourcesContent: merged.sourcesContent,
 		mappings: merged.mappings,
