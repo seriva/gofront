@@ -44,7 +44,11 @@ export { TypeCheckError, typeStr };
 export class TypeChecker {
 	constructor() {
 		this.types = new Map(); // named types
-		this.globals = new Scope();
+		// Go's universe scope: builtins, browser globals and built-in package
+		// namespaces.  Package declarations live in `globals` above it, so they
+		// shadow predeclared names (`func Array()`, `var document int`).
+		this.universe = new Scope();
+		this.globals = new Scope(this.universe);
 		this.errors = [];
 		this.warnings = []; // non-fatal diagnostics (e.g. boundary-call-in-loop hints)
 		this.target = "js";
@@ -59,13 +63,14 @@ export class TypeChecker {
 		this._deferCount = 0; // tracks defer usage in current function body
 		this._imports = []; // tracked imports for unused-import detection
 		this._constExprs = new Map(); // name -> AST initializer expr
+		this._externalNames = new Set(); // package-scope names from .d.ts / dot imports
 		this._setupGlobals();
 		// Register error as a named type (interface)
 		this.types.set("error", ERROR);
 	}
 
 	_setupGlobals() {
-		setupGlobals(this.globals, this.types);
+		setupGlobals(this.universe, this.types);
 	}
 
 	addDefinitions(types, values) {
@@ -74,6 +79,7 @@ export class TypeChecker {
 		}
 		for (const [name, type] of values) {
 			this.globals.define(name, type);
+			this._externalNames.add(name);
 		}
 	}
 
@@ -109,7 +115,7 @@ export class TypeChecker {
 	// Report any tracked imports whose package name was never referenced.
 	reportUnusedImports() {
 		for (const { name, node, filename, source } of this._imports) {
-			if (!this.globals._used.has(name)) {
+			if (!this.globals._used.has(name) && !this.universe._used.has(name)) {
 				const saved = [this._currentFile, this._currentSource];
 				this._currentFile = filename;
 				this._currentSource = source;
