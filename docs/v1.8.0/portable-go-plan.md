@@ -676,6 +676,7 @@ Conventions used in the tasks:
   - Do: a backend-independent evaluator for untyped constant expressions using `BigInt` for integers and `Number` for floats, covering `+ - * / % << >> & | ^ &^`, unary `- ^ !`, comparisons, and conversions. The checker attaches the folded value to the AST node. Typed constant overflow (`int32(1 << 40)`, `var x int8 = 200`) is a compile error with Go's `overflows` wording.
   - Test: new `test/unit/language/constants.test.js` — folded values for the constant edge cases; the two overflow diagnostics; WASM golden output unchanged (`test/unit/wasm/golden.test.js`).
   - Done when: the WASM backend uses the moved folder with no output change and the checker reports overflow.
+  - Also (from the Phase 0.5 review): the checker's interim `_constIntValue` folder (32-bit bitwise ops, no unsigned `^` above 32 bits) is replaced by the shared folder. Keyed array literal keys that it cannot fold today (`len("abc")`, dot-imported constants) must resolve to their index instead of falling back to positional, and `a[^uint8(0)]` must give the same result in JS as in WASM.
 
 - [ ] **Task 0.13b — JS backend emits folded constants**
   - Files: `src/backend/js/expressions.js`
@@ -722,6 +723,34 @@ Conventions used in the tasks:
   - Do: JS output must produce the zero value of the instantiated type wherever a generic body uses a type parameter's zero value (`var zero T`, `*new(T)`, zero results), for generic functions and for methods of generic types, for example by passing zero values from the call site or storing them on generic instances. Accept unary `-`, `+` and `^` on type parameters whose constraint allows them.
   - Test: `test/unit/wasm/generics.test.js` — parity tests for `cmp.Or("", "x")`, `cmp.Or(0, 3)`, `Stack[int].Pop` on an empty stack, and `Abs[T Number](x T) T` using `-x`. Turn the WASM-only `cmp.Or` test in `stdlib-go.test.js` into a parity test and drop the Task 0.18 note from the `cmp` row in `language-support.md`.
   - Done when: those pass as parity tests.
+
+### Phase 0.9: Phase 0.5 review follow-ups
+
+The Phase 0.5 reviews (PR #29) found these bugs. None of them were introduced by Phase 0.5; they were already on `feat/portable-go`. They are grouped here so they are fixed deliberately rather than inside an unrelated phase.
+
+- [ ] **Task 0.19a — Slice aliasing and multi-value assignment**
+  - Files: `src/backend/js/expressions.js` (`_genSliceExpr`), `src/backend/js/statements.js` (for-init), `src/backend/wasm/emit-stmts.js` (assignment)
+  - Do: in JS, `b[:]`, `b[i:]` and `a[:]` on non-typed-array slices and arrays must alias the backing store as in Go, not `.slice()` a copy (`b := []int{1,2,3}; s := b[:]; s[0] = 9; b[0]` is 9). In WASM, `x, y = y, x` (and `a, b = b, a` for arrays) evaluates every right-hand side before assigning. In JS, `for i, j := 0, 10; …; i, j = i+1, j+1` emits valid code.
+  - Test: parity tests in `test/unit/wasm/arrays.test.js` and `test/unit/language/` for each case. Re-check the `closures.test.js` test "slicing an array loop var aliases…", which only passes in JS because of the copy.
+  - Done when: all pass as parity tests; `npm run bench` within 3%.
+
+- [ ] **Task 0.19b — Array type completion**
+  - Files: `src/backend/wasm/types.js`, `src/backend/wasm/emit-exprs.js`, `src/backend/js/expressions.js` (`_genImplicitCompositeLit`, `_genArrayLitElems`), `src/typechecker/expressions.js`
+  - Do: named array types (`type V [3]int`, its literals, comparison and methods) produce valid WASM. Pointers to arrays (`p := &a; p[i]; *p`) type-check and produce valid WASM. Keyed slice literals (`[]int{2: 7}`) work on both backends. Keyed nested literals with elided types (`[2][3]int{1: {2: 5}}`) produce arrays in JS. Keyed elements evaluate in source order on both backends. WASM array literals over 10000 elements do not hit the `array.new_fixed` limit.
+  - Test: parity tests in `test/unit/wasm/arrays.test.js`.
+  - Done when: all pass as parity tests.
+
+- [ ] **Task 0.19c — WASM scoping and method values**
+  - Files: `src/backend/wasm/emit-stmts.js`, `src/backend/wasm/emit.js` (locals), `src/backend/wasm/emit-exprs.js`
+  - Do: WASM locals are block-scoped, so an inner `x := 5` no longer writes the outer `x`. A range key or value variable that a closure captures and mutates produces a valid module. Method values on pointer receivers (`f := p.Get`) and promoted pointer-receiver methods on loop variables work in WASM.
+  - Test: parity tests in `test/unit/wasm/closures.test.js`.
+  - Done when: all pass as parity tests and `zero-alloc.js` still passes.
+
+- [ ] **Task 0.19d — Interop and naming leftovers**
+  - Files: `src/backend/js/index.js`, `src/backend/wasm/boundary.js`, `src/typechecker/stdlib/` (`slices`), `src/parser/declarations.js`
+  - Do: a type declaration named after a browser global (`type Array struct{}`, `type Error struct{}`) is renamed like other declarations, or rejected with a clear diagnostic; update the warning in `docs/go-compatibility.md`. Exported non-shared vars of a `wasm` package appear in the JS facade. `slices.Contains`/`Index` on struct slices compare by value in JS. The parser accepts `func mk() (Box[int], *Box[int])`.
+  - Test: `test/unit/types/shadowing.test.js`, `test/unit/wasm/boundary.test.js`, parser and stdlib tests for each case.
+  - Done when: all pass.
 
 ### Phase 1.1: Manifest generator and coverage gates
 
