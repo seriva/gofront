@@ -1,7 +1,13 @@
 // test/unit/wasm/complex.test.js
 // Tests for complex numbers in WASM: representation, arithmetic, builtins, literals, conversions.
 
-import { assertEqual, compileHybrid, section, test } from "../helpers.js";
+import {
+	assertEqual,
+	compileHybrid,
+	runWasm,
+	section,
+	test,
+} from "../helpers.js";
 
 section("WASM Complex — Task 0.4a: Representation and Arithmetic");
 
@@ -246,6 +252,110 @@ func Main() int {
 		return 1
 	}
 	return 0
+}
+`;
+	const hybrid = compileHybrid(src);
+	const res = hybrid.run("Main");
+	assertEqual(res.wasmRes, 1n);
+	assertEqual(res.jsRes, 1);
+});
+
+section("WASM Complex — Task 0.4b: Equality, Map Keys, fmt");
+
+test("complex equality and inequality with float rules", () => {
+	const src = `
+package main
+
+import "math"
+
+func Main() int {
+	c1 := complex(1.0, 2.0)
+	c2 := complex(1.0, 2.0)
+	c3 := complex(1.0, 3.0)
+
+	if !(c1 == c2) || c1 != c2 {
+		return 0
+	}
+	if c1 == c3 || !(c1 != c3) {
+		return 0
+	}
+
+	// NaN parts are never equal according to IEEE-754 float rules
+	nan := math.NaN()
+	cNan1 := complex(nan, 1.0)
+	cNan2 := complex(nan, 1.0)
+	if cNan1 == cNan2 {
+		return 0
+	}
+	if !(cNan1 != cNan2) {
+		return 0
+	}
+
+	return 1
+}
+`;
+	const hybrid = compileHybrid(src);
+	const res = hybrid.run("Main");
+	assertEqual(res.wasmRes, 1n);
+	assertEqual(res.jsRes, 1);
+});
+
+test("map[complex128]int map keys and hashing", () => {
+	const src = `
+package main
+
+func Main() int {
+	m := make(map[complex128]int)
+	c1 := complex(1.0, 2.0)
+	c2 := complex(3.0, 4.0)
+	m[c1] = 42
+	m[c2] = 99
+
+	if len(m) != 2 {
+		return 0
+	}
+	if m[c1] != 42 || m[c2] != 99 {
+		return 0
+	}
+
+	// Lookup with reconstructed key
+	if m[complex(1.0, 2.0)] != 42 {
+		return 0
+	}
+
+	// Missing key returns zero value
+	if m[complex(9.0, 9.0)] != 0 {
+		return 0
+	}
+
+	return 1
+}
+`;
+	// WASM-only: the JS backend stringifies struct/complex keys (documented divergence).
+	const { wasm, stringTable } = compileHybrid(src);
+	assertEqual(runWasm(wasm, { stringTable }).exports.Main(), 1n);
+});
+
+test("fmt.Sprintf %v and %g for complex", () => {
+	const src = `
+package main
+
+import "fmt"
+
+func Main() int {
+	c := complex(1.0, 2.0)
+	s := fmt.Sprintf("%v %g", c, c)
+	if s != "(1+2i) (1+2i)" {
+		return 0
+	}
+
+	cNeg := complex(1.0, -2.0)
+	sNeg := fmt.Sprintf("%v", cNeg)
+	if sNeg != "(1-2i)" {
+		return 0
+	}
+
+	return 1
 }
 `;
 	const hybrid = compileHybrid(src);
