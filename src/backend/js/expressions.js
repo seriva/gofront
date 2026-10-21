@@ -844,8 +844,28 @@ export const expressionGenMethods = {
 	_genCallArgs(expr) {
 		if (expr._multiForward) return `...${this.genExpr(expr.args[0])}`;
 		return expr.args
-			.map((a) => (a._spread ? `...${this.genExpr(a)}` : this.genExpr(a)))
+			.map((a, i) =>
+				a._spread
+					? `...${this.genExpr(a)}`
+					: this._callerCopiesArg(expr, i)
+						? this.genValueExpr(a)
+						: this.genExpr(a),
+			)
 			.join(", ");
+	},
+
+	// A callee copies its mutated array parameters on entry, except when the
+	// parameter is a type parameter (generics are erased in JS) or part of a
+	// variadic rest array.  For those the caller passes array arguments as
+	// copies.
+	_callerCopiesArg(expr, i) {
+		if (this._aggregateBase(expr.args[i]._type)?.kind !== "array") return false;
+		let ft = expr.func?._type ?? expr.func?.expr?._type;
+		if (ft?.kind === "generic") ft = ft.underlying;
+		if (ft?.kind !== "func") return false;
+		const params = ft.params ?? [];
+		if (ft.variadic && i >= params.length - 1) return true;
+		return params[i]?.kind === "typeParam";
 	},
 
 	_genPointerSelectorField(expr, base) {
@@ -939,9 +959,12 @@ export const expressionGenMethods = {
 				`(${check} ? ${out} : (() => { throw new Error("interface conversion: type assertion failed"); })())`,
 			);
 		}
-		// comma-ok: emit [value-or-zero, runtimeTypeCheck]
+		// comma-ok: emit [value-or-zero, runtimeTypeCheck]; an asserted array
+		// is a copy of the boxed value.
 		const zero = this.zeroValueForTypeNode(expr.type);
-		return wrap(`(${check} ? [${out}, true] : [${zero}, false])`);
+		const arrT = this._typeFromNode(expr.type);
+		const okOut = arrT?.kind === "array" ? this._cloneJs(arrT, out) : out;
+		return wrap(`(${check} ? [${okOut}, true] : [${zero}, false])`);
 	},
 
 	_typeNameCheckExpr(name, val) {
@@ -1047,11 +1070,7 @@ export const expressionGenMethods = {
 		expr.func._callee = true;
 		const rawFn = this.genExpr(expr.func);
 		const fn = expr.func.kind === "FuncLit" ? `(${rawFn})` : rawFn;
-		if (expr._multiForward) return `${fn}(...${this.genExpr(expr.args[0])})`;
-		const args = expr.args
-			.map((a) => (a._spread ? `...${this.genExpr(a)}` : this.genExpr(a)))
-			.join(", ");
-		return `${fn}(${args})`;
+		return `${fn}(${this._genCallArgs(expr)})`;
 	},
 
 	_isErrorInterfaceType(t) {
@@ -1253,9 +1272,16 @@ export const expressionGenMethods = {
 			return `new ${retType.name}(__append(${sliceJS}, ${elems.join(", ")}))`;
 		}
 		const slice = this.genExpr(expr.args[0]);
+		// Spread elements of array type are values: append copies them.
+		const st = expr._type ?? expr.args[0]._type;
+		const elemT = (st?.kind === "named" ? st.underlying : st)?.elem;
+		const spreadOf = (a) =>
+			this._aggregateBase(elemT)?.kind === "array"
+				? `...(${this.genExpr(a)} ?? []).map((__e) => ${this._cloneJs(elemT, "__e")})`
+				: `...${this.genExpr(a)}`;
 		const elems = expr.args
 			.slice(1)
-			.map((a) => (a._spread ? `...${this.genExpr(a)}` : this.genValueExpr(a)));
+			.map((a) => (a._spread ? spreadOf(a) : this.genValueExpr(a)));
 		if (elems.length === 0) return slice;
 		this.useHelper("append");
 		const sliceType = expr._type ?? expr.args[0]._type;
@@ -1909,7 +1935,8 @@ export const expressionGenMethods = {
 			const size = t.size?.value !== undefined ? Number(t.size.value) : t.size;
 			return `${inner}.slice(0, ${size})`;
 		}
-		return inner;
+		// Array-to-array conversion yields a new array value.
+		return this._cloneJs(expr.expr._type, inner);
 	},
 
 	_genSliceTypeConversion(expr, inner, t) {
