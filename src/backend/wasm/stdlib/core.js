@@ -4955,7 +4955,7 @@ export class StdlibCoreEmitter {
 		const vTmps = vNodes.map((vNode) => {
 			const tmp = this.acquireTemp(arrInfo.elemWType);
 			this.emitExpr(vNode, arrInfo.elemWType);
-			this._emitCopyIfValueStruct(vNode, elemGoType, arrInfo.elemWType);
+			this._emitCopyIfValue(vNode, elemGoType, arrInfo.elemWType);
 			this.pushInstruction({ op: "local.set", index: tmp });
 			return tmp;
 		});
@@ -5212,7 +5212,7 @@ export class StdlibCoreEmitter {
 		const vTmps = vNodes.map((vNode) => {
 			const tmp = this.acquireTemp(arrInfo.elemWType);
 			this.emitExpr(vNode, arrInfo.elemWType);
-			this._emitCopyIfValueStruct(vNode, elemGoType, arrInfo.elemWType);
+			this._emitCopyIfValue(vNode, elemGoType, arrInfo.elemWType);
 			this.pushInstruction({ op: "local.set", index: tmp });
 			return tmp;
 		});

@@ -311,7 +311,18 @@ const BUILTIN_GEN = {
 	},
 	copy: (s, e) => {
 		const [dst, src] = e.args.map((a) => s.genExpr(a));
-		return `((__cd, __cs) => { if (!__cd || !__cs) return 0; const n = Math.min(__cd.length, __cs.length); if (__cd.set) { __cd.set(__cs.length === n ? __cs : (__cs.subarray ? __cs.subarray(0, n) : __cs.slice(0, n))); } else { __cd.splice(0, n, ...(__cs.slice ? __cs.slice(0, n) : __cs.subarray(0, n))); } return n; })(${dst}, ${src})`;
+		// Array elements are values: the copied elements must not alias src.
+		const t = e.args[1]._type;
+		const elem = (t?.kind === "named" ? t.underlying : t)?.elem;
+		const clone =
+			s._aggregateBase(elem)?.kind === "array"
+				? s._cloneJs(elem, "__e")
+				: "__e";
+		const items =
+			clone === "__e"
+				? "(__cs.slice ? __cs.slice(0, n) : __cs.subarray(0, n))"
+				: `__cs.slice(0, n).map((__e) => ${clone})`;
+		return `((__cd, __cs) => { if (!__cd || !__cs) return 0; const n = Math.min(__cd.length, __cs.length); if (__cd.set) { __cd.set(__cs.length === n ? __cs : (__cs.subarray ? __cs.subarray(0, n) : __cs.slice(0, n))); } else { __cd.splice(0, n, ...${items}); } return n; })(${dst}, ${src})`;
 	},
 	new: (s, e) => {
 		const arg = e.args[0];
