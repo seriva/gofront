@@ -760,13 +760,16 @@ const TYPED_ARRAY_CONSTRUCTORS = {
 
 // Element indices of an array or slice literal (Go spec): `i: v` puts v at
 // index i, any other element goes right after the previous one, so
-// `[5]int{1, 3: 4, 5}` fills indices 0, 3 and 4.  Only integer-literal keys
-// are known here; another key is treated as a positional element.
+// `[5]int{1, 3: 4, 5}` fills indices 0, 3 and 4.  Array literal keys are
+// resolved by the type checker (`_index`, which handles named constants and
+// constant expressions); otherwise only integer-literal keys are known and
+// another key is treated as a positional element.
 export function compositeLitIndices(elems) {
 	const out = [];
 	let next = 0;
 	for (const e of elems) {
-		if (e.kind === "KeyValueExpr" && e.key?.value !== undefined)
+		if (e.kind === "KeyValueExpr" && e._index !== undefined) next = e._index;
+		else if (e.kind === "KeyValueExpr" && e.key?.value !== undefined)
 			next = Number(e.key.value);
 		out.push(next++);
 	}

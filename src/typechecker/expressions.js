@@ -18,11 +18,13 @@ import {
 	isComplex,
 	isComplex64,
 	isComplexOrNumeric,
+	isInteger,
 	isNumeric,
 	isString,
 	NIL,
 	RUNE,
 	Scope,
+	SIZED_INT_NAMES,
 	STRING,
 	TAINTED_ANY,
 	typeStr,
@@ -682,18 +684,15 @@ export const expressionCheckMethods = {
 		if (!expr) return null;
 		if (expr.kind === "BasicLit" && expr.litKind === "INT")
 			return Number(expr.value);
-		if (
-			expr.kind === "UnaryExpr" &&
-			expr.op === "-" &&
-			expr.operand?.kind === "BasicLit" &&
-			expr.operand.litKind === "INT"
-		) {
-			return -Number(expr.operand.value);
-		}
 		if (expr.kind === "UnaryExpr" && expr.op === "+") {
 			return this._constIntValue(expr.operand, scope);
 		}
+		const folded = this._constIntFold(expr, scope);
+		if (folded !== undefined) return folded;
 		if (expr.kind === "Ident") {
+			// A local variable shadowing a constant is not a constant.
+			const owner = scope?.lookupScope?.(expr.name);
+			if (owner && !owner._consts.has(expr.name)) return null;
 			const c =
 				scope?.lookupConstExpr?.(expr.name) ??
 				this.globals.lookupConstExpr?.(expr.name) ??
@@ -704,6 +703,80 @@ export const expressionCheckMethods = {
 			return this._constIntValue(expr.expr, scope);
 		}
 		return null;
+	},
+
+	// Operators and integer conversions for `_constIntValue`; undefined when
+	// `expr` is none of these.
+	_constIntFold(expr, scope) {
+		if (expr.kind === "UnaryExpr" && (expr.op === "-" || expr.op === "^")) {
+			const v = this._constIntValue(expr.operand, scope);
+			if (v === null) return null;
+			return expr.op === "-" ? -v : ~v;
+		}
+		if (expr.kind === "BinaryExpr") return this._constIntBinary(expr, scope);
+		if (expr.kind === "CallExpr" && this._isIntConversion(expr))
+			return this._constIntValue(expr.args[0], scope);
+		if (
+			expr.kind === "TypeConversion" &&
+			this._isIntTypeNode(expr.targetType, scope)
+		)
+			return this._constIntValue(expr.expr, scope);
+		return undefined;
+	},
+
+	// Integer constant folding for `_constIntValue`: both operands must fold.
+	_constIntBinary(expr, scope) {
+		const fold = CONST_INT_OPS[expr.op];
+		if (!fold) return null;
+		const l = this._constIntValue(expr.left, scope);
+		const r = this._constIntValue(expr.right, scope);
+		if (l === null || r === null) return null;
+		return fold(l, r);
+	},
+
+	// `int(K)`, `uint8(K)`, `MyInt(K)`: a conversion to an integer type.
+	_isIntConversion(expr) {
+		if (expr.args?.length !== 1) return false;
+		const target = expr._conversionTargetType;
+		if (expr._isTypeConversion && target)
+			return isInteger(target.kind === "named" ? target.underlying : target);
+		return (
+			expr.func?.kind === "Ident" && SIZED_INT_NAMES.includes(expr.func.name)
+		);
+	},
+
+	_isIntTypeNode(node, scope) {
+		if (node?.kind !== "TypeName") return false;
+		const t = this.resolveTypeNode(node, scope ?? this.globals);
+		return isInteger(t?.kind === "named" ? t.underlying : t);
+	},
+
+	// Keyed array literal indices (Go spec): each key must be a non-negative
+	// integer constant, and no index may appear twice.  The resolved index is
+	// stored on the KeyValueExpr as `_index` for compositeLitIndices.
+	_checkArrayLitKeys(expr, scope) {
+		const seen = new Set();
+		let next = 0;
+		for (const elem of expr.elems) {
+			if (elem.kind === "KeyValueExpr") {
+				this.checkExpr(elem.key, scope);
+				const idx = this._constIntValue(elem.key, scope);
+				const text = constKeyText(elem.key);
+				if (idx === null)
+					this.err(`index ${text} must be integer constant`, elem.key);
+				else if (idx < 0)
+					this.err(
+						`index ${text} must be non-negative integer constant`,
+						elem.key,
+					);
+				else next = idx;
+				elem._index = next;
+			}
+			if (seen.has(next))
+				this.err(`duplicate index ${next} in array or slice literal`, elem);
+			seen.add(next);
+			next++;
+		}
 	},
 
 	_resolveCallArgTypes(expr, scope) {
@@ -1055,6 +1128,7 @@ export const expressionCheckMethods = {
 				: this.resolveTypeNode(expr.typeExpr, scope);
 		const base = t.kind === "named" ? t.underlying : t;
 		const typeNode = expr.typeExpr;
+		if (base?.kind === "array") this._checkArrayLitKeys(expr, scope);
 		this._inferArraySize(expr, typeNode, base);
 		if (base?.kind === "struct")
 			return this._checkStructCompositeLit(expr, scope, t, base);
@@ -1191,6 +1265,41 @@ export const expressionCheckMethods = {
 		return t;
 	},
 };
+
+// Integer constant operators for `_constIntBinary`; null means not foldable.
+const CONST_INT_OPS = {
+	"+": (l, r) => l + r,
+	"-": (l, r) => l - r,
+	"*": (l, r) => l * r,
+	"/": (l, r) => (r === 0 ? null : Math.trunc(l / r)),
+	"%": (l, r) => (r === 0 ? null : l % r),
+	"<<": (l, r) => l * 2 ** r,
+	">>": (l, r) => Math.floor(l / 2 ** r),
+	"&": (l, r) => l & r,
+	"|": (l, r) => l | r,
+	"^": (l, r) => l ^ r,
+	"&^": (l, r) => l & ~r,
+};
+
+// Source-like text of a literal key for diagnostics (`k`, `-1`, `K + 1`).
+function constKeyText(e) {
+	switch (e?.kind) {
+		case "Ident":
+			return e.name;
+		case "BasicLit":
+			return String(e.value);
+		case "UnaryExpr":
+			return `${e.op}${constKeyText(e.operand)}`;
+		case "BinaryExpr":
+			return `${constKeyText(e.left)} ${e.op} ${constKeyText(e.right)}`;
+		case "ParenExpr":
+			return `(${constKeyText(e.expr)})`;
+		case "SelectorExpr":
+			return `${constKeyText(e.expr)}.${e.field}`;
+		default:
+			return "expression";
+	}
+}
 
 function computeMaxIndex(elems) {
 	return Math.max(-1, ...compositeLitIndices(elems));
