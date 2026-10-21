@@ -3,6 +3,10 @@
 
 import { Lexer } from "../../lexer.js";
 import { lower } from "../../lower/index.js";
+import {
+	getOrCreateIteratorFuncLit,
+	isIteratorRangeFor,
+} from "../../lower/range.js";
 import { Parser } from "../../parser/index.js";
 import { TypeChecker } from "../../typechecker/index.js";
 import {
@@ -2177,6 +2181,8 @@ export function compileWasmModule(
 	} else if (!resolvedLowerResult) {
 		resolvedLowerResult = lower(progs, resolvedChecker);
 	}
+	checker = resolvedChecker;
+	lowerResult = resolvedLowerResult;
 
 	const mod = new ModuleEmitter(resolvedChecker, resolvedLowerResult, progs, {
 		bundledPackages: options.bundledPackages,
@@ -2239,6 +2245,11 @@ export function compileWasmModule(
 			for (const item of node) scanClosures(item, rootFn);
 			return;
 		}
+		if (isIteratorRangeFor(node)) {
+			const yieldFuncLit = getOrCreateIteratorFuncLit(node);
+			scanClosures(yieldFuncLit, rootFn);
+			return;
+		}
 		if (node.kind === "FuncLit") {
 			closureCounter++;
 			const closureName = `_closure$${closureCounter}`;
@@ -2255,6 +2266,8 @@ export function compileWasmModule(
 				returnType: node.returnType,
 				body: node.body,
 				_isClosure: true,
+				_isYieldClosure: Boolean(node._isYieldClosure),
+				_iterStateName: node._iterStateName ?? null,
 				_funcLit: node,
 				_rootFuncDecl: rootFn,
 				_srcFile: rootFn?._srcFile ?? null,
