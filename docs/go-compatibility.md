@@ -91,5 +91,13 @@ WASM facade by name (an `import { Array$ } from "./app.js"`, a `<script>` callin
 exported function, a test harness) must use `Array$`, not `Array`; `Array` there is still
 the browser's global. Pick a different Go name for exported functions you call from JS.
 
+> [!WARNING]
+> Type declarations are **not** renamed. A type named after a browser global, such as
+> `type Array struct{}`, is emitted as `class Array`, which shadows the global in the
+> bundle's module scope. Generated helpers that call the real global then fail at runtime
+> (for example `Array.isArray is not a function` as soon as the program calls `append`).
+> GoFront does not reject such a declaration, so pick another name for the type
+> (`ArrayData`, `Obj`, …).
+
 ---
 
