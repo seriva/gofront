@@ -138,6 +138,10 @@ export const expressionCheckMethods = {
 				const t = scope.lookup(expr.name);
 				if (!t) return this.err(`Undefined: '${expr.name}'`, expr);
 				if (this.types.has(expr.name)) expr._isTypeRef = true;
+				// Go-source stdlib loading: record package-scope references so the
+				// loader can mangle them (see compiler.js loadStdlibPackage).
+				if (this._pkgRefs && scope.lookupScope(expr.name) === this.globals)
+					this._pkgRefs.add(`${this._currentFile}:${expr._line}:${expr._col}`);
 				if (
 					(this.target === "wasm" || this.target === "both") &&
 					BROWSER_GLOBALS.has(expr.name) &&

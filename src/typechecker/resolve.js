@@ -91,9 +91,7 @@ export const resolveMethods = {
 				}
 				const named = this.types.get(node.name);
 				if (named) {
-					// `pkg.T` in a type position counts as using the import.
-					const dot = node.name.indexOf(".");
-					if (dot > 0) this.globals.lookup(node.name.slice(0, dot));
+					this._useQualifiedTypeName(node, named);
 					return named;
 				}
 				return this.err(`Unknown type '${node.name}'`, node);
@@ -176,6 +174,15 @@ export const resolveMethods = {
 			default:
 				return ANY;
 		}
+	},
+
+	// `pkg.T` in a type position counts as using the import; a Go-source
+	// stdlib type is emitted under its mangled name.
+	_useQualifiedTypeName(node, named) {
+		const dot = node.name.indexOf(".");
+		if (dot <= 0) return;
+		this.globals.lookup(node.name.slice(0, dot));
+		if (named.name?.includes("$$")) node._stdName = named.name;
 	},
 
 	_resolveArrayTypeNode(node, scope) {
@@ -545,6 +552,12 @@ export const resolveMethods = {
 				`cannot refer to unexported name ${base.name}.${field}`,
 				node,
 			);
+		// Go-source stdlib member: backends emit the mangled top-level name.
+		const mangled = base._mangle?.get(field);
+		if (mangled) {
+			node._stdName = mangled;
+			return base.members[field];
+		}
 		if (field in base.members) {
 			if (
 				(this.target === "wasm" || this.target === "both") &&

@@ -867,10 +867,12 @@ export function typeStr(t) {
 		}
 		case "tuple":
 			return `(${t.types.map(typeStr).join(", ")})`;
-		case "named":
+		case "named": {
+			const name = displayTypeName(t.name);
 			return t.typeArgs && t.typeArgs.length > 0
-				? `${t.name}[${t.typeArgs.map(typeStr).join(", ")}]`
-				: t.name;
+				? `${name}[${t.typeArgs.map(typeStr).join(", ")}]`
+				: name;
+		}
 		case "pointer":
 			return `*${typeStr(t.base)}`;
 		case "typeParam":
@@ -880,6 +882,17 @@ export function typeStr(t) {
 		default:
 			return "?";
 	}
+}
+
+// Go-source stdlib names are mangled to `Name$$path` (`List$$container$list`);
+// diagnostics show them qualified, as Go does (`list.List`).
+export function displayTypeName(name) {
+	const i = typeof name === "string" ? name.indexOf("$$") : -1;
+	if (i < 0) return name;
+	return `${name
+		.slice(i + 2)
+		.split("$")
+		.at(-1)}.${name.slice(0, i)}`;
 }
 
 // ── Iterator function detection (Go 1.23 range-over-func) ───
