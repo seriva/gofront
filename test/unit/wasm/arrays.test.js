@@ -2,7 +2,13 @@
 // Tests for Task 0.8a: fixed-size arrays are values in WASM (copy on every
 // assignment, call, return, store and load), matching the JS backend.
 
-import { assertEqual, compileHybrid, section, test } from "../helpers.js";
+import {
+	assert,
+	assertEqual,
+	compileHybrid,
+	section,
+	test,
+} from "../helpers.js";
 
 section("WASM Arrays — value semantics");
 
@@ -338,4 +344,58 @@ func Main() float64 {
 	const res = compileHybrid(src).run("Main");
 	assertEqual(res.jsRes, 19);
 	assertEqual(res.wasmRes, 19);
+});
+
+section("WASM Arrays — clone elision");
+
+test("copy between unmutated locals is elided", () => {
+	const src = `
+package main
+
+func Main() int {
+	a := [3]int{1, 2, 3}
+	b := a
+	return a[0] + b[2]
+}
+`;
+	const res = compileHybrid(src, { emitWat: true });
+	assertEqual(res.run("Main").jsRes, 4);
+	assert(
+		!res.wat.includes("array.copy"),
+		"elided copy must not emit array.copy",
+	);
+});
+
+test("copy stays when the source is mutated afterwards", () => {
+	const src = `
+package main
+
+func Main() int {
+	a := [3]int{1, 2, 3}
+	b := a
+	a[0] = 9
+	return a[0]*10 + b[0]
+}
+`;
+	const res = compileHybrid(src, { emitWat: true });
+	assertEqual(res.run("Main").jsRes, 91);
+	assert(res.wat.includes("array.copy"), "copy must remain");
+});
+
+test("range over an unmutated local array does not copy it", () => {
+	const src = `
+package main
+
+func Main() int {
+	a := [3]int{1, 2, 3}
+	s := 0
+	for _, v := range a {
+		s += v
+	}
+	return s
+}
+`;
+	const res = compileHybrid(src, { emitWat: true });
+	assertEqual(res.run("Main").jsRes, 6);
+	assert(!res.wat.includes("array.copy"), "range copy must be elided");
 });

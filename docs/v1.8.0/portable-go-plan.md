@@ -639,7 +639,7 @@ Conventions used in the tasks:
   - Test: new `test/unit/wasm/arrays.test.js` — every array edge case in [Edge Cases](#edge-cases) as parity tests, including the map/slice load cases and `[N]simd.F32x4`.
   - Done when: all pass; `npm run bench` numbers are recorded (regression expected, fixed in Task 0.5b).
 
-- [ ] **Task 0.8b — Clone elision for arrays**
+- [x] **Task 0.8b — Clone elision for arrays**
   - Files: `src/lower/ownership.js`, the emit sites from Task 0.5a
   - Do: skip the copy when `ownership.js` proves the source is dead after the copy or never mutated on either side. Add the negative case to the analysis tests: a copy must stay when the source is mutated afterwards.
   - Test: `test/unit/compiler/lower.test.js` (elision decisions), `arrays.test.js` (behaviour unchanged).
@@ -1173,6 +1173,7 @@ Each Phase 6 task follows the same Files/Test/Done-when discipline: files are `s
 - Dev-mode `app.wasm` and `app.js` for `example/hybrid` without new imports must be byte-identical in size to v1.7.0. The only exceptions are code affected by the pointer fix (Task 0.1: addresses of scalar fields or elements), the array fix (Task 0.8: array copies that clone elision cannot remove), per-iteration boxes for captured loop variables (Task 0.10), and strict-mode index helpers that elision cannot remove (Task 0.16).
 - The pointer fast path: a micro-benchmark of `*p` on a boxed local (`&x`) must stay within 5% of v1.7.0. Measured on 100M read/write dereference iterations: median 155.66 ms (642.4 Mops/s), within 1.5% of baseline (153.2 ms / 652.7 Mops/s). Hybrid raycast benchmark: 11,840 rays/s (1.35× speedup over JS), 2,688 B alloc/run.
 - Array value semantics (Task 0.8a, copies always inserted, no elision yet), `npm run bench` on the same machine: base `feat/portable-go` hybrid 19,722 rays/s, 85,616 B alloc/run; after 0.8a hybrid 18,727 rays/s (−5.0%), 85,624 B alloc/run; dev `app.wasm` 67.9 KB in both.
+- Clone elision for arrays (Task 0.8b), interleaved `npm run bench --mode hybrid` runs on the same machine: base 18,881 / 17,632 rays/s (84,352 / 84,424 B alloc/run), after 0.8b 18,572 / 18,745 rays/s (84,552 / 84,800 B alloc/run): within noise and inside the 3% budget. The raycast fixture declares no fixed-size arrays in its hot path, so its module size and hot-function instruction counts (`--sizes`) are unchanged, and `example/hybrid` dev `app.wasm`/`app.js` are byte-identical to the base. The 0.8a −5% figure above was run-to-run noise.
 - The WASM JSON benchmark (Task 5.6) is recorded in this document.
 - `npm run bench` must show no regression in the hybrid raycast. Neither the array-copy fix (Task 0.8b) nor the strict-mode runtime checks (Task 0.16b) may slow the scalar raycast by more than 3% each; the analysis is extended until they do not, and the checks are never shipped disabled.
 - `test/e2e/perf/zero-alloc.js` must pass after Tasks 0.5a, 0.5d and 0.7c.
