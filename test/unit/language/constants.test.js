@@ -272,6 +272,91 @@ func main() {
 	);
 });
 
+section("Constants — review fixes (overflow contexts, precision warning)");
+
+const mainWith = (body, imports = "") =>
+	`package main\n${imports}\nfunc main() {\n${body}\n}\n`;
+
+test("error: x := 1 << 63 overflows int (M2)", () => {
+	const { errors } = compile(mainWith("x := 1 << 63\nprintln(x)"));
+	assertErrorContains(
+		errors,
+		"(untyped int constant 9223372036854775808) as int value in variable declaration (overflows)",
+	);
+});
+
+test("error: x := math.MaxUint64 overflows int (M2)", () => {
+	const { errors } = compile(
+		mainWith("x := math.MaxUint64\nprintln(x)", 'import "math"'),
+	);
+	assertErrorContains(
+		errors,
+		"(untyped int constant 18446744073709551615) as int value in variable declaration (overflows)",
+	);
+});
+
+test("error: x = 300 into int8 overflows (M2)", () => {
+	const { errors } = compile(mainWith("var x int8\nx = 300\nprintln(x)"));
+	assertErrorContains(
+		errors,
+		"cannot use 300 (untyped int constant) as int8 value in assignment (overflows)",
+	);
+});
+
+test("error: x + 300 with x int8 overflows int8 (M2)", () => {
+	const { errors } = compile(
+		mainWith("var x int8 = 1\ny := x + 300\nprintln(y)"),
+	);
+	assertErrorContains(errors, "300 (untyped int constant) overflows int8");
+});
+
+test("error: println(1 << 64) overflows int (M2)", () => {
+	const { errors } = compile(mainWith("println(1 << 64)"));
+	assertErrorContains(
+		errors,
+		"as int value in argument to built-in println (overflows)",
+	);
+	const viaAny = compile(`package main
+
+func f(v any) {}
+
+func main() {
+	f(1 << 64)
+}
+`);
+	assertErrorContains(viaAny.errors, "as int value in argument (overflows)");
+});
+
+test("in-range constants in the same contexts still compile (M2)", () => {
+	const { errors } = compile(
+		mainWith(
+			"x := 1 << 62\nvar y int8\ny = 127\nz := y + 1\nvar u uint64 = math.MaxUint64\nprintln(x, y, z, u, 1<<62, x < math.MaxInt64)",
+			'import "math"',
+		),
+	);
+	assertEqual(errors.length, 0);
+});
+
+test("warning: integral float and named constants in integer contexts (M3)", () => {
+	const msgs = (src) => compile(src).warnings.map((message) => ({ message }));
+	assertErrorContains(
+		msgs(mainWith("var x int64 = 1e18 + 1\nprintln(x)")),
+		"constant 1000000000000000001 exceeds JS Number precision",
+	);
+	assertErrorContains(
+		msgs(mainWith("var x int64 = math.MaxInt64\nprintln(x)", 'import "math"')),
+		"constant 9223372036854775807 exceeds JS Number precision",
+	);
+	// Float contexts and exactly representable values stay quiet.
+	const quiet = compile(
+		mainWith(
+			"var f float64 = 1e18 + 1\nvar x int64 = 1e18\nvar u uint64 = 1 << 63\nprintln(f, x, u, math.MaxInt32)",
+			'import "math"',
+		),
+	);
+	assertEqual(quiet.warnings.length, 0);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

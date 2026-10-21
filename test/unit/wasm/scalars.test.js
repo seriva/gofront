@@ -630,3 +630,58 @@ func Main() {
 	const res = compileHybrid(src).run("Main");
 	assertEqual(res.output, "a b a c\n42 42\n2.5 2.5 1\n5 9");
 });
+
+test("min/max on a type parameter that includes strings (review M1)", () => {
+	const src = `
+package main
+
+type Ordered interface{ ~int | ~float64 | ~string }
+
+func Mn[T Ordered](a, b T) T { return min(a, b) }
+func Mx[T Ordered](a, b T) T { return max(a, b) }
+
+func Main() {
+    println(Mn("b", "a"), Mx("b", "a"), Mn(3, 2), Mx(1.5, 2.5))
+    z := 0.0
+    n := z / z
+    println(Mn(n, 1.0) != Mn(n, 1.0), Mx(1.0, n) != Mx(1.0, n))
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.output, "a b 2 2.5\ntrue true");
+});
+
+test("min/max mixing a typed integer with an untyped float constant (review M5)", () => {
+	const src = `
+package main
+
+func Main() {
+    x := 3
+    println(min(x, 2.0))
+    var y int64 = 3
+    println(max(y, 1e3))
+    var z int32
+    println(min(2.0, z))
+    var w int = 2.0
+    a := []int{1, 2, 3}
+    println(w, a[2.0])
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.output, "2\n1000\n0\n2 3");
+});
+
+test("integral float constant inside a conversion stays exact in WASM (review M4)", () => {
+	const src = `
+package main
+
+func Main() {
+    x := int64(1e18 + 1)
+    println(x)
+}
+`;
+	const { wasm, stringTable } = compileWasm(src);
+	const { exports, lines } = runWasm(wasm, { stringTable });
+	exports.Main();
+	assertEqual(lines.join("\n"), "1000000000000000001");
+});
