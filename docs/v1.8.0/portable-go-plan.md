@@ -695,11 +695,12 @@ Conventions used in the tasks:
   - Done when: the four edge cases pass as parity tests.
   - Landed in `src/typechecker/index.js` (`_collectGenericAlias`; there is no `declarations.js`) and `src/typechecker/resolve.js`. The edge cases also needed anonymous struct literals to work: WASM no longer registers a struct alias (`type P = struct{…}`) as a distinct struct type and gives `struct{}` a real (empty) struct type, and JS emits a full plain object for `struct{…}{…}`, `P{…}` and alias literals (it emitted an array for positional ones and dropped omitted fields).
 
-- [ ] **Task 0.15 — Method expressions on pointer receivers**
+- [x] **Task 0.15 — Method expressions on pointer receivers**
   - Files: `src/parser/expressions.js`, `src/typechecker/expressions.js`
   - Do: `(*T).M` parses as a method expression when `T` names a type; its type is `func(*T, args…) results`. Value form `T.M` keeps working. Both backends reuse the existing method-value lowering.
   - Test: `test/unit/language/expressions.test.js` — the method-expression edge cases as parity tests; the old `cannot dereference non-pointer type` message must not appear for this form.
   - Done when: all pass.
+  - Landed without parser changes: the parser already drops the parentheses, so `(*T).M` is a selector on `*T`, and the checker treats `*T` as a pointer type when `T` names a type (`(*p).M` on a pointer variable still dereferences). `Box[int]` in expression position (`Box[int].Get`, `(*Box[int]).Set`) is resolved as an instantiated type. The WASM backend had no method-value lowering to reuse, so a new desugaring pass (`src/backend/wasm/method-expr.js`, after monomorphisation) turns `(*T).M(p, a)` into `p.M(a)` and any other use into a forwarding func literal. Method values (`x.M`) in WASM stay with Task 0.19c, and pointer-receiver methods on named non-struct types (`func (c *Counter) Inc()`) produce an invalid module in WASM even when called directly, so they are not covered here.
 
 - [ ] **Task 0.16a — Strict-mode runtime panics (checks everywhere)**
   - Files: `src/backend/js/expressions.js` (strict index/field access), `src/backend/js/runtime.js` (`__at`, `__set`, `__nilmap`, `__deref` helpers)
