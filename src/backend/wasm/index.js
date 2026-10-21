@@ -1452,6 +1452,10 @@ class ModuleEmitter {
 		return this.resolveFuncIndex("__bounds_panic");
 	}
 
+	getIndexPanicFuncIndex() {
+		return this.resolveFuncIndex("__index_panic");
+	}
+
 	// `gofront/shared` buffers are `(base i32, len i32)` views over the single
 	// exported linear memory, bump-allocated by `__shared_new` during start.
 	getSharedType() {
@@ -2156,6 +2160,47 @@ class ModuleEmitter {
 	}
 }
 
+// Body of `__index_panic(i i64, n i32)`: builds Go's message with the string
+// imports and raises it like any other runtime panic.
+function emitIndexPanicBody(mod, emitter) {
+	const str = (text) => {
+		emitter.pushInstruction({ op: "i32.const", value: mod.internString(text) });
+		emitter.pushInstruction({
+			op: "call",
+			funcIndex: mod.getStringImportIndex(),
+		});
+	};
+	const concat = () =>
+		emitter.pushInstruction({
+			op: "call",
+			funcIndex: mod.getStringConcatImportIndex(),
+		});
+	str("runtime error: index out of range [");
+	emitter.pushInstruction({ op: "local.get", index: 0 });
+	emitter.pushInstruction({
+		op: "call",
+		funcIndex: mod.getStrFromI64ImportIndex(),
+	});
+	concat();
+	emitter.pushInstruction({ op: "local.get", index: 0 });
+	emitter.pushInstruction({ op: "i64.const", value: 0n });
+	emitter.pushInstruction("i64.lt_s");
+	emitter.pushInstruction({ op: "if", blockType: "externref" });
+	str("]");
+	emitter.pushInstruction("else");
+	str("] with length ");
+	emitter.pushInstruction({ op: "local.get", index: 1 });
+	emitter.pushInstruction({
+		op: "call",
+		funcIndex: mod.getStrFromI32ImportIndex(),
+	});
+	concat();
+	emitter.pushInstruction("end");
+	concat();
+	emitter.pushInstruction("any.convert_extern");
+	emitter.emitPanicThrow();
+}
+
 function peepholeOptimize(instructions) {
 	let changed = true;
 	let current = instructions;
@@ -2440,6 +2485,19 @@ export function compileWasmModule(
 		_panicMsg: "runtime error: index out of range",
 	};
 	funcDecls.push(boundsPanicFn);
+
+	// Go's index panic: `index out of range [i] with length n`, or
+	// `index out of range [i]` for a negative index.
+	funcDecls.push({
+		kind: "FuncDecl",
+		name: "__index_panic",
+		params: [
+			{ name: "i", type: { kind: "basic", name: "int64" } },
+			{ name: "n", type: { kind: "basic", name: "int32" } },
+		],
+		returnType: null,
+		_isIndexPanic: true,
+	});
 
 	const sliceBoundsPanicFn = {
 		kind: "FuncDecl",
@@ -2910,7 +2968,9 @@ export function compileWasmModule(
 	// 4. Emit function bodies
 	for (const fn of funcDecls) {
 		const emitter = new FunctionEmitter(mod, fn, fn._globalFuncIndex);
-		if (fn._isRuntimePanic) {
+		if (fn._isIndexPanic) {
+			emitIndexPanicBody(mod, emitter);
+		} else if (fn._isRuntimePanic) {
 			const strIdx = mod.internString(fn._panicMsg);
 			const funcIdx = mod.getStringImportIndex();
 			emitter.pushInstruction({ op: "i32.const", value: strIdx });

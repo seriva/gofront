@@ -215,10 +215,7 @@ export class FunctionEmitter {
 		this._initNamedReturns();
 
 		const needsOobBlock = this._needsOobBlock(body);
-		if (needsOobBlock) {
-			this.pushInstruction({ op: "block", blockType: "void" });
-			this.pushControl("oob");
-		}
+		if (needsOobBlock) this._openOobBlocks();
 
 		this.emitBlock(body);
 		if (this._finishYieldClosureBody()) return;
@@ -232,14 +229,48 @@ export class FunctionEmitter {
 					this.pushInstruction({ op: "unreachable" });
 				}
 			}
-			this.pushInstruction("end");
-
-			this.pushInstruction({
-				op: "call",
-				funcIndex: this.mod.getBoundsPanicFuncIndex(),
-			});
-			this.pushInstruction("unreachable");
+			this._closeOobBlocks();
 		}
+	}
+
+	// Index checks branch out of the body to one of two blocks wrapped around
+	// it: `oob32` for i32 indexes and `oob64` for i64 indexes.  Each check
+	// leaves the index and the length in the function's `oob` locals (the
+	// temps the check needs anyway), so the shared handler after the block can
+	// raise Go's `index out of range [i] with length n`.
+	_openOobBlocks() {
+		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushControl("oob64");
+		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushControl("oob32");
+	}
+
+	// Closes the blocks opened by _openOobBlocks; the body must already end
+	// in a branch, return or unreachable.
+	_closeOobBlocks() {
+		const { idx32, idx64, len } = this._oobLocals();
+		const panicIdx = this.mod.getIndexPanicFuncIndex();
+		this.pushInstruction("end");
+		this.pushInstruction({ op: "local.get", index: idx32 });
+		this.pushInstruction("i64.extend_i32_s");
+		this.pushInstruction({ op: "local.get", index: len });
+		this.pushInstruction({ op: "call", funcIndex: panicIdx });
+		this.pushInstruction("unreachable");
+		this.pushInstruction("end");
+		this.pushInstruction({ op: "local.get", index: idx64 });
+		this.pushInstruction({ op: "local.get", index: len });
+		this.pushInstruction({ op: "call", funcIndex: panicIdx });
+		this.pushInstruction("unreachable");
+	}
+
+	// The locals an index check stores its index and length in.
+	_oobLocals() {
+		this._oob ??= {
+			idx32: this.allocLocal(null, "i32"),
+			idx64: this.allocLocal(null, "i64"),
+			len: this.allocLocal(null, "i32"),
+		};
+		return this._oob;
 	}
 
 	_initNamedReturns() {
@@ -329,10 +360,7 @@ export class FunctionEmitter {
 		this.pushControl("try_table");
 
 		const needsOobBlock = this._needsOobBlock(body);
-		if (needsOobBlock) {
-			this.pushInstruction({ op: "block", blockType: "void" });
-			this.pushControl("oob");
-		}
+		if (needsOobBlock) this._openOobBlocks();
 
 		this.emitBlock(body);
 
@@ -344,13 +372,7 @@ export class FunctionEmitter {
 					depth: this.resolveBranchDepthToRole("runDefers"),
 				});
 			}
-			this.pushInstruction("end");
-
-			this.pushInstruction({
-				op: "call",
-				funcIndex: this.mod.getBoundsPanicFuncIndex(),
-			});
-			this.pushInstruction("unreachable");
+			this._closeOobBlocks();
 		}
 
 		// Close try_table
@@ -1496,8 +1518,9 @@ export class FunctionEmitter {
 		return 0;
 	}
 
-	resolveBranchDepthToOob() {
-		return this.resolveBranchDepthToRole("oob");
+	// Depth of the index-check block for i32 or i64 indexes, or null.
+	resolveBranchDepthToOob(width = 64) {
+		return this.resolveBranchDepthToRole(width === 32 ? "oob32" : "oob64");
 	}
 
 	resolveBranchDepthToRole(targetRole) {
