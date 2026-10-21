@@ -977,6 +977,8 @@ export class TypeChecker {
 				for (let i = 0; i < spec.names.length; i++) {
 					const vt = valTypesFlat[i] ?? ANY;
 					const varType = type ?? defaultType(vt) ?? ANY;
+					if (!type && spec.names.length === spec.value.length)
+						this._checkConstDefault(vt, spec.value[i], "variable declaration");
 					if (type)
 						this.assertAssignable(
 							type,

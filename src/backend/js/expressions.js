@@ -5,6 +5,7 @@ import {
 	nodeWritesVar,
 	rootIdentName,
 } from "../../lower/index.js";
+import { constIntValue } from "../../typechecker/const-fold.js";
 import {
 	BROWSER_GLOBALS,
 	compositeLitIndices,
@@ -368,11 +369,16 @@ const BUILTIN_GEN = {
 };
 
 // Math.min/max coerce strings to NaN, so string operands fold with `<`/`>`.
+// A type parameter may be a string or a number: pick the form at run time
+// (Math.min/max keeps NaN propagation and -0 for floats).
 function genMinMax(s, e, fn, cmp) {
 	const args = e.args.map((a) => s.genExpr(a));
+	const fold = (xs) => `${xs}.reduce((a, b) => (b ${cmp} a ? b : a))`;
+	if (e._type?.kind === "typeParam" && args.length > 1)
+		return `((...v) => (typeof v[0] === "string" ? ${fold("v")} : Math.${fn}(...v)))(${args.join(", ")})`;
 	if (!s._isStringExprType(e._type)) return `Math.${fn}(${args.join(", ")})`;
 	if (args.length === 1) return args[0];
-	return `[${args.join(", ")}].reduce((a, b) => (b ${cmp} a ? b : a))`;
+	return fold(`[${args.join(", ")}]`);
 }
 
 // Expression kinds whose folded constant value (`_const`, attached by the
@@ -481,11 +487,25 @@ export const expressionGenMethods = {
 	// Number and a precision warning.
 	_genFoldedConst(expr) {
 		const val = expr._const;
-		if (!val || !FOLDED_CONST_KINDS.has(expr.kind) || isSignedLit(expr))
+		if (!val) return null;
+		// Constant names emit themselves, but an integer use of one still warns
+		// (an integer constant declared in this package warned at its declaration).
+		if (expr.kind === "Ident" || expr.kind === "SelectorExpr") {
+			const declared = expr.kind === "Ident" && val.k === "INT";
+			if (expr._intConst && !declared) this._warnConstPrecision(val, expr);
 			return null;
-		if (val.k === "INT" && (val.v > JS_SAFE_INT || val.v < -JS_SAFE_INT))
-			this._warn(`constant ${val.v} exceeds JS Number precision`, expr);
+		}
+		if (!FOLDED_CONST_KINDS.has(expr.kind) || isSignedLit(expr)) return null;
+		if (val.k === "INT" || expr._intConst) this._warnConstPrecision(val, expr);
 		return CONST_LITS[val.k]?.(val.v) ?? null;
+	},
+
+	// Warns when an integer constant outside ±2⁵³ has no exact Number.
+	_warnConstPrecision(val, expr) {
+		const i = constIntValue(val);
+		if (i === null || (i <= JS_SAFE_INT && i >= -JS_SAFE_INT)) return;
+		if (BigInt(Number(i)) !== i)
+			this._warn(`constant ${i} exceeds JS Number precision`, expr);
 	},
 
 	_isNamedBoxKind(expr) {

@@ -79,6 +79,12 @@ export const statementCheckMethods = {
 			const name = stmt.lhs[i].name ?? stmt.lhs[i];
 			if (name === "_") continue;
 			if (scope.symbols.has(name)) stmt.lhs[i]._redecl = true;
+			if (stmt.rhs.length === stmt.lhs.length)
+				this._checkConstDefault(
+					rhsFlat[i],
+					stmt.rhs[i],
+					"variable declaration",
+				);
 			scope.defineLocal(name, defaultType(rhsFlat[i]) ?? ANY);
 		}
 	},
@@ -191,6 +197,11 @@ export const statementCheckMethods = {
 					this.resolveType(r),
 					stmt.rhs[i],
 				);
+			if (
+				stmt.rhs.length === lhsTypes.length &&
+				this._checkConstOverflow(lhsTypes[i], r, stmt.rhs[i], "assignment")
+			)
+				continue;
 			if (!isAny(lhsTypes[i]) && !isAny(r)) {
 				this._skipIfaceMark = true;
 				this.assertAssignable(lhsTypes[i], r, stmt.lhs[i]);

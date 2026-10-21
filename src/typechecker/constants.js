@@ -16,7 +16,7 @@ import {
 	intConst,
 	MATH_INT_CONSTS,
 } from "./const-fold.js";
-import { typeStr } from "./types.js";
+import { defaultType, isAny, typeStr, VOID } from "./types.js";
 
 // Basic type names usable as conversion functions (`int32(x)`).
 const BASIC_CONVERSIONS = new Set([
@@ -187,12 +187,22 @@ export const constantCheckMethods = {
 		return r?.overflow ? { ...r, typeName: typeStr(t) } : r;
 	},
 
-	// `var x int8 = 200`: an untyped integer constant must fit the target.
+	// `var x int8 = 200`: an untyped integer constant must fit the target.  An
+	// interface target takes the constant's default type (`var v any = 1 << 64`).
+	// A null `ctx` reports an operand converted to the other operand's type.
 	_checkConstOverflow(target, source, node, ctx) {
 		if (source?.kind !== "untyped" || !node?._const) return false;
+		const base = this.resolveType(
+			target?.kind === "named" ? target.underlying : target,
+		);
+		if (base?.kind === "interface" || isAny(base)) target = defaultType(source);
 		const i = constIntValue(node._const);
 		const range = i === null ? null : this._intRange(target);
-		if (!range || (i >= range[0] && i <= range[1])) return false;
+		if (!range) return false;
+		if (i >= range[0] && i <= range[1]) {
+			node._intConst = true; // the JS backend's precision warning reads this
+			return false;
+		}
 		const isInt = node._const.k === "INT";
 		const text = isInt ? String(i) : String(node._const.v);
 		const what = `untyped ${isInt ? "int" : "float"} constant`;
@@ -201,10 +211,38 @@ export const constantCheckMethods = {
 				? `${node.value} (${what})`
 				: `${text} (${what} ${text})`;
 		this.err(
-			`cannot use ${shown} as ${typeStr(target)} value in ${ctx} (overflows)`,
+			ctx
+				? `cannot use ${shown} as ${typeStr(target)} value in ${ctx} (overflows)`
+				: `${shown} overflows ${typeStr(target)}`,
 			node,
 		);
 		return true;
+	},
+
+	// `x := 1 << 63`, `println(1 << 64)`: the constant takes its default type.
+	_checkConstDefault(source, node, ctx) {
+		return this._checkConstOverflow(defaultType(source), source, node, ctx);
+	},
+
+	// print/println arguments take their default type.
+	_checkPrintArgs(name, expr, argTypes) {
+		for (let i = 0; i < expr.args.length; i++)
+			this._checkConstDefault(
+				argTypes[i],
+				expr.args[i],
+				`argument to built-in ${name}`,
+			);
+		return VOID;
+	},
+
+	// `x + 300` with `x int8`: the untyped operand is converted to the other
+	// operand's type.
+	_checkConstOperands(op, lt, rt, expr) {
+		if (op === "<<" || op === ">>" || op === "&&" || op === "||") return;
+		if (rt?.kind === "untyped" && lt?.kind !== "untyped")
+			this._checkConstOverflow(lt, rt, expr.right, null);
+		else if (lt?.kind === "untyped" && rt?.kind !== "untyped")
+			this._checkConstOverflow(rt, lt, expr.left, null);
 	},
 
 	_intRange(t) {
