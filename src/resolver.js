@@ -12,6 +12,7 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // Walk up from startDir looking for a node_modules directory
 function findNodeModules(startDir) {
@@ -34,6 +35,23 @@ export function isLocalPath(importPath) {
 
 export function isBuiltinPackage(importPath) {
 	return STDLIB_PACKAGES.has(importPath);
+}
+
+// Go-source stdlib: `runtime/stdlib/<import path>/*.go`, written in GoFront Go
+// and compiled into the caller's target.  A directory for a path that is also
+// in STDLIB_PACKAGES is an overlay: its declarations extend that namespace.
+const STDLIB_SOURCE_ROOT = fileURLToPath(
+	new URL("../runtime/stdlib/", import.meta.url),
+);
+const STDLIB_PATH_RE = /^[a-z0-9]+(\/[a-z0-9]+)*$/;
+
+// Returns the source directory for a Go-source stdlib import path, or null.
+// `root` replaces runtime/stdlib/ (tests use a temporary tree).
+export function resolveStdlibSource(importPath, root = null) {
+	if (!STDLIB_PATH_RE.test(importPath)) return null;
+	const dir = join(root ?? STDLIB_SOURCE_ROOT, importPath);
+	if (!existsSync(dir)) return null;
+	return readdirSync(dir).some((f) => f.endsWith(".go")) ? dir : null;
 }
 
 // Resolve a local relative import path to an absolute directory of .go files.
@@ -86,7 +104,7 @@ function resolveImport(importPath, fromFile) {
 
 // Given an AST's import list, resolve all imports.
 // Returns Map<importPath, { dtsPath, importPath, types, values }>
-export function resolveAll(imports, fromFile, parseDts) {
+export function resolveAll(imports, fromFile, parseDts, stdlibRoot = null) {
 	const resolved = new Map();
 
 	for (const imp of imports) {
@@ -94,6 +112,7 @@ export function resolveAll(imports, fromFile, parseDts) {
 			if (path.startsWith("js:")) continue; // handled separately
 			if (isLocalPath(path)) continue; // local .go packages — handled by compiler
 			if (isBuiltinPackage(path)) continue; // built-in stdlib namespaces — always available
+			if (resolveStdlibSource(path, stdlibRoot)) continue; // Go-source stdlib — handled by compiler
 
 			if (resolved.has(path)) continue;
 
