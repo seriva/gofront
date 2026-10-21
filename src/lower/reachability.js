@@ -40,6 +40,7 @@ function collectRefs(node, names, fields) {
 		for (const n of node) collectRefs(n, names, fields);
 		return;
 	}
+	if (node._stdName) names.add(node._stdName); // `cmp.Compare` in user code
 	if (
 		node.kind === "Ident" ||
 		node.kind === "TypeName" ||

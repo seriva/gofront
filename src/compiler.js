@@ -275,6 +275,7 @@ function linkWasmUnits(
 		programs.push(...copies);
 		if (u.key.startsWith("stdlib:")) stdlibPrograms.push(...copies);
 	}
+	lowerStdlibRefs(programs);
 	dequalifyBundledRefs(programs, bundledPackages);
 	const keepType = pruneStdlibPrograms(programs, stdlibPrograms);
 	for (const u of units)
@@ -541,6 +542,10 @@ function mangleRefs(node, file, tparams, ctx) {
 			if (node.typeExpr?.kind === "Ident")
 				mangleTypeRef(node.typeExpr, tp, ctx);
 			break;
+		case "InstantiationExpr": // `Stack[T]{}`, `Pair[K, V](x)`
+		case "IndexExpr":
+			if (node.expr?.kind === "Ident") mangleTypeRef(node.expr, tp, ctx);
+			break;
 		case "Ident":
 			if (ctx.refs.has(`${file}:${node._line}:${node._col}`))
 				mangleIdentRef(node, ctx);
@@ -712,9 +717,11 @@ function buildStdlibPackage(importPath, dir, options) {
 	return pkg;
 }
 
-// After type-checking, turns `cmp.Compare` / `cmp.Ordered` references into
-// plain identifiers with the mangled name, so the backends (and WASM
-// monomorphisation) see ordinary top-level references.
+// Turns `cmp.Compare` / `cmp.Ordered` references (marked `_stdName` by the
+// checker) into plain identifiers with the mangled name, so WASM
+// monomorphisation sees ordinary top-level references.  Only for ASTs that
+// are not cached: a stdlib package's own parse and the WASM link copy (user
+// ASTs are re-checked on the next build; the JS backend reads `_stdName`).
 function lowerStdlibRefs(node) {
 	if (!node || typeof node !== "object") return;
 	if (Array.isArray(node)) {
@@ -754,6 +761,22 @@ function stdlibJs(pkg, reached) {
 	}).generateAll(programs, { isTest: false });
 }
 
+// The API a wasm package exposes to JS through the facade: exported func and
+// method signatures and exported type declarations.
+function wasmExportedSignatures(units) {
+	const out = [];
+	for (const u of units) {
+		if (u.target !== "wasm" || u.key.startsWith("stdlib:")) continue;
+		for (const d of u.programs.flatMap((p) => p.decls ?? [])) {
+			if (!/^[A-Z]/.test(d.name ?? "")) continue;
+			if (d.kind === "TypeDecl") out.push(d.type);
+			else if (d.kind === "FuncDecl" || d.kind === "MethodDecl")
+				out.push(d.params, d.returnType);
+		}
+	}
+	return out;
+}
+
 // Replaces each marker with the package's reachable code (no line at all when
 // nothing is reachable) and shifts the source-map lines that follow.
 function spliceStdlibJs(merged, options) {
@@ -764,7 +787,7 @@ function spliceStdlibJs(merged, options) {
 		.map((path) => options.stdlibCache.get(path));
 	if (pkgs.length === 0) return;
 	const reached = reachableStdlibDecls(
-		options.jsRootPrograms,
+		[options.jsRootPrograms, wasmExportedSignatures(options.wasmUnits)],
 		pkgs.flatMap((pkg) => pkg.unit.programs),
 	);
 	const out = [];
@@ -802,12 +825,12 @@ function emitStdlibPackage(
 ) {
 	for (const dep of pkg.deps)
 		emitStdlibPackage(dep, importerTarget, preambles, bundledDirs, options);
-	if (importerTarget !== "wasm") {
-		const key = `${pkg.unit.key}:js`;
-		if (!bundledDirs.has(key)) {
-			bundledDirs.add(key);
-			preambles.push(stdlibMarker(pkg.importPath));
-		}
+	// Every importer leaves a JS marker: the facade of a wasm package may
+	// expose a stdlib type; unreachable code splices to nothing.
+	const key = `${pkg.unit.key}:js`;
+	if (!bundledDirs.has(key)) {
+		bundledDirs.add(key);
+		preambles.push(stdlibMarker(pkg.importPath));
 	}
 	if (importerTarget !== "js") registerWasmUnit(options, pkg.unit);
 }
@@ -834,6 +857,17 @@ function bindStdlibImport(checker, p, spec, pkg) {
 		return;
 	}
 	const name = alias ?? pkg.pkgName;
+	// Emitter-backed members are emitted by package name, so an overlaid
+	// package cannot be renamed (aliases of emitter packages never worked).
+	if (pkg.overlay && name !== pkg.pkgName) {
+		errAtImport(
+			checker,
+			p,
+			spec,
+			`import alias for '${path}' is not supported`,
+		);
+		return;
+	}
 	checker.globals.define(name, { ...pkg.namespace, name });
 	for (const [k, t] of pkg.exportedTypes) {
 		const dot = k.indexOf(".");
@@ -1149,7 +1183,6 @@ export function compileSingleFile(inputPath, options = {}) {
 	if (errors.length > 0) {
 		throw new Error(errors.map((e) => e.message).join("\n"));
 	}
-	lowerStdlibRefs(ast);
 	for (const w of checker.warnings) log.warn(w);
 
 	if (pkgTarget === "wasm" || pkgTarget === "both") {
@@ -1309,7 +1342,6 @@ export function compileFiles(files, options = {}) {
 		const msgs = errors.map((e) => e.message).join("\n");
 		throw new Error(msgs);
 	}
-	lowerStdlibRefs(programs);
 	for (const w of checker.warnings) log.warn(w);
 
 	// ── 4. Code generation ────────────────────────────────────────
