@@ -583,7 +583,7 @@ Conventions used in the tasks:
   - Test: `complex.test.js` — equality, a `map[complex128]int`, `fmt.Sprintf("%v %g", c, c)`.
   - Done when: both tests pass as parity tests.
 
-- [ ] **Task 0.5a — Language-support rows for the new parity items**
+- [x] **Task 0.5a — Language-support rows for the new parity items**
   - Files: `docs/language-support.md`
   - Do: add rows (with a one-line fixture snippet in a `<!-- fixture: … -->` comment the generator can read) for: per-iteration loop variables, `min`/`max`/`clear`, `[]rune` conversions, constant expressions, generic type aliases, method expressions on pointer receivers, runtime panics (index, nil map, nil deref), `goto` (expected diagnostic). Correct the method-expression row.
   - Test: none (documentation).
