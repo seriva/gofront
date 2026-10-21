@@ -29,6 +29,7 @@ export const TEST_FILES = [
 	"./language/codegen-regressions.test.js",
 	"./language/named-type-methods.test.js",
 	"./language/structs.test.js",
+	"./language/parity-matrix.test.js",
 	"./types/errors.test.js",
 	"./types/checks.test.js",
 	"./types/inference.test.js",
@@ -80,6 +81,7 @@ export const TEST_FILES = [
 	"./wasm/simd.test.js",
 	"./wasm/pointers.test.js",
 	"./wasm/range_func.test.js",
+	"./wasm/complex.test.js",
 	"./wasm/stdlib.test.js",
 	"./wasm/golden.test.js",
 ];

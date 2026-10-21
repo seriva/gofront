@@ -20,6 +20,8 @@ import {
 } from "./stdlib/index.js";
 import {
 	isArrayType,
+	isComplex,
+	isComplex64,
 	isPointerToStruct,
 	isSliceType,
 	isStringType,
@@ -1190,6 +1192,22 @@ export class FunctionEmitter {
 			wType.kind === "ref"
 		) {
 			if (
+				(goType && isComplex(goType)) ||
+				wType.typeName === "$complex64" ||
+				wType.typeName === "$complex128"
+			) {
+				const is64 = isComplex64(goType) || wType.typeName === "$complex64";
+				const info = this.mod.getComplexType(is64 ? "complex64" : "complex128");
+				this.pushInstruction({ op: `${info.elemWType}.const`, value: 0.0 });
+				this.pushInstruction({ op: `${info.elemWType}.const`, value: 0.0 });
+				this.pushInstruction({
+					op: "struct.new",
+					typeIndex: info.typeIndex,
+					typeName: info.name,
+				});
+				return;
+			}
+			if (
 				goType &&
 				goType.kind !== "pointer" &&
 				isStructType(goType, this.mod.checker)
@@ -1216,7 +1234,10 @@ export class FunctionEmitter {
 				const elemType = goType.elem;
 				const arrInfo = this.mod.getArrayType(elemType);
 				const size = this._getArraySize(goType);
-				if (isStructType(elemType, this.mod.checker, this.mod)) {
+				if (
+					isStructType(elemType, this.mod.checker, this.mod) ||
+					isComplex(elemType)
+				) {
 					for (let i = 0; i < size; i++) {
 						this.emitZeroValue(elemType, arrInfo.elemWType);
 					}

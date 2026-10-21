@@ -244,8 +244,11 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
         return typeof __timeFmt === "function" ? __timeFmt(val, "2006-01-02 15:04:05.999999999 -0700 MST") : String(val._d);
       }
       if ("re" in val && "im" in val) {
-        const sign = val.im >= 0 ? "+" : "";
-        return "(" + val.re + sign + val.im + "i)";
+        const isNeg = val.im < 0 || Object.is(val.im, -0);
+        const sign = isNeg ? "" : "+";
+        const imStr = Object.is(val.im, -0) ? "-0" : String(val.im);
+        const reStr = Object.is(val.re, -0) ? "-0" : String(val.re);
+        return "(" + reStr + sign + imStr + "i)";
       }
       if (typeof val.Error === "function") {
         return String(val.Error());
@@ -351,7 +354,16 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
         const isPlus = flags?.includes("+") ?? false;
         return pad(formatV(v, isPlus, true), width, false);
       }
-      case "f": { const n = Number(v), p = prec !== "" ? parseInt(prec) : 6; return pad(n.toFixed(p), width, zero); }
+      case "f": {
+        if (v !== null && typeof v === "object" && "re" in v && "im" in v) {
+          const p = prec !== "" ? parseInt(prec) : 6;
+          const isNeg = v.im < 0 || Object.is(v.im, -0);
+          const sign = isNeg ? "" : "+";
+          return pad("(" + Number(v.re).toFixed(p) + sign + Number(v.im).toFixed(p) + "i)", width, false);
+        }
+        const n = Number(v), p = prec !== "" ? parseInt(prec) : 6;
+        return pad(n.toFixed(p), width, zero);
+      }
       case "t": return pad(String(!!v), width, false);
       case "x": {
         let hex;
@@ -386,8 +398,26 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
       case "o": return pad((typeof v === "bigint" ? BigInt.asUintN(64, v).toString(8) : (Number(v) >>> 0).toString(8)), width, zero);
       case "b": return pad((typeof v === "bigint" ? BigInt.asUintN(64, v).toString(2) : (Number(v) >>> 0).toString(2)), width, zero);
       case "q": return pad('"' + String(v == null ? "" : v).replace(/\\\\/g, "\\\\\\\\").replace(/"/g, '\\\\"') + '"', width, false);
-      case "e": case "E": { const n = Number(v), p = prec !== "" ? parseInt(prec) : 6; return pad(n.toExponential(p), width, zero); }
-      case "g": case "G": { const n = Number(v); return pad(prec !== "" ? n.toPrecision(parseInt(prec)) : String(n), width, zero); }
+      case "e": case "E": {
+        if (v !== null && typeof v === "object" && "re" in v && "im" in v) {
+          const p = prec !== "" ? parseInt(prec) : 6;
+          const isNeg = v.im < 0 || Object.is(v.im, -0);
+          const sign = isNeg ? "" : "+";
+          const fmtE = (n) => (verb === "E" ? Number(n).toExponential(p).toUpperCase() : Number(n).toExponential(p));
+          return pad("(" + fmtE(v.re) + sign + fmtE(v.im) + "i)", width, false);
+        }
+        const n = Number(v), p = prec !== "" ? parseInt(prec) : 6;
+        return pad(verb === "E" ? n.toExponential(p).toUpperCase() : n.toExponential(p), width, zero);
+      }
+      case "g": case "G": {
+        if (v !== null && typeof v === "object" && "re" in v && "im" in v) {
+          const isNeg = v.im < 0 || Object.is(v.im, -0);
+          const sign = isNeg ? "" : "+";
+          const fmtPart = (n) => (Object.is(n, -0) ? "-0" : (prec !== "" ? Number(n).toPrecision(parseInt(prec)) : String(Number(n))));
+          return pad("(" + fmtPart(v.re) + sign + fmtPart(v.im) + "i)", width, false);
+        }
+        const n = Number(v); return pad(prec !== "" ? n.toPrecision(parseInt(prec)) : String(n), width, zero);
+      }
       case "w": return pad(String(v == null ? "<nil>" : typeof v === "object" && v.Error ? v.Error() : v), width, false);
       default: return m;
     }
