@@ -44,7 +44,7 @@ divide-by-zero panics) — see the [hybrid guide](hybrid-wasm.md#strict-numeric-
 | Map keys | Keys are stringified: struct keys collapse to `"[object Object]"`, `NaN` equals itself and `-0` equals `0` | Field-wise struct equality, `NaN != NaN` | JS objects only have string keys. `wasm` packages hash struct keys field-wise and follow Go's float key rules. |
 | `defer` / `recover()` | `try`/`finally` defer stack plus a panic stack; `recover()` only works when called directly by a deferred function; a panic inside a deferred function replaces the in-flight one | Same | Matches Go for the common cases; panic *values* are surfaced as `Error.message` strings. |
 | Integer arithmetic | IEEE 754 float64 semantics; `a + b` never wraps | Wraps at type width | All JS numbers are float64. Conversions do truncate: `uint8(300) == 44`, `int8(200) == -56`. |
-| Integer precision | Safe up to 2⁵³ | Full width per type (`int64` = 64 bits) | JS `number` limitation. |
+| Integer precision | Safe up to 2⁵³ | Full width per type (`int64` = 64 bits) | JS `number` limitation. A constant outside ±2⁵³ compiles to the nearest `Number` with a `constant … exceeds JS Number precision` warning. |
 | `cap()` | Always equals `len()` | May exceed `len()` | JS arrays have no separate capacity. |
 | Fixed-size arrays (`[n]T`) | Compile-time enforcement (bounds, `append` rejected, size matching); copied on assignment; plain JS arrays at runtime | Fixed at compile time, value-type copy semantics | Runtime bounds enforcement adds overhead; compile-time checks catch most errors. |
 | `nil` | Maps to `null`; `== nil` also matches `undefined` | Typed nil (distinct per type) | JS has no typed nil concept; JS interop values are often `undefined`. |

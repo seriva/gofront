@@ -5,6 +5,7 @@ import {
 	nodeWritesVar,
 	rootIdentName,
 } from "../../lower/index.js";
+import { constIntValue } from "../../typechecker/const-fold.js";
 import {
 	BROWSER_GLOBALS,
 	compositeLitIndices,
@@ -358,13 +359,60 @@ const BUILTIN_GEN = {
 		s.useHelper("error");
 		return `__error(${s.genExpr(e.args[0])})`;
 	},
-	min: (s, e) => `Math.min(${e.args.map((a) => s.genExpr(a)).join(", ")})`,
-	max: (s, e) => `Math.max(${e.args.map((a) => s.genExpr(a)).join(", ")})`,
+	min: (s, e) => genMinMax(s, e, "min", "<"),
+	max: (s, e) => genMinMax(s, e, "max", ">"),
 	clear: (s, e) => s._genBuiltinClear(e),
 	complex: (s, e) =>
 		`{ re: ${s.genExpr(e.args[0])}, im: ${s.genExpr(e.args[1])} }`,
 	real: (s, e) => `(${s.genExpr(e.args[0])}).re`,
 	imag: (s, e) => `(${s.genExpr(e.args[0])}).im`,
+};
+
+// Math.min/max coerce strings to NaN, so string operands fold with `<`/`>`.
+// A type parameter may be a string or a number: pick the form at run time
+// (Math.min/max keeps NaN propagation and -0 for floats).
+function genMinMax(s, e, fn, cmp) {
+	const args = e.args.map((a) => s.genExpr(a));
+	const fold = (xs) => `${xs}.reduce((a, b) => (b ${cmp} a ? b : a))`;
+	if (args.length === 1) return args[0];
+	if (e._type?.kind === "typeParam")
+		return `((...v) => (typeof v[0] === "string" ? ${fold("v")} : Math.${fn}(...v)))(${args.join(", ")})`;
+	if (!s._isStringExprType(e._type)) return `Math.${fn}(${args.join(", ")})`;
+	return fold(`[${args.join(", ")}]`);
+}
+
+// Expression kinds whose folded constant value (`_const`, attached by the
+// checker — see typechecker/const-fold.js) is emitted as a literal.  Literals
+// and constant names already emit their value.
+const FOLDED_CONST_KINDS = new Set([
+	"UnaryExpr",
+	"BinaryExpr",
+	"ParenExpr",
+	"CallExpr",
+	"TypeConversion",
+]);
+
+const JS_SAFE_INT = 2n ** 53n;
+
+// `-1.0` already emits its exact value; keep it as written.
+const isSignedLit = (e) =>
+	e.kind === "UnaryExpr" &&
+	(e.op === "-" || e.op === "+") &&
+	e.operand?.kind === "BasicLit";
+
+// Negative literals are parenthesised so they splice safely into operators.
+const signed = (n, text) => (n < 0 || Object.is(n, -0) ? `(${text})` : text);
+
+// JS literal per folded constant kind; null when JS cannot represent it.
+const CONST_LITS = {
+	STRING: (v) => JSON.stringify(v),
+	BOOL: (v) => (v ? "true" : "false"),
+	FLOAT: (v) =>
+		Number.isFinite(v) ? signed(v, Object.is(v, -0) ? "-0" : String(v)) : null,
+	INT: (v) => {
+		const n = Number(v);
+		return Number.isFinite(n) ? signed(n, BigInt(n).toString()) : null;
+	},
 };
 
 // Method-name dispatch for genExpr — string values add no static call edges.
@@ -409,6 +457,8 @@ export const expressionGenMethods = {
 				expr._ifaceBoxing = false;
 			}
 		}
+		const folded = this._genFoldedConst(expr);
+		if (folded !== null) return folded;
 		switch (expr.kind) {
 			case "BasicLit":
 				if (expr.litKind === "STRING") return JSON.stringify(expr.value);
@@ -430,6 +480,32 @@ export const expressionGenMethods = {
 				throw new Error(`CodeGen: unhandled expression kind '${expr.kind}'`);
 			}
 		}
+	},
+
+	// The literal for a folded constant expression (`1 << 40` →
+	// `1099511627776`), or null.  Integers outside ±2⁵³ emit the nearest
+	// Number and a precision warning.
+	_genFoldedConst(expr) {
+		const val = expr._const;
+		if (!val) return null;
+		// Constant names emit themselves, but an integer use of one still warns
+		// (an integer constant declared in this package warned at its declaration).
+		if (expr.kind === "Ident" || expr.kind === "SelectorExpr") {
+			const declared = expr.kind === "Ident" && val.k === "INT";
+			if (expr._intConst && !declared) this._warnConstPrecision(val, expr);
+			return null;
+		}
+		if (!FOLDED_CONST_KINDS.has(expr.kind) || isSignedLit(expr)) return null;
+		if (val.k === "INT" || expr._intConst) this._warnConstPrecision(val, expr);
+		return CONST_LITS[val.k]?.(val.v) ?? null;
+	},
+
+	// Warns when an integer constant outside ±2⁵³ has no exact Number.
+	_warnConstPrecision(val, expr) {
+		const i = constIntValue(val);
+		if (i === null || (i <= JS_SAFE_INT && i >= -JS_SAFE_INT)) return;
+		if (BigInt(Number(i)) !== i)
+			this._warn(`constant ${i} exceeds JS Number precision`, expr);
 	},
 
 	_isNamedBoxKind(expr) {

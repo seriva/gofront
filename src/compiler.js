@@ -745,6 +745,11 @@ function lowerStdlibRefs(node) {
 // emitted (see lower/reachability.js).  Importers leave a marker line.
 const STDLIB_MARKER_RE = /^\/\*__GOFRONT_STDLIB:([^*]*)\*\/$/;
 
+// Prints non-fatal diagnostics (e.g. JS Number precision of a constant).
+function logWarnings(warnings) {
+	for (const w of warnings) log.warn(w);
+}
+
 function stdlibMarker(importPath) {
 	return `/*__GOFRONT_STDLIB:${importPath}*/`;
 }
@@ -1080,6 +1085,7 @@ function resolveImports(
 				if (alias === ".") {
 					checker.addDefinitions(dep.exportedTypes, dep.exportedSymbols, {
 						external: false,
+						consts: dep.exportedConsts,
 					});
 					continue;
 				}
@@ -1206,6 +1212,7 @@ export function compileSingleFile(inputPath, options = {}) {
 	});
 	const mainJs =
 		pkgTarget === "wasm" ? wasmMarker(checker.pkgName) : cg.generate(ast);
+	logWarnings(cg.warnings);
 
 	const mainChunk = {
 		js: mainJs,
@@ -1368,6 +1375,7 @@ export function compileFiles(files, options = {}) {
 			: codegen.generateAll(programs, {
 					isTest: options.isTest ?? false,
 				});
+	logWarnings(codegen.warnings);
 
 	const mainChunk = {
 		js: mainJs,

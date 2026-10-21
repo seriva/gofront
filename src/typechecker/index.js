@@ -11,6 +11,7 @@
 //   assignability.js  — assertAssignable, binaryResultType, implements
 
 import { assignabilityMethods } from "./assignability.js";
+import { constantCheckMethods } from "./constants.js";
 import { expressionCheckMethods } from "./expressions.js";
 import { resolveMethods } from "./resolve.js";
 import { statementCheckMethods } from "./statements.js";
@@ -63,6 +64,7 @@ export class TypeChecker {
 		this._deferCount = 0; // tracks defer usage in current function body
 		this._imports = []; // tracked imports for unused-import detection
 		this._constExprs = new Map(); // name -> AST initializer expr
+		this._importedConsts = new Map(); // dot-imported const name -> value
 		this._externalNames = new Set(); // package-scope names from .d.ts / npm definitions
 		this._setupGlobals();
 		// Register error as a named type (interface)
@@ -76,7 +78,9 @@ export class TypeChecker {
 	// `external` marks values as real JS names (.d.ts / npm definitions) that
 	// must not be renamed; dot-imported GoFront packages pass false so their
 	// browser-global-named members get the same `$` renaming as local ones.
-	addDefinitions(types, values, { external = true } = {}) {
+	// `consts` (dot-imported GoFront packages) maps constant names to their
+	// folded values.
+	addDefinitions(types, values, { external = true, consts = null } = {}) {
 		for (const [name, type] of types) {
 			this.types.set(name, type);
 		}
@@ -84,14 +88,19 @@ export class TypeChecker {
 			this.globals.define(name, type);
 			if (external) this._externalNames.add(name);
 		}
+		for (const [name, v] of consts ?? []) {
+			if (!v || !values.has(name)) continue;
+			this.globals._consts.add(name);
+			this._importedConsts.set(name, v);
+		}
 	}
 
 	// Add an imported GoFront package as a qualified namespace.
 	// e.g. addPackageNamespace('utils', symbolsMap, typesMap)
 	// lets callers type-check `utils.Foo` via SelectorExpr.
 	// `target` is the imported package's compile target ("js"/"wasm"/"both").
-	// `consts` maps the package's constant names to their integer value (or
-	// null when not an integer the folder knows).
+	// `consts` maps the package's constant names to their folded value (see
+	// typechecker/const-fold.js), or null when the folder cannot evaluate one.
 	addPackageNamespace(pkgName, symbols, types, target = null, consts = null) {
 		const members = {};
 		for (const [name, type] of symbols) members[name] = type;
@@ -146,8 +155,8 @@ export class TypeChecker {
 	getExportedConsts() {
 		const out = new Map();
 		for (const name of this.globals._consts) {
-			const expr = this.globals.lookupConstExpr(name);
-			out.set(name, expr ? this._constIntValue(expr, this.globals) : null);
+			if (!this.globals.lookupConstExpr(name)) continue;
+			out.set(name, this._constValue({ kind: "Ident", name }, this.globals));
 		}
 		return out;
 	}
@@ -968,8 +977,15 @@ export class TypeChecker {
 				for (let i = 0; i < spec.names.length; i++) {
 					const vt = valTypesFlat[i] ?? ANY;
 					const varType = type ?? defaultType(vt) ?? ANY;
+					if (!type && spec.names.length === spec.value.length)
+						this._checkConstDefault(vt, spec.value[i], "variable declaration");
 					if (type)
-						this.assertAssignable(type, vt, spec.value[i] ?? spec.value[0]);
+						this.assertAssignable(
+							type,
+							vt,
+							spec.value[i] ?? spec.value[0],
+							"variable declaration",
+						);
 					scope.defineLocal(spec.names[i], varType);
 				}
 			} else {
@@ -990,6 +1006,13 @@ export class TypeChecker {
 			for (let i = 0; i < spec.names.length; i++) {
 				const name = spec.names[i];
 				const expr = spec.value?.[i] ?? spec.value?.[0] ?? null;
+				if (spec.type && expr)
+					this._checkConstOverflow(
+						type,
+						valTypes[i] ?? valTypes[0],
+						expr,
+						"constant declaration",
+					);
 				scope.defineConst(name, type, expr);
 			}
 		}
@@ -1003,3 +1026,4 @@ Object.assign(TypeChecker.prototype, expressionCheckMethods);
 Object.assign(TypeChecker.prototype, terminationMethods);
 Object.assign(TypeChecker.prototype, resolveMethods);
 Object.assign(TypeChecker.prototype, assignabilityMethods);
+Object.assign(TypeChecker.prototype, constantCheckMethods);

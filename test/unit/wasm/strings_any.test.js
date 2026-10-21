@@ -1050,3 +1050,43 @@ func Main() string {
 	assertEqual(wasmRes, "{A:{P:0x1} B:{P:0x2}}");
 	assertEqual(wasmRes, jsRes);
 });
+
+section("WASM []rune conversions (Task 0.12)");
+
+test("[]rune(s) decodes code points; string(r[i]) and string(r) round-trip", () => {
+	const src = `
+package main
+
+func Main() {
+    r := []rune("héllo")
+    println(len(r), r[1], string(r[1]))
+    println(string(r) == "héllo", string(r))
+    e := []rune("")
+    println(len(e), string(e) == "")
+    w := []rune("a😀b")
+    println(len(w), w[1], string(w[1:]))
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.output, "5 233 é\ntrue héllo\n0 true\n3 128512 😀b");
+});
+
+test("[]rune slices support append, index writes, range and slicing", () => {
+	const src = `
+package main
+
+func Main() {
+    r := []rune("héllo")
+    r = append(r, 'x')
+    r[0] = 'H'
+    println(len(r), string(r))
+    n := 0
+    for _, c := range r[1:3] {
+        n += int(c)
+    }
+    println(n, string(r[:2]))
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.output, "6 Héllox\n341 Hé");
+});

@@ -659,27 +659,29 @@ Conventions used in the tasks:
 
 ### Phase 0.6: WASM builtins, conversions & constant folding
 
-- [ ] **Task 0.11 — `min`/`max` builtins in WASM**
+- [x] **Task 0.11 — `min`/`max` builtins in WASM**
   - Files: `src/backend/wasm/emit-builtins.js`
   - Do: integers via `select` on `lt_s`/`lt_u`; floats via `f32.min`/`f64.min` and `max`; strings via the existing compare import; variadic forms fold left; a single argument returns itself.
   - Test: `test/unit/wasm/scalars.test.js` — the builtin edge cases in [Edge Cases](#edge-cases) as parity tests.
   - Done when: `Unresolved identifier: min` is gone and all cases pass.
 
-- [ ] **Task 0.12 — `[]rune` conversions in WASM**
+- [x] **Task 0.12 — `[]rune` conversions in WASM**
   - Files: `src/backend/wasm/emit-exprs.js` (conversion), `src/backend/wasm/types.js`
   - Do: `[]rune(s)` produces a `(ref null $array_i32)` built from code points; `string(r)` and `string(r[i])` accept it; `len`, `append`, slicing work on it.
   - Test: `test/unit/wasm/strings_any.test.js` — the `[]rune` edge cases as parity tests.
   - Done when: the `local.tee expected (ref null 21)` module is valid and outputs match JS.
 
-- [ ] **Task 0.13a — Shared constant folder**
+- [x] **Task 0.13a — Shared constant folder**
   - Files: move `src/backend/wasm/const-fold.js` to `src/lower/const-fold.js`; `src/backend/wasm/*` imports updated; `src/typechecker/expressions.js` (constant typing)
+  - Landed as `src/typechecker/const-fold.js` (evaluator mixin in `src/typechecker/constants.js`): the checker sits below `lower/` in the Sentrux layer order and may not import it, and a `typechecker → lower` edge fails the coupling gate.
   - Do: a backend-independent evaluator for untyped constant expressions using `BigInt` for integers and `Number` for floats, covering `+ - * / % << >> & | ^ &^`, unary `- ^ !`, comparisons, and conversions. The checker attaches the folded value to the AST node. Typed constant overflow (`int32(1 << 40)`, `var x int8 = 200`) is a compile error with Go's `overflows` wording.
   - Test: new `test/unit/language/constants.test.js` — folded values for the constant edge cases; the two overflow diagnostics; WASM golden output unchanged (`test/unit/wasm/golden.test.js`).
   - Done when: the WASM backend uses the moved folder with no output change and the checker reports overflow.
   - Also (from the Phase 0.5 review): the checker's interim `_constIntValue` folder (32-bit bitwise ops, no unsigned `^` above 32 bits) is replaced by the shared folder. Keyed array literal keys that it cannot fold today (`len("abc")`, dot-imported constants) must resolve to their index instead of falling back to positional, and `a[^uint8(0)]` must give the same result in JS as in WASM.
 
-- [ ] **Task 0.13b — JS backend emits folded constants**
+- [x] **Task 0.13b — JS backend emits folded constants**
   - Files: `src/backend/js/expressions.js`
+  - Landed with the precision warning collected by `CodeGen` (`warnings`, printed by `src/compiler.js`) and folding applied to operator, paren, call and conversion nodes (literals and constant names already emit their value). The `a[^uint8(0)]` parity test from Task 0.13a's review item lands here: it needs the JS backend to emit the folded `255`.
   - Do: when a node carries a folded constant, emit the literal (`1099511627776`, not `1 << 40`). Values outside ±2⁵³ in `js` packages emit the nearest `Number` and a compile warning `constant … exceeds JS Number precision`; in `both` packages the same rule applies to the JS copy.
   - Test: `constants.test.js` — parity tests for `1 << 40`, `1 << 62`, `math.MaxInt64 / 2`; the warning text for `1<<63 + 5`.
   - Done when: `float64(x * 1000)` with `x = 1 << 40` gives `1099511627776000` on both backends.
