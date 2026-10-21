@@ -982,6 +982,14 @@ export class FunctionEmitter {
 				typeIndex: structInfo.typeIndex,
 				fieldIndex: i,
 			});
+			// Array fields are values: copy them with the struct.
+			const f = structInfo.fields[i];
+			if (
+				f.goType &&
+				f.goType.kind !== "pointer" &&
+				isArrayType(f.goType, this.mod.checker)
+			)
+				this.emitCopyArray(f.goType);
 		}
 		this.pushInstruction({
 			op: "struct.new",
@@ -990,10 +998,96 @@ export class FunctionEmitter {
 		this.releaseTemp(tmp, baseWType);
 	}
 
-	// Go copies structs on assignment.  After `node` has been emitted (value on
-	// the stack), clone it unless it is already a fresh temporary
-	// (composite literal or `*p` deref) or not a value struct at all.
-	_emitCopyIfValueStruct(node, goType, wType) {
+	// Copies the fixed-size array on top of the stack into a fresh array.
+	// Elements that are themselves arrays or value structs are copied deeply.
+	// A null source (an array slot that was never written, e.g. an element of
+	// `make([][2]int, n)`) yields the zero array, so every copy is non-null.
+	emitCopyArray(goType) {
+		const elemType = this._getArrayElemType(goType);
+		const arrInfo = this.mod.getArrayType(elemType);
+		const arrWType = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: arrInfo.typeIndex,
+		};
+		const src = this.acquireTemp(arrWType);
+		const dst = this.acquireTemp(arrWType);
+		this.pushInstruction({ op: "local.tee", index: src });
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction({ op: "if", blockType: arrWType });
+		this.emitZeroValue(goType, arrWType);
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "local.get", index: src });
+		this.pushInstruction("array.len");
+		this.pushInstruction({
+			op: "array.new_default",
+			typeIndex: arrInfo.typeIndex,
+		});
+		this.pushInstruction({ op: "local.set", index: dst });
+		const elemIsArray =
+			elemType?.kind !== "pointer" && isArrayType(elemType, this.mod.checker);
+		const elemStruct =
+			!elemIsArray &&
+			isStructType(elemType, this.mod.checker, this.mod) &&
+			!isPointerToStruct(elemType, this.mod.checker, this.mod)
+				? this.mod.getStructType(elemType?.name)
+				: null;
+		if (elemIsArray || elemStruct) {
+			const i = this.acquireTemp("i32");
+			this.pushInstruction({ op: "i32.const", value: 0 });
+			this.pushInstruction({ op: "local.set", index: i });
+			this.pushInstruction({ op: "block", blockType: "void" });
+			this.pushInstruction({ op: "loop", blockType: "void" });
+			this.pushInstruction({ op: "local.get", index: i });
+			this.pushInstruction({ op: "local.get", index: dst });
+			this.pushInstruction("array.len");
+			this.pushInstruction("i32.ge_u");
+			this.pushInstruction({ op: "br_if", depth: 1 });
+			this.pushInstruction({ op: "local.get", index: dst });
+			this.pushInstruction({ op: "local.get", index: i });
+			this.pushInstruction({ op: "local.get", index: src });
+			this.pushInstruction({ op: "local.get", index: i });
+			this.pushInstruction({ op: "array.get", typeIndex: arrInfo.typeIndex });
+			if (elemIsArray) this.emitCopyArray(elemType);
+			else this.emitCloneStruct(elemStruct, arrInfo.elemWType);
+			this.pushInstruction({ op: "array.set", typeIndex: arrInfo.typeIndex });
+			this.pushInstruction({ op: "local.get", index: i });
+			this.pushInstruction({ op: "i32.const", value: 1 });
+			this.pushInstruction("i32.add");
+			this.pushInstruction({ op: "local.set", index: i });
+			this.pushInstruction({ op: "br", depth: 0 });
+			this.pushInstruction("end");
+			this.pushInstruction("end");
+			this.releaseTemp(i, "i32");
+		} else {
+			this.pushInstruction({ op: "local.get", index: dst });
+			this.pushInstruction({ op: "i32.const", value: 0 });
+			this.pushInstruction({ op: "local.get", index: src });
+			this.pushInstruction({ op: "i32.const", value: 0 });
+			this.pushInstruction({ op: "local.get", index: src });
+			this.pushInstruction("array.len");
+			this.pushInstruction({
+				op: "array.copy",
+				typeIndex: arrInfo.typeIndex,
+			});
+		}
+		this.pushInstruction({ op: "local.get", index: dst });
+		this.pushInstruction("end");
+		this.releaseTemp(dst, arrWType);
+		this.releaseTemp(src, arrWType);
+	}
+
+	// Go copies structs and arrays on assignment.  After `node` has been
+	// emitted (value on the stack), copy it unless it is already a fresh
+	// temporary (composite literal, call result, or a struct `*p` deref) or not
+	// a value type at all.
+	_emitCopyIfValue(node, goType, wType) {
+		if (goType?.kind !== "pointer" && isArrayType(goType, this.mod.checker)) {
+			if (node.kind === "CompositeLit") return;
+			if (node.kind === "CallExpr" && !node._isTypeConversion) return;
+			this.emitCopyArray(goType);
+			return;
+		}
 		if (
 			!isStructType(goType, this.mod.checker, this.mod) ||
 			isPointerToStruct(goType, this.mod.checker, this.mod)
@@ -1236,7 +1330,9 @@ export class FunctionEmitter {
 				const size = this._getArraySize(goType);
 				if (
 					isStructType(elemType, this.mod.checker, this.mod) ||
-					isComplex(elemType)
+					isComplex(elemType) ||
+					(elemType?.kind !== "pointer" &&
+						isArrayType(elemType, this.mod.checker))
 				) {
 					for (let i = 0; i < size; i++) {
 						this.emitZeroValue(elemType, arrInfo.elemWType);
