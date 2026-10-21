@@ -855,12 +855,12 @@ export const expressionGenMethods = {
 			.join(", ");
 	},
 
-	// A callee copies its mutated array parameters on entry, except when the
-	// parameter is a type parameter (generics are erased in JS) or part of a
-	// variadic rest array.  For those the caller passes array arguments as
-	// copies.
+	// A callee copies its mutated array and struct parameters on entry, except
+	// when the parameter is a type parameter (generics are erased in JS) or
+	// part of a variadic rest array.  For those the caller passes aggregate
+	// (array and struct) arguments as copies.
 	_callerCopiesArg(expr, i) {
-		if (this._aggregateBase(expr.args[i]._type)?.kind !== "array") return false;
+		if (!this._aggregateBase(expr.args[i]._type)) return false;
 		let ft = expr.func?._type ?? expr.func?.expr?._type;
 		if (ft?.kind === "generic") ft = ft.underlying;
 		if (ft?.kind !== "func") return false;

@@ -737,3 +737,42 @@ func main() {
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "true 1");
 });
+
+section("Struct arguments to generic and variadic parameters are copies");
+
+parity(
+	"struct passed to a generic parameter is a copy",
+	`	a := P{1}
+	s := Push(nil, a)
+	a.X = 9
+	return s[0].X`,
+	1,
+	"type P struct {\n\tX int\n}\n\nfunc Push[T any](s []T, v T) []T { return append(s, v) }",
+);
+
+parity(
+	"callee mutating a variadic struct argument leaves the caller unchanged",
+	`	a := P{1}
+	f(a)
+	return a.X`,
+	1,
+	"type P struct {\n\tX int\n}\n\nfunc f(xs ...P) { xs[0].X = 9 }",
+);
+
+parity(
+	"variadic struct with an array field is copied deeply",
+	`	a := Q{[2]int{1, 2}}
+	f(a, a)
+	return a.A[0]*10 + a.A[1]`,
+	12,
+	"type Q struct {\n\tA [2]int\n}\n\nfunc f(xs ...Q) {\n\txs[0].A[0] = 9\n\txs[1].A[1] = 9\n}",
+);
+
+parity(
+	"f(s...) still passes the caller's slice",
+	`	s := []P{{1}}
+	f(s...)
+	return s[0].X`,
+	9,
+	"type P struct {\n\tX int\n}\n\nfunc f(xs ...P) { xs[0].X = 9 }",
+);
