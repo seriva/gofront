@@ -884,7 +884,7 @@ export const expressionGenMethods = {
 	},
 
 	_genFuncLit(expr) {
-		const params = expr.params.map((p) => p.name).join(", ");
+		const params = this._paramNames(expr.params).join(", ");
 		const asyncPrefix = expr.async ? "async " : "";
 		const saved = this.out;
 		const prevBoxed = this._boxedVars;
