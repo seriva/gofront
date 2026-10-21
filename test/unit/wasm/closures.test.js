@@ -517,3 +517,53 @@ func Main() int {
 		`unexpected struct.new in Main:\n${main}`,
 	);
 });
+
+test("a hot uncaptured loop does not allocate when another loop captures the same name", () => {
+	const src = `
+package main
+
+func Main() int {
+	s := 0
+	for i := 0; i < 1000; i++ {
+		s += i * 2
+	}
+	f := func() int { return 0 }
+	for i := 0; i < 2; i++ {
+		f = func() int { return i }
+	}
+	return s + f()
+}
+`;
+	const res = compileHybrid(src, { emitWat: true });
+	assertEqual(res.run("Main").jsRes, 999001);
+	const start = res.wat.indexOf('(export "Main")');
+	const main = res.wat.slice(start, res.wat.indexOf("\n  (func", start));
+	const at = main.indexOf("loop");
+	const firstLoop = main.slice(at, main.indexOf("br 0", at));
+	assert(
+		!firstLoop.includes("struct.new"),
+		`first loop allocates:\n${firstLoop}`,
+	);
+});
+
+test("captured struct and array loop variables get a per-iteration copy", () => {
+	const src = `
+package main
+
+type Pt struct{ X int }
+
+func Main() int {
+	var fs []func() int
+	for p := (Pt{0}); p.X < 3; p.X++ {
+		fs = append(fs, func() int { return p.X })
+	}
+	var gs []func() int
+	for a := [1]int{0}; a[0] < 3; a[0]++ {
+		gs = append(gs, func() int { return a[0] })
+	}
+	return (fs[0]()*100+fs[1]()*10+fs[2]())*1000 + gs[0]()*100 + gs[1]()*10 + gs[2]()
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.jsRes, 12012);
+});
