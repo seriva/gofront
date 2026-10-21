@@ -1078,7 +1078,9 @@ function resolveImports(
 
 				if (alias === "_") continue;
 				if (alias === ".") {
-					checker.addDefinitions(dep.exportedTypes, dep.exportedSymbols);
+					checker.addDefinitions(dep.exportedTypes, dep.exportedSymbols, {
+						external: false,
+					});
 					continue;
 				}
 				const nameUsed = alias ?? dep.pkgName;

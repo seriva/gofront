@@ -6,6 +6,7 @@
 import {
 	assert,
 	assertEqual,
+	assertErrorContains,
 	compile,
 	compileHybrid,
 	compileHybridProject,
@@ -74,10 +75,7 @@ func Array() int { return 1 }
 func Array() int { return 2 }
 `;
 	const { errors } = compile(src);
-	assert(
-		errors.some((e) => e.message.includes("Array redeclared in this block")),
-		"duplicate package declarations must still be rejected",
-	);
+	assertErrorContains(errors, "Array redeclared in this block");
 });
 
 test("generated JS keeps reaching the real globals a package shadows", () => {
@@ -132,6 +130,28 @@ func Main() int {
 			{ exports: ["Main"] },
 		);
 		assertEqual(mod.Main(), 237);
+	});
+}
+
+for (const target of ["js", "wasm"]) {
+	test(`dot-importing a ${target} package that shadows browser globals`, async () => {
+		const { mod } = await compileHybridProject(
+			{
+				"util/u.go": `//gofront:target ${target}
+package util
+
+func Array() int { return 7 }
+`,
+				"main.go": `package main
+
+import . "./util"
+
+func Main() int { return Array() }
+`,
+			},
+			{ exports: ["Main"] },
+		);
+		assertEqual(mod.Main(), 7);
 	});
 }
 

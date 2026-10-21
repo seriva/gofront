@@ -63,7 +63,7 @@ export class TypeChecker {
 		this._deferCount = 0; // tracks defer usage in current function body
 		this._imports = []; // tracked imports for unused-import detection
 		this._constExprs = new Map(); // name -> AST initializer expr
-		this._externalNames = new Set(); // package-scope names from .d.ts / dot imports
+		this._externalNames = new Set(); // package-scope names from .d.ts / npm definitions
 		this._setupGlobals();
 		// Register error as a named type (interface)
 		this.types.set("error", ERROR);
@@ -73,13 +73,16 @@ export class TypeChecker {
 		setupGlobals(this.universe, this.types);
 	}
 
-	addDefinitions(types, values) {
+	// `external` marks values as real JS names (.d.ts / npm definitions) that
+	// must not be renamed; dot-imported GoFront packages pass false so their
+	// browser-global-named members get the same `$` renaming as local ones.
+	addDefinitions(types, values, { external = true } = {}) {
 		for (const [name, type] of types) {
 			this.types.set(name, type);
 		}
 		for (const [name, type] of values) {
 			this.globals.define(name, type);
-			this._externalNames.add(name);
+			if (external) this._externalNames.add(name);
 		}
 	}
 
