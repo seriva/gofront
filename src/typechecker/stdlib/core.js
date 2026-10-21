@@ -9,8 +9,6 @@ import {
 	FLOAT32,
 	FLOAT64,
 	INT,
-	INT8,
-	INT16,
 	INT32,
 	INT64,
 	STRING,
