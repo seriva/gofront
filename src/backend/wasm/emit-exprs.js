@@ -1,6 +1,7 @@
 // src/backend/wasm/emit-exprs.js
 // FunctionEmitter mixin: expression emission (literals, operators, indexing, conversions).
 
+import { compositeLitIndices } from "../../typechecker/types.js";
 import { foldConstExpr } from "./const-fold.js";
 import {
 	getMapKeyValTypes,
@@ -368,14 +369,23 @@ export class ExprsEmitter {
 		if (isArrayType(litType, this.mod.checker)) {
 			const elemType = litType.elem;
 			const arrInfo = this.mod.getArrayType(elemType);
-			const count = lit.elems?.length ?? 0;
+			const elems = lit.elems ?? [];
+			const indices = compositeLitIndices(elems);
+			const count = Math.max(-1, ...indices) + 1;
 			const targetSize = this._getArraySize(litType, count);
-			for (const elem of lit.elems ?? []) {
+			// Keyed elements (`[5]int{2: 7}`) go to their index; every other
+			// slot is the element zero value.
+			const slots = new Array(targetSize).fill(null);
+			elems.forEach((e, i) => {
+				slots[indices[i]] = e.kind === "KeyValueExpr" ? e.value : e;
+			});
+			for (const elem of slots) {
+				if (!elem) {
+					this.emitZeroValue(elemType, arrInfo.elemWType);
+					continue;
+				}
 				this.emitExpr(elem, arrInfo.elemWType);
 				this._emitCopyIfValue(elem, elem._type, arrInfo.elemWType);
-			}
-			for (let i = count; i < targetSize; i++) {
-				this.emitZeroValue(elemType, arrInfo.elemWType);
 			}
 			this.pushInstruction({
 				op: "array.new_fixed",

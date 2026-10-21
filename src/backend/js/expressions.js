@@ -7,6 +7,7 @@ import {
 } from "../../lower/index.js";
 import {
 	BROWSER_GLOBALS,
+	compositeLitIndices,
 	ERROR,
 	isAny,
 	isComplex,
@@ -1374,6 +1375,13 @@ export const expressionGenMethods = {
 	},
 
 	_genFallbackCompositeLit(expr) {
+		const at = this._litArrayType(expr);
+		if (at) {
+			// A named array type without methods (`type V [3]int; V{1}`).
+			const elems = this._genArrayLitElems(at, expr);
+			const ctor = typedArrayConstructorForElem(at.elem);
+			return ctor ? `new ${ctor}([${elems}])` : `[${elems}]`;
+		}
 		if (expr.elems.length > 0 && expr.elems[0]?.kind === "KeyValueExpr") {
 			const fields = expr.elems
 				.map(
@@ -1472,10 +1480,39 @@ export const expressionGenMethods = {
 		return inst;
 	},
 
-	_genSliceOrArrayLit(t, expr) {
-		const elems = expr.elems
+	// The array type of a literal (through named types), or null.
+	_litArrayType(expr) {
+		let t = expr._type;
+		while (t?.kind === "named") t = t.underlying;
+		return t?.kind === "array" && typeof t.size === "number" ? t : null;
+	},
+
+	// Elements of a literal of array type `at`, placed at their (keyed)
+	// indices, with every other slot the element zero value: `[3]int{1}` is
+	// `[1, 0, 0]` and `[5]int{2: 7}` is `[0, 0, 7, 0, 0]`, as in Go.
+	_genArrayLitElems(at, expr) {
+		const values = new Array(at.size).fill(null);
+		const indices = compositeLitIndices(expr.elems);
+		expr.elems.forEach((e, i) => {
+			values[indices[i]] = this.genValueExpr(
+				e.kind === "KeyValueExpr" ? e.value : e,
+			);
+		});
+		for (let i = 0; i < values.length; i++)
+			values[i] ??= this.zeroValueForType(at.elem);
+		return values.join(", ");
+	},
+
+	_genLitElems(expr) {
+		const at = this._litArrayType(expr);
+		if (at) return this._genArrayLitElems(at, expr);
+		return expr.elems
 			.map((e) => this.genValueExpr(e.kind === "KeyValueExpr" ? e.value : e))
 			.join(", ");
+	},
+
+	_genSliceOrArrayLit(t, expr) {
+		const elems = this._genLitElems(expr);
 		const elemNode =
 			t.kind === "SliceType" || t.kind === "ArrayType" ? t.elem : null;
 		const elemResolved =
@@ -1542,7 +1579,7 @@ export const expressionGenMethods = {
 				.join(", ");
 			return `{ ${fields} }`;
 		}
-		const elems = expr.elems.map((e) => this.genValueExpr(e)).join(", ");
+		const elems = this._genLitElems(expr);
 		if (isTypedArraySlice(expr._type)) {
 			const typedCtor = typedArrayConstructorForElem(expr._type.elem);
 			if (typedCtor) return `new ${typedCtor}([${elems}])`;
@@ -1556,11 +1593,8 @@ export const expressionGenMethods = {
 		if (u?.kind === "map") {
 			return `{ ${this._genMapLitEntries(expr.elems)} }`;
 		}
-		// Default: slice
-		const elems = expr.elems
-			.map((e) => this.genValueExpr(e.kind === "KeyValueExpr" ? e.value : e))
-			.join(", ");
-		return `[${elems}]`;
+		// Default: slice or array
+		return `[${this._genLitElems(expr)}]`;
 	},
 
 	// ── Helpers ───────────────────────────────────────────────────
