@@ -86,6 +86,7 @@ These were confirmed while writing this plan. The Phase 1 audit produces the com
 | Type switch on `any` holding a float | `switch any(3.0).(type)` matches `case int` in JS and `case float64` in WASM. Same root cause as the documented `any == any` row: JS has one number type. | Probe |
 | Stdlib signatures | `strconv.ParseInt` is declared as returning `(int, error)`; Go returns `(int64, error)`. A manifest that compares member **names** does not find this. | [`core.js`](../../src/typechecker/stdlib/core.js) `strconv.ParseInt` |
 | `goto` | `Undefined: 'goto'`. Not mentioned in any plan; [`go-compatibility.md`](../go-compatibility.md) says "Not planned". | Probe |
+| Generic calls inside generic bodies in WASM | `Compare[T]` calling `isNaN[T]` reports `Undefined: 'isNaN'`: monomorphisation dropped the inferred type arguments of a generic call when it copied a generic body. **Fixed in Phase 0.4.** | Found while landing `cmp` (Task 0.6a) |
 | `fmt` | `Sprint`, `Sprintln`, `Append*`, `Stringer` missing | [`src/typechecker/stdlib/core.js`](../../src/typechecker/stdlib/core.js) `fmt` namespace |
 | `sort` | `Sort`, `Stable`, `Interface`, `Reverse`, `IsSorted`, `Search{Ints,Strings,Float64s}`, `{Int,String,Float64}Slice` missing | `sort` namespace |
 | `unicode/utf8` | Byte-slice API missing: `EncodeRune`, `AppendRune`, `DecodeRune`, `DecodeLastRune`, `RuneCount`, `FullRune` | `utf8` namespace |
