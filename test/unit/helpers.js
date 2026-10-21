@@ -111,11 +111,12 @@ export function compile(
 	if (errors.length > 0) return { js: null, errors };
 
 	const isStrict = Boolean(strict || pkgTarget === "both");
-	const js = new CodeGen(checker, jsImports, new Set(), {
+	const cg = new CodeGen(checker, jsImports, new Set(), {
 		target: pkgTarget,
 		strict: isStrict,
-	}).generate(ast);
-	return { js, errors: [] };
+	});
+	const js = cg.generate(ast);
+	return { js, errors: [], warnings: [...checker.warnings, ...cg.warnings] };
 }
 
 export function compileFile(path) {
