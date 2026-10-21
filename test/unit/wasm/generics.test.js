@@ -4,6 +4,7 @@
 import {
 	assertEqual,
 	compileHybrid,
+	compileHybridProject,
 	compileWasm,
 	runWasm,
 	section,
@@ -563,4 +564,56 @@ func Main() int {
 	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
 	assertEqual(wasmRes, 12n);
 	assertEqual(Number(jsRes), 12);
+});
+
+section("WASM Generics — Generic Calls Inside Generic Bodies");
+
+test("generic function calling another generic with its type parameter", () => {
+	const src = `
+package main
+
+type Number interface { ~int | ~float64 }
+
+func less[T Number](a, b T) bool { return a < b }
+
+func Max[T Number](a, b T) T {
+	if less(a, b) {
+		return b
+	}
+	return a
+}
+
+func Main() float64 {
+	return float64(Max(3, 7)) + Max(2.5, 1.5)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, 9.5);
+	assertEqual(jsRes, wasmRes);
+});
+
+test("linked wasm program with generics and a cross-package call", async () => {
+	const res = await compileHybridProject({
+		"util/util.go": `//gofront:target both
+package util
+
+func Two() int { return 2 }
+
+func Id[T any](x T) T { return x }
+`,
+		"lib/lib.go": `//gofront:target wasm
+package lib
+
+import "../util"
+
+func Run() int { return util.Two() + util.Id(40) }
+`,
+		"main.go": `package main
+
+import "./lib"
+
+func main() { println(lib.Run()) }
+`,
+	});
+	assertEqual(res.lines.join("\n"), "42");
 });

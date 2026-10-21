@@ -625,6 +625,14 @@ export const WASM_STDLIB_MEMBERS = new Map([
 
 export const VALID_TARGETS = new Set(["js", "wasm", "both"]);
 
+// Backend-provided implementations for body-less Go-source stdlib functions
+// marked `//gofront:intrinsic <name>`: name -> required signature.  New
+// intrinsics need a plan change.
+export const INTRINSICS = new Map([
+	// JS: setTimeout(fire, ns/1e6); WASM: returns at once (cooperative model).
+	["deadline_timer", "func(int64, func() void) void"],
+]);
+
 // ── Static operator sets (module-level for reuse) ────────────
 export const CMP_OPS = new Set(["==", "!=", "<", ">", "<=", ">="]);
 export const LOG_OPS = new Set(["&&", "||"]);
@@ -867,10 +875,12 @@ export function typeStr(t) {
 		}
 		case "tuple":
 			return `(${t.types.map(typeStr).join(", ")})`;
-		case "named":
+		case "named": {
+			const name = displayTypeName(t.name);
 			return t.typeArgs && t.typeArgs.length > 0
-				? `${t.name}[${t.typeArgs.map(typeStr).join(", ")}]`
-				: t.name;
+				? `${name}[${t.typeArgs.map(typeStr).join(", ")}]`
+				: name;
+		}
 		case "pointer":
 			return `*${typeStr(t.base)}`;
 		case "typeParam":
@@ -880,6 +890,17 @@ export function typeStr(t) {
 		default:
 			return "?";
 	}
+}
+
+// Go-source stdlib names are mangled to `Name$$path` (`List$$container$list`);
+// diagnostics show them qualified, as Go does (`list.List`).
+export function displayTypeName(name) {
+	const i = typeof name === "string" ? name.indexOf("$$") : -1;
+	if (i < 0) return name;
+	return `${name
+		.slice(i + 2)
+		.split("$")
+		.at(-1)}.${name.slice(0, i)}`;
 }
 
 // ── Iterator function detection (Go 1.23 range-over-func) ───

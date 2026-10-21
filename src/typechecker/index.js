@@ -20,6 +20,7 @@ import {
 	ANY,
 	defaultType,
 	ERROR,
+	INTRINSICS,
 	isVoid,
 	Scope,
 	TAINTED_ANY,
@@ -786,7 +787,24 @@ export class TypeChecker {
 		this.globals.define(decl.name, funcType);
 	}
 
+	_checkIntrinsic(decl) {
+		const want = INTRINSICS.get(decl.intrinsic);
+		if (!want) return this.err(`unknown intrinsic '${decl.intrinsic}'`, decl);
+		if (!decl._bodyless)
+			return this.err(
+				`intrinsic '${decl.intrinsic}' must not have a body`,
+				decl,
+			);
+		const got = typeStr(this.globals.symbols.get(decl.name));
+		if (got !== want)
+			this.err(
+				`intrinsic '${decl.intrinsic}' must have type ${want}, not ${got}`,
+				decl,
+			);
+	}
+
 	checkFuncDecl(decl, outer) {
+		if (decl.intrinsic) this._checkIntrinsic(decl);
 		if (
 			(this.target === "wasm" || this.target === "both") &&
 			(decl.async || decl.isAsync)
@@ -800,7 +818,7 @@ export class TypeChecker {
 		const inner = new Scope(outer);
 		this._injectTypeParams(decl, inner, outer);
 		for (const p of decl.params) {
-			inner.define(p.name, this.resolveTypeNode(p.type, inner));
+			inner.define(p.name, this._paramType(p, inner));
 		}
 		const returnType = this._setupFuncReturnType(decl, inner, outer);
 		const savedSharedAlloc = this._sharedAllocOk;
@@ -834,11 +852,18 @@ export class TypeChecker {
 			decl.recvPointer ? { kind: "pointer", base: recvType } : recvType,
 		);
 		for (const p of decl.params) {
-			inner.define(p.name, this.resolveTypeNode(p.type, inner));
+			inner.define(p.name, this._paramType(p, inner));
 		}
 		const returnType = this._setupFuncReturnType(decl, inner, inner);
 		this._runFuncBody(decl, inner, returnType);
 		this._checkMissingReturn(decl, returnType, "method");
+	}
+
+	// A variadic parameter `xs ...T` is a `[]T` inside the body (the signature
+	// keeps the element type plus the `variadic` flag).
+	_paramType(p, scope) {
+		const t = this.resolveTypeNode(p.type, scope);
+		return p.variadic ? { kind: "slice", elem: t } : t;
 	}
 
 	_injectTypeParams(decl, inner, outer) {

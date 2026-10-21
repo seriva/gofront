@@ -700,6 +700,8 @@ export const expressionGenMethods = {
 	},
 
 	_genSelectorExpr(expr) {
+		// Go-source stdlib member: bundled under its mangled top-level name.
+		if (expr._stdName) return expr._stdName;
 		if (expr._isMethodExpr) {
 			const namedExpr = this._namedMethodExprInfo(expr);
 			if (namedExpr) return `${namedExpr.cls}.$${expr.field}`;
@@ -884,7 +886,7 @@ export const expressionGenMethods = {
 	},
 
 	_genFuncLit(expr) {
-		const params = expr.params.map((p) => p.name).join(", ");
+		const params = this._paramNames(expr.params).join(", ");
 		const asyncPrefix = expr.async ? "async " : "";
 		const saved = this.out;
 		const prevBoxed = this._boxedVars;
@@ -1529,6 +1531,7 @@ export const expressionGenMethods = {
 
 	getTypeName(typeNode) {
 		if (!typeNode) return null;
+		if (typeNode._stdName) return typeNode._stdName;
 		if (typeNode.kind === "TypeName") return this._dequalify(typeNode.name);
 		if (typeNode.kind === "GenericTypeName") return typeNode.name;
 		if (typeNode.kind === "Ident") return typeNode.name;
