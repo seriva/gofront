@@ -62,5 +62,34 @@ divide-by-zero panics) — see the [hybrid guide](hybrid-wasm.md#strict-numeric-
 | `time.Time` boundary crossing | Round-trips across the JS↔WASM boundary via Unix milliseconds (matching JS `Date`); sub-millisecond nanoseconds are truncated | Nanosecond precision everywhere | The JS shim operates on millisecond timestamps. Times created in WASM retain nanoseconds internally until crossing the boundary. |
 | Exported / unexported | Enforced for GoFront packages; external `.d.ts`/npm namespaces are exempt | Access enforced uniformly | External JS APIs use lowercase names by convention. |
 
+### Names that shadow JS globals
+
+As in Go, a declaration may shadow a predeclared name: a package-level `func Array()`,
+`var document int` or `const Object = 2`, a parameter, or a local `console := 1` are all
+accepted in `js`, `wasm` and `both` packages, and Go code referring to the name gets the
+declaration.
+
+The JS bundle is one flat module scope, and generated code relies on the real globals
+(`Array.from`, `Object.keys`, `Math.trunc`, …). So when a function, variable, constant,
+parameter or named result has the same name as a browser global GoFront predeclares
+(`console`, `document`, `window`, `Array`, `Object`, `Math`, `JSON`, `Date`, `Error`,
+`String`, `Number`, `Promise`, `fetch`, `setTimeout`, …), it is emitted with a `$` suffix:
+
+| Go source | JS output / WASM boundary facade |
+|---|---|
+| `func Array() int` | `function Array$()`; the facade of a `wasm`/`both` package exports `Array$` |
+| `var document int` | `let document$` |
+| `func f(console int)` | `function f(console$)` |
+
+Go code never sees the suffix: references from the same package, from importing packages
+(`util.Array()`) and through dot imports (`import . "./util"` then `Array()`) all use the
+renamed binding. Builtins that are not JS globals (`len`, `append`, …) and type names are
+not renamed.
+
+The suffix is visible to hand-written JavaScript. Code that reaches into the bundle or the
+WASM facade by name (an `import { Array$ } from "./app.js"`, a `<script>` calling an
+exported function, a test harness) must use `Array$`, not `Array`; `Array` there is still
+the browser's global. Pick a different Go name for exported functions you call from JS.
+
 ---
 
