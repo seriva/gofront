@@ -577,7 +577,7 @@ Conventions used in the tasks:
   - Test: new `test/unit/wasm/complex.test.js` — parity tests for arithmetic, `complex64` rounding, division by `0+0i` yielding `Inf`/`NaN` without a panic.
   - Done when: `Unresolved identifier: complex` is gone and the parity tests pass.
 
-- [ ] **Task 0.4b — Complex numbers: equality, map keys, `fmt`**
+- [x] **Task 0.4b — Complex numbers: equality, map keys, `fmt`**
   - Files: `src/backend/wasm/emit-exprs.js` (`==`), `src/backend/wasm/emit-maps.js` (hash/eq), `src/backend/wasm/emit-stdlib.js` (`%v`/`%g`)
   - Do: `==`/`!=` compare both parts with float rules (`NaN` parts never equal); map keys hash both parts under the existing float-key rules; `%v` prints `(1+2i)` as Go does.
   - Test: `complex.test.js` — equality, a `map[complex128]int`, `fmt.Sprintf("%v %g", c, c)`.

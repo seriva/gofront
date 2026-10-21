@@ -4,12 +4,34 @@
 
 import {
 	isArrayType,
+	isComplex,
 	isInterfaceType,
 	isPointerToStruct,
 	isSigned,
 	isStringType,
 	toWasmType,
 } from "./types.js";
+
+function _complexTypeFor(mod, t) {
+	if (!isComplex(t)) return null;
+	const is64 = t?.name === "complex64" || t?.underlying?.name === "complex64";
+	return mod.getComplexType(is64 ? "complex64" : "complex128");
+}
+
+function _resolveStructType(mod, goType) {
+	let t = goType;
+	while (t && (t.kind === "TypeName" || t.kind === "Ident")) {
+		const info = mod.getStructType(t.name);
+		if (info) return info;
+		const resolved = mod.checker?.types?.get(t.name);
+		if (!resolved || resolved === t) break;
+		t = resolved;
+	}
+	if (t?.kind === "named") return mod.getStructType(t.name) ?? null;
+	if ((t?.kind === "struct" || t?.kind === "StructType") && t.name)
+		return mod.getStructType(t.name) ?? null;
+	return null;
+}
 
 export class MapsEmitter {
 	emitMapHelper(fn) {
@@ -49,20 +71,11 @@ export class MapsEmitter {
 		}
 	}
 
-	// Struct info for a Go type used as a map key (named struct or alias).
+	// Struct info for a Go type used as a map key (named struct, alias, or complex).
 	_structInfoForGoType(goType) {
-		let t = goType;
-		while (t && (t.kind === "TypeName" || t.kind === "Ident")) {
-			const info = this.mod.getStructType(t.name);
-			if (info) return info;
-			const resolved = this.mod.checker?.types?.get(t.name);
-			if (!resolved || resolved === t) break;
-			t = resolved;
-		}
-		if (t?.kind === "named") return this.mod.getStructType(t.name) ?? null;
-		if ((t?.kind === "struct" || t?.kind === "StructType") && t.name)
-			return this.mod.getStructType(t.name) ?? null;
-		return null;
+		return (
+			_complexTypeFor(this.mod, goType) ?? _resolveStructType(this.mod, goType)
+		);
 	}
 
 	_unsupportedMapKey(_keyGoType) {
