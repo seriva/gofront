@@ -147,7 +147,46 @@ export class FunctionEmitter {
 		return true;
 	}
 
+	_collectLabelTargets(body) {
+		const targets = new Map();
+		let nextTag = 3;
+		const scan = (node) => {
+			if (!node || typeof node !== "object") return;
+			if (Array.isArray(node)) {
+				for (const item of node) scan(item);
+				return;
+			}
+			if (node.kind === "LabeledStmt" && node.label) {
+				const bTag = nextTag++;
+				const cTag = nextTag++;
+				targets.set(bTag, { tag: bTag, label: node.label, role: "break" });
+				targets.set(cTag, { tag: cTag, label: node.label, role: "continue" });
+			} else if (node.kind === "ForStmt" && node.label) {
+				const bTag = nextTag++;
+				const cTag = nextTag++;
+				targets.set(bTag, { tag: bTag, label: node.label, role: "break" });
+				targets.set(cTag, { tag: cTag, label: node.label, role: "continue" });
+			}
+			for (const k of Object.keys(node)) {
+				if (k.startsWith("_")) continue;
+				scan(node[k]);
+			}
+		};
+		scan(body);
+		return targets;
+	}
+
+	_findLabelTarget(label, role) {
+		for (const target of this.rootFuncDecl?._labelTargets?.values() ?? []) {
+			if (target.label === label && target.role === role) return target;
+		}
+		return null;
+	}
+
 	emitFunctionBody(body) {
+		if (!this.funcDecl._isClosure && !this.funcDecl._labelTargets) {
+			this.funcDecl._labelTargets = this._collectLabelTargets(body);
+		}
 		if (
 			this.funcDecl._isClosure &&
 			!this.funcDecl._isTrampoline &&
@@ -211,13 +250,6 @@ export class FunctionEmitter {
 			const varName = isBlank ? `__ret_blank$${i}` : r.name;
 			const wType = this.toWasmType(r.type);
 			const localIdx = this.allocLocal(varName, wType, r.type, isBlank);
-			this.namedReturnVars.push({
-				name: varName,
-				localIdx,
-				type: wType,
-				goType: r.type,
-				isBlank,
-			});
 			this.emitZeroValue(r.type, wType);
 			const localInfo = this.locals.get(varName);
 			if (localInfo?.isBoxed) {
@@ -227,6 +259,13 @@ export class FunctionEmitter {
 				});
 			}
 			this.pushInstruction({ op: "local.set", index: localIdx });
+			this.namedReturnVars.push({
+				name: varName,
+				localIdx,
+				type: wType,
+				goType: r.type,
+				isBlank,
+			});
 		}
 		return true;
 	}
