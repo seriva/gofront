@@ -134,7 +134,8 @@ export class StmtsEmitter {
 		const idx = this.allocLocal(l.name, wType, r._type);
 		const localInfo = this.locals.get(l.name);
 		this.emitExpr(r, wType);
-		this._emitCopyIfValue(r, r._type, wType);
+		if (!this._arrayCopyElidable(r, l.name))
+			this._emitCopyIfValue(r, r._type, wType);
 		if (localInfo?.isBoxed) {
 			this.pushInstruction({
 				op: "struct.new",
@@ -288,7 +289,8 @@ export class StmtsEmitter {
 					return;
 				}
 				this.emitExpr(r, localInfo.type);
-				this._emitCopyIfValue(r, localInfo.goType, localInfo.type);
+				if (!this._arrayCopyElidable(r, l.name))
+					this._emitCopyIfValue(r, localInfo.goType, localInfo.type);
 				this.pushInstruction({ op: "local.set", index: localInfo.index });
 			} else {
 				const globalInfo = this.mod.resolveGlobal(l.name);
@@ -2190,7 +2192,7 @@ export class StmtsEmitter {
 			this.emitExpr(iterExpr, arrWType);
 			// Go ranges over a copy of an array (the range expression is
 			// evaluated once), so body writes to the array do not reach `v`.
-			if (hasVal && !isPtrToArr)
+			if (hasVal && !isPtrToArr && !this._arrayCopyElidable(iterExpr, null))
 				this._emitCopyIfValue(iterExpr, iterType, arrWType);
 			if (hasVal) {
 				this.pushInstruction({ op: "local.set", index: arrTmp });

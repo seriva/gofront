@@ -24,6 +24,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **WASM accessor refs for fields and elements**: Added subtype `$acc_T` implementing scalar pointers to struct fields (`&s.F`) and slice/array elements (`&xs[i]`) with getter/setter helpers; updated dereference assignment (`*p = v`) to dispatch between box and accessor refs.
 - **WASM pointer type hierarchy**: Emitted abstract supertype `$ptr_T` with box struct `$box_T` as a subtype (`sub $ptr_T`) for scalar pointer types.
 
+### Changed
+- **Clone elision for arrays in WASM (Task 0.8b)**: `b := a` (and `b = a`) between two local arrays, and `for _, v := range a` over a local array, share the array instead of copying it when the ownership analysis proves that neither variable is ever written in place, sliced, address-taken or used as a method receiver in the function (closures included). A copy always stays when the source is mutated after it.
+
 ### Fixed
 - **Array value semantics in WASM (Task 0.8a)**: Fixed-size arrays aliased instead of copying in `wasm`/`both` packages, so `b := a; b[0] = 9` changed `a` and a callee could mutate its caller's array. Arrays now copy (deeply for nested arrays and arrays of structs) on assignment, parameter passing, return, struct-field copies and literals, stores into slices, maps and interfaces, loads from them, `append` and `copy`. Zero values of nested arrays and `make([][N]T, n)` elements are real zero arrays instead of null. On both backends, `for i, v := range arr` now ranges over a copy and a map range value of array type is a copy; `copy()` between slices of arrays copies the elements in JS.
 - **Generic calls inside generic bodies in WASM**: A generic function calling another generic function with its own type parameter (`Max[T]` calling `less[T]`) failed with `Undefined: 'less'`, because monomorphisation dropped the inferred type arguments when it copied the body.
