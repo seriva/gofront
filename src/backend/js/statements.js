@@ -810,8 +810,22 @@ export const statementGenMethods = {
 				: `[${lhs.map((n) => (n === "_" ? "_$" : n)).join(", ")}]`;
 		const kw = init.kind === "AssignStmt" ? "" : "let ";
 		this.line(`for (${kw}${binding} of ${iterExpr}) {`);
-		this.indented(() => this.genBlock(body));
+		this.indented(() => {
+			this._cloneMapRangeValue(init, iterType, lhs[1]);
+			this.genBlock(body);
+		});
 		this.line("}");
+	},
+
+	// A map range value of array type is a copy: clone it when the body may
+	// mutate it (it otherwise aliases the stored array).
+	_cloneMapRangeValue(init, iterType, name) {
+		if (!name || name === "_" || !this._isMapRangeType(iterType)) return;
+		const base = iterType?.kind === "named" ? iterType.underlying : iterType;
+		const valType = base?.value ?? base?.elem;
+		if (this._aggregateBase(valType)?.kind !== "array") return;
+		if (init.kind !== "AssignStmt" && !this._fnMutates(name)) return;
+		this.line(`${name} = ${this._cloneJs(valType, name)};`);
 	},
 
 	genRangeFor(stmt) {
@@ -839,7 +853,18 @@ export const statementGenMethods = {
 			return;
 		}
 
-		this._genSliceRangeFor(stmt, iteree, init.kind === "AssignStmt");
+		// Go ranges over a copy of an array: the range expression is evaluated
+		// once, so writes to the array inside the body do not reach `v`.
+		const valNode = init.lhs[1];
+		const rangesArrayValue =
+			valNode &&
+			valNode.name !== "_" &&
+			this._aggregateBase(iterType)?.kind === "array";
+		this._genSliceRangeFor(
+			stmt,
+			rangesArrayValue ? this._cloneJs(iterType, iteree) : iteree,
+			init.kind === "AssignStmt",
+		);
 	},
 
 	_genRangeIterExpr(iterType, iteree, lhs) {

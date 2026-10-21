@@ -633,7 +633,7 @@ Conventions used in the tasks:
 
 ### Phase 0.5: Array value semantics, universe scope & loop variables
 
-- [ ] **Task 0.8a — Array value semantics in WASM: always copy**
+- [x] **Task 0.8a — Array value semantics in WASM: always copy**
   - Files: `src/backend/wasm/emit-exprs.js`, `src/backend/wasm/emit-stmts.js`, `src/backend/wasm/emit-shared.js` (reuse the value-struct copy helper)
   - Do: insert `array.new` + `array.copy` on assignment, parameter passing, return, struct-field copy, store into slice/map/interface, and load from slice/map/struct field. Nested arrays copy deeply. `range` over an array iterates a copy.
   - Test: new `test/unit/wasm/arrays.test.js` — every array edge case in [Edge Cases](#edge-cases) as parity tests, including the map/slice load cases and `[N]simd.F32x4`.
@@ -1172,6 +1172,7 @@ Each Phase 6 task follows the same Files/Test/Done-when discipline: files are `s
 ### Performance and size
 - Dev-mode `app.wasm` and `app.js` for `example/hybrid` without new imports must be byte-identical in size to v1.7.0. The only exceptions are code affected by the pointer fix (Task 0.1: addresses of scalar fields or elements), the array fix (Task 0.8: array copies that clone elision cannot remove), per-iteration boxes for captured loop variables (Task 0.10), and strict-mode index helpers that elision cannot remove (Task 0.16).
 - The pointer fast path: a micro-benchmark of `*p` on a boxed local (`&x`) must stay within 5% of v1.7.0. Measured on 100M read/write dereference iterations: median 155.66 ms (642.4 Mops/s), within 1.5% of baseline (153.2 ms / 652.7 Mops/s). Hybrid raycast benchmark: 11,840 rays/s (1.35× speedup over JS), 2,688 B alloc/run.
+- Array value semantics (Task 0.8a, copies always inserted, no elision yet), `npm run bench` on the same machine: base `feat/portable-go` hybrid 19,722 rays/s, 85,616 B alloc/run; after 0.8a hybrid 18,727 rays/s (−5.0%), 85,624 B alloc/run; dev `app.wasm` 67.9 KB in both.
 - The WASM JSON benchmark (Task 5.6) is recorded in this document.
 - `npm run bench` must show no regression in the hybrid raycast. Neither the array-copy fix (Task 0.8b) nor the strict-mode runtime checks (Task 0.16b) may slow the scalar raycast by more than 3% each; the analysis is extended until they do not, and the checks are never shipped disabled.
 - `test/e2e/perf/zero-alloc.js` must pass after Tasks 0.5a, 0.5d and 0.7c.

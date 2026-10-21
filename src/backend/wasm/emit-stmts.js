@@ -61,7 +61,7 @@ export class StmtsEmitter {
 				if (values?.[i]) {
 					const r = values[i];
 					this.emitExpr(r, wType);
-					this._emitCopyIfValueStruct(r, rawType, wType);
+					this._emitCopyIfValue(r, rawType, wType);
 					if (localInfo?.isBoxed) {
 						this.pushInstruction({
 							op: "struct.new",
@@ -134,7 +134,7 @@ export class StmtsEmitter {
 		const idx = this.allocLocal(l.name, wType, r._type);
 		const localInfo = this.locals.get(l.name);
 		this.emitExpr(r, wType);
-		this._emitCopyIfValueStruct(r, r._type, wType);
+		this._emitCopyIfValue(r, r._type, wType);
 		if (localInfo?.isBoxed) {
 			this.pushInstruction({
 				op: "struct.new",
@@ -278,6 +278,8 @@ export class StmtsEmitter {
 				if (localInfo.isBoxed) {
 					this.pushInstruction({ op: "local.get", index: localInfo.index });
 					this.emitExpr(r, localInfo.boxInfo.wType);
+					if (isArrayType(localInfo.goType, this.mod.checker))
+						this._emitCopyIfValue(r, localInfo.goType, localInfo.boxInfo.wType);
 					this.pushInstruction({
 						op: "struct.set",
 						typeIndex: localInfo.boxInfo.typeIndex,
@@ -286,13 +288,13 @@ export class StmtsEmitter {
 					return;
 				}
 				this.emitExpr(r, localInfo.type);
-				this._emitCopyIfValueStruct(r, localInfo.goType, localInfo.type);
+				this._emitCopyIfValue(r, localInfo.goType, localInfo.type);
 				this.pushInstruction({ op: "local.set", index: localInfo.index });
 			} else {
 				const globalInfo = this.mod.resolveGlobal(l.name);
 				if (globalInfo) {
 					this.emitExpr(r, globalInfo.type);
-					this._emitCopyIfValueStruct(r, globalInfo.goType, globalInfo.type);
+					this._emitCopyIfValue(r, globalInfo.goType, globalInfo.type);
 					this.pushInstruction({
 						op: "global.set",
 						index: globalInfo.index,
@@ -332,11 +334,7 @@ export class StmtsEmitter {
 				});
 			}
 			this.emitExpr(r, lastStep.field.wType);
-			this._emitCopyIfValueStruct(
-				r,
-				lastStep.field.goType,
-				lastStep.field.wType,
-			);
+			this._emitCopyIfValue(r, lastStep.field.goType, lastStep.field.wType);
 			this.pushInstruction({
 				op: "struct.set",
 				typeIndex: lastStep.structInfo.typeIndex,
@@ -362,7 +360,7 @@ export class StmtsEmitter {
 				this.emitExpr(baseNode, mapInfo.wType);
 				this.emitExpr(l.index, mapInfo.keyWType);
 				this.emitExpr(r, mapInfo.valWType);
-				this._emitCopyIfValueStruct(r, valType, mapInfo.valWType);
+				this._emitCopyIfValue(r, valType, mapInfo.valWType);
 				this.pushInstruction({
 					op: "call",
 					funcIndex: this.mod.resolveFuncIndex(mapInfo.setFuncName),
@@ -392,7 +390,7 @@ export class StmtsEmitter {
 			this._emitElemAddr(baseNode, l.index, sliceInfo, arrInfo);
 
 			this.emitExpr(r, arrInfo.elemWType);
-			this._emitCopyIfValueStruct(r, elemGoType, arrInfo.elemWType);
+			this._emitCopyIfValue(r, elemGoType, arrInfo.elemWType);
 
 			this.pushInstruction({
 				op: "array.set",
@@ -2082,6 +2080,11 @@ export class StmtsEmitter {
 					if (sInfo) {
 						this.emitCloneStruct(sInfo, mapInfo.valWType);
 					}
+				} else if (
+					valType?.kind !== "pointer" &&
+					isArrayType(valType, this.mod.checker)
+				) {
+					this.emitCopyArray(valType);
 				}
 				if (this.resolveLocal(lhs[1].name)) {
 					this.pushInstruction({
@@ -2185,6 +2188,10 @@ export class StmtsEmitter {
 			this.releaseTemp(sliceTmp, sliceWType);
 		} else {
 			this.emitExpr(iterExpr, arrWType);
+			// Go ranges over a copy of an array (the range expression is
+			// evaluated once), so body writes to the array do not reach `v`.
+			if (hasVal && !isPtrToArr)
+				this._emitCopyIfValue(iterExpr, iterType, arrWType);
 			if (hasVal) {
 				this.pushInstruction({ op: "local.set", index: arrTmp });
 				this.pushInstruction({ op: "i32.const", value: 0 });
@@ -2287,6 +2294,11 @@ export class StmtsEmitter {
 				if (sInfo) {
 					this.emitCloneStruct(sInfo, arrInfo.elemWType);
 				}
+			} else if (
+				elemGoType?.kind !== "pointer" &&
+				isArrayType(elemGoType, this.mod.checker)
+			) {
+				this.emitCopyArray(elemGoType);
 			}
 			if (this.resolveLocal(lhs[1].name)) {
 				this.pushInstruction({ op: "local.set", index: valLocalInfo.index });
@@ -2963,7 +2975,7 @@ export class StmtsEmitter {
 				const nr = rootNamed[i];
 				const targetWType = this.toWasmType(nr?.type ?? val._type);
 				this.emitExpr(val, targetWType);
-				this._emitCopyIfValueStruct(val, val._type, targetWType);
+				this._emitCopyIfValue(val, val._type, targetWType);
 				const tmp = this.acquireTemp(targetWType);
 				this.pushInstruction({ op: "local.set", index: tmp });
 				temps.push({ tmp, type: targetWType });
@@ -3021,7 +3033,7 @@ export class StmtsEmitter {
 						const val = values[i];
 						const targetWType = this.returnTypes[i] ?? null;
 						this.emitExpr(val, targetWType);
-						this._emitCopyIfValueStruct(val, val._type, targetWType);
+						this._emitCopyIfValue(val, val._type, targetWType);
 						const tmp = this.acquireTemp(targetWType);
 						this.pushInstruction({ op: "local.set", index: tmp });
 						temps.push({ tmp, type: targetWType });
@@ -3046,7 +3058,7 @@ export class StmtsEmitter {
 						const val = values[i];
 						const targetWType = this.returnTypes[i] ?? null;
 						this.emitExpr(val, targetWType);
-						this._emitCopyIfValueStruct(val, val._type, targetWType);
+						this._emitCopyIfValue(val, val._type, targetWType);
 						this.pushInstruction({
 							op: "local.set",
 							index: this.returnTempLocals[i],
@@ -3081,7 +3093,7 @@ export class StmtsEmitter {
 			const val = values[i];
 			const targetWType = this.returnTypes[i] ?? null;
 			this.emitExpr(val, targetWType);
-			this._emitCopyIfValueStruct(val, val._type, targetWType);
+			this._emitCopyIfValue(val, val._type, targetWType);
 		}
 		this.pushInstruction("return");
 	}
