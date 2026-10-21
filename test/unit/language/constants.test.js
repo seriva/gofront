@@ -327,6 +327,15 @@ func main() {
 	assertErrorContains(viaAny.errors, "as int value in argument (overflows)");
 });
 
+test("shift-assign counts beyond the operand type do not overflow", () => {
+	const { errors } = compile(
+		mainWith(
+			"var x int8 = 1\nx <<= 300\nvar y uint8 = 64\ny >>= 200\nprintln(x, y)",
+		),
+	);
+	assertEqual(errors.length, 0);
+});
+
 test("in-range constants in the same contexts still compile (M2)", () => {
 	const { errors } = compile(
 		mainWith(
