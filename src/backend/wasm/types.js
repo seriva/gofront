@@ -2,9 +2,9 @@
 // Maps GoFront types to WasmGC types and manages type registry.
 
 import { SHARED_KINDS } from "../../typechecker/stdlib/shared.js";
-import { isComplex } from "../../typechecker/types.js";
+import { isComplex, isComplex64 } from "../../typechecker/types.js";
 
-export { isComplex };
+export { isComplex, isComplex64 };
 
 // Name of the runtime's error struct (`errors.New`, `fmt.Errorf`, strconv).
 export const ERROR_STRUCT = "__errorString";

@@ -11,6 +11,7 @@ import {
 	getMapKeyValTypes,
 	isArrayType,
 	isComplex,
+	isComplex64,
 	isFuncType,
 	isInterfaceType,
 	isMapType,
@@ -895,7 +896,7 @@ export class StmtsEmitter {
 				right: r,
 				_type: l._type,
 			};
-			const is64 = l._type?.name === "complex64";
+			const is64 = isComplex64(l._type);
 			const info = this.mod.getComplexType(is64 ? "complex64" : "complex128");
 			const cWType = {
 				kind: "ref",
