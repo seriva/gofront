@@ -671,8 +671,9 @@ Conventions used in the tasks:
   - Test: `test/unit/wasm/strings_any.test.js` — the `[]rune` edge cases as parity tests.
   - Done when: the `local.tee expected (ref null 21)` module is valid and outputs match JS.
 
-- [ ] **Task 0.13a — Shared constant folder**
+- [x] **Task 0.13a — Shared constant folder**
   - Files: move `src/backend/wasm/const-fold.js` to `src/lower/const-fold.js`; `src/backend/wasm/*` imports updated; `src/typechecker/expressions.js` (constant typing)
+  - Landed as `src/typechecker/const-fold.js` (evaluator mixin in `src/typechecker/constants.js`): the checker sits below `lower/` in the Sentrux layer order and may not import it, and a `typechecker → lower` edge fails the coupling gate.
   - Do: a backend-independent evaluator for untyped constant expressions using `BigInt` for integers and `Number` for floats, covering `+ - * / % << >> & | ^ &^`, unary `- ^ !`, comparisons, and conversions. The checker attaches the folded value to the AST node. Typed constant overflow (`int32(1 << 40)`, `var x int8 = 200`) is a compile error with Go's `overflows` wording.
   - Test: new `test/unit/language/constants.test.js` — folded values for the constant edge cases; the two overflow diagnostics; WASM golden output unchanged (`test/unit/wasm/golden.test.js`).
   - Done when: the WASM backend uses the moved folder with no output change and the checker reports overflow.
