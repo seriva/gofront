@@ -399,3 +399,228 @@ func Main() int {
 	assertEqual(res.run("Main").jsRes, 6);
 	assert(!res.wat.includes("array.copy"), "range copy must be elided");
 });
+
+section("WASM Arrays — equality");
+
+parity(
+	"== compares array elements, not identity",
+	`	a := [2]int{1, 2}
+	b := a
+	b[0] = 1
+	if a == b {
+		return 1
+	}
+	return 0`,
+	1,
+);
+
+parity(
+	"!= compares array elements, not identity",
+	`	a := [2]int{1, 2}
+	b := a
+	r := 0
+	if a != b {
+		r += 1
+	}
+	b[1] = 3
+	if a != b {
+		r += 10
+	}
+	return r`,
+	10,
+);
+
+parity(
+	"== on nested string arrays compares element-wise",
+	`	a := [2][2]string{{"a", "b"}, {"c", "d"}}
+	b := a
+	b[0][0] = "a"
+	r := 0
+	if a == b {
+		r += 1
+	}
+	b[1][1] = "x"
+	if a == b {
+		r += 10
+	}
+	return r`,
+	1,
+);
+
+parity(
+	"== on float arrays treats NaN as unequal",
+	`	a := [2]float64{math.NaN(), 1}
+	b := a
+	c := [2]float64{0.5, 1}
+	d := c
+	r := 0
+	if a == b {
+		r += 1
+	}
+	if c == d {
+		r += 10
+	}
+	return r`,
+	10,
+	`import "math"`,
+);
+
+parity(
+	"== on arrays of structs compares fields",
+	`	a := [2]P{{1, 2}, {3, 4}}
+	b := a
+	b[0].X = 1
+	r := 0
+	if a == b {
+		r += 1
+	}
+	b[1].Y = 5
+	if a != b {
+		r += 10
+	}
+	return r`,
+	11,
+	"type P struct {\n\tX int\n\tY float64\n}",
+);
+
+parity(
+	"struct == compares array fields element-wise",
+	`	s := S{[2]int{1, 2}, 3}
+	t := s
+	t.A[0] = 1
+	r := 0
+	if s == t {
+		r += 1
+	}
+	t.A[1] = 7
+	if s != t {
+		r += 10
+	}
+	return r`,
+	11,
+	"type S struct {\n\tA [2]int\n\tN int\n}",
+);
+
+section("WASM Arrays — loads from maps and interfaces copy");
+
+parity(
+	"comma-ok map load copies the array",
+	`	m := map[string][2]int{"a": {1, 2}}
+	v, ok := m["a"]
+	v[0] = 9
+	if !ok {
+		return -1
+	}
+	return m["a"][0]*10 + v[0]`,
+	19,
+);
+
+parity(
+	"comma-ok map load in assign form copies the array",
+	`	m := map[string][2]int{"a": {1, 2}}
+	var v [2]int
+	var ok bool
+	v, ok = m["a"]
+	v[0] = 9
+	if !ok {
+		return -1
+	}
+	return m["a"][0]*10 + v[0]`,
+	19,
+);
+
+parity(
+	"comma-ok type assertion copies the array",
+	`	var x any = [2]int{1, 2}
+	b, _ := x.([2]int)
+	b[0] = 9
+	c := x.([2]int)
+	return c[0]*10 + b[0]`,
+	19,
+);
+
+parity(
+	"type switch binding copies the array",
+	`	var x any = [2]int{1, 2}
+	r := 0
+	switch v := x.(type) {
+	case [2]int:
+		v[0] = 9
+		r = v[0]
+	}
+	c := x.([2]int)
+	return c[0]*10 + r`,
+	19,
+);
+
+section("WASM Arrays — deep copies");
+
+parity(
+	"array of anonymous structs copies the elements",
+	`	a := [2]struct{ X int }{{1}, {2}}
+	b := a
+	b[0].X = 9
+	return a[0].X*10 + b[0].X`,
+	19,
+);
+
+parity(
+	"struct copy clones nested value-struct fields",
+	`	s := S{In{[2]int{1, 2}}}
+	t := s
+	t.In.A[0] = 9
+	return s.In.A[0]*10 + t.In.A[0]`,
+	19,
+	"type In struct {\n\tA [2]int\n}\n\ntype S struct {\n\tIn In\n}",
+);
+
+section("WASM Arrays — JS copies match WASM");
+
+parity(
+	"generic identity returns a copy of an array argument",
+	`	a := [2]int{1, 2}
+	b := id(a)
+	b[0] = 9
+	return a[0]*10 + b[0]`,
+	19,
+	"func id[T any](v T) T { return v }",
+);
+
+parity(
+	"variadic array arguments are copies",
+	`	a := [2]int{1, 2}
+	f(a)
+	return a[0]`,
+	1,
+	"func f(xs ...[2]int) {\n\txs[0][0] = 9\n}",
+);
+
+parity(
+	"append with a spread of arrays copies the elements",
+	`	xs := [][2]int{{1, 2}}
+	var dst [][2]int
+	dst = append(dst, xs...)
+	dst[0][0] = 9
+	return xs[0][0]*10 + dst[0][0]`,
+	19,
+);
+
+parity(
+	"array conversion copies",
+	`	a := [2]int{1, 2}
+	b := [2]int(a)
+	b[0] = 9
+	return a[0]*10 + b[0]`,
+	19,
+);
+
+parity(
+	"map range value with an array field is a copy",
+	`	m := map[int]S{1: {[2]int{1, 2}}}
+	for _, v := range m {
+		v.A[0] = 9
+	}
+	return m[1].A[0]`,
+	1,
+	"type S struct {\n\tA [2]int\n}",
+);

@@ -134,3 +134,56 @@ func Main() int {
 		assertEqual(mod.Main(), 237);
 	});
 }
+
+test("an import alias named after a browser global keeps reaching the package", async () => {
+	const { mod } = await compileHybridProject(
+		{
+			"util/u.go": `//gofront:target both
+package util
+
+func Answer() int { return 42 }
+`,
+			"main.go": `package main
+
+import console "./util"
+
+func Main() int { return console.Answer() }
+`,
+		},
+		{ exports: ["Main"] },
+	);
+	assertEqual(mod.Main(), 42);
+});
+
+test("a package directory named after a browser global keeps reaching the package", async () => {
+	const { mod } = await compileHybridProject(
+		{
+			"document/d.go": `//gofront:target both
+package document
+
+func Answer() int { return 42 }
+`,
+			"main.go": `package main
+
+import "./document"
+
+func Main() int { return document.Answer() }
+`,
+		},
+		{ exports: ["Main"] },
+	);
+	assertEqual(mod.Main(), 42);
+});
+
+test("a := redeclaration of a browser-global name assigns the local", () => {
+	const src = `package main
+
+func Main() int {
+	document := 1
+	x, document := 2, 3
+	return x + document
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.jsRes, 5);
+});

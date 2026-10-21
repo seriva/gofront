@@ -2277,6 +2277,8 @@ export class ExprsEmitter {
 							(f.goType?.kind === "named" ? f.goType.name : null),
 					);
 				this._emitStructEq(sInfo);
+			} else if (this._isValueArray(f.goType)) {
+				this._emitArrayEq(f.goType);
 			} else if (isStringType(f.goType, this.mod.checker)) {
 				const cmpIdx = this.mod.getStringCmpImportIndex("==");
 				this.pushInstruction({ op: "call", funcIndex: cmpIdx });
@@ -2315,7 +2317,90 @@ export class ExprsEmitter {
 		});
 	}
 
+	_isValueArray(goType) {
+		return goType?.kind !== "pointer" && isArrayType(goType, this.mod.checker);
+	}
+
+	// Go array equality: element-wise (arrays are values).  Pops two arrays
+	// and pushes an i32.  A null array (a never-written slot) is the zero
+	// array.
+	_emitArrayEq(goType) {
+		const elemType = this._getArrayElemType(goType);
+		const arrInfo = this.mod.getArrayType(elemType);
+		const arrWType = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: arrInfo.typeIndex,
+		};
+		const bTmp = this.acquireTemp(arrWType);
+		const aTmp = this.acquireTemp(arrWType);
+		for (const tmp of [bTmp, aTmp]) {
+			this.pushInstruction({ op: "local.tee", index: tmp });
+			this.pushInstruction("ref.is_null");
+			this.pushInstruction({ op: "if", blockType: "void" });
+			this.emitZeroValue(goType, arrWType);
+			this.pushInstruction({ op: "local.set", index: tmp });
+			this.pushInstruction("end");
+		}
+		const i = this.acquireTemp("i32");
+		const resTmp = this.acquireTemp("i32");
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction({ op: "local.set", index: resTmp });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: i });
+		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushInstruction({ op: "loop", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: i });
+		this.pushInstruction({ op: "local.get", index: aTmp });
+		this.pushInstruction("array.len");
+		this.pushInstruction("i32.ge_u");
+		this.pushInstruction({ op: "br_if", depth: 1 });
+		for (const tmp of [aTmp, bTmp]) {
+			this.pushInstruction({ op: "local.get", index: tmp });
+			this.pushInstruction({ op: "local.get", index: i });
+			this.pushInstruction({ op: "array.get", typeIndex: arrInfo.typeIndex });
+		}
+		this._emitElemEq(elemType, arrInfo.elemWType);
+		this.pushInstruction("i32.eqz");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: resTmp });
+		this.pushInstruction({ op: "br", depth: 2 });
+		this.pushInstruction("end");
+		this.pushInstruction({ op: "local.get", index: i });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: i });
+		this.pushInstruction({ op: "br", depth: 0 });
+		this.pushInstruction("end");
+		this.pushInstruction("end");
+		this.pushInstruction({ op: "local.get", index: resTmp });
+		this.releaseTemp(resTmp, "i32");
+		this.releaseTemp(i, "i32");
+		this.releaseTemp(aTmp, arrWType);
+		this.releaseTemp(bTmp, arrWType);
+	}
+
+	// Equality of two array elements on the stack -> i32.
+	_emitElemEq(goType, wType) {
+		if (this._isValueArray(goType)) {
+			this._emitArrayEq(goType);
+		} else if (
+			isStructType(goType, this.mod.checker, this.mod) &&
+			!isPointerToStruct(goType, this.mod.checker, this.mod)
+		) {
+			this._emitStructEq(this._resolveStructInfo({ _type: goType }));
+		} else {
+			this.emitBinaryOp("==", wType, goType);
+		}
+	}
+
 	emitBinaryOp(op, wType, goType) {
+		if ((op === "==" || op === "!=") && this._isValueArray(goType)) {
+			this._emitArrayEq(goType);
+			if (op === "!=") this.pushInstruction("i32.eqz");
+			return;
+		}
 		if (isComplex(goType)) {
 			const is64 = isComplex64(goType);
 			const info = this.mod.getComplexType(is64 ? "complex64" : "complex128");

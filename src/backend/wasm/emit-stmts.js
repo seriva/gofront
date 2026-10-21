@@ -1,6 +1,7 @@
 // src/backend/wasm/emit-stmts.js
 // FunctionEmitter mixin: statement emission (decls, assignment, control flow, return).
 
+import { loopVarsCapturedInLoop } from "../../lower/captures.js";
 import {
 	getOrCreateIteratorFuncLit,
 	isIntRangeType,
@@ -617,12 +618,20 @@ export class StmtsEmitter {
 		this.releaseTemp(okTmp, "i32");
 	}
 
+	// Pushes a comma-ok result (map value / asserted value).  An array is a
+	// value: the stored one must not alias the map entry or boxed interface.
+	_emitGetTempValue(tempIdx, goType) {
+		this.pushInstruction({ op: "local.get", index: tempIdx });
+		if (goType?.kind !== "pointer" && isArrayType(goType, this.mod.checker))
+			this.emitCopyArray(goType);
+	}
+
 	_emitStoreLhsFromTemp(lhsNode, tempIdx, wType, goType, isDefine) {
 		if (lhsNode.kind !== "Ident" || lhsNode.name === "_") return;
 		if (isDefine) {
 			const idx = this.allocLocal(lhsNode.name, wType, goType);
 			const local = this.locals.get(lhsNode.name);
-			this.pushInstruction({ op: "local.get", index: tempIdx });
+			this._emitGetTempValue(tempIdx, goType);
 			if (local?.isBoxed) {
 				this.pushInstruction({
 					op: "struct.new",
@@ -636,19 +645,19 @@ export class StmtsEmitter {
 		if (local) {
 			if (local.isBoxed) {
 				this.pushInstruction({ op: "local.get", index: local.index });
-				this.pushInstruction({ op: "local.get", index: tempIdx });
+				this._emitGetTempValue(tempIdx, goType);
 				this.pushInstruction({
 					op: "struct.set",
 					typeIndex: local.boxInfo.typeIndex,
 					fieldIndex: 0,
 				});
 			} else {
-				this.pushInstruction({ op: "local.get", index: tempIdx });
+				this._emitGetTempValue(tempIdx, goType);
 				this.pushInstruction({ op: "local.set", index: local.index });
 			}
 		} else {
 			const global = this.mod.resolveGlobal(lhsNode.name);
-			this.pushInstruction({ op: "local.get", index: tempIdx });
+			this._emitGetTempValue(tempIdx, goType);
 			this.pushInstruction({ op: "global.set", index: global.index });
 		}
 	}
@@ -2521,27 +2530,42 @@ export class StmtsEmitter {
 		}
 	}
 
-	// Go 1.22 per-iteration loop variables: a three-clause `for` variable that
-	// a closure captures lives in a box (uncaptured ones stay plain locals).
-	// Before the post statement, move the current value into a fresh box, so
-	// closures created in this iteration keep their own copy while the post
-	// statement (and the next iteration) works on the new one.
+	// Go 1.22 per-iteration loop variables.  For each three-clause `for`
+	// variable that a closure in this loop captures, give the next iteration a
+	// fresh copy before the post statement: closures created in this
+	// iteration keep their own variable, the post statement (and the next
+	// iteration) work on the new one, which starts from the current value.
+	// A boxed scalar gets a new box; a value struct or array (a ref) is also
+	// cloned.  Uncaptured variables stay plain locals with no allocation.
 	_emitPerIterationBoxes(stmt) {
-		if (stmt.init?.kind !== "DefineStmt") return;
-		for (const l of stmt.init.lhs ?? []) {
-			if (l.kind !== "Ident" || l.name === "_") continue;
-			const info = this.locals.get(l.name);
-			if (!info?.isBoxed) continue;
+		for (const name of loopVarsCapturedInLoop(stmt)) {
+			const info = this.locals.get(name);
+			if (!info) continue;
+			const goType = info.goType;
+			const cloneValue = (wType) => {
+				if (goType?.kind === "pointer") return;
+				if (isArrayType(goType, this.mod.checker)) {
+					this.emitCopyArray(goType);
+				} else if (isStructType(goType, this.mod.checker, this.mod)) {
+					const sInfo = this._resolveStructInfo({ _type: goType });
+					if (sInfo) this.emitCloneStruct(sInfo, wType);
+				}
+			};
 			this.pushInstruction({ op: "local.get", index: info.index });
-			this.pushInstruction({
-				op: "struct.get",
-				typeIndex: info.boxInfo.typeIndex,
-				fieldIndex: 0,
-			});
-			this.pushInstruction({
-				op: "struct.new",
-				typeIndex: info.boxInfo.typeIndex,
-			});
+			if (info.isBoxed) {
+				this.pushInstruction({
+					op: "struct.get",
+					typeIndex: info.boxInfo.typeIndex,
+					fieldIndex: 0,
+				});
+				cloneValue(info.boxInfo.wType);
+				this.pushInstruction({
+					op: "struct.new",
+					typeIndex: info.boxInfo.typeIndex,
+				});
+			} else {
+				cloneValue(info.type);
+			}
 			this.pushInstruction({ op: "local.set", index: info.index });
 		}
 	}
@@ -2809,6 +2833,12 @@ export class StmtsEmitter {
 				if (types.length === 1) {
 					this.pushInstruction({ op: "local.get", index: tswTmp });
 					this._emitTypeCast(targetGoType, targetWType);
+					// The bound array is a copy of the boxed value.
+					if (
+						targetGoType?.kind !== "pointer" &&
+						isArrayType(targetGoType, this.mod.checker)
+					)
+						this.emitCopyArray(targetGoType);
 				} else {
 					this.pushInstruction({ op: "local.get", index: tswTmp });
 				}
