@@ -269,3 +269,59 @@ test("an unknown intrinsic name is rejected", () => {
 		},
 	);
 });
+
+section("Go-source stdlib: reachability");
+
+// Compiles the same project with and without `import _ "cmp"` in its wasm
+// package and returns both builds.
+function buildWithAndWithout(importLine) {
+	const project = (imp) => ({
+		"lib/lib.go": `//gofront:target wasm
+package lib
+
+${imp}
+
+func Run() int { return 1 }
+`,
+		"main.go": `package main
+
+${imp}
+import "./lib"
+
+func main() { println(lib.Run()) }
+`,
+	});
+	const build = (imp) =>
+		withTempDir(project(imp), (dir) => {
+			const res = compileDir(dir);
+			return { js: res.js, wasm: res.wasm };
+		});
+	return { with: build(importLine), without: build("") };
+}
+
+test("an imported but unused Go-source package adds 0 bytes", () => {
+	const r = buildWithAndWithout(`import _ "cmp"`);
+	assertEqual(r.with.js.length, r.without.js.length);
+	assertEqual(r.with.js, r.without.js);
+	assertEqual(r.with.wasm.length, r.without.wasm.length);
+	assert(
+		Buffer.from(r.with.wasm).equals(Buffer.from(r.without.wasm)),
+		"dev app.wasm must be byte-identical",
+	);
+});
+
+test("only reachable Go-source declarations are emitted", async () => {
+	const res = await compileHybridProject({
+		"main.go": `package main
+
+import "cmp"
+
+func main() { println(cmp.Less(1, 2)) }
+`,
+	});
+	assertEqual(res.lines.join("\n"), "true");
+	assert(res.js.includes("Less$$cmp"), "Less must be emitted");
+	assert(res.js.includes("isNaNValue$$cmp"), "its helper must be emitted");
+	assert(!res.js.includes("Compare$$cmp"), "Compare is unreachable");
+	assert(!res.js.includes("Or$$cmp"), "Or is unreachable");
+});

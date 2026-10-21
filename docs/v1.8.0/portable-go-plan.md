@@ -625,7 +625,7 @@ Conventions used in the tasks:
   - Test: `stdlib-go.test.js` — a temp Go-source package calling the intrinsic compiles on both targets; an unknown intrinsic name is rejected.
   - Done when: `context` (Task 4.3b) can be written without browser APIs.
 
-- [ ] **Task 0.7 — Reachability-based emission for Go-source packages**
+- [x] **Task 0.7 — Reachability-based emission for Go-source packages**
   - Files: `src/lower/index.js` (or a new `src/lower/reachability.js`), `src/backend/js/index.js`, `src/backend/wasm/emit.js`
   - Do: starting from user exports, `init`, and `main`, mark reachable functions, methods (by name on reachable types) and package variables in Go-source packages; emit only those, in JS output and in dev-mode WASM. Emitter-backed packages are unaffected.
   - Test: `stdlib-go.test.js` — a program importing `cmp` but using nothing adds 0 bytes to `app.js` and to dev `app.wasm` compared with the same program without the import.
