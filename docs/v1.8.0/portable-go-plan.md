@@ -645,7 +645,7 @@ Conventions used in the tasks:
   - Test: `test/unit/compiler/lower.test.js` (elision decisions), `arrays.test.js` (behaviour unchanged).
   - Done when: `npm run bench` scalar raycast is within 3% of v1.7.0 and `test/e2e/perf/zero-alloc.js` passes.
 
-- [ ] **Task 0.9 — Predeclared names in the universe scope**
+- [x] **Task 0.9 — Predeclared names in the universe scope**
   - Files: `src/typechecker/index.js` (scope setup), `src/typechecker/types.js` (browser-global list)
   - Do: browser globals and other predeclared names live in a universe scope below the package scope, so package and local declarations shadow them in every target. Shadowing a global in a `js` package hides it for that package.
   - Test: new `test/unit/types/shadowing.test.js` — `func Array()`, `var document int`, a local `len := 3`, in `js`, `wasm` and `both` packages; `Array redeclared` must not appear.

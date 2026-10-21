@@ -34,6 +34,7 @@
 //   - `*testing.T`: the harness's JS test object, passed as an opaque
 //     externref (test methods are routed back to JS via `env.testing_*`).
 
+import { BROWSER_GLOBALS } from "../../typechecker/types.js";
 import {
 	HELPER_BASE64,
 	HELPER_DURATION,
@@ -2702,6 +2703,13 @@ function ${P}idxview(n, getAt, setAt) {
 }`;
 
 // Generates the JS facade for the linked wasm module.
+// A facade binding for a Go name that shadows a browser global carries the
+// same `$` suffix as JS output uses (see jsBindingName in backend/js), so the
+// flat bundle keeps reaching the real global.
+function facadeName(name) {
+	return BROWSER_GLOBALS.has(name) ? `${name}$` : name;
+}
+
 export function generateFacade(
 	meta,
 	{ stringTable = [], callMain = false, stdlibEnv = true } = {},
@@ -2989,15 +2997,15 @@ function ${P}shin(v, Ctor) {
 	for (const c of meta.consts) {
 		if (c.dynamic) {
 			out.push(
-				`const ${c.name} = ${outExpr(c.desc, `__w.__const_${c.name}()`)};`,
+				`const ${facadeName(c.name)} = ${outExpr(c.desc, `__w.__const_${c.name}()`)};`,
 			);
 		} else {
-			out.push(`const ${c.name} = ${c.value};`);
+			out.push(`const ${facadeName(c.name)} = ${c.value};`);
 		}
 	}
 	for (const v of meta.vars ?? [])
 		out.push(
-			`const ${v.name} = ${P}shout(__w.__var_${v.name}(), ${v.desc.ctor});`,
+			`const ${facadeName(v.name)} = ${P}shout(__w.__var_${v.name}(), ${v.desc.ctor});`,
 		);
 
 	for (const f of meta.funcs) {
@@ -3007,7 +3015,7 @@ function ${P}shin(v, Ctor) {
 			f.returns,
 		);
 		out.push(
-			`function ${f.name}(${restParams(names, f.variadic)}) {\n${body}\n}`,
+			`function ${facadeName(f.name)}(${restParams(names, f.variadic)}) {\n${body}\n}`,
 		);
 	}
 

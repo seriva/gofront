@@ -138,6 +138,16 @@ export const expressionCheckMethods = {
 				const t = scope.lookup(expr.name);
 				if (!t) return this.err(`Undefined: '${expr.name}'`, expr);
 				if (this.types.has(expr.name)) expr._isTypeRef = true;
+				// A Go declaration that shadows a browser global: JS output renames
+				// it so generated code keeps reaching the real global.
+				if (BROWSER_GLOBALS.has(expr.name)) {
+					const owner = scope.lookupScope(expr.name);
+					if (
+						owner !== this.universe &&
+						!(owner === this.globals && this._externalNames.has(expr.name))
+					)
+						expr._shadowsGlobal = true;
+				}
 				// Go-source stdlib loading: record package-scope references so the
 				// loader can mangle them (see compiler.js loadStdlibPackage).
 				if (this._pkgRefs && scope.lookupScope(expr.name) === this.globals)
@@ -145,7 +155,7 @@ export const expressionCheckMethods = {
 				if (
 					(this.target === "wasm" || this.target === "both") &&
 					BROWSER_GLOBALS.has(expr.name) &&
-					scope.lookup(expr.name) === this.globals.lookup(expr.name)
+					scope.lookupScope(expr.name) === this.universe
 				) {
 					this.recordBlocker("browser global", expr.name);
 					this.err(
