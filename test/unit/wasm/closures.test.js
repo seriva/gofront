@@ -4,8 +4,10 @@
 import {
 	assert,
 	assertEqual,
+	compile,
 	compileHybrid,
 	compileWasm,
+	runJs,
 	runWasm,
 	section,
 	test,
@@ -638,4 +640,85 @@ func Main() int {
 `;
 	const res = compileHybrid(src).run("Main");
 	assertEqual(res.jsRes, 12);
+});
+
+test("pointer-receiver method call on a loop var sees a distinct var per iteration", () => {
+	const src = `
+package main
+
+type P struct{ X int }
+
+func (p *P) Self() *P { return p }
+
+func Main() int {
+	var ps []*P
+	for p := (P{}); p.X < 3; p.X++ {
+		ps = append(ps, p.Self())
+	}
+	return ps[0].X*100 + ps[1].X*10 + ps[2].X
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.jsRes, 12);
+});
+
+// JS only: method values do not compile in WASM yet.
+test("pointer-receiver method value on a loop var binds that iteration's var (js)", () => {
+	const { js, errors } = compile(`
+package main
+
+type P struct{ X int }
+
+func (p *P) Get() int { return p.X }
+
+func main() {
+	var fs []func() int
+	for p := (P{}); p.X < 3; p.X++ {
+		fs = append(fs, p.Get)
+	}
+	println(fs[0]()*100 + fs[1]()*10 + fs[2]())
+}
+`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "12");
+});
+
+test("slicing an array loop var aliases that iteration's array", () => {
+	const src = `
+package main
+
+func Main() int {
+	var ss [][]int
+	for a := [2]int{}; a[0] < 3; a[0]++ {
+		ss = append(ss, a[:])
+	}
+	return ss[0][0]*100 + ss[1][0]*10 + ss[2][0]
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.jsRes, 12);
+});
+
+test("value-receiver method call keeps the loop var a plain local", () => {
+	const src = `
+package main
+
+type P struct{ X int }
+
+func (p P) Val() int { return p.X }
+
+func Main() int {
+	s := 0
+	for p := (P{}); p.X < 3; p.X++ {
+		s = s*10 + p.Val()
+	}
+	return s
+}
+`;
+	const hybrid = compileHybrid(src);
+	assertEqual(hybrid.run("Main").jsRes, 12);
+	assert(
+		hybrid.js.includes("for (let p = new P(); p.X < 3; p.X++)"),
+		"no per-iteration copy",
+	);
 });
