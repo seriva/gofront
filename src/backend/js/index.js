@@ -385,10 +385,12 @@ export class CodeGen {
 			spec.names = spec.names.map(jsBindingName);
 	}
 
-	// `document := 1` declares a binding that shadows the browser global.
+	// `document := 1` declares a binding that shadows the browser global.  A
+	// `:=` redeclaration (`x, document := 2, 3`) always targets a local of the
+	// same scope, which carries the same suffix.
 	_renameDefineNode(node) {
 		for (const l of node.lhs ?? [])
-			if (l.kind === "Ident" && !l._redecl) l.name = jsBindingName(l.name);
+			if (l.kind === "Ident") l.name = jsBindingName(l.name);
 	}
 
 	_renameTypeSwitchNode(node) {

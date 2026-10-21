@@ -982,14 +982,18 @@ export class FunctionEmitter {
 				typeIndex: structInfo.typeIndex,
 				fieldIndex: i,
 			});
-			// Array fields are values: copy them with the struct.
+			// Array and value-struct fields are values: copy them with the struct.
 			const f = structInfo.fields[i];
-			if (
-				f.goType &&
-				f.goType.kind !== "pointer" &&
-				isArrayType(f.goType, this.mod.checker)
-			)
+			if (!f.goType || f.goType.kind === "pointer") continue;
+			if (isArrayType(f.goType, this.mod.checker)) {
 				this.emitCopyArray(f.goType);
+			} else if (
+				isStructType(f.goType, this.mod.checker, this.mod) &&
+				!isPointerToStruct(f.goType, this.mod.checker, this.mod)
+			) {
+				const inner = this._resolveStructInfo({ _type: f.goType });
+				if (inner) this.emitCloneStruct(inner, f.wType);
+			}
 		}
 		this.pushInstruction({
 			op: "struct.new",
@@ -1030,7 +1034,8 @@ export class FunctionEmitter {
 			!elemIsArray &&
 			isStructType(elemType, this.mod.checker, this.mod) &&
 			!isPointerToStruct(elemType, this.mod.checker, this.mod)
-				? this.mod.getStructType(elemType?.name)
+				? (this._resolveStructInfo({ _type: elemType }) ??
+					this.mod.getStructType(elemType?.name))
 				: null;
 		if (elemIsArray || elemStruct) {
 			const i = this.acquireTemp("i32");

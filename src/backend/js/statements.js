@@ -5,6 +5,7 @@ import {
 	isRangeFor,
 	isSimpleIntRange,
 	isStringRangeType,
+	loopVarsCapturedInLoop,
 	nodeAssigns,
 } from "../../lower/index.js";
 import { isComplex } from "../../typechecker/types.js";
@@ -36,9 +37,15 @@ export const statementGenMethods = {
 		const keyExpr = this.genExpr(rhsNode.index);
 		const [vName, okName] = stmt.lhs.map((e) => e.name ?? this.genExpr(e));
 		const decl = isDefine ? "let " : "";
+		// An array map value is a copy, not the stored array.
+		const valType = rhsNode._mapValueType;
+		const copyVal = (js) =>
+			this._aggregateBase(valType)?.kind === "array"
+				? this._cloneJs(valType, js)
+				: js;
 		if (isDefine && !this.strict) {
 			if (vName !== "_") {
-				this.line(`let ${vName} = ${mapExpr}[${keyExpr}];`);
+				this.line(`let ${vName} = ${copyVal(`${mapExpr}[${keyExpr}]`)};`);
 			}
 			if (okName !== "_") {
 				this.line(`let ${okName} = (${keyExpr}) in ${mapExpr};`);
@@ -54,7 +61,7 @@ export const statementGenMethods = {
 		this.line(`const ${mTmp} = ${mapExpr}, ${kTmp} = ${keyExpr};`);
 		if (vName !== "_") {
 			this.line(
-				`${decl}${vName} = (${mTmp} && (${kTmp} in ${mTmp})) ? ${mTmp}[${kTmp}] : ${zero};`,
+				`${decl}${vName} = (${mTmp} && (${kTmp} in ${mTmp})) ? ${copyVal(`${mTmp}[${kTmp}]`)} : ${zero};`,
 			);
 		}
 		if (okName !== "_") {
@@ -618,7 +625,10 @@ export const statementGenMethods = {
 			}
 			const init = stmt.init ? this.stmtInline(stmt.init) : "";
 			const cond = stmt.cond ? this.genExpr(stmt.cond) : "";
-			const post = stmt.post ? this.stmtInline(stmt.post) : "";
+			const post = this._perIterationClones(
+				stmt,
+				stmt.post ? this.stmtInline(stmt.post) : "",
+			);
 			this.line(`for (${init}; ${cond}; ${post}) {`);
 			this.indented(() => this.genBlock(stmt.body));
 			this.line("}");
@@ -632,6 +642,23 @@ export const statementGenMethods = {
 
 	isRangeFor(stmt) {
 		return isRangeFor(stmt);
+	},
+
+	// Go 1.22 per-iteration loop variables.  `let` gives each iteration its
+	// own binding, but a struct or array variable is a reference: clone it at
+	// the start of the post step (which runs in the next iteration's binding),
+	// so closures from the finished iteration keep their own value.
+	_perIterationClones(stmt, post) {
+		const clones = [];
+		for (const name of loopVarsCapturedInLoop(stmt)) {
+			const i = stmt.init.lhs.findIndex((e) => e.name === name);
+			const t = stmt.init.lhs[i]?._type ?? stmt.init.rhs?.[i]?._type;
+			if (!this._aggregateBase(t) || this._boxedVars?.has(name)) continue;
+			clones.push(`${name} = ${this._cloneJs(t, name)}`);
+		}
+		if (clones.length === 0) return post;
+		const tail = post.replace(/;\s*$/, "");
+		return tail ? `${clones.join(", ")}, ${tail}` : clones.join(", ");
 	},
 
 	_isIntRangeType(iterType) {
@@ -817,13 +844,13 @@ export const statementGenMethods = {
 		this.line("}");
 	},
 
-	// A map range value of array type is a copy: clone it when the body may
-	// mutate it (it otherwise aliases the stored array).
+	// A map range value of array or struct type is a copy: clone it when the
+	// body may mutate it (it otherwise aliases the stored value).
 	_cloneMapRangeValue(init, iterType, name) {
 		if (!name || name === "_" || !this._isMapRangeType(iterType)) return;
 		const base = iterType?.kind === "named" ? iterType.underlying : iterType;
 		const valType = base?.value ?? base?.elem;
-		if (this._aggregateBase(valType)?.kind !== "array") return;
+		if (!this._aggregateBase(valType)) return;
 		if (init.kind !== "AssignStmt" && !this._fnMutates(name)) return;
 		this.line(`${name} = ${this._cloneJs(valType, name)};`);
 	},
@@ -1144,6 +1171,15 @@ export const statementGenMethods = {
 						this._isNamedBoxTypeNode(c.types[0])
 					)
 						this.line(`const ${stmt.assign} = __tsw.__gfUnbox();`);
+					// An array case binds a copy of the boxed value.
+					else if (
+						stmt.assign &&
+						c.types.length === 1 &&
+						this._typeFromNode(c.types[0])?.kind === "array"
+					)
+						this.line(
+							`let ${stmt.assign} = ${this._cloneJs(this._typeFromNode(c.types[0]), "__tsw")};`,
+						);
 					for (const s of c.stmts) this.genStmt(s);
 				});
 				this.line("}");

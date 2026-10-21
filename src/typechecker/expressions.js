@@ -139,8 +139,10 @@ export const expressionCheckMethods = {
 				if (!t) return this.err(`Undefined: '${expr.name}'`, expr);
 				if (this.types.has(expr.name)) expr._isTypeRef = true;
 				// A Go declaration that shadows a browser global: JS output renames
-				// it so generated code keeps reaching the real global.
-				if (BROWSER_GLOBALS.has(expr.name)) {
+				// it so generated code keeps reaching the real global.  Package
+				// namespaces (`import console "./util"`) are never renamed: JS
+				// selects their members directly (bundledPackages).
+				if (BROWSER_GLOBALS.has(expr.name) && t.kind !== "namespace") {
 					const owner = scope.lookupScope(expr.name);
 					if (
 						owner !== this.universe &&
