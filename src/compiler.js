@@ -1080,6 +1080,7 @@ function resolveImports(
 				if (alias === ".") {
 					checker.addDefinitions(dep.exportedTypes, dep.exportedSymbols, {
 						external: false,
+						consts: dep.exportedConsts,
 					});
 					continue;
 				}

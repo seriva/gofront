@@ -248,7 +248,12 @@ export const statementCheckMethods = {
 				returnType.kind === "tuple" ? returnType.types : [returnType];
 			for (let i = 0; i < expected.length; i++) {
 				if (types[i])
-					this.assertAssignable(expected[i], types[i], stmt.values[i] ?? stmt);
+					this.assertAssignable(
+						expected[i],
+						types[i],
+						stmt.values[i] ?? stmt,
+						"return statement",
+					);
 			}
 		}
 	},

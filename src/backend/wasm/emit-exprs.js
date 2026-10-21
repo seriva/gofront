@@ -1,8 +1,12 @@
 // src/backend/wasm/emit-exprs.js
 // FunctionEmitter mixin: expression emission (literals, operators, indexing, conversions).
 
+import {
+	constIntValue,
+	constToLit,
+	foldConstExpr,
+} from "../../typechecker/const-fold.js";
 import { compositeLitIndices } from "../../typechecker/types.js";
-import { foldConstExpr } from "./const-fold.js";
 import {
 	getMapKeyValTypes,
 	isAnyType,
@@ -20,6 +24,19 @@ import {
 	isStructType,
 	toWasmType,
 } from "./types.js";
+
+// An untyped integral float constant (`1e18 + 1`) in an integer context is
+// emitted from its exact integer value.
+function constLitFor(val, targetWasmType) {
+	const i = constIntValue(val);
+	if (
+		val.k === "FLOAT" &&
+		i !== null &&
+		(targetWasmType === "i64" || targetWasmType === "i32")
+	)
+		return constToLit({ k: "INT", v: i });
+	return constToLit(val);
+}
 
 export class ExprsEmitter {
 	emitExpr(expr, targetWasmType = null) {
@@ -141,9 +158,10 @@ export class ExprsEmitter {
 
 	_emitRawExpr(expr, targetWasmType = null) {
 		if (expr.kind === "BinaryExpr" || expr.kind === "UnaryExpr") {
-			const folded = foldConstExpr(expr, (name) =>
-				this.mod.pkgConsts?.get(name),
-			);
+			// The checker's exact value (src/typechecker/const-fold.js) when it has one.
+			const folded = expr._const
+				? constLitFor(expr._const, targetWasmType)
+				: foldConstExpr(expr, (name) => this.mod.pkgConsts?.get(name));
 			if (folded) {
 				folded._type = expr._type;
 				this.emitBasicLit(folded, targetWasmType);

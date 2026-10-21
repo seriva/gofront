@@ -8,6 +8,7 @@ import {
 	isIteratorRangeFor,
 } from "../../lower/range.js";
 import { Parser } from "../../parser/index.js";
+import { foldConstExpr } from "../../typechecker/const-fold.js";
 import { TypeChecker } from "../../typechecker/index.js";
 import {
 	addBoundaryHelpers,
@@ -16,7 +17,6 @@ import {
 	scanBoundaryImports,
 	wTypeKey,
 } from "./boundary.js";
-import { foldConstExpr } from "./const-fold.js";
 import { FunctionEmitter } from "./emit.js";
 import { encodeModule, isGoFrontWasm } from "./encode.js";
 import { hasGenerics, monomorphise } from "./monomorph.js";
