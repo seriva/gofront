@@ -2,6 +2,7 @@
 // FunctionEmitter mixin: expression emission (literals, operators, indexing, conversions).
 
 import {
+	constFromLit,
 	constIntValue,
 	constToLit,
 	foldConstExpr,
@@ -168,6 +169,7 @@ export class ExprsEmitter {
 				return;
 			}
 		}
+		if (this._emitFoldedIntConversion(expr, targetWasmType)) return;
 
 		switch (expr.kind) {
 			case "BasicLit":
@@ -1142,6 +1144,46 @@ export class ExprsEmitter {
 		}
 	}
 
+	// Integer conversions of constants (`int64(1e18 + 1)`) keep the exact value.
+	_emitFoldedIntConversion(expr, targetWasmType) {
+		if (expr.kind !== "TypeConversion" && expr.kind !== "CallExpr")
+			return false;
+		if (expr._const?.k !== "INT") return false;
+		if (
+			targetWasmType != null &&
+			targetWasmType !== "i32" &&
+			targetWasmType !== "i64"
+		)
+			return false;
+		const lit = constToLit(expr._const);
+		lit._type = expr._type;
+		this.emitBasicLit(lit, targetWasmType);
+		return true;
+	}
+
+	// A float literal; an integral one in an integer context (`var y int = 2.0`)
+	// emits its exact integer value.
+	_emitFloatLit(lit, wType) {
+		const i =
+			wType === "i32" || wType === "i64"
+				? constIntValue(constFromLit(lit) ?? {})
+				: null;
+		if (i !== null) {
+			this.pushInstruction(
+				wType === "i32"
+					? { op: "i32.const", value: Number(BigInt.asIntN(32, i)) }
+					: { op: "i64.const", value: BigInt.asIntN(64, i) },
+			);
+			return;
+		}
+		const n = Number(lit.value);
+		if (wType === "f32") {
+			this.pushInstruction({ op: "f32.const", value: n });
+		} else {
+			this.pushInstruction({ op: "f64.const", value: n });
+		}
+	}
+
 	emitBasicLit(lit, targetWasmType) {
 		const isTargetComplex64 =
 			lit._type?.name === "complex64" ||
@@ -1188,12 +1230,7 @@ export class ExprsEmitter {
 		}
 
 		if (lit.litKind === "FLOAT") {
-			const n = Number(lit.value);
-			if (wType === "f32") {
-				this.pushInstruction({ op: "f32.const", value: n });
-			} else {
-				this.pushInstruction({ op: "f64.const", value: n });
-			}
+			this._emitFloatLit(lit, wType);
 			return;
 		}
 

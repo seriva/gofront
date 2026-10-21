@@ -90,8 +90,8 @@ const BUILTIN_CHECK = {
 		const inner = s.resolveTypeNode(e.args[0], sc);
 		return { kind: "pointer", base: inner };
 	},
-	print: () => VOID,
-	println: () => VOID,
+	print: (s, n, e, at) => s._checkPrintArgs(n, e, at),
+	println: (s, n, e, at) => s._checkPrintArgs(n, e, at),
 	panic: () => VOID,
 	recover: () => ANY,
 	error: () => ERROR,
@@ -194,6 +194,7 @@ export const expressionCheckMethods = {
 				if (lt?._tainted || rt?._tainted) return TAINTED_ANY;
 				if (isAny(lt) || isAny(rt))
 					return this.binaryResultType(expr.op, ANY, ANY, expr);
+				this._checkConstOperands(expr.op, lt, rt, expr);
 				return this.binaryResultType(expr.op, lt, rt, expr);
 			}
 			case "AwaitExpr": {
