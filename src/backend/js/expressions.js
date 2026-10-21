@@ -374,10 +374,10 @@ const BUILTIN_GEN = {
 function genMinMax(s, e, fn, cmp) {
 	const args = e.args.map((a) => s.genExpr(a));
 	const fold = (xs) => `${xs}.reduce((a, b) => (b ${cmp} a ? b : a))`;
-	if (e._type?.kind === "typeParam" && args.length > 1)
+	if (args.length === 1) return args[0];
+	if (e._type?.kind === "typeParam")
 		return `((...v) => (typeof v[0] === "string" ? ${fold("v")} : Math.${fn}(...v)))(${args.join(", ")})`;
 	if (!s._isStringExprType(e._type)) return `Math.${fn}(${args.join(", ")})`;
-	if (args.length === 1) return args[0];
 	return fold(`[${args.join(", ")}]`);
 }
 
