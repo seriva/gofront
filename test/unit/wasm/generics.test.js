@@ -564,3 +564,29 @@ func Main() int {
 	assertEqual(wasmRes, 12n);
 	assertEqual(Number(jsRes), 12);
 });
+
+section("WASM Generics — Generic Calls Inside Generic Bodies");
+
+test("generic function calling another generic with its type parameter", () => {
+	const src = `
+package main
+
+type Number interface { ~int | ~float64 }
+
+func less[T Number](a, b T) bool { return a < b }
+
+func Max[T Number](a, b T) T {
+	if less(a, b) {
+		return b
+	}
+	return a
+}
+
+func Main() float64 {
+	return float64(Max(3, 7)) + Max(2.5, 1.5)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, 9.5);
+	assertEqual(jsRes, wasmRes);
+});

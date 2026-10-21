@@ -19,6 +19,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **WASM accessor refs for fields and elements**: Added subtype `$acc_T` implementing scalar pointers to struct fields (`&s.F`) and slice/array elements (`&xs[i]`) with getter/setter helpers; updated dereference assignment (`*p = v`) to dispatch between box and accessor refs.
 - **WASM pointer type hierarchy**: Emitted abstract supertype `$ptr_T` with box struct `$box_T` as a subtype (`sub $ptr_T`) for scalar pointer types.
 
+### Fixed
+- **Generic calls inside generic bodies in WASM**: A generic function calling another generic function with its own type parameter (`Max[T]` calling `less[T]`) failed with `Undefined: 'less'`, because monomorphisation dropped the inferred type arguments when it copied the body.
+
 ## [1.7.0] - 2026-10-20
 
 ### Added
