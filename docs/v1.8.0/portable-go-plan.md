@@ -688,11 +688,12 @@ Conventions used in the tasks:
 
 ### Phase 0.7: Type aliases, method expressions, panics & goto
 
-- [ ] **Task 0.14 — Generic type aliases**
+- [x] **Task 0.14 — Generic type aliases**
   - Files: `src/typechecker/declarations.js`, `src/typechecker/resolve.js`
   - Do: `type A[P any] = T[P]` records type parameters on the alias; an instantiation `A[int]` substitutes into the aliased type and resolves to exactly that type (no new named type). Works in composite literals, parameter types and nested generics.
   - Test: `test/unit/types/generics.test.js` — the generic-alias edge cases; the `Unknown struct in CompositeLit` message must not appear.
   - Done when: the four edge cases pass as parity tests.
+  - Landed in `src/typechecker/index.js` (`_collectGenericAlias`; there is no `declarations.js`) and `src/typechecker/resolve.js`. The edge cases also needed anonymous struct literals to work: WASM no longer registers a struct alias (`type P = struct{…}`) as a distinct struct type and gives `struct{}` a real (empty) struct type, and JS emits a full plain object for `struct{…}{…}`, `P{…}` and alias literals (it emitted an array for positional ones and dropped omitted fields).
 
 - [ ] **Task 0.15 — Method expressions on pointer receivers**
   - Files: `src/parser/expressions.js`, `src/typechecker/expressions.js`

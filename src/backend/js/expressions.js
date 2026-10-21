@@ -1649,6 +1649,8 @@ export const expressionGenMethods = {
 			const d = expr.elems[3] ? this.genExpr(expr.elems[3]) : "0";
 			return `__simd_f32x4(${a}, ${b}, ${c}, ${d})`;
 		}
+		const aliasLit = this._genAliasLit(t, typeName, expr);
+		if (aliasLit !== null) return aliasLit;
 		if (typeName && this.structNames.has(typeName))
 			return this._genPositionalStructLit(typeName, expr);
 		if (typeName && this.namedWrapperNames.has(typeName))
@@ -1660,6 +1662,54 @@ export const expressionGenMethods = {
 		if (this._isMapTypeNode(t))
 			return `{ ${this._genMapLitEntries(expr.elems)} }`;
 		return this._genFallbackCompositeLit(expr);
+	},
+
+	// Literals whose type expression is not the class to construct: a generic
+	// alias `A[X]{…}`, an anonymous `struct{…}{…}`, or `P{…}` for
+	// `type P = struct{…}`. Null for every other literal.
+	_genAliasLit(t, typeName, expr) {
+		if (t.kind === "GenericTypeName" || t.kind === "InstantiationExpr")
+			return this._genGenericAliasLit(typeName, expr);
+		const anon =
+			t.kind === "StructType" ||
+			((t.kind === "TypeName" || t.kind === "Ident") &&
+				this.checker?.types.get(t.name)?.kind === "struct");
+		return anon ? this._genAnonStructLit(expr) : null;
+	},
+
+	// `A[X]{…}` for a generic alias `type A[P any] = T`: the literal has the
+	// aliased type (expr._type), so dispatch on that instead of on `A`.
+	_genGenericAliasLit(typeName, expr) {
+		if (!this.checker?.types.get(typeName)?._generic?.isAlias) return null;
+		const rt = expr._type;
+		const base = rt?.kind === "named" ? rt.underlying : rt;
+		if (rt?.kind === "named" && this.structNames.has(rt.name))
+			return this._genPositionalStructLit(rt.name, expr);
+		if (base?.kind === "map")
+			return `{ ${this._genMapLitEntries(expr.elems)} }`;
+		if (base?.kind === "struct") return this._genAnonStructLit(expr);
+		return this._genImplicitCompositeLit(expr);
+	},
+
+	// A literal of an anonymous struct type: a plain object with every field,
+	// the omitted ones set to their zero value.
+	_genAnonStructLit(expr) {
+		const st =
+			expr._type?.kind === "named" ? expr._type.underlying : expr._type;
+		if (st?.kind !== "struct" || !(st.fields instanceof Map))
+			return this._genFallbackCompositeLit(expr);
+		const values = new Map();
+		for (const e of expr.elems) {
+			if (e._positionalField)
+				values.set(e._positionalField, this.genValueExpr(e));
+			else if (e.kind === "KeyValueExpr")
+				values.set(e.key.name, this.genValueExpr(e.value));
+		}
+		const fields = [...st.fields].map(
+			([name, ft]) =>
+				`${name}: ${values.get(name) ?? this.zeroValueForType(ft)}`,
+		);
+		return `{ ${fields.join(", ")} }`;
 	},
 
 	_genImplicitCompositeLit(expr) {
