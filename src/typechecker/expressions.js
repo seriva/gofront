@@ -302,9 +302,9 @@ export const expressionCheckMethods = {
 		return ft;
 	},
 
-	_checkArrayBoundsExpr(btu, bt, expr) {
+	_checkArrayBoundsExpr(btu, bt, expr, scope) {
 		if (btu.kind !== "array" || btu.size == null) return;
-		const idx = this._constIntValue(expr.index);
+		const idx = this._constIntValue(expr.index, scope);
 		if (idx === null) return;
 		if (idx < 0)
 			this.err(`invalid array index ${idx} (index must not be negative)`, expr);
@@ -325,7 +325,7 @@ export const expressionCheckMethods = {
 				? (this.resolveType(bt.underlying) ?? bt.underlying)
 				: bt;
 		if (btu.kind === "slice" || btu.kind === "array") {
-			this._checkArrayBoundsExpr(btu, bt, expr);
+			this._checkArrayBoundsExpr(btu, bt, expr, scope);
 			return btu.elem;
 		}
 		if (btu.kind === "map") {
@@ -334,7 +334,7 @@ export const expressionCheckMethods = {
 		}
 		if (btu.kind === "shared") {
 			expr._sharedElem = btu.elem;
-			const idx = this._constIntValue(expr.index);
+			const idx = this._constIntValue(expr.index, scope);
 			if (idx !== null && idx < 0)
 				this.err(`invalid index ${idx} (index must not be negative)`, expr);
 			return btu.elem;
@@ -702,6 +702,11 @@ export const expressionCheckMethods = {
 		if (expr.kind === "ParenExpr") {
 			return this._constIntValue(expr.expr, scope);
 		}
+		if (expr.kind === "SelectorExpr" && expr.expr?.kind === "Ident") {
+			// `pkg.K`: integer constants exported by an imported GoFront package.
+			const ns = (scope ?? this.globals).lookup(expr.expr.name);
+			if (ns?.kind === "namespace") return ns._consts?.get(expr.field) ?? null;
+		}
 		return null;
 	},
 
@@ -711,17 +716,48 @@ export const expressionCheckMethods = {
 		if (expr.kind === "UnaryExpr" && (expr.op === "-" || expr.op === "^")) {
 			const v = this._constIntValue(expr.operand, scope);
 			if (v === null) return null;
-			return expr.op === "-" ? -v : ~v;
+			if (expr.op === "-") return -v;
+			return this._constComplement(v, expr.operand._type);
 		}
 		if (expr.kind === "BinaryExpr") return this._constIntBinary(expr, scope);
-		if (expr.kind === "CallExpr" && this._isIntConversion(expr))
-			return this._constIntValue(expr.args[0], scope);
+		if (expr.kind === "CallExpr" && this._isIntConversion(expr)) {
+			const target =
+				expr._isTypeConversion && expr._conversionTargetType
+					? expr._conversionTargetType
+					: { kind: "basic", name: expr.func?.name };
+			return this._fitIntType(this._constIntValue(expr.args[0], scope), target);
+		}
 		if (
 			expr.kind === "TypeConversion" &&
 			this._isIntTypeNode(expr.targetType, scope)
-		)
-			return this._constIntValue(expr.expr, scope);
+		) {
+			const target = this.resolveTypeNode(
+				expr.targetType,
+				scope ?? this.globals,
+			);
+			return this._fitIntType(this._constIntValue(expr.expr, scope), target);
+		}
 		return undefined;
+	},
+
+	// ^v in the operand's type: -v-1 when signed, max-v when unsigned; null
+	// for an unknown type or an unsigned width JS numbers cannot hold exactly.
+	_constComplement(v, t) {
+		if (t?.kind === "untyped")
+			return t.base === "int" || t.base === "rune" ? -v - 1 : null;
+		const u = t?.kind === "named" ? this.resolveType(t.underlying) : t;
+		const range = u?.kind === "basic" ? INT_RANGES[u.name] : null;
+		if (!range) return null;
+		if (range[0] < 0) return -v - 1;
+		return range[1] < 2 ** 53 ? range[1] - v : null;
+	},
+
+	// A converted constant folds only when it fits the target integer type.
+	_fitIntType(v, t) {
+		if (v === null) return null;
+		const u = t?.kind === "named" ? this.resolveType(t.underlying) : t;
+		const range = u?.kind === "basic" ? INT_RANGES[u.name] : null;
+		return range && v >= range[0] && v <= range[1] ? v : null;
 	},
 
 	// Integer constant folding for `_constIntValue`: both operands must fold.
@@ -757,11 +793,23 @@ export const expressionCheckMethods = {
 	_checkArrayLitKeys(expr, scope) {
 		const seen = new Set();
 		let next = 0;
+		let unknown = false;
 		for (const elem of expr.elems) {
 			if (elem.kind === "KeyValueExpr") {
 				this.checkExpr(elem.key, scope);
-				const idx = this._constIntValue(elem.key, scope);
+				const idx =
+					this._constIntValue(elem.key, scope) ??
+					this._constIntegralFloat(elem.key, scope);
 				const text = constKeyText(elem.key);
+				if (idx === null && this._isConstExpr(elem.key, scope)) {
+					// Known limitation: a constant key the folder cannot evaluate
+					// (e.g. `len("abc")`, unsigned `^`) keeps the literal/positional
+					// index of compositeLitIndices; later indices are not
+					// duplicate-checked.
+					unknown = true;
+					next++;
+					continue;
+				}
 				if (idx === null)
 					this.err(`index ${text} must be integer constant`, elem.key);
 				else if (idx < 0)
@@ -772,10 +820,70 @@ export const expressionCheckMethods = {
 				else next = idx;
 				elem._index = next;
 			}
-			if (seen.has(next))
+			if (!unknown && seen.has(next))
 				this.err(`duplicate index ${next} in array or slice literal`, elem);
 			seen.add(next);
 			next++;
+		}
+	},
+
+	// An integral untyped float constant key (`2.0`, `const K = 2.0`).
+	_constIntegralFloat(e, scope) {
+		if (e?.kind === "ParenExpr") return this._constIntegralFloat(e.expr, scope);
+		if (e?.kind === "BasicLit" && e.litKind === "FLOAT") {
+			const v = Number(e.value);
+			return Number.isInteger(v) ? v : null;
+		}
+		if (e?.kind !== "Ident") return null;
+		const owner = (scope ?? this.globals).lookupScope(e.name);
+		if (!owner?._consts.has(e.name)) return null;
+		if (owner.symbols.get(e.name)?.kind === "basic") return null; // typed
+		const c = owner.lookupConstExpr(e.name);
+		return c ? this._constIntegralFloat(c, scope) : null;
+	},
+
+	// Whether `e` is a constant expression (whose value the folder may not
+	// know): literals, constants, operators, conversions and builtin calls.
+	_isConstExpr(e, scope) {
+		switch (e?.kind) {
+			case "BasicLit":
+				return true;
+			case "ParenExpr":
+				return this._isConstExpr(e.expr, scope);
+			case "UnaryExpr":
+				return (
+					["-", "+", "^", "!"].includes(e.op) &&
+					this._isConstExpr(e.operand, scope)
+				);
+			case "BinaryExpr":
+				return (
+					this._isConstExpr(e.left, scope) && this._isConstExpr(e.right, scope)
+				);
+			case "Ident":
+				return !!(scope ?? this.globals)
+					.lookupScope(e.name)
+					?._consts.has(e.name);
+			case "SelectorExpr": {
+				// Package members: constant unless the package says otherwise.
+				const ns =
+					e.expr?.kind === "Ident"
+						? (scope ?? this.globals).lookup(e.expr.name)
+						: null;
+				if (ns?.kind !== "namespace") return false;
+				return ns._consts ? ns._consts.has(e.field) : true;
+			}
+			case "TypeConversion":
+				return this._isConstExpr(e.expr, scope);
+			case "CallExpr":
+				if (e._isTypeConversion || this._isIntConversion(e))
+					return this._isConstExpr(e.args?.[0], scope);
+				return (
+					e.func?.kind === "Ident" &&
+					CONST_BUILTINS.has(e.func.name) &&
+					(scope ?? this.globals).lookup(e.func.name)?.kind === "builtin"
+				);
+			default:
+				return false;
 		}
 	},
 
@@ -1275,10 +1383,43 @@ const CONST_INT_OPS = {
 	"%": (l, r) => (r === 0 ? null : l % r),
 	"<<": (l, r) => l * 2 ** r,
 	">>": (l, r) => Math.floor(l / 2 ** r),
-	"&": (l, r) => l & r,
-	"|": (l, r) => l | r,
-	"^": (l, r) => l ^ r,
-	"&^": (l, r) => l & ~r,
+	"&": int32Op((l, r) => l & r),
+	"|": int32Op((l, r) => l | r),
+	"^": int32Op((l, r) => l ^ r),
+	"&^": int32Op((l, r) => l & ~r),
+};
+
+// Builtins whose calls may be constant expressions (`len("abc")`).
+const CONST_BUILTINS = new Set([
+	"len",
+	"cap",
+	"real",
+	"imag",
+	"complex",
+	"min",
+	"max",
+]);
+
+// JS bitwise operators are 32-bit: fold only operands in that range.
+function int32Op(f) {
+	return (l, r) => ((l | 0) === l && (r | 0) === r ? f(l, r) : null);
+}
+
+// Value ranges of the integer types for constant conversions.
+const INT_RANGES = {
+	int8: [-(2 ** 7), 2 ** 7 - 1],
+	int16: [-(2 ** 15), 2 ** 15 - 1],
+	int32: [-(2 ** 31), 2 ** 31 - 1],
+	rune: [-(2 ** 31), 2 ** 31 - 1],
+	int64: [-(2 ** 63), 2 ** 63 - 1],
+	int: [-(2 ** 63), 2 ** 63 - 1],
+	uint8: [0, 2 ** 8 - 1],
+	byte: [0, 2 ** 8 - 1],
+	uint16: [0, 2 ** 16 - 1],
+	uint32: [0, 2 ** 32 - 1],
+	uint64: [0, 2 ** 64 - 1],
+	uint: [0, 2 ** 64 - 1],
+	uintptr: [0, 2 ** 64 - 1],
 };
 
 // Source-like text of a literal key for diagnostics (`k`, `-1`, `K + 1`).

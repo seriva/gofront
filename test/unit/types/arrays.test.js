@@ -4,7 +4,11 @@ import {
 	assertEqual,
 	assertErrorContains,
 	compile,
+	compileHybrid,
+	compileHybridProject,
+	compileWasm,
 	runJs,
+	runWasm,
 	section,
 	summarize,
 	test,
@@ -457,6 +461,197 @@ func main() {
 `);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "1 2 3");
+});
+
+section("Constant folder only folds real constants");
+
+function hybridMain(body, prelude = "") {
+	return compileHybrid(`package main
+${prelude}
+${body}
+`).run("Main");
+}
+
+test("param shadowing a package const is not folded as the const", () => {
+	const res = hybridMain(
+		`func get(a [4]int, size int) int { return a[size-1] }
+
+func Main() int { return get([4]int{1, 2, 3, 4}, 2) }`,
+		"const size = 8",
+	);
+	assertEqual(res.jsRes, 2);
+});
+
+test("local shadowing a package const is not folded as the const", () => {
+	const res = hybridMain(
+		`func Main() int {
+	a := [4]int{5, 6, 7, 8}
+	n := 1
+	return a[n-1] + a[n]
+}`,
+		"const n = 10",
+	);
+	assertEqual(res.jsRes, 11);
+});
+
+test("loop var shadowing a package const is not folded as the const", () => {
+	const res = hybridMain(
+		`func Main() int {
+	a := [4]int{1, 2, 3, 4}
+	s := 0
+	for i := 0; i < 2; i++ {
+		s += a[i+1]
+	}
+	return s
+}`,
+		"const i = 7",
+	);
+	assertEqual(res.jsRes, 5);
+});
+
+test("bare shadowing index is not folded as the const", () => {
+	const res = hybridMain(
+		`func Main() int {
+	a := [4]int{1, 2, 3, 4}
+	K := 3
+	return a[K]
+}`,
+		"const K = 9",
+	);
+	assertEqual(res.jsRes, 4);
+});
+
+test("^uint8(0) index is not folded as -1", () => {
+	const src = `package main
+
+func Main() int {
+	var a [256]int
+	a[^uint8(0)] = 3
+	return a[255]
+}
+`;
+	assertEqual(compile(src).errors.length, 0);
+	// JS backend: ^uint8(0) evaluates to -1 at runtime (pre-existing, also on
+	// base), so only the WASM result is checked here.
+	const { wasm, stringTable, errors } = compileWasm(src);
+	assertEqual(errors.length, 0);
+	assertEqual(runWasm(wasm, { stringTable }).exports.Main(), 3n);
+});
+
+test("typed uint8 const index from ^uint8(0) compiles", () => {
+	const { errors } = compile(`package main
+
+const M uint8 = ^uint8(0)
+
+func main() {
+	var a [256]int
+	a[M] = 1
+	_ = a
+}
+`);
+	assertEqual(errors.length, 0);
+});
+
+test("^uint8(0) array literal key places the value at 255", () => {
+	const res = hybridMain(`func Main() int {
+	a := [256]int{^uint8(0): 3}
+	return a[255]*10 + a[0]
+}`);
+	assertEqual(res.jsRes, 30);
+});
+
+test("wide bitwise constant index is not folded with 32-bit ops", () => {
+	const { errors } = compile(`package main
+
+const Big = 1 << 40
+
+func main() {
+	var a [4]int
+	_ = a[(Big|1)-Big]
+}
+`);
+	assertEqual(errors.length, 0);
+});
+
+test("cross-package constant array key places the value", async () => {
+	const { mod } = await compileHybridProject(
+		{
+			"consts/c.go": `//gofront:target both
+package consts
+
+const K = 2
+`,
+			"main.go": `package main
+
+import "./consts"
+
+func Main() int {
+	a := [3]int{consts.K: 5}
+	return a[2]*10 + a[0]
+}
+`,
+		},
+		{ exports: ["Main"] },
+	);
+	assertEqual(mod.Main(), 50);
+});
+
+test("integral float literal array key places the value", () => {
+	const res = hybridMain(`func Main() int {
+	a := [3]int{2.0: 5}
+	return a[2]*10 + a[0]
+}`);
+	assertEqual(res.jsRes, 50);
+});
+
+test("integral untyped float const array key places the value", () => {
+	const res = hybridMain(
+		`func Main() int {
+	a := [3]int{K: 5}
+	return a[2]*10 + a[0]
+}`,
+		"const K = 2.0",
+	);
+	assertEqual(res.jsRes, 50);
+});
+
+test("constant builtin call array key compiles", () => {
+	const { errors } = compile(`package main
+
+const K = len("abc")
+
+func main() {
+	a := [4]int{K: 5}
+	b := [4]int{len("ab"): 1}
+	_, _ = a, b
+}
+`);
+	assertEqual(errors.length, 0);
+});
+
+test("error: variable array key is still rejected", () => {
+	const { errors } = compile(`package main
+
+func main() {
+	k := 1
+	a := [3]int{k: 2}
+	_ = a
+}
+`);
+	assertErrorContains(errors, "index k must be integer constant");
+});
+
+test("error: non-builtin call array key is rejected", () => {
+	const { errors } = compile(`package main
+
+func f() int { return 1 }
+
+func main() {
+	a := [3]int{f(): 2}
+	_ = a
+}
+`);
+	assertErrorContains(errors, "must be integer constant");
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
