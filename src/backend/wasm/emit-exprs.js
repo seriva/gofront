@@ -81,6 +81,9 @@ export class ExprsEmitter {
 			) {
 				const refWType = this.toWasmType(goType);
 				this._emitRawExpr(expr, refWType);
+				// An array stored in an interface is a copy.
+				if (isArrayType(goType, this.mod.checker))
+					this._emitCopyIfValue(expr, goType, refWType);
 				return;
 			}
 
@@ -312,7 +315,7 @@ export class ExprsEmitter {
 					this.pushInstruction({ op: "local.get", index: mTmp });
 					this.emitExpr(elem.key, mapInfo.keyWType);
 					this.emitExpr(elem.value, mapInfo.valWType);
-					this._emitCopyIfValueStruct(elem.value, valType, mapInfo.valWType);
+					this._emitCopyIfValue(elem.value, valType, mapInfo.valWType);
 					this.pushInstruction({
 						op: "call",
 						funcIndex: this.mod.resolveFuncIndex(mapInfo.setFuncName),
@@ -345,7 +348,7 @@ export class ExprsEmitter {
 			}
 			for (const elem of lit.elems) {
 				this.emitExpr(elem, sliceInfo.elemWType);
-				this._emitCopyIfValueStruct(elem, elem._type, sliceInfo.elemWType);
+				this._emitCopyIfValue(elem, elem._type, sliceInfo.elemWType);
 			}
 			this.pushInstruction({
 				op: "array.new_fixed",
@@ -369,7 +372,7 @@ export class ExprsEmitter {
 			const targetSize = this._getArraySize(litType, count);
 			for (const elem of lit.elems ?? []) {
 				this.emitExpr(elem, arrInfo.elemWType);
-				this._emitCopyIfValueStruct(elem, elem._type, arrInfo.elemWType);
+				this._emitCopyIfValue(elem, elem._type, arrInfo.elemWType);
 			}
 			for (let i = count; i < targetSize; i++) {
 				this.emitZeroValue(elemType, arrInfo.elemWType);
@@ -408,13 +411,13 @@ export class ExprsEmitter {
 			const f = fields[i];
 			if (isKeyed) {
 				if (map.has(f.name)) {
-					this.emitExpr(map.get(f.name), f.wType);
+					this._emitFieldInit(map.get(f.name), f);
 				} else {
 					this.emitZeroValue(f.goType, f.wType);
 				}
 			} else {
 				if (i < (lit.elems?.length ?? 0)) {
-					this.emitExpr(lit.elems[i], f.wType);
+					this._emitFieldInit(lit.elems[i], f);
 				} else {
 					this.emitZeroValue(f.goType, f.wType);
 				}
@@ -425,6 +428,13 @@ export class ExprsEmitter {
 			op: "struct.new",
 			typeIndex: structInfo.typeIndex,
 		});
+	}
+
+	// A struct literal field initialiser; array values are copied in.
+	_emitFieldInit(value, f) {
+		this.emitExpr(value, f.wType);
+		if (f.goType?.kind !== "pointer" && isArrayType(f.goType, this.mod.checker))
+			this._emitCopyIfValue(value, f.goType, f.wType);
 	}
 
 	emitSelectorExpr(expr) {
@@ -767,8 +777,11 @@ export class ExprsEmitter {
 		const isValStruct =
 			isStructType(elemGoType, this.mod.checker, this.mod) &&
 			!isPointerToStruct(elemGoType, this.mod.checker, this.mod);
+		const isValArray =
+			elemGoType?.kind !== "pointer" &&
+			isArrayType(elemGoType, this.mod.checker);
 
-		if (!isValStruct) {
+		if (!isValStruct && !isValArray) {
 			this.pushInstruction({
 				op: "array.copy",
 				typeIndexDst: arrInfo.typeIndex,
@@ -841,7 +854,9 @@ export class ExprsEmitter {
 		this.pushInstruction("i32.add");
 		this.pushInstruction({ op: "array.get", typeIndex: arrInfo.typeIndex });
 
-		if (sInfo) {
+		if (isValArray) {
+			this.emitCopyArray(elemGoType);
+		} else if (sInfo) {
 			this.emitCloneStruct(sInfo, arrInfo.elemWType);
 		}
 
@@ -879,7 +894,9 @@ export class ExprsEmitter {
 		this.pushInstruction("i32.add");
 		this.pushInstruction({ op: "array.get", typeIndex: arrInfo.typeIndex });
 
-		if (sInfo) {
+		if (isValArray) {
+			this.emitCopyArray(elemGoType);
+		} else if (sInfo) {
 			this.emitCloneStruct(sInfo, arrInfo.elemWType);
 		}
 
