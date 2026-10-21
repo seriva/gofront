@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Generic named func types in WASM (Task 0.3)**: Instantiated generic named func types (e.g. `type Seq[V any] func(yield func(V) bool)` specialized as `Seq[int]`) correctly resolve to their underlying closure signature during WebAssembly compilation, allowing generic iterators like `Map[A, B any]` and functions returning `Seq[T]` to type-check and execute with full JS/WASM parity.
 - **Range-over-func control flow and error semantics (Task 0.2b)**: Implemented labeled `break` and `continue` across iterator boundaries, `return` from iterator body with enclosing function unwinding and defer execution, panic propagation through iterators with enclosing `recover()`, and re-yield panic detection with Go's standard message in both WASM and JS backends.
 - **Range-over-func in WASM backend**: Implemented Go 1.23 range-over-func (`for v := range seq`, `for k, v := range seq2`, `for range seq0`) in the WebAssembly backend; synthesized yield callback closures with environment capture and state tracking for plain `break` and `continue`, achieving full parity with the JavaScript backend.
 - **WASM accessor refs at the JS boundary and documentation**: Supported crossing accessor refs through the JS↔WASM boundary via copy-in/copy-out `{ value }` boxes with live getters and setters; updated `docs/go-compatibility.md` pointer documentation to reflect pointer identity and accessor ref semantics across JS and WASM.

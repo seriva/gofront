@@ -496,3 +496,71 @@ func Main() string {
 	const res = exports.Main();
 	assertEqual(res, "wasm_monomorph_strict");
 });
+
+// ── Task 0.3 — Generic Named Func Types ───────────────────────
+
+section("WASM Generics — Generic Named Func Types (Task 0.3)");
+
+test("function returning Seq[int] ranged over in a parity test", () => {
+	const src = `
+package main
+
+type Seq[V any] func(yield func(V) bool)
+
+func Count() Seq[int] {
+	return func(yield func(int) bool) {
+		if !yield(10) { return }
+		if !yield(20) { return }
+		if !yield(30) { return }
+	}
+}
+
+func Main() int {
+	sum := 0
+	for v := range Count() {
+		sum += v
+	}
+	return sum
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, 60n);
+	assertEqual(Number(jsRes), 60);
+});
+
+test("generic Map[A, B any](s Seq[A], f func(A) B) Seq[B]", () => {
+	const src = `
+package main
+
+type Seq[V any] func(yield func(V) bool)
+
+func FromSlice[T any](xs []T) Seq[T] {
+	return func(yield func(T) bool) {
+		for _, x := range xs {
+			if !yield(x) { return }
+		}
+	}
+}
+
+func Map[A, B any](s Seq[A], f func(A) B) Seq[B] {
+	return func(yield func(B) bool) {
+		for a := range s {
+			if !yield(f(a)) { return }
+		}
+	}
+}
+
+func Main() int {
+	xs := []int{1, 2, 3}
+	double := func(x int) int { return x * 2 }
+	sum := 0
+	for v := range Map(FromSlice(xs), double) {
+		sum += v
+	}
+	return sum
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, 12n);
+	assertEqual(Number(jsRes), 12);
+});

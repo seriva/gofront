@@ -563,7 +563,7 @@ Conventions used in the tasks:
   - Test: `range_func.test.js` — every range-over-func edge case in [Edge Cases](#edge-cases).
   - Done when: all pass as parity tests and the panic message is identical on both backends.
 
-- [ ] **Task 0.3 — Generic named func types**
+- [x] **Task 0.3 — Generic named func types**
   - Files: `src/backend/wasm/monomorph.js`, `src/backend/wasm/types.js`
   - Do: `type Seq[V any] func(yield func(V) bool)` instantiated as `Seq[int]` must map to the same closure type as its underlying func type; returning a `Seq[int]` from a function type-checks in the module.
   - Test: `test/unit/wasm/generics.test.js` — a function returning `Seq[int]` ranged over in a parity test; a generic `Map[A, B any](s Seq[A], f func(A) B) Seq[B]`.

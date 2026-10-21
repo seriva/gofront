@@ -123,6 +123,7 @@ function hasIteratorWithReturn(body) {
 			for (const elem of x) check(elem);
 			return;
 		}
+		if (x.kind === "FuncLit") return;
 		if (isIteratorRangeFor(x)) {
 			const lit = getOrCreateIteratorFuncLit(x);
 			if (hasReturnInNode(lit?.body)) {

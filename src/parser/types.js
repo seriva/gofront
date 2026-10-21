@@ -86,11 +86,17 @@ export const typeParserMethods = {
 	parseTypeParamList() {
 		this.expect(T.LBRACKET);
 		const params = [];
-		do {
-			const name = this.expect(T.IDENT).value;
+		while (!this.check(T.RBRACKET) && !this.check(T.EOF)) {
+			const names = [this.expect(T.IDENT).value];
+			while (this.match(T.COMMA)) {
+				names.push(this.expect(T.IDENT).value);
+			}
 			const constraint = this.parseConstraint();
-			params.push({ kind: "TypeParam", name, constraint });
-		} while (this.match(T.COMMA));
+			for (const name of names) {
+				params.push({ kind: "TypeParam", name, constraint });
+			}
+			if (!this.match(T.COMMA)) break;
+		}
 		this.expect(T.RBRACKET);
 		return params;
 	},
