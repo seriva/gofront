@@ -589,7 +589,7 @@ Conventions used in the tasks:
   - Test: none (documentation).
   - Done when: every row in the Core/Types/Control-flow/Expressions tables has a fixture comment or an explicit `<!-- no-fixture: reason -->`.
 
-- [ ] **Task 0.5b — Parity matrix generator**
+- [x] **Task 0.5b — Parity matrix generator**
   - Files: new `test/unit/language/parity-matrix.test.js`
   - Do: parse the fixture comments from `language-support.md`; for each, compile as a `both` package via `compileHybrid` and run `Main`. Rows marked `diagnostic:` must produce that diagnostic on both targets. Any invalid module, internal error (`Unresolved identifier`, `Unsupported WASM instruction`, `Unknown struct`), or output mismatch fails with the row name.
   - Test: the generator itself; it must fail on the v1.7.0 tree for the rows that Phase 0 fixes (confirm before fixing, then watch the failures disappear task by task).
