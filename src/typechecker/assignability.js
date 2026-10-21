@@ -10,6 +10,7 @@ import {
 	FLOAT64,
 	isAny,
 	isComplex,
+	isComplex64,
 	isComplexOrNumeric,
 	isNil,
 	isNumeric,
@@ -111,6 +112,9 @@ export const assignabilityMethods = {
 			return ANY;
 		}
 		if (lt.kind === "untyped" && rt.kind === "untyped") return UNTYPED_COMPLEX;
+		if (lt.kind === "untyped") return rt;
+		if (rt.kind === "untyped") return lt;
+		if (isComplex64(lt) && isComplex64(rt)) return lt;
 		return COMPLEX128;
 	},
 

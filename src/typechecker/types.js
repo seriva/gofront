@@ -669,7 +669,7 @@ export const UNTYPED_BOOL = { kind: "untyped", base: "bool" };
 
 // ── Complex types ────────────────────────────────────────────
 export const COMPLEX128 = { kind: "basic", name: "complex128" };
-const COMPLEX64 = { kind: "basic", name: "complex64" };
+export const COMPLEX64 = { kind: "basic", name: "complex64" };
 export const UNTYPED_COMPLEX = { kind: "untyped", base: "complex128" };
 
 export const BASIC_TYPES = {
@@ -765,10 +765,26 @@ export function isTypedArraySlice(type) {
 
 export function isComplex(t) {
 	if (!t) return false;
-	if (t.kind === "basic" && (t.name === "complex128" || t.name === "complex64"))
+	if (
+		(t.kind === "basic" || t.kind === "TypeName" || t.kind === "Ident") &&
+		(t.name === "complex128" || t.name === "complex64")
+	)
 		return true;
 	if (t.kind === "untyped" && t.base === "complex128") return true;
 	if (t.kind === "named") return isComplex(t.underlying);
+	return false;
+}
+export function isComplex64(t) {
+	if (!t) return false;
+	if (
+		(t.kind === "basic" || t.kind === "TypeName" || t.kind === "Ident") &&
+		t.name === "complex64"
+	)
+		return true;
+	if (t.kind === "untyped" && t.base === "complex64") return true;
+	if (t.kind === "named") return isComplex64(t.underlying);
+	if (t.name === "complex64") return true;
+	if (t.underlying) return isComplex64(t.underlying);
 	return false;
 }
 export function isComplexOrNumeric(t) {

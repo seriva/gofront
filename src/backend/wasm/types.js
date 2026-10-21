@@ -2,6 +2,9 @@
 // Maps GoFront types to WasmGC types and manages type registry.
 
 import { SHARED_KINDS } from "../../typechecker/stdlib/shared.js";
+import { isComplex, isComplex64 } from "../../typechecker/types.js";
+
+export { isComplex, isComplex64 };
 
 // Name of the runtime's error struct (`errors.New`, `fmt.Errorf`, strconv).
 export const ERROR_STRUCT = "__errorString";
@@ -128,6 +131,17 @@ export function toWasmType(goType, checker = null, mod = null) {
 				return "externref";
 			case "bool":
 				return "i32";
+			case "complex128":
+				if (mod?.getComplexType) {
+					const info = mod.getComplexType("complex128");
+					return {
+						kind: "ref",
+						nullable: true,
+						typeIndex: info.typeIndex,
+						typeName: info.name,
+					};
+				}
+				return { kind: "ref", nullable: true, heapType: "struct" };
 			default:
 				return "i64";
 		}
@@ -158,6 +172,32 @@ export function toWasmType(goType, checker = null, mod = null) {
 
 			case "float64":
 				return "f64";
+
+			case "complex64": {
+				if (mod?.getComplexType) {
+					const info = mod.getComplexType("complex64");
+					return {
+						kind: "ref",
+						nullable: true,
+						typeIndex: info.typeIndex,
+						typeName: info.name,
+					};
+				}
+				return { kind: "ref", nullable: true, heapType: "struct" };
+			}
+
+			case "complex128": {
+				if (mod?.getComplexType) {
+					const info = mod.getComplexType("complex128");
+					return {
+						kind: "ref",
+						nullable: true,
+						typeIndex: info.typeIndex,
+						typeName: info.name,
+					};
+				}
+				return { kind: "ref", nullable: true, heapType: "struct" };
+			}
 
 			case "string":
 				return "externref";
@@ -426,7 +466,8 @@ export function isScalarType(goType, checker = null, mod = null) {
 		isSliceType(goType, checker) ||
 		isArrayType(goType, checker) ||
 		isMapType(goType, checker) ||
-		isFuncType(goType, checker)
+		isFuncType(goType, checker) ||
+		isComplex(goType)
 	) {
 		return false;
 	}
