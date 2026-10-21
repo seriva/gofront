@@ -400,31 +400,45 @@ export const statementGenMethods = {
 	},
 
 	_genComplexCompoundAssign(stmt) {
-		const lhsStr = stmt.lhs[0].name ?? this.genExpr(stmt.lhs[0]);
+		const l = stmt.lhs[0];
+		let lhsTarget;
+		let lhsRead;
+		if (l.kind === "IndexExpr" && l._mapValueType) {
+			const wrapField = this._namedWrapperField(l.expr._type, l.expr);
+			const base = wrapField
+				? `${this.genExpr(l.expr)}.${wrapField}`
+				: this.genExpr(l.expr);
+			const idx = this.genExpr(l.index);
+			lhsTarget = `${base}[${idx}]`;
+			lhsRead = `(${base}[${idx}] ?? { re: 0, im: 0 })`;
+		} else {
+			lhsTarget = l.name ?? this.genExpr(l);
+			lhsRead = lhsTarget;
+		}
 		const rhsExpr = this._genComplexOperand(stmt.rhs[0]);
 		const baseOp = stmt.op.slice(0, -1); // "+=" → "+"
 		let result;
 		switch (baseOp) {
 			case "+":
-				result = `{ re: ${lhsStr}.re + ${rhsExpr}.re, im: ${lhsStr}.im + ${rhsExpr}.im }`;
+				result = `{ re: ${lhsRead}.re + ${rhsExpr}.re, im: ${lhsRead}.im + ${rhsExpr}.im }`;
 				break;
 			case "-":
-				result = `{ re: ${lhsStr}.re - ${rhsExpr}.re, im: ${lhsStr}.im - ${rhsExpr}.im }`;
+				result = `{ re: ${lhsRead}.re - ${rhsExpr}.re, im: ${lhsRead}.im - ${rhsExpr}.im }`;
 				break;
 			case "*":
 				this.useHelper("cmul");
-				result = `__cmul(${lhsStr}, ${rhsExpr})`;
+				result = `__cmul(${lhsRead}, ${rhsExpr})`;
 				break;
 			case "/":
 				this.useHelper("cdiv");
-				result = `__cdiv(${lhsStr}, ${rhsExpr})`;
+				result = `__cdiv(${lhsRead}, ${rhsExpr})`;
 				break;
 			default:
 				throw new Error(
 					`unsupported complex compound assignment operator: ${stmt.op}`,
 				);
 		}
-		this.line(`${lhsStr} = ${result};`);
+		this.line(`${lhsTarget} = ${result};`);
 	},
 
 	_genIteratorReturn(stmt) {

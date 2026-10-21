@@ -571,25 +571,25 @@ Conventions used in the tasks:
 
 ### Phase 0.3: Complex numbers in WASM and parity matrix
 
-- [ ] **Task 0.4a — Complex numbers in WASM: representation and arithmetic**
+- [x] **Task 0.4a — Complex numbers in WASM: representation and arithmetic**
   - Files: `src/backend/wasm/types.js`, `src/backend/wasm/emit-exprs.js`, `src/backend/wasm/emit-builtins.js`
   - Do: `complex64`/`complex128` as immutable structs `{re, im}` of `f32`/`f64`. `complex`, `real`, `imag`, `+ - * /`, unary `-`, conversions between the two widths, and complex literals (`3i`). Division uses the same algorithm as the JS `__cdiv` helper.
   - Test: new `test/unit/wasm/complex.test.js` — parity tests for arithmetic, `complex64` rounding, division by `0+0i` yielding `Inf`/`NaN` without a panic.
   - Done when: `Unresolved identifier: complex` is gone and the parity tests pass.
 
-- [ ] **Task 0.4b — Complex numbers: equality, map keys, `fmt`**
+- [x] **Task 0.4b — Complex numbers: equality, map keys, `fmt`**
   - Files: `src/backend/wasm/emit-exprs.js` (`==`), `src/backend/wasm/emit-maps.js` (hash/eq), `src/backend/wasm/emit-stdlib.js` (`%v`/`%g`)
   - Do: `==`/`!=` compare both parts with float rules (`NaN` parts never equal); map keys hash both parts under the existing float-key rules; `%v` prints `(1+2i)` as Go does.
   - Test: `complex.test.js` — equality, a `map[complex128]int`, `fmt.Sprintf("%v %g", c, c)`.
   - Done when: both tests pass as parity tests.
 
-- [ ] **Task 0.5a — Language-support rows for the new parity items**
+- [x] **Task 0.5a — Language-support rows for the new parity items**
   - Files: `docs/language-support.md`
   - Do: add rows (with a one-line fixture snippet in a `<!-- fixture: … -->` comment the generator can read) for: per-iteration loop variables, `min`/`max`/`clear`, `[]rune` conversions, constant expressions, generic type aliases, method expressions on pointer receivers, runtime panics (index, nil map, nil deref), `goto` (expected diagnostic). Correct the method-expression row.
   - Test: none (documentation).
   - Done when: every row in the Core/Types/Control-flow/Expressions tables has a fixture comment or an explicit `<!-- no-fixture: reason -->`.
 
-- [ ] **Task 0.5b — Parity matrix generator**
+- [x] **Task 0.5b — Parity matrix generator**
   - Files: new `test/unit/language/parity-matrix.test.js`
   - Do: parse the fixture comments from `language-support.md`; for each, compile as a `both` package via `compileHybrid` and run `Main`. Rows marked `diagnostic:` must produce that diagnostic on both targets. Any invalid module, internal error (`Unresolved identifier`, `Unsupported WASM instruction`, `Unknown struct`), or output mismatch fails with the row name.
   - Test: the generator itself; it must fail on the v1.7.0 tree for the rows that Phase 0 fixes (confirm before fixing, then watch the failures disappear task by task).

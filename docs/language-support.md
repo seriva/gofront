@@ -7,65 +7,73 @@ packages is listed in the [hybrid guide](hybrid-wasm.md#what-wasm-packages-suppo
 
 | Feature | Status |
 |---|---|
-| Variables (`var`, `:=` short re-declaration) | ✓ |
-| Constants (`const`, `iota`, untyped constants) | ✓ |
-| Functions, multiple returns, named returns, variadic | ✓ |
-| `init()` functions | ✓ |
-| Closures / function literals | ✓ |
-| `async func` / `await` expressions | ✓ |
-| `defer`, `panic()` / `recover()` | ✓ |
-| `print` / `println` builtins | ✓ — compile to `console.log` |
+| Variables (`var`, `:=` short re-declaration) | ✓ <!-- fixture: package main; func Main() int { var a = 1; a, b := 2, 3; return a + b } --> |
+| Constants (`const`, `iota`, untyped constants) | ✓ <!-- fixture: package main; const ( A = iota; B; C ); func Main() int { return A + B + C } --> |
+| Constant expressions | ✓ <!-- fixture: package main; const X = (1 << 10) + 24; func Main() int { return X } --> |
+| Functions, multiple returns, named returns, variadic | ✓ <!-- fixture: package main; func f(a int, b int) int { return a + b }; func Main() int { return f(20, 22) } --> |
+| `init()` functions | ✓ <!-- fixture: package main; var x = 1; func init() { x += 41 }; func Main() int { return x } --> |
+| Closures / function literals | ✓ <!-- fixture: package main; func Main() int { f := func(x int) int { return x * 2 }; return f(21) } --> |
+| `async func` / `await` expressions | ✓ <!-- no-fixture: JS-only language extension; not supported in WASM --> |
+| `defer`, `panic()` / `recover()` | ✓ <!-- fixture: package main; func Main() int { defer func() { recover() }(); panic("test"); return 0 } --> |
+| `print` / `println` builtins | ✓ — compile to `console.log` <!-- no-fixture: output side-effect only --> |
+| Runtime panics (index, nil map, nil deref) | ✓ in WASM; JS strict mode in progress <!-- fixture: pending: Task 0.16 | package main; func Main() (res int) { defer func() { if recover() != nil { res = 1 } }(); var m map[string]int; m["k"] = 1; return 0 } --> |
 
 ### Types & data structures
 
 | Feature | Status |
 |---|---|
-| Structs + methods (value & pointer receivers) | ✓ |
-| Embedded structs (flattened fields + promoted methods) | ✓ |
-| Anonymous struct types | ✓ — compile to plain JS objects |
-| Interfaces (with embedding) | ✓ |
-| Slices (`append`, `len`, `make`) | ✓ |
-| Maps (`make`, `delete`, comma-ok) | ✓ |
-| Arrays with compile-time enforcement | ✓ — reject `append`, bounds checking, size matching, `[...]T` inference, compile-time `len()` |
-| Slice → array conversion (`[N]T(slice)`) | ✓ — Go 1.20 |
-| Pointers (`&x`, `*p`, `new(T)`) | ✓ — scalar locals boxed as `{ value: T }` for shared mutation |
-| `error` type | ✓ — interface `{ Error() string }`; custom error types, `errors.Is`/`Unwrap`, `%w` wrapping |
-| Complex numbers (`complex64`, `complex128`, `3i`) | ✓ — `complex()`, `real()`, `imag()` builtins; `__cmul`/`__cdiv` helpers |
-| Type definitions, type aliases (`type A = B`) | ✓ |
-| Methods on named non-struct types | ✓ — basic, slice, map and func types (`type Celsius float64`, `type Names []string`); value and pointer receivers; values stay plain JS values, methods dispatch statically, and values are boxed only inside interfaces; satisfies interfaces, type assertions and switches |
-| Type conversions, type assertions (plain & comma-ok) | ✓ |
-| Type switch (`switch v := x.(type)`) | ✓ — compiles to `if/else if` with `typeof` / `instanceof` |
-| Sized integers (`int8`–`int64`, `uint8`–`uint64`, `float32`) | ✓ — distinct types in the checker; `rune` = `int32`, `byte` = `uint8`; conversions truncate to width; arithmetic is float64 in `js` packages, exact in `wasm`/`both` |
-| Generics (`func F[T any]`, `type S[T any] struct`) | ✓ — type erasure to JS; generic functions, structs, constraints (`any`, `comparable`, interfaces, unions), type inference |
-| Struct field tags | ✓ — parsed and preserved; `json:"…"` tags drive the compile-time `encoding/json` codecs (no reflection) |
-| Struct and array equality (`a == b`) | ✓ — deep comparison via `__equal` helper |
+| Structs + methods (value & pointer receivers) | ✓ <!-- fixture: package main; type S struct { N int }; func (s S) Val() int { return s.N }; func (s *S) Inc() { s.N++ }; func Main() int { s := S{41}; (&s).Inc(); return s.Val() } --> |
+| Embedded structs (flattened fields + promoted methods) | ✓ <!-- fixture: package main; type Inner struct { X int }; func (i Inner) Get() int { return i.X }; type Outer struct { Inner }; func Main() int { o := Outer{Inner: Inner{X: 42}}; return o.X } --> |
+| Anonymous struct types | ✓ — compile to plain JS objects <!-- fixture: package main; func Main() int { s := struct { X int }{X: 42}; return s.X } --> |
+| Interfaces (with embedding) | ✓ <!-- fixture: package main; type Reader interface { Read() int }; type ReadCloser interface { Reader; Close() int }; type Impl struct { V int }; func (i Impl) Read() int { return i.V }; func (i Impl) Close() int { return 0 }; func Main() int { var rc ReadCloser = Impl{42}; return rc.Read() } --> |
+| Slices (`append`, `len`, `make`) | ✓ <!-- fixture: package main; func Main() int { s := make([]int, 0, 2); s = append(s, 10, 32); return len(s)*100 + s[0] + s[1] } --> |
+| Maps (`make`, `delete`, comma-ok) | ✓ <!-- fixture: package main; func Main() int { m := make(map[string]int); m["a"] = 42; v, ok := m["a"]; delete(m, "a"); _, ok2 := m["a"]; if ok && !ok2 { return v }; return 0 } --> |
+| Arrays with compile-time enforcement | ✓ — reject `append`, bounds checking, size matching, `[...]T` inference, compile-time `len()` <!-- fixture: package main; func Main() int { a := [...]int{1, 2, 3}; return len(a)*10 + a[1] } --> |
+| Slice → array conversion (`[N]T(slice)`) | ✓ — Go 1.20 <!-- no-fixture: pending WASM typed slice conversion in Task 0.8 --> |
+| Pointers (`&x`, `*p`, `new(T)`) | ✓ — scalar locals boxed as `{ value: T }` for shared mutation <!-- fixture: package main; func Main() int { x := 42; p := &x; *p = 100; return x } --> |
+| `error` type | ✓ — interface `{ Error() string }`; custom error types, `errors.Is`/`Unwrap`, `%w` wrapping <!-- fixture: package main; import "errors"; func Main() int { err := errors.New("err"); if err != nil && err.Error() == "err" { return 1 }; return 0 } --> |
+| Complex numbers (`complex64`, `complex128`, `3i`) | ✓ — `complex()`, `real()`, `imag()` builtins; `__cmul`/`__cdiv` helpers <!-- fixture: package main; func Main() int { c := complex(1.0, 2.0) + 3i; if real(c) == 1.0 && imag(c) == 5.0 { return 1 }; return 0 } --> |
+| Type definitions, type aliases (`type A = B`) | ✓ <!-- fixture: package main; type MyInt int; type Alias = MyInt; func Main() int { var a Alias = 42; return int(a) } --> |
+| Generic type aliases (Go 1.24) | ✓ — `type A[T any] = B[T]` <!-- fixture: pending: Task 0.14 | package main; type Box[T any] struct { Val T }; type Alias[T any] = Box[T]; func Main() int { b := Alias[int]{Val: 42}; return b.Val } --> |
+| Methods on named non-struct types | ✓ — basic, slice, map and func types (`type Celsius float64`, `type Names []string`); value and pointer receivers; values stay plain JS values, methods dispatch statically, and values are boxed only inside interfaces; satisfies interfaces, type assertions and switches <!-- fixture: package main; type MyInt int; func (m MyInt) Double() int { return int(m * 2) }; func Main() int { x := MyInt(21); return x.Double() } --> |
+| Type conversions, type assertions (plain & comma-ok) | ✓ <!-- fixture: package main; func Main() int { var x any = 42; n, ok := x.(int); if ok { return n }; return 0 } --> |
+| Type switch (`switch v := x.(type)`) | ✓ — compiles to `if/else if` with `typeof` / `instanceof` <!-- fixture: package main; func check(x any) int { switch v := x.(type) { case int: return v; default: return 0 } }; func Main() int { return check(42) } --> |
+| Sized integers (`int8`–`int64`, `uint8`–`uint64`, `float32`) | ✓ — distinct types in the checker; `rune` = `int32`, `byte` = `uint8`; conversions truncate to width; arithmetic is float64 in `js` packages, exact in `wasm`/`both` <!-- fixture: package main; func Main() int { var a int8 = 10; var b int16 = 20; var c int32 = 30; return int(a) + int(b) + int(c) } --> |
+| Generics (`func F[T any]`, `type S[T any] struct`) | ✓ — type erasure to JS; generic functions, structs, constraints (`any`, `comparable`, interfaces, unions), type inference <!-- fixture: package main; func Identity[T any](x T) T { return x }; func Main() int { return Identity(42) } --> |
+| Struct field tags | ✓ — parsed and preserved; `json:"…"` tags drive the compile-time `encoding/json` codecs (no reflection) <!-- no-fixture: struct tags are compile-time metadata for encoding/json --> |
+| Struct and array equality (`a == b`) | ✓ — deep comparison via `__equal` helper <!-- fixture: package main; type Pt struct { X, Y int }; func Main() int { p1 := Pt{1, 2}; p2 := Pt{1, 2}; p3 := Pt{1, 3}; if p1 == p2 && p1 != p3 { return 1 }; return 0 } --> |
+| Builtin `min`, `max`, and `clear` (Go 1.21) | ✗ — planned for Task 0.11 <!-- fixture: pending: Task 0.11 | package main; func Main() int { return min(10, 20) + max(1, 2) } --> |
 
 ### Control flow
 
 | Feature | Status |
 |---|---|
-| `if` / `else if` / `else` (with init statement) | ✓ |
-| `for` (C-style, condition-only, infinite, `range`) | ✓ |
-| `range` over slice, map, string, integer | ✓ |
-| Range over iterator functions (Go 1.23) | ✓ — `func(yield func(K, V) bool)` protocol; break/continue/return propagation |
-| `switch` / `fallthrough` (with init statement) | ✓ |
-| `break` / `continue` / labeled variants | ✓ |
-| Terminating statement analysis | ✓ — missing `return` in non-void functions is a type error |
+| `if` / `else if` / `else` (with init statement) | ✓ <!-- fixture: package main; func Main() int { if x := 10; x > 5 { return x } else { return 0 } } --> |
+| `for` (C-style, condition-only, infinite, `range`) | ✓ <!-- fixture: package main; func Main() int { sum := 0; for i := 0; i < 5; i++ { sum += i }; return sum } --> |
+| Per-iteration loop variables (Go 1.22) | ✓ in JS; WASM pending Task 0.10 <!-- fixture: pending: Task 0.10 | package main; func Main() int { var fs []func() int; for i := 0; i < 3; i++ { fs = append(fs, func() int { return i }) }; return fs[0]()*100 + fs[1]()*10 + fs[2]() } --> |
+| `range` over slice, map, string, integer | ✓ <!-- fixture: package main; func Main() int { sum := 0; for i, v := range []int{10, 20, 30} { sum += i + v }; return sum } --> |
+| Range over iterator functions (Go 1.23) | ✓ — `func(yield func(K, V) bool)` protocol; break/continue/return propagation <!-- fixture: package main; func count(yield func(int) bool) { yield(1); yield(2); yield(3) }; func Main() int { sum := 0; for v := range count { sum += v }; return sum } --> |
+| `switch` / `fallthrough` (with init statement) | ✓ <!-- fixture: package main; func Main() int { switch x := 2; x { case 1: return 10; case 2: return 20; default: return 0 } } --> |
+| `break` / `continue` / labeled variants | ✓ <!-- fixture: package main; func Main() int { sum := 0; Outer: for i := 0; i < 5; i++ { for j := 0; j < 5; j++ { if i == 2 { break Outer }; sum++ } }; return sum } --> |
+| Terminating statement analysis | ✓ — missing `return` in non-void functions is a type error <!-- no-fixture: compile-time analysis rejecting missing return --> |
+| `goto` statement | ✗ — targeted diagnostic: `goto is not supported; restructure with labeled break/continue` <!-- fixture: pending: Task 0.17 | diagnostic: goto is not supported => package main; func Main() int { goto L; L: return 1 } --> |
 
 ### Expressions & literals
 
 | Feature | Status |
 |---|---|
-| Arithmetic, comparison, logical, bitwise operators | ✓ — includes `&^` (bit clear) |
-| Compound assignment, increment / decrement | ✓ |
-| Slice expressions (`s[lo:hi]`, `s[lo:hi:max]`) | ✓ |
-| Variadic spread (`f(slice...)`, `append(a, b...)`) | ✓ |
-| Positional struct literals (`Point{1, 2}`) | ✓ |
-| Method expressions (`T.Method`) / method values (`x.Method`) | ✓ |
-| Multi-value function forwarding (`f(g())`) | ✓ |
-| Raw string literals (backticks), rune literals | ✓ |
-| Numeric separators (`1_000_000`), binary/octal/hex literals | ✓ |
-| `[]byte(s)` / `[]rune(s)` conversions | ✓ |
+| Arithmetic, comparison, logical, bitwise operators | ✓ — includes `&^` (bit clear) <!-- fixture: package main; func Main() int { a := 10 + 2; b := 5 &^ 1; if a > 10 && b == 4 { return a + b }; return 0 } --> |
+| Compound assignment, increment / decrement | ✓ <!-- fixture: package main; func Main() int { x := 10; x += 5; x++; x--; return x } --> |
+| Slice expressions (`s[lo:hi]`, `s[lo:hi:max]`) | ✓ <!-- fixture: package main; func Main() int { s := []int{1, 2, 3, 4, 5}; sub := s[1:3]; return sub[0]*10 + sub[1] } --> |
+| Variadic spread (`f(slice...)`, `append(a, b...)`) | ✓ <!-- fixture: package main; func Main() int { a := []int{10, 20}; b := []int{30, 40}; c := append(a, b...); return c[0] + c[1] + c[2] + c[3] } --> |
+| Positional struct literals (`Point{1, 2}`) | ✓ <!-- fixture: package main; type Pt struct { X, Y int }; func Main() int { p := Pt{10, 20}; return p.X + p.Y } --> |
+| Method expressions with value receiver (`T.Method`) / method values (`x.Method`) | ✓ (JS-only; WASM method values in Task 0.15) <!-- no-fixture: JS-only; WASM method expressions in Task 0.15 --> |
+| Method expressions on pointer receivers (`(*T).Method`) | ✗ — planned for Task 0.15 <!-- fixture: pending: Task 0.15 | package main; type C struct { N int }; func (c *C) Inc() { c.N++ }; func Main() int { f := (*C).Inc; c := &C{N: 1}; f(c); return c.N } --> |
+| Multi-value function forwarding (`f(g())`) | ✓ <!-- fixture: package main; func g() (int, int) { return 10, 20 }; func f(a, b int) int { return a + b }; func Main() int { return f(g()) } --> |
+| Raw string literals (backticks), rune literals | ✓ <!-- fixture: package main; func Main() int { s := `raw`; r := 'A'; if s == "raw" && r == 65 { return 1 }; return 0 } --> |
+| Numeric separators (`1_000_000`), binary/octal/hex literals | ✓ <!-- fixture: package main; func Main() int { a := 1_000; b := 0b101; c := 0o12; d := 0x1f; return a + b + c + d } --> |
+| `[]byte(s)` conversions | ✓ <!-- fixture: package main; func Main() int { b := []byte("hello"); return len(b)*10 + int(b[0]) } --> |
+| `[]rune(s)` conversions | ✗ — planned for Task 0.13 <!-- fixture: pending: Task 0.13 | package main; func Main() int { r := []rune("hello"); return len(r) } --> |
 
 ### Standard library shims
 

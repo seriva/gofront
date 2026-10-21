@@ -5,14 +5,17 @@ import {
 	ANY,
 	BOOL,
 	BROWSER_GLOBALS,
+	COMPLEX64,
 	COMPLEX128,
 	ERROR,
+	FLOAT32,
 	FLOAT64,
 	INT,
 	isAny,
 	isArray,
 	isBool,
 	isComplex,
+	isComplex64,
 	isComplexOrNumeric,
 	isNumeric,
 	isString,
@@ -517,6 +520,11 @@ export const expressionCheckMethods = {
 		if (isString(srcResolved) && isString(tgtResolved)) return;
 		if (isBool(srcResolved) && isBool(tgtResolved)) return;
 		if (
+			(isComplex(srcResolved) || isNumeric(srcResolved)) &&
+			isComplex(tgtResolved)
+		)
+			return;
+		if (
 			isString(srcResolved) &&
 			tgtResolved?.kind === "slice" &&
 			(tgtResolved.elem?.name === "byte" ||
@@ -952,6 +960,17 @@ export const expressionCheckMethods = {
 		}
 		if (crt.kind === "untyped" && cit.kind === "untyped")
 			return UNTYPED_COMPLEX;
+		if (crt.name === "float32" && cit.name === "float32") return COMPLEX64;
+		if (crt.name === "float64" && cit.name === "float64") return COMPLEX128;
+		if (crt.name === "float32" || cit.name === "float32") {
+			if (crt.name === "float64" || cit.name === "float64") {
+				this.err(
+					`invalid complex call: mismatched float types (${typeStr(crt)} and ${typeStr(cit)})`,
+					expr,
+				);
+			}
+			return COMPLEX64;
+		}
 		return COMPLEX128;
 	},
 
@@ -966,6 +985,7 @@ export const expressionCheckMethods = {
 			return ANY;
 		}
 		if (zt.kind === "untyped") return UNTYPED_FLOAT;
+		if (isComplex64(zt)) return FLOAT32;
 		return FLOAT64;
 	},
 

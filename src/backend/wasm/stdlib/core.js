@@ -8,6 +8,8 @@ import {
 	getMapKeyValTypes,
 	goTypeKey,
 	isArrayType,
+	isComplex,
+	isComplex64,
 	isErrorType,
 	isMapType,
 	isPointerToStruct,
@@ -17,6 +19,28 @@ import {
 	isUnhashableGoType,
 	toWasmType,
 } from "../types.js";
+
+function _isPointerKind(t) {
+	return (
+		t?.kind === "pointer" || t?.kind === "PointerType" || t?.kind === "StarExpr"
+	);
+}
+
+function _isSimplePrimitive(t) {
+	const n = t?.name ?? t;
+	return n === "string" || n === "bool";
+}
+
+function _getStructOrComplexInfo(mod, emitter, goType) {
+	if (isComplex(goType)) {
+		const is64 = isComplex64(goType);
+		return mod.getComplexType(is64 ? "complex64" : "complex128");
+	}
+	return (
+		emitter._resolveStructInfo({ _type: goType }) ??
+		(goType?.name ? mod.getStructType(goType.name) : null)
+	);
+}
 
 // `unicode/utf8` package constants.
 const UTF8_CONSTS = {
@@ -406,19 +430,16 @@ export class StdlibCoreEmitter {
 	// argument itself, or `Error()` on an `error` operand) happens in the first
 	// phase: such code can call Sprintf and reset the JS-side argument buffer,
 	_isCompositeGoType(goType) {
-		if (!goType) return false;
+		if (!goType || _isSimplePrimitive(goType)) return false;
 		if (isErrorType(goType) && this.mod.hasErrorType) return false;
-		if (goType.name === "string" || goType === "string") return false;
-		if (goType.name === "bool" || goType === "bool") return false;
 		return (
+			isComplex(goType) ||
 			isSliceType(goType, this.mod.checker) ||
 			isArrayType(goType, this.mod.checker) ||
 			isMapType(goType, this.mod.checker) ||
 			isStructType(goType, this.mod.checker, this.mod) ||
 			isPointerToStruct(goType, this.mod.checker, this.mod) ||
-			goType.kind === "pointer" ||
-			goType.kind === "PointerType" ||
-			goType.kind === "StarExpr"
+			_isPointerKind(goType)
 		);
 	}
 
@@ -802,9 +823,7 @@ export class StdlibCoreEmitter {
 		inCycle,
 		nextSeen,
 	) {
-		const structInfo =
-			this._resolveStructInfo({ _type: goType }) ??
-			(goType?.name ? this.mod.getStructType(goType.name) : null);
+		const structInfo = _getStructOrComplexInfo(this.mod, this, goType);
 		const resTmp = this.acquireTemp("externref");
 
 		this.pushInstruction({ op: "local.get", index: valTmp });
@@ -893,12 +912,10 @@ export class StdlibCoreEmitter {
 
 		const isStructPtr = isPointerToStruct(goType, this.mod.checker, this.mod);
 		const isStruct =
-			isStructType(goType, this.mod.checker, this.mod) || isStructPtr;
-		const isScalarPtr =
-			!isStructPtr &&
-			(goType?.kind === "pointer" ||
-				goType?.kind === "PointerType" ||
-				goType?.kind === "StarExpr");
+			isStructType(goType, this.mod.checker, this.mod) ||
+			isStructPtr ||
+			isComplex(goType);
+		const isScalarPtr = !isStructPtr && _isPointerKind(goType);
 
 		if (isScalarPtr) {
 			this._emitScalarPtrToExternref(valTmp, valW);
