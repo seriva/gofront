@@ -113,6 +113,7 @@ export class Lexer {
 		this.filename = filename;
 		this.target = null;
 		this.targetDirective = null;
+		this.intrinsics = new Map(); // line -> name of a //gofront:intrinsic
 	}
 
 	// ── Primitives ──────────────────────────────────────────────
@@ -158,6 +159,8 @@ export class Lexer {
 				while (this.pos < this.src.length && this.peek() !== "\n")
 					this.advance();
 				const comment = this.src.slice(start, this.pos);
+				const intrinsic = comment.match(/^\/\/gofront:intrinsic\s+(\S+)/);
+				if (intrinsic) this.intrinsics.set(line, intrinsic[1]);
 				const match = comment.match(/^\/\/gofront:target\s+(\S+)/);
 				if (match) {
 					this.target = match[1];
@@ -541,6 +544,7 @@ export class Lexer {
 		this.push(T.EOF, "", this.line, this.col);
 		this.tokens.target = this.target;
 		this.tokens.targetDirective = this.targetDirective;
+		this.tokens.intrinsics = this.intrinsics;
 		return this.tokens;
 	}
 	_readPlusOp(l, c) {
