@@ -5,7 +5,9 @@
 import {
 	assert,
 	assertEqual,
+	compile,
 	compileHybrid,
+	runJs,
 	section,
 	test,
 } from "../helpers.js";
@@ -624,3 +626,114 @@ parity(
 	1,
 	"type S struct {\n\tA [2]int\n}",
 );
+
+section("Arrays — composite literals are zero-filled to their length");
+
+parity(
+	"partial array literal pads with zeros",
+	`	a := [3]int{1}
+	return a[0]*100 + a[1]*10 + a[2] + len(a)`,
+	103,
+);
+
+parity(
+	"empty array literal equals the zero array",
+	`	a := [3]int{}
+	var b [3]int
+	if a == b {
+		return a[2] + 1
+	}
+	return 0`,
+	1,
+);
+
+parity(
+	"keyed array literal places elements by index",
+	`	a := [5]int{2: 7}
+	b := [5]int{1, 3: 4, 5}
+	return a[0] + a[2]*10 + a[4] + b[0]*10000 + b[1]*1000 + b[2]*100 + b[3]*10 + b[4]`,
+	10115,
+);
+
+parity(
+	"keyed nested array literal pads the inner arrays",
+	`	x := [3][2]int{1: {5}}
+	return x[0][1] + x[1][0]*10 + x[1][1] + x[2][1] + len(x[2])`,
+	52,
+);
+
+parity(
+	"ellipsis array literal with an index key",
+	`	a := [...]int{4: 1}
+	return len(a)*10 + a[3] + a[4]`,
+	51,
+);
+
+parity(
+	"ellipsis array length counts elements after a key",
+	`	a := [...]int{1, 3: 4, 5}
+	return len(a)*10 + a[4]`,
+	55,
+);
+
+parity(
+	"nested array literal pads inner and outer arrays",
+	`	x := [2][3]int{{1}}
+	var z [2][3]int
+	z[0][0] = 1
+	if x == z {
+		return x[0][2] + x[1][2] + 1
+	}
+	return 0`,
+	1,
+);
+
+parity(
+	"array of structs literal pads with zero structs",
+	`	ps := [3]P{{1}}
+	ps[2].X += 5
+	return ps[0].X*10 + ps[2].X`,
+	15,
+	"type P struct {\n\tX int\n}",
+);
+
+parity(
+	"string array literal pads with empty strings",
+	`	s := [3]string{"a"}
+	return len(s[0] + s[1] + s[2])`,
+	1,
+);
+
+parity(
+	"bool array literal pads with false",
+	`	b := [2]bool{true}
+	if b[0] && !b[1] {
+		return 1
+	}
+	return 0`,
+	1,
+);
+
+parity(
+	"float array literal pads with zeros",
+	`	f := [3]float64{1.5}
+	return int(f[0]*2 + f[1] + f[2])`,
+	3,
+);
+
+// JS only: a named array type literal does not compile in WASM yet.
+test("named array type literal pads with zeros (js)", () => {
+	const { js, errors } = compile(`package main
+
+type V [3]int
+
+func main() {
+	v := V{1}
+	var w V
+	w[0] = 1
+	println(v == w, v[2] + 1)
+}
+`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true 1");
+});
