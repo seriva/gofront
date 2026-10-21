@@ -1,7 +1,12 @@
 // src/backend/wasm/emit-stmts.js
 // FunctionEmitter mixin: statement emission (decls, assignment, control flow, return).
 
-import { isIntRangeType, isRangeFor } from "../../lower/range.js";
+import {
+	getOrCreateIteratorFuncLit,
+	isIntRangeType,
+	isIteratorRangeFor,
+	isRangeFor,
+} from "../../lower/range.js";
 import {
 	getMapKeyValTypes,
 	isArrayType,
@@ -2263,7 +2268,100 @@ export class StmtsEmitter {
 		restoreShadowed();
 	}
 
+	_initIterState(stmt) {
+		if (!stmt._iterStateName) return;
+		let stateLoc = this.resolveLocal(stmt._iterStateName);
+		if (!stateLoc) {
+			this.allocLocal(stmt._iterStateName, "i64", {
+				kind: "basic",
+				name: "int",
+			});
+			stateLoc = this.resolveLocal(stmt._iterStateName);
+		}
+		if (stateLoc?.isBoxed) {
+			this.pushInstruction({ op: "i64.const", value: 0n });
+			this.pushInstruction({
+				op: "struct.new",
+				typeIndex: stateLoc.boxInfo.typeIndex,
+			});
+			this.pushInstruction({ op: "local.set", index: stateLoc.index });
+		}
+	}
+
+	_emitIteratorRange(stmt, rangeExpr) {
+		const funcLit = getOrCreateIteratorFuncLit(stmt);
+		const iterExpr = rangeExpr.expr;
+		const iterType = this._resolveExprGoType(iterExpr) ?? iterExpr._type;
+		const iterInfo = this.mod.getClosureType(iterType);
+		const iterWType = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: iterInfo.typeIndex,
+		};
+
+		this._initIterState(stmt);
+
+		const iterTmp = this.acquireTemp(iterWType);
+		this.emitExpr(iterExpr, iterWType);
+		this.pushInstruction({ op: "local.set", index: iterTmp });
+
+		const yieldClosureInfo = this.mod.getClosureType(funcLit._type ?? funcLit);
+		const yieldClosureWType = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: yieldClosureInfo.typeIndex,
+		};
+		const yieldTmp = this.acquireTemp(yieldClosureWType);
+		this.emitFuncLit(funcLit);
+		this.pushInstruction({ op: "local.set", index: yieldTmp });
+
+		// Outer block for break
+		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushControl("break", stmt.label);
+
+		// Push env of iterTmp (param 0)
+		this.pushInstruction({ op: "local.get", index: iterTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: iterInfo.typeIndex,
+			fieldIndex: 1,
+		});
+
+		// Push yield callback closure (param 1)
+		this.pushInstruction({ op: "local.get", index: yieldTmp });
+
+		// Push funcref of iterTmp
+		this.pushInstruction({ op: "local.get", index: iterTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: iterInfo.typeIndex,
+			fieldIndex: 0,
+		});
+
+		// Call iterator via call_ref
+		this.pushInstruction({
+			op: "call_ref",
+			typeIndex: iterInfo.funcTypeIndex,
+		});
+
+		// If iterator returned any values, drop them
+		for (let i = 0; i < (iterInfo.returnWTypes?.length ?? 0); i++) {
+			this.pushInstruction("drop");
+		}
+
+		this.pushInstruction("end");
+
+		this.releaseTemp(yieldTmp, yieldClosureWType);
+		this.releaseTemp(iterTmp, iterWType);
+	}
+
 	emitForStmt(stmt) {
+		if (isIteratorRangeFor(stmt)) {
+			const rangeExpr =
+				stmt.cond?.kind === "RangeExpr" ? stmt.cond : stmt.init.rhs[0];
+			this._emitIteratorRange(stmt, rangeExpr);
+			return;
+		}
 		if (isRangeFor(stmt) || stmt.cond?.kind === "RangeExpr") {
 			this.emitRangeForStmt(stmt);
 			return;
@@ -2648,7 +2746,40 @@ export class StmtsEmitter {
 		this.pushInstruction("end");
 	}
 
+	_tryEmitYieldBranch(stmt) {
+		if (!this.funcDecl._isYieldClosure || stmt.label) return false;
+		const isContinue = stmt.keyword === "continue";
+		const targetRole = isContinue ? "continue" : "break";
+		const hasInnerTarget = this.controlStack.some((c) => c.role === targetRole);
+		if (hasInnerTarget) return false;
+
+		if (stmt.keyword === "break") {
+			if (this.funcDecl._iterStateName) {
+				const stateLoc = this.resolveLocal(this.funcDecl._iterStateName);
+				if (stateLoc?.isBoxed) {
+					this.pushInstruction({ op: "local.get", index: stateLoc.index });
+					this.pushInstruction({ op: "i64.const", value: 1n });
+					this.pushInstruction({
+						op: "struct.set",
+						typeIndex: stateLoc.boxInfo.typeIndex,
+						fieldIndex: 0,
+					});
+				}
+			}
+			this.pushInstruction({ op: "i32.const", value: 0 });
+			this.pushInstruction({ op: "return" });
+			return true;
+		}
+		if (stmt.keyword === "continue") {
+			this.pushInstruction({ op: "i32.const", value: 1 });
+			this.pushInstruction({ op: "return" });
+			return true;
+		}
+		return false;
+	}
+
 	emitBranchStmt(stmt) {
+		if (this._tryEmitYieldBranch(stmt)) return;
 		const isContinue = stmt.keyword === "continue";
 		const depth = this.resolveBranchDepth(stmt.label, isContinue);
 		this.pushInstruction({ op: "br", depth });
