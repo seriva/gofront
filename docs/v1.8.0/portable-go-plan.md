@@ -619,7 +619,7 @@ Conventions used in the tasks:
   - Test: `stdlib-go.test.js` — the coexistence fixture (use `cmp` plus a user package `cmp`); a temporarily broken overlay copied to a temp dir reports at the call site.
   - Done when: both tests pass.
 
-- [ ] **Task 0.6d — `//gofront:intrinsic` with the deadline timer**
+- [x] **Task 0.6d — `//gofront:intrinsic` with the deadline timer**
   - Files: `src/parser/declarations.js` (directive), `src/typechecker/declarations.js`, `src/backend/js/statements.js`, `src/backend/wasm/emit-stdlib.js`
   - Do: a body-less func declaration preceded by `//gofront:intrinsic <name>` resolves to a backend-provided implementation. Only `deadline_timer(ns int64, fire func())` exists: JS arms `setTimeout`; WASM returns immediately (cooperative model). Any other name is a compile error `unknown intrinsic`.
   - Test: `stdlib-go.test.js` — a temp Go-source package calling the intrinsic compiles on both targets; an unknown intrinsic name is rejected.

@@ -151,6 +151,13 @@ const HELPER_MAP = [
 	["simd", HELPER_SIMD],
 ];
 
+// JS bodies of `//gofront:intrinsic` functions (names: INTRINSICS in
+// typechecker/types.js).  The WASM backend keeps their empty body.
+const JS_INTRINSICS = {
+	deadline_timer: ([ns, fire]) =>
+		`setTimeout(${fire}, Math.max(0, Number(${ns}) / 1e6));`,
+};
+
 export class CodeGen {
 	// jsImports:       Map<importPath, string[]> — npm package imports to emit at top of file
 	// bundledPackages: Set<string>               — GoFront package names bundled inline;
@@ -817,6 +824,12 @@ export class CodeGen {
 		const asyncPrefix = decl.async ? "async " : "";
 		const srcLine = decl._line ?? null;
 		this.line(`${asyncPrefix}function ${name}(${params}) {`, srcLine);
+		if (decl.intrinsic) {
+			const args = decl.params.map((p) => p.name);
+			this.indented(() => this.line(JS_INTRINSICS[decl.intrinsic](args)));
+			this.line("}");
+			return;
+		}
 		const prevBoxed = this._boxedVars;
 		this._boxedVars = new Set();
 		this._scanAddressTaken(decl.body);
