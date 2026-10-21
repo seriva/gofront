@@ -206,3 +206,66 @@ func main() { println(errors.ErrBroken != nil) }
 		},
 	);
 });
+
+section("Go-source stdlib: //gofront:intrinsic");
+
+const TIMER_PKG = `//go:build gofront
+
+//gofront:target both
+
+package timer
+
+//gofront:intrinsic deadline_timer
+func armDeadline(ns int64, fire func())
+
+// After arms fire after ms milliseconds (JS); in WASM it returns at once.
+func After(ms int, fire func()) {
+	armDeadline(int64(ms)*1000000, fire)
+}
+`;
+
+test("deadline_timer arms setTimeout in JS and is a no-op in wasm", async () => {
+	const project = (target) => ({
+		"lib/lib.go": `//gofront:target ${target}
+package lib
+
+import "timer"
+
+func Run() string {
+	timer.After(1, func() { println("fired") })
+	return "armed"
+}
+`,
+		"main.go": `package main\n\nimport "./lib"\n\nfunc main() { println(lib.Run()) }\n`,
+	});
+	await withTempDir({ "timer/timer.go": TIMER_PKG }, async (stdlib) => {
+		const js = await compileHybridProject(project("both"), {
+			stdlibRoot: stdlib,
+		});
+		const wasm = await compileHybridProject(project("wasm"), {
+			stdlibRoot: stdlib,
+		});
+		assert(wasm.wasm instanceof Uint8Array, "expected linked wasm");
+		await new Promise((r) => setTimeout(r, 20));
+		assertEqual(js.lines.join("\n"), "armed\nfired");
+		assertEqual(wasm.lines.join("\n"), "armed");
+	});
+});
+
+test("an unknown intrinsic name is rejected", () => {
+	withTempDir(
+		{
+			"stdlib/timer/timer.go": TIMER_PKG.replace(
+				"deadline_timer",
+				"sleep_forever",
+			),
+			"app/main.go": `package main\n\nimport "timer"\n\nfunc main() { timer.After(1, func() {}) }\n`,
+		},
+		(dir) => {
+			assertThrows(
+				() => compileDir(join(dir, "app"), { stdlibRoot: join(dir, "stdlib") }),
+				"unknown intrinsic 'sleep_forever'",
+			);
+		},
+	);
+});

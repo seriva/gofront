@@ -625,6 +625,14 @@ export const WASM_STDLIB_MEMBERS = new Map([
 
 export const VALID_TARGETS = new Set(["js", "wasm", "both"]);
 
+// Backend-provided implementations for body-less Go-source stdlib functions
+// marked `//gofront:intrinsic <name>`: name -> required signature.  New
+// intrinsics need a plan change.
+export const INTRINSICS = new Map([
+	// JS: setTimeout(fire, ns/1e6); WASM: returns at once (cooperative model).
+	["deadline_timer", "func(int64, func() void) void"],
+]);
+
 // ── Static operator sets (module-level for reuse) ────────────
 export const CMP_OPS = new Set(["==", "!=", "<", ">", "<=", ">="]);
 export const LOG_OPS = new Set(["&&", "||"]);

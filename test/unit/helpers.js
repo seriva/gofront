@@ -363,9 +363,12 @@ export function compileHybrid(source, options = {}) {
 // Compiles the root directory through the real compiler pipeline, embeds the
 // linked app.wasm bytes and imports the resulting ES module so the test can
 // call the facade's exports directly.  `exports` lists the top-level names to
-// re-export from the bundle.
+// re-export from the bundle; other options go to compileDir.
 
-export async function compileHybridProject(files, { exports = [] } = {}) {
+export async function compileHybridProject(
+	files,
+	{ exports = [], ...compileOptions } = {},
+) {
 	const root = mkdtempSync(join(tmpdir(), "gofront-hybrid-"));
 	try {
 		for (const [rel, src] of Object.entries(files)) {
@@ -373,7 +376,7 @@ export async function compileHybridProject(files, { exports = [] } = {}) {
 			mkdirSync(dirname(full), { recursive: true });
 			writeFileSync(full, src);
 		}
-		const result = compileDir(root);
+		const result = compileDir(root, compileOptions);
 		const parts = [];
 		if (result.wasm) {
 			assertValidWasm(result.wasm);

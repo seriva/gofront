@@ -20,6 +20,7 @@ import {
 	ANY,
 	defaultType,
 	ERROR,
+	INTRINSICS,
 	isVoid,
 	Scope,
 	TAINTED_ANY,
@@ -786,7 +787,24 @@ export class TypeChecker {
 		this.globals.define(decl.name, funcType);
 	}
 
+	_checkIntrinsic(decl) {
+		const want = INTRINSICS.get(decl.intrinsic);
+		if (!want) return this.err(`unknown intrinsic '${decl.intrinsic}'`, decl);
+		if (!decl._bodyless)
+			return this.err(
+				`intrinsic '${decl.intrinsic}' must not have a body`,
+				decl,
+			);
+		const got = typeStr(this.globals.symbols.get(decl.name));
+		if (got !== want)
+			this.err(
+				`intrinsic '${decl.intrinsic}' must have type ${want}, not ${got}`,
+				decl,
+			);
+	}
+
 	checkFuncDecl(decl, outer) {
+		if (decl.intrinsic) this._checkIntrinsic(decl);
 		if (
 			(this.target === "wasm" || this.target === "both") &&
 			(decl.async || decl.isAsync)
