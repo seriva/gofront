@@ -28,7 +28,8 @@
 	},
 	"type": "module",
 	"files": [
-		"src/"
+		"src/",
+		"runtime/"
 	],
 	"bin": {
 		"gofront": "src/index.js"

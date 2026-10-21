@@ -138,6 +138,10 @@ export const expressionCheckMethods = {
 				const t = scope.lookup(expr.name);
 				if (!t) return this.err(`Undefined: '${expr.name}'`, expr);
 				if (this.types.has(expr.name)) expr._isTypeRef = true;
+				// Go-source stdlib loading: record package-scope references so the
+				// loader can mangle them (see compiler.js loadStdlibPackage).
+				if (this._pkgRefs && scope.lookupScope(expr.name) === this.globals)
+					this._pkgRefs.add(`${this._currentFile}:${expr._line}:${expr._col}`);
 				if (
 					(this.target === "wasm" || this.target === "both") &&
 					BROWSER_GLOBALS.has(expr.name) &&
@@ -390,7 +394,7 @@ export const expressionCheckMethods = {
 		}
 		const inner = new Scope(scope);
 		for (const p of expr.params)
-			inner.define(p.name, p.type ? this.resolveTypeNode(p.type, scope) : ANY);
+			inner.define(p.name, p.type ? this._paramType(p, scope) : ANY);
 		const ret = expr.returnType
 			? this.resolveTypeNode(expr.returnType, scope)
 			: VOID;
@@ -407,6 +411,7 @@ export const expressionCheckMethods = {
 			kind: "func",
 			params: paramTypes,
 			returns: [ret],
+			variadic: expr.params.at(-1)?.variadic === true,
 			async: expr.async,
 		};
 	},
@@ -873,8 +878,28 @@ export const expressionCheckMethods = {
 			);
 	},
 
+	// WASM packs a variadic call's trailing arguments into a slice, which it
+	// cannot do for `f(g())` yet.  Emitter-backed stdlib calls (`fmt.X`) are
+	// not packed; GoFront and Go-source package functions are.
+	_checkMultiForwardVariadic(fnType, expr) {
+		if (!expr._multiForward || !fnType.variadic) return;
+		if (this.target !== "wasm" && this.target !== "both") return;
+		const ns =
+			expr.func?.kind === "SelectorExpr" ? expr.func.expr?._type : null;
+		const emitterBacked =
+			ns?.kind === "namespace" &&
+			!ns._gofront &&
+			!ns._mangle?.has(expr.func.field);
+		if (emitterBacked) return;
+		this.err(
+			"passing multiple return values to a variadic function is not supported in wasm packages; assign them to variables first",
+			expr,
+		);
+	},
+
 	_checkCallArgs(fnType, argTypes, expr, scope = null) {
 		this._checkArgCount(fnType, argTypes, expr);
+		this._checkMultiForwardVariadic(fnType, expr);
 		const maxLen = fnType.variadic
 			? argTypes.length
 			: Math.min(fnType.params.length, argTypes.length);

@@ -151,6 +151,13 @@ const HELPER_MAP = [
 	["simd", HELPER_SIMD],
 ];
 
+// JS bodies of `//gofront:intrinsic` functions (names: INTRINSICS in
+// typechecker/types.js).  The WASM backend keeps their empty body.
+const JS_INTRINSICS = {
+	deadline_timer: ([ns, fire]) =>
+		`setTimeout(${fire}, Math.max(0, Number(${ns}) / 1e6));`,
+};
+
 export class CodeGen {
 	// jsImports:       Map<importPath, string[]> — npm package imports to emit at top of file
 	// bundledPackages: Set<string>               — GoFront package names bundled inline;
@@ -772,9 +779,16 @@ export class CodeGen {
 		this._currentSrcFileIdx = prevFileIdx;
 	}
 
+	// JS parameter names; a variadic Go parameter is a rest parameter.
+	_paramNames(params) {
+		return params.map((p, i) =>
+			p.variadic && i === params.length - 1 ? `...${p.name}` : p.name,
+		);
+	}
+
 	// Static methods of named non-struct types take the receiver as first parameter.
 	_methodSignature(decl, staticNamed, recvParam) {
-		const params = decl.params.map((p) => p.name);
+		const params = this._paramNames(decl.params);
 		const asyncPrefix = decl.async ? "async " : "";
 		if (!staticNamed)
 			return `${asyncPrefix}${decl.name}(${params.join(", ")}) {`;
@@ -806,14 +820,16 @@ export class CodeGen {
 
 	genFuncDecl(decl, nameOverride) {
 		const name = nameOverride ?? decl.name;
-		const params = decl.params
-			.map((p, i) =>
-				p.variadic && i === decl.params.length - 1 ? `...${p.name}` : p.name,
-			)
-			.join(", ");
+		const params = this._paramNames(decl.params).join(", ");
 		const asyncPrefix = decl.async ? "async " : "";
 		const srcLine = decl._line ?? null;
 		this.line(`${asyncPrefix}function ${name}(${params}) {`, srcLine);
+		if (decl.intrinsic) {
+			const args = decl.params.map((p) => p.name);
+			this.indented(() => this.line(JS_INTRINSICS[decl.intrinsic](args)));
+			this.line("}");
+			return;
+		}
 		const prevBoxed = this._boxedVars;
 		this._boxedVars = new Set();
 		this._scanAddressTaken(decl.body);
