@@ -179,6 +179,60 @@ func main() {
 	assertErrorContains(errors, "out of bounds");
 });
 
+function keyErrors(body, prelude = "") {
+	return compile(`
+package main
+${prelude}
+func main() {
+${body}
+}
+`).errors;
+}
+
+test("error: non-constant keyed array index", () => {
+	const errors = keyErrors(`	k := 1
+	a := [3]int{k: 2}
+	_ = a`);
+	assertErrorContains(errors, "index k must be integer constant");
+});
+
+test("error: negative keyed array index", () => {
+	const errors = keyErrors(`	a := [3]int{-1: 2}
+	_ = a`);
+	assertErrorContains(errors, "must be non-negative integer constant");
+});
+
+test("error: duplicate keyed array index", () => {
+	const errors = keyErrors(`	a := [3]int{0: 1, 0: 2}
+	_ = a`);
+	assertErrorContains(errors, "duplicate index 0 in array or slice literal");
+});
+
+test("error: keyed index duplicating a positional element", () => {
+	const errors = keyErrors(`	a := [3]int{1, 0: 2}
+	_ = a`);
+	assertErrorContains(errors, "duplicate index 0 in array or slice literal");
+});
+
+test("error: constant keyed index out of bounds", () => {
+	const errors = keyErrors(
+		`	a := [3]int{K: 2}
+	_ = a`,
+		"const K = 3",
+	);
+	assertErrorContains(errors, "array index 3 out of bounds");
+});
+
+test("no error: keyed array indices from constants and iota", () => {
+	const errors = keyErrors(
+		`	a := [3]string{B: "b", A: "a", C - 1 + 1: "c"}
+	b := [4]int{int(A) + 1: 1, K * 2: 2}
+	_, _ = a, b`,
+		"const (\n\tA = iota\n\tB\n\tC\n)\n\nconst K = 1",
+	);
+	assertEqual(errors.length, 0);
+});
+
 test("no error: exact element count matches", () => {
 	const { js, errors } = compile(`
 package main
