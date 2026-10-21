@@ -4,7 +4,9 @@
 import { fileURLToPath } from "node:url";
 import {
 	assertEqual,
+	assertThrows,
 	compileHybrid,
+	runWasm,
 	section,
 	summarize,
 	test,
@@ -297,6 +299,203 @@ func Main() int {
 	const res = hybrid.run("Main");
 	assertEqual(res.wasmRes, 0n);
 	assertEqual(res.jsRes, 0);
+});
+
+// ── Task 0.2b — Labels, Return, Defer, Panic, Re-yield ────────
+
+section("Range-over-func WASM: Task 0.2b edge cases");
+
+test("labeled continue outer crosses yield closure", () => {
+	const src = `
+package main
+
+func Main() int {
+	sum := 0
+Outer:
+	for i := 0; i < 3; i++ {
+		iter := func(yield func(int) bool) {
+			if !yield(1) { return }
+			if !yield(2) { return }
+			if !yield(3) { return }
+		}
+		for v := range iter {
+			if v == 2 {
+				continue Outer
+			}
+			sum += v
+		}
+	}
+	return sum
+}
+`;
+	const hybrid = compileHybrid(src);
+	const res = hybrid.run("Main");
+	assertEqual(res.wasmRes, 3n);
+	assertEqual(res.jsRes, 3);
+});
+
+test("labeled break outer crosses yield closure", () => {
+	const src = `
+package main
+
+func Main() int {
+	sum := 0
+Outer:
+	for i := 0; i < 5; i++ {
+		iter := func(yield func(int) bool) {
+			if !yield(10) { return }
+			if !yield(20) { return }
+			if !yield(30) { return }
+		}
+		for v := range iter {
+			if i == 1 && v == 20 {
+				break Outer
+			}
+			sum += v
+		}
+	}
+	return sum
+}
+`;
+	const hybrid = compileHybrid(src);
+	const res = hybrid.run("Main");
+	assertEqual(res.wasmRes, 70n);
+	assertEqual(res.jsRes, 70);
+});
+
+test("return from iterator body returns from enclosing function", () => {
+	const src = `
+package main
+
+func Find() int {
+	iter := func(yield func(int) bool) {
+		if !yield(10) { return }
+		if !yield(20) { return }
+		if !yield(30) { return }
+	}
+	for v := range iter {
+		if v == 20 {
+			return 200
+		}
+	}
+	return 0
+}
+
+func Main() int {
+	return Find()
+}
+`;
+	const hybrid = compileHybrid(src);
+	const res = hybrid.run("Main");
+	assertEqual(res.wasmRes, 200n);
+	assertEqual(res.jsRes, 200);
+});
+
+test("defer in enclosing function runs once on return from iterator body", () => {
+	const src = `
+package main
+
+func Find(log *int) int {
+	defer func() {
+		*log += 1
+	}()
+	iter := func(yield func(int) bool) {
+		if !yield(10) { return }
+		if !yield(20) { return }
+		if !yield(30) { return }
+	}
+	for v := range iter {
+		if v == 20 {
+			return 200
+		}
+	}
+	return 0
+}
+
+func Main() int {
+	log := 0
+	res := Find(&log)
+	return res + log
+}
+`;
+	const hybrid = compileHybrid(src);
+	const res = hybrid.run("Main");
+	assertEqual(res.wasmRes, 201n);
+	assertEqual(res.jsRes, 201);
+});
+
+test("panic in iterator body propagates through iterator to recover in enclosing function", () => {
+	const src = `
+package main
+
+func Main() (recovered int) {
+	defer func() {
+		if r := recover(); r != nil {
+			recovered = 1
+		}
+	}()
+	iter := func(yield func(int) bool) {
+		yield(1)
+	}
+	for v := range iter {
+		if v == 1 {
+			panic("boom")
+		}
+	}
+	return 0
+}
+`;
+	const hybrid = compileHybrid(src);
+	const res = hybrid.run("Main");
+	assertEqual(res.wasmRes, 1n);
+	assertEqual(res.jsRes, 1);
+});
+
+test("re-yield after body returned false panics with Go message", () => {
+	const src = `
+package main
+
+func Main() {
+	iter := func(yield func(int) bool) {
+		yield(1)
+		yield(2)
+	}
+	for v := range iter {
+		if v == 1 {
+			break
+		}
+	}
+}
+`;
+	const hybrid = compileHybrid(src);
+	assertThrows(() => {
+		const { wasm, stringTable } = hybrid;
+		runWasm(wasm, { stringTable }).exports.Main();
+	}, "range function continued iteration after function for loop body returned false");
+	hybrid.run("Main");
+});
+
+test("Seq2 with struct values copies values", () => {
+	const src = `
+package main
+
+type Point struct { X int }
+
+func Main() int {
+	pt := Point{X: 10}
+	iter := func(yield func(int, Point) bool) {
+		yield(1, pt)
+	}
+	for _, p := range iter {
+		p.X = 99
+	}
+	return pt.X
+}
+`;
+	const hybrid = compileHybrid(src);
+	const res = hybrid.run("Main");
+	assertEqual(res.wasmRes, 10n);
+	assertEqual(res.jsRes, 10);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
