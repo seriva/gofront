@@ -752,6 +752,45 @@ parity(
 	3,
 );
 
+parity(
+	"large sparse array literal keeps given elements and zero slots",
+	`	a := [1000]int{1: 2, 999: 3}
+	b := [...]int{500: 4, 5}
+	ps := [100]P{7: {9}}
+	ps[8].X++
+	return a[0] + a[1]*10 + a[998] + a[999]*100 + len(b)*1000 + b[501]*1000000 + ps[7].X*10000000 + ps[8].X*100000000`,
+	195502320,
+	"type P struct {\n\tX int\n}",
+);
+
+// JS only: WASM keeps array.new_fixed (limited to 10000 elements).
+test("large mostly-zero array literals are not expanded slot by slot (js)", () => {
+	const { js, errors } = compile(`package main
+
+func main() {
+	b := [100000]byte{}
+	c := [65536]int{1: 2, 65535: 3}
+	d := [64]string{"x"}
+	println(len(b), b[99999], c[0], c[1], c[65535], len(c), d[0] + d[63] + "|")
+}
+`);
+	assertEqual(errors.length, 0);
+	assert(js.length < 5000, `output is ${js.length} bytes`);
+	assertEqual(runJs(js), "100000 0 0 2 3 65536 x|");
+});
+
+test("small array literals stay inline (js)", () => {
+	const { js, errors } = compile(`package main
+
+func main() {
+	a := [3]int{1}
+	println(a[0], a[2])
+}
+`);
+	assertEqual(errors.length, 0);
+	assert(js.includes("[1, 0, 0]"), "inline literal");
+});
+
 // JS only: a named array type literal does not compile in WASM yet.
 test("named array type literal pads with zeros (js)", () => {
 	const { js, errors } = compile(`package main
