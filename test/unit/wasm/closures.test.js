@@ -2,6 +2,7 @@
 // Tests for Phase 4d: Closures, Function Values, and Trampolines in WASM.
 
 import {
+	assert,
 	assertEqual,
 	compileHybrid,
 	compileWasm,
@@ -419,4 +420,100 @@ func Main() int {
 		);
 	}
 	assertEqual(threwWasm, true);
+});
+
+section("WASM Closures — Per-iteration loop variables (Go 1.22)");
+
+test("closures in a three-clause for capture a distinct i per iteration", () => {
+	const src = `
+package main
+
+func Main() int {
+	var fs []func() int
+	for i := 0; i < 3; i++ {
+		fs = append(fs, func() int { return i })
+	}
+	return fs[0]()*100 + fs[1]()*10 + fs[2]()
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.jsRes, 12);
+});
+
+test("a closure writing i affects its own iteration and the post statement sees it", () => {
+	const src = `
+package main
+
+func Main() int {
+	s := 0
+	for i := 0; i < 10; i++ {
+		inc := func() { i += 2 }
+		inc()
+		s = s*10 + i
+	}
+	return s
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.jsRes, 2591);
+});
+
+test("a later write through one iteration's closure leaves the others alone", () => {
+	const src = `
+package main
+
+func Main() int {
+	var gets []func() int
+	var sets []func()
+	for i := 0; i < 3; i++ {
+		gets = append(gets, func() int { return i })
+		sets = append(sets, func() { i = 100 })
+	}
+	sets[0]()
+	return gets[0]()*100 + gets[1]()*10 + gets[2]()
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.jsRes, 10012);
+});
+
+test("continue still gets a fresh per-iteration variable", () => {
+	const src = `
+package main
+
+func Main() int {
+	var fs []func() int
+	for i := 0; i < 4; i++ {
+		if i%2 == 1 {
+			continue
+		}
+		fs = append(fs, func() int { return i })
+	}
+	return fs[0]()*10 + fs[1]()
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.jsRes, 2);
+});
+
+test("an uncaptured loop variable stays a plain local (no struct.new in the loop)", () => {
+	const src = `
+package main
+
+func Main() int {
+	s := 0
+	for i := 0; i < 10; i++ {
+		s += i
+	}
+	return s
+}
+`;
+	const res = compileHybrid(src, { emitWat: true });
+	assertEqual(res.run("Main").jsRes, 45);
+	const start = res.wat.indexOf('(export "Main")');
+	const main = res.wat.slice(start, res.wat.indexOf("\n  (func", start));
+	assert(
+		!main.includes("struct.new"),
+		`unexpected struct.new in Main:\n${main}`,
+	);
 });

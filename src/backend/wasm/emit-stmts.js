@@ -2492,6 +2492,8 @@ export class StmtsEmitter {
 		// End inner continue block
 		this.pushInstruction("end");
 
+		this._emitPerIterationBoxes(stmt);
+
 		if (iv) {
 			this.pushInstruction({ op: "local.get", index: ivLocalInfo.index });
 			this.pushInstruction({ op: "i32.const", value: iv.step });
@@ -2516,6 +2518,31 @@ export class StmtsEmitter {
 			} else {
 				this.locals.delete(iv.name);
 			}
+		}
+	}
+
+	// Go 1.22 per-iteration loop variables: a three-clause `for` variable that
+	// a closure captures lives in a box (uncaptured ones stay plain locals).
+	// Before the post statement, move the current value into a fresh box, so
+	// closures created in this iteration keep their own copy while the post
+	// statement (and the next iteration) works on the new one.
+	_emitPerIterationBoxes(stmt) {
+		if (stmt.init?.kind !== "DefineStmt") return;
+		for (const l of stmt.init.lhs ?? []) {
+			if (l.kind !== "Ident" || l.name === "_") continue;
+			const info = this.locals.get(l.name);
+			if (!info?.isBoxed) continue;
+			this.pushInstruction({ op: "local.get", index: info.index });
+			this.pushInstruction({
+				op: "struct.get",
+				typeIndex: info.boxInfo.typeIndex,
+				fieldIndex: 0,
+			});
+			this.pushInstruction({
+				op: "struct.new",
+				typeIndex: info.boxInfo.typeIndex,
+			});
+			this.pushInstruction({ op: "local.set", index: info.index });
 		}
 	}
 

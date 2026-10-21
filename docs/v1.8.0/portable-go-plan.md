@@ -651,7 +651,7 @@ Conventions used in the tasks:
   - Test: new `test/unit/types/shadowing.test.js` — `func Array()`, `var document int`, a local `len := 3`, in `js`, `wasm` and `both` packages; `Array redeclared` must not appear.
   - Done when: all pass and `npm run check` on `example/` is unchanged.
 
-- [ ] **Task 0.10 — Per-iteration loop variables in WASM**
+- [x] **Task 0.10 — Per-iteration loop variables in WASM**
   - Files: `src/backend/wasm/emit-stmts.js` (three-clause `for`), `src/lower/captures.js`
   - Do: when a three-clause `for` variable is captured by a closure in the body, allocate a fresh box per iteration: copy the value in at the top of the body and back out before the post statement. Uncaptured variables keep a plain local.
   - Test: `test/unit/wasm/closures.test.js` — the `fs[0]()*100 + fs[1]()*10 + fs[2]()` parity test (`12`); a closure that writes `i`; an uncaptured loop emits no `struct.new` in the loop (assert on WAT).
