@@ -138,7 +138,10 @@ function cloneAst(node) {
 	if (Array.isArray(node)) return node.map(cloneAst);
 	const copy = {};
 	for (const [k, v] of Object.entries(node)) {
-		if (k.startsWith("_")) continue;
+		// Side tables are dropped, except the inferred type arguments of a
+		// generic call inside a generic body: substitution needs them to
+		// specialise the callee (`isNaN(x)` inside `Compare[T]`).
+		if (k.startsWith("_") && k !== "_typeArgs") continue;
 		copy[k] = cloneAst(v);
 	}
 	return copy;
