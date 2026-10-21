@@ -656,6 +656,37 @@ parity(
 );
 
 parity(
+	"keyed array literal with a named constant index",
+	`	a := [5]int{K: 7}
+	return a[0]*10 + a[2]`,
+	7,
+	"const K = 2",
+);
+
+parity(
+	"keyed array literal with a constant expression index",
+	`	a := [5]int{1 + 1: 7, 3: 8}
+	return a[0]*100 + a[2]*10 + a[3]`,
+	78,
+);
+
+parity(
+	"ellipsis array length uses a named constant key",
+	`	a := [...]int{K: 7}
+	return len(a)*10 + a[4]`,
+	57,
+	"const K = 4",
+);
+
+parity(
+	"positional elements follow a constant key",
+	`	a := [...]int{K: 1, 2}
+	return len(a)*10 + a[2]`,
+	32,
+	"const K = 1",
+);
+
+parity(
 	"keyed nested array literal pads the inner arrays",
 	`	x := [3][2]int{1: {5}}
 	return x[0][1] + x[1][0]*10 + x[1][1] + x[2][1] + len(x[2])`,
