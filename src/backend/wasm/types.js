@@ -495,6 +495,20 @@ export function isSliceType(goType, checker = null) {
 	return goType.kind === "slice" || goType.kind === "SliceType";
 }
 
+// `[]rune` / `[]int32` (also through named types): the target of `[]rune(s)`.
+export function isRuneSlice(goType, checker = null) {
+	if (!isSliceType(goType, checker)) return false;
+	let t = goType;
+	while (t && !t.elem) {
+		if (t.kind === "named") t = t.underlying;
+		else if (t.kind === "TypeName" || t.kind === "Ident")
+			t = checker?.types?.get(t.name);
+		else return false;
+	}
+	const name = t?.elem?.name;
+	return name === "rune" || name === "int32";
+}
+
 // `gofront/shared` linear-memory buffer: returns the SHARED_KINDS entry
 // (elem, ctor, bytes, key) or null.
 export function getSharedInfo(goType, checker = null) {
