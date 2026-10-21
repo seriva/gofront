@@ -29,6 +29,7 @@ import { log } from "./colors.js";
 import { parseDts } from "./dts-parser.js";
 import { Lexer } from "./lexer.js";
 import { lower } from "./lower/index.js";
+import { forEachChild } from "./lower/walk.js";
 import { Parser } from "./parser/index.js";
 import {
 	isBuiltinPackage,
@@ -268,8 +269,9 @@ function linkWasmUnits(
 	for (const u of units) {
 		for (const [k, v] of u.types) types.set(k, v);
 		for (const b of u.bundledPackages) bundledPackages.add(b);
-		programs.push(...u.programs);
+		programs.push(...u.programs.map((p) => cloneAstForWasm(p)));
 	}
+	dequalifyBundledRefs(programs, bundledPackages);
 	const checker = {
 		types,
 		errors: [],
@@ -292,6 +294,58 @@ function linkWasmUnits(
 		callMain: rootTarget === "wasm",
 		sourceMappingURL,
 	});
+}
+
+// The WASM pipeline rewrites ASTs in place (package dequalification,
+// monomorphisation).  Parsed ASTs are cached across builds and shared with JS
+// codegen, so the link works on a structural copy; side tables (`_type`, …)
+// are shared by reference.
+function cloneAstForWasm(node, seen = new Map()) {
+	if (!node || typeof node !== "object") return node;
+	const prev = seen.get(node);
+	if (prev) return prev;
+	const copy = Array.isArray(node) ? [] : {};
+	seen.set(node, copy);
+	if (Array.isArray(node)) {
+		for (const n of node) copy.push(cloneAstForWasm(n, seen));
+		return copy;
+	}
+	for (const [k, v] of Object.entries(node)) {
+		copy[k] = k.charCodeAt(0) === 95 ? v : cloneAstForWasm(v, seen);
+	}
+	return copy;
+}
+
+// The linked module is flat, so `util.Two` names the top-level `Two`.  Done on
+// the link copy before monomorphisation, whose re-check of all programs has no
+// package namespaces.  A local variable that shadows the package is typed and
+// is left alone.
+function isBundledSelector(node, bundled) {
+	const base = node.expr;
+	return (
+		base?.kind === "Ident" &&
+		bundled.has(base.name) &&
+		(base._type == null || base._type.kind === "namespace")
+	);
+}
+
+function dequalifyBundledRefs(node, bundled) {
+	if (!node || typeof node !== "object") return;
+	if (Array.isArray(node)) {
+		for (const n of node) dequalifyBundledRefs(n, bundled);
+		return;
+	}
+	if (node.kind === "SelectorExpr" && isBundledSelector(node, bundled)) {
+		node.kind = "Ident";
+		node.name = node.field;
+		delete node.expr;
+		delete node.field;
+	} else if (node.kind === "TypeName" || node.kind === "GenericTypeName") {
+		const dot = node.name?.indexOf(".") ?? -1;
+		if (dot > 0 && bundled.has(node.name.slice(0, dot)))
+			node.name = node.name.slice(dot + 1);
+	}
+	forEachChild(node, (child) => dequalifyBundledRefs(child, bundled));
 }
 
 // The linked module is one flat namespace (like the JS bundle), so a top-level

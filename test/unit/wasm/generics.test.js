@@ -4,6 +4,7 @@
 import {
 	assertEqual,
 	compileHybrid,
+	compileHybridProject,
 	compileWasm,
 	runWasm,
 	section,
@@ -589,4 +590,30 @@ func Main() float64 {
 	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
 	assertEqual(wasmRes, 9.5);
 	assertEqual(jsRes, wasmRes);
+});
+
+test("linked wasm program with generics and a cross-package call", async () => {
+	const res = await compileHybridProject({
+		"util/util.go": `//gofront:target both
+package util
+
+func Two() int { return 2 }
+
+func Id[T any](x T) T { return x }
+`,
+		"lib/lib.go": `//gofront:target wasm
+package lib
+
+import "../util"
+
+func Run() int { return util.Two() + util.Id(40) }
+`,
+		"main.go": `package main
+
+import "./lib"
+
+func main() { println(lib.Run()) }
+`,
+	});
+	assertEqual(res.lines.join("\n"), "42");
 });

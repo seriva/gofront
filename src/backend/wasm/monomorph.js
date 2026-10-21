@@ -707,9 +707,9 @@ export function monomorphise(programs, checker) {
 		}
 	}
 
-	for (const p of progs) {
-		monoChecker.check(p);
-	}
+	// One pass over all programs: declarations of every linked package are
+	// visible to the others (cross-package references are dequalified).
+	monoChecker.checkAll(progs);
 
 	return { programs: progs, checker: monoChecker };
 }
