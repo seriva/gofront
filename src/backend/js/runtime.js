@@ -145,6 +145,9 @@ export const HELPER_IFEQ = `var __ifeq = __ifeq || function(a, b) {
 export const HELPER_EQUAL = `var __equal = __equal || function __equal(a, b) {
   if (a === b) return true;
   if (a === null || b === null) return false;
+  if (a.__target !== undefined && b.__target !== undefined) {
+    return a.__target === b.__target && a.__index === b.__index;
+  }
   if (a instanceof Date && b instanceof Date) return a.getTime() === b.getTime();
   if (ArrayBuffer.isView(a) && ArrayBuffer.isView(b)) {
     if (a.byteLength !== b.byteLength || a.length !== b.length) return false;
@@ -172,6 +175,15 @@ export const HELPER_CMUL = `var __cmul = __cmul || function(a, b) {
 export const HELPER_CDIV = `var __cdiv = __cdiv || function(a, b) {
   const d = b.re * b.re + b.im * b.im;
   return { re: (a.re * b.re + a.im * b.im) / d, im: (a.im * b.re - a.re * b.im) / d };
+};`;
+
+export const HELPER_PTREQ = `var __ptreq = __ptreq || function __ptreq(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.__target !== undefined && b.__target !== undefined) {
+    return a.__target === b.__target && a.__index === b.__index;
+  }
+  return false;
 };`;
 
 // Panic/defer runtime.  \`stack\` holds the in-flight panic of every frame

@@ -185,10 +185,25 @@ export function toWasmType(goType, checker = null, mod = null) {
 			) {
 				return baseWType;
 			}
-			if (mod?.getBoxType) {
+			if (mod?.getPtrType) {
+				const ptr = mod.getPtrType(goType.base);
+				if (mod.getBoxType) mod.getBoxType(goType.base);
+				if (ptr)
+					return {
+						kind: "ref",
+						nullable: true,
+						typeIndex: ptr.typeIndex,
+						typeName: ptr.name,
+					};
+			} else if (mod?.getBoxType) {
 				const box = mod.getBoxType(goType.base);
 				if (box)
-					return { kind: "ref", nullable: true, typeIndex: box.typeIndex };
+					return {
+						kind: "ref",
+						nullable: true,
+						typeIndex: box.typeIndex,
+						typeName: box.name,
+					};
 			}
 		}
 		return { kind: "ref", nullable: true, heapType: "any" };
@@ -402,6 +417,24 @@ export function isPointerToStruct(goType, checker = null, mod = null) {
 		return isStructType(goType.expr ?? goType.operand, checker, mod);
 	}
 	return false;
+}
+
+export function isScalarType(goType, checker = null, mod = null) {
+	if (!goType) return false;
+	if (
+		isStructType(goType, checker, mod) ||
+		isSliceType(goType, checker) ||
+		isArrayType(goType, checker) ||
+		isMapType(goType, checker) ||
+		isFuncType(goType, checker)
+	) {
+		return false;
+	}
+	const wType = toWasmType(goType, checker, mod);
+	if (typeof wType === "object" && wType !== null && wType.kind === "ref") {
+		return false;
+	}
+	return true;
 }
 
 export function isSliceType(goType, checker = null) {

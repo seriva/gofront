@@ -282,13 +282,24 @@ function classifyPointer(t, mod) {
 	if (base.k === "anon_struct" && !base.ptr) return { ...base, ptr: true };
 	if (base.k === "time" && !base.ptr) return { ...base, ptr: true };
 	const boxInfo = mod.getBoxType(t.base);
+	const ptrInfo = mod.getPtrType ? mod.getPtrType(t.base) : null;
+	const accInfo = mod.getAccType ? mod.getAccType(t.base) : null;
 	const key = `${base.k}${base.unsigned ? "_u" : ""}_${boxInfo.typeIndex}`;
 	return {
 		k: "ptr_box",
 		base,
 		boxInfo,
+		ptrInfo,
+		accInfo,
 		key,
-		wType: { kind: "ref", nullable: true, typeIndex: boxInfo.typeIndex },
+		wType: ptrInfo
+			? {
+					kind: "ref",
+					nullable: true,
+					typeIndex: ptrInfo.typeIndex,
+					typeName: ptrInfo.name,
+				}
+			: { kind: "ref", nullable: true, typeIndex: boxInfo.typeIndex },
 	};
 }
 
@@ -1272,7 +1283,7 @@ export function addBoundaryHelpers(mod, meta) {
 	}
 
 	for (const [key, desc] of needs.boxes) {
-		const { boxInfo } = desc;
+		const { boxInfo, ptrInfo, accInfo } = desc;
 		const ref = desc.wType;
 		const ti = boxInfo.typeIndex;
 		const w = boxInfo.wType;
@@ -1282,26 +1293,172 @@ export function addBoundaryHelpers(mod, meta) {
 			[EXT],
 			[...getIn(0, w), { op: "struct.new", typeIndex: ti }, ...toExt(ref)],
 		);
-		addFunc(
-			`__box_get_${key}`,
-			[EXT],
-			[extType(w)],
-			[
-				...getIn(0, ref),
-				{ op: "struct.get", typeIndex: ti, fieldIndex: 0 },
-				...toExt(w),
-			],
-		);
-		addFunc(
-			`__box_set_${key}`,
-			[EXT, extType(w)],
-			[],
-			[
-				...getIn(0, ref),
-				...getIn(1, w),
-				{ op: "struct.set", typeIndex: ti, fieldIndex: 0 },
-			],
-		);
+		if (ptrInfo && accInfo) {
+			addFunc(
+				`__box_get_${key}`,
+				[EXT],
+				[extType(w)],
+				[
+					...getIn(0, ref),
+					{ op: "local.set", index: 1 },
+					{ op: "local.get", index: 1 },
+					{
+						op: "ref.test",
+						typeIndex: boxInfo.typeIndex,
+						typeName: boxInfo.name,
+					},
+					{ op: "if", blockType: w },
+					{ op: "local.get", index: 1 },
+					{
+						op: "ref.cast",
+						typeIndex: boxInfo.typeIndex,
+						typeName: boxInfo.name,
+					},
+					{
+						op: "struct.get",
+						typeIndex: boxInfo.typeIndex,
+						typeName: boxInfo.name,
+						fieldIndex: 0,
+					},
+					"else",
+					{ op: "local.get", index: 1 },
+					{
+						op: "ref.cast",
+						typeIndex: accInfo.typeIndex,
+						typeName: accInfo.name,
+					},
+					{
+						op: "struct.get",
+						typeIndex: accInfo.typeIndex,
+						typeName: accInfo.name,
+						fieldIndex: 0,
+					},
+					{ op: "local.get", index: 1 },
+					{
+						op: "ref.cast",
+						typeIndex: accInfo.typeIndex,
+						typeName: accInfo.name,
+					},
+					{
+						op: "struct.get",
+						typeIndex: accInfo.typeIndex,
+						typeName: accInfo.name,
+						fieldIndex: 1,
+					},
+					{ op: "local.get", index: 1 },
+					{
+						op: "ref.cast",
+						typeIndex: accInfo.typeIndex,
+						typeName: accInfo.name,
+					},
+					{
+						op: "struct.get",
+						typeIndex: accInfo.typeIndex,
+						typeName: accInfo.name,
+						fieldIndex: 2,
+					},
+					{ op: "call_ref", typeIndex: accInfo.getFuncTypeIndex },
+					"end",
+					...toExt(w),
+				],
+				true,
+				[ref],
+			);
+			addFunc(
+				`__box_set_${key}`,
+				[EXT, extType(w)],
+				[],
+				[
+					...getIn(0, ref),
+					{ op: "local.set", index: 2 },
+					...getIn(1, w),
+					{ op: "local.set", index: 3 },
+					{ op: "local.get", index: 2 },
+					{
+						op: "ref.test",
+						typeIndex: boxInfo.typeIndex,
+						typeName: boxInfo.name,
+					},
+					{ op: "if", blockType: "void" },
+					{ op: "local.get", index: 2 },
+					{
+						op: "ref.cast",
+						typeIndex: boxInfo.typeIndex,
+						typeName: boxInfo.name,
+					},
+					{ op: "local.get", index: 3 },
+					{
+						op: "struct.set",
+						typeIndex: boxInfo.typeIndex,
+						typeName: boxInfo.name,
+						fieldIndex: 0,
+					},
+					"else",
+					{ op: "local.get", index: 2 },
+					{
+						op: "ref.cast",
+						typeIndex: accInfo.typeIndex,
+						typeName: accInfo.name,
+					},
+					{
+						op: "struct.get",
+						typeIndex: accInfo.typeIndex,
+						typeName: accInfo.name,
+						fieldIndex: 0,
+					},
+					{ op: "local.get", index: 2 },
+					{
+						op: "ref.cast",
+						typeIndex: accInfo.typeIndex,
+						typeName: accInfo.name,
+					},
+					{
+						op: "struct.get",
+						typeIndex: accInfo.typeIndex,
+						typeName: accInfo.name,
+						fieldIndex: 1,
+					},
+					{ op: "local.get", index: 3 },
+					{ op: "local.get", index: 2 },
+					{
+						op: "ref.cast",
+						typeIndex: accInfo.typeIndex,
+						typeName: accInfo.name,
+					},
+					{
+						op: "struct.get",
+						typeIndex: accInfo.typeIndex,
+						typeName: accInfo.name,
+						fieldIndex: 3,
+					},
+					{ op: "call_ref", typeIndex: accInfo.setFuncTypeIndex },
+					"end",
+				],
+				true,
+				[ref, w],
+			);
+		} else {
+			addFunc(
+				`__box_get_${key}`,
+				[EXT],
+				[extType(w)],
+				[
+					...getIn(0, ref),
+					{ op: "struct.get", typeIndex: ti, fieldIndex: 0 },
+					...toExt(w),
+				],
+			);
+			addFunc(
+				`__box_set_${key}`,
+				[EXT, extType(w)],
+				[],
+				[
+					...getIn(0, ref),
+					...getIn(1, w),
+					{ op: "struct.set", typeIndex: ti, fieldIndex: 0 },
+				],
+			);
+		}
 	}
 
 	for (const [key, desc] of needs.maps) {
@@ -2547,18 +2704,42 @@ export function generateFacade(
 	out.push(`const ${P}env = {};`);
 	for (const [key, desc] of needs.funcs) {
 		const names = desc.params.map((_, i) => `a${i}`);
-		const args = desc.params.map((d, i) =>
-			isPtrBoth(d) ? `${P}view_${d.name}(${names[i]})` : outExpr(d, names[i]),
-		);
-		const call = `fn(${args.join(", ")})`;
+		const hasPtrBox = desc.params.some((d) => d.k === "ptr_box");
 		let body;
-		if (desc.returns.length === 0) body = `${call};`;
-		else if (desc.returns.length === 1)
-			body = `return ${inExpr(desc.returns[0], call)};`;
-		else
-			body = `const __r = ${call}; return [${desc.returns
-				.map((d, i) => inExpr(d, `__r[${i}]`))
-				.join(", ")}];`;
+		if (hasPtrBox) {
+			const argVars = desc.params.map((_, i) => `__arg${i}`);
+			const decls = desc.params.map(
+				(d, i) =>
+					`const __arg${i} = ${isPtrBoth(d) ? `${P}view_${d.name}(${names[i]})` : outExpr(d, names[i])};`,
+			);
+			const call = `fn(${argVars.join(", ")})`;
+			const writebacks = desc.params
+				.map((d, i) =>
+					d.k === "ptr_box"
+						? `if (__arg${i} && __arg${i}.value !== undefined) __w.__box_set_${d.key}(${names[i]}, ${inExpr(d.base, `__arg${i}.value`)});`
+						: "",
+				)
+				.filter(Boolean);
+			if (desc.returns.length === 0) {
+				body = `${decls.join(" ")} ${call}; ${writebacks.join(" ")}`;
+			} else if (desc.returns.length === 1) {
+				body = `${decls.join(" ")} const __r = ${call}; ${writebacks.join(" ")} return ${inExpr(desc.returns[0], "__r")};`;
+			} else {
+				body = `${decls.join(" ")} const __r = ${call}; ${writebacks.join(" ")} return [${desc.returns.map((d, i) => inExpr(d, `__r[${i}]`)).join(", ")}];`;
+			}
+		} else {
+			const args = desc.params.map((d, i) =>
+				isPtrBoth(d) ? `${P}view_${d.name}(${names[i]})` : outExpr(d, names[i]),
+			);
+			const call = `fn(${args.join(", ")})`;
+			if (desc.returns.length === 0) body = `${call};`;
+			else if (desc.returns.length === 1)
+				body = `return ${inExpr(desc.returns[0], call)};`;
+			else
+				body = `const __r = ${call}; return [${desc.returns
+					.map((d, i) => inExpr(d, `__r[${i}]`))
+					.join(", ")}];`;
+		}
 		const sig = ["fn", ...names].join(", ");
 		out.push(
 			`${P}env["__invoke$${key}"] = (${sig}) => { try { ${body} } catch (__e) { if (__w && __w.__push_panic) __w.__push_panic(__e.message ?? String(__e)); throw __e; } };`,
@@ -2596,12 +2777,17 @@ ${desc.fields.map((f) => `\to.${f.name} = ${outExpr(f.desc, `__w.__get_${name}_$
 	for (const [key, desc] of needs.boxes) {
 		out.push(`function ${P}boxin_${key}(b) {
 	if (b == null) return null;
+	if (b.__ref) return b.__ref;
 	const v = b.value !== undefined ? b.value : ${zeroExpr(desc.base)};
 	return __w.__box_new_${key}(${inExpr(desc.base, "v")});
 }
 function ${P}boxout_${key}(r) {
 	if (r == null) return null;
-	return { "value": ${outExpr(desc.base, `__w.__box_get_${key}(r)`)} };
+	return {
+		__ref: r,
+		get value() { return ${outExpr(desc.base, `__w.__box_get_${key}(r)`)}; },
+		set value(v) { __w.__box_set_${key}(r, ${inExpr(desc.base, "v")}); }
+	};
 }
 function ${P}boxback_${key}(r, b) {
 	if (r == null || b == null) return;

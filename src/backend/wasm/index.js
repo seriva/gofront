@@ -26,9 +26,12 @@ import {
 	getMapKeyValTypes,
 	getReceiverTypeName,
 	goTypeKey,
+	isArrayType,
 	isInterfaceType,
 	isMapType,
 	isNonEmptyInterface,
+	isScalarType,
+	isSliceType,
 	isTestingT,
 	toWasmType,
 } from "./types.js";
@@ -272,7 +275,11 @@ class ModuleEmitter {
 		this._openRec = null; // rec group receiving new types while structs are resolved
 
 		this.structTypes = new Map(); // name -> struct info
+		this.ptrTypes = new Map(); // key -> ptr supertype info
 		this.boxTypes = new Map(); // wType key -> box info
+		this.accTypes = new Map(); // key -> acc info
+		this.structAccessorHelpers = new Map(); // key -> helper info
+		this.elemAccessorHelpers = new Map(); // key -> helper info
 		this.ifaceBoxTypes = new Map(); // key -> iface box info
 		this.arrayTypes = new Map(); // wType key -> array info
 		this.sliceTypes = new Map(); // wType key -> slice info
@@ -512,21 +519,224 @@ class ModuleEmitter {
 		return info;
 	}
 
+	getPtrType(goType) {
+		const key = goTypeKey(goType);
+		if (this.ptrTypes.has(key)) {
+			return this.ptrTypes.get(key);
+		}
+		const typeIndex = this._getTotalTypeCount();
+		const name = `$ptr_${key}`;
+		const typeEntry = {
+			form: "struct",
+			name,
+			sub: true,
+			fields: [],
+		};
+		this._pushType(typeEntry);
+		const ptrInfo = { key, name, typeIndex, typeEntry, goType };
+		this.ptrTypes.set(key, ptrInfo);
+		return ptrInfo;
+	}
+
 	getBoxType(goType) {
 		const key = goTypeKey(goType);
 		if (this.boxTypes.has(key)) {
 			return this.boxTypes.get(key);
 		}
+		const ptrInfo = this.getPtrType(goType);
 		const wType = toWasmType(goType, this.checker, this);
 		const typeIndex = this._getTotalTypeCount();
+		const name = `$box_${key}`;
 		const typeEntry = {
 			form: "struct",
+			name,
+			sub: true,
+			superType: ptrInfo.name,
+			superTypeIndex: ptrInfo.typeIndex,
 			fields: [{ type: wType, mutable: true }],
 		};
 		this._pushType(typeEntry);
-		const boxInfo = { key, typeIndex, typeEntry, wType, goType };
+		const boxInfo = {
+			key,
+			name,
+			typeIndex,
+			typeEntry,
+			ptrType: ptrInfo,
+			ptrTypeIndex: ptrInfo.typeIndex,
+			wType,
+			goType,
+		};
 		this.boxTypes.set(key, boxInfo);
 		return boxInfo;
+	}
+
+	getAccType(goType) {
+		const key = goTypeKey(goType);
+		if (this.accTypes.has(key)) {
+			return this.accTypes.get(key);
+		}
+		const ptrInfo = this.getPtrType(goType);
+		const wType = toWasmType(goType, this.checker, this);
+		const getFuncTypeIndex = this.getTypeIndex(["anyref", "i32"], [wType]);
+		const setFuncTypeIndex = this.getTypeIndex(["anyref", "i32", wType], []);
+
+		const typeIndex = this._getTotalTypeCount();
+		const name = `$acc_${key}`;
+		const typeEntry = {
+			form: "struct",
+			name,
+			sub: true,
+			superType: ptrInfo.name,
+			superTypeIndex: ptrInfo.typeIndex,
+			fields: [
+				{ type: "anyref", mutable: false },
+				{ type: "i32", mutable: false },
+				{
+					type: {
+						kind: "ref",
+						nullable: false,
+						typeIndex: getFuncTypeIndex,
+					},
+					mutable: false,
+				},
+				{
+					type: {
+						kind: "ref",
+						nullable: false,
+						typeIndex: setFuncTypeIndex,
+					},
+					mutable: false,
+				},
+			],
+		};
+		this._pushType(typeEntry);
+		const accInfo = {
+			key,
+			name,
+			typeIndex,
+			typeEntry,
+			ptrType: ptrInfo,
+			ptrTypeIndex: ptrInfo.typeIndex,
+			getFuncTypeIndex,
+			setFuncTypeIndex,
+			wType,
+			goType,
+		};
+		this.accTypes.set(key, accInfo);
+		return accInfo;
+	}
+
+	getStructAccessorHelpers(structInfo, fieldIndex) {
+		const field = structInfo.fields[fieldIndex];
+		const key = `${structInfo.name}.${field.name}`;
+		if (this.structAccessorHelpers.has(key)) {
+			return this.structAccessorHelpers.get(key);
+		}
+		const fieldGoType = field.goType;
+		const accInfo = this.getAccType(fieldGoType);
+		const safeStructName = structInfo.name.replace(/[^a-zA-Z0-9_]/g, "_");
+		const getterName = `__gf_acc_get_${safeStructName}_${field.name}`;
+		const setterName = `__gf_acc_set_${safeStructName}_${field.name}`;
+		const getterFn = {
+			kind: "FuncDecl",
+			name: getterName,
+			params: [
+				{ name: "target", type: "anyref" },
+				{ name: "index", type: "i32" },
+			],
+			returnType: fieldGoType,
+			body: { kind: "Block", stmts: [], list: [] },
+			_isAccessorHelper: true,
+			_accessorKind: "struct_get",
+			_structInfo: structInfo,
+			_fieldIndex: fieldIndex,
+			_fieldType: fieldGoType,
+			_rootFuncDecl: null,
+		};
+		const setterFn = {
+			kind: "FuncDecl",
+			name: setterName,
+			params: [
+				{ name: "target", type: "anyref" },
+				{ name: "index", type: "i32" },
+				{ name: "val", type: fieldGoType },
+			],
+			returnType: null,
+			body: { kind: "Block", stmts: [], list: [] },
+			_isAccessorHelper: true,
+			_accessorKind: "struct_set",
+			_structInfo: structInfo,
+			_fieldIndex: fieldIndex,
+			_fieldType: fieldGoType,
+			_rootFuncDecl: null,
+		};
+		const helperInfo = {
+			key,
+			getterName,
+			setterName,
+			getterFn,
+			setterFn,
+			accInfo,
+			structInfo,
+			fieldIndex,
+			fieldGoType,
+		};
+		this.structAccessorHelpers.set(key, helperInfo);
+		return helperInfo;
+	}
+
+	getElemAccessorHelpers(elemGoType) {
+		const key = goTypeKey(elemGoType);
+		if (this.elemAccessorHelpers.has(key)) {
+			return this.elemAccessorHelpers.get(key);
+		}
+		const arrInfo = this.getArrayType(elemGoType);
+		const accInfo = this.getAccType(elemGoType);
+		const getterName = `__gf_acc_get_elem_${key}`;
+		const setterName = `__gf_acc_set_elem_${key}`;
+		const getterFn = {
+			kind: "FuncDecl",
+			name: getterName,
+			params: [
+				{ name: "target", type: "anyref" },
+				{ name: "index", type: "i32" },
+			],
+			returnType: elemGoType,
+			body: { kind: "Block", stmts: [], list: [] },
+			_isAccessorHelper: true,
+			_accessorKind: "elem_get",
+			_arrInfo: arrInfo,
+			_elemGoType: elemGoType,
+			_rootFuncDecl: null,
+		};
+		const setterFn = {
+			kind: "FuncDecl",
+			name: setterName,
+			params: [
+				{ name: "target", type: "anyref" },
+				{ name: "index", type: "i32" },
+				{ name: "val", type: elemGoType },
+			],
+			returnType: null,
+			body: { kind: "Block", stmts: [], list: [] },
+			_isAccessorHelper: true,
+			_accessorKind: "elem_set",
+			_arrInfo: arrInfo,
+			_elemGoType: elemGoType,
+			_rootFuncDecl: null,
+		};
+		const helperInfo = {
+			key,
+			getterName,
+			setterName,
+			getterFn,
+			setterFn,
+			arrInfo,
+			accInfo,
+			elemGoType,
+		};
+		this.elemAccessorHelpers.set(key, helperInfo);
+		return helperInfo;
 	}
 
 	getIfaceBoxType(goType) {
@@ -2533,6 +2743,9 @@ export function compileWasmModule(
 	}
 	_registerIoSyntheticMethods(funcDecls, mod, STR_T, progs);
 
+	// 1e4. Accessor helpers for &s.F and &xs[i] / &arr[i]
+	_collectAccessorHelpers(progs, funcDecls, mod, checker);
+
 	// 1f. Boundary metadata (exported surface of wasm packages)
 	const boundaryMeta = options.boundary
 		? collectBoundaryMeta(progs, funcDecls, mod)
@@ -2552,7 +2765,7 @@ export function compileWasmModule(
 		const fn = funcDecls[i];
 		const globalIdx = importFuncCount + i;
 		mod.funcMap.set(fn.name, globalIdx);
-		if (fn._isClosure) {
+		if (fn._isClosure || fn._isAccessorHelper) {
 			if (fn._funcLit) {
 				fn._funcLit._globalFuncIndex = globalIdx;
 			}
@@ -2656,6 +2869,8 @@ export function compileWasmModule(
 			emitter.emitRuntimeHelper(fn);
 		} else if (fn._isIoHelper || fn._isPhase7Helper) {
 			emitter.emitIoHelper(fn);
+		} else if (fn._isAccessorHelper) {
+			emitter.emitAccessorHelper(fn);
 		} else if (fn.body) {
 			emitter.emitFunctionBody(fn.body);
 		}
@@ -3755,5 +3970,188 @@ function _registerIoSyntheticMethods(funcDecls, mod, strType, programs) {
 				},
 			),
 		);
+	}
+}
+
+function _unwrapPointer(t) {
+	let curr = t;
+	while (
+		curr &&
+		(curr.kind === "pointer" ||
+			curr.kind === "PointerType" ||
+			curr.kind === "StarExpr")
+	) {
+		curr = curr.base ?? curr.expr ?? curr.operand;
+	}
+	return curr;
+}
+
+function _resolveIdentType(name, fn, mod) {
+	if (fn) {
+		for (const p of fn.params ?? []) {
+			if (p.name === name) return p.type;
+		}
+	}
+	const global = mod.resolveGlobal(name);
+	return global?.goType ?? null;
+}
+
+function _resolveAnonStruct(t, mod) {
+	if (!mod.getAnonStructType) return null;
+	const rawFields = [];
+	if (t.fields instanceof Map) {
+		for (const [k, v] of t.fields.entries())
+			rawFields.push({ name: k, goType: v });
+	} else if (Array.isArray(t.fields)) {
+		for (const f of t.fields) {
+			const names = f.names ?? (f.name ? [f.name] : []);
+			for (const n of names) rawFields.push({ name: n, goType: f.type });
+		}
+	}
+	return rawFields.length > 0 ? mod.getAnonStructType(rawFields) : null;
+}
+
+function _resolveStructInfoForAccessor(node, mod, _checker, fn = null) {
+	if (!node) return null;
+	let t = node._type;
+	if (!t && node.kind === "Ident") {
+		t = _resolveIdentType(node.name, fn, mod);
+	}
+	t = _unwrapPointer(t);
+	if (!t) return null;
+	const name = t.name ?? (t.kind === "named" ? t.name : null);
+	if (name && mod.structTypes.has(name)) {
+		return mod.structTypes.get(name);
+	}
+	if (t.kind === "TypeName" || t.kind === "Ident") {
+		if (mod.structTypes.has(t.name)) return mod.structTypes.get(t.name);
+	}
+	if (t.kind === "struct" || t.kind === "StructType") {
+		return _resolveAnonStruct(t, mod);
+	}
+	return null;
+}
+
+function _resolveFieldPathForAccessor(structInfo, fieldName, mod) {
+	if (!structInfo) return null;
+	if (structInfo.fieldIndexMap?.has(fieldName)) {
+		const idx = structInfo.fieldIndexMap.get(fieldName);
+		return [{ structInfo, fieldIndex: idx, field: structInfo.fields[idx] }];
+	}
+	for (const embed of structInfo.embeds ?? []) {
+		const embedInfo = mod.structTypes.get(embed.name);
+		if (embedInfo) {
+			const sub = _resolveFieldPathForAccessor(embedInfo, fieldName, mod);
+			if (sub) {
+				return [
+					{
+						structInfo,
+						fieldIndex: embed.fieldIndex,
+						field: structInfo.fields[embed.fieldIndex],
+					},
+					...sub,
+				];
+			}
+		}
+	}
+	return null;
+}
+
+function _checkSelectorAccessor(operand, currentFn, mod, checker, funcDecls) {
+	const sInfo = _resolveStructInfoForAccessor(operand, mod, checker, currentFn);
+	if (sInfo) return;
+
+	const baseStructInfo = _resolveStructInfoForAccessor(
+		operand.expr,
+		mod,
+		checker,
+		currentFn,
+	);
+	if (!baseStructInfo) return;
+
+	const path = _resolveFieldPathForAccessor(baseStructInfo, operand.field, mod);
+	if (!path || path.length === 0) return;
+
+	const lastStep = path[path.length - 1];
+	if (!isScalarType(lastStep.field.goType, checker, mod)) return;
+
+	const h = mod.getStructAccessorHelpers(
+		lastStep.structInfo,
+		lastStep.fieldIndex,
+	);
+	if (!funcDecls.includes(h.getterFn)) {
+		funcDecls.push(h.getterFn, h.setterFn);
+	}
+}
+
+function _resolveBaseTypeForIndex(baseNode, currentFn, mod) {
+	const baseType = baseNode?._type;
+	if (!baseType && baseNode?.kind === "Ident") {
+		if (currentFn) {
+			for (const p of currentFn.params ?? []) {
+				if (p.name === baseNode.name) return p.type;
+			}
+		}
+		const global = mod.resolveGlobal(baseNode.name);
+		if (global?.goType) return global.goType;
+	}
+	return baseType;
+}
+
+function _checkIndexAccessor(operand, currentFn, mod, checker, funcDecls) {
+	const sInfo = _resolveStructInfoForAccessor(operand, mod, checker, currentFn);
+	if (sInfo) return;
+
+	const baseType = _resolveBaseTypeForIndex(operand.expr, currentFn, mod);
+	const isSlice = isSliceType(baseType, checker);
+	const isArr = isArrayType(baseType, checker);
+	const isPtrToArr =
+		baseType?.kind === "pointer" && isArrayType(baseType.base, checker);
+	if (!isSlice && !isArr && !isPtrToArr) return;
+
+	const elemGoType = isSlice
+		? baseType.elem
+		: isPtrToArr
+			? baseType.base.elem
+			: baseType.elem;
+	if (!elemGoType || !isScalarType(elemGoType, checker, mod)) return;
+
+	const h = mod.getElemAccessorHelpers(elemGoType);
+	if (!funcDecls.includes(h.getterFn)) {
+		funcDecls.push(h.getterFn, h.setterFn);
+	}
+}
+
+function _collectAccessorHelpers(progs, funcDecls, mod, checker) {
+	function scan(node, currentFn) {
+		if (!node || typeof node !== "object") return;
+		if (Array.isArray(node)) {
+			for (const item of node) scan(item, currentFn);
+			return;
+		}
+		if (node.kind === "UnaryExpr" && node.op === "&" && node.operand) {
+			if (node.operand.kind === "SelectorExpr") {
+				_checkSelectorAccessor(
+					node.operand,
+					currentFn,
+					mod,
+					checker,
+					funcDecls,
+				);
+			} else if (node.operand.kind === "IndexExpr") {
+				_checkIndexAccessor(node.operand, currentFn, mod, checker, funcDecls);
+			}
+		}
+		for (const key of Object.keys(node)) {
+			if (key.startsWith("_")) continue;
+			scan(node[key], currentFn);
+		}
+	}
+
+	for (const fn of funcDecls) {
+		if (fn.body) scan(fn.body, fn);
+	}
+	for (const p of progs) {
+		for (const d of p.decls ?? []) scan(d, null);
 	}
 }
