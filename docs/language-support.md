@@ -73,7 +73,7 @@ packages is listed in the [hybrid guide](hybrid-wasm.md#what-wasm-packages-suppo
 | Raw string literals (backticks), rune literals | ✓ <!-- fixture: package main; func Main() int { s := `raw`; r := 'A'; if s == "raw" && r == 65 { return 1 }; return 0 } --> |
 | Numeric separators (`1_000_000`), binary/octal/hex literals | ✓ <!-- fixture: package main; func Main() int { a := 1_000; b := 0b101; c := 0o12; d := 0x1f; return a + b + c + d } --> |
 | `[]byte(s)` conversions | ✓ <!-- fixture: package main; func Main() int { b := []byte("hello"); return len(b)*10 + int(b[0]) } --> |
-| `[]rune(s)` conversions | ✗ — planned for Task 0.13 <!-- fixture: pending: Task 0.13 | package main; func Main() int { r := []rune("hello"); return len(r) } --> |
+| `[]rune(s)` conversions | ✓ — code points; `string(r)` and `string(r[i])` <!-- fixture: package main; func Main() int { r := []rune("héllo"); r = append(r, 'x'); if string(r[1]) != "é" || string(r) != "héllox" { return 0 }; return len(r) } --> |
 
 ### Standard library shims
 
