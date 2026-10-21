@@ -390,7 +390,7 @@ export const expressionCheckMethods = {
 		}
 		const inner = new Scope(scope);
 		for (const p of expr.params)
-			inner.define(p.name, p.type ? this.resolveTypeNode(p.type, scope) : ANY);
+			inner.define(p.name, p.type ? this._paramType(p, scope) : ANY);
 		const ret = expr.returnType
 			? this.resolveTypeNode(expr.returnType, scope)
 			: VOID;
@@ -407,6 +407,7 @@ export const expressionCheckMethods = {
 			kind: "func",
 			params: paramTypes,
 			returns: [ret],
+			variadic: expr.params.at(-1)?.variadic === true,
 			async: expr.async,
 		};
 	},

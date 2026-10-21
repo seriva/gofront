@@ -73,6 +73,7 @@ export const TEST_FILES = [
 	"./wasm/boundary.test.js",
 	"./wasm/interfaces.test.js",
 	"./wasm/generics.test.js",
+	"./wasm/variadic.test.js",
 	"./wasm/maps.test.js",
 	"./wasm/defer_recover.test.js",
 	"./wasm/go_semantics.test.js",

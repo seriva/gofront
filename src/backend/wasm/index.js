@@ -38,7 +38,9 @@ import {
 	isSliceType,
 	isTestingT,
 	toWasmType,
+	variadicAsSlice,
 } from "./types.js";
+import { desugarVariadics } from "./variadic.js";
 import { emitWat } from "./wat.js";
 
 export { hasNativeWasmOpt, isGoFrontWasm, optimizeWasm };
@@ -2223,8 +2225,10 @@ export function compileWasmModule(
 		const mono = monomorphise(progs, checker);
 		progs = mono.programs;
 		resolvedChecker = mono.checker;
-		resolvedLowerResult = lower(progs, resolvedChecker);
-	} else if (!resolvedLowerResult) {
+		resolvedLowerResult = null;
+	}
+	// Variadic parameters become slices (after monomorphisation: concrete types).
+	if (desugarVariadics(progs) || !resolvedLowerResult) {
 		resolvedLowerResult = lower(progs, resolvedChecker);
 	}
 	checker = resolvedChecker;
@@ -3547,8 +3551,9 @@ function _makeInterfaceDispatcher(info, checker) {
 
 	const params = [{ name: "__recv", type: { kind: "basic", name: "any" } }];
 	if (methodSig?.params) {
-		for (let p = 0; p < methodSig.params.length; p++) {
-			params.push({ name: `__arg${p}`, type: methodSig.params[p] });
+		const sigParams = variadicAsSlice(methodSig.params, methodSig.variadic);
+		for (let p = 0; p < sigParams.length; p++) {
+			params.push({ name: `__arg${p}`, type: sigParams[p] });
 		}
 	} else if (info.callNode?.args) {
 		for (let p = 0; p < info.callNode.args.length; p++) {
