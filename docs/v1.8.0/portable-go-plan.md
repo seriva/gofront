@@ -89,6 +89,7 @@ These were confirmed while writing this plan. The Phase 1 audit produces the com
 | Generic calls inside generic bodies in WASM | `Compare[T]` calling `isNaN[T]` reports `Undefined: 'isNaN'`: monomorphisation dropped the inferred type arguments of a generic call when it copied a generic body. **Fixed in Phase 0.4.** | Found while landing `cmp` (Task 0.6a) |
 | Generics in multi-package WASM builds | A linked `app.wasm` with any generic declaration fails on every cross-package reference (`Undefined: 'util'`): the monomorphisation re-check has no package namespaces. **Fixed in Phase 0.4.** | Probe: a `wasm` package calling `util.Two()` next to a generic `util.Id` |
 | Variadic functions | `func f(xs ...T)` produces an invalid module in WASM (no rest-parameter lowering). On both backends the checker types `xs` as `T` instead of `[]T` inside the body, and JS methods and func literals lose the rest parameter. **Fixed in Phase 0.4.** | Probe: `sum(1, 2, 3)` in a `both` package fails `WebAssembly.validate` |
+| Generic zero values in JS | **Silent wrong results.** JS output erases generics, so `var zero T` is `null`: `cmp.Or("", "x")` returns `""` in JS and `"x"` in WASM, and a generic `Stack[int].Pop` on an empty stack returns `null`. The checker also rejects unary `-` on a numeric type parameter (`- requires numeric`). | `cmp.Or` parity test (Task 0.6a); Task 0.18 |
 | `fmt` | `Sprint`, `Sprintln`, `Append*`, `Stringer` missing | [`src/typechecker/stdlib/core.js`](../../src/typechecker/stdlib/core.js) `fmt` namespace |
 | `sort` | `Sort`, `Stable`, `Interface`, `Reverse`, `IsSorted`, `Search{Ints,Strings,Float64s}`, `{Int,String,Float64}Slice` missing | `sort` namespace |
 | `unicode/utf8` | Byte-slice API missing: `EncodeRune`, `AppendRune`, `DecodeRune`, `DecodeLastRune`, `RuneCount`, `FullRune` | `utf8` namespace |
@@ -600,7 +601,7 @@ Conventions used in the tasks:
 
 ### Phase 0.4: Go-source stdlib loader & reachability
 
-- [ ] **Task 0.6a — Go-source stdlib loader (first package: `cmp`)**
+- [x] **Task 0.6a — Go-source stdlib loader (first package: `cmp`)**
   - Files: `src/resolver.js`, `src/compiler.js`, `src/typechecker/types.js` (`STDLIB_PACKAGES`), new `runtime/stdlib/cmp/cmp.go`
   - Do: resolve an import path to `runtime/stdlib/<path>/` before checking `STDLIB_PACKAGES`. Type-check and compile the package into the caller's target (`js`, `wasm`, or both) as if it were a user `both` package, with no boundary facade and no linked top-level names. Land `cmp` (`Ordered`, `Compare`, `Less`, `Or`) as the smoke package.
   - Test: new `test/unit/compiler/stdlib-go.test.js` — a `js` package and a `wasm` package importing `cmp`; `cmp.Compare(1.0, math.NaN())` parity; a `both` package using `cmp.Or`.
@@ -713,6 +714,14 @@ Conventions used in the tasks:
   - Do: parse `goto L` and labels so the error is targeted: `goto is not supported; restructure with labeled break/continue`.
   - Test: `test/unit/language/control-flow.test.js` — the message appears for `js`, `wasm` and `both` packages; `Undefined: 'goto'` does not.
   - Done when: the parity matrix row for `goto` passes.
+
+### Phase 0.8: Generic zero values in JS
+
+- [ ] **Task 0.18 — Generic zero values and type-parameter operators in JS**
+  - Files: `src/backend/js/index.js`, `src/backend/js/expressions.js`, `src/typechecker/expressions.js` (unary operators on type parameters)
+  - Do: JS output must produce the zero value of the instantiated type wherever a generic body uses a type parameter's zero value (`var zero T`, `*new(T)`, zero results), for generic functions and for methods of generic types, for example by passing zero values from the call site or storing them on generic instances. Accept unary `-`, `+` and `^` on type parameters whose constraint allows them.
+  - Test: `test/unit/wasm/generics.test.js` — parity tests for `cmp.Or("", "x")`, `cmp.Or(0, 3)`, `Stack[int].Pop` on an empty stack, and `Abs[T Number](x T) T` using `-x`. Turn the WASM-only `cmp.Or` test in `stdlib-go.test.js` into a parity test and drop the Task 0.18 note from the `cmp` row in `language-support.md`.
+  - Done when: those pass as parity tests.
 
 ### Phase 1.1: Manifest generator and coverage gates
 
