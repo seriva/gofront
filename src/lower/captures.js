@@ -277,8 +277,10 @@ export function analyzeCaptures(fnDecl) {
 /**
  * Go 1.22 per-iteration loop variables: the names declared by a three-clause
  * `for` init (`for i := …`) that a closure inside the loop (body, cond or
- * post) refers to.  Conservative by name.  Only these need a fresh copy per
- * iteration; the others stay plain locals.
+ * post) refers to, or whose address is taken there (`&i`, `&p.X`): a pointer
+ * from one iteration must keep pointing at that iteration's variable.
+ * Conservative by name.  Only these need a fresh copy per iteration; the
+ * others stay plain locals.
  */
 export function loopVarsCapturedInLoop(stmt) {
 	const out = new Set();
@@ -300,6 +302,9 @@ export function loopVarsCapturedInLoop(stmt) {
 		const nowIn = inClosure || node.kind === "FuncLit";
 		forEachChild(node, (child) => walk(child, nowIn));
 	};
-	walk([stmt.cond, stmt.post, stmt.body], false);
+	const loop = [stmt.cond, stmt.post, stmt.body];
+	walk(loop, false);
+	for (const name of collectMutatedVars(loop, new Set(), true))
+		if (names.has(name)) out.add(name);
 	return out;
 }

@@ -645,15 +645,22 @@ export const statementGenMethods = {
 	},
 
 	// Go 1.22 per-iteration loop variables.  `let` gives each iteration its
-	// own binding, but a struct or array variable is a reference: clone it at
-	// the start of the post step (which runs in the next iteration's binding),
-	// so closures from the finished iteration keep their own value.
+	// own binding, but a struct or array variable is a reference and an
+	// address-taken scalar is a `{ value }` box: replace it at the start of
+	// the post step (which runs in the next iteration's binding), so closures
+	// and pointers from the finished iteration keep their own variable.
 	_perIterationClones(stmt, post) {
 		const clones = [];
 		for (const name of loopVarsCapturedInLoop(stmt)) {
 			const i = stmt.init.lhs.findIndex((e) => e.name === name);
 			const t = stmt.init.lhs[i]?._type ?? stmt.init.rhs?.[i]?._type;
-			if (!this._aggregateBase(t) || this._boxedVars?.has(name)) continue;
+			if (this._boxedVars?.has(name)) {
+				const v = `${name}.value`;
+				const copy = this._aggregateBase(t) ? this._cloneJs(t, v) : v;
+				clones.push(`${name} = { value: ${copy} }`);
+				continue;
+			}
+			if (!this._aggregateBase(t)) continue;
 			clones.push(`${name} = ${this._cloneJs(t, name)}`);
 		}
 		if (clones.length === 0) return post;
@@ -1068,6 +1075,12 @@ export const statementGenMethods = {
 	stmtInline(stmt) {
 		switch (stmt.kind) {
 			case "DefineStmt": {
+				const boxed =
+					stmt.lhs.length === 1 &&
+					stmt.rhs.length === 1 &&
+					this._boxedVars.has(stmt.lhs[0].name);
+				if (boxed)
+					return `let ${stmt.lhs[0].name} = { value: ${this.genValueExpr(stmt.rhs[0])} }`;
 				const rhs = stmt.rhs.map((e) => this.genExpr(e)).join(", ");
 				const lhs = stmt.lhs.map((e) => e.name ?? this.genExpr(e)).join(", ");
 				return `let ${lhs} = ${rhs}`;

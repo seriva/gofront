@@ -567,3 +567,75 @@ func Main() int {
 	const res = compileHybrid(src).run("Main");
 	assertEqual(res.jsRes, 12012);
 });
+
+section("Per-iteration loop variables — address-of (Go 1.22)");
+
+test("&i in a three-clause for points at a distinct i per iteration", () => {
+	const src = `
+package main
+
+func Main() int {
+	var ps []*int
+	for i := 0; i < 3; i++ {
+		ps = append(ps, &i)
+	}
+	return *ps[0]*100 + *ps[1]*10 + *ps[2]
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.jsRes, 12);
+});
+
+test("a write through &i is seen by the post statement", () => {
+	const src = `
+package main
+
+func Main() int {
+	s := 0
+	for i := 0; i < 10; i++ {
+		p := &i
+		*p += 2
+		s = s*10 + i
+	}
+	return s
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.jsRes, 2591);
+});
+
+test("&p of a struct loop variable points at a distinct struct per iteration", () => {
+	const src = `
+package main
+
+type P struct{ X int }
+
+func Main() int {
+	var ps []*P
+	for p := (P{0}); p.X < 3; p.X++ {
+		ps = append(ps, &p)
+	}
+	return ps[0].X*100 + ps[1].X*10 + ps[2].X
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.jsRes, 12);
+});
+
+test("&p.X of a struct loop variable points into that iteration's struct", () => {
+	const src = `
+package main
+
+type P struct{ X int }
+
+func Main() int {
+	var ps []*int
+	for p := (P{0}); p.X < 3; p.X++ {
+		ps = append(ps, &p.X)
+	}
+	return *ps[0]*100 + *ps[1]*10 + *ps[2]
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.jsRes, 12);
+});
