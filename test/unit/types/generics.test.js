@@ -6,6 +6,7 @@ import {
 	assertEqual,
 	assertErrorContains,
 	compile,
+	compileHybrid,
 	Lexer,
 	runJs,
 	section,
@@ -452,6 +453,118 @@ func main() {
 }`);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "7 1");
+});
+
+// ═════════════════════════════════════════════════════════════
+// Generic type aliases (Go 1.24, Task 0.14)
+// ═════════════════════════════════════════════════════════════
+
+section("Generics — Type aliases");
+
+test("generic alias of a map used as a composite literal (parity)", () => {
+	const h = compileHybrid(`package main
+type Set[T comparable] = map[T]struct{}
+func Main() int {
+	s := Set[int]{1: {}, 2: {}}
+	s[3] = struct{}{}
+	_, ok := s[2]
+	_, missing := s[9]
+	n := 0
+	if ok { n += 100 }
+	if missing { n += 10 }
+	return len(s)*1000 + n
+}`);
+	assertEqual(Number(h.run("Main").wasmRes), 3100);
+});
+
+test("generic alias as a parameter type is identical to the aliased type", () => {
+	const h = compileHybrid(`package main
+type Set[T comparable] = map[T]struct{}
+func count[K comparable](s Set[K]) int { return len(s) }
+func size(s map[string]struct{}) int { return len(s) }
+func Main() int {
+	s := Set[string]{"a": {}}
+	var m map[string]struct{} = s
+	ints := map[int]struct{}{1: {}, 2: {}}
+	return count(s)*10 + size(m) + count(ints)*100
+}`);
+	assertEqual(Number(h.run("Main").wasmRes), 211);
+});
+
+test("generic alias as the value of a map keyed by another generic's parameter", () => {
+	const h = compileHybrid(`package main
+type Set[T comparable] = map[T]struct{}
+type Graph[K comparable] struct { adj map[K]Set[K] }
+func (g *Graph[K]) Add(a, b K) {
+	if _, ok := g.adj[a]; !ok { g.adj[a] = Set[K]{} }
+	g.adj[a][b] = struct{}{}
+}
+func Main() int {
+	g := &Graph[string]{adj: map[string]Set[string]{}}
+	g.Add("a", "b")
+	g.Add("a", "c")
+	g.Add("b", "c")
+	return len(g.adj)*10 + len(g.adj["a"])
+}`);
+	assertEqual(Number(h.run("Main").wasmRes), 22);
+});
+
+test("generic alias of a generic struct keeps the struct's identity and methods", () => {
+	const h = compileHybrid(`package main
+type Box[T any] struct { Val T }
+func (b Box[T]) Get() T { return b.Val }
+type Alias[T any] = Box[T]
+func unwrap(b Box[int]) int { return b.Get() }
+func Main() int {
+	a := Alias[int]{Val: 42}
+	var b Box[int] = a
+	return unwrap(a) + b.Val
+}`);
+	assertEqual(Number(h.run("Main").wasmRes), 84);
+});
+
+test("generic alias of an anonymous struct with a positional literal", () => {
+	const h = compileHybrid(`package main
+type Pair[T any] = struct{ A, B T }
+func sum(p struct{ A, B int }) int { return p.A + p.B }
+func Main() int {
+	p := Pair[int]{3, 4}
+	q := p
+	q.A = 9
+	k := Pair[int]{B: 5}
+	return p.A*1000 + p.B*100 + sum(q)*10 + k.A + k.B
+}`);
+	assertEqual(Number(h.run("Main").wasmRes), 3535);
+});
+
+test("generic alias with swapped parameters substitutes in order", () => {
+	const h = compileHybrid(`package main
+type KV[K comparable, V any] struct { K K; V V }
+type VK[V any, K comparable] = KV[K, V]
+func Main() int {
+	x := VK[int, string]{K: "a", V: 7}
+	var y KV[string, int] = x
+	return y.V + len(y.K)*10
+}`);
+	assertEqual(Number(h.run("Main").wasmRes), 17);
+});
+
+test("generic alias with the wrong number of type arguments is an error", () => {
+	const { errors } = compile(`package main
+type Set[T comparable] = map[T]struct{}
+func main() { s := Set[int, string]{}; _ = s }`);
+	assertErrorContains(
+		errors,
+		"got 2 type arguments but Set has 1 type parameters",
+	);
+});
+
+test("generic alias does not hit the CompositeLit internal error", () => {
+	const h = compileHybrid(`package main
+type Box[T any] struct { Val T }
+type Alias[T any] = Box[T]
+func Main() int { b := Alias[int]{Val: 42}; return b.Val }`);
+	assertEqual(Number(h.run("Main").wasmRes), 42);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
