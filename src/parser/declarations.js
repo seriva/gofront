@@ -91,17 +91,23 @@ export const declarationParseMethods = {
 	// Type param lists contain IDENT followed by a constraint (another IDENT or keyword),
 	// not expressions like integers or operators.
 	_looksLikeTypeParamList() {
-		const i = this.pos + 1; // skip [
+		let i = this.pos + 1; // skip [
 		const src = this.tokens;
-		// First token must be an IDENT (the type param name)
 		if (!src[i] || src[i].type !== T.IDENT) return false;
-		// Second token should be a constraint (IDENT like 'any', 'comparable', another type name)
-		// or TILDE for union constraints
-		const second = src[i + 1];
-		if (!second) return false;
-		if (second.type === T.IDENT) return true; // T any, T Stringer
-		if (second.type === T.TILDE) return true; // T ~int
-		if (second.type === T.INTERFACE) return true; // T interface{...}
+		while (
+			src[i] &&
+			src[i].type === T.IDENT &&
+			src[i + 1] &&
+			src[i + 1].type === T.COMMA
+		) {
+			i += 2;
+		}
+		if (!src[i] || src[i].type !== T.IDENT) return false;
+		const afterName = src[i + 1];
+		if (!afterName) return false;
+		if (afterName.type === T.IDENT) return true; // T any, T Stringer
+		if (afterName.type === T.TILDE) return true; // T ~int
+		if (afterName.type === T.INTERFACE) return true; // T interface{...}
 		return false;
 	},
 
