@@ -42,7 +42,7 @@ packages is listed in the [hybrid guide](hybrid-wasm.md#what-wasm-packages-suppo
 | Generics (`func F[T any]`, `type S[T any] struct`) | ✓ — type erasure to JS; generic functions, structs, constraints (`any`, `comparable`, interfaces, unions), type inference <!-- fixture: package main; func Identity[T any](x T) T { return x }; func Main() int { return Identity(42) } --> |
 | Struct field tags | ✓ — parsed and preserved; `json:"…"` tags drive the compile-time `encoding/json` codecs (no reflection) <!-- no-fixture: struct tags are compile-time metadata for encoding/json --> |
 | Struct and array equality (`a == b`) | ✓ — deep comparison via `__equal` helper <!-- fixture: package main; type Pt struct { X, Y int }; func Main() int { p1 := Pt{1, 2}; p2 := Pt{1, 2}; p3 := Pt{1, 3}; if p1 == p2 && p1 != p3 { return 1 }; return 0 } --> |
-| Builtin `min`, `max`, and `clear` (Go 1.21) | ✗ — planned for Task 0.11 <!-- fixture: pending: Task 0.11 | package main; func Main() int { return min(10, 20) + max(1, 2) } --> |
+| Builtin `min`, `max`, and `clear` (Go 1.21) | ✓ — numbers and strings; float `NaN` propagates and `min(-0.0, 0.0)` is `-0` <!-- fixture: package main; func Main() int { a, b := 10, 20; s := min("b", "a"); if s != "a" { return 0 }; return min(a, b) + max(1, 2) } --> |
 
 ### Control flow
 

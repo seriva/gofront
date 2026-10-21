@@ -358,14 +358,22 @@ const BUILTIN_GEN = {
 		s.useHelper("error");
 		return `__error(${s.genExpr(e.args[0])})`;
 	},
-	min: (s, e) => `Math.min(${e.args.map((a) => s.genExpr(a)).join(", ")})`,
-	max: (s, e) => `Math.max(${e.args.map((a) => s.genExpr(a)).join(", ")})`,
+	min: (s, e) => genMinMax(s, e, "min", "<"),
+	max: (s, e) => genMinMax(s, e, "max", ">"),
 	clear: (s, e) => s._genBuiltinClear(e),
 	complex: (s, e) =>
 		`{ re: ${s.genExpr(e.args[0])}, im: ${s.genExpr(e.args[1])} }`,
 	real: (s, e) => `(${s.genExpr(e.args[0])}).re`,
 	imag: (s, e) => `(${s.genExpr(e.args[0])}).im`,
 };
+
+// Math.min/max coerce strings to NaN, so string operands fold with `<`/`>`.
+function genMinMax(s, e, fn, cmp) {
+	const args = e.args.map((a) => s.genExpr(a));
+	if (!s._isStringExprType(e._type)) return `Math.${fn}(${args.join(", ")})`;
+	if (args.length === 1) return args[0];
+	return `[${args.join(", ")}].reduce((a, b) => (b ${cmp} a ? b : a))`;
+}
 
 // Method-name dispatch for genExpr — string values add no static call edges.
 const EXPR_GEN_DELEGATE = {
