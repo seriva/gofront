@@ -607,7 +607,7 @@ Conventions used in the tasks:
   - Test: new `test/unit/compiler/stdlib-go.test.js` — a `js` package and a `wasm` package importing `cmp`; `cmp.Compare(1.0, math.NaN())` parity; a `both` package using `cmp.Or`.
   - Done when: `import "cmp"` works in all three targets without any entry in `src/typechecker/stdlib/`.
 
-- [ ] **Task 0.6b — Overlays on emitter-backed packages (first overlay: `errors.ErrUnsupported`)**
+- [x] **Task 0.6b — Overlays on emitter-backed packages (first overlay: `errors.ErrUnsupported`)**
   - Files: `src/resolver.js`, `src/typechecker/index.js` (namespace merge), new `runtime/stdlib/errors/overlay.go`
   - Do: a Go-source directory may extend an existing emitter-backed package; its declarations merge into the same namespace and must not collide with emitter members (collision = compiler error at load). Land `var ErrUnsupported = New("unsupported operation")`.
   - Test: `stdlib-go.test.js` — `errors.Is(err, errors.ErrUnsupported)` parity; a deliberate collision fixture reports `overlay redeclares errors.New`.
