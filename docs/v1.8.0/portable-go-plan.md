@@ -665,7 +665,7 @@ Conventions used in the tasks:
   - Test: `test/unit/wasm/scalars.test.js` — the builtin edge cases in [Edge Cases](#edge-cases) as parity tests.
   - Done when: `Unresolved identifier: min` is gone and all cases pass.
 
-- [ ] **Task 0.12 — `[]rune` conversions in WASM**
+- [x] **Task 0.12 — `[]rune` conversions in WASM**
   - Files: `src/backend/wasm/emit-exprs.js` (conversion), `src/backend/wasm/types.js`
   - Do: `[]rune(s)` produces a `(ref null $array_i32)` built from code points; `string(r)` and `string(r[i])` accept it; `len`, `append`, slicing work on it.
   - Test: `test/unit/wasm/strings_any.test.js` — the `[]rune` edge cases as parity tests.
