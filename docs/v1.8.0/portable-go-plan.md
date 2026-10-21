@@ -679,8 +679,9 @@ Conventions used in the tasks:
   - Done when: the WASM backend uses the moved folder with no output change and the checker reports overflow.
   - Also (from the Phase 0.5 review): the checker's interim `_constIntValue` folder (32-bit bitwise ops, no unsigned `^` above 32 bits) is replaced by the shared folder. Keyed array literal keys that it cannot fold today (`len("abc")`, dot-imported constants) must resolve to their index instead of falling back to positional, and `a[^uint8(0)]` must give the same result in JS as in WASM.
 
-- [ ] **Task 0.13b — JS backend emits folded constants**
+- [x] **Task 0.13b — JS backend emits folded constants**
   - Files: `src/backend/js/expressions.js`
+  - Landed with the precision warning collected by `CodeGen` (`warnings`, printed by `src/compiler.js`) and folding applied to operator, paren, call and conversion nodes (literals and constant names already emit their value). The `a[^uint8(0)]` parity test from Task 0.13a's review item lands here: it needs the JS backend to emit the folded `255`.
   - Do: when a node carries a folded constant, emit the literal (`1099511627776`, not `1 << 40`). Values outside ±2⁵³ in `js` packages emit the nearest `Number` and a compile warning `constant … exceeds JS Number precision`; in `both` packages the same rule applies to the JS copy.
   - Test: `constants.test.js` — parity tests for `1 << 40`, `1 << 62`, `math.MaxInt64 / 2`; the warning text for `1<<63 + 5`.
   - Done when: `float64(x * 1000)` with `x = 1 << 40` gives `1099511627776000` on both backends.

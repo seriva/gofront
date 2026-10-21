@@ -375,6 +375,40 @@ function genMinMax(s, e, fn, cmp) {
 	return `[${args.join(", ")}].reduce((a, b) => (b ${cmp} a ? b : a))`;
 }
 
+// Expression kinds whose folded constant value (`_const`, attached by the
+// checker — see typechecker/const-fold.js) is emitted as a literal.  Literals
+// and constant names already emit their value.
+const FOLDED_CONST_KINDS = new Set([
+	"UnaryExpr",
+	"BinaryExpr",
+	"ParenExpr",
+	"CallExpr",
+	"TypeConversion",
+]);
+
+const JS_SAFE_INT = 2n ** 53n;
+
+// `-1.0` already emits its exact value; keep it as written.
+const isSignedLit = (e) =>
+	e.kind === "UnaryExpr" &&
+	(e.op === "-" || e.op === "+") &&
+	e.operand?.kind === "BasicLit";
+
+// Negative literals are parenthesised so they splice safely into operators.
+const signed = (n, text) => (n < 0 || Object.is(n, -0) ? `(${text})` : text);
+
+// JS literal per folded constant kind; null when JS cannot represent it.
+const CONST_LITS = {
+	STRING: (v) => JSON.stringify(v),
+	BOOL: (v) => (v ? "true" : "false"),
+	FLOAT: (v) =>
+		Number.isFinite(v) ? signed(v, Object.is(v, -0) ? "-0" : String(v)) : null,
+	INT: (v) => {
+		const n = Number(v);
+		return Number.isFinite(n) ? signed(n, BigInt(n).toString()) : null;
+	},
+};
+
 // Method-name dispatch for genExpr — string values add no static call edges.
 const EXPR_GEN_DELEGATE = {
 	UnaryExpr: "_genUnaryExpr",
@@ -417,6 +451,8 @@ export const expressionGenMethods = {
 				expr._ifaceBoxing = false;
 			}
 		}
+		const folded = this._genFoldedConst(expr);
+		if (folded !== null) return folded;
 		switch (expr.kind) {
 			case "BasicLit":
 				if (expr.litKind === "STRING") return JSON.stringify(expr.value);
@@ -438,6 +474,18 @@ export const expressionGenMethods = {
 				throw new Error(`CodeGen: unhandled expression kind '${expr.kind}'`);
 			}
 		}
+	},
+
+	// The literal for a folded constant expression (`1 << 40` →
+	// `1099511627776`), or null.  Integers outside ±2⁵³ emit the nearest
+	// Number and a precision warning.
+	_genFoldedConst(expr) {
+		const val = expr._const;
+		if (!val || !FOLDED_CONST_KINDS.has(expr.kind) || isSignedLit(expr))
+			return null;
+		if (val.k === "INT" && (val.v > JS_SAFE_INT || val.v < -JS_SAFE_INT))
+			this._warn(`constant ${val.v} exceeds JS Number precision`, expr);
+		return CONST_LITS[val.k]?.(val.v) ?? null;
 	},
 
 	_isNamedBoxKind(expr) {

@@ -374,7 +374,7 @@ func main() {
 	assertEqual(runJs(js), "2");
 });
 
-test("integer division with untyped int constants uses Math.trunc", () => {
+test("integer division with untyped int constants folds to the truncated value", () => {
 	const { js, errors } = compile(`package main
 const a = 7
 const b = 2
@@ -383,8 +383,8 @@ func main() {
 }`);
 	assertEqual(errors.length, 0);
 	assert(
-		js.includes("Math.trunc"),
-		"should use Math.trunc for integer division",
+		js.includes("console.log(3)"),
+		"should emit the folded integer quotient",
 	);
 	assertEqual(runJs(js), "3");
 });

@@ -187,6 +187,8 @@ export class CodeGen {
 		this.structFields = new Map();
 		this.namedWrapperNames = new Set();
 		this.collectedCss = [];
+		this.warnings = []; // non-fatal diagnostics; the compiler prints them
+		this._srcFileNames = []; // source file name per _srcFileIdx
 		this.jsImports = jsImports;
 		this.bundledPackages = bundledPackages;
 		this.namedReturnVars = null; // names of current function's named return vars
@@ -285,6 +287,7 @@ export class CodeGen {
 		// idempotent and owned by the backends: the wasm path runs it via
 		// `lower()`, the JS path here.
 		normalizeDefers(program);
+		if (program._filename) this._srcFileNames = [program._filename];
 		// Ensure _pkgName is set on all decls (generateAll sets it for
 		// multi-file; for single-file compiles we derive it from the AST).
 		const pkgName = program.pkg?.name;
@@ -531,6 +534,7 @@ export class CodeGen {
 	// Generate a single bundle from multiple programs (same-package multi-file).
 	// Annotates each decl with its source file index before merging.
 	generateAll(programs, options = {}) {
+		this._srcFileNames = programs.map((p) => p._filename ?? null);
 		for (let i = 0; i < programs.length; i++) {
 			for (const decl of programs[i].decls) {
 				decl._srcFileIdx = i;
@@ -539,6 +543,15 @@ export class CodeGen {
 		}
 		const merged = { decls: programs.flatMap((p) => p.decls) };
 		return this.generate(merged, options);
+	}
+
+	// Records a non-fatal diagnostic at `node` ("main.go at line 3:5: msg").
+	_warn(msg, node) {
+		const file = this._srcFileNames[this._currentSrcFileIdx ?? 0];
+		const line = node?.line ?? node?._line;
+		const at = line ? `at line ${line}:${node.col ?? node._col ?? 1}` : "";
+		const loc = [file, at].filter(Boolean).join(" ");
+		this.warnings.push(loc ? `${loc}: ${msg}` : msg);
 	}
 
 	getCss() {
