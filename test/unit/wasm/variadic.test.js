@@ -203,3 +203,37 @@ func Main() int { return f(g()) }
 		"passing multiple return values to a variadic function is not supported",
 	);
 });
+
+test("multiple return values into another package's variadic call are rejected", async () => {
+	let msg = "";
+	try {
+		await compileHybridProject({
+			"lib/lib.go": `//gofront:target wasm
+package lib
+
+func F(xs ...int) int { return len(xs) }
+`,
+			"w/w.go": `//gofront:target wasm
+package w
+
+import "../lib"
+
+func g() (int, int) { return 3, 4 }
+
+func Run() int { return lib.F(g()) }
+`,
+			"main.go": `package main
+
+import "./w"
+
+func main() { println(w.Run()) }
+`,
+		});
+	} catch (e) {
+		msg = e.message;
+	}
+	assertContains(
+		msg,
+		"passing multiple return values to a variadic function is not supported",
+	);
+});
