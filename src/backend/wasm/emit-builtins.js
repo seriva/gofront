@@ -232,7 +232,9 @@ export class BuiltinsEmitter {
 
 			if (
 				isStructType(elemGoType, this.mod.checker, this.mod) ||
-				isComplex(elemGoType)
+				isComplex(elemGoType) ||
+				(elemGoType?.kind !== "pointer" &&
+					isArrayType(elemGoType, this.mod.checker))
 			) {
 				const arrTmp = this.acquireTemp({
 					kind: "ref",
@@ -492,7 +494,7 @@ export class BuiltinsEmitter {
 					this.pushInstruction("i32.add");
 				}
 				this.emitExpr(elemNode, arrInfo.elemWType);
-				this._emitCopyIfValueStruct(elemNode, elemGoType, arrInfo.elemWType);
+				this._emitCopyIfValue(elemNode, elemGoType, arrInfo.elemWType);
 				this.pushInstruction({
 					op: "array.set",
 					typeIndex: arrInfo.typeIndex,
@@ -1084,7 +1086,7 @@ export class BuiltinsEmitter {
 					const pType = targetParamTypes[i + 1] ?? null;
 					const pGoType = paramGoTypes[i + 1] ?? null;
 					this.emitExpr(args[i], pType);
-					this._emitCopyIfValueStruct(args[i], pGoType, pType);
+					this._emitCopyIfValue(args[i], pGoType, pType);
 				}
 				this.pushInstruction({ op: "call", funcIndex: targetFuncIdx });
 				return true;
@@ -1107,13 +1109,13 @@ export class BuiltinsEmitter {
 				const recvWType = targetParamTypes[0] ?? null;
 				const recvGoType = this.mod.getFuncParamGoTypes(methodName)[0] ?? null;
 				this.emitExpr(func.expr, recvWType);
-				this._emitCopyIfValueStruct(func.expr, recvGoType, recvWType);
+				this._emitCopyIfValue(func.expr, recvGoType, recvWType);
 				const paramGoTypes = this.mod.getFuncParamGoTypes(methodName);
 				for (let i = 0; i < args.length; i++) {
 					const pType = targetParamTypes[i + 1] ?? null;
 					const pGoType = paramGoTypes[i + 1] ?? null;
 					this.emitExpr(args[i], pType);
-					this._emitCopyIfValueStruct(args[i], pGoType, pType);
+					this._emitCopyIfValue(args[i], pGoType, pType);
 				}
 				this.pushInstruction({ op: "call", funcIndex: targetFuncIdx });
 				return true;
@@ -1244,7 +1246,7 @@ export class BuiltinsEmitter {
 					const pType = paramTypes[i] ?? null;
 					const pGoType = paramGoTypes[i] ?? null;
 					this.emitExpr(arg, pType);
-					this._emitCopyIfValueStruct(arg, pGoType, pType);
+					this._emitCopyIfValue(arg, pGoType, pType);
 				}
 				this.pushInstruction({ op: "call", funcIndex: targetFuncIdx });
 				return true;
@@ -1281,7 +1283,7 @@ export class BuiltinsEmitter {
 			const pWType = closureInfo.paramWTypes[i] ?? null;
 			const pGoType = closureInfo.sig.params[i] ?? null;
 			this.emitExpr(arg, pWType);
-			this._emitCopyIfValueStruct(arg, pGoType, pWType);
+			this._emitCopyIfValue(arg, pGoType, pWType);
 		}
 
 		// Push funcref

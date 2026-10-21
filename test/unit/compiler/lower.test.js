@@ -391,3 +391,54 @@ func (c *Counter) Run() {
 	assert.ok(res.ownership.has(run));
 	assert.ok(res.functions.has(run));
 });
+
+// ── Array clone elision (Task 0.8b) ──────────────────────────
+
+function arrayCtx(body) {
+	const { ast } = parseSnippet(`func f() {\n${body}\n}`);
+	const fn = ast.decls.find((d) => d.name === "f");
+	return lower(ast).ownership.get(fn);
+}
+
+test("lower/ownership: array copy between unmutated locals is elidable", () => {
+	const ctx = arrayCtx(`	a := [3]int{1, 2, 3}
+	b := a
+	_ = a[0] + b[1]`);
+	assert.ok(ctx.arrayShareable("a"));
+	assert.ok(ctx.arrayShareable("b"));
+});
+
+test("lower/ownership: copy stays when the source is mutated after the copy", () => {
+	const ctx = arrayCtx(`	a := [3]int{1, 2, 3}
+	b := a
+	a[0] = 9
+	_ = b`);
+	assert.strictEqual(ctx.arrayShareable("a"), false);
+	assert.ok(ctx.arrayShareable("b"));
+});
+
+test("lower/ownership: copy stays when the destination is mutated", () => {
+	const ctx = arrayCtx(`	a := [3]int{1, 2, 3}
+	b := a
+	b[1]++
+	_ = a`);
+	assert.strictEqual(ctx.arrayShareable("b"), false);
+});
+
+test("lower/ownership: slicing, address-of, closures and method calls block elision", () => {
+	const ctx = arrayCtx(`	a := [3]int{1, 2, 3}
+	s := a[:]
+	b := [3]int{}
+	p := &b
+	c := [3]int{}
+	f := func() { c[0] = 1 }
+	f()
+	d := [3]int{}
+	d.M()
+	_, _ = s, p`);
+	assert.strictEqual(ctx.arrayShareable("a"), false);
+	assert.strictEqual(ctx.arrayShareable("b"), false);
+	assert.strictEqual(ctx.arrayShareable("c"), false);
+	assert.strictEqual(ctx.arrayShareable("d"), false);
+	assert.strictEqual(ctx.arrayShareable("_"), false);
+});
