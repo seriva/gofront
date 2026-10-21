@@ -571,7 +571,7 @@ Conventions used in the tasks:
 
 ### Phase 0.3: Complex numbers in WASM and parity matrix
 
-- [ ] **Task 0.4a — Complex numbers in WASM: representation and arithmetic**
+- [x] **Task 0.4a — Complex numbers in WASM: representation and arithmetic**
   - Files: `src/backend/wasm/types.js`, `src/backend/wasm/emit-exprs.js`, `src/backend/wasm/emit-builtins.js`
   - Do: `complex64`/`complex128` as immutable structs `{re, im}` of `f32`/`f64`. `complex`, `real`, `imag`, `+ - * /`, unary `-`, conversions between the two widths, and complex literals (`3i`). Division uses the same algorithm as the JS `__cdiv` helper.
   - Test: new `test/unit/wasm/complex.test.js` — parity tests for arithmetic, `complex64` rounding, division by `0+0i` yielding `Inf`/`NaN` without a panic.
