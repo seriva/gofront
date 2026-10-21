@@ -2181,6 +2181,8 @@ export function compileWasmModule(
 	} else if (!resolvedLowerResult) {
 		resolvedLowerResult = lower(progs, resolvedChecker);
 	}
+	checker = resolvedChecker;
+	lowerResult = resolvedLowerResult;
 
 	const mod = new ModuleEmitter(resolvedChecker, resolvedLowerResult, progs, {
 		bundledPackages: options.bundledPackages,

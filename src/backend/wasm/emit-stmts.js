@@ -21,6 +21,28 @@ import {
 	isStructType,
 } from "./types.js";
 
+function hasReturnInBlock(n) {
+	let found = false;
+	const check = (x) => {
+		if (!x || typeof x !== "object" || found) return;
+		if (Array.isArray(x)) {
+			for (const elem of x) check(elem);
+			return;
+		}
+		if (x.kind === "ReturnStmt") {
+			found = true;
+			return;
+		}
+		if (x.kind === "FuncLit" && !x._isYieldClosure) return;
+		for (const k of Object.keys(x)) {
+			if (k.startsWith("_")) continue;
+			check(x[k]);
+		}
+	};
+	check(n);
+	return found;
+}
+
 export class StmtsEmitter {
 	emitVarDecl(stmt) {
 		const decls = stmt.decls ?? stmt.specs ?? [stmt];
