@@ -1000,55 +1000,84 @@ export class ExprsEmitter {
 		return this.toWasmType(expr._type) === "i32";
 	}
 
+	// Panics with the generic out-of-range message (shared buffers, SIMD
+	// loads) when the condition on the stack is true.
 	_emitBoundsBranch() {
-		const oobDepth = this.resolveBranchDepthToOob();
-		if (oobDepth !== null) {
-			this.pushInstruction({ op: "br_if", depth: oobDepth });
-		} else {
-			this.pushInstruction({ op: "if", blockType: "void" });
-			this.pushInstruction({
-				op: "call",
-				funcIndex: this.mod.getBoundsPanicFuncIndex(),
-			});
-			this.pushInstruction("unreachable");
-			this.pushInstruction("end");
-		}
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getBoundsPanicFuncIndex(),
+		});
+		this.pushInstruction("unreachable");
+		this.pushInstruction("end");
+	}
+
+	// If the condition on the stack is true, panics with Go's index message;
+	// `pushIdx64` and `emitLen` push the i64 index and the i32 length.
+	_emitIndexPanicIf(pushIdx64, emitLen) {
+		this.pushInstruction({ op: "if", blockType: "void" });
+		pushIdx64();
+		emitLen();
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getIndexPanicFuncIndex(),
+		});
+		this.pushInstruction("unreachable");
+		this.pushInstruction("end");
 	}
 
 	// Pushes the bounds-checked i32 index onto the stack. `emitLen` must push
-	// the i32 length. Constant and plain-local indexes are re-emitted instead
-	// of spilled; everything else goes through one temp.
+	// the i32 length.  Inside a function body the index and length go to the
+	// `oob` locals and a failing check branches to the shared handler
+	// (`_closeOobBlocks`), which reports Go's message; elsewhere the check
+	// panics inline.
 	_emitCheckedIndex(indexNode, emitLen) {
-		const simple =
-			(indexNode.kind === "BasicLit" && indexNode.litKind === "INT") ||
-			(indexNode.kind === "Ident" && this.resolveLocal(indexNode.name));
+		const depth32 = this.resolveBranchDepthToOob(32);
+		const oob = depth32 === null ? null : this._oobLocals();
 		if (this._isI32IndexExpr(indexNode)) {
+			const idx = oob ? oob.idx32 : this.acquireTemp("i32");
 			this.emitExpr(indexNode, "i32");
-			let tmp = null;
-			if (simple) {
-				this.emitExpr(indexNode, "i32");
-			} else {
-				tmp = this.acquireTemp("i32");
-				this.pushInstruction({ op: "local.tee", index: tmp });
-				this.pushInstruction({ op: "local.get", index: tmp });
-			}
+			this.pushInstruction({ op: "local.tee", index: idx });
+			this.pushInstruction({ op: "local.get", index: idx });
 			emitLen();
+			if (oob) {
+				this.pushInstruction({ op: "local.tee", index: oob.len });
+				this.pushInstruction("i32.ge_u");
+				this.pushInstruction({ op: "br_if", depth: depth32 });
+				return;
+			}
 			this.pushInstruction("i32.ge_u");
-			this._emitBoundsBranch();
-			if (tmp !== null) this.releaseTemp(tmp, "i32");
+			this._emitIndexPanicIf(() => {
+				this.pushInstruction({ op: "local.get", index: idx });
+				this.pushInstruction("i64.extend_i32_s");
+			}, emitLen);
+			this.releaseTemp(idx, "i32");
 			return;
 		}
 
-		const idx64 = this.acquireTemp("i64");
+		const idx64 = oob ? oob.idx64 : this.acquireTemp("i64");
 		this.emitExpr(indexNode, "i64");
 		this.pushInstruction({ op: "local.tee", index: idx64 });
 		emitLen();
-		this.pushInstruction("i64.extend_i32_u");
-		this.pushInstruction("i64.ge_u");
-		this._emitBoundsBranch();
+		if (oob) {
+			this.pushInstruction({ op: "local.tee", index: oob.len });
+			this.pushInstruction("i64.extend_i32_u");
+			this.pushInstruction("i64.ge_u");
+			this.pushInstruction({
+				op: "br_if",
+				depth: this.resolveBranchDepthToOob(64),
+			});
+		} else {
+			this.pushInstruction("i64.extend_i32_u");
+			this.pushInstruction("i64.ge_u");
+			this._emitIndexPanicIf(
+				() => this.pushInstruction({ op: "local.get", index: idx64 }),
+				emitLen,
+			);
+		}
 		this.pushInstruction({ op: "local.get", index: idx64 });
 		this.pushInstruction("i32.wrap_i64");
-		this.releaseTemp(idx64, "i64");
+		if (!oob) this.releaseTemp(idx64, "i64");
 	}
 
 	// Leaves `[arr, off+idx]` on the stack for `base[idx]` over a slice or

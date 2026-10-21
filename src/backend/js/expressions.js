@@ -762,6 +762,13 @@ export const expressionGenMethods = {
 			if (expr.operand.kind === "IndexExpr") {
 				const obj = this.genExpr(expr.operand.expr);
 				const idx = this.genExpr(expr.operand.index);
+				const check = this._genStrictIndex(
+					{ ...expr.operand, _lvalue: false },
+					"__o",
+					"__i",
+				);
+				if (check)
+					return `((__o, __i) => (${check}, Object.defineProperties({ get value() { return __o[__i]; }, set value(v) { __o[__i] = v; } }, { __target: { value: __o }, __index: { value: __i } })))(${obj}, ${idx})`;
 				return `((__o, __i) => Object.defineProperties({ get value() { return __o[__i]; }, set value(v) { __o[__i] = v; } }, { __target: { value: __o }, __index: { value: __i } }))(${obj}, ${idx})`;
 			}
 			if (expr.operand.kind === "SelectorExpr") {
@@ -951,7 +958,10 @@ export const expressionGenMethods = {
 
 	_genPointerSelectorField(expr, base) {
 		if (this._isStructPointerType(expr.expr._type)) {
-			const sel = `${base}.${expr.field}`;
+			// Strict mode: a field of a nil struct pointer panics as in Go.
+			const recv =
+				this.strict && !expr._isMethodValue ? this._genNilChecked(base) : base;
+			const sel = `${recv}.${expr.field}`;
 			if (expr._isMethodValue && !expr._callee) return `${sel}.bind(${base})`;
 			return sel;
 		}
@@ -968,11 +978,46 @@ export const expressionGenMethods = {
 			? `${this.genExpr(expr.expr)}.${wrapField}`
 			: this.genExpr(expr.expr);
 		const idx = this.genExpr(expr.index);
-		if (expr._mapValueType && !expr._lvalue)
-			return this._genMapIndexExpr(expr, base, idx);
+		if (expr._mapValueType) {
+			if (!expr._lvalue) return this._genMapIndexExpr(expr, base, idx);
+			return `${this._genMapWriteBase(base)}[${idx}]`;
+		}
+		const checked = this._genStrictIndex(expr, base, idx);
+		if (checked) return checked;
 		if (this._isStringExprType(exprType) && !expr._lvalue)
 			return `${base}.charCodeAt(${idx})`;
 		return `${base}[${idx}]`;
+	},
+
+	// `p` for a field access `p.F`, panicking with Go's message when nil.
+	_genNilChecked(base) {
+		this.useHelper("nilCall");
+		return `__nilcall(${base})`;
+	},
+
+	// The map of a write `m[k] = v`: strict mode panics on a nil map.
+	_genMapWriteBase(base) {
+		if (!this.strict) return base;
+		this.useHelper("nilMap");
+		return `__mw(${base})`;
+	},
+
+	// Strict mode: `xs[i]` on a slice, array or string with Go's bounds check
+	// (null when no check applies).  Reads of slices and arrays use `__at`;
+	// lvalues and string reads use `base[__ix(base, i)]`, binding `base` to
+	// `__lv` first when evaluating it twice could repeat a call.
+	_genStrictIndex(expr, base, idx) {
+		if (!this.strict || expr._inBounds) return null;
+		const t = expr.expr._type;
+		const u = t?.kind === "named" ? t.underlying : t;
+		const isStr = this._isStringExprType(t);
+		if (!isStr && u?.kind !== "slice" && u?.kind !== "array") return null;
+		this.useHelper("bounds");
+		if (!expr._lvalue && !isStr) return `__at(${base}, ${idx})`;
+		const once = this._hasCallExpr(expr.expr);
+		const obj = once ? `(__lv = ${base})` : base;
+		const at = `__ix(${once ? "__lv" : base}, ${idx})`;
+		return expr._lvalue ? `${obj}[${at}]` : `${obj}.charCodeAt(${at})`;
 	},
 
 	_genMapIndexExpr(expr, base, idx) {
@@ -1851,7 +1896,7 @@ export const expressionGenMethods = {
 				);
 			}
 			case "MapType":
-				return "{}";
+				return this._nilMapZero();
 			case "PointerType":
 				return "null";
 			case "StructType": {
@@ -1867,6 +1912,14 @@ export const expressionGenMethods = {
 			default:
 				return "null";
 		}
+	},
+
+	// A nil map: `{}` in js packages; in strict mode the frozen `__nilmap`,
+	// which panics on write.
+	_nilMapZero() {
+		if (!this.strict) return "{}";
+		this.useHelper("nilMap");
+		return "__nilmap";
 	},
 
 	_arrayZero(n, ctor, elemZero) {
@@ -1892,7 +1945,7 @@ export const expressionGenMethods = {
 					this.zeroValueForType(t.elem),
 				);
 			case "map":
-				return "{}";
+				return this._nilMapZero();
 			case "struct": {
 				const fields = [...t.fields.entries()]
 					.map(([name, ft]) => `${name}: ${this.zeroValueForType(ft)}`)

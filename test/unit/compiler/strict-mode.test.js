@@ -175,7 +175,11 @@ func main() {
 	const { js, errors } = compile(src);
 	assertEqual(errors.length, 0);
 	assertContains(js, "Math.fround(__o1[__k1] + 0.1)");
-	assertContains(js, "o.In.F = Math.fround(o.In.F + 0.1)");
+	// `o` is a pointer: strict mode checks it for nil before the field access.
+	assertContains(
+		js,
+		"{ const __o2 = __nilcall(o).In; __o2.F = Math.fround(__o2.F + 0.1); }",
+	);
 	// float32 accumulation differs from float64; int8 wraps; uint8 wraps; index evaluated once.
 	assertEqual(runJs(js), "1.0000001192092896 0.10000000149011612 -128 0 1");
 });
