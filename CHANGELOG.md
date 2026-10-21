@@ -21,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 - **Generic calls inside generic bodies in WASM**: A generic function calling another generic function with its own type parameter (`Max[T]` calling `less[T]`) failed with `Undefined: 'less'`, because monomorphisation dropped the inferred type arguments when it copied the body.
+- **Generics in multi-package WASM builds**: A linked `app.wasm` with any generic declaration failed on every cross-package reference (`Undefined: 'util'`), because the monomorphisation re-check had no package namespaces. Package-qualified references are now resolved on the link's own copy of the ASTs, so linking also no longer rewrites the cached ASTs that JS code generation reuses.
 
 ## [1.7.0] - 2026-10-20
 
