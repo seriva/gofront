@@ -190,6 +190,88 @@ func Main() int {
 	assertEqual(mod.Main(), 50);
 });
 
+section("Constants — JS backend emits folded values (Task 0.13b)");
+
+test("JS emits the folded literal for 1 << 40", () => {
+	const { js, warnings } = compile(`package main
+
+const x = 1 << 40
+
+func main() {
+	var a int64 = 1 << 40
+	println(a, x)
+}
+`);
+	assertEqual(js.includes("1099511627776"), true);
+	assertEqual(js.includes("1 << 40"), false);
+	assertEqual(warnings.length, 0);
+});
+
+test("float64(x * 1000) with x = 1 << 40 matches on both backends", () => {
+	const res = compileHybrid(`package main
+
+const x = 1 << 40
+
+func Main() float64 {
+	var y int64 = 1 << 40
+	if float64(y*1000) != float64(x*1000) {
+		return -1
+	}
+	return float64(x * 1000)
+}
+`).run("Main");
+	assertEqual(res.jsRes, 1099511627776000);
+});
+
+test("1 << 62 and math.MaxInt64 / 2 match on both backends", () => {
+	const res = compileHybrid(`package main
+
+import "math"
+
+func Main() float64 {
+	var a int64 = 1 << 62
+	var b int64 = math.MaxInt64 / 2
+	return float64(a) + float64(b)
+}
+`).run("Main");
+	assertEqual(res.jsRes, 2 ** 62 * 2);
+});
+
+test("a[^uint8(0)] indexes element 255 on both backends", () => {
+	const res = compileHybrid(`package main
+
+func Main() int {
+	var a [256]int
+	for i := range a {
+		a[i] = i * 2
+	}
+	return a[^uint8(0)]
+}
+`).run("Main");
+	assertEqual(res.jsRes, 510);
+});
+
+test("warning: 1<<63 + 5 exceeds JS Number precision", () => {
+	const src = `package main
+
+func main() {
+	var u uint64 = uint64(1<<63 + 5)
+	println(u)
+}
+`;
+	const { js, warnings } = compile(src);
+	assertEqual(js.includes("9223372036854775808"), true);
+	assertErrorContains(
+		warnings.map((message) => ({ message })),
+		"constant 9223372036854775813 exceeds JS Number precision",
+	);
+	const both = compile(src, { target: "both" });
+	assertErrorContains(
+		both.warnings.map((message) => ({ message })),
+		"constant 9223372036854775813 exceeds JS Number precision",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
