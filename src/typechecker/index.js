@@ -90,7 +90,9 @@ export class TypeChecker {
 	// e.g. addPackageNamespace('utils', symbolsMap, typesMap)
 	// lets callers type-check `utils.Foo` via SelectorExpr.
 	// `target` is the imported package's compile target ("js"/"wasm"/"both").
-	addPackageNamespace(pkgName, symbols, types, target = null) {
+	// `consts` maps the package's constant names to their integer value (or
+	// null when not an integer the folder knows).
+	addPackageNamespace(pkgName, symbols, types, target = null, consts = null) {
 		const members = {};
 		for (const [name, type] of symbols) members[name] = type;
 		// _gofront: true marks this as a GoFront package — exported identifier rules apply
@@ -100,6 +102,7 @@ export class TypeChecker {
 			members,
 			_gofront: true,
 			_target: target,
+			_consts: consts,
 		});
 		for (const [name, type] of types) {
 			this.types.set(name, type);
@@ -136,6 +139,15 @@ export class TypeChecker {
 			if (type?.kind === "builtin") continue; // skip built-ins
 			if (type === ANY && !name[0].match(/[A-Z]/)) continue; // skip browser globals
 			out.set(name, type);
+		}
+		return out;
+	}
+
+	getExportedConsts() {
+		const out = new Map();
+		for (const name of this.globals._consts) {
+			const expr = this.globals.lookupConstExpr(name);
+			out.set(name, expr ? this._constIntValue(expr, this.globals) : null);
 		}
 		return out;
 	}
