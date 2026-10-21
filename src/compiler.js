@@ -29,6 +29,7 @@ import { log } from "./colors.js";
 import { parseDts } from "./dts-parser.js";
 import { Lexer } from "./lexer.js";
 import { lower } from "./lower/index.js";
+import { reachableStdlibDecls } from "./lower/reachability.js";
 import { forEachChild } from "./lower/walk.js";
 import { Parser } from "./parser/index.js";
 import {
@@ -267,12 +268,17 @@ function linkWasmUnits(
 	const types = new Map();
 	const bundledPackages = new Set();
 	const programs = [];
+	const stdlibPrograms = [];
 	for (const u of units) {
-		for (const [k, v] of u.types) types.set(k, v);
 		for (const b of u.bundledPackages) bundledPackages.add(b);
-		programs.push(...u.programs.map((p) => cloneAstForWasm(p)));
+		const copies = u.programs.map((p) => cloneAstForWasm(p));
+		programs.push(...copies);
+		if (u.key.startsWith("stdlib:")) stdlibPrograms.push(...copies);
 	}
 	dequalifyBundledRefs(programs, bundledPackages);
+	const keepType = pruneStdlibPrograms(programs, stdlibPrograms);
+	for (const u of units)
+		for (const [k, v] of u.types) if (keepType(v)) types.set(k, v);
 	const checker = {
 		types,
 		errors: [],
@@ -315,6 +321,26 @@ function cloneAstForWasm(node, seen = new Map()) {
 		copy[k] = k.charCodeAt(0) === 95 ? v : cloneAstForWasm(v, seen);
 	}
 	return copy;
+}
+
+// Drops unreachable Go-source stdlib declarations from the link copy and
+// returns a filter that drops their (mangled) named types.
+function pruneStdlibPrograms(programs, stdlibPrograms) {
+	if (stdlibPrograms.length === 0) return () => true;
+	const std = new Set(stdlibPrograms);
+	const reached = reachableStdlibDecls(
+		programs.filter((p) => !std.has(p)),
+		stdlibPrograms,
+	);
+	const types = new Set();
+	for (const p of stdlibPrograms) {
+		p.decls = p.decls.filter((d) => reached.has(d));
+		for (const d of p.decls) if (d.kind === "TypeDecl") types.add(d.name);
+	}
+	return (t) => {
+		const name = typeof t?.name === "string" ? t.name : "";
+		return !name.includes("$$") || types.has(name.replace(/\[.*$/, ""));
+	};
 }
 
 // The linked module is flat, so `util.Two` names the top-level `Two`.  Done on
@@ -663,11 +689,9 @@ function buildStdlibPackage(importPath, dir, options) {
 	throwStdlibErrors(checker.checkAll(programs));
 	lowerStdlibRefs(programs);
 
-	const codegen = new CodeGen(checker, new Map(), new Set(), {
-		target: "both",
-		strict: true,
-	});
 	const pkg = {
+		importPath,
+		checker,
 		pkgName: info.pkgName,
 		overlay,
 		namespace: stdlibNamespace(checker, info, overlay),
@@ -676,12 +700,6 @@ function buildStdlibPackage(importPath, dir, options) {
 			.flatMap((p) => p.imports.flatMap((imp) => imp.imports))
 			.map(({ path }) => cache.get(path))
 			.filter(Boolean),
-		chunk: {
-			js: codegen.generateAll(programs, { isTest: false }),
-			sourceFiles: programs.map((p) => p._path),
-			sourcesContent: programs.map((p) => p._source),
-			mappings: codegen.getMappings(),
-		},
 		unit: {
 			key: `stdlib:${importPath}`,
 			pkgName: info.pkgName,
@@ -715,6 +733,64 @@ function lowerStdlibRefs(node) {
 	forEachChild(node, lowerStdlibRefs);
 }
 
+// A Go-source package's JS is generated at the root compile, once every
+// JS-emitted user program is known, so only reachable declarations are
+// emitted (see lower/reachability.js).  Importers leave a marker line.
+const STDLIB_MARKER_RE = /^\/\*__GOFRONT_STDLIB:([^*]*)\*\/$/;
+
+function stdlibMarker(importPath) {
+	return `/*__GOFRONT_STDLIB:${importPath}*/`;
+}
+
+function stdlibJs(pkg, reached) {
+	const programs = pkg.unit.programs.map((p) => ({
+		...p,
+		decls: p.decls.filter((d) => reached.has(d)),
+	}));
+	if (programs.every((p) => p.decls.length === 0)) return "";
+	return new CodeGen(pkg.checker, new Map(), new Set(), {
+		target: "both",
+		strict: true,
+	}).generateAll(programs, { isTest: false });
+}
+
+// Replaces each marker with the package's reachable code (no line at all when
+// nothing is reachable) and shifts the source-map lines that follow.
+function spliceStdlibJs(merged, options) {
+	const lines = merged.js.split("\n");
+	const pkgs = lines
+		.map((l) => l.match(STDLIB_MARKER_RE)?.[1])
+		.filter(Boolean)
+		.map((path) => options.stdlibCache.get(path));
+	if (pkgs.length === 0) return;
+	const reached = reachableStdlibDecls(
+		options.jsRootPrograms,
+		pkgs.flatMap((pkg) => pkg.unit.programs),
+	);
+	const out = [];
+	for (const line of lines) {
+		const path = line.match(STDLIB_MARKER_RE)?.[1];
+		if (!path) {
+			out.push(line);
+			continue;
+		}
+		const js = stdlibJs(options.stdlibCache.get(path), reached);
+		const code = js === "" ? [] : js.split("\n");
+		const delta = code.length - 1;
+		for (const m of merged.mappings)
+			if (m.genLine > out.length) m.genLine += delta;
+		out.push(...code);
+	}
+	merged.js = out.join("\n");
+}
+
+// Records a package's JS-emitted programs as reachability roots; the root
+// compile then splices in the stdlib code they reach.
+function finishStdlibJs(merged, options, programs, emitTarget) {
+	if (emitTarget !== "wasm") options.jsRootPrograms.push(...programs);
+	if (!options.isDependency) spliceStdlibJs(merged, options);
+}
+
 // Adds a loaded package (and, first, its Go-source dependencies) to the
 // importer's output: JS for js/both importers, a link unit for wasm/both.
 function emitStdlibPackage(
@@ -730,7 +806,7 @@ function emitStdlibPackage(
 		const key = `${pkg.unit.key}:js`;
 		if (!bundledDirs.has(key)) {
 			bundledDirs.add(key);
-			preambles.push(pkg.chunk);
+			preambles.push(stdlibMarker(pkg.importPath));
 		}
 	}
 	if (importerTarget !== "js") registerWasmUnit(options, pkg.unit);
@@ -1021,6 +1097,7 @@ export function compileSingleFile(inputPath, options = {}) {
 		...options,
 		wasmUnits: options.wasmUnits ?? [],
 		stdlibCache: options.stdlibCache ?? new Map(),
+		jsRootPrograms: options.jsRootPrograms ?? [],
 	};
 
 	let source;
@@ -1102,6 +1179,7 @@ export function compileSingleFile(inputPath, options = {}) {
 	};
 
 	const merged = mergeCompilationChunks([...preambles, mainChunk]);
+	finishStdlibJs(merged, options, [ast], pkgTarget);
 	const { wasm, wat, wasmOptInfo, wasmSourceMap } = finishWasm(
 		{ ...options, sourceMap },
 		merged,
@@ -1149,6 +1227,7 @@ export function compileFiles(files, options = {}) {
 		...options,
 		wasmUnits: options.wasmUnits ?? [],
 		stdlibCache: options.stdlibCache ?? new Map(),
+		jsRootPrograms: options.jsRootPrograms ?? [],
 		rootDir: options.rootDir ?? fromDir,
 	};
 	const outputDir =
@@ -1263,6 +1342,7 @@ export function compileFiles(files, options = {}) {
 	};
 
 	const merged = mergeCompilationChunks([...preambles, mainChunk]);
+	finishStdlibJs(merged, options, programs, emitTarget);
 	const { wasm, wat, wasmOptInfo, wasmSourceMap } = finishWasm(
 		options,
 		merged,
