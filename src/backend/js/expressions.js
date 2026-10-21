@@ -17,6 +17,10 @@ import {
 
 /** @typedef {import('./index.js').CodeGen} CodeGen */
 
+// Array literals longer than this that leave most slots zero are emitted as
+// the zero array plus assignments (_genSparseArrayLit).
+const SPARSE_ARRAY_MIN = 32;
+
 const STRICT_NUMERIC_TYPES = new Set([
 	"float32",
 	"int8",
@@ -1503,6 +1507,24 @@ export const expressionGenMethods = {
 		return values.join(", ");
 	},
 
+	// A large array literal that leaves most slots zero (`[100000]byte{}`,
+	// `[65536]int{1: 2}`) starts from the zero array, as `var a [N]T` does,
+	// and assigns only the given elements instead of spelling out every
+	// slot.  Small or mostly-filled literals stay inline (null).
+	_genSparseArrayLit(expr) {
+		const at = this._litArrayType(expr);
+		if (!at || at.size <= SPARSE_ARRAY_MIN) return null;
+		if (expr.elems.length * 2 >= at.size) return null;
+		const zero = this.zeroValueForType(at);
+		if (expr.elems.length === 0) return zero;
+		const indices = compositeLitIndices(expr.elems);
+		const sets = expr.elems.map((e, i) => {
+			const v = this.genValueExpr(e.kind === "KeyValueExpr" ? e.value : e);
+			return `a$[${indices[i]}] = (${v})`;
+		});
+		return `((a$) => (${sets.join(", ")}, a$))(${zero})`;
+	},
+
 	_genLitElems(expr) {
 		const at = this._litArrayType(expr);
 		if (at) return this._genArrayLitElems(at, expr);
@@ -1512,6 +1534,8 @@ export const expressionGenMethods = {
 	},
 
 	_genSliceOrArrayLit(t, expr) {
+		const sparse = this._genSparseArrayLit(expr);
+		if (sparse) return sparse;
 		const elems = this._genLitElems(expr);
 		const elemNode =
 			t.kind === "SliceType" || t.kind === "ArrayType" ? t.elem : null;
@@ -1579,6 +1603,8 @@ export const expressionGenMethods = {
 				.join(", ");
 			return `{ ${fields} }`;
 		}
+		const sparse = this._genSparseArrayLit(expr);
+		if (sparse) return sparse;
 		const elems = this._genLitElems(expr);
 		if (isTypedArraySlice(expr._type)) {
 			const typedCtor = typedArrayConstructorForElem(expr._type.elem);
