@@ -279,6 +279,7 @@ class ModuleEmitter {
 		this._openRec = null; // rec group receiving new types while structs are resolved
 
 		this.structTypes = new Map(); // name -> struct info
+		this.complexTypes = new Map(); // key -> complex struct info
 		this.ptrTypes = new Map(); // key -> ptr supertype info
 		this.boxTypes = new Map(); // wType key -> box info
 		this.accTypes = new Map(); // key -> acc info
@@ -520,6 +521,51 @@ class ModuleEmitter {
 			isAnon: true,
 		};
 		this.structTypes.set(name, info);
+		return info;
+	}
+
+	getComplexType(name = "complex128") {
+		const key = name === "complex64" ? "complex64" : "complex128";
+		if (this.complexTypes.has(key)) {
+			return this.complexTypes.get(key);
+		}
+		const isF32 = key === "complex64";
+		const elemWType = isF32 ? "f32" : "f64";
+		const elemGoType = { kind: "basic", name: isF32 ? "float32" : "float64" };
+		const typeName = `$${key}`;
+		const typeIndex = this._getTotalTypeCount();
+		const typeEntry = {
+			form: "struct",
+			name: typeName,
+			fields: [
+				{ type: elemWType, mutable: false },
+				{ type: elemWType, mutable: false },
+			],
+		};
+		this._pushType(typeEntry);
+		const fields = [
+			{ name: "re", fieldIndex: 0, wType: elemWType, goType: elemGoType },
+			{ name: "im", fieldIndex: 1, wType: elemWType, goType: elemGoType },
+		];
+		const info = {
+			name: typeName,
+			typeIndex,
+			typeEntry,
+			fields,
+			fieldIndexMap: new Map([
+				["re", 0],
+				["im", 1],
+			]),
+			embeds: [],
+			pkgName: null,
+			pkgTarget: "wasm",
+			isComplex: true,
+			elemWType,
+			elemGoType,
+		};
+		this.complexTypes.set(key, info);
+		this.structTypes.set(key, info);
+		this.structTypes.set(typeName, info);
 		return info;
 	}
 

@@ -5,8 +5,10 @@ import {
 	ANY,
 	BOOL,
 	BROWSER_GLOBALS,
+	COMPLEX64,
 	COMPLEX128,
 	ERROR,
+	FLOAT32,
 	FLOAT64,
 	INT,
 	isAny,
@@ -952,6 +954,7 @@ export const expressionCheckMethods = {
 		}
 		if (crt.kind === "untyped" && cit.kind === "untyped")
 			return UNTYPED_COMPLEX;
+		if (crt.name === "float32" || cit.name === "float32") return COMPLEX64;
 		return COMPLEX128;
 	},
 
@@ -966,6 +969,7 @@ export const expressionCheckMethods = {
 			return ANY;
 		}
 		if (zt.kind === "untyped") return UNTYPED_FLOAT;
+		if (zt.name === "complex64") return FLOAT32;
 		return FLOAT64;
 	},
 

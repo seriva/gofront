@@ -10,6 +10,7 @@ import {
 import {
 	getMapKeyValTypes,
 	isArrayType,
+	isComplex,
 	isFuncType,
 	isInterfaceType,
 	isMapType,
@@ -885,6 +886,44 @@ export class StmtsEmitter {
 		const baseOp = op.slice(0, -1);
 		const l = Array.isArray(lhs) ? lhs[0] : lhs;
 		const r = Array.isArray(rhs) ? rhs[0] : rhs;
+
+		if (isComplex(l._type)) {
+			const synthBinary = {
+				kind: "BinaryExpr",
+				op: baseOp,
+				left: l,
+				right: r,
+				_type: l._type,
+			};
+			const is64 = l._type?.name === "complex64";
+			const info = this.mod.getComplexType(is64 ? "complex64" : "complex128");
+			const cWType = {
+				kind: "ref",
+				nullable: true,
+				typeIndex: info.typeIndex,
+				typeName: info.name,
+			};
+			if (l.kind === "Ident") {
+				const localInfo = this.resolveLocal(l.name);
+				const globalInfo = !localInfo ? this.mod.resolveGlobal(l.name) : null;
+				if (localInfo?.isBoxed) {
+					this.pushInstruction({ op: "local.get", index: localInfo.index });
+					this.emitComplexBinary(synthBinary, cWType);
+					this.pushInstruction({
+						op: "struct.set",
+						typeIndex: localInfo.boxInfo.typeIndex,
+						fieldIndex: 0,
+					});
+				} else if (localInfo) {
+					this.emitComplexBinary(synthBinary, cWType);
+					this.pushInstruction({ op: "local.set", index: localInfo.index });
+				} else if (globalInfo) {
+					this.emitComplexBinary(synthBinary, cWType);
+					this.pushInstruction({ op: "global.set", index: globalInfo.index });
+				}
+				return;
+			}
+		}
 
 		if (l.kind === "SelectorExpr") {
 			const structInfo = this._resolveStructInfo(l.expr);

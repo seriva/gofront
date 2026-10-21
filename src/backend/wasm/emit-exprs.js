@@ -6,6 +6,7 @@ import {
 	getMapKeyValTypes,
 	isAnyType,
 	isArrayType,
+	isComplex,
 	isFuncType,
 	isMapType,
 	isPointerToStruct,
@@ -117,6 +118,9 @@ export class ExprsEmitter {
 					return { kind: "nil", name: "nil" };
 			}
 		}
+		if (expr.kind === "ImagLit") {
+			return { kind: "untyped", base: "complex128" };
+		}
 		if (expr.kind === "Ident") {
 			const local = this.resolveLocal(expr.name);
 			if (local) return local.goType;
@@ -144,6 +148,10 @@ export class ExprsEmitter {
 		switch (expr.kind) {
 			case "BasicLit":
 				this.emitBasicLit(expr, targetWasmType);
+				break;
+
+			case "ImagLit":
+				this.emitImagLit(expr, targetWasmType);
 				break;
 
 			case "Ident":
@@ -1088,6 +1096,30 @@ export class ExprsEmitter {
 	}
 
 	emitBasicLit(lit, targetWasmType) {
+		const isTargetComplex64 =
+			lit._type?.name === "complex64" ||
+			targetWasmType?.typeName === "$complex64";
+		const isTargetComplex128 =
+			lit._type?.name === "complex128" ||
+			lit._type?.base === "complex128" ||
+			targetWasmType?.typeName === "$complex128";
+		if (isTargetComplex64 || isTargetComplex128) {
+			const info = this.mod.getComplexType(
+				isTargetComplex64 ? "complex64" : "complex128",
+			);
+			const s = String(lit.value);
+			const clean = /^0[0-7]+$/.test(s) ? `0o${s.slice(1)}` : s;
+			const n = Number(clean);
+			this.pushInstruction({ op: `${info.elemWType}.const`, value: n });
+			this.pushInstruction({ op: `${info.elemWType}.const`, value: 0.0 });
+			this.pushInstruction({
+				op: "struct.new",
+				typeIndex: info.typeIndex,
+				typeName: info.name,
+			});
+			return;
+		}
+
 		const wType =
 			targetWasmType ??
 			toWasmType(lit._type, this.mod.checker) ??
@@ -1140,6 +1172,22 @@ export class ExprsEmitter {
 			this.pushInstruction({ op: "call", funcIndex: funcIdx });
 			return;
 		}
+	}
+
+	emitImagLit(lit, targetWasmType) {
+		const is64 =
+			lit._type?.name === "complex64" ||
+			targetWasmType?.typeName === "$complex64";
+		const complexName = is64 ? "complex64" : "complex128";
+		const info = this.mod.getComplexType(complexName);
+		const imVal = Number(lit.value);
+		this.pushInstruction({ op: `${info.elemWType}.const`, value: 0.0 });
+		this.pushInstruction({ op: `${info.elemWType}.const`, value: imVal });
+		this.pushInstruction({
+			op: "struct.new",
+			typeIndex: info.typeIndex,
+			typeName: info.name,
+		});
 	}
 
 	_emitNilValue(goType, targetWasmType) {
@@ -1265,6 +1313,11 @@ export class ExprsEmitter {
 	emitUnaryExpr(expr, targetWasmType = null) {
 		const { op, operand } = expr;
 
+		if (isComplex(expr._type) || isComplex(operand._type)) {
+			this._emitComplexUnary(expr, op, operand, targetWasmType);
+			return;
+		}
+
 		// Optimize negative numeric literals directly
 		if (op === "-" && operand.kind === "BasicLit") {
 			if (operand.litKind === "INT" || operand.litKind === "FLOAT") {
@@ -1330,6 +1383,54 @@ export class ExprsEmitter {
 
 			default:
 				throw new Error(`Unsupported unary operator: ${op}`);
+		}
+	}
+
+	_emitComplexUnary(expr, op, operand, targetWasmType) {
+		if (op === "+") {
+			this.emitExpr(operand, targetWasmType);
+			return;
+		}
+		if (op === "-") {
+			if (operand.kind === "ImagLit") {
+				this.emitImagLit(
+					{ ...operand, value: `-${operand.value}` },
+					targetWasmType,
+				);
+				return;
+			}
+			const is64 =
+				expr._type?.name === "complex64" ||
+				operand._type?.name === "complex64" ||
+				targetWasmType?.typeName === "$complex64";
+			const info = this.mod.getComplexType(is64 ? "complex64" : "complex128");
+			const cWType = {
+				kind: "ref",
+				nullable: true,
+				typeIndex: info.typeIndex,
+				typeName: info.name,
+			};
+			const opTmp = this.acquireTemp(cWType);
+			this.emitExpr(operand, cWType);
+			this.pushInstruction({ op: "local.set", index: opTmp });
+
+			for (let i = 0; i < 2; i++) {
+				this.pushInstruction({ op: "local.get", index: opTmp });
+				this.pushInstruction({
+					op: "struct.get",
+					typeIndex: info.typeIndex,
+					typeName: info.name,
+					fieldIndex: i,
+				});
+				this.pushInstruction(`${info.elemWType}.neg`);
+			}
+
+			this.pushInstruction({
+				op: "struct.new",
+				typeIndex: info.typeIndex,
+				typeName: info.name,
+			});
+			this.releaseTemp(opTmp, cWType);
 		}
 	}
 
@@ -1540,8 +1641,270 @@ export class ExprsEmitter {
 		this.releaseTemp(pTmp, ptrWType);
 	}
 
+	_emitComplexEq(aTmp, bTmp, info, f, op) {
+		for (let i = 0; i < 2; i++) {
+			this.pushInstruction({ op: "local.get", index: aTmp });
+			this.pushInstruction({
+				op: "struct.get",
+				typeIndex: info.typeIndex,
+				typeName: info.name,
+				fieldIndex: i,
+			});
+			this.pushInstruction({ op: "local.get", index: bTmp });
+			this.pushInstruction({
+				op: "struct.get",
+				typeIndex: info.typeIndex,
+				typeName: info.name,
+				fieldIndex: i,
+			});
+			this.pushInstruction(`${f}.eq`);
+		}
+		this.pushInstruction("i32.and");
+		if (op === "!=") this.pushInstruction("i32.eqz");
+	}
+
+	_emitComplexAddSub(aTmp, bTmp, info, f, op) {
+		const wasmOp = op === "+" ? `${f}.add` : `${f}.sub`;
+		for (let i = 0; i < 2; i++) {
+			this.pushInstruction({ op: "local.get", index: aTmp });
+			this.pushInstruction({
+				op: "struct.get",
+				typeIndex: info.typeIndex,
+				typeName: info.name,
+				fieldIndex: i,
+			});
+			this.pushInstruction({ op: "local.get", index: bTmp });
+			this.pushInstruction({
+				op: "struct.get",
+				typeIndex: info.typeIndex,
+				typeName: info.name,
+				fieldIndex: i,
+			});
+			this.pushInstruction(wasmOp);
+		}
+		this.pushInstruction({
+			op: "struct.new",
+			typeIndex: info.typeIndex,
+			typeName: info.name,
+		});
+	}
+
+	_emitComplexMul(aTmp, bTmp, info, f) {
+		this.pushInstruction({ op: "local.get", index: aTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: info.typeIndex,
+			typeName: info.name,
+			fieldIndex: 0,
+		});
+		this.pushInstruction({ op: "local.get", index: bTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: info.typeIndex,
+			typeName: info.name,
+			fieldIndex: 0,
+		});
+		this.pushInstruction(`${f}.mul`);
+		this.pushInstruction({ op: "local.get", index: aTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: info.typeIndex,
+			typeName: info.name,
+			fieldIndex: 1,
+		});
+		this.pushInstruction({ op: "local.get", index: bTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: info.typeIndex,
+			typeName: info.name,
+			fieldIndex: 1,
+		});
+		this.pushInstruction(`${f}.mul`);
+		this.pushInstruction(`${f}.sub`);
+
+		this.pushInstruction({ op: "local.get", index: aTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: info.typeIndex,
+			typeName: info.name,
+			fieldIndex: 0,
+		});
+		this.pushInstruction({ op: "local.get", index: bTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: info.typeIndex,
+			typeName: info.name,
+			fieldIndex: 1,
+		});
+		this.pushInstruction(`${f}.mul`);
+		this.pushInstruction({ op: "local.get", index: aTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: info.typeIndex,
+			typeName: info.name,
+			fieldIndex: 1,
+		});
+		this.pushInstruction({ op: "local.get", index: bTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: info.typeIndex,
+			typeName: info.name,
+			fieldIndex: 0,
+		});
+		this.pushInstruction(`${f}.mul`);
+		this.pushInstruction(`${f}.add`);
+
+		this.pushInstruction({
+			op: "struct.new",
+			typeIndex: info.typeIndex,
+			typeName: info.name,
+		});
+	}
+
+	_emitComplexDiv(aTmp, bTmp, info, f) {
+		const dTmp = this.acquireTemp(f);
+		for (let i = 0; i < 2; i++) {
+			this.pushInstruction({ op: "local.get", index: bTmp });
+			this.pushInstruction({
+				op: "struct.get",
+				typeIndex: info.typeIndex,
+				typeName: info.name,
+				fieldIndex: i,
+			});
+			this.pushInstruction({ op: "local.get", index: bTmp });
+			this.pushInstruction({
+				op: "struct.get",
+				typeIndex: info.typeIndex,
+				typeName: info.name,
+				fieldIndex: i,
+			});
+			this.pushInstruction(`${f}.mul`);
+			if (i > 0) this.pushInstruction(`${f}.add`);
+		}
+		this.pushInstruction({ op: "local.set", index: dTmp });
+
+		this.pushInstruction({ op: "local.get", index: aTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: info.typeIndex,
+			typeName: info.name,
+			fieldIndex: 0,
+		});
+		this.pushInstruction({ op: "local.get", index: bTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: info.typeIndex,
+			typeName: info.name,
+			fieldIndex: 0,
+		});
+		this.pushInstruction(`${f}.mul`);
+		this.pushInstruction({ op: "local.get", index: aTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: info.typeIndex,
+			typeName: info.name,
+			fieldIndex: 1,
+		});
+		this.pushInstruction({ op: "local.get", index: bTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: info.typeIndex,
+			typeName: info.name,
+			fieldIndex: 1,
+		});
+		this.pushInstruction(`${f}.mul`);
+		this.pushInstruction(`${f}.add`);
+		this.pushInstruction({ op: "local.get", index: dTmp });
+		this.pushInstruction(`${f}.div`);
+
+		this.pushInstruction({ op: "local.get", index: aTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: info.typeIndex,
+			typeName: info.name,
+			fieldIndex: 1,
+		});
+		this.pushInstruction({ op: "local.get", index: bTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: info.typeIndex,
+			typeName: info.name,
+			fieldIndex: 0,
+		});
+		this.pushInstruction(`${f}.mul`);
+		this.pushInstruction({ op: "local.get", index: aTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: info.typeIndex,
+			typeName: info.name,
+			fieldIndex: 0,
+		});
+		this.pushInstruction({ op: "local.get", index: bTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: info.typeIndex,
+			typeName: info.name,
+			fieldIndex: 1,
+		});
+		this.pushInstruction(`${f}.mul`);
+		this.pushInstruction(`${f}.sub`);
+		this.pushInstruction({ op: "local.get", index: dTmp });
+		this.pushInstruction(`${f}.div`);
+
+		this.pushInstruction({
+			op: "struct.new",
+			typeIndex: info.typeIndex,
+			typeName: info.name,
+		});
+		this.releaseTemp(dTmp, f);
+	}
+
+	emitComplexBinary(expr, targetWasmType) {
+		const { op, left, right } = expr;
+		const is64 =
+			expr._type?.name === "complex64" ||
+			left._type?.name === "complex64" ||
+			right._type?.name === "complex64" ||
+			targetWasmType?.typeName === "$complex64";
+		const info = this.mod.getComplexType(is64 ? "complex64" : "complex128");
+		const f = info.elemWType;
+		const cWType = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: info.typeIndex,
+			typeName: info.name,
+		};
+		const aTmp = this.acquireTemp(cWType);
+		const bTmp = this.acquireTemp(cWType);
+		this.emitExpr(left, cWType);
+		this.pushInstruction({ op: "local.set", index: aTmp });
+		this.emitExpr(right, cWType);
+		this.pushInstruction({ op: "local.set", index: bTmp });
+
+		if (op === "==" || op === "!=") {
+			this._emitComplexEq(aTmp, bTmp, info, f, op);
+		} else if (op === "+" || op === "-") {
+			this._emitComplexAddSub(aTmp, bTmp, info, f, op);
+		} else if (op === "*") {
+			this._emitComplexMul(aTmp, bTmp, info, f);
+		} else if (op === "/") {
+			this._emitComplexDiv(aTmp, bTmp, info, f);
+		}
+		this.releaseTemp(bTmp, cWType);
+		this.releaseTemp(aTmp, cWType);
+	}
+
 	emitBinaryExpr(expr, targetWasmType = null) {
 		const { op, left, right } = expr;
+
+		if (
+			isComplex(expr._type) ||
+			isComplex(left._type) ||
+			isComplex(right._type)
+		) {
+			this.emitComplexBinary(expr, targetWasmType);
+			return;
+		}
 
 		// Short-circuiting logical operators
 		if (op === "&&") {
@@ -2253,11 +2616,16 @@ export class ExprsEmitter {
 
 	emitTypeConversion(conv) {
 		const { targetType, expr } = conv;
-		const fromType = expr._type;
-		const fromWType = toWasmType(fromType, this.mod.checker);
-		const toWType = toWasmType(targetType, this.mod.checker);
+		const fromType = expr._type ?? this._resolveExprGoType(expr);
+		const fromWType = this.toWasmType(fromType);
+		const toWType = this.toWasmType(targetType);
 
 		this.emitExpr(expr, fromWType);
+
+		if (isComplex(targetType)) {
+			this._emitComplexConversion(targetType, fromType, fromWType);
+			return;
+		}
 
 		if (fromWType === toWType) {
 			this.emitNarrowIntWrap(targetType);
@@ -2321,6 +2689,64 @@ export class ExprsEmitter {
 			this.pushInstruction(`${toWType}.trunc_sat_${fromWType}_${dstSign}`);
 			if (toWType === "i32") this.emitNarrowIntWrap(targetType);
 		}
+	}
+
+	_emitComplexConversion(targetType, fromType, fromWType) {
+		const isTarget64 = targetType.name === "complex64";
+		const targetInfo = this.mod.getComplexType(
+			isTarget64 ? "complex64" : "complex128",
+		);
+		if (isComplex(fromType)) {
+			const isFrom64 = fromType?.name === "complex64";
+			if (isTarget64 === isFrom64) return;
+			const fromInfo = this.mod.getComplexType(
+				isFrom64 ? "complex64" : "complex128",
+			);
+			const fromWTypeRef = {
+				kind: "ref",
+				nullable: true,
+				typeIndex: fromInfo.typeIndex,
+				typeName: fromInfo.name,
+			};
+			const cTmp = this.acquireTemp(fromWTypeRef);
+			this.pushInstruction({ op: "local.set", index: cTmp });
+
+			for (let i = 0; i < 2; i++) {
+				this.pushInstruction({ op: "local.get", index: cTmp });
+				this.pushInstruction({
+					op: "struct.get",
+					typeIndex: fromInfo.typeIndex,
+					typeName: fromInfo.name,
+					fieldIndex: i,
+				});
+				this.pushInstruction(isTarget64 ? "f32.demote_f64" : "f64.promote_f32");
+			}
+
+			this.pushInstruction({
+				op: "struct.new",
+				typeIndex: targetInfo.typeIndex,
+				typeName: targetInfo.name,
+			});
+			this.releaseTemp(cTmp, fromWTypeRef);
+			return;
+		}
+
+		// From numeric scalar
+		const targetF = targetInfo.elemWType;
+		const srcSign = isSigned(fromType) ? "s" : "u";
+		if (fromWType === "i32" || fromWType === "i64") {
+			this.pushInstruction(`${targetF}.convert_${fromWType}_${srcSign}`);
+		} else if (fromWType === "f32" && targetF === "f64") {
+			this.pushInstruction("f64.promote_f32");
+		} else if (fromWType === "f64" && targetF === "f32") {
+			this.pushInstruction("f32.demote_f64");
+		}
+		this.pushInstruction({ op: `${targetF}.const`, value: 0.0 });
+		this.pushInstruction({
+			op: "struct.new",
+			typeIndex: targetInfo.typeIndex,
+			typeName: targetInfo.name,
+		});
 	}
 
 	_emitStringToByteSlice(targetType) {

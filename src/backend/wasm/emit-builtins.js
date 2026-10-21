@@ -795,6 +795,82 @@ export class BuiltinsEmitter {
 		}
 	}
 
+	_emitBuiltinComplex(call, targetWasmType) {
+		const arg0 = call.args[0];
+		const arg1 = call.args[1];
+		const callType = call._type;
+		const is64 =
+			callType?.name === "complex64" ||
+			arg0._type?.name === "float32" ||
+			arg1._type?.name === "float32" ||
+			targetWasmType?.typeName === "$complex64";
+		const complexName = is64 ? "complex64" : "complex128";
+		const info = this.mod.getComplexType(complexName);
+		this.emitExpr(arg0, info.elemWType);
+		this.emitExpr(arg1, info.elemWType);
+		this.pushInstruction({
+			op: "struct.new",
+			typeIndex: info.typeIndex,
+			typeName: info.name,
+		});
+	}
+
+	_emitBuiltinReal(call, targetWasmType) {
+		const arg = call.args[0];
+		const argType = arg._type ?? this._resolveExprGoType(arg);
+		const is64 = argType?.name === "complex64";
+		const complexName = is64 ? "complex64" : "complex128";
+		const info = this.mod.getComplexType(complexName);
+		const complexWType = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: info.typeIndex,
+			typeName: info.name,
+		};
+		this.emitExpr(arg, complexWType);
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: info.typeIndex,
+			typeName: info.name,
+			fieldIndex: 0,
+		});
+		if (targetWasmType && targetWasmType !== info.elemWType) {
+			if (info.elemWType === "f32" && targetWasmType === "f64") {
+				this.pushInstruction("f64.promote_f32");
+			} else if (info.elemWType === "f64" && targetWasmType === "f32") {
+				this.pushInstruction("f32.demote_f64");
+			}
+		}
+	}
+
+	_emitBuiltinImag(call, targetWasmType) {
+		const arg = call.args[0];
+		const argType = arg._type ?? this._resolveExprGoType(arg);
+		const is64 = argType?.name === "complex64";
+		const complexName = is64 ? "complex64" : "complex128";
+		const info = this.mod.getComplexType(complexName);
+		const complexWType = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: info.typeIndex,
+			typeName: info.name,
+		};
+		this.emitExpr(arg, complexWType);
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: info.typeIndex,
+			typeName: info.name,
+			fieldIndex: 1,
+		});
+		if (targetWasmType && targetWasmType !== info.elemWType) {
+			if (info.elemWType === "f32" && targetWasmType === "f64") {
+				this.pushInstruction("f64.promote_f32");
+			} else if (info.elemWType === "f64" && targetWasmType === "f32") {
+				this.pushInstruction("f32.demote_f64");
+			}
+		}
+	}
+
 	_emitBuiltinCall(call, targetWasmType) {
 		const { func } = call;
 		if (func.kind !== "Ident") return false;
@@ -832,6 +908,15 @@ export class BuiltinsEmitter {
 				return true;
 			case "recover":
 				this._emitBuiltinRecover(call, targetWasmType);
+				return true;
+			case "complex":
+				this._emitBuiltinComplex(call, targetWasmType);
+				return true;
+			case "real":
+				this._emitBuiltinReal(call, targetWasmType);
+				return true;
+			case "imag":
+				this._emitBuiltinImag(call, targetWasmType);
 				return true;
 			default:
 				return false;
