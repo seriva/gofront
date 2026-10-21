@@ -88,6 +88,7 @@ export const resolveMethods = {
 				if (scope) {
 					const fromScope = scope.lookup(node.name);
 					if (fromScope?.kind === "typeParam") return fromScope;
+					if (fromScope?.kind === "aliasArg") return fromScope.type;
 				}
 				const named = this.types.get(node.name);
 				if (named) {
@@ -98,28 +99,8 @@ export const resolveMethods = {
 			}
 			case "GenericTypeName":
 			case "InstantiationExpr":
-			case "IndexExpr": {
-				const name =
-					node.name ?? (node.expr?.kind === "Ident" ? node.expr.name : null);
-				const typeArgs = node.typeArgs ?? (node.index ? [node.index] : []);
-				const base = name
-					? this.types.get(name)
-					: node.expr
-						? this.resolveTypeNode(node.expr, scope)
-						: null;
-				if (!base) return this.err(`Unknown type '${name ?? "?"}'`, node);
-				if (base.kind === "named" && base._generic) {
-					const res = this.instantiateGenericType(
-						base._generic,
-						typeArgs,
-						scope,
-					);
-					node._typeArgs = res.typeArgs;
-					node._genericType = base;
-					return res;
-				}
-				return this.err(`Type '${name ?? "?"}' is not generic`, node);
-			}
+			case "IndexExpr":
+				return this._resolveGenericTypeName(node, scope);
 			case "TypeParam": {
 				const constraint = node.constraint
 					? this.resolveTypeNode(node.constraint, scope)
@@ -195,6 +176,31 @@ export const resolveMethods = {
 					: node.size,
 			elem: this.resolveTypeNode(node.elem, scope),
 		};
+	},
+
+	// `G[X]`: instantiate a generic named type, or expand a generic alias.
+	_resolveGenericTypeName(node, scope) {
+		const name =
+			node.name ?? (node.expr?.kind === "Ident" ? node.expr.name : null);
+		const typeArgs = node.typeArgs ?? (node.index ? [node.index] : []);
+		const base = name
+			? this.types.get(name)
+			: node.expr
+				? this.resolveTypeNode(node.expr, scope)
+				: null;
+		if (!base) return this.err(`Unknown type '${name ?? "?"}'`, node);
+		if (base.kind === "named" && base._generic?.isAlias) {
+			const aliasArgs = typeArgs.map((n) => this.resolveTypeNode(n, scope));
+			node._typeArgs = aliasArgs;
+			return this._instantiateGenericAlias(base._generic, aliasArgs);
+		}
+		if (base.kind === "named" && base._generic) {
+			const res = this.instantiateGenericType(base._generic, typeArgs, scope);
+			node._typeArgs = res.typeArgs;
+			node._genericType = base;
+			return res;
+		}
+		return this.err(`Type '${name ?? "?"}' is not generic`, node);
 	},
 
 	_resolveFuncTypeNode(node, scope) {
@@ -336,6 +342,29 @@ export const resolveMethods = {
 			underlying: instantiated,
 			methods: instantiated.methods,
 		};
+	},
+
+	// A[X] for `type A[P any] = T`: resolve T with each P bound to the
+	// concrete X, so A[int] is exactly T[int] (generic named types inside T
+	// are instantiated normally and keep their identity).
+	_instantiateGenericAlias(generic, typeArgs) {
+		const { typeParams, declNode } = generic;
+		if (typeArgs.length !== typeParams.length) {
+			return this.err(
+				`got ${typeArgs.length} type arguments but ${declNode.name} has ${typeParams.length} type parameters`,
+				declNode,
+			);
+		}
+		const aliasScope = new Scope(this.globals);
+		for (let i = 0; i < typeParams.length; i++) {
+			const tp = typeParams[i];
+			if (tp.constraint) {
+				const constraint = this.resolveTypeNode(tp.constraint, this.globals);
+				this.checkConstraint(typeArgs[i], constraint, declNode);
+			}
+			aliasScope.define(tp.name, { kind: "aliasArg", type: typeArgs[i] });
+		}
+		return this.resolveTypeNode(declNode.type, aliasScope);
 	},
 
 	inferTypeArgs(genericType, argTypes) {

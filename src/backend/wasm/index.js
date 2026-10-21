@@ -354,7 +354,11 @@ class ModuleEmitter {
 
 		for (const p of progs) {
 			for (const d of p.decls ?? []) {
-				if (d.kind === "TypeDecl" && d.type?.kind === "StructType") {
+				if (
+					d.kind === "TypeDecl" &&
+					!d.isAlias &&
+					d.type?.kind === "StructType"
+				) {
 					if (!seen.has(d.name)) {
 						seen.add(d.name);
 						rawStructs.push({

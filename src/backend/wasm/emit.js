@@ -940,7 +940,7 @@ export class FunctionEmitter {
 					for (const n of names) rawFields.push({ name: n, goType: f.type });
 				}
 			}
-			if (rawFields.length > 0 && this.mod.getAnonStructType) {
+			if (this.mod.getAnonStructType) {
 				return this.mod.getAnonStructType(rawFields);
 			}
 		}
