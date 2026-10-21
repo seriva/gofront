@@ -563,11 +563,16 @@ function checkStdlibPrograms(programs, pkgName, options, overlay) {
 	return checker;
 }
 
-function throwStdlibErrors(errors, importPath) {
+// Errors in stdlib source are compiler bugs; the importer reports them at its
+// import (see reportStdlibLoadError), so only the message text is kept, never
+// a location inside runtime/stdlib/.
+function throwStdlibErrors(errors) {
 	if (errors.length === 0) return;
-	throw new Error(
-		`internal stdlib error in ${importPath}; please report:\n${errors.map((e) => e.message).join("\n")}`,
-	);
+	const detail = (e) =>
+		e.message
+			.split("\n")[0]
+			.replace(/^Type error(?: in \S+)?(?: at line \d+:\d+)?:\s*/, "");
+	throw new Error([...new Set(errors.map(detail))].join("; "));
 }
 
 // Pass 1: type-check the package as written and record which identifiers
@@ -581,7 +586,7 @@ function probeStdlibPackage(importPath, dir, options, overlay) {
 			throw new Error(`overlay redeclares ${overlay.name}.${n}`);
 	const probe = checkStdlibPrograms(programs, pkgName, options, overlay);
 	probe._pkgRefs = new Set();
-	throwStdlibErrors(probe.checkAll(programs), importPath);
+	throwStdlibErrors(probe.checkAll(programs));
 	return { pkgName, values, types, refs: probe._pkgRefs };
 }
 
@@ -621,15 +626,28 @@ function stdlibExportedTypes(checker, { pkgName, suffix }) {
 	return out;
 }
 
-// Loads (once per build) and compiles the Go-source package at `dir`.
+// Loads (once per build) and compiles the Go-source package at `dir`.  A
+// failure is cached too, so every importer reports it.
 function loadStdlibPackage(importPath, dir, options) {
 	const cache = options.stdlibCache;
 	const cached = cache.get(importPath);
 	if (cached === null)
 		throw new Error(`import cycle in Go-source stdlib: ${importPath}`);
+	if (cached instanceof Error) throw cached;
 	if (cached) return cached;
 	cache.set(importPath, null);
+	try {
+		const pkg = buildStdlibPackage(importPath, dir, options);
+		cache.set(importPath, pkg);
+		return pkg;
+	} catch (e) {
+		cache.set(importPath, e);
+		throw e;
+	}
+}
 
+function buildStdlibPackage(importPath, dir, options) {
+	const cache = options.stdlibCache;
 	const overlay = isBuiltinPackage(importPath)
 		? new TypeChecker().globals.lookup(importPath.split("/").at(-1))
 		: null;
@@ -642,7 +660,7 @@ function loadStdlibPackage(importPath, dir, options) {
 	const programs = parseStdlibFiles(dir);
 	mangleStdlibAst(programs, { ...info, overlay });
 	const checker = checkStdlibPrograms(programs, info.pkgName, options, null);
-	throwStdlibErrors(checker.checkAll(programs), importPath);
+	throwStdlibErrors(checker.checkAll(programs));
 	lowerStdlibRefs(programs);
 
 	const codegen = new CodeGen(checker, new Map(), new Set(), {
@@ -673,7 +691,6 @@ function loadStdlibPackage(importPath, dir, options) {
 			bundledPackages: new Set(),
 		},
 	};
-	cache.set(importPath, pkg);
 	return pkg;
 }
 
@@ -719,17 +736,25 @@ function emitStdlibPackage(
 	if (importerTarget !== "js") registerWasmUnit(options, pkg.unit);
 }
 
+function importNode({ _line, _col, line, col }) {
+	return { _line, _col, line: line ?? _line, col: col ?? _col ?? 1 };
+}
+
+// Reports `msg` at an import spec of program `p`.
+function errAtImport(checker, p, spec, msg, hint = null) {
+	const saved = [checker._currentFile, checker._currentSource];
+	checker._currentFile = p._filename ?? null;
+	checker._currentSource = p._source ?? null;
+	checker.err(msg, importNode(spec), hint);
+	[checker._currentFile, checker._currentSource] = saved;
+}
+
 // Defines the import's namespace (and `pkg.T` type names) in the importer.
 function bindStdlibImport(checker, p, spec, pkg) {
-	const { path, alias, _line, _col, line, col } = spec;
+	const { path, alias } = spec;
 	if (alias === "_") return;
-	const node = { _line, _col, line: line ?? _line, col: col ?? _col ?? 1 };
 	if (alias === ".") {
-		const saved = [checker._currentFile, checker._currentSource];
-		checker._currentFile = p._filename ?? null;
-		checker._currentSource = p._source ?? null;
-		checker.err(`dot-import of '${path}' is not supported`, node);
-		[checker._currentFile, checker._currentSource] = saved;
+		errAtImport(checker, p, spec, `dot-import of '${path}' is not supported`);
 		return;
 	}
 	const name = alias ?? pkg.pkgName;
@@ -738,7 +763,8 @@ function bindStdlibImport(checker, p, spec, pkg) {
 		const dot = k.indexOf(".");
 		checker.types.set(dot < 0 ? k : `${name}${k.slice(dot)}`, t);
 	}
-	if (!pkg.overlay) checker.trackImport(name, node, p._filename, p._source);
+	if (!pkg.overlay)
+		checker.trackImport(name, importNode(spec), p._filename, p._source);
 }
 
 function importStdlibPackages(
@@ -753,7 +779,14 @@ function importStdlibPackages(
 			if (spec.path.startsWith("js:") || isLocalPath(spec.path)) continue;
 			const dir = resolveStdlibSource(spec.path, options.stdlibRoot);
 			if (!dir) continue;
-			const pkg = loadStdlibPackage(spec.path, dir, options);
+			let pkg;
+			try {
+				pkg = loadStdlibPackage(spec.path, dir, options);
+			} catch (e) {
+				const msg = `internal stdlib error in ${spec.path}; please report`;
+				errAtImport(checker, p, spec, msg, e.message);
+				continue;
+			}
 			emitStdlibPackage(pkg, checker.target, preambles, bundledDirs, options);
 			bindStdlibImport(checker, p, spec, pkg);
 		}

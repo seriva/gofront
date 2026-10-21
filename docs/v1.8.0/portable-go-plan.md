@@ -613,7 +613,7 @@ Conventions used in the tasks:
   - Test: `stdlib-go.test.js` — `errors.Is(err, errors.ErrUnsupported)` parity; a deliberate collision fixture reports `overlay redeclares errors.New`.
   - Done when: overlay members appear in `errors` on both backends and the collision diagnostic is tested.
 
-- [ ] **Task 0.6c — Name coexistence and call-site diagnostics**
+- [x] **Task 0.6c — Name coexistence and call-site diagnostics**
   - Files: `src/resolver.js`, `src/typechecker/index.js`, `src/compiler.js` (error mapping)
   - Do: a user package named `heap` coexists with `container/heap` (qualified by import path everywhere, including the WASM function-name mangling). A type error inside a Go-source file is re-reported at the user's import or call site with the note `internal stdlib error in <path>; please report`, never as a path into `runtime/stdlib/`.
   - Test: `stdlib-go.test.js` — the coexistence fixture (use `cmp` plus a user package `cmp`); a temporarily broken overlay copied to a temp dir reports at the call site.

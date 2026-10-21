@@ -16,10 +16,12 @@ import {
 
 // Builds `lib` once as `both` (JS code path) and once as `wasm` (linked
 // module behind the facade), calls `lib.Run()` from a JS root, and returns the
-// printed line of each.  Throws when the two backends disagree.
-async function stdParity(libBody) {
+// printed line of each.  Throws when the two backends disagree.  `extraFiles`
+// adds more project files (e.g. a local package `lib` imports).
+async function stdParity(libBody, extraFiles = {}) {
 	const run = async (target) => {
 		const res = await compileHybridProject({
+			...extraFiles,
 			"lib/lib.go": `//gofront:target ${target}\npackage lib\n\n${libBody}`,
 			"main.go": `package main\n\nimport "./lib"\n\nfunc main() { println(lib.Run()) }\n`,
 		});
@@ -141,6 +143,66 @@ func main() { println(errors.New("x") != nil) }
 				() => compileDir(join(dir, "app"), { stdlibRoot: join(dir, "stdlib") }),
 				"overlay redeclares errors.New",
 			);
+		},
+	);
+});
+
+section("Go-source stdlib: name coexistence and diagnostics");
+
+test("a user package named cmp coexists with the stdlib cmp", async () => {
+	const out = await stdParity(
+		`import (
+	"cmp"
+	mycmp "../cmp"
+)
+
+func Run() int { return cmp.Compare(1, 2)*1000 + mycmp.Compare(1, 2) }
+`,
+		{
+			"cmp/cmp.go": `//gofront:target both
+package cmp
+
+func Compare(a, b int) int { return 7 }
+`,
+		},
+	);
+	assertEqual(out, "-993");
+});
+
+test("a type error in Go-source stdlib is reported at the import site", () => {
+	withTempDir(
+		{
+			"stdlib/errors/overlay.go": `//go:build gofront
+
+//gofront:target both
+
+package errors
+
+var ErrBroken = New(42)
+`,
+			"app/main.go": `package main
+
+import "errors"
+
+func main() { println(errors.ErrBroken != nil) }
+`,
+		},
+		(dir) => {
+			let msg = "";
+			try {
+				compileDir(join(dir, "app"), { stdlibRoot: join(dir, "stdlib") });
+			} catch (e) {
+				msg = e.message;
+			}
+			assert(
+				msg.includes("internal stdlib error in errors; please report"),
+				`expected the internal stdlib note, got: ${msg}`,
+			);
+			assert(
+				msg.includes("main.go at line 3"),
+				`expected the import site: ${msg}`,
+			);
+			assert(!msg.includes("stdlib/errors"), `leaked a stdlib path: ${msg}`);
 		},
 	);
 });
