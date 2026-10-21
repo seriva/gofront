@@ -584,7 +584,8 @@ test("Probe 12: Float NaN / Infinity returns unsupported value error", () => {
 	const { js, errors } = compile(`package main
 import "encoding/json"
 func main() {
-	nan := 0.0 / 0.0
+	zero := 0.0
+	nan := zero / zero
 	_, err := json.Marshal(nan)
 	console.log(err != nil, err.Error())
 }`);

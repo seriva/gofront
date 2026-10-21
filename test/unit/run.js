@@ -29,6 +29,7 @@ export const TEST_FILES = [
 	"./language/codegen-regressions.test.js",
 	"./language/named-type-methods.test.js",
 	"./language/structs.test.js",
+	"./language/constants.test.js",
 	"./language/parity-matrix.test.js",
 	"./types/errors.test.js",
 	"./types/checks.test.js",

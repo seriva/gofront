@@ -169,8 +169,9 @@ export const assignabilityMethods = {
 
 	// ── Assignability ─────────────────────────────────────────────────
 
-	assertAssignable(target, source, node) {
+	assertAssignable(target, source, node, ctx = "assignment") {
 		if (!target || !source) return;
+		if (this._checkConstOverflow(target, source, node, ctx)) return;
 		target = this.resolveType(target);
 		source = this.resolveType(source);
 		this._markIfaceBox(target, source, node);
