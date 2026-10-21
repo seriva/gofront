@@ -7,6 +7,7 @@ import {
 	BROWSER_GLOBALS,
 	COMPLEX64,
 	COMPLEX128,
+	compositeLitIndices,
 	ERROR,
 	FLOAT32,
 	FLOAT64,
@@ -1135,8 +1136,19 @@ export const expressionCheckMethods = {
 				const et = this.checkCompositeLit(elem, scope, base.elem);
 				elem._type = et;
 			} else if (elem.kind === "KeyValueExpr") {
-				const vt = this.checkExpr(elem.value, scope);
-				this.assertAssignable(base.elem, vt, elem.value);
+				if (
+					elem.value.kind === "CompositeLit" &&
+					elem.value.typeExpr === null
+				) {
+					elem.value._type = this.checkCompositeLit(
+						elem.value,
+						scope,
+						base.elem,
+					);
+				} else {
+					const vt = this.checkExpr(elem.value, scope);
+					this.assertAssignable(base.elem, vt, elem.value);
+				}
 			} else {
 				const et = this.checkExpr(elem, scope);
 				this.assertAssignable(base.elem, et, elem);
@@ -1181,14 +1193,5 @@ export const expressionCheckMethods = {
 };
 
 function computeMaxIndex(elems) {
-	let sequential = 0;
-	let maxKeyed = -1;
-	for (const e of elems) {
-		if (e.kind === "KeyValueExpr" && e.key?.value !== undefined) {
-			maxKeyed = Math.max(maxKeyed, Number(e.key.value));
-		} else {
-			sequential++;
-		}
-	}
-	return Math.max(sequential - 1, maxKeyed);
+	return Math.max(-1, ...compositeLitIndices(elems));
 }
