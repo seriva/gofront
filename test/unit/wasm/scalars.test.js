@@ -639,16 +639,18 @@ type Ordered interface{ ~int | ~float64 | ~string }
 
 func Mn[T Ordered](a, b T) T { return min(a, b) }
 func Mx[T Ordered](a, b T) T { return max(a, b) }
+func Mn1[T Ordered](a T) T { return min(a) }
 
 func Main() {
     println(Mn("b", "a"), Mx("b", "a"), Mn(3, 2), Mx(1.5, 2.5))
     z := 0.0
     n := z / z
     println(Mn(n, 1.0) != Mn(n, 1.0), Mx(1.0, n) != Mx(1.0, n))
+    println(Mn1("z"), Mn1(7))
 }
 `;
 	const res = compileHybrid(src).run("Main");
-	assertEqual(res.output, "a b 2 2.5\ntrue true");
+	assertEqual(res.output, "a b 2 2.5\ntrue true\nz 7");
 });
 
 test("min/max mixing a typed integer with an untyped float constant (review M5)", () => {
