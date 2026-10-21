@@ -209,6 +209,11 @@ export const expressionCheckMethods = {
 			}
 			case "InstantiationExpr":
 				return this._checkInstantiationExpr(expr, scope);
+			case "TypeName":
+				// A type in expression position: monomorphisation rewrites
+				// `Box[int]` in `(*Box[int]).Set` to the TypeName `Box$int`.
+				expr._isTypeRef = true;
+				return this.resolveTypeNode(expr, scope);
 			default: {
 				const m = CHECK_EXPR_DELEGATE[expr.kind];
 				if (m) return this[m](expr, scope);
@@ -253,7 +258,15 @@ export const expressionCheckMethods = {
 		if (expr.op === "-" || expr.op === "+")
 			return this._checkNumericUnaryOp(ot, expr);
 		if (expr.op === "&") return this._checkAddressOfExpr(expr, scope, ot);
-		if (expr.op === "*") return this._checkDeref(ot, expr);
+		if (expr.op === "*") {
+			// `(*T).M`: the operand names a type, so `*T` is the pointer type
+			// of a method expression, not a dereference.
+			if (expr.operand._isTypeRef) {
+				expr._isTypeRef = true;
+				return { kind: "pointer", base: ot };
+			}
+			return this._checkDeref(ot, expr);
+		}
 		return ot;
 	},
 
@@ -274,10 +287,12 @@ export const expressionCheckMethods = {
 		const baseType = this.checkExpr(expr.expr, scope);
 		if (baseType?._tainted) return TAINTED_ANY;
 		if (expr.expr._isTypeRef) {
-			let base = baseType.kind === "named" ? baseType.underlying : baseType;
+			// `(*T).M` takes its methods from T and its receiver is `*T`.
+			const recvBase = baseType.kind === "pointer" ? baseType.base : baseType;
+			let base = recvBase.kind === "named" ? recvBase.underlying : recvBase;
 			base = this.resolveType(base);
 			const methodType = this._resolveMethodExprType(
-				baseType,
+				recvBase,
 				base,
 				expr.field,
 			);
@@ -325,7 +340,29 @@ export const expressionCheckMethods = {
 			);
 	},
 
+	// `Box[int]` in an expression (the receiver of a method expression such
+	// as `Box[int].Get` or `(*Box[int]).Set`) names the instantiated type.
+	// The node becomes an InstantiationExpr so monomorphisation rewrites it.
+	_genericTypeRef(expr, scope) {
+		const base = expr.expr;
+		if (base?.kind !== "Ident") return null;
+		const t = this.types.get(base.name);
+		if (!t?._generic || t._generic.isAlias || scope.lookup(base.name) !== t)
+			return null;
+		if (expr.kind === "IndexExpr") {
+			if (expr.index?.kind !== "Ident") return null;
+			expr.kind = "InstantiationExpr";
+			expr.typeArgs = [{ kind: "TypeName", name: expr.index.name }];
+			delete expr.index;
+		}
+		const resolved = this.resolveTypeNode(expr, scope);
+		expr._isTypeRef = true;
+		return resolved;
+	},
+
 	_checkIndexExpr(expr, scope) {
+		const typeRef = this._genericTypeRef(expr, scope);
+		if (typeRef) return typeRef;
 		const bt = this.checkExpr(expr.expr, scope);
 		this.checkExpr(expr.index, scope);
 		if (bt?._tainted) return TAINTED_ANY;
@@ -634,6 +671,8 @@ export const expressionCheckMethods = {
 	},
 
 	_checkInstantiationExpr(expr, scope) {
+		const typeRef = this._genericTypeRef(expr, scope);
+		if (typeRef) return typeRef;
 		// Generic instantiation: Foo[int] or Foo[int, string]
 		const baseType = this.checkExpr(expr.expr, scope);
 		if (baseType?.kind === "generic") {

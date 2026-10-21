@@ -19,6 +19,7 @@ import {
 } from "./boundary.js";
 import { FunctionEmitter } from "./emit.js";
 import { encodeModule, isGoFrontWasm } from "./encode.js";
+import { desugarMethodExprs } from "./method-expr.js";
 import { hasGenerics, monomorphise } from "./monomorph.js";
 import { hasNativeWasmOpt, optimizeWasm } from "./optimize.js";
 import { BINARY_MATH_IMPORTS } from "./stdlib/index.js";
@@ -2232,7 +2233,10 @@ export function compileWasmModule(
 		resolvedLowerResult = null;
 	}
 	// Variadic parameters become slices (after monomorphisation: concrete types).
-	if (desugarVariadics(progs) || !resolvedLowerResult) {
+	// Method expressions become method calls or forwarding func literals,
+	// before variadics so a variadic method's forwarder packs its arguments.
+	const methodExprs = desugarMethodExprs(progs);
+	if (desugarVariadics(progs) || methodExprs || !resolvedLowerResult) {
 		resolvedLowerResult = lower(progs, resolvedChecker);
 	}
 	checker = resolvedChecker;
