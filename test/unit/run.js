@@ -80,6 +80,7 @@ export const TEST_FILES = [
 	"./wasm/simd.test.js",
 	"./wasm/pointers.test.js",
 	"./wasm/range_func.test.js",
+	"./wasm/complex.test.js",
 	"./wasm/stdlib.test.js",
 	"./wasm/golden.test.js",
 ];
