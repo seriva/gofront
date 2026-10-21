@@ -138,6 +138,7 @@ function cloneAst(node) {
 	if (Array.isArray(node)) return node.map(cloneAst);
 	const copy = {};
 	for (const [k, v] of Object.entries(node)) {
+		if (k.startsWith("_")) continue;
 		copy[k] = cloneAst(v);
 	}
 	return copy;

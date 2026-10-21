@@ -2353,6 +2353,8 @@ export class StmtsEmitter {
 
 		this.releaseTemp(yieldTmp, yieldClosureWType);
 		this.releaseTemp(iterTmp, iterWType);
+
+		this._emitIteratorUnwind(stmt);
 	}
 
 	emitForStmt(stmt) {
@@ -2746,36 +2748,185 @@ export class StmtsEmitter {
 		this.pushInstruction("end");
 	}
 
-	_tryEmitYieldBranch(stmt) {
-		if (!this.funcDecl._isYieldClosure || stmt.label) return false;
-		const isContinue = stmt.keyword === "continue";
-		const targetRole = isContinue ? "continue" : "break";
-		const hasInnerTarget = this.controlStack.some((c) => c.role === targetRole);
-		if (hasInnerTarget) return false;
+	_propagateYieldExit(tag) {
+		if (this.funcDecl._iterStateName) {
+			const outerLoc = this.resolveLocal(this.funcDecl._iterStateName);
+			if (outerLoc?.isBoxed) {
+				this.pushInstruction({ op: "local.get", index: outerLoc.index });
+				this.pushInstruction({ op: "i64.const", value: tag });
+				this.pushInstruction({
+					op: "struct.set",
+					typeIndex: outerLoc.boxInfo.typeIndex,
+					fieldIndex: 0,
+				});
+			}
+		}
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "return" });
+	}
 
-		if (stmt.keyword === "break") {
-			if (this.funcDecl._iterStateName) {
-				const stateLoc = this.resolveLocal(this.funcDecl._iterStateName);
-				if (stateLoc?.isBoxed) {
-					this.pushInstruction({ op: "local.get", index: stateLoc.index });
-					this.pushInstruction({ op: "i64.const", value: 1n });
-					this.pushInstruction({
-						op: "struct.set",
-						typeIndex: stateLoc.boxInfo.typeIndex,
-						fieldIndex: 0,
-					});
+	_unwindIteratorReturn() {
+		if (this.funcDecl._isYieldClosure) {
+			this._propagateYieldExit(2n);
+			return;
+		}
+		if (this.hasDefer) {
+			const depth = this.resolveBranchDepthToRole("runDefers");
+			this.pushInstruction({ op: "br", depth });
+			return;
+		}
+		const rootNamed = this.funcDecl.returnType?._namedReturns ?? [];
+		for (const nr of rootNamed) {
+			const loc = this.locals.get(nr.name);
+			if (loc?.isBoxed) {
+				this.pushInstruction({ op: "local.get", index: loc.index });
+				this.pushInstruction({
+					op: "struct.get",
+					typeIndex: loc.boxInfo.typeIndex,
+					fieldIndex: 0,
+				});
+			} else if (loc) {
+				this.pushInstruction({ op: "local.get", index: loc.index });
+			}
+		}
+		this.pushInstruction({ op: "return" });
+	}
+
+	_unwindIteratorTargets(stmt, stateTmp, labelTargets) {
+		for (const target of labelTargets) {
+			this.pushInstruction({ op: "local.get", index: stateTmp });
+			this.pushInstruction({ op: "i64.const", value: BigInt(target.tag) });
+			this.pushInstruction("i64.eq");
+			this.pushInstruction({ op: "if", blockType: "void" });
+			if (target.role !== "break" || stmt.label !== target.label) {
+				if (this.funcDecl._isYieldClosure) {
+					this._propagateYieldExit(BigInt(target.tag));
+				} else {
+					const depth = this.resolveBranchDepth(
+						target.label,
+						target.role === "continue",
+					);
+					this.pushInstruction({ op: "br", depth });
 				}
 			}
-			this.pushInstruction({ op: "i32.const", value: 0 });
-			this.pushInstruction({ op: "return" });
-			return true;
+			this.pushInstruction("end");
 		}
-		if (stmt.keyword === "continue") {
+	}
+
+	_emitIteratorUnwind(stmt) {
+		if (!stmt._iterStateName) return;
+		const stateLoc = this.resolveLocal(stmt._iterStateName);
+		if (!stateLoc?.isBoxed) return;
+
+		const funcLit = getOrCreateIteratorFuncLit(stmt);
+		const hasRet = hasReturnInBlock(funcLit?.body);
+		const labelTargets = Array.from(
+			this.rootFuncDecl?._labelTargets?.values() ?? [],
+		);
+		if (!hasRet && labelTargets.length === 0) return;
+
+		const stateTmp = this.acquireTemp("i64");
+		this.pushInstruction({ op: "local.get", index: stateLoc.index });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: stateLoc.boxInfo.typeIndex,
+			fieldIndex: 0,
+		});
+		this.pushInstruction({ op: "local.set", index: stateTmp });
+
+		if (hasRet) {
+			this.pushInstruction({ op: "local.get", index: stateTmp });
+			this.pushInstruction({ op: "i64.const", value: 2n });
+			this.pushInstruction("i64.eq");
+			this.pushInstruction({ op: "if", blockType: "void" });
+			this._unwindIteratorReturn();
+			this.pushInstruction("end");
+		}
+
+		this._unwindIteratorTargets(stmt, stateTmp, labelTargets);
+		this.releaseTemp(stateTmp, "i64");
+	}
+
+	_tryEmitYieldBranch(stmt) {
+		if (!this.funcDecl._isYieldClosure) return false;
+		const isContinue = stmt.keyword === "continue";
+		const targetRole = isContinue ? "continue" : "break";
+		const hasInnerTarget = this.controlStack.some((c) =>
+			stmt.label
+				? c.label === stmt.label && c.role === targetRole
+				: c.role === targetRole,
+		);
+		if (hasInnerTarget) return false;
+
+		if (!stmt.label) {
+			if (stmt.keyword === "break") {
+				this._propagateYieldExit(1n);
+				return true;
+			}
+			if (stmt.keyword === "continue") {
+				this.pushInstruction({ op: "i32.const", value: 1 });
+				this.pushInstruction({ op: "return" });
+				return true;
+			}
+			return false;
+		}
+
+		if (
+			stmt.keyword === "continue" &&
+			stmt.label === this.funcDecl._forStmt?.label
+		) {
 			this.pushInstruction({ op: "i32.const", value: 1 });
 			this.pushInstruction({ op: "return" });
 			return true;
 		}
-		return false;
+
+		const target = this._findLabelTarget(stmt.label, targetRole);
+		const tag = target ? BigInt(target.tag) : 1n;
+		this._propagateYieldExit(tag);
+		return true;
+	}
+
+	_emitYieldReturn(stmt) {
+		const values = stmt.values ?? [];
+		const rootNamed = this.rootFuncDecl?.returnType?._namedReturns ?? [];
+		if (values.length === 1 && rootNamed.length > 1) {
+			this.emitExpr(values[0]);
+			for (let i = rootNamed.length - 1; i >= 0; i--) {
+				this._assignToNamedReturnVar(rootNamed[i]);
+			}
+		} else if (values.length > 0 && rootNamed.length > 0) {
+			const temps = [];
+			for (let i = 0; i < values.length; i++) {
+				const val = values[i];
+				const nr = rootNamed[i];
+				const targetWType = this.toWasmType(nr?.type ?? val._type);
+				this.emitExpr(val, targetWType);
+				this._emitCopyIfValueStruct(val, val._type, targetWType);
+				const tmp = this.acquireTemp(targetWType);
+				this.pushInstruction({ op: "local.set", index: tmp });
+				temps.push({ tmp, type: targetWType });
+			}
+			for (let i = 0; i < temps.length; i++) {
+				this.pushInstruction({ op: "local.get", index: temps[i].tmp });
+				this._assignToNamedReturnVar(rootNamed[i]);
+				this.releaseTemp(temps[i].tmp, temps[i].type);
+			}
+		}
+
+		if (this.funcDecl._iterStateName) {
+			const stateLoc = this.resolveLocal(this.funcDecl._iterStateName);
+			if (stateLoc?.isBoxed) {
+				this.pushInstruction({ op: "local.get", index: stateLoc.index });
+				this.pushInstruction({ op: "i64.const", value: 2n });
+				this.pushInstruction({
+					op: "struct.set",
+					typeIndex: stateLoc.boxInfo.typeIndex,
+					fieldIndex: 0,
+				});
+			}
+		}
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "return" });
 	}
 
 	emitBranchStmt(stmt) {
@@ -2786,6 +2937,10 @@ export class StmtsEmitter {
 	}
 
 	emitReturnStmt(stmt) {
+		if (this.funcDecl._isYieldClosure) {
+			this._emitYieldReturn(stmt);
+			return;
+		}
 		const values = stmt.values ?? [];
 		if (this.hasDefer) {
 			if (this.namedReturnVars?.length > 0) {
@@ -2870,7 +3025,15 @@ export class StmtsEmitter {
 	}
 
 	_assignToNamedReturnVar(nr) {
+		if (!nr?.name || nr.name === "_") {
+			this.pushInstruction("drop");
+			return;
+		}
 		const loc = this.locals.get(nr.name);
+		if (!loc) {
+			this.pushInstruction("drop");
+			return;
+		}
 		if (loc.isBoxed) {
 			const valTmp = this.acquireTemp(loc.boxInfo.wType);
 			this.pushInstruction({ op: "local.set", index: valTmp });
