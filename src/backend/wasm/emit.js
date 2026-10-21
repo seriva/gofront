@@ -118,6 +118,35 @@ export class FunctionEmitter {
 		this.recoverOkLocalIndex = local;
 	}
 
+	_checkYieldClosureReentry() {
+		if (!this.funcDecl._isYieldClosure || !this.funcDecl._iterStateName) return;
+		const stateLoc = this.resolveLocal(this.funcDecl._iterStateName);
+		if (!stateLoc?.isBoxed) return;
+		this.pushInstruction({ op: "local.get", index: stateLoc.index });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: stateLoc.boxInfo.typeIndex,
+			fieldIndex: 0,
+		});
+		this.pushInstruction({ op: "i64.const", value: 0n });
+		this.pushInstruction("i64.ne");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.emitPanic(
+			"range function continued iteration after function for loop body returned false",
+		);
+		this.pushInstruction("end");
+	}
+
+	_finishYieldClosureBody() {
+		if (!this.funcDecl._isYieldClosure) return false;
+		const lastOp = this.body[this.body.length - 1]?.op;
+		if (lastOp !== "return" && lastOp !== "unreachable") {
+			this.pushInstruction({ op: "i32.const", value: 1 });
+			this.pushInstruction({ op: "return" });
+		}
+		return true;
+	}
+
 	emitFunctionBody(body) {
 		if (
 			this.funcDecl._isClosure &&
@@ -132,6 +161,7 @@ export class FunctionEmitter {
 		this._cacheScratchGlobals();
 
 		this._emitRecoverArmPrologue(body);
+		this._checkYieldClosureReentry();
 
 		const hasDef = hasDefer(body);
 		this.hasDefer = hasDef;
@@ -150,6 +180,7 @@ export class FunctionEmitter {
 		}
 
 		this.emitBlock(body);
+		if (this._finishYieldClosureBody()) return;
 
 		if (needsOobBlock) {
 			const lastOp = this.body[this.body.length - 1]?.op;

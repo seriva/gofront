@@ -793,7 +793,7 @@ export const statementGenMethods = {
 		return `__s(${iteree}).entries()`;
 	},
 
-	_genIteratorLoop(itereeExpr, paramsStr, body) {
+	_genIteratorLoop(itereeExpr, paramsStr, body, assignPreamble = null) {
 		let iteree = this.genExpr(itereeExpr);
 		if (itereeExpr.kind === "FuncLit") {
 			iteree = `(${iteree})`;
@@ -824,6 +824,7 @@ export const statementGenMethods = {
 				this._iterReturnFlag = retFlag;
 				this._iterReturnVar = retVar;
 
+				if (assignPreamble) assignPreamble();
 				this.genBlock(body);
 
 				this._inIteratorBody = prev.in;
@@ -842,7 +843,21 @@ export const statementGenMethods = {
 
 	genIteratorFor(stmt) {
 		const range = stmt.init.rhs[0];
+		const isAssign = stmt.init.kind === "AssignStmt";
 		const lhs = stmt.init.lhs.map((e) => e.name ?? this.genExpr(e));
+		if (isAssign) {
+			const cbParams = lhs.map((_, i) => `__p${i}`);
+			const params = range._yieldParams.length === 0 ? "" : cbParams.join(", ");
+			const assignPreamble = () => {
+				for (let i = 0; i < lhs.length; i++) {
+					if (lhs[i] !== "_") {
+						this.line(`${lhs[i]} = ${cbParams[i]};`);
+					}
+				}
+			};
+			this._genIteratorLoop(range.expr, params, stmt.body, assignPreamble);
+			return;
+		}
 		const cbParams = lhs.map((n, i) => (n === "_" ? `_$${i}` : n));
 		const params = range._yieldParams.length === 0 ? "" : cbParams.join(", ");
 		this._genIteratorLoop(range.expr, params, stmt.body);

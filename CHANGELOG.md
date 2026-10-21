@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Range-over-func in WASM backend**: Implemented Go 1.23 range-over-func (`for v := range seq`, `for k, v := range seq2`, `for range seq0`) in the WebAssembly backend; synthesized yield callback closures with environment capture and state tracking for plain `break` and `continue`, achieving full parity with the JavaScript backend.
 - **WASM accessor refs at the JS boundary and documentation**: Supported crossing accessor refs through the JS↔WASM boundary via copy-in/copy-out `{ value }` boxes with live getters and setters; updated `docs/go-compatibility.md` pointer documentation to reflect pointer identity and accessor ref semantics across JS and WASM.
 - **WASM pointer dereference dispatch and accessor ref identity**: Dispatched pointer dereference expressions (`*p`) and assignments (`*p = v`) between box and accessor subtypes with getter/setter helpers; implemented scalar pointer identity comparisons (`==` and `!=`) comparing target references and indices across accessor refs, boxes, and struct equality fields in both WASM and JS.
 - **WASM accessor refs for fields and elements**: Added subtype `$acc_T` implementing scalar pointers to struct fields (`&s.F`) and slice/array elements (`&xs[i]`) with getter/setter helpers; updated dereference assignment (`*p = v`) to dispatch between box and accessor refs.
