@@ -659,7 +659,7 @@ Conventions used in the tasks:
 
 ### Phase 0.6: WASM builtins, conversions & constant folding
 
-- [ ] **Task 0.11 — `min`/`max` builtins in WASM**
+- [x] **Task 0.11 — `min`/`max` builtins in WASM**
   - Files: `src/backend/wasm/emit-builtins.js`
   - Do: integers via `select` on `lt_s`/`lt_u`; floats via `f32.min`/`f64.min` and `max`; strings via the existing compare import; variadic forms fold left; a single argument returns itself.
   - Test: `test/unit/wasm/scalars.test.js` — the builtin edge cases in [Edge Cases](#edge-cases) as parity tests.

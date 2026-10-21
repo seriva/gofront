@@ -9,6 +9,7 @@ import {
 	isComplex64,
 	isMapType,
 	isNonEmptyInterface,
+	isSigned,
 	isSliceType,
 	isStringType,
 	isStructType,
@@ -878,6 +879,60 @@ export class BuiltinsEmitter {
 		}
 	}
 
+	// min/max fold left over the operands: floats use f32/f64.min/max (NaN
+	// propagates, -0 < +0), integers `select` on lt/gt, strings compare via the
+	// string import.  A single operand is the result itself.
+	_emitBuiltinMinMax(call, targetWasmType) {
+		const isMin = call.func.name === "min";
+		const goType = call._type ?? this._resolveExprGoType(call.args[0]);
+		const wType =
+			goType?.kind === "untyped" && typeof targetWasmType === "string"
+				? targetWasmType
+				: toWasmType(goType, this.mod.checker);
+		const [first, ...rest] = call.args;
+		this.emitExpr(first, wType);
+		if (rest.length === 0) return;
+		const acc = this.acquireTemp(wType);
+		const next = this.acquireTemp(wType);
+		const isStr = isStringType(goType, this.mod.checker);
+		const isFloatType = wType === "f32" || wType === "f64";
+		const cmp = isMin ? "lt" : "gt";
+		for (const arg of rest) {
+			this.pushInstruction({ op: "local.set", index: acc });
+			this.emitExpr(arg, wType);
+			this.pushInstruction({ op: "local.set", index: next });
+			if (isFloatType) {
+				this.pushInstruction({ op: "local.get", index: acc });
+				this.pushInstruction({ op: "local.get", index: next });
+				this.pushInstruction(`${wType}.${isMin ? "min" : "max"}`);
+				continue;
+			}
+			if (isStr) {
+				// next < acc (min) / next > acc (max) ? next : acc
+				this.pushInstruction({ op: "local.get", index: next });
+				this.pushInstruction({ op: "local.get", index: acc });
+				this.pushInstruction({
+					op: "call",
+					funcIndex: this.mod.getStringCmpImportIndex(isMin ? "<" : ">"),
+				});
+				this.pushInstruction({ op: "if", blockType: wType });
+				this.pushInstruction({ op: "local.get", index: next });
+				this.pushInstruction("else");
+				this.pushInstruction({ op: "local.get", index: acc });
+				this.pushInstruction("end");
+				continue;
+			}
+			this.pushInstruction({ op: "local.get", index: next });
+			this.pushInstruction({ op: "local.get", index: acc });
+			this.pushInstruction({ op: "local.get", index: next });
+			this.pushInstruction({ op: "local.get", index: acc });
+			this.pushInstruction(`${wType}.${cmp}_${isSigned(goType) ? "s" : "u"}`);
+			this.pushInstruction("select");
+		}
+		this.releaseTemp(next, wType);
+		this.releaseTemp(acc, wType);
+	}
+
 	_emitBuiltinCall(call, targetWasmType) {
 		const { func } = call;
 		if (func.kind !== "Ident") return false;
@@ -924,6 +979,10 @@ export class BuiltinsEmitter {
 				return true;
 			case "imag":
 				this._emitBuiltinImag(call, targetWasmType);
+				return true;
+			case "min":
+			case "max":
+				this._emitBuiltinMinMax(call, targetWasmType);
 				return true;
 			default:
 				return false;

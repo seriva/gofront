@@ -65,7 +65,7 @@ readable and debuggable — no name mangling, no opaque wrappers. This page desc
 | `make(map[K]V)` | `{}` |
 | `delete(m, k)` | `delete m[k]` |
 | `new(T)` | `new T()` for structs, `{ value: zeroOf(T) }` for scalars |
-| `min` / `max` | `Math.min` / `Math.max` |
+| `min` / `max` | `Math.min` / `Math.max`; strings fold with `<` / `>` |
 | `clear(x)` | `.length = 0` (slice) or delete-loop (map) |
 | `print` / `println` | `console.log` |
 | `complex(r, i)` | `{ re: r, im: i }` |
