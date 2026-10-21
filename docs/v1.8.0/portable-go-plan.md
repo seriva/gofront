@@ -551,7 +551,7 @@ Conventions used in the tasks:
 
 ### Phase 0.2: Range-over-func and generic named func types
 
-- [ ] **Task 0.2a — Range-over-func in WASM: body closure, `break`, `continue`**
+- [x] **Task 0.2a — Range-over-func in WASM: body closure, `break`, `continue`**
   - Files: `src/backend/wasm/emit-stmts.js` (`RangeStmt` over func types), `src/lower/captures.js` if the body closure needs capture info
   - Do: lower `for k, v := range f` as the JS backend does: synthesize a closure for the body returning `i32` (1 = continue, 0 = stop), call `f` with it, keep a per-loop state local. Support `Seq` and `Seq2` shapes, plain `break` and `continue`.
   - Test: new `test/unit/wasm/range_func.test.js` — parity tests for a counting iterator, a `Seq2` over a slice, `break` at 3, `continue` on odd.
