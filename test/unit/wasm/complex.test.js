@@ -363,3 +363,106 @@ func Main() int {
 	assertEqual(res.wasmRes, 1n);
 	assertEqual(res.jsRes, 1);
 });
+
+test("fmt.Sprintf %f and %e for complex", () => {
+	const src = `
+package main
+
+import "fmt"
+
+func Main() int {
+	c := complex(1.0, 2.0)
+	s := fmt.Sprintf("%f", c)
+	if s != "(1.000000+2.000000i)" {
+		return 0
+	}
+
+	cNeg := complex(1.0, -2.0)
+	sNeg := fmt.Sprintf("%.2e", cNeg)
+	if sNeg != "(1.00e+0-2.00e+0i)" {
+		return 0
+	}
+
+	return 1
+}
+`;
+	const hybrid = compileHybrid(src);
+	const res = hybrid.run("Main");
+	assertEqual(res.wasmRes, 1n);
+	assertEqual(res.jsRes, 1);
+});
+
+test("compound assignment on struct field, array, slice, and map", () => {
+	const src = `
+package main
+
+type S struct {
+	c complex128
+}
+
+func Main() int {
+	var s S
+	s.c += 1 + 2i
+	if real(s.c) != 1.0 || imag(s.c) != 2.0 {
+		return 0
+	}
+
+	var a [2]complex128
+	a[0] += 3 + 4i
+	if real(a[0]) != 3.0 || imag(a[0]) != 4.0 {
+		return 0
+	}
+
+	sl := make([]complex128, 1)
+	sl[0] += 5 + 6i
+	if real(sl[0]) != 5.0 || imag(sl[0]) != 6.0 {
+		return 0
+	}
+
+	m := make(map[string]complex128)
+	m["k"] += 7 + 8i
+	if real(m["k"]) != 7.0 || imag(m["k"]) != 8.0 {
+		return 0
+	}
+
+	return 1
+}
+`;
+	const hybrid = compileHybrid(src);
+	const res = hybrid.run("Main");
+	assertEqual(res.wasmRes, 1n);
+	assertEqual(res.jsRes, 1);
+});
+
+test("named complex64 types", () => {
+	const src = `
+package main
+
+type MyC64 complex64
+
+func Main() int {
+	var c MyC64 = 1.5 + 2.5i
+	r := real(c)
+	im := imag(c)
+	if r != 1.5 || im != 2.5 {
+		return 0
+	}
+
+	c2 := c + MyC64(0.5 + 0.5i)
+	if real(c2) != 2.0 || imag(c2) != 3.0 {
+		return 0
+	}
+
+	c128 := complex128(c2)
+	if real(c128) != 2.0 || imag(c128) != 3.0 {
+		return 0
+	}
+
+	return 1
+}
+`;
+	const hybrid = compileHybrid(src);
+	const res = hybrid.run("Main");
+	assertEqual(res.wasmRes, 1n);
+	assertEqual(res.jsRes, 1);
+});

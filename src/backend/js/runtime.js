@@ -354,7 +354,16 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
         const isPlus = flags?.includes("+") ?? false;
         return pad(formatV(v, isPlus, true), width, false);
       }
-      case "f": { const n = Number(v), p = prec !== "" ? parseInt(prec) : 6; return pad(n.toFixed(p), width, zero); }
+      case "f": {
+        if (v !== null && typeof v === "object" && "re" in v && "im" in v) {
+          const p = prec !== "" ? parseInt(prec) : 6;
+          const isNeg = v.im < 0 || Object.is(v.im, -0);
+          const sign = isNeg ? "" : "+";
+          return pad("(" + Number(v.re).toFixed(p) + sign + Number(v.im).toFixed(p) + "i)", width, false);
+        }
+        const n = Number(v), p = prec !== "" ? parseInt(prec) : 6;
+        return pad(n.toFixed(p), width, zero);
+      }
       case "t": return pad(String(!!v), width, false);
       case "x": {
         let hex;
@@ -389,7 +398,17 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
       case "o": return pad((typeof v === "bigint" ? BigInt.asUintN(64, v).toString(8) : (Number(v) >>> 0).toString(8)), width, zero);
       case "b": return pad((typeof v === "bigint" ? BigInt.asUintN(64, v).toString(2) : (Number(v) >>> 0).toString(2)), width, zero);
       case "q": return pad('"' + String(v == null ? "" : v).replace(/\\\\/g, "\\\\\\\\").replace(/"/g, '\\\\"') + '"', width, false);
-      case "e": case "E": { const n = Number(v), p = prec !== "" ? parseInt(prec) : 6; return pad(n.toExponential(p), width, zero); }
+      case "e": case "E": {
+        if (v !== null && typeof v === "object" && "re" in v && "im" in v) {
+          const p = prec !== "" ? parseInt(prec) : 6;
+          const isNeg = v.im < 0 || Object.is(v.im, -0);
+          const sign = isNeg ? "" : "+";
+          const fmtE = (n) => (verb === "E" ? Number(n).toExponential(p).toUpperCase() : Number(n).toExponential(p));
+          return pad("(" + fmtE(v.re) + sign + fmtE(v.im) + "i)", width, false);
+        }
+        const n = Number(v), p = prec !== "" ? parseInt(prec) : 6;
+        return pad(verb === "E" ? n.toExponential(p).toUpperCase() : n.toExponential(p), width, zero);
+      }
       case "g": case "G": {
         if (v !== null && typeof v === "object" && "re" in v && "im" in v) {
           const isNeg = v.im < 0 || Object.is(v.im, -0);

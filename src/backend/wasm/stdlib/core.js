@@ -9,6 +9,7 @@ import {
 	goTypeKey,
 	isArrayType,
 	isComplex,
+	isComplex64,
 	isErrorType,
 	isMapType,
 	isPointerToStruct,
@@ -32,8 +33,7 @@ function _isSimplePrimitive(t) {
 
 function _getStructOrComplexInfo(mod, emitter, goType) {
 	if (isComplex(goType)) {
-		const is64 =
-			goType?.name === "complex64" || goType?.underlying?.name === "complex64";
+		const is64 = isComplex64(goType);
 		return mod.getComplexType(is64 ? "complex64" : "complex128");
 	}
 	return (

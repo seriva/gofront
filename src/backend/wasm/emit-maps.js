@@ -5,6 +5,7 @@
 import {
 	isArrayType,
 	isComplex,
+	isComplex64,
 	isInterfaceType,
 	isPointerToStruct,
 	isSigned,
@@ -14,7 +15,7 @@ import {
 
 function _complexTypeFor(mod, t) {
 	if (!isComplex(t)) return null;
-	const is64 = t?.name === "complex64" || t?.underlying?.name === "complex64";
+	const is64 = isComplex64(t);
 	return mod.getComplexType(is64 ? "complex64" : "complex128");
 }
 

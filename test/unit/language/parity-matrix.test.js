@@ -167,7 +167,14 @@ for (const [tableName, rows] of tables) {
 			}
 
 			const h = compileHybrid(code);
-			h.run("Main");
+			const res = h.run("Main");
+			if (res?.jsRes !== undefined && res?.wasmRes !== undefined) {
+				assertEqual(
+					BigInt(res.jsRes),
+					BigInt(res.wasmRes),
+					`Return value parity mismatch in ${row.feature}`,
+				);
+			}
 		});
 	}
 }

@@ -1643,7 +1643,7 @@ export const expressionGenMethods = {
 		if (ctor) return `new ${ctor}(${n})`;
 		if (n === 0) return "[]";
 		if (/^(new |\{|\[|Array)/.test(elemZero))
-			return `Array.from({ length: ${n} }, () => ${elemZero})`;
+			return `Array.from({ length: ${n} }, () => (${elemZero}))`;
 		return `new Array(${n}).fill(${elemZero})`;
 	},
 

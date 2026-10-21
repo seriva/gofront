@@ -5,6 +5,8 @@
 import {
 	getMapKeyValTypes,
 	isArrayType,
+	isComplex,
+	isComplex64,
 	isMapType,
 	isNonEmptyInterface,
 	isSliceType,
@@ -228,7 +230,10 @@ export class BuiltinsEmitter {
 			this.emitPanic("runtime error: makeslice: len out of range");
 			this.pushInstruction("end");
 
-			if (isStructType(elemGoType, this.mod.checker, this.mod)) {
+			if (
+				isStructType(elemGoType, this.mod.checker, this.mod) ||
+				isComplex(elemGoType)
+			) {
 				const arrTmp = this.acquireTemp({
 					kind: "ref",
 					nullable: true,
@@ -818,7 +823,7 @@ export class BuiltinsEmitter {
 	_emitBuiltinReal(call, targetWasmType) {
 		const arg = call.args[0];
 		const argType = arg._type ?? this._resolveExprGoType(arg);
-		const is64 = argType?.name === "complex64";
+		const is64 = isComplex64(argType);
 		const complexName = is64 ? "complex64" : "complex128";
 		const info = this.mod.getComplexType(complexName);
 		const complexWType = {
@@ -846,7 +851,7 @@ export class BuiltinsEmitter {
 	_emitBuiltinImag(call, targetWasmType) {
 		const arg = call.args[0];
 		const argType = arg._type ?? this._resolveExprGoType(arg);
-		const is64 = argType?.name === "complex64";
+		const is64 = isComplex64(argType);
 		const complexName = is64 ? "complex64" : "complex128";
 		const info = this.mod.getComplexType(complexName);
 		const complexWType = {
