@@ -65,7 +65,7 @@ packages is listed in the [hybrid guide](hybrid-wasm.md#what-wasm-packages-suppo
 | Arithmetic, comparison, logical, bitwise operators | ✓ — includes `&^` (bit clear) <!-- fixture: package main; func Main() int { a := 10 + 2; b := 5 &^ 1; if a > 10 && b == 4 { return a + b }; return 0 } --> |
 | Compound assignment, increment / decrement | ✓ <!-- fixture: package main; func Main() int { x := 10; x += 5; x++; x--; return x } --> |
 | Slice expressions (`s[lo:hi]`, `s[lo:hi:max]`) | ✓ <!-- fixture: package main; func Main() int { s := []int{1, 2, 3, 4, 5}; sub := s[1:3]; return sub[0]*10 + sub[1] } --> |
-| Variadic spread (`f(slice...)`, `append(a, b...)`) | ✓ <!-- fixture: package main; func sum(a int, b int) int { return a + b }; func add(nums ...int) int { return sum(nums[0], nums[1]) }; func Main() int { return add(20, 22) } --> |
+| Variadic spread (`f(slice...)`, `append(a, b...)`) | ✓ <!-- fixture: package main; func Main() int { a := []int{10, 20}; b := []int{30, 40}; c := append(a, b...); return c[0] + c[1] + c[2] + c[3] } --> |
 | Positional struct literals (`Point{1, 2}`) | ✓ <!-- fixture: package main; type Pt struct { X, Y int }; func Main() int { p := Pt{10, 20}; return p.X + p.Y } --> |
 | Method expressions with value receiver (`T.Method`) / method values (`x.Method`) | ✓ (JS-only; WASM method values in Task 0.15) <!-- no-fixture: JS-only; WASM method expressions in Task 0.15 --> |
 | Method expressions on pointer receivers (`(*T).Method`) | ✗ — planned for Task 0.15 <!-- fixture: pending: Task 0.15 | package main; type C struct { N int }; func (c *C) Inc() { c.N++ }; func Main() int { f := (*C).Inc; c := &C{N: 1}; f(c); return c.N } --> |
