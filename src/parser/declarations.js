@@ -56,7 +56,11 @@ export const declarationParseMethods = {
 			typeParams = this.parseTypeParamList();
 		}
 		const { params, returnType } = this.parseSignature();
-		const body = this.parseBlock();
+		// `//gofront:intrinsic name` on the line before a body-less func: the
+		// backend provides the implementation; every pass sees an empty body.
+		const intrinsic = this.tokens?.intrinsics?.get(_line - 1) ?? null;
+		const bodyless = intrinsic !== null && !this.check(T.LBRACE);
+		const body = bodyless ? { kind: "Block", stmts: [] } : this.parseBlock();
 		this.semi();
 		return {
 			kind: "FuncDecl",
@@ -65,6 +69,7 @@ export const declarationParseMethods = {
 			params,
 			returnType,
 			body,
+			...(intrinsic && { intrinsic, _bodyless: bodyless }),
 			_line,
 		};
 	},
