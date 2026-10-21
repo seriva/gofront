@@ -551,19 +551,19 @@ Conventions used in the tasks:
 
 ### Phase 0.2: Range-over-func and generic named func types
 
-- [ ] **Task 0.2a — Range-over-func in WASM: body closure, `break`, `continue`**
+- [x] **Task 0.2a — Range-over-func in WASM: body closure, `break`, `continue`**
   - Files: `src/backend/wasm/emit-stmts.js` (`RangeStmt` over func types), `src/lower/captures.js` if the body closure needs capture info
   - Do: lower `for k, v := range f` as the JS backend does: synthesize a closure for the body returning `i32` (1 = continue, 0 = stop), call `f` with it, keep a per-loop state local. Support `Seq` and `Seq2` shapes, plain `break` and `continue`.
   - Test: new `test/unit/wasm/range_func.test.js` — parity tests for a counting iterator, a `Seq2` over a slice, `break` at 3, `continue` on odd.
   - Done when: the v1.7.0 probe (`array.len expected arrayref`) produces a valid module and the same output as JS.
 
-- [ ] **Task 0.2b — Range-over-func: labels, `return`, `defer`, `panic`, re-yield panic**
+- [x] **Task 0.2b — Range-over-func: labels, `return`, `defer`, `panic`, re-yield panic**
   - Files: `src/backend/wasm/emit-stmts.js`
   - Do: encode labeled `break`/`continue` targets and `return` (with results) in the state local; unwind after the iterator call returns. Propagate `panic` through the iterator; `defer` in the enclosing function runs once. After the body returns `false`, a further `yield` call panics with Go's message (`range function continued iteration after function for loop body returned false`).
   - Test: `range_func.test.js` — every range-over-func edge case in [Edge Cases](#edge-cases).
   - Done when: all pass as parity tests and the panic message is identical on both backends.
 
-- [ ] **Task 0.3 — Generic named func types**
+- [x] **Task 0.3 — Generic named func types**
   - Files: `src/backend/wasm/monomorph.js`, `src/backend/wasm/types.js`
   - Do: `type Seq[V any] func(yield func(V) bool)` instantiated as `Seq[int]` must map to the same closure type as its underlying func type; returning a `Seq[int]` from a function type-checks in the module.
   - Test: `test/unit/wasm/generics.test.js` — a function returning `Seq[int]` ranged over in a parity test; a generic `Map[A, B any](s Seq[A], f func(A) B) Seq[B]`.

@@ -118,7 +118,75 @@ export class FunctionEmitter {
 		this.recoverOkLocalIndex = local;
 	}
 
+	_checkYieldClosureReentry() {
+		if (!this.funcDecl._isYieldClosure || !this.funcDecl._iterStateName) return;
+		const stateLoc = this.resolveLocal(this.funcDecl._iterStateName);
+		if (!stateLoc?.isBoxed) return;
+		this.pushInstruction({ op: "local.get", index: stateLoc.index });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: stateLoc.boxInfo.typeIndex,
+			fieldIndex: 0,
+		});
+		this.pushInstruction({ op: "i64.const", value: 0n });
+		this.pushInstruction("i64.ne");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.emitPanic(
+			"range function continued iteration after function for loop body returned false",
+		);
+		this.pushInstruction("end");
+	}
+
+	_finishYieldClosureBody() {
+		if (!this.funcDecl._isYieldClosure) return false;
+		const lastOp = this.body[this.body.length - 1]?.op;
+		if (lastOp !== "return" && lastOp !== "unreachable") {
+			this.pushInstruction({ op: "i32.const", value: 1 });
+			this.pushInstruction({ op: "return" });
+		}
+		return true;
+	}
+
+	_collectLabelTargets(body) {
+		const targets = new Map();
+		let nextTag = 3;
+		const scan = (node) => {
+			if (!node || typeof node !== "object") return;
+			if (Array.isArray(node)) {
+				for (const item of node) scan(item);
+				return;
+			}
+			if (node.kind === "LabeledStmt" && node.label) {
+				const bTag = nextTag++;
+				const cTag = nextTag++;
+				targets.set(bTag, { tag: bTag, label: node.label, role: "break" });
+				targets.set(cTag, { tag: cTag, label: node.label, role: "continue" });
+			} else if (node.kind === "ForStmt" && node.label) {
+				const bTag = nextTag++;
+				const cTag = nextTag++;
+				targets.set(bTag, { tag: bTag, label: node.label, role: "break" });
+				targets.set(cTag, { tag: cTag, label: node.label, role: "continue" });
+			}
+			for (const k of Object.keys(node)) {
+				if (k.startsWith("_")) continue;
+				scan(node[k]);
+			}
+		};
+		scan(body);
+		return targets;
+	}
+
+	_findLabelTarget(label, role) {
+		for (const target of this.rootFuncDecl?._labelTargets?.values() ?? []) {
+			if (target.label === label && target.role === role) return target;
+		}
+		return null;
+	}
+
 	emitFunctionBody(body) {
+		if (!this.funcDecl._isClosure && !this.funcDecl._labelTargets) {
+			this.funcDecl._labelTargets = this._collectLabelTargets(body);
+		}
 		if (
 			this.funcDecl._isClosure &&
 			!this.funcDecl._isTrampoline &&
@@ -132,6 +200,7 @@ export class FunctionEmitter {
 		this._cacheScratchGlobals();
 
 		this._emitRecoverArmPrologue(body);
+		this._checkYieldClosureReentry();
 
 		const hasDef = hasDefer(body);
 		this.hasDefer = hasDef;
@@ -150,6 +219,7 @@ export class FunctionEmitter {
 		}
 
 		this.emitBlock(body);
+		if (this._finishYieldClosureBody()) return;
 
 		if (needsOobBlock) {
 			const lastOp = this.body[this.body.length - 1]?.op;
@@ -180,13 +250,6 @@ export class FunctionEmitter {
 			const varName = isBlank ? `__ret_blank$${i}` : r.name;
 			const wType = this.toWasmType(r.type);
 			const localIdx = this.allocLocal(varName, wType, r.type, isBlank);
-			this.namedReturnVars.push({
-				name: varName,
-				localIdx,
-				type: wType,
-				goType: r.type,
-				isBlank,
-			});
 			this.emitZeroValue(r.type, wType);
 			const localInfo = this.locals.get(varName);
 			if (localInfo?.isBoxed) {
@@ -196,6 +259,13 @@ export class FunctionEmitter {
 				});
 			}
 			this.pushInstruction({ op: "local.set", index: localIdx });
+			this.namedReturnVars.push({
+				name: varName,
+				localIdx,
+				type: wType,
+				goType: r.type,
+				isBlank,
+			});
 		}
 		return true;
 	}
