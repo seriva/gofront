@@ -349,14 +349,19 @@ export function getInterfaceMethodList(iface) {
 	if (iface.methods instanceof Map) {
 		return Array.from(iface.methods.entries()).map(([name, sig]) => ({
 			name,
-			params: (sig.params ?? []).map((p) => p.type ?? p),
+			params: variadicAsSlice(
+				(sig.params ?? []).map((p) => p.type ?? p),
+				sig.variadic,
+			),
 			returns: (sig.returns ?? []).map((r) => r.type ?? r),
 		}));
 	}
 	if (Array.isArray(iface.methods)) {
 		return iface.methods.map((m) => ({
 			name: m.name?.value ?? m.name ?? m,
-			params: (m.params ?? []).map((p) => p.type ?? p),
+			params: (m.params ?? []).map((p) =>
+				p.variadic ? { kind: "SliceType", elem: p.type } : (p.type ?? p),
+			),
 			returns: m.returnType
 				? m.returnType.kind === "TupleType" || m.returnType.kind === "tuple"
 					? m.returnType.types
@@ -713,7 +718,9 @@ export function getFuncSignature(goType, checker = null) {
 		goType.kind === "FuncLit" ||
 		goType.kind === "FuncDecl"
 	) {
-		const params = (goType.params ?? []).map((p) => p.type ?? p);
+		const params = (goType.params ?? []).map((p) =>
+			p.variadic ? { kind: "SliceType", elem: p.type } : (p.type ?? p),
+		);
 		const returns = [];
 		if (goType.returnType) {
 			if (
@@ -746,9 +753,20 @@ export function getFuncSignature(goType, checker = null) {
 				returns.push(r);
 			}
 		}
-		return { params: goType.params ?? [], returns };
+		return {
+			params: variadicAsSlice(goType.params ?? [], goType.variadic),
+			returns,
+		};
 	}
 	return { params: [], returns: [] };
+}
+
+// Checker func types keep a variadic parameter's element type; in WASM the
+// parameter is a slice (see variadic.js).
+export function variadicAsSlice(params, variadic) {
+	if (!variadic || params.length === 0) return params;
+	const last = params[params.length - 1];
+	return [...params.slice(0, -1), { kind: "slice", elem: last }];
 }
 
 export function isUnhashableGoType(goType, checker = null, seen = new Set()) {

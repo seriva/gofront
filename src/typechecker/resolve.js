@@ -195,7 +195,9 @@ export const resolveMethods = {
 		const returns = node.returnType
 			? [this.resolveTypeNode(node.returnType, scope)]
 			: [VOID];
-		return { kind: "func", params, returns };
+		const fn = { kind: "func", params, returns };
+		if (node.params.at(-1)?.variadic) fn.variadic = true;
+		return fn;
 	},
 
 	resolveTypeNodeName(node, scope) {

@@ -22,6 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 - **Generic calls inside generic bodies in WASM**: A generic function calling another generic function with its own type parameter (`Max[T]` calling `less[T]`) failed with `Undefined: 'less'`, because monomorphisation dropped the inferred type arguments when it copied the body.
 - **Generics in multi-package WASM builds**: A linked `app.wasm` with any generic declaration failed on every cross-package reference (`Undefined: 'util'`), because the monomorphisation re-check had no package namespaces. Package-qualified references are now resolved on the link's own copy of the ASTs, so linking also no longer rewrites the cached ASTs that JS code generation reuses.
+- **Variadic functions in WASM**: `func f(xs ...T)` produced an invalid `.wasm` module. A variadic parameter is now a `[]T` in WASM: calls pack their trailing arguments into a slice, `f(s...)` passes `s` through, and this works for functions, methods, interface methods, closures, func values and generics. Exported variadic `wasm` functions and methods keep a rest parameter in the JS facade. The checker now types `xs` as `[]T` inside the body (ranging over a variadic parameter used to yield its elements' runes or fail), and JS output keeps the rest parameter on methods and func literals.
 
 ## [1.7.0] - 2026-10-20
 

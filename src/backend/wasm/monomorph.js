@@ -78,7 +78,7 @@ function typeKey(t) {
 /**
  * Converts a Go type representation or AST type node into a concrete AST type node.
  */
-function typeToTypeNode(t) {
+export function typeToTypeNode(t) {
 	if (!t) return { kind: "TypeName", name: "any" };
 	if (typeof t === "string") return { kind: "TypeName", name: t };
 	if (

@@ -668,6 +668,7 @@ function collectMethodMeta(fn, meta, errors, mod) {
 		exportName: fn._exportName,
 		fnName: fn.name,
 		ptrRecv: fn.params[0].type?.kind === "pointer",
+		variadic: Boolean(fn.params.at(-1)?._variadic),
 		params: fn.params
 			.slice(1)
 			.map((p) => checkDesc(classifyType(p.type, mod), where, errors)),
@@ -684,6 +685,7 @@ function collectFuncMeta(fn, meta, errors, mod) {
 		name: fn.name,
 		exportName: fn.name,
 		pkgName: fn._pkgName,
+		variadic: Boolean(fn.params?.at(-1)?._variadic),
 		params: (fn.params ?? []).map((p) =>
 			checkDesc(classifyType(p.type, mod), where, errors),
 		),
@@ -2997,11 +2999,20 @@ function ${P}shin(v, Ctor) {
 			f.params,
 			f.returns,
 		);
-		out.push(`function ${f.name}(${names.join(", ")}) {\n${body}\n}`);
+		out.push(
+			`function ${f.name}(${restParams(names, f.variadic)}) {\n${body}\n}`,
+		);
 	}
 
 	if (callMain) out.push("__w.main();");
 	return bindExports(out.join("\n"));
+}
+
+// A variadic Go function is a slice parameter in wasm; JS callers pass the
+// trailing arguments spread, so the facade collects them with a rest param.
+function restParams(names, variadic) {
+	if (!variadic || names.length === 0) return names.join(", ");
+	return [...names.slice(0, -1), `...${names.at(-1)}`].join(", ");
 }
 
 // Rewrites `__w.name(...)` into calls through module-level `const` bindings.
@@ -3160,7 +3171,7 @@ class ${name} {
 			[recv],
 		);
 		lines.push(
-			`\t${m.name}(${names.join(", ")}) {\n${indent(body, "\t")}\n\t}`,
+			`\t${m.name}(${restParams(names, m.variadic)}) {\n${indent(body, "\t")}\n\t}`,
 		);
 	}
 	lines.push("}");
