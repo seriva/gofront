@@ -135,6 +135,31 @@ export function closureMutates(body, name, cache = null) {
 	return walk(body);
 }
 
+// Names whose array value may be changed in place or aliased anywhere in
+// `body` (closures included): every mutation or address-of counted by
+// collectMutatedVars, plus slicing (`a[:]` aliases the array) and method
+// calls on the variable (a pointer receiver may write through).
+export function collectArrayAliasedVars(body) {
+	const names = collectMutatedVars(body, new Set(), false);
+	const walk = (node) => {
+		if (!node || typeof node !== "object") return;
+		if (Array.isArray(node)) {
+			for (const n of node) walk(n);
+			return;
+		}
+		if (node.kind === "SliceExpr") {
+			const root = rootIdentName(node.expr);
+			if (root) names.add(root);
+		} else if (node.kind === "CallExpr" && node.func?.kind === "SelectorExpr") {
+			const root = rootIdentName(node.func.expr);
+			if (root) names.add(root);
+		}
+		forEachChild(node, walk);
+	};
+	walk(body);
+	return names;
+}
+
 export class OwnershipContext {
 	constructor(body) {
 		this.body = body;
@@ -150,6 +175,21 @@ export class OwnershipContext {
 
 	fnMutates(name, addrOnly = false) {
 		return fnMutates(this.body, name, addrOnly, this.mut);
+	}
+
+	// Clone elision for arrays: a copy between two local variables may share
+	// the array when neither is ever changed in place or aliased in this
+	// function (closures included), so no write can be observed through the
+	// other name.  Conservative by name: a shadowing variable with the same
+	// name that is mutated also blocks elision.
+	arrayShareable(name) {
+		if (!name || name === "_") return false;
+		let set = this.mut.get("arr*");
+		if (!set) {
+			set = collectArrayAliasedVars(this.body);
+			this.mut.set("arr*", set);
+		}
+		return !set.has(name);
 	}
 
 	closureMutates(name) {
