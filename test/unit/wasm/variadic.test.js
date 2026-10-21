@@ -3,10 +3,13 @@
 // pack their trailing arguments, and `f(s...)` passes the slice through.
 
 import {
+	assertContains,
 	assertEqual,
+	assertErrorContains,
 	compileDir,
 	compileHybrid,
 	compileHybridProject,
+	compileWasm,
 	section,
 	test,
 	withTempDir,
@@ -160,5 +163,43 @@ func Main() int { return lib.Count(1, 2) }
 			const second = compileDir(dir);
 			assertEqual(second.js, first.js);
 		},
+	);
+});
+
+test("a variadic func value may not cross the JS boundary", async () => {
+	let msg = "";
+	try {
+		await compileHybridProject({
+			"lib/lib.go": `//gofront:target wasm
+package lib
+
+func Call(f func(xs ...int) int) int { return f(1, 2, 3) }
+`,
+			"main.go": `package main
+
+import "./lib"
+
+func main() { println(lib.Call(func(xs ...int) int { return len(xs) })) }
+`,
+		});
+	} catch (e) {
+		msg = e.message;
+	}
+	assertContains(msg, "variadic func value is not yet supported");
+});
+
+test("multiple return values into a variadic call are rejected in wasm", () => {
+	const { errors } = compileWasm(`//gofront:target both
+package main
+
+func g() (int, int) { return 3, 4 }
+
+func f(xs ...int) int { return len(xs) }
+
+func Main() int { return f(g()) }
+`);
+	assertErrorContains(
+		errors,
+		"passing multiple return values to a variadic function is not supported",
 	);
 });

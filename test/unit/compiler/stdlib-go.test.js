@@ -17,14 +17,18 @@ import {
 // Builds `lib` once as `both` (JS code path) and once as `wasm` (linked
 // module behind the facade), calls `lib.Run()` from a JS root, and returns the
 // printed line of each.  Throws when the two backends disagree.  `extraFiles`
-// adds more project files (e.g. a local package `lib` imports).
-async function stdParity(libBody, extraFiles = {}) {
+// adds more project files (e.g. a local package `lib` imports); `options` go
+// to compileDir.
+async function stdParity(libBody, extraFiles = {}, options = {}) {
 	const run = async (target) => {
-		const res = await compileHybridProject({
-			...extraFiles,
-			"lib/lib.go": `//gofront:target ${target}\npackage lib\n\n${libBody}`,
-			"main.go": `package main\n\nimport "./lib"\n\nfunc main() { println(lib.Run()) }\n`,
-		});
+		const res = await compileHybridProject(
+			{
+				...extraFiles,
+				"lib/lib.go": `//gofront:target ${target}\npackage lib\n\n${libBody}`,
+				"main.go": `package main\n\nimport "./lib"\n\nfunc main() { println(lib.Run()) }\n`,
+			},
+			options,
+		);
 		return res.lines.join("\n");
 	};
 	const js = await run("both");
@@ -324,4 +328,117 @@ func main() { println(cmp.Less(1, 2)) }
 	assert(res.js.includes("isNaNValue$$cmp"), "its helper must be emitted");
 	assert(!res.js.includes("Compare$$cmp"), "Compare is unreachable");
 	assert(!res.js.includes("Or$$cmp"), "Or is unreachable");
+});
+
+section("Go-source stdlib: review regressions");
+
+test("repeated builds and diamond imports reuse cached ASTs safely", () => {
+	withTempDir(
+		{
+			"u/u.go": `//gofront:target both
+package u
+
+import "cmp"
+
+func C(a, b int) int { return cmp.Compare(a, b) }
+`,
+			"w/w.go": `//gofront:target wasm
+package w
+
+import "../u"
+
+func Run() int { return u.C(2, 1) }
+`,
+			"main.go": `package main
+
+import (
+	"./u"
+	"./w"
+)
+
+func main() { println(u.C(1, 2), w.Run()) }
+`,
+		},
+		(dir) => {
+			const first = compileDir(dir);
+			const second = compileDir(dir);
+			assertEqual(second.js, first.js);
+		},
+	);
+});
+
+test("an aliased overlay import is rejected at the import", () => {
+	withTempDir(
+		{
+			"main.go": `package main\n\nimport e "errors"\n\nfunc main() { println(e.New("x").Error()) }\n`,
+		},
+		(dir) => {
+			assertThrows(
+				() => compileDir(dir),
+				"import alias for 'errors' is not supported",
+			);
+		},
+	);
+});
+
+const BOX_PKG = `//go:build gofront
+
+//gofront:target both
+
+package box
+
+type Stack[T any] struct{ items []T }
+
+func (s *Stack[T]) Push(v T) { s.items = append(s.items, v) }
+
+func (s *Stack[T]) Len() int { return len(s.items) }
+
+func StackOf[T any](v T) *Stack[T] {
+	s := &Stack[T]{}
+	s.Push(v)
+	return s
+}
+
+type Box struct{ n int }
+
+func NewBox(n int) *Box { return &Box{n: n} }
+
+func (b *Box) Get() int { return b.n }
+`;
+
+test("generic composite literals in Go-source packages", async () => {
+	await withTempDir({ "box/box.go": BOX_PKG }, async (stdlib) => {
+		const out = await stdParity(
+			`import "box"
+
+func Run() int {
+	s := box.StackOf(1)
+	s.Push(2)
+	return s.Len()
+}
+`,
+			{},
+			{ stdlibRoot: stdlib },
+		);
+		assertEqual(out, "2");
+	});
+});
+
+test("a wasm package may return a Go-source type to JS", async () => {
+	await withTempDir({ "box/box.go": BOX_PKG }, async (stdlib) => {
+		const res = await compileHybridProject(
+			{
+				"lib/lib.go": `//gofront:target wasm
+package lib
+
+import "box"
+
+func Make() *box.Box { return box.NewBox(7) }
+`,
+				"main.go": `package main\n\nimport "./lib"\n\nfunc main() { println(lib.Make().Get()) }\n`,
+			},
+			{ stdlibRoot: stdlib },
+		);
+		assertEqual(res.lines.join("\n"), "7");
+	});
 });
