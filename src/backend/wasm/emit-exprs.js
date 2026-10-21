@@ -7,6 +7,7 @@ import {
 	isAnyType,
 	isArrayType,
 	isComplex,
+	isComplex64,
 	isFuncType,
 	isMapType,
 	isPointerToStruct,
@@ -1400,8 +1401,8 @@ export class ExprsEmitter {
 				return;
 			}
 			const is64 =
-				expr._type?.name === "complex64" ||
-				operand._type?.name === "complex64" ||
+				isComplex64(expr._type) ||
+				isComplex64(operand._type) ||
 				targetWasmType?.typeName === "$complex64";
 			const info = this.mod.getComplexType(is64 ? "complex64" : "complex128");
 			const cWType = {
@@ -1862,9 +1863,9 @@ export class ExprsEmitter {
 	emitComplexBinary(expr, targetWasmType) {
 		const { op, left, right } = expr;
 		const is64 =
-			expr._type?.name === "complex64" ||
-			left._type?.name === "complex64" ||
-			right._type?.name === "complex64" ||
+			isComplex64(expr._type) ||
+			isComplex64(left._type) ||
+			isComplex64(right._type) ||
 			targetWasmType?.typeName === "$complex64";
 		const info = this.mod.getComplexType(is64 ? "complex64" : "complex128");
 		const f = info.elemWType;
@@ -2298,6 +2299,26 @@ export class ExprsEmitter {
 	}
 
 	emitBinaryOp(op, wType, goType) {
+		if (isComplex(goType)) {
+			const is64 = isComplex64(goType);
+			const info = this.mod.getComplexType(is64 ? "complex64" : "complex128");
+			const f = info.elemWType;
+			const bTmp = this.acquireTemp(wType);
+			const aTmp = this.acquireTemp(wType);
+			this.pushInstruction({ op: "local.set", index: bTmp });
+			this.pushInstruction({ op: "local.set", index: aTmp });
+			if (op === "+" || op === "-") {
+				this._emitComplexAddSub(aTmp, bTmp, info, f, op);
+			} else if (op === "*") {
+				this._emitComplexMul(aTmp, bTmp, info, f);
+			} else if (op === "/") {
+				this._emitComplexDiv(aTmp, bTmp, info, f);
+			}
+			this.releaseTemp(aTmp, wType);
+			this.releaseTemp(bTmp, wType);
+			return;
+		}
+
 		const signed = isSigned(goType);
 
 		switch (op) {
@@ -2692,12 +2713,12 @@ export class ExprsEmitter {
 	}
 
 	_emitComplexConversion(targetType, fromType, fromWType) {
-		const isTarget64 = targetType.name === "complex64";
+		const isTarget64 = isComplex64(targetType);
 		const targetInfo = this.mod.getComplexType(
 			isTarget64 ? "complex64" : "complex128",
 		);
 		if (isComplex(fromType)) {
-			const isFrom64 = fromType?.name === "complex64";
+			const isFrom64 = isComplex64(fromType);
 			if (isTarget64 === isFrom64) return;
 			const fromInfo = this.mod.getComplexType(
 				isFrom64 ? "complex64" : "complex128",

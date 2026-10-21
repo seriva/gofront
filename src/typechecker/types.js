@@ -774,6 +774,19 @@ export function isComplex(t) {
 	if (t.kind === "named") return isComplex(t.underlying);
 	return false;
 }
+export function isComplex64(t) {
+	if (!t) return false;
+	if (
+		(t.kind === "basic" || t.kind === "TypeName" || t.kind === "Ident") &&
+		t.name === "complex64"
+	)
+		return true;
+	if (t.kind === "untyped" && t.base === "complex64") return true;
+	if (t.kind === "named") return isComplex64(t.underlying);
+	if (t.name === "complex64") return true;
+	if (t.underlying) return isComplex64(t.underlying);
+	return false;
+}
 export function isComplexOrNumeric(t) {
 	return isNumeric(t) || isComplex(t);
 }
