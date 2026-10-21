@@ -878,8 +878,22 @@ export const expressionCheckMethods = {
 			);
 	},
 
+	// WASM packs a variadic call's trailing arguments into a slice, which it
+	// cannot do for `f(g())` yet (emitter-backed stdlib calls are fine).
+	_checkMultiForwardVariadic(fnType, expr) {
+		if (!expr._multiForward || !fnType.variadic) return;
+		if (this.target !== "wasm" && this.target !== "both") return;
+		const base = expr.func?.kind === "SelectorExpr" ? expr.func.expr : null;
+		if (base?._type?.kind === "namespace") return;
+		this.err(
+			"passing multiple return values to a variadic function is not supported in wasm packages; assign them to variables first",
+			expr,
+		);
+	},
+
 	_checkCallArgs(fnType, argTypes, expr, scope = null) {
 		this._checkArgCount(fnType, argTypes, expr);
+		this._checkMultiForwardVariadic(fnType, expr);
 		const maxLen = fnType.variadic
 			? argTypes.length
 			: Math.min(fnType.params.length, argTypes.length);

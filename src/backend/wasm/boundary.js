@@ -98,6 +98,10 @@ function funcSigFromAst(t) {
 				? t.returnType.types
 				: [t.returnType]
 			: [],
+		// `_variadic`: already desugared to a slice by variadic.js
+		variadic: Boolean(
+			t.params?.at(-1)?.variadic || t.params?.at(-1)?._variadic,
+		),
 	};
 }
 
@@ -398,6 +402,9 @@ function classifySig(t, mod) {
 }
 
 function classifyFunc(t, mod) {
+	// A variadic func value is a slice-taking closure in wasm but a rest-param
+	// function in JS; no adapter yet, so it may not cross.
+	if (t.variadic) return { k: "unsupported", what: "variadic func value" };
 	const sig = classifySig(t, mod);
 	if (sig.k === "unsupported") return sig;
 	const closureInfo = mod.getClosureType(t);
