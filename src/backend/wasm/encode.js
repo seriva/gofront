@@ -703,35 +703,48 @@ function encodeTypeEntry(t) {
 		return [0x4e, ...count, ...innerBytes];
 	}
 
+	let compositeBytes;
 	if (t.form === "struct") {
 		// Struct type: 0x5F, vector of fields [valtype, mutability]
 		const fields = t.fields ?? [];
-		return [
+		compositeBytes = [
 			0x5f,
 			...encodeVector(fields, (f) => [
 				...encodeValType(f.type),
 				f.mutable ? 0x01 : 0x00,
 			]),
 		];
-	}
-
-	if (t.form === "array") {
+	} else if (t.form === "array") {
 		// Array type: 0x5E, field [valtype, mutability]
-		return [
+		compositeBytes = [
 			0x5e,
 			...encodeValType(t.elemType ?? t.type),
 			t.mutable ? 0x01 : 0x00,
 		];
+	} else {
+		// Function type: 0x60, params vector, results vector
+		const params = t.params ?? [];
+		const results = t.results ?? [];
+		compositeBytes = [
+			0x60,
+			...encodeVector(params, encodeValType),
+			...encodeVector(results, encodeValType),
+		];
 	}
 
-	// Function type: 0x60, params vector, results vector
-	const params = t.params ?? [];
-	const results = t.results ?? [];
-	return [
-		0x60,
-		...encodeVector(params, encodeValType),
-		...encodeVector(results, encodeValType),
-	];
+	if (t.sub) {
+		const superIndices =
+			t.superTypeIndex !== undefined
+				? [t.superTypeIndex]
+				: (t.superTypeIndices ?? []);
+		return [
+			0x50,
+			...encodeVector(superIndices, encodeU32LEB),
+			...compositeBytes,
+		];
+	}
+
+	return compositeBytes;
 }
 
 function encodeTypeSection(types) {

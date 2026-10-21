@@ -351,7 +351,11 @@ export const statementGenMethods = {
 			) {
 				return;
 			}
-			this.line(`${active[0].l} ${stmt.op} ${active[0].r};`);
+			const targetL =
+				active[0].l.startsWith("{") && !active[0].l.startsWith("({")
+					? `(${active[0].l})`
+					: active[0].l;
+			this.line(`${targetL} ${stmt.op} ${active[0].r};`);
 		} else {
 			this._genAssignMulti(stmt, lhs, rhs, active, pairs);
 		}

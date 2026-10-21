@@ -1628,3 +1628,71 @@ func main() {
 	const milli = res.mod.GetUnixMilli(resT);
 	assertEqual(milli, BigInt(1704067200000 + 15 * 60 * 1000));
 });
+
+test("exported WASM function or callback receives or takes *float64 pointing at struct field; JS mutates box.value", async () => {
+	const res = await compileHybridProject(
+		{
+			"store/store.go": `//gofront:target wasm
+package store
+
+type Item struct {
+	Price float64
+}
+
+var GlobalItem = Item{Price: 10.5}
+
+func GetPricePtr() *float64 {
+	return &GlobalItem.Price
+}
+
+func ReadPrice() float64 {
+	return GlobalItem.Price
+}
+
+func UpdateWithCallback(cb func(p *float64)) float64 {
+	cb(&GlobalItem.Price)
+	return GlobalItem.Price
+}
+
+func MutateViaPtr(p *float64, v float64) {
+	*p = v
+}
+`,
+			"main.go": `package main
+
+import "./store"
+
+func main() {
+	_ = store.GetPricePtr
+}
+`,
+		},
+		{
+			exports: [
+				"GetPricePtr",
+				"ReadPrice",
+				"UpdateWithCallback",
+				"MutateViaPtr",
+			],
+		},
+	);
+
+	// 1. Exported function returns accessor ref to struct field. JS reads and mutates it.
+	const p = res.mod.GetPricePtr();
+	assertEqual(p.value, 10.5);
+	p.value = 42.0;
+	assertEqual(res.mod.ReadPrice(), 42.0);
+
+	// 2. Exported function takes accessor ref passed back in from JS and mutates it in WASM.
+	res.mod.MutateViaPtr(p, 77.5);
+	assertEqual(res.mod.ReadPrice(), 77.5);
+	assertEqual(p.value, 77.5);
+
+	// 3. Exported function invokes JS callback with *float64 accessor ref; JS mutates box.value.
+	const finalPrice = res.mod.UpdateWithCallback((box) => {
+		assertEqual(box.value, 77.5);
+		box.value = 99.25;
+	});
+	assertEqual(finalPrice, 99.25);
+	assertEqual(res.mod.ReadPrice(), 99.25);
+});

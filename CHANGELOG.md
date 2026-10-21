@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+- **WASM accessor refs at the JS boundary and documentation**: Supported crossing accessor refs through the JS↔WASM boundary via copy-in/copy-out `{ value }` boxes with live getters and setters; updated `docs/go-compatibility.md` pointer documentation to reflect pointer identity and accessor ref semantics across JS and WASM.
+- **WASM pointer dereference dispatch and accessor ref identity**: Dispatched pointer dereference expressions (`*p`) and assignments (`*p = v`) between box and accessor subtypes with getter/setter helpers; implemented scalar pointer identity comparisons (`==` and `!=`) comparing target references and indices across accessor refs, boxes, and struct equality fields in both WASM and JS.
+- **WASM accessor refs for fields and elements**: Added subtype `$acc_T` implementing scalar pointers to struct fields (`&s.F`) and slice/array elements (`&xs[i]`) with getter/setter helpers; updated dereference assignment (`*p = v`) to dispatch between box and accessor refs.
+- **WASM pointer type hierarchy**: Emitted abstract supertype `$ptr_T` with box struct `$box_T` as a subtype (`sub $ptr_T`) for scalar pointer types.
+
 ## [1.7.0] - 2026-10-20
 
 ### Added
