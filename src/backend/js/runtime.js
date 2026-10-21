@@ -131,6 +131,32 @@ export const HELPER_NIL_CALL = `var __nilcall = __nilcall || function(x) {
   return x;
 };`;
 
+// Strict-mode index checks (`both` packages): Go's out-of-range panic for
+// slices, arrays and strings.  `__at` reads an element; `__ix` returns the
+// checked index for writes, compound assignments and string reads.  A nil
+// slice (`null`) has length 0.
+export const HELPER_BOUNDS = `var __ixerr = __ixerr || function(i, n) {
+  throw new Error(i < 0 ? "runtime error: index out of range [" + i + "]" : "runtime error: index out of range [" + i + "] with length " + n);
+};
+var __at = __at || function(a, i) {
+  if (a != null && i >= 0 && i < a.length) return a[i];
+  return __ixerr(i, a == null ? 0 : a.length);
+};
+var __ix = __ix || function(a, i) {
+  if (a != null && i >= 0 && i < a.length) return i;
+  return __ixerr(i, a == null ? 0 : a.length);
+};
+var __lv;`;
+
+// Strict-mode nil maps: the zero value of a map type is one frozen empty
+// object, so reads, `len` and `range` behave as on an empty map, and every
+// write goes through `__mw`, which panics with Go's message.
+export const HELPER_NIL_MAP = `var __nilmap = __nilmap || Object.freeze(Object.defineProperty({}, "__map", { value: true }));
+var __mw = __mw || function(m) {
+  if (m == null || m === __nilmap) throw new Error("assignment to entry in nil map");
+  return m;
+};`;
+
 // Interface equality: named non-struct values are boxed in interfaces, so two
 // boxes are equal when they share a type and hold the same value (as in Go).
 export const HELPER_IFEQ = `var __ifeq = __ifeq || function(a, b) {
@@ -186,8 +212,8 @@ export const HELPER_PTREQ = `var __ptreq = __ptreq || function __ptreq(a, b) {
   return false;
 };`;
 
-// Panic/defer runtime.  \`stack\` holds the in-flight panic of every frame
-// currently running its defers; \`armed\` is set right before a deferred
+// Panic/defer runtime.  `stack` holds the in-flight panic of every frame
+// currently running its defers; `armed` is set right before a deferred
 // function is invoked and consumed by that function's prologue, so recover()
 // only takes effect when called directly by the deferred function (Go spec).
 export const HELPER_PANIC = `var __gopanic = __gopanic || { stack: [], armed: false };

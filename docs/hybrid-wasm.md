@@ -82,6 +82,9 @@ copies agree bit-for-bit:
 | Integer `/`, `%` by zero | panics |
 | Shift count ≥ width | yields `0` (or `-1` for negative signed `>>`) |
 | `x op= y`, `x++`, `x--` | covered for locals, struct fields and slice/array elements; the index expression is evaluated once |
+| `xs[i]` on a slice, array or string out of range | panics with `runtime error: index out of range [i] with length n` (`[i]` alone for a negative index) |
+| Write to a nil map | panics with `assignment to entry in nil map`; reads, `len`, `range` and `delete` see an empty map |
+| Field access through a nil struct pointer | panics with `runtime error: invalid memory address or nil pointer dereference` |
 
 `wasm` packages get these semantics natively from the WASM instruction set.
 
