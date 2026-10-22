@@ -68,6 +68,7 @@ import {
 	HELPER_SPRINTF,
 	HELPER_STRCONV,
 	HELPER_STRCONV_ERROR,
+	HELPER_SV,
 	HELPER_SYNC,
 	HELPER_TESTING,
 	HELPER_TIME_FMT,
@@ -130,6 +131,7 @@ const jsBindingName = (n) =>
 // `this.useHelper(name)`; `_prependHelpers` emits every marked entry.
 const HELPER_MAP = [
 	["len", HELPER_LEN],
+	["sv", HELPER_SV],
 	["slice", HELPER_SLICE],
 	["append", HELPER_APPEND],
 	["sliceGuard", HELPER_S],
@@ -517,7 +519,8 @@ export class CodeGen {
 		if (name === "json") {
 			this.useHelper("base64");
 		}
-		if (name === "append") this._helpers.add("slice");
+		if (name === "append") this.useHelper("slice");
+		if (name === "slice") this._helpers.add("sv");
 		if (name === "binary") {
 			this.useHelper("ioEOF");
 			this._helpers.add("error");
@@ -875,6 +878,7 @@ export class CodeGen {
 		this._withFnCtx(decl.body, () =>
 			this.indented(() => {
 				if (tpNames) this._genTypeParamBindings(tpNames, "this[__tz]");
+				if (decl.recvName) this._fnCtx.params.add(decl.recvName);
 				if (!staticNamed && decl.recvName && decl.recvName !== "_") {
 					this.line(`const ${decl.recvName} = ${this._receiverValue(decl)};`);
 				}
@@ -976,6 +980,7 @@ export class CodeGen {
 				const { name, type } = named[i];
 				const varName = !name || name === "_" ? `__ret_blank$${i}` : name;
 				this._markOwnership(varName, true);
+				this._fnCtx?.params.add(varName);
 				this.line(`let ${varName} = ${this.zeroValueForTypeNode(type)};`);
 			}
 			this.namedReturnVars = named.map((r, i) =>

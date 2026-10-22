@@ -700,6 +700,9 @@ export const expressionGenMethods = {
 			mut: new Map(),
 			owned: new Set(),
 			borrowed: new Set(),
+			// Parameters, receivers and named results, including the enclosing
+			// functions' (closures): `x = x[lo:hi]` on them must not copy.
+			params: new Set(prev?.params),
 		};
 		try {
 			fn();
@@ -723,6 +726,7 @@ export const expressionGenMethods = {
 	// Copies aggregate params/receivers that the function body mutates.
 	_emitParamCopies(params) {
 		for (const p of params) {
+			if (p.name) this._fnCtx?.params.add(p.name);
 			if (p.variadic || !p.name || p.name === "_") continue;
 			if (this._boxedVars.has(p.name)) {
 				// Address-taken parameter: rebind it to a { value } box.
