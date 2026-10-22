@@ -77,6 +77,7 @@ function formatInstruction(inst) {
 		case "loop":
 		case "if": {
 			const bt = inst.blockType ?? inst.resultType;
+			if (typeof bt === "number") return `${op} (type $t${bt})`;
 			const res = bt && bt !== "void" ? ` (result ${formatValType(bt)})` : "";
 			return `${op}${res}`;
 		}

@@ -1026,58 +1026,71 @@ export class ExprsEmitter {
 		this.pushInstruction("end");
 	}
 
+	// Registers an index-check site and pushes its id: a failing check
+	// carries the index and this id to the handler, which re-emits `emitLen`
+	// for that site (its temps still hold the operand at the branch).
+	_pushOobSite(emitLen) {
+		this.oobSites ??= [];
+		this.oobSites.push(emitLen);
+		this.pushInstruction({ op: "i32.const", value: this.oobSites.length - 1 });
+	}
+
 	// Pushes the bounds-checked i32 index onto the stack. `emitLen` must push
-	// the i32 length.  Inside a function body the index and length go to the
-	// `oob` locals and a failing check branches to the shared handler
-	// (`_closeOobBlocks`), which reports Go's message; elsewhere the check
-	// panics inline.
+	// the i32 length.  Inside a function body a failing check branches to the
+	// shared handler (`_closeOobBlocks`) with the index and a site id, and the
+	// handler reports Go's message; elsewhere the check panics inline.
 	_emitCheckedIndex(indexNode, emitLen) {
 		const depth32 = this.resolveBranchDepthToOob(32);
-		const oob = depth32 === null ? null : this._oobLocals();
 		if (this._isI32IndexExpr(indexNode)) {
-			const idx = oob ? oob.idx32 : this.acquireTemp("i32");
+			const idx = this.acquireTemp("i32");
 			this.emitExpr(indexNode, "i32");
 			this.pushInstruction({ op: "local.tee", index: idx });
-			this.pushInstruction({ op: "local.get", index: idx });
-			emitLen();
-			if (oob) {
-				this.pushInstruction({ op: "local.tee", index: oob.len });
+			if (depth32 !== null) {
+				this._pushOobSite(emitLen);
+				this.pushInstruction({ op: "local.get", index: idx });
+				emitLen();
 				this.pushInstruction("i32.ge_u");
 				this.pushInstruction({ op: "br_if", depth: depth32 });
-				return;
-			}
-			this.pushInstruction("i32.ge_u");
-			this._emitIndexPanicIf(() => {
+				this.pushInstruction("drop");
+			} else {
 				this.pushInstruction({ op: "local.get", index: idx });
-				this.pushInstruction("i64.extend_i32_s");
-			}, emitLen);
+				emitLen();
+				this.pushInstruction("i32.ge_u");
+				this._emitIndexPanicIf(() => {
+					this.pushInstruction({ op: "local.get", index: idx });
+					this.pushInstruction("i64.extend_i32_s");
+				}, emitLen);
+			}
 			this.releaseTemp(idx, "i32");
 			return;
 		}
 
-		const idx64 = oob ? oob.idx64 : this.acquireTemp("i64");
+		const idx64 = this.acquireTemp("i64");
 		this.emitExpr(indexNode, "i64");
 		this.pushInstruction({ op: "local.tee", index: idx64 });
-		emitLen();
-		if (oob) {
-			this.pushInstruction({ op: "local.tee", index: oob.len });
+		if (depth32 !== null) {
+			this._pushOobSite(emitLen);
+			this.pushInstruction({ op: "local.get", index: idx64 });
+			emitLen();
 			this.pushInstruction("i64.extend_i32_u");
 			this.pushInstruction("i64.ge_u");
 			this.pushInstruction({
 				op: "br_if",
 				depth: this.resolveBranchDepthToOob(64),
 			});
+			this.pushInstruction("drop");
 		} else {
+			emitLen();
 			this.pushInstruction("i64.extend_i32_u");
 			this.pushInstruction("i64.ge_u");
 			this._emitIndexPanicIf(
 				() => this.pushInstruction({ op: "local.get", index: idx64 }),
 				emitLen,
 			);
+			this.pushInstruction({ op: "local.get", index: idx64 });
 		}
-		this.pushInstruction({ op: "local.get", index: idx64 });
 		this.pushInstruction("i32.wrap_i64");
-		if (!oob) this.releaseTemp(idx64, "i64");
+		this.releaseTemp(idx64, "i64");
 	}
 
 	// Leaves `[arr, off+idx]` on the stack for `base[idx]` over a slice or
