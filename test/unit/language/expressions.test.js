@@ -807,6 +807,25 @@ func Main() int { c := C{}; f := C.Inc; f(c); return c.n }`);
 	);
 });
 
+test("T.M on a generic pointer-receiver method is an error", () => {
+	for (const target of ["both", "wasm"]) {
+		for (const body of [
+			"b := Box[int]{}; Box[int].Set(b, 3); return b.v",
+			"b := Box[int]{}; f := Box[int].Set; f(b, 3); return b.v",
+		]) {
+			const { errors } = compile(`//gofront:target ${target}
+package main
+type Box[T any] struct { v T }
+func (b *Box[T]) Set(v T) { b.v = v }
+func Main() int { ${body} }`);
+			assertErrorContains(
+				errors,
+				"invalid method expression Box[int].Set (needs pointer receiver (*Box[int]).Set)",
+			);
+		}
+	}
+});
+
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
