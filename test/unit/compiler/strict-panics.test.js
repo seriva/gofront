@@ -198,6 +198,103 @@ func Main() int { var p *P; p.X = 3; return p.X }`);
 	assertEqual(err, null, "compileHybrid compares both messages");
 });
 
+section("Strict panics — index-check elision (Task 0.16b)");
+
+// JS for a `both` package whose Main is `body`, and its bounds helper calls.
+function boundsChecks(body, params = "xs []int") {
+	const { js, errors } = compile(
+		`package main
+func three() int { return 3 }
+func Main(${params}) int {
+	s := 0
+	${body}
+	return s
+}`,
+		{ target: "both" },
+	);
+	assertEqual(errors.map((e) => e.message).join("\n"), "");
+	const main = js.slice(js.indexOf("function Main("));
+	return (main.match(/__at\(|__ix\(/g) ?? []).length;
+}
+
+test("for i := range xs { xs[i] = 0 } emits no check", () => {
+	assertEqual(boundsChecks("for i := range xs { xs[i] = 0 }"), 0);
+	assertEqual(
+		boundsChecks("for i, v := range xs { xs[i] += v; s += xs[i] }"),
+		0,
+	);
+});
+
+test("for i := 0; i < len(xs); i++ { s += xs[i] } emits no check", () => {
+	assertEqual(boundsChecks("for i := 0; i < len(xs); i++ { s += xs[i] }"), 0);
+	assertEqual(boundsChecks("for i := 1; i < len(xs); i++ { xs[i]++ }"), 0);
+});
+
+test("constant in-range indexes into arrays emit no check", () => {
+	assertEqual(
+		boundsChecks("var a [3]int; a[0] = 1; a[2] = a[0] + a[1]; s = a[2]", ""),
+		0,
+	);
+});
+
+test("a body that reassigns xs or i keeps the checks", () => {
+	assert(boundsChecks("for i := range xs { xs = xs[1:]; s += xs[i] }") > 0);
+	assert(boundsChecks("for i := range xs { i += 1; s += xs[i] }") > 0);
+	assert(
+		boundsChecks("for i := 0; i < len(xs); i++ { xs = nil; s += xs[i] }") > 0,
+	);
+	assert(boundsChecks("for i := 0; i < len(xs); i++ { i++; s += xs[i] }") > 0);
+});
+
+test("other indexes keep their checks", () => {
+	// A different slice, an offset index, a shadowing declaration, a slice
+	// written by a closure, an address-taken slice, and a slice index.
+	assert(boundsChecks("for i := range xs { s += ys[i] }", "xs, ys []int") > 0);
+	assert(boundsChecks("for i := range xs { s += xs[i+1] }") > 0);
+	assert(boundsChecks("for i := range xs { xs := xs[:1]; s += xs[i] }") > 0);
+	assert(
+		boundsChecks(
+			"f := func() { xs = nil }; for i := range xs { f(); s += xs[i] }",
+		) > 0,
+	);
+	assert(
+		boundsChecks("p := &xs; for i := range xs { *p = nil; s += xs[i] }") > 0,
+	);
+	assert(boundsChecks("for i := 0; i <= len(xs); i++ { s += xs[i] }") > 0);
+	assert(boundsChecks("for i := -1; i < len(xs); i++ { s += xs[i] }") > 0);
+	assert(boundsChecks("s = xs[0]") > 0);
+});
+
+test("a package-level slice keeps its checks (only locals are analysed)", () => {
+	const { js, errors } = compile(
+		`package main
+var xs = []int{1, 2, 3}
+func Main() int {
+	s := 0
+	for i := range xs { s += xs[i] }
+	return s
+}`,
+		{ target: "both" },
+	);
+	assertEqual(errors.length, 0);
+	assert(js.slice(js.indexOf("function Main(")).includes("__at("));
+});
+
+test("elided loops still compute the same results (parity)", () => {
+	const h = compileHybrid(`package main
+func Main() int {
+	xs := []int{1, 2, 3, 4}
+	s := 0
+	for i := range xs { xs[i] *= 2 }
+	for i := 0; i < len(xs); i++ { s += xs[i] }
+	var a [3]int
+	a[0] = s
+	a[2] = a[0] + 1
+	return a[2]
+}`);
+	assertEqual(Number(h.run("Main").wasmRes), 21);
+});
+
 section("Strict panics — js packages are unchanged");
 
 test("a js package emits no bounds, nil-map or nil-pointer helpers", () => {
