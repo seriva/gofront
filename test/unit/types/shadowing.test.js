@@ -207,3 +207,66 @@ func Main() int {
 	const res = compileHybrid(src).run("Main");
 	assertEqual(res.jsRes, 5);
 });
+
+section("Type declarations named after browser globals (Task 0.19d)");
+
+test("js package: type Array struct{} is rejected", () => {
+	const { errors } = compile(
+		"package main\n\ntype Array struct{ N int }\n\nfunc main() { _ = Array{} }\n",
+		{ target: "js" },
+	);
+	assertErrorContains(
+		errors,
+		"type Array shadows the JavaScript global Array; rename the type",
+	);
+});
+
+test("both package: type Error struct{} is rejected", () => {
+	const { errors } = compile(
+		"//gofront:target both\npackage main\n\ntype Error struct{ Msg string }\n\nfunc Main() int { return len(Error{}.Msg) }\n",
+	);
+	assertErrorContains(
+		errors,
+		"type Error shadows the JavaScript global Error; rename the type",
+	);
+});
+
+test("wasm package: type Array struct{} compiles (no JS class is emitted)", () => {
+	const { wasm, errors } = compileWasm(`
+package main
+
+type Array struct{ N int }
+
+func Main() int { return Array{N: 3}.N }
+`);
+	assertEqual(errors.length, 0);
+	assertEqual(runWasm(wasm).exports.Main(), 3n);
+});
+
+test("type alias named after a browser global is allowed", () => {
+	const { errors } = compile(
+		"package main\n\ntype Object = map[string]int\n\nfunc main() { _ = Object{} }\n",
+		{ target: "js" },
+	);
+	assertEqual(errors.length, 0);
+});
+
+test("named type with methods named after a JS built-in is rejected", () => {
+	const { errors } = compile(
+		'package main\n\ntype Set map[string]bool\n\nfunc (s Set) Has(k string) bool { return s[k] }\n\nfunc main() { _ = Set{}.Has("a") }\n',
+		{ target: "js" },
+	);
+	assertErrorContains(
+		errors,
+		"type Set shadows the JavaScript global Set; rename the type",
+	);
+});
+
+test("interfaces, method-less named types and DOM names are allowed", () => {
+	const { js, errors } = compile(
+		'package main\n\ntype Number interface{ ~int | ~float64 }\n\ntype Error interface{ Error() string }\n\ntype String string\n\ntype Element struct{ Tag string }\n\nfunc Twice[T Number](x T) T { return x + x }\n\nfunc main() { println(Twice(2), String("s"), Element{Tag: "p"}.Tag) }\n',
+		{ target: "js" },
+	);
+	assertEqual(errors.map((e) => e.message).join("\n"), "");
+	assert(js.includes("class Element"), "Element struct emitted");
+});

@@ -4256,11 +4256,8 @@ function _checkIndexAccessor(operand, currentFn, mod, checker, funcDecls) {
 		baseType?.kind === "pointer" && isArrayType(baseType.base, checker);
 	if (!isSlice && !isArr && !isPtrToArr) return;
 
-	const elemGoType = isSlice
-		? baseType.elem
-		: isPtrToArr
-			? baseType.base.elem
-			: baseType.elem;
+	const container = isPtrToArr ? baseType.base : baseType;
+	const elemGoType = container.elem ?? container.underlying?.elem;
 	if (!elemGoType || !isScalarType(elemGoType, checker, mod)) return;
 
 	const h = mod.getElemAccessorHelpers(elemGoType);

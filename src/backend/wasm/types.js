@@ -118,6 +118,10 @@ export function toWasmType(goType, checker = null, mod = null) {
 		if (goType.underlying) {
 			return toWasmType(goType.underlying, checker, mod);
 		}
+		// A bare `{ kind: "named", name }` (method receivers): look it up.
+		const resolved = checker?.types?.get(goType.name);
+		if (resolved?.underlying)
+			return toWasmType(resolved.underlying, checker, mod);
 	}
 
 	// Untyped constants
