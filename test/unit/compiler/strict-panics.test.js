@@ -10,7 +10,6 @@ import {
 	assertEqual,
 	compile,
 	compileHybrid,
-	runJs,
 	section,
 	summarize,
 	test,
@@ -174,14 +173,30 @@ test("writes to a made map still work", () => {
 	);
 });
 
-test("p.X through a nil pointer panics with Go's message (JS, recovered)", () => {
-	const { js, errors } = compile(recovered("var p *P; _ = p.X"), {
-		target: "both",
-	});
-	assertEqual(errors.length, 0);
+test("p.X through a nil pointer panics with Go's message (recovered)", () => {
+	for (const body of [
+		"var p *P; _ = p.X",
+		"var p *P; p.X = 1",
+		"var p *P; p.X += 1",
+		"var p *P; p.X++",
+		"var p *P; _ = readX(p)",
+	]) {
+		assertEqual(
+			panicMessage(body, "func readX(p *P) int { return p.X }"),
+			"runtime error: invalid memory address or nil pointer dereference",
+			body,
+		);
+	}
+});
+
+test("p.X through a non-nil pointer is unchanged", () => {
 	assertEqual(
-		runJs(`${js}\nconsole.log(Main());`),
-		"runtime error: invalid memory address or nil pointer dereference",
+		panicMessage(`p := &P{X: 2}
+	p.X = 3
+	p.X += 1
+	p.X++
+	if p.X != 5 { return "bad" }`),
+		"nopanic",
 	);
 });
 

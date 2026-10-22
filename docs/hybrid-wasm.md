@@ -244,8 +244,9 @@ for (let i = 0; i < sim.Positions.length; i += 2) {
 ### Panics and traps
 
 A Go `panic` inside WASM surfaces in JS as a thrown `Error` carrying the panic message.
-Nil dereferences trap in hardware and are mapped to the matching Go panic message by the
-facade.
+A field access through a nil struct pointer is checked and raises the same Go panic,
+so `recover()` catches it. A whole-value dereference of a nil pointer (`*p`) still traps
+in hardware; the facade maps that trap to the matching Go panic message.
 
 ### Loading `app.wasm`
 

@@ -214,23 +214,52 @@ export class FunctionEmitter {
 
 		this._initNamedReturns();
 
-		const needsOobBlock = this._needsOobBlock(body);
-		if (needsOobBlock) this._openOobBlocks();
+		const closeChecks = this._openCheckBlocks(body);
 
 		this.emitBlock(body);
 		if (this._finishYieldClosureBody()) return;
 
-		if (needsOobBlock) {
+		closeChecks?.(() =>
+			this.pushInstruction({
+				op: this.returnTypes.length === 0 ? "return" : "unreachable",
+			}),
+		);
+	}
+
+	// Opens the nil and index-check blocks `body` needs and returns the
+	// function that closes them (null when none are needed).  The closer runs
+	// `terminate` first unless the body already ends in a return or trap.
+	_openCheckBlocks(body) {
+		const nil = this._needsNilBlock(body);
+		const oob = this._needsOobBlock(body);
+		if (!nil && !oob) return null;
+		if (nil) this._openNilBlock();
+		if (oob) this._openOobBlocks();
+		return (terminate) => {
 			const lastOp = this.body[this.body.length - 1]?.op;
-			if (lastOp !== "return" && lastOp !== "unreachable") {
-				if (this.returnTypes.length === 0) {
-					this.pushInstruction({ op: "return" });
-				} else {
-					this.pushInstruction({ op: "unreachable" });
-				}
-			}
-			this._closeOobBlocks();
-		}
+			if (lastOp !== "return" && lastOp !== "unreachable") terminate();
+			if (oob) this._closeOobBlocks();
+			if (nil) this._closeNilBlock();
+		};
+	}
+
+	// Field access through a nil struct pointer branches (`br_on_null`) out
+	// of the body to a block wrapped around it, whose handler raises Go's
+	// panic, so `recover()` sees it where a trap would skip the defers.
+	_openNilBlock() {
+		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushControl("nil");
+	}
+
+	// Closes the block opened by _openNilBlock; the body must already end in
+	// a branch, return or unreachable.
+	_closeNilBlock() {
+		this.pushInstruction("end");
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getNilPanicFuncIndex(),
+		});
+		this.pushInstruction("unreachable");
 	}
 
 	// Index checks branch out of the body to one of two blocks wrapped around
@@ -403,21 +432,16 @@ export class FunctionEmitter {
 		});
 		this.pushControl("try_table");
 
-		const needsOobBlock = this._needsOobBlock(body);
-		if (needsOobBlock) this._openOobBlocks();
+		const closeChecks = this._openCheckBlocks(body);
 
 		this.emitBlock(body);
 
-		if (needsOobBlock) {
-			const lastOp = this.body[this.body.length - 1]?.op;
-			if (lastOp !== "return" && lastOp !== "unreachable") {
-				this.pushInstruction({
-					op: "br",
-					depth: this.resolveBranchDepthToRole("runDefers"),
-				});
-			}
-			this._closeOobBlocks();
-		}
+		closeChecks?.(() =>
+			this.pushInstruction({
+				op: "br",
+				depth: this.resolveBranchDepthToRole("runDefers"),
+			}),
+		);
 
 		// Close try_table
 		this.pushInstruction("end");
@@ -709,6 +733,20 @@ export class FunctionEmitter {
 		for (const key of Object.keys(node)) {
 			if (key.startsWith("_")) continue;
 			if (this._bodyReadsIdent(node[key], name)) return true;
+		}
+		return false;
+	}
+
+	// True when the body reads or writes a field through a pointer.
+	_needsNilBlock(node) {
+		if (!node || typeof node !== "object") return false;
+		if (Array.isArray(node)) return node.some((n) => this._needsNilBlock(n));
+		if (node.kind === "FuncLit") return false;
+		if (node.kind === "SelectorExpr" && node.expr?._type?.kind === "pointer")
+			return true;
+		for (const key of Object.keys(node)) {
+			if (key.startsWith("_")) continue;
+			if (this._needsNilBlock(node[key])) return true;
 		}
 		return false;
 	}

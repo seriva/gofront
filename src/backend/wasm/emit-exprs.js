@@ -468,6 +468,15 @@ export class ExprsEmitter {
 			this._emitCopyIfValue(value, f.goType, f.wType);
 	}
 
+	// With a pointer on the stack, branches to the function's `nil` block
+	// (_openNilBlock) when it is null.  Outside one, the access traps.
+	_emitNilCheck(goType) {
+		if (goType?.kind !== "pointer") return;
+		const depth = this.resolveBranchDepthToRole("nil");
+		if (depth == null) return;
+		this.pushInstruction({ op: "br_on_null", depth });
+	}
+
 	emitSelectorExpr(expr) {
 		const structInfo = this._resolveStructInfo(expr.expr);
 		if (!structInfo) {
@@ -482,6 +491,7 @@ export class ExprsEmitter {
 
 		const baseWType = this.toWasmType(expr.expr._type);
 		this.emitExpr(expr.expr, baseWType);
+		this._emitNilCheck(expr.expr._type);
 
 		for (let i = 0; i < path.length; i++) {
 			const step = path[i];

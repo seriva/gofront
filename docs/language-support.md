@@ -16,7 +16,7 @@ packages is listed in the [hybrid guide](hybrid-wasm.md#what-wasm-packages-suppo
 | `async func` / `await` expressions | ✓ <!-- no-fixture: JS-only language extension; not supported in WASM --> |
 | `defer`, `panic()` / `recover()` | ✓ <!-- fixture: package main; func Main() int { defer func() { recover() }(); panic("test"); return 0 } --> |
 | `print` / `println` builtins | ✓ — compile to `console.log` <!-- no-fixture: output side-effect only --> |
-| Runtime panics (index, nil map, nil deref) | ✓ — `both` packages panic with Go's message on both backends (JS strict mode); `recover()` of a nil dereference is JS-only for now <!-- fixture: package main; func Main() (res int) { defer func() { if recover() != nil { res = 1 } }(); var m map[string]int; m["k"] = 1; return 0 } --> |
+| Runtime panics (index, nil map, nil deref) | ✓ — `both` packages panic with Go's message on both backends (JS strict mode), and `recover()` catches them on both <!-- fixture: package main; func Main() (res int) { defer func() { if recover() != nil { res = 1 } }(); var m map[string]int; m["k"] = 1; return 0 } --> |
 
 ### Types & data structures
 
