@@ -7,7 +7,10 @@ import {
 	constToLit,
 	foldConstExpr,
 } from "../../typechecker/const-fold.js";
-import { compositeLitIndices } from "../../typechecker/types.js";
+import {
+	compositeLitIndices,
+	compositeLitMaxIndex,
+} from "../../typechecker/types.js";
 import {
 	getMapKeyValTypes,
 	isAnyType,
@@ -356,7 +359,7 @@ export class ExprsEmitter {
 			const elemType = this._getArrayElemType(litType);
 			const sliceInfo = this.mod.getSliceType(elemType);
 			const elems = lit.elems ?? [];
-			const count = Math.max(-1, ...compositeLitIndices(elems)) + 1;
+			const count = compositeLitMaxIndex(elems) + 1;
 			this._emitArrayLitElems(elems, elemType, sliceInfo.arrInfo, count);
 			this.pushInstruction({ op: "i32.const", value: 0 }); // offset
 			this.pushInstruction({ op: "i32.const", value: count }); // len
@@ -372,7 +375,7 @@ export class ExprsEmitter {
 			const elemType = this._getArrayElemType(litType);
 			const arrInfo = this.mod.getArrayType(elemType);
 			const elems = lit.elems ?? [];
-			const count = Math.max(-1, ...compositeLitIndices(elems)) + 1;
+			const count = compositeLitMaxIndex(elems) + 1;
 			const targetSize = this._getArraySize(litType, count);
 			this._emitArrayLitElems(elems, elemType, arrInfo, targetSize);
 			return;
