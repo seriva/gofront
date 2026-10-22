@@ -63,6 +63,7 @@ import {
 	HELPER_SCLONE,
 	HELPER_SHA256,
 	HELPER_SIMD,
+	HELPER_SLICE,
 	HELPER_SORT_SLICE,
 	HELPER_SPRINTF,
 	HELPER_STRCONV,
@@ -129,6 +130,7 @@ const jsBindingName = (n) =>
 // `this.useHelper(name)`; `_prependHelpers` emits every marked entry.
 const HELPER_MAP = [
 	["len", HELPER_LEN],
+	["slice", HELPER_SLICE],
 	["append", HELPER_APPEND],
 	["sliceGuard", HELPER_S],
 	["sclone", HELPER_SCLONE],
@@ -515,6 +517,7 @@ export class CodeGen {
 		if (name === "json") {
 			this.useHelper("base64");
 		}
+		if (name === "append") this._helpers.add("slice");
 		if (name === "binary") {
 			this.useHelper("ioEOF");
 			this._helpers.add("error");
