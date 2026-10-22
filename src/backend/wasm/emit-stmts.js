@@ -266,6 +266,7 @@ export class StmtsEmitter {
 		const observes = (r, i) =>
 			define ? this._mentions(r, roots) || (redecl && !pure[i]) : !pure[i];
 		if (!rhsNodes.some((r, i) => i > 0 && observes(r, i))) return rhsNodes;
+		const inPlace = lhsNodes.some((l) => this._isInPlaceArrayStore(l));
 		return rhsNodes.map((r, i) => {
 			if (pure[i]) return r;
 			const goType = r._type ?? this._resolveExprGoType(r);
@@ -273,14 +274,47 @@ export class StmtsEmitter {
 			const name = `__par_tmp_${this.tempCounter++}`;
 			const idx = this.allocLocal(name, wType, goType, true);
 			this.emitExpr(r, wType);
-			// An array temp must snapshot the value: an in-place store into
-			// an address-taken array (`a, b = b, a` with `p := &a`) would
-			// otherwise change what the temp holds.
-			if (this._isValueArray(goType) && !this._arrayCopyElidable(r, null))
-				this._emitCopyIfValue(r, goType, wType);
+			// An array temp must snapshot the value when a target is stored in
+			// place (`a, b = b, a` with `p := &a`): the store would otherwise
+			// change what the temp holds.  The snapshot is already a fresh
+			// copy, so assigning from the temp does not copy it again.
+			const snapshot =
+				inPlace &&
+				this._isValueArray(goType) &&
+				!this._arrayCopyElidable(r, null);
+			if (snapshot) this._emitCopyIfValue(r, goType, wType);
 			this.pushInstruction({ op: "local.set", index: idx });
-			return { kind: "Ident", name, _type: goType, _parTmp: true };
+			return {
+				kind: "Ident",
+				name,
+				_type: goType,
+				_parTmp: true,
+				_freshArray: snapshot,
+			};
 		});
+	}
+
+	// True when assigning to `l` writes into an existing array object (so an
+	// earlier-read array value sharing that object would see the write): a
+	// boxed (address-taken) array local, `*p` on an array pointer, or an
+	// element of an array.
+	_isInPlaceArrayStore(l) {
+		if (l.kind === "Ident") {
+			const info = this.resolveLocal(l.name);
+			return !!info?.isBoxed && this._isValueArray(info.goType);
+		}
+		if ((l.kind === "UnaryExpr" && l.op === "*") || l.kind === "StarExpr") {
+			const t = (l.operand ?? l.expr)?._type;
+			return this._isValueArray(t?.base ?? t);
+		}
+		if (l.kind === "IndexExpr") {
+			const t = l.expr._type ?? this._resolveExprGoType(l.expr);
+			return (
+				this._isValueArray(t) ||
+				(t?.kind === "pointer" && this._isValueArray(t.base))
+			);
+		}
+		return false;
 	}
 
 	_mentions(node, names) {

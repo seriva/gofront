@@ -939,3 +939,45 @@ parity(
 	6,
 	"type V [3]int\n\nfunc (v V) Sum() int {\n\ts := 0\n\tfor _, x := range v {\n\t\ts += x\n\t}\n\treturn s\n}",
 );
+
+parity(
+	"pointer-receiver method value on a named int writes through to x",
+	`	x := N(1)
+	g := x.Inc
+	g()
+	g()
+	return int(x)`,
+	3,
+	"type N int\n\nfunc (n *N) Inc() { *n++ }",
+);
+
+parity(
+	"pointer-receiver method value on a named float64 writes through to x",
+	`	x := F(1)
+	g := x.Inc
+	g()
+	g()
+	return int(x)`,
+	4,
+	"type F float64\n\nfunc (f *F) Inc() { *f += 1.5 }",
+);
+
+parity(
+	"direct pointer-receiver call on a named int local",
+	`	x := N(1)
+	x.Inc()
+	x.Inc()
+	return int(x)`,
+	3,
+	"type N int\n\nfunc (n *N) Inc() { *n++ }",
+);
+
+parity(
+	"direct pointer-receiver call on a named float64 local",
+	`	x := F(1)
+	x.Inc()
+	x.Inc()
+	return int(x)`,
+	4,
+	"type F float64\n\nfunc (f *F) Inc() { *f += 1.5 }",
+);
