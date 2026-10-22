@@ -884,3 +884,58 @@ parity(
 	3,
 	"type Inner struct{ N int }\n\ntype Outer struct{ Inner }",
 );
+
+section("WASM method values (review fixes)");
+
+parity(
+	"two method values with different receiver types",
+	`	a := A{1}
+	b := &B{"hey"}
+	f := a.Get
+	g := b.Len
+	return f()*10 + g()`,
+	13,
+	"type A struct{ n int }\n\nfunc (a A) Get() int { return a.n }\n\ntype B struct{ s string }\n\nfunc (b *B) Len() int { return len(b.s) }",
+);
+
+parity(
+	"method values on a named array and a named int",
+	`	v := V{1, 2, 3}
+	n := N(4)
+	f := v.Sum
+	g := n.Twice
+	return f()*100 + g()`,
+	608,
+	"type V [3]int\n\nfunc (v V) Sum() int {\n\ts := 0\n\tfor _, x := range v {\n\t\ts += x\n\t}\n\treturn s\n}\n\ntype N int\n\nfunc (n N) Twice() int { return int(n) * 2 }",
+);
+
+parity(
+	"value-receiver method value copies even when &c was taken by another method value",
+	`	c := C{1}
+	inc := c.Inc
+	get := c.Get
+	inc()
+	return get()`,
+	1,
+	"type C struct{ n int }\n\nfunc (c *C) Inc() { c.n++ }\n\nfunc (c C) Get() int { return c.n }",
+);
+
+parity(
+	"method value through a pointer to a value-receiver method copies *p",
+	`	p := &C{10}
+	pg := p.Get
+	p.n = 50
+	return pg()`,
+	10,
+	"type C struct{ n int }\n\nfunc (c C) Get() int { return c.n }",
+);
+
+parity(
+	"method value on a named-array value receiver copies the array",
+	`	v := V{1, 2, 3}
+	f := v.Sum
+	v[0] = 100
+	return f()`,
+	6,
+	"type V [3]int\n\nfunc (v V) Sum() int {\n\ts := 0\n\tfor _, x := range v {\n\t\ts += x\n\t}\n\treturn s\n}",
+);

@@ -405,8 +405,12 @@ export const expressionCheckMethods = {
 					: baseType;
 			let base = recvT?.kind === "named" ? recvT.underlying : recvT;
 			base = this.resolveType(base);
-			if (recvT && this._isStructOrNamedMethod(recvT, base, expr.field))
+			if (recvT && this._isStructOrNamedMethod(recvT, base, expr.field)) {
 				expr._isMethodValue = true;
+				// `p.M` with a value receiver binds a copy of `*p`.
+				if (baseType.kind === "pointer")
+					expr._derefRecv = !this._methodExprPtrRecv(recvT, ft, expr.field);
+			}
 		}
 		if (
 			baseType?.kind === "namespace" &&
