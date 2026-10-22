@@ -83,6 +83,8 @@ function declaredNames(node) {
 			);
 		case "FuncLit":
 			return (node.params ?? []).map((p) => p.name).filter(Boolean);
+		case "TypeSwitchStmt":
+			return node.assign ? [node.assign] : [];
 		default:
 			return [];
 	}
@@ -140,6 +142,8 @@ function lenOfName(node) {
 function rangeLoop(init, i) {
 	const rhs = init.rhs?.[0];
 	if (!isIdent(rhs.expr) || !isSliceOrArray(rhs.expr._type)) return null;
+	// `for i, xs := range xs`: the body's xs is the element, not the slice.
+	if (isIdent(init.lhs[1], rhs.expr.name)) return null;
 	return { xs: rhs.expr.name, i };
 }
 
@@ -181,6 +185,7 @@ const SCOPE_KINDS = new Set([
 	"IfStmt",
 	"FuncLit",
 	"CaseClause",
+	"TypeSwitchStmt",
 ]);
 
 function analyzeFunc(params, body) {
@@ -197,9 +202,10 @@ function analyzeFunc(params, body) {
 		if (node.kind === "ForStmt") markLoop(node, scope, unsafe);
 		const inner = SCOPE_KINDS.has(node.kind) ? scope.child() : scope;
 		const declared = declaredNames(node);
-		// Func literal parameters belong to its body; other declarations
-		// follow the node in its enclosing scope.
-		const target = node.kind === "FuncLit" ? inner : null;
+		// Func literal parameters and a type switch binding belong to its
+		// body; other declarations follow the node in its enclosing scope.
+		const ownsDecls = node.kind === "FuncLit" || node.kind === "TypeSwitchStmt";
+		const target = ownsDecls ? inner : null;
 		if (target) for (const n of declared) target.add(n);
 		forEachChild(node, (c) => visit(c, inner));
 		if (!target) for (const n of declared) scope.add(n);
