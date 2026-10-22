@@ -885,3 +885,88 @@ func Flip[T Float](x T) T { return ^x }
 `);
 	assertErrorContains(errors, "^ requires integer");
 });
+
+test("unary ^, - and + on a type parameter whose constraint embeds a type set", () => {
+	const src = `
+package main
+
+import "fmt"
+
+type Integer interface{ ~int | ~int64 }
+
+type Num2 interface{ Integer }
+
+type Num3 interface {
+	Integer
+	String() string
+}
+
+type MyInt int
+
+func (m MyInt) String() string { return "m" }
+
+func B[T Num2](x T) T { return ^x }
+
+func E[T Num3](x T) T { return ^x }
+
+func G[T interface{ Integer }](x T) T { return ^x }
+
+func N[T Num2](x T) T { return -x }
+
+func P[T Num2](x T) T { return +x }
+
+func Main() {
+	fmt.Println(B(2), int(E(MyInt(3))), G(int64(4)), N(7), P(8))
+}
+`;
+	const { output } = compileHybrid(src).run("Main");
+	assertEqual(output, "-3 -4 -5 -7 8");
+});
+
+test("unary operators on type parameters reject constraints outside their type set", () => {
+	const cases = [
+		["func F[T ~int | ~string](x T) T { return -x }", "- requires numeric"],
+		["func F[T ~float64 | ~int](x T) T { return ^x }", "^ requires integer"],
+		["func F[T any](x T) T { return +x }", "+ requires numeric"],
+		["func F[T comparable](x T) T { return ^x }", "^ requires integer"],
+		[
+			"type Mixed interface{ ~int | ~string }\ntype Wrap interface{ Mixed }\nfunc F[T Wrap](x T) T { return -x }",
+			"- requires numeric",
+		],
+	];
+	for (const [decl, msg] of cases) {
+		const { errors } = compile(`package main\n\n${decl}\n`);
+		assertErrorContains(errors, msg);
+	}
+});
+
+// JS only: WASM does not support partial explicit instantiation (pre-existing).
+test("partial explicit instantiation infers the remaining type arguments in JS", () => {
+	const { js, errors } = compile(
+		`
+package main
+
+import "fmt"
+
+func Two[A, B any](b B) (A, B) {
+	var a A
+	var bb B
+	return a, bb
+}
+
+func Conv[U, T any](x T) U {
+	var u U
+	return u
+}
+
+func main() {
+	a, b := Two[int](true)
+	fmt.Println(a, b)
+	fmt.Println(Conv[int]("a"), Conv[string](1) == "")
+}
+`,
+		{ strict: true },
+	);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "0 false\n0 true");
+});
