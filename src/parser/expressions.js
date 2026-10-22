@@ -108,9 +108,9 @@ function _isTypeIntroducerToken(tt) {
 }
 
 export const expressionParserMethods = {
-	parseExprList() {
-		const exprs = [this.parseExpr()];
-		while (this.match(T.COMMA)) exprs.push(this.parseExpr());
+	parseExprList(noCompLit = false) {
+		const exprs = [this.parseExpr(0, noCompLit)];
+		while (this.match(T.COMMA)) exprs.push(this.parseExpr(0, noCompLit));
 		return exprs;
 	},
 

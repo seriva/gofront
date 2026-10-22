@@ -1063,6 +1063,11 @@ export const expressionGenMethods = {
 		const lo = expr.low ? this.genExpr(expr.low) : "";
 		const hi = expr.high ? this.genExpr(expr.high) : "";
 		const method = isTypedArraySlice(expr.expr._type) ? "subarray" : "slice";
+		// `b[:]`, `b[0:]` and `a[:]` share the backing store as in Go: the
+		// result is the operand itself.  Other bounds still copy (a JS array
+		// cannot view part of another one).
+		const zeroLow = !expr.low || Number(expr.low._const?.v) === 0;
+		if (method === "slice" && zeroLow && !hi) return base;
 		if (!lo && !hi) return `${base}.${method}()`;
 		if (!hi) return `${base}.${method}(${lo})`;
 		if (!lo) return `${base}.${method}(0, ${hi})`;

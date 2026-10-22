@@ -187,7 +187,7 @@ export const statementParserMethods = {
 		if (!this.check(T.SEMICOLON)) cond = this.parseExpr(0, true);
 		this.expect(T.SEMICOLON);
 		let post = null;
-		if (!this.check(T.LBRACE)) post = this.parseSimpleStmtRaw();
+		if (!this.check(T.LBRACE)) post = this.parseSimpleStmtRaw(true);
 		const body = this.parseBlock();
 		return { kind: "ForStmt", init: first, cond, post, body };
 	},
@@ -297,9 +297,9 @@ export const statementParserMethods = {
 		// a, b, c := ...  or  x, y = ...
 		if (t.type === T.COMMA) {
 			const lhs = [first];
-			while (this.match(T.COMMA)) lhs.push(this.parseExpr());
+			while (this.match(T.COMMA)) lhs.push(this.parseExpr(0, noCompLit));
 			const op = this.advance(); // := or =
-			const rhs = this.parseExprList();
+			const rhs = this.parseExprList(noCompLit);
 			if (op.type === T.DEFINE) return { kind: "DefineStmt", lhs, rhs };
 			return { kind: "AssignStmt", lhs, op: "=", rhs };
 		}
@@ -307,14 +307,14 @@ export const statementParserMethods = {
 		// x := expr
 		if (t.type === T.DEFINE) {
 			this.advance();
-			const rhs = this.parseExprList();
+			const rhs = this.parseExprList(noCompLit);
 			return { kind: "DefineStmt", lhs: [first], rhs };
 		}
 
 		// x = expr  or  x += expr  etc.
 		if (ASSIGN_OPS.has(t.type)) {
 			const op = this.advance().value;
-			const rhs = this.parseExprList();
+			const rhs = this.parseExprList(noCompLit);
 			return { kind: "AssignStmt", lhs: [first], op, rhs };
 		}
 

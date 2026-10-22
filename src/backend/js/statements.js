@@ -189,22 +189,14 @@ export const statementGenMethods = {
 	},
 
 	_genDefineMixedRedecl(lhs, rhs, redecls) {
-		if (rhs.length === 1 && lhs.length > 1) {
-			this._tmpCounter = (this._tmpCounter ?? 0) + 1;
-			const tmp = `__t${this._tmpCounter}`;
-			this.line(`const ${tmp} = ${rhs[0]};`);
-			for (let i = 0; i < lhs.length; i++) {
-				if (lhs[i] === "_") continue;
-				this._genDefineSingleVar([lhs[i]], [`${tmp}[${i}]`], [redecls[i]]);
-			}
-		} else {
-			for (let i = 0; i < lhs.length; i++) {
-				if (lhs[i] === "_") {
-					this.line(`${rhs[i]};`);
-					continue;
-				}
-				this._genDefineSingleVar([lhs[i]], [rhs[i]], [redecls[i]]);
-			}
+		// `x, y := 2, x` reads the old `x`: evaluate every value first.
+		this._tmpCounter = (this._tmpCounter ?? 0) + 1;
+		const tmp = `__t${this._tmpCounter}`;
+		const all = rhs.length === 1 ? rhs[0] : `[${rhs.join(", ")}]`;
+		this.line(`const ${tmp} = ${all};`);
+		for (let i = 0; i < lhs.length; i++) {
+			if (lhs[i] === "_") continue;
+			this._genDefineSingleVar([lhs[i]], [`${tmp}[${i}]`], [redecls[i]]);
 		}
 	},
 
@@ -1075,23 +1067,10 @@ export const statementGenMethods = {
 	// Inline a statement as a for-init/post string (no semicolon)
 	stmtInline(stmt) {
 		switch (stmt.kind) {
-			case "DefineStmt": {
-				const boxed =
-					stmt.lhs.length === 1 &&
-					stmt.rhs.length === 1 &&
-					this._boxedVars.has(stmt.lhs[0].name);
-				if (boxed)
-					return `let ${stmt.lhs[0].name} = { value: ${this.genValueExpr(stmt.rhs[0])} }`;
-				const rhs = stmt.rhs.map((e) => this.genExpr(e)).join(", ");
-				const lhs = stmt.lhs.map((e) => e.name ?? this.genExpr(e)).join(", ");
-				return `let ${lhs} = ${rhs}`;
-			}
-			case "AssignStmt": {
-				this._markIndexLvalues(stmt.lhs);
-				const rhs = stmt.rhs.map((e) => this.genExpr(e)).join(", ");
-				const lhs = stmt.lhs.map((e) => this.genExpr(e)).join(", ");
-				return `${lhs} ${stmt.op} ${rhs}`;
-			}
+			case "DefineStmt":
+				return this._inlineDefine(stmt);
+			case "AssignStmt":
+				return this._inlineAssign(stmt);
 			case "IncDecStmt":
 				this._markIndexLvalues([stmt.expr]);
 				return `${this.genExpr(stmt.expr)}${stmt.op}`;
@@ -1100,6 +1079,41 @@ export const statementGenMethods = {
 			default:
 				return "";
 		}
+	},
+
+	_inlineDefine(stmt) {
+		const boxed =
+			stmt.lhs.length === 1 &&
+			stmt.rhs.length === 1 &&
+			this._boxedVars.has(stmt.lhs[0].name);
+		if (boxed)
+			return `let ${stmt.lhs[0].name} = { value: ${this.genValueExpr(stmt.rhs[0])} }`;
+		const rhs = stmt.rhs.map((e) => this.genExpr(e));
+		const lhs = stmt.lhs.map((e) => e.name ?? this.genExpr(e));
+		if (lhs.length === 1) return `let ${lhs[0]} = ${rhs[0]}`;
+		// `for i, j := 0, 10`: one declarator per variable.
+		if (rhs.length === lhs.length) {
+			const decls = lhs.map((n, i) =>
+				this._boxedVars.has(n)
+					? `${n} = { value: ${rhs[i]} }`
+					: `${n} = ${rhs[i]}`,
+			);
+			return `let ${decls.join(", ")}`;
+		}
+		return `let [${lhs.map((n) => (n === "_" ? "" : n)).join(", ")}] = ${rhs[0]}`;
+	},
+
+	_inlineAssign(stmt) {
+		this._markIndexLvalues(stmt.lhs);
+		const rhs = stmt.rhs.map((e) => this.genExpr(e));
+		if (stmt.lhs.length === 1)
+			return `${this.genExpr(stmt.lhs[0])} ${stmt.op} ${rhs[0]}`;
+		// `i, j = i+1, j-1`: every right-hand side is evaluated first.
+		const lhs = stmt.lhs.map((e) =>
+			e.name === "_" ? "" : this._genAssignLhsExpr(e),
+		);
+		const r = rhs.length === 1 ? rhs[0] : `[${rhs.join(", ")}]`;
+		return `[${lhs.join(", ")}] = ${r}`;
 	},
 
 	// Interface-typed tags may hold boxed named values; cases compare with __ifeq.

@@ -846,3 +846,101 @@ parity(
 	9,
 	"type P struct {\n\tX int\n}\n\nfunc f(xs ...P) { xs[0].X = 9 }",
 );
+
+section("Slice aliasing and multi-value assignment (Task 0.19a)");
+
+parity(
+	"s := b[:] aliases the slice's backing store",
+	`	b := []int{1, 2, 3}
+	s := b[:]
+	s[0] = 9
+	return b[0]`,
+	9,
+);
+
+parity(
+	"s := b[0:] aliases the slice's backing store",
+	`	b := []int{1, 2, 3}
+	s := b[0:]
+	s[1] = 8
+	return b[1]`,
+	8,
+);
+
+parity(
+	"s := a[:] aliases the array",
+	`	a := [3]int{1, 2, 3}
+	s := a[:]
+	s[2] = 7
+	a[0] = 5
+	return a[2]*10 + s[0]`,
+	75,
+);
+
+parity(
+	"append to b[:] does not grow b",
+	`	b := []int{1, 2, 3}
+	s := append(b[:], 4)
+	return len(b)*10 + len(s)`,
+	34,
+);
+
+parity(
+	"x, y = y, x swaps scalars",
+	`	x, y := 1, 2
+	x, y = y, x
+	return x*10 + y`,
+	21,
+);
+
+parity(
+	"a, b = b, a swaps arrays",
+	`	a := [2]int{1, 2}
+	b := [2]int{3, 4}
+	a, b = b, a
+	return a[0]*1000 + a[1]*100 + b[0]*10 + b[1]`,
+	3412,
+);
+
+parity(
+	"xs[0], xs[1] = xs[1], xs[0] swaps slice elements",
+	`	xs := []int{1, 2}
+	xs[0], xs[1] = xs[1], xs[0]
+	return xs[0]*10 + xs[1]`,
+	21,
+);
+
+parity(
+	"multi-value assignment evaluates every right-hand side first",
+	`	i, j, k := 1, 2, 3
+	i, j, k = j+k, i+k, i+j
+	return i*100 + j*10 + k`,
+	543,
+);
+
+parity(
+	"x, y := 2, x on a redeclared x reads the old x",
+	`	x := 1
+	x, y := 2, x
+	return x*10 + y`,
+	21,
+);
+
+parity(
+	"x, y := 2, f() runs f before the redeclared x is assigned",
+	`	x := 1
+	f := func() int { return x }
+	x, y := 2, f()
+	return x*10 + y`,
+	21,
+);
+
+parity(
+	"lo, hi := 0, len(xs) and a, b = b, len(xs) keep their values",
+	`	xs := []int{1, 2, 3}
+	lo, hi := 0, len(xs)
+	a, b := 5, 6
+	a, b = b, len(xs)
+	return lo*1000 + hi*100 + a*10 + b`,
+	363,
+);

@@ -4,6 +4,7 @@ import {
 	assert,
 	assertEqual,
 	compile,
+	compileHybrid,
 	runJs,
 	section,
 	test,
@@ -160,4 +161,38 @@ func main() {
 	assertEqual(errors.length, 0);
 	assert(js.includes("Object.entries"), "map range should use Object.entries");
 	assertEqual(runJs(js), "a 1");
+});
+
+section("Multi-variable three-clause for (Task 0.19a)");
+
+test("for i, j := 0, 10; …; i, j = i+1, j-1 matches Go on both backends", () => {
+	const res = compileHybrid(`
+package main
+
+func Main() int {
+	s := 0
+	for i, j := 0, 10; i < j; i, j = i+1, j-1 {
+		s = s*10 + (j - i)
+	}
+	return s
+}
+`).run("Main");
+	assertEqual(res.jsRes, 108642);
+	assertEqual(res.wasmRes, 108642n);
+});
+
+test("for i, j := 0, 0; …; i, j = j, i+j swaps in the post statement", () => {
+	const res = compileHybrid(`
+package main
+
+func Main() int {
+	n := 0
+	for i, j := 0, 1; i < 20; i, j = j, i+j {
+		n = n*100 + i
+	}
+	return n
+}
+`).run("Main");
+	assertEqual(res.jsRes, 1010203050813);
+	assertEqual(res.wasmRes, 1010203050813n);
 });

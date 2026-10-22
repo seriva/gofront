@@ -697,6 +697,7 @@ func Main() int {
 `;
 	const res = compileHybrid(src).run("Main");
 	assertEqual(res.jsRes, 12);
+	assertEqual(res.wasmRes, 12n);
 });
 
 test("value-receiver method call keeps the loop var a plain local", () => {
