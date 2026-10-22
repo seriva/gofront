@@ -8,7 +8,7 @@ import {
 	loopVarsCapturedInLoop,
 	nodeAssigns,
 } from "../../lower/index.js";
-import { isComplex } from "../../typechecker/types.js";
+import { isComplex, isTypedArraySlice } from "../../typechecker/types.js";
 
 /** @typedef {import('./index.js').CodeGen} CodeGen */
 
@@ -290,6 +290,10 @@ export const statementGenMethods = {
 			return;
 		const r = stmt.rhs[0];
 		if (r.kind !== "SliceExpr" || r.max) return;
+		// A parameter or named result may alias the caller's slice: keep the
+		// view.  Field chains (`n.Children = n.Children[:k]`) still copy.
+		const lhs = stmt.lhs[0];
+		if (lhs.kind === "Ident" && this._fnCtx?.params.has(lhs.name)) return;
 		const same = (a, b) =>
 			a.kind === b.kind &&
 			(a.kind === "Ident"
@@ -738,21 +742,33 @@ export const statementGenMethods = {
 		return mutated ? this._cloneJs(elemType, js) : js;
 	},
 
-	_genSliceRangeFor(stmt, iteree, isAssign) {
+	_genSliceRangeFor(stmt, iteree, isAssign, unwrapView = false) {
 		this._loopDepth = this._loopDepth ?? 0;
 		const d = this._loopDepth++;
 		const [idxNode, valNode] = stmt.init.lhs;
 		const i = `__i${d}`;
 		const arr = `__arr${d}`;
 		const len = `__len${d}`;
-		this.line(
-			`for (let ${i} = 0, ${arr} = ${iteree}, ${len} = ${arr} ? ${arr}.length : 0; ${i} < ${len}; ${i}++) {`,
-		);
+		let elem = `${arr}[${i}]`;
+		if (unwrapView) {
+			// A partial view of a plain array is a Proxy (`__slice`): read the
+			// elements from its backing array `b` at offset `o` instead.
+			this.useHelper("sv");
+			const [v, b, o] = [`__v${d}`, `__b${d}`, `__o${d}`];
+			this.line(
+				`for (let ${i} = 0, ${arr} = ${iteree}, ${v} = ${arr}?.[__sv], ${b} = ${v} === undefined ? ${arr} : ${v}.b, ${o} = ${v} === undefined ? 0 : ${v}.o, ${len} = ${v} !== undefined ? ${v}.n : ${arr} ? ${arr}.length : 0; ${i} < ${len}; ${i}++) {`,
+			);
+			elem = `${b}[${o} + ${i}]`;
+		} else {
+			this.line(
+				`for (let ${i} = 0, ${arr} = ${iteree}, ${len} = ${arr} ? ${arr}.length : 0; ${i} < ${len}; ${i}++) {`,
+			);
+		}
 		this.indented(() => {
 			this._emitRangeVar(idxNode, i, isAssign);
 			this._emitRangeVar(
 				valNode,
-				this._rangeElemValue(stmt, valNode, `${arr}[${i}]`, isAssign),
+				this._rangeElemValue(stmt, valNode, elem, isAssign),
 				isAssign,
 			);
 			const declared = isAssign
@@ -906,10 +922,18 @@ export const statementGenMethods = {
 			valNode &&
 			valNode.name !== "_" &&
 			this._aggregateBase(iterType)?.kind === "array";
+		const iterBase =
+			iterType?.kind === "named" ? iterType.underlying : iterType;
+		const unwrapView =
+			valNode?.name !== "_" &&
+			!!valNode &&
+			iterBase?.kind === "slice" &&
+			!isTypedArraySlice(iterType);
 		this._genSliceRangeFor(
 			stmt,
 			rangesArrayValue ? this._cloneJs(iterType, iteree) : iteree,
 			init.kind === "AssignStmt",
+			unwrapView,
 		);
 	},
 
