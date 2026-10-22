@@ -82,6 +82,9 @@ copies agree bit-for-bit:
 | Integer `/`, `%` by zero | panics |
 | Shift count ≥ width | yields `0` (or `-1` for negative signed `>>`) |
 | `x op= y`, `x++`, `x--` | covered for locals, struct fields and slice/array elements; the index expression is evaluated once |
+| `xs[i]` on a slice, array or string out of range | panics with `runtime error: index out of range [i] with length n` (`[i]` alone for a negative index) |
+| Write to a nil map | panics with `assignment to entry in nil map`; reads, `len`, `range` and `delete` see an empty map |
+| Field access through a nil struct pointer | panics with `runtime error: invalid memory address or nil pointer dereference` |
 
 `wasm` packages get these semantics natively from the WASM instruction set.
 
@@ -241,8 +244,9 @@ for (let i = 0; i < sim.Positions.length; i += 2) {
 ### Panics and traps
 
 A Go `panic` inside WASM surfaces in JS as a thrown `Error` carrying the panic message.
-Nil dereferences trap in hardware and are mapped to the matching Go panic message by the
-facade.
+A field access through a nil struct pointer is checked and raises the same Go panic,
+so `recover()` catches it. A whole-value dereference of a nil pointer (`*p`) still traps
+in hardware; the facade maps that trap to the matching Go panic message.
 
 ### Loading `app.wasm`
 

@@ -19,7 +19,7 @@ export const terminationMethods = {
 			case "ReturnStmt":
 				return true;
 			case "BranchStmt":
-				return false;
+				return stmt.keyword === "goto";
 			case "ExprStmt":
 				return this._isPanicCall(stmt.expr);
 			case "LabeledStmt":

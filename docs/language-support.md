@@ -16,7 +16,7 @@ packages is listed in the [hybrid guide](hybrid-wasm.md#what-wasm-packages-suppo
 | `async func` / `await` expressions | ✓ <!-- no-fixture: JS-only language extension; not supported in WASM --> |
 | `defer`, `panic()` / `recover()` | ✓ <!-- fixture: package main; func Main() int { defer func() { recover() }(); panic("test"); return 0 } --> |
 | `print` / `println` builtins | ✓ — compile to `console.log` <!-- no-fixture: output side-effect only --> |
-| Runtime panics (index, nil map, nil deref) | ✓ in WASM; JS strict mode in progress <!-- fixture: pending: Task 0.16 | package main; func Main() (res int) { defer func() { if recover() != nil { res = 1 } }(); var m map[string]int; m["k"] = 1; return 0 } --> |
+| Runtime panics (index, nil map, nil deref) | ✓ — `both` packages panic with Go's message on both backends (JS strict mode), and `recover()` catches them on both <!-- fixture: package main; func Main() (res int) { defer func() { if recover() != nil { res = 1 } }(); var m map[string]int; m["k"] = 1; return 0 } --> |
 
 ### Types & data structures
 
@@ -34,7 +34,7 @@ packages is listed in the [hybrid guide](hybrid-wasm.md#what-wasm-packages-suppo
 | `error` type | ✓ — interface `{ Error() string }`; custom error types, `errors.Is`/`Unwrap`, `%w` wrapping <!-- fixture: package main; import "errors"; func Main() int { err := errors.New("err"); if err != nil && err.Error() == "err" { return 1 }; return 0 } --> |
 | Complex numbers (`complex64`, `complex128`, `3i`) | ✓ — `complex()`, `real()`, `imag()` builtins; `__cmul`/`__cdiv` helpers <!-- fixture: package main; func Main() int { c := complex(1.0, 2.0) + 3i; if real(c) == 1.0 && imag(c) == 5.0 { return 1 }; return 0 } --> |
 | Type definitions, type aliases (`type A = B`) | ✓ <!-- fixture: package main; type MyInt int; type Alias = MyInt; func Main() int { var a Alias = 42; return int(a) } --> |
-| Generic type aliases (Go 1.24) | ✓ — `type A[T any] = B[T]` <!-- fixture: pending: Task 0.14 | package main; type Box[T any] struct { Val T }; type Alias[T any] = Box[T]; func Main() int { b := Alias[int]{Val: 42}; return b.Val } --> |
+| Generic type aliases (Go 1.24) | ✓ — `type A[T any] = B[T]` <!-- fixture: package main; type Box[T any] struct { Val T }; type Alias[T any] = Box[T]; func Main() int { b := Alias[int]{Val: 42}; return b.Val } --> |
 | Methods on named non-struct types | ✓ — basic, slice, map and func types (`type Celsius float64`, `type Names []string`); value and pointer receivers; values stay plain JS values, methods dispatch statically, and values are boxed only inside interfaces; satisfies interfaces, type assertions and switches <!-- fixture: package main; type MyInt int; func (m MyInt) Double() int { return int(m * 2) }; func Main() int { x := MyInt(21); return x.Double() } --> |
 | Type conversions, type assertions (plain & comma-ok) | ✓ <!-- fixture: package main; func Main() int { var x any = 42; n, ok := x.(int); if ok { return n }; return 0 } --> |
 | Type switch (`switch v := x.(type)`) | ✓ — compiles to `if/else if` with `typeof` / `instanceof` <!-- fixture: package main; func check(x any) int { switch v := x.(type) { case int: return v; default: return 0 } }; func Main() int { return check(42) } --> |
@@ -56,7 +56,7 @@ packages is listed in the [hybrid guide](hybrid-wasm.md#what-wasm-packages-suppo
 | `switch` / `fallthrough` (with init statement) | ✓ <!-- fixture: package main; func Main() int { switch x := 2; x { case 1: return 10; case 2: return 20; default: return 0 } } --> |
 | `break` / `continue` / labeled variants | ✓ <!-- fixture: package main; func Main() int { sum := 0; Outer: for i := 0; i < 5; i++ { for j := 0; j < 5; j++ { if i == 2 { break Outer }; sum++ } }; return sum } --> |
 | Terminating statement analysis | ✓ — missing `return` in non-void functions is a type error <!-- no-fixture: compile-time analysis rejecting missing return --> |
-| `goto` statement | ✗ — targeted diagnostic: `goto is not supported; restructure with labeled break/continue` <!-- fixture: pending: Task 0.17 | diagnostic: goto is not supported => package main; func Main() int { goto L; L: return 1 } --> |
+| `goto` statement | ✗ — targeted diagnostic: `goto is not supported; restructure with labeled break/continue` <!-- fixture: diagnostic: goto is not supported => package main; func Main() int { goto L; L: return 1 } --> |
 
 ### Expressions & literals
 
@@ -67,8 +67,8 @@ packages is listed in the [hybrid guide](hybrid-wasm.md#what-wasm-packages-suppo
 | Slice expressions (`s[lo:hi]`, `s[lo:hi:max]`) | ✓ <!-- fixture: package main; func Main() int { s := []int{1, 2, 3, 4, 5}; sub := s[1:3]; return sub[0]*10 + sub[1] } --> |
 | Variadic spread (`f(slice...)`, `append(a, b...)`) | ✓ <!-- fixture: package main; func Main() int { a := []int{10, 20}; b := []int{30, 40}; c := append(a, b...); return c[0] + c[1] + c[2] + c[3] } --> |
 | Positional struct literals (`Point{1, 2}`) | ✓ <!-- fixture: package main; type Pt struct { X, Y int }; func Main() int { p := Pt{10, 20}; return p.X + p.Y } --> |
-| Method expressions with value receiver (`T.Method`) / method values (`x.Method`) | ✓ (JS-only; WASM method values in Task 0.15) <!-- no-fixture: JS-only; WASM method expressions in Task 0.15 --> |
-| Method expressions on pointer receivers (`(*T).Method`) | ✗ — planned for Task 0.15 <!-- fixture: pending: Task 0.15 | package main; type C struct { N int }; func (c *C) Inc() { c.N++ }; func Main() int { f := (*C).Inc; c := &C{N: 1}; f(c); return c.N } --> |
+| Method expressions with value receiver (`T.Method`) / method values (`x.Method`) | ✓ — method expressions on both backends; method values JS-only (WASM in Task 0.19c) <!-- no-fixture: method values are JS-only until Task 0.19c; T.Method is covered by the pointer-receiver row and expressions.test.js --> |
+| Method expressions on pointer receivers (`(*T).Method`) | ✓ — `(*T).M` is a `func(*T, …)`, also on generic types (`(*Box[int]).Set`) <!-- fixture: package main; type C struct { N int }; func (c *C) Inc() { c.N++ }; func Main() int { f := (*C).Inc; c := &C{N: 1}; f(c); return c.N } --> |
 | Multi-value function forwarding (`f(g())`) | ✓ <!-- fixture: package main; func g() (int, int) { return 10, 20 }; func f(a, b int) int { return a + b }; func Main() int { return f(g()) } --> |
 | Raw string literals (backticks), rune literals | ✓ <!-- fixture: package main; func Main() int { s := `raw`; r := 'A'; if s == "raw" && r == 65 { return 1 }; return 0 } --> |
 | Numeric separators (`1_000_000`), binary/octal/hex literals | ✓ <!-- fixture: package main; func Main() int { a := 1_000; b := 0b101; c := 0o12; d := 0x1f; return a + b + c + d } --> |

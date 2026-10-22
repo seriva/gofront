@@ -762,6 +762,13 @@ export const expressionGenMethods = {
 			if (expr.operand.kind === "IndexExpr") {
 				const obj = this.genExpr(expr.operand.expr);
 				const idx = this.genExpr(expr.operand.index);
+				const check = this._genStrictIndex(
+					{ ...expr.operand, _lvalue: false },
+					"__o",
+					"__i",
+				);
+				if (check)
+					return `((__o, __i) => (${check}, Object.defineProperties({ get value() { return __o[__i]; }, set value(v) { __o[__i] = v; } }, { __target: { value: __o }, __index: { value: __i } })))(${obj}, ${idx})`;
 				return `((__o, __i) => Object.defineProperties({ get value() { return __o[__i]; }, set value(v) { __o[__i] = v; } }, { __target: { value: __o }, __index: { value: __i } }))(${obj}, ${idx})`;
 			}
 			if (expr.operand.kind === "SelectorExpr") {
@@ -951,7 +958,10 @@ export const expressionGenMethods = {
 
 	_genPointerSelectorField(expr, base) {
 		if (this._isStructPointerType(expr.expr._type)) {
-			const sel = `${base}.${expr.field}`;
+			// Strict mode: a field of a nil struct pointer panics as in Go.
+			const recv =
+				this.strict && !expr._isMethodValue ? this._genNilChecked(base) : base;
+			const sel = `${recv}.${expr.field}`;
 			if (expr._isMethodValue && !expr._callee) return `${sel}.bind(${base})`;
 			return sel;
 		}
@@ -968,11 +978,46 @@ export const expressionGenMethods = {
 			? `${this.genExpr(expr.expr)}.${wrapField}`
 			: this.genExpr(expr.expr);
 		const idx = this.genExpr(expr.index);
-		if (expr._mapValueType && !expr._lvalue)
-			return this._genMapIndexExpr(expr, base, idx);
+		if (expr._mapValueType) {
+			if (!expr._lvalue) return this._genMapIndexExpr(expr, base, idx);
+			return `${this._genMapWriteBase(base)}[${idx}]`;
+		}
+		const checked = this._genStrictIndex(expr, base, idx);
+		if (checked) return checked;
 		if (this._isStringExprType(exprType) && !expr._lvalue)
 			return `${base}.charCodeAt(${idx})`;
 		return `${base}[${idx}]`;
+	},
+
+	// `p` for a field access `p.F`, panicking with Go's message when nil.
+	_genNilChecked(base) {
+		this.useHelper("nilCall");
+		return `__nilcall(${base})`;
+	},
+
+	// The map of a write `m[k] = v`: strict mode panics on a nil map.
+	_genMapWriteBase(base) {
+		if (!this.strict) return base;
+		this.useHelper("nilMap");
+		return `__mw(${base})`;
+	},
+
+	// Strict mode: `xs[i]` on a slice, array or string with Go's bounds check
+	// (null when no check applies).  Reads of slices and arrays use `__at`;
+	// lvalues and string reads use `base[__ix(base, i)]`, binding `base` to
+	// `__lv` first when evaluating it twice could repeat a call.
+	_genStrictIndex(expr, base, idx) {
+		if (!this.strict || expr._inBounds) return null;
+		const t = expr.expr._type;
+		const u = t?.kind === "named" ? t.underlying : t;
+		const isStr = this._isStringExprType(t);
+		if (!isStr && u?.kind !== "slice" && u?.kind !== "array") return null;
+		this.useHelper("bounds");
+		if (!expr._lvalue && !isStr) return `__at(${base}, ${idx})`;
+		const once = this._hasCallExpr(expr.expr);
+		const obj = once ? `(__lv = ${base})` : base;
+		const at = `__ix(${once ? "__lv" : base}, ${idx})`;
+		return expr._lvalue ? `${obj}[${at}]` : `${obj}.charCodeAt(${at})`;
 	},
 
 	_genMapIndexExpr(expr, base, idx) {
@@ -1649,6 +1694,8 @@ export const expressionGenMethods = {
 			const d = expr.elems[3] ? this.genExpr(expr.elems[3]) : "0";
 			return `__simd_f32x4(${a}, ${b}, ${c}, ${d})`;
 		}
+		const aliasLit = this._genAliasLit(t, typeName, expr);
+		if (aliasLit !== null) return aliasLit;
 		if (typeName && this.structNames.has(typeName))
 			return this._genPositionalStructLit(typeName, expr);
 		if (typeName && this.namedWrapperNames.has(typeName))
@@ -1660,6 +1707,54 @@ export const expressionGenMethods = {
 		if (this._isMapTypeNode(t))
 			return `{ ${this._genMapLitEntries(expr.elems)} }`;
 		return this._genFallbackCompositeLit(expr);
+	},
+
+	// Literals whose type expression is not the class to construct: a generic
+	// alias `A[X]{…}`, an anonymous `struct{…}{…}`, or `P{…}` for
+	// `type P = struct{…}`. Null for every other literal.
+	_genAliasLit(t, typeName, expr) {
+		if (t.kind === "GenericTypeName" || t.kind === "InstantiationExpr")
+			return this._genGenericAliasLit(typeName, expr);
+		const anon =
+			t.kind === "StructType" ||
+			((t.kind === "TypeName" || t.kind === "Ident") &&
+				this.checker?.types.get(t.name)?.kind === "struct");
+		return anon ? this._genAnonStructLit(expr) : null;
+	},
+
+	// `A[X]{…}` for a generic alias `type A[P any] = T`: the literal has the
+	// aliased type (expr._type), so dispatch on that instead of on `A`.
+	_genGenericAliasLit(typeName, expr) {
+		if (!this.checker?.types.get(typeName)?._generic?.isAlias) return null;
+		const rt = expr._type;
+		const base = rt?.kind === "named" ? rt.underlying : rt;
+		if (rt?.kind === "named" && this.structNames.has(rt.name))
+			return this._genPositionalStructLit(rt.name, expr);
+		if (base?.kind === "map")
+			return `{ ${this._genMapLitEntries(expr.elems)} }`;
+		if (base?.kind === "struct") return this._genAnonStructLit(expr);
+		return this._genImplicitCompositeLit(expr);
+	},
+
+	// A literal of an anonymous struct type: a plain object with every field,
+	// the omitted ones set to their zero value.
+	_genAnonStructLit(expr) {
+		const st =
+			expr._type?.kind === "named" ? expr._type.underlying : expr._type;
+		if (st?.kind !== "struct" || !(st.fields instanceof Map))
+			return this._genFallbackCompositeLit(expr);
+		const values = new Map();
+		for (const e of expr.elems) {
+			if (e._positionalField)
+				values.set(e._positionalField, this.genValueExpr(e));
+			else if (e.kind === "KeyValueExpr")
+				values.set(e.key.name, this.genValueExpr(e.value));
+		}
+		const fields = [...st.fields].map(
+			([name, ft]) =>
+				`${name}: ${values.get(name) ?? this.zeroValueForType(ft)}`,
+		);
+		return `{ ${fields.join(", ")} }`;
 	},
 
 	_genImplicitCompositeLit(expr) {
@@ -1801,7 +1896,7 @@ export const expressionGenMethods = {
 				);
 			}
 			case "MapType":
-				return "{}";
+				return this._nilMapZero();
 			case "PointerType":
 				return "null";
 			case "StructType": {
@@ -1817,6 +1912,14 @@ export const expressionGenMethods = {
 			default:
 				return "null";
 		}
+	},
+
+	// A nil map: `{}` in js packages; in strict mode the frozen `__nilmap`,
+	// which panics on write.
+	_nilMapZero() {
+		if (!this.strict) return "{}";
+		this.useHelper("nilMap");
+		return "__nilmap";
 	},
 
 	_arrayZero(n, ctor, elemZero) {
@@ -1842,7 +1945,7 @@ export const expressionGenMethods = {
 					this.zeroValueForType(t.elem),
 				);
 			case "map":
-				return "{}";
+				return this._nilMapZero();
 			case "struct": {
 				const fields = [...t.fields.entries()]
 					.map(([name, ft]) => `${name}: ${this.zeroValueForType(ft)}`)

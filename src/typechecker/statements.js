@@ -365,7 +365,12 @@ export const statementCheckMethods = {
 
 	_checkBranchStmt(stmt) {
 		const kw = stmt.keyword;
-		if (kw === "continue" && this._loopDepth === 0)
+		if (kw === "goto")
+			this.err(
+				"goto is not supported; restructure with labeled break/continue",
+				stmt,
+			);
+		else if (kw === "continue" && this._loopDepth === 0)
 			this.err("continue statement outside for loop", stmt);
 		else if (kw === "break" && this._loopDepth === 0 && this._switchDepth === 0)
 			this.err("break statement outside for loop or switch", stmt);

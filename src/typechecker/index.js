@@ -560,6 +560,10 @@ export class TypeChecker {
 	// ── Type collection ──────────────────────────────────────────
 
 	collectType(decl) {
+		if (decl.typeParams && decl.isAlias) {
+			this._collectGenericAlias(decl);
+			return;
+		}
 		if (decl.typeParams) {
 			// Generic type — resolve underlying with type params as ANY for struct fields
 			const typeScope = new Scope(this.globals);
@@ -617,6 +621,29 @@ export class TypeChecker {
 		}
 		this.types.set(decl.name, named);
 		this.globals.define(decl.name, named);
+	}
+
+	// type A[P any] = T[P] — Go 1.24 generic alias. The declaration is a
+	// template only: each instantiation A[X] substitutes X into the aliased
+	// type and resolves to exactly that type (no new named type).
+	_collectGenericAlias(decl) {
+		const typeScope = new Scope(this.globals);
+		const typeParamTypes = decl.typeParams.map((tp) => {
+			const t = { kind: "typeParam", name: tp.name, constraint: tp.constraint };
+			typeScope.define(tp.name, t);
+			return t;
+		});
+		// Resolve once with the parameters in scope to report errors in the
+		// aliased type at the declaration.
+		const underlying = this.resolveTypeNode(decl.type, typeScope);
+		const alias = {
+			kind: "named",
+			name: decl.name,
+			underlying,
+			_generic: { typeParams: typeParamTypes, declNode: decl, isAlias: true },
+		};
+		this.types.set(decl.name, alias);
+		this.globals.define(decl.name, alias);
 	}
 
 	_buildCollectFuncScope(decl) {

@@ -80,6 +80,7 @@ export const T = {
 	RSHIFT: ">>",
 	ELLIPSIS: "...",
 	FALLTHROUGH: "fallthrough",
+	GOTO: "goto",
 
 	// Delimiters
 	LPAREN: "(",

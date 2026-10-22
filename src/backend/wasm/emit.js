@@ -214,32 +214,136 @@ export class FunctionEmitter {
 
 		this._initNamedReturns();
 
-		const needsOobBlock = this._needsOobBlock(body);
-		if (needsOobBlock) {
-			this.pushInstruction({ op: "block", blockType: "void" });
-			this.pushControl("oob");
-		}
+		const closeChecks = this._openCheckBlocks(body);
 
 		this.emitBlock(body);
 		if (this._finishYieldClosureBody()) return;
 
-		if (needsOobBlock) {
+		closeChecks?.(() =>
+			this.pushInstruction({
+				op: this.returnTypes.length === 0 ? "return" : "unreachable",
+			}),
+		);
+	}
+
+	// Opens the nil and index-check blocks `body` needs and returns the
+	// function that closes them (null when none are needed).  The closer runs
+	// `terminate` first unless the body already ends in a return or trap.
+	_openCheckBlocks(body) {
+		const nil = this._needsNilBlock(body);
+		const oob = this._needsOobBlock(body);
+		if (!nil && !oob) return null;
+		if (nil) this._openNilBlock();
+		if (oob) this._openOobBlocks();
+		return (terminate) => {
 			const lastOp = this.body[this.body.length - 1]?.op;
-			if (lastOp !== "return" && lastOp !== "unreachable") {
-				if (this.returnTypes.length === 0) {
-					this.pushInstruction({ op: "return" });
-				} else {
-					this.pushInstruction({ op: "unreachable" });
-				}
+			if (lastOp !== "return" && lastOp !== "unreachable") terminate();
+			if (oob) this._closeOobBlocks();
+			if (nil) this._closeNilBlock();
+		};
+	}
+
+	// Field access through a nil struct pointer branches (`br_on_null`) out
+	// of the body to a block wrapped around it, whose handler raises Go's
+	// panic, so `recover()` sees it where a trap would skip the defers.
+	_openNilBlock() {
+		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushControl("nil");
+	}
+
+	// Closes the block opened by _openNilBlock; the body must already end in
+	// a branch, return or unreachable.
+	_closeNilBlock() {
+		this.pushInstruction("end");
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getNilPanicFuncIndex(),
+		});
+		this.pushInstruction("unreachable");
+	}
+
+	// Index checks branch out of the body to one of two blocks wrapped around
+	// it, `oob32` for i32 indexes and `oob64` for i64 indexes, carrying the
+	// index and the check's site id as block results (`_pushOobSite`).  The
+	// handlers after the blocks recompute that site's length and raise Go's
+	// `index out of range [i] with length n`.  Nothing extra stays live in
+	// the hot path: a site id is an immediate.
+	_openOobBlocks() {
+		this.pushInstruction({
+			op: "block",
+			blockType: this.mod.getTypeIndex([], ["i64", "i32"]),
+		});
+		this.pushControl("oob64");
+		this.pushInstruction({
+			op: "block",
+			blockType: this.mod.getTypeIndex([], ["i32", "i32"]),
+		});
+		this.pushControl("oob32");
+	}
+
+	// Closes the blocks opened by _openOobBlocks; the body must already end
+	// in a branch, return or unreachable.
+	_closeOobBlocks() {
+		const site = this.acquireTemp("i32");
+		const idx = this.acquireTemp("i64");
+		const len = this.acquireTemp("i32");
+		// oob32 lands here with [i32 index, site]: widen the index and fall
+		// through to the oob64 handler.
+		this.pushInstruction("end");
+		this.pushInstruction({ op: "local.set", index: site });
+		this.pushInstruction("i64.extend_i32_s");
+		this.pushInstruction({ op: "local.get", index: site });
+		this.pushInstruction("end");
+		this.pushInstruction({ op: "local.set", index: site });
+		this.pushInstruction({ op: "local.set", index: idx });
+		// Sites whose length code is identical (same temp, same field) share
+		// one br_table target.
+		const codes = [];
+		const target = (this.oobSites ?? []).map((emitLen) => {
+			const saved = this.body;
+			this.body = [];
+			emitLen();
+			const code = this.body;
+			this.body = saved;
+			const key = JSON.stringify(code);
+			let k = codes.findIndex((c) => c.key === key);
+			if (k < 0) k = codes.push({ key, code }) - 1;
+			return k;
+		});
+		const sites = codes.map(({ code }) => () => {
+			for (const inst of code) this.pushInstruction(inst);
+		});
+		if (sites.length === 0) {
+			this.pushInstruction({ op: "i32.const", value: 0 });
+		} else {
+			// block $len (result i32) { block … block { br_table } emitLen_0; br $len … }
+			this.pushInstruction({ op: "block", blockType: "i32" });
+			for (let k = 0; k < sites.length; k++)
+				this.pushInstruction({ op: "block", blockType: "void" });
+			this.pushInstruction({ op: "local.get", index: site });
+			this.pushInstruction({
+				op: "br_table",
+				targets: target,
+				defaultTarget: sites.length - 1,
+			});
+			for (let k = 0; k < sites.length; k++) {
+				this.pushInstruction("end");
+				sites[k]();
+				this.pushInstruction({ op: "br", depth: sites.length - 1 - k });
 			}
 			this.pushInstruction("end");
-
-			this.pushInstruction({
-				op: "call",
-				funcIndex: this.mod.getBoundsPanicFuncIndex(),
-			});
-			this.pushInstruction("unreachable");
 		}
+		this.pushInstruction({ op: "local.set", index: len });
+		this.pushInstruction({ op: "local.get", index: idx });
+		this.pushInstruction({ op: "local.get", index: len });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getIndexPanicFuncIndex(),
+		});
+		this.pushInstruction("unreachable");
+		this.releaseTemp(site, "i32");
+		this.releaseTemp(idx, "i64");
+		this.releaseTemp(len, "i32");
 	}
 
 	_initNamedReturns() {
@@ -328,30 +432,16 @@ export class FunctionEmitter {
 		});
 		this.pushControl("try_table");
 
-		const needsOobBlock = this._needsOobBlock(body);
-		if (needsOobBlock) {
-			this.pushInstruction({ op: "block", blockType: "void" });
-			this.pushControl("oob");
-		}
+		const closeChecks = this._openCheckBlocks(body);
 
 		this.emitBlock(body);
 
-		if (needsOobBlock) {
-			const lastOp = this.body[this.body.length - 1]?.op;
-			if (lastOp !== "return" && lastOp !== "unreachable") {
-				this.pushInstruction({
-					op: "br",
-					depth: this.resolveBranchDepthToRole("runDefers"),
-				});
-			}
-			this.pushInstruction("end");
-
+		closeChecks?.(() =>
 			this.pushInstruction({
-				op: "call",
-				funcIndex: this.mod.getBoundsPanicFuncIndex(),
-			});
-			this.pushInstruction("unreachable");
-		}
+				op: "br",
+				depth: this.resolveBranchDepthToRole("runDefers"),
+			}),
+		);
 
 		// Close try_table
 		this.pushInstruction("end");
@@ -643,6 +733,20 @@ export class FunctionEmitter {
 		for (const key of Object.keys(node)) {
 			if (key.startsWith("_")) continue;
 			if (this._bodyReadsIdent(node[key], name)) return true;
+		}
+		return false;
+	}
+
+	// True when the body reads or writes a field through a pointer.
+	_needsNilBlock(node) {
+		if (!node || typeof node !== "object") return false;
+		if (Array.isArray(node)) return node.some((n) => this._needsNilBlock(n));
+		if (node.kind === "FuncLit") return false;
+		if (node.kind === "SelectorExpr" && node.expr?._type?.kind === "pointer")
+			return true;
+		for (const key of Object.keys(node)) {
+			if (key.startsWith("_")) continue;
+			if (this._needsNilBlock(node[key])) return true;
 		}
 		return false;
 	}
@@ -940,7 +1044,7 @@ export class FunctionEmitter {
 					for (const n of names) rawFields.push({ name: n, goType: f.type });
 				}
 			}
-			if (rawFields.length > 0 && this.mod.getAnonStructType) {
+			if (this.mod.getAnonStructType) {
 				return this.mod.getAnonStructType(rawFields);
 			}
 		}
@@ -1496,8 +1600,9 @@ export class FunctionEmitter {
 		return 0;
 	}
 
-	resolveBranchDepthToOob() {
-		return this.resolveBranchDepthToRole("oob");
+	// Depth of the index-check block for i32 or i64 indexes, or null.
+	resolveBranchDepthToOob(width = 64) {
+		return this.resolveBranchDepthToRole(width === 32 ? "oob32" : "oob64");
 	}
 
 	resolveBranchDepthToRole(targetRole) {

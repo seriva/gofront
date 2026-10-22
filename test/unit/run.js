@@ -58,6 +58,7 @@ export const TEST_FILES = [
 	"./compiler/test-runner.test.js",
 	"./compiler/targets.test.js",
 	"./compiler/strict-mode.test.js",
+	"./compiler/strict-panics.test.js",
 	"./compiler/templ.test.js",
 	"./compiler/lexer-parser.test.js",
 	"./compiler/minifier.test.js",

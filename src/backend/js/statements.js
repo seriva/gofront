@@ -78,6 +78,7 @@ export const statementGenMethods = {
 				this.genTypeDeclWithMethods(stmt, []);
 				break;
 			case "IncDecStmt": {
+				this._markIndexLvalues([stmt.expr]);
 				if (stmt.expr.kind === "IndexExpr" && stmt.expr._mapValueType) {
 					const zero = this.zeroValueForType(stmt.expr._mapValueType);
 					const wrapField = this._namedWrapperField(
@@ -94,12 +95,12 @@ export const statementGenMethods = {
 						this._hasCallExpr(stmt.expr.index)
 					) {
 						this.line(
-							`((__m, __k) => { __m[__k] = (__m[__k] ?? ${zero}) ${op} 1; })(${base}, ${idx});`,
+							`((__m, __k) => { ${this._genMapWriteBase("__m")}[__k] = (__m[__k] ?? ${zero}) ${op} 1; })(${base}, ${idx});`,
 							srcLine,
 						);
 					} else {
 						this.line(
-							`${base}[${idx}] = (${base}[${idx}] ?? ${zero}) ${op} 1;`,
+							`${this._genMapWriteBase(base)}[${idx}] = (${base}[${idx}] ?? ${zero}) ${op} 1;`,
 							srcLine,
 						);
 					}
@@ -290,6 +291,7 @@ export const statementGenMethods = {
 	},
 
 	_genAssignStmt(stmt) {
+		this._markIndexLvalues(stmt.lhs);
 		if (this._isComplexCompoundAssign(stmt)) {
 			this._genComplexCompoundAssign(stmt);
 			return;
@@ -312,7 +314,6 @@ export const statementGenMethods = {
 				? this.genValueExpr(e)
 				: this.genExpr(e),
 		);
-		this._markIndexLvalues(stmt.lhs);
 		const lhs = stmt.lhs.map((e) => this._genAssignLhsExpr(e));
 		const pairs = lhs.map((l, i) => ({ l, r: rhs[i] ?? rhs[0] }));
 		const active = pairs.filter((p) => p.l !== "_");
@@ -339,11 +340,11 @@ export const statementGenMethods = {
 					this._hasCallExpr(stmt.lhs[0].index)
 				) {
 					this.line(
-						`((__m, __k) => { __m[__k] = (__m[__k] ?? ${zero}) ${binOp} (${active[0].r}); })(${base}, ${idx});`,
+						`((__m, __k) => { ${this._genMapWriteBase("__m")}[__k] = (__m[__k] ?? ${zero}) ${binOp} (${active[0].r}); })(${base}, ${idx});`,
 					);
 				} else {
 					this.line(
-						`${base}[${idx}] = (${base}[${idx}] ?? ${zero}) ${binOp} (${active[0].r});`,
+						`${this._genMapWriteBase(base)}[${idx}] = (${base}[${idx}] ?? ${zero}) ${binOp} (${active[0].r});`,
 					);
 				}
 				return;
@@ -416,7 +417,7 @@ export const statementGenMethods = {
 				? `${this.genExpr(l.expr)}.${wrapField}`
 				: this.genExpr(l.expr);
 			const idx = this.genExpr(l.index);
-			lhsTarget = `${base}[${idx}]`;
+			lhsTarget = `${this._genMapWriteBase(base)}[${idx}]`;
 			lhsRead = `(${base}[${idx}] ?? { re: 0, im: 0 })`;
 		} else {
 			lhsTarget = l.name ?? this.genExpr(l);
@@ -1086,11 +1087,13 @@ export const statementGenMethods = {
 				return `let ${lhs} = ${rhs}`;
 			}
 			case "AssignStmt": {
+				this._markIndexLvalues(stmt.lhs);
 				const rhs = stmt.rhs.map((e) => this.genExpr(e)).join(", ");
 				const lhs = stmt.lhs.map((e) => this.genExpr(e)).join(", ");
 				return `${lhs} ${stmt.op} ${rhs}`;
 			}
 			case "IncDecStmt":
+				this._markIndexLvalues([stmt.expr]);
 				return `${this.genExpr(stmt.expr)}${stmt.op}`;
 			case "ExprStmt":
 				return this.genExpr(stmt.expr);

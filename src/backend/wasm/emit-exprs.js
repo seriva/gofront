@@ -468,6 +468,15 @@ export class ExprsEmitter {
 			this._emitCopyIfValue(value, f.goType, f.wType);
 	}
 
+	// With a pointer on the stack, branches to the function's `nil` block
+	// (_openNilBlock) when it is null.  Outside one, the access traps.
+	_emitNilCheck(goType) {
+		if (goType?.kind !== "pointer") return;
+		const depth = this.resolveBranchDepthToRole("nil");
+		if (depth == null) return;
+		this.pushInstruction({ op: "br_on_null", depth });
+	}
+
 	emitSelectorExpr(expr) {
 		const structInfo = this._resolveStructInfo(expr.expr);
 		if (!structInfo) {
@@ -482,6 +491,7 @@ export class ExprsEmitter {
 
 		const baseWType = this.toWasmType(expr.expr._type);
 		this.emitExpr(expr.expr, baseWType);
+		this._emitNilCheck(expr.expr._type);
 
 		for (let i = 0; i < path.length; i++) {
 			const step = path[i];
@@ -1000,53 +1010,95 @@ export class ExprsEmitter {
 		return this.toWasmType(expr._type) === "i32";
 	}
 
+	// Panics with the generic out-of-range message (shared buffers, SIMD
+	// loads) when the condition on the stack is true.
 	_emitBoundsBranch() {
-		const oobDepth = this.resolveBranchDepthToOob();
-		if (oobDepth !== null) {
-			this.pushInstruction({ op: "br_if", depth: oobDepth });
-		} else {
-			this.pushInstruction({ op: "if", blockType: "void" });
-			this.pushInstruction({
-				op: "call",
-				funcIndex: this.mod.getBoundsPanicFuncIndex(),
-			});
-			this.pushInstruction("unreachable");
-			this.pushInstruction("end");
-		}
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getBoundsPanicFuncIndex(),
+		});
+		this.pushInstruction("unreachable");
+		this.pushInstruction("end");
+	}
+
+	// If the condition on the stack is true, panics with Go's index message;
+	// `pushIdx64` and `emitLen` push the i64 index and the i32 length.
+	_emitIndexPanicIf(pushIdx64, emitLen) {
+		this.pushInstruction({ op: "if", blockType: "void" });
+		pushIdx64();
+		emitLen();
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getIndexPanicFuncIndex(),
+		});
+		this.pushInstruction("unreachable");
+		this.pushInstruction("end");
+	}
+
+	// Registers an index-check site and pushes its id: a failing check
+	// carries the index and this id to the handler, which re-emits `emitLen`
+	// for that site (its temps still hold the operand at the branch).
+	_pushOobSite(emitLen) {
+		this.oobSites ??= [];
+		this.oobSites.push(emitLen);
+		this.pushInstruction({ op: "i32.const", value: this.oobSites.length - 1 });
 	}
 
 	// Pushes the bounds-checked i32 index onto the stack. `emitLen` must push
-	// the i32 length. Constant and plain-local indexes are re-emitted instead
-	// of spilled; everything else goes through one temp.
+	// the i32 length.  Inside a function body a failing check branches to the
+	// shared handler (`_closeOobBlocks`) with the index and a site id, and the
+	// handler reports Go's message; elsewhere the check panics inline.
 	_emitCheckedIndex(indexNode, emitLen) {
-		const simple =
-			(indexNode.kind === "BasicLit" && indexNode.litKind === "INT") ||
-			(indexNode.kind === "Ident" && this.resolveLocal(indexNode.name));
+		const depth32 = this.resolveBranchDepthToOob(32);
 		if (this._isI32IndexExpr(indexNode)) {
+			const idx = this.acquireTemp("i32");
 			this.emitExpr(indexNode, "i32");
-			let tmp = null;
-			if (simple) {
-				this.emitExpr(indexNode, "i32");
+			this.pushInstruction({ op: "local.tee", index: idx });
+			if (depth32 !== null) {
+				this._pushOobSite(emitLen);
+				this.pushInstruction({ op: "local.get", index: idx });
+				emitLen();
+				this.pushInstruction("i32.ge_u");
+				this.pushInstruction({ op: "br_if", depth: depth32 });
+				this.pushInstruction("drop");
 			} else {
-				tmp = this.acquireTemp("i32");
-				this.pushInstruction({ op: "local.tee", index: tmp });
-				this.pushInstruction({ op: "local.get", index: tmp });
+				this.pushInstruction({ op: "local.get", index: idx });
+				emitLen();
+				this.pushInstruction("i32.ge_u");
+				this._emitIndexPanicIf(() => {
+					this.pushInstruction({ op: "local.get", index: idx });
+					this.pushInstruction("i64.extend_i32_s");
+				}, emitLen);
 			}
-			emitLen();
-			this.pushInstruction("i32.ge_u");
-			this._emitBoundsBranch();
-			if (tmp !== null) this.releaseTemp(tmp, "i32");
+			this.releaseTemp(idx, "i32");
 			return;
 		}
 
 		const idx64 = this.acquireTemp("i64");
 		this.emitExpr(indexNode, "i64");
 		this.pushInstruction({ op: "local.tee", index: idx64 });
-		emitLen();
-		this.pushInstruction("i64.extend_i32_u");
-		this.pushInstruction("i64.ge_u");
-		this._emitBoundsBranch();
-		this.pushInstruction({ op: "local.get", index: idx64 });
+		if (depth32 !== null) {
+			this._pushOobSite(emitLen);
+			this.pushInstruction({ op: "local.get", index: idx64 });
+			emitLen();
+			this.pushInstruction("i64.extend_i32_u");
+			this.pushInstruction("i64.ge_u");
+			this.pushInstruction({
+				op: "br_if",
+				depth: this.resolveBranchDepthToOob(64),
+			});
+			this.pushInstruction("drop");
+		} else {
+			emitLen();
+			this.pushInstruction("i64.extend_i32_u");
+			this.pushInstruction("i64.ge_u");
+			this._emitIndexPanicIf(
+				() => this.pushInstruction({ op: "local.get", index: idx64 }),
+				emitLen,
+			);
+			this.pushInstruction({ op: "local.get", index: idx64 });
+		}
 		this.pushInstruction("i32.wrap_i64");
 		this.releaseTemp(idx64, "i64");
 	}
