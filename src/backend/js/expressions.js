@@ -280,6 +280,14 @@ const INT_TYPE_NAMES = new Set([
 	"rune",
 ]);
 
+// Zero values with a shared factory in HELPER_GENERICS.
+const SHARED_ZERO_FACTORIES = {
+	null: "__zn",
+	0: "__z0",
+	'""': "__zs",
+	false: "__zf",
+};
+
 // Zero-value JS literals for basic Go types.
 const ZERO_FOR_BASIC = {
 	int: "0",
@@ -333,6 +341,11 @@ const BUILTIN_GEN = {
 	},
 	new: (s, e) => {
 		const arg = e.args[0];
+		const base = e._type?.kind === "pointer" ? e._type.base : null;
+		if (base?.kind === "named" && base.typeArgs?.length) {
+			const inst = s._genericStructNew(base.name, base.typeArgs);
+			if (inst) return inst;
+		}
 		const typeName = arg.name ?? s.getTypeName(arg);
 		if (typeName && s.structNames.has(typeName)) {
 			return `new ${typeName}()`;
@@ -472,6 +485,7 @@ export const expressionGenMethods = {
 			case "AwaitExpr":
 				return `await ${this.genExpr(expr.expr)}`;
 			case "InstantiationExpr":
+				return this._genInstantiationExpr(expr);
 			case "RangeExpr":
 				return this.genExpr(expr.expr);
 			default: {
@@ -929,6 +943,15 @@ export const expressionGenMethods = {
 		return `${target.cls}.$${sel.field}(${args ? `${target.recv}, ${args}` : target.recv})`;
 	},
 
+	// `F[int]` as a value is a function that passes F its zero-value factories.
+	_genInstantiationExpr(expr) {
+		const fn = this.genExpr(expr.expr);
+		if (!expr._genericFnType || expr._callee) return fn;
+		const { typeParams } = expr._genericFnType;
+		const zeros = this._typeArgFactories(typeParams, expr._typeArgs);
+		return `((...a) => ${fn}(${zeros.join(", ")}, ...a))`;
+	},
+
 	_genCallArgs(expr) {
 		if (expr._multiForward) return `...${this.genExpr(expr.args[0])}`;
 		return expr.args
@@ -1196,7 +1219,23 @@ export const expressionGenMethods = {
 		expr.func._callee = true;
 		const rawFn = this.genExpr(expr.func);
 		const fn = expr.func.kind === "FuncLit" ? `(${rawFn})` : rawFn;
-		return `${fn}(${this._genCallArgs(expr)})`;
+		const args = this._genCallArgs(expr);
+		const zeros = this._genericCallZeros(expr);
+		if (!zeros) return `${fn}(${args})`;
+		return `${fn}(${args ? `${zeros}, ${args}` : zeros})`;
+	},
+
+	// The leading zero-value factories of a call to a generic function
+	// (`F(x)` with inferred, `F[int](x)` with explicit type arguments), or null.
+	_genericCallZeros(expr) {
+		const site = expr._genericFnType
+			? expr
+			: expr.func.kind === "InstantiationExpr" && expr.func._genericFnType
+				? expr.func
+				: null;
+		if (!site) return null;
+		const { typeParams } = site._genericFnType;
+		return this._typeArgFactories(typeParams, site._typeArgs).join(", ");
 	},
 
 	_isErrorInterfaceType(t) {
@@ -1451,7 +1490,7 @@ export const expressionGenMethods = {
 				zero = this.zeroValueForTypeNode(elemNode);
 			}
 			// If zero value is a constructor call, use a factory function so each element is distinct
-			if (zero.startsWith("new ")) {
+			if (zero.startsWith("new ") || zero.includes("$z_")) {
 				return `Array.from({length: ${n}}, () => ${zero})`;
 			}
 			return `new Array(${n}).fill(${zero})`;
@@ -1588,6 +1627,8 @@ export const expressionGenMethods = {
 
 	_genPositionalStructLit(typeName, expr) {
 		const fields = this.getStructFields(typeName);
+		const generic = this._genGenericStructLit(fields, expr);
+		if (generic) return generic;
 		if (!fields || fields.length === 0 || expr.elems.length === 0) {
 			return `new ${typeName}()`;
 		}
@@ -1603,6 +1644,22 @@ export const expressionGenMethods = {
 				? `new ${typeName}()`
 				: `new ${typeName}(${values.slice(0, maxExplicitIdx + 1).join(", ")})`;
 		return inst;
+	},
+
+	// `Box[int]{…}`: every field is passed (unset ones as undefined, so the
+	// constructor starts them at their zero value) followed by the factories.
+	_genGenericStructLit(fields, expr) {
+		const t = expr._type;
+		if (t?.kind !== "named" || !t.typeArgs?.length) return null;
+		const values = fields.map(() => undefined);
+		if (expr.elems.length > 0) {
+			const hasPositional = expr.elems.some(
+				(e) => e._positionalField || e.kind !== "KeyValueExpr",
+			);
+			if (hasPositional) this._fillPositionalStructElems(fields, expr, values);
+			else this._fillKeyedStructElems(fields, expr, values);
+		}
+		return this._genericStructNew(t.name, t.typeArgs, values);
 	},
 
 	// The array type of a literal (through named types), or null.
@@ -1846,6 +1903,65 @@ export const expressionGenMethods = {
 		return false;
 	},
 
+	// ── Generic zero values (see HELPER_GENERICS) ─────────────────
+
+	// The zero-value factory bound to type parameter `name` in the code being
+	// emitted (`$z_T`), or null outside a generic body.
+	_typeParamZeroFactory(name) {
+		return this._typeParamZeros?.get(name) ?? null;
+	},
+
+	// Runs `fn` with type parameters `names` bound to the factories `$z_<name>`.
+	_withTypeParamZeros(names, fn) {
+		const prev = this._typeParamZeros;
+		this._typeParamZeros = names
+			? new Map(names.map((n) => [n, `$z_${n}`]))
+			: null;
+		try {
+			return fn();
+		} finally {
+			this._typeParamZeros = prev;
+		}
+	},
+
+	// A factory `() => zero` for type `t`: what a generic callee receives for
+	// one of its type parameters.
+	zeroFactoryFor(t) {
+		if (t?.kind === "typeParam") {
+			const bound = this._typeParamZeroFactory(t.name);
+			if (bound) return bound;
+		}
+		this.useHelper("generics");
+		const zero = this.zeroValueForType(t);
+		return Object.hasOwn(SHARED_ZERO_FACTORIES, zero)
+			? SHARED_ZERO_FACTORIES[zero]
+			: `() => (${zero})`;
+	},
+
+	// One factory per type parameter of generic function or type `generic`.
+	_typeArgFactories(typeParams, typeArgs) {
+		return typeParams.map((_, i) => this.zeroFactoryFor(typeArgs?.[i]));
+	},
+
+	// `new Box(args…, [factories])` for an instance of generic struct `name`
+	// with `typeArgs`; fields without an argument start at their zero value.
+	// Null when `name` is not a generic struct.
+	_genericStructNew(name, typeArgs, args = []) {
+		const generic = this.checker?.types.get(name);
+		const st = generic?.underlying;
+		const cls = this._dequalify(name);
+		if (!generic?._generic || generic._generic.isAlias) return null;
+		if (st?.kind !== "struct") return null;
+		if (!this.structNames.has(cls)) return null;
+		const tps = generic._generic.typeParams;
+		const vals = Array.from(
+			{ length: st.fields.size },
+			(_, i) => args[i] ?? "undefined",
+		);
+		vals.push(`[${this._typeArgFactories(tps, typeArgs).join(", ")}]`);
+		return `new ${cls}(${vals.join(", ")})`;
+	},
+
 	// Returns the JS zero-value literal for a basic type name, or null if not a basic type.
 	_zeroForBasicName(name) {
 		return Object.hasOwn(ZERO_FOR_BASIC, name) ? ZERO_FOR_BASIC[name] : null;
@@ -1875,6 +1991,8 @@ export const expressionGenMethods = {
 		if (!typeNode) return "null";
 		switch (typeNode.kind) {
 			case "TypeName": {
+				const factory = this._typeParamZeroFactory(typeNode.name);
+				if (factory) return `${factory}()`;
 				const basic = this._zeroForBasicName(typeNode.name);
 				if (basic !== null) return basic;
 				return this._zeroForNamedType(typeNode.name);
@@ -1909,6 +2027,14 @@ export const expressionGenMethods = {
 					.join(", ");
 				return `{ ${fields} }`;
 			}
+			case "GenericTypeName":
+			case "InstantiationExpr":
+				return (
+					this._genericStructNew(
+						this.getTypeName(typeNode),
+						typeNode._typeArgs,
+					) ?? "null"
+				);
 			default:
 				return "null";
 		}
@@ -1925,7 +2051,7 @@ export const expressionGenMethods = {
 	_arrayZero(n, ctor, elemZero) {
 		if (ctor) return `new ${ctor}(${n})`;
 		if (n === 0) return "[]";
-		if (/^(new |\{|\[|Array)/.test(elemZero))
+		if (/^(new |\{|\[|Array)|\$z_/.test(elemZero))
 			return `Array.from({ length: ${n} }, () => (${elemZero}))`;
 		return `new Array(${n}).fill(${elemZero})`;
 	},
@@ -1953,7 +2079,14 @@ export const expressionGenMethods = {
 				return `{ ${fields} }`;
 			}
 			case "named":
-				return this._zeroForNamedType(t.name);
+				return (
+					this._genericStructNew(t.name, t.typeArgs) ??
+					this._zeroForNamedType(t.name)
+				);
+			case "typeParam": {
+				const factory = this._typeParamZeroFactory(t.name);
+				return factory ? `${factory}()` : "null";
+			}
 			default:
 				return "null";
 		}
@@ -1980,6 +2113,8 @@ export const expressionGenMethods = {
 	zeroValueForExpr(expr) {
 		// For new(T) calls
 		if (expr.kind === "Ident") {
+			const factory = this._typeParamZeroFactory(expr.name);
+			if (factory) return `${factory}()`;
 			switch (expr.name) {
 				case "int":
 				case "float64":

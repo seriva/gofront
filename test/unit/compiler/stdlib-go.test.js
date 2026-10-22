@@ -91,21 +91,12 @@ func Run() string { return cmp.Or("x", "y") + cmp.Or("z") + "!" }
 	assertEqual(out, "xz!");
 });
 
-// JS output erases generics, so the zero value of T is null there and
-// cmp.Or cannot skip "" or 0 in JS yet (plan Task 0.18, JS generic zero
-// values).  WASM is monomorphised and already matches Go.
-test("cmp.Or skips zero values in wasm", async () => {
-	const res = await compileHybridProject({
-		"lib/lib.go": `//gofront:target wasm
-package lib
-
-import "cmp"
+test("cmp.Or skips zero values", async () => {
+	const out = await stdParity(`import "cmp"
 
 func Run() string { return cmp.Or("", "", "x", "y") + cmp.Or("", "") + "!" }
-`,
-		"main.go": `package main\n\nimport "./lib"\n\nfunc main() { println(lib.Run()) }\n`,
-	});
-	assertEqual(res.lines.join("\n"), "x!");
+`);
+	assertEqual(out, "x!");
 });
 
 section("Go-source stdlib: overlays (errors.ErrUnsupported)");

@@ -3,9 +3,12 @@
 
 import {
 	assertEqual,
+	assertErrorContains,
+	compile,
 	compileHybrid,
 	compileHybridProject,
 	compileWasm,
+	runJs,
 	runWasm,
 	section,
 	test,
@@ -616,4 +619,354 @@ func main() { println(lib.Run()) }
 `,
 	});
 	assertEqual(res.lines.join("\n"), "42");
+});
+
+section("Generic zero values and type-parameter operators (Task 0.18)");
+
+// Builds \`lib\` once as \`both\` (JS code path) and once as \`wasm\`, prints
+// \`lib.Run()\` from a JS root and throws when the two backends disagree.
+async function libParity(libBody) {
+	const run = async (target) => {
+		const res = await compileHybridProject({
+			"lib/lib.go": `//gofront:target ${target}\npackage lib\n\n${libBody}`,
+			"main.go": `package main\n\nimport "./lib"\n\nfunc main() { println(lib.Run()) }\n`,
+		});
+		return res.lines.join("\n");
+	};
+	const js = await run("both");
+	const wasm = await run("wasm");
+	if (js !== wasm)
+		throw new Error(
+			`Output mismatch:\n  JS:   ${JSON.stringify(js)}\n  WASM: ${JSON.stringify(wasm)}`,
+		);
+	return js;
+}
+
+test('cmp.Or("", "x") and cmp.Or(0, 3) skip zero values', async () => {
+	const out = await libParity(`import (
+	"cmp"
+	"fmt"
+)
+
+func Run() string {
+	return fmt.Sprintf("%s|%d|%q|%d", cmp.Or("", "x"), cmp.Or(0, 3), cmp.Or("", ""), cmp.Or(0, 0))
+}
+`);
+	assertEqual(out, 'x|3|""|0');
+});
+
+const STACK = `
+type Stack[T any] struct {
+	items []T
+}
+
+func (s *Stack[T]) Push(v T) { s.items = append(s.items, v) }
+
+func (s *Stack[T]) Pop() (T, bool) {
+	var zero T
+	if len(s.items) == 0 {
+		return zero, false
+	}
+	v := s.items[len(s.items)-1]
+	s.items = s.items[:len(s.items)-1]
+	return v, true
+}
+`;
+
+test("Stack[int].Pop on an empty stack returns 0", () => {
+	const src = `
+package main
+${STACK}
+func Main() int {
+	s := &Stack[int]{}
+	s.Push(4)
+	a, _ := s.Pop()
+	b, ok := s.Pop()
+	var t Stack[string]
+	c, _ := t.Pop()
+	if ok || c != "" {
+		return -1
+	}
+	return a*10 + b
+}
+`;
+	const { wasmRes } = compileHybrid(src).run("Main");
+	assertEqual(Number(wasmRes), 40);
+});
+
+test("Stack[int].Pop through an interface returns 0", () => {
+	const src = `
+package main
+
+import "fmt"
+${STACK}
+
+type IntPopper interface {
+	Pop() (int, bool)
+}
+
+func Main() {
+	var p IntPopper = &Stack[int]{}
+	v, ok := p.Pop()
+	fmt.Println(v, ok)
+}
+`;
+	const { output } = compileHybrid(src).run("Main");
+	assertEqual(output, "0 false");
+});
+
+test("Abs[T Number](x T) T using -x", () => {
+	const src = `
+package main
+
+import "fmt"
+
+type Number interface {
+	~int | ~int64 | ~float64
+}
+
+func Abs[T Number](x T) T {
+	if x < 0 {
+		return -x
+	}
+	return +x
+}
+
+func Main() {
+	fmt.Println(Abs(-3), Abs(2), Abs(int64(-5)), Abs(-1.5))
+}
+`;
+	const { output } = compileHybrid(src).run("Main");
+	assertEqual(output, "3 2 5 1.5");
+});
+
+test("^x on an integer type parameter", () => {
+	const src = `
+package main
+
+type Signed interface {
+	~int | ~int32
+}
+
+func Flip[T Signed](x T) T { return ^x }
+
+func Main() int {
+	return Flip(5) + int(Flip(int32(-1)))
+}
+`;
+	const { wasmRes } = compileHybrid(src).run("Main");
+	assertEqual(Number(wasmRes), -6);
+});
+
+test("[2]T zero value in a generic body", () => {
+	const src = `
+package main
+
+import "fmt"
+
+type Point struct {
+	X, Y int
+}
+
+func Pair[T any]() [2]T {
+	var a [2]T
+	return a
+}
+
+func Main() {
+	p := Pair[Point]()
+	p[0].X = 5
+	fmt.Println(p[0].X, p[1].X, Pair[bool]()[0], Pair[float64]()[1])
+}
+`;
+	const { output } = compileHybrid(src).run("Main");
+	assertEqual(output, "5 0 false 0");
+});
+
+// JS only: WASM monomorphisation does not substitute T in \`new(T)\` and drops
+// named results when it copies a generic body (both fail to compile there).
+test("*new(T), named results and recovered results are zero in JS", () => {
+	const { js, errors } = compile(
+		`
+package main
+
+import "fmt"
+
+type Point struct {
+	X, Y int
+}
+
+func NewZero[T any]() T { return *new(T) }
+
+func Named[T any]() (r T, ok bool) { return }
+
+func Recovered[T any]() T {
+	defer func() { recover() }()
+	panic("boom")
+}
+
+func main() {
+	a, _ := Named[float64]()
+	b, ok := Named[Point]()
+	fmt.Println(NewZero[int](), NewZero[string]() == "", NewZero[Point]().X, a, b.X, ok, Recovered[int](), Recovered[bool]())
+}
+`,
+		{ strict: true },
+	);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "0 true 0 0 0 false 0 false");
+});
+
+test("generic body forwards its type parameter's zero value", () => {
+	const src = `
+package main
+
+import "fmt"
+
+func Zero[T any]() T {
+	var z T
+	return z
+}
+
+func Wrap[T any]() T { return Zero[T]() }
+
+func Apply(f func() int) int { return f() }
+
+func Main() {
+	fmt.Println(Wrap[int](), Apply(Zero[int]), len(Wrap[string]()), Wrap[bool]())
+}
+`;
+	const { output } = compileHybrid(src).run("Main");
+	assertEqual(output, "0 0 0 false");
+});
+
+test("generic struct fields of type T start at T's zero value", () => {
+	const src = `
+package main
+
+import "fmt"
+
+type Box[T any] struct {
+	V T
+	N int
+}
+
+func (b Box[T]) Get() T { return b.V }
+
+func Main() {
+	var a Box[int]
+	b := Box[int]{N: 2}
+	c := &Box[string]{}
+	fmt.Println(a.V, b.Get(), b.N, c.Get() == "", len(c.V))
+}
+`;
+	const { output } = compileHybrid(src).run("Main");
+	assertEqual(output, "0 0 2 true 0");
+});
+
+test("unary - on a non-numeric type parameter is rejected", () => {
+	const { errors } = compile(`
+package main
+
+func Neg[T ~string](x T) T { return -x }
+`);
+	assertErrorContains(errors, "- requires numeric");
+});
+
+test("unary ^ on a float type parameter is rejected", () => {
+	const { errors } = compile(`
+package main
+
+type Float interface {
+	~float32 | ~float64
+}
+
+func Flip[T Float](x T) T { return ^x }
+`);
+	assertErrorContains(errors, "^ requires integer");
+});
+
+test("unary ^, - and + on a type parameter whose constraint embeds a type set", () => {
+	const src = `
+package main
+
+import "fmt"
+
+type Integer interface{ ~int | ~int64 }
+
+type Num2 interface{ Integer }
+
+type Num3 interface {
+	Integer
+	String() string
+}
+
+type MyInt int
+
+func (m MyInt) String() string { return "m" }
+
+func B[T Num2](x T) T { return ^x }
+
+func E[T Num3](x T) T { return ^x }
+
+func G[T interface{ Integer }](x T) T { return ^x }
+
+func N[T Num2](x T) T { return -x }
+
+func P[T Num2](x T) T { return +x }
+
+func Main() {
+	fmt.Println(B(2), int(E(MyInt(3))), G(int64(4)), N(7), P(8))
+}
+`;
+	const { output } = compileHybrid(src).run("Main");
+	assertEqual(output, "-3 -4 -5 -7 8");
+});
+
+test("unary operators on type parameters reject constraints outside their type set", () => {
+	const cases = [
+		["func F[T ~int | ~string](x T) T { return -x }", "- requires numeric"],
+		["func F[T ~float64 | ~int](x T) T { return ^x }", "^ requires integer"],
+		["func F[T any](x T) T { return +x }", "+ requires numeric"],
+		["func F[T comparable](x T) T { return ^x }", "^ requires integer"],
+		[
+			"type Mixed interface{ ~int | ~string }\ntype Wrap interface{ Mixed }\nfunc F[T Wrap](x T) T { return -x }",
+			"- requires numeric",
+		],
+	];
+	for (const [decl, msg] of cases) {
+		const { errors } = compile(`package main\n\n${decl}\n`);
+		assertErrorContains(errors, msg);
+	}
+});
+
+// JS only: WASM does not support partial explicit instantiation (pre-existing).
+test("partial explicit instantiation infers the remaining type arguments in JS", () => {
+	const { js, errors } = compile(
+		`
+package main
+
+import "fmt"
+
+func Two[A, B any](b B) (A, B) {
+	var a A
+	var bb B
+	return a, bb
+}
+
+func Conv[U, T any](x T) U {
+	var u U
+	return u
+}
+
+func main() {
+	a, b := Two[int](true)
+	fmt.Println(a, b)
+	fmt.Println(Conv[int]("a"), Conv[string](1) == "")
+}
+`,
+		{ strict: true },
+	);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "0 false\n0 true");
 });
