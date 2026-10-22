@@ -398,9 +398,14 @@ export const expressionCheckMethods = {
 		}
 		const ft = this.fieldType(baseType, expr.field, expr);
 		if (ft?.kind === "func") {
-			let base = baseType.kind === "named" ? baseType.underlying : baseType;
+			// `p.M` on a pointer is a method value too.
+			const recvT =
+				baseType.kind === "pointer"
+					? (this.resolveType(baseType.base) ?? baseType.base)
+					: baseType;
+			let base = recvT?.kind === "named" ? recvT.underlying : recvT;
 			base = this.resolveType(base);
-			if (this._isStructOrNamedMethod(baseType, base, expr.field))
+			if (recvT && this._isStructOrNamedMethod(recvT, base, expr.field))
 				expr._isMethodValue = true;
 		}
 		if (

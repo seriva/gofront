@@ -855,7 +855,13 @@ export const expressionGenMethods = {
 		if (expr.expr._type?.kind === "pointer" && expr.field !== "value")
 			return this._genPointerSelectorField(expr, base);
 		const sel = `${base}.${this._jsMemberName(expr)}`;
-		if (expr._isMethodValue && !expr._callee) return `${sel}.bind(${base})`;
+		if (expr._isMethodValue && !expr._callee) {
+			// A value receiver is copied when the method value is evaluated.
+			const t = expr.expr._type;
+			if (!expr._type?._ptrRecv && this._aggregateBase(t))
+				return `((__r) => __r.${this._jsMemberName(expr)}.bind(__r))(${this._cloneJs(t, base)})`;
+			return `${sel}.bind(${base})`;
+		}
 		return sel;
 	},
 
