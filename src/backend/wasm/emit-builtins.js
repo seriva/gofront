@@ -9,6 +9,7 @@ import {
 	isComplex64,
 	isMapType,
 	isNonEmptyInterface,
+	isScalarType,
 	isSigned,
 	isSliceType,
 	isStringType,
@@ -1167,7 +1168,7 @@ export class BuiltinsEmitter {
 			if (targetFuncIdx !== null) {
 				const recvWType = targetParamTypes[0] ?? null;
 				const recvGoType = this.mod.getFuncParamGoTypes(methodName)[0] ?? null;
-				this.emitExpr(func.expr, recvWType);
+				this.emitExpr(this._ptrRecvOperand(func), recvWType);
 				this._emitCopyIfValue(func.expr, recvGoType, recvWType);
 				const paramGoTypes = this.mod.getFuncParamGoTypes(methodName);
 				for (let i = 0; i < args.length; i++) {
@@ -1181,6 +1182,20 @@ export class BuiltinsEmitter {
 			}
 		}
 		return false;
+	}
+
+	// `x.M()` with a pointer receiver on a named scalar value passes `&x`
+	// (the typechecker boxed `x`).
+	_ptrRecvOperand(func) {
+		const t = func.expr._type;
+		if (!func._type?._ptrRecv || t?.kind !== "named") return func.expr;
+		if (!isScalarType(t, this.mod.checker, this.mod)) return func.expr;
+		return {
+			kind: "UnaryExpr",
+			op: "&",
+			operand: func.expr,
+			_type: { kind: "pointer", base: t },
+		};
 	}
 
 	_emitStdlibReceiverMethod(

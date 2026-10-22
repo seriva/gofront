@@ -776,6 +776,14 @@ export function compositeLitIndices(elems) {
 	return out;
 }
 
+// Highest element index of an array or slice literal (-1 when empty).  A
+// loop, not `Math.max(...)`: spreading a huge literal overflows the stack.
+export function compositeLitMaxIndex(elems) {
+	let max = -1;
+	for (const i of compositeLitIndices(elems)) if (i > max) max = i;
+	return max;
+}
+
 export function typedArrayConstructorForElem(elemType) {
 	if (!elemType) return null;
 	const name = elemType.kind === "basic" ? elemType.name : null;

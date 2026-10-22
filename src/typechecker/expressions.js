@@ -7,7 +7,7 @@ import {
 	BROWSER_GLOBALS,
 	COMPLEX64,
 	COMPLEX128,
-	compositeLitIndices,
+	compositeLitMaxIndex,
 	ERROR,
 	FLOAT32,
 	FLOAT64,
@@ -361,6 +361,16 @@ export const expressionCheckMethods = {
 		return Boolean(generic?.methods?.get(field)?._ptrRecv);
 	},
 
+	// `x.M` or `x.M()` with a pointer receiver on a named scalar local takes
+	// `&x`, so `x` must be boxed like an explicit `&x`.
+	_markPtrRecvAddress(expr, base, ft, scope) {
+		if (expr.expr.kind !== "Ident" || !ft._ptrRecv) return;
+		if (base?.kind !== "basic") return;
+		expr.expr._addressTaken = true;
+		const sym = scope.lookup(expr.expr.name);
+		if (sym) sym._addressTaken = true;
+	},
+
 	_checkSelectorExpr(expr, scope) {
 		expr.expr._typeRefOk = true;
 		const baseType = this.checkExpr(expr.expr, scope);
@@ -410,6 +420,7 @@ export const expressionCheckMethods = {
 				// `p.M` with a value receiver binds a copy of `*p`.
 				if (baseType.kind === "pointer")
 					expr._derefRecv = !this._methodExprPtrRecv(recvT, ft, expr.field);
+				else this._markPtrRecvAddress(expr, base, ft, scope);
 			}
 		}
 		if (
@@ -1487,5 +1498,5 @@ function constKeyText(e) {
 }
 
 function computeMaxIndex(elems) {
-	return Math.max(-1, ...compositeLitIndices(elems));
+	return compositeLitMaxIndex(elems);
 }

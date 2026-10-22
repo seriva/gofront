@@ -5,8 +5,10 @@
 import {
 	assert,
 	assertEqual,
+	assertValidWasm,
 	compile,
 	compileHybrid,
+	compileWasm,
 	runJs,
 	section,
 	test,
@@ -1153,6 +1155,51 @@ parity(
 	3131,
 );
 
+parity(
+	"element store before a parallel array read sees the old array",
+	`	a := [2]int{1, 2}
+	var b [2]int
+	a[0], b = 9, a
+	return a[0]*10 + b[0]`,
+	91,
+);
+
+function mainCopies(src) {
+	const res = compileHybrid(src, { emitWat: true });
+	const start = res.wat.indexOf('(export "Main")');
+	const main = res.wat.slice(start, res.wat.indexOf("\n  (func", start));
+	return { res, copies: (main.match(/array\.copy/g) ?? []).length };
+}
+
+test("plain array swap copies each array once", () => {
+	const { res, copies } = mainCopies(`
+package main
+
+func Main() int {
+	a := [2]int{1, 2}
+	b := [2]int{3, 4}
+	a, b = b, a
+	return a[0]*10 + b[0]
+}
+`);
+	assertEqual(res.run("Main").wasmRes, 31n);
+	assertEqual(copies, 2);
+});
+
+test("slice element array swap copies each array once", () => {
+	const { res, copies } = mainCopies(`
+package main
+
+func Main() int {
+	s := [][2]int{{1, 2}, {3, 4}}
+	s[0], s[1] = s[1], s[0]
+	return s[0][0]*10 + s[1][0]
+}
+`);
+	assertEqual(res.run("Main").wasmRes, 31n);
+	assertEqual(copies, 2);
+});
+
 test("JS compile of a 200000-element slice literal", () => {
 	const elems = Array.from({ length: 200000 }, (_, i) => String(i % 7)).join(
 		",",
@@ -1169,4 +1216,39 @@ func Main() int {
 	const { js, errors } = compile(src);
 	assertEqual(errors.length, 0);
 	assert(js.length > 0, "emitted JS");
+});
+
+test("WASM compile of a 200000-element slice literal", () => {
+	const elems = Array.from({ length: 200000 }, (_, i) => String(i % 7)).join(
+		",",
+	);
+	const src = `
+package main
+
+var big = []int{${elems}}
+
+func Main() int {
+	return len(big)
+}
+`;
+	const { wasm, errors } = compileWasm(src);
+	assertEqual(errors?.length ?? 0, 0);
+	assertValidWasm(wasm);
+});
+
+test("type check of a 200000-element [...]int literal", () => {
+	const elems = Array.from({ length: 200000 }, (_, i) => String(i % 7)).join(
+		",",
+	);
+	const src = `
+package main
+
+var big = [...]int{${elems}}
+
+func Main() int {
+	return len(big)
+}
+`;
+	const { errors } = compile(src);
+	assertEqual(errors.length, 0);
 });

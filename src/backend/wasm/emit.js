@@ -1222,7 +1222,7 @@ export class FunctionEmitter {
 	// a value type at all.
 	_emitCopyIfValue(node, goType, wType) {
 		if (goType?.kind !== "pointer" && isArrayType(goType, this.mod.checker)) {
-			if (node.kind === "CompositeLit") return;
+			if (node.kind === "CompositeLit" || node._freshArray) return;
 			if (node.kind === "CallExpr" && !node._isTypeConversion) return;
 			this.emitCopyArray(goType);
 			return;
