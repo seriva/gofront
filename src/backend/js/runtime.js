@@ -19,10 +19,11 @@ export const HELPER_LEN = `var __len = __len || function(a) {
 // (generic code).  `__reslice` is `x = x[lo:hi]`: within `len(x)` a plain
 // array is copied instead (a Proxy is much slower to index, and the old
 // value of `x` is usually dead), see docs/go-compatibility.md.
-// The copy keeps the capacity of the old value: `__rcap` maps it to
-// `{b, o, c}` (backing array, offset, capacity), and a slice or `append`
-// beyond the copy's length writes the copy back into `b` first and continues
-// with a view over `b`.  `__mkslice` is `make([]T, n, cap)`.
+// The copy keeps the capacity of the old value: its `__rcap` symbol property
+// (shared by every compiled module) is `{b, o, c, s, so}` (backing array,
+// offset, capacity, snapshot of the copy and its offset in `s`); a slice or `append` beyond the copy's length writes
+// the elements that changed since the snapshot back into `b` first and
+// continues with a view over `b`.  `__mkslice` is `make([]T, n, cap)`.
 // `__sv` is its own helper ("sv") so range loops can unwrap a view without
 // pulling in the rest.
 export const HELPER_SV = `var __sv = __sv || Symbol.for("gofront.sliceView");`;
@@ -32,7 +33,7 @@ var __SV = __SV || class extends Array {
   static get [Symbol.species]() { return Array; }
   [Symbol.for("nodejs.util.inspect.custom")]() { return Array.from(this); }
 };
-var __rcap = __rcap || (globalThis[Symbol.for("gofront.resliceCap")] ??= new WeakMap());
+var __rcap = __rcap || Symbol.for("gofront.resliceCap");
 var __svh = __svh || {
   get(t, k) {
     if (typeof k === "string") {
@@ -93,8 +94,8 @@ var __svh = __svh || {
     return Reflect.getOwnPropertyDescriptor(t, k);
   },
 };
-var __mkview = __mkview || function(b, o, n, c) {
-  if (o === 0 && n === b.length && c === n) return b;
+var __mkview = __mkview || function(b, o, n, c, f) {
+  if (o === 0 && n === b.length && c === n && !f) return b;
   if (c === 0) return [];
   const t = new __SV();
   t.b = b; t.o = o; t.n = n; t.c = c;
@@ -105,12 +106,21 @@ var __cap = __cap || function(a) {
   const s = a[__sv];
   if (s !== undefined) return s.c;
   if (ArrayBuffer.isView(a)) return __tcap.get(a) ?? a.length;
-  return __rcap.u ? (__rcap.get(a)?.c ?? a.length) : a.length;
+  return a[__rcap]?.c ?? a.length;
+};
+// Write back only the elements of a __reslice copy that changed since it was
+// made (e.s from e.so is its snapshot; NaN counts as unchanged), so writes
+// made meanwhile through other slices of the backing array are kept.
+var __rcput = __rcput || function(e, a, from, to) {
+  const s = e.s, so = e.so;
+  for (let i = from; i < to; i++) {
+    const v = a[i], w = s[so + i];
+    if (v !== w && (v === v || w === w)) { e.b[e.o + i] = v; s[so + i] = v; }
+  }
 };
 var __rcflush = __rcflush || function(a) {
-  const e = __rcap.u ? __rcap.get(a) : undefined;
-  if (e === undefined) return undefined;
-  for (let i = 0; i < a.length; i++) e.b[e.o + i] = a[i];
+  const e = a[__rcap];
+  if (e !== undefined) __rcput(e, a, 0, a.length);
   return e;
 };
 var __slice = __slice || function(a, lo, hi, max) {
@@ -124,10 +134,11 @@ var __slice = __slice || function(a, lo, hi, max) {
   if (!(lo >= 0 && lo <= hi && hi <= max && max <= c)) throw new Error("runtime error: slice bounds out of range");
   if (a == null) return a;
   if (s !== undefined) return __mkview(s.b, s.o + lo, hi - lo, max - lo);
-  if (max > n && Array.isArray(a)) {
+  if (c > n && Array.isArray(a)) {
     // a is a __reslice copy (only those have cap > len): reach past its
-    // length through the backing array, else stay on the copy.
-    if (hi <= n && mx === undefined) max = n;
+    // length or capacity through the backing array, else stay on the copy
+    // (an explicit max needs a view: the copy itself keeps the old cap).
+    if (hi <= n && (mx === undefined || mx <= n)) return __mkview(a, lo, hi - lo, Math.min(max, n) - lo, mx !== undefined);
     else { const e = __rcflush(a); return __mkview(e.b, e.o + lo, hi - lo, max - lo); }
   }
   if (ArrayBuffer.isView(a)) {
@@ -143,11 +154,17 @@ var __reslice = __reslice || function(a, lo, hi) {
     if (hi === undefined) hi = n;
     if (lo >= 0 && lo <= hi && hi <= n) {
       if (lo === 0 && hi === n) return a;
-      const e = __rcflush(a);
-      const b = e === undefined ? a : e.b, o = e === undefined ? lo : e.o + lo;
-      const c = (e === undefined ? n : e.c) - lo;
+      const e = a[__rcap];
       const r = a.slice(lo, hi);
-      if (c > r.length) { __rcap.u = true; __rcap.set(r, { b, o, c }); }
+      if (e === undefined) {
+        if (n - lo > r.length) r[__rcap] = { b: a, o: lo, c: n - lo, s: a.slice(lo, hi), so: 0 };
+        return r;
+      }
+      // A copy of a copy: write back the changed elements it drops and share
+      // the snapshot, so a pop costs no more than the copy itself.
+      if (lo > 0) __rcput(e, a, 0, lo);
+      __rcput(e, a, hi, n);
+      if (e.c - lo > r.length) r[__rcap] = { b: e.b, o: e.o + lo, c: e.c - lo, s: e.s, so: e.so + lo };
       return r;
     }
   }
@@ -177,8 +194,8 @@ export const HELPER_APPEND = `var __append = __append || function(a, ...b) {
     for (let i = 0; i < b.length; i++) s.b[s.o + s.n + i] = b[i];
     return __mkview(s.b, s.o, s.n + b.length, s.c);
   }
-  if (__rcap.u && s === undefined && a) {
-    const e = __rcap.get(a);
+  if (s === undefined && a) {
+    const e = a[__rcap];
     if (e !== undefined && a.length + b.length <= e.c) {
       __rcflush(a);
       for (let i = 0; i < b.length; i++) e.b[e.o + a.length + i] = b[i];
