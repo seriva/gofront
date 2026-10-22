@@ -777,6 +777,36 @@ func main() { x := C{}; console.log((*x).Get()) }`);
 	assertErrorContains(errors, "cannot dereference non-pointer type C");
 });
 
+test("a type in value position is an error", () => {
+	const decls = `type C struct { n int }
+type Box[T any] struct { v T }
+func f(p *C) int { return p.n }
+func g(b Box[int]) int { return b.v }`;
+	for (const body of [
+		"return f(*C)",
+		"return g(Box[int])",
+		"x := *C; _ = x; return 0",
+		"x := (*C); _ = x; return 0",
+		"x := Box[int]; _ = x; return 0",
+	]) {
+		const { errors } = compile(`package main
+${decls}
+func Main() int { ${body} }`);
+		assertErrorContains(errors, "is not an expression");
+	}
+});
+
+test("T.M on a pointer-receiver method is an error", () => {
+	const { errors } = compile(`package main
+type C struct { n int }
+func (c *C) Inc() { c.n++ }
+func Main() int { c := C{}; f := C.Inc; f(c); return c.n }`);
+	assertErrorContains(
+		errors,
+		"invalid method expression C.Inc (needs pointer receiver (*C).Inc)",
+	);
+});
+
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);

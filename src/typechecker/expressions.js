@@ -213,7 +213,7 @@ export const expressionCheckMethods = {
 				// A type in expression position: monomorphisation rewrites
 				// `Box[int]` in `(*Box[int]).Set` to the TypeName `Box$int`.
 				expr._isTypeRef = true;
-				return this.resolveTypeNode(expr, scope);
+				return this._typeRefOperand(expr, this.resolveTypeNode(expr, scope));
 			default: {
 				const m = CHECK_EXPR_DELEGATE[expr.kind];
 				if (m) return this[m](expr, scope);
@@ -221,6 +221,13 @@ export const expressionCheckMethods = {
 			}
 		}
 		return ANY;
+	},
+
+	// A type ref (`*T`, `Box[int]`) is a value only as the base of a method
+	// expression (`(*T).M`), a conversion callee or the operand of `*`.
+	_typeRefOperand(expr, t) {
+		if (expr._typeRefOk) return t;
+		return this.err(`${typeStr(t)} (type) is not an expression`, expr);
 	},
 
 	_checkDeref(ot, expr) {
@@ -253,6 +260,7 @@ export const expressionCheckMethods = {
 	},
 
 	_checkUnaryExpr(expr, scope) {
+		if (expr.op === "*") expr.operand._typeRefOk = true;
 		const ot = this.checkExpr(expr.operand, scope);
 		if (expr.op === "!") return this._checkBoolUnaryOp(ot, expr);
 		if (expr.op === "-" || expr.op === "+")
@@ -263,7 +271,7 @@ export const expressionCheckMethods = {
 			// of a method expression, not a dereference.
 			if (expr.operand._isTypeRef) {
 				expr._isTypeRef = true;
-				return { kind: "pointer", base: ot };
+				return this._typeRefOperand(expr, { kind: "pointer", base: ot });
 			}
 			return this._checkDeref(ot, expr);
 		}
@@ -284,6 +292,7 @@ export const expressionCheckMethods = {
 	},
 
 	_checkSelectorExpr(expr, scope) {
+		expr.expr._typeRefOk = true;
 		const baseType = this.checkExpr(expr.expr, scope);
 		if (baseType?._tainted) return TAINTED_ANY;
 		if (expr.expr._isTypeRef) {
@@ -296,6 +305,13 @@ export const expressionCheckMethods = {
 				base,
 				expr.field,
 			);
+			if (methodType?._ptrRecv && baseType.kind !== "pointer") {
+				const t = typeStr(baseType);
+				return this.err(
+					`invalid method expression ${t}.${expr.field} (needs pointer receiver (*${t}).${expr.field})`,
+					expr,
+				);
+			}
 			if (methodType) {
 				expr._isMethodExpr = true;
 				expr._methodExprRecv = baseType;
@@ -357,7 +373,7 @@ export const expressionCheckMethods = {
 		}
 		const resolved = this.resolveTypeNode(expr, scope);
 		expr._isTypeRef = true;
-		return resolved;
+		return this._typeRefOperand(expr, resolved);
 	},
 
 	_checkIndexExpr(expr, scope) {
@@ -851,6 +867,7 @@ export const expressionCheckMethods = {
 	},
 
 	checkCall(expr, scope) {
+		expr.func._typeRefOk = true;
 		let fnType = this.checkExpr(expr.func, scope);
 		this._checkSharedAllocSite(expr, scope);
 		this._checkBoundaryCallInLoop(expr, scope);
