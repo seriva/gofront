@@ -58,11 +58,16 @@ function methodCall(sel, recvExpr, args, fnType) {
 	};
 }
 
-function forwardingFuncLit(sel) {
+// Each method value's outer literal gets its own receiver name: captures are
+// resolved by name, so two method values of different receiver types in one
+// function must not share `recv$`.
+let recvCounter = 0;
+
+function forwardingFuncLit(sel, recvName = "recv$") {
 	const fnType = sel._type;
 	const [recvType, ...paramTypes] = fnType.params;
 	const params = [
-		{ name: "recv$", type: typeToTypeNode(recvType) },
+		{ name: recvName, type: typeToTypeNode(recvType) },
 		...paramTypes.map((t, i) => ({
 			name: `a$${i}`,
 			type: typeToTypeNode(t),
@@ -74,7 +79,7 @@ function forwardingFuncLit(sel) {
 		if (fnType.variadic && i === paramTypes.length - 1) a._spread = true;
 		return a;
 	});
-	const call = methodCall(sel, ident("recv$", recvType, sel), args, fnType);
+	const call = methodCall(sel, ident(recvName, recvType, sel), args, fnType);
 	const result = fnType.returns?.[0];
 	const stmts = isVoid(result)
 		? [{ kind: "ExprStmt", expr: call }]
@@ -104,12 +109,27 @@ function methodValueLit(sel) {
 			_line: sel._line,
 			_col: sel._col,
 		};
+	} else if (sel._derefRecv && recvType?.kind === "pointer") {
+		// `p.M` with a value receiver binds a copy of `*p` now.
+		recvType = recvType.base;
+		recvArg = {
+			kind: "UnaryExpr",
+			op: "*",
+			operand: sel.expr,
+			_type: recvType,
+			_line: sel._line,
+			_col: sel._col,
+		};
 	}
 	const params = fnType.params ?? [];
-	const inner = forwardingFuncLit({
-		...sel,
-		_type: { ...fnType, params: [recvType, ...params] },
-	});
+	const recvName = `recv$${recvCounter++}`;
+	const inner = forwardingFuncLit(
+		{
+			...sel,
+			_type: { ...fnType, params: [recvType, ...params] },
+		},
+		recvName,
+	);
 	// The receiver is the outer parameter; the inner literal takes the rest.
 	inner.params = inner.params.slice(1);
 	inner._type = fnType;
@@ -118,7 +138,7 @@ function methodValueLit(sel) {
 		kind: "CallExpr",
 		func: {
 			kind: "FuncLit",
-			params: [{ name: "recv$", type: typeToTypeNode(recvType) }],
+			params: [{ name: recvName, type: typeToTypeNode(recvType) }],
 			returnType: typeToTypeNode(fnType),
 			body: {
 				kind: "Block",
@@ -163,6 +183,11 @@ function rewrite(node, isCallee) {
 
 /** Rewrites method expressions in place; true if anything changed. */
 export function desugarMethodExprs(node) {
+	recvCounter = 0;
+	return desugar(node);
+}
+
+function desugar(node) {
 	if (!node || typeof node !== "object") return false;
 	let changed = false;
 	if (Array.isArray(node)) {
@@ -172,7 +197,7 @@ export function desugarMethodExprs(node) {
 				node[i] = r;
 				changed = true;
 			}
-			changed = desugarMethodExprs(node[i]) || changed;
+			changed = desugar(node[i]) || changed;
 		}
 		return changed;
 	}
@@ -183,7 +208,7 @@ export function desugarMethodExprs(node) {
 			node[key] = r;
 			changed = true;
 		}
-		changed = desugarMethodExprs(node[key]) || changed;
+		changed = desugar(node[key]) || changed;
 	}
 	return changed;
 }
