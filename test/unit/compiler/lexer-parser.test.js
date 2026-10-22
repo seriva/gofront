@@ -10,6 +10,7 @@ import {
 	assertEqual,
 	assertThrows,
 	compile,
+	compileHybrid,
 	DtsParser,
 	Lexer,
 	Parser,
@@ -979,6 +980,42 @@ type User struct {
 	assertEqual(fields[3].type.kind, "PointerType");
 	assertEqual(fields[3].type.base.name, "Local");
 	assertEqual(fields[3].tag, null);
+});
+
+section("Result lists with instantiated generic types (Task 0.19d)");
+
+test("parser accepts func mk() (Box[int], *Box[int])", () => {
+	const src = `package main
+func mk() (Box[int], *Box[int]) { return Box[int]{}, nil }
+func named() (a []int, b [2]Box[int]) { return }
+`;
+	const file = new Parser(new Lexer(src).tokenize()).parse();
+	const mk = file.decls[0].returnType;
+	assertEqual(mk.kind, "TupleType");
+	assertEqual(mk.types.length, 2);
+	assertEqual(mk._namedReturns, undefined);
+	assertEqual(mk.types[1].kind, "PointerType");
+	const named = file.decls[1].returnType;
+	assertEqual(named._namedReturns.map((r) => r.name).join(","), "a,b");
+});
+
+test("generic results run on both backends", () => {
+	const res = compileHybrid(`
+package main
+
+type Box[T any] struct{ V T }
+
+func mk() (Box[int], *Box[int]) {
+	return Box[int]{1}, &Box[int]{2}
+}
+
+func Main() int {
+	x, y := mk()
+	return x.V*10 + y.V
+}
+`).run("Main");
+	assertEqual(res.jsRes, 12);
+	assertEqual(res.wasmRes, 12n);
 });
 
 // ── Entry point ───────────────────────────────────────────────

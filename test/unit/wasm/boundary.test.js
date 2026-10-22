@@ -1696,3 +1696,41 @@ func main() {
 	assertEqual(finalPrice, 99.25);
 	assertEqual(res.mod.ReadPrice(), 99.25);
 });
+
+test("exported non-shared vars of a wasm package appear in the facade (Task 0.19d)", async () => {
+	const res = await compileHybridProject(
+		{
+			"cfg/cfg.go": `//gofront:target wasm
+package cfg
+
+type Item struct {
+	Price float64
+}
+
+var Limit = 40
+var Name = "gofront"
+var Ratio float64
+var Default = Item{Price: 2.5}
+var hidden = 2
+
+func init() { Ratio = 0.5 }
+
+func Get() int { return Limit + hidden }
+`,
+			"main.go": `package main
+
+import "./cfg"
+
+func main() {
+	println(cfg.Limit, cfg.Name, cfg.Ratio, cfg.Default.Price, cfg.Get())
+}
+`,
+		},
+		{ exports: ["Limit", "Name", "Ratio", "Default"] },
+	);
+	assertEqual(res.lines[0], "40 gofront 0.5 2.5 42");
+	assertEqual(res.mod.Limit, 40);
+	assertEqual(res.mod.Name, "gofront");
+	assertEqual(res.mod.Ratio, 0.5);
+	assertEqual(res.mod.Default.Price, 2.5);
+});
