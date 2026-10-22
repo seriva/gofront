@@ -265,6 +265,35 @@ test("other indexes keep their checks", () => {
 	assert(boundsChecks("s = xs[0]") > 0);
 });
 
+test("a range value variable or type-switch binding that shadows keeps the checks", () => {
+	// Each body indexes a shadowing xs or i, so the loop proves nothing.
+	const a =
+		"xs := [][]int{{1}, {2}, {3}}; for i, xs := range xs { s += xs[i] }";
+	const b =
+		"for i := range xs { switch xs := other.(type) { case []int: s += xs[i] } }";
+	const c =
+		"for i := range xs { _ = i; switch i := other.(type) { case int: s += xs[i] } }";
+	assert(boundsChecks(a, "") > 0);
+	assert(boundsChecks(b, "xs []int, other any") > 0);
+	assert(boundsChecks(c, "xs []int, other any") > 0);
+	assertEqual(
+		panicMessage(`s := 0; ${a}; _ = s`),
+		"runtime error: index out of range [1] with length 1",
+	);
+	assertEqual(
+		panicMessage(
+			`s := 0; xs := []int{1, 2, 3}; var other any = []int{7}; ${b}; _ = s`,
+		),
+		"runtime error: index out of range [1] with length 1",
+	);
+	assertEqual(
+		panicMessage(
+			`s := 0; xs := []int{1, 2, 3}; var other any = 9; ${c}; _ = s`,
+		),
+		"runtime error: index out of range [9] with length 3",
+	);
+});
+
 test("a package-level slice keeps its checks (only locals are analysed)", () => {
 	const { js, errors } = compile(
 		`package main
