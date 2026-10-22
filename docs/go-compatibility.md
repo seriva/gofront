@@ -93,12 +93,15 @@ exported function, a test harness) must use `Array$`, not `Array`; `Array` there
 the browser's global. Pick a different Go name for exported functions you call from JS.
 
 > [!WARNING]
-> Type declarations are **not** renamed. A type named after a browser global, such as
-> `type Array struct{}`, is emitted as `class Array`, which shadows the global in the
-> bundle's module scope. Generated helpers that call the real global then fail at runtime
-> (for example `Array.isArray is not a function` as soon as the program calls `append`).
-> GoFront does not reject such a declaration, so pick another name for the type
-> (`ArrayData`, `Obj`, …).
+> Type declarations are **not** renamed. A struct type, or a named type with methods, is
+> emitted as a JS class of the same name, and a class named after a JavaScript built-in
+> that generated helpers call (`Array`, `Object`, `Error`, `Map`, `Set`, `Number`,
+> `String`, `Math`, `JSON`, `Promise`, `Date`, the typed-array constructors, …) would
+> shadow it. GoFront therefore rejects such a declaration in `js` and `both` packages with
+> `type Array shadows the JavaScript global Array; rename the type`; pick another name
+> (`ArrayData`, `AppError`, …). Interfaces (`type Number interface{ ~int | ~float64 }`),
+> method-less named types (`type String string`), aliases, DOM names (`type Element struct{…}`)
+> and every type in a `wasm` package emit no conflicting class and are accepted.
 
 ---
 
