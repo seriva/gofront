@@ -328,6 +328,7 @@ export class StmtsEmitter {
 			const baseWType = this.toWasmType(exprGoType);
 
 			this.emitExpr(l.expr, baseWType);
+			this._emitNilCheck(exprGoType);
 			for (let i = 0; i < path.length - 1; i++) {
 				const step = path[i];
 				this.pushInstruction({
@@ -954,6 +955,7 @@ export class StmtsEmitter {
 
 			const baseTmp = this.acquireTemp(baseWType);
 			this.emitExpr(l.expr, baseWType);
+			this._emitNilCheck(l.expr._type);
 			for (let i = 0; i < path.length - 1; i++) {
 				const step = path[i];
 				this.pushInstruction({
@@ -1468,6 +1470,7 @@ export class StmtsEmitter {
 
 			const baseTmp = this.acquireTemp(baseWType);
 			this.emitExpr(expr.expr, baseWType);
+			this._emitNilCheck(expr.expr._type);
 			for (let i = 0; i < path.length - 1; i++) {
 				const step = path[i];
 				this.pushInstruction({

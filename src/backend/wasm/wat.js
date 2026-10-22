@@ -77,11 +77,13 @@ function formatInstruction(inst) {
 		case "loop":
 		case "if": {
 			const bt = inst.blockType ?? inst.resultType;
+			if (typeof bt === "number") return `${op} (type $t${bt})`;
 			const res = bt && bt !== "void" ? ` (result ${formatValType(bt)})` : "";
 			return `${op}${res}`;
 		}
 		case "br":
 		case "br_if":
+		case "br_on_null":
 			return `${op} ${inst.depth ?? inst.index ?? 0}`;
 		case "br_table": {
 			const targets = (inst.targets ?? []).join(" ");

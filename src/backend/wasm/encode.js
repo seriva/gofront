@@ -354,6 +354,7 @@ const OPCODES = {
 	"ref.func": 0xd2,
 	"ref.eq": 0xd3,
 	"ref.as_non_null": 0xd4,
+	br_on_null: 0xd5,
 };
 
 // 0xFC prefixed saturating truncations
@@ -579,6 +580,7 @@ function encodeInstruction(inst) {
 
 			case "br":
 			case "br_if":
+			case "br_on_null":
 				return [byte, ...encodeU32LEB(inst.depth ?? inst.index ?? 0)];
 
 			case "br_table": {

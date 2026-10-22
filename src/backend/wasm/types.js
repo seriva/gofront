@@ -317,10 +317,8 @@ export function toWasmType(goType, checker = null, mod = null) {
 					for (const n of names) rawFields.push({ name: n, goType: f.type });
 				}
 			}
-			if (rawFields.length > 0) {
-				const info = mod.getAnonStructType(rawFields);
-				return { kind: "ref", nullable: true, typeIndex: info.typeIndex };
-			}
+			const info = mod.getAnonStructType(rawFields);
+			return { kind: "ref", nullable: true, typeIndex: info.typeIndex };
 		}
 		return { kind: "ref", nullable: true, heapType: "struct" };
 	}

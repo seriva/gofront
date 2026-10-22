@@ -1,13 +1,7 @@
 // test/unit/wasm/maps.test.js
 // Tests for Phase H4 Task H4.3: Maps & stdlib in WASM and JS-strict parity.
 
-import {
-	assertEqual,
-	assertThrows,
-	compileHybrid,
-	section,
-	test,
-} from "../helpers.js";
+import { assertEqual, compileHybrid, section, test } from "../helpers.js";
 
 section("WASM Maps — Basics & CRUD");
 
@@ -219,14 +213,18 @@ test("Assignment to entry in nil map traps with runtime panic", () => {
 	const src = `
 package main
 
-func Main() {
+func Main() (res string) {
+	defer func() {
+		if r := recover(); r != nil { res = r.(string) }
+	}()
 	var m map[string]int
 	m["key"] = 123
+	return "nopanic"
 }
 `;
-	assertThrows(() => {
-		compileHybrid(src).run("Main");
-	}, "assignment to entry in nil map");
+	// Both backends panic (strict mode in JS) with the same message.
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.wasmRes, "assignment to entry in nil map");
 });
 
 section("WASM Maps — Growth & Rehashing");
