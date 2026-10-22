@@ -1674,20 +1674,37 @@ export const expressionGenMethods = {
 		return t?.kind === "array" && typeof t.size === "number" ? t : null;
 	},
 
-	// Elements of a literal of array type `at`, placed at their (keyed)
-	// indices, with every other slot the element zero value: `[3]int{1}` is
-	// `[1, 0, 0]` and `[5]int{2: 7}` is `[0, 0, 7, 0, 0]`, as in Go.
+	// Elements of a literal of array type `at` (or `{ size, elem }` for a
+	// slice), placed at their (keyed) indices, with every other slot the
+	// element zero value: `[3]int{1}` is `[1, 0, 0]` and `[5]int{2: 7}` is
+	// `[0, 0, 7, 0, 0]`, as in Go.  Keys out of ascending order would
+	// evaluate the elements out of source order, so the values are then
+	// computed first and spread into place.
 	_genArrayLitElems(at, expr) {
 		const values = new Array(at.size).fill(null);
 		const indices = compositeLitIndices(expr.elems);
-		expr.elems.forEach((e, i) => {
-			values[indices[i]] = this.genValueExpr(
-				e.kind === "KeyValueExpr" ? e.value : e,
-			);
+		const src = expr.elems.map((e) =>
+			this.genValueExpr(e.kind === "KeyValueExpr" ? e.value : e),
+		);
+		const ascending = indices.every((v, i) => i === 0 || v > indices[i - 1]);
+		indices.forEach((idx, i) => {
+			values[idx] = ascending ? src[i] : `v$[${i}]`;
 		});
 		for (let i = 0; i < values.length; i++)
 			values[i] ??= this.zeroValueForType(at.elem);
-		return values.join(", ");
+		if (ascending) return values.join(", ");
+		return `...((v$) => [${values.join(", ")}])([${src.join(", ")}])`;
+	},
+
+	// `{ size, elem }` for a slice or array literal (through named types).
+	_litIndexedShape(expr) {
+		const at = this._litArrayType(expr);
+		if (at) return at;
+		let t = expr._type;
+		while (t?.kind === "named") t = t.underlying;
+		if (t?.kind !== "slice") return null;
+		const size = Math.max(-1, ...compositeLitIndices(expr.elems)) + 1;
+		return { size, elem: t.elem };
 	},
 
 	// A large array literal that leaves most slots zero (`[100000]byte{}`,
@@ -1709,7 +1726,7 @@ export const expressionGenMethods = {
 	},
 
 	_genLitElems(expr) {
-		const at = this._litArrayType(expr);
+		const at = this._litIndexedShape(expr);
 		if (at) return this._genArrayLitElems(at, expr);
 		return expr.elems
 			.map((e) => this.genValueExpr(e.kind === "KeyValueExpr" ? e.value : e))
@@ -1826,7 +1843,9 @@ export const expressionGenMethods = {
 		}
 		const hasPositional = expr.elems.some((e) => e._positionalField);
 		const hasKeyed = expr.elems.some((e) => e.kind === "KeyValueExpr");
-		if (hasPositional || hasKeyed) {
+		// `{2: 5}` inside `[2][3]int{…}` is an array, not an object.
+		const indexed = this._litIndexedShape(expr) !== null;
+		if (hasPositional || (hasKeyed && !indexed)) {
 			const fields = expr.elems
 				.map((e) => {
 					if (e._positionalField)

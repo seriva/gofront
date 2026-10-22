@@ -366,6 +366,18 @@ export class StmtsEmitter {
 				localInfo = this.locals.get(l.name);
 			}
 			if (localInfo) {
+				if (localInfo.isBoxed && this._isValueArray(localInfo.goType)) {
+					// Pointers to the array (`&a`) hold its reference: write in place.
+					this._emitArrayStoreInto(localInfo.goType, r, () => {
+						this.pushInstruction({ op: "local.get", index: localInfo.index });
+						this.pushInstruction({
+							op: "struct.get",
+							typeIndex: localInfo.boxInfo.typeIndex,
+							fieldIndex: 0,
+						});
+					});
+					return;
+				}
 				if (localInfo.isBoxed) {
 					this.pushInstruction({ op: "local.get", index: localInfo.index });
 					this.emitExpr(r, localInfo.boxInfo.wType);
@@ -472,11 +484,9 @@ export class StmtsEmitter {
 				baseType?.kind === "pointer" &&
 				isArrayType(baseType.base, this.mod.checker);
 
-			const elemGoType = isSlice
-				? baseType.elem
-				: isPtrToArr
-					? baseType.base.elem
-					: baseType.elem;
+			const elemGoType = this._getArrayElemType(
+				isPtrToArr ? baseType.base : baseType,
+			);
 			const arrInfo = this.mod.getArrayType(elemGoType);
 			const sliceInfo = isSlice ? this.mod.getSliceType(elemGoType) : null;
 
@@ -491,6 +501,27 @@ export class StmtsEmitter {
 			});
 			return;
 		}
+	}
+
+	// Copy the array value `r` into the existing array that `emitDst` pushes,
+	// so every pointer to that array sees the new elements.
+	_emitArrayStoreInto(goType, r, emitDst) {
+		const arrInfo = this.mod.getArrayType(this._getArrayElemType(goType));
+		const wType = { kind: "ref", nullable: true, typeIndex: arrInfo.typeIndex };
+		const dst = this.acquireTemp(wType);
+		emitDst();
+		this.pushInstruction({ op: "local.tee", index: dst });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.emitExpr(r, wType);
+		this._emitCopyIfValue(r, goType, wType);
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.get", index: dst });
+		this.pushInstruction("array.len");
+		this.pushInstruction({
+			op: "array.copy",
+			typeIndex: arrInfo.typeIndex,
+		});
+		this.releaseTemp(dst, wType);
 	}
 
 	_emitStructDerefAssign(operand, r, structInfo) {
@@ -533,6 +564,13 @@ export class StmtsEmitter {
 				: null) ??
 			this._resolveExprGoType(operand);
 		const baseGoType = operandGoType?.base ?? operandGoType;
+		if (this._isValueArray(baseGoType)) {
+			this._emitArrayStoreInto(baseGoType, r, () => {
+				this.emitExpr(operand);
+				this._emitNilCheck(operandGoType);
+			});
+			return;
+		}
 		if (!isScalarType(baseGoType, this.mod.checker, this.mod)) {
 			return;
 		}
@@ -1128,11 +1166,9 @@ export class StmtsEmitter {
 				baseType?.kind === "pointer" &&
 				isArrayType(baseType.base, this.mod.checker);
 
-			const elemGoType = isSlice
-				? baseType.elem
-				: isPtrToArr
-					? baseType.base.elem
-					: baseType.elem;
+			const elemGoType = this._getArrayElemType(
+				isPtrToArr ? baseType.base : baseType,
+			);
 			const arrInfo = this.mod.getArrayType(elemGoType);
 			const sliceInfo = isSlice ? this.mod.getSliceType(elemGoType) : null;
 			const targetType = arrInfo.elemWType;
@@ -1646,11 +1682,9 @@ export class StmtsEmitter {
 				baseType?.kind === "pointer" &&
 				isArrayType(baseType.base, this.mod.checker);
 
-			const elemGoType = isSlice
-				? baseType.elem
-				: isPtrToArr
-					? baseType.base.elem
-					: baseType.elem;
+			const elemGoType = this._getArrayElemType(
+				isPtrToArr ? baseType.base : baseType,
+			);
 			const arrInfo = this.mod.getArrayType(elemGoType);
 			const sliceInfo = isSlice ? this.mod.getSliceType(elemGoType) : null;
 			const targetType = arrInfo.elemWType;

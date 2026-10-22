@@ -26,6 +26,9 @@ import {
 	toWasmType,
 } from "./types.js";
 
+// Engine limit on `array.new_fixed` operands.
+const MAX_NEW_FIXED = 10000;
+
 // An untyped integral float constant (`1e18 + 1`) in an integer context is
 // emitted from its exact integer value.
 function constLitFor(val, targetWasmType) {
@@ -350,33 +353,11 @@ export class ExprsEmitter {
 		}
 
 		if (isSliceType(litType, this.mod.checker)) {
-			const elemType = litType.elem;
+			const elemType = this._getArrayElemType(litType);
 			const sliceInfo = this.mod.getSliceType(elemType);
-			const count = lit.elems?.length ?? 0;
-			if (count === 0) {
-				this.pushInstruction({ op: "i32.const", value: 0 });
-				this.pushInstruction({
-					op: "array.new_default",
-					typeIndex: sliceInfo.arrInfo.typeIndex,
-				});
-				this.pushInstruction({ op: "i32.const", value: 0 }); // offset
-				this.pushInstruction({ op: "i32.const", value: 0 }); // len
-				this.pushInstruction({ op: "i32.const", value: 0 }); // cap
-				this.pushInstruction({
-					op: "struct.new",
-					typeIndex: sliceInfo.typeIndex,
-				});
-				return;
-			}
-			for (const elem of lit.elems) {
-				this.emitExpr(elem, sliceInfo.elemWType);
-				this._emitCopyIfValue(elem, elem._type, sliceInfo.elemWType);
-			}
-			this.pushInstruction({
-				op: "array.new_fixed",
-				typeIndex: sliceInfo.arrInfo.typeIndex,
-				size: count,
-			});
+			const elems = lit.elems ?? [];
+			const count = Math.max(-1, ...compositeLitIndices(elems)) + 1;
+			this._emitArrayLitElems(elems, elemType, sliceInfo.arrInfo, count);
 			this.pushInstruction({ op: "i32.const", value: 0 }); // offset
 			this.pushInstruction({ op: "i32.const", value: count }); // len
 			this.pushInstruction({ op: "i32.const", value: count }); // cap
@@ -388,31 +369,12 @@ export class ExprsEmitter {
 		}
 
 		if (isArrayType(litType, this.mod.checker)) {
-			const elemType = litType.elem;
+			const elemType = this._getArrayElemType(litType);
 			const arrInfo = this.mod.getArrayType(elemType);
 			const elems = lit.elems ?? [];
-			const indices = compositeLitIndices(elems);
-			const count = Math.max(-1, ...indices) + 1;
+			const count = Math.max(-1, ...compositeLitIndices(elems)) + 1;
 			const targetSize = this._getArraySize(litType, count);
-			// Keyed elements (`[5]int{2: 7}`) go to their index; every other
-			// slot is the element zero value.
-			const slots = new Array(targetSize).fill(null);
-			elems.forEach((e, i) => {
-				slots[indices[i]] = e.kind === "KeyValueExpr" ? e.value : e;
-			});
-			for (const elem of slots) {
-				if (!elem) {
-					this.emitZeroValue(elemType, arrInfo.elemWType);
-					continue;
-				}
-				this.emitExpr(elem, arrInfo.elemWType);
-				this._emitCopyIfValue(elem, elem._type, arrInfo.elemWType);
-			}
-			this.pushInstruction({
-				op: "array.new_fixed",
-				typeIndex: arrInfo.typeIndex,
-				size: targetSize,
-			});
+			this._emitArrayLitElems(elems, elemType, arrInfo, targetSize);
 			return;
 		}
 
@@ -459,6 +421,64 @@ export class ExprsEmitter {
 			op: "struct.new",
 			typeIndex: structInfo.typeIndex,
 		});
+	}
+
+	// Pushes a new array of `size` elements built from literal `elems`.
+	// Keyed elements (`{2: 7}`) go to their index; every other slot is the
+	// element zero value.  With ascending keys and at most
+	// MAX_NEW_FIXED elements this is one `array.new_fixed`; otherwise the
+	// array is allocated first and the elements are stored in source order
+	// (Go evaluates them left to right whatever their keys).
+	_emitArrayLitElems(elems, elemType, arrInfo, size) {
+		const indices = compositeLitIndices(elems);
+		const ascending = indices.every((v, i) => i === 0 || v > indices[i - 1]);
+		const value = (e) => (e.kind === "KeyValueExpr" ? e.value : e);
+		const emitElem = (e) => {
+			this.emitExpr(e, arrInfo.elemWType);
+			this._emitCopyIfValue(e, e._type, arrInfo.elemWType);
+		};
+		if (ascending && size <= MAX_NEW_FIXED) {
+			const slots = new Array(size).fill(null);
+			elems.forEach((e, i) => {
+				slots[indices[i]] = value(e);
+			});
+			for (const e of slots) {
+				if (e) emitElem(e);
+				else this.emitZeroValue(elemType, arrInfo.elemWType);
+			}
+			this.pushInstruction({
+				op: "array.new_fixed",
+				typeIndex: arrInfo.typeIndex,
+				size,
+			});
+			return;
+		}
+		const wType = { kind: "ref", nullable: true, typeIndex: arrInfo.typeIndex };
+		const arr = this.acquireTemp(wType);
+		const set = (idx, emit) => {
+			this.pushInstruction({ op: "local.get", index: arr });
+			this.pushInstruction({ op: "i32.const", value: idx });
+			emit();
+			this.pushInstruction({ op: "array.set", typeIndex: arrInfo.typeIndex });
+		};
+		this.pushInstruction({ op: "i32.const", value: size });
+		this.pushInstruction({
+			op: "array.new_default",
+			typeIndex: arrInfo.typeIndex,
+		});
+		this.pushInstruction({ op: "local.set", index: arr });
+		// Numeric zero values are the array default; others are stored.
+		if (typeof arrInfo.elemWType !== "string") {
+			const given = new Set(indices);
+			for (let i = 0; i < size; i++)
+				if (!given.has(i))
+					set(i, () => this.emitZeroValue(elemType, arrInfo.elemWType));
+		}
+		elems.forEach((e, i) => {
+			set(indices[i], () => emitElem(value(e)));
+		});
+		this.pushInstruction({ op: "local.get", index: arr });
+		this.releaseTemp(arr, wType);
 	}
 
 	// A struct literal field initialiser; array values are copied in.
@@ -567,11 +587,9 @@ export class ExprsEmitter {
 			);
 		}
 
-		const elemGoType = isSlice
-			? baseType.elem
-			: isPtrToArr
-				? baseType.base.elem
-				: baseType.elem;
+		const elemGoType = this._getArrayElemType(
+			isPtrToArr ? baseType.base : baseType,
+		);
 		const arrInfo = this.mod.getArrayType(elemGoType);
 		const sliceInfo = isSlice ? this.mod.getSliceType(elemGoType) : null;
 
@@ -665,11 +683,9 @@ export class ExprsEmitter {
 			);
 		}
 
-		const elemGoType = isSlice
-			? baseType.elem
-			: isPtrToArr
-				? baseType.base.elem
-				: baseType.elem;
+		const elemGoType = this._getArrayElemType(
+			isPtrToArr ? baseType.base : baseType,
+		);
 		const arrInfo = this.mod.getArrayType(elemGoType);
 		const sliceInfo = this.mod.getSliceType(elemGoType);
 
@@ -1617,11 +1633,9 @@ export class ExprsEmitter {
 			isArrayType(baseType.base, this.mod.checker);
 		if (!isSlice && !isArr && !isPtrToArr) return false;
 
-		const elemGoType = isSlice
-			? baseType.elem
-			: isPtrToArr
-				? baseType.base.elem
-				: baseType.elem;
+		const elemGoType = this._getArrayElemType(
+			isPtrToArr ? baseType.base : baseType,
+		);
 		if (!elemGoType || !isScalarType(elemGoType, this.mod.checker, this.mod)) {
 			return false;
 		}
@@ -1646,6 +1660,13 @@ export class ExprsEmitter {
 			const loc = this.resolveLocal(operand.name);
 			if (loc?.isBoxed) {
 				this.pushInstruction({ op: "local.get", index: loc.index });
+				// A pointer to an array is the array reference itself.
+				if (this._isValueArray(loc.goType))
+					this.pushInstruction({
+						op: "struct.get",
+						typeIndex: loc.boxInfo.typeIndex,
+						fieldIndex: 0,
+					});
 				return;
 			}
 		}

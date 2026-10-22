@@ -1452,7 +1452,7 @@ export class FunctionEmitter {
 				goType.kind !== "pointer" &&
 				isArrayType(goType, this.mod.checker)
 			) {
-				const elemType = goType.elem;
+				const elemType = this._getArrayElemType(goType);
 				const arrInfo = this.mod.getArrayType(elemType);
 				const size = this._getArraySize(goType);
 				if (
