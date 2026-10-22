@@ -1579,3 +1579,75 @@ test("slice view Proxy contract for JS callers", () => {
 	assert(Array.isArray(a) && a.length === 2 && a[0] === 9 && a[1] === 3);
 	assertEqual(Object.getPrototypeOf(a), Array.prototype);
 });
+
+parity(
+	"reslicing an x = x[:n] copy keeps writes made through other slices",
+	`	a := []int{1, 2, 3, 4}
+	b := a
+	a = a[:3]
+	b[0] = 100
+	a = a[:2]
+	return b[0]`,
+	100,
+);
+
+parity(
+	"extending an x = x[:n] copy keeps writes made through other slices",
+	`	a := []int{1, 2, 3, 4}
+	b := a
+	a = a[:2]
+	b[0] = 100
+	a = a[:4]
+	return a[0]*1000 + b[0]`,
+	100100,
+);
+
+parity(
+	"extending an x = x[:n] copy keeps writes through both slices",
+	`	a := []int{1, 2, 3, 4}
+	b := a
+	a = a[:2]
+	a[1] = 7
+	b[0] = 100
+	b[3] = 5
+	a = a[:4]
+	return a[0]*10000 + a[1]*1000 + b[1]*100 + a[3]*10 + len(a)`,
+	1007754,
+);
+
+parity(
+	"append onto an x = x[:n] copy keeps writes through both slices",
+	`	a := []int{1, 2, 3, 4}
+	b := a
+	a = a[:2]
+	a[0] = 9
+	b[3] = 5
+	a = append(a, 8)
+	return b[0]*1000 + b[2]*100 + b[3]*10 + len(a)`,
+	9853,
+);
+
+parity(
+	"three-index slice of an x = x[:n] copy limits the capacity",
+	`	b := []int{1, 2, 3, 4}
+	x := b
+	x = x[:2]
+	y := x[0:2:2]
+	c := cap(y)
+	y = append(y, 9)
+	return c*10 + b[2]`,
+	23,
+);
+
+parity(
+	"reslicing an x = x[:n] copy again keeps writes to the dropped elements",
+	`	a := []int{1, 2, 3, 4}
+	b := a
+	a = a[:3]
+	a[2] = 7
+	a = a[:2]
+	b[1] = 8
+	a = a[:3]
+	return a[1]*100 + a[2]*10 + b[2]`,
+	877,
+);
