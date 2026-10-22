@@ -697,6 +697,7 @@ func Main() int {
 `;
 	const res = compileHybrid(src).run("Main");
 	assertEqual(res.jsRes, 12);
+	assertEqual(res.wasmRes, 12n);
 });
 
 test("value-receiver method call keeps the loop var a plain local", () => {
@@ -722,3 +723,261 @@ func Main() int {
 		"no per-iteration copy",
 	);
 });
+
+section("WASM scoping and method values (Task 0.19c)");
+
+function parity(name, body, expected, prelude = "") {
+	test(name, () => {
+		const src = `
+package main
+${prelude}
+func Main() int {
+${body}
+}
+`;
+		const res = compileHybrid(src).run("Main");
+		assertEqual(res.jsRes, expected);
+		assertEqual(res.wasmRes, BigInt(expected));
+	});
+}
+
+parity(
+	"inner x := 5 does not write the outer x",
+	`	x := 1
+	if true {
+		x := 5
+		x++
+	}
+	return x`,
+	1,
+);
+
+parity(
+	"inner redeclaration with a different type",
+	`	x := 2
+	{
+		x := "abc"
+		_ = x
+	}
+	for i := 0; i < 2; i++ {
+		x := 10
+		x += i
+	}
+	return x`,
+	2,
+);
+
+test("inner x := x reads the outer x (wasm)", () => {
+	const { wasm, errors } = compileWasm(`
+package main
+
+func Main() int {
+	x := 3
+	y := 0
+	{
+		x := x * 2
+		y = x
+	}
+	return x*100 + y
+}
+`);
+	assertEqual(errors.length, 0);
+	assertEqual(runWasm(wasm).exports.Main(), 306n);
+});
+
+parity(
+	"closure capturing and mutating a range value variable",
+	`	s := 0
+	for _, v := range []int{1, 2, 3} {
+		f := func() { v *= 10 }
+		f()
+		s += v
+	}
+	return s`,
+	60,
+);
+
+parity(
+	"closure capturing and mutating a range key variable",
+	`	s := 0
+	for i := range 3 {
+		inc := func() { i += 100 }
+		inc()
+		s += i
+	}
+	return s`,
+	303,
+);
+
+parity(
+	"method value on a pointer receiver",
+	`	c := &C{1}
+	f := c.Inc
+	f()
+	f()
+	g := c.Get
+	return g()`,
+	3,
+	"type C struct{ N int }\n\nfunc (c *C) Inc() { c.N++ }\n\nfunc (c *C) Get() int { return c.N }",
+);
+
+parity(
+	"method value on an addressable value with a pointer receiver",
+	`	var c C
+	f := c.Inc
+	f()
+	return c.N`,
+	1,
+	"type C struct{ N int }\n\nfunc (c *C) Inc() { c.N++ }",
+);
+
+parity(
+	"method value on a value receiver copies the receiver",
+	`	c := C{4}
+	g := c.Get
+	c.N = 9
+	return g()`,
+	4,
+	"type C struct{ N int }\n\nfunc (c C) Get() int { return c.N }",
+);
+
+parity(
+	"promoted pointer-receiver method on a loop variable",
+	`	var os []Outer
+	for k := 1; k <= 2; k++ {
+		var o Outer
+		o.N = k
+		os = append(os, o)
+	}
+	s := 0
+	for _, o := range os {
+		o.Bump()
+		s = s*10 + o.N
+	}
+	return s*100 + os[0].N*10 + os[1].N`,
+	2312,
+	"type Inner struct{ N int }\n\nfunc (in *Inner) Bump() { in.N++ }\n\ntype Outer struct{ Inner }",
+);
+
+parity(
+	"promoted pointer-receiver method value on a three-clause loop variable",
+	`	s := 0
+	var fs []func()
+	for o := (Outer{}); o.N < 2; o.N++ {
+		fs = append(fs, o.Bump)
+		s += o.N
+	}
+	for _, f := range fs {
+		f()
+	}
+	return s`,
+	1,
+	"type Inner struct{ N int }\n\nfunc (in *Inner) Bump() { in.N++ }\n\ntype Outer struct{ Inner }",
+);
+
+parity(
+	"++ and += on a promoted field",
+	`	var o Outer
+	o.N++
+	o.N += 2
+	return o.N`,
+	3,
+	"type Inner struct{ N int }\n\ntype Outer struct{ Inner }",
+);
+
+section("WASM method values (review fixes)");
+
+parity(
+	"two method values with different receiver types",
+	`	a := A{1}
+	b := &B{"hey"}
+	f := a.Get
+	g := b.Len
+	return f()*10 + g()`,
+	13,
+	"type A struct{ n int }\n\nfunc (a A) Get() int { return a.n }\n\ntype B struct{ s string }\n\nfunc (b *B) Len() int { return len(b.s) }",
+);
+
+parity(
+	"method values on a named array and a named int",
+	`	v := V{1, 2, 3}
+	n := N(4)
+	f := v.Sum
+	g := n.Twice
+	return f()*100 + g()`,
+	608,
+	"type V [3]int\n\nfunc (v V) Sum() int {\n\ts := 0\n\tfor _, x := range v {\n\t\ts += x\n\t}\n\treturn s\n}\n\ntype N int\n\nfunc (n N) Twice() int { return int(n) * 2 }",
+);
+
+parity(
+	"value-receiver method value copies even when &c was taken by another method value",
+	`	c := C{1}
+	inc := c.Inc
+	get := c.Get
+	inc()
+	return get()`,
+	1,
+	"type C struct{ n int }\n\nfunc (c *C) Inc() { c.n++ }\n\nfunc (c C) Get() int { return c.n }",
+);
+
+parity(
+	"method value through a pointer to a value-receiver method copies *p",
+	`	p := &C{10}
+	pg := p.Get
+	p.n = 50
+	return pg()`,
+	10,
+	"type C struct{ n int }\n\nfunc (c C) Get() int { return c.n }",
+);
+
+parity(
+	"method value on a named-array value receiver copies the array",
+	`	v := V{1, 2, 3}
+	f := v.Sum
+	v[0] = 100
+	return f()`,
+	6,
+	"type V [3]int\n\nfunc (v V) Sum() int {\n\ts := 0\n\tfor _, x := range v {\n\t\ts += x\n\t}\n\treturn s\n}",
+);
+
+parity(
+	"pointer-receiver method value on a named int writes through to x",
+	`	x := N(1)
+	g := x.Inc
+	g()
+	g()
+	return int(x)`,
+	3,
+	"type N int\n\nfunc (n *N) Inc() { *n++ }",
+);
+
+parity(
+	"pointer-receiver method value on a named float64 writes through to x",
+	`	x := F(1)
+	g := x.Inc
+	g()
+	g()
+	return int(x)`,
+	4,
+	"type F float64\n\nfunc (f *F) Inc() { *f += 1.5 }",
+);
+
+parity(
+	"direct pointer-receiver call on a named int local",
+	`	x := N(1)
+	x.Inc()
+	x.Inc()
+	return int(x)`,
+	3,
+	"type N int\n\nfunc (n *N) Inc() { *n++ }",
+);
+
+parity(
+	"direct pointer-receiver call on a named float64 local",
+	`	x := F(1)
+	x.Inc()
+	x.Inc()
+	return int(x)`,
+	4,
+	"type F float64\n\nfunc (f *F) Inc() { *f += 1.5 }",
+);

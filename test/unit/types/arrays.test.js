@@ -657,3 +657,16 @@ func main() {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
+
+test("error: duplicate keyed slice index (Task 0.19b)", () => {
+	const errors = keyErrors(`	s := []int{1, 0: 2}
+	_ = s`);
+	assertErrorContains(errors, "duplicate index 0 in array or slice literal");
+});
+
+test("error: non-constant keyed slice index (Task 0.19b)", () => {
+	const errors = keyErrors(`	k := 1
+	s := []int{k: 2}
+	_ = s`);
+	assertErrorContains(errors, "index k must be integer constant");
+});
