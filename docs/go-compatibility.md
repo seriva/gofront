@@ -25,7 +25,7 @@ These features are intentional additions for the JavaScript platform:
 
 | Feature | Reason | Prospect |
 |---|---|---|
-| `goto` | No clean JS translation. Rare in idiomatic Go. | Not planned. |
+| `goto` | No clean JS or WASM translation (neither backend has unstructured control flow). Rare in idiomatic Go. | Not planned. Reported in every target as `goto is not supported; restructure with labeled break/continue`. |
 | Goroutines / channels / `select` | Go's concurrency model has no JS equivalent. A userland scheduler defeats the "no runtime" goal. | Out of scope. |
 | `unsafe`, `reflect`, `cgo` | Require memory model or runtime type metadata that JS cannot provide. | Out of scope. |
 | `time.Sleep` in `wasm`/`both` packages | Go's `time.Sleep` blocks OS threads; in GoFront `time.Sleep` is an async Promise helper for the single-threaded JS event loop. Synchronous WASM cannot block. | Supported in `js` packages via `await time.Sleep(...)`. |

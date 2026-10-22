@@ -78,6 +78,13 @@ export const statementParserMethods = {
 				this.advance();
 				this.semi();
 				return { kind: "BranchStmt", keyword: "fallthrough" };
+			case T.GOTO: {
+				// Parsed so the checker can reject it with a targeted message.
+				this.advance();
+				const label = this.expect(T.IDENT).value;
+				this.semi();
+				return { kind: "BranchStmt", keyword: "goto", label };
+			}
 			case T.GO:
 				return this.err("goroutines are not supported in GoFront");
 			case T.SELECT:

@@ -54,6 +54,7 @@ const KEYWORDS = new Set([
 	"map",
 	"new",
 	"fallthrough",
+	"goto",
 	"defer",
 	"async",
 	"await",
