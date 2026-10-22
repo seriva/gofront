@@ -19,13 +19,20 @@ export const HELPER_LEN = `var __len = __len || function(a) {
 // (generic code).  `__reslice` is `x = x[lo:hi]`: within `len(x)` a plain
 // array is copied instead (a Proxy is much slower to index, and the old
 // value of `x` is usually dead), see docs/go-compatibility.md.
-// `__mkslice` is `make([]T, n, cap)`.
-export const HELPER_SLICE = `var __sv = __sv || Symbol.for("gofront.sliceView");
-var __tcap = __tcap || (globalThis[Symbol.for("gofront.typedCap")] ??= new WeakMap());
+// The copy keeps the capacity of the old value: `__rcap` maps it to
+// `{b, o, c}` (backing array, offset, capacity), and a slice or `append`
+// beyond the copy's length writes the copy back into `b` first and continues
+// with a view over `b`.  `__mkslice` is `make([]T, n, cap)`.
+// `__sv` is its own helper ("sv") so range loops can unwrap a view without
+// pulling in the rest.
+export const HELPER_SV = `var __sv = __sv || Symbol.for("gofront.sliceView");`;
+
+export const HELPER_SLICE = `var __tcap = __tcap || (globalThis[Symbol.for("gofront.typedCap")] ??= new WeakMap());
 var __SV = __SV || class extends Array {
   static get [Symbol.species]() { return Array; }
   [Symbol.for("nodejs.util.inspect.custom")]() { return Array.from(this); }
 };
+var __rcap = __rcap || (globalThis[Symbol.for("gofront.resliceCap")] ??= new WeakMap());
 var __svh = __svh || {
   get(t, k) {
     if (typeof k === "string") {
@@ -51,6 +58,19 @@ var __svh = __svh || {
     }
     return k in t;
   },
+  defineProperty(t, k, d) {
+    if (typeof k === "string") {
+      const ch = k.charCodeAt(0);
+      if (ch >= 48 && ch <= 57) {
+        const i = +k;
+        if (i >= t.n || d.get || d.set || d.configurable === false) return false;
+        if ("value" in d) t.b[t.o + i] = d.value;
+        return true;
+      }
+    }
+    return Reflect.defineProperty(t, k, d);
+  },
+  preventExtensions() { return false; },
   deleteProperty(t, k) {
     if (typeof k === "string" && k.charCodeAt(0) >= 48 && k.charCodeAt(0) <= 57) return true;
     return delete t[k];
@@ -84,18 +104,32 @@ var __cap = __cap || function(a) {
   if (a == null) return 0;
   const s = a[__sv];
   if (s !== undefined) return s.c;
-  return ArrayBuffer.isView(a) ? (__tcap.get(a) ?? a.length) : a.length;
+  if (ArrayBuffer.isView(a)) return __tcap.get(a) ?? a.length;
+  return __rcap.u ? (__rcap.get(a)?.c ?? a.length) : a.length;
+};
+var __rcflush = __rcflush || function(a) {
+  const e = __rcap.u ? __rcap.get(a) : undefined;
+  if (e === undefined) return undefined;
+  for (let i = 0; i < a.length; i++) e.b[e.o + i] = a[i];
+  return e;
 };
 var __slice = __slice || function(a, lo, hi, max) {
   if (typeof a === "string") return a.slice(lo, hi);
   const s = a == null ? undefined : a[__sv];
   const n = s !== undefined ? s.n : a == null ? 0 : a.length;
   const c = s !== undefined ? s.c : __cap(a);
+  const mx = max;
   if (hi === undefined) hi = n;
   if (max === undefined) max = c;
   if (!(lo >= 0 && lo <= hi && hi <= max && max <= c)) throw new Error("runtime error: slice bounds out of range");
   if (a == null) return a;
   if (s !== undefined) return __mkview(s.b, s.o + lo, hi - lo, max - lo);
+  if (max > n && Array.isArray(a)) {
+    // a is a __reslice copy (only those have cap > len): reach past its
+    // length through the backing array, else stay on the copy.
+    if (hi <= n && mx === undefined) max = n;
+    else { const e = __rcflush(a); return __mkview(e.b, e.o + lo, hi - lo, max - lo); }
+  }
   if (ArrayBuffer.isView(a)) {
     const r = hi <= n ? a.subarray(lo, hi) : new a.constructor(a.buffer, a.byteOffset + lo * a.BYTES_PER_ELEMENT, hi - lo);
     if (max - lo > hi - lo) __tcap.set(r, max - lo);
@@ -107,7 +141,15 @@ var __reslice = __reslice || function(a, lo, hi) {
   if (Array.isArray(a) && a[__sv] === undefined) {
     const n = a.length;
     if (hi === undefined) hi = n;
-    if (lo >= 0 && lo <= hi && hi <= n) return lo === 0 && hi === n ? a : a.slice(lo, hi);
+    if (lo >= 0 && lo <= hi && hi <= n) {
+      if (lo === 0 && hi === n) return a;
+      const e = __rcflush(a);
+      const b = e === undefined ? a : e.b, o = e === undefined ? lo : e.o + lo;
+      const c = (e === undefined ? n : e.c) - lo;
+      const r = a.slice(lo, hi);
+      if (c > r.length) { __rcap.u = true; __rcap.set(r, { b, o, c }); }
+      return r;
+    }
   }
   return __slice(a, lo, hi);
 };
@@ -134,6 +176,14 @@ export const HELPER_APPEND = `var __append = __append || function(a, ...b) {
   if (s !== undefined && s.n + b.length <= s.c) {
     for (let i = 0; i < b.length; i++) s.b[s.o + s.n + i] = b[i];
     return __mkview(s.b, s.o, s.n + b.length, s.c);
+  }
+  if (__rcap.u && s === undefined && a) {
+    const e = __rcap.get(a);
+    if (e !== undefined && a.length + b.length <= e.c) {
+      __rcflush(a);
+      for (let i = 0; i < b.length; i++) e.b[e.o + a.length + i] = b[i];
+      return __mkview(e.b, e.o, a.length + b.length, e.c);
+    }
   }
   return a ? [...a, ...b] : b;
 };`;

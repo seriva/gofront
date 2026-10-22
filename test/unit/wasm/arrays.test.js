@@ -3,6 +3,7 @@
 // assignment, call, return, store and load), matching the JS backend.
 
 import { inspect } from "node:util";
+import { HELPER_SLICE, HELPER_SV } from "../../../src/backend/js/runtime.js";
 import {
 	assert,
 	assertEqual,
@@ -1442,6 +1443,64 @@ parity(
 	93,
 );
 
+parity(
+	"x = x[:2]; x = x[:4] keeps the capacity",
+	`	x := []int{1, 2, 3, 4}
+	x = x[:2]
+	x[0] = 9
+	x = x[:4]
+	return x[0]*1000 + x[3]*100 + len(x)*10 + cap(x)`,
+	9444,
+);
+
+parity(
+	"append after x = x[:n] writes into the old store",
+	`	b := []int{1, 2, 3, 4}
+	x := b
+	x = x[:2]
+	x = append(x, 7)
+	return b[2]*100 + len(x)*10 + cap(x)`,
+	734,
+);
+
+parity(
+	"cap after x = x[i:j] counts from the old capacity",
+	`	x := make([]int, 4, 6)
+	x = x[1:3]
+	y := []int{1, 2, 3, 4, 5}
+	y = y[:1]
+	y = y[:0]
+	return cap(x)*100 + cap(y)*10 + len(y)`,
+	550,
+);
+
+parity(
+	"x = x[:n] on a parameter keeps the caller's store",
+	`	a := []int{1, 2, 3, 4}
+	dbl(a, 2)
+	return a[0]*10 + a[1]`,
+	24,
+	`func dbl(xs []int, n int) {
+	xs = xs[:n]
+	for i := range xs {
+		xs[i] *= 2
+	}
+}`,
+);
+
+parity(
+	"range over a view reads the right elements and writes go to the store",
+	`	b := []int{1, 2, 3, 4, 5}
+	v := b[1:4]
+	sum := 0
+	for i, x := range v {
+		sum = sum*10 + x
+		v[i] = x * 2
+	}
+	return sum*1000 + b[1]*100 + b[3]*10 + b[4]`,
+	234485,
+);
+
 test("x = x[:n] within the length copies a plain array in JS (documented)", () => {
 	const { js, errors } = compile(`package main
 func main() {
@@ -1458,7 +1517,7 @@ func main() {
 }`);
 	assertEqual(errors.length, 0);
 	assert(js.includes("x = __reslice(x, 0, 2)"), "self reslice uses __reslice");
-	assertEqual(runJs(js), "1 2 2\n9 3");
+	assertEqual(runJs(js), "1 2 3\n9 3");
 });
 
 test("slice views print their elements", () => {
@@ -1478,4 +1537,45 @@ func main() {
 	};
 	runJs(js, { console });
 	assertEqual(out.join("\n"), "[ 2, 3 ] [] 0 4");
+});
+
+test("range over a plain slice unwraps a view once", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	b := []int{1, 2, 3, 4, 5}
+	s := 0
+	for _, x := range b[1:4] {
+		s += x
+	}
+	for i := range b {
+		s += i
+	}
+	println(s)
+}`);
+	assertEqual(errors.length, 0);
+	assert(js.includes("__v0 = __arr0?.[__sv]"), "range unwraps the view");
+	assertEqual((js.match(/\?\.\[__sv\]/g) ?? []).length, 1);
+	assertEqual(runJs(js), "19");
+});
+
+test("slice view Proxy contract for JS callers", () => {
+	const mk = new Function(`${HELPER_SV}\n${HELPER_SLICE}\nreturn __slice;`)();
+	const b = [1, 2, 3, 4];
+	const v = mk(b, 1, 3);
+	let err = null;
+	try {
+		Object.freeze(v);
+	} catch (e) {
+		err = e;
+	}
+	assert(err instanceof TypeError, "freeze throws a TypeError");
+	Object.defineProperty(v, "0", { value: 9 });
+	assertEqual(b[1], 9);
+	assertEqual(Reflect.defineProperty(v, "1", { get: () => 1 }), false);
+	assertEqual(Reflect.defineProperty(v, "5", { value: 1 }), false);
+	v.push(7);
+	assertEqual(v.length, 2);
+	const a = Array.from(v);
+	assert(Array.isArray(a) && a.length === 2 && a[0] === 9 && a[1] === 3);
+	assertEqual(Object.getPrototypeOf(a), Array.prototype);
 });
