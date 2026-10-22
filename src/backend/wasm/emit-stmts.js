@@ -2,12 +2,14 @@
 // FunctionEmitter mixin: statement emission (decls, assignment, control flow, return).
 
 import { loopVarsCapturedInLoop } from "../../lower/captures.js";
+import { rootIdentName } from "../../lower/ownership.js";
 import {
 	getOrCreateIteratorFuncLit,
 	isIntRangeType,
 	isIteratorRangeFor,
 	isRangeFor,
 } from "../../lower/range.js";
+import { someChild } from "../../lower/walk.js";
 import {
 	getMapKeyValTypes,
 	isArrayType,
@@ -119,9 +121,11 @@ export class StmtsEmitter {
 			return;
 		}
 
+		const rhsVals = this._parallelAssignValues(lhsNodes, rhsNodes, true);
 		for (let i = 0; i < lhsNodes.length; i++) {
-			this._emitDefineSingle(lhsNodes[i], rhsNodes[i]);
+			this._emitDefineSingle(lhsNodes[i], rhsVals[i]);
 		}
+		this._releaseParallelTemps(rhsVals, rhsNodes);
 	}
 
 	_emitDefineSingle(l, r) {
@@ -232,9 +236,94 @@ export class StmtsEmitter {
 			return;
 		}
 
+		const rhsVals = this._parallelAssignValues(lhsNodes, rhsNodes);
 		for (let i = 0; i < lhsNodes.length; i++) {
-			this._emitAssignSingle(lhsNodes[i], rhsNodes[i], op);
+			this._emitAssignSingle(lhsNodes[i], rhsVals[i], op);
 		}
+		this._releaseParallelTemps(rhsVals, rhsNodes);
+	}
+
+	// `x, y = y, x`: Go evaluates every right-hand side before assigning.
+	// When a later value could see an earlier assignment, every value that
+	// is not pure is stored in a temporary first (in source order, so side
+	// effects keep their order).  Pure values stay inline, so `i, n = 0,
+	// len(xs)` is unchanged.  A definition only exposes its redeclared
+	// names: a new name is not visible to the values being assigned to it.
+	_parallelAssignValues(lhsNodes, rhsNodes, define = false) {
+		if (lhsNodes.length < 2 || rhsNodes.length !== lhsNodes.length)
+			return rhsNodes;
+		const roots = new Set(
+			lhsNodes.map((l) => rootIdentName(l)).filter((n) => n && n !== "_"),
+		);
+		const pure = rhsNodes.map((r) => this._independentOf(r, roots));
+		const redecl = lhsNodes.some((l) => l._redecl);
+		const observes = (r, i) =>
+			define ? this._mentions(r, roots) || (redecl && !pure[i]) : !pure[i];
+		if (!rhsNodes.some((r, i) => i > 0 && observes(r, i))) return rhsNodes;
+		return rhsNodes.map((r, i) => {
+			if (pure[i]) return r;
+			const goType = r._type ?? this._resolveExprGoType(r);
+			const wType = this.toWasmType(goType);
+			const name = `__par_tmp_${this.tempCounter++}`;
+			const idx = this.allocLocal(name, wType, goType, true);
+			this.emitExpr(r, wType);
+			this.pushInstruction({ op: "local.set", index: idx });
+			return { kind: "Ident", name, _type: goType, _parTmp: true };
+		});
+	}
+
+	_mentions(node, names) {
+		if (!node || typeof node !== "object") return false;
+		if (node.kind === "Ident" && names.has(node.name)) return true;
+		return someChild(node, (child) => this._mentions(child, names));
+	}
+
+	_releaseParallelTemps(rhsVals, rhsNodes) {
+		if (rhsVals === rhsNodes) return;
+		for (const r of rhsVals) if (r?._parTmp) this.locals.delete(r.name);
+	}
+
+	// True when evaluating `node` cannot observe an assignment to `roots`
+	// (or through a pointer) and has no side effects.
+	_independentOf(node, roots) {
+		if (!node || typeof node !== "object") return true;
+		switch (node.kind) {
+			case "BasicLit":
+				return true;
+			case "Ident":
+				return this._independentIdent(node, roots);
+			case "BinaryExpr":
+				return (
+					this._independentOf(node.left, roots) &&
+					this._independentOf(node.right, roots)
+				);
+			case "UnaryExpr":
+				return (
+					node.op !== "*" &&
+					node.op !== "&" &&
+					this._independentOf(node.operand, roots)
+				);
+			case "CallExpr":
+				return this._isPureLenCall(node, roots);
+			default:
+				return false;
+		}
+	}
+
+	_independentIdent(node, roots) {
+		if (node._const || node.name === "nil") return true;
+		if (roots.has(node.name)) return false;
+		const local = this.resolveLocal(node.name);
+		return !!local && !local.isBoxed;
+	}
+
+	// `len`/`cap` of a pure operand.
+	_isPureLenCall(node, roots) {
+		const fn = node.func;
+		if (fn?.kind !== "Ident" || (fn.name !== "len" && fn.name !== "cap"))
+			return false;
+		if (this.resolveLocal(fn.name) || node.args?.length !== 1) return false;
+		return this._independentOf(node.args[0], roots);
 	}
 
 	_emitAssignToTarget(target, wasmType, goType, emitValue) {
