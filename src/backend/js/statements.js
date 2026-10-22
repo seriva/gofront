@@ -282,8 +282,27 @@ export const statementGenMethods = {
 		}
 	},
 
+	// `x = x[lo:hi]` with the same variable or field chain on both sides:
+	// the old value of `x` is replaced, so `_genSliceExpr` may copy instead
+	// of building a slice view (`__reslice`).
+	_markSelfReslice(stmt) {
+		if (stmt.op !== "=" || stmt.lhs.length !== 1 || stmt.rhs.length !== 1)
+			return;
+		const r = stmt.rhs[0];
+		if (r.kind !== "SliceExpr" || r.max) return;
+		const same = (a, b) =>
+			a.kind === b.kind &&
+			(a.kind === "Ident"
+				? a.name === b.name && a.name !== "_"
+				: a.kind === "SelectorExpr" &&
+					a.field === b.field &&
+					same(a.expr, b.expr));
+		if (same(stmt.lhs[0], r.expr)) r._selfReslice = true;
+	},
+
 	_genAssignStmt(stmt) {
 		this._markIndexLvalues(stmt.lhs);
+		this._markSelfReslice(stmt);
 		if (this._isComplexCompoundAssign(stmt)) {
 			this._genComplexCompoundAssign(stmt);
 			return;

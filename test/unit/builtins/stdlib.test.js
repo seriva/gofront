@@ -1397,6 +1397,33 @@ func main() {
 	assertEqual(runJs(js), "3");
 });
 
+test("slices functions on slice views (Task 0.20)", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	b := []int{9, 1, 2, 2, 3, 4, 9}
+	c := slices.Compact(b[1:6])
+	console.log(len(c), c[0], c[3], b[2], b[3])
+	e := []int{9, 1, 2, 3, 4, 9}
+	d := slices.Delete(e[1:5], 1, 2)
+	console.log(len(d), d[1], e[2])
+	f := []int{9, 1, 2, 3, 9}
+	g := slices.DeleteFunc(f[1:4], func(n int) bool { return n == 2 })
+	console.log(len(g), g[1], f[2])
+	h := []int{9, 1, 2}
+	k := slices.Insert(h[1:3], 1, 7)
+	console.log(len(k), k[1], k[2])
+	q := []int{9, 1, 2}
+	r := slices.Replace(q[1:3], 0, 1, 5, 6)
+	console.log(len(r), r[0], r[2])
+	s := []int{9, 3, 1, 2, 0}
+	slices.Sort(s[1:4])
+	slices.Reverse(s[3:])
+	console.log(s[1], s[2], s[3], s[4])
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "4 1 4 2 3\n3 3 3\n2 3 3\n3 7 2\n3 5 2\n1 2 0 3");
+});
+
 // ═════════════════════════════════════════════════════════════
 // maps package
 // ═════════════════════════════════════════════════════════════

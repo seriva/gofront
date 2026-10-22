@@ -2,6 +2,7 @@
 // Tests for Task 0.8a: fixed-size arrays are values in WASM (copy on every
 // assignment, call, return, store and load), matching the JS backend.
 
+import { inspect } from "node:util";
 import {
 	assert,
 	assertEqual,
@@ -1251,4 +1252,230 @@ func Main() int {
 `;
 	const { errors } = compile(src);
 	assertEqual(errors.length, 0);
+});
+
+section("Slice views share the backing store (Task 0.20)");
+
+parity(
+	"p[:2] and p[:] of a pointer to an array alias the array",
+	`	v := [3]int{1, 2, 3}
+	p := &v
+	q := p[:2]
+	q[0] = 9
+	r := p[:]
+	r[1] = 8
+	return v[0]*10 + v[1]`,
+	98,
+);
+
+parity(
+	"b[i:] aliases the slice in both directions",
+	`	b := []int{1, 2, 3}
+	s := b[1:]
+	s[0] = 9
+	b[2] = 7
+	return b[1]*10 + s[1]`,
+	97,
+);
+
+parity(
+	"b[:n] aliases the slice",
+	`	b := []int{1, 2, 3}
+	s := b[:2]
+	s[1] = 9
+	return b[1]*10 + len(s)`,
+	92,
+);
+
+parity(
+	"b[i:j] of a view aliases the original",
+	`	b := []int{1, 2, 3, 4}
+	s := b[1:3]
+	t := s[1:]
+	t[0] = 5
+	return b[2]*100 + len(t)*10 + cap(t)`,
+	512,
+);
+
+parity(
+	"a[i:j] of an array aliases the array",
+	`	a := [4]int{1, 2, 3, 4}
+	s := a[1:3]
+	s[1] = 9
+	a[1] = 7
+	return a[2]*10 + s[0]`,
+	97,
+);
+
+parity(
+	"cap of partial slices",
+	`	b := []int{1, 2, 3, 4}
+	return cap(b[1:])*1000 + cap(b[:1])*100 + cap(b[1:2])*10 + cap(b[0:1:2])`,
+	3432,
+);
+
+parity(
+	"append within capacity writes into the shared store",
+	`	b := []int{1, 2, 3}
+	s := b[:1]
+	s = append(s, 9)
+	s[0] = 5
+	return b[0]*100 + b[1]*10 + len(s)`,
+	592,
+);
+
+parity(
+	"append beyond capacity reallocates",
+	`	b := []int{1, 2, 3}
+	s := b[1:]
+	s = append(s, 4)
+	s[0] = 9
+	return b[1]*10 + len(s)`,
+	23,
+);
+
+parity(
+	"three-index slice limits capacity for append",
+	`	b := []int{1, 2, 3}
+	s := b[0:1:1]
+	s = append(s, 9)
+	return b[1]*10 + cap(b[0:1:2])`,
+	22,
+);
+
+parity(
+	"reslicing up to capacity extends a view",
+	`	b := []int{1, 2, 3}
+	s := b[:1]
+	t := s[:3]
+	t[2] = 9
+	return b[2]*10 + len(t)`,
+	93,
+);
+
+parity(
+	"range, copy and append(spread) over views",
+	`	b := []int{1, 2, 3, 4}
+	sum := 0
+	for _, x := range b[1:3] {
+		sum += x
+	}
+	n := copy(b[2:], []int{8, 9, 10})
+	c := append([]int{}, b[1:]...)
+	return sum*1000 + n*100 + c[1]*10 + len(c)`,
+	5283,
+);
+
+parity(
+	"byte slice views share and append within capacity",
+	`	b := []byte{1, 2, 3}
+	s := b[:1]
+	s = append(s, 9)
+	t := b[1:]
+	t[1] = 7
+	return int(b[1])*100 + int(b[2])*10 + cap(s)`,
+	973,
+);
+
+parity(
+	"byte array views alias the array",
+	`	a := [3]byte{1, 2, 3}
+	s := a[1:]
+	s[0] = 9
+	return int(a[1])*10 + len(s)`,
+	92,
+);
+
+parity(
+	"struct slice views alias elements",
+	`	ps := []P{{1}, {2}, {3}}
+	s := ps[1:]
+	s[0] = P{7}
+	s[1].X = 8
+	return ps[1].X*10 + ps[2].X`,
+	78,
+	"type P struct {\n\tX int\n}",
+);
+
+parity(
+	"make with a capacity: reslicing and append share the store",
+	`	m := make([]int, 1, 4)
+	t := m[:3]
+	t[2] = 5
+	m = append(m, 7)
+	return cap(m)*1000 + len(t)*100 + t[1]*10 + m[1]*0 + t[2]`,
+	4375,
+);
+
+parity(
+	"make with a capacity of byte and pointer elements",
+	`	b := make([]byte, 2, 8)
+	u := b[:6]
+	u[5] = 7
+	b = append(b, 1, 2, 3, 4)
+	ps := make([]*int, 1, 3)
+	n := 0
+	if ps[0] == nil {
+		n = 1
+	}
+	return int(b[5])*1000 + cap(b)*100 + cap(ps)*10 + n`,
+	4831,
+);
+
+parity(
+	"x = x[i:j] within the length keeps the elements",
+	`	x := []int{1, 2, 3, 4}
+	x = x[:3]
+	x = x[1:]
+	x[0] = 9
+	return x[0]*100 + x[1]*10 + len(x)`,
+	932,
+);
+
+parity(
+	"x = x[:n] beyond the length reslices up to the capacity",
+	`	b := []int{1, 2, 3}
+	x := b[:1]
+	x = x[:3]
+	x[2] = 9
+	return b[2]*10 + len(x)`,
+	93,
+);
+
+test("x = x[:n] within the length copies a plain array in JS (documented)", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	b := []int{1, 2, 3}
+	x := b
+	x = x[:2]
+	x[0] = 9
+	println(b[0], len(x), cap(x))
+	f := []byte{1, 2, 3}
+	g := f
+	g = g[:2]
+	g[0] = 9
+	println(f[0], cap(g))
+}`);
+	assertEqual(errors.length, 0);
+	assert(js.includes("x = __reslice(x, 0, 2)"), "self reslice uses __reslice");
+	assertEqual(runJs(js), "1 2 2\n9 3");
+});
+
+test("slice views print their elements", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	b := []int{1, 2, 3, 4}
+	println(b[1:3], b[:0], len(b[:0]), cap(b[:0]))
+}`);
+	assertEqual(errors.length, 0);
+	// Node's console shows the elements, not the Proxy's backing fields.
+	const out = [];
+	const console = {
+		log: (...a) =>
+			out.push(
+				a.map((x) => (typeof x === "string" ? x : inspect(x))).join(" "),
+			),
+	};
+	runJs(js, { console });
+	assertEqual(out.join("\n"), "[ 2, 3 ] [] 0 4");
 });
