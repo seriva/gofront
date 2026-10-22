@@ -1660,8 +1660,14 @@ export class ExprsEmitter {
 			const loc = this.resolveLocal(operand.name);
 			if (loc?.isBoxed) {
 				this.pushInstruction({ op: "local.get", index: loc.index });
-				// A pointer to an array is the array reference itself.
-				if (this._isValueArray(loc.goType))
+				// A pointer to an array or struct is its reference itself.
+				const t = loc.goType;
+				if (
+					this._isValueArray(t) ||
+					(t?.kind !== "pointer" &&
+						isStructType(t, this.mod.checker, this.mod) &&
+						!isPointerToStruct(t, this.mod.checker, this.mod))
+				)
 					this.pushInstruction({
 						op: "struct.get",
 						typeIndex: loc.boxInfo.typeIndex,
