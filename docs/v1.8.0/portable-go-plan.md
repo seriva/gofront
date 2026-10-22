@@ -688,31 +688,36 @@ Conventions used in the tasks:
 
 ### Phase 0.7: Type aliases, method expressions, panics & goto
 
-- [ ] **Task 0.14 — Generic type aliases**
+- [x] **Task 0.14 — Generic type aliases**
   - Files: `src/typechecker/declarations.js`, `src/typechecker/resolve.js`
   - Do: `type A[P any] = T[P]` records type parameters on the alias; an instantiation `A[int]` substitutes into the aliased type and resolves to exactly that type (no new named type). Works in composite literals, parameter types and nested generics.
   - Test: `test/unit/types/generics.test.js` — the generic-alias edge cases; the `Unknown struct in CompositeLit` message must not appear.
   - Done when: the four edge cases pass as parity tests.
+  - Landed in `src/typechecker/index.js` (`_collectGenericAlias`; there is no `declarations.js`) and `src/typechecker/resolve.js`. The edge cases also needed anonymous struct literals to work: WASM no longer registers a struct alias (`type P = struct{…}`) as a distinct struct type and gives `struct{}` a real (empty) struct type, and JS emits a full plain object for `struct{…}{…}`, `P{…}` and alias literals (it emitted an array for positional ones and dropped omitted fields).
 
-- [ ] **Task 0.15 — Method expressions on pointer receivers**
+- [x] **Task 0.15 — Method expressions on pointer receivers**
   - Files: `src/parser/expressions.js`, `src/typechecker/expressions.js`
   - Do: `(*T).M` parses as a method expression when `T` names a type; its type is `func(*T, args…) results`. Value form `T.M` keeps working. Both backends reuse the existing method-value lowering.
   - Test: `test/unit/language/expressions.test.js` — the method-expression edge cases as parity tests; the old `cannot dereference non-pointer type` message must not appear for this form.
   - Done when: all pass.
+  - Landed without parser changes: the parser already drops the parentheses, so `(*T).M` is a selector on `*T`, and the checker treats `*T` as a pointer type when `T` names a type (`(*p).M` on a pointer variable still dereferences). `Box[int]` in expression position (`Box[int].Get`, `(*Box[int]).Set`) is resolved as an instantiated type. The WASM backend had no method-value lowering to reuse, so a new desugaring pass (`src/backend/wasm/method-expr.js`, after monomorphisation) turns `(*T).M(p, a)` into `p.M(a)` and any other use into a forwarding func literal. Method values (`x.M`) in WASM stay with Task 0.19c, and pointer-receiver methods on named non-struct types (`func (c *Counter) Inc()`) produce an invalid module in WASM even when called directly, so they are not covered here.
 
-- [ ] **Task 0.16a — Strict-mode runtime panics (checks everywhere)**
+- [x] **Task 0.16a — Strict-mode runtime panics (checks everywhere)**
   - Files: `src/backend/js/expressions.js` (strict index/field access), `src/backend/js/runtime.js` (`__at`, `__set`, `__nilmap`, `__deref` helpers)
   - Do: in strict mode only, index reads/writes on slices, arrays and strings go through bounds-checked helpers that throw `runtime error: index out of range [i] with length n`; a write to a nil map throws `assignment to entry in nil map`; field access through a nil struct pointer throws `runtime error: invalid memory address or nil pointer dereference`. `recover()` returns the same message as WASM.
   - Test: new `test/unit/compiler/strict-panics.test.js` — the runtime-panic edge cases as parity tests; a `js` package is unchanged (no helpers in output).
   - Done when: all parity tests pass (benchmark regression expected, fixed next).
+  - Landed: reads use `__at(xs, i)`; writes, compound assignments, `++`/`--`, `&xs[i]` and string reads use `xs[__ix(xs, i)]` (with `__lv` binding a base that contains a call, so it is evaluated once). The nil-map zero value in strict mode is a frozen `__nilmap` sentinel, so reads, `len`, `range` and `delete` see an empty map and `__mw(m)[k] = v` panics. Field access through a struct pointer goes through the existing `__nilcall` guard. The WASM index panic now has Go's message too (`index out of range [5] with length 3`, `[-1]` alone for a negative index, as Go prints it): each check leaves the index and length in per-function locals and a failing check branches to a shared handler that calls `__index_panic(i64, i32)`.
+  - Nil dereference in WASM: the audit row above assumed WASM already raised a recoverable panic here, but a `struct.get`/`struct.set` on a null reference is a trap, so `recover()` could not catch it and deferred calls did not run. Field reads, writes, compound assignments and `++`/`--` through a pointer now `br_on_null` to a per-function `nil` block (opened next to the index-check blocks) whose handler calls a shared `__nil_panic`, so the panic is a Go panic on both backends. Not covered (outside this task, which is field access only): a whole-value dereference of a nil pointer still traps in WASM (`q := *p` on a nil `*P`), and `*p` on a nil scalar pointer (`*int`) fails with `illegal cast` instead of Go's message. Cost in [Performance and size](#performance-and-size).
 
-- [ ] **Task 0.16b — Index-check elision**
+- [x] **Task 0.16b — Index-check elision**
   - Files: `src/lower/` (new `bounds.js`), `src/backend/js/expressions.js`
   - Do: skip the helper for `for i := range xs` indices, `for i := 0; i < len(xs); i++` with no writes to `i`/`xs` in the body, and constant in-range indices into arrays.
   - Test: `strict-panics.test.js` — assert `__at` is absent from the generated JS for the elidable loops and present when the body reassigns `xs`.
   - Done when: `npm run bench` hybrid raycast is within 3% of v1.7.0. If not, extend the analysis; do not disable the checks.
+  - Landed: `markInBoundsIndexes` (`src/lower/bounds.js`) runs from the JS backend in strict mode and marks `xs[i]` `_inBounds` for the two loop shapes (local `xs`, never assigned, shadowed, address-taken, used as a selector base or written in any closure; `i` written only by the loop; indexes inside func literals in the body are not marked) and for constant indexes into arrays. The hybrid raycast runs in WASM, so the measured cost came from the 0.16a WASM change instead: keeping the length in a local for the panic message cost ~4%. A failing WASM check now branches with the index and a site id (an immediate) to a per-function handler that recomputes that site's length, so the hot path stores nothing extra. Numbers in [Performance and size](#performance-and-size).
 
-- [ ] **Task 0.17 — `goto` diagnostic**
+- [x] **Task 0.17 — `goto` diagnostic**
   - Files: `src/lexer.js` (keyword), `src/parser/statements.js`, `src/typechecker/statements.js`
   - Do: parse `goto L` and labels so the error is targeted: `goto is not supported; restructure with labeled break/continue`.
   - Test: `test/unit/language/control-flow.test.js` — the message appears for `js`, `wasm` and `both` packages; `Undefined: 'goto'` does not.
@@ -1206,6 +1211,8 @@ Each Phase 6 task follows the same Files/Test/Done-when discipline: files are `s
 - Array value semantics (Task 0.8a, copies always inserted, no elision yet), `npm run bench` on the same machine: base `feat/portable-go` hybrid 19,722 rays/s, 85,616 B alloc/run; after 0.8a hybrid 18,727 rays/s (−5.0%), 85,624 B alloc/run; dev `app.wasm` 67.9 KB in both.
 - Clone elision for arrays (Task 0.8b), interleaved `npm run bench --mode hybrid` runs on the same machine: base 18,881 / 17,632 rays/s (84,352 / 84,424 B alloc/run), after 0.8b 18,572 / 18,745 rays/s (84,552 / 84,800 B alloc/run): within noise and inside the 3% budget. The raycast fixture declares no fixed-size arrays in its hot path, so its module size and hot-function instruction counts (`--sizes`) are unchanged, and `example/hybrid` dev `app.wasm`/`app.js` are byte-identical to the base. The 0.8a −5% figure above was run-to-run noise.
 - After the Phase 0.5 review fixes: base 20,760 rays/s (85,832 B alloc/run) against branch 20,946 rays/s (85,512 B alloc/run); `example/hybrid` dev output and raycast `--sizes` are still identical to the base.
+- Strict-mode runtime checks (Tasks 0.16a/0.16b), interleaved `npm run bench --mode hybrid` runs on the same machine: v1.7.0 11,615 / 11,831 / 11,845 / 11,875 rays/s (median 11,838), branch 11,742 / 11,690 / 11,726 / 11,762 rays/s (median 11,734): −0.9%, inside the 3% budget; 2,688 B alloc/run in both. Raycast `app.wasm` grows from 67.9 KB to 74.9 KB (index-check handlers). Intermediate variants measured on the way: Go's message with the length kept in a local 11,424 / 11,449 / 11,311 (−4.2%), length carried as a branch value 11,596 / 11,540 (−2.7%).
+- Recoverable nil dereference in WASM (Task 0.16a follow-up), three interleaved rounds: v1.7.0 11,944 / 11,728 / 11,629 rays/s (median 11,728), before the nil checks 11,569 / 11,614 / 11,206 (median 11,569, −1.4%), with them 11,458 / 11,486 / 11,529 (median 11,486, −2.1%); 2,688 B alloc/run in all three. Raycast `app.wasm` 74.9 KB → 77.3 KB (one `br_on_null` per pointer field access, one `nil` block per function).
 - The WASM JSON benchmark (Task 5.6) is recorded in this document.
 - `npm run bench` must show no regression in the hybrid raycast. Neither the array-copy fix (Task 0.8b) nor the strict-mode runtime checks (Task 0.16b) may slow the scalar raycast by more than 3% each; the analysis is extended until they do not, and the checks are never shipped disabled.
 - `test/e2e/perf/zero-alloc.js` must pass after Tasks 0.5a, 0.5d and 0.7c.

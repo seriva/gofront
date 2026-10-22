@@ -21,6 +21,7 @@ import {
 	computeEmbeddedStubs,
 	hasDirectRecover,
 	isReferenceType,
+	markInBoundsIndexes,
 	normalizeDefers,
 	scanAddressTaken,
 } from "../../lower/index.js";
@@ -34,6 +35,7 @@ import {
 	HELPER_APPEND,
 	HELPER_BASE64,
 	HELPER_BINARY,
+	HELPER_BOUNDS,
 	HELPER_CDIV,
 	HELPER_CMUL,
 	HELPER_CRYPTO_RAND,
@@ -51,6 +53,7 @@ import {
 	HELPER_JSON,
 	HELPER_LEN,
 	HELPER_NIL_CALL,
+	HELPER_NIL_MAP,
 	HELPER_PANIC,
 	HELPER_PATH_CLEAN,
 	HELPER_PATH_ERROR,
@@ -136,6 +139,8 @@ const HELPER_MAP = [
 	["cdiv", HELPER_CDIV],
 	["panicRt", HELPER_PANIC],
 	["nilCall", HELPER_NIL_CALL],
+	["bounds", HELPER_BOUNDS],
+	["nilMap", HELPER_NIL_MAP],
 	["sprintf", HELPER_SPRINTF],
 	["error", HELPER_ERROR],
 	["errorIs", HELPER_ERROR_IS],
@@ -287,6 +292,8 @@ export class CodeGen {
 		// idempotent and owned by the backends: the wasm path runs it via
 		// `lower()`, the JS path here.
 		normalizeDefers(program);
+		// Strict mode: index checks the loop shape proves unnecessary are elided.
+		if (this.strict) markInBoundsIndexes(program);
 		if (program._filename) this._srcFileNames = [program._filename];
 		// Ensure _pkgName is set on all decls (generateAll sets it for
 		// multi-file; for single-file compiles we derive it from the AST).
