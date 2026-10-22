@@ -291,6 +291,17 @@ export const expressionCheckMethods = {
 		return base?.methods?.get(field) ?? baseType.methods?.get(field);
 	},
 
+	// Instantiated generic methods are substituted copies without `_ptrRecv`,
+	// so read it from the generic declaration's method.
+	_methodExprPtrRecv(recvBase, methodType, field) {
+		if (!methodType) return false;
+		if (Object.hasOwn(methodType, "_ptrRecv")) return methodType._ptrRecv;
+		const generic = recvBase.typeArgs
+			? this.types.get(recvBase.name)?._generic
+			: null;
+		return Boolean(generic?.methods?.get(field)?._ptrRecv);
+	},
+
 	_checkSelectorExpr(expr, scope) {
 		expr.expr._typeRefOk = true;
 		const baseType = this.checkExpr(expr.expr, scope);
@@ -305,7 +316,10 @@ export const expressionCheckMethods = {
 				base,
 				expr.field,
 			);
-			if (methodType?._ptrRecv && baseType.kind !== "pointer") {
+			if (
+				this._methodExprPtrRecv(recvBase, methodType, expr.field) &&
+				baseType.kind !== "pointer"
+			) {
 				const t = typeStr(baseType);
 				return this.err(
 					`invalid method expression ${t}.${expr.field} (needs pointer receiver (*${t}).${expr.field})`,
