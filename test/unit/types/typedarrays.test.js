@@ -200,7 +200,7 @@ func main() {
 	assertEqual(runJs(js), "3 1.5 2.5 3.5");
 });
 
-test("sub-slicing TypedArray emits .subarray and creates zero-copy mutable view", () => {
+test("sub-slicing TypedArray creates a zero-copy mutable subarray view", () => {
 	const { js, errors } = compile(`package main
 func main() {
 	arr := []float32{10, 20, 30, 40}
@@ -210,7 +210,9 @@ func main() {
 	println(arr[1])
 }`);
 	assertEqual(errors.length, 0);
-	assert(js.includes(".subarray(1, 3)"), "should emit .subarray(1, 3)");
+	// __slice keeps typed arrays typed: the view is `arr.subarray(1, 3)`.
+	assert(js.includes("__slice(arr, 1, 3)"), "should emit __slice(arr, 1, 3)");
+	assert(js.includes("a.subarray(lo, hi)"), "typed views use subarray");
 	assertEqual(runJs(js), "20 30\n99");
 });
 
