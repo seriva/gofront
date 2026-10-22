@@ -278,8 +278,7 @@ export const expressionCheckMethods = {
 		if (c.kind === "TypeName" || c.kind === "InterfaceType")
 			return this._constraintTerms(this.resolveTypeNode(c, this.globals), seen);
 		if (c.kind === "named") return this._constraintTerms(c.underlying, seen);
-		if (c.kind === "interface")
-			return this._constraintTerms(c.unionConstraint, seen);
+		if (c.kind === "interface") return this._interfaceTerms(c, seen);
 		if (c.kind === "typeParam")
 			return this._constraintTerms(c.constraint, seen);
 		if (c.kind !== "UnionConstraint") return isAny(c) ? null : [c];
@@ -294,6 +293,19 @@ export const expressionCheckMethods = {
 			out.push(...inner);
 		}
 		return out;
+	},
+
+	// An interface's type set is the intersection of its own union and the
+	// type sets of the interfaces it embeds; null when it has none.
+	_interfaceTerms(iface, seen) {
+		const sets = [iface.unionConstraint, ...(iface._typeSetEmbeds ?? [])]
+			.filter(Boolean)
+			.map((s) => this._constraintTerms(s, new Set(seen)));
+		if (sets.length === 0 || sets.includes(null)) return null;
+		const [first, ...rest] = sets;
+		return first.filter((t) =>
+			rest.every((set) => set.some((u) => typeStr(u) === typeStr(t))),
+		);
 	},
 
 	_checkAddressOfExpr(expr, scope, ot) {
@@ -924,7 +936,27 @@ export const expressionCheckMethods = {
 			if (!resolved) return null;
 			fnType = resolved;
 		}
-		return fnType;
+		return this._completePartialInstantiation(expr, argTypes) ?? fnType;
+	},
+
+	// `F[int](x)` with fewer explicit type arguments than type parameters:
+	// infer the rest from the call arguments and record the full list.
+	_completePartialInstantiation(expr, argTypes) {
+		const inst = expr.func;
+		const generic = inst?.kind === "InstantiationExpr" && inst._genericFnType;
+		if (!generic || inst._typeArgs.length >= generic.typeParams.length)
+			return null;
+		const typeArgs = this.inferTypeArgs(generic, argTypes, inst._typeArgs);
+		if (!typeArgs) {
+			this.err(
+				`Cannot infer type arguments for generic function '${generic.name}'`,
+				expr,
+			);
+			return null;
+		}
+		inst._typeArgs = typeArgs;
+		if (inst.expr) inst.expr._typeArgs = typeArgs;
+		return this.instantiateGenericFunc(generic, typeArgs);
 	},
 
 	checkCall(expr, scope) {

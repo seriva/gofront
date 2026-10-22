@@ -277,6 +277,9 @@ export const resolveMethods = {
 			if (isVariadic) mType.variadic = true;
 			methods.set(m.name, mType);
 		}
+		// Embedded interfaces that carry a type set (`interface{ Integer }`):
+		// kept so type-parameter operator checks can follow them.
+		const typeSetEmbeds = [];
 		if (node.embeds) {
 			for (const embed of node.embeds) {
 				const resolved = this.resolveTypeNode(embed, scope);
@@ -286,6 +289,8 @@ export const resolveMethods = {
 					for (const [mName, mType] of base.methods) {
 						if (!methods.has(mName)) methods.set(mName, mType);
 					}
+					if (base.unionConstraint || base._typeSetEmbeds)
+						typeSetEmbeds.push(base);
 				} else if (!isAny(resolved)) {
 					this.err(
 						`cannot embed non-interface type ${typeStr(resolved)}`,
@@ -296,6 +301,7 @@ export const resolveMethods = {
 		}
 		const result = { kind: "interface", methods };
 		if (node.unionConstraint) result.unionConstraint = node.unionConstraint;
+		if (typeSetEmbeds.length > 0) result._typeSetEmbeds = typeSetEmbeds;
 		return result;
 	},
 
@@ -367,8 +373,12 @@ export const resolveMethods = {
 		return this.resolveTypeNode(declNode.type, aliasScope);
 	},
 
-	inferTypeArgs(genericType, argTypes) {
+	// `explicit` seeds the leading type arguments of a partial instantiation
+	// (`F[int](x)`); the rest are inferred from the call arguments.
+	inferTypeArgs(genericType, argTypes, explicit = []) {
 		const map = new Map();
+		for (let i = 0; i < explicit.length; i++)
+			map.set(genericType.typeParams[i].name, explicit[i]);
 		const params = genericType.underlying.params;
 		for (let i = 0; i < params.length && i < argTypes.length; i++)
 			this._inferFromPair(params[i], argTypes[i], map);
