@@ -42,6 +42,46 @@ function rootIdentName(e) {
 // Re-export for consumers that import from typechecker.js
 export { TypeCheckError, typeStr };
 
+// JavaScript built-ins that generated JS relies on; a JS class of the same
+// name in the bundle would shadow them (see _checkGlobalTypeNamesPass).
+const JS_BUILTIN_CLASSES = new Set([
+	"Array",
+	"ArrayBuffer",
+	"BigInt",
+	"BigInt64Array",
+	"BigUint64Array",
+	"Boolean",
+	"DataView",
+	"Date",
+	"Error",
+	"Float32Array",
+	"Float64Array",
+	"Int16Array",
+	"Int32Array",
+	"Int8Array",
+	"JSON",
+	"Map",
+	"Math",
+	"Number",
+	"Object",
+	"Promise",
+	"RangeError",
+	"Reflect",
+	"RegExp",
+	"Set",
+	"String",
+	"Symbol",
+	"TextDecoder",
+	"TextEncoder",
+	"TypeError",
+	"Uint16Array",
+	"Uint32Array",
+	"Uint8Array",
+	"Uint8ClampedArray",
+	"WeakMap",
+	"WebAssembly",
+]);
+
 export class TypeChecker {
 	constructor() {
 		this.types = new Map(); // named types
@@ -302,6 +342,7 @@ export class TypeChecker {
 
 		this._collectTypesPass(programs);
 		this._collectFuncsPass(programs);
+		this._checkGlobalTypeNamesPass(programs);
 		this._promoteEmbeddedMethods();
 		this._collectVarsConstsPass(programs);
 		this._checkTopDeclsPass(programs);
@@ -464,6 +505,36 @@ export class TypeChecker {
 			}
 			pending =
 				ready.length > 0 ? pending.filter((x) => !ready.includes(x)) : [];
+		}
+	}
+
+	// A struct type, or a named type with methods, becomes a JS class of the
+	// same name in `js` and `both` packages.  Functions and variables that
+	// shadow a browser global get a `$` suffix, but type names reach the
+	// output through the checker's types (class declarations, `new T`,
+	// `instanceof T`, static methods), so a class named after a JavaScript
+	// built-in the generated code calls (`Array.isArray`, `new Error`) is
+	// rejected instead.  Interfaces and method-less named types emit no class.
+	_checkGlobalTypeNamesPass(programs) {
+		if (this.target === "wasm") return;
+		for (const p of programs) {
+			for (const d of p.decls) {
+				if (
+					d.kind !== "TypeDecl" ||
+					d.isAlias ||
+					!JS_BUILTIN_CLASSES.has(d.name)
+				)
+					continue;
+				const t = this.types.get(d.name);
+				const isClass =
+					t?.underlying?.kind === "struct" || (t?.methods?.size ?? 0) > 0;
+				if (!isClass) continue;
+				this._setCurrentFile(p);
+				this.err(
+					`type ${d.name} shadows the JavaScript global ${d.name}; rename the type`,
+					d,
+				);
+			}
 		}
 	}
 

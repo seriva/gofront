@@ -32,6 +32,14 @@ import {
 // The emitter is one class split over several files by concern. Methods from
 // the emit-*.js modules are assigned to FunctionEmitter.prototype below; `this`
 // is shared, so cross-file calls are plain method calls.
+const SCOPED_STMTS = new Set([
+	"Block",
+	"IfStmt",
+	"ForStmt",
+	"SwitchStmt",
+	"TypeSwitchStmt",
+]);
+
 export class FunctionEmitter {
 	constructor(moduleEmitter, funcDecl, funcIndex) {
 		this.mod = moduleEmitter;
@@ -816,6 +824,10 @@ export class FunctionEmitter {
 			for (let i = 0; i < lhs.length; i++) {
 				if (lhs[i].name === varName) {
 					if (lhs[i]._type) return lhs[i]._type;
+					// `for k, v := range x`: the range expression is a tuple.
+					const rt = node.rhs?.[0]?._type;
+					if (node.rhs?.[0]?.kind === "RangeExpr" && rt?.kind === "tuple")
+						return rt.types?.[i] ?? null;
 					if (node.rhs?.[i]?._type) return node.rhs[i]._type;
 				}
 			}
@@ -1210,7 +1222,7 @@ export class FunctionEmitter {
 	// a value type at all.
 	_emitCopyIfValue(node, goType, wType) {
 		if (goType?.kind !== "pointer" && isArrayType(goType, this.mod.checker)) {
-			if (node.kind === "CompositeLit") return;
+			if (node.kind === "CompositeLit" || node._freshArray) return;
 			if (node.kind === "CallExpr" && !node._isTypeConversion) return;
 			this.emitCopyArray(goType);
 			return;
@@ -1381,6 +1393,10 @@ export class FunctionEmitter {
 		if (typeof t.len === "number") return t.len;
 		if (t.len?.value !== undefined) return Number(t.len.value);
 		if (t.underlying) return this._getArraySize(t.underlying, defaultSize);
+		if (t.name && this.mod.checker?.types?.has(t.name)) {
+			const resolved = this.mod.checker.types.get(t.name);
+			if (resolved !== t) return this._getArraySize(resolved, defaultSize);
+		}
 		return defaultSize;
 	}
 
@@ -1452,7 +1468,7 @@ export class FunctionEmitter {
 				goType.kind !== "pointer" &&
 				isArrayType(goType, this.mod.checker)
 			) {
-				const elemType = goType.elem;
+				const elemType = this._getArrayElemType(goType);
 				const arrInfo = this.mod.getArrayType(elemType);
 				const size = this._getArraySize(goType);
 				if (
@@ -1623,8 +1639,24 @@ export class FunctionEmitter {
 		}
 	}
 
+	// Go scopes: a block, `if`, `for` and `switch` (with their init
+	// statements) end the names they declare, so an inner `x := 5` does not
+	// rebind the outer `x` for the code after it.
 	emitStmt(stmt) {
 		if (!stmt) return;
+		if (!SCOPED_STMTS.has(stmt.kind)) {
+			this._emitStmtKind(stmt);
+			return;
+		}
+		const saved = new Map(this.locals);
+		try {
+			this._emitStmtKind(stmt);
+		} finally {
+			this.locals = saved;
+		}
+	}
+
+	_emitStmtKind(stmt) {
 		switch (stmt.kind) {
 			case "Block":
 				this.emitBlock(stmt);

@@ -7,7 +7,7 @@ import {
 	BROWSER_GLOBALS,
 	COMPLEX64,
 	COMPLEX128,
-	compositeLitIndices,
+	compositeLitMaxIndex,
 	ERROR,
 	FLOAT32,
 	FLOAT64,
@@ -361,6 +361,16 @@ export const expressionCheckMethods = {
 		return Boolean(generic?.methods?.get(field)?._ptrRecv);
 	},
 
+	// `x.M` or `x.M()` with a pointer receiver on a named scalar local takes
+	// `&x`, so `x` must be boxed like an explicit `&x`.
+	_markPtrRecvAddress(expr, base, ft, scope) {
+		if (expr.expr.kind !== "Ident" || !ft._ptrRecv) return;
+		if (base?.kind !== "basic") return;
+		expr.expr._addressTaken = true;
+		const sym = scope.lookup(expr.expr.name);
+		if (sym) sym._addressTaken = true;
+	},
+
 	_checkSelectorExpr(expr, scope) {
 		expr.expr._typeRefOk = true;
 		const baseType = this.checkExpr(expr.expr, scope);
@@ -398,10 +408,20 @@ export const expressionCheckMethods = {
 		}
 		const ft = this.fieldType(baseType, expr.field, expr);
 		if (ft?.kind === "func") {
-			let base = baseType.kind === "named" ? baseType.underlying : baseType;
+			// `p.M` on a pointer is a method value too.
+			const recvT =
+				baseType.kind === "pointer"
+					? (this.resolveType(baseType.base) ?? baseType.base)
+					: baseType;
+			let base = recvT?.kind === "named" ? recvT.underlying : recvT;
 			base = this.resolveType(base);
-			if (this._isStructOrNamedMethod(baseType, base, expr.field))
+			if (recvT && this._isStructOrNamedMethod(recvT, base, expr.field)) {
 				expr._isMethodValue = true;
+				// `p.M` with a value receiver binds a copy of `*p`.
+				if (baseType.kind === "pointer")
+					expr._derefRecv = !this._methodExprPtrRecv(recvT, ft, expr.field);
+				else this._markPtrRecvAddress(expr, base, ft, scope);
+			}
 		}
 		if (
 			baseType?.kind === "namespace" &&
@@ -452,7 +472,11 @@ export const expressionCheckMethods = {
 	_checkIndexExpr(expr, scope) {
 		const typeRef = this._genericTypeRef(expr, scope);
 		if (typeRef) return typeRef;
-		const bt = this.checkExpr(expr.expr, scope);
+		const bt = this._derefArrayPtr(
+			expr,
+			"expr",
+			this.checkExpr(expr.expr, scope),
+		);
 		this.checkExpr(expr.index, scope);
 		if (bt?._tainted) return TAINTED_ANY;
 		if (isAny(bt)) return ANY;
@@ -504,8 +528,25 @@ export const expressionCheckMethods = {
 		return INT;
 	},
 
+	// Go's shorthand for pointers to arrays: `p[i]`, `p[lo:hi]`, `len(p)` and
+	// `range p` mean `(*p)[i]` and so on.  The operand is rewritten to an
+	// explicit dereference so every backend sees the array.
+	_derefArrayPtr(holder, key, t) {
+		if (t?.kind !== "pointer") return t;
+		const base = t.base?.kind === "named" ? this.resolveType(t.base) : t.base;
+		const under = base?.kind === "named" ? base.underlying : base;
+		if (under?.kind !== "array") return t;
+		holder[key] = { kind: "UnaryExpr", op: "*", operand: holder[key] };
+		holder[key]._type = t.base;
+		return t.base;
+	},
+
 	_checkSliceExpr(expr, scope) {
-		const bt = this.checkExpr(expr.expr, scope);
+		const bt = this._derefArrayPtr(
+			expr,
+			"expr",
+			this.checkExpr(expr.expr, scope),
+		);
 		if (expr.low) this.checkExpr(expr.low, scope);
 		if (expr.high) this.checkExpr(expr.high, scope);
 		if (expr.max) this.checkExpr(expr.max, scope);
@@ -753,7 +794,11 @@ export const expressionCheckMethods = {
 	},
 
 	_checkRangeExpr(expr, scope) {
-		const collType = this.checkExpr(expr.expr, scope);
+		const collType = this._derefArrayPtr(
+			expr,
+			"expr",
+			this.checkExpr(expr.expr, scope),
+		);
 		const resolved =
 			collType?.kind === "named" ? collType.underlying : collType;
 		return this._rangeCollTypeTuple(resolved, collType);
@@ -1195,6 +1240,8 @@ export const expressionCheckMethods = {
 	},
 
 	_checkBuiltinLen(name, expr, argTypes) {
+		if (expr.args?.length === 1)
+			argTypes[0] = this._derefArrayPtr(expr.args, 0, argTypes[0]);
 		if (name === "len") {
 			const size = this._constLenFromType(argTypes[0]);
 			if (size != null) expr._constLen = size;
@@ -1281,7 +1328,7 @@ export const expressionCheckMethods = {
 				: this.resolveTypeNode(expr.typeExpr, scope);
 		const base = t.kind === "named" ? t.underlying : t;
 		const typeNode = expr.typeExpr;
-		if (base?.kind === "array") this._checkArrayLitKeys(expr, scope);
+		if (this._isSliceOrArray(base)) this._checkArrayLitKeys(expr, scope);
 		this._inferArraySize(expr, typeNode, base);
 		if (base?.kind === "struct")
 			return this._checkStructCompositeLit(expr, scope, t, base);
@@ -1451,5 +1498,5 @@ function constKeyText(e) {
 }
 
 function computeMaxIndex(elems) {
-	return Math.max(-1, ...compositeLitIndices(elems));
+	return compositeLitMaxIndex(elems);
 }

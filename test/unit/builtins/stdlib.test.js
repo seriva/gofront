@@ -6,6 +6,7 @@ import {
 	assertContains,
 	assertEqual,
 	compile,
+	compileHybrid,
 	runJs,
 	section,
 	summarize,
@@ -1091,6 +1092,29 @@ func main() {
 }`);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "true\nfalse");
+});
+
+test("slices.Contains and slices.Index compare structs and arrays by value (Task 0.19d)", () => {
+	const res = compileHybrid(`//gofront:target both
+package main
+
+import "slices"
+
+type P struct{ X, Y int }
+
+func Main() int {
+	ps := []P{{1, 2}, {3, 4}}
+	as := [][2]int{{5, 6}, {7, 8}}
+	r := slices.Index(ps, P{3, 4})*100 + slices.Index(as, [2]int{7, 8})*10
+	if slices.Contains(ps, P{1, 2}) && !slices.Contains(ps, P{2, 1}) {
+		r++
+	}
+	var none []P
+	return r + slices.Index(none, P{})*1000
+}
+`).run("Main");
+	assertEqual(res.jsRes, -889);
+	assertEqual(res.wasmRes, -889n);
 });
 
 test("slices.Index", () => {

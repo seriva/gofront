@@ -70,8 +70,26 @@ export const slicesMethods = {
 			const [a1, b1] = a();
 			return `__equal(${a1}, ${b1})`;
 		}
+		// Struct and array elements are values: compare them field by field
+		// (`.includes` and `.indexOf` compare object identity).
+		if (
+			(fn === "Contains" || fn === "Index") &&
+			this._sliceElemIsAggregate(expr)
+		) {
+			this.useHelper("equal");
+			const [s1, v1] = a();
+			const found = fn === "Contains" ? "true" : "i";
+			const missing = fn === "Contains" ? "false" : "-1";
+			return `((s, v) => { s = s || []; for (let i = 0; i < s.length; i++) { if (__equal(s[i], v)) return ${found}; } return ${missing}; })(${s1}, ${v1})`;
+		}
 		const isTyped = isTypedArraySlice(expr?.args?.[0]?._type);
 		const gen = SLICES_DISPATCH[fn];
 		return gen ? gen(a(), isTyped) : undefined;
+	},
+
+	_sliceElemIsAggregate(expr) {
+		let t = expr?.args?.[0]?._type;
+		while (t?.kind === "named") t = t.underlying;
+		return t?.kind === "slice" && Boolean(this._aggregateBase(t.elem));
 	},
 };

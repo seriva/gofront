@@ -855,7 +855,13 @@ export const expressionGenMethods = {
 		if (expr.expr._type?.kind === "pointer" && expr.field !== "value")
 			return this._genPointerSelectorField(expr, base);
 		const sel = `${base}.${this._jsMemberName(expr)}`;
-		if (expr._isMethodValue && !expr._callee) return `${sel}.bind(${base})`;
+		if (expr._isMethodValue && !expr._callee) {
+			// A value receiver is copied when the method value is evaluated.
+			const t = expr.expr._type;
+			if (!expr._type?._ptrRecv && this._aggregateBase(t))
+				return `((__r) => __r.${this._jsMemberName(expr)}.bind(__r))(${this._cloneJs(t, base)})`;
+			return `${sel}.bind(${base})`;
+		}
 		return sel;
 	},
 
@@ -900,7 +906,12 @@ export const expressionGenMethods = {
 				? `${this.genExpr(sel.expr)}.value`
 				: this.genExpr(sel.expr);
 		}
-		return { cls: info.cls, recv };
+		return {
+			cls: info.cls,
+			recv,
+			byValue: !method._ptrRecv,
+			recvType: viaPtr ? recvType.base : recvType,
+		};
 	},
 
 	// `x.M` used as a value: binds the receiver now, as Go does.
@@ -908,7 +919,11 @@ export const expressionGenMethods = {
 		if (!expr._isMethodValue || expr._callee) return undefined;
 		const target = this._namedMethodTarget(expr);
 		if (!target) return undefined;
-		return `((__r) => (...__a) => ${target.cls}.$${expr.field}(__r, ...__a))(${target.recv})`;
+		// A value receiver (a named array) is copied when the value is evaluated.
+		const recv = target.byValue
+			? this._cloneJs(target.recvType, target.recv)
+			: target.recv;
+		return `((__r) => (...__a) => ${target.cls}.$${expr.field}(__r, ...__a))(${recv})`;
 	},
 
 	_genAddressOfExpr(operand) {
@@ -985,7 +1000,17 @@ export const expressionGenMethods = {
 			const recv =
 				this.strict && !expr._isMethodValue ? this._genNilChecked(base) : base;
 			const sel = `${recv}.${expr.field}`;
-			if (expr._isMethodValue && !expr._callee) return `${sel}.bind(${base})`;
+			if (expr._isMethodValue && !expr._callee) {
+				// `p.M` with a value receiver binds a copy of `*p` now.
+				if (expr._derefRecv) {
+					const copy = this._cloneJs(
+						expr.expr._type.base,
+						this.strict ? this._genNilChecked(base) : base,
+					);
+					return `((__r) => __r.${expr.field}.bind(__r))(${copy})`;
+				}
+				return `${sel}.bind(${base})`;
+			}
 			return sel;
 		}
 		const sel = `${base}.value.${expr.field}`;
@@ -1063,6 +1088,11 @@ export const expressionGenMethods = {
 		const lo = expr.low ? this.genExpr(expr.low) : "";
 		const hi = expr.high ? this.genExpr(expr.high) : "";
 		const method = isTypedArraySlice(expr.expr._type) ? "subarray" : "slice";
+		// `b[:]`, `b[0:]` and `a[:]` share the backing store as in Go: the
+		// result is the operand itself.  Other bounds still copy (a JS array
+		// cannot view part of another one).
+		const zeroLow = !expr.low || Number(expr.low._const?.v) === 0;
+		if (method === "slice" && zeroLow && !hi) return base;
 		if (!lo && !hi) return `${base}.${method}()`;
 		if (!hi) return `${base}.${method}(${lo})`;
 		if (!lo) return `${base}.${method}(0, ${hi})`;
@@ -1669,20 +1699,40 @@ export const expressionGenMethods = {
 		return t?.kind === "array" && typeof t.size === "number" ? t : null;
 	},
 
-	// Elements of a literal of array type `at`, placed at their (keyed)
-	// indices, with every other slot the element zero value: `[3]int{1}` is
-	// `[1, 0, 0]` and `[5]int{2: 7}` is `[0, 0, 7, 0, 0]`, as in Go.
+	// Elements of a literal of array type `at` (or `{ size, elem }` for a
+	// slice), placed at their (keyed) indices, with every other slot the
+	// element zero value: `[3]int{1}` is `[1, 0, 0]` and `[5]int{2: 7}` is
+	// `[0, 0, 7, 0, 0]`, as in Go.  Keys out of ascending order would
+	// evaluate the elements out of source order, so the values are then
+	// computed first and spread into place.
 	_genArrayLitElems(at, expr) {
 		const values = new Array(at.size).fill(null);
 		const indices = compositeLitIndices(expr.elems);
-		expr.elems.forEach((e, i) => {
-			values[indices[i]] = this.genValueExpr(
-				e.kind === "KeyValueExpr" ? e.value : e,
-			);
+		const src = expr.elems.map((e) =>
+			this.genValueExpr(e.kind === "KeyValueExpr" ? e.value : e),
+		);
+		const ascending = indices.every((v, i) => i === 0 || v > indices[i - 1]);
+		indices.forEach((idx, i) => {
+			values[idx] = ascending ? src[i] : `v$[${i}]`;
 		});
 		for (let i = 0; i < values.length; i++)
 			values[i] ??= this.zeroValueForType(at.elem);
-		return values.join(", ");
+		if (ascending) return values.join(", ");
+		return `...((v$) => [${values.join(", ")}])([${src.join(", ")}])`;
+	},
+
+	// `{ size, elem }` for a slice or array literal (through named types).
+	_litIndexedShape(expr) {
+		const at = this._litArrayType(expr);
+		if (at) return at;
+		let t = expr._type;
+		while (t?.kind === "named") t = t.underlying;
+		if (t?.kind !== "slice") return null;
+		// A loop, not a spread: huge literals would overflow the call stack.
+		let max = -1;
+		for (const i of compositeLitIndices(expr.elems)) if (i > max) max = i;
+		const size = max + 1;
+		return { size, elem: t.elem };
 	},
 
 	// A large array literal that leaves most slots zero (`[100000]byte{}`,
@@ -1704,7 +1754,7 @@ export const expressionGenMethods = {
 	},
 
 	_genLitElems(expr) {
-		const at = this._litArrayType(expr);
+		const at = this._litIndexedShape(expr);
 		if (at) return this._genArrayLitElems(at, expr);
 		return expr.elems
 			.map((e) => this.genValueExpr(e.kind === "KeyValueExpr" ? e.value : e))
@@ -1821,7 +1871,9 @@ export const expressionGenMethods = {
 		}
 		const hasPositional = expr.elems.some((e) => e._positionalField);
 		const hasKeyed = expr.elems.some((e) => e.kind === "KeyValueExpr");
-		if (hasPositional || hasKeyed) {
+		// `{2: 5}` inside `[2][3]int{…}` is an array, not an object.
+		const indexed = this._litIndexedShape(expr) !== null;
+		if (hasPositional || (hasKeyed && !indexed)) {
 			const fields = expr.elems
 				.map((e) => {
 					if (e._positionalField)

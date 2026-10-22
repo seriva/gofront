@@ -569,7 +569,7 @@ export function collectBoundaryMeta(progs, funcDecls, mod) {
 			} else if (d.kind === "ConstDecl" && pkgTarget === "wasm") {
 				collectConstDecl(d, pkgName, meta, errors);
 			} else if (d.kind === "VarDecl" && pkgTarget === "wasm") {
-				collectSharedVarDecl(d, meta, mod);
+				collectVarDecl(d, meta, mod);
 			}
 		}
 	}
@@ -651,17 +651,24 @@ function checkDesc(desc, where, errors) {
 }
 
 // Exported `var Buf = shared.NewFloat32(n)` globals are exposed to JS as
-// TypedArray views (read once after instantiation; sizing is fixed).
-function collectSharedVarDecl(d, meta, mod) {
+// TypedArray views (read once after instantiation; sizing is fixed).  Other
+// exported vars of a supported boundary type are read once when the module
+// loads, after package initialization (`var Limit = 40` is `Limit` in the
+// facade); a var of an unsupported type is left out.
+function collectVarDecl(d, meta, mod) {
 	for (const spec of d.decls ?? d.specs ?? [d]) {
 		const names = spec.names ?? (spec.name ? [spec.name] : []);
 		const values = spec.value ?? (spec.init ? [spec.init] : []);
 		for (let i = 0; i < names.length; i++) {
 			const name = names[i];
 			if (!isExported(name)) continue;
-			const goType = spec.type ?? values[i]?._type;
-			if (!getSharedInfo(goType, mod.checker)) continue;
-			meta.vars.push({ name, desc: classifyType(goType, mod) });
+			const goType =
+				spec.type ?? mod.resolveGlobal(name)?.goType ?? values[i]?._type;
+			const shared = Boolean(getSharedInfo(goType, mod.checker));
+			const desc = classifyType(goType, mod);
+			if (!shared && (!desc || desc.k === "unsupported" || desc.k === "void"))
+				continue;
+			meta.vars.push({ name, desc, shared });
 		}
 	}
 }
@@ -1231,7 +1238,7 @@ export function addBoundaryHelpers(mod, meta) {
 			[get(0), get(1), { op: "struct.new", typeIndex }, ...toExt(wType)],
 		);
 		for (const v of meta.vars ?? []) {
-			const g = mod.resolveGlobal(v.name);
+			const g = v.shared ? mod.resolveGlobal(v.name) : null;
 			if (!g) continue;
 			addFunc(
 				`__var_${v.name}`,
@@ -1610,6 +1617,16 @@ export function addBoundaryHelpers(mod, meta) {
 			[],
 			[extType(c.desc.wType)],
 			[{ op: "global.get", index: g.index }, ...toExt(c.desc.wType)],
+		);
+	}
+	for (const v of meta.vars ?? []) {
+		const g = v.shared ? null : mod.resolveGlobal(v.name);
+		if (!g) continue;
+		addFunc(
+			`__var_${v.name}`,
+			[],
+			[extType(v.desc.wType)],
+			[{ op: "global.get", index: g.index }, ...toExt(v.desc.wType)],
 		);
 	}
 }
@@ -3005,7 +3022,9 @@ function ${P}shin(v, Ctor) {
 	}
 	for (const v of meta.vars ?? [])
 		out.push(
-			`const ${facadeName(v.name)} = ${P}shout(__w.__var_${v.name}(), ${v.desc.ctor});`,
+			v.shared
+				? `const ${facadeName(v.name)} = ${P}shout(__w.__var_${v.name}(), ${v.desc.ctor});`
+				: `const ${facadeName(v.name)} = ${outExpr(v.desc, `__w.__var_${v.name}()`)};`,
 		);
 
 	for (const f of meta.funcs) {
