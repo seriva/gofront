@@ -32,6 +32,14 @@ import {
 // The emitter is one class split over several files by concern. Methods from
 // the emit-*.js modules are assigned to FunctionEmitter.prototype below; `this`
 // is shared, so cross-file calls are plain method calls.
+const SCOPED_STMTS = new Set([
+	"Block",
+	"IfStmt",
+	"ForStmt",
+	"SwitchStmt",
+	"TypeSwitchStmt",
+]);
+
 export class FunctionEmitter {
 	constructor(moduleEmitter, funcDecl, funcIndex) {
 		this.mod = moduleEmitter;
@@ -816,6 +824,10 @@ export class FunctionEmitter {
 			for (let i = 0; i < lhs.length; i++) {
 				if (lhs[i].name === varName) {
 					if (lhs[i]._type) return lhs[i]._type;
+					// `for k, v := range x`: the range expression is a tuple.
+					const rt = node.rhs?.[0]?._type;
+					if (node.rhs?.[0]?.kind === "RangeExpr" && rt?.kind === "tuple")
+						return rt.types?.[i] ?? null;
 					if (node.rhs?.[i]?._type) return node.rhs[i]._type;
 				}
 			}
@@ -1623,8 +1635,24 @@ export class FunctionEmitter {
 		}
 	}
 
+	// Go scopes: a block, `if`, `for` and `switch` (with their init
+	// statements) end the names they declare, so an inner `x := 5` does not
+	// rebind the outer `x` for the code after it.
 	emitStmt(stmt) {
 		if (!stmt) return;
+		if (!SCOPED_STMTS.has(stmt.kind)) {
+			this._emitStmtKind(stmt);
+			return;
+		}
+		const saved = new Map(this.locals);
+		try {
+			this._emitStmtKind(stmt);
+		} finally {
+			this.locals = saved;
+		}
+	}
+
+	_emitStmtKind(stmt) {
 		switch (stmt.kind) {
 			case "Block":
 				this.emitBlock(stmt);

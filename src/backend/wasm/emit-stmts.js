@@ -135,12 +135,18 @@ export class StmtsEmitter {
 			this.pushInstruction("drop");
 			return;
 		}
+		if (l._redecl && this.resolveLocal(l.name)) {
+			this._emitAssignSingle(l, r, "=");
+			return;
+		}
 		const wType = this.toWasmType(r._type);
-		const idx = this.allocLocal(l.name, wType, r._type);
-		const localInfo = this.locals.get(l.name);
+		// The value is computed before the new name exists: `x := x * 2`
+		// in an inner block reads the outer `x`.
 		this.emitExpr(r, wType);
 		if (!this._arrayCopyElidable(r, l.name))
 			this._emitCopyIfValue(r, r._type, wType);
+		const idx = this.allocLocal(l.name, wType, r._type);
+		const localInfo = this.locals.get(l.name);
 		if (localInfo?.isBoxed) {
 			this.pushInstruction({
 				op: "struct.new",
@@ -501,6 +507,44 @@ export class StmtsEmitter {
 			});
 			return;
 		}
+	}
+
+	// A range variable that a closure captures and mutates lives in a box,
+	// but the loop writes the plain value each iteration.  It gets a raw
+	// local here, and `_emitRangeBoxes` (at the top of the body) wraps the
+	// value in a fresh box per iteration, so each iteration's closures keep
+	// their own variable (Go 1.22) and the loop never stores a raw value
+	// into a box local.
+	_allocRangeVar(name, wType, goType) {
+		if (!this.mutatedCaptures.has(name))
+			return this.allocLocal(name, wType, goType);
+		const idx = this.allocLocal(name, wType, goType, true);
+		if (!this._pendingRangeBoxes) this._pendingRangeBoxes = [];
+		this._pendingRangeBoxes.push({ name, idx, wType, goType });
+		return idx;
+	}
+
+	_emitRangeBoxes() {
+		const pending = this._pendingRangeBoxes ?? [];
+		this._pendingRangeBoxes = [];
+		for (const { name, idx, wType, goType } of pending) {
+			const boxIdx = this.allocLocal(name, wType, goType);
+			const info = this.locals.get(name);
+			this.pushInstruction({ op: "local.get", index: idx });
+			this.pushInstruction({
+				op: "struct.new",
+				typeIndex: info.boxInfo.typeIndex,
+			});
+			this.pushInstruction({ op: "local.set", index: boxIdx });
+		}
+	}
+
+	// The struct that holds the last field of `path`: a promoted field
+	// (`o.N` on an embedded `Inner`) lives on the embedded struct.
+	_fieldHolderWType(path, baseWType) {
+		if (path.length <= 1) return baseWType;
+		const holder = path[path.length - 1].structInfo;
+		return { kind: "ref", nullable: true, typeIndex: holder.typeIndex };
 	}
 
 	// Copy the array value `r` into the existing array that `emitDst` pushes,
@@ -1079,8 +1123,9 @@ export class StmtsEmitter {
 			const lastStep = path[path.length - 1];
 			const targetType = lastStep.field.wType;
 			const baseWType = this.toWasmType(l.expr._type);
+			const holderWType = this._fieldHolderWType(path, baseWType);
 
-			const baseTmp = this.acquireTemp(baseWType);
+			const baseTmp = this.acquireTemp(holderWType);
 			this.emitExpr(l.expr, baseWType);
 			this._emitNilCheck(l.expr._type);
 			for (let i = 0; i < path.length - 1; i++) {
@@ -1109,7 +1154,7 @@ export class StmtsEmitter {
 				typeIndex: lastStep.structInfo.typeIndex,
 				fieldIndex: lastStep.fieldIndex,
 			});
-			this.releaseTemp(baseTmp, baseWType);
+			this.releaseTemp(baseTmp, holderWType);
 			return;
 		}
 
@@ -1592,8 +1637,9 @@ export class StmtsEmitter {
 			const lastStep = path[path.length - 1];
 			const targetType = lastStep.field.wType;
 			const baseWType = this.toWasmType(expr.expr._type);
+			const holderWType = this._fieldHolderWType(path, baseWType);
 
-			const baseTmp = this.acquireTemp(baseWType);
+			const baseTmp = this.acquireTemp(holderWType);
 			this.emitExpr(expr.expr, baseWType);
 			this._emitNilCheck(expr.expr._type);
 			for (let i = 0; i < path.length - 1; i++) {
@@ -1835,7 +1881,7 @@ export class StmtsEmitter {
 						!this.capturedNames?.includes(lhs[0].name) &&
 						!this._varMutatesOrEscapes(bodyBlock, lhs[0].name);
 					const wType = isNonEscaping ? "i32" : "i64";
-					const lIdx = this.allocLocal(lhs[0].name, wType, {
+					const lIdx = this._allocRangeVar(lhs[0].name, wType, {
 						kind: "basic",
 						name: "int",
 					});
@@ -1888,6 +1934,7 @@ export class StmtsEmitter {
 			// Emit body
 			const bodyBlock = stmt.body ?? stmt.block;
 			if (bodyBlock) {
+				this._emitRangeBoxes();
 				this.emitBlock(bodyBlock);
 			}
 
@@ -1935,7 +1982,7 @@ export class StmtsEmitter {
 			let idxLocalInfo = null;
 			if (lhs[0] && lhs[0].name !== "_") {
 				if (!isAssign) {
-					const lIdx = this.allocLocal(lhs[0].name, "i64", {
+					const lIdx = this._allocRangeVar(lhs[0].name, "i64", {
 						kind: "basic",
 						name: "int",
 					});
@@ -1950,7 +1997,7 @@ export class StmtsEmitter {
 			let valLocalInfo = null;
 			if (lhs[1] && lhs[1].name !== "_") {
 				if (!isAssign) {
-					const lIdx = this.allocLocal(lhs[1].name, "i32", {
+					const lIdx = this._allocRangeVar(lhs[1].name, "i32", {
 						kind: "basic",
 						name: "rune",
 					});
@@ -2029,6 +2076,7 @@ export class StmtsEmitter {
 			// Body
 			const bodyBlock = stmt.body ?? stmt.block;
 			if (bodyBlock) {
+				this._emitRangeBoxes();
 				this.emitBlock(bodyBlock);
 			}
 
@@ -2106,7 +2154,11 @@ export class StmtsEmitter {
 			let keyLocalInfo = null;
 			if (lhs[0] && lhs[0].name !== "_") {
 				if (!isAssign) {
-					const lIdx = this.allocLocal(lhs[0].name, mapInfo.keyWType, keyType);
+					const lIdx = this._allocRangeVar(
+						lhs[0].name,
+						mapInfo.keyWType,
+						keyType,
+					);
 					keyLocalInfo = { index: lIdx, type: mapInfo.keyWType };
 				} else {
 					keyLocalInfo =
@@ -2118,7 +2170,11 @@ export class StmtsEmitter {
 			let valLocalInfo = null;
 			if (lhs[1] && lhs[1].name !== "_") {
 				if (!isAssign) {
-					const lIdx = this.allocLocal(lhs[1].name, mapInfo.valWType, valType);
+					const lIdx = this._allocRangeVar(
+						lhs[1].name,
+						mapInfo.valWType,
+						valType,
+					);
 					valLocalInfo = { index: lIdx, type: mapInfo.valWType };
 				} else {
 					valLocalInfo =
@@ -2239,6 +2295,7 @@ export class StmtsEmitter {
 			// Body
 			const bodyBlock = stmt.body ?? stmt.block;
 			if (bodyBlock) {
+				this._emitRangeBoxes();
 				this.emitBlock(bodyBlock);
 			}
 
@@ -2352,7 +2409,7 @@ export class StmtsEmitter {
 					!this.capturedNames?.includes(lhs[0].name) &&
 					!this._varMutatesOrEscapes(bodyBlock, lhs[0].name);
 				const wType = isNonEscaping ? "i32" : "i64";
-				const lIdx = this.allocLocal(lhs[0].name, wType, {
+				const lIdx = this._allocRangeVar(lhs[0].name, wType, {
 					kind: "basic",
 					name: "int",
 				});
@@ -2366,7 +2423,7 @@ export class StmtsEmitter {
 		let valLocalInfo = null;
 		if (lhs[1] && lhs[1].name !== "_") {
 			if (!isAssign) {
-				const lIdx = this.allocLocal(
+				const lIdx = this._allocRangeVar(
 					lhs[1].name,
 					arrInfo.elemWType,
 					elemGoType,
@@ -2450,6 +2507,7 @@ export class StmtsEmitter {
 		// Body
 		const bodyBlock = stmt.body ?? stmt.block;
 		if (bodyBlock) {
+			this._emitRangeBoxes();
 			this.emitBlock(bodyBlock);
 		}
 
