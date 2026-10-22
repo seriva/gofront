@@ -1456,6 +1456,10 @@ class ModuleEmitter {
 		return this.resolveFuncIndex("__index_panic");
 	}
 
+	getNilPanicFuncIndex() {
+		return this.resolveFuncIndex("__nil_panic");
+	}
+
 	// `gofront/shared` buffers are `(base i32, len i32)` views over the single
 	// exported linear memory, bump-allocated by `__shared_new` during start.
 	getSharedType() {
@@ -2497,6 +2501,17 @@ export function compileWasmModule(
 		],
 		returnType: null,
 		_isIndexPanic: true,
+	});
+
+	// Target of the per-function `nil` block (`_openNilBlock` in emit.js).
+	funcDecls.push({
+		kind: "FuncDecl",
+		name: "__nil_panic",
+		params: [],
+		returnType: null,
+		_isRuntimePanic: true,
+		_panicMsg:
+			"runtime error: invalid memory address or nil pointer dereference",
 	});
 
 	const sliceBoundsPanicFn = {
