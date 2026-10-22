@@ -877,7 +877,7 @@ export class TypeChecker {
 		for (const p of decl.params) {
 			inner.define(p.name, this._paramType(p, inner));
 		}
-		const returnType = this._setupFuncReturnType(decl, inner, outer);
+		const returnType = this._setupFuncReturnType(decl, inner);
 		const savedSharedAlloc = this._sharedAllocOk;
 		this._sharedAllocOk = decl.name === "init";
 		this._runFuncBody(decl, inner, returnType);
@@ -911,7 +911,7 @@ export class TypeChecker {
 		for (const p of decl.params) {
 			inner.define(p.name, this._paramType(p, inner));
 		}
-		const returnType = this._setupFuncReturnType(decl, inner, inner);
+		const returnType = this._setupFuncReturnType(decl, inner);
 		this._runFuncBody(decl, inner, returnType);
 		this._checkMissingReturn(decl, returnType, "method");
 	}
@@ -940,15 +940,11 @@ export class TypeChecker {
 		}
 	}
 
-	_setupFuncReturnType(decl, inner, outer) {
+	_setupFuncReturnType(decl, inner) {
 		let returnType = decl.returnType
 			? this.resolveTypeNode(decl.returnType, inner)
 			: VOID;
-		const hasNamedReturns = this._injectNamedReturns(
-			decl.returnType,
-			inner,
-			outer,
-		);
+		const hasNamedReturns = this._injectNamedReturns(decl.returnType, inner);
 		if (hasNamedReturns && returnType)
 			returnType = { ...returnType, _hasNamedReturns: true };
 		return returnType;
@@ -972,10 +968,12 @@ export class TypeChecker {
 		}
 	}
 
-	_injectNamedReturns(returnTypeNode, scope, outer) {
+	// Named result types resolve in the function scope, so a result of a type
+	// parameter's type (`(r T)`) sees T.
+	_injectNamedReturns(returnTypeNode, scope) {
 		if (!returnTypeNode?._namedReturns) return false;
 		for (const { name, type } of returnTypeNode._namedReturns) {
-			if (name) scope.define(name, this.resolveTypeNode(type, outer));
+			if (name) scope.define(name, this.resolveTypeNode(type, scope));
 		}
 		return true;
 	}

@@ -245,9 +245,55 @@ export const expressionCheckMethods = {
 	},
 
 	_checkNumericUnaryOp(ot, expr) {
+		if (ot?.kind === "typeParam") {
+			if (!this._typeParamAllows(ot, isComplexOrNumeric))
+				this.err(`${expr.op} requires numeric`, expr);
+			return ot;
+		}
 		if (!isNumeric(ot) && !isComplex(ot) && !isAny(ot))
 			this.err(`${expr.op} requires numeric`, expr);
 		return ot;
+	},
+
+	// `^x` on a type parameter needs every type in its constraint to be an
+	// integer.  Other operands keep the existing (unchecked) behaviour.
+	_checkComplementUnaryOp(ot, expr) {
+		if (ot?.kind === "typeParam" && !this._typeParamAllows(ot, isInteger))
+			this.err("^ requires integer", expr);
+		return ot;
+	},
+
+	// Whether every type in the type set of type parameter `tp`'s constraint
+	// satisfies `pred`.  A constraint without a type set (any, comparable,
+	// method-only interfaces) allows nothing.
+	_typeParamAllows(tp, pred) {
+		const terms = this._constraintTerms(tp.constraint, new Set());
+		return terms !== null && terms.length > 0 && terms.every(pred);
+	},
+
+	_constraintTerms(c, seen) {
+		if (!c || seen.has(c)) return null;
+		seen.add(c);
+		// Receiver type parameters keep their constraint as an AST node.
+		if (c.kind === "TypeName" || c.kind === "InterfaceType")
+			return this._constraintTerms(this.resolveTypeNode(c, this.globals), seen);
+		if (c.kind === "named") return this._constraintTerms(c.underlying, seen);
+		if (c.kind === "interface")
+			return this._constraintTerms(c.unionConstraint, seen);
+		if (c.kind === "typeParam")
+			return this._constraintTerms(c.constraint, seen);
+		if (c.kind !== "UnionConstraint") return isAny(c) ? null : [c];
+		const out = [];
+		for (const term of c.terms) {
+			const t = this.resolveTypeNode(term.type, this.globals);
+			const inner =
+				t?.kind === "named" && t.underlying?.kind === "interface"
+					? this._constraintTerms(t, seen)
+					: [t];
+			if (inner === null) return null;
+			out.push(...inner);
+		}
+		return out;
 	},
 
 	_checkAddressOfExpr(expr, scope, ot) {
@@ -265,6 +311,7 @@ export const expressionCheckMethods = {
 		if (expr.op === "!") return this._checkBoolUnaryOp(ot, expr);
 		if (expr.op === "-" || expr.op === "+")
 			return this._checkNumericUnaryOp(ot, expr);
+		if (expr.op === "^") return this._checkComplementUnaryOp(ot, expr);
 		if (expr.op === "&") return this._checkAddressOfExpr(expr, scope, ot);
 		if (expr.op === "*") {
 			// `(*T).M`: the operand names a type, so `*T` is the pointer type
