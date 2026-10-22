@@ -21,6 +21,7 @@ import {
 	computeEmbeddedStubs,
 	hasDirectRecover,
 	isReferenceType,
+	markInBoundsIndexes,
 	normalizeDefers,
 	scanAddressTaken,
 } from "../../lower/index.js";
@@ -291,6 +292,8 @@ export class CodeGen {
 		// idempotent and owned by the backends: the wasm path runs it via
 		// `lower()`, the JS path here.
 		normalizeDefers(program);
+		// Strict mode: index checks the loop shape proves unnecessary are elided.
+		if (this.strict) markInBoundsIndexes(program);
 		if (program._filename) this._srcFileNames = [program._filename];
 		// Ensure _pkgName is set on all decls (generateAll sets it for
 		// multi-file; for single-file compiles we derive it from the AST).

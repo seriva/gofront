@@ -234,43 +234,87 @@ export class FunctionEmitter {
 	}
 
 	// Index checks branch out of the body to one of two blocks wrapped around
-	// it: `oob32` for i32 indexes and `oob64` for i64 indexes.  Each check
-	// leaves the index and the length in the function's `oob` locals (the
-	// temps the check needs anyway), so the shared handler after the block can
-	// raise Go's `index out of range [i] with length n`.
+	// it, `oob32` for i32 indexes and `oob64` for i64 indexes, carrying the
+	// index and the check's site id as block results (`_pushOobSite`).  The
+	// handlers after the blocks recompute that site's length and raise Go's
+	// `index out of range [i] with length n`.  Nothing extra stays live in
+	// the hot path: a site id is an immediate.
 	_openOobBlocks() {
-		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushInstruction({
+			op: "block",
+			blockType: this.mod.getTypeIndex([], ["i64", "i32"]),
+		});
 		this.pushControl("oob64");
-		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushInstruction({
+			op: "block",
+			blockType: this.mod.getTypeIndex([], ["i32", "i32"]),
+		});
 		this.pushControl("oob32");
 	}
 
 	// Closes the blocks opened by _openOobBlocks; the body must already end
 	// in a branch, return or unreachable.
 	_closeOobBlocks() {
-		const { idx32, idx64, len } = this._oobLocals();
-		const panicIdx = this.mod.getIndexPanicFuncIndex();
+		const site = this.acquireTemp("i32");
+		const idx = this.acquireTemp("i64");
+		const len = this.acquireTemp("i32");
+		// oob32 lands here with [i32 index, site]: widen the index and fall
+		// through to the oob64 handler.
 		this.pushInstruction("end");
-		this.pushInstruction({ op: "local.get", index: idx32 });
+		this.pushInstruction({ op: "local.set", index: site });
 		this.pushInstruction("i64.extend_i32_s");
-		this.pushInstruction({ op: "local.get", index: len });
-		this.pushInstruction({ op: "call", funcIndex: panicIdx });
-		this.pushInstruction("unreachable");
+		this.pushInstruction({ op: "local.get", index: site });
 		this.pushInstruction("end");
-		this.pushInstruction({ op: "local.get", index: idx64 });
+		this.pushInstruction({ op: "local.set", index: site });
+		this.pushInstruction({ op: "local.set", index: idx });
+		// Sites whose length code is identical (same temp, same field) share
+		// one br_table target.
+		const codes = [];
+		const target = (this.oobSites ?? []).map((emitLen) => {
+			const saved = this.body;
+			this.body = [];
+			emitLen();
+			const code = this.body;
+			this.body = saved;
+			const key = JSON.stringify(code);
+			let k = codes.findIndex((c) => c.key === key);
+			if (k < 0) k = codes.push({ key, code }) - 1;
+			return k;
+		});
+		const sites = codes.map(({ code }) => () => {
+			for (const inst of code) this.pushInstruction(inst);
+		});
+		if (sites.length === 0) {
+			this.pushInstruction({ op: "i32.const", value: 0 });
+		} else {
+			// block $len (result i32) { block … block { br_table } emitLen_0; br $len … }
+			this.pushInstruction({ op: "block", blockType: "i32" });
+			for (let k = 0; k < sites.length; k++)
+				this.pushInstruction({ op: "block", blockType: "void" });
+			this.pushInstruction({ op: "local.get", index: site });
+			this.pushInstruction({
+				op: "br_table",
+				targets: target,
+				defaultTarget: sites.length - 1,
+			});
+			for (let k = 0; k < sites.length; k++) {
+				this.pushInstruction("end");
+				sites[k]();
+				this.pushInstruction({ op: "br", depth: sites.length - 1 - k });
+			}
+			this.pushInstruction("end");
+		}
+		this.pushInstruction({ op: "local.set", index: len });
+		this.pushInstruction({ op: "local.get", index: idx });
 		this.pushInstruction({ op: "local.get", index: len });
-		this.pushInstruction({ op: "call", funcIndex: panicIdx });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getIndexPanicFuncIndex(),
+		});
 		this.pushInstruction("unreachable");
-	}
-
-	// The locals an index check stores its index and length in.
-	_oobLocals() {
-		this._oob ??= {
-			idx32: this.allocLocal(null, "i32"),
-			idx64: this.allocLocal(null, "i64"),
-			len: this.allocLocal(null, "i32"),
-		};
-		return this._oob;
+		this.releaseTemp(site, "i32");
+		this.releaseTemp(idx, "i64");
+		this.releaseTemp(len, "i32");
 	}
 
 	_initNamedReturns() {
