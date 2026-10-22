@@ -944,3 +944,125 @@ parity(
 	return lo*1000 + hi*100 + a*10 + b`,
 	363,
 );
+
+section("Array type completion (Task 0.19b)");
+
+parity(
+	"named array type: literal, index and assignment",
+	`	v := V{1, 2, 3}
+	w := v
+	w[0] = 9
+	return v[0]*100 + w[0]*10 + len(v)`,
+	193,
+	"type V [3]int",
+);
+
+parity(
+	"named array type: comparison",
+	`	a := V{1, 2, 3}
+	b := V{1, 2, 3}
+	c := V{1, 2, 4}
+	r := 0
+	if a == b {
+		r += 10
+	}
+	if a != c {
+		r++
+	}
+	return r`,
+	11,
+	"type V [3]int",
+);
+
+parity(
+	"named array type: value and pointer methods",
+	`	v := V{1, 2, 3}
+	v.Scale(2)
+	return v.Sum()`,
+	12,
+	"type V [3]int\n\nfunc (v V) Sum() int { return v[0] + v[1] + v[2] }\n\nfunc (v *V) Scale(k int) {\n\tfor i := range v {\n\t\tv[i] *= k\n\t}\n}",
+);
+
+parity(
+	"pointer to array: index, write and dereference",
+	`	a := [3]int{1, 2, 3}
+	p := &a
+	p[1] = 7
+	b := *p
+	b[0] = 9
+	return a[0]*100 + a[1]*10 + p[2] + len(p)*1000`,
+	3173,
+);
+
+parity(
+	"pointer to array: assignment through *p",
+	`	a := [2]int{1, 2}
+	p := &a
+	*p = [2]int{5, 6}
+	return a[0]*10 + a[1]`,
+	56,
+);
+
+parity(
+	"keyed slice literal",
+	`	s := []int{2: 7, 4: 1}
+	return len(s)*100 + s[2]*10 + s[4] + s[0]`,
+	571,
+);
+
+parity(
+	"keyed slice literal with positional elements after a key",
+	`	s := []int{1, 3: 4, 5}
+	return len(s)*1000 + s[0]*100 + s[3]*10 + s[4]`,
+	5145,
+);
+
+parity(
+	"keyed nested array literal with elided types",
+	`	a := [2][3]int{1: {2: 5}}
+	b := a
+	b[1][2] = 9
+	return a[1][2]*100 + a[0][0]*10 + b[1][2]`,
+	509,
+);
+
+parity(
+	"keyed elements evaluate in source order",
+	`	n := 0
+	next := func() int {
+		n++
+		return n
+	}
+	a := [3]int{2: next(), 0: next(), 1: next()}
+	s := []int{2: next(), 0: next()}
+	return a[0]*10000 + a[1]*1000 + a[2]*100 + s[0]*10 + s[2]`,
+	23154,
+);
+
+test("array literal over 10000 elements compiles to a valid module", () => {
+	const elems = Array.from({ length: 10050 }, (_, i) => String(i % 7)).join(
+		", ",
+	);
+	const src = `
+package main
+
+var big = [10050]int{${elems}}
+
+func Main() int {
+	return big[10049]*10 + big[13]
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.jsRes, (10049 % 7) * 10 + (13 % 7));
+	assertEqual(res.wasmRes, BigInt((10049 % 7) * 10 + (13 % 7)));
+});
+
+parity(
+	"pointer to array sees a later assignment to the array",
+	`	a := [2]int{1, 2}
+	p := &a
+	a = [2]int{3, 4}
+	p[1] = 9
+	return a[0]*10 + a[1] + p[0]*100`,
+	339,
+);
