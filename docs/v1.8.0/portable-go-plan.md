@@ -717,7 +717,7 @@ Conventions used in the tasks:
   - Done when: `npm run bench` hybrid raycast is within 3% of v1.7.0. If not, extend the analysis; do not disable the checks.
   - Landed: `markInBoundsIndexes` (`src/lower/bounds.js`) runs from the JS backend in strict mode and marks `xs[i]` `_inBounds` for the two loop shapes (local `xs`, never assigned, shadowed, address-taken, used as a selector base or written in any closure; `i` written only by the loop; indexes inside func literals in the body are not marked) and for constant indexes into arrays. The hybrid raycast runs in WASM, so the measured cost came from the 0.16a WASM change instead: keeping the length in a local for the panic message cost ~4%. A failing WASM check now branches with the index and a site id (an immediate) to a per-function handler that recomputes that site's length, so the hot path stores nothing extra. Numbers in [Performance and size](#performance-and-size).
 
-- [ ] **Task 0.17 — `goto` diagnostic**
+- [x] **Task 0.17 — `goto` diagnostic**
   - Files: `src/lexer.js` (keyword), `src/parser/statements.js`, `src/typechecker/statements.js`
   - Do: parse `goto L` and labels so the error is targeted: `goto is not supported; restructure with labeled break/continue`.
   - Test: `test/unit/language/control-flow.test.js` — the message appears for `js`, `wasm` and `both` packages; `Undefined: 'goto'` does not.
