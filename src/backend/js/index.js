@@ -45,6 +45,7 @@ import {
 	HELPER_ERROR_AS,
 	HELPER_ERROR_IS,
 	HELPER_ERROR_JOIN,
+	HELPER_GENERICS,
 	HELPER_HEX,
 	HELPER_IFACE_BOX,
 	HELPER_IFEQ,
@@ -141,6 +142,7 @@ const HELPER_MAP = [
 	["nilCall", HELPER_NIL_CALL],
 	["bounds", HELPER_BOUNDS],
 	["nilMap", HELPER_NIL_MAP],
+	["generics", HELPER_GENERICS],
 	["sprintf", HELPER_SPRINTF],
 	["error", HELPER_ERROR],
 	["errorIs", HELPER_ERROR_IS],
@@ -676,9 +678,11 @@ export class CodeGen {
 		const resolved = this.checker.types.get(typeName)?.underlying;
 		if (resolved?.kind === "struct") {
 			const fields = [];
-			for (const [name, type] of resolved.fields.entries()) {
-				fields.push({ name, zero: this.zeroValueForType(type) });
-			}
+			// Cached per type name, so never bound to the current generic body.
+			this._withTypeParamZeros(null, () => {
+				for (const [name, type] of resolved.fields.entries())
+					fields.push({ name, zero: this.zeroValueForType(type) });
+			});
 			this.structFields.set(typeName, fields);
 			return fields;
 		}
@@ -711,6 +715,34 @@ export class CodeGen {
 		this.line("}");
 	}
 
+	// A generic struct's constructor takes the instance's zero-value factories
+	// after the fields (see HELPER_GENERICS). A field whose zero value depends
+	// on a type parameter starts at it when its argument is undefined.
+	_genTypeParamBindings(tpNames, tz) {
+		tpNames.forEach((n, i) => {
+			this.line(`const $z_${n} = ${tz}?.[${i}] ?? __zn;`);
+		});
+	}
+
+	_genGenericStructConstructor(fields, tpNames) {
+		const usesTz = (f) => f.zero.includes("$z_");
+		const params = fields.map((f) =>
+			usesTz(f) ? `${f.name}$` : `${f.name}$ = ${f.zero}`,
+		);
+		this.line(`constructor(${[...params, "$tz"].join(", ")}) {`);
+		this.indented(() => {
+			this.line("this[__tz] = $tz;");
+			if (fields.some(usesTz)) this._genTypeParamBindings(tpNames, "$tz");
+			for (const f of fields) {
+				const v = usesTz(f)
+					? `${f.name}$ === undefined ? ${f.zero} : ${f.name}$`
+					: `${f.name}$`;
+				this.line(`this.${f.name} = ${v};`);
+			}
+		});
+		this.line("}");
+	}
+
 	_genStructClone(name, structTypeAst, fields) {
 		const resolved = this.checker?.types.get(name)?.underlying;
 		const astTypes = new Map();
@@ -722,6 +754,7 @@ export class CodeGen {
 				this._typeFromNode(astTypes.get(f.name));
 			return this._cloneJs(t, `this.${f.name}`);
 		});
+		if (this._genericTypeParamNames(name)) args.push("this[__tz]");
 		this.blank();
 		this.line(`__clone() { return new ${name}(${args.join(", ")}); }`);
 	}
@@ -735,12 +768,31 @@ export class CodeGen {
 		);
 	}
 
+	// Type parameter names of generic type `name`, or null.
+	_genericTypeParamNames(name) {
+		const generic = this.checker?.types.get(name)?._generic;
+		if (!generic?.typeParams?.length || generic.isAlias) return null;
+		return generic.typeParams.map((tp) => tp.name);
+	}
+
 	genStruct(name, structTypeAst, methodDecls) {
-		const fields = this._collectStructFields(name, structTypeAst);
-		this.structFields.set(name, fields);
+		const tpNames = this._genericTypeParamNames(name);
+		if (tpNames) this.useHelper("generics");
+		const fields = this._withTypeParamZeros(tpNames, () =>
+			this._collectStructFields(name, structTypeAst),
+		);
+		this.structFields.set(
+			name,
+			tpNames
+				? this._withTypeParamZeros(null, () =>
+						this._collectStructFields(name, structTypeAst),
+					)
+				: fields,
+		);
 		this.line(`class ${name} {`);
 		this.indented(() => {
-			this._genStructConstructor(fields);
+			if (tpNames) this._genGenericStructConstructor(fields, tpNames);
+			else this._genStructConstructor(fields);
 			for (const m of methodDecls) {
 				this.blank();
 				this.genMethod(m);
@@ -803,8 +855,23 @@ export class CodeGen {
 		const prevBoxed = this._boxedVars;
 		this._boxedVars = new Set();
 		this._scanAddressTaken(decl.body);
+		// Methods of a generic struct read its type arguments from the
+		// instance; named non-struct types have no instance to carry them.
+		const tpNames = staticNamed
+			? null
+			: this._genericTypeParamNames(decl.recvType?.name);
+		this._withTypeParamZeros(tpNames, () =>
+			this._genMethodBody(decl, staticNamed, recvParam, tpNames),
+		);
+		this._boxedVars = prevBoxed;
+		this.line("}");
+		this._currentSrcFileIdx = prevFileIdx;
+	}
+
+	_genMethodBody(decl, staticNamed, recvParam, tpNames) {
 		this._withFnCtx(decl.body, () =>
 			this.indented(() => {
+				if (tpNames) this._genTypeParamBindings(tpNames, "this[__tz]");
 				if (!staticNamed && decl.recvName && decl.recvName !== "_") {
 					this.line(`const ${decl.recvName} = ${this._receiverValue(decl)};`);
 				}
@@ -815,9 +882,6 @@ export class CodeGen {
 				this._withNamedReturns(decl, () => this._genBody(decl.body, decl));
 			}),
 		);
-		this._boxedVars = prevBoxed;
-		this.line("}");
-		this._currentSrcFileIdx = prevFileIdx;
 	}
 
 	// JS parameter names; a variadic Go parameter is a rest parameter.
@@ -860,8 +924,22 @@ export class CodeGen {
 	// ── Function declarations ────────────────────────────────────
 
 	genFuncDecl(decl, nameOverride) {
+		const tpNames = decl.typeParams?.length
+			? decl.typeParams.map((tp) => tp.name)
+			: null;
+		this._withTypeParamZeros(tpNames, () =>
+			this._genFuncDecl(decl, nameOverride, tpNames),
+		);
+	}
+
+	// A generic function takes one zero-value factory per type parameter
+	// before its parameters (see HELPER_GENERICS).
+	_genFuncDecl(decl, nameOverride, tpNames) {
 		const name = nameOverride ?? decl.name;
-		const params = this._paramNames(decl.params).join(", ");
+		const params = [
+			...(tpNames ?? []).map((n) => `$z_${n}`),
+			...this._paramNames(decl.params),
+		].join(", ");
 		const asyncPrefix = decl.async ? "async " : "";
 		const srcLine = decl._line ?? null;
 		this.line(`${asyncPrefix}function ${name}(${params}) {`, srcLine);

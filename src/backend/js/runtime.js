@@ -148,6 +148,17 @@ var __ix = __ix || function(a, i) {
 };
 var __lv;`;
 
+// Generic zero values (generics are erased in JS): a generic function takes
+// one zero-value factory per type parameter as leading arguments, and an
+// instance of a generic struct keeps its factories under the `__tz` symbol
+// (a symbol, so field iteration, equality and JSON never see it).  Shared
+// factories for the common zero values avoid a closure per call.
+export const HELPER_GENERICS = `var __tz = __tz || Symbol.for("gofront.typeArgs");
+var __zn = __zn || (() => null);
+var __z0 = __z0 || (() => 0);
+var __zs = __zs || (() => "");
+var __zf = __zf || (() => false);`;
+
 // Strict-mode nil maps: the zero value of a map type is one frozen empty
 // object, so reads, `len` and `range` behave as on an empty map, and every
 // write goes through `__mw`, which panics with Go's message.
