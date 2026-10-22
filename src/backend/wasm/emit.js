@@ -1393,6 +1393,10 @@ export class FunctionEmitter {
 		if (typeof t.len === "number") return t.len;
 		if (t.len?.value !== undefined) return Number(t.len.value);
 		if (t.underlying) return this._getArraySize(t.underlying, defaultSize);
+		if (t.name && this.mod.checker?.types?.has(t.name)) {
+			const resolved = this.mod.checker.types.get(t.name);
+			if (resolved !== t) return this._getArraySize(resolved, defaultSize);
+		}
 		return defaultSize;
 	}
 

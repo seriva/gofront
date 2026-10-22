@@ -906,7 +906,12 @@ export const expressionGenMethods = {
 				? `${this.genExpr(sel.expr)}.value`
 				: this.genExpr(sel.expr);
 		}
-		return { cls: info.cls, recv };
+		return {
+			cls: info.cls,
+			recv,
+			byValue: !method._ptrRecv,
+			recvType: viaPtr ? recvType.base : recvType,
+		};
 	},
 
 	// `x.M` used as a value: binds the receiver now, as Go does.
@@ -914,7 +919,11 @@ export const expressionGenMethods = {
 		if (!expr._isMethodValue || expr._callee) return undefined;
 		const target = this._namedMethodTarget(expr);
 		if (!target) return undefined;
-		return `((__r) => (...__a) => ${target.cls}.$${expr.field}(__r, ...__a))(${target.recv})`;
+		// A value receiver (a named array) is copied when the value is evaluated.
+		const recv = target.byValue
+			? this._cloneJs(target.recvType, target.recv)
+			: target.recv;
+		return `((__r) => (...__a) => ${target.cls}.$${expr.field}(__r, ...__a))(${recv})`;
 	},
 
 	_genAddressOfExpr(operand) {
@@ -991,7 +1000,17 @@ export const expressionGenMethods = {
 			const recv =
 				this.strict && !expr._isMethodValue ? this._genNilChecked(base) : base;
 			const sel = `${recv}.${expr.field}`;
-			if (expr._isMethodValue && !expr._callee) return `${sel}.bind(${base})`;
+			if (expr._isMethodValue && !expr._callee) {
+				// `p.M` with a value receiver binds a copy of `*p` now.
+				if (expr._derefRecv) {
+					const copy = this._cloneJs(
+						expr.expr._type.base,
+						this.strict ? this._genNilChecked(base) : base,
+					);
+					return `((__r) => __r.${expr.field}.bind(__r))(${copy})`;
+				}
+				return `${sel}.bind(${base})`;
+			}
 			return sel;
 		}
 		const sel = `${base}.value.${expr.field}`;
@@ -1709,7 +1728,10 @@ export const expressionGenMethods = {
 		let t = expr._type;
 		while (t?.kind === "named") t = t.underlying;
 		if (t?.kind !== "slice") return null;
-		const size = Math.max(-1, ...compositeLitIndices(expr.elems)) + 1;
+		// A loop, not a spread: huge literals would overflow the call stack.
+		let max = -1;
+		for (const i of compositeLitIndices(expr.elems)) if (i > max) max = i;
+		const size = max + 1;
 		return { size, elem: t.elem };
 	},
 

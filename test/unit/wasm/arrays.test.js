@@ -1066,3 +1066,107 @@ parity(
 	return a[0]*10 + a[1] + p[0]*100`,
 	339,
 );
+
+section("WASM Arrays — named array types and swaps (review fixes)");
+
+const namedV = "type V [3]int";
+
+parity(
+	"range over a named array value",
+	`	v := V{1, 2, 3}
+	n := 0
+	for i, x := range v {
+		n += i * x
+	}
+	return n`,
+	8,
+	namedV,
+);
+
+parity(
+	"range over a pointer to a named array",
+	`	v := V{1, 2, 3}
+	p := &v
+	n := 0
+	for i, x := range p {
+		n += i * x
+	}
+	return n`,
+	8,
+	namedV,
+);
+
+parity(
+	"zero value of a named array has its full length",
+	`	var w V
+	w[1] = 2
+	return w[1]*10 + len(w)`,
+	23,
+	namedV,
+);
+
+parity(
+	"named array struct field zero value",
+	`	h := H{}
+	h.v[1] = 4
+	return h.v[1]`,
+	4,
+	`${namedV}\n\ntype H struct{ v V }`,
+);
+
+parity(
+	"array of named arrays zero value",
+	`	var m [2]V
+	m[1][2] = 5
+	return m[1][2]`,
+	5,
+	namedV,
+);
+
+parity(
+	"named array passed and returned by value",
+	`	var w V
+	w = f(w)
+	return w[2]`,
+	7,
+	`${namedV}\n\nfunc f(v V) V {\n\tv[2] = 7\n\treturn v\n}`,
+);
+
+parity(
+	"swap of address-taken arrays",
+	`	a := [2]int{1, 2}
+	b := [2]int{3, 4}
+	p := &a
+	a, b = b, a
+	return a[0]*1000 + b[0]*100 + p[0]`,
+	3103,
+);
+
+parity(
+	"swap of two address-taken arrays",
+	`	a := [2]int{1, 2}
+	b := [2]int{3, 4}
+	p := &a
+	q := &b
+	a, b = b, a
+	return a[0]*1000 + b[0]*100 + p[0]*10 + q[0]`,
+	3131,
+);
+
+test("JS compile of a 200000-element slice literal", () => {
+	const elems = Array.from({ length: 200000 }, (_, i) => String(i % 7)).join(
+		",",
+	);
+	const src = `
+package main
+
+var big = []byte{${elems}}
+
+func Main() int {
+	return len(big)
+}
+`;
+	const { js, errors } = compile(src);
+	assertEqual(errors.length, 0);
+	assert(js.length > 0, "emitted JS");
+});

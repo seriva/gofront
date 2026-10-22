@@ -273,6 +273,11 @@ export class StmtsEmitter {
 			const name = `__par_tmp_${this.tempCounter++}`;
 			const idx = this.allocLocal(name, wType, goType, true);
 			this.emitExpr(r, wType);
+			// An array temp must snapshot the value: an in-place store into
+			// an address-taken array (`a, b = b, a` with `p := &a`) would
+			// otherwise change what the temp holds.
+			if (this._isValueArray(goType) && !this._arrayCopyElidable(r, null))
+				this._emitCopyIfValue(r, goType, wType);
 			this.pushInstruction({ op: "local.set", index: idx });
 			return { kind: "Ident", name, _type: goType, _parTmp: true };
 		});
@@ -2342,9 +2347,7 @@ export class StmtsEmitter {
 
 		const elemGoType = isSlice
 			? iterType.elem
-			: isPtrToArr
-				? iterType.base.elem
-				: iterType.elem;
+			: this._getArrayElemType(isPtrToArr ? iterType.base : iterType);
 		const arrInfo = this.mod.getArrayType(elemGoType);
 		const sliceInfo = isSlice ? this.mod.getSliceType(elemGoType) : null;
 
