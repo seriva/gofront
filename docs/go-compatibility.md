@@ -58,6 +58,7 @@ divide-by-zero panics) — see the [hybrid guide](hybrid-wasm.md#strict-numeric-
 | `encoding/json` | Implemented via static compile-time code generation without runtime reflection (`js` packages). Supports structs, maps, slices, primitives, pointers, `json.RawMessage`, `MarshalJSON` methods (pointer receivers only on addressable values, as in Go), and `UnmarshalJSON` methods. Not implemented: `Encoder`/`Decoder`, `Number`, and typed error values (`*json.SyntaxError`, `*json.UnmarshalTypeError`, …) — errors are plain `error`s with Go's messages. `int64` values beyond 2⁵³ lose precision on the JS side. Unsupported in `wasm` packages (reports compile diagnostic). | Standard library package with runtime reflection | Reflection-free compile-time specialization matches Go formatting and error messages. |
 | `gofront/simd` | Experimental value-type 4-wide float SIMD (`simd.F32x4`). In WASM compiles to native `v128` instructions without GC allocation; in JS lowers to frozen 4-element arrays using `Math.fround` for 32-bit float parity. Cannot cross the JS↔WASM boundary yet, so exported struct fields and exported function parameters/results of type `F32x4` are rejected in `wasm`/`both` packages; `==` on `F32x4` and `fmt` formatting of `F32x4` are not supported in `wasm` packages. Completion is planned for v1.8.0. | Not in Go standard library | High-performance vector math targeting WebAssembly SIMD. |
 | Pointers (`&x`, `*p`) | Struct pointers are the struct reference itself; address-taken scalar variables use a box struct (`$box_T`); pointers to struct fields (`&s.Field`) and slice/array elements (`&xs[i]`) use accessor refs (`$acc_T`) with getter/setter helpers under an abstract supertype `$ptr_T` in WASM, and accessor boxes in JS; slices and maps are references | True memory indirection | Shared mutation works for scalars, structs, fields, and slice/array elements across both JS and WASM/both packages. Pointers compare by identity: two `&s.X` taken separately compare equal (same target and field index), while boxes never equal accessor refs. Accessor refs cross the JS↔WASM boundary via copy-in/copy-out `{ value }` boxes with live getters and setters. |
+| Partial slice expressions in `js` packages | `b[:]`, `b[0:]` and `a[:]` share the backing store; `b[i:]` with a non-zero `i` and any slice with a high bound (`b[:n]`, `b[i:j]`) copy the elements (typed-array slices use `subarray` and always share). WASM shares in every case | Every slice expression shares the backing store | A JS array cannot be a view onto part of another array. Write through the original slice, or use an index offset, when the sharing matters. |
 | Three-index slice (`a[lo:hi:max]`) | `max` is parsed but ignored | Sets result capacity | JS arrays have no capacity. |
 | `time.Time` boundary crossing | Round-trips across the JS↔WASM boundary via Unix milliseconds (matching JS `Date`); sub-millisecond nanoseconds are truncated | Nanosecond precision everywhere | The JS shim operates on millisecond timestamps. Times created in WASM retain nanoseconds internally until crossing the boundary. |
 | Exported / unexported | Enforced for GoFront packages; external `.d.ts`/npm namespaces are exempt | Access enforced uniformly | External JS APIs use lowercase names by convention. |
@@ -92,12 +93,15 @@ exported function, a test harness) must use `Array$`, not `Array`; `Array` there
 the browser's global. Pick a different Go name for exported functions you call from JS.
 
 > [!WARNING]
-> Type declarations are **not** renamed. A type named after a browser global, such as
-> `type Array struct{}`, is emitted as `class Array`, which shadows the global in the
-> bundle's module scope. Generated helpers that call the real global then fail at runtime
-> (for example `Array.isArray is not a function` as soon as the program calls `append`).
-> GoFront does not reject such a declaration, so pick another name for the type
-> (`ArrayData`, `Obj`, …).
+> Type declarations are **not** renamed. A struct type, or a named type with methods, is
+> emitted as a JS class of the same name, and a class named after a JavaScript built-in
+> that generated helpers call (`Array`, `Object`, `Error`, `Map`, `Set`, `Number`,
+> `String`, `Math`, `JSON`, `Promise`, `Date`, the typed-array constructors, …) would
+> shadow it. GoFront therefore rejects such a declaration in `js` and `both` packages with
+> `type Array shadows the JavaScript global Array; rename the type`; pick another name
+> (`ArrayData`, `AppError`, …). Interfaces (`type Number interface{ ~int | ~float64 }`),
+> method-less named types (`type String string`), aliases, DOM names (`type Element struct{…}`)
+> and every type in a `wasm` package emit no conflicting class and are accepted.
 
 ---
 

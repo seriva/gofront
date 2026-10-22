@@ -1,13 +1,22 @@
 // src/backend/wasm/method-expr.js
-// Method expressions (`T.M`, `(*T).M`) in WASM.  A call through one,
-// `(*T).M(p, a)`, becomes the ordinary method call `p.M(a)`.  Any other use
-// becomes a func literal that forwards to the method,
-// `func(recv *T, a0 A) R { return recv.M(a0) }`, which the closure lifting
-// then emits like any other func value.  Runs after monomorphisation, so the
+// Method expressions (`T.M`, `(*T).M`) and method values (`x.M`) in WASM.
+// A call through a method expression, `(*T).M(p, a)`, becomes the ordinary
+// method call `p.M(a)`.  Any other use becomes a func literal that forwards
+// to the method, `func(recv *T, a0 A) R { return recv.M(a0) }`, which the
+// closure lifting then emits like any other func value.  A method value
+// binds its receiver when it is evaluated (copying a value receiver, taking
+// the address of an addressable one for a pointer receiver):
+// `func(recv$ *T) func(A) R { return func(a0 A) R { return recv$.M(a0) } }(&x)`.  Runs after monomorphisation, so the
 // receiver and method types are concrete, on the WASM pipeline's own copy of
 // the programs.
 
-import { typeToTypeNode } from "./monomorph.js";
+import { typeToTypeNode as toNode } from "./monomorph.js";
+
+// Func types stay semantic types: `typeToTypeNode` has no func form and
+// would turn them into `any`.
+function typeToTypeNode(t) {
+	return t?.kind === "func" ? t : toNode(t);
+}
 
 function isVoid(t) {
 	return !t || (t.kind === "basic" && t.name === "void");
@@ -49,11 +58,16 @@ function methodCall(sel, recvExpr, args, fnType) {
 	};
 }
 
-function forwardingFuncLit(sel) {
+// Each method value's outer literal gets its own receiver name: captures are
+// resolved by name, so two method values of different receiver types in one
+// function must not share `recv$`.
+let recvCounter = 0;
+
+function forwardingFuncLit(sel, recvName = "recv$") {
 	const fnType = sel._type;
 	const [recvType, ...paramTypes] = fnType.params;
 	const params = [
-		{ name: "recv$", type: typeToTypeNode(recvType) },
+		{ name: recvName, type: typeToTypeNode(recvType) },
 		...paramTypes.map((t, i) => ({
 			name: `a$${i}`,
 			type: typeToTypeNode(t),
@@ -65,7 +79,7 @@ function forwardingFuncLit(sel) {
 		if (fnType.variadic && i === paramTypes.length - 1) a._spread = true;
 		return a;
 	});
-	const call = methodCall(sel, ident("recv$", recvType, sel), args, fnType);
+	const call = methodCall(sel, ident(recvName, recvType, sel), args, fnType);
 	const result = fnType.returns?.[0];
 	const stmts = isVoid(result)
 		? [{ kind: "ExprStmt", expr: call }]
@@ -81,9 +95,76 @@ function forwardingFuncLit(sel) {
 	};
 }
 
-function rewrite(node) {
+function methodValueLit(sel) {
+	const fnType = sel._type;
+	let recvType = sel.expr._type;
+	let recvArg = sel.expr;
+	if (fnType._ptrRecv && recvType?.kind !== "pointer") {
+		recvType = { kind: "pointer", base: recvType };
+		recvArg = {
+			kind: "UnaryExpr",
+			op: "&",
+			operand: sel.expr,
+			_type: recvType,
+			_line: sel._line,
+			_col: sel._col,
+		};
+	} else if (sel._derefRecv && recvType?.kind === "pointer") {
+		// `p.M` with a value receiver binds a copy of `*p` now.
+		recvType = recvType.base;
+		recvArg = {
+			kind: "UnaryExpr",
+			op: "*",
+			operand: sel.expr,
+			_type: recvType,
+			_line: sel._line,
+			_col: sel._col,
+		};
+	}
+	const params = fnType.params ?? [];
+	const recvName = `recv$${recvCounter++}`;
+	const inner = forwardingFuncLit(
+		{
+			...sel,
+			_type: { ...fnType, params: [recvType, ...params] },
+		},
+		recvName,
+	);
+	// The receiver is the outer parameter; the inner literal takes the rest.
+	inner.params = inner.params.slice(1);
+	inner._type = fnType;
+	const outerType = { kind: "func", params: [recvType], returns: [fnType] };
+	return {
+		kind: "CallExpr",
+		func: {
+			kind: "FuncLit",
+			params: [{ name: recvName, type: typeToTypeNode(recvType) }],
+			returnType: typeToTypeNode(fnType),
+			body: {
+				kind: "Block",
+				stmts: [{ kind: "ReturnStmt", values: [inner] }],
+			},
+			_type: outerType,
+			_line: sel._line,
+			_col: sel._col,
+		},
+		args: [recvArg],
+		_type: fnType,
+		_line: sel._line,
+		_col: sel._col,
+	};
+}
+
+function rewrite(node, isCallee) {
 	if (node?.kind === "SelectorExpr" && node._isMethodExpr && node._type)
 		return forwardingFuncLit(node);
+	if (
+		node?.kind === "SelectorExpr" &&
+		node._isMethodValue &&
+		node._type?.kind === "func" &&
+		!isCallee
+	)
+		return methodValueLit(node);
 	if (
 		node?.kind === "CallExpr" &&
 		node.func?.kind === "SelectorExpr" &&
@@ -102,6 +183,11 @@ function rewrite(node) {
 
 /** Rewrites method expressions in place; true if anything changed. */
 export function desugarMethodExprs(node) {
+	recvCounter = 0;
+	return desugar(node);
+}
+
+function desugar(node) {
 	if (!node || typeof node !== "object") return false;
 	let changed = false;
 	if (Array.isArray(node)) {
@@ -111,18 +197,18 @@ export function desugarMethodExprs(node) {
 				node[i] = r;
 				changed = true;
 			}
-			changed = desugarMethodExprs(node[i]) || changed;
+			changed = desugar(node[i]) || changed;
 		}
 		return changed;
 	}
 	for (const key of Object.keys(node)) {
 		if (key.charCodeAt(0) === 95) continue; // "_" side tables
-		const r = rewrite(node[key]);
+		const r = rewrite(node[key], node.kind === "CallExpr" && key === "func");
 		if (r) {
 			node[key] = r;
 			changed = true;
 		}
-		changed = desugarMethodExprs(node[key]) || changed;
+		changed = desugar(node[key]) || changed;
 	}
 	return changed;
 }

@@ -5,8 +5,10 @@
 import {
 	assert,
 	assertEqual,
+	assertValidWasm,
 	compile,
 	compileHybrid,
+	compileWasm,
 	runJs,
 	section,
 	test,
@@ -846,3 +848,407 @@ parity(
 	9,
 	"type P struct {\n\tX int\n}\n\nfunc f(xs ...P) { xs[0].X = 9 }",
 );
+
+section("Slice aliasing and multi-value assignment (Task 0.19a)");
+
+parity(
+	"s := b[:] aliases the slice's backing store",
+	`	b := []int{1, 2, 3}
+	s := b[:]
+	s[0] = 9
+	return b[0]`,
+	9,
+);
+
+parity(
+	"s := b[0:] aliases the slice's backing store",
+	`	b := []int{1, 2, 3}
+	s := b[0:]
+	s[1] = 8
+	return b[1]`,
+	8,
+);
+
+parity(
+	"s := a[:] aliases the array",
+	`	a := [3]int{1, 2, 3}
+	s := a[:]
+	s[2] = 7
+	a[0] = 5
+	return a[2]*10 + s[0]`,
+	75,
+);
+
+parity(
+	"append to b[:] does not grow b",
+	`	b := []int{1, 2, 3}
+	s := append(b[:], 4)
+	return len(b)*10 + len(s)`,
+	34,
+);
+
+parity(
+	"x, y = y, x swaps scalars",
+	`	x, y := 1, 2
+	x, y = y, x
+	return x*10 + y`,
+	21,
+);
+
+parity(
+	"a, b = b, a swaps arrays",
+	`	a := [2]int{1, 2}
+	b := [2]int{3, 4}
+	a, b = b, a
+	return a[0]*1000 + a[1]*100 + b[0]*10 + b[1]`,
+	3412,
+);
+
+parity(
+	"xs[0], xs[1] = xs[1], xs[0] swaps slice elements",
+	`	xs := []int{1, 2}
+	xs[0], xs[1] = xs[1], xs[0]
+	return xs[0]*10 + xs[1]`,
+	21,
+);
+
+parity(
+	"multi-value assignment evaluates every right-hand side first",
+	`	i, j, k := 1, 2, 3
+	i, j, k = j+k, i+k, i+j
+	return i*100 + j*10 + k`,
+	543,
+);
+
+parity(
+	"x, y := 2, x on a redeclared x reads the old x",
+	`	x := 1
+	x, y := 2, x
+	return x*10 + y`,
+	21,
+);
+
+parity(
+	"x, y := 2, f() runs f before the redeclared x is assigned",
+	`	x := 1
+	f := func() int { return x }
+	x, y := 2, f()
+	return x*10 + y`,
+	21,
+);
+
+parity(
+	"lo, hi := 0, len(xs) and a, b = b, len(xs) keep their values",
+	`	xs := []int{1, 2, 3}
+	lo, hi := 0, len(xs)
+	a, b := 5, 6
+	a, b = b, len(xs)
+	return lo*1000 + hi*100 + a*10 + b`,
+	363,
+);
+
+section("Array type completion (Task 0.19b)");
+
+parity(
+	"named array type: literal, index and assignment",
+	`	v := V{1, 2, 3}
+	w := v
+	w[0] = 9
+	return v[0]*100 + w[0]*10 + len(v)`,
+	193,
+	"type V [3]int",
+);
+
+parity(
+	"named array type: comparison",
+	`	a := V{1, 2, 3}
+	b := V{1, 2, 3}
+	c := V{1, 2, 4}
+	r := 0
+	if a == b {
+		r += 10
+	}
+	if a != c {
+		r++
+	}
+	return r`,
+	11,
+	"type V [3]int",
+);
+
+parity(
+	"named array type: value and pointer methods",
+	`	v := V{1, 2, 3}
+	v.Scale(2)
+	return v.Sum()`,
+	12,
+	"type V [3]int\n\nfunc (v V) Sum() int { return v[0] + v[1] + v[2] }\n\nfunc (v *V) Scale(k int) {\n\tfor i := range v {\n\t\tv[i] *= k\n\t}\n}",
+);
+
+parity(
+	"pointer to array: index, write and dereference",
+	`	a := [3]int{1, 2, 3}
+	p := &a
+	p[1] = 7
+	b := *p
+	b[0] = 9
+	return a[0]*100 + a[1]*10 + p[2] + len(p)*1000`,
+	3173,
+);
+
+parity(
+	"pointer to array: assignment through *p",
+	`	a := [2]int{1, 2}
+	p := &a
+	*p = [2]int{5, 6}
+	return a[0]*10 + a[1]`,
+	56,
+);
+
+parity(
+	"keyed slice literal",
+	`	s := []int{2: 7, 4: 1}
+	return len(s)*100 + s[2]*10 + s[4] + s[0]`,
+	571,
+);
+
+parity(
+	"keyed slice literal with positional elements after a key",
+	`	s := []int{1, 3: 4, 5}
+	return len(s)*1000 + s[0]*100 + s[3]*10 + s[4]`,
+	5145,
+);
+
+parity(
+	"keyed nested array literal with elided types",
+	`	a := [2][3]int{1: {2: 5}}
+	b := a
+	b[1][2] = 9
+	return a[1][2]*100 + a[0][0]*10 + b[1][2]`,
+	509,
+);
+
+parity(
+	"keyed elements evaluate in source order",
+	`	n := 0
+	next := func() int {
+		n++
+		return n
+	}
+	a := [3]int{2: next(), 0: next(), 1: next()}
+	s := []int{2: next(), 0: next()}
+	return a[0]*10000 + a[1]*1000 + a[2]*100 + s[0]*10 + s[2]`,
+	23154,
+);
+
+test("array literal over 10000 elements compiles to a valid module", () => {
+	const elems = Array.from({ length: 10050 }, (_, i) => String(i % 7)).join(
+		", ",
+	);
+	const src = `
+package main
+
+var big = [10050]int{${elems}}
+
+func Main() int {
+	return big[10049]*10 + big[13]
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.jsRes, (10049 % 7) * 10 + (13 % 7));
+	assertEqual(res.wasmRes, BigInt((10049 % 7) * 10 + (13 % 7)));
+});
+
+parity(
+	"pointer to array sees a later assignment to the array",
+	`	a := [2]int{1, 2}
+	p := &a
+	a = [2]int{3, 4}
+	p[1] = 9
+	return a[0]*10 + a[1] + p[0]*100`,
+	339,
+);
+
+section("WASM Arrays — named array types and swaps (review fixes)");
+
+const namedV = "type V [3]int";
+
+parity(
+	"range over a named array value",
+	`	v := V{1, 2, 3}
+	n := 0
+	for i, x := range v {
+		n += i * x
+	}
+	return n`,
+	8,
+	namedV,
+);
+
+parity(
+	"range over a pointer to a named array",
+	`	v := V{1, 2, 3}
+	p := &v
+	n := 0
+	for i, x := range p {
+		n += i * x
+	}
+	return n`,
+	8,
+	namedV,
+);
+
+parity(
+	"zero value of a named array has its full length",
+	`	var w V
+	w[1] = 2
+	return w[1]*10 + len(w)`,
+	23,
+	namedV,
+);
+
+parity(
+	"named array struct field zero value",
+	`	h := H{}
+	h.v[1] = 4
+	return h.v[1]`,
+	4,
+	`${namedV}\n\ntype H struct{ v V }`,
+);
+
+parity(
+	"array of named arrays zero value",
+	`	var m [2]V
+	m[1][2] = 5
+	return m[1][2]`,
+	5,
+	namedV,
+);
+
+parity(
+	"named array passed and returned by value",
+	`	var w V
+	w = f(w)
+	return w[2]`,
+	7,
+	`${namedV}\n\nfunc f(v V) V {\n\tv[2] = 7\n\treturn v\n}`,
+);
+
+parity(
+	"swap of address-taken arrays",
+	`	a := [2]int{1, 2}
+	b := [2]int{3, 4}
+	p := &a
+	a, b = b, a
+	return a[0]*1000 + b[0]*100 + p[0]`,
+	3103,
+);
+
+parity(
+	"swap of two address-taken arrays",
+	`	a := [2]int{1, 2}
+	b := [2]int{3, 4}
+	p := &a
+	q := &b
+	a, b = b, a
+	return a[0]*1000 + b[0]*100 + p[0]*10 + q[0]`,
+	3131,
+);
+
+parity(
+	"element store before a parallel array read sees the old array",
+	`	a := [2]int{1, 2}
+	var b [2]int
+	a[0], b = 9, a
+	return a[0]*10 + b[0]`,
+	91,
+);
+
+function mainCopies(src) {
+	const res = compileHybrid(src, { emitWat: true });
+	const start = res.wat.indexOf('(export "Main")');
+	const main = res.wat.slice(start, res.wat.indexOf("\n  (func", start));
+	return { res, copies: (main.match(/array\.copy/g) ?? []).length };
+}
+
+test("plain array swap copies each array once", () => {
+	const { res, copies } = mainCopies(`
+package main
+
+func Main() int {
+	a := [2]int{1, 2}
+	b := [2]int{3, 4}
+	a, b = b, a
+	return a[0]*10 + b[0]
+}
+`);
+	assertEqual(res.run("Main").wasmRes, 31n);
+	assertEqual(copies, 2);
+});
+
+test("slice element array swap copies each array once", () => {
+	const { res, copies } = mainCopies(`
+package main
+
+func Main() int {
+	s := [][2]int{{1, 2}, {3, 4}}
+	s[0], s[1] = s[1], s[0]
+	return s[0][0]*10 + s[1][0]
+}
+`);
+	assertEqual(res.run("Main").wasmRes, 31n);
+	assertEqual(copies, 2);
+});
+
+test("JS compile of a 200000-element slice literal", () => {
+	const elems = Array.from({ length: 200000 }, (_, i) => String(i % 7)).join(
+		",",
+	);
+	const src = `
+package main
+
+var big = []byte{${elems}}
+
+func Main() int {
+	return len(big)
+}
+`;
+	const { js, errors } = compile(src);
+	assertEqual(errors.length, 0);
+	assert(js.length > 0, "emitted JS");
+});
+
+test("WASM compile of a 200000-element slice literal", () => {
+	const elems = Array.from({ length: 200000 }, (_, i) => String(i % 7)).join(
+		",",
+	);
+	const src = `
+package main
+
+var big = []int{${elems}}
+
+func Main() int {
+	return len(big)
+}
+`;
+	const { wasm, errors } = compileWasm(src);
+	assertEqual(errors?.length ?? 0, 0);
+	assertValidWasm(wasm);
+});
+
+test("type check of a 200000-element [...]int literal", () => {
+	const elems = Array.from({ length: 200000 }, (_, i) => String(i % 7)).join(
+		",",
+	);
+	const src = `
+package main
+
+var big = [...]int{${elems}}
+
+func Main() int {
+	return len(big)
+}
+`;
+	const { errors } = compile(src);
+	assertEqual(errors.length, 0);
+});
