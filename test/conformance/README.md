@@ -6,6 +6,15 @@ Each `test/conformance/<pkg>/<name>.go` is a small, plain Go program whose `main
 
 To run a different directory of fixtures: `node test/conformance/run.js <dir>`.
 
+## Workflow
+
+1. Write `<pkg>/<name>.go` (see the rules below).
+2. Capture the expected output from real Go: `npm run conformance:update`. It runs `go run` on every fixture and writes each `.out`; pass paths to limit it (`npm run conformance:update -- test/conformance/fmt` or a single `.go` file). It needs the Go toolchain (go1.26, the version the stdlib manifest targets) on `PATH` and fails with an explanation when `go` is missing or has another version.
+3. Review the `.out` diff and commit both files.
+4. `npm run conformance` checks both GoFront backends against it.
+
+Only step 2 needs Go. The `.out` files are checked in, so `npm test` and CI run without a Go toolchain. The unit test that regenerates the checked-in fixtures and expects no change runs only when go1.26 is installed.
+
 ## Writing a fixture
 
 - Keep it a valid Go program: `package main`, a `main` function, standard imports only. No `//gofront:` directives are needed; the runner compiles the file as `both`.
