@@ -31,6 +31,26 @@ export const fmtMethods = {
 			case "Sprintf":
 				this.useHelper("sprintf");
 				return `__sprintf(${fmtArgs})`;
+			case "Sprint":
+			case "Sprintln":
+				this.useHelper("sprint");
+				return `__sprint(${fn === "Sprintln"}${expr.args.map((e) => `, ${this._fmtArgJs(e)}`).join("")})`;
+			case "Append":
+			case "Appendln":
+			case "Appendf": {
+				this.useHelper("sprint");
+				const [dst, ...rest] = expr.args;
+				const restJs = rest
+					.map((e, idx) =>
+						fn === "Appendf" && idx === 0 ? this.genExpr(e) : this._fmtArgJs(e),
+					)
+					.join(", ");
+				const str =
+					fn === "Appendf"
+						? `__sprintf(${restJs})`
+						: `__sprint(${fn === "Appendln"}${restJs ? `, ${restJs}` : ""})`;
+				return `((d, s) => { const e = new TextEncoder().encode(s); const dl = d ? d.length : 0; const r = new Uint8Array(dl + e.length); if (dl > 0) r.set(d, 0); r.set(e, dl); return r; })(${this.genExpr(dst)}, ${str})`;
+			}
 			case "Errorf": {
 				this.useHelper("sprintf");
 				this.useHelper("error");
@@ -46,7 +66,10 @@ export const fmtMethods = {
 				return this._genStdoutWrite(`__sprintf(${fmtArgs})`);
 			case "Print":
 				this.useHelper("sprintf");
-				return this._genStdoutWrite(this._genPrintOperands(expr, "", ""));
+				this.useHelper("sprint");
+				return this._genStdoutWrite(
+					`__sprint(false${expr.args.map((e) => `, ${this._fmtArgJs(e)}`).join("")})`,
+				);
 			case "Println":
 				this.useHelper("sprintf");
 				// console.log supplies the trailing newline.

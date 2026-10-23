@@ -95,6 +95,7 @@ export function setupCoreGlobals(globals, types) {
 		returns: [ret],
 		variadic: true,
 	});
+	const FMT_BYTES = { kind: "slice", elem: UINT8 };
 	const fmtPrintVariadic = (ret) => ({
 		kind: "func",
 		params: [ANY],
@@ -106,6 +107,26 @@ export function setupCoreGlobals(globals, types) {
 		name: "fmt",
 		members: {
 			Sprintf: fmtVariadic(STRING),
+			Sprint: fmtPrintVariadic(STRING),
+			Sprintln: fmtPrintVariadic(STRING),
+			Append: {
+				kind: "func",
+				params: [FMT_BYTES, ANY],
+				returns: [FMT_BYTES],
+				variadic: true,
+			},
+			Appendf: {
+				kind: "func",
+				params: [FMT_BYTES, STRING, ANY],
+				returns: [FMT_BYTES],
+				variadic: true,
+			},
+			Appendln: {
+				kind: "func",
+				params: [FMT_BYTES, ANY],
+				returns: [FMT_BYTES],
+				variadic: true,
+			},
 			Errorf: fmtVariadic(ERROR),
 			Printf: fmtVariadic(VOID),
 			Println: fmtPrintVariadic(VOID),

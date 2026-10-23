@@ -193,6 +193,8 @@ const STDLIB_IMPORTS = [
 	// fmt (arguments travel through the testing_arg_* buffer)
 	["fmt_sprintf", [S], [S]],
 	["fmt_printf", [S], []],
+	["fmt_sprint", ["i32"], [S]],
+	["fmt_print", ["i32"], []],
 	["fmt_format_v", [S], [S]],
 	["fmt_sscan_init", [S, "i32"], ["i32"]],
 	["fmt_sscanf_init", [S, S], ["i32"]],

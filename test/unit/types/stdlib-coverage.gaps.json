@@ -391,9 +391,6 @@
 		],
 		"errors": ["AsType"],
 		"fmt": [
-			"Append",
-			"Appendf",
-			"Appendln",
 			"FormatString",
 			"Formatter",
 			"Formatter.Format",
@@ -414,8 +411,6 @@
 			"Scanln",
 			"Scanner",
 			"Scanner.Scan",
-			"Sprint",
-			"Sprintln",
 			"State",
 			"State.Flag",
 			"State.Precision",

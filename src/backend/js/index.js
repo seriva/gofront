@@ -65,6 +65,7 @@ import {
 	HELPER_SIMD,
 	HELPER_SLICE,
 	HELPER_SORT_SLICE,
+	HELPER_SPRINT,
 	HELPER_SPRINTF,
 	HELPER_STRCONV,
 	HELPER_STRCONV_ERROR,
@@ -148,6 +149,7 @@ const HELPER_MAP = [
 	["nilMap", HELPER_NIL_MAP],
 	["generics", HELPER_GENERICS],
 	["sprintf", HELPER_SPRINTF],
+	["sprint", HELPER_SPRINT],
 	["error", HELPER_ERROR],
 	["errorIs", HELPER_ERROR_IS],
 	["errorAs", HELPER_ERROR_AS],
@@ -521,6 +523,7 @@ export class CodeGen {
 			this.useHelper("base64");
 		}
 		if (name === "append") this.useHelper("slice");
+		if (name === "sprint") this._helpers.add("sprintf");
 		if (name === "slice") this._helpers.add("sv");
 		if (name === "binary") {
 			this.useHelper("ioEOF");

@@ -945,11 +945,12 @@ The Phase 0.5 reviews (PR #29) found these bugs. None of them were introduced by
 
 ### Phase 3.1: `fmt` and `os.Stdout` completion
 
-- [ ] **Task 3.1a — `fmt.Sprint`, `Sprintln`, `Append`, `Appendf`, `Appendln`**
+- [x] **Task 3.1a — `fmt.Sprint`, `Sprintln`, `Append`, `Appendf`, `Appendln`**
   - Files: `src/typechecker/stdlib/core.js`, `src/backend/js/runtime.js`, `src/backend/wasm/emit-stdlib.js`
   - Do: `Sprint` inserts a space only between two non-string operands; `Sprintln` always. `Append*` write into a `[]byte`. `fmt.Print` follows the same rule (found by the Task 1.3a fixtures: `fmt.Print("a", "b", 1, 2, "c")` prints `ab12c` in JS and `a b 1 2 c` in WASM; Go prints `ab1 2c`).
   - Test: conformance fixture `fmt/print.go`.
   - Done when: fixture matches Go on both backends.
+  - Landed: `Sprint`, `Sprintln`, `Append`, `Appendf` and `Appendln` are checker members (`src/typechecker/stdlib/core.js`, and in `WASM_STDLIB_MEMBERS`). The emitter-side code is in `src/backend/js/stdlib/fmt.js` and `emitFmtCall` in `src/backend/wasm/stdlib/core.js` (the WASM `fmt` emitter lives there, not in `emit-stdlib.js`), not in `runtime.js`/`emit-stdlib.js` as the Files line said. Both backends join operands with one shared host helper, `__sprint(ln, ...args)` (`HELPER_SPRINT` in `runtime.js`; the WASM side gets it through two new imports `fmt_sprint`/`fmt_print` that read the argument buffer): a space goes between two operands when neither is a string (also for named string types and `any` holding a string), always for the `ln` forms. `fmt.Print` now uses it on both backends, so `fmt.Print("a", "b", 1, 2, "c")` prints `ab1 2c`. `fmt.Println` is unchanged. `Append*` build the string and append its bytes to a copy of the destination. Fixture `test/conformance/fmt/print.go`. The five members left the `missing` gaps in `stdlib-coverage.gaps.json`.
 
 - [ ] **Task 3.1b — `Stringer` and `error` dispatch for `%v`/`%s`**
   - Files: `src/backend/js/runtime.js` (`formatV`), `src/backend/wasm/emit-stdlib.js`, `src/typechecker/stdlib/core.js` (`fmt.Stringer`)
