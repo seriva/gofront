@@ -2040,6 +2040,7 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		"testing_arg_str": targ, "testing_arg_any": targ,
 		"testing_arg_i64": (v) => targ(v > ${P}MAX || v < -${P}MAX ? v : Number(v)),
 		"testing_arg_bool": (v) => targ(v !== 0),
+		"testing_arg_err": (s) => targ({ Error() { return s; } }),
 		"testing_call": (t, i) => { const a = targs; targs = []; fmtStructMap = new WeakMap(); t[stringTable[i]](...a); },
 		"testing_name": (t) => t.Name(),
 		"testing_flag": (t, i) => (t[stringTable[i]]() ? 1 : 0),
