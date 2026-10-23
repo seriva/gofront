@@ -552,7 +552,6 @@
 			"WriterTo",
 			"WriterTo.WriteTo"
 		],
-		"iter": ["Seq", "Seq2"],
 		"log": [
 			"Default",
 			"Fatal",
@@ -1406,7 +1405,6 @@
 		],
 		"io/fs": ["*"],
 		"io/ioutil": ["*"],
-		"iter": ["Pull", "Pull2"],
 		"log/slog": ["*"],
 		"log/syslog": ["*"],
 		"math/big": ["*"],

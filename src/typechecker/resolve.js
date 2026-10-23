@@ -2,6 +2,7 @@
 // Installed as a mixin on TypeChecker.prototype.
 
 import { parseJsonTag } from "../parser/struct-tag.js";
+import { EXCLUDED_STDLIB_MEMBERS } from "./stdlib/excluded.js";
 import {
 	ANY,
 	BASIC_TYPES,
@@ -189,6 +190,7 @@ export const resolveMethods = {
 				? this.resolveTypeNode(node.expr, scope)
 				: null;
 		if (!base) return this.err(`Unknown type '${name ?? "?"}'`, node);
+		if (name) this._useQualifiedTypeName(node.name ? node : node.expr, base);
 		if (base.kind === "named" && base._generic?.isAlias) {
 			const aliasArgs = typeArgs.map((n) => this.resolveTypeNode(n, scope));
 			node._typeArgs = aliasArgs;
@@ -615,6 +617,12 @@ export const resolveMethods = {
 			}
 			return base.members[field];
 		}
+		const excluded = EXCLUDED_STDLIB_MEMBERS.get(`${base.name}.${field}`);
+		if (excluded)
+			return this.err(
+				`${base.name}.${field} is not available: ${excluded}`,
+				node,
+			);
 		return this.err(`No member '${field}' in namespace ${base.name}`, node);
 	},
 
