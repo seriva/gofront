@@ -1,4 +1,5 @@
-// GoFront test suite — `iter` package (runtime/stdlib/iter).
+// GoFront test suite — `iter` package and the slices iterator members
+// (runtime/stdlib/iter, runtime/stdlib/slices/iter.go overlay).
 
 import { compileDir } from "../../../src/compiler.js";
 import {
@@ -210,4 +211,127 @@ test("an unknown iter member is still a plain missing-member error", () => {
 			),
 		"No member 'Push' in namespace iter",
 	);
+});
+
+section("slices: All, Values, Backward, Collect, AppendSeq");
+
+test("slices.All, Values and Backward", async () => {
+	const out = await iterParity(`import (
+	"fmt"
+	"slices"
+)
+
+func Run() string {
+	xs := []string{"a", "b", "c"}
+	s := ""
+	for i, v := range slices.All(xs) {
+		s += fmt.Sprintf("%d%s", i, v)
+	}
+	s += " "
+	for v := range slices.Values(xs) {
+		s += v
+	}
+	s += " "
+	for i, v := range slices.Backward(xs) {
+		s += fmt.Sprintf("%d%s", i, v)
+	}
+	return s
+}
+`);
+	assertEqual(out, "0a1b2c abc 2c1b0a");
+});
+
+test("early break from slices.All and slices.Backward", async () => {
+	const out = await iterParity(`import (
+	"fmt"
+	"slices"
+)
+
+func Run() string {
+	xs := []int{5, 6, 7, 8}
+	s := ""
+	for i, v := range slices.All(xs) {
+		if i == 2 {
+			break
+		}
+		s += fmt.Sprintf("%d", v)
+	}
+	for _, v := range slices.Backward(xs) {
+		if v == 6 {
+			break
+		}
+		s += fmt.Sprintf("%d", v)
+	}
+	return s
+}
+`);
+	assertEqual(out, "5687");
+});
+
+test("slices.Collect and slices.AppendSeq", async () => {
+	const out = await iterParity(`import (
+	"fmt"
+	"slices"
+)
+
+func Run() string {
+	xs := []float64{1.5, 2.5}
+	ys := slices.Collect(slices.Values(xs))
+	ys[0] = 9
+	zs := slices.AppendSeq([]float64{0}, slices.Values(xs))
+	var none []int
+	empty := slices.Collect(slices.Values(none))
+	return fmt.Sprintf("%v %v %v %d %v", xs, ys, zs, len(empty), empty == nil)
+}
+`);
+	assertEqual(out, "[1.5 2.5] [9 2.5] [0 1.5 2.5] 0 true");
+});
+
+test("slices.Collect of a user sequence of structs", async () => {
+	const out = await iterParity(`import (
+	"iter"
+	"slices"
+)
+
+type P struct {
+	Name string
+	Age  int
+}
+
+func adults(ps []P) iter.Seq[P] {
+	return func(yield func(P) bool) {
+		for _, p := range ps {
+			if p.Age >= 18 && !yield(p) {
+				return
+			}
+		}
+	}
+}
+
+func Run() string {
+	got := slices.Collect(adults([]P{{"a", 20}, {"b", 3}, {"c", 40}}))
+	s := ""
+	for _, p := range got {
+		s += p.Name
+	}
+	return s
+}
+`);
+	assertEqual(out, "ac");
+});
+
+test("slices.Values over a named slice type", async () => {
+	const out = await iterParity(`import (
+	"slices"
+	"strings"
+)
+
+type Names []string
+
+func Run() string {
+	ns := Names{"x", "y"}
+	return strings.Join(slices.Collect(slices.Values(ns)), "+")
+}
+`);
+	assertEqual(out, "x+y");
 });

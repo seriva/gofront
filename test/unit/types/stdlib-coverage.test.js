@@ -88,6 +88,9 @@ function goSource(pkg) {
 		if (STDLIB_PACKAGES.has(pkg))
 			for (const [n, t] of Object.entries(namespace(pkg)?.members ?? {}))
 				pkgChecker.globals.define(n, t);
+		for (const p of programs)
+			for (const { path } of p.imports.flatMap((imp) => imp.imports))
+				importGoSource(pkgChecker, path);
 		const errors = pkgChecker.checkAll(programs);
 		if (errors.length > 0)
 			throw new Error(`${pkg}: ${errors.map((e) => e.message).join("; ")}`);
@@ -95,6 +98,38 @@ function goSource(pkg) {
 	}
 	goSourceCache.set(pkg, src);
 	return src;
+}
+
+// Binds an imported Go-source package (`iter` in the slices overlay) as a
+// namespace of its exported names.  Its types are renamed `iter.Seq`, as
+// emitter-backed types are named, so signatures print them qualified.
+function importGoSource(pkgChecker, path) {
+	const dep = goSource(path);
+	if (!dep) return;
+	const id = pkgIdent(path);
+	const symbols = new Map();
+	const types = new Map();
+	for (const n of dep.names) {
+		if (n.includes(".")) continue;
+		const t = dep.checker.globals.symbols.get(n);
+		if (t !== undefined) symbols.set(n, t);
+		if (dep.checker.types.has(n))
+			types.set(n, qualifiedType(dep.checker.types.get(n), `${id}.${n}`));
+	}
+	pkgChecker.addPackageNamespace(id, symbols, types);
+}
+
+// A copy of named type `t` named `name` (a generic type's instances take
+// the name of its declaration).
+function qualifiedType(t, name) {
+	if (t?.kind !== "named") return t;
+	const copy = { ...t, name };
+	if (t._generic)
+		copy._generic = {
+			...t._generic,
+			declNode: { ...t._generic.declNode, name },
+		};
+	return copy;
 }
 
 function collectDecl(d, names) {
