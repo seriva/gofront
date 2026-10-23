@@ -21,9 +21,13 @@ export const HELPER_LEN = `var __len = __len || function(a) {
 // value of `x` is usually dead), see docs/go-compatibility.md.
 // The copy keeps the capacity of the old value: its `__rcap` symbol property
 // (shared by every compiled module) is `{b, o, c, s, so}` (backing array,
-// offset, capacity, snapshot of the copy and its offset in `s`); a slice or `append` beyond the copy's length writes
-// the elements that changed since the snapshot back into `b` first and
-// continues with a view over `b`.  `__mkslice` is `make([]T, n, cap)`.
+// offset, capacity, snapshot of the copy and its offset in `s`).  An index
+// write `x[i] = v` to a chain that the package self-reslices is followed by
+// `__rcs(x, i)`, which writes the element through to `b` (and `s`), so it is
+// ordered with writes through other slices of `b`.  A slice or `append`
+// beyond the copy's length writes the remaining elements that differ from the
+// snapshot (written through other references to the copy) back into `b`
+// first and continues with a view over `b`.  `__mkslice` is `make([]T, n, cap)`.
 // `__sv` is its own helper ("sv") so range loops can unwrap a view without
 // pulling in the rest.
 export const HELPER_SV = `var __sv = __sv || Symbol.for("gofront.sliceView");`;
@@ -109,14 +113,22 @@ var __cap = __cap || function(a) {
   return a[__rcap]?.c ?? a.length;
 };
 // Write back only the elements of a __reslice copy that changed since it was
-// made (e.s from e.so is its snapshot; NaN counts as unchanged), so writes
+// made (e.s from e.so is its snapshot, kept up to date by __rcs), so writes
 // made meanwhile through other slices of the backing array are kept.
 var __rcput = __rcput || function(e, a, from, to) {
   const s = e.s, so = e.so;
   for (let i = from; i < to; i++) {
-    const v = a[i], w = s[so + i];
-    if (v !== w && (v === v || w === w)) { e.b[e.o + i] = v; s[so + i] = v; }
+    const v = a[i];
+    if (!Object.is(v, s[so + i])) { e.b[e.o + i] = v; s[so + i] = v; }
   }
+};
+// After an index write to a possible __reslice copy: write element i through.
+var __rcs = __rcs || function(a, i) {
+  const e = a?.[__rcap];
+  if (e !== undefined && i >= 0 && i < e.c && i < a.length) { const v = a[i]; e.b[e.o + i] = v; e.s[e.so + i] = v; }
+};
+var __rcdef = __rcdef || function(r, e) {
+  Object.defineProperty(r, __rcap, { value: e, writable: true });
 };
 var __rcflush = __rcflush || function(a) {
   const e = a[__rcap];
@@ -157,14 +169,14 @@ var __reslice = __reslice || function(a, lo, hi) {
       const e = a[__rcap];
       const r = a.slice(lo, hi);
       if (e === undefined) {
-        if (n - lo > r.length) r[__rcap] = { b: a, o: lo, c: n - lo, s: a.slice(lo, hi), so: 0 };
+        if (n - lo > r.length) __rcdef(r, { b: a, o: lo, c: n - lo, s: a.slice(lo, hi), so: 0 });
         return r;
       }
       // A copy of a copy: write back the changed elements it drops and share
       // the snapshot, so a pop costs no more than the copy itself.
       if (lo > 0) __rcput(e, a, 0, lo);
       __rcput(e, a, hi, n);
-      if (e.c - lo > r.length) r[__rcap] = { b: e.b, o: e.o + lo, c: e.c - lo, s: e.s, so: e.so + lo };
+      if (e.c - lo > r.length) __rcdef(r, { b: e.b, o: e.o + lo, c: e.c - lo, s: e.s, so: e.so + lo });
       return r;
     }
   }

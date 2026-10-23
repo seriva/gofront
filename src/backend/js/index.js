@@ -310,6 +310,7 @@ export class CodeGen {
 			}
 		}
 		this._renameReservedIdents(program.decls);
+		this._collectResliceNames(program);
 		const methods = this._collectDecls(program);
 		this._emitJsImports();
 		this._emitTypeDecls(program, methods);
