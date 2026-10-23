@@ -39,6 +39,7 @@ export const TEST_FILES = [
 	"./types/complex.test.js",
 	"./types/generics.test.js",
 	"./types/typedarrays.test.js",
+	"./types/stdlib-coverage.test.js",
 	"./types/webgl.test.js",
 	"./builtins/core.test.js",
 	"./builtins/operators.test.js",
