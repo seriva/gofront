@@ -1,0 +1,14 @@
+all 0 pear
+all 1 apple
+all 2 fig
+value pear
+value apple
+value fig
+backward 2 fig
+backward 1 apple
+backward 0 pear
+first pear
+[4 3 2 1]
+[10 20 2 1]
+0
+[pear apple fig] [PEAR apple fig]
