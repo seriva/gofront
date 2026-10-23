@@ -1,7 +1,7 @@
 // GoFront test suite — stdlib coverage manifest (runtime/stdlib/manifest.json)
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
 	buildManifest,
@@ -11,7 +11,14 @@ import {
 	parseFeature,
 	serializeManifest,
 } from "../../../scripts/stdlib-manifest.js";
-import { assert, assertEqual, section, test } from "../helpers.js";
+import {
+	assert,
+	assertEqual,
+	assertThrows,
+	section,
+	test,
+	withTempDir,
+} from "../helpers.js";
 
 const manifest = JSON.parse(readFileSync(MANIFEST_PATH, "utf8"));
 const byKey = new Map(
@@ -115,7 +122,85 @@ test("parseFeature skips const value lines and unexported markers", () => {
 	assertEqual(parseFeature("type Block interface, unexported methods"), null);
 });
 
+section("Stdlib manifest: statuses");
+
+test("no todo entries remain (every in-scope package is scheduled)", () => {
+	const todo = manifest.entries.filter((e) => e.status === "todo");
+	assertEqual(todo.map((e) => `${e.pkg}.${e.name}`).join(", "), "");
+});
+
+test("every excluded: reason is a scope-rule category", () => {
+	for (const e of manifest.entries) {
+		if (!e.status.startsWith("excluded:")) continue;
+		const category = e.status.slice("excluded:".length);
+		assert(
+			EXCLUDED_CATEGORIES.includes(category),
+			`${e.pkg}.${e.name}: unknown category ${category}`,
+		);
+	}
+});
+
+test("member-level classification follows the scope rule tables", () => {
+	const status = (pkg, name, kind = "func") => entry(pkg, name, kind)?.status;
+	assertEqual(status("strings", "Cut"), "both");
+	assertEqual(status("time", "Sleep"), "js");
+	assertEqual(status("time", "After"), "excluded:runtime");
+	assertEqual(status("time", "Ticker.Stop", "method"), "excluded:runtime");
+	assertEqual(status("time", "LoadLocation"), "excluded:host");
+	assertEqual(status("time", "Time.MarshalJSON", "method"), "both");
+	assertEqual(status("sync", "Cond", "type"), "excluded:runtime");
+	assertEqual(status("sync", "OnceValue"), "both");
+	assertEqual(status("os", "Stdout", "var"), "both");
+	assertEqual(status("os", "Getenv"), "js");
+	assertEqual(status("os", "Open"), "excluded:host");
+	assertEqual(status("regexp", "MustCompile"), "js");
+	assertEqual(status("unicode", "Han", "var"), "excluded:deferred");
+	assertEqual(status("unicode", "Letter", "var"), "both");
+	assertEqual(status("unicode", "IsLetter"), "both");
+	assertEqual(status("math/rand/v2", "NewChaCha8"), "excluded:deferred");
+	assertEqual(status("testing", "T.TempDir", "method"), "excluded:host");
+	assertEqual(status("testing", "T.Parallel", "method"), "both");
+	assertEqual(
+		entry("iter", "Pull", "func").note,
+		"requires coroutines; out of scope (no runtime)",
+	);
+	assertEqual(entry("strings", "Cut", "func").note, undefined);
+});
+
 section("Stdlib manifest: generator");
+
+// A one-package API tree and overrides file for generator unit tests.
+function withFakeApi(overrides, fn) {
+	withTempDir(
+		{
+			"api/go1.26.txt":
+				"pkg strings, func Cut(string, string) (string, string, bool)\n" +
+				"pkg strings, func Lines(string) iter.Seq[string] #61901\n",
+		},
+		(dir) => {
+			const path = join(dir, "overrides.json");
+			writeFileSync(path, JSON.stringify(overrides));
+			fn(join(dir, "api"), path);
+		},
+	);
+}
+
+test("an in-scope package without a default status stays todo", () => {
+	withFakeApi({ packages: {}, rules: {} }, (api, overrides) => {
+		const m = buildManifest(api, overrides);
+		assertEqual(m.entries.map((e) => e.status).join(","), "todo,todo");
+	});
+});
+
+test("an override rule that matches nothing is an error", () => {
+	const overrides = {
+		packages: { strings: { status: "both" } },
+		rules: { strings: [{ status: "js", members: ["Cutt"] }] },
+	};
+	withFakeApi(overrides, (api, path) =>
+		assertThrows(() => buildManifest(api, path), "strings Cutt matches no"),
+	);
+});
 
 test("regenerating the manifest is a no-op", () => {
 	const apiDir = goApiDir();

@@ -1,0 +1,379 @@
+{
+	"$comment": "Member statuses for runtime/stdlib/manifest.json (Task 1.1b). `packages` gives each in-scope package's default status; a package without one stays `todo`. `rules` then apply in order, later rules winning: `members` are member names, `T.*` (a type and all its methods and fields) or `*` (every member); `signature` limits a rule to members with exactly that signature; `note` is the reason recorded with a `js` or `excluded:` status. See the scope rule in docs/v1.8.0/portable-go-plan.md.",
+	"packages": {
+		"bufio": {
+			"status": "both"
+		},
+		"bytes": {
+			"status": "both"
+		},
+		"cmp": {
+			"status": "both"
+		},
+		"container/heap": {
+			"status": "both"
+		},
+		"container/list": {
+			"status": "both"
+		},
+		"container/ring": {
+			"status": "both"
+		},
+		"context": {
+			"status": "both"
+		},
+		"crypto/hmac": {
+			"status": "both"
+		},
+		"crypto/md5": {
+			"status": "both"
+		},
+		"crypto/rand": {
+			"status": "both"
+		},
+		"crypto/sha1": {
+			"status": "both"
+		},
+		"crypto/sha256": {
+			"status": "both"
+		},
+		"crypto/sha512": {
+			"status": "both"
+		},
+		"crypto/subtle": {
+			"status": "both"
+		},
+		"encoding/base32": {
+			"status": "both"
+		},
+		"encoding/base64": {
+			"status": "both"
+		},
+		"encoding/binary": {
+			"status": "both"
+		},
+		"encoding/csv": {
+			"status": "both"
+		},
+		"encoding/hex": {
+			"status": "both"
+		},
+		"encoding/json": {
+			"status": "both"
+		},
+		"errors": {
+			"status": "both"
+		},
+		"fmt": {
+			"status": "both"
+		},
+		"hash": {
+			"status": "both"
+		},
+		"hash/adler32": {
+			"status": "both"
+		},
+		"hash/crc32": {
+			"status": "both"
+		},
+		"hash/fnv": {
+			"status": "both"
+		},
+		"html": {
+			"status": "both"
+		},
+		"io": {
+			"status": "both"
+		},
+		"iter": {
+			"status": "both"
+		},
+		"log": {
+			"status": "both"
+		},
+		"maps": {
+			"status": "both"
+		},
+		"math": {
+			"status": "both"
+		},
+		"math/bits": {
+			"status": "both"
+		},
+		"math/cmplx": {
+			"status": "both"
+		},
+		"math/rand": {
+			"status": "both"
+		},
+		"math/rand/v2": {
+			"status": "both"
+		},
+		"net/url": {
+			"status": "both"
+		},
+		"os": {
+			"status": "excluded:host",
+			"note": "files, processes and signals"
+		},
+		"path": {
+			"status": "both"
+		},
+		"path/filepath": {
+			"status": "both"
+		},
+		"regexp": {
+			"status": "js",
+			"note": "JS-only by design"
+		},
+		"slices": {
+			"status": "both"
+		},
+		"sort": {
+			"status": "both"
+		},
+		"strconv": {
+			"status": "both"
+		},
+		"strings": {
+			"status": "both"
+		},
+		"sync": {
+			"status": "both"
+		},
+		"sync/atomic": {
+			"status": "both"
+		},
+		"testing": {
+			"status": "both"
+		},
+		"time": {
+			"status": "both"
+		},
+		"unicode": {
+			"status": "both"
+		},
+		"unicode/utf16": {
+			"status": "both"
+		},
+		"unicode/utf8": {
+			"status": "both"
+		}
+	},
+	"rules": {
+		"context": [
+			{
+				"status": "excluded:runtime",
+				"note": "Done() returns a channel; use ctx.Err() != nil or context.AfterFunc",
+				"members": ["Context.Done"]
+			}
+		],
+		"crypto/rand": [
+			{
+				"status": "excluded:deferred",
+				"note": "needs math/big",
+				"members": ["Int", "Prime"]
+			}
+		],
+		"io": [
+			{
+				"status": "excluded:runtime",
+				"note": "a pipe blocks until the other side reads",
+				"members": ["Pipe", "PipeReader.*", "PipeWriter.*", "ErrClosedPipe"]
+			}
+		],
+		"iter": [
+			{
+				"status": "excluded:runtime",
+				"note": "requires coroutines; out of scope (no runtime)",
+				"members": ["Pull", "Pull2"]
+			}
+		],
+		"math/rand/v2": [
+			{
+				"status": "excluded:deferred",
+				"note": "ChaCha8 is deferred (code size)",
+				"members": ["ChaCha8.*", "NewChaCha8"]
+			}
+		],
+		"os": [
+			{
+				"status": "both",
+				"members": [
+					"Stdout",
+					"Stderr",
+					"Stdin",
+					"File",
+					"File.Read",
+					"File.Write",
+					"File.WriteString"
+				]
+			},
+			{
+				"status": "js",
+				"note": "JS-only by design",
+				"members": ["Args", "Getenv", "Exit"]
+			}
+		],
+		"path/filepath": [
+			{
+				"status": "excluded:host",
+				"note": "file system",
+				"members": [
+					"Abs",
+					"EvalSymlinks",
+					"Glob",
+					"SkipAll",
+					"SkipDir",
+					"Walk",
+					"WalkDir",
+					"WalkFunc"
+				]
+			}
+		],
+		"sync": [
+			{
+				"status": "excluded:runtime",
+				"note": "blocking wait",
+				"members": ["Cond.*", "NewCond"]
+			},
+			{
+				"status": "excluded:runtime",
+				"note": "starts a goroutine",
+				"members": ["WaitGroup.Go"]
+			}
+		],
+		"sync/atomic": [
+			{
+				"status": "excluded:runtime",
+				"note": "unsafe.Pointer",
+				"members": [
+					"CompareAndSwapPointer",
+					"LoadPointer",
+					"StorePointer",
+					"SwapPointer"
+				]
+			}
+		],
+		"testing": [
+			{
+				"status": "excluded:host",
+				"note": "file system",
+				"members": [
+					"B.ArtifactDir",
+					"B.Chdir",
+					"B.TempDir",
+					"T.ArtifactDir",
+					"T.Chdir",
+					"T.TempDir",
+					"TB.ArtifactDir",
+					"TB.Chdir",
+					"TB.TempDir"
+				]
+			},
+			{
+				"status": "excluded:runtime",
+				"note": "fuzzing",
+				"members": ["F.*", "InternalFuzzTarget.*"]
+			},
+			{
+				"status": "excluded:runtime",
+				"note": "goroutines",
+				"members": ["B.RunParallel", "B.SetParallelism", "PB.*"]
+			},
+			{
+				"status": "excluded:runtime",
+				"note": "allocation counters",
+				"members": ["AllocsPerRun"]
+			},
+			{
+				"status": "excluded:runtime",
+				"note": "go test driver internals",
+				"members": [
+					"Cover.*",
+					"CoverBlock.*",
+					"CoverMode",
+					"Coverage",
+					"InternalBenchmark.*",
+					"InternalExample.*",
+					"InternalTest.*",
+					"Main",
+					"MainStart",
+					"RunBenchmarks",
+					"RunExamples",
+					"RunTests"
+				]
+			}
+		],
+		"time": [
+			{
+				"status": "js",
+				"note": "event loop",
+				"members": ["Sleep", "AfterFunc", "Timer", "Timer.Reset", "Timer.Stop"]
+			},
+			{
+				"status": "excluded:runtime",
+				"note": "channels",
+				"members": [
+					"After",
+					"NewTicker",
+					"NewTimer",
+					"Tick",
+					"Ticker.*",
+					"Timer.C"
+				]
+			},
+			{
+				"status": "excluded:host",
+				"note": "tz database",
+				"members": ["LoadLocation"]
+			},
+			{
+				"status": "excluded:deferred",
+				"note": "tz database parser (code size)",
+				"members": ["LoadLocationFromTZData"]
+			}
+		],
+		"unicode": [
+			{
+				"status": "excluded:deferred",
+				"note": "Unicode table size",
+				"signature": "*RangeTable",
+				"members": ["*"]
+			},
+			{
+				"status": "excluded:deferred",
+				"note": "Unicode table size",
+				"members": [
+					"AzeriCase",
+					"CaseRange.*",
+					"CaseRanges",
+					"Categories",
+					"CategoryAliases",
+					"FoldCategory",
+					"FoldScript",
+					"GraphicRanges",
+					"PrintRanges",
+					"Properties",
+					"Scripts",
+					"SpecialCase.*",
+					"TurkishCase"
+				]
+			},
+			{
+				"status": "both",
+				"members": [
+					"Digit",
+					"Letter",
+					"Lower",
+					"Mark",
+					"Number",
+					"Punct",
+					"Space",
+					"Symbol",
+					"Upper"
+				]
+			}
+		]
+	}
+}
