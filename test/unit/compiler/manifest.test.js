@@ -4,6 +4,12 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+	DOCS,
+	generateDocs,
+	replaceBetweenMarkers,
+	stdlibTables,
+} from "../../../scripts/docs-stdlib.js";
+import {
 	buildManifest,
 	EXCLUDED_CATEGORIES,
 	GO_VERSION,
@@ -13,6 +19,7 @@ import {
 } from "../../../scripts/stdlib-manifest.js";
 import {
 	assert,
+	assertContains,
 	assertEqual,
 	assertThrows,
 	section,
@@ -210,4 +217,68 @@ test("regenerating the manifest is a no-op", () => {
 			readFileSync(MANIFEST_PATH, "utf8"),
 		"runtime/stdlib/manifest.json is stale; run npm run manifest:update",
 	);
+});
+
+section("Generated stdlib docs (docs:stdlib)");
+
+const MINI_MANIFEST = {
+	go: "go1.26",
+	entries: [
+		{
+			pkg: "archive/tar",
+			name: "",
+			kind: "package",
+			status: "excluded:deferred",
+		},
+		{ pkg: "os/exec", name: "", kind: "package", status: "excluded:host" },
+		{ pkg: "fmt", name: "Println", kind: "func", status: "both" },
+		{ pkg: "fmt", name: "Sprint", kind: "func", status: "both" },
+		{ pkg: "fmt", name: "Stringer", kind: "type", status: "both" },
+		{ pkg: "os", name: "Getenv", kind: "func", status: "excluded:host" },
+		{ pkg: "regexp", name: "MustCompile", kind: "func", status: "js" },
+		{ pkg: "regexp", name: "Compile", kind: "func", status: "js" },
+		{ pkg: "strings", name: "Replacer", kind: "type", status: "both" },
+		{ pkg: "strings", name: "ToUpper", kind: "func", status: "both" },
+	],
+};
+const MINI_GAPS = {
+	missing: { fmt: ["Sprint"], regexp: ["Compile"] },
+	wasm: { strings: ["Replacer"] },
+};
+
+test("tables count available, pending, JS-only and excluded members", () => {
+	const t = stdlibTables(MINI_MANIFEST, MINI_GAPS);
+	assertContains(t.all, "| `fmt` | 2 of 3 | 1 | 0 | 0 |");
+	assertContains(t.all, "| `os` | 0 of 0 | 0 | 0 | 1 |");
+	assertContains(t.all, "| `regexp` | 1 of 2 | 1 | 2 | 0 |");
+	assertContains(t.all, "| `strings` | 2 of 2 | 0 | 0 | 0 |");
+	assertContains(t.all, "| host | `os/exec` |");
+	assertContains(t.all, "| deferred | `archive/tar` |");
+	assertContains(t.wasm, "| `fmt` | 2 of 3 | 1 |");
+	assertContains(t.wasm, "| `strings` | 1 of 2 | 1 |");
+	assert(!t.wasm.includes("`regexp` |"), "JS-only package in wasm table");
+	assert(!t.wasm.includes("`os` |"), "excluded package in wasm table");
+});
+
+test("marker replacement is idempotent and requires both markers", () => {
+	const doc = "a\n<!-- stdlib:begin -->\nold\n<!-- stdlib:end -->\nb\n";
+	const once = replaceBetweenMarkers(doc, "NEW", "x.md");
+	assertEqual(once, "a\n<!-- stdlib:begin -->\nNEW\n<!-- stdlib:end -->\nb\n");
+	assertEqual(replaceBetweenMarkers(once, "NEW", "x.md"), once);
+	assertThrows(
+		() => replaceBetweenMarkers("no markers", "NEW", "x.md"),
+		"x.md has no <!-- stdlib:begin --> / <!-- stdlib:end --> markers",
+	);
+});
+
+test("the generator is idempotent and the committed docs are fresh", () => {
+	const first = generateDocs();
+	for (const { path, text } of first) {
+		assertEqual(
+			text === readFileSync(path, "utf8"),
+			true,
+			`${path} is stale; run npm run docs:stdlib`,
+		);
+	}
+	assertEqual(DOCS.length, 2);
 });

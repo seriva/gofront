@@ -465,11 +465,16 @@ npm test                  # unit, zero-alloc perf, and example tests (~1,920+ te
 npm run test:e2e          # E2E browser tests (Playwright, headless Chromium)
 npm run bench             # Möller–Trumbore raycast benchmark comparing pure JS vs hybrid WASM
 npm run manifest:update   # regenerate runtime/stdlib/manifest.json from Go's api/*.txt (needs go1.26)
+npm run conformance       # run test/conformance fixtures on JS and WASM against real Go output (part of npm test)
+npm run conformance:update # capture fixture .out files with go run (needs go1.26)
+npm run docs:stdlib       # regenerate the stdlib tables in docs/ from the manifest (checked by npm run check)
 ```
 
 The stdlib coverage gate (`test/unit/types/stdlib-coverage.test.js`) compares the manifest
 with GoFront's stdlib by name and by signature; known gaps are listed in
-`test/unit/types/stdlib-coverage.gaps.json` (`--update-gaps` rewrites it).
+`test/unit/types/stdlib-coverage.gaps.json` (`--update-gaps` rewrites it; rerun
+`npm run docs:stdlib` afterwards). Conformance fixtures are described in
+[`test/conformance/README.md`](test/conformance/README.md).
 
 **Unit tests** (~1,920+) cover language features, type errors, edge cases, DOM (jsdom),
 external `.d.ts`, npm resolver, TypeScript tuple return signatures, multi-file compilation,

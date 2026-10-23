@@ -63,7 +63,7 @@ A Go package or member is **in scope** when it can be implemented as ordinary co
 
 ## Verified gaps (2026-10-20, v1.7.0 tree)
 
-These were confirmed while writing this plan. The Phase 1 audit produces the complete list.
+These were confirmed while writing this plan. The Phase 1 audit produced the complete list: the coverage gate's gaps file, assigned to tasks in [Task 1.5](#phase-12-conformance-harness-documentation-and-reconciliation). Every stdlib row below is scheduled there.
 
 | Area | Finding | Evidence |
 |---|---|---|
@@ -805,35 +805,96 @@ The Phase 0.5 reviews (PR #29) found these bugs. None of them were introduced by
 
 ### Phase 1.2: Conformance harness, documentation and reconciliation
 
-- [ ] **Task 1.3a — Conformance runner**
+- [x] **Task 1.3a — Conformance runner**
   - Files: new `test/conformance/run.js`, `test/conformance/README.md`, `package.json` (`conformance` script, included in `npm test`)
   - Do: for each `test/conformance/<pkg>/<name>.go`, compile as a `both` package, run `main` on JS and on WASM, and compare both outputs byte for byte with `<name>.out`. Missing `.out` is a failure with the `conformance:update` hint.
   - Test: one fixture per existing package (`strings`, `strconv`, `fmt`) with hand-verified `.out` files to bootstrap.
   - Done when: `npm run conformance` passes on the bootstrap fixtures on both backends.
+  - Landed: `test/conformance/run.js` finds `<pkg>/<name>.go`, compiles each as a `both` package (JS through the strict `both` code generator, WASM through `compileWasm`, which must validate), runs the module on JS (the generated module calls `main` itself) and calls the exported `main` in WASM, capturing raw stdout: `process.stdout.write` and `console.log` in JS, the line-buffered `stdout` callback in WASM. Each output is compared with `<name>.out` as bytes; a failure names the backend and the first differing line, and a missing `.out` names `npm run conformance:update`. `npm run conformance` runs after the unit tests in `npm test`, and `test/unit/compiler/conformance.test.js` covers the runner on temp-dir fixtures. Bootstrap fixtures: `strings/basic.go`, `strconv/basic.go`, `fmt/basic.go`, with `.out` files written by hand and checked against `go run`. Writing them found gaps that were left out of the fixtures because later tasks own them: `fmt.Sprint`/`Sprintln` do not exist and `fmt.Print` spaces operands wrongly on both backends (JS: no space between numbers; WASM: a space between every operand) (Task 3.1a); `%U` and `%T` are printed literally (Task 3.1c); `fmt.Print` of a string that contains `"\n"` is never flushed in WASM, and an unterminated last line is lost there (Task 3.1e's shared line buffer); not yet in any task: `%e` prints a one-digit exponent (`1.234568e+3`, Go `e+03`), `%q` on a `[]string` quotes the joined string, and `fmt.Sprintf("%v", nil)` produces an invalid WASM module (`local.set expected type i64, found ref.null`).
 
-- [ ] **Task 1.3b — `conformance:update` with real Go**
+- [x] **Task 1.3b — `conformance:update` with real Go**
   - Files: `test/conformance/update.js`, `package.json`
   - Do: run each fixture with `go run` (go1.26) and write `.out`. Fail clearly when `go` is missing. Fixtures are plain Go programs, so they compile with both toolchains.
   - Test: regenerate the bootstrap fixtures; the files must be unchanged.
   - Done when: the README documents the workflow and CI does not need `go`.
+  - Landed: `test/conformance/update.js` (`npm run conformance:update [-- <dir-or-fixture>…]`) checks `go env GOVERSION` (missing `go` or a version other than go1.26.x exits 1 with an explanation), runs `go run` on each fixture from its directory and writes `<name>.out`, reporting created/updated/unchanged files. `conformance.test.js` checks the missing-`go` message with an empty `PATH` and, when go1.26 is installed, that Go's output equals every checked-in `.out`. Regenerating the bootstrap fixtures with go1.26.10 left them unchanged.
 
-- [ ] **Task 1.3c — Fixture lint for string semantics**
+- [x] **Task 1.3c — Fixture lint for string semantics**
   - Files: `test/conformance/run.js`
   - Do: reject fixtures that apply `len(`, index `[`, or `range` to a string literal containing non-ASCII bytes, with the hint from [§1.1](#11-string-semantics-both-backends). `[]byte(...)` forms are allowed.
   - Test: a deliberately bad fixture in a temp dir is rejected.
   - Done when: the lint runs as part of `npm run conformance`.
+  - Landed: `lintFixture` in `test/conformance/run.js` scans the fixture's tokens for `len(<lit>)`, `<lit>[` (index and slice) and `range <lit>` where `<lit>` is a string literal with a non-ASCII character or, in an interpreted literal, an escape that produces a byte ≥ 0x80 (`\xc3`, `\303`, `\u00e9`; read from the source because the lexer partly decodes escapes, so `"\\xc3"` is ASCII). Each use is reported as `<pkg>/<name>.go:<line>: …` with the §1.1 hint, and `checkFixture` rejects a fixture before compiling it. `[]byte(…)`/`[]rune(…)` and literals not under `len`/index/`range` pass. Literals reached through variables are not tracked. Tests in `conformance.test.js` (temp-dir fixture rejected, allowed forms).
 
-- [ ] **Task 1.4 — Generated stdlib docs**
+- [x] **Task 1.4 — Generated stdlib docs**
   - Files: new `scripts/docs-stdlib.js`, `docs/language-support.md`, `docs/hybrid-wasm.md`, `package.json` (`docs:stdlib`, added to `check`)
   - Do: generate the package tables between `<!-- stdlib:begin -->` / `<!-- stdlib:end -->` markers from the manifest. `npm run check` fails when the committed tables differ from the generated ones.
   - Test: `manifest.test.js` — the generator is idempotent.
   - Done when: both docs carry generated tables and `npm run check` enforces freshness.
+  - Landed: `scripts/docs-stdlib.js` (`npm run docs:stdlib`; `--check` runs in `npm run check` after Biome) writes per-package tables between the markers. Decision: the manifest's `js`/`both` status is the *target*, so a member counts as available only when `test/unit/types/stdlib-coverage.gaps.json` does not list it (`missing`, plus `wasm` for the WASM table); the tables describe the current tree, and a task that shrinks the gaps file must rerun `npm run docs:stdlib`. `language-support.md` gets *Available N of M / Not yet / JS-only / Excluded* for every in-scope package plus the whole-package exclusions by reason; `hybrid-wasm.md` gets *Available N of M / Not yet* over the `wasm`/`both` members. The hand-written member tables stay below the generated ones as notes (they also cover `gom`, `gofront/shared` and `gofront/simd`, which are not in Go's API files); the parity matrix still reads the rows above `### Standard library shims`. Tests in `manifest.test.js`: counts on a small manifest, marker replacement is idempotent and needs both markers, and the committed docs equal the generated text.
 
-- [ ] **Task 1.5 — Audit reconciliation**
+- [x] **Task 1.5 — Audit reconciliation**
   - Files: this document ([Verified gaps](#verified-gaps-2026-10-20-v170-tree) and the task lists)
   - Do: take the coverage-gate failure list; every member is either already in a Phase 2–5 task, added to Task 3.7, or marked `excluded:` with a reason in the manifest. Record the final counts (supported/excluded per package) here.
   - Test: `stdlib-coverage.test.js` has no unclassified failures.
   - Done when: the only remaining failures are members scheduled in later tasks, listed by task number in this document.
+  - Landed: every entry of `test/unit/types/stdlib-coverage.gaps.json` (the coverage gate's complete failure list: 1,245 missing members, 16 members not available in wasm packages, 163 signature mismatches and 691 exclusions without a diagnostic) is assigned to a task below; none needed a new `excluded:` status. The members a Phase 2–5 task names (or that belong to a type it names) stay with that task; Task 3.7 now lists every other member by name, together with the exclusion diagnostic, the signature mismatches no other task fixes, and the `fmt` defects that the Task 1.3a fixtures found. `stdlib-coverage.test.js` has no unclassified failure: anything not in the gaps file fails it. Final counts per in-scope package (members as in Go's `api` files: functions, types, methods, fields, constants, variables; **Supported** is what the gate finds today, out of the `js`/`wasm`/`both` members; **WASM** and **Signature** are failures of members that exist; the 121 packages excluded as a whole are listed in the [generated table](../language-support.md#standard-library-shims)):
+
+    | Package | Supported | Excluded | Missing | WASM | Signature | Scheduled in (failures) |
+    |---|---|---|---|---|---|---|
+    | `bufio` | 0 of 79 | 0 | 79 | 0 | 0 | 4.1a (23), 4.1b (38), 4.1c (18) |
+    | `bytes` | 49 of 99 | 0 | 50 | 0 | 9 | 2.4 (5), 3.4c (29), 3.7 (25) |
+    | `cmp` | 4 of 4 | 0 | 0 | 0 | 0 | — |
+    | `container/heap` | 0 of 11 | 0 | 11 | 0 | 0 | 4.4 (11) |
+    | `container/list` | 0 of 21 | 0 | 21 | 0 | 0 | 4.4 (21) |
+    | `container/ring` | 0 of 10 | 0 | 10 | 0 | 0 | 4.4 (10) |
+    | `context` | 0 of 20 | 1 | 20 | 0 | 0 | 4.3a (13), 4.3b (7) |
+    | `crypto/hmac` | 0 of 2 | 0 | 2 | 0 | 0 | 4.6b (2) |
+    | `crypto/md5` | 0 of 4 | 0 | 4 | 0 | 0 | 4.6a (4) |
+    | `crypto/rand` | 2 of 3 | 2 | 1 | 0 | 0 | 3.7 (1) |
+    | `crypto/sha1` | 0 of 4 | 0 | 4 | 0 | 0 | 4.6a (4) |
+    | `crypto/sha256` | 4 of 7 | 0 | 3 | 0 | 3 | 3.7 (6) |
+    | `crypto/sha512` | 0 of 13 | 0 | 13 | 0 | 0 | 4.6a (13) |
+    | `crypto/subtle` | 0 of 8 | 0 | 8 | 0 | 0 | 4.6b (8) |
+    | `encoding/base32` | 0 of 19 | 0 | 19 | 0 | 0 | 4.7 (19) |
+    | `encoding/base64` | 15 of 22 | 0 | 7 | 0 | 8 | 3.7 (15) |
+    | `encoding/binary` | 13 of 33 | 0 | 20 | 0 | 4 | 3.7 (24) |
+    | `encoding/csv` | 0 of 32 | 0 | 32 | 0 | 0 | 4.9 (32) |
+    | `encoding/hex` | 7 of 15 | 0 | 8 | 0 | 0 | 3.7 (8) |
+    | `encoding/json` | 5 of 68 | 0 | 63 | 5 | 0 | 5.1a (2), 5.2 (4), 5.3 (40), 5.4 (17), 5.5 (5) |
+    | `errors` | 6 of 7 | 0 | 1 | 0 | 0 | 3.7 (1) |
+    | `fmt` | 11 of 43 | 0 | 32 | 0 | 6 | 3.1a (5), 3.1b (2), 3.1e (6), 3.1f (3), 3.7 (22) |
+    | `hash` | 0 of 32 | 0 | 32 | 0 | 0 | 4.5 (32) |
+    | `hash/adler32` | 0 of 3 | 0 | 3 | 0 | 0 | 4.5 (3) |
+    | `hash/crc32` | 0 of 12 | 0 | 12 | 0 | 0 | 4.5 (12) |
+    | `hash/fnv` | 0 of 6 | 0 | 6 | 0 | 0 | 4.5 (6) |
+    | `html` | 2 of 2 | 0 | 0 | 0 | 0 | — |
+    | `io` | 23 of 94 | 10 | 71 | 4 | 0 | 3.3a (20), 3.7 (55) |
+    | `iter` | 0 of 2 | 2 | 2 | 0 | 0 | 2.1 (2) |
+    | `log` | 0 of 43 | 0 | 43 | 0 | 0 | 4.10 (43) |
+    | `maps` | 7 of 10 | 0 | 3 | 0 | 7 | 2.3 (5), 3.7 (5) |
+    | `math` | 69 of 97 | 0 | 28 | 0 | 18 | 3.4a (11), 3.7 (35) |
+    | `math/bits` | 15 of 50 | 0 | 35 | 0 | 0 | 3.4a (28), 3.7 (7) |
+    | `math/cmplx` | 0 of 27 | 0 | 27 | 0 | 0 | 4.8 (27) |
+    | `math/rand` | 12 of 45 | 0 | 33 | 0 | 6 | 3.7 (39) |
+    | `math/rand/v2` | 0 of 51 | 8 | 51 | 0 | 0 | 4.11 (51) |
+    | `net/url` | 0 of 60 | 0 | 60 | 0 | 0 | 4.2a (14), 4.2b (46) |
+    | `os` | 6 of 10 | 188 | 4 | 3 | 3 | 3.1e (10) |
+    | `path` | 9 of 9 | 0 | 0 | 0 | 0 | — |
+    | `path/filepath` | 9 of 19 | 8 | 10 | 0 | 0 | 3.7 (10) |
+    | `regexp` | 15 of 49 | 0 | 34 | 0 | 0 | 3.7 (34) |
+    | `slices` | 28 of 40 | 0 | 12 | 0 | 28 | 2.2a (5), 2.2b (4), 3.7 (31) |
+    | `sort` | 10 of 40 | 0 | 30 | 0 | 4 | 3.2 (29), 3.7 (5) |
+    | `strconv` | 18 of 43 | 0 | 25 | 0 | 2 | 3.3c (16), 3.7 (11) |
+    | `strings` | 61 of 82 | 0 | 21 | 2 | 14 | 2.4 (5), 3.4c (12), 3.7 (20) |
+    | `sync` | 20 of 39 | 7 | 19 | 0 | 0 | 3.5 (18), 3.7 (1) |
+    | `sync/atomic` | 0 of 90 | 4 | 90 | 0 | 0 | 4.7 (90) |
+    | `testing` | 18 of 94 | 72 | 76 | 2 | 0 | 3.6 (54), 3.7 (24) |
+    | `time` | 81 of 134 | 11 | 53 | 0 | 33 | 3.4b (63), 3.7 (23) |
+    | `unicode` | 11 of 52 | 257 | 41 | 0 | 11 | 3.3b (28), 3.7 (24) |
+    | `unicode/utf16` | 0 of 7 | 0 | 7 | 0 | 0 | 4.7 (7) |
+    | `unicode/utf8` | 10 of 19 | 0 | 9 | 0 | 7 | 3.3b (7), 3.7 (9) |
+    | **Total** | 540 of 1785 | 570 | 1245 | 16 | 163 | |
 
 ### Phase 2.1: `iter` package and slices iterator members
 
@@ -879,7 +940,7 @@ The Phase 0.5 reviews (PR #29) found these bugs. None of them were introduced by
 
 - [ ] **Task 3.1a — `fmt.Sprint`, `Sprintln`, `Append`, `Appendf`, `Appendln`**
   - Files: `src/typechecker/stdlib/core.js`, `src/backend/js/runtime.js`, `src/backend/wasm/emit-stdlib.js`
-  - Do: `Sprint` inserts a space only between two non-string operands; `Sprintln` always. `Append*` write into a `[]byte`.
+  - Do: `Sprint` inserts a space only between two non-string operands; `Sprintln` always. `Append*` write into a `[]byte`. `fmt.Print` follows the same rule (found by the Task 1.3a fixtures: `fmt.Print("a", "b", 1, 2, "c")` prints `ab12c` in JS and `a b 1 2 c` in WASM; Go prints `ab1 2c`).
   - Test: conformance fixture `fmt/print.go`.
   - Done when: fixture matches Go on both backends.
 
@@ -976,6 +1037,50 @@ The Phase 0.5 reviews (PR #29) found these bugs. None of them were introduced by
 - [ ] **Task 3.7 — Remaining audit items**
   - Files: as the manifest dictates
   - Do: every member still `todo` in a package already supported, in manifest order, one package per change. Pure members go into overlays; emitter members only when an instruction or helper is cheaper.
+  - Assigned by Task 1.5 (every coverage-gate failure that no other task names):
+    - **Exclusion diagnostics.** Importing an excluded package, or referencing an excluded member, reports the manifest `note` (or the category) as an error in every target, so the gate's 691 `exclusion` entries (133 packages) disappear. Tasks that name a specific exclusion message (2.1 `iter.Pull`, 3.4b channel timers, 3.5 `sync.Cond`, 3.6 `TempDir`/`Chdir`, 4.3a `ctx.Done()`, 4.11 `ChaCha8`) keep their wording.
+    - **Signature decisions** carried over from Task 1.2b: generic `slices`/`maps` functions typed as `func(interface{}) interface{}`, function-typed parameters typed `interface{}`, typed instead of untyped constants (`math.Pi`), and `int` for `rune`/`byte`/`int32`/`int64`/`uint8`. Each needs a decision before it is fixed; record it here.
+    - **`fmt` defects found by the Task 1.3a fixtures:** `%e` prints a one-digit exponent (`1.234568e+3`, Go `1.234568e+03`), `%q` on a `[]string` quotes the joined string instead of each element, and `fmt.Sprintf("%v", nil)` produces an invalid WASM module (`expected type i64, found ref.null`).
+    - **Members:**
+    - `bytes` (missing): `Compare`, `ContainsFunc`, `CutPrefix`, `CutSuffix`, `EqualFold`, `IndexAny`, `IndexFunc`, `IndexRune`, `LastIndexAny`, `LastIndexFunc`, `Runes`, `SplitAfter`, `SplitAfterN`, `Title`, `ToLowerSpecial`, `ToTitleSpecial`, `ToUpperSpecial`, `TrimLeftFunc`, `TrimRightFunc`
+    - `crypto/rand` (missing): `Text`
+    - `crypto/sha256` (missing): `New224`, `Size224`, `Sum224`
+    - `encoding/base64` (missing): `CorruptInputError`, `CorruptInputError.Error`, `Encoding.AppendDecode`, `Encoding.AppendEncode`, `Encoding.Strict`, `NewDecoder`, `NewEncoder`
+    - `encoding/binary` (missing): `Append`, `AppendByteOrder`, `AppendByteOrder.AppendUint16`, `AppendByteOrder.AppendUint32`, `AppendByteOrder.AppendUint64`, `AppendByteOrder.String`, `AppendUvarint`, `AppendVarint`, `Decode`, `Encode`, `MaxVarintLen16`, `MaxVarintLen32`, `MaxVarintLen64`, `NativeEndian`, `PutUvarint`, `PutVarint`, `ReadUvarint`, `ReadVarint`, `Uvarint`, `Varint`
+    - `encoding/hex` (missing): `AppendDecode`, `AppendEncode`, `Dump`, `Dumper`, `InvalidByteError`, `InvalidByteError.Error`, `NewDecoder`, `NewEncoder`
+    - `errors` (missing): `AsType`
+    - `fmt` (missing): `FormatString`, `Formatter`, `Formatter.Format`, `GoStringer`, `GoStringer.GoString`, `Scan`, `ScanState`, `ScanState.Read`, `ScanState.ReadRune`, `ScanState.SkipSpace`, `ScanState.Token`, `ScanState.UnreadRune`, `ScanState.Width`, `Scanf`, `Scanln`, `Scanner`, `Scanner.Scan`, `State`, `State.Flag`, `State.Precision`, `State.Width`, `State.Write`
+    - `io` (missing): `ByteScanner`, `ByteScanner.ReadByte`, `ByteScanner.UnreadByte`, `CopyBuffer`, `ErrNoProgress`, `ErrShortBuffer`, `NewOffsetWriter`, `OffsetWriter`, `OffsetWriter.Seek`, `OffsetWriter.Write`, `OffsetWriter.WriteAt`, `ReadCloser`, `ReadCloser.Close`, `ReadCloser.Read`, `ReadSeekCloser`, `ReadSeekCloser.Close`, `ReadSeekCloser.Read`, `ReadSeekCloser.Seek`, `ReadSeeker`, `ReadSeeker.Read`, `ReadSeeker.Seek`, `ReadWriteCloser`, `ReadWriteCloser.Close`, `ReadWriteCloser.Read`, `ReadWriteCloser.Write`, `ReadWriteSeeker`, `ReadWriteSeeker.Read`, `ReadWriteSeeker.Seek`, `ReadWriteSeeker.Write`, `ReaderAt`, `ReaderAt.ReadAt`, `ReaderFrom`, `ReaderFrom.ReadFrom`, `RuneScanner`, `RuneScanner.ReadRune`, `RuneScanner.UnreadRune`, `SeekCurrent`, `SeekEnd`, `SeekStart`, `Seeker`, `Seeker.Seek`, `WriteCloser`, `WriteCloser.Close`, `WriteCloser.Write`, `WriteSeeker`, `WriteSeeker.Seek`, `WriteSeeker.Write`, `WriterAt`, `WriterAt.WriteAt`, `WriterTo`, `WriterTo.WriteTo`
+    - `math` (missing): `Acosh`, `Asinh`, `Atanh`, `Erfc`, `Erfcinv`, `Erfinv`, `Ilogb`, `J0`, `J1`, `Jn`, `Lgamma`, `Logb`, `Pow10`, `Sincos`, `Y0`, `Y1`, `Yn`
+    - `math/bits` (missing): `Add`, `Div`, `Mul`, `Rem`, `Reverse`, `Sub`, `UintSize`
+    - `math/rand` (missing): `ExpFloat64`, `New`, `NewSource`, `NewZipf`, `NormFloat64`, `Rand`, `Rand.ExpFloat64`, `Rand.Float32`, `Rand.Float64`, `Rand.Int`, `Rand.Int31`, `Rand.Int31n`, `Rand.Int63`, `Rand.Int63n`, `Rand.Intn`, `Rand.NormFloat64`, `Rand.Perm`, `Rand.Read`, `Rand.Seed`, `Rand.Shuffle`, `Rand.Uint32`, `Rand.Uint64`, `Source`, `Source.Int63`, `Source.Seed`, `Source64`, `Source64.Int63`, `Source64.Seed`, `Source64.Uint64`, `Uint32`, `Uint64`, `Zipf`, `Zipf.Uint64`
+    - `path/filepath` (missing): `FromSlash`, `HasPrefix`, `IsLocal`, `ListSeparator`, `Localize`, `Rel`, `Separator`, `SplitList`, `ToSlash`, `VolumeName`
+    - `regexp` (missing): `CompilePOSIX`, `Match`, `MatchReader`, `MustCompilePOSIX`, `Regexp.AppendText`, `Regexp.Copy`, `Regexp.Expand`, `Regexp.ExpandString`, `Regexp.Find`, `Regexp.FindAll`, `Regexp.FindAllIndex`, `Regexp.FindAllStringIndex`, `Regexp.FindAllStringSubmatchIndex`, `Regexp.FindAllSubmatch`, `Regexp.FindAllSubmatchIndex`, `Regexp.FindIndex`, `Regexp.FindReaderIndex`, `Regexp.FindReaderSubmatchIndex`, `Regexp.FindStringSubmatchIndex`, `Regexp.FindSubmatch`, `Regexp.FindSubmatchIndex`, `Regexp.LiteralPrefix`, `Regexp.Longest`, `Regexp.MarshalText`, `Regexp.Match`, `Regexp.MatchReader`, `Regexp.NumSubexp`, `Regexp.ReplaceAll`, `Regexp.ReplaceAllFunc`, `Regexp.ReplaceAllLiteral`, `Regexp.ReplaceAllStringFunc`, `Regexp.SubexpIndex`, `Regexp.SubexpNames`, `Regexp.UnmarshalText`
+    - `slices` (missing): `CompareFunc`, `EqualFunc`, `Repeat`
+    - `sort` (missing): `Find`
+    - `strconv` (missing): `AppendQuoteRuneToGraphic`, `AppendQuoteToGraphic`, `FormatComplex`, `IntSize`, `IsGraphic`, `ParseComplex`, `QuoteRuneToGraphic`, `QuoteToGraphic`, `QuotedPrefix`
+    - `strings` (missing): `Clone`, `Compare`, `ContainsFunc`, `Replacer.WriteString`, `ToLowerSpecial`, `ToTitleSpecial`, `ToUpperSpecial`
+    - `sync` (missing): `RWMutex.RLocker`
+    - `testing` (missing): `Init`, `T.Attr`, `T.Output`, `T.SkipNow`, `TB.Attr`, `TB.Error`, `TB.Errorf`, `TB.Fail`, `TB.FailNow`, `TB.Failed`, `TB.Fatal`, `TB.Fatalf`, `TB.Helper`, `TB.Log`, `TB.Logf`, `TB.Name`, `TB.Output`, `TB.Skip`, `TB.SkipNow`, `TB.Skipf`, `TB.Skipped`, `Testing`
+    - `time` (missing): `ANSIC`, `Kitchen`, `Layout`, `ParseError`, `ParseError.Error`, `ParseError.Layout`, `ParseError.LayoutElem`, `ParseError.Message`, `ParseError.Value`, `ParseError.ValueElem`, `ParseInLocation`, `RFC1123`, `RFC1123Z`, `RFC822`, `RFC822Z`, `RFC850`, `RubyDate`, `Stamp`, `StampMicro`, `StampMilli`, `StampNano`, `UnixDate`, `Until`
+    - `unicode` (missing): `IsOneOf`, `LowerCase`, `MaxASCII`, `MaxCase`, `MaxLatin1`, `MaxRune`, `ReplacementChar`, `TitleCase`, `To`, `ToTitle`, `UpperCase`, `UpperLower`, `Version`
+    - `unicode/utf8` (missing): `RuneSelf`, `RuneStart`
+    - `io` (not available in wasm packages): `LimitedReader`, `LimitedReader.N`, `LimitedReader.R`, `LimitedReader.Read`
+    - `strings` (not available in wasm packages): `Replacer`, `Replacer.Replace`
+    - `testing` (not available in wasm packages): `Short`, `Verbose`
+    - `bytes` (signature differs from Go): `ContainsRune`, `FieldsFunc`, `IndexByte`, `LastIndexByte`, `Map`, `TrimFunc`
+    - `crypto/sha256` (signature differs from Go): `BlockSize`, `New`, `Size`
+    - `encoding/base64` (signature differs from Go): `Encoding.WithPadding`, `NewEncoding`, `NoPadding`, `RawStdEncoding`, `RawURLEncoding`, `StdEncoding`, `StdPadding`, `URLEncoding`
+    - `encoding/binary` (signature differs from Go): `BigEndian`, `LittleEndian`, `Read`, `Write`
+    - `maps` (signature differs from Go): `Clone`, `Copy`, `DeleteFunc`, `Equal`, `EqualFunc`
+    - `math` (signature differs from Go): `E`, `Ln10`, `Ln2`, `Log10E`, `Log2E`, `MaxFloat32`, `MaxFloat64`, `MaxInt`, `MaxUint`, `MinInt`, `Phi`, `Pi`, `SmallestNonzeroFloat32`, `SmallestNonzeroFloat64`, `Sqrt2`, `SqrtE`, `SqrtPhi`, `SqrtPi`
+    - `math/rand` (signature differs from Go): `Int31`, `Int31n`, `Int63`, `Int63n`, `Seed`, `Shuffle`
+    - `slices` (signature differs from Go): `BinarySearch`, `BinarySearchFunc`, `Clip`, `Clone`, `Compact`, `CompactFunc`, `Compare`, `Concat`, `Contains`, `ContainsFunc`, `Delete`, `DeleteFunc`, `Equal`, `Grow`, `Index`, `IndexFunc`, `Insert`, `IsSorted`, `IsSortedFunc`, `Max`, `MaxFunc`, `Min`, `MinFunc`, `Replace`, `Reverse`, `Sort`, `SortFunc`, `SortStableFunc`
+    - `sort` (signature differs from Go): `Search`, `Slice`, `SliceIsSorted`, `SliceStable`
+    - `strconv` (signature differs from Go): `AppendFloat`, `FormatFloat`
+    - `strings` (signature differs from Go): `ContainsRune`, `FieldsFunc`, `IndexByte`, `IndexFunc`, `IndexRune`, `LastIndexByte`, `LastIndexFunc`, `Map`, `TrimFunc`, `TrimLeftFunc`, `TrimRightFunc`
+    - `unicode` (signature differs from Go): `IsControl`, `IsDigit`, `IsGraphic`, `IsLetter`, `IsLower`, `IsPrint`, `IsPunct`, `IsSpace`, `IsUpper`, `ToLower`, `ToUpper`
+    - `unicode/utf8` (signature differs from Go): `DecodeLastRuneInString`, `DecodeRuneInString`, `MaxRune`, `RuneError`, `RuneLen`, `UTFMax`, `ValidRune`
   - Test: one conformance fixture per package touched.
   - Done when: `stdlib-coverage.test.js` reports no `todo` in Phase 3 packages.
 
