@@ -7,14 +7,21 @@
 //
 //   node test/conformance/run.js [dir]
 
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import {
+	existsSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
-import { fileURLToPath } from "node:url";
-import vm from "node:vm";
-import { instantiateWasm } from "../../src/backend/wasm/glue.js";
-import { compileWasm } from "../../src/backend/wasm/index.js";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { compileFiles } from "../../src/compiler.js";
 import { Lexer } from "../../src/lexer.js";
-import { assertValidWasm, compile } from "../unit/helpers.js";
+import { assertValidWasm } from "../unit/helpers.js";
 
 export const CONFORMANCE_DIR = dirname(fileURLToPath(import.meta.url));
 
@@ -30,43 +37,53 @@ export function findFixtures(dir = CONFORMANCE_DIR) {
 	return out;
 }
 
-function compileErrors(kind, errors) {
-	return new Error(
-		`${kind} compile failed:\n${errors.map((e) => e.message).join("\n")}`,
-	);
+// Output sinks of the modules being run, by id (see runModule).
+const SINKS = "__gofrontConformanceSinks";
+let nextSink = 0;
+
+// Runs a compiled bundle as an ES module and returns its stdout: what it
+// writes with `process.stdout.write` and `console.log` (one line per call;
+// the WASM facade writes each line-buffered line that way).  The bundle
+// calls main itself; `wasm` is the linked app.wasm its facade loads.
+async function runModule(js, wasm) {
+	const id = nextSink++;
+	let out = "";
+	globalThis[SINKS] ??= new Map();
+	globalThis[SINKS].set(id, (s) => (out += s));
+	const prelude = [
+		`const __sink = globalThis.${SINKS}.get(${id});`,
+		"const process = { stdout: { write: (s) => __sink(String(s)) } };",
+		'const console = { log: (...a) => __sink(a.map(String).join(" ") + "\\n") };',
+		wasm
+			? `const __wasmBytes = new Uint8Array(Buffer.from("${Buffer.from(wasm).toString("base64")}", "base64"));`
+			: "",
+	];
+	const body = js
+		.replace(/^import\s[^;]+;\n?/gm, "")
+		.replaceAll("globalThis.__GOFRONT_WASM_BYTES", "__wasmBytes");
+	const dir = mkdtempSync(join(tmpdir(), "gofront-conformance-"));
+	try {
+		const file = join(dir, "bundle.mjs");
+		writeFileSync(file, `${prelude.join("\n")}\n${body}`);
+		await import(pathToFileURL(file).href);
+		return out;
+	} finally {
+		globalThis[SINKS].delete(id);
+		rmSync(dir, { recursive: true, force: true });
+	}
 }
 
-function runJs(js) {
-	let out = "";
-	const ctx = vm.createContext({
-		Math,
-		Date,
-		JSON,
-		String,
-		Number,
-		Boolean,
-		Array,
-		Object,
-		TextEncoder,
-		TextDecoder,
-		crypto: globalThis.crypto,
-		process: { stdout: { write: (s) => (out += s) } },
-		console: { log: (...a) => (out += `${a.map(String).join(" ")}\n`) },
-	});
-	// The generated module calls main() itself.
-	vm.runInContext(js.replace(/^import\s[^;]+;\n?/gm, ""), ctx);
-	return out;
-}
-
-function runWasm(wasm, stringTable) {
-	let out = "";
-	// WASM stdout is line-buffered: each call is one line without its "\n".
-	const { exports } = instantiateWasm(wasm, {
-		stringTable,
-		stdout: (line) => (out += `${line}\n`),
-	});
-	exports.main();
-	return out;
+// Compiles the fixture as a root package with the Go-source stdlib: `both`
+// runs on the JS backend, `wasm` links app.wasm behind the facade.
+async function runTarget(goPath, target, label) {
+	let res;
+	try {
+		res = compileFiles([goPath], { forceTarget: target });
+	} catch (e) {
+		throw new Error(`${label} compile failed:\n${e.message}`);
+	}
+	if (target === "wasm") assertValidWasm(res.wasm);
+	return runModule(res.js, target === "wasm" ? res.wasm : null);
 }
 
 // GoFront strings are JS strings on both backends: len, indexing and range
@@ -120,16 +137,10 @@ export function lintFixture(source, name) {
 }
 
 // Compiles one fixture as a `both` package and returns the stdout of each backend.
-export function runFixture(goPath) {
-	const source = readFileSync(goPath, "utf8");
-	const js = compile(source, { fromFile: goPath, target: "both" });
-	if (js.errors.length > 0) throw compileErrors("JS", js.errors);
-	const wasm = compileWasm(source, { filename: goPath.split("/").pop() });
-	if (wasm.errors?.length > 0) throw compileErrors("WASM", wasm.errors);
-	assertValidWasm(wasm.wasm);
+export async function runFixture(goPath) {
 	return {
-		js: runJs(js.js),
-		wasm: runWasm(wasm.wasm, wasm.stringTable),
+		js: await runTarget(goPath, "both", "JS"),
+		wasm: await runTarget(goPath, "wasm", "WASM"),
 	};
 }
 
@@ -146,7 +157,7 @@ function firstDiff(want, got) {
 
 // Runs a fixture and compares both backends with its .out file.
 // Returns { ok, message }; message lists every problem found.
-export function checkFixture(goPath, root = dirname(dirname(goPath))) {
+export async function checkFixture(goPath, root = dirname(dirname(goPath))) {
 	const name = relative(root, goPath);
 	const outPath = goPath.replace(/\.go$/, ".out");
 	const outName = relative(root, outPath);
@@ -160,7 +171,7 @@ export function checkFixture(goPath, root = dirname(dirname(goPath))) {
 	try {
 		const lint = lintFixture(readFileSync(goPath, "utf8"), name);
 		if (lint.length > 0) return { ok: false, message: lint.join("\n") };
-		got = runFixture(goPath);
+		got = await runFixture(goPath);
 	} catch (e) {
 		return { ok: false, message: `${name}: ${e.message}` };
 	}
@@ -177,12 +188,12 @@ export function checkFixture(goPath, root = dirname(dirname(goPath))) {
 	return { ok: problems.length === 0, message: problems.join("\n") };
 }
 
-function main(dir) {
+async function main(dir) {
 	const fixtures = findFixtures(dir);
 	let failed = 0;
 	for (const f of fixtures) {
 		const name = relative(dir, f);
-		const res = checkFixture(f, dir);
+		const res = await checkFixture(f, dir);
 		if (res.ok) {
 			process.stdout.write(`  \x1b[32m✓\x1b[0m ${name}\n`);
 			continue;
@@ -199,5 +210,5 @@ function main(dir) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-	process.exitCode = main(process.argv[2] ?? CONFORMANCE_DIR);
+	process.exitCode = await main(process.argv[2] ?? CONFORMANCE_DIR);
 }

@@ -144,7 +144,7 @@ Members of each Go package that `wasm` and `both` packages can use today, out of
 | `hash/fnv` | 0 of 6 | 6 |
 | `html` | 2 of 2 | 0 |
 | `io` | 19 of 94 | 75 |
-| `iter` | 0 of 2 | 2 |
+| `iter` | 2 of 2 | 0 |
 | `log` | 0 of 43 | 43 |
 | `maps` | 7 of 10 | 3 |
 | `math` | 69 of 97 | 28 |
@@ -156,7 +156,7 @@ Members of each Go package that `wasm` and `both` packages can use today, out of
 | `os` | 0 of 7 | 7 |
 | `path` | 9 of 9 | 0 |
 | `path/filepath` | 9 of 19 | 10 |
-| `slices` | 28 of 40 | 12 |
+| `slices` | 37 of 40 | 3 |
 | `sort` | 10 of 40 | 30 |
 | `strconv` | 18 of 43 | 25 |
 | `strings` | 59 of 82 | 23 |
