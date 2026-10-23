@@ -1534,6 +1534,82 @@ parity(
 );
 
 parity(
+	"an index changed by another LHS is written through at its old value",
+	`	x := []int{0, 0, 0, 0, 0}
+	al := x
+	x = x[:3]
+	al[0] = 7
+	c := &cnt{i: 2}
+	x[c.i], c.i = 5, 0
+	x = x[:5]
+	return x[0]*100000 + x[1]*10000 + x[2]*1000 + x[3]*100 + x[4]*10 + al[2]`,
+	705005,
+	"type cnt struct{ i int }",
+);
+
+parity(
+	"an index changed by the RHS is written through at the written element",
+	`	s := &rbuf{buf: []int{0, 0, 0, 0, 0}}
+	ob := s.buf
+	s.buf = s.buf[:3]
+	ob[1] = 7
+	s.buf[s.n] = s.next()
+	s.buf = s.buf[:5]
+	return s.buf[0]*10000 + s.buf[1]*1000 + s.buf[2]*100 + s.buf[3]*10 + s.buf[4]`,
+	97000,
+	`type rbuf struct {
+	buf []int
+	n   int
+}
+
+func (s *rbuf) next() int {
+	s.n++
+	return 9
+}`,
+);
+
+parity(
+	"x = x[lo:] copy writes through to the old array",
+	`	x := []int{1, 2, 3, 4, 5}
+	al := x
+	x = x[1:]
+	x[0] = 9
+	y := []int{1, 2, 3}
+	ay := y
+	y = y[1:len(y)]
+	y[1] = 8
+	return al[0]*1000000 + al[1]*100000 + al[2]*10000 + ay[0]*100 + ay[1]*10 + ay[2] + len(x)*10000000 + cap(x)*100000000`,
+	441930128,
+);
+
+parity(
+	"q = q[1:] then q[0] = v writes through to the old array",
+	`	q := []int{1, 2, 3}
+	all := q
+	q = q[1:]
+	q[0] = 20
+	return all[0]*1000 + all[1]*10 + all[2]`,
+	1203,
+);
+
+parity(
+	"q = q[1:] queue-pop loop writes through to the old array",
+	`	q := []int{1, 2, 3, 4, 5}
+	all := q
+	sum := 0
+	for len(q) > 0 {
+		v := q[0]
+		q = q[1:]
+		if len(q) > 0 {
+			q[0] += v
+		}
+		sum = sum*10 + v
+	}
+	return sum*1000 + all[2]*100 + all[3]*10 + all[4] - all[1]`,
+	13715000 + 600 + 100 + 15 - 3,
+);
+
+parity(
 	"field chain copy writes through in methods and loops",
 	`	s := &stk{items: []int{1, 2, 3, 4}}
 	b := s.items
