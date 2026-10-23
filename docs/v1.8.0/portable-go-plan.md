@@ -826,11 +826,12 @@ The Phase 0.5 reviews (PR #29) found these bugs. None of them were introduced by
   - Done when: the lint runs as part of `npm run conformance`.
   - Landed: `lintFixture` in `test/conformance/run.js` scans the fixture's tokens for `len(<lit>)`, `<lit>[` (index and slice) and `range <lit>` where `<lit>` is a string literal with a non-ASCII character or, in an interpreted literal, an escape that produces a byte ≥ 0x80 (`\xc3`, `\303`, `\u00e9`; read from the source because the lexer partly decodes escapes, so `"\\xc3"` is ASCII). Each use is reported as `<pkg>/<name>.go:<line>: …` with the §1.1 hint, and `checkFixture` rejects a fixture before compiling it. `[]byte(…)`/`[]rune(…)` and literals not under `len`/index/`range` pass. Literals reached through variables are not tracked. Tests in `conformance.test.js` (temp-dir fixture rejected, allowed forms).
 
-- [ ] **Task 1.4 — Generated stdlib docs**
+- [x] **Task 1.4 — Generated stdlib docs**
   - Files: new `scripts/docs-stdlib.js`, `docs/language-support.md`, `docs/hybrid-wasm.md`, `package.json` (`docs:stdlib`, added to `check`)
   - Do: generate the package tables between `<!-- stdlib:begin -->` / `<!-- stdlib:end -->` markers from the manifest. `npm run check` fails when the committed tables differ from the generated ones.
   - Test: `manifest.test.js` — the generator is idempotent.
   - Done when: both docs carry generated tables and `npm run check` enforces freshness.
+  - Landed: `scripts/docs-stdlib.js` (`npm run docs:stdlib`; `--check` runs in `npm run check` after Biome) writes per-package tables between the markers. Decision: the manifest's `js`/`both` status is the *target*, so a member counts as available only when `test/unit/types/stdlib-coverage.gaps.json` does not list it (`missing`, plus `wasm` for the WASM table); the tables describe the current tree, and a task that shrinks the gaps file must rerun `npm run docs:stdlib`. `language-support.md` gets *Available N of M / Not yet / JS-only / Excluded* for every in-scope package plus the whole-package exclusions by reason; `hybrid-wasm.md` gets *Available N of M / Not yet* over the `wasm`/`both` members. The hand-written member tables stay below the generated ones as notes (they also cover `gom`, `gofront/shared` and `gofront/simd`, which are not in Go's API files); the parity matrix still reads the rows above `### Standard library shims`. Tests in `manifest.test.js`: counts on a small manifest, marker replacement is idempotent and needs both markers, and the committed docs equal the generated text.
 
 - [ ] **Task 1.5 — Audit reconciliation**
   - Files: this document ([Verified gaps](#verified-gaps-2026-10-20-v170-tree) and the task lists)

@@ -44,7 +44,8 @@
 		"bench": "node --expose-gc test/e2e/perf/raycast-bench.js",
 		"format": "biome format --write .",
 		"manifest:update": "node scripts/stdlib-manifest.js",
-		"check": "biome check . && sentrux check && sentrux gate && node src/index.js check example/...",
+		"docs:stdlib": "node scripts/docs-stdlib.js",
+		"check": "biome check . && node scripts/docs-stdlib.js --check && sentrux check && sentrux gate && node src/index.js check example/...",
 		"prepare": "lefthook install"
 	},
 	"devDependencies": {
