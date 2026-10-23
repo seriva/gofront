@@ -79,6 +79,11 @@ const hasCall = (n) => {
 	return someChild(n, hasCall);
 };
 
+// A call in a left-hand index or on the right-hand side of the statement.
+const stmtHasCall = (lhs, stmt) =>
+	lhs.some((e) => hasCall(e.index)) ||
+	(stmt.kind === "AssignStmt" && hasCall(stmt.rhs));
+
 // Index of a `__rcs` sync that can be evaluated again after the write:
 // constants, and, when `vars` (a single-LHS statement without calls), unboxed
 // variables, with `len`/`cap` and arithmetic over those.  Any other index
@@ -170,11 +175,12 @@ export const statementGenMethods = {
 		// Record source mapping for the first line this statement produces
 		const srcLine = stmt._line ?? null;
 		const _line0 = this.out.length;
+		const restore = [];
 		const syncs =
 			stmt.kind === "AssignStmt"
-				? this._resliceSyncs(stmt.lhs, stmt)
+				? this._resliceSyncs(stmt.lhs, stmt, false, restore)
 				: stmt.kind === "IncDecStmt"
-					? this._resliceSyncs([stmt.expr], stmt)
+					? this._resliceSyncs([stmt.expr], stmt, false, restore)
 					: null;
 		switch (stmt.kind) {
 			case "TypeDecl":
@@ -262,6 +268,8 @@ export const statementGenMethods = {
 			}
 		}
 		this._emitResliceSyncs(syncs);
+		// The AST is shared with the WASM backend: undo the temporaries.
+		for (const [node, key, v] of restore) node[key] = v;
 		// Record source mapping: first output line this statement produced
 		if (srcLine != null && this.out.length > _line0) {
 			this._srcMappings.push({
@@ -428,27 +436,25 @@ export const statementGenMethods = {
 	// could change (`isReusableIndex`) is first bound to a temporary (not in
 	// `inline` for-clause statements, which skip the sync: the write-back on
 	// extension still applies).  Not covered: writes through other references to the copy.
-	_resliceSyncs(lhs, stmt, inline = false) {
+	// Once one index is bound, every left-hand index with a call is bound too,
+	// in source order, and so is the slice operand of a synced write in a
+	// statement with a call (Go evaluates both before the right-hand side).
+	// `restore` collects the replaced nodes for the caller to put back.
+	_resliceSyncs(lhs, stmt, inline = false, restore = []) {
 		if (!this._resliceNames?.size) return null;
 		const assigned = new Set();
 		if (stmt.kind === "AssignStmt" && stmt.lhs.length > 1)
 			for (const e of stmt.lhs) if (e.kind === "Ident") assigned.add(e.name);
-		const vars =
-			lhs.length === 1 &&
-			!hasCall(lhs[0].index) &&
-			(stmt.kind !== "AssignStmt" || !hasCall(stmt.rhs));
-		const out = [];
-		for (const e of lhs) {
-			if (!this._isResliceSyncTarget(e, assigned)) continue;
-			if (!isReusableIndex(e.index, vars, this._boxedVars)) {
-				if (inline) continue;
-				this._tmpCounter = (this._tmpCounter ?? 0) + 1;
-				const tmp = `__rci${this._tmpCounter}`;
-				this.line(`const ${tmp} = ${this.genExpr(e.index)};`);
-				e.index = { kind: "Ident", name: tmp, _type: e.index._type };
-			}
-			out.push(e);
-		}
+		const targets = new Set(
+			lhs.filter((e) => this._isResliceSyncTarget(e, assigned)),
+		);
+		if (targets.size === 0) return null;
+		const called = stmtHasCall(lhs, stmt);
+		const vars = lhs.length === 1 && !called;
+		const reusable = (e) => isReusableIndex(e.index, vars, this._boxedVars);
+		const out = [...targets].filter((e) => !inline || reusable(e));
+		if (!inline && (called || out.some((e) => !reusable(e))))
+			this._bindResliceOperands(lhs, targets, called, reusable, restore);
 		if (out.length === 0) return null;
 		this.useHelper("slice");
 		return out.map((e) => {
@@ -458,6 +464,24 @@ export const statementGenMethods = {
 				: this.genExpr(e.expr);
 			return `__rcs(${base}, ${this.genExpr(e.index)})`;
 		});
+	},
+
+	// Binds the left-hand operands that `_resliceSyncs` must not evaluate
+	// twice to temporaries, in source order.
+	_bindResliceOperands(lhs, targets, called, reusable, restore) {
+		const bind = (e, key) => {
+			this._tmpCounter = (this._tmpCounter ?? 0) + 1;
+			const tmp = `__rci${this._tmpCounter}`;
+			this.line(`const ${tmp} = ${this.genExpr(e[key])};`);
+			restore.push([e, key, e[key]]);
+			e[key] = { kind: "Ident", name: tmp, _type: e[key]._type };
+		};
+		for (const e of lhs) {
+			if (e.kind !== "IndexExpr") continue;
+			const t = targets.has(e);
+			if (t && called) bind(e, "expr");
+			if ((t && !reusable(e)) || hasCall(e.index)) bind(e, "index");
+		}
 	},
 
 	// `x[i]` on a plain slice held by a chain in `_resliceNames` whose root
