@@ -318,7 +318,10 @@ const TYPEOF_NUMBER_NAMES = new Set([...INT_TYPE_NAMES, "float32", "float64"]);
 const BUILTIN_GEN = {
 	append: (s, e) => s.genAppend(e),
 	len: (s, e) => s._genBuiltinLen(e),
-	cap: (s, e) => `(${s.genExpr(e.args[0])}?.length ?? 0)`,
+	cap: (s, e) => {
+		s.useHelper("slice");
+		return `__cap(${s.genExpr(e.args[0])})`;
+	},
 	make: (s, e) => s.genMake(e),
 	delete: (s, e) => {
 		const [m, k] = e.args.map((a) => s.genExpr(a));
@@ -697,6 +700,9 @@ export const expressionGenMethods = {
 			mut: new Map(),
 			owned: new Set(),
 			borrowed: new Set(),
+			// Parameters, receivers and named results, including the enclosing
+			// functions' (closures): `x = x[lo:hi]` on them must not copy.
+			params: new Set(prev?.params),
 		};
 		try {
 			fn();
@@ -720,6 +726,7 @@ export const expressionGenMethods = {
 	// Copies aggregate params/receivers that the function body mutates.
 	_emitParamCopies(params) {
 		for (const p of params) {
+			if (p.name) this._fnCtx?.params.add(p.name);
 			if (p.variadic || !p.name || p.name === "_") continue;
 			if (this._boxedVars.has(p.name)) {
 				// Address-taken parameter: rebind it to a { value } box.
@@ -1085,18 +1092,22 @@ export const expressionGenMethods = {
 
 	_genSliceExpr(expr) {
 		const base = this.genExpr(expr.expr);
-		const lo = expr.low ? this.genExpr(expr.low) : "";
-		const hi = expr.high ? this.genExpr(expr.high) : "";
-		const method = isTypedArraySlice(expr.expr._type) ? "subarray" : "slice";
-		// `b[:]`, `b[0:]` and `a[:]` share the backing store as in Go: the
-		// result is the operand itself.  Other bounds still copy (a JS array
-		// cannot view part of another one).
+		const lo = expr.low ? this.genExpr(expr.low) : "0";
+		const hi = expr.high ? this.genExpr(expr.high) : "undefined";
+		if (this._isStringExprType(expr.expr._type))
+			return expr.high ? `${base}.slice(${lo}, ${hi})` : `${base}.slice(${lo})`;
+		// `b[:]`, `b[0:]` and `a[:]` have the operand's length and capacity:
+		// the result is the operand itself.  Other bounds make a view sharing
+		// the backing store (`__slice`, which checks the bounds against cap).
 		const zeroLow = !expr.low || Number(expr.low._const?.v) === 0;
-		if (method === "slice" && zeroLow && !hi) return base;
-		if (!lo && !hi) return `${base}.${method}()`;
-		if (!hi) return `${base}.${method}(${lo})`;
-		if (!lo) return `${base}.${method}(0, ${hi})`;
-		return `${base}.${method}(${lo}, ${hi})`;
+		if (zeroLow && !expr.high && !expr.max) return base;
+		this.useHelper("slice");
+		// `x = x[lo:hi]` (see `_markSelfReslice`) copies a plain array when
+		// the result stays within `len(x)`; typed arrays always share.
+		if (expr._selfReslice && !isTypedArraySlice(expr.expr._type))
+			return `__reslice(${base}, ${lo}, ${hi})`;
+		const max = expr.max ? `, ${this.genExpr(expr.max)}` : "";
+		return `__slice(${base}, ${lo}, ${hi}${max})`;
 	},
 
 	_genFuncLit(expr) {
@@ -1509,8 +1520,14 @@ export const expressionGenMethods = {
 							name: elemNode.name,
 						})
 					: null);
+			// make([]T, n, cap) allocates cap elements and returns a view of
+			// the first n (`__mkslice`), so append within cap shares them.
+			const capArg = expr.args[2] ? this.genExpr(expr.args[2]) : null;
+			if (capArg) this.useHelper("slice");
+			const withCap = (alloc) =>
+				capArg ? `__mkslice(${n}, ${alloc(capArg)})` : alloc(n);
 			if (typedCtor) {
-				return `new ${typedCtor}(${n})`;
+				return withCap((k) => `new ${typedCtor}(${k})`);
 			}
 			// Use the proper zero value for the element type (e.g. new Point() not 0)
 			let zero = "null";
@@ -1521,9 +1538,9 @@ export const expressionGenMethods = {
 			}
 			// If zero value is a constructor call, use a factory function so each element is distinct
 			if (zero.startsWith("new ") || zero.includes("$z_")) {
-				return `Array.from({length: ${n}}, () => ${zero})`;
+				return withCap((k) => `Array.from({length: ${k}}, () => ${zero})`);
 			}
-			return `new Array(${n}).fill(${zero})`;
+			return withCap((k) => `new Array(${k}).fill(${zero})`);
 		}
 		// map or fallback
 		return "{}";

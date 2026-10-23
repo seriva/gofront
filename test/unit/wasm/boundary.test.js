@@ -541,6 +541,25 @@ func main() {
 	assertEqual(c.Y, 6);
 });
 
+test("JS slice views cross into wasm element-wise (Task 0.20)", async () => {
+	const res = await compileHybridProject({
+		"coll/coll.go": COLL_WASM,
+		"main.go": `package main
+
+import "./coll"
+
+func main() {
+	xs := []int{1, 2, 3, 4}
+	fs := []float64{1, 2, 3}
+	ss := []string{"a", "b", "c"}
+	d := coll.Doubled(fs[1:])
+	println(coll.Sum(xs[1:3]), coll.Sum(xs[:0]), len(d), d[0], d[1], coll.Join(ss[1:]))
+}
+`,
+	});
+	assertEqual(res.lines.join("\n"), "5 0 2 4 6 bc");
+});
+
 test("func values cross as callbacks in both directions", async () => {
 	const res = await compileHybridProject(
 		{
