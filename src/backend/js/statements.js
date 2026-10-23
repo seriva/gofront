@@ -1,5 +1,6 @@
 import {
 	bodyRedeclares,
+	forEachChild,
 	isIntRangeType,
 	isMapRangeType,
 	isRangeFor,
@@ -11,6 +12,54 @@ import {
 import { isComplex, isTypedArraySlice } from "../../typechecker/types.js";
 
 /** @typedef {import('./index.js').CodeGen} CodeGen */
+
+// The same variable or field chain (`x`, `n.Children`) on both sides.
+const sameChain = (a, b) =>
+	a.kind === b.kind &&
+	(a.kind === "Ident"
+		? a.name === b.name && a.name !== "_"
+		: a.kind === "SelectorExpr" &&
+			a.field === b.field &&
+			sameChain(a.expr, b.expr));
+
+// `x = x[lo:hi]` (no max) with the same chain on both sides.
+const isSelfResliceShape = (stmt) =>
+	stmt.op === "=" &&
+	stmt.lhs.length === 1 &&
+	stmt.rhs.length === 1 &&
+	stmt.rhs[0].kind === "SliceExpr" &&
+	!stmt.rhs[0].max &&
+	sameChain(stmt.lhs[0], stmt.rhs[0].expr);
+
+// Pure index expressions that read the same value after the write as before
+// it: literals, variables and fields not assigned by the statement, `len`
+// and `cap`, and arithmetic over those.
+const isStableIndex = (e, assigned) => {
+	switch (e?.kind) {
+		case "BasicLit":
+			return true;
+		case "Ident":
+			return !assigned.has(e.name);
+		case "SelectorExpr":
+			return !e._isMethodValue && isStableIndex(e.expr, assigned);
+		case "ParenExpr":
+			return isStableIndex(e.expr, assigned);
+		case "UnaryExpr":
+			return e.op !== "<-" && isStableIndex(e.operand, assigned);
+		case "BinaryExpr":
+			return (
+				isStableIndex(e.left, assigned) && isStableIndex(e.right, assigned)
+			);
+		case "CallExpr":
+			return (
+				e.func?.kind === "Ident" &&
+				(e.func.name === "len" || e.func.name === "cap") &&
+				e.args.every((a) => isStableIndex(a, assigned))
+			);
+		default:
+			return false;
+	}
+};
 
 // Method-name dispatch for genStmt — string values add no static call edges.
 const STMT_GEN_DELEGATE = {
@@ -73,6 +122,12 @@ export const statementGenMethods = {
 		// Record source mapping for the first line this statement produces
 		const srcLine = stmt._line ?? null;
 		const _line0 = this.out.length;
+		const syncs =
+			stmt.kind === "AssignStmt"
+				? this._resliceSyncs(stmt.lhs, stmt)
+				: stmt.kind === "IncDecStmt"
+					? this._resliceSyncs([stmt.expr], stmt)
+					: null;
 		switch (stmt.kind) {
 			case "TypeDecl":
 				this.genTypeDeclWithMethods(stmt, []);
@@ -158,6 +213,7 @@ export const statementGenMethods = {
 				throw new Error(`CodeGen: unhandled statement kind '${stmt.kind}'`);
 			}
 		}
+		this._emitResliceSyncs(syncs);
 		// Record source mapping: first output line this statement produced
 		if (srcLine != null && this.out.length > _line0) {
 			this._srcMappings.push({
@@ -294,14 +350,85 @@ export const statementGenMethods = {
 		// view.  Field chains (`n.Children = n.Children[:k]`) still copy.
 		const lhs = stmt.lhs[0];
 		if (lhs.kind === "Ident" && this._fnCtx?.params.has(lhs.name)) return;
-		const same = (a, b) =>
-			a.kind === b.kind &&
-			(a.kind === "Ident"
-				? a.name === b.name && a.name !== "_"
-				: a.kind === "SelectorExpr" &&
-					a.field === b.field &&
-					same(a.expr, b.expr));
-		if (same(stmt.lhs[0], r.expr)) r._selfReslice = true;
+		if (sameChain(stmt.lhs[0], r.expr)) r._selfReslice = true;
+	},
+
+	// Names of the variables and fields (`.F`) that some `x = x[lo:hi]` in the
+	// program may turn into a `__reslice` copy (`_resliceSyncs`).
+	_collectResliceNames(program) {
+		const names = new Set();
+		const visit = (n) => {
+			if (Array.isArray(n)) {
+				for (const c of n) visit(c);
+				return;
+			}
+			if (!n || typeof n !== "object" || typeof n.kind !== "string") return;
+			if (n.kind === "AssignStmt" && isSelfResliceShape(n)) {
+				const l = n.lhs[0];
+				names.add(l.kind === "Ident" ? l.name : `.${l.field}`);
+			}
+			forEachChild(n, visit);
+		};
+		visit(program.decls);
+		this._resliceNames = names;
+	},
+
+	// Index writes in `lhs` whose slice may be a `__reslice` copy: each is
+	// followed by `__rcs(x, i)` (`_emitResliceSyncs`), which writes the element
+	// through to the copy's old array, so writes through the copy and through
+	// other slices of that array keep Go's order.  An index that the write
+	// could change, or that has a call, is first bound to a temporary (not in
+	// `inline` for-clause statements, where the write-back on extension still
+	// applies).  Not covered: writes through other references to the copy.
+	_resliceSyncs(lhs, stmt, inline = false) {
+		if (!this._resliceNames?.size) return null;
+		const assigned = new Set();
+		if (stmt.kind === "AssignStmt" && stmt.lhs.length > 1)
+			for (const e of stmt.lhs) if (e.kind === "Ident") assigned.add(e.name);
+		const out = [];
+		for (const e of lhs) {
+			if (!this._isResliceSyncTarget(e, assigned)) continue;
+			if (!isStableIndex(e.index, assigned)) {
+				if (inline) continue;
+				this._tmpCounter = (this._tmpCounter ?? 0) + 1;
+				const tmp = `__rci${this._tmpCounter}`;
+				this.line(`const ${tmp} = ${this.genExpr(e.index)};`);
+				e.index = { kind: "Ident", name: tmp, _type: e.index._type };
+			}
+			out.push(e);
+		}
+		if (out.length === 0) return null;
+		this.useHelper("slice");
+		return out.map((e) => {
+			const wrapField = this._namedWrapperField(e.expr._type, e.expr);
+			const base = wrapField
+				? `${this.genExpr(e.expr)}.${wrapField}`
+				: this.genExpr(e.expr);
+			return `__rcs(${base}, ${this.genExpr(e.index)})`;
+		});
+	},
+
+	// `x[i]` on a plain slice held by a chain in `_resliceNames` whose root
+	// variable the statement does not reassign.
+	_isResliceSyncTarget(e, assigned) {
+		if (e.kind !== "IndexExpr" || e._mapValueType) return false;
+		const c = e.expr;
+		if (c.kind !== "Ident" && c.kind !== "SelectorExpr") return false;
+		if (!this._resliceNames.has(c.kind === "Ident" ? c.name : `.${c.field}`))
+			return false;
+		const u = c._type?.kind === "named" ? c._type.underlying : c._type;
+		if (u?.kind !== "slice" || isTypedArraySlice(c._type)) return false;
+		let root = c;
+		while (root.kind === "SelectorExpr") root = root.expr;
+		return (
+			root.kind === "Ident" &&
+			!assigned.has(root.name) &&
+			isStableIndex(c, assigned)
+		);
+	},
+
+	_emitResliceSyncs(syncs) {
+		if (syncs) for (const s of syncs) this.line(`${s};`);
 	},
 
 	_genAssignStmt(stmt) {
@@ -1113,15 +1240,27 @@ export const statementGenMethods = {
 			case "DefineStmt":
 				return this._inlineDefine(stmt);
 			case "AssignStmt":
-				return this._inlineAssign(stmt);
-			case "IncDecStmt":
+				return this._withInlineSyncs(
+					this._resliceSyncs(stmt.lhs, stmt, true),
+					this._inlineAssign(stmt),
+				);
+			case "IncDecStmt": {
+				const syncs = this._resliceSyncs([stmt.expr], stmt, true);
 				this._markIndexLvalues([stmt.expr]);
-				return `${this.genExpr(stmt.expr)}${stmt.op}`;
+				return this._withInlineSyncs(
+					syncs,
+					`${this.genExpr(stmt.expr)}${stmt.op}`,
+				);
+			}
 			case "ExprStmt":
 				return this.genExpr(stmt.expr);
 			default:
 				return "";
 		}
+	},
+
+	_withInlineSyncs(syncs, js) {
+		return syncs ? `${js}, ${syncs.join(", ")}` : js;
 	},
 
 	_inlineDefine(stmt) {
