@@ -169,14 +169,14 @@ var __reslice = __reslice || function(a, lo, hi) {
       const e = a[__rcap];
       const r = a.slice(lo, hi);
       if (e === undefined) {
-        if (n - lo > r.length) __rcdef(r, { b: a, o: lo, c: n - lo, s: a.slice(lo, hi), so: 0 });
+        __rcdef(r, { b: a, o: lo, c: n - lo, s: a.slice(lo, hi), so: 0 });
         return r;
       }
       // A copy of a copy: write back the changed elements it drops and share
       // the snapshot, so a pop costs no more than the copy itself.
       if (lo > 0) __rcput(e, a, 0, lo);
       __rcput(e, a, hi, n);
-      if (e.c - lo > r.length) __rcdef(r, { b: e.b, o: e.o + lo, c: e.c - lo, s: e.s, so: e.so + lo });
+      __rcdef(r, { b: e.b, o: e.o + lo, c: e.c - lo, s: e.s, so: e.so + lo });
       return r;
     }
   }

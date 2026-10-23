@@ -8,6 +8,7 @@ import {
 	isStringRangeType,
 	loopVarsCapturedInLoop,
 	nodeAssigns,
+	someChild,
 } from "../../lower/index.js";
 import { isComplex, isTypedArraySlice } from "../../typechecker/types.js";
 
@@ -31,9 +32,9 @@ const isSelfResliceShape = (stmt) =>
 	!stmt.rhs[0].max &&
 	sameChain(stmt.lhs[0], stmt.rhs[0].expr);
 
-// Pure index expressions that read the same value after the write as before
-// it: literals, variables and fields not assigned by the statement, `len`
-// and `cap`, and arithmetic over those.
+// Pure expressions (the slice chain of a `__rcs` sync) that read the same
+// value after the write as before it: literals, variables and fields not
+// assigned by the statement, `len` and `cap`, and arithmetic over those.
 const isStableIndex = (e, assigned) => {
 	switch (e?.kind) {
 		case "BasicLit":
@@ -55,6 +56,53 @@ const isStableIndex = (e, assigned) => {
 				e.func?.kind === "Ident" &&
 				(e.func.name === "len" || e.func.name === "cap") &&
 				e.args.every((a) => isStableIndex(a, assigned))
+			);
+		default:
+			return false;
+	}
+};
+
+const isLenCap = (e) =>
+	e.kind === "CallExpr" &&
+	e.func?.kind === "Ident" &&
+	(e.func.name === "len" || e.func.name === "cap");
+
+// A call (other than `len`/`cap`), receive or await in `n` (not inside a
+// function literal): it may change variables and fields.
+const hasCall = (n) => {
+	if (Array.isArray(n)) return n.some(hasCall);
+	if (!n || typeof n !== "object" || typeof n.kind !== "string") return false;
+	if (n.kind === "FuncLit") return false;
+	if (n.kind === "AwaitExpr" || (n.kind === "CallExpr" && !isLenCap(n)))
+		return true;
+	if (n.kind === "UnaryExpr" && n.op === "<-") return true;
+	return someChild(n, hasCall);
+};
+
+// Index of a `__rcs` sync that can be evaluated again after the write:
+// constants, and, when `vars` (a single-LHS statement without calls), unboxed
+// variables, with `len`/`cap` and arithmetic over those.  Any other index
+// is bound to a temporary first, so the write and the sync use one value.
+const isReusableIndex = (e, vars, boxed) => {
+	if (e?._const || e?.kind === "BasicLit") return true;
+	switch (e?.kind) {
+		case "Ident":
+			return vars && !boxed.has(e.name);
+		case "ParenExpr":
+			return isReusableIndex(e.expr, vars, boxed);
+		case "UnaryExpr":
+			return (
+				(e.op === "-" || e.op === "+" || e.op === "^") &&
+				isReusableIndex(e.operand, vars, boxed)
+			);
+		case "BinaryExpr":
+			return (
+				isReusableIndex(e.left, vars, boxed) &&
+				isReusableIndex(e.right, vars, boxed)
+			);
+		case "CallExpr":
+			return (
+				isLenCap(e) && e.args.every((a) => isReusableIndex(a, vars, boxed))
 			);
 		default:
 			return false;
@@ -376,19 +424,23 @@ export const statementGenMethods = {
 	// Index writes in `lhs` whose slice may be a `__reslice` copy: each is
 	// followed by `__rcs(x, i)` (`_emitResliceSyncs`), which writes the element
 	// through to the copy's old array, so writes through the copy and through
-	// other slices of that array keep Go's order.  An index that the write
-	// could change, or that has a call, is first bound to a temporary (not in
-	// `inline` for-clause statements, where the write-back on extension still
-	// applies).  Not covered: writes through other references to the copy.
+	// other slices of that array keep Go's order.  An index that the statement
+	// could change (`isReusableIndex`) is first bound to a temporary (not in
+	// `inline` for-clause statements, which skip the sync: the write-back on
+	// extension still applies).  Not covered: writes through other references to the copy.
 	_resliceSyncs(lhs, stmt, inline = false) {
 		if (!this._resliceNames?.size) return null;
 		const assigned = new Set();
 		if (stmt.kind === "AssignStmt" && stmt.lhs.length > 1)
 			for (const e of stmt.lhs) if (e.kind === "Ident") assigned.add(e.name);
+		const vars =
+			lhs.length === 1 &&
+			!hasCall(lhs[0].index) &&
+			(stmt.kind !== "AssignStmt" || !hasCall(stmt.rhs));
 		const out = [];
 		for (const e of lhs) {
 			if (!this._isResliceSyncTarget(e, assigned)) continue;
-			if (!isStableIndex(e.index, assigned)) {
+			if (!isReusableIndex(e.index, vars, this._boxedVars)) {
 				if (inline) continue;
 				this._tmpCounter = (this._tmpCounter ?? 0) + 1;
 				const tmp = `__rci${this._tmpCounter}`;
