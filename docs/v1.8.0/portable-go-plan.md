@@ -805,11 +805,12 @@ The Phase 0.5 reviews (PR #29) found these bugs. None of them were introduced by
 
 ### Phase 1.2: Conformance harness, documentation and reconciliation
 
-- [ ] **Task 1.3a — Conformance runner**
+- [x] **Task 1.3a — Conformance runner**
   - Files: new `test/conformance/run.js`, `test/conformance/README.md`, `package.json` (`conformance` script, included in `npm test`)
   - Do: for each `test/conformance/<pkg>/<name>.go`, compile as a `both` package, run `main` on JS and on WASM, and compare both outputs byte for byte with `<name>.out`. Missing `.out` is a failure with the `conformance:update` hint.
   - Test: one fixture per existing package (`strings`, `strconv`, `fmt`) with hand-verified `.out` files to bootstrap.
   - Done when: `npm run conformance` passes on the bootstrap fixtures on both backends.
+  - Landed: `test/conformance/run.js` finds `<pkg>/<name>.go`, compiles each as a `both` package (JS through the strict `both` code generator, WASM through `compileWasm`, which must validate), runs the module on JS (the generated module calls `main` itself) and calls the exported `main` in WASM, capturing raw stdout: `process.stdout.write` and `console.log` in JS, the line-buffered `stdout` callback in WASM. Each output is compared with `<name>.out` as bytes; a failure names the backend and the first differing line, and a missing `.out` names `npm run conformance:update`. `npm run conformance` runs after the unit tests in `npm test`, and `test/unit/compiler/conformance.test.js` covers the runner on temp-dir fixtures. Bootstrap fixtures: `strings/basic.go`, `strconv/basic.go`, `fmt/basic.go`, with `.out` files written by hand and checked against `go run`. Writing them found gaps that were left out of the fixtures because later tasks own them: `fmt.Sprint`/`Sprintln` do not exist and `fmt.Print` spaces operands wrongly on both backends (JS: no space between numbers; WASM: a space between every operand) (Task 3.1a); `%U` and `%T` are printed literally (Task 3.1c); `fmt.Print` of a string that contains `"\n"` is never flushed in WASM, and an unterminated last line is lost there (Task 3.1e's shared line buffer); not yet in any task: `%e` prints a one-digit exponent (`1.234568e+3`, Go `e+03`), `%q` on a `[]string` quotes the joined string, and `fmt.Sprintf("%v", nil)` produces an invalid WASM module (`local.set expected type i64, found ref.null`).
 
 - [ ] **Task 1.3b — `conformance:update` with real Go**
   - Files: `test/conformance/update.js`, `package.json`
