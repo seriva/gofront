@@ -33,9 +33,11 @@ import {
 	assertEqual,
 	assertErrorContains,
 	compile,
+	compileDir,
 	ROOT,
 	section,
 	test,
+	withTempDir,
 } from "../helpers.js";
 
 const GAPS_PATH = fileURLToPath(
@@ -182,10 +184,21 @@ function exclusionProbe(e) {
 // The compile errors of `source` as a js package.  An exclusion is a
 // targeted error, so warnings ("cannot find types for …") do not count; they
 // are kept off the console.
-function compileErrors(source) {
+// A package with Go source (runtime/stdlib/<pkg>) is only loaded by a
+// directory build, whose errors are thrown.
+function compileErrors(source, goSourcePkg) {
 	const { warn, error } = console;
 	console.warn = console.error = () => {};
 	try {
+		if (goSourcePkg)
+			return withTempDir({ "main.go": source }, (dir) => {
+				try {
+					compileDir(dir);
+					return "";
+				} catch (err) {
+					return err.message;
+				}
+			});
 		return compile(source)
 			.errors.map((x) => x.message)
 			.join("\n");
@@ -199,7 +212,9 @@ function compileErrors(source) {
 function reportsExclusion(e) {
 	const reason = e.note ?? e.status.slice("excluded:".length);
 	// The package path itself (`runtime/debug`) may contain the reason.
-	const text = compileErrors(exclusionProbe(e)).split(e.pkg).join("");
+	const text = compileErrors(exclusionProbe(e), goSource(e.pkg) !== null)
+		.split(e.pkg)
+		.join("");
 	return text.includes(reason);
 }
 

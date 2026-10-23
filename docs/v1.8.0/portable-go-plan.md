@@ -898,11 +898,12 @@ The Phase 0.5 reviews (PR #29) found these bugs. None of them were introduced by
 
 ### Phase 2.1: `iter` package and slices iterator members
 
-- [ ] **Task 2.1 — `iter` package**
+- [x] **Task 2.1 — `iter` package**
   - Files: new `runtime/stdlib/iter/iter.go`, `src/typechecker/stdlib/` (diagnostic for `Pull`)
   - Do: `Seq[V]`, `Seq2[K, V]` as generic named func types (needs Task 0.3). `iter.Pull`/`Pull2` report `requires coroutines; out of scope (no runtime)`.
   - Test: new `test/unit/builtins/iter.test.js` — parity tests ranging over `iter.Seq[int]` returned from a user function; the `Pull` diagnostic.
   - Done when: both pass; `cmp` already landed in Task 0.6a.
+  - Landed: `runtime/stdlib/iter/iter.go` declares `Seq` and `Seq2`. A qualified generic type (`iter.Seq[int]`, a `GenericTypeName`) did not count as using its import (`'iter' imported and not used`) and was not renamed to its mangled name, so the WASM link typed it as `i32` and produced an invalid module; `_resolveGenericTypeName` (`src/typechecker/resolve.js`) now goes through `_useQualifiedTypeName` like a plain `pkg.T`. `iter.Pull`/`Pull2` report `iter.Pull is not available: requires coroutines; out of scope (no runtime)` from a small table of excluded members with the manifest note (`src/typechecker/stdlib/excluded.js`, checked in `_fieldTypeNamespace`); the general exclusion diagnostic stays with Task 3.7. The coverage gate's exclusion probe builds a project directory for packages that have Go source (the single-file `compile` helper does not load `runtime/stdlib/`), so `iter.Pull`/`Pull2` left the `exclusion` gaps and `iter.Seq`/`Seq2` the `missing` ones.
 
 - [ ] **Task 2.2a — `slices` iterator members: `All`, `Values`, `Backward`, `Collect`, `AppendSeq`**
   - Files: new `runtime/stdlib/slices/iter.go` (overlay)
