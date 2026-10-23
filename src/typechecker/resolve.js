@@ -490,7 +490,25 @@ export const resolveMethods = {
 			const found = this.types.get(t.name);
 			if (found) return found;
 		}
+		if (t.kind === "named" && t.typeArgs?.length)
+			return this._withGenericMethods(t);
 		return t;
+	},
+
+	// A substituted generic instance (e.g. Stack[int] from an inferred call)
+	// drops the methods map; re-derive it from the generic declaration.
+	_withGenericMethods(t) {
+		const generic = this.types.get(t.name)?._generic;
+		if (!generic?.methods || generic.methods.size === 0) return t;
+		if (t.methods && generic.methods.size <= t.methods.size) return t;
+		const map = new Map();
+		for (let i = 0; i < generic.typeParams.length; i++)
+			map.set(generic.typeParams[i].name, t.typeArgs[i] ?? ANY);
+		const methods = new Map(t.methods);
+		for (const [name, mType] of generic.methods)
+			if (!methods.has(name))
+				methods.set(name, this.substituteType(mType, map));
+		return { ...t, methods };
 	},
 
 	// ── Field type lookup ─────────────────────────────────────────────
