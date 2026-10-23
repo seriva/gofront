@@ -863,7 +863,6 @@
 			"Match",
 			"MatchReader",
 			"MustCompilePOSIX",
-			"Regexp",
 			"Regexp.AppendText",
 			"Regexp.Copy",
 			"Regexp.Expand",
@@ -983,7 +982,6 @@
 			"Reader.UnreadByte",
 			"Reader.UnreadRune",
 			"Reader.WriteTo",
-			"Replacer",
 			"Replacer.WriteString",
 			"SplitAfterSeq",
 			"SplitSeq",
@@ -1317,7 +1315,7 @@
 			"LimitedReader.Read"
 		],
 		"os": ["Stderr", "Stdin", "Stdout"],
-		"strings": ["Replacer.Replace"],
+		"strings": ["Replacer", "Replacer.Replace"],
 		"testing": ["Short", "Verbose"]
 	},
 	"exclusion": {
