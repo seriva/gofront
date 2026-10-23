@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
 type name string
@@ -65,4 +66,39 @@ func main() {
 	fb := []byte("ab")
 	fb2 := fmt.Append(fb[:2:2], "cd")
 	fmt.Println(string(fb), string(fb2))
+
+	// A result that does not fit in the spare capacity reallocates as a
+	// whole: the caller's backing array stays untouched, however the
+	// encoded bytes are chunked.
+	long := strings.Repeat("k", 10000)
+	for _, capacity := range []int{9000, 8192, 8193, 20000, 10000, 9999} {
+		lb := make([]byte, 0, capacity)
+		full := lb[:cap(lb)]
+		for _, fn := range []int{0, 1, 2} {
+			var out []byte
+			switch fn {
+			case 0:
+				out = fmt.Append(lb, long)
+			case 1:
+				out = fmt.Appendf(lb, "%s", long)
+			default:
+				out = fmt.Appendln(lb, long)
+			}
+			sum := 0
+			for _, x := range full {
+				sum += int(x)
+			}
+			fmt.Println(capacity, fn, len(out), sum)
+		}
+	}
+	// Fits exactly: written in place. One byte too long: untouched.
+	base := make([]byte, 10, 20)
+	fmt.Println(len(fmt.Append(base, "0123456789")), string(base[:cap(base)][10:20]))
+	base2 := make([]byte, 10, 20)
+	out2 := fmt.Append(base2, "0123456789A")
+	tail := 0
+	for _, x := range base2[:cap(base2)][10:20] {
+		tail += int(x)
+	}
+	fmt.Println(len(out2), tail)
 }
