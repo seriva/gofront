@@ -20,8 +20,9 @@ export const HELPER_LEN = `var __len = __len || function(a) {
 // array is copied instead (a Proxy is much slower to index, and the old
 // value of `x` is usually dead), see docs/go-compatibility.md.
 // The copy keeps the capacity of the old value: its `__rcap` symbol property
-// (shared by every compiled module) is `{b, o, c, s, so}` (backing array,
-// offset, capacity, snapshot of the copy and its offset in `s`).  An index
+// (shared by every compiled module) is `{b, o, c, s, so, own}` (backing array,
+// offset, capacity, snapshot of the copy, its offset in `s`, and false while
+// `s` is shared with another copy).  An index
 // write `x[i] = v` to a chain that the package self-reslices is followed by
 // `__rcs(x, i)`, which writes the element through to `b` (and `s`), so it is
 // ordered with writes through other slices of `b`.  A slice or `append`
@@ -112,20 +113,26 @@ var __cap = __cap || function(a) {
   if (ArrayBuffer.isView(a)) return __tcap.get(a) ?? a.length;
   return a[__rcap]?.c ?? a.length;
 };
+// A snapshot shared by a copy of a copy (e.own false) is cloned before it is
+// updated, so the update does not reach the other copy's snapshot (whose
+// write-back would then revert the element).
+var __rcown = __rcown || function(e, a) {
+  if (e.own === false) { e.s = e.s.slice(e.so, e.so + a.length); e.so = 0; e.own = true; }
+  return e.s;
+};
 // Write back only the elements of a __reslice copy that changed since it was
 // made (e.s from e.so is its snapshot, kept up to date by __rcs), so writes
 // made meanwhile through other slices of the backing array are kept.
 var __rcput = __rcput || function(e, a, from, to) {
-  const s = e.s, so = e.so;
   for (let i = from; i < to; i++) {
     const v = a[i];
-    if (!Object.is(v, s[so + i])) { e.b[e.o + i] = v; s[so + i] = v; }
+    if (!Object.is(v, e.s[e.so + i])) { e.b[e.o + i] = v; __rcown(e, a)[e.so + i] = v; }
   }
 };
 // After an index write to a possible __reslice copy: write element i through.
 var __rcs = __rcs || function(a, i) {
   const e = a?.[__rcap];
-  if (e !== undefined && i >= 0 && i < e.c && i < a.length) { const v = a[i]; e.b[e.o + i] = v; e.s[e.so + i] = v; }
+  if (e !== undefined && i >= 0 && i < e.c && i < a.length) { const v = a[i]; e.b[e.o + i] = v; __rcown(e, a)[e.so + i] = v; }
 };
 var __rcdef = __rcdef || function(r, e) {
   Object.defineProperty(r, __rcap, { value: e, writable: true });
@@ -173,10 +180,12 @@ var __reslice = __reslice || function(a, lo, hi) {
         return r;
       }
       // A copy of a copy: write back the changed elements it drops and share
-      // the snapshot, so a pop costs no more than the copy itself.
+      // the snapshot (copied on write, __rcown), so a pop costs no more than
+      // the copy itself.
       if (lo > 0) __rcput(e, a, 0, lo);
       __rcput(e, a, hi, n);
-      __rcdef(r, { b: e.b, o: e.o + lo, c: e.c - lo, s: e.s, so: e.so + lo });
+      e.own = false;
+      __rcdef(r, { b: e.b, o: e.o + lo, c: e.c - lo, s: e.s, so: e.so + lo, own: false });
       return r;
     }
   }
