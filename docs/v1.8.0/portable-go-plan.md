@@ -819,11 +819,12 @@ The Phase 0.5 reviews (PR #29) found these bugs. None of them were introduced by
   - Done when: the README documents the workflow and CI does not need `go`.
   - Landed: `test/conformance/update.js` (`npm run conformance:update [-- <dir-or-fixture>…]`) checks `go env GOVERSION` (missing `go` or a version other than go1.26.x exits 1 with an explanation), runs `go run` on each fixture from its directory and writes `<name>.out`, reporting created/updated/unchanged files. `conformance.test.js` checks the missing-`go` message with an empty `PATH` and, when go1.26 is installed, that Go's output equals every checked-in `.out`. Regenerating the bootstrap fixtures with go1.26.10 left them unchanged.
 
-- [ ] **Task 1.3c — Fixture lint for string semantics**
+- [x] **Task 1.3c — Fixture lint for string semantics**
   - Files: `test/conformance/run.js`
   - Do: reject fixtures that apply `len(`, index `[`, or `range` to a string literal containing non-ASCII bytes, with the hint from [§1.1](#11-string-semantics-both-backends). `[]byte(...)` forms are allowed.
   - Test: a deliberately bad fixture in a temp dir is rejected.
   - Done when: the lint runs as part of `npm run conformance`.
+  - Landed: `lintFixture` in `test/conformance/run.js` scans the fixture's tokens for `len(<lit>)`, `<lit>[` (index and slice) and `range <lit>` where `<lit>` is a string literal with a non-ASCII character or, in an interpreted literal, an escape that produces a byte ≥ 0x80 (`\xc3`, `\303`, `\u00e9`; read from the source because the lexer partly decodes escapes, so `"\\xc3"` is ASCII). Each use is reported as `<pkg>/<name>.go:<line>: …` with the §1.1 hint, and `checkFixture` rejects a fixture before compiling it. `[]byte(…)`/`[]rune(…)` and literals not under `len`/index/`range` pass. Literals reached through variables are not tracked. Tests in `conformance.test.js` (temp-dir fixture rejected, allowed forms).
 
 - [ ] **Task 1.4 — Generated stdlib docs**
   - Files: new `scripts/docs-stdlib.js`, `docs/language-support.md`, `docs/hybrid-wasm.md`, `package.json` (`docs:stdlib`, added to `check`)
