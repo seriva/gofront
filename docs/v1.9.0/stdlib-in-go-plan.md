@@ -1,16 +1,16 @@
 # Stdlib in Go — Design Plan
 
-**Version:** v1.8.1
+**Version:** v1.9.0
 **Status:** Draft (2026-10-23)
 **Depends on:** v1.8.0 ([`../v1.8.0/portable-go-plan.md`](../v1.8.0/portable-go-plan.md)) **released**: the Go-source stdlib loader, overlays, reachability, `//gofront:intrinsic`, the coverage manifest and the conformance harness must all exist. Phases 3–9 of this plan also assume the v1.8.0 member tasks that touch the same packages have landed (see [Relationship to v1.8.0 and v2.0.0](#4-relationship-to-v180-and-v200)).
 **Replaces:** None
-**Followed by:** [`docs/v2.0.0/native-go-engine.md`](../v2.0.0/native-go-engine.md). After this release the stdlib that the native engine must port is a fraction of today's, because Go-source packages are embedded, not ported.
+**Followed by:** [`docs/v2.0.0/native-go-engine.md`](../v2.0.0/native-go-engine.md), whose baseline moves from v1.8.0 to this release. After it the stdlib that the native engine must port is a fraction of today's, because Go-source packages are embedded, not ported.
 
 ---
 
 ## Goal
 
-v1.8.0 introduced a way to write a stdlib package **once, in Go**, and left every existing package on the old path: a hand-written type table in [`src/typechecker/stdlib/`](../../src/typechecker/stdlib/), a JS shim in [`src/backend/js/stdlib/`](../../src/backend/js/stdlib/) and a WASM instruction emitter in [`src/backend/wasm/stdlib/`](../../src/backend/wasm/stdlib/). That is 26,119 lines of JavaScript (2,426 typings, 2,976 JS shims, 20,717 WASM emitters) against 77 lines of Go-source stdlib. v1.8.1 moves **every package whose behaviour is ordinary Go over GoFront values** onto the Go-source path, and keeps host-backed fast paths as small, named **natives** that are checked against the Go body.
+v1.8.0 introduced a way to write a stdlib package **once, in Go**, and left every existing package on the old path: a hand-written type table in [`src/typechecker/stdlib/`](../../src/typechecker/stdlib/), a JS shim in [`src/backend/js/stdlib/`](../../src/backend/js/stdlib/) and a WASM instruction emitter in [`src/backend/wasm/stdlib/`](../../src/backend/wasm/stdlib/). That is 26,119 lines of JavaScript (2,426 typings, 2,976 JS shims, 20,717 WASM emitters) against 77 lines of Go-source stdlib. v1.9.0 moves **every package whose behaviour is ordinary Go over GoFront values** onto the Go-source path, and keeps host-backed fast paths as small, named **natives** that are checked against the Go body.
 
 This is not only a cleanup. The probes below show that the old path is where the correctness and speed bugs are: every WASM sort is quadratic, sorting `NaN` gives an unsorted result on both backends, `sort.Slice` breaks ties in a different order than Go, and 163 signatures differ from Go's. It also shows the opposite risk: a naive Go rewrite of host-backed string functions is about 300× slower in WASM. So the plan has one rule: **Go is the specification and the default implementation; a native may replace it only where the host has a faster primitive, and only while a differential test proves the two agree.**
 
@@ -35,7 +35,7 @@ A package or member is **moved to Go** when its behaviour can be written as ordi
 | **In scope: Native-accelerated** | Go body is the specification; a registered native replaces calls when the host primitive wins | `strings` (`Contains`, `Index*`, `Has*`, `Repeat`, `ToUpper`/`ToLower`, `Split*`, `Join`, `Replace*`, `Trim*`, `EqualFold`, ... where JS or a WASM import has the primitive), `bytes` (`IndexByte`, `Equal`, `Compare` on typed arrays), `slices.Sort`/`Contains`/`Index`/`Reverse`/`Clone` for `int`/`string`/`float64` element types where JS equals Go, `sort.Ints`/`Strings`, `math/bits` (`Len`, `LeadingZeros`, `OnesCount` via `Math.clz32`/WASM instructions), `math/rand` (top-level functions over `Math.random` or the existing random import), `unicode` `Is*`/`To*` (JS `\p{…}` classes and the existing WASM tables), `strconv` (`FormatFloat`/`ParseFloat`/`AppendFloat` shortest-repr), `time` (`Now`, `Since`, local zone offset) |
 | **In scope: Stays emitter** | Needs type tables, generated code or the host | `fmt` (verb engine, `%T`/`%v` type tables, `Fprint*` dispatch), `encoding/json` (generated codecs), `regexp`, `os`, `testing`, `gom`, `gofront/shared`, `gofront/simd`, browser and WebGL/WebGPU typings, `math` (single instructions and imports), `crypto/rand`, `errors.As` (tests the dynamic type of its target), `strings.Builder` (JS string append, WASM builder state), `encoding/binary` `Read`/`Write` (take `any` and walk struct fields), `time.Sleep` |
 | **Excluded: runtime / platform** | Unchanged from v1.8.0 | goroutines, channels, `reflect`, `unsafe`, `runtime`, file I/O |
-| **Excluded: deferred** | Valid, but not part of a patch release | A user-visible `//gofront:native` for user packages (natives are a closed, compiler-owned registry); generating a Go-source `fmt`; moving `regexp` to Go (RE2 port); the `go/*`, `compress/*`, `math/big` families already deferred in v1.8.0 |
+| **Excluded: deferred** | Valid, but not part of this release | A user-visible `//gofront:native` for user packages (natives are a closed, compiler-owned registry); generating a Go-source `fmt`; moving `regexp` to Go (RE2 port); the `go/*`, `compress/*`, `math/big` families already deferred in v1.8.0 |
 
 ---
 
@@ -60,7 +60,7 @@ Audit run 2026-10-23 on `feat/portable-go` (HEAD `04aa0c6`, Node 25.2.0, local G
 | Manifest | `runtime/stdlib/manifest.json` entries have `pkg, name, kind, signature, status` only. The `implementation` field (`emitter`/`source`) that [v1.8.0 §3](../v1.8.0/portable-go-plan.md#3-coverage-manifest-and-conformance) and [v2.0.0](../v2.0.0/native-go-engine.md) rely on does not exist. | Inspection of `runtime/stdlib/manifest.json` (2,476 entries, 4 key sets) |
 | Tooling | `npm run conformance:update` accepts only `go1.26.x` ([`update.js:13`](../../test/conformance/update.js)). This machine has `go1.27.2`, so new fixtures cannot be captured here without a pinned 1.26 toolchain. | `go version`; `GO_VERSION = "go1.26"` |
 | No gap found | `unicode.IsLetter/IsUpper/IsLower/IsDigit/IsSpace/IsPunct/ToUpper/ToLower` on `a é Σ σ 中 ٣ ǅ U+00A0 €` give identical results on JS, WASM and Go. The `unicode` natives can be kept as they are. | P8 against `.probes/gop8/main.go` |
-| Found, not in this plan | (1) `'é'` as a rune literal throws a `LexError` (`Unknown escape in rune literal: \u`); string literals and `'\x41'` need a separate check. (2) `fmt.Sprintf("%v", math.Inf(-1))` prints `-Infinity`; Go prints `-Inf`. | P9, P6. (2) joins the `fmt` defects already listed in v1.8.0 Task 3.7; (1) is a lexer bug for a v1.8.x fix |
+| Found, not in this plan | (1) `'\u00e9'` as a rune literal throws a `LexError` (`Unknown escape in rune literal: \u`); string literals and `'\x41'` need a separate check. (2) `fmt.Sprintf("%v", math.Inf(-1))` prints `-Infinity`; Go prints `-Inf`. | P9, P6. (2) joins the `fmt` defects already listed in v1.8.0 Task 3.7; (1) is a lexer bug for a v1.8.x fix |
 
 ---
 
@@ -159,7 +159,7 @@ func Index(s, substr string) int { /* Go body: the specification */ }
 
 ### 4. Relationship to v1.8.0 and v2.0.0
 
-- **Patch policy.** [v1.8.0](../v1.8.0/portable-go-plan.md) and [v2.0.0](../v2.0.0/native-go-engine.md) say v1.8.x releases are bug fixes only. This release is justified as a bug-fix release (quadratic WASM sorts, wrong `NaN` and tie order, 163 wrong signatures) whose fix is a structural change. **This needs the project owner's agreement before Phase 3 starts**; Phases 1 and 2 add compiler capabilities with no stdlib behaviour change and are safe either way.
+- **Release placement.** This is a feature release after v1.8.0, so v1.8.0 is no longer the last feature release of the JS engine: v1.9.0 takes that role, and the v2.0.0 port's baseline moves from v1.8.0 to v1.9.0. That trade is deliberate: the port gets smaller, because migrated packages are embedded instead of ported. Task 9.3 updates the v1.8.0 and v2.0.0 plans and the roadmap accordingly. v1.8.x stays bug-fix only.
 - **Unfinished v1.8.0 member tasks.** Tasks 2.2/2.3 (`slices`/`maps` iterator members, already Go overlays), 3.2 (`sort`, Go), 3.3a–3.3c, 3.4a–3.4c (these edit emitters), 3.5 and 3.7 add members to packages this plan migrates. Members written as Go overlays are absorbed by the matching phase here. Members written as emitters (3.3c, 3.4a, 3.4b, 3.4c, parts of 3.7) are rework: **write them as Go overlays in v1.8.0 where a native is not needed**, so this release only deletes code.
 - **v2.0.0 baseline.** The native engine ports the compiler core plus the *remaining* emitters; migrated packages are embedded `.go` files. Task 9.3 updates the v2.0.0 plan's "ported stdlib" list and its 22k-line estimate. The natives registry becomes a table the native engine ports (an estimated 60 small templates instead of ≈ 21,000 lines).
 
@@ -392,8 +392,8 @@ Execution follows [v1.8.0 → How to execute a task](../v1.8.0/portable-go-plan.
   - Done when: the line-count targets in [Done means](#goal) hold.
 
 - [ ] **Task 9.3 — Documentation, v2.0.0 baseline and release notes**
-  - Files: `docs/go-compatibility.md`, `docs/hybrid-wasm.md`, `docs/language-support.md` (regenerated by `npm run docs:stdlib`), `docs/architecture.md`, `docs/v2.0.0/native-go-engine.md`, `docs/roadmap.md`, `CHANGELOG.md`, `README.md`
-  - Do: document the new sort tie order and `NaN` ordering, natives (what they are, `--no-natives`), the Go-source stdlib layout, `errors.As` as the one emitter member of `errors`; replace the v2.0.0 plan's "emitter-backed packages" list and its 22k-line estimate with the post-migration list and the natives registry; set this document's status to *Completed* and record the final numbers in [Performance and size](#performance-and-size).
+  - Files: `docs/go-compatibility.md`, `docs/hybrid-wasm.md`, `docs/language-support.md` (regenerated by `npm run docs:stdlib`), `docs/architecture.md`, `docs/v1.8.0/portable-go-plan.md` (header: no longer the last feature release), `docs/v2.0.0/native-go-engine.md`, `docs/roadmap.md`, `CHANGELOG.md`, `README.md`
+  - Do: document the new sort tie order and `NaN` ordering, natives (what they are, `--no-natives`), the Go-source stdlib layout, `errors.As` as the one emitter member of `errors`; move the v2.0.0 plan's baseline from v1.8.0 to v1.9.0 (header, roadmap theme), replace its "emitter-backed packages" list and its 22k-line estimate with the post-migration list and the natives registry; set this document's status to *Completed* and record the final numbers in [Performance and size](#performance-and-size).
   - Test: `npm run docs:stdlib -- --check` and `npm run check` pass; the v2.0.0 plan's package list equals the manifest's `emitter` packages (a one-line assertion in `manifest.test.js`).
   - Done when: docs are generated and the check passes.
 
