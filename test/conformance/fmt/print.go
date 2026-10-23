@@ -1,6 +1,9 @@
 package main
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 type name string
 
@@ -36,4 +39,30 @@ func main() {
 	fmt.Println(len(b))
 	c := fmt.Append(nil, "n", "m")
 	fmt.Println(string(c), len(c))
+
+	// error operands are not strings: Sprint/Print/Append space them.
+	e1 := errors.New("a")
+	e2 := errors.New("b")
+	fmt.Println(fmt.Sprint(e1, e2) + "|")
+	fmt.Println(fmt.Sprint(e1, 1, "x", e2) + "|")
+	fmt.Println(fmt.Sprint("s", e1, "t") + "|")
+	fmt.Print(e1, e2, "z")
+	fmt.Println()
+	fmt.Println(string(fmt.Append(nil, e1, e2)))
+
+	// Append reuses spare capacity of dst, like append.
+	sb := make([]byte, 2, 10)
+	sc := fmt.Append(sb, "xy")
+	sd := fmt.Append(sb, "zw")
+	fmt.Println(len(sc), cap(sc) >= 4, string(sc[2:]), string(sd[2:]))
+	hs := []byte("hello")
+	hs2 := fmt.Append(hs[:2], "Z")
+	fmt.Println(string(hs), string(hs2))
+	hs3 := fmt.Appendf(hs[:1], "%s", "J")
+	hs4 := fmt.Appendln(hs[:3], "K")
+	fmt.Println(string(hs), string(hs3), len(hs4))
+	// A full destination reallocates and leaves the original alone.
+	fb := []byte("ab")
+	fb2 := fmt.Append(fb[:2:2], "cd")
+	fmt.Println(string(fb), string(fb2))
 }

@@ -946,7 +946,9 @@ export class StdlibCoreEmitter {
 	// so nothing may be pushed until every operand is fully evaluated.
 	// Returns the temps so the caller can still read an argument (fmt.Errorf's
 	// %w cause keeps the original error value in `errTmp`).
-	_emitArgBuffer(args) {
+	// `markErrors` (Sprint/Print/Append) pushes error operands through
+	// `testing_arg_err`, so the host sees a non-string like Go does.
+	_emitArgBuffer(args, markErrors = false) {
 		const temps = [];
 		for (const arg of args) {
 			const goType = arg._type ?? this._resolveExprGoType(arg);
@@ -973,7 +975,13 @@ export class StdlibCoreEmitter {
 					funcIndex: this.mod.resolveFuncIndex("__error_str"),
 				});
 				this.pushInstruction({ op: "local.set", index: tmp });
-				temps.push({ tmp, wType: "externref", isBool: false, errTmp });
+				temps.push({
+					tmp,
+					wType: "externref",
+					isBool: false,
+					errTmp,
+					markErr: markErrors,
+				});
 				continue;
 			}
 			if (this._isCompositeGoType(goType)) {
@@ -1004,11 +1012,13 @@ export class StdlibCoreEmitter {
 			this.pushInstruction({ op: "local.set", index: tmp });
 			temps.push({ tmp, wType, isBool, errTmp: null });
 		}
-		for (const { tmp, wType, isBool } of temps) {
+		for (const { tmp, wType, isBool, markErr } of temps) {
 			this.pushInstruction({ op: "local.get", index: tmp });
 			this.pushInstruction({
 				op: "call",
-				funcIndex: this.mod.getTestingArgImportIndex(wType, isBool),
+				funcIndex: markErr
+					? this.mod.getTestingArgErrImportIndex()
+					: this.mod.getTestingArgImportIndex(wType, isBool),
 			});
 		}
 		return temps;
@@ -7681,7 +7691,7 @@ export class StdlibCoreEmitter {
 		if (name === "Print" || name === "Sprint" || name === "Sprintln") {
 			// Operands travel through the argument buffer; the host joins them
 			// with Go's spacing rule (a space only between two non-strings).
-			const temps = this._emitArgBuffer(args);
+			const temps = this._emitArgBuffer(args, true);
 			this.pushInstruction({
 				op: "i32.const",
 				value: name === "Sprintln" ? 1 : 0,
@@ -7700,7 +7710,7 @@ export class StdlibCoreEmitter {
 				this._callStdlib("fmt_sprintf");
 				this._releaseArgBuffer(temps);
 			} else {
-				const temps = this._emitArgBuffer(rest);
+				const temps = this._emitArgBuffer(rest, true);
 				this.pushInstruction({
 					op: "i32.const",
 					value: name === "Appendln" ? 1 : 0,
