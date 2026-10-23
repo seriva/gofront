@@ -686,3 +686,88 @@ func main() {
 `);
 	assertEqual(errors[0].message, "");
 });
+
+section("strings and bytes: sequence members");
+
+test("strings sequence members in a js-only program", async () => {
+	const res = await compileHybridProject({
+		"main.go": `package main
+
+import (
+	"slices"
+	"strings"
+)
+
+func main() {
+	println(len(slices.Collect(strings.SplitSeq("a,b,c", ","))))
+	n := 0
+	for range strings.Lines("x\\ny\\n") {
+		n++
+	}
+	println(n)
+	for f := range strings.FieldsSeq(" p  q ") {
+		println(f)
+	}
+}
+`,
+	});
+	assertEqual(res.lines.join("|"), "3|2|p|q");
+	assert(res.wasm === null, "a js-only program must not link app.wasm");
+});
+
+test("strings.SplitSeq with a non-ASCII separator agrees on both backends", async () => {
+	const out = await iterParity(
+		`import (
+	"slices"
+	"strings"
+)
+
+func Run() string {
+	parts := slices.Collect(strings.SplitSeq("héllo wörld", "ö"))
+	return strings.Join(parts, "|")
+}
+`,
+	);
+	assertEqual(out, "héllo w|rld");
+});
+
+test("bytes sequence members agree on both backends", async () => {
+	const out = await iterParity(
+		`import (
+	"bytes"
+	"fmt"
+	"slices"
+)
+
+func Run() string {
+	n := 0
+	for p := range bytes.SplitSeq([]byte("héllo wörld"), []byte("ö")) {
+		n += len(p)
+	}
+	lines := slices.Collect(bytes.Lines([]byte("a\\nbb\\n")))
+	return fmt.Sprintf("%d %d %d", n, len(lines), cap(lines[0]))
+}
+`,
+	);
+	assertEqual(out, "11 2 2");
+});
+
+test("strings.FieldsFuncSeq stops when the loop breaks", async () => {
+	const out = await iterParity(
+		`import "strings"
+
+func Run() string {
+	seen := 0
+	isDigit := func(r rune) bool { return r >= '0' && r <= '9' }
+	for range strings.FieldsFuncSeq("a1b2c3d", isDigit) {
+		seen++
+		if seen == 2 {
+			break
+		}
+	}
+	return string(rune('0' + seen))
+}
+`,
+	);
+	assertEqual(out, "2");
+});
