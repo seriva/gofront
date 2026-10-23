@@ -366,8 +366,15 @@ export const assignabilityMethods = {
 	// maps.Keys/Values (and every iter.Seq) no longer return a slice: point the
 	// slice-expecting caller at slices.Collect.
 	_seqToSliceHint(source, tBase, node) {
-		if (tBase?.kind !== "slice" || source.kind !== "named") return null;
-		if (!/^iter\.Seq\d*\[/.test(typeStr(source))) return null;
+		if (tBase?.kind !== "slice" || !this._isIterSeq(source)) return null;
+		return this._seqCollectHint(node);
+	},
+
+	_isIterSeq(t) {
+		return t?.kind === "named" && /^iter\.Seq\d*\[/.test(typeStr(t));
+	},
+
+	_seqCollectHint(node) {
 		const f = node?.kind === "CallExpr" ? node.func : null;
 		if (
 			f?.kind === "SelectorExpr" &&
@@ -377,6 +384,17 @@ export const assignabilityMethods = {
 		)
 			return `use slices.Collect(maps.${f.field}(m)) for a slice`;
 		return "use slices.Collect(seq) for a slice";
+	},
+
+	// len/cap, spread and slice conversion are lenient on func types, and an
+	// iter.Seq value is one: reject it there instead of miscompiling.
+	_rejectSeqAsSlice(type, node, use) {
+		if (!this._isIterSeq(type)) return;
+		this.err(
+			`cannot use ${typeStr(type)} in ${use}`,
+			node,
+			this._seqCollectHint(node),
+		);
 	},
 
 	// Identical underlying types are assignable when one side is an unnamed
