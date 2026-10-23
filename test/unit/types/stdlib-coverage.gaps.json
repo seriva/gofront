@@ -552,7 +552,6 @@
 			"WriterTo",
 			"WriterTo.WriteTo"
 		],
-		"iter": ["Seq", "Seq2"],
 		"log": [
 			"Default",
 			"Fatal",
@@ -894,20 +893,7 @@
 			"Regexp.SubexpNames",
 			"Regexp.UnmarshalText"
 		],
-		"slices": [
-			"All",
-			"AppendSeq",
-			"Backward",
-			"Chunk",
-			"Collect",
-			"CompareFunc",
-			"EqualFunc",
-			"Repeat",
-			"Sorted",
-			"SortedFunc",
-			"SortedStableFunc",
-			"Values"
-		],
+		"slices": ["CompareFunc", "EqualFunc", "Repeat"],
 		"sort": [
 			"Find",
 			"Float64Slice",
@@ -1406,7 +1392,6 @@
 		],
 		"io/fs": ["*"],
 		"io/ioutil": ["*"],
-		"iter": ["Pull", "Pull2"],
 		"log/slog": ["*"],
 		"log/syslog": ["*"],
 		"math/big": ["*"],
@@ -2111,8 +2096,12 @@
 			"Stdout": "interface{}"
 		},
 		"slices": {
+			"All": "func[$0 interface{}]([]$0) iter.Seq2[int, $0]",
+			"AppendSeq": "func[$0 interface{}]([]$0, iter.Seq[$0]) []$0",
+			"Backward": "func[$0 interface{}]([]$0) iter.Seq2[int, $0]",
 			"BinarySearch": "func(interface{}, interface{}) (int, bool)",
 			"BinarySearchFunc": "func(interface{}, interface{}, interface{}) (int, bool)",
+			"Chunk": "func[$0 interface{}]([]$0, int) iter.Seq[[]$0]",
 			"Clip": "func(interface{}) interface{}",
 			"Clone": "func(interface{}) interface{}",
 			"Compact": "func(interface{}) interface{}",
@@ -2138,7 +2127,8 @@
 			"Reverse": "func(interface{})",
 			"Sort": "func(interface{})",
 			"SortFunc": "func(interface{}, interface{})",
-			"SortStableFunc": "func(interface{}, interface{})"
+			"SortStableFunc": "func(interface{}, interface{})",
+			"Values": "func[$0 interface{}]([]$0) iter.Seq[$0]"
 		},
 		"sort": {
 			"Search": "func(int, interface{}) int",

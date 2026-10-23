@@ -2,6 +2,7 @@
 // Installed as a mixin on TypeChecker.prototype.
 
 import { parseJsonTag } from "../parser/struct-tag.js";
+import { EXCLUDED_STDLIB_MEMBERS } from "./stdlib/excluded.js";
 import {
 	ANY,
 	BASIC_TYPES,
@@ -73,6 +74,9 @@ const SUBSTITUTE_DISPATCH = {
 	named: (s, type, map) => ({
 		kind: "named",
 		name: type.name,
+		...(type.typeArgs && {
+			typeArgs: type.typeArgs.map((t) => s.substituteType(t, map)),
+		}),
 		underlying: s.substituteType(type.underlying, map),
 	}),
 };
@@ -189,6 +193,7 @@ export const resolveMethods = {
 				? this.resolveTypeNode(node.expr, scope)
 				: null;
 		if (!base) return this.err(`Unknown type '${name ?? "?"}'`, node);
+		if (name) this._useQualifiedTypeName(node.name ? node : node.expr, base);
 		if (base.kind === "named" && base._generic?.isAlias) {
 			const aliasArgs = typeArgs.map((n) => this.resolveTypeNode(n, scope));
 			node._typeArgs = aliasArgs;
@@ -420,6 +425,19 @@ export const resolveMethods = {
 			if (!map.has(paramType.name)) map.set(paramType.name, argType);
 			return;
 		}
+		if (paramType.kind === "named" && paramType.typeArgs) {
+			// `iter.Seq[E]` against `iter.Seq[int]`: unify the type arguments;
+			// against any other type, its underlying type.
+			if (argType.kind === "named" && argType.name === paramType.name) {
+				const args = argType.typeArgs ?? [];
+				for (let i = 0; i < paramType.typeArgs.length; i++)
+					this._inferFromPair(paramType.typeArgs[i], args[i], map);
+				return;
+			}
+			paramType = paramType.underlying;
+		}
+		if (argType.kind === "named" && argType.underlying)
+			argType = argType.underlying;
 		this._inferFromStructuredPair(paramType, argType, map);
 	},
 
@@ -472,7 +490,29 @@ export const resolveMethods = {
 			const found = this.types.get(t.name);
 			if (found) return found;
 		}
+		if (t.kind === "named" && t.typeArgs?.length)
+			return this._withGenericMethods(t);
 		return t;
+	},
+
+	// A substituted generic instance (e.g. Stack[int] from an inferred call)
+	// drops the methods map; re-derive it from the generic declaration.
+	_withGenericMethods(t) {
+		const decl = this.types.get(t.name);
+		const generic = decl?._generic;
+		// Struct generics only: codegen has no receiver support for generic
+		// slice/map/func named types, so those keep the baseline diagnostics.
+		if (this.resolveType(decl?.underlying)?.kind !== "struct") return t;
+		if (!generic?.methods || generic.methods.size === 0) return t;
+		if (t.methods && generic.methods.size <= t.methods.size) return t;
+		const map = new Map();
+		for (let i = 0; i < generic.typeParams.length; i++)
+			map.set(generic.typeParams[i].name, t.typeArgs[i] ?? ANY);
+		const methods = new Map(t.methods);
+		for (const [name, mType] of generic.methods)
+			if (!methods.has(name))
+				methods.set(name, this.substituteType(mType, map));
+		return { ...t, methods };
 	},
 
 	// ── Field type lookup ─────────────────────────────────────────────
@@ -615,6 +655,12 @@ export const resolveMethods = {
 			}
 			return base.members[field];
 		}
+		const excluded = EXCLUDED_STDLIB_MEMBERS.get(`${base.name}.${field}`);
+		if (excluded)
+			return this.err(
+				`${base.name}.${field} is not available: ${excluded}`,
+				node,
+			);
 		return this.err(`No member '${field}' in namespace ${base.name}`, node);
 	},
 

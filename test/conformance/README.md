@@ -2,7 +2,7 @@
 
 Each `test/conformance/<pkg>/<name>.go` is a small, plain Go program whose `main` prints results with `fmt`. Next to it, `<name>.out` holds the output of the same program under real Go.
 
-`npm run conformance` (part of `npm test`) compiles every fixture as a `both` package, runs `main` on the JS backend and on the WASM backend, and compares each output with `<name>.out` byte for byte. A failure names the backend and the first line that differs. A fixture without an `.out` file fails with a hint to run `npm run conformance:update`.
+`npm run conformance` (part of `npm test`) compiles every fixture as a `both` package (with the Go-source stdlib under `runtime/stdlib/`, like a project build), runs `main` on the JS backend and on the WASM backend, and compares each output with `<name>.out` byte for byte. A failure names the backend and the first line that differs. A fixture without an `.out` file fails with a hint to run `npm run conformance:update`.
 
 To run a different directory of fixtures: `node test/conformance/run.js <dir>`.
 

@@ -898,23 +898,26 @@ The Phase 0.5 reviews (PR #29) found these bugs. None of them were introduced by
 
 ### Phase 2.1: `iter` package and slices iterator members
 
-- [ ] **Task 2.1 — `iter` package**
+- [x] **Task 2.1 — `iter` package**
   - Files: new `runtime/stdlib/iter/iter.go`, `src/typechecker/stdlib/` (diagnostic for `Pull`)
   - Do: `Seq[V]`, `Seq2[K, V]` as generic named func types (needs Task 0.3). `iter.Pull`/`Pull2` report `requires coroutines; out of scope (no runtime)`.
   - Test: new `test/unit/builtins/iter.test.js` — parity tests ranging over `iter.Seq[int]` returned from a user function; the `Pull` diagnostic.
   - Done when: both pass; `cmp` already landed in Task 0.6a.
+  - Landed: `runtime/stdlib/iter/iter.go` declares `Seq` and `Seq2`. A qualified generic type (`iter.Seq[int]`, a `GenericTypeName`) did not count as using its import (`'iter' imported and not used`) and was not renamed to its mangled name, so the WASM link typed it as `i32` and produced an invalid module; `_resolveGenericTypeName` (`src/typechecker/resolve.js`) now goes through `_useQualifiedTypeName` like a plain `pkg.T`. `iter.Pull`/`Pull2` report `iter.Pull is not available: requires coroutines; out of scope (no runtime)` from a small table of excluded members with the manifest note (`src/typechecker/stdlib/excluded.js`, checked in `_fieldTypeNamespace`); the general exclusion diagnostic stays with Task 3.7. The coverage gate's exclusion probe builds a project directory for packages that have Go source (the single-file `compile` helper does not load `runtime/stdlib/`), so `iter.Pull`/`Pull2` left the `exclusion` gaps and `iter.Seq`/`Seq2` the `missing` ones.
 
-- [ ] **Task 2.2a — `slices` iterator members: `All`, `Values`, `Backward`, `Collect`, `AppendSeq`**
+- [x] **Task 2.2a — `slices` iterator members: `All`, `Values`, `Backward`, `Collect`, `AppendSeq`**
   - Files: new `runtime/stdlib/slices/iter.go` (overlay)
   - Do: implement over `iter.Seq`/`Seq2` in Go source.
   - Test: `iter.test.js` parity tests; conformance fixture `test/conformance/slices/iter.go`.
   - Done when: fixture output matches Go on both backends.
+  - Landed: the overlay is Go's code with one change: the functions take `s []E` instead of a `Slice ~[]E` type parameter. GoFront has no core types (indexing, slicing or ranging over a type parameter constrained by `~[]E`, or inferring `E` from it), and adding them is a language change outside this phase, so `All`, `Values`, `Backward`, `AppendSeq` (and `Chunk`, Task 2.2b) are listed under `signature` in `stdlib-coverage.gaps.json` (a named slice type still works: it is passed as its underlying `[]E`, and `AppendSeq`/`Chunk` return `[]E`). Two checker fixes were needed: type inference did not look into instantiated generic types (`Collect(seq)` with `seq` an `iter.Seq[int]` failed with `Cannot infer type arguments`); `_inferFromPair` now unifies the type arguments of two instances of the same generic type and otherwise compares underlying types. And substituting type arguments dropped those of a generic named type (`iter.Seq[E]` became `iter.Seq`, so `AppendSeq(s, seq)` inside `Collect` failed with `Cannot assign iter.Seq[E] to iter.Seq`). The conformance runner compiled fixtures with the single-file helpers, which do not load `runtime/stdlib/`; `runFixture`/`checkFixture` (now async) build the fixture with `compileFiles` (`forceTarget` `both`, then `wasm`, which links `app.wasm` and calls `main` through the facade) and run the bundle as an ES module with `console`/`process` captured. The coverage gate binds the Go-source packages an overlay imports (`iter` in `slices`) and prints their types qualified (`iter.Seq[$0]`), so `Collect` matches Go's signature.
 
-- [ ] **Task 2.2b — `slices` iterator members: `Sorted`, `SortedFunc`, `SortedStableFunc`, `Chunk`**
+- [x] **Task 2.2b — `slices` iterator members: `Sorted`, `SortedFunc`, `SortedStableFunc`, `Chunk`**
   - Files: `runtime/stdlib/slices/iter.go`
   - Do: `Sorted*` collect then call the existing sort lowering; `Chunk` panics on `n < 1` with Go's message.
   - Test: `iter.test.js`; extend the `slices/iter.go` fixture.
   - Done when: fixture matches Go.
+  - Landed: `Sorted`, `SortedFunc` and `SortedStableFunc` call `Collect` and then the emitter's `Sort`/`SortFunc`/`SortStableFunc` (unqualified in the overlay); their signatures match Go's. `Chunk` panics with `cannot be less than 1` (Go's message) and yields `s[i : i+end : i+end]`, so appending to a chunk does not write into the original slice. Coverage: `slices` is now 37 of 40 (left: `CompareFunc`, `EqualFunc`, `Repeat`, Task 3.7) and `iter` 2 of 2.
 
 ### Phase 2.2: `maps`, strings/bytes sequences and migration
 
