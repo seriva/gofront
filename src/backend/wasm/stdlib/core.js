@@ -7678,8 +7678,43 @@ export class StdlibCoreEmitter {
 	}
 
 	emitFmtCall(name, args) {
-		if (name === "Println" || name === "Print") {
-			const isPrintln = name === "Println";
+		if (name === "Print" || name === "Sprint" || name === "Sprintln") {
+			// Operands travel through the argument buffer; the host joins them
+			// with Go's spacing rule (a space only between two non-strings).
+			const temps = this._emitArgBuffer(args);
+			this.pushInstruction({
+				op: "i32.const",
+				value: name === "Sprintln" ? 1 : 0,
+			});
+			this._callStdlib(name === "Print" ? "fmt_print" : "fmt_sprint");
+			this._releaseArgBuffer(temps);
+			return;
+		}
+		if (name === "Append" || name === "Appendln" || name === "Appendf") {
+			const [dst, ...rest] = args;
+			const strTmp = this.acquireTemp("externref");
+			if (name === "Appendf") {
+				const [format, ...operands] = rest;
+				const temps = this._emitArgBuffer(operands);
+				this.emitExpr(format, "externref");
+				this._callStdlib("fmt_sprintf");
+				this._releaseArgBuffer(temps);
+			} else {
+				const temps = this._emitArgBuffer(rest);
+				this.pushInstruction({
+					op: "i32.const",
+					value: name === "Appendln" ? 1 : 0,
+				});
+				this._callStdlib("fmt_sprint");
+				this._releaseArgBuffer(temps);
+			}
+			this.pushInstruction({ op: "local.set", index: strTmp });
+			this._emitAppendStringToByteSlice(dst, strTmp);
+			this.releaseTemp(strTmp, "externref");
+			return;
+		}
+		if (name === "Println") {
+			const isPrintln = true;
 			if (args.length === 0 && isPrintln) {
 				const logIdx = this.mod.getPrintlnEmptyIndex();
 				this.pushInstruction({ op: "call", funcIndex: logIdx });
