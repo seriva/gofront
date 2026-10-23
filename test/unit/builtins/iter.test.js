@@ -5,6 +5,7 @@ import { compileDir } from "../../../src/compiler.js";
 import {
 	assert,
 	assertEqual,
+	assertErrorContains,
 	assertThrows,
 	compileHybridProject,
 	section,
@@ -604,4 +605,84 @@ func main() {
 		msg.includes("use slices.Collect(maps.Values(m)) for a slice"),
 		`missing hint: ${msg}`,
 	);
+});
+
+// compileError wrapped as the `errors` array assertErrorContains expects.
+function compileErrors(source) {
+	return [{ message: compileError(source) }];
+}
+
+const SEQ_SLICE_HINT = "use slices.Collect(maps.Keys(m)) for a slice";
+
+test("len(maps.Keys(m)) is rejected with the slices.Collect hint", () => {
+	const errors = compileErrors(`package main
+
+import "maps"
+
+func main() {
+	m := map[string]int{"a": 1}
+	_ = len(maps.Keys(m))
+}
+`);
+	assertErrorContains(errors, "iter.Seq[string]");
+	assertErrorContains(errors, SEQ_SLICE_HINT);
+});
+
+test("append(a, maps.Keys(m)...) is rejected with the slices.Collect hint", () => {
+	const errors = compileErrors(`package main
+
+import "maps"
+
+func main() {
+	m := map[string]int{"a": 1}
+	a := []string{}
+	a = append(a, maps.Keys(m)...)
+	_ = a
+}
+`);
+	assertErrorContains(errors, "iter.Seq[string]");
+	assertErrorContains(errors, SEQ_SLICE_HINT);
+});
+
+test("[]string(maps.Keys(m)) is rejected with the slices.Collect hint", () => {
+	const errors = compileErrors(`package main
+
+import "maps"
+
+func main() {
+	m := map[string]int{"a": 1}
+	ks := []string(maps.Keys(m))
+	_ = ks
+}
+`);
+	assertErrorContains(errors, "iter.Seq[string]");
+	assertErrorContains(errors, SEQ_SLICE_HINT);
+});
+
+test("cap, spread and conversion of a plain iter.Seq value use the generic hint", () => {
+	const errors = compileErrors(`package main
+
+import "iter"
+
+func f(xs ...int) {}
+
+func main() {
+	var s iter.Seq[int]
+	_ = cap(s)
+	f(s...)
+	_ = []int(s)
+}
+`);
+	assertErrorContains(errors, "use slices.Collect(seq) for a slice");
+});
+
+test("plain func types keep len/cap/spread leniency", () => {
+	const errors = compileErrors(`package main
+
+func main() {
+	f := func() {}
+	_ = len(f)
+}
+`);
+	assertEqual(errors[0].message, "");
 });
