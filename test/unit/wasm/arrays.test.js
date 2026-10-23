@@ -1474,6 +1474,86 @@ parity(
 	550,
 );
 
+// Writes through a `x = x[lo:hi]` copy reach the old array in program order
+// (`__rcs`), so extending the copy agrees with Go however the writes through
+// the copy and through other slices of the old array interleave.
+parity(
+	"copy write then alias write to the same index: the alias wins",
+	`	b := []int{1, 2, 3, 4}
+	x := b
+	x = x[:2]
+	x[0] = 5
+	b[0] = 7
+	x = x[:4]
+	return x[0]*10 + b[0]`,
+	77,
+);
+
+parity(
+	"alias write then copy write of the old value: the copy wins",
+	`	b := []int{1, 2, 3, 4}
+	x := b
+	x = x[:2]
+	b[0] = 100
+	x[0] = 1
+	x = x[:4]
+	return x[0]*1000 + b[0]`,
+	1001,
+);
+
+parity(
+	"x[i] op= v, x[i]++ and x[len(x)-1] = v write through the copy",
+	`	b := []int{1, 2, 3, 4, 5}
+	x := b
+	x = x[:3]
+	x[1] += 4
+	x[0]++
+	x[len(x)-1] = 8
+	b[1] = 9
+	b[0] = 7
+	x = append(x, 6)
+	return x[0]*10000 + x[1]*1000 + x[2]*100 + x[3]*10 + b[2]`,
+	79868,
+);
+
+parity(
+	"an index with a call is evaluated once and written through",
+	`	b := []int{1, 2, 3, 4}
+	x := b
+	x = x[:3]
+	k := 0
+	next := func() int {
+		k++
+		return k
+	}
+	x[next()] = 5
+	b[1] = 8
+	x = x[:4]
+	return x[1]*100 + b[1]*10 + k`,
+	881,
+);
+
+parity(
+	"field chain copy writes through in methods and loops",
+	`	s := &stk{items: []int{1, 2, 3, 4}}
+	b := s.items
+	s.pop()
+	s.set(1, 6)
+	b[1] = 9
+	for i := 0; i < 1; s.items[0]++ {
+		i++
+	}
+	b[0] = 3
+	s.items = s.items[:4]
+	return s.items[0]*100 + s.items[1]*10 + b[0]`,
+	393,
+	`type stk struct{ items []int }
+
+func (s *stk) pop() { s.items = s.items[:len(s.items)-1] }
+
+func (s *stk) set(i, v int) { s.items[i] = v }`,
+);
+
 parity(
 	"x = x[:n] on a parameter keeps the caller's store",
 	`	a := []int{1, 2, 3, 4}
@@ -1517,7 +1597,9 @@ func main() {
 }`);
 	assertEqual(errors.length, 0);
 	assert(js.includes("x = __reslice(x, 0, 2)"), "self reslice uses __reslice");
-	assertEqual(runJs(js), "1 2 3\n9 3");
+	// The write through the copy reaches the old array (`__rcs`), as in Go.
+	assert(js.includes("__rcs(x, 0)"), "index write through a copy is synced");
+	assertEqual(runJs(js), "9 2 3\n9 3");
 });
 
 test("slice views print their elements", () => {
