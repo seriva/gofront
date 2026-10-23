@@ -1,0 +1,213 @@
+// GoFront test suite — `iter` package (runtime/stdlib/iter).
+
+import { compileDir } from "../../../src/compiler.js";
+import {
+	assert,
+	assertEqual,
+	assertThrows,
+	compileHybridProject,
+	section,
+	test,
+	withTempDir,
+} from "../helpers.js";
+
+// Builds `lib` once as `both` (JS code path) and once as `wasm` (linked
+// module behind the facade), calls `lib.Run()` from a JS root, and returns the
+// printed line.  Throws when the two backends disagree.
+async function iterParity(libBody) {
+	const run = async (target) => {
+		const res = await compileHybridProject({
+			"lib/lib.go": `//gofront:target ${target}\npackage lib\n\n${libBody}`,
+			"main.go": `package main\n\nimport "./lib"\n\nfunc main() { println(lib.Run()) }\n`,
+		});
+		return res.lines.join("\n");
+	};
+	const js = await run("both");
+	const wasm = await run("wasm");
+	if (js !== wasm)
+		throw new Error(
+			`Output mismatch:\n  JS:   ${JSON.stringify(js)}\n  WASM: ${JSON.stringify(wasm)}`,
+		);
+	return js;
+}
+
+// The error message of compiling `main.go` as a js package ("" on success).
+function compileError(source) {
+	return withTempDir({ "main.go": source }, (dir) => {
+		try {
+			compileDir(dir);
+			return "";
+		} catch (e) {
+			return e.message;
+		}
+	});
+}
+
+section("iter: Seq and Seq2");
+
+const COUNT = `func count(n int) iter.Seq[int] {
+	return func(yield func(int) bool) {
+		for i := 0; i < n; i++ {
+			if !yield(i) {
+				return
+			}
+		}
+	}
+}
+`;
+
+test("range over iter.Seq[int] returned from a user function", async () => {
+	const out = await iterParity(`import (
+	"fmt"
+	"iter"
+)
+
+${COUNT}
+func Run() string {
+	s := ""
+	for v := range count(4) {
+		s += fmt.Sprintf("%d,", v)
+	}
+	return s
+}
+`);
+	assertEqual(out, "0,1,2,3,");
+});
+
+test("break out of a range over iter.Seq stops the sequence", async () => {
+	const out = await iterParity(`import (
+	"fmt"
+	"iter"
+)
+
+${COUNT}
+func Run() string {
+	s := ""
+	for v := range count(100) {
+		if v == 3 {
+			break
+		}
+		s += fmt.Sprintf("%d", v)
+	}
+	return s
+}
+`);
+	assertEqual(out, "012");
+});
+
+test("range over iter.Seq2 and a func literal assigned to iter.Seq2", async () => {
+	const out = await iterParity(`import (
+	"fmt"
+	"iter"
+)
+
+func pairs(keys []string) iter.Seq2[string, int] {
+	return func(yield func(string, int) bool) {
+		for i, k := range keys {
+			if !yield(k, i*10) {
+				return
+			}
+		}
+	}
+}
+
+func Run() string {
+	s := ""
+	for k, v := range pairs([]string{"a", "b"}) {
+		s += fmt.Sprintf("%s=%d ", k, v)
+	}
+	var seq iter.Seq2[string, int] = func(yield func(string, int) bool) {
+		yield("z", 1)
+	}
+	for k, v := range seq {
+		s += fmt.Sprintf("%s=%d", k, v)
+	}
+	return s
+}
+`);
+	assertEqual(out, "a=0 b=10 z=1");
+});
+
+test("iter.Seq as a parameter type", async () => {
+	const out = await iterParity(`import "iter"
+
+${COUNT}
+func sum(seq iter.Seq[int]) int {
+	t := 0
+	for v := range seq {
+		t += v
+	}
+	return t
+}
+
+func Run() int { return sum(count(5)) }
+`);
+	assertEqual(out, "10");
+});
+
+test("a js package uses iter.Seq only in type positions", async () => {
+	const res = await compileHybridProject({
+		"main.go": `package main
+
+import "iter"
+
+${COUNT}
+func main() {
+	n := 0
+	for range count(3) {
+		n++
+	}
+	println(n)
+}
+`,
+	});
+	assertEqual(res.lines.join("\n"), "3");
+	assert(res.wasm === null, "a js-only program must not link app.wasm");
+});
+
+test("iter.Pull reports that it needs coroutines", () => {
+	const msg = compileError(`package main
+
+import "iter"
+
+func main() {
+	var seq iter.Seq[int] = func(yield func(int) bool) {}
+	next, stop := iter.Pull(seq)
+	_, _ = next, stop
+}
+`);
+	assert(
+		msg.includes(
+			"iter.Pull is not available: requires coroutines; out of scope (no runtime)",
+		),
+		`expected the Pull diagnostic, got: ${msg}`,
+	);
+});
+
+test("iter.Pull2 reports that it needs coroutines", () => {
+	const msg = compileError(`package main
+
+import "iter"
+
+func main() { _ = iter.Pull2 }
+`);
+	assert(
+		msg.includes(
+			"iter.Pull2 is not available: requires coroutines; out of scope (no runtime)",
+		),
+		`expected the Pull2 diagnostic, got: ${msg}`,
+	);
+});
+
+test("an unknown iter member is still a plain missing-member error", () => {
+	assertThrows(
+		() =>
+			withTempDir(
+				{
+					"main.go": `package main\n\nimport "iter"\n\nfunc main() { _ = iter.Push }\n`,
+				},
+				(dir) => compileDir(dir),
+			),
+		"No member 'Push' in namespace iter",
+	);
+});

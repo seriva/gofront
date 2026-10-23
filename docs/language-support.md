@@ -114,7 +114,7 @@ Members of each Go package (functions, types, methods, fields, constants and var
 | `hash/fnv` | 0 of 6 | 6 | 0 | 0 |
 | `html` | 2 of 2 | 0 | 0 | 0 |
 | `io` | 23 of 94 | 71 | 0 | 10 |
-| `iter` | 0 of 2 | 2 | 0 | 2 |
+| `iter` | 2 of 2 | 0 | 0 | 2 |
 | `log` | 0 of 43 | 43 | 0 | 0 |
 | `maps` | 7 of 10 | 3 | 0 | 0 |
 | `math` | 69 of 97 | 28 | 0 | 0 |
@@ -165,6 +165,7 @@ Notable members and behaviour per package, including GoFront's own packages:
 | `time` | `Now` → `time.Time`, `Since`, `Sleep` (JS-only), `Parse`, `Unix`, `Date`; **`time.Duration`** methods: `Seconds`, `Milliseconds`, `Microseconds`, `Nanoseconds`, `Minutes`, `Hours`, `String`; **`time.Time`** methods: `Format`, `String`, `Year`, `Month`, `Day`, `Hour`, `Minute`, `Second`, `Weekday`, `Unix`, `UnixMilli`, `UnixNano`, `Nanosecond`, `UTC`, `Local`, `IsZero`, `Add`, `Sub`, `Before`, `After`, `Equal`; layout constants: `RFC3339`, `RFC3339Nano`, `DateOnly`, `TimeOnly`, `DateTime`; duration constants: `Millisecond`, `Second`, `Minute`, `Hour`; month/weekday constants |
 | `html` | `EscapeString`, `UnescapeString` |
 | `cmp` | `Ordered`, `Compare`, `Less`, `Or` — written in Go (`runtime/stdlib/cmp`), compiled into the caller's target (`js`, `wasm` or `both`). |
+| `iter` | `Seq`, `Seq2` — written in Go (`runtime/stdlib/iter`); range over them with `for v := range seq`. `Pull` and `Pull2` need coroutines and report `requires coroutines; out of scope (no runtime)`. |
 | `maps` | `Keys`, `Values`, `Clone`, `Copy`, `Equal`, `EqualFunc`, `Delete`, `DeleteFunc` |
 | `slices` | `Contains`, `ContainsFunc`, `Index`, `IndexFunc`, `BinarySearch`, `BinarySearchFunc`, `Equal`, `Compare`, `Sort`, `SortFunc`, `SortStableFunc`, `IsSorted`, `IsSortedFunc`, `Reverse`, `Max`, `Min`, `MaxFunc`, `MinFunc`, `Clone`, `Compact`, `CompactFunc`, `Concat`, `Delete`, `DeleteFunc`, `Insert`, `Replace`, `Grow`, `Clip` |
 | `regexp` | `MustCompile`, `Compile`, `MatchString`, `QuoteMeta`; **`*Regexp`** methods: `MatchString`, `FindString`, `FindStringIndex`, `FindAllString`, `FindStringSubmatch`, `FindAllStringSubmatch`, `ReplaceAllString`, `ReplaceAllLiteralString`, `Split`, `String`. Inline flags (`(?i)`, `(?m)`, `(?s)`) are extracted automatically into the JS `RegExp` constructor. |
