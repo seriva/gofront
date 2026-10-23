@@ -7,12 +7,221 @@ export const HELPER_LEN = `var __len = __len || function(a) {
   return a?.length ?? 0;
 };`;
 
+// Slice views (Go's `b[lo:hi:max]` shares the backing store).  A view of a
+// plain array is a Proxy over an empty `__SV` array that holds the backing
+// array `b`, offset `o`, length `n` and capacity `c`: Array.isArray, length,
+// indexing, iteration and the Array.prototype methods work through the traps,
+// so the rest of the runtime and JS callers see an ordinary array (`__SV`
+// makes Array.prototype methods return plain arrays and Node print the
+// elements).  A view covering its whole backing array is that array.  A
+// typed-array view is a `subarray`; a capacity beyond its length is kept in a
+// WeakMap shared by every compiled module.  `__slice` also accepts strings
+// (generic code).  `__reslice` is `x = x[lo:hi]`: within `len(x)` a plain
+// array is copied instead (a Proxy is much slower to index, and the old
+// value of `x` is usually dead), see docs/go-compatibility.md.
+// The copy keeps the capacity of the old value: its `__rcap` symbol property
+// (shared by every compiled module) is `{b, o, c, s, so, own}` (backing array,
+// offset, capacity, snapshot of the copy, its offset in `s`, and false while
+// `s` is shared with another copy).  An index
+// write `x[i] = v` to a chain that the package self-reslices is followed by
+// `__rcs(x, i)`, which writes the element through to `b` (and `s`), so it is
+// ordered with writes through other slices of `b`.  A slice or `append`
+// beyond the copy's length writes the remaining elements that differ from the
+// snapshot (written through other references to the copy) back into `b`
+// first and continues with a view over `b`.  `__mkslice` is `make([]T, n, cap)`.
+// `__sv` is its own helper ("sv") so range loops can unwrap a view without
+// pulling in the rest.
+export const HELPER_SV = `var __sv = __sv || Symbol.for("gofront.sliceView");`;
+
+export const HELPER_SLICE = `var __tcap = __tcap || (globalThis[Symbol.for("gofront.typedCap")] ??= new WeakMap());
+var __SV = __SV || class extends Array {
+  static get [Symbol.species]() { return Array; }
+  [Symbol.for("nodejs.util.inspect.custom")]() { return Array.from(this); }
+};
+var __rcap = __rcap || Symbol.for("gofront.resliceCap");
+var __svh = __svh || {
+  get(t, k) {
+    if (typeof k === "string") {
+      const ch = k.charCodeAt(0);
+      if (ch >= 48 && ch <= 57) { const i = +k; return i < t.n ? t.b[t.o + i] : undefined; }
+      if (k === "length") return t.n;
+    } else if (k === __sv) return t;
+    return t[k];
+  },
+  set(t, k, v) {
+    if (typeof k === "string") {
+      const ch = k.charCodeAt(0);
+      if (ch >= 48 && ch <= 57) { const i = +k; if (i < t.n) t.b[t.o + i] = v; return true; }
+      if (k === "length") return true;
+    }
+    t[k] = v;
+    return true;
+  },
+  has(t, k) {
+    if (typeof k === "string") {
+      const ch = k.charCodeAt(0);
+      if (ch >= 48 && ch <= 57) return +k < t.n;
+    }
+    return k in t;
+  },
+  defineProperty(t, k, d) {
+    if (typeof k === "string") {
+      const ch = k.charCodeAt(0);
+      if (ch >= 48 && ch <= 57) {
+        const i = +k;
+        if (i >= t.n || d.get || d.set || d.configurable === false) return false;
+        if ("value" in d) t.b[t.o + i] = d.value;
+        return true;
+      }
+    }
+    return Reflect.defineProperty(t, k, d);
+  },
+  preventExtensions() { return false; },
+  deleteProperty(t, k) {
+    if (typeof k === "string" && k.charCodeAt(0) >= 48 && k.charCodeAt(0) <= 57) return true;
+    return delete t[k];
+  },
+  ownKeys(t) {
+    const ks = [];
+    for (let i = 0; i < t.n; i++) ks.push(String(i));
+    ks.push("length");
+    return ks;
+  },
+  getOwnPropertyDescriptor(t, k) {
+    if (typeof k === "string") {
+      const ch = k.charCodeAt(0);
+      if (ch >= 48 && ch <= 57) {
+        const i = +k;
+        return i < t.n ? { value: t.b[t.o + i], writable: true, enumerable: true, configurable: true } : undefined;
+      }
+      if (k === "length") return { value: t.n, writable: true, enumerable: false, configurable: false };
+    }
+    return Reflect.getOwnPropertyDescriptor(t, k);
+  },
+};
+var __mkview = __mkview || function(b, o, n, c, f) {
+  if (o === 0 && n === b.length && c === n && !f) return b;
+  if (c === 0) return [];
+  const t = new __SV();
+  t.b = b; t.o = o; t.n = n; t.c = c;
+  return new Proxy(t, __svh);
+};
+var __cap = __cap || function(a) {
+  if (a == null) return 0;
+  const s = a[__sv];
+  if (s !== undefined) return s.c;
+  if (ArrayBuffer.isView(a)) return __tcap.get(a) ?? a.length;
+  return a[__rcap]?.c ?? a.length;
+};
+// A snapshot shared by a copy of a copy (e.own false) is cloned before it is
+// updated, so the update does not reach the other copy's snapshot (whose
+// write-back would then revert the element).
+var __rcown = __rcown || function(e, a) {
+  if (e.own === false) { e.s = e.s.slice(e.so, e.so + a.length); e.so = 0; e.own = true; }
+  return e.s;
+};
+// Write back only the elements of a __reslice copy that changed since it was
+// made (e.s from e.so is its snapshot, kept up to date by __rcs), so writes
+// made meanwhile through other slices of the backing array are kept.
+var __rcput = __rcput || function(e, a, from, to) {
+  for (let i = from; i < to; i++) {
+    const v = a[i];
+    if (!Object.is(v, e.s[e.so + i])) { e.b[e.o + i] = v; __rcown(e, a)[e.so + i] = v; }
+  }
+};
+// After an index write to a possible __reslice copy: write element i through.
+var __rcs = __rcs || function(a, i) {
+  const e = a?.[__rcap];
+  if (e !== undefined && i >= 0 && i < e.c && i < a.length) { const v = a[i]; e.b[e.o + i] = v; __rcown(e, a)[e.so + i] = v; }
+};
+var __rcdef = __rcdef || function(r, e) {
+  Object.defineProperty(r, __rcap, { value: e, writable: true });
+};
+var __rcflush = __rcflush || function(a) {
+  const e = a[__rcap];
+  if (e !== undefined) __rcput(e, a, 0, a.length);
+  return e;
+};
+var __slice = __slice || function(a, lo, hi, max) {
+  if (typeof a === "string") return a.slice(lo, hi);
+  const s = a == null ? undefined : a[__sv];
+  const n = s !== undefined ? s.n : a == null ? 0 : a.length;
+  const c = s !== undefined ? s.c : __cap(a);
+  const mx = max;
+  if (hi === undefined) hi = n;
+  if (max === undefined) max = c;
+  if (!(lo >= 0 && lo <= hi && hi <= max && max <= c)) throw new Error("runtime error: slice bounds out of range");
+  if (a == null) return a;
+  if (s !== undefined) return __mkview(s.b, s.o + lo, hi - lo, max - lo);
+  if (c > n && Array.isArray(a)) {
+    // a is a __reslice copy (only those have cap > len): reach past its
+    // length or capacity through the backing array, else stay on the copy
+    // (an explicit max needs a view: the copy itself keeps the old cap).
+    if (hi <= n && (mx === undefined || mx <= n)) return __mkview(a, lo, hi - lo, Math.min(max, n) - lo, mx !== undefined);
+    else { const e = __rcflush(a); return __mkview(e.b, e.o + lo, hi - lo, max - lo); }
+  }
+  if (ArrayBuffer.isView(a)) {
+    const r = hi <= n ? a.subarray(lo, hi) : new a.constructor(a.buffer, a.byteOffset + lo * a.BYTES_PER_ELEMENT, hi - lo);
+    if (max - lo > hi - lo) __tcap.set(r, max - lo);
+    return r;
+  }
+  return __mkview(a, lo, hi - lo, max - lo);
+};
+var __reslice = __reslice || function(a, lo, hi) {
+  if (Array.isArray(a) && a[__sv] === undefined) {
+    const n = a.length;
+    if (hi === undefined) hi = n;
+    if (lo >= 0 && lo <= hi && hi <= n) {
+      if (lo === 0 && hi === n) return a;
+      const e = a[__rcap];
+      const r = a.slice(lo, hi);
+      if (e === undefined) {
+        __rcdef(r, { b: a, o: lo, c: n - lo, s: a.slice(lo, hi), so: 0 });
+        return r;
+      }
+      // A copy of a copy: write back the changed elements it drops and share
+      // the snapshot (copied on write, __rcown), so a pop costs no more than
+      // the copy itself.
+      if (lo > 0) __rcput(e, a, 0, lo);
+      __rcput(e, a, hi, n);
+      e.own = false;
+      __rcdef(r, { b: e.b, o: e.o + lo, c: e.c - lo, s: e.s, so: e.so + lo, own: false });
+      return r;
+    }
+  }
+  return __slice(a, lo, hi);
+};
+var __mkslice = __mkslice || function(n, b) {
+  if (!(n >= 0 && n <= b.length)) throw new Error("runtime error: makeslice: cap out of range");
+  return __slice(b, 0, n);
+};`;
+
 export const HELPER_APPEND = `var __append = __append || function(a, ...b) {
   if (a && ArrayBuffer.isView(a)) {
+    const c = __tcap.get(a);
+    if (c !== undefined && a.length + b.length <= c) {
+      const r = new a.constructor(a.buffer, a.byteOffset, a.length + b.length);
+      r.set(b, a.length);
+      if (c > r.length) __tcap.set(r, c);
+      return r;
+    }
     const res = new a.constructor(a.length + b.length);
     res.set(a);
     res.set(b, a.length);
     return res;
+  }
+  const s = a ? a[__sv] : undefined;
+  if (s !== undefined && s.n + b.length <= s.c) {
+    for (let i = 0; i < b.length; i++) s.b[s.o + s.n + i] = b[i];
+    return __mkview(s.b, s.o, s.n + b.length, s.c);
+  }
+  if (s === undefined && a) {
+    const e = a[__rcap];
+    if (e !== undefined && a.length + b.length <= e.c) {
+      __rcflush(a);
+      for (let i = 0; i < b.length; i++) e.b[e.o + a.length + i] = b[i];
+      return __mkview(e.b, e.o, a.length + b.length, e.c);
+    }
   }
   return a ? [...a, ...b] : b;
 };`;

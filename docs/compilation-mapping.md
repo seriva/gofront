@@ -11,8 +11,8 @@ readable and debuggable — no name mangling, no opaque wrappers. This page desc
 | `struct` | ES6 `class` | Positional constructor with zero-value defaults: `new Point(1, 2)`; a generated `__clone()` gives struct values Go copy semantics on assignment, call, return, `append`, and `range` |
 | Methods | Class instance methods | Receiver is `this` (typed `*T` for pointer receivers) |
 | Embedded structs | Flattened fields + delegation stubs | `Greet(...a) { return Base.prototype.Greet.call(this, ...a); }` |
-| `[]T` (slice) | `Array` | `append` → `__append`, `len` → `__len` (both tree-shaken helpers) |
-| `[]float32`, `[]int8`…`[]int32`, `[]uint8`/`[]byte`…`[]uint32`, `[]rune` | TypedArray (`Float32Array`, `Int32Array`, `Uint8Array`, …) | `[]float64` and `[]int` stay plain `Array`; slicing → `.subarray`, `copy` → `.set` |
+| `[]T` (slice) | `Array` | `append` → `__append`, `len` → `__len` (both tree-shaken helpers). `b[i:j]` and `b[i:j:k]` → `__slice`: a `Proxy` view over the operand's array (offset, length, capacity) unless the result covers the whole array; `x = x[i:j]` within `len(x)` copies (`__reslice`); `make([]T, n, cap)` → `__mkslice` |
+| `[]float32`, `[]int8`…`[]int32`, `[]uint8`/`[]byte`…`[]uint32`, `[]rune` | TypedArray (`Float32Array`, `Int32Array`, `Uint8Array`, …) | `[]float64` and `[]int` stay plain `Array`; slicing → `.subarray` (through `__slice`, which keeps a capacity beyond the length in a `WeakMap`), `copy` → `.set` |
 | `simd.F32x4` | Frozen 4-element `Array` | Each lane rounded with `Math.fround`; operations go through tree-shaken `__simd_*` helpers |
 | `[N]T` (array) | `Array` | Copied with `.slice()` on assignment so arrays keep value semantics; bounds and size checked at compile time |
 | `map[K]V` | Plain object `{}` | Key access via `[]`, iteration via `Object.entries()` |
@@ -58,7 +58,7 @@ readable and debuggable — no name mangling, no opaque wrappers. This page desc
 | Go | JavaScript |
 |---|---|
 | `len(x)` | `__len(x)` (tree-shaken helper; `.length` for arrays/TypedArrays, `Object.keys().length` for maps); constant for fixed arrays |
-| `cap(x)` | `(x?.length ?? 0)` — capacity always equals length |
+| `cap(x)` | `__cap(x)` — a view's capacity, otherwise the length |
 | `append(s, elems...)` | `__append(s, ...elems)` — nil-safe, preserves TypedArray type |
 | `copy(dst, src)` | Inline helper: `.set` for TypedArrays, `splice` otherwise; returns the count |
 | `make([]T, n)` | `new Array(n).fill(zero)`, or `new Float32Array(n)` etc. for sized numeric element types |
