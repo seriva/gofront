@@ -49,7 +49,10 @@ export const fmtMethods = {
 					fn === "Appendf"
 						? `__sprintf(${restJs})`
 						: `__sprint(${fn === "Appendln"}${restJs ? `, ${restJs}` : ""})`;
-				return `((d, s) => { const e = new TextEncoder().encode(s); const dl = d ? d.length : 0; const r = new Uint8Array(dl + e.length); if (dl > 0) r.set(d, 0); r.set(e, dl); return r; })(${this.genExpr(dst)}, ${str})`;
+				// __append reuses spare capacity of dst like append; chunked so a
+				// long string cannot overflow the argument limit of the spread.
+				this.useHelper("append");
+				return `((d, s) => { const e = new TextEncoder().encode(s); let r = d ?? new Uint8Array(0); for (let i = 0; i < e.length; i += 8192) r = __append(r, ...e.subarray(i, i + 8192)); return r; })(${this.genExpr(dst)}, ${str})`;
 			}
 			case "Errorf": {
 				this.useHelper("sprintf");
