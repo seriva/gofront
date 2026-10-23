@@ -155,11 +155,11 @@ export function checkFixture(goPath, root = dirname(dirname(goPath))) {
 			ok: false,
 			message: `missing ${outName}: capture it from real Go with \`npm run conformance:update\``,
 		};
-	const lint = lintFixture(readFileSync(goPath, "utf8"), name);
-	if (lint.length > 0) return { ok: false, message: lint.join("\n") };
 	const want = readFileSync(outPath);
 	let got;
 	try {
+		const lint = lintFixture(readFileSync(goPath, "utf8"), name);
+		if (lint.length > 0) return { ok: false, message: lint.join("\n") };
 		got = runFixture(goPath);
 	} catch (e) {
 		return { ok: false, message: `${name}: ${e.message}` };
