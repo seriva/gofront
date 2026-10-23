@@ -11,14 +11,6 @@ export const mapsMethods = {
 			return `__equal(${a1}, ${b1})`;
 		}
 		switch (fn) {
-			case "Keys": {
-				const [m] = a();
-				return `Object.keys(${m})`;
-			}
-			case "Values": {
-				const [m] = a();
-				return `Object.values(${m})`;
-			}
 			case "Clone": {
 				const [m] = a();
 				return `({...${m}})`;

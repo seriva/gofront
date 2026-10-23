@@ -400,16 +400,7 @@ export const WASM_STDLIB_MEMBERS = new Map([
 	],
 	[
 		"maps",
-		new Set([
-			"Keys",
-			"Values",
-			"Clone",
-			"Copy",
-			"Equal",
-			"EqualFunc",
-			"Delete",
-			"DeleteFunc",
-		]),
+		new Set(["Clone", "Copy", "Equal", "EqualFunc", "Delete", "DeleteFunc"]),
 	],
 	[
 		"unicode",

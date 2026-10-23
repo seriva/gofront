@@ -1350,30 +1350,6 @@ export class StdlibCoreEmitter {
 
 	emitMapsCall(name, args, _targetWasmType) {
 		switch (name) {
-			case "Keys": {
-				const mArg = args[0];
-				const mType = mArg._type ?? this._resolveExprGoType(mArg);
-				const { keyType, valType } = getMapKeyValTypes(mType, this.mod.checker);
-				const mapInfo = this.mod.getMapType(keyType, valType);
-				this.emitExpr(mArg, mapInfo.wType);
-				this.pushInstruction({
-					op: "call",
-					funcIndex: this.mod.resolveFuncIndex(mapInfo.keysFuncName),
-				});
-				return;
-			}
-			case "Values": {
-				const mArg = args[0];
-				const mType = mArg._type ?? this._resolveExprGoType(mArg);
-				const { keyType, valType } = getMapKeyValTypes(mType, this.mod.checker);
-				const mapInfo = this.mod.getMapType(keyType, valType);
-				this.emitExpr(mArg, mapInfo.wType);
-				this.pushInstruction({
-					op: "call",
-					funcIndex: this.mod.resolveFuncIndex(mapInfo.valuesFuncName),
-				});
-				return;
-			}
 			case "Clone": {
 				const mArg = args[0];
 				const mType = mArg._type ?? this._resolveExprGoType(mArg);
