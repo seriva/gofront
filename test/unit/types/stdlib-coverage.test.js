@@ -133,10 +133,12 @@ function emitterMember(pkg, name) {
 	const [top, member] = name.split(".");
 	const owner =
 		checker.types.get(`${pkgIdent(pkg)}.${top}`) ?? ns?.members?.[top];
-	if (member === undefined)
-		return ns?.members && top in ns.members
-			? { t: ns.members[top], owner: null }
-			: null;
+	if (member === undefined) {
+		if (ns?.members && top in ns.members)
+			return { t: ns.members[top], owner: null };
+		const named = checker.types.get(`${pkgIdent(pkg)}.${top}`);
+		return named ? { t: named, owner: null } : null;
+	}
 	const t = memberOf(owner, member);
 	return t === undefined ? null : { t, owner };
 }
@@ -187,8 +189,8 @@ function compileErrors(source) {
 		return compile(source)
 			.errors.map((x) => x.message)
 			.join("\n");
-	} catch (err) {
-		return String(err?.message ?? err);
+	} catch {
+		return ""; // a crash is never a diagnostic
 	} finally {
 		Object.assign(console, { warn, error });
 	}
@@ -196,7 +198,9 @@ function compileErrors(source) {
 
 function reportsExclusion(e) {
 	const reason = e.note ?? e.status.slice("excluded:".length);
-	return compileErrors(exclusionProbe(e)).includes(reason);
+	// The package path itself (`runtime/debug`) may contain the reason.
+	const text = compileErrors(exclusionProbe(e)).split(e.pkg).join("");
+	return text.includes(reason);
 }
 
 // ── Signatures ──────────────────────────────────────────────────────────
@@ -451,6 +455,42 @@ test("signature printer: generics, methods and type definitions", () => {
 		),
 		"int64",
 	);
+});
+
+test("signature printer: real checker types of a Go-source package", () => {
+	const source = [
+		"package box",
+		"type Box[T any] struct { v T }",
+		"func (b *Box[T]) Clone() *Box[T] { return nil }",
+		"func (b *Box[T]) Get() (T, error) { return b.v, nil }",
+		"func Use(b *Box[int]) {}",
+		"func Two() (int, error) { return 0, nil }",
+		"func Index[S ~[]E, E comparable](s S, v E) int { return 0 }",
+		"func Sum[N ~int | ~string](a N) N { return a }",
+		"",
+	].join("\n");
+	const ast = new Parser(
+		new Lexer(source, "box.go").tokenize(),
+		"box.go",
+		source,
+	).parse();
+	ast.target = "both";
+	const c = new TypeChecker();
+	c.target = "both";
+	c.pkgName = "box";
+	assertEqual(c.checkAll([ast]).length, 0);
+	const fn = (n) => goSignature("func", c.globals.symbols.get(n), "box");
+	assertEqual(fn("Two"), "func() (int, error)");
+	assertEqual(fn("Use"), "func(*Box[int])");
+	assertEqual(
+		fn("Index"),
+		"func[$0 interface{ ~[]$1 }, $1 comparable]($0, $1) int",
+	);
+	assertEqual(fn("Sum"), "func[$0 interface{ ~int | ~string }]($0) $0");
+	const box = c.types.get("Box");
+	const method = (m) => goSignature("method", memberOf(box, m), "box", box);
+	assertEqual(method("Clone"), "func() *Box[$0]");
+	assertEqual(method("Get"), "func() ($0, error)");
 });
 
 test("strconv.ParseInt returns int64, as in Go", () => {

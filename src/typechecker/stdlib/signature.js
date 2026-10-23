@@ -42,15 +42,35 @@ function typeString(t, pkg, tparams) {
 		case "generic":
 			return genericString(t, pkg, tparams);
 		case "TypeName": // an unresolved constraint node (`Ordered`, `any`)
-			return t.name === "any" ? "interface{}" : t.name;
+			return tparams.get(t.name) ?? (t.name === "any" ? "interface{}" : t.name);
+		// Inline constraint nodes: `~[]E`, `~int | ~string`.
+		case "UnionConstraint":
+			return `interface{ ${t.terms
+				.map((x) => (x.approx ? "~" : "") + typeString(x.type, pkg, tparams))
+				.join(" | ")} }`;
+		case "SliceType":
+			return `[]${typeString(t.elem, pkg, tparams)}`;
+		case "PointerType":
+			return `*${typeString(t.base, pkg, tparams)}`;
+		case "MapType":
+			return `map[${typeString(t.key, pkg, tparams)}]${typeString(t.value, pkg, tparams)}`;
+		case "GenericTypeName":
+			return `${qualify(t.name, pkg)}${typeArgList(t.typeArgs, pkg, tparams)}`;
 		default:
-			if (t.name) return qualify(t.name, pkg);
+			if (t.name)
+				return `${qualify(t.name, pkg)}${typeArgList(t.typeArgs, pkg, tparams)}`;
 			return t.kind === "struct" ? "struct" : "interface{}";
 	}
 }
 
 const qualify = (name, pkg) =>
 	name.startsWith(`${pkg}.`) ? name.slice(pkg.length + 1) : name;
+
+// `[int, $0]` of an instantiated generic type, or "".
+const typeArgList = (args, pkg, tparams) =>
+	args?.length > 0
+		? `[${args.map((a) => typeString(a, pkg, tparams)).join(", ")}]`
+		: "";
 
 // `(params) results` of a func type.
 function funcTail(t, pkg, tparams) {
@@ -59,7 +79,9 @@ function funcTail(t, pkg, tparams) {
 			(t.variadic && i === all.length - 1 ? "..." : "") +
 			typeString(p, pkg, tparams),
 	);
+	// Multiple results of a Go-source func are one `tuple`.
 	const results = (t.returns ?? [])
+		.flatMap((r) => (r.kind === "tuple" ? r.types : [r]))
 		.filter((r) => !(r.kind === "basic" && r.name === "void"))
 		.map((r) => typeString(r, pkg, tparams));
 	const tail =
