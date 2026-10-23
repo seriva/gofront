@@ -52,38 +52,58 @@ test("finds fixtures as <pkg>/<name>.go, sorted", () => {
 	);
 });
 
-test("runs a fixture on JS and WASM with byte-exact stdout", () => {
-	withTempDir({ "fmt/hello.go": HELLO }, (dir) => {
-		const { js, wasm } = runFixture(join(dir, "fmt/hello.go"));
+test("runs a fixture on JS and WASM with byte-exact stdout", async () => {
+	await withTempDir({ "fmt/hello.go": HELLO }, async (dir) => {
+		const { js, wasm } = await runFixture(join(dir, "fmt/hello.go"));
 		assertEqual(js, "hi 3\nab\n");
 		assertEqual(wasm, "hi 3\nab\n");
 	});
 });
 
-test("a fixture matching its .out passes", () => {
-	withTempDir(
+test("a fixture may import a Go-source stdlib package", async () => {
+	const src = `package main
+
+import (
+	"cmp"
+	"fmt"
+	"slices"
+)
+
+func main() {
+	fmt.Println(cmp.Compare(1, 2), slices.Collect(slices.Values([]int{4, 5})))
+}
+`;
+	await withTempDir({ "slices/std.go": src }, async (dir) => {
+		const { js, wasm } = await runFixture(join(dir, "slices/std.go"));
+		assertEqual(js, "-1 [4 5]\n");
+		assertEqual(wasm, "-1 [4 5]\n");
+	});
+});
+
+test("a fixture matching its .out passes", async () => {
+	await withTempDir(
 		{ "fmt/hello.go": HELLO, "fmt/hello.out": "hi 3\nab\n" },
-		(dir) => {
-			const res = checkFixture(join(dir, "fmt/hello.go"));
+		async (dir) => {
+			const res = await checkFixture(join(dir, "fmt/hello.go"));
 			assert(res.ok, res.message);
 		},
 	);
 });
 
-test("a missing .out fails with the conformance:update hint", () => {
-	withTempDir({ "fmt/hello.go": HELLO }, (dir) => {
-		const res = checkFixture(join(dir, "fmt/hello.go"));
+test("a missing .out fails with the conformance:update hint", async () => {
+	await withTempDir({ "fmt/hello.go": HELLO }, async (dir) => {
+		const res = await checkFixture(join(dir, "fmt/hello.go"));
 		assert(!res.ok, "expected failure");
 		assertContains(res.message, "missing fmt/hello.out");
 		assertContains(res.message, "npm run conformance:update");
 	});
 });
 
-test("an output difference fails and names the backend and line", () => {
-	withTempDir(
+test("an output difference fails and names the backend and line", async () => {
+	await withTempDir(
 		{ "fmt/hello.go": HELLO, "fmt/hello.out": "hi 4\nab\n" },
-		(dir) => {
-			const res = checkFixture(join(dir, "fmt/hello.go"));
+		async (dir) => {
+			const res = await checkFixture(join(dir, "fmt/hello.go"));
 			assert(!res.ok, "expected failure");
 			assertContains(res.message, "JS output differs from fmt/hello.out");
 			assertContains(res.message, "WASM output differs from fmt/hello.out");
@@ -92,16 +112,19 @@ test("an output difference fails and names the backend and line", () => {
 	);
 });
 
-test("a trailing newline difference is a failure (byte for byte)", () => {
-	withTempDir({ "fmt/hello.go": HELLO, "fmt/hello.out": "hi 3\nab" }, (dir) => {
-		const res = checkFixture(join(dir, "fmt/hello.go"));
-		assert(!res.ok, "expected failure");
-		assertContains(res.message, "JS output differs");
-	});
+test("a trailing newline difference is a failure (byte for byte)", async () => {
+	await withTempDir(
+		{ "fmt/hello.go": HELLO, "fmt/hello.out": "hi 3\nab" },
+		async (dir) => {
+			const res = await checkFixture(join(dir, "fmt/hello.go"));
+			assert(!res.ok, "expected failure");
+			assertContains(res.message, "JS output differs");
+		},
+	);
 });
 
-test("a compile error fails with the diagnostic", () => {
-	withTempDir(
+test("a compile error fails with the diagnostic", async () => {
+	await withTempDir(
 		{
 			"fmt/bad.go": `package main
 
@@ -113,8 +136,8 @@ func main() {
 `,
 			"fmt/bad.out": "",
 		},
-		(dir) => {
-			const res = checkFixture(join(dir, "fmt/bad.go"));
+		async (dir) => {
+			const res = await checkFixture(join(dir, "fmt/bad.go"));
 			assert(!res.ok, "expected failure");
 			assertContains(res.message, "undefinedName");
 		},
@@ -165,28 +188,28 @@ test("ASCII literals and []byte/[]rune forms are allowed", () => {
 	assertEqual(lintFixture(src, "fmt/ok.go").join("\n"), "");
 });
 
-test("a fixture failing the lint is rejected before it runs", () => {
-	withTempDir(
+test("a fixture failing the lint is rejected before it runs", async () => {
+	await withTempDir(
 		{
 			"strings/bad.go": wrap('\tfmt.Println(len("é"))'),
 			"strings/bad.out": "1\n",
 		},
-		(dir) => {
-			const res = checkFixture(join(dir, "strings/bad.go"));
+		async (dir) => {
+			const res = await checkFixture(join(dir, "strings/bad.go"));
 			assert(!res.ok, "expected failure");
 			assertContains(res.message, "strings/bad.go:6: len() of a non-ASCII");
 		},
 	);
 });
 
-test("a fixture the lexer rejects fails instead of throwing", () => {
-	withTempDir(
+test("a fixture the lexer rejects fails instead of throwing", async () => {
+	await withTempDir(
 		{
 			"strings/unlexable.go": wrap('\tfmt.Println(len("é))'),
 			"strings/unlexable.out": "1\n",
 		},
-		(dir) => {
-			const res = checkFixture(join(dir, "strings/unlexable.go"));
+		async (dir) => {
+			const res = await checkFixture(join(dir, "strings/unlexable.go"));
 			assert(!res.ok, "expected failure");
 			assertContains(res.message, "strings/unlexable.go: ");
 			assertContains(res.message, "Unterminated");
