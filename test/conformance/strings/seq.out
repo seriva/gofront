@@ -1,0 +1,28 @@
+line <one\n>
+line <two\n>
+line <\n>
+line <three>
+0
+1 2
+[a|b||c]
+[a,|b,|,|c]
+[a|b|c]
+[]
+[a|b|c]
+[a|b|c]
+[trailing|]
+[no separator]
+[héllo w rld]
+[日 本 語]
+[foo|bar|baz]
+0 0
+[α β γ]
+[  foo|bar|  baz  ]
+[a1|b2|c3]
+0
+true
+true
+true
+visited 3
+first field first
+first line <x\n>

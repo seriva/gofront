@@ -117,7 +117,7 @@ Members of each Go package that `wasm` and `both` packages can use today, out of
 | Package | Available | Not yet |
 |---|---|---|
 | `bufio` | 0 of 79 | 79 |
-| `bytes` | 49 of 99 | 50 |
+| `bytes` | 54 of 99 | 45 |
 | `cmp` | 4 of 4 | 0 |
 | `container/heap` | 0 of 11 | 11 |
 | `container/list` | 0 of 21 | 21 |
@@ -146,7 +146,7 @@ Members of each Go package that `wasm` and `both` packages can use today, out of
 | `io` | 19 of 94 | 75 |
 | `iter` | 2 of 2 | 0 |
 | `log` | 0 of 43 | 43 |
-| `maps` | 7 of 10 | 3 |
+| `maps` | 10 of 10 | 0 |
 | `math` | 69 of 97 | 28 |
 | `math/bits` | 15 of 50 | 35 |
 | `math/cmplx` | 0 of 27 | 27 |
@@ -159,7 +159,7 @@ Members of each Go package that `wasm` and `both` packages can use today, out of
 | `slices` | 37 of 40 | 3 |
 | `sort` | 10 of 40 | 30 |
 | `strconv` | 18 of 43 | 25 |
-| `strings` | 59 of 82 | 23 |
+| `strings` | 64 of 82 | 18 |
 | `sync` | 20 of 39 | 19 |
 | `sync/atomic` | 0 of 90 | 90 |
 | `testing` | 16 of 94 | 78 |

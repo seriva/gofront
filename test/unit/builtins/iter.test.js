@@ -5,6 +5,7 @@ import { compileDir } from "../../../src/compiler.js";
 import {
 	assert,
 	assertEqual,
+	assertErrorContains,
 	assertThrows,
 	compileHybridProject,
 	section,
@@ -30,6 +31,15 @@ async function iterParity(libBody) {
 			`Output mismatch:\n  JS:   ${JSON.stringify(js)}\n  WASM: ${JSON.stringify(wasm)}`,
 		);
 	return js;
+}
+
+// Same as iterParity for one target only ("wasm" or "both").
+async function iterRun(target, libBody) {
+	const res = await compileHybridProject({
+		"lib/lib.go": `//gofront:target ${target}\npackage lib\n\n${libBody}`,
+		"main.go": `package main\n\nimport "./lib"\n\nfunc main() { println(lib.Run()) }\n`,
+	});
+	return res.lines.join("\n");
 }
 
 // The error message of compiling `main.go` as a js package ("" on success).
@@ -434,4 +444,330 @@ func Run() (s string) {
 }
 `);
 	assertEqual(out, "cannot be less than 1");
+});
+
+section("maps: iterator members");
+
+test("for k := range maps.Keys(m) and maps.Values", async () => {
+	const out = await iterParity(`import (
+	"fmt"
+	"maps"
+	"slices"
+)
+
+func Run() string {
+	m := map[string]int{"a": 1, "b": 2, "c": 3}
+	var ks []string
+	for k := range maps.Keys(m) {
+		ks = append(ks, k)
+	}
+	slices.Sort(ks)
+	sum := 0
+	for v := range maps.Values(m) {
+		sum += v
+	}
+	return fmt.Sprintf("%v %d", ks, sum)
+}
+`);
+	assertEqual(out, "[a b c] 6");
+});
+
+test("maps.All yields every pair and stops on break", async () => {
+	const out = await iterParity(`import (
+	"fmt"
+	"maps"
+)
+
+func Run() string {
+	m := map[int]string{1: "x", 2: "y", 3: "z"}
+	s := ""
+	n := 0
+	for k, v := range maps.All(m) {
+		s += fmt.Sprintf("%d%s", k, v)
+		n++
+	}
+	seen := 0
+	for range maps.All(m) {
+		seen++
+		break
+	}
+	return fmt.Sprintf("%d %d %d", n, len(s), seen)
+}
+`);
+	assertEqual(out, "3 6 1");
+});
+
+test("maps.Insert and maps.Collect over sequences", async () => {
+	const out = await iterParity(`import (
+	"fmt"
+	"maps"
+	"slices"
+)
+
+func Run() string {
+	src := map[string]int{"a": 1, "b": 2}
+	dst := map[string]int{"a": 9, "z": 26}
+	maps.Insert(dst, maps.All(src))
+	c := maps.Collect(maps.All(dst))
+	c["q"] = 5
+	ks := slices.Sorted(maps.Keys(c))
+	return fmt.Sprintf("%v %d %d %d %d", ks, dst["a"], dst["b"], dst["z"], len(c))
+}
+`);
+	assertEqual(out, "[a b q z] 1 2 26 4");
+});
+
+test("slices.Sorted(maps.Keys(m)) and slices.Collect(maps.Values(m))", async () => {
+	const out = await iterParity(`import (
+	"fmt"
+	"maps"
+	"slices"
+)
+
+type P struct{ X int }
+
+func Run() string {
+	m := map[int]P{3: {30}, 1: {10}, 2: {20}}
+	ks := slices.Sorted(maps.Keys(m))
+	vs := slices.Collect(maps.Values(m))
+	slices.SortFunc(vs, func(a, b P) int { return a.X - b.X })
+	return fmt.Sprintf("%v %v", ks, vs)
+}
+`);
+	assertEqual(out, "[1 2 3] [{10} {20} {30}]");
+});
+
+test("slices.Sorted(maps.Keys(m)) on a WASM map with NaN keys keeps each entry", async () => {
+	const out = await iterRun(
+		"wasm",
+		`import (
+	"fmt"
+	"maps"
+	"math"
+	"slices"
+)
+
+func Run() string {
+	m := map[float64]int{}
+	m[math.NaN()] = 1
+	m[math.NaN()] = 2
+	m[1.5] = 3
+	keys := slices.Sorted(maps.Keys(m))
+	nan := 0
+	for _, k := range keys {
+		if k != k {
+			nan++
+		}
+	}
+	sum := 0
+	for v := range maps.Values(m) {
+		sum += v
+	}
+	return fmt.Sprintf("%d %d %d %d", len(m), len(keys), nan, sum)
+}
+`,
+	);
+	assertEqual(out, "3 3 2 6");
+});
+
+test("sort.Strings(maps.Keys(m)) reports the slices.Collect hint", () => {
+	const msg = compileError(`package main
+
+import (
+	"maps"
+	"sort"
+)
+
+func main() {
+	m := map[string]int{"a": 1}
+	sort.Strings(maps.Keys(m))
+}
+`);
+	assert(
+		msg.includes("use slices.Collect(maps.Keys(m)) for a slice"),
+		`missing hint: ${msg}`,
+	);
+	assert(msg.includes("iter.Seq[string]"), `missing type: ${msg}`);
+});
+
+test("assigning maps.Values(m) to a slice reports the hint", () => {
+	const msg = compileError(`package main
+
+import "maps"
+
+func main() {
+	m := map[string]int{"a": 1}
+	var vs []int = maps.Values(m)
+	_ = vs
+}
+`);
+	assert(
+		msg.includes("use slices.Collect(maps.Values(m)) for a slice"),
+		`missing hint: ${msg}`,
+	);
+});
+
+// compileError wrapped as the `errors` array assertErrorContains expects.
+function compileErrors(source) {
+	return [{ message: compileError(source) }];
+}
+
+const SEQ_SLICE_HINT = "use slices.Collect(maps.Keys(m)) for a slice";
+
+test("len(maps.Keys(m)) is rejected with the slices.Collect hint", () => {
+	const errors = compileErrors(`package main
+
+import "maps"
+
+func main() {
+	m := map[string]int{"a": 1}
+	_ = len(maps.Keys(m))
+}
+`);
+	assertErrorContains(errors, "iter.Seq[string]");
+	assertErrorContains(errors, SEQ_SLICE_HINT);
+});
+
+test("append(a, maps.Keys(m)...) is rejected with the slices.Collect hint", () => {
+	const errors = compileErrors(`package main
+
+import "maps"
+
+func main() {
+	m := map[string]int{"a": 1}
+	a := []string{}
+	a = append(a, maps.Keys(m)...)
+	_ = a
+}
+`);
+	assertErrorContains(errors, "iter.Seq[string]");
+	assertErrorContains(errors, SEQ_SLICE_HINT);
+});
+
+test("[]string(maps.Keys(m)) is rejected with the slices.Collect hint", () => {
+	const errors = compileErrors(`package main
+
+import "maps"
+
+func main() {
+	m := map[string]int{"a": 1}
+	ks := []string(maps.Keys(m))
+	_ = ks
+}
+`);
+	assertErrorContains(errors, "iter.Seq[string]");
+	assertErrorContains(errors, SEQ_SLICE_HINT);
+});
+
+test("cap, spread and conversion of a plain iter.Seq value use the generic hint", () => {
+	const errors = compileErrors(`package main
+
+import "iter"
+
+func f(xs ...int) {}
+
+func main() {
+	var s iter.Seq[int]
+	_ = cap(s)
+	f(s...)
+	_ = []int(s)
+}
+`);
+	assertErrorContains(errors, "use slices.Collect(seq) for a slice");
+});
+
+test("plain func types keep len/cap/spread leniency", () => {
+	const errors = compileErrors(`package main
+
+func main() {
+	f := func() {}
+	_ = len(f)
+}
+`);
+	assertEqual(errors[0].message, "");
+});
+
+section("strings and bytes: sequence members");
+
+test("strings sequence members in a js-only program", async () => {
+	const res = await compileHybridProject({
+		"main.go": `package main
+
+import (
+	"slices"
+	"strings"
+)
+
+func main() {
+	println(len(slices.Collect(strings.SplitSeq("a,b,c", ","))))
+	n := 0
+	for range strings.Lines("x\\ny\\n") {
+		n++
+	}
+	println(n)
+	for f := range strings.FieldsSeq(" p  q ") {
+		println(f)
+	}
+}
+`,
+	});
+	assertEqual(res.lines.join("|"), "3|2|p|q");
+	assert(res.wasm === null, "a js-only program must not link app.wasm");
+});
+
+test("strings.SplitSeq with a non-ASCII separator agrees on both backends", async () => {
+	const out = await iterParity(
+		`import (
+	"slices"
+	"strings"
+)
+
+func Run() string {
+	parts := slices.Collect(strings.SplitSeq("héllo wörld", "ö"))
+	return strings.Join(parts, "|")
+}
+`,
+	);
+	assertEqual(out, "héllo w|rld");
+});
+
+test("bytes sequence members agree on both backends", async () => {
+	const out = await iterParity(
+		`import (
+	"bytes"
+	"fmt"
+	"slices"
+)
+
+func Run() string {
+	n := 0
+	for p := range bytes.SplitSeq([]byte("héllo wörld"), []byte("ö")) {
+		n += len(p)
+	}
+	lines := slices.Collect(bytes.Lines([]byte("a\\nbb\\n")))
+	return fmt.Sprintf("%d %d %d", n, len(lines), cap(lines[0]))
+}
+`,
+	);
+	assertEqual(out, "11 2 2");
+});
+
+test("strings.FieldsFuncSeq stops when the loop breaks", async () => {
+	const out = await iterParity(
+		`import "strings"
+
+func Run() string {
+	seen := 0
+	isDigit := func(r rune) bool { return r >= '0' && r <= '9' }
+	for range strings.FieldsFuncSeq("a1b2c3d", isDigit) {
+		seen++
+		if seen == 2 {
+			break
+		}
+	}
+	return string(rune('0' + seen))
+}
+`,
+	);
+	assertEqual(out, "2");
 });

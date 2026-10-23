@@ -101,14 +101,11 @@
 			"CutSuffix",
 			"EqualFold",
 			"ErrTooLarge",
-			"FieldsFuncSeq",
-			"FieldsSeq",
 			"IndexAny",
 			"IndexFunc",
 			"IndexRune",
 			"LastIndexAny",
 			"LastIndexFunc",
-			"Lines",
 			"MinRead",
 			"NewBuffer",
 			"NewBufferString",
@@ -123,8 +120,6 @@
 			"Runes",
 			"SplitAfter",
 			"SplitAfterN",
-			"SplitAfterSeq",
-			"SplitSeq",
 			"Title",
 			"ToLowerSpecial",
 			"ToTitleSpecial",
@@ -597,7 +592,6 @@
 			"SetPrefix",
 			"Writer"
 		],
-		"maps": ["All", "Collect", "Insert"],
 		"math": [
 			"Acosh",
 			"Asinh",
@@ -957,9 +951,6 @@
 			"Clone",
 			"Compare",
 			"ContainsFunc",
-			"FieldsFuncSeq",
-			"FieldsSeq",
-			"Lines",
 			"Reader.ReadAt",
 			"Reader.ReadByte",
 			"Reader.ReadRune",
@@ -969,8 +960,6 @@
 			"Reader.UnreadRune",
 			"Reader.WriteTo",
 			"Replacer.WriteString",
-			"SplitAfterSeq",
-			"SplitSeq",
 			"ToLowerSpecial",
 			"ToTitleSpecial",
 			"ToUpperSpecial",
@@ -2054,13 +2043,15 @@
 			"Println": "func(...interface{})"
 		},
 		"maps": {
+			"All": "func[$0 comparable, $1 interface{}](map[$0]$1) iter.Seq2[$0, $1]",
 			"Clone": "func(interface{}) interface{}",
 			"Copy": "func(interface{}, interface{})",
 			"DeleteFunc": "func(interface{}, interface{})",
 			"Equal": "func(interface{}, interface{}) bool",
 			"EqualFunc": "func(interface{}, interface{}, interface{}) bool",
-			"Keys": "func(interface{}) interface{}",
-			"Values": "func(interface{}) interface{}"
+			"Insert": "func[$0 comparable, $1 interface{}](map[$0]$1, iter.Seq2[$0, $1])",
+			"Keys": "func[$0 comparable, $1 interface{}](map[$0]$1) iter.Seq[$0]",
+			"Values": "func[$0 comparable, $1 interface{}](map[$0]$1) iter.Seq[$1]"
 		},
 		"math": {
 			"E": "float64",
