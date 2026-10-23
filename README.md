@@ -464,7 +464,12 @@ Design documents for planned features are organised by release under `docs/v*/`
 npm test                  # unit, zero-alloc perf, and example tests (~1,920+ tests, no browser required)
 npm run test:e2e          # E2E browser tests (Playwright, headless Chromium)
 npm run bench             # Möller–Trumbore raycast benchmark comparing pure JS vs hybrid WASM
+npm run manifest:update   # regenerate runtime/stdlib/manifest.json from Go's api/*.txt (needs go1.26)
 ```
+
+The stdlib coverage gate (`test/unit/types/stdlib-coverage.test.js`) compares the manifest
+with GoFront's stdlib by name and by signature; known gaps are listed in
+`test/unit/types/stdlib-coverage.gaps.json` (`--update-gaps` rewrites it).
 
 **Unit tests** (~1,920+) cover language features, type errors, edge cases, DOM (jsdom),
 external `.d.ts`, npm resolver, TypeScript tuple return signatures, multi-file compilation,
