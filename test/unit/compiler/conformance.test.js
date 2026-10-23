@@ -1,11 +1,19 @@
 // GoFront test suite — conformance runner (test/conformance/run.js)
 
+import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+	CONFORMANCE_DIR,
 	checkFixture,
 	findFixtures,
 	runFixture,
 } from "../../conformance/run.js";
+import {
+	goOutput,
+	goVersion,
+	UPDATE_SCRIPT,
+} from "../../conformance/update.js";
 import {
 	assert,
 	assertContains,
@@ -110,4 +118,26 @@ func main() {
 			assertContains(res.message, "undefinedName");
 		},
 	);
+});
+
+section("Conformance update (real Go)");
+
+test("conformance:update fails clearly when go is missing", () => {
+	withTempDir((dir) => {
+		const res = spawnSync(process.execPath, [UPDATE_SCRIPT], {
+			encoding: "utf8",
+			env: { PATH: dir },
+		});
+		assertEqual(res.status, 1);
+		assertContains(res.stderr, "needs the Go toolchain (go1.26)");
+	});
+});
+
+test("regenerating the checked-in fixtures leaves them unchanged", () => {
+	const version = goVersion();
+	if (!version?.startsWith("go1.26")) return; // no go1.26: CI has no Go
+	for (const f of findFixtures(CONFORMANCE_DIR)) {
+		const want = readFileSync(f.replace(/\.go$/, ".out"), "utf8");
+		assertEqual(goOutput(f), want);
+	}
 });

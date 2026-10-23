@@ -38,6 +38,7 @@
 		"build": "node src/index.js example/simple/src -o example/simple/app.js && node src/index.js example/preact/src -o example/preact/app.js && node src/index.js example/gom/src -o example/gom/app.js && node src/index.js example/templ/src -o example/templ/app.js && node src/index.js example/webgl/src -o example/webgl/app.js && node src/index.js example/hybrid/src -o example/hybrid/app.js",
 		"test": "node test/unit/run.js && npm run conformance && node test/e2e/perf/zero-alloc.js && node src/index.js test --dom example/...",
 		"conformance": "node test/conformance/run.js",
+		"conformance:update": "node test/conformance/update.js",
 		"test:e2e": "playwright test",
 		"test:coverage": "c8 --include='src/**' --reporter=text --reporter=lcov node test/unit/run.js",
 		"bench": "node --expose-gc test/e2e/perf/raycast-bench.js",
