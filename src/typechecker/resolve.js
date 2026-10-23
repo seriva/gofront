@@ -74,6 +74,9 @@ const SUBSTITUTE_DISPATCH = {
 	named: (s, type, map) => ({
 		kind: "named",
 		name: type.name,
+		...(type.typeArgs && {
+			typeArgs: type.typeArgs.map((t) => s.substituteType(t, map)),
+		}),
 		underlying: s.substituteType(type.underlying, map),
 	}),
 };
@@ -422,6 +425,19 @@ export const resolveMethods = {
 			if (!map.has(paramType.name)) map.set(paramType.name, argType);
 			return;
 		}
+		if (paramType.kind === "named" && paramType.typeArgs) {
+			// `iter.Seq[E]` against `iter.Seq[int]`: unify the type arguments;
+			// against any other type, its underlying type.
+			if (argType.kind === "named" && argType.name === paramType.name) {
+				const args = argType.typeArgs ?? [];
+				for (let i = 0; i < paramType.typeArgs.length; i++)
+					this._inferFromPair(paramType.typeArgs[i], args[i], map);
+				return;
+			}
+			paramType = paramType.underlying;
+		}
+		if (argType.kind === "named" && argType.underlying)
+			argType = argType.underlying;
 		this._inferFromStructuredPair(paramType, argType, map);
 	},
 

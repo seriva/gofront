@@ -894,18 +894,13 @@
 			"Regexp.UnmarshalText"
 		],
 		"slices": [
-			"All",
-			"AppendSeq",
-			"Backward",
 			"Chunk",
-			"Collect",
 			"CompareFunc",
 			"EqualFunc",
 			"Repeat",
 			"Sorted",
 			"SortedFunc",
-			"SortedStableFunc",
-			"Values"
+			"SortedStableFunc"
 		],
 		"sort": [
 			"Find",
@@ -2109,6 +2104,9 @@
 			"Stdout": "interface{}"
 		},
 		"slices": {
+			"All": "func[$0 interface{}]([]$0) iter.Seq2[int, $0]",
+			"AppendSeq": "func[$0 interface{}]([]$0, iter.Seq[$0]) []$0",
+			"Backward": "func[$0 interface{}]([]$0) iter.Seq2[int, $0]",
 			"BinarySearch": "func(interface{}, interface{}) (int, bool)",
 			"BinarySearchFunc": "func(interface{}, interface{}, interface{}) (int, bool)",
 			"Clip": "func(interface{}) interface{}",
@@ -2136,7 +2134,8 @@
 			"Reverse": "func(interface{})",
 			"Sort": "func(interface{})",
 			"SortFunc": "func(interface{}, interface{})",
-			"SortStableFunc": "func(interface{}, interface{})"
+			"SortStableFunc": "func(interface{}, interface{})",
+			"Values": "func[$0 interface{}]([]$0) iter.Seq[$0]"
 		},
 		"sort": {
 			"Search": "func(int, interface{}) int",
