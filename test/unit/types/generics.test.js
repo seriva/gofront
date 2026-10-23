@@ -567,6 +567,31 @@ func Main() int { b := Alias[int]{Val: 42}; return b.Val }`);
 	assertEqual(Number(h.run("Main").wasmRes), 42);
 });
 
+test("methods survive on the result of a generic constructor call", () => {
+	const decls = `package main
+import "fmt"
+type Stack[T any] struct{ items []T }
+func NewStack[T any](x T) *Stack[T] { return &Stack[T]{items: []T{x}} }
+func (s *Stack[T]) Push(x T) { s.items = append(s.items, x) }
+func (s *Stack[T]) Len() int { return len(s.items) }
+type Box[T any] struct{ v T }
+func NewBox[T any](x T) Box[T] { return Box[T]{v: x} }
+func (b Box[T]) Get() T { return b.v }
+`;
+	const bodies = [
+		"a := NewStack(1); a.Push(2); fmt.Println(a.Len())",
+		"a := NewStack[int](3); a.Push(2); fmt.Println(a.Len())",
+		"b := NewBox(7); fmt.Println(b.Get())",
+		"b := NewBox[int](7); fmt.Println(b.Get())",
+	];
+	const expected = ["2", "2", "7", "7"];
+	bodies.forEach((body, i) => {
+		const { js, errors } = compile(`${decls}func main() { ${body} }`);
+		assertEqual(errors.length, 0, errors.map((e) => e.message).join("; "));
+		assertEqual(runJs(js), expected[i]);
+	});
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
