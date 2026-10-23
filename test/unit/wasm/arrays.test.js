@@ -10,6 +10,7 @@ import {
 	assertValidWasm,
 	compile,
 	compileHybrid,
+	compileHybridProject,
 	compileWasm,
 	runJs,
 	section,
@@ -1515,6 +1516,94 @@ parity(
 	return x[0]*10000 + x[1]*1000 + x[2]*100 + x[3]*10 + b[2]`,
 	79868,
 );
+
+parity(
+	"left-hand index calls run left to right when one is bound to a temporary",
+	`	log := 0
+	f := func(v int) int {
+		log = log*10 + v
+		return 0
+	}
+	a := []int{0}
+	x := []int{0, 0, 0}
+	x = x[:2]
+	a[f(1)], x[f(2)] = 1, 2
+	return log*10 + x[0]`,
+	122,
+);
+
+parity(
+	"the slice operand of a written-through index is read before the call",
+	`	s := &S{buf: []int{0, 0, 0, 0}}
+	al := s.buf
+	s.buf = s.buf[:2]
+	s.buf[0] = s.reset()
+	s.buf = s.buf[:4]
+	return al[0]*100 + s.buf[0]*10 + len(s.alt)`,
+	902,
+	`type S struct {
+	buf []int
+	alt []int
+}
+
+func (s *S) reset() int {
+	s.alt = s.buf
+	s.buf = []int{0, 0, 0, 0}
+	s.buf = s.buf[:2]
+	return 9
+}`,
+);
+
+test("a both package with bound index temporaries compiles to JS and WASM", async () => {
+	const lib = `//gofront:target both
+package lib
+
+type S struct {
+	Buf []int
+	N   int
+}
+
+func (s *S) next() int { s.N++; return 9 }
+
+func Run() int {
+	x := []int{0, 0, 0, 0, 0}
+	al := x
+	x = x[:3]
+	al[0] = 7
+	k := 2
+	x[k+0], k = 5, 0
+	s := &S{Buf: []int{1, 2, 3, 4, 5}}
+	s.Buf = s.Buf[:3]
+	s.Buf[s.N] = s.next()
+	s.Buf = s.Buf[:5]
+	x = x[:5]
+	return x[0]*100 + x[2]*10 + k
+}
+`;
+	const { mod } = await compileHybridProject(
+		{
+			"lib/lib.go": lib,
+			"w/w.go": `//gofront:target wasm
+package w
+
+import "../lib"
+
+func WRun() int { return lib.Run() }
+`,
+			"main.go": `package main
+
+import (
+	"./lib"
+	"./w"
+)
+
+func Main() int { return lib.Run()*1000 + w.WRun() }
+`,
+		},
+		{ exports: ["Main"] },
+	);
+	assertEqual(mod.Main(), 750750);
+});
 
 parity(
 	"an index with a call is evaluated once and written through",
