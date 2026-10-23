@@ -592,6 +592,40 @@ func (b Box[T]) Get() T { return b.v }
 	});
 });
 
+test("generic constructor results satisfy interfaces", () => {
+	const decls = `package main
+import "fmt"
+type Stack[T any] struct{ items []T }
+func NewStack[T any](x T) *Stack[T] { return &Stack[T]{items: []T{x}} }
+func (s *Stack[T]) Len() int { return len(s.items) }
+type Box[T any] struct{ v T }
+func NewBox[T any](x T) Box[T] { return Box[T]{v: x} }
+func (b Box[T]) Get() T { return b.v }
+type Lener interface{ Len() int }
+type Getter interface{ Get() string }
+func show(l Lener) { fmt.Println(l.Len()) }
+func showG[T Lener](l T) { fmt.Println(l.Len()) }
+`;
+	const bodies = [
+		"s := NewStack(1); show(s)",
+		"show(NewStack[int](1))",
+		"var i Lener = NewStack(1); fmt.Println(i.Len())",
+		"var i interface{ Len() int } = NewStack[int](1); fmt.Println(i.Len())",
+		"showG(NewStack(1))",
+		'var g Getter = NewBox("a"); fmt.Println(len(g.Get()))',
+		'var g Getter = NewBox[string]("a"); fmt.Println(len(g.Get()))',
+	];
+	bodies.forEach((body) => {
+		const { js, errors } = compile(`${decls}func main() { ${body} }`);
+		assertEqual(
+			errors.length,
+			0,
+			`${body}: ${errors.map((e) => e.message).join("; ")}`,
+		);
+		assertEqual(runJs(js), "1");
+	});
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
