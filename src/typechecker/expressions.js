@@ -67,6 +67,8 @@ const BUILTIN_CHECK = {
 		const sb = s.resolveType(st?.kind === "named" ? st.underlying : st);
 		if (sb?.kind === "slice") {
 			for (let i = 1; i < e.args.length; i++) {
+				if (e.args[i]._spread)
+					s._rejectSeqAsSlice(at[i], e.args[i], "a spread argument");
 				if (!e.args[i]._spread && at[i])
 					s._markIfaceBox(
 						s.resolveType(sb.elem),
@@ -656,6 +658,8 @@ export const expressionCheckMethods = {
 				expr,
 			);
 		}
+		if (tgtResolved?.kind === "slice")
+			this._rejectSeqAsSlice(srcType, expr.expr, "a slice conversion");
 		if (this._isMutualArraySlice(tgtResolved, srcResolved)) {
 			this._checkElemTypeCompatible(
 				tgtResolved.elem,
@@ -695,6 +699,8 @@ export const expressionCheckMethods = {
 			);
 			return;
 		}
+		if (tgtResolved?.kind === "slice")
+			this._rejectSeqAsSlice(srcType, expr.args?.[0], "a slice conversion");
 		if (this._isMutualArraySlice(tgtResolved, srcResolved)) {
 			this._checkElemTypeCompatible(
 				tgtResolved.elem,
@@ -1111,12 +1117,6 @@ export const expressionCheckMethods = {
 				return under ? arg : null;
 			case "elemOfArg0":
 				return under?.elem ?? null;
-			case "keysOfArg0":
-				return under?.key ? { kind: "slice", elem: under.key } : null;
-			case "valuesOfArg0": {
-				const v = under?.value ?? under?.elem;
-				return v ? { kind: "slice", elem: v } : null;
-			}
 			default:
 				return null;
 		}
@@ -1192,7 +1192,10 @@ export const expressionCheckMethods = {
 				fnType.variadic && i >= fnType.params.length - 1
 					? fnType.params.length - 1
 					: i;
-			if (expr.args[i]?._spread) continue;
+			if (expr.args[i]?._spread) {
+				this._rejectSeqAsSlice(argTypes[i], expr.args[i], "a spread argument");
+				continue;
+			}
 			const targetParam = fnType.params[paramIdx];
 			const node = expr._multiForward ? null : expr.args[i];
 			this.assertAssignable(targetParam, argTypes[i], node, "argument");
@@ -1240,6 +1243,7 @@ export const expressionCheckMethods = {
 	},
 
 	_checkBuiltinLen(name, expr, argTypes) {
+		this._rejectSeqAsSlice(argTypes[0], expr.args?.[0], `${name}()`);
 		if (expr.args?.length === 1)
 			argTypes[0] = this._derefArrayPtr(expr.args, 0, argTypes[0]);
 		if (name === "len") {
