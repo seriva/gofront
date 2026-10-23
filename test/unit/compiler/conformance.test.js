@@ -7,6 +7,7 @@ import {
 	CONFORMANCE_DIR,
 	checkFixture,
 	findFixtures,
+	lintFixture,
 	runFixture,
 } from "../../conformance/run.js";
 import {
@@ -116,6 +117,64 @@ func main() {
 			const res = checkFixture(join(dir, "fmt/bad.go"));
 			assert(!res.ok, "expected failure");
 			assertContains(res.message, "undefinedName");
+		},
+	);
+});
+
+section("Conformance fixture lint (string semantics)");
+
+const wrap = (body) =>
+	`package main\n\nimport "fmt"\n\nfunc main() {\n${body}\n}\n`;
+
+test("len, index and range on a non-ASCII string literal are rejected", () => {
+	const src = wrap(
+		[
+			'\tfmt.Println(len("h\u00e9llo"))',
+			'\tfmt.Println("héllo"[1])',
+			'\tfmt.Println("héllo"[1:])',
+			"\tfor i := range `héllo` {",
+			"\t\tfmt.Println(i)",
+			"\t}",
+			'\tfmt.Println(len("\\xc3"))',
+		].join("\n"),
+	);
+	const errs = lintFixture(src, "fmt/bad.go");
+	assertEqual(errs.length, 5);
+	assertContains(errs[0], "fmt/bad.go:6: len() of a non-ASCII string literal");
+	assertContains(errs[1], "fmt/bad.go:7: indexing a non-ASCII string literal");
+	assertContains(
+		errs[3],
+		"fmt/bad.go:9: range over a non-ASCII string literal",
+	);
+	assertContains(errs[4], "fmt/bad.go:12: len()");
+	assertContains(errs[0], "UTF-16 code units");
+	assertContains(errs[0], "[]byte(s)");
+});
+
+test("ASCII literals and []byte/[]rune forms are allowed", () => {
+	const src = wrap(
+		[
+			'\tfmt.Println(len("hello"), "abc"[1], len([]byte("héllo")))',
+			'\tfmt.Println(len([]rune("héllo")), "héllo", `raw \\xc3`)',
+			'\tfor _, r := range []rune("héllo") {',
+			"\t\tfmt.Println(r)",
+			"\t}",
+			'\tfmt.Println(len("\\\\xc3"), len("\\u0041"), "\\x41"[0])',
+		].join("\n"),
+	);
+	assertEqual(lintFixture(src, "fmt/ok.go").join("\n"), "");
+});
+
+test("a fixture failing the lint is rejected before it runs", () => {
+	withTempDir(
+		{
+			"strings/bad.go": wrap('\tfmt.Println(len("é"))'),
+			"strings/bad.out": "1\n",
+		},
+		(dir) => {
+			const res = checkFixture(join(dir, "strings/bad.go"));
+			assert(!res.ok, "expected failure");
+			assertContains(res.message, "strings/bad.go:6: len() of a non-ASCII");
 		},
 	);
 });

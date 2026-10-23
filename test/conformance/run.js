@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 import { instantiateWasm } from "../../src/backend/wasm/glue.js";
 import { compileWasm } from "../../src/backend/wasm/index.js";
+import { Lexer } from "../../src/lexer.js";
 import { assertValidWasm, compile } from "../unit/helpers.js";
 
 export const CONFORMANCE_DIR = dirname(fileURLToPath(import.meta.url));
@@ -68,6 +69,56 @@ function runWasm(wasm, stringTable) {
 	return out;
 }
 
+// GoFront strings are JS strings on both backends: len, indexing and range
+// count UTF-16 code units, Go counts UTF-8 bytes (portable-go plan §1.1).
+const STRING_HINT =
+	"GoFront strings are JavaScript strings, so len, indexing and range count UTF-16 code units where Go counts UTF-8 bytes; use []byte(s) or []rune(s) instead (docs/v1.8.0/portable-go-plan.md §1.1)";
+
+// Escapes in an interpreted literal that produce a byte >= 0x80.
+const NON_ASCII_ESCAPE =
+	/(?:^|[^\\])(?:\\\\)*\\(?:x[89a-fA-F][0-9a-fA-F]|[2-3][0-7]{2}|u(?!00[0-7])[0-9a-fA-F]{4}|U(?!000000[0-7])[0-9a-fA-F]{8})/;
+
+function isNonAsciiLiteral(tok, lines) {
+	if (tok?.type !== "STRING") return false;
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: ASCII range
+	if (/[^\x00-\x7f]/.test(tok.value)) return true;
+	// The token value has escapes partly decoded, so read the source text.
+	const line = lines[tok.line - 1] ?? "";
+	if (line[tok.col - 1] !== '"') return false; // raw string: no escapes
+	let j = tok.col;
+	while (j < line.length && line[j] !== '"') j += line[j] === "\\" ? 2 : 1;
+	return NON_ASCII_ESCAPE.test(line.slice(tok.col, j));
+}
+
+// Rejects len(), indexing and range applied to a non-ASCII string literal.
+// Returns one message per offending use; `[]byte(...)`/`[]rune(...)` forms
+// are not string literals and pass.
+export function lintFixture(source, name) {
+	const toks = new Lexer(source, name).tokenize();
+	const lines = source.split("\n");
+	const errs = [];
+	const report = (tok, what) =>
+		errs.push(
+			`${name}:${tok.line}: ${what} a non-ASCII string literal: ${STRING_HINT}`,
+		);
+	for (let i = 0; i < toks.length; i++) {
+		const t = toks[i];
+		if (
+			t.type === "IDENT" &&
+			t.value === "len" &&
+			toks[i + 1]?.type === "(" &&
+			isNonAsciiLiteral(toks[i + 2], lines) &&
+			toks[i + 3]?.type === ")"
+		)
+			report(t, "len() of");
+		else if (t.type === "range" && isNonAsciiLiteral(toks[i + 1], lines))
+			report(t, "range over");
+		else if (isNonAsciiLiteral(t, lines) && toks[i + 1]?.type === "[")
+			report(t, "indexing");
+	}
+	return errs;
+}
+
 // Compiles one fixture as a `both` package and returns the stdout of each backend.
 export function runFixture(goPath) {
 	const source = readFileSync(goPath, "utf8");
@@ -104,6 +155,8 @@ export function checkFixture(goPath, root = dirname(dirname(goPath))) {
 			ok: false,
 			message: `missing ${outName}: capture it from real Go with \`npm run conformance:update\``,
 		};
+	const lint = lintFixture(readFileSync(goPath, "utf8"), name);
+	if (lint.length > 0) return { ok: false, message: lint.join("\n") };
 	const want = readFileSync(outPath);
 	let got;
 	try {
