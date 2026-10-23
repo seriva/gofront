@@ -114,7 +114,7 @@ Members of each Go package (functions, types, methods, fields, constants and var
 | `hash/fnv` | 0 of 6 | 6 | 0 | 0 |
 | `html` | 2 of 2 | 0 | 0 | 0 |
 | `io` | 23 of 94 | 71 | 0 | 10 |
-| `iter` | 0 of 2 | 2 | 0 | 2 |
+| `iter` | 2 of 2 | 0 | 0 | 2 |
 | `log` | 0 of 43 | 43 | 0 | 0 |
 | `maps` | 7 of 10 | 3 | 0 | 0 |
 | `math` | 69 of 97 | 28 | 0 | 0 |
@@ -127,7 +127,7 @@ Members of each Go package (functions, types, methods, fields, constants and var
 | `path` | 9 of 9 | 0 | 0 | 0 |
 | `path/filepath` | 9 of 19 | 10 | 0 | 8 |
 | `regexp` | 15 of 49 | 34 | 49 | 0 |
-| `slices` | 28 of 40 | 12 | 0 | 0 |
+| `slices` | 37 of 40 | 3 | 0 | 0 |
 | `sort` | 10 of 40 | 30 | 0 | 0 |
 | `strconv` | 18 of 43 | 25 | 0 | 0 |
 | `strings` | 61 of 82 | 21 | 0 | 0 |
@@ -165,8 +165,9 @@ Notable members and behaviour per package, including GoFront's own packages:
 | `time` | `Now` → `time.Time`, `Since`, `Sleep` (JS-only), `Parse`, `Unix`, `Date`; **`time.Duration`** methods: `Seconds`, `Milliseconds`, `Microseconds`, `Nanoseconds`, `Minutes`, `Hours`, `String`; **`time.Time`** methods: `Format`, `String`, `Year`, `Month`, `Day`, `Hour`, `Minute`, `Second`, `Weekday`, `Unix`, `UnixMilli`, `UnixNano`, `Nanosecond`, `UTC`, `Local`, `IsZero`, `Add`, `Sub`, `Before`, `After`, `Equal`; layout constants: `RFC3339`, `RFC3339Nano`, `DateOnly`, `TimeOnly`, `DateTime`; duration constants: `Millisecond`, `Second`, `Minute`, `Hour`; month/weekday constants |
 | `html` | `EscapeString`, `UnescapeString` |
 | `cmp` | `Ordered`, `Compare`, `Less`, `Or` — written in Go (`runtime/stdlib/cmp`), compiled into the caller's target (`js`, `wasm` or `both`). |
+| `iter` | `Seq`, `Seq2` — written in Go (`runtime/stdlib/iter`); range over them with `for v := range seq`. `Pull` and `Pull2` need coroutines and report `requires coroutines; out of scope (no runtime)`. |
 | `maps` | `Keys`, `Values`, `Clone`, `Copy`, `Equal`, `EqualFunc`, `Delete`, `DeleteFunc` |
-| `slices` | `Contains`, `ContainsFunc`, `Index`, `IndexFunc`, `BinarySearch`, `BinarySearchFunc`, `Equal`, `Compare`, `Sort`, `SortFunc`, `SortStableFunc`, `IsSorted`, `IsSortedFunc`, `Reverse`, `Max`, `Min`, `MaxFunc`, `MinFunc`, `Clone`, `Compact`, `CompactFunc`, `Concat`, `Delete`, `DeleteFunc`, `Insert`, `Replace`, `Grow`, `Clip` |
+| `slices` | `Contains`, `ContainsFunc`, `Index`, `IndexFunc`, `BinarySearch`, `BinarySearchFunc`, `Equal`, `Compare`, `Sort`, `SortFunc`, `SortStableFunc`, `IsSorted`, `IsSortedFunc`, `Reverse`, `Max`, `Min`, `MaxFunc`, `MinFunc`, `Clone`, `Compact`, `CompactFunc`, `Concat`, `Delete`, `DeleteFunc`, `Insert`, `Replace`, `Grow`, `Clip`; iterator members `All`, `Values`, `Backward`, `Collect`, `AppendSeq`, `Sorted`, `SortedFunc`, `SortedStableFunc`, `Chunk` written in Go (`runtime/stdlib/slices/iter.go`, an overlay). They take `[]E` rather than a `Slice ~[]E` type parameter, so `Chunk` and `AppendSeq` of a named slice type return `[]E`. |
 | `regexp` | `MustCompile`, `Compile`, `MatchString`, `QuoteMeta`; **`*Regexp`** methods: `MatchString`, `FindString`, `FindStringIndex`, `FindAllString`, `FindStringSubmatch`, `FindAllStringSubmatch`, `ReplaceAllString`, `ReplaceAllLiteralString`, `Split`, `String`. Inline flags (`(?i)`, `(?m)`, `(?s)`) are extracted automatically into the JS `RegExp` constructor. |
 | `unicode` | `IsLetter`, `IsDigit`, `IsSpace`, `IsUpper`, `IsLower`, `IsPunct`, `IsControl`, `IsPrint`, `IsGraphic`, `ToUpper`, `ToLower` |
 | `unicode/utf8` | `RuneCountInString`, `RuneLen`, `ValidString`, `ValidRune`, `DecodeRuneInString`, `DecodeLastRuneInString`, `FullRuneInString`; constants `RuneError`, `MaxRune`, `UTFMax` |
