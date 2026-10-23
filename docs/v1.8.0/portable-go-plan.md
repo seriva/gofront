@@ -775,11 +775,12 @@ The Phase 0.5 reviews (PR #29) found these bugs. None of them were introduced by
 
 ### Phase 1.1: Manifest generator and coverage gates
 
-- [ ] **Task 1.1a — Manifest generator**
+- [x] **Task 1.1a — Manifest generator**
   - Files: new `scripts/stdlib-manifest.js`, `package.json` (`manifest:update` script)
   - Do: read `$(go env GOROOT)/api/go1.txt` … `go1.26.txt`, parse `pkg <path>, func|type|var|const|method` lines into `{pkg, name, kind, signature}`, and write `runtime/stdlib/manifest.json` with a `status` of `todo` for every member of every package named in the [Scope rule](#scope-rule) and the member tables. Packages absent from the scope rule get `excluded:<category>` from the table.
   - Test: new `test/unit/compiler/manifest.test.js` — the JSON parses, every entry has `pkg`, `name`, `kind`, `signature`, `status`; a sample of known members is present (`strconv.ParseInt` with `func(string, int, int) (int64, error)`).
   - Done when: the manifest is checked in and regenerating it is a no-op.
+  - Landed: `npm run manifest:update` (`--check` fails on a stale file) reads the API files up to `go1.26.txt`, drops platform-specific lines (`pkg os (linux-386), …`), `//deprecated` markers and the `except.txt` features, and writes one entry per member: `func`, `var`, `const` (signature is the type, `ideal-int` for untyped constants), `type` (generic types keep their `[$0 …]` parameter list), `method` (name `T.M`, receiver in `recv`, interface methods included) and `field` (struct fields and `embedded` fields, name `T.F`). In-scope packages are the ones the scope rule and its member tables name, the ones §4–§9 add and the ones GoFront already ships (52 packages, all members `todo`); every other package in the API files gets a single `package` entry with `excluded:runtime|host|reflection|deferred` (121 packages; unlisted pure packages such as `mime`, `net/netip` or `log/slog` are `deferred`). A package the scope rule does not classify fails the generator. The file uses Biome's JSON layout so `npm run format` leaves it unchanged. The idempotence test regenerates the manifest only when a go1.26 toolchain is installed.
 
 - [ ] **Task 1.1b — Fill statuses and exclusion reasons**
   - Files: `runtime/stdlib/manifest.json`, `scripts/stdlib-manifest.js` (status overrides file `scripts/manifest-overrides.json`)
