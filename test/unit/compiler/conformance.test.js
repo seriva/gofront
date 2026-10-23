@@ -179,6 +179,21 @@ test("a fixture failing the lint is rejected before it runs", () => {
 	);
 });
 
+test("a fixture the lexer rejects fails instead of throwing", () => {
+	withTempDir(
+		{
+			"strings/unlexable.go": wrap('\tfmt.Println(len("é))'),
+			"strings/unlexable.out": "1\n",
+		},
+		(dir) => {
+			const res = checkFixture(join(dir, "strings/unlexable.go"));
+			assert(!res.ok, "expected failure");
+			assertContains(res.message, "strings/unlexable.go: ");
+			assertContains(res.message, "Unterminated");
+		},
+	);
+});
+
 section("Conformance update (real Go)");
 
 test("conformance:update fails clearly when go is missing", () => {
