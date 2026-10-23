@@ -498,7 +498,11 @@ export const resolveMethods = {
 	// A substituted generic instance (e.g. Stack[int] from an inferred call)
 	// drops the methods map; re-derive it from the generic declaration.
 	_withGenericMethods(t) {
-		const generic = this.types.get(t.name)?._generic;
+		const decl = this.types.get(t.name);
+		const generic = decl?._generic;
+		// Struct generics only: codegen has no receiver support for generic
+		// slice/map/func named types, so those keep the baseline diagnostics.
+		if (this.resolveType(decl?.underlying)?.kind !== "struct") return t;
 		if (!generic?.methods || generic.methods.size === 0) return t;
 		if (t.methods && generic.methods.size <= t.methods.size) return t;
 		const map = new Map();
