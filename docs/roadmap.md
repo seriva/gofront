@@ -26,9 +26,9 @@ features (e.g. `docs/v0.0.5/`).
 
 ---
 
-## v1.8.1
+## v1.9.0
 
-**Theme: Stdlib in Go.** Move every existing stdlib package whose behaviour is ordinary Go over GoFront values onto the v1.8.0 Go-source path (`runtime/stdlib/`), and keep host-backed fast paths as small registered **natives** (`//gofront:native`) that a differential test checks against the Go body. Removes the hand-written type tables, JS shims and WASM emitters for `sort`, `slices`, `maps`, `errors`, `unicode/utf8`, `path`, `html`, `bytes`, `io`, `strings`, `encoding/{hex,base64,binary}`, `crypto/sha256`, `math/{bits,rand}`, `sync`, `time` and `strconv` (WASM stdlib emitters 20,717 → ≤ 8,000 lines). Fixes what the old path got wrong: every WASM sort is O(n²), sorting `NaN` is wrong on both backends, `sort.Slice` tie order differs from Go, 163 signatures differ from Go's. Needs v1.8.0 released and the project owner's agreement that a structural fix ships as a v1.8.x patch. Design document in [`docs/v1.8.1/stdlib-in-go-plan.md`](v1.8.1/stdlib-in-go-plan.md).
+**Theme: Stdlib in Go.** Move every existing stdlib package whose behaviour is ordinary Go over GoFront values onto the v1.8.0 Go-source path (`runtime/stdlib/`), and keep host-backed fast paths as small registered **natives** (`//gofront:native`) that a differential test checks against the Go body. Removes the hand-written type tables, JS shims and WASM emitters for `sort`, `slices`, `maps`, `errors`, `unicode/utf8`, `path`, `html`, `bytes`, `io`, `strings`, `encoding/{hex,base64,binary}`, `crypto/sha256`, `math/{bits,rand}`, `sync`, `time` and `strconv` (WASM stdlib emitters 20,717 → ≤ 8,000 lines). Fixes what the old path got wrong: every WASM sort is O(n²), sorting `NaN` is wrong on both backends, `sort.Slice` tie order differs from Go, 163 signatures differ from Go's. Needs v1.8.0 released. Becomes the last feature release of the JS engine, so the v2.0.0 baseline moves from v1.8.0 to v1.9.0. Design document in [`docs/v1.9.0/stdlib-in-go-plan.md`](v1.9.0/stdlib-in-go-plan.md).
 
 | Area | Difficulty | Status | Notes |
 |---|---|---|---|
