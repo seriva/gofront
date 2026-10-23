@@ -356,7 +356,45 @@ export const assignabilityMethods = {
 			return;
 		}
 		if (this._identicalUnderlyingLiteral(target, source, tBase, sBase)) return;
-		this.err(`Cannot assign ${typeStr(source)} to ${typeStr(target)}`, node);
+		this.err(
+			`Cannot assign ${typeStr(source)} to ${typeStr(target)}`,
+			node,
+			this._seqToSliceHint(source, tBase, node),
+		);
+	},
+
+	// maps.Keys/Values (and every iter.Seq) no longer return a slice: point the
+	// slice-expecting caller at slices.Collect.
+	_seqToSliceHint(source, tBase, node) {
+		if (tBase?.kind !== "slice" || !this._isIterSeq(source)) return null;
+		return this._seqCollectHint(node);
+	},
+
+	_isIterSeq(t) {
+		return t?.kind === "named" && /^iter\.Seq\d*\[/.test(typeStr(t));
+	},
+
+	_seqCollectHint(node) {
+		const f = node?.kind === "CallExpr" ? node.func : null;
+		if (
+			f?.kind === "SelectorExpr" &&
+			f.expr?.kind === "Ident" &&
+			f.expr.name === "maps" &&
+			(f.field === "Keys" || f.field === "Values")
+		)
+			return `use slices.Collect(maps.${f.field}(m)) for a slice`;
+		return "use slices.Collect(seq) for a slice";
+	},
+
+	// len/cap, spread and slice conversion are lenient on func types, and an
+	// iter.Seq value is one: reject it there instead of miscompiling.
+	_rejectSeqAsSlice(type, node, use) {
+		if (!this._isIterSeq(type)) return;
+		this.err(
+			`cannot use ${typeStr(type)} in ${use}`,
+			node,
+			this._seqCollectHint(node),
+		);
 	},
 
 	// Identical underlying types are assignable when one side is an unnamed

@@ -7,6 +7,7 @@ import {
 	assertEqual,
 	compile,
 	compileHybrid,
+	compileHybridProject,
 	runJs,
 	section,
 	summarize,
@@ -1430,32 +1431,43 @@ func main() {
 
 section("maps package");
 
-test("maps.Keys", () => {
-	const { js, errors } = compile(`package main
+// maps.Keys/Values are Go-source (iter.Seq), which the single-file `compile`
+// helper does not load: build `body` as a project's main package instead.
+async function runMapsMain(body) {
+	const res = await compileHybridProject({
+		"main.go": `package main
+
+import (
+	"maps"
+	"slices"
+)
+
 func main() {
-	m := map[string]int{"a": 1, "b": 2, "c": 3}
-	keys := maps.Keys(m)
+${body}
+}
+`,
+	});
+	return res.lines.join("\n");
+}
+
+test("maps.Keys", async () => {
+	const out = await runMapsMain(`	m := map[string]int{"a": 1, "b": 2, "c": 3}
+	keys := slices.Collect(maps.Keys(m))
 	slices.Sort(keys)
 	for _, k := range keys {
 		console.log(k)
-	}
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "a\nb\nc");
+	}`);
+	assertEqual(out, "a\nb\nc");
 });
 
-test("maps.Values", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	m := map[string]int{"x": 10, "y": 20}
-	vals := maps.Values(m)
+test("maps.Values", async () => {
+	const out = await runMapsMain(`	m := map[string]int{"x": 10, "y": 20}
+	vals := slices.Collect(maps.Values(m))
 	slices.Sort(vals)
 	for _, v := range vals {
 		console.log(v)
-	}
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "10\n20");
+	}`);
+	assertEqual(out, "10\n20");
 });
 
 test("maps.Clone", () => {
@@ -1471,20 +1483,16 @@ func main() {
 	assertEqual(runJs(js), "1\n2");
 });
 
-test("maps.Copy", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	dst := map[string]int{"a": 1}
+test("maps.Copy", async () => {
+	const out = await runMapsMain(`	dst := map[string]int{"a": 1}
 	src := map[string]int{"b": 2, "c": 3}
 	maps.Copy(dst, src)
-	keys := maps.Keys(dst)
+	keys := slices.Collect(maps.Keys(dst))
 	slices.Sort(keys)
 	for _, k := range keys {
 		console.log(k)
-	}
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "a\nb\nc");
+	}`);
+	assertEqual(out, "a\nb\nc");
 });
 
 test("maps.Equal", () => {
@@ -1500,19 +1508,15 @@ func main() {
 	assertEqual(runJs(js), "true\nfalse");
 });
 
-test("maps.Delete", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	m := map[string]int{"a": 1, "b": 2, "c": 3}
+test("maps.Delete", async () => {
+	const out = await runMapsMain(`	m := map[string]int{"a": 1, "b": 2, "c": 3}
 	maps.Delete(m, "b")
-	keys := maps.Keys(m)
+	keys := slices.Collect(maps.Keys(m))
 	slices.Sort(keys)
 	for _, k := range keys {
 		console.log(k)
-	}
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "a\nc");
+	}`);
+	assertEqual(out, "a\nc");
 });
 
 test("maps.EqualFunc", () => {
@@ -1527,19 +1531,15 @@ func main() {
 	assertEqual(runJs(js), "true");
 });
 
-test("maps.DeleteFunc", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	m := map[string]int{"a": 1, "b": 2, "c": 3}
+test("maps.DeleteFunc", async () => {
+	const out = await runMapsMain(`	m := map[string]int{"a": 1, "b": 2, "c": 3}
 	maps.DeleteFunc(m, func(k string, v int) bool { return v > 1 })
-	keys := maps.Keys(m)
+	keys := slices.Collect(maps.Keys(m))
 	slices.Sort(keys)
 	for _, k := range keys {
 		console.log(k)
-	}
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "a");
+	}`);
+	assertEqual(out, "a");
 });
 
 // ═════════════════════════════════════════════════════════════
