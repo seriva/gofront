@@ -340,7 +340,7 @@ export function setupCoreGlobals(globals, types) {
 			ParseInt: {
 				kind: "func",
 				params: [STRING, INT, INT],
-				returns: [INT, ERROR],
+				returns: [INT64, ERROR],
 			},
 			ParseUint: {
 				kind: "func",
