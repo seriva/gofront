@@ -32,6 +32,15 @@ async function iterParity(libBody) {
 	return js;
 }
 
+// Same as iterParity for one target only ("wasm" or "both").
+async function iterRun(target, libBody) {
+	const res = await compileHybridProject({
+		"lib/lib.go": `//gofront:target ${target}\npackage lib\n\n${libBody}`,
+		"main.go": `package main\n\nimport "./lib"\n\nfunc main() { println(lib.Run()) }\n`,
+	});
+	return res.lines.join("\n");
+}
+
 // The error message of compiling `main.go` as a js package ("" on success).
 function compileError(source) {
 	return withTempDir({ "main.go": source }, (dir) => {
@@ -434,4 +443,165 @@ func Run() (s string) {
 }
 `);
 	assertEqual(out, "cannot be less than 1");
+});
+
+section("maps: iterator members");
+
+test("for k := range maps.Keys(m) and maps.Values", async () => {
+	const out = await iterParity(`import (
+	"fmt"
+	"maps"
+	"slices"
+)
+
+func Run() string {
+	m := map[string]int{"a": 1, "b": 2, "c": 3}
+	var ks []string
+	for k := range maps.Keys(m) {
+		ks = append(ks, k)
+	}
+	slices.Sort(ks)
+	sum := 0
+	for v := range maps.Values(m) {
+		sum += v
+	}
+	return fmt.Sprintf("%v %d", ks, sum)
+}
+`);
+	assertEqual(out, "[a b c] 6");
+});
+
+test("maps.All yields every pair and stops on break", async () => {
+	const out = await iterParity(`import (
+	"fmt"
+	"maps"
+)
+
+func Run() string {
+	m := map[int]string{1: "x", 2: "y", 3: "z"}
+	s := ""
+	n := 0
+	for k, v := range maps.All(m) {
+		s += fmt.Sprintf("%d%s", k, v)
+		n++
+	}
+	seen := 0
+	for range maps.All(m) {
+		seen++
+		break
+	}
+	return fmt.Sprintf("%d %d %d", n, len(s), seen)
+}
+`);
+	assertEqual(out, "3 6 1");
+});
+
+test("maps.Insert and maps.Collect over sequences", async () => {
+	const out = await iterParity(`import (
+	"fmt"
+	"maps"
+	"slices"
+)
+
+func Run() string {
+	src := map[string]int{"a": 1, "b": 2}
+	dst := map[string]int{"a": 9, "z": 26}
+	maps.Insert(dst, maps.All(src))
+	c := maps.Collect(maps.All(dst))
+	c["q"] = 5
+	ks := slices.Sorted(maps.Keys(c))
+	return fmt.Sprintf("%v %d %d %d %d", ks, dst["a"], dst["b"], dst["z"], len(c))
+}
+`);
+	assertEqual(out, "[a b q z] 1 2 26 4");
+});
+
+test("slices.Sorted(maps.Keys(m)) and slices.Collect(maps.Values(m))", async () => {
+	const out = await iterParity(`import (
+	"fmt"
+	"maps"
+	"slices"
+)
+
+type P struct{ X int }
+
+func Run() string {
+	m := map[int]P{3: {30}, 1: {10}, 2: {20}}
+	ks := slices.Sorted(maps.Keys(m))
+	vs := slices.Collect(maps.Values(m))
+	slices.SortFunc(vs, func(a, b P) int { return a.X - b.X })
+	return fmt.Sprintf("%v %v", ks, vs)
+}
+`);
+	assertEqual(out, "[1 2 3] [{10} {20} {30}]");
+});
+
+test("slices.Sorted(maps.Keys(m)) on a WASM map with NaN keys keeps each entry", async () => {
+	const out = await iterRun(
+		"wasm",
+		`import (
+	"fmt"
+	"maps"
+	"math"
+	"slices"
+)
+
+func Run() string {
+	m := map[float64]int{}
+	m[math.NaN()] = 1
+	m[math.NaN()] = 2
+	m[1.5] = 3
+	keys := slices.Sorted(maps.Keys(m))
+	nan := 0
+	for _, k := range keys {
+		if k != k {
+			nan++
+		}
+	}
+	sum := 0
+	for v := range maps.Values(m) {
+		sum += v
+	}
+	return fmt.Sprintf("%d %d %d %d", len(m), len(keys), nan, sum)
+}
+`,
+	);
+	assertEqual(out, "3 3 2 6");
+});
+
+test("sort.Strings(maps.Keys(m)) reports the slices.Collect hint", () => {
+	const msg = compileError(`package main
+
+import (
+	"maps"
+	"sort"
+)
+
+func main() {
+	m := map[string]int{"a": 1}
+	sort.Strings(maps.Keys(m))
+}
+`);
+	assert(
+		msg.includes("use slices.Collect(maps.Keys(m)) for a slice"),
+		`missing hint: ${msg}`,
+	);
+	assert(msg.includes("iter.Seq[string]"), `missing type: ${msg}`);
+});
+
+test("assigning maps.Values(m) to a slice reports the hint", () => {
+	const msg = compileError(`package main
+
+import "maps"
+
+func main() {
+	m := map[string]int{"a": 1}
+	var vs []int = maps.Values(m)
+	_ = vs
+}
+`);
+	assert(
+		msg.includes("use slices.Collect(maps.Values(m)) for a slice"),
+		`missing hint: ${msg}`,
+	);
 });

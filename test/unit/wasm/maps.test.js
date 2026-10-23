@@ -1,7 +1,27 @@
 // test/unit/wasm/maps.test.js
 // Tests for Phase H4 Task H4.3: Maps & stdlib in WASM and JS-strict parity.
 
-import { assertEqual, compileHybrid, section, test } from "../helpers.js";
+import {
+	assertEqual,
+	compileHybrid,
+	compileHybridProject,
+	section,
+	test,
+} from "../helpers.js";
+
+// maps.Keys/Values are Go-source (iter.Seq), which the single-file
+// `compileHybrid` helper does not load: build `src` (a package with
+// `Main() string`) as a project's lib, once as wasm and once as both.
+async function runMapsProject(src) {
+	const run = async (target) => {
+		const res = await compileHybridProject({
+			"lib/lib.go": `//gofront:target ${target}\n${src.replace("package main", "package lib")}`,
+			"main.go": `package main\n\nimport "./lib"\n\nfunc main() { println(lib.Main()) }\n`,
+		});
+		return res.lines.join("\n");
+	};
+	return { wasmRes: await run("wasm"), jsRes: await run("both") };
+}
 
 section("WASM Maps — Basics & CRUD");
 
@@ -354,16 +374,19 @@ func Main() string {
 
 section("WASM Stdlib — maps Package");
 
-test("maps.Keys and maps.Values in insertion order", () => {
+test("maps.Keys and maps.Values in insertion order", async () => {
 	const src = `
 package main
 
-import "maps"
+import (
+	"maps"
+	"slices"
+)
 
 func Main() string {
 	m := map[string]int{"x": 10, "y": 20, "z": 30}
-	keys := maps.Keys(m)
-	vals := maps.Values(m)
+	keys := slices.Collect(maps.Keys(m))
+	vals := slices.Collect(maps.Values(m))
 	if len(keys) != 3 || len(vals) != 3 {
 		return "fail len"
 	}
@@ -376,7 +399,7 @@ func Main() string {
 	return "ok"
 }
 `;
-	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	const { wasmRes, jsRes } = await runMapsProject(src);
 	assertEqual(wasmRes, "ok");
 	assertEqual(jsRes, wasmRes);
 });
@@ -496,7 +519,7 @@ func Main() string {
 	assertEqual(jsRes, wasmRes);
 });
 
-test("slices.Sort on map keys", () => {
+test("slices.Sort on map keys", async () => {
 	const src = `
 package main
 
@@ -507,7 +530,7 @@ import (
 
 func Main() string {
 	m := map[string]int{"zebra": 1, "apple": 2, "monkey": 3}
-	keys := maps.Keys(m)
+	keys := slices.Collect(maps.Keys(m))
 	slices.Sort(keys)
 	if keys[0] != "apple" || keys[1] != "monkey" || keys[2] != "zebra" {
 		return "fail sorted keys"
@@ -515,7 +538,7 @@ func Main() string {
 	return "ok"
 }
 `;
-	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	const { wasmRes, jsRes } = await runMapsProject(src);
 	assertEqual(wasmRes, "ok");
 	assertEqual(jsRes, wasmRes);
 });

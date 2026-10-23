@@ -356,7 +356,27 @@ export const assignabilityMethods = {
 			return;
 		}
 		if (this._identicalUnderlyingLiteral(target, source, tBase, sBase)) return;
-		this.err(`Cannot assign ${typeStr(source)} to ${typeStr(target)}`, node);
+		this.err(
+			`Cannot assign ${typeStr(source)} to ${typeStr(target)}`,
+			node,
+			this._seqToSliceHint(source, tBase, node),
+		);
+	},
+
+	// maps.Keys/Values (and every iter.Seq) no longer return a slice: point the
+	// slice-expecting caller at slices.Collect.
+	_seqToSliceHint(source, tBase, node) {
+		if (tBase?.kind !== "slice" || source.kind !== "named") return null;
+		if (!/^iter\.Seq\d*\[/.test(typeStr(source))) return null;
+		const f = node?.kind === "CallExpr" ? node.func : null;
+		if (
+			f?.kind === "SelectorExpr" &&
+			f.expr?.kind === "Ident" &&
+			f.expr.name === "maps" &&
+			(f.field === "Keys" || f.field === "Values")
+		)
+			return `use slices.Collect(maps.${f.field}(m)) for a slice`;
+		return "use slices.Collect(seq) for a slice";
 	},
 
 	// Identical underlying types are assignable when one side is an unnamed

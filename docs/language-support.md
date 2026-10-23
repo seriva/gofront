@@ -116,7 +116,7 @@ Members of each Go package (functions, types, methods, fields, constants and var
 | `io` | 23 of 94 | 71 | 0 | 10 |
 | `iter` | 2 of 2 | 0 | 0 | 2 |
 | `log` | 0 of 43 | 43 | 0 | 0 |
-| `maps` | 7 of 10 | 3 | 0 | 0 |
+| `maps` | 10 of 10 | 0 | 0 | 0 |
 | `math` | 69 of 97 | 28 | 0 | 0 |
 | `math/bits` | 15 of 50 | 35 | 0 | 0 |
 | `math/cmplx` | 0 of 27 | 27 | 0 | 0 |
@@ -166,7 +166,7 @@ Notable members and behaviour per package, including GoFront's own packages:
 | `html` | `EscapeString`, `UnescapeString` |
 | `cmp` | `Ordered`, `Compare`, `Less`, `Or` — written in Go (`runtime/stdlib/cmp`), compiled into the caller's target (`js`, `wasm` or `both`). |
 | `iter` | `Seq`, `Seq2` — written in Go (`runtime/stdlib/iter`); range over them with `for v := range seq`. `Pull` and `Pull2` need coroutines and report `requires coroutines; out of scope (no runtime)`. |
-| `maps` | `Keys`, `Values`, `Clone`, `Copy`, `Equal`, `EqualFunc`, `Delete`, `DeleteFunc` |
+| `maps` | `Clone`, `Copy`, `Equal`, `EqualFunc`, `Delete`, `DeleteFunc`; iterator members `All`, `Keys`, `Values`, `Insert`, `Collect` (Go-source overlay `runtime/stdlib/maps/iter.go`). `Keys` and `Values` return `iter.Seq`, as in Go 1.23: use `slices.Collect(maps.Keys(m))` or `slices.Sorted(maps.Keys(m))` for a slice. |
 | `slices` | `Contains`, `ContainsFunc`, `Index`, `IndexFunc`, `BinarySearch`, `BinarySearchFunc`, `Equal`, `Compare`, `Sort`, `SortFunc`, `SortStableFunc`, `IsSorted`, `IsSortedFunc`, `Reverse`, `Max`, `Min`, `MaxFunc`, `MinFunc`, `Clone`, `Compact`, `CompactFunc`, `Concat`, `Delete`, `DeleteFunc`, `Insert`, `Replace`, `Grow`, `Clip`; iterator members `All`, `Values`, `Backward`, `Collect`, `AppendSeq`, `Sorted`, `SortedFunc`, `SortedStableFunc`, `Chunk` written in Go (`runtime/stdlib/slices/iter.go`, an overlay). They take `[]E` rather than a `Slice ~[]E` type parameter, so `Chunk` and `AppendSeq` of a named slice type return `[]E`. |
 | `regexp` | `MustCompile`, `Compile`, `MatchString`, `QuoteMeta`; **`*Regexp`** methods: `MatchString`, `FindString`, `FindStringIndex`, `FindAllString`, `FindStringSubmatch`, `FindAllStringSubmatch`, `ReplaceAllString`, `ReplaceAllLiteralString`, `Split`, `String`. Inline flags (`(?i)`, `(?m)`, `(?s)`) are extracted automatically into the JS `RegExp` constructor. |
 | `unicode` | `IsLetter`, `IsDigit`, `IsSpace`, `IsUpper`, `IsLower`, `IsPunct`, `IsControl`, `IsPrint`, `IsGraphic`, `ToUpper`, `ToLower` |

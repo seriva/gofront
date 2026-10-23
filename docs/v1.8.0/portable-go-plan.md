@@ -922,11 +922,12 @@ The Phase 0.5 reviews (PR #29) found these bugs. None of them were introduced by
 
 ### Phase 2.2: `maps`, strings/bytes sequences and migration
 
-- [ ] **Task 2.3 — `maps` iterator members and the breaking change**
+- [x] **Task 2.3 — `maps` iterator members and the breaking change**
   - Files: new `runtime/stdlib/maps/iter.go` (overlay), `src/typechecker/stdlib/core.js` (`maps.Keys`/`Values` removed from the emitter list), `src/typechecker/expressions.js` (hint diagnostic)
   - Do: `All`, `Keys`, `Values`, `Insert`, `Collect` over `iter.Seq`. `Keys`/`Values` now return `iter.Seq`; passing the result where a slice is expected reports the type error with the hint `use slices.Collect(maps.Keys(m)) for a slice`.
   - Test: `iter.test.js` — `for k := range maps.Keys(m)`; `sort.Strings(maps.Keys(m))` reports the hint; `slices.Sorted(maps.Keys(m))` on a WASM map with `NaN` keys keeps each entry.
   - Done when: all pass and `CHANGELOG.md` gets the breaking-change entry.
+  - Landed: `runtime/stdlib/maps/iter.go` declares `All`, `Keys`, `Values`, `Insert` and `Collect`; as in `slices` (Task 2.2a) they take `m map[K]V` instead of a `Map ~map[K]V` type parameter (no core types), so `All`, `Insert`, `Keys` and `Values` are listed under `signature` in `stdlib-coverage.gaps.json`. `Keys`/`Values` left the emitter lists (the checker namespace is in `src/typechecker/stdlib/extended.js`, where `maps` lives, not `core.js`; also `WASM_STDLIB_MEMBERS`, the JS and WASM emitters and the `keysOfArg0`/`valuesOfArg0` result derivation). The hint is added where the mismatch is reported (`_assertAssignableTypeMismatch` in `src/typechecker/assignability.js`, not `expressions.js`), so it covers arguments, assignments and returns: `Cannot assign iter.Seq[string] to []string` with `use slices.Collect(maps.Keys(m)) for a slice` (`Values` for a `maps.Values` call, `slices.Collect(seq)` for any other `iter.Seq`). The existing tests that used `maps.Keys`/`Values` as slices (`test/unit/builtins/stdlib.test.js`, `test/unit/wasm/maps.test.js`) had to wrap them in `slices.Collect` and build as a project (the single-file helpers do not load Go-source stdlib) for the suite to pass; no `example/` code uses them, so Task 2.5 keeps only the smoke build of `../simplefps`. `maps` is 10 of 10. The breaking-change entry is under `### Changed` in `CHANGELOG.md`.
 
 - [ ] **Task 2.4 — `strings`/`bytes` sequence members**
   - Files: new `runtime/stdlib/strings/iter.go`, `runtime/stdlib/bytes/iter.go` (overlays)

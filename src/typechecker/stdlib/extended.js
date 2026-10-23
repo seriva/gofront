@@ -165,18 +165,6 @@ export function setupExtendedGlobals(globals, types) {
 		kind: "namespace",
 		name: "maps",
 		members: {
-			Keys: {
-				kind: "func",
-				params: [ANY],
-				returns: [ANY],
-				_derivedReturn: "keysOfArg0",
-			},
-			Values: {
-				kind: "func",
-				params: [ANY],
-				returns: [ANY],
-				_derivedReturn: "valuesOfArg0",
-			},
 			Clone: {
 				kind: "func",
 				params: [ANY],
