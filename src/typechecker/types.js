@@ -278,6 +278,11 @@ export const WASM_STDLIB_MEMBERS = new Map([
 		"fmt",
 		new Set([
 			"Sprintf",
+			"Sprint",
+			"Sprintln",
+			"Append",
+			"Appendf",
+			"Appendln",
 			"Errorf",
 			"Printf",
 			"Println",
