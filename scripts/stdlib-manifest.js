@@ -21,6 +21,9 @@ export const GO_VERSION = "go1.26";
 export const MANIFEST_PATH = fileURLToPath(
 	new URL("../runtime/stdlib/manifest.json", import.meta.url),
 );
+const OVERRIDES_PATH = fileURLToPath(
+	new URL("./manifest-overrides.json", import.meta.url),
+);
 
 // ── Scope rule (docs/v1.8.0/portable-go-plan.md#scope-rule) ──────────────
 //
@@ -337,7 +340,69 @@ function readFeatures(apiDir) {
 
 // ── Manifest ─────────────────────────────────────────────────────────────
 
-export function buildManifest(apiDir) {
+// ── Statuses (scripts/manifest-overrides.json) ──────────────────────────
+
+const STATUS_RE = new RegExp(
+	`^(js|wasm|both|excluded:(${EXCLUDED_CATEGORIES.join("|")}))$`,
+);
+
+function checkStatus(status, where) {
+	if (!STATUS_RE.test(status))
+		throw new Error(`manifest-overrides.json: bad status ${status} (${where})`);
+}
+
+const matches = (pattern, name) =>
+	pattern === "*" ||
+	pattern === name ||
+	(pattern.endsWith(".*") &&
+		(name === pattern.slice(0, -2) || name.startsWith(pattern.slice(0, -1))));
+
+// Sets `status` (and `note`) on the members of one in-scope package: the
+// package default, then each rule in order.  A rule that matches nothing is
+// an error, so a typo cannot silently leave members unclassified.
+function applyOverrides(pkg, members, overrides) {
+	const def = overrides.packages[pkg];
+	if (!def) return;
+	checkStatus(def.status, pkg);
+	for (const m of members) setStatus(m, def);
+	for (const rule of overrides.rules[pkg] ?? []) {
+		checkStatus(rule.status, `${pkg} rule`);
+		for (const pattern of rule.members) {
+			const hit = members.filter(
+				(m) =>
+					matches(pattern, m.name) &&
+					(rule.signature === undefined || m.signature === rule.signature),
+			);
+			if (hit.length === 0)
+				throw new Error(
+					`manifest-overrides.json: ${pkg} ${pattern} matches no member`,
+				);
+			for (const m of hit) setStatus(m, rule);
+		}
+	}
+}
+
+function setStatus(member, { status, note }) {
+	member.status = status;
+	if (note && status !== "both") member.note = note;
+	else delete member.note;
+}
+
+function loadOverrides(path) {
+	const overrides = JSON.parse(readFileSync(path, "utf8"));
+	for (const pkg of [
+		...Object.keys(overrides.packages),
+		...Object.keys(overrides.rules),
+	])
+		if (!IN_SCOPE_PACKAGES.includes(pkg))
+			throw new Error(`manifest-overrides.json: ${pkg} is not in scope`);
+	return overrides;
+}
+
+// ── Manifest ─────────────────────────────────────────────────────────────
+
+export function buildManifest(apiDir, overridesPath = OVERRIDES_PATH) {
+	const overrides = loadOverrides(overridesPath);
 	const { features, packages } = readFeatures(apiDir);
 	const unclassified = [...packages].filter((p) => packageStatus(p) === null);
 	if (unclassified.length > 0)
@@ -367,6 +432,7 @@ export function buildManifest(apiDir) {
 			(a, b) =>
 				a.name.localeCompare(b.name, "en") || a.kind.localeCompare(b.kind),
 		);
+		applyOverrides(pkg, members, overrides);
 		entries.push(...members);
 	}
 	return { go: GO_VERSION, entries };
