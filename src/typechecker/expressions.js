@@ -1111,12 +1111,6 @@ export const expressionCheckMethods = {
 				return under ? arg : null;
 			case "elemOfArg0":
 				return under?.elem ?? null;
-			case "keysOfArg0":
-				return under?.key ? { kind: "slice", elem: under.key } : null;
-			case "valuesOfArg0": {
-				const v = under?.value ?? under?.elem;
-				return v ? { kind: "slice", elem: v } : null;
-			}
 			default:
 				return null;
 		}
