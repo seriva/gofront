@@ -893,15 +893,7 @@
 			"Regexp.SubexpNames",
 			"Regexp.UnmarshalText"
 		],
-		"slices": [
-			"Chunk",
-			"CompareFunc",
-			"EqualFunc",
-			"Repeat",
-			"Sorted",
-			"SortedFunc",
-			"SortedStableFunc"
-		],
+		"slices": ["CompareFunc", "EqualFunc", "Repeat"],
 		"sort": [
 			"Find",
 			"Float64Slice",
@@ -2109,6 +2101,7 @@
 			"Backward": "func[$0 interface{}]([]$0) iter.Seq2[int, $0]",
 			"BinarySearch": "func(interface{}, interface{}) (int, bool)",
 			"BinarySearchFunc": "func(interface{}, interface{}, interface{}) (int, bool)",
+			"Chunk": "func[$0 interface{}]([]$0, int) iter.Seq[[]$0]",
 			"Clip": "func(interface{}) interface{}",
 			"Clone": "func(interface{}) interface{}",
 			"Compact": "func(interface{}) interface{}",
