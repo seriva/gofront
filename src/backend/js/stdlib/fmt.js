@@ -49,10 +49,11 @@ export const fmtMethods = {
 					fn === "Appendf"
 						? `__sprintf(${restJs})`
 						: `__sprint(${fn === "Appendln"}${restJs ? `, ${restJs}` : ""})`;
-				// __append reuses spare capacity of dst like append; chunked so a
-				// long string cannot overflow the argument limit of the spread.
+				// Like append: write in place only when the whole result fits in
+				// dst's spare capacity, otherwise copy into one fresh array and
+				// leave dst's backing array untouched (never chunk the write).
 				this.useHelper("append");
-				return `((d, s) => { const e = new TextEncoder().encode(s); let r = d ?? new Uint8Array(0); for (let i = 0; i < e.length; i += 8192) r = __append(r, ...e.subarray(i, i + 8192)); return r; })(${this.genExpr(dst)}, ${str})`;
+				return `((d, s) => { const e = new TextEncoder().encode(s); const r = d ?? new Uint8Array(0); const n = r.length + e.length; const c = __tcap.get(r); if (c !== undefined && n <= c) { const v = new Uint8Array(r.buffer, r.byteOffset, n); v.set(e, r.length); if (c > n) __tcap.set(v, c); return v; } const v = new Uint8Array(n); v.set(r); v.set(e, r.length); return v; })(${this.genExpr(dst)}, ${str})`;
 			}
 			case "Errorf": {
 				this.useHelper("sprintf");
