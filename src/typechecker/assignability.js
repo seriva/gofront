@@ -516,7 +516,9 @@ export const assignabilityMethods = {
 		}
 		const methodMap =
 			base?.kind === "struct"
-				? base.methods || srcType.methods
+				? base.methods?.size
+					? base.methods
+					: srcType.methods || base.methods
 				: srcType.kind === "named"
 					? srcType.methods
 					: null;
