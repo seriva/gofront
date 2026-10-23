@@ -335,3 +335,103 @@ func Run() string {
 `);
 	assertEqual(out, "x+y");
 });
+
+section("slices: Sorted, SortedFunc, SortedStableFunc, Chunk");
+
+test("slices.Sorted and slices.SortedFunc", async () => {
+	const out = await iterParity(`import (
+	"fmt"
+	"slices"
+	"strings"
+)
+
+func Run() string {
+	xs := []int{3, 1, 2}
+	a := slices.Sorted(slices.Values(xs))
+	b := slices.SortedFunc(slices.Values(xs), func(x, y int) int { return y - x })
+	c := slices.Sorted(slices.Values([]string{"b", "c", "a"}))
+	return fmt.Sprintf("%v %v %v %s", xs, a, b, strings.Join(c, ""))
+}
+`);
+	assertEqual(out, "[3 1 2] [1 2 3] [3 2 1] abc");
+});
+
+test("slices.SortedStableFunc keeps the order of equal elements", async () => {
+	const out = await iterParity(`import "slices"
+
+type P struct {
+	Name string
+	Age  int
+}
+
+func Run() string {
+	ps := []P{{"d", 2}, {"b", 1}, {"a", 2}, {"c", 1}, {"e", 2}}
+	got := slices.SortedStableFunc(slices.Values(ps), func(x, y P) int { return x.Age - y.Age })
+	s := ""
+	for _, p := range got {
+		s += p.Name
+	}
+	return s
+}
+`);
+	assertEqual(out, "bcdae");
+});
+
+test("slices.Chunk yields clipped sub-slices", async () => {
+	const out = await iterParity(`import (
+	"fmt"
+	"slices"
+)
+
+func Run() string {
+	s := ""
+	for c := range slices.Chunk([]int{1, 2, 3, 4, 5}, 2) {
+		s += fmt.Sprintf("%v/%d ", c, cap(c))
+	}
+	var none []int
+	n := 0
+	for range slices.Chunk(none, 3) {
+		n++
+	}
+	for c := range slices.Chunk([]int{1, 2, 3}, 5) {
+		s += fmt.Sprintf("%v ", c)
+	}
+	return fmt.Sprintf("%s%d", s, n)
+}
+`);
+	assertEqual(out, "[1 2]/2 [3 4]/2 [5]/1 [1 2 3] 0");
+});
+
+test("appending to a chunk does not modify the original slice", async () => {
+	const out = await iterParity(`import (
+	"fmt"
+	"slices"
+)
+
+func Run() string {
+	xs := []int{1, 2, 3, 4}
+	for c := range slices.Chunk(xs, 2) {
+		c = append(c, 0)
+		_ = c
+		break
+	}
+	return fmt.Sprintf("%v", xs)
+}
+`);
+	assertEqual(out, "[1 2 3 4]");
+});
+
+test("slices.Chunk panics on n < 1 with Go's message", async () => {
+	const out = await iterParity(`import (
+	"fmt"
+	"slices"
+)
+
+func Run() (s string) {
+	defer func() { s = fmt.Sprintf("%v", recover()) }()
+	slices.Chunk([]int{1}, 0)
+	return "no panic"
+}
+`);
+	assertEqual(out, "cannot be less than 1");
+});
