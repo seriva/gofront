@@ -26,6 +26,23 @@ features (e.g. `docs/v0.0.5/`).
 
 ---
 
+## v1.8.1
+
+**Theme: Stdlib in Go.** Move every existing stdlib package whose behaviour is ordinary Go over GoFront values onto the v1.8.0 Go-source path (`runtime/stdlib/`), and keep host-backed fast paths as small registered **natives** (`//gofront:native`) that a differential test checks against the Go body. Removes the hand-written type tables, JS shims and WASM emitters for `sort`, `slices`, `maps`, `errors`, `unicode/utf8`, `path`, `html`, `bytes`, `io`, `strings`, `encoding/{hex,base64,binary}`, `crypto/sha256`, `math/{bits,rand}`, `sync`, `time` and `strconv` (WASM stdlib emitters 20,717 → ≤ 8,000 lines). Fixes what the old path got wrong: every WASM sort is O(n²), sorting `NaN` is wrong on both backends, `sort.Slice` tie order differs from Go, 163 signatures differ from Go's. Needs v1.8.0 released and the project owner's agreement that a structural fix ships as a v1.8.x patch. Design document in [`docs/v1.8.1/stdlib-in-go-plan.md`](v1.8.1/stdlib-in-go-plan.md).
+
+| Area | Difficulty | Status | Notes |
+|---|---|---|---|
+| Generic core types | Medium | Planned | `S ~[]E` / `M ~map[K]V` index, slice, conversion and inference in the checker; valid WASM for named slice arguments (today `Cannot index type S`, invalid module). |
+| Natives, differential testing, lazy checking | High | Planned | `//gofront:native` registry (JS templates, WASM emitters, decline and value fallback); every conformance fixture runs four ways (JS/WASM × natives on/off); declarations checked eagerly, stdlib bodies on demand. |
+| `sort` & `slices` | High | Planned | Generated pdqsort variants (Go's tie order), `NaN` ordering, O(n log n) in WASM (200k ints: 20 s → ≤ 100 ms). |
+| `maps`, `errors`, `utf8`, `path`, `html` | Medium | Planned | Go source with Go's signatures; `errors.As` stays the one emitter member. |
+| `bytes`, `io`, `strings` | High | Planned | `Buffer`, `Reader`, `Replacer`, `io` as Go with host natives for search and case mapping; name-coupled backend special cases removed. |
+| Encodings, `sha256`, `bits`, `rand`, `sync` | Medium | Planned | Go source; `binary.Read`/`Write` stay emitters. |
+| `time` & `strconv` | High | Planned | Civil dates, layouts and `Duration` in Go; clock and shortest-repr floats native. |
+| Typings removal & manifest | Medium | Planned | Manifest `implementation` field, signature gate for `source`/`native` members, v2.0.0 baseline update. |
+
+---
+
 ## v1.8.0
 
 **Theme: Portable Go completion.** Make GoFront as complete as possible inside its no-runtime and JS/WASM boundaries. Every language feature that works in `js` packages works in `wasm`/`both` (array value semantics, pointers to scalar fields and elements, per-iteration loop variables, range-over-func, generic func types and type aliases, complex numbers, `min`/`max`, exact constant folding, strict-mode runtime panics, shadowing of predeclared names). Pure packages are written once in GoFront Go and compiled for both targets. The release adds `encoding/json` in WASM, `bufio`, `net/url`, `context`, `encoding/csv`, `iter`/`cmp` with the Go 1.23 iterator APIs, and commonly imported pure packages (`container/*`, `hash/*`, `crypto/*` digests, `log`, `math/rand/v2`, …). A coverage manifest derived from Go's API files gates the result: every in-scope member is supported on both backends or excluded with a reason. `gofront/simd` is completed (masks, comparisons, select, rounding, shuffles, SoA `Vec3x4`/`AABB4`/`Ray4`, batch load/store, boundary transport). Promotion to stable is decided by a separate benchmark gate. Breaking: `maps.Keys`/`Values` return `iter.Seq`. Replaces the dropped v1.7.1 plans (only boundary slice borrowing is not carried over). Design document in [`docs/v1.8.0/portable-go-plan.md`](v1.8.0/portable-go-plan.md).
