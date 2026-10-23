@@ -1623,6 +1623,101 @@ parity(
 );
 
 parity(
+	"a write to a chain another LHS field reassigns goes to the old slice",
+	`	p := &S{buf: []int{1, 2, 3, 4}}
+	al := p.buf
+	p.buf = p.buf[:3]
+	o := []int{10, 20, 30, 40}
+	oal := o
+	o = o[:3]
+	oal[0] = 99
+	p.buf[0], p.buf = 5, o
+	return al[0]*10000 + oal[0]*10 + len(p.buf)`,
+	50993,
+	"type S struct{ buf []int }",
+);
+
+parity(
+	"a write to a chain another LHS deref reassigns goes to the old slice",
+	`	p := &S{buf: []int{1, 2, 3, 4}}
+	pb := &p.buf
+	al := p.buf
+	p.buf = p.buf[:3]
+	o := []int{10, 20, 30, 40}
+	oal := o
+	o = o[:3]
+	oal[0] = 99
+	p.buf[0], *pb = 5, o
+	return al[0]*10000 + oal[0]*10 + len(p.buf)`,
+	50993,
+	"type S struct{ buf []int }",
+);
+
+parity(
+	"a written-through element survives an older copy's append",
+	`	x := []int{1, 2, 3, 4, 5}
+	orig := x
+	x = x[:4]
+	y := x
+	x = x[:3]
+	x[0] = 9
+	y = append(y, 100)
+	return orig[0]*1000 + y[0]*10 + orig[4]/100`,
+	9091,
+);
+
+parity(
+	"a written-through element survives an older copy's reslice",
+	`	x := []int{1, 2, 3, 4, 5}
+	orig := x
+	x = x[:4]
+	y := x
+	x = x[:3]
+	x[2] = 7
+	y = y[:2]
+	return orig[2]*10 + len(y)`,
+	72,
+);
+
+parity(
+	"a bound LHS index is evaluated after its operand",
+	`	x := []int{1, 2, 3}
+	x = x[:2]
+	arr := []int{0, 0}
+	tr := 0
+	get := func() []int {
+		tr = tr*10 + 1
+		return arr
+	}
+	g := func() int {
+		tr = tr*10 + 2
+		return 1
+	}
+	f := func() int {
+		tr = tr*10 + 3
+		return 4
+	}
+	get()[g()], x[0] = f(), 6
+	return tr*100 + arr[1]*10 + x[0]`,
+	12346,
+);
+
+parity(
+	"a bound LHS index that reassigns its operand writes the old slice",
+	`	a := []int{0, 0}
+	old := a
+	x := []int{1, 2, 3}
+	x = x[:2]
+	g := func() int {
+		a = []int{0, 0}
+		return 1
+	}
+	a[g()], x[0] = 5, 6
+	return old[1]*1000 + a[1]*100 + x[0]`,
+	5006,
+);
+
+parity(
 	"an index changed by another LHS is written through at its old value",
 	`	x := []int{0, 0, 0, 0, 0}
 	al := x

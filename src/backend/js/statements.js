@@ -84,6 +84,16 @@ const stmtHasCall = (lhs, stmt) =>
 	lhs.some((e) => hasCall(e.index)) ||
 	(stmt.kind === "AssignStmt" && hasCall(stmt.rhs));
 
+// A multi-assign with a field or `*p` left-hand side: it may reassign the
+// slice chain of an index write, whose sync must then use the old slice.
+const reassignsChains = (lhs, stmt) =>
+	stmt.kind === "AssignStmt" &&
+	lhs.length > 1 &&
+	lhs.some(
+		(e) =>
+			e.kind === "SelectorExpr" || (e.kind === "UnaryExpr" && e.op === "*"),
+	);
+
 // Index of a `__rcs` sync that can be evaluated again after the write:
 // constants, and, when `vars` (a single-LHS statement without calls), unboxed
 // variables, with `len`/`cap` and arithmetic over those.  Any other index
@@ -437,24 +447,23 @@ export const statementGenMethods = {
 	// `inline` for-clause statements, which skip the sync: the write-back on
 	// extension still applies).  Not covered: writes through other references to the copy.
 	// Once one index is bound, every left-hand index with a call is bound too,
-	// in source order, and so is the slice operand of a synced write in a
-	// statement with a call (Go evaluates both before the right-hand side).
+	// in source order and each after its operand, and so is the slice operand
+	// of a synced write in a statement with a call or one that may reassign
+	// the chain through a field or `*p` (`reassignsChains`; inline statements
+	// skip that sync) — Go evaluates both before the right-hand side.
 	// `restore` collects the replaced nodes for the caller to put back.
 	_resliceSyncs(lhs, stmt, inline = false, restore = []) {
 		if (!this._resliceNames?.size) return null;
-		const assigned = new Set();
-		if (stmt.kind === "AssignStmt" && stmt.lhs.length > 1)
-			for (const e of stmt.lhs) if (e.kind === "Ident") assigned.add(e.name);
-		const targets = new Set(
-			lhs.filter((e) => this._isResliceSyncTarget(e, assigned)),
-		);
+		const targets = this._resliceTargets(lhs, stmt);
 		if (targets.size === 0) return null;
 		const called = stmtHasCall(lhs, stmt);
+		const moved = reassignsChains(lhs, stmt);
 		const vars = lhs.length === 1 && !called;
 		const reusable = (e) => isReusableIndex(e.index, vars, this._boxedVars);
-		const out = [...targets].filter((e) => !inline || reusable(e));
-		if (!inline && (called || out.some((e) => !reusable(e))))
-			this._bindResliceOperands(lhs, targets, called, reusable, restore);
+		const out = [...targets].filter((e) => !inline || (!moved && reusable(e)));
+		const operands = called || moved;
+		if (!inline && (operands || out.some((e) => !reusable(e))))
+			this._bindResliceOperands(lhs, targets, operands, reusable, restore);
 		if (out.length === 0) return null;
 		this.useHelper("slice");
 		return out.map((e) => {
@@ -466,9 +475,18 @@ export const statementGenMethods = {
 		});
 	},
 
+	// The `_isResliceSyncTarget` writes in `lhs`.
+	_resliceTargets(lhs, stmt) {
+		const assigned = new Set();
+		if (stmt.kind === "AssignStmt" && stmt.lhs.length > 1)
+			for (const e of stmt.lhs) if (e.kind === "Ident") assigned.add(e.name);
+		return new Set(lhs.filter((e) => this._isResliceSyncTarget(e, assigned)));
+	},
+
 	// Binds the left-hand operands that `_resliceSyncs` must not evaluate
-	// twice to temporaries, in source order.
-	_bindResliceOperands(lhs, targets, called, reusable, restore) {
+	// twice to temporaries, in source order: an index after its operand, and
+	// the operand of every synced write when `operands`.
+	_bindResliceOperands(lhs, targets, operands, reusable, restore) {
 		const bind = (e, key) => {
 			this._tmpCounter = (this._tmpCounter ?? 0) + 1;
 			const tmp = `__rci${this._tmpCounter}`;
@@ -479,8 +497,9 @@ export const statementGenMethods = {
 		for (const e of lhs) {
 			if (e.kind !== "IndexExpr") continue;
 			const t = targets.has(e);
-			if (t && called) bind(e, "expr");
-			if ((t && !reusable(e)) || hasCall(e.index)) bind(e, "index");
+			const index = (t && !reusable(e)) || hasCall(e.index);
+			if ((t && operands) || index) bind(e, "expr");
+			if (index) bind(e, "index");
 		}
 	},
 
