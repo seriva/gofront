@@ -22,12 +22,21 @@ import { MANIFEST_PATH } from "../../../scripts/stdlib-manifest.js";
 import { Lexer } from "../../../src/lexer.js";
 import { Parser } from "../../../src/parser/index.js";
 import { TypeChecker } from "../../../src/typechecker/index.js";
+import { goSignature } from "../../../src/typechecker/stdlib/signature.js";
 import {
+	ERROR,
 	STDLIB_PACKAGES,
 	WASM_STDLIB_MEMBERS,
 	WASM_SUPPORTED_STDLIB,
 } from "../../../src/typechecker/types.js";
-import { compile, ROOT, section, test } from "../helpers.js";
+import {
+	assertEqual,
+	assertErrorContains,
+	compile,
+	ROOT,
+	section,
+	test,
+} from "../helpers.js";
 
 const GAPS_PATH = fileURLToPath(
 	new URL("./stdlib-coverage.gaps.json", import.meta.url),
@@ -46,23 +55,44 @@ const pkgIdent = (pkg) =>
 
 // ── What GoFront implements ─────────────────────────────────────────────
 
-// Exported names of a Go-source package (runtime/stdlib/<pkg>): top-level
-// declarations plus `T.M` methods and `T.F` struct fields.
+// A Go-source package (runtime/stdlib/<pkg>), type-checked as the loader
+// does (an overlay sees its emitter members): its exported names, plus `T.M`
+// methods and `T.F` struct fields, and its checker.
 const goSourceCache = new Map();
-function goSourceMembers(pkg) {
+function goSource(pkg) {
 	if (goSourceCache.has(pkg)) return goSourceCache.get(pkg);
 	const dir = join(STDLIB_SOURCE, pkg);
 	const files = existsSync(dir)
 		? readdirSync(dir).filter((f) => f.endsWith(".go"))
 		: [];
-	const names = files.length > 0 ? new Set() : null;
-	for (const f of files) {
-		const source = readFileSync(join(dir, f), "utf8");
-		const ast = new Parser(new Lexer(source, f).tokenize(), f, source).parse();
-		for (const d of ast.decls ?? []) collectDecl(d, names);
+	let src = null;
+	if (files.length > 0) {
+		const programs = files.map((f) => {
+			const source = readFileSync(join(dir, f), "utf8");
+			const ast = new Parser(
+				new Lexer(source, f).tokenize(),
+				f,
+				source,
+			).parse();
+			ast.target = "both";
+			return ast;
+		});
+		const names = new Set();
+		for (const p of programs)
+			for (const d of p.decls ?? []) collectDecl(d, names);
+		const pkgChecker = new TypeChecker();
+		pkgChecker.target = "both";
+		pkgChecker.pkgName = programs[0].pkg.name;
+		if (STDLIB_PACKAGES.has(pkg))
+			for (const [n, t] of Object.entries(namespace(pkg)?.members ?? {}))
+				pkgChecker.globals.define(n, t);
+		const errors = pkgChecker.checkAll(programs);
+		if (errors.length > 0)
+			throw new Error(`${pkg}: ${errors.map((e) => e.message).join("; ")}`);
+		src = { names, checker: pkgChecker };
 	}
-	goSourceCache.set(pkg, names);
-	return names;
+	goSourceCache.set(pkg, src);
+	return src;
 }
 
 function collectDecl(d, names) {
@@ -82,34 +112,51 @@ function collectDecl(d, names) {
 	}
 }
 
-// Does checker type `t` (a named type, struct, interface or pointer to one)
-// have a method or field `member`?
-function typeHas(t, member) {
+const namespace = (pkg) => checker.globals.lookup(pkgIdent(pkg));
+
+// The type of method or field `member` of checker type `t` (a named type,
+// struct, interface or pointer to one), or undefined.
+function memberOf(t, member) {
 	for (let x = t, depth = 0; x && depth < 6; depth++) {
 		for (const set of [x.methods, x.fields])
-			if (set instanceof Map && set.has(member)) return true;
+			if (set instanceof Map && set.has(member)) return set.get(member);
 		x = x.kind === "pointer" ? x.base : x.underlying;
 	}
-	return false;
+	return undefined;
 }
 
-// Is `name` (`X` or `T.M`) declared by the emitter-backed package?
-function inChecker(pkg, name) {
-	if (!STDLIB_PACKAGES.has(pkg)) return false;
-	const ident = pkgIdent(pkg);
-	const ns = checker.globals.lookup(ident);
+// `{ t, owner }` for `name` (`X` or `T.M`) as the emitter-backed package
+// declares it, or null.
+function emitterMember(pkg, name) {
+	if (!STDLIB_PACKAGES.has(pkg)) return null;
+	const ns = namespace(pkg);
 	const [top, member] = name.split(".");
-	if (member === undefined) return Boolean(ns?.members && top in ns.members);
-	const t = checker.types.get(`${ident}.${top}`) ?? ns?.members?.[top];
-	return Boolean(t) && typeHas(t, member);
+	const owner =
+		checker.types.get(`${pkgIdent(pkg)}.${top}`) ?? ns?.members?.[top];
+	if (member === undefined)
+		return ns?.members && top in ns.members
+			? { t: ns.members[top], owner: null }
+			: null;
+	const t = memberOf(owner, member);
+	return t === undefined ? null : { t, owner };
 }
 
-function inGoSource(pkg, name) {
-	return goSourceMembers(pkg)?.has(name) ?? false;
+function goSourceMember(pkg, name) {
+	const src = goSource(pkg);
+	if (!src?.names.has(name)) return null;
+	const { checker: c } = src;
+	const [top, member] = name.split(".");
+	const owner = c.types.get(top) ?? null;
+	if (member === undefined)
+		return { t: c.globals.symbols.get(top) ?? owner, owner: null };
+	return { t: memberOf(owner, member), owner };
 }
+
+const findMember = (pkg, name) =>
+	goSourceMember(pkg, name) ?? emitterMember(pkg, name);
 
 function inWasm(pkg, name) {
-	if (inGoSource(pkg, name)) return true;
+	if (goSourceMember(pkg, name)) return true;
 	if (!WASM_SUPPORTED_STDLIB.has(pkg)) return false;
 	const allowed = WASM_STDLIB_MEMBERS.get(pkgIdent(pkg));
 	return !allowed || allowed.has(name.split(".")[0]);
@@ -152,11 +199,19 @@ function reportsExclusion(e) {
 	return compileErrors(exclusionProbe(e)).includes(reason);
 }
 
+// ── Signatures ──────────────────────────────────────────────────────────
+
+// GoFront's signature of manifest entry `e`, in the manifest's notation.
+function signatureOf(e, { t, owner }) {
+	const sig = goSignature(e.kind, t, pkgIdent(e.pkg), owner);
+	return e.signature.startsWith("embedded ") ? `embedded ${sig}` : sig;
+}
+
 // ── Gaps ────────────────────────────────────────────────────────────────
 
 // { missing, wasm, exclusion }: check -> pkg -> sorted member names.
 function currentGaps() {
-	const gaps = { missing: {}, wasm: {}, exclusion: {} };
+	const gaps = { missing: {}, wasm: {}, exclusion: {}, signature: {} };
 	const add = (check, e) => {
 		const list = gaps[check][e.pkg] ?? [];
 		gaps[check][e.pkg] = list;
@@ -169,12 +224,24 @@ function currentGaps() {
 			continue;
 		}
 		if (!["js", "wasm", "both"].includes(e.status)) continue;
-		if (!inChecker(e.pkg, e.name) && !inGoSource(e.pkg, e.name))
+		const found = findMember(e.pkg, e.name);
+		if (!found) {
 			add("missing", e);
-		else if (e.status !== "js" && !inWasm(e.pkg, e.name)) add("wasm", e);
+			continue;
+		}
+		if (e.status !== "js" && !inWasm(e.pkg, e.name)) add("wasm", e);
+		const sig = signatureOf(e, found);
+		if (sig !== e.signature) {
+			gaps.signature[e.pkg] ??= {};
+			gaps.signature[e.pkg][e.name] = sig;
+		}
 	}
-	for (const byPkg of Object.values(gaps))
-		for (const list of Object.values(byPkg)) list.sort();
+	for (const check of ["missing", "wasm", "exclusion"])
+		for (const list of Object.values(gaps[check])) list.sort();
+	for (const [pkg, sigs] of Object.entries(gaps.signature))
+		gaps.signature[pkg] = Object.fromEntries(
+			Object.entries(sigs).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+		);
 	return gaps;
 }
 
@@ -228,12 +295,185 @@ test("every excluded package and member reports its exclusion reason", () => {
 	checkGaps("exclusion", "exclusions without their diagnostic");
 });
 
+section("Stdlib coverage gate: by signature");
+
+const entryOf = new Map(manifest.entries.map((e) => [`${e.pkg}.${e.name}`, e]));
+
+// Fails on a mismatch that is not listed, or listed with another GoFront
+// signature, and on a listed mismatch that is gone.
+test("every member present in GoFront has Go's signature", () => {
+	const flat = (g) =>
+		new Map(
+			Object.entries(g.signature ?? {}).flatMap(([pkg, sigs]) =>
+				Object.entries(sigs).map(([n, sig]) => [`${pkg}.${n}`, sig]),
+			),
+		);
+	const now = flat(gaps);
+	const listed = flat(known);
+	const lines = [];
+	for (const [n, sig] of now)
+		if (listed.get(n) !== sig)
+			lines.push(`${n}: GoFront ${sig}, Go ${entryOf.get(n).signature}`);
+	const fixed = [...listed.keys()].filter((n) => !now.has(n));
+	const parts = [];
+	if (lines.length > 0)
+		parts.push(
+			`${lines.length} signature mismatches:\n  ${lines.join("\n  ")}`,
+		);
+	if (fixed.length > 0)
+		parts.push(
+			`${fixed.length} mismatches are fixed; remove them from stdlib-coverage.gaps.json (--update-gaps):\n  ${fixed.join("\n  ")}`,
+		);
+	if (parts.length > 0) throw new Error(parts.join("\n"));
+});
+
+test("signature printer: funcs, variadics and results", () => {
+	const B = (name) => ({ kind: "basic", name });
+	const fn = (params, returns, variadic = false) => ({
+		kind: "func",
+		params,
+		returns,
+		variadic,
+	});
+	assertEqual(
+		goSignature(
+			"func",
+			fn([B("string"), B("int"), B("int")], [B("int64"), ERROR]),
+			"strconv",
+		),
+		"func(string, int, int) (int64, error)",
+	);
+	assertEqual(
+		goSignature(
+			"func",
+			fn([B("string"), B("any")], [B("string")], true),
+			"fmt",
+		),
+		"func(string, ...interface{}) string",
+	);
+	assertEqual(goSignature("func", fn([], [B("void")]), "x"), "func()");
+	assertEqual(
+		goSignature(
+			"var",
+			{ kind: "pointer", base: { kind: "named", name: "time.Location" } },
+			"time",
+		),
+		"*Location",
+	);
+	assertEqual(
+		goSignature("var", { kind: "named", name: "io.Writer" }, "fmt"),
+		"io.Writer",
+	);
+	assertEqual(
+		goSignature("const", { kind: "untyped", base: "float64" }, "math"),
+		"ideal-float",
+	);
+	assertEqual(
+		goSignature(
+			"field",
+			{
+				kind: "map",
+				key: B("string"),
+				value: { kind: "slice", elem: B("uint8") },
+			},
+			"x",
+		),
+		"map[string][]uint8",
+	);
+});
+
+test("signature printer: generics, methods and type definitions", () => {
+	const tp = (name, constraint) => ({
+		kind: "typeParam",
+		name,
+		constraint: { kind: "TypeName", name: constraint },
+	});
+	const T = tp("T", "comparable");
+	const or = {
+		kind: "generic",
+		typeParams: [T],
+		underlying: { kind: "func", params: [T], returns: [T], variadic: true },
+	};
+	assertEqual(goSignature("func", or, "cmp"), "func[$0 comparable](...$0) $0");
+	const V = tp("V", "any");
+	const seq = {
+		kind: "named",
+		name: "Seq",
+		underlying: {
+			kind: "func",
+			params: [
+				{
+					kind: "func",
+					params: [V],
+					returns: [{ kind: "basic", name: "bool" }],
+				},
+			],
+			returns: [],
+		},
+		_generic: { typeParams: [V] },
+	};
+	assertEqual(
+		goSignature("type", seq, "iter"),
+		"[$0 interface{}] func(func($0) bool)",
+	);
+	// A method of a generic type uses the receiver's type parameters.
+	const load = {
+		kind: "func",
+		params: [],
+		returns: [{ kind: "pointer", base: V }],
+	};
+	assertEqual(goSignature("method", load, "atomic", seq), "func() *$0");
+	const iface = {
+		kind: "named",
+		name: "sort.Interface",
+		underlying: {
+			kind: "interface",
+			methods: new Map([
+				["Swap", {}],
+				["Len", {}],
+				["Less", {}],
+			]),
+		},
+	};
+	assertEqual(
+		goSignature("type", iface, "sort"),
+		"interface { Len, Less, Swap }",
+	);
+	assertEqual(
+		goSignature(
+			"type",
+			{
+				kind: "named",
+				name: "time.Duration",
+				underlying: { kind: "basic", name: "int64" },
+			},
+			"time",
+		),
+		"int64",
+	);
+});
+
+test("strconv.ParseInt returns int64, as in Go", () => {
+	const src = (decl) =>
+		`package main\n\nimport "strconv"\n\nfunc main() {\n\tn, _ := strconv.ParseInt("7", 10, 64)\n\t${decl}\n\tprintln(x)\n}\n`;
+	assertEqual(compile(src("var x int64 = n")).errors.length, 0);
+	assertErrorContains(
+		compile(src("var x int = n")).errors,
+		"Cannot assign int64 to int",
+	);
+});
+
 test("the known gaps only name manifest entries", () => {
 	const names = new Set(
 		manifest.entries.map(
 			(e) => `${e.pkg}.${e.kind === "package" ? "*" : e.name}`,
 		),
 	);
+	for (const n of Object.entries(known.signature ?? {}).flatMap(([pkg, sigs]) =>
+		Object.keys(sigs).map((k) => `${pkg}.${k}`),
+	))
+		if (!names.has(n))
+			throw new Error(`signature: ${n} is not in the manifest`);
 	for (const check of ["missing", "wasm", "exclusion"])
 		for (const n of flatten(known, check))
 			if (!names.has(n))
