@@ -31,6 +31,30 @@ export const fmtMethods = {
 			case "Sprintf":
 				this.useHelper("sprintf");
 				return `__sprintf(${fmtArgs})`;
+			case "Sprint":
+			case "Sprintln":
+				this.useHelper("sprint");
+				return `__sprint(${fn === "Sprintln"}${expr.args.map((e) => `, ${this._fmtArgJs(e)}`).join("")})`;
+			case "Append":
+			case "Appendln":
+			case "Appendf": {
+				this.useHelper("sprint");
+				const [dst, ...rest] = expr.args;
+				const restJs = rest
+					.map((e, idx) =>
+						fn === "Appendf" && idx === 0 ? this.genExpr(e) : this._fmtArgJs(e),
+					)
+					.join(", ");
+				const str =
+					fn === "Appendf"
+						? `__sprintf(${restJs})`
+						: `__sprint(${fn === "Appendln"}${restJs ? `, ${restJs}` : ""})`;
+				// Like append: write in place only when the whole result fits in
+				// dst's spare capacity, otherwise copy into one fresh array and
+				// leave dst's backing array untouched (never chunk the write).
+				this.useHelper("append");
+				return `((d, s) => { const e = new TextEncoder().encode(s); const r = d ?? new Uint8Array(0); const n = r.length + e.length; const c = __tcap.get(r); if (c !== undefined && n <= c) { const v = new Uint8Array(r.buffer, r.byteOffset, n); v.set(e, r.length); if (c > n) __tcap.set(v, c); return v; } const v = new Uint8Array(n); v.set(r); v.set(e, r.length); return v; })(${this.genExpr(dst)}, ${str})`;
+			}
 			case "Errorf": {
 				this.useHelper("sprintf");
 				this.useHelper("error");
@@ -46,7 +70,10 @@ export const fmtMethods = {
 				return this._genStdoutWrite(`__sprintf(${fmtArgs})`);
 			case "Print":
 				this.useHelper("sprintf");
-				return this._genStdoutWrite(this._genPrintOperands(expr, "", ""));
+				this.useHelper("sprint");
+				return this._genStdoutWrite(
+					`__sprint(false${expr.args.map((e) => `, ${this._fmtArgJs(e)}`).join("")})`,
+				);
 			case "Println":
 				this.useHelper("sprintf");
 				// console.log supplies the trailing newline.
