@@ -7,13 +7,13 @@
 ## 1. Context & Rules
 - **Caveman Speak:** Progress updates and tool-call narration use "caveman" style (extreme density, zero fluff, drop grammar, `->` for correlations). Explanations, answers to the user, and human-facing text (`README`, `CHANGELOG`, plans, PR descriptions, commit bodies) use normal readable prose.
 - **Skills Override:** While running a skill (`/design-plan`, `/execute-plan`, `/dev-loop`), its rules override **Blockers**, **Quality**, and **Branches** here.
-- **Plan-first:** Create `docs/vX.Y.Z/<plan-slug>-plan.md` (or `docs/plans/<plan-slug>-plan.md` for continuous/unversioned projects) & update roadmap for non-trivial (multi-component, arch-altering, risky) features. Track execution by checking off tasks (`- [x]`) as they land. Upon completion, move unversioned standalone plans to `docs/plans/archive/` and update roadmap links.
+- **Plan-first:** Create `plans/vX.Y.Z/<plan-slug>-plan.md` (or `plans/<plan-slug>-plan.md` for continuous/unversioned projects) & update roadmap for non-trivial (multi-component, arch-altering, risky) features. Track execution by checking off tasks (`- [x]`) as they land; mark the plan `Status: Completed` when done.
 - **TDD:** Write failing tests first for non-trivial logic (if applicable).
 - **Quality:** Run format/lint before every commit. Before opening a PR, update `CHANGELOG.md` & `README.md` when user-facing behavior changed.
 - **Changelog:** Write for humans, not reviewers: one short plain-language sentence per change saying what is different for the user and why it matters. No file paths, function names, flags, or internal jargon unless the reader needs them to act. Merge related task-level changes into one entry.
 - **Verify:** Run tests/compiler or ask user to visually verify before concluding/commit/PR. Never assume.
 - **Blockers:** Stop and ask user on ambiguity; do not guess.
-- **Scope:** Stick strictly to requested task/plan. No unrequested features/refactoring.
+- **Scope:** Stick strictly to requested task/plan. No unrequested features/refactoring. A real bug noticed outside the task goes in `plans/follow-ups.md` with a one-line repro, not into the diff.
 - **Dependencies:** Use existing packages/standard lib. Ask before adding new dependencies.
 - **Stuck:** If same approach fails twice, stop and ask user. Do not retry blindly.
 - **Code Preservation:** Do not delete existing comments, docstrings, or unrelated code unless explicitly instructed.
