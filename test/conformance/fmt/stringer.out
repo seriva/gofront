@@ -31,3 +31,12 @@ both-error [both-error]
 map[x:[green]]
 counter=5
 red red
+1|green
+ps
+[{1} {2}]
+ps
+{{4}} &{{4}}
+ps [{{5}}]
+x y
+[z]
+v|s

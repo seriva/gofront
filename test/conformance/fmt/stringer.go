@@ -64,6 +64,17 @@ func (b Both) String() string { return "both-string" }
 
 type PtrHolder struct{ C *Counter }
 
+type PS struct{ N int }
+
+func (p *PS) String() string { return "ps" }
+
+type PW struct{ V PS }
+
+type EW struct {
+	error
+	Code int
+}
+
 func main() {
 	fmt.Println(Celsius(36.6), Red, Green)
 	fmt.Printf("%v|%s|%d\n", Green, Green, Green)
@@ -109,4 +120,20 @@ func main() {
 	fmt.Println(s)
 	s = Red
 	fmt.Println(s, s.String())
+
+	fmt.Printf("%#v|%v\n", Green, Green)
+
+	ps := []PS{{1}, {2}}
+	fmt.Println(&ps[0])
+	fmt.Println(ps)
+	w := PW{PS{4}}
+	pv := &w.V
+	fmt.Println(pv)
+	fmt.Println(w, &w)
+	ws := []PW{{PS{5}}}
+	fmt.Println(&ws[0].V, ws)
+
+	fmt.Println(EW{errors.New("x"), 1}, &EW{errors.New("y"), 2})
+	fmt.Println([]EW{{errors.New("z"), 3}})
+	fmt.Printf("%v|%s\n", EW{errors.New("v"), 4}, EW{errors.New("s"), 5})
 }
