@@ -108,11 +108,18 @@ export function toWasmType(goType, checker = null, mod = null) {
 		) {
 			return "v128";
 		}
-		if (mod?.getStructType(goType.name)) {
+		// An instance written `Box[int]` is the monomorphised struct `Box$int`.
+		const instance = goType.typeArgs?.length
+			? mod?.getStructType(
+					`${goType.name}$${goType.typeArgs.map(goTypeKey).join("$")}`,
+				)
+			: null;
+		const struct = instance ?? mod?.getStructType(goType.name);
+		if (struct) {
 			return {
 				kind: "ref",
 				nullable: true,
-				typeIndex: mod.getStructType(goType.name).typeIndex,
+				typeIndex: struct.typeIndex,
 			};
 		}
 		if (goType.underlying) {
@@ -225,7 +232,10 @@ export function toWasmType(goType, checker = null, mod = null) {
 			if (
 				typeof baseWType === "object" &&
 				baseWType !== null &&
-				baseWType.kind === "ref"
+				baseWType.kind === "ref" &&
+				// A pointer to a slice goes through the scalar box / accessor
+				// pair: slice headers are immutable shared values.
+				!isSliceType(goType.base, checker)
 			) {
 				return baseWType;
 			}
@@ -468,9 +478,10 @@ export function isPointerToStruct(goType, checker = null, mod = null) {
 
 export function isScalarType(goType, checker = null, mod = null) {
 	if (!goType) return false;
+	// A slice is a pointee "scalar": the pointer to it is a box or accessor.
+	if (isSliceType(goType, checker)) return true;
 	if (
 		isStructType(goType, checker, mod) ||
-		isSliceType(goType, checker) ||
 		isArrayType(goType, checker) ||
 		isMapType(goType, checker) ||
 		isFuncType(goType, checker) ||
@@ -493,6 +504,10 @@ export function isSliceType(goType, checker = null) {
 	}
 	if (goType.kind === "named" && goType.underlying) {
 		return isSliceType(goType.underlying, checker);
+	}
+	if (goType.kind === "named" && !goType.underlying) {
+		const resolved = checker?.types?.get(goType.name);
+		if (resolved && resolved !== goType) return isSliceType(resolved, checker);
 	}
 	return goType.kind === "slice" || goType.kind === "SliceType";
 }
