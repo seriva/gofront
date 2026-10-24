@@ -37,6 +37,7 @@ import {
 	isNonEmptyInterface,
 	isScalarType,
 	isSliceType,
+	isStructType,
 	isTestingT,
 	toWasmType,
 	variadicAsSlice,
@@ -3382,6 +3383,58 @@ function _zeroFieldConst(f, mod) {
 	return [{ op: "ref.null", heapType: ti ?? "any" }];
 }
 
+// Length and element type of an array type (checker type, AST node or name).
+function _arrayShape(t, checker) {
+	if (!t) return null;
+	if (t.kind === "array" || t.kind === "ArrayType") {
+		const size = typeof t.size === "number" ? t.size : Number(t.size?.value);
+		return Number.isInteger(size) ? { size, elem: t.elem } : null;
+	}
+	if (t.kind === "named" && t.underlying)
+		return _arrayShape(t.underlying, checker);
+	if (t.kind === "TypeName" || t.kind === "Ident")
+		return _arrayShape(checker?.types?.get(t.name), checker);
+	return null;
+}
+
+// Constant-expression zero value of a package-level array global (a null ref
+// would trap on the first element access); null when it cannot be built.
+function _zeroArrayConst(goType, mod, depth = 0) {
+	const checker = mod.checker;
+	if (!goType || goType.kind === "pointer" || depth > 4) return null;
+	const shape = _arrayShape(goType, checker);
+	if (!shape) return null;
+	const { size, elem } = shape;
+	const arrInfo = mod.getArrayType(elem);
+	const elemW = toWasmType(elem, checker, mod);
+	let one = null;
+	if (_arrayShape(elem, checker)) {
+		one = _zeroArrayConst(elem, mod, depth + 1);
+		if (!one) return null;
+	} else if (
+		elem?.kind !== "pointer" &&
+		elem?.kind !== "StarExpr" &&
+		typeof elemW === "object" &&
+		isStructType(elem, checker, mod)
+	) {
+		const info = Array.from(mod.structTypes.values()).find(
+			(x) => x.typeIndex === elemW.typeIndex,
+		);
+		if (!info) return null;
+		one = _zeroStructConst(info, mod);
+	}
+	if (!one)
+		return [
+			{ op: "i32.const", value: size },
+			{ op: "array.new_default", typeIndex: arrInfo.typeIndex },
+		];
+	if (size > 64) return null;
+	const out = [];
+	for (let i = 0; i < size; i++) out.push(...one);
+	out.push({ op: "array.new_fixed", typeIndex: arrInfo.typeIndex, size });
+	return out;
+}
+
 function _collectPackageGlobals(progs, mod, checker) {
 	const pending = []; // non-constant initializers, run by the start function
 	const pendingConsts = []; // unfoldable consts; they run before any var
@@ -3424,8 +3477,11 @@ function _collectPackageGlobals(progs, mod, checker) {
 							const structInfo = Array.from(mod.structTypes.values()).find(
 								(s) => s.typeIndex === wType.typeIndex,
 							);
+							const arrZero = structInfo ? null : _zeroArrayConst(rawType, mod);
 							if (structInfo) {
 								initInsts = _zeroStructConst(structInfo, mod);
+							} else if (arrZero) {
+								initInsts = arrZero;
 							} else {
 								initInsts = [
 									{ op: "ref.null", heapType: wType.typeIndex ?? "any" },

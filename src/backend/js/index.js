@@ -322,6 +322,8 @@ export class CodeGen {
 			}
 		}
 		this._renameReservedIdents(program.decls);
+		this._boxedGlobals = this._collectBoxedGlobals(program);
+		this._boxedVars = new Set(this._boxedGlobals);
 		this._collectResliceNames(program);
 		const methods = this._collectDecls(program);
 		this._emitJsImports();
@@ -917,7 +919,7 @@ export class CodeGen {
 			decl._line ?? null,
 		);
 		const prevBoxed = this._boxedVars;
-		this._boxedVars = new Set();
+		this._boxedVars = new Set(this._boxedGlobals);
 		this._scanAddressTaken(decl.body);
 		// Methods of a generic struct read its type arguments from the
 		// instance; named non-struct types have no instance to carry them.
@@ -1015,7 +1017,7 @@ export class CodeGen {
 			return;
 		}
 		const prevBoxed = this._boxedVars;
-		this._boxedVars = new Set();
+		this._boxedVars = new Set(this._boxedGlobals);
 		this._scanAddressTaken(decl.body);
 		this._withFnCtx(decl.body, () =>
 			this.indented(() => {
@@ -1113,11 +1115,25 @@ export class CodeGen {
 		this._recoverOkInScope = prevRecoverOk;
 	}
 
+	// Package-level variables whose address is taken anywhere (`&g`, `g.Inc()`
+	// on a pointer-receiver method) are boxed like address-taken locals.
+	_collectBoxedGlobals(program) {
+		const names = new Set();
+		for (const d of program.decls)
+			if (d.kind === "VarDecl")
+				for (const spec of d.decls) for (const n of spec.names) names.add(n);
+		const boxed = new Set();
+		if (names.size === 0) return boxed;
+		for (const n of this._scanAddressTaken(program.decls, new Set()))
+			if (names.has(n)) boxed.add(n);
+		return boxed;
+	}
+
 	// Scan AST node for _addressTaken idents on scalars and populate _boxedVars.
 	// A pointer-receiver method call on a named non-struct local (`l.Set(5)`)
 	// takes the variable's address too, so the variable must be boxed.
-	_scanAddressTaken(node) {
-		scanAddressTaken(node, this._boxedVars);
+	_scanAddressTaken(node, into = this._boxedVars) {
+		scanAddressTaken(node, into);
 		const visit = (n) => {
 			if (!n || typeof n !== "object") return;
 			if (Array.isArray(n)) {
@@ -1130,7 +1146,7 @@ export class CodeGen {
 					recv?.kind === "Ident" &&
 					this._namedPtrMethodOn(recv._type, n.func.field)
 				)
-					this._boxedVars.add(recv.name);
+					into.add(recv.name);
 			}
 			for (const key of Object.keys(n)) {
 				if (key.startsWith("_") || key === "kind") continue;
@@ -1138,6 +1154,7 @@ export class CodeGen {
 			}
 		};
 		visit(node);
+		return into;
 	}
 
 	_namedPtrMethodOn(type, method) {

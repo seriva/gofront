@@ -846,7 +846,7 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
   - Test: parity tests in `test/unit/language/structs.test.js`: `xs := []*P{{1}, {2}}; xs[1].A` → 2 (P14); embedded write → 52 (P70); `fmt.Sprint(map[P]int{P{1}: 2})` → `map[{1}:2]` (P15).
   - Done when: all pass.
 
-- [ ] **Task 0.28 — Package-level arrays and named scalars**
+- [x] **Task 0.28 — Package-level arrays and named scalars**
   - Files: `src/backend/js/index.js` (global declarations), `src/backend/js/expressions.js` (array length from a constant), `src/backend/wasm/emit.js` (global initialisers), `src/lower/boxing.js`
   - Do: JS: `&g` on a package-level array is the array; `[N]T` with `N` a named constant has length `N`; a package-level named scalar whose address is taken by a pointer-receiver call (`g.Inc()`) is boxed like a local. WASM: a package-level `[N]T` global is initialised to its zero array, and `[N]T` with a named constant `N` has length `N`.
   - Test: parity tests in `test/unit/wasm/arrays.test.js` and `test/unit/language/named-type-methods.test.js`: `p := &g; p[0] = 5; g[0]` → 5 (P21); `g[1] + len(g)` → 3 (P22); `var a [N]int; a[2] = 4; len(a) + a[2]` → 7 (P23); `g.Inc(); g.Inc(); int(g)` → 2 (P29).
