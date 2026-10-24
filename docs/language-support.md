@@ -123,7 +123,7 @@ Members of each Go package (functions, types, methods, fields, constants and var
 | `math/rand` | 12 of 45 | 33 | 0 | 0 |
 | `math/rand/v2` | 0 of 51 | 51 | 0 | 8 |
 | `net/url` | 0 of 60 | 60 | 0 | 0 |
-| `os` | 6 of 10 | 4 | 3 | 188 |
+| `os` | 10 of 10 | 0 | 3 | 188 |
 | `path` | 9 of 9 | 0 | 0 | 0 |
 | `path/filepath` | 9 of 19 | 10 | 0 | 8 |
 | `regexp` | 15 of 49 | 34 | 49 | 0 |

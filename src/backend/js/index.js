@@ -58,6 +58,7 @@ import {
 	HELPER_NIL_CALL,
 	HELPER_NIL_MAP,
 	HELPER_NM,
+	HELPER_OS,
 	HELPER_PANIC,
 	HELPER_PATH_CLEAN,
 	HELPER_PATH_ERROR,
@@ -167,6 +168,7 @@ const HELPER_MAP = [
 	["strconvError", HELPER_STRCONV_ERROR],
 	["pathError", HELPER_PATH_ERROR],
 	["ioEOF", HELPER_IO_EOF],
+	["os", HELPER_OS],
 	["strconv", HELPER_STRCONV],
 	["pathClean", HELPER_PATH_CLEAN],
 	["sortSlice", HELPER_SORT_SLICE],
@@ -543,6 +545,10 @@ export class CodeGen {
 		}
 		if (name === "json") {
 			this.useHelper("base64");
+		}
+		if (name === "os") {
+			this.useHelper("ioEOF");
+			this._helpers.add("error");
 		}
 		if (name === "append") this.useHelper("slice");
 		if (name === "sprint") this._helpers.add("sprintf");

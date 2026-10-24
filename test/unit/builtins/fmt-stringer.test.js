@@ -364,25 +364,25 @@ func (o OW) Error() string { return "outer" }`,
 
 section("fmt Stringer: %#v");
 
-test("%#v does not call String", () => {
+test("%#v does not call String and prints Go syntax", () => {
 	assertEqual(
 		run(
 			`fmt.Println(fmt.Sprintf("%#v|%v", Green, Green))
 fmt.Println(fmt.Sprintf("%#v", []Color{Red, Green}))`,
 			TYPES,
 		),
-		"1|green\n[0 1]",
+		"1|green\n[]main.Color{0, 1}",
 	);
 });
 
-test("%#v of a struct with a value-receiver String keeps the raw layout", () => {
+test("%#v of a struct with a value-receiver String prints Go syntax, not String", () => {
 	assertEqual(
 		run(
 			`fmt.Println(fmt.Sprintf("%#v|%v", VS{1}, VS{1}))`,
 			`type VS struct{ n int }
 func (v VS) String() string { return fmt.Sprintf("vs%d", v.n) }`,
 		),
-		"{1}|vs1",
+		"main.VS{n:1}|vs1",
 	);
 });
 
@@ -449,13 +449,13 @@ test("fmt.Append of nothing onto a nil slice stays nil (P17)", () => {
 	assertEqual(out, "true true false");
 });
 
-test("a nil pointer with a pointer-receiver String uses it only for %v and %s", () => {
+test("a nil pointer with a pointer-receiver String uses it for %v, %s and %q but not %#v", () => {
 	const o = run(
 		`var p *C
 	fmt.Printf("%v|%s|%#v|%q\\n", p, p, p, p)`,
 		'type C struct{ n int }\nfunc (c *C) String() string { return "c" }',
 	);
-	assertEqual(o, 'c|c|<nil>|""\n');
+	assertEqual(o, 'c|c|<nil>|"c"\n');
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
