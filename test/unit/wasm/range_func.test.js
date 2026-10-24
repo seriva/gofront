@@ -6,6 +6,7 @@ import {
 	assertEqual,
 	assertThrows,
 	compileHybrid,
+	compileHybridProject,
 	runWasm,
 	section,
 	summarize,
@@ -496,6 +497,84 @@ func Main() int {
 	const res = hybrid.run("Main");
 	assertEqual(res.wasmRes, 10n);
 	assertEqual(res.jsRes, 10);
+});
+
+section("Range-over-func leftovers (Task 0.36)");
+
+test("ranging directly over a func literal (P46)", () => {
+	const src = `
+package main
+
+func Main() int {
+	sum := 0
+	k := 1
+	for v := range func(yield func(int) bool) {
+		yield(1)
+		yield(1 + k)
+	} {
+		sum += v
+	}
+	return sum
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.wasmRes, 3n);
+	assertEqual(res.jsRes, 3);
+});
+
+test("iterator yielding a pointer to a struct (P47)", () => {
+	const src = `
+package main
+
+type P struct{ A int }
+
+func it(yield func(*P) bool) {
+	p := &P{3}
+	if !yield(p) {
+		return
+	}
+	yield(&P{4})
+}
+
+func Main() int {
+	s := 0
+	for p := range it {
+		s += p.A
+	}
+	return s
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.wasmRes, 7n);
+	assertEqual(res.jsRes, 7);
+});
+
+test("slices.Values over a slice of a generic struct (P40)", async () => {
+	const res = await compileHybridProject({
+		"lib/lib.go": `//gofront:target wasm
+package lib
+
+import "slices"
+
+type Box[T any] struct{ V T }
+
+func Run() int {
+	bs := []Box[int]{{1}, {2}}
+	s := 0
+	for b := range slices.Values(bs) {
+		s += b.V
+	}
+	return s
+}
+`,
+		"main.go": `package main
+
+import "./lib"
+
+func main() { println(lib.Run()) }
+`,
+	});
+	assertEqual(res.lines.join("\n"), "3");
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

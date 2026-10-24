@@ -108,11 +108,18 @@ export function toWasmType(goType, checker = null, mod = null) {
 		) {
 			return "v128";
 		}
-		if (mod?.getStructType(goType.name)) {
+		// An instance written `Box[int]` is the monomorphised struct `Box$int`.
+		const instance = goType.typeArgs?.length
+			? mod?.getStructType(
+					`${goType.name}$${goType.typeArgs.map(goTypeKey).join("$")}`,
+				)
+			: null;
+		const struct = instance ?? mod?.getStructType(goType.name);
+		if (struct) {
 			return {
 				kind: "ref",
 				nullable: true,
-				typeIndex: mod.getStructType(goType.name).typeIndex,
+				typeIndex: struct.typeIndex,
 			};
 		}
 		if (goType.underlying) {
