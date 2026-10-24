@@ -684,7 +684,12 @@ export class TypeChecker {
 			this.globals.define(decl.name, named);
 			return;
 		}
-		const underlying = this.resolveTypeNode(decl.type, this.globals);
+		let underlying = this.resolveTypeNode(decl.type, this.globals);
+		// `type W V` with V a named array: W's underlying type is V's array.
+		if (!decl.isAlias && underlying.kind === "named") {
+			const inner = this._deepUnderlying(underlying);
+			if (inner?.kind === "array") underlying = inner;
+		}
 		if (decl.isAlias) {
 			// type A = B — transparent alias, A and B are identical types
 			this.types.set(decl.name, underlying);

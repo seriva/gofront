@@ -854,7 +854,7 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
 
 ### Phase 0.13: Parser and generics leftovers
 
-- [ ] **Task 0.29 — Composite-literal keys and named array types**
+- [x] **Task 0.29 — Composite-literal keys and named array types**
   - Files: `src/parser/expressions.js` (`parseCompositeLit`), `src/typechecker/expressions.js` (index on a named type), `src/typechecker/resolve.js`
   - Do: an element that starts with `{` may be a key: `map[P]int{{1}: 2}` and `map[[2]int]string{{1, 2}: "a"}` parse as key/value pairs with elided key types. `type W V` where `V` is a named array type is indexable, sliceable and has `len` on both backends.
   - Test: parity tests in `test/unit/language/expressions.test.js`: `len(map[P]int{{1}: 2})` → 1 (P13); `W{1, 2}[1]` → 2 (P24). Parser test for the elided-key form in `test/unit/compiler/lexer-parser.test.js`.
