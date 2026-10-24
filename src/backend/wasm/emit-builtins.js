@@ -997,6 +997,12 @@ export class BuiltinsEmitter {
 			this.emitTestingCall(func, args);
 			return true;
 		}
+		if (
+			func.expr?.name &&
+			(this.resolveLocal(func.expr.name) ||
+				this.mod.resolveGlobal(func.expr.name))
+		)
+			return false;
 		const pkgName = func.expr?.name;
 		switch (pkgName) {
 			case "math":
