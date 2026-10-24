@@ -166,7 +166,12 @@ export const expressionParserMethods = {
 				}
 			} else if (t.type === T.LBRACKET) {
 				// Check if this looks like generic type args: Ident[Type](...)  or Ident[Type]{...}
-				if (expr.kind === "Ident" && this.looksLikeTypeArgList()) {
+				// `pkg.F[int](x)` / `pkg.T[X]{...}` instantiate through a qualifier.
+				if (
+					(expr.kind === "Ident" ||
+						(expr.kind === "SelectorExpr" && expr.expr.kind === "Ident")) &&
+					this.looksLikeTypeArgList()
+				) {
 					this.advance(); // consume [
 					const typeArgs = [this.parseType()];
 					while (this.match(T.COMMA)) typeArgs.push(this.parseType());
