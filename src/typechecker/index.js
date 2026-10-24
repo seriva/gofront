@@ -503,6 +503,7 @@ export class TypeChecker {
 		for (const p of programs) {
 			for (const d of p.decls) if (d.kind === "TypeDecl") all.push({ p, d });
 		}
+		this._expandGenericStructDefs(all.map((x) => x.d));
 		// Collect in dependency order so aliases, generics, embedded and by-value
 		// field types declared later (or in other files) are ready when needed.
 		let pending = all;
@@ -518,6 +519,24 @@ export class TypeChecker {
 			}
 			pending =
 				ready.length > 0 ? pending.filter((x) => !ready.includes(x)) : [];
+		}
+	}
+
+	// `type S[T any] Base` with `Base` a struct declared in the package: S is a
+	// new struct type with Base's fields (and none of its methods), so its
+	// declaration becomes a copy of Base's struct type.
+	_expandGenericStructDefs(decls) {
+		const byName = new Map(decls.map((d) => [d.name, d]));
+		for (const d of decls) {
+			if (!d.typeParams || d.isAlias) continue;
+			let target = d.type;
+			for (let i = 0; i < 16 && target?.kind === "TypeName"; i++) {
+				const base = byName.get(target.name);
+				if (!base || base.typeParams || base.isAlias) break;
+				target = base.type;
+			}
+			if (target?.kind === "StructType")
+				d.type = JSON.parse(JSON.stringify(target));
 		}
 	}
 
@@ -643,16 +662,20 @@ export class TypeChecker {
 
 	_promoteEmbeddedMethods() {
 		for (const type of this.types.values()) {
-			const struct = type.underlying;
-			if (struct?.kind === "struct" && struct._embeds) {
-				for (const embed of struct._embeds) {
-					const inner = embed.kind === "pointer" ? embed.base : embed;
-					const base = inner.kind === "named" ? inner.underlying : inner;
-					if (base?.kind !== "struct" || !base.methods) continue;
-					for (const [mName, mType] of base.methods.entries()) {
-						if (!struct.methods.has(mName)) struct.methods.set(mName, mType);
-					}
-				}
+			this._promoteEmbeddedInto(type.underlying);
+			for (const inst of type._generic?._instances?.values() ?? [])
+				this._promoteEmbeddedInto(inst.underlying);
+		}
+	}
+
+	_promoteEmbeddedInto(struct) {
+		if (struct?.kind !== "struct" || !struct._embeds) return;
+		for (const embed of struct._embeds) {
+			const inner = embed.kind === "pointer" ? embed.base : embed;
+			const base = inner.kind === "named" ? inner.underlying : inner;
+			if (base?.kind !== "struct" || !base.methods) continue;
+			for (const [mName, mType] of base.methods.entries()) {
+				if (!struct.methods.has(mName)) struct.methods.set(mName, mType);
 			}
 		}
 	}
