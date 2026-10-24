@@ -60,6 +60,50 @@ test("runs a fixture on JS and WASM with byte-exact stdout", async () => {
 	});
 });
 
+test("a JS-only fixture is not run on WASM", async () => {
+	// Printing an `any` argument does not produce a valid WASM module yet, so
+	// without the marker this fixture could not run; with it, only JS runs.
+	const src = `//conformance:js-only
+package main
+
+import "fmt"
+
+func main() {
+	var v any = 5
+	fmt.Println(v)
+}
+`;
+	await withTempDir(
+		{ "fmt/jsonly.go": src, "fmt/jsonly.out": "5\n" },
+		async (dir) => {
+			const run = await runFixture(join(dir, "fmt/jsonly.go"));
+			assertEqual(run.js, "5\n");
+			assertEqual(run.wasm, null);
+			const res = await checkFixture(join(dir, "fmt/jsonly.go"));
+			assert(res.ok, res.message);
+		},
+	);
+});
+
+test("a JS-only fixture still fails when the JS output differs", async () => {
+	const src = `//conformance:js-only
+package main
+
+import "fmt"
+
+func main() { fmt.Println("hi") }
+`;
+	await withTempDir(
+		{ "fmt/jsonly.go": src, "fmt/jsonly.out": "bye\n" },
+		async (dir) => {
+			const res = await checkFixture(join(dir, "fmt/jsonly.go"));
+			assert(!res.ok, "expected failure");
+			assertContains(res.message, "JS output differs");
+			assert(!res.message.includes("WASM"), res.message);
+		},
+	);
+});
+
 test("a fixture may import a Go-source stdlib package", async () => {
 	const src = `package main
 
