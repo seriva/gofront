@@ -446,6 +446,34 @@ func main() {
 	assertErrorContains(errors, "First");
 });
 
+section("Package-level named scalars (Task 0.28)");
+
+test("a pointer-receiver call on a package-level named scalar writes through (P29)", () => {
+	const { js, errors } = compile(`package main
+
+type C int
+
+func (c *C) Inc() { *c++ }
+
+var g C
+
+func twice() {
+	g.Inc()
+	g.Inc()
+}
+
+func main() {
+	twice()
+	console.log(int(g))
+	p := &g
+	*p += 10
+	console.log(int(g))
+}
+`);
+	assertEqual(errors.length, 0, errors.join("\n"));
+	assertEqual(runJs(js), "2\n12");
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
