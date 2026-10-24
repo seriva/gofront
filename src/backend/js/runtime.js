@@ -333,6 +333,15 @@ var __ifps = __ifps || function(x) {
   return x;
 };`;
 
+// fmt metadata: the Stringer/error element types of a slice, array or map
+// converted to an interface (the elements are raw numbers/strings at run
+// time), as a non-enumerable __fd descriptor that __sprintf reads.
+export const HELPER_IFD = `var __ifd = __ifd || function(x, d) {
+  if (x !== null && typeof x === "object" && Object.isExtensible(x))
+    Object.defineProperty(x, "__fd", { value: d, configurable: true });
+  return x;
+};`;
+
 // Nil-interface method call guard (strict mode only): matches Go's panic
 // message instead of a JS TypeError.
 export const HELPER_NIL_CALL = `var __nilcall = __nilcall || function(x) {
@@ -480,7 +489,22 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
   const isPointer = (o) => {
     return o !== null && typeof o === "object" && (o.__p === true || ptrSet.has(o));
   };
-  const formatV = (val, isPlus, isTopLevel) => {
+  const isExported = (k) => /^\\p{Lu}/u.test(k);
+  // The method fmt calls on val: Error before String, and a pointer-receiver
+  // method (listed in the class's __pr) only for a pointer, as Go's method sets.
+  const stringMethod = (val) => {
+    for (const name of ["Error", "String"]) {
+      if (typeof val[name] !== "function" || val[name].length !== 0) continue;
+      if (val.__pr !== undefined && val.__pr.includes(name) && !isPointer(val)) continue;
+      return name;
+    }
+    return "";
+  };
+  // ro: val was reached through an unexported field, where Go cannot call
+  // methods. fd: descriptor of val's type when it is not carried by val itself
+  // (raw named values and the elements of slices and maps).
+  const formatV = (val, isPlus, isTopLevel, ro, fd) => {
+    if (fd?.b && !ro && !(val instanceof fd.b)) val = new fd.b(val);
     if (val === null || val === undefined) return "<nil>";
     if (typeof val === "boolean") return String(val);
     if (typeof val === "number" || typeof val === "bigint") return String(val);
@@ -496,10 +520,10 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
         const reStr = Object.is(val.re, -0) ? "-0" : String(val.re);
         return "(" + reStr + sign + imStr + "i)";
       }
-      if (typeof val.Error === "function") {
-        return String(val.Error());
-      }
-      if (typeof val.__gfUnbox === "function") return formatV(val.__gfUnbox(), isPlus, isTopLevel);
+      const sm = ro ? "" : stringMethod(val);
+      if (sm) return String(val[sm]());
+      if (typeof val.__gfUnbox === "function") return formatV(val.__gfUnbox(), isPlus, isTopLevel, ro);
+      const cd = fd ?? val.__fd;
       if (Array.isArray(val) || ArrayBuffer.isView(val)) {
         const isElemPtr = val.__ptr_slice === true;
         const pf = val.__ptr_fields;
@@ -521,7 +545,7 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
               }
             }
           }
-          parts.push(formatV(item, isPlus, false));
+          parts.push(formatV(item, isPlus, false, ro, cd?.e));
         }
         return "[" + parts.join(" ") + "]";
       }
@@ -539,7 +563,7 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
             if (isElemPtr && v !== null && typeof v === "object") {
               markPtr(v);
             }
-            parts.push(formatV(k, isPlus, false) + ":" + formatV(v, isPlus, false));
+            parts.push(formatV(k, isPlus, false, ro, cd?.k) + ":" + formatV(v, isPlus, false, ro, cd?.v));
           }
         } else {
           const keys = Object.keys(val).sort((a, b) => {
@@ -552,7 +576,8 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
             if (isElemPtr && v !== null && typeof v === "object") {
               markPtr(v);
             }
-            parts.push(formatV(k, isPlus, false) + ":" + formatV(v, isPlus, false));
+            const kv = cd?.k?.n ? Number(k) : k;
+            parts.push(formatV(kv, isPlus, false, ro, cd?.k) + ":" + formatV(v, isPlus, false, ro, cd?.v));
           }
         }
         return "map[" + parts.join(" ") + "]";
@@ -570,8 +595,9 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
       const prefix = isPtr ? "&{" : "{";
       const keys = Object.keys(val);
       const parts = [];
+      const ff = typeof val.__ff === "function" ? val.__ff() : null;
       for (const k of keys) {
-        const fv = formatV(val[k], isPlus, false);
+        const fv = formatV(val[k], isPlus, false, ro || !isExported(k), ff?.[k]);
         parts.push(isPlus ? k + ":" + fv : fv);
       }
       return prefix + parts.join(" ") + "}";
@@ -582,8 +608,8 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
     if (m === "%%") return "%";
     const verb = m.slice(-1);
     let v = a[i++];
-    // Boxed named values format as their underlying value; Error() still applies to %v/%s/%q/%w.
-    if (v && typeof v.__gfUnbox === "function" && !(typeof v.Error === "function" && "vsqw".includes(verb))) v = v.__gfUnbox();
+    // Boxed named values format as their underlying value; Error() still applies to %v/%s/%q/%w, String() to %v/%s.
+    if (v && typeof v.__gfUnbox === "function" && !(typeof v.Error === "function" && "vsqw".includes(verb)) && !("vs".includes(verb) && stringMethod(v))) v = v.__gfUnbox();
     const [, flags, width, prec] = m.match(/^%([#+\\- 0]*)([0-9]*)\\.?([0-9]*)/) || [];
     const zero = flags?.includes("0") && !flags?.includes("-");
     const pad = (s, w, z) => {
@@ -593,7 +619,10 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
       return flags.includes("-") ? s + p : p + s;
     };
     switch (verb) {
-      case "s": return pad(String(v == null ? "<nil>" : v), width, false);
+      case "s": {
+        const sm = v !== null && typeof v === "object" ? stringMethod(v) : "";
+        return pad(sm ? String(v[sm]()) : String(v == null ? "<nil>" : v), width, false);
+      }
       case "c": return pad(String.fromCodePoint(Number(v)), width, false);
       case "d": return pad(String(typeof v === "bigint" ? v : Math.trunc(Number(v))), width, zero);
       case "v": {

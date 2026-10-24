@@ -14,8 +14,99 @@ const _SSCAN_LOOP =
 	`else if (typeof p.value === "boolean") { const tl = String(t).toLowerCase(); if (tl === "true" || tl === "1" || tl === "t") p.value = true; else if (tl === "false" || tl === "0" || tl === "f") p.value = false; else { err = __error("expected boolean"); break; } } ` +
 	`else p.value = t; n++; }`;
 
+const FMT_METHODS = ["Error", "String"];
+const isExportedName = (n) => /^\p{Lu}/u.test(n);
+
 /** @type {ThisType<CodeGen>} */
 export const fmtMethods = {
+	// ── Stringer/error dispatch metadata (read by __sprintf) ─────────────
+	//
+	// Named non-struct values are raw numbers/strings/arrays inside slices,
+	// maps and struct fields, and a struct and a pointer to it share one class.
+	// The type is therefore carried two ways, both only where a method can be
+	// called: a descriptor of the container's element types, attached when a
+	// slice/array/map is converted to an interface (static type passing, see
+	// __ifd), and per-class metadata for struct fields (__ff) and for
+	// pointer-receiver Error/String methods (__pr).
+
+	// JS source of the fmt descriptor for static type `t`, or null when no
+	// value of the type needs one:
+	//   { b: Class, n }  a raw value of a named type with a value-receiver
+	//                    Error/String; Class boxes it, n: numeric (map keys)
+	//   { e }            elements of a slice or array
+	//   { k, v }         keys and values of a map
+	_fmtDesc(t, seen = new Set()) {
+		t = this.checker?.resolveType?.(t) ?? t;
+		if (!t || seen.has(t)) return null;
+		const next = new Set(seen).add(t);
+		if (t.kind === "named") return this._fmtNamedDesc(t, next);
+		if (t.kind === "slice" || t.kind === "array") {
+			const e = this._fmtDesc(t.elem, next);
+			return e ? `{ e: ${e} }` : null;
+		}
+		if (t.kind !== "map") return null;
+		const parts = [
+			["k", this._fmtDesc(t.key, next)],
+			["v", this._fmtDesc(t.value, next)],
+		].filter(([, d]) => d);
+		return parts.length
+			? `{ ${parts.map(([n, d]) => `${n}: ${d}`).join(", ")} }`
+			: null;
+	},
+
+	_fmtNamedDesc(t, seen) {
+		const u = this.checker?.resolveType?.(t.underlying) ?? t.underlying;
+		const info = this._namedBoxInfo(t);
+		if (
+			info &&
+			FMT_METHODS.some((m) => info.methods.get(m)?._ptrRecv === false)
+		) {
+			const numeric = u?.kind === "basic" && /^(u?int|float)/.test(u.name);
+			return `{ b: ${info.cls}, n: ${numeric ? 1 : 0} }`;
+		}
+		if (!u || u.kind === "struct" || u.kind === "interface") return null;
+		return this._fmtDesc(u, seen);
+	},
+
+	// Per-class fmt metadata of a struct: which of Error/String have a pointer
+	// receiver, and the descriptors of the exported fields that hold raw
+	// Stringer values.
+	_genFmtClassMeta(name, methodDecls) {
+		const st = this.checker?.types.get(name)?.underlying;
+		if (st?.kind !== "struct") return;
+		const ptrRecv = FMT_METHODS.filter((mn) =>
+			this._fmtPtrRecv(st, methodDecls, mn),
+		);
+		if (ptrRecv.length > 0)
+			this.line(
+				`Object.defineProperty(${name}.prototype, "__pr", { value: ${JSON.stringify(ptrRecv)} });`,
+			);
+		const fields = [];
+		for (const [fname, ftype] of st.fields.entries()) {
+			const desc = isExportedName(fname) ? this._fmtDesc(ftype) : null;
+			if (desc) fields.push(`${fname}: ${desc}`);
+		}
+		// A thunk: the descriptors name classes declared further down.
+		if (fields.length > 0)
+			this.line(
+				`Object.defineProperty(${name}.prototype, "__ff", { value: () => ({ ${fields.join(", ")} }) });`,
+			);
+	},
+
+	// Whether method `mn` of struct `st` has a pointer receiver: declared on it,
+	// or promoted from an embedded struct (an embedded pointer promotes every
+	// method to the value's method set).
+	_fmtPtrRecv(st, methodDecls, mn) {
+		const decl = methodDecls.find((d) => d.name === mn);
+		if (decl) return Boolean(decl.recvPointer);
+		for (const raw of st._embeds ?? []) {
+			const isPtr = raw.kind === "pointer";
+			const m = (isPtr ? raw.base : raw).underlying?.methods?.get(mn);
+			if (m) return !isPtr && Boolean(m._ptrRecv);
+		}
+		return false;
+	},
+
 	_fmtArgJs(e) {
 		const js = this.genExpr(e);
 		const base =
