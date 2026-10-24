@@ -340,6 +340,7 @@ export class TypeChecker {
 			}
 		}
 
+		this._registerConstExprs(programs);
 		this._collectTypesPass(programs);
 		this._collectFuncsPass(programs);
 		this._checkGlobalTypeNamesPass(programs);
@@ -573,6 +574,22 @@ export class TypeChecker {
 					this.collectFunc(d);
 				else if (d.kind === "TemplDecl") this._collectTemplDecl(d);
 				else if (d.kind === "CssDecl") this._collectCssDecl(d);
+			}
+		}
+	}
+
+	// Constant initializers are known before types are resolved, so an array
+	// length may name a constant declared later (`[N]int`, `[N + 1]T`).
+	_registerConstExprs(programs) {
+		for (const p of programs) {
+			for (const d of p.decls) {
+				if (d.kind !== "ConstDecl") continue;
+				for (const spec of d.decls) {
+					spec.names.forEach((name, i) => {
+						const expr = spec.value?.[i] ?? spec.value?.[0] ?? null;
+						if (expr) this.globals._constExprs.set(name, expr);
+					});
+				}
 			}
 		}
 	}
