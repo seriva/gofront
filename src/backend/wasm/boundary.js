@@ -42,6 +42,7 @@ import {
 	HELPER_HEX,
 	HELPER_PATH_CLEAN,
 	HELPER_SHA256,
+	HELPER_SPRINT,
 	HELPER_SPRINTF,
 	HELPER_STRCONV,
 } from "../js/runtime.js";
@@ -2039,6 +2040,7 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		"testing_arg_str": targ, "testing_arg_any": targ,
 		"testing_arg_i64": (v) => targ(v > ${P}MAX || v < -${P}MAX ? v : Number(v)),
 		"testing_arg_bool": (v) => targ(v !== 0),
+		"testing_arg_err": (s) => targ({ Error() { return s; } }),
 		"testing_call": (t, i) => { const a = targs; targs = []; fmtStructMap = new WeakMap(); t[stringTable[i]](...a); },
 		"testing_name": (t) => t.Name(),
 		"testing_flag": (t, i) => (t[stringTable[i]]() ? 1 : 0),
@@ -2070,6 +2072,7 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 // module imports one of the packages that use it.
 export const WASM_STDLIB_JS = `${HELPER_ERROR}
 ${HELPER_SPRINTF}
+${HELPER_SPRINT}
 ${HELPER_STRCONV}
 ${HELPER_PATH_CLEAN}
 ${HELPER_DURATION}
@@ -2205,6 +2208,8 @@ function ${P}stdlib(stringTable, io) {
 		},
 		"testing_run": (t, name, fn) => (t.Run(name, (sub) => { io.late.exports.__testing_run_cb(fn, sub); }) ? 1 : 0),
 		"fmt_sprintf": (f) => __sprintf(f ?? "", ...io.take()),
+		"fmt_sprint": (ln) => __sprint(ln !== 0, ...io.take()),
+		"fmt_print": (ln) => { io.printf(__sprint(ln !== 0, ...io.take())); },
 		"fmt_printf": (f) => { io.printf(__sprintf(f ?? "", ...io.take())); },
 		"fmt_format_v": (v) => { const res = __sprintf("%v", v); io.take(); return res; },
 		"str_trim": (s, c) => ${P}trim(s ?? "", c ?? "", true, true),

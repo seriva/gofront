@@ -945,17 +945,38 @@ The Phase 0.5 reviews (PR #29) found these bugs. None of them were introduced by
 
 ### Phase 3.1: `fmt` and `os.Stdout` completion
 
-- [ ] **Task 3.1a — `fmt.Sprint`, `Sprintln`, `Append`, `Appendf`, `Appendln`**
+- [x] **Task 3.1a — `fmt.Sprint`, `Sprintln`, `Append`, `Appendf`, `Appendln`**
   - Files: `src/typechecker/stdlib/core.js`, `src/backend/js/runtime.js`, `src/backend/wasm/emit-stdlib.js`
   - Do: `Sprint` inserts a space only between two non-string operands; `Sprintln` always. `Append*` write into a `[]byte`. `fmt.Print` follows the same rule (found by the Task 1.3a fixtures: `fmt.Print("a", "b", 1, 2, "c")` prints `ab12c` in JS and `a b 1 2 c` in WASM; Go prints `ab1 2c`).
   - Test: conformance fixture `fmt/print.go`.
   - Done when: fixture matches Go on both backends.
+  - Landed: `Sprint`, `Sprintln`, `Append`, `Appendf` and `Appendln` are checker members (`src/typechecker/stdlib/core.js`, and in `WASM_STDLIB_MEMBERS`). The emitter-side code is in `src/backend/js/stdlib/fmt.js` and `emitFmtCall` in `src/backend/wasm/stdlib/core.js` (the WASM `fmt` emitter lives there, not in `emit-stdlib.js`), not in `runtime.js`/`emit-stdlib.js` as the Files line said. Both backends join operands with one shared host helper, `__sprint(ln, ...args)` (`HELPER_SPRINT` in `runtime.js`; the WASM side gets it through two new imports `fmt_sprint`/`fmt_print` that read the argument buffer): a space goes between two operands when neither is a string (also for named string types and `any` holding a string), always for the `ln` forms. `fmt.Print` now uses it on both backends, so `fmt.Print("a", "b", 1, 2, "c")` prints `ab1 2c`. `fmt.Println` is unchanged. `Append*` build the string and append its bytes to the destination on JS with one `Uint8Array` write (in place when the whole result fits the spare capacity, otherwise a fresh array and the caller's backing array stays untouched; the `__append` chunk loop wrote partial results into the caller's array) and with the byte-slice append on WASM, so spare capacity is reused and a sub-slice destination is overwritten in place, as in Go. Error operands are non-strings for the spacing rule (`fmt.Sprint(e1, e2)` is `a b`): the WASM argument buffer pushes them through `testing_arg_err`, which hands the host an object with `Error()`. Fixture `test/conformance/fmt/print.go`. The five members left the `missing` gaps in `stdlib-coverage.gaps.json`.
 
-- [ ] **Task 3.1b — `Stringer` and `error` dispatch for `%v`/`%s`**
-  - Files: `src/backend/js/runtime.js` (`formatV`), `src/backend/wasm/emit-stdlib.js`, `src/typechecker/stdlib/core.js` (`fmt.Stringer`)
-  - Do: a value whose type has `String() string` or `Error() string` prints through that method. Value-receiver methods apply to values and pointers; pointer-receiver methods only to pointers. Nested inside slices, maps and structs too.
-  - Test: conformance fixture `fmt/stringer.go`.
-  - Done when: fixture matches Go.
+> **Split (2026-10-23).** Task 3.1b needs decisions the original text did not make, and with 3.1c–3.1e it would exceed the phase budget. Findings from the first attempt: (1) WASM cannot read `any`/interface-typed `fmt` arguments at all (`var v any = 5; fmt.Println(v)` fails module validation, `Printf("%v", v)` prints `{}`), so `any`-typed Stringer dispatch cannot work there yet; (2) JS keeps named non-struct values (`Color`, `Celsius`) as raw numbers inside slices, maps and struct fields, and boxes them only when passed directly into an interface, so nesting needs per-container/per-field type metadata or static type passing from the checker; (3) struct values and pointers share one JS class, so value- vs pointer-receiver dispatch needs per-class metadata, and Go only calls methods on exported fields of nested values. The work is split into Phases 3.1.1–3.1.3 below; the Go-generated fixture `fmt/stringer.go` is split to match (a JS-only part first).
+
+### Phase 3.1.1: `Stringer` and `error` dispatch for `%v`/`%s` (JS)
+
+- [ ] **Task 3.1b-js — `Stringer`/`error` dispatch on the JS backend**
+  - Files: `src/backend/js/runtime.js` (`formatV`), `src/typechecker/stdlib/core.js` (`fmt.Stringer`), plus the minimum JS lowering/emit change needed for type metadata
+  - Do: a value whose type has `String() string` or `Error() string` prints through that method on the JS backend. Value-receiver methods apply to values and pointers; pointer-receiver methods only to pointers. Nested inside slices, maps and structs too (exported struct fields only, as in Go). Decide and record in the `Landed:` note how the type is carried (per-class/per-field metadata or static type passing); if that needs a decision this document does not make, stop and ask.
+  - Test: conformance fixture `fmt/stringer.go` restricted to what the JS backend supports (extend the harness with a JS-only fixture mode if needed; record it), unit tests for value vs pointer receivers and nesting.
+  - Done when: the fixture matches Go on the JS backend.
+
+### Phase 3.1.2: `fmt` on WASM: `any` arguments and `Stringer`/`error` dispatch
+
+- [ ] **Task 3.1b-any — `any` and interface-typed `fmt` arguments in WASM (prerequisite)**
+  - Files: `src/backend/wasm/stdlib/core.js` (`emitFmtCall`), `src/backend/wasm/boundary.js` as needed
+  - Do: `fmt.Println(v)`, `fmt.Sprint(v)` and `Printf("%v", v)` with `v` of type `any` or an interface type produce a valid module and print the dynamic value as Go does. Record how `any` is boxed for the host helper.
+  - Test: parity tests (`compileHybrid`) for `any` holding int, string, float, bool, nil, a slice and a struct; conformance fixture `fmt/any.go`.
+  - Done when: both pass and the Task 3.1a fixture still matches.
+
+- [ ] **Task 3.1b-wasm — `Stringer`/`error` dispatch on the WASM backend**
+  - Files: `src/backend/wasm/stdlib/core.js` (`emitFmtCall`), `src/backend/js/runtime.js` (shared helper), `src/typechecker/stdlib/core.js`
+  - Do: same semantics as Task 3.1b-js on WASM, using the boxing decided in Task 3.1b-any (host-side unboxing so `%d` still gets the number, or static `String()` calls at the argument-buffer step; record the choice).
+  - Test: the full conformance fixture `fmt/stringer.go` on both backends.
+  - Done when: fixture matches Go on both backends.
+
+### Phase 3.1.3: `fmt` verbs, 64-bit formatting and `os.Stdout`
 
 - [ ] **Task 3.1c — Verb completion: `%T`, `%U`, `%q` on runes, `%#v`, `%#x`, `%+d`, `% d`, `%[n]`, `%*d`, `%x` on byte slices**
   - Files: `src/typechecker/stdlib/core.js` (static type names per argument), `src/backend/js/runtime.js`, `src/backend/wasm/emit-stdlib.js`
