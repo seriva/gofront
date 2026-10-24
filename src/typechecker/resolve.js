@@ -65,6 +65,7 @@ const SUBSTITUTE_DISPATCH = {
 			fields,
 			methods,
 			_embeds: type._embeds,
+			_structFields: type._structFields,
 		};
 	},
 	interface: (s, type, map) => {
@@ -420,13 +421,14 @@ export const resolveMethods = {
 	// up the methods declared since.
 	_syncInstanceMethods(generic, named) {
 		const methods = named.methods;
-		if (!generic.methods || !methods || !named._instMap || named._syncing)
-			return;
+		if (!methods || !named._instMap || named._syncing) return;
 		// A method signature that names the instance reaches this again.
 		named._syncing = true;
-		for (const [mName, mType] of generic.methods)
+		for (const [mName, mType] of generic.methods ?? [])
 			if (!methods.has(mName))
 				methods.set(mName, this.substituteType(mType, named._instMap));
+		// Methods promoted from embedded structs (`Outer[T]` embedding `Base`).
+		this._promoteEmbeddedInto(named.underlying);
 		named._syncing = false;
 	},
 

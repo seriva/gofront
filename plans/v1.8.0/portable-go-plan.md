@@ -872,7 +872,7 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
   - Test: parity tests in `test/unit/wasm/generics.test.js`: `l.Next.V` → 2 (P10); a `Tree[string]` with `[]Tree[T]` children; `A[T]`/`B[T]` mutual recursion.
   - Done when: all pass on both targets and the compiler does not overflow the stack.
 
-- [ ] **Task 0.32 — Generic named types: embedding, defined types and type switches**
+- [x] **Task 0.32 — Generic named types: embedding, defined types and type switches**
   - Files: `src/typechecker/expressions.js` (selector lookup), `src/lower/embedding.js`, `src/typechecker/resolve.js`, `src/backend/js/statements.js` (`genTypeSwitch`)
   - Do: methods and fields promoted from an embedded non-generic struct are visible on a generic struct. `type S3[T any] Base` (a generic defined type over a named struct) gets `Base`'s fields and its own methods. In JS, a type switch or assertion distinguishes instantiations of the same generic type (`*Stack[int]` vs `*Stack[string]`); record how the instantiation is identified at run time.
   - Test: parity tests in `test/unit/types/generics.test.js`: `o.N()` → 7 (P44); `S3[int]{n: 5}.N()` → 5 (P45); type switch → 2 (P42).
