@@ -577,6 +577,52 @@ func main() { println(lib.Run()) }
 	assertEqual(res.lines.join("\n"), "3");
 });
 
+test("range over a func literal inside a package-level initializer", () => {
+	const src = `
+package main
+
+var f = func() int {
+	t := 0
+	for v := range func(y func(int) bool) {
+		y(1)
+		y(2)
+	} {
+		t += v
+	}
+	return t
+}
+
+func Main() int { return f() }
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, 3n);
+	assertEqual(jsRes, 3);
+});
+
+test("range over a named iterator inside a package-level initializer", () => {
+	const src = `
+package main
+
+func it(y func(int) bool) {
+	y(1)
+	y(2)
+}
+
+var f = func() int {
+	t := 0
+	for v := range it {
+		t += v
+	}
+	return t
+}
+
+func Main() int { return f() }
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, 3n);
+	assertEqual(jsRes, 3);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

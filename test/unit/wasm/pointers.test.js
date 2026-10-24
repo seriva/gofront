@@ -1,7 +1,13 @@
 // test/unit/wasm/pointers.test.js
 // Tests for Task 0.1b: Accessor refs for &s.F and &xs[i] / &arr[i]
 
-import { assertEqual, compileHybrid, section, test } from "../helpers.js";
+import {
+	assertEqual,
+	compileHybrid,
+	runWasm,
+	section,
+	test,
+} from "../helpers.js";
 
 section("WASM Pointers — Accessor Refs for Fields and Elements");
 
@@ -533,4 +539,96 @@ func Main() int {
 	const res = compileHybrid(src).run("Main");
 	assertEqual(res.wasmRes, 4n);
 	assertEqual(res.jsRes, 4);
+});
+
+section("Review fixes for whole-value assignment (Task 0.33 follow-up)");
+
+test("tuple swap of address-taken structs reads before it writes", () => {
+	const src = `
+package main
+
+type S struct{ A int }
+
+func Main() int {
+	a := S{1}
+	b := S{2}
+	p := &a
+	a, b = b, a
+	return p.A*100 + a.A*10 + b.A
+}
+`;
+	// WASM-only: the JS backend's tuple swap of address-taken values differs.
+	const { wasm, stringTable } = compileHybrid(src);
+	assertEqual(runWasm(wasm, { stringTable }).exports.Main(), 221n);
+});
+
+test("tuple swap of address-taken arrays reads before it writes", () => {
+	const src = `
+package main
+
+func Main() int {
+	a := [2]int{1, 2}
+	b := [2]int{3, 4}
+	p := &a[0]
+	a, b = b, a
+	return *p*10 + b[0]
+}
+`;
+	// WASM-only: the JS backend's tuple swap of address-taken values differs.
+	const { wasm, stringTable } = compileHybrid(src);
+	assertEqual(runWasm(wasm, { stringTable }).exports.Main(), 31n);
+});
+
+test("whole array of structs assignment keeps &a[i] valid", () => {
+	const src = `
+package main
+
+type S struct{ A int }
+
+func Main() int {
+	a := [2]S{{1}, {2}}
+	p := &a[1]
+	a = [2]S{{5}, {6}}
+	return p.A
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.wasmRes, 6n);
+	assertEqual(res.jsRes, 6);
+});
+
+test("package-level array assignment keeps &g[0] valid", () => {
+	const src = `
+package main
+
+var g [2]int
+
+func Main() int {
+	p := &g[0]
+	g = [2]int{4, 5}
+	return *p
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.wasmRes, 4n);
+	assertEqual(res.jsRes, 4);
+});
+
+test("package-level struct assignment keeps &g valid", () => {
+	const src = `
+package main
+
+type S struct{ A int }
+
+var g S
+
+func Main() int {
+	p := &g
+	g = S{7}
+	return p.A
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.wasmRes, 7n);
+	assertEqual(res.jsRes, 7);
 });
