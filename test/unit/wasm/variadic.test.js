@@ -237,3 +237,60 @@ func main() { println(w.Run()) }
 		"passing multiple return values to a variadic function is not supported",
 	);
 });
+
+test("f(nilSlice...) passes a nil parameter (P08)", () => {
+	const res = compileHybrid(`package main
+
+func sum(xs ...int) int {
+	t := 0
+	for _, x := range xs {
+		t += x
+	}
+	return t + len(xs)
+}
+
+func Main() int {
+	var n []int
+	return sum(n...)
+}
+`).run("Main");
+	assertEqual(res.jsRes, 0);
+	assertEqual(Number(res.wasmRes), 0);
+});
+
+test("f(a...) shares the caller's slice, so writes reach it (P09)", () => {
+	const res = compileHybrid(`package main
+
+func set(xs ...int) { xs[0] = 9 }
+
+type T struct{}
+
+func (T) put(xs ...int) { xs[1] = 7 }
+
+func Main() int {
+	a := []int{1, 2}
+	set(a...)
+	T{}.put(a...)
+	set(1, 2)
+	return a[0]*10 + a[1]
+}
+`).run("Main");
+	assertEqual(res.jsRes, 97);
+	assertEqual(Number(res.wasmRes), 97);
+});
+
+test("individual variadic arguments still build a fresh slice; append spread unchanged", () => {
+	const res = compileHybrid(`package main
+
+func first(xs ...int) []int { xs[0] = 5; return xs }
+
+func Main() int {
+	a := []int{1, 2}
+	b := first(a[0], a[1])
+	ys := append([]int{3}, a...)
+	return a[0]*1000 + b[0]*100 + len(ys)*10 + ys[1]
+}
+`).run("Main");
+	assertEqual(res.jsRes, 1000 + 500 + 30 + 1);
+	assertEqual(Number(res.wasmRes), 1531);
+});

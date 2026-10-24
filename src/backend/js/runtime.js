@@ -250,6 +250,13 @@ export const HELPER_SCLONE = `var __sclone = __sclone || function(x) {
   return Object.assign(Object.create(Object.getPrototypeOf(x)), x);
 };`;
 
+// Variadic prologue.  `f(xs...)` to a Go-compiled variadic function passes
+// `{ __sp: xs }`, so the parameter is the caller's slice itself (or nil).
+export const HELPER_VA = `var __va = __va || function(a) {
+  const f = a.length === 1 ? a[0] : undefined;
+  return f !== null && typeof f === "object" && f.__sp !== undefined ? f.__sp : a;
+};`;
+
 // Copy of a value whose type is a type parameter.  `z` is the argument's
 // zero-value factory: an object zero means a struct or array (copied by
 // value); anything else (scalars, pointers, interfaces) is returned as is.
