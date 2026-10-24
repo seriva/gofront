@@ -720,3 +720,22 @@ func main() {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
+
+test("shift count with side effects is evaluated once on both backends", () => {
+	const src = (op) => `package main
+
+func Main() int64 {
+	i := 0
+	g := func() int { i++; return 40 }
+	var x int64 = ${op === "<<" ? "1" : "1 << 50"}
+	y := x ${op} g()
+	return y*10 + int64(i)
+}
+`;
+	const shl = compileHybrid(src("<<")).run("Main");
+	assertEqual(shl.jsRes, shl.wasmRes);
+	assertEqual(Number(shl.jsRes), 10995116277761);
+	const shr = compileHybrid(src(">>")).run("Main");
+	assertEqual(shr.jsRes, shr.wasmRes);
+	assertEqual(Number(shr.jsRes), 10241);
+});

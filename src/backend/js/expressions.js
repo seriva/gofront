@@ -2589,11 +2589,17 @@ export const expressionGenMethods = {
 		if (op === "<<" || op === ">>") {
 			// A constant count below 32 keeps the plain 32-bit operator.
 			if (/^\d+$/.test(r) && Number(r) < 32) return `${l} ${op} ${r}`;
-			if (op === "<<") return `((${r}) >= 64 ? 0 : (${l}) * 2 ** (${r}))`;
+			// Evaluate a side-effecting count once, after the operand (Go order).
+			const pure = /^[\w$]+$/.test(r);
+			const n = pure ? r : "__n";
+			const wrap = (body) =>
+				pure ? body : `((__x, __n) => ${body})(${l}, ${r})`;
+			const x = pure ? l : "__x";
+			if (op === "<<") return wrap(`((${n}) >= 64 ? 0 : (${x}) * 2 ** (${n}))`);
 			const ovf = this._typeName(type).startsWith("u")
 				? "0"
-				: `((${l}) < 0 ? -1 : 0)`;
-			return `((${r}) >= 64 ? ${ovf} : Math.floor((${l}) / 2 ** (${r})))`;
+				: `((${x}) < 0 ? -1 : 0)`;
+			return wrap(`((${n}) >= 64 ? ${ovf} : Math.floor((${x}) / 2 ** (${n})))`);
 		}
 		if (this.isIntType(type)) {
 			if (op === "/")
