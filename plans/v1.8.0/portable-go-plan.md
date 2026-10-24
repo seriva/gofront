@@ -1150,11 +1150,12 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
   - Done when: fixture matches Go.
   - Landed: implemented `sort.Interface`, pdqsort `Sort`, `Stable`, `Reverse`, `IsSorted`, `Search*`, and `*Slice` types in `runtime/stdlib/sort/sort.go`. Extended interface dispatch and boxing across JS backend (`assignability.js`, `stdlib/index.js`) and WASM backend (`findInterfaceCandidates` and range loop slice handling) for named non-struct types like slices. Verified with conformance test `test/conformance/sort/sort.go` matching Go output.
 
-- [ ] **Task 3.3a — `io` completion**
+- [x] **Task 3.3a — `io` completion**
   - Files: new `runtime/stdlib/io/io.go` (overlay)
   - Do: `MultiReader`, `MultiWriter`, `TeeReader`, `NopCloser`, `ReadAtLeast`, `ReadFull`, `StringWriter`, `ByteReader`, `ByteWriter`, `RuneReader`, `ErrUnexpectedEOF`, `ErrShortWrite`, `SectionReader` if cheap.
   - Test: conformance fixture `io/io.go`.
   - Done when: fixture matches Go.
+  - Landed: implemented `MultiReader`, `MultiWriter`, `TeeReader`, `NopCloser`, `ReadAtLeast`, `ReadFull`, `SectionReader`, `ErrUnexpectedEOF`, `ErrShortWrite`, `ErrShortBuffer`, `ErrNoProgress`, `Seek*` constants, and I/O interfaces in `runtime/stdlib/io/io.go`. Fixed overlay type resolution and qualification for emitter-backed interfaces, interface dispatcher parameter types, and named string scalar boxing in WASM. Verified with conformance test `test/conformance/io/io.go`.
 
 - [ ] **Task 3.3b — `unicode/utf8` byte API and `unicode` predicates**
   - Files: new `runtime/stdlib/unicode/utf8/bytes.go`, `runtime/stdlib/unicode/tables.go` (general categories only)

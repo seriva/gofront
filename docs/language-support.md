@@ -113,7 +113,7 @@ Members of each Go package (functions, types, methods, fields, constants and var
 | `hash/crc32` | 0 of 12 | 12 | 0 | 0 |
 | `hash/fnv` | 0 of 6 | 6 | 0 | 0 |
 | `html` | 2 of 2 | 0 | 0 | 0 |
-| `io` | 23 of 94 | 71 | 0 | 10 |
+| `io` | 58 of 94 | 36 | 0 | 10 |
 | `iter` | 2 of 2 | 0 | 0 | 2 |
 | `log` | 0 of 43 | 43 | 0 | 0 |
 | `maps` | 10 of 10 | 0 | 0 | 0 |
