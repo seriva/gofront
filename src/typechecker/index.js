@@ -482,6 +482,18 @@ export class TypeChecker {
 			for (const d of p.decls) {
 				if (d.kind === "TypeDecl" && !d.isAlias && !this.types.has(d.name)) {
 					const placeholder = { kind: "named", name: d.name, underlying: null };
+					// A generic type is known to be generic before any field resolves,
+					// so types declared earlier can instantiate it.
+					if (d.typeParams) {
+						placeholder._generic = {
+							typeParams: d.typeParams.map((tp) => ({
+								kind: "typeParam",
+								name: tp.name,
+								constraint: tp.constraint,
+							})),
+							declNode: d,
+						};
+					}
 					this.types.set(d.name, placeholder);
 					this.globals.define(d.name, placeholder);
 				}
@@ -655,27 +667,32 @@ export class TypeChecker {
 		if (decl.typeParams) {
 			// Generic type — resolve underlying with type params as ANY for struct fields
 			const typeScope = new Scope(this.globals);
-			const typeParamTypes = decl.typeParams.map((tp) => {
-				const t = {
-					kind: "typeParam",
-					name: tp.name,
-					constraint: tp.constraint,
-				};
+			const preset = this.types.get(decl.name)?._generic;
+			const typeParamTypes = decl.typeParams.map((tp, i) => {
+				const t =
+					preset?.declNode === decl
+						? preset.typeParams[i]
+						: {
+								kind: "typeParam",
+								name: tp.name,
+								constraint: tp.constraint,
+							};
 				typeScope.define(tp.name, t);
 				return t;
 			});
-			const underlying = this.resolveTypeNode(decl.type, typeScope);
 			const existing = this.types.get(decl.name);
 			const named =
 				existing?.kind === "named"
 					? existing
 					: { kind: "named", name: decl.name };
+			// Registered before the fields resolve so `Next *List[T]` finds the
+			// generic declaration it is part of.
+			if (preset?.declNode === decl) named._generic = preset;
+			else named._generic = { typeParams: typeParamTypes, declNode: decl };
+			this.types.set(decl.name, named);
+			const underlying = this.resolveTypeNode(decl.type, typeScope);
 			named.underlying = underlying;
 			named._target = this.target;
-			named._generic = {
-				typeParams: typeParamTypes,
-				declNode: decl,
-			};
 			if (underlying.kind === "struct") {
 				underlying.name = decl.name;
 				underlying.methods = new Map();
