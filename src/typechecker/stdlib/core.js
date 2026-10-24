@@ -648,16 +648,67 @@ export function setupCoreGlobals(globals, types) {
 		},
 	});
 
+	const BYTE_SLICE_IO = { kind: "slice", elem: UINT8 };
+	const OS_FILE = {
+		kind: "named",
+		name: "os.File",
+		underlying: {
+			kind: "struct",
+			fields: new Map([["fd", INT]]),
+			methods: new Map([
+				[
+					"Write",
+					{
+						kind: "func",
+						params: [BYTE_SLICE_IO],
+						returns: [INT, ERROR],
+						_ptrRecv: true,
+					},
+				],
+				[
+					"WriteString",
+					{
+						kind: "func",
+						params: [STRING],
+						returns: [INT, ERROR],
+						_ptrRecv: true,
+					},
+				],
+				[
+					"Read",
+					{
+						kind: "func",
+						params: [BYTE_SLICE_IO],
+						returns: [INT, ERROR],
+						_ptrRecv: true,
+					},
+				],
+				[
+					"Close",
+					{
+						kind: "func",
+						params: [],
+						returns: [ERROR],
+						_ptrRecv: true,
+					},
+				],
+			]),
+		},
+	};
+	const OS_FILE_PTR = { kind: "pointer", base: OS_FILE };
+	types.set("os.File", OS_FILE);
+
 	globals.define("os", {
 		kind: "namespace",
 		name: "os",
 		members: {
+			File: OS_FILE,
 			Exit: { kind: "func", params: [INT], returns: [VOID] },
 			Args: { kind: "slice", elem: STRING },
 			Getenv: { kind: "func", params: [STRING], returns: [STRING] },
-			Stdout: ANY,
-			Stderr: ANY,
-			Stdin: ANY,
+			Stdout: OS_FILE_PTR,
+			Stderr: OS_FILE_PTR,
+			Stdin: OS_FILE_PTR,
 		},
 	});
 
@@ -737,7 +788,6 @@ export function setupCoreGlobals(globals, types) {
 		},
 	});
 
-	const BYTE_SLICE_IO = { kind: "slice", elem: UINT8 };
 	const IO_WRITER = {
 		kind: "interface",
 		name: "io.Writer",

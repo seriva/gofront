@@ -1113,23 +1113,26 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
 
 ### Phase 3.1.3: `fmt` verbs, 64-bit formatting and `os.Stdout`
 
-- [ ] **Task 3.1c — Verb completion: `%T`, `%U`, `%q` on runes, `%#v`, `%#x`, `%+d`, `% d`, `%[n]`, `%*d`, `%x` on byte slices**
+- [x] **Task 3.1c — Verb completion: `%T`, `%U`, `%q` on runes, `%#v`, `%#x`, `%+d`, `% d`, `%[n]`, `%*d`, `%x` on byte slices**
   - Files: `src/typechecker/stdlib/core.js` (static type names per argument), `src/backend/js/runtime.js`, `src/backend/wasm/emit-stdlib.js`
   - Do: as specified in [§5](#5-member-completion). `%T` on interfaces uses the per-type name table shared with `%v`. `%p` prints `%!p(T)`.
   - Test: conformance fixture `fmt/verbs.go` (excluding `%p`); unit test for `%p` text.
   - Done when: fixture matches Go.
+  - Landed: implemented format parser and runtime in `src/backend/js/fmt-runtime.js` and `src/backend/js/fmt-types.js`. `%T` uses operand static type or dynamic type for interfaces (`__ft(val, desc)` in JS, `fmt_arg_type` in WASM); `%U` prints `U+%04X`; `%q` quotes runes and strings with Go escaping; `%#v` formats Go syntax literals including struct names, slices, maps, and typed nils; `%#x`/`%#X` emits `0x`/`0X` prefix; `%+d` and `% d` respect sign flags; `%[n]` handles explicit argument indexing with sequential follow-up tracking; `%*d` and `%.*f` handle dynamic width and precision; `%x`/`%X` formats byte slices (with space flag support `% x`); `%p` prints `%!p(T=val)` as GoFront does not expose memory addresses. Conformance fixture `test/conformance/fmt/verbs.go` and unit test `test/unit/builtins/fmt-verbs.test.js` pass.
 
-- [ ] **Task 3.1d — Exact 64-bit integer formatting in WASM and `MISSING`/`EXTRA` forms**
+- [x] **Task 3.1d — Exact 64-bit integer formatting in WASM and `MISSING`/`EXTRA` forms**
   - Files: `src/backend/wasm/emit-stdlib.js`
   - Do: `%d %x %o %b` take `i64` and use the `strconv` lowering, never `f64`. `%!d(MISSING)` and `%!(EXTRA int=1)` match Go.
   - Test: parity test `fmt.Sprintf("%d", uint64(1<<63+5))` in WASM equals `9223372036854775813`; conformance fixture `fmt/errors.go`.
   - Done when: both pass.
+  - Landed: WASM integer operands preserve full 64-bit precision via `testing_arg_u64` and BigInt arithmetic in `fmt-runtime.js`, formatting exact numbers above $2^{53}$ (e.g. `uint64(1<<63+5)` prints `9223372036854775813` in WASM, while JS prints the nearest float with precision warning as planned). Negative `int64` under `%x`/`%o`/`%b` prints sign prefix rather than two's complement. Operand error diagnostics match Go: `%!s(MISSING)`, `%!(EXTRA T=v)`, `%!d(BADINDEX)`, and `%!(NOVERB)`. Conformance fixture `test/conformance/fmt/errors.go` and unit tests in `test/unit/builtins/fmt-verbs.test.js` pass.
 
-- [ ] **Task 3.1e — `os.Stdout`/`os.Stderr` as `io.Writer`, shared line buffer**
+- [x] **Task 3.1e — `os.Stdout`/`os.Stderr` as `io.Writer`, shared line buffer**
   - Files: `src/typechecker/stdlib/core.js` (`os.File` type), `src/backend/js/stdlib/os.js`, `src/backend/js/runtime.js`, `src/backend/wasm/emit-stdlib.js`, `src/backend/wasm/boundary.js` (console import)
   - Do: `*os.File` with `Write`, `WriteString`; `Stdout` and `Stderr` map to `console.log`/`console.error` through one line buffer shared with `fmt.Print*`. `Stdin.Read` returns `io.EOF`.
   - Test: `test/unit/builtins/stdlib.test.js` — `fmt.Fprintf(os.Stderr, "a"); fmt.Fprintln(os.Stderr, "b")` produces one `ab` line in both backends (use the harness `stdout` capture).
   - Done when: `os.Stdout` type-checks as `io.Writer` in `js`, `wasm` and `both` packages.
+  - Landed: defined `os.File` struct with `Write`, `WriteString`, `Read`, and `Close` pointer-receiver methods in `src/typechecker/stdlib/core.js`. Exposed `os.Stdout`, `os.Stderr`, and `os.Stdin` as `*os.File` satisfying `io.Writer` and `io.Reader`. In JS, writes pass through `HELPER_OS` (`__os_write`) using `process.stdout.write`/`process.stderr.write` when available, or buffer through `__os_buf` until newline `\n` to log via `console.log`/`console.error`. In WASM, synthesized `os.File` methods write to `fmt_print_raw` via the shared console line buffer. `os.Stdin.Read` returns `(0, io.EOF)`. Added `os` to `WASM_SUPPORTED_STDLIB` and `WASM_STDLIB_MEMBERS` (`Stdout`, `Stderr`, `Stdin`, `File`). Removed resolved gaps from `test/unit/types/stdlib-coverage.gaps.json`. Verified in `test/unit/builtins/stdlib.test.js`.
 
 ### Phase 3.2: `io`, `sort`, `unicode` and `strconv` completion
 

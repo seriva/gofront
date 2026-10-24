@@ -197,6 +197,7 @@ const STDLIB_IMPORTS = [
 	["fmt_printf", [S], []],
 	["fmt_sprint", ["i32"], [S]],
 	["fmt_print", ["i32"], []],
+	["fmt_print_raw", [S], []],
 	["fmt_format_v", [S], [S]],
 	["fmt_sscan_init", [S, "i32"], ["i32"]],
 	["fmt_sscanf_init", [S, S], ["i32"]],
@@ -1160,6 +1161,9 @@ class ModuleEmitter {
 		this.getTestingArgImportIndex("i32", true);
 		this.getTestingArgErrImportIndex();
 		this.getTestingArgSpreadImportIndex();
+		this.getTestingArgU64ImportIndex();
+		this.getFmtArgTypeImportIndex();
+		this.getFmtStructTypeImportIndex();
 		this.getFmtNewArrayIndex();
 		this.getFmtArrayPushIndex();
 		this.getFmtNewMapIndex();
@@ -1364,6 +1368,19 @@ class ModuleEmitter {
 		return gIdx;
 	}
 
+	getOsGlobalIndex(field) {
+		this.osGlobals ??= new Map();
+		if (this.osGlobals.has(field)) return this.osGlobals.get(field);
+		const gIdx = this.globals.length;
+		this.globals.push({
+			type: "anyref",
+			mutable: true,
+			init: [{ op: "ref.null", heapType: "any" }],
+		});
+		this.osGlobals.set(field, gIdx);
+		return gIdx;
+	}
+
 	getDeferNodeTypeIndex() {
 		if (this.deferNodeTypeIndex !== undefined) {
 			return this.deferNodeTypeIndex;
@@ -1545,6 +1562,16 @@ class ModuleEmitter {
 		);
 	}
 
+	// Names the Go type of a struct built for fmt (`%T`, `%#v` of an any).
+	getFmtStructTypeImportIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"fmt_struct_type",
+			["externref", "i32"],
+			[],
+		);
+	}
+
 	getFmtStructSetIndex() {
 		return this.getOrAddFuncImport(
 			"env",
@@ -1622,6 +1649,17 @@ class ModuleEmitter {
 			["externref"],
 			[],
 		);
+	}
+
+	// An unsigned 64-bit operand: the host reinterprets the i64 as unsigned.
+	getTestingArgU64ImportIndex() {
+		return this.getOrAddFuncImport("env", "testing_arg_u64", ["i64"], []);
+	}
+
+	// Tags the last operand in the argument buffer with the static type
+	// descriptor (JSON) held in string table entry `i32`, for `%T` and `%#v`.
+	getFmtArgTypeImportIndex() {
+		return this.getOrAddFuncImport("env", "fmt_arg_type", ["i32"], []);
 	}
 
 	getTestingArgErrImportIndex() {
@@ -4168,6 +4206,56 @@ function _registerIoSyntheticMethods(funcDecls, mod, strType, programs) {
 					_recvTypeName: "io.LimitedReader",
 					_methodName: "Read",
 				},
+			),
+		);
+	}
+	const hasOs = importsAnyOf(progs, ["os"]);
+	if (hasOs && mod.structTypes.has("os.File")) {
+		const fPtr = {
+			kind: "pointer",
+			base: { kind: "named", name: "os.File" },
+		};
+		funcDecls.push(
+			ioHelper(
+				"os.File.Write",
+				[
+					{ name: "f", type: fPtr },
+					{ name: "p", type: BYTE_SLICE_T },
+				],
+				INT_ERR_RET,
+				"os_file_write",
+				{ _isMethod: true, _recvTypeName: "os.File", _methodName: "Write" },
+			),
+			ioHelper(
+				"os.File.WriteString",
+				[
+					{ name: "f", type: fPtr },
+					{ name: "s", type: strType },
+				],
+				INT_ERR_RET,
+				"os_file_write_string",
+				{
+					_isMethod: true,
+					_recvTypeName: "os.File",
+					_methodName: "WriteString",
+				},
+			),
+			ioHelper(
+				"os.File.Read",
+				[
+					{ name: "f", type: fPtr },
+					{ name: "p", type: BYTE_SLICE_T },
+				],
+				INT_ERR_RET,
+				"os_file_read",
+				{ _isMethod: true, _recvTypeName: "os.File", _methodName: "Read" },
+			),
+			ioHelper(
+				"os.File.Close",
+				[{ name: "f", type: fPtr }],
+				ERR_T,
+				"os_file_close",
+				{ _isMethod: true, _recvTypeName: "os.File", _methodName: "Close" },
 			),
 		);
 	}

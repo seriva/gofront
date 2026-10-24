@@ -556,7 +556,7 @@ func Main() string {
 }
 `;
 	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
-	assertEqual(wasmRes, "1 1 2147483648 true 1 1 9223372036854776000");
+	assertEqual(wasmRes, "1 1 2147483648 true 1 1 9223372036854775808");
 	assertEqual(wasmRes, jsRes);
 });
 
@@ -2047,15 +2047,15 @@ test("a stdlib member that cannot be a value names itself in the error", () => {
 			compileWasm(`
 package main
 
-import "os"
+import "regexp"
 
 func Main() int {
-	f := os.Exit
+	f := regexp.QuoteMeta
 	_ = f
 	return 1
 }
 `),
-		"os.Exit cannot be used as a value",
+		"regexp.QuoteMeta cannot be used as a value",
 	);
 });
 
