@@ -3,9 +3,7 @@
 **Version:** v1.8.0
 **Status:** In Progress (2026-10-20)
 **Base branch:** main
-**Depends on:** v1.7.0 ([`json-preact-simd-plan.md`](../v1.7.0/json-preact-simd-plan.md)), including the JS `encoding/json` hardening on the v1.7.0 branch.
-**Replaces:** the dropped v1.7.1 plans. Their stdlib items (`bufio`, `context`, `net/url`), the WASM interior-pointer problem and the SIMD completion and SoA work move here. Boundary slice borrowing (a performance optimisation, not a completeness item) is not part of this plan.
-**Followed by:** [`plans/v2.0.0/native-go-engine.md`](../v2.0.0/native-go-engine.md). v1.8.0 is the **last feature release of the JS engine** and the baseline for the v2.0.0 port. After it, only bug-fix releases (v1.8.x) ship.
+**Related:** Depends on v1.7.0 ([`json-preact-simd-plan.md`](../v1.7.0/json-preact-simd-plan.md)), including the JS `encoding/json` hardening on the v1.7.0 branch. Replaces the dropped v1.7.1 plans. Their stdlib items (`bufio`, `context`, `net/url`), the WASM interior-pointer problem and the SIMD completion and SoA work move here. Boundary slice borrowing (a performance optimisation, not a completeness item) is not part of this plan. Followed by [`plans/v2.0.0/native-go-engine.md`](../v2.0.0/native-go-engine.md). v1.8.0 is the **last feature release of the JS engine** and the baseline for the v2.0.0 port. After it, only bug-fix releases (v1.8.x) ship.
 
 ---
 
@@ -43,6 +41,7 @@ A Go package or member is **in scope** when it can be implemented as ordinary co
 | **Excluded: host** | Targeted diagnostic everywhere | `net/http`, `net`, `os/exec`, file I/O in `os`, `syscall` |
 | **Excluded: needs reflection** | Targeted diagnostic everywhere | `text/template`, `html/template`, `encoding/xml`, `encoding/gob`, `flag` |
 | **Excluded: deferred (pure, large)** | Pure and inside the boundary, but the code size or API surface does not pay for itself in a frontend compiler. Targeted diagnostic with `deferred; open an issue if you need it`. Revived by a separate plan, never ad hoc. | `math/big`, `compress/*`, `archive/*`, `image/*`, `crypto/{aes,cipher,rsa,ecdsa,ed25519,x509,tls,elliptic}`, `encoding/{asn1,pem,ascii85}`, `text/{tabwriter,scanner}`, `go/*`, `debug/*`, `hash/{crc64,maphash}`, `unicode` range tables (`unicode.Is`/`In`, script and category tables), `embed` |
+| **Excluded: this plan** | Inside the boundary but not built in v1.8.0, each with its reason | Everything listed under [Out of Scope](#out-of-scope) |
 
 `encoding/json` stays in scope because GoFront generates codecs at compile time. That is the precedent: **compile-time specialization of a reflective API is allowed; a reflective runtime is not.**
 
@@ -551,11 +550,6 @@ Conventions used in the tasks:
 - *Go-source package* = files under `runtime/stdlib/<import path>/` starting with `//go:build gofront` and `//gofront:target both`. They follow [§1.1](#11-string-semantics-both-backends): index `[]byte`, not `string`.
 - Phases 2.1–6.2 are independent of each other once Phases 0.1–1.2 are done. Inside a phase, do tasks in order unless a task says otherwise.
 - Phases 0.11–0.14 (review follow-ups) were added after Phase 3.1.1 landed. They run next, before Phase 3.1.2, in order.
-
-> **Phase Sizing & Dev-Loop Bounds (1 Phase = 1 Dev-Loop)**:
-> - **1 Phase = 1 Dev-Loop**: Each phase creates a dedicated branch (`feat/portable-go-phase-<N>`), executes all tasks continuously, opens 1 PR into `feat/portable-go`, and runs an isolated 2-pass AI code review.
-> - **Phase Budget (3–5 Tasks)**: Phases are capped at 3–5 cohesive tasks with a net diff budget $\le$ 500 LOC so that AI reviews and tests are reliable and fast.
-> - **Continuous Execution**: Within each phase, the orchestrator loops continuously through all tasks without halting between checkboxes, committing each task atomically (`feat(<scope>): <task summary> (Task N.M)`).
 
 ### Phase 0.1: Pointer type hierarchy & accessor refs
 
@@ -1426,10 +1420,9 @@ Each Phase 6 task follows the same Files/Test/Done-when discipline: files are `s
 - [ ] **Task 7.2** — Update [`go-compatibility.md`](../../docs/go-compatibility.md): the scope rule, the excluded-package table, the string-semantics table from [§1.1](#11-string-semantics-both-backends), the `goto` and `//go:embed` rows, the strict-mode runtime-panic row, the `maps.Keys` change, `context` without `Done()`, `%p`, and the `crypto/*` caveat.
 - [ ] **Task 7.3** — Regenerate the stdlib tables in `language-support.md` and `hybrid-wasm.md`. Update [`architecture.md`](../../docs/architecture.md) with `runtime/stdlib/`, `scripts/`, `test/conformance/` and the manifest.
 
-### Phase 7.2: Baseline verification, release gates and changelog
+### Phase 7.2: Baseline verification and changelog
 
 - [ ] **Task 7.4** — Confirm the [`v2.0.0`](../v2.0.0/native-go-engine.md) baseline against what v1.8.0 actually shipped (including the SIMD promotion decision and the final manifest), and declare the JS-engine feature freeze.
-- [ ] **Task 7.5** — Verification: `npm test`, `npm run check`, `npm run build`, `npm run test:e2e`, `npm run bench`, `npm run conformance`. Check for no regression in `app.wasm` size for apps that do not import new packages.
 - [ ] **Task 7.6** — `CHANGELOG.md` (with a breaking-changes section: `maps.Keys`/`Values`, strict-mode runtime panics, typed-constant overflow errors, type declarations named after JavaScript globals now rejected (Task 0.19d), unknown string escapes now a lexer error (Task 0.21)) and [`roadmap.md`](../roadmap.md).
 
 ---
@@ -1508,51 +1501,3 @@ Each Phase 6 task follows the same Files/Test/Done-when discipline: files are `s
 - `npm run bench` must show no regression in the hybrid raycast. Neither the array-copy fix (Task 0.8b) nor the strict-mode runtime checks (Task 0.16b) may slow the scalar raycast by more than 3% each; the analysis is extended until they do not, and the checks are never shipped disabled.
 - `test/e2e/perf/zero-alloc.js` must pass after Tasks 0.5a, 0.5d and 0.7c.
 - The SIMD particle and `IntersectRayAABB4` raycast results, with allocations per run, are recorded in §10.6 together with the promotion decision.
-
----
-
-## Follow-ups
-
-Review follow-up ledger (see `/dev-loop` **Follow-ups**). Seeded on 2026-10-24 from the PR #28–#40 review findings, re-probed against go1.26 on `a697b9b` (evidence: [Review follow-ups](#review-follow-ups-2026-10-24)). These checkboxes are not tasks.
-
-- [x] **Lexer:** escapes other than `\n \t \r \" \\ \0` stay raw. Repro: `len("\x00")` → got `4`, want `1`; `len([]byte("\xc3"))` → got `4`, want `1`. (PR #39, Phase 3.1, Out of Scope) → Task 0.21
-- [x] **JS integers:** unsigned unary does not wrap. Repro: `^uint8(5)`, `-uint32(1)` → got `-6 -1`, want `250 4294967295`. (PR #32, Phase 0.8, Out of Scope) → Task 0.22
-- [x] **JS integers:** 64-bit shift count wraps mod 32. Repro: `int64(1) << 70` (count in a var) → got `64`, want `0`; `int64(-1) << 64` → got `-1`, want `0`. (PR #30, Phase 0.6, Out of Scope) → Task 0.22
-- [x] **Checker:** shift count of another integer type rejected. Repro: `x := 1; var n uint = 3; x <<= n` → got `Cannot assign uint to int`, want `8`. (PR #30, Phase 0.6, Out of Scope) → Task 0.23
-- [x] **Checker:** negative constant shift count accepted. Repro: `const s = -1; x << s` → got no error, want `invalid shift count`. (PR #30, Phase 0.6, Out of Scope) → Task 0.23
-- [x] **JS generics:** `==` on struct type-parameter values compares references. Repro: `eq[T comparable](P{1}, P{1})` → got `false`, want `true`. (PR #32, Phase 0.8, Out of Scope) → Task 0.24
-- [x] **JS generics:** struct `T` fields alias on copy. Repro: `a := W[P]{P{1}}; b := a; b.v.A = 9; a.v.A` → got `9`, want `1`. (PR #32, Phase 0.8, Out of Scope) → Task 0.24
-- [x] **JS variadic:** nil spread throws. Repro: `var xs []int; sum(xs...)` → got `xs is not iterable`, want `0`. (PR #28, Phase 0.4, Out of Scope) → Task 0.25
-- [x] **JS variadic:** spread copies the slice. Repro: `set(a...)` with `xs[0] = 9` → got `a[0] == 1`, want `9`. (PR #28, Phase 0.4, Out of Scope) → Task 0.25
-- [x] **JS nil:** nil map compares non-nil. Repro: `var m map[string]int; m == nil` → got `false`, want `true`. (PR #31, Phase 0.7, Low) → Task 0.26
-- [x] **JS fmt:** `fmt.Append(nil)` not nil. Repro: `fmt.Append(nil) == nil` → got `false`, want `true`. (PR #39, Phase 3.1, Low) → Task 0.26
-- [x] **JS literals:** elided `&T` in `[]*T{{1}}`. Repro: `xs := []*P{{1}, {2}}; xs[1].A` → got `undefined`, want `2`. (PR #40, Phase 3.1.1, Out of Scope) → Task 0.27
-- [x] **JS structs:** write through promoted field lost. Repro: `o := Out{In{1}, 2}; o.A = 5; o.In.A*10 + o.B` → got `10`, want `52`. (PR #40, Phase 3.1.1, Out of Scope) → Task 0.27
-- [x] **JS fmt:** struct map keys. Repro: `fmt.Sprint(map[P]int{P{1}: 2})` → got `map[[object Object]:2]`, want `map[{1}:2]`. (PR #40, Phase 3.1.1, Out of Scope) → Task 0.27
-- [x] **Globals:** `&g` on a package-level array in JS. Repro: `var g [3]int; p := &g; p[0] = 5; g[0]` → got `Cannot set properties of undefined`, want `5`. (PR #33, Phase 0.9, Out of Scope) → Task 0.28
-- [x] **Globals:** package-level array zero value in WASM. Repro: `var g [3]int; g[1] + len(g)` → got nil-dereference panic, want `3`. (PR #33, Phase 0.9, Out of Scope) → Task 0.28
-- [x] **Arrays:** constant-length `[N]int`. Repro: `const N = 3; var a [N]int; a[2] = 4` → got invalid JS / WASM length 0, want `len(a) + a[2] == 7`. (PR #33, Phase 0.9, Out of Scope) → Task 0.28
-- [x] **JS methods:** pointer method on a package-level named scalar. Repro: `type C int; var g C; g.Inc()` → got `Cannot create property 'value' on number`, want `g == 1`. (PR #33, Phase 0.9, Out of Scope) → Task 0.28
-- [x] **Parser:** elided composite key in a map literal. Repro: `map[P]int{{1}: 2}` → got `Unexpected token in expression: ':'`, want a 1-entry map. (found while probing, 2026-10-24, Out of Scope) → Task 0.29
-- [x] **Checker:** named type over a named array. Repro: `type V [2]int; type W V; W{1, 2}[1]` → got `Cannot index type W`, want `2`. (PR #33, Phase 0.9, Out of Scope) → Task 0.29
-- [x] **Generics:** explicit instantiation through a package. Repro: `cmp.Compare[int](1, 2)`, `iter.Seq[int](f)`, `slices.Collect[int](…)` → got `Undefined: 'int'`, want `-1` / valid conversion / call. (PR #28, PR #37, Out of Scope) → Task 0.30
-- [x] **Generics:** recursive generic types. Repro: `type List[T any] struct { V T; Next *List[T] }` → got `Maximum call stack size exceeded`, want `l.Next.V == 2`. (PR #37, Phase 2.1, Out of Scope) → Task 0.31
-- [x] **Generics:** promoted method through an embedded struct in a generic struct. Repro: `Out[int]{In: In{7}}.N()` → got `No field 'N' on Out[int]`, want `7`. (PR #37, Phase 2.1, Low) → Task 0.32
-- [x] **Generics:** generic defined type over a named struct. Repro: `type S3[T any] Base` with methods, `S3[int]{n: 5}.N()` → got `Unknown struct in CompositeLit: S3$int`, want `5`. (PR #37, Phase 2.1, Low) → Task 0.32
-- [x] **JS generics:** type switch ignores type arguments. Repro: `var x any = &Stack[string]{}` switched against `*Stack[int]` first → got `1`, want `2`. (PR #37, Phase 2.1, Out of Scope) → Task 0.32
-- [x] **Pointers:** element pointer after whole-array assignment (both backends). Repro: `p := &a[1]; a = [3]int{4, 5, 6}; *p` → got `2`, want `5`. (PR #33, Phase 0.9, Out of Scope) → Task 0.33
-- [x] **Pointers:** struct pointer after whole-struct assignment (both backends). Repro: `p := &s; s = S{5}; p.A` → got `1`, want `5`. (PR #33, Phase 0.9, Out of Scope) → Task 0.33
-- [x] **WASM methods:** value method through `*N`. Repro: `type N int; x := N(3); p := &x; p.Get()` → got invalid module, want `3`. (PR #33, Phase 0.9, Out of Scope) → Task 0.34
-- [x] **WASM methods:** pointer method on a named slice. Repro: `type L []int; var l L; l.Add(1); l.Add(2); len(l)` → got `0`, want `2`. (PR #33, Phase 0.9, Out of Scope) → Task 0.34
-- [x] **WASM stdlib:** stdlib function as a value. Repro: `var sp = fmt.Sprint; sp(1)` → got `Cannot resolve struct for selector: Sprint`, want `1`. (found while probing, 2026-10-24, Out of Scope) → Task 0.35
-- [x] **WASM iterators:** range over a func literal. Repro: `for v := range func(y func(int) bool) { y(1); y(2) } { t += v }` → got `reading '_globalFuncIndex'`, want `3`. (PR #38, Phase 2.2, Out of Scope) → Task 0.36
-- [x] **WASM iterators:** iterator yielding a struct pointer. Repro: `func seq(y func(*P) bool) { y(&P{3}); y(&P{4}) }` ranged → got invalid module, want `7`. (PR #38, Phase 2.2, Out of Scope) → Task 0.36
-- [x] **WASM iterators:** `slices.Values` over a generic struct slice. Repro: `range slices.Values([]Box[int]{{1}, {2}})` summing `.V` → got invalid module (`call_ref`), want `3`. (PR #37, Phase 2.1, Out of Scope) → Task 0.36
-- [x] **WASM fmt:** spread `[]any` into `fmt`. Repro: `fmt.Sprintf("%d %s", args...)`, `fmt.Println(xs...)` → got invalid module, want `1 a`. (PR #28, PR #40, Out of Scope) → Task 3.1b-any (Also)
-- [x] **WASM fmt:** `%v` of `nil`. Repro: `fmt.Sprintf("%v", nil)` → got invalid module, want `<nil>`. (PR #36, Phase 1.2, Out of Scope) → Task 3.1b-any (Also)
-- [x] **fmt:** nil pointer with a pointer-receiver `String`. Repro: `var p *C; fmt.Sprint(p)` → got `<nil>`, want `c`. (PR #40, Phase 3.1.1, Low) → Task 3.1b-wasm (Also)
-- [x] **fmt:** `%e` exponent digits and `%q` on `[]string`. Repro: `fmt.Sprintf("%e", 1234.5678)` → got `1.234568e+3`, want `1.234568e+03`; `%q` of `[]string{"a","b"}` → got `"a,b"`, want `["a" "b"]`. (PR #36, Phase 1.2, Out of Scope) → Task 3.7
-- [x] **unicode:** `IsSpace` differs from Go. Repro: `strings.Fields("a\u0085b\vc")` → got `1`, want `3` (also needs Task 0.21). (PR #38, Phase 2.2, Low) → Task 3.3b (Also)
-- [x] **JS bytes:** `bytes.Index` on non-ASCII input. Repro: `bytes.Index([]byte("héllo"), []byte("l"))` → got `2`, want `3`. (PR #38, Phase 2.2, Out of Scope) → Task 3.4c (Also)
-- [x] **Diagnostics and tooling:** precision warning above 2⁵³, unchecked constraints on partial inference, duplicate diagnostic on `Two[int]()`, generic-alias arity error without a position, `//gofront:intrinsic` outside `runtime/stdlib`, `conformance:update test/conformance` selects nothing, `compile` test helper does not load Go-source stdlib. (PRs #28, #31, #32, #35, #36, Low) → Out of Scope
-- [x] **Changelog:** rejecting type names that clash with JavaScript globals is a breaking change. (PR #33, Phase 0.9, Low) → Task 7.6
