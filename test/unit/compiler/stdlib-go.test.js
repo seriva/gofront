@@ -467,3 +467,34 @@ func Run() int {
 	);
 	assertEqual(out, "351");
 });
+
+test("util.Box[int]{...} as the only use counts as using the import", async () => {
+	const util = `//gofront:target both
+package util
+
+type Box[T any] struct{ V T }
+`;
+	const out = await stdParity(
+		`import "./util"
+
+func Run() int {
+	v := util.Box[int]{V: 2}
+	return v.V
+}
+`,
+		{ "lib/util/util.go": util },
+	);
+	assertEqual(out, "2");
+});
+
+test("slices.Sort/Index/Max with explicit instantiation (emitter-backed)", async () => {
+	const out = await stdParity(`import "slices"
+
+func Run() int {
+	xs := []int{3, 1, 2}
+	slices.Sort[[]int](xs)
+	return xs[0]*100 + slices.Index[[]int, int](xs, 2)*10 + slices.Max[[]int](xs)
+}
+`);
+	assertEqual(out, "113");
+});

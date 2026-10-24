@@ -1028,6 +1028,15 @@ export const expressionCheckMethods = {
 	checkCall(expr, scope) {
 		expr.func._typeRefOk = true;
 		let fnType = this.checkExpr(expr.func, scope);
+		// `slices.Sort[[]int](xs)` on an emitter-backed (non-generic) stdlib
+		// function: the type arguments are inferred, so call it as `slices.Sort(xs)`.
+		if (
+			expr.func.kind === "InstantiationExpr" &&
+			!expr.func._genericFnType &&
+			expr.func.expr?.kind === "SelectorExpr" &&
+			fnType?.kind === "func"
+		)
+			expr.func = expr.func.expr;
 		this._checkSharedAllocSite(expr, scope);
 		this._checkBoundaryCallInLoop(expr, scope);
 		if (fnType.kind === "builtin") {
