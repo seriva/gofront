@@ -40,3 +40,5 @@ ps [{{5}}]
 x y
 [z]
 v|s
+c <nil> ne
+c c|<nil>

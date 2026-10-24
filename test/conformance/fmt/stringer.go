@@ -1,4 +1,3 @@
-//conformance:js-only
 package main
 
 import (
@@ -75,6 +74,18 @@ type EW struct {
 	Code int
 }
 
+type NC struct{ N int }
+
+func (c *NC) String() string { return "c" }
+
+type NV struct{ N int }
+
+func (v NV) String() string { return "v" }
+
+type NE struct{ N int }
+
+func (e *NE) Error() string { return "ne" }
+
 func main() {
 	fmt.Println(Celsius(36.6), Red, Green)
 	fmt.Printf("%v|%s|%d\n", Green, Green, Green)
@@ -136,4 +147,10 @@ func main() {
 	fmt.Println(EW{errors.New("x"), 1}, &EW{errors.New("y"), 2})
 	fmt.Println([]EW{{errors.New("z"), 3}})
 	fmt.Printf("%v|%s\n", EW{errors.New("v"), 4}, EW{errors.New("s"), 5})
+
+	var nc *NC
+	var nv *NV
+	var ne *NE
+	fmt.Println(nc, nv, ne)
+	fmt.Println(fmt.Sprint(nc), fmt.Sprintf("%v|%s", nc, nv))
 }

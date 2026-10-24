@@ -31,6 +31,7 @@ import {
 	getMapKeyValTypes,
 	getReceiverTypeName,
 	goTypeKey,
+	isAnyType,
 	isArrayType,
 	isInterfaceType,
 	isMapType,
@@ -1158,6 +1159,7 @@ class ModuleEmitter {
 		}
 		this.getTestingArgImportIndex("i32", true);
 		this.getTestingArgErrImportIndex();
+		this.getTestingArgSpreadImportIndex();
 		this.getFmtNewArrayIndex();
 		this.getFmtArrayPushIndex();
 		this.getFmtNewMapIndex();
@@ -1169,6 +1171,7 @@ class ModuleEmitter {
 		this.getFmtBoxF64Index();
 		this.getFmtBoxBoolIndex();
 		this.getFmtNewBoxIndex();
+		this.getFmtNewStringerIndex();
 		if (this.usesStdlibEnv) {
 			for (const [name, params, results] of STDLIB_IMPORTS) {
 				this.getOrAddFuncImport("env", name, params, results);
@@ -1524,6 +1527,15 @@ class ModuleEmitter {
 		);
 	}
 
+	getFmtNewStringerIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"fmt_new_stringer",
+			["externref", "externref", "i32"],
+			["externref"],
+		);
+	}
+
 	getFmtNewStructIndex() {
 		return this.getOrAddFuncImport(
 			"env",
@@ -1603,6 +1615,15 @@ class ModuleEmitter {
 	}
 
 	// Error operands of fmt.Sprint/Print/Append: a non-string for the host.
+	getTestingArgSpreadImportIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"testing_arg_spread",
+			["externref"],
+			[],
+		);
+	}
+
 	getTestingArgErrImportIndex() {
 		return this.getOrAddFuncImport("env", "testing_arg_err", ["externref"], []);
 	}
@@ -2905,6 +2926,13 @@ export function compileWasmModule(
 		);
 	}
 	_registerIoSyntheticMethods(funcDecls, mod, STR_T, progs);
+	// `__any_fmt` turns an `any` operand of fmt into the host value; its body
+	// is emitted last-but-one so every type registered by user code is seen.
+	if (_usesFmtAny(funcDecls, mod)) {
+		funcDecls.push(
+			helper("__any_fmt", [{ name: "a", type: ANY_T }], STR_T, "any_fmt"),
+		);
+	}
 
 	// 1e4. Accessor helpers for &s.F and &xs[i] / &arr[i]
 	_collectAccessorHelpers(progs, funcDecls, mod, checker);
@@ -3228,6 +3256,27 @@ function _usesAnyEq(funcDecls, mod) {
 			if (n.kind === "SwitchStmt" && n.tag) return isAnyRef(n.tag);
 			return false;
 		}),
+	);
+}
+
+// An `fmt` call with an `any`/interface operand or a `xs...` spread needs
+// `__any_fmt`.  `emitFmtCall` falls back to scalar-only dispatch without it.
+function _usesFmtAny(funcDecls, mod) {
+	return funcDecls.some((fn) =>
+		_someNode(
+			fn.body,
+			(n) =>
+				n.kind === "CallExpr" &&
+				n.func?.kind === "SelectorExpr" &&
+				n.func.expr?.kind === "Ident" &&
+				n.func.expr.name === "fmt" &&
+				n.args?.some(
+					(a) =>
+						a._spread ||
+						isAnyType(a._type, mod.checker) ||
+						isInterfaceType(a._type, mod.checker),
+				),
+		),
 	);
 }
 
