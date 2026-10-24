@@ -208,6 +208,7 @@ Rules that follow:
 2. **Conformance fixtures do not print `len(s)`, `s[i]` or `range` indices of non-ASCII strings.** They may print `len([]byte(s))`, runes, and the output of the packages under test. The harness lints fixtures for `len(` applied to a string literal containing non-ASCII bytes and fails with a hint.
 3. **Documentation.** The table above moves into [`go-compatibility.md`](../../docs/go-compatibility.md) (it replaces the two existing rows on `range` over string and `len()`), and [`language-support.md`](../../docs/language-support.md) links to it from the `strings`/`bytes` rows.
 4. **JSON and CSV offsets.** `SyntaxError.Offset`, `csv.ParseError.Column` and `Decoder.InputOffset` count **bytes** of the UTF-8 input, because both codecs read `[]byte`. This matches Go exactly, even though `len(s)` on the original string does not.
+5. **Byte escapes.** `\xNN` and octal escapes in string literals are the code point U+00NN, because a GoFront string cannot hold a raw byte. `len("\x00")` is 1 as in Go, but `"\xc3"` is `Ã`, so `[]byte("\xc3")` is the two bytes `c3 83` where Go has one (`c3`). Use `[]byte{0xc3}` for raw bytes. Unknown escapes (`\q`, `\'` in a string, `\"` in a rune) and out-of-range `\u`/`\U`/octal values are lexer errors, as in Go.
 
 ### 2. Go-source stdlib
 
@@ -801,7 +802,7 @@ The Phase 0.5 reviews (PR #29) found these bugs. None of them were introduced by
 
 Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-2026-10-24) table that the PR #28–#40 reviews found and left open. They run **next, before Phase 3.1.2**. Each task turns its probes into parity tests: a `compileHybrid` (or `compileHybridProject`) test whose expected value is the go1.26 output quoted in the task.
 
-- [ ] **Task 0.21 — String and rune literal escapes**
+- [x] **Task 0.21 — String and rune literal escapes**
   - Files: `src/lexer.js` (`readString`, the rune-literal reader)
   - Do: decode every Go escape in interpreted string literals the way the rune reader does: `\a`, `\b`, `\f`, `\v`, `\'` (runes only), `\xNN`, octal `\NNN`, `\uNNNN`, `\UNNNNNNNN`. An unknown escape is a lexer error (`unknown escape sequence`), as in Go. Bytes `\x80`–`\xff` follow the [§1.1](#11-string-semantics-both-backends) representation and that decision is written into §1.1 (in particular whether `[]byte("\xc3")` keeps the single raw byte).
   - Test: parity tests in `test/unit/language/core.test.js`: `len("\x00")` → 1 (P01), `len([]byte("\xc3"))` → 1 (P02), `"é" == "é"`, `"\101" == "A"`, `"\v\f"` lengths. Negative: `"\q"` with `assertErrorContains(errors, "unknown escape")`. Lexer unit test in `test/unit/compiler/lexer-parser.test.js`.
