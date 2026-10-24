@@ -107,7 +107,7 @@ Members of each Go package (functions, types, methods, fields, constants and var
 | `encoding/hex` | 7 of 15 | 8 | 0 | 0 |
 | `encoding/json` | 5 of 68 | 63 | 0 | 0 |
 | `errors` | 6 of 7 | 1 | 0 | 0 |
-| `fmt` | 18 of 43 | 25 | 0 | 0 |
+| `fmt` | 21 of 43 | 22 | 0 | 0 |
 | `hash` | 0 of 32 | 32 | 0 | 0 |
 | `hash/adler32` | 0 of 3 | 3 | 0 | 0 |
 | `hash/crc32` | 0 of 12 | 12 | 0 | 0 |
