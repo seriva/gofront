@@ -16,6 +16,10 @@ const _SSCAN_LOOP =
 
 const FMT_METHODS = ["Error", "String"];
 const isExportedName = (n) => /^\p{Lu}/u.test(n);
+// Descriptor of a struct value whose class has a pointer-receiver Error/String:
+// a value element or field must not be taken for a pointer because an earlier
+// &x tagged the same object (see isPointer in __sprintf).
+const FMT_STRUCT_VALUE = "{ sv: 1 }";
 
 /** @type {ThisType<CodeGen>} */
 export const fmtMethods = {
@@ -33,6 +37,7 @@ export const fmtMethods = {
 	// value of the type needs one:
 	//   { b: Class, n }  a raw value of a named type with a value-receiver
 	//                    Error/String; Class boxes it, n: numeric (map keys)
+	//   { sv: 1 }        a struct value with a pointer-receiver Error/String
 	//   { e }            elements of a slice or array
 	//   { k, v }         keys and values of a map
 	_fmtDesc(t, seen = new Set()) {
@@ -64,8 +69,41 @@ export const fmtMethods = {
 			const numeric = u?.kind === "basic" && /^(u?int|float)/.test(u.name);
 			return `{ b: ${info.cls}, n: ${numeric ? 1 : 0} }`;
 		}
+		if (u?.kind === "struct" && this._fmtHasPtrMethod(u))
+			return FMT_STRUCT_VALUE;
 		if (!u || u.kind === "struct" || u.kind === "interface") return null;
 		return this._fmtDesc(u, seen);
+	},
+
+	// Whether struct `st` has a pointer-receiver Error/String, declared or
+	// promoted from an embedded struct.
+	_fmtHasPtrMethod(st, seen = new Set()) {
+		if (seen.has(st)) return false;
+		seen.add(st);
+		if (FMT_METHODS.some((m) => st.methods?.get(m)?._ptrRecv)) return true;
+		return (st._embeds ?? []).some((raw) => {
+			const inner = (raw.kind === "pointer" ? raw.base : raw).underlying;
+			return inner?.kind === "struct" && this._fmtHasPtrMethod(inner, seen);
+		});
+	},
+
+	// Error/String promoted from embedded interface fields, as { method: field }.
+	_fmtPromoted(st, methodDecls) {
+		const out = {};
+		for (const f of st._structFields ?? []) {
+			if (!f.embedded) continue;
+			const t = this.checker?.resolveType?.(f.type) ?? f.type;
+			const it = t?.kind === "named" ? t.underlying : t;
+			const key = (f.astType?.name ?? t?.name ?? "").split(".").pop();
+			if (it?.kind !== "interface" || !key) continue;
+			for (const mn of FMT_METHODS) {
+				const m = it.methods?.get(mn);
+				if (!m || m.params?.length > 0 || out[mn]) continue;
+				if (methodDecls.some((d) => d.name === mn)) continue;
+				out[mn] = key;
+			}
+		}
+		return out;
 	},
 
 	// Per-class fmt metadata of a struct: which of Error/String have a pointer
@@ -81,10 +119,17 @@ export const fmtMethods = {
 			this.line(
 				`Object.defineProperty(${name}.prototype, "__pr", { value: ${JSON.stringify(ptrRecv)} });`,
 			);
+		const promoted = this._fmtPromoted(st, methodDecls);
+		if (Object.keys(promoted).length > 0)
+			this.line(
+				`Object.defineProperty(${name}.prototype, "__pe", { value: ${JSON.stringify(promoted)} });`,
+			);
 		const fields = [];
 		for (const [fname, ftype] of st.fields.entries()) {
-			const desc = isExportedName(fname) ? this._fmtDesc(ftype) : null;
-			if (desc) fields.push(`${fname}: ${desc}`);
+			const desc = this._fmtDesc(ftype);
+			// Unexported fields get no method dispatch, only the value marker.
+			if (desc && (isExportedName(fname) || desc === FMT_STRUCT_VALUE))
+				fields.push(`${fname}: ${desc}`);
 		}
 		// A thunk: the descriptors name classes declared further down.
 		if (fields.length > 0)
