@@ -814,7 +814,7 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
   - Test: parity tests in `test/unit/builtins/operators.test.js`: `^uint8(5)`, `-uint32(1)` → `250 4294967295` (P03); `int64(1) << 70` → 0 (P04); `int64(-1) >> 64`, `int64(-1) << 64` → `-1 0` (P51).
   - Done when: all pass; `npm run bench` within 3%.
 
-- [ ] **Task 0.23 — Shift count typing and negative constant counts**
+- [x] **Task 0.23 — Shift count typing and negative constant counts**
   - Files: `src/typechecker/expressions.js` (binary shift), `src/typechecker/statements.js` (`<<=`/`>>=`), `src/typechecker/const-fold.js`
   - Do: a shift count may be any integer type (or an untyped constant representable as `uint`) in both `x << n` and `x <<= n`; the result has the type of the left operand. A constant negative count is an error.
   - Test: `test/unit/language/constants.test.js`: parity test `x := 1; var n uint = 3; x <<= n` → 8 (P50); negative test `const s = -1; x << s` with `assertErrorContains(errors, "invalid shift count")`.

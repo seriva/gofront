@@ -198,10 +198,12 @@ export const statementCheckMethods = {
 					stmt.rhs[i],
 				);
 			// A shift count is not converted to the left operand's type.
+			if (stmt.op === "<<=" || stmt.op === ">>=") {
+				if (r && !isAny(r)) this.checkShiftCount(r, stmt.rhs[i]);
+				continue;
+			}
 			if (
 				stmt.rhs.length === lhsTypes.length &&
-				stmt.op !== "<<=" &&
-				stmt.op !== ">>=" &&
 				this._checkConstOverflow(lhsTypes[i], r, stmt.rhs[i], "assignment")
 			)
 				continue;

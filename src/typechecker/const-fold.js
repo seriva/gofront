@@ -242,7 +242,7 @@ function foldShift(op, a, b) {
 	const n = constIntValue(b);
 	const x = constIntValue(a);
 	if (n === null || x === null) return null;
-	if (n < 0n) throw new Error("invalid shift: negative shift count");
+	if (n < 0n) throw new Error("invalid shift count: negative shift count");
 	if (n > MAX_SHIFT) return null;
 	return typedInt(op === "<<" ? x << n : x >> n, a.t);
 }
