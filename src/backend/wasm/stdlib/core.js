@@ -27,6 +27,15 @@ function _isPointerKind(t) {
 	);
 }
 
+// Whether `sig` is `Error() string` / `String() string` and in the method set
+// of the operand (a pointer receiver needs a pointer operand).
+function _isFmtMethodSig(sig, isPtr) {
+	if (!sig || sig.params?.length || sig.variadic) return false;
+	if (sig._ptrRecv && !isPtr) return false;
+	const ret = sig.returns ?? [];
+	return ret.length === 1 && ret[0]?.name === "string";
+}
+
 function _isSimplePrimitive(t) {
 	const n = t?.name ?? t;
 	return n === "string" || n === "bool";
@@ -446,7 +455,9 @@ export class StdlibCoreEmitter {
 
 	_isFmtExternOperand(goType) {
 		return (
-			isAnyType(goType, this.mod.checker) || this._isCompositeGoType(goType)
+			isAnyType(goType, this.mod.checker) ||
+			this._isCompositeGoType(goType) ||
+			this._fmtMethodOf(goType) !== null
 		);
 	}
 
@@ -465,6 +476,15 @@ export class StdlibCoreEmitter {
 	// format: strings pass through, scalars are boxed by their dynamic type,
 	// anything else (and nil) becomes a null externref.
 	_emitAnyToExternref() {
+		const helper = this.mod.resolveFuncIndex("__any_fmt");
+		if (helper !== null && helper !== undefined) {
+			this.pushInstruction({ op: "call", funcIndex: helper });
+			return;
+		}
+		this._emitAnyScalarsToExternref();
+	}
+
+	_emitAnyScalarsToExternref() {
 		const tmp = this.acquireTemp("anyref");
 		this.pushInstruction({ op: "local.set", index: tmp });
 		const kinds = [
@@ -939,10 +959,195 @@ export class StdlibCoreEmitter {
 		this.releaseTemp(valTmp, valW);
 	}
 
+	// The `String() string` / `Error() string` method fmt calls on a value of
+	// static type `goType` (Error first, as in Go), or null.  A pointer-receiver
+	// method applies to pointers only; interfaces are dispatched on the dynamic
+	// type (`__any_fmt`).
+	_fmtMethodOf(goType) {
+		if (!goType || isAnyType(goType, this.mod.checker)) return null;
+		const checker = this.mod.checker;
+		const isPtr = _isPointerKind(goType);
+		const named = this._fmtNamed(isPtr ? (goType.base ?? goType.elem) : goType);
+		if (!named || named.name === ERROR_STRUCT) return null;
+		// Elements of an `any`-held container share a wasm type across Go types
+		// (`[]Color` and `[]int`), so scalar-backed named types are not dispatched.
+		if (
+			this._fmtNoScalarMethods &&
+			!isPtr &&
+			!isStructType(goType, checker, this.mod)
+		)
+			return null;
+		// Linked projects use a stub checker (no `implements`), so look the
+		// method up on the named type directly.
+		const methodMap = this._fmtMethodMap(named);
+		for (const method of ["Error", "String"]) {
+			const sig = methodMap?.get(method);
+			if (!_isFmtMethodSig(sig, isPtr)) continue;
+			const found = this._fmtMethodFunc(named, method);
+			if (found) return { method, isPtr, ...found };
+		}
+		return null;
+	}
+
+	// The named type behind `t` (type names resolve through the checker), or null.
+	_fmtNamed(t) {
+		if (t?.kind === "TypeName" || t?.kind === "Ident")
+			t = this.mod.checker?.types?.get(t.name) ?? t;
+		return t?.kind === "named" && t.name ? t : null;
+	}
+
+	_fmtMethodMap(named) {
+		const resolved = this.mod.checker?.types?.get(named.name) ?? named;
+		const under = resolved?.kind === "named" ? resolved.underlying : resolved;
+		if (under?.kind === "interface") return null;
+		return resolved?.methods?.size
+			? resolved.methods
+			: (under?.methods ?? null);
+	}
+
+	_fmtMethodFunc(named, method) {
+		const names = [`${named.name}.${method}`];
+		if (named.pkg) names.unshift(`${named.pkg}.${named.name}.${method}`);
+		for (const n of names) {
+			const funcIndex = this.mod.resolveFuncIndex(n);
+			if (funcIndex === null || funcIndex === undefined) continue;
+			const recv = this.mod.getFuncParamGoTypes(n)[0];
+			return { funcIndex, valueRecv: !_isPointerKind(recv) };
+		}
+		return null;
+	}
+
+	// A struct that embeds `error` and declares no Error/String itself prints
+	// the embedded error's text (the checker does not promote interface
+	// methods, so only fmt sees this).
+	_fmtEmbeddedError(goType) {
+		if (!this.mod.hasErrorType) return null;
+		let t = _isPointerKind(goType) ? (goType.base ?? goType.elem) : goType;
+		if (t?.kind === "TypeName" || t?.kind === "Ident")
+			t = this.mod.checker?.types?.get(t.name) ?? t;
+		if (t?.kind !== "named" || t.name === ERROR_STRUCT) return null;
+		const sInfo = this.mod.getStructType(t.name);
+		const field = sInfo?.fields?.find(
+			(f) => f.embedded && isErrorType(f.goType),
+		);
+		if (!field) return null;
+		return {
+			typeIndex: sInfo.typeIndex,
+			fieldIndex: sInfo.fieldIndexMap.get(field.name),
+		};
+	}
+
+	_emitEmbeddedErrorToExternref(goType, emb, isNested, seen) {
+		const valW = toWasmType(goType, this.mod.checker, this.mod);
+		const valTmp = this.acquireTemp(valW);
+		const rawTmp = this.acquireTemp("externref");
+		const errTmp = this.acquireTemp("anyref");
+		this.pushInstruction({ op: "local.tee", index: valTmp });
+		this._emitToExternrefPlain(goType, isNested, seen);
+		this.pushInstruction({ op: "local.set", index: rawTmp });
+		// nil struct pointer or nil embedded error: print the struct as is.
+		this.pushInstruction({ op: "local.get", index: valTmp });
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction({ op: "if", blockType: "externref" });
+		this.pushInstruction({ op: "local.get", index: rawTmp });
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "local.get", index: valTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: emb.typeIndex,
+			fieldIndex: emb.fieldIndex,
+		});
+		this.pushInstruction({ op: "local.tee", index: errTmp });
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction({ op: "if", blockType: "externref" });
+		this.pushInstruction({ op: "local.get", index: rawTmp });
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "local.get", index: rawTmp });
+		this.pushInstruction({ op: "local.get", index: errTmp });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.resolveFuncIndex("__error_str"),
+		});
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getFmtNewStringerIndex(),
+		});
+		this.pushInstruction("end");
+		this.pushInstruction("end");
+		this.releaseTemp(errTmp, "anyref");
+		this.releaseTemp(rawTmp, "externref");
+		this.releaseTemp(valTmp, valW);
+	}
+
 	emitToExternref(goType, isNested = false, seen = new Set()) {
+		const m = this._fmtMethodOf(goType);
+		if (!m) {
+			const emb = this._fmtEmbeddedError(goType);
+			if (emb) {
+				this._emitEmbeddedErrorToExternref(goType, emb, isNested, seen);
+				return;
+			}
+			this._emitToExternrefPlain(goType, isNested, seen);
+			return;
+		}
+		const valW = toWasmType(goType, this.mod.checker, this.mod);
+		const valTmp = this.acquireTemp(valW);
+		const rawTmp = this.acquireTemp("externref");
+		this.pushInstruction({ op: "local.tee", index: valTmp });
+		this._emitToExternrefPlain(goType, isNested, seen);
+		this.pushInstruction({ op: "local.set", index: rawTmp });
+		const nilGuard = m.isPtr && m.valueRecv;
+		if (nilGuard) {
+			// A nil pointer with a value receiver prints <nil>.
+			this.pushInstruction({ op: "local.get", index: valTmp });
+			this.pushInstruction("ref.is_null");
+			this.pushInstruction({ op: "if", blockType: "externref" });
+			this.pushInstruction({ op: "ref.null", heapType: "extern" });
+			this.pushInstruction("else");
+		}
+		this.pushInstruction({ op: "local.get", index: rawTmp });
+		this.pushInstruction({ op: "local.get", index: valTmp });
+		if (nilGuard && !isPointerToStruct(goType, this.mod.checker, this.mod)) {
+			// A pointer to a scalar is a box; the value receiver takes the scalar.
+			const box = this.mod.getBoxType(goType.base ?? goType.elem);
+			this.pushInstruction({
+				op: "ref.cast",
+				typeIndex: box.typeIndex,
+				typeName: box.name,
+			});
+			this.pushInstruction({
+				op: "struct.get",
+				typeIndex: box.typeIndex,
+				typeName: box.name,
+				fieldIndex: 0,
+			});
+		}
+		this.pushInstruction({ op: "call", funcIndex: m.funcIndex });
+		this.pushInstruction({
+			op: "i32.const",
+			value: m.method === "Error" ? 1 : 0,
+		});
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getFmtNewStringerIndex(),
+		});
+		if (nilGuard) this.pushInstruction("end");
+		this.releaseTemp(rawTmp, "externref");
+		this.releaseTemp(valTmp, valW);
+	}
+
+	_emitToExternrefPlain(goType, isNested = false, seen = new Set()) {
 		const valW = toWasmType(goType, this.mod.checker, this.mod);
 		const valTmp = this.acquireTemp(valW);
 		this.pushInstruction({ op: "local.set", index: valTmp });
+
+		if (isAnyType(goType, this.mod.checker)) {
+			this.pushInstruction({ op: "local.get", index: valTmp });
+			this.releaseTemp(valTmp, valW);
+			this._emitAnyToExternref();
+			return;
+		}
 
 		if (this._emitScalarToExternref(goType, valTmp, valW)) return;
 
@@ -994,6 +1199,26 @@ export class StdlibCoreEmitter {
 		this.releaseTemp(valTmp, valW);
 	}
 
+	// `xs...` (xs []any: the host appends each element) and a bare `nil`
+	// operand; returns the buffer entry, or null for an ordinary operand.
+	_emitSpecialFmtOperand(arg, goType) {
+		const spread = arg._spread && isSliceType(goType, this.mod.checker);
+		const isNil =
+			(arg.kind === "Ident" && arg.name === "nil") ||
+			goType?.name === "nil" ||
+			goType?.kind === "nil";
+		if (!spread && !isNil) return null;
+		const tmp = this.acquireTemp("externref");
+		if (spread) {
+			this.emitExpr(arg, toWasmType(goType, this.mod.checker, this.mod));
+			this.emitToExternref(goType, false);
+		} else {
+			this.pushInstruction({ op: "ref.null", heapType: "extern" });
+		}
+		this.pushInstruction({ op: "local.set", index: tmp });
+		return { tmp, wType: "externref", isBool: false, errTmp: null, spread };
+	}
+
 	// Evaluates every argument into a temp first, then pushes them in order via
 	// the typed `testing_arg_*` imports.  Anything that may run user code (the
 	// argument itself, or `Error()` on an `error` operand) happens in the first
@@ -1019,6 +1244,11 @@ export class StdlibCoreEmitter {
 							this.mod.checker?.types?.get("error"),
 						),
 					));
+			const special = this._emitSpecialFmtOperand(arg, goType);
+			if (special) {
+				temps.push(special);
+				continue;
+			}
 			const valW = toWasmType(goType, this.mod.checker, this.mod);
 			if (isErr) {
 				const errTmp = this.acquireTemp("anyref");
@@ -1066,14 +1296,12 @@ export class StdlibCoreEmitter {
 			this.pushInstruction({ op: "local.set", index: tmp });
 			temps.push({ tmp, wType, isBool, errTmp: null });
 		}
-		for (const { tmp, wType, isBool, markErr } of temps) {
+		for (const { tmp, wType, isBool, markErr, spread } of temps) {
 			this.pushInstruction({ op: "local.get", index: tmp });
-			this.pushInstruction({
-				op: "call",
-				funcIndex: markErr
-					? this.mod.getTestingArgErrImportIndex()
-					: this.mod.getTestingArgImportIndex(wType, isBool),
-			});
+			let funcIndex = this.mod.getTestingArgImportIndex(wType, isBool);
+			if (markErr) funcIndex = this.mod.getTestingArgErrImportIndex();
+			if (spread) funcIndex = this.mod.getTestingArgSpreadImportIndex();
+			this.pushInstruction({ op: "call", funcIndex });
 		}
 		return temps;
 	}
@@ -7784,6 +8012,13 @@ export class StdlibCoreEmitter {
 				this.pushInstruction({ op: "call", funcIndex: logIdx });
 				return;
 			}
+			if (args.some((a) => a._spread)) {
+				const temps = this._emitArgBuffer(args, true);
+				this.pushInstruction({ op: "i32.const", value: 1 });
+				this._callStdlib("fmt_print");
+				this._releaseArgBuffer(temps);
+				return;
+			}
 			for (let i = 0; i < args.length; i++) {
 				const arg = args[i];
 				const isLast = i === args.length - 1 && isPrintln;
@@ -8639,6 +8874,172 @@ export class StdlibCoreEmitter {
 		this.pushInstruction({ op: "call", funcIndex: idx });
 	}
 
+	// Whether `emitToExternref` can turn a value of this type into a host value.
+	_isExternConvertible(goType, depth = 0) {
+		if (!goType || depth > 4) return false;
+		const checker = this.mod.checker;
+		if (isAnyType(goType, checker)) return true;
+		if (isSliceType(goType, checker) || isArrayType(goType, checker)) {
+			return this._isExternConvertible(
+				goType.elem ?? goType.underlying?.elem,
+				depth + 1,
+			);
+		}
+		if (isMapType(goType, checker)) {
+			const { keyType, valType } = getMapKeyValTypes(goType, checker);
+			return (
+				this._isExternConvertible(keyType, depth + 1) &&
+				this._isExternConvertible(valType, depth + 1)
+			);
+		}
+		return this._isExternLeaf(goType);
+	}
+
+	_isExternLeaf(goType) {
+		const checker = this.mod.checker;
+		if (
+			isStructType(goType, checker, this.mod) ||
+			isPointerToStruct(goType, checker, this.mod) ||
+			isComplex(goType) ||
+			_isPointerKind(goType)
+		)
+			return true;
+		return ["i32", "i64", "f32", "f64", "externref"].includes(
+			toWasmType(goType, checker, this.mod),
+		);
+	}
+
+	// Body of `__any_fmt(a any) externref`: the dynamic type of `a` is found
+	// with a `ref.test` chain over every type the module knows (like
+	// `__any_eq`), and the value goes through `emitToExternref`, so
+	// String/Error dispatch and nesting work as for statically typed operands.
+	_emitAnyFmtHelper() {
+		const done = new Set();
+		this.pushInstruction({ op: "local.get", index: 0 });
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "ref.null", heapType: "extern" });
+		this.pushInstruction("return");
+		this.pushInstruction("end");
+
+		// Strings are host values; scalars are boxed by their dynamic type.
+		this.pushInstruction({ op: "local.get", index: 0 });
+		this._emitTypeTest({ kind: "basic", name: "string" });
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: 0 });
+		this.pushInstruction("extern.convert_any");
+		this.pushInstruction("return");
+		this.pushInstruction("end");
+
+		this._emitAnyFmtError(done);
+		for (let round = 0; round < 3; round++) {
+			this._emitAnyFmtBoxes(done);
+			this._emitAnyFmtStructs(done);
+			// Containers share a wasm type across Go element types, so their
+			// elements are formatted without scalar-backed Stringer dispatch.
+			this._fmtNoScalarMethods = true;
+			this._emitAnyFmtContainers(done);
+			this._fmtNoScalarMethods = false;
+		}
+		this.pushInstruction({ op: "ref.null", heapType: "extern" });
+		this.pushInstruction("return");
+	}
+
+	// One arm of the `__any_fmt` chain: if `a` is a `typeIndex`, format it as
+	// `goType` (a box is unwrapped first) and return.
+	_emitAnyFmtArm(done, typeIndex, goType, unbox) {
+		if (done.has(typeIndex)) return;
+		done.add(typeIndex);
+		this.pushInstruction({ op: "local.get", index: 0 });
+		this.pushInstruction({ op: "ref.test", typeIndex });
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: 0 });
+		this.pushInstruction({ op: "ref.cast", typeIndex });
+		if (unbox) {
+			this.pushInstruction({ op: "struct.get", typeIndex, fieldIndex: 0 });
+		}
+		this.emitToExternref(goType);
+		this.pushInstruction("return");
+		this.pushInstruction("end");
+	}
+
+	// errors.New / fmt.Errorf values print their message.
+	_emitAnyFmtError(done) {
+		const errInfo = this.mod.hasErrorType
+			? this.mod.getStructType(ERROR_STRUCT)
+			: null;
+		if (!errInfo) return;
+		const msgTmp = this.acquireTemp("externref");
+		this.pushInstruction({ op: "local.get", index: 0 });
+		this.pushInstruction({ op: "ref.test", typeIndex: errInfo.typeIndex });
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: 0 });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.resolveFuncIndex("__error_str"),
+		});
+		this.pushInstruction({ op: "local.set", index: msgTmp });
+		this.pushInstruction({ op: "local.get", index: msgTmp });
+		this.pushInstruction({ op: "local.get", index: msgTmp });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getFmtNewStringerIndex(),
+		});
+		this.pushInstruction("return");
+		this.pushInstruction("end");
+		this.releaseTemp(msgTmp, "externref");
+		done.add(errInfo.typeIndex);
+	}
+
+	_emitAnyFmtBoxes(done) {
+		for (const box of [...this.mod.ifaceBoxTypes.values()]) {
+			// `any(5)` boxes the untyped constant type; format it as its default type.
+			const goType =
+				box.goType?.kind === "untyped"
+					? {
+							kind: "basic",
+							name:
+								{ float: "float64", rune: "int32" }[box.goType.base] ??
+								box.goType.base,
+						}
+					: box.goType;
+			if (this._isExternConvertible(goType))
+				this._emitAnyFmtArm(done, box.typeIndex, goType, true);
+		}
+	}
+
+	// A bare struct ref in an `any` is a pointer.
+	_emitAnyFmtStructs(done) {
+		const checker = this.mod.checker;
+		for (const [name, sInfo] of [...this.mod.structTypes.entries()]) {
+			const named = name === ERROR_STRUCT ? null : checker?.types?.get(name);
+			if (!named) continue;
+			const ptrType = { kind: "pointer", base: named };
+			const w = toWasmType(ptrType, checker, this.mod);
+			if (w?.typeIndex === sInfo.typeIndex)
+				this._emitAnyFmtArm(done, sInfo.typeIndex, ptrType, false);
+		}
+	}
+
+	_emitAnyFmtContainers(done) {
+		const groups = [
+			[this.mod.sliceTypes, (i) => ({ kind: "slice", elem: i.elemGoType })],
+			[this.mod.arrayTypes, (i) => ({ kind: "array", elem: i.elemGoType })],
+			[
+				this.mod.mapTypes,
+				(i) => ({ kind: "map", key: i.keyGoType, value: i.valGoType }),
+			],
+		];
+		for (const [infos, toGoType] of groups) {
+			for (const info of [...infos.values()]) {
+				const goType = toGoType(info);
+				if (this._isExternConvertible(goType))
+					this._emitAnyFmtArm(done, info.typeIndex, goType, false);
+			}
+		}
+	}
+
 	// Bodies of the synthetic runtime helpers declared in compileWasmModule.
 	emitRuntimeHelper(fn) {
 		const errInfo = this.mod.getStructType(ERROR_STRUCT);
@@ -8862,6 +9263,9 @@ export class StdlibCoreEmitter {
 					typeIndex: errInfo.typeIndex,
 				});
 				this.pushInstruction("return");
+				return;
+			case "any_fmt":
+				this._emitAnyFmtHelper();
 				return;
 			case "error_str":
 				this.pushInstruction({ op: "local.get", index: 0 });

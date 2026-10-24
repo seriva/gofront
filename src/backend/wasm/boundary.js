@@ -1918,6 +1918,10 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 	let lineBuf = "";
 	let targs = [];
 	let fmtStructMap = new WeakMap();
+	// A value whose type has String()/Error(): the method already ran in WASM.
+	// __gfUnbox hands fmt the raw value for the other verbs.
+	class FmtStr { constructor(r, s) { this.r = r; this.s = s; } __gfUnbox() { return this.r; } String() { return this.s; } }
+	class FmtErr { constructor(r, s) { this.r = r; this.s = s; } __gfUnbox() { return this.r; } Error() { return this.s; } }
 	const late = { exports: null };
 	const flush = () => { write(lineBuf); lineBuf = ""; };
 	const print = (v) => {
@@ -2035,11 +2039,13 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		"fmt_box_i64": (v) => (v > ${P}MAX || v < -${P}MAX ? v : Number(v)),
 		"fmt_box_f64": (v) => v,
 		"fmt_box_bool": (v) => v !== 0,
+		"fmt_new_stringer": (r, s, isErr) => (isErr !== 0 ? new FmtErr(r, s) : new FmtStr(r, s)),
 		"fmt_new_box": () => ({ value: null, __p: true, __box: true }),
 		"testing_arg_i32": targ, "testing_arg_f32": targ, "testing_arg_f64": targ,
 		"testing_arg_str": targ, "testing_arg_any": targ,
 		"testing_arg_i64": (v) => targ(v > ${P}MAX || v < -${P}MAX ? v : Number(v)),
 		"testing_arg_bool": (v) => targ(v !== 0),
+		"testing_arg_spread": (a) => { if (a) for (const v of a) targs.push(v); },
 		"testing_arg_err": (s) => targ({ Error() { return s; } }),
 		"testing_call": (t, i) => { const a = targs; targs = []; fmtStructMap = new WeakMap(); t[stringTable[i]](...a); },
 		"testing_name": (t) => t.Name(),
