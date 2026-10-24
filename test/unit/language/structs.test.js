@@ -691,6 +691,26 @@ func Main() int {
 	assertEqual(Number(res.wasmRes), 5353);
 });
 
+test("a promoted pointer-receiver method mutates the embedded value", () => {
+	const res = compileHybrid(`package main
+
+type In struct{ A int }
+
+func (i *In) Inc() { i.A++ }
+
+type Out struct{ In }
+
+func Main() int {
+	o := Out{}
+	o.Inc()
+	o.Inc()
+	return o.A*10 + o.In.A
+}
+`).run("Main");
+	assertEqual(res.jsRes, 22);
+	assertEqual(Number(res.wasmRes), 22);
+});
+
 test("fmt prints struct map keys as Go does (P15)", () => {
 	const res = compileHybrid(`package main
 
