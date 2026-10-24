@@ -834,7 +834,7 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
   - Test: parity tests in `test/unit/wasm/variadic.test.js`: `sum(nilSlice...)` → 0 (P08); `set(a...)` with `xs[0] = 9` → 9 (P09); `append(xs, ys...)` and `fmt.Println(args...)` unchanged.
   - Done when: all pass.
 
-- [ ] **Task 0.26 — Nil maps and nil slices in JS**
+- [x] **Task 0.26 — Nil maps and nil slices in JS**
   - Files: `src/backend/js/expressions.js` (nil comparison, `_nilMap`), `src/backend/js/stdlib/fmt.js` (`Append*`)
   - Do: `m == nil` is true for the strict-mode `__nilmap` sentinel and for an unassigned map in `js` packages, and false for `map[K]V{}` and `make(map…)`. `fmt.Append(nil)` and `fmt.Append(nil, "")` return nil.
   - Test: parity tests in `test/unit/wasm/maps.test.js`: `var m map[string]int; n := map[string]int{}` → `true false` (P60); `fmt.Append(nil) == nil` → true (P17) in `test/unit/builtins/fmt-stringer.test.js`.
