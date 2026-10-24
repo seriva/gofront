@@ -6,6 +6,7 @@ import {
 	assertEqual,
 	assertThrows,
 	compileHybrid,
+	compileWasm,
 	runWasm,
 	section,
 	test,
@@ -1981,4 +1982,79 @@ func Main() string {
 `;
 	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
 	assertEqual(wasmRes, jsRes);
+});
+
+section("WASM stdlib — functions as values (Task 0.35)");
+
+test("fmt.Sprint as a package-level func value (P72)", () => {
+	const src = `
+package main
+
+import "fmt"
+
+var sp = fmt.Sprint
+
+func Main() string { return sp(1) + "|" + sp(1, 2) + "|" + sp() + "|" + sp("a", 2) }
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "1|1 2||a2");
+	assertEqual(jsRes, "1|1 2||a2");
+});
+
+test("strings.ToUpper passed to a func(string) string parameter", () => {
+	const src = `
+package main
+
+import "strings"
+
+func apply(f func(string) string, s string) string { return f(s) }
+
+func Main() string {
+	g := strings.TrimSpace
+	return apply(strings.ToUpper, "abc") + g("  x ")
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "ABCx");
+	assertEqual(jsRes, "ABCx");
+});
+
+test("fmt.Sprintf and sort.Ints as local func values", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"sort"
+)
+
+func Main() string {
+	f := fmt.Sprintf
+	xs := []int{3, 1, 2}
+	sl := sort.Ints
+	sl(xs)
+	return f("%d-%s-%v", 3, "x", xs[0])
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "3-x-1");
+	assertEqual(jsRes, "3-x-1");
+});
+
+test("a stdlib member that cannot be a value names itself in the error", () => {
+	assertThrows(
+		() =>
+			compileWasm(`
+package main
+
+import "os"
+
+func Main() int {
+	f := os.Exit
+	_ = f
+	return 1
+}
+`),
+		"os.Exit cannot be used as a value",
+	);
 });
