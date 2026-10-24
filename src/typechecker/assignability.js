@@ -1,6 +1,7 @@
 // Assignability, binary result types, and interface satisfaction.
 // Installed as a mixin on TypeChecker.prototype.
 
+import { constIntValue } from "./const-fold.js";
 import { sharedInfo } from "./stdlib/shared.js";
 import {
 	ANY,
@@ -12,6 +13,7 @@ import {
 	isComplex,
 	isComplex64,
 	isComplexOrNumeric,
+	isInteger,
 	isNil,
 	isNumeric,
 	isPointer,
@@ -80,6 +82,8 @@ export const assignabilityMethods = {
 		if (isAny(lt) || isAny(rt)) return ANY;
 		if (isComplex(lt) || isComplex(rt))
 			return this._binaryResultTypeComplex(op, lt, rt, node);
+		if ((op === "<<" || op === ">>") && isNumeric(lt) && isNumeric(rt))
+			return this._binaryResultTypeShift(op, lt, rt, node);
 		if (isNumeric(lt) && isNumeric(rt))
 			return this._binaryResultTypeNumeric(lt, rt);
 		if (isString(lt) && isString(rt) && op === "+")
@@ -87,6 +91,35 @@ export const assignabilityMethods = {
 		if (node)
 			this.err(`Invalid operation: ${typeStr(lt)} ${op} ${typeStr(rt)}`, node);
 		return ANY;
+	},
+
+	// A shift has the type of its left operand; the count may be any integer
+	// type or an untyped constant representable as uint.
+	_binaryResultTypeShift(op, lt, rt, node) {
+		if (node) this.checkShiftCount(rt, node.right);
+		return lt;
+	},
+
+	// Reports a shift count that is not an integer or is a negative constant.
+	checkShiftCount(rt, countExpr) {
+		const v = this._constValue(countExpr);
+		if (v) {
+			const n = constIntValue(v);
+			if (n === null) {
+				this.err(
+					`invalid shift count ${typeStr(rt)} constant: not an integer`,
+					countExpr,
+				);
+			} else if (n < 0n) {
+				this.err(`invalid shift count: ${n} is negative`, countExpr);
+			}
+			return;
+		}
+		if (!isInteger(rt))
+			this.err(
+				`invalid shift count: ${typeStr(rt)} is not an integer type`,
+				countExpr,
+			);
 	},
 
 	_binaryResultTypeString(lt, rt) {
