@@ -860,7 +860,7 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
   - Test: parity tests in `test/unit/language/expressions.test.js`: `len(map[P]int{{1}: 2})` → 1 (P13); `W{1, 2}[1]` → 2 (P24). Parser test for the elided-key form in `test/unit/compiler/lexer-parser.test.js`.
   - Done when: all pass.
 
-- [ ] **Task 0.30 — Explicit instantiation through a package qualifier**
+- [x] **Task 0.30 — Explicit instantiation through a package qualifier**
   - Files: `src/typechecker/expressions.js` (`IndexExpr` on a namespace member, `instantiateGenericFunc`), `src/typechecker/resolve.js` (`_resolveGenericTypeName` for `pkg.T[X]`)
   - Do: `pkg.F[T1, …](args)` instantiates a generic function from an imported package (user, emitter-backed or Go-source), and `pkg.T[X](v)` converts to an instantiated generic type. Type arguments resolve in the caller's scope (today `int` is looked up in the package scope).
   - Test: project parity tests in `test/unit/builtins/iter.test.js` and `test/unit/compiler/stdlib-go.test.js`: `cmp.Compare[int](1, 2)` → -1 (P11); `iter.Seq[int](f)` ranged → 4 (P12); `len(slices.Collect[int](slices.Values([]int{1, 2})))` → 2 (P74); a user package `util.Id[string]("x")`.
