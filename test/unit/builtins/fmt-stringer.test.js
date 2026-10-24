@@ -13,9 +13,9 @@ import {
 	test,
 } from "../helpers.js";
 
-function run(body, decls = "") {
+function run(body, decls = "", imports = '"fmt"') {
 	const { js, errors } = compile(`package main
-import "fmt"
+import (${imports})
 ${decls}
 func main() {
 ${body}
@@ -44,6 +44,15 @@ type ValErr struct{ Msg string }
 func (e ValErr) Error() string { return "valerr " + e.Msg }
 type PtrErr struct{ Code int }
 func (e *PtrErr) Error() string { return fmt.Sprintf("ptrerr %d", e.Code) }
+`;
+
+const PSTYPES = `
+type PS struct{ N int }
+func (p *PS) String() string { return "ps" }
+type PW struct {
+	V PS
+	v PS
+}
 `;
 
 section("fmt Stringer: named non-struct types");
@@ -286,6 +295,137 @@ fmt.Println(e)`,
 			"type P struct{ X int }",
 		),
 		"[1 2] map[a:1] {1} &{2} [a]\n<nil>",
+	);
+});
+
+section("fmt Stringer: runtime errors behind unexported fields");
+
+test("errors.New and Errorf values in unexported fields print their message", () => {
+	const out = run(
+		`r := Res{1, fmt.Errorf("bad %d", 3), []error{errors.New("e1")}}
+fmt.Println(r)
+fmt.Println(fmt.Sprintf("%+v", r))
+fmt.Println(&r)`,
+		`type Res struct {
+	val  int
+	err  error
+	errs []error
+}`,
+		'"fmt"; "errors"',
+	);
+	assertEqual(
+		out,
+		"{1 bad 3 [e1]}\n{val:1 err:bad 3 errs:[e1]}\n&{1 bad 3 [e1]}",
+	);
+	assert(!out.includes("return"), "function source leaked");
+});
+
+test("an embedded error interface is promoted to Error", () => {
+	assertEqual(
+		run(
+			`fmt.Println(EW{errors.New("x"), 1}, &EW{errors.New("y"), 2})
+fmt.Println(fmt.Sprintf("%v|%s", EW{errors.New("z"), 3}, EW{errors.New("z"), 3}))
+fmt.Println([]EW{{errors.New("a"), 4}})`,
+			`type EW struct {
+	error
+	Code int
+}`,
+			'"fmt"; "errors"',
+		),
+		"x y\nz|z\n[a]",
+	);
+});
+
+test("an embedded fmt.Stringer is promoted to String", () => {
+	assertEqual(
+		run(
+			`fmt.Println(SW{Red, 1})`,
+			`${TYPES}
+type SW struct {
+	fmt.Stringer
+	N int
+}`,
+		),
+		"red",
+	);
+});
+
+test("a declared Error wins over the embedded one", () => {
+	assertEqual(
+		run(
+			`fmt.Println(OW{errors.New("inner")})`,
+			`type OW struct{ error }
+func (o OW) Error() string { return "outer" }`,
+			'"fmt"; "errors"',
+		),
+		"outer",
+	);
+});
+
+section("fmt Stringer: %#v");
+
+test("%#v does not call String", () => {
+	assertEqual(
+		run(
+			`fmt.Println(fmt.Sprintf("%#v|%v", Green, Green))
+fmt.Println(fmt.Sprintf("%#v", []Color{Red, Green}))`,
+			TYPES,
+		),
+		"1|green\n[0 1]",
+	);
+});
+
+test("%#v of a struct with a value-receiver String keeps the raw layout", () => {
+	assertEqual(
+		run(
+			`fmt.Println(fmt.Sprintf("%#v|%v", VS{1}, VS{1}))`,
+			`type VS struct{ n int }
+func (v VS) String() string { return fmt.Sprintf("vs%d", v.n) }`,
+		),
+		"{1}|vs1",
+	);
+});
+
+section("fmt Stringer: pointer tag does not leak to nested values");
+
+test("a value in a slice stays a value after its address was taken", () => {
+	assertEqual(
+		run(
+			`ps := []PS{{1}, {2}}
+fmt.Println(&ps[0])
+fmt.Println(ps)
+fmt.Println(fmt.Sprintf("%v|%s", ps[1], &ps[1]))`,
+			PSTYPES,
+		),
+		"ps\n[{1} {2}]\n{2}|ps",
+	);
+});
+
+test("a struct value field stays a value after its address was taken", () => {
+	assertEqual(
+		run(
+			`w := PW{PS{4}, PS{5}}
+p := &w.V
+fmt.Println(p)
+fmt.Println(w)
+fmt.Println(&w)
+ws := []PW{{PS{1}, PS{2}}}
+q := &ws[0].V
+fmt.Println(q, ws)`,
+			PSTYPES,
+		),
+		"ps\n{{4} {5}}\n&{{4} {5}}\nps [{{1} {2}}]",
+	);
+});
+
+test("a pointer slice and a pointer field still dispatch", () => {
+	assertEqual(
+		run(
+			`fmt.Println([]*PS{&PS{1}, &PS{2}}, PH{&PS{3}})`,
+			`${PSTYPES}
+type PH struct{ P *PS }`,
+		),
+		"[ps ps] {ps}",
 	);
 });
 
