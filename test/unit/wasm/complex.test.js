@@ -379,7 +379,7 @@ func Main() int {
 
 	cNeg := complex(1.0, -2.0)
 	sNeg := fmt.Sprintf("%.2e", cNeg)
-	if sNeg != "(1.00e+0-2.00e+0i)" {
+	if sNeg != "(1.00e+00-2.00e+00i)" {
 		return 0
 	}
 
