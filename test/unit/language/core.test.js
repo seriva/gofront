@@ -5,7 +5,9 @@ import { fileURLToPath } from "node:url";
 import {
 	assertEqual,
 	assertErrorContains,
+	assertThrows,
 	compile,
+	compileHybrid,
 	FIXTURES,
 	runJs,
 	section,
@@ -669,6 +671,50 @@ func main() { greet(Dog{}) }`);
 
 // ═════════════════════════════════════════════════════════════
 // 6. npm package resolver
+test("string escapes decode to their characters on both backends", () => {
+	const res = compileHybrid(`package main
+
+func Main() int {
+	n := 0
+	if len("\\x00") == 1 {
+		n += 1
+	}
+	if "\\101" == "A" && "\\x41" == "A" && "\\u0041" == "A" && "\\U00000041" == "A" {
+		n += 10
+	}
+	if "\\u00e9" == "\u00e9" {
+		n += 100
+	}
+	return n*1000 + len("\\v\\f") * 100 + len("\\a\\b") * 10 + len("\\xc3")
+}
+`).run("Main");
+	assertEqual(res.jsRes, 111221);
+	assertEqual(res.wasmRes, 111221);
+});
+
+test("\\xNN above 0x7f is the code point, so []byte gives its UTF-8 (documented)", () => {
+	const res = compileHybrid(`package main
+
+func Main() int {
+	return len([]byte("\\xc3"))
+}
+`).run("Main");
+	assertEqual(res.jsRes, 2);
+	assertEqual(res.wasmRes, 2);
+});
+
+test("error: unknown string escape", () => {
+	assertThrows(
+		() =>
+			compile(`package main
+func main() {
+	s := "\\q"
+	console.log(s)
+}`),
+		"unknown escape",
+	);
+});
+
 // ═════════════════════════════════════════════════════════════
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
