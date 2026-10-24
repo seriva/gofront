@@ -456,10 +456,18 @@ export const expressionCheckMethods = {
 	// The node becomes an InstantiationExpr so monomorphisation rewrites it.
 	_genericTypeRef(expr, scope) {
 		const base = expr.expr;
-		if (base?.kind !== "Ident") return null;
-		const t = this.types.get(base.name);
-		if (!t?._generic || t._generic.isAlias || scope.lookup(base.name) !== t)
-			return null;
+		let t;
+		if (base?.kind === "SelectorExpr" && base.expr?.kind === "Ident") {
+			// `iter.Seq[int]`: a generic type behind a package qualifier.
+			if (scope.lookup(base.expr.name)?.kind !== "namespace") return null;
+			t = this.types.get(`${base.expr.name}.${base.field}`);
+			if (!t?._generic || t._generic.isAlias) return null;
+		} else {
+			if (base?.kind !== "Ident") return null;
+			t = this.types.get(base.name);
+			if (!t?._generic || t._generic.isAlias || scope.lookup(base.name) !== t)
+				return null;
+		}
 		if (expr.kind === "IndexExpr") {
 			if (expr.index?.kind !== "Ident") return null;
 			expr.kind = "InstantiationExpr";

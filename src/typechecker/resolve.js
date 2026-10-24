@@ -212,8 +212,13 @@ export const resolveMethods = {
 
 	// `G[X]`: instantiate a generic named type, or expand a generic alias.
 	_resolveGenericTypeName(node, scope) {
+		const sel = node.expr?.kind === "SelectorExpr" ? node.expr : null;
+		const qualified =
+			sel?.expr?.kind === "Ident" ? `${sel.expr.name}.${sel.field}` : null;
 		const name =
-			node.name ?? (node.expr?.kind === "Ident" ? node.expr.name : null);
+			node.name ??
+			(node.expr?.kind === "Ident" ? node.expr.name : null) ??
+			qualified;
 		const typeArgs = node.typeArgs ?? (node.index ? [node.index] : []);
 		const base = name
 			? this.types.get(name)
@@ -221,7 +226,8 @@ export const resolveMethods = {
 				? this.resolveTypeNode(node.expr, scope)
 				: null;
 		if (!base) return this.err(`Unknown type '${name ?? "?"}'`, node);
-		if (name) this._useQualifiedTypeName(node.name ? node : node.expr, base);
+		if (name && !qualified)
+			this._useQualifiedTypeName(node.name ? node : node.expr, base);
 		if (base.kind === "named" && base._generic?.isAlias) {
 			const aliasArgs = typeArgs.map((n) => this.resolveTypeNode(n, scope));
 			node._typeArgs = aliasArgs;
