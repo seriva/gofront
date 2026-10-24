@@ -237,7 +237,8 @@ export const resolveMethods = {
 				? this.resolveTypeNode(node.expr, scope)
 				: null;
 		if (!base) return this.err(`Unknown type '${name ?? "?"}'`, node);
-		if (name && !qualified)
+		if (qualified) this.globals.lookup(sel.expr.name);
+		else if (name)
 			this._useQualifiedTypeName(node.name ? node : node.expr, base);
 		if (base.kind === "named" && base._generic?.isAlias) {
 			const aliasArgs = typeArgs.map((n) => this.resolveTypeNode(n, scope));
