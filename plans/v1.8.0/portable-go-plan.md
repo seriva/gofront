@@ -828,7 +828,7 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
   - Test: parity tests in `test/unit/types/generics.test.js`: `eq(P{1}, P{1})` → true (P06); `a := W[P]{P{1}}; b := a; b.v.A = 9; a.v.A` → 1 (P07).
   - Done when: both pass; `npm run bench` within 3%.
 
-- [ ] **Task 0.25 — Variadic spread in JS**
+- [x] **Task 0.25 — Variadic spread in JS**
   - Files: `src/backend/js/expressions.js` (call arguments with `_spread`), `src/backend/js/statements.js` (variadic parameter prologue) as needed
   - Do: `f(xs...)` passes the slice itself as the variadic parameter (no copy, as in Go), so writes through the parameter reach the caller's slice; a nil `xs` gives a nil parameter instead of throwing. Calls with individual arguments keep building a fresh slice.
   - Test: parity tests in `test/unit/wasm/variadic.test.js`: `sum(nilSlice...)` → 0 (P08); `set(a...)` with `xs[0] = 9` → 9 (P09); `append(xs, ys...)` and `fmt.Println(args...)` unchanged.
