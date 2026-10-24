@@ -893,13 +893,13 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
   - Done when: both pass.
 
 - [x] **Task 0.35 — Stdlib functions as values in WASM**
-  - Files: `src/backend/wasm/emit-exprs.js` (selector on a stdlib namespace), `src/backend/wasm/emit-stdlib.js`
+  - Files: `src/backend/wasm/emit-exprs.js` (selector on a stdlib namespace), `src/backend/wasm/emit-stdlib.js`, `src/backend/wasm/method-expr.js`
   - Do: a stdlib function used as a value (`var sp = fmt.Sprint`, `f := strings.ToUpper`, `sort.Slice` passed around) becomes a closure over the emitter call. A member that cannot be a value (an intrinsic with no function form) gets a targeted diagnostic naming it, never `Cannot resolve struct for selector`.
   - Test: parity tests in `test/unit/wasm/stdlib.test.js`: `sp(1)` → `1` (P72); `strings.ToUpper` passed to a `func(string) string` parameter; negative test with `assertErrorContains` for a non-value member.
   - Done when: all pass.
 
 - [x] **Task 0.36 — Range-over-func leftovers in WASM**
-  - Files: `src/backend/wasm/emit-stmts.js` (range-over-func lowering), `src/backend/wasm/monomorph.js`, `src/lower/range.js`
+  - Files: `src/backend/wasm/emit-stmts.js` (range-over-func lowering), `src/backend/wasm/monomorph.js`, `src/lower/range.js`, `src/backend/wasm/index.js` (package-level initializer analysis), `src/lower/index.js`
   - Do: ranging directly over a func literal works; an iterator whose yield parameter is a pointer to a struct produces a valid module; `slices.Values`/`All` over a slice of a generic struct produces a valid module.
   - Test: parity tests in `test/unit/wasm/range_func.test.js`: func literal → 3 (P46); `*P` yields → 7 (P47); project test for `slices.Values([]Box[int])` → 3 (P40).
   - Done when: all pass.

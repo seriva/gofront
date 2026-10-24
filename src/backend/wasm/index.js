@@ -2,7 +2,7 @@
 // WASM Backend compiler entry point: lowered AST + types -> Module IR -> binary / WAT.
 
 import { Lexer } from "../../lexer.js";
-import { lower } from "../../lower/index.js";
+import { lower, lowerFunction } from "../../lower/index.js";
 import {
 	getOrCreateIteratorFuncLit,
 	isIteratorRangeFor,
@@ -2492,6 +2492,8 @@ export function compileWasmModule(
 	if (globalInitFn) {
 		// Func literals in package-level initializers are lifted like any other.
 		globalInitFn._rootFuncDecl = globalInitFn;
+		// Captured variables of those literals need the same analysis.
+		lowerFunction(lowerResult, globalInitFn);
 		const before = closures.length;
 		scanClosures(globalInitFn.body, globalInitFn);
 		funcDecls.push(globalInitFn, ...closures.slice(before));
