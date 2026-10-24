@@ -89,7 +89,7 @@ async function runTarget(goPath, target, label) {
 // GoFront strings are JS strings on both backends: len, indexing and range
 // count UTF-16 code units, Go counts UTF-8 bytes (portable-go plan §1.1).
 const STRING_HINT =
-	"GoFront strings are JavaScript strings, so len, indexing and range count UTF-16 code units where Go counts UTF-8 bytes; use []byte(s) or []rune(s) instead (docs/v1.8.0/portable-go-plan.md §1.1)";
+	"GoFront strings are JavaScript strings, so len, indexing and range count UTF-16 code units where Go counts UTF-8 bytes; use []byte(s) or []rune(s) instead (plans/v1.8.0/portable-go-plan.md §1.1)";
 
 // Escapes in an interpreted literal that produce a byte >= 0x80.
 const NON_ASCII_ESCAPE =
