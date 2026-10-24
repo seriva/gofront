@@ -415,9 +415,7 @@
 			"State.Flag",
 			"State.Precision",
 			"State.Width",
-			"State.Write",
-			"Stringer",
-			"Stringer.String"
+			"State.Write"
 		],
 		"hash": [
 			"Cloner",
