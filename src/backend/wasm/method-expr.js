@@ -299,8 +299,26 @@ function rewrite(node, isCallee) {
 	return rewriteMethods(node, isCallee) ?? rewriteStdlibValue(node, isCallee);
 }
 
+// The forwarder passes plain operands and returns one value, so a stdlib
+// function that takes a callback or returns several values cannot be one.
+function assertForwardable(sel) {
+	const t = sel._type;
+	// Stdlib signatures type a callback as `any`, and the forwarder cannot
+	// pass an `any` operand to an emitter that expects a slice or function.
+	const fixed = t.variadic ? (t.params ?? []).slice(0, -1) : (t.params ?? []);
+	const hasCallback = fixed.some(
+		(p) => p?.kind === "func" || (p?.kind === "basic" && p.name === "any"),
+	);
+	if (hasCallback || (t.returns?.length ?? 0) > 1)
+		throw new Error(
+			`${sel.expr.name}.${sel.field} cannot be used as a value in WASM (it takes a callback or returns several values)`,
+		);
+}
+
 function rewriteStdlibValue(node, isCallee) {
-	return !isCallee && isStdlibFuncValue(node) ? stdlibFuncLit(node) : null;
+	if (isCallee || !isStdlibFuncValue(node)) return null;
+	assertForwardable(node);
+	return stdlibFuncLit(node);
 }
 
 function rewriteMethods(node, isCallee) {
