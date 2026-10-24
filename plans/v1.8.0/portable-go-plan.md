@@ -822,31 +822,31 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
 
 ### Phase 0.12: JS value semantics leftovers
 
-- [ ] **Task 0.24 — Type-parameter struct values in JS**
+- [x] **Task 0.24 — Type-parameter struct values in JS**
   - Files: `src/backend/js/expressions.js` (equality, value copies), `src/backend/js/runtime.js`
-  - Do: inside generic code, `==`/`!=` on a type parameter compares structs and arrays by value (`__equal`) when the type argument is a struct or array, and assigning or passing a `T` value copies it. Decide between static dispatch per instantiation and a runtime check on the value, and record the choice; non-struct type arguments keep the plain `===`.
+  - Do: inside generic code, `==`/`!=` on a type parameter compares structs and arrays by value (`__equal`) when the type argument is a struct or array, and assigning or passing a `T` value copies it. Decide between static dispatch per instantiation and a runtime check on the value, and record the choice (chosen: runtime check on the type argument's zero-value factory `$z_T`, so one erased body serves every instantiation; an object zero means struct or array); non-struct type arguments keep the plain `===`.
   - Test: parity tests in `test/unit/types/generics.test.js`: `eq(P{1}, P{1})` → true (P06); `a := W[P]{P{1}}; b := a; b.v.A = 9; a.v.A` → 1 (P07).
   - Done when: both pass; `npm run bench` within 3%.
 
-- [ ] **Task 0.25 — Variadic spread in JS**
+- [x] **Task 0.25 — Variadic spread in JS**
   - Files: `src/backend/js/expressions.js` (call arguments with `_spread`), `src/backend/js/statements.js` (variadic parameter prologue) as needed
   - Do: `f(xs...)` passes the slice itself as the variadic parameter (no copy, as in Go), so writes through the parameter reach the caller's slice; a nil `xs` gives a nil parameter instead of throwing. Calls with individual arguments keep building a fresh slice.
   - Test: parity tests in `test/unit/wasm/variadic.test.js`: `sum(nilSlice...)` → 0 (P08); `set(a...)` with `xs[0] = 9` → 9 (P09); `append(xs, ys...)` and `fmt.Println(args...)` unchanged.
   - Done when: all pass.
 
-- [ ] **Task 0.26 — Nil maps and nil slices in JS**
+- [x] **Task 0.26 — Nil maps and nil slices in JS**
   - Files: `src/backend/js/expressions.js` (nil comparison, `_nilMap`), `src/backend/js/stdlib/fmt.js` (`Append*`)
   - Do: `m == nil` is true for the strict-mode `__nilmap` sentinel and for an unassigned map in `js` packages, and false for `map[K]V{}` and `make(map…)`. `fmt.Append(nil)` and `fmt.Append(nil, "")` return nil.
   - Test: parity tests in `test/unit/wasm/maps.test.js`: `var m map[string]int; n := map[string]int{}` → `true false` (P60); `fmt.Append(nil) == nil` → true (P17) in `test/unit/builtins/fmt-stringer.test.js`.
   - Done when: both pass; strict-mode nil-map write panics still pass.
 
-- [ ] **Task 0.27 — Struct literals and embedded fields in JS**
+- [x] **Task 0.27 — Struct literals and embedded fields in JS**
   - Files: `src/backend/js/expressions.js` (`_genImplicitCompositeLit`, selector assignment), `src/backend/js/runtime.js` (`fmt` map keys)
   - Do: an elided `&T` in `[]*T{{1}}` and `map[K]*T{"a": {1}}` builds the pointer. A write through a promoted field (`o.A = 5` with embedded `In`) writes `o.In.A`; reads already do. `fmt` prints struct map keys as Go does (`map[{1}:2]`, keys sorted as Go sorts them).
   - Test: parity tests in `test/unit/language/structs.test.js`: `xs := []*P{{1}, {2}}; xs[1].A` → 2 (P14); embedded write → 52 (P70); `fmt.Sprint(map[P]int{P{1}: 2})` → `map[{1}:2]` (P15).
   - Done when: all pass.
 
-- [ ] **Task 0.28 — Package-level arrays and named scalars**
+- [x] **Task 0.28 — Package-level arrays and named scalars**
   - Files: `src/backend/js/index.js` (global declarations), `src/backend/js/expressions.js` (array length from a constant), `src/backend/wasm/emit.js` (global initialisers), `src/lower/boxing.js`
   - Do: JS: `&g` on a package-level array is the array; `[N]T` with `N` a named constant has length `N`; a package-level named scalar whose address is taken by a pointer-receiver call (`g.Inc()`) is boxed like a local. WASM: a package-level `[N]T` global is initialised to its zero array, and `[N]T` with a named constant `N` has length `N`.
   - Test: parity tests in `test/unit/wasm/arrays.test.js` and `test/unit/language/named-type-methods.test.js`: `p := &g; p[0] = 5; g[0]` → 5 (P21); `g[1] + len(g)` → 3 (P22); `var a [N]int; a[2] = 4; len(a) + a[2]` → 7 (P23); `g.Inc(); g.Inc(); int(g)` → 2 (P29).

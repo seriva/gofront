@@ -46,6 +46,7 @@ import {
 	HELPER_ERROR_IS,
 	HELPER_ERROR_JOIN,
 	HELPER_GENERICS,
+	HELPER_GEQ,
 	HELPER_HEX,
 	HELPER_IFACE_BOX,
 	HELPER_IFD,
@@ -56,6 +57,7 @@ import {
 	HELPER_LEN,
 	HELPER_NIL_CALL,
 	HELPER_NIL_MAP,
+	HELPER_NM,
 	HELPER_PANIC,
 	HELPER_PATH_CLEAN,
 	HELPER_PATH_ERROR,
@@ -75,6 +77,8 @@ import {
 	HELPER_TESTING,
 	HELPER_TIME_FMT,
 	HELPER_TIME_PARSE,
+	HELPER_VA,
+	HELPER_VCLONE,
 } from "./runtime.js";
 import { buildSourceMap, buildWasmSourceMap } from "./source-map.js";
 import { statementGenMethods } from "./statements.js";
@@ -138,9 +142,12 @@ const HELPER_MAP = [
 	["append", HELPER_APPEND],
 	["sliceGuard", HELPER_S],
 	["sclone", HELPER_SCLONE],
+	["va", HELPER_VA],
+	["vclone", HELPER_VCLONE],
 	["ifaceBox", HELPER_IFACE_BOX],
 	["ifd", HELPER_IFD],
 	["equal", HELPER_EQUAL],
+	["geq", HELPER_GEQ],
 	["ptreq", HELPER_PTREQ],
 	["ifeq", HELPER_IFEQ],
 	["cmul", HELPER_CMUL],
@@ -149,6 +156,7 @@ const HELPER_MAP = [
 	["nilCall", HELPER_NIL_CALL],
 	["bounds", HELPER_BOUNDS],
 	["nilMap", HELPER_NIL_MAP],
+	["nm", HELPER_NM],
 	["generics", HELPER_GENERICS],
 	["sprintf", HELPER_SPRINTF],
 	["sprint", HELPER_SPRINT],
@@ -314,6 +322,8 @@ export class CodeGen {
 			}
 		}
 		this._renameReservedIdents(program.decls);
+		this._boxedGlobals = this._collectBoxedGlobals(program);
+		this._boxedVars = new Set(this._boxedGlobals);
 		this._collectResliceNames(program);
 		const methods = this._collectDecls(program);
 		this._emitJsImports();
@@ -461,6 +471,16 @@ export class CodeGen {
 	// Collects struct names, method map, and named wrapper names from program decls.
 	// Returns the method map (typeName → MethodDecl[]).
 	_collectStructNames(program) {
+		// Go-compiled variadic functions and methods: a `f(xs...)` call to one
+		// passes the slice itself (see `_genCallArgs`, `_emitParamCopies`).
+		this.variadicFns = new Set();
+		for (const d of program.decls) {
+			const last = d.params?.[d.params.length - 1];
+			if (!last?.variadic) continue;
+			if (d.kind === "FuncDecl") this.variadicFns.add(d.name);
+			else if (d.kind === "MethodDecl")
+				this.variadicFns.add(`${d.recvType.name}.${d.name}`);
+		}
 		for (const d of program.decls) {
 			if (d.kind === "TypeDecl" && d.type.kind === "StructType")
 				this.structNames.add(d.name);
@@ -755,18 +775,44 @@ export class CodeGen {
 		this.line("}");
 	}
 
+	// JS object keys are strings: a struct used as a map key becomes its Go
+	// `%v` text (`{1 x}`), so equal values share a key and fmt prints it as Go does.
+	_genStructKeyString(name, fields) {
+		if (fields.some((f) => f.name === "toString")) return;
+		const resolved = this.checker?.types.get(name)?.underlying;
+		const parts = fields.map((f) => {
+			const base = this._aggregateBase(resolved?.fields?.get(f.name));
+			return base?.kind === "array"
+				? `"[" + this.${f.name}.join(" ") + "]"`
+				: `this.${f.name}`;
+		});
+		this.line(
+			`toString() { return "{" + [${parts.join(", ")}].join(" ") + "}"; }`,
+		);
+	}
+
 	_genStructClone(name, structTypeAst, fields) {
 		const resolved = this.checker?.types.get(name)?.underlying;
 		const astTypes = new Map();
 		for (const f of structTypeAst?.fields ?? [])
 			for (const n of f.names ?? []) astTypes.set(n, f.type);
-		const args = fields.map((f) => {
-			const t =
-				resolved?.fields?.get(f.name) ??
-				this._typeFromNode(astTypes.get(f.name));
-			return this._cloneJs(t, `this.${f.name}`);
-		});
-		if (this._genericTypeParamNames(name)) args.push("this[__tz]");
+		const tpNames = this._genericTypeParamNames(name);
+		const prevZeros = this._typeParamZeros;
+		this._typeParamZeros = tpNames
+			? new Map(tpNames.map((n, i) => [n, `this[__tz]?.[${i}]`]))
+			: null;
+		let args;
+		try {
+			args = fields.map((f) => {
+				const t =
+					resolved?.fields?.get(f.name) ??
+					this._typeFromNode(astTypes.get(f.name));
+				return this._cloneJs(t, `this.${f.name}`);
+			});
+		} finally {
+			this._typeParamZeros = prevZeros;
+		}
+		if (tpNames) args.push("this[__tz]");
 		this.blank();
 		this.line(`__clone() { return new ${name}(${args.join(", ")}); }`);
 	}
@@ -811,6 +857,7 @@ export class CodeGen {
 			}
 			this._genEmbeddedMethodStubs(name, methodDecls);
 			this._genStructClone(name, structTypeAst, fields);
+			this._genStructKeyString(name, fields);
 		});
 		this.line("}");
 		// Lets generic `p.value` dereferences resolve to the struct itself.
@@ -830,6 +877,16 @@ export class CodeGen {
 		}
 	}
 
+	// A promoted method runs on the embedded value (`this.In`), so it and the
+	// outer struct's promoted-field accesses see the same storage.  Embedded
+	// types that are not compiled Go structs keep the borrowed-`this` form.
+	_embedStub(method, embedName) {
+		const call = this.structNames.has(embedName)
+			? `this.${embedName}.${method}(...__a)`
+			: `${embedName}.prototype.${method}.call(this, ...__a)`;
+		return `${method}(...__a) { return ${call}; }`;
+	}
+
 	_genSingleEmbedStubs(embed, declared) {
 		const embedName = embed.kind === "named" ? embed.name : null;
 		if (!embedName) return;
@@ -838,9 +895,7 @@ export class CodeGen {
 		for (const [mName] of embedBase.methods.entries()) {
 			if (!declared.has(mName)) {
 				this.blank();
-				this.line(
-					`${mName}(...__a) { return ${embedName}.prototype.${mName}.call(this, ...__a); }`,
-				);
+				this.line(this._embedStub(mName, embedName));
 			}
 		}
 	}
@@ -849,9 +904,7 @@ export class CodeGen {
 		const stubs = computeEmbeddedStubs(name, methodDecls, this.checker);
 		for (const stub of stubs) {
 			this.blank();
-			this.line(
-				`${stub.methodName}(...__a) { return ${stub.embedName}.prototype.${stub.methodName}.call(this, ...__a); }`,
-			);
+			this.line(this._embedStub(stub.methodName, stub.embedName));
 		}
 	}
 
@@ -866,7 +919,7 @@ export class CodeGen {
 			decl._line ?? null,
 		);
 		const prevBoxed = this._boxedVars;
-		this._boxedVars = new Set();
+		this._boxedVars = new Set(this._boxedGlobals);
 		this._scanAddressTaken(decl.body);
 		// Methods of a generic struct read its type arguments from the
 		// instance; named non-struct types have no instance to carry them.
@@ -964,7 +1017,7 @@ export class CodeGen {
 			return;
 		}
 		const prevBoxed = this._boxedVars;
-		this._boxedVars = new Set();
+		this._boxedVars = new Set(this._boxedGlobals);
 		this._scanAddressTaken(decl.body);
 		this._withFnCtx(decl.body, () =>
 			this.indented(() => {
@@ -1062,11 +1115,25 @@ export class CodeGen {
 		this._recoverOkInScope = prevRecoverOk;
 	}
 
+	// Package-level variables whose address is taken anywhere (`&g`, `g.Inc()`
+	// on a pointer-receiver method) are boxed like address-taken locals.
+	_collectBoxedGlobals(program) {
+		const names = new Set();
+		for (const d of program.decls)
+			if (d.kind === "VarDecl")
+				for (const spec of d.decls) for (const n of spec.names) names.add(n);
+		const boxed = new Set();
+		if (names.size === 0) return boxed;
+		for (const n of this._scanAddressTaken(program.decls, new Set()))
+			if (names.has(n)) boxed.add(n);
+		return boxed;
+	}
+
 	// Scan AST node for _addressTaken idents on scalars and populate _boxedVars.
 	// A pointer-receiver method call on a named non-struct local (`l.Set(5)`)
 	// takes the variable's address too, so the variable must be boxed.
-	_scanAddressTaken(node) {
-		scanAddressTaken(node, this._boxedVars);
+	_scanAddressTaken(node, into = this._boxedVars) {
+		scanAddressTaken(node, into);
 		const visit = (n) => {
 			if (!n || typeof n !== "object") return;
 			if (Array.isArray(n)) {
@@ -1079,7 +1146,7 @@ export class CodeGen {
 					recv?.kind === "Ident" &&
 					this._namedPtrMethodOn(recv._type, n.func.field)
 				)
-					this._boxedVars.add(recv.name);
+					into.add(recv.name);
 			}
 			for (const key of Object.keys(n)) {
 				if (key.startsWith("_") || key === "kind") continue;
@@ -1087,6 +1154,7 @@ export class CodeGen {
 			}
 		};
 		visit(node);
+		return into;
 	}
 
 	_namedPtrMethodOn(type, method) {

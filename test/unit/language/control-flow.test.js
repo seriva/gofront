@@ -223,7 +223,7 @@ func main() {
   e := Empty{}
   console.log(e)
 }`);
-	assertEqual(runJs(js), "[object Object]");
+	assertEqual(runJs(js), "{}");
 });
 
 test("nil slice has zero length", () => {

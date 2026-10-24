@@ -651,7 +651,20 @@ export const expressionGenMethods = {
 		return null;
 	},
 
+	// A value of type-parameter type is copied at run time when its type
+	// argument is a struct or array (decision: runtime check on the zero-value
+	// factory, so one erased function body serves every instantiation).
+	_typeParamClone(t, js) {
+		if (t?.kind !== "typeParam") return null;
+		const factory = this._typeParamZeroFactory(t.name);
+		if (!factory) return null;
+		this.useHelper("vclone");
+		return `__vclone(${factory}, ${js})`;
+	},
+
 	_cloneJs(t, js) {
+		const tp = this._typeParamClone(t, js);
+		if (tp) return tp;
 		const base = this._aggregateBase(t);
 		if (!base) return js;
 		if (base.kind === "struct") {
@@ -687,7 +700,12 @@ export const expressionGenMethods = {
 	genValueExpr(expr) {
 		const js = this.genExpr(expr);
 		if (expr._ifaceBox) return js;
-		if (!this._aggregateBase(expr._type) || !this._isAddressableExpr(expr))
+		if (
+			!(
+				this._aggregateBase(expr._type) || this._typeParamClone(expr._type, js)
+			) ||
+			!this._isAddressableExpr(expr)
+		)
 			return js;
 		return this._cloneJs(expr._type, js);
 	},
@@ -750,6 +768,10 @@ export const expressionGenMethods = {
 	_emitParamCopies(params) {
 		for (const p of params) {
 			if (p.name) this._fnCtx?.params.add(p.name);
+			if (p.variadic && p.name && p.name !== "_") {
+				this.useHelper("va");
+				this.line(`${p.name} = __va(${p.name});`);
+			}
 			if (p.variadic || !p.name || p.name === "_") continue;
 			if (this._boxedVars.has(p.name)) {
 				// Address-taken parameter: rebind it to a { value } box.
@@ -888,7 +910,7 @@ export const expressionGenMethods = {
 			return BROWSER_GLOBALS.has(expr.field) ? `${expr.field}$` : expr.field;
 		if (expr.expr._type?.kind === "pointer" && expr.field !== "value")
 			return this._genPointerSelectorField(expr, base);
-		const sel = `${base}.${this._jsMemberName(expr)}`;
+		const sel = `${base}${this._promotedPath(expr)}.${this._jsMemberName(expr)}`;
 		if (expr._isMethodValue && !expr._callee) {
 			// A value receiver is copied when the method value is evaluated.
 			const t = expr.expr._type;
@@ -897,6 +919,43 @@ export const expressionGenMethods = {
 			return `${sel}.bind(${base})`;
 		}
 		return sel;
+	},
+
+	// A promoted field (`o.A` with embedded `In`) lives on the embedded value:
+	// the class also carries a flattened copy, so reads and writes go through
+	// the embedded path (`.In`) to stay in sync.  Returns "" for direct fields.
+	_promotedPath(expr) {
+		if (expr._isMethodValue || expr._isMethodExpr) return "";
+		let t = expr.expr._type;
+		if (t?.kind === "pointer") t = t.base;
+		const path = this._embedPath(t, expr.field, 0);
+		return path ? path.map((n) => `.${n}`).join("") : "";
+	},
+
+	_embedPath(t, field, depth) {
+		const st = t?.kind === "named" ? t.underlying : t;
+		if (st?.kind !== "struct" || !st.fields?.has(field) || depth > 8)
+			return null;
+		const direct = (st._structFields ?? []).some(
+			(sf) => !sf.embedded && sf.names?.includes(field),
+		);
+		if (direct) return null;
+		for (const sf of st._structFields ?? []) {
+			if (!sf.embedded) continue;
+			const inner = sf.type?.kind === "pointer" ? sf.type.base : sf.type;
+			if (inner?.kind !== "named" || !this.structNames.has(inner.name))
+				continue;
+			const name = inner.name;
+			if (name === field) return null;
+			const ist = inner.underlying;
+			if (!ist?.fields?.has(field)) continue;
+			const sub = this._embedPath(inner, field, depth + 1);
+			const idirect = (ist._structFields ?? []).some(
+				(x) => !x.embedded && x.names?.includes(field),
+			);
+			return idirect ? [name] : sub ? [name, ...sub] : null;
+		}
+		return null;
 	},
 
 	// PascalCase aliases of Web API methods (gl.ClearColor) map to the real camelCase member.
@@ -1006,7 +1065,7 @@ export const expressionGenMethods = {
 		return expr.args
 			.map((a, i) =>
 				a._spread
-					? `...${this.genExpr(a)}`
+					? this._genSpreadArg(expr, a)
 					: this._callerCopiesArg(expr, i)
 						? this.genValueExpr(a)
 						: this.genExpr(a),
@@ -1014,12 +1073,29 @@ export const expressionGenMethods = {
 			.join(", ");
 	},
 
+	// `f(xs...)`: a Go-compiled variadic callee receives the slice itself in a
+	// marker (its prologue unwraps it); other callees get a JS spread.
+	_genSpreadArg(call, arg) {
+		const js = this.genExpr(arg);
+		return this._calleeIsGoVariadic(call) ? `{ __sp: ${js} }` : `...${js}`;
+	},
+
+	_calleeIsGoVariadic(call) {
+		const f = call.func;
+		if (f.kind === "Ident") return !!this.variadicFns?.has(f.name);
+		if (f.kind !== "SelectorExpr" || f._isMethodExpr) return false;
+		const recv = this._resolveRecvName(f.expr._type);
+		return !!recv && !!this.variadicFns?.has(`${recv}.${f.field}`);
+	},
+
 	// A callee copies its mutated array and struct parameters on entry, except
 	// when the parameter is a type parameter (generics are erased in JS) or
 	// part of a variadic rest array.  For those the caller passes aggregate
 	// (array and struct) arguments as copies.
 	_callerCopiesArg(expr, i) {
-		if (!this._aggregateBase(expr.args[i]._type)) return false;
+		const argT = expr.args[i]._type;
+		if (!this._aggregateBase(argT) && !this._typeParamClone(argT, ""))
+			return false;
 		let ft = expr.func?._type ?? expr.func?.expr?._type;
 		if (ft?.kind === "generic") ft = ft.underlying;
 		if (ft?.kind !== "func") return false;
@@ -1033,7 +1109,7 @@ export const expressionGenMethods = {
 			// Strict mode: a field of a nil struct pointer panics as in Go.
 			const recv =
 				this.strict && !expr._isMethodValue ? this._genNilChecked(base) : base;
-			const sel = `${recv}.${expr.field}`;
+			const sel = `${recv}${this._promotedPath(expr)}.${expr.field}`;
 			if (expr._isMethodValue && !expr._callee) {
 				// `p.M` with a value receiver binds a copy of `*p` now.
 				if (expr._derefRecv) {
@@ -1909,7 +1985,9 @@ export const expressionGenMethods = {
 	},
 
 	_genImplicitCompositeLit(expr) {
-		const typeName = expr._type?.name ?? expr._type?.underlying?.name;
+		// An elided `&T` (`[]*T{{1}}`) builds the struct; a struct pointer is the object.
+		const lit = expr._type?.kind === "pointer" ? expr._type.base : expr._type;
+		const typeName = lit?.name ?? lit?.underlying?.name;
 		if (typeName && this.structNames.has(typeName)) {
 			return this._genPositionalStructLit(typeName, expr);
 		}
@@ -2136,18 +2214,17 @@ export const expressionGenMethods = {
 		}
 	},
 
-	// A nil map: `{}` in js packages; in strict mode the frozen `__nilmap`,
-	// which panics on write.
+	// A nil map: a fresh tagged `{}` in js packages (`m == nil` holds while it
+	// stays empty); in strict mode the frozen `__nilmap`, which panics on write.
 	_nilMapZero() {
-		if (!this.strict) return "{}";
-		this.useHelper("nilMap");
-		return "__nilmap";
+		this.useHelper(this.strict ? "nilMap" : "nm");
+		return this.strict ? "__nilmap" : "__nm()";
 	},
 
 	_arrayZero(n, ctor, elemZero) {
 		if (ctor) return `new ${ctor}(${n})`;
 		if (n === 0) return "[]";
-		if (/^(new |\{|\[|Array)|\$z_/.test(elemZero))
+		if (/^(new |\{|\[|Array|__nm\()|\$z_/.test(elemZero))
 			return `Array.from({ length: ${n} }, () => (${elemZero}))`;
 		return `new Array(${n}).fill(${elemZero})`;
 	},
@@ -2268,6 +2345,12 @@ export const expressionGenMethods = {
 			return expr.op === "==" ? cmp : `!${cmp}`;
 		}
 
+		const nilMap = this._genNilMapCompare(expr);
+		if (nilMap) return nilMap;
+
+		const tpEq = this._genTypeParamEquality(expr);
+		if (tpEq) return tpEq;
+
 		if (this._isIfaceEquality(expr)) {
 			this.useHelper("ifeq");
 			const cmp = `__ifeq(${this._genIfaceOperand(expr.left)}, ${this._genIfaceOperand(expr.right)})`;
@@ -2302,6 +2385,43 @@ export const expressionGenMethods = {
 		const r = operand(expr.right, true);
 		if (this._isIntDivision(expr)) return `Math.trunc(${l} / ${r})`;
 		return `${l} ${jsOp} ${r}`;
+	},
+
+	// `m == nil` / `m != nil` on a map: true for a nil map (null, the strict
+	// sentinel, or an untouched js-package zero map), false for `map[K]V{}`.
+	_nilMapOperand(expr) {
+		if (expr.op !== "==" && expr.op !== "!=") return null;
+		const other = this._isNilLiteral(expr.right)
+			? expr.left
+			: this._isNilLiteral(expr.left)
+				? expr.right
+				: null;
+		if (!other) return null;
+		const t =
+			other._type?.kind === "named" ? other._type.underlying : other._type;
+		return t?.kind === "map" ? other : null;
+	},
+
+	_genNilMapCompare(expr) {
+		const operand = this._nilMapOperand(expr);
+		if (!operand) return null;
+		this.useHelper(this.strict ? "nilMap" : "nm");
+		const cmp = `__isnm(${this.genExpr(operand)})`;
+		return expr.op === "==" ? cmp : `!${cmp}`;
+	},
+
+	// `a == b` on type-parameter operands: __geq compares structs and arrays by value.
+	_genTypeParamEquality(expr) {
+		if (expr.op !== "==" && expr.op !== "!=") return null;
+		const t = expr.left._type;
+		if (t?.kind !== "typeParam" || expr.right._type?.kind !== "typeParam")
+			return null;
+		const factory = this._typeParamZeroFactory(t.name);
+		if (!factory) return null;
+		this.useHelper("equal");
+		this.useHelper("geq");
+		const cmp = `__geq(${factory}, ${this.genExpr(expr.left)}, ${this.genExpr(expr.right)})`;
+		return expr.op === "==" ? cmp : `!${cmp}`;
 	},
 
 	_isStructEquality(expr) {
@@ -2361,6 +2481,7 @@ export const expressionGenMethods = {
 		)
 			return null;
 		if (this._isStructEquality(expr) || this._isIntDivision(expr)) return null;
+		if (this._nilMapOperand(expr)) return null;
 		if (this._isIfaceEquality(expr)) return null;
 		if (expr.op === "&^") return "&";
 		if (expr.op === "==" || expr.op === "!=") {

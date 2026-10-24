@@ -442,6 +442,13 @@ func main() {
 	assertErrorContains(errors, "does not implement");
 });
 
+test("fmt.Append of nothing onto a nil slice stays nil (P17)", () => {
+	const out = run(
+		`fmt.Println(fmt.Append(nil) == nil, fmt.Append(nil, "") == nil, fmt.Append(nil, "x") == nil)`,
+	);
+	assertEqual(out, "true true false");
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

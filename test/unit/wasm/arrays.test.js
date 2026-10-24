@@ -1993,3 +1993,62 @@ parity(
 	return a[1]*100 + a[2]*10 + b[2]`,
 	877,
 );
+
+section("Package-level arrays and named lengths (Task 0.28)");
+
+test("&g on a package-level array aliases it (P21)", () => {
+	const res = compileHybrid(`package main
+
+var g [2]int
+
+func Main() int {
+	p := &g
+	p[0] = 5
+	return g[0]
+}
+`).run("Main");
+	assertEqual(res.jsRes, 5);
+	assertEqual(Number(res.wasmRes), 5);
+});
+
+test("a package-level array starts as its zero array (P22)", () => {
+	const res = compileHybrid(`package main
+
+type V [3]int
+type S struct{ A, B int }
+
+var g [2]int
+var v V
+var s [2]S
+
+func Main() int {
+	g[1] = 1
+	v[2] = 7
+	s[1].B = 4
+	return g[1] + len(g) + v[2]*10 + s[1].B*100
+}
+`).run("Main");
+	assertEqual(res.jsRes, 473);
+	assertEqual(Number(res.wasmRes), 473);
+});
+
+test("[N]T with a named constant N has length N (P23)", () => {
+	const res = compileHybrid(`package main
+
+var g [N]int
+
+const N = 3
+
+type T struct{ a [N + 1]int }
+
+func Main() int {
+	var a [N]int
+	a[2] = 4
+	var t T
+	g[1] = 1
+	return len(a) + a[2] + len(g)*10 + len(t.a)*100 + g[1]
+}
+`).run("Main");
+	assertEqual(res.jsRes, 438);
+	assertEqual(Number(res.wasmRes), 438);
+});

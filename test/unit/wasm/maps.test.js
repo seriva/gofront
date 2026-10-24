@@ -3,8 +3,10 @@
 
 import {
 	assertEqual,
+	compile,
 	compileHybrid,
 	compileHybridProject,
+	runJs,
 	section,
 	test,
 } from "../helpers.js";
@@ -571,4 +573,38 @@ func Main() string {
 	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
 	assertEqual(wasmRes, "ok");
 	assertEqual(jsRes, wasmRes);
+});
+
+test("m == nil is true for a nil map, false for an empty one (P60)", () => {
+	const res = compileHybrid(`package main
+
+import "fmt"
+
+func Main() string {
+	var m map[string]int
+	n := map[string]int{}
+	k := make(map[string]int)
+	return fmt.Sprint(m == nil, n == nil, k == nil, m != nil, len(m))
+}
+`).run("Main");
+	assertEqual(res.jsRes, "true false false false 0");
+	assertEqual(res.wasmRes, res.jsRes);
+});
+
+test("m == nil in a non-strict js package", () => {
+	const { js, errors } = compile(`package main
+
+type S struct{ m map[string]int }
+
+func main() {
+	var m map[string]int
+	n := map[string]int{}
+	var s S
+	println(m == nil, n == nil, s.m == nil)
+	m["a"] = 1
+	println(m == nil)
+}
+`);
+	assertEqual(errors.length, 0, errors.join("\n"));
+	assertEqual(runJs(js), "true false true\nfalse");
 });
