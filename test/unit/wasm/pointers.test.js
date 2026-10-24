@@ -444,3 +444,93 @@ func Main() int {
 	assertEqual(res.wasmRes, 47n);
 	assertEqual(res.jsRes, 47);
 });
+
+section("Pointer stability on whole-value assignment (Task 0.33)");
+
+test("whole array assignment writes into storage seen by &a[1] (P20)", () => {
+	const src = `
+package main
+
+func Main() int {
+	a := [3]int{1, 2, 3}
+	p := &a[1]
+	a = [3]int{4, 5, 6}
+	return *p
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.wasmRes, 5n);
+	assertEqual(res.jsRes, 5);
+});
+
+test("whole struct assignment writes into storage seen by &s (P25)", () => {
+	const src = `
+package main
+
+type S struct{ A int }
+
+func Main() int {
+	s := S{1}
+	p := &s
+	s = S{5}
+	return p.A
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.wasmRes, 5n);
+	assertEqual(res.jsRes, 5);
+});
+
+test("whole struct assignment keeps field pointer &s.A valid", () => {
+	const src = `
+package main
+
+type S struct{ A, B int }
+
+func Main() int {
+	s := S{1, 2}
+	p := &s.B
+	s = S{5, 7}
+	return *p
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.wasmRes, 7n);
+	assertEqual(res.jsRes, 7);
+});
+
+test("whole struct assignment through a field array pointer &w.arr[0]", () => {
+	const src = `
+package main
+
+type W struct{ arr [2]int }
+
+func Main() int {
+	w := W{[2]int{1, 2}}
+	p := &w.arr[0]
+	w = W{[2]int{8, 9}}
+	return *p
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.wasmRes, 8n);
+	assertEqual(res.jsRes, 8);
+});
+
+test("assigning a field array wholesale keeps &w.arr[1] valid", () => {
+	const src = `
+package main
+
+type W struct{ arr [2]int }
+
+func Main() int {
+	var w W
+	p := &w.arr[1]
+	w.arr = [2]int{3, 4}
+	return *p
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.wasmRes, 4n);
+	assertEqual(res.jsRes, 4);
+});
