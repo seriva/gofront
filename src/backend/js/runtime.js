@@ -670,6 +670,18 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
   });
 };`;
 
+// fmt.Sprint/Print/Append: a space goes between two operands when neither is a
+// string; `ln` (Sprintln, Println, Appendln) separates always and ends with a newline.
+export const HELPER_SPRINT = `var __sprint = __sprint || function(ln, ...a) {
+  const isStr = (x) => typeof x === "string" || (x !== null && typeof x === "object" && typeof x.__gfUnbox === "function" && typeof x.__gfUnbox() === "string");
+  let f = "";
+  for (let i = 0; i < a.length; i++) {
+    if (i > 0 && (ln || (!isStr(a[i - 1]) && !isStr(a[i])))) f += " ";
+    f += "%v";
+  }
+  return __sprintf(ln ? f + "\\n" : f, ...a);
+};`;
+
 export const HELPER_ERROR = `var __error = __error || function(msg, cause) {
   return { Error() { return msg; }, toString() { return msg; }, _msg: msg, _cause: cause ?? null };
 };`;
