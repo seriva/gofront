@@ -771,3 +771,33 @@ func Run() string {
 	);
 	assertEqual(out, "2");
 });
+
+section("iter: explicit instantiation through a package qualifier (Task 0.30)");
+
+test("iter.Seq[int](f) converts a func literal and ranges (P12)", async () => {
+	const out = await iterParity(`import "iter"
+
+func Run() int {
+	f := func(yield func(int) bool) {
+		yield(1)
+		yield(3)
+	}
+	s := 0
+	for v := range iter.Seq[int](f) {
+		s += v
+	}
+	return s
+}
+`);
+	assertEqual(out, "4");
+});
+
+test("slices.Collect[int](slices.Values(...)) instantiates explicitly (P74)", async () => {
+	const out = await iterParity(`import "slices"
+
+func Run() int {
+	return len(slices.Collect[int](slices.Values([]int{1, 2})))
+}
+`);
+	assertEqual(out, "2");
+});
