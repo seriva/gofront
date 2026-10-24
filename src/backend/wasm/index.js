@@ -2364,6 +2364,8 @@ export function compileWasmModule(
 		if (isIteratorRangeFor(node)) {
 			const yieldFuncLit = getOrCreateIteratorFuncLit(node);
 			scanClosures(yieldFuncLit, rootFn);
+			// A func literal ranged over directly is a closure of its own.
+			scanClosures(node.cond?.expr ?? node.init?.rhs?.[0]?.expr, rootFn);
 			return;
 		}
 		if (node.kind === "FuncLit") {
