@@ -910,7 +910,7 @@ export const expressionGenMethods = {
 			return BROWSER_GLOBALS.has(expr.field) ? `${expr.field}$` : expr.field;
 		if (expr.expr._type?.kind === "pointer" && expr.field !== "value")
 			return this._genPointerSelectorField(expr, base);
-		const sel = `${base}.${this._jsMemberName(expr)}`;
+		const sel = `${base}${this._promotedPath(expr)}.${this._jsMemberName(expr)}`;
 		if (expr._isMethodValue && !expr._callee) {
 			// A value receiver is copied when the method value is evaluated.
 			const t = expr.expr._type;
@@ -919,6 +919,43 @@ export const expressionGenMethods = {
 			return `${sel}.bind(${base})`;
 		}
 		return sel;
+	},
+
+	// A promoted field (`o.A` with embedded `In`) lives on the embedded value:
+	// the class also carries a flattened copy, so reads and writes go through
+	// the embedded path (`.In`) to stay in sync.  Returns "" for direct fields.
+	_promotedPath(expr) {
+		if (expr._isMethodValue || expr._isMethodExpr) return "";
+		let t = expr.expr._type;
+		if (t?.kind === "pointer") t = t.base;
+		const path = this._embedPath(t, expr.field, 0);
+		return path ? path.map((n) => `.${n}`).join("") : "";
+	},
+
+	_embedPath(t, field, depth) {
+		const st = t?.kind === "named" ? t.underlying : t;
+		if (st?.kind !== "struct" || !st.fields?.has(field) || depth > 8)
+			return null;
+		const direct = (st._structFields ?? []).some(
+			(sf) => !sf.embedded && sf.names?.includes(field),
+		);
+		if (direct) return null;
+		for (const sf of st._structFields ?? []) {
+			if (!sf.embedded) continue;
+			const inner = sf.type?.kind === "pointer" ? sf.type.base : sf.type;
+			if (inner?.kind !== "named" || !this.structNames.has(inner.name))
+				continue;
+			const name = inner.name;
+			if (name === field) return null;
+			const ist = inner.underlying;
+			if (!ist?.fields?.has(field)) continue;
+			const sub = this._embedPath(inner, field, depth + 1);
+			const idirect = (ist._structFields ?? []).some(
+				(x) => !x.embedded && x.names?.includes(field),
+			);
+			return idirect ? [name] : sub ? [name, ...sub] : null;
+		}
+		return null;
 	},
 
 	// PascalCase aliases of Web API methods (gl.ClearColor) map to the real camelCase member.
@@ -1072,7 +1109,7 @@ export const expressionGenMethods = {
 			// Strict mode: a field of a nil struct pointer panics as in Go.
 			const recv =
 				this.strict && !expr._isMethodValue ? this._genNilChecked(base) : base;
-			const sel = `${recv}.${expr.field}`;
+			const sel = `${recv}${this._promotedPath(expr)}.${expr.field}`;
 			if (expr._isMethodValue && !expr._callee) {
 				// `p.M` with a value receiver binds a copy of `*p` now.
 				if (expr._derefRecv) {
@@ -1948,7 +1985,9 @@ export const expressionGenMethods = {
 	},
 
 	_genImplicitCompositeLit(expr) {
-		const typeName = expr._type?.name ?? expr._type?.underlying?.name;
+		// An elided `&T` (`[]*T{{1}}`) builds the struct; a struct pointer is the object.
+		const lit = expr._type?.kind === "pointer" ? expr._type.base : expr._type;
+		const typeName = lit?.name ?? lit?.underlying?.name;
 		if (typeName && this.structNames.has(typeName)) {
 			return this._genPositionalStructLit(typeName, expr);
 		}

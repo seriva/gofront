@@ -6,6 +6,7 @@ import {
 	assertEqual,
 	assertErrorContains,
 	compile,
+	compileHybrid,
 	runJs,
 	section,
 	summarize,
@@ -651,6 +652,76 @@ func main() {
 }`);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "10");
+});
+
+section("Struct literals and embedded fields in JS (Task 0.27)");
+
+test("elided &T in slice and map literals builds the pointer (P14)", () => {
+	const res = compileHybrid(`package main
+
+type P struct{ A int }
+
+func Main() int {
+	xs := []*P{{1}, {2}}
+	m := map[string]*P{"a": {7}}
+	xs[0].A += 10
+	return xs[1].A*100 + xs[0].A*10 + m["a"].A
+}
+`).run("Main");
+	assertEqual(res.jsRes, 2 * 100 + 11 * 10 + 7);
+	assertEqual(Number(res.wasmRes), 317);
+});
+
+test("a write through a promoted field reaches the embedded value (P70)", () => {
+	const res = compileHybrid(`package main
+
+type In struct{ A int }
+type Out struct{ In }
+
+func Main() int {
+	o := Out{}
+	o.A = 5
+	o.A += 47
+	p := &o
+	p.A++
+	return o.A*100 + o.In.A
+}
+`).run("Main");
+	assertEqual(res.jsRes, 5353);
+	assertEqual(Number(res.wasmRes), 5353);
+});
+
+test("fmt prints struct map keys as Go does (P15)", () => {
+	const res = compileHybrid(`package main
+
+import "fmt"
+
+type P struct{ A int }
+
+func Main() string {
+	m := map[P]int{P{1}: 2}
+	m[P{3}] = 4
+	return fmt.Sprint(map[P]int{P{1}: 2}, len(m), m[P{3}], m[P{1}])
+}
+`).run("Main");
+	assertEqual(res.jsRes, "map[{1}:2] 2 4 2");
+	assertEqual(res.wasmRes, res.jsRes);
+});
+
+test("struct map keys sort field by field", () => {
+	const { js, errors } = compile(`package main
+
+import "fmt"
+
+type P struct{ A, B int }
+
+func main() {
+	m := map[P]int{P{10, 1}: 1, P{2, 5}: 2, P{2, 3}: 3}
+	fmt.Println(m)
+}
+`);
+	assertEqual(errors.length, 0, errors.join("\n"));
+	assertEqual(runJs(js), "map[{2 3}:3 {2 5}:2 {10 1}:1]");
 });
 
 // ── Entry point ───────────────────────────────────────────────
