@@ -2175,18 +2175,17 @@ export const expressionGenMethods = {
 		}
 	},
 
-	// A nil map: `{}` in js packages; in strict mode the frozen `__nilmap`,
-	// which panics on write.
+	// A nil map: a fresh tagged `{}` in js packages (`m == nil` holds while it
+	// stays empty); in strict mode the frozen `__nilmap`, which panics on write.
 	_nilMapZero() {
-		if (!this.strict) return "{}";
-		this.useHelper("nilMap");
-		return "__nilmap";
+		this.useHelper(this.strict ? "nilMap" : "nm");
+		return this.strict ? "__nilmap" : "__nm()";
 	},
 
 	_arrayZero(n, ctor, elemZero) {
 		if (ctor) return `new ${ctor}(${n})`;
 		if (n === 0) return "[]";
-		if (/^(new |\{|\[|Array)|\$z_/.test(elemZero))
+		if (/^(new |\{|\[|Array|__nm\()|\$z_/.test(elemZero))
 			return `Array.from({ length: ${n} }, () => (${elemZero}))`;
 		return `new Array(${n}).fill(${elemZero})`;
 	},
@@ -2307,6 +2306,9 @@ export const expressionGenMethods = {
 			return expr.op === "==" ? cmp : `!${cmp}`;
 		}
 
+		const nilMap = this._genNilMapCompare(expr);
+		if (nilMap) return nilMap;
+
 		const tpEq = this._genTypeParamEquality(expr);
 		if (tpEq) return tpEq;
 
@@ -2344,6 +2346,29 @@ export const expressionGenMethods = {
 		const r = operand(expr.right, true);
 		if (this._isIntDivision(expr)) return `Math.trunc(${l} / ${r})`;
 		return `${l} ${jsOp} ${r}`;
+	},
+
+	// `m == nil` / `m != nil` on a map: true for a nil map (null, the strict
+	// sentinel, or an untouched js-package zero map), false for `map[K]V{}`.
+	_nilMapOperand(expr) {
+		if (expr.op !== "==" && expr.op !== "!=") return null;
+		const other = this._isNilLiteral(expr.right)
+			? expr.left
+			: this._isNilLiteral(expr.left)
+				? expr.right
+				: null;
+		if (!other) return null;
+		const t =
+			other._type?.kind === "named" ? other._type.underlying : other._type;
+		return t?.kind === "map" ? other : null;
+	},
+
+	_genNilMapCompare(expr) {
+		const operand = this._nilMapOperand(expr);
+		if (!operand) return null;
+		this.useHelper(this.strict ? "nilMap" : "nm");
+		const cmp = `__isnm(${this.genExpr(operand)})`;
+		return expr.op === "==" ? cmp : `!${cmp}`;
 	},
 
 	// `a == b` on type-parameter operands: __geq compares structs and arrays by value.
@@ -2417,6 +2442,7 @@ export const expressionGenMethods = {
 		)
 			return null;
 		if (this._isStructEquality(expr) || this._isIntDivision(expr)) return null;
+		if (this._nilMapOperand(expr)) return null;
 		if (this._isIfaceEquality(expr)) return null;
 		if (expr.op === "&^") return "&";
 		if (expr.op === "==" || expr.op === "!=") {

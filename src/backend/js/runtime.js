@@ -417,6 +417,16 @@ export const HELPER_NIL_MAP = `var __nilmap = __nilmap || Object.freeze(Object.d
 var __mw = __mw || function(m) {
   if (m == null || m === __nilmap) throw new Error("assignment to entry in nil map");
   return m;
+};
+var __isnm = __isnm || function(m) {
+  return m == null || m.__map === true || (m.__nm === true && Object.keys(m).length === 0);
+};`;
+
+// js-package nil maps: the zero value is a fresh `{}` carrying a hidden tag;
+// `m == nil` holds while it stays empty (writes are allowed, as in plain JS).
+export const HELPER_NM = `var __nm = __nm || function() { return Object.defineProperty({}, "__nm", { value: true }); };
+var __isnm = __isnm || function(m) {
+  return m == null || m.__map === true || (m.__nm === true && Object.keys(m).length === 0);
 };`;
 
 // Interface equality: named non-struct values are boxed in interfaces, so two
