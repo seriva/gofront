@@ -202,6 +202,8 @@ export function analyzeCaptures(fnDecl) {
 			}
 		}
 		walkClosures(funcLit, scopeStack);
+		// A func literal ranged over directly is a closure of its own.
+		walkClosures(node.cond?.expr ?? node.init?.rhs?.[0]?.expr, scopeStack);
 		const captured = result.capturesByClosure.get(funcLit) ?? new Set();
 		if (node._iterStateName) {
 			captured.add(node._iterStateName);
