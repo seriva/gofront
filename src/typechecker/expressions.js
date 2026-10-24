@@ -456,10 +456,18 @@ export const expressionCheckMethods = {
 	// The node becomes an InstantiationExpr so monomorphisation rewrites it.
 	_genericTypeRef(expr, scope) {
 		const base = expr.expr;
-		if (base?.kind !== "Ident") return null;
-		const t = this.types.get(base.name);
-		if (!t?._generic || t._generic.isAlias || scope.lookup(base.name) !== t)
-			return null;
+		let t;
+		if (base?.kind === "SelectorExpr" && base.expr?.kind === "Ident") {
+			// `iter.Seq[int]`: a generic type behind a package qualifier.
+			if (scope.lookup(base.expr.name)?.kind !== "namespace") return null;
+			t = this.types.get(`${base.expr.name}.${base.field}`);
+			if (!t?._generic || t._generic.isAlias) return null;
+		} else {
+			if (base?.kind !== "Ident") return null;
+			t = this.types.get(base.name);
+			if (!t?._generic || t._generic.isAlias || scope.lookup(base.name) !== t)
+				return null;
+		}
 		if (expr.kind === "IndexExpr") {
 			if (expr.index?.kind !== "Ident") return null;
 			expr.kind = "InstantiationExpr";
@@ -469,6 +477,15 @@ export const expressionCheckMethods = {
 		const resolved = this.resolveTypeNode(expr, scope);
 		expr._isTypeRef = true;
 		return this._typeRefOperand(expr, resolved);
+	},
+
+	// Underlying type with chains of defined types followed through
+	// (`type W V` where `V` is itself a named array).
+	_deepUnderlying(t) {
+		let u = t;
+		for (let i = 0; u?.kind === "named" && i < 32; i++)
+			u = this.resolveType(u.underlying) ?? u.underlying;
+		return u;
 	},
 
 	_checkIndexExpr(expr, scope) {
@@ -482,10 +499,7 @@ export const expressionCheckMethods = {
 		this.checkExpr(expr.index, scope);
 		if (bt?._tainted) return TAINTED_ANY;
 		if (isAny(bt)) return ANY;
-		const btu =
-			bt.kind === "named"
-				? (this.resolveType(bt.underlying) ?? bt.underlying)
-				: bt;
+		const btu = this._deepUnderlying(bt);
 		if (btu.kind === "slice" || btu.kind === "array") {
 			this._checkArrayBoundsExpr(btu, bt, expr, scope);
 			return btu.elem;
@@ -554,8 +568,9 @@ export const expressionCheckMethods = {
 		if (expr.max) this.checkExpr(expr.max, scope);
 		if (bt?._tainted) return TAINTED_ANY;
 		if (isAny(bt)) return ANY;
-		if (bt.kind === "slice" || bt.kind === "array")
-			return { kind: "slice", elem: bt.elem };
+		const btu = this._deepUnderlying(bt);
+		if (btu.kind === "slice" || btu.kind === "array")
+			return { kind: "slice", elem: btu.elem };
 		if (isString(bt)) return STRING;
 		if (sharedInfo(bt))
 			return this.err(
@@ -1013,6 +1028,15 @@ export const expressionCheckMethods = {
 	checkCall(expr, scope) {
 		expr.func._typeRefOk = true;
 		let fnType = this.checkExpr(expr.func, scope);
+		// `slices.Sort[[]int](xs)` on an emitter-backed (non-generic) stdlib
+		// function: the type arguments are inferred, so call it as `slices.Sort(xs)`.
+		if (
+			expr.func.kind === "InstantiationExpr" &&
+			!expr.func._genericFnType &&
+			expr.func.expr?.kind === "SelectorExpr" &&
+			fnType?.kind === "func"
+		)
+			expr.func = expr.func.expr;
 		this._checkSharedAllocSite(expr, scope);
 		this._checkBoundaryCallInLoop(expr, scope);
 		if (fnType.kind === "builtin") {
@@ -1450,7 +1474,13 @@ export const expressionCheckMethods = {
 	_checkMapCompositeLit(expr, scope, t, base) {
 		for (const elem of expr.elems) {
 			if (elem.kind === "KeyValueExpr") {
-				const kt = this.checkExpr(elem.key, scope);
+				let kt;
+				if (elem.key.kind === "CompositeLit" && elem.key.typeExpr === null) {
+					kt = this.checkCompositeLit(elem.key, scope, base.key);
+					elem.key._type = kt;
+				} else {
+					kt = this.checkExpr(elem.key, scope);
+				}
 				// value may be an implicit composite lit
 				let vt;
 				if (

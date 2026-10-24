@@ -348,6 +348,12 @@ export const statementCheckMethods = {
 		this._typeSwitchDepth++;
 		for (const c of stmt.cases) {
 			const caseScope = new Scope(inner);
+			// Resolve instantiated generic case types so backends can tell
+			// `*Stack[int]` from `*Stack[string]`.
+			for (const t of c.types ?? []) {
+				const base = t?.kind === "PointerType" ? t.base : t;
+				if (base?.kind === "GenericTypeName") this.resolveTypeNode(t, inner);
+			}
 			if (stmt.assign) {
 				// Bind the variable to the single case type, or any for multi/default
 				const bindType =

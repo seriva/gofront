@@ -482,6 +482,18 @@ export class TypeChecker {
 			for (const d of p.decls) {
 				if (d.kind === "TypeDecl" && !d.isAlias && !this.types.has(d.name)) {
 					const placeholder = { kind: "named", name: d.name, underlying: null };
+					// A generic type is known to be generic before any field resolves,
+					// so types declared earlier can instantiate it.
+					if (d.typeParams) {
+						placeholder._generic = {
+							typeParams: d.typeParams.map((tp) => ({
+								kind: "typeParam",
+								name: tp.name,
+								constraint: tp.constraint,
+							})),
+							declNode: d,
+						};
+					}
 					this.types.set(d.name, placeholder);
 					this.globals.define(d.name, placeholder);
 				}
@@ -491,6 +503,7 @@ export class TypeChecker {
 		for (const p of programs) {
 			for (const d of p.decls) if (d.kind === "TypeDecl") all.push({ p, d });
 		}
+		this._expandGenericStructDefs(all.map((x) => x.d));
 		// Collect in dependency order so aliases, generics, embedded and by-value
 		// field types declared later (or in other files) are ready when needed.
 		let pending = all;
@@ -506,6 +519,24 @@ export class TypeChecker {
 			}
 			pending =
 				ready.length > 0 ? pending.filter((x) => !ready.includes(x)) : [];
+		}
+	}
+
+	// `type S[T any] Base` with `Base` a struct declared in the package: S is a
+	// new struct type with Base's fields (and none of its methods), so its
+	// declaration becomes a copy of Base's struct type.
+	_expandGenericStructDefs(decls) {
+		const byName = new Map(decls.map((d) => [d.name, d]));
+		for (const d of decls) {
+			if (!d.typeParams || d.isAlias) continue;
+			let target = d.type;
+			for (let i = 0; i < 16 && target?.kind === "TypeName"; i++) {
+				const base = byName.get(target.name);
+				if (!base || base.typeParams || base.isAlias) break;
+				target = base.type;
+			}
+			if (target?.kind === "StructType")
+				d.type = JSON.parse(JSON.stringify(target));
 		}
 	}
 
@@ -631,16 +662,20 @@ export class TypeChecker {
 
 	_promoteEmbeddedMethods() {
 		for (const type of this.types.values()) {
-			const struct = type.underlying;
-			if (struct?.kind === "struct" && struct._embeds) {
-				for (const embed of struct._embeds) {
-					const inner = embed.kind === "pointer" ? embed.base : embed;
-					const base = inner.kind === "named" ? inner.underlying : inner;
-					if (base?.kind !== "struct" || !base.methods) continue;
-					for (const [mName, mType] of base.methods.entries()) {
-						if (!struct.methods.has(mName)) struct.methods.set(mName, mType);
-					}
-				}
+			this._promoteEmbeddedInto(type.underlying);
+			for (const inst of type._generic?._instances?.values() ?? [])
+				this._promoteEmbeddedInto(inst.underlying);
+		}
+	}
+
+	_promoteEmbeddedInto(struct) {
+		if (struct?.kind !== "struct" || !struct._embeds) return;
+		for (const embed of struct._embeds) {
+			const inner = embed.kind === "pointer" ? embed.base : embed;
+			const base = inner.kind === "named" ? inner.underlying : inner;
+			if (base?.kind !== "struct" || !base.methods) continue;
+			for (const [mName, mType] of base.methods.entries()) {
+				if (!struct.methods.has(mName)) struct.methods.set(mName, mType);
 			}
 		}
 	}
@@ -655,27 +690,32 @@ export class TypeChecker {
 		if (decl.typeParams) {
 			// Generic type — resolve underlying with type params as ANY for struct fields
 			const typeScope = new Scope(this.globals);
-			const typeParamTypes = decl.typeParams.map((tp) => {
-				const t = {
-					kind: "typeParam",
-					name: tp.name,
-					constraint: tp.constraint,
-				};
+			const preset = this.types.get(decl.name)?._generic;
+			const typeParamTypes = decl.typeParams.map((tp, i) => {
+				const t =
+					preset?.declNode === decl
+						? preset.typeParams[i]
+						: {
+								kind: "typeParam",
+								name: tp.name,
+								constraint: tp.constraint,
+							};
 				typeScope.define(tp.name, t);
 				return t;
 			});
-			const underlying = this.resolveTypeNode(decl.type, typeScope);
 			const existing = this.types.get(decl.name);
 			const named =
 				existing?.kind === "named"
 					? existing
 					: { kind: "named", name: decl.name };
+			// Registered before the fields resolve so `Next *List[T]` finds the
+			// generic declaration it is part of.
+			if (preset?.declNode === decl) named._generic = preset;
+			else named._generic = { typeParams: typeParamTypes, declNode: decl };
+			this.types.set(decl.name, named);
+			const underlying = this.resolveTypeNode(decl.type, typeScope);
 			named.underlying = underlying;
 			named._target = this.target;
-			named._generic = {
-				typeParams: typeParamTypes,
-				declNode: decl,
-			};
 			if (underlying.kind === "struct") {
 				underlying.name = decl.name;
 				underlying.methods = new Map();
@@ -684,7 +724,12 @@ export class TypeChecker {
 			this.globals.define(decl.name, named);
 			return;
 		}
-		const underlying = this.resolveTypeNode(decl.type, this.globals);
+		let underlying = this.resolveTypeNode(decl.type, this.globals);
+		// `type W V` with V a named array: W's underlying type is V's array.
+		if (!decl.isAlias && underlying.kind === "named") {
+			const inner = this._deepUnderlying(underlying);
+			if (inner?.kind === "array") underlying = inner;
+		}
 		if (decl.isAlias) {
 			// type A = B — transparent alias, A and B are identical types
 			this.types.set(decl.name, underlying);

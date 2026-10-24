@@ -826,6 +826,33 @@ func Main() int { ${body} }`);
 	}
 });
 
+section("Composite-literal keys and named array types (Task 0.29)");
+
+test("map keys may elide their composite type (P13)", () => {
+	const res = compileHybrid(`package main
+type P struct{ X int }
+func Main() int {
+	a := map[P]int{{1}: 2}
+	b := map[[2]int]string{{1, 2}: "a"}
+	return len(a)*100 + a[P{1}]*10 + len(b[[2]int{1, 2}])
+}`).run("Main");
+	assertEqual(res.jsRes, 121);
+	assertEqual(Number(res.wasmRes), 121);
+});
+
+test("a type defined over a named array is indexable (P24)", () => {
+	const res = compileHybrid(`package main
+type V [2]int
+type W V
+func (w W) Sum() int { return w[0] + w[1] }
+func Main() int {
+	w := W{1, 2}
+	return w[1] + len(w)*10 + len(w[:])*100 + w.Sum()*1000
+}`).run("Main");
+	assertEqual(res.jsRes, 3222);
+	assertEqual(Number(res.wasmRes), 3222);
+});
+
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);

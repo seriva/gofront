@@ -65,6 +65,7 @@ const SUBSTITUTE_DISPATCH = {
 			fields,
 			methods,
 			_embeds: type._embeds,
+			_structFields: type._structFields,
 		};
 	},
 	interface: (s, type, map) => {
@@ -72,14 +73,24 @@ const SUBSTITUTE_DISPATCH = {
 		for (const [k, v] of type.methods) methods.set(k, s.substituteType(v, map));
 		return { kind: "interface", name: type.name, methods };
 	},
-	named: (s, type, map) => ({
-		kind: "named",
-		name: type.name,
-		...(type.typeArgs && {
-			typeArgs: type.typeArgs.map((t) => s.substituteType(t, map)),
-		}),
-		underlying: s.substituteType(type.underlying, map),
-	}),
+	named: (s, type, map) => {
+		// An instance of a generic type: re-instantiate with the substituted
+		// arguments (through the instance cache) rather than copying its
+		// possibly cyclic underlying type.
+		if (type._genericOf)
+			return s.instantiateGenericWithArgs(
+				type._genericOf,
+				type.typeArgs.map((t) => s.substituteType(t, map)),
+			);
+		return {
+			kind: "named",
+			name: type.name,
+			...(type.typeArgs && {
+				typeArgs: type.typeArgs.map((t) => s.substituteType(t, map)),
+			}),
+			underlying: s.substituteType(type.underlying, map),
+		};
+	},
 };
 
 /** @type {ThisType<TypeChecker>} */
@@ -212,8 +223,13 @@ export const resolveMethods = {
 
 	// `G[X]`: instantiate a generic named type, or expand a generic alias.
 	_resolveGenericTypeName(node, scope) {
+		const sel = node.expr?.kind === "SelectorExpr" ? node.expr : null;
+		const qualified =
+			sel?.expr?.kind === "Ident" ? `${sel.expr.name}.${sel.field}` : null;
 		const name =
-			node.name ?? (node.expr?.kind === "Ident" ? node.expr.name : null);
+			node.name ??
+			(node.expr?.kind === "Ident" ? node.expr.name : null) ??
+			qualified;
 		const typeArgs = node.typeArgs ?? (node.index ? [node.index] : []);
 		const base = name
 			? this.types.get(name)
@@ -221,7 +237,9 @@ export const resolveMethods = {
 				? this.resolveTypeNode(node.expr, scope)
 				: null;
 		if (!base) return this.err(`Unknown type '${name ?? "?"}'`, node);
-		if (name) this._useQualifiedTypeName(node.name ? node : node.expr, base);
+		if (qualified) this.globals.lookup(sel.expr.name);
+		else if (name)
+			this._useQualifiedTypeName(node.name ? node : node.expr, base);
 		if (base.kind === "named" && base._generic?.isAlias) {
 			const aliasArgs = typeArgs.map((n) => this.resolveTypeNode(n, scope));
 			node._typeArgs = aliasArgs;
@@ -355,10 +373,33 @@ export const resolveMethods = {
 	},
 
 	instantiateGenericType(generic, typeArgNodes, scope) {
-		const map = new Map();
 		const typeArgs = typeArgNodes.map((n) => this.resolveTypeNode(n, scope));
+		return this.instantiateGenericWithArgs(generic, typeArgs);
+	},
+
+	// One instance per type-argument list.  The instance is cached before its
+	// fields are resolved, so a field that names the instance again (`Next
+	// *List[T]`, `Children []Tree[T]`, or a cycle through another generic type)
+	// reaches the same object instead of recursing forever.
+	instantiateGenericWithArgs(generic, typeArgs) {
+		const key = typeArgs.map(typeStr).join(",");
+		generic._instances ??= new Map();
+		const cached = generic._instances.get(key);
+		if (cached) {
+			this._syncInstanceMethods(generic, cached);
+			return cached;
+		}
+		const map = new Map();
 		for (let i = 0; i < generic.typeParams.length; i++)
 			map.set(generic.typeParams[i].name, typeArgs[i] ?? ANY);
+		const named = {
+			kind: "named",
+			name: generic.declNode.name,
+			typeArgs,
+			underlying: null,
+			_genericOf: generic,
+		};
+		generic._instances.set(key, named);
 		// Resolve the declaration with its type params in scope (as typeParams,
 		// never as value symbols), then substitute the concrete arguments.
 		const typeScope = new Scope(this.globals);
@@ -369,18 +410,27 @@ export const resolveMethods = {
 			instantiated.name = generic.declNode.name;
 			instantiated.typeArgs = typeArgs;
 			if (!instantiated.methods) instantiated.methods = new Map();
-			if (generic.methods) {
-				for (const [mName, mType] of generic.methods)
-					instantiated.methods.set(mName, this.substituteType(mType, map));
-			}
 		}
-		return {
-			kind: "named",
-			name: generic.declNode.name,
-			typeArgs,
-			underlying: instantiated,
-			methods: instantiated.methods,
-		};
+		named.underlying = instantiated;
+		named.methods = instantiated.methods;
+		named._instMap = map;
+		this._syncInstanceMethods(generic, named);
+		return named;
+	},
+
+	// Methods are collected after types, so an instance created earlier picks
+	// up the methods declared since.
+	_syncInstanceMethods(generic, named) {
+		const methods = named.methods;
+		if (!methods || !named._instMap || named._syncing) return;
+		// A method signature that names the instance reaches this again.
+		named._syncing = true;
+		for (const [mName, mType] of generic.methods ?? [])
+			if (!methods.has(mName))
+				methods.set(mName, this.substituteType(mType, named._instMap));
+		// Methods promoted from embedded structs (`Outer[T]` embedding `Base`).
+		this._promoteEmbeddedInto(named.underlying);
+		named._syncing = false;
 	},
 
 	// A[X] for `type A[P any] = T`: resolve T with each P bound to the
