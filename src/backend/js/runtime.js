@@ -250,6 +250,32 @@ export const HELPER_SCLONE = `var __sclone = __sclone || function(x) {
   return Object.assign(Object.create(Object.getPrototypeOf(x)), x);
 };`;
 
+// Copy of a value whose type is a type parameter.  `z` is the argument's
+// zero-value factory: an object zero means a struct or array (copied by
+// value); anything else (scalars, pointers, interfaces) is returned as is.
+export const HELPER_VCLONE = `var __vclone = __vclone || function __vclone(z, x) {
+  if (x === null || typeof x !== "object") return x;
+  const zero = z?.();
+  if (zero === null || zero === undefined || typeof zero !== "object") return x;
+  const cp = (v) => {
+    if (v === null || typeof v !== "object") return v;
+    if (Array.isArray(v)) return v.map(cp);
+    if (typeof v.__clone === "function") return v.__clone();
+    return Object.assign(Object.create(Object.getPrototypeOf(v)), v);
+  };
+  return cp(x);
+};`;
+
+// == on type-parameter operands: structs and arrays compare by value, other
+// type arguments with ===.  Decided at run time from the zero-value factory.
+export const HELPER_GEQ = `var __geq = __geq || function(z, a, b) {
+  if (a === b) return true;
+  if (a === null || b === null || typeof a !== "object" || typeof b !== "object") return false;
+  const zero = z?.();
+  if (zero === null || zero === undefined || typeof zero !== "object") return false;
+  return __equal(a, b);
+};`;
+
 // Interface boxing: tag struct values (__v) vs struct pointers (__p) so type
 // switches can tell T from *T; tags are non-enumerable so __equal/JSON ignore them.
 export const HELPER_IFACE_BOX = `var __ifv = __ifv || function(x, ptrFields) {

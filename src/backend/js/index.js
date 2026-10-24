@@ -46,6 +46,7 @@ import {
 	HELPER_ERROR_IS,
 	HELPER_ERROR_JOIN,
 	HELPER_GENERICS,
+	HELPER_GEQ,
 	HELPER_HEX,
 	HELPER_IFACE_BOX,
 	HELPER_IFD,
@@ -75,6 +76,7 @@ import {
 	HELPER_TESTING,
 	HELPER_TIME_FMT,
 	HELPER_TIME_PARSE,
+	HELPER_VCLONE,
 } from "./runtime.js";
 import { buildSourceMap, buildWasmSourceMap } from "./source-map.js";
 import { statementGenMethods } from "./statements.js";
@@ -138,9 +140,11 @@ const HELPER_MAP = [
 	["append", HELPER_APPEND],
 	["sliceGuard", HELPER_S],
 	["sclone", HELPER_SCLONE],
+	["vclone", HELPER_VCLONE],
 	["ifaceBox", HELPER_IFACE_BOX],
 	["ifd", HELPER_IFD],
 	["equal", HELPER_EQUAL],
+	["geq", HELPER_GEQ],
 	["ptreq", HELPER_PTREQ],
 	["ifeq", HELPER_IFEQ],
 	["cmul", HELPER_CMUL],
@@ -760,13 +764,23 @@ export class CodeGen {
 		const astTypes = new Map();
 		for (const f of structTypeAst?.fields ?? [])
 			for (const n of f.names ?? []) astTypes.set(n, f.type);
-		const args = fields.map((f) => {
-			const t =
-				resolved?.fields?.get(f.name) ??
-				this._typeFromNode(astTypes.get(f.name));
-			return this._cloneJs(t, `this.${f.name}`);
-		});
-		if (this._genericTypeParamNames(name)) args.push("this[__tz]");
+		const tpNames = this._genericTypeParamNames(name);
+		const prevZeros = this._typeParamZeros;
+		this._typeParamZeros = tpNames
+			? new Map(tpNames.map((n, i) => [n, `this[__tz]?.[${i}]`]))
+			: null;
+		let args;
+		try {
+			args = fields.map((f) => {
+				const t =
+					resolved?.fields?.get(f.name) ??
+					this._typeFromNode(astTypes.get(f.name));
+				return this._cloneJs(t, `this.${f.name}`);
+			});
+		} finally {
+			this._typeParamZeros = prevZeros;
+		}
+		if (tpNames) args.push("this[__tz]");
 		this.blank();
 		this.line(`__clone() { return new ${name}(${args.join(", ")}); }`);
 	}
