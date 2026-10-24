@@ -2,6 +2,7 @@
 // Installed as a mixin on TypeChecker.prototype.
 
 import { parseJsonTag } from "../parser/struct-tag.js";
+import { foldConstExpr } from "./const-fold.js";
 import { EXCLUDED_STDLIB_MEMBERS } from "./stdlib/excluded.js";
 import {
 	ANY,
@@ -170,14 +171,41 @@ export const resolveMethods = {
 		if (named.name?.includes("$$")) node._stdName = named.name;
 	},
 
+	// `[N]T` with a named constant (or constant expression) length folds to a number.
+	_foldArrayLen(size, scope) {
+		const resolve = (name, depth = 0) => {
+			const e = depth < 16 ? scope.lookupConstExpr(name) : null;
+			return e ? foldConstExpr(e, (n) => resolve(n, depth + 1)) : undefined;
+		};
+		try {
+			const lit = foldConstExpr(size, resolve);
+			const n = lit ? Number(lit.value) : Number.NaN;
+			return Number.isInteger(n) && n >= 0 ? n : size;
+		} catch {
+			return size;
+		}
+	},
+
 	_resolveArrayTypeNode(node, scope) {
+		// Fold in place so backends that read the type node see a literal length.
+		if (!node.inferLen && node.size?.value === undefined) {
+			const n = this._foldArrayLen(node.size, scope);
+			if (typeof n === "number")
+				node.size = {
+					kind: "BasicLit",
+					litKind: "INT",
+					value: String(n),
+					_line: node.size._line,
+					_col: node.size._col,
+				};
+		}
 		return {
 			kind: "array",
 			size: node.inferLen
 				? null
 				: node.size?.value !== undefined
 					? Number(node.size.value)
-					: node.size,
+					: this._foldArrayLen(node.size, scope),
 			elem: this.resolveTypeNode(node.elem, scope),
 		};
 	},
