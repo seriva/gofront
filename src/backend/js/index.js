@@ -48,6 +48,7 @@ import {
 	HELPER_GENERICS,
 	HELPER_HEX,
 	HELPER_IFACE_BOX,
+	HELPER_IFD,
 	HELPER_IFEQ,
 	HELPER_INJECT_STYLES,
 	HELPER_IO_EOF,
@@ -138,6 +139,7 @@ const HELPER_MAP = [
 	["sliceGuard", HELPER_S],
 	["sclone", HELPER_SCLONE],
 	["ifaceBox", HELPER_IFACE_BOX],
+	["ifd", HELPER_IFD],
 	["equal", HELPER_EQUAL],
 	["ptreq", HELPER_PTREQ],
 	["ifeq", HELPER_IFEQ],
@@ -817,6 +819,7 @@ export class CodeGen {
 				`Object.defineProperty(${name}.prototype, "value", { get() { return this; }, set(v) { Object.assign(this, v); }, configurable: true });`,
 			);
 		}
+		this._genFmtClassMeta(name, methodDecls);
 	}
 
 	_emitJsonCodecs() {
