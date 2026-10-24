@@ -156,6 +156,72 @@ func Main() int {
 	assertEqual(res.jsRes, 517);
 });
 
+test("x <<= n accepts any integer count type", () => {
+	const res = compileHybrid(`package main
+
+func Main() int {
+	x := 1
+	var n uint = 3
+	x <<= n
+	var m uint8 = 1
+	x >>= m
+	y := int64(1) << m
+	return x*100 + int(y)
+}
+`).run("Main");
+	assertEqual(res.jsRes, 402);
+	assertEqual(Number(res.wasmRes), 402);
+});
+
+test("a shift has the type of its left operand", () => {
+	const res = compileHybrid(`package main
+
+func Main() int64 {
+	var x int64 = 1
+	var n uint16 = 40
+	return x << n
+}
+`).run("Main");
+	assertEqual(Number(res.jsRes), 1099511627776);
+	assertEqual(Number(res.wasmRes), 1099511627776);
+});
+
+test("error: negative constant shift count", () => {
+	const { errors } = compile(`package main
+
+func main() {
+	x := 1
+	const s = -1
+	console.log(x << s)
+}
+`);
+	assertErrorContains(errors, "invalid shift count");
+});
+
+test("error: negative constant shift count in <<=", () => {
+	const { errors } = compile(`package main
+
+func main() {
+	x := 1
+	x <<= -2
+	console.log(x)
+}
+`);
+	assertErrorContains(errors, "invalid shift count");
+});
+
+test("error: float shift count", () => {
+	const { errors } = compile(`package main
+
+func main() {
+	x := 1
+	var f float64 = 3
+	console.log(x << f)
+}
+`);
+	assertErrorContains(errors, "not an integer type");
+});
+
 test("error: duplicate index through a folded builtin key", () => {
 	const { errors } = compile(`package main
 
