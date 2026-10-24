@@ -143,7 +143,7 @@ Members of each Go package that `wasm` and `both` packages can use today, out of
 | `hash/crc32` | 0 of 12 | 12 |
 | `hash/fnv` | 0 of 6 | 6 |
 | `html` | 2 of 2 | 0 |
-| `io` | 19 of 94 | 75 |
+| `io` | 54 of 94 | 40 |
 | `iter` | 2 of 2 | 0 |
 | `log` | 0 of 43 | 43 |
 | `maps` | 10 of 10 | 0 |

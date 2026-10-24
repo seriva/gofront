@@ -3809,14 +3809,17 @@ function _scanInterfaceTypeDecls(progs, interfaceCalls, checker) {
 function _makeInterfaceDispatcher(info, checker) {
 	let methodSig = info.methodSig;
 	if (!methodSig) {
-		const ifaceResolved =
-			checker?.resolveType?.(
-				info.ifaceType?.kind === "named"
-					? info.ifaceType.underlying
-					: info.ifaceType,
-			) ?? info.ifaceType;
-		if (ifaceResolved?.methods instanceof Map) {
-			methodSig = ifaceResolved.methods.get(info.methodName);
+		const raw =
+			info.ifaceType?.kind === "named" && info.ifaceType.underlying
+				? info.ifaceType.underlying
+				: info.ifaceType;
+		const ifaceResolved = checker?.resolveType?.(raw) ?? raw;
+		const methods =
+			ifaceResolved?.methods ?? ifaceResolved?.underlying?.methods;
+		if (methods instanceof Map) {
+			methodSig = methods.get(info.methodName);
+		} else if (Array.isArray(methods)) {
+			methodSig = methods.find((m) => (m.name ?? m) === info.methodName);
 		}
 	}
 
