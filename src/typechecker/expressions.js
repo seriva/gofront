@@ -471,6 +471,15 @@ export const expressionCheckMethods = {
 		return this._typeRefOperand(expr, resolved);
 	},
 
+	// Underlying type with chains of defined types followed through
+	// (`type W V` where `V` is itself a named array).
+	_deepUnderlying(t) {
+		let u = t;
+		for (let i = 0; u?.kind === "named" && i < 32; i++)
+			u = this.resolveType(u.underlying) ?? u.underlying;
+		return u;
+	},
+
 	_checkIndexExpr(expr, scope) {
 		const typeRef = this._genericTypeRef(expr, scope);
 		if (typeRef) return typeRef;
@@ -482,10 +491,7 @@ export const expressionCheckMethods = {
 		this.checkExpr(expr.index, scope);
 		if (bt?._tainted) return TAINTED_ANY;
 		if (isAny(bt)) return ANY;
-		const btu =
-			bt.kind === "named"
-				? (this.resolveType(bt.underlying) ?? bt.underlying)
-				: bt;
+		const btu = this._deepUnderlying(bt);
 		if (btu.kind === "slice" || btu.kind === "array") {
 			this._checkArrayBoundsExpr(btu, bt, expr, scope);
 			return btu.elem;
@@ -554,8 +560,9 @@ export const expressionCheckMethods = {
 		if (expr.max) this.checkExpr(expr.max, scope);
 		if (bt?._tainted) return TAINTED_ANY;
 		if (isAny(bt)) return ANY;
-		if (bt.kind === "slice" || bt.kind === "array")
-			return { kind: "slice", elem: bt.elem };
+		const btu = this._deepUnderlying(bt);
+		if (btu.kind === "slice" || btu.kind === "array")
+			return { kind: "slice", elem: btu.elem };
 		if (isString(bt)) return STRING;
 		if (sharedInfo(bt))
 			return this.err(
@@ -1450,7 +1457,13 @@ export const expressionCheckMethods = {
 	_checkMapCompositeLit(expr, scope, t, base) {
 		for (const elem of expr.elems) {
 			if (elem.kind === "KeyValueExpr") {
-				const kt = this.checkExpr(elem.key, scope);
+				let kt;
+				if (elem.key.kind === "CompositeLit" && elem.key.typeExpr === null) {
+					kt = this.checkCompositeLit(elem.key, scope, base.key);
+					elem.key._type = kt;
+				} else {
+					kt = this.checkExpr(elem.key, scope);
+				}
 				// value may be an implicit composite lit
 				let vt;
 				if (
