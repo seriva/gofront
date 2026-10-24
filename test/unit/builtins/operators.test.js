@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import {
 	assertEqual,
 	compile,
+	compileHybrid,
 	runJs,
 	section,
 	summarize,
@@ -341,6 +342,80 @@ func main() {
 
 // ═════════════════════════════════════════════════════════════
 // strings package
+// ── Unsigned unary operators and 64-bit shifts (both targets) ─
+
+section("Unsigned unary operators and 64-bit shifts");
+
+function parity(body, expected) {
+	const res = compileHybrid(`package main
+
+func Main() int64 {
+${body}
+}
+`).run("Main");
+	assertEqual(Number(res.jsRes), expected);
+	assertEqual(Number(res.wasmRes), expected);
+}
+
+test("^uint8 and -uint32 wrap to the unsigned range", () => {
+	parity(
+		`	var a uint8 = 5
+	var z uint32 = 1
+	return int64(^a)*10000000000 + int64(-z)`,
+		250 * 10000000000 + 4294967295,
+	);
+});
+
+test("-uint16 and ^uint32 wrap to the unsigned range", () => {
+	parity(
+		`	var a uint16 = 1
+	var b uint32 = 0
+	return int64(-a)*10000000000 + int64(^b)`,
+		65535 * 10000000000 + 4294967295,
+	);
+});
+
+test("int64 shifts by 64 or more follow Go", () => {
+	parity(
+		`	var x int64 = 1
+	n := 70
+	return x << n`,
+		0,
+	);
+});
+
+test("int64(-1) >> 64 is -1 and int64(-1) << 64 is 0", () => {
+	parity(
+		`	var a int64 = -1
+	var b int64 = -1
+	n := 64
+	return (a>>n)*10 + (b << n)`,
+		-10,
+	);
+});
+
+test("64-bit shifts by 32 or more keep the high bits", () => {
+	parity(
+		`	var x uint64 = 1
+	y := 1
+	n := 40
+	var m uint = 33
+	return int64(x<<n) + int64(y<<m) + int64((x<<n)>>n)`,
+		1099511627776 + 8589934592 + 1,
+	);
+});
+
+test("x <<= n with a wide count shifts past 32 bits", () => {
+	parity(
+		`	x := 1
+	n := 40
+	x <<= n
+	x >>= 38
+	return int64(x)`,
+		4,
+	);
+});
+
 // ═════════════════════════════════════════════════════════════
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
