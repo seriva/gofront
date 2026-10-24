@@ -210,6 +210,9 @@ export const assignabilityMethods = {
 			target.kind === "named" ? target.underlying : target,
 		);
 		if (!isAny(target) && tBase?.kind !== "interface") return;
+		// The static type behind the interface value: codegen derives the
+		// fmt metadata (Stringer elements of slices and maps) from it.
+		node._ifaceSrc = source;
 		const named = this._namedMethodBoxSource(source);
 		if (named) {
 			node._ifaceBox = named.ptr ? "named_ptr" : "named";

@@ -15,6 +15,10 @@ To run a different directory of fixtures: `node test/conformance/run.js <dir>`.
 
 Only step 2 needs Go. The `.out` files are checked in, so `npm test` and CI run without a Go toolchain. The unit test that regenerates the checked-in fixtures and expects no change runs only when go1.26 is installed.
 
+## JS-only fixtures
+
+A fixture whose first line is `//conformance:js-only` covers only what the JS backend supports so far: it is compared on JS and not run on WASM. It is a temporary state. When the WASM backend catches up, delete the line and the fixture is checked on both backends (`fmt/stringer.go` is promoted that way by Task 3.1b-wasm). The `.out` file is still captured from real Go.
+
 ## Writing a fixture
 
 - Keep it a valid Go program: `package main`, a `main` function, standard imports only. No `//gofront:` directives are needed; the runner compiles the file as `both`.

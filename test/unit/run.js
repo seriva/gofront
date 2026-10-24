@@ -45,6 +45,7 @@ export const TEST_FILES = [
 	"./builtins/operators.test.js",
 	"./builtins/stdlib.test.js",
 	"./builtins/bytes.test.js",
+	"./builtins/fmt-stringer.test.js",
 	"./builtins/iter.test.js",
 	"./builtins/json.test.js",
 	"./builtins/gom.test.js",
