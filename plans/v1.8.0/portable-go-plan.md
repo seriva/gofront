@@ -1136,11 +1136,12 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
 
 ### Phase 3.2: `io`, `sort`, `unicode` and `strconv` completion
 
-- [ ] **Task 3.1f — `fmt.Fscan`, `Fscanf`, `Fscanln`**
+- [x] **Task 3.1f — `fmt.Fscan`, `Fscanf`, `Fscanln`**
   - Files: `runtime/stdlib/fmt/scan.go` (overlay over `io.Reader` using `Sscan*`)
   - Do: read a line or token stream from an `io.Reader` and delegate to the existing `Sscan*` lowering.
   - Test: conformance fixture `fmt/fscan.go` over `strings.NewReader`.
   - Done when: fixture matches Go.
+  - Landed: implemented `fmt.Fscan`, `fmt.Fscanf`, `fmt.Fscanln` in `runtime/stdlib/fmt/scan.go` over `io.Reader`, delegating to `Sscan*`. Supported spread variadic arguments in JS `fmt.js` and WASM `io.js` `emitSscanCall` by unpacking slices across scalar box and pointer types. Removed resolved gaps from `stdlib-coverage.gaps.json` and verified with conformance fixture `test/conformance/fmt/fscan.go`.
 
 - [ ] **Task 3.2 — `sort` completion**
   - Files: new `runtime/stdlib/sort/sort.go` (overlay)
