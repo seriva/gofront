@@ -1,0 +1,33 @@
+36.6C red green
+green|green|1
+(1,2)
+(3,4)
+(3,4)|(3,4)|(3,4)
+counter=5
+counter=5|counter=5
+{5}
+myerr 7
+myerr 7|myerr 7
+valerr x valerr y
+wrap: myerr 7 myerr 7
+[red green]
+[(1,2) (3,4)]
+map[a:green b:red]
+map[red:2 green:1]
+{(5,6) green h}
+{P:(5,6) C:red Name:h}
+[myerr 7 valerr z]
+red green (0,0)
+
+(9,9)
+<nil>
+[ green][red   ][ (1,2)]
+[L:a L:b] [red green] [[red] [green red]]
+{red 1 (1,2) {3 4}}
+{A:green b:0 P:(1,2) q:{X:3 Y:4}}
+both-error [both-error]
+[{1} {2}]
+{counter=8}
+map[x:[green]]
+counter=5
+red red

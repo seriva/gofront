@@ -449,6 +449,18 @@ const EXPR_GEN_DELEGATE = {
 export const expressionGenMethods = {
 	genExpr(expr) {
 		if (this._isNamedIfaceBox(expr)) return this._genNamedIfaceBoxExpr(expr);
+		if (expr._ifaceSrc && !expr._fmtDescing && !this._isNamedBoxKind(expr)) {
+			const desc = this._fmtDesc(expr._ifaceSrc);
+			if (desc) {
+				expr._fmtDescing = true;
+				try {
+					this.useHelper("ifd");
+					return `__ifd(${this.genExpr(expr)}, ${desc})`;
+				} finally {
+					expr._fmtDescing = false;
+				}
+			}
+		}
 		if (expr._ifaceBox && !expr._ifaceBoxing && !this._isNamedBoxKind(expr)) {
 			expr._ifaceBoxing = true;
 			try {
