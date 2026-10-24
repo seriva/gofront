@@ -166,7 +166,12 @@ export const expressionParserMethods = {
 				}
 			} else if (t.type === T.LBRACKET) {
 				// Check if this looks like generic type args: Ident[Type](...)  or Ident[Type]{...}
-				if (expr.kind === "Ident" && this.looksLikeTypeArgList()) {
+				// `pkg.F[int](x)` / `pkg.T[X]{...}` instantiate through a qualifier.
+				if (
+					(expr.kind === "Ident" ||
+						(expr.kind === "SelectorExpr" && expr.expr.kind === "Ident")) &&
+					this.looksLikeTypeArgList()
+				) {
 					this.advance(); // consume [
 					const typeArgs = [this.parseType()];
 					while (this.match(T.COMMA)) typeArgs.push(this.parseType());
@@ -369,7 +374,16 @@ export const expressionParserMethods = {
 		while (!this.check(T.RBRACE) && !this.check(T.EOF)) {
 			// Implicit composite literal: {X: 1} inside []Point{{X:1}} or map[string]Point{"a": {X:1}}
 			if (this.check(T.LBRACE)) {
-				elems.push(this.parseCompositeLit(null)); // null typeExpr = inferred
+				const lit = this.parseCompositeLit(null); // null typeExpr = inferred
+				if (this.match(T.COLON)) {
+					// Elided key type: map[P]int{{1}: 2}
+					const val = this.check(T.LBRACE)
+						? this.parseCompositeLit(null)
+						: this.parseExpr();
+					elems.push({ kind: "KeyValueExpr", key: lit, value: val });
+				} else {
+					elems.push(lit);
+				}
 			} else {
 				const first = this.parseExpr();
 				if (this.match(T.COLON)) {

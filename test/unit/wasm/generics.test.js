@@ -970,3 +970,86 @@ func main() {
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "0 false\n0 true");
 });
+
+section("Recursive generic types (Task 0.31)");
+
+function genericParity(name, src, expected) {
+	test(name, () => {
+		const res = compileHybrid(src).run("Main");
+		assertEqual(res.jsRes, expected);
+		assertEqual(Number(res.wasmRes), expected);
+	});
+}
+
+genericParity(
+	"a generic list refers to its own instantiation (P10)",
+	`package main
+
+type List[T any] struct {
+	V    T
+	Next *List[T]
+}
+
+func (l *List[T]) Len() int {
+	if l.Next == nil {
+		return 1
+	}
+	return 1 + l.Next.Len()
+}
+
+func Main() int {
+	l := &List[int]{V: 1, Next: &List[int]{V: 2, Next: &List[int]{V: 3}}}
+	return l.Next.V*10 + l.Len()
+}
+`,
+	23,
+);
+
+genericParity(
+	"a generic tree holds a slice of its own instantiation",
+	`package main
+
+type Tree[T any] struct {
+	V        T
+	Children []Tree[T]
+}
+
+func count[T any](t Tree[T]) int {
+	n := 1
+	for _, c := range t.Children {
+		n += count(c)
+	}
+	return n
+}
+
+func Main() int {
+	t := Tree[string]{V: "a", Children: []Tree[string]{{V: "bb"}, {V: "ccc", Children: []Tree[string]{{V: "d"}}}}}
+	return count(t)*10 + len(t.Children[1].V)
+}
+`,
+	43,
+);
+
+genericParity(
+	"mutually recursive generic types A[T] and B[T]",
+	`package main
+
+type A[T any] struct {
+	V T
+	B *B[T]
+}
+
+type B[T any] struct {
+	W T
+	A *A[T]
+}
+
+func Main() int {
+	a := &A[int]{V: 1}
+	b := &B[int]{W: 5, A: a}
+	a.B = b
+	return a.B.A.B.W*10 + a.V
+}
+`,
+	51,
+);
