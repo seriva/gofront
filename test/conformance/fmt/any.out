@@ -1,0 +1,71 @@
+5
+5
+5
+hi
+hi
+hi
+2.5
+2.5
+2.5
+true
+true
+true
+-3
+-3
+-3
+1099511627776
+1099511627776
+1099511627776
+1.5
+1.5
+1.5
+120
+120
+120
+[1 2]
+[1 2]
+[1 2]
+{3}
+{3}
+{3}
+&{4}
+&{4}
+&{4}
+[a b]
+[a b]
+[a b]
+map[a:1]
+map[a:1]
+map[a:1]
+boom
+boom
+boom
+color
+color
+color
+n
+n
+n
+[{1} {2}]
+[{1} {2}]
+[{1} {2}]
+[1 a <nil>]
+[1 a <nil>]
+[1 a <nil>]
+<nil>
+<nil>
+<nil>
+a <nil> 3
+7|7|    7|7
+1|color|color
+<nil>
+<nil> true
+<nil> 7
+1 a 2.5
+1 a 2.5
+1a2.5
+1a2.5 true
+x=4
+pre [1 a 2.5]
+err err
+color

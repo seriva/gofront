@@ -615,7 +615,10 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
         const isElemPtr = val.__ptr_map === true;
         const parts = [];
         if (val instanceof Map) {
-          const entries = Array.from(val.entries()).sort(([k1], [k2]) => {
+          // Keys of a type with String()/Error() sort by their raw value, as in Go.
+          const raw = (k) => (k !== null && typeof k === "object" && typeof k.__gfUnbox === "function" ? k.__gfUnbox() : k);
+          const entries = Array.from(val.entries()).sort(([a], [b]) => {
+            const k1 = raw(a), k2 = raw(b);
             if (typeof k1 === "number" && typeof k2 === "number") return k1 - k2;
             const na = Number(k1), nb = Number(k2);
             if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
