@@ -17,7 +17,7 @@ Only step 2 needs Go. The `.out` files are checked in, so `npm test` and CI run 
 
 ## JS-only fixtures
 
-A fixture whose first line is `//conformance:js-only` covers only what the JS backend supports so far: it is compared on JS and not run on WASM. It is a temporary state. When the WASM backend catches up, delete the line and the fixture is checked on both backends (`fmt/stringer.go` is promoted that way by Task 3.1b-wasm). The `.out` file is still captured from real Go.
+A fixture whose first line is `//conformance:js-only` covers only what the JS backend supports so far: it is compared on JS and not run on WASM. It is a temporary state. When the WASM backend catches up, delete the line and the fixture is checked on both backends (`fmt/stringer.go` was promoted that way by Task 3.1b-wasm). The `.out` file is still captured from real Go.
 
 ## Writing a fixture
 
