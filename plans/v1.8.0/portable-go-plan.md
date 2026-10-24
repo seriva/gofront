@@ -880,7 +880,7 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
 
 ### Phase 0.14: Pointer stability and WASM leftovers
 
-- [ ] **Task 0.33 — Pointers survive whole-value assignment**
+- [x] **Task 0.33 — Pointers survive whole-value assignment**
   - Files: `src/backend/wasm/emit-stmts.js` (assignment to an address-taken array or struct variable), `src/backend/js/statements.js`, `src/lower/ownership.js`
   - Do: assigning a whole array or struct to a variable whose address (or an element's or field's address) has been taken writes into the existing storage (`array.copy` / field-by-field in WASM, an in-place copy in JS), so existing pointers see the new value. Variables whose address is never taken keep the current fast path.
   - Test: parity tests in `test/unit/wasm/pointers.test.js`: `p := &a[1]; a = [3]int{4, 5, 6}; *p` → 5 (P20); `p := &s; s = S{5}; p.A` → 5 (P25); the same through a field array (`&w.arr[0]`).

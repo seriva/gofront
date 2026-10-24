@@ -410,6 +410,22 @@ export class StmtsEmitter {
 				this.allocLocal(l.name, wType, r._type);
 				localInfo = this.locals.get(l.name);
 			}
+			if (
+				localInfo &&
+				op !== ":=" &&
+				this._needsStableStore(l, localInfo.goType)
+			) {
+				this._emitStableStore(localInfo.goType, r, () => {
+					this.pushInstruction({ op: "local.get", index: localInfo.index });
+					if (localInfo.isBoxed)
+						this.pushInstruction({
+							op: "struct.get",
+							typeIndex: localInfo.boxInfo.typeIndex,
+							fieldIndex: 0,
+						});
+				});
+				return;
+			}
 			if (localInfo) {
 				if (localInfo.isBoxed && this._isValueArray(localInfo.goType)) {
 					// Pointers to the array (`&a`) hold its reference: write in place.
@@ -473,6 +489,20 @@ export class StmtsEmitter {
 				this._resolveExprGoType(l.expr);
 			const baseWType = this.toWasmType(exprGoType);
 
+			if (this._needsStableStore(l, lastStep.field.goType)) {
+				this._emitStableStore(lastStep.field.goType, r, () => {
+					this.emitExpr(l.expr, baseWType);
+					this._emitNilCheck(exprGoType);
+					for (const step of path) {
+						this.pushInstruction({
+							op: "struct.get",
+							typeIndex: step.structInfo.typeIndex,
+							fieldIndex: step.fieldIndex,
+						});
+					}
+				});
+				return;
+			}
 			this.emitExpr(l.expr, baseWType);
 			this._emitNilCheck(exprGoType);
 			for (let i = 0; i < path.length - 1; i++) {
@@ -605,6 +635,109 @@ export class StmtsEmitter {
 			typeIndex: arrInfo.typeIndex,
 		});
 		this.releaseTemp(dst, wType);
+	}
+
+	// Whole-value assignment to a variable (or a field of one) whose address
+	// is taken writes into the existing storage, so earlier pointers to it or
+	// to its parts see the new value (Task 0.33).  Other variables keep the
+	// plain local.set / struct.set path.
+	_needsStableStore(l, goType) {
+		if (!goType || goType.kind === "pointer") return false;
+		const isArr = this._isValueArray(goType);
+		if (
+			!isArr &&
+			!(
+				isStructType(goType, this.mod.checker, this.mod) &&
+				!isPointerToStruct(goType, this.mod.checker, this.mod)
+			)
+		)
+			return false;
+		const root = rootIdentName(l);
+		if (!root || !this.resolveLocal(root)) return false;
+		const decl = this.rootFuncDecl._sourceDecl ?? this.rootFuncDecl;
+		const ctx = this.mod.lowerResult?.ownership?.get(decl);
+		return Boolean(ctx?.fnMutates(root, true));
+	}
+
+	_emitStableStore(goType, r, emitDst) {
+		if (this._isValueArray(goType)) {
+			this._emitArrayStoreInto(goType, r, emitDst);
+			return;
+		}
+		const info = this._resolveStructInfo({ _type: goType });
+		const wType = this.toWasmType(goType);
+		const dst = this.acquireTemp(wType);
+		const src = this.acquireTemp(wType);
+		emitDst();
+		this.pushInstruction({ op: "local.set", index: dst });
+		this.emitExpr(r, wType);
+		this.pushInstruction({ op: "local.set", index: src });
+		this._emitStructFieldsInto(info, dst, src);
+		this.releaseTemp(src, wType);
+		this.releaseTemp(dst, wType);
+	}
+
+	// Copies every field of the struct in `src` into the struct in `dst`;
+	// array and value-struct fields are copied into the existing storage.
+	_emitStructFieldsInto(info, dst, src) {
+		const get = (tmp, i) => {
+			this.pushInstruction({ op: "local.get", index: tmp });
+			this.pushInstruction({
+				op: "struct.get",
+				typeIndex: info.typeIndex,
+				fieldIndex: i,
+			});
+		};
+		for (let i = 0; i < info.fields.length; i++) {
+			const f = info.fields[i];
+			const gt = f.goType;
+			if (gt && gt.kind !== "pointer" && this._isValueArray(gt)) {
+				const arrInfo = this.mod.getArrayType(this._getArrayElemType(gt));
+				get(dst, i);
+				this.pushInstruction({ op: "i32.const", value: 0 });
+				get(src, i);
+				const elem = this._getArrayElemType(gt);
+				if (
+					isArrayType(elem, this.mod.checker) ||
+					isStructType(elem, this.mod.checker, this.mod)
+				)
+					this.emitCopyArray(gt);
+				this.pushInstruction({ op: "i32.const", value: 0 });
+				get(dst, i);
+				this.pushInstruction("array.len");
+				this.pushInstruction({
+					op: "array.copy",
+					typeIndex: arrInfo.typeIndex,
+				});
+				continue;
+			}
+			const inner =
+				gt &&
+				gt.kind !== "pointer" &&
+				isStructType(gt, this.mod.checker, this.mod) &&
+				!isPointerToStruct(gt, this.mod.checker, this.mod)
+					? this._resolveStructInfo({ _type: gt })
+					: null;
+			if (inner) {
+				const d = this.acquireTemp(f.wType);
+				const s = this.acquireTemp(f.wType);
+				get(dst, i);
+				this.pushInstruction({ op: "local.set", index: d });
+				get(src, i);
+				this.pushInstruction({ op: "local.set", index: s });
+				this._emitStructFieldsInto(inner, d, s);
+				this.releaseTemp(s, f.wType);
+				this.releaseTemp(d, f.wType);
+				continue;
+			}
+			this.pushInstruction({ op: "local.get", index: dst });
+			get(src, i);
+			this.pushInstruction({
+				op: "struct.set",
+				typeIndex: info.typeIndex,
+				fieldIndex: i,
+			});
+		}
 	}
 
 	_emitStructDerefAssign(operand, r, structInfo) {
