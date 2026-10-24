@@ -1,3 +1,5 @@
+import { HELPER_FMT_LOOP, HELPER_FMT_UTIL } from "./fmt-runtime.js";
+
 // Runtime helpers emitted by the code generator when the corresponding feature is used.
 // Each export is a single JS statement (var __x = __x || function(...){...};) so that
 // multiple compiled files bundled together can safely repeat the declaration.
@@ -513,7 +515,10 @@ var __recover = __recover || function(ok) {
   return top.err?.message ?? String(top.err);
 };`;
 
-export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
+export const HELPER_SPRINTF =
+	HELPER_FMT_UTIL +
+	`
+var __sprintf = __sprintf || function(f, ...a) {
   let i = 0;
   const ptrMap = new WeakMap();
   const ptrSet = new WeakSet();
@@ -680,103 +685,8 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
     }
     return String(val);
   };
-  return f.replace(/%([#+\\- 0]*)([0-9]*)\\.?([0-9]*)[sdvftxXqobeEgGwc%]/g, (m) => {
-    if (m === "%%") return "%";
-    const verb = m.slice(-1);
-    let v = a[i++];
-    const [, flags, width, prec] = m.match(/^%([#+\\- 0]*)([0-9]*)\\.?([0-9]*)/) || [];
-    sharp = verb === "v" && Boolean(flags?.includes("#"));
-    // The stand-in for a nil pointer with a pointer-receiver String/Error only serves %v and %s.
-    if (v && v.__nilp === true && !(verb === "s" || (verb === "v" && !sharp))) v = null;
-    // Boxed named values format as their underlying value; Error() still applies to %v/%s/%q/%w, String() to %v/%s.
-    if (v && typeof v.__gfUnbox === "function" && !(typeof v.Error === "function" && "vsqw".includes(verb)) && !("vs".includes(verb) && stringMethod(v))) v = v.__gfUnbox();
-    const zero = flags?.includes("0") && !flags?.includes("-");
-    const pad = (s, w, z) => {
-      w = parseInt(w) || 0;
-      if (!w) return s;
-      const p = (z ? "0" : " ").repeat(Math.max(0, w - s.length));
-      return flags.includes("-") ? s + p : p + s;
-    };
-    switch (verb) {
-      case "s": {
-        const sm = v !== null && typeof v === "object" ? stringMethod(v) : "";
-        return pad(sm ? String(callMethod(v, sm)) : String(v == null ? "<nil>" : v), width, false);
-      }
-      case "c": return pad(String.fromCodePoint(Number(v)), width, false);
-      case "d": return pad(String(typeof v === "bigint" ? v : Math.trunc(Number(v))), width, zero);
-      case "v": {
-        const isPlus = flags?.includes("+") ?? false;
-        return pad(formatV(v, isPlus, true), width, false);
-      }
-      case "f": {
-        if (v !== null && typeof v === "object" && "re" in v && "im" in v) {
-          const p = prec !== "" ? parseInt(prec) : 6;
-          const isNeg = v.im < 0 || Object.is(v.im, -0);
-          const sign = isNeg ? "" : "+";
-          return pad("(" + Number(v.re).toFixed(p) + sign + Number(v.im).toFixed(p) + "i)", width, false);
-        }
-        const n = Number(v), p = prec !== "" ? parseInt(prec) : 6;
-        return pad(n.toFixed(p), width, zero);
-      }
-      case "t": return pad(String(!!v), width, false);
-      case "x": {
-        let hex;
-        if (Array.isArray(v) || ArrayBuffer.isView(v)) {
-          hex = Array.from(v).map((b) => (Number(b) & 0xff).toString(16).padStart(2, "0")).join("");
-        } else if (typeof v === "string") {
-          hex = Array.from(new TextEncoder().encode(v)).map((b) => b.toString(16).padStart(2, "0")).join("");
-        } else if (typeof v === "bigint") {
-          hex = BigInt.asUintN(64, v).toString(16);
-        } else if (Math.abs(Number(v)) > 0xffffffff) {
-          hex = (Math.trunc(Number(v) / 0x100000000) >>> 0).toString(16) + (Number(v) >>> 0).toString(16).padStart(8, "0");
-        } else {
-          hex = (Number(v) >>> 0).toString(16);
-        }
-        return pad(hex, width, zero);
-      }
-      case "X": {
-        let hex;
-        if (Array.isArray(v) || ArrayBuffer.isView(v)) {
-          hex = Array.from(v).map((b) => (Number(b) & 0xff).toString(16).padStart(2, "0").toUpperCase()).join("");
-        } else if (typeof v === "string") {
-          hex = Array.from(new TextEncoder().encode(v)).map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join("");
-        } else if (typeof v === "bigint") {
-          hex = BigInt.asUintN(64, v).toString(16).toUpperCase();
-        } else if (Math.abs(Number(v)) > 0xffffffff) {
-          hex = (Math.trunc(Number(v) / 0x100000000) >>> 0).toString(16).toUpperCase() + (Number(v) >>> 0).toString(16).padStart(8, "0").toUpperCase();
-        } else {
-          hex = (Number(v) >>> 0).toString(16).toUpperCase();
-        }
-        return pad(hex, width, zero);
-      }
-      case "o": return pad((typeof v === "bigint" ? BigInt.asUintN(64, v).toString(8) : (Number(v) >>> 0).toString(8)), width, zero);
-      case "b": return pad((typeof v === "bigint" ? BigInt.asUintN(64, v).toString(2) : (Number(v) >>> 0).toString(2)), width, zero);
-      case "q": return pad('"' + String(v == null ? "" : v).replace(/\\\\/g, "\\\\\\\\").replace(/"/g, '\\\\"') + '"', width, false);
-      case "e": case "E": {
-        if (v !== null && typeof v === "object" && "re" in v && "im" in v) {
-          const p = prec !== "" ? parseInt(prec) : 6;
-          const isNeg = v.im < 0 || Object.is(v.im, -0);
-          const sign = isNeg ? "" : "+";
-          const fmtE = (n) => (verb === "E" ? Number(n).toExponential(p).toUpperCase() : Number(n).toExponential(p));
-          return pad("(" + fmtE(v.re) + sign + fmtE(v.im) + "i)", width, false);
-        }
-        const n = Number(v), p = prec !== "" ? parseInt(prec) : 6;
-        return pad(verb === "E" ? n.toExponential(p).toUpperCase() : n.toExponential(p), width, zero);
-      }
-      case "g": case "G": {
-        if (v !== null && typeof v === "object" && "re" in v && "im" in v) {
-          const isNeg = v.im < 0 || Object.is(v.im, -0);
-          const sign = isNeg ? "" : "+";
-          const fmtPart = (n) => (Object.is(n, -0) ? "-0" : (prec !== "" ? Number(n).toPrecision(parseInt(prec)) : String(Number(n))));
-          return pad("(" + fmtPart(v.re) + sign + fmtPart(v.im) + "i)", width, false);
-        }
-        const n = Number(v); return pad(prec !== "" ? n.toPrecision(parseInt(prec)) : String(n), width, zero);
-      }
-      case "w": return pad(String(v == null ? "<nil>" : typeof v === "object" && v.Error ? v.Error() : v), width, false);
-      default: return m;
-    }
-  });
-};`;
+` +
+	HELPER_FMT_LOOP;
 
 // fmt.Sprint/Print/Append: a space goes between two operands when neither is a
 // string; `ln` (Sprintln, Println, Appendln) separates always and ends with a newline.
@@ -800,6 +710,36 @@ var __strconv_err_range = __strconv_err_range || __error("value out of range");`
 export const HELPER_PATH_ERROR = `var __path_err_bad_pattern = __path_err_bad_pattern || __error("syntax error in pattern");`;
 
 export const HELPER_IO_EOF = `var __io_eof = __io_eof || __error("EOF");`;
+
+export const HELPER_OS = `var __os_buf = "";
+var __os_write = __os_write || function(s, isErr) {
+  if (typeof process !== "undefined" && process?.stdout?.write) {
+    process.stdout.write(s);
+    return [s.length, null];
+  }
+  __os_buf += s;
+  const nl = __os_buf.lastIndexOf(String.fromCharCode(10));
+  if (nl >= 0) {
+    const fn = (isErr && typeof console.error === "function") ? console.error : console.log;
+    fn(__os_buf.slice(0, nl));
+    __os_buf = __os_buf.slice(nl + 1);
+  }
+  return [s.length, null];
+};
+var __os_file = __os_file || class {
+  constructor(fd) { this.fd = fd; }
+  WriteString(s) { return __os_write(s, this.fd === 2); }
+  Write(b) {
+    const s = typeof b === "string" ? b : new TextDecoder().decode(b);
+    return __os_write(s, this.fd === 2);
+  }
+  Read(b) { return [0, typeof __io_eof !== "undefined" ? __io_eof : __error("EOF")]; }
+  Close() { return null; }
+};
+var __os_stdout = __os_stdout || new __os_file(1);
+var __os_stderr = __os_stderr || new __os_file(2);
+var __os_stdin = __os_stdin || new __os_file(0);
+`;
 
 export const HELPER_ERROR_IS = `var __errorIs = __errorIs || function __errorIs(err, target) {
   if (err === null || err === undefined) return false;

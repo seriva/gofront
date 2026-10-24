@@ -330,7 +330,7 @@ func main() {
 	console.log(fmt.Sprintf("%.2e", 12345.6789))
 }`);
 	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "1.23e+4");
+	assertEqual(runJs(js), "1.23e+04");
 });
 
 // ═════════════════════════════════════════════════════════════
@@ -640,6 +640,33 @@ func main() {
   os.Exit(0)
 }`);
 	assertEqual(errors.length, 0);
+});
+
+test("os.Stdout and os.Stderr as io.Writer, shared line buffer", () => {
+	const src = `package main
+import (
+	"fmt"
+	"io"
+	"os"
+)
+func writeTo(w io.Writer) {
+	fmt.Fprintf(w, "a")
+	fmt.Fprintln(w, "b")
+}
+func Main() {
+	writeTo(os.Stderr)
+	var w io.Writer = os.Stdout
+	var r io.Reader = os.Stdin
+	_ = w
+	_ = r
+	var buf [4]byte
+	n, err := os.Stdin.Read(buf[:])
+	if n != 0 || err != io.EOF {
+		panic("expected 0, io.EOF")
+	}
+}`;
+	const { output } = compileHybrid(src).run("Main");
+	assertEqual(output, "ab");
 });
 
 // ═════════════════════════════════════════════════════════════
