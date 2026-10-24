@@ -95,7 +95,7 @@ export const assignabilityMethods = {
 
 	// A shift has the type of its left operand; the count may be any integer
 	// type or an untyped constant representable as uint.
-	_binaryResultTypeShift(op, lt, rt, node) {
+	_binaryResultTypeShift(_op, lt, rt, node) {
 		if (node) this.checkShiftCount(rt, node.right);
 		return lt;
 	},
@@ -239,9 +239,8 @@ export const assignabilityMethods = {
 		)
 			return;
 		if (target.kind === "typeParam") return;
-		const tBase = this.resolveType(
-			target.kind === "named" ? target.underlying : target,
-		);
+		let tBase = this.resolveType(target);
+		if (tBase?.kind === "named") tBase = this.resolveType(tBase.underlying);
 		if (!isAny(target) && tBase?.kind !== "interface") return;
 		// The static type behind the interface value: codegen derives the
 		// fmt metadata (Stringer elements of slices and maps) from it.
@@ -266,7 +265,8 @@ export const assignabilityMethods = {
 	// dynamic method dispatch works.
 	_namedMethodBoxSource(source) {
 		const isPtr = source?.kind === "pointer";
-		const t = isPtr ? source.base : source;
+		let t = isPtr ? source.base : source;
+		if (t?.kind === "TypeName" || t?.kind === "Ident") t = this.resolveType(t);
 		if (t?.kind !== "named") return null;
 		const u = this.resolveType(t.underlying);
 		if (!u || u.kind === "struct" || u.kind === "interface") return null;
