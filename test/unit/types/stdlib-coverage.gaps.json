@@ -831,7 +831,6 @@
 			"Values.Has",
 			"Values.Set"
 		],
-		"os": ["File", "File.Read", "File.Write", "File.WriteString"],
 		"path/filepath": [
 			"FromSlash",
 			"HasPrefix",
@@ -1282,7 +1281,6 @@
 			"LimitedReader.R",
 			"LimitedReader.Read"
 		],
-		"os": ["Stderr", "Stdin", "Stdout"],
 		"strings": ["Replacer", "Replacer.Replace"],
 		"testing": ["Short", "Verbose"]
 	},
@@ -2073,11 +2071,6 @@
 			"Int63n": "func(int) int",
 			"Seed": "func(int)",
 			"Shuffle": "func(int, interface{})"
-		},
-		"os": {
-			"Stderr": "interface{}",
-			"Stdin": "interface{}",
-			"Stdout": "interface{}"
 		},
 		"slices": {
 			"All": "func[$0 interface{}]([]$0) iter.Seq2[int, $0]",
