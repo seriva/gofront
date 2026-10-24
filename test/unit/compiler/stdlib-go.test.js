@@ -433,3 +433,68 @@ func Make() *box.Box { return box.NewBox(7) }
 		assertEqual(res.lines.join("\n"), "7");
 	});
 });
+
+section("Explicit instantiation through a package qualifier (Task 0.30)");
+
+test("cmp.Compare[int](1, 2) on both backends (P11)", async () => {
+	const out = await stdParity(`import "cmp"
+
+func Run() int { return cmp.Compare[int](1, 2) }
+`);
+	assertEqual(out, "-1");
+});
+
+test("util.Id[string] instantiates a user package function with caller types", async () => {
+	const util = `//gofront:target both
+package util
+
+type Box[T any] struct{ V T }
+
+func Id[T any](x T) T { return x }
+func Pair[A any, B any](a A, b B) A { return a }
+`;
+	const out = await stdParity(
+		`import "./util"
+
+type Pt struct{ X int }
+
+func Run() int {
+	b := util.Box[Pt]{V: Pt{3}}
+	return len(util.Id[string]("x")) + util.Pair[Pt, string](Pt{5}, "s").X*10 + b.V.X*100
+}
+`,
+		{ "lib/util/util.go": util },
+	);
+	assertEqual(out, "351");
+});
+
+test("util.Box[int]{...} as the only use counts as using the import", async () => {
+	const util = `//gofront:target both
+package util
+
+type Box[T any] struct{ V T }
+`;
+	const out = await stdParity(
+		`import "./util"
+
+func Run() int {
+	v := util.Box[int]{V: 2}
+	return v.V
+}
+`,
+		{ "lib/util/util.go": util },
+	);
+	assertEqual(out, "2");
+});
+
+test("slices.Sort/Index/Max with explicit instantiation (emitter-backed)", async () => {
+	const out = await stdParity(`import "slices"
+
+func Run() int {
+	xs := []int{3, 1, 2}
+	slices.Sort[[]int](xs)
+	return xs[0]*100 + slices.Index[[]int, int](xs, 2)*10 + slices.Max[[]int](xs)
+}
+`);
+	assertEqual(out, "113");
+});

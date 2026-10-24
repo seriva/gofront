@@ -854,25 +854,25 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
 
 ### Phase 0.13: Parser and generics leftovers
 
-- [ ] **Task 0.29 — Composite-literal keys and named array types**
+- [x] **Task 0.29 — Composite-literal keys and named array types**
   - Files: `src/parser/expressions.js` (`parseCompositeLit`), `src/typechecker/expressions.js` (index on a named type), `src/typechecker/resolve.js`
   - Do: an element that starts with `{` may be a key: `map[P]int{{1}: 2}` and `map[[2]int]string{{1, 2}: "a"}` parse as key/value pairs with elided key types. `type W V` where `V` is a named array type is indexable, sliceable and has `len` on both backends.
   - Test: parity tests in `test/unit/language/expressions.test.js`: `len(map[P]int{{1}: 2})` → 1 (P13); `W{1, 2}[1]` → 2 (P24). Parser test for the elided-key form in `test/unit/compiler/lexer-parser.test.js`.
   - Done when: all pass.
 
-- [ ] **Task 0.30 — Explicit instantiation through a package qualifier**
+- [x] **Task 0.30 — Explicit instantiation through a package qualifier**
   - Files: `src/typechecker/expressions.js` (`IndexExpr` on a namespace member, `instantiateGenericFunc`), `src/typechecker/resolve.js` (`_resolveGenericTypeName` for `pkg.T[X]`)
   - Do: `pkg.F[T1, …](args)` instantiates a generic function from an imported package (user, emitter-backed or Go-source), and `pkg.T[X](v)` converts to an instantiated generic type. Type arguments resolve in the caller's scope (today `int` is looked up in the package scope).
   - Test: project parity tests in `test/unit/builtins/iter.test.js` and `test/unit/compiler/stdlib-go.test.js`: `cmp.Compare[int](1, 2)` → -1 (P11); `iter.Seq[int](f)` ranged → 4 (P12); `len(slices.Collect[int](slices.Values([]int{1, 2})))` → 2 (P74); a user package `util.Id[string]("x")`.
   - Done when: all pass on `both` and `wasm` targets.
 
-- [ ] **Task 0.31 — Recursive generic types**
+- [x] **Task 0.31 — Recursive generic types**
   - Files: `src/typechecker/resolve.js` (`instantiateGenericType`), `src/backend/wasm/monomorph.js`
   - Do: a generic type that refers to its own instantiation (`Next *List[T]`, `Children []Tree[T]`) is instantiated once per type-argument list through a cache entered before the fields are resolved. Mutual recursion (`A[T]` ↔ `B[T]`) works the same way.
   - Test: parity tests in `test/unit/wasm/generics.test.js`: `l.Next.V` → 2 (P10); a `Tree[string]` with `[]Tree[T]` children; `A[T]`/`B[T]` mutual recursion.
   - Done when: all pass on both targets and the compiler does not overflow the stack.
 
-- [ ] **Task 0.32 — Generic named types: embedding, defined types and type switches**
+- [x] **Task 0.32 — Generic named types: embedding, defined types and type switches**
   - Files: `src/typechecker/expressions.js` (selector lookup), `src/lower/embedding.js`, `src/typechecker/resolve.js`, `src/backend/js/statements.js` (`genTypeSwitch`)
   - Do: methods and fields promoted from an embedded non-generic struct are visible on a generic struct. `type S3[T any] Base` (a generic defined type over a named struct) gets `Base`'s fields and its own methods. In JS, a type switch or assertion distinguishes instantiations of the same generic type (`*Stack[int]` vs `*Stack[string]`); record how the instantiation is identified at run time.
   - Test: parity tests in `test/unit/types/generics.test.js`: `o.N()` → 7 (P44); `S3[int]{n: 5}.N()` → 5 (P45); type switch → 2 (P42).
