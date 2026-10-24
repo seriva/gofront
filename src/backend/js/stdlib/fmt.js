@@ -1,5 +1,7 @@
 // CodeGen for Go `fmt` package — installed onto CodeGen.prototype via stdlibGenMethods.
 
+import { fmtTypeDesc, fmtWantsTypes } from "../fmt-types.js";
+
 /** @typedef {import('../index.js').CodeGen} CodeGen */
 
 const _SSCAN_LOOP =
@@ -174,7 +176,11 @@ export const fmtMethods = {
 		return null;
 	},
 
-	_fmtArgJs(e) {
+	// `typed`: the format string needs operand types (`%T`, `%#v`, EXTRA, see
+	// fmtWantsTypes), so the operand travels with its static type as
+	// `__ft(value, descriptor)`; operands of interface type carry their dynamic
+	// type and stay bare.
+	_fmtArgJs(e, typed = false) {
 		// `xs...` passes each element as its own operand.
 		if (e?._spread) return `...(${this.genExpr(e)} ?? [])`;
 		const nilOperand = this._fmtNilPtrOperand(e?._type);
@@ -182,13 +188,37 @@ export const fmtMethods = {
 		const js = this.genExpr(e);
 		const base =
 			e?._type?.kind === "named" ? (e._type.underlying ?? e._type) : e?._type;
+		if (typed) {
+			const desc = fmtTypeDesc(
+				e?._type,
+				(t) => this.checker?.resolveType?.(t) ?? t,
+			);
+			if (desc && desc.k !== "i") return `__ft(${js}, ${JSON.stringify(desc)})`;
+		}
 		return base?.kind === "slice" ? `(${js} ?? [])` : js;
 	},
 
+	// The operands of a Printf-style call whose format is args[fmtIdx].
+	_fmtFormatArgsJs(args, fmtIdx) {
+		const lit = args[fmtIdx];
+		const spread = args.some((e) => e?._spread);
+		const typed =
+			lit?.kind === "BasicLit" &&
+			fmtWantsTypes(lit.value, spread ? -1 : args.length - fmtIdx - 1);
+		if (typed) this.useHelper("sprintf");
+		return args.map((e, idx) =>
+			idx < fmtIdx
+				? this.genExpr(e)
+				: idx === fmtIdx
+					? this.genExpr(e)
+					: this._fmtArgJs(e, typed),
+		);
+	},
+
 	_genFmt(fn, _a, expr) {
-		const fmtArgs = expr.args
-			.map((e, idx) => (idx === 0 ? this.genExpr(e) : this._fmtArgJs(e)))
-			.join(", ");
+		const fmtArgs = ["Sprintf", "Printf", "Errorf"].includes(fn)
+			? this._fmtFormatArgsJs(expr.args, 0).join(", ")
+			: "";
 		switch (fn) {
 			case "Sprintf":
 				this.useHelper("sprintf");
@@ -202,11 +232,11 @@ export const fmtMethods = {
 			case "Appendf": {
 				this.useHelper("sprint");
 				const [dst, ...rest] = expr.args;
-				const restJs = rest
-					.map((e, idx) =>
-						fn === "Appendf" && idx === 0 ? this.genExpr(e) : this._fmtArgJs(e),
-					)
-					.join(", ");
+				const restJs = (
+					fn === "Appendf"
+						? this._fmtFormatArgsJs(rest, 0)
+						: rest.map((e) => this._fmtArgJs(e))
+				).join(", ");
 				const str =
 					fn === "Appendf"
 						? `__sprintf(${restJs})`
@@ -321,7 +351,11 @@ export const fmtMethods = {
 		this.useHelper("sprintf");
 		const writerArg = expr.args[0];
 		const rest = expr.args.slice(1);
-		const restJs = rest.map((e) => this._fmtArgJs(e)).join(", ");
+		const restJs = (
+			fn === "Fprintf"
+				? this._fmtFormatArgsJs(rest, 0)
+				: rest.map((e) => this._fmtArgJs(e))
+		).join(", ");
 		const writerType = writerArg._type;
 		const targetTypeName =
 			writerType?.name ??

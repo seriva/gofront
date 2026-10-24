@@ -223,6 +223,8 @@ export class ExprsEmitter {
 					this.emitPathConst(expr.field, targetWasmType);
 				else if (this._isIoConst(expr))
 					this.emitIoConst(expr.field, targetWasmType);
+				else if (this._isOsConst?.(expr))
+					this.emitOsConst(expr.field, targetWasmType);
 				else if (this._isTimeConst(expr))
 					this.emitTimeConst(expr.field, targetWasmType);
 				else if (this._isExtendedPkgConst?.(expr))
