@@ -136,11 +136,22 @@ export function lintFixture(source, name) {
 	return errs;
 }
 
-// Compiles one fixture as a `both` package and returns the stdout of each backend.
+// A fixture whose first line is this directive covers only what the JS backend
+// supports so far: it is not run on WASM. Remove the line to promote the
+// fixture to both backends once WASM catches up.
+export const JS_ONLY_MARKER = "//conformance:js-only";
+
+export function isJsOnly(source) {
+	return source.startsWith(JS_ONLY_MARKER);
+}
+
+// Compiles one fixture as a `both` package and returns the stdout of each
+// backend (`wasm` is null for a JS-only fixture).
 export async function runFixture(goPath) {
+	const jsOnly = isJsOnly(readFileSync(goPath, "utf8"));
 	return {
 		js: await runTarget(goPath, "both", "JS"),
-		wasm: await runTarget(goPath, "wasm", "WASM"),
+		wasm: jsOnly ? null : await runTarget(goPath, "wasm", "WASM"),
 	};
 }
 
@@ -180,7 +191,7 @@ export async function checkFixture(goPath, root = dirname(dirname(goPath))) {
 		["JS", got.js],
 		["WASM", got.wasm],
 	]) {
-		if (Buffer.from(out, "utf8").equals(want)) continue;
+		if (out === null || Buffer.from(out, "utf8").equals(want)) continue;
 		problems.push(
 			`${backend} output differs from ${outName}: ${firstDiff(want.toString("utf8"), out)}`,
 		);

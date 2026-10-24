@@ -102,10 +102,18 @@ export function setupCoreGlobals(globals, types) {
 		returns: [ret],
 		variadic: true,
 	});
+	const FMT_STRINGER = {
+		kind: "interface",
+		name: "fmt.Stringer",
+		methods: new Map([
+			["String", { kind: "func", params: [], returns: [STRING] }],
+		]),
+	};
 	globals.define("fmt", {
 		kind: "namespace",
 		name: "fmt",
 		members: {
+			Stringer: FMT_STRINGER,
 			Sprintf: fmtVariadic(STRING),
 			Sprint: fmtPrintVariadic(STRING),
 			Sprintln: fmtPrintVariadic(STRING),
@@ -815,6 +823,7 @@ export function setupCoreGlobals(globals, types) {
 			Discard: IO_WRITER,
 		},
 	});
+	types.set("fmt.Stringer", FMT_STRINGER);
 	types.set("io.Writer", IO_WRITER);
 	types.set("io.Reader", IO_READER);
 	types.set("io.Closer", IO_CLOSER);
