@@ -677,6 +677,65 @@ type A interface{ Apply(x int) int }`,
 	}
 });
 
+test("== on a type parameter compares struct and array arguments by value", () => {
+	const res = compileHybrid(`package main
+
+type P struct{ A int }
+
+func eq[T comparable](a, b T) bool { return a == b }
+func ne[T comparable](a, b T) bool { return a != b }
+
+func Main() int {
+	r := 0
+	if eq(P{1}, P{1}) { r += 1 }
+	if ne(P{1}, P{2}) { r += 2 }
+	if eq([2]int{1, 2}, [2]int{1, 2}) { r += 4 }
+	if eq(1, 1) { r += 8 }
+	p := &P{1}
+	if !eq(p, &P{1}) { r += 16 }
+	return r
+}
+`).run("Main");
+	assertEqual(res.jsRes, 31);
+	assertEqual(Number(res.wasmRes), 31);
+});
+
+test("a generic struct holding a struct value copies it on assignment", () => {
+	const res = compileHybrid(`package main
+
+type P struct{ A int }
+type W[T any] struct{ v T }
+
+func Main() int {
+	a := W[P]{P{1}}
+	b := a
+	b.v.A = 9
+	return a.v.A*10 + b.v.A
+}
+`).run("Main");
+	assertEqual(res.jsRes, 19);
+	assertEqual(Number(res.wasmRes), 19);
+});
+
+test("a T value passed on inside generic code is copied for struct arguments", () => {
+	const res = compileHybrid(`package main
+
+type P struct{ A int }
+
+func id[T any](x T) T { return x }
+func keep[T any](x T) T { y := id(x); return y }
+
+func Main() int {
+	p := P{1}
+	q := keep(p)
+	q.A = 5
+	return p.A*10 + q.A
+}
+`).run("Main");
+	assertEqual(res.jsRes, 15);
+	assertEqual(Number(res.wasmRes), 15);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
