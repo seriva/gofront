@@ -11,6 +11,42 @@ export class IoEmitter {
 		);
 	}
 
+	_isOsConst(expr) {
+		return (
+			this._isPkgExpr(expr, "os") &&
+			(expr.field === "Stdout" ||
+				expr.field === "Stderr" ||
+				expr.field === "Stdin")
+		);
+	}
+
+	emitOsConst(field, targetWasmType) {
+		const gIdx = this.mod.getOsGlobalIndex(field);
+		const fileInfo = this.mod.getStructType("os.File");
+		const fd = field === "Stdout" ? 1 : field === "Stderr" ? 2 : 0;
+		this.pushInstruction({ op: "global.get", index: gIdx });
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		if (fileInfo) {
+			this.pushInstruction({ op: "i64.const", value: BigInt(fd) });
+			this.pushInstruction({
+				op: "struct.new",
+				typeIndex: fileInfo.typeIndex,
+			});
+		} else {
+			this.pushInstruction({ op: "ref.null", heapType: "any" });
+		}
+		this.pushInstruction({ op: "global.set", index: gIdx });
+		this.pushInstruction("end");
+		this.pushInstruction({ op: "global.get", index: gIdx });
+		if (fileInfo && targetWasmType && targetWasmType !== "anyref") {
+			this.pushInstruction({
+				op: "ref.cast",
+				typeIndex: fileInfo.typeIndex,
+			});
+		}
+	}
+
 	emitIoConst(field, _targetWasmType) {
 		if (field === "EOF") {
 			this._emitLazyErrorGlobal(this.mod.getIoErrGlobalIndex("EOF"), "EOF");
@@ -102,6 +138,11 @@ export class IoEmitter {
 			this.pushInstruction({ op: "local.set", index: bTmp });
 			this._emitBufferWriteStringCore(bTmp, strTmp);
 			this.releaseTemp(bTmp, bufW);
+			return;
+		}
+		if (targetName === "os.File") {
+			this.pushInstruction({ op: "local.get", index: strTmp });
+			this._callStdlib("fmt_print_raw");
 			return;
 		}
 
@@ -1056,7 +1097,11 @@ export class IoEmitter {
 	_emitFprintFormatString(fn, restArgs) {
 		if (fn === "Fprintf") {
 			const [format, ...rest] = restArgs;
-			const temps = this._emitArgBuffer(rest);
+			const temps = this._emitArgBuffer(
+				rest,
+				false,
+				this._fmtNeedsTypes(format, rest),
+			);
 			this.emitExpr(format, "externref");
 			this._callStdlib("fmt_sprintf");
 			this._releaseArgBuffer(temps);
@@ -1286,6 +1331,18 @@ export class IoEmitter {
 				return;
 			case "sha256_block_size":
 				this._emitHelperSha256BlockSize(fn);
+				return;
+			case "os_file_write":
+				this._emitHelperOsFileWrite(fn);
+				return;
+			case "os_file_write_string":
+				this._emitHelperOsFileWriteString(fn);
+				return;
+			case "os_file_read":
+				this._emitHelperOsFileRead(fn);
+				return;
+			case "os_file_close":
+				this._emitHelperOsFileClose(fn);
 				return;
 			default:
 				throw new Error(`Unknown io helper: ${kind}`);
@@ -1813,6 +1870,47 @@ export class IoEmitter {
 			funcIndex: this.mod.getStringLenImportIndex(),
 		});
 		this.pushInstruction("i64.extend_i32_u");
+		this.pushInstruction({ op: "ref.null", heapType: "any" });
+		this.pushInstruction("return");
+	}
+
+	_emitHelperOsFileWriteString(_fn) {
+		this.pushInstruction({ op: "local.get", index: 1 });
+		this._callStdlib("fmt_print_raw");
+		this.pushInstruction({ op: "local.get", index: 1 });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getStringLenImportIndex(),
+		});
+		this.pushInstruction("i64.extend_i32_u");
+		this.pushInstruction({ op: "ref.null", heapType: "any" });
+		this.pushInstruction("return");
+	}
+
+	_emitHelperOsFileWrite(_fn) {
+		this.pushInstruction({ op: "local.get", index: 1 });
+		this._emitByteSliceToString({ elem: { kind: "basic", name: "byte" } });
+		this._callStdlib("fmt_print_raw");
+		const byteElemGo = { kind: "basic", name: "byte" };
+		const sliceInfo = this.mod.getSliceType(byteElemGo);
+		this.pushInstruction({ op: "local.get", index: 1 });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: sliceInfo.typeIndex,
+			fieldIndex: 2,
+		});
+		this.pushInstruction("i64.extend_i32_u");
+		this.pushInstruction({ op: "ref.null", heapType: "any" });
+		this.pushInstruction("return");
+	}
+
+	_emitHelperOsFileRead(_fn) {
+		this.pushInstruction({ op: "i64.const", value: 0n });
+		this._emitLazyErrorGlobal(this.mod.getIoErrGlobalIndex("EOF"), "EOF");
+		this.pushInstruction("return");
+	}
+
+	_emitHelperOsFileClose(_fn) {
 		this.pushInstruction({ op: "ref.null", heapType: "any" });
 		this.pushInstruction("return");
 	}
