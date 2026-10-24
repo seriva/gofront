@@ -189,7 +189,7 @@ export const fmtMethods = {
 				// dst's spare capacity, otherwise copy into one fresh array and
 				// leave dst's backing array untouched (never chunk the write).
 				this.useHelper("append");
-				return `((d, s) => { const e = new TextEncoder().encode(s); const r = d ?? new Uint8Array(0); const n = r.length + e.length; const c = __tcap.get(r); if (c !== undefined && n <= c) { const v = new Uint8Array(r.buffer, r.byteOffset, n); v.set(e, r.length); if (c > n) __tcap.set(v, c); return v; } const v = new Uint8Array(n); v.set(r); v.set(e, r.length); return v; })(${this.genExpr(dst)}, ${str})`;
+				return `((d, s) => { const e = new TextEncoder().encode(s); if (d == null && e.length === 0) return null; const r = d ?? new Uint8Array(0); const n = r.length + e.length; const c = __tcap.get(r); if (c !== undefined && n <= c) { const v = new Uint8Array(r.buffer, r.byteOffset, n); v.set(e, r.length); if (c > n) __tcap.set(v, c); return v; } const v = new Uint8Array(n); v.set(r); v.set(e, r.length); return v; })(${this.genExpr(dst)}, ${str})`;
 			}
 			case "Errorf": {
 				this.useHelper("sprintf");
