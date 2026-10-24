@@ -1052,6 +1052,22 @@ func Main() int {
 	assertEqual(res.wasmRes, 12n);
 });
 
+section("Composite-literal elided keys (Task 0.29)");
+
+test("parser: {1}: 2 parses as a key/value pair with an elided key type", () => {
+	const ast = new Parser(
+		new Lexer(
+			"package main\ntype P struct{ X int }\nvar m = map[P]int{{1}: 2}",
+		).tokenize(),
+	).parse();
+	const decl = ast.decls.find((d) => d.kind === "VarDecl");
+	const lit = decl.decls[0].value[0];
+	const kv = lit.elems[0];
+	assertEqual(kv.kind, "KeyValueExpr");
+	assertEqual(kv.key.kind, "CompositeLit");
+	assertEqual(kv.key.typeExpr, null);
+});
+
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);

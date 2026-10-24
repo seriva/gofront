@@ -14,9 +14,47 @@ import {
 	isComplex,
 	isTypedArraySlice,
 	typedArrayConstructorForElem,
+	typeStr,
 } from "../../typechecker/types.js";
 
 /** @typedef {import('./index.js').CodeGen} CodeGen */
+
+// True when type `t` mentions a type parameter anywhere.
+function mentionsTypeParam(t, depth = 0) {
+	if (!t || depth > 16) return false;
+	switch (t.kind) {
+		case "typeParam":
+			return true;
+		case "slice":
+		case "array":
+			return mentionsTypeParam(t.elem, depth + 1);
+		case "pointer":
+			return mentionsTypeParam(t.base, depth + 1);
+		case "map":
+			return (
+				mentionsTypeParam(t.key, depth + 1) ||
+				mentionsTypeParam(t.value, depth + 1)
+			);
+		case "func":
+			return [...t.params, ...t.returns].some((x) =>
+				mentionsTypeParam(x, depth + 1),
+			);
+		case "named":
+			return (t.typeArgs ?? []).some((x) => mentionsTypeParam(x, depth + 1));
+		default:
+			return false;
+	}
+}
+
+// How an instance of a generic struct is identified at run time: the type
+// arguments' printed form, kept after the zero-value factories in the
+// instance's `__tz` array.  Null when an argument is a type parameter (the
+// instantiation is not known inside erased generic code).
+function instanceId(typeArgs) {
+	if (!typeArgs?.length || typeArgs.some((t) => mentionsTypeParam(t)))
+		return null;
+	return typeArgs.map(typeStr).join(",");
+}
 
 // Array literals longer than this that leave most slots zero are emitted as
 // the zero array plus assignments (_genSparseArrayLit).
@@ -2132,7 +2170,10 @@ export const expressionGenMethods = {
 			{ length: st.fields.size },
 			(_, i) => args[i] ?? "undefined",
 		);
-		vals.push(`[${this._typeArgFactories(tps, typeArgs).join(", ")}]`);
+		const tz = this._typeArgFactories(tps, typeArgs);
+		const id = instanceId(typeArgs);
+		if (id !== null) tz.push(JSON.stringify(id));
+		vals.push(`[${tz.join(", ")}]`);
 		return `new ${cls}(${vals.join(", ")})`;
 	},
 
@@ -2270,6 +2311,8 @@ export const expressionGenMethods = {
 		if (!typeNode) return "true";
 		if (typeNode.kind === "TypeName")
 			return this._typeNameCheckExpr(typeNode.name, val);
+		const generic = this._genericInstanceCheck(typeNode, val);
+		if (generic) return generic;
 		const extended = this._namedOrIfaceCheckExpr(typeNode, val);
 		if (extended) return extended;
 		if (
@@ -2281,6 +2324,27 @@ export const expressionGenMethods = {
 			return `(${val} instanceof ${name} && ${val}.__v !== true)`;
 		}
 		return "true";
+	},
+
+	// `Stack[int]` / `*Stack[int]`: the class test plus the instantiation
+	// recorded on the instance (an instance without one matches any).
+	_genericInstanceCheck(typeNode, val) {
+		const isPtr = typeNode.kind === "PointerType";
+		const base = isPtr ? typeNode.base : typeNode;
+		if (base?.kind !== "GenericTypeName" || !base._typeArgs) return null;
+		const cls = this._dequalify(base.name);
+		if (!this.structNames.has(cls)) return null;
+		const generic = this.checker?.types.get(base.name)?._generic;
+		const id = instanceId(base._typeArgs);
+		let check = isPtr
+			? `${val} instanceof ${cls} && ${val}.__v !== true`
+			: `${val} instanceof ${cls} && ${val}.__p !== true`;
+		if (id !== null && generic) {
+			this.useHelper("generics");
+			const at = generic.typeParams.length;
+			check += ` && (${val}[__tz]?.[${at}] ?? ${JSON.stringify(id)}) === ${JSON.stringify(id)}`;
+		}
+		return `(${check})`;
 	},
 
 	zeroValueForExpr(expr) {

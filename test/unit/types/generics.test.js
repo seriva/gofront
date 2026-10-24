@@ -736,6 +736,118 @@ func Main() int {
 	assertEqual(Number(res.wasmRes), 15);
 });
 
+section(
+	"Generic named types — embedding, defined types, type switches (Task 0.32)",
+);
+
+function genericsParity(name, src, expected) {
+	test(name, () => {
+		const res = compileHybrid(src).run("Main");
+		assertEqual(res.jsRes, expected);
+		assertEqual(Number(res.wasmRes), expected);
+	});
+}
+
+genericsParity(
+	"a generic struct sees methods and fields promoted from an embedded struct (P44)",
+	`package main
+
+type Base struct{ n int }
+
+func (b Base) N() int { return b.n }
+
+type Outer[T any] struct {
+	Base
+	v T
+}
+
+func Main() int {
+	o := Outer[string]{Base: Base{n: 7}, v: "x"}
+	p := &Outer[int]{Base: Base{n: 3}}
+	return o.N() + o.n + p.N()*100
+}
+`,
+	314,
+);
+
+genericsParity(
+	"a pointer-receiver method promoted into a generic struct writes the embedded value",
+	`package main
+
+type Base struct{ n int }
+
+func (b *Base) Inc() { b.n++ }
+
+type Outer[T any] struct {
+	Base
+	v T
+}
+
+func Main() int {
+	o := Outer[string]{Base: Base{n: 7}}
+	o.Inc()
+	return o.n
+}
+`,
+	8,
+);
+
+genericsParity(
+	"type S3[T any] Base gets Base's fields and its own methods (P45)",
+	`package main
+
+type Base struct{ n int }
+
+type S3[T any] Base
+
+func (s S3[T]) N() int { return s.n }
+
+func Main() int {
+	return S3[int]{n: 5}.N() + S3[string]{n: 1}.N()*10
+}
+`,
+	15,
+);
+
+genericsParity(
+	"a type switch tells instantiations of one generic type apart (P42)",
+	`package main
+
+type Stack[T any] struct{ items []T }
+type Pt struct{ X int }
+
+func Main() int {
+	var x any = &Stack[string]{}
+	var y any = Stack[int]{}
+	var z any = &Stack[Pt]{}
+	r := 0
+	switch x.(type) {
+	case *Stack[int]:
+		r = 1
+	case *Stack[string]:
+		r = 2
+	}
+	switch y.(type) {
+	case Stack[string]:
+		r += 10
+	case Stack[int]:
+		r += 20
+	}
+	if _, ok := x.(*Stack[int]); ok {
+		r += 100
+	}
+	if _, ok := z.(*Stack[Pt]); ok {
+		r += 1000
+	}
+	if _, ok := z.(*Stack[string]); ok {
+		r += 10000
+	}
+	return r
+}
+`,
+	1022,
+);
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
