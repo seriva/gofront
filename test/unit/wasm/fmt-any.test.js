@@ -157,4 +157,16 @@ test("a nil pointer calls a pointer-receiver String", () => {
 	);
 });
 
+test("a pointer to a named scalar with a value-receiver String", () => {
+	assertEqual(
+		out(
+			`x := Color(1)
+	p := &x
+	fmt.Println(p, fmt.Sprint(p))`,
+			'type Color int\nfunc (c Color) String() string { return "col" }',
+		),
+		"col col",
+	);
+});
+
 summarize();
