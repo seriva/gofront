@@ -686,6 +686,8 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
     let v = a[i++];
     const [, flags, width, prec] = m.match(/^%([#+\\- 0]*)([0-9]*)\\.?([0-9]*)/) || [];
     sharp = verb === "v" && Boolean(flags?.includes("#"));
+    // The stand-in for a nil pointer with a pointer-receiver String/Error only serves %v and %s.
+    if (v && v.__nilp === true && !(verb === "s" || (verb === "v" && !sharp))) v = null;
     // Boxed named values format as their underlying value; Error() still applies to %v/%s/%q/%w, String() to %v/%s.
     if (v && typeof v.__gfUnbox === "function" && !(typeof v.Error === "function" && "vsqw".includes(verb)) && !("vs".includes(verb) && stringMethod(v))) v = v.__gfUnbox();
     const zero = flags?.includes("0") && !flags?.includes("-");

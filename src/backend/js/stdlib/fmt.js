@@ -169,7 +169,7 @@ export const fmtMethods = {
 			if (!m?._ptrRecv || m.params?.length > 0) continue;
 			const cls = this._dequalify(base.name);
 			if (/[[.]/.test(cls)) return null;
-			return `{ ${mn}() { try { return ${cls}.prototype.${mn}.call(null); } catch (e) { return "<nil>"; } }, __p: true }`;
+			return `{ ${mn}() { try { return ${cls}.prototype.${mn}.call(null); } catch (e) { return "<nil>"; } }, __p: true, __nilp: true }`;
 		}
 		return null;
 	},

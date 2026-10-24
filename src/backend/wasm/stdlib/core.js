@@ -1108,6 +1108,21 @@ export class StdlibCoreEmitter {
 		}
 		this.pushInstruction({ op: "local.get", index: rawTmp });
 		this.pushInstruction({ op: "local.get", index: valTmp });
+		if (nilGuard && !isPointerToStruct(goType, this.mod.checker, this.mod)) {
+			// A pointer to a scalar is a box; the value receiver takes the scalar.
+			const box = this.mod.getBoxType(goType.base ?? goType.elem);
+			this.pushInstruction({
+				op: "ref.cast",
+				typeIndex: box.typeIndex,
+				typeName: box.name,
+			});
+			this.pushInstruction({
+				op: "struct.get",
+				typeIndex: box.typeIndex,
+				typeName: box.name,
+				fieldIndex: 0,
+			});
+		}
 		this.pushInstruction({ op: "call", funcIndex: m.funcIndex });
 		this.pushInstruction({
 			op: "i32.const",
