@@ -2,7 +2,7 @@
 // JS <-> WASM boundary: type classification, marshalling helpers (WASM IR)
 // and the generated JS facade that exposes a wasm package to JS callers.
 //
-// Boundary v1 rules (docs/v1.5.0/wasm-mvp-plan.md, Phase 5):
+// Boundary v1 rules (plans/v1.5.0/wasm-mvp-plan.md, Phase 5):
 //   - primitives: bool <-> i32, narrow ints <-> i32, int/int64 <-> f64 at the
 //     boundary (i64 inside; exact for |v| <= 2^53, which the facade already
 //     enforces, and keeps BigInt boxing off hot paths), floats direct,
