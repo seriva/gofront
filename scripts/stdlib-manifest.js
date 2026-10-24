@@ -25,7 +25,7 @@ const OVERRIDES_PATH = fileURLToPath(
 	new URL("./manifest-overrides.json", import.meta.url),
 );
 
-// ── Scope rule (docs/v1.8.0/portable-go-plan.md#scope-rule) ──────────────
+// ── Scope rule (plans/v1.8.0/portable-go-plan.md#scope-rule) ──────────────
 //
 // In-scope packages: the packages the scope rule and its member tables name,
 // the packages the plan adds (§4–§9), and the packages GoFront already ships.
