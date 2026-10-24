@@ -34,6 +34,17 @@ const STRICT_NUMERIC_TYPES = new Set([
 	"uint32",
 ]);
 
+// Unsigned types narrower than 64 bits: `-x` and `^x` wrap back into range.
+const SMALL_UNSIGNED_WRAP = {
+	uint8: "& 0xFF",
+	byte: "& 0xFF",
+	uint16: "& 0xFFFF",
+	uint32: ">>> 0",
+};
+
+// Integer types whose JS shifts must follow Go's 64-bit semantics.
+const WIDE_INT_NAMES = new Set(["int", "int64", "uint", "uint64", "uintptr"]);
+
 const STRICT_OPS = new Set([
 	"+",
 	"-",
@@ -826,6 +837,10 @@ export const expressionGenMethods = {
 			return inner;
 		}
 		const code = this.genExpr(expr.operand);
+		const wrap = this.strict
+			? SMALL_UNSIGNED_WRAP[this._typeName(expr._type)]
+			: null;
+		if (wrap && (op === "-" || op === "~")) return `(${op}(${code}) ${wrap})`;
 		const needsParens =
 			this._emittedBinaryOp(expr.operand) !== null ||
 			((op === "-" || op === "+") && /^[-+]/.test(code));
@@ -2480,6 +2495,8 @@ export const expressionGenMethods = {
 	_needsStrictOp(op, type) {
 		if (!STRICT_OPS.has(op)) return false;
 		if (this._isStrictAtomicOp(op, this._typeName(type))) return true;
+		if (op === "<<" || op === ">>")
+			return WIDE_INT_NAMES.has(this._typeName(type));
 		return this.isIntType(type) && (op === "/" || op === "%");
 	},
 
@@ -2568,6 +2585,15 @@ export const expressionGenMethods = {
 			}
 			if (op === "&^") return `(((${l}) & ~(${r})) & ${mask})`;
 			return `((${l} ${op} ${r}) & ${mask})`;
+		}
+		if (op === "<<" || op === ">>") {
+			// A constant count below 32 keeps the plain 32-bit operator.
+			if (/^\d+$/.test(r) && Number(r) < 32) return `${l} ${op} ${r}`;
+			if (op === "<<") return `((${r}) >= 64 ? 0 : (${l}) * 2 ** (${r}))`;
+			const ovf = this._typeName(type).startsWith("u")
+				? "0"
+				: `((${l}) < 0 ? -1 : 0)`;
+			return `((${r}) >= 64 ? ${ovf} : Math.floor((${l}) / 2 ** (${r})))`;
 		}
 		if (this.isIntType(type)) {
 			if (op === "/")

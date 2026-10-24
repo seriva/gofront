@@ -808,7 +808,7 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
   - Test: parity tests in `test/unit/language/core.test.js`: `len("\x00")` → 1 (P01), `len([]byte("\xc3"))` → 1 (P02), `"é" == "é"`, `"\101" == "A"`, `"\v\f"` lengths. Negative: `"\q"` with `assertErrorContains(errors, "unknown escape")`. Lexer unit test in `test/unit/compiler/lexer-parser.test.js`.
   - Done when: all pass; P16 (`strings.Fields("a\u0085b\vc")`) is re-probed and its remaining difference is only the `IsSpace` table owned by Task 3.3b.
 
-- [ ] **Task 0.22 — Unsigned unary operators and 64-bit shifts in JS**
+- [x] **Task 0.22 — Unsigned unary operators and 64-bit shifts in JS**
   - Files: `src/backend/js/expressions.js` (`_genUnaryExpr`, shift emission)
   - Do: `^x` and `-x` on `uint8`/`uint16`/`uint32`/`uint`/`uintptr` wrap to the unsigned range in JS, as `+`/`*` already do. Shifts on `int64`/`uint64`/`int`/`uint` with a count ≥ 32 follow Go: `<<` by ≥ the bit size is 0, `>>` by ≥ the bit size is 0 or −1 for signed negatives. Keep the 32-bit fast path when the count is a constant below 32.
   - Test: parity tests in `test/unit/builtins/operators.test.js`: `^uint8(5)`, `-uint32(1)` → `250 4294967295` (P03); `int64(1) << 70` → 0 (P04); `int64(-1) >> 64`, `int64(-1) << 64` → `-1 0` (P51).
