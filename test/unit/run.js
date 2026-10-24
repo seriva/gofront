@@ -94,6 +94,7 @@ export const TEST_FILES = [
 	"./wasm/range_func.test.js",
 	"./wasm/complex.test.js",
 	"./wasm/stdlib.test.js",
+	"./wasm/fmt-any.test.js",
 	"./wasm/golden.test.js",
 ];
 

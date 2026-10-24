@@ -152,7 +152,33 @@ export const fmtMethods = {
 		return false;
 	},
 
+	// A nil `*T` whose Error/String has a pointer receiver still calls the method
+	// (Go does; a panic in it, usually a nil dereference, prints <nil>).  The JS
+	// source of a stand-in for the nil pointer, or null when `t` is not such a
+	// pointer.  Only operands whose static type is the pointer are covered.
+	_fmtNilPtrOperand(t) {
+		t = this.checker?.resolveType?.(t) ?? t;
+		if (t?.kind !== "pointer") return null;
+		const base = this.checker?.resolveType?.(t.base) ?? t.base;
+		const st =
+			this.checker?.resolveType?.(base?.underlying) ?? base?.underlying;
+		if (base?.kind !== "named" || st?.kind !== "struct" || !base.name)
+			return null;
+		for (const mn of FMT_METHODS) {
+			const m = st.methods?.get(mn) ?? base.methods?.get(mn);
+			if (!m?._ptrRecv || m.params?.length > 0) continue;
+			const cls = this._dequalify(base.name);
+			if (/[[.]/.test(cls)) return null;
+			return `{ ${mn}() { try { return ${cls}.prototype.${mn}.call(null); } catch (e) { return "<nil>"; } }, __p: true, __nilp: true }`;
+		}
+		return null;
+	},
+
 	_fmtArgJs(e) {
+		// `xs...` passes each element as its own operand.
+		if (e?._spread) return `...(${this.genExpr(e)} ?? [])`;
+		const nilOperand = this._fmtNilPtrOperand(e?._type);
+		if (nilOperand) return `(${this.genExpr(e)} ?? ${nilOperand})`;
 		const js = this.genExpr(e);
 		const base =
 			e?._type?.kind === "named" ? (e._type.underlying ?? e._type) : e?._type;
@@ -325,6 +351,12 @@ export const fmtMethods = {
 	_genPrintOperands(expr, sep, suffix) {
 		const argc = expr.args.length;
 		if (argc === 0) return JSON.stringify(suffix);
+		if (expr.args.some((e) => e._spread)) {
+			// The operand count is only known at run time: join with Sprint's rules.
+			this.useHelper("sprint");
+			const joined = `__sprint(${sep === " "}, ${expr.args.map((e) => this._fmtArgJs(e)).join(", ")})`;
+			return sep === " " ? `${joined}.slice(0, -1)` : joined;
+		}
 		const fmt = Array(argc).fill("%v").join(sep) + suffix;
 		const args = expr.args.map((e) => this._fmtArgJs(e)).join(", ");
 		return `__sprintf(${JSON.stringify(fmt)}, ${args})`;

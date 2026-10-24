@@ -593,6 +593,10 @@ export function isStringType(goType, checker = null) {
 	if (goType.kind === "named") {
 		if (goType.name === "string") return true;
 		if (goType.underlying) return isStringType(goType.underlying, checker);
+		// A bare `{ kind: "named", name }` (interface candidates) resolves by name.
+		const resolved = checker?.types?.get(goType.name);
+		if (resolved && resolved !== goType && resolved.kind === "named")
+			return isStringType(resolved, checker);
 	}
 	if (goType.kind === "basic") return goType.name === "string";
 	if (goType.kind === "untyped") return goType.base === "string";

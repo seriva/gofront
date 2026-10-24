@@ -449,6 +449,15 @@ test("fmt.Append of nothing onto a nil slice stays nil (P17)", () => {
 	assertEqual(out, "true true false");
 });
 
+test("a nil pointer with a pointer-receiver String uses it only for %v and %s", () => {
+	const o = run(
+		`var p *C
+	fmt.Printf("%v|%s|%#v|%q\\n", p, p, p, p)`,
+		'type C struct{ n int }\nfunc (c *C) String() string { return "c" }',
+	);
+	assertEqual(o, 'c|c|<nil>|""\n');
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
