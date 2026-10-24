@@ -875,6 +875,16 @@ export class CodeGen {
 		}
 	}
 
+	// A promoted method runs on the embedded value (`this.In`), so it and the
+	// outer struct's promoted-field accesses see the same storage.  Embedded
+	// types that are not compiled Go structs keep the borrowed-`this` form.
+	_embedStub(method, embedName) {
+		const call = this.structNames.has(embedName)
+			? `this.${embedName}.${method}(...__a)`
+			: `${embedName}.prototype.${method}.call(this, ...__a)`;
+		return `${method}(...__a) { return ${call}; }`;
+	}
+
 	_genSingleEmbedStubs(embed, declared) {
 		const embedName = embed.kind === "named" ? embed.name : null;
 		if (!embedName) return;
@@ -883,9 +893,7 @@ export class CodeGen {
 		for (const [mName] of embedBase.methods.entries()) {
 			if (!declared.has(mName)) {
 				this.blank();
-				this.line(
-					`${mName}(...__a) { return ${embedName}.prototype.${mName}.call(this, ...__a); }`,
-				);
+				this.line(this._embedStub(mName, embedName));
 			}
 		}
 	}
@@ -894,9 +902,7 @@ export class CodeGen {
 		const stubs = computeEmbeddedStubs(name, methodDecls, this.checker);
 		for (const stub of stubs) {
 			this.blank();
-			this.line(
-				`${stub.methodName}(...__a) { return ${stub.embedName}.prototype.${stub.methodName}.call(this, ...__a); }`,
-			);
+			this.line(this._embedStub(stub.methodName, stub.embedName));
 		}
 	}
 
