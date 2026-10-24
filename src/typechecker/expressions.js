@@ -363,11 +363,11 @@ export const expressionCheckMethods = {
 		return Boolean(generic?.methods?.get(field)?._ptrRecv);
 	},
 
-	// `x.M` or `x.M()` with a pointer receiver on a named scalar local takes
+	// `x.M` or `x.M()` with a pointer receiver on a named scalar or slice local takes
 	// `&x`, so `x` must be boxed like an explicit `&x`.
 	_markPtrRecvAddress(expr, base, ft, scope) {
 		if (expr.expr.kind !== "Ident" || !ft._ptrRecv) return;
-		if (base?.kind !== "basic") return;
+		if (base?.kind !== "basic" && base?.kind !== "slice") return;
 		expr.expr._addressTaken = true;
 		const sym = scope.lookup(expr.expr.name);
 		if (sym) sym._addressTaken = true;

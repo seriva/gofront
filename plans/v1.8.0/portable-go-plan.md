@@ -886,7 +886,7 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
   - Test: parity tests in `test/unit/wasm/pointers.test.js`: `p := &a[1]; a = [3]int{4, 5, 6}; *p` → 5 (P20); `p := &s; s = S{5}; p.A` → 5 (P25); the same through a field array (`&w.arr[0]`).
   - Done when: all pass; `zero-alloc.js` still passes; `npm run bench` within 3%.
 
-- [ ] **Task 0.34 — Named types with methods in WASM**
+- [x] **Task 0.34 — Named types with methods in WASM**
   - Files: `src/backend/wasm/emit-exprs.js` (method calls through pointers), `src/backend/wasm/method-expr.js`, `src/backend/wasm/types.js`
   - Do: a value-receiver method called through a pointer to a named scalar (`p.Get()` with `p *N`) dereferences the box. A pointer-receiver method on a named slice (`func (l *L) Add`) writes the new slice header back to the variable.
   - Test: parity tests in `test/unit/language/named-type-methods.test.js`: `p.Get()` → 3 (P26); `l.Add(1); l.Add(2); len(l)` → 2 (P28).
