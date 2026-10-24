@@ -2034,6 +2034,7 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 			if (ref !== null && ref !== undefined && typeof ref === "object") fmtStructMap.set(ref, o);
 			return o;
 		},
+		"fmt_struct_type": (o, i) => { Object.defineProperty(o, "__tn", { value: stringTable[i], configurable: true }); },
 		"fmt_struct_set": (o, k, v) => { o[typeof k === "number" ? stringTable[k] : k] = v; },
 		"fmt_box_i32": (v) => v,
 		"fmt_box_i64": (v) => (v > ${P}MAX || v < -${P}MAX ? v : Number(v)),
@@ -2045,6 +2046,8 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		"testing_arg_str": targ, "testing_arg_any": targ,
 		"testing_arg_i64": (v) => targ(v > ${P}MAX || v < -${P}MAX ? v : Number(v)),
 		"testing_arg_bool": (v) => targ(v !== 0),
+		"testing_arg_u64": (v) => { v = BigInt.asUintN(64, v); targ(v > ${P}MAX ? v : Number(v)); },
+		"fmt_arg_type": (i) => { if (targs.length > 0) targs[targs.length - 1] = __ft(targs[targs.length - 1], JSON.parse(stringTable[i])); },
 		"testing_arg_spread": (a) => { if (a) for (const v of a) targs.push(v); },
 		"testing_arg_err": (s) => targ({ Error() { return s; } }),
 		"testing_call": (t, i) => { const a = targs; targs = []; fmtStructMap = new WeakMap(); t[stringTable[i]](...a); },
@@ -2216,6 +2219,7 @@ function ${P}stdlib(stringTable, io) {
 		"fmt_sprintf": (f) => __sprintf(f ?? "", ...io.take()),
 		"fmt_sprint": (ln) => __sprint(ln !== 0, ...io.take()),
 		"fmt_print": (ln) => { io.printf(__sprint(ln !== 0, ...io.take())); },
+		"fmt_print_raw": (s) => { io.printf(s ?? ""); },
 		"fmt_printf": (f) => { io.printf(__sprintf(f ?? "", ...io.take())); },
 		"fmt_format_v": (v) => { const res = __sprintf("%v", v); io.take(); return res; },
 		"str_trim": (s, c) => ${P}trim(s ?? "", c ?? "", true, true),

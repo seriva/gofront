@@ -235,7 +235,12 @@ const NS_CONSTANTS = {
 	rand: {
 		Reader: "__crypto_rand_reader",
 	},
-	os: { Args: "process.argv" },
+	os: {
+		Args: "process.argv",
+		Stdout: "__os_stdout",
+		Stderr: "__os_stderr",
+		Stdin: "__os_stdin",
+	},
 	time: {
 		Nanosecond: "1",
 		Microsecond: "1000",
@@ -947,6 +952,8 @@ export const expressionGenMethods = {
 					this.useHelper("cryptoRand");
 				} else if (expr.expr.name === "sha256") {
 					this.useHelper("sha256");
+				} else if (expr.expr.name === "os") {
+					this.useHelper("os");
 				}
 				return nsConst;
 			}

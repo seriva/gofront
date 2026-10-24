@@ -133,11 +133,11 @@ export const WASM_SUPPORTED_STDLIB = new Set([
 	"encoding/binary",
 	"encoding/hex",
 	"encoding/base64",
+	"os",
 ]);
 
 export const STDLIB_PACKAGES = new Set([
 	...WASM_SUPPORTED_STDLIB,
-	"os",
 	"gom",
 	"regexp",
 	"encoding/json",
@@ -148,6 +148,7 @@ export const STDLIB_PACKAGES = new Set([
 // wasm/both packages with "'strings.Split' is not yet available in wasm packages".
 export const WASM_STDLIB_MEMBERS = new Map([
 	["json", new Set()],
+	["os", new Set(["Stdout", "Stderr", "Stdin", "File"])],
 	[
 		"math",
 		new Set([
