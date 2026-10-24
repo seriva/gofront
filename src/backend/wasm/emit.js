@@ -225,7 +225,10 @@ export class FunctionEmitter {
 		const closeChecks = this._openCheckBlocks(body);
 
 		this.emitBlock(body);
-		if (this._finishYieldClosureBody()) return;
+		if (this._finishYieldClosureBody()) {
+			closeChecks?.(() => {});
+			return;
+		}
 
 		closeChecks?.(() =>
 			this.pushInstruction({

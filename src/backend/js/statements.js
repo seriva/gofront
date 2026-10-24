@@ -545,6 +545,10 @@ export const statementGenMethods = {
 			this._genStructDerefAssign(stmt);
 			return;
 		}
+		if (this._isStableWholeAssign(stmt)) {
+			this._genStableWholeAssign(stmt);
+			return;
+		}
 		const paired = stmt.rhs.length === stmt.lhs.length && stmt.op === "=";
 		const rhs = stmt.rhs.map((e, i) =>
 			paired && stmt.lhs[i].name !== "_"
@@ -617,6 +621,57 @@ export const statementGenMethods = {
 		this.line(`const ${tmp} = ${val};`);
 		if (vName !== "_") this.line(`${vName} = ${tmp}[0];`);
 		if (okName !== "_") this.line(`${okName} = ${tmp}[1];`);
+	},
+
+	// `a = [3]int{...}` / `s = S{...}` on a variable whose address (or an
+	// element's or field's address) is taken must write into the existing
+	// storage so those pointers see the new value (Task 0.33).
+	_isStableWholeAssign(stmt) {
+		if (stmt.op !== "=" || stmt.lhs.length !== 1 || stmt.rhs.length !== 1)
+			return false;
+		const l = stmt.lhs[0];
+		if (l.kind !== "Ident" && l.kind !== "SelectorExpr") return false;
+		if (l.kind === "Ident" && l.name === "_") return false;
+		if (
+			!this._aggregateBase(l._type) ||
+			!this._aggregateBase(stmt.rhs[0]._type)
+		)
+			return false;
+		const root = this._rootIdentName(l);
+		return root !== null && this._fnMutates(root, true);
+	},
+
+	_genStableWholeAssign(stmt) {
+		const target = this._genAssignLhsExpr(stmt.lhs[0]);
+		const type = stmt.lhs[0]._type;
+		this._tmpCounter = (this._tmpCounter ?? 0) + 1;
+		const src = `__s${this._tmpCounter}`;
+		this.line(`{ const ${src} = ${this.genExpr(stmt.rhs[0])};`);
+		this._emitCopyInto(target, src, type);
+		this.line("}");
+	},
+
+	// Copies aggregate `src` into the storage `dst` element by element, going
+	// into nested arrays and structs so pointers to inner parts stay valid.
+	_emitCopyInto(dst, src, type) {
+		const base = this._aggregateBase(type);
+		if (base.kind === "struct") {
+			for (const [name, ft] of base.fields) {
+				if (name === "_") continue;
+				const f = `.${name}`;
+				if (this._aggregateBase(ft))
+					this._emitCopyInto(`${dst}${f}`, `${src}${f}`, ft);
+				else this.line(`${dst}${f} = ${src}${f};`);
+			}
+			return;
+		}
+		this._tmpCounter = (this._tmpCounter ?? 0) + 1;
+		const k = `__k${this._tmpCounter}`;
+		this.line(`for (let ${k} = 0; ${k} < ${src}.length; ${k}++) {`);
+		if (this._aggregateBase(base.elem))
+			this._emitCopyInto(`${dst}[${k}]`, `${src}[${k}]`, base.elem);
+		else this.line(`${dst}[${k}] = ${src}[${k}];`);
+		this.line("}");
 	},
 
 	_genStructDerefAssign(stmt) {

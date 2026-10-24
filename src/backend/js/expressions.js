@@ -495,6 +495,15 @@ const EXPR_GEN_DELEGATE = {
 };
 
 /** @type {ThisType<CodeGen>} */
+const stdIdent = (name, type) => ({ kind: "Ident", name, _type: type });
+
+// True when a func type mentions a type parameter (a generic stdlib function).
+function hasTypeParamType(t) {
+	return JSON.stringify([t.params, t.returns], (k, v) =>
+		k.startsWith("_") || k === "underlying" ? undefined : v,
+	).includes('"typeParam"');
+}
+
 export const expressionGenMethods = {
 	genExpr(expr) {
 		if (this._isNamedIfaceBox(expr)) return this._genNamedIfaceBoxExpr(expr);
@@ -910,6 +919,7 @@ export const expressionGenMethods = {
 	_genSelectorExpr(expr) {
 		// Go-source stdlib member: bundled under its mangled top-level name.
 		if (expr._stdName) return expr._stdName;
+		if (this._isStdlibFuncValue(expr)) return this._genStdlibFuncValue(expr);
 		if (expr._isMethodExpr) {
 			const namedExpr = this._namedMethodExprInfo(expr);
 			if (namedExpr) return `${namedExpr.cls}.$${expr.field}`;
@@ -957,6 +967,43 @@ export const expressionGenMethods = {
 			return `${sel}.bind(${base})`;
 		}
 		return sel;
+	},
+
+	// `pkg.Fn` used as a value (not called): a stdlib function is inlined at
+	// its call sites, so a value is an arrow function that makes that call.
+	_isStdlibFuncValue(expr) {
+		const t = expr._type;
+		if (expr._callee || t?.kind !== "func" || expr._isMethodExpr) return false;
+		const ns = expr.expr;
+		if (ns?.kind !== "Ident" || ns._type?.kind !== "namespace") return false;
+		return !this.bundledPackages.has(ns.name) && !hasTypeParamType(t);
+	},
+
+	_genStdlibFuncValue(expr) {
+		const t = expr._type;
+		const ps = t.params ?? [];
+		const nFixed = t.variadic && ps.length > 0 ? ps.length - 1 : ps.length;
+		const fixed = ps.slice(0, nFixed).map((p, i) => stdIdent(`__a${i}`, p));
+		const names = fixed.map((a) => a.name);
+		const callJs = (args) =>
+			this.genExpr({
+				kind: "CallExpr",
+				func: { ...expr, _callee: true },
+				args,
+				_type: t.returns?.[0] ?? { kind: "basic", name: "void" },
+			});
+		if (nFixed === ps.length)
+			return `((${names.join(", ")}) => ${callJs(fixed)})`;
+		// Stdlib calls are inlined per operand count, so dispatch on it.
+		const rest = `__a${nFixed}`;
+		let body = `(() => { throw new Error("too many arguments in call to ${expr.expr.name}.${expr.field}"); })()`;
+		for (let k = 8; k >= 0; k--) {
+			const extra = Array.from({ length: k }, (_, i) =>
+				stdIdent(`${rest}[${i}]`, ps[nFixed]),
+			);
+			body = `${rest}.length === ${k} ? ${callJs([...fixed, ...extra])} : ${body}`;
+		}
+		return `((${[...names, `...${rest}`].join(", ")}) => ${body})`;
 	},
 
 	// A promoted field (`o.A` with embedded `In`) lives on the embedded value:

@@ -5,6 +5,7 @@ import {
 	assertEqual,
 	assertErrorContains,
 	compile,
+	compileHybrid,
 	runJs,
 	section,
 	summarize,
@@ -472,6 +473,35 @@ func main() {
 `);
 	assertEqual(errors.length, 0, errors.join("\n"));
 	assertEqual(runJs(js), "2\n12");
+});
+
+section("Named types with methods through pointers (Task 0.34)");
+
+test("value method called through a pointer to a named scalar (P26)", () => {
+	const res = compileHybrid(`package main
+type N int
+func (n N) Get() int { return int(n) }
+func Main() int {
+	n := N(3)
+	p := &n
+	return p.Get()
+}`).run("Main");
+	assertEqual(res.wasmRes, 3n);
+	assertEqual(res.jsRes, 3);
+});
+
+test("pointer-receiver method on a named slice writes the header back (P28)", () => {
+	const res = compileHybrid(`package main
+type L []int
+func (l *L) Add(v int) { *l = append(*l, v) }
+func Main() int {
+	var l L
+	l.Add(1)
+	l.Add(2)
+	return len(l)
+}`).run("Main");
+	assertEqual(res.wasmRes, 2n);
+	assertEqual(res.jsRes, 2);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

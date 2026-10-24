@@ -503,6 +503,10 @@ export class ExprsEmitter {
 	emitSelectorExpr(expr) {
 		const structInfo = this._resolveStructInfo(expr.expr);
 		if (!structInfo) {
+			if (expr.expr?.kind === "Ident" && expr.expr._type?.kind === "namespace")
+				throw new Error(
+					`${expr.expr.name}.${expr.field} cannot be used as a value in WASM`,
+				);
 			throw new Error(`Cannot resolve struct for selector: ${expr.field}`);
 		}
 		const path = this._resolveFieldPath(structInfo, expr.field);

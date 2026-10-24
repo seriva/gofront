@@ -880,26 +880,26 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
 
 ### Phase 0.14: Pointer stability and WASM leftovers
 
-- [ ] **Task 0.33 — Pointers survive whole-value assignment**
+- [x] **Task 0.33 — Pointers survive whole-value assignment**
   - Files: `src/backend/wasm/emit-stmts.js` (assignment to an address-taken array or struct variable), `src/backend/js/statements.js`, `src/lower/ownership.js`
   - Do: assigning a whole array or struct to a variable whose address (or an element's or field's address) has been taken writes into the existing storage (`array.copy` / field-by-field in WASM, an in-place copy in JS), so existing pointers see the new value. Variables whose address is never taken keep the current fast path.
   - Test: parity tests in `test/unit/wasm/pointers.test.js`: `p := &a[1]; a = [3]int{4, 5, 6}; *p` → 5 (P20); `p := &s; s = S{5}; p.A` → 5 (P25); the same through a field array (`&w.arr[0]`).
   - Done when: all pass; `zero-alloc.js` still passes; `npm run bench` within 3%.
 
-- [ ] **Task 0.34 — Named types with methods in WASM**
+- [x] **Task 0.34 — Named types with methods in WASM**
   - Files: `src/backend/wasm/emit-exprs.js` (method calls through pointers), `src/backend/wasm/method-expr.js`, `src/backend/wasm/types.js`
   - Do: a value-receiver method called through a pointer to a named scalar (`p.Get()` with `p *N`) dereferences the box. A pointer-receiver method on a named slice (`func (l *L) Add`) writes the new slice header back to the variable.
   - Test: parity tests in `test/unit/language/named-type-methods.test.js`: `p.Get()` → 3 (P26); `l.Add(1); l.Add(2); len(l)` → 2 (P28).
   - Done when: both pass.
 
-- [ ] **Task 0.35 — Stdlib functions as values in WASM**
-  - Files: `src/backend/wasm/emit-exprs.js` (selector on a stdlib namespace), `src/backend/wasm/emit-stdlib.js`
+- [x] **Task 0.35 — Stdlib functions as values in WASM**
+  - Files: `src/backend/wasm/emit-exprs.js` (selector on a stdlib namespace), `src/backend/wasm/emit-stdlib.js`, `src/backend/wasm/method-expr.js`
   - Do: a stdlib function used as a value (`var sp = fmt.Sprint`, `f := strings.ToUpper`, `sort.Slice` passed around) becomes a closure over the emitter call. A member that cannot be a value (an intrinsic with no function form) gets a targeted diagnostic naming it, never `Cannot resolve struct for selector`.
   - Test: parity tests in `test/unit/wasm/stdlib.test.js`: `sp(1)` → `1` (P72); `strings.ToUpper` passed to a `func(string) string` parameter; negative test with `assertErrorContains` for a non-value member.
   - Done when: all pass.
 
-- [ ] **Task 0.36 — Range-over-func leftovers in WASM**
-  - Files: `src/backend/wasm/emit-stmts.js` (range-over-func lowering), `src/backend/wasm/monomorph.js`, `src/lower/range.js`
+- [x] **Task 0.36 — Range-over-func leftovers in WASM**
+  - Files: `src/backend/wasm/emit-stmts.js` (range-over-func lowering), `src/backend/wasm/monomorph.js`, `src/lower/range.js`, `src/backend/wasm/index.js` (package-level initializer analysis), `src/lower/index.js`
   - Do: ranging directly over a func literal works; an iterator whose yield parameter is a pointer to a struct produces a valid module; `slices.Values`/`All` over a slice of a generic struct produces a valid module.
   - Test: parity tests in `test/unit/wasm/range_func.test.js`: func literal → 3 (P46); `*P` yields → 7 (P47); project test for `slices.Values([]Box[int])` → 3 (P40).
   - Done when: all pass.
