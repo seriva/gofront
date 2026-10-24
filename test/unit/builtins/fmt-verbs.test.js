@@ -113,6 +113,13 @@ test("%+d, % d, %#x, %U and %q on runes", () => {
 	);
 });
 
+test("%#08x and %#06o zero-pad accounts for prefix width", () => {
+	assertEqual(
+		parity(`return fmt.Sprintf("%#08x|%#06o", 255, 10)`),
+		"0x0000ff|000012",
+	);
+});
+
 section("fmt 64-bit integers and operand errors");
 
 test("uint64 above 2^63 formats exactly in WASM", () => {

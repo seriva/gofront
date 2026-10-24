@@ -45,13 +45,6 @@ var __fmtu = __fmtu || (() => {
     if (neg) b = -b;
     let ds = b.toString(base);
     if (upper) ds = ds.toUpperCase();
-    if (hasPrec) {
-      ds = prec === 0 && b === 0n ? "" : ds.padStart(prec, "0");
-    } else if (fl.zero && !fl.minus && hasWid) {
-      let p = wid;
-      if (neg || fl.plus || fl.space) p--;
-      ds = ds.padStart(p, "0");
-    }
     let pre = "";
     if (fl.sharp) {
       if (base === 16) pre = upper ? "0X" : "0x";
@@ -59,6 +52,13 @@ var __fmtu = __fmtu || (() => {
       else if (base === 8 && ds[0] !== "0") pre = "0";
     }
     if (verbO) pre = "0o";
+    if (hasPrec) {
+      ds = prec === 0 && b === 0n ? "" : ds.padStart(prec, "0");
+    } else if (fl.zero && !fl.minus && hasWid) {
+      let p = wid - pre.length;
+      if (neg || fl.plus || fl.space) p--;
+      if (p > ds.length) ds = ds.padStart(p, "0");
+    }
     const sign = neg ? "-" : fl.plus ? "+" : fl.space ? " " : "";
     return pad(sign + pre + ds, fl, wid);
   };
