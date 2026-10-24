@@ -651,7 +651,20 @@ export const expressionGenMethods = {
 		return null;
 	},
 
+	// A value of type-parameter type is copied at run time when its type
+	// argument is a struct or array (decision: runtime check on the zero-value
+	// factory, so one erased function body serves every instantiation).
+	_typeParamClone(t, js) {
+		if (t?.kind !== "typeParam") return null;
+		const factory = this._typeParamZeroFactory(t.name);
+		if (!factory) return null;
+		this.useHelper("vclone");
+		return `__vclone(${factory}, ${js})`;
+	},
+
 	_cloneJs(t, js) {
+		const tp = this._typeParamClone(t, js);
+		if (tp) return tp;
 		const base = this._aggregateBase(t);
 		if (!base) return js;
 		if (base.kind === "struct") {
@@ -687,7 +700,12 @@ export const expressionGenMethods = {
 	genValueExpr(expr) {
 		const js = this.genExpr(expr);
 		if (expr._ifaceBox) return js;
-		if (!this._aggregateBase(expr._type) || !this._isAddressableExpr(expr))
+		if (
+			!(
+				this._aggregateBase(expr._type) || this._typeParamClone(expr._type, js)
+			) ||
+			!this._isAddressableExpr(expr)
+		)
 			return js;
 		return this._cloneJs(expr._type, js);
 	},
@@ -1019,7 +1037,9 @@ export const expressionGenMethods = {
 	// part of a variadic rest array.  For those the caller passes aggregate
 	// (array and struct) arguments as copies.
 	_callerCopiesArg(expr, i) {
-		if (!this._aggregateBase(expr.args[i]._type)) return false;
+		const argT = expr.args[i]._type;
+		if (!this._aggregateBase(argT) && !this._typeParamClone(argT, ""))
+			return false;
 		let ft = expr.func?._type ?? expr.func?.expr?._type;
 		if (ft?.kind === "generic") ft = ft.underlying;
 		if (ft?.kind !== "func") return false;
@@ -2268,6 +2288,9 @@ export const expressionGenMethods = {
 			return expr.op === "==" ? cmp : `!${cmp}`;
 		}
 
+		const tpEq = this._genTypeParamEquality(expr);
+		if (tpEq) return tpEq;
+
 		if (this._isIfaceEquality(expr)) {
 			this.useHelper("ifeq");
 			const cmp = `__ifeq(${this._genIfaceOperand(expr.left)}, ${this._genIfaceOperand(expr.right)})`;
@@ -2302,6 +2325,20 @@ export const expressionGenMethods = {
 		const r = operand(expr.right, true);
 		if (this._isIntDivision(expr)) return `Math.trunc(${l} / ${r})`;
 		return `${l} ${jsOp} ${r}`;
+	},
+
+	// `a == b` on type-parameter operands: __geq compares structs and arrays by value.
+	_genTypeParamEquality(expr) {
+		if (expr.op !== "==" && expr.op !== "!=") return null;
+		const t = expr.left._type;
+		if (t?.kind !== "typeParam" || expr.right._type?.kind !== "typeParam")
+			return null;
+		const factory = this._typeParamZeroFactory(t.name);
+		if (!factory) return null;
+		this.useHelper("equal");
+		this.useHelper("geq");
+		const cmp = `__geq(${factory}, ${this.genExpr(expr.left)}, ${this.genExpr(expr.right)})`;
+		return expr.op === "==" ? cmp : `!${cmp}`;
 	},
 
 	_isStructEquality(expr) {

@@ -822,9 +822,9 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
 
 ### Phase 0.12: JS value semantics leftovers
 
-- [ ] **Task 0.24 — Type-parameter struct values in JS**
+- [x] **Task 0.24 — Type-parameter struct values in JS**
   - Files: `src/backend/js/expressions.js` (equality, value copies), `src/backend/js/runtime.js`
-  - Do: inside generic code, `==`/`!=` on a type parameter compares structs and arrays by value (`__equal`) when the type argument is a struct or array, and assigning or passing a `T` value copies it. Decide between static dispatch per instantiation and a runtime check on the value, and record the choice; non-struct type arguments keep the plain `===`.
+  - Do: inside generic code, `==`/`!=` on a type parameter compares structs and arrays by value (`__equal`) when the type argument is a struct or array, and assigning or passing a `T` value copies it. Decide between static dispatch per instantiation and a runtime check on the value, and record the choice (chosen: runtime check on the type argument's zero-value factory `$z_T`, so one erased body serves every instantiation; an object zero means struct or array); non-struct type arguments keep the plain `===`.
   - Test: parity tests in `test/unit/types/generics.test.js`: `eq(P{1}, P{1})` → true (P06); `a := W[P]{P{1}}; b := a; b.v.A = 9; a.v.A` → 1 (P07).
   - Done when: both pass; `npm run bench` within 3%.
 
