@@ -250,6 +250,39 @@ export const HELPER_SCLONE = `var __sclone = __sclone || function(x) {
   return Object.assign(Object.create(Object.getPrototypeOf(x)), x);
 };`;
 
+// Variadic prologue.  `f(xs...)` to a Go-compiled variadic function passes
+// `{ __sp: xs }`, so the parameter is the caller's slice itself (or nil).
+export const HELPER_VA = `var __va = __va || function(a) {
+  const f = a.length === 1 ? a[0] : undefined;
+  return f !== null && typeof f === "object" && f.__sp !== undefined ? f.__sp : a;
+};`;
+
+// Copy of a value whose type is a type parameter.  `z` is the argument's
+// zero-value factory: an object zero means a struct or array (copied by
+// value); anything else (scalars, pointers, interfaces) is returned as is.
+export const HELPER_VCLONE = `var __vclone = __vclone || function __vclone(z, x) {
+  if (x === null || typeof x !== "object") return x;
+  const zero = z?.();
+  if (zero === null || zero === undefined || typeof zero !== "object") return x;
+  const cp = (v) => {
+    if (v === null || typeof v !== "object") return v;
+    if (Array.isArray(v)) return v.map(cp);
+    if (typeof v.__clone === "function") return v.__clone();
+    return Object.assign(Object.create(Object.getPrototypeOf(v)), v);
+  };
+  return cp(x);
+};`;
+
+// == on type-parameter operands: structs and arrays compare by value, other
+// type arguments with ===.  Decided at run time from the zero-value factory.
+export const HELPER_GEQ = `var __geq = __geq || function(z, a, b) {
+  if (a === b) return true;
+  if (a === null || b === null || typeof a !== "object" || typeof b !== "object") return false;
+  const zero = z?.();
+  if (zero === null || zero === undefined || typeof zero !== "object") return false;
+  return __equal(a, b);
+};`;
+
 // Interface boxing: tag struct values (__v) vs struct pointers (__p) so type
 // switches can tell T from *T; tags are non-enumerable so __equal/JSON ignore them.
 export const HELPER_IFACE_BOX = `var __ifv = __ifv || function(x, ptrFields) {
@@ -380,10 +413,20 @@ var __zf = __zf || (() => false);`;
 // Strict-mode nil maps: the zero value of a map type is one frozen empty
 // object, so reads, `len` and `range` behave as on an empty map, and every
 // write goes through `__mw`, which panics with Go's message.
-export const HELPER_NIL_MAP = `var __nilmap = __nilmap || Object.freeze(Object.defineProperty({}, "__map", { value: true }));
+export const HELPER_NIL_MAP = `var __nilmap = __nilmap || Object.freeze(Object.defineProperties({}, { __map: { value: true }, __nilm: { value: true } }));
 var __mw = __mw || function(m) {
   if (m == null || m === __nilmap) throw new Error("assignment to entry in nil map");
   return m;
+};
+var __isnm = __isnm || function(m) {
+  return m == null || m.__nilm === true || (m.__nm === true && Object.keys(m).length === 0);
+};`;
+
+// js-package nil maps: the zero value is a fresh `{}` carrying a hidden tag;
+// `m == nil` holds while it stays empty (writes are allowed, as in plain JS).
+export const HELPER_NM = `var __nm = __nm || function() { return Object.defineProperty({}, "__nm", { value: true }); };
+var __isnm = __isnm || function(m) {
+  return m == null || m.__nilm === true || (m.__nm === true && Object.keys(m).length === 0);
 };`;
 
 // Interface equality: named non-struct values are boxed in interfaces, so two
@@ -588,6 +631,17 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
           const keys = Object.keys(val).sort((a, b) => {
             const na = Number(a), nb = Number(b);
             if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
+            if (a[0] === "{" && b[0] === "{") {
+              // Struct keys (their %v text) sort field by field, as in Go.
+              const ta = a.slice(1, -1).split(/[ {}]+/), tb = b.slice(1, -1).split(/[ {}]+/);
+              for (let i = 0; i < ta.length && i < tb.length; i++) {
+                if (ta[i] === tb[i]) continue;
+                const x = Number(ta[i]), y = Number(tb[i]);
+                if (ta[i] !== "" && tb[i] !== "" && !Number.isNaN(x) && !Number.isNaN(y)) return x - y;
+                return ta[i].localeCompare(tb[i]);
+              }
+              return ta.length - tb.length;
+            }
             return a.localeCompare(b);
           });
           for (const k of keys) {
