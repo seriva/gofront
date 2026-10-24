@@ -768,6 +768,10 @@ export const expressionGenMethods = {
 	_emitParamCopies(params) {
 		for (const p of params) {
 			if (p.name) this._fnCtx?.params.add(p.name);
+			if (p.variadic && p.name && p.name !== "_") {
+				this.useHelper("va");
+				this.line(`${p.name} = __va(${p.name});`);
+			}
 			if (p.variadic || !p.name || p.name === "_") continue;
 			if (this._boxedVars.has(p.name)) {
 				// Address-taken parameter: rebind it to a { value } box.
@@ -1024,12 +1028,27 @@ export const expressionGenMethods = {
 		return expr.args
 			.map((a, i) =>
 				a._spread
-					? `...${this.genExpr(a)}`
+					? this._genSpreadArg(expr, a)
 					: this._callerCopiesArg(expr, i)
 						? this.genValueExpr(a)
 						: this.genExpr(a),
 			)
 			.join(", ");
+	},
+
+	// `f(xs...)`: a Go-compiled variadic callee receives the slice itself in a
+	// marker (its prologue unwraps it); other callees get a JS spread.
+	_genSpreadArg(call, arg) {
+		const js = this.genExpr(arg);
+		return this._calleeIsGoVariadic(call) ? `{ __sp: ${js} }` : `...${js}`;
+	},
+
+	_calleeIsGoVariadic(call) {
+		const f = call.func;
+		if (f.kind === "Ident") return !!this.variadicFns?.has(f.name);
+		if (f.kind !== "SelectorExpr" || f._isMethodExpr) return false;
+		const recv = this._resolveRecvName(f.expr._type);
+		return !!recv && !!this.variadicFns?.has(`${recv}.${f.field}`);
 	},
 
 	// A callee copies its mutated array and struct parameters on entry, except

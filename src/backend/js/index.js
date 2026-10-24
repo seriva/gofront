@@ -76,6 +76,7 @@ import {
 	HELPER_TESTING,
 	HELPER_TIME_FMT,
 	HELPER_TIME_PARSE,
+	HELPER_VA,
 	HELPER_VCLONE,
 } from "./runtime.js";
 import { buildSourceMap, buildWasmSourceMap } from "./source-map.js";
@@ -140,6 +141,7 @@ const HELPER_MAP = [
 	["append", HELPER_APPEND],
 	["sliceGuard", HELPER_S],
 	["sclone", HELPER_SCLONE],
+	["va", HELPER_VA],
 	["vclone", HELPER_VCLONE],
 	["ifaceBox", HELPER_IFACE_BOX],
 	["ifd", HELPER_IFD],
@@ -465,6 +467,16 @@ export class CodeGen {
 	// Collects struct names, method map, and named wrapper names from program decls.
 	// Returns the method map (typeName → MethodDecl[]).
 	_collectStructNames(program) {
+		// Go-compiled variadic functions and methods: a `f(xs...)` call to one
+		// passes the slice itself (see `_genCallArgs`, `_emitParamCopies`).
+		this.variadicFns = new Set();
+		for (const d of program.decls) {
+			const last = d.params?.[d.params.length - 1];
+			if (!last?.variadic) continue;
+			if (d.kind === "FuncDecl") this.variadicFns.add(d.name);
+			else if (d.kind === "MethodDecl")
+				this.variadicFns.add(`${d.recvType.name}.${d.name}`);
+		}
 		for (const d of program.decls) {
 			if (d.kind === "TypeDecl" && d.type.kind === "StructType")
 				this.structNames.add(d.name);
