@@ -65,7 +65,7 @@ export class ExprsEmitter {
 			}
 
 			if (
-				isStringType(goType, this.mod.checker) ||
+				(isStringType(goType, this.mod.checker) && goType?.kind !== "named") ||
 				(expr.kind === "BasicLit" && expr.litKind === "STRING")
 			) {
 				this._emitRawExpr(expr, "externref");

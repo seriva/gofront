@@ -554,8 +554,12 @@ function mangleRefs(node, file, tparams, ctx) {
 	forEachChild(node, (child) => mangleRefs(child, file, tp, ctx));
 }
 
-function mangleTypeRef(node, tparams, { suffix, types }) {
-	if (types.has(node.name) && !tparams.has(node.name)) node.name += suffix;
+function mangleTypeRef(node, tparams, { suffix, types, overlay }) {
+	if (types.has(node.name) && !tparams.has(node.name)) {
+		node.name += suffix;
+	} else if (overlay && node.name in overlay.members) {
+		node.name = `${overlay.name}.${node.name}`;
+	}
 }
 
 // A package-scope identifier: a package declaration gets the suffix; in an
@@ -578,9 +582,14 @@ function checkStdlibPrograms(programs, pkgName, options, overlay) {
 	const checker = new TypeChecker();
 	checker.target = "both";
 	checker.pkgName = pkgName;
-	if (overlay)
-		for (const [name, t] of Object.entries(overlay.members))
+	if (overlay) {
+		for (const [name, t] of Object.entries(overlay.members)) {
 			checker.globals.define(name, t);
+			if (t.kind === "interface" || t.kind === "named" || t.kind === "struct") {
+				checker.types.set(name, t);
+			}
+		}
+	}
 	resolveImports(
 		programs,
 		programs[0]._path,
