@@ -293,6 +293,7 @@ export const WASM_STDLIB_MEMBERS = new Map([
 			"Sscan",
 			"Sscanln",
 			"Sscanf",
+			"Stringer",
 		]),
 	],
 	[
