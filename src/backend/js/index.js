@@ -773,6 +773,22 @@ export class CodeGen {
 		this.line("}");
 	}
 
+	// JS object keys are strings: a struct used as a map key becomes its Go
+	// `%v` text (`{1 x}`), so equal values share a key and fmt prints it as Go does.
+	_genStructKeyString(name, fields) {
+		if (fields.some((f) => f.name === "toString")) return;
+		const resolved = this.checker?.types.get(name)?.underlying;
+		const parts = fields.map((f) => {
+			const base = this._aggregateBase(resolved?.fields?.get(f.name));
+			return base?.kind === "array"
+				? `"[" + this.${f.name}.join(" ") + "]"`
+				: `this.${f.name}`;
+		});
+		this.line(
+			`toString() { return "{" + [${parts.join(", ")}].join(" ") + "}"; }`,
+		);
+	}
+
 	_genStructClone(name, structTypeAst, fields) {
 		const resolved = this.checker?.types.get(name)?.underlying;
 		const astTypes = new Map();
@@ -839,6 +855,7 @@ export class CodeGen {
 			}
 			this._genEmbeddedMethodStubs(name, methodDecls);
 			this._genStructClone(name, structTypeAst, fields);
+			this._genStructKeyString(name, fields);
 		});
 		this.line("}");
 		// Lets generic `p.value` dereferences resolve to the struct itself.

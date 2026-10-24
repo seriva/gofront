@@ -840,7 +840,7 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
   - Test: parity tests in `test/unit/wasm/maps.test.js`: `var m map[string]int; n := map[string]int{}` → `true false` (P60); `fmt.Append(nil) == nil` → true (P17) in `test/unit/builtins/fmt-stringer.test.js`.
   - Done when: both pass; strict-mode nil-map write panics still pass.
 
-- [ ] **Task 0.27 — Struct literals and embedded fields in JS**
+- [x] **Task 0.27 — Struct literals and embedded fields in JS**
   - Files: `src/backend/js/expressions.js` (`_genImplicitCompositeLit`, selector assignment), `src/backend/js/runtime.js` (`fmt` map keys)
   - Do: an elided `&T` in `[]*T{{1}}` and `map[K]*T{"a": {1}}` builds the pointer. A write through a promoted field (`o.A = 5` with embedded `In`) writes `o.In.A`; reads already do. `fmt` prints struct map keys as Go does (`map[{1}:2]`, keys sorted as Go sorts them).
   - Test: parity tests in `test/unit/language/structs.test.js`: `xs := []*P{{1}, {2}}; xs[1].A` → 2 (P14); embedded write → 52 (P70); `fmt.Sprint(map[P]int{P{1}: 2})` → `map[{1}:2]` (P15).
