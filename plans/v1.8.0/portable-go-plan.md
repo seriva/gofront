@@ -892,7 +892,7 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
   - Test: parity tests in `test/unit/language/named-type-methods.test.js`: `p.Get()` → 3 (P26); `l.Add(1); l.Add(2); len(l)` → 2 (P28).
   - Done when: both pass.
 
-- [ ] **Task 0.35 — Stdlib functions as values in WASM**
+- [x] **Task 0.35 — Stdlib functions as values in WASM**
   - Files: `src/backend/wasm/emit-exprs.js` (selector on a stdlib namespace), `src/backend/wasm/emit-stdlib.js`
   - Do: a stdlib function used as a value (`var sp = fmt.Sprint`, `f := strings.ToUpper`, `sort.Slice` passed around) becomes a closure over the emitter call. A member that cannot be a value (an intrinsic with no function form) gets a targeted diagnostic naming it, never `Cannot resolve struct for selector`.
   - Test: parity tests in `test/unit/wasm/stdlib.test.js`: `sp(1)` → `1` (P72); `strings.ToUpper` passed to a `func(string) string` parameter; negative test with `assertErrorContains` for a non-value member.

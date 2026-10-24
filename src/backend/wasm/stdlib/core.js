@@ -7,6 +7,7 @@ import {
 	ERROR_STRUCT,
 	getMapKeyValTypes,
 	goTypeKey,
+	isAnyType,
 	isArrayType,
 	isComplex,
 	isComplex64,
@@ -441,6 +442,60 @@ export class StdlibCoreEmitter {
 			isPointerToStruct(goType, this.mod.checker, this.mod) ||
 			_isPointerKind(goType)
 		);
+	}
+
+	_isFmtExternOperand(goType) {
+		return (
+			isAnyType(goType, this.mod.checker) || this._isCompositeGoType(goType)
+		);
+	}
+
+	// Pushes `arg` as the externref the fmt host helpers format.
+	_emitOperandExternref(arg, goType) {
+		if (isAnyType(goType, this.mod.checker)) {
+			this.emitExpr(arg, "anyref");
+			this._emitAnyToExternref();
+			return;
+		}
+		this.emitExpr(arg, toWasmType(goType, this.mod.checker, this.mod));
+		this.emitToExternref(goType, false);
+	}
+
+	// Turns the `any` on the stack into the externref the fmt host helpers
+	// format: strings pass through, scalars are boxed by their dynamic type,
+	// anything else (and nil) becomes a null externref.
+	_emitAnyToExternref() {
+		const tmp = this.acquireTemp("anyref");
+		this.pushInstruction({ op: "local.set", index: tmp });
+		const kinds = [
+			"string",
+			"bool",
+			"int",
+			"int8",
+			"int16",
+			"int32",
+			"int64",
+			"uint",
+			"uint8",
+			"uint16",
+			"uint32",
+			"uint64",
+			"float32",
+			"float64",
+		];
+		for (const name of kinds) {
+			const t = { kind: "basic", name };
+			this.pushInstruction({ op: "local.get", index: tmp });
+			this._emitTypeTest(t);
+			this.pushInstruction({ op: "if", blockType: "externref" });
+			this.pushInstruction({ op: "local.get", index: tmp });
+			this._emitTypeCast(t, toWasmType(t, this.mod.checker, this.mod));
+			this.emitToExternref(t, false);
+			this.pushInstruction("else");
+		}
+		this.pushInstruction({ op: "ref.null", heapType: "extern" });
+		for (let i = 0; i < kinds.length; i++) this.pushInstruction("end");
+		this.releaseTemp(tmp, "anyref");
 	}
 
 	_emitScalarToExternref(goType, valTmp, valW) {
@@ -984,10 +1039,9 @@ export class StdlibCoreEmitter {
 				});
 				continue;
 			}
-			if (this._isCompositeGoType(goType)) {
+			if (this._isFmtExternOperand(goType)) {
 				const tmp = this.acquireTemp("externref");
-				this.emitExpr(arg, valW);
-				this.emitToExternref(goType, false);
+				this._emitOperandExternref(arg, goType);
 				this.pushInstruction({ op: "local.set", index: tmp });
 				temps.push({ tmp, wType: "externref", isBool: false, errTmp: null });
 				continue;
@@ -7749,10 +7803,8 @@ export class StdlibCoreEmitter {
 					});
 					continue;
 				}
-				if (this._isCompositeGoType(goType)) {
-					const valW = toWasmType(goType, this.mod.checker, this.mod);
-					this.emitExpr(arg, valW);
-					this.emitToExternref(goType, false);
+				if (this._isFmtExternOperand(goType)) {
+					this._emitOperandExternref(arg, goType);
 					this._callStdlib("fmt_format_v");
 					this.pushInstruction({
 						op: "call",

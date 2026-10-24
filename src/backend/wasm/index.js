@@ -2293,7 +2293,7 @@ export function compileWasmModule(
 	// Variadic parameters become slices (after monomorphisation: concrete types).
 	// Method expressions become method calls or forwarding func literals,
 	// before variadics so a variadic method's forwarder packs its arguments.
-	const methodExprs = desugarMethodExprs(progs);
+	const methodExprs = desugarMethodExprs(progs, options.bundledPackages);
 	if (desugarVariadics(progs) || methodExprs || !resolvedLowerResult) {
 		resolvedLowerResult = lower(progs, resolvedChecker);
 	}
@@ -2487,7 +2487,13 @@ export function compileWasmModule(
 		pendingInits.length > 0 || initNames.length > 0
 			? _makeGlobalInitFunc(pendingInits, initNames)
 			: null;
-	if (globalInitFn) funcDecls.push(globalInitFn);
+	if (globalInitFn) {
+		// Func literals in package-level initializers are lifted like any other.
+		globalInitFn._rootFuncDecl = globalInitFn;
+		const before = closures.length;
+		scanClosures(globalInitFn.body, globalInitFn);
+		funcDecls.push(globalInitFn, ...closures.slice(before));
+	}
 
 	const boundsPanicFn = {
 		kind: "FuncDecl",
