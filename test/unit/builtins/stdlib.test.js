@@ -669,6 +669,24 @@ func Main() {
 	assertEqual(output, "ab");
 });
 
+test("os.File.Write returns byte slice length for multi-byte UTF-8", () => {
+	const src = `package main
+import (
+	"os"
+)
+func Main() int {
+	b := []byte("世界\\n")
+	n, err := os.Stdout.Write(b)
+	if err != nil {
+		panic("write failed")
+	}
+	return n
+}`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, 7n);
+	assertEqual(jsRes, 7);
+});
+
 // ═════════════════════════════════════════════════════════════
 // strings.Builder
 // ═════════════════════════════════════════════════════════════

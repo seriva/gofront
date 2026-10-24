@@ -731,7 +731,9 @@ var __os_file = __os_file || class {
   WriteString(s) { return __os_write(s, this.fd === 2); }
   Write(b) {
     const s = typeof b === "string" ? b : new TextDecoder().decode(b);
-    return __os_write(s, this.fd === 2);
+    __os_write(s, this.fd === 2);
+    const n = typeof b === "string" ? s.length : (b?.byteLength ?? b?.length ?? s.length);
+    return [n, null];
   }
   Read(b) { return [0, typeof __io_eof !== "undefined" ? __io_eof : __error("EOF")]; }
   Close() { return null; }
