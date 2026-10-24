@@ -30,6 +30,7 @@ import {
 	getInterfaceMethodList,
 	getMapKeyValTypes,
 	getReceiverTypeName,
+	getSliceElemType,
 	goTypeKey,
 	isAnyType,
 	isArrayType,
@@ -2155,20 +2156,44 @@ class ModuleEmitter {
 			if (fnName.endsWith(`.${methodName}`)) {
 				const rName = fnName.slice(0, fnName.length - methodName.length - 1);
 				if (!this.structTypes.has(rName)) {
-					const box = this.getIfaceBoxType({ kind: "named", name: rName });
-					const key = `named:${rName}`;
-					if (box && !seenKeys.has(key)) {
-						seenKeys.add(key);
-						const paramWTypes = this.getFuncParamTypes(fnName);
-						candidates.push({
-							recvTypeName: rName,
-							testTypeIndex: box.typeIndex,
-							isBoxedValue: true,
-							needsValueDeref: false,
-							embedPath: null,
-							funcIndex: fIdx,
-							targetParamTypes: paramWTypes,
-						});
+					const rType = this.checker?.types?.get(rName) ?? {
+						kind: "named",
+						name: rName,
+					};
+					const isSlice = isSliceType(rType, this.checker);
+					if (isSlice) {
+						const elemType = getSliceElemType(rType, this.checker);
+						const sliceInfo = this.getSliceType(elemType);
+						const key = `slice:${rName}`;
+						if (sliceInfo && !seenKeys.has(key)) {
+							seenKeys.add(key);
+							const paramWTypes = this.getFuncParamTypes(fnName);
+							candidates.push({
+								recvTypeName: rName,
+								testTypeIndex: sliceInfo.typeIndex,
+								isBoxedValue: false,
+								needsValueDeref: false,
+								embedPath: null,
+								funcIndex: fIdx,
+								targetParamTypes: paramWTypes,
+							});
+						}
+					} else {
+						const box = this.getIfaceBoxType({ kind: "named", name: rName });
+						const key = `named:${rName}`;
+						if (box && !seenKeys.has(key)) {
+							seenKeys.add(key);
+							const paramWTypes = this.getFuncParamTypes(fnName);
+							candidates.push({
+								recvTypeName: rName,
+								testTypeIndex: box.typeIndex,
+								isBoxedValue: true,
+								needsValueDeref: false,
+								embedPath: null,
+								funcIndex: fIdx,
+								targetParamTypes: paramWTypes,
+							});
+						}
 					}
 				}
 			}

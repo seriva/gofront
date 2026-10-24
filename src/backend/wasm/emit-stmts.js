@@ -2594,9 +2594,9 @@ export class StmtsEmitter {
 			iterType?.kind === "pointer" &&
 			isArrayType(iterType.base, this.mod.checker);
 
-		const elemGoType = isSlice
-			? iterType.elem
-			: this._getArrayElemType(isPtrToArr ? iterType.base : iterType);
+		const elemGoType = this._getArrayElemType(
+			isPtrToArr ? iterType.base : iterType,
+		);
 		const arrInfo = this.mod.getArrayType(elemGoType);
 		const sliceInfo = isSlice ? this.mod.getSliceType(elemGoType) : null;
 

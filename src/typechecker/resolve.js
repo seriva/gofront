@@ -152,11 +152,14 @@ export const resolveMethods = {
 				// SelectorExpr; resolve it like a qualified TypeName.
 				if (node.expr?.kind === "Ident" && typeof node.field === "string") {
 					const qualified = `${node.expr.name}.${node.field}`;
-					if (this.types.has(qualified))
-						return this.resolveTypeNode(
+					if (this.types.has(qualified)) {
+						const resolved = this.resolveTypeNode(
 							{ kind: "TypeName", name: qualified },
 							scope,
 						);
+						this._useQualifiedTypeName(node, resolved);
+						return resolved;
+					}
 				}
 				return ANY;
 			case "ArrayType":
@@ -176,9 +179,11 @@ export const resolveMethods = {
 	// `pkg.T` in a type position counts as using the import; a Go-source
 	// stdlib type is emitted under its mangled name.
 	_useQualifiedTypeName(node, named) {
-		const dot = node.name.indexOf(".");
+		const name =
+			node.name ?? (node.expr ? `${node.expr.name}.${node.field}` : "");
+		const dot = name.indexOf(".");
 		if (dot <= 0) return;
-		this.globals.lookup(node.name.slice(0, dot));
+		this.globals.lookup(name.slice(0, dot));
 		if (named.name?.includes("$$")) node._stdName = named.name;
 	},
 

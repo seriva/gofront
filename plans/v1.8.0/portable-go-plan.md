@@ -1143,11 +1143,12 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
   - Done when: fixture matches Go.
   - Landed: implemented `fmt.Fscan`, `fmt.Fscanf`, `fmt.Fscanln` in `runtime/stdlib/fmt/scan.go` over `io.Reader`, delegating to `Sscan*`. Supported spread variadic arguments in JS `fmt.js` and WASM `io.js` `emitSscanCall` by unpacking slices across scalar box and pointer types. Removed resolved gaps from `stdlib-coverage.gaps.json` and verified with conformance fixture `test/conformance/fmt/fscan.go`.
 
-- [ ] **Task 3.2 — `sort` completion**
+- [x] **Task 3.2 — `sort` completion**
   - Files: new `runtime/stdlib/sort/sort.go` (overlay)
   - Do: `Interface`, `Sort` (port of Go's pdqsort so equal-element order matches Go), `Stable` (insertion-merge as Go), `Reverse`, `IsSorted`, `SearchInts`/`SearchStrings`/`SearchFloat64s`, `IntSlice`/`StringSlice`/`Float64Slice`. No delegation to JS `Array.prototype.sort`.
   - Test: conformance fixture `sort/sort.go` including an unstable-order case that only matches with pdqsort.
   - Done when: fixture matches Go.
+  - Landed: implemented `sort.Interface`, pdqsort `Sort`, `Stable`, `Reverse`, `IsSorted`, `Search*`, and `*Slice` types in `runtime/stdlib/sort/sort.go`. Extended interface dispatch and boxing across JS backend (`assignability.js`, `stdlib/index.js`) and WASM backend (`findInterfaceCandidates` and range loop slice handling) for named non-struct types like slices. Verified with conformance test `test/conformance/sort/sort.go` matching Go output.
 
 - [ ] **Task 3.3a — `io` completion**
   - Files: new `runtime/stdlib/io/io.go` (overlay)

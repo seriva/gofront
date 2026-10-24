@@ -157,7 +157,7 @@ Members of each Go package that `wasm` and `both` packages can use today, out of
 | `path` | 9 of 9 | 0 |
 | `path/filepath` | 9 of 19 | 10 |
 | `slices` | 37 of 40 | 3 |
-| `sort` | 10 of 40 | 30 |
+| `sort` | 36 of 40 | 4 |
 | `strconv` | 18 of 43 | 25 |
 | `strings` | 64 of 82 | 18 |
 | `sync` | 20 of 39 | 19 |

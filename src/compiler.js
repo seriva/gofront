@@ -608,7 +608,7 @@ function throwStdlibErrors(errors) {
 
 // Pass 1: type-check the package as written and record which identifiers
 // refer to package scope.  An overlay sees its emitter members unqualified.
-function probeStdlibPackage(importPath, dir, options, overlay) {
+function probeStdlibPackage(_importPath, dir, options, overlay) {
 	const programs = parseStdlibFiles(dir);
 	const pkgName = programs[0].pkg.name;
 	const { values, types } = stdlibTopLevelNames(programs);
