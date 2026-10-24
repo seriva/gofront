@@ -92,7 +92,7 @@ export function stdlibTables(manifest, gaps) {
 	const all = [
 		NOTE,
 		"",
-		`Members of each Go package (functions, types, methods, fields, constants and variables, as listed in Go's \`api/${manifest.go}.txt\`) that GoFront provides. **Available** counts what works today out of the members in scope; **Not yet** is scheduled in the [portable Go plan](v1.8.0/portable-go-plan.md); **JS-only** members (included in the first two columns) are not available in \`wasm\`/\`both\` packages by design; **Excluded** members are out of scope.`,
+		`Members of each Go package (functions, types, methods, fields, constants and variables, as listed in Go's \`api/${manifest.go}.txt\`) that GoFront provides. **Available** counts what works today out of the members in scope; **Not yet** is scheduled in the [portable Go plan](../plans/v1.8.0/portable-go-plan.md); **JS-only** members (included in the first two columns) are not available in \`wasm\`/\`both\` packages by design; **Excluded** members are out of scope.`,
 		"",
 		"| Package | Available | Not yet | JS-only | Excluded |",
 		"|---|---|---|---|---|",
@@ -118,7 +118,7 @@ export function stdlibTables(manifest, gaps) {
 	const wasm = [
 		NOTE,
 		"",
-		`Members of each Go package that \`wasm\` and \`both\` packages can use today, out of the members planned for them (JS-only and excluded members are not counted). **Not yet** is scheduled in the [portable Go plan](v1.8.0/portable-go-plan.md).`,
+		`Members of each Go package that \`wasm\` and \`both\` packages can use today, out of the members planned for them (JS-only and excluded members are not counted). **Not yet** is scheduled in the [portable Go plan](../plans/v1.8.0/portable-go-plan.md).`,
 		"",
 		"| Package | Available | Not yet |",
 		"|---|---|---|",

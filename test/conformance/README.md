@@ -25,4 +25,4 @@ A fixture whose first line is `//conformance:js-only` covers only what the JS ba
 - Put it under the directory of the package it tests (`strings/`, `strconv/`, `fmt/`, …).
 - End the output with a newline. WASM stdout is line-buffered, so an unterminated last line is not written.
 - Do not panic and do not write to stderr; only stdout is compared.
-- Follow the string rules in the [portable Go plan §1.1](../../docs/v1.8.0/portable-go-plan.md#11-string-semantics-both-backends): GoFront strings are JavaScript strings, so `len`, indexing and `range` count UTF-16 code units on both backends while Go counts UTF-8 bytes. Do not apply them to non-ASCII strings; use `[]byte(s)` or `[]rune(s)` instead.
+- Follow the string rules in the [portable Go plan §1.1](../../plans/v1.8.0/portable-go-plan.md#11-string-semantics-both-backends): GoFront strings are JavaScript strings, so `len`, indexing and `range` count UTF-16 code units on both backends while Go counts UTF-8 bytes. Do not apply them to non-ASCII strings; use `[]byte(s)` or `[]rune(s)` instead.

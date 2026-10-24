@@ -452,9 +452,9 @@ For detailed command flags, project configuration (`gofront.json`), multi-file p
 
 ## Roadmap
 
-See [`docs/roadmap.md`](docs/roadmap.md) for the full roadmap and release history.
-Design documents for planned features are organised by release under `docs/v*/`
-(e.g. [`docs/v0.0.8/`](docs/v0.0.8/), [`docs/v1.2.0/`](docs/v1.2.0/), [`docs/v1.3.0/`](docs/v1.3.0/), [`docs/v1.6.0/`](docs/v1.6.0/)).
+See [`plans/roadmap.md`](plans/roadmap.md) for the full roadmap and release history.
+Design documents for planned features are organised by release under `plans/v*/`
+(e.g. [`plans/v1.2.0/`](plans/v1.2.0/), [`plans/v1.3.0/`](plans/v1.3.0/), [`plans/v1.6.0/`](plans/v1.6.0/), [`plans/v1.8.0/`](plans/v1.8.0/)).
 
 ---
 

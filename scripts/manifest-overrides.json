@@ -1,5 +1,5 @@
 {
-	"$comment": "Member statuses for runtime/stdlib/manifest.json (Task 1.1b). `packages` gives each in-scope package's default status; a package without one stays `todo`. `rules` then apply in order, later rules winning: `members` are member names, `T.*` (a type and all its methods and fields) or `*` (every member); `signature` limits a rule to members with exactly that signature; `note` is the reason recorded with a `js` or `excluded:` status. See the scope rule in docs/v1.8.0/portable-go-plan.md.",
+	"$comment": "Member statuses for runtime/stdlib/manifest.json (Task 1.1b). `packages` gives each in-scope package's default status; a package without one stays `todo`. `rules` then apply in order, later rules winning: `members` are member names, `T.*` (a type and all its methods and fields) or `*` (every member); `signature` limits a rule to members with exactly that signature; `note` is the reason recorded with a `js` or `excluded:` status. See the scope rule in plans/v1.8.0/portable-go-plan.md.",
 	"packages": {
 		"bufio": {
 			"status": "both"
