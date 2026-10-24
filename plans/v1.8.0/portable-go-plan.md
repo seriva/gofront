@@ -866,7 +866,7 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
   - Test: project parity tests in `test/unit/builtins/iter.test.js` and `test/unit/compiler/stdlib-go.test.js`: `cmp.Compare[int](1, 2)` → -1 (P11); `iter.Seq[int](f)` ranged → 4 (P12); `len(slices.Collect[int](slices.Values([]int{1, 2})))` → 2 (P74); a user package `util.Id[string]("x")`.
   - Done when: all pass on `both` and `wasm` targets.
 
-- [ ] **Task 0.31 — Recursive generic types**
+- [x] **Task 0.31 — Recursive generic types**
   - Files: `src/typechecker/resolve.js` (`instantiateGenericType`), `src/backend/wasm/monomorph.js`
   - Do: a generic type that refers to its own instantiation (`Next *List[T]`, `Children []Tree[T]`) is instantiated once per type-argument list through a cache entered before the fields are resolved. Mutual recursion (`A[T]` ↔ `B[T]`) works the same way.
   - Test: parity tests in `test/unit/wasm/generics.test.js`: `l.Next.V` → 2 (P10); a `Tree[string]` with `[]Tree[T]` children; `A[T]`/`B[T]` mutual recursion.
