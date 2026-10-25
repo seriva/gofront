@@ -1,0 +1,25 @@
+MaxScanTokenSize: 65536
+Line 1: "line1" (bytes=5)
+Line 2: "line2" (bytes=5)
+Line 3: "line3 without newline" (bytes=21)
+ScanLines err: <nil>
+Word: "foo"
+Word: "bar"
+Word: "baz"
+Word: "qux"
+ScanWords err: <nil>
+Byte: "a"
+Byte: "b"
+Byte: "c"
+ScanBytes err: <nil>
+Rune: "a"
+Rune: "世"
+Rune: "b"
+ScanRunes err: <nil>
+FinalToken scan: "one"
+FinalToken scan: "two"
+FinalToken scan: "STOP"
+FinalToken err: <nil>
+ErrTooLong is: bufio.Scanner: token too long (match=true)
+ErrNegativeAdvance match: true
+ErrAdvanceTooFar match: true
