@@ -415,7 +415,7 @@ export class StdlibCoreEmitter {
 	emitTestingCall(func, args) {
 		const method = func.field;
 		const nameIdx = this.mod.internString(method);
-		if (method === "Run") {
+		if (method === "Run" && args.length > 0) {
 			this.emitExpr(func.expr, "externref");
 			this.emitExpr(args[0], "externref");
 			this.emitExpr(args[1], "anyref");
@@ -425,12 +425,75 @@ export class StdlibCoreEmitter {
 			});
 			return;
 		}
+		if (method === "Cleanup") {
+			this.emitExpr(func.expr, "externref");
+			this.emitExpr(args[0], "anyref");
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getStdlibImportIndex("testing_cleanup"),
+			});
+			return;
+		}
 		if (method === "Name") {
 			this.emitExpr(func.expr, "externref");
 			this.pushInstruction({
 				op: "call",
 				funcIndex: this.mod.getTestingNameImportIndex(),
 			});
+			return;
+		}
+		if (method === "Loop") {
+			this.emitExpr(func.expr, "externref");
+			this.pushInstruction({ op: "i32.const", value: nameIdx });
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getTestingFlagImportIndex(),
+			});
+			return;
+		}
+		if (method === "Run" && args.length === 0) {
+			this.emitExpr(func.expr, "externref");
+			this.pushInstruction({ op: "i32.const", value: nameIdx });
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getTestingFlagImportIndex(),
+			});
+			this.pushInstruction("i64.extend_i32_s");
+			return;
+		}
+		if (method === "Elapsed") {
+			this.emitExpr(func.expr, "externref");
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getStdlibImportIndex("testing_elapsed"),
+			});
+			return;
+		}
+		if (method === "Context") {
+			this.emitExpr(func.expr, "externref");
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getStdlibImportIndex("testing_context"),
+			});
+			this.pushInstruction("any.convert_extern");
+			return;
+		}
+		if (method === "Output") {
+			this.emitExpr(func.expr, "externref");
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getStdlibImportIndex("testing_output"),
+			});
+			this.pushInstruction("any.convert_extern");
+			return;
+		}
+		if (method === "Deadline") {
+			this.emitExpr(func.expr, "externref");
+			this.pushInstruction("drop");
+			const timeType = this.mod.checker?.types?.get("time.Time");
+			const timeWType = this.toWasmType(timeType);
+			this.emitZeroValue(timeType, timeWType);
+			this.pushInstruction({ op: "i32.const", value: 0 });
 			return;
 		}
 		if (method === "Failed" || method === "Skipped") {
@@ -1294,7 +1357,11 @@ export class StdlibCoreEmitter {
 			return;
 		}
 
-		this.pushInstruction({ op: "local.get", index: valTmp });
+		if (valW !== "externref") {
+			this.pushInstruction({ op: "ref.null", heapType: "extern" });
+		} else {
+			this.pushInstruction({ op: "local.get", index: valTmp });
+		}
 		this.releaseTemp(valTmp, valW);
 	}
 
@@ -9932,6 +9999,36 @@ export class StdlibCoreEmitter {
 					fieldIndex: 1,
 				});
 				this.pushInstruction({ op: "local.get", index: 1 });
+				this.pushInstruction({ op: "local.get", index: 0 });
+				this.pushInstruction({
+					op: "ref.cast",
+					typeIndex: closureInfo.typeIndex,
+				});
+				this.pushInstruction({
+					op: "struct.get",
+					typeIndex: closureInfo.typeIndex,
+					fieldIndex: 0,
+				});
+				this.pushInstruction({
+					op: "call_ref",
+					typeIndex: closureInfo.funcTypeIndex,
+				});
+				this.pushInstruction("return");
+				return;
+			}
+			case "testing_cleanup_cb": {
+				// (fn anyref): fn is a func() closure
+				const closureInfo = this.mod.getTestingCleanupClosureType();
+				this.pushInstruction({ op: "local.get", index: 0 });
+				this.pushInstruction({
+					op: "ref.cast",
+					typeIndex: closureInfo.typeIndex,
+				});
+				this.pushInstruction({
+					op: "struct.get",
+					typeIndex: closureInfo.typeIndex,
+					fieldIndex: 1,
+				});
 				this.pushInstruction({ op: "local.get", index: 0 });
 				this.pushInstruction({
 					op: "ref.cast",

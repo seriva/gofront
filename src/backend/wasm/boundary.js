@@ -2054,7 +2054,11 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		"testing_arg_err": (s) => targ({ Error() { return s; } }),
 		"testing_call": (t, i) => { const a = targs; targs = []; fmtStructMap = new WeakMap(); t[stringTable[i]](...a); },
 		"testing_name": (t) => t.Name(),
-		"testing_flag": (t, i) => (t[stringTable[i]]() ? 1 : 0),
+		"testing_flag": (t, i) => Number(t[stringTable[i]]()),
+		"testing_n": (t) => BigInt(t.N ?? 0),
+		"testing_elapsed": (t) => BigInt(t.Elapsed()),
+		"testing_context": (t) => t.Context(),
+		"testing_output": (t) => t.Output(),
 	};
 	// Stdlib imports (strings/strconv/utf8/fmt/t.Run) are a separate block so
 	// modules that never call them do not ship it (see WASM_STDLIB_JS).
@@ -2220,6 +2224,11 @@ function ${P}stdlib(stringTable, io) {
 			return 0;
 		},
 		"testing_run": (t, name, fn) => (t.Run(name, (sub) => { io.late.exports.__testing_run_cb(fn, sub); }) ? 1 : 0),
+		"testing_cleanup": (t, fn) => { t.Cleanup(() => { io.late.exports.__testing_cleanup_cb(fn); }); },
+		"testing_n": (t) => BigInt(t.N ?? 0),
+		"testing_elapsed": (t) => BigInt(t.Elapsed()),
+		"testing_context": (t) => t.Context(),
+		"testing_output": (t) => t.Output(),
 		"fmt_sprintf": (f) => __sprintf(f ?? "", ...io.take()),
 		"fmt_sprint": (ln) => __sprint(ln !== 0, ...io.take()),
 		"fmt_print": (ln) => { io.printf(__sprint(ln !== 0, ...io.take())); },
