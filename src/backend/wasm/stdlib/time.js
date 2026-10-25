@@ -110,6 +110,12 @@ export class TimeEmitter {
 			case "Parse":
 				this._emitTimeParse(call.args, targetWasmType);
 				break;
+			case "ParseDuration":
+				this._emitTimeParseDuration(call.args, targetWasmType);
+				break;
+			case "FixedZone":
+				this._emitTimeFixedZone(call.args, targetWasmType);
+				break;
 			default:
 				throw new Error(`Unsupported time function '${field}'`);
 		}
@@ -132,6 +138,9 @@ export class TimeEmitter {
 			case "Add":
 				this._emitTimeMethodAdd(expr, args, targetWasmType);
 				break;
+			case "AddDate":
+				this._emitTimeMethodAddDate(expr, args, targetWasmType);
+				break;
 			case "Sub":
 				this._emitTimeMethodSub(expr, args, targetWasmType);
 				break;
@@ -143,6 +152,9 @@ export class TimeEmitter {
 				break;
 			case "Equal":
 				this._emitTimeMethodEqual(expr, args, targetWasmType);
+				break;
+			case "Compare":
+				this._emitTimeMethodCompare(expr, args, targetWasmType);
 				break;
 			case "Hour":
 				this._emitTimeMethodHour(expr, targetWasmType);
@@ -165,6 +177,18 @@ export class TimeEmitter {
 			case "Day":
 				this._emitTimeMethodYMD(expr, targetWasmType, 2);
 				break;
+			case "YearDay":
+				this._emitTimeMethodYearDay(expr, targetWasmType);
+				break;
+			case "ISOWeek":
+				this._emitTimeMethodISOWeek(expr, targetWasmType);
+				break;
+			case "Zone":
+				this._emitTimeMethodZone(expr, targetWasmType);
+				break;
+			case "Location":
+				this._emitTimeMethodLocation(expr, targetWasmType);
+				break;
 			case "IsZero":
 				this._emitTimeMethodIsZero(expr);
 				break;
@@ -173,6 +197,24 @@ export class TimeEmitter {
 				break;
 			case "Nanosecond":
 				this._emitTimeMethodNanosecond(expr, targetWasmType);
+				break;
+			case "Truncate":
+				this._emitTimeMethodTruncate(expr, args, targetWasmType);
+				break;
+			case "Round":
+				this._emitTimeMethodRound(expr, args, targetWasmType);
+				break;
+			case "MarshalJSON":
+				this._emitTimeMethodMarshalJSON(expr, targetWasmType);
+				break;
+			case "UnmarshalJSON":
+				this._emitTimeMethodUnmarshalJSON(expr, args, targetWasmType);
+				break;
+			case "MarshalText":
+				this._emitTimeMethodMarshalText(expr, targetWasmType);
+				break;
+			case "UnmarshalText":
+				this._emitTimeMethodUnmarshalText(expr, args, targetWasmType);
 				break;
 			case "UTC":
 				this._emitTimeMethodUTC(expr);
@@ -185,7 +227,7 @@ export class TimeEmitter {
 		}
 	}
 
-	emitDurationMethodCall(field, expr, _args, _targetWasmType) {
+	emitDurationMethodCall(field, expr, args, _targetWasmType) {
 		switch (field) {
 			case "Nanoseconds":
 				this.emitExpr(expr, "i64");
@@ -218,6 +260,15 @@ export class TimeEmitter {
 				this.pushInstruction({ op: "f64.const", value: 3600000000000.0 });
 				this.pushInstruction("f64.div");
 				return;
+			case "Truncate":
+				this._emitDurationTruncate(expr, args);
+				return;
+			case "Round":
+				this._emitDurationRound(expr, args);
+				return;
+			case "Abs":
+				this._emitDurationAbs(expr);
+				return;
 			case "String":
 				this.emitExpr(expr, "i64");
 				this._callStdlib("time_duration_string");
@@ -236,10 +287,11 @@ export class TimeEmitter {
 		this._callStdlib("time_timezone_offset");
 		this.pushInstruction({ op: "local.set", index: offTmp });
 		this.pushInstruction({ op: "local.get", index: msTmp });
-		this.pushInstruction({ op: "f64.const", value: 1000000 });
-		this.pushInstruction("f64.mul");
 		this.pushInstruction("i64.trunc_sat_f64_s");
+		this.pushInstruction({ op: "i64.const", value: 1000000n });
+		this.pushInstruction("i64.mul");
 		this.pushInstruction({ op: "local.get", index: offTmp });
+		this.pushInstruction({ op: "ref.null", heapType: "any" });
 		this.pushInstruction({ op: "struct.new", typeIndex: timeInfo.typeIndex });
 		this.releaseTemp(offTmp, "i32");
 		this.releaseTemp(msTmp, "f64");
@@ -260,9 +312,9 @@ export class TimeEmitter {
 		this._callStdlib("time_now_ms");
 		this.pushInstruction({ op: "local.set", index: msTmp });
 		this.pushInstruction({ op: "local.get", index: msTmp });
-		this.pushInstruction({ op: "f64.const", value: 1000000 });
-		this.pushInstruction("f64.mul");
 		this.pushInstruction("i64.trunc_sat_f64_s");
+		this.pushInstruction({ op: "i64.const", value: 1000000n });
+		this.pushInstruction("i64.mul");
 		this.pushInstruction({ op: "local.get", index: argTmp });
 		this.pushInstruction({
 			op: "struct.get",
@@ -305,6 +357,7 @@ export class TimeEmitter {
 
 		this.pushInstruction({ op: "local.get", index: nanoTmp });
 		this.pushInstruction({ op: "local.get", index: offTmp });
+		this.pushInstruction({ op: "ref.null", heapType: "any" });
 		this.pushInstruction({ op: "struct.new", typeIndex: timeInfo.typeIndex });
 
 		this.releaseTemp(offTmp, "i32");
@@ -465,6 +518,9 @@ export class TimeEmitter {
 		this.pushInstruction({ op: "local.set", index: localSecTmp });
 
 		const offTmp = this.acquireTemp("i32");
+		this.pushInstruction({ op: "local.get", index: locTmp });
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction({ op: "if", blockType: "void" });
 		if (this._isUtcExpr(args[7])) {
 			this.pushInstruction({ op: "i32.const", value: 0 });
 			this.pushInstruction({ op: "local.set", index: offTmp });
@@ -476,6 +532,24 @@ export class TimeEmitter {
 			this._callStdlib("time_timezone_offset");
 			this.pushInstruction({ op: "local.set", index: offTmp });
 		}
+		this.pushInstruction("else");
+		const locInfo = this.mod.getStructType("time.Location");
+		if (locInfo) {
+			this.pushInstruction({ op: "local.get", index: locTmp });
+			this.pushInstruction({
+				op: "ref.cast",
+				nullable: true,
+				typeIndex: locInfo.typeIndex,
+			});
+			this.pushInstruction({
+				op: "struct.get",
+				typeIndex: locInfo.typeIndex,
+				fieldIndex: 1,
+			});
+			this.pushInstruction("i32.wrap_i64");
+			this.pushInstruction({ op: "local.set", index: offTmp });
+		}
+		this.pushInstruction("end");
 
 		// unixSec = localSec - offset
 		this.pushInstruction({ op: "local.get", index: localSecTmp });
@@ -488,6 +562,7 @@ export class TimeEmitter {
 		this.pushInstruction("i64.add");
 
 		this.pushInstruction({ op: "local.get", index: offTmp });
+		this.pushInstruction({ op: "local.get", index: locTmp });
 		this.pushInstruction({ op: "struct.new", typeIndex: timeInfo.typeIndex });
 
 		this.releaseTemp(offTmp, "i32");
@@ -531,10 +606,14 @@ export class TimeEmitter {
 
 		// Success
 		this.pushInstruction({ op: "local.get", index: msTmp });
-		this.pushInstruction({ op: "f64.const", value: 1000000 });
-		this.pushInstruction("f64.mul");
 		this.pushInstruction("i64.trunc_sat_f64_s");
+		this.pushInstruction({ op: "i64.const", value: 1000000n });
+		this.pushInstruction("i64.mul");
+		this._callStdlib("time_parse_sub_ns");
+		this.pushInstruction("i64.extend_i32_s");
+		this.pushInstruction("i64.add");
 		this.pushInstruction({ op: "local.get", index: offTmp });
+		this.pushInstruction({ op: "ref.null", heapType: "any" });
 		this.pushInstruction({ op: "struct.new", typeIndex: timeInfo.typeIndex });
 		this.pushInstruction({ op: "local.set", index: resTimeTmp });
 		this.pushInstruction({ op: "ref.null", heapType: "any" });
@@ -545,6 +624,7 @@ export class TimeEmitter {
 		// Error
 		this.pushInstruction({ op: "i64.const", value: 0n });
 		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "ref.null", heapType: "any" });
 		this.pushInstruction({ op: "struct.new", typeIndex: timeInfo.typeIndex });
 		this.pushInstruction({ op: "local.set", index: resTimeTmp });
 		this.pushInstruction({ op: "local.get", index: errStrTmp });
@@ -596,6 +676,13 @@ export class TimeEmitter {
 			op: "struct.get",
 			typeIndex: timeInfo.typeIndex,
 			fieldIndex: 1,
+		});
+
+		this.pushInstruction({ op: "local.get", index: rTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: timeInfo.typeIndex,
+			fieldIndex: 2,
 		});
 
 		this.pushInstruction({ op: "struct.new", typeIndex: timeInfo.typeIndex });
@@ -756,6 +843,7 @@ export class TimeEmitter {
 	_emitTimeMethodUTC(expr) {
 		const timeInfo = this._emitTimeGetNano(expr);
 		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "ref.null", heapType: "any" });
 		this.pushInstruction({
 			op: "struct.new",
 			typeIndex: timeInfo.typeIndex,
@@ -793,7 +881,7 @@ export class TimeEmitter {
 			op: "call",
 			funcIndex: this.mod.getTimezoneOffsetImportIndex(),
 		});
-
+		this.pushInstruction({ op: "ref.null", heapType: "any" });
 		this.pushInstruction({
 			op: "struct.new",
 			typeIndex: timeInfo.typeIndex,
@@ -1146,20 +1234,18 @@ export class TimeEmitter {
 		this.pushInstruction({ op: "local.set", index: wdTmp });
 		this.pushInstruction("end");
 
-		// ms = i32((nanoTmp % 1000000000n) / 1000000n)
+		// ns = i32(nanoTmp % 1000000000n)
 		const msTmp = this.acquireTemp("i32");
 		this.pushInstruction({ op: "local.get", index: p.nanoTmp });
 		this.pushInstruction({ op: "i64.const", value: 1000000000n });
 		this.pushInstruction("i64.rem_s");
-		this.pushInstruction({ op: "i64.const", value: 1000000n });
-		this.pushInstruction("i64.div_s");
 		this.pushInstruction("i32.wrap_i64");
 		this.pushInstruction({ op: "local.tee", index: msTmp });
 		this.pushInstruction({ op: "i32.const", value: 0 });
 		this.pushInstruction("i32.lt_s");
 		this.pushInstruction({ op: "if", blockType: "void" });
 		this.pushInstruction({ op: "local.get", index: msTmp });
-		this.pushInstruction({ op: "i32.const", value: 1000 });
+		this.pushInstruction({ op: "i32.const", value: 1000000000 });
 		this.pushInstruction("i32.add");
 		this.pushInstruction({ op: "local.set", index: msTmp });
 		this.pushInstruction("end");
@@ -1196,5 +1282,948 @@ export class TimeEmitter {
 			value: "2006-01-02T15:04:05Z07:00",
 		};
 		this._emitTimeMethodFormat(expr, [strLit], targetWasmType);
+	}
+
+	_emitTimeParseDuration(args, _targetWasmType) {
+		const durTmp = this.acquireTemp("i64");
+		const errStrTmp = this.acquireTemp("externref");
+		const resErrTmp = this.acquireTemp("anyref");
+
+		this.emitExpr(args[0], "externref");
+		this._callStdlib("time_parse_duration");
+		this.pushInstruction({ op: "local.set", index: durTmp });
+		this._callStdlib("time_parse_duration_err");
+		this.pushInstruction({ op: "local.set", index: errStrTmp });
+
+		this.pushInstruction({ op: "local.get", index: errStrTmp });
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "ref.null", heapType: "any" });
+		this.pushInstruction({ op: "local.set", index: resErrTmp });
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "local.get", index: errStrTmp });
+		this.pushInstruction({ op: "ref.null", heapType: "any" });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.resolveFuncIndex("__mk_error"),
+		});
+		this.pushInstruction({ op: "local.set", index: resErrTmp });
+		this.pushInstruction("end");
+
+		this.pushInstruction({ op: "local.get", index: durTmp });
+		this.pushInstruction({ op: "local.get", index: resErrTmp });
+
+		this.releaseTemp(resErrTmp, "anyref");
+		this.releaseTemp(errStrTmp, "externref");
+		this.releaseTemp(durTmp, "i64");
+	}
+
+	_emitTimeFixedZone(args, _targetWasmType) {
+		const locInfo = this.mod.getStructType("time.Location");
+		this.emitExpr(args[0], "externref");
+		this.emitExpr(args[1], "i64");
+		this.pushInstruction({ op: "struct.new", typeIndex: locInfo.typeIndex });
+	}
+
+	_emitDurationAbs(expr) {
+		const dTmp = this.acquireTemp("i64");
+		this.emitExpr(expr, "i64");
+		this.pushInstruction({ op: "local.tee", index: dTmp });
+		this.pushInstruction({ op: "i64.const", value: 0n });
+		this.pushInstruction("i64.ge_s");
+		this.pushInstruction({ op: "if", blockType: "i64" });
+		this.pushInstruction({ op: "local.get", index: dTmp });
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "local.get", index: dTmp });
+		this.pushInstruction({ op: "i64.const", value: -9223372036854775808n });
+		this.pushInstruction("i64.eq");
+		this.pushInstruction({ op: "if", blockType: "i64" });
+		this.pushInstruction({ op: "i64.const", value: 9223372036854775807n });
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "i64.const", value: 0n });
+		this.pushInstruction({ op: "local.get", index: dTmp });
+		this.pushInstruction("i64.sub");
+		this.pushInstruction("end");
+		this.pushInstruction("end");
+		this.releaseTemp(dTmp, "i64");
+	}
+
+	_emitDurationTruncate(expr, args) {
+		const dTmp = this.acquireTemp("i64");
+		const mTmp = this.acquireTemp("i64");
+		this.emitExpr(expr, "i64");
+		this.pushInstruction({ op: "local.set", index: dTmp });
+		this.emitExpr(args[0], "i64");
+		this.pushInstruction({ op: "local.tee", index: mTmp });
+		this.pushInstruction({ op: "i64.const", value: 0n });
+		this.pushInstruction("i64.le_s");
+		this.pushInstruction({ op: "if", blockType: "i64" });
+		this.pushInstruction({ op: "local.get", index: dTmp });
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "local.get", index: dTmp });
+		this.pushInstruction({ op: "local.get", index: dTmp });
+		this.pushInstruction({ op: "local.get", index: mTmp });
+		this.pushInstruction("i64.rem_s");
+		this.pushInstruction("i64.sub");
+		this.pushInstruction("end");
+		this.releaseTemp(mTmp, "i64");
+		this.releaseTemp(dTmp, "i64");
+	}
+
+	_emitDurationRound(expr, args) {
+		const dTmp = this.acquireTemp("i64");
+		const mTmp = this.acquireTemp("i64");
+		const rTmp = this.acquireTemp("i64");
+		this.emitExpr(expr, "i64");
+		this.pushInstruction({ op: "local.set", index: dTmp });
+		this.emitExpr(args[0], "i64");
+		this.pushInstruction({ op: "local.set", index: mTmp });
+
+		this.pushInstruction({ op: "local.get", index: mTmp });
+		this.pushInstruction({ op: "i64.const", value: 0n });
+		this.pushInstruction("i64.le_s");
+		this.pushInstruction({ op: "if", blockType: "i64" });
+		this.pushInstruction({ op: "local.get", index: dTmp });
+		this.pushInstruction("else");
+
+		this.pushInstruction({ op: "local.get", index: dTmp });
+		this.pushInstruction({ op: "local.get", index: mTmp });
+		this.pushInstruction("i64.rem_s");
+		this.pushInstruction({ op: "local.set", index: rTmp });
+
+		this.pushInstruction({ op: "local.get", index: dTmp });
+		this.pushInstruction({ op: "i64.const", value: 0n });
+		this.pushInstruction("i64.lt_s");
+		this.pushInstruction({ op: "if", blockType: "i64" });
+
+		this.pushInstruction({ op: "i64.const", value: 0n });
+		this.pushInstruction({ op: "local.get", index: rTmp });
+		this.pushInstruction("i64.sub");
+		this.pushInstruction({ op: "local.set", index: rTmp });
+
+		this.pushInstruction({ op: "local.get", index: rTmp });
+		this.pushInstruction({ op: "local.get", index: mTmp });
+		this.pushInstruction({ op: "local.get", index: rTmp });
+		this.pushInstruction("i64.sub");
+		this.pushInstruction("i64.lt_u");
+		this.pushInstruction({ op: "if", blockType: "i64" });
+		this.pushInstruction({ op: "local.get", index: dTmp });
+		this.pushInstruction({ op: "local.get", index: rTmp });
+		this.pushInstruction("i64.add");
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "local.get", index: dTmp });
+		this.pushInstruction({ op: "local.get", index: mTmp });
+		this.pushInstruction("i64.sub");
+		this.pushInstruction({ op: "local.get", index: rTmp });
+		this.pushInstruction("i64.add");
+		this.pushInstruction("end");
+
+		this.pushInstruction("else");
+
+		this.pushInstruction({ op: "local.get", index: rTmp });
+		this.pushInstruction({ op: "local.get", index: mTmp });
+		this.pushInstruction({ op: "local.get", index: rTmp });
+		this.pushInstruction("i64.sub");
+		this.pushInstruction("i64.lt_u");
+		this.pushInstruction({ op: "if", blockType: "i64" });
+		this.pushInstruction({ op: "local.get", index: dTmp });
+		this.pushInstruction({ op: "local.get", index: rTmp });
+		this.pushInstruction("i64.sub");
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "local.get", index: dTmp });
+		this.pushInstruction({ op: "local.get", index: mTmp });
+		this.pushInstruction("i64.add");
+		this.pushInstruction({ op: "local.get", index: rTmp });
+		this.pushInstruction("i64.sub");
+		this.pushInstruction("end");
+
+		this.pushInstruction("end");
+		this.pushInstruction("end");
+
+		this.releaseTemp(rTmp, "i64");
+		this.releaseTemp(mTmp, "i64");
+		this.releaseTemp(dTmp, "i64");
+	}
+
+	_emitTimeMethodCompare(expr, args, targetWasmType) {
+		const timeInfo = this.mod.getStructType("time.Time");
+		const timeW = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: timeInfo.typeIndex,
+		};
+		const tTmp = this.acquireTemp(timeW);
+		const uTmp = this.acquireTemp(timeW);
+		const tNano = this.acquireTemp("i64");
+		const uNano = this.acquireTemp("i64");
+
+		this.emitExpr(expr, timeW);
+		this.pushInstruction({ op: "local.set", index: tTmp });
+		this.emitExpr(args[0], timeW);
+		this.pushInstruction({ op: "local.set", index: uTmp });
+
+		this.pushInstruction({ op: "local.get", index: tTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: timeInfo.typeIndex,
+			fieldIndex: 0,
+		});
+		this.pushInstruction({ op: "local.set", index: tNano });
+		this.pushInstruction({ op: "local.get", index: uTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: timeInfo.typeIndex,
+			fieldIndex: 0,
+		});
+		this.pushInstruction({ op: "local.set", index: uNano });
+
+		this.pushInstruction({ op: "local.get", index: tNano });
+		this.pushInstruction({ op: "local.get", index: uNano });
+		this.pushInstruction("i64.lt_s");
+		this.pushInstruction({ op: "if", blockType: "i32" });
+		this.pushInstruction({ op: "i32.const", value: -1 });
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "local.get", index: tNano });
+		this.pushInstruction({ op: "local.get", index: uNano });
+		this.pushInstruction("i64.gt_s");
+		this.pushInstruction({ op: "if", blockType: "i32" });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction("end");
+		this.pushInstruction("end");
+
+		this.releaseTemp(uNano, "i64");
+		this.releaseTemp(tNano, "i64");
+		this.releaseTemp(uTmp, timeW);
+		this.releaseTemp(tTmp, timeW);
+
+		if (targetWasmType === "i64") {
+			this.pushInstruction("i64.extend_i32_s");
+		}
+	}
+
+	_emitTimeMethodYearDay(expr, targetWasmType) {
+		const p = this._emitTimeDecomposeParts(expr);
+		const yTmp = this.acquireTemp("i32");
+		const mTmp = this.acquireTemp("i32");
+		const dTmp = this.acquireTemp("i32");
+		this._emitCivilDateFromDays(p.daysTmp, yTmp, mTmp, dTmp);
+
+		const jan1YTmp = this.acquireTemp("i32");
+		const jan1MTmp = this.acquireTemp("i32");
+		const jan1DTmp = this.acquireTemp("i32");
+		const jan1DaysTmp = this.acquireTemp("i64");
+
+		this.pushInstruction({ op: "local.get", index: yTmp });
+		this.pushInstruction({ op: "local.set", index: jan1YTmp });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction({ op: "local.set", index: jan1MTmp });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction({ op: "local.set", index: jan1DTmp });
+		this._emitCivilDays(jan1YTmp, jan1MTmp, jan1DTmp, jan1DaysTmp);
+
+		this.pushInstruction({ op: "local.get", index: p.daysTmp });
+		this.pushInstruction({ op: "local.get", index: jan1DaysTmp });
+		this.pushInstruction("i64.sub");
+		this.pushInstruction({ op: "i64.const", value: 1n });
+		this.pushInstruction("i64.add");
+
+		if (targetWasmType === "i32") {
+			this.pushInstruction("i32.wrap_i64");
+		}
+
+		this.releaseTemp(jan1DaysTmp, "i64");
+		this.releaseTemp(jan1DTmp, "i32");
+		this.releaseTemp(jan1MTmp, "i32");
+		this.releaseTemp(jan1YTmp, "i32");
+		this.releaseTemp(dTmp, "i32");
+		this.releaseTemp(mTmp, "i32");
+		this.releaseTemp(yTmp, "i32");
+		this._releaseTimeDecomposeParts(p);
+	}
+
+	_emitTimeMethodISOWeek(expr, targetWasmType) {
+		const p = this._emitTimeDecomposeParts(expr);
+		const monOffsetTmp = this.acquireTemp("i32");
+		const thuDaysTmp = this.acquireTemp("i64");
+		this.pushInstruction({ op: "local.get", index: p.daysTmp });
+		this.pushInstruction({ op: "i64.const", value: 3n });
+		this.pushInstruction("i64.add");
+		this.pushInstruction({ op: "i64.const", value: 7n });
+		this.pushInstruction("i64.rem_s");
+		this.pushInstruction("i32.wrap_i64");
+		this.pushInstruction({ op: "local.tee", index: monOffsetTmp });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction("i32.lt_s");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: monOffsetTmp });
+		this.pushInstruction({ op: "i32.const", value: 7 });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: monOffsetTmp });
+		this.pushInstruction("end");
+
+		this.pushInstruction({ op: "local.get", index: p.daysTmp });
+		this.pushInstruction({ op: "local.get", index: monOffsetTmp });
+		this.pushInstruction("i64.extend_i32_s");
+		this.pushInstruction("i64.sub");
+		this.pushInstruction({ op: "i64.const", value: 3n });
+		this.pushInstruction("i64.add");
+		this.pushInstruction({ op: "local.set", index: thuDaysTmp });
+
+		const isoYearTmp = this.acquireTemp("i32");
+		const dummyMTmp = this.acquireTemp("i32");
+		const dummyDTmp = this.acquireTemp("i32");
+		this._emitCivilDateFromDays(thuDaysTmp, isoYearTmp, dummyMTmp, dummyDTmp);
+		this.releaseTemp(dummyDTmp, "i32");
+		this.releaseTemp(dummyMTmp, "i32");
+
+		const jan4YTmp = this.acquireTemp("i32");
+		const jan4MTmp = this.acquireTemp("i32");
+		const jan4DTmp = this.acquireTemp("i32");
+		const jan4DaysTmp = this.acquireTemp("i64");
+		this.pushInstruction({ op: "local.get", index: isoYearTmp });
+		this.pushInstruction({ op: "local.set", index: jan4YTmp });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction({ op: "local.set", index: jan4MTmp });
+		this.pushInstruction({ op: "i32.const", value: 4 });
+		this.pushInstruction({ op: "local.set", index: jan4DTmp });
+		this._emitCivilDays(jan4YTmp, jan4MTmp, jan4DTmp, jan4DaysTmp);
+		this.releaseTemp(jan4DTmp, "i32");
+		this.releaseTemp(jan4MTmp, "i32");
+		this.releaseTemp(jan4YTmp, "i32");
+
+		const jan4MonOffTmp = this.acquireTemp("i32");
+		const firstThuDaysTmp = this.acquireTemp("i64");
+		this.pushInstruction({ op: "local.get", index: jan4DaysTmp });
+		this.pushInstruction({ op: "i64.const", value: 3n });
+		this.pushInstruction("i64.add");
+		this.pushInstruction({ op: "i64.const", value: 7n });
+		this.pushInstruction("i64.rem_s");
+		this.pushInstruction("i32.wrap_i64");
+		this.pushInstruction({ op: "local.tee", index: jan4MonOffTmp });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction("i32.lt_s");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: jan4MonOffTmp });
+		this.pushInstruction({ op: "i32.const", value: 7 });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: jan4MonOffTmp });
+		this.pushInstruction("end");
+
+		this.pushInstruction({ op: "local.get", index: jan4DaysTmp });
+		this.pushInstruction({ op: "local.get", index: jan4MonOffTmp });
+		this.pushInstruction("i64.extend_i32_s");
+		this.pushInstruction("i64.sub");
+		this.pushInstruction({ op: "i64.const", value: 3n });
+		this.pushInstruction("i64.add");
+		this.pushInstruction({ op: "local.set", index: firstThuDaysTmp });
+
+		const weekTmp = this.acquireTemp("i32");
+		this.pushInstruction({ op: "local.get", index: thuDaysTmp });
+		this.pushInstruction({ op: "local.get", index: firstThuDaysTmp });
+		this.pushInstruction("i64.sub");
+		this.pushInstruction({ op: "i64.const", value: 7n });
+		this.pushInstruction("i64.div_s");
+		this.pushInstruction("i32.wrap_i64");
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: weekTmp });
+
+		this.pushInstruction({ op: "local.get", index: isoYearTmp });
+		this.pushInstruction("i64.extend_i32_s");
+		if (targetWasmType === "i32") this.pushInstruction("i32.wrap_i64");
+		this.pushInstruction({ op: "local.get", index: weekTmp });
+		this.pushInstruction("i64.extend_i32_s");
+		if (targetWasmType === "i32") this.pushInstruction("i32.wrap_i64");
+
+		this.releaseTemp(weekTmp, "i32");
+		this.releaseTemp(firstThuDaysTmp, "i64");
+		this.releaseTemp(jan4MonOffTmp, "i32");
+		this.releaseTemp(jan4DaysTmp, "i64");
+		this.releaseTemp(isoYearTmp, "i32");
+		this.releaseTemp(thuDaysTmp, "i64");
+		this.releaseTemp(monOffsetTmp, "i32");
+		this._releaseTimeDecomposeParts(p);
+	}
+
+	_emitTimeMethodZone(expr, targetWasmType) {
+		const timeInfo = this.mod.getStructType("time.Time");
+		const timeW = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: timeInfo.typeIndex,
+		};
+		const rTmp = this.acquireTemp(timeW);
+		const offTmp = this.acquireTemp("i32");
+		const locTmp = this.acquireTemp("anyref");
+		this.emitExpr(expr, timeW);
+		this.pushInstruction({ op: "local.tee", index: rTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: timeInfo.typeIndex,
+			fieldIndex: 1,
+		});
+		this.pushInstruction({ op: "local.set", index: offTmp });
+
+		this.pushInstruction({ op: "local.get", index: rTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: timeInfo.typeIndex,
+			fieldIndex: 2,
+		});
+		this.pushInstruction({ op: "local.tee", index: locTmp });
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction({ op: "if", blockType: "externref" });
+
+		this.pushInstruction({ op: "local.get", index: offTmp });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction("i32.eq");
+		this.pushInstruction({ op: "if", blockType: "externref" });
+		this.emitBasicLit(
+			{ kind: "BasicLit", litKind: "STRING", value: "UTC" },
+			"externref",
+		);
+		this.pushInstruction("else");
+		this.emitBasicLit(
+			{ kind: "BasicLit", litKind: "STRING", value: "LOCAL" },
+			"externref",
+		);
+		this.pushInstruction("end");
+
+		this.pushInstruction("else");
+		const locInfo = this.mod.getStructType("time.Location");
+		this.pushInstruction({ op: "local.get", index: locTmp });
+		this.pushInstruction({
+			op: "ref.cast",
+			nullable: true,
+			typeIndex: locInfo.typeIndex,
+		});
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: locInfo.typeIndex,
+			fieldIndex: 0,
+		});
+		this.pushInstruction("end");
+
+		this.pushInstruction({ op: "local.get", index: offTmp });
+		this.pushInstruction("i64.extend_i32_s");
+		if (targetWasmType === "i32") {
+			this.pushInstruction("i32.wrap_i64");
+		}
+
+		this.releaseTemp(locTmp, "anyref");
+		this.releaseTemp(offTmp, "i32");
+		this.releaseTemp(rTmp, timeW);
+	}
+
+	_emitTimeMethodLocation(expr, _targetWasmType) {
+		const timeInfo = this.mod.getStructType("time.Time");
+		const locInfo = this.mod.getStructType("time.Location");
+		const timeW = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: timeInfo.typeIndex,
+		};
+		const rTmp = this.acquireTemp(timeW);
+		const offTmp = this.acquireTemp("i32");
+		const locTmp = this.acquireTemp("anyref");
+
+		this.emitExpr(expr, timeW);
+		this.pushInstruction({ op: "local.tee", index: rTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: timeInfo.typeIndex,
+			fieldIndex: 2,
+		});
+		this.pushInstruction({ op: "local.tee", index: locTmp });
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction({
+			op: "if",
+			blockType: { kind: "ref", nullable: true, typeIndex: locInfo.typeIndex },
+		});
+
+		this.pushInstruction({ op: "local.get", index: rTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: timeInfo.typeIndex,
+			fieldIndex: 1,
+		});
+		this.pushInstruction({ op: "local.set", index: offTmp });
+
+		this.pushInstruction({ op: "local.get", index: offTmp });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction("i32.eq");
+		this.pushInstruction({ op: "if", blockType: "externref" });
+		this.emitBasicLit(
+			{ kind: "BasicLit", litKind: "STRING", value: "UTC" },
+			"externref",
+		);
+		this.pushInstruction("else");
+		this.emitBasicLit(
+			{ kind: "BasicLit", litKind: "STRING", value: "Local" },
+			"externref",
+		);
+		this.pushInstruction("end");
+
+		this.pushInstruction({ op: "local.get", index: offTmp });
+		this.pushInstruction("i64.extend_i32_s");
+
+		this.pushInstruction({ op: "struct.new", typeIndex: locInfo.typeIndex });
+
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "local.get", index: locTmp });
+		this.pushInstruction({
+			op: "ref.cast",
+			nullable: true,
+			typeIndex: locInfo.typeIndex,
+		});
+		this.pushInstruction("end");
+
+		this.releaseTemp(locTmp, "anyref");
+		this.releaseTemp(offTmp, "i32");
+		this.releaseTemp(rTmp, timeW);
+	}
+
+	_emitTimeMethodTruncate(expr, args, _targetWasmType) {
+		const timeInfo = this.mod.getStructType("time.Time");
+		const timeW = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: timeInfo.typeIndex,
+		};
+		const rTmp = this.acquireTemp(timeW);
+		const dTmp = this.acquireTemp("i64");
+		const nanoTmp = this.acquireTemp("i64");
+		const remTmp = this.acquireTemp("i64");
+		const resNanoTmp = this.acquireTemp("i64");
+
+		this.emitExpr(expr, timeW);
+		this.pushInstruction({ op: "local.set", index: rTmp });
+		this.emitExpr(args[0], "i64");
+		this.pushInstruction({ op: "local.set", index: dTmp });
+
+		this.pushInstruction({ op: "local.get", index: rTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: timeInfo.typeIndex,
+			fieldIndex: 0,
+		});
+		this.pushInstruction({ op: "local.set", index: nanoTmp });
+
+		this.pushInstruction({ op: "local.get", index: dTmp });
+		this.pushInstruction({ op: "i64.const", value: 0n });
+		this.pushInstruction("i64.le_s");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: nanoTmp });
+		this.pushInstruction({ op: "local.set", index: resNanoTmp });
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "local.get", index: nanoTmp });
+		this.pushInstruction({ op: "local.get", index: dTmp });
+		this.pushInstruction("i64.rem_s");
+		this.pushInstruction({ op: "local.tee", index: remTmp });
+		this.pushInstruction({ op: "i64.const", value: 0n });
+		this.pushInstruction("i64.lt_s");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: remTmp });
+		this.pushInstruction({ op: "local.get", index: dTmp });
+		this.pushInstruction("i64.add");
+		this.pushInstruction({ op: "local.set", index: remTmp });
+		this.pushInstruction("end");
+		this.pushInstruction({ op: "local.get", index: nanoTmp });
+		this.pushInstruction({ op: "local.get", index: remTmp });
+		this.pushInstruction("i64.sub");
+		this.pushInstruction({ op: "local.set", index: resNanoTmp });
+		this.pushInstruction("end");
+
+		this.pushInstruction({ op: "local.get", index: resNanoTmp });
+		this.pushInstruction({ op: "local.get", index: rTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: timeInfo.typeIndex,
+			fieldIndex: 1,
+		});
+		this.pushInstruction({ op: "local.get", index: rTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: timeInfo.typeIndex,
+			fieldIndex: 2,
+		});
+		this.pushInstruction({ op: "struct.new", typeIndex: timeInfo.typeIndex });
+
+		this.releaseTemp(resNanoTmp, "i64");
+		this.releaseTemp(remTmp, "i64");
+		this.releaseTemp(nanoTmp, "i64");
+		this.releaseTemp(dTmp, "i64");
+		this.releaseTemp(rTmp, timeW);
+	}
+
+	_emitTimeMethodRound(expr, args, _targetWasmType) {
+		const timeInfo = this.mod.getStructType("time.Time");
+		const timeW = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: timeInfo.typeIndex,
+		};
+		const rTmp = this.acquireTemp(timeW);
+		const dTmp = this.acquireTemp("i64");
+		const nanoTmp = this.acquireTemp("i64");
+		const remTmp = this.acquireTemp("i64");
+		const resNanoTmp = this.acquireTemp("i64");
+
+		this.emitExpr(expr, timeW);
+		this.pushInstruction({ op: "local.set", index: rTmp });
+		this.emitExpr(args[0], "i64");
+		this.pushInstruction({ op: "local.set", index: dTmp });
+
+		this.pushInstruction({ op: "local.get", index: rTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: timeInfo.typeIndex,
+			fieldIndex: 0,
+		});
+		this.pushInstruction({ op: "local.set", index: nanoTmp });
+
+		this.pushInstruction({ op: "local.get", index: dTmp });
+		this.pushInstruction({ op: "i64.const", value: 0n });
+		this.pushInstruction("i64.le_s");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: nanoTmp });
+		this.pushInstruction({ op: "local.set", index: resNanoTmp });
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "local.get", index: nanoTmp });
+		this.pushInstruction({ op: "local.get", index: dTmp });
+		this.pushInstruction("i64.rem_s");
+		this.pushInstruction({ op: "local.tee", index: remTmp });
+		this.pushInstruction({ op: "i64.const", value: 0n });
+		this.pushInstruction("i64.lt_s");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: remTmp });
+		this.pushInstruction({ op: "local.get", index: dTmp });
+		this.pushInstruction("i64.add");
+		this.pushInstruction({ op: "local.set", index: remTmp });
+		this.pushInstruction("end");
+
+		this.pushInstruction({ op: "local.get", index: remTmp });
+		this.pushInstruction({ op: "local.get", index: dTmp });
+		this.pushInstruction({ op: "local.get", index: remTmp });
+		this.pushInstruction("i64.sub");
+		this.pushInstruction("i64.lt_u");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: nanoTmp });
+		this.pushInstruction({ op: "local.get", index: remTmp });
+		this.pushInstruction("i64.sub");
+		this.pushInstruction({ op: "local.set", index: resNanoTmp });
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "local.get", index: nanoTmp });
+		this.pushInstruction({ op: "local.get", index: dTmp });
+		this.pushInstruction("i64.add");
+		this.pushInstruction({ op: "local.get", index: remTmp });
+		this.pushInstruction("i64.sub");
+		this.pushInstruction({ op: "local.set", index: resNanoTmp });
+		this.pushInstruction("end");
+		this.pushInstruction("end");
+
+		this.pushInstruction({ op: "local.get", index: resNanoTmp });
+		this.pushInstruction({ op: "local.get", index: rTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: timeInfo.typeIndex,
+			fieldIndex: 1,
+		});
+		this.pushInstruction({ op: "local.get", index: rTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: timeInfo.typeIndex,
+			fieldIndex: 2,
+		});
+		this.pushInstruction({ op: "struct.new", typeIndex: timeInfo.typeIndex });
+
+		this.releaseTemp(resNanoTmp, "i64");
+		this.releaseTemp(remTmp, "i64");
+		this.releaseTemp(nanoTmp, "i64");
+		this.releaseTemp(dTmp, "i64");
+		this.releaseTemp(rTmp, timeW);
+	}
+
+	_emitTimeMethodAddDate(expr, args, _targetWasmType) {
+		const timeInfo = this.mod.getStructType("time.Time");
+		const p = this._emitTimeDecomposeParts(expr);
+
+		const yearsTmp = this.acquireTemp("i32");
+		const monthsTmp = this.acquireTemp("i32");
+		const daysAddTmp = this.acquireTemp("i32");
+		this.emitExpr(args[0], "i32");
+		this.pushInstruction({ op: "local.set", index: yearsTmp });
+		this.emitExpr(args[1], "i32");
+		this.pushInstruction({ op: "local.set", index: monthsTmp });
+		this.emitExpr(args[2], "i32");
+		this.pushInstruction({ op: "local.set", index: daysAddTmp });
+
+		const curY = this.acquireTemp("i32");
+		const curM = this.acquireTemp("i32");
+		const curD = this.acquireTemp("i32");
+		this._emitCivilDateFromDays(p.daysTmp, curY, curM, curD);
+
+		this.pushInstruction({ op: "local.get", index: curY });
+		this.pushInstruction({ op: "local.get", index: yearsTmp });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: curY });
+
+		this.pushInstruction({ op: "local.get", index: curM });
+		this.pushInstruction({ op: "local.get", index: monthsTmp });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: curM });
+
+		this.pushInstruction({ op: "local.get", index: curD });
+		this.pushInstruction({ op: "local.get", index: daysAddTmp });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: curD });
+
+		const newDaysTmp = this.acquireTemp("i64");
+		this._emitCivilDays(curY, curM, curD, newDaysTmp);
+
+		const newLocalSecTmp = this.acquireTemp("i64");
+		this.pushInstruction({ op: "local.get", index: newDaysTmp });
+		this.pushInstruction({ op: "i64.const", value: 86400n });
+		this.pushInstruction("i64.mul");
+		this.pushInstruction({ op: "local.get", index: p.remSecTmp });
+		this.pushInstruction("i64.add");
+		this.pushInstruction({ op: "local.set", index: newLocalSecTmp });
+
+		const nsecTmp = this.acquireTemp("i64");
+		this.pushInstruction({ op: "local.get", index: p.nanoTmp });
+		this.pushInstruction({ op: "i64.const", value: 1000000000n });
+		this.pushInstruction("i64.rem_s");
+		this.pushInstruction({ op: "local.tee", index: nsecTmp });
+		this.pushInstruction({ op: "i64.const", value: 0n });
+		this.pushInstruction("i64.lt_s");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: nsecTmp });
+		this.pushInstruction({ op: "i64.const", value: 1000000000n });
+		this.pushInstruction("i64.add");
+		this.pushInstruction({ op: "local.set", index: nsecTmp });
+		this.pushInstruction("end");
+
+		this.pushInstruction({ op: "local.get", index: newLocalSecTmp });
+		this.pushInstruction({ op: "local.get", index: p.offTmp });
+		this.pushInstruction("i64.extend_i32_s");
+		this.pushInstruction("i64.sub");
+		this.pushInstruction({ op: "i64.const", value: 1000000000n });
+		this.pushInstruction("i64.mul");
+		this.pushInstruction({ op: "local.get", index: nsecTmp });
+		this.pushInstruction("i64.add");
+
+		this.pushInstruction({ op: "local.get", index: p.offTmp });
+		this.pushInstruction({ op: "local.get", index: p.rTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: timeInfo.typeIndex,
+			fieldIndex: 2,
+		});
+		this.pushInstruction({ op: "struct.new", typeIndex: timeInfo.typeIndex });
+
+		this.releaseTemp(nsecTmp, "i64");
+		this.releaseTemp(newLocalSecTmp, "i64");
+		this.releaseTemp(newDaysTmp, "i64");
+		this.releaseTemp(curD, "i32");
+		this.releaseTemp(curM, "i32");
+		this.releaseTemp(curY, "i32");
+		this.releaseTemp(daysAddTmp, "i32");
+		this.releaseTemp(monthsTmp, "i32");
+		this.releaseTemp(yearsTmp, "i32");
+		this._releaseTimeDecomposeParts(p);
+	}
+
+	_emitTimeMethodMarshalText(expr, _targetWasmType) {
+		const rfcLit = {
+			kind: "BasicLit",
+			litKind: "STRING",
+			value: "2006-01-02T15:04:05.999999999Z07:00",
+		};
+		this._emitTimeMethodFormat(expr, [rfcLit], "externref");
+		this._emitStringToByteSlice({ elem: { kind: "basic", name: "byte" } });
+		this.pushInstruction({ op: "ref.null", heapType: "any" });
+	}
+
+	_emitTimeMethodMarshalJSON(expr, _targetWasmType) {
+		const rfcLit = {
+			kind: "BasicLit",
+			litKind: "STRING",
+			value: "2006-01-02T15:04:05.999999999Z07:00",
+		};
+		this._emitTimeMethodFormat(expr, [rfcLit], "externref");
+		const strTmp = this.acquireTemp("externref");
+		this.pushInstruction({ op: "local.set", index: strTmp });
+		const qLit = { kind: "BasicLit", litKind: "STRING", value: '"' };
+		this.emitBasicLit(qLit, "externref");
+		this.pushInstruction({ op: "local.get", index: strTmp });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getStringConcatImportIndex(),
+		});
+		this.emitBasicLit(qLit, "externref");
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getStringConcatImportIndex(),
+		});
+		this.releaseTemp(strTmp, "externref");
+		this._emitStringToByteSlice({ elem: { kind: "basic", name: "byte" } });
+		this.pushInstruction({ op: "ref.null", heapType: "any" });
+	}
+
+	_emitTimeMethodUnmarshalText(expr, args, _targetWasmType) {
+		this._emitTimeMethodUnmarshalCore(expr, args[0]);
+	}
+
+	_emitTimeMethodUnmarshalJSON(expr, args, _targetWasmType) {
+		this._emitTimeMethodUnmarshalCore(expr, args[0]);
+	}
+
+	_emitTimeMethodUnmarshalCore(expr, dataArg) {
+		const timeInfo = this.mod.getStructType("time.Time");
+		const timeW = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: timeInfo.typeIndex,
+		};
+		const rTmp = this.acquireTemp(timeW);
+		this.emitExpr(expr, timeW);
+		this.pushInstruction({ op: "local.set", index: rTmp });
+
+		const byteSliceGo = dataArg._type ?? this._resolveExprGoType(dataArg);
+		this.emitExpr(dataArg, this.toWasmType(byteSliceGo));
+		this._emitByteSliceToString(byteSliceGo);
+
+		const strTmp = this.acquireTemp("externref");
+		this.pushInstruction({ op: "local.set", index: strTmp });
+
+		const rfcLit = {
+			kind: "BasicLit",
+			litKind: "STRING",
+			value: "2006-01-02T15:04:05.999999999Z07:00",
+		};
+		this.emitBasicLit(rfcLit, "externref");
+		this.pushInstruction({ op: "local.get", index: strTmp });
+		this._callStdlib("time_parse");
+
+		const msTmp = this.acquireTemp("f64");
+		const offTmp = this.acquireTemp("i32");
+		const errStrTmp = this.acquireTemp("externref");
+		const resErrTmp = this.acquireTemp("anyref");
+
+		this.pushInstruction({ op: "local.set", index: msTmp });
+		this._callStdlib("time_parse_offset");
+		this.pushInstruction({ op: "local.set", index: offTmp });
+		this._callStdlib("time_parse_err");
+		this.pushInstruction({ op: "local.set", index: errStrTmp });
+
+		this.pushInstruction({ op: "local.get", index: errStrTmp });
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction({ op: "if", blockType: "void" });
+
+		this.pushInstruction({ op: "local.get", index: rTmp });
+		this.pushInstruction({ op: "local.get", index: msTmp });
+		this.pushInstruction("i64.trunc_sat_f64_s");
+		this.pushInstruction({ op: "i64.const", value: 1000000n });
+		this.pushInstruction("i64.mul");
+		this._callStdlib("time_parse_sub_ns");
+		this.pushInstruction("i64.extend_i32_s");
+		this.pushInstruction("i64.add");
+		this.pushInstruction({
+			op: "struct.set",
+			typeIndex: timeInfo.typeIndex,
+			fieldIndex: 0,
+		});
+
+		this.pushInstruction({ op: "local.get", index: rTmp });
+		this.pushInstruction({ op: "local.get", index: offTmp });
+		this.pushInstruction({
+			op: "struct.set",
+			typeIndex: timeInfo.typeIndex,
+			fieldIndex: 1,
+		});
+
+		this.pushInstruction({ op: "local.get", index: rTmp });
+		this.pushInstruction({ op: "ref.null", heapType: "any" });
+		this.pushInstruction({
+			op: "struct.set",
+			typeIndex: timeInfo.typeIndex,
+			fieldIndex: 2,
+		});
+
+		this.pushInstruction({ op: "ref.null", heapType: "any" });
+		this.pushInstruction({ op: "local.set", index: resErrTmp });
+
+		this.pushInstruction("else");
+
+		this.pushInstruction({ op: "local.get", index: errStrTmp });
+		this.pushInstruction({ op: "ref.null", heapType: "any" });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.resolveFuncIndex("__mk_error"),
+		});
+		this.pushInstruction({ op: "local.set", index: resErrTmp });
+
+		this.pushInstruction("end");
+
+		this.pushInstruction({ op: "local.get", index: resErrTmp });
+
+		this.releaseTemp(resErrTmp, "anyref");
+		this.releaseTemp(errStrTmp, "externref");
+		this.releaseTemp(offTmp, "i32");
+		this.releaseTemp(msTmp, "f64");
+		this.releaseTemp(strTmp, "externref");
+		this.releaseTemp(rTmp, timeW);
+	}
+
+	emitTimeAuxMethodCall(recvTypeName, field, expr, _args, _targetWasmType) {
+		if (field === "String") {
+			if (recvTypeName === "time.Month") {
+				this.emitExpr(expr, "i32");
+				this._callStdlib("time_month_string");
+				return;
+			}
+			if (recvTypeName === "time.Weekday") {
+				this.emitExpr(expr, "i32");
+				this._callStdlib("time_weekday_string");
+				return;
+			}
+			if (recvTypeName === "time.Location") {
+				const locInfo = this.mod.getStructType("time.Location");
+				const locTmp = this.acquireTemp({
+					kind: "ref",
+					nullable: true,
+					typeIndex: locInfo.typeIndex,
+				});
+				this.emitExpr(expr, {
+					kind: "ref",
+					nullable: true,
+					typeIndex: locInfo.typeIndex,
+				});
+				this.pushInstruction({ op: "local.tee", index: locTmp });
+				this.pushInstruction("ref.is_null");
+				this.pushInstruction({ op: "if", blockType: "externref" });
+				this.emitBasicLit(
+					{ kind: "BasicLit", litKind: "STRING", value: "UTC" },
+					"externref",
+				);
+				this.pushInstruction("else");
+				this.pushInstruction({ op: "local.get", index: locTmp });
+				this.pushInstruction({
+					op: "struct.get",
+					typeIndex: locInfo.typeIndex,
+					fieldIndex: 0,
+				});
+				this.pushInstruction("end");
+				this.releaseTemp(locTmp, {
+					kind: "ref",
+					nullable: true,
+					typeIndex: locInfo.typeIndex,
+				});
+				return;
+			}
+		}
+		throw new Error(`Unsupported method ${recvTypeName}.${field}`);
 	}
 }

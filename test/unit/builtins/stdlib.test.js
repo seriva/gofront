@@ -579,6 +579,57 @@ func main() {
 	assertEqual(runJs(js), "true\ntrue\ntrue");
 });
 
+test("WASM package rejects JS-only time members (time.AfterFunc, time.Timer, time.Sleep)", () => {
+	let res = compile(
+		'package main\nimport "time"\nfunc main() { time.AfterFunc(time.Second, func(){}) }',
+		{ target: "wasm" },
+	);
+	assert(
+		res.errors.some((e) =>
+			e.message?.includes(
+				"'time.AfterFunc' is not yet available in wasm packages",
+			),
+		),
+	);
+	res = compile(
+		'package main\nimport "time"\nfunc main() { var t time.Timer; _ = t }',
+		{ target: "wasm" },
+	);
+	assert(
+		res.errors.some((e) =>
+			e.message?.includes("'time.Timer' is not yet available in wasm packages"),
+		),
+	);
+	res = compile(
+		'package main\nimport "time"\nfunc main() { time.Sleep(time.Second) }',
+		{ target: "wasm" },
+	);
+	assert(
+		res.errors.some((e) =>
+			e.message?.includes("'time.Sleep' is not yet available in wasm packages"),
+		),
+	);
+});
+
+test("channel exclusions for time package (time.After, time.Tick, time.NewTicker, time.NewTimer)", () => {
+	for (const member of [
+		"time.After",
+		"time.Tick",
+		"time.NewTicker",
+		"time.NewTimer",
+	]) {
+		const res = compile(
+			`package main\nimport "time"\nfunc main() { _ = ${member} }`,
+		);
+		assert(
+			res.errors.some((e) =>
+				e.message?.includes(`${member} is not available: channels`),
+			),
+			`expected channel error for ${member}`,
+		);
+	}
+});
+
 // ── unicode package ──────────────────────────────────────────
 
 section("unicode package");
