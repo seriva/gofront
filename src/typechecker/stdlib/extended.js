@@ -545,22 +545,12 @@ export function setupExtendedGlobals(globals, types) {
 			kind: "interface",
 			methods: new Map([
 				["Deadline", { kind: "func", params: [], returns: [TIME_TIME, BOOL] }],
-				["Done", { kind: "func", params: [], returns: [ANY] }],
 				["Err", { kind: "func", params: [], returns: [ERROR] }],
 				["Value", { kind: "func", params: [ANY], returns: [ANY] }],
 			]),
 		},
 	};
 	types.set("context.Context", CONTEXT_T);
-	if (!globals.lookup("context")) {
-		globals.define("context", {
-			kind: "namespace",
-			name: "context",
-			members: {
-				Context: CONTEXT_T,
-			},
-		});
-	}
 
 	const TESTING_T = {
 		kind: "named",

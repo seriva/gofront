@@ -97,25 +97,14 @@
 		],
 		"context": [
 			"AfterFunc",
-			"Background",
-			"CancelCauseFunc",
-			"CancelFunc",
-			"Canceled",
-			"Cause",
-			"Context",
 			"Context.Deadline",
 			"Context.Err",
 			"Context.Value",
 			"DeadlineExceeded",
-			"TODO",
-			"WithCancel",
-			"WithCancelCause",
 			"WithDeadline",
 			"WithDeadlineCause",
 			"WithTimeout",
-			"WithTimeoutCause",
-			"WithValue",
-			"WithoutCancel"
+			"WithTimeoutCause"
 		],
 		"crypto/hmac": ["Equal", "New"],
 		"crypto/md5": ["BlockSize", "New", "Size", "Sum"],
@@ -1217,10 +1206,7 @@
 			"PB.Next",
 			"RunBenchmarks",
 			"RunExamples",
-			"RunTests",
-			"TB.ArtifactDir",
-			"TB.Chdir",
-			"TB.TempDir"
+			"RunTests"
 		],
 		"testing/cryptotest": ["*"],
 		"testing/fstest": ["*"],
@@ -1505,6 +1491,9 @@
 			"LastIndexByte": "func([]uint8, int) int",
 			"Map": "func(interface{}, []uint8) []uint8",
 			"TrimFunc": "func([]uint8, interface{}) []uint8"
+		},
+		"context": {
+			"Context": "interface { Deadline, Err, Value }"
 		},
 		"crypto/sha256": {
 			"BlockSize": "int",
