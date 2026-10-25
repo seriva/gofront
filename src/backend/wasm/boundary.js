@@ -2338,7 +2338,7 @@ function ${P}stdlib(stringTable, io) {
 			parts = r;
 			return parts.length;
 		},
-		"str_fields": (s) => { parts = (s ?? "").split(/\\s+/).filter((p) => p !== ""); return parts.length; },
+		"str_fields": (s) => { parts = (s ?? "").split(/[ \\t\\n\\v\\f\\r\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]+/).filter((p) => p !== ""); return parts.length; },
 		"str_part": (i) => parts[i] ?? "",
 		"str_replacer_init": (s) => {
 			replacerTarget = s ?? "";
@@ -2453,7 +2453,7 @@ function ${P}stdlib(stringTable, io) {
 		// unicode
 		"unicode_is_letter": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{L}/u.test(c)) ? 1 : 0; },
 		"unicode_is_digit": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{Nd}/u.test(c)) ? 1 : 0; },
-		"unicode_is_space": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\s/u.test(c)) ? 1 : 0; },
+		"unicode_is_space": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /[ \\t\\n\\v\\f\\r\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]/.test(c)) ? 1 : 0; },
 		"unicode_is_upper": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{Lu}/u.test(c)) ? 1 : 0; },
 		"unicode_is_lower": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{Ll}/u.test(c)) ? 1 : 0; },
 		"unicode_is_punct": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{P}/u.test(c)) ? 1 : 0; },
