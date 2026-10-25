@@ -85,6 +85,7 @@ function goSource(pkg) {
 		const pkgChecker = new TypeChecker();
 		pkgChecker.target = "both";
 		pkgChecker.pkgName = programs[0].pkg.name;
+		pkgChecker.isStdlib = true;
 		if (STDLIB_PACKAGES.has(pkg))
 			for (const [n, t] of Object.entries(namespace(pkg)?.members ?? {})) {
 				pkgChecker.globals.define(n, t);
