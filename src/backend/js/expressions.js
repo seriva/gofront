@@ -1546,6 +1546,7 @@ export const expressionGenMethods = {
 		if (recvName === "sync.Mutex" || recvName === "sync.RWMutex") {
 			if (expr.func.field === "TryLock" || expr.func.field === "TryRLock")
 				return "true";
+			if (expr.func.field === "RLocker") return "({ Lock() {}, Unlock() {} })";
 			return "(void 0)";
 		}
 		if (recvName === "sync.Once" && expr.func.field === "Do") {

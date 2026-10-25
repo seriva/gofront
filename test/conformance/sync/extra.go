@@ -130,4 +130,11 @@ func main() {
 	s1, n1 := f3()
 	s2, n2 := f3()
 	fmt.Println(s1, n1, s2, n2, cnt3)
+
+	// ── RWMutex.RLocker ──
+	var rw sync.RWMutex
+	l := rw.RLocker()
+	l.Lock()
+	l.Unlock()
+	fmt.Println("rlocker ok")
 }

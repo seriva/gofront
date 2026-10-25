@@ -1283,7 +1283,10 @@ export class BuiltinsEmitter {
 			this.emitIoLimitedReaderMethodCall(field, expr, args, targetWasmType);
 			return true;
 		}
-		if (recvTypeName === "sync.Mutex" || recvTypeName === "sync.RWMutex") {
+		if (
+			(recvTypeName === "sync.Mutex" || recvTypeName === "sync.RWMutex") &&
+			field !== "RLocker"
+		) {
 			this.emitSyncMutexMethodCall(field, expr, args, targetWasmType);
 			return true;
 		}
