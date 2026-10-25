@@ -653,7 +653,8 @@ func (u *URL) MarshalBinary() ([]byte, error) {
 }
 
 func (u *URL) AppendBinary(b []byte) ([]byte, error) {
-	return append(b, u.String()...), nil
+	strBytes := []byte(u.String())
+	return append(b, strBytes...), nil
 }
 
 func (u *URL) UnmarshalBinary(text []byte) error {
