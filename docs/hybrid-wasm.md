@@ -160,7 +160,7 @@ Members of each Go package that `wasm` and `both` packages can use today, out of
 | `sort` | 36 of 40 | 4 |
 | `strconv` | 41 of 43 | 2 |
 | `strings` | 75 of 82 | 7 |
-| `sync` | 38 of 39 | 1 |
+| `sync` | 39 of 39 | 0 |
 | `sync/atomic` | 0 of 90 | 90 |
 | `testing` | 94 of 94 | 0 |
 | `time` | 95 of 129 | 34 |

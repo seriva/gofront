@@ -850,6 +850,14 @@ export function setupExtendedGlobals(globals, types) {
 			["TryLock", { kind: "func", params: [], returns: [BOOL] }],
 		]),
 	};
+	const LOCKER_T = {
+		kind: "interface",
+		name: "sync.Locker",
+		methods: new Map([
+			["Lock", { kind: "func", params: [], returns: [VOID] }],
+			["Unlock", { kind: "func", params: [], returns: [VOID] }],
+		]),
+	};
 	const RWMUTEX_T = {
 		kind: "named",
 		name: "sync.RWMutex",
@@ -859,6 +867,7 @@ export function setupExtendedGlobals(globals, types) {
 			["Unlock", { kind: "func", params: [], returns: [VOID] }],
 			["RLock", { kind: "func", params: [], returns: [VOID] }],
 			["RUnlock", { kind: "func", params: [], returns: [VOID] }],
+			["RLocker", { kind: "func", params: [], returns: [LOCKER_T] }],
 			["TryLock", { kind: "func", params: [], returns: [BOOL] }],
 			["TryRLock", { kind: "func", params: [], returns: [BOOL] }],
 		]),
@@ -886,14 +895,6 @@ export function setupExtendedGlobals(globals, types) {
 			["Add", { kind: "func", params: [INT], returns: [VOID] }],
 			["Done", { kind: "func", params: [], returns: [VOID] }],
 			["Wait", { kind: "func", params: [], returns: [VOID] }],
-		]),
-	};
-	const LOCKER_T = {
-		kind: "interface",
-		name: "sync.Locker",
-		methods: new Map([
-			["Lock", { kind: "func", params: [], returns: [VOID] }],
-			["Unlock", { kind: "func", params: [], returns: [VOID] }],
 		]),
 	};
 	globals.define("sync", {

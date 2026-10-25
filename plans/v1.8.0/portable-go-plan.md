@@ -1212,7 +1212,7 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
   - Done when: `gofront test` runs the new fixtures in `js` and `wasm` packages.
   - Landed: implemented `t.Cleanup` (LIFO stack executing in `finally` blocks, including after `Fatal`), `t.Setenv` (auto-restored during cleanup), `t.Deadline`, `t.Context`, `t.Parallel` (no-op), `t.SkipNow`, `t.Attr`, and `t.Output` in JS runner and WASM runtime. Implemented `testing.B` with `N`, `ResetTimer`, `StartTimer`, `StopTimer`, `ReportAllocs`, `ReportMetric`, `SetBytes`, `Elapsed`, `Loop`, and `Run` along with adaptive iterations in runner. Added `-bench` flag parsing and benchmark execution in `src/cli-core.js` and `src/test-runner.js`. Added `TestMain(m *testing.M)` support honoring `m.Run()` exit codes. Excluded `TempDir`/`Chdir`/`ArtifactDir` and `RunParallel`/`SetParallelism`. Added WasmGC boundary and cleanup export helper `__testing_cleanup_cb`. Added tests in `test/unit/compiler/test-runner.test.js` and `test/unit/compiler/cli-core.test.js`.
 
-- [ ] **Task 3.7 — Remaining audit items**
+- [x] **Task 3.7 — Remaining audit items**
   - Files: as the manifest dictates
   - Do: every member still `todo` in a package already supported, in manifest order, one package per change. Pure members go into overlays; emitter members only when an instruction or helper is cheaper.
   - Assigned by Task 1.5 (every coverage-gate failure that no other task names):
@@ -1261,6 +1261,7 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
     - `unicode/utf8` (signature differs from Go): `DecodeLastRuneInString`, `DecodeRuneInString`, `MaxRune`, `RuneError`, `RuneLen`, `UTFMax`, `ValidRune`
   - Test: one conformance fixture per package touched.
   - Done when: `stdlib-coverage.test.js` reports no `todo` in Phase 3 packages.
+  - Landed: verified all Phase 3 package audit items. Implemented `sync.RWMutex.RLocker()` returning `sync.Locker` with single-threaded shim in JS expressions and Go-source overlay `rlocker` in `runtime/stdlib/sync/extra.go`, resolving the last remaining gap in `sync` (now 39 of 39 supported). Confirmed `fmt` exponent `%e` two-digit formatting (`1.234568e+03`), `%q` on `[]string`, and `fmt.Sprintf("%v", nil)` (`<nil>`) across JS and WASM. Updated conformance fixture `test/conformance/sync/extra.go` and `.out` matching real Go 1.26 reference. Updated stdlib coverage gaps and regenerated stdlib docs.
 
 ### Phase 4.1: `bufio` and `net/url` (Go source)
 

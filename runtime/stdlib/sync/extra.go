@@ -170,3 +170,15 @@ func OnceValues[T1, T2 any](f func() (T1, T2)) func() (T1, T2) {
 		return v1, v2
 	}
 }
+
+type rlocker struct {
+	rw *RWMutex
+}
+
+func (r *rlocker) Lock() {}
+
+func (r *rlocker) Unlock() {}
+
+func (rw *RWMutex) RLocker() Locker {
+	return &rlocker{rw: rw}
+}
