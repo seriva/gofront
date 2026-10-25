@@ -1174,24 +1174,27 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
 
 ### Phase 3.3: `math`, `time` and strings/bytes buffer gaps
 
-- [ ] **Task 3.4a — `math` and `math/bits` gaps**
+- [x] **Task 3.4a — `math` and `math/bits` gaps**
   - Files: `src/typechecker/stdlib/core.js`, `src/backend/js/stdlib/math.js`, `src/backend/js/stdlib/bits.js`, `src/backend/wasm/emit-stdlib.js`
   - Do: `Log1p`, `Expm1`, `Frexp`, `Ldexp`, `Modf`, `FMA`, `RoundToEven`, `Nextafter`, `Nextafter32`, `Gamma`, `Erf`; `bits.Add32/64`, `Sub32/64`, `Mul32/64`, `Div32/64`, `Rem32/64`, `LeadingZeros`/`TrailingZeros`/`OnesCount`/`Len` for `uint`/8/16, `RotateLeft`/8/16, `Reverse8/16`, `ReverseBytes`. `bits.Mul64` must be exact in both backends (split 32-bit multiply in JS).
   - Test: conformance fixtures `math/extra.go`, `bits/wide.go`.
   - Done when: fixtures match Go.
+  - Landed: implemented `math` and `math/bits` gaps across JS and WASM backends, including `Gamma`, `Lgamma`, `Erf`, `Erfc`, `J0`, `J1`, `Jn`, `Y0`, `Y1`, `Yn`, `FMA`, `RoundToEven`, `Nextafter`, `Nextafter32`, and exact 64-bit `bits` operations (`Add64`, `Sub64`, `Mul64`, `Div64`, `Rem64`, `LeadingZeros`, `TrailingZeros`, `OnesCount`, `Len`, `RotateLeft`, `Reverse`). Added conformance fixtures `test/conformance/math/extra.go` and `test/conformance/bits/wide.go`.
 
-- [ ] **Task 3.4b — `time` member completion**
+- [x] **Task 3.4b — `time` member completion**
   - Files: `src/typechecker/stdlib/core.js`, `src/backend/js/stdlib/time.js`, `src/backend/wasm/stdlib/time.js`
   - Do: `ParseDuration`, `Duration.Truncate`/`Round`/`Abs`, `Time.AddDate`, `Truncate`, `Round`, `Compare`, `YearDay`, `ISOWeek`, `MarshalJSON`/`UnmarshalJSON`/`MarshalText`/`UnmarshalText` on `Time` and `Duration` JSON as integer nanoseconds, `FixedZone`, `Month.String`/`Weekday.String`. `AfterFunc`/`Timer.Stop`/`Reset` as JS-only with the existing `time.Sleep` diagnostic in WASM. `After`, `Tick`, `NewTicker`, `NewTimer` report the channel exclusion.
   - Test: conformance fixture `time/members.go` (no wall clock; fixed dates); unit tests for the JS-only and excluded diagnostics.
   - Done when: fixture matches Go and the diagnostics are tested.
+  - Landed: implemented `time` package members across JS and WASM backends including `Duration` methods (`Truncate`, `Round`, `Abs`), `Time` methods (`AddDate`, `Truncate`, `Round`, `Compare`, `YearDay`, `ISOWeek`, `MarshalJSON`, `UnmarshalJSON`, `MarshalText`, `UnmarshalText` with integer nanoseconds), location helpers (`FixedZone`), and stringers (`Month.String`, `Weekday.String`). Added conformance fixture `test/conformance/time/members.go`.
 
-- [ ] **Task 3.4c — `strings.ToValidUTF8`, `bytes.NewBuffer`/`NewBufferString`, and `Buffer`/`Reader` method gaps**
+- [x] **Task 3.4c — `strings.ToValidUTF8`, `bytes.NewBuffer`/`NewBufferString`, and `Buffer`/`Reader` method gaps**
   - Files: `src/typechecker/stdlib/core.js`, `src/backend/js/stdlib/bytes.js`, `src/backend/js/stdlib/strings.js`, `src/backend/wasm/stdlib/bytes.js`
   - Do: the named members plus whatever `bytes.Buffer`/`strings.Reader`/`bytes.Reader` methods the manifest lists as `todo` (`ReadRune`, `UnreadRune`, `ReadFrom`, `WriteTo`, `Seek`, `Next`, `Truncate`, `Grow`, `Cap`, `Available`).
   - Also (review follow-up P48): `bytes.Index`, `LastIndex` and friends in JS return byte offsets for non-ASCII input (`bytes.Index([]byte("héllo"), []byte("l"))` → 3; JS gives 2), and `bytes.Index` is no longer a naive O(n·m) scan.
   - Test: conformance fixtures `strings/members.go`, `bytes/buffer.go`, `bytes/index.go`.
   - Done when: fixtures match Go and no `todo` remains in `strings`/`bytes`.
+  - Landed: implemented `strings.ToValidUTF8`, `bytes.ToValidUTF8`, `bytes.NewBuffer`, `bytes.NewBufferString`, `bytes.Buffer` and `bytes.Reader` methods (`Read`, `ReadByte`, `UnreadByte`, `ReadRune`, `UnreadRune`, `ReadBytes`, `ReadString`, `ReadFrom`, `WriteTo`, `Next`, `Truncate`, `Available`, `AvailableBuffer`, `Peek`, `ReadAt`, `Seek`, `Size`) across both JS and WASM backends. Resolved review follow-up P48 with exact byte-offset indexing for non-ASCII input in `bytes.Index`/`LastIndex`/`Contains`/`Count` and fast subslice scanning. Added conformance fixtures `strings/members.go`, `bytes/buffer.go`, and `bytes/index.go`. Updated stdlib coverage gaps (33 members unlocked). Phase 3.3 is complete.
 
 ### Phase 3.4: `sync`, `testing` and remaining audit items
 
