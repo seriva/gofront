@@ -216,6 +216,11 @@ const STDLIB_IMPORTS = [
 	["fmt_sscan_token_bool", ["i32"], ["i32"]],
 	// testing.T.Run: the harness calls back into the exported __testing_run_cb
 	["testing_run", [S, S, "anyref"], ["i32"]],
+	["testing_cleanup", [S, "anyref"], []],
+	["testing_n", [S], ["i64"]],
+	["testing_elapsed", [S], ["i64"]],
+	["testing_context", [S], [S]],
+	["testing_output", [S], [S]],
 	// unicode
 	["unicode_is_letter", ["i32"], ["i32"]],
 	["unicode_is_digit", ["i32"], ["i32"]],
@@ -347,6 +352,7 @@ class ModuleEmitter {
 		this.hasErrorType =
 			importsAnyOf(programs, ERROR_PRODUCING_PKGS) || hasErrorUsage(programs);
 		this.usesStdlibEnv = importsAnyOf(programs, STDLIB_ENV_PKGS);
+		this.importsTesting = importsAnyOf(programs, ["testing"]);
 
 		if (programs && programs.length > 0) {
 			this.initTypes(programs);
@@ -400,6 +406,11 @@ class ModuleEmitter {
 			for (const [key, t] of this.checker.types.entries()) {
 				if (t.kind === "named" && t.underlying?.kind === "struct") {
 					const name = t.name ?? key;
+					if (
+						name.startsWith("testing.") &&
+						(!this.importsTesting || name !== "testing.BenchmarkResult")
+					)
+						continue;
 					if (!seen.has(name)) {
 						seen.add(name);
 						rawStructs.push({ name, structType: t.underlying });
@@ -2026,6 +2037,15 @@ class ModuleEmitter {
 		});
 	}
 
+	// Closure type of `func()` (the t.Cleanup body).
+	getTestingCleanupClosureType() {
+		return this.getClosureType({
+			kind: "func",
+			params: [],
+			returns: [],
+		});
+	}
+
 	resolveFuncIndex(name) {
 		return this.funcMap.get(name) ?? null;
 	}
@@ -2891,6 +2911,7 @@ export function compileWasmModule(
 
 	// 1e3. Runtime helpers: error values, interface equality, t.Run callback.
 	mod.usesTestingRun = funcDecls.some((fn) => _usesTestingRun(fn.body));
+	mod.usesTestingCleanup = funcDecls.some((fn) => _usesTestingCleanup(fn.body));
 	mod.usesAnyEq = _usesAnyEq(funcDecls, mod);
 	const ANY_T = { kind: "basic", name: "any" };
 	const STR_T = { kind: "basic", name: "string" };
@@ -3013,6 +3034,17 @@ export function compileWasmModule(
 				],
 				null,
 				"testing_run_cb",
+				{ _forceExport: true },
+			),
+		);
+	}
+	if (mod.usesTestingCleanup) {
+		funcDecls.push(
+			helper(
+				"__testing_cleanup_cb",
+				[{ name: "fn", type: ANY_T }],
+				null,
+				"testing_cleanup_cb",
 				{ _forceExport: true },
 			),
 		);
@@ -3327,6 +3359,17 @@ function _usesTestingRun(node) {
 	);
 }
 
+function _usesTestingCleanup(node) {
+	return _someNode(
+		node,
+		(n) =>
+			n.kind === "CallExpr" &&
+			n.func?.kind === "SelectorExpr" &&
+			n.func.field === "Cleanup" &&
+			isTestingT(n.func.expr?._type),
+	);
+}
+
 // `__any_eq` is only needed when some `==`/`!=` (or switch case) compares
 // anyref operands, a struct with an anyref field is compared, or the error
 // runtime (`errors.Is`) is present.  `_emitAnyEq` throws if this misses a
@@ -3438,6 +3481,8 @@ function _scanImportsInBody(node, mod) {
 			else if (func.field === "Run") {
 				// closure type for func(*testing.T) must exist before bodies are emitted
 				mod.getTestingRunClosureType();
+			} else if (func.field === "Cleanup") {
+				mod.getTestingCleanupClosureType();
 			} else {
 				mod.getTestingCallImportIndex();
 				for (const arg of args) {

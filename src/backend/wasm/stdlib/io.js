@@ -124,6 +124,13 @@ export class IoEmitter {
 			this.pushInstruction({ op: "local.set", index: bTmp });
 			this._emitBuilderWriteStringCore(bTmp, strTmp);
 			this.releaseTemp(bTmp, builderW);
+			this.pushInstruction({ op: "local.get", index: strTmp });
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getStringLenImportIndex(),
+			});
+			this.pushInstruction("i64.extend_i32_u");
+			this.pushInstruction({ op: "ref.null", heapType: "any" });
 			return;
 		}
 		if (targetName === "bytes.Buffer") {
@@ -138,11 +145,25 @@ export class IoEmitter {
 			this.pushInstruction({ op: "local.set", index: bTmp });
 			this._emitBufferWriteStringCore(bTmp, strTmp);
 			this.releaseTemp(bTmp, bufW);
+			this.pushInstruction({ op: "local.get", index: strTmp });
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getStringLenImportIndex(),
+			});
+			this.pushInstruction("i64.extend_i32_u");
+			this.pushInstruction({ op: "ref.null", heapType: "any" });
 			return;
 		}
 		if (targetName === "os.File") {
 			this.pushInstruction({ op: "local.get", index: strTmp });
 			this._callStdlib("fmt_print_raw");
+			this.pushInstruction({ op: "local.get", index: strTmp });
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getStringLenImportIndex(),
+			});
+			this.pushInstruction("i64.extend_i32_u");
+			this.pushInstruction({ op: "ref.null", heapType: "any" });
 			return;
 		}
 
@@ -2082,6 +2103,13 @@ export class IoEmitter {
 			this.pushInstruction({ op: "local.set", index: bTmp });
 			this._emitBuilderWriteStringCore(bTmp, strTmp);
 			this.releaseTemp(bTmp, builderW);
+			this.pushInstruction({ op: "local.get", index: strTmp });
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getStringLenImportIndex(),
+			});
+			this.pushInstruction("i64.extend_i32_u");
+			this.pushInstruction({ op: "ref.null", heapType: "any" });
 			this.releaseTemp(strTmp, "externref");
 			return;
 		}
@@ -2097,6 +2125,13 @@ export class IoEmitter {
 			this.pushInstruction({ op: "local.set", index: bTmp });
 			this._emitBufferWriteStringCore(bTmp, strTmp);
 			this.releaseTemp(bTmp, bufW);
+			this.pushInstruction({ op: "local.get", index: strTmp });
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getStringLenImportIndex(),
+			});
+			this.pushInstruction("i64.extend_i32_u");
+			this.pushInstruction({ op: "ref.null", heapType: "any" });
 			this.releaseTemp(strTmp, "externref");
 			return;
 		}
