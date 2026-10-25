@@ -547,7 +547,18 @@ export const assignabilityMethods = {
 	_sigParamsMatch(reqList, actList) {
 		if (reqList.length !== actList.length) return false;
 		for (let i = 0; i < reqList.length; i++) {
-			if (typeStr(reqList[i]) !== typeStr(actList[i])) return false;
+			const r = reqList[i];
+			const a = actList[i];
+			const rs = typeStr(r);
+			const as = typeStr(a);
+			if (rs === as) continue;
+			if (
+				(r?.underlying && a?.underlying && r.underlying === a.underlying) ||
+				rs.split(".").pop() === as.split(".").pop()
+			) {
+				continue;
+			}
+			return false;
 		}
 		return true;
 	},
