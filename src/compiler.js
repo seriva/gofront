@@ -280,7 +280,7 @@ function linkWasmUnits(
 	const keepType = pruneStdlibPrograms(programs, stdlibPrograms);
 	for (const u of units)
 		for (const [k, v] of u.types) if (keepType(v)) types.set(k, v);
-	const checker = {
+	const checker = Object.assign(new TypeChecker(), {
 		types,
 		errors: [],
 		err(msg, node) {
@@ -293,7 +293,7 @@ function linkWasmUnits(
 			this.errors.push(e);
 			return e;
 		},
-	};
+	});
 	const lowerRes = lower(programs, checker);
 	return compileWasmModule(programs, checker, lowerRes, {
 		boundary: true,

@@ -291,11 +291,14 @@ export const statementGenMethods = {
 	},
 
 	_isCommaOkMapExpr(stmt, rhsNode) {
+		if (stmt._commaOkMap) return true;
+		const t = rhsNode?.expr?._type;
+		const underlying = t?.kind === "named" ? t.underlying : t;
 		return (
 			stmt.rhs.length === 1 &&
 			stmt.lhs.length === 2 &&
 			rhsNode?.kind === "IndexExpr" &&
-			rhsNode.expr?._type?.kind === "map"
+			underlying?.kind === "map"
 		);
 	},
 
