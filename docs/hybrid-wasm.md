@@ -124,11 +124,11 @@ Members of each Go package that `wasm` and `both` packages can use today, out of
 | `container/ring` | 10 of 10 | 0 |
 | `context` | 17 of 20 | 3 |
 | `crypto/hmac` | 0 of 2 | 2 |
-| `crypto/md5` | 0 of 4 | 4 |
+| `crypto/md5` | 4 of 4 | 0 |
 | `crypto/rand` | 2 of 3 | 1 |
-| `crypto/sha1` | 0 of 4 | 4 |
+| `crypto/sha1` | 4 of 4 | 0 |
 | `crypto/sha256` | 4 of 7 | 3 |
-| `crypto/sha512` | 0 of 13 | 13 |
+| `crypto/sha512` | 13 of 13 | 0 |
 | `crypto/subtle` | 0 of 8 | 8 |
 | `encoding/base32` | 0 of 19 | 19 |
 | `encoding/base64` | 15 of 22 | 7 |
