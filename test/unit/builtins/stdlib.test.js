@@ -2605,6 +2605,41 @@ func main() {
 	assertEqual(runJs(js), "1\ntrue\nhello");
 });
 
+test("strings.ToValidUTF8", () => {
+	const { js, errors } = compile(`package main
+import "strings"
+func main() {
+	console.log(strings.ToValidUTF8("hello", "X"))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "hello");
+});
+
+test("strings.Reader method gaps", () => {
+	const { js, errors } = compile(`package main
+import (
+	"strings"
+)
+func main() {
+	r := strings.NewReader("hello world")
+	console.log(r.Len())
+	console.log(r.Size())
+	b, _ := r.ReadByte()
+	console.log(string(b))
+	_ = r.UnreadByte()
+	b, _ = r.ReadByte()
+	console.log(string(b))
+	pos, _ := r.Seek(0, 0)
+	console.log(pos)
+	buf := make([]byte, 4)
+	n, _ := r.ReadAt(buf, 6)
+	console.log(n)
+	console.log(string(buf[:n]))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "11\n11\nh\nh\n0\n4\nworl");
+});
+
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);

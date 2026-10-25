@@ -309,6 +309,66 @@ func main() {
 	assertEqual(runJs(js), "3\na\nb\nc,d");
 });
 
+test("bytes.Index byte offset with non-ASCII input (P48)", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	b := []byte("héllo")
+	console.log(bytes.Index(b, []byte("l")))
+	console.log(bytes.Index(b, []byte("é")))
+	console.log(bytes.LastIndex(b, []byte("l")))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "3\n1\n4");
+});
+
+test("bytes.NewBuffer and NewBufferString", () => {
+	const { js, errors } = compile(`package main
+import "bytes"
+func main() {
+	b1 := bytes.NewBuffer([]byte("hello"))
+	b2 := bytes.NewBufferString("world")
+	console.log(b1.String())
+	console.log(b2.String())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "hello\nworld");
+});
+
+test("bytes.Buffer method gaps", () => {
+	const { js, errors } = compile(`package main
+import "bytes"
+func main() {
+	b := bytes.NewBufferString("hello\\nworld\\n")
+	ch, _ := b.ReadByte()
+	console.log(string(ch))
+	_ = b.UnreadByte()
+	ch, _ = b.ReadByte()
+	console.log(string(ch))
+	line, _ := b.ReadString('\n')
+	console.log(line)
+	nxt := b.Next(3)
+	console.log(string(nxt))
+	p, _ := b.Peek(2)
+	console.log(string(p))
+	console.log(b.Len())
+	b.Truncate(1)
+	console.log(b.String())
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "h\nh\nello\n\nwor\nld\n3\nl");
+});
+
+test("bytes.ToValidUTF8", () => {
+	const { js, errors } = compile(`package main
+import "bytes"
+func main() {
+	res := bytes.ToValidUTF8([]byte{'a', 0xff, 'b'}, []byte("X"))
+	console.log(string(res))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "aXb");
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

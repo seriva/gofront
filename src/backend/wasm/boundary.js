@@ -1977,6 +1977,7 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		},
 		"str_to_upper": (s) => (s ? s.toUpperCase() : ""),
 		"str_to_lower": (s) => (s ? s.toLowerCase() : ""),
+		"str_to_valid_utf8": (s, repl) => (s ? s.replace(/(?:[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF])+/g, repl ?? "") : (s ?? "")),
 		"str_trim_space": (s) => (s ? s.trim() : ""),
 		"str_contains": (s, sub) => (s && sub !== undefined ? (s.includes(sub) ? 1 : 0) : 0),
 		"str_has_prefix": (s, pre) => (s && pre !== undefined ? (s.startsWith(pre) ? 1 : 0) : 0),

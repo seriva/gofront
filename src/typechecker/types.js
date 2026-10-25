@@ -394,6 +394,7 @@ export const WASM_STDLIB_MEMBERS = new Map([
 			"Builder",
 			"NewReader",
 			"Reader",
+			"ToValidUTF8",
 		]),
 	],
 	[
@@ -544,8 +545,11 @@ export const WASM_STDLIB_MEMBERS = new Map([
 			"Map",
 			"SplitN",
 			"Buffer",
+			"NewBuffer",
+			"NewBufferString",
 			"NewReader",
 			"Reader",
+			"ToValidUTF8",
 		]),
 	],
 	[
