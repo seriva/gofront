@@ -18,7 +18,7 @@ export function isTestingT(goType) {
 			? goType.base
 			: goType.kind === "StarExpr"
 				? (goType.expr ?? goType.operand)
-				: null;
+				: goType;
 	const name = base?.name ?? (typeof base === "string" ? base : null);
 	return (
 		name === "testing.T" ||
