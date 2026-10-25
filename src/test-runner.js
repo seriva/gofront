@@ -284,52 +284,85 @@ async function __runGoFrontSuite() {
 ${allFuncNames.map((n) => `    ${JSON.stringify(n)}: typeof ${n} !== "undefined" ? ${n} : null`).join(",\n")}
   };
 
-  async function runAll() {
+  function runAll() {
     let totalFailures = 0;
     let totalSkipped = 0;
     const suiteStart = now();
 
-    for (const name of testsToRun) {
+    const finish = () => {
+      const suiteElapsed = ((now() - suiteStart) / 1000).toFixed(3);
+      if (totalFailures > 0) {
+        console.log(FAIL);
+        console.log(FAIL + "\\t" + pkgName + "\\t" + dim(suiteElapsed + "s"));
+        return 1;
+      } else {
+        console.log(PASS);
+        okLine(pkgName, suiteElapsed);
+        return 0;
+      }
+    };
+
+    const runOneTest = (name) => {
       const fn = __testRegistry[name] ?? (typeof globalThis[name] === "function" ? globalThis[name] : null);
       if (typeof fn !== "function") {
         console.error(red("testing: cannot find test function " + name));
         totalFailures++;
-        continue;
+        return null;
       }
 
       const t = new __GoFront_T(name);
       if (verbose) console.log(dim("=== RUN   ") + name);
 
+      let res;
       try {
-        const res = fn(t);
-        if (res && typeof res.then === "function") await res;
+        res = fn(t);
       } catch (e) {
         recordTestError(t, e);
-      } finally {
         t._runCleanups();
+        if (t.skipped) totalSkipped++;
+        else if (t.failed) totalFailures++;
+        report(t);
+        return null;
       }
 
+      if (res && typeof res.then === "function") {
+        return res
+          .catch((e) => { recordTestError(t, e); })
+          .finally(() => {
+            t._runCleanups();
+            if (t.skipped) totalSkipped++;
+            else if (t.failed) totalFailures++;
+            report(t);
+          });
+      }
+
+      t._runCleanups();
       if (t.skipped) totalSkipped++;
       else if (t.failed) totalFailures++;
       report(t);
-    }
+      return null;
+    };
 
-    for (const name of benchesToRun) {
+    const runOneBench = (name) => {
       const fn = __testRegistry[name] ?? (typeof globalThis[name] === "function" ? globalThis[name] : null);
       if (typeof fn !== "function") {
         console.error(red("testing: cannot find benchmark function " + name));
         totalFailures++;
-        continue;
+        return null;
       }
       if (verbose) console.log(dim("=== RUN   ") + name);
       const b = new __GoFront_B(name);
       b._benchDurationNs = 1e8; // 100ms
-      try {
+      const runIters = () => {
         b.N = 1;
         b.ResetTimer();
-        let res = fn(b);
-        if (res && typeof res.then === "function") await res;
-
+        const res = fn(b);
+        if (res && typeof res.then === "function") {
+          return res.then(() => loopBench(b, fn));
+        }
+        return loopBench(b, fn);
+      };
+      const loopBench = (b, fn) => {
         if (!b._loopStarted && !b.failed && !b.skipped) {
           b.StopTimer();
           b._runCleanups();
@@ -346,8 +379,19 @@ ${allFuncNames.map((n) => `    ${JSON.stringify(n)}: typeof ${n} !== "undefined"
             nextB._benchDurationNs = b._benchDurationNs;
             nextB.N = n;
             nextB.ResetTimer();
-            res = fn(nextB);
-            if (res && typeof res.then === "function") await res;
+            const res = fn(nextB);
+            if (res && typeof res.then === "function") {
+              return res.then(() => {
+                nextB.StopTimer();
+                nextB._runCleanups();
+                b.N = nextB.N;
+                b._elapsedMs = nextB._elapsedMs;
+                b._timerRunning = false;
+                b.failed = nextB.failed;
+                b.skipped = nextB.skipped;
+                b._logs = nextB._logs;
+              });
+            }
             nextB.StopTimer();
             nextB._runCleanups();
             b.N = nextB.N;
@@ -358,36 +402,83 @@ ${allFuncNames.map((n) => `    ${JSON.stringify(n)}: typeof ${n} !== "undefined"
             b._logs = nextB._logs;
           }
         }
+      };
+
+      let res;
+      try {
+        res = runIters();
       } catch (e) {
         recordTestError(b, e);
-      } finally {
         b._runCleanups();
+        if (b.failed) totalFailures++;
+        else if (b.skipped) totalSkipped++;
+        reportBenchmark(b);
+        return null;
       }
 
+      if (res && typeof res.then === "function") {
+        return res
+          .catch((e) => { recordTestError(b, e); })
+          .finally(() => {
+            b._runCleanups();
+            if (b.failed) totalFailures++;
+            else if (b.skipped) totalSkipped++;
+            reportBenchmark(b);
+          });
+      }
+
+      b._runCleanups();
       if (b.failed) totalFailures++;
       else if (b.skipped) totalSkipped++;
       reportBenchmark(b);
+      return null;
+    };
+
+    let ti = 0;
+    while (ti < testsToRun.length) {
+      const p = runOneTest(testsToRun[ti++]);
+      if (p) {
+        return p.then(async () => {
+          while (ti < testsToRun.length) {
+            const nextP = runOneTest(testsToRun[ti++]);
+            if (nextP) await nextP;
+          }
+          for (const bName of benchesToRun) {
+            const nextP = runOneBench(bName);
+            if (nextP) await nextP;
+          }
+          return finish();
+        });
+      }
     }
 
-    const suiteElapsed = ((now() - suiteStart) / 1000).toFixed(3);
-
-    if (totalFailures > 0) {
-      console.log(FAIL);
-      console.log(FAIL + "\\t" + pkgName + "\\t" + dim(suiteElapsed + "s"));
-      return 1;
-    } else {
-      console.log(PASS);
-      okLine(pkgName, suiteElapsed);
-      return 0;
+    let bi = 0;
+    while (bi < benchesToRun.length) {
+      const p = runOneBench(benchesToRun[bi++]);
+      if (p) {
+        return p.then(async () => {
+          while (bi < benchesToRun.length) {
+            const nextP = runOneBench(benchesToRun[bi++]);
+            if (nextP) await nextP;
+          }
+          return finish();
+        });
+      }
     }
+
+    return finish();
   }
 
   if (testMainName) {
     const mainFn = __testRegistry[testMainName] ?? (typeof globalThis[testMainName] === "function" ? globalThis[testMainName] : null);
     if (typeof mainFn === "function") {
       let exitCode = 0;
-      const m = new __GoFront_M(async () => {
-        exitCode = await runAll();
+      const m = new __GoFront_M(() => {
+        const res = runAll();
+        if (res && typeof res.then === "function") {
+          return res.then((code) => { exitCode = code; return code; });
+        }
+        exitCode = res;
         return exitCode;
       });
       try {
@@ -402,7 +493,8 @@ ${allFuncNames.map((n) => `    ${JSON.stringify(n)}: typeof ${n} !== "undefined"
     }
   }
 
-  const exitCode = await runAll();
+  const res = runAll();
+  const exitCode = res && typeof res.then === "function" ? await res : res;
   process.exit(exitCode);
 }
 

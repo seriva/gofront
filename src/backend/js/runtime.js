@@ -1615,7 +1615,7 @@ var __GoFront_BenchmarkResult = __GoFront_BenchmarkResult || class {
 };
 var __testing_BenchmarkResult = __GoFront_BenchmarkResult;
 var __testing_Benchmark = __testing_Benchmark || function(fn) {
-  const b = new __GoFront_B("Benchmark");
+  let b = new __GoFront_B("Benchmark");
   b._benchDurationNs = 1e9;
   b.N = 1;
   b.ResetTimer();

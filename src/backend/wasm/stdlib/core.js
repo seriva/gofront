@@ -442,11 +442,61 @@ export class StdlibCoreEmitter {
 			});
 			return;
 		}
-		if (
-			method === "Failed" ||
-			method === "Skipped" ||
-			(method === "Run" && args.length === 0)
-		) {
+		if (method === "Loop") {
+			this.emitExpr(func.expr, "externref");
+			this.pushInstruction({ op: "i32.const", value: nameIdx });
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getTestingFlagImportIndex(),
+			});
+			return;
+		}
+		if (method === "Run" && args.length === 0) {
+			this.emitExpr(func.expr, "externref");
+			this.pushInstruction({ op: "i32.const", value: nameIdx });
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getTestingFlagImportIndex(),
+			});
+			this.pushInstruction("i64.extend_i32_s");
+			return;
+		}
+		if (method === "Elapsed") {
+			this.emitExpr(func.expr, "externref");
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getStdlibImportIndex("testing_elapsed"),
+			});
+			return;
+		}
+		if (method === "Context") {
+			this.emitExpr(func.expr, "externref");
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getStdlibImportIndex("testing_context"),
+			});
+			this.pushInstruction("any.convert_extern");
+			return;
+		}
+		if (method === "Output") {
+			this.emitExpr(func.expr, "externref");
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getStdlibImportIndex("testing_output"),
+			});
+			this.pushInstruction("any.convert_extern");
+			return;
+		}
+		if (method === "Deadline") {
+			this.emitExpr(func.expr, "externref");
+			this.pushInstruction("drop");
+			const timeType = this.mod.checker?.types?.get("time.Time");
+			const timeWType = this.toWasmType(timeType);
+			this.emitZeroValue(timeType, timeWType);
+			this.pushInstruction({ op: "i32.const", value: 0 });
+			return;
+		}
+		if (method === "Failed" || method === "Skipped") {
 			this.emitExpr(func.expr, "externref");
 			this.pushInstruction({ op: "i32.const", value: nameIdx });
 			this.pushInstruction({
