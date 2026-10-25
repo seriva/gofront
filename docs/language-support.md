@@ -133,7 +133,7 @@ Members of each Go package (functions, types, methods, fields, constants and var
 | `strings` | 75 of 82 | 7 | 0 | 0 |
 | `sync` | 38 of 39 | 1 | 0 | 7 |
 | `sync/atomic` | 0 of 90 | 90 | 0 | 4 |
-| `testing` | 18 of 94 | 76 | 0 | 72 |
+| `testing` | 94 of 94 | 0 | 0 | 72 |
 | `time` | 100 of 134 | 34 | 5 | 11 |
 | `unicode` | 52 of 52 | 0 | 0 | 257 |
 | `unicode/utf16` | 0 of 7 | 7 | 0 | 0 |

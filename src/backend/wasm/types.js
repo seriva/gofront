@@ -19,7 +19,13 @@ export function isTestingT(goType) {
 			: goType.kind === "StarExpr"
 				? (goType.expr ?? goType.operand)
 				: null;
-	return base?.name === "testing.T";
+	const name = base?.name ?? (typeof base === "string" ? base : null);
+	return (
+		name === "testing.T" ||
+		name === "testing.B" ||
+		name === "testing.M" ||
+		name === "testing.TB"
+	);
 }
 
 export function toWasmType(goType, checker = null, mod = null) {
