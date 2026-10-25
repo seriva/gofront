@@ -2273,6 +2273,10 @@ export const expressionGenMethods = {
 			u.kind !== "named"
 		)
 			return this.zeroValueForType(u);
+		if (named?.kind === "named" && u?.kind === "struct") {
+			const clsName = named.name ?? this._dequalify(name);
+			if (this.structNames.has(clsName)) return `new ${clsName}()`;
+		}
 		name = this._dequalify(name);
 		if (this.structNames.has(name)) return `new ${name}()`;
 		return "null";

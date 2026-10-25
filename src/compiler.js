@@ -582,6 +582,7 @@ function checkStdlibPrograms(programs, pkgName, options, overlay) {
 	const checker = new TypeChecker();
 	checker.target = "both";
 	checker.pkgName = pkgName;
+	checker.isStdlib = true;
 	if (overlay) {
 		for (const [name, t] of Object.entries(overlay.members)) {
 			checker.globals.define(name, t);

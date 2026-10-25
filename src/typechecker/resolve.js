@@ -527,6 +527,14 @@ export const resolveMethods = {
 		}
 		if (paramType.kind === "func" && argType.kind === "func")
 			this._inferFromFuncPair(paramType, argType, map);
+		if (paramType.kind === "tuple" && argType.kind === "tuple") {
+			for (
+				let i = 0;
+				i < paramType.types.length && i < argType.types.length;
+				i++
+			)
+				this._inferFromPair(paramType.types[i], argType.types[i], map);
+		}
 	},
 
 	_inferFromPair(paramType, argType, map) {
