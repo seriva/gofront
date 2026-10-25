@@ -2537,7 +2537,7 @@ function ${P}stdlib(stringTable, io) {
 				return 0n;
 			}
 			timeParseDurationErr = null;
-			return res[0];
+			return BigInt(res[0]);
 		},
 		"time_parse_duration_err": () => timeParseDurationErr,
 		"time_month_string": (m) => __monthString(m),
