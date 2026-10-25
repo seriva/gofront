@@ -471,6 +471,10 @@ export class StdlibCoreEmitter {
 	}
 
 	_isFmtExternOperand(goType) {
+		const name = goType?.name;
+		if (name === "time.Duration") {
+			return true;
+		}
 		return (
 			isAnyType(goType, this.mod.checker) ||
 			this._isCompositeGoType(goType) ||
@@ -480,6 +484,11 @@ export class StdlibCoreEmitter {
 
 	// Pushes `arg` as the externref the fmt host helpers format.
 	_emitOperandExternref(arg, goType, allowNil = false) {
+		if (goType?.name === "time.Duration") {
+			this.emitExpr(arg, "i64");
+			this._callStdlib("time_duration_string");
+			return;
+		}
 		if (isAnyType(goType, this.mod.checker)) {
 			this.emitExpr(arg, "anyref");
 			this._emitAnyToExternref();
