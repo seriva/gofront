@@ -122,7 +122,7 @@ Members of each Go package (functions, types, methods, fields, constants and var
 | `math/cmplx` | 0 of 27 | 27 | 0 | 0 |
 | `math/rand` | 12 of 45 | 33 | 0 | 0 |
 | `math/rand/v2` | 0 of 51 | 51 | 0 | 8 |
-| `net/url` | 0 of 60 | 60 | 0 | 0 |
+| `net/url` | 16 of 60 | 44 | 0 | 0 |
 | `os` | 10 of 10 | 0 | 3 | 188 |
 | `path` | 9 of 9 | 0 | 0 | 0 |
 | `path/filepath` | 9 of 19 | 10 | 0 | 8 |

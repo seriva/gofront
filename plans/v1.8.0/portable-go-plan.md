@@ -1286,11 +1286,12 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
   - Done when: fixture matches Go.
   - Landed: implemented `bufio.Scanner` in Go source with all methods (`NewScanner`, `Err`, `Bytes`, `Text`, `Scan`, `Buffer`, `Split`) and split functions (`ScanLines`, `ScanWords`, `ScanRunes`, `ScanBytes`), `SplitFunc`, `MaxScanTokenSize`, and errors `ErrTooLong`, `ErrNegativeAdvance`, `ErrAdvanceTooFar`, `ErrBadReadCount`, `ErrFinalToken`. Added conformance fixture `test/conformance/bufio/scanner.go` and `.out`. Fixed WASM `%q` on byte arrays in `src/backend/js/fmt-runtime.js`. Updated stdlib coverage gaps and regenerated docs. Conformance fixture passes across JS and WASM matching Go 1.26 reference.
 
-- [ ] **Task 4.2a — `net/url` escaping and `Values`**
+- [x] **Task 4.2a — `net/url` escaping and `Values`**
   - Files: new `runtime/stdlib/net/url/escape.go`, `values.go`
   - Do: `QueryEscape`, `QueryUnescape`, `PathEscape`, `PathUnescape`, `EscapeError`, `Values` (`Get`, `Set`, `Add`, `Del`, `Has`, `Encode` with sorted keys), `ParseQuery`. Work on `[]byte` so `"é"` escapes to `%C3%A9`.
   - Test: conformance fixture `url/escape.go` including non-ASCII input.
   - Done when: fixture matches Go.
+  - Landed: implemented `net/url` query/path escaping and values in Go source (`QueryEscape`, `QueryUnescape`, `PathEscape`, `PathUnescape`, `EscapeError`, `InvalidHostError`, `Values` with `Get`, `Set`, `Add`, `Del`, `Has`, `Encode` with sorted keys, and `ParseQuery`), operating on `[]byte` for correct UTF-8 percent-encoding. Fixed comma-ok map index generation in JS backend for defined types (`stmt._commaOkMap`). Conformance fixture `test/conformance/url/escape.go` passes on JS and WASM matching Go 1.26 reference. Updated stdlib coverage gaps and regenerated docs.
 
 - [ ] **Task 4.2b — `net/url` parsing, `URL` methods, errors**
   - Files: new `runtime/stdlib/net/url/url.go`
