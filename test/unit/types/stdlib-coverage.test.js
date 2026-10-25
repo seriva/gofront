@@ -135,7 +135,6 @@ function importGoSource(pkgChecker, path) {
 	};
 	pkgChecker.globals.define(id, ns);
 	for (const [name, type] of types) {
-		pkgChecker.types.set(name, type);
 		pkgChecker.types.set(`${id}.${name}`, type);
 	}
 }
@@ -144,13 +143,9 @@ function importGoSource(pkgChecker, path) {
 // the name of its declaration).
 function qualifiedType(t, name) {
 	if (t?.kind !== "named") return t;
-	const copy = { ...t, name };
-	if (t._generic)
-		copy._generic = {
-			...t._generic,
-			declNode: { ...t._generic.declNode, name },
-		};
-	return copy;
+	t.name = name;
+	if (t._generic) t._generic.declNode = { ...t._generic.declNode, name };
+	return t;
 }
 
 function collectDecl(d, names) {

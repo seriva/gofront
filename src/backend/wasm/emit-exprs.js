@@ -1720,8 +1720,10 @@ export class ExprsEmitter {
 			}
 		}
 		if (operand.kind === "CompositeLit") {
-			this.emitExpr(operand);
-			return;
+			if (isStructType(operand._type, this.mod.checker, this.mod)) {
+				this.emitExpr(operand);
+				return;
+			}
 		}
 		const structInfo = this._resolveStructInfo(operand);
 		if (structInfo) {

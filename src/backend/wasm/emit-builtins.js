@@ -311,6 +311,49 @@ export class BuiltinsEmitter {
 		}
 	}
 
+	_emitBuiltinNew(call) {
+		const targetType =
+			call._type?.base ??
+			(call.args[0]?.kind === "TypeExpr"
+				? call.args[0].type
+				: call.args[0]?._type) ??
+			call.args[0];
+		if (isStructType(targetType, this.mod.checker, this.mod)) {
+			let structInfo = this._resolveStructInfo({ _type: targetType });
+			if (!structInfo) {
+				const typeName =
+					targetType.kind === "named" ? targetType.name : targetType.name;
+				if (typeName) structInfo = this.mod.getStructType(typeName);
+			}
+			if (!structInfo) {
+				throw new Error(
+					`Unknown struct in new: ${targetType.name ?? targetType}`,
+				);
+			}
+			for (const f of structInfo.fields) {
+				this.emitZeroValue(f.goType, f.wType);
+			}
+			this.pushInstruction({
+				op: "struct.new",
+				typeIndex: structInfo.typeIndex,
+			});
+			return;
+		}
+		if (isArrayType(targetType, this.mod.checker)) {
+			const wType = this.toWasmType(targetType);
+			this.emitZeroValue(targetType, wType);
+			return;
+		}
+		const box = this.mod.getBoxType(targetType);
+		const valWType = this.toWasmType(targetType);
+		this.emitZeroValue(targetType, valWType);
+		this.pushInstruction({
+			op: "struct.new",
+			typeIndex: box.typeIndex,
+			typeName: box.name,
+		});
+	}
+
 	// With `newLen` already computed: when it exceeds the old capacity, allocate
 	// a doubled (min 2, at least newLen) backing array and copy the old elements
 	// into it at offset 0; otherwise reuse the old array, offset and capacity.
@@ -946,6 +989,9 @@ export class BuiltinsEmitter {
 				return true;
 			case "cap":
 				this._emitBuiltinCap(call, targetWasmType);
+				return true;
+			case "new":
+				this._emitBuiltinNew(call);
 				return true;
 			case "make":
 				this._emitBuiltinMake(call);
