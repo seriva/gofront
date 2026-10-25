@@ -21,6 +21,44 @@ import {
 	VOID,
 } from "../types.js";
 
+const MONTH_T = {
+	kind: "named",
+	name: "time.Month",
+	underlying: INT,
+	methods: new Map([
+		["String", { kind: "func", params: [], returns: [STRING] }],
+	]),
+};
+
+const WEEKDAY_T = {
+	kind: "named",
+	name: "time.Weekday",
+	underlying: INT,
+	methods: new Map([
+		["String", { kind: "func", params: [], returns: [STRING] }],
+	]),
+};
+
+const LOCATION_T = {
+	kind: "named",
+	name: "time.Location",
+	underlying: {
+		kind: "struct",
+		fields: new Map([
+			["_name", STRING],
+			["_offset", INT],
+		]),
+		methods: new Map([
+			["String", { kind: "func", params: [], returns: [STRING] }],
+		]),
+	},
+};
+LOCATION_T.methods = LOCATION_T.underlying.methods;
+const LOCATION_PTR_T = {
+	kind: "pointer",
+	base: LOCATION_T,
+};
+
 const DURATION_T = {
 	kind: "named",
 	name: "time.Duration",
@@ -35,6 +73,44 @@ const DURATION_T = {
 		["String", { kind: "func", params: [], returns: [STRING] }],
 	]),
 };
+DURATION_T.methods.set("Truncate", {
+	kind: "func",
+	params: [DURATION_T],
+	returns: [DURATION_T],
+});
+DURATION_T.methods.set("Round", {
+	kind: "func",
+	params: [DURATION_T],
+	returns: [DURATION_T],
+});
+DURATION_T.methods.set("Abs", {
+	kind: "func",
+	params: [],
+	returns: [DURATION_T],
+});
+
+const TIMER_T = {
+	kind: "named",
+	name: "time.Timer",
+	underlying: {
+		kind: "struct",
+		fields: new Map(),
+		methods: new Map([
+			["Stop", { kind: "func", params: [], returns: [BOOL], _ptrRecv: true }],
+			[
+				"Reset",
+				{ kind: "func", params: [DURATION_T], returns: [BOOL], _ptrRecv: true },
+			],
+		]),
+	},
+};
+TIMER_T.methods = TIMER_T.underlying.methods;
+const TIMER_PTR_T = {
+	kind: "pointer",
+	base: TIMER_T,
+};
+
+const TIME_BYTES = { kind: "slice", elem: UINT8 };
 const TIME_T = {
 	kind: "named",
 	name: "time.Time",
@@ -46,16 +122,17 @@ const TIME_T = {
 };
 TIME_T.underlying.fields.set("_unixNano", INT64);
 TIME_T.underlying.fields.set("_offset", INT32);
+TIME_T.underlying.fields.set("_loc", ANY);
 TIME_T.underlying.methods = new Map([
 	["Format", { kind: "func", params: [STRING], returns: [STRING] }],
 	["String", { kind: "func", params: [], returns: [STRING] }],
 	["Year", { kind: "func", params: [], returns: [INT] }],
-	["Month", { kind: "func", params: [], returns: [INT] }],
+	["Month", { kind: "func", params: [], returns: [MONTH_T] }],
 	["Day", { kind: "func", params: [], returns: [INT] }],
 	["Hour", { kind: "func", params: [], returns: [INT] }],
 	["Minute", { kind: "func", params: [], returns: [INT] }],
 	["Second", { kind: "func", params: [], returns: [INT] }],
-	["Weekday", { kind: "func", params: [], returns: [INT] }],
+	["Weekday", { kind: "func", params: [], returns: [WEEKDAY_T] }],
 	["Unix", { kind: "func", params: [], returns: [INT64] }],
 	["UnixMilli", { kind: "func", params: [], returns: [INT64] }],
 	["UnixNano", { kind: "func", params: [], returns: [INT64] }],
@@ -77,8 +154,18 @@ TIME_T.underlying.methods = new Map([
 	["ISOWeek", { kind: "func", params: [], returns: [INT, INT] }],
 	["Compare", { kind: "func", params: [TIME_T], returns: [INT] }],
 	["In", { kind: "func", params: [ANY], returns: [TIME_T] }],
-	["Location", { kind: "func", params: [], returns: [ANY] }],
+	["Location", { kind: "func", params: [], returns: [LOCATION_PTR_T] }],
 	["Zone", { kind: "func", params: [], returns: [STRING, INT] }],
+	["MarshalJSON", { kind: "func", params: [], returns: [TIME_BYTES, ERROR] }],
+	[
+		"UnmarshalJSON",
+		{ kind: "func", params: [TIME_BYTES], returns: [ERROR], _ptrRecv: true },
+	],
+	["MarshalText", { kind: "func", params: [], returns: [TIME_BYTES, ERROR] }],
+	[
+		"UnmarshalText",
+		{ kind: "func", params: [TIME_BYTES], returns: [ERROR], _ptrRecv: true },
+	],
 ]);
 TIME_T.methods = TIME_T.underlying.methods;
 const REPLACER_T = {
@@ -658,13 +745,28 @@ export function setupCoreGlobals(globals, types) {
 				params: [STRING, STRING],
 				returns: [TIME_T, ERROR],
 			},
+			ParseDuration: {
+				kind: "func",
+				params: [STRING],
+				returns: [DURATION_T, ERROR],
+			},
 			Unix: { kind: "func", params: [INT64, INT64], returns: [TIME_T] },
 			UnixMicro: { kind: "func", params: [INT64], returns: [TIME_T] },
 			UnixMilli: { kind: "func", params: [INT64], returns: [TIME_T] },
 			Date: {
 				kind: "func",
-				params: [INT, INT, INT, INT, INT, INT, INT, ANY],
+				params: [INT, ANY, INT, INT, INT, INT, INT, ANY],
 				returns: [TIME_T],
+			},
+			FixedZone: {
+				kind: "func",
+				params: [STRING, INT],
+				returns: [LOCATION_PTR_T],
+			},
+			AfterFunc: {
+				kind: "func",
+				params: [DURATION_T, { kind: "func", params: [], returns: [VOID] }],
+				returns: [TIMER_PTR_T],
 			},
 			Duration: DURATION_T,
 			Nanosecond: DURATION_T,
@@ -674,6 +776,10 @@ export function setupCoreGlobals(globals, types) {
 			Minute: DURATION_T,
 			Hour: DURATION_T,
 			Time: TIME_T,
+			Month: MONTH_T,
+			Weekday: WEEKDAY_T,
+			Location: LOCATION_T,
+			Timer: TIMER_T,
 			RFC3339: STRING,
 			RFC3339Nano: STRING,
 			DateOnly: STRING,
@@ -681,29 +787,33 @@ export function setupCoreGlobals(globals, types) {
 			DateTime: STRING,
 			UTC: ANY,
 			Local: ANY,
-			January: INT,
-			February: INT,
-			March: INT,
-			April: INT,
-			May: INT,
-			June: INT,
-			July: INT,
-			August: INT,
-			September: INT,
-			October: INT,
-			November: INT,
-			December: INT,
-			Sunday: INT,
-			Monday: INT,
-			Tuesday: INT,
-			Wednesday: INT,
-			Thursday: INT,
-			Friday: INT,
-			Saturday: INT,
+			January: MONTH_T,
+			February: MONTH_T,
+			March: MONTH_T,
+			April: MONTH_T,
+			May: MONTH_T,
+			June: MONTH_T,
+			July: MONTH_T,
+			August: MONTH_T,
+			September: MONTH_T,
+			October: MONTH_T,
+			November: MONTH_T,
+			December: MONTH_T,
+			Sunday: WEEKDAY_T,
+			Monday: WEEKDAY_T,
+			Tuesday: WEEKDAY_T,
+			Wednesday: WEEKDAY_T,
+			Thursday: WEEKDAY_T,
+			Friday: WEEKDAY_T,
+			Saturday: WEEKDAY_T,
 		},
 	});
 	types.set("time.Duration", DURATION_T);
 	types.set("time.Time", TIME_T);
+	types.set("time.Month", MONTH_T);
+	types.set("time.Weekday", WEEKDAY_T);
+	types.set("time.Location", LOCATION_T);
+	types.set("time.Timer", TIMER_T);
 
 	const runeToStr = { kind: "func", params: [INT], returns: [BOOL] };
 	const runeTrans = { kind: "func", params: [INT], returns: [INT] };

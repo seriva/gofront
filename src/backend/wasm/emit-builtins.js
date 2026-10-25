@@ -1257,6 +1257,20 @@ export class BuiltinsEmitter {
 			this.emitDurationMethodCall(field, expr, args, targetWasmType);
 			return true;
 		}
+		if (
+			recvTypeName === "time.Month" ||
+			recvTypeName === "time.Weekday" ||
+			recvTypeName === "time.Location"
+		) {
+			this.emitTimeAuxMethodCall(
+				recvTypeName,
+				field,
+				expr,
+				args,
+				targetWasmType,
+			);
+			return true;
+		}
 		if (recvTypeName === "io.LimitedReader") {
 			this.emitIoLimitedReaderMethodCall(field, expr, args, targetWasmType);
 			return true;

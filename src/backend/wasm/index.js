@@ -254,12 +254,17 @@ const STDLIB_IMPORTS = [
 	["time_parse", [S, S], ["f64"]],
 	["time_parse_err", [], [S]],
 	["time_parse_offset", [], ["i32"]],
+	["time_parse_sub_ns", [], ["i32"]],
 	[
 		"time_format",
 		["i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", S],
 		[S],
 	],
 	["time_duration_string", ["i64"], [S]],
+	["time_parse_duration", [S], ["i64"]],
+	["time_parse_duration_err", [], [S]],
+	["time_month_string", ["i32"], [S]],
+	["time_weekday_string", ["i32"], [S]],
 	// raw binary buffer for crypto/rand, crypto/sha256, hex, base64
 	["raw_bytes_init", ["i32"], []],
 	["raw_bytes_push", ["i32"], []],
