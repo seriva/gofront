@@ -6449,6 +6449,15 @@ export class StdlibCoreEmitter {
 
 	emitStringsCall(name, args, targetWasmType) {
 		switch (name) {
+			case "ToValidUTF8": {
+				this.emitExpr(args[0], "externref");
+				this.emitExpr(args[1], "externref");
+				this.pushInstruction({
+					op: "call",
+					funcIndex: this.mod.getStringToValidUTF8ImportIndex(),
+				});
+				return;
+			}
 			case "ToUpper": {
 				this.emitExpr(args[0], "externref");
 				this.pushInstruction({
