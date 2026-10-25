@@ -4013,6 +4013,174 @@ export class BytesEmitter {
 		this.releaseTemp(bArr, arrW);
 	}
 
+	_emitIsSpaceAt(arr, off, idx, len, outWidth, arrInfo) {
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: outWidth });
+
+		const cTmp = this.acquireTemp("i32");
+		this.pushInstruction({ op: "local.get", index: arr });
+		this.pushInstruction({ op: "local.get", index: off });
+		this.pushInstruction({ op: "local.get", index: idx });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "array.get", typeIndex: arrInfo.typeIndex });
+		this.pushInstruction({ op: "local.set", index: cTmp });
+
+		// if c == 32 || (c >= 9 && c <= 13) -> 1
+		this.pushInstruction({ op: "local.get", index: cTmp });
+		this.pushInstruction({ op: "i32.const", value: 32 });
+		this.pushInstruction("i32.eq");
+		this.pushInstruction({ op: "local.get", index: cTmp });
+		this.pushInstruction({ op: "i32.const", value: 9 });
+		this.pushInstruction("i32.sub");
+		this.pushInstruction({ op: "i32.const", value: 4 });
+		this.pushInstruction("i32.le_u");
+		this.pushInstruction("i32.or");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction({ op: "local.set", index: outWidth });
+		this.pushInstruction({ op: "else" });
+
+		// if c == 0xC2 && idx + 1 < len
+		this.pushInstruction({ op: "local.get", index: cTmp });
+		this.pushInstruction({ op: "i32.const", value: 0xc2 });
+		this.pushInstruction("i32.eq");
+		this.pushInstruction({ op: "local.get", index: idx });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.get", index: len });
+		this.pushInstruction("i32.lt_s");
+		this.pushInstruction("i32.and");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		// c1 = arr[off + idx + 1]
+		this.pushInstruction({ op: "local.get", index: arr });
+		this.pushInstruction({ op: "local.get", index: off });
+		this.pushInstruction({ op: "local.get", index: idx });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "array.get", typeIndex: arrInfo.typeIndex });
+		this.pushInstruction({ op: "local.tee", index: cTmp });
+		this.pushInstruction({ op: "i32.const", value: 0x85 });
+		this.pushInstruction("i32.eq");
+		this.pushInstruction({ op: "local.get", index: cTmp });
+		this.pushInstruction({ op: "i32.const", value: 0xa0 });
+		this.pushInstruction("i32.eq");
+		this.pushInstruction("i32.or");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "i32.const", value: 2 });
+		this.pushInstruction({ op: "local.set", index: outWidth });
+		this.pushInstruction("end");
+		this.pushInstruction({ op: "else" });
+
+		// idx + 2 < len
+		this.pushInstruction({ op: "local.get", index: idx });
+		this.pushInstruction({ op: "i32.const", value: 2 });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.get", index: len });
+		this.pushInstruction("i32.lt_s");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		const c1Tmp = this.acquireTemp("i32");
+		const c2Tmp = this.acquireTemp("i32");
+		this.pushInstruction({ op: "local.get", index: arr });
+		this.pushInstruction({ op: "local.get", index: off });
+		this.pushInstruction({ op: "local.get", index: idx });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "array.get", typeIndex: arrInfo.typeIndex });
+		this.pushInstruction({ op: "local.set", index: c1Tmp });
+
+		this.pushInstruction({ op: "local.get", index: arr });
+		this.pushInstruction({ op: "local.get", index: off });
+		this.pushInstruction({ op: "local.get", index: idx });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "i32.const", value: 2 });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "array.get", typeIndex: arrInfo.typeIndex });
+		this.pushInstruction({ op: "local.set", index: c2Tmp });
+
+		// if c == 0xE1 && c1 == 0x9A && c2 == 0x80 -> 3
+		this.pushInstruction({ op: "local.get", index: cTmp });
+		this.pushInstruction({ op: "i32.const", value: 0xe1 });
+		this.pushInstruction("i32.eq");
+		this.pushInstruction({ op: "local.get", index: c1Tmp });
+		this.pushInstruction({ op: "i32.const", value: 0x9a });
+		this.pushInstruction("i32.eq");
+		this.pushInstruction("i32.and");
+		this.pushInstruction({ op: "local.get", index: c2Tmp });
+		this.pushInstruction({ op: "i32.const", value: 0x80 });
+		this.pushInstruction("i32.eq");
+		this.pushInstruction("i32.and");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "i32.const", value: 3 });
+		this.pushInstruction({ op: "local.set", index: outWidth });
+		this.pushInstruction("end");
+
+		// if c == 0xE2:
+		this.pushInstruction({ op: "local.get", index: cTmp });
+		this.pushInstruction({ op: "i32.const", value: 0xe2 });
+		this.pushInstruction("i32.eq");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		// condition 1: (c1 == 0x80 && (c2 <= 0x8A || c2 == 0xA8 || c2 == 0xA9 || c2 == 0xAF))
+		this.pushInstruction({ op: "local.get", index: c1Tmp });
+		this.pushInstruction({ op: "i32.const", value: 0x80 });
+		this.pushInstruction("i32.eq");
+		this.pushInstruction({ op: "local.get", index: c2Tmp });
+		this.pushInstruction({ op: "i32.const", value: 0x8a });
+		this.pushInstruction("i32.le_u");
+		this.pushInstruction({ op: "local.get", index: c2Tmp });
+		this.pushInstruction({ op: "i32.const", value: 0xa8 });
+		this.pushInstruction("i32.eq");
+		this.pushInstruction("i32.or");
+		this.pushInstruction({ op: "local.get", index: c2Tmp });
+		this.pushInstruction({ op: "i32.const", value: 0xa9 });
+		this.pushInstruction("i32.eq");
+		this.pushInstruction("i32.or");
+		this.pushInstruction({ op: "local.get", index: c2Tmp });
+		this.pushInstruction({ op: "i32.const", value: 0xaf });
+		this.pushInstruction("i32.eq");
+		this.pushInstruction("i32.or");
+		this.pushInstruction("i32.and");
+		// condition 2: (c1 == 0x81 && c2 == 0x9F)
+		this.pushInstruction({ op: "local.get", index: c1Tmp });
+		this.pushInstruction({ op: "i32.const", value: 0x81 });
+		this.pushInstruction("i32.eq");
+		this.pushInstruction({ op: "local.get", index: c2Tmp });
+		this.pushInstruction({ op: "i32.const", value: 0x9f });
+		this.pushInstruction("i32.eq");
+		this.pushInstruction("i32.and");
+		this.pushInstruction("i32.or");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "i32.const", value: 3 });
+		this.pushInstruction({ op: "local.set", index: outWidth });
+		this.pushInstruction("end");
+		this.pushInstruction("end");
+
+		// if c == 0xE3 && c1 == 0x80 && c2 == 0x80 -> 3
+		this.pushInstruction({ op: "local.get", index: cTmp });
+		this.pushInstruction({ op: "i32.const", value: 0xe3 });
+		this.pushInstruction("i32.eq");
+		this.pushInstruction({ op: "local.get", index: c1Tmp });
+		this.pushInstruction({ op: "i32.const", value: 0x80 });
+		this.pushInstruction("i32.eq");
+		this.pushInstruction("i32.and");
+		this.pushInstruction({ op: "local.get", index: c2Tmp });
+		this.pushInstruction({ op: "i32.const", value: 0x80 });
+		this.pushInstruction("i32.eq");
+		this.pushInstruction("i32.and");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction({ op: "i32.const", value: 3 });
+		this.pushInstruction({ op: "local.set", index: outWidth });
+		this.pushInstruction("end");
+
+		this.releaseTemp(c2Tmp, "i32");
+		this.releaseTemp(c1Tmp, "i32");
+		this.pushInstruction("end"); // idx + 2 < len
+		this.pushInstruction("end"); // c == 0xC2 else
+		this.pushInstruction("end"); // c == 32 else
+		this.releaseTemp(cTmp, "i32");
+	}
+
 	_emitInternalBytesFields(bTmp) {
 		const byteGo = { kind: "basic", name: "byte" };
 		const sliceInfo = this.mod.getSliceType(byteGo);
@@ -4062,31 +4230,17 @@ export class BytesEmitter {
 		this.pushInstruction("i32.ge_s");
 		this.pushInstruction({ op: "br_if", depth: 1 });
 
-		const cTmp = this.acquireTemp("i32");
-		this.pushInstruction({ op: "local.get", index: bArr });
-		this.pushInstruction({ op: "local.get", index: bOff });
-		this.pushInstruction({ op: "local.get", index: iTmp });
-		this.pushInstruction("i32.add");
-		this.pushInstruction({ op: "array.get", typeIndex: arrInfo.typeIndex });
-		this.pushInstruction({ op: "local.set", index: cTmp });
-
-		// isSp: c == 32 || (c >= 9 && c <= 13)
 		const isSpTmp = this.acquireTemp("i32");
-		this.pushInstruction({ op: "local.get", index: cTmp });
-		this.pushInstruction({ op: "i32.const", value: 32 });
-		this.pushInstruction("i32.eq");
-		this.pushInstruction({ op: "local.get", index: cTmp });
-		this.pushInstruction({ op: "i32.const", value: 9 });
-		this.pushInstruction("i32.sub");
-		this.pushInstruction({ op: "i32.const", value: 4 });
-		this.pushInstruction("i32.le_u");
-		this.pushInstruction("i32.or");
-		this.pushInstruction({ op: "local.set", index: isSpTmp });
+		this._emitIsSpaceAt(bArr, bOff, iTmp, bLen, isSpTmp, arrInfo);
 
 		this.pushInstruction({ op: "local.get", index: isSpTmp });
 		this.pushInstruction({ op: "if", blockType: "void" });
 		this.pushInstruction({ op: "i32.const", value: 0 });
 		this.pushInstruction({ op: "local.set", index: inWordTmp });
+		this.pushInstruction({ op: "local.get", index: iTmp });
+		this.pushInstruction({ op: "local.get", index: isSpTmp });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: iTmp });
 		this.pushInstruction("else");
 		this.pushInstruction({ op: "local.get", index: inWordTmp });
 		this.pushInstruction("i32.eqz");
@@ -4098,15 +4252,14 @@ export class BytesEmitter {
 		this.pushInstruction({ op: "i32.const", value: 1 });
 		this.pushInstruction({ op: "local.set", index: inWordTmp });
 		this.pushInstruction("end");
-		this.pushInstruction("end");
-
-		this.releaseTemp(isSpTmp, "i32");
-		this.releaseTemp(cTmp, "i32");
-
 		this.pushInstruction({ op: "local.get", index: iTmp });
 		this.pushInstruction({ op: "i32.const", value: 1 });
 		this.pushInstruction("i32.add");
 		this.pushInstruction({ op: "local.set", index: iTmp });
+		this.pushInstruction("end");
+
+		this.releaseTemp(isSpTmp, "i32");
+
 		this.pushInstruction({ op: "br", depth: 0 });
 		this.pushInstruction("end");
 		this.pushInstruction("end");
@@ -4152,25 +4305,8 @@ export class BytesEmitter {
 		this.pushInstruction("i32.ge_s");
 		this.pushInstruction({ op: "br_if", depth: 1 });
 
-		const c2Tmp = this.acquireTemp("i32");
-		this.pushInstruction({ op: "local.get", index: bArr });
-		this.pushInstruction({ op: "local.get", index: bOff });
-		this.pushInstruction({ op: "local.get", index: kTmp });
-		this.pushInstruction("i32.add");
-		this.pushInstruction({ op: "array.get", typeIndex: arrInfo.typeIndex });
-		this.pushInstruction({ op: "local.set", index: c2Tmp });
-
 		const isSp2Tmp = this.acquireTemp("i32");
-		this.pushInstruction({ op: "local.get", index: c2Tmp });
-		this.pushInstruction({ op: "i32.const", value: 32 });
-		this.pushInstruction("i32.eq");
-		this.pushInstruction({ op: "local.get", index: c2Tmp });
-		this.pushInstruction({ op: "i32.const", value: 9 });
-		this.pushInstruction("i32.sub");
-		this.pushInstruction({ op: "i32.const", value: 4 });
-		this.pushInstruction("i32.le_u");
-		this.pushInstruction("i32.or");
-		this.pushInstruction({ op: "local.set", index: isSp2Tmp });
+		this._emitIsSpaceAt(bArr, bOff, kTmp, bLen, isSp2Tmp, arrInfo);
 
 		this.pushInstruction({ op: "local.get", index: isSp2Tmp });
 		this.pushInstruction({ op: "if", blockType: "void" });
@@ -4204,6 +4340,10 @@ export class BytesEmitter {
 		this.pushInstruction({ op: "i32.const", value: 0 });
 		this.pushInstruction({ op: "local.set", index: inWordTmp });
 		this.pushInstruction("end");
+		this.pushInstruction({ op: "local.get", index: kTmp });
+		this.pushInstruction({ op: "local.get", index: isSp2Tmp });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: kTmp });
 		this.pushInstruction("else");
 		this.pushInstruction({ op: "local.get", index: inWordTmp });
 		this.pushInstruction("i32.eqz");
@@ -4213,15 +4353,14 @@ export class BytesEmitter {
 		this.pushInstruction({ op: "i32.const", value: 1 });
 		this.pushInstruction({ op: "local.set", index: inWordTmp });
 		this.pushInstruction("end");
-		this.pushInstruction("end");
-
-		this.releaseTemp(isSp2Tmp, "i32");
-		this.releaseTemp(c2Tmp, "i32");
-
 		this.pushInstruction({ op: "local.get", index: kTmp });
 		this.pushInstruction({ op: "i32.const", value: 1 });
 		this.pushInstruction("i32.add");
 		this.pushInstruction({ op: "local.set", index: kTmp });
+		this.pushInstruction("end");
+
+		this.releaseTemp(isSp2Tmp, "i32");
+
 		this.pushInstruction({ op: "br", depth: 0 });
 		this.pushInstruction("end");
 		this.pushInstruction("end");
