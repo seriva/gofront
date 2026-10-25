@@ -138,10 +138,10 @@ Members of each Go package that `wasm` and `both` packages can use today, out of
 | `encoding/json` | 0 of 68 | 68 |
 | `errors` | 6 of 7 | 1 |
 | `fmt` | 21 of 43 | 22 |
-| `hash` | 0 of 32 | 32 |
-| `hash/adler32` | 0 of 3 | 3 |
-| `hash/crc32` | 0 of 12 | 12 |
-| `hash/fnv` | 0 of 6 | 6 |
+| `hash` | 5 of 32 | 27 |
+| `hash/adler32` | 3 of 3 | 0 |
+| `hash/crc32` | 12 of 12 | 0 |
+| `hash/fnv` | 6 of 6 | 0 |
 | `html` | 2 of 2 | 0 |
 | `io` | 54 of 94 | 40 |
 | `iter` | 2 of 2 | 0 |
