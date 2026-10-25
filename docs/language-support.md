@@ -87,7 +87,7 @@ Members of each Go package (functions, types, methods, fields, constants and var
 | Package | Available | Not yet | JS-only | Excluded |
 |---|---|---|---|---|
 | `bufio` | 0 of 79 | 79 | 0 | 0 |
-| `bytes` | 54 of 99 | 45 | 0 | 0 |
+| `bytes` | 78 of 99 | 21 | 0 | 0 |
 | `cmp` | 4 of 4 | 0 | 0 | 0 |
 | `container/heap` | 0 of 11 | 11 | 0 | 0 |
 | `container/list` | 0 of 21 | 21 | 0 | 0 |
@@ -130,7 +130,7 @@ Members of each Go package (functions, types, methods, fields, constants and var
 | `slices` | 37 of 40 | 3 | 0 | 0 |
 | `sort` | 36 of 40 | 4 | 0 | 0 |
 | `strconv` | 41 of 43 | 2 | 0 | 0 |
-| `strings` | 66 of 82 | 16 | 0 | 0 |
+| `strings` | 75 of 82 | 7 | 0 | 0 |
 | `sync` | 20 of 39 | 19 | 0 | 7 |
 | `sync/atomic` | 0 of 90 | 90 | 0 | 4 |
 | `testing` | 18 of 94 | 76 | 0 | 72 |
