@@ -9,6 +9,7 @@ import {
 	BASIC_TYPES,
 	COMPARABLE,
 	defaultType,
+	displayTypeName,
 	isAny,
 	isTypedArraySlice,
 	Scope,
@@ -697,11 +698,25 @@ export const resolveMethods = {
 		}
 		if (base.methods?.has(field)) return base.methods.get(field);
 		const typeName = baseType?.name || base.name;
-		if (typeName && EXCLUDED_STDLIB_MEMBERS.has(`${typeName}.${field}`)) {
-			return this.err(
-				`${typeName}.${field} is not available: ${EXCLUDED_STDLIB_MEMBERS.get(`${typeName}.${field}`)}`,
-				node,
-			);
+		if (typeName) {
+			const dName = displayTypeName(typeName);
+			const shortName = typeName.includes("$$")
+				? typeName.split("$$")[0]
+				: typeName.includes(".")
+					? typeName.split(".").pop()
+					: typeName;
+			for (const key of [
+				`${dName}.${field}`,
+				`${typeName}.${field}`,
+				`${shortName}.${field}`,
+			]) {
+				if (EXCLUDED_STDLIB_MEMBERS.has(key)) {
+					return this.err(
+						`${dName}.${field} is not available: ${EXCLUDED_STDLIB_MEMBERS.get(key)}`,
+						node,
+					);
+				}
+			}
 		}
 		return this.err(`No field '${field}' on ${typeStr(baseType)}`, node);
 	},
@@ -709,6 +724,27 @@ export const resolveMethods = {
 	_fieldTypeInterface(base, baseType, field, node) {
 		if (base.methods?.has(field)) return base.methods.get(field);
 		if (base.fields?.has(field)) return base.fields.get(field);
+		const typeName = baseType?.name || base.name;
+		if (typeName) {
+			const dName = displayTypeName(typeName);
+			const shortName = typeName.includes("$$")
+				? typeName.split("$$")[0]
+				: typeName.includes(".")
+					? typeName.split(".").pop()
+					: typeName;
+			for (const key of [
+				`${dName}.${field}`,
+				`${typeName}.${field}`,
+				`${shortName}.${field}`,
+			]) {
+				if (EXCLUDED_STDLIB_MEMBERS.has(key)) {
+					return this.err(
+						`${dName}.${field} is not available: ${EXCLUDED_STDLIB_MEMBERS.get(key)}`,
+						node,
+					);
+				}
+			}
+		}
 		if (base._excluded?.has(field))
 			return this.err(`No member '${field}' on ${typeStr(baseType)}`, node);
 		if (base._isOpen) return ANY;
