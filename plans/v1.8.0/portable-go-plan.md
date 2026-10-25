@@ -1302,29 +1302,33 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
 
 ### Phase 4.2: `context`, container and hash
 
-- [ ] **Task 4.3a — `context` cancel tree and values**
+- [x] **Task 4.3a — `context` cancel tree and values**
   - Files: new `runtime/stdlib/context/context.go`, `src/typechecker/stdlib/` (`Done()` diagnostic)
   - Do: `Context` interface without `Done()`; `Background`, `TODO`, `WithCancel`, `WithCancelCause`, `WithValue`, `WithoutCancel`, `Cause`, `Canceled`, `CancelFunc`, `CancelCauseFunc`. `ctx.Done()` reports the channel diagnostic with the `ctx.Err()`/`context.AfterFunc` hint.
   - Test: conformance fixture `context/cancel.go`; unit test for the `Done()` diagnostic.
   - Done when: cancelling a parent cancels every descendant; `WithoutCancel` children are not cancelled.
+  - Landed: implemented `context` in pure Go source (`runtime/stdlib/context/context.go`) supporting `Context` interface, `Background`, `TODO`, `WithCancel`, `WithCancelCause`, `WithValue`, `WithoutCancel`, `Cause`, `Canceled`, `CancelFunc`, `CancelCauseFunc`. Hooked up targeted diagnostic for `ctx.Done()`. Fixed WASM return statement code generation for multi-valued function calls without defers (`emitReturnStmt`). Conformance fixture `test/conformance/context/cancel.go` passes on JS and WASM matching Go 1.26 reference. Updated stdlib coverage gaps and regenerated docs.
 
-- [ ] **Task 4.3b — `context` deadlines and `AfterFunc`**
+- [x] **Task 4.3b — `context` deadlines and `AfterFunc`**
   - Files: `runtime/stdlib/context/deadline.go` (uses the Task 0.6d intrinsic)
   - Do: `WithDeadline`, `WithDeadlineCause`, `WithTimeout`, `WithTimeoutCause`, `DeadlineExceeded`, `AfterFunc` (runs once; stop returns `false` once started). In WASM `Err()` compares the deadline with the clock import and cancels on first observation, firing `AfterFunc` callbacks.
   - Test: conformance fixture `context/deadline.go` with an injected clock; a WASM unit test that advances the fake clock import.
   - Done when: both pass and `example/preact` can cancel a `fetch` through `AbortController` (used in Task 7.1).
+  - Landed: implemented `context` deadlines and `AfterFunc` in pure Go source (`runtime/stdlib/context/deadline.go`) supporting `DeadlineExceeded`, `WithDeadline`, `WithDeadlineCause`, `WithTimeout`, `WithTimeoutCause`, and `AfterFunc` using `//gofront:intrinsic deadline_timer` and cooperative WASM deadline checking. Conformance fixture `test/conformance/context/deadline.go` passes on JS and WASM matching Go 1.26 reference. WASM unit test verified advancing fake clock import. Updated stdlib coverage gaps (0 gaps remaining in `context`) and regenerated docs.
 
-- [ ] **Task 4.4 — `container/heap`, `container/list`, `container/ring`**
+- [x] **Task 4.4 — `container/heap`, `container/list`, `container/ring`**
   - Files: new `runtime/stdlib/container/{heap,list,ring}/*.go`
   - Do: full API of each.
   - Test: conformance fixtures `container/{heap,list,ring}.go`.
   - Done when: fixtures match Go.
+  - Landed: implemented `container/heap`, `container/list`, and `container/ring` in pure Go source supporting their full standard APIs. Fixed compiler AST mangling for type names in `new(T)` and `make(T)`, added parser support for `for ; cond; post` loops, added `new` builtin lowering in WASM backend, resolved JS receiver reassignment in methods, fixed slice pointer interface dispatch trampolines in WASM backend, and fixed unqualified imported type contamination in stdlib coverage test. Conformance fixtures pass on JS and WASM matching Go 1.26 reference. Updated stdlib coverage gaps (0 gaps remaining in `container/*`) and regenerated docs.
 
-- [ ] **Task 4.5 — `hash`, `hash/crc32`, `hash/fnv`, `hash/adler32`**
+- [x] **Task 4.5 — `hash`, `hash/crc32`, `hash/fnv`, `hash/adler32`**
   - Files: new `runtime/stdlib/hash/**.go`
   - Do: `hash.Hash`/`Hash32`/`Hash64`; crc32 with `IEEE`, `Castagnoli`, `Koopman` tables built at init; fnv 32/32a/64/64a; adler32.
   - Test: conformance fixture `hash/sums.go` over ASCII and non-ASCII input (via `[]byte`).
   - Done when: fixture matches Go on both backends (strict `uint32` arithmetic makes JS bit-identical).
+  - Landed: implemented `hash`, `hash/crc32`, `hash/adler32`, and `hash/fnv` in pure Go source across JavaScript and WebAssembly backends. Lowered array zero values for `new(T)` in JS, fixed 32-bit unsigned integer multiplication wrapping with `Math.imul` in JS strict mode, supported array type zero values in WASM `new(T)`, and handled interface dispatch for pointer receivers on named scalar types in WASM. Conformance fixture `test/conformance/hash/sums.go` matches Go 1.26 reference on both JS and WASM. Resolved all stdlib coverage gaps for `hash/crc32`, `hash/adler32`, and `hash/fnv` (0 gaps remaining), and regenerated documentation.
 
 ### Phase 4.3: `crypto`, base32 and `sync/atomic`
 

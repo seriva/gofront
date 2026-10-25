@@ -6,6 +6,7 @@ import {
 	assertEqual,
 	assertThrows,
 	compileHybrid,
+	compileHybridProject,
 	compileWasm,
 	runWasm,
 	section,
@@ -1462,6 +1463,61 @@ func Main() string {
 `;
 		const { wasmRes, jsRes } = compileHybrid(src).run("Main");
 		assertEqual(wasmRes, jsRes);
+	} finally {
+		globalThis.__GOFRONT_CLOCK = oldClock;
+	}
+});
+
+test("context.WithDeadline and AfterFunc with advancing fake clock in wasm", async () => {
+	let currentTime = 1704067200000;
+	const oldClock = globalThis.__GOFRONT_CLOCK;
+	try {
+		globalThis.__GOFRONT_CLOCK = () => currentTime;
+		const src = `
+package main
+
+import (
+	"context"
+	"fmt"
+	"time"
+)
+
+var (
+	ctx context.Context
+	cancel context.CancelFunc
+	afterFired bool
+)
+
+func InitCtx() {
+	deadline := time.Now().Add(1000 * time.Millisecond)
+	ctx, cancel = context.WithDeadline(context.Background(), deadline)
+	context.AfterFunc(ctx, func() {
+		afterFired = true
+	})
+}
+
+func CheckBefore() string {
+	return fmt.Sprintf("err=%v fired=%t", ctx.Err(), afterFired)
+}
+
+func CheckAfter() string {
+	return fmt.Sprintf("err=%v fired=%t", ctx.Err() == context.DeadlineExceeded, afterFired)
+}
+
+func main() {}
+`;
+		const res = await compileHybridProject(
+			{ "main.go": `//gofront:target wasm\n${src}` },
+			{ exports: ["InitCtx", "CheckBefore", "CheckAfter"] },
+		);
+		res.mod.InitCtx();
+		const before = res.mod.CheckBefore();
+		assertEqual(before, "err=<nil> fired=false");
+
+		// Advance clock past deadline
+		currentTime = 1704067202000;
+		const after = res.mod.CheckAfter();
+		assertEqual(after, "err=true fired=true");
 	} finally {
 		globalThis.__GOFRONT_CLOCK = oldClock;
 	}
