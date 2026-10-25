@@ -95,17 +95,7 @@
 			"Ring.Unlink",
 			"Ring.Value"
 		],
-		"context": [
-			"AfterFunc",
-			"Context.Deadline",
-			"Context.Err",
-			"Context.Value",
-			"DeadlineExceeded",
-			"WithDeadline",
-			"WithDeadlineCause",
-			"WithTimeout",
-			"WithTimeoutCause"
-		],
+		"context": ["Context.Deadline", "Context.Err", "Context.Value"],
 		"crypto/hmac": ["Equal", "New"],
 		"crypto/md5": ["BlockSize", "New", "Size", "Sum"],
 		"crypto/rand": ["Text"],
