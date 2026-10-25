@@ -347,7 +347,7 @@ export const HELPER_FMT_LOOP = String.raw`
       // numbers of unknown element type is taken for bytes under %s, %x and %X.
       const et0 = elemOf(t);
       const bn0 = U.baseOf(et0);
-      const isBytes = v instanceof Uint8Array || (et0 == null && "sxX".includes(verb) && items.every((e) => Number.isInteger(e) && e >= 0 && e < 256)) || (bn0?.k === "b" && bn0.n === "uint8" && "xX".includes(verb));
+      const isBytes = v instanceof Uint8Array || (et0 == null && "sqxX".includes(verb) && items.every((e) => Number.isInteger(e) && e >= 0 && e < 256)) || (bn0?.k === "b" && bn0.n === "uint8" && "sqxX".includes(verb));
       if (isBytes && "sqxX".includes(verb)) {
         if (verb === "x" || verb === "X") return U.fmtHex(items, verb === "X", fl, prec, hasPrec, wid);
         return fmtStr(verb, new TextDecoder().decode(Uint8Array.from(items)), fl, wid, prec, hasPrec);
