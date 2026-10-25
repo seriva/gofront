@@ -27,6 +27,7 @@ import {
 	assertErrorContains,
 	assertThrows,
 	compile,
+	compileWasm,
 	section,
 	summarize,
 	test,
@@ -1211,6 +1212,147 @@ func TestPass(t *testing.T) {
 			assertContains(combined, "setup before m.Run()");
 			assertContains(combined, "exit code: 0");
 			assertContains(result.stdout, "--- PASS: TestPass");
+		},
+	);
+});
+
+test("testing.Benchmark compiles and runs in JS without ICE or constant reassignment", () => {
+	const src = `package main
+import "testing"
+func main() {
+  res := testing.Benchmark(func(b *testing.B) {
+    for i := 0; i < b.N; i++ {}
+  })
+  _ = res
+}
+`;
+	const out = compile(src);
+	assertEqual(out.errors.length, 0);
+	new Function(out.js)();
+});
+
+test("package-level testing functions in wasm package produce clean diagnostic", () => {
+	const src = `package main
+import "testing"
+func main() {
+  _ = testing.Short()
+}
+`;
+	const res = compileWasm(src);
+	assert(res.errors.length > 0);
+	assertErrorContains(
+		res.errors,
+		"'testing.Short' is not yet available in wasm packages",
+	);
+});
+
+test("WASM benchmarks and testing types (b.N, b.Loop, BenchmarkResult.N, testing.TB, m.Run)", () => {
+	const src = `package main
+import "testing"
+func helper(tb testing.TB) {
+  tb.Helper()
+}
+func BenchmarkWasm(b *testing.B) {
+  for i := 0; i < b.N; i++ {}
+  for b.Loop() {}
+  var res testing.BenchmarkResult
+  _ = res.N
+  helper(b)
+  _ = b.Elapsed()
+}
+func TestWasmTB(t *testing.T) {
+  helper(t)
+  t.Context()
+  t.Output()
+  t.Deadline()
+}
+func TestMain(m *testing.M) {
+  code := m.Run()
+  _ = code
+}
+`;
+	const out = compileWasm(src);
+	assertEqual(out.errors.length, 0);
+	new WebAssembly.Module(out.wasm);
+});
+
+test("runTests propagates failure when TestMain calls os.Exit(m.Run())", async () => {
+	await withTempDir(
+		{
+			"tm_fail_test.go": `package tmfail
+import "testing"
+import "os"
+
+func TestMain(m *testing.M) {
+  os.Exit(m.Run())
+}
+
+func TestShouldFail(t *testing.T) {
+  t.Fatal("expected failure")
+}
+`,
+		},
+		async (dir) => {
+			const result = await runTests(dir, {
+				captureOutput: true,
+			});
+			assertEqual(result.exitCode, 1);
+			assertContains(result.stdout, "--- FAIL: TestShouldFail");
+		},
+	);
+});
+
+test("sync.OnceFunc, OnceValue, and OnceValues re-panic on subsequent calls", async () => {
+	await withTempDir(
+		{
+			"main.go": `package main
+import "sync"
+
+func main() {
+  f := sync.OnceFunc(func() { panic("panic-func") })
+  func() {
+    defer func() { _ = recover() }()
+    f()
+  }()
+  func() {
+    defer func() {
+      r := recover()
+      if r != "panic-func" { panic("expected re-panic") }
+    }()
+    f()
+  }()
+
+  fVal := sync.OnceValue(func() int { panic("panic-val") })
+  func() {
+    defer func() { _ = recover() }()
+    fVal()
+  }()
+  func() {
+    defer func() {
+      r := recover()
+      if r != "panic-val" { panic("expected re-panic") }
+    }()
+    fVal()
+  }()
+
+  fVals := sync.OnceValues(func() (int, string) { panic("panic-vals") })
+  func() {
+    defer func() { _ = recover() }()
+    fVals()
+  }()
+  func() {
+    defer func() {
+      r := recover()
+      if r != "panic-vals" { panic("expected re-panic") }
+    }()
+    fVals()
+  }()
+}
+`,
+		},
+		async (dir) => {
+			const out = compileDir(dir);
+			new Function(out.js)();
 		},
 	);
 });

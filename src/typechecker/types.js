@@ -648,21 +648,7 @@ export const WASM_STDLIB_MEMBERS = new Map([
 			"Location",
 		]),
 	],
-	[
-		"testing",
-		new Set([
-			"T",
-			"B",
-			"M",
-			"TB",
-			"Benchmark",
-			"BenchmarkResult",
-			"Init",
-			"Testing",
-			"Short",
-			"Verbose",
-		]),
-	],
+	["testing", new Set(["T", "B", "M", "TB", "BenchmarkResult"])],
 	["sync", new Set(["Mutex", "RWMutex", "Once", "WaitGroup", "Locker"])],
 	["sha256", new Set(["Sum256", "New", "Size", "BlockSize"])],
 	[

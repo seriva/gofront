@@ -16,7 +16,7 @@ export const testingMethods = {
 				return "/* testing.Init */";
 			case "Benchmark":
 				this.useHelper("testing");
-				return `__testing_Benchmark(${this.genExpr(_a[0])})`;
+				return `__testing_Benchmark(${_a()[0]})`;
 		}
 		return undefined;
 	},
