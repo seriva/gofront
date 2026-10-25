@@ -2212,30 +2212,74 @@ class ModuleEmitter {
 						kind: "named",
 						name: rName,
 					};
+					const paramGoTypes = this.getFuncParamGoTypes(fnName);
+					const paramWTypes = this.getFuncParamTypes(fnName);
+					const isPtrRecv = paramGoTypes[0]?.kind === "pointer";
 					const isSlice = isSliceType(rType, this.checker);
+
 					if (isSlice) {
 						const elemType = getSliceElemType(rType, this.checker);
 						const sliceInfo = this.getSliceType(elemType);
-						const key = `slice:${rName}`;
-						if (sliceInfo && !seenKeys.has(key)) {
-							seenKeys.add(key);
-							const paramWTypes = this.getFuncParamTypes(fnName);
-							candidates.push({
-								recvTypeName: rName,
-								testTypeIndex: sliceInfo.typeIndex,
-								isBoxedValue: false,
-								needsValueDeref: false,
-								embedPath: null,
-								funcIndex: fIdx,
-								targetParamTypes: paramWTypes,
-							});
+						const ptrIfaceBox = this.getIfaceBoxType({
+							kind: "pointer",
+							base: rType,
+						});
+						const box = this.getBoxType(rType);
+						if (isPtrRecv) {
+							const ptrKey = `ptr:${rName}`;
+							if (ptrIfaceBox && !seenKeys.has(ptrKey)) {
+								seenKeys.add(ptrKey);
+								candidates.push({
+									recvTypeName: rName,
+									testTypeIndex: ptrIfaceBox.typeIndex,
+									isBoxedValue: true,
+									needsValueDeref: false,
+									embedPath: null,
+									funcIndex: fIdx,
+									targetParamTypes: paramWTypes,
+								});
+							}
+						} else {
+							const ptrKey = `ptr:${rName}`;
+							if (ptrIfaceBox && box && !seenKeys.has(ptrKey)) {
+								seenKeys.add(ptrKey);
+								candidates.push({
+									recvTypeName: rName,
+									testTypeIndex: ptrIfaceBox.typeIndex,
+									isBoxedValue: true,
+									needsValueDeref: false,
+									embedPath: [
+										{
+											castTypeIndex: box.typeIndex,
+											parentTypeIndex: box.typeIndex,
+											fieldIndex: 0,
+										},
+									],
+									funcIndex: fIdx,
+									targetParamTypes: paramWTypes,
+								});
+							}
+							const key = `slice:${rName}`;
+							if (sliceInfo && !seenKeys.has(key)) {
+								seenKeys.add(key);
+								candidates.push({
+									recvTypeName: rName,
+									testTypeIndex: sliceInfo.typeIndex,
+									isBoxedValue: false,
+									needsValueDeref: false,
+									embedPath: null,
+									funcIndex: fIdx,
+									targetParamTypes: paramWTypes,
+								});
+							}
 						}
 					} else {
-						const box = this.getIfaceBoxType({ kind: "named", name: rName });
-						const key = `named:${rName}`;
+						const box = isPtrRecv
+							? this.getIfaceBoxType({ kind: "pointer", base: rType })
+							: this.getIfaceBoxType(rType);
+						const key = `${isPtrRecv ? "ptr" : "named"}:${rName}`;
 						if (box && !seenKeys.has(key)) {
 							seenKeys.add(key);
-							const paramWTypes = this.getFuncParamTypes(fnName);
 							candidates.push({
 								recvTypeName: rName,
 								testTypeIndex: box.typeIndex,

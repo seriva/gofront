@@ -605,3 +605,33 @@ func Run() string {
 `);
 	assertEqual(out, "n=6 err=<nil> out1=世界 out2=世界");
 });
+
+test("context.Context.Done reports exclusion diagnostic", () => {
+	withTempDir(
+		{
+			"main.go": `package main
+
+import "context"
+
+func use(ctx context.Context) {
+	_ = ctx.Done()
+}
+
+func main() {}
+`,
+		},
+		(dir) => {
+			let threw = false;
+			try {
+				compileDir(dir);
+			} catch (err) {
+				threw = true;
+				assert(
+					err.message.includes("Done() returns a channel"),
+					`expected channel diagnostic, got: ${err.message}`,
+				);
+			}
+			assert(threw, "expected compile error for ctx.Done()");
+		},
+	);
+});

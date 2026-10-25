@@ -546,6 +546,14 @@ function mangleRefs(node, file, tparams, ctx) {
 		case "IndexExpr":
 			if (node.expr?.kind === "Ident") mangleTypeRef(node.expr, tp, ctx);
 			break;
+		case "CallExpr":
+			if (
+				(node.func?.name === "new" || node.func?.name === "make") &&
+				node.args?.[0]?.kind === "Ident"
+			) {
+				mangleTypeRef(node.args[0], tp, ctx);
+			}
+			break;
 		case "Ident":
 			if (ctx.refs.has(`${file}:${node._line}:${node._col}`))
 				mangleIdentRef(node, ctx);
