@@ -1332,11 +1332,12 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
 
 ### Phase 4.3: `crypto`, base32 and `sync/atomic`
 
-- [ ] **Task 4.6a — `crypto/md5`, `crypto/sha1`, `crypto/sha512`**
+- [x] **Task 4.6a — `crypto/md5`, `crypto/sha1`, `crypto/sha512`**
   - Files: new `runtime/stdlib/crypto/{md5,sha1,sha512}/*.go`
   - Do: `Sum*`, `New*`, `Size`, `BlockSize`, including `sha512/224`, `sha512/256`, `sha384`. sha512 needs `uint64` arithmetic: exact in WASM; in JS use `bits.Add64`/`Mul64`-style split limbs (document that it is slower in `js` packages).
   - Test: conformance fixture `crypto/digests.go` with the FIPS test vectors.
   - Done when: fixture matches Go.
+  - Landed: `crypto/md5`, `crypto/sha1` and `crypto/sha512` (SHA-512, SHA-384, SHA-512/224, SHA-512/256) in pure Go source with `Sum*`, `New*`, `Size*` and `BlockSize`. `sha512` keeps its 64-bit words as pairs of `uint32` so JS is exact (the JS `uint64` is a Number); it is slower than the other digests. Fixed the WASM interface dispatcher so a same-named method with a different arity (`strings.Reader.Reset(s)`) is no longer a candidate for `hash.Hash.Reset()`, which produced an invalid module. Conformance fixture `crypto/digests.go` matches Go 1.26 on JS and WASM.
 
 - [ ] **Task 4.6b — `crypto/hmac`, `crypto/subtle`, and the security note**
   - Files: new `runtime/stdlib/crypto/{hmac,subtle}/*.go`, `docs/go-compatibility.md`
