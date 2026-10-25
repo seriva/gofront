@@ -344,11 +344,11 @@ const BYTES_DISPATCH = {
 			},
 			Size() { return BigInt(this._src.length); },
 			WriteTo(w) {
-				if (this._pos >= this._src.length) return [0n, null];
+				if (this._pos >= this._src.length) return [0, null];
 				const rem = this._src.subarray ? this._src.subarray(this._pos) : new Uint8Array(this._src.slice(this._pos));
 				const [n, err] = w.Write(rem);
 				this._pos += n;
-				return [BigInt(n), err];
+				return [n, err];
 			},
 			Len() { return Math.max(0, this._src.length - this._pos); },
 			Reset(b2) { this._src = b2; this._pos = 0; this._prevRune = -1; }

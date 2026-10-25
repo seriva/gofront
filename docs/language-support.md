@@ -86,7 +86,7 @@ Members of each Go package (functions, types, methods, fields, constants and var
 
 | Package | Available | Not yet | JS-only | Excluded |
 |---|---|---|---|---|
-| `bufio` | 0 of 79 | 79 | 0 | 0 |
+| `bufio` | 57 of 79 | 22 | 0 | 0 |
 | `bytes` | 78 of 99 | 21 | 0 | 0 |
 | `cmp` | 4 of 4 | 0 | 0 | 0 |
 | `container/heap` | 0 of 11 | 11 | 0 | 0 |
@@ -122,7 +122,7 @@ Members of each Go package (functions, types, methods, fields, constants and var
 | `math/cmplx` | 0 of 27 | 27 | 0 | 0 |
 | `math/rand` | 12 of 45 | 33 | 0 | 0 |
 | `math/rand/v2` | 0 of 51 | 51 | 0 | 8 |
-| `net/url` | 0 of 60 | 60 | 0 | 0 |
+| `net/url` | 60 of 60 | 0 | 0 | 0 |
 | `os` | 10 of 10 | 0 | 3 | 188 |
 | `path` | 9 of 9 | 0 | 0 | 0 |
 | `path/filepath` | 9 of 19 | 10 | 0 | 8 |
