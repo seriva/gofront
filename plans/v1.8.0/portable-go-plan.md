@@ -1309,11 +1309,12 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
   - Done when: cancelling a parent cancels every descendant; `WithoutCancel` children are not cancelled.
   - Landed: implemented `context` in pure Go source (`runtime/stdlib/context/context.go`) supporting `Context` interface, `Background`, `TODO`, `WithCancel`, `WithCancelCause`, `WithValue`, `WithoutCancel`, `Cause`, `Canceled`, `CancelFunc`, `CancelCauseFunc`. Hooked up targeted diagnostic for `ctx.Done()`. Fixed WASM return statement code generation for multi-valued function calls without defers (`emitReturnStmt`). Conformance fixture `test/conformance/context/cancel.go` passes on JS and WASM matching Go 1.26 reference. Updated stdlib coverage gaps and regenerated docs.
 
-- [ ] **Task 4.3b — `context` deadlines and `AfterFunc`**
+- [x] **Task 4.3b — `context` deadlines and `AfterFunc`**
   - Files: `runtime/stdlib/context/deadline.go` (uses the Task 0.6d intrinsic)
   - Do: `WithDeadline`, `WithDeadlineCause`, `WithTimeout`, `WithTimeoutCause`, `DeadlineExceeded`, `AfterFunc` (runs once; stop returns `false` once started). In WASM `Err()` compares the deadline with the clock import and cancels on first observation, firing `AfterFunc` callbacks.
   - Test: conformance fixture `context/deadline.go` with an injected clock; a WASM unit test that advances the fake clock import.
   - Done when: both pass and `example/preact` can cancel a `fetch` through `AbortController` (used in Task 7.1).
+  - Landed: implemented `context` deadlines and `AfterFunc` in pure Go source (`runtime/stdlib/context/deadline.go`) supporting `DeadlineExceeded`, `WithDeadline`, `WithDeadlineCause`, `WithTimeout`, `WithTimeoutCause`, and `AfterFunc` using `//gofront:intrinsic deadline_timer` and cooperative WASM deadline checking. Conformance fixture `test/conformance/context/deadline.go` passes on JS and WASM matching Go 1.26 reference. WASM unit test verified advancing fake clock import. Updated stdlib coverage gaps (0 gaps remaining in `context`) and regenerated docs.
 
 - [ ] **Task 4.4 — `container/heap`, `container/list`, `container/ring`**
   - Files: new `runtime/stdlib/container/{heap,list,ring}/*.go`
