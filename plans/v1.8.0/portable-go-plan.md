@@ -1302,11 +1302,12 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
 
 ### Phase 4.2: `context`, container and hash
 
-- [ ] **Task 4.3a — `context` cancel tree and values**
+- [x] **Task 4.3a — `context` cancel tree and values**
   - Files: new `runtime/stdlib/context/context.go`, `src/typechecker/stdlib/` (`Done()` diagnostic)
   - Do: `Context` interface without `Done()`; `Background`, `TODO`, `WithCancel`, `WithCancelCause`, `WithValue`, `WithoutCancel`, `Cause`, `Canceled`, `CancelFunc`, `CancelCauseFunc`. `ctx.Done()` reports the channel diagnostic with the `ctx.Err()`/`context.AfterFunc` hint.
   - Test: conformance fixture `context/cancel.go`; unit test for the `Done()` diagnostic.
   - Done when: cancelling a parent cancels every descendant; `WithoutCancel` children are not cancelled.
+  - Landed: implemented `context` in pure Go source (`runtime/stdlib/context/context.go`) supporting `Context` interface, `Background`, `TODO`, `WithCancel`, `WithCancelCause`, `WithValue`, `WithoutCancel`, `Cause`, `Canceled`, `CancelFunc`, `CancelCauseFunc`. Hooked up targeted diagnostic for `ctx.Done()`. Fixed WASM return statement code generation for multi-valued function calls without defers (`emitReturnStmt`). Conformance fixture `test/conformance/context/cancel.go` passes on JS and WASM matching Go 1.26 reference. Updated stdlib coverage gaps and regenerated docs.
 
 - [ ] **Task 4.3b — `context` deadlines and `AfterFunc`**
   - Files: `runtime/stdlib/context/deadline.go` (uses the Task 0.6d intrinsic)

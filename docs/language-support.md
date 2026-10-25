@@ -92,7 +92,7 @@ Members of each Go package (functions, types, methods, fields, constants and var
 | `container/heap` | 0 of 11 | 11 | 0 | 0 |
 | `container/list` | 0 of 21 | 21 | 0 | 0 |
 | `container/ring` | 0 of 10 | 10 | 0 | 0 |
-| `context` | 0 of 20 | 20 | 0 | 1 |
+| `context` | 11 of 20 | 9 | 0 | 1 |
 | `crypto/hmac` | 0 of 2 | 2 | 0 | 0 |
 | `crypto/md5` | 0 of 4 | 4 | 0 | 0 |
 | `crypto/rand` | 2 of 3 | 1 | 0 | 2 |

@@ -3584,6 +3584,12 @@ export class StmtsEmitter {
 			return;
 		}
 
+		if (values.length === 1 && this.returnTypes.length > 1) {
+			this.emitExpr(values[0]);
+			this.pushInstruction("return");
+			return;
+		}
+
 		for (let i = 0; i < values.length; i++) {
 			const val = values[i];
 			const targetWType = this.returnTypes[i] ?? null;
