@@ -116,7 +116,7 @@ Members of each Go package that `wasm` and `both` packages can use today, out of
 
 | Package | Available | Not yet |
 |---|---|---|
-| `bufio` | 0 of 79 | 79 |
+| `bufio` | 57 of 79 | 22 |
 | `bytes` | 78 of 99 | 21 |
 | `cmp` | 4 of 4 | 0 |
 | `container/heap` | 0 of 11 | 11 |
@@ -152,7 +152,7 @@ Members of each Go package that `wasm` and `both` packages can use today, out of
 | `math/cmplx` | 0 of 27 | 27 |
 | `math/rand` | 12 of 45 | 33 |
 | `math/rand/v2` | 0 of 51 | 51 |
-| `net/url` | 0 of 60 | 60 |
+| `net/url` | 60 of 60 | 0 |
 | `os` | 7 of 7 | 0 |
 | `path` | 9 of 9 | 0 |
 | `path/filepath` | 9 of 19 | 10 |

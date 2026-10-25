@@ -1381,7 +1381,21 @@ export const expressionCheckMethods = {
 	},
 
 	_checkStructPositionalElems(expr, scope, t, base) {
-		const fieldNames = [...(base.fields?.keys() ?? [])];
+		const fieldNames = base._structFields
+			? base._structFields.flatMap((f) =>
+					f.embedded
+						? [
+								(
+									(f.type?.kind === "pointer"
+										? f.type.base?.name
+										: f.type?.name) ?? ""
+								)
+									.split(".")
+									.pop(),
+							]
+						: f.names,
+				)
+			: [...(base.fields?.keys() ?? [])];
 		for (let i = 0; i < expr.elems.length; i++) {
 			const elem = expr.elems[i];
 			const fieldName = fieldNames[i];

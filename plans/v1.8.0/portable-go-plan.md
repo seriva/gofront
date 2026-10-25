@@ -1265,35 +1265,40 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
 
 ### Phase 4.1: `bufio` and `net/url` (Go source)
 
-- [ ] **Task 4.1a — `bufio.Reader`**
+- [x] **Task 4.1a — `bufio.Reader`**
   - Files: new `runtime/stdlib/bufio/reader.go`
   - Do: the `Reader` members from [§6](#6-bufio-neturl-and-context-go-source) plus `ErrBufferFull`, `ErrNegativeCount`.
   - Test: conformance fixture `bufio/reader.go` (`ReadLine` with `isPrefix`, `Peek`, `UnreadRune`).
   - Done when: fixture matches Go.
+  - Landed: implemented `bufio.Reader` in Go source with all methods (`NewReader`, `NewReaderSize`, `Buffered`, `Discard`, `Peek`, `Read`, `ReadByte`, `UnreadByte`, `ReadRune`, `UnreadRune`, `ReadSlice`, `ReadLine`, `ReadBytes`, `ReadString`, `Reset`, `Size`, `WriteTo`) and errors `ErrBufferFull`, `ErrNegativeCount`, `ErrInvalidUnreadByte`, `ErrInvalidUnreadRune`. Conformance fixture `test/conformance/bufio/reader.go` passes on JS and WASM matching Go 1.26 reference. Updated stdlib gaps and docs.
 
-- [ ] **Task 4.1b — `bufio.Writer` and `ReadWriter`**
+- [x] **Task 4.1b — `bufio.Writer` and `ReadWriter`**
   - Files: new `runtime/stdlib/bufio/writer.go`
   - Do: the `Writer` members; large writes pass through after flushing; `ReadWriter`, `NewReadWriter`.
   - Test: conformance fixture `bufio/writer.go` using a counting `io.Writer`.
   - Done when: fixture matches Go.
+  - Landed: implemented `bufio.Writer` in Go source with all methods (`NewWriter`, `NewWriterSize`, `Available`, `AvailableBuffer`, `Buffered`, `Flush`, `ReadFrom`, `Reset`, `Size`, `Write`, `WriteByte`, `WriteRune`, `WriteString`), large writes pass-through after flushing, and `ReadWriter` with `NewReadWriter`. Conformance fixture `test/conformance/bufio/writer.go` passes on JS and WASM with counting writer matching Go 1.26 reference. Updated stdlib gaps and docs.
 
-- [ ] **Task 4.1c — `bufio.Scanner` and split functions**
+- [x] **Task 4.1c — `bufio.Scanner` and split functions**
   - Files: new `runtime/stdlib/bufio/scan.go`
   - Do: `Scanner`, `SplitFunc`, `ScanLines`, `ScanWords`, `ScanRunes`, `ScanBytes`, `MaxScanTokenSize`, `ErrTooLong`, `ErrNegativeAdvance`, `ErrAdvanceTooFar`, `ErrFinalToken`.
   - Test: conformance fixture `bufio/scanner.go` (final token without newline, `ErrFinalToken`, `ErrTooLong`).
   - Done when: fixture matches Go.
+  - Landed: implemented `bufio.Scanner` in Go source with all methods (`NewScanner`, `Err`, `Bytes`, `Text`, `Scan`, `Buffer`, `Split`) and split functions (`ScanLines`, `ScanWords`, `ScanRunes`, `ScanBytes`), `SplitFunc`, `MaxScanTokenSize`, and errors `ErrTooLong`, `ErrNegativeAdvance`, `ErrAdvanceTooFar`, `ErrBadReadCount`, `ErrFinalToken`. Added conformance fixture `test/conformance/bufio/scanner.go` and `.out`. Fixed WASM `%q` on byte arrays in `src/backend/js/fmt-runtime.js`. Updated stdlib coverage gaps and regenerated docs. Conformance fixture passes across JS and WASM matching Go 1.26 reference.
 
-- [ ] **Task 4.2a — `net/url` escaping and `Values`**
+- [x] **Task 4.2a — `net/url` escaping and `Values`**
   - Files: new `runtime/stdlib/net/url/escape.go`, `values.go`
   - Do: `QueryEscape`, `QueryUnescape`, `PathEscape`, `PathUnescape`, `EscapeError`, `Values` (`Get`, `Set`, `Add`, `Del`, `Has`, `Encode` with sorted keys), `ParseQuery`. Work on `[]byte` so `"é"` escapes to `%C3%A9`.
   - Test: conformance fixture `url/escape.go` including non-ASCII input.
   - Done when: fixture matches Go.
+  - Landed: implemented `net/url` query/path escaping and values in Go source (`QueryEscape`, `QueryUnescape`, `PathEscape`, `PathUnescape`, `EscapeError`, `InvalidHostError`, `Values` with `Get`, `Set`, `Add`, `Del`, `Has`, `Encode` with sorted keys, and `ParseQuery`), operating on `[]byte` for correct UTF-8 percent-encoding. Fixed comma-ok map index generation in JS backend for defined types (`stmt._commaOkMap`). Conformance fixture `test/conformance/url/escape.go` passes on JS and WASM matching Go 1.26 reference. Updated stdlib coverage gaps and regenerated docs.
 
-- [ ] **Task 4.2b — `net/url` parsing, `URL` methods, errors**
+- [x] **Task 4.2b — `net/url` parsing, `URL` methods, errors**
   - Files: new `runtime/stdlib/net/url/url.go`
   - Do: `Parse`, `ParseRequestURI`, `URL` fields and methods from [§6](#6-bufio-neturl-and-context-go-source), `Userinfo`, `*Error`, `InvalidHostError`, `JoinPath`.
   - Test: conformance fixture `url/parse.go` (IPv6 host and port, `ResolveReference`, `Redacted`, malformed escapes returning `*url.Error`).
   - Done when: fixture matches Go.
+  - Landed: implemented `URL`, `Userinfo`, and `*Error` in pure Go source (`runtime/stdlib/net/url/url.go`) with full method sets (`String`, `Redacted`, `IsAbs`, `Parse`, `ResolveReference`, `Query`, `RequestURI`, `Hostname`, `Port`, `EscapedPath`, `EscapedFragment`, `JoinPath`, `MarshalBinary`, `AppendBinary`, `UnmarshalBinary`) and functions (`Parse`, `ParseRequestURI`, `JoinPath`). IPv6 host and port parsing verified. Conformance fixture `test/conformance/url/parse.go` passes across JS and WASM matching Go 1.26 reference. Updated stdlib coverage gaps (0 gaps remaining in `net/url`) and regenerated docs. Updated CHANGELOG.md for Phase 4.1.
 
 ### Phase 4.2: `context`, container and hash
 
