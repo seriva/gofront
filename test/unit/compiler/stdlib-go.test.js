@@ -498,3 +498,110 @@ func Run() int {
 `);
 	assertEqual(out, "113");
 });
+
+section("Portable Go Phase 3.2 review feedback: io & fmt.Fscan fixes");
+
+test("fmt.Fscan returns n=0 on parse failure (JS and WASM parity)", async () => {
+	const out = await stdParity(`import (
+	"fmt"
+	"strings"
+)
+
+func Run() string {
+	r := strings.NewReader("xyz")
+	var a int
+	n, err := fmt.Fscan(r, &a)
+	return fmt.Sprintf("n=%d err=%t a=%d", n, err != nil, a)
+}
+`);
+	assertEqual(out, "n=0 err=true a=0");
+});
+
+test("fmt.Fscan with all integer pointer types (JS and WASM parity)", async () => {
+	const out = await stdParity(`import (
+	"fmt"
+	"strings"
+)
+
+func Run() string {
+	var (
+		i64 int64
+		u   uint
+		u64 uint64
+		u32 uint32
+		u16 uint16
+		u8  uint8
+		i16 int16
+		i8  int8
+	)
+	r := strings.NewReader("10 20 30 40 50 60 70 80")
+	n, err := fmt.Fscan(r, &i64, &u, &u64, &u32, &u16, &u8, &i16, &i8)
+	return fmt.Sprintf("n=%d err=%t vals=%d,%d,%d,%d,%d,%d,%d,%d",
+		n, err != nil, i64, u, u64, u32, u16, u8, i16, i8)
+}
+`);
+	assertEqual(out, "n=8 err=false vals=10,20,30,40,50,60,70,80");
+});
+
+test("io.SectionReader.ReadAt does not leak bytes beyond section limit", async () => {
+	const out = await stdParity(`import (
+	"errors"
+	"fmt"
+	"io"
+)
+
+type stringReaderAt string
+
+func (s stringReaderAt) ReadAt(p []byte, off int64) (n int, err error) {
+	if off < 0 {
+		return 0, errors.New("negative offset")
+	}
+	if off >= int64(len(s)) {
+		return 0, io.EOF
+	}
+	sub := s[off:]
+	n = copy(p, []byte(sub))
+	if n < len(p) {
+		err = io.EOF
+	}
+	return n, err
+}
+
+func Run() string {
+	src := stringReaderAt("0123456789abcdef")
+	sr := io.NewSectionReader(src, 4, 4)
+	buf := make([]byte, 8)
+	for i := range buf {
+		buf[i] = 'X'
+	}
+	n, err := sr.ReadAt(buf, 0)
+	return fmt.Sprintf("n=%d err=%v buf=%s", n, err, string(buf))
+}
+`);
+	assertEqual(out, "n=4 err=EOF buf=4567XXXX");
+});
+
+test("io.MultiWriter.WriteString succeeds on multibyte UTF-8 strings", async () => {
+	const out = await stdParity(`import (
+	"fmt"
+	"io"
+)
+
+type memWriter struct {
+	buf []byte
+}
+
+func (w *memWriter) Write(p []byte) (n int, err error) {
+	w.buf = append(w.buf, p...)
+	return len(p), nil
+}
+
+func Run() string {
+	var out1, out2 memWriter
+	mw := io.MultiWriter(&out1, &out2)
+	n, err := io.WriteString(mw, "世界")
+	return fmt.Sprintf("n=%d err=%v out1=%s out2=%s", n, err, string(out1.buf), string(out2.buf))
+}
+`);
+	assertEqual(out, "n=6 err=<nil> out1=世界 out2=世界");
+});
