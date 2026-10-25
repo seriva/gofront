@@ -137,13 +137,13 @@ Members of each Go package that `wasm` and `both` packages can use today, out of
 | `encoding/hex` | 7 of 15 | 8 |
 | `encoding/json` | 0 of 68 | 68 |
 | `errors` | 6 of 7 | 1 |
-| `fmt` | 18 of 43 | 25 |
+| `fmt` | 21 of 43 | 22 |
 | `hash` | 0 of 32 | 32 |
 | `hash/adler32` | 0 of 3 | 3 |
 | `hash/crc32` | 0 of 12 | 12 |
 | `hash/fnv` | 0 of 6 | 6 |
 | `html` | 2 of 2 | 0 |
-| `io` | 19 of 94 | 75 |
+| `io` | 54 of 94 | 40 |
 | `iter` | 2 of 2 | 0 |
 | `log` | 0 of 43 | 43 |
 | `maps` | 10 of 10 | 0 |
@@ -157,16 +157,16 @@ Members of each Go package that `wasm` and `both` packages can use today, out of
 | `path` | 9 of 9 | 0 |
 | `path/filepath` | 9 of 19 | 10 |
 | `slices` | 37 of 40 | 3 |
-| `sort` | 10 of 40 | 30 |
-| `strconv` | 18 of 43 | 25 |
+| `sort` | 36 of 40 | 4 |
+| `strconv` | 41 of 43 | 2 |
 | `strings` | 64 of 82 | 18 |
 | `sync` | 20 of 39 | 19 |
 | `sync/atomic` | 0 of 90 | 90 |
 | `testing` | 16 of 94 | 78 |
 | `time` | 80 of 129 | 49 |
-| `unicode` | 11 of 52 | 41 |
+| `unicode` | 52 of 52 | 0 |
 | `unicode/utf16` | 0 of 7 | 7 |
-| `unicode/utf8` | 10 of 19 | 9 |
+| `unicode/utf8` | 19 of 19 | 0 |
 <!-- stdlib:end -->
 
 Notable members per package:
