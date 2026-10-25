@@ -172,6 +172,12 @@ const REPLACER_T = {
 	kind: "pointer",
 	base: { kind: "named", name: "strings.Replacer" },
 };
+const BUFFER_T = {
+	kind: "named",
+	name: "bytes.Buffer",
+	underlying: { kind: "struct" },
+};
+const BUFFER_PTR_T = { kind: "pointer", base: BUFFER_T };
 
 export function setupCoreGlobals(globals, types) {
 	for (const g of BROWSER_GLOBALS) globals.define(g, ANY);
@@ -354,6 +360,7 @@ export function setupCoreGlobals(globals, types) {
 				variadic: true,
 			},
 			NewReader: { kind: "func", params: [STRING], returns: [ANY] },
+			ToValidUTF8: strFn2(STRING, STRING),
 			Builder: ANY,
 		},
 	});
@@ -430,7 +437,18 @@ export function setupCoreGlobals(globals, types) {
 				returns: [{ kind: "slice", elem: BYTE_SLICE }],
 			},
 			NewReader: { kind: "func", params: [BYTE_SLICE], returns: [ANY] },
-			Buffer: ANY,
+			NewBuffer: {
+				kind: "func",
+				params: [BYTE_SLICE],
+				returns: [BUFFER_PTR_T],
+			},
+			NewBufferString: {
+				kind: "func",
+				params: [STRING],
+				returns: [BUFFER_PTR_T],
+			},
+			ToValidUTF8: byFn2(BYTE_SLICE, BYTE_SLICE),
+			Buffer: BUFFER_T,
 		},
 	});
 

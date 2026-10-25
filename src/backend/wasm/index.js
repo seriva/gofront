@@ -1161,6 +1161,7 @@ class ModuleEmitter {
 		this.getStringReplaceAllImportIndex();
 		this.getStringEqualFoldImportIndex();
 		this.getStringCountImportIndex();
+		this.getStringToValidUTF8ImportIndex();
 		this.getStrFromI64ImportIndex();
 		this.getStrFromI32ImportIndex();
 		this.getStrFromF64ImportIndex();
@@ -1927,6 +1928,15 @@ class ModuleEmitter {
 			"str_count",
 			["externref", "externref"],
 			["i32"],
+		);
+	}
+
+	getStringToValidUTF8ImportIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"str_to_valid_utf8",
+			["externref", "externref"],
+			["externref"],
 		);
 	}
 
