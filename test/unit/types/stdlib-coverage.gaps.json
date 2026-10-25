@@ -781,27 +781,7 @@
 			"ToTitleSpecial",
 			"ToUpperSpecial"
 		],
-		"sync": [
-			"Map",
-			"Map.Clear",
-			"Map.CompareAndDelete",
-			"Map.CompareAndSwap",
-			"Map.Delete",
-			"Map.Load",
-			"Map.LoadAndDelete",
-			"Map.LoadOrStore",
-			"Map.Range",
-			"Map.Store",
-			"Map.Swap",
-			"OnceFunc",
-			"OnceValue",
-			"OnceValues",
-			"Pool",
-			"Pool.Get",
-			"Pool.New",
-			"Pool.Put",
-			"RWMutex.RLocker"
-		],
+		"sync": ["RWMutex.RLocker"],
 		"sync/atomic": [
 			"AddInt32",
 			"AddInt64",
@@ -1367,15 +1347,6 @@
 		"runtime/pprof": ["*"],
 		"runtime/trace": ["*"],
 		"structs": ["*"],
-		"sync": [
-			"Cond",
-			"Cond.Broadcast",
-			"Cond.L",
-			"Cond.Signal",
-			"Cond.Wait",
-			"NewCond",
-			"WaitGroup.Go"
-		],
 		"sync/atomic": [
 			"CompareAndSwapPointer",
 			"LoadPointer",
