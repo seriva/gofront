@@ -1346,11 +1346,12 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
   - Done when: fixture matches Go and the doc row exists.
   - Landed: `crypto/hmac` (`New`, `Equal`) and `crypto/subtle` (all members, including `ConstantTimeByteEq`, `ConstantTimeCopy`, `ConstantTimeLessOrEq` and `WithDataIndependentTiming`) in pure Go source. `ConstantTimeEq` uses a 32-bit nonzero test instead of Go's `uint64` arithmetic so JS stays exact. The security note is a row in `docs/go-compatibility.md`. Conformance fixture `crypto/hmac.go` (RFC 4231 cases for SHA-384/512, plus SHA-1 and MD5) matches Go 1.26 on JS and WASM.
 
-- [ ] **Task 4.7 — `encoding/base32`, `unicode/utf16`, `sync/atomic`**
+- [x] **Task 4.7 — `encoding/base32`, `unicode/utf16`, `sync/atomic`**
   - Files: new `runtime/stdlib/encoding/base32/`, `runtime/stdlib/unicode/utf16/`, `runtime/stdlib/sync/atomic/`
   - Do: the member lists in [§7](#7-new-pure-packages-go-source). `atomic` is single-threaded; `Pointer[T]` and `Value` included.
   - Test: conformance fixtures `base32/codec.go`, `utf16/codec.go`, `atomic/ops.go`.
   - Done when: fixtures match Go.
+  - Landed: `encoding/base32` (all members, including the streaming `NewEncoder`/`NewDecoder`), `unicode/utf16` and `sync/atomic` (typed `Int32`/`Int64`/`Uint32`/`Uint64`/`Uintptr`/`Bool`/`Pointer[T]`/`Value` and all function forms, single-threaded) in Go source. 64-bit atomics hold a Number on JS, so they are exact only to 2^53. `Value` does not check that stored values share one type. The sources avoid constructs the WASM backend mishandles (`fallthrough`, tuple stores into computed indexes, `copy` into an array field); each is recorded in `plans/follow-ups.md`. Conformance fixtures `base32/codec.go`, `utf16/codec.go` and `atomic/ops.go` match Go 1.26 on JS and WASM.
 
 ### Phase 4.4: `math/cmplx`, `csv`, `log` and `math/rand/v2`
 
