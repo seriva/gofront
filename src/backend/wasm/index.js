@@ -71,6 +71,8 @@ const ERROR_PRODUCING_PKGS = new Set([
 	"hex",
 	"encoding/base64",
 	"base64",
+	"math/bits",
+	"bits",
 ]);
 // Packages whose calls lower to the `env.*` imports in STDLIB_IMPORTS (the
 // matching JS lives in WASM_STDLIB_JS).  Only modules importing one of them
@@ -101,6 +103,8 @@ const STDLIB_ENV_PKGS = new Set([
 	"hex",
 	"encoding/base64",
 	"base64",
+	"math/bits",
+	"bits",
 ]);
 
 function importsAnyOf(programs, pkgs) {
@@ -250,12 +254,17 @@ const STDLIB_IMPORTS = [
 	["time_parse", [S, S], ["f64"]],
 	["time_parse_err", [], [S]],
 	["time_parse_offset", [], ["i32"]],
+	["time_parse_sub_ns", [], ["i32"]],
 	[
 		"time_format",
 		["i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", S],
 		[S],
 	],
 	["time_duration_string", ["i64"], [S]],
+	["time_parse_duration", [S], ["i64"]],
+	["time_parse_duration_err", [], [S]],
+	["time_month_string", ["i32"], [S]],
+	["time_weekday_string", ["i32"], [S]],
 	// raw binary buffer for crypto/rand, crypto/sha256, hex, base64
 	["raw_bytes_init", ["i32"], []],
 	["raw_bytes_push", ["i32"], []],
@@ -273,6 +282,12 @@ const STDLIB_IMPORTS = [
 	["base64_encode_to_string", ["i32"], [S]],
 	["base64_decode_string", ["i32", S], ["i32"]],
 	["base64_get_err", [], [S]],
+	["bits_div32", ["i32", "i32", "i32"], ["i32"]],
+	["bits_div32_rem", [], ["i32"]],
+	["bits_rem32", ["i32", "i32", "i32"], ["i32"]],
+	["bits_div64", ["i64", "i64", "i64"], ["i64"]],
+	["bits_div64_rem", [], ["i64"]],
+	["bits_rem64", ["i64", "i64", "i64"], ["i64"]],
 ];
 
 class ModuleEmitter {
@@ -1146,6 +1161,7 @@ class ModuleEmitter {
 		this.getStringReplaceAllImportIndex();
 		this.getStringEqualFoldImportIndex();
 		this.getStringCountImportIndex();
+		this.getStringToValidUTF8ImportIndex();
 		this.getStrFromI64ImportIndex();
 		this.getStrFromI32ImportIndex();
 		this.getStrFromF64ImportIndex();
@@ -1209,6 +1225,8 @@ class ModuleEmitter {
 			"log10",
 			"round",
 			"cbrt",
+			"log1p",
+			"expm1",
 		];
 		for (const m of unaryMath) {
 			this.getMathImportIndex(m, false);
@@ -1910,6 +1928,15 @@ class ModuleEmitter {
 			"str_count",
 			["externref", "externref"],
 			["i32"],
+		);
+	}
+
+	getStringToValidUTF8ImportIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"str_to_valid_utf8",
+			["externref", "externref"],
+			["externref"],
 		);
 	}
 
@@ -3386,8 +3413,10 @@ function _scanImportsInBody(node, mod) {
 				Cbrt: "cbrt",
 				Exp: "exp",
 				Log: "log",
+				Log1p: "log1p",
 				Log2: "log2",
 				Log10: "log10",
+				Expm1: "expm1",
 				Round: "round",
 				Sinh: "sinh",
 				Cosh: "cosh",

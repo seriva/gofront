@@ -213,22 +213,7 @@ export class ExprsEmitter {
 			case "SelectorExpr": {
 				const deq = this._dequalify(expr);
 				if (deq) this.emitIdent(deq, targetWasmType);
-				else if (this._isMathConst(expr))
-					this.emitMathConst(expr.field, targetWasmType);
-				else if (this._isUtf8Const(expr))
-					this.emitUtf8Const(expr.field, targetWasmType);
-				else if (this._isStrconvConst(expr))
-					this.emitStrconvConst(expr.field, targetWasmType);
-				else if (this._isPathConst(expr))
-					this.emitPathConst(expr.field, targetWasmType);
-				else if (this._isIoConst(expr))
-					this.emitIoConst(expr.field, targetWasmType);
-				else if (this._isOsConst?.(expr))
-					this.emitOsConst(expr.field, targetWasmType);
-				else if (this._isTimeConst(expr))
-					this.emitTimeConst(expr.field, targetWasmType);
-				else if (this._isExtendedPkgConst?.(expr))
-					this.emitExtendedPkgConst(expr, targetWasmType);
+				else if (this._emitPkgConst(expr, targetWasmType)) break;
 				else this.emitSelectorExpr(expr);
 				break;
 			}
@@ -500,6 +485,46 @@ export class ExprsEmitter {
 		const depth = this.resolveBranchDepthToRole("nil");
 		if (depth == null) return;
 		this.pushInstruction({ op: "br_on_null", depth });
+	}
+
+	_emitPkgConst(expr, targetWasmType) {
+		if (this._isMathConst(expr)) {
+			this.emitMathConst(expr.field, targetWasmType);
+			return true;
+		}
+		if (this._isUtf8Const(expr)) {
+			this.emitUtf8Const(expr.field, targetWasmType);
+			return true;
+		}
+		if (this._isStrconvConst(expr)) {
+			this.emitStrconvConst(expr.field, targetWasmType);
+			return true;
+		}
+		if (this._isPathConst(expr)) {
+			this.emitPathConst(expr.field, targetWasmType);
+			return true;
+		}
+		if (this._isIoConst(expr)) {
+			this.emitIoConst(expr.field, targetWasmType);
+			return true;
+		}
+		if (this._isOsConst?.(expr)) {
+			this.emitOsConst(expr.field, targetWasmType);
+			return true;
+		}
+		if (this._isTimeConst(expr)) {
+			this.emitTimeConst(expr.field, targetWasmType);
+			return true;
+		}
+		if (this._isBitsConst?.(expr)) {
+			this.emitBitsConst(expr.field, targetWasmType);
+			return true;
+		}
+		if (this._isExtendedPkgConst?.(expr)) {
+			this.emitExtendedPkgConst(expr, targetWasmType);
+			return true;
+		}
+		return false;
 	}
 
 	emitSelectorExpr(expr) {

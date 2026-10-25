@@ -571,10 +571,19 @@ var __sprintf = __sprintf || function(f, ...a) {
   // by val itself (raw named values and the elements of slices and maps).
   // el: val is a value element or value field, see isPointer.
   const formatV = (val, isPlus, isTopLevel, ro, fd, el) => {
+    if (typeof __FT !== "undefined" && val instanceof __FT) {
+      if (val.t?.n === "time.Duration") {
+        return typeof __durationString === "function" ? __durationString(val.v) : String(val.v);
+      }
+      return formatV(val.v, isPlus, isTopLevel, ro, val.t, el);
+    }
+    if (fd?.n === "time.Duration") {
+      return typeof __durationString === "function" ? __durationString(val) : String(val);
+    }
     if (fd?.b && !ro && !(val instanceof fd.b)) val = new fd.b(val);
     if (val === null || val === undefined) return "<nil>";
     if (typeof val === "boolean") return String(val);
-    if (typeof val === "number" || typeof val === "bigint") return String(val);
+    if (typeof val === "number" || typeof val === "bigint") return Object.is(val, -0) ? "-0" : String(val);
     if (typeof val === "string") return val;
     if (typeof val === "object") {
       if (val._d instanceof Date) {
@@ -1019,28 +1028,78 @@ var __pathMatch = __pathMatch || function(pat, name) {
   }
 };`;
 
-export const HELPER_TIME_FMT = `var __timeFmt = __timeFmt || function(d, layout) {
+export const HELPER_TIME_FMT = `var __timeLocalDt = __timeLocalDt || function(t) {
+  const dt = t instanceof Date ? t : (t?._d ?? t);
+  if (typeof t?._offset === "number") {
+    return new Date(dt.getTime() + t._offset * 1000);
+  }
+  return null;
+};
+var __timeYear = __timeYear || function(t) {
+  var ld = __timeLocalDt(t);
+  return ld ? ld.getUTCFullYear() : (t instanceof Date ? t : t._d).getFullYear();
+};
+var __timeMonth = __timeMonth || function(t) {
+  var ld = __timeLocalDt(t);
+  return (ld ? ld.getUTCMonth() : (t instanceof Date ? t : t._d).getMonth()) + 1;
+};
+var __timeDay = __timeDay || function(t) {
+  var ld = __timeLocalDt(t);
+  return ld ? ld.getUTCDate() : (t instanceof Date ? t : t._d).getDate();
+};
+var __timeHour = __timeHour || function(t) {
+  var ld = __timeLocalDt(t);
+  return ld ? ld.getUTCHours() : (t instanceof Date ? t : t._d).getHours();
+};
+var __timeMinute = __timeMinute || function(t) {
+  var ld = __timeLocalDt(t);
+  return ld ? ld.getUTCMinutes() : (t instanceof Date ? t : t._d).getMinutes();
+};
+var __timeSecond = __timeSecond || function(t) {
+  var ld = __timeLocalDt(t);
+  return ld ? ld.getUTCSeconds() : (t instanceof Date ? t : t._d).getSeconds();
+};
+var __timeWeekday = __timeWeekday || function(t) {
+  var ld = __timeLocalDt(t);
+  return ld ? ld.getUTCDay() : (t instanceof Date ? t : t._d).getDay();
+};
+var __timeDate = __timeDate || function(t) {
+  var ld = __timeLocalDt(t);
+  var dt = t instanceof Date ? t : t._d;
+  return ld ? [ld.getUTCFullYear(), ld.getUTCMonth() + 1, ld.getUTCDate()] : [dt.getFullYear(), dt.getMonth() + 1, dt.getDate()];
+};
+var __timeClock = __timeClock || function(t) {
+  var ld = __timeLocalDt(t);
+  var dt = t instanceof Date ? t : t._d;
+  return ld ? [ld.getUTCHours(), ld.getUTCMinutes(), ld.getUTCSeconds()] : [dt.getHours(), dt.getMinutes(), dt.getSeconds()];
+};
+var __timeFmt = __timeFmt || function(d, layout) {
   const dt = d instanceof Date ? d : (d?._d ?? d);
-  const isUtc = d?._offset === 0;
+  const hasOff = typeof d?._offset === "number" || typeof d?._loc?._offset === "number";
+  const offSec = typeof d?._offset === "number" ? d._offset : (d?._loc?._offset ?? 0);
+  const localDt = hasOff ? new Date(dt.getTime() + offSec * 1000) : null;
   const pad = (n, w = 2) => String(n).padStart(w, "0");
   const DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
   const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-  const getFullYear = () => isUtc ? dt.getUTCFullYear() : dt.getFullYear();
-  const getMonth = () => isUtc ? dt.getUTCMonth() : dt.getMonth();
-  const getDate = () => isUtc ? dt.getUTCDate() : dt.getDate();
-  const getDay = () => isUtc ? dt.getUTCDay() : dt.getDay();
-  const getHours = () => isUtc ? dt.getUTCHours() : dt.getHours();
-  const getMinutes = () => isUtc ? dt.getUTCMinutes() : dt.getMinutes();
-  const getSeconds = () => isUtc ? dt.getUTCSeconds() : dt.getSeconds();
-  const getMilliseconds = () => isUtc ? dt.getUTCMilliseconds() : dt.getMilliseconds();
-  const getTimezoneOffset = () => isUtc ? 0 : dt.getTimezoneOffset();
+  const getFullYear = () => localDt ? localDt.getUTCFullYear() : dt.getFullYear();
+  const getMonth = () => localDt ? localDt.getUTCMonth() : dt.getMonth();
+  const getDate = () => localDt ? localDt.getUTCDate() : dt.getDate();
+  const getDay = () => localDt ? localDt.getUTCDay() : dt.getDay();
+  const getHours = () => localDt ? localDt.getUTCHours() : dt.getHours();
+  const getMinutes = () => localDt ? localDt.getUTCMinutes() : dt.getMinutes();
+  const getSeconds = () => localDt ? localDt.getUTCSeconds() : dt.getSeconds();
+  const getMilliseconds = () => localDt ? localDt.getUTCMilliseconds() : dt.getMilliseconds();
+  const getTimezoneOffset = () => hasOff ? Math.round(-offSec / 60) : dt.getTimezoneOffset();
   return layout.replace(/2006|06|Monday|Mon|January|Jan|01|02|15|PM|pm|03|04|05|Z07:00|-07:00|-0700|MST|\\.(?:0+|9+)|1|2|3|4|5/g, t => {
     if (t.startsWith(".")) {
       const isZeroPad = t.includes("0");
       const maxLen = t.length - 1;
       const ms = getMilliseconds();
       let frac = pad(ms, 3);
-      if (maxLen > 3) frac = frac.padEnd(maxLen, "0");
+      if (d?._ns) {
+        frac += String(d._ns).padStart(6, "0");
+      }
+      if (maxLen > frac.length) frac = frac.padEnd(maxLen, "0");
       else frac = frac.slice(0, maxLen);
       if (!isZeroPad) {
         frac = frac.replace(/0+$/, "");
@@ -1081,17 +1140,199 @@ export const HELPER_TIME_FMT = `var __timeFmt = __timeFmt || function(d, layout)
         const o = -getTimezoneOffset();
         return (o >= 0 ? "+" : "-") + pad(Math.floor(Math.abs(o) / 60)) + pad(Math.abs(o) % 60);
       }
-      case "MST": return isUtc ? "UTC" : "LOCAL";
+      case "MST": return d?._loc ? d._loc._name : (hasOff && offSec === 0 ? "UTC" : "LOCAL");
       default: return t;
     }
   });
+};
+var __timeTruncate = __timeTruncate || function(t, d) {
+  d = BigInt(d);
+  if (d <= 0n) return t;
+  var nano = BigInt(t._d.getTime()) * 1000000n + BigInt(t._ns || 0);
+  var dt = nano + 62135596800000000000n;
+  var r = dt % d;
+  if (r < 0n) r += d;
+  var newNano = nano - r;
+  var newMs = Number(newNano / 1000000n);
+  var remNs = Number(newNano % 1000000n);
+  if (remNs < 0) { newMs--; remNs += 1000000; }
+  return { _d: new Date(newMs), _offset: t._offset, _loc: t._loc, _ns: remNs };
+};
+var __timeRound = __timeRound || function(t, d) {
+  d = BigInt(d);
+  if (d <= 0n) return t;
+  var nano = BigInt(t._d.getTime()) * 1000000n + BigInt(t._ns || 0);
+  var dt = nano + 62135596800000000000n;
+  var r = dt % d;
+  if (r < 0n) r += d;
+  var newNano = (r + r < d) ? (nano - r) : (nano + d - r);
+  var newMs = Number(newNano / 1000000n);
+  var remNs = Number(newNano % 1000000n);
+  if (remNs < 0) { newMs--; remNs += 1000000; }
+  return { _d: new Date(newMs), _offset: t._offset, _loc: t._loc, _ns: remNs };
+};
+var __timeAddDate = __timeAddDate || function(t, years, months, days) {
+  var d = t._d;
+  if (typeof t._offset === "number") {
+    var offSec = t._offset;
+    var localD = new Date(d.getTime() + offSec * 1000);
+    var newLocalD = new Date(Date.UTC(
+      localD.getUTCFullYear() + Number(years),
+      localD.getUTCMonth() + Number(months),
+      localD.getUTCDate() + Number(days),
+      localD.getUTCHours(),
+      localD.getUTCMinutes(),
+      localD.getUTCSeconds(),
+      localD.getUTCMilliseconds()
+    ));
+    var newDate = new Date(newLocalD.getTime() - offSec * 1000);
+    return { _d: newDate, _offset: t._offset, _loc: t._loc, _ns: t._ns };
+  }
+  var newDate = new Date(
+    d.getFullYear() + Number(years),
+    d.getMonth() + Number(months),
+    d.getDate() + Number(days),
+    d.getHours(),
+    d.getMinutes(),
+    d.getSeconds(),
+    d.getMilliseconds()
+  );
+  return { _d: newDate, _offset: t._offset, _loc: t._loc, _ns: t._ns };
+};
+var __timeYearDay = __timeYearDay || function(t) {
+  var d = t._d;
+  if (typeof t._offset === "number") {
+    var localD = new Date(d.getTime() + t._offset * 1000);
+    var start = new Date(Date.UTC(localD.getUTCFullYear(), 0, 0));
+    return Math.floor((localD.getTime() - start.getTime()) / 86400000);
+  }
+  var start = new Date(d.getFullYear(), 0, 0);
+  return Math.floor((d.getTime() - start.getTime()) / 86400000);
+};
+var __timeISOWeek = __timeISOWeek || function(t) {
+  if (typeof t._offset === "number") {
+    var d = new Date(t._d.getTime() + t._offset * 1000);
+    var day = (d.getUTCDay() + 6) % 7;
+    d.setUTCDate(d.getUTCDate() - day + 3);
+    var year = d.getUTCFullYear();
+    var firstThu = new Date(Date.UTC(year, 0, 4));
+    var firstDay = (firstThu.getUTCDay() + 6) % 7;
+    firstThu.setUTCDate(firstThu.getUTCDate() - firstDay + 3);
+    var week = 1 + Math.round((d.getTime() - firstThu.getTime()) / 604800000);
+    return [year, week];
+  }
+  var d = new Date(t._d.getTime());
+  var day = (d.getDay() + 6) % 7;
+  d.setDate(d.getDate() - day + 3);
+  var year = d.getFullYear();
+  var firstThu = new Date(year, 0, 4);
+  var firstDay = (firstThu.getDay() + 6) % 7;
+  firstThu.setDate(firstThu.getDate() - firstDay + 3);
+  var week = 1 + Math.round((d.getTime() - firstThu.getTime()) / 604800000);
+  return [year, week];
+};
+var __timeMarshalJSON = __timeMarshalJSON || function(t) {
+  var y = (typeof t._offset === "number") ? new Date(t._d.getTime() + t._offset * 1000).getUTCFullYear() : t._d.getFullYear();
+  if (y < 0 || y > 9999) {
+    return [new Uint8Array(0), typeof __error === "function" ? __error("Time.MarshalJSON: year outside of range [0,9999]") : new Error("Time.MarshalJSON: year outside of range [0,9999]")];
+  }
+  var s = '"' + __timeFmt(t, "2006-01-02T15:04:05.999999999Z07:00") + '"';
+  return [new TextEncoder().encode(s), null];
+};
+var __timeMarshalText = __timeMarshalText || function(t) {
+  var y = (typeof t._offset === "number") ? new Date(t._d.getTime() + t._offset * 1000).getUTCFullYear() : t._d.getFullYear();
+  if (y < 0 || y > 9999) {
+    return [new Uint8Array(0), typeof __error === "function" ? __error("Time.MarshalText: year outside of range [0,9999]") : new Error("Time.MarshalText: year outside of range [0,9999]")];
+  }
+  var s = __timeFmt(t, "2006-01-02T15:04:05.999999999Z07:00");
+  return [new TextEncoder().encode(s), null];
+};
+var __timeUnmarshalJSON = __timeUnmarshalJSON || function(t, data) {
+  var s = typeof data === "string" ? data : new TextDecoder().decode(data);
+  s = s.trim();
+  if (s === "null") return null;
+  if (!s.startsWith('"') || !s.endsWith('"') || s.length < 2) {
+    return typeof __error === "function" ? __error("Time.UnmarshalJSON: input is not a JSON string") : new Error("Time.UnmarshalJSON: input is not a JSON string");
+  }
+  var inner = s.slice(1, -1);
+  var parsed = __timeParse("2006-01-02T15:04:05.999999999Z07:00", inner);
+  if (parsed[1]) parsed = __timeParse("2006-01-02T15:04:05Z07:00", inner);
+  if (parsed[1]) return parsed[1];
+  t._d = parsed[0]._d;
+  t._offset = parsed[0]._offset;
+  t._loc = parsed[0]._loc;
+  t._ns = parsed[0]._ns;
+  return null;
+};
+var __timeUnmarshalText = __timeUnmarshalText || function(t, data) {
+  var s = typeof data === "string" ? data : new TextDecoder().decode(data);
+  s = s.trim();
+  var parsed = __timeParse("2006-01-02T15:04:05.999999999Z07:00", s);
+  if (parsed[1]) parsed = __timeParse("2006-01-02T15:04:05Z07:00", s);
+  if (parsed[1]) return parsed[1];
+  t._d = parsed[0]._d;
+  t._offset = parsed[0]._offset;
+  t._loc = parsed[0]._loc;
+  t._ns = parsed[0]._ns;
+  return null;
+};
+var __timeAfterFunc = __timeAfterFunc || function(d, f) {
+  var timer = {
+    _id: null,
+    _active: true,
+    _f: f,
+    Stop: function() {
+      var act = this._active;
+      if (act) {
+        clearTimeout(this._id);
+        this._active = false;
+      }
+      return act;
+    },
+    Reset: function(newD) {
+      var act = this._active;
+      if (act) clearTimeout(this._id);
+      var self = this;
+      this._active = true;
+      this._id = setTimeout(function() {
+        self._active = false;
+        self._f();
+      }, Math.round(Number(newD) / 1000000));
+      return act;
+    }
+  };
+  timer._id = setTimeout(function() {
+    timer._active = false;
+    timer._f();
+  }, Math.round(Number(d) / 1000000));
+  return timer;
 };`;
 
 export const HELPER_TIME_PARSE = `var __timeParse = __timeParse || function(layout, value) {
   try {
-    const d = new Date(value);
+    const val = String(value);
+    const d = new Date(val);
     if (isNaN(d.getTime())) throw 0;
-    return [{ _d: d }, null];
+    let offset = undefined;
+    let loc = null;
+    let ns = 0;
+    const m = /\\.(\\d{1,9})/.exec(val);
+    if (m) {
+      const fracStr = m[1].padEnd(9, "0");
+      ns = Number(fracStr.slice(3));
+    }
+    if (val.endsWith("Z") || val.endsWith("z")) {
+      offset = 0;
+    } else {
+      const tzMatch = /([+-])(\\d{2}):?(\\d{2})$/.exec(val);
+      if (tzMatch) {
+        const sign = tzMatch[1] === "+" ? 1 : -1;
+        const offSec = sign * (Number(tzMatch[2]) * 3600 + Number(tzMatch[3]) * 60);
+        offset = offSec;
+        loc = { _name: tzMatch[0], _offset: offSec, String() { return this._name; } };
+      }
+    }
+    return [{ _d: d, _offset: offset, _loc: loc, _ns: ns }, null];
   } catch {
     return [{ _d: new Date(0) }, { Error() { return "parsing time: cannot parse"; }, toString() { return "parsing time: cannot parse"; }, _msg: "parsing time: cannot parse", _cause: null }];
   }
@@ -1260,6 +1501,73 @@ export const HELPER_DURATION = `var __durationString = __durationString || funct
     }
   }
   return neg ? "-" + s : s;
+};
+var __durationRound = __durationRound || function(d, m) {
+  d = BigInt(d);
+  m = BigInt(m);
+  if (m <= 0n) return Number(d);
+  var r = d % m;
+  if (d < 0n) {
+    r = -r;
+    if (r + r < m) return Number(d + r);
+    return Number(d - m + r);
+  }
+  if (r + r < m) return Number(d - r);
+  return Number(d + m - r);
+};
+var __monthString = __monthString || function(m) {
+  var names = ["", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  var n = Number(m);
+  if (n >= 1 && n <= 12) return names[n];
+  return "%!Month(" + n + ")";
+};
+var __weekdayString = __weekdayString || function(w) {
+  var names = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  var n = Number(w);
+  if (n >= 0 && n <= 6) return names[n];
+  return "%!Weekday(" + n + ")";
+};
+var __timeParseDuration = __timeParseDuration || function(s) {
+  var orig = String(s);
+  if (orig === "0") return [0, null];
+  var str = orig.trim();
+  var neg = false;
+  if (str.startsWith("-")) { neg = true; str = str.slice(1); }
+  else if (str.startsWith("+")) { str = str.slice(1); }
+  if (str === "0") return [0, null];
+  if (str === "") return [0, typeof __error === "function" ? __error('time: invalid duration ""') : new Error('time: invalid duration ""')];
+
+  var totalNs = 0n;
+  var re = /^(\\d*(?:\\.\\d+)?)(ns|us|µs|\\u00b5s|\\u03bcs|ms|s|m|h)/;
+  while (str.length > 0) {
+    var m = re.exec(str);
+    if (!m || m[1] === "" || m[1] === ".") {
+      return [0, typeof __error === "function" ? __error('time: invalid duration "' + orig + '"') : new Error('time: invalid duration "' + orig + '"')];
+    }
+    var numStr = m[1];
+    var unitStr = m[2];
+    var unitMult = 1n;
+    if (unitStr === "ns") unitMult = 1n;
+    else if (unitStr === "us" || unitStr === "µs" || unitStr === "\\u00b5s" || unitStr === "\\u03bcs") unitMult = 1000n;
+    else if (unitStr === "ms") unitMult = 1000000n;
+    else if (unitStr === "s") unitMult = 1000000000n;
+    else if (unitStr === "m") unitMult = 60000000000n;
+    else if (unitStr === "h") unitMult = 3600000000000n;
+
+    if (numStr.includes(".")) {
+      var parts = numStr.split(".");
+      var whole = parts[0] ? BigInt(parts[0]) : 0n;
+      var frac = parts[1];
+      var fracScale = Math.pow(10, frac.length);
+      var fracVal = BigInt(Math.round((Number(frac) / fracScale) * Number(unitMult)));
+      totalNs += whole * unitMult + fracVal;
+    } else {
+      totalNs += BigInt(numStr) * unitMult;
+    }
+    str = str.slice(m[0].length);
+  }
+  if (neg) totalNs = -totalNs;
+  return [Number(totalNs), null];
 };`;
 
 export const HELPER_SYNC = `var __sync_mutex = __sync_mutex || function() {
