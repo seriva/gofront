@@ -1061,6 +1061,14 @@ export class BuiltinsEmitter {
 					this.emitBytesNewReader(call, targetWasmType);
 					return true;
 				}
+				if (func.field === "NewBuffer") {
+					this.emitBytesNewBuffer(call, targetWasmType);
+					return true;
+				}
+				if (func.field === "NewBufferString") {
+					this.emitBytesNewBufferString(call, targetWasmType);
+					return true;
+				}
 				this.emitBytesCall(func.field, args, targetWasmType);
 				return true;
 			case "path":
@@ -1255,6 +1263,20 @@ export class BuiltinsEmitter {
 		}
 		if (recvTypeName === "time.Duration") {
 			this.emitDurationMethodCall(field, expr, args, targetWasmType);
+			return true;
+		}
+		if (
+			recvTypeName === "time.Month" ||
+			recvTypeName === "time.Weekday" ||
+			recvTypeName === "time.Location"
+		) {
+			this.emitTimeAuxMethodCall(
+				recvTypeName,
+				field,
+				expr,
+				args,
+				targetWasmType,
+			);
 			return true;
 		}
 		if (recvTypeName === "io.LimitedReader") {
