@@ -55,19 +55,8 @@
 			"Interface.Swap"
 		],
 		"context": ["Context.Deadline", "Context.Err", "Context.Value"],
-		"crypto/hmac": ["Equal", "New"],
 		"crypto/rand": ["Text"],
 		"crypto/sha256": ["New224", "Size224", "Sum224"],
-		"crypto/subtle": [
-			"ConstantTimeByteEq",
-			"ConstantTimeCompare",
-			"ConstantTimeCopy",
-			"ConstantTimeEq",
-			"ConstantTimeLessOrEq",
-			"ConstantTimeSelect",
-			"WithDataIndependentTiming",
-			"XORBytes"
-		],
 		"encoding/base32": [
 			"CorruptInputError",
 			"CorruptInputError.Error",

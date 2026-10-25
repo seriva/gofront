@@ -1339,11 +1339,12 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
   - Done when: fixture matches Go.
   - Landed: `crypto/md5`, `crypto/sha1` and `crypto/sha512` (SHA-512, SHA-384, SHA-512/224, SHA-512/256) in pure Go source with `Sum*`, `New*`, `Size*` and `BlockSize`. `sha512` keeps its 64-bit words as pairs of `uint32` so JS is exact (the JS `uint64` is a Number); it is slower than the other digests. Fixed the WASM interface dispatcher so a same-named method with a different arity (`strings.Reader.Reset(s)`) is no longer a candidate for `hash.Hash.Reset()`, which produced an invalid module. Conformance fixture `crypto/digests.go` matches Go 1.26 on JS and WASM.
 
-- [ ] **Task 4.6b — `crypto/hmac`, `crypto/subtle`, and the security note**
+- [x] **Task 4.6b — `crypto/hmac`, `crypto/subtle`, and the security note**
   - Files: new `runtime/stdlib/crypto/{hmac,subtle}/*.go`, `docs/go-compatibility.md`
   - Do: `hmac.New`, `Equal`; `subtle.ConstantTimeCompare`, `ConstantTimeEq`, `ConstantTimeSelect`, `XORBytes`. Docs: not side-channel hardened; use Web Crypto in `js` packages for real cryptography.
   - Test: conformance fixture `crypto/hmac.go` (RFC 4231 vectors).
   - Done when: fixture matches Go and the doc row exists.
+  - Landed: `crypto/hmac` (`New`, `Equal`) and `crypto/subtle` (all members, including `ConstantTimeByteEq`, `ConstantTimeCopy`, `ConstantTimeLessOrEq` and `WithDataIndependentTiming`) in pure Go source. `ConstantTimeEq` uses a 32-bit nonzero test instead of Go's `uint64` arithmetic so JS stays exact. The security note is a row in `docs/go-compatibility.md`. Conformance fixture `crypto/hmac.go` (RFC 4231 cases for SHA-384/512, plus SHA-1 and MD5) matches Go 1.26 on JS and WASM.
 
 - [ ] **Task 4.7 — `encoding/base32`, `unicode/utf16`, `sync/atomic`**
   - Files: new `runtime/stdlib/encoding/base32/`, `runtime/stdlib/unicode/utf16/`, `runtime/stdlib/sync/atomic/`
