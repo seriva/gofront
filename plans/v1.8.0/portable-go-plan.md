@@ -1293,11 +1293,12 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
   - Done when: fixture matches Go.
   - Landed: implemented `net/url` query/path escaping and values in Go source (`QueryEscape`, `QueryUnescape`, `PathEscape`, `PathUnescape`, `EscapeError`, `InvalidHostError`, `Values` with `Get`, `Set`, `Add`, `Del`, `Has`, `Encode` with sorted keys, and `ParseQuery`), operating on `[]byte` for correct UTF-8 percent-encoding. Fixed comma-ok map index generation in JS backend for defined types (`stmt._commaOkMap`). Conformance fixture `test/conformance/url/escape.go` passes on JS and WASM matching Go 1.26 reference. Updated stdlib coverage gaps and regenerated docs.
 
-- [ ] **Task 4.2b — `net/url` parsing, `URL` methods, errors**
+- [x] **Task 4.2b — `net/url` parsing, `URL` methods, errors**
   - Files: new `runtime/stdlib/net/url/url.go`
   - Do: `Parse`, `ParseRequestURI`, `URL` fields and methods from [§6](#6-bufio-neturl-and-context-go-source), `Userinfo`, `*Error`, `InvalidHostError`, `JoinPath`.
   - Test: conformance fixture `url/parse.go` (IPv6 host and port, `ResolveReference`, `Redacted`, malformed escapes returning `*url.Error`).
   - Done when: fixture matches Go.
+  - Landed: implemented `URL`, `Userinfo`, and `*Error` in pure Go source (`runtime/stdlib/net/url/url.go`) with full method sets (`String`, `Redacted`, `IsAbs`, `Parse`, `ResolveReference`, `Query`, `RequestURI`, `Hostname`, `Port`, `EscapedPath`, `EscapedFragment`, `JoinPath`, `MarshalBinary`, `AppendBinary`, `UnmarshalBinary`) and functions (`Parse`, `ParseRequestURI`, `JoinPath`). IPv6 host and port parsing verified. Conformance fixture `test/conformance/url/parse.go` passes across JS and WASM matching Go 1.26 reference. Updated stdlib coverage gaps (0 gaps remaining in `net/url`) and regenerated docs. Updated CHANGELOG.md for Phase 4.1.
 
 ### Phase 4.2: `context`, container and hash
 
