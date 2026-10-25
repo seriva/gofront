@@ -37,7 +37,8 @@ const STRINGS_DISPATCH = {
 	TrimRight: ([s, s2]) =>
 		`((str, cut) => { const cs = new Set(cut); let j = str.length; while (j > 0 && cs.has(str[j - 1])) j--; return str.slice(0, j); })(${s}, ${s2})`,
 	EqualFold: ([s, s2]) => `${s}.toLowerCase() === ${s2}.toLowerCase()`,
-	Fields: ([s]) => `(${s}).trim() === '' ? [] : (${s}).trim().split(/\\s+/)`,
+	Fields: ([s]) =>
+		`(${s}).split(/[ \\t\\n\\v\\f\\r\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]+/).filter(p => p !== "")`,
 	FieldsFunc: ([s, f]) =>
 		`((s, fn) => { const res = []; const runes = Array.from(s ?? ""); let cur = ""; for (const ch of runes) { const cp = ch.codePointAt(0); if (fn(cp)) { if (cur.length > 0) { res.push(cur); cur = ""; } } else { cur += ch; } } if (cur.length > 0) res.push(cur); return res; })(${s}, ${f})`,
 	Cut: ([s, s2]) =>
