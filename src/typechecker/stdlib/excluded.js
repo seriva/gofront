@@ -6,4 +6,10 @@
 export const EXCLUDED_STDLIB_MEMBERS = new Map([
 	["iter.Pull", "requires coroutines; out of scope (no runtime)"],
 	["iter.Pull2", "requires coroutines; out of scope (no runtime)"],
+	["time.After", "channels"],
+	["time.Tick", "channels"],
+	["time.NewTicker", "channels"],
+	["time.NewTimer", "channels"],
+	["time.Ticker", "channels"],
+	["time.Timer.C", "channels"],
 ]);

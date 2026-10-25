@@ -579,6 +579,57 @@ func main() {
 	assertEqual(runJs(js), "true\ntrue\ntrue");
 });
 
+test("WASM package rejects JS-only time members (time.AfterFunc, time.Timer, time.Sleep)", () => {
+	let res = compile(
+		'package main\nimport "time"\nfunc main() { time.AfterFunc(time.Second, func(){}) }',
+		{ target: "wasm" },
+	);
+	assert(
+		res.errors.some((e) =>
+			e.message?.includes(
+				"'time.AfterFunc' is not yet available in wasm packages",
+			),
+		),
+	);
+	res = compile(
+		'package main\nimport "time"\nfunc main() { var t time.Timer; _ = t }',
+		{ target: "wasm" },
+	);
+	assert(
+		res.errors.some((e) =>
+			e.message?.includes("'time.Timer' is not yet available in wasm packages"),
+		),
+	);
+	res = compile(
+		'package main\nimport "time"\nfunc main() { time.Sleep(time.Second) }',
+		{ target: "wasm" },
+	);
+	assert(
+		res.errors.some((e) =>
+			e.message?.includes("'time.Sleep' is not yet available in wasm packages"),
+		),
+	);
+});
+
+test("channel exclusions for time package (time.After, time.Tick, time.NewTicker, time.NewTimer)", () => {
+	for (const member of [
+		"time.After",
+		"time.Tick",
+		"time.NewTicker",
+		"time.NewTimer",
+	]) {
+		const res = compile(
+			`package main\nimport "time"\nfunc main() { _ = ${member} }`,
+		);
+		assert(
+			res.errors.some((e) =>
+				e.message?.includes(`${member} is not available: channels`),
+			),
+			`expected channel error for ${member}`,
+		);
+	}
+});
+
 // ── unicode package ──────────────────────────────────────────
 
 section("unicode package");
@@ -2552,6 +2603,41 @@ func main() {
 }`);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "1\ntrue\nhello");
+});
+
+test("strings.ToValidUTF8", () => {
+	const { js, errors } = compile(`package main
+import "strings"
+func main() {
+	console.log(strings.ToValidUTF8("hello", "X"))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "hello");
+});
+
+test("strings.Reader method gaps", () => {
+	const { js, errors } = compile(`package main
+import (
+	"strings"
+)
+func main() {
+	r := strings.NewReader("hello world")
+	console.log(r.Len())
+	console.log(r.Size())
+	b, _ := r.ReadByte()
+	console.log(string(b))
+	_ = r.UnreadByte()
+	b, _ = r.ReadByte()
+	console.log(string(b))
+	pos, _ := r.Seek(0, 0)
+	console.log(pos)
+	buf := make([]byte, 4)
+	n, _ := r.ReadAt(buf, 6)
+	console.log(n)
+	console.log(string(buf[:n]))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "11\n11\nh\nh\n0\n4\nworl");
 });
 
 // ── Entry point ───────────────────────────────────────────────

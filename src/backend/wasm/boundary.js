@@ -1565,10 +1565,11 @@ export function addBoundaryHelpers(mod, meta) {
 				[EXT],
 				[
 					get(0),
-					{ op: "f64.const", value: 1000000 },
-					{ op: "f64.mul" },
 					{ op: "i64.trunc_sat_f64_s" },
+					{ op: "i64.const", value: 1000000n },
+					{ op: "i64.mul" },
 					get(1),
+					{ op: "ref.null", heapType: "any" },
 					{ op: "struct.new", typeIndex: timeInfo.typeIndex },
 					...toExt(timeWType),
 				],
@@ -1925,14 +1926,14 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 	const late = { exports: null };
 	const flush = () => { write(lineBuf); lineBuf = ""; };
 	const print = (v) => {
-		const s = String(v);
+		const s = Object.is(v, -0) ? "-0" : String(v);
 		if (lineBuf.length > 0 && !lineBuf.endsWith(" ") && !s.startsWith(" ")) {
 			lineBuf += " ";
 		}
 		lineBuf += s;
 	};
 	const println = (v) => {
-		const s = String(v);
+		const s = Object.is(v, -0) ? "-0" : String(v);
 		if (lineBuf.length > 0 && !lineBuf.endsWith(" ") && !s.startsWith(" ")) {
 			lineBuf += " ";
 		}
@@ -1976,6 +1977,7 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		},
 		"str_to_upper": (s) => (s ? s.toUpperCase() : ""),
 		"str_to_lower": (s) => (s ? s.toLowerCase() : ""),
+		"str_to_valid_utf8": (s, repl) => (s ? s.replace(/(?:[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF])+/g, repl ?? "") : (s ?? "")),
 		"str_trim_space": (s) => (s ? s.trim() : ""),
 		"str_contains": (s, sub) => (s && sub !== undefined ? (s.includes(sub) ? 1 : 0) : 0),
 		"str_has_prefix": (s, pre) => (s && pre !== undefined ? (s.startsWith(pre) ? 1 : 0) : 0),
@@ -1992,7 +1994,7 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		},
 		"str_from_i64": (n) => String(n),
 		"str_from_i32": (n) => String(n),
-		"str_from_f64": (f) => String(f),
+		"str_from_f64": (f) => (Object.is(f, -0) ? "-0" : String(f)),
 		"is_string": (v) => (typeof v === "string" ? 1 : 0),
 		"str_to_bytes": (s) => {
 			utf8Encoded = new TextEncoder().encode(s ?? "");
@@ -2069,7 +2071,7 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 	}
 	Object.assign(env, extraEnv);
 	const m = {};
-	for (const k of ["sin", "cos", "tan", "asin", "acos", "atan", "atan2", "pow", "exp", "log", "log2", "log10", "cbrt", "hypot", "random", "sinh", "cosh", "tanh"]) m[k] = Math[k];
+	for (const k of ["sin", "cos", "tan", "asin", "acos", "atan", "atan2", "pow", "exp", "log", "log2", "log10", "cbrt", "hypot", "random", "sinh", "cosh", "tanh", "log1p", "expm1"]) m[k] = Math[k];
 	m.mod = (x, y) => x % y;
 	// Go rounds half away from zero; Math.round rounds half toward +Infinity.
 	m.round = (x) => Math.sign(x) * Math.round(Math.abs(x));
@@ -2100,12 +2102,14 @@ function ${P}stdlib(stringTable, io) {
 	let trimStart = 0, trimEnd = 0;
 	let sscanTokens = [];
 	let sscanHasErr = 0, sscanErrMsg = "";
-	let timeParseErr = null, timeParseOffset = 0;
+	let timeParseErr = null, timeParseOffset = 0, timeParseDurationErr = null, timeParseSubNs = 0;
 	let rawBytes = new Uint8Array(0);
 	let rawPos = 0;
 	let hexErr = null;
 	let base64Err = null;
 	let customBase64Encodings = [];
+	let bitsRem32 = 0;
+	let bitsRem64 = 0n;
 	return {
 		"fmt_sscan_init": (s, mode) => {
 			sscanHasErr = 0;
@@ -2526,32 +2530,66 @@ function ${P}stdlib(stringTable, io) {
 		"time_now_ms": () => (typeof globalThis.__GOFRONT_CLOCK === "function" ? globalThis.__GOFRONT_CLOCK() : Date.now()),
 		"time_timezone_offset": (ms) => -new Date(ms).getTimezoneOffset() * 60,
 		"time_duration_string": (d) => __durationString(d),
+		"time_parse_duration": (s) => {
+			const res = __timeParseDuration(s);
+			if (res[1]) {
+				timeParseDurationErr = res[1].message || String(res[1]);
+				return 0n;
+			}
+			timeParseDurationErr = null;
+			return BigInt(res[0]);
+		},
+		"time_parse_duration_err": () => timeParseDurationErr,
+		"time_month_string": (m) => __monthString(m),
+		"time_weekday_string": (w) => __weekdayString(w),
 		"time_parse": (layout, val) => {
 			try {
-				const d = new Date(val ?? "");
+				let s = String(val ?? "");
+				if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) {
+					s = s.slice(1, -1);
+				}
+				const d = new Date(s);
 				if (isNaN(d.getTime())) throw 0;
+				let subNs = 0;
+				const m = /\\.([0-9]{1,9})/.exec(s);
+				if (m) {
+					subNs = Number(m[1].padEnd(9, "0")) % 1000000;
+				}
 				timeParseErr = null;
-				timeParseOffset = -d.getTimezoneOffset() * 60;
+				if (s.endsWith("Z") || s.endsWith("z")) {
+					timeParseOffset = 0;
+				} else {
+					const tzMatch = /([+-])(\\d{2}):?(\\d{2})$/.exec(s);
+					if (tzMatch) {
+						const sign = tzMatch[1] === "+" ? 1 : -1;
+						timeParseOffset = sign * (Number(tzMatch[2]) * 3600 + Number(tzMatch[3]) * 60);
+					} else {
+						timeParseOffset = -d.getTimezoneOffset() * 60;
+					}
+				}
+				timeParseSubNs = subNs;
 				return d.getTime();
 			} catch {
 				timeParseErr = "parsing time: cannot parse";
 				timeParseOffset = 0;
+				timeParseSubNs = 0;
 				return 0;
 			}
 		},
 		"time_parse_err": () => timeParseErr,
 		"time_parse_offset": () => timeParseOffset,
+		"time_parse_sub_ns": () => timeParseSubNs,
 		"time_format": (y, m, d, hr, min, sec, wd, ms, offsetSec, layout) => {
 			const DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
 			const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 			const pad = (n, w = 2) => String(n).padStart(w, "0");
-			return (layout ?? "").replace(/2006|06|Monday|Mon|January|Jan|01|02|15|PM|pm|03|04|05|Z07:00|\\.(?:0+|9+)|1|2|3|4|5/g, t => {
+			return (layout ?? "").replace(/2006|06|Monday|Mon|January|Jan|01|02|15|PM|pm|03|04|05|Z07:00|-07:00|-0700|MST|\\.(?:0+|9+)|1|2|3|4|5/g, t => {
 				if (t.startsWith(".")) {
 					const isZeroPad = t.includes("0");
 					const maxLen = t.length - 1;
-					let frac = pad(ms % 1000, 3);
-					if (maxLen > 3) frac = frac.padEnd(maxLen, "0");
-					else frac = frac.slice(0, maxLen);
+					let frac = pad(ms % 1000000000, 9);
+					if (maxLen <= 9) frac = frac.slice(0, maxLen);
+					else frac = frac.padEnd(maxLen, "0");
 					if (!isZeroPad) {
 						frac = frac.replace(/0+$/, "");
 						return frac.length > 0 ? "." + frac : "";
@@ -2582,6 +2620,15 @@ function ${P}stdlib(stringTable, io) {
 						const o = Math.floor(offsetSec / 60);
 						return o === 0 ? "Z" : (o > 0 ? "+" : "-") + pad(Math.floor(Math.abs(o) / 60)) + ":" + pad(Math.abs(o) % 60);
 					}
+					case "-07:00": {
+						const o = Math.floor(offsetSec / 60);
+						return (o >= 0 ? "+" : "-") + pad(Math.floor(Math.abs(o) / 60)) + ":" + pad(Math.abs(o) % 60);
+					}
+					case "-0700": {
+						const o = Math.floor(offsetSec / 60);
+						return (o >= 0 ? "+" : "-") + pad(Math.floor(Math.abs(o) / 60)) + pad(Math.abs(o) % 60);
+					}
+					case "MST": return offsetSec === 0 ? "UTC" : "LOCAL";
 					default: return t;
 				}
 			});
@@ -2641,6 +2688,40 @@ function ${P}stdlib(stringTable, io) {
 			return rawBytes.length;
 		},
 		"base64_get_err": () => base64Err,
+		"bits_div32": (hi, lo, y) => {
+			const yu = y >>> 0;
+			if (yu === 0) throw new Error("runtime error: integer divide by zero");
+			const hiu = hi >>> 0;
+			if (hiu >= yu) throw new Error("runtime error: integer overflow");
+			const z = (BigInt(hiu) << 32n) | BigInt(lo >>> 0);
+			const yB = BigInt(yu);
+			bitsRem32 = Number(z % yB);
+			return Number(z / yB);
+		},
+		"bits_div32_rem": () => bitsRem32,
+		"bits_rem32": (hi, lo, y) => {
+			const yu = y >>> 0;
+			if (yu === 0) throw new Error("runtime error: integer divide by zero");
+			const z = (BigInt(hi >>> 0) << 32n) | BigInt(lo >>> 0);
+			return Number(z % BigInt(yu));
+		},
+		"bits_div64": (hi, lo, y) => {
+			const yB = BigInt.asUintN(64, BigInt(y));
+			if (yB === 0n) throw new Error("runtime error: integer divide by zero");
+			const hiB = BigInt.asUintN(64, BigInt(hi));
+			if (hiB >= yB) throw new Error("runtime error: integer overflow");
+			const loB = BigInt.asUintN(64, BigInt(lo));
+			const z = (hiB << 64n) | loB;
+			bitsRem64 = z % yB;
+			return z / yB;
+		},
+		"bits_div64_rem": () => bitsRem64,
+		"bits_rem64": (hi, lo, y) => {
+			const yB = BigInt.asUintN(64, BigInt(y));
+			if (yB === 0n) throw new Error("runtime error: integer divide by zero");
+			const z = ((BigInt.asUintN(64, BigInt(hi)) % yB) << 64n) | BigInt.asUintN(64, BigInt(lo));
+			return z % yB;
+		},
 	};
 }
 function ${P}trim(s, cutset, left, right) {

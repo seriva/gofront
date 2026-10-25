@@ -262,12 +262,26 @@ export function setupExtendedGlobals(globals, types) {
 							["_self", ANY],
 						]
 					: name === "bytes.Buffer"
-						? [["_buf", BYTE_SLICE_T]]
+						? [
+								["_buf", BYTE_SLICE_T],
+								["_lastOp", INT],
+								["_lastRuneLen", INT],
+							]
 						: [],
 			),
 			methods: new Map([..._builderBase, ...extra]),
 		},
 	});
+	const ioPkg = globals.lookup("io");
+	const IO_READER = ioPkg?.members?.Reader ?? {
+		kind: "interface",
+		name: "io.Reader",
+	};
+	const IO_WRITER = ioPkg?.members?.Writer ?? {
+		kind: "interface",
+		name: "io.Writer",
+	};
+
 	types.set(
 		"strings.Builder",
 		_makeBuilderType("strings.Builder", [
@@ -280,6 +294,34 @@ export function setupExtendedGlobals(globals, types) {
 			["WriteRune", { kind: "func", params: [INT], returns: [INT, ERROR] }],
 			["Bytes", { kind: "func", params: [], returns: [BYTE_SLICE_T] }],
 			["Read", { kind: "func", params: [BYTE_SLICE_T], returns: [INT, ERROR] }],
+			["ReadRune", { kind: "func", params: [], returns: [INT32, INT, ERROR] }],
+			["UnreadRune", { kind: "func", params: [], returns: [ERROR] }],
+			["ReadByte", { kind: "func", params: [], returns: [UINT8, ERROR] }],
+			["UnreadByte", { kind: "func", params: [], returns: [ERROR] }],
+			[
+				"ReadBytes",
+				{ kind: "func", params: [UINT8], returns: [BYTE_SLICE_T, ERROR] },
+			],
+			[
+				"ReadString",
+				{ kind: "func", params: [UINT8], returns: [STRING, ERROR] },
+			],
+			[
+				"ReadFrom",
+				{ kind: "func", params: [IO_READER], returns: [INT64, ERROR] },
+			],
+			[
+				"WriteTo",
+				{ kind: "func", params: [IO_WRITER], returns: [INT64, ERROR] },
+			],
+			["Next", { kind: "func", params: [INT], returns: [BYTE_SLICE_T] }],
+			["Truncate", { kind: "func", params: [INT], returns: [VOID] }],
+			["Available", { kind: "func", params: [], returns: [INT] }],
+			[
+				"AvailableBuffer",
+				{ kind: "func", params: [], returns: [BYTE_SLICE_T] },
+			],
+			["Peek", { kind: "func", params: [INT], returns: [BYTE_SLICE_T, ERROR] }],
 		]),
 	);
 	types.set("strings.Replacer", {
@@ -301,11 +343,36 @@ export function setupExtendedGlobals(globals, types) {
 			fields: new Map([
 				["_src", srcType],
 				["_pos", INT],
+				["_prev", INT],
 			]),
 			methods: new Map([
 				[
 					"Read",
 					{ kind: "func", params: [BYTE_SLICE_T], returns: [INT, ERROR] },
+				],
+				[
+					"ReadAt",
+					{
+						kind: "func",
+						params: [BYTE_SLICE_T, INT64],
+						returns: [INT, ERROR],
+					},
+				],
+				["ReadByte", { kind: "func", params: [], returns: [UINT8, ERROR] }],
+				["UnreadByte", { kind: "func", params: [], returns: [ERROR] }],
+				[
+					"ReadRune",
+					{ kind: "func", params: [], returns: [INT32, INT, ERROR] },
+				],
+				["UnreadRune", { kind: "func", params: [], returns: [ERROR] }],
+				[
+					"Seek",
+					{ kind: "func", params: [INT64, INT], returns: [INT64, ERROR] },
+				],
+				["Size", { kind: "func", params: [], returns: [INT64] }],
+				[
+					"WriteTo",
+					{ kind: "func", params: [IO_WRITER], returns: [INT64, ERROR] },
 				],
 				["Len", { kind: "func", params: [], returns: [INT] }],
 				["Reset", { kind: "func", params: [resetArgType], returns: [VOID] }],
@@ -335,11 +402,6 @@ export function setupExtendedGlobals(globals, types) {
 			]),
 		},
 	});
-	const ioPkg = globals.lookup("io");
-	const IO_READER = ioPkg?.members?.Reader ?? {
-		kind: "interface",
-		name: "io.Reader",
-	};
 	types.set("io.LimitedReader", {
 		kind: "named",
 		name: "io.LimitedReader",
@@ -377,6 +439,7 @@ export function setupExtendedGlobals(globals, types) {
 			returns: [{ kind: "pointer", base: types.get("bytes.Reader") }],
 		};
 		bytesPkg.members.Reader = types.get("bytes.Reader");
+		bytesPkg.members.Buffer = types.get("bytes.Buffer");
 	}
 
 	globals.define("rand", {

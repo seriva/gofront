@@ -202,6 +202,9 @@ const NS_CONSTANTS = {
 		ErrSyntax: "__strconv_err_syntax",
 		ErrRange: "__strconv_err_range",
 	},
+	bits: {
+		UintSize: "64",
+	},
 	path: {
 		ErrBadPattern: "__path_err_bad_pattern",
 	},
@@ -1502,6 +1505,25 @@ export const expressionGenMethods = {
 			return this._genTimeMethodCall(expr.func.field, expr);
 		if (recvName === "time.Duration")
 			return this._genDurationMethodCall(expr.func.field, expr);
+		if (recvName === "time.Month") {
+			this.useHelper("duration");
+			return `__monthString(${this.genExpr(expr.func.expr)})`;
+		}
+		if (recvName === "time.Weekday") {
+			this.useHelper("duration");
+			return `__weekdayString(${this.genExpr(expr.func.expr)})`;
+		}
+		if (recvName === "time.Location") {
+			const recv = this.genExpr(expr.func.expr);
+			return `(${recv} ? ${recv}.String() : "UTC")`;
+		}
+		if (recvName === "time.Timer") {
+			const recv = this.genExpr(expr.func.expr);
+			if (expr.func.field === "Stop")
+				return `(${recv} ? ${recv}.Stop() : false)`;
+			if (expr.func.field === "Reset")
+				return `(${recv} ? ${recv}.Reset(${this.genExpr(expr.args[0])}) : false)`;
+		}
 		if (recvName === "testing.T")
 			return this._genTestingMethodCall(expr.func.field, expr);
 		if (recvName === "strings.Replacer") {

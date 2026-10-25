@@ -188,6 +188,11 @@ export const fmtMethods = {
 		const js = this.genExpr(e);
 		const base =
 			e?._type?.kind === "named" ? (e._type.underlying ?? e._type) : e?._type;
+		if (e?._type?.name === "time.Duration") {
+			this.useHelper("duration");
+			this.useHelper("sprintf");
+			return `__ft(${js}, { k: "named", n: "time.Duration" })`;
+		}
 		if (typed) {
 			const desc = fmtTypeDesc(
 				e?._type,

@@ -318,6 +318,9 @@ export const HELPER_FMT_LOOP = String.raw`
       // the nil-dereference panic); a bare null cannot tell it from a nil interface.
       else return verb === "s" ? U.pad("<nil>", fl, wid) : bad(verb, v, t);
     }
+    if (t?.n === "time.Duration" && "vs".includes(verb)) {
+      return typeof __durationString === "function" ? __durationString(v) : String(v);
+    }
     switch (typeof v) {
       case "boolean": return verb === "t" ? U.pad(String(v), fl, wid) : bad(verb, v, t);
       case "string": {
@@ -454,7 +457,8 @@ export const HELPER_FMT_LOOP = String.raw`
         const bt0 = U.baseOf(t);
         v = bt0?.k === "slice" ? [] : v;
       }
-      out += U.pad(sharp ? U.gs(v, t, true) : formatV(unbox(v, "v"), fl.plus, true), fl, wid);
+      const vStr = t?.n === "time.Duration" && typeof __durationString === "function" ? __durationString(v) : formatV(unbox(v, "v"), fl.plus, true, false, t);
+      out += U.pad(sharp ? U.gs(v, t, true) : vStr, fl, wid);
       continue;
     }
     if (verb === "w") {
