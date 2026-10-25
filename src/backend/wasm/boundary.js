@@ -1925,14 +1925,14 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 	const late = { exports: null };
 	const flush = () => { write(lineBuf); lineBuf = ""; };
 	const print = (v) => {
-		const s = String(v);
+		const s = Object.is(v, -0) ? "-0" : String(v);
 		if (lineBuf.length > 0 && !lineBuf.endsWith(" ") && !s.startsWith(" ")) {
 			lineBuf += " ";
 		}
 		lineBuf += s;
 	};
 	const println = (v) => {
-		const s = String(v);
+		const s = Object.is(v, -0) ? "-0" : String(v);
 		if (lineBuf.length > 0 && !lineBuf.endsWith(" ") && !s.startsWith(" ")) {
 			lineBuf += " ";
 		}
@@ -1992,7 +1992,7 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		},
 		"str_from_i64": (n) => String(n),
 		"str_from_i32": (n) => String(n),
-		"str_from_f64": (f) => String(f),
+		"str_from_f64": (f) => (Object.is(f, -0) ? "-0" : String(f)),
 		"is_string": (v) => (typeof v === "string" ? 1 : 0),
 		"str_to_bytes": (s) => {
 			utf8Encoded = new TextEncoder().encode(s ?? "");
@@ -2069,7 +2069,7 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 	}
 	Object.assign(env, extraEnv);
 	const m = {};
-	for (const k of ["sin", "cos", "tan", "asin", "acos", "atan", "atan2", "pow", "exp", "log", "log2", "log10", "cbrt", "hypot", "random", "sinh", "cosh", "tanh"]) m[k] = Math[k];
+	for (const k of ["sin", "cos", "tan", "asin", "acos", "atan", "atan2", "pow", "exp", "log", "log2", "log10", "cbrt", "hypot", "random", "sinh", "cosh", "tanh", "log1p", "expm1"]) m[k] = Math[k];
 	m.mod = (x, y) => x % y;
 	// Go rounds half away from zero; Math.round rounds half toward +Infinity.
 	m.round = (x) => Math.sign(x) * Math.round(Math.abs(x));
@@ -2106,6 +2106,8 @@ function ${P}stdlib(stringTable, io) {
 	let hexErr = null;
 	let base64Err = null;
 	let customBase64Encodings = [];
+	let bitsRem32 = 0;
+	let bitsRem64 = 0n;
 	return {
 		"fmt_sscan_init": (s, mode) => {
 			sscanHasErr = 0;
@@ -2641,6 +2643,40 @@ function ${P}stdlib(stringTable, io) {
 			return rawBytes.length;
 		},
 		"base64_get_err": () => base64Err,
+		"bits_div32": (hi, lo, y) => {
+			const yu = y >>> 0;
+			if (yu === 0) throw new Error("runtime error: integer divide by zero");
+			const hiu = hi >>> 0;
+			if (hiu >= yu) throw new Error("runtime error: integer overflow");
+			const z = (BigInt(hiu) << 32n) | BigInt(lo >>> 0);
+			const yB = BigInt(yu);
+			bitsRem32 = Number(z % yB);
+			return Number(z / yB);
+		},
+		"bits_div32_rem": () => bitsRem32,
+		"bits_rem32": (hi, lo, y) => {
+			const yu = y >>> 0;
+			if (yu === 0) throw new Error("runtime error: integer divide by zero");
+			const z = (BigInt(hi >>> 0) << 32n) | BigInt(lo >>> 0);
+			return Number(z % BigInt(yu));
+		},
+		"bits_div64": (hi, lo, y) => {
+			const yB = BigInt.asUintN(64, BigInt(y));
+			if (yB === 0n) throw new Error("runtime error: integer divide by zero");
+			const hiB = BigInt.asUintN(64, BigInt(hi));
+			if (hiB >= yB) throw new Error("runtime error: integer overflow");
+			const loB = BigInt.asUintN(64, BigInt(lo));
+			const z = (hiB << 64n) | loB;
+			bitsRem64 = z % yB;
+			return z / yB;
+		},
+		"bits_div64_rem": () => bitsRem64,
+		"bits_rem64": (hi, lo, y) => {
+			const yB = BigInt.asUintN(64, BigInt(y));
+			if (yB === 0n) throw new Error("runtime error: integer divide by zero");
+			const z = ((BigInt.asUintN(64, BigInt(hi)) % yB) << 64n) | BigInt.asUintN(64, BigInt(lo));
+			return z % yB;
+		},
 	};
 }
 function ${P}trim(s, cutset, left, right) {

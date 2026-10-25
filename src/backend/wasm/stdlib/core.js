@@ -121,6 +121,20 @@ export class StdlibCoreEmitter {
 		);
 	}
 
+	_isBitsConst(expr) {
+		return this._isPkgExpr(expr, "bits") && expr.field === "UintSize";
+	}
+
+	emitBitsConst(name, targetWasmType) {
+		if (name === "UintSize") {
+			if (targetWasmType === "i32") {
+				this.pushInstruction({ op: "i32.const", value: 64 });
+			} else {
+				this.pushInstruction({ op: "i64.const", value: 64n });
+			}
+		}
+	}
+
 	emitUtf8Const(name, targetWasmType) {
 		const v = UTF8_CONSTS[name];
 		if ((targetWasmType ?? "i32") === "i64") {
@@ -372,8 +386,10 @@ export class StdlibCoreEmitter {
 			Cbrt: "cbrt",
 			Exp: "exp",
 			Log: "log",
+			Log1p: "log1p",
 			Log2: "log2",
 			Log10: "log10",
+			Expm1: "expm1",
 			Round: "round",
 			Sinh: "sinh",
 			Cosh: "cosh",
@@ -1414,23 +1430,443 @@ export class StdlibCoreEmitter {
 		}
 	}
 
-	emitBitsCall(name, args) {
+	_emitBitsArith(name, args) {
 		switch (name) {
+			case "Add32": {
+				const sumTmp = this.acquireTemp("i64");
+				this.emitExpr(args[0], "i32");
+				this.pushInstruction("i64.extend_i32_u");
+				this.emitExpr(args[1], "i32");
+				this.pushInstruction("i64.extend_i32_u");
+				this.pushInstruction("i64.add");
+				this.emitExpr(args[2], "i32");
+				this.pushInstruction("i64.extend_i32_u");
+				this.pushInstruction("i64.add");
+				this.pushInstruction({ op: "local.set", index: sumTmp });
+				this.pushInstruction({ op: "local.get", index: sumTmp });
+				this.pushInstruction("i32.wrap_i64");
+				this.pushInstruction({ op: "local.get", index: sumTmp });
+				this.pushInstruction({ op: "i64.const", value: 32n });
+				this.pushInstruction("i64.shr_u");
+				this.pushInstruction("i32.wrap_i64");
+				this.releaseTemp(sumTmp, "i64");
+				return true;
+			}
+			case "Add":
+			case "Add64": {
+				const xTmp = this.acquireTemp("i64");
+				const yTmp = this.acquireTemp("i64");
+				const cTmp = this.acquireTemp("i64");
+				const s1Tmp = this.acquireTemp("i64");
+				const sTmp = this.acquireTemp("i64");
+				this.emitExpr(args[0], "i64");
+				this.pushInstruction({ op: "local.set", index: xTmp });
+				this.emitExpr(args[1], "i64");
+				this.pushInstruction({ op: "local.set", index: yTmp });
+				this.emitExpr(args[2], "i64");
+				this.pushInstruction({ op: "local.set", index: cTmp });
+				this.pushInstruction({ op: "local.get", index: xTmp });
+				this.pushInstruction({ op: "local.get", index: yTmp });
+				this.pushInstruction("i64.add");
+				this.pushInstruction({ op: "local.set", index: s1Tmp });
+				this.pushInstruction({ op: "local.get", index: s1Tmp });
+				this.pushInstruction({ op: "local.get", index: cTmp });
+				this.pushInstruction("i64.add");
+				this.pushInstruction({ op: "local.set", index: sTmp });
+				this.pushInstruction({ op: "local.get", index: sTmp });
+				this.pushInstruction({ op: "local.get", index: s1Tmp });
+				this.pushInstruction({ op: "local.get", index: xTmp });
+				this.pushInstruction("i64.lt_u");
+				this.pushInstruction({ op: "local.get", index: sTmp });
+				this.pushInstruction({ op: "local.get", index: s1Tmp });
+				this.pushInstruction("i64.lt_u");
+				this.pushInstruction("i32.or");
+				this.pushInstruction("i64.extend_i32_u");
+				this.releaseTemp(xTmp, "i64");
+				this.releaseTemp(yTmp, "i64");
+				this.releaseTemp(cTmp, "i64");
+				this.releaseTemp(s1Tmp, "i64");
+				this.releaseTemp(sTmp, "i64");
+				return true;
+			}
+			case "Sub32": {
+				const diffTmp = this.acquireTemp("i64");
+				this.emitExpr(args[0], "i32");
+				this.pushInstruction("i64.extend_i32_u");
+				this.emitExpr(args[1], "i32");
+				this.pushInstruction("i64.extend_i32_u");
+				this.pushInstruction("i64.sub");
+				this.emitExpr(args[2], "i32");
+				this.pushInstruction("i64.extend_i32_u");
+				this.pushInstruction("i64.sub");
+				this.pushInstruction({ op: "local.set", index: diffTmp });
+				this.pushInstruction({ op: "local.get", index: diffTmp });
+				this.pushInstruction("i32.wrap_i64");
+				this.pushInstruction({ op: "local.get", index: diffTmp });
+				this.pushInstruction({ op: "i64.const", value: 63n });
+				this.pushInstruction("i64.shr_u");
+				this.pushInstruction("i32.wrap_i64");
+				this.releaseTemp(diffTmp, "i64");
+				return true;
+			}
+			case "Sub":
+			case "Sub64": {
+				const xTmp = this.acquireTemp("i64");
+				const yTmp = this.acquireTemp("i64");
+				const bTmp = this.acquireTemp("i64");
+				const d1Tmp = this.acquireTemp("i64");
+				const diffTmp = this.acquireTemp("i64");
+				this.emitExpr(args[0], "i64");
+				this.pushInstruction({ op: "local.set", index: xTmp });
+				this.emitExpr(args[1], "i64");
+				this.pushInstruction({ op: "local.set", index: yTmp });
+				this.emitExpr(args[2], "i64");
+				this.pushInstruction({ op: "local.set", index: bTmp });
+				this.pushInstruction({ op: "local.get", index: xTmp });
+				this.pushInstruction({ op: "local.get", index: yTmp });
+				this.pushInstruction("i64.sub");
+				this.pushInstruction({ op: "local.set", index: d1Tmp });
+				this.pushInstruction({ op: "local.get", index: d1Tmp });
+				this.pushInstruction({ op: "local.get", index: bTmp });
+				this.pushInstruction("i64.sub");
+				this.pushInstruction({ op: "local.set", index: diffTmp });
+				this.pushInstruction({ op: "local.get", index: diffTmp });
+				this.pushInstruction({ op: "local.get", index: xTmp });
+				this.pushInstruction({ op: "local.get", index: yTmp });
+				this.pushInstruction("i64.lt_u");
+				this.pushInstruction({ op: "local.get", index: d1Tmp });
+				this.pushInstruction({ op: "local.get", index: bTmp });
+				this.pushInstruction("i64.lt_u");
+				this.pushInstruction("i32.or");
+				this.pushInstruction("i64.extend_i32_u");
+				this.releaseTemp(xTmp, "i64");
+				this.releaseTemp(yTmp, "i64");
+				this.releaseTemp(bTmp, "i64");
+				this.releaseTemp(d1Tmp, "i64");
+				this.releaseTemp(diffTmp, "i64");
+				return true;
+			}
+			case "Mul32": {
+				const pTmp = this.acquireTemp("i64");
+				this.emitExpr(args[0], "i32");
+				this.pushInstruction("i64.extend_i32_u");
+				this.emitExpr(args[1], "i32");
+				this.pushInstruction("i64.extend_i32_u");
+				this.pushInstruction("i64.mul");
+				this.pushInstruction({ op: "local.set", index: pTmp });
+				this.pushInstruction({ op: "local.get", index: pTmp });
+				this.pushInstruction({ op: "i64.const", value: 32n });
+				this.pushInstruction("i64.shr_u");
+				this.pushInstruction("i32.wrap_i64");
+				this.pushInstruction({ op: "local.get", index: pTmp });
+				this.pushInstruction("i32.wrap_i64");
+				this.releaseTemp(pTmp, "i64");
+				return true;
+			}
+			case "Mul":
+			case "Mul64": {
+				const xTmp = this.acquireTemp("i64");
+				const yTmp = this.acquireTemp("i64");
+				const x0Tmp = this.acquireTemp("i64");
+				const x1Tmp = this.acquireTemp("i64");
+				const y0Tmp = this.acquireTemp("i64");
+				const y1Tmp = this.acquireTemp("i64");
+				const w0Tmp = this.acquireTemp("i64");
+				const tTmp = this.acquireTemp("i64");
+				const w1Tmp = this.acquireTemp("i64");
+				this.emitExpr(args[0], "i64");
+				this.pushInstruction({ op: "local.set", index: xTmp });
+				this.emitExpr(args[1], "i64");
+				this.pushInstruction({ op: "local.set", index: yTmp });
+				this.pushInstruction({ op: "local.get", index: xTmp });
+				this.pushInstruction({ op: "i64.const", value: 0xffffffffn });
+				this.pushInstruction("i64.and");
+				this.pushInstruction({ op: "local.set", index: x0Tmp });
+				this.pushInstruction({ op: "local.get", index: xTmp });
+				this.pushInstruction({ op: "i64.const", value: 32n });
+				this.pushInstruction("i64.shr_u");
+				this.pushInstruction({ op: "local.set", index: x1Tmp });
+				this.pushInstruction({ op: "local.get", index: yTmp });
+				this.pushInstruction({ op: "i64.const", value: 0xffffffffn });
+				this.pushInstruction("i64.and");
+				this.pushInstruction({ op: "local.set", index: y0Tmp });
+				this.pushInstruction({ op: "local.get", index: yTmp });
+				this.pushInstruction({ op: "i64.const", value: 32n });
+				this.pushInstruction("i64.shr_u");
+				this.pushInstruction({ op: "local.set", index: y1Tmp });
+				this.pushInstruction({ op: "local.get", index: x0Tmp });
+				this.pushInstruction({ op: "local.get", index: y0Tmp });
+				this.pushInstruction("i64.mul");
+				this.pushInstruction({ op: "local.set", index: w0Tmp });
+				this.pushInstruction({ op: "local.get", index: x1Tmp });
+				this.pushInstruction({ op: "local.get", index: y0Tmp });
+				this.pushInstruction("i64.mul");
+				this.pushInstruction({ op: "local.get", index: w0Tmp });
+				this.pushInstruction({ op: "i64.const", value: 32n });
+				this.pushInstruction("i64.shr_u");
+				this.pushInstruction("i64.add");
+				this.pushInstruction({ op: "local.set", index: tTmp });
+				this.pushInstruction({ op: "local.get", index: tTmp });
+				this.pushInstruction({ op: "i64.const", value: 0xffffffffn });
+				this.pushInstruction("i64.and");
+				this.pushInstruction({ op: "local.get", index: x0Tmp });
+				this.pushInstruction({ op: "local.get", index: y1Tmp });
+				this.pushInstruction("i64.mul");
+				this.pushInstruction("i64.add");
+				this.pushInstruction({ op: "local.set", index: w1Tmp });
+				this.pushInstruction({ op: "local.get", index: x1Tmp });
+				this.pushInstruction({ op: "local.get", index: y1Tmp });
+				this.pushInstruction("i64.mul");
+				this.pushInstruction({ op: "local.get", index: tTmp });
+				this.pushInstruction({ op: "i64.const", value: 32n });
+				this.pushInstruction("i64.shr_u");
+				this.pushInstruction("i64.add");
+				this.pushInstruction({ op: "local.get", index: w1Tmp });
+				this.pushInstruction({ op: "i64.const", value: 32n });
+				this.pushInstruction("i64.shr_u");
+				this.pushInstruction("i64.add");
+				this.pushInstruction({ op: "local.get", index: xTmp });
+				this.pushInstruction({ op: "local.get", index: yTmp });
+				this.pushInstruction("i64.mul");
+				this.releaseTemp(xTmp, "i64");
+				this.releaseTemp(yTmp, "i64");
+				this.releaseTemp(x0Tmp, "i64");
+				this.releaseTemp(x1Tmp, "i64");
+				this.releaseTemp(y0Tmp, "i64");
+				this.releaseTemp(y1Tmp, "i64");
+				this.releaseTemp(w0Tmp, "i64");
+				this.releaseTemp(tTmp, "i64");
+				this.releaseTemp(w1Tmp, "i64");
+				return true;
+			}
+			case "Div32":
+				this.emitExpr(args[0], "i32");
+				this.emitExpr(args[1], "i32");
+				this.emitExpr(args[2], "i32");
+				this.pushInstruction({
+					op: "call",
+					funcIndex: this.mod.getStdlibImportIndex("bits_div32"),
+				});
+				this.pushInstruction({
+					op: "call",
+					funcIndex: this.mod.getStdlibImportIndex("bits_div32_rem"),
+				});
+				return true;
+			case "Rem32":
+				this.emitExpr(args[0], "i32");
+				this.emitExpr(args[1], "i32");
+				this.emitExpr(args[2], "i32");
+				this.pushInstruction({
+					op: "call",
+					funcIndex: this.mod.getStdlibImportIndex("bits_rem32"),
+				});
+				return true;
+			case "Div":
+			case "Div64":
+				this.emitExpr(args[0], "i64");
+				this.emitExpr(args[1], "i64");
+				this.emitExpr(args[2], "i64");
+				this.pushInstruction({
+					op: "call",
+					funcIndex: this.mod.getStdlibImportIndex("bits_div64"),
+				});
+				this.pushInstruction({
+					op: "call",
+					funcIndex: this.mod.getStdlibImportIndex("bits_div64_rem"),
+				});
+				return true;
+			case "Rem":
+			case "Rem64":
+				this.emitExpr(args[0], "i64");
+				this.emitExpr(args[1], "i64");
+				this.emitExpr(args[2], "i64");
+				this.pushInstruction({
+					op: "call",
+					funcIndex: this.mod.getStdlibImportIndex("bits_rem64"),
+				});
+				return true;
+			default:
+				return false;
+		}
+	}
+
+	_emitBitsCount(name, args) {
+		switch (name) {
+			case "LeadingZeros8":
+				this.emitExpr(args[0], "i32");
+				this.pushInstruction({ op: "i32.const", value: 0xff });
+				this.pushInstruction("i32.and");
+				this.pushInstruction("i32.clz");
+				this.pushInstruction({ op: "i32.const", value: 24 });
+				this.pushInstruction("i32.sub");
+				this.pushInstruction("i64.extend_i32_u");
+				return true;
+			case "LeadingZeros16":
+				this.emitExpr(args[0], "i32");
+				this.pushInstruction({ op: "i32.const", value: 0xffff });
+				this.pushInstruction("i32.and");
+				this.pushInstruction("i32.clz");
+				this.pushInstruction({ op: "i32.const", value: 16 });
+				this.pushInstruction("i32.sub");
+				this.pushInstruction("i64.extend_i32_u");
+				return true;
 			case "LeadingZeros32":
 				this.emitExpr(args[0], "i32");
 				this.pushInstruction("i32.clz");
 				this.pushInstruction("i64.extend_i32_u");
-				return;
+				return true;
+			case "LeadingZeros":
+			case "LeadingZeros64":
+				this.emitExpr(args[0], "i64");
+				this.pushInstruction("i64.clz");
+				return true;
+			case "TrailingZeros8":
+				this.emitExpr(args[0], "i32");
+				this.pushInstruction({ op: "i32.const", value: 0xff });
+				this.pushInstruction("i32.and");
+				this.pushInstruction({ op: "i32.const", value: 0x100 });
+				this.pushInstruction("i32.or");
+				this.pushInstruction("i32.ctz");
+				this.pushInstruction("i64.extend_i32_u");
+				return true;
+			case "TrailingZeros16":
+				this.emitExpr(args[0], "i32");
+				this.pushInstruction({ op: "i32.const", value: 0xffff });
+				this.pushInstruction("i32.and");
+				this.pushInstruction({ op: "i32.const", value: 0x10000 });
+				this.pushInstruction("i32.or");
+				this.pushInstruction("i32.ctz");
+				this.pushInstruction("i64.extend_i32_u");
+				return true;
 			case "TrailingZeros32":
 				this.emitExpr(args[0], "i32");
 				this.pushInstruction("i32.ctz");
 				this.pushInstruction("i64.extend_i32_u");
-				return;
+				return true;
+			case "TrailingZeros":
+			case "TrailingZeros64":
+				this.emitExpr(args[0], "i64");
+				this.pushInstruction("i64.ctz");
+				return true;
+			case "OnesCount8":
+				this.emitExpr(args[0], "i32");
+				this.pushInstruction({ op: "i32.const", value: 0xff });
+				this.pushInstruction("i32.and");
+				this.pushInstruction("i32.popcnt");
+				this.pushInstruction("i64.extend_i32_u");
+				return true;
+			case "OnesCount16":
+				this.emitExpr(args[0], "i32");
+				this.pushInstruction({ op: "i32.const", value: 0xffff });
+				this.pushInstruction("i32.and");
+				this.pushInstruction("i32.popcnt");
+				this.pushInstruction("i64.extend_i32_u");
+				return true;
 			case "OnesCount32":
 				this.emitExpr(args[0], "i32");
 				this.pushInstruction("i32.popcnt");
 				this.pushInstruction("i64.extend_i32_u");
-				return;
+				return true;
+			case "OnesCount":
+			case "OnesCount64":
+				this.emitExpr(args[0], "i64");
+				this.pushInstruction("i64.popcnt");
+				return true;
+			case "Len8":
+				this.pushInstruction({ op: "i32.const", value: 32 });
+				this.emitExpr(args[0], "i32");
+				this.pushInstruction({ op: "i32.const", value: 0xff });
+				this.pushInstruction("i32.and");
+				this.pushInstruction("i32.clz");
+				this.pushInstruction("i32.sub");
+				this.pushInstruction("i64.extend_i32_u");
+				return true;
+			case "Len16":
+				this.pushInstruction({ op: "i32.const", value: 32 });
+				this.emitExpr(args[0], "i32");
+				this.pushInstruction({ op: "i32.const", value: 0xffff });
+				this.pushInstruction("i32.and");
+				this.pushInstruction("i32.clz");
+				this.pushInstruction("i32.sub");
+				this.pushInstruction("i64.extend_i32_u");
+				return true;
+			case "Len32":
+				this.pushInstruction({ op: "i32.const", value: 32 });
+				this.emitExpr(args[0], "i32");
+				this.pushInstruction("i32.clz");
+				this.pushInstruction("i32.sub");
+				this.pushInstruction("i64.extend_i32_u");
+				return true;
+			case "Len":
+			case "Len64":
+				this.pushInstruction({ op: "i64.const", value: 64n });
+				this.emitExpr(args[0], "i64");
+				this.pushInstruction("i64.clz");
+				this.pushInstruction("i64.sub");
+				return true;
+			default:
+				return false;
+		}
+	}
+
+	_emitBitsRotate(name, args) {
+		switch (name) {
+			case "RotateLeft8": {
+				const xTmp = this.acquireTemp("i32");
+				const sTmp = this.acquireTemp("i32");
+				this.emitExpr(args[0], "i32");
+				this.pushInstruction({ op: "i32.const", value: 0xff });
+				this.pushInstruction("i32.and");
+				this.pushInstruction({ op: "local.set", index: xTmp });
+				this.emitExpr(args[1], "i32");
+				this.pushInstruction({ op: "i32.const", value: 7 });
+				this.pushInstruction("i32.and");
+				this.pushInstruction({ op: "local.set", index: sTmp });
+				this.pushInstruction({ op: "local.get", index: xTmp });
+				this.pushInstruction({ op: "local.get", index: sTmp });
+				this.pushInstruction("i32.shl");
+				this.pushInstruction({ op: "local.get", index: xTmp });
+				this.pushInstruction({ op: "i32.const", value: 8 });
+				this.pushInstruction({ op: "local.get", index: sTmp });
+				this.pushInstruction("i32.sub");
+				this.pushInstruction({ op: "i32.const", value: 7 });
+				this.pushInstruction("i32.and");
+				this.pushInstruction("i32.shr_u");
+				this.pushInstruction("i32.or");
+				this.pushInstruction({ op: "i32.const", value: 0xff });
+				this.pushInstruction("i32.and");
+				this.releaseTemp(sTmp, "i32");
+				this.releaseTemp(xTmp, "i32");
+				return true;
+			}
+			case "RotateLeft16": {
+				const xTmp = this.acquireTemp("i32");
+				const sTmp = this.acquireTemp("i32");
+				this.emitExpr(args[0], "i32");
+				this.pushInstruction({ op: "i32.const", value: 0xffff });
+				this.pushInstruction("i32.and");
+				this.pushInstruction({ op: "local.set", index: xTmp });
+				this.emitExpr(args[1], "i32");
+				this.pushInstruction({ op: "i32.const", value: 15 });
+				this.pushInstruction("i32.and");
+				this.pushInstruction({ op: "local.set", index: sTmp });
+				this.pushInstruction({ op: "local.get", index: xTmp });
+				this.pushInstruction({ op: "local.get", index: sTmp });
+				this.pushInstruction("i32.shl");
+				this.pushInstruction({ op: "local.get", index: xTmp });
+				this.pushInstruction({ op: "i32.const", value: 16 });
+				this.pushInstruction({ op: "local.get", index: sTmp });
+				this.pushInstruction("i32.sub");
+				this.pushInstruction({ op: "i32.const", value: 15 });
+				this.pushInstruction("i32.and");
+				this.pushInstruction("i32.shr_u");
+				this.pushInstruction("i32.or");
+				this.pushInstruction({ op: "i32.const", value: 0xffff });
+				this.pushInstruction("i32.and");
+				this.releaseTemp(sTmp, "i32");
+				this.releaseTemp(xTmp, "i32");
+				return true;
+			}
 			case "RotateLeft32": {
 				this.emitExpr(args[0], "i32");
 				const arg1WType = toWasmType(args[1]?._type, this.mod.checker);
@@ -1441,21 +1877,9 @@ export class StdlibCoreEmitter {
 					this.emitExpr(args[1], "i32");
 				}
 				this.pushInstruction("i32.rotl");
-				return;
+				return true;
 			}
-
-			case "LeadingZeros64":
-				this.emitExpr(args[0], "i64");
-				this.pushInstruction("i64.clz");
-				return;
-			case "TrailingZeros64":
-				this.emitExpr(args[0], "i64");
-				this.pushInstruction("i64.ctz");
-				return;
-			case "OnesCount64":
-				this.emitExpr(args[0], "i64");
-				this.pushInstruction("i64.popcnt");
-				return;
+			case "RotateLeft":
 			case "RotateLeft64": {
 				this.emitExpr(args[0], "i64");
 				const arg1WType = toWasmType(args[1]?._type, this.mod.checker);
@@ -1466,24 +1890,49 @@ export class StdlibCoreEmitter {
 					this.emitExpr(args[1], "i64");
 				}
 				this.pushInstruction("i64.rotl");
-				return;
+				return true;
 			}
-
-			case "Len32":
-				this.pushInstruction({ op: "i32.const", value: 32 });
+			case "Reverse8":
 				this.emitExpr(args[0], "i32");
-				this.pushInstruction("i32.clz");
-				this.pushInstruction("i32.sub");
-				this.pushInstruction("i64.extend_i32_u");
-				return;
-
-			case "Len64":
-				this.pushInstruction({ op: "i64.const", value: 64n });
+				this.pushInstruction({ op: "i32.const", value: 0xff });
+				this.pushInstruction("i32.and");
+				this._emitReverse32Sequence();
+				this.pushInstruction({ op: "i32.const", value: 24 });
+				this.pushInstruction("i32.shr_u");
+				return true;
+			case "Reverse16":
+				this.emitExpr(args[0], "i32");
+				this.pushInstruction({ op: "i32.const", value: 0xffff });
+				this.pushInstruction("i32.and");
+				this._emitReverse32Sequence();
+				this.pushInstruction({ op: "i32.const", value: 16 });
+				this.pushInstruction("i32.shr_u");
+				return true;
+			case "Reverse32":
+				this.emitExpr(args[0], "i32");
+				this._emitReverse32Sequence();
+				return true;
+			case "Reverse":
+			case "Reverse64": {
+				const xTmp = this.acquireTemp("i64");
 				this.emitExpr(args[0], "i64");
-				this.pushInstruction("i64.clz");
-				this.pushInstruction("i64.sub");
-				return;
-
+				this.pushInstruction({ op: "local.set", index: xTmp });
+				this.pushInstruction({ op: "local.get", index: xTmp });
+				this.pushInstruction("i32.wrap_i64");
+				this._emitReverse32Sequence();
+				this.pushInstruction("i64.extend_i32_u");
+				this.pushInstruction({ op: "i64.const", value: 32n });
+				this.pushInstruction("i64.shl");
+				this.pushInstruction({ op: "local.get", index: xTmp });
+				this.pushInstruction({ op: "i64.const", value: 32n });
+				this.pushInstruction("i64.shr_u");
+				this.pushInstruction("i32.wrap_i64");
+				this._emitReverse32Sequence();
+				this.pushInstruction("i64.extend_i32_u");
+				this.pushInstruction("i64.or");
+				this.releaseTemp(xTmp, "i64");
+				return true;
+			}
 			case "ReverseBytes16": {
 				const xTmp = this.acquireTemp("i32");
 				this.emitExpr(args[0], "i32");
@@ -1499,76 +1948,43 @@ export class StdlibCoreEmitter {
 				this.pushInstruction("i32.shl");
 				this.pushInstruction("i32.or");
 				this.releaseTemp(xTmp, "i32");
-				return;
+				return true;
 			}
-
-			case "ReverseBytes32": {
+			case "ReverseBytes32":
 				this.emitExpr(args[0], "i32");
 				this._emitReverseBytes32Sequence();
-				return;
-			}
-
+				return true;
+			case "ReverseBytes":
 			case "ReverseBytes64": {
 				const xTmp = this.acquireTemp("i64");
 				this.emitExpr(args[0], "i64");
 				this.pushInstruction({ op: "local.set", index: xTmp });
-
-				// lo 32 bits -> ReverseBytes32 -> extend to i64 -> shl 32
 				this.pushInstruction({ op: "local.get", index: xTmp });
 				this.pushInstruction("i32.wrap_i64");
 				this._emitReverseBytes32Sequence();
 				this.pushInstruction("i64.extend_i32_u");
 				this.pushInstruction({ op: "i64.const", value: 32n });
 				this.pushInstruction("i64.shl");
-
-				// hi 32 bits -> ReverseBytes32 -> extend to i64
 				this.pushInstruction({ op: "local.get", index: xTmp });
 				this.pushInstruction({ op: "i64.const", value: 32n });
 				this.pushInstruction("i64.shr_u");
 				this.pushInstruction("i32.wrap_i64");
 				this._emitReverseBytes32Sequence();
 				this.pushInstruction("i64.extend_i32_u");
-
 				this.pushInstruction("i64.or");
 				this.releaseTemp(xTmp, "i64");
-				return;
+				return true;
 			}
-
-			case "Reverse32": {
-				this.emitExpr(args[0], "i32");
-				this._emitReverse32Sequence();
-				return;
-			}
-
-			case "Reverse64": {
-				const xTmp = this.acquireTemp("i64");
-				this.emitExpr(args[0], "i64");
-				this.pushInstruction({ op: "local.set", index: xTmp });
-
-				// lo 32 bits -> Reverse32 -> extend to i64 -> shl 32
-				this.pushInstruction({ op: "local.get", index: xTmp });
-				this.pushInstruction("i32.wrap_i64");
-				this._emitReverse32Sequence();
-				this.pushInstruction("i64.extend_i32_u");
-				this.pushInstruction({ op: "i64.const", value: 32n });
-				this.pushInstruction("i64.shl");
-
-				// hi 32 bits -> Reverse32 -> extend to i64
-				this.pushInstruction({ op: "local.get", index: xTmp });
-				this.pushInstruction({ op: "i64.const", value: 32n });
-				this.pushInstruction("i64.shr_u");
-				this.pushInstruction("i32.wrap_i64");
-				this._emitReverse32Sequence();
-				this.pushInstruction("i64.extend_i32_u");
-
-				this.pushInstruction("i64.or");
-				this.releaseTemp(xTmp, "i64");
-				return;
-			}
-
 			default:
-				throw new Error(`Unsupported bits function: bits.${name}`);
+				return false;
 		}
+	}
+
+	emitBitsCall(name, args) {
+		if (this._emitBitsArith(name, args)) return;
+		if (this._emitBitsCount(name, args)) return;
+		if (this._emitBitsRotate(name, args)) return;
+		throw new Error(`Unsupported bits function: bits.${name}`);
 	}
 
 	_emitReverseBytes32Sequence() {

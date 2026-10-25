@@ -1174,7 +1174,7 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
 
 ### Phase 3.3: `math`, `time` and strings/bytes buffer gaps
 
-- [ ] **Task 3.4a — `math` and `math/bits` gaps**
+- [x] **Task 3.4a — `math` and `math/bits` gaps**
   - Files: `src/typechecker/stdlib/core.js`, `src/backend/js/stdlib/math.js`, `src/backend/js/stdlib/bits.js`, `src/backend/wasm/emit-stdlib.js`
   - Do: `Log1p`, `Expm1`, `Frexp`, `Ldexp`, `Modf`, `FMA`, `RoundToEven`, `Nextafter`, `Nextafter32`, `Gamma`, `Erf`; `bits.Add32/64`, `Sub32/64`, `Mul32/64`, `Div32/64`, `Rem32/64`, `LeadingZeros`/`TrailingZeros`/`OnesCount`/`Len` for `uint`/8/16, `RotateLeft`/8/16, `Reverse8/16`, `ReverseBytes`. `bits.Mul64` must be exact in both backends (split 32-bit multiply in JS).
   - Test: conformance fixtures `math/extra.go`, `bits/wide.go`.

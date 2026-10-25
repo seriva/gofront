@@ -574,7 +574,7 @@ var __sprintf = __sprintf || function(f, ...a) {
     if (fd?.b && !ro && !(val instanceof fd.b)) val = new fd.b(val);
     if (val === null || val === undefined) return "<nil>";
     if (typeof val === "boolean") return String(val);
-    if (typeof val === "number" || typeof val === "bigint") return String(val);
+    if (typeof val === "number" || typeof val === "bigint") return Object.is(val, -0) ? "-0" : String(val);
     if (typeof val === "string") return val;
     if (typeof val === "object") {
       if (val._d instanceof Date) {
