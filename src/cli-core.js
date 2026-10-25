@@ -334,6 +334,7 @@ export function formatPrepSummary({ assets, vendor }) {
 
 export function parseTestArgs(argv) {
 	let run = null;
+	let bench = null;
 	const positional = [];
 	const rest = stripTargetFlag(argv);
 	for (let i = 0; i < rest.length; i++) {
@@ -342,6 +343,15 @@ export function parseTestArgs(argv) {
 			run = rest[++i] ?? null;
 		} else if (arg.startsWith("-run=") || arg.startsWith("--run=")) {
 			run = arg.slice(arg.indexOf("=") + 1);
+		} else if (arg === "-bench" || arg === "--bench") {
+			const next = rest[i + 1];
+			if (next !== undefined && !next.startsWith("-")) {
+				bench = rest[++i];
+			} else {
+				bench = true;
+			}
+		} else if (arg.startsWith("-bench=") || arg.startsWith("--bench=")) {
+			bench = arg.slice(arg.indexOf("=") + 1);
 		} else if (!arg.startsWith("-")) {
 			positional.push(arg);
 		}
@@ -351,6 +361,7 @@ export function parseTestArgs(argv) {
 		verbose: argv.includes("-v"),
 		dom: argv.includes("--dom"),
 		run,
+		bench,
 		forceTarget: parseTargetFlag(argv),
 	};
 }
