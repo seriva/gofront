@@ -2274,8 +2274,10 @@ class ModuleEmitter {
 							}
 						}
 					} else {
-						const box = this.getIfaceBoxType({ kind: "named", name: rName });
-						const key = `named:${rName}`;
+						const box = isPtrRecv
+							? this.getIfaceBoxType({ kind: "pointer", base: rType })
+							: this.getIfaceBoxType(rType);
+						const key = `${isPtrRecv ? "ptr" : "named"}:${rName}`;
 						if (box && !seenKeys.has(key)) {
 							seenKeys.add(key);
 							candidates.push({

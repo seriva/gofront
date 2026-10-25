@@ -1323,11 +1323,12 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
   - Done when: fixtures match Go.
   - Landed: implemented `container/heap`, `container/list`, and `container/ring` in pure Go source supporting their full standard APIs. Fixed compiler AST mangling for type names in `new(T)` and `make(T)`, added parser support for `for ; cond; post` loops, added `new` builtin lowering in WASM backend, resolved JS receiver reassignment in methods, fixed slice pointer interface dispatch trampolines in WASM backend, and fixed unqualified imported type contamination in stdlib coverage test. Conformance fixtures pass on JS and WASM matching Go 1.26 reference. Updated stdlib coverage gaps (0 gaps remaining in `container/*`) and regenerated docs.
 
-- [ ] **Task 4.5 — `hash`, `hash/crc32`, `hash/fnv`, `hash/adler32`**
+- [x] **Task 4.5 — `hash`, `hash/crc32`, `hash/fnv`, `hash/adler32`**
   - Files: new `runtime/stdlib/hash/**.go`
   - Do: `hash.Hash`/`Hash32`/`Hash64`; crc32 with `IEEE`, `Castagnoli`, `Koopman` tables built at init; fnv 32/32a/64/64a; adler32.
   - Test: conformance fixture `hash/sums.go` over ASCII and non-ASCII input (via `[]byte`).
   - Done when: fixture matches Go on both backends (strict `uint32` arithmetic makes JS bit-identical).
+  - Landed: implemented `hash`, `hash/crc32`, `hash/adler32`, and `hash/fnv` in pure Go source across JavaScript and WebAssembly backends. Lowered array zero values for `new(T)` in JS, fixed 32-bit unsigned integer multiplication wrapping with `Math.imul` in JS strict mode, supported array type zero values in WASM `new(T)`, and handled interface dispatch for pointer receivers on named scalar types in WASM. Conformance fixture `test/conformance/hash/sums.go` matches Go 1.26 reference on both JS and WASM. Resolved all stdlib coverage gaps for `hash/crc32`, `hash/adler32`, and `hash/fnv` (0 gaps remaining), and regenerated documentation.
 
 ### Phase 4.3: `crypto`, base32 and `sync/atomic`
 

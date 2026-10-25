@@ -2291,6 +2291,7 @@ export const expressionGenMethods = {
 	zeroValueForTypeNode(typeNode) {
 		if (!typeNode) return "null";
 		switch (typeNode.kind) {
+			case "Ident":
 			case "TypeName": {
 				const factory = this._typeParamZeroFactory(typeNode.name);
 				if (factory) return `${factory}()`;
@@ -2434,23 +2435,7 @@ export const expressionGenMethods = {
 	},
 
 	zeroValueForExpr(expr) {
-		// For new(T) calls
-		if (expr.kind === "Ident") {
-			const factory = this._typeParamZeroFactory(expr.name);
-			if (factory) return `${factory}()`;
-			switch (expr.name) {
-				case "int":
-				case "float64":
-					return "0";
-				case "string":
-					return '""';
-				case "bool":
-					return "false";
-				default:
-					if (this.structNames.has(expr.name)) return `new ${expr.name}()`;
-			}
-		}
-		return "null";
+		return this.zeroValueForTypeNode(expr);
 	},
 
 	// Returns true if the type is a struct or array (uses value comparison with __equal).
@@ -2817,7 +2802,10 @@ export const expressionGenMethods = {
 		if (tName === "int32" || tName === "rune" || tName === "uint32") {
 			const signed = tName !== "uint32";
 			const cast = signed ? "| 0" : ">>> 0";
-			if (signed && op === "*") return `Math.imul(${l}, ${r})`;
+			if (op === "*")
+				return signed
+					? `Math.imul(${l}, ${r})`
+					: `(Math.imul(${l}, ${r}) >>> 0)`;
 			if (op === "/")
 				return `((${r}) === 0 ? ${divZero} : (Math.trunc((${l}) / (${r})) ${cast}))`;
 			if (op === "%")

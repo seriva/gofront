@@ -108,10 +108,10 @@ Members of each Go package (functions, types, methods, fields, constants and var
 | `encoding/json` | 5 of 68 | 63 | 0 | 0 |
 | `errors` | 6 of 7 | 1 | 0 | 0 |
 | `fmt` | 21 of 43 | 22 | 0 | 0 |
-| `hash` | 0 of 32 | 32 | 0 | 0 |
-| `hash/adler32` | 0 of 3 | 3 | 0 | 0 |
-| `hash/crc32` | 0 of 12 | 12 | 0 | 0 |
-| `hash/fnv` | 0 of 6 | 6 | 0 | 0 |
+| `hash` | 5 of 32 | 27 | 0 | 0 |
+| `hash/adler32` | 3 of 3 | 0 | 0 | 0 |
+| `hash/crc32` | 12 of 12 | 0 | 0 | 0 |
+| `hash/fnv` | 6 of 6 | 0 | 0 | 0 |
 | `html` | 2 of 2 | 0 | 0 | 0 |
 | `io` | 58 of 94 | 36 | 0 | 10 |
 | `iter` | 2 of 2 | 0 | 0 | 2 |

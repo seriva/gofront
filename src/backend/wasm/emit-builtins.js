@@ -339,6 +339,11 @@ export class BuiltinsEmitter {
 			});
 			return;
 		}
+		if (isArrayType(targetType, this.mod.checker)) {
+			const wType = this.toWasmType(targetType);
+			this.emitZeroValue(targetType, wType);
+			return;
+		}
 		const box = this.mod.getBoxType(targetType);
 		const valWType = this.toWasmType(targetType);
 		this.emitZeroValue(targetType, valWType);
