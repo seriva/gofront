@@ -94,11 +94,11 @@ Members of each Go package (functions, types, methods, fields, constants and var
 | `container/ring` | 10 of 10 | 0 | 0 | 0 |
 | `context` | 17 of 20 | 3 | 0 | 1 |
 | `crypto/hmac` | 0 of 2 | 2 | 0 | 0 |
-| `crypto/md5` | 0 of 4 | 4 | 0 | 0 |
+| `crypto/md5` | 4 of 4 | 0 | 0 | 0 |
 | `crypto/rand` | 2 of 3 | 1 | 0 | 2 |
-| `crypto/sha1` | 0 of 4 | 4 | 0 | 0 |
+| `crypto/sha1` | 4 of 4 | 0 | 0 | 0 |
 | `crypto/sha256` | 4 of 7 | 3 | 0 | 0 |
-| `crypto/sha512` | 0 of 13 | 13 | 0 | 0 |
+| `crypto/sha512` | 13 of 13 | 0 | 0 | 0 |
 | `crypto/subtle` | 0 of 8 | 8 | 0 | 0 |
 | `encoding/base32` | 0 of 19 | 19 | 0 | 0 |
 | `encoding/base64` | 15 of 22 | 7 | 0 | 0 |
