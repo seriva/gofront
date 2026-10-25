@@ -548,7 +548,7 @@ export class TypeChecker {
 	// built-in the generated code calls (`Array.isArray`, `new Error`) is
 	// rejected instead.  Interfaces and method-less named types emit no class.
 	_checkGlobalTypeNamesPass(programs) {
-		if (this.target === "wasm") return;
+		if (this.target === "wasm" || this.isStdlib) return;
 		for (const p of programs) {
 			for (const d of p.decls) {
 				if (
@@ -854,8 +854,11 @@ export class TypeChecker {
 		const recvType = this.resolveTypeNodeName(decl.recvType, this.globals);
 		const base = recvType?.underlying ?? recvType;
 		if (base?.kind === "struct") {
+			base.methods ??= new Map();
 			base.methods.set(decl.name, funcType);
-		} else if (recvType?.kind === "named" && recvType.methods) {
+		}
+		if (recvType?.kind === "named") {
+			recvType.methods ??= new Map();
 			recvType.methods.set(decl.name, funcType);
 		}
 	}

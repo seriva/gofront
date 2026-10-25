@@ -10,6 +10,13 @@ export const testingMethods = {
 				return "false";
 			case "Verbose":
 				return "Boolean(globalThis.__gofront_verbose)";
+			case "Testing":
+				return "true";
+			case "Init":
+				return "/* testing.Init */";
+			case "Benchmark":
+				this.useHelper("testing");
+				return `__testing_Benchmark(${_a()[0]})`;
 		}
 		return undefined;
 	},
