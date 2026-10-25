@@ -1205,11 +1205,12 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
   - Done when: fixture matches Go.
   - Landed: implemented single-threaded `sync.Map`, `sync.Pool`, `OnceFunc`, `OnceValue`, and `OnceValues` in `runtime/stdlib/sync/extra.go`. Added blocking wait exclusions for `sync.Cond` and starts goroutine exclusion for `sync.WaitGroup.Go` in `src/typechecker/stdlib/excluded.js`. Added conformance fixture `test/conformance/sync/extra.go` matching Go 1.26 reference byte-for-byte. Updated stdlib coverage gaps (18 missing members and 7 exclusions unlocked) and regenerated stdlib docs.
 
-- [ ] **Task 3.6 — `testing` additions**
+- [x] **Task 3.6 — `testing` additions**
   - Files: `src/typechecker/stdlib/core.js`, `src/backend/js/stdlib/testing.js`, `src/cli-core.js` (test runner), `src/backend/wasm/boundary.js` (`*testing.T` routing)
   - Do: `t.Cleanup` (LIFO, runs after `Fatal`), `t.Context()` (cancelled at test end; needs Task 4.3), `t.Setenv`, `t.Deadline`, `testing.B` with `N`, `ResetTimer`, `ReportAllocs`, `Loop`, run by `gofront test -bench`, `TestMain(m *testing.M)`. `t.Parallel` is a no-op; `TempDir`/`Chdir` report the host exclusion.
   - Test: `test/unit/compiler/test-runner.test.js` — Cleanup order, a benchmark that runs, `TestMain` that skips a test.
   - Done when: `gofront test` runs the new fixtures in `js` and `wasm` packages.
+  - Landed: implemented `t.Cleanup` (LIFO stack executing in `finally` blocks, including after `Fatal`), `t.Setenv` (auto-restored during cleanup), `t.Deadline`, `t.Context`, `t.Parallel` (no-op), `t.SkipNow`, `t.Attr`, and `t.Output` in JS runner and WASM runtime. Implemented `testing.B` with `N`, `ResetTimer`, `StartTimer`, `StopTimer`, `ReportAllocs`, `ReportMetric`, `SetBytes`, `Elapsed`, `Loop`, and `Run` along with adaptive iterations in runner. Added `-bench` flag parsing and benchmark execution in `src/cli-core.js` and `src/test-runner.js`. Added `TestMain(m *testing.M)` support honoring `m.Run()` exit codes. Excluded `TempDir`/`Chdir`/`ArtifactDir` and `RunParallel`/`SetParallelism`. Added WasmGC boundary and cleanup export helper `__testing_cleanup_cb`. Added tests in `test/unit/compiler/test-runner.test.js` and `test/unit/compiler/cli-core.test.js`.
 
 - [ ] **Task 3.7 — Remaining audit items**
   - Files: as the manifest dictates

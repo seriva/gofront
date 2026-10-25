@@ -415,13 +415,22 @@ export class StdlibCoreEmitter {
 	emitTestingCall(func, args) {
 		const method = func.field;
 		const nameIdx = this.mod.internString(method);
-		if (method === "Run") {
+		if (method === "Run" && args.length > 0) {
 			this.emitExpr(func.expr, "externref");
 			this.emitExpr(args[0], "externref");
 			this.emitExpr(args[1], "anyref");
 			this.pushInstruction({
 				op: "call",
 				funcIndex: this.mod.getStdlibImportIndex("testing_run"),
+			});
+			return;
+		}
+		if (method === "Cleanup") {
+			this.emitExpr(func.expr, "externref");
+			this.emitExpr(args[0], "anyref");
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getStdlibImportIndex("testing_cleanup"),
 			});
 			return;
 		}
@@ -433,7 +442,11 @@ export class StdlibCoreEmitter {
 			});
 			return;
 		}
-		if (method === "Failed" || method === "Skipped") {
+		if (
+			method === "Failed" ||
+			method === "Skipped" ||
+			(method === "Run" && args.length === 0)
+		) {
 			this.emitExpr(func.expr, "externref");
 			this.pushInstruction({ op: "i32.const", value: nameIdx });
 			this.pushInstruction({
@@ -9936,6 +9949,36 @@ export class StdlibCoreEmitter {
 					fieldIndex: 1,
 				});
 				this.pushInstruction({ op: "local.get", index: 1 });
+				this.pushInstruction({ op: "local.get", index: 0 });
+				this.pushInstruction({
+					op: "ref.cast",
+					typeIndex: closureInfo.typeIndex,
+				});
+				this.pushInstruction({
+					op: "struct.get",
+					typeIndex: closureInfo.typeIndex,
+					fieldIndex: 0,
+				});
+				this.pushInstruction({
+					op: "call_ref",
+					typeIndex: closureInfo.funcTypeIndex,
+				});
+				this.pushInstruction("return");
+				return;
+			}
+			case "testing_cleanup_cb": {
+				// (fn anyref): fn is a func() closure
+				const closureInfo = this.mod.getTestingCleanupClosureType();
+				this.pushInstruction({ op: "local.get", index: 0 });
+				this.pushInstruction({
+					op: "ref.cast",
+					typeIndex: closureInfo.typeIndex,
+				});
+				this.pushInstruction({
+					op: "struct.get",
+					typeIndex: closureInfo.typeIndex,
+					fieldIndex: 1,
+				});
 				this.pushInstruction({ op: "local.get", index: 0 });
 				this.pushInstruction({
 					op: "ref.cast",
