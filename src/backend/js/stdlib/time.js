@@ -3,19 +3,13 @@
 /** @typedef {import('../index.js').CodeGen} CodeGen */
 
 const TIME_METHOD_DISPATCH = {
-	Year: (r) =>
-		`(${r}._offset === 0 ? ${r}._d.getUTCFullYear() : ${r}._d.getFullYear())`,
-	Month: (r) =>
-		`(${r}._offset === 0 ? ${r}._d.getUTCMonth() + 1 : ${r}._d.getMonth() + 1)`,
-	Day: (r) => `(${r}._offset === 0 ? ${r}._d.getUTCDate() : ${r}._d.getDate())`,
-	Hour: (r) =>
-		`(${r}._offset === 0 ? ${r}._d.getUTCHours() : ${r}._d.getHours())`,
-	Minute: (r) =>
-		`(${r}._offset === 0 ? ${r}._d.getUTCMinutes() : ${r}._d.getMinutes())`,
-	Second: (r) =>
-		`(${r}._offset === 0 ? ${r}._d.getUTCSeconds() : ${r}._d.getSeconds())`,
-	Weekday: (r) =>
-		`(${r}._offset === 0 ? ${r}._d.getUTCDay() : ${r}._d.getDay())`,
+	Year: (r) => `__timeYear(${r})`,
+	Month: (r) => `__timeMonth(${r})`,
+	Day: (r) => `__timeDay(${r})`,
+	Hour: (r) => `__timeHour(${r})`,
+	Minute: (r) => `__timeMinute(${r})`,
+	Second: (r) => `__timeSecond(${r})`,
+	Weekday: (r) => `__timeWeekday(${r})`,
 	Unix: (r) => `Math.floor(${r}._d.getTime() / 1000)`,
 	UnixMilli: (r) => `${r}._d.getTime()`,
 	Add: (r, a) =>
@@ -31,7 +25,7 @@ const TIME_METHOD_DISPATCH = {
 	UnixNano: (r) =>
 		`(${r}?._d ? Math.round(${r}._d.getTime() * 1000000) + (${r}._ns || 0) : 0)`,
 	Nanosecond: (r) =>
-		`(${r}?._d ? (${r}._offset === 0 ? ${r}._d.getUTCMilliseconds() : ${r}._d.getMilliseconds()) * 1000000 + (${r}._ns || 0) : 0)`,
+		`(${r}?._d ? (typeof ${r}._offset === "number" ? ${r}._d.getUTCMilliseconds() : ${r}._d.getMilliseconds()) * 1000000 + (${r}._ns || 0) : 0)`,
 	UTC: (r) =>
 		`({_d: ${r}?._d ?? new Date(0), _offset: 0, _loc: null, _ns: ${r}?._ns || 0})`,
 	Local: (r) =>
@@ -39,10 +33,8 @@ const TIME_METHOD_DISPATCH = {
 	AddDate: (r, a) => `__timeAddDate(${r}, ${a[0]}, ${a[1]}, ${a[2]})`,
 	Truncate: (r, a) => `__timeTruncate(${r}, ${a[0]})`,
 	Round: (r, a) => `__timeRound(${r}, ${a[0]})`,
-	Date: (r) =>
-		`[${r}._offset === 0 ? ${r}._d.getUTCFullYear() : ${r}._d.getFullYear(), ${r}._offset === 0 ? ${r}._d.getUTCMonth() + 1 : ${r}._d.getMonth() + 1, ${r}._offset === 0 ? ${r}._d.getUTCDate() : ${r}._d.getDate()]`,
-	Clock: (r) =>
-		`[${r}._offset === 0 ? ${r}._d.getUTCHours() : ${r}._d.getHours(), ${r}._offset === 0 ? ${r}._d.getUTCMinutes() : ${r}._d.getMinutes(), ${r}._offset === 0 ? ${r}._d.getUTCSeconds() : ${r}._d.getSeconds()]`,
+	Date: (r) => `__timeDate(${r})`,
+	Clock: (r) => `__timeClock(${r})`,
 	YearDay: (r) => `__timeYearDay(${r})`,
 	Compare: (r, a) =>
 		`(${r}._d.getTime() < (${a[0]})._d.getTime() ? -1 : (${r}._d.getTime() > (${a[0]})._d.getTime() ? 1 : ((${r}._ns || 0) < ((${a[0]})._ns || 0) ? -1 : ((${r}._ns || 0) > ((${a[0]})._ns || 0) ? 1 : 0))))`,
@@ -67,10 +59,9 @@ const DURATION_METHOD_DISPATCH = {
 	Minutes: (r) => `(Number(${r}) / 60000000000)`,
 	Hours: (r) => `(Number(${r}) / 3600000000000)`,
 	String: (r) => `__durationString(${r})`,
-	Truncate: (r, a) => `(${a[0]} <= 0n ? ${r} : ${r} - (${r} % ${a[0]}))`,
+	Truncate: (r, a) => `(${a[0]} <= 0 ? ${r} : ${r} - (${r} % ${a[0]}))`,
 	Round: (r, a) => `__durationRound(${r}, ${a[0]})`,
-	Abs: (r) =>
-		`(${r} >= 0n ? ${r} : (${r} === -9223372036854775808n ? 9223372036854775807n : -(${r})))`,
+	Abs: (r) => `(${r} >= 0 ? ${r} : -(${r}))`,
 };
 
 const TIME_DISPATCH = {
