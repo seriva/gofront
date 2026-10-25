@@ -100,7 +100,7 @@ Members of each Go package (functions, types, methods, fields, constants and var
 | `crypto/sha256` | 4 of 7 | 3 | 0 | 0 |
 | `crypto/sha512` | 13 of 13 | 0 | 0 | 0 |
 | `crypto/subtle` | 8 of 8 | 0 | 0 | 0 |
-| `encoding/base32` | 0 of 19 | 19 | 0 | 0 |
+| `encoding/base32` | 19 of 19 | 0 | 0 | 0 |
 | `encoding/base64` | 15 of 22 | 7 | 0 | 0 |
 | `encoding/binary` | 13 of 33 | 20 | 0 | 0 |
 | `encoding/csv` | 0 of 32 | 32 | 0 | 0 |
@@ -132,11 +132,11 @@ Members of each Go package (functions, types, methods, fields, constants and var
 | `strconv` | 41 of 43 | 2 | 0 | 0 |
 | `strings` | 75 of 82 | 7 | 0 | 0 |
 | `sync` | 39 of 39 | 0 | 0 | 7 |
-| `sync/atomic` | 0 of 90 | 90 | 0 | 4 |
+| `sync/atomic` | 90 of 90 | 0 | 0 | 4 |
 | `testing` | 94 of 94 | 0 | 0 | 72 |
 | `time` | 100 of 134 | 34 | 5 | 11 |
 | `unicode` | 52 of 52 | 0 | 0 | 257 |
-| `unicode/utf16` | 0 of 7 | 7 | 0 | 0 |
+| `unicode/utf16` | 7 of 7 | 0 | 0 | 0 |
 | `unicode/utf8` | 19 of 19 | 0 | 0 | 0 |
 
 Packages excluded as a whole, by reason:

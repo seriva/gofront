@@ -1,0 +1,50 @@
+"" std= hex= raw=
+  decode "" <nil>
+  decode hex "" <nil>
+  decode raw "" <nil>
+"f" std=MY====== hex=CO====== raw=MY
+  decode "f" <nil>
+  decode hex "f" <nil>
+  decode raw "f" <nil>
+"fo" std=MZXQ==== hex=CPNG==== raw=MZXQ
+  decode "fo" <nil>
+  decode hex "fo" <nil>
+  decode raw "fo" <nil>
+"foo" std=MZXW6=== hex=CPNMU=== raw=MZXW6
+  decode "foo" <nil>
+  decode hex "foo" <nil>
+  decode raw "foo" <nil>
+"foob" std=MZXW6YQ= hex=CPNMUOG= raw=MZXW6YQ
+  decode "foob" <nil>
+  decode hex "foob" <nil>
+  decode raw "foob" <nil>
+"fooba" std=MZXW6YTB hex=CPNMUOJ1 raw=MZXW6YTB
+  decode "fooba" <nil>
+  decode hex "fooba" <nil>
+  decode raw "fooba" <nil>
+"foobar" std=MZXW6YTBOI====== hex=CPNMUOJ1E8====== raw=MZXW6YTBOI
+  decode "foobar" <nil>
+  decode hex "foobar" <nil>
+  decode raw "foobar" <nil>
+AD7RBAD74S4JM=== 16 10
+13 8
+[0 255 16 128 127 228 184 150] <nil>
+"MZXW6===!": <nil>
+"MZXW6": illegal base32 data at input byte 0
+"M": illegal base32 data at input byte 0
+"mzxw6ytb": illegal base32 data at input byte 0
+"MZXW6YTB=": illegal base32 data at input byte 8
+"MZXW6YTBOI======\n": <nil>
+"========": illegal base32 data at input byte 0
+illegal base32 data at input byte 7
+"foobar" <nil>
+MZXW6===
+3 <nil> foo
+x:MZXW6YTBOI======
+x:foobar <nil>
+MZXW6YQ*
+"foob" <nil>
+<nil>
+MZXW6YTBOI======
+"foobar" <nil>
+61 -1

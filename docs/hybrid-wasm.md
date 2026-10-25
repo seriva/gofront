@@ -130,7 +130,7 @@ Members of each Go package that `wasm` and `both` packages can use today, out of
 | `crypto/sha256` | 4 of 7 | 3 |
 | `crypto/sha512` | 13 of 13 | 0 |
 | `crypto/subtle` | 8 of 8 | 0 |
-| `encoding/base32` | 0 of 19 | 19 |
+| `encoding/base32` | 19 of 19 | 0 |
 | `encoding/base64` | 15 of 22 | 7 |
 | `encoding/binary` | 13 of 33 | 20 |
 | `encoding/csv` | 0 of 32 | 32 |
@@ -161,11 +161,11 @@ Members of each Go package that `wasm` and `both` packages can use today, out of
 | `strconv` | 41 of 43 | 2 |
 | `strings` | 75 of 82 | 7 |
 | `sync` | 39 of 39 | 0 |
-| `sync/atomic` | 0 of 90 | 90 |
+| `sync/atomic` | 90 of 90 | 0 |
 | `testing` | 89 of 94 | 5 |
 | `time` | 95 of 129 | 34 |
 | `unicode` | 52 of 52 | 0 |
-| `unicode/utf16` | 0 of 7 | 7 |
+| `unicode/utf16` | 7 of 7 | 0 |
 | `unicode/utf8` | 19 of 19 | 0 |
 <!-- stdlib:end -->
 
