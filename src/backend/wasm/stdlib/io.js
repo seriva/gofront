@@ -1303,7 +1303,52 @@ export class IoEmitter {
 				wrap: null,
 			},
 			{
+				goType: { kind: "basic", name: "int64" },
+				call: "fmt_sscan_token_i64",
+				wrap: null,
+			},
+			{
+				goType: { kind: "basic", name: "uint" },
+				call: "fmt_sscan_token_i64",
+				wrap: null,
+			},
+			{
+				goType: { kind: "basic", name: "uint64" },
+				call: "fmt_sscan_token_i64",
+				wrap: null,
+			},
+			{
+				goType: { kind: "basic", name: "uintptr" },
+				call: "fmt_sscan_token_i64",
+				wrap: null,
+			},
+			{
 				goType: { kind: "basic", name: "int32" },
+				call: "fmt_sscan_token_i64",
+				wrap: "i32.wrap_i64",
+			},
+			{
+				goType: { kind: "basic", name: "uint32" },
+				call: "fmt_sscan_token_i64",
+				wrap: "i32.wrap_i64",
+			},
+			{
+				goType: { kind: "basic", name: "int16" },
+				call: "fmt_sscan_token_i64",
+				wrap: "i32.wrap_i64",
+			},
+			{
+				goType: { kind: "basic", name: "uint16" },
+				call: "fmt_sscan_token_i64",
+				wrap: "i32.wrap_i64",
+			},
+			{
+				goType: { kind: "basic", name: "int8" },
+				call: "fmt_sscan_token_i64",
+				wrap: "i32.wrap_i64",
+			},
+			{
+				goType: { kind: "basic", name: "uint8" },
 				call: "fmt_sscan_token_i64",
 				wrap: "i32.wrap_i64",
 			},
@@ -1384,10 +1429,14 @@ export class IoEmitter {
 	}
 
 	_emitIncrementN(nTmp) {
+		this._callStdlib("fmt_sscan_has_err");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.pushInstruction("else");
 		this.pushInstruction({ op: "local.get", index: nTmp });
 		this.pushInstruction({ op: "i64.const", value: 1n });
 		this.pushInstruction("i64.add");
 		this.pushInstruction({ op: "local.set", index: nTmp });
+		this.pushInstruction("end");
 	}
 
 	_emitSscanAssignOne(pExpr, tokenIdx, totTokensTmp, nTmp) {

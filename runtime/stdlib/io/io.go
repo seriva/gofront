@@ -247,12 +247,12 @@ func (t *multiWriter) WriteString(s string) (n int, err error) {
 		if err != nil {
 			return
 		}
-		if n != len(s) {
+		if n != len(p) {
 			err = ErrShortWrite
 			return
 		}
 	}
-	return len(s), nil
+	return len(p), nil
 }
 
 // MultiWriter creates a writer that duplicates its writes to all writers.
@@ -326,6 +326,7 @@ func (s *SectionReader) ReadAt(p []byte, off int64) (n int, err error) {
 	}
 	off += s.base
 	if max := s.limit - off; int64(len(p)) > max {
+		p = p[0:max]
 		n, err = s.r.ReadAt(p, off)
 		if err == nil {
 			err = EOF
