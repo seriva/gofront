@@ -4,6 +4,14 @@
 // note instead of the generic `No member` error.
 
 export const EXCLUDED_STDLIB_MEMBERS = new Map([
+	[
+		"Context.Done",
+		"Done() returns a channel; use ctx.Err() != nil or context.AfterFunc",
+	],
+	[
+		"context.Context.Done",
+		"Done() returns a channel; use ctx.Err() != nil or context.AfterFunc",
+	],
 	["iter.Pull", "requires coroutines; out of scope (no runtime)"],
 	["iter.Pull2", "requires coroutines; out of scope (no runtime)"],
 	["time.After", "channels"],
