@@ -202,6 +202,9 @@ const NS_CONSTANTS = {
 		ErrSyntax: "__strconv_err_syntax",
 		ErrRange: "__strconv_err_range",
 	},
+	bits: {
+		UintSize: "64",
+	},
 	path: {
 		ErrBadPattern: "__path_err_bad_pattern",
 	},

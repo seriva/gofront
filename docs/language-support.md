@@ -117,8 +117,8 @@ Members of each Go package (functions, types, methods, fields, constants and var
 | `iter` | 2 of 2 | 0 | 0 | 2 |
 | `log` | 0 of 43 | 43 | 0 | 0 |
 | `maps` | 10 of 10 | 0 | 0 | 0 |
-| `math` | 69 of 97 | 28 | 0 | 0 |
-| `math/bits` | 15 of 50 | 35 | 0 | 0 |
+| `math` | 80 of 97 | 17 | 0 | 0 |
+| `math/bits` | 50 of 50 | 0 | 0 | 0 |
 | `math/cmplx` | 0 of 27 | 27 | 0 | 0 |
 | `math/rand` | 12 of 45 | 33 | 0 | 0 |
 | `math/rand/v2` | 0 of 51 | 51 | 0 | 8 |

@@ -147,8 +147,8 @@ Members of each Go package that `wasm` and `both` packages can use today, out of
 | `iter` | 2 of 2 | 0 |
 | `log` | 0 of 43 | 43 |
 | `maps` | 10 of 10 | 0 |
-| `math` | 69 of 97 | 28 |
-| `math/bits` | 15 of 50 | 35 |
+| `math` | 80 of 97 | 17 |
+| `math/bits` | 50 of 50 | 0 |
 | `math/cmplx` | 0 of 27 | 27 |
 | `math/rand` | 12 of 45 | 33 |
 | `math/rand/v2` | 0 of 51 | 51 |

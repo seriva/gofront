@@ -71,6 +71,8 @@ const ERROR_PRODUCING_PKGS = new Set([
 	"hex",
 	"encoding/base64",
 	"base64",
+	"math/bits",
+	"bits",
 ]);
 // Packages whose calls lower to the `env.*` imports in STDLIB_IMPORTS (the
 // matching JS lives in WASM_STDLIB_JS).  Only modules importing one of them
@@ -101,6 +103,8 @@ const STDLIB_ENV_PKGS = new Set([
 	"hex",
 	"encoding/base64",
 	"base64",
+	"math/bits",
+	"bits",
 ]);
 
 function importsAnyOf(programs, pkgs) {
@@ -273,6 +277,12 @@ const STDLIB_IMPORTS = [
 	["base64_encode_to_string", ["i32"], [S]],
 	["base64_decode_string", ["i32", S], ["i32"]],
 	["base64_get_err", [], [S]],
+	["bits_div32", ["i32", "i32", "i32"], ["i32"]],
+	["bits_div32_rem", [], ["i32"]],
+	["bits_rem32", ["i32", "i32", "i32"], ["i32"]],
+	["bits_div64", ["i64", "i64", "i64"], ["i64"]],
+	["bits_div64_rem", [], ["i64"]],
+	["bits_rem64", ["i64", "i64", "i64"], ["i64"]],
 ];
 
 class ModuleEmitter {
@@ -1209,6 +1219,8 @@ class ModuleEmitter {
 			"log10",
 			"round",
 			"cbrt",
+			"log1p",
+			"expm1",
 		];
 		for (const m of unaryMath) {
 			this.getMathImportIndex(m, false);
@@ -3386,8 +3398,10 @@ function _scanImportsInBody(node, mod) {
 				Cbrt: "cbrt",
 				Exp: "exp",
 				Log: "log",
+				Log1p: "log1p",
 				Log2: "log2",
 				Log10: "log10",
+				Expm1: "expm1",
 				Round: "round",
 				Sinh: "sinh",
 				Cosh: "cosh",
