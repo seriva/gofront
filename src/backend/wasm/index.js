@@ -217,6 +217,10 @@ const STDLIB_IMPORTS = [
 	// testing.T.Run: the harness calls back into the exported __testing_run_cb
 	["testing_run", [S, S, "anyref"], ["i32"]],
 	["testing_cleanup", [S, "anyref"], []],
+	["testing_n", [S], ["i64"]],
+	["testing_elapsed", [S], ["i64"]],
+	["testing_context", [S], [S]],
+	["testing_output", [S], [S]],
 	// unicode
 	["unicode_is_letter", ["i32"], ["i32"]],
 	["unicode_is_digit", ["i32"], ["i32"]],
@@ -348,6 +352,7 @@ class ModuleEmitter {
 		this.hasErrorType =
 			importsAnyOf(programs, ERROR_PRODUCING_PKGS) || hasErrorUsage(programs);
 		this.usesStdlibEnv = importsAnyOf(programs, STDLIB_ENV_PKGS);
+		this.importsTesting = importsAnyOf(programs, ["testing"]);
 
 		if (programs && programs.length > 0) {
 			this.initTypes(programs);
@@ -401,7 +406,11 @@ class ModuleEmitter {
 			for (const [key, t] of this.checker.types.entries()) {
 				if (t.kind === "named" && t.underlying?.kind === "struct") {
 					const name = t.name ?? key;
-					if (name.startsWith("testing.")) continue;
+					if (
+						name.startsWith("testing.") &&
+						(!this.importsTesting || name !== "testing.BenchmarkResult")
+					)
+						continue;
 					if (!seen.has(name)) {
 						seen.add(name);
 						rawStructs.push({ name, structType: t.underlying });
