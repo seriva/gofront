@@ -1354,6 +1354,12 @@ export class FunctionEmitter {
 				});
 				if (cand.embedPath) {
 					for (const step of cand.embedPath) {
+						if (step.castTypeIndex) {
+							this.pushInstruction({
+								op: "ref.cast",
+								typeIndex: step.castTypeIndex,
+							});
+						}
 						this.pushInstruction({
 							op: "struct.get",
 							typeIndex: step.parentTypeIndex,

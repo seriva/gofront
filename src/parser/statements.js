@@ -157,27 +157,30 @@ export const statementParserMethods = {
 			};
 		}
 
-		const first = this.parseSimpleStmtRaw(true);
+		let first = null;
+		if (!this.check(T.SEMICOLON)) {
+			first = this.parseSimpleStmtRaw(true);
 
-		if (this.check(T.LBRACE)) {
-			// for k, v := range expr { }  — range stmt ends right before {
-			if (this.isRangeStmt(first)) {
+			if (this.check(T.LBRACE)) {
+				// for k, v := range expr { }  — range stmt ends right before {
+				if (this.isRangeStmt(first)) {
+					return {
+						kind: "ForStmt",
+						init: first,
+						cond: null,
+						post: null,
+						body: this.parseBlock(),
+					};
+				}
+				// for cond { }
 				return {
 					kind: "ForStmt",
-					init: first,
-					cond: null,
+					init: null,
+					cond: this.stmtToExpr(first),
 					post: null,
 					body: this.parseBlock(),
 				};
 			}
-			// for cond { }
-			return {
-				kind: "ForStmt",
-				init: null,
-				cond: this.stmtToExpr(first),
-				post: null,
-				body: this.parseBlock(),
-			};
 		}
 
 		this.expect(T.SEMICOLON);

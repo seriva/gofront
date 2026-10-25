@@ -1,0 +1,13 @@
+len: 4
+list [ 1 2 3 4 ]
+reverse [ 4 3 2 1 ]
+moveToFront(4): list [ 4 1 2 3 ]
+moveToBack(1): list [ 4 2 3 1 ]
+moveBefore(1, 4): list [ 1 4 2 3 ]
+moveAfter(1, 4): list [ 4 1 2 3 ]
+removed: 4
+list [ 1 2 3 ]
+after PushBackList: list [ 1 2 3 10 20 ]
+after PushFrontList: list [ 10 20 1 2 3 10 20 ]
+zeroList len: 2
+list [ zero_b zero_a ]

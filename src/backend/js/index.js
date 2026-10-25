@@ -946,7 +946,7 @@ export class CodeGen {
 				if (tpNames) this._genTypeParamBindings(tpNames, "this[__tz]");
 				if (decl.recvName) this._fnCtx.params.add(decl.recvName);
 				if (!staticNamed && decl.recvName && decl.recvName !== "_") {
-					this.line(`const ${decl.recvName} = ${this._receiverValue(decl)};`);
+					this.line(`let ${decl.recvName} = ${this._receiverValue(decl)};`);
 				}
 				if (staticNamed && this._boxedVars.has(recvParam)) {
 					this.line(`${recvParam} = { value: ${recvParam} };`);
