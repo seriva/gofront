@@ -1272,11 +1272,12 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
   - Done when: fixture matches Go.
   - Landed: implemented `bufio.Reader` in Go source with all methods (`NewReader`, `NewReaderSize`, `Buffered`, `Discard`, `Peek`, `Read`, `ReadByte`, `UnreadByte`, `ReadRune`, `UnreadRune`, `ReadSlice`, `ReadLine`, `ReadBytes`, `ReadString`, `Reset`, `Size`, `WriteTo`) and errors `ErrBufferFull`, `ErrNegativeCount`, `ErrInvalidUnreadByte`, `ErrInvalidUnreadRune`. Conformance fixture `test/conformance/bufio/reader.go` passes on JS and WASM matching Go 1.26 reference. Updated stdlib gaps and docs.
 
-- [ ] **Task 4.1b — `bufio.Writer` and `ReadWriter`**
+- [x] **Task 4.1b — `bufio.Writer` and `ReadWriter`**
   - Files: new `runtime/stdlib/bufio/writer.go`
   - Do: the `Writer` members; large writes pass through after flushing; `ReadWriter`, `NewReadWriter`.
   - Test: conformance fixture `bufio/writer.go` using a counting `io.Writer`.
   - Done when: fixture matches Go.
+  - Landed: implemented `bufio.Writer` in Go source with all methods (`NewWriter`, `NewWriterSize`, `Available`, `AvailableBuffer`, `Buffered`, `Flush`, `ReadFrom`, `Reset`, `Size`, `Write`, `WriteByte`, `WriteRune`, `WriteString`), large writes pass-through after flushing, and `ReadWriter` with `NewReadWriter`. Conformance fixture `test/conformance/bufio/writer.go` passes on JS and WASM with counting writer matching Go 1.26 reference. Updated stdlib gaps and docs.
 
 - [ ] **Task 4.1c — `bufio.Scanner` and split functions**
   - Files: new `runtime/stdlib/bufio/scan.go`
