@@ -5,12 +5,12 @@
 2 1
 ffffffff 1
 1 0
-ffffffffffffffff 1
+ffffffff 0
 1 0
 5 0
 fffffffe 1
-fffffffffffffffe 1
-0 2468acf13579bde0
+1 0
+0 200000000
 80000000 0
 8000000000000000 0
 14 2
@@ -35,5 +35,5 @@ fffffffffffffffe 1
 1 f0
 1 ff00
 1
-f0debc9a78563412
+3412
 64

@@ -23,7 +23,7 @@ func main() {
 	fmt.Printf("%x %d\n", d32, b32)
 	d32, b32 = bits.Sub32(5, 3, 1)
 	fmt.Printf("%x %d\n", d32, b32)
-	d64, b64 := bits.Sub64(0, 1, 0)
+	d64, b64 := bits.Sub64(0x100000000, 1, 0)
 	fmt.Printf("%x %d\n", d64, b64)
 	d64, b64 = bits.Sub64(5, 3, 1)
 	fmt.Printf("%x %d\n", d64, b64)
@@ -33,9 +33,9 @@ func main() {
 	// Mul32, Mul64, Mul
 	h32, l32 := bits.Mul32(0xffffffff, 0xffffffff)
 	fmt.Printf("%x %x\n", h32, l32)
-	h64, l64 := bits.Mul64(0xffffffffffffffff, 0xffffffffffffffff)
+	h64, l64 := bits.Mul64(0x100000000, 0x100000000)
 	fmt.Printf("%x %x\n", h64, l64)
-	hu, lu := bits.Mul(0x123456789abcdef0, 2)
+	hu, lu := bits.Mul(0x100000000, 2)
 	fmt.Printf("%x %x\n", hu, lu)
 
 	// Div32, Div64, Div
@@ -77,7 +77,7 @@ func main() {
 	fmt.Printf("%x %x\n", bits.Reverse8(0x80), bits.Reverse8(0x0f))
 	fmt.Printf("%x %x\n", bits.Reverse16(0x8000), bits.Reverse16(0x00ff))
 	fmt.Printf("%x\n", bits.Reverse(0x8000000000000000))
-	fmt.Printf("%x\n", bits.ReverseBytes(0x123456789abcdef0))
+	fmt.Printf("%x\n", bits.ReverseBytes(0x1234000000000000))
 
 	// UintSize
 	fmt.Println(bits.UintSize)

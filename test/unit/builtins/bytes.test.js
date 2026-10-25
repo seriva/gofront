@@ -369,6 +369,49 @@ func main() {
 	assertEqual(runJs(js), "aXb");
 });
 
+test("bytes search functions handle nil slices per Go semantics", () => {
+	const { js, errors } = compile(`package main
+import (
+	"bytes"
+	"fmt"
+)
+func main() {
+	b := []byte("hello")
+	fmt.Println(bytes.Index(b, nil), bytes.Contains(b, nil))
+	fmt.Println(bytes.Index(nil, []byte("")), bytes.Contains(nil, []byte("")))
+	fmt.Println(bytes.LastIndex(b, nil), bytes.Count(b, nil))
+	fmt.Println(bytes.LastIndex(nil, []byte("")), bytes.Count(nil, []byte("")))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "0 true\n0 true\n5 6\n0 1");
+});
+
+test("bytes.Buffer.UnreadByte after Read and write resets", () => {
+	const { js, errors } = compile(`package main
+import (
+	"bytes"
+	"fmt"
+)
+func main() {
+	buf := bytes.NewBufferString("hello")
+	p := make([]byte, 2)
+	buf.Read(p)
+	err := buf.UnreadByte()
+	fmt.Println("unread err:", err != nil)
+	b, _ := buf.ReadByte()
+	fmt.Println(string(b), b)
+
+	buf.WriteString("xyz")
+	err = buf.UnreadByte()
+	fmt.Println("unread after write err:", err != nil)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(
+		runJs(js),
+		"unread err: false\ne 101\nunread after write err: true",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

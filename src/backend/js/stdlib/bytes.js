@@ -8,7 +8,8 @@ const __sb = `(s => typeof TextEncoder !== "undefined" ? new TextEncoder().encod
 const BYTES_DISPATCH = {
 	Contains: (a) =>
 		`((b, sep) => {
-			if (!b || !sep) return false;
+			b = b || new Uint8Array(0);
+			sep = sep || new Uint8Array(0);
 			if (sep.length === 0) return true;
 			if (sep.length === 1) return (b.indexOf ? b.indexOf(sep[0]) : Array.prototype.indexOf.call(b, sep[0])) >= 0;
 			if (sep.length > b.length) return false;
@@ -35,7 +36,8 @@ const BYTES_DISPATCH = {
 		`((b, s) => { const off = b.length - s.length; if (off < 0) return false; for (let i = 0; i < s.length; i++) if (b[off + i] !== s[i]) return false; return true; })(${a[0]}, ${a[1]})`,
 	Index: (a) =>
 		`((b, sep) => {
-			if (!b || !sep) return -1;
+			b = b || new Uint8Array(0);
+			sep = sep || new Uint8Array(0);
 			const n = b.length;
 			const m = sep.length;
 			if (m === 0) return 0;
@@ -64,7 +66,8 @@ const BYTES_DISPATCH = {
 		})(${a[0]}, ${a[1]})`,
 	Count: (a) =>
 		`((b, sep) => {
-			if (!b || !sep) return 0;
+			b = b || new Uint8Array(0);
+			sep = sep || new Uint8Array(0);
 			if (sep.length === 0) {
 				let runes = 0;
 				for (let i = 0; i < b.length; i++) if ((b[i] & 0xc0) !== 0x80) runes++;
@@ -129,7 +132,8 @@ const BYTES_DISPATCH = {
 	IndexByte: (a) => `(${a[0]}).indexOf(${a[1]})`,
 	LastIndex: (a) =>
 		`((b, sep) => {
-			if (!b || !sep) return -1;
+			b = b || new Uint8Array(0);
+			sep = sep || new Uint8Array(0);
 			const n = b.length;
 			const m = sep.length;
 			if (m === 0) return n;
