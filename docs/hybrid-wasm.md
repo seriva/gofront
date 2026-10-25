@@ -162,7 +162,7 @@ Members of each Go package that `wasm` and `both` packages can use today, out of
 | `strings` | 75 of 82 | 7 |
 | `sync` | 38 of 39 | 1 |
 | `sync/atomic` | 0 of 90 | 90 |
-| `testing` | 16 of 94 | 78 |
+| `testing` | 94 of 94 | 0 |
 | `time` | 95 of 129 | 34 |
 | `unicode` | 52 of 52 | 0 |
 | `unicode/utf16` | 0 of 7 | 7 |

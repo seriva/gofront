@@ -1524,7 +1524,12 @@ export const expressionGenMethods = {
 			if (expr.func.field === "Reset")
 				return `(${recv} ? ${recv}.Reset(${this.genExpr(expr.args[0])}) : false)`;
 		}
-		if (recvName === "testing.T")
+		if (
+			recvName === "testing.T" ||
+			recvName === "testing.B" ||
+			recvName === "testing.M" ||
+			recvName === "testing.TB"
+		)
 			return this._genTestingMethodCall(expr.func.field, expr);
 		if (recvName === "strings.Replacer") {
 			const recv = this.genExpr(expr.func.expr);

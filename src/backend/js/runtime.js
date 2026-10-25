@@ -1351,6 +1351,7 @@ var __GoFront_T = __GoFront_T || class {
     this.failed = false;
     this.skipped = false;
     this._logs = [];
+    this._cleanups = [];
     this._start = typeof performance !== "undefined" ? performance.now() : Date.now();
   }
   Name() { return this._name; }
@@ -1403,15 +1404,71 @@ var __GoFront_T = __GoFront_T || class {
     throw new __GoFront_SkipNow();
   }
   Skipped() { return this.skipped; }
+  SkipNow() {
+    this.skipped = true;
+    throw new __GoFront_SkipNow();
+  }
   Helper() {}
+  Parallel() {}
+  Attr(k, v) {}
+  Output() {
+    return {
+      Write(p) {
+        process.stdout.write(typeof p === "string" ? p : Buffer.from(p));
+        return [p.length, null];
+      }
+    };
+  }
+  Deadline() {
+    return [null, false];
+  }
+  Context() {
+    if (!this._ctx) {
+      let canceled = false;
+      this._ctx = {
+        Deadline() { return [null, false]; },
+        Done() { return null; },
+        Err() { return canceled ? new Error("context canceled") : null; },
+        Value(k) { return null; },
+      };
+      this.Cleanup(() => { canceled = true; });
+    }
+    return this._ctx;
+  }
+  Setenv(key, val) {
+    const prev = process.env[key];
+    const hasPrev = Object.prototype.hasOwnProperty.call(process.env, key);
+    process.env[key] = String(val);
+    this.Cleanup(() => {
+      if (hasPrev) process.env[key] = prev;
+      else delete process.env[key];
+    });
+  }
+  Cleanup(fn) {
+    this._cleanups.push(fn);
+  }
+  _runCleanups() {
+    while (this._cleanups.length > 0) {
+      const fn = this._cleanups.pop();
+      try {
+        fn();
+      } catch (e) {
+        this.Fail();
+        this.Log("panic in cleanup: " + (e?.message ?? String(e)));
+      }
+    }
+  }
   Run(name, fn) {
     const subName = this._name ? \`\${this._name}/\${name}\` : name;
-    const subT = new __GoFront_T(subName, this);
+    const subT = new this.constructor(subName, this);
     if (typeof globalThis.__onSubtestStart === "function") globalThis.__onSubtestStart(subName);
+    let isAsync = false;
     try {
       const res = fn(subT);
       if (res && typeof res.then === "function") {
+        isAsync = true;
         return res.then(() => {
+          subT._runCleanups();
           if (typeof globalThis.__onSubtestEnd === "function") globalThis.__onSubtestEnd(subT);
           return !subT.failed;
         }).catch(e => {
@@ -1423,6 +1480,7 @@ var __GoFront_T = __GoFront_T || class {
             subT.Fail();
             subT.Log("panic: " + (e?.message ?? String(e)));
           }
+          subT._runCleanups();
           if (typeof globalThis.__onSubtestEnd === "function") globalThis.__onSubtestEnd(subT);
           return false;
         });
@@ -1436,12 +1494,157 @@ var __GoFront_T = __GoFront_T || class {
         subT.Fail();
         subT.Log("panic: " + (e?.message ?? String(e)));
       }
+    } finally {
+      if (!isAsync) {
+        subT._runCleanups();
+      }
     }
     if (typeof globalThis.__onSubtestEnd === "function") globalThis.__onSubtestEnd(subT);
     return !subT.failed;
   }
 };
-var __testing_T = __GoFront_T;`;
+var __testing_T = __GoFront_T;
+var __GoFront_B = __GoFront_B || class extends __GoFront_T {
+  constructor(name = "", parent = null) {
+    super(name, parent);
+    this.N = 1;
+    this._bytes = 0n;
+    this._reportAllocs = false;
+    this._timerStart = typeof performance !== "undefined" ? performance.now() : Date.now();
+    this._elapsedMs = 0;
+    this._timerRunning = true;
+    this._loopStarted = false;
+  }
+  ResetTimer() {
+    this._timerStart = typeof performance !== "undefined" ? performance.now() : Date.now();
+    this._elapsedMs = 0;
+  }
+  StartTimer() {
+    if (!this._timerRunning) {
+      this._timerStart = typeof performance !== "undefined" ? performance.now() : Date.now();
+      this._timerRunning = true;
+    }
+  }
+  StopTimer() {
+    if (this._timerRunning) {
+      const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+      this._elapsedMs += now - this._timerStart;
+      this._timerRunning = false;
+    }
+  }
+  ReportAllocs() {
+    this._reportAllocs = true;
+  }
+  ReportMetric(n, unit) {}
+  SetBytes(n) {
+    this._bytes = BigInt(n);
+  }
+  Elapsed() {
+    const ms = this._timerRunning
+      ? this._elapsedMs + ((typeof performance !== "undefined" ? performance.now() : Date.now()) - this._timerStart)
+      : this._elapsedMs;
+    return BigInt(Math.round(ms * 1e6));
+  }
+  Loop() {
+    if (!this._loopStarted) {
+      this._loopStarted = true;
+      this.ResetTimer();
+      this._loopTargetNs = this._benchDurationNs || 1e9;
+      this._loopIters = 0;
+      this._nextCheck = 1;
+    }
+    if (this.failed || this.skipped) return false;
+    this._loopIters++;
+    this.N = this._loopIters;
+    if (this._loopIters >= this._nextCheck) {
+      const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+      const elapsedNs = (now - this._timerStart) * 1e6;
+      if (elapsedNs >= this._loopTargetNs || this._loopIters >= 1e9) {
+        this.StopTimer();
+        return false;
+      }
+      const nsPerOp = Math.max(1, elapsedNs / this._loopIters);
+      const remainingNs = this._loopTargetNs - elapsedNs;
+      const addIters = Math.max(1, Math.min(100000, Math.floor(remainingNs / (nsPerOp * 2))));
+      this._nextCheck = this._loopIters + addIters;
+    }
+    return true;
+  }
+};
+var __testing_B = __GoFront_B;
+var __GoFront_M = __GoFront_M || class {
+  constructor(runFn) {
+    this._run = runFn;
+    this._ran = false;
+    this._exitCode = 0;
+  }
+  Run() {
+    this._ran = true;
+    const res = this._run();
+    if (res && typeof res.then === "function") {
+      this._promise = res.then(code => { this._exitCode = code; return code; });
+      return 0;
+    }
+    this._exitCode = res ?? 0;
+    return this._exitCode;
+  }
+};
+var __testing_M = __GoFront_M;
+var __GoFront_BenchmarkResult = __GoFront_BenchmarkResult || class {
+  constructor(b = null) {
+    this.N = b?.N ?? 0;
+    this.T = b ? b.Elapsed() : 0n;
+    this.Bytes = b?._bytes ?? 0n;
+    this.MemAllocs = 0n;
+    this.MemBytes = 0n;
+    this.Extra = new Map();
+  }
+  AllocedBytesPerOp() { return this.N > 0 ? this.MemBytes / BigInt(this.N) : 0n; }
+  AllocsPerOp() { return this.N > 0 ? this.MemAllocs / BigInt(this.N) : 0n; }
+  MemString() { return \`\${this.AllocedBytesPerOp()} B/op\\t\${this.AllocsPerOp()} allocs/op\`; }
+  NsPerOp() { return this.N > 0 ? this.T / BigInt(this.N) : 0n; }
+  String() {
+    const ns = this.NsPerOp();
+    let s = \`\${this.N}\\t\${ns} ns/op\`;
+    if (this.Bytes > 0n && this.T > 0n) {
+      const mbPerSec = (Number(this.Bytes * BigInt(this.N)) / (Number(this.T) / 1e9) / (1024 * 1024)).toFixed(2);
+      s += \`\\t\${mbPerSec} MB/s\`;
+    }
+    return s;
+  }
+};
+var __testing_BenchmarkResult = __GoFront_BenchmarkResult;
+var __testing_Benchmark = __testing_Benchmark || function(fn) {
+  const b = new __GoFront_B("Benchmark");
+  b._benchDurationNs = 1e9;
+  b.N = 1;
+  b.ResetTimer();
+  fn(b);
+  if (!b._loopStarted) {
+    b.StopTimer();
+    b._runCleanups();
+    let n = 1;
+    while (!b.failed && !b.skipped) {
+      const elapsedNs = Number(b.Elapsed());
+      if (elapsedNs >= 1e9 || n >= 1e9) break;
+      let nextN;
+      if (elapsedNs === 0) nextN = n * 100;
+      else nextN = Math.max(n + 1, Math.min(1e9, Math.floor(n * (1e9 / elapsedNs) * 1.2)));
+      if (nextN <= n) break;
+      n = nextN;
+      b = new __GoFront_B("Benchmark");
+      b._benchDurationNs = 1e9;
+      b.N = n;
+      b.ResetTimer();
+      fn(b);
+      b.StopTimer();
+      b._runCleanups();
+    }
+  } else {
+    b._runCleanups();
+  }
+  return new __GoFront_BenchmarkResult(b);
+};`;
 
 export const HELPER_INJECT_STYLES = `var __injectStyles = __injectStyles || function(css) {
   if (typeof document === "undefined" || !document || !document.head || !css) return;
