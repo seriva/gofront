@@ -159,11 +159,11 @@ Members of each Go package that `wasm` and `both` packages can use today, out of
 | `slices` | 37 of 40 | 3 |
 | `sort` | 36 of 40 | 4 |
 | `strconv` | 41 of 43 | 2 |
-| `strings` | 64 of 82 | 18 |
+| `strings` | 66 of 82 | 16 |
 | `sync` | 20 of 39 | 19 |
 | `sync/atomic` | 0 of 90 | 90 |
 | `testing` | 16 of 94 | 78 |
-| `time` | 80 of 129 | 49 |
+| `time` | 95 of 129 | 34 |
 | `unicode` | 52 of 52 | 0 |
 | `unicode/utf16` | 0 of 7 | 7 |
 | `unicode/utf8` | 19 of 19 | 0 |

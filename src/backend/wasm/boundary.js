@@ -1565,10 +1565,11 @@ export function addBoundaryHelpers(mod, meta) {
 				[EXT],
 				[
 					get(0),
-					{ op: "f64.const", value: 1000000 },
-					{ op: "f64.mul" },
 					{ op: "i64.trunc_sat_f64_s" },
+					{ op: "i64.const", value: 1000000n },
+					{ op: "i64.mul" },
 					get(1),
+					{ op: "ref.null", heapType: "any" },
 					{ op: "struct.new", typeIndex: timeInfo.typeIndex },
 					...toExt(timeWType),
 				],
@@ -2100,7 +2101,7 @@ function ${P}stdlib(stringTable, io) {
 	let trimStart = 0, trimEnd = 0;
 	let sscanTokens = [];
 	let sscanHasErr = 0, sscanErrMsg = "";
-	let timeParseErr = null, timeParseOffset = 0;
+	let timeParseErr = null, timeParseOffset = 0, timeParseDurationErr = null, timeParseSubNs = 0;
 	let rawBytes = new Uint8Array(0);
 	let rawPos = 0;
 	let hexErr = null;
@@ -2528,32 +2529,66 @@ function ${P}stdlib(stringTable, io) {
 		"time_now_ms": () => (typeof globalThis.__GOFRONT_CLOCK === "function" ? globalThis.__GOFRONT_CLOCK() : Date.now()),
 		"time_timezone_offset": (ms) => -new Date(ms).getTimezoneOffset() * 60,
 		"time_duration_string": (d) => __durationString(d),
+		"time_parse_duration": (s) => {
+			const res = __timeParseDuration(s);
+			if (res[1]) {
+				timeParseDurationErr = res[1].message || String(res[1]);
+				return 0n;
+			}
+			timeParseDurationErr = null;
+			return res[0];
+		},
+		"time_parse_duration_err": () => timeParseDurationErr,
+		"time_month_string": (m) => __monthString(m),
+		"time_weekday_string": (w) => __weekdayString(w),
 		"time_parse": (layout, val) => {
 			try {
-				const d = new Date(val ?? "");
+				let s = String(val ?? "");
+				if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) {
+					s = s.slice(1, -1);
+				}
+				const d = new Date(s);
 				if (isNaN(d.getTime())) throw 0;
+				let subNs = 0;
+				const m = /\\.([0-9]{1,9})/.exec(s);
+				if (m) {
+					subNs = Number(m[1].padEnd(9, "0")) % 1000000;
+				}
 				timeParseErr = null;
-				timeParseOffset = -d.getTimezoneOffset() * 60;
+				if (s.endsWith("Z") || s.endsWith("z")) {
+					timeParseOffset = 0;
+				} else {
+					const tzMatch = /([+-])(\\d{2}):?(\\d{2})$/.exec(s);
+					if (tzMatch) {
+						const sign = tzMatch[1] === "+" ? 1 : -1;
+						timeParseOffset = sign * (Number(tzMatch[2]) * 3600 + Number(tzMatch[3]) * 60);
+					} else {
+						timeParseOffset = -d.getTimezoneOffset() * 60;
+					}
+				}
+				timeParseSubNs = subNs;
 				return d.getTime();
 			} catch {
 				timeParseErr = "parsing time: cannot parse";
 				timeParseOffset = 0;
+				timeParseSubNs = 0;
 				return 0;
 			}
 		},
 		"time_parse_err": () => timeParseErr,
 		"time_parse_offset": () => timeParseOffset,
+		"time_parse_sub_ns": () => timeParseSubNs,
 		"time_format": (y, m, d, hr, min, sec, wd, ms, offsetSec, layout) => {
 			const DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
 			const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 			const pad = (n, w = 2) => String(n).padStart(w, "0");
-			return (layout ?? "").replace(/2006|06|Monday|Mon|January|Jan|01|02|15|PM|pm|03|04|05|Z07:00|\\.(?:0+|9+)|1|2|3|4|5/g, t => {
+			return (layout ?? "").replace(/2006|06|Monday|Mon|January|Jan|01|02|15|PM|pm|03|04|05|Z07:00|-07:00|-0700|MST|\\.(?:0+|9+)|1|2|3|4|5/g, t => {
 				if (t.startsWith(".")) {
 					const isZeroPad = t.includes("0");
 					const maxLen = t.length - 1;
-					let frac = pad(ms % 1000, 3);
-					if (maxLen > 3) frac = frac.padEnd(maxLen, "0");
-					else frac = frac.slice(0, maxLen);
+					let frac = pad(ms % 1000000000, 9);
+					if (maxLen <= 9) frac = frac.slice(0, maxLen);
+					else frac = frac.padEnd(maxLen, "0");
 					if (!isZeroPad) {
 						frac = frac.replace(/0+$/, "");
 						return frac.length > 0 ? "." + frac : "";
@@ -2584,6 +2619,15 @@ function ${P}stdlib(stringTable, io) {
 						const o = Math.floor(offsetSec / 60);
 						return o === 0 ? "Z" : (o > 0 ? "+" : "-") + pad(Math.floor(Math.abs(o) / 60)) + ":" + pad(Math.abs(o) % 60);
 					}
+					case "-07:00": {
+						const o = Math.floor(offsetSec / 60);
+						return (o >= 0 ? "+" : "-") + pad(Math.floor(Math.abs(o) / 60)) + ":" + pad(Math.abs(o) % 60);
+					}
+					case "-0700": {
+						const o = Math.floor(offsetSec / 60);
+						return (o >= 0 ? "+" : "-") + pad(Math.floor(Math.abs(o) / 60)) + pad(Math.abs(o) % 60);
+					}
+					case "MST": return offsetSec === 0 ? "UTC" : "LOCAL";
 					default: return t;
 				}
 			});

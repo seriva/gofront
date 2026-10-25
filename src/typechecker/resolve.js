@@ -108,8 +108,16 @@ export const resolveMethods = {
 				}
 				const named = this.types.get(node.name);
 				if (named) {
+					const wasmErr = this._checkWasmStdlibTypeMember(node);
+					if (wasmErr) return wasmErr;
 					this._useQualifiedTypeName(node, named);
 					return named;
+				}
+				if (EXCLUDED_STDLIB_MEMBERS.has(node.name)) {
+					return this.err(
+						`${node.name} is not available: ${EXCLUDED_STDLIB_MEMBERS.get(node.name)}`,
+						node,
+					);
 				}
 				return this.err(`Unknown type '${node.name}'`, node);
 			}
@@ -174,6 +182,25 @@ export const resolveMethods = {
 			default:
 				return ANY;
 		}
+	},
+
+	_checkWasmStdlibTypeMember(node) {
+		if (this.target !== "wasm" && this.target !== "both") return null;
+		const dot = node.name.indexOf(".");
+		if (dot === -1) return null;
+		const pkg = node.name.slice(0, dot);
+		if (pkg !== "time") return null;
+		const field = node.name.slice(dot + 1);
+		const allowed = WASM_STDLIB_MEMBERS.get(pkg);
+		if (allowed && !allowed.has(field)) {
+			this.recordBlocker("unsupported stdlib member", node.name);
+			return this.err(
+				`'${node.name}' is not yet available in wasm packages`,
+				node,
+				"move this call to a JS package, or use a supported alternative",
+			);
+		}
+		return null;
 	},
 
 	// `pkg.T` in a type position counts as using the import; a Go-source
@@ -661,6 +688,13 @@ export const resolveMethods = {
 			return base.fields.get(field);
 		}
 		if (base.methods?.has(field)) return base.methods.get(field);
+		const typeName = baseType?.name || base.name;
+		if (typeName && EXCLUDED_STDLIB_MEMBERS.has(`${typeName}.${field}`)) {
+			return this.err(
+				`${typeName}.${field} is not available: ${EXCLUDED_STDLIB_MEMBERS.get(`${typeName}.${field}`)}`,
+				node,
+			);
+		}
 		return this.err(`No field '${field}' on ${typeStr(baseType)}`, node);
 	},
 
