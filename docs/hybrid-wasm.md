@@ -119,9 +119,9 @@ Members of each Go package that `wasm` and `both` packages can use today, out of
 | `bufio` | 57 of 79 | 22 |
 | `bytes` | 78 of 99 | 21 |
 | `cmp` | 4 of 4 | 0 |
-| `container/heap` | 0 of 11 | 11 |
-| `container/list` | 0 of 21 | 21 |
-| `container/ring` | 0 of 10 | 10 |
+| `container/heap` | 6 of 11 | 5 |
+| `container/list` | 21 of 21 | 0 |
+| `container/ring` | 10 of 10 | 0 |
 | `context` | 17 of 20 | 3 |
 | `crypto/hmac` | 0 of 2 | 2 |
 | `crypto/md5` | 0 of 4 | 4 |
