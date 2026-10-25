@@ -1316,11 +1316,12 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
   - Done when: both pass and `example/preact` can cancel a `fetch` through `AbortController` (used in Task 7.1).
   - Landed: implemented `context` deadlines and `AfterFunc` in pure Go source (`runtime/stdlib/context/deadline.go`) supporting `DeadlineExceeded`, `WithDeadline`, `WithDeadlineCause`, `WithTimeout`, `WithTimeoutCause`, and `AfterFunc` using `//gofront:intrinsic deadline_timer` and cooperative WASM deadline checking. Conformance fixture `test/conformance/context/deadline.go` passes on JS and WASM matching Go 1.26 reference. WASM unit test verified advancing fake clock import. Updated stdlib coverage gaps (0 gaps remaining in `context`) and regenerated docs.
 
-- [ ] **Task 4.4 — `container/heap`, `container/list`, `container/ring`**
+- [x] **Task 4.4 — `container/heap`, `container/list`, `container/ring`**
   - Files: new `runtime/stdlib/container/{heap,list,ring}/*.go`
   - Do: full API of each.
   - Test: conformance fixtures `container/{heap,list,ring}.go`.
   - Done when: fixtures match Go.
+  - Landed: implemented `container/heap`, `container/list`, and `container/ring` in pure Go source supporting their full standard APIs. Fixed compiler AST mangling for type names in `new(T)` and `make(T)`, added parser support for `for ; cond; post` loops, added `new` builtin lowering in WASM backend, resolved JS receiver reassignment in methods, fixed slice pointer interface dispatch trampolines in WASM backend, and fixed unqualified imported type contamination in stdlib coverage test. Conformance fixtures pass on JS and WASM matching Go 1.26 reference. Updated stdlib coverage gaps (0 gaps remaining in `container/*`) and regenerated docs.
 
 - [ ] **Task 4.5 — `hash`, `hash/crc32`, `hash/fnv`, `hash/adler32`**
   - Files: new `runtime/stdlib/hash/**.go`

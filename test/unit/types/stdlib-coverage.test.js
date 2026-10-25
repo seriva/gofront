@@ -135,7 +135,6 @@ function importGoSource(pkgChecker, path) {
 	};
 	pkgChecker.globals.define(id, ns);
 	for (const [name, type] of types) {
-		pkgChecker.types.set(name, type);
 		pkgChecker.types.set(`${id}.${name}`, type);
 	}
 }
