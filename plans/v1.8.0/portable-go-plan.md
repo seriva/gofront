@@ -1165,11 +1165,12 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
   - Done when: fixtures match Go and the table file is under 40 KB of source.
   - Landed: implemented `unicode/utf8` byte slice APIs (`EncodeRune`, `AppendRune`, `DecodeRune`, `DecodeLastRune`, `RuneCount`, `FullRune`, `Valid`, `RuneStart`, `RuneSelf`) in `runtime/stdlib/unicode/utf8/bytes.go`. Added general-category tables in `runtime/stdlib/unicode/tables.go` (compact <40 KB source) and `unicode.Is`, `In`, `IsOneOf`, `IsNumber`, `IsSymbol`, `IsMark`, `IsTitle`, `To`, `ToTitle`, `SimpleFold` in `runtime/stdlib/unicode/unicode.go`. Aligned `unicode.IsSpace`, `strings.Fields`, and `bytes.Fields` on both backends to match Go's whitespace predicate per P16. Verified with conformance fixtures `test/conformance/utf8/bytes.go` and `test/conformance/unicode/categories.go`.
 
-- [ ] **Task 3.3c — `strconv.NumError`, `ErrRange`, `ErrSyntax`, quoting, and `errors.ErrUnsupported` usage**
+- [x] **Task 3.3c — `strconv.NumError`, `ErrRange`, `ErrSyntax`, quoting, and `errors.ErrUnsupported` usage**
   - Files: `src/backend/js/stdlib/strconv.js`, `src/backend/wasm/stdlib/core.js`, new `runtime/stdlib/strconv/quote.go`
   - Do: `Parse*` return `*NumError{Func, Num, Err}` wrapping `ErrRange`/`ErrSyntax` with Go's message; `QuoteRune`, `QuoteToASCII`, `QuoteRuneToASCII`, `AppendQuote*`, `UnquoteChar`, `IsPrint`, `CanBackquote`.
   - Test: conformance fixture `strconv/errors.go` with `errors.Is(err, strconv.ErrRange)` and `errors.As(err, &numErr)`.
   - Done when: fixture matches Go.
+  - Landed: defined `strconv.NumError` struct with `Error()` and `Unwrap()` methods, `IntSize`, `IsPrint`, `IsGraphic`, `CanBackquote`, `UnquoteChar`, `QuotedPrefix`, and quoting functions (`QuoteRune`, `QuoteToASCII`, `QuoteRuneToASCII`, `QuoteToGraphic`, `QuoteRuneToGraphic`, `AppendQuote`, `AppendQuoteToASCII`, `AppendQuoteToGraphic`, `AppendQuoteRune`, `AppendQuoteRuneToASCII`, `AppendQuoteRuneToGraphic`) in `runtime/stdlib/strconv/quote.go`. Updated `Parse*` functions across JS and WASM to return `*NumError` wrapping `ErrSyntax` or `ErrRange`. Added conformance fixture `test/conformance/strconv/errors.go` testing `errors.Is` and `errors.As`. Phase 3.2 is complete.
 
 ### Phase 3.3: `math`, `time` and strings/bytes buffer gaps
 
