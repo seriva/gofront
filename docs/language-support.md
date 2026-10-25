@@ -129,7 +129,7 @@ Members of each Go package (functions, types, methods, fields, constants and var
 | `regexp` | 15 of 49 | 34 | 49 | 0 |
 | `slices` | 37 of 40 | 3 | 0 | 0 |
 | `sort` | 36 of 40 | 4 | 0 | 0 |
-| `strconv` | 18 of 43 | 25 | 0 | 0 |
+| `strconv` | 41 of 43 | 2 | 0 | 0 |
 | `strings` | 66 of 82 | 16 | 0 | 0 |
 | `sync` | 20 of 39 | 19 | 0 | 7 |
 | `sync/atomic` | 0 of 90 | 90 | 0 | 4 |
