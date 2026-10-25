@@ -107,13 +107,13 @@ Members of each Go package (functions, types, methods, fields, constants and var
 | `encoding/hex` | 7 of 15 | 8 | 0 | 0 |
 | `encoding/json` | 5 of 68 | 63 | 0 | 0 |
 | `errors` | 6 of 7 | 1 | 0 | 0 |
-| `fmt` | 18 of 43 | 25 | 0 | 0 |
+| `fmt` | 21 of 43 | 22 | 0 | 0 |
 | `hash` | 0 of 32 | 32 | 0 | 0 |
 | `hash/adler32` | 0 of 3 | 3 | 0 | 0 |
 | `hash/crc32` | 0 of 12 | 12 | 0 | 0 |
 | `hash/fnv` | 0 of 6 | 6 | 0 | 0 |
 | `html` | 2 of 2 | 0 | 0 | 0 |
-| `io` | 23 of 94 | 71 | 0 | 10 |
+| `io` | 58 of 94 | 36 | 0 | 10 |
 | `iter` | 2 of 2 | 0 | 0 | 2 |
 | `log` | 0 of 43 | 43 | 0 | 0 |
 | `maps` | 10 of 10 | 0 | 0 | 0 |
@@ -128,16 +128,16 @@ Members of each Go package (functions, types, methods, fields, constants and var
 | `path/filepath` | 9 of 19 | 10 | 0 | 8 |
 | `regexp` | 15 of 49 | 34 | 49 | 0 |
 | `slices` | 37 of 40 | 3 | 0 | 0 |
-| `sort` | 10 of 40 | 30 | 0 | 0 |
-| `strconv` | 18 of 43 | 25 | 0 | 0 |
+| `sort` | 36 of 40 | 4 | 0 | 0 |
+| `strconv` | 41 of 43 | 2 | 0 | 0 |
 | `strings` | 66 of 82 | 16 | 0 | 0 |
 | `sync` | 20 of 39 | 19 | 0 | 7 |
 | `sync/atomic` | 0 of 90 | 90 | 0 | 4 |
 | `testing` | 18 of 94 | 76 | 0 | 72 |
 | `time` | 81 of 134 | 53 | 5 | 11 |
-| `unicode` | 11 of 52 | 41 | 0 | 257 |
+| `unicode` | 52 of 52 | 0 | 0 | 257 |
 | `unicode/utf16` | 0 of 7 | 7 | 0 | 0 |
-| `unicode/utf8` | 10 of 19 | 9 | 0 | 0 |
+| `unicode/utf8` | 19 of 19 | 0 | 0 | 0 |
 
 Packages excluded as a whole, by reason:
 

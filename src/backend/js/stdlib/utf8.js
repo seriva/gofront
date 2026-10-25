@@ -9,7 +9,7 @@ const UTF8_DISPATCH = {
 	ValidString: (a) =>
 		`/[\\uD800-\\uDBFF](?![\\uDC00-\\uDFFF])|(?<![\\uD800-\\uDBFF])[\\uDC00-\\uDFFF]/.test(${a[0]}) === false`,
 	ValidRune: (a) =>
-		`(${a[0]}) >= 0 && (${a[0]}) <= 0x10FFFF && !((${a[0]}) >= 0xD800 && (${a[0]}) <= 0xDFFF)`,
+		`((${a[0]}) >= 0 && (${a[0]}) <= 0x10FFFF && !((${a[0]}) >= 0xD800 && (${a[0]}) <= 0xDFFF))`,
 	DecodeRuneInString: (a) =>
 		`((s) => { if (!s) return [0xFFFD, 0]; const cp = s.codePointAt(0); return [cp, cp > 0xFFFF ? 2 : 1]; })(${a[0]})`,
 	DecodeLastRuneInString: (a) =>
