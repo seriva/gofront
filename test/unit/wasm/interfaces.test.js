@@ -489,3 +489,33 @@ func Main() string {
 	assertEqual(wasmRes, "Hi Alice, Greetings from Mars, Hi Bob");
 	assertEqual(wasmRes, jsRes);
 });
+
+test("Interface dispatch skips same-named methods with a different arity", () => {
+	const src = `
+package main
+
+type Resetter interface {
+	Reset()
+}
+
+type Counter struct{ n int }
+
+func (c *Counter) Reset() { c.n = 0 }
+
+type Reader struct{ s string }
+
+func (r *Reader) Reset(s string) { r.s = s }
+
+func Main() int {
+	c := &Counter{n: 5}
+	var r Resetter = c
+	r.Reset()
+	rd := &Reader{}
+	rd.Reset("x")
+	return c.n + len(rd.s)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, 1);
+	assertEqual(wasmRes, jsRes);
+});
