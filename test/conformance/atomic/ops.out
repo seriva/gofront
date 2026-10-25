@@ -1,0 +1,35 @@
+5 8 8 10
+true false 11
+11 3 3 11
+1099511627775 1099511627775 1099511627775 true 8
+16 16 16 240 240
+1099511627781 1099511627781 true 4
+10 10 true 1 2
+false false true true false false
+true
+true
+a false true b
+b a
+true
+hello hello world
+false true x
+5 5 5 true
+10
+6 2
+10
+8589934593 8589934593 8589934593 true
+3
+12 4
+5
+2 2 2 true
+1
+6 2
+10
+34359738369 34359738369 34359738369 true
+3
+12 4
+5
+7 7 7 true
+3
+6 2
+10
