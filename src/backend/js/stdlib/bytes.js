@@ -48,7 +48,7 @@ const BYTES_DISPATCH = {
 		`((b, s) => { for (let i = b.length - s.length; i >= 0; i--) if (s.every((v, j) => b[i + j] === v)) return i; return -1; })(${a[0]}, ${a[1]})`,
 	LastIndexByte: (a) => `(${a[0]}).lastIndexOf(${a[1]})`,
 	Fields: (a) =>
-		`((b) => { const s = new TextDecoder().decode(new Uint8Array(b ?? [])).trim(); return s === '' ? [] : s.split(/\\s+/).map(w => new TextEncoder().encode(w)); })(${a[0]})`,
+		`((b) => { const s = new TextDecoder().decode(new Uint8Array(b ?? [])); return s.split(/[ \\t\\n\\v\\f\\r\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]+/).filter(p => p !== "").map(w => new TextEncoder().encode(w)); })(${a[0]})`,
 	FieldsFunc: (a) =>
 		`((b, fn) => { const s = new TextDecoder().decode(new Uint8Array(b ?? [])); const res = []; let cur = ""; for (const ch of s) { const cp = ch.codePointAt(0); if (fn(cp)) { if (cur.length > 0) { res.push(new TextEncoder().encode(cur)); cur = ""; } } else { cur += ch; } } if (cur.length > 0) res.push(new TextEncoder().encode(cur)); return res; })(${a[0]}, ${a[1]})`,
 	Clone: (a) =>
