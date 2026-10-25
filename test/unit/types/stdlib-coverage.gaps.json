@@ -1,13 +1,6 @@
 {
 	"missing": {
 		"bufio": [
-			"ErrAdvanceTooFar",
-			"ErrBadReadCount",
-			"ErrFinalToken",
-			"ErrNegativeAdvance",
-			"ErrTooLong",
-			"MaxScanTokenSize",
-			"NewScanner",
 			"ReadWriter.Available",
 			"ReadWriter.AvailableBuffer",
 			"ReadWriter.Discard",
@@ -29,19 +22,7 @@
 			"ReadWriter.WriteRune",
 			"ReadWriter.WriteString",
 			"ReadWriter.WriteTo",
-			"ReadWriter.Writer",
-			"ScanBytes",
-			"ScanLines",
-			"ScanRunes",
-			"ScanWords",
-			"Scanner",
-			"Scanner.Buffer",
-			"Scanner.Bytes",
-			"Scanner.Err",
-			"Scanner.Scan",
-			"Scanner.Split",
-			"Scanner.Text",
-			"SplitFunc"
+			"ReadWriter.Writer"
 		],
 		"bytes": [
 			"Compare",
