@@ -465,7 +465,11 @@ class ModuleEmitter {
 				let fIdx = 0;
 				for (const f of s.astFields) {
 					const names = f.embedded
-						? [f.type.name]
+						? [
+								f.type?.kind === "PointerType"
+									? f.type.base?.name
+									: f.type?.name,
+							]
 						: f.names?.length
 							? f.names
 							: f.name
@@ -499,7 +503,8 @@ class ModuleEmitter {
 				}
 				if (resolvedStruct?._embeds) {
 					for (const embed of resolvedStruct._embeds) {
-						const embedName = embed.kind === "named" ? embed.name : null;
+						const inner = embed.kind === "pointer" ? embed.base : embed;
+						const embedName = inner?.kind === "named" ? inner.name : null;
 						if (embedName && fieldIndexMap.has(embedName)) {
 							embeds.push({
 								name: embedName,
