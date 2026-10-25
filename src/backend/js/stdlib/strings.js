@@ -238,11 +238,11 @@ const STRINGS_DISPATCH = {
 			},
 			Size() { return BigInt(this._bytes.length); },
 			WriteTo(w) {
-				if (this._pos >= this._bytes.length) return [0n, null];
+				if (this._pos >= this._bytes.length) return [0, null];
 				const rem = this._bytes.subarray(this._pos);
 				const [n, err] = w.Write(rem);
 				this._pos += n;
-				return [BigInt(n), err];
+				return [n, err];
 			},
 			Len() { return Math.max(0, this._bytes.length - this._pos); },
 			Reset(s2) { this._bytes = new TextEncoder().encode(s2 ?? ""); this._pos = 0; this._prevRune = -1; }

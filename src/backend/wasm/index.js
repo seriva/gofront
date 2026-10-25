@@ -2291,7 +2291,7 @@ class ModuleEmitter {
 					tVal.underlying?.kind !== "struct" &&
 					tVal.underlying?.kind !== "interface"
 				) {
-					if (this.checker.implements(tVal, ifaceResolved)) {
+					if (this.checker?.implements?.(tVal, ifaceResolved)) {
 						const box = this.getIfaceBoxType(tVal);
 						if (box && !seen.has(box.typeIndex)) {
 							seen.add(box.typeIndex);

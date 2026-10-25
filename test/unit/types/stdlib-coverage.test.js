@@ -116,14 +116,28 @@ function importGoSource(pkgChecker, path) {
 		: {};
 	const symbols = new Map(Object.entries(baseMembers));
 	const types = new Map();
+	const mangle = new Map();
 	for (const n of dep.names) {
 		if (n.includes(".")) continue;
 		const t = dep.checker.globals.symbols.get(n);
 		if (t !== undefined) symbols.set(n, t);
+		mangle.set(n, n);
 		if (dep.checker.types.has(n))
 			types.set(n, qualifiedType(dep.checker.types.get(n), `${id}.${n}`));
 	}
-	pkgChecker.addPackageNamespace(id, symbols, types);
+	const ns = {
+		kind: "namespace",
+		name: id,
+		members: Object.fromEntries(symbols),
+		_gofront: true,
+		_target: "both",
+		_mangle: mangle,
+	};
+	pkgChecker.globals.define(id, ns);
+	for (const [name, type] of types) {
+		pkgChecker.types.set(name, type);
+		pkgChecker.types.set(`${id}.${name}`, type);
+	}
 }
 
 // A copy of named type `t` named `name` (a generic type's instances take
