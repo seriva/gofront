@@ -6590,11 +6590,14 @@ export class StdlibCoreEmitter {
 				return;
 			}
 			case "ParseUint": {
+				const sTmp = this.acquireTemp("externref");
 				this.emitExpr(args[0], "externref");
+				this.pushInstruction({ op: "local.tee", index: sTmp });
 				this._emitI32Arg(args[1]);
 				this._emitI32Arg(args[2]);
 				this._callStdlib("strconv_parse_uint");
-				this._emitStrconvError();
+				this._emitStrconvError("ParseUint", sTmp);
+				this.releaseTemp(sTmp, "externref");
 				return;
 			}
 			case "Atoi":
@@ -6603,7 +6606,9 @@ export class StdlibCoreEmitter {
 			case "ParseBool": {
 				// (value, error): the JS side records a failure message that
 				// `strconv_err` returns (null on success) → runtime error value.
+				const sTmp = this.acquireTemp("externref");
 				this.emitExpr(args[0], "externref");
+				this.pushInstruction({ op: "local.tee", index: sTmp });
 				if (name === "Atoi") this._callStdlib("strconv_atoi");
 				else if (name === "ParseInt") {
 					this._emitI32Arg(args[1]);
@@ -6612,7 +6617,8 @@ export class StdlibCoreEmitter {
 				} else if (name === "ParseFloat")
 					this._callStdlib("strconv_parse_float");
 				else this._callStdlib("strconv_parse_bool");
-				this._emitStrconvError();
+				this._emitStrconvError(name, sTmp);
+				this.releaseTemp(sTmp, "externref");
 				return;
 			}
 			default:
@@ -6620,7 +6626,7 @@ export class StdlibCoreEmitter {
 		}
 	}
 
-	_emitStrconvError() {
+	_emitStrconvError(fnName = null, sTmp = null) {
 		this._callStdlib("strconv_err");
 		const msgTmp = this.acquireTemp("externref");
 		this.pushInstruction({ op: "local.set", index: msgTmp });
@@ -6649,12 +6655,38 @@ export class StdlibCoreEmitter {
 		this.pushInstruction("end");
 		this.pushInstruction("end");
 
+		const numErrInfo =
+			this.mod.getStructType("NumError$$strconv") ??
+			this.mod.getStructType("strconv.NumError");
+
 		this.pushInstruction({ op: "local.get", index: msgTmp });
-		this.pushInstruction({ op: "local.get", index: causeTmp });
-		this.pushInstruction({
-			op: "call",
-			funcIndex: this.mod.resolveFuncIndex("__mk_error"),
-		});
+		this.pushInstruction("any.convert_extern");
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction({ op: "if", blockType: "anyref" });
+		this.pushInstruction({ op: "ref.null", heapType: "any" });
+		this.pushInstruction({ op: "else" });
+		if (numErrInfo && fnName && sTmp !== null) {
+			const fnStrIdx = this.mod.internString(fnName);
+			this.pushInstruction({ op: "i32.const", value: fnStrIdx });
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getStringImportIndex(),
+			});
+			this.pushInstruction({ op: "local.get", index: sTmp });
+			this.pushInstruction({ op: "local.get", index: causeTmp });
+			this.pushInstruction({
+				op: "struct.new",
+				typeIndex: numErrInfo.typeIndex,
+			});
+		} else {
+			this.pushInstruction({ op: "local.get", index: msgTmp });
+			this.pushInstruction({ op: "local.get", index: causeTmp });
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.resolveFuncIndex("__mk_error"),
+			});
+		}
+		this.pushInstruction("end");
 
 		this.releaseTemp(causeTmp, "anyref");
 		this.releaseTemp(kindTmp, "i32");
