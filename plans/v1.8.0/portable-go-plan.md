@@ -1279,11 +1279,12 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
   - Done when: fixture matches Go.
   - Landed: implemented `bufio.Writer` in Go source with all methods (`NewWriter`, `NewWriterSize`, `Available`, `AvailableBuffer`, `Buffered`, `Flush`, `ReadFrom`, `Reset`, `Size`, `Write`, `WriteByte`, `WriteRune`, `WriteString`), large writes pass-through after flushing, and `ReadWriter` with `NewReadWriter`. Conformance fixture `test/conformance/bufio/writer.go` passes on JS and WASM with counting writer matching Go 1.26 reference. Updated stdlib gaps and docs.
 
-- [ ] **Task 4.1c — `bufio.Scanner` and split functions**
+- [x] **Task 4.1c — `bufio.Scanner` and split functions**
   - Files: new `runtime/stdlib/bufio/scan.go`
   - Do: `Scanner`, `SplitFunc`, `ScanLines`, `ScanWords`, `ScanRunes`, `ScanBytes`, `MaxScanTokenSize`, `ErrTooLong`, `ErrNegativeAdvance`, `ErrAdvanceTooFar`, `ErrFinalToken`.
   - Test: conformance fixture `bufio/scanner.go` (final token without newline, `ErrFinalToken`, `ErrTooLong`).
   - Done when: fixture matches Go.
+  - Landed: implemented `bufio.Scanner` in Go source with all methods (`NewScanner`, `Err`, `Bytes`, `Text`, `Scan`, `Buffer`, `Split`) and split functions (`ScanLines`, `ScanWords`, `ScanRunes`, `ScanBytes`), `SplitFunc`, `MaxScanTokenSize`, and errors `ErrTooLong`, `ErrNegativeAdvance`, `ErrAdvanceTooFar`, `ErrBadReadCount`, `ErrFinalToken`. Added conformance fixture `test/conformance/bufio/scanner.go` and `.out`. Fixed WASM `%q` on byte arrays in `src/backend/js/fmt-runtime.js`. Updated stdlib coverage gaps and regenerated docs. Conformance fixture passes across JS and WASM matching Go 1.26 reference.
 
 - [ ] **Task 4.2a — `net/url` escaping and `Values`**
   - Files: new `runtime/stdlib/net/url/escape.go`, `values.go`
