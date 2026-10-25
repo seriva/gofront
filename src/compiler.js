@@ -554,8 +554,12 @@ function mangleRefs(node, file, tparams, ctx) {
 	forEachChild(node, (child) => mangleRefs(child, file, tp, ctx));
 }
 
-function mangleTypeRef(node, tparams, { suffix, types }) {
-	if (types.has(node.name) && !tparams.has(node.name)) node.name += suffix;
+function mangleTypeRef(node, tparams, { suffix, types, overlay }) {
+	if (types.has(node.name) && !tparams.has(node.name)) {
+		node.name += suffix;
+	} else if (overlay && node.name in overlay.members) {
+		node.name = `${overlay.name}.${node.name}`;
+	}
 }
 
 // A package-scope identifier: a package declaration gets the suffix; in an
@@ -578,9 +582,14 @@ function checkStdlibPrograms(programs, pkgName, options, overlay) {
 	const checker = new TypeChecker();
 	checker.target = "both";
 	checker.pkgName = pkgName;
-	if (overlay)
-		for (const [name, t] of Object.entries(overlay.members))
+	if (overlay) {
+		for (const [name, t] of Object.entries(overlay.members)) {
 			checker.globals.define(name, t);
+			if (t.kind === "interface" || t.kind === "named" || t.kind === "struct") {
+				checker.types.set(name, t);
+			}
+		}
+	}
 	resolveImports(
 		programs,
 		programs[0]._path,
@@ -608,7 +617,7 @@ function throwStdlibErrors(errors) {
 
 // Pass 1: type-check the package as written and record which identifiers
 // refer to package scope.  An overlay sees its emitter members unqualified.
-function probeStdlibPackage(importPath, dir, options, overlay) {
+function probeStdlibPackage(_importPath, dir, options, overlay) {
 	const programs = parseStdlibFiles(dir);
 	const pkgName = programs[0].pkg.name;
 	const { values, types } = stdlibTopLevelNames(programs);

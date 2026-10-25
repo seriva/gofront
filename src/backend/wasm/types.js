@@ -512,6 +512,17 @@ export function isSliceType(goType, checker = null) {
 	return goType.kind === "slice" || goType.kind === "SliceType";
 }
 
+export function getSliceElemType(t, checker = null) {
+	if (!t) return null;
+	if (t.elem) return t.elem;
+	if (t.underlying?.elem) return t.underlying.elem;
+	if (t.name && checker?.types?.has(t.name)) {
+		const resolved = checker.types.get(t.name);
+		return getSliceElemType(resolved, checker);
+	}
+	return null;
+}
+
 // `[]rune` / `[]int32` (also through named types): the target of `[]rune(s)`.
 export function isRuneSlice(goType, checker = null) {
 	if (!isSliceType(goType, checker)) return false;

@@ -86,8 +86,11 @@ function goSource(pkg) {
 		pkgChecker.target = "both";
 		pkgChecker.pkgName = programs[0].pkg.name;
 		if (STDLIB_PACKAGES.has(pkg))
-			for (const [n, t] of Object.entries(namespace(pkg)?.members ?? {}))
+			for (const [n, t] of Object.entries(namespace(pkg)?.members ?? {})) {
 				pkgChecker.globals.define(n, t);
+				if (t.kind === "interface" || t.kind === "named" || t.kind === "struct")
+					pkgChecker.types.set(n, t);
+			}
 		for (const p of programs)
 			for (const { path } of p.imports.flatMap((imp) => imp.imports))
 				importGoSource(pkgChecker, path);
@@ -107,7 +110,10 @@ function importGoSource(pkgChecker, path) {
 	const dep = goSource(path);
 	if (!dep) return;
 	const id = pkgIdent(path);
-	const symbols = new Map();
+	const baseMembers = STDLIB_PACKAGES.has(path)
+		? (namespace(path)?.members ?? {})
+		: {};
+	const symbols = new Map(Object.entries(baseMembers));
 	const types = new Map();
 	for (const n of dep.names) {
 		if (n.includes(".")) continue;

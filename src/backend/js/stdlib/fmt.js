@@ -279,7 +279,7 @@ export const fmtMethods = {
 				const strArg = this.genExpr(expr.args[0]);
 				const restArgs = expr.args
 					.slice(1)
-					.map((e) => this.genExpr(e))
+					.map((e) => (e._spread ? `...${this.genExpr(e)}` : this.genExpr(e)))
 					.join(", ");
 				return `((str, ...ptrs) => { const tokens = str.trim().split(/\\s+/).filter(Boolean); ${_SSCAN_LOOP} return [n, err ? err : (n < ptrs.length ? __error("unexpected EOF") : null)]; })(${strArg}, ${restArgs})`;
 			}
@@ -288,7 +288,7 @@ export const fmtMethods = {
 				const strArg = this.genExpr(expr.args[0]);
 				const restArgs = expr.args
 					.slice(1)
-					.map((e) => this.genExpr(e))
+					.map((e) => (e._spread ? `...${this.genExpr(e)}` : this.genExpr(e)))
 					.join(", ");
 				return `((str, ...ptrs) => { const tokens = str.split("\\n")[0].trim().split(/\\s+/).filter(Boolean); ${_SSCAN_LOOP} return [n, err ? err : (n < ptrs.length ? __error("unexpected EOF") : null)]; })(${strArg}, ${restArgs})`;
 			}
@@ -298,7 +298,7 @@ export const fmtMethods = {
 				const fmtArg = this.genExpr(expr.args[1]);
 				const restArgs = expr.args
 					.slice(2)
-					.map((e) => this.genExpr(e))
+					.map((e) => (e._spread ? `...${this.genExpr(e)}` : this.genExpr(e)))
 					.join(", ");
 				return (
 					`((str, fmt, ...ptrs) => { ` +

@@ -1,0 +1,8 @@
+Fscanln 1: 2 true 123 hello
+Fscanln 2: 2 true 456 world
+Fscanln EOF: 0 true
+Fscan 1: 2 true 10 20
+Fscan 2: 2 true 30 40
+Fscan EOF: 0 true
+Fscanf 1: 2 true 42 foo
+Fscanf 2: 2 true 99 bar

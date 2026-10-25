@@ -81,6 +81,9 @@ export function reachableStdlibDecls(rootPrograms, stdlibPrograms) {
 	const names = new Set();
 	const fields = new Set(IMPLICIT_METHODS);
 	collectRefs(rootPrograms, names, fields);
+	if (names.has("strconv")) {
+		names.add("NumError$$strconv");
+	}
 
 	const pending = [...names];
 	const reach = (d) => {

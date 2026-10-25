@@ -1136,36 +1136,41 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
 
 ### Phase 3.2: `io`, `sort`, `unicode` and `strconv` completion
 
-- [ ] **Task 3.1f — `fmt.Fscan`, `Fscanf`, `Fscanln`**
+- [x] **Task 3.1f — `fmt.Fscan`, `Fscanf`, `Fscanln`**
   - Files: `runtime/stdlib/fmt/scan.go` (overlay over `io.Reader` using `Sscan*`)
   - Do: read a line or token stream from an `io.Reader` and delegate to the existing `Sscan*` lowering.
   - Test: conformance fixture `fmt/fscan.go` over `strings.NewReader`.
   - Done when: fixture matches Go.
+  - Landed: implemented `fmt.Fscan`, `fmt.Fscanf`, `fmt.Fscanln` in `runtime/stdlib/fmt/scan.go` over `io.Reader`, delegating to `Sscan*`. Supported spread variadic arguments in JS `fmt.js` and WASM `io.js` `emitSscanCall` by unpacking slices across scalar box and pointer types. Removed resolved gaps from `stdlib-coverage.gaps.json` and verified with conformance fixture `test/conformance/fmt/fscan.go`.
 
-- [ ] **Task 3.2 — `sort` completion**
+- [x] **Task 3.2 — `sort` completion**
   - Files: new `runtime/stdlib/sort/sort.go` (overlay)
   - Do: `Interface`, `Sort` (port of Go's pdqsort so equal-element order matches Go), `Stable` (insertion-merge as Go), `Reverse`, `IsSorted`, `SearchInts`/`SearchStrings`/`SearchFloat64s`, `IntSlice`/`StringSlice`/`Float64Slice`. No delegation to JS `Array.prototype.sort`.
   - Test: conformance fixture `sort/sort.go` including an unstable-order case that only matches with pdqsort.
   - Done when: fixture matches Go.
+  - Landed: implemented `sort.Interface`, pdqsort `Sort`, `Stable`, `Reverse`, `IsSorted`, `Search*`, and `*Slice` types in `runtime/stdlib/sort/sort.go`. Extended interface dispatch and boxing across JS backend (`assignability.js`, `stdlib/index.js`) and WASM backend (`findInterfaceCandidates` and range loop slice handling) for named non-struct types like slices. Verified with conformance test `test/conformance/sort/sort.go` matching Go output.
 
-- [ ] **Task 3.3a — `io` completion**
+- [x] **Task 3.3a — `io` completion**
   - Files: new `runtime/stdlib/io/io.go` (overlay)
   - Do: `MultiReader`, `MultiWriter`, `TeeReader`, `NopCloser`, `ReadAtLeast`, `ReadFull`, `StringWriter`, `ByteReader`, `ByteWriter`, `RuneReader`, `ErrUnexpectedEOF`, `ErrShortWrite`, `SectionReader` if cheap.
   - Test: conformance fixture `io/io.go`.
   - Done when: fixture matches Go.
+  - Landed: implemented `MultiReader`, `MultiWriter`, `TeeReader`, `NopCloser`, `ReadAtLeast`, `ReadFull`, `SectionReader`, `ErrUnexpectedEOF`, `ErrShortWrite`, `ErrShortBuffer`, `ErrNoProgress`, `Seek*` constants, and I/O interfaces in `runtime/stdlib/io/io.go`. Fixed overlay type resolution and qualification for emitter-backed interfaces, interface dispatcher parameter types, and named string scalar boxing in WASM. Verified with conformance test `test/conformance/io/io.go`.
 
-- [ ] **Task 3.3b — `unicode/utf8` byte API and `unicode` predicates**
+- [x] **Task 3.3b — `unicode/utf8` byte API and `unicode` predicates**
   - Files: new `runtime/stdlib/unicode/utf8/bytes.go`, `runtime/stdlib/unicode/tables.go` (general categories only)
   - Do: `EncodeRune`, `AppendRune`, `DecodeRune`, `DecodeLastRune`, `RuneCount`, `FullRune`, `Valid`; `unicode.IsNumber`, `IsSymbol`, `IsMark`, `IsTitle`, `SimpleFold`, `Is`/`In` over the general-category tables listed in the scope rule.
   - Also (review follow-up P16): `unicode.IsSpace` matches Go on both backends (`\t`, `\n`, `\v`, `\f`, `\r`, space, U+0085, U+00A0 and category Zs; not U+FEFF). Today JS uses `/\s/` and WASM tests only 9–13 and 32. `strings.Fields`, `bytes.Fields` and `FieldsSeq` use the same predicate.
   - Test: conformance fixtures `utf8/bytes.go`, `unicode/categories.go` (including `strings.Fields("a\u0085b\vc\u00a0d\ufeffe")`; needs Task 0.21).
   - Done when: fixtures match Go and the table file is under 40 KB of source.
+  - Landed: implemented `unicode/utf8` byte slice APIs (`EncodeRune`, `AppendRune`, `DecodeRune`, `DecodeLastRune`, `RuneCount`, `FullRune`, `Valid`, `RuneStart`, `RuneSelf`) in `runtime/stdlib/unicode/utf8/bytes.go`. Added general-category tables in `runtime/stdlib/unicode/tables.go` (compact <40 KB source) and `unicode.Is`, `In`, `IsOneOf`, `IsNumber`, `IsSymbol`, `IsMark`, `IsTitle`, `To`, `ToTitle`, `SimpleFold` in `runtime/stdlib/unicode/unicode.go`. Aligned `unicode.IsSpace`, `strings.Fields`, and `bytes.Fields` on both backends to match Go's whitespace predicate per P16. Verified with conformance fixtures `test/conformance/utf8/bytes.go` and `test/conformance/unicode/categories.go`.
 
-- [ ] **Task 3.3c — `strconv.NumError`, `ErrRange`, `ErrSyntax`, quoting, and `errors.ErrUnsupported` usage**
+- [x] **Task 3.3c — `strconv.NumError`, `ErrRange`, `ErrSyntax`, quoting, and `errors.ErrUnsupported` usage**
   - Files: `src/backend/js/stdlib/strconv.js`, `src/backend/wasm/stdlib/core.js`, new `runtime/stdlib/strconv/quote.go`
   - Do: `Parse*` return `*NumError{Func, Num, Err}` wrapping `ErrRange`/`ErrSyntax` with Go's message; `QuoteRune`, `QuoteToASCII`, `QuoteRuneToASCII`, `AppendQuote*`, `UnquoteChar`, `IsPrint`, `CanBackquote`.
   - Test: conformance fixture `strconv/errors.go` with `errors.Is(err, strconv.ErrRange)` and `errors.As(err, &numErr)`.
   - Done when: fixture matches Go.
+  - Landed: defined `strconv.NumError` struct with `Error()` and `Unwrap()` methods, `IntSize`, `IsPrint`, `IsGraphic`, `CanBackquote`, `UnquoteChar`, `QuotedPrefix`, and quoting functions (`QuoteRune`, `QuoteToASCII`, `QuoteRuneToASCII`, `QuoteToGraphic`, `QuoteRuneToGraphic`, `AppendQuote`, `AppendQuoteToASCII`, `AppendQuoteToGraphic`, `AppendQuoteRune`, `AppendQuoteRuneToASCII`, `AppendQuoteRuneToGraphic`) in `runtime/stdlib/strconv/quote.go`. Updated `Parse*` functions across JS and WASM to return `*NumError` wrapping `ErrSyntax` or `ErrRange`. Added conformance fixture `test/conformance/strconv/errors.go` testing `errors.Is` and `errors.As`. Phase 3.2 is complete.
 
 ### Phase 3.3: `math`, `time` and strings/bytes buffer gaps
 

@@ -30,6 +30,7 @@ import {
 	getInterfaceMethodList,
 	getMapKeyValTypes,
 	getReceiverTypeName,
+	getSliceElemType,
 	goTypeKey,
 	isAnyType,
 	isArrayType,
@@ -2155,20 +2156,44 @@ class ModuleEmitter {
 			if (fnName.endsWith(`.${methodName}`)) {
 				const rName = fnName.slice(0, fnName.length - methodName.length - 1);
 				if (!this.structTypes.has(rName)) {
-					const box = this.getIfaceBoxType({ kind: "named", name: rName });
-					const key = `named:${rName}`;
-					if (box && !seenKeys.has(key)) {
-						seenKeys.add(key);
-						const paramWTypes = this.getFuncParamTypes(fnName);
-						candidates.push({
-							recvTypeName: rName,
-							testTypeIndex: box.typeIndex,
-							isBoxedValue: true,
-							needsValueDeref: false,
-							embedPath: null,
-							funcIndex: fIdx,
-							targetParamTypes: paramWTypes,
-						});
+					const rType = this.checker?.types?.get(rName) ?? {
+						kind: "named",
+						name: rName,
+					};
+					const isSlice = isSliceType(rType, this.checker);
+					if (isSlice) {
+						const elemType = getSliceElemType(rType, this.checker);
+						const sliceInfo = this.getSliceType(elemType);
+						const key = `slice:${rName}`;
+						if (sliceInfo && !seenKeys.has(key)) {
+							seenKeys.add(key);
+							const paramWTypes = this.getFuncParamTypes(fnName);
+							candidates.push({
+								recvTypeName: rName,
+								testTypeIndex: sliceInfo.typeIndex,
+								isBoxedValue: false,
+								needsValueDeref: false,
+								embedPath: null,
+								funcIndex: fIdx,
+								targetParamTypes: paramWTypes,
+							});
+						}
+					} else {
+						const box = this.getIfaceBoxType({ kind: "named", name: rName });
+						const key = `named:${rName}`;
+						if (box && !seenKeys.has(key)) {
+							seenKeys.add(key);
+							const paramWTypes = this.getFuncParamTypes(fnName);
+							candidates.push({
+								recvTypeName: rName,
+								testTypeIndex: box.typeIndex,
+								isBoxedValue: true,
+								needsValueDeref: false,
+								embedPath: null,
+								funcIndex: fIdx,
+								targetParamTypes: paramWTypes,
+							});
+						}
 					}
 				}
 			}
@@ -3784,14 +3809,17 @@ function _scanInterfaceTypeDecls(progs, interfaceCalls, checker) {
 function _makeInterfaceDispatcher(info, checker) {
 	let methodSig = info.methodSig;
 	if (!methodSig) {
-		const ifaceResolved =
-			checker?.resolveType?.(
-				info.ifaceType?.kind === "named"
-					? info.ifaceType.underlying
-					: info.ifaceType,
-			) ?? info.ifaceType;
-		if (ifaceResolved?.methods instanceof Map) {
-			methodSig = ifaceResolved.methods.get(info.methodName);
+		const raw =
+			info.ifaceType?.kind === "named" && info.ifaceType.underlying
+				? info.ifaceType.underlying
+				: info.ifaceType;
+		const ifaceResolved = checker?.resolveType?.(raw) ?? raw;
+		const methods =
+			ifaceResolved?.methods ?? ifaceResolved?.underlying?.methods;
+		if (methods instanceof Map) {
+			methodSig = methods.get(info.methodName);
+		} else if (Array.isArray(methods)) {
+			methodSig = methods.find((m) => (m.name ?? m) === info.methodName);
 		}
 	}
 

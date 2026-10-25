@@ -838,16 +838,9 @@ export function setupCoreGlobals(globals, types) {
 			Closer: IO_CLOSER,
 			ReadWriter: IO_READWRITER,
 			EOF: ERROR,
-			ErrUnexpectedEOF: ERROR,
-			ErrShortWrite: ERROR,
 			WriteString: {
 				kind: "func",
 				params: [IO_WRITER, STRING],
-				returns: [INT, ERROR],
-			},
-			ReadFull: {
-				kind: "func",
-				params: [IO_READER, BYTE_SLICE_IO],
 				returns: [INT, ERROR],
 			},
 			ReadAll: {
