@@ -15,31 +15,31 @@ const BITS_MAP = {
 	Add32: ([x, y, c]) =>
 		`((() => { const s = BigInt((${x}) >>> 0) + BigInt((${y}) >>> 0) + BigInt((${c}) >>> 0); return [Number(s & 0xffffffffn), Number(s >> 32n)]; })())`,
 	Add64: ([x, y, c]) =>
-		`((() => { const s = BigInt.asUintN(64, ${toBig64(x)}) + BigInt.asUintN(64, ${toBig64(y)}) + BigInt.asUintN(64, ${toBig64(c)}); return [BigInt.asUintN(64, s), Number(s >> 64n)]; })())`,
+		`((() => { const s = BigInt.asUintN(64, ${toBig64(x)}) + BigInt.asUintN(64, ${toBig64(y)}) + BigInt.asUintN(64, ${toBig64(c)}); return [Number(BigInt.asUintN(64, s)), Number(s >> 64n)]; })())`,
 	Add: (args) => BITS_MAP.Add64(args),
 
 	Sub32: ([x, y, b]) =>
 		`((() => { const diff = BigInt((${x}) >>> 0) - BigInt((${y}) >>> 0) - BigInt((${b}) >>> 0); return [Number(BigInt.asUintN(32, diff)), diff < 0n ? 1 : 0]; })())`,
 	Sub64: ([x, y, b]) =>
-		`((() => { const diff = BigInt.asUintN(64, ${toBig64(x)}) - BigInt.asUintN(64, ${toBig64(y)}) - BigInt.asUintN(64, ${toBig64(b)}); return [BigInt.asUintN(64, diff), diff < 0n ? 1 : 0]; })())`,
+		`((() => { const diff = BigInt.asUintN(64, ${toBig64(x)}) - BigInt.asUintN(64, ${toBig64(y)}) - BigInt.asUintN(64, ${toBig64(b)}); return [Number(BigInt.asUintN(64, diff)), diff < 0n ? 1 : 0]; })())`,
 	Sub: (args) => BITS_MAP.Sub64(args),
 
 	Mul32: ([x, y]) =>
 		`((() => { const p = BigInt((${x}) >>> 0) * BigInt((${y}) >>> 0); return [Number(p >> 32n), Number(p & 0xffffffffn)]; })())`,
 	Mul64: ([x, y]) =>
-		`((() => { const xB = BigInt.asUintN(64, ${toBig64(x)}); const yB = BigInt.asUintN(64, ${toBig64(y)}); const mask32 = 0xffffffffn; const x0 = xB & mask32, x1 = xB >> 32n; const y0 = yB & mask32, y1 = yB >> 32n; const w0 = x0 * y0; const t = x1 * y0 + (w0 >> 32n); const w1 = (t & mask32) + x0 * y1; const hi = x1 * y1 + (t >> 32n) + (w1 >> 32n); const lo = BigInt.asUintN(64, xB * yB); return [hi, lo]; })())`,
+		`((() => { const xB = BigInt.asUintN(64, ${toBig64(x)}); const yB = BigInt.asUintN(64, ${toBig64(y)}); const mask32 = 0xffffffffn; const x0 = xB & mask32, x1 = xB >> 32n; const y0 = yB & mask32, y1 = yB >> 32n; const w0 = x0 * y0; const t = x1 * y0 + (w0 >> 32n); const w1 = (t & mask32) + x0 * y1; const hi = x1 * y1 + (t >> 32n) + (w1 >> 32n); const lo = BigInt.asUintN(64, xB * yB); return [Number(hi), Number(lo)]; })())`,
 	Mul: (args) => BITS_MAP.Mul64(args),
 
 	Div32: ([hi, lo, y]) =>
 		`((() => { const yu = (${y}) >>> 0; if (yu === 0) throw new Error("runtime error: integer divide by zero"); const hiu = (${hi}) >>> 0; if (hiu >= yu) throw new Error("runtime error: integer overflow"); const z = (BigInt(hiu) << 32n) | BigInt((${lo}) >>> 0); const yB = BigInt(yu); return [Number(z / yB), Number(z % yB)]; })())`,
 	Div64: ([hi, lo, y]) =>
-		`((() => { const yB = BigInt.asUintN(64, ${toBig64(y)}); if (yB === 0n) throw new Error("runtime error: integer divide by zero"); const hiB = BigInt.asUintN(64, ${toBig64(hi)}); if (hiB >= yB) throw new Error("runtime error: integer overflow"); const loB = BigInt.asUintN(64, ${toBig64(lo)}); const z = (hiB << 64n) | loB; return [BigInt.asUintN(64, z / yB), BigInt.asUintN(64, z % yB)]; })())`,
+		`((() => { const yB = BigInt.asUintN(64, ${toBig64(y)}); if (yB === 0n) throw new Error("runtime error: integer divide by zero"); const hiB = BigInt.asUintN(64, ${toBig64(hi)}); if (hiB >= yB) throw new Error("runtime error: integer overflow"); const loB = BigInt.asUintN(64, ${toBig64(lo)}); const z = (hiB << 64n) | loB; return [Number(BigInt.asUintN(64, z / yB)), Number(BigInt.asUintN(64, z % yB))]; })())`,
 	Div: (args) => BITS_MAP.Div64(args),
 
 	Rem32: ([hi, lo, y]) =>
 		`((() => { const yu = (${y}) >>> 0; if (yu === 0) throw new Error("runtime error: integer divide by zero"); const z = (BigInt((${hi}) >>> 0) << 32n) | BigInt((${lo}) >>> 0); return Number(z % BigInt(yu)); })())`,
 	Rem64: ([hi, lo, y]) =>
-		`((() => { const yB = BigInt.asUintN(64, ${toBig64(y)}); if (yB === 0n) throw new Error("runtime error: integer divide by zero"); const z = ((BigInt.asUintN(64, ${toBig64(hi)}) % yB) << 64n) | BigInt.asUintN(64, ${toBig64(lo)}); return BigInt.asUintN(64, z % yB); })())`,
+		`((() => { const yB = BigInt.asUintN(64, ${toBig64(y)}); if (yB === 0n) throw new Error("runtime error: integer divide by zero"); const z = ((BigInt.asUintN(64, ${toBig64(hi)}) % yB) << 64n) | BigInt.asUintN(64, ${toBig64(lo)}); return Number(BigInt.asUintN(64, z % yB)); })())`,
 	Rem: (args) => BITS_MAP.Rem64(args),
 
 	LeadingZeros8: ([x]) =>
@@ -78,7 +78,7 @@ const BITS_MAP = {
 	RotateLeft32: ([x, k]) =>
 		`((() => { const s = (${k}) & 31; const v = (${x}) >>> 0; return ((v << s) | (v >>> ((32 - s) & 31))) >>> 0; })())`,
 	RotateLeft64: ([x, k]) =>
-		`((() => { const s = ${toBig64(k)} & 63n; const v = BigInt.asUintN(64, ${toBig64(x)}); return BigInt.asUintN(64, (v << s) | (v >> ((64n - s) & 63n))); })())`,
+		`((() => { const s = ${toBig64(k)} & 63n; const v = BigInt.asUintN(64, ${toBig64(x)}); return Number(BigInt.asUintN(64, (v << s) | (v >> ((64n - s) & 63n)))); })())`,
 	RotateLeft: (args) => BITS_MAP.RotateLeft64(args),
 
 	Len8: ([x]) =>
@@ -97,7 +97,7 @@ const BITS_MAP = {
 	Reverse32: ([x]) =>
 		`((() => { let v = (${x}) >>> 0; v = ((v >>> 1) & 0x55555555) | ((v & 0x55555555) << 1); v = ((v >>> 2) & 0x33333333) | ((v & 0x33333333) << 2); v = ((v >>> 4) & 0x0f0f0f0f) | ((v & 0x0f0f0f0f) << 4); v = ((v >>> 8) & 0x00ff00ff) | ((v & 0x00ff00ff) << 8); return ((v >>> 16) | (v << 16)) >>> 0; })())`,
 	Reverse64: ([x]) =>
-		`((() => { const rev32 = (v) => { v = ((v >>> 1) & 0x55555555) | ((v & 0x55555555) << 1); v = ((v >>> 2) & 0x33333333) | ((v & 0x33333333) << 2); v = ((v >>> 4) & 0x0f0f0f0f) | ((v & 0x0f0f0f0f) << 4); v = ((v >>> 8) & 0x00ff00ff) | ((v & 0x00ff00ff) << 8); return ((v >>> 16) | (v << 16)) >>> 0; }; const v = BigInt.asUintN(64, ${toBig64(x)}); const lo = Number(v & 0xffffffffn); const hi = Number((v >> 32n) & 0xffffffffn); return (BigInt(rev32(lo)) << 32n) | BigInt(rev32(hi)); })())`,
+		`((() => { const rev32 = (v) => { v = ((v >>> 1) & 0x55555555) | ((v & 0x55555555) << 1); v = ((v >>> 2) & 0x33333333) | ((v & 0x33333333) << 2); v = ((v >>> 4) & 0x0f0f0f0f) | ((v & 0x0f0f0f0f) << 4); v = ((v >>> 8) & 0x00ff00ff) | ((v & 0x00ff00ff) << 8); return ((v >>> 16) | (v << 16)) >>> 0; }; const v = BigInt.asUintN(64, ${toBig64(x)}); const lo = Number(v & 0xffffffffn); const hi = Number((v >> 32n) & 0xffffffffn); return Number((BigInt(rev32(lo)) << 32n) | BigInt(rev32(hi))); })())`,
 	Reverse: (args) => BITS_MAP.Reverse64(args),
 
 	ReverseBytes16: ([x]) =>
@@ -105,7 +105,7 @@ const BITS_MAP = {
 	ReverseBytes32: ([x]) =>
 		`((v => (((v & 0xff) << 24) | ((v & 0xff00) << 8) | ((v >>> 8) & 0xff00) | ((v >>> 24) & 0xff)) >>> 0)((${x}) >>> 0))`,
 	ReverseBytes64: ([x]) =>
-		`((() => { const v = BigInt.asUintN(64, ${toBig64(x)}); let r = 0n; for (let i = 0n; i < 8n; i++) r = (r << 8n) | ((v >> (i * 8n)) & 0xffn); return r; })())`,
+		`((() => { const v = BigInt.asUintN(64, ${toBig64(x)}); let r = 0n; for (let i = 0n; i < 8n; i++) r = (r << 8n) | ((v >> (i * 8n)) & 0xffn); return Number(r); })())`,
 	ReverseBytes: (args) => BITS_MAP.ReverseBytes64(args),
 };
 

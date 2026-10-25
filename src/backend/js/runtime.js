@@ -1028,21 +1028,68 @@ var __pathMatch = __pathMatch || function(pat, name) {
   }
 };`;
 
-export const HELPER_TIME_FMT = `var __timeFmt = __timeFmt || function(d, layout) {
+export const HELPER_TIME_FMT = `var __timeLocalDt = __timeLocalDt || function(t) {
+  const dt = t instanceof Date ? t : (t?._d ?? t);
+  if (typeof t?._offset === "number") {
+    return new Date(dt.getTime() + t._offset * 1000);
+  }
+  return null;
+};
+var __timeYear = __timeYear || function(t) {
+  var ld = __timeLocalDt(t);
+  return ld ? ld.getUTCFullYear() : (t instanceof Date ? t : t._d).getFullYear();
+};
+var __timeMonth = __timeMonth || function(t) {
+  var ld = __timeLocalDt(t);
+  return (ld ? ld.getUTCMonth() : (t instanceof Date ? t : t._d).getMonth()) + 1;
+};
+var __timeDay = __timeDay || function(t) {
+  var ld = __timeLocalDt(t);
+  return ld ? ld.getUTCDate() : (t instanceof Date ? t : t._d).getDate();
+};
+var __timeHour = __timeHour || function(t) {
+  var ld = __timeLocalDt(t);
+  return ld ? ld.getUTCHours() : (t instanceof Date ? t : t._d).getHours();
+};
+var __timeMinute = __timeMinute || function(t) {
+  var ld = __timeLocalDt(t);
+  return ld ? ld.getUTCMinutes() : (t instanceof Date ? t : t._d).getMinutes();
+};
+var __timeSecond = __timeSecond || function(t) {
+  var ld = __timeLocalDt(t);
+  return ld ? ld.getUTCSeconds() : (t instanceof Date ? t : t._d).getSeconds();
+};
+var __timeWeekday = __timeWeekday || function(t) {
+  var ld = __timeLocalDt(t);
+  return ld ? ld.getUTCDay() : (t instanceof Date ? t : t._d).getDay();
+};
+var __timeDate = __timeDate || function(t) {
+  var ld = __timeLocalDt(t);
+  var dt = t instanceof Date ? t : t._d;
+  return ld ? [ld.getUTCFullYear(), ld.getUTCMonth() + 1, ld.getUTCDate()] : [dt.getFullYear(), dt.getMonth() + 1, dt.getDate()];
+};
+var __timeClock = __timeClock || function(t) {
+  var ld = __timeLocalDt(t);
+  var dt = t instanceof Date ? t : t._d;
+  return ld ? [ld.getUTCHours(), ld.getUTCMinutes(), ld.getUTCSeconds()] : [dt.getHours(), dt.getMinutes(), dt.getSeconds()];
+};
+var __timeFmt = __timeFmt || function(d, layout) {
   const dt = d instanceof Date ? d : (d?._d ?? d);
-  const isUtc = d?._offset === 0;
+  const hasOff = typeof d?._offset === "number" || typeof d?._loc?._offset === "number";
+  const offSec = typeof d?._offset === "number" ? d._offset : (d?._loc?._offset ?? 0);
+  const localDt = hasOff ? new Date(dt.getTime() + offSec * 1000) : null;
   const pad = (n, w = 2) => String(n).padStart(w, "0");
   const DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
   const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-  const getFullYear = () => isUtc ? dt.getUTCFullYear() : dt.getFullYear();
-  const getMonth = () => isUtc ? dt.getUTCMonth() : dt.getMonth();
-  const getDate = () => isUtc ? dt.getUTCDate() : dt.getDate();
-  const getDay = () => isUtc ? dt.getUTCDay() : dt.getDay();
-  const getHours = () => isUtc ? dt.getUTCHours() : dt.getHours();
-  const getMinutes = () => isUtc ? dt.getUTCMinutes() : dt.getMinutes();
-  const getSeconds = () => isUtc ? dt.getUTCSeconds() : dt.getSeconds();
-  const getMilliseconds = () => isUtc ? dt.getUTCMilliseconds() : dt.getMilliseconds();
-  const getTimezoneOffset = () => d?._loc ? Math.round(-d._loc._offset / 60) : (isUtc ? 0 : dt.getTimezoneOffset());
+  const getFullYear = () => localDt ? localDt.getUTCFullYear() : dt.getFullYear();
+  const getMonth = () => localDt ? localDt.getUTCMonth() : dt.getMonth();
+  const getDate = () => localDt ? localDt.getUTCDate() : dt.getDate();
+  const getDay = () => localDt ? localDt.getUTCDay() : dt.getDay();
+  const getHours = () => localDt ? localDt.getUTCHours() : dt.getHours();
+  const getMinutes = () => localDt ? localDt.getUTCMinutes() : dt.getMinutes();
+  const getSeconds = () => localDt ? localDt.getUTCSeconds() : dt.getSeconds();
+  const getMilliseconds = () => localDt ? localDt.getUTCMilliseconds() : dt.getMilliseconds();
+  const getTimezoneOffset = () => hasOff ? Math.round(-offSec / 60) : dt.getTimezoneOffset();
   return layout.replace(/2006|06|Monday|Mon|January|Jan|01|02|15|PM|pm|03|04|05|Z07:00|-07:00|-0700|MST|\\.(?:0+|9+)|1|2|3|4|5/g, t => {
     if (t.startsWith(".")) {
       const isZeroPad = t.includes("0");
@@ -1093,7 +1140,7 @@ export const HELPER_TIME_FMT = `var __timeFmt = __timeFmt || function(d, layout)
         const o = -getTimezoneOffset();
         return (o >= 0 ? "+" : "-") + pad(Math.floor(Math.abs(o) / 60)) + pad(Math.abs(o) % 60);
       }
-      case "MST": return d?._loc ? d._loc._name : (isUtc ? "UTC" : "LOCAL");
+      case "MST": return d?._loc ? d._loc._name : (hasOff && offSec === 0 ? "UTC" : "LOCAL");
       default: return t;
     }
   });
@@ -1126,18 +1173,20 @@ var __timeRound = __timeRound || function(t, d) {
 };
 var __timeAddDate = __timeAddDate || function(t, years, months, days) {
   var d = t._d;
-  var isUtc = t._offset === 0;
-  if (isUtc) {
-    var newDate = new Date(Date.UTC(
-      d.getUTCFullYear() + Number(years),
-      d.getUTCMonth() + Number(months),
-      d.getUTCDate() + Number(days),
-      d.getUTCHours(),
-      d.getUTCMinutes(),
-      d.getUTCSeconds(),
-      d.getUTCMilliseconds()
+  if (typeof t._offset === "number") {
+    var offSec = t._offset;
+    var localD = new Date(d.getTime() + offSec * 1000);
+    var newLocalD = new Date(Date.UTC(
+      localD.getUTCFullYear() + Number(years),
+      localD.getUTCMonth() + Number(months),
+      localD.getUTCDate() + Number(days),
+      localD.getUTCHours(),
+      localD.getUTCMinutes(),
+      localD.getUTCSeconds(),
+      localD.getUTCMilliseconds()
     ));
-    return { _d: newDate, _offset: 0, _loc: t._loc, _ns: t._ns };
+    var newDate = new Date(newLocalD.getTime() - offSec * 1000);
+    return { _d: newDate, _offset: t._offset, _loc: t._loc, _ns: t._ns };
   }
   var newDate = new Date(
     d.getFullYear() + Number(years),
@@ -1152,16 +1201,17 @@ var __timeAddDate = __timeAddDate || function(t, years, months, days) {
 };
 var __timeYearDay = __timeYearDay || function(t) {
   var d = t._d;
-  if (t._offset === 0) {
-    var start = new Date(Date.UTC(d.getUTCFullYear(), 0, 0));
-    return Math.floor((d.getTime() - start.getTime()) / 86400000);
+  if (typeof t._offset === "number") {
+    var localD = new Date(d.getTime() + t._offset * 1000);
+    var start = new Date(Date.UTC(localD.getUTCFullYear(), 0, 0));
+    return Math.floor((localD.getTime() - start.getTime()) / 86400000);
   }
   var start = new Date(d.getFullYear(), 0, 0);
   return Math.floor((d.getTime() - start.getTime()) / 86400000);
 };
 var __timeISOWeek = __timeISOWeek || function(t) {
-  var d = new Date(t._d.getTime());
-  if (t._offset === 0) {
+  if (typeof t._offset === "number") {
+    var d = new Date(t._d.getTime() + t._offset * 1000);
     var day = (d.getUTCDay() + 6) % 7;
     d.setUTCDate(d.getUTCDate() - day + 3);
     var year = d.getUTCFullYear();
@@ -1171,6 +1221,7 @@ var __timeISOWeek = __timeISOWeek || function(t) {
     var week = 1 + Math.round((d.getTime() - firstThu.getTime()) / 604800000);
     return [year, week];
   }
+  var d = new Date(t._d.getTime());
   var day = (d.getDay() + 6) % 7;
   d.setDate(d.getDate() - day + 3);
   var year = d.getFullYear();
@@ -1181,7 +1232,7 @@ var __timeISOWeek = __timeISOWeek || function(t) {
   return [year, week];
 };
 var __timeMarshalJSON = __timeMarshalJSON || function(t) {
-  var y = t._offset === 0 ? t._d.getUTCFullYear() : t._d.getFullYear();
+  var y = (typeof t._offset === "number") ? new Date(t._d.getTime() + t._offset * 1000).getUTCFullYear() : t._d.getFullYear();
   if (y < 0 || y > 9999) {
     return [new Uint8Array(0), typeof __error === "function" ? __error("Time.MarshalJSON: year outside of range [0,9999]") : new Error("Time.MarshalJSON: year outside of range [0,9999]")];
   }
@@ -1189,7 +1240,7 @@ var __timeMarshalJSON = __timeMarshalJSON || function(t) {
   return [new TextEncoder().encode(s), null];
 };
 var __timeMarshalText = __timeMarshalText || function(t) {
-  var y = t._offset === 0 ? t._d.getUTCFullYear() : t._d.getFullYear();
+  var y = (typeof t._offset === "number") ? new Date(t._d.getTime() + t._offset * 1000).getUTCFullYear() : t._d.getFullYear();
   if (y < 0 || y > 9999) {
     return [new Uint8Array(0), typeof __error === "function" ? __error("Time.MarshalText: year outside of range [0,9999]") : new Error("Time.MarshalText: year outside of range [0,9999]")];
   }
@@ -1454,15 +1505,15 @@ export const HELPER_DURATION = `var __durationString = __durationString || funct
 var __durationRound = __durationRound || function(d, m) {
   d = BigInt(d);
   m = BigInt(m);
-  if (m <= 0n) return d;
+  if (m <= 0n) return Number(d);
   var r = d % m;
   if (d < 0n) {
     r = -r;
-    if (r + r < m) return d + r;
-    return d - m + r;
+    if (r + r < m) return Number(d + r);
+    return Number(d - m + r);
   }
-  if (r + r < m) return d - r;
-  return d + m - r;
+  if (r + r < m) return Number(d - r);
+  return Number(d + m - r);
 };
 var __monthString = __monthString || function(m) {
   var names = ["", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -1478,20 +1529,20 @@ var __weekdayString = __weekdayString || function(w) {
 };
 var __timeParseDuration = __timeParseDuration || function(s) {
   var orig = String(s);
-  if (orig === "0") return [0n, null];
+  if (orig === "0") return [0, null];
   var str = orig.trim();
   var neg = false;
   if (str.startsWith("-")) { neg = true; str = str.slice(1); }
   else if (str.startsWith("+")) { str = str.slice(1); }
-  if (str === "0") return [0n, null];
-  if (str === "") return [0n, typeof __error === "function" ? __error('time: invalid duration ""') : new Error('time: invalid duration ""')];
+  if (str === "0") return [0, null];
+  if (str === "") return [0, typeof __error === "function" ? __error('time: invalid duration ""') : new Error('time: invalid duration ""')];
 
   var totalNs = 0n;
   var re = /^(\\d*(?:\\.\\d+)?)(ns|us|µs|\\u00b5s|\\u03bcs|ms|s|m|h)/;
   while (str.length > 0) {
     var m = re.exec(str);
     if (!m || m[1] === "" || m[1] === ".") {
-      return [0n, typeof __error === "function" ? __error('time: invalid duration "' + orig + '"') : new Error('time: invalid duration "' + orig + '"')];
+      return [0, typeof __error === "function" ? __error('time: invalid duration "' + orig + '"') : new Error('time: invalid duration "' + orig + '"')];
     }
     var numStr = m[1];
     var unitStr = m[2];
@@ -1516,7 +1567,7 @@ var __timeParseDuration = __timeParseDuration || function(s) {
     str = str.slice(m[0].length);
   }
   if (neg) totalNs = -totalNs;
-  return [totalNs, null];
+  return [Number(totalNs), null];
 };`;
 
 export const HELPER_SYNC = `var __sync_mutex = __sync_mutex || function() {
