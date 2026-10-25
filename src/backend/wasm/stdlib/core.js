@@ -1294,7 +1294,11 @@ export class StdlibCoreEmitter {
 			return;
 		}
 
-		this.pushInstruction({ op: "local.get", index: valTmp });
+		if (valW !== "externref") {
+			this.pushInstruction({ op: "ref.null", heapType: "extern" });
+		} else {
+			this.pushInstruction({ op: "local.get", index: valTmp });
+		}
 		this.releaseTemp(valTmp, valW);
 	}
 

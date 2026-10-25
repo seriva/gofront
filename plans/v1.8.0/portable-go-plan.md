@@ -1198,11 +1198,12 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
 
 ### Phase 3.4: `sync`, `testing` and remaining audit items
 
-- [ ] **Task 3.5 — `sync.Map`, `sync.Pool`, `OnceFunc`/`OnceValue`/`OnceValues`**
+- [x] **Task 3.5 — `sync.Map`, `sync.Pool`, `OnceFunc`/`OnceValue`/`OnceValues`**
   - Files: new `runtime/stdlib/sync/extra.go` (overlay)
   - Do: single-threaded implementations. `Pool.Get` returns `New()` when empty and `nil` when `New` is nil. `Map.Range` stops on `false`. `sync.Cond` reports the blocking exclusion.
   - Test: conformance fixture `sync/extra.go`.
   - Done when: fixture matches Go.
+  - Landed: implemented single-threaded `sync.Map`, `sync.Pool`, `OnceFunc`, `OnceValue`, and `OnceValues` in `runtime/stdlib/sync/extra.go`. Added blocking wait exclusions for `sync.Cond` and starts goroutine exclusion for `sync.WaitGroup.Go` in `src/typechecker/stdlib/excluded.js`. Added conformance fixture `test/conformance/sync/extra.go` matching Go 1.26 reference byte-for-byte. Updated stdlib coverage gaps (18 missing members and 7 exclusions unlocked) and regenerated stdlib docs.
 
 - [ ] **Task 3.6 — `testing` additions**
   - Files: `src/typechecker/stdlib/core.js`, `src/backend/js/stdlib/testing.js`, `src/cli-core.js` (test runner), `src/backend/wasm/boundary.js` (`*testing.T` routing)

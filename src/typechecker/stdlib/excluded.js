@@ -12,4 +12,11 @@ export const EXCLUDED_STDLIB_MEMBERS = new Map([
 	["time.NewTimer", "channels"],
 	["time.Ticker", "channels"],
 	["time.Timer.C", "channels"],
+	["sync.Cond", "blocking wait"],
+	["sync.Cond.Broadcast", "blocking wait"],
+	["sync.Cond.L", "blocking wait"],
+	["sync.Cond.Signal", "blocking wait"],
+	["sync.Cond.Wait", "blocking wait"],
+	["sync.NewCond", "blocking wait"],
+	["sync.WaitGroup.Go", "starts a goroutine"],
 ]);

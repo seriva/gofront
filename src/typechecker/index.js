@@ -548,7 +548,7 @@ export class TypeChecker {
 	// built-in the generated code calls (`Array.isArray`, `new Error`) is
 	// rejected instead.  Interfaces and method-less named types emit no class.
 	_checkGlobalTypeNamesPass(programs) {
-		if (this.target === "wasm") return;
+		if (this.target === "wasm" || this.isStdlib) return;
 		for (const p of programs) {
 			for (const d of p.decls) {
 				if (
