@@ -1157,12 +1157,13 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
   - Done when: fixture matches Go.
   - Landed: implemented `MultiReader`, `MultiWriter`, `TeeReader`, `NopCloser`, `ReadAtLeast`, `ReadFull`, `SectionReader`, `ErrUnexpectedEOF`, `ErrShortWrite`, `ErrShortBuffer`, `ErrNoProgress`, `Seek*` constants, and I/O interfaces in `runtime/stdlib/io/io.go`. Fixed overlay type resolution and qualification for emitter-backed interfaces, interface dispatcher parameter types, and named string scalar boxing in WASM. Verified with conformance test `test/conformance/io/io.go`.
 
-- [ ] **Task 3.3b — `unicode/utf8` byte API and `unicode` predicates**
+- [x] **Task 3.3b — `unicode/utf8` byte API and `unicode` predicates**
   - Files: new `runtime/stdlib/unicode/utf8/bytes.go`, `runtime/stdlib/unicode/tables.go` (general categories only)
   - Do: `EncodeRune`, `AppendRune`, `DecodeRune`, `DecodeLastRune`, `RuneCount`, `FullRune`, `Valid`; `unicode.IsNumber`, `IsSymbol`, `IsMark`, `IsTitle`, `SimpleFold`, `Is`/`In` over the general-category tables listed in the scope rule.
   - Also (review follow-up P16): `unicode.IsSpace` matches Go on both backends (`\t`, `\n`, `\v`, `\f`, `\r`, space, U+0085, U+00A0 and category Zs; not U+FEFF). Today JS uses `/\s/` and WASM tests only 9–13 and 32. `strings.Fields`, `bytes.Fields` and `FieldsSeq` use the same predicate.
   - Test: conformance fixtures `utf8/bytes.go`, `unicode/categories.go` (including `strings.Fields("a\u0085b\vc\u00a0d\ufeffe")`; needs Task 0.21).
   - Done when: fixtures match Go and the table file is under 40 KB of source.
+  - Landed: implemented `unicode/utf8` byte slice APIs (`EncodeRune`, `AppendRune`, `DecodeRune`, `DecodeLastRune`, `RuneCount`, `FullRune`, `Valid`, `RuneStart`, `RuneSelf`) in `runtime/stdlib/unicode/utf8/bytes.go`. Added general-category tables in `runtime/stdlib/unicode/tables.go` (compact <40 KB source) and `unicode.Is`, `In`, `IsOneOf`, `IsNumber`, `IsSymbol`, `IsMark`, `IsTitle`, `To`, `ToTitle`, `SimpleFold` in `runtime/stdlib/unicode/unicode.go`. Aligned `unicode.IsSpace`, `strings.Fields`, and `bytes.Fields` on both backends to match Go's whitespace predicate per P16. Verified with conformance fixtures `test/conformance/utf8/bytes.go` and `test/conformance/unicode/categories.go`.
 
 - [ ] **Task 3.3c — `strconv.NumError`, `ErrRange`, `ErrSyntax`, quoting, and `errors.ErrUnsupported` usage**
   - Files: `src/backend/js/stdlib/strconv.js`, `src/backend/wasm/stdlib/core.js`, new `runtime/stdlib/strconv/quote.go`
