@@ -211,11 +211,20 @@ const TIMER_PKG = `//go:build gofront
 package timer
 
 //gofront:intrinsic deadline_timer
-func armDeadline(ns int64, fire func())
+func armDeadline(key any, ns int64, fire func())
+
+//gofront:intrinsic deadline_stop
+func stopDeadline(key any)
 
 // After arms fire after ms milliseconds (JS); in WASM it returns at once.
 func After(ms int, fire func()) {
-	armDeadline(int64(ms)*1000000, fire)
+	armDeadline(&ms, int64(ms)*1000000, fire)
+}
+
+// AfterStoppable is After plus a func that cancels the pending timer.
+func AfterStoppable(ms int, fire func()) func() {
+	armDeadline(&ms, int64(ms)*1000000, fire)
+	return func() { stopDeadline(&ms) }
 }
 `;
 
@@ -244,6 +253,35 @@ func Run() string {
 		await new Promise((r) => setTimeout(r, 20));
 		assertEqual(js.lines.join("\n"), "armed\nfired");
 		assertEqual(wasm.lines.join("\n"), "armed");
+	});
+});
+
+test("the deadline_timer stop func clears the JS timer", async () => {
+	const project = (target) => ({
+		"lib/lib.go": `//gofront:target ${target}
+package lib
+
+import "timer"
+
+func Run() string {
+	stop := timer.AfterStoppable(1, func() { println("fired") })
+	stop()
+	return "stopped"
+}
+`,
+		"main.go": `package main\n\nimport "./lib"\n\nfunc main() { println(lib.Run()) }\n`,
+	});
+	await withTempDir({ "timer/timer.go": TIMER_PKG }, async (stdlib) => {
+		const js = await compileHybridProject(project("both"), {
+			stdlibRoot: stdlib,
+		});
+		const wasm = await compileHybridProject(project("wasm"), {
+			stdlibRoot: stdlib,
+		});
+		assert(wasm.wasm instanceof Uint8Array, "expected linked wasm");
+		await new Promise((r) => setTimeout(r, 20));
+		assertEqual(js.lines.join("\n"), "stopped");
+		assertEqual(wasm.lines.join("\n"), "stopped");
 	});
 });
 

@@ -14,7 +14,10 @@ import (
 var DeadlineExceeded = errors.New("context deadline exceeded")
 
 //gofront:intrinsic deadline_timer
-func armDeadline(ns int64, fire func())
+func armDeadline(key any, ns int64, fire func())
+
+//gofront:intrinsic deadline_stop
+func stopDeadline(key any)
 
 // A timerCtx carries a timer and a deadline.
 type timerCtx struct {
@@ -78,13 +81,16 @@ func WithDeadlineCause(parent Context, d time.Time, cause error) (Context, Cance
 		cc.cancel(true, DeadlineExceeded, effCause)
 		return c, func() { cc.cancel(true, Canceled, nil) }
 	}
-	armDeadline(int64(dur), func() {
+	armDeadline(c, int64(dur), func() {
 		effCause := cause
 		if effCause == nil {
 			effCause = DeadlineExceeded
 		}
 		cc.cancel(true, DeadlineExceeded, effCause)
 	})
+	// Any cancellation (cancel func, parent, or the timer itself) stops the
+	// timer, so a cancelled long deadline does not keep the host alive.
+	AfterFunc(cc, func() { stopDeadline(c) })
 	return c, func() { cc.cancel(true, Canceled, nil) }
 }
 
