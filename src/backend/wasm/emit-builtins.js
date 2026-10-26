@@ -1173,6 +1173,9 @@ export class BuiltinsEmitter {
 				func.expr,
 				args,
 				targetWasmType,
+				recvTypeName === "simd.Mask32x4" ||
+					recvType?.underlying?.simd === "Mask32x4" ||
+					recvType?.simd === "Mask32x4",
 			);
 		}
 		if (

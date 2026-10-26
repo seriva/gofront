@@ -180,6 +180,34 @@ export class MapsEmitter {
 			this.pushInstruction("i32.mul");
 			return;
 		}
+		if (wType === "v128") {
+			// Lane-wise like a [4]float32 key: h = 17; h = h*31 + hash(lane).
+			const isMask = this._isSimdMaskType(keyGoType);
+			const laneType = {
+				kind: "basic",
+				name: isMask ? "int32" : "float32",
+			};
+			const h = this.allocLocal(null, "i32");
+			this.pushInstruction({ op: "i32.const", value: 17 });
+			this.pushInstruction({ op: "local.set", index: h });
+			for (let lane = 0; lane < 4; lane++) {
+				const lt = this.allocLocal(null, isMask ? "i32" : "f32");
+				this.pushInstruction({ op: "local.get", index: keyLocal });
+				this.pushInstruction({
+					op: isMask ? "i32x4.extract_lane" : "f32x4.extract_lane",
+					lane,
+				});
+				this.pushInstruction({ op: "local.set", index: lt });
+				this.pushInstruction({ op: "local.get", index: h });
+				this.pushInstruction({ op: "i32.const", value: 31 });
+				this.pushInstruction("i32.mul");
+				this.emitKeyHash(lt, laneType);
+				this.pushInstruction("i32.add");
+				this.pushInstruction({ op: "local.set", index: h });
+			}
+			this.pushInstruction({ op: "local.get", index: h });
+			return;
+		}
 		// Floats: `x + 0.0` folds -0 onto +0 (they are equal keys in Go) and
 		// NaN elements never match (f32.eq/f64.eq returns false in key comparison).
 		if (wType === "f32") {
@@ -348,6 +376,12 @@ export class MapsEmitter {
 			this.pushInstruction({ op: "local.get", index: k1Local });
 			this.pushInstruction({ op: "local.get", index: k2Local });
 			this.pushInstruction("f64.eq");
+			return;
+		}
+		if (wType === "v128") {
+			this.pushInstruction({ op: "local.get", index: k1Local });
+			this.pushInstruction({ op: "local.get", index: k2Local });
+			this._emitSimdEq(keyGoType);
 			return;
 		}
 		const structInfo = this._structInfoForGoType(keyGoType);
