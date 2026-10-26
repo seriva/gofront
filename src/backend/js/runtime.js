@@ -313,8 +313,52 @@ export const HELPER_IFACE_BOX = `var __ifv = __ifv || function(x, ptrFields) {
   }
   return c;
 };
+var __buffer_proto = __buffer_proto || {
+  Write(d) {
+    this._lastOp = 0;
+    for (let i = 0; i < d.length; i++) this._buf.push(d[i]);
+    return [d.length, null];
+  },
+  WriteString(s) {
+    this._lastOp = 0;
+    const bytes = new TextEncoder().encode(s);
+    for (let i = 0; i < bytes.length; i++) this._buf.push(bytes[i]);
+    return [bytes.length, null];
+  },
+  Read(p) {
+    if (!this._buf || this._buf.length === 0) return [0, typeof __io_eof !== "undefined" ? __io_eof : "EOF"];
+    const n = Math.min(p.length, this._buf.length);
+    for (let i = 0; i < n; i++) p[i] = this._buf.shift();
+    if (n > 0) { this._lastOp = 1; this._lastByte = p[n - 1]; } else { this._lastOp = 0; }
+    return [n, null];
+  },
+  String() {
+    return new TextDecoder().decode(new Uint8Array(this._buf));
+  },
+  Reset() {
+    this._buf = [];
+  }
+};
+var __builder_proto = __builder_proto || {
+  Write(d) {
+    this._buf += new TextDecoder().decode(new Uint8Array(d));
+    return [d.length, null];
+  },
+  WriteString(s) {
+    this._buf += s;
+    return [new TextEncoder().encode(s).length, null];
+  },
+  String() {
+    return this._buf;
+  },
+  Reset() {
+    this._buf = "";
+  }
+};
 var __ifp = __ifp || function(x, ptrFields, seen) {
   if (x === null || typeof x !== "object") return x;
+  if (Array.isArray(x._buf) && typeof x.Write !== "function") Object.assign(x, __buffer_proto);
+  else if (typeof x._buf === "string" && typeof x.WriteString !== "function") Object.assign(x, __builder_proto);
   if (x.__p !== true && Object.isExtensible(x))
     Object.defineProperty(x, "__p", { value: true, configurable: true, writable: true });
   if (Array.isArray(ptrFields)) {
@@ -2206,12 +2250,31 @@ var __base64_raw_url = __base64_raw_url || __base64_make("ABCDEFGHIJKLMNOPQRSTUV
 
 export const HELPER_JSON = `var __json_esc = __json_esc || function(s) {
   if (typeof s !== "string") s = String(s);
-  return JSON.stringify(s)
-    .replace(/[<>&]/g, function(c) {
-      return c === "<" ? "\\\\u003c" : (c === ">" ? "\\\\u003e" : "\\\\u0026");
-    })
-    .replace(/\\u2028/g, "\\\\u2028")
-    .replace(/\\u2029/g, "\\\\u2029");
+  var out = JSON.stringify(s);
+  var escHtml = typeof OptEscapeHTML$$internal$jsonrt === "undefined" || OptEscapeHTML$$internal$jsonrt;
+  if (escHtml) {
+    out = out
+      .replace(/[<>&]/g, function(c) {
+        return c === "<" ? "\\\\u003c" : (c === ">" ? "\\\\u003e" : "\\\\u0026");
+      })
+      .replace(/\\u2028/g, "\\\\u2028")
+      .replace(/\\u2029/g, "\\\\u2029");
+  }
+  return out;
+};
+var __json_check_unknown = __json_check_unknown || function(parsed, knownKeys) {
+  var disallow = typeof OptDisallowUnknownFields$$internal$jsonrt !== "undefined" && OptDisallowUnknownFields$$internal$jsonrt;
+  if (!disallow || !parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  var lowerSet = new Set(knownKeys.map(function(k) { return k.toLowerCase(); }));
+  for (var k in parsed) {
+    if (Object.prototype.hasOwnProperty.call(parsed, k) && !k.startsWith("__")) {
+      if (!lowerSet.has(k.toLowerCase())) {
+        var msg = "json: unknown field " + JSON.stringify(k);
+        return typeof __error === "function" ? __error(msg) : new Error(msg);
+      }
+    }
+  }
+  return null;
 };
 var __json_err = __json_err || function(msg, valKind, targetType) {
   var fullMsg = "json: " + msg;
@@ -2648,11 +2711,23 @@ var __json_enc_any = __json_enc_any || function(v) {
 };
 var __json_dec_any = __json_dec_any || function(parsed) {
   if (parsed === null) return null;
+  var useNum = typeof OptUseNumber$$internal$jsonrt !== "undefined" && OptUseNumber$$internal$jsonrt;
   if (typeof parsed === "string") {
-    if (parsed.endsWith("__bigint")) return Number(parsed.slice(0, -8));
+    if (parsed.endsWith("__bigint")) {
+      var rawBig = parsed.slice(0, -8);
+      if (useNum) return typeof Number$$internal$jsonrt === "function" ? new Number$$internal$jsonrt(rawBig) : rawBig;
+      return Number(rawBig);
+    }
     return parsed;
   }
-  if (typeof parsed === "number" || typeof parsed === "boolean") return parsed;
+  if (typeof parsed === "number") {
+    if (useNum) {
+      var rawNum = String(parsed);
+      return typeof Number$$internal$jsonrt === "function" ? new Number$$internal$jsonrt(rawNum) : rawNum;
+    }
+    return parsed;
+  }
+  if (typeof parsed === "boolean") return parsed;
   if (Array.isArray(parsed)) {
     var outSlice = [];
     for (var i = 0; i < parsed.length; i++) outSlice.push(__json_dec_any(parsed[i]));
@@ -2822,6 +2897,47 @@ var __json_unmarshal = __json_unmarshal || function(dec, data, target, targetTyp
   var err = dec(parsed, dest, isBox ? target : null, data, rootRaw.raw);
   if (err) return err.__userErr || err;
   return null;
+};
+var __json_encoder_encode = __json_encoder_encode || function(enc, codec, v) {
+  var e = enc?.value ?? enc;
+  if (e.err != null) return e.err;
+  OptEscapeHTML$$internal$jsonrt = e.escapeHTML;
+  var jsonStr;
+  try {
+    jsonStr = codec(v);
+  } finally {
+    OptEscapeHTML$$internal$jsonrt = true;
+  }
+  if (e.indent !== "" || e.prefix !== "") {
+    var indented = __json_indent(jsonStr, e.prefix, e.indent);
+    if (indented != null) jsonStr = indented;
+  }
+  var bytes = new TextEncoder().encode(jsonStr + "\\n");
+  var res = e.w.Write(bytes);
+  var err = Array.isArray(res) ? res[1] : null;
+  if (err != null) {
+    e.err = err;
+    return err;
+  }
+  return null;
+};
+var __json_decoder_decode = __json_decoder_decode || function(dec, decFn, target, targetTypeName) {
+  var d = dec?.value ?? dec;
+  var res = ScanNext$$internal$jsonrt(d.r);
+  var data = res[0], skipped = res[1], err = res[2];
+  d.offset += skipped;
+  if (err != null) return err;
+  d.offset += data.length;
+  OptUseNumber$$internal$jsonrt = d.useNumber;
+  OptDisallowUnknownFields$$internal$jsonrt = d.disallowUnknownFields;
+  var uerr;
+  try {
+    uerr = __json_unmarshal(decFn, data, target, targetTypeName);
+  } finally {
+    OptUseNumber$$internal$jsonrt = false;
+    OptDisallowUnknownFields$$internal$jsonrt = false;
+  }
+  return uerr;
 };`;
 
 export const HELPER_SIMD = `var __simd_f32x4 = __simd_f32x4 || function(a, b, c, d) {

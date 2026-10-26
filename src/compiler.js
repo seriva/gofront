@@ -756,9 +756,16 @@ function lowerStdlibRefs(node) {
 		node.name = node._stdName;
 		delete node._stdName;
 	}
-	// `json.Marshal` calls the package's generated codec entry point (see
-	// lower/json-codecs.js).
-	if (node._jsonGen && node.kind === "SelectorExpr") {
+	if (node.kind === "CallExpr" && node.func?._jsonStream) {
+		const entry = node.func._jsonGen;
+		node.args.unshift(node.func.expr);
+		delete node.func.expr;
+		delete node.func.field;
+		delete node.func._jsonStream;
+		delete node.func._jsonGen;
+		node.func.kind = "Ident";
+		node.func.name = entry;
+	} else if (node._jsonGen && node.kind === "SelectorExpr") {
 		delete node.expr;
 		delete node.field;
 		node.kind = "Ident";

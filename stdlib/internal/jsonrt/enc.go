@@ -64,7 +64,7 @@ type Enc struct {
 
 // NewEnc returns an encoder that escapes <, > and & like json.Marshal.
 func NewEnc() *Enc {
-	return &Enc{EscapeHTML: true}
+	return &Enc{EscapeHTML: OptEscapeHTML}
 }
 
 // Result returns the encoded bytes, or the first error.
