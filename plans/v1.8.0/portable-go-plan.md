@@ -1439,14 +1439,14 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
 - [ ] **Task 6.2** — `F32x4` as a value type: boundary classification (removes the exported-API build blocker), `==`/`!=`, map keys, `fmt` on both backends (needs Task 3.1c for `%#v`), generic type arguments (array copies come from Task 0.8).
 - [ ] **Task 6.3** — Encoder and WAT support for comparisons, `bitselect`, `any_true`/`all_true`, `bitmask`, and the `ceil`/`floor`/`trunc`/`nearest` opcodes. Include multi-byte LEB128 sub-opcode tests and Binaryen validation of optimized and unoptimized modules.
 - [ ] **Task 6.4** — `Mask32x4` and the new `F32x4` methods (§10.2) in the checker, the WASM emitter and the JS fallback helpers.
-- [ ] **Task 6.5** — Go-source overlay with `Vec3x4`, `AABB4`, `Ray4`, constructors, `SelectVec3x4` and `IntersectRayAABB4`.
+- [x] **Task 6.5** — ~~Go-source overlay with `Vec3x4`, `AABB4`, `Ray4`, constructors, `SelectVec3x4` and `IntersectRayAABB4`.~~ **Dropped from this plan:** these SoA types belong in the `simplefps` project, not GoFront. `gofront/simd` ships only `F32x4`/`Mask32x4` and their intrinsics. Everything in this document that mentions `Vec3x4`, `AABB4`, `Ray4`, `SelectVec3x4` or `IntersectRayAABB4` (§10, Task 6.6/6.9 parts, test lists) is out of scope for v1.8.0.
 
 ### Phase 6.2: Memory helpers, boundary transport and benchmarks
 
-- [ ] **Task 6.6** — Memory helpers: `LoadVec3x4`/`StoreVec3x4`, `LoadAoS4`/`StoreAoS4` (`i8x16.shuffle` transpose), `LoadF32x4Slice`/`StoreF32x4Slice`, `Pad4`.
+- [ ] **Task 6.6** — Memory helpers: ~~`LoadVec3x4`/`StoreVec3x4`, `LoadAoS4`/`StoreAoS4`~~ (dropped with Task 6.5), `LoadF32x4Slice`/`StoreF32x4Slice`, `Pad4`.
 - [ ] **Task 6.7** — Boundary transport for `F32x4`, `Mask32x4` and `[]F32x4` (§10.5). Update the marshalling table in `hybrid-wasm.md`.
 - [ ] **Task 6.8** — Check allocations in release builds. If `heap2local` leaves allocations in the SoA hot loop, add scalar replacement for non-escaping `gofront/simd` structs.
-- [ ] **Task 6.9** — Particle kinematics benchmark (65,536 particles) and the `IntersectRayAABB4` raycast variant in `test/e2e/perf/`. Adopt SoA SIMD in the `example/hybrid` particle simulation.
+- [ ] **Task 6.9** — Particle kinematics benchmark (65,536 particles) in `test/e2e/perf/` (the `IntersectRayAABB4` raycast variant is dropped with Task 6.5). Adopt SoA SIMD in the `example/hybrid` particle simulation.
 - [ ] **Task 6.10** — Apply the promotion rule (§10.6) and record the numbers and the decision in this document. Update `hybrid-wasm.md` and `go-compatibility.md` (stable or experimental, boundary rules, the zero-copy note).
 
 Each Phase 6 task follows the same Files/Test/Done-when discipline: files are `src/typechecker/stdlib/simd.js`, `src/backend/wasm/stdlib/simd.js`, `src/backend/js/stdlib/simd.js`, `src/backend/wasm/encode.js`, `src/backend/wasm/wat.js`, `src/backend/wasm/boundary.js` and `runtime/stdlib/gofront/simd/`; tests go in `test/unit/wasm/simd.test.js`, `encode.test.js`, `wat.test.js` and `boundary.test.js`; every operation is checked against a scalar `[4]float32` reference on both backends.
