@@ -1369,11 +1369,12 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
   - Done when: fixtures match Go.
   - Landed: `encoding/csv` `Reader` and `Writer` in Go source (the standard library's own code), with `ParseError` and the error values. The reader converts each field from the byte buffer on its own, because GoFront strings index UTF-16 units and Go's whole-buffer slicing would split non-ASCII fields. Fixed JS type assertions to a Go-source package's struct pointer (`err.(*csv.ParseError)` was always true) and WASM interface dispatch, which treated a same-named method with other parameter or result types (`csv.Writer.Write(record []string) error`) as an `io.Writer`. Conformance fixtures `csv/reader.go` (every case from Go's `reader_test.go` except the invalid-UTF-8 one, with field and error positions) and `csv/writer.go` match Go 1.26 on JS and WASM.
 
-- [ ] **Task 4.10 — `log` (after Task 3.1e)**
-  - Files: new `runtime/stdlib/log/log.go`
+- [x] **Task 4.10 — `log` (after Task 3.1e)**
+  - Files: new `runtime/stdlib/log/log.go`, `src/typechecker/types.js` (`exit` intrinsic)
   - Do: the member list in [§7](#7-new-pure-packages-go-source). Default output `os.Stderr`; `Fatal*` calls `os.Exit(1)` in JS and panics in WASM; `Lshortfile`/`Llongfile` print `???:0`.
   - Test: conformance fixture `log/log.go` with `SetFlags(0)` and a `bytes.Buffer` output; unit test for `Fatal` on both backends.
   - Done when: fixture matches Go.
+  - Landed: `log` in Go source with the full member list. `Fatal*` writes, then calls the new `exit` intrinsic (`process.exit` where a process exists, a no-op in WASM) and panics with the message, so JS exits and WASM panics. `Lshortfile` and `Llongfile` print `???:0`. The package-level functions reach the standard logger through a small accessor because a `both` package may not call a pointer-receiver method on a package variable. Conformance fixture `log/log.go` writes to a small `io.Writer` of its own instead of a `bytes.Buffer`, which has no methods on JS once converted to an interface (recorded in `plans/follow-ups.md`); unit tests cover `Fatal` on both backends and the `???:0` output.
 
 - [ ] **Task 4.11 — `math/rand/v2`**
   - Files: new `runtime/stdlib/math/rand/v2/*.go`
