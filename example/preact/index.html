@@ -518,6 +518,7 @@
 
   <script>
     window.sleep = ms => new Promise(r => setTimeout(r, ms));
+    window.newAbortController = () => new AbortController();
   </script>
   <script type="module">
     import './vendor.js';

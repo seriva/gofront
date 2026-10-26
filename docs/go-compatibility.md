@@ -25,10 +25,41 @@ These features are intentional additions for the JavaScript platform:
 
 | Feature | Reason | Prospect |
 |---|---|---|
-| `goto` | No clean JS or WASM translation (neither backend has unstructured control flow). Rare in idiomatic Go. | Not planned. Reported in every target as `goto is not supported; restructure with labeled break/continue`. |
+| `goto` | Neither backend has unstructured control flow; both would require a loop-plus-state-machine lowering. Rare in idiomatic Go. | Not planned. Reported in every target as `goto is not supported; restructure with labeled break/continue`. |
+| `//go:embed` and `embed.FS` | Asset embedding requires resolver and asset pipeline design outside this release. | Deferred. |
 | Goroutines / channels / `select` | Go's concurrency model has no JS equivalent. A userland scheduler defeats the "no runtime" goal. | Out of scope. |
-| `unsafe`, `reflect`, `cgo` | Require memory model or runtime type metadata that JS cannot provide. | Out of scope. |
+| `unsafe`, `reflect`, `cgo` | Require memory model or runtime type metadata that JS cannot provide. | Out of scope. `encoding/json` is supported through compile-time specialization without runtime reflection. |
 | `time.Sleep` in `wasm`/`both` packages | Go's `time.Sleep` blocks OS threads; in GoFront `time.Sleep` is an async Promise helper for the single-threaded JS event loop. Synchronous WASM cannot block. | Supported in `js` packages via `await time.Sleep(...)`. |
+
+### Scope rule and standard library boundaries
+
+A Go package or standard library member is **in scope** when it can be implemented as ordinary compiled code over values GoFront already supports, without a runtime scheduler, runtime type reflection metadata, or host operating-system services beyond what the browser or target platform provides (clock, random numbers, console).
+
+| Category | Policy | Examples |
+|---|---|---|
+| **In scope: pure** | Supported on `js`, `wasm`, and `both` packages | `encoding/csv`, `container/heap`, `hash/crc32`, `cmp`, `iter`, `unicode/utf16`, `sync/atomic`, `math/cmplx` |
+| **In scope: JS-only by design** | Supported in `js` packages; targeted diagnostic in `wasm` | `regexp`, `time.Sleep`, DOM APIs, host event loop |
+| **Excluded: runtime** | Targeted diagnostic in all targets | Goroutines, channels, `select`, `reflect`, `unsafe`, `runtime`, `weak`, `unique` |
+| **Excluded: host** | Targeted diagnostic in all targets | `net/http`, `net`, `os/exec`, file I/O in `os`, `syscall` |
+| **Excluded: needs reflection** | Targeted diagnostic in all targets | `text/template`, `html/template`, `encoding/xml`, `encoding/gob`, `flag` |
+| **Excluded: deferred (pure, large)** | Pure code inside the boundary whose size or surface does not pay for itself in frontend targets; targeted diagnostic | `math/big`, `compress/*`, `archive/*`, `image/*`, `crypto/{aes,cipher,rsa,ecdsa,ed25519,x509,tls,elliptic}`, `encoding/{asn1,pem,ascii85}`, `text/{tabwriter,scanner}`, `go/*`, `debug/*`, `hash/{crc64,maphash}`, script and category tables in `unicode`, `//go:embed` |
+
+### String semantics (both backends)
+
+GoFront strings are JavaScript strings on both backends (`externref` in WebAssembly; string length, indexing, and range operate over UTF-16 code units):
+
+| Construct | GoFront (JS and WASM) | Go |
+|---|---|---|
+| `len("héllo")` | `5` (UTF-16 code units) | `6` (UTF-8 bytes) |
+| `"héllo"[1]` | `0xE9` (code unit) | `0xC3` (byte) |
+| `for i := range "héllo"` | `i` counts runes `0, 1, 2, 3, 4` | `i` is byte offset `0, 1, 3, 4, 5` |
+| `[]byte("héllo")`, `string(b)` | UTF-8, 6 bytes | UTF-8, 6 bytes |
+| `[]rune(s)`, `string(r)`, `utf8.*InString` | Code points, as Go | Code points |
+
+Consequences for portable code:
+- **Byte operations**: Standard library packages that parse formats (`net/url`, `encoding/csv`, `encoding/json`, `bufio`, `hash/*`, `crypto/*`) operate on `[]byte(s)` rather than string indexing so that byte offsets and multi-byte UTF-8 sequences are exact.
+- **Escape sequences**: `\xNN` and octal escapes decode to the code point U+00NN (`len("\x00")` is 1 as in Go, but `"\xc3"` is the code point `Ã`, so `[]byte("\xc3")` yields the two UTF-8 bytes `0xc3 0x83`; use `[]byte{0xc3}` when raw byte literals are required).
+- **Format offsets**: Byte offsets reported by `json.SyntaxError.Offset` and `csv.ParseError.Column` count UTF-8 input bytes, matching Go.
 
 ### Semantic differences
 
@@ -49,8 +80,11 @@ divide-by-zero panics) — see the [hybrid guide](hybrid-wasm.md#strict-numeric-
 | Fixed-size arrays (`[n]T`) | Compile-time enforcement (bounds, `append` rejected, size matching); copied on assignment; plain JS arrays at runtime | Fixed at compile time, value-type copy semantics | Runtime bounds enforcement adds overhead; compile-time checks catch most errors. |
 | `nil` | Maps to `null`; `== nil` also matches `undefined` | Typed nil (distinct per type) | JS has no typed nil concept; JS interop values are often `undefined`. |
 | `rune` / `byte` | Aliases of `int32` / `uint8`, all mapped to `number` | Aliases of `int32` / `uint8` | Type-level behaviour matches Go; at runtime every number is a float64. |
-| `range` over string | Rune integers via `.codePointAt()` | Runes (UTF-8 code points) | Close match — values are code points, but indices are sequential rune positions (0, 1, 2, …), not byte offsets. |
-| `len()` on strings | JS `.length` (UTF-16 code units) | Byte count (UTF-8) | Matching Go would require `TextEncoder` on every call. Use `utf8.RuneCountInString` for character counts. |
+| Strings and UTF-16 | JavaScript UTF-16 code units for string length, indexing, and range. Byte conversions (`[]byte(s)`) and standard library parsers operate on exact UTF-8 bytes | Byte count, byte index, rune range | See [String semantics](#string-semantics-both-backends) above. |
+| Runtime panics in `both` packages | In `both` and `wasm` packages, out-of-range indexing panics with `index out of range [i] with length n`, writes to a nil map panic with `assignment to entry in nil map`, and nil struct pointer reads panic with `invalid memory address or nil pointer dereference`. Bounds checks are elided for provably in-bounds loops. In `js` packages, standard JavaScript behavior applies | Same runtime panics | Matches Go runtime panic behavior in `both` and `wasm` packages without slowing hot paths. |
+| `maps.Keys` / `maps.Values` | Return `iter.Seq` iterators, matching Go 1.23, instead of slices. Range over them directly or collect into a slice with `slices.Collect(maps.Keys(m))` | Return `iter.Seq` | Matches Go 1.23 iterator semantics. |
+| `context.Context` without `Done()` | `Context` interface provides `Deadline()`, `Err()`, and `Value()`. GoFront does not support channels, so `ctx.Done()` is not available; check `ctx.Err() != nil` or use `context.AfterFunc`. In `js` packages, `context.AfterFunc` bridges to `AbortController` to cancel in-flight `fetch` calls. In `wasm` packages, deadlines are checked cooperatively on `ctx.Err()` | `ctx.Done()` returns `<-chan struct{}` | Channels are out of scope (no runtime scheduler). `AfterFunc` and `Err()` provide cancellation and deadline support without channels. |
+| `fmt` `%p` verb | Formats pointers as `0x<hex>` (or `0x0` for nil) on both backends | Formats memory address | WASM pointers and JS boxed pointer references print their unique hex identity. |
 | `error` type | Interface `{ Error() string }` with `__error` runtime objects | Interface `{ Error() string }` | Close match. Custom error types, `errors.Is`/`Unwrap`, `%w` wrapping all work. `toString()` added for JS string context compat. |
 | `errors.Is` | Walks the `Unwrap` chain comparing by identity **or by message** for `errors.New`/`fmt.Errorf` values (both backends) | Identity (or `Is` method) only | Two distinct `errors.New("x")` sentinels compare equal. Use distinct messages or a custom error type when identity matters. |
 | `any == any` with numbers | `js` packages compare by JS value: `any(3) == any(3.0)` is `true`; `wasm` packages compare dynamic type first, so it is `false` | `false` (different dynamic types) | JS has a single `number` type. Compare after a type assertion in `both` packages to get identical results. |

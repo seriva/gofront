@@ -2174,26 +2174,9 @@ ${HELPER_DURATION}
 ${HELPER_SHA256}
 ${HELPER_HEX}
 ${HELPER_BASE64}
-function ${P}stdlib(stringTable, io) {
-	let parts = [];
-	let cutBefore = "", cutAfter = "";
-	let strconvErr = null, strconvErrKind = 0;
-	let decodeSize = 0;
-	let replacerTarget = "", replacerPairs = [];
-	let splitDir = "", splitFile = "";
-	let joinParts = [];
-	let matchHasErr = 0;
-	let trimStart = 0, trimEnd = 0;
+function ${P}stdlib_fmt(stringTable, io) {
 	let sscanTokens = [];
 	let sscanHasErr = 0, sscanErrMsg = "";
-	let timeParseErr = null, timeParseOffset = 0, timeParseDurationErr = null, timeParseSubNs = 0;
-	let rawBytes = new Uint8Array(0);
-	let rawPos = 0;
-	let hexErr = null;
-	let base64Err = null;
-	let customBase64Encodings = [];
-	let bitsRem32 = 0;
-	let bitsRem64 = 0n;
 	return {
 		"fmt_sscan_init": (s, mode) => {
 			sscanHasErr = 0;
@@ -2315,6 +2298,15 @@ function ${P}stdlib(stringTable, io) {
 		"fmt_print_raw": (s) => { io.printf(s ?? ""); },
 		"fmt_printf": (f) => { io.printf(__sprintf(f ?? "", ...io.take())); },
 		"fmt_format_v": (v) => { const res = __sprintf("%v", v); io.take(); return res; },
+	};
+}
+function ${P}stdlib_str(stringTable, io) {
+	let parts = [];
+	let cutBefore = "", cutAfter = "";
+	let replacerTarget = "", replacerPairs = [];
+	let strconvErr = null, strconvErrKind = 0;
+	let decodeSize = 0;
+	return {
 		"str_trim": (s, c) => ${P}trim(s ?? "", c ?? "", true, true),
 		"str_trim_left": (s, c) => ${P}trim(s ?? "", c ?? "", true, false),
 		"str_trim_right": (s, c) => ${P}trim(s ?? "", c ?? "", false, true),
@@ -2555,6 +2547,22 @@ function ${P}stdlib(stringTable, io) {
 		"unicode_is_graphic": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && !/\\p{Cc}/u.test(c)) ? 1 : 0; },
 		"unicode_to_upper": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return c ? (c.toUpperCase().codePointAt(0) ?? r) : r; },
 		"unicode_to_lower": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return c ? (c.toLowerCase().codePointAt(0) ?? r) : r; },
+	};
+}
+function ${P}stdlib_sys(stringTable, io) {
+	let splitDir = "", splitFile = "";
+	let joinParts = [];
+	let matchHasErr = 0;
+	let trimStart = 0, trimEnd = 0;
+	let timeParseErr = null, timeParseOffset = 0, timeParseDurationErr = null, timeParseSubNs = 0;
+	let rawBytes = new Uint8Array(0);
+	let rawPos = 0;
+	let hexErr = null;
+	let base64Err = null;
+	let customBase64Encodings = [];
+	let bitsRem32 = 0;
+	let bitsRem64 = 0n;
+	return {
 		// html
 		"html_escape": (s) => (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&#34;").replace(/'/g, "&#39;"),
 		"html_unescape": (s) => (s ?? "").replace(/&(?:quot|apos|#39|#34|gt|lt|amp|#(?:[0-9]+|[xX][0-9a-fA-F]+));/g, (m) => {
@@ -2812,6 +2820,14 @@ function ${P}stdlib(stringTable, io) {
 			return z % yB;
 		},
 	};
+}
+function ${P}stdlib(stringTable, io) {
+	return Object.assign(
+		{},
+		${P}stdlib_fmt(stringTable, io),
+		${P}stdlib_str(stringTable, io),
+		${P}stdlib_sys(stringTable, io),
+	);
 }
 function ${P}trim(s, cutset, left, right) {
 	const cs = new Set(Array.from(cutset));
