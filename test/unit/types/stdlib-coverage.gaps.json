@@ -408,13 +408,7 @@
 		]
 	},
 	"wasm": {
-		"encoding/json": [
-			"Marshal",
-			"MarshalIndent",
-			"RawMessage",
-			"Unmarshal",
-			"Valid"
-		],
+		"encoding/json": ["MarshalIndent"],
 		"io": [
 			"LimitedReader",
 			"LimitedReader.N",

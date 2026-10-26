@@ -7,6 +7,7 @@ import { fmtTypeDesc, fmtWantsTypes } from "../../js/fmt-types.js";
 import {
 	ERROR_STRUCT,
 	getMapKeyValTypes,
+	getSliceElemType,
 	goTypeKey,
 	isAnyType,
 	isArrayType,
@@ -662,7 +663,7 @@ export class StdlibCoreEmitter {
 		nextSeen,
 		allowNil = false,
 	) {
-		const elemGoType = goType.elem ?? goType.underlying?.elem;
+		const elemGoType = this._getSliceElemType(goType);
 		const sliceInfo = this.mod.getSliceType(elemGoType);
 		const arrInfo = this.mod.getArrayType(elemGoType);
 		const arrWType = {
@@ -778,7 +779,7 @@ export class StdlibCoreEmitter {
 	}
 
 	_emitArrayToExternref(goType, valTmp, valW, inCycle, nextSeen) {
-		const elemGoType = goType.elem ?? goType.underlying?.elem;
+		const elemGoType = this._getArrayElemType(goType);
 		const arrInfo = this.mod.getArrayType(elemGoType);
 		const resTmp = this.acquireTemp("externref");
 		const lenTmp = this.acquireTemp("i32");
@@ -9523,7 +9524,7 @@ export class StdlibCoreEmitter {
 		if (isAnyType(goType, checker)) return true;
 		if (isSliceType(goType, checker) || isArrayType(goType, checker)) {
 			return this._isExternConvertible(
-				goType.elem ?? goType.underlying?.elem,
+				getSliceElemType(goType, checker),
 				depth + 1,
 			);
 		}

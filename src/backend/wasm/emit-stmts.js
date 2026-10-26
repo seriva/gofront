@@ -48,6 +48,12 @@ function hasReturnInBlock(n) {
 	return found;
 }
 
+// A plain `string`: the one string type that lives in `any` as the bare
+// string. A named string type is boxed like any other scalar (see emitExpr).
+function isBareStringType(t, checker) {
+	return isStringType(t, checker) && t.kind !== "named";
+}
+
 export class StmtsEmitter {
 	emitVarDecl(stmt) {
 		const decls = stmt.decls ?? stmt.specs ?? [stmt];
@@ -1134,6 +1140,15 @@ export class StmtsEmitter {
 		return goType.name ?? null;
 	}
 
+	// The struct a type assertion target refers to; an anonymous struct type
+	// has no name to look up.
+	_structInfoOfType(goType) {
+		return (
+			this.mod.getStructType(this._structNameOf(goType)) ??
+			this._resolveStructInfo({ _type: goType })
+		);
+	}
+
 	_emitTypeTest(targetGoType) {
 		if (!targetGoType) {
 			this.pushInstruction("drop");
@@ -1181,7 +1196,9 @@ export class StmtsEmitter {
 			return;
 		}
 
-		if (isStringType(targetGoType, this.mod.checker)) {
+		// A named string type is boxed like any other scalar (see emitExpr); only
+		// a plain `string` lives in `any` as the bare string.
+		if (isBareStringType(targetGoType, this.mod.checker)) {
 			const isStrIdx = this.mod.getIsStringImportIndex();
 			this.pushInstruction({ op: "call", funcIndex: isStrIdx });
 			return;
@@ -1199,7 +1216,7 @@ export class StmtsEmitter {
 		// `*T` lives in `any` as the bare struct ref; a `T` value as a boxed
 		// clone (see emitExpr).  Fall through to the scalar box for values.
 		if (isPointerToStruct(targetGoType, this.mod.checker, this.mod)) {
-			const sInfo = this.mod.getStructType(this._structNameOf(targetGoType));
+			const sInfo = this._structInfoOfType(targetGoType);
 			if (sInfo) {
 				this.pushInstruction({ op: "ref.test", typeIndex: sInfo.typeIndex });
 				return;
@@ -1224,6 +1241,17 @@ export class StmtsEmitter {
 			}
 		}
 
+		// A map lives in `any` as its bare map struct.
+		if (isMapType(targetGoType, this.mod.checker)) {
+			const { keyType, valType } = getMapKeyValTypes(
+				targetGoType,
+				this.mod.checker,
+			);
+			const mInfo = this.mod.getMapType(keyType, valType);
+			this.pushInstruction({ op: "ref.test", typeIndex: mInfo.typeIndex });
+			return;
+		}
+
 		// Scalar types
 		const box = this.mod.getIfaceBoxType(targetGoType);
 		if (box) {
@@ -1240,7 +1268,7 @@ export class StmtsEmitter {
 			return;
 		}
 
-		if (isStringType(targetGoType, this.mod.checker)) {
+		if (isBareStringType(targetGoType, this.mod.checker)) {
 			this.pushInstruction("extern.convert_any");
 			return;
 		}
@@ -1255,7 +1283,7 @@ export class StmtsEmitter {
 		}
 
 		if (isPointerToStruct(targetGoType, this.mod.checker, this.mod)) {
-			const sInfo = this.mod.getStructType(this._structNameOf(targetGoType));
+			const sInfo = this._structInfoOfType(targetGoType);
 			if (sInfo) {
 				this.pushInstruction({
 					op: "ref.cast_null",
@@ -1265,7 +1293,7 @@ export class StmtsEmitter {
 			}
 		}
 		if (isStructType(targetGoType, this.mod.checker, this.mod)) {
-			const sInfo = this.mod.getStructType(this._structNameOf(targetGoType));
+			const sInfo = this._structInfoOfType(targetGoType);
 			const box = this.mod.getIfaceBoxType(targetGoType);
 			if (sInfo && box) {
 				this._emitUnbox(box);
@@ -1296,6 +1324,19 @@ export class StmtsEmitter {
 				});
 				return;
 			}
+		}
+
+		if (isMapType(targetGoType, this.mod.checker)) {
+			const { keyType, valType } = getMapKeyValTypes(
+				targetGoType,
+				this.mod.checker,
+			);
+			const mInfo = this.mod.getMapType(keyType, valType);
+			this.pushInstruction({
+				op: "ref.cast_null",
+				typeIndex: mInfo.typeIndex,
+			});
+			return;
 		}
 
 		// Scalar types

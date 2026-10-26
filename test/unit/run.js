@@ -96,6 +96,7 @@ export const TEST_FILES = [
 	"./wasm/complex.test.js",
 	"./wasm/stdlib.test.js",
 	"./wasm/fmt-any.test.js",
+	"./wasm/json.test.js",
 	"./wasm/golden.test.js",
 ];
 

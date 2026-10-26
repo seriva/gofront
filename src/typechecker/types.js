@@ -134,20 +134,20 @@ export const WASM_SUPPORTED_STDLIB = new Set([
 	"encoding/hex",
 	"encoding/base64",
 	"os",
+	"encoding/json",
 ]);
 
 export const STDLIB_PACKAGES = new Set([
 	...WASM_SUPPORTED_STDLIB,
 	"gom",
 	"regexp",
-	"encoding/json",
 ]);
 
 // Per-namespace member subset the WASM backend implements. `null` means every
 // member the checker knows about. Members outside the set are rejected in
 // wasm/both packages with "'strings.Split' is not yet available in wasm packages".
 export const WASM_STDLIB_MEMBERS = new Map([
-	["json", new Set()],
+	["json", new Set(["Marshal", "Unmarshal", "Valid", "RawMessage"])],
 	["os", new Set(["Stdout", "Stderr", "Stdin", "File"])],
 	[
 		"math",
