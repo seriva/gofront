@@ -1,5 +1,5 @@
 // src/typechecker/stdlib/excluded.js
-// Stdlib members that the manifest excludes (runtime/stdlib/manifest.json,
+// Stdlib members that the manifest excludes (stdlib/manifest.json,
 // `excluded:` status) and that get a targeted diagnostic with the manifest's
 // note instead of the generic `No member` error.
 
