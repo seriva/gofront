@@ -92,20 +92,7 @@ copies agree bit-for-bit:
 
 ## What `wasm` packages support
 
-The backend (`src/backend/wasm/`) implements: structs, pointers, methods, arrays, slices
-(`append`, slicing, `copy`), strings, maps (including array-typed and interface-typed keys),
-interfaces (including anonymous interfaces), generics, closures (including closures inside methods),
-`defer`/`panic`/`recover`, `error` values, and non-literal package constants.
-
-**Known limitations** (fixes planned for [v1.8.0](../plans/v1.8.0/portable-go-plan.md)); a `both` package's
-`[wasm]` test run is the quickest way to spot them:
-
-- Fixed-size arrays (`[N]T`) are not copied on assignment or when passed to a function, so the
-  copy aliases the original.
-- A pointer to a scalar struct field or slice/array element (`&s.X`, `&xs[i]`) points at a copy;
-  writes through it do not reach the original.
-- `for … range` over an iterator function and complex numbers (`complex`, `real`, `imag`) are
-  not supported in `wasm` packages.
+The backend (`src/backend/wasm/`) implements: structs, pointers (including pointers to scalar struct fields and slice/array elements), methods (including method expressions and method values), value-copied fixed-size arrays, slices (`append`, slicing, `copy`), strings, maps (including struct-typed, array-typed, and interface-typed keys), interfaces (including anonymous interfaces), generics, closures (including closures inside methods and per-iteration loop variable captures), `for … range` over iterator functions (`iter.Seq`, `iter.Seq2`), complex numbers (`complex64`, `complex128`, `complex`, `real`, `imag`), `defer`/`panic`/`recover`, `error` values, and non-literal package constants.
 
 Stdlib coverage in `wasm`/`both` packages, per package:
 
@@ -170,27 +157,24 @@ Members of each Go package that `wasm` and `both` packages can use today, out of
 <!-- stdlib:end -->
 
 Notable members per package:
-- `math` (including 24 constants, `Float64bits`/`Float64frombits`, `Float32bits`/`Float32frombits`, `Sinh`, `Cosh`, `Tanh`, `Remainder`), `math/bits` (including `Len*`, `Reverse*`, `ReverseBytes*`), `math/rand` (pure inline 64-bit PRNG with deterministic `Seed`, `Read`, `Shuffle`, `Perm`)
-- `errors` (`New`, `Is`, `Unwrap`, `As`, `Join`)
-- `fmt` (`Sprintf`, `Printf`, `Println`, `Errorf`, `Fprintf`, `Fprintln`, `Fprint`, `Sscan`, `Sscanln`, `Sscanf`, including `%v`/`%+v` composite formatting over slices, arrays, maps, and structs)
-- `strings` (including `Builder`, `NewReplacer`, `NewReader`, `Cut*`, `Split*`, `*Func`, `FieldsFunc`)
-- `bytes` (including `Buffer`, `NewReader`, `FieldsFunc`, `Clone`)
-- `strconv` (including `Unquote`, `AppendInt`, `AppendFloat`, `AppendUint`, `AppendBool`, `ParseUint`, `FormatUint`)
-- `unicode`, `unicode/utf8`
-- `slices` (including `Compare`, `SortFunc`, `IndexFunc`, `ContainsFunc`, `BinarySearch`, `BinarySearchFunc`, `Min`, `Max`, `Compact`, `Concat`, `Delete`, `Insert`, `Replace`, `Grow`, `Clip`), `maps`, `sort`
-- `io` (`Reader`, `Writer`, `ReadWriter`, `Closer`, `ReadAll`, `Discard`, `WriteString`, `Copy`, `CopyN`, `LimitReader`, `EOF`)
-- `path`, `path/filepath`
-- `html` (`EscapeString`, `UnescapeString`)
-- `time` (pure parts: `Duration` with methods `.Seconds()`, `.Milliseconds()`, `.Minutes()`, `.Hours()`, `.String()`; `Time` with methods `.IsZero()`, `.UnixNano()`, `.Nanosecond()`, `.UTC()`, `.Local()`, calendar arithmetic, parsing, formatting; `time.Sleep` stays JS-only)
-- `sync` (`Mutex`, `RWMutex`, `Once`, `WaitGroup`)
-- `crypto/rand` (`Read`), `crypto/sha256` (`Sum256`, `New`)
-- `encoding/binary` (`LittleEndian`, `BigEndian`, `Read`, `Write`, `Append*`, `Size`)
-- `encoding/hex` (`EncodeToString`, `DecodeString`, `EncodedLen`, `DecodedLen`)
-- `encoding/base64` (`StdEncoding`, `URLEncoding`, `RawStdEncoding`, `RawURLEncoding`)
+- `math` (including 24 constants, `Float64bits`/`Float64frombits`, `Float32bits`/`Float32frombits`, `Sinh`, `Cosh`, `Tanh`, `Remainder`), `math/bits` (including `Len*`, `Reverse*`, `ReverseBytes*`), `math/cmplx`, `math/rand`, `math/rand/v2` (`PCG`, `Zipf`, top-level random functions)
+- `cmp` (`Ordered`, `Compare`, `Less`, `Or`), `iter` (`Seq`, `Seq2`), `container/heap`, `container/list`, `container/ring`
+- `errors` (`New`, `Is`, `Unwrap`, `As`, `Join`, `ErrUnsupported`)
+- `fmt` (`Sprintf`, `Printf`, `Println`, `Errorf`, `Fprintf`, `Fprintln`, `Fprint`, `Sscan`, `Sscanln`, `Sscanf`, including `%v`/`%+v`/`%#v`/`%T`/`%p` and `fmt.Stringer`/`fmt.GoStringer`), `log` (`Logger`, `New`, `Default`, `Print*`, `Fatal*`, `Panic*`)
+- `strings` (including `Builder`, `Reader`, `Replacer`, `Cut*`, `Split*`, `*Func`, `FieldsFunc`, `Lines`, `*Seq`), `bytes` (including `Buffer`, `Reader`, `FieldsFunc`, `Clone`, `Lines`, `*Seq`), `bufio` (`Reader`, `Writer`, `Scanner`, `ReadWriter`, split functions)
+- `strconv` (including `Unquote`, `QuotedPrefix`, `CanBackquote`, `Append*`, `Parse*`, `Format*`, `NumError`)
+- `unicode` (character classes, case conversion, `RangeTable`, and general-category tables `L`, `Ll`, `Lu`, `Nd`, `P`, `S`, `Z`, …), `unicode/utf8`, `unicode/utf16`
+- `slices` (including `Compare`, `SortFunc`, `BinarySearch*`, `Min*`, `Max*`, `Compact*`, `Concat`, `Delete*`, `Insert`, `Replace`, `Grow`, `Clip`, `All`, `Values`, `Backward`, `Collect`, `AppendSeq`, `Sorted*`, `Chunk`), `maps` (including `All`, `Keys`, `Values`, `Insert`, `Collect`), `sort` (`Interface`, `Search*`, `Find`, `Slice*`)
+- `io` (`Reader`, `Writer`, `ReadWriter`, `Closer`, `Seeker`, `ReaderAt`, `WriterTo`, `ByteReader`, `RuneReader`, `SectionReader`, `LimitedReader`, `MultiReader`, `MultiWriter`, `TeeReader`, `NopCloser`, `ReadAll`, `ReadFull`, `Copy*`), `os` (`Stdout`, `Stderr`, `Stdin`, `DevNull`; `Getenv`, `Args`, `Exit` stay JS-only)
+- `path`, `path/filepath`, `net/url` (`URL`, `Values`, `Userinfo`, `Parse*`, `QueryEscape`/`QueryUnescape`, `PathEscape`/`PathUnescape`, `JoinPath`), `html` (`EscapeString`, `UnescapeString`)
+- `time` (`Duration` with `.Truncate()`, `.Round()`, `.Abs()`, `ParseDuration`; `Time` with calendar arithmetic, `.AppendFormat()`, `.Compare()`, `FixedZone`, `Date`, `Parse`, `Unix*`; `time.Sleep` stays JS-only), `context` (`Background`, `TODO`, `WithCancel`, `WithCancelCause`, `WithDeadline`, `WithTimeout`, `WithValue`, `AfterFunc`, `WithoutCancel`, `Cause`)
+- `sync` (`Mutex`, `RWMutex`, `Once`, `WaitGroup`, `Map`, `Pool`, `Cond`, `OnceFunc`, `OnceValue`, `OnceValues`), `sync/atomic` (`Bool`, `Int32`, `Int64`, `Uint32`, `Uint64`, `Uintptr`, `Pointer[T]`, `Value`, package-level `Load*`/`Store*`/`Add*`/`Swap*`/`CompareAndSwap*`)
+- `hash` (`Hash`, `Hash32`, `Hash64`), `hash/fnv`, `hash/crc32`, `hash/adler32`, `crypto/rand` (`Read`, `Prime`), `crypto/sha256`, `crypto/sha512`, `crypto/sha1`, `crypto/md5`, `crypto/hmac`, `crypto/subtle`
+- `encoding/binary` (`LittleEndian`, `BigEndian`, `Read`, `Write`, `Append*`, `Size`, `Uvarint`, `Varint`, `PutUvarint`, `PutVarint`, `AppendUvarint`, `AppendVarint`), `encoding/hex`, `encoding/base64`, `encoding/base32`, `encoding/csv` (`Reader`, `Writer`, `ParseError`)
 - `encoding/json` (`Marshal`, `MarshalIndent`, `Unmarshal`, `Valid`, `RawMessage`, `Number`, `Encoder`, `Decoder`, `Compact`, `Indent`, `HTMLEscape`; the codecs are generated Go linked into `app.wasm`)
-- `testing`, `gofront/shared`, and `gofront/simd` (experimental).
+- `testing` (`T`, `B`, `M`, `TB`, `Run`, `Cleanup`, `Setenv`, `TempDir`), `gofront/shared`, and `gofront/simd` (experimental).
 
-Any other import, or JS-only API (`os`, `regexp`, `time.Sleep`), reports a targeted diagnostic
+Any other import, or JS-only API (`regexp`, `time.Sleep`, `os.Getenv`, `os.Args`, `os.Exit`), reports a targeted diagnostic
 (e.g. `'time.Sleep' is not yet available in wasm packages`) with a hint to keep the call in a JS package.
 The `math` functions without a native WASM instruction (`Sin`, `Cos`, `Atan2`, `Pow`, `Mod`, `Hypot`,
 `Cbrt`, `Round`, …) are imported from JS `Math` with Go semantics (`Round` rounds half away
@@ -319,9 +303,9 @@ for (let i = 0; i < sim.Positions.length; i += 2) {
   - **Value semantics:** `F32x4` and `Mask32x4` are ordinary values: struct fields, array and slice elements, map keys and values, generic type arguments, closure captures, and values stored in `any`. `==` and `!=` compare lane by lane on vector operands and on structs and arrays containing them (`NaN != NaN`, `-0 == +0`), and `fmt` prints `[1 2 3 4]` for `%v` and `%+v`, and `simd.F32x4{1, 2, 3, 4}` for `%#v`. Comparing two `any` values that hold vectors, and taking the address of a vector (`&v`), are not supported yet.
   - **JS:** compiles to frozen 4-element arrays using `Math.fround` per lane for bit-level 32-bit float parity.
   - **Boundary:** an `F32x4` crosses the JS↔WASM boundary as a copied 4-element `Float32Array` and a `Mask32x4` as a 4-element array of booleans, in exported function parameters and results and in exported struct fields. In `wasm` packages a `[]F32x4` crosses as one copied `Float32Array` of `4n` floats; in `both` packages, which run as plain JavaScript, it stays an array of 4-element arrays. A `[]Mask32x4` crosses as an array of boolean arrays. Vectors live in garbage-collected memory, so they cannot be viewed zero-copy from JavaScript; move bulk data through `gofront/shared.Float32` buffers.
-- **Benchmark & Gating:**
+- **Performance:**
   - Particle kinematics (65,536 particles, gravity, damping and a box bounce with `Select`, release build): about 1.6× faster than the equivalent scalar loop in the same module, with a small reported allocation per step (`node --expose-gc test/e2e/perf/particle-bench.js`).
-  - Octree raycast (131,072 triangles, triangle-packet kernel): within noise of scalar WebAssembly and does not reach 1.30×, because spatial traversal dominates the 3-wide triangle checks. Use SIMD for flat, data-parallel loops over `shared.Float32` buffers rather than for pointer-chasing traversals.
+  - Octree raycast (131,072 triangles, triangle-packet kernel): within noise of scalar WebAssembly, because spatial traversal dominates the 3-wide triangle checks. Use SIMD for flat, data-parallel loops over `shared.Float32` buffers rather than for pointer-chasing traversals.
   - `example/hybrid` runs its particle `Step` on `simd.F32x4`, two interleaved `x, y` particles per vector.
 
 ### Panics and traps

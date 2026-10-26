@@ -447,14 +447,7 @@ For detailed command flags, project configuration (`gofront.json`), multi-file p
 * [Go to JS Mapping](docs/compilation-mapping.md) — what each construct compiles to
 * [Go Compatibility Differences](docs/go-compatibility.md) — where GoFront deliberately differs from Go
 * [Compiler Architecture & Internals](docs/architecture.md) — pipeline stages and source layout
-
----
-
-## Roadmap
-
-See [`plans/roadmap.md`](plans/roadmap.md) for the full roadmap and release history.
-Design documents for planned features are organised by release under `plans/v*/`
-(e.g. [`plans/v1.2.0/`](plans/v1.2.0/), [`plans/v1.3.0/`](plans/v1.3.0/), [`plans/v1.6.0/`](plans/v1.6.0/), [`plans/v1.8.0/`](plans/v1.8.0/)).
+* [Changelog](CHANGELOG.md) — release history and upgrade notes
 
 ---
 
@@ -463,18 +456,14 @@ Design documents for planned features are organised by release under `plans/v*/`
 ```sh
 npm test                  # unit, zero-alloc perf, and example tests (~1,920+ tests, no browser required)
 npm run test:e2e          # E2E browser tests (Playwright, headless Chromium)
-npm run bench             # Möller–Trumbore raycast benchmark comparing pure JS vs hybrid WASM
+npm run bench             # Raycast, JSON, and SIMD particle benchmarks (pure JS vs hybrid WASM)
 npm run manifest:update   # regenerate stdlib/manifest.json from Go's api/*.txt (needs go1.26)
 npm run conformance       # run test/conformance fixtures on JS and WASM against real Go output (part of npm test)
 npm run conformance:update # capture fixture .out files with go run (needs go1.26)
 npm run docs:stdlib       # regenerate the stdlib tables in docs/ from the manifest (checked by npm run check)
 ```
 
-The stdlib coverage gate (`test/unit/types/stdlib-coverage.test.js`) compares the manifest
-with GoFront's stdlib by name and by signature; known gaps are listed in
-`test/unit/types/stdlib-coverage.gaps.json` (`--update-gaps` rewrites it; rerun
-`npm run docs:stdlib` afterwards). Conformance fixtures are described in
-[`test/conformance/README.md`](test/conformance/README.md).
+For details on standard library manifest verification and differential conformance fixtures, see [Compiler Architecture & Internals](docs/architecture.md#standard-library--conformance) and [`test/conformance/README.md`](test/conformance/README.md).
 
 **Unit tests** (~1,920+) cover language features, type errors, edge cases, DOM (jsdom),
 external `.d.ts`, npm resolver, TypeScript tuple return signatures, multi-file compilation,
