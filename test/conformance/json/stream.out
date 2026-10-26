@@ -1,0 +1,19 @@
+Encode 1 err=<nil>: {"id":1,"name":"apple"}
+Encode 2 err=<nil>: {"id":1,"name":"apple"}
+{"id":2,"name":"banana"}
+Encode indented err=<nil>:
+{
+>>  "id": 3,
+>>  "name": "cherry"
+>>}
+Encode escapeHTML true: "\u003cb\u003etest \u0026 ' \"\u003c/b\u003e"
+Encode escapeHTML false: "<b>test & ' \"</b>"
+Decode item: id=10 name=ten err=<nil> offsetBefore=0 offsetAfter=22
+Decode item: id=20 name=twenty err=<nil> offsetBefore=23 offsetAfter=48
+Decode at EOF: err=EOF (isEOF=true)
+Decode truncated: err=unexpected EOF (isUnexpectedEOF=true)
+Decode UseNumber: val=1234567890123456789 isNumber=true err=<nil>
+Decode DisallowUnknownFields: err=json: unknown field "unknown"
+Decode Buffered: id=1 rest=" trailing data"
+Encode UnsupportedValueError NaN: Str=NaN msg=json: unsupported value: NaN
+Encode MarshalerError: msg=json: error calling MarshalJSON for type main.FailItem: cannot marshal item unwrap=cannot marshal item
