@@ -41,14 +41,25 @@ const SCOPED_STMTS = new Set([
 ]);
 
 // A same-named method with another arity (strings.Reader.Reset(s) vs
-// hash.Hash.Reset()) cannot satisfy this interface method.
-function filterByArity(candidates, params) {
-	if (!Array.isArray(params)) return candidates;
-	return candidates.filter(
-		(c) =>
-			!Array.isArray(c.targetParamTypes) ||
-			c.targetParamTypes.length === params.length,
+// hash.Hash.Reset()) cannot satisfy this interface method.  Neither can one
+// whose parameters or results have other types (csv.Writer.Write(record
+// []string) error vs io.Writer.Write(p []byte) (int, error)).
+function sameTypes(a, b) {
+	return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function sameParams(c, params, paramTypes) {
+	if (c.targetParamTypes.length !== params.length) return false;
+	if (paramTypes?.length !== params.length) return true;
+	return c.targetParamTypes.every(
+		(t, i) => i === 0 || sameTypes(t, paramTypes[i]),
 	);
+}
+
+function sameSignature(c, params, paramTypes, want, got) {
+	if (!Array.isArray(c.targetParamTypes)) return true;
+	if (!sameParams(c, params, paramTypes)) return false;
+	return want === undefined || got === undefined || sameTypes(got, want);
 }
 
 export class FunctionEmitter {
@@ -1300,12 +1311,23 @@ export class FunctionEmitter {
 		return null;
 	}
 
-	emitInterfaceDispatcher(fn) {
-		let candidates = this.mod.findInterfaceCandidates(
+	// Concrete methods the dispatcher `fn` can call: same name, same signature.
+	_dispatchCandidates(fn) {
+		const candidates = this.mod.findInterfaceCandidates(
 			fn._ifaceType,
 			fn._methodName,
 		);
-		candidates = filterByArity(candidates, fn.params);
+		if (!Array.isArray(fn.params)) return candidates;
+		const paramTypes = this.mod.getFuncParamTypes(fn.name);
+		const results = this.mod.funcReturnTypesByIdx;
+		const want = results.get(fn._globalFuncIndex);
+		return candidates.filter((c) =>
+			sameSignature(c, fn.params, paramTypes, want, results.get(c.funcIndex)),
+		);
+	}
+
+	emitInterfaceDispatcher(fn) {
+		let candidates = this._dispatchCandidates(fn);
 		const recvLocal = 0; // __recv is local 0
 		// Soft dispatchers (errors.Unwrap) return nil instead of panicking when
 		// the receiver is nil or has no such method.

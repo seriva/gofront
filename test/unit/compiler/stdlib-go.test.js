@@ -673,3 +673,161 @@ func main() {}
 		},
 	);
 });
+
+test("type assertion to a Go-source package struct pointer (JS and WASM parity)", async () => {
+	const out = await stdParity(`import (
+	"encoding/csv"
+	"io"
+	"strings"
+)
+
+func Run() string {
+	var eof error = io.EOF
+	_, isParse := eof.(*csv.ParseError)
+	r := csv.NewReader(strings.NewReader("a\\"b,c\\n"))
+	_, err := r.Read()
+	pe, ok := err.(*csv.ParseError)
+	if !ok {
+		return "not a ParseError"
+	}
+	if isParse {
+		return "EOF reported as ParseError"
+	}
+	return "ok line=" + string(rune('0'+pe.Line))
+}
+`);
+	assertEqual(out, "ok line=1");
+});
+
+test("interface dispatch skips same-named methods with other parameters (WASM)", async () => {
+	const out = await stdParity(`import "io"
+
+type rows struct{ n int }
+
+func (r *rows) Write(rec []string) error {
+	r.n += len(rec)
+	return nil
+}
+
+type sink struct{ buf []byte }
+
+func (s *sink) Write(p []byte) (int, error) {
+	s.buf = append(s.buf, p...)
+	return len(p), nil
+}
+
+func Run() string {
+	var w io.Writer = &sink{}
+	w.Write([]byte("abc"))
+	rs := &rows{}
+	rs.Write([]string{"x", "y"})
+	return string(w.(*sink).buf) + "," + string(rune('0'+rs.n))
+}
+`);
+	assertEqual(out, "abc,2");
+});
+
+const LOG_SINK = `type sink struct{ buf []byte }
+
+func (s *sink) Write(p []byte) (int, error) {
+	s.buf = append(s.buf, p...)
+	return len(p), nil
+}
+`;
+
+test("log.Fatal writes the message, then exits in JS and panics in WASM", async () => {
+	const realExit = process.exit;
+	const codes = [];
+	process.exit = (code) => {
+		codes.push(code);
+	};
+	try {
+		const out = await stdParity(`import "log"
+
+${LOG_SINK}
+func Run() (res string) {
+	s := &sink{}
+	l := log.New(s, "fatal: ", 0)
+	defer func() {
+		res = string(s.buf) + "|" + recover().(string)
+	}()
+	l.Fatalf("code %d", 7)
+	return "not reached"
+}
+`);
+		assertEqual(out, "fatal: code 7\n|code 7");
+		assertEqual(codes.join(","), "1");
+	} finally {
+		process.exit = realExit;
+	}
+});
+
+test("log prints ???:0 for Lshortfile and Llongfile (JS and WASM parity)", async () => {
+	const out = await stdParity(`import "log"
+
+${LOG_SINK}
+func Run() string {
+	s := &sink{}
+	l := log.New(s, "p ", log.Lshortfile)
+	l.Print("a")
+	l.SetFlags(log.Llongfile | log.Lmsgprefix)
+	l.Print("b")
+	return string(s.buf)
+}
+`);
+	assertEqual(out, "p ???:0: a\n???:0: p b\n");
+});
+
+test("math/rand/v2 argument panics carry Go's messages (JS and WASM parity)", async () => {
+	const out = await stdParity(`import "math/rand/v2"
+
+func try(f func()) (msg string) {
+	defer func() { msg = recover().(string) }()
+	f()
+	return ""
+}
+
+func Run() string {
+	r := rand.New(rand.NewPCG(1, 2))
+	return try(func() { r.IntN(0) }) + "|" +
+		try(func() { r.Int64N(-1) }) + "|" +
+		try(func() { r.Uint64N(0) }) + "|" +
+		try(func() { r.Int32N(0) }) + "|" +
+		try(func() { r.Uint32N(0) }) + "|" +
+		try(func() { rand.IntN(0) }) + "|" +
+		try(func() { rand.N(0) }) + "|" +
+		try(func() { r.Shuffle(-1, func(i, j int) {}) })
+}
+`);
+	assertEqual(
+		out,
+		"invalid argument to IntN|invalid argument to Int64N|invalid argument to Uint64N|invalid argument to Int32N|invalid argument to Uint32N|invalid argument to IntN|invalid argument to N|invalid argument to Shuffle",
+	);
+});
+
+test("math/rand/v2 ChaCha8 reports the deferred exclusion", () => {
+	withTempDir(
+		{
+			"main.go": `package main
+
+import "math/rand/v2"
+
+func main() {
+	_ = rand.NewChaCha8([32]byte{})
+}
+`,
+		},
+		(dir) => {
+			let msg = "";
+			try {
+				compileDir(dir);
+			} catch (err) {
+				msg = err.message;
+			}
+			assert(
+				msg.includes("ChaCha8 is deferred"),
+				`expected the deferred diagnostic, got: ${msg}`,
+			);
+		},
+	);
+});

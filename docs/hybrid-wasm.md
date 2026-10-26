@@ -133,7 +133,7 @@ Members of each Go package that `wasm` and `both` packages can use today, out of
 | `encoding/base32` | 19 of 19 | 0 |
 | `encoding/base64` | 15 of 22 | 7 |
 | `encoding/binary` | 13 of 33 | 20 |
-| `encoding/csv` | 0 of 32 | 32 |
+| `encoding/csv` | 32 of 32 | 0 |
 | `encoding/hex` | 7 of 15 | 8 |
 | `encoding/json` | 0 of 68 | 68 |
 | `errors` | 6 of 7 | 1 |
@@ -145,13 +145,13 @@ Members of each Go package that `wasm` and `both` packages can use today, out of
 | `html` | 2 of 2 | 0 |
 | `io` | 54 of 94 | 40 |
 | `iter` | 2 of 2 | 0 |
-| `log` | 0 of 43 | 43 |
+| `log` | 43 of 43 | 0 |
 | `maps` | 10 of 10 | 0 |
 | `math` | 80 of 97 | 17 |
 | `math/bits` | 50 of 50 | 0 |
-| `math/cmplx` | 0 of 27 | 27 |
+| `math/cmplx` | 27 of 27 | 0 |
 | `math/rand` | 12 of 45 | 33 |
-| `math/rand/v2` | 0 of 51 | 51 |
+| `math/rand/v2` | 50 of 51 | 1 |
 | `net/url` | 60 of 60 | 0 |
 | `os` | 7 of 7 | 0 |
 | `path` | 9 of 9 | 0 |

@@ -428,6 +428,18 @@ func main() {
 	assertEqual(runJs(js), "4\n1024");
 });
 
+test("math.IsInf(x, 0) is false for NaN", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(math.IsInf(math.NaN(), 0))
+	console.log(math.IsInf(math.Inf(1), 0))
+	console.log(math.IsInf(math.Inf(-1), 0))
+	console.log(math.IsInf(1.5, 0))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "false\ntrue\ntrue\nfalse");
+});
+
 test("math.Floor, Ceil, Round", () => {
 	const { js, errors } = compile(`package main
 func main() {
