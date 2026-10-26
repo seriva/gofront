@@ -250,6 +250,23 @@ function substituteTypesInAst(
 
 	// 4. CallExpr
 	if (node.kind === "CallExpr") {
+		// `T(x)` with T a type parameter becomes the conversion `int8(x)`.
+		const conv =
+			node.func?.kind === "Ident" ? typeSubstMap.get(node.func.name) : null;
+		if (conv && node.args?.length === 1) {
+			return {
+				kind: "TypeConversion",
+				targetType: cloneAst(conv),
+				expr: substituteTypesInAst(
+					node.args[0],
+					typeSubstMap,
+					onGenericUsage,
+					genericTypes,
+					genericFuncs,
+				),
+				_line: node._line,
+			};
+		}
 		if (node.func?.kind === "Ident") {
 			let typeArgs = node._typeArgs ?? node.func._typeArgs;
 			if (typeArgs) {

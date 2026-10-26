@@ -12,6 +12,8 @@ export const EXCLUDED_STDLIB_MEMBERS = new Map([
 		"context.Context.Done",
 		"Done() returns a channel; use ctx.Err() != nil or context.AfterFunc",
 	],
+	["rand.ChaCha8", "ChaCha8 is deferred (code size)"],
+	["rand.NewChaCha8", "ChaCha8 is deferred (code size)"],
 	["iter.Pull", "requires coroutines; out of scope (no runtime)"],
 	["iter.Pull2", "requires coroutines; out of scope (no runtime)"],
 	["time.After", "channels"],

@@ -151,7 +151,7 @@ Members of each Go package that `wasm` and `both` packages can use today, out of
 | `math/bits` | 50 of 50 | 0 |
 | `math/cmplx` | 27 of 27 | 0 |
 | `math/rand` | 12 of 45 | 33 |
-| `math/rand/v2` | 0 of 51 | 51 |
+| `math/rand/v2` | 50 of 51 | 1 |
 | `net/url` | 60 of 60 | 0 |
 | `os` | 7 of 7 | 0 |
 | `path` | 9 of 9 | 0 |

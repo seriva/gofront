@@ -151,7 +151,8 @@ export const expressionCheckMethods = {
 			case "Ident": {
 				const t = scope.lookup(expr.name);
 				if (!t) return this.err(`Undefined: '${expr.name}'`, expr);
-				if (this.types.has(expr.name)) expr._isTypeRef = true;
+				if (this.types.has(expr.name) || t.kind === "typeParam")
+					expr._isTypeRef = true;
 				// A Go declaration that shadows a browser global: JS output renames
 				// it so generated code keeps reaching the real global.  Package
 				// namespaces (`import console "./util"`) are never renamed: JS
@@ -1025,6 +1026,29 @@ export const expressionCheckMethods = {
 		return this.instantiateGenericFunc(generic, typeArgs);
 	},
 
+	// `T(x)` with T a type parameter: only a numeric x converts (the constraint
+	// decides the target at instantiation).
+	_checkTypeParamConversion(tp, argTypes, expr) {
+		expr._isTypeConversion = true;
+		expr._conversionTargetType = tp;
+		if (expr.args.length !== 1) {
+			return this.err(
+				`cannot convert ${expr.args.length} arguments to type ${typeStr(tp)}`,
+				expr,
+			);
+		}
+		if (
+			!isNumeric(argTypes[0]) &&
+			!isAny(argTypes[0]) &&
+			argTypes[0]?.kind !== "typeParam"
+		)
+			this.err(
+				`cannot convert ${typeStr(argTypes[0])} to ${typeStr(tp)}`,
+				expr,
+			);
+		return tp;
+	},
+
 	checkCall(expr, scope) {
 		expr.func._typeRefOk = true;
 		let fnType = this.checkExpr(expr.func, scope);
@@ -1067,6 +1091,10 @@ export const expressionCheckMethods = {
 			const argType = argTypes[0];
 			this._checkConversionValidity(argType, fnType, expr);
 			return fnType;
+		}
+
+		if (fnType.kind === "typeParam" && expr.func._isTypeRef) {
+			return this._checkTypeParamConversion(fnType, argTypes, expr);
 		}
 
 		fnType = this._resolveCallFnType(fnType, argTypes, expr, scope);
