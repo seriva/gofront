@@ -1376,11 +1376,12 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
   - Done when: fixture matches Go.
   - Landed: `log` in Go source with the full member list. `Fatal*` writes, then calls the new `exit` intrinsic (`process.exit` where a process exists, a no-op in WASM) and panics with the message, so JS exits and WASM panics. `Lshortfile` and `Llongfile` print `???:0`. The package-level functions reach the standard logger through a small accessor because a `both` package may not call a pointer-receiver method on a package variable. Conformance fixture `log/log.go` writes to a small `io.Writer` of its own instead of a `bytes.Buffer`, which has no methods on JS once converted to an interface (recorded in `plans/follow-ups.md`); unit tests cover `Fatal` on both backends and the `???:0` output.
 
-- [ ] **Task 4.11 — `math/rand/v2`**
+- [x] **Task 4.11 — `math/rand/v2`**
   - Files: new `runtime/stdlib/math/rand/v2/*.go`
   - Do: `PCG` source (bit-exact with Go for a given seed), `Rand`, `New`, `N` (generic), `IntN`, `Int64N`, `Uint64N`, `Float64`, `Float32`, `Perm`, `Shuffle`, `NormFloat64`, `ExpFloat64`; top-level functions use the per-target random source. `ChaCha8` reports the deferred exclusion.
   - Test: conformance fixture `rand/pcg.go` with a fixed seed (PCG output must match Go exactly); unit test for `IntN(0)` panic message.
   - Done when: fixture matches Go.
+  - Landed: `math/rand/v2` in Go source: `PCG` (bit-exact for a seed, with binary marshaling), `Rand` with every method, the top-level functions and generic `N`, `Zipf`, and the normal and exponential distributions. The top-level functions use a `PCG` seeded from the platform's random source (`math/rand`). `ChaCha8` and `NewChaCha8` report `ChaCha8 is deferred (code size)`. Every 64-bit value is kept as two `uint32` halves, so the sequence is the same on JS and WASM; only a value returned as a `uint64` (`Uint64`, `Int64`, `Int`) loses low bits above 2^53 in JS, and a custom `Source` is exact only in WASM. Added conversion to a type parameter (`T(n)`), which `N` needs: type-checked, exact in WASM through monomorphisation, and a plain pass-through in JS (it does not truncate). Conformance fixture `rand/pcg.go` matches Go 1.26 on JS and WASM; unit tests cover the `IntN(0)` family of panic messages and the `ChaCha8` diagnostic.
 
 ### Phase 5.1: WASM JSON scanner, encoders, decoders and unmarshaling
 
