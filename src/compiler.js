@@ -823,12 +823,15 @@ function spliceStdlibJs(merged, options) {
 		pkgs.flatMap((pkg) => pkg.unit.programs),
 	);
 	const out = [];
+	const spliced = new Set();
 	for (const line of lines) {
 		const path = line.match(STDLIB_MARKER_RE)?.[1];
 		if (!path) {
 			out.push(line);
 			continue;
 		}
+		if (spliced.has(path)) continue;
+		spliced.add(path);
 		const js = stdlibJs(options.stdlibCache.get(path), reached);
 		const code = js === "" ? [] : js.split("\n");
 		const delta = code.length - 1;
@@ -1212,6 +1215,7 @@ export function compileSingleFile(inputPath, options = {}) {
 		wasmUnits: options.wasmUnits ?? [],
 		stdlibCache: options.stdlibCache ?? new Map(),
 		jsRootPrograms: options.jsRootPrograms ?? [],
+		bundledDirs: options.bundledDirs ?? new Set(),
 	};
 
 	let source;
@@ -1343,6 +1347,7 @@ export function compileFiles(files, options = {}) {
 		stdlibCache: options.stdlibCache ?? new Map(),
 		jsRootPrograms: options.jsRootPrograms ?? [],
 		rootDir: options.rootDir ?? fromDir,
+		bundledDirs: options.bundledDirs ?? new Set(),
 	};
 	const outputDir =
 		options.outputDir ??

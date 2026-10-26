@@ -18,7 +18,7 @@ import { defaultType } from "../typechecker/types.js";
 import { forEachChild } from "./walk.js";
 
 const JSON_PATH = "encoding/json";
-const SITE_FUNCS = new Set(["Marshal", "Unmarshal", "Valid"]);
+const SITE_FUNCS = new Set(["Marshal", "MarshalIndent", "Unmarshal", "Valid"]);
 
 const INT_KINDS = new Set(["int", "int8", "int16", "int32", "int64"]);
 const UINT_KINDS = new Set([
@@ -79,6 +79,14 @@ function isBasic(t, set) {
 const isRaw = (t) =>
 	t?.kind === "named" &&
 	(t.name === "json.RawMessage" || t.name === "encoding/json.RawMessage");
+
+const isNumber = (t) =>
+	t?.kind === "named" &&
+	(t.name === "json.Number" ||
+		t.name === "encoding/json.Number" ||
+		t.name?.startsWith("Number$$") ||
+		t.name?.endsWith(".Number") ||
+		(t.name === "Number" && under(t)?.name === "string"));
 
 function isBytes(t) {
 	const u = under(t);
@@ -198,8 +206,30 @@ export class JsonCodecGen {
 		return byKind[t.kind]();
 	}
 
+	resolveImportAlias(modPath) {
+		for (const p of this.programs) {
+			for (const imp of p.imports ?? []) {
+				for (const spec of imp.imports) {
+					if (spec.path === modPath) {
+						return spec.alias ?? spec.path.split("/").pop();
+					}
+				}
+			}
+		}
+		return modPath.split("/").pop();
+	}
+
 	spellNamed(t) {
-		const base = this.qualified(t.name);
+		let name = t.name;
+		const at = name.indexOf("$$");
+		if (at >= 0) {
+			const orig = name.slice(0, at);
+			const modPath = name.slice(at + 2).replaceAll("$", "/");
+			const alias = this.resolveImportAlias(modPath);
+			this.qualifiers.add(alias);
+			name = `${alias}.${orig}`;
+		}
+		const base = this.qualified(name);
 		return t.typeArgs?.length
 			? `${base}[${t.typeArgs.map((a) => this.spell(a)).join(", ")}]`
 			: base;
@@ -226,9 +256,15 @@ export class JsonCodecGen {
 			case "basic":
 				return REFLECT_NAME[t.name] ?? unalias(t.name);
 			case "named": {
-				const name = t.name.includes(".")
-					? t.name
-					: `${this.pkgName}.${t.name}`;
+				let name = t.name;
+				const at = name.indexOf("$$");
+				if (at >= 0) {
+					const orig = name.slice(0, at);
+					const modPath = name.slice(at + 2).replaceAll("$", "/");
+					name = `${modPath}.${orig}`;
+				} else if (!name.includes(".")) {
+					name = `${this.pkgName}.${name}`;
+				}
 				return t.typeArgs?.length
 					? `${name}[${t.typeArgs.map((a) => this.refl(a)).join(",")}]`
 					: name;
@@ -320,6 +356,7 @@ export class JsonCodecGen {
 	// Raw messages, marshalers, byte slices and interfaces encode specially.
 	encSpecial(t, addr) {
 		if (isRaw(t)) return ["e.Raw([]byte(v))"];
+		if (isNumber(t)) return ["e.Number(string(v))"];
 		const m = marshalerOf(t);
 		if (m && (!m._ptrRecv || addr)) return this.marshalCall("v", t);
 		if (isBytes(t)) return ["e.Bytes([]byte(v))"];
@@ -611,6 +648,14 @@ export class JsonCodecGen {
 
 	decSpecial(t, typ) {
 		if (isRaw(t)) return [`return ${this.spell(t)}(d.Raw())`];
+		if (isNumber(t))
+			return [
+				`s, ok := d.Number(${typ})`,
+				"if !ok {",
+				"\treturn cur",
+				"}",
+				`return ${this.spell(t)}(s)`,
+			];
 		if (unmarshalerOf(t)) return this.decUnmarshaler(t);
 		if (isBytes(t)) return this.decBytes(t, typ);
 		return null;
@@ -892,6 +937,33 @@ export class JsonCodecGen {
 			: [`*${x} = ${this.decFn(base)}(d, *${x})`];
 	}
 
+	entryMarshalIndent(argType) {
+		const name = `${this.prefix}marshal_indent${this.entries.length}`;
+		const lines = [
+			`func ${name}(v any, prefix, indent string) ([]byte, error) {`,
+			"\te := jsonrt.NewEnc()",
+		];
+		if (!argType || isInterface(argType)) {
+			this.flagDynamic();
+			lines.push(`\t${this.prefix}encAny(e, v)`);
+		} else {
+			lines.push(
+				`\tx, _ := v.(${this.spell(argType)})`,
+				`\t${this.encFn(argType, false)}(e, x)`,
+			);
+		}
+		lines.push(
+			"\tb, err := e.Result()",
+			"\tif err != nil {",
+			"\t\treturn nil, err",
+			"\t}",
+			"\treturn jsonrt.AppendIndent(nil, b, prefix, indent)",
+			"}",
+		);
+		this.entries.push(lines.join("\n"));
+		return name;
+	}
+
 	entryUnmarshal(argType) {
 		const name = `${this.prefix}unmarshal${this.entries.length}`;
 		const lines = [
@@ -916,6 +988,7 @@ export class JsonCodecGen {
 			this.dynamicDecode = true;
 		} else {
 			lines.push(
+				"\t_ = d",
 				"\t_ = v",
 				`\treturn &jsonrt.InvalidUnmarshalError{Type: ${q(this.refl(argType))}}`,
 			);
@@ -1136,6 +1209,7 @@ export function generateJsonCodecs(programs, checker, pkgName) {
 			});
 		let entry;
 		if (fn === "Marshal") entry = gen.entryMarshal(argType(0));
+		else if (fn === "MarshalIndent") entry = gen.entryMarshalIndent(argType(0));
 		else if (fn === "Unmarshal") entry = gen.entryUnmarshal(argType(1));
 		else entry = gen.entryValid();
 		pending.push([call.func, entry]);

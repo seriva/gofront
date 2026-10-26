@@ -164,8 +164,9 @@ func (d *Dec) Mismatch(typ string) {
 	if d.fatal {
 		return
 	}
-	d.typeErr(d.kind(), typ)
+	k := d.kind()
 	d.Skip()
+	d.typeErr(k, typ)
 }
 
 // IsArray reports whether the next value is an array.
@@ -358,6 +359,29 @@ func (d *Dec) readNumber() string {
 	return string(d.data[start:d.pos])
 }
 
+// Number decodes a number or string as a Number. ok is false for null.
+func (d *Dec) Number(typ string) (string, bool) {
+	if d.fatal || d.Null() {
+		return "", false
+	}
+	if d.peek() == '"' {
+		s, ok := d.String(typ)
+		if !ok {
+			return "", false
+		}
+		if !isValidNumber(s) {
+			d.Save(fmt.Errorf("json: invalid number literal, trying to unmarshal %q into Number", s))
+			return "", false
+		}
+		return s, true
+	}
+	if d.kind() == "number" {
+		return d.readNumber(), true
+	}
+	d.Mismatch(typ)
+	return "", false
+}
+
 // Bool decodes a bool. ok is false for null (leave the target alone) and for
 // a value of another kind (a type error is recorded).
 func (d *Dec) Bool(typ string) (v bool, ok bool) {
@@ -373,8 +397,9 @@ func (d *Dec) Bool(typ string) (v bool, ok bool) {
 		d.pos += 5
 		return false, true
 	}
-	d.typeErr(d.kind(), typ)
+	k := d.kind()
 	d.Skip()
+	d.typeErr(k, typ)
 	return false, false
 }
 
@@ -384,8 +409,9 @@ func (d *Dec) String(typ string) (v string, ok bool) {
 		return "", false
 	}
 	if d.peek() != '"' {
-		d.typeErr(d.kind(), typ)
+		k := d.kind()
 		d.Skip()
+		d.typeErr(k, typ)
 		return "", false
 	}
 	return d.readString(), true
@@ -397,8 +423,9 @@ func (d *Dec) Int(bits int, typ string) (v int64, ok bool) {
 		return 0, false
 	}
 	if d.peek() == '"' || d.peek() == '{' || d.peek() == '[' || d.peek() == 't' || d.peek() == 'f' {
-		d.typeErr(d.kind(), typ)
+		k := d.kind()
 		d.Skip()
+		d.typeErr(k, typ)
 		return 0, false
 	}
 	s := d.readNumber()
@@ -416,8 +443,9 @@ func (d *Dec) Uint(bits int, typ string) (v uint64, ok bool) {
 		return 0, false
 	}
 	if d.peek() == '"' || d.peek() == '{' || d.peek() == '[' || d.peek() == 't' || d.peek() == 'f' {
-		d.typeErr(d.kind(), typ)
+		k := d.kind()
 		d.Skip()
+		d.typeErr(k, typ)
 		return 0, false
 	}
 	s := d.readNumber()
@@ -435,8 +463,9 @@ func (d *Dec) Float(bits int, typ string) (v float64, ok bool) {
 		return 0, false
 	}
 	if d.peek() == '"' || d.peek() == '{' || d.peek() == '[' || d.peek() == 't' || d.peek() == 'f' {
-		d.typeErr(d.kind(), typ)
+		k := d.kind()
 		d.Skip()
+		d.typeErr(k, typ)
 		return 0, false
 	}
 	s := d.readNumber()
@@ -459,8 +488,9 @@ func (d *Dec) ObjBegin(typ string) bool {
 		return false
 	}
 	if d.peek() != '{' {
-		d.typeErr(d.kind(), typ)
+		k := d.kind()
 		d.Skip()
+		d.typeErr(k, typ)
 		return false
 	}
 	d.pos++
@@ -499,8 +529,9 @@ func (d *Dec) ArrBegin(typ string) bool {
 		return false
 	}
 	if d.peek() != '[' {
-		d.typeErr(d.kind(), typ)
+		k := d.kind()
 		d.Skip()
+		d.typeErr(k, typ)
 		return false
 	}
 	d.pos++
