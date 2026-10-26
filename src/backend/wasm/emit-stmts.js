@@ -48,6 +48,12 @@ function hasReturnInBlock(n) {
 	return found;
 }
 
+// A plain `string`: the one string type that lives in `any` as the bare
+// string. A named string type is boxed like any other scalar (see emitExpr).
+function isBareStringType(t, checker) {
+	return isStringType(t, checker) && t.kind !== "named";
+}
+
 export class StmtsEmitter {
 	emitVarDecl(stmt) {
 		const decls = stmt.decls ?? stmt.specs ?? [stmt];
@@ -1181,7 +1187,9 @@ export class StmtsEmitter {
 			return;
 		}
 
-		if (isStringType(targetGoType, this.mod.checker)) {
+		// A named string type is boxed like any other scalar (see emitExpr); only
+		// a plain `string` lives in `any` as the bare string.
+		if (isBareStringType(targetGoType, this.mod.checker)) {
 			const isStrIdx = this.mod.getIsStringImportIndex();
 			this.pushInstruction({ op: "call", funcIndex: isStrIdx });
 			return;
@@ -1224,6 +1232,17 @@ export class StmtsEmitter {
 			}
 		}
 
+		// A map lives in `any` as its bare map struct.
+		if (isMapType(targetGoType, this.mod.checker)) {
+			const { keyType, valType } = getMapKeyValTypes(
+				targetGoType,
+				this.mod.checker,
+			);
+			const mInfo = this.mod.getMapType(keyType, valType);
+			this.pushInstruction({ op: "ref.test", typeIndex: mInfo.typeIndex });
+			return;
+		}
+
 		// Scalar types
 		const box = this.mod.getIfaceBoxType(targetGoType);
 		if (box) {
@@ -1240,7 +1259,7 @@ export class StmtsEmitter {
 			return;
 		}
 
-		if (isStringType(targetGoType, this.mod.checker)) {
+		if (isBareStringType(targetGoType, this.mod.checker)) {
 			this.pushInstruction("extern.convert_any");
 			return;
 		}
@@ -1296,6 +1315,19 @@ export class StmtsEmitter {
 				});
 				return;
 			}
+		}
+
+		if (isMapType(targetGoType, this.mod.checker)) {
+			const { keyType, valType } = getMapKeyValTypes(
+				targetGoType,
+				this.mod.checker,
+			);
+			const mInfo = this.mod.getMapType(keyType, valType);
+			this.pushInstruction({
+				op: "ref.cast_null",
+				typeIndex: mInfo.typeIndex,
+			});
+			return;
 		}
 
 		// Scalar types
