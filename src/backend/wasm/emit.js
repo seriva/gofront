@@ -40,6 +40,17 @@ const SCOPED_STMTS = new Set([
 	"TypeSwitchStmt",
 ]);
 
+// A same-named method with another arity (strings.Reader.Reset(s) vs
+// hash.Hash.Reset()) cannot satisfy this interface method.
+function filterByArity(candidates, params) {
+	if (!Array.isArray(params)) return candidates;
+	return candidates.filter(
+		(c) =>
+			!Array.isArray(c.targetParamTypes) ||
+			c.targetParamTypes.length === params.length,
+	);
+}
+
 export class FunctionEmitter {
 	constructor(moduleEmitter, funcDecl, funcIndex) {
 		this.mod = moduleEmitter;
@@ -1294,6 +1305,7 @@ export class FunctionEmitter {
 			fn._ifaceType,
 			fn._methodName,
 		);
+		candidates = filterByArity(candidates, fn.params);
 		const recvLocal = 0; // __recv is local 0
 		// Soft dispatchers (errors.Unwrap) return nil instead of panicking when
 		// the receiver is nil or has no such method.

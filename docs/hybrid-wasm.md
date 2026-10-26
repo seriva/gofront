@@ -123,14 +123,14 @@ Members of each Go package that `wasm` and `both` packages can use today, out of
 | `container/list` | 21 of 21 | 0 |
 | `container/ring` | 10 of 10 | 0 |
 | `context` | 17 of 20 | 3 |
-| `crypto/hmac` | 0 of 2 | 2 |
-| `crypto/md5` | 0 of 4 | 4 |
+| `crypto/hmac` | 2 of 2 | 0 |
+| `crypto/md5` | 4 of 4 | 0 |
 | `crypto/rand` | 2 of 3 | 1 |
-| `crypto/sha1` | 0 of 4 | 4 |
+| `crypto/sha1` | 4 of 4 | 0 |
 | `crypto/sha256` | 4 of 7 | 3 |
-| `crypto/sha512` | 0 of 13 | 13 |
-| `crypto/subtle` | 0 of 8 | 8 |
-| `encoding/base32` | 0 of 19 | 19 |
+| `crypto/sha512` | 13 of 13 | 0 |
+| `crypto/subtle` | 8 of 8 | 0 |
+| `encoding/base32` | 19 of 19 | 0 |
 | `encoding/base64` | 15 of 22 | 7 |
 | `encoding/binary` | 13 of 33 | 20 |
 | `encoding/csv` | 0 of 32 | 32 |
@@ -161,11 +161,11 @@ Members of each Go package that `wasm` and `both` packages can use today, out of
 | `strconv` | 41 of 43 | 2 |
 | `strings` | 75 of 82 | 7 |
 | `sync` | 39 of 39 | 0 |
-| `sync/atomic` | 0 of 90 | 90 |
+| `sync/atomic` | 90 of 90 | 0 |
 | `testing` | 89 of 94 | 5 |
 | `time` | 95 of 129 | 34 |
 | `unicode` | 52 of 52 | 0 |
-| `unicode/utf16` | 0 of 7 | 7 |
+| `unicode/utf16` | 7 of 7 | 0 |
 | `unicode/utf8` | 19 of 19 | 0 |
 <!-- stdlib:end -->
 
