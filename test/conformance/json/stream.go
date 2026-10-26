@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"math"
 	"strings"
 )
 
@@ -15,6 +17,12 @@ type Item struct {
 
 type StrictItem struct {
 	ID int `json:"id"`
+}
+
+type FailItem struct{}
+
+func (FailItem) MarshalJSON() ([]byte, error) {
+	return nil, errors.New("cannot marshal item")
 }
 
 func main() {
@@ -94,4 +102,23 @@ func main() {
 	err = bufDec.Decode(&itBuf)
 	rest, _ := io.ReadAll(bufDec.Buffered())
 	fmt.Printf("Decode Buffered: id=%d rest=%q\n", itBuf.ID, string(rest))
+
+	// --- 9. Encoder error handling ---
+	buf.Reset()
+	enc = json.NewEncoder(&buf)
+	err = enc.Encode(math.NaN())
+	var valErr *json.UnsupportedValueError
+	if errors.As(err, &valErr) {
+		fmt.Printf("Encode UnsupportedValueError NaN: Str=%s msg=%s\n", valErr.Str, valErr.Error())
+	} else {
+		fmt.Printf("Encode NaN unexpected: err=%v\n", err)
+	}
+
+	err = enc.Encode(FailItem{})
+	var marshErr *json.MarshalerError
+	if errors.As(err, &marshErr) {
+		fmt.Printf("Encode MarshalerError: msg=%s unwrap=%v\n", marshErr.Error(), errors.Unwrap(marshErr))
+	} else {
+		fmt.Printf("Encode FailItem unexpected: err=%v\n", err)
+	}
 }
