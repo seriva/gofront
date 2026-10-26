@@ -1,18 +1,18 @@
 # Native Go Compiler Engine — Design Plan
 
 **Version:** v2.0.0  
-**Status:** Draft (2026-10-23)  
+**Status:** Confirmed Baseline (2026-10-26) — JS engine feature-frozen at v1.8.0  
 **Related:** Depends on v1.8.0 ([`plans/v1.8.0/portable-go-plan.md`](../v1.8.0/portable-go-plan.md)), the **last feature release of the JS engine**. Followed by v2.1.0 (continuous feature evolution on the native Go engine)  
 
 **Baseline Spec:** v1.8.0, comprising:
 - The v1.4.0 language (including `.templ` and component-colocated scoped `css`);
 - The complete hybrid JS + WASM compiler from v1.5.0–v1.6.1 (`src/lower/`, package targets, JS strict numeric mode, full WasmGC backend, JS ↔ WASM boundary facades, shared linear-memory buffers);
 - v1.7.0 compile-time `encoding/json`, `.d.ts` tuple returns, Preact integration, and `gofront/simd`;
-- v1.8.0 WASM language parity (array value semantics, accessor-ref pointers to scalar fields/elements, per-iteration loop variables, range-over-func, generic named func types and type aliases, complex numbers, `min`/`max`, `[]rune`, exact constant folding, strict-mode runtime panics, universe-scope predeclared-name shadowing), the Go-source stdlib (`runtime/stdlib/`) with overlays and coverage manifest (`runtime/stdlib/manifest.json`), `iter`/`cmp`, `bufio`/`net/url`/`context`, `encoding/csv` and pure Go packages, pure-WASM `encoding/json`, and completed `gofront/simd`.
+- v1.8.0 WASM language parity (array value semantics, accessor-ref pointers to scalar fields/elements, per-iteration loop variables, range-over-func, generic named func types and type aliases, complex numbers, `min`/`max`, `[]rune`, exact constant folding, strict-mode runtime panics, universe-scope predeclared-name shadowing), the Go-source stdlib (`stdlib/`) with overlays and coverage manifest (`stdlib/manifest.json`), `iter`/`cmp`, `bufio`/`net/url`/`context`, `encoding/csv` and pure Go packages, pure-WASM `encoding/json`, and `gofront/simd` (`F32x4`, `Mask32x4`, lane operations, comparisons, shuffles, slice load/store helpers; SoA structs dropped to `simplefps`; retained as experimental per promotion gate decision).
 
 See [`plans/v1.6.1/wasm-gaps-plan.md`](../v1.6.1/wasm-gaps-plan.md), [`plans/v1.7.0/json-preact-simd-plan.md`](../v1.7.0/json-preact-simd-plan.md), and [`plans/v1.8.0/portable-go-plan.md`](../v1.8.0/portable-go-plan.md).
 
-**Prerequisite:** v1.8.0 released. The JS engine is feature-frozen from that release on (see [Cutover & Coexistence](#cutover--coexistence)). Phases 1–6 (build isolation, oracle, lexer, parser) may start earlier because v1.8.0 adds no syntax changes.
+**Prerequisite:** v1.8.0 baseline verified and released. The JS engine is feature-frozen from that release on (see [Cutover & Coexistence](#cutover--coexistence)). Phases 1–6 (build isolation, oracle, lexer, parser) may start earlier because v1.8.0 adds no syntax changes.
 
 > **Numbering.** Phases follow the plan template: `Phase N` (one dev-loop each, numbered 1–26 in execution order), with tasks `Task N.M` inside Phase N. Subsystems span consecutive phases: 1–2 scaffolding & oracle, 3–4 lexer, 5–6 parser, 7–11 checker, 12–14 lowering & JS core, 15–16 JS stdlib, 17–21 WASM backend, 22–23 dev server & CLI, 24 packaging, 25 conformance, 26 cutover. References to the v1.8.0 plan are always prefixed ("v1.8.0 Phase 1.2"), because that plan keeps its own `Phase X.Y` numbering.
 
@@ -89,8 +89,8 @@ Empirically audited against the repository on 2026-10-21:
 ## Out of Scope
 
 - **Language or semantic changes:** v2.0.0 is a strict port. New syntax, type rules, stdlib packages, or WASM features wait for v2.1+. Known v1.8.0 quirks are ported *as-is* and logged for v2.x.
-- **Expanding the stdlib surface:** The v1.8.0 coverage manifest (`runtime/stdlib/manifest.json`) is the frozen stdlib surface. Excluded entries remain excluded with identical diagnostics. `gofront/simd` retains the stability status decided in v1.8.0.
-- **Porting Go-source stdlib packages:** Pure packages and overlays written in GoFront Go under `runtime/stdlib/` in v1.8.0 are shared directly and embedded via `runtime/assets.go` (`//go:embed`). They are compiled by GoFront, not rewritten in host Go.
+- **Expanding the stdlib surface:** The v1.8.0 coverage manifest (`stdlib/manifest.json`) is the frozen stdlib surface. Excluded entries remain excluded with identical diagnostics. `gofront/simd` retains the stability status decided in v1.8.0 (retained as experimental per the promotion gate benchmark).
+- **Porting Go-source stdlib packages:** Pure packages and overlays written in GoFront Go under `stdlib/` in v1.8.0 are shared directly and embedded via `runtime/assets.go` (`//go:embed`). They are compiled by GoFront, not rewritten in host Go.
 - **Rewriting vendor bundling:** `gofront prep` / `vendor` (and the vendor step of `gofront build` when npm `dependencies` are present) continues delegating to [`src/vendor.js`](../../src/vendor.js), which invokes Rolldown or esbuild from the consumer's `devDependencies`.
 - **Embedding a JS runtime for `gofront test`:** GoFront will not embed Goja (incomplete modern ES/WasmGC/JSDOM support) or QuickJS (requires CGO). Node is already present wherever JS/WASM unit tests and JSDOM run.
 - **Using standard `go/parser` / `go/ast` / `go/types`:** The standard library packages enforce the official Go grammar and type rules strictly, rejecting GoFront extensions (`async`/`await`, `.templ`, `css`, `js:` imports, browser globals). `go/constant` and `math/big` *are* used for exact untyped constant arithmetic.
@@ -124,7 +124,7 @@ Empirically audited against the repository on 2026-10-21:
 - **Single-Source Shared Assets (`runtime/`):**
   - `runtime/js/*.js` holds the 35 JS runtime helpers extracted from `src/backend/js/runtime.js`.
   - `runtime/js/wasm/*.js` holds `WASM_IMPORTS_JS` and `WASM_STDLIB_JS` extracted from `src/backend/wasm/boundary.js`.
-  - `runtime/stdlib/` holds the v1.8.0 Go-source stdlib packages, overlays, and `manifest.json`.
+  - `runtime/stdlib/` holds the v1.8.0 Go-source stdlib packages, overlays, and `manifest.json` (migrated/shared from `stdlib/` in Phase 1).
   - `runtime/assets.go` (`package runtime`) exports `//go:embed js/*.js js/wasm/*.js stdlib` as `embed.FS` so `internal/*` packages can read them without `..` path traversal, while the JS engine loads the exact same files via `fs.readFileSync`.
 
 #### 1.1 Repository Layout
@@ -153,7 +153,7 @@ internal/oracle         JSON-lines differential testing oracle server
 runtime/assets.go       //go:embed exporter for runtime/js/, runtime/js/wasm/, and runtime/stdlib/
 runtime/js/*.js         Shared JS runtime helpers
 runtime/js/wasm/*.js    Shared WASM host imports + boundary glue
-runtime/stdlib/         Shared Go-source stdlib packages, overlays, and manifest.json (from v1.8.0)
+runtime/stdlib/         Shared Go-source stdlib packages, overlays, and manifest.json (from v1.8.0 stdlib/)
 ```
 
 #### 1.2 Differential Testing Oracle (`internal/oracle` & `test/unit/helpers.js`)
@@ -242,7 +242,7 @@ type Type interface {
 Ports the complete 39,850-LOC `src/backend/wasm/` subsystem as shipped in v1.8.0:
 - **WasmGC Type Hierarchy & Deterministic Binary Encoder (`types.go`, `encode.go`, `wat.go`):** Recursive type groups (`rec`), immutable slice headers with shared empty headers, `externref` JS strings (via JS String Builtins + host imports), insertion-ordered hash maps, interface itabs and `ref.test`/`ref.cast` dispatch, closure structs, complex `{re, im}` structs, and v1.8.0 abstract scalar pointer supertypes with box (`{ mut value T }`) and accessor-ref (`{ anyref target, i32 index, ref $get_T, ref $set_T }`) subtypes tested via `br_on_cast`.
 - **Monomorphisation & Instruction Emission (`monomorph.go`, `module.go`, `emit*.go`):** Specializes generic functions/structs/func-types; emits structured control flow (`block`/`loop`/`br_if`/`br_table`), `i32` bounds checks and induction-variable fast paths, trap-based nil dereference, scratch-global local caching, `local.tee` peepholes, `[N]T` deep array copy + clone elision, per-iteration loop variable boxes, range-over-func closures, and `try_table` + `exnref` `panic`/`defer`/`recover`.
-- **WASM Stdlib, JSON & SIMD (`stdlib/*.go`):** Ports all emitter mixins (`core`, `bytes`, `io`, `time`, `packages`, `pure`, `simd`), the v1.8.0 pure-WASM `encoding/json` scanner and per-type codecs, `gofront/simd` `v128` (`0xFD` LEB128 opcodes, `F32x4`, `Mask32x4`, shuffles, SoA `Vec3x4`/`AABB4`/`Ray4`), and `gofront/shared` linear-memory views.
+- **WASM Stdlib, JSON & SIMD (`stdlib/*.go`):** Ports all emitter mixins (`core`, `bytes`, `io`, `time`, `packages`, `pure`, `simd`), the v1.8.0 pure-WASM `encoding/json` scanner and per-type codecs, `gofront/simd` `v128` (`0xFD` LEB128 opcodes, `F32x4`, `Mask32x4`, shuffles, comparisons, slice helpers; experimental status retained; SoA structs dropped to `simplefps`), and `gofront/shared` linear-memory views.
 - **JS ↔ WASM Boundary & Binaryen (`boundary_*.go`, `optimize.go`):** Generates JS facades and `app.wasm` loader splicing embedded `runtime/js/wasm/*.js`; invokes `wasm-opt` (`-O3 --gufa --closed-world`, plus `--converge` on `--release`) preferring native `wasm-opt` on `PATH` with Node `binaryen` fallback.
 
 #### 1.8 CLI, Dev Server, Minifier & NPM Distribution (`internal/cli`, `internal/devserver`, `internal/minify`, `bin/`)
@@ -254,7 +254,7 @@ Ports the complete 39,850-LOC `src/backend/wasm/` subsystem as shipped in v1.8.0
 
 #### 1.9 Cutover & Coexistence
 
-1. **JS Engine Feature Freeze:** Once v1.8.0 ships, the JS compiler in `src/` receives bug fixes only; any bug fix lands in both engines with a shared test.
+1. **JS Engine Feature Freeze:** As of the v1.8.0 release, the JS compiler in `src/` is officially feature-frozen. The JS compiler in `src/` receives bug fixes only; any bug fix lands in both engines with a shared test.
 2. **Dual-Engine CI:** From Phase 3 onward (the first phase with native output the oracle can compare), CI runs both `GOFRONT_ENGINE=js` and `GOFRONT_ENGINE=native` on every phase PR, tracking parity gates.
 3. **Beta Opt-In → Default Flip:** `GOFRONT_ENGINE=native` enables the native binary during beta; Phase 26 (Task 26.2) flips the default in `bin/gofront.js` to `native` while retaining `GOFRONT_ENGINE=js` as a fallback for one minor release before retiring compiler sources in `src/` (keeping `src/vendor.js`, `src/test-runner.js`, and `runtime/`).
 
@@ -486,7 +486,7 @@ Ports the complete 39,850-LOC `src/backend/wasm/` subsystem as shipped in v1.8.0
 - [ ] Task 11.4: v1.8.0 coverage manifest gate on native checker
   - Files: `internal/stdlib/manifest_test.go`
   - Test: `go test ./internal/stdlib/... -run TestManifestCoverage`.
-  - Done when: Every in-scope entry in `runtime/stdlib/manifest.json` is verified present with matching Go signature in the native engine.
+  - Done when: Every in-scope entry in `stdlib/manifest.json` is verified present with matching Go signature in the native engine.
 
 ### Phase 12: Shared Lowering & Semantic Analyses (`internal/lower`)
 - [ ] Task 12.1: Ownership, mutation & struct/array clone elision
@@ -568,7 +568,7 @@ Ports the complete 39,850-LOC `src/backend/wasm/` subsystem as shipped in v1.8.0
 - [ ] Task 16.2: `gofront/simd` JS fallback & `gofront/shared` emitters
   - Files: `internal/backend/js/stdlib/simd.go`, `internal/backend/js/stdlib/shared.go`
   - Test: `go test ./internal/backend/js/stdlib/... -run TestSimdAndShared`.
-  - Done when: `gofront/simd` (`F32x4`, `Mask32x4`, comparisons, shuffles, SoA helpers) and `gofront/shared` JS emitters match `src/backend/js/stdlib/{simd,shared}.js`.
+  - Done when: `gofront/simd` (`F32x4`, `Mask32x4`, comparisons, shuffles, slice load/store helpers; experimental) and `gofront/shared` JS emitters match `src/backend/js/stdlib/{simd,shared}.js`.
 - [ ] Task 16.3: `.templ` DOM codegen & `gom` namespace emitter
   - Files: `internal/backend/js/templ.go`, `internal/backend/js/stdlib/gom.go`
   - Test: `GOFRONT_ENGINE=native node test/unit/run.js test/unit/builtins/gom.test.js test/unit/builtins/dom.test.js`.
@@ -648,7 +648,7 @@ Ports the complete 39,850-LOC `src/backend/wasm/` subsystem as shipped in v1.8.0
 - [ ] Task 20.4: WASM `encoding/json`, `gofront/simd` & `gofront/shared` emitters
   - Files: `internal/backend/wasm/stdlib/json.go`, `internal/backend/wasm/stdlib/simd.go`, `internal/backend/wasm/stdlib/pure.go`
   - Test: `GOFRONT_ENGINE=native node test/unit/run.js test/unit/wasm/simd.test.js test/unit/wasm/shared.test.js`.
-  - Done when: v1.8.0 pure-WASM JSON codecs, `gofront/simd` (`F32x4`, `Mask32x4`, SoA types), and `gofront/shared` linear-memory views pass all tests.
+  - Done when: v1.8.0 pure-WASM JSON codecs, `gofront/simd` (`F32x4`, `Mask32x4`, slice load/store helpers; experimental), and `gofront/shared` linear-memory views pass all tests.
 
 ### Phase 21: JS ↔ WASM Boundary, Facades & Binaryen Optimizer
 - [ ] Task 21.1: Boundary metadata collection, import scanning & WASM boundary helpers
