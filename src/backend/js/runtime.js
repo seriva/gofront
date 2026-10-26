@@ -3039,4 +3039,12 @@ var __simd_load = __simd_load || function(buf, i) {
 var __simd_store = __simd_store || function(buf, i, v) {
   if (i < 0 || i + 4 > buf.length) throw new Error("panic: runtime error: index out of range");
   buf[i] = v[0]; buf[i + 1] = v[1]; buf[i + 2] = v[2]; buf[i + 3] = v[3];
+};
+var __simd_load_slice = __simd_load_slice || function(xs, i) {
+  if (xs == null || i < 0 || i + 4 > xs.length) throw new Error("panic: runtime error: index out of range");
+  return Object.freeze([xs[i], xs[i + 1], xs[i + 2], xs[i + 3]]);
+};
+var __simd_store_slice = __simd_store_slice || function(xs, i, v) {
+  if (xs == null || i < 0 || i + 4 > xs.length) throw new Error("panic: runtime error: index out of range");
+  xs[i] = v[0]; xs[i + 1] = v[1]; xs[i + 2] = v[2]; xs[i + 3] = v[3];
 };`;
