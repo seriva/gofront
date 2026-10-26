@@ -104,15 +104,47 @@ reported as `pkg [js]` and `pkg [wasm]` — ensuring both backends produce ident
 
 ---
 
+## Standard library & Conformance
+
+### Go-source standard library (`stdlib/`, `runtime/stdlib/`)
+
+GoFront provides pure Go implementations of standard library packages (such as `encoding/csv`, `container/heap`, `cmp`, `iter`, `hash/*`, `net/url`, `bufio`, and `context`), located in `stdlib/` (embedded as `runtime/stdlib/`). These packages are written in GoFront Go with `//gofront:target both` and `//go:build gofront`. The resolver loads them before built-in fallbacks and compiles them into the caller's target (`js`, `wasm`, or `both`) with no external runtime dependencies. Package overlays extend emitter-backed namespaces with pure Go implementations.
+
+### Standard library manifest (`stdlib/manifest.json`)
+
+The coverage manifest records every member of every standard library package listed in Go's `api/go1.*.txt` specifications (targeting Go 1.26). It documents each member's kind, signature, availability (`js`, `wasm`, `both`, or `excluded:<reason>`), and implementation source (`emitter` or `source`). The manifest is checked into the repository, allowing CI and coverage verification to run without requiring a host Go toolchain.
+
+### Maintenance scripts (`scripts/`)
+
+- `scripts/stdlib-manifest.js`: Parses Go API specification files, applies overrides from `scripts/manifest-overrides.json`, and generates or validates (`--check`) `stdlib/manifest.json`.
+- `scripts/docs-stdlib.js`: Reads `stdlib/manifest.json` and `test/unit/types/stdlib-coverage.gaps.json` to generate or check the stdlib coverage tables in `docs/language-support.md` and `docs/hybrid-wasm.md`.
+
+### Conformance testing (`test/conformance/`)
+
+The conformance test suite verifies standard library behavior against the official Go compiler:
+
+- Each fixture in `test/conformance/<pkg>/<name>.go` is a standalone Go program whose expected output is recorded in `<name>.out` using real Go (`go run`).
+- `npm run conformance` (`test/conformance/run.js`) compiles every fixture as a `both` package, executes it under both the JavaScript and WebAssembly backends, and compares stdout byte-for-byte with `<name>.out`.
+- `npm run conformance:update` (`test/conformance/update.js`) regenerates the `.out` golden files using the Go 1.26 toolchain when new conformance tests are added.
+
+---
+
 ## Source layout
 
 ```
+stdlib/               Go-source standard library packages (//gofront:target both)
+  manifest.json       Standard library coverage manifest against Go 1.26 API
+  <pkg>/              Pure Go implementations (cmp, iter, container, csv, url, etc.)
+scripts/
+  stdlib-manifest.js  Generates and checks stdlib/manifest.json from Go API files
+  manifest-overrides.json Overrides and status annotations for the manifest
+  docs-stdlib.js      Generates stdlib tables in language-support.md and hybrid-wasm.md
 src/
   index.js            CLI entry: argument routing, file I/O, watch mode
   cli-core.js         dev / build / check / test / prep / init command implementations
   colors.js           ANSI color helpers and diagnostic formatting
   compiler.js         compileDir / compileSingleFile: parse → check → lower → emit, package linking
-  resolver.js         import resolution: local packages, npm types, .d.ts, builtin package list
+  resolver.js         import resolution: local packages, npm types, .d.ts, builtin package list, stdlib/
   project-config.js   gofront.json / package.json "gofront" settings
   dev-server.js       static server, SSE live reload, error overlay
   test-runner.js      *_test.go discovery and Go-style harness (JS, wasm and dual-target)
@@ -128,6 +160,12 @@ src/
   lower/              backend-independent analyses stored as side tables
   backend/js/         JS code generator: statements, expressions, templ, runtime helpers, source maps, stdlib/ shims
   backend/wasm/       WasmGC backend (see table above)
+test/
+  conformance/        Byte-for-byte output conformance fixtures compared with real Go
+    run.js            Conformance runner (JS and WASM backends vs .out golden files)
+    update.js         Regenerates .out golden files using the Go 1.26 toolchain
+  unit/               Compiler, parser, type checker, and backend unit tests
+  e2e/                End-to-end and performance benchmark suites
 ```
 
 Layer boundaries (`cli → support → backend → lower → typechecker → parser → lexer → types`)
