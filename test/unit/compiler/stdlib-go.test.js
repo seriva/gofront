@@ -673,3 +673,56 @@ func main() {}
 		},
 	);
 });
+
+test("type assertion to a Go-source package struct pointer (JS and WASM parity)", async () => {
+	const out = await stdParity(`import (
+	"encoding/csv"
+	"io"
+	"strings"
+)
+
+func Run() string {
+	var eof error = io.EOF
+	_, isParse := eof.(*csv.ParseError)
+	r := csv.NewReader(strings.NewReader("a\\"b,c\\n"))
+	_, err := r.Read()
+	pe, ok := err.(*csv.ParseError)
+	if !ok {
+		return "not a ParseError"
+	}
+	if isParse {
+		return "EOF reported as ParseError"
+	}
+	return "ok line=" + string(rune('0'+pe.Line))
+}
+`);
+	assertEqual(out, "ok line=1");
+});
+
+test("interface dispatch skips same-named methods with other parameters (WASM)", async () => {
+	const out = await stdParity(`import "io"
+
+type rows struct{ n int }
+
+func (r *rows) Write(rec []string) error {
+	r.n += len(rec)
+	return nil
+}
+
+type sink struct{ buf []byte }
+
+func (s *sink) Write(p []byte) (int, error) {
+	s.buf = append(s.buf, p...)
+	return len(p), nil
+}
+
+func Run() string {
+	var w io.Writer = &sink{}
+	w.Write([]byte("abc"))
+	rs := &rows{}
+	rs.Write([]string{"x", "y"})
+	return string(w.(*sink).buf) + "," + string(rune('0'+rs.n))
+}
+`);
+	assertEqual(out, "abc,2");
+});

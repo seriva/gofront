@@ -133,7 +133,7 @@ Members of each Go package that `wasm` and `both` packages can use today, out of
 | `encoding/base32` | 19 of 19 | 0 |
 | `encoding/base64` | 15 of 22 | 7 |
 | `encoding/binary` | 13 of 33 | 20 |
-| `encoding/csv` | 0 of 32 | 32 |
+| `encoding/csv` | 32 of 32 | 0 |
 | `encoding/hex` | 7 of 15 | 8 |
 | `encoding/json` | 0 of 68 | 68 |
 | `errors` | 6 of 7 | 1 |

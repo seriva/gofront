@@ -1355,7 +1355,15 @@ export const expressionGenMethods = {
 		return wrap(`(${check} ? [${okOut}, true] : [${zero}, false])`);
 	},
 
-	_typeNameCheckExpr(name, val) {
+	// `csv.ParseError` names the class of the bundled Go-source package type.
+	_qualifiedStructName(name) {
+		if (!name.includes(".") || this.structNames.has(name)) return name;
+		const cls = this.checker?.types.get(name)?.name;
+		return cls && this.structNames.has(cls) ? cls : name;
+	},
+
+	_typeNameCheckExpr(typeName, val) {
+		const name = this._qualifiedStructName(typeName);
 		if (TYPEOF_NUMBER_NAMES.has(name)) return `typeof ${val} === "number"`;
 		if (name === "string") return `typeof ${val} === "string"`;
 		if (name === "bool") return `typeof ${val} === "boolean"`;
@@ -2405,9 +2413,9 @@ export const expressionGenMethods = {
 		if (
 			typeNode.kind === "PointerType" &&
 			typeNode.base?.kind === "TypeName" &&
-			this.structNames.has(typeNode.base.name)
+			this.structNames.has(this._qualifiedStructName(typeNode.base.name))
 		) {
-			const name = typeNode.base.name;
+			const name = this._qualifiedStructName(typeNode.base.name);
 			return `(${val} instanceof ${name} && ${val}.__v !== true)`;
 		}
 		return "true";
