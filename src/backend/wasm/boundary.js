@@ -377,7 +377,11 @@ function classifySlice(t, mod) {
 		k: "slice",
 		elem,
 		sliceInfo,
-		key: wTypeKey(sliceInfo.elemWType),
+		// []F32x4 and []Mask32x4 share a wasm slice type but cross differently,
+		// so they get separate helper keys.
+		key:
+			wTypeKey(sliceInfo.elemWType) +
+			(elem.k === "f32x4" || elem.k === "mask4" ? `_${elem.k}` : ""),
 		wType: { kind: "ref", nullable: true, typeIndex: sliceInfo.typeIndex },
 	};
 }
