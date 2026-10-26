@@ -1293,7 +1293,8 @@ export class FunctionEmitter {
 				const pkg = t.expr?.name;
 				if (pkg) return `${pkg}.${t.field}`;
 			}
-			if (t.kind === "simd") return "simd.F32x4";
+			if (t.kind === "simd")
+				return t.simd === "Mask32x4" ? "simd.Mask32x4" : "simd.F32x4";
 			if (t.name) return t.name;
 			if (t.kind === "named") return t.name;
 			if (t.kind === "TypeName" || t.kind === "Ident") return t.name;

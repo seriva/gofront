@@ -2472,6 +2472,8 @@ export class ExprsEmitter {
 			} else if (isStringType(f.goType, this.mod.checker)) {
 				const cmpIdx = this.mod.getStringCmpImportIndex("==");
 				this.pushInstruction({ op: "call", funcIndex: cmpIdx });
+			} else if (f.wType === "v128") {
+				this._emitSimdEq(f.goType);
 			} else if (f.wType === "anyref") {
 				this._emitAnyEq();
 			} else if (this._isScalarPtrType(f.goType, f.wType)) {
@@ -2678,6 +2680,8 @@ export class ExprsEmitter {
 				if (isStringType(goType, this.mod.checker) || wType === "externref") {
 					const cmpIdx = this.mod.getStringCmpImportIndex("==");
 					this.pushInstruction({ op: "call", funcIndex: cmpIdx });
+				} else if (wType === "v128") {
+					this._emitSimdEq(goType);
 				} else if (wType === "anyref") {
 					this._emitAnyEq();
 				} else if (this._isScalarPtrType(goType, wType)) {
@@ -2693,6 +2697,9 @@ export class ExprsEmitter {
 				if (isStringType(goType, this.mod.checker) || wType === "externref") {
 					const cmpIdx = this.mod.getStringCmpImportIndex("!=");
 					this.pushInstruction({ op: "call", funcIndex: cmpIdx });
+				} else if (wType === "v128") {
+					this._emitSimdEq(goType);
+					this.pushInstruction("i32.eqz");
 				} else if (wType === "anyref") {
 					this._emitAnyEq();
 					this.pushInstruction("i32.eqz");

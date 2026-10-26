@@ -1253,29 +1253,52 @@ export const expressionCheckMethods = {
 			this.assertAssignable(targetParam, argTypes[i], node, "argument");
 		}
 
-		// Validate Lane and WithLane constant integer lane index
-		if (expr.func?.kind === "SelectorExpr") {
-			const recvType = expr.func.expr?._type;
-			const isSimd =
-				recvType?.name === "simd.F32x4" ||
-				recvType?.name === "F32x4" ||
-				recvType?.underlying?.kind === "simd";
-			if (
-				isSimd &&
-				(expr.func.field === "Lane" || expr.func.field === "WithLane")
-			) {
-				const laneArg = expr.args[0];
-				if (laneArg) {
-					const idx = this._constIntValue(laneArg, scope);
-					if (idx === null || idx < 0 || idx > 3) {
-						this.err(
-							"lane index must be a constant integer in range [0, 3]",
-							laneArg,
-						);
-					}
-				}
+		this._checkSimdLaneArgs(expr, scope);
+	},
+
+	// Lane, WithLane, Swizzle and Shuffle take constant lane indices.
+	_checkSimdLaneArgs(expr, scope) {
+		if (expr.func?.kind !== "SelectorExpr") return;
+		const recv = expr.func.expr?._type;
+		const field = expr.func.field;
+		let first = 0;
+		let count = 0;
+		let max = 3;
+		if (recv?.kind === "namespace" && recv.members?.Mask32x4) {
+			if (field !== "Shuffle") return;
+			first = 2;
+			count = 4;
+			max = 7;
+		} else if (this._isSimdType(recv)) {
+			if (field === "Lane" || field === "WithLane") count = 1;
+			else if (field === "Swizzle") count = 4;
+			else return;
+		} else {
+			return;
+		}
+		for (let i = first; i < first + count; i++) {
+			const arg = expr.args[i];
+			if (!arg) continue;
+			const idx = this._constIntValue(arg, scope);
+			if (idx !== null) arg._constInt = idx;
+			if (idx === null || idx < 0 || idx > max) {
+				this.err(
+					`lane index must be a constant integer in range [0, ${max}]`,
+					arg,
+				);
 			}
 		}
+	},
+
+	_isSimdType(t) {
+		return (
+			t?.name === "simd.F32x4" ||
+			t?.name === "F32x4" ||
+			t?.name === "simd.Mask32x4" ||
+			t?.name === "Mask32x4" ||
+			t?.underlying?.kind === "simd" ||
+			t?.kind === "simd"
+		);
 	},
 
 	checkBuiltin(name, expr, argTypes, scope) {
@@ -1398,6 +1421,11 @@ export const expressionCheckMethods = {
 	},
 
 	_checkSimdCompositeLit(expr, scope, t, base) {
+		if (base.simd === "Mask32x4") {
+			if (expr.elems.length > 0)
+				this.err("simd.Mask32x4 literal cannot have values", expr);
+			return t;
+		}
 		if (expr.elems.length > 4) {
 			this.err("too many values in simd.F32x4 literal", expr);
 		}
