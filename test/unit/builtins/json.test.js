@@ -1287,34 +1287,26 @@ func main() {
 // WASM Diagnostic (Task 1.5)
 // ═════════════════════════════════════════════════════════════
 
-section("encoding/json — wasm diagnostic");
+section("encoding/json — wasm enablement");
 
-test("json.MarshalIndent rejected in wasm target", () => {
+test("json.MarshalIndent accepted in wasm target", () => {
 	const res = compile(`//gofront:target wasm
 package main
 import "encoding/json"
 func main() {
 	_, _ = json.MarshalIndent(42, "", "  ")
 }`);
-	assert(res.errors.length > 0, "expected compile error in wasm package");
-	assertContains(
-		res.errors[0].message,
-		"'json.MarshalIndent' is not yet available in wasm packages",
-	);
+	assertEqual(res.errors.length, 0);
 });
 
-test("json.MarshalIndent rejected in both target", () => {
+test("json.MarshalIndent accepted in both target", () => {
 	const res = compile(`//gofront:target both
 package main
 import "encoding/json"
 func main() {
 	_, _ = json.MarshalIndent(42, "", "  ")
 }`);
-	assert(res.errors.length > 0, "expected compile error in both package");
-	assertContains(
-		res.errors[0].message,
-		"'json.MarshalIndent' is not yet available in wasm packages",
-	);
+	assertEqual(res.errors.length, 0);
 });
 
 // ── Entry point ───────────────────────────────────────────────
