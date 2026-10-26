@@ -2945,21 +2945,32 @@ export class ExprsEmitter {
 			return;
 		}
 
+		// A named byte slice (`type MyBytes []byte`) converts like `[]byte`.
+		const isByteElem = (t) => {
+			const elem = this._getSliceElemType(t);
+			return elem?.name === "byte" || elem?.name === "uint8";
+		};
 		if (
 			fromWType === "externref" &&
 			isSliceType(targetType, this.mod.checker) &&
-			(targetType.elem?.name === "byte" || targetType.elem?.name === "uint8")
+			isByteElem(targetType)
 		) {
-			this._emitStringToByteSlice(targetType);
+			this._emitStringToByteSlice({
+				kind: "slice",
+				elem: this._getSliceElemType(targetType),
+			});
 			return;
 		}
 
 		if (
 			toWType === "externref" &&
 			isSliceType(fromType, this.mod.checker) &&
-			(fromType.elem?.name === "byte" || fromType.elem?.name === "uint8")
+			isByteElem(fromType)
 		) {
-			this._emitByteSliceToString(fromType);
+			this._emitByteSliceToString({
+				kind: "slice",
+				elem: this._getSliceElemType(fromType),
+			});
 			return;
 		}
 

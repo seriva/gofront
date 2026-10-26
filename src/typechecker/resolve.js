@@ -836,7 +836,16 @@ function isExported(name) {
 	return code >= 65 && code <= 90;
 }
 
-function _processJsonField(f, depth, path, visited, queue, candidates) {
+function _processJsonField(
+	f,
+	depth,
+	path,
+	visited,
+	queue,
+	candidates,
+	index,
+	pos,
+) {
 	const tagInfo = parseJsonTag(f.tag);
 	if (tagInfo.ignored) return;
 
@@ -863,6 +872,7 @@ function _processJsonField(f, depth, path, visited, queue, candidates) {
 					depth,
 					tagged: true,
 					isEmbedded: true,
+					index: [...index, pos],
 					path: [...path, { name: embedName, isPtr, typeName: embedName }],
 				});
 			}
@@ -873,6 +883,7 @@ function _processJsonField(f, depth, path, visited, queue, candidates) {
 				queue.push({
 					struct: embedStruct,
 					depth: depth + 1,
+					index: [...index, pos],
 					path: [...path, { name: embedName, isPtr, typeName: embedName }],
 					visited: nextVisited,
 				});
@@ -881,9 +892,10 @@ function _processJsonField(f, depth, path, visited, queue, candidates) {
 		return;
 	}
 
-	for (const name of f.names) {
+	for (const [i, name] of f.names.entries()) {
 		if (!isExported(name)) continue;
 		candidates.push({
+			index: [...index, pos + i],
 			jsonKey: tagInfo.name !== null ? tagInfo.name : name,
 			goName: name,
 			type: f.type,
@@ -919,8 +931,16 @@ function _resolveCandidateCollisions(candidates) {
 		}
 	}
 
-	winningFields.sort((a, b) => candidates.indexOf(a) - candidates.indexOf(b));
+	// Go orders the fields of a struct by their index sequence, so a promoted
+	// field sits where its embedded struct is declared.
+	winningFields.sort((a, b) => compareIndex(a.index, b.index));
 	return winningFields;
+}
+
+function compareIndex(a, b) {
+	for (let i = 0; i < a.length && i < b.length; i++)
+		if (a[i] !== b[i]) return a[i] - b[i];
+	return a.length - b.length;
 }
 
 export function resolveJsonFields(structType) {
@@ -931,16 +951,25 @@ export function resolveJsonFields(structType) {
 	if (underlying._jsonFields) return underlying._jsonFields;
 
 	const queue = [
-		{ struct: underlying, depth: 0, path: [], visited: new Set([underlying]) },
+		{
+			struct: underlying,
+			depth: 0,
+			path: [],
+			index: [],
+			visited: new Set([underlying]),
+		},
 	];
 	const candidates = [];
 
 	while (queue.length > 0) {
-		const { struct: curr, depth, path, visited } = queue.shift();
+		const { struct: curr, depth, path, index, visited } = queue.shift();
 		if (curr?.kind !== "struct") continue;
 
+		// Each name of a `A, B int` field is its own field, as in Go.
+		let pos = 0;
 		for (const f of curr._structFields || []) {
-			_processJsonField(f, depth, path, visited, queue, candidates);
+			_processJsonField(f, depth, path, visited, queue, candidates, index, pos);
+			pos += f.embedded ? 1 : (f.names?.length ?? 1);
 		}
 	}
 
