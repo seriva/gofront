@@ -29,6 +29,7 @@ import { log } from "./colors.js";
 import { parseDts } from "./dts-parser.js";
 import { Lexer } from "./lexer.js";
 import { lower } from "./lower/index.js";
+import { generateJsonCodecs } from "./lower/json-codecs.js";
 import { reachableStdlibDecls } from "./lower/reachability.js";
 import { forEachChild } from "./lower/walk.js";
 import { Parser } from "./parser/index.js";
@@ -755,6 +756,14 @@ function lowerStdlibRefs(node) {
 		node.name = node._stdName;
 		delete node._stdName;
 	}
+	// `json.Marshal` calls the package's generated codec entry point (see
+	// lower/json-codecs.js).
+	if (node._jsonGen && node.kind === "SelectorExpr") {
+		delete node.expr;
+		delete node.field;
+		node.kind = "Ident";
+		node.name = node._jsonGen;
+	}
 	forEachChild(node, lowerStdlibRefs);
 }
 
@@ -898,6 +907,50 @@ function bindStdlibImport(checker, p, spec, pkg) {
 	}
 	if (!pkg.overlay)
 		checker.trackImport(name, importNode(spec), p._filename, p._source);
+}
+
+// Generates, imports and checks the codecs for the package's `encoding/json`
+// calls as one more (wasm-only) file.  Returns the generated programs: none
+// for a js package, a package with errors, or one that makes no json calls.
+function checkJsonCodecs(programs, checker, preambles, options) {
+	const wasm = checker.target === "wasm" || checker.target === "both";
+	if (!wasm || checker.errors.length > 0) return [];
+	const gen = generateJsonCodecs(programs, checker, checker.pkgName);
+	if (!gen) return [];
+	for (const { program, node, message, hint } of gen.diagnostics) {
+		checker._setCurrentFile(program);
+		checker.recordBlocker("unsupported stdlib member", message);
+		checker.err(message, node, hint);
+	}
+	if (gen.diagnostics.length > 0) return [];
+	const filename = "json_codecs.go";
+	const ast = new Parser(
+		new Lexer(gen.source, filename).tokenize(),
+		filename,
+		gen.source,
+	).parse();
+	ast._source = gen.source;
+	ast._path = join(dirname(programs[0]._path ?? "."), filename);
+	ast.target = checker.target;
+	importStdlibPackages(
+		[ast],
+		checker,
+		preambles,
+		options.bundledDirs ?? new Set(),
+		options,
+	);
+	const before = checker.errors.length;
+	checker.checkAll([ast]);
+	if (checker.errors.length > before) {
+		const detail = checker.errors
+			.slice(before)
+			.map((e) => e.message)
+			.join("\n");
+		throw new Error(
+			`internal error in the generated encoding/json codecs; please report\n${detail}`,
+		);
+	}
+	return [ast];
 }
 
 function importStdlibPackages(
@@ -1365,6 +1418,7 @@ export function compileFiles(files, options = {}) {
 
 	// ── 3. Type-check ─────────────────────────────────────────────
 	const errors = checker.checkAll(programs);
+	const codecs = checkJsonCodecs(programs, checker, preambles, options);
 	checker.reportUnusedImports();
 	if (errors.length > 0) {
 		const msgs = errors.map((e) => e.message).join("\n");
@@ -1377,7 +1431,7 @@ export function compileFiles(files, options = {}) {
 		key: resolve(fromDir),
 		pkgName,
 		pkgTarget,
-		programs,
+		programs: [...programs, ...codecs],
 		types: checker.types,
 		bundledPackages,
 	});

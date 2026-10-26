@@ -1,0 +1,9 @@
+<nil> "AB" "CD" "EF" {"X":1} [1, 2]
+<nil> NULL true
+<nil> "TOP"
+true strict says no
+true strict says no
+<nil> 1
+{"a" : [1, 2 ,3], "b":"x"}
+1|"two"|{"k":null}
+<nil> point <nil> 1 2
