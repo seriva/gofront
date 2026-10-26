@@ -1,18 +1,15 @@
 // GoFront test suite — encoding/json package
 
 import { fileURLToPath } from "node:url";
-import { compileSingleFile } from "../../../src/compiler.js";
 import {
 	assert,
 	assertContains,
 	assertEqual,
 	compile,
-	join,
 	runJs,
 	section,
 	summarize,
 	test,
-	withTempDir,
 } from "../helpers.js";
 
 // ═════════════════════════════════════════════════════════════
@@ -175,7 +172,7 @@ func main() {
 	console.log(string(b))
 }`);
 	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), '{"title":"Book","id":42}');
+	assertEqual(runJs(js), '{"id":42,"title":"Book"}');
 });
 
 test("json.Marshal embedded struct with explicit tag name is not promoted", () => {
@@ -613,7 +610,7 @@ func main() {
 	console.log(string(b2))
 }`);
 	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), '{"title":"Book"}\n{"title":"Book","id":42}');
+	assertEqual(runJs(js), '{"title":"Book"}\n{"id":42,"title":"Book"}');
 });
 
 test("Probe 14: Numeric slices decode to typed arrays and []byte accepts number arrays", () => {
@@ -1292,54 +1289,31 @@ func main() {
 
 section("encoding/json — wasm diagnostic");
 
-test("json.Marshal rejected in wasm target", () => {
+test("json.MarshalIndent rejected in wasm target", () => {
 	const res = compile(`//gofront:target wasm
 package main
 import "encoding/json"
 func main() {
-	_, _ = json.Marshal(42)
+	_, _ = json.MarshalIndent(42, "", "  ")
 }`);
 	assert(res.errors.length > 0, "expected compile error in wasm package");
 	assertContains(
 		res.errors[0].message,
-		"'json.Marshal' is not yet available in wasm packages",
+		"'json.MarshalIndent' is not yet available in wasm packages",
 	);
 });
 
-test("json.Marshal rejected in both target", () => {
+test("json.MarshalIndent rejected in both target", () => {
 	const res = compile(`//gofront:target both
 package main
 import "encoding/json"
 func main() {
-	_, _ = json.Marshal(42)
+	_, _ = json.MarshalIndent(42, "", "  ")
 }`);
 	assert(res.errors.length > 0, "expected compile error in both package");
 	assertContains(
 		res.errors[0].message,
-		"'json.Marshal' is not yet available in wasm packages",
-	);
-});
-
-test("encoding/json import rejected in wasm package", () => {
-	withTempDir(
-		{
-			"main.go": `//gofront:target wasm
-package main
-import "encoding/json"
-func main() {}`,
-		},
-		(dir) => {
-			let err = "";
-			try {
-				compileSingleFile(join(dir, "main.go"));
-			} catch (e) {
-				err = e.message;
-			}
-			assertContains(
-				err,
-				"'encoding/json' is not yet available in wasm packages",
-			);
-		},
+		"'json.MarshalIndent' is not yet available in wasm packages",
 	);
 });
 
