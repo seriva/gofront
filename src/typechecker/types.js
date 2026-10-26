@@ -703,6 +703,9 @@ export const INTRINSICS = new Map([
 	["deadline_timer", "func(any, int64, func() void) void"],
 	// JS: clears the timer armed under key; WASM: returns at once.
 	["deadline_stop", "func(any) void"],
+	// JS: process.exit(code) where a process exists; WASM: returns at once
+	// (the caller then panics).
+	["exit", "func(int) void"],
 ]);
 
 // ── Static operator sets (module-level for reuse) ────────────
