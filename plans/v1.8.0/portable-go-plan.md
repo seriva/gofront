@@ -1414,7 +1414,7 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
   - Test: conformance fixture `json/errors.go` and `json/indent.go`.
   - Done when: fixtures match Go on both backends.
 
-- [ ] **Task 5.4 — `Encoder`/`Decoder` over `io.Writer`/`io.Reader` (both backends)**
+- [x] **Task 5.4 — `Encoder`/`Decoder` over `io.Writer`/`io.Reader` (both backends)**
   - Files: new `runtime/stdlib/encoding/json/stream.go` (overlay, built on `bufio`)
   - Do: `NewEncoder`, `Encode`, `SetIndent`, `SetEscapeHTML`; `NewDecoder`, `Decode`, `More`, `UseNumber`, `DisallowUnknownFields`, `Buffered`, `InputOffset`. Multiple values in a stream, `io.EOF` at end, `io.ErrUnexpectedEOF` on truncation.
   - Test: conformance fixture `json/stream.go`.

@@ -764,6 +764,11 @@ export const jsonMethods = {
 			`    return __json_err("cannot unmarshal " + __json_type(parsed) + " into " + __json_ctx(${JSON.stringify(this._jsonDisplayType(structType))}));`,
 		);
 		lines.push(`  }`);
+		const knownKeys = fields.flatMap((f) => [f.jsonKey, f.goName]);
+		lines.push(
+			`  var disallowErr = __json_check_unknown(parsed, ${JSON.stringify(knownKeys)});`,
+		);
+		lines.push(`  if (disallowErr) return disallowErr;`);
 		// Go reports errors as "Go struct field <innermost struct>.<json key path>".
 		lines.push(`  __json_structs.push(${JSON.stringify(structName)});`);
 		lines.push(`  try {`);

@@ -51,16 +51,24 @@ func (e *InvalidUnmarshalError) Error() string {
 	return "json: Unmarshal(nil " + e.Type + ")"
 }
 
+var (
+	OptEscapeHTML            = true
+	OptUseNumber             bool
+	OptDisallowUnknownFields bool
+)
+
 // Dec is the state of one Unmarshal call. The input has been checked to be
 // valid JSON, so the readers below do not look for syntax errors.
 type Dec struct {
-	data    []byte
-	pos     int
-	Err     error
-	fatal   bool
-	structs []string
-	fields  []string
-	key     string
+	data                  []byte
+	pos                   int
+	Err                   error
+	fatal                 bool
+	structs               []string
+	fields                []string
+	key                   string
+	UseNumber             bool
+	DisallowUnknownFields bool
 }
 
 // NewDec checks that data is one valid JSON value and returns a decoder
@@ -69,7 +77,17 @@ func NewDec(data []byte) (*Dec, error) {
 	if err := CheckValid(data); err != nil {
 		return nil, err
 	}
-	return &Dec{data: data}, nil
+	return &Dec{
+		data:                  data,
+		UseNumber:             OptUseNumber,
+		DisallowUnknownFields: OptDisallowUnknownFields,
+	}, nil
+}
+
+// UnknownField records an error when an unknown struct field is encountered with DisallowUnknownFields.
+func (d *Dec) UnknownField(field string) {
+	d.Save(fmt.Errorf("json: unknown field %q", field))
+	d.Skip()
 }
 
 // InvalidUnmarshal is the error for a Unmarshal target v that is not a pointer
@@ -708,6 +726,9 @@ func (d *Dec) Any() any {
 		return nil
 	}
 	s := d.readNumber()
+	if d.UseNumber {
+		return Number(s)
+	}
 	f, err := strconv.ParseFloat(s, 64)
 	if err != nil {
 		d.typeErr("number "+s, "float64")
