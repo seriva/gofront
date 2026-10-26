@@ -1053,3 +1053,37 @@ func Main() int {
 `,
 	51,
 );
+
+test("Conversion to a type parameter (JS and WASM parity for in-range values)", () => {
+	const src = `
+package main
+
+type num interface {
+	~int | ~int8 | ~uint16 | ~int64 | ~uint64 | ~float64
+}
+
+func conv[T num](n uint64) T {
+	return T(n)
+}
+
+func Main() int {
+	return int(conv[int](7)) + int(conv[int8](100)) + int(conv[uint16](60000)) + int(conv[int64](1<<40)/1099511627776) + int(conv[float64](3))
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, 60111);
+	assertEqual(jsRes, wasmRes);
+});
+
+test("Conversion to a type parameter rejects a non-numeric operand", () => {
+	const { errors } = compile(`package main
+
+type num interface{ ~int | ~int64 }
+
+func conv[T num](s string) T {
+	return T(s)
+}
+
+func main() {}`);
+	assertErrorContains(errors, "cannot convert string to T");
+});

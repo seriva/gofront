@@ -103,7 +103,7 @@ Members of each Go package (functions, types, methods, fields, constants and var
 | `encoding/base32` | 19 of 19 | 0 | 0 | 0 |
 | `encoding/base64` | 15 of 22 | 7 | 0 | 0 |
 | `encoding/binary` | 13 of 33 | 20 | 0 | 0 |
-| `encoding/csv` | 0 of 32 | 32 | 0 | 0 |
+| `encoding/csv` | 32 of 32 | 0 | 0 | 0 |
 | `encoding/hex` | 7 of 15 | 8 | 0 | 0 |
 | `encoding/json` | 5 of 68 | 63 | 0 | 0 |
 | `errors` | 6 of 7 | 1 | 0 | 0 |
@@ -115,13 +115,13 @@ Members of each Go package (functions, types, methods, fields, constants and var
 | `html` | 2 of 2 | 0 | 0 | 0 |
 | `io` | 58 of 94 | 36 | 0 | 10 |
 | `iter` | 2 of 2 | 0 | 0 | 2 |
-| `log` | 0 of 43 | 43 | 0 | 0 |
+| `log` | 43 of 43 | 0 | 0 | 0 |
 | `maps` | 10 of 10 | 0 | 0 | 0 |
 | `math` | 80 of 97 | 17 | 0 | 0 |
 | `math/bits` | 50 of 50 | 0 | 0 | 0 |
-| `math/cmplx` | 0 of 27 | 27 | 0 | 0 |
+| `math/cmplx` | 27 of 27 | 0 | 0 | 0 |
 | `math/rand` | 12 of 45 | 33 | 0 | 0 |
-| `math/rand/v2` | 0 of 51 | 51 | 0 | 8 |
+| `math/rand/v2` | 50 of 51 | 1 | 0 | 8 |
 | `net/url` | 60 of 60 | 0 | 0 | 0 |
 | `os` | 10 of 10 | 0 | 3 | 188 |
 | `path` | 9 of 9 | 0 | 0 | 0 |

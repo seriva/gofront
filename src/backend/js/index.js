@@ -191,6 +191,8 @@ const HELPER_MAP = [
 const JS_INTRINSICS = {
 	deadline_timer: ([key, ns, fire]) =>
 		`(globalThis.__gofrontDeadlines ??= new Map()).set(${key}, setTimeout(${fire}, Math.max(0, Number(${ns}) / 1e6)));`,
+	exit: ([code]) =>
+		`if (typeof process !== "undefined" && process.exit) process.exit(${code});`,
 	deadline_stop: ([key]) =>
 		`clearTimeout(globalThis.__gofrontDeadlines?.get(${key})); globalThis.__gofrontDeadlines?.delete(${key});`,
 };
