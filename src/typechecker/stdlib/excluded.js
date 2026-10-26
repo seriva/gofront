@@ -1,7 +1,20 @@
 // src/typechecker/stdlib/excluded.js
-// Stdlib members that the manifest excludes (stdlib/manifest.json,
+// Stdlib packages and members that the manifest excludes (stdlib/manifest.json,
 // `excluded:` status) and that get a targeted diagnostic with the manifest's
-// note instead of the generic `No member` error.
+// note (or category reason) instead of the generic `No member` error.
+
+import { readFileSync } from "node:fs";
+
+const MANIFEST_URL = new URL("../../../stdlib/manifest.json", import.meta.url);
+const manifest = JSON.parse(readFileSync(MANIFEST_URL, "utf8"));
+
+const pkgIdent = (pkg) =>
+	pkg
+		.split("/")
+		.filter((s) => !/^v\d+$/.test(s))
+		.at(-1);
+
+export const EXCLUDED_STDLIB_PACKAGES = new Map();
 
 export const EXCLUDED_STDLIB_MEMBERS = new Map([
 	[
@@ -41,3 +54,27 @@ export const EXCLUDED_STDLIB_MEMBERS = new Map([
 	["testing.TB.Chdir", "file system"],
 	["testing.TB.ArtifactDir", "file system"],
 ]);
+
+for (const e of manifest.entries) {
+	if (!e.status?.startsWith("excluded:")) continue;
+	const reason = e.note ?? e.status.slice("excluded:".length);
+	if (e.kind === "package") {
+		if (!EXCLUDED_STDLIB_PACKAGES.has(e.pkg)) {
+			EXCLUDED_STDLIB_PACKAGES.set(e.pkg, reason);
+		}
+		continue;
+	}
+	const fullKey = `${e.pkg}.${e.name}`;
+	if (!EXCLUDED_STDLIB_MEMBERS.has(fullKey)) {
+		EXCLUDED_STDLIB_MEMBERS.set(fullKey, reason);
+	}
+	const key = `${pkgIdent(e.pkg)}.${e.name}`;
+	if (!EXCLUDED_STDLIB_MEMBERS.has(key)) {
+		EXCLUDED_STDLIB_MEMBERS.set(key, reason);
+	}
+	const rawLast = e.pkg.split("/").at(-1);
+	const rawKey = `${rawLast}.${e.name}`;
+	if (!EXCLUDED_STDLIB_MEMBERS.has(rawKey)) {
+		EXCLUDED_STDLIB_MEMBERS.set(rawKey, reason);
+	}
+}

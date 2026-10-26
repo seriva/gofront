@@ -15,6 +15,7 @@ import { constantCheckMethods } from "./constants.js";
 import { expressionCheckMethods } from "./expressions.js";
 import { resolveMethods } from "./resolve.js";
 import { statementCheckMethods } from "./statements.js";
+import { EXCLUDED_STDLIB_PACKAGES } from "./stdlib/excluded.js";
 import { setupGlobals } from "./stdlib.js";
 import { terminationMethods } from "./termination.js";
 import {
@@ -340,6 +341,7 @@ export class TypeChecker {
 			}
 		}
 
+		this._checkDirectivesAndImportsPass(programs);
 		this._registerConstExprs(programs);
 		this._collectTypesPass(programs);
 		this._collectFuncsPass(programs);
@@ -361,6 +363,38 @@ export class TypeChecker {
 		}
 
 		return this.errors;
+	}
+
+	_checkEmbedLines(source) {
+		if (typeof source !== "string") return;
+		const lines = source.split("\n");
+		for (let i = 0; i < lines.length; i++) {
+			if (/^[ \t]*\/\/go:embed(?:\s|$)/.test(lines[i])) {
+				this.err("//go:embed is not supported yet", {
+					line: i + 1,
+					col: lines[i].indexOf("//") + 1,
+				});
+			}
+		}
+	}
+
+	_checkDirectivesAndImportsPass(programs) {
+		this._importedPaths = new Set();
+		for (const p of programs) {
+			this._setCurrentFile(p);
+			this._checkEmbedLines(p._source);
+			for (const imp of p.imports ?? []) {
+				for (const spec of imp.imports ?? []) {
+					this._importedPaths.add(spec.path);
+					if (EXCLUDED_STDLIB_PACKAGES.has(spec.path)) {
+						this.err(
+							`package '${spec.path}' is not available: ${EXCLUDED_STDLIB_PACKAGES.get(spec.path)}`,
+							spec,
+						);
+					}
+				}
+			}
+		}
 	}
 
 	_checkMutablePackageVars(programs) {
