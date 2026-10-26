@@ -1355,29 +1355,33 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
 
 ### Phase 4.4: `math/cmplx`, `csv`, `log` and `math/rand/v2`
 
-- [ ] **Task 4.8 — `math/cmplx` (after Task 0.4)**
+- [x] **Task 4.8 — `math/cmplx` (after Task 0.4)**
   - Files: new `runtime/stdlib/math/cmplx/*.go`
   - Do: everything except functions needing `math/big`.
   - Test: conformance fixture `cmplx/funcs.go` with values printed via `%.6g` to avoid last-ulp differences.
   - Done when: fixture matches Go.
+  - Landed: `math/cmplx` in Go source (the standard library's own code, so results follow Go's algorithms), with every function except those needing `math/big`. Private stand-ins cover `math.Sincos`, `math.Asinh` and `math.Atanh`, which `math` lacks. The sources avoid constructs the backends still mishandle (non-ASCII identifiers, grouped named results, function-local constants, untyped constants as complex values); each is in `plans/follow-ups.md`. Fixed `math.IsInf(x, 0)` on JS, which was true for NaN. Conformance fixture `cmplx/funcs.go` matches Go 1.26 on JS and WASM.
 
-- [ ] **Task 4.9 — `encoding/csv` (after Task 4.1a)**
+- [x] **Task 4.9 — `encoding/csv` (after Task 4.1a)**
   - Files: new `runtime/stdlib/encoding/csv/{reader,writer}.go`
   - Do: as specified in [§8](#8-encodingcsv-go-source). Offsets count UTF-8 bytes.
   - Test: conformance fixtures `csv/reader.go`, `csv/writer.go` with the RFC 4180 cases and Go's `reader_test.go`/`writer_test.go` vectors.
   - Done when: fixtures match Go.
+  - Landed: `encoding/csv` `Reader` and `Writer` in Go source (the standard library's own code), with `ParseError` and the error values. The reader converts each field from the byte buffer on its own, because GoFront strings index UTF-16 units and Go's whole-buffer slicing would split non-ASCII fields. Fixed JS type assertions to a Go-source package's struct pointer (`err.(*csv.ParseError)` was always true) and WASM interface dispatch, which treated a same-named method with other parameter or result types (`csv.Writer.Write(record []string) error`) as an `io.Writer`. Conformance fixtures `csv/reader.go` (every case from Go's `reader_test.go` except the invalid-UTF-8 one, with field and error positions) and `csv/writer.go` match Go 1.26 on JS and WASM.
 
-- [ ] **Task 4.10 — `log` (after Task 3.1e)**
-  - Files: new `runtime/stdlib/log/log.go`
+- [x] **Task 4.10 — `log` (after Task 3.1e)**
+  - Files: new `runtime/stdlib/log/log.go`, `src/typechecker/types.js` (`exit` intrinsic)
   - Do: the member list in [§7](#7-new-pure-packages-go-source). Default output `os.Stderr`; `Fatal*` calls `os.Exit(1)` in JS and panics in WASM; `Lshortfile`/`Llongfile` print `???:0`.
   - Test: conformance fixture `log/log.go` with `SetFlags(0)` and a `bytes.Buffer` output; unit test for `Fatal` on both backends.
   - Done when: fixture matches Go.
+  - Landed: `log` in Go source with the full member list. `Fatal*` writes, then calls the new `exit` intrinsic (`process.exit` where a process exists, a no-op in WASM) and panics with the message, so JS exits and WASM panics. `Lshortfile` and `Llongfile` print `???:0`. The package-level functions reach the standard logger through a small accessor because a `both` package may not call a pointer-receiver method on a package variable. Conformance fixture `log/log.go` writes to a small `io.Writer` of its own instead of a `bytes.Buffer`, which has no methods on JS once converted to an interface (recorded in `plans/follow-ups.md`); unit tests cover `Fatal` on both backends and the `???:0` output.
 
-- [ ] **Task 4.11 — `math/rand/v2`**
+- [x] **Task 4.11 — `math/rand/v2`**
   - Files: new `runtime/stdlib/math/rand/v2/*.go`
   - Do: `PCG` source (bit-exact with Go for a given seed), `Rand`, `New`, `N` (generic), `IntN`, `Int64N`, `Uint64N`, `Float64`, `Float32`, `Perm`, `Shuffle`, `NormFloat64`, `ExpFloat64`; top-level functions use the per-target random source. `ChaCha8` reports the deferred exclusion.
   - Test: conformance fixture `rand/pcg.go` with a fixed seed (PCG output must match Go exactly); unit test for `IntN(0)` panic message.
   - Done when: fixture matches Go.
+  - Landed: `math/rand/v2` in Go source: `PCG` (bit-exact for a seed, with binary marshaling), `Rand` with every method, the top-level functions and generic `N`, `Zipf`, and the normal and exponential distributions. The top-level functions use a `PCG` seeded from the platform's random source (`math/rand`). `ChaCha8` and `NewChaCha8` report `ChaCha8 is deferred (code size)`. Every 64-bit value is kept as two `uint32` halves, so the sequence is the same on JS and WASM; only a value returned as a `uint64` (`Uint64`, `Int64`, `Int`) loses low bits above 2^53 in JS, and a custom `Source` is exact only in WASM. Added conversion to a type parameter (`T(n)`), which `N` needs: type-checked, exact in WASM through monomorphisation, and a plain pass-through in JS (it does not truncate). Conformance fixture `rand/pcg.go` matches Go 1.26 on JS and WASM; unit tests cover the `IntN(0)` family of panic messages and the `ChaCha8` diagnostic.
 
 ### Phase 5.1: WASM JSON scanner, encoders, decoders and unmarshaling
 
