@@ -70,6 +70,27 @@ function indexStdlib(stdlibPrograms) {
 	return { byName, methods, inits };
 }
 
+const JSON_NAMES = [
+	"SyntaxError$$internal$jsonrt",
+	"UnmarshalTypeError$$internal$jsonrt",
+	"InvalidUnmarshalError$$internal$jsonrt",
+	"UnsupportedValueError$$internal$jsonrt",
+	"UnsupportedTypeError$$internal$jsonrt",
+	"MarshalerError$$internal$jsonrt",
+	"CheckValid$$internal$jsonrt",
+	"Number$$internal$jsonrt",
+	"OptEscapeHTML$$internal$jsonrt",
+	"OptUseNumber$$internal$jsonrt",
+	"OptDisallowUnknownFields$$internal$jsonrt",
+];
+
+function addExtraRoots(names) {
+	if (names.has("strconv")) names.add("NumError$$strconv");
+	if (names.has("json")) {
+		for (const n of JSON_NAMES) names.add(n);
+	}
+}
+
 /**
  * Returns the set of declarations of `stdlibPrograms` reachable from
  * `rootPrograms` (all user code that is emitted).  A program's `init` is
@@ -81,9 +102,7 @@ export function reachableStdlibDecls(rootPrograms, stdlibPrograms) {
 	const names = new Set();
 	const fields = new Set(IMPLICIT_METHODS);
 	collectRefs(rootPrograms, names, fields);
-	if (names.has("strconv")) {
-		names.add("NumError$$strconv");
-	}
+	addExtraRoots(names);
 
 	const pending = [...names];
 	const reach = (d) => {

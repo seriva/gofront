@@ -18,7 +18,7 @@ import { defaultType } from "../typechecker/types.js";
 import { forEachChild } from "./walk.js";
 
 const JSON_PATH = "encoding/json";
-const SITE_FUNCS = new Set(["Marshal", "Unmarshal", "Valid"]);
+const SITE_FUNCS = new Set(["Marshal", "MarshalIndent", "Unmarshal", "Valid"]);
 
 const INT_KINDS = new Set(["int", "int8", "int16", "int32", "int64"]);
 const UINT_KINDS = new Set([
@@ -79,6 +79,14 @@ function isBasic(t, set) {
 const isRaw = (t) =>
 	t?.kind === "named" &&
 	(t.name === "json.RawMessage" || t.name === "encoding/json.RawMessage");
+
+const isNumber = (t) =>
+	t?.kind === "named" &&
+	(t.name === "json.Number" ||
+		t.name === "encoding/json.Number" ||
+		t.name?.startsWith("Number$$") ||
+		t.name?.endsWith(".Number") ||
+		(t.name === "Number" && under(t)?.name === "string"));
 
 function isBytes(t) {
 	const u = under(t);
@@ -198,8 +206,30 @@ export class JsonCodecGen {
 		return byKind[t.kind]();
 	}
 
+	resolveImportAlias(modPath) {
+		for (const p of this.programs) {
+			for (const imp of p.imports ?? []) {
+				for (const spec of imp.imports) {
+					if (spec.path === modPath) {
+						return spec.alias ?? spec.path.split("/").pop();
+					}
+				}
+			}
+		}
+		return modPath.split("/").pop();
+	}
+
 	spellNamed(t) {
-		const base = this.qualified(t.name);
+		let name = t.name;
+		const at = name.indexOf("$$");
+		if (at >= 0) {
+			const orig = name.slice(0, at);
+			const modPath = name.slice(at + 2).replaceAll("$", "/");
+			const alias = this.resolveImportAlias(modPath);
+			this.qualifiers.add(alias);
+			name = `${alias}.${orig}`;
+		}
+		const base = this.qualified(name);
 		return t.typeArgs?.length
 			? `${base}[${t.typeArgs.map((a) => this.spell(a)).join(", ")}]`
 			: base;
@@ -226,9 +256,15 @@ export class JsonCodecGen {
 			case "basic":
 				return REFLECT_NAME[t.name] ?? unalias(t.name);
 			case "named": {
-				const name = t.name.includes(".")
-					? t.name
-					: `${this.pkgName}.${t.name}`;
+				let name = t.name;
+				const at = name.indexOf("$$");
+				if (at >= 0) {
+					const orig = name.slice(0, at);
+					const modPath = name.slice(at + 2).replaceAll("$", "/");
+					name = `${modPath}.${orig}`;
+				} else if (!name.includes(".")) {
+					name = `${this.pkgName}.${name}`;
+				}
 				return t.typeArgs?.length
 					? `${name}[${t.typeArgs.map((a) => this.refl(a)).join(",")}]`
 					: name;
@@ -320,6 +356,7 @@ export class JsonCodecGen {
 	// Raw messages, marshalers, byte slices and interfaces encode specially.
 	encSpecial(t, addr) {
 		if (isRaw(t)) return ["e.Raw([]byte(v))"];
+		if (isNumber(t)) return ["e.Number(string(v))"];
 		const m = marshalerOf(t);
 		if (m && (!m._ptrRecv || addr)) return this.marshalCall("v", t);
 		if (isBytes(t)) return ["e.Bytes([]byte(v))"];
@@ -611,6 +648,14 @@ export class JsonCodecGen {
 
 	decSpecial(t, typ) {
 		if (isRaw(t)) return [`return ${this.spell(t)}(d.Raw())`];
+		if (isNumber(t))
+			return [
+				`s, ok := d.Number(${typ})`,
+				"if !ok {",
+				"\treturn cur",
+				"}",
+				`return ${this.spell(t)}(s)`,
+			];
 		if (unmarshalerOf(t)) return this.decUnmarshaler(t);
 		if (isBytes(t)) return this.decBytes(t, typ);
 		return null;
@@ -784,7 +829,14 @@ export class JsonCodecGen {
 			"for d.NextKey() {",
 		];
 		if (fields.length === 0) {
-			lines.push("\td.Skip()", "}");
+			lines.push(
+				"\tif d.DisallowUnknownFields {",
+				"\t\td.UnknownField(d.Key())",
+				"\t} else {",
+				"\t\td.Skip()",
+				"\t}",
+				"}",
+			);
 			return lines;
 		}
 		lines.push("\tk := d.Key()", "\ti := -1", "\tswitch k {");
@@ -805,7 +857,16 @@ export class JsonCodecGen {
 			lines.push(...this.decFieldLines(u, f).map((l) => `\t\t${l}`));
 			lines.push("\t\td.Leave()");
 		});
-		lines.push("\tdefault:", "\t\td.Skip()", "\t}", "}");
+		lines.push(
+			"\tdefault:",
+			"\t\tif d.DisallowUnknownFields {",
+			"\t\t\td.UnknownField(k)",
+			"\t\t} else {",
+			"\t\t\td.Skip()",
+			"\t\t}",
+			"\t}",
+			"}",
+		);
 		return lines;
 	}
 
@@ -892,6 +953,33 @@ export class JsonCodecGen {
 			: [`*${x} = ${this.decFn(base)}(d, *${x})`];
 	}
 
+	entryMarshalIndent(argType) {
+		const name = `${this.prefix}marshal_indent${this.entries.length}`;
+		const lines = [
+			`func ${name}(v any, prefix, indent string) ([]byte, error) {`,
+			"\te := jsonrt.NewEnc()",
+		];
+		if (!argType || isInterface(argType)) {
+			this.flagDynamic();
+			lines.push(`\t${this.prefix}encAny(e, v)`);
+		} else {
+			lines.push(
+				`\tx, _ := v.(${this.spell(argType)})`,
+				`\t${this.encFn(argType, false)}(e, x)`,
+			);
+		}
+		lines.push(
+			"\tb, err := e.Result()",
+			"\tif err != nil {",
+			"\t\treturn nil, err",
+			"\t}",
+			"\treturn jsonrt.AppendIndent(nil, b, prefix, indent)",
+			"}",
+		);
+		this.entries.push(lines.join("\n"));
+		return name;
+	}
+
 	entryUnmarshal(argType) {
 		const name = `${this.prefix}unmarshal${this.entries.length}`;
 		const lines = [
@@ -916,6 +1004,7 @@ export class JsonCodecGen {
 			this.dynamicDecode = true;
 		} else {
 			lines.push(
+				"\t_ = d",
 				"\t_ = v",
 				`\treturn &jsonrt.InvalidUnmarshalError{Type: ${q(this.refl(argType))}}`,
 			);
@@ -930,6 +1019,78 @@ export class JsonCodecGen {
 		this.entries.push(
 			`func ${name}(data []byte) bool {\n\treturn jsonrt.Valid(data)\n}`,
 		);
+		return name;
+	}
+
+	entryEncode(argType) {
+		this.qualified("json.Encoder");
+		const name = `${this.prefix}encode${this.entries.length}`;
+		const lines = [
+			`func ${name}(enc *json.Encoder, v any) error {`,
+			"\tif enc.Err() != nil {",
+			"\t\treturn enc.Err()",
+			"\t}",
+			"\te := jsonrt.NewEnc()",
+			"\te.EscapeHTML = enc.EscapeHTML()",
+		];
+		if (!argType || isInterface(argType)) {
+			this.flagDynamic();
+			lines.push(`\t${this.prefix}encAny(e, v)`);
+		} else {
+			lines.push(
+				`\tx, _ := v.(${this.spell(argType)})`,
+				`\t${this.encFn(argType, false)}(e, x)`,
+			);
+		}
+		lines.push(
+			"\tb, err := e.Result()",
+			"\tif err != nil {",
+			"\t\treturn err",
+			"\t}",
+			"\treturn enc.EncodeRaw(b)",
+			"}",
+		);
+		this.entries.push(lines.join("\n"));
+		return name;
+	}
+
+	entryDecode(argType) {
+		this.qualified("json.Decoder");
+		const name = `${this.prefix}decode${this.entries.length}`;
+		const lines = [
+			`func ${name}(dec *json.Decoder, v any) error {`,
+			"\tdata, err := dec.ScanNext()",
+			"\tif err != nil {",
+			"\t\treturn err",
+			"\t}",
+			"\td, err := jsonrt.NewDec(data)",
+			"\tif err != nil {",
+			"\t\treturn err",
+			"\t}",
+			"\tdec.SetupDec(d)",
+		];
+		if (argType?.kind === "pointer" && !isInterface(argType)) {
+			this.decTargets.push(argType);
+			lines.push(
+				`\tp, _ := v.(${this.spell(argType)})`,
+				"\tif p == nil {",
+				`\t\treturn &jsonrt.InvalidUnmarshalError{Type: ${q(this.refl(argType))}, IsPtr: true}`,
+				"\t}",
+				...this.rootDecode(argType, "p").map((l) => `\t${l}`),
+				"\treturn d.Done()",
+			);
+		} else if (!argType || isInterface(argType)) {
+			lines.push(`\treturn ${this.prefix}decAny(d, v)`);
+			this.dynamicDecode = true;
+		} else {
+			lines.push(
+				"\t_ = d",
+				"\t_ = v",
+				`\treturn &jsonrt.InvalidUnmarshalError{Type: ${q(this.refl(argType))}}`,
+			);
+		}
+		lines.push("}");
+		this.entries.push(lines.join("\n"));
 		return name;
 	}
 
@@ -1100,18 +1261,48 @@ const isJsonCall = (node, aliases) =>
 	aliases.has(node.func.expr.name) &&
 	SITE_FUNCS.has(node.func.field);
 
+function isStreamCall(node) {
+	if (node.kind !== "CallExpr" || node.func?.kind !== "SelectorExpr")
+		return null;
+	const recvType = node.func.expr?._type;
+	const recvName = recvType?.name ?? recvType?.base?.name ?? "";
+	const isEnc =
+		recvName === "json.Encoder" ||
+		recvName === "encoding/json.Encoder" ||
+		recvName.startsWith("Encoder$$");
+	if (isEnc && node.func.field === "Encode") return "Encode";
+	const isDec =
+		recvName === "json.Decoder" ||
+		recvName === "encoding/json.Decoder" ||
+		recvName.startsWith("Decoder$$");
+	if (isDec && node.func.field === "Decode") return "Decode";
+	return null;
+}
+
 // Finds `json.Marshal/Unmarshal/Valid` call sites in the checked programs.
 function findSites(programs) {
 	const sites = [];
 	for (const p of programs) {
 		const aliases = jsonAliases(p);
-		if (aliases.size === 0) continue;
 		walkNodes(p.decls, (node) => {
-			if (isJsonCall(node, aliases))
+			if (isJsonCall(node, aliases)) {
 				sites.push({ call: node, fn: node.func.field, program: p });
+			} else {
+				const streamFn = isStreamCall(node);
+				if (streamFn) sites.push({ call: node, fn: streamFn, program: p });
+			}
 		});
 	}
 	return sites;
+}
+
+function selectCodecEntry(gen, fn, argType) {
+	if (fn === "Marshal") return gen.entryMarshal(argType(0));
+	if (fn === "MarshalIndent") return gen.entryMarshalIndent(argType(0));
+	if (fn === "Unmarshal") return gen.entryUnmarshal(argType(1));
+	if (fn === "Encode") return gen.entryEncode(argType(0));
+	if (fn === "Decode") return gen.entryDecode(argType(0));
+	return gen.entryValid();
 }
 
 // Generates the codec file for a package's `json` call sites.  Returns null
@@ -1134,14 +1325,14 @@ export function generateJsonCodecs(programs, checker, pkgName) {
 					"json.Unmarshal into a pointer to a pointer is not yet available in wasm packages",
 				hint: "declare the value and pass its address, or pass the pointer itself",
 			});
-		let entry;
-		if (fn === "Marshal") entry = gen.entryMarshal(argType(0));
-		else if (fn === "Unmarshal") entry = gen.entryUnmarshal(argType(1));
-		else entry = gen.entryValid();
-		pending.push([call.func, entry]);
+		const entry = selectCodecEntry(gen, fn, argType);
+		pending.push([call.func, entry, fn === "Encode" || fn === "Decode"]);
 	}
 	gen.finish();
-	for (const [sel, entry] of pending) sel._jsonGen = entry;
+	for (const [sel, entry, isStream] of pending) {
+		sel._jsonGen = entry;
+		if (isStream) sel._jsonStream = true;
+	}
 	const importPaths = new Map();
 	for (const p of programs)
 		for (const imp of p.imports ?? [])

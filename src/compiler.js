@@ -756,9 +756,16 @@ function lowerStdlibRefs(node) {
 		node.name = node._stdName;
 		delete node._stdName;
 	}
-	// `json.Marshal` calls the package's generated codec entry point (see
-	// lower/json-codecs.js).
-	if (node._jsonGen && node.kind === "SelectorExpr") {
+	if (node.kind === "CallExpr" && node.func?._jsonStream) {
+		const entry = node.func._jsonGen;
+		node.args.unshift(node.func.expr);
+		delete node.func.expr;
+		delete node.func.field;
+		delete node.func._jsonStream;
+		delete node.func._jsonGen;
+		node.func.kind = "Ident";
+		node.func.name = entry;
+	} else if (node._jsonGen && node.kind === "SelectorExpr") {
 		delete node.expr;
 		delete node.field;
 		node.kind = "Ident";
@@ -823,12 +830,15 @@ function spliceStdlibJs(merged, options) {
 		pkgs.flatMap((pkg) => pkg.unit.programs),
 	);
 	const out = [];
+	const spliced = new Set();
 	for (const line of lines) {
 		const path = line.match(STDLIB_MARKER_RE)?.[1];
 		if (!path) {
 			out.push(line);
 			continue;
 		}
+		if (spliced.has(path)) continue;
+		spliced.add(path);
 		const js = stdlibJs(options.stdlibCache.get(path), reached);
 		const code = js === "" ? [] : js.split("\n");
 		const delta = code.length - 1;
@@ -1212,6 +1222,7 @@ export function compileSingleFile(inputPath, options = {}) {
 		wasmUnits: options.wasmUnits ?? [],
 		stdlibCache: options.stdlibCache ?? new Map(),
 		jsRootPrograms: options.jsRootPrograms ?? [],
+		bundledDirs: options.bundledDirs ?? new Set(),
 	};
 
 	let source;
@@ -1343,6 +1354,7 @@ export function compileFiles(files, options = {}) {
 		stdlibCache: options.stdlibCache ?? new Map(),
 		jsRootPrograms: options.jsRootPrograms ?? [],
 		rootDir: options.rootDir ?? fromDir,
+		bundledDirs: options.bundledDirs ?? new Set(),
 	};
 	const outputDir =
 		options.outputDir ??

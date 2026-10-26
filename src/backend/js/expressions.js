@@ -1504,7 +1504,38 @@ export const expressionGenMethods = {
 		return recvType?.name ?? recvType?.base?.name;
 	},
 
+	_genJsonStreamCall(recvName, expr) {
+		const isEnc =
+			recvName === "json.Encoder" ||
+			recvName === "encoding/json.Encoder" ||
+			recvName?.startsWith("Encoder$$");
+		if (isEnc && expr.func.field === "Encode") {
+			this.useHelper("json");
+			const enc = this.genExpr(expr.func.expr);
+			const argType = expr.args[0]?._type;
+			const codec = this._getJsonEncoder(argType);
+			const arg = this.genExpr(expr.args[0]);
+			return `__json_encoder_encode(${enc}, ${codec}, ${arg})`;
+		}
+		const isDec =
+			recvName === "json.Decoder" ||
+			recvName === "encoding/json.Decoder" ||
+			recvName?.startsWith("Decoder$$");
+		if (isDec && expr.func.field === "Decode") {
+			this.useHelper("json");
+			const dec = this.genExpr(expr.func.expr);
+			const targetType = expr.args[0]?._type;
+			const codec = this._getJsonDecoder(targetType);
+			const typeName = targetType ? this._jsonTypeName(targetType) : "";
+			const arg = this.genExpr(expr.args[0]);
+			return `__json_decoder_decode(${dec}, ${codec}, ${arg}, ${JSON.stringify(typeName)})`;
+		}
+		return undefined;
+	},
+
 	_genReceiverTypeCall(recvName, expr) {
+		const jsonStream = this._genJsonStreamCall(recvName, expr);
+		if (jsonStream !== undefined) return jsonStream;
 		if (recvName === "strings.Builder" || recvName === "bytes.Buffer")
 			return this._genBuilderCall(recvName, expr.func.field, expr);
 		if (recvName === "regexp.Regexp")

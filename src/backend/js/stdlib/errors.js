@@ -14,7 +14,8 @@ export const errorsMethods = {
 			this.useHelper("errorIs");
 			return `__errorIs(${args[0]}, ${args[1]})`;
 		}
-		if (fn === "Unwrap") return `(${args[0]}?._cause ?? null)`;
+		if (fn === "Unwrap")
+			return `((e) => typeof e?.Unwrap === "function" ? e.Unwrap() : (e?._cause ?? null))(${args[0]})`;
 		if (fn === "As") {
 			this.useHelper("errorAs");
 			const targetGoType = expr?.args?.[1]?._type;

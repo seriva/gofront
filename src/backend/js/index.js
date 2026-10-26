@@ -323,6 +323,7 @@ export class CodeGen {
 		// multi-file; for single-file compiles we derive it from the AST).
 		const pkgName = program.pkg?.name;
 		if (pkgName) {
+			this.pkgName = pkgName;
 			for (const d of program.decls) {
 				if (!d._pkgName) d._pkgName = pkgName;
 			}
@@ -592,7 +593,10 @@ export class CodeGen {
 				decl._pkgName = programs[i].pkg?.name;
 			}
 		}
-		const merged = { decls: programs.flatMap((p) => p.decls) };
+		const merged = {
+			pkg: programs[0]?.pkg,
+			decls: programs.flatMap((p) => p.decls),
+		};
 		return this.generate(merged, options);
 	}
 
