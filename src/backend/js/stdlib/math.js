@@ -39,7 +39,7 @@ const MATH_EXTRA = {
 	Inf: ([x]) => `(${x} >= 0 ? Infinity : -Infinity)`,
 	IsNaN: ([x]) => `Number.isNaN(${x})`,
 	IsInf: ([x, y]) =>
-		`(${y} > 0 ? ${x} === Infinity : ${y} < 0 ? ${x} === -Infinity : !Number.isFinite(${x}))`,
+		`(${y} > 0 ? ${x} === Infinity : ${y} < 0 ? ${x} === -Infinity : Math.abs(${x}) === Infinity)`,
 	NaN: () => "NaN",
 	Exp2: ([x]) => `Math.pow(2, ${x})`,
 	Signbit: ([x]) => `(${x} < 0 || Object.is(${x}, -0))`,
