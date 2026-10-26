@@ -106,9 +106,9 @@ reported as `pkg [js]` and `pkg [wasm]` — ensuring both backends produce ident
 
 ## Standard library & Conformance
 
-### Go-source standard library (`stdlib/`, `runtime/stdlib/`)
+### Go-source standard library (`stdlib/`)
 
-GoFront provides pure Go implementations of standard library packages (such as `encoding/csv`, `container/heap`, `cmp`, `iter`, `hash/*`, `net/url`, `bufio`, and `context`), located in `stdlib/` (embedded as `runtime/stdlib/`). These packages are written in GoFront Go with `//gofront:target both` and `//go:build gofront`. The resolver loads them before built-in fallbacks and compiles them into the caller's target (`js`, `wasm`, or `both`) with no external runtime dependencies. Package overlays extend emitter-backed namespaces with pure Go implementations.
+GoFront provides pure Go implementations of standard library packages (such as `encoding/csv`, `container/heap`, `cmp`, `iter`, `hash/*`, `net/url`, `bufio`, and `context`), located in `stdlib/`. These packages are written in GoFront Go with `//gofront:target both` and `//go:build gofront`. The resolver loads them before built-in fallbacks and compiles them into the caller's target (`js`, `wasm`, or `both`) with no external runtime dependencies. Package overlays extend emitter-backed namespaces with pure Go implementations.
 
 ### Standard library manifest (`stdlib/manifest.json`)
 

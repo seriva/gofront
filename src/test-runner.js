@@ -172,7 +172,6 @@ globalThis.HTMLElement = __dom.window.HTMLElement;
 globalThis.Element = __dom.window.Element;
 globalThis.Node = __dom.window.Node;
 globalThis.customElements = __dom.window.customElements;
-globalThis.newAbortController = () => new AbortController();
 `
 		: `globalThis.window = globalThis.window ?? null;
 globalThis.document = globalThis.document ?? null;
