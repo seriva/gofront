@@ -147,7 +147,7 @@ export const STDLIB_PACKAGES = new Set([
 // member the checker knows about. Members outside the set are rejected in
 // wasm/both packages with "'strings.Split' is not yet available in wasm packages".
 export const WASM_STDLIB_MEMBERS = new Map([
-	["json", new Set(["Marshal", "Unmarshal", "Valid"])],
+	["json", new Set(["Marshal", "Unmarshal", "Valid", "RawMessage"])],
 	["os", new Set(["Stdout", "Stderr", "Stdin", "File"])],
 	[
 		"math",
