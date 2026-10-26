@@ -632,3 +632,28 @@ func Main() int {
 	assertEqual(res.wasmRes, 7n);
 	assertEqual(res.jsRes, 7);
 });
+
+test("*p = make(...) through a pointer to a nil map replaces the map", () => {
+	const src = `
+package main
+
+func fill(p *map[string]int) {
+	m := *p
+	if m == nil {
+		m = make(map[string]int)
+	}
+	m["a"] = 1
+	*p = m
+}
+
+func Main() int {
+	var m map[string]int
+	fill(&m)
+	fill(&m)
+	return len(m)*10 + m["a"]
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.wasmRes, 11n);
+	assertEqual(res.jsRes, 11);
+});

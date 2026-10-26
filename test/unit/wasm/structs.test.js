@@ -357,3 +357,25 @@ func Main() int {
 	assertEqual(res.wasmRes, 6n);
 	assertEqual(res.jsRes, 6);
 });
+
+test("a variable or field of an anonymous struct type starts as a zero struct", () => {
+	const src = `
+package main
+
+type T struct {
+	Name  string
+	Inner struct{ N int }
+}
+
+func Main() int {
+	var anon struct{ X, Y int }
+	var t T
+	anon.X = 3
+	t.Inner.N += 4
+	return anon.X + anon.Y + t.Inner.N + len(t.Name)
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.wasmRes, 7n);
+	assertEqual(res.jsRes, 7);
+});
