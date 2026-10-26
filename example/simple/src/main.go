@@ -143,6 +143,11 @@ func setupEvents() {
             clearCompleted()
             render()
             triggerSave()
+        case "export-csv":
+            _, err := ExportCSV(todos)
+            if err == nil {
+                setSyncStatus("CSV Exported", "saved")
+            }
         }
     })
 
