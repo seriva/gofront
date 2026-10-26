@@ -15,3 +15,5 @@ Decode truncated: err=unexpected EOF (isUnexpectedEOF=true)
 Decode UseNumber: val=1234567890123456789 isNumber=true err=<nil>
 Decode DisallowUnknownFields: err=json: unknown field "unknown"
 Decode Buffered: id=1 rest=" trailing data"
+Encode UnsupportedValueError NaN: Str=NaN msg=json: unsupported value: NaN
+Encode MarshalerError: msg=json: error calling MarshalJSON for type main.FailItem: cannot marshal item unwrap=cannot marshal item
