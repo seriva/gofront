@@ -1420,7 +1420,7 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
   - Test: conformance fixture `json/stream.go`.
   - Done when: fixture matches Go.
 
-- [ ] **Task 5.5 — Enable JSON in WASM**
+- [x] **Task 5.5 — Enable JSON in WASM**
   - Files: `src/typechecker/types.js` (`WASM_STDLIB_MEMBERS` `["json", new Set()]` removed), `docs/go-compatibility.md`, `docs/hybrid-wasm.md`
   - Do: remove the rejection and its diagnostic; update the docs rows.
   - Test: the `json` diagnostic test is inverted; `npm test`.
