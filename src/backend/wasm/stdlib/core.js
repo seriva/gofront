@@ -525,6 +525,7 @@ export class StdlibCoreEmitter {
 		if (isErrorType(goType) && this.mod.hasErrorType) return false;
 		return (
 			isComplex(goType) ||
+			toWasmType(goType, this.mod.checker, this.mod) === "v128" ||
 			isSliceType(goType, this.mod.checker) ||
 			isArrayType(goType, this.mod.checker) ||
 			isMapType(goType, this.mod.checker) ||
@@ -774,6 +775,47 @@ export class StdlibCoreEmitter {
 		this.releaseTemp(lenTmp, "i32");
 		this.releaseTemp(offTmp, "i32");
 		this.releaseTemp(arrTmp, arrWType);
+		this.releaseTemp(resTmp, "externref");
+		this.releaseTemp(valTmp, valW);
+	}
+
+	// F32x4 and Mask32x4 print like a [4]float32 / [4]bool array.
+	_emitSimdToExternref(goType, valTmp, valW) {
+		const isMask =
+			goType?.name === "simd.Mask32x4" ||
+			goType?.simd === "Mask32x4" ||
+			goType?.underlying?.simd === "Mask32x4";
+		const resTmp = this.acquireTemp("externref");
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getFmtNewArrayIndex(),
+		});
+		this.pushInstruction({ op: "local.set", index: resTmp });
+		for (let lane = 0; lane < 4; lane++) {
+			this.pushInstruction({ op: "local.get", index: resTmp });
+			this.pushInstruction({ op: "local.get", index: valTmp });
+			if (isMask) {
+				this.pushInstruction({ op: "i32x4.extract_lane", lane });
+				this.pushInstruction({ op: "i32.const", value: 0 });
+				this.pushInstruction("i32.ne");
+				this.pushInstruction({
+					op: "call",
+					funcIndex: this.mod.getFmtBoxBoolIndex(),
+				});
+			} else {
+				this.pushInstruction({ op: "f32x4.extract_lane", lane });
+				this.pushInstruction("f64.promote_f32");
+				this.pushInstruction({
+					op: "call",
+					funcIndex: this.mod.getFmtBoxF64Index(),
+				});
+			}
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getFmtArrayPushIndex(),
+			});
+		}
+		this.pushInstruction({ op: "local.get", index: resTmp });
 		this.releaseTemp(resTmp, "externref");
 		this.releaseTemp(valTmp, valW);
 	}
@@ -1299,6 +1341,11 @@ export class StdlibCoreEmitter {
 		}
 
 		if (this._emitScalarToExternref(goType, valTmp, valW)) return;
+
+		if (valW === "v128") {
+			this._emitSimdToExternref(goType, valTmp, valW);
+			return;
+		}
 
 		const tKey = goType ? goTypeKey(goType) : null;
 		const inCycle = tKey !== null && seen.has(tKey);
@@ -9547,7 +9594,7 @@ export class StdlibCoreEmitter {
 			_isPointerKind(goType)
 		)
 			return true;
-		return ["i32", "i64", "f32", "f64", "externref"].includes(
+		return ["i32", "i64", "f32", "f64", "externref", "v128"].includes(
 			toWasmType(goType, checker, this.mod),
 		);
 	}

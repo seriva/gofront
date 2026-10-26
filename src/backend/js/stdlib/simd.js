@@ -13,6 +13,10 @@ export const simdMethods = {
 				return `__simd_splat(${args[0]})`;
 			case "NewF32x4":
 				return `__simd_f32x4(${args[0]}, ${args[1]}, ${args[2]}, ${args[3]})`;
+			case "Select":
+				return `__simd_select(${args[0]}, ${args[1]}, ${args[2]})`;
+			case "Shuffle":
+				return `__simd_shuffle(${args.join(", ")})`;
 			case "LoadF32x4":
 				return `__simd_load(${args[0]}, ${args[1]})`;
 			case "StoreF32x4":
