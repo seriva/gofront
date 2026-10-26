@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Generates runtime/stdlib/manifest.json, the stdlib coverage manifest, from
+// Generates stdlib/manifest.json, the stdlib coverage manifest, from
 // Go's API files ($(go env GOROOT)/api/go1.txt … go1.26.txt).  The manifest is
 // checked in, so CI and the coverage tests never need a Go toolchain.
 //
@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 
 export const GO_VERSION = "go1.26";
 export const MANIFEST_PATH = fileURLToPath(
-	new URL("../runtime/stdlib/manifest.json", import.meta.url),
+	new URL("../stdlib/manifest.json", import.meta.url),
 );
 const OVERRIDES_PATH = fileURLToPath(
 	new URL("./manifest-overrides.json", import.meta.url),
@@ -461,7 +461,7 @@ function main(argv) {
 			: "";
 		if (current !== text) {
 			console.error(
-				"runtime/stdlib/manifest.json is stale; run npm run manifest:update",
+				"stdlib/manifest.json is stale; run npm run manifest:update",
 			);
 			process.exit(1);
 		}
