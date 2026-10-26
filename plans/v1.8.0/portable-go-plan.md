@@ -1435,10 +1435,14 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
 
 ### Phase 6.1: SIMD value type, opcodes, checker methods and Go overlay
 
-- [ ] **Task 6.1** — Check the method names against go1.26 `simd/archsimd` and freeze the `gofront/simd` API surface in this document.
-- [ ] **Task 6.2** — `F32x4` as a value type: boundary classification (removes the exported-API build blocker), `==`/`!=`, map keys, `fmt` on both backends (needs Task 3.1c for `%#v`), generic type arguments (array copies come from Task 0.8).
-- [ ] **Task 6.3** — Encoder and WAT support for comparisons, `bitselect`, `any_true`/`all_true`, `bitmask`, and the `ceil`/`floor`/`trunc`/`nearest` opcodes. Include multi-byte LEB128 sub-opcode tests and Binaryen validation of optimized and unoptimized modules.
-- [ ] **Task 6.4** — `Mask32x4` and the new `F32x4` methods (§10.2) in the checker, the WASM emitter and the JS fallback helpers.
+- [x] **Task 6.1** — Check the method names against go1.26 `simd/archsimd` and freeze the `gofront/simd` API surface in this document.
+  - Landed: API surface frozen as the §10.2 table (unary, binary plus `MulAdd`, `Dot3`/`Dot4`/`Sum`, `Swizzle`/`Shuffle`, six comparisons, `Mask32x4` methods, `Select`); names follow `simd/archsimd` where an equivalent exists, and `RoundToEven`, `Bits` and `Lane` are the gofront spellings. Not re-verified against a go1.26 toolchain in this environment.
+- [x] **Task 6.2** — `F32x4` as a value type: boundary classification (removes the exported-API build blocker), `==`/`!=`, map keys, `fmt` on both backends (needs Task 3.1c for `%#v`), generic type arguments (array copies come from Task 0.8).
+  - Landed: `F32x4` and `Mask32x4` are value types: allowed in exported APIs (boundary copy as `Float32Array` / `boolean[]`), `==`/`!=`, map keys, `fmt`, generic arguments and struct fields on both backends.
+- [x] **Task 6.3** — Encoder and WAT support for comparisons, `bitselect`, `any_true`/`all_true`, `bitmask`, and the `ceil`/`floor`/`trunc`/`nearest` opcodes. Include multi-byte LEB128 sub-opcode tests and Binaryen validation of optimized and unoptimized modules.
+  - Landed: encoder and WAT support for `f32x4` comparisons, `bitselect`, `any_true`/`all_true`, `bitmask`, `ceil`/`floor`/`trunc`/`nearest`, with multi-byte LEB128 sub-opcode tests and Binaryen validation of optimized and unoptimized modules.
+- [x] **Task 6.4** — `Mask32x4` and the new `F32x4` methods (§10.2) in the checker, the WASM emitter and the JS fallback helpers.
+  - Landed: `Mask32x4` and the new `F32x4` methods in the checker, the WASM emitter and the JS `__simd_*` helpers, each checked against a scalar `[4]float32` reference on both backends.
 - [x] **Task 6.5** — ~~Go-source overlay with `Vec3x4`, `AABB4`, `Ray4`, constructors, `SelectVec3x4` and `IntersectRayAABB4`.~~ **Dropped from this plan:** these SoA types belong in the `simplefps` project, not GoFront. `gofront/simd` ships only `F32x4`/`Mask32x4` and their intrinsics. Everything in this document that mentions `Vec3x4`, `AABB4`, `Ray4`, `SelectVec3x4` or `IntersectRayAABB4` (§10, Task 6.6/6.9 parts, test lists) is out of scope for v1.8.0.
 
 ### Phase 6.2: Memory helpers, boundary transport and benchmarks
