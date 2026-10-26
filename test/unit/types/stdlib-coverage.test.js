@@ -262,9 +262,12 @@ function compileErrors(source, goSourcePkg) {
 
 function reportsExclusion(e) {
 	const reason = e.note ?? e.status.slice("excluded:".length);
-	// The package path itself (`runtime/debug`) may contain the reason.
+	// Strip quoted package paths (`"runtime/debug"`, `'runtime/debug'`) so the
+	// import path itself cannot satisfy `reason`, while keeping `reason` text.
 	const text = compileErrors(exclusionProbe(e), goSource(e.pkg) !== null)
-		.split(e.pkg)
+		.split(`"${e.pkg}"`)
+		.join("")
+		.split(`'${e.pkg}'`)
 		.join("");
 	return text.includes(reason);
 }

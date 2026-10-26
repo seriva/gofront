@@ -1604,11 +1604,12 @@ Each Phase 6 task follows the same Files/Test/Done-when discipline: files are `s
 
 Scheduled from the Step 4.4 full-branch audit (2026-10-26) to resolve all remaining discrepancies in stdlib manifest coverage, exclusion/`//go:embed` diagnostics, `fmt` `%p` parity, and user documentation.
 
-- [ ] **Task 8.1 — Manifest exclusion diagnostics and `//go:embed` diagnostic**
+- [x] **Task 8.1 — Manifest exclusion diagnostics and `//go:embed` diagnostic**
   - Files: `src/typechecker/stdlib/excluded.js`, `src/typechecker/declarations.js`, `src/typechecker/expressions.js`, `src/typechecker/index.js`
   - Do: Load `stdlib/manifest.json` in `src/typechecker/stdlib/excluded.js`. When importing an excluded package (`kind === "package"` and `status.startsWith("excluded:")`), report a compile error containing the manifest's `note` (or category reason). When referencing an excluded package member (`pkg.X`) or method/field (`x.M` on a stdlib type `pkg.T`), report a compile error containing the manifest's `note` (or category reason), preserving existing custom wordings (`iter.Pull`, `ctx.Done()`, `time.After`/`Tick`/`NewTimer`/`NewTicker`, `sync.Cond`, `TempDir`/`Chdir`, `ChaCha8`). Detect `//go:embed` directives in source files and report a compile error `//go:embed is not supported yet`.
   - Test: `test/unit/types/stdlib-coverage.test.js` (`gaps.exclusion` becomes `{}`), plus unit tests in `test/unit/language/declarations.test.js` for `//go:embed` (`assertErrorContains(errors, "//go:embed is not supported yet")`) and excluded package imports (`reflect`, `net/http`, `text/template`, `math/big`, `compress/gzip`).
   - Done when: `gaps.exclusion` in `test/unit/types/stdlib-coverage.gaps.json` has 0 entries and all exclusion/embed tests pass.
+  - Landed: `src/typechecker/stdlib/excluded.js` loads `stdlib/manifest.json` and populates `EXCLUDED_STDLIB_PACKAGES` and `EXCLUDED_STDLIB_MEMBERS` with each excluded entry's `note` or category reason while preserving custom wordings. `_checkDirectivesAndImportsPass` in `src/typechecker/index.js` reports `//go:embed is not supported yet` on `//go:embed` directives and reports the manifest exclusion reason on excluded package imports. `_checkSelectorExpr` in `src/typechecker/expressions.js` checks excluded package members and type methods/fields. `gaps.exclusion` in `test/unit/types/stdlib-coverage.gaps.json` is now `{}` (0 entries).
 
 - [ ] **Task 8.2 — Coverage gate member resolution, WASM stdlib gaps, and `strconv` complex helpers**
   - Files: `test/unit/types/stdlib-coverage.test.js`, `src/typechecker/types.js`, `stdlib/io/io.go`, `stdlib/strconv/quote.go`, `test/conformance/strconv/basic.go`, `test/conformance/strconv/basic.out`

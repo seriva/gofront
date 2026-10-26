@@ -1,5 +1,6 @@
 // TypeChecker expression-checking methods — installed as a mixin on TypeChecker.prototype.
 
+import { EXCLUDED_STDLIB_MEMBERS } from "./stdlib/excluded.js";
 import { sharedInfo } from "./stdlib/shared.js";
 import {
 	ANY,
@@ -8,6 +9,7 @@ import {
 	COMPLEX64,
 	COMPLEX128,
 	compositeLitMaxIndex,
+	displayTypeName,
 	ERROR,
 	FLOAT32,
 	FLOAT64,
@@ -374,65 +376,101 @@ export const expressionCheckMethods = {
 		if (sym) sym._addressTaken = true;
 	},
 
+	_checkExcludedNamespaceMember(expr, baseType) {
+		if (!this._importedPaths) return null;
+		for (const pkgPath of this._importedPaths) {
+			const id = pkgPath
+				.split("/")
+				.filter((s) => !/^v\d+$/.test(s))
+				.at(-1);
+			const key = `${pkgPath}.${expr.field}`;
+			if (id === baseType.name && EXCLUDED_STDLIB_MEMBERS.has(key)) {
+				return this.err(
+					`${baseType.name}.${expr.field} is not available: ${EXCLUDED_STDLIB_MEMBERS.get(key)}`,
+					expr,
+				);
+			}
+		}
+		return null;
+	},
+
+	_checkExcludedSelectorExpr(expr, baseType) {
+		if (baseType?.kind === "namespace") {
+			return this._checkExcludedNamespaceMember(expr, baseType);
+		}
+		const recvCheck =
+			baseType?.kind === "pointer"
+				? (this.resolveType(baseType.base) ?? baseType.base)
+				: baseType;
+		const recvName = recvCheck?.name;
+		if (!recvName) return null;
+		const dName = displayTypeName(recvName);
+		const reason =
+			EXCLUDED_STDLIB_MEMBERS.get(`${dName}.${expr.field}`) ??
+			EXCLUDED_STDLIB_MEMBERS.get(`${recvName}.${expr.field}`);
+		if (!reason) return null;
+		return this.err(`${dName}.${expr.field} is not available: ${reason}`, expr);
+	},
+
+	_checkMethodExprSelector(expr, baseType) {
+		const recvBase = baseType.kind === "pointer" ? baseType.base : baseType;
+		const base = this.resolveType(
+			recvBase.kind === "named" ? recvBase.underlying : recvBase,
+		);
+		const methodType = this._resolveMethodExprType(recvBase, base, expr.field);
+		if (
+			this._methodExprPtrRecv(recvBase, methodType, expr.field) &&
+			baseType.kind !== "pointer"
+		) {
+			const t = typeStr(baseType);
+			return this.err(
+				`invalid method expression ${t}.${expr.field} (needs pointer receiver (*${t}).${expr.field})`,
+				expr,
+			);
+		}
+		if (!methodType) return null;
+		expr._isMethodExpr = true;
+		expr._methodExprRecv = baseType;
+		return {
+			kind: "func",
+			params: [baseType, ...(methodType.params ?? [])],
+			returns: methodType.returns ?? [],
+			variadic: methodType.variadic,
+		};
+	},
+
+	_markMethodValueSelector(expr, baseType, ft, scope) {
+		const recvT =
+			baseType.kind === "pointer"
+				? (this.resolveType(baseType.base) ?? baseType.base)
+				: baseType;
+		const base = this.resolveType(
+			recvT?.kind === "named" ? recvT.underlying : recvT,
+		);
+		if (!recvT || !this._isStructOrNamedMethod(recvT, base, expr.field)) return;
+		expr._isMethodValue = true;
+		if (baseType.kind === "pointer")
+			expr._derefRecv = !this._methodExprPtrRecv(recvT, ft, expr.field);
+		else this._markPtrRecvAddress(expr, base, ft, scope);
+	},
+
 	_checkSelectorExpr(expr, scope) {
 		expr.expr._typeRefOk = true;
 		const baseType = this.checkExpr(expr.expr, scope);
 		if (baseType?._tainted) return TAINTED_ANY;
+		const exclErr = this._checkExcludedSelectorExpr(expr, baseType);
+		if (exclErr) return exclErr;
 		if (expr.expr._isTypeRef) {
-			// `(*T).M` takes its methods from T and its receiver is `*T`.
-			const recvBase = baseType.kind === "pointer" ? baseType.base : baseType;
-			let base = recvBase.kind === "named" ? recvBase.underlying : recvBase;
-			base = this.resolveType(base);
-			const methodType = this._resolveMethodExprType(
-				recvBase,
-				base,
-				expr.field,
-			);
-			if (
-				this._methodExprPtrRecv(recvBase, methodType, expr.field) &&
-				baseType.kind !== "pointer"
-			) {
-				const t = typeStr(baseType);
-				return this.err(
-					`invalid method expression ${t}.${expr.field} (needs pointer receiver (*${t}).${expr.field})`,
-					expr,
-				);
-			}
-			if (methodType) {
-				expr._isMethodExpr = true;
-				expr._methodExprRecv = baseType;
-				return {
-					kind: "func",
-					params: [baseType, ...(methodType.params ?? [])],
-					returns: methodType.returns ?? [],
-					variadic: methodType.variadic,
-				};
-			}
+			const mExpr = this._checkMethodExprSelector(expr, baseType);
+			if (mExpr) return mExpr;
 		}
 		const ft = this.fieldType(baseType, expr.field, expr);
-		if (ft?.kind === "func") {
-			// `p.M` on a pointer is a method value too.
-			const recvT =
-				baseType.kind === "pointer"
-					? (this.resolveType(baseType.base) ?? baseType.base)
-					: baseType;
-			let base = recvT?.kind === "named" ? recvT.underlying : recvT;
-			base = this.resolveType(base);
-			if (recvT && this._isStructOrNamedMethod(recvT, base, expr.field)) {
-				expr._isMethodValue = true;
-				// `p.M` with a value receiver binds a copy of `*p`.
-				if (baseType.kind === "pointer")
-					expr._derefRecv = !this._methodExprPtrRecv(recvT, ft, expr.field);
-				else this._markPtrRecvAddress(expr, base, ft, scope);
-			}
-		}
+		if (ft?.kind === "func")
+			this._markMethodValueSelector(expr, baseType, ft, scope);
 		if (
 			baseType?.kind === "namespace" &&
 			this.types.has(`${baseType.name}.${expr.field}`) &&
-			!(
-				baseType.name === "binary" &&
-				(expr.field === "LittleEndian" || expr.field === "BigEndian")
-			)
+			baseType.name !== "binary"
 		) {
 			expr._isTypeRef = true;
 		}
