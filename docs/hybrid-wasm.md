@@ -221,6 +221,8 @@ compile error.
 | Struct from a `both` package (`T`, `*T`) | Copied into its JS class. `*T` parameters are written back after the call. |
 | Struct from a `wasm` package (`T`, `*T`) | Opaque **handle** class with stable identity. Scalar fields are read/written through accessors; aggregate fields (`b.Pos.X = 1`, `b.Tags[0] = 2`) are live views, so writes reach WASM memory. |
 | `[]T`, `[N]T` | Copied element-wise in both directions. TypedArray inputs (`Float32Array`, `Int32Array`, …) are accepted. |
+| `simd.F32x4`, `simd.Mask32x4` | Copied: a 4-element `Float32Array` and a 4-element array of booleans. |
+| `[]simd.F32x4`, `[]simd.Mask32x4` | In `wasm` packages a `[]F32x4` crosses as one copied `Float32Array` of `4n` floats; in `both` packages, which run as plain JavaScript, it stays an array of 4-element arrays. A `[]Mask32x4` crosses as an array of boolean arrays. |
 | `func` values | Wrapped in both directions, so callbacks work either way. |
 | Named non-empty interfaces | **WASM → JS:** an exported `*T` arrives as its handle class (or `both` live view); other dynamic types arrive as a facade object whose methods call into WASM. **JS → WASM:** only WASM-owned values (handles, facades) are accepted. A `js` type implementing a `wasm` interface is a compile error (`type '*tri' (js) cannot implement wasm interface 'Shape' across the boundary; …`); keep implementations in WASM or pass a `func` callback. |
 | `*testing.T` | Stays a JS object; `t.Errorf`, `t.Fatal`, `t.Log`, `t.Skip`, `t.Name`, `t.Failed`, … are routed back to the harness. |
@@ -282,9 +284,9 @@ for (let i = 0; i < sim.Positions.length; i += 2) {
 
 `example/hybrid` is a complete particle demo built this way.
 
-### WASM SIMD (`gofront/simd`, experimental)
+### WASM SIMD (`gofront/simd`)
 
-`gofront/simd` provides 4-wide 32-bit floating-point SIMD vector operations lowering to native WebAssembly `v128` instructions without GC overhead.
+`gofront/simd` is experimental. It provides 4-wide 32-bit floating-point SIMD vector operations lowering to native WebAssembly `v128` instructions without GC overhead.
 
 - **Types & Methods:**
   - `simd.F32x4` — 4-lane `float32` vector value type: `simd.F32x4{a, b, c, d}`, `simd.Splat(f)`.
@@ -298,13 +300,29 @@ for (let i = 0; i < sim.Positions.length; i += 2) {
   - `simd.LoadF32x4(buf shared.Float32, i)` — loads 4 consecutive floats from element offset `i` (`v128.load`).
   - `simd.StoreF32x4(buf, i, v)` — stores vector `v` at element offset `i` (`v128.store`).
   - Bounds checks enforce $i + 4 \le \text{len}(buf)$ and trap with a panic on out-of-bounds access.
+- **Slices and padding:**
+  - `simd.LoadF32x4Slice(xs []float32, i)` and `simd.StoreF32x4Slice(xs, i, v)` do the same on an ordinary `[]float32`. A garbage-collected array cannot be read as a `v128`, so each lane moves separately in WASM; prefer `shared.Float32` buffers for hot loops.
+  - `simd.Pad4(n)` rounds `n` up to a multiple of 4, for sizing a `shared.NewFloat32` buffer that is processed four lanes at a time. When the data is not padded, finish with a scalar loop:
+
+    ```go
+    i := 0
+    for ; i+4 <= len(xs); i += 4 {
+        simd.StoreF32x4Slice(xs, i, simd.LoadF32x4Slice(xs, i).Mul(simd.Splat(2)))
+    }
+    for ; i < len(xs); i++ {
+        xs[i] *= 2
+    }
+    ```
+  - An out-of-range offset panics with an index-out-of-range error on both backends.
 - **Lowering & Semantics:**
   - **WASM:** compiles directly to unboxed `v128` locals, parameters, and struct fields using `0xFD` opcodes.
   - **Value semantics:** `F32x4` and `Mask32x4` are ordinary values: struct fields, array and slice elements, map keys and values, generic type arguments, closure captures, and values stored in `any`. `==` and `!=` compare lane by lane on vector operands and on structs and arrays containing them (`NaN != NaN`, `-0 == +0`), and `fmt` prints `[1 2 3 4]` for `%v` and `%+v`, and `simd.F32x4{1, 2, 3, 4}` for `%#v`. Comparing two `any` values that hold vectors, and taking the address of a vector (`&v`), are not supported yet.
   - **JS:** compiles to frozen 4-element arrays using `Math.fround` per lane for bit-level 32-bit float parity.
-  - **Boundary:** an `F32x4` crosses the JS↔WASM boundary as a copied 4-element `Float32Array` and a `Mask32x4` as a 4-element array of booleans, in exported function parameters and results and in exported struct fields. Bulk data should still travel through `gofront/shared.Float32` buffers.
+  - **Boundary:** an `F32x4` crosses the JS↔WASM boundary as a copied 4-element `Float32Array` and a `Mask32x4` as a 4-element array of booleans, in exported function parameters and results and in exported struct fields. In `wasm` packages a `[]F32x4` crosses as one copied `Float32Array` of `4n` floats; in `both` packages, which run as plain JavaScript, it stays an array of 4-element arrays. A `[]Mask32x4` crosses as an array of boolean arrays. Vectors live in garbage-collected memory, so they cannot be viewed zero-copy from JavaScript; move bulk data through `gofront/shared.Float32` buffers.
 - **Benchmark & Gating:**
-  - Tested on the 131,072-triangle raycast benchmark: 1.34× faster than pure JS, but 1.02× over scalar hybrid (spatial octree traversal dominates runtime over 3-wide triangle checks). Per the release plan's $\ge 1.30\times$ gate, `gofront/simd` stays experimental; its completion and the promotion decision are planned for v1.8.0 ([`plans/v1.8.0/portable-go-plan.md`](../plans/v1.8.0/portable-go-plan.md)).
+  - Particle kinematics (65,536 particles, gravity, damping and a box bounce with `Select`, release build): about 1.6× faster than the equivalent scalar loop in the same module, with a small reported allocation per step (`node --expose-gc test/e2e/perf/particle-bench.js`).
+  - Octree raycast (131,072 triangles, triangle-packet kernel): within noise of scalar WebAssembly and does not reach 1.30×, because spatial traversal dominates the 3-wide triangle checks. Use SIMD for flat, data-parallel loops over `shared.Float32` buffers rather than for pointer-chasing traversals.
+  - `example/hybrid` runs its particle `Step` on `simd.F32x4`, two interleaved `x, y` particles per vector.
 
 ### Panics and traps
 

@@ -109,6 +109,9 @@ export function setupSimdGlobals(globals, types) {
 			params: [sharedFloat32, INT],
 			returns: [f32x4Type],
 		},
+		LoadF32x4Slice: fn([{ kind: "slice", elem: FLOAT32 }, INT], [f32x4Type]),
+		StoreF32x4Slice: fn([{ kind: "slice", elem: FLOAT32 }, INT, f32x4Type], []),
+		Pad4: fn([INT], [INT]),
 		StoreF32x4: {
 			kind: "func",
 			params: [sharedFloat32, INT, f32x4Type],
