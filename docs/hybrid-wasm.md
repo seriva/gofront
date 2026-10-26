@@ -135,7 +135,7 @@ Members of each Go package that `wasm` and `both` packages can use today, out of
 | `encoding/binary` | 13 of 33 | 20 |
 | `encoding/csv` | 32 of 32 | 0 |
 | `encoding/hex` | 7 of 15 | 8 |
-| `encoding/json` | 4 of 68 | 64 |
+| `encoding/json` | 28 of 68 | 40 |
 | `errors` | 6 of 7 | 1 |
 | `fmt` | 21 of 43 | 22 |
 | `hash` | 5 of 32 | 27 |
@@ -187,7 +187,7 @@ Notable members per package:
 - `encoding/binary` (`LittleEndian`, `BigEndian`, `Read`, `Write`, `Append*`, `Size`)
 - `encoding/hex` (`EncodeToString`, `DecodeString`, `EncodedLen`, `DecodedLen`)
 - `encoding/base64` (`StdEncoding`, `URLEncoding`, `RawStdEncoding`, `RawURLEncoding`)
-- `encoding/json` (`Marshal`, `Unmarshal`, `Valid`, `RawMessage`; the codecs are generated Go linked into `app.wasm`)
+- `encoding/json` (`Marshal`, `MarshalIndent`, `Unmarshal`, `Valid`, `RawMessage`, `Number`, `Encoder`, `Decoder`, `Compact`, `Indent`, `HTMLEscape`; the codecs are generated Go linked into `app.wasm`)
 - `testing`, `gofront/shared`, and `gofront/simd` (experimental).
 
 Any other import, or JS-only API (`os`, `regexp`, `time.Sleep`), reports a targeted diagnostic

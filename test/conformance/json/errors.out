@@ -1,0 +1,8 @@
+SyntaxError: Offset=24 msg=invalid character '}' looking for beginning of value
+SyntaxError EOF: Offset=11 msg=unexpected end of JSON input
+UnmarshalTypeError struct: Value=string Struct=User Field=age Offset=32 msg=json: cannot unmarshal string into Go struct field User.age of type int
+UnmarshalTypeError scalar: Value=string Struct= Field= msg=json: cannot unmarshal string into Go value of type int
+InvalidUnmarshalError nil: msg=json: Unmarshal(nil)
+InvalidUnmarshalError non-ptr: msg=json: Unmarshal(non-pointer main.User)
+UnsupportedValueError NaN: Str=NaN msg=json: unsupported value: NaN
+MarshalerError: msg=json: error calling MarshalJSON for type main.FailMarshal: marshaler failed unwrap=marshaler failed

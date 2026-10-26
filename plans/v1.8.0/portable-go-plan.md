@@ -1408,29 +1408,30 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
 
 ### Phase 5.2: JSON helpers, streaming I/O, enablement & benchmark
 
-- [ ] **Task 5.3 — `Number`, `Compact`/`Indent`/`HTMLEscape`, error types (both backends)**
+- [x] **Task 5.3 — `Number`, `Compact`/`Indent`/`HTMLEscape`, error types (both backends)**
   - Files: `src/backend/js/stdlib/json.js`, `src/backend/js/runtime.js`, WASM json emitter, `src/typechecker/stdlib/core.js`
   - Do: as specified in [§9](#9-encodingjson-everywhere). Error types must work with `errors.As` and carry Go's `Offset`/field path.
   - Test: conformance fixture `json/errors.go` and `json/indent.go`.
   - Done when: fixtures match Go on both backends.
 
-- [ ] **Task 5.4 — `Encoder`/`Decoder` over `io.Writer`/`io.Reader` (both backends)**
+- [x] **Task 5.4 — `Encoder`/`Decoder` over `io.Writer`/`io.Reader` (both backends)**
   - Files: new `runtime/stdlib/encoding/json/stream.go` (overlay, built on `bufio`)
   - Do: `NewEncoder`, `Encode`, `SetIndent`, `SetEscapeHTML`; `NewDecoder`, `Decode`, `More`, `UseNumber`, `DisallowUnknownFields`, `Buffered`, `InputOffset`. Multiple values in a stream, `io.EOF` at end, `io.ErrUnexpectedEOF` on truncation.
   - Test: conformance fixture `json/stream.go`.
   - Done when: fixture matches Go.
 
-- [ ] **Task 5.5 — Enable JSON in WASM**
+- [x] **Task 5.5 — Enable JSON in WASM**
   - Files: `src/typechecker/types.js` (`WASM_STDLIB_MEMBERS` `["json", new Set()]` removed), `docs/go-compatibility.md`, `docs/hybrid-wasm.md`
   - Do: remove the rejection and its diagnostic; update the docs rows.
   - Test: the `json` diagnostic test is inverted; `npm test`.
   - Done when: `example/hybrid` can import `encoding/json` in its `wasm` package.
 
-- [ ] **Task 5.6 — JSON benchmark**
+- [x] **Task 5.6 — JSON benchmark**
   - Files: new `test/e2e/perf/json-bench.js`
   - Do: encode and decode a 1 MB corpus in WASM and in the JS backend; record the result in [Performance and size](#performance-and-size). Gate: WASM ≤ 2× JS. A miss is documented with a follow-up; the feature still ships.
   - Test: the benchmark runs under `npm run bench`.
   - Done when: numbers are recorded in this document.
+  - Landed: `test/e2e/perf/json-bench.js` encodes and decodes a 1.05 MB corpus (18,000 items) over 5 runs under `npm run bench`. Results: JS encode 24.68 ms (42.3 MB/s), decode 139.83 ms (7.5 MB/s), total 164.52 ms; WASM encode 48.15 ms (21.7 MB/s), decode 139.26 ms (7.5 MB/s), total 187.41 ms. Ratio WASM / JS: encode 1.95×, decode 1.00×, total 1.14× (gate: WASM ≤ 2× JS total execution time, passed).
 
 ### Phase 6.1: SIMD value type, opcodes, checker methods and Go overlay
 
@@ -1533,7 +1534,7 @@ Each Phase 6 task follows the same Files/Test/Done-when discipline: files are `s
 - After the Phase 0.5 review fixes: base 20,760 rays/s (85,832 B alloc/run) against branch 20,946 rays/s (85,512 B alloc/run); `example/hybrid` dev output and raycast `--sizes` are still identical to the base.
 - Strict-mode runtime checks (Tasks 0.16a/0.16b), interleaved `npm run bench --mode hybrid` runs on the same machine: v1.7.0 11,615 / 11,831 / 11,845 / 11,875 rays/s (median 11,838), branch 11,742 / 11,690 / 11,726 / 11,762 rays/s (median 11,734): −0.9%, inside the 3% budget; 2,688 B alloc/run in both. Raycast `app.wasm` grows from 67.9 KB to 74.9 KB (index-check handlers). Intermediate variants measured on the way: Go's message with the length kept in a local 11,424 / 11,449 / 11,311 (−4.2%), length carried as a branch value 11,596 / 11,540 (−2.7%).
 - Recoverable nil dereference in WASM (Task 0.16a follow-up), three interleaved rounds: v1.7.0 11,944 / 11,728 / 11,629 rays/s (median 11,728), before the nil checks 11,569 / 11,614 / 11,206 (median 11,569, −1.4%), with them 11,458 / 11,486 / 11,529 (median 11,486, −2.1%); 2,688 B alloc/run in all three. Raycast `app.wasm` 74.9 KB → 77.3 KB (one `br_on_null` per pointer field access, one `nil` block per function).
-- The WASM JSON benchmark (Task 5.6) is recorded in this document.
+- WASM JSON benchmark (Task 5.6, `test/e2e/perf/json-bench.js`), 1.05 MB corpus (18,000 items), 5 runs: JS encode 24.68 ms (42.3 MB/s), decode 139.83 ms (7.5 MB/s), total 164.52 ms; WASM encode 48.15 ms (21.7 MB/s), decode 139.26 ms (7.5 MB/s), total 187.41 ms. Ratio WASM / JS: encode 1.95×, decode 1.00×, total 1.14× (gate: WASM ≤ 2× JS total time, passed).
 - `npm run bench` must show no regression in the hybrid raycast. Neither the array-copy fix (Task 0.8b) nor the strict-mode runtime checks (Task 0.16b) may slow the scalar raycast by more than 3% each; the analysis is extended until they do not, and the checks are never shipped disabled.
 - `test/e2e/perf/zero-alloc.js` must pass after Tasks 0.5a, 0.5d and 0.7c.
 - The SIMD particle and `IntersectRayAABB4` raycast results, with allocations per run, are recorded in §10.6 together with the promotion decision.
