@@ -189,8 +189,10 @@ const HELPER_MAP = [
 // JS bodies of `//gofront:intrinsic` functions (names: INTRINSICS in
 // typechecker/types.js).  The WASM backend keeps their empty body.
 const JS_INTRINSICS = {
-	deadline_timer: ([ns, fire]) =>
-		`setTimeout(${fire}, Math.max(0, Number(${ns}) / 1e6));`,
+	deadline_timer: ([key, ns, fire]) =>
+		`(globalThis.__gofrontDeadlines ??= new Map()).set(${key}, setTimeout(${fire}, Math.max(0, Number(${ns}) / 1e6)));`,
+	deadline_stop: ([key]) =>
+		`clearTimeout(globalThis.__gofrontDeadlines?.get(${key})); globalThis.__gofrontDeadlines?.delete(${key});`,
 };
 
 export class CodeGen {
