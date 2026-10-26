@@ -1,0 +1,10 @@
+[
+	{ "id": 1, "text": "Read the GoFront docs", "done": false, "priority": 0 },
+	{
+		"id": 2,
+		"text": "Fix the critical production bug",
+		"done": false,
+		"priority": 1
+	},
+	{ "id": 3, "text": "Write tests", "done": true, "priority": 0 }
+]
