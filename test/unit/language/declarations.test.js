@@ -884,6 +884,32 @@ func main() {
 
 // ── Unimplemented Go features ─────────────────────────────────
 
+section("Excluded packages and //go:embed diagnostics");
+
+test("//go:embed reports targeted diagnostic", () => {
+	const { errors } = compile(`package main
+//go:embed hello.txt
+var s string
+func main() {}`);
+	assertErrorContains(errors, "//go:embed is not supported yet");
+});
+
+test("importing excluded stdlib packages reports manifest reason", () => {
+	const cases = [
+		["reflect", "runtime"],
+		["net/http", "host"],
+		["text/template", "reflection"],
+		["math/big", "deferred"],
+		["compress/gzip", "deferred"],
+	];
+	for (const [pkg, reason] of cases) {
+		const { errors } = compile(`package main
+import _ "${pkg}"
+func main() {}`);
+		assertErrorContains(errors, reason);
+	}
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
