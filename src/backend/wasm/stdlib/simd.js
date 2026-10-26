@@ -276,6 +276,15 @@ export class SimdEmitter {
 			case "StoreF32x4":
 				this.emitSimdStore(args[0], args[1], args[2]);
 				return true;
+			case "LoadF32x4Slice":
+				this.emitSimdSliceAccess(args[0], args[1], null);
+				return true;
+			case "StoreF32x4Slice":
+				this.emitSimdSliceAccess(args[0], args[1], args[2]);
+				return true;
+			case "Pad4":
+				this._emitSimdPad4(args[0]);
+				return true;
 			default:
 				return false;
 		}
@@ -350,6 +359,101 @@ export class SimdEmitter {
 		this._emitSharedFloat32Address(bufNode, indexNode);
 		this.emitExpr(valNode, "v128");
 		this.pushInstruction({ op: "v128.store", align: 2, offset: 0 });
+	}
+
+	// Pad4(n) = (n + 3) &^ 3 in the width of n.
+	_emitSimdPad4(nNode) {
+		const wide = !this._isI32IndexExpr(nNode);
+		const t = wide ? "i64" : "i32";
+		this.emitExpr(nNode, t);
+		this.pushInstruction({ op: `${t}.const`, value: wide ? 3n : 3 });
+		this.pushInstruction(`${t}.add`);
+		this.pushInstruction({ op: `${t}.const`, value: wide ? -4n : -4 });
+		this.pushInstruction(`${t}.and`);
+	}
+
+	// LoadF32x4Slice (valNode null) and StoreF32x4Slice on a []float32: a
+	// GC array cannot be read as v128, so each lane is moved on its own.
+	emitSimdSliceAccess(sliceNode, indexNode, valNode) {
+		const sliceType = sliceNode._type ?? this._resolveExprGoType(sliceNode);
+		const elemGoType = this._getArrayElemType(sliceType);
+		const arrInfo = this.mod.getArrayType(elemGoType);
+		const sliceInfo = this.mod.getSliceType(elemGoType);
+		const sTI = sliceInfo.typeIndex;
+		const sliceWType = { kind: "ref", nullable: true, typeIndex: sTI };
+		const sliceTmp = this.acquireTemp(sliceWType);
+		const idx64 = this.acquireTemp("i64");
+		const baseTmp = this.acquireTemp("i32");
+		const vecTmp = valNode ? this.acquireTemp("v128") : null;
+		const lenOf = () => {
+			this.pushInstruction({ op: "local.get", index: sliceTmp });
+			this.pushInstruction({ op: "struct.get", typeIndex: sTI, fieldIndex: 2 });
+		};
+
+		this.emitExpr(sliceNode, sliceWType);
+		this.pushInstruction({ op: "local.set", index: sliceTmp });
+		if (this._isI32IndexExpr(indexNode)) {
+			this.emitExpr(indexNode, "i32");
+			this.pushInstruction("i64.extend_i32_s");
+		} else {
+			this.emitExpr(indexNode, "i64");
+		}
+		this.pushInstruction({ op: "local.set", index: idx64 });
+		if (valNode) {
+			this.emitExpr(valNode, "v128");
+			this.pushInstruction({ op: "local.set", index: vecTmp });
+		}
+
+		// Out of range when len < 4 or unsigned(i) > len - 4 (negative i wraps).
+		lenOf();
+		this.pushInstruction({ op: "i32.const", value: 4 });
+		this.pushInstruction("i32.lt_u");
+		this._emitBoundsBranch();
+		this.pushInstruction({ op: "local.get", index: idx64 });
+		lenOf();
+		this.pushInstruction({ op: "i32.const", value: 4 });
+		this.pushInstruction("i32.sub");
+		this.pushInstruction("i64.extend_i32_u");
+		this.pushInstruction("i64.gt_u");
+		this._emitBoundsBranch();
+
+		this.pushInstruction({ op: "local.get", index: sliceTmp });
+		this.pushInstruction({ op: "struct.get", typeIndex: sTI, fieldIndex: 1 });
+		this.pushInstruction({ op: "local.get", index: idx64 });
+		this.pushInstruction("i32.wrap_i64");
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: baseTmp });
+
+		const elemAt = (lane) => {
+			this.pushInstruction({ op: "local.get", index: sliceTmp });
+			this.pushInstruction({ op: "struct.get", typeIndex: sTI, fieldIndex: 0 });
+			this.pushInstruction({ op: "local.get", index: baseTmp });
+			if (lane) {
+				this.pushInstruction({ op: "i32.const", value: lane });
+				this.pushInstruction("i32.add");
+			}
+		};
+		if (valNode) {
+			for (let lane = 0; lane < 4; lane++) {
+				elemAt(lane);
+				this.pushInstruction({ op: "local.get", index: vecTmp });
+				this.pushInstruction({ op: "f32x4.extract_lane", lane });
+				this.pushInstruction({ op: "array.set", typeIndex: arrInfo.typeIndex });
+			}
+		} else {
+			elemAt(0);
+			this.pushInstruction({ op: "array.get", typeIndex: arrInfo.typeIndex });
+			this.pushInstruction("f32x4.splat");
+			for (let lane = 1; lane < 4; lane++) {
+				elemAt(lane);
+				this.pushInstruction({ op: "array.get", typeIndex: arrInfo.typeIndex });
+				this.pushInstruction({ op: "f32x4.replace_lane", lane });
+			}
+		}
+		if (vecTmp !== null) this.releaseTemp(vecTmp, "v128");
+		this.releaseTemp(baseTmp, "i32");
+		this.releaseTemp(idx64, "i64");
+		this.releaseTemp(sliceTmp, sliceWType);
 	}
 
 	_constIntValue(node) {
