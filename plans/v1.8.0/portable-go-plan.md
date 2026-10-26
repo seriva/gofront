@@ -1355,11 +1355,12 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
 
 ### Phase 4.4: `math/cmplx`, `csv`, `log` and `math/rand/v2`
 
-- [ ] **Task 4.8 — `math/cmplx` (after Task 0.4)**
+- [x] **Task 4.8 — `math/cmplx` (after Task 0.4)**
   - Files: new `runtime/stdlib/math/cmplx/*.go`
   - Do: everything except functions needing `math/big`.
   - Test: conformance fixture `cmplx/funcs.go` with values printed via `%.6g` to avoid last-ulp differences.
   - Done when: fixture matches Go.
+  - Landed: `math/cmplx` in Go source (the standard library's own code, so results follow Go's algorithms), with every function except those needing `math/big`. Private stand-ins cover `math.Sincos`, `math.Asinh` and `math.Atanh`, which `math` lacks. The sources avoid constructs the backends still mishandle (non-ASCII identifiers, grouped named results, function-local constants, untyped constants as complex values); each is in `plans/follow-ups.md`. Fixed `math.IsInf(x, 0)` on JS, which was true for NaN. Conformance fixture `cmplx/funcs.go` matches Go 1.26 on JS and WASM.
 
 - [ ] **Task 4.9 — `encoding/csv` (after Task 4.1a)**
   - Files: new `runtime/stdlib/encoding/csv/{reader,writer}.go`
