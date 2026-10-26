@@ -1385,11 +1385,12 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
 
 ### Phase 5.1: WASM JSON scanner, encoders, decoders and unmarshaling
 
-- [ ] **Task 5.1a — WASM JSON scanner and per-type encoders**
+- [x] **Task 5.1a — WASM JSON scanner and per-type encoders**
   - Files: `src/backend/wasm/emit-stdlib.js` (or new `src/backend/wasm/stdlib/json.js`), `src/typechecker/resolve.js` (`resolveJsonFields` reused)
   - Do: one encoder per reachable type appending to `[]byte`, using `strconv.AppendFloat`/`AppendInt` and the UTF-8 helpers; sorted map keys; `Marshaler` through interface calls. No host JSON.
   - Test: new `test/unit/wasm/json.test.js` sharing cases with `test/unit/builtins/json.test.js` — `Marshal` of the existing JS corpus produces identical bytes in WASM.
   - Done when: encoding cases pass as parity tests.
+  - Landed: the JSON scanner and the encoder and decoder state are Go source in `stdlib/internal/jsonrt` (adapted from the standard library, one copy for both backends). For each `json.Marshal` call in a `wasm` or `both` package, `src/lower/json-codecs.js` generates one encoder per reachable type as Go source from the checked types and `resolveJsonFields`, checks it as an extra `json_codecs.go` file of the package and links it into `app.wasm` (the JS side keeps its own codecs). `Marshaler` methods are called directly, map keys are sorted, and `json.Marshal` and `json.Valid` are now allowed in WASM packages (the rest of `encoding/json` stays rejected until Tasks 5.1b to 5.5). A value stored in `any` is encoded by a type switch over the types the package builds with composite literals, `&T{}`, `make` and `new`, plus the types it encodes anywhere; any other dynamic type reports `json: unsupported type`. Fixed along the way: a promoted field of an embedded struct is now ordered where the embedded struct is declared, as in Go (also in JS), and in WASM a named string type, a named `[]byte` conversion and a map in `any` round-trip through type assertions. Conformance fixture `json/encode.go` matches Go 1.26 on both backends; `test/unit/wasm/json.test.js` checks WASM against Go's output for the cases where the JS backend still differs (recorded in `plans/follow-ups.md`).
 
 - [ ] **Task 5.1b — WASM per-type decoders**
   - Files: as 5.1a
