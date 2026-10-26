@@ -1,7 +1,10 @@
 //gofront:target wasm
 package sim
 
-import "gofront/shared"
+import (
+	"gofront/shared"
+	"gofront/simd"
+)
 
 // MaxParticles is the fixed capacity of the simulation. All buffers are
 // allocated once at startup (gofront/shared forbids later allocation) and
@@ -47,44 +50,87 @@ func Count() int { return count }
 
 // Step advances the simulation by dt seconds: a soft attractor at
 // (ax, ay), a little drag and elastic walls at the box edges.
+//
+// The interleaved x,y layout puts two particles in one simd.F32x4, so the
+// loop moves a pair per iteration; Swizzle adds dx*dx and dy*dy within each
+// pair and Select flips the particles that crossed a wall.
 func Step(dt float32, ax float32, ay float32, width float32, height float32) {
-	for i := 0; i < count; i++ {
-		px := Positions[i*2]
-		py := Positions[i*2+1]
-		vx := Velocities[i*2]
-		vy := Velocities[i*2+1]
+	attractor := simd.F32x4{ax, ay, ax, ay}
+	limit := simd.F32x4{width, height, width, height}
+	limit2 := limit.Add(limit)
+	zero := simd.Splat(0)
+	soften := simd.Splat(400.0)
+	force := simd.Splat(60000.0)
+	vdt := simd.Splat(dt)
+	twenty := simd.Splat(20.0)
+	drag := simd.Splat(0.999)
 
-		dx := ax - px
-		dy := ay - py
-		d2 := dx*dx + dy*dy + 400.0
-		f := 60000.0 / d2
-		vx += dx * f * dt / 20.0
-		vy += dy * f * dt / 20.0
-		vx *= 0.999
-		vy *= 0.999
+	i := 0
+	for ; i+2 <= count; i += 2 {
+		k := i * 2
+		p := simd.LoadF32x4(Positions, k)
+		v := simd.LoadF32x4(Velocities, k)
 
-		px += vx * dt
-		py += vy * dt
-		if px < 0 {
-			px = -px
-			vx = -vx
-		} else if px > width {
-			px = 2*width - px
-			vx = -vx
-		}
-		if py < 0 {
-			py = -py
-			vy = -vy
-		} else if py > height {
-			py = 2*height - py
-			vy = -vy
-		}
+		d := attractor.Sub(p)
+		sq := d.Mul(d)
+		d2 := sq.Add(sq.Swizzle(1, 0, 3, 2)).Add(soften)
+		f := force.Div(d2)
+		v = v.Add(d.Mul(f).Mul(vdt).Div(twenty))
+		v = v.Mul(drag)
+		p = p.Add(v.Mul(vdt))
 
-		Positions[i*2] = px
-		Positions[i*2+1] = py
-		Velocities[i*2] = vx
-		Velocities[i*2+1] = vy
+		low := p.Less(zero)
+		p = simd.Select(low, p.Neg(), p)
+		v = simd.Select(low, v.Neg(), v)
+		high := p.Greater(limit)
+		p = simd.Select(high, limit2.Sub(p), p)
+		v = simd.Select(high, v.Neg(), v)
+
+		simd.StoreF32x4(Positions, k, p)
+		simd.StoreF32x4(Velocities, k, v)
 	}
+	for ; i < count; i++ {
+		stepOne(i, dt, ax, ay, width, height)
+	}
+}
+
+// stepOne is the scalar form of Step for a single particle.
+func stepOne(i int, dt float32, ax float32, ay float32, width float32, height float32) {
+	px := Positions[i*2]
+	py := Positions[i*2+1]
+	vx := Velocities[i*2]
+	vy := Velocities[i*2+1]
+
+	dx := ax - px
+	dy := ay - py
+	d2 := dx*dx + dy*dy + 400.0
+	f := 60000.0 / d2
+	vx += dx * f * dt / 20.0
+	vy += dy * f * dt / 20.0
+	vx *= 0.999
+	vy *= 0.999
+
+	px += vx * dt
+	py += vy * dt
+	if px < 0 {
+		px = -px
+		vx = -vx
+	} else if px > width {
+		px = 2*width - px
+		vx = -vx
+	}
+	if py < 0 {
+		py = -py
+		vy = -vy
+	} else if py > height {
+		py = 2*height - py
+		vy = -vy
+	}
+
+	Positions[i*2] = px
+	Positions[i*2+1] = py
+	Velocities[i*2] = vx
+	Velocities[i*2+1] = vy
 }
 
 // Energy returns the total kinetic energy — a cheap checksum for tests.

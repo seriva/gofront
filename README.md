@@ -398,7 +398,7 @@ The compiler analyzes both sides of the boundary and synthesizes a facade into `
 - **Slices & Arrays:** Slices and arrays copy element-wise in both directions; TypedArrays (`Float32Array`, `Int32Array`, etc.) are natively accepted.
 - **Closures & Interfaces:** Function values, callbacks, and named non-empty interfaces cross the boundary transparently.
 - **Shared Linear-Memory Buffers:** `gofront/shared` (`shared.NewFloat32`, etc.) exposes zero-copy TypedArray views over linear memory for bulk per-frame data.
-- **WASM SIMD (`gofront/simd`):** Experimental 4-wide float vector type (`simd.F32x4`) compiling directly to native `v128` instructions with zero GC overhead, including `simd.LoadF32x4`/`StoreF32x4` for direct linear-memory access.
+- **WASM SIMD (`gofront/simd`, experimental):** 4-wide float vector type (`simd.F32x4`) compiling directly to native `v128` instructions with zero GC overhead, including `simd.LoadF32x4`/`StoreF32x4` for direct linear-memory access (about 1.6× faster than a scalar loop on a particle-integration benchmark).
 - **WASM Loader:** The generated JS bundle automatically fetches `app.wasm` relative to `app.js` (`import.meta.url`, customizable via `globalThis.__GOFRONT_WASM_URL` or `globalThis.__GOFRONT_WASM_BYTES`).
 - **WAT Inspection:** Passing `--emit-wat` writes human-readable `app.wat` alongside the binary module.
 - **Binaryen Optimization:** Passing `--release` or `--wasm-opt` optimizes `app.wasm` via Binaryen (`-O3` + GUFA), achieving ~23% smaller binaries and generating `app.wasm.map` source maps.

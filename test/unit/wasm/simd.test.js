@@ -1102,3 +1102,72 @@ func main() {
 		assertEqual(mods[target].Assert(), false);
 	}
 });
+
+section("WASM SIMD — memory helpers and slice transport");
+
+for (const target of ["wasm", "js"]) {
+	test(`LoadF32x4Slice, StoreF32x4Slice and Pad4 on a []float32 in ${target}`, async () => {
+		const res = await compileHybridProject(
+			{
+				"sim/sim.go": `//gofront:target ${target}
+package sim
+
+import "gofront/simd"
+
+var Xs = make([]float32, 10)
+
+func Fill() {
+	for i := range Xs {
+		Xs[i] = float32(i) * 1.5
+	}
+}
+
+func AddAt(i int) {
+	v := simd.LoadF32x4Slice(Xs, i)
+	simd.StoreF32x4Slice(Xs, i, v.Add(simd.Splat(100)))
+}
+
+func Sub(i int) []float32 {
+	part := Xs[2:8]
+	simd.StoreF32x4Slice(part, i, simd.Splat(7))
+	return Xs
+}
+
+func Bad(i int) float32 { return simd.LoadF32x4Slice(Xs, i).Lane(0) }
+
+func BadStore(i int) { simd.StoreF32x4Slice(Xs, i, simd.Splat(1)) }
+
+func Nil() float32 {
+	var n []float32
+	return simd.LoadF32x4Slice(n, 0).Lane(0)
+}
+
+func Pad(n int) int { return simd.Pad4(n) }
+`,
+				"main.go": `package main
+
+import "./sim"
+
+func main() { _ = sim.Fill }
+`,
+			},
+			{
+				exports: ["Fill", "AddAt", "Sub", "Bad", "BadStore", "Nil", "Pad"],
+			},
+		);
+		const m = res.mod;
+		m.Fill();
+		m.AddAt(3);
+		const xs = Array.from(m.Sub(0));
+		assertDeep(xs, [0, 1.5, 7, 7, 7, 7, 109, 10.5, 12, 13.5]);
+		assertThrows(() => m.Bad(7));
+		assertThrows(() => m.Bad(-1));
+		assertThrows(() => m.BadStore(7));
+		assertThrows(() => m.BadStore(-1));
+		assertThrows(() => m.Nil());
+		assertEqual(Number(m.Pad(0)), 0);
+		assertEqual(Number(m.Pad(1)), 4);
+		assertEqual(Number(m.Pad(4)), 4);
+		assertEqual(Number(m.Pad(5)), 8);
+	});
+}
