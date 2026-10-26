@@ -99,6 +99,7 @@ func setupEvents() {
 // ── Entry point ───────────────────────────────────────────────
 
 func main() {
+	sim.LoadConfig(sim.DefaultConfigJSON)
 	canvas = document.getElementById("sim")
 	ctx = canvas.getContext("2d")
 
