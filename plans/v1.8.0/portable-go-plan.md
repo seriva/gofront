@@ -22,7 +22,7 @@ v1.6.1 closed the obvious WASM gaps package by package. v1.8.0 changes the quest
 
 **Done means:**
 - No language construct accepted in a `js` package produces an invalid `.wasm` module, an internal compiler error, or a different result in a `wasm`/`both` package. The two accepted, documented divergences are numeric `any` (type switches and equality on numbers held in `any`) and the UTF-16 string model shared by both backends (see [§1.1](#11-string-semantics-both-backends)).
-- Every in-scope package and member in the manifest (see [Scope rule](#scope-rule)) is supported on JS and WASM with Go's signature, or excluded with a stated reason.
+- Every in-scope package and member in the manifest (see [Scope rule](#scope-rule)) is supported on JS and WASM with Go's signature (aside from the intentional GoFront type-system representation differences recorded in `test/unit/types/stdlib-coverage.gaps.json` under `signature`, see Task 1.2b), or excluded with a stated reason (`gaps.missing`, `gaps.wasm`, and `gaps.exclusion` are all empty).
 - `encoding/json` and `encoding/csv` produce the same output as Go on the conformance corpus, on both backends.
 - `gofront/simd` produces the same results on both backends (NaN payloads aside), and the promotion decision is recorded in this document with the benchmark numbers.
 - [`go-compatibility.md`](../../docs/go-compatibility.md), [`language-support.md`](../../docs/language-support.md) and [`hybrid-wasm.md`](../../docs/hybrid-wasm.md) are generated from, or checked against, the same manifest.
@@ -1599,6 +1599,47 @@ Each Phase 6 task follows the same Files/Test/Done-when discipline: files are `s
   - Landed: confirmed the v2.0.0 baseline against what v1.8.0 actually shipped: Go-source standard library packages in `stdlib/` and the coverage manifest in `stdlib/manifest.json` (51 conformance fixtures, 2,746 unit tests, 0 gaps in covered packages), `gofront/simd` completed and retained as experimental per promotion gate decision (`F32x4`, `Mask32x4`, lane operations, comparisons, shuffles, slice load/store helpers; SoA structs dropped to `simplefps`), and declared the JS-engine feature freeze in `plans/v2.0.0/native-go-engine.md`.
 - [x] **Task 7.6** — `CHANGELOG.md` (with a breaking-changes section: `maps.Keys`/`Values`, strict-mode runtime panics, typed-constant overflow errors, type declarations named after JavaScript globals now rejected (Task 0.19d), unknown string escapes now a lexer error (Task 0.21)) and [`roadmap.md`](../roadmap.md).
   - Landed: updated `CHANGELOG.md` with explicit breaking-change entries for `maps.Keys`/`Values`, strict-mode runtime panics, typed-constant overflow errors, rejected type declarations named after JS globals, and unknown string escape lexer errors; updated `plans/roadmap.md` with completed v1.8.0 areas (`WASM language parity`, `Go-source stdlib`, `Coverage manifest & conformance`, `iter, cmp`, `Member completion`, `bufio, net/url, context`, `New pure packages`, `SIMD completion & promotion gate` marked experimental, `encoding/json everywhere`, `Review follow-ups`), baseline notes, and the JS-engine feature freeze declaration.
+
+### Phase 8: Full-branch audit discrepancy fixes
+
+Scheduled from the Step 4.4 full-branch audit (2026-10-26) to resolve all remaining discrepancies in stdlib manifest coverage, exclusion/`//go:embed` diagnostics, `fmt` `%p` parity, and user documentation.
+
+- [ ] **Task 8.1 — Manifest exclusion diagnostics and `//go:embed` diagnostic**
+  - Files: `src/typechecker/stdlib/excluded.js`, `src/typechecker/declarations.js`, `src/typechecker/expressions.js`, `src/typechecker/index.js`
+  - Do: Load `stdlib/manifest.json` in `src/typechecker/stdlib/excluded.js`. When importing an excluded package (`kind === "package"` and `status.startsWith("excluded:")`), report a compile error containing the manifest's `note` (or category reason). When referencing an excluded package member (`pkg.X`) or method/field (`x.M` on a stdlib type `pkg.T`), report a compile error containing the manifest's `note` (or category reason), preserving existing custom wordings (`iter.Pull`, `ctx.Done()`, `time.After`/`Tick`/`NewTimer`/`NewTicker`, `sync.Cond`, `TempDir`/`Chdir`, `ChaCha8`). Detect `//go:embed` directives in source files and report a compile error `//go:embed is not supported yet`.
+  - Test: `test/unit/types/stdlib-coverage.test.js` (`gaps.exclusion` becomes `{}`), plus unit tests in `test/unit/language/declarations.test.js` for `//go:embed` (`assertErrorContains(errors, "//go:embed is not supported yet")`) and excluded package imports (`reflect`, `net/http`, `text/template`, `math/big`, `compress/gzip`).
+  - Done when: `gaps.exclusion` in `test/unit/types/stdlib-coverage.gaps.json` has 0 entries and all exclusion/embed tests pass.
+
+- [ ] **Task 8.2 — Coverage gate member resolution, WASM stdlib gaps, and `strconv` complex helpers**
+  - Files: `test/unit/types/stdlib-coverage.test.js`, `src/typechecker/types.js`, `stdlib/io/io.go`, `stdlib/strconv/quote.go`, `test/conformance/strconv/basic.go`, `test/conformance/strconv/basic.out`
+  - Do:
+    1. In `test/unit/types/stdlib-coverage.test.js`, update `collectDecl` and `memberOf`/`findMember` so `InterfaceType` methods (in `io`, `hash`, `container/heap`, `context`, `sort`, `math/rand/v2`, `encoding/json`), promoted methods/fields on embedded structs (`bufio.ReadWriter`), and existing `encoding/json` error/token/number types and methods are recognized.
+    2. Enable `io.LimitedReader` (in `stdlib/io/io.go` or WASM stdlib) and `testing.Short`/`testing.Verbose`/`testing.Init`/`testing.Testing`/`testing.Benchmark` in WASM (`WASM_STDLIB_MEMBERS`) or reclassify driver-only helpers appropriately so `gaps.wasm` is `{}`.
+    3. Implement `strconv.FormatComplex` and `strconv.ParseComplex` in `stdlib/strconv/quote.go` (using `FormatFloat`/`ParseFloat` and `complex`/`real`/`imag`) as required by the Scope rule.
+  - Test: `test/conformance/strconv/basic.go` extended with `FormatComplex`/`ParseComplex`, `test/unit/types/stdlib-coverage.test.js`.
+  - Done when: `strconv.FormatComplex`/`ParseComplex` match Go 1.26 on both backends, `gaps.wasm` is empty, and all already-implemented interface/embedded members are recognized by `stdlib-coverage.test.js`.
+
+- [ ] **Task 8.3 — Reclassify remaining unimplemented stdlib members as `excluded:deferred` and reconcile plan notes**
+  - Files: `scripts/manifest-overrides.json`, `stdlib/manifest.json`, `test/unit/types/stdlib-coverage.gaps.json`, `plans/v1.8.0/portable-go-plan.md`, `plans/roadmap.md`
+  - Do: Move the remaining unimplemented `gaps.missing` members in `scripts/manifest-overrides.json` to `excluded:deferred` with a clear `note` (e.g. `"deferred; open an issue if you need it"`), regenerate `stdlib/manifest.json` (`npm run manifest:update`) and `test/unit/types/stdlib-coverage.gaps.json` (`node test/unit/types/stdlib-coverage.test.js --update-gaps`). Verify that `gaps.missing`, `gaps.wasm`, and `gaps.exclusion` are all `{}` (0 gaps), and that referencing any newly deferred member reports its exclusion diagnostic via Task 8.1. Reconcile `plans/v1.8.0/portable-go-plan.md` (Scope rule member table, Task 1.5 counts, Task 3.4a/3.7/7.4 `Landed:` notes) and `plans/roadmap.md` with the final manifest counts.
+  - Test: `test/unit/types/stdlib-coverage.test.js` and `test/unit/compiler/manifest.test.js`.
+  - Done when: `stdlib-coverage.gaps.json` has `missing: {}`, `wasm: {}`, `exclusion: {}`, and `npm test` passes.
+
+- [ ] **Task 8.4 — Fix `fmt` `%p` parity on boxed scalar pointers**
+  - Files: `src/backend/js/fmt-runtime.js`, `src/backend/js/fmt-types.js`, `src/backend/wasm/stdlib/core.js`, `test/unit/builtins/fmt-verbs.test.js`
+  - Do: Ensure `fmt.Sprintf("%p", p)` on a boxed scalar pointer (`x := 42; p := &x`), struct pointer (`&S{1}`), slice, and `nil` pointer produces identical output on JS and WASM (`%!p(...)` with matching type representation across backends).
+  - Test: `compileHybrid` parity test in `test/unit/builtins/fmt-verbs.test.js` for `fmt.Sprintf("%p|%p|%p", &x, &s, nilPtr)`.
+  - Done when: `compileHybrid` parity test passes on JS and WASM.
+
+- [ ] **Task 8.5 — Fix stdlib docs generator, notable-member tables, `go-compatibility.md`, and `CHANGELOG.md`**
+  - Files: `scripts/docs-stdlib.js`, `docs/language-support.md`, `docs/hybrid-wasm.md`, `docs/go-compatibility.md`, `CHANGELOG.md`
+  - Do:
+    1. Remove all references/links to `plans/v1.8.0/portable-go-plan.md` from `scripts/docs-stdlib.js` and regenerate `docs/language-support.md` and `docs/hybrid-wasm.md` (`npm run docs:stdlib`).
+    2. Audit the hand-written "Notable members" tables in `docs/language-support.md` and `docs/hybrid-wasm.md` and remove every excluded or unimplemented symbol (`sync.Cond`/`NewCond`, `crypto/rand.Prime`, `testing.T.TempDir`, `testing.AllocsPerRun`, deferred `unicode` tables, and deferred Task 8.3 members) so every symbol listed as supported compiles on its stated target.
+    3. Update the `fmt %p verb` row in `docs/go-compatibility.md` to accurately describe `%!p(...)` formatting on both backends.
+    4. Consolidate `## [Unreleased]` in `CHANGELOG.md` per `/dev-loop` **People docs**: merge non-breaking entries into concise 1–2 sentence feature entries that link to `docs/` instead of listing long symbol catalogues inline, while keeping each breaking change as its own `**Breaking:**` entry under `### Changed`.
+  - Test: `npm run check`, `npm test`, and a unit test in `test/unit/compiler/manifest.test.js` verifying that `docs/` contain no `plans/` links.
+  - Done when: `npm run check` and `npm test` pass with zero plan references in `docs/`, zero unimplemented symbols in `docs/` tables, accurate `%p` docs, and compliant `CHANGELOG.md`.
 
 ---
 
