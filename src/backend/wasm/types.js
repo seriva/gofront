@@ -239,9 +239,9 @@ export function toWasmType(goType, checker = null, mod = null) {
 				typeof baseWType === "object" &&
 				baseWType !== null &&
 				baseWType.kind === "ref" &&
-				// A pointer to a slice goes through the scalar box / accessor
-				// pair: slice headers are immutable shared values.
-				!isSliceType(goType.base, checker)
+				// A pointer to a slice or map goes through the scalar box /
+				// accessor pair: the pointee is a replaceable reference value.
+				!isReplaceableRef(goType.base, checker)
 			) {
 				return baseWType;
 			}
@@ -482,10 +482,18 @@ export function isPointerToStruct(goType, checker = null, mod = null) {
 	return false;
 }
 
+// Slices and maps are reference values that an assignment through a pointer
+// replaces (a nil map becomes a new one), unlike structs and arrays, whose
+// pointer is the value's own reference.
+function isReplaceableRef(goType, checker) {
+	return isSliceType(goType, checker) || isMapType(goType, checker);
+}
+
 export function isScalarType(goType, checker = null, mod = null) {
 	if (!goType) return false;
-	// A slice is a pointee "scalar": the pointer to it is a box or accessor.
-	if (isSliceType(goType, checker)) return true;
+	// A slice or map is a pointee "scalar": the pointer to it is a
+	// box or accessor, so the pointee can be replaced (`*p = make(...)`).
+	if (isReplaceableRef(goType, checker)) return true;
 	if (
 		isStructType(goType, checker, mod) ||
 		isArrayType(goType, checker) ||
