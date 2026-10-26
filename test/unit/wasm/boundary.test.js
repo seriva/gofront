@@ -1916,3 +1916,34 @@ func main() { _ = sim.Poke }
 	assertEqual(res.mod.Poke(input), 9);
 	assertEqual(input[0], 1);
 });
+
+test("[]Mask32x4 and []F32x4 in one module keep their own transport", async () => {
+	const res = await compileHybridProject(
+		{
+			"sim/sim.go": `//gofront:target wasm
+package sim
+
+import "gofront/simd"
+
+func Vecs(vs []simd.F32x4) int { return len(vs) }
+func Mask(vs []simd.Mask32x4) int { return len(vs) }
+func MaskAny(vs []simd.Mask32x4) bool { return vs[1].All() }
+`,
+			"main.go": `package main
+
+import "./sim"
+
+func main() { _ = sim.Vecs }
+`,
+		},
+		{ exports: ["Vecs", "Mask", "MaskAny"] },
+	);
+	const m = res.mod;
+	const masks = [
+		[true, false, true, false],
+		[true, true, true, true],
+	];
+	assertEqual(m.Vecs(new Float32Array(8)), 2);
+	assertEqual(m.Mask(masks), 2);
+	assertEqual(m.MaskAny(masks), true);
+});
