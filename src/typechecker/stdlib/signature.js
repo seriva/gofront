@@ -1,6 +1,6 @@
 // Prints checker types in the notation of Go's api/*.txt files, so the stdlib
 // coverage gate can compare GoFront's declared signatures with Go's
-// (runtime/stdlib/manifest.json).  Examples:
+// (stdlib/manifest.json).  Examples:
 //   func(string, int, int) (int64, error)
 //   func[$0 comparable](...$0) $0
 //   interface { Len, Less, Swap }

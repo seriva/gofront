@@ -1,4 +1,4 @@
-// Go-source stdlib: packages written in GoFront Go under runtime/stdlib/,
+// Go-source stdlib: packages written in GoFront Go under stdlib/,
 // compiled into the caller's target (js, wasm, or both).
 
 import { STDLIB_PACKAGES } from "../../../src/typechecker/types.js";
@@ -43,7 +43,7 @@ async function stdParity(libBody, extraFiles = {}, options = {}) {
 section("Go-source stdlib: loader (cmp)");
 
 test("cmp has no hand-written checker entry", () => {
-	assert(!STDLIB_PACKAGES.has("cmp"), "cmp must come from runtime/stdlib");
+	assert(!STDLIB_PACKAGES.has("cmp"), "cmp must come from stdlib");
 });
 
 test("js package imports cmp", async () => {

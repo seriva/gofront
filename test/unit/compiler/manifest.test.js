@@ -1,4 +1,4 @@
-// GoFront test suite — stdlib coverage manifest (runtime/stdlib/manifest.json)
+// GoFront test suite — stdlib coverage manifest (stdlib/manifest.json)
 
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -215,7 +215,7 @@ test("regenerating the manifest is a no-op", () => {
 	assert(
 		serializeManifest(buildManifest(apiDir)) ===
 			readFileSync(MANIFEST_PATH, "utf8"),
-		"runtime/stdlib/manifest.json is stale; run npm run manifest:update",
+		"stdlib/manifest.json is stale; run npm run manifest:update",
 	);
 });
 

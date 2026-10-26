@@ -1,5 +1,5 @@
 // GoFront test suite — `iter` package and the slices iterator members
-// (runtime/stdlib/iter, runtime/stdlib/slices/iter.go overlay).
+// (stdlib/iter, stdlib/slices/iter.go overlay).
 
 import { compileDir } from "../../../src/compiler.js";
 import {

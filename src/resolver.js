@@ -37,16 +37,16 @@ export function isBuiltinPackage(importPath) {
 	return STDLIB_PACKAGES.has(importPath);
 }
 
-// Go-source stdlib: `runtime/stdlib/<import path>/*.go`, written in GoFront Go
+// Go-source stdlib: `stdlib/<import path>/*.go`, written in GoFront Go
 // and compiled into the caller's target.  A directory for a path that is also
 // in STDLIB_PACKAGES is an overlay: its declarations extend that namespace.
 const STDLIB_SOURCE_ROOT = fileURLToPath(
-	new URL("../runtime/stdlib/", import.meta.url),
+	new URL("../stdlib/", import.meta.url),
 );
 const STDLIB_PATH_RE = /^[a-z0-9]+(\/[a-z0-9]+)*$/;
 
 // Returns the source directory for a Go-source stdlib import path, or null.
-// `root` replaces runtime/stdlib/ (tests use a temporary tree).
+// `root` replaces stdlib/ (tests use a temporary tree).
 export function resolveStdlibSource(importPath, root = null) {
 	if (!STDLIB_PATH_RE.test(importPath)) return null;
 	const dir = join(root ?? STDLIB_SOURCE_ROOT, importPath);

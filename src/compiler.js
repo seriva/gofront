@@ -461,7 +461,7 @@ function linkIntoBundle(options, merged, pkgTarget, { sourceMappingURL } = {}) {
 
 // ── Go-source stdlib ──────────────────────────────────────────
 //
-// Packages under runtime/stdlib/<path>/ are GoFront Go.  Each is type-checked
+// Packages under stdlib/<path>/ are GoFront Go.  Each is type-checked
 // and compiled once per build as a `both` package (strict numerics): its JS
 // is bundled for js/both importers and its programs are linked into app.wasm
 // for wasm/both importers, never through the boundary facade.  Top-level
@@ -614,7 +614,7 @@ function checkStdlibPrograms(programs, pkgName, options, overlay) {
 
 // Errors in stdlib source are compiler bugs; the importer reports them at its
 // import (see reportStdlibLoadError), so only the message text is kept, never
-// a location inside runtime/stdlib/.
+// a location inside stdlib/.
 function throwStdlibErrors(errors) {
 	if (errors.length === 0) return;
 	const detail = (e) =>
