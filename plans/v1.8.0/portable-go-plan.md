@@ -1332,23 +1332,26 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
 
 ### Phase 4.3: `crypto`, base32 and `sync/atomic`
 
-- [ ] **Task 4.6a — `crypto/md5`, `crypto/sha1`, `crypto/sha512`**
+- [x] **Task 4.6a — `crypto/md5`, `crypto/sha1`, `crypto/sha512`**
   - Files: new `runtime/stdlib/crypto/{md5,sha1,sha512}/*.go`
   - Do: `Sum*`, `New*`, `Size`, `BlockSize`, including `sha512/224`, `sha512/256`, `sha384`. sha512 needs `uint64` arithmetic: exact in WASM; in JS use `bits.Add64`/`Mul64`-style split limbs (document that it is slower in `js` packages).
   - Test: conformance fixture `crypto/digests.go` with the FIPS test vectors.
   - Done when: fixture matches Go.
+  - Landed: `crypto/md5`, `crypto/sha1` and `crypto/sha512` (SHA-512, SHA-384, SHA-512/224, SHA-512/256) in pure Go source with `Sum*`, `New*`, `Size*` and `BlockSize`. `sha512` keeps its 64-bit words as pairs of `uint32` so JS is exact (the JS `uint64` is a Number); it is slower than the other digests. Fixed the WASM interface dispatcher so a same-named method with a different arity (`strings.Reader.Reset(s)`) is no longer a candidate for `hash.Hash.Reset()`, which produced an invalid module. Conformance fixture `crypto/digests.go` matches Go 1.26 on JS and WASM.
 
-- [ ] **Task 4.6b — `crypto/hmac`, `crypto/subtle`, and the security note**
+- [x] **Task 4.6b — `crypto/hmac`, `crypto/subtle`, and the security note**
   - Files: new `runtime/stdlib/crypto/{hmac,subtle}/*.go`, `docs/go-compatibility.md`
   - Do: `hmac.New`, `Equal`; `subtle.ConstantTimeCompare`, `ConstantTimeEq`, `ConstantTimeSelect`, `XORBytes`. Docs: not side-channel hardened; use Web Crypto in `js` packages for real cryptography.
   - Test: conformance fixture `crypto/hmac.go` (RFC 4231 vectors).
   - Done when: fixture matches Go and the doc row exists.
+  - Landed: `crypto/hmac` (`New`, `Equal`) and `crypto/subtle` (all members, including `ConstantTimeByteEq`, `ConstantTimeCopy`, `ConstantTimeLessOrEq` and `WithDataIndependentTiming`) in pure Go source. `ConstantTimeEq` uses a 32-bit nonzero test instead of Go's `uint64` arithmetic so JS stays exact. The security note is a row in `docs/go-compatibility.md`. Conformance fixture `crypto/hmac.go` (RFC 4231 cases for SHA-384/512, plus SHA-1 and MD5) matches Go 1.26 on JS and WASM.
 
-- [ ] **Task 4.7 — `encoding/base32`, `unicode/utf16`, `sync/atomic`**
+- [x] **Task 4.7 — `encoding/base32`, `unicode/utf16`, `sync/atomic`**
   - Files: new `runtime/stdlib/encoding/base32/`, `runtime/stdlib/unicode/utf16/`, `runtime/stdlib/sync/atomic/`
   - Do: the member lists in [§7](#7-new-pure-packages-go-source). `atomic` is single-threaded; `Pointer[T]` and `Value` included.
   - Test: conformance fixtures `base32/codec.go`, `utf16/codec.go`, `atomic/ops.go`.
   - Done when: fixtures match Go.
+  - Landed: `encoding/base32` (all members, including the streaming `NewEncoder`/`NewDecoder`), `unicode/utf16` and `sync/atomic` (typed `Int32`/`Int64`/`Uint32`/`Uint64`/`Uintptr`/`Bool`/`Pointer[T]`/`Value` and all function forms, single-threaded) in Go source. 64-bit atomics hold a Number on JS, so they are exact only to 2^53. `Value` does not check that stored values share one type. The sources avoid constructs the WASM backend mishandles (`fallthrough`, tuple stores into computed indexes, `copy` into an array field); each is recorded in `plans/follow-ups.md`. Conformance fixtures `base32/codec.go`, `utf16/codec.go` and `atomic/ops.go` match Go 1.26 on JS and WASM.
 
 ### Phase 4.4: `math/cmplx`, `csv`, `log` and `math/rand/v2`
 
