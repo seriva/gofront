@@ -154,10 +154,7 @@ function classifyType(goType, mod) {
 		case "interface":
 			return classifyInterface(t, mod);
 		case "simd":
-			return {
-				k: "unsupported",
-				what: "simd.F32x4 cannot cross the JS↔WASM boundary in 1.7.0 (use shared.Float32 instead)",
-			};
+			return classifySimd(t, mod);
 		default:
 			return {
 				k: "unsupported",
@@ -225,12 +222,11 @@ function classifyNamed(t, mod) {
 	if (
 		t.name === "simd.F32x4" ||
 		t.name === "F32x4" ||
+		t.name === "simd.Mask32x4" ||
+		t.name === "Mask32x4" ||
 		t.underlying?.kind === "simd"
 	) {
-		return {
-			k: "unsupported",
-			what: "simd.F32x4 cannot cross the JS↔WASM boundary in 1.7.0 (use shared.Float32 instead)",
-		};
+		return classifySimd(t.underlying ?? t, mod, t.name);
 	}
 	if (t.name === "error") return { k: "error", wType: "anyref" };
 	if (t.name === "time.Duration")
@@ -243,6 +239,18 @@ function classifyNamed(t, mod) {
 	if (info) return structDesc(info, false);
 	if (t.underlying) return classifyType(t.underlying, mod);
 	return { k: "unsupported", what: `named type '${t.name}'` };
+}
+
+// F32x4 crosses as a copied 4-element Float32Array, Mask32x4 as a 4-element
+// boolean array.  Both travel through the wasm boundary as a GC array of the
+// four i32 lane words (`arr`), converted by __v128_from/__v128_to.
+function classifySimd(t, mod, name = "") {
+	const isMask = t.simd === "Mask32x4" || name.endsWith("Mask32x4");
+	const arr = classifyArray(
+		{ kind: "array", elem: { kind: "basic", name: "int32" }, size: 4 },
+		mod,
+	);
+	return { k: isMask ? "mask4" : "f32x4", wType: "v128", arr };
 }
 
 function classifyAnonStruct(t, mod) {
@@ -740,6 +748,11 @@ function visitNeed(desc, needs, errors, mod) {
 		case "error":
 			needs.error = true;
 			return;
+		case "f32x4":
+		case "mask4":
+			needs.simd = desc.arr;
+			visitNeed(desc.arr, needs, errors, mod);
+			return;
 		case "time":
 			needs.time = true;
 			return;
@@ -820,6 +833,7 @@ function collectNeeds(meta) {
 		ifaces: new Map(), // interface name -> desc
 		error: false,
 		time: false,
+		simd: null, // array desc carrying vectors across the boundary
 		shared: false, // any shared buffer on the surface
 	};
 	const errors = [];
@@ -864,16 +878,22 @@ export function scanBoundaryImports(mod, meta) {
 function isGcRef(wType) {
 	return wType === "anyref" || (typeof wType === "object" && wType !== null);
 }
+// A v128 crosses as an externref holding a GC array of its four i32 lanes;
+// the converting helpers are registered first thing in addBoundaryHelpers.
+const v128Conv = { from: null, to: null };
+
 function extType(wType) {
+	if (wType === "v128") return "externref";
 	if (wType === "i64") return "f64";
 	if (isGcRef(wType)) return "externref";
 	return wType;
 }
 function needsConv(wTypes) {
-	return wTypes.some((w) => w === "i64" || isGcRef(w));
+	return wTypes.some((w) => w === "i64" || w === "v128" || isGcRef(w));
 }
 // Instructions converting the value on the stack from its boundary form.
 function fromExt(wType) {
+	if (wType === "v128") return [{ op: "call", funcIndex: v128Conv.from }];
 	if (wType === "i64") return [{ op: "i64.trunc_sat_f64_s" }];
 	if (wType === "anyref") return [{ op: "any.convert_extern" }];
 	if (isGcRef(wType)) {
@@ -886,6 +906,7 @@ function fromExt(wType) {
 }
 // Instructions converting the value on the stack to its boundary form.
 function toExt(wType) {
+	if (wType === "v128") return [{ op: "call", funcIndex: v128Conv.to }];
 	if (wType === "i64") return [{ op: "f64.convert_i64_s" }];
 	if (isGcRef(wType)) return [{ op: "extern.convert_any" }];
 	return [];
@@ -904,6 +925,8 @@ function convertResults(wTypes, conv, localBase) {
 }
 
 function zeroInstr(wType) {
+	if (wType === "v128")
+		return { op: "v128.const", bytes: new Array(16).fill(0) };
 	if (wType === "i64") return { op: "i64.const", value: 0n };
 	if (wType === "f32" || wType === "f64")
 		return { op: `${wType}.const`, value: 0 };
@@ -955,6 +978,47 @@ export function addBoundaryHelpers(mod, meta) {
 		return idx;
 	};
 	const get = (i) => ({ op: "local.get", index: i });
+	if (needs.simd) {
+		const { arrInfo } = needs.simd;
+		const arrRef = needs.simd.wType;
+		v128Conv.to = addFunc(
+			"__v128_to",
+			["v128"],
+			["externref"],
+			[
+				...[0, 1, 2, 3].flatMap((lane) => [
+					get(0),
+					{ op: "i32x4.extract_lane", lane },
+				]),
+				{ op: "array.new_fixed", typeIndex: arrInfo.typeIndex, size: 4 },
+				{ op: "extern.convert_any" },
+			],
+			false,
+		);
+		v128Conv.from = addFunc(
+			"__v128_from",
+			["externref"],
+			["v128"],
+			[
+				get(0),
+				{ op: "any.convert_extern" },
+				{ op: "ref.cast_null", typeIndex: arrInfo.typeIndex },
+				{ op: "local.set", index: 1 },
+				get(1),
+				{ op: "i32.const", value: 0 },
+				{ op: "array.get", typeIndex: arrInfo.typeIndex },
+				{ op: "i32x4.splat" },
+				...[1, 2, 3].flatMap((lane) => [
+					get(1),
+					{ op: "i32.const", value: lane },
+					{ op: "array.get", typeIndex: arrInfo.typeIndex },
+					{ op: "i32x4.replace_lane", lane },
+				]),
+			],
+			false,
+			[arrRef],
+		);
+	}
 	// Parameter `i` converted from its boundary form.
 	const getIn = (i, wType) => [get(i), ...fromExt(wType)];
 	const EXT = "externref";
@@ -1715,6 +1779,10 @@ function inExpr(desc, v) {
 			return `(${v} === undefined ? null : ${v})`;
 		case "error":
 			return `${P}errin(${v})`;
+		case "f32x4":
+			return `${P}f32x4in(${v})`;
+		case "mask4":
+			return `${P}mask4in(${v})`;
 		case "time":
 			return desc.ptr ? `${P}timein_ptr(${v})` : `${P}timein(${v})`;
 		case "map":
@@ -1759,6 +1827,10 @@ function outExpr(desc, v) {
 			return `(${v} ?? "")`;
 		case "error":
 			return `${P}errout(${v})`;
+		case "f32x4":
+			return `${P}f32x4out(${v})`;
+		case "mask4":
+			return `${P}mask4out(${v})`;
 		case "time":
 			return desc.ptr ? `${P}timeout_ptr(${v})` : `${P}timeout(${v})`;
 		case "map":
@@ -1799,6 +1871,10 @@ function zeroExpr(desc) {
 			return "0";
 		case "string":
 			return '""';
+		case "f32x4":
+			return "new Float32Array(4)";
+		case "mask4":
+			return "[false, false, false, false]";
 		case "error":
 		case "time":
 		case "map":
@@ -2977,6 +3053,34 @@ function ${P}mapout_${key}(m) {
 		}
 	}
 	return out;
+}`);
+	}
+
+	if (needs.simd) {
+		const k = needs.simd.key;
+		out.push(`function ${P}v4in(words) {
+	const a = __w.__array_new_${k}(4);
+	for (let i = 0; i < 4; i++) __w.__array_set_${k}(a, i, words[i]);
+	return a;
+}
+function ${P}v4out(a) {
+	const words = new Int32Array(4);
+	for (let i = 0; i < 4; i++) words[i] = __w.__array_get_${k}(a, i);
+	return words;
+}
+function ${P}f32x4in(v) {
+	return ${P}v4in(new Int32Array(new Float32Array(v ?? 4).buffer));
+}
+function ${P}f32x4out(a) {
+	return new Float32Array(${P}v4out(a).buffer);
+}
+function ${P}mask4in(v) {
+	const w = new Int32Array(4);
+	if (v) for (let i = 0; i < 4; i++) w[i] = v[i] ? -1 : 0;
+	return ${P}v4in(w);
+}
+function ${P}mask4out(a) {
+	return Array.from(${P}v4out(a), (w) => w !== 0);
 }`);
 	}
 

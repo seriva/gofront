@@ -143,3 +143,29 @@ func f(x int) *int {
 		`WAT must contain (type $box_int (sub $ptr_int ...)), got:\n${res.wat}`,
 	);
 });
+
+test("Emits WAT for SIMD comparison, mask and rounding opcodes", () => {
+	const ops = [
+		"f32x4.eq",
+		"f32x4.ne",
+		"f32x4.lt",
+		"f32x4.gt",
+		"f32x4.le",
+		"f32x4.ge",
+		"v128.bitselect",
+		"v128.any_true",
+		"i32x4.all_true",
+		"i32x4.bitmask",
+		"f32x4.ceil",
+		"f32x4.floor",
+		"f32x4.trunc",
+		"f32x4.nearest",
+	];
+	const mod = {
+		types: [{ form: "func", params: [], results: [] }],
+		funcs: [{ typeIndex: 0, locals: [], body: ops.map((op) => ({ op })) }],
+		exports: [{ name: "f", kind: "func", index: 0 }],
+	};
+	const wat = emitWat(mod);
+	for (const op of ops) assert(wat.includes(`    ${op}\n`), `WAT ${op}`);
+});
