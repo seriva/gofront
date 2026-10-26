@@ -4,6 +4,7 @@
 import {
 	assertEqual,
 	compileHybrid,
+	compileWasm,
 	runWasm,
 	section,
 	test,
@@ -518,4 +519,48 @@ func Main() int {
 	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
 	assertEqual(wasmRes, 1);
 	assertEqual(wasmRes, jsRes);
+});
+
+test("type assertions to a named string, a map and a pointer to an anonymous struct", () => {
+	const src = `
+package main
+
+type Label string
+
+func Main() string {
+	var a any = Label("x")
+	l, ok := a.(Label)
+	_, isStr := a.(string)
+	var s any = "plain"
+	_, isLabel := s.(Label)
+	var m any = map[string]int{"k": 2}
+	mm, isMap := m.(map[string]int)
+	anon := &struct{ N int }{5}
+	var p any = anon
+	pp, isPtr := p.(*struct{ N int })
+	if !isPtr {
+		return "no pointer"
+	}
+	return string(l) + " " + boolStr(ok) + boolStr(isStr) + boolStr(isLabel) + boolStr(isMap) + " " + itoa(mm["k"]+pp.N)
+}
+
+func boolStr(b bool) string {
+	if b {
+		return "T"
+	}
+	return "F"
+}
+
+func itoa(n int) string {
+	if n == 7 {
+		return "7"
+	}
+	return "?"
+}
+`;
+	// Go's answer; the JS backend still treats a named string as a string here
+	// (plans/follow-ups.md), so only WASM is compared.
+	const { wasm, stringTable } = compileWasm(src);
+	const wasmRes = runWasm(wasm, { stringTable }).exports.Main();
+	assertEqual(wasmRes, "x TFFT 7");
 });

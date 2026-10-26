@@ -917,6 +917,12 @@ function checkJsonCodecs(programs, checker, preambles, options) {
 	if (!wasm || checker.errors.length > 0) return [];
 	const gen = generateJsonCodecs(programs, checker, checker.pkgName);
 	if (!gen) return [];
+	for (const { program, node, message, hint } of gen.diagnostics) {
+		checker._setCurrentFile(program);
+		checker.recordBlocker("unsupported stdlib member", message);
+		checker.err(message, node, hint);
+	}
+	if (gen.diagnostics.length > 0) return [];
 	const filename = "json_codecs.go";
 	const ast = new Parser(
 		new Lexer(gen.source, filename).tokenize(),

@@ -11,6 +11,8 @@ package jsonrt
 import (
 	"encoding/base64"
 	"errors"
+	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -68,6 +70,16 @@ func NewDec(data []byte) (*Dec, error) {
 		return nil, err
 	}
 	return &Dec{data: data}, nil
+}
+
+// InvalidUnmarshal is the error for a Unmarshal target v that is not a pointer
+// to a type the compiler generated a decoder for.
+func InvalidUnmarshal(v any) error {
+	if v == nil {
+		return &InvalidUnmarshalError{}
+	}
+	name := fmt.Sprintf("%T", v)
+	return &InvalidUnmarshalError{Type: name, IsPtr: strings.HasPrefix(name, "*")}
 }
 
 // Done returns the first error found while decoding, if any.
@@ -229,7 +241,7 @@ func (d *Dec) Unquote(typ, kind string) *Dec {
 		d.Save(errors.New("json: invalid use of ,string struct tag, trying to unmarshal " + strconv.Quote(s) + " into " + typ))
 		return nil
 	}
-	return &Dec{data: b}
+	return &Dec{data: b, structs: d.structs, fields: d.fields}
 }
 
 // Merge takes over the first error of a decoder made by Unquote.
@@ -429,7 +441,11 @@ func (d *Dec) Float(bits int, typ string) (v float64, ok bool) {
 	}
 	s := d.readNumber()
 	n, err := strconv.ParseFloat(s, bits)
-	if err != nil {
+	if bits == 32 {
+		// Round to float32 here: the number may be out of float32 range.
+		n = float64(float32(n))
+	}
+	if err != nil || math.IsInf(n, 0) {
 		d.typeErr("number "+s, typ)
 		return 0, false
 	}

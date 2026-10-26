@@ -148,7 +148,6 @@ export class JsonCodecGen {
 		this.dynamicDone = false;
 		this.decTargets = [];
 		this.counter = 0;
-		this.unsupported = [];
 	}
 
 	// ── Type naming ─────────────────────────────────────────────
@@ -344,7 +343,6 @@ export class JsonCodecGen {
 			struct: () => this.encStruct(u, addr),
 		};
 		if (byKind[u.kind]) return byKind[u.kind]();
-		this.unsupported.push(this.refl(t));
 		return ["_ = v", `e.FailType(${q(this.refl(t))})`];
 	}
 
@@ -395,7 +393,6 @@ export class JsonCodecGen {
 		if (UINT_KINDS.has(n)) return [`e.Uint(uint64(${x}))`];
 		if (n === "float32") return [`e.Float(float64(${x}), 32)`];
 		if (n === "float64") return [`e.Float(float64(${x}), 64)`];
-		this.unsupported.push(this.refl(t));
 		return [`_ = ${x}`, `e.FailType(${q(this.refl(t))})`];
 	}
 
@@ -405,7 +402,6 @@ export class JsonCodecGen {
 		const intKey = isBasic(kt, INT_KINDS);
 		const uintKey = isBasic(kt, UINT_KINDS);
 		if (!strKey && !intKey && !uintKey) {
-			this.unsupported.push(this.refl(u));
 			return ["_ = v", `e.FailType(${q(this.refl(u))})`];
 		}
 		const conv = strKey
@@ -550,6 +546,15 @@ export class JsonCodecGen {
 	}
 
 	// ── Decoders ────────────────────────────────────────────────
+	//
+	// A struct decodes in place through its pointer (`func(d, p *S)`); every
+	// other type is a value-style `func(d, cur T) T` that returns the decoded
+	// value, because the WASM backend cannot take the address of a field or
+	// element that holds a pointer.
+
+	decInPlace(t) {
+		return under(t)?.kind === "struct";
+	}
 
 	decFn(t) {
 		const key = this.key(t);
@@ -564,45 +569,24 @@ export class JsonCodecGen {
 
 	genDec({ name, t }) {
 		const body = this.decBody(t).map((l) => `\t${l}`);
-		this.out.push(
-			`func ${name}(d *jsonrt.Dec, p *${this.spell(t)}) {\n${body.join("\n")}\n}`,
-		);
+		const sp = this.spell(t);
+		const sig = this.decInPlace(t)
+			? `(d *jsonrt.Dec, p *${sp})`
+			: `(d *jsonrt.Dec, cur ${sp}) ${sp}`;
+		this.out.push(`func ${name}${sig} {\n${body.join("\n")}\n}`);
 	}
 
-	decValue(t, ptrExpr) {
-		return [`${this.decFn(t)}(d, ${ptrExpr})`];
+	// Statements that decode a value of type `t` into the addressable
+	// expression `lv`, reading from decoder `dv`.
+	decInto(t, lv, dv = "d") {
+		const fn = this.decFn(t);
+		return this.decInPlace(t)
+			? [`${fn}(${dv}, &${lv})`]
+			: [`${lv} = ${fn}(${dv}, ${lv})`];
 	}
 
-	decSpecial(t, typ) {
-		if (isRaw(t)) return [`*p = ${this.spell(t)}(d.Raw())`];
-		if (unmarshalerOf(t)) {
-			return [
-				"raw := d.Raw()",
-				"if err := p.UnmarshalJSON(raw); err != nil {",
-				"\td.Fatal(err)",
-				"}",
-			];
-		}
-		if (isBytes(t)) return this.decBytes(t, typ);
-		return null;
-	}
-
-	decBytes(t, typ) {
-		return [
-			"if d.Null() {",
-			"\t*p = nil",
-			"\treturn",
-			"}",
-			"if d.IsArray() {",
-			...this.decSlice(under(t), t, typ).map((l) => `\t${l}`),
-			"\treturn",
-			"}",
-			`if b, ok := d.Bytes(${typ}); ok {`,
-			`\t*p = ${this.spell(t)}(b)`,
-			"}",
-		];
-	}
-
+	// The scalar-or-reference forms return `cur` unchanged when the value does
+	// not apply (null, or a type error that was recorded).
 	decBody(t) {
 		const typ = q(this.refl(t));
 		const special = this.decSpecial(t, typ);
@@ -611,49 +595,126 @@ export class JsonCodecGen {
 		if (u.kind === "basic" && !isEmptyIface(t))
 			return this.decScalar(t, u, typ);
 		const byKind = {
-			pointer: () => this.decPointer(u),
-			slice: () => [
-				"if d.Null() {",
-				"\t*p = nil",
-				"\treturn",
-				"}",
-				...this.decSlice(u, t, typ),
-			],
+			pointer: () => this.decPointer(u, typ),
+			slice: () => this.decSlice(u, t, typ),
 			array: () => this.decArray(u, typ),
 			map: () => this.decMap(u, t, typ),
 			struct: () => this.decStruct(u, t, typ),
 			interface: () =>
-				isEmptyIface(t) ? ["*p = d.Any()"] : [`d.Mismatch(${typ})`],
-			basic: () => ["*p = d.Any()"],
+				isEmptyIface(t)
+					? ["return d.Any()"]
+					: [`d.Mismatch(${typ})`, "return cur"],
+			basic: () => ["return d.Any()"],
 		};
-		return (byKind[u.kind] ?? (() => [`d.Mismatch(${typ})`]))();
+		return (byKind[u.kind] ?? (() => [`d.Mismatch(${typ})`, "return cur"]))();
 	}
 
-	decPointer(u) {
+	decSpecial(t, typ) {
+		if (isRaw(t)) return [`return ${this.spell(t)}(d.Raw())`];
+		if (unmarshalerOf(t)) return this.decUnmarshaler(t);
+		if (isBytes(t)) return this.decBytes(t, typ);
+		return null;
+	}
+
+	decUnmarshaler(t) {
+		const inPlace = this.decInPlace(t);
+		const recv = inPlace ? "p" : "x";
+		const call = [
+			"raw := d.Raw()",
+			`if err := ${recv}.UnmarshalJSON(raw); err != nil {`,
+			"\td.Fatal(err)",
+			"}",
+		];
+		return inPlace ? call : ["x := cur", ...call, "return x"];
+	}
+
+	decBytes(t, typ) {
 		return [
 			"if d.Null() {",
-			"\t*p = nil",
-			"\treturn",
+			"\treturn nil",
 			"}",
-			"if *p == nil {",
-			`\t*p = new(${this.spell(u.base)})`,
+			"if d.IsArray() {",
+			...this.decElems(under(t), t, typ),
 			"}",
-			...this.decValue(u.base, "*p"),
+			`if b, ok := d.Bytes(${typ}); ok {`,
+			`\treturn ${this.spell(t)}(b)`,
+			"}",
+			"return cur",
 		];
+	}
+
+	decScalar(t, u, typ) {
+		const n = unalias(u.name);
+		const sp = this.spell(t);
+		let call;
+		if (n === "bool") call = `d.Bool(${typ})`;
+		else if (n === "string") call = `d.String(${typ})`;
+		else if (INT_KINDS.has(n)) call = `d.Int(${INT_BITS[n]}, ${typ})`;
+		else if (UINT_KINDS.has(n)) call = `d.Uint(${INT_BITS[n]}, ${typ})`;
+		else if (FLOAT_KINDS.has(n))
+			call = `d.Float(${n === "float32" ? 32 : 64}, ${typ})`;
+		else return [`d.Mismatch(${typ})`, "return cur"];
+		return [
+			`if v, ok := ${call}; ok {`,
+			`\treturn ${sp}(v)`,
+			"}",
+			"return cur",
+		];
+	}
+
+	decPointer(u, typ) {
+		const base = u.base;
+		const lines = [
+			"if d.Null() {",
+			"\treturn nil",
+			"}",
+			"if cur == nil {",
+			`\tcur = new(${this.spell(base)})`,
+			"}",
+		];
+		if (under(base)?.kind === "pointer") {
+			lines.push(`d.Mismatch(${typ})`);
+		} else if (this.decInPlace(base)) {
+			lines.push(`${this.decFn(base)}(d, cur)`);
+		} else {
+			lines.push(`*cur = ${this.decFn(base)}(d, *cur)`);
+		}
+		lines.push("return cur");
+		return lines;
+	}
+
+	// Decodes the elements of the array at the cursor into a new slice `s`.
+	decElems(u, t, typ) {
+		return [
+			`if !d.ArrBegin(${typ}) {`,
+			"\treturn cur",
+			"}",
+			`s := make(${this.spell(t)}, 0)`,
+			"for d.NextElem() {",
+			`\tvar x ${this.spell(u.elem)}`,
+			...this.decInto(u.elem, "x").map((l) => `\t${l}`),
+			"\ts = append(s, x)",
+			"}",
+			"return s",
+		];
+	}
+
+	decSlice(u, t, typ) {
+		return ["if d.Null() {", "\treturn nil", "}", ...this.decElems(u, t, typ)];
 	}
 
 	decArray(u, typ) {
 		return [
 			"if d.Null() {",
-			"\treturn",
+			"\treturn cur",
 			"}",
 			`if !d.ArrBegin(${typ}) {`,
-			"\treturn",
+			"\treturn cur",
 			"}",
 			"i := 0",
 			"for d.NextElem() {",
 			`\tif i < ${u.size} {`,
-			...this.decValue(u.elem, "&p[i]").map((l) => `\t\t${l}`),
+			...this.decInto(u.elem, "cur[i]").map((l) => `\t\t${l}`),
 			"\t} else {",
 			"\t\td.Skip()",
 			"\t}",
@@ -661,52 +722,9 @@ export class JsonCodecGen {
 			"}",
 			`for ; i < ${u.size}; i++ {`,
 			`\tvar zero ${this.spell(u.elem)}`,
-			"\tp[i] = zero",
+			"\tcur[i] = zero",
 			"}",
-		];
-	}
-
-	decScalar(t, u, typ) {
-		const n = unalias(u.name);
-		const sp = this.spell(t);
-		if (n === "bool")
-			return [`if v, ok := d.Bool(${typ}); ok {`, `\t*p = ${sp}(v)`, "}"];
-		if (n === "string")
-			return [`if v, ok := d.String(${typ}); ok {`, `\t*p = ${sp}(v)`, "}"];
-		if (INT_KINDS.has(n))
-			return [
-				`if v, ok := d.Int(${INT_BITS[n]}, ${typ}); ok {`,
-				`\t*p = ${sp}(v)`,
-				"}",
-			];
-		if (UINT_KINDS.has(n))
-			return [
-				`if v, ok := d.Uint(${INT_BITS[n]}, ${typ}); ok {`,
-				`\t*p = ${sp}(v)`,
-				"}",
-			];
-		if (FLOAT_KINDS.has(n))
-			return [
-				`if v, ok := d.Float(${n === "float32" ? 32 : 64}, ${typ}); ok {`,
-				`\t*p = ${sp}(v)`,
-				"}",
-			];
-		return [`d.Mismatch(${typ})`];
-	}
-
-	decSlice(u, t, typ) {
-		const sp = this.spell(t);
-		return [
-			`if !d.ArrBegin(${typ}) {`,
-			"\treturn",
-			"}",
-			`s := make(${sp}, 0)`,
-			"for d.NextElem() {",
-			`\tvar x ${this.spell(u.elem)}`,
-			...this.decValue(u.elem, "&x").map((l) => `\t${l}`),
-			"\ts = append(s, x)",
-			"}",
-			"*p = s",
+			"return cur",
 		];
 	}
 
@@ -715,7 +733,8 @@ export class JsonCodecGen {
 		const strKey = isBasic(kt, new Set(["string"]));
 		const intKey = isBasic(kt, INT_KINDS);
 		const uintKey = isBasic(kt, UINT_KINDS);
-		if (!strKey && !intKey && !uintKey) return [`d.Mismatch(${typ})`];
+		if (!strKey && !intKey && !uintKey)
+			return [`d.Mismatch(${typ})`, "return cur"];
 		const ks = this.spell(kt);
 		let keyLines;
 		if (strKey) {
@@ -723,7 +742,7 @@ export class JsonCodecGen {
 		} else {
 			const n = unalias(under(kt).name);
 			keyLines = [
-				`kv, ok := d.KeyInt(${INT_BITS[n]}, ${intKey}, ${typ})`,
+				`kv, ok := d.KeyInt(${INT_BITS[n]}, ${intKey}, ${q(this.refl(kt))})`,
 				"if !ok {",
 				"\td.Skip()",
 				"\tcontinue",
@@ -733,23 +752,22 @@ export class JsonCodecGen {
 		}
 		return [
 			"if d.Null() {",
-			"\t*p = nil",
-			"\treturn",
+			"\treturn nil",
 			"}",
 			`if !d.ObjBegin(${typ}) {`,
-			"\treturn",
+			"\treturn cur",
 			"}",
-			"m := *p",
+			"m := cur",
 			"if m == nil {",
 			`\tm = make(${this.spell(t)})`,
 			"}",
 			"for d.NextKey() {",
 			...keyLines.map((l) => `\t${l}`),
 			`\tvar x ${this.spell(u.value)}`,
-			...this.decValue(u.value, "&x").map((l) => `\t${l}`),
+			...this.decInto(u.value, "x").map((l) => `\t${l}`),
 			"\tm[k] = x",
 			"}",
-			"*p = m",
+			"return m",
 		];
 	}
 
@@ -784,24 +802,29 @@ export class JsonCodecGen {
 		fields.forEach((f, i) => {
 			lines.push(`\tcase ${i}:`);
 			lines.push(`\t\td.Enter(${q(sname)}, ${q(f.jsonKey)})`);
-			const path = f.path ?? [{ name: f.goName, isPtr: false }];
-			let cur = "p";
-			for (let j = 0; j < path.length - 1; j++) {
-				cur += `.${path[j].name}`;
-				if (path[j].isPtr) {
-					const segType = this.embedType(u, path.slice(0, j + 1));
-					lines.push(
-						`\t\tif ${cur} == nil {`,
-						`\t\t\t${cur} = new(${this.spell(segType)})`,
-						"\t\t}",
-					);
-				}
-			}
-			const target = `&${cur}.${path[path.length - 1].name}`;
-			lines.push(...this.decField(f, target).map((l) => `\t\t${l}`));
+			lines.push(...this.decFieldLines(u, f).map((l) => `\t\t${l}`));
 			lines.push("\t\td.Leave()");
 		});
 		lines.push("\tdefault:", "\t\td.Skip()", "\t}", "}");
+		return lines;
+	}
+
+	// Allocates the embedded pointers on the path to the field, then decodes it.
+	decFieldLines(u, f) {
+		const path = f.path ?? [{ name: f.goName, isPtr: false }];
+		const lines = [];
+		let cur = "p";
+		for (let j = 0; j < path.length - 1; j++) {
+			cur += `.${path[j].name}`;
+			if (!path[j].isPtr) continue;
+			const segType = this.embedType(u, path.slice(0, j + 1));
+			lines.push(
+				`if ${cur} == nil {`,
+				`\t${cur} = new(${this.spell(segType)})`,
+				"}",
+			);
+		}
+		lines.push(...this.decField(f, `${cur}.${path[path.length - 1].name}`));
 		return lines;
 	}
 
@@ -826,30 +849,17 @@ export class JsonCodecGen {
 			.pop();
 	}
 
-	decField(f, target) {
-		if (!this.quotable(f)) return this.decValue(f.type, target);
-		const isPtr = f.type.kind === "pointer";
-		const t = isPtr ? f.type.base : f.type;
-		const typ = q(this.refl(t));
+	decField(f, lv) {
+		if (!this.quotable(f)) return this.decInto(f.type, lv);
+		const t = f.type.kind === "pointer" ? f.type.base : f.type;
 		const un = unalias(under(t).name);
 		const kind = un === "string" ? "string" : un === "bool" ? "bool" : "number";
 		return [
-			`if sub := d.Unquote(${typ}, ${q(kind)}); sub != nil {`,
-			...(isPtr
-				? [
-						`\tif *(${target}) == nil {`,
-						`\t\t*(${target}) = new(${this.spell(t)})`,
-						"\t}",
-						...this.decSub(t, `*(${target})`).map((l) => `\t${l}`),
-					]
-				: this.decSub(t, target).map((l) => `\t${l}`)),
+			`if sub := d.Unquote(${q(this.refl(t))}, ${q(kind)}); sub != nil {`,
+			...this.decInto(f.type, lv, "sub").map((l) => `\t${l}`),
 			"\td.Merge(sub)",
 			"}",
 		];
-	}
-
-	decSub(t, ptr) {
-		return [`${this.decFn(t)}(sub, ${ptr})`];
 	}
 
 	// ── Entry points ────────────────────────────────────────────
@@ -874,6 +884,14 @@ export class JsonCodecGen {
 		return name;
 	}
 
+	// Statements that decode into the pointer `x` of pointer type `pt`.
+	rootDecode(pt, x) {
+		const base = pt.base;
+		return this.decInPlace(base)
+			? [`${this.decFn(base)}(d, ${x})`]
+			: [`*${x} = ${this.decFn(base)}(d, *${x})`];
+	}
+
 	entryUnmarshal(argType) {
 		const name = `${this.prefix}unmarshal${this.entries.length}`;
 		const lines = [
@@ -883,15 +901,14 @@ export class JsonCodecGen {
 			"\t\treturn err",
 			"\t}",
 		];
-		if (argType && argType.kind === "pointer" && !isInterface(argType)) {
-			const target = argType.base;
+		if (argType?.kind === "pointer" && !isInterface(argType)) {
 			this.decTargets.push(argType);
 			lines.push(
 				`\tp, _ := v.(${this.spell(argType)})`,
 				"\tif p == nil {",
 				`\t\treturn &jsonrt.InvalidUnmarshalError{Type: ${q(this.refl(argType))}, IsPtr: true}`,
 				"\t}",
-				`\t${this.decFn(target)}(d, p)`,
+				...this.rootDecode(argType, "p").map((l) => `\t${l}`),
 				"\treturn d.Done()",
 			);
 		} else if (!argType || isInterface(argType)) {
@@ -899,7 +916,7 @@ export class JsonCodecGen {
 			this.dynamicDecode = true;
 		} else {
 			lines.push(
-				`\t_ = v`,
+				"\t_ = v",
 				`\treturn &jsonrt.InvalidUnmarshalError{Type: ${q(this.refl(argType))}}`,
 			);
 		}
@@ -920,7 +937,11 @@ export class JsonCodecGen {
 	genDecAny() {
 		const seen = new Set();
 		const cases = [];
-		for (const pt of this.decTargets) {
+		const pointers = this.programTypes().filter(
+			(t) =>
+				t.kind === "pointer" && (isEmptyIface(t.base) || !isInterface(t.base)),
+		);
+		for (const pt of [...this.decTargets, ...pointers]) {
 			const k = this.key(pt);
 			if (seen.has(k)) continue;
 			seen.add(k);
@@ -928,8 +949,9 @@ export class JsonCodecGen {
 				`\tcase ${this.spell(pt)}:`,
 				"\t\tif x == nil {",
 				`\t\t\treturn &jsonrt.InvalidUnmarshalError{Type: ${q(this.refl(pt))}, IsPtr: true}`,
+				"\t\t} else {",
+				...this.rootDecode(pt, "x").map((l) => `\t\t\t${l}`),
 				"\t\t}",
-				`\t\t${this.decFn(pt.base)}(d, x)`,
 			);
 		}
 		this.out.push(
@@ -939,7 +961,7 @@ export class JsonCodecGen {
 				...cases,
 				"\tdefault:",
 				"\t\t_ = x",
-				'\t\treturn &jsonrt.InvalidUnmarshalError{Type: ""}',
+				"\t\treturn jsonrt.InvalidUnmarshal(v)",
 				"\t}",
 				"\treturn d.Done()",
 				"}",
@@ -986,6 +1008,7 @@ export class JsonCodecGen {
 			array: () => ok(t.elem),
 			map: () => ok(t.key) && ok(t.value),
 			interface: () => true,
+			struct: () => (t._structFields ?? []).every((f) => ok(f.type)),
 			func: () => t.params.every(ok) && results(t).every(ok),
 		};
 		return byKind[t.kind]?.() ?? false;
@@ -1085,7 +1108,7 @@ function findSites(programs) {
 		if (aliases.size === 0) continue;
 		walkNodes(p.decls, (node) => {
 			if (isJsonCall(node, aliases))
-				sites.push({ call: node, fn: node.func.field });
+				sites.push({ call: node, fn: node.func.field, program: p });
 		});
 	}
 	return sites;
@@ -1100,8 +1123,17 @@ export function generateJsonCodecs(programs, checker, pkgName) {
 	const qualifiers = new Set();
 	const gen = new JsonCodecGen(checker, pkgName, qualifiers, programs);
 	const pending = [];
-	for (const { call, fn } of sites) {
+	const diagnostics = [];
+	for (const { call, fn, program } of sites) {
 		const argType = (i) => defaultType(call.args[i]?._type);
+		if (fn === "Unmarshal" && argType(1)?.base?.kind === "pointer")
+			diagnostics.push({
+				program,
+				node: call.func.expr,
+				message:
+					"json.Unmarshal into a pointer to a pointer is not yet available in wasm packages",
+				hint: "declare the value and pass its address, or pass the pointer itself",
+			});
 		let entry;
 		if (fn === "Marshal") entry = gen.entryMarshal(argType(0));
 		else if (fn === "Unmarshal") entry = gen.entryUnmarshal(argType(1));
@@ -1120,5 +1152,5 @@ export function generateJsonCodecs(programs, checker, pkgName) {
 	const imports = [...qualifiers]
 		.map((qn) => importPaths.get(qn))
 		.filter(Boolean);
-	return { source: gen.source(pkgName, imports), unsupported: gen.unsupported };
+	return { source: gen.source(pkgName, imports), diagnostics };
 }

@@ -1090,3 +1090,20 @@ func Main() {
 	const res = compileHybrid(src).run("Main");
 	assertEqual(res.output, "6 Héllox\n341 Hé");
 });
+
+test("a named byte slice converts to and from string like []byte", () => {
+	const src = `
+package main
+
+type MyBytes []byte
+
+func Main() string {
+	m := MyBytes("hello")
+	m[0] = 'j'
+	return string(m) + " " + string(len(m)+48)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "jello 5");
+	assertEqual(wasmRes, jsRes);
+});

@@ -1140,6 +1140,15 @@ export class StmtsEmitter {
 		return goType.name ?? null;
 	}
 
+	// The struct a type assertion target refers to; an anonymous struct type
+	// has no name to look up.
+	_structInfoOfType(goType) {
+		return (
+			this.mod.getStructType(this._structNameOf(goType)) ??
+			this._resolveStructInfo({ _type: goType })
+		);
+	}
+
 	_emitTypeTest(targetGoType) {
 		if (!targetGoType) {
 			this.pushInstruction("drop");
@@ -1207,7 +1216,7 @@ export class StmtsEmitter {
 		// `*T` lives in `any` as the bare struct ref; a `T` value as a boxed
 		// clone (see emitExpr).  Fall through to the scalar box for values.
 		if (isPointerToStruct(targetGoType, this.mod.checker, this.mod)) {
-			const sInfo = this.mod.getStructType(this._structNameOf(targetGoType));
+			const sInfo = this._structInfoOfType(targetGoType);
 			if (sInfo) {
 				this.pushInstruction({ op: "ref.test", typeIndex: sInfo.typeIndex });
 				return;
@@ -1274,7 +1283,7 @@ export class StmtsEmitter {
 		}
 
 		if (isPointerToStruct(targetGoType, this.mod.checker, this.mod)) {
-			const sInfo = this.mod.getStructType(this._structNameOf(targetGoType));
+			const sInfo = this._structInfoOfType(targetGoType);
 			if (sInfo) {
 				this.pushInstruction({
 					op: "ref.cast_null",
@@ -1284,7 +1293,7 @@ export class StmtsEmitter {
 			}
 		}
 		if (isStructType(targetGoType, this.mod.checker, this.mod)) {
-			const sInfo = this.mod.getStructType(this._structNameOf(targetGoType));
+			const sInfo = this._structInfoOfType(targetGoType);
 			const box = this.mod.getIfaceBoxType(targetGoType);
 			if (sInfo && box) {
 				this._emitUnbox(box);
