@@ -726,3 +726,54 @@ func Run() string {
 `);
 	assertEqual(out, "abc,2");
 });
+
+const LOG_SINK = `type sink struct{ buf []byte }
+
+func (s *sink) Write(p []byte) (int, error) {
+	s.buf = append(s.buf, p...)
+	return len(p), nil
+}
+`;
+
+test("log.Fatal writes the message, then exits in JS and panics in WASM", async () => {
+	const realExit = process.exit;
+	const codes = [];
+	process.exit = (code) => {
+		codes.push(code);
+	};
+	try {
+		const out = await stdParity(`import "log"
+
+${LOG_SINK}
+func Run() (res string) {
+	s := &sink{}
+	l := log.New(s, "fatal: ", 0)
+	defer func() {
+		res = string(s.buf) + "|" + recover().(string)
+	}()
+	l.Fatalf("code %d", 7)
+	return "not reached"
+}
+`);
+		assertEqual(out, "fatal: code 7\n|code 7");
+		assertEqual(codes.join(","), "1");
+	} finally {
+		process.exit = realExit;
+	}
+});
+
+test("log prints ???:0 for Lshortfile and Llongfile (JS and WASM parity)", async () => {
+	const out = await stdParity(`import "log"
+
+${LOG_SINK}
+func Run() string {
+	s := &sink{}
+	l := log.New(s, "p ", log.Lshortfile)
+	l.Print("a")
+	l.SetFlags(log.Llongfile | log.Lmsgprefix)
+	l.Print("b")
+	return string(s.buf)
+}
+`);
+	assertEqual(out, "p ???:0: a\n???:0: p b\n");
+});
