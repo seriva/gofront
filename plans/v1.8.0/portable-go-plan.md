@@ -1362,11 +1362,12 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
   - Done when: fixture matches Go.
   - Landed: `math/cmplx` in Go source (the standard library's own code, so results follow Go's algorithms), with every function except those needing `math/big`. Private stand-ins cover `math.Sincos`, `math.Asinh` and `math.Atanh`, which `math` lacks. The sources avoid constructs the backends still mishandle (non-ASCII identifiers, grouped named results, function-local constants, untyped constants as complex values); each is in `plans/follow-ups.md`. Fixed `math.IsInf(x, 0)` on JS, which was true for NaN. Conformance fixture `cmplx/funcs.go` matches Go 1.26 on JS and WASM.
 
-- [ ] **Task 4.9 — `encoding/csv` (after Task 4.1a)**
+- [x] **Task 4.9 — `encoding/csv` (after Task 4.1a)**
   - Files: new `runtime/stdlib/encoding/csv/{reader,writer}.go`
   - Do: as specified in [§8](#8-encodingcsv-go-source). Offsets count UTF-8 bytes.
   - Test: conformance fixtures `csv/reader.go`, `csv/writer.go` with the RFC 4180 cases and Go's `reader_test.go`/`writer_test.go` vectors.
   - Done when: fixtures match Go.
+  - Landed: `encoding/csv` `Reader` and `Writer` in Go source (the standard library's own code), with `ParseError` and the error values. The reader converts each field from the byte buffer on its own, because GoFront strings index UTF-16 units and Go's whole-buffer slicing would split non-ASCII fields. Fixed JS type assertions to a Go-source package's struct pointer (`err.(*csv.ParseError)` was always true) and WASM interface dispatch, which treated a same-named method with other parameter or result types (`csv.Writer.Write(record []string) error`) as an `io.Writer`. Conformance fixtures `csv/reader.go` (every case from Go's `reader_test.go` except the invalid-UTF-8 one, with field and error positions) and `csv/writer.go` match Go 1.26 on JS and WASM.
 
 - [ ] **Task 4.10 — `log` (after Task 3.1e)**
   - Files: new `runtime/stdlib/log/log.go`
