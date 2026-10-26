@@ -129,6 +129,48 @@ const NAMED_ZERO_TABLE = {
 	"encoding/base64.Encoding": ["base64", "__base64_std"],
 	"simd.F32x4": [null, "Object.freeze([0, 0, 0, 0])"],
 	F32x4: [null, "Object.freeze([0, 0, 0, 0])"],
+	"simd.Mask32x4": [null, "Object.freeze([false, false, false, false])"],
+	Mask32x4: [null, "Object.freeze([false, false, false, false])"],
+};
+
+// gofront/simd receiver methods -> runtime helper; the receiver is passed first.
+const SIMD_VECTOR_HELPERS = {
+	Add: "__simd_add",
+	Sub: "__simd_sub",
+	Mul: "__simd_mul",
+	Div: "__simd_div",
+	Min: "__simd_min",
+	Max: "__simd_max",
+	MulAdd: "__simd_muladd",
+	Neg: "__simd_neg",
+	Abs: "__simd_abs",
+	Sqrt: "__simd_sqrt",
+	Floor: "__simd_floor",
+	Ceil: "__simd_ceil",
+	Trunc: "__simd_trunc",
+	RoundToEven: "__simd_nearest",
+	Dot3: "__simd_dot3",
+	Dot4: "__simd_dot4",
+	Sum: "__simd_sum",
+	WithLane: "__simd_with_lane",
+	Swizzle: "__simd_swizzle",
+	Equal: "__simd_eq",
+	NotEqual: "__simd_ne",
+	Less: "__simd_lt",
+	LessEqual: "__simd_le",
+	Greater: "__simd_gt",
+	GreaterEqual: "__simd_ge",
+};
+
+const SIMD_MASK_HELPERS = {
+	And: "__simd_mask_and",
+	Or: "__simd_mask_or",
+	Xor: "__simd_mask_xor",
+	AndNot: "__simd_mask_andnot",
+	Not: "__simd_mask_not",
+	Any: "__simd_mask_any",
+	All: "__simd_mask_all",
+	Bits: "__simd_mask_bits",
 };
 
 // Splits a generated JS lvalue at its outermost trailing access:
@@ -1579,8 +1621,8 @@ export const expressionGenMethods = {
 			const args = expr.args.map((a) => this.genExpr(a)).join(", ");
 			return `${this.genExpr(expr.func.expr)}.subarray(${args})`;
 		}
-		if (recvName === "simd.F32x4" || recvName === "F32x4") {
-			return this._genSimdReceiverCall(expr);
+		if (/^(simd\.)?(F32x4|Mask32x4)$/.test(recvName ?? "")) {
+			return this._genSimdReceiverCall(expr, recvName.endsWith("Mask32x4"));
 		}
 		if (recvName === "sync.Mutex" || recvName === "sync.RWMutex") {
 			if (expr.func.field === "TryLock" || expr.func.field === "TryRLock")
@@ -1628,33 +1670,15 @@ export const expressionGenMethods = {
 		return undefined;
 	},
 
-	_genSimdReceiverCall(expr) {
+	_genSimdReceiverCall(expr, isMask = false) {
 		this.useHelper("simd");
 		const method = expr.func.field;
 		const recv = this.genExpr(expr.func.expr);
-		const helpers = {
-			Add: "__simd_add",
-			Sub: "__simd_sub",
-			Mul: "__simd_mul",
-			Div: "__simd_div",
-			Min: "__simd_min",
-			Max: "__simd_max",
-			Dot3: "__simd_dot3",
-			Dot4: "__simd_dot4",
-		};
-		if (helpers[method]) {
-			return `${helpers[method]}(${recv}, ${this.genExpr(expr.args[0])})`;
-		}
-		if (method === "Lane") {
-			return `${recv}[${this.genExpr(expr.args[0])}]`;
-		}
-		if (method === "WithLane") {
-			return `__simd_with_lane(${recv}, ${this.genExpr(expr.args[0])}, ${this.genExpr(expr.args[1])})`;
-		}
-		if (method === "Splat") {
-			return `__simd_splat(${this.genExpr(expr.args[0])})`;
-		}
-		return undefined;
+		const args = expr.args.map((a) => this.genExpr(a));
+		if (method === "Lane") return `${recv}[${args[0]}]`;
+		if (method === "Splat" && !isMask) return `__simd_splat(${args[0]})`;
+		const helper = (isMask ? SIMD_MASK_HELPERS : SIMD_VECTOR_HELPERS)[method];
+		return helper ? `${helper}(${[recv, ...args].join(", ")})` : undefined;
 	},
 
 	_genSelectorCall(expr) {
@@ -2072,6 +2096,8 @@ export const expressionGenMethods = {
 			return "{ _buf: [] }";
 		if (typeName === "strings.Builder" || typeName === "Builder")
 			return '{ _buf: "" }';
+		if (typeName === "simd.Mask32x4" || typeName === "Mask32x4")
+			return "Object.freeze([false, false, false, false])";
 		if (typeName === "simd.F32x4" || typeName === "F32x4") {
 			this.useHelper("simd");
 			const a = expr.elems[0] ? this.genExpr(expr.elems[0]) : "0";
@@ -2477,6 +2503,19 @@ export const expressionGenMethods = {
 		return this.zeroValueForTypeNode(expr);
 	},
 
+	_genSimdEquality(expr) {
+		if (expr.op !== "==" && expr.op !== "!=") return null;
+		if (!this._isSimdValueType(expr.left._type)) return null;
+		this.useHelper("simd");
+		const cmp = `__simd_equal(${this.genExpr(expr.left)}, ${this.genExpr(expr.right)})`;
+		return expr.op === "==" ? cmp : `!${cmp}`;
+	},
+
+	_isSimdValueType(t) {
+		const base = t?.kind === "named" ? t.underlying : t;
+		return base?.kind === "simd";
+	},
+
 	// Returns true if the type is a struct or array (uses value comparison with __equal).
 	_isStructOrArrayType(t) {
 		if (!t) return false;
@@ -2512,6 +2551,9 @@ export const expressionGenMethods = {
 			isComplex(expr.right._type)
 		)
 			return this._genComplexBinary(expr);
+
+		const simdEq = this._genSimdEquality(expr);
+		if (simdEq !== null) return simdEq;
 
 		if (this._isStructEquality(expr)) {
 			this.useHelper("equal");
