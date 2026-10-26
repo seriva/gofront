@@ -2,9 +2,52 @@
 package sim
 
 import (
+	"encoding/json"
 	"gofront/shared"
 	"gofront/simd"
 )
+
+// Config defines simulation physics settings loaded from JSON inside the WASM module.
+type Config struct {
+	Name           string  `json:"name"`
+	Drag           float32 `json:"drag"`
+	AttractorForce float32 `json:"attractor_force"`
+	Soften         float32 `json:"soften"`
+}
+
+var currentConfig = Config{
+	Name:           "standard",
+	Drag:           0.999,
+	AttractorForce: 60000.0,
+	Soften:         400.0,
+}
+
+// DefaultConfigJSON is the initial simulation config in JSON.
+const DefaultConfigJSON = `{"name":"standard","drag":0.999,"attractor_force":60000.0,"soften":400.0}`
+
+// LoadConfig parses a JSON configuration string inside the WASM module and applies it.
+func LoadConfig(configJSON string) error {
+	var cfg Config
+	if err := json.Unmarshal([]byte(configJSON), &cfg); err != nil {
+		return err
+	}
+	if cfg.Drag <= 0 || cfg.Drag > 1 {
+		cfg.Drag = 0.999
+	}
+	if cfg.AttractorForce <= 0 {
+		cfg.AttractorForce = 60000.0
+	}
+	if cfg.Soften <= 0 {
+		cfg.Soften = 400.0
+	}
+	currentConfig = cfg
+	return nil
+}
+
+// ConfigName returns the name of the currently active configuration.
+func ConfigName() string {
+	return currentConfig.Name
+}
 
 // MaxParticles is the fixed capacity of the simulation. All buffers are
 // allocated once at startup (gofront/shared forbids later allocation) and
@@ -59,11 +102,11 @@ func Step(dt float32, ax float32, ay float32, width float32, height float32) {
 	limit := simd.F32x4{width, height, width, height}
 	limit2 := limit.Add(limit)
 	zero := simd.Splat(0)
-	soften := simd.Splat(400.0)
-	force := simd.Splat(60000.0)
+	soften := simd.Splat(currentConfig.Soften)
+	force := simd.Splat(currentConfig.AttractorForce)
 	vdt := simd.Splat(dt)
 	twenty := simd.Splat(20.0)
-	drag := simd.Splat(0.999)
+	drag := simd.Splat(currentConfig.Drag)
 
 	i := 0
 	for ; i+2 <= count; i += 2 {
@@ -103,12 +146,12 @@ func stepOne(i int, dt float32, ax float32, ay float32, width float32, height fl
 
 	dx := ax - px
 	dy := ay - py
-	d2 := dx*dx + dy*dy + 400.0
-	f := 60000.0 / d2
+	d2 := dx*dx + dy*dy + currentConfig.Soften
+	f := currentConfig.AttractorForce / d2
 	vx += dx * f * dt / 20.0
 	vy += dy * f * dt / 20.0
-	vx *= 0.999
-	vy *= 0.999
+	vx *= currentConfig.Drag
+	vy *= currentConfig.Drag
 
 	px += vx * dt
 	py += vy * dt
