@@ -698,8 +698,11 @@ export const VALID_TARGETS = new Set(["js", "wasm", "both"]);
 // marked `//gofront:intrinsic <name>`: name -> required signature.  New
 // intrinsics need a plan change.
 export const INTRINSICS = new Map([
-	// JS: setTimeout(fire, ns/1e6); WASM: returns at once (cooperative model).
-	["deadline_timer", "func(int64, func() void) void"],
+	// JS: setTimeout(fire, ns/1e6) kept under key; WASM: returns at once
+	// (cooperative model).
+	["deadline_timer", "func(any, int64, func() void) void"],
+	// JS: clears the timer armed under key; WASM: returns at once.
+	["deadline_stop", "func(any) void"],
 ]);
 
 // ── Static operator sets (module-level for reuse) ────────────
