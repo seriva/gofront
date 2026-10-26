@@ -170,3 +170,26 @@ test("a pointer to a named scalar with a value-receiver String", () => {
 });
 
 summarize();
+
+test("fmt prints a struct whose field has a named slice or array type", () => {
+	const src = `
+package main
+
+import "fmt"
+
+type Colors []int
+type Pair [2]int
+type Doc struct {
+	C Colors
+	P Pair
+}
+
+func Main() string {
+	var a any = &Doc{C: Colors{1, 2}, P: Pair{3, 4}}
+	return fmt.Sprint(a)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "&{[1 2] [3 4]}");
+	assertEqual(wasmRes, jsRes);
+});

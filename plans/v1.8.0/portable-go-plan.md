@@ -1399,11 +1399,12 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
   - Done when: decoding cases pass as parity tests.
   - Landed: `json.Unmarshal` is allowed in WASM packages. The scanner in `internal/jsonrt` validates the input first (Go's syntax errors and offsets), then each call site gets decoders generated per target type: exact-then-case-folded field matching, Go's `null` rules (scalars keep their value, pointers, slices, maps and interfaces become nil), integer range and fraction errors with the number literal, and `UnmarshalTypeError` text with the struct and JSON field path. A struct decodes in place through its pointer; every other type returns its new value, because the WASM backend cannot take the address of a field that holds a pointer or a map. To make `Unmarshal(data, &m)` work for a nil map, a pointer to a map is now a box like a pointer to a slice, and the zero value, type test and cast of an anonymous struct type now work (a `var x struct{...}` was a nil reference). `json.Unmarshal` into a pointer to a pointer reports a compile error until the backend supports `**T`. Conformance fixture `json/decode.go` matches Go 1.26 on both backends; `json.test.js` covers the cases where the JS backend differs.
 
-- [ ] **Task 5.2 — `Unmarshaler`, `RawMessage`, and `any` decoding in WASM**
+- [x] **Task 5.2 — `Unmarshaler`, `RawMessage`, and `any` decoding in WASM**
   - Files: as 5.1a
   - Do: `Unmarshaler` dispatch; exact `RawMessage` bytes; `any` decodes to `map[string]any`, `[]any`, `float64`, `string`, `bool`, `nil`.
   - Test: `json.test.js` — the corresponding JS cases as parity tests.
   - Done when: all pass.
+  - Landed: a type with an `UnmarshalJSON` method (own or promoted from an embedded struct, value or pointer receiver, on a struct or a named non-struct type) is decoded by calling it with the raw value bytes, also as a field, slice element, map value or pointer; its error comes back unwrapped, and a JSON `null` reaches it except through a nil pointer. `json.RawMessage` keeps the exact source bytes (including `null`) in fields, slices, maps and at the top level; `RawMessage` is now allowed in WASM packages. Decoding into `any` yields `map[string]any`, `[]any`, `float64`, `string`, `bool` and `nil`. Fixed along the way: `fmt` of a struct with a named slice or array field produced an invalid module. Conformance fixture `json/unmarshaler.go` matches Go 1.26 on both backends; `json.test.js` covers the cases where the JS backend differs (it does not compact `RawMessage` on `Marshal`, for one).
 
 ### Phase 5.2: JSON helpers, streaming I/O, enablement & benchmark
 
