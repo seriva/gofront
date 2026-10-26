@@ -2905,6 +2905,9 @@ var __json_encoder_encode = __json_encoder_encode || function(enc, codec, v) {
   var jsonStr;
   try {
     jsonStr = codec(v);
+  } catch (err) {
+    if (err && typeof err.Error === "function") return err;
+    return typeof __error === "function" ? __error(err.message || String(err)) : err;
   } finally {
     OptEscapeHTML$$internal$jsonrt = true;
   }
