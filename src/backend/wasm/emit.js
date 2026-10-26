@@ -1494,7 +1494,10 @@ export class FunctionEmitter {
 			) {
 				const sName =
 					goType.name ?? (goType.kind === "named" ? goType.name : null);
-				const structInfo = this.mod.getStructType(sName);
+				// An anonymous struct type has no name to look up.
+				const structInfo =
+					this.mod.getStructType(sName) ??
+					this._resolveStructInfo({ _type: goType });
 				if (structInfo) {
 					for (const f of structInfo.fields) {
 						this.emitZeroValue(f.goType, f.wType);
