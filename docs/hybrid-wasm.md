@@ -187,7 +187,7 @@ Notable members per package:
 - `encoding/binary` (`LittleEndian`, `BigEndian`, `Read`, `Write`, `Append*`, `Size`)
 - `encoding/hex` (`EncodeToString`, `DecodeString`, `EncodedLen`, `DecodedLen`)
 - `encoding/base64` (`StdEncoding`, `URLEncoding`, `RawStdEncoding`, `RawURLEncoding`)
-- `encoding/json` (`Marshal`, `Unmarshal`, `Valid`, `RawMessage`; the codecs are generated Go linked into `app.wasm`)
+- `encoding/json` (`Marshal`, `MarshalIndent`, `Unmarshal`, `Valid`, `RawMessage`, `Number`, `Encoder`, `Decoder`, `Compact`, `Indent`, `HTMLEscape`; the codecs are generated Go linked into `app.wasm`)
 - `testing`, `gofront/shared`, and `gofront/simd` (experimental).
 
 Any other import, or JS-only API (`os`, `regexp`, `time.Sleep`), reports a targeted diagnostic
