@@ -102,6 +102,33 @@ func (e *Enc) Null() {
 	e.B = appendStr(e.B, "null")
 }
 
+// Number appends the literal representation of a Number.
+func (e *Enc) Number(v string) {
+	if e.Err != nil {
+		return
+	}
+	if v == "" {
+		e.B = append(e.B, '0')
+		return
+	}
+	if !isValidNumber(v) {
+		e.Fail(fmt.Errorf("json: invalid number literal %q", v))
+		return
+	}
+	e.B = appendStr(e.B, v)
+}
+
+func isValidNumber(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	first := s[0]
+	if first != '-' && (first < '0' || first > '9') {
+		return false
+	}
+	return CheckValid([]byte(s)) == nil
+}
+
 // Bool appends true or false.
 func (e *Enc) Bool(v bool) {
 	if v {
