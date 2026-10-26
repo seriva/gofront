@@ -777,3 +777,57 @@ func Run() string {
 `);
 	assertEqual(out, "p ???:0: a\n???:0: p b\n");
 });
+
+test("math/rand/v2 argument panics carry Go's messages (JS and WASM parity)", async () => {
+	const out = await stdParity(`import "math/rand/v2"
+
+func try(f func()) (msg string) {
+	defer func() { msg = recover().(string) }()
+	f()
+	return ""
+}
+
+func Run() string {
+	r := rand.New(rand.NewPCG(1, 2))
+	return try(func() { r.IntN(0) }) + "|" +
+		try(func() { r.Int64N(-1) }) + "|" +
+		try(func() { r.Uint64N(0) }) + "|" +
+		try(func() { r.Int32N(0) }) + "|" +
+		try(func() { r.Uint32N(0) }) + "|" +
+		try(func() { rand.IntN(0) }) + "|" +
+		try(func() { rand.N(0) }) + "|" +
+		try(func() { r.Shuffle(-1, func(i, j int) {}) })
+}
+`);
+	assertEqual(
+		out,
+		"invalid argument to IntN|invalid argument to Int64N|invalid argument to Uint64N|invalid argument to Int32N|invalid argument to Uint32N|invalid argument to IntN|invalid argument to N|invalid argument to Shuffle",
+	);
+});
+
+test("math/rand/v2 ChaCha8 reports the deferred exclusion", () => {
+	withTempDir(
+		{
+			"main.go": `package main
+
+import "math/rand/v2"
+
+func main() {
+	_ = rand.NewChaCha8([32]byte{})
+}
+`,
+		},
+		(dir) => {
+			let msg = "";
+			try {
+				compileDir(dir);
+			} catch (err) {
+				msg = err.message;
+			}
+			assert(
+				msg.includes("ChaCha8 is deferred"),
+				`expected the deferred diagnostic, got: ${msg}`,
+			);
+		},
+	);
+});
