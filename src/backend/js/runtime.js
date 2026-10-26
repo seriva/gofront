@@ -487,7 +487,7 @@ export const HELPER_IFEQ = `var __ifeq = __ifeq || function(a, b) {
 };`;
 
 export const HELPER_EQUAL = `var __equal = __equal || function __equal(a, b) {
-  if (a === b) return true;
+  if (a === b && !Array.isArray(a)) return true;
   if (a === null || b === null) return false;
   if (a.__target !== undefined && b.__target !== undefined) {
     return a.__target === b.__target && a.__index === b.__index;
@@ -2978,6 +2978,59 @@ var __simd_with_lane = __simd_with_lane || function(a, i, v) {
   var r = [a[0], a[1], a[2], a[3]];
   r[i] = Math.fround(v);
   return Object.freeze(r);
+};
+var __simd_map = __simd_map || function(a, f) {
+  return Object.freeze([Math.fround(f(a[0])), Math.fround(f(a[1])), Math.fround(f(a[2])), Math.fround(f(a[3]))]);
+};
+var __simd_neg = __simd_neg || function(a) { return __simd_map(a, function(x) { return -x; }); };
+var __simd_abs = __simd_abs || function(a) { return __simd_map(a, Math.abs); };
+var __simd_sqrt = __simd_sqrt || function(a) { return __simd_map(a, Math.sqrt); };
+var __simd_floor = __simd_floor || function(a) { return __simd_map(a, Math.floor); };
+var __simd_ceil = __simd_ceil || function(a) { return __simd_map(a, Math.ceil); };
+var __simd_trunc = __simd_trunc || function(a) { return __simd_map(a, Math.trunc); };
+var __simd_nearest = __simd_nearest || function(a) {
+  return __simd_map(a, function(x) {
+    if (!isFinite(x)) return x;
+    var f = Math.floor(x), d = x - f, r;
+    if (d < 0.5) r = f; else if (d > 0.5) r = f + 1; else r = (f % 2 === 0) ? f : f + 1;
+    return (r === 0 && (x < 0 || Object.is(x, -0))) ? -0 : r;
+  });
+};
+var __simd_muladd = __simd_muladd || function(a, b, c) {
+  return Object.freeze([Math.fround(Math.fround(a[0] * b[0]) + c[0]), Math.fround(Math.fround(a[1] * b[1]) + c[1]), Math.fround(Math.fround(a[2] * b[2]) + c[2]), Math.fround(Math.fround(a[3] * b[3]) + c[3])]);
+};
+var __simd_sum = __simd_sum || function(a) {
+  return Math.fround(Math.fround(Math.fround(a[0] + a[1]) + a[2]) + a[3]);
+};
+var __simd_cmp = __simd_cmp || function(a, b, f) {
+  return Object.freeze([f(a[0], b[0]), f(a[1], b[1]), f(a[2], b[2]), f(a[3], b[3])]);
+};
+var __simd_eq = __simd_eq || function(a, b) { return __simd_cmp(a, b, function(x, y) { return x === y; }); };
+var __simd_ne = __simd_ne || function(a, b) { return __simd_cmp(a, b, function(x, y) { return x !== y; }); };
+var __simd_lt = __simd_lt || function(a, b) { return __simd_cmp(a, b, function(x, y) { return x < y; }); };
+var __simd_le = __simd_le || function(a, b) { return __simd_cmp(a, b, function(x, y) { return x <= y; }); };
+var __simd_gt = __simd_gt || function(a, b) { return __simd_cmp(a, b, function(x, y) { return x > y; }); };
+var __simd_ge = __simd_ge || function(a, b) { return __simd_cmp(a, b, function(x, y) { return x >= y; }); };
+var __simd_equal = __simd_equal || function(a, b) {
+  return a[0] === b[0] && a[1] === b[1] && a[2] === b[2] && a[3] === b[3];
+};
+var __simd_mask_and = __simd_mask_and || function(a, b) { return __simd_cmp(a, b, function(x, y) { return x && y; }); };
+var __simd_mask_or = __simd_mask_or || function(a, b) { return __simd_cmp(a, b, function(x, y) { return x || y; }); };
+var __simd_mask_xor = __simd_mask_xor || function(a, b) { return __simd_cmp(a, b, function(x, y) { return x !== y; }); };
+var __simd_mask_andnot = __simd_mask_andnot || function(a, b) { return __simd_cmp(a, b, function(x, y) { return x && !y; }); };
+var __simd_mask_not = __simd_mask_not || function(a) { return Object.freeze([!a[0], !a[1], !a[2], !a[3]]); };
+var __simd_mask_any = __simd_mask_any || function(a) { return a[0] || a[1] || a[2] || a[3]; };
+var __simd_mask_all = __simd_mask_all || function(a) { return a[0] && a[1] && a[2] && a[3]; };
+var __simd_mask_bits = __simd_mask_bits || function(a) { return (a[0] ? 1 : 0) | (a[1] ? 2 : 0) | (a[2] ? 4 : 0) | (a[3] ? 8 : 0); };
+var __simd_select = __simd_select || function(m, a, b) {
+  return Object.freeze([m[0] ? a[0] : b[0], m[1] ? a[1] : b[1], m[2] ? a[2] : b[2], m[3] ? a[3] : b[3]]);
+};
+var __simd_shuffle = __simd_shuffle || function(a, b, i0, i1, i2, i3) {
+  var c = [a[0], a[1], a[2], a[3], b[0], b[1], b[2], b[3]];
+  return Object.freeze([c[i0], c[i1], c[i2], c[i3]]);
+};
+var __simd_swizzle = __simd_swizzle || function(a, i0, i1, i2, i3) {
+  return Object.freeze([a[i0], a[i1], a[i2], a[i3]]);
 };
 var __simd_load = __simd_load || function(buf, i) {
   if (i < 0 || i + 4 > buf.length) throw new Error("panic: runtime error: index out of range");

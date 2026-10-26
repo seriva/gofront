@@ -288,9 +288,11 @@ for (let i = 0; i < sim.Positions.length; i += 2) {
 
 - **Types & Methods:**
   - `simd.F32x4` — 4-lane `float32` vector value type: `simd.F32x4{a, b, c, d}`, `simd.Splat(f)`.
-  - Arithmetic & math: `v.Add(u)`, `v.Sub(u)`, `v.Mul(u)`, `v.Div(u)`, `v.Min(u)`, `v.Max(u)`.
-  - Dot products: `v.Dot3(u)`, `v.Dot4(u)`.
+  - Arithmetic & math: `v.Add(u)`, `v.Sub(u)`, `v.Mul(u)`, `v.Div(u)`, `v.Min(u)`, `v.Max(u)`, `v.MulAdd(u, w)` (`v*u + w`, rounded twice, not fused), `v.Neg()`, `v.Abs()`, `v.Sqrt()`, `v.Floor()`, `v.Ceil()`, `v.Trunc()`, `v.RoundToEven()`. `Min` and `Max` propagate `NaN` and order `-0` before `+0`, like `math.Min`/`math.Max`.
+  - Dot products and sums: `v.Dot3(u)`, `v.Dot4(u)`, `v.Sum()`.
   - Lane access: `v.Lane(i)` (where index `i` is a constant $0 \le i \le 3$), `v.WithLane(i, f)`.
+  - Shuffles with constant indexes: `v.Swizzle(i0, i1, i2, i3)` and `simd.Shuffle(a, b, i0, i1, i2, i3)` (lanes 0–3 come from `a`, 4–7 from `b`).
+  - Comparisons return a `simd.Mask32x4`: `v.Equal(u)`, `NotEqual`, `Less`, `LessEqual`, `Greater`, `GreaterEqual`. A mask has `And`, `Or`, `Xor`, `AndNot`, `Not`, `Any()`, `All()`, `Bits()` (lane `i` is bit `i`) and `Lane(i)`; `simd.Select(m, a, b)` takes lane `i` from `a` where the mask is set and from `b` elsewhere.
   - Zero value: `var v simd.F32x4` initializes to `(0, 0, 0, 0)` (`v128.const` zeros in WASM, frozen `[0, 0, 0, 0]` in JS).
 - **Direct Linear-Memory Load / Store:**
   - `simd.LoadF32x4(buf shared.Float32, i)` — loads 4 consecutive floats from element offset `i` (`v128.load`).
@@ -298,9 +300,9 @@ for (let i = 0; i < sim.Positions.length; i += 2) {
   - Bounds checks enforce $i + 4 \le \text{len}(buf)$ and trap with a panic on out-of-bounds access.
 - **Lowering & Semantics:**
   - **WASM:** compiles directly to unboxed `v128` locals, parameters, and struct fields using `0xFD` opcodes.
-  - **Current limits (planned for v1.8.0):** in `wasm`/`both` packages, `F32x4` cannot appear in exported struct fields or exported function signatures (they would cross the boundary), `==`/`!=` on `F32x4` is not supported, and `fmt` cannot format `F32x4` values. Keep `F32x4` in unexported types and functions, and compare or print lanes individually.
+  - **Value semantics:** `F32x4` and `Mask32x4` are ordinary values: struct fields, array and slice elements, map keys and values, generic type arguments, closure captures, and values stored in `any`. `==` and `!=` compare lane by lane on vector operands and on structs and arrays containing them (`NaN != NaN`, `-0 == +0`), and `fmt` prints `[1 2 3 4]` for `%v` and `%+v`, and `simd.F32x4{1, 2, 3, 4}` for `%#v`. Comparing two `any` values that hold vectors, and taking the address of a vector (`&v`), are not supported yet.
   - **JS:** compiles to frozen 4-element arrays using `Math.fround` per lane for bit-level 32-bit float parity.
-  - **Boundary:** In v1.7.0, `F32x4` is restricted from crossing the JS↔WASM boundary directly (compile diagnostic advises passing data via `gofront/shared.Float32`).
+  - **Boundary:** an `F32x4` crosses the JS↔WASM boundary as a copied 4-element `Float32Array` and a `Mask32x4` as a 4-element array of booleans, in exported function parameters and results and in exported struct fields. Bulk data should still travel through `gofront/shared.Float32` buffers.
 - **Benchmark & Gating:**
   - Tested on the 131,072-triangle raycast benchmark: 1.34× faster than pure JS, but 1.02× over scalar hybrid (spatial octree traversal dominates runtime over 3-wide triangle checks). Per the release plan's $\ge 1.30\times$ gate, `gofront/simd` stays experimental; its completion and the promotion decision are planned for v1.8.0 ([`plans/v1.8.0/portable-go-plan.md`](../plans/v1.8.0/portable-go-plan.md)).
 

@@ -955,7 +955,11 @@ class ModuleEmitter {
 	getMapType(keyGoType, valGoType) {
 		const keyWType = toWasmType(keyGoType, this.checker, this);
 		const valWType = toWasmType(valGoType, this.checker, this);
-		const key = `${wTypeKey(keyWType)}:${wTypeKey(valWType)}`;
+		// Vector keys share one wasm type but compare differently (floats vs
+		// mask words), so the Go type is part of the key.
+		const keyPart =
+			keyWType === "v128" ? `v128_${goTypeKey(keyGoType)}` : wTypeKey(keyWType);
+		const key = `${keyPart}:${wTypeKey(valWType)}`;
 		if (this.mapTypes.has(key)) {
 			return this.mapTypes.get(key);
 		}

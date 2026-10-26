@@ -1753,3 +1753,87 @@ func main() {
 	assertEqual(res.mod.Ratio, 0.5);
 	assertEqual(res.mod.Default.Price, 2.5);
 });
+
+section("JS <-> WASM boundary — SIMD vectors");
+
+const SIMD_BOUNDARY = (target) => `//gofront:target ${target}
+package sim
+
+import "gofront/simd"
+
+type Body struct {
+	Pos simd.F32x4
+	Hit simd.Mask32x4
+	N   int
+}
+
+func Scale(v simd.F32x4, k float32) simd.F32x4 { return v.Mul(simd.Splat(k)) }
+
+func Less(a, b simd.F32x4) simd.Mask32x4 { return a.Less(b) }
+
+func NewBody() *Body { return &Body{Pos: simd.F32x4{1, 2, 3, 4}} }
+
+func (b *Body) Move(d simd.F32x4) { b.Pos = b.Pos.Add(d) }
+
+func Pair(a simd.F32x4) (simd.F32x4, simd.Mask32x4) {
+	return a, a.Greater(simd.Splat(2))
+}
+`;
+
+for (const target of ["wasm", "both"]) {
+	test(`F32x4 and Mask32x4 cross the boundary by value in a ${target} package`, async () => {
+		const res = await compileHybridProject(
+			{
+				"sim/sim.go": SIMD_BOUNDARY(target),
+				"main.go": `package main
+
+import "./sim"
+
+func main() { _ = sim.Scale }
+`,
+			},
+			{ exports: ["Scale", "Less", "NewBody", "Pair"] },
+		);
+		const m = res.mod;
+		const arr = (v) => Array.from(v);
+		assertEqual(
+			JSON.stringify(arr(m.Scale(new Float32Array([1, 2, 3, 4]), 2))),
+			"[2,4,6,8]",
+		);
+		assertEqual(
+			JSON.stringify(arr(m.Less([1, 5, 3, 9], [2, 4, 3, 10]))),
+			"[true,false,false,true]",
+		);
+		const input = new Float32Array([1, 2, 3, 4]);
+		const [back, mask] = m.Pair(input);
+		input[0] = 99;
+		// A wasm package gets a copy; a both package runs as plain JS.
+		if (target === "wasm") assertEqual(back[0], 1);
+		assertEqual(JSON.stringify(arr(mask)), "[false,false,true,true]");
+		const body = m.NewBody();
+		assertEqual(JSON.stringify(arr(body.Pos)), "[1,2,3,4]");
+		assertEqual(JSON.stringify(arr(body.Hit)), "[false,false,false,false]");
+		body.Move(new Float32Array([1, 1, 1, 1]));
+		assertEqual(JSON.stringify(arr(body.Pos)), "[2,3,4,5]");
+		body.Pos = new Float32Array([9, 8, 7, 6]);
+		assertEqual(JSON.stringify(arr(body.Pos)), "[9,8,7,6]");
+	});
+}
+
+test("F32x4 crossing the boundary keeps NaN and signed zero", async () => {
+	const res = await compileHybridProject(
+		{
+			"sim/sim.go": SIMD_BOUNDARY("wasm"),
+			"main.go": `package main
+
+import "./sim"
+
+func main() { _ = sim.Scale }
+`,
+		},
+		{ exports: ["Scale"] },
+	);
+	const out = res.mod.Scale(new Float32Array([Number.NaN, -0, 1, 2]), 1);
+	assert(Number.isNaN(out[0]), "NaN survives");
+	assert(Object.is(out[1], -0), "-0 survives");
+});
