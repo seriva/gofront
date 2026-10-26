@@ -3011,6 +3011,27 @@ function ${P}boxback_${key}(r, b) {
 	}
 
 	for (const [key, desc] of needs.slices) {
+		if (desc.elem.k === "f32x4") {
+			// []F32x4 travels as one Float32Array of 4n lanes.
+			out.push(`function ${P}slin_${key}(arr) {
+	if (arr == null) return __w.__slice_nil_${key}();
+	const n = arr.length >> 2;
+	const s = __w.__slice_new_${key}(n);
+	for (let i = 0; i < n; i++) __w.__slice_set_${key}(s, i, ${P}f32x4in(arr.subarray ? arr.subarray(4 * i, 4 * i + 4) : arr.slice(4 * i, 4 * i + 4)));
+	return s;
+}
+function ${P}slout_${key}(s) {
+	if (s == null || __w.__slice_is_nil_${key}(s)) return null;
+	const n = __w.__slice_len_${key}(s);
+	const out = new Float32Array(4 * n);
+	for (let i = 0; i < n; i++) out.set(${P}f32x4out(__w.__slice_get_${key}(s, i)), 4 * i);
+	return out;
+}
+function ${P}slview_${key}(s) {
+	return ${P}slout_${key}(s);
+}`);
+			continue;
+		}
 		out.push(`function ${P}slin_${key}(arr) {
 	if (arr == null) return __w.__slice_nil_${key}();
 	const n = arr.length;
