@@ -1051,3 +1051,54 @@ test("F32x4 operations give the same results in a Binaryen release build", async
 		);
 	}
 });
+
+test("F32x4 and Mask32x4 stay distinct inside any (type switch and assertion)", async () => {
+	const mods = await compileBoth(
+		{
+			"anyv/anyv.go": `//gofront:target X
+package anyv
+
+import (
+	"fmt"
+	"gofront/simd"
+)
+
+func ts(x any) string {
+	switch v := x.(type) {
+	case simd.F32x4:
+		return fmt.Sprint("f", v)
+	case simd.Mask32x4:
+		return fmt.Sprint("m", v)
+	}
+	return "?"
+}
+
+func Switch() string {
+	a := simd.Splat(1)
+	return ts(a) + ts(a.Less(a))
+}
+
+func Assert() bool {
+	a := simd.Splat(1)
+	var v any = a.Less(a)
+	_, ok := v.(simd.F32x4)
+	return ok
+}
+`,
+			"main.go": `package main
+
+import "./anyv"
+
+func main() {
+	_ = anyv.Switch
+	_ = anyv.Assert
+}
+`,
+		},
+		["Switch", "Assert"],
+	);
+	for (const target of TARGETS) {
+		assertEqual(mods[target].Switch(), "f[1 1 1 1]m[false false false false]");
+		assertEqual(mods[target].Assert(), false);
+	}
+});
