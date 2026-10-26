@@ -1837,3 +1837,113 @@ func main() { _ = sim.Scale }
 	assert(Number.isNaN(out[0]), "NaN survives");
 	assert(Object.is(out[1], -0), "-0 survives");
 });
+
+section("JS <-> WASM boundary — []simd.F32x4");
+
+for (const target of ["wasm"]) {
+	test(`[]F32x4 crosses the boundary as one Float32Array in a ${target} package`, async () => {
+		const res = await compileHybridProject(
+			{
+				"sim/sim.go": `//gofront:target ${target}
+package sim
+
+import "gofront/simd"
+
+type Cloud struct {
+	Pts []simd.F32x4
+}
+
+func Double(vs []simd.F32x4) []simd.F32x4 {
+	out := make([]simd.F32x4, len(vs))
+	for i, v := range vs {
+		out[i] = v.Add(v)
+	}
+	return out
+}
+
+func Count(vs []simd.F32x4) int { return len(vs) }
+
+func NewCloud() *Cloud {
+	return &Cloud{Pts: []simd.F32x4{{1, 2, 3, 4}, {5, 6, 7, 8}}}
+}
+
+func Nil() []simd.F32x4 { return nil }
+`,
+				"main.go": `package main
+
+import "./sim"
+
+func main() { _ = sim.Count }
+`,
+			},
+			{ exports: ["Double", "Count", "NewCloud", "Nil"] },
+		);
+		const m = res.mod;
+		const out = m.Double(new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]));
+		assert(out instanceof Float32Array, "result is a Float32Array");
+		assertEqual(JSON.stringify(Array.from(out)), "[2,4,6,8,10,12,14,16]");
+		assertEqual(m.Count(new Float32Array(12)), 3);
+		assertEqual(m.Count(new Float32Array(0)), 0);
+		const cloud = m.NewCloud();
+		assertEqual(JSON.stringify(Array.from(cloud.Pts)), "[1,2,3,4,5,6,7,8]");
+		assertEqual(m.Nil() == null || m.Nil().length === 0, true);
+	});
+}
+
+test("[]F32x4 argument is copied, not shared with the caller", async () => {
+	const res = await compileHybridProject(
+		{
+			"sim/sim.go": `//gofront:target wasm
+package sim
+
+import "gofront/simd"
+
+func Poke(vs []simd.F32x4) float32 {
+	vs[0] = simd.Splat(9)
+	return vs[0].Lane(0)
+}
+`,
+			"main.go": `package main
+
+import "./sim"
+
+func main() { _ = sim.Poke }
+`,
+		},
+		{ exports: ["Poke"] },
+	);
+	const input = new Float32Array([1, 2, 3, 4]);
+	assertEqual(res.mod.Poke(input), 9);
+	assertEqual(input[0], 1);
+});
+
+test("[]Mask32x4 and []F32x4 in one module keep their own transport", async () => {
+	const res = await compileHybridProject(
+		{
+			"sim/sim.go": `//gofront:target wasm
+package sim
+
+import "gofront/simd"
+
+func Vecs(vs []simd.F32x4) int { return len(vs) }
+func Mask(vs []simd.Mask32x4) int { return len(vs) }
+func MaskAny(vs []simd.Mask32x4) bool { return vs[1].All() }
+`,
+			"main.go": `package main
+
+import "./sim"
+
+func main() { _ = sim.Vecs }
+`,
+		},
+		{ exports: ["Vecs", "Mask", "MaskAny"] },
+	);
+	const m = res.mod;
+	const masks = [
+		[true, false, true, false],
+		[true, true, true, true],
+	];
+	assertEqual(m.Vecs(new Float32Array(8)), 2);
+	assertEqual(m.Mask(masks), 2);
+	assertEqual(m.MaskAny(masks), true);
+});
