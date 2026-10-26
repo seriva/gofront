@@ -464,7 +464,7 @@ Design documents for planned features are organised by release under `plans/v*/`
 npm test                  # unit, zero-alloc perf, and example tests (~1,920+ tests, no browser required)
 npm run test:e2e          # E2E browser tests (Playwright, headless Chromium)
 npm run bench             # Möller–Trumbore raycast benchmark comparing pure JS vs hybrid WASM
-npm run manifest:update   # regenerate runtime/stdlib/manifest.json from Go's api/*.txt (needs go1.26)
+npm run manifest:update   # regenerate stdlib/manifest.json from Go's api/*.txt (needs go1.26)
 npm run conformance       # run test/conformance fixtures on JS and WASM against real Go output (part of npm test)
 npm run conformance:update # capture fixture .out files with go run (needs go1.26)
 npm run docs:stdlib       # regenerate the stdlib tables in docs/ from the manifest (checked by npm run check)
