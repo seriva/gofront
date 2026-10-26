@@ -78,6 +78,10 @@ const JSON_NAMES = [
 	"UnsupportedTypeError$$internal$jsonrt",
 	"MarshalerError$$internal$jsonrt",
 	"CheckValid$$internal$jsonrt",
+	"Number$$internal$jsonrt",
+	"OptEscapeHTML$$internal$jsonrt",
+	"OptUseNumber$$internal$jsonrt",
+	"OptDisallowUnknownFields$$internal$jsonrt",
 ];
 
 function addExtraRoots(names) {
