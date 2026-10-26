@@ -1824,6 +1824,348 @@ error: unexpected end of JSON input | null
 	);
 });
 
+test("Unmarshal calls UnmarshalJSON with the raw value bytes", async () => {
+	const src = `//gofront:target wasm
+package lib
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+	"errors"
+)
+
+var _ = fmt.Sprint
+var _ = strings.Join
+
+func show(b []byte, err error) string {
+	if err != nil {
+		return "error: " + err.Error()
+	}
+	return string(b)
+}
+
+type Up struct{ S string }
+func (u *Up) UnmarshalJSON(b []byte) error {
+	u.S = strings.ToUpper(string(b))
+	return nil
+}
+type Strict struct{ N int }
+var errStrict = errors.New("strict says no")
+func (s *Strict) UnmarshalJSON(b []byte) error {
+	if string(b) == "0" {
+		return errStrict
+	}
+	s.N = len(b)
+	return nil
+}
+type Color int
+func (c *Color) UnmarshalJSON(b []byte) error {
+	*c = Color(len(b))
+	return nil
+}
+type Colors []Color
+type Doc struct {
+	U  Up             \`json:"u"\`
+	UP *Up            \`json:"up"\`
+	L  []Up           \`json:"l"\`
+	M  map[string]Up  \`json:"m"\`
+	C  Color          \`json:"c"\`
+	CS Colors         \`json:"cs"\`
+}
+type Base struct{ Raw string }
+func (b *Base) UnmarshalJSON(data []byte) error {
+	b.Raw = string(data)
+	return nil
+}
+type Wrap struct {
+	Base
+	Z int
+}
+
+func un(data string, v any) string {
+	err := json.Unmarshal([]byte(data), v)
+	b, _ := json.Marshal(v)
+	if err != nil {
+		return "error: " + err.Error() + " | " + string(b)
+	}
+	return string(b)
+}
+
+
+func Run() string {
+	var out []string
+	add := func(s string) { out = append(out, s) }
+
+	var d Doc
+	add(un(\`{"u":"ab","up":"cd","l":["ef",{"x":1}],"m":{"k":[1, 2]},"c":7,"cs":[1,2]}\`, &d))
+	add(fmt.Sprint(d.U.S, d.UP.S, d.L[0].S, d.L[1].S, d.M["k"].S, int(d.C), int(d.CS[1])))
+	d2 := Doc{UP: &Up{S: "keep"}}
+	add(un(\`{"u":null,"up":null,"c":null}\`, &d2))
+	add(fmt.Sprint(d2.U.S, d2.UP == nil))
+	var top Up
+	add(un(\` "top" \`, &top))
+	add(top.S)
+	var st Strict
+	err := json.Unmarshal([]byte("0"), &st)
+	add(fmt.Sprint(errors.Is(err, errStrict), err))
+	var sts []Strict
+	err = json.Unmarshal([]byte("[12, 0]"), &sts)
+	add(fmt.Sprint(errors.Is(err, errStrict), err, err == errStrict))
+	var w Wrap
+	err = json.Unmarshal([]byte(\`{"Z": 3}\`), &w)
+	add(fmt.Sprint(err, w.Raw, w.Z))
+
+	return strings.Join(out, "\\n")
+}
+`;
+	assertEqual(
+		await runLib(src),
+		`{"u":{"S":"\\"AB\\""},"up":{"S":"\\"CD\\""},"l":[{"S":"\\"EF\\""},{"S":"{\\"X\\":1}"}],"m":{"k":{"S":"[1, 2]"}},"c":1,"cs":[1,1]}
+"AB""CD""EF"{"X":1}[1, 2]1 1
+{"u":{"S":"NULL"},"up":null,"l":null,"m":null,"c":4,"cs":null}
+NULLtrue
+{"S":"\\"TOP\\""}
+"TOP"
+true strict says no
+true strict says no true
+<nil>{"Z": 3}0`,
+	);
+});
+
+test("Unmarshal keeps the exact bytes of a RawMessage", async () => {
+	const src = `//gofront:target wasm
+package lib
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+var _ = fmt.Sprint
+var _ = strings.Join
+
+func show(b []byte, err error) string {
+	if err != nil {
+		return "error: " + err.Error()
+	}
+	return string(b)
+}
+
+type Pt struct{ X, Y int }
+type Msg struct {
+	ID      int                        \`json:"id"\`
+	Payload json.RawMessage            \`json:"payload"\`
+	List    []json.RawMessage          \`json:"list"\`
+	M       map[string]json.RawMessage \`json:"m"\`
+	N       json.RawMessage            \`json:"n"\`
+}
+type Lazy struct {
+	Kind string          \`json:"kind"\`
+	Data json.RawMessage \`json:"data"\`
+}
+
+func un(data string, v any) string {
+	err := json.Unmarshal([]byte(data), v)
+	b, _ := json.Marshal(v)
+	if err != nil {
+		return "error: " + err.Error() + " | " + string(b)
+	}
+	return string(b)
+}
+
+
+func Run() string {
+	var out []string
+	add := func(s string) { out = append(out, s) }
+
+	var m Msg
+	add(un(\`{"id":1,"payload": {"a" : [1, 2 ,3], "b":"x"} ,"list":[ 1 , "two" ,{"k":null}],"m":{"x": true ,"y":null},"n":null}\`, &m))
+	add(string(m.Payload))
+	add(string(m.List[0]) + "|" + string(m.List[1]) + "|" + string(m.List[2]))
+	add(string(m.M["x"]) + "|" + string(m.M["y"]))
+	add(string(m.N))
+	var raw json.RawMessage
+	add(un(\`  {"top" : [ ]}  \`, &raw))
+	add(string(raw))
+	add(un("null", &raw))
+	add(string(raw))
+	var m2 Msg
+	add(un(\`{"payload":null}\`, &m2))
+	add(string(m2.Payload))
+	b, err := json.Marshal(Msg{ID: 2, Payload: json.RawMessage(\`{ "z" : 1 }\`), N: nil})
+	add(string(b))
+	add(fmt.Sprint(err))
+	b, err = json.Marshal(json.RawMessage(\`[1, 2]\`))
+	add(string(b))
+	var nilRaw json.RawMessage
+	b, err = json.Marshal(nilRaw)
+	add(string(b))
+	b, err = json.Marshal(Msg{Payload: json.RawMessage(\`{bad\`)})
+	add(string(b))
+	add(fmt.Sprint(err))
+	var holder any
+	add(un(\`{"x":[1]}\`, &holder))
+	var lazy Lazy
+	add(un(\`{"kind":"point","data":{"X":1,"Y":2}}\`, &lazy))
+	var pt Pt
+	add(fmt.Sprint(json.Unmarshal(lazy.Data, &pt), pt.X, pt.Y))
+
+	return strings.Join(out, "\\n")
+}
+`;
+	assertEqual(
+		await runLib(src),
+		`{"id":1,"payload":{"a":[1,2,3],"b":"x"},"list":[1,"two",{"k":null}],"m":{"x":true,"y":null},"n":null}
+{"a" : [1, 2 ,3], "b":"x"}
+1|"two"|{"k":null}
+true|null
+null
+{"top":[]}
+{"top" : [ ]}
+null
+null
+{"id":0,"payload":null,"list":null,"m":null,"n":null}
+null
+{"id":2,"payload":{"z":1},"list":null,"m":null,"n":null}
+<nil>
+[1,2]
+null
+
+json: error calling MarshalJSON for type json.RawMessage: invalid character 'b' looking for beginning of object key string
+{"x":[1]}
+{"kind":"point","data":{"X":1,"Y":2}}
+<nil> 1 2`,
+	);
+});
+
+test("Unmarshal decodes numbers in any as float64 and keeps nested structure", async () => {
+	const src = `//gofront:target wasm
+package lib
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+var _ = fmt.Sprint
+var _ = strings.Join
+
+func show(b []byte, err error) string {
+	if err != nil {
+		return "error: " + err.Error()
+	}
+	return string(b)
+}
+
+type Holder struct{ A, B, C, D, E, F any }
+
+func un(data string, v any) string {
+	err := json.Unmarshal([]byte(data), v)
+	b, _ := json.Marshal(v)
+	if err != nil {
+		return "error: " + err.Error() + " | " + string(b)
+	}
+	return string(b)
+}
+
+
+func Run() string {
+	var out []string
+	add := func(s string) { out = append(out, s) }
+
+	var v any
+	add(un(\`[1, 2.5, -3e2, 1e21, 0.1, 123456789.125, 9007199254740993]\`, &v))
+	l := v.([]any)
+	add(fmt.Sprint(len(l), l[0].(float64), l[3].(float64), l[6].(float64) == 9007199254740992))
+	add(un(\`{"b":{"c":[true,false,null]},"a":"x\\u00e9\\ud83d\\ude00y"}\`, &v))
+	m := v.(map[string]any)
+	add(m["a"].(string))
+	add(fmt.Sprint(len(m["a"].(string)) > 0))
+	deep := m["b"].(map[string]any)["c"].([]any)
+	add(fmt.Sprint(deep[0], deep[1], deep[2] == nil))
+	var h Holder
+	add(un(\`{"A":1,"B":"s","C":[1,2],"D":{"k":"v"},"E":null,"F":true}\`, &h))
+	add(fmt.Sprint(h.A.(float64), h.B.(string), len(h.C.([]any)), h.D.(map[string]any)["k"], h.E == nil, h.F.(bool)))
+	var sl []any
+	add(un(\`[[1],[2,[3]],{}]\`, &sl))
+	var mm map[string]any
+	add(un(\`{"n":null,"x":[]}\`, &mm))
+	add(fmt.Sprint(len(mm), mm["n"] == nil, mm["x"] != nil))
+
+	return strings.Join(out, "\\n")
+}
+`;
+	assertEqual(
+		await runLib(src),
+		`[1,2.5,-300,1e+21,0.1,123456789.125,9007199254740992]
+7 1 1e+21 true
+{"a":"xé😀y","b":{"c":[true,false,null]}}
+xé😀y
+true
+true false true
+{"A":1,"B":"s","C":[1,2],"D":{"k":"v"},"E":null,"F":true}
+1s2vtrue true
+[[1],[2,[3]],{}]
+{"n":null,"x":[]}
+2 true true`,
+	);
+});
+
+test("Unmarshal into any keeps an existing pointer target out of the way", async () => {
+	const src = `//gofront:target wasm
+package lib
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+var _ = fmt.Sprint
+var _ = strings.Join
+
+func show(b []byte, err error) string {
+	if err != nil {
+		return "error: " + err.Error()
+	}
+	return string(b)
+}
+
+
+func un(data string, v any) string {
+	err := json.Unmarshal([]byte(data), v)
+	b, _ := json.Marshal(v)
+	if err != nil {
+		return "error: " + err.Error() + " | " + string(b)
+	}
+	return string(b)
+}
+
+
+func Run() string {
+	var out []string
+	add := func(s string) { out = append(out, s) }
+
+	var v any = 5
+	add(un(\`{"a":1}\`, &v))
+	var e any
+	add(un("[]", &e))
+	add(fmt.Sprint(e != nil))
+
+	return strings.Join(out, "\\n")
+}
+`;
+	assertEqual(
+		await runLib(src),
+		`{"a":1}
+[]
+true`,
+	);
+});
+
 test("Unmarshal into a pointer to a pointer reports a diagnostic", async () => {
 	let err = "";
 	try {
