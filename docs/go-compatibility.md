@@ -26,7 +26,7 @@ These features are intentional additions for the JavaScript platform:
 | Feature | Reason | Prospect |
 |---|---|---|
 | `goto` | Neither backend has unstructured control flow; both would require a loop-plus-state-machine lowering. Rare in idiomatic Go. | Not planned. Reported in every target as `goto is not supported; restructure with labeled break/continue`. |
-| `//go:embed` and `embed.FS` | Asset embedding requires resolver and asset pipeline design outside this release. | Deferred. Reported in every target as `//go:embed is not supported yet`. |
+| `//go:embed` and `embed.FS` | Asset embedding requires resolver and asset pipeline design outside this release. | Deferred. |
 | Goroutines / channels / `select` | Go's concurrency model has no JS equivalent. A userland scheduler defeats the "no runtime" goal. | Out of scope. |
 | `unsafe`, `reflect`, `cgo` | Require memory model or runtime type metadata that JS cannot provide. | Out of scope. `encoding/json` is supported through compile-time specialization without runtime reflection. |
 | `time.Sleep` in `wasm`/`both` packages | Go's `time.Sleep` blocks OS threads; in GoFront `time.Sleep` is an async Promise helper for the single-threaded JS event loop. Synchronous WASM cannot block. | Supported in `js` packages via `await time.Sleep(...)`. |
