@@ -1,4 +1,4 @@
-// GoFront test suite — stdlib coverage gate (runtime/stdlib/manifest.json)
+// GoFront test suite — stdlib coverage gate (stdlib/manifest.json)
 //
 // Compares the manifest (Go's API, classified by the scope rule) with what
 // GoFront implements:
@@ -43,7 +43,7 @@ import {
 const GAPS_PATH = fileURLToPath(
 	new URL("./stdlib-coverage.gaps.json", import.meta.url),
 );
-const STDLIB_SOURCE = join(ROOT, "runtime/stdlib");
+const STDLIB_SOURCE = join(ROOT, "stdlib");
 
 const manifest = JSON.parse(readFileSync(MANIFEST_PATH, "utf8"));
 const checker = new TypeChecker();
@@ -57,7 +57,7 @@ const pkgIdent = (pkg) =>
 
 // ── What GoFront implements ─────────────────────────────────────────────
 
-// A Go-source package (runtime/stdlib/<pkg>), type-checked as the loader
+// A Go-source package (stdlib/<pkg>), type-checked as the loader
 // does (an overlay sees its emitter members): its exported names, plus `T.M`
 // methods and `T.F` struct fields, and its checker.
 const goSourceCache = new Map();
@@ -235,7 +235,7 @@ function exclusionProbe(e) {
 // The compile errors of `source` as a js package.  An exclusion is a
 // targeted error, so warnings ("cannot find types for …") do not count; they
 // are kept off the console.
-// A package with Go source (runtime/stdlib/<pkg>) is only loaded by a
+// A package with Go source (stdlib/<pkg>) is only loaded by a
 // directory build, whose errors are thrown.
 function compileErrors(source, goSourcePkg) {
 	const { warn, error } = console;
