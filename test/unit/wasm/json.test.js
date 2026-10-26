@@ -6,6 +6,7 @@
 
 import { fileURLToPath } from "node:url";
 import {
+	assertContains,
 	assertEqual,
 	compileHybridProject,
 	section,
@@ -940,6 +941,953 @@ func Run() string {
 }
 `;
 	assertEqual(await runLib(src), `true false true false false true false`);
+});
+
+test("Unmarshal scalars into pointers", async () => {
+	const src = `//gofront:target wasm
+package lib
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+var _ = fmt.Sprint
+var _ = strings.Join
+
+func show(b []byte, err error) string {
+	if err != nil {
+		return "error: " + err.Error()
+	}
+	return string(b)
+}
+
+
+func un(data string, v any) string {
+	err := json.Unmarshal([]byte(data), v)
+	b, _ := json.Marshal(v)
+	if err != nil {
+		return "error: " + err.Error() + " | " + string(b)
+	}
+	return string(b)
+}
+
+
+func Run() string {
+	var out []string
+	add := func(s string) { out = append(out, s) }
+
+	var i int
+	var i8 int8
+	var u uint
+	var u8 uint8
+	var f float64
+	var f32 float32
+	var s string
+	var b bool
+	add(un("42", &i))
+	add(un("-128", &i8))
+	add(un("7", &u))
+	add(un("255", &u8))
+	add(un("2.5", &f))
+	add(un("0.1", &f32))
+	add(un(\`"h\\u00e9llo \\\\n \\\\u0041"\`, &s))
+	add(un("true", &b))
+	add(un("  [1, 2]  ", &s))
+	var i64 int64
+	var u64 uint64
+	add(un("9223372036854775807", &i64))
+	add(un("18446744073709551615", &u64))
+	var big float64
+	add(un("123456789012345678901234567890", &big))
+	add(un("1e400", &big))
+	add(un("-1.5E-3", &big))
+
+	return strings.Join(out, "\\n")
+}
+`;
+	assertEqual(
+		await runLib(src),
+		`42
+-128
+7
+255
+2.5
+0.1
+"héllo \\\\n \\\\u0041"
+true
+error: json: cannot unmarshal array into Go value of type string | "héllo \\\\n \\\\u0041"
+9223372036854775807
+18446744073709551615
+1.2345678901234568e+29
+error: json: cannot unmarshal number 1e400 into Go value of type float64 | 1.2345678901234568e+29
+-0.0015`,
+	);
+});
+
+test("Unmarshal integer range and fraction errors", async () => {
+	const src = `//gofront:target wasm
+package lib
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+var _ = fmt.Sprint
+var _ = strings.Join
+
+func show(b []byte, err error) string {
+	if err != nil {
+		return "error: " + err.Error()
+	}
+	return string(b)
+}
+
+
+func un(data string, v any) string {
+	err := json.Unmarshal([]byte(data), v)
+	b, _ := json.Marshal(v)
+	if err != nil {
+		return "error: " + err.Error() + " | " + string(b)
+	}
+	return string(b)
+}
+
+
+func Run() string {
+	var out []string
+	add := func(s string) { out = append(out, s) }
+
+	var i8 int8
+	var u8 uint8
+	var i int
+	var u uint
+	add(un("128", &i8))
+	add(un("-129", &i8))
+	add(un("256", &u8))
+	add(un("-1", &u8))
+	add(un("1.5", &i))
+	add(un("1e2", &i))
+	add(un("-1", &u))
+	add(un("9223372036854775808", &i))
+	add(un("true", &i))
+	add(un(\`"1"\`, &i))
+	add(un("[1]", &i))
+	add(un("{}", &i))
+
+	return strings.Join(out, "\\n")
+}
+`;
+	assertEqual(
+		await runLib(src),
+		`error: json: cannot unmarshal number 128 into Go value of type int8 | 0
+error: json: cannot unmarshal number -129 into Go value of type int8 | 0
+error: json: cannot unmarshal number 256 into Go value of type uint8 | 0
+error: json: cannot unmarshal number -1 into Go value of type uint8 | 0
+error: json: cannot unmarshal number 1.5 into Go value of type int | 0
+error: json: cannot unmarshal number 1e2 into Go value of type int | 0
+error: json: cannot unmarshal number -1 into Go value of type uint | 0
+error: json: cannot unmarshal number 9223372036854775808 into Go value of type int | 0
+error: json: cannot unmarshal bool into Go value of type int | 0
+error: json: cannot unmarshal string into Go value of type int | 0
+error: json: cannot unmarshal array into Go value of type int | 0
+error: json: cannot unmarshal object into Go value of type int | 0`,
+	);
+});
+
+test("Unmarshal syntax errors", async () => {
+	const src = `//gofront:target wasm
+package lib
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+var _ = fmt.Sprint
+var _ = strings.Join
+
+func show(b []byte, err error) string {
+	if err != nil {
+		return "error: " + err.Error()
+	}
+	return string(b)
+}
+
+
+func un(data string, v any) string {
+	err := json.Unmarshal([]byte(data), v)
+	b, _ := json.Marshal(v)
+	if err != nil {
+		return "error: " + err.Error() + " | " + string(b)
+	}
+	return string(b)
+}
+
+
+func Run() string {
+	var out []string
+	add := func(s string) { out = append(out, s) }
+
+	var v any
+	add(un("", &v))
+	add(un("{", &v))
+	add(un("[1,", &v))
+	add(un("[1 2]", &v))
+	add(un("{\\"a\\" 1}", &v))
+	add(un("{\\"a\\":1,}", &v))
+	add(un("nul", &v))
+	add(un("tru", &v))
+	add(un("'x'", &v))
+	add(un("01", &v))
+	add(un("1.", &v))
+	add(un("-", &v))
+	add(un("\\"abc", &v))
+	add(un("\\"a\\\\qb\\"", &v))
+	add(un("[1] x", &v))
+	add(un("\\"\\\\u12\\"", &v))
+
+	return strings.Join(out, "\\n")
+}
+`;
+	assertEqual(
+		await runLib(src),
+		`error: unexpected end of JSON input | null
+error: unexpected end of JSON input | null
+error: unexpected end of JSON input | null
+error: invalid character '2' after array element | null
+error: invalid character '1' after object key | null
+error: invalid character '}' looking for beginning of object key string | null
+error: invalid character ' ' in literal null (expecting 'l') | null
+error: invalid character ' ' in literal true (expecting 'e') | null
+error: invalid character '\\'' looking for beginning of value | null
+error: invalid character '1' after top-level value | null
+error: invalid character ' ' after decimal point in numeric literal | null
+error: invalid character ' ' in numeric literal | null
+error: unexpected end of JSON input | null
+error: invalid character 'q' in string escape code | null
+error: invalid character 'x' after top-level value | null
+error: invalid character '"' in \\u hexadecimal character escape | null`,
+	);
+});
+
+test("Unmarshal into struct: tags, case-insensitive match, unknown fields, null", async () => {
+	const src = `//gofront:target wasm
+package lib
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+var _ = fmt.Sprint
+var _ = strings.Join
+
+func show(b []byte, err error) string {
+	if err != nil {
+		return "error: " + err.Error()
+	}
+	return string(b)
+}
+
+type Addr struct {
+	Street string \`json:"street"\`
+	City   string \`json:"city,omitempty"\`
+}
+type P struct {
+	Name  string         \`json:"name"\`
+	Age   int            \`json:"age"\`
+	Score float64
+	OK    bool           \`json:"ok"\`
+	Tags  []string       \`json:"tags"\`
+	Addr  Addr           \`json:"addr"\`
+	Home  *Addr          \`json:"home"\`
+	M     map[string]int \`json:"m"\`
+	Any   any            \`json:"any"\`
+	skip  int
+	Dash  string         \`json:"-"\`
+}
+
+func un(data string, v any) string {
+	err := json.Unmarshal([]byte(data), v)
+	b, _ := json.Marshal(v)
+	if err != nil {
+		return "error: " + err.Error() + " | " + string(b)
+	}
+	return string(b)
+}
+
+
+func Run() string {
+	var out []string
+	add := func(s string) { out = append(out, s) }
+
+	var p P
+	add(un(\`{"name":"Ann","AGE":31,"Score":1.5,"ok":true,"tags":["a","b"],"extra":{"deep":[1,{"x":2}]},"nick":null}\`, &p))
+	add(un(\`{"NAME":"Bob","Age":"x"}\`, &p))
+	p2 := P{Name: "keep", Age: 9, Tags: []string{"old"}, Home: &Addr{Street: "S"}, M: map[string]int{"k": 1}, Any: 5}
+	add(un(\`{"name":null,"age":null,"tags":null,"home":null,"m":null,"any":null}\`, &p2))
+	var p3 P
+	add(un(\`{"name":"a","name":"b"}\`, &p3))
+	add(un(\`{"home":{"street":"H","city":"C"},"addr":{"street":"A"}}\`, &p3))
+	add(un(\`[]\`, &p3))
+	add(un("null", &p3))
+
+	return strings.Join(out, "\\n")
+}
+`;
+	assertEqual(
+		await runLib(src),
+		`{"name":"Ann","age":31,"Score":1.5,"ok":true,"tags":["a","b"],"addr":{"street":""},"home":null,"m":null,"any":null}
+error: json: cannot unmarshal string into Go struct field P.age of type int | {"name":"Bob","age":31,"Score":1.5,"ok":true,"tags":["a","b"],"addr":{"street":""},"home":null,"m":null,"any":null}
+{"name":"keep","age":9,"Score":0,"ok":false,"tags":null,"addr":{"street":""},"home":null,"m":null,"any":null}
+{"name":"b","age":0,"Score":0,"ok":false,"tags":null,"addr":{"street":""},"home":null,"m":null,"any":null}
+{"name":"b","age":0,"Score":0,"ok":false,"tags":null,"addr":{"street":"A"},"home":{"street":"H","city":"C"},"m":null,"any":null}
+error: json: cannot unmarshal array into Go value of type lib.P | {"name":"b","age":0,"Score":0,"ok":false,"tags":null,"addr":{"street":"A"},"home":{"street":"H","city":"C"},"m":null,"any":null}
+{"name":"b","age":0,"Score":0,"ok":false,"tags":null,"addr":{"street":"A"},"home":{"street":"H","city":"C"},"m":null,"any":null}`,
+	);
+});
+
+test("Unmarshal slices, arrays, maps and pointers", async () => {
+	const src = `//gofront:target wasm
+package lib
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+var _ = fmt.Sprint
+var _ = strings.Join
+
+func show(b []byte, err error) string {
+	if err != nil {
+		return "error: " + err.Error()
+	}
+	return string(b)
+}
+
+type Pt struct{ X, Y int }
+
+func un(data string, v any) string {
+	err := json.Unmarshal([]byte(data), v)
+	b, _ := json.Marshal(v)
+	if err != nil {
+		return "error: " + err.Error() + " | " + string(b)
+	}
+	return string(b)
+}
+
+
+func Run() string {
+	var out []string
+	add := func(s string) { out = append(out, s) }
+
+	var s []int
+	add(un("[1,2,3]", &s))
+	add(un("[]", &s))
+	add(un("null", &s))
+	var s2 [][]string
+	add(un(\`[["a"],[],null,["b","c"]]\`, &s2))
+	var a [3]int
+	add(un("[1,2]", &a))
+	add(un("[1,2,3,4,5]", &a))
+	var m map[string]int
+	add(un(\`{"b":2,"a":1}\`, &m))
+	add(un("{}", &m))
+	add(un("null", &m))
+	var m2 map[string][]Pt
+	add(un(\`{"x":[{"X":1,"Y":2}],"y":[]}\`, &m2))
+	var mi map[int]string
+	add(un(\`{"10":"ten","-2":"neg"}\`, &mi))
+	add(un(\`{"x":"bad"}\`, &mi))
+	var mu map[uint8]bool
+	add(un(\`{"7":true,"300":false}\`, &mu))
+	var sp []*Pt
+	add(un(\`[{"X":1},null,{"Y":2}]\`, &sp))
+	var ex map[string]int = map[string]int{"keep": 1}
+	add(un(\`{"new":2}\`, &ex))
+
+	return strings.Join(out, "\\n")
+}
+`;
+	assertEqual(
+		await runLib(src),
+		`[1,2,3]
+[]
+null
+[["a"],[],null,["b","c"]]
+[1,2,0]
+[1,2,3]
+{"a":1,"b":2}
+{"a":1,"b":2}
+null
+{"x":[{"X":1,"Y":2}],"y":[]}
+{"-2":"neg","10":"ten"}
+error: json: cannot unmarshal number x into Go value of type int | {"-2":"neg","10":"ten"}
+error: json: cannot unmarshal number 300 into Go value of type uint8 | {"7":true}
+[{"X":1,"Y":0},null,{"X":0,"Y":2}]
+{"keep":1,"new":2}`,
+	);
+});
+
+test("Unmarshal reports Go's type errors with the struct field path", async () => {
+	const src = `//gofront:target wasm
+package lib
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+var _ = fmt.Sprint
+var _ = strings.Join
+
+func show(b []byte, err error) string {
+	if err != nil {
+		return "error: " + err.Error()
+	}
+	return string(b)
+}
+
+type In struct{ N int \`json:"n"\` }
+type Outer struct {
+	Name string            \`json:"name"\`
+	In   In                \`json:"in"\`
+	List []In              \`json:"list"\`
+	M    map[string]In     \`json:"m"\`
+	F    int8              \`json:"f"\`
+	U    uint              \`json:"u"\`
+	P    *int              \`json:"p"\`
+	Tags []string          \`json:"tags"\`
+}
+
+func un(data string, v any) string {
+	err := json.Unmarshal([]byte(data), v)
+	b, _ := json.Marshal(v)
+	if err != nil {
+		return "error: " + err.Error() + " | " + string(b)
+	}
+	return string(b)
+}
+
+
+func Run() string {
+	var out []string
+	add := func(s string) { out = append(out, s) }
+
+	var o Outer
+	add(un(\`{"name":5}\`, &o))
+	add(un(\`{"in":{"n":"x"}}\`, &o))
+	add(un(\`{"in":[1]}\`, &o))
+	add(un(\`{"list":[{"n":1},{"n":"bad"}]}\`, &o))
+	add(un(\`{"m":{"k":{"n":true}}}\`, &o))
+	add(un(\`{"name":5,"in":{"n":"x"}}\`, &o))
+	add(un(\`{"f":1.5}\`, &o))
+	add(un(\`{"u":-1}\`, &o))
+	add(un(\`{"p":"x"}\`, &o))
+	add(un(\`{"tags":{"a":1}}\`, &o))
+
+	return strings.Join(out, "\\n")
+}
+`;
+	assertEqual(
+		await runLib(src),
+		`error: json: cannot unmarshal number into Go struct field Outer.name of type string | {"name":"","in":{"n":0},"list":null,"m":null,"f":0,"u":0,"p":null,"tags":null}
+error: json: cannot unmarshal string into Go struct field In.in.n of type int | {"name":"","in":{"n":0},"list":null,"m":null,"f":0,"u":0,"p":null,"tags":null}
+error: json: cannot unmarshal array into Go struct field Outer.in of type lib.In | {"name":"","in":{"n":0},"list":null,"m":null,"f":0,"u":0,"p":null,"tags":null}
+error: json: cannot unmarshal string into Go struct field In.list.n of type int | {"name":"","in":{"n":0},"list":[{"n":1},{"n":0}],"m":null,"f":0,"u":0,"p":null,"tags":null}
+error: json: cannot unmarshal bool into Go struct field In.m.n of type int | {"name":"","in":{"n":0},"list":[{"n":1},{"n":0}],"m":{"k":{"n":0}},"f":0,"u":0,"p":null,"tags":null}
+error: json: cannot unmarshal number into Go struct field Outer.name of type string | {"name":"","in":{"n":0},"list":[{"n":1},{"n":0}],"m":{"k":{"n":0}},"f":0,"u":0,"p":null,"tags":null}
+error: json: cannot unmarshal number 1.5 into Go struct field Outer.f of type int8 | {"name":"","in":{"n":0},"list":[{"n":1},{"n":0}],"m":{"k":{"n":0}},"f":0,"u":0,"p":null,"tags":null}
+error: json: cannot unmarshal number -1 into Go struct field Outer.u of type uint | {"name":"","in":{"n":0},"list":[{"n":1},{"n":0}],"m":{"k":{"n":0}},"f":0,"u":0,"p":null,"tags":null}
+error: json: cannot unmarshal string into Go struct field Outer.p of type int | {"name":"","in":{"n":0},"list":[{"n":1},{"n":0}],"m":{"k":{"n":0}},"f":0,"u":0,"p":0,"tags":null}
+error: json: cannot unmarshal object into Go struct field Outer.tags of type []string | {"name":"","in":{"n":0},"list":[{"n":1},{"n":0}],"m":{"k":{"n":0}},"f":0,"u":0,"p":0,"tags":null}`,
+	);
+});
+
+test("Unmarshal into any: maps, slices, float64, strings, bools, nil", async () => {
+	const src = `//gofront:target wasm
+package lib
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+var _ = fmt.Sprint
+var _ = strings.Join
+
+func show(b []byte, err error) string {
+	if err != nil {
+		return "error: " + err.Error()
+	}
+	return string(b)
+}
+
+
+func un(data string, v any) string {
+	err := json.Unmarshal([]byte(data), v)
+	b, _ := json.Marshal(v)
+	if err != nil {
+		return "error: " + err.Error() + " | " + string(b)
+	}
+	return string(b)
+}
+
+
+func Run() string {
+	var out []string
+	add := func(s string) { out = append(out, s) }
+
+	var v any
+	add(un(\`{"a":[1,"two",true,null,{"b":2.5}],"c":"d"}\`, &v))
+	add(un("12345678901234567890", &v))
+	add(un("[]", &v))
+	add(un("{}", &v))
+	add(un("null", &v))
+	add(un(\`"s"\`, &v))
+	m, ok := v.(map[string]any)
+	add(fmt.Sprint(m == nil, ok))
+	add(un(\`{"x":{"y":[1,2]}}\`, &v))
+	m = v.(map[string]any)
+	inner := m["x"].(map[string]any)
+	l := inner["y"].([]any)
+	add(fmt.Sprint(len(m), len(inner), len(l), l[0].(float64)+l[1].(float64)))
+	var ms map[string]any
+	add(un(\`{"k":1,"j":[true]}\`, &ms))
+	var ls []any
+	add(un(\`[1,{"a":null}]\`, &ls))
+	var st struct{ X any }
+	add(un(\`{"X":{"deep":[1]}}\`, &st))
+
+	return strings.Join(out, "\\n")
+}
+`;
+	assertEqual(
+		await runLib(src),
+		`{"a":[1,"two",true,null,{"b":2.5}],"c":"d"}
+12345678901234567000
+[]
+{}
+null
+"s"
+true false
+{"x":{"y":[1,2]}}
+1 1 2 3
+{"j":[true],"k":1}
+[1,{"a":null}]
+{"X":{"deep":[1]}}`,
+	);
+});
+
+test("Unmarshal []byte from base64 and number arrays", async () => {
+	const src = `//gofront:target wasm
+package lib
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+var _ = fmt.Sprint
+var _ = strings.Join
+
+func show(b []byte, err error) string {
+	if err != nil {
+		return "error: " + err.Error()
+	}
+	return string(b)
+}
+
+type MyBytes []byte
+
+func un(data string, v any) string {
+	err := json.Unmarshal([]byte(data), v)
+	b, _ := json.Marshal(v)
+	if err != nil {
+		return "error: " + err.Error() + " | " + string(b)
+	}
+	return string(b)
+}
+
+
+func Run() string {
+	var out []string
+	add := func(s string) { out = append(out, s) }
+
+	var b []byte
+	add(un(\`"aGVsbG8="\`, &b))
+	add(string(b))
+	add(un("null", &b))
+	add(un("[104,105]", &b))
+	add(string(b))
+	add(un("5", &b))
+	var mb MyBytes
+	add(un(\`"aGk="\`, &mb))
+	var st struct{ B []byte \`json:"b"\` }
+	add(un(\`{"b":"AQID"}\`, &st))
+
+	return strings.Join(out, "\\n")
+}
+`;
+	assertEqual(
+		await runLib(src),
+		`"aGVsbG8="
+hello
+null
+"aGk="
+hi
+error: json: cannot unmarshal number into Go value of type []uint8 | "aGk="
+"aGk="
+{"b":"AQID"}`,
+	);
+});
+
+test("Unmarshal embedded structs", async () => {
+	const src = `//gofront:target wasm
+package lib
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+var _ = fmt.Sprint
+var _ = strings.Join
+
+func show(b []byte, err error) string {
+	if err != nil {
+		return "error: " + err.Error()
+	}
+	return string(b)
+}
+
+type Base struct {
+	ID   int    \`json:"id"\`
+	Name string \`json:"name"\`
+}
+type Extended struct {
+	Base
+	Title string \`json:"title"\`
+}
+type PE struct {
+	*Base
+	Z int
+}
+type Named struct {
+	Base \`json:"base"\`
+	Name string \`json:"name"\`
+}
+type Outer struct {
+	Base
+	Name string \`json:"name"\`
+}
+
+func un(data string, v any) string {
+	err := json.Unmarshal([]byte(data), v)
+	b, _ := json.Marshal(v)
+	if err != nil {
+		return "error: " + err.Error() + " | " + string(b)
+	}
+	return string(b)
+}
+
+
+func Run() string {
+	var out []string
+	add := func(s string) { out = append(out, s) }
+
+	var e Extended
+	add(un(\`{"id":42,"title":"Book","name":"n"}\`, &e))
+	var pe PE
+	add(un(\`{"id":7,"Z":3}\`, &pe))
+	add(fmt.Sprint(pe.Base != nil, pe.ID))
+	var pe2 PE
+	add(un(\`{"Z":3}\`, &pe2))
+	add(fmt.Sprint(pe2.Base == nil))
+	var n Named
+	add(un(\`{"base":{"id":9},"name":"nm"}\`, &n))
+	var o Outer
+	add(un(\`{"name":"outer","id":1}\`, &o))
+
+	return strings.Join(out, "\\n")
+}
+`;
+	assertEqual(
+		await runLib(src),
+		`{"id":42,"name":"n","title":"Book"}
+{"id":7,"name":"","Z":3}
+true 7
+{"Z":3}
+true
+{"base":{"id":9,"name":""},"name":"nm"}
+{"id":1,"name":"outer"}`,
+	);
+});
+
+test("Unmarshal quoted fields (,string)", async () => {
+	const src = `//gofront:target wasm
+package lib
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+var _ = fmt.Sprint
+var _ = strings.Join
+
+func show(b []byte, err error) string {
+	if err != nil {
+		return "error: " + err.Error()
+	}
+	return string(b)
+}
+
+type Q struct {
+	I int      \`json:"i,string"\`
+	S string   \`json:"s,string"\`
+	B bool     \`json:"b,string"\`
+	F float64  \`json:"f,string"\`
+	U uint8    \`json:"u,string"\`
+	P *int     \`json:"p,string"\`
+}
+
+func un(data string, v any) string {
+	err := json.Unmarshal([]byte(data), v)
+	b, _ := json.Marshal(v)
+	if err != nil {
+		return "error: " + err.Error() + " | " + string(b)
+	}
+	return string(b)
+}
+
+
+func Run() string {
+	var out []string
+	add := func(s string) { out = append(out, s) }
+
+	var q Q
+	add(un(\`{"i":"12","s":"\\\\"hi\\\\"","b":"true","f":"2.5","u":"7","p":"5"}\`, &q))
+	add(un(\`{"i":12}\`, &q))
+	add(un(\`{"i":"x"}\`, &q))
+	add(un(\`{"b":"yes"}\`, &q))
+	add(un(\`{"s":"hi"}\`, &q))
+	add(un(\`{"i":null,"p":null}\`, &q))
+	add(un(\`{"u":"300"}\`, &q))
+
+	return strings.Join(out, "\\n")
+}
+`;
+	assertEqual(
+		await runLib(src),
+		`error: invalid character 'h' after object key:value pair | {"i":"0","s":"\\"\\"","b":"false","f":"0","u":"0","p":null}
+error: json: invalid use of ,string struct tag, trying to unmarshal unquoted value into int | {"i":"0","s":"\\"\\"","b":"false","f":"0","u":"0","p":null}
+error: json: invalid use of ,string struct tag, trying to unmarshal "x" into int | {"i":"0","s":"\\"\\"","b":"false","f":"0","u":"0","p":null}
+error: json: invalid use of ,string struct tag, trying to unmarshal "yes" into bool | {"i":"0","s":"\\"\\"","b":"false","f":"0","u":"0","p":null}
+error: json: invalid use of ,string struct tag, trying to unmarshal "hi" into string | {"i":"0","s":"\\"\\"","b":"false","f":"0","u":"0","p":null}
+{"i":"0","s":"\\"\\"","b":"false","f":"0","u":"0","p":null}
+error: json: cannot unmarshal number 300 into Go struct field Q.u of type uint8 | {"i":"0","s":"\\"\\"","b":"false","f":"0","u":"0","p":null}`,
+	);
+});
+
+test("Unmarshal named types, float32 and large numbers", async () => {
+	const src = `//gofront:target wasm
+package lib
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+var _ = fmt.Sprint
+var _ = strings.Join
+
+func show(b []byte, err error) string {
+	if err != nil {
+		return "error: " + err.Error()
+	}
+	return string(b)
+}
+
+type Celsius float64
+type Label string
+type Level int8
+
+func un(data string, v any) string {
+	err := json.Unmarshal([]byte(data), v)
+	b, _ := json.Marshal(v)
+	if err != nil {
+		return "error: " + err.Error() + " | " + string(b)
+	}
+	return string(b)
+}
+
+
+func Run() string {
+	var out []string
+	add := func(s string) { out = append(out, s) }
+
+	var c Celsius
+	add(un("36.6", &c))
+	var l Label
+	add(un(\`"x"\`, &l))
+	var lv Level
+	add(un("3", &lv))
+	var f32 []float32
+	add(un("[0.1, 16777217, 3.4e38, 1e39]", &f32))
+	var fs struct{ A float32 \`json:"a"\`; B *float32 \`json:"b"\` }
+	add(un(\`{"a":0.1,"b":2.2}\`, &fs))
+	var n []int
+	add(un("[1e2, 0, -0, 12]", &n))
+
+	return strings.Join(out, "\\n")
+}
+`;
+	assertEqual(
+		await runLib(src),
+		`36.6
+"x"
+3
+error: json: cannot unmarshal number 1e39 into Go value of type float32 | [0.1,16777216,3.4e+38,0]
+{"a":0.1,"b":2.2}
+error: json: cannot unmarshal number 1e2 into Go value of type int | [0,0,0,12]`,
+	);
+});
+
+test("Unmarshal needs a non-nil pointer", async () => {
+	const src = `//gofront:target wasm
+package lib
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+var _ = fmt.Sprint
+var _ = strings.Join
+
+func show(b []byte, err error) string {
+	if err != nil {
+		return "error: " + err.Error()
+	}
+	return string(b)
+}
+
+
+func un(data string, v any) string {
+	err := json.Unmarshal([]byte(data), v)
+	b, _ := json.Marshal(v)
+	if err != nil {
+		return "error: " + err.Error() + " | " + string(b)
+	}
+	return string(b)
+}
+
+
+func Run() string {
+	var out []string
+	add := func(s string) { out = append(out, s) }
+
+	var n int
+	add(un("1", n))
+	var pn *int
+	add(un("1", pn))
+	add(un("1", nil))
+	add(un("{", pn))
+	add(un("1", &n))
+
+	return strings.Join(out, "\\n")
+}
+`;
+	assertEqual(
+		await runLib(src),
+		`error: json: Unmarshal(non-pointer int) | 0
+error: json: Unmarshal(nil *int) | null
+error: json: Unmarshal(nil) | null
+error: unexpected end of JSON input | null
+1`,
+	);
+});
+
+test("Unmarshal into a pointer to a pointer reports a diagnostic", async () => {
+	let err = "";
+	try {
+		await runLib(`//gofront:target wasm
+package lib
+
+import "encoding/json"
+
+type T struct{ A int }
+
+func Run() string {
+	var p *T
+	_ = json.Unmarshal([]byte("{}"), &p)
+	return ""
+}
+`);
+	} catch (e) {
+		err = e.message;
+	}
+	assertContains(
+		err,
+		"json.Unmarshal into a pointer to a pointer is not yet available in wasm packages",
+	);
+});
+
+test("json round trip gives the same result in a both package on JS and WASM", async () => {
+	const body = `package lib
+
+import "encoding/json"
+
+type Item struct {
+	Name  string   \`json:"name"\`
+	Qty   int      \`json:"qty,omitempty"\`
+	Tags  []string \`json:"tags"\`
+	Price float64
+}
+
+func Run() string {
+	b, err := json.Marshal([]Item{{Name: "a<b", Qty: 2, Tags: []string{"x"}, Price: 1.5}, {Name: "c"}})
+	if err != nil {
+		return err.Error()
+	}
+	var back []Item
+	if err := json.Unmarshal(b, &back); err != nil {
+		return err.Error()
+	}
+	out, _ := json.Marshal(back)
+	return string(b) + "\\n" + string(out)
+}
+`;
+	const run = async (target) => {
+		const res = await compileHybridProject({
+			"lib/lib.go": `//gofront:target ${target}\n${body}`,
+			"main.go": `package main\n\nimport "./lib"\n\nfunc main() { println(lib.Run()) }\n`,
+		});
+		return res.lines.join("\n");
+	};
+	const js = await run("both");
+	const wasm = await run("wasm");
+	assertEqual(wasm, js);
+	assertEqual(
+		wasm,
+		'[{"name":"a\\u003cb","qty":2,"tags":["x"],"Price":1.5},{"name":"c","tags":null,"Price":0}]\n[{"name":"a\\u003cb","qty":2,"tags":["x"],"Price":1.5},{"name":"c","tags":null,"Price":0}]',
+	);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
