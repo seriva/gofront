@@ -1410,6 +1410,11 @@ export const expressionGenMethods = {
 		if (name === "string") return `typeof ${val} === "string"`;
 		if (name === "bool") return `typeof ${val} === "boolean"`;
 		if (name === "nil") return `${val} === null`;
+		// F32x4 and Mask32x4 are both frozen 4-element arrays; lanes tell them apart.
+		if (name === "simd.F32x4" || name === "F32x4")
+			return `(Array.isArray(${val}) && ${val}.length === 4 && typeof ${val}[0] === "number")`;
+		if (name === "simd.Mask32x4" || name === "Mask32x4")
+			return `(Array.isArray(${val}) && ${val}.length === 4 && typeof ${val}[0] === "boolean")`;
 		if (name === "error")
 			return `(typeof ${val} === "object" && ${val} !== null && typeof ${val}.Error === "function")`;
 		if (this.structNames.has(name))
