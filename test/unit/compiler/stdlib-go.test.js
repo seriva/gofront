@@ -831,3 +831,32 @@ func main() {
 		},
 	);
 });
+
+section("Go-source stdlib: slices.Repeat panics");
+
+test("slices.Repeat panics with Go's messages on both backends", async () => {
+	const out = await stdParity(`import (
+	"fmt"
+	"slices"
+)
+
+func try(count int) (msg string) {
+	msg = "ok"
+	defer func() {
+		if r := recover(); r != nil {
+			msg = fmt.Sprint(r)
+		}
+	}()
+	_ = slices.Repeat([]int{1, 2}, count)
+	return msg
+}
+
+func Run() string {
+	return try(2) + "|" + try(-1) + "|" + try(9223372036854775807)
+}
+`);
+	assertEqual(
+		out,
+		"ok|cannot be negative|the result of (len(x) * count) overflows",
+	);
+});

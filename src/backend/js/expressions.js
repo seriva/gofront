@@ -1619,6 +1619,11 @@ export const expressionGenMethods = {
 			return this._genTestingMethodCall(expr.func.field, expr);
 		if (recvName === "strings.Replacer") {
 			const recv = this.genExpr(expr.func.expr);
+			if (expr.func.field === "WriteString") {
+				const w = this.genExpr(expr.args[0]);
+				const s = this.genExpr(expr.args[1]);
+				return `((r,w,s) => { s = r ? r.Replace(s) : s; const x = w?.value ?? w; if (typeof x.WriteString === "function") return x.WriteString(s); if (typeof x._buf === "string") { x._buf += s; return [s.length, null]; } if (Array.isArray(x._buf)) { const bytes = new TextEncoder().encode(s); for (let i = 0; i < bytes.length; i++) x._buf.push(bytes[i]); return [bytes.length, null]; } if (typeof x.Write === "function") return x.Write(new TextEncoder().encode(s)); return [0, "strings.Replacer.WriteString: unsupported writer"]; })(${recv}, ${w}, ${s})`;
+			}
 			const arg = this.genExpr(expr.args[0]);
 			return `(${recv} ? ${recv}.Replace(${arg}) : ${arg})`;
 		}
