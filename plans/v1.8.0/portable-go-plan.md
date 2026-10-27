@@ -1,7 +1,7 @@
 # Portable Go Completion — Design Plan
 
 **Version:** v1.8.0
-**Status:** In Progress (2026-10-20); simplification phases 8–11 added 2026-10-27
+**Status:** Done (2026-10-27); simplification phases 8–11 added and completed 2026-10-27
 **Base branch:** main
 **Related:** Depends on v1.7.0 ([`json-preact-simd-plan.md`](../v1.7.0/json-preact-simd-plan.md)), including the JS `encoding/json` hardening on the v1.7.0 branch. Replaces the dropped v1.7.1 plans. Their stdlib items (`bufio`, `context`, `net/url`; built in Phase 4, removed again by D2), the WASM interior-pointer problem and the SIMD completion and SoA work move here. Boundary slice borrowing (a performance optimisation, not a completeness item) is not part of this plan. The v2.0.0 native Go engine ([`native-go-engine.md`](../v2.0.0/native-go-engine.md)) is shelved, so v1.8.0 is no longer a JS-engine feature freeze.
 
@@ -1605,12 +1605,12 @@ Removed packages and the D4 overlay members were added in this unreleased cycle,
 
 No gate-only tasks: `/dev-loop` runs the suites per phase and the Phase 10 tasks already record the benchmark numbers (D7, Task 10.4).
 
-- [ ] **Task 11.1 — Fix `fmt` `%p` parity on boxed scalar pointers** (carried over from the 2026-10-26 audit)
+- [x] **Task 11.1 — Fix `fmt` `%p` parity on boxed scalar pointers** (carried over from the 2026-10-26 audit)
   - Files: `src/backend/js/fmt-runtime.js`, `src/backend/js/fmt-types.js`, `src/backend/wasm/stdlib/core.js`, `test/unit/builtins/fmt-verbs.test.js`
   - Test (first, failing): `compileHybrid` parity test for `fmt.Sprintf("%p|%p|%p", &x, &s, nilPtr)` (`x` a boxed int local, `s` a struct).
   - Done when: identical output on JS and WASM.
 
-- [ ] **Task 11.2 — User docs, CHANGELOG and roadmap for the simplification**
+- [x] **Task 11.2 — User docs, CHANGELOG and roadmap for the simplification**
   - Files: `docs/go-compatibility.md`, `docs/hybrid-wasm.md`, `README.md`, `CHANGELOG.md`, `plans/roadmap.md`, this plan's header
   - Do: in `go-compatibility.md` and `hybrid-wasm.md`, describe the scalar-pointer rule for `wasm`/`both` (D5) with a short before/after example and update the `%p` row (Task 11.1); the package lists were already trimmed by Tasks 9.3 and 9.4. In `CHANGELOG.md` `## [Unreleased]`, drop the pruned packages and the D4 members (`unicode` range tables, `math.Gamma`/`Erf`, `sync.Map`/`Pool`, `fmt.Fscan*`, `strconv.*ToGraphic`) from the "Expanded standard library" entry, reword the pointer entry to say scalar field/element pointers are `js`-only, remove any JS-engine feature-freeze wording, and keep each breaking change as its own `**Breaking:**` entry. Mark the Phase 8–11 rows ✅ in the roadmap and set this plan's status to Done. (`plans/v2.0.0/native-go-engine.md` was already shelved on 2026-10-27.)
   - Test: `npm run check`
