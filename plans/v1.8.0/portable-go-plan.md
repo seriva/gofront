@@ -1573,7 +1573,7 @@ Removed packages and the D4 overlay members were added in this unreleased cycle,
 
 ### Phase 10: WASM backend simplification (D5–D7)
 
-- [ ] **Task 10.1 — Diagnostic for pointers into scalar storage in `wasm`/`both` (D5)**
+- [x] **Task 10.1 — Diagnostic for pointers into scalar storage in `wasm`/`both` (D5)**
   - Files: `src/typechecker/expressions.js` (unary `&` and the implicit `&` of pointer-receiver method calls), new `test/unit/types/pointers.test.js`, `test/unit/wasm/pointers.test.js`, `test/unit/language/parity-matrix.test.js`, `plans/follow-ups.md` (and any kept `stdlib/` file if it takes a scalar field/element/global address)
   - Test (write first, failing):
     - `both` and `wasm` packages, explicit: `&s.X` (int field), `&xs[i]` (`[]float64`), `&arr[i]` (`[4]int32`), `&s.A[1]` (`A [2]int`, the ledger's stale-pointer repro), `&g` with `var g int` at package level (the ledger's writes-nowhere repro) → `assertErrorContains(errors, "cannot take the address of a scalar field, element or package-level variable in a wasm package")`; the message suggests passing the parent struct pointer, the index, or copying to a local.
@@ -1582,22 +1582,24 @@ Removed packages and the D4 overlay members were added in this unreleased cycle,
     - Still compiles in `both`: `&items[i]` with `[]Item`, `&s.Inner` with struct-typed `Inner`, `&pkgStruct`, `&x` on a local (`var x int`), `x.Inc()` on a local `C`, `&T{}`.
   - Done when: tests pass; all kept `stdlib/` packages compile cleanly under D5; affected positive cases in `test/unit/wasm/pointers.test.js` and parity-matrix rows become negative cases; the two ledger entries named in D5 are deleted from `plans/follow-ups.md` in the same commit.
 
-- [ ] **Task 10.2 — Remove accessor-ref generation from the WASM backend**
+- [x] **Task 10.2 — Remove accessor-ref generation from the WASM backend**
   - Files: `src/backend/wasm/index.js`, `src/backend/wasm/emit.js`, `src/backend/wasm/emit-exprs.js`, `src/backend/wasm/emit-stmts.js`, `src/backend/wasm/boundary.js`, `src/backend/wasm/types.js`, `src/backend/wasm/wat.js`, `src/lower/escape.js`, `src/lower/ownership.js` (only accessor-related paths), `test/unit/wasm/wat.test.js`
   - Test: `node test/unit/run.js`
   - Done when: `grep -rn "structAccessorHelpers\|elemAccessorHelpers\|_accessorKind\|getAccType\|accInfo\|_emitSelectorAddressOf\|_emitIndexAddressOf" src/` is empty; unit tests pass.
 
-- [ ] **Task 10.3 — Remove array clone elision (D7)**
+- [x] **Task 10.3 — Remove array clone elision (D7)**
   - Files: `src/backend/wasm/emit.js`, `src/backend/wasm/emit-stmts.js`, `src/lower/` (array ownership tracking), `test/unit/wasm/arrays.test.js`
   - Do: always copy fixed-size arrays on assignment, parameter passing and return; delete clone-elision negative tests.
   - Test: `node test/unit/run.js`, `node test/e2e/perf/zero-alloc.js`, `npm run bench` (3 interleaved hybrid runs vs. pre-task `main`).
   - Done when: `grep -rn _arrayCopyElidable src/` is empty; zero-alloc passes; hybrid raycast median within 3%. If not, revert and record the numbers here instead.
+  - Landed: `bench` hybrid raycast, 3 interleaved runs vs. pre-task (rays/s): before 12445/12473/12330 (median 12445), after 12510/12439/12354 (median 12439), -0.05%; `app.wasm` 82672 B both. `arrayShareable`/`collectArrayAliasedVars` in `src/lower/ownership.js` and their `lower.test.js` cases removed with it.
 
 - [ ] **Task 10.4 — Merge WASM runtime panic helpers (D6)**
   - Files: `src/backend/wasm/index.js`, `src/backend/wasm/emit.js`, `test/unit/compiler/strict-panics.test.js`
   - Do: replace `__bounds_panic`, `__nil_panic` and `__slice_bounds_panic` (and `getBoundsPanicFuncIndex`/`getNilPanicFuncIndex`/the slice variant) with one `__runtime_panic` path taking the message; keep `__index_panic` and `__push_panic`.
   - Test: existing `strict-panics.test.js` parity cases unchanged (messages and `recover()` behaviour identical on both backends).
   - Done when: `grep -rn "__bounds_panic\|__nil_panic\|__slice_bounds_panic" src/` is empty; strict-panic tests pass; raycast `app.wasm` not larger than before.
+  - Gate failed, reverted (not landed): a `__runtime_panic(msg)` helper taking the interned message index (`__shared_len_panic` folded in too) passed `npm test` but grew the raycast hybrid `app.wasm` from 82672 B to 82848 B (+176 B): every panic site gains an `i32.const`, which outweighs the three removed helper bodies. Retry only with a call shape that adds no per-site bytes (e.g. one helper per message kept, or message selected inside the helper from a code the site already pushes).
 
 ### Phase 11: `%p` parity & user docs
 

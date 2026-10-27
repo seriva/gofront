@@ -211,9 +211,11 @@ func main() {
 	_ = binary.Write(&buf, binary.LittleEndian, s.F)
 	_ = binary.Write(&buf, binary.LittleEndian, s.I)
 
-	var s2 S
-	_ = binary.Read(&buf, binary.LittleEndian, &s2.F)
-	_ = binary.Read(&buf, binary.LittleEndian, &s2.I)
+	var f2 float32
+	var i2 int16
+	_ = binary.Read(&buf, binary.LittleEndian, &f2)
+	_ = binary.Read(&buf, binary.LittleEndian, &i2)
+	s2 := S{F: f2, I: i2}
 	fmt.Printf("%.2f %d\\n", s2.F, s2.I)
 
 	var buf2 bytes.Buffer
@@ -403,9 +405,13 @@ func scanToPtr(p *int) {
 }
 func main() {
 	s := S{x: 0}
-	fmt.Sscan("15", &s.x)
+	x := 0
+	fmt.Sscan("15", &x)
+	s.x = x
 	arr := []int{0, 0}
-	fmt.Sscan("25", &arr[1])
+	e := 0
+	fmt.Sscan("25", &e)
+	arr[1] = e
 	v := 0
 	scanToPtr(&v)
 	fmt.Printf("%d %d %d\\n", s.x, arr[1], v)
