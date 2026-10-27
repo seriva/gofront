@@ -56,7 +56,7 @@ Usage:
   gofront dev [dir] [options]    Start dev server with live reload (default port 3000)
   gofront build [dir] [options]  Build production bundle (-o <dir>, --pwa, --minify, --emit-wat, --release, --wasm-opt, --js-only)
   gofront check [dir|dir/...]    Type-check only (dir/... recurses into every package)
-  gofront test [dir|dir/...] [--dom]  Run unit tests (-v verbose, -run <regex>)
+  gofront test [dir|dir/...] [--dom]  Run unit tests (-v verbose, -run <regex>, -bench <regex>)
   gofront prep [dir] [--minify]  Copy static assets and bundle vendor dependencies
   gofront init [dir]             Scaffold a new GoFront project
   gofront <file.go>              Compile single file and print to stdout

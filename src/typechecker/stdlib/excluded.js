@@ -137,8 +137,17 @@ const EXCLUDED_PACKAGE_GROUPS = {
 		"structs",
 		"testing/synctest",
 		"unique",
+		"unsafe",
 		"weak",
 	],
+};
+
+const PACKAGE_GROUP_REASONS = {
+	deferred: "deferred; open an issue if you need it",
+	host: "needs host services (network, processes, signals or files) that GoFront does not provide",
+	reflection: "needs runtime reflection, which GoFront does not have",
+	runtime:
+		"needs the Go runtime (scheduler, reflection or raw memory), which GoFront does not have",
 };
 
 const TRIMMED_UNICODE_TABLES =
@@ -835,10 +844,10 @@ const REMOVED_PACKAGES = {
 export const EXCLUDED_STDLIB_PACKAGES = new Map(
 	Object.entries(REMOVED_PACKAGES),
 );
-for (const [reason, paths] of Object.entries(EXCLUDED_PACKAGE_GROUPS)) {
+for (const [group, paths] of Object.entries(EXCLUDED_PACKAGE_GROUPS)) {
 	for (const p of paths) {
 		if (!EXCLUDED_STDLIB_PACKAGES.has(p))
-			EXCLUDED_STDLIB_PACKAGES.set(p, reason);
+			EXCLUDED_STDLIB_PACKAGES.set(p, PACKAGE_GROUP_REASONS[group]);
 	}
 }
 

@@ -12,7 +12,7 @@ import {
 } from "../helpers.js";
 
 const SCALAR_ADDR_MSG =
-	"cannot take the address of a scalar field, element or package-level variable in a wasm package";
+	"cannot take the address of a field, element or package-level variable of type";
 
 section("WASM Pointers — Scalar Interior Addresses Are Rejected");
 

@@ -60,7 +60,7 @@ copies its arguments, so the loop usually belongs on the WASM side, or the data 
 
 ## Pointers in `wasm` and `both` packages
 
-Pointers to structs, to local variables and to struct-typed fields, elements and package-level variables work as in Go. A pointer to a number, string, bool, slice, map or `any` value that lives inside a struct field, a slice or array element, or a package-level variable is a compile error, because WebAssembly cannot point into the middle of a managed object:
+Pointers to structs, to local variables and to struct-typed fields, elements and package-level variables work as in Go. A pointer to any other value (a number, string, bool, slice, map, interface such as `error`, pointer, func or SIMD vector) that lives inside a struct field, a slice or array element, or a package-level variable is a compile error, because WebAssembly cannot point into the middle of a managed object:
 
 ```go
 //gofront:target wasm
@@ -70,8 +70,8 @@ type Body struct{ X int }
 
 func bump(p *int) { *p++ }
 
-// Rejected: cannot take the address of a scalar field, element or
-// package-level variable in a wasm package
+// Rejected: cannot take the address of a field, element or
+// package-level variable of type int in a wasm package
 func Step(b *Body) { bump(&b.X) }
 ```
 
@@ -83,7 +83,7 @@ func bumpBody(b *Body) { b.X++ }
 func Step(b *Body) { bumpBody(b) }
 ```
 
-The same rule covers `&xs[i]` on a `[]float64`, `&pkgVar` on a package-level `int`, and a pointer-receiver call on such an operand (`s.Count.Inc()` where `type Counter int` is the field type). Pointers to struct-typed fields and elements (`&items[i]` on a `[]Item`) are fine. `js` packages are unchanged and accept all of these.
+The same rule covers `&xs[i]` on a `[]float64`, `&pkgVar` on a package-level `int`, and a pointer-receiver call on such an operand (`s.Count.Inc()` where `type Counter int` is the field type). Pointers to struct- and array-typed fields and elements (`&items[i]` on a `[]Item`, `&g.Cells` on a `[4]int` field) are fine. `js` packages are unchanged and accept all of these.
 
 ---
 
@@ -155,7 +155,7 @@ Notable members per package:
 - `math` (including 24 constants, `Float64bits`/`Float64frombits`, `Float32bits`/`Float32frombits`, `Sinh`, `Cosh`, `Tanh`, `Remainder`), `math/bits` (including `Len*`, `Reverse*`, `ReverseBytes*`), `math/rand`
 - `cmp` (`Ordered`, `Compare`, `Less`, `Or`), `iter` (`Seq`, `Seq2`)
 - `errors` (`New`, `Is`, `Unwrap`, `As`, `Join`, `ErrUnsupported`)
-- `fmt` (`Sprintf`, `Printf`, `Println`, `Errorf`, `Fprintf`, `Fprintln`, `Fprint`, `Sscan`, `Sscanln`, `Sscanf`, including `%v`/`%+v`/`%#v`/`%T`/`%p` and `fmt.Stringer`)
+- `fmt` (`Sprintf`, `Printf`, `Println`, `Errorf`, `Fprintf`, `Fprintln`, `Fprint`, `Sscan`, `Sscanln`, `Sscanf`, including `%v`/`%+v`/`%#v`/`%T` and `fmt.Stringer`; `%p` prints Go's bad-verb form as in `js` packages)
 - `strings` (including `Builder`, `Reader`, `Replacer`, `Cut*`, `Split*`, `*Func`, `FieldsFunc`, `Lines`, `*Seq`), `bytes` (including `Buffer`, `Reader`, `FieldsFunc`, `Clone`, `Lines`, `*Seq`)
 - `strconv` (including `Unquote`, `QuotedPrefix`, `CanBackquote`, `Append*`, `Parse*`, `Format*`, `NumError`)
 - `unicode` (character classes and case conversion; range tables are not supported), `unicode/utf8`
@@ -167,7 +167,7 @@ Notable members per package:
 - `hash` (`Hash`, `Hash32`, `Hash64`), `crypto/rand` (`Reader`, `Read`), `crypto/sha256`
 - `encoding/binary` (`LittleEndian`, `BigEndian`, `Read`, `Write`, `Append*`, `Size`; no varints), `encoding/hex`, `encoding/base64`
 - `encoding/json` (`Marshal`, `MarshalIndent`, `Unmarshal`, `Valid`, `RawMessage`, `Number`, `Encoder`, `Decoder`, `Compact`, `Indent`, `HTMLEscape`; the codecs are generated Go linked into `app.wasm`)
-- `testing` (`T`, `B`, `M`, `TB`, `Run`, `Cleanup`, `Setenv`, `TempDir`), `gofront/shared`, and `gofront/simd` (experimental).
+- `testing` (`T`, `B`, `M`, `TB`, `Run`, `Cleanup`, `Setenv`), `gofront/shared`, and `gofront/simd` (experimental).
 
 Any other import, or JS-only API (`regexp`, `time.Sleep`, `os.Getenv`, `os.Args`, `os.Exit`), reports a targeted diagnostic
 (e.g. `'time.Sleep' is not yet available in wasm packages`) with a hint to keep the call in a JS package.
