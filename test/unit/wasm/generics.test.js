@@ -621,6 +621,48 @@ func main() { println(lib.Run()) }
 	assertEqual(res.lines.join("\n"), "42");
 });
 
+test("a recursive generic struct in a both package links into wasm and js", async () => {
+	const res = await compileHybridProject({
+		"util/util.go": `//gofront:target both
+package util
+
+type List[T any] struct {
+	V    T
+	Next *List[T]
+}
+
+func (l *List[T]) Len() int {
+	if l.Next == nil {
+		return 1
+	}
+	return 1 + l.Next.Len()
+}
+
+func Three() int {
+	l := &List[int]{V: 1, Next: &List[int]{V: 2, Next: &List[int]{V: 3}}}
+	return l.Len()
+}
+`,
+		"lib/lib.go": `//gofront:target wasm
+package lib
+
+import "../util"
+
+func Run() int { return util.Three() * 10 }
+`,
+		"main.go": `package main
+
+import (
+	"./lib"
+	"./util"
+)
+
+func main() { println(lib.Run() + util.Three()) }
+`,
+	});
+	assertEqual(res.lines.join("\n"), "33");
+});
+
 section("Generic zero values and type-parameter operators (Task 0.18)");
 
 // Builds \`lib\` once as \`both\` (JS code path) and once as \`wasm\`, prints
