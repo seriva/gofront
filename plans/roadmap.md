@@ -40,7 +40,7 @@ features (e.g. `plans/v1.8.0/`).
 | WASM language parity | High | ✅ Done | Range-over-func, generic named func types and type aliases, complex numbers, `min`/`max`, strict-mode checks, and predeclared name shadowing. |
 | Modern iterators (`iter`, `slices`, `maps`) | Medium | ✅ Done | `iter.Seq`, sequence helpers, and iterator range support across both backends. |
 | Go-source stdlib | High | ✅ Done | Pure packages in `stdlib/` compiled into the caller's target with strict numerics; reachability-based emission, so unused imports cost 0 bytes. |
-| Member completion | Medium | ✅ Done | `fmt.Sprint`/`Stringer`/`%T`/`%#v`, `os.Stdout` as `io.Writer`, `sort.Sort`/`Interface`, `utf8` byte API, `strconv.NumError`, `math`/`bits`/`time` gaps (incl. `time.Time` JSON), `sync.Map`/`Pool` (removed again by Phase 9 Task 9.4), `testing` additions. |
+| Member completion | Medium | ✅ Done | `fmt.Sprint`/`Stringer`/`%T`/`%#v`, `os.Stdout` as `io.Writer`, `sort.Sort`/`Interface`, `utf8` byte API, `strconv.NumError`, `math`/`bits`/`time` gaps (`time.Time` JSON on WASM only, see follow-ups), `sync.Map`/`Pool` (removed again by Phase 9 Task 9.4), `testing` additions. |
 | Compile-time JSON everywhere | High | ✅ Done | Tag-driven compile-time codec generation on JS and WASM. |
 | SIMD completion & promotion gate | High | ✅ Experimental | Value semantics, comparisons, shuffles, slice helpers; experimental status retained. |
 | Coverage manifest & conformance | Medium | ✅ Done → retired (Phase 8) | Manifest from go1.26 `api/*.txt`, signature-checked coverage gate, generated docs, 55 real-Go conformance fixtures. Built in Phases 1–7; retired by D1. |
