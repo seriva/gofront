@@ -573,7 +573,10 @@ export class TypeChecker {
 				if (!base || base.typeParams || base.isAlias) break;
 				target = base.type;
 			}
-			if (target?.kind === "StructType")
+			// A struct written in place is already this declaration's own copy;
+			// cloning it would also choke on an AST a previous target pass
+			// annotated with cycles.
+			if (target?.kind === "StructType" && target !== d.type)
 				d.type = JSON.parse(JSON.stringify(target));
 		}
 	}

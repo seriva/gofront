@@ -1143,6 +1143,10 @@ func Nil() float32 {
 }
 
 func Pad(n int) int { return simd.Pad4(n) }
+
+func PadConst() int { return simd.Pad4(5) }
+
+func PadLen() int { return simd.Pad4(len(Xs)) + simd.Pad4(len(Xs)+1) }
 `,
 				"main.go": `package main
 
@@ -1152,7 +1156,17 @@ func main() { _ = sim.Fill }
 `,
 			},
 			{
-				exports: ["Fill", "AddAt", "Sub", "Bad", "BadStore", "Nil", "Pad"],
+				exports: [
+					"Fill",
+					"AddAt",
+					"Sub",
+					"Bad",
+					"BadStore",
+					"Nil",
+					"Pad",
+					"PadConst",
+					"PadLen",
+				],
 			},
 		);
 		const m = res.mod;
@@ -1169,5 +1183,7 @@ func main() { _ = sim.Fill }
 		assertEqual(Number(m.Pad(1)), 4);
 		assertEqual(Number(m.Pad(4)), 4);
 		assertEqual(Number(m.Pad(5)), 8);
+		assertEqual(Number(m.PadConst()), 8);
+		assertEqual(Number(m.PadLen()), 24);
 	});
 }

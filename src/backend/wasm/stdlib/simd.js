@@ -361,15 +361,13 @@ export class SimdEmitter {
 		this.pushInstruction({ op: "v128.store", align: 2, offset: 0 });
 	}
 
-	// Pad4(n) = (n + 3) &^ 3 in the width of n.
+	// Pad4(n) = (n + 3) &^ 3; a Go int, so always computed as i64.
 	_emitSimdPad4(nNode) {
-		const wide = !this._isI32IndexExpr(nNode);
-		const t = wide ? "i64" : "i32";
-		this.emitExpr(nNode, t);
-		this.pushInstruction({ op: `${t}.const`, value: wide ? 3n : 3 });
-		this.pushInstruction(`${t}.add`);
-		this.pushInstruction({ op: `${t}.const`, value: wide ? -4n : -4 });
-		this.pushInstruction(`${t}.and`);
+		this.emitExpr(nNode, "i64");
+		this.pushInstruction({ op: "i64.const", value: 3n });
+		this.pushInstruction("i64.add");
+		this.pushInstruction({ op: "i64.const", value: -4n });
+		this.pushInstruction("i64.and");
 	}
 
 	// LoadF32x4Slice (valNode null) and StoreF32x4Slice on a []float32: a
