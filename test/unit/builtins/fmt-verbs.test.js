@@ -59,6 +59,19 @@ test("%p of a pointer prints the bad-verb form with its pointee", () => {
 	);
 });
 
+test("%p of boxed scalar pointers, struct pointers and nil agree on both backends", () => {
+	assertEqual(
+		parity(
+			`x := 5
+	s := &P{1}
+	var nilPtr *int
+	return fmt.Sprintf("%p|%p|%p", &x, s, nilPtr)`,
+			"type P struct{ X int }",
+		),
+		"%!p(*int=0x1)|%!p(*main.P=&{1})|%!p(<nil>)",
+	);
+});
+
 section("fmt %T and %#v");
 
 test("%T uses the static type of each operand", () => {
