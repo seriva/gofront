@@ -217,15 +217,51 @@ function emitterMember(pkg, name) {
 	return t === undefined ? null : { t, owner };
 }
 
+// The method or field `member` of type `t` as Go promotes it: the shallowest
+// depth through embedded fields wins; two hits at the same depth are
+// ambiguous and not promoted.
+function promotedMember(t, member) {
+	let level = [t];
+	for (let depth = 0; level.length > 0 && depth < 6; depth++) {
+		const hits = [];
+		const next = [];
+		for (const x of level) {
+			const direct = memberOf(x, member);
+			if (direct !== undefined) hits.push(direct);
+			const base = x?.kind === "pointer" ? x.base : x;
+			const struct = base?.kind === "named" ? base.underlying : base;
+			if (struct?.kind === "struct") next.push(...(struct._embeds ?? []));
+		}
+		if (hits.length === 1) return hits[0];
+		if (hits.length > 1) return undefined;
+		level = next;
+	}
+	return undefined;
+}
+
 function goSourceMember(pkg, name) {
 	const src = goSource(pkg);
-	if (!src?.names.has(name)) return null;
+	if (!src) return null;
 	const { checker: c } = src;
 	const [top, member] = name.split(".");
-	const owner = c.types.get(top) ?? null;
-	if (member === undefined)
+	if (member === undefined) {
+		if (!src.names.has(name)) return null;
+		const owner = c.types.get(top) ?? null;
 		return { t: c.globals.symbols.get(top) ?? owner, owner: null };
-	return { t: memberOf(owner, member), owner };
+	}
+	if (!src.names.has(top)) return null;
+	const owner = c.types.get(top) ?? null;
+	if (!src.names.has(name) && !owner) return null;
+	// An embedded field's own name is only a member when the package indexes
+	// it (`bufio.ReadWriter.Reader` is not usable yet: the checker rejects it).
+	const struct = owner?.kind === "named" ? owner.underlying : owner;
+	const embeddedName = (struct?.kind === "struct" ? struct._structFields : [])
+		?.filter((f) => f.embedded)
+		.map((f) => f.astType?.name ?? f.astType?.base?.name)
+		.includes(member);
+	if (embeddedName && !src.names.has(name)) return null;
+	const t = promotedMember(owner, member);
+	return t === undefined ? null : { t, owner };
 }
 
 const findMember = (pkg, name) =>
@@ -605,6 +641,34 @@ test("interface method sets are indexed, embedded interfaces expanded", () => {
 		const e = entryOf.get(`${pkg}.${name}`);
 		assertEqual(signatureOf(e, found), e.signature);
 	}
+});
+
+test("promoted members and aliased types are indexed", () => {
+	if (!findMember("bufio", "ReadWriter.ReadString"))
+		throw new Error("bufio.ReadWriter.ReadString (promoted from *Reader)");
+	if (!findMember("encoding/json", "SyntaxError.Offset"))
+		throw new Error("json.SyntaxError.Offset (alias into internal/jsonrt)");
+	if (findMember("bufio", "ReadWriter.Reader"))
+		throw new Error("bufio.ReadWriter.Reader is a checker bug, not a member");
+});
+
+test("promotion: shallowest wins, equal depth is ambiguous", () => {
+	const fn = { kind: "func", params: [], returns: [] };
+	const named = (name, methods, embeds = []) => ({
+		kind: "named",
+		name,
+		methods: new Map(methods),
+		underlying: { kind: "struct", fields: new Map(), _embeds: embeds },
+	});
+	const a = named("A", [["M", fn]]);
+	const b = named("B", [["M", fn]]);
+	const deep = named("Deep", [["N", fn]]);
+	const mid = named("Mid", [], [deep]);
+	const ambiguous = named("Amb", [], [a, b]);
+	const shadow = named("Shadow", [["N", { ...fn, shadow: true }]], [mid]);
+	assertEqual(promotedMember(ambiguous, "M"), undefined);
+	assertEqual(promotedMember(named("Via", [], [mid]), "N"), fn);
+	assertEqual(promotedMember(shadow, "N").shadow, true);
 });
 
 test("the known gaps only name manifest entries", () => {

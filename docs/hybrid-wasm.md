@@ -103,7 +103,7 @@ Members of each Go package that `wasm` and `both` packages can use today, out of
 
 | Package | Available | Not yet |
 |---|---|---|
-| `bufio` | 57 of 79 | 22 |
+| `bufio` | 77 of 79 | 2 |
 | `bytes` | 78 of 99 | 21 |
 | `cmp` | 4 of 4 | 0 |
 | `container/heap` | 11 of 11 | 0 |
@@ -122,7 +122,7 @@ Members of each Go package that `wasm` and `both` packages can use today, out of
 | `encoding/binary` | 13 of 33 | 20 |
 | `encoding/csv` | 32 of 32 | 0 |
 | `encoding/hex` | 7 of 15 | 8 |
-| `encoding/json` | 28 of 68 | 40 |
+| `encoding/json` | 49 of 68 | 19 |
 | `errors` | 6 of 7 | 1 |
 | `fmt` | 21 of 43 | 22 |
 | `hash` | 32 of 32 | 0 |
