@@ -1778,65 +1778,6 @@ export class FunctionEmitter {
 		if (pkgName !== undefined && name !== pkgName) return false;
 		return !this.resolveLocal(name) && !this.mod.resolveGlobal(name);
 	}
-
-	emitAccessorHelper(fn) {
-		const kind = fn._accessorKind;
-		if (kind === "struct_get") {
-			this.pushInstruction({ op: "local.get", index: 0 });
-			this.pushInstruction({
-				op: "ref.cast",
-				typeIndex: fn._structInfo.typeIndex,
-				typeName: fn._structInfo.name,
-			});
-			this.pushInstruction({
-				op: "struct.get",
-				typeIndex: fn._structInfo.typeIndex,
-				typeName: fn._structInfo.name,
-				fieldIndex: fn._fieldIndex,
-			});
-			this.pushInstruction("return");
-		} else if (kind === "struct_set") {
-			this.pushInstruction({ op: "local.get", index: 0 });
-			this.pushInstruction({
-				op: "ref.cast",
-				typeIndex: fn._structInfo.typeIndex,
-				typeName: fn._structInfo.name,
-			});
-			this.pushInstruction({ op: "local.get", index: 2 });
-			this.pushInstruction({
-				op: "struct.set",
-				typeIndex: fn._structInfo.typeIndex,
-				typeName: fn._structInfo.name,
-				fieldIndex: fn._fieldIndex,
-			});
-			this.pushInstruction("return");
-		} else if (kind === "elem_get") {
-			this.pushInstruction({ op: "local.get", index: 0 });
-			this.pushInstruction({
-				op: "ref.cast",
-				typeIndex: fn._arrInfo.typeIndex,
-			});
-			this.pushInstruction({ op: "local.get", index: 1 });
-			this.pushInstruction({
-				op: "array.get",
-				typeIndex: fn._arrInfo.typeIndex,
-			});
-			this.pushInstruction("return");
-		} else if (kind === "elem_set") {
-			this.pushInstruction({ op: "local.get", index: 0 });
-			this.pushInstruction({
-				op: "ref.cast",
-				typeIndex: fn._arrInfo.typeIndex,
-			});
-			this.pushInstruction({ op: "local.get", index: 1 });
-			this.pushInstruction({ op: "local.get", index: 2 });
-			this.pushInstruction({
-				op: "array.set",
-				typeIndex: fn._arrInfo.typeIndex,
-			});
-			this.pushInstruction("return");
-		}
-	}
 }
 
 function copyMethods(target, source) {

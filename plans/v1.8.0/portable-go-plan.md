@@ -1582,7 +1582,7 @@ Removed packages and the D4 overlay members were added in this unreleased cycle,
     - Still compiles in `both`: `&items[i]` with `[]Item`, `&s.Inner` with struct-typed `Inner`, `&pkgStruct`, `&x` on a local (`var x int`), `x.Inc()` on a local `C`, `&T{}`.
   - Done when: tests pass; all kept `stdlib/` packages compile cleanly under D5; affected positive cases in `test/unit/wasm/pointers.test.js` and parity-matrix rows become negative cases; the two ledger entries named in D5 are deleted from `plans/follow-ups.md` in the same commit.
 
-- [ ] **Task 10.2 — Remove accessor-ref generation from the WASM backend**
+- [x] **Task 10.2 — Remove accessor-ref generation from the WASM backend**
   - Files: `src/backend/wasm/index.js`, `src/backend/wasm/emit.js`, `src/backend/wasm/emit-exprs.js`, `src/backend/wasm/emit-stmts.js`, `src/backend/wasm/boundary.js`, `src/backend/wasm/types.js`, `src/backend/wasm/wat.js`, `src/lower/escape.js`, `src/lower/ownership.js` (only accessor-related paths), `test/unit/wasm/wat.test.js`
   - Test: `node test/unit/run.js`
   - Done when: `grep -rn "structAccessorHelpers\|elemAccessorHelpers\|_accessorKind\|getAccType\|accInfo\|_emitSelectorAddressOf\|_emitIndexAddressOf" src/` is empty; unit tests pass.
