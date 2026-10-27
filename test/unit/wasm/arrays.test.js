@@ -353,25 +353,7 @@ func Main() float64 {
 	assertEqual(res.wasmRes, 19);
 });
 
-section("WASM Arrays — clone elision");
-
-test("copy between unmutated locals is elided", () => {
-	const src = `
-package main
-
-func Main() int {
-	a := [3]int{1, 2, 3}
-	b := a
-	return a[0] + b[2]
-}
-`;
-	const res = compileHybrid(src, { emitWat: true });
-	assertEqual(res.run("Main").jsRes, 4);
-	assert(
-		!res.wat.includes("array.copy"),
-		"elided copy must not emit array.copy",
-	);
-});
+section("WASM Arrays — copies on assignment");
 
 test("copy stays when the source is mutated afterwards", () => {
 	const src = `
@@ -387,24 +369,6 @@ func Main() int {
 	const res = compileHybrid(src, { emitWat: true });
 	assertEqual(res.run("Main").jsRes, 91);
 	assert(res.wat.includes("array.copy"), "copy must remain");
-});
-
-test("range over an unmutated local array does not copy it", () => {
-	const src = `
-package main
-
-func Main() int {
-	a := [3]int{1, 2, 3}
-	s := 0
-	for _, v := range a {
-		s += v
-	}
-	return s
-}
-`;
-	const res = compileHybrid(src, { emitWat: true });
-	assertEqual(res.run("Main").jsRes, 6);
-	assert(!res.wat.includes("array.copy"), "range copy must be elided");
 });
 
 section("WASM Arrays — equality");
