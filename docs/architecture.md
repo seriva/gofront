@@ -104,7 +104,7 @@ reported as `pkg [js]` and `pkg [wasm]` — ensuring both backends produce ident
 
 ---
 
-## Standard library & Conformance
+## Standard library
 
 ### Go-source standard library (`stdlib/`)
 
