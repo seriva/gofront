@@ -2,17 +2,7 @@
 	"missing": {
 		"bufio": ["ReadWriter.Reader", "ReadWriter.Writer"],
 		"bytes": [
-			"Compare",
-			"ContainsFunc",
-			"CutPrefix",
-			"CutSuffix",
-			"EqualFold",
 			"ErrTooLarge",
-			"IndexAny",
-			"IndexFunc",
-			"IndexRune",
-			"LastIndexAny",
-			"LastIndexFunc",
 			"MinRead",
 			"Runes",
 			"SplitAfter",
