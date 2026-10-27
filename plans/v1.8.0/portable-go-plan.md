@@ -53,11 +53,17 @@ A Go package or member is **in scope** when it can be implemented as ordinary co
 | `sync` | `Mutex`, `RWMutex`, `Once`, `OnceFunc`, `OnceValue`, `OnceValues`, `WaitGroup`, `Map`, `Pool` as single-threaded shims | — | `Cond` (blocking wait) |
 | `os` | `Stdout`, `Stderr` as `io.Writer` over the console import; `Stdin` as an `io.Reader` that always returns `io.EOF` | `Args`, `Getenv`, `Exit` | files, processes, signals |
 | `testing` | `T` (existing members plus `Cleanup`, `Context`, `Setenv`, `Deadline`), `B` (`N`, `ResetTimer`, `ReportAllocs`, `Loop`), `M`/`TestMain`, `Short`, `Verbose` | — | `TempDir`, `Chdir`, `Parallel` is a no-op, fuzzing |
-| `fmt` | Everything, including `Fscan*` over `io.Reader`, `Formatter`, `GoStringer`, `State` | — | — |
+| `fmt` | Everything, including `Fscan*` over `io.Reader`, `Scan*` over `os.Stdin`, `Formatter`, `GoStringer`, `State` | — | `Scanner`/`ScanState` (deferred: custom-scan dispatch in both `Sscan*` emitters) |
 | `strconv` | Everything, including `ParseComplex`/`FormatComplex` (after complex lowering) | — | — |
 | `unicode` | Predicate functions (`Is*`), `To*`, `SimpleFold`, `In`/`Is` over the **general-category** tables (`Letter`, `Digit`, `Space`, `Upper`, `Lower`, `Punct`, `Symbol`, `Mark`, `Number`), plus `MaxRune`/`ReplacementChar` | — | Script tables (`Han`, `Latin`, …), `Properties`, `CaseRanges`, `SpecialCase` (table size) |
 | `log` | `Logger`, `New`, `Default`, `Print*`, `Fatal*`, `Panic*`, `SetFlags`, `SetPrefix`, `SetOutput`, `Flags`, `Prefix`, `Writer`, flag constants | — | `Lshortfile`/`Llongfile` flags are accepted and print `???:0` (no caller metadata) |
 | `math/rand/v2` | Top-level functions, `Rand`, `PCG`, `Source`, `N` | — | `ChaCha8` (deferred, size) |
+| `math/rand` | The top-level functions shipped before v1.8.0 (`Seed`, `Intn`, `Float64`, …) | — | `Rand`, `Source`, `Source64`, `Zipf`, `New`, `NewSource`, `NewZipf`, `ExpFloat64`, `NormFloat64`, `Uint32`, `Uint64` (deferred: legacy API, `math/rand/v2` covers it) |
+| `math` | Everything else | — | `J0`, `J1`, `Jn`, `Y0`, `Y1`, `Yn` (deferred, size) |
+| `bytes`, `strings` | Everything else | — | `ToUpperSpecial`, `ToLowerSpecial`, `ToTitleSpecial` (deferred: need `unicode.SpecialCase`) |
+| `regexp` | — | Everything else | `CompilePOSIX`, `MustCompilePOSIX`, `Regexp.Longest` (host: JS `RegExp` has no leftmost-longest mode) |
+| `encoding/json` | Everything else | — | `UnsupportedValueError.Value` (reflection: `reflect.Value`) |
+| `path/filepath` | Everything, with Unix semantics (`/`, `:`; no volumes) | — | — |
 
 ---
 
@@ -141,6 +147,60 @@ Probed on `feat/portable-go` at `a697b9b`. The reviews of PRs #28–#40 listed b
 | `unicode.IsSpace` and `bytes.Index` | `unicode.IsSpace` differs from Go: JS uses `/\s/` (misses U+0085, matches U+FEFF), WASM only tests 9–13 and 32. `strings.Fields`/`FieldsSeq` follow it. `bytes.Index([]byte("héllo"), []byte("l"))` is `2` in JS (Go and WASM `3`). Assigned to [Tasks 3.3b and 3.4c](#phase-32-io-sort-unicode-and-strconv-completion). | [`unicode.js`](../../src/backend/js/stdlib/unicode.js) line 13, [`pure.js`](../../src/backend/wasm/stdlib/pure.js) line 43. P16, P48 (PR #38) |
 
 ---
+
+### Full-branch audit re-probe (2026-10-26)
+
+Probed on `feat/portable-go-phase-8` at `30324c2` (Task 8.1 landed, unmerged) and, for regressions, on `feat/portable-go` at `37fb2b2`. Probes ran from `.probes/` (deleted). Use-probe = `var _ pkg.T` (type), `_ = pkg.X` (func/const/var), `func use(x [*]pkg.T) { _ = x.M }` (method/field), compiled with `compile` (emitter packages) or `compileDir` (Go-source packages); "compiles" = no errors.
+
+| # | Area | Finding | Evidence & probe |
+|---|---|---|---|
+| 1 | Gate counts | `gaps.missing` 361 members / 24 packages; `gaps.wasm` 9 / 2 (`io.LimitedReader` ×4, `testing.Benchmark`/`Init`/`Short`/`Testing`/`Verbose`); `gaps.signature` 16; `gaps.exclusion` 0. | Count over `test/unit/types/stdlib-coverage.gaps.json`. |
+| 2 | Unindexed members | **110 of the 361 compile today.** Interface methods (`io` 30, `hash` 27, `container/heap` 5, `sort` 3, `context` 3, `math/rand/v2` 1): `collectDecl` ignores `InterfaceType` method lists. `bufio.ReadWriter` promoted methods (20): no embedding promotion in `goSourceMember`. `encoding/json` error/`Number` members (21): they are aliases (`type SyntaxError = jsonrt.SyntaxError`, `stdlib/encoding/json/errors.go`) the gate does not follow into `internal/jsonrt`. | Use-probe per `gaps.missing` entry → 110 compile, 251 fail. Scheduled: Tasks 8.2–8.3; Task 8.4 makes the probe part of the gate. |
+| 3 | Absent members | **251 fail** with `No member '…' in namespace …`, `Unknown type '…'` or `No field '…'`: `bytes` 21, `strings` 7, `slices` 3, `sort` 1, `errors` 1, `strconv` 2, `crypto/rand` 1, `crypto/sha256` 3, `encoding/base64` 7, `encoding/binary` 20, `encoding/hex` 8, `bufio` 2, `io` 6, `path/filepath` 10, `math` 17, `time` 34, `encoding/json` 19, `fmt` 22, `regexp` 34, `math/rand` 33. | Same probe. Triage below. |
+| 4 | Plan claims | Task 3.7 assigned every row-3 member by name; its `Landed:` covers only `sync.RWMutex.RLocker`. Task 3.4a `Landed:` lists `Lgamma`, `Erfc`, `J0`, `J1`, `Jn`, `Y0`, `Y1`, `Yn`: each is `No member '…' in namespace math`. Task 7.4 and the roadmap say "0 gaps in covered packages". | `_ = math.Lgamma` etc.; corrections added to those tasks. |
+| 5 | `bufio.ReadWriter.Reader` | `func use(x bufio.ReadWriter) { _ = x.Reader }` → `No field 'Reader' on bufio.ReadWriter`; the same shape with a type declared in the user package compiles. Checker bug for embedded-field names of Go-source types seen from an importer. | Use-probe; user-package probe `type RW struct{ *R }; _ = rw.R` → no errors. Task 11.1. |
+| 6 | `fmt.GoStringer` | `%#v` ignores `GoString()`: `type T struct{A int}; func (T) GoString() string { return "G" }; fmt.Sprintf("%#v", T{1})` → JS `main.T{A:1}`, Go `G`. Both docs list `fmt.GoStringer` as supported. | `compile` + run. Task 14.3. |
+| 7 | `fmt.Formatter` | `func (T) Format(f fmt.State, c rune)` → `Unknown type 'fmt.State'`. Scope rule promises `Formatter`, `GoStringer`, `State`. | `compile`. Tasks 14.1–14.2. |
+| 8 | `json.Marshaler` | User `MarshalJSON` already dispatches (`json.Marshal(T{})` → `42`); only the `Marshaler`/`Unmarshaler` interface declarations are missing. | `compile` + run. Task 13.1. |
+| 9 | Task 8.1: runtime manifest read | `src/typechecker/stdlib/excluded.js` does `readFileSync(new URL("../../../stdlib/manifest.json"))` (377,470 B) and `JSON.parse` at import: the first `node:` import under `src/typechecker/`. `import("./src/typechecker/index.js")`: 26.1 ms vs 15.1 ms on the epic branch. `repo-structure-plan.md` Task 7.2 drops `stdlib/manifest.json` from the npm package, so the published compiler would throw `ENOENT` on import. | `grep -rn "node:fs" src/typechecker/` → only `excluded.js`; `performance.now()` around the import on both branches. Task 17.1. |
+| 10 | Task 8.1 false positive: user type | `type Context struct{}; func (Context) Done() int { return 1 }; c.Done()` → `Context.Done is not available: Done() returns a channel; …`. Epic branch: compiles. Cause: `_checkExcludedSelectorExpr` runs before member lookup and keys on the display name. | `compile`. Task 17.2. |
+| 11 | Task 8.1 false positive: shadowed package | `main.go` imports local `./rand` (with `func Prime() int`), `other.go` imports `_ "crypto/rand"`: `rand.Prime()` → `rand.Prime is not available: needs math/big`. Epic branch: compiles. Cause: `_checkExcludedNamespaceMember` iterates every file's `_importedPaths` and matches by package identifier; keys are also aliased by identifier (`rand.Int` is excluded because `crypto/rand.Int` is). | `compileDir`. Tasks 17.1–17.2. |
+| 12 | Task 8.1 false positive: raw string | ``var s = `\n//go:embed x\n` `` → `//go:embed is not supported yet`. Epic branch: compiles. Cause: `_checkEmbedLines` regex over raw source lines. | `compile`. Task 17.3. |
+| 13 | `%p` parity | `x := 42; fmt.Sprintf("%p", &x)` in a `both` package: JS `%!p(main.Object=0x1)`, WASM `%!p(struct { value interface {}; __p bool; __box bool }=0x1)`. `&S{1}`, nil `*S` and `[]int` agree (`%!p(*main.S=&{1})`, `%!p(<nil>)`, `%!p([]int=[1])`). | `compileHybrid(...).run("Main")` → return mismatch. Task 18.1. |
+| 14 | Doc drift | Rough lint of the hand-written "Notable members" table in `language-support.md` (capitalised backticked names per package row vs manifest status and `gaps.missing`): 107 hits, e.g. `bytes.Compare`, `strconv.FormatComplex`, `sort.Find`, `math.Lgamma`, `math.J0`, `time.Until`, `slices.Repeat`, `unicode.L`/`Ll`/`Lu` (`excluded:deferred`: only `Letter`, `Digit`, … are in), `sync.Cond`, `crypto/rand.Prime`, `testing.T.TempDir`. Some hits are prose mentions of excluded names (`iter.Pull`) or v1/v2 mixing in the `math/rand` row. `hybrid-wasm.md`'s bullet list claims `fmt.GoStringer` and the short category tables. Both lists sit outside the generated `<!-- stdlib:begin/end -->` block. | Lint script over `docs/language-support.md:152-186`. Task 18.2. |
+| 15 | Plan links in docs | `scripts/docs-stdlib.js:95,121` put `../plans/v1.8.0/portable-go-plan.md` links into the generated tables (AGENTS.md **Docs**: no plan references). | `grep -n "plans/" scripts/docs-stdlib.js docs/*.md`. Task 18.3. |
+| 16 | v2.0.0 freeze | `plans/v2.0.0/native-go-engine.md`: "The v1.8.0 coverage manifest (`stdlib/manifest.json`) is the frozen stdlib surface"; new stdlib waits for v2.1+. Anything excluded here stays excluded through v2.0.0. | Plan text. Drives the triage: defer only with a reason a v2.1 plan can revisit. |
+
+**Triage of the 361 `gaps.missing` and 9 `gaps.wasm` entries.** Every member is in exactly one row; counts add up to 361 + 9.
+
+| Family | Members | Verdict | Where |
+|---|---|---|---|
+| Interface methods (`io`, `hash`, `container/heap`, `sort`, `context`, `math/rand/v2`) | 69 | Implemented, unindexed | Task 8.2 |
+| `bufio.ReadWriter` promoted methods; `encoding/json` aliased error/`Number` members | 41 | Implemented, unindexed | Task 8.3 |
+| `bytes` search/compare/split/trim/`Title`/`Runes`/`ErrTooLarge`/`MinRead` | 18 | Implement | Tasks 9.1–9.2 |
+| `strings` `Clone`/`Compare`/`ContainsFunc`/`Replacer.WriteString`; `slices` `CompareFunc`/`EqualFunc`/`Repeat` | 7 | Implement | Task 9.3 |
+| `sort.Find`, `errors.AsType` | 2 | Implement | Task 9.4 |
+| `encoding/binary` (varints, `AppendByteOrder`, `NativeEndian`, `Append`/`Encode`/`Decode`) | 20 | Implement | Tasks 10.1–10.2 |
+| `encoding/hex`, `encoding/base64` streams, append forms, error types | 15 | Implement | Tasks 10.3–10.4 |
+| `crypto/sha256` SHA-224, `crypto/rand.Text` | 4 | Implement | Task 10.5 |
+| `bufio.ReadWriter.Reader`/`Writer` | 2 | Checker bug | Task 11.1 |
+| `io.CopyBuffer`, `OffsetWriter` (6); `io.LimitedReader` in WASM (4, `wasm`) | 6 + 4 | Implement | Task 11.2 |
+| `testing.Short`/`Verbose`/`Testing`/`Init`/`Benchmark` in WASM | 5 (`wasm`) | Implement | Task 11.3 |
+| `strconv.FormatComplex`/`ParseComplex` | 2 | Implement (Scope rule) | Task 11.4 |
+| `path/filepath` | 10 | Implement, Unix semantics | Task 11.5 |
+| `math` `Acosh`, `Asinh`, `Atanh`, `Ilogb`, `Logb`, `Pow10`, `Sincos`, `Erfc`, `Erfinv`, `Erfcinv`, `Lgamma` | 11 | Implement (claimed by Task 3.4a) | Tasks 12.1–12.2 |
+| `time` layouts, `Until`, `ParseInLocation`, `UnixMicro`, `ParseError`, encodings, zone queries | 34 | Implement (Scope rule: parsing/formatting is pure) | Tasks 12.3–12.5 |
+| `encoding/json` `Marshaler`/`Unmarshaler`, `RawMessage` methods, deprecated errors, `Token`/`Delim` | 18 | Implement | Phase 13 |
+| `fmt` `Formatter`, `State` (+4), `FormatString`, `GoStringer` (+1), `Scan`/`Scanf`/`Scanln` | 13 | Implement (Scope rule) | Phase 14 |
+| `regexp` `[]byte` forms, index variants, introspection, templates, readers, text marshaling | 31 | Implement (JS-only) | Phase 15 |
+| **Excluded:** `math/rand` v1 `Rand`, `Source`, `Source64`, `Zipf` (+ methods), `New`, `NewSource`, `NewZipf`, `ExpFloat64`, `NormFloat64`, `Uint32`, `Uint64` | 33 | `excluded:deferred`, note `legacy API; use math/rand/v2` | Task 16.1 |
+| **Excluded:** `math.J0`, `J1`, `Jn`, `Y0`, `Y1`, `Yn` | 6 | `excluded:deferred`: ~1,150 lines of ported Go source (`j0.go`, `j1.go`, `jn.go`) for functions frontend code rarely calls | Task 16.1 |
+| **Excluded:** `bytes`/`strings` `ToUpperSpecial`, `ToLowerSpecial`, `ToTitleSpecial` | 6 | `excluded:deferred`: they take `unicode.SpecialCase`, itself deferred (table size) | Task 16.1 |
+| **Excluded:** `fmt.Scanner`, `Scanner.Scan`, `ScanState` (+6) | 9 | `excluded:deferred`: user `Scan` methods need dispatch inside both `Sscan*` emitters; reading from `os.Stdin` (always EOF) gains nothing in a frontend | Task 16.1 |
+| **Excluded:** `regexp.CompilePOSIX`, `MustCompilePOSIX`, `Regexp.Longest` | 3 | `excluded:host`: JS `RegExp` has no leftmost-longest mode | Task 16.1 |
+| **Excluded:** `json.UnsupportedValueError.Value` | 1 | `excluded:reflection`: its type is `reflect.Value` | Task 16.1 |
+
+Totals: 110 unindexed + 193 implemented + 58 excluded = 361 `missing`; 9 `wasm` implemented.
 
 ## Out of Scope
 
@@ -1180,6 +1240,7 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
   - Test: conformance fixtures `math/extra.go`, `bits/wide.go`.
   - Done when: fixtures match Go.
   - Landed: implemented `math` and `math/bits` gaps across JS and WASM backends, including `Gamma`, `Lgamma`, `Erf`, `Erfc`, `J0`, `J1`, `Jn`, `Y0`, `Y1`, `Yn`, `FMA`, `RoundToEven`, `Nextafter`, `Nextafter32`, and exact 64-bit `bits` operations (`Add64`, `Sub64`, `Mul64`, `Div64`, `Rem64`, `LeadingZeros`, `TrailingZeros`, `OnesCount`, `Len`, `RotateLeft`, `Reverse`). Added conformance fixtures `test/conformance/math/extra.go` and `test/conformance/bits/wide.go`.
+  - Correction (2026-10-26 audit): `Lgamma`, `Erfc`, `J0`, `J1`, `Jn`, `Y0`, `Y1`, `Yn` are not implemented (`No member '…' in namespace math`). `Lgamma` and `Erfc` are scheduled in Task 12.2; the Bessel functions are excluded (deferred) in Task 16.1.
 
 - [x] **Task 3.4b — `time` member completion**
   - Files: `src/typechecker/stdlib/core.js`, `src/backend/js/stdlib/time.js`, `src/backend/wasm/stdlib/time.js`
@@ -1262,6 +1323,7 @@ Phases 0.11–0.14 fix the bugs from the [review follow-ups](#review-follow-ups-
   - Test: one conformance fixture per package touched.
   - Done when: `stdlib-coverage.test.js` reports no `todo` in Phase 3 packages.
   - Landed: verified all Phase 3 package audit items. Implemented `sync.RWMutex.RLocker()` returning `sync.Locker` with single-threaded shim in JS expressions and Go-source overlay `rlocker` in `runtime/stdlib/sync/extra.go`, resolving the last remaining gap in `sync` (now 39 of 39 supported). Confirmed `fmt` exponent `%e` two-digit formatting (`1.234568e+03`), `%q` on `[]string`, and `fmt.Sprintf("%v", nil)` (`<nil>`) across JS and WASM. Updated conformance fixture `test/conformance/sync/extra.go` and `.out` matching real Go 1.26 reference. Updated stdlib coverage gaps and regenerated stdlib docs.
+  - Correction (2026-10-26 audit): only `sync.RWMutex.RLocker` landed. The other assigned members (251 still absent, plus 110 already implemented but not recognised by the gate) are triaged in [Full-branch audit re-probe](#full-branch-audit-re-probe-2026-10-26) and scheduled in Phases 8–16.
 
 ### Phase 4.1: `bufio` and `net/url` (Go source)
 
@@ -1473,49 +1535,319 @@ Each Phase 6 task follows the same Files/Test/Done-when discipline: files are `s
 
 - [x] **Task 7.4** — Confirm the [`v2.0.0`](../v2.0.0/native-go-engine.md) baseline against what v1.8.0 actually shipped (including the SIMD promotion decision and the final manifest), and declare the JS-engine feature freeze.
   - Landed: confirmed the v2.0.0 baseline against what v1.8.0 actually shipped: Go-source standard library packages in `stdlib/` and the coverage manifest in `stdlib/manifest.json` (51 conformance fixtures, 2,746 unit tests, 0 gaps in covered packages), `gofront/simd` completed and retained as experimental per promotion gate decision (`F32x4`, `Mask32x4`, lane operations, comparisons, shuffles, slice load/store helpers; SoA structs dropped to `simplefps`), and declared the JS-engine feature freeze in `plans/v2.0.0/native-go-engine.md`.
+  - Correction (2026-10-26 audit): "0 gaps in covered packages" was wrong: `gaps.missing` held 361 entries and `gaps.wasm` 9. Final counts are recorded by Task 16.3.
 - [x] **Task 7.6** — `CHANGELOG.md` (with a breaking-changes section: `maps.Keys`/`Values`, strict-mode runtime panics, typed-constant overflow errors, type declarations named after JavaScript globals now rejected (Task 0.19d), unknown string escapes now a lexer error (Task 0.21)) and [`roadmap.md`](../roadmap.md).
   - Landed: updated `CHANGELOG.md` with explicit breaking-change entries for `maps.Keys`/`Values`, strict-mode runtime panics, typed-constant overflow errors, rejected type declarations named after JS globals, and unknown string escape lexer errors; updated `plans/roadmap.md` with completed v1.8.0 areas (`WASM language parity`, `Go-source stdlib`, `Coverage manifest & conformance`, `iter, cmp`, `Member completion`, `bufio, net/url, context`, `New pure packages`, `SIMD completion & promotion gate` marked experimental, `encoding/json everywhere`, `Review follow-ups`), baseline notes, and the JS-engine feature freeze declaration.
 
-### Phase 8: Full-branch audit discrepancy fixes
+### Phase 8: Coverage gate truth
 
-Scheduled from the Step 4.4 full-branch audit (2026-10-26) to resolve all remaining discrepancies in stdlib manifest coverage, exclusion/`//go:embed` diagnostics, `fmt` `%p` parity, and user documentation.
+Scheduled from the Step 4.4 full-branch audit (2026-10-26), re-planned the same day after review of the first draft (see [Full-branch audit re-probe](#full-branch-audit-re-probe-2026-10-26)). The first draft swept all 361 `gaps.missing` entries into `excluded:deferred`; 110 of them already compile and 251 are absent, most of them promised by Task 3.7 and the [Scope rule](#scope-rule) member table. Since `plans/v2.0.0/native-go-engine.md` freezes the v1.8.0 manifest as the stdlib surface, an entry deferred here stays out until v2.1+.
 
-- [ ] **Task 8.1 — Manifest exclusion diagnostics and `//go:embed` diagnostic**
+**Order (dependency chain), one PR per phase:**
+1. Phase 8: the gate learns what is really implemented (harness only, no compiler change except the already-landed Task 8.1).
+2. Phases 9–15: implement the in-scope absent members, grouped by subsystem.
+3. Phase 16: classify what remains as `excluded:*` with a per-family reason; `missing`/`wasm` become hard-empty.
+4. Phase 17: rebuild the exclusion diagnostics on the final manifest (generated table, type-identity matching).
+5. Phase 18: `%p` parity, then docs whose member tables are generated and checked, not hand-pruned.
+
+**Phase 8–18 done means:**
+- `test/unit/types/stdlib-coverage.gaps.json` has `missing: {}`, `wasm: {}`, `exclusion: {}`; only `signature` entries remain, and the gate fails on any non-empty `missing`/`wasm`/`exclusion` (Task 16.2).
+- Every member of the [triage table](#full-branch-audit-re-probe-2026-10-26) is either implemented (conformance fixture or parity test named in its task) or `excluded:<category>` with the reason given there; no member is excluded without a row.
+- `src/typechecker/` has no `node:` import and reads no JSON at runtime (Task 17.1); the three Task 8.1 false positives are negative tests that pass (Tasks 17.2, 17.3).
+- `docs/` contains no `plans/` link, and every symbol in the generated notable-member tables resolves to an implemented member on its stated target (Task 18.2 test).
+
+- [x] **Task 8.1 — Manifest exclusion diagnostics and `//go:embed` diagnostic**
   - Files: `src/typechecker/stdlib/excluded.js`, `src/typechecker/declarations.js`, `src/typechecker/expressions.js`, `src/typechecker/index.js`
   - Do: Load `stdlib/manifest.json` in `src/typechecker/stdlib/excluded.js`. When importing an excluded package (`kind === "package"` and `status.startsWith("excluded:")`), report a compile error containing the manifest's `note` (or category reason). When referencing an excluded package member (`pkg.X`) or method/field (`x.M` on a stdlib type `pkg.T`), report a compile error containing the manifest's `note` (or category reason), preserving existing custom wordings (`iter.Pull`, `ctx.Done()`, `time.After`/`Tick`/`NewTimer`/`NewTicker`, `sync.Cond`, `TempDir`/`Chdir`, `ChaCha8`). Detect `//go:embed` directives in source files and report a compile error `//go:embed is not supported yet`.
   - Test: `test/unit/types/stdlib-coverage.test.js` (`gaps.exclusion` becomes `{}`), plus unit tests in `test/unit/language/declarations.test.js` for `//go:embed` (`assertErrorContains(errors, "//go:embed is not supported yet")`) and excluded package imports (`reflect`, `net/http`, `text/template`, `math/big`, `compress/gzip`).
   - Done when: `gaps.exclusion` in `test/unit/types/stdlib-coverage.gaps.json` has 0 entries and all exclusion/embed tests pass.
+  - Landed: `src/typechecker/stdlib/excluded.js` loads `stdlib/manifest.json` and populates `EXCLUDED_STDLIB_PACKAGES` and `EXCLUDED_STDLIB_MEMBERS` with each excluded entry's `note` or category reason while preserving custom wordings. `_checkDirectivesAndImportsPass` in `src/typechecker/index.js` reports `//go:embed is not supported yet` on `//go:embed` directives and reports the manifest exclusion reason on excluded package imports. `_checkSelectorExpr` in `src/typechecker/expressions.js` checks excluded package members and type methods/fields. `gaps.exclusion` in `test/unit/types/stdlib-coverage.gaps.json` is now `{}` (0 entries).
+  - Audit (2026-10-26): landed ahead of the re-planned order (commit `30324c2`, unmerged). Kept as the interim engine: it reads the manifest at import, so the entries Phase 16 adds get diagnostics without a code change, and `gaps.exclusion == {}` is re-checked by the gate in every later phase rather than being a one-time gate. Its defects are scheduled, not accepted: the runtime manifest read (Task 17.1) and three false positives that the epic branch does not have (user type `Context.Done`, a local package shadowed by `crypto/rand`, `//go:embed` inside a raw string; Tasks 17.2, 17.3).
 
-- [ ] **Task 8.2 — Coverage gate member resolution, WASM stdlib gaps, and `strconv` complex helpers**
-  - Files: `test/unit/types/stdlib-coverage.test.js`, `src/typechecker/types.js`, `stdlib/io/io.go`, `stdlib/strconv/quote.go`, `test/conformance/strconv/basic.go`, `test/conformance/strconv/basic.out`
-  - Do:
-    1. In `test/unit/types/stdlib-coverage.test.js`, update `collectDecl` and `memberOf`/`findMember` so `InterfaceType` methods (in `io`, `hash`, `container/heap`, `context`, `sort`, `math/rand/v2`, `encoding/json`), promoted methods/fields on embedded structs (`bufio.ReadWriter`), and existing `encoding/json` error/token/number types and methods are recognized.
-    2. Enable `io.LimitedReader` (in `stdlib/io/io.go` or WASM stdlib) and `testing.Short`/`testing.Verbose`/`testing.Init`/`testing.Testing`/`testing.Benchmark` in WASM (`WASM_STDLIB_MEMBERS`) or reclassify driver-only helpers appropriately so `gaps.wasm` is `{}`.
-    3. Implement `strconv.FormatComplex` and `strconv.ParseComplex` in `stdlib/strconv/quote.go` (using `FormatFloat`/`ParseFloat` and `complex`/`real`/`imag`) as required by the Scope rule.
-  - Test: `test/conformance/strconv/basic.go` extended with `FormatComplex`/`ParseComplex`, `test/unit/types/stdlib-coverage.test.js`.
-  - Done when: `strconv.FormatComplex`/`ParseComplex` match Go 1.26 on both backends, `gaps.wasm` is empty, and all already-implemented interface/embedded members are recognized by `stdlib-coverage.test.js`.
+- [x] **Task 8.2 — Gate: interface method sets**
+  - Files: `test/unit/types/stdlib-coverage.test.js`, `test/unit/types/stdlib-coverage.gaps.json`
+  - Do: `collectDecl` adds `I.M` for every method of an exported `InterfaceType` declaration (embedded interfaces expanded, so `io.ReadCloser.Read` comes from `Reader`); `memberOf` reads an emitter-backed interface type's method set. Covers `io` (30), `hash` (27), `container/heap` (5), `sort` (3), `context` (3), `math/rand/v2` (1).
+  - Test: a gate unit case asserting `findMember("io", "ReadCloser.Close")` and `findMember("hash", "Hash32.Sum32")` are found and that their signatures go through `signatureOf` (a new signature mismatch is recorded under `signature`, not hidden).
+  - Done when: those 69 entries leave `gaps.missing`; `--update-gaps` produces no other change except new `signature` entries, each listed in the commit body.
+  - Landed: the gate indexes interface method sets from the checker's resolved interface types (embedded expanded); 69 entries left `gaps.missing`, no new `signature` entries.
 
-- [ ] **Task 8.3 — Reclassify remaining unimplemented stdlib members as `excluded:deferred` and reconcile plan notes**
-  - Files: `scripts/manifest-overrides.json`, `stdlib/manifest.json`, `test/unit/types/stdlib-coverage.gaps.json`, `plans/v1.8.0/portable-go-plan.md`, `plans/roadmap.md`
-  - Do: Move the remaining unimplemented `gaps.missing` members in `scripts/manifest-overrides.json` to `excluded:deferred` with a clear `note` (e.g. `"deferred; open an issue if you need it"`), regenerate `stdlib/manifest.json` (`npm run manifest:update`) and `test/unit/types/stdlib-coverage.gaps.json` (`node test/unit/types/stdlib-coverage.test.js --update-gaps`). Verify that `gaps.missing`, `gaps.wasm`, and `gaps.exclusion` are all `{}` (0 gaps), and that referencing any newly deferred member reports its exclusion diagnostic via Task 8.1. Reconcile `plans/v1.8.0/portable-go-plan.md` (Scope rule member table, Task 1.5 counts, Task 3.4a/3.7/7.4 `Landed:` notes) and `plans/roadmap.md` with the final manifest counts.
-  - Test: `test/unit/types/stdlib-coverage.test.js` and `test/unit/compiler/manifest.test.js`.
-  - Done when: `stdlib-coverage.gaps.json` has `missing: {}`, `wasm: {}`, `exclusion: {}`, and `npm test` passes.
+- [x] **Task 8.3 — Gate: promoted members and aliased types**
+  - Files: `test/unit/types/stdlib-coverage.test.js`, `test/unit/types/stdlib-coverage.gaps.json`
+  - Do: `goSourceMember` resolves `T.M`/`T.F` through embedded fields (Go's promotion depth rules: shallowest wins, ambiguous at equal depth is not promoted) and through type aliases into imported Go-source packages (`type SyntaxError = jsonrt.SyntaxError` resolves into `internal/jsonrt`). Covers `bufio.ReadWriter` promoted methods (20) and `encoding/json` error/`Number` methods and fields (21).
+  - Test: gate unit cases for `bufio.ReadWriter.ReadString` (promoted from `*Reader`), `json.SyntaxError.Offset` (alias into `internal/jsonrt`), and an ambiguous-depth fixture that must stay unpromoted.
+  - Done when: those 41 entries leave `gaps.missing` (`bufio.ReadWriter.Reader`/`Writer` stay: they are a checker bug, Task 11.1).
+  - Landed: `goSourceMember` resolves through embedded fields (`promotedMember`: shallowest wins, equal depth ambiguous) and through aliases; 41 entries left `gaps.missing`; `ReadWriter.Reader`/`Writer` stay. Four new `signature` entries: `json.{InvalidUnmarshalError,MarshalerError,UnmarshalTypeError,UnsupportedTypeError}.Type` is `string`, Go has `reflect.Type`.
 
-- [ ] **Task 8.4 — Fix `fmt` `%p` parity on boxed scalar pointers**
-  - Files: `src/backend/js/fmt-runtime.js`, `src/backend/js/fmt-types.js`, `src/backend/wasm/stdlib/core.js`, `test/unit/builtins/fmt-verbs.test.js`
-  - Do: Ensure `fmt.Sprintf("%p", p)` on a boxed scalar pointer (`x := 42; p := &x`), struct pointer (`&S{1}`), slice, and `nil` pointer produces identical output on JS and WASM (`%!p(...)` with matching type representation across backends).
-  - Test: `compileHybrid` parity test in `test/unit/builtins/fmt-verbs.test.js` for `fmt.Sprintf("%p|%p|%p", &x, &s, nilPtr)`.
-  - Done when: `compileHybrid` parity test passes on JS and WASM.
+- [x] **Task 8.4 — Gate: gap honesty check**
+  - Files: `test/unit/types/stdlib-coverage.test.js`
+  - Do: for every `gaps.missing` entry, compile the use-probe the audit used (`var _ pkg.T`; `_ = pkg.X`; `func use(x [*]pkg.T) { _ = x.M }`; directory build for Go-source packages). A probe that compiles fails the gate with `implemented but not recognised by the gate: <pkg>.<name>`. This is the automated form of the audit's triage probe, so unindexed members cannot accumulate again.
+  - Test: the gate itself, plus a unit case that feeds a synthetic gaps list containing `io.Reader.Read` and asserts the message.
+  - Done when: the gate passes on the tree after Tasks 8.2–8.3 (251 entries, each probe failing), and runtime of `node test/unit/types/stdlib-coverage.test.js` is recorded in the commit body.
+  - Landed: `implementedGaps` compiles each listed `missing` entry's use-probe and fails with `implemented but not recognised by the gate: <pkg>.<name>`; the real gap list passes and a synthetic `io.Reader.Read` case asserts the message. Gate runtime about 15 s (was about 11 s).
 
-- [ ] **Task 8.5 — Fix stdlib docs generator, notable-member tables, `go-compatibility.md`, and `CHANGELOG.md`**
-  - Files: `scripts/docs-stdlib.js`, `docs/language-support.md`, `docs/hybrid-wasm.md`, `docs/go-compatibility.md`, `CHANGELOG.md`
-  - Do:
-    1. Remove all references/links to `plans/v1.8.0/portable-go-plan.md` from `scripts/docs-stdlib.js` and regenerate `docs/language-support.md` and `docs/hybrid-wasm.md` (`npm run docs:stdlib`).
-    2. Audit the hand-written "Notable members" tables in `docs/language-support.md` and `docs/hybrid-wasm.md` and remove every excluded or unimplemented symbol (`sync.Cond`/`NewCond`, `crypto/rand.Prime`, `testing.T.TempDir`, `testing.AllocsPerRun`, deferred `unicode` tables, and deferred Task 8.3 members) so every symbol listed as supported compiles on its stated target.
-    3. Update the `fmt %p verb` row in `docs/go-compatibility.md` to accurately describe `%!p(...)` formatting on both backends.
-    4. Consolidate `## [Unreleased]` in `CHANGELOG.md` per `/dev-loop` **People docs**: merge non-breaking entries into concise 1–2 sentence feature entries that link to `docs/` instead of listing long symbol catalogues inline, while keeping each breaking change as its own `**Breaking:**` entry under `### Changed`.
-  - Test: `npm run check`, `npm test`, and a unit test in `test/unit/compiler/manifest.test.js` verifying that `docs/` contain no `plans/` links.
-  - Done when: `npm run check` and `npm test` pass with zero plan references in `docs/`, zero unimplemented symbols in `docs/` tables, accurate `%p` docs, and compliant `CHANGELOG.md`.
+### Phase 9: `bytes`, `strings`, `slices`, `sort`, `errors` members (Go source)
+
+All in Go-source overlays compiled for both targets; each task adds a conformance fixture compared with real Go on JS and WASM. Triage rows `bytes`, `strings`, `slices`, `sort`, `errors`. `ToUpperSpecial`/`ToLowerSpecial`/`ToTitleSpecial` (both packages) are not here: they take `unicode.SpecialCase`, an `excluded:deferred` table (Phase 16).
+
+- [ ] **Task 9.1 — `bytes` search and compare**
+  - Files: `stdlib/bytes/search.go` (new overlay), `test/conformance/bytes/search.go`, `test/conformance/bytes/search.out`
+  - Do: `Compare`, `EqualFold`, `IndexAny`, `LastIndexAny`, `IndexRune`, `IndexFunc`, `LastIndexFunc`, `ContainsFunc`, `CutPrefix`, `CutSuffix`; byte offsets, invalid UTF-8 handled as Go (`IndexRune(s, utf8.RuneError)` matches invalid sequences).
+  - Test: fixture over ASCII, multi-byte and invalid-UTF-8 inputs (byte slices, per §1.1).
+  - Done when: fixture matches Go on both backends; the 10 entries leave `gaps.missing`.
+
+- [ ] **Task 9.2 — `bytes` split, trim, case and buffer constants**
+  - Files: `stdlib/bytes/split.go` (new overlay), `test/conformance/bytes/split.go`, `test/conformance/bytes/split.out`
+  - Do: `SplitAfter`, `SplitAfterN`, `Runes`, `Title`, `TrimLeftFunc`, `TrimRightFunc`, `ErrTooLarge`, `MinRead`.
+  - Test: fixture including `SplitAfterN` with n = -1, 0, 1 and an empty separator.
+  - Done when: fixture matches Go; the 8 entries leave `gaps.missing`.
+
+- [ ] **Task 9.3 — `strings` and `slices` members**
+  - Files: `stdlib/strings/extra.go`, `stdlib/slices/extra.go` (new overlays), `test/conformance/strings/extra.go` (+ `.out`)
+  - Do: `strings.Clone`, `Compare`, `ContainsFunc`, `Replacer.WriteString` (writes `Replace(s)` to the `io.Writer`); `slices.CompareFunc`, `EqualFunc`, `Repeat` (panics on negative count / overflow with Go's message).
+  - Test: fixture; plus a parity test for the `Repeat` panic message in `test/unit/builtins/stdlib.test.js`.
+  - Done when: fixture and parity test pass; the 7 entries leave `gaps.missing`.
+
+- [ ] **Task 9.4 — `sort.Find` and `errors.AsType`**
+  - Files: `stdlib/sort/sort.go`, `stdlib/errors/overlay.go`, `test/conformance/sort/find.go` (+ `.out`)
+  - Do: `sort.Find(n, cmp func(int) int) (int, bool)`; `errors.AsType[E error](err error) (E, bool)` walking `Unwrap() error` and `Unwrap() []error` like `errors.As`. If explicit instantiation of a type-parameter-only generic with a type assertion to `E` does not compile on WASM, stop and ask (do not ship JS-only).
+  - Test: fixture for `Find`; parity test for `AsType[*MyErr]` through a `fmt.Errorf("%w")` chain and an `errors.Join` tree.
+  - Done when: both pass; the 2 entries leave `gaps.missing`.
+
+### Phase 10: `encoding/binary`, `hex`, `base64`, digests
+
+Triage rows `encoding/binary`, `encoding/hex`, `encoding/base64`, `crypto/sha256`, `crypto/rand`. Overlays on the emitter-backed packages (Task 0.6b mechanism).
+
+- [ ] **Task 10.1 — `encoding/binary` varints**
+  - Files: `stdlib/encoding/binary/varint.go` (new overlay), `test/conformance/binary/varint.go` (+ `.out`; new dir)
+  - Do: `Uvarint`, `Varint`, `PutUvarint`, `PutVarint`, `AppendUvarint`, `AppendVarint`, `ReadUvarint`, `ReadVarint` (over `io.ByteReader`, Go's overflow error), `MaxVarintLen16/32/64`.
+  - Test: fixture with boundary values (0, 127, 128, max uint64, min int64), truncated and overflowing input.
+  - Done when: fixture matches Go on both backends (exact 64-bit in JS via the existing `uint64` path); 11 entries leave `gaps.missing`.
+
+- [ ] **Task 10.2 — `encoding/binary` `AppendByteOrder`, `NativeEndian`, `Append`/`Encode`/`Decode`**
+  - Files: `src/typechecker/stdlib/core.js`, `src/backend/js/stdlib/binary.js`, `src/backend/wasm/stdlib/packages.js`
+  - Do: `AppendByteOrder` interface (`AppendUint16/32/64`, `String`) satisfied by `LittleEndian`/`BigEndian`/`NativeEndian` (little-endian; `String()` is `"LittleEndian"` as on every Go target GoFront emits for); `Append`/`Encode`/`Decode` accept exactly the data shapes `Read`/`Write` already accept and reuse their lowering; any other shape is the existing `Read`/`Write` diagnostic.
+  - Test: parity tests in `test/unit/builtins/stdlib.test.js`; negative test for a struct shape `Write` rejects (same message).
+  - Done when: tests pass; 9 entries leave `gaps.missing`.
+
+- [ ] **Task 10.3 — `encoding/hex` completion**
+  - Files: `stdlib/encoding/hex/extra.go` (new overlay), `test/conformance/hex/dump.go` (+ `.out`; new dir)
+  - Do: `AppendEncode`, `AppendDecode`, `Dump`, `Dumper` (stateful `io.WriteCloser`, Go's exact layout), `InvalidByteError` (+ `Error`), `NewEncoder`, `NewDecoder`.
+  - Test: fixture: `Dump` of 0, 15, 16, 17 and 40 bytes; `Dumper` fed in uneven chunks then `Close`; decoder over an odd-length stream.
+  - Done when: fixture matches Go; 8 entries leave `gaps.missing`.
+
+- [ ] **Task 10.4 — `encoding/base64` completion**
+  - Files: `stdlib/encoding/base64/extra.go` (new overlay), `test/conformance/base64/stream.go` (+ `.out`; new dir)
+  - Do: `CorruptInputError` (+ `Error`), `Encoding.AppendEncode`, `AppendDecode`, `Strict`, `NewEncoder` (buffers partial quanta until `Close`), `NewDecoder`.
+  - Test: fixture: encoder fed 1/2/3-byte writes, strict decoding rejecting non-zero padding bits.
+  - Done when: fixture matches Go; 7 entries leave `gaps.missing`.
+
+- [ ] **Task 10.5 — `crypto/sha256` SHA-224 and `crypto/rand.Text`**
+  - Files: `src/backend/js/stdlib/sha256.js`, `src/backend/wasm/stdlib/packages.js`, `src/typechecker/stdlib/core.js`
+  - Do: `New224`, `Sum224`, `Size224` (SHA-256 with the SHA-224 IVs, truncated); `rand.Text()` (26 base32 chars from the existing random source).
+  - Test: parity test with the FIPS 180-4 SHA-224 vectors (`""`, `"abc"`, the 448-bit message); `rand.Text` length and alphabet check.
+  - Done when: tests pass on both backends; 4 entries leave `gaps.missing`.
+
+### Phase 11: `bufio`, `io`, `testing` in WASM, `strconv` complex, `path/filepath`
+
+Triage rows `bufio`, `io`, `strconv`, `path/filepath` and both `gaps.wasm` packages. One subsystem per task: Task 11.1 is a checker fix, 11.2–11.3 are WASM availability, 11.4–11.5 are Go-source algorithms.
+
+- [ ] **Task 11.1 — Embedded field names on imported Go-source types**
+  - Files: `src/typechecker/resolve.js`, `test/unit/compiler/stdlib-go.test.js`
+  - Do: selecting an embedded field by its type name (`rw.Reader`, `rw.Writer`) on a Go-source type seen from an importing package resolves the field, as it already does for types declared in the same package.
+  - Test: `func use(rw *bufio.ReadWriter) *bufio.Reader { return rw.Reader }` compiles and runs on both backends; a user-package equivalent stays green.
+  - Done when: test passes; `bufio.ReadWriter.Reader`/`Writer` leave `gaps.missing`.
+
+- [ ] **Task 11.2 — `io.CopyBuffer`, `OffsetWriter`, and `LimitedReader` in WASM**
+  - Files: `stdlib/io/io.go`, `src/typechecker/types.js` (`WASM_STDLIB_MEMBERS`), `test/conformance/io/offset.go` (+ `.out`)
+  - Do: `CopyBuffer` (panics on an empty non-nil buffer, as Go), `OffsetWriter`, `NewOffsetWriter` with `Write`/`WriteAt`/`Seek`; move `LimitedReader` (type, `N`, `R`, `Read`) into the Go-source overlay so it exists on both targets (or allow it in `WASM_STDLIB_MEMBERS` if the emitter version already lowers in WASM; decide by probe and record which).
+  - Test: fixture run on both backends, including `LimitedReader` used from a `both` package.
+  - Done when: fixture matches Go; 6 `missing` and 4 `wasm` entries leave the gaps file.
+
+- [ ] **Task 11.3 — `testing` package members in WASM**
+  - Files: `src/typechecker/types.js`, `src/backend/wasm/boundary.js`, `test/unit/compiler/test-runner.test.js`
+  - Do: `testing.Short`, `Verbose` (read the runner's `-short`/`-v` flags through the existing test-runner import), `Testing` (true under `gofront test`), `Init` (no-op), `Benchmark` (runs the function with the adaptive `b.N` loop the runner already has, returns `BenchmarkResult`).
+  - Test: `gofront test -short -v` over a `wasm` package fixture asserting `Short()`/`Verbose()`/`Testing()`; a `Benchmark` call returning `N > 0`.
+  - Done when: test passes; the 5 `testing` entries leave `gaps.wasm`.
+
+- [ ] **Task 11.4 — `strconv.FormatComplex` and `ParseComplex`**
+  - Files: `stdlib/strconv/complex.go` (new overlay), `test/conformance/strconv/complex.go` (+ `.out`)
+  - Do: Go's algorithm over `FormatFloat`/`ParseFloat` with `bitSize` 64/128 (`complex64` rounds each part to float32), `(a+bi)` forms, `NaN`/`Inf` parts, the `*NumError` with `Func: "ParseComplex"`.
+  - Test: fixture: `"1+2i"`, `"(1+2i)"`, `"2i"`, `"1"`, `"+Inf-NaNi"`, `"1e400+0i"` (range error), malformed inputs.
+  - Done when: fixture matches Go on both backends; 2 entries leave `gaps.missing`.
+
+- [ ] **Task 11.5 — `path/filepath` with `/` separators**
+  - Files: `stdlib/path/filepath/filepath.go` (new overlay), `test/conformance/filepath/basic.go` (+ `.out`; new dir)
+  - Do: Unix semantics (GoFront has no host OS; documented in `go-compatibility.md` in Task 18.3): `Separator = '/'`, `ListSeparator = ':'`, `ToSlash`/`FromSlash` identity, `SplitList`, `VolumeName` (`""`), `HasPrefix`, `IsLocal`, `Localize`, `Rel`.
+  - Test: fixture with Go's own `Rel` and `IsLocal` test tables, run against `GOOS=linux` output (`conformance:update` already runs host Go; the fixture header records the GOOS).
+  - Done when: fixture matches Go; 10 entries leave `gaps.missing`.
+
+### Phase 12: `math` and `time`
+
+Triage rows `math` (11 of 17; the Bessel functions are deferred in Phase 16) and `time` (34). Ports from Go's source keep results bit-identical to Go on both backends.
+
+- [ ] **Task 12.1 — `math` elementary functions**
+  - Files: `stdlib/math/extra.go` (overlay), `test/conformance/math/elementary.go` (+ `.out`)
+  - Do: `Acosh`, `Asinh`, `Atanh`, `Ilogb`, `Logb`, `Pow10`, `Sincos`, ported from Go's `math` sources (not `Math.*` host calls, whose last-ulp results differ between engines).
+  - Test: fixture over Go's `math/all_test.go` vectors for these functions plus special values (±0, ±Inf, NaN, subnormals), printed with `%b`.
+  - Done when: fixture matches Go bit-for-bit on both backends; 7 entries leave `gaps.missing`.
+
+- [ ] **Task 12.2 — `math.Erfc`, `Erfinv`, `Erfcinv`, `Lgamma`**
+  - Files: `stdlib/math/erf.go`, `stdlib/math/lgamma.go` (overlays), `test/conformance/math/erf.go` (+ `.out`)
+  - Do: port Go's `erf.go` (`Erfc`), `erfinv.go`, `lgamma.go` (returns `(lgamma float64, sign int)`). Check whether the existing `math.Erf` matches Go bit-for-bit; if not, switch it to the port in the same commit.
+  - Test: fixture over Go's vectors, `%b`.
+  - Done when: fixture matches Go; 4 entries leave `gaps.missing`.
+
+- [ ] **Task 12.3 — `time` layout constants, `Until`, `ParseInLocation`, `Time.UnixMicro`**
+  - Files: `stdlib/time/layout.go` (new overlay), `src/typechecker/stdlib/core.js`, `test/conformance/time/layouts.go` (+ `.out`)
+  - Do: `Layout`, `ANSIC`, `UnixDate`, `RubyDate`, `RFC822`, `RFC822Z`, `RFC850`, `RFC1123`, `RFC1123Z`, `Kitchen`, `Stamp`, `StampMilli`, `StampMicro`, `StampNano`; `Until` (over the injected clock); `ParseInLocation` for `UTC`/`Local`/`FixedZone` locations; `Time.UnixMicro`.
+  - Test: fixture formatting and re-parsing a fixed date with every layout constant; `ParseInLocation` with a `FixedZone`.
+  - Done when: fixture matches Go; 17 entries leave `gaps.missing`.
+
+- [ ] **Task 12.4 — `time.ParseError`**
+  - Files: `src/backend/js/stdlib/time.js`, `src/backend/wasm/stdlib/time.js`, `src/typechecker/stdlib/core.js`
+  - Do: `Parse`/`ParseInLocation`/`ParseDuration` failures return `*time.ParseError{Layout, Value, LayoutElem, ValueElem, Message}` with Go's `Error()` text, so `errors.As(err, &pe)` works.
+  - Test: conformance fixture `test/conformance/time/parse_error.go` (+ `.out`) with out-of-range month, extra text, and bad layout element.
+  - Done when: fixture matches Go on both backends; 7 entries leave `gaps.missing`.
+
+- [ ] **Task 12.5 — `time.Time` binary/text encodings and zone queries**
+  - Files: `stdlib/time/encoding.go` (new overlay), `test/conformance/time/encoding.go` (+ `.out`)
+  - Do: `MarshalBinary`/`UnmarshalBinary`/`AppendBinary`, `GobEncode`/`GobDecode` (Go's version-2 binary layout), `AppendText`, `AppendFormat`, `GoString`, `IsDST` (false for `UTC`/`FixedZone`; `Local` reports the host offset change via the existing clock import, JS-only if the WASM import set lacks it, decided by probe), `ZoneBounds` (zero `Time`s for fixed zones, as Go).
+  - Test: fixture: round-trip a `FixedZone` time through `MarshalBinary` and compare bytes with Go's output.
+  - Done when: fixture matches Go; 10 entries leave `gaps.missing`.
+
+### Phase 13: `encoding/json` completion
+
+Triage row `encoding/json` (18 of 19; `UnsupportedValueError.Value` is a `reflect.Value`, excluded in Phase 16). All in Go source (`stdlib/encoding/json/`, `stdlib/internal/jsonrt/`), so both targets at once. User `MarshalJSON`/`UnmarshalJSON` already dispatch (probe); only the declarations are missing.
+
+- [ ] **Task 13.1 — `Marshaler`, `Unmarshaler` and `RawMessage` methods**
+  - Files: `stdlib/encoding/json/marshaler.go` (new), `stdlib/encoding/json/number.go`, `test/conformance/json/marshaler.go` (+ `.out`)
+  - Do: declare `Marshaler`, `Unmarshaler`; add `RawMessage.MarshalJSON` (nil → `null`) and `(*RawMessage).UnmarshalJSON` (copies).
+  - Test: fixture: `var _ json.Marshaler = T{}`, a `[]json.Marshaler` encoded, `RawMessage` round-trip.
+  - Done when: fixture matches Go on both backends; 6 entries leave `gaps.missing`.
+
+- [ ] **Task 13.2 — Deprecated error types**
+  - Files: `stdlib/internal/jsonrt/errors.go` (or the existing errors file), `stdlib/encoding/json/errors.go`
+  - Do: `InvalidUTF8Error{S}` and `UnmarshalFieldError{Key, Type, Field}` with Go's `Error()` text. Go never returns them; they exist so code that type-switches on them compiles. `Type`/`Field` hold GoFront's existing type-name strings as `UnmarshalTypeError` does; if Go's `reflect.Type`/`reflect.StructField` field types cannot be represented, those two fields go to Phase 16 as `excluded:reflection` and the decision is recorded here.
+  - Test: `test/unit/builtins/json.test.js` parity case constructing each and printing `Error()`.
+  - Done when: test passes; up to 8 entries leave `gaps.missing`.
+
+- [ ] **Task 13.3 — `Decoder.Token`, `Delim`, `Token`**
+  - Files: `stdlib/encoding/json/stream.go`, `stdlib/internal/jsonrt/scanner.go`, `test/conformance/json/token.go` (+ `.out`)
+  - Do: Go's token state machine over the existing scanner: `Token` (`any`), `Delim` (+ `String`), `Decoder.Token` returning `Delim`, `bool`, `float64`/`Number` (with `UseNumber`), `string`, `nil`; interleaves with `Decode` and `More` as in Go.
+  - Test: fixture: Go's `example_test.go` `ExampleDecoder_Token` and `ExampleDecoder_Decode_stream`, plus syntax errors mid-stream with Go's offsets.
+  - Done when: fixture matches Go on both backends; 4 entries leave `gaps.missing`.
+
+### Phase 14: `fmt` `Formatter`, `State`, `GoStringer` and stdin scanning
+
+Triage row `fmt` (13 of 22; `Scanner`/`ScanState` deferred in Phase 16). The [Scope rule](#scope-rule) promises `Formatter`, `GoStringer` and `State`. Dispatch follows the `Stringer` design of Phases 3.1.1–3.1.2.
+
+- [ ] **Task 14.1 — `fmt.State`, `Formatter`, `FormatString` on JS**
+  - Files: `src/typechecker/stdlib/core.js`, `src/backend/js/fmt-runtime.js`, `test/unit/builtins/fmt-stringer.test.js`
+  - Do: declare `State` (`Write`, `Width`, `Precision`, `Flag`), `Formatter`, `FormatString(State, rune)`; an operand whose type has `Format(fmt.State, rune)` is formatted by calling it for every verb (before `GoStringer`/`error`/`Stringer`, as Go's `handleMethods`).
+  - Test: JS cases: a `Formatter` printing width/precision/flags back; `%v` of a slice of formatters; `FormatString` round-trip.
+  - Done when: tests pass on JS; a `wasm` package using a `Formatter` still reports a targeted diagnostic (no invalid module) until Task 14.2.
+
+- [ ] **Task 14.2 — `Formatter` dispatch on WASM**
+  - Files: `src/backend/wasm/stdlib/core.js`, `src/backend/wasm/index.js`, `test/unit/builtins/fmt-stringer.test.js`
+  - Do: the same dispatch through the interface-candidate tables used for `Stringer`; `State` is a host-free struct implementing the four methods over the verb parser's state.
+  - Test: the 14.1 cases as parity tests (`compileHybrid`).
+  - Done when: parity tests pass; `Formatter`, `Formatter.Format`, `State` and its 4 methods, `FormatString` leave `gaps.missing` (8).
+
+- [ ] **Task 14.3 — `GoStringer` for `%#v` on both backends**
+  - Files: `src/backend/js/fmt-runtime.js`, `src/backend/wasm/stdlib/core.js`, `test/unit/builtins/fmt-stringer.test.js`
+  - Do: declare `GoStringer`; `%#v` of an operand with `GoString() string` prints its result (today: `main.T{A:1}`, Go: the method's result), including nested inside structs/slices as Go.
+  - Test: parity test from the audit probe (`want "G"`), plus a nested case.
+  - Done when: parity tests pass; 2 entries leave `gaps.missing`.
+
+- [ ] **Task 14.4 — `fmt.Scan`, `Scanf`, `Scanln`**
+  - Files: `stdlib/fmt/scan.go`
+  - Do: `Fscan*(os.Stdin, …)`; `os.Stdin` always returns `io.EOF` (Scope rule `os` row), so they return `0, io.EOF` / `unexpected newline` exactly as Go does on an empty stdin.
+  - Test: conformance fixture `test/conformance/fmt/scan_stdin.go` (+ `.out`, captured with stdin `/dev/null`).
+  - Done when: fixture matches Go; 3 entries leave `gaps.missing`.
+
+### Phase 15: `regexp` completion (JS-only)
+
+Triage row `regexp` (31 of 34; `CompilePOSIX`, `MustCompilePOSIX`, `Regexp.Longest` are excluded in Phase 16: JS `RegExp` has no leftmost-longest mode). `regexp` stays JS-only by design ([Out of Scope](#out-of-scope)); the WASM diagnostic is unchanged. Byte-slice variants convert offsets so results are byte offsets, as Go.
+
+- [ ] **Task 15.1 — `[]byte` match, find and replace**
+  - Files: `src/typechecker/stdlib/extended.js`, `src/backend/js/stdlib/regexp.js`, `test/unit/builtins/stdlib.test.js`
+  - Do: `Match`, `Regexp.Match`, `Find`, `FindAll`, `FindSubmatch`, `FindAllSubmatch`, `ReplaceAll`, `ReplaceAllFunc`, `ReplaceAllLiteral`, `ReplaceAllStringFunc`.
+  - Test: JS cases including non-ASCII input; expected values from Go recorded in the test.
+  - Done when: tests pass; 10 entries leave `gaps.missing`.
+
+- [ ] **Task 15.2 — Index variants with byte offsets**
+  - Files: `src/backend/js/stdlib/regexp.js`, `src/typechecker/stdlib/extended.js`, `test/unit/builtins/stdlib.test.js`
+  - Do: `FindIndex`, `FindAllIndex`, `FindAllStringIndex`, `FindStringSubmatchIndex`, `FindAllStringSubmatchIndex`, `FindSubmatchIndex`, `FindAllSubmatchIndex` (UTF-16 → byte offset mapping; `-1` pairs for unmatched groups).
+  - Test: JS cases on `"héllo wörld"` asserting Go's byte offsets.
+  - Done when: tests pass; 7 entries leave `gaps.missing`.
+
+- [ ] **Task 15.3 — Introspection, templates, readers and text marshaling**
+  - Files: `src/backend/js/stdlib/regexp.js`, `src/typechecker/stdlib/extended.js`, `test/unit/builtins/stdlib.test.js`
+  - Do: `NumSubexp`, `SubexpNames`, `SubexpIndex`, `LiteralPrefix`, `Copy`, `Expand`, `ExpandString` (Go's `$name`/`${1}` template syntax, not JS's), `MatchReader`, `Regexp.MatchReader`, `FindReaderIndex`, `FindReaderSubmatchIndex` (read the `io.RuneReader` to EOF, then match), `MarshalText`, `UnmarshalText`, `AppendText`.
+  - Test: JS cases from Go's `regexp` example tests for `Expand` and `SubexpNames`.
+  - Done when: tests pass; 14 entries leave `gaps.missing` (31 in the phase).
+
+### Phase 16: Gap triage and hard-empty gate
+
+- [ ] **Task 16.1 — Classify the remaining families**
+  - Files: `scripts/manifest-overrides.json`, `stdlib/manifest.json`, `test/unit/types/stdlib-coverage.gaps.json`
+  - Do: one override rule per family in the triage table's **Excluded** rows, each with its own `note`, never a blanket `"*"` rule: `math/rand` v1 (`Rand.*`, `Source.*`, `Source64.*`, `Zipf.*`, `New`, `NewSource`, `NewZipf`, `ExpFloat64`, `NormFloat64`, `Uint32`, `Uint64` → `excluded:deferred`, note `legacy API; use math/rand/v2`); Bessel (`J0`, `J1`, `Jn`, `Y0`, `Y1`, `Yn` → `excluded:deferred`); `bytes`/`strings` `To*Special` (→ `excluded:deferred`, note `needs unicode.SpecialCase`); `fmt.Scanner`, `Scanner.Scan`, `ScanState.*` (→ `excluded:deferred`); `regexp.CompilePOSIX`, `MustCompilePOSIX`, `Regexp.Longest` (→ `excluded:host`, note `JS RegExp has no leftmost-longest mode`); `json.UnsupportedValueError.Value` (→ `excluded:reflection`). `npm run manifest:update`, then `--update-gaps`. Any member still in `gaps.missing`/`gaps.wasm` that no rule names is a stop-and-ask, not a new rule.
+  - Test: `test/unit/compiler/manifest.test.js` case: no override rule in this set uses `"*"`, and each listed family has the expected status and note.
+  - Done when: `gaps.missing` and `gaps.wasm` are `{}`, `gaps.exclusion` is still `{}` (the new entries report their notes through the Task 8.1 engine), `npm test` passes.
+
+- [ ] **Task 16.2 — Gate: `missing`/`wasm`/`exclusion` must be empty**
+  - Files: `test/unit/types/stdlib-coverage.test.js`, `test/unit/types/stdlib-coverage.gaps.json`
+  - Do: the gaps file keeps only `signature`; any `missing`, `wasm` or `exclusion` entry is a hard failure with the member list (no allow-list), and `--update-gaps` refuses to write those keys.
+  - Test: gate unit case with a synthetic missing entry asserting the failure message.
+  - Done when: gate passes on the tree; the file has only `signature`.
+
+- [ ] **Task 16.3 — Final counts in the plan and roadmap**
+  - Files: `plans/v1.8.0/portable-go-plan.md`, `plans/roadmap.md`
+  - Do: replace the "0 gaps in covered packages" claims (Task 7.4 `Landed:`, roadmap `Coverage manifest & conformance` row) with the measured per-package supported/excluded counts from the final manifest, as in Task 1.5's table; mark the roadmap `Member completion` and `Coverage manifest & conformance` rows done again.
+  - Test: none beyond `npm test` (plan text only).
+  - Done when: every count in those notes matches `stdlib/manifest.json` and the gaps file.
+
+### Phase 17: Exclusion diagnostics on the final manifest
+
+Rebuilds the Task 8.1 engine now that the manifest is final. Probes in [Full-branch audit re-probe](#full-branch-audit-re-probe-2026-10-26) rows 9–12 are the failing tests.
+
+- [ ] **Task 17.1 — Generated exclusion table**
+  - Files: `scripts/stdlib-manifest.js`, `src/typechecker/stdlib/excluded-table.js` (generated), `src/typechecker/stdlib/excluded.js`
+  - Do: `npm run manifest:update` also writes `excluded-table.js`: a minified ES module exporting two frozen `Map` literals (`package path → reason`, `"<import path>.<Name>"`/`"<import path>.<T>.<M>"` → reason), only `excluded:` entries; `--check` fails when it is stale. `excluded.js` imports it instead of `node:fs` + `JSON.parse`; hand-written custom wordings stay in `excluded.js` and win. Keys are full import paths only (no `pkgIdent` aliases: those caused the `crypto/rand` ↔ `math/rand` key collision `rand.Int`).
+  - Test: `test/unit/compiler/manifest.test.js`: regenerating the table is a no-op; `grep -r "node:" src/typechecker/` is empty; importing `src/typechecker/index.js` with `stdlib/manifest.json` renamed away still works (the repo-structure plan Task 7.2 drops it from the npm package).
+  - Done when: tests pass; typechecker import time is back within 2 ms of the epic-branch baseline (15.1 ms on the audit machine), measured in the commit body.
+
+- [ ] **Task 17.2 — Exclusions by type identity**
+  - Files: `src/typechecker/expressions.js`, `src/typechecker/resolve.js`, `test/unit/types/errors.test.js`
+  - Do: a namespace member is checked against the import path its own `import` spec bound (the namespace object carries the path), not against every path any file imported. A method/field exclusion applies only when the receiver's named type originates from that stdlib package, and only after normal member lookup fails (the epic-branch order), so a user method of the same name always wins. Remove the pre-lookup `_checkExcludedSelectorExpr` type branch.
+  - Test: negatives that must compile (audit rows 10–11: user `type Context struct{}` with `Done()`; local `./rand` with `Prime()` alongside `import _ "crypto/rand"`; user type embedding `sync.WaitGroup` and defining its own `Go`), and positives that must still report (`ctx.Done()`, `wg.Go`, `crypto/rand.Prime`, `time.Timer.C`).
+  - Done when: tests pass and `gaps.exclusion` stays `{}`.
+
+- [ ] **Task 17.3 — `//go:embed` from the lexer**
+  - Files: `src/lexer.js`, `src/typechecker/index.js`, `test/unit/language/declarations.test.js`
+  - Do: the lexer records `//go:embed` line comments (as it records `//gofront:intrinsic`), so the directive is only seen in comment position; drop `_checkEmbedLines`' regex over raw source.
+  - Test: audit row 12 (`//go:embed` inside a raw string) compiles; a real directive before a `var` still reports `//go:embed is not supported yet` at its line and column.
+  - Done when: tests pass.
+
+### Phase 18: `%p` parity and generated docs
+
+- [ ] **Task 18.1 — `%p` of boxed scalar pointers**
+  - Files: `src/backend/js/fmt-types.js`, `src/backend/wasm/stdlib/core.js`, `test/unit/builtins/fmt-verbs.test.js`
+  - Do: a pointer to a boxed scalar prints its static pointer type and pointee on both backends: `%!p(*int=42)` (today JS `%!p(main.Object=0x1)`, WASM `%!p(struct { value interface {}; __p bool; __box bool }=0x1)`); `%T` of the same pointer prints `*int` on both.
+  - Test: parity test `fmt.Sprintf("%p|%p|%p|%p", &x, &S{1}, nilPtr, xs)` asserting `%!p(*int=42)|%!p(*main.S=&{1})|%!p(<nil>)|%!p([]int=[1])`.
+  - Done when: parity test passes.
+
+- [ ] **Task 18.2 — Generated, checked notable-member tables**
+  - Files: `scripts/docs-notable.json` (new), `scripts/docs-stdlib.js`, `test/unit/types/stdlib-coverage.test.js`
+  - Do: the "Notable members" table in `language-support.md` and the bullet list in `hybrid-wasm.md` move between their own generated markers, rendered from `docs-notable.json` (`{pkg, members: [...], note}` per row; members are manifest names). The coverage gate checks every listed member: it must exist in the manifest, not be `excluded:`, and resolve with `findMember` (and `inWasm` for the `hybrid-wasm.md` list). `npm run check` already runs `docs-stdlib.js --check`, so a hand edit or a stale table fails CI.
+  - Test: gate unit case with a synthetic `docs-notable.json` row naming `math.J0` asserting `listed in docs but not available: math.J0`.
+  - Done when: the regenerated tables drop every symbol the audit lint found (`bytes.Compare` etc. now implemented stay; `unicode.L`/`Ll`, `sync.Cond`, `crypto/rand.Prime`, `testing.T.TempDir`, `math/rand` v1 types, Bessel go), and the gate passes.
+
+- [ ] **Task 18.3 — No plan links in docs; compatibility rows**
+  - Files: `scripts/docs-stdlib.js`, `docs/go-compatibility.md`, `test/unit/compiler/manifest.test.js`
+  - Do: drop the `plans/v1.8.0/portable-go-plan.md` links from the generated headers (`scripts/docs-stdlib.js:95,121`) and say "not available yet" instead; regenerate. In `go-compatibility.md`: the `%p` row describes `%!p(<type>=<value>)` on both backends; add rows for the Phase 16 exclusions (`math/rand` v1 → `math/rand/v2`, `regexp` POSIX, `fmt.Scanner`, Bessel, `To*Special`) and the `path/filepath` Unix semantics.
+  - Test: manifest test asserting no file in `docs/` contains `plans/`.
+  - Done when: tests pass and `npm run check` is green.
 
 ---
 

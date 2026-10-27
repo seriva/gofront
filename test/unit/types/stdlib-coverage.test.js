@@ -98,6 +98,7 @@ function goSource(pkg) {
 		const errors = pkgChecker.checkAll(programs);
 		if (errors.length > 0)
 			throw new Error(`${pkg}: ${errors.map((e) => e.message).join("; ")}`);
+		collectInterfaceMethods(programs, pkgChecker, names);
 		src = { names, checker: pkgChecker };
 	}
 	goSourceCache.set(pkg, src);
@@ -148,6 +149,26 @@ function qualifiedType(t, name) {
 	return t;
 }
 
+// Method names of an interface type (named or not), embedded ones included.
+function interfaceMethods(t) {
+	const u = t?.kind === "named" ? t.underlying : t;
+	return u?.kind === "interface" && u.methods instanceof Map
+		? [...u.methods.keys()]
+		: [];
+}
+
+// Interface method sets, embedded interfaces expanded by the checker
+// (`io.ReadCloser.Read` comes from `Reader`).
+function collectInterfaceMethods(programs, pkgChecker, names) {
+	const decls = programs.flatMap((p) => p.decls ?? []);
+	for (const d of decls) {
+		if (d.kind !== "TypeDecl" || d.type?.kind !== "InterfaceType") continue;
+		if (!/^[A-Z]/.test(d.name)) continue;
+		for (const m of interfaceMethods(pkgChecker.types.get(d.name)))
+			if (/^[A-Z]/.test(m)) names.add(`${d.name}.${m}`);
+	}
+}
+
 function collectDecl(d, names) {
 	const exported = (n) => /^[A-Z]/.test(n);
 	if (d.kind === "MethodDecl" && exported(d.name)) {
@@ -196,15 +217,51 @@ function emitterMember(pkg, name) {
 	return t === undefined ? null : { t, owner };
 }
 
+// The method or field `member` of type `t` as Go promotes it: the shallowest
+// depth through embedded fields wins; two hits at the same depth are
+// ambiguous and not promoted.
+function promotedMember(t, member) {
+	let level = [t];
+	for (let depth = 0; level.length > 0 && depth < 6; depth++) {
+		const hits = [];
+		const next = [];
+		for (const x of level) {
+			const direct = memberOf(x, member);
+			if (direct !== undefined) hits.push(direct);
+			const base = x?.kind === "pointer" ? x.base : x;
+			const struct = base?.kind === "named" ? base.underlying : base;
+			if (struct?.kind === "struct") next.push(...(struct._embeds ?? []));
+		}
+		if (hits.length === 1) return hits[0];
+		if (hits.length > 1) return undefined;
+		level = next;
+	}
+	return undefined;
+}
+
 function goSourceMember(pkg, name) {
 	const src = goSource(pkg);
-	if (!src?.names.has(name)) return null;
+	if (!src) return null;
 	const { checker: c } = src;
 	const [top, member] = name.split(".");
-	const owner = c.types.get(top) ?? null;
-	if (member === undefined)
+	if (member === undefined) {
+		if (!src.names.has(name)) return null;
+		const owner = c.types.get(top) ?? null;
 		return { t: c.globals.symbols.get(top) ?? owner, owner: null };
-	return { t: memberOf(owner, member), owner };
+	}
+	if (!src.names.has(top)) return null;
+	const owner = c.types.get(top) ?? null;
+	if (!src.names.has(name) && !owner) return null;
+	// An embedded field's own name is only a member when the package indexes
+	// it (`bufio.ReadWriter.Reader` is not usable yet: the checker rejects it).
+	const struct = owner?.kind === "named" ? owner.underlying : owner;
+	const embeddedName = (struct?.kind === "struct" ? struct._structFields : [])
+		?.filter((f) => f.embedded)
+		.map((f) => f.astType?.name ?? f.astType?.base?.name)
+		.includes(member);
+	if (embeddedName && !src.names.has(name)) return null;
+	const t = promotedMember(owner, member);
+	return t === undefined ? null : { t, owner };
 }
 
 const findMember = (pkg, name) =>
@@ -262,11 +319,51 @@ function compileErrors(source, goSourcePkg) {
 
 function reportsExclusion(e) {
 	const reason = e.note ?? e.status.slice("excluded:".length);
-	// The package path itself (`runtime/debug`) may contain the reason.
+	// Strip quoted package paths (`"runtime/debug"`, `'runtime/debug'`) so the
+	// import path itself cannot satisfy `reason`, while keeping `reason` text.
 	const text = compileErrors(exclusionProbe(e), goSource(e.pkg) !== null)
-		.split(e.pkg)
+		.split(`"${e.pkg}"`)
+		.join("")
+		.split(`'${e.pkg}'`)
 		.join("");
 	return text.includes(reason);
+}
+
+// ── Gap honesty ─────────────────────────────────────────────────────────
+
+// True when the use-probe of manifest entry `e` compiles.  A crash or a
+// thrown error is a failed compile.
+function probeCompiles(e) {
+	const source = exclusionProbe(e);
+	const { warn, error } = console;
+	console.warn = console.error = () => {};
+	try {
+		if (goSource(e.pkg) !== null)
+			return withTempDir({ "main.go": source }, (dir) => {
+				try {
+					compileDir(dir);
+					return true;
+				} catch {
+					return false;
+				}
+			});
+		return compile(source).errors.length === 0;
+	} catch {
+		return false;
+	} finally {
+		Object.assign(console, { warn, error });
+	}
+}
+
+// One message per listed `missing` entry whose use-probe compiles.
+function implementedGaps(names) {
+	const messages = [];
+	for (const n of names) {
+		const e = entryOf.get(n);
+		if (e && probeCompiles(e))
+			messages.push(`implemented but not recognised by the gate: ${n}`);
+	}
+	return messages;
 }
 
 // ── Signatures ──────────────────────────────────────────────────────────
@@ -320,6 +417,8 @@ const flatten = (gaps, check) =>
 		names.map((n) => `${pkg}.${n}`),
 	);
 
+const entryOf = new Map(manifest.entries.map((e) => [`${e.pkg}.${e.name}`, e]));
+
 const gaps = currentGaps();
 
 if (process.argv.includes("--update-gaps")) {
@@ -365,9 +464,19 @@ test("every excluded package and member reports its exclusion reason", () => {
 	checkGaps("exclusion", "exclusions without their diagnostic");
 });
 
-section("Stdlib coverage gate: by signature");
+test("no listed missing member is actually implemented", () => {
+	const messages = implementedGaps(flatten(gaps, "missing"));
+	if (messages.length > 0) throw new Error(messages.join("\n"));
+});
 
-const entryOf = new Map(manifest.entries.map((e) => [`${e.pkg}.${e.name}`, e]));
+test("gap honesty check names members that already compile", () => {
+	assertEqual(
+		implementedGaps(["io.Reader.Read"]).join("\n"),
+		"implemented but not recognised by the gate: io.Reader.Read",
+	);
+});
+
+section("Stdlib coverage gate: by signature");
 
 // Fails on a mismatch that is not listed, or listed with another GoFront
 // signature, and on a listed mismatch that is gone.
@@ -567,6 +676,48 @@ test("strconv.ParseInt returns int64, as in Go", () => {
 		compile(src("var x int = n")).errors,
 		"Cannot assign int64 to int",
 	);
+});
+
+test("interface method sets are indexed, embedded interfaces expanded", () => {
+	for (const [pkg, name] of [
+		["io", "ReadCloser.Close"],
+		["io", "ReadCloser.Read"],
+		["hash", "Hash32.Sum32"],
+		["hash", "Hash32.Write"],
+	]) {
+		const found = findMember(pkg, name);
+		if (!found) throw new Error(`${pkg}.${name} not found`);
+		const e = entryOf.get(`${pkg}.${name}`);
+		assertEqual(signatureOf(e, found), e.signature);
+	}
+});
+
+test("promoted members and aliased types are indexed", () => {
+	if (!findMember("bufio", "ReadWriter.ReadString"))
+		throw new Error("bufio.ReadWriter.ReadString (promoted from *Reader)");
+	if (!findMember("encoding/json", "SyntaxError.Offset"))
+		throw new Error("json.SyntaxError.Offset (alias into internal/jsonrt)");
+	if (findMember("bufio", "ReadWriter.Reader"))
+		throw new Error("bufio.ReadWriter.Reader is a checker bug, not a member");
+});
+
+test("promotion: shallowest wins, equal depth is ambiguous", () => {
+	const fn = { kind: "func", params: [], returns: [] };
+	const named = (name, methods, embeds = []) => ({
+		kind: "named",
+		name,
+		methods: new Map(methods),
+		underlying: { kind: "struct", fields: new Map(), _embeds: embeds },
+	});
+	const a = named("A", [["M", fn]]);
+	const b = named("B", [["M", fn]]);
+	const deep = named("Deep", [["N", fn]]);
+	const mid = named("Mid", [], [deep]);
+	const ambiguous = named("Amb", [], [a, b]);
+	const shadow = named("Shadow", [["N", { ...fn, shadow: true }]], [mid]);
+	assertEqual(promotedMember(ambiguous, "M"), undefined);
+	assertEqual(promotedMember(named("Via", [], [mid]), "N"), fn);
+	assertEqual(promotedMember(shadow, "N").shadow, true);
 });
 
 test("the known gaps only name manifest entries", () => {
