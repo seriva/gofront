@@ -103,13 +103,13 @@ Members of each Go package that `wasm` and `both` packages can use today, out of
 
 | Package | Available | Not yet |
 |---|---|---|
-| `bufio` | 57 of 79 | 22 |
+| `bufio` | 77 of 79 | 2 |
 | `bytes` | 78 of 99 | 21 |
 | `cmp` | 4 of 4 | 0 |
-| `container/heap` | 6 of 11 | 5 |
+| `container/heap` | 11 of 11 | 0 |
 | `container/list` | 21 of 21 | 0 |
 | `container/ring` | 10 of 10 | 0 |
-| `context` | 17 of 20 | 3 |
+| `context` | 20 of 20 | 0 |
 | `crypto/hmac` | 2 of 2 | 0 |
 | `crypto/md5` | 4 of 4 | 0 |
 | `crypto/rand` | 2 of 3 | 1 |
@@ -122,15 +122,15 @@ Members of each Go package that `wasm` and `both` packages can use today, out of
 | `encoding/binary` | 13 of 33 | 20 |
 | `encoding/csv` | 32 of 32 | 0 |
 | `encoding/hex` | 7 of 15 | 8 |
-| `encoding/json` | 28 of 68 | 40 |
+| `encoding/json` | 49 of 68 | 19 |
 | `errors` | 6 of 7 | 1 |
 | `fmt` | 21 of 43 | 22 |
-| `hash` | 5 of 32 | 27 |
+| `hash` | 32 of 32 | 0 |
 | `hash/adler32` | 3 of 3 | 0 |
 | `hash/crc32` | 12 of 12 | 0 |
 | `hash/fnv` | 6 of 6 | 0 |
 | `html` | 2 of 2 | 0 |
-| `io` | 54 of 94 | 40 |
+| `io` | 84 of 94 | 10 |
 | `iter` | 2 of 2 | 0 |
 | `log` | 43 of 43 | 0 |
 | `maps` | 10 of 10 | 0 |
@@ -138,13 +138,13 @@ Members of each Go package that `wasm` and `both` packages can use today, out of
 | `math/bits` | 50 of 50 | 0 |
 | `math/cmplx` | 27 of 27 | 0 |
 | `math/rand` | 12 of 45 | 33 |
-| `math/rand/v2` | 50 of 51 | 1 |
+| `math/rand/v2` | 51 of 51 | 0 |
 | `net/url` | 60 of 60 | 0 |
 | `os` | 7 of 7 | 0 |
 | `path` | 9 of 9 | 0 |
 | `path/filepath` | 9 of 19 | 10 |
 | `slices` | 37 of 40 | 3 |
-| `sort` | 36 of 40 | 4 |
+| `sort` | 39 of 40 | 1 |
 | `strconv` | 41 of 43 | 2 |
 | `strings` | 75 of 82 | 7 |
 | `sync` | 39 of 39 | 0 |
