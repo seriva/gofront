@@ -491,6 +491,23 @@ func rotate(data Interface, a, m, b int) {
 	swapRange(data, m-i, m, i)
 }
 
+// Find uses binary search to find and return the smallest index i in [0, n)
+// at which cmp(i) <= 0. If there is no such index i, Find returns i = n.
+// The found result is true if i < n and cmp(i) == 0.
+// Find calls cmp(i) only for i in the range [0, n).
+func Find(n int, cmp func(int) int) (i int, found bool) {
+	i, j := 0, n
+	for i < j {
+		h := int(uint(i+j) >> 1)
+		if cmp(h) > 0 {
+			i = h + 1
+		} else {
+			j = h
+		}
+	}
+	return i, i < n && cmp(i) == 0
+}
+
 // SearchInts searches for x in a sorted slice of ints and returns the index
 // as specified by Search.
 func SearchInts(a []int, x int) int {
