@@ -1595,7 +1595,7 @@ All in Go-source overlays compiled for both targets; each task adds a conformanc
   - Test: fixture over ASCII, multi-byte and invalid-UTF-8 inputs (byte slices, per §1.1).
   - Done when: fixture matches Go on both backends; the 10 entries leave `gaps.missing`.
 
-- [ ] **Task 9.2 — `bytes` split, trim, case and buffer constants**
+- [x] **Task 9.2 — `bytes` split, trim, case and buffer constants**
   - Files: `stdlib/bytes/split.go` (new overlay), `test/conformance/bytes/split.go`, `test/conformance/bytes/split.out`
   - Do: `SplitAfter`, `SplitAfterN`, `Runes`, `Title`, `TrimLeftFunc`, `TrimRightFunc`, `ErrTooLarge`, `MinRead`.
   - Test: fixture including `SplitAfterN` with n = -1, 0, 1 and an empty separator.
