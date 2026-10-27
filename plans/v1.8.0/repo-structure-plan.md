@@ -1,21 +1,21 @@
 # Repository Structure Cleanup — Design Plan
 
 **Version:** v1.8.0
-**Status:** Draft
+**Status:** Draft (revised 2026-10-27 for the simplification direction)
 **Base branch:** main
 **Related:**
-- **Order.** Assumes [`portable-go-plan.md`](portable-go-plan.md) is completed and merged into `main`, including WASM JSON (Phase 5), SIMD (Phase 6) and the docs and baseline work (Phase 7). Must be merged **before [`v1.9.0/stdlib-in-go-plan.md`](../v1.9.0/stdlib-in-go-plan.md) starts**.
-- **Relation to v1.9.0.** v1.9.0 becomes the last feature release of the JS engine and the [`v2.0.0`](../v2.0.0/native-go-engine.md) baseline, and it deletes most of the hand-written stdlib emitters and type tables. This plan therefore leaves the stdlib code that v1.9.0 deletes alone, restructures everything around it, and finishes by rewriting the v1.9.0 plan's file references for the new layout.
-- **Folder names** follow the v2.0.0 package layout where one exists (`src/cli/` ↔ `internal/cli`, `src/lexer/` ↔ `internal/lexer`, `src/link/` ↔ `internal/compiler`).
+- **Order.** Assumes [`portable-go-plan.md`](portable-go-plan.md) is completed and merged into `main`, including WASM JSON (Phase 5), SIMD (Phase 6), the docs and baseline work (Phase 7) and the simplification Phases 8–11 (manifest and conformance retired, stdlib pruned, WASM accessor refs and clone elision removed). Must be merged **before [`v1.9.0/stdlib-in-go-plan.md`](../v1.9.0/stdlib-in-go-plan.md) starts**.
+- **Relation to v1.9.0.** v1.9.0 deletes most of the hand-written stdlib emitters and type tables. This plan therefore leaves the stdlib code that v1.9.0 deletes alone, restructures everything around it, and finishes by rewriting the v1.9.0 plan's file references for the new layout.
+- **Folder names** group files by pipeline stage and role (`src/cli/`, `src/lexer/`, `src/link/`). The v2.0.0 native engine is shelved, so they no longer need to mirror its package layout.
 - **External review.** Incorporates an external structure review (2026-10-26). The points that were not adopted are recorded in the boundary matrix.
 
-**Release note:** No change to the compiler's behaviour or output. The examples are no longer committed pre-built: run `npm run build` before opening one in a browser. The published npm package is smaller.
+**Release note:** No change to the compiler's behaviour or output. The examples are no longer committed pre-built: run `npm run build` before opening one in a browser.
 
 ---
 
 ## Goal
 
-Two releases of the JS engine still have to land on this source tree before the v2.0.0 port: v1.9.0, which moves the stdlib to Go, and the port itself. This plan prepares the tree for both, and fixes these problems in it today:
+v1.9.0, which moves the stdlib to Go, still has to land on this source tree, and the tree stays the long-term home of the compiler now that the native Go port is shelved. This plan prepares the tree for v1.9.0, and fixes these problems in it today:
 - an architecture gate with holes in it
 - a WASM backend that also drives the whole pipeline and reaches into the JS backend
 - JS codegen that runs the parser
@@ -24,20 +24,20 @@ Two releases of the JS engine still have to land on this source tree before the 
 - a flat `src/`
 - build output and example config committed alongside the sources
 
-It does this without changing what the compiler emits. Every phase is a pure move or split, and each is proven by byte-identical example output, unchanged unit, golden and conformance suites, and a stricter architecture gate.
+It does this without changing what the compiler emits. Every phase is a pure move or split, and each is proven by byte-identical example output, unchanged unit and golden suites, and a stricter architecture gate.
 
 The large WASM stdlib files (`wasm/stdlib/core.js` at 10,069 lines, `bytes.js` at 6,716) and the typechecker stdlib tables are **not** split here. v1.9.0 deletes most of their content package by package (its Tasks 3.2–8.4 and 9.2), so splitting them first would only make v1.9.0 delete code from new files under new names.
 
 **Done means:**
-- **Layer coverage:** every `src/**/*.js` and `stdlib/**/*.go` file belongs to a Sentrux layer, except the two documented false positives. `src/backend/js/` and `src/backend/wasm/` import each other only through the allowlisted boundary edge. `node scripts/check-layers.js`, run inside `npm run check`, fails on a new unlayered file, a dead glob or a new cross-backend import, and `sentrux check && sentrux gate` pass.
-- **Unchanged output:** `npm run build` produces byte-identical `example/*/app.js` and `example/hybrid/app.wasm`, and `prep` a byte-identical `example/preact/vendor.js`, compared with the [baseline hashes](#baseline-build-hashes) recorded on `main` before Phase 1. `node test/unit/run.js` (2680 tests at baseline, plus new ones), `npm run conformance` (40/40) and `npm run test:e2e` all pass.
+- **Layer coverage:** every `src/**/*.js` and `stdlib/**/*.go` file belongs to a Sentrux layer, except the documented false positive (`stdlib/math/extra.go`). `src/backend/js/` and `src/backend/wasm/` import each other only through the allowlisted boundary edge. `node scripts/check-layers.js`, run inside `npm run check`, fails on a new unlayered file, a dead glob or a new cross-backend import, and `sentrux check && sentrux gate` pass.
+- **Unchanged output:** `npm run build` produces byte-identical `example/*/app.js` and `example/hybrid/app.wasm`, and `prep` a byte-identical `example/preact/vendor.js`, compared with the [baseline hashes](#baseline-build-hashes) recorded on `main` before Phase 1. `node test/unit/run.js` (count recorded with the baseline hashes, plus new ones) and `npm run test:e2e` pass.
 - **File sizes and imports**, measured with `wc -l` and grep:
   - `src/backend/wasm/index.js` ≤ 1,800 lines (today 4,665) and imports nothing from `src/lexer/` or `src/parser/`.
   - `src/compiler.js` ≤ 750 (today 1,440).
   - `src/index.js` ≤ 220 (today 371).
   - `src/backend/js/templ.js` does not import the parser.
-- **Repo and package:** `git ls-files 'example/*/app.js' 'example/*/app.wasm'` is empty. The root `package.json` has no `gofront` block. `npm pack --dry-run` lists no `stdlib/manifest.json`. CI (`npm test`, `test:e2e`, Pages deploy) passes from a clean checkout.
-- **Plan paths:** every repository path cited in `plans/v1.9.0/stdlib-in-go-plan.md` and `plans/v2.0.0/native-go-engine.md` that refers to today's tree exists after this plan. Paths that a plan creates itself (for example `src/backend/js/natives.js`) are exempt. Checked by `test/unit/compiler/plan-paths.test.js`.
+- **Repo and package:** `git ls-files 'example/*/app.js' 'example/*/app.wasm'` is empty. The root `package.json` has no `gofront` block. CI (`npm test`, `test:e2e`, Pages deploy) passes from a clean checkout.
+- **Plan paths:** every repository path cited in `plans/v1.9.0/stdlib-in-go-plan.md` and `plans/roadmap.md` that refers to today's tree exists after this plan. The shelved `plans/v2.0.0/native-go-engine.md` is left as it is. Paths that a plan creates itself (for example `src/backend/js/natives.js`) are exempt. Checked by `test/unit/compiler/plan-paths.test.js`.
 
 ---
 
@@ -47,18 +47,17 @@ A change is in scope when it moves, splits, renames or deletes code, config or f
 
 | Category | Rule | Examples / Members | Reason (Excluded rows) |
 |---|---|---|---|
-| **In scope: core** | Pure move or split, output byte-identical | Gate: Sentrux layer coverage, guard script with a cross-backend check, dead WASM shims removed, stdlib mixins registered from one list. Repo: `.gitignore` dedupe, looped `build`, example outputs untracked, preact vendor config in `example/preact/gofront.json`. CLI logic out of `src/index.js`. `src/link/` from `compiler.js`. `compileWasm` moved to `compiler.js`; `wasm/index.js` split. `fmt-types.js` to `src/backend/shared/`. Templ expressions parsed in the templ parser. New folders: `src/cli/`, `src/lexer/`, `src/parser/templ.js`, `test/unit/cli/`, `test/perf/`; test discovery. `typechecker/stdlib/index.js`. `manifest.json` out of the npm package. File references in the roadmap, AGENTS.md and the v1.9.0 and v2.0.0 plans | |
+| **In scope: core** | Pure move or split, output byte-identical | Gate: Sentrux layer coverage, guard script with a cross-backend check, dead WASM shims removed, stdlib mixins registered from one list. Repo: `.gitignore` dedupe, looped `build`, example outputs untracked, preact vendor config in `example/preact/gofront.json`. CLI logic out of `src/index.js`. `src/link/` from `compiler.js`. `compileWasm` moved to `compiler.js`; `wasm/index.js` split. `fmt-types.js` to `src/backend/shared/`. Templ expressions parsed in the templ parser. New folders: `src/cli/`, `src/lexer/`, `src/parser/templ.js`, `test/unit/cli/`, `test/perf/`; test discovery. `typechecker/stdlib/index.js`. File references in the roadmap, AGENTS.md and the v1.9.0 plan | |
 | **Excluded: superseded by v1.9.0** | v1.9.0 deletes or replaces this code | Splitting `wasm/stdlib/core.js` per package (slices, strings, maps, sort, errors, utf8, bits, strconv) | v1.9.0 Tasks 3.2–3.4, 4.1–4.3, 6.3, 6.4, 7.3 and 8.4 delete those emitters. What remains afterwards (fmt, math, `errors.As`, `strings.Builder`, shared helpers) is small enough that splitting it then is a v1.9.x decision |
 | **Excluded: superseded by v1.9.0** | | Splitting `wasm/stdlib/bytes.js` (`Buffer` methods) | v1.9.0 Task 5.2's done-when is "`bytes.js` in the WASM stdlib directory is gone" |
 | **Excluded: superseded by v1.9.0** | | Splitting the typechecker `stdlib/core.js` and `extended.js` per package | v1.9.0 replaces the tables with Go declarations and Task 9.2 deletes what is left over. Only the entry-file rename (`stdlib.js` → `stdlib/index.js`) is done here |
-| **Excluded: superseded by v1.9.0** | | A per-package "where does a stdlib package live" table in `docs/architecture.md` | v1.9.0 changes the answer for about 25 packages (one Go directory plus natives, instead of four places). The table belongs in v1.9.0 Task 9.3, which documents the new layout. Task 7.4 adds it there as a suggestion |
-| **Excluded: deferred** | Valid, but not in this plan | Splitting `emit-stmts.js` (3.6k), `emit-exprs.js` (3.4k), `boundary.js` (3.3k), `js/expressions.js` (2.9k), `js/runtime.js` (2.8k), `wasm/stdlib/io.js` (3.6k), `packages.js` (2.4k), `time.js` (2.2k) | Each is one cohesive dispatch mixin or one runtime. v1.9.0 edits `boundary.js`, `io.js`, `packages.js`, `time.js` and the name-coupled sites in the others, and v2.0.0 rewrites them all |
+| **Excluded: superseded by v1.9.0** | | A per-package "where does a stdlib package live" table in `docs/architecture.md` | v1.9.0 changes the answer for about 25 packages (one Go directory plus natives, instead of four places). The table belongs in v1.9.0 Task 9.3, which documents the new layout (already listed there) |
+| **Excluded: deferred** | Valid, but not in this plan | Splitting `emit-stmts.js` (3.6k), `emit-exprs.js` (3.4k), `boundary.js` (3.3k), `js/expressions.js` (2.9k), `js/runtime.js` (2.8k), `wasm/stdlib/io.js` (3.6k), `packages.js` (2.4k), `time.js` (2.2k) | Each is one cohesive dispatch mixin or one runtime. v1.9.0 edits `boundary.js`, `io.js`, `packages.js`, `time.js` and the name-coupled sites in the others |
 | **Excluded: deferred** | | Type-checking expressions inside `.templ` bodies | Today `{ name + undefinedVar }` passes `check` and `build` (see Verified Gaps). Fixing it changes diagnostics, so it is a behaviour change, logged in `plans/follow-ups.md`. Phase 5 does the groundwork: the AST then exists before the checker runs |
-| **Excluded: deferred** | | Removing `wasm/boundary.js` → `js/runtime.js` (the `HELPER_*` imports) | Not a leak: the boundary emits JS facade code that calls the JS runtime helpers. v2.0.0 moves them to `runtime/js/`. The guard script allowlists exactly this edge |
+| **Excluded: deferred** | | Removing `wasm/boundary.js` → `js/runtime.js` (the `HELPER_*` imports) | Not a leak: the boundary emits JS facade code that calls the JS runtime helpers. The guard script allowlists exactly this edge |
 | **Excluded: deferred** | | Moving `fmt-types.js` into `src/lower/` (reviewer option) | It formats Go types for `%T`/`%v` at emit time and analyses format strings, which is codegen work used by both backends, not lowering. `fmt` stays an emitter in v1.9.0, so the file stays |
-| **Excluded: deferred** | | Moving `src/dts-parser.js` into `src/parser/` | It is part of package resolution (imported only by `resolver.js`), parses TypeScript rather than Go, and has its own `internal/dts` in v2.0.0 |
+| **Excluded: deferred** | | Moving `src/dts-parser.js` into `src/parser/` | It is part of package resolution (imported only by `resolver.js`), and parses TypeScript rather than Go |
 | **Excluded: deferred** | | Folder-only Sentrux globs for the lexer (`src/lexer/*`) | `tokens.js` (types layer 7) and `lexer.js` (layer 6) share the folder. One glob would erase their ordering |
-| **Excluded: deferred** | | Putting `manifest.json`, `scripts/manifest-overrides.json` and `test/unit/types/stdlib-coverage.gaps.json` in one directory (reviewer option) | Each sits beside its only reader or writer. v1.9.0 Task 9.1 changes the manifest generator and gate, so moving them now would conflict. Excluding the manifest from `files` removes its cost to the package |
 | **Excluded: deferred** | | Untracking `example/preact/vendor.js` | Only `gofront prep` writes it, and `npm run build` does not run `prep`. Generating it in CI changes the build pipeline |
 | **Excluded: deferred** | | Raising Sentrux limits or editing `.sentrux/baseline.json` by hand | This plan must pass the existing gate, not loosen it |
 
@@ -68,12 +67,14 @@ A change is in scope when it moves, splits, renames or deletes code, config or f
 
 All probes ran at `ade5edb` on `feat/portable-go`, using a throwaway `git worktree` or temporary untracked files under `.probes/` (removed afterwards). At that commit portable-go Phases 4.4–7.2 were still open. The structural findings hold for the finished state, but line counts and line numbers will have moved. Each phase's first task re-runs the relevant `wc -l`/`grep -n` probe on its base commit and splits along the boundaries it finds, not the line numbers below.
 
+**After portable-go Phases 8–11** (added 2026-10-27), several rows shrink or disappear: `stdlib/manifest.json`, `scripts/stdlib-manifest.js` and `test/conformance/` are deleted; the pruned packages (`container/*`, `encoding/base32`, `encoding/csv`, `sync/atomic`, `unicode/utf16`, `hash/{adler32,crc32,fnv}`, …) are gone, so most nested-stdlib gaps and the `fnv` false positive go with them; `wasm/index.js` loses the accessor helpers and the separate panic helpers. Rows marked *(obsolete)* are kept for history only.
+
 | Area | Finding | Evidence & Probe Reference |
 |---|---|---|
 | Sentrux: unlayered `src` | `src/colors.js`, `src/project-config.js`, `src/pwa.js`, `src/typechecker/constants.js` and `src/typechecker/const-fold.js` are in no layer, so violations involving them pass the gate | Probe: a glob matcher over `.sentrux/rules.toml` `paths` vs `src/**` prints those 5 plus `typechecker/expressions.js` as `UNLAYERED`. Injecting `import "../backend/js/index.js"` into `typechecker/constants.js` → `✓ All rules pass`; the same import in the layered `typechecker/statements.js` → `✗ layer_direction ... typechecker must not depend on backend`. `import "./pwa.js"` in `src/lexer.js` → `✓` |
 | Sentrux: dead glob | The typechecker layer lists `src/typechecker/expressions/*`, which does not exist. Sentrux still assigns `expressions.js` a layer | Probe: inject into `typechecker/expressions.js` → `✗ ... typechecker must not depend on backend` |
 | Sentrux: nested stdlib | `*` matches one directory level, so `stdlib/container/{heap,list,ring}`, `encoding/base32`, `sync/atomic`, `unicode/utf16` and `unicode/utf8/bytes.go` are unchecked. `**` works | Probe: `import "net/url"` in `stdlib/unicode/utf16/utf16.go` → `✓`; the same in `stdlib/sort/sort.go` → `✗ stdlib-leaf must not depend on stdlib-top`; with `stdlib/unicode/**` → `✗` |
-| Sentrux: hidden violations | Layering everything reveals exactly one violation, `stdlib/hash/fnv/fnv.go` → `src/backend/js/stdlib/bits.js`. This is the documented `math/bits` suffix false positive, so `hash` needs explicit globs | Probe: rules rewritten (6 src files added, `stdlib/*/` → `/**`) → that single `✗` |
+| Sentrux: hidden violations *(obsolete after portable-go Phase 9 removes `hash/fnv`)* | Layering everything reveals exactly one violation, `stdlib/hash/fnv/fnv.go` → `src/backend/js/stdlib/bits.js`. This is the documented `math/bits` suffix false positive, so `hash` needs explicit globs | Probe: rules rewritten (6 src files added, `stdlib/*/` → `/**`) → that single `✗` |
 | Review claim: upward imports | **Not confirmed as gate leaks.** In `rules.toml` a layer may import layers with a *higher* order number, and backend (2) → lower (3), typechecker (4), parser (5), lexer (6) is the allowed direction. The real problems are the next three rows | `.sentrux/rules.toml` header. `grep -rnE 'from "(\.\./)+(lexer\|tokens\|parser/\|typechecker/\|lower/)' src/backend` → 20 edges, none flagged |
 | `compileWasm` in the backend | `wasm/index.js:3566` `compileWasm(source)` runs Lexer → Parser → TypeChecker → lower → `compileWasmModule`. It is a single-file test driver, used by `test/unit/helpers.js:16` and imported directly by `wasm/scalars.test.js`, `wasm/arrays.test.js` and `types/arrays.test.js`. It is the only reason `wasm/index.js` imports `lexer.js`, `parser/index.js` and `typechecker/index.js` | `grep -rn 'compileWasm\b' src test` |
 | Parser in JS codegen | `backend/js/templ.js:5` imports `Parser` and builds new parsers during codegen (`:247` `parseFor`, `:297/:306/:317` `parseExpr`) for templ `{ expr }` and `for` headers | `grep -n 'new Parser' src/backend/js/templ.js` → 4 sites |
@@ -84,13 +85,13 @@ All probes ran at `ade5edb` on `feat/portable-go`, using a throwaway `git worktr
 | `wasm/index.js` | 4,665 lines: `ModuleEmitter` (298–2360), `compileWasmModule` (2459–3331), about 1,300 lines of pre-scan and global-init helpers (3331–4665), and `compileWasm` (3566). v1.9.0 Tasks 5.2, 5.3, 6.1 and 6.2 unwind name-coupled sites in this file | `grep -nE '^(export )?(class\|function\|const) ' src/backend/wasm/index.js` |
 | `compiler.js` | 1,440 lines in the support layer, with three jobs: chunk and source-map merging (95–180), WASM unit linking (179–470), and the Go-source stdlib load/mangle/check/emit pipeline (473–933, incl. `checkStdlibPrograms`, which v1.9.0 Task 2.5 edits for lazy checking). Plus `resolveImports` and the public `compile*` entry points | `grep -n '^function\|^export function' src/compiler.js` |
 | CLI entry | `src/index.js` (371 lines) contains `copyProjectAssets` (231), the single-shot flow (243–321) and the watch-mode reporters (332–368), contrary to the AGENTS.md rule "Never modify `src/index.js` for logic" | `src/index.js:231-368` |
-| Flat `src/` | The lexer stage (`lexer.js`, `templ-lexer.js`, `tokens.js`), a parser-stage file (`templ-parser.js`), CLI/dev tooling (`cli-core`, `dev-server`, `test-runner`, `asset-manager`, `vendor`, `pwa`, `project-config`, `colors`, `minifier`) and pipeline drivers all sit in `src/`. v2.0.0 maps the tooling to `internal/cli`, `internal/devserver` and `internal/minify` | `ls src`. `native-go-engine.md` §1.1 |
+| Flat `src/` | The lexer stage (`lexer.js`, `templ-lexer.js`, `tokens.js`), a parser-stage file (`templ-parser.js`), CLI/dev tooling (`cli-core`, `dev-server`, `test-runner`, `asset-manager`, `vendor`, `pwa`, `project-config`, `colors`, `minifier`) and pipeline drivers all sit in `src/` | `ls src` |
 | Entry-file convention | `src/typechecker/stdlib.js` sits beside `src/typechecker/stdlib/`, while both backend `stdlib/` folders use an `index.js` | `ls src/typechecker` |
 | v1.9.0 overlap | The v1.9.0 plan (on `main`, 2026-10-23) migrates `sort`, `slices`, `maps`, `errors`, `unicode/utf8`, `path`, `html`, `bytes`, `io`, `strings`, encodings, `sha256`, `bits`, `rand`, `sync`, `time` and `strconv` to Go. It targets `wasm/stdlib/` 20,717 → ≤ 8,000 lines. 14 of its task lines edit `wasm/stdlib/core.js`, 8 the typechecker `core`/`extended` tables, 2 `wasm/stdlib/bytes.js` (deleted in Task 5.2) | `git show main:plans/v1.9.0/stdlib-in-go-plan.md`, `grep -c` per path |
 | v1.9.0 stale paths | The v1.9.0 plan predates PR #53 and this plan. It cites `runtime/stdlib/` 29 times, plus `src/lexer.js`, `src/cli-core.js`, `src/compiler.js` (`checkStdlibPrograms`), `src/backend/wasm/index.js` sites, `test/e2e/perf/` (4) and "add to `TEST_FILES`" | `grep -c` per path on the same file |
-| Manifest in the npm package | `stdlib/manifest.json` (377,470 bytes) is shipped because `files` includes `stdlib/`, but no runtime code loads it (`src/` only mentions it in comments). It is 11% of the unpacked package (3.43 MB) and about 23 KB of the 617 KB tarball | `npm pack --dry-run --json --ignore-scripts` → 159 files, unpacked 3,432,186, tarball 616,821 |
-| Other stale paths | The roadmap's v2.0.0 theme and `native-go-engine.md:92` say the *v1.8.0* stdlib is in `runtime/stdlib/` (moved to `stdlib/` by PR #53, `b34b52f`). The roadmap's v1.8.0 row says `src/stdlib/go/`. `native-go-engine.md` §1.1 describes the *v2.0.0* target layout with `runtime/stdlib/`, which is a design choice and not stale | `grep -n 'runtime/stdlib\|src/stdlib/go' plans/roadmap.md plans/v2.0.0/native-go-engine.md` |
-| Perf in `e2e/` | `test/e2e/perf/` holds Node/V8 scripts, not Playwright specs. Playwright skips them only because each project's `testMatch` names its specs. Referenced by `package.json` `test`/`bench`, `docs/hybrid-wasm.md:385`, and the v1.9.0 and v2.0.0 plans | `playwright.config.js:4,15-35` |
+| Manifest in the npm package *(obsolete: deleted by portable-go Task 8.1)* | `stdlib/manifest.json` (377,470 bytes) is shipped because `files` includes `stdlib/`, but no runtime code loads it (`src/` only mentions it in comments). It is 11% of the unpacked package (3.43 MB) and about 23 KB of the 617 KB tarball | `npm pack --dry-run --json --ignore-scripts` → 159 files, unpacked 3,432,186, tarball 616,821 |
+| Other stale paths *(mostly obsolete: v2.0.0 shelved 2026-10-27; roadmap rewritten)* | The roadmap's v2.0.0 theme and `native-go-engine.md:92` say the *v1.8.0* stdlib is in `runtime/stdlib/` (moved to `stdlib/` by PR #53, `b34b52f`). The roadmap's v1.8.0 row says `src/stdlib/go/`. `native-go-engine.md` §1.1 describes the *v2.0.0* target layout with `runtime/stdlib/`, which is a design choice and not stale | `grep -n 'runtime/stdlib\|src/stdlib/go' plans/roadmap.md plans/v2.0.0/native-go-engine.md` |
+| Perf in `e2e/` | `test/e2e/perf/` holds Node/V8 scripts, not Playwright specs. Playwright skips them only because each project's `testMatch` names its specs. Referenced by `package.json` `test`/`bench`, `docs/hybrid-wasm.md:385`, and the v1.9.0 plan | `playwright.config.js:4,15-35` |
 | Example config in root | The root `package.json` has a 30-line `gofront.vendor` block that only serves `example/preact`. `project-config.js` already reads `gofront.json` from a project root, and vendor destinations must lie inside it | `src/project-config.js:2-19`. Probe: `prep` with the root config and with a temporary `example/preact/gofront.json` → both `no bundler found`, because `esbuild` (a declared devDependency) is not installed locally. The byte comparison happens in Task 2.4 after `npm ci` |
 | Committed build output | `example/*/app.js` (6) and `example/hybrid/app.wasm` are tracked, stale (rebuilding at HEAD changes 6 of 7) and touched by 40 commits. Nothing reads them from git | Worktree `npm run build && git status --short example` → 6 `M` |
 | Build determinism | Two consecutive builds are byte-identical | `npm run build` twice → `sha256sum -c` all `OK` |
@@ -98,7 +99,7 @@ All probes ran at `ade5edb` on `feat/portable-go`, using a throwaway `git worktr
 | `.gitignore` | 8 patterns appear twice | `grep -vE '^\s*(#\|$)' .gitignore \| sort \| uniq -d` |
 | Unit test layout | `test/unit/compiler/` mixes CLI/tooling tests with compiler internals (21 files). `run.js` hand-lists 80 files; complete today, but a forgotten file never runs | Set comparison of `TEST_FILES` vs `find` → 80/80 |
 | Public surface | No `main` or `exports`, only `bin: src/index.js` and `files: [src/, stdlib/]` | `node -e 'require("./package.json").main'` → `undefined` |
-| Baseline suites | Unit 2680/2680 (16 s), conformance 40/40 (5 s), `sentrux check` ✓ (Quality 6258), `sentrux gate` ✓ | At `ade5edb` |
+| Baseline suites | Unit 2680/2680 (16 s), conformance 40/40 (5 s; harness deleted by portable-go Task 8.3), `sentrux check` ✓ (Quality 6258), `sentrux gate` ✓ | At `ade5edb` |
 
 ### Baseline build hashes
 
@@ -153,7 +154,7 @@ v1.9.0 then adds `src/backend/js/natives.js` and `src/backend/wasm/natives.js` n
 - Check 1: every `src/**/*.js` and `stdlib/**/*.go` file matches some layer.
 - Check 2: no glob is dead.
 - Check 3 (cross-backend): it scans import specifiers in `src/backend/js/**` and `src/backend/wasm/**` and fails on an import of the other backend, except `ALLOW_CROSS = [["src/backend/wasm/boundary.js", "src/backend/js/runtime.js"]]`.
-- `ALLOW` lists the documented unlayered files (`stdlib/math/extra.go`, `stdlib/hash/fnv/fnv.go`) with reasons.
+- `ALLOW` lists the documented unlayered file (`stdlib/math/extra.go`) with its reason.
 - It exports `findLayerGaps(tomlText, files)` and `findCrossBackendImports(sources)` for unit tests, and runs in `npm run check` before `sentrux check`.
 
 Sentrux only supports a linear order, so it cannot forbid imports between peer layers. The script covers that.
@@ -162,7 +163,7 @@ Sentrux only supports a linear order, so it cannot forbid imports between peer l
 - `colors`, `project-config` and `pwa` go to support (1).
 - `typechecker/constants`, `const-fold` and `expressions` go to typechecker (4).
 - The dead `expressions/*` glob is removed.
-- Nested stdlib packages use `**` (`container/**`, `encoding/**`, `sync/**`, `unicode/**`). `hash` stays explicit.
+- Nested stdlib packages use `**` (`encoding/**`, `unicode/**`, `internal/**`), re-probed against the pruned tree.
 - After Phase 6: support = `src/compiler.js`, `src/resolver.js`, `src/dts-parser.js`, `src/link/*`, `src/cli/*`. Lexer = `src/lexer/lexer.js`, `src/lexer/templ-lexer.js`. Types = `src/lexer/tokens.js`, `src/typechecker/types.js`. Parser = `src/parser/*`. Backend gains `src/backend/shared/*`.
 - New Go-source packages that v1.9.0 adds under `stdlib/` must be layered, or the guard fails. That is intended: it forces each new package into the dependency order v1.9.0's invariant describes (`cmp`, `iter`, `errors`, `io`, `unicode/utf8` as the base).
 
@@ -175,7 +176,7 @@ Sentrux only supports a linear order, so it cannot forbid imports between peer l
 - `prescan.js`: `_uses*`, `_scanImportsInBody`, `_scanInterface*`, `_scanFuncSigInterfaces`, `_someNode`, `importsAnyOf`, `hasErrorUsage`.
 - `globals.js`: `_collectPackage{Consts,Globals}`, `_zero*Const`, `_arrayShape`, `_orderConstInits`, `_makeGlobalInitFunc`, `_makeInterfaceDispatcher`.
 
-`index.js` keeps `compileWasmModule`, `STDLIB_IMPORTS` and its other exports under the same names and values (snapshot test). Task 7.4 maps the name-coupled sites that v1.9.0 cites in "`wasm/index.js`" to their new file.
+`index.js` keeps `compileWasmModule`, `STDLIB_IMPORTS` and its other exports under the same names and values (snapshot test). Task 7.3 maps the name-coupled sites that v1.9.0 cites in "`wasm/index.js`" to their new file.
 
 **Templ expressions parsed by the templ parser.** `TemplParser`, which already imports `Parser` and sits in the parser layer, calls `parseExpr`/`parseFor` on the token runs it stores today, with the same synthetic EOF token. It puts the result on the node (`node.expr`, `node.forStmt`). `backend/js/templ.js` reads those fields and no longer imports `parser/`. It keeps the `tokens.js` import only if it needs `T` for something other than building parsers.
 
@@ -199,16 +200,12 @@ To avoid a cycle with `compiler.js`, `link/stdlib.js` takes `parseGoFrontFile`, 
 
 **Typechecker stdlib entry.** `typechecker/stdlib.js` becomes `typechecker/stdlib/index.js`, contents unchanged.
 
-**Manifest out of the npm package.** `files` becomes `["src/", "stdlib/", "!stdlib/manifest.json"]`. The file stays at the same path, so v1.9.0's Task 9.1 (manifest `implementation` field), the scripts, the tests and v2.0.0's embed plan are unaffected.
-
-**Cross-plan path refresh.** The last task rewrites the file references in the roadmap, `AGENTS.md`, `plans/v1.9.0/stdlib-in-go-plan.md` and `plans/v2.0.0/native-go-engine.md`:
-- `runtime/stdlib/` → `stdlib/` wherever a plan means today's tree. v2.0.0's own target layout keeps `runtime/stdlib/`, with "moved from `stdlib/` by the port".
+**Cross-plan path refresh.** The last task rewrites the file references in the roadmap, `AGENTS.md` and `plans/v1.9.0/stdlib-in-go-plan.md` (`runtime/stdlib/` → `stdlib/` and the `TEST_FILES` line were already fixed there on 2026-10-27; the shelved v2.0.0 plan is not touched):
 - `src/lexer.js` → `src/lexer/lexer.js`.
 - `src/cli-core.js` → `src/cli/cli-core.js`.
 - `checkStdlibPrograms` in `src/compiler.js` → `src/link/stdlib.js`.
 - `wasm/index.js` sites → the new file that holds them.
 - `test/e2e/perf/` → `test/perf/`.
-- The v1.9.0 test-plan line "New test files are added to `TEST_FILES`" is dropped.
 
 Only paths change. No task, scope or number in those plans is edited.
 
@@ -220,14 +217,13 @@ Only paths change. No task, scope or number in those plans is edited.
 - **The gate only gets stricter.** `max_cycles` stays 0, and `max_coupling`, `max_cc` and `no_god_files` are unchanged. `sentrux gate` must not report degradation, and the baseline is never edited by hand.
 - **Zero runtime dependencies.** The guard script and test discovery use only `node:` modules.
 - **Test count.** Never fewer than 2680 unit tests plus the new ones. Discovery must find the same files plus new ones.
-- **Package contents.** Apart from `stdlib/manifest.json`, `npm pack --dry-run` lists the same files before and after each phase, modulo the paths this plan renames under `src/`.
+- **Package contents.** `npm pack --dry-run` lists the same files before and after each phase, modulo the paths this plan renames under `src/`.
 
 ### 3. Edge Cases & Error Handling
 
 - **Cycles from extraction.** `link/stdlib.js` gets its dependencies injected. `compileWasm` in `compiler.js` adds a support → backend edge, which already exists. `prescan.js` and `globals.js` are free functions imported by `index.js` and `module-emitter.js` only, and never import `index.js`.
 - **Templ parse timing.** Moving `parseExpr`/`parseFor` into `TemplParser` can only change *when* a templ syntax error is raised, not its text. Task 5.2 first pins the message, position and exit code for a malformed `{ a + }` and a malformed `for` header under both `build` and `check`. If `check` reports such errors where it did not before, the task either keeps the old timing (deferring the throw) or records the change in the Release note, whichever keeps the pinned outputs and exit codes unchanged.
 - **Vendor resolution from a subdirectory.** If `prep example/preact` cannot resolve `preact` or the bundler, Task 2.4 stops and records why, instead of adding a path hack. The block then stays in the root `package.json`.
-- **`files` negation.** If npm ignores the `!` entry, fall back to listing the stdlib package directories explicitly. The Task 7.2 test is the arbiter.
 - **Fresh clone with no build.** An example opened without `npm run build` returns 404 for `app.js`. The README and `docs/usage.md` say to build first. CI builds first anyway.
 - **Moving tests.** Moved unit tests keep their directory depth. `test/perf/` is one level shallower than `test/e2e/perf/`, so its relative imports and fixture paths are rewritten and both scripts run once from the new location.
 - **Emitters added by portable-go.** The WASM JSON and SIMD emitters are registered through `stdlibEmitters` with the rest. Any JSON or SIMD code that landed in `wasm/index.js` moves with the Phase 4 split, by the same rules.
@@ -246,12 +242,12 @@ Only paths change. No task, scope or number in those plans is edited.
   - Test: `test/unit/compiler/check-layers.test.js`:
     - `findLayerGaps` on fixture TOML and file lists flags an unlayered file, a dead glob, `*` vs `**` depth, and `ALLOW`.
     - `findCrossBackendImports` flags a fixture `js → wasm` import and a non-allowlisted `wasm → js` import, and passes the `boundary.js → js/runtime.js` edge.
-    - Real-repo cases land as `todo`: they currently list 6 src + 9 stdlib files and the `core.js → fmt-types.js` edge.
+    - Real-repo cases land as `todo`: they list the unlayered src and stdlib files found on the base commit (re-probed after portable-go Phase 9) and the `core.js → fmt-types.js` edge.
   - Done when: the fixture cases pass, and the real-repo cases list exactly the files in Verified Gaps
 - [ ] Task 1.2: Complete the Sentrux layers
   - Files: `.sentrux/rules.toml`
   - Test: the real-repo layer-gap case from Task 1.1 is turned on. The cross-backend case stays `todo` until Task 5.1
-  - Done when: the layer-gap check is clean, `sentrux check` and `sentrux gate` pass, and the `rules.toml` comment documents `fnv` and `math` as the only allowed gaps
+  - Done when: the layer-gap check is clean, `sentrux check` and `sentrux gate` pass, and the `rules.toml` comment documents `math` as the only allowed gap
 - [ ] Task 1.3: Remove the dead WASM compatibility shims
   - Files: `src/backend/wasm/emit-stdlib.js` (delete), `src/backend/wasm/stdlib/index.js`, `src/backend/wasm/stdlib/core.js` (the trailing alias line only); also the comment at `src/typechecker/types.js:105`
   - Test: none new (deletion only). `grep -rn 'emit-stdlib\|Phase[678]Emitter\|StdlibEmitter\b' src test` must be empty
@@ -301,7 +297,7 @@ Only paths change. No task, scope or number in those plans is edited.
 - [ ] Task 3.3: Go-source stdlib pipeline → `src/link/stdlib.js` with injected dependencies
   - Files: `src/compiler.js`, `src/link/stdlib.js`
   - Test: `link.test.js`: the mangling helper renames a top-level stdlib declaration with the package suffix, and leaves type parameters and overlay names alone
-  - Done when: conformance is 40/40, `stdlib-go.test.js` passes, `sentrux check` reports 0 cycles, and `wc -l src/compiler.js` ≤ 700
+  - Done when: `stdlib-go.test.js` passes, `sentrux check` reports 0 cycles, and `wc -l src/compiler.js` ≤ 700
 
 ### Phase 4: `wasm/index.js` split
 
@@ -358,7 +354,7 @@ Only paths change. No task, scope or number in those plans is edited.
   - Test: the Task 6.1 discovery test
   - Done when: the unit pass count is unchanged
 - [ ] Task 6.5: `test/e2e/perf/` → `test/perf/`
-  - Files: `git mv test/e2e/perf test/perf`; relative imports and fixture paths in `raycast-bench.js` and `zero-alloc.js`; `package.json` (`test`, `bench`)
+  - Files: `git mv test/e2e/perf test/perf`; relative imports and fixture paths in `raycast-bench.js`, `zero-alloc.js`, `json-bench.js` and `particle-bench.js`; `package.json` (`test`, `bench`)
   - Test: `node test/perf/zero-alloc.js` passes (already part of `npm test`). `node --expose-gc test/perf/raycast-bench.js --tris 1000 --rays 1000` completes
   - Done when: `npm test` passes, `ls test/e2e` has only specs and helpers, and `npm run test:e2e` is unchanged
 - [ ] Task 6.6: Update the path references in the docs and agent guide
@@ -366,30 +362,23 @@ Only paths change. No task, scope or number in those plans is edited.
   - Test: `grep -rnE 'src/(lexer|templ-lexer|templ-parser|tokens|dev-server|pwa|minifier|vendor|asset-manager|test-runner|colors|project-config|cli-core)\.js|test/e2e/perf' docs AGENTS.md .sentrux package.json` is empty
   - Done when: grep is empty
 
-### Phase 7: Package footprint & cross-plan paths
+### Phase 7: Typechecker entry & cross-plan paths
 
 - [ ] Task 7.1: `typechecker/stdlib.js` → `typechecker/stdlib/index.js`
   - Files: `src/typechecker/stdlib.js` → `src/typechecker/stdlib/index.js` (`git mv`), its importers
-  - Test: none new (rename). The full unit and conformance suites pass
+  - Test: none new (rename). The full unit suite passes
   - Done when: `ls src/typechecker/stdlib.js` fails, and the hashes match
-- [ ] Task 7.2: Keep `stdlib/manifest.json` out of the npm package
-  - Files: `package.json` (`files`)
-  - Test: `test/unit/compiler/manifest.test.js`: `npm pack --dry-run --json --ignore-scripts` lists no `stdlib/manifest.json` and still lists every `stdlib/**/*.go` and `src/index.js`. Fails first
-  - Done when: the test passes, and the unpacked size is smaller than on the Phase 7 base commit
-- [ ] Task 7.3: Roadmap and v2.0.0 plan paths
-  - Files: `plans/roadmap.md`, `plans/v2.0.0/native-go-engine.md`
-    - `plans/roadmap.md`: the v1.8.0 row's `src/stdlib/go/` → `stdlib/`; the v2.0.0 theme says the stdlib is in `stdlib/` and moves to `runtime/stdlib/` in the port.
-    - `plans/v2.0.0/native-go-engine.md`: `:92` and every "v1.8.0 … `runtime/stdlib/`" statement → `stdlib/`. The §1.1 target layout keeps `runtime/stdlib/` and notes "moved from `stdlib/`". JS-engine source paths it cites (`src/vendor.js`, `test/e2e/perf/`, …) match the new layout.
-  - Test: new `test/unit/compiler/plan-paths.test.js`: every backticked `src/…`, `stdlib/…`, `test/…` and `scripts/…` path in the two files exists, except an explicit list of paths the plans create themselves. `grep -n 'src/stdlib/go' plans/roadmap.md` is empty
-  - Done when: the test passes for both files
-- [ ] Task 7.4: v1.9.0 plan paths
+- [ ] Task 7.2: Roadmap paths
+  - Files: `plans/roadmap.md`
+    - Any JS-engine source path the roadmap cites matches the new layout (`src/cli/`, `src/lexer/`, `src/link/`, `test/perf/`).
+    - `plans/v2.0.0/native-go-engine.md` is shelved and keeps its historical paths.
+  - Test: new `test/unit/compiler/plan-paths.test.js`: every backticked `src/…`, `stdlib/…`, `test/…` and `scripts/…` path in `plans/roadmap.md` exists, except an explicit list of paths a plan creates itself
+  - Done when: the test passes
+- [ ] Task 7.3: v1.9.0 plan paths
   - Files: `plans/v1.9.0/stdlib-in-go-plan.md`, `test/unit/compiler/plan-paths.test.js` (add the file)
   - Changes (paths only; no task, scope or number changes):
-    - `runtime/stdlib/` → `stdlib/` (29 occurrences).
     - `src/lexer.js` → `src/lexer/lexer.js`, `src/cli-core.js` → `src/cli/cli-core.js`, `src/compiler.js` (`checkStdlibPrograms`) → `src/link/stdlib.js`.
     - The `wasm/index.js` name-coupled sites → the file that now holds each site (`module-emitter.js`, `prescan.js`, `globals.js` or `index.js`).
-    - `test/e2e/perf/` → `test/perf/`, and "add to `TEST_FILES`" is dropped (discovery).
-    - A one-line note in its **Depends on:** header saying it builds on this plan's layout.
-    - A suggestion line in its Task 9.3 to add the per-package stdlib location table (see the boundary matrix).
-  - Test: `plan-paths.test.js` covers `stdlib-in-go-plan.md`. Exempt: the paths it creates (`src/backend/{js,wasm}/natives.js`, `scripts/gen-pdq.js`, `scripts/pdq-template.txt`, the new `stdlib/<pkg>/*.go` files and conformance fixtures)
-  - Done when: the test passes, and the plan is marked `Status: Completed`
+    - All occurrences of `test/e2e/perf` (tasks, invariants, and test plan) → `test/perf`.
+  - Test: `plan-paths.test.js` covers `stdlib-in-go-plan.md`. Exempt: the paths it creates (`src/backend/{js,wasm}/natives.js`, `scripts/gen-pdq.js`, `scripts/pdq-template.txt`, the new `stdlib/<pkg>/*.go` files, `test/unit/stdlib/*.test.js` and `test/unit/stdlib/harness.js`)
+  - Done when: the test passes, and this plan (`repo-structure-plan.md`) is marked `Status: Completed`
