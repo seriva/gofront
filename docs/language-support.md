@@ -77,8 +77,6 @@ packages is listed in the [hybrid guide](hybrid-wasm.md#what-wasm-packages-suppo
 
 ### Standard library shims
 
-Coverage of the Go 1.26 standard library, per package:
-
 Coverage of the Go standard library, per package. Anything not listed here is not available; importing it gives an error naming the package.
 
 | Package | Targets | Notes |
@@ -93,9 +91,9 @@ Coverage of the Go standard library, per package. Anything not listed here is no
 | `crypto/sha256` | js, wasm, both | `Sum256`, `New` |
 | `encoding/base32` | js, wasm, both | Go source |
 | `encoding/base64` | js, wasm, both | Std, URL and Raw encodings |
-| `encoding/binary` | js, wasm, both | Byte-order helpers and varints |
+| `encoding/binary` | js, wasm, both | `BigEndian` and `LittleEndian` byte-order accessors, `Read`, `Write`, `Size`, `Append*`; no varints |
 | `encoding/csv` | js, wasm, both | Go source |
-| `encoding/hex` | js, wasm, both | Encode, decode, `Dump` |
+| `encoding/hex` | js, wasm, both | `EncodeToString`, `DecodeString`, `Encode`, `Decode`, `EncodedLen`, `DecodedLen` |
 | `encoding/json` | js, wasm, both | Go source; struct tags, `Marshal`, `Unmarshal`, `Decoder`, `Encoder` |
 | `errors` | js, wasm, both | `New`, `Is`, `As`, `Unwrap`, `Join` |
 | `fmt` | js, wasm, both | Print, Sprint, Fprint, Errorf, Append, `Sscan*` |
