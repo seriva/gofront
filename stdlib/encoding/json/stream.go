@@ -5,7 +5,6 @@
 package json
 
 import (
-	"bufio"
 	"bytes"
 	"internal/jsonrt"
 	"io"
@@ -80,7 +79,7 @@ func (enc *Encoder) Encode(v any) error {
 
 // A Decoder reads and decodes JSON values from an input stream.
 type Decoder struct {
-	r                     *bufio.Reader
+	r                     *jsonrt.Reader
 	useNumber             bool
 	disallowUnknownFields bool
 	offset                int64
@@ -88,7 +87,7 @@ type Decoder struct {
 
 // NewDecoder returns a new decoder that reads from r.
 func NewDecoder(r io.Reader) *Decoder {
-	return &Decoder{r: bufio.NewReader(r)}
+	return &Decoder{r: jsonrt.NewReader(r)}
 }
 
 // UseNumber causes the Decoder to unmarshal a number into an interface{} as a
@@ -114,9 +113,8 @@ func (dec *Decoder) InputOffset() int64 {
 // Buffered returns a reader of the data remaining in the Decoder's
 // buffer. The reader is valid until the next call to Decode.
 func (dec *Decoder) Buffered() io.Reader {
-	n := dec.r.Buffered()
-	if n > 0 {
-		p, _ := dec.r.Peek(n)
+	p := dec.r.Buffered()
+	if len(p) > 0 {
 		return bytes.NewReader(p)
 	}
 	return bytes.NewReader(nil)
@@ -134,7 +132,7 @@ func (dec *Decoder) More() bool {
 			dec.offset++
 			continue
 		}
-		_ = dec.r.UnreadByte()
+		dec.r.UnreadByte()
 		if b == ']' || b == '}' {
 			return false
 		}

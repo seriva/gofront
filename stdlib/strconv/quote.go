@@ -153,16 +153,6 @@ func QuoteRuneToASCII(r rune) string {
 	return quoteRuneWith(r, byte('\''), true, false)
 }
 
-// QuoteToGraphic returns a double-quoted Go string literal representing s using graphic escapes.
-func QuoteToGraphic(s string) string {
-	return quoteWith(s, byte('"'), false, true)
-}
-
-// QuoteRuneToGraphic returns a single-quoted Go character literal representing the rune using graphic escapes.
-func QuoteRuneToGraphic(r rune) string {
-	return quoteRuneWith(r, byte('\''), false, true)
-}
-
 // AppendQuote appends a double-quoted Go string literal representing s to dst.
 func AppendQuote(dst []byte, s string) []byte {
 	return appendQuotedWith(dst, s, byte('"'), false, false)
@@ -173,11 +163,6 @@ func AppendQuoteToASCII(dst []byte, s string) []byte {
 	return appendQuotedWith(dst, s, byte('"'), true, false)
 }
 
-// AppendQuoteToGraphic appends a double-quoted Go string literal representing s using graphic escapes to dst.
-func AppendQuoteToGraphic(dst []byte, s string) []byte {
-	return appendQuotedWith(dst, s, byte('"'), false, true)
-}
-
 // AppendQuoteRune appends a single-quoted Go character literal representing the rune to dst.
 func AppendQuoteRune(dst []byte, r rune) []byte {
 	return appendQuotedRuneWith(dst, r, byte('\''), false, false)
@@ -186,11 +171,6 @@ func AppendQuoteRune(dst []byte, r rune) []byte {
 // AppendQuoteRuneToASCII appends a single-quoted Go character literal representing the rune using ASCII escapes to dst.
 func AppendQuoteRuneToASCII(dst []byte, r rune) []byte {
 	return appendQuotedRuneWith(dst, r, byte('\''), true, false)
-}
-
-// AppendQuoteRuneToGraphic appends a single-quoted Go character literal representing the rune using graphic escapes to dst.
-func AppendQuoteRuneToGraphic(dst []byte, r rune) []byte {
-	return appendQuotedRuneWith(dst, r, byte('\''), false, true)
 }
 
 // CanBackquote reports whether the string s can be represented unchanged as a single-line backquoted string.

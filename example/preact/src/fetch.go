@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,26 +9,57 @@ import (
 	"js:./preact.d.ts"
 )
 
-// FetchTodosWithContext fetches todos from url using an AbortController bridged
-// to ctx via context.AfterFunc so that cancelling the context cancels the in-flight fetch.
-async func FetchTodosWithContext(ctx context.Context, url string) (loaded []Todo, err error) {
+// FetchCancel lets the caller stop an in-flight fetch, either by calling
+// Cancel or by giving it a deadline.
+type FetchCancel struct {
+	cancelled  bool
+	deadline   time.Time
+	hasLimit   bool
+	started    bool
+	controller AbortControllerWrapper
+}
+
+// NewFetchCancel returns a FetchCancel that is not cancelled and has no deadline.
+func NewFetchCancel() *FetchCancel {
+	return &FetchCancel{}
+}
+
+// Cancel marks the fetch as cancelled and aborts the request if it has started.
+func (c *FetchCancel) Cancel() {
+	c.cancelled = true
+	if c.started {
+		c.controller.abort()
+	}
+}
+
+// Err reports why the fetch should stop, or nil to keep going.
+func (c *FetchCancel) Err() error {
+	if c.cancelled {
+		return errors.New("fetch canceled")
+	}
+	if c.hasLimit && !time.Now().Before(c.deadline) {
+		return errors.New("fetch deadline exceeded")
+	}
+	return nil
+}
+
+// FetchTodosWithCancel fetches todos from url. Cancelling c, before or during
+// the request, cancels the fetch through an AbortController.
+async func FetchTodosWithCancel(c *FetchCancel, url string) (loaded []Todo, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = errors.New(fmt.Sprintf("%v", r))
 		}
 	}()
 
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return nil, ctxErr
+	if stopErr := c.Err(); stopErr != nil {
+		return nil, stopErr
 	}
 
-	controller := newAbortController()
-	stop := context.AfterFunc(ctx, func() {
-		controller.abort()
-	})
-	defer stop()
+	c.controller = newAbortController()
+	c.started = true
 
-	resp := await fetch(url, map[string]any{"signal": controller.signal})
+	resp := await fetch(url, map[string]any{"signal": c.controller.signal})
 	if resp == nil {
 		return nil, fmt.Errorf("fetch %s failed: nil response", url)
 	}
@@ -41,10 +71,12 @@ async func FetchTodosWithContext(ctx context.Context, url string) (loaded []Todo
 	return loaded, nil
 }
 
-// FetchTodosWithTimeout fetches todos with a timeout context.
+// FetchTodosWithTimeout fetches todos and gives up if the deadline has passed
+// by the time the request would start.
 async func FetchTodosWithTimeout(url string, timeout time.Duration) ([]Todo, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	items, err := await FetchTodosWithContext(ctx, url)
+	c := NewFetchCancel()
+	c.deadline = time.Now().Add(timeout)
+	c.hasLimit = true
+	items, err := await FetchTodosWithCancel(c, url)
 	return items, err
 }

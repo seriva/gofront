@@ -188,14 +188,7 @@ const HELPER_MAP = [
 
 // JS bodies of `//gofront:intrinsic` functions (names: INTRINSICS in
 // typechecker/types.js).  The WASM backend keeps their empty body.
-const JS_INTRINSICS = {
-	deadline_timer: ([key, ns, fire]) =>
-		`(globalThis.__gofrontDeadlines ??= new Map()).set(${key}, setTimeout(${fire}, Math.max(0, Number(${ns}) / 1e6)));`,
-	exit: ([code]) =>
-		`if (typeof process !== "undefined" && process.exit) process.exit(${code});`,
-	deadline_stop: ([key]) =>
-		`clearTimeout(globalThis.__gofrontDeadlines?.get(${key})); globalThis.__gofrontDeadlines?.delete(${key});`,
-};
+const JS_INTRINSICS = {};
 
 export class CodeGen {
 	// jsImports:       Map<importPath, string[]> — npm package imports to emit at top of file

@@ -52,18 +52,13 @@ order = 7
 
 # Go standard library (stdlib/, GoFront Go) — same rule: a layer can only import from layers
 # with HIGHER order numbers.
-# stdlib-top(8) → stdlib-high(9) → stdlib-mid(10) → stdlib-leaf(11)
-# stdlib/math and stdlib/hash/fnv are unlayered: they import the built-in math/bits, which
+# stdlib-high(9) → stdlib-mid(10) → stdlib-leaf(11)
+# stdlib/math is unlayered: it imports the built-in math/bits, which
 # sentrux resolves by suffix to src/backend/js/stdlib/bits.js (a false layer violation).
 
 [[layers]]
-name  = "stdlib-top"
-paths = ["stdlib/net/url/*"]
-order = 8
-
-[[layers]]
 name  = "stdlib-high"
-paths = ["stdlib/bufio/*", "stdlib/fmt/*", "stdlib/context/*", "stdlib/container/*", "stdlib/encoding/*", "stdlib/crypto/hmac/*", "stdlib/crypto/md5/*", "stdlib/crypto/sha1/*", "stdlib/crypto/sha512/*", "stdlib/hash/adler32/*", "stdlib/hash/crc32/*"]
+paths = ["stdlib/encoding/*"]
 order = 9
 
 [[layers]]
@@ -73,5 +68,5 @@ order = 10
 
 [[layers]]
 name  = "stdlib-leaf"
-paths = ["stdlib/cmp/*", "stdlib/errors/*", "stdlib/iter/*", "stdlib/sort/*", "stdlib/sync/*", "stdlib/unicode/*", "stdlib/crypto/subtle/*"]
+paths = ["stdlib/cmp/*", "stdlib/errors/*", "stdlib/iter/*", "stdlib/sort/*", "stdlib/sync/*", "stdlib/unicode/*"]
 order = 11

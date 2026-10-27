@@ -141,11 +141,59 @@ const EXCLUDED_PACKAGE_GROUPS = {
 	],
 };
 
+const TRIMMED_UNICODE_TABLES =
+	"removed in v1.8.0; range tables are not supported";
+const TRIMMED_UNICODE_CASE =
+	"removed in v1.8.0; case ranges are not supported, use ToUpper, ToLower or ToTitle";
+const TRIMMED_FSCAN =
+	"removed in v1.8.0; scanning from an io.Reader is not supported, use fmt.Sscan on the text";
+
 // reason -> package path -> excluded member names
 const EXCLUDED_MEMBER_GROUPS = {
-	"Done() returns a channel; use ctx.Err() != nil or context.AfterFunc": {
-		context: ["Context.Done"],
+	[TRIMMED_UNICODE_TABLES]: {
+		unicode: [
+			"Is",
+			"In",
+			"IsOneOf",
+			"IsMark",
+			"IsNumber",
+			"IsSymbol",
+			"IsTitle",
+			"RangeTable",
+			"Range16",
+			"Range32",
+			"Letter",
+			"Digit",
+			"Space",
+			"Upper",
+			"Lower",
+			"Punct",
+			"Symbol",
+			"Mark",
+			"Number",
+		],
 	},
+	[TRIMMED_UNICODE_CASE]: {
+		unicode: ["To", "UpperCase", "LowerCase", "TitleCase", "MaxCase"],
+	},
+	[TRIMMED_FSCAN]: {
+		fmt: ["Fscan", "Fscanf", "Fscanln"],
+	},
+	"removed in v1.8.0; this function is not supported": {
+		math: ["Gamma", "Erf"],
+	},
+	"removed in v1.8.0; not supported, use a plain struct or map": {
+		sync: ["Pool", "Map"],
+	},
+	"removed in v1.8.0; graphic quoting is not supported, use Quote or QuoteToASCII":
+		{
+			strconv: [
+				"QuoteToGraphic",
+				"QuoteRuneToGraphic",
+				"AppendQuoteToGraphic",
+				"AppendQuoteRuneToGraphic",
+			],
+		},
 	"needs math/big": {
 		"crypto/rand": ["Int", "Prime"],
 	},
@@ -165,18 +213,6 @@ const EXCLUDED_MEMBER_GROUPS = {
 	},
 	"requires coroutines; out of scope (no runtime)": {
 		iter: ["Pull", "Pull2"],
-	},
-	"ChaCha8 is deferred (code size)": {
-		"math/rand/v2": [
-			"ChaCha8",
-			"ChaCha8.AppendBinary",
-			"ChaCha8.MarshalBinary",
-			"ChaCha8.Read",
-			"ChaCha8.Seed",
-			"ChaCha8.Uint64",
-			"ChaCha8.UnmarshalBinary",
-			"NewChaCha8",
-		],
 	},
 	"files, processes and signals": {
 		os: [
@@ -405,14 +441,6 @@ const EXCLUDED_MEMBER_GROUPS = {
 	},
 	"starts a goroutine": {
 		sync: ["WaitGroup.Go"],
-	},
-	"unsafe.Pointer": {
-		"sync/atomic": [
-			"CompareAndSwapPointer",
-			"LoadPointer",
-			"StorePointer",
-			"SwapPointer",
-		],
 	},
 	"allocation counters": {
 		testing: ["AllocsPerRun"],
@@ -768,7 +796,45 @@ const EXCLUDED_MEMBER_GROUPS = {
 	},
 };
 
-export const EXCLUDED_STDLIB_PACKAGES = new Map();
+// Packages that were pruned from the lean core: import path -> reason.
+const REMOVED_PACKAGES = {
+	bufio: "removed in v1.8.0; use strings and bytes readers",
+	"net/url": "removed in v1.8.0; use the URL class from a js package",
+	context:
+		"removed in v1.8.0; use a cancel flag, or AbortController from a js package",
+	"encoding/csv":
+		"removed in v1.8.0; split lines and fields with strings.Split",
+	"container/heap":
+		"removed in v1.8.0; write the data structure in your package",
+	"container/list":
+		"removed in v1.8.0; write the data structure in your package",
+	"container/ring":
+		"removed in v1.8.0; write the data structure in your package",
+	"hash/adler32": "removed in v1.8.0; write the checksum in your package",
+	"hash/crc32": "removed in v1.8.0; write the checksum in your package",
+	"hash/fnv": "removed in v1.8.0; write the hash in your package",
+	"crypto/hmac":
+		"removed in v1.8.0; use Web Crypto (crypto.subtle) in a js package",
+	"crypto/md5":
+		"removed in v1.8.0; use Web Crypto (crypto.subtle) in a js package",
+	"crypto/sha1":
+		"removed in v1.8.0; use Web Crypto (crypto.subtle) in a js package",
+	"crypto/sha512":
+		"removed in v1.8.0; use Web Crypto (crypto.subtle) in a js package",
+	"crypto/subtle":
+		"removed in v1.8.0; use Web Crypto (crypto.subtle) in a js package",
+	"encoding/base32": "removed in v1.8.0; use encoding/base64 or encoding/hex",
+	log: "removed in v1.8.0; use fmt or println",
+	"math/rand/v2": "removed in v1.8.0; use math/rand",
+	"unicode/utf16": "removed in v1.8.0; use unicode/utf8",
+	"math/cmplx": "removed in v1.8.0; complex math is not supported",
+	"sync/atomic":
+		"removed in v1.8.0; GoFront is single-threaded, use plain variables",
+};
+
+export const EXCLUDED_STDLIB_PACKAGES = new Map(
+	Object.entries(REMOVED_PACKAGES),
+);
 for (const [reason, paths] of Object.entries(EXCLUDED_PACKAGE_GROUPS)) {
 	for (const p of paths) {
 		if (!EXCLUDED_STDLIB_PACKAGES.has(p))
@@ -777,16 +843,6 @@ for (const [reason, paths] of Object.entries(EXCLUDED_PACKAGE_GROUPS)) {
 }
 
 export const EXCLUDED_STDLIB_MEMBERS = new Map([
-	[
-		"Context.Done",
-		"Done() returns a channel; use ctx.Err() != nil or context.AfterFunc",
-	],
-	[
-		"context.Context.Done",
-		"Done() returns a channel; use ctx.Err() != nil or context.AfterFunc",
-	],
-	["rand.ChaCha8", "ChaCha8 is deferred (code size)"],
-	["rand.NewChaCha8", "ChaCha8 is deferred (code size)"],
 	["iter.Pull", "requires coroutines; out of scope (no runtime)"],
 	["iter.Pull2", "requires coroutines; out of scope (no runtime)"],
 	["time.After", "channels"],
