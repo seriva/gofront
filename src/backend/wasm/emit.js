@@ -1223,24 +1223,6 @@ export class FunctionEmitter {
 		this.releaseTemp(src, arrWType);
 	}
 
-	// Clone elision (Task 0.8b): true when the array held by local `node`
-	// may be shared with local `dstName` instead of copied, because
-	// ownership analysis proves neither is ever changed in place or aliased
-	// in this function.  `dstName` null means a hidden temporary (range).
-	_arrayCopyElidable(node, dstName) {
-		if (node?.kind !== "Ident" || !this.resolveLocal(node.name)) return false;
-		if (
-			node._type?.kind === "pointer" ||
-			!isArrayType(node._type, this.mod.checker)
-		)
-			return false;
-		const ctx = this.mod.lowerResult?.ownership?.get(
-			this.rootFuncDecl._sourceDecl ?? this.rootFuncDecl,
-		);
-		if (!ctx?.arrayShareable(node.name)) return false;
-		return dstName === null || ctx.arrayShareable(dstName);
-	}
-
 	// Go copies structs and arrays on assignment.  After `node` has been
 	// emitted (value on the stack), copy it unless it is already a fresh
 	// temporary (composite literal, call result, or a struct `*p` deref) or not
