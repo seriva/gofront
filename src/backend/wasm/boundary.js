@@ -297,14 +297,12 @@ function classifyPointer(t, mod) {
 	if (base.k === "time" && !base.ptr) return { ...base, ptr: true };
 	const boxInfo = mod.getBoxType(t.base);
 	const ptrInfo = mod.getPtrType ? mod.getPtrType(t.base) : null;
-	const accInfo = mod.getAccType ? mod.getAccType(t.base) : null;
 	const key = `${base.k}${base.unsigned ? "_u" : ""}_${boxInfo.typeIndex}`;
 	return {
 		k: "ptr_box",
 		base,
 		boxInfo,
 		ptrInfo,
-		accInfo,
 		key,
 		wType: ptrInfo
 			? {
@@ -1369,7 +1367,7 @@ export function addBoundaryHelpers(mod, meta) {
 	}
 
 	for (const [key, desc] of needs.boxes) {
-		const { boxInfo, ptrInfo, accInfo } = desc;
+		const { boxInfo } = desc;
 		const ref = desc.wType;
 		const ti = boxInfo.typeIndex;
 		const w = boxInfo.wType;
@@ -1379,172 +1377,33 @@ export function addBoundaryHelpers(mod, meta) {
 			[EXT],
 			[...getIn(0, w), { op: "struct.new", typeIndex: ti }, ...toExt(ref)],
 		);
-		if (ptrInfo && accInfo) {
-			addFunc(
-				`__box_get_${key}`,
-				[EXT],
-				[extType(w)],
-				[
-					...getIn(0, ref),
-					{ op: "local.set", index: 1 },
-					{ op: "local.get", index: 1 },
-					{
-						op: "ref.test",
-						typeIndex: boxInfo.typeIndex,
-						typeName: boxInfo.name,
-					},
-					{ op: "if", blockType: w },
-					{ op: "local.get", index: 1 },
-					{
-						op: "ref.cast",
-						typeIndex: boxInfo.typeIndex,
-						typeName: boxInfo.name,
-					},
-					{
-						op: "struct.get",
-						typeIndex: boxInfo.typeIndex,
-						typeName: boxInfo.name,
-						fieldIndex: 0,
-					},
-					"else",
-					{ op: "local.get", index: 1 },
-					{
-						op: "ref.cast",
-						typeIndex: accInfo.typeIndex,
-						typeName: accInfo.name,
-					},
-					{
-						op: "struct.get",
-						typeIndex: accInfo.typeIndex,
-						typeName: accInfo.name,
-						fieldIndex: 0,
-					},
-					{ op: "local.get", index: 1 },
-					{
-						op: "ref.cast",
-						typeIndex: accInfo.typeIndex,
-						typeName: accInfo.name,
-					},
-					{
-						op: "struct.get",
-						typeIndex: accInfo.typeIndex,
-						typeName: accInfo.name,
-						fieldIndex: 1,
-					},
-					{ op: "local.get", index: 1 },
-					{
-						op: "ref.cast",
-						typeIndex: accInfo.typeIndex,
-						typeName: accInfo.name,
-					},
-					{
-						op: "struct.get",
-						typeIndex: accInfo.typeIndex,
-						typeName: accInfo.name,
-						fieldIndex: 2,
-					},
-					{ op: "call_ref", typeIndex: accInfo.getFuncTypeIndex },
-					"end",
-					...toExt(w),
-				],
-				true,
-				[ref],
-			);
-			addFunc(
-				`__box_set_${key}`,
-				[EXT, extType(w)],
-				[],
-				[
-					...getIn(0, ref),
-					{ op: "local.set", index: 2 },
-					...getIn(1, w),
-					{ op: "local.set", index: 3 },
-					{ op: "local.get", index: 2 },
-					{
-						op: "ref.test",
-						typeIndex: boxInfo.typeIndex,
-						typeName: boxInfo.name,
-					},
-					{ op: "if", blockType: "void" },
-					{ op: "local.get", index: 2 },
-					{
-						op: "ref.cast",
-						typeIndex: boxInfo.typeIndex,
-						typeName: boxInfo.name,
-					},
-					{ op: "local.get", index: 3 },
-					{
-						op: "struct.set",
-						typeIndex: boxInfo.typeIndex,
-						typeName: boxInfo.name,
-						fieldIndex: 0,
-					},
-					"else",
-					{ op: "local.get", index: 2 },
-					{
-						op: "ref.cast",
-						typeIndex: accInfo.typeIndex,
-						typeName: accInfo.name,
-					},
-					{
-						op: "struct.get",
-						typeIndex: accInfo.typeIndex,
-						typeName: accInfo.name,
-						fieldIndex: 0,
-					},
-					{ op: "local.get", index: 2 },
-					{
-						op: "ref.cast",
-						typeIndex: accInfo.typeIndex,
-						typeName: accInfo.name,
-					},
-					{
-						op: "struct.get",
-						typeIndex: accInfo.typeIndex,
-						typeName: accInfo.name,
-						fieldIndex: 1,
-					},
-					{ op: "local.get", index: 3 },
-					{ op: "local.get", index: 2 },
-					{
-						op: "ref.cast",
-						typeIndex: accInfo.typeIndex,
-						typeName: accInfo.name,
-					},
-					{
-						op: "struct.get",
-						typeIndex: accInfo.typeIndex,
-						typeName: accInfo.name,
-						fieldIndex: 3,
-					},
-					{ op: "call_ref", typeIndex: accInfo.setFuncTypeIndex },
-					"end",
-				],
-				true,
-				[ref, w],
-			);
-		} else {
-			addFunc(
-				`__box_get_${key}`,
-				[EXT],
-				[extType(w)],
-				[
-					...getIn(0, ref),
-					{ op: "struct.get", typeIndex: ti, fieldIndex: 0 },
-					...toExt(w),
-				],
-			);
-			addFunc(
-				`__box_set_${key}`,
-				[EXT, extType(w)],
-				[],
-				[
-					...getIn(0, ref),
-					...getIn(1, w),
-					{ op: "struct.set", typeIndex: ti, fieldIndex: 0 },
-				],
-			);
-		}
+		const cast = {
+			op: "ref.cast",
+			typeIndex: boxInfo.typeIndex,
+			typeName: boxInfo.name,
+		};
+		addFunc(
+			`__box_get_${key}`,
+			[EXT],
+			[extType(w)],
+			[
+				...getIn(0, ref),
+				cast,
+				{ op: "struct.get", typeIndex: ti, fieldIndex: 0 },
+				...toExt(w),
+			],
+		);
+		addFunc(
+			`__box_set_${key}`,
+			[EXT, extType(w)],
+			[],
+			[
+				...getIn(0, ref),
+				cast,
+				...getIn(1, w),
+				{ op: "struct.set", typeIndex: ti, fieldIndex: 0 },
+			],
+		);
 	}
 
 	for (const [key, desc] of needs.maps) {

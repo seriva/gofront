@@ -313,7 +313,47 @@ export const expressionCheckMethods = {
 		);
 	},
 
+	// Scalars (basic, slice, map) live inline in their parent struct, array or
+	// global, so wasm has no stable address for them.
+	_isScalarStorageType(t) {
+		const u = this.resolveType(t?.kind === "named" ? t.underlying : t);
+		const k = (u ?? t)?.kind;
+		return k === "basic" || k === "slice" || k === "map";
+	},
+
+	// True when `operand` is a struct field, array/slice element or package-level
+	// variable holding a scalar, in a package compiled to wasm.
+	_isScalarInteriorOperand(operand, type, scope) {
+		if (this.target !== "wasm" && this.target !== "both") return false;
+		let node = operand;
+		while (node?.kind === "ParenExpr") node = node.expr;
+		if (!node) return false;
+		if (node.kind === "Ident") {
+			if (scope.lookupScope(node.name) !== this.globals) return false;
+			if (scope.isConst?.(node.name)) return false;
+			const sym = this.globals.symbols.get(node.name);
+			if (sym?.kind === "func" || sym?.kind === "namespace") return false;
+		} else if (node.kind !== "SelectorExpr" && node.kind !== "IndexExpr") {
+			return false;
+		}
+		if (node.kind === "SelectorExpr" && node.expr?._isTypeRef) return false;
+		if (node.kind === "SelectorExpr" && node.expr?._type?.kind === "namespace")
+			return false;
+		return this._isScalarStorageType(type);
+	},
+
+	_errScalarInteriorAddress(node) {
+		return this.err(
+			"cannot take the address of a scalar field, element or package-level variable in a wasm package; pass the parent struct pointer or the index instead, or copy the value to a local variable",
+			node,
+		);
+	},
+
 	_checkAddressOfExpr(expr, scope, ot) {
+		if (this._isScalarInteriorOperand(expr.operand, ot, scope)) {
+			this._errScalarInteriorAddress(expr);
+			return { kind: "pointer", base: ot };
+		}
 		if (expr.operand.kind === "Ident") {
 			expr.operand._addressTaken = true;
 			const sym = scope.lookup(expr.operand.name);
@@ -369,8 +409,13 @@ export const expressionCheckMethods = {
 	// `x.M` or `x.M()` with a pointer receiver on a named scalar or slice local takes
 	// `&x`, so `x` must be boxed like an explicit `&x`.
 	_markPtrRecvAddress(expr, base, ft, scope) {
-		if (expr.expr.kind !== "Ident" || !ft._ptrRecv) return;
+		if (!ft._ptrRecv) return;
 		if (base?.kind !== "basic" && base?.kind !== "slice") return;
+		if (this._isScalarInteriorOperand(expr.expr, expr.expr._type, scope)) {
+			this._errScalarInteriorAddress(expr);
+			return;
+		}
+		if (expr.expr.kind !== "Ident") return;
 		expr.expr._addressTaken = true;
 		const sym = scope.lookup(expr.expr.name);
 		if (sym) sym._addressTaken = true;
