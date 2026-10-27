@@ -1556,7 +1556,7 @@ Removed packages and the D4 overlay members were added in this unreleased cycle,
   - Done when: directories deleted; negative tests pass; `.sentrux/rules.toml` has no deleted D2 paths; `grep -rnE "bufio|net/url|encoding/csv|container/|math/cmplx|sync/atomic|utf16|base32|rand/v2" docs/` returns only "not supported" / "not available" mentions; `npm test` and `npm run check` pass.
   - Landed: removed packages report `package '<path>' is not available: removed in v1.8.0; <alternative>` and skip the missing-types warning. `INTRINSICS` and `JS_INTRINSICS` are empty, so the intrinsic positive tests (timer) are gone; the unknown-intrinsic rejection test stays. Three follow-ups tied only to removed packages deleted (url.Parse IPv6, JS context unref, sha256.New signature for hmac).
 
-- [ ] **Task 9.4 — Trim the kept Go-source overlays (D4)**
+- [x] **Task 9.4 — Trim the kept Go-source overlays (D4)**
   - Files: `stdlib/unicode/tables.go` (delete), `stdlib/unicode/unicode.go`, `stdlib/math/extra.go`, `stdlib/sync/extra.go`, `stdlib/fmt/scan.go` (delete; it is the only file in `stdlib/fmt/`, so the directory goes and `fmt` is emitter-only again), `stdlib/strconv/quote.go`, `src/typechecker/stdlib/excluded.js` (`EXCLUDED_STDLIB_MEMBERS`), `.sentrux/rules.toml` (if `stdlib/fmt` has a glob), `test/unit/compiler/stdlib-go.test.js`, `test/unit/builtins/stdlib.test.js`, `test/unit/wasm/stdlib.test.js`, `docs/language-support.md`, `docs/hybrid-wasm.md`
   - Do:
     1. Record the pre-task figures in the commit body: median of 3 `node src/index.js check` runs on a one-line program importing only `fmt`, then only `unicode`, then only `math`.
@@ -1569,6 +1569,7 @@ Removed packages and the D4 overlay members were added in this unreleased cycle,
     8. Remove the deleted members from the Task 8.2 lists in both docs.
   - Test (write first, failing): one negative case per deleted exported member → `assertErrorContains(errors, "not supported")` on both backends. Positive cases on both backends: `strings.EqualFold("σ", "Σ")` (reaches `unicode.SimpleFold`), `strings.ToTitle` and `strconv.Quote("\u00e9")` (reach `ToTitle`/`IsPrint`), `math.Frexp`/`Ldexp`/`Modf` round trip in a `both` package, `sync.OnceValue`, `fmt.Sscan`. Retarget the two `fmt.Fscan` cases in `stdlib-go.test.js` (Phase 3.2 review section) to `fmt.Sscan` with the same inputs; the `OnceFunc`/`OnceValue`/`OnceValues` re-panic case in `test/unit/compiler/test-runner.test.js` runs unchanged.
   - Done when: `grep -rnE "RangeTable|func (Gamma|Erf|Fscan|QuoteToGraphic|QuoteRuneToGraphic|AppendQuoteToGraphic|AppendQuoteRuneToGraphic)\b|type (Pool|Map) struct" stdlib/` is empty; `stdlib/fmt/` does not exist; the three Step 1 timings each drop by at least 10 ms (recorded in the commit body next to the pre-task figures); `npm test` and `npm run check` pass.
+  - Landed: median of 3 `check` wall times (ms) before/after: `fmt` 414/363, `unicode` 457/380, `math` 390/375. Removed members report `<pkg>.<name> is not available: removed in v1.8.0; ...`. Found while testing: `strings.ToTitle` upper-cases digraphs (follow-up).
 
 ### Phase 10: WASM backend simplification (D5–D7)
 

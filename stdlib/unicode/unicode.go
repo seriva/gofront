@@ -9,136 +9,9 @@ const (
 	ReplacementChar = '\uFFFD'     // Represents invalid code points.
 	MaxASCII        = '\u007F'     // maximum ASCII value.
 	MaxLatin1       = '\u00FF'     // maximum Latin-1 value.
-	UpperCase       = 0
-	LowerCase       = 1
-	TitleCase       = 2
-	MaxCase         = 3
 	UpperLower      = MaxRune + 1
 	Version         = "15.0.0"
 )
-
-// RangeTable defines a set of Unicode code points by listing ranges of code points.
-type RangeTable struct {
-	R16         []Range16
-	R32         []Range32
-	LatinOffset int
-}
-
-// Range16 represents a range of 16-bit Unicode code points.
-type Range16 struct {
-	Lo     uint16
-	Hi     uint16
-	Stride uint16
-}
-
-// Range32 represents a range of Unicode code points.
-type Range32 struct {
-	Lo     uint32
-	Hi     uint32
-	Stride uint32
-}
-
-func is16(ranges []Range16, r uint16) bool {
-	lo := 0
-	hi := len(ranges)
-	for lo < hi {
-		m := int(uint(lo+hi) >> 1)
-		range_ := &ranges[m]
-		if range_.Lo <= r && r <= range_.Hi {
-			return range_.Stride == 1 || (r-range_.Lo)%range_.Stride == 0
-		}
-		if r < range_.Lo {
-			hi = m
-		} else {
-			lo = m + 1
-		}
-	}
-	return false
-}
-
-func is32(ranges []Range32, r uint32) bool {
-	lo := 0
-	hi := len(ranges)
-	for lo < hi {
-		m := int(uint(lo+hi) >> 1)
-		range_ := ranges[m]
-		if range_.Lo <= r && r <= range_.Hi {
-			return range_.Stride == 1 || (r-range_.Lo)%range_.Stride == 0
-		}
-		if r < range_.Lo {
-			hi = m
-		} else {
-			lo = m + 1
-		}
-	}
-	return false
-}
-
-// Is reports whether the rune is in the specified table of ranges.
-func Is(rangeTab *RangeTable, r rune) bool {
-	if rangeTab == nil {
-		return false
-	}
-	r16 := rangeTab.R16
-	if len(r16) > 0 && uint32(r) <= uint32(r16[len(r16)-1].Hi) {
-		return is16(r16, uint16(r))
-	}
-	r32 := rangeTab.R32
-	if len(r32) > 0 && uint32(r) >= r32[0].Lo && uint32(r) <= r32[len(r32)-1].Hi {
-		return is32(r32, uint32(r))
-	}
-	return false
-}
-
-// In reports whether the rune is a member of one of the ranges.
-func In(r rune, ranges ...*RangeTable) bool {
-	for _, inside := range ranges {
-		if Is(inside, r) {
-			return true
-		}
-	}
-	return false
-}
-
-// IsOneOf reports whether the rune is a member of one of the ranges.
-func IsOneOf(ranges []*RangeTable, r rune) bool {
-	for _, inside := range ranges {
-		if Is(inside, r) {
-			return true
-		}
-	}
-	return false
-}
-
-// IsMark reports whether the rune is a mark character (category M).
-func IsMark(r rune) bool {
-	return Is(Mark, r)
-}
-
-// IsNumber reports whether the rune is a number (category N).
-func IsNumber(r rune) bool {
-	return Is(Number, r)
-}
-
-// IsSymbol reports whether the rune is a symbolic character (category S).
-func IsSymbol(r rune) bool {
-	return Is(Symbol, r)
-}
-
-// IsTitle reports whether the rune is a title case letter.
-func IsTitle(r rune) bool {
-	if r <= MaxLatin1 {
-		return false
-	}
-	switch r {
-	case 0x1C5, 0x1C8, 0x1CB, 0x1F2, 0x1FBC, 0x1FCC, 0x1FFC:
-		return true
-	}
-	if (0x1F88 <= r && r <= 0x1F8F) || (0x1F98 <= r && r <= 0x1F9F) || (0x1FA8 <= r && r <= 0x1FAF) {
-		return true
-	}
-	return false
-}
 
 // ToTitle maps the rune to title case.
 func ToTitle(r rune) rune {
@@ -162,20 +35,6 @@ func ToTitle(r rune) rune {
 		return r
 	}
 	return rune(ToUpper(int(r)))
-}
-
-// To maps the rune to the specified case: UpperCase, LowerCase, or TitleCase.
-func To(case_ int, r rune) rune {
-	switch case_ {
-	case UpperCase:
-		return rune(ToUpper(int(r)))
-	case LowerCase:
-		return rune(ToLower(int(r)))
-	case TitleCase:
-		return ToTitle(r)
-	default:
-		return ReplacementChar
-	}
 }
 
 type foldPair struct {

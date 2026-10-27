@@ -129,12 +129,12 @@ Notable members per package:
 - `fmt` (`Sprintf`, `Printf`, `Println`, `Errorf`, `Fprintf`, `Fprintln`, `Fprint`, `Sscan`, `Sscanln`, `Sscanf`, including `%v`/`%+v`/`%#v`/`%T`/`%p` and `fmt.Stringer`/`fmt.GoStringer`)
 - `strings` (including `Builder`, `Reader`, `Replacer`, `Cut*`, `Split*`, `*Func`, `FieldsFunc`, `Lines`, `*Seq`), `bytes` (including `Buffer`, `Reader`, `FieldsFunc`, `Clone`, `Lines`, `*Seq`)
 - `strconv` (including `Unquote`, `QuotedPrefix`, `CanBackquote`, `Append*`, `Parse*`, `Format*`, `NumError`)
-- `unicode` (character classes, case conversion, `RangeTable`, and general-category tables `L`, `Ll`, `Lu`, `Nd`, `P`, `S`, `Z`, …), `unicode/utf8`
+- `unicode` (character classes and case conversion; range tables are not supported), `unicode/utf8`
 - `slices` (including `Compare`, `SortFunc`, `BinarySearch*`, `Min*`, `Max*`, `Compact*`, `Concat`, `Delete*`, `Insert`, `Replace`, `Grow`, `Clip`, `All`, `Values`, `Backward`, `Collect`, `AppendSeq`, `Sorted*`, `Chunk`), `maps` (including `All`, `Keys`, `Values`, `Insert`, `Collect`), `sort` (`Interface`, `Search*`, `Find`, `Slice*`)
 - `io` (`Reader`, `Writer`, `ReadWriter`, `Closer`, `Seeker`, `ReaderAt`, `WriterTo`, `ByteReader`, `RuneReader`, `SectionReader`, `LimitedReader`, `MultiReader`, `MultiWriter`, `TeeReader`, `NopCloser`, `ReadAll`, `ReadFull`, `Copy*`), `os` (`Stdout`, `Stderr`, `Stdin`, `DevNull`; `Getenv`, `Args`, `Exit` stay JS-only)
 - `path`, `path/filepath`, `html` (`EscapeString`, `UnescapeString`)
 - `time` (`Duration` with `.Truncate()`, `.Round()`, `.Abs()`, `ParseDuration`; `Time` with calendar arithmetic, `.AppendFormat()`, `.Compare()`, `FixedZone`, `Date`, `Parse`, `Unix*`; `time.Sleep` stays JS-only)
-- `sync` (`Mutex`, `RWMutex`, `Once`, `WaitGroup`, `Map`, `Pool`, `Cond`, `OnceFunc`, `OnceValue`, `OnceValues`)
+- `sync` (`Mutex`, `RWMutex`, `Once`, `WaitGroup`, `Cond`, `OnceFunc`, `OnceValue`, `OnceValues`)
 - `hash` (`Hash`, `Hash32`, `Hash64`), `crypto/rand` (`Read`, `Prime`), `crypto/sha256`
 - `encoding/binary` (`LittleEndian`, `BigEndian`, `Read`, `Write`, `Append*`, `Size`; no varints), `encoding/hex`, `encoding/base64`
 - `encoding/json` (`Marshal`, `MarshalIndent`, `Unmarshal`, `Valid`, `RawMessage`, `Number`, `Encoder`, `Decoder`, `Compact`, `Indent`, `HTMLEscape`; the codecs are generated Go linked into `app.wasm`)
