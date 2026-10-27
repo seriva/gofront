@@ -376,22 +376,19 @@ export const expressionCheckMethods = {
 		if (sym) sym._addressTaken = true;
 	},
 
+	// Resolved per file from the import path, so a local package sharing an
+	// identifier with a stdlib one (or a stdlib import in another file) never matches.
 	_checkExcludedNamespaceMember(expr, baseType) {
-		if (!this._importedPaths) return null;
-		for (const pkgPath of this._importedPaths) {
-			const id = pkgPath
-				.split("/")
-				.filter((s) => !/^v\d+$/.test(s))
-				.at(-1);
-			const key = `${pkgPath}.${expr.field}`;
-			if (id === baseType.name && EXCLUDED_STDLIB_MEMBERS.has(key)) {
-				return this.err(
-					`${baseType.name}.${expr.field} is not available: ${EXCLUDED_STDLIB_MEMBERS.get(key)}`,
-					expr,
-				);
-			}
-		}
-		return null;
+		const pkgPath = this._fileImports
+			?.get(this._currentFile)
+			?.get(baseType.name);
+		if (!pkgPath || pkgPath.startsWith(".")) return null;
+		const key = `${pkgPath}.${expr.field}`;
+		if (!EXCLUDED_STDLIB_MEMBERS.has(key)) return null;
+		return this.err(
+			`${baseType.name}.${expr.field} is not available: ${EXCLUDED_STDLIB_MEMBERS.get(key)}`,
+			expr,
+		);
 	},
 
 	_checkExcludedSelectorExpr(expr, baseType) {
@@ -403,7 +400,9 @@ export const expressionCheckMethods = {
 				? (this.resolveType(baseType.base) ?? baseType.base)
 				: baseType;
 		const recvName = recvCheck?.name;
-		if (!recvName) return null;
+		// Stdlib named types are qualified (`pkg.T` or mangled `T$$pkg`); a
+		// bare name is a user type and never matches the exclusion table.
+		if (!recvName || !/[.$]/.test(recvName)) return null;
 		const dName = displayTypeName(recvName);
 		const reason =
 			EXCLUDED_STDLIB_MEMBERS.get(`${dName}.${expr.field}`) ??
