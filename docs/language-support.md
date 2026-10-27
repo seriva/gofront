@@ -86,7 +86,7 @@ Members of each Go package (functions, types, methods, fields, constants and var
 
 | Package | Available | Not yet | JS-only | Excluded |
 |---|---|---|---|---|
-| `bufio` | 57 of 79 | 22 | 0 | 0 |
+| `bufio` | 77 of 79 | 2 | 0 | 0 |
 | `bytes` | 78 of 99 | 21 | 0 | 0 |
 | `cmp` | 4 of 4 | 0 | 0 | 0 |
 | `container/heap` | 11 of 11 | 0 | 0 | 0 |
@@ -105,7 +105,7 @@ Members of each Go package (functions, types, methods, fields, constants and var
 | `encoding/binary` | 13 of 33 | 20 | 0 | 0 |
 | `encoding/csv` | 32 of 32 | 0 | 0 | 0 |
 | `encoding/hex` | 7 of 15 | 8 | 0 | 0 |
-| `encoding/json` | 28 of 68 | 40 | 0 | 0 |
+| `encoding/json` | 49 of 68 | 19 | 0 | 0 |
 | `errors` | 6 of 7 | 1 | 0 | 0 |
 | `fmt` | 21 of 43 | 22 | 0 | 0 |
 | `hash` | 32 of 32 | 0 | 0 | 0 |

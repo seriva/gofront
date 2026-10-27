@@ -1571,11 +1571,12 @@ Scheduled from the Step 4.4 full-branch audit (2026-10-26), re-planned the same 
   - Done when: those 69 entries leave `gaps.missing`; `--update-gaps` produces no other change except new `signature` entries, each listed in the commit body.
   - Landed: the gate indexes interface method sets from the checker's resolved interface types (embedded expanded); 69 entries left `gaps.missing`, no new `signature` entries.
 
-- [ ] **Task 8.3 — Gate: promoted members and aliased types**
+- [x] **Task 8.3 — Gate: promoted members and aliased types**
   - Files: `test/unit/types/stdlib-coverage.test.js`, `test/unit/types/stdlib-coverage.gaps.json`
   - Do: `goSourceMember` resolves `T.M`/`T.F` through embedded fields (Go's promotion depth rules: shallowest wins, ambiguous at equal depth is not promoted) and through type aliases into imported Go-source packages (`type SyntaxError = jsonrt.SyntaxError` resolves into `internal/jsonrt`). Covers `bufio.ReadWriter` promoted methods (20) and `encoding/json` error/`Number` methods and fields (21).
   - Test: gate unit cases for `bufio.ReadWriter.ReadString` (promoted from `*Reader`), `json.SyntaxError.Offset` (alias into `internal/jsonrt`), and an ambiguous-depth fixture that must stay unpromoted.
   - Done when: those 41 entries leave `gaps.missing` (`bufio.ReadWriter.Reader`/`Writer` stay: they are a checker bug, Task 11.1).
+  - Landed: `goSourceMember` resolves through embedded fields (`promotedMember`: shallowest wins, equal depth ambiguous) and through aliases; 41 entries left `gaps.missing`; `ReadWriter.Reader`/`Writer` stay. Four new `signature` entries: `json.{InvalidUnmarshalError,MarshalerError,UnmarshalTypeError,UnsupportedTypeError}.Type` is `string`, Go has `reflect.Type`.
 
 - [ ] **Task 8.4 — Gate: gap honesty check**
   - Files: `test/unit/types/stdlib-coverage.test.js`
