@@ -139,8 +139,6 @@ src/
   backend/js/         JS code generator: statements, expressions, templ, runtime helpers, source maps, stdlib/ shims
   backend/wasm/       WasmGC backend (see table above)
 test/
-    run.js            Conformance runner (JS and WASM backends vs .out golden files)
-    update.js         Regenerates .out golden files using the Go 1.26 toolchain
   unit/               Compiler, parser, type checker, and backend unit tests
   e2e/                End-to-end and performance benchmark suites
 ```
