@@ -454,12 +454,12 @@ For detailed command flags, project configuration (`gofront.json`), multi-file p
 ## Tests
 
 ```sh
-npm test                  # unit, zero-alloc perf, and example tests (~1,920+ tests, no browser required)
+npm test                  # unit, zero-alloc perf, and example tests (~2,900 tests, no browser required)
 npm run test:e2e          # E2E browser tests (Playwright, headless Chromium)
 npm run bench             # Raycast, JSON, and SIMD particle benchmarks (pure JS vs hybrid WASM)
 ```
 
-**Unit tests** (~1,920+) cover language features, type errors, edge cases, DOM (jsdom),
+**Unit tests** (~2,900) cover language features, type errors, edge cases, DOM (jsdom),
 external `.d.ts`, npm resolver, TypeScript tuple return signatures, multi-file compilation,
 embedded structs, string formatting, compile-time `encoding/json` serialization with struct tags,
 map iteration order, integer overflow semantics, unused variable detection,
