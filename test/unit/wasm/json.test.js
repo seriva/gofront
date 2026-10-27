@@ -2515,6 +2515,47 @@ true strict says no
 	);
 });
 
+test("Decoder reads a multi-value stream from a one-byte reader", async () => {
+	const out = await runLib(`//gofront:target wasm
+package lib
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"strings"
+)
+
+type oneByte struct{ r io.Reader }
+
+func (o oneByte) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	n, err := o.r.Read(p[:1])
+	return n, err
+}
+
+type Item struct {
+	A int
+	B string
+}
+
+func Run() string {
+	dec := json.NewDecoder(oneByte{strings.NewReader(\`{"A":1,"B":"x"} {"A":2,"B":"y"}  {"B":"end"}\`)})
+	out := ""
+	for dec.More() {
+		var it Item
+		err := dec.Decode(&it)
+		out += fmt.Sprint(it.A, it.B, err, dec.InputOffset(), ";")
+	}
+	var v Item
+	return out + fmt.Sprint(dec.Decode(&v) == io.EOF)
+}
+`);
+	assertEqual(out, "1x<nil> 15;2y<nil> 31;0end<nil> 44;true");
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
