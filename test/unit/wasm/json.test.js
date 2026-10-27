@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import {
 	assertContains,
 	assertEqual,
+	assertProgramOutput,
 	compileHybridProject,
 	section,
 	summarize,
@@ -2229,6 +2230,288 @@ func Run() string {
 	assertEqual(
 		wasm,
 		'[{"name":"a\\u003cb","qty":2,"tags":["x"],"Price":1.5},{"name":"c","tags":null,"Price":0}]\n[{"name":"a\\u003cb","qty":2,"tags":["x"],"Price":1.5},{"name":"c","tags":null,"Price":0}]',
+	);
+});
+
+// ── Real-Go conformance (expected output captured from go run) ──
+
+test("real Go output: json/errors on JS and WASM", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"math"
+)
+
+type User struct {
+	Name string \`json:"name"\`
+	Age  int    \`json:"age"\`
+}
+
+type FailMarshal struct{}
+
+func (FailMarshal) MarshalJSON() ([]byte, error) {
+	return nil, errors.New("marshaler failed")
+}
+
+func main() {
+	// 1. SyntaxError
+	var synErr *json.SyntaxError
+	var u User
+	err := json.Unmarshal([]byte(\`{"name": "foo", "age": }\`), &u)
+	if errors.As(err, &synErr) {
+		fmt.Printf("SyntaxError: Offset=%d msg=%s\\n", synErr.Offset, synErr.Error())
+	}
+
+	err = json.Unmarshal([]byte(\`{"unclosed"\`), &u)
+	if errors.As(err, &synErr) {
+		fmt.Printf("SyntaxError EOF: Offset=%d msg=%s\\n", synErr.Offset, synErr.Error())
+	}
+
+	// 2. UnmarshalTypeError
+	var typeErr *json.UnmarshalTypeError
+	err = json.Unmarshal([]byte(\`{"name":"bar","age":"notanumber"}\`), &u)
+	if errors.As(err, &typeErr) {
+		fmt.Printf("UnmarshalTypeError struct: Value=%s Struct=%s Field=%s Offset=%d msg=%s\\n",
+			typeErr.Value, typeErr.Struct, typeErr.Field, typeErr.Offset, typeErr.Error())
+	}
+
+	var num int
+	err = json.Unmarshal([]byte(\`"notanumber"\`), &num)
+	if errors.As(err, &typeErr) {
+		fmt.Printf("UnmarshalTypeError scalar: Value=%s Struct=%s Field=%s msg=%s\\n",
+			typeErr.Value, typeErr.Struct, typeErr.Field, typeErr.Error())
+	}
+
+	// 3. InvalidUnmarshalError
+	var invErr *json.InvalidUnmarshalError
+	err = json.Unmarshal([]byte(\`{"name":"foo"}\`), nil)
+	if errors.As(err, &invErr) {
+		fmt.Printf("InvalidUnmarshalError nil: msg=%s\\n", invErr.Error())
+	}
+
+	err = json.Unmarshal([]byte(\`{"name":"foo"}\`), u)
+	if errors.As(err, &invErr) {
+		fmt.Printf("InvalidUnmarshalError non-ptr: msg=%s\\n", invErr.Error())
+	}
+
+	// 4. UnsupportedValueError
+	var valErr *json.UnsupportedValueError
+	_, err = json.Marshal(math.NaN())
+	if errors.As(err, &valErr) {
+		fmt.Printf("UnsupportedValueError NaN: Str=%s msg=%s\\n", valErr.Str, valErr.Error())
+	}
+
+	// 5. MarshalerError
+	var marshErr *json.MarshalerError
+	_, err = json.Marshal(FailMarshal{})
+	if errors.As(err, &marshErr) {
+		fmt.Printf("MarshalerError: msg=%s unwrap=%v\\n", marshErr.Error(), errors.Unwrap(marshErr))
+	}
+}
+`,
+		`SyntaxError: Offset=24 msg=invalid character '}' looking for beginning of value
+SyntaxError EOF: Offset=11 msg=unexpected end of JSON input
+UnmarshalTypeError struct: Value=string Struct=User Field=age Offset=32 msg=json: cannot unmarshal string into Go struct field User.age of type int
+UnmarshalTypeError scalar: Value=string Struct= Field= msg=json: cannot unmarshal string into Go value of type int
+InvalidUnmarshalError nil: msg=json: Unmarshal(nil)
+InvalidUnmarshalError non-ptr: msg=json: Unmarshal(non-pointer main.User)
+UnsupportedValueError NaN: Str=NaN msg=json: unsupported value: NaN
+MarshalerError: msg=json: error calling MarshalJSON for type main.FailMarshal: marshaler failed unwrap=marshaler failed
+`,
+	);
+});
+
+test("real Go output: json/indent on JS and WASM", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+)
+
+func main() {
+	var buf bytes.Buffer
+
+	// Compact
+	src1 := []byte(\` { "name" : "Alice" , "nums" : [ 1 , 2 , 3 ] } \`)
+	err := json.Compact(&buf, src1)
+	fmt.Printf("Compact: err=%v out=%s\\n", err, buf.String())
+
+	buf.Reset()
+	err = json.Compact(&buf, []byte(\` { "broken" \`))
+	fmt.Printf("Compact err: %v\\n", err != nil)
+
+	// Indent
+	buf.Reset()
+	src2 := []byte(\`{"title":"GoFront","items":[1,2],"empty_obj":{},"empty_arr":[]}\`)
+	err = json.Indent(&buf, src2, "", "  ")
+	fmt.Printf("Indent: err=%v\\n%s\\n", err, buf.String())
+
+	buf.Reset()
+	err = json.Indent(&buf, src2, ">> ", "  ")
+	fmt.Printf("Indent with prefix: err=%v\\n%s\\n", err, buf.String())
+
+	buf.Reset()
+	err = json.Indent(&buf, []byte(\`[1,\`), "", "  ")
+	fmt.Printf("Indent err: %v\\n", err != nil)
+
+	// HTMLEscape
+	buf.Reset()
+	src3 := []byte(\`{"body":"<b>Hello & Welcome</b>"}\`)
+	json.HTMLEscape(&buf, src3)
+	fmt.Printf("HTMLEscape: %s\\n", buf.String())
+
+	// Number
+	var n json.Number = "42.5"
+	f, err := n.Float64()
+	fmt.Printf("Number Float64: %v, err=%v\\n", f, err)
+	var nInt json.Number = "123456"
+	i, err := nInt.Int64()
+	fmt.Printf("Number Int64: %v, err=%v\\n", i, err)
+	fmt.Printf("Number String: %s\\n", n.String())
+
+	var decodedNum json.Number
+	err = json.Unmarshal([]byte("987.654"), &decodedNum)
+	fmt.Printf("Unmarshal into Number: %s, err=%v\\n", decodedNum, err)
+
+	err = json.Unmarshal([]byte(\`"987.654"\`), &decodedNum)
+	fmt.Printf("Unmarshal string into Number: %s, err=%v\\n", decodedNum, err)
+
+	b, err := json.Marshal(decodedNum)
+	fmt.Printf("Marshal Number: %s, err=%v\\n", string(b), err)
+
+	b, err = json.Marshal(json.Number(""))
+	fmt.Printf("Marshal empty Number: %s, err=%v\\n", string(b), err)
+}
+`,
+		`Compact: err=<nil> out={"name":"Alice","nums":[1,2,3]}
+Compact err: true
+Indent: err=<nil>
+{
+  "title": "GoFront",
+  "items": [
+    1,
+    2
+  ],
+  "empty_obj": {},
+  "empty_arr": []
+}
+Indent with prefix: err=<nil>
+{
+>>   "title": "GoFront",
+>>   "items": [
+>>     1,
+>>     2
+>>   ],
+>>   "empty_obj": {},
+>>   "empty_arr": []
+>> }
+Indent err: true
+HTMLEscape: {"body":"\\u003cb\\u003eHello \\u0026 Welcome\\u003c/b\\u003e"}
+Number Float64: 42.5, err=<nil>
+Number Int64: 123456, err=<nil>
+Number String: 42.5
+Unmarshal into Number: 987.654, err=<nil>
+Unmarshal string into Number: 987.654, err=<nil>
+Marshal Number: 987.654, err=<nil>
+Marshal empty Number: 0, err=<nil>
+`,
+	);
+});
+
+test("real Go output: json/unmarshaler on JS and WASM", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+)
+
+type Up struct{ S string }
+
+func (u *Up) UnmarshalJSON(b []byte) error {
+	u.S = strings.ToUpper(string(b))
+	return nil
+}
+
+type Strict struct{ N int }
+
+var errStrict = errors.New("strict says no")
+
+func (s *Strict) UnmarshalJSON(b []byte) error {
+	if string(b) == "0" {
+		return errStrict
+	}
+	s.N = len(b)
+	return nil
+}
+
+type Doc struct {
+	U  Up            \`json:"u"\`
+	UP *Up           \`json:"up"\`
+	L  []Up          \`json:"l"\`
+	M  map[string]Up \`json:"m"\`
+}
+
+type Msg struct {
+	ID      int               \`json:"id"\`
+	Payload json.RawMessage   \`json:"payload"\`
+	List    []json.RawMessage \`json:"list"\`
+}
+
+type Pt struct{ X, Y int }
+
+func main() {
+	var d Doc
+	err := json.Unmarshal([]byte(\`{"u":"ab","up":"cd","l":["ef",{"x":1}],"m":{"k":[1, 2]}}\`), &d)
+	fmt.Println(err, d.U.S, d.UP.S, d.L[0].S, d.L[1].S, d.M["k"].S)
+	var d2 Doc
+	d2.UP = &Up{S: "keep"}
+	err = json.Unmarshal([]byte(\`{"u":null,"up":null}\`), &d2)
+	fmt.Println(err, d2.U.S, d2.UP == nil)
+	var top Up
+	err = json.Unmarshal([]byte(\` "top" \`), &top)
+	fmt.Println(err, top.S)
+	var st Strict
+	err = json.Unmarshal([]byte("0"), &st)
+	fmt.Println(errors.Is(err, errStrict), err)
+	var sts []Strict
+	err = json.Unmarshal([]byte("[12, 0]"), &sts)
+	fmt.Println(errors.Is(err, errStrict), err)
+
+	var m Msg
+	err = json.Unmarshal([]byte(\`{"id":1,"payload": {"a" : [1, 2 ,3], "b":"x"} ,"list":[ 1 , "two" ,{"k":null}]}\`), &m)
+	fmt.Println(err, m.ID)
+	fmt.Println(string(m.Payload))
+	fmt.Println(string(m.List[0]) + "|" + string(m.List[1]) + "|" + string(m.List[2]))
+	var lazy struct {
+		Kind string          \`json:"kind"\`
+		Data json.RawMessage \`json:"data"\`
+	}
+	err = json.Unmarshal([]byte(\`{"kind":"point","data":{"X":1,"Y":2}}\`), &lazy)
+	var pt Pt
+	fmt.Println(err, lazy.Kind, json.Unmarshal(lazy.Data, &pt), pt.X, pt.Y)
+}
+`,
+		`<nil> "AB" "CD" "EF" {"X":1} [1, 2]
+<nil> NULL true
+<nil> "TOP"
+true strict says no
+true strict says no
+<nil> 1
+{"a" : [1, 2 ,3], "b":"x"}
+1|"two"|{"k":null}
+<nil> point <nil> 1 2
+`,
 	);
 });
 

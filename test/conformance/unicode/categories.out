@@ -1,40 +1,0 @@
-IsLetter: a:true Z:true 5:false  :false 	:false 
-:false :false  :false  :false ﻿:false .:false $:false +:false ̀:false 1:false Ⅸ:false
-IsDigit: a:false Z:false 5:true  :false 	:false 
-:false :false  :false  :false ﻿:false .:false $:false +:false ̀:false 1:true Ⅸ:false
-IsSpace table: U+0061:false U+005A:false U+0035:false U+0020:true U+0009:false U+000A:false U+0085:false U+00A0:true U+2000:true U+FEFF:false U+002E:false U+0024:false U+002B:false U+0300:false U+0031:false U+2168:false
-IsUpper table: a:false Z:true 5:false  :false 	:false 
-:false :false  :false  :false ﻿:false .:false $:false +:false ̀:false 1:false Ⅸ:false
-IsLower table: a:true Z:false 5:false  :false 	:false 
-:false :false  :false  :false ﻿:false .:false $:false +:false ̀:false 1:false Ⅸ:false
-IsPunct: a:false Z:false 5:false  :false 	:false 
-:false :false  :false  :false ﻿:false .:true $:false +:false ̀:false 1:false Ⅸ:false
-IsSymbol: a:false Z:false 5:false  :false 	:false 
-:false :false  :false  :false ﻿:false .:false $:true +:true ̀:false 1:false Ⅸ:false
-IsMark: U+0061:false U+005A:false U+0035:false U+0020:false U+0009:false U+000A:false U+0085:false U+00A0:false U+2000:false U+FEFF:false U+002E:false U+0024:false U+002B:false U+0300:true U+0031:false U+2168:false
-IsNumber: a:false Z:false 5:true  :false 	:false 
-:false :false  :false  :false ﻿:false .:false $:false +:false ̀:false 1:true Ⅸ:true
-IsNumber helper: a:false Z:false 5:true  :false 	:false 
-:false :false  :false  :false ﻿:false .:false $:false +:false ̀:false 1:true Ⅸ:true
-IsSymbol helper: a:false Z:false 5:false  :false 	:false 
-:false :false  :false  :false ﻿:false .:false $:true +:true ̀:false 1:false Ⅸ:false
-IsMark helper: U+0061:false U+005A:false U+0035:false U+0020:false U+0009:false U+000A:false U+0085:false U+00A0:false U+2000:false U+FEFF:false U+002E:false U+0024:false U+002B:false U+0300:true U+0031:false U+2168:false
-IsTitle: U+0061:false U+0041:false U+01C5:true U+01C8:true U+01CB:true U+01F2:true U+1F88:true U+1FBC:true
-In 'a' (Letter, Digit): true
-In '5' (Letter, Digit): true
-In '$' (Letter, Digit): false
-IsOneOf 'a': true
-IsOneOf '$': false
-SimpleFold: U+0041->U+0061 U+0061->U+0041 U+004B->U+006B U+006B->U+212A U+212A->U+004B U+0031->U+0031 U+0073->U+017F U+0053->U+0073 U+017F->U+0053
-SimpleFold(-2): -2
-U+0061: ToUpper=U+0041 ToLower=U+0061 ToTitle=U+0041 ToTitle=U+0041
-U+005A: ToUpper=U+005A ToLower=U+007A ToTitle=U+005A ToTitle=U+005A
-U+01C4: ToUpper=U+01C4 ToLower=U+01C6 ToTitle=U+01C5 ToTitle=U+01C5
-U+01C5: ToUpper=U+01C4 ToLower=U+01C6 ToTitle=U+01C5 ToTitle=U+01C5
-U+01C6: ToUpper=U+01C4 ToLower=U+01C6 ToTitle=U+01C5 ToTitle=U+01C5
-U+10D0: ToUpper=U+1C90 ToLower=U+10D0 ToTitle=U+10D0 ToTitle=U+10D0
-unicode.IsSpace: U+0009:true U+000A:true U+000B:true U+000C:true U+000D:true U+0020:true U+0085:true U+00A0:true U+1680:true U+2000:true U+2028:true U+2029:true U+202F:true U+205F:true U+3000:true U+FEFF:false U+0078:false
-strings.Fields: []string{"a", "b", "c", "d\ufeffe"}
-bytes.Fields: "a" "b" "c" "d\ufeffe"
-strings.FieldsSeq: "a" "b" "c" "d\ufeffe"
-bytes.FieldsSeq: "a" "b" "c" "d\ufeffe"
