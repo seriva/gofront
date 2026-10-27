@@ -1612,6 +1612,7 @@ All in Go-source overlays compiled for both targets; each task adds a conformanc
   - Do: `sort.Find(n, cmp func(int) int) (int, bool)`; `errors.AsType[E error](err error) (E, bool)` walking `Unwrap() error` and `Unwrap() []error` like `errors.As`. If explicit instantiation of a type-parameter-only generic with a type assertion to `E` does not compile on WASM, stop and ask (do not ship JS-only).
   - Test: fixture for `Find`; parity test for `AsType[*MyErr]` through a `fmt.Errorf("%w")` chain and an `errors.Join` tree.
   - Done when: both pass; the 2 entries leave `gaps.missing`.
+  - Status: `sort.Find` landed. `errors.AsType` BLOCKED (stop-and-ask): `errors.AsType[*T](err)` over `err.(E)` fails to compile on WASM (`.for is not iterable`), and on JS the assertion to a type parameter compiles to `true ? [cur, true] : ...` (never checks the type) while `Unwrap() error` and `Unwrap() []error` both lower to a `typeof .Unwrap === "function"` check. Needs a compiler decision (type-param assertions with runtime type args) before the overlay can be written.
 
 ### Phase 10: `encoding/binary`, `hex`, `base64`, digests
 
