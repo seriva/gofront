@@ -98,54 +98,45 @@ Packages that `wasm` and `both` packages can import (JS-only packages such as `r
 
 | Package | Targets | Notes |
 |---|---|---|
-| `bufio` | js, wasm, both | Go source: Reader, Writer, Scanner, ReadWriter |
 | `bytes` | js, wasm, both | Buffer, Reader and the search/split/trim helpers |
 | `cmp` | js, wasm, both | Go source |
-| `container/heap`, `container/list`, `container/ring` | js, wasm, both | Go source |
-| `context` | js, wasm, both | Go source; no `Done()` channel (use `Err()` or `AfterFunc`) |
-| `crypto/hmac`, `crypto/md5`, `crypto/sha1`, `crypto/sha512`, `crypto/subtle` | js, wasm, both | Go source |
 | `crypto/rand` | js, wasm, both | `Read`, `Reader` |
 | `crypto/sha256` | js, wasm, both | `Sum256`, `New` |
-| `encoding/base32` | js, wasm, both | Go source |
 | `encoding/base64` | js, wasm, both | Std, URL and Raw encodings |
 | `encoding/binary` | js, wasm, both | `BigEndian` and `LittleEndian` byte-order accessors, `Read`, `Write`, `Size`, `Append*`; no varints |
-| `encoding/csv` | js, wasm, both | Go source |
 | `encoding/hex` | js, wasm, both | `EncodeToString`, `DecodeString`, `Encode`, `Decode`, `EncodedLen`, `DecodedLen` |
 | `encoding/json` | js, wasm, both | Go source; struct tags, `Marshal`, `Unmarshal`, `Decoder`, `Encoder` |
 | `errors` | js, wasm, both | `New`, `Is`, `As`, `Unwrap`, `Join` |
 | `fmt` | js, wasm, both | Print, Sprint, Fprint, Errorf, Append, `Sscan*` |
-| `hash`, `hash/adler32`, `hash/crc32`, `hash/fnv` | js, wasm, both | Go source |
+| `hash` | js, wasm, both | Go source |
 | `html` | js, wasm, both | `EscapeString`, `UnescapeString` |
 | `io` | js, wasm, both | Reader/Writer interfaces and helpers; no `Pipe` |
 | `iter`, `maps`, `slices`, `sort` | js, wasm, both | Go 1.23 iterator APIs; no `iter.Pull` |
-| `log` | js, wasm, both | Go source |
 | `math`, `math/bits` | js, wasm, both | Some `math` members are Go source |
-| `math/cmplx` | js, wasm, both | Go source |
-| `math/rand`, `math/rand/v2` | js, wasm, both | Seeded generators (`math/rand` is a subset in `wasm`/`both`); no `ChaCha8` |
-| `net/url` | js, wasm, both | Go source |
+| `math/rand` | js, wasm, both | Seeded generators (a subset in `wasm`/`both`) |
 | `os` | js, wasm, both | `Stdout`, `Stderr`, `Stdin`, `File`; JS also has `Exit`, `Args`, `Getenv` |
 | `path`, `path/filepath` | js, wasm, both | Lexical helpers only; no file-system walking |
-| `strconv`, `strings`, `unicode`, `unicode/utf8`, `unicode/utf16` | js, wasm, both | `strings.Builder`, `Reader`, `Replacer` included |
-| `sync`, `sync/atomic` | js, wasm, both | No `sync.Cond`, no `WaitGroup.Go` |
+| `strconv`, `strings`, `unicode`, `unicode/utf8` | js, wasm, both | `strings.Builder`, `Reader`, `Replacer` included |
+| `sync` | js, wasm, both | No `sync.Cond`, no `WaitGroup.Go` |
 | `testing` | js, wasm, both | `T`, `B`, subtests, benchmarks; no fuzzing |
 | `time` | js, wasm, both | `Sleep` is JS-only; no timers or tickers |
 | `gofront/shared`, `gofront/simd` | wasm, both | Shared memory and SIMD helpers |
 
 Notable members per package:
-- `math` (including 24 constants, `Float64bits`/`Float64frombits`, `Float32bits`/`Float32frombits`, `Sinh`, `Cosh`, `Tanh`, `Remainder`), `math/bits` (including `Len*`, `Reverse*`, `ReverseBytes*`), `math/cmplx`, `math/rand`, `math/rand/v2` (`PCG`, `Zipf`, top-level random functions)
-- `cmp` (`Ordered`, `Compare`, `Less`, `Or`), `iter` (`Seq`, `Seq2`), `container/heap`, `container/list`, `container/ring`
+- `math` (including 24 constants, `Float64bits`/`Float64frombits`, `Float32bits`/`Float32frombits`, `Sinh`, `Cosh`, `Tanh`, `Remainder`), `math/bits` (including `Len*`, `Reverse*`, `ReverseBytes*`), `math/rand`
+- `cmp` (`Ordered`, `Compare`, `Less`, `Or`), `iter` (`Seq`, `Seq2`)
 - `errors` (`New`, `Is`, `Unwrap`, `As`, `Join`, `ErrUnsupported`)
-- `fmt` (`Sprintf`, `Printf`, `Println`, `Errorf`, `Fprintf`, `Fprintln`, `Fprint`, `Sscan`, `Sscanln`, `Sscanf`, including `%v`/`%+v`/`%#v`/`%T`/`%p` and `fmt.Stringer`/`fmt.GoStringer`), `log` (`Logger`, `New`, `Default`, `Print*`, `Fatal*`, `Panic*`)
-- `strings` (including `Builder`, `Reader`, `Replacer`, `Cut*`, `Split*`, `*Func`, `FieldsFunc`, `Lines`, `*Seq`), `bytes` (including `Buffer`, `Reader`, `FieldsFunc`, `Clone`, `Lines`, `*Seq`), `bufio` (`Reader`, `Writer`, `Scanner`, `ReadWriter`, split functions)
+- `fmt` (`Sprintf`, `Printf`, `Println`, `Errorf`, `Fprintf`, `Fprintln`, `Fprint`, `Sscan`, `Sscanln`, `Sscanf`, including `%v`/`%+v`/`%#v`/`%T`/`%p` and `fmt.Stringer`/`fmt.GoStringer`)
+- `strings` (including `Builder`, `Reader`, `Replacer`, `Cut*`, `Split*`, `*Func`, `FieldsFunc`, `Lines`, `*Seq`), `bytes` (including `Buffer`, `Reader`, `FieldsFunc`, `Clone`, `Lines`, `*Seq`)
 - `strconv` (including `Unquote`, `QuotedPrefix`, `CanBackquote`, `Append*`, `Parse*`, `Format*`, `NumError`)
-- `unicode` (character classes, case conversion, `RangeTable`, and general-category tables `L`, `Ll`, `Lu`, `Nd`, `P`, `S`, `Z`, …), `unicode/utf8`, `unicode/utf16`
+- `unicode` (character classes, case conversion, `RangeTable`, and general-category tables `L`, `Ll`, `Lu`, `Nd`, `P`, `S`, `Z`, …), `unicode/utf8`
 - `slices` (including `Compare`, `SortFunc`, `BinarySearch*`, `Min*`, `Max*`, `Compact*`, `Concat`, `Delete*`, `Insert`, `Replace`, `Grow`, `Clip`, `All`, `Values`, `Backward`, `Collect`, `AppendSeq`, `Sorted*`, `Chunk`), `maps` (including `All`, `Keys`, `Values`, `Insert`, `Collect`), `sort` (`Interface`, `Search*`, `Find`, `Slice*`)
 - `io` (`Reader`, `Writer`, `ReadWriter`, `Closer`, `Seeker`, `ReaderAt`, `WriterTo`, `ByteReader`, `RuneReader`, `SectionReader`, `LimitedReader`, `MultiReader`, `MultiWriter`, `TeeReader`, `NopCloser`, `ReadAll`, `ReadFull`, `Copy*`), `os` (`Stdout`, `Stderr`, `Stdin`, `DevNull`; `Getenv`, `Args`, `Exit` stay JS-only)
-- `path`, `path/filepath`, `net/url` (`URL`, `Values`, `Userinfo`, `Parse*`, `QueryEscape`/`QueryUnescape`, `PathEscape`/`PathUnescape`, `JoinPath`), `html` (`EscapeString`, `UnescapeString`)
-- `time` (`Duration` with `.Truncate()`, `.Round()`, `.Abs()`, `ParseDuration`; `Time` with calendar arithmetic, `.AppendFormat()`, `.Compare()`, `FixedZone`, `Date`, `Parse`, `Unix*`; `time.Sleep` stays JS-only), `context` (`Background`, `TODO`, `WithCancel`, `WithCancelCause`, `WithDeadline`, `WithTimeout`, `WithValue`, `AfterFunc`, `WithoutCancel`, `Cause`)
-- `sync` (`Mutex`, `RWMutex`, `Once`, `WaitGroup`, `Map`, `Pool`, `Cond`, `OnceFunc`, `OnceValue`, `OnceValues`), `sync/atomic` (`Bool`, `Int32`, `Int64`, `Uint32`, `Uint64`, `Uintptr`, `Pointer[T]`, `Value`, package-level `Load*`/`Store*`/`Add*`/`Swap*`/`CompareAndSwap*`)
-- `hash` (`Hash`, `Hash32`, `Hash64`), `hash/fnv`, `hash/crc32`, `hash/adler32`, `crypto/rand` (`Read`, `Prime`), `crypto/sha256`, `crypto/sha512`, `crypto/sha1`, `crypto/md5`, `crypto/hmac`, `crypto/subtle`
-- `encoding/binary` (`LittleEndian`, `BigEndian`, `Read`, `Write`, `Append*`, `Size`; no varints), `encoding/hex`, `encoding/base64`, `encoding/base32`, `encoding/csv` (`Reader`, `Writer`, `ParseError`)
+- `path`, `path/filepath`, `html` (`EscapeString`, `UnescapeString`)
+- `time` (`Duration` with `.Truncate()`, `.Round()`, `.Abs()`, `ParseDuration`; `Time` with calendar arithmetic, `.AppendFormat()`, `.Compare()`, `FixedZone`, `Date`, `Parse`, `Unix*`; `time.Sleep` stays JS-only)
+- `sync` (`Mutex`, `RWMutex`, `Once`, `WaitGroup`, `Map`, `Pool`, `Cond`, `OnceFunc`, `OnceValue`, `OnceValues`)
+- `hash` (`Hash`, `Hash32`, `Hash64`), `crypto/rand` (`Read`, `Prime`), `crypto/sha256`
+- `encoding/binary` (`LittleEndian`, `BigEndian`, `Read`, `Write`, `Append*`, `Size`; no varints), `encoding/hex`, `encoding/base64`
 - `encoding/json` (`Marshal`, `MarshalIndent`, `Unmarshal`, `Valid`, `RawMessage`, `Number`, `Encoder`, `Decoder`, `Compact`, `Indent`, `HTMLEscape`; the codecs are generated Go linked into `app.wasm`)
 - `testing` (`T`, `B`, `M`, `TB`, `Run`, `Cleanup`, `Setenv`, `TempDir`), `gofront/shared`, and `gofront/simd` (experimental).
 
