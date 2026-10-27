@@ -126,6 +126,7 @@ export class Lexer {
 		this.target = null;
 		this.targetDirective = null;
 		this.intrinsics = new Map(); // line -> name of a //gofront:intrinsic
+		this.embedDirectives = []; // {line, col} of each //go:embed line comment
 	}
 
 	// ── Primitives ──────────────────────────────────────────────
@@ -171,6 +172,13 @@ export class Lexer {
 				while (this.pos < this.src.length && this.peek() !== "\n")
 					this.advance();
 				const comment = this.src.slice(start, this.pos);
+				if (
+					/^\/\/go:embed(?:\s|$)/.test(comment) &&
+					/^[ \t]*$/.test(
+						this.src.slice(this.src.lastIndexOf("\n", start - 1) + 1, start),
+					)
+				)
+					this.embedDirectives.push({ line, col });
 				const intrinsic = comment.match(/^\/\/gofront:intrinsic\s+(\S+)/);
 				if (intrinsic) this.intrinsics.set(line, intrinsic[1]);
 				const match = comment.match(/^\/\/gofront:target\s+(\S+)/);
@@ -547,6 +555,7 @@ export class Lexer {
 		this.tokens.target = this.target;
 		this.tokens.targetDirective = this.targetDirective;
 		this.tokens.intrinsics = this.intrinsics;
+		this.tokens.embedDirectives = this.embedDirectives;
 		return this.tokens;
 	}
 	_readPlusOp(l, c) {

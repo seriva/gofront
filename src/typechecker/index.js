@@ -365,27 +365,31 @@ export class TypeChecker {
 		return this.errors;
 	}
 
-	_checkEmbedLines(source) {
-		if (typeof source !== "string") return;
-		const lines = source.split("\n");
-		for (let i = 0; i < lines.length; i++) {
-			if (/^[ \t]*\/\/go:embed(?:\s|$)/.test(lines[i])) {
-				this.err("//go:embed is not supported yet", {
-					line: i + 1,
-					col: lines[i].indexOf("//") + 1,
-				});
-			}
+	_checkEmbedDirectives(directives) {
+		for (const { line, col } of directives ?? []) {
+			this.err("//go:embed is not supported yet", { line, col });
 		}
 	}
 
 	_checkDirectivesAndImportsPass(programs) {
 		this._importedPaths = new Set();
+		this._fileImports = new Map();
 		for (const p of programs) {
 			this._setCurrentFile(p);
-			this._checkEmbedLines(p._source);
+			const names = new Map();
+			this._fileImports.set(this._currentFile, names);
+			this._checkEmbedDirectives(p._embedDirectives);
 			for (const imp of p.imports ?? []) {
 				for (const spec of imp.imports ?? []) {
 					this._importedPaths.add(spec.path);
+					names.set(
+						spec.alias ??
+							spec.path
+								.split("/")
+								.filter((s) => !/^v\d+$/.test(s))
+								.at(-1),
+						spec.path,
+					);
 					if (EXCLUDED_STDLIB_PACKAGES.has(spec.path)) {
 						this.err(
 							`package '${spec.path}' is not available: ${EXCLUDED_STDLIB_PACKAGES.get(spec.path)}`,
