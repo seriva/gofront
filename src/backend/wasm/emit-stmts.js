@@ -149,8 +149,7 @@ export class StmtsEmitter {
 		// The value is computed before the new name exists: `x := x * 2`
 		// in an inner block reads the outer `x`.
 		this.emitExpr(r, wType);
-		if (!this._arrayCopyElidable(r, l.name))
-			this._emitCopyIfValue(r, r._type, wType);
+		this._emitCopyIfValue(r, r._type, wType);
 		const idx = this.allocLocal(l.name, wType, r._type);
 		const localInfo = this.locals.get(l.name);
 		if (localInfo?.isBoxed) {
@@ -287,10 +286,7 @@ export class StmtsEmitter {
 			// change what the temp holds.  The snapshot is already a fresh
 			// copy, so assigning from the temp does not copy it again.
 			const isArr = this._isValueArray(goType);
-			const snapshot =
-				inPlace &&
-				(isArr || this._isValueStruct(goType)) &&
-				!this._arrayCopyElidable(r, null);
+			const snapshot = inPlace && (isArr || this._isValueStruct(goType));
 			if (snapshot) this._emitCopyIfValue(r, goType, wType);
 			this.pushInstruction({ op: "local.set", index: idx });
 			return {
@@ -476,8 +472,7 @@ export class StmtsEmitter {
 					return;
 				}
 				this.emitExpr(r, localInfo.type);
-				if (!this._arrayCopyElidable(r, l.name))
-					this._emitCopyIfValue(r, localInfo.goType, localInfo.type);
+				this._emitCopyIfValue(r, localInfo.goType, localInfo.type);
 				this.pushInstruction({ op: "local.set", index: localInfo.index });
 			} else {
 				const globalInfo = this.mod.resolveGlobal(l.name);
@@ -880,7 +875,6 @@ export class StmtsEmitter {
 		}
 		const box = this.mod.getBoxType(baseGoType);
 		const ptr = this.mod.getPtrType(baseGoType);
-		const acc = this.mod.getAccType(baseGoType);
 		const ptrWType = {
 			kind: "ref",
 			nullable: true,
@@ -896,13 +890,6 @@ export class StmtsEmitter {
 
 		this.pushInstruction({ op: "local.get", index: ptrTmp });
 		this.pushInstruction({
-			op: "ref.test",
-			typeIndex: box.typeIndex,
-			typeName: box.name,
-		});
-		this.pushInstruction({ op: "if", blockType: "void" });
-		this.pushInstruction({ op: "local.get", index: ptrTmp });
-		this.pushInstruction({
 			op: "ref.cast",
 			typeIndex: box.typeIndex,
 			typeName: box.name,
@@ -914,49 +901,6 @@ export class StmtsEmitter {
 			typeName: box.name,
 			fieldIndex: 0,
 		});
-		this.pushInstruction("else");
-		this.pushInstruction({ op: "local.get", index: ptrTmp });
-		this.pushInstruction({
-			op: "ref.cast",
-			typeIndex: acc.typeIndex,
-			typeName: acc.name,
-		});
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: acc.typeIndex,
-			typeName: acc.name,
-			fieldIndex: 0,
-		});
-		this.pushInstruction({ op: "local.get", index: ptrTmp });
-		this.pushInstruction({
-			op: "ref.cast",
-			typeIndex: acc.typeIndex,
-			typeName: acc.name,
-		});
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: acc.typeIndex,
-			typeName: acc.name,
-			fieldIndex: 1,
-		});
-		this.pushInstruction({ op: "local.get", index: valTmp });
-		this.pushInstruction({ op: "local.get", index: ptrTmp });
-		this.pushInstruction({
-			op: "ref.cast",
-			typeIndex: acc.typeIndex,
-			typeName: acc.name,
-		});
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: acc.typeIndex,
-			typeName: acc.name,
-			fieldIndex: 3,
-		});
-		this.pushInstruction({
-			op: "call_ref",
-			typeIndex: acc.setFuncTypeIndex,
-		});
-		this.pushInstruction("end");
 
 		this.releaseTemp(valTmp, box.wType);
 		this.releaseTemp(ptrTmp, ptrWType);
@@ -1557,8 +1501,7 @@ export class StmtsEmitter {
 			if (!isScalarType(baseGoType, this.mod.checker, this.mod)) return;
 			const box = this.mod.getBoxType(baseGoType);
 			const ptr = this.mod.getPtrType(baseGoType);
-			const acc = this.mod.getAccType(baseGoType);
-			if (box && ptr && acc) {
+			if (box && ptr) {
 				const ptrWType = {
 					kind: "ref",
 					nullable: true,
@@ -1570,13 +1513,6 @@ export class StmtsEmitter {
 				this.emitExpr(operand, ptrWType);
 				this.pushInstruction({ op: "local.set", index: ptrTmp });
 
-				this.pushInstruction({ op: "local.get", index: ptrTmp });
-				this.pushInstruction({
-					op: "ref.test",
-					typeIndex: box.typeIndex,
-					typeName: box.name,
-				});
-				this.pushInstruction({ op: "if", blockType: "void" });
 				this.pushInstruction({ op: "local.get", index: ptrTmp });
 				this.pushInstruction({
 					op: "ref.cast",
@@ -1603,91 +1539,6 @@ export class StmtsEmitter {
 					typeName: box.name,
 					fieldIndex: 0,
 				});
-
-				this.pushInstruction("else");
-				this.pushInstruction({ op: "local.get", index: ptrTmp });
-				this.pushInstruction({
-					op: "ref.cast",
-					typeIndex: acc.typeIndex,
-					typeName: acc.name,
-				});
-				this.pushInstruction({
-					op: "struct.get",
-					typeIndex: acc.typeIndex,
-					typeName: acc.name,
-					fieldIndex: 0,
-				});
-				this.pushInstruction({ op: "local.get", index: ptrTmp });
-				this.pushInstruction({
-					op: "ref.cast",
-					typeIndex: acc.typeIndex,
-					typeName: acc.name,
-				});
-				this.pushInstruction({
-					op: "struct.get",
-					typeIndex: acc.typeIndex,
-					typeName: acc.name,
-					fieldIndex: 1,
-				});
-				this.pushInstruction({ op: "local.get", index: ptrTmp });
-				this.pushInstruction({
-					op: "ref.cast",
-					typeIndex: acc.typeIndex,
-					typeName: acc.name,
-				});
-				this.pushInstruction({
-					op: "struct.get",
-					typeIndex: acc.typeIndex,
-					typeName: acc.name,
-					fieldIndex: 0,
-				});
-				this.pushInstruction({ op: "local.get", index: ptrTmp });
-				this.pushInstruction({
-					op: "ref.cast",
-					typeIndex: acc.typeIndex,
-					typeName: acc.name,
-				});
-				this.pushInstruction({
-					op: "struct.get",
-					typeIndex: acc.typeIndex,
-					typeName: acc.name,
-					fieldIndex: 1,
-				});
-				this.pushInstruction({ op: "local.get", index: ptrTmp });
-				this.pushInstruction({
-					op: "ref.cast",
-					typeIndex: acc.typeIndex,
-					typeName: acc.name,
-				});
-				this.pushInstruction({
-					op: "struct.get",
-					typeIndex: acc.typeIndex,
-					typeName: acc.name,
-					fieldIndex: 2,
-				});
-				this.pushInstruction({
-					op: "call_ref",
-					typeIndex: acc.getFuncTypeIndex,
-				});
-				this.emitExpr(r, targetType);
-				this.emitBinaryOp(baseOp, targetType, l._type ?? baseGoType);
-				this.pushInstruction({ op: "local.get", index: ptrTmp });
-				this.pushInstruction({
-					op: "ref.cast",
-					typeIndex: acc.typeIndex,
-					typeName: acc.name,
-				});
-				this.pushInstruction({
-					op: "struct.get",
-					typeIndex: acc.typeIndex,
-					typeName: acc.name,
-					fieldIndex: 3,
-				});
-				this.pushInstruction({
-					op: "call_ref",
-					typeIndex: acc.setFuncTypeIndex,
-				});
-				this.pushInstruction("end");
 
 				this.releaseTemp(ptrTmp, ptrWType);
 				return;
@@ -1789,8 +1640,7 @@ export class StmtsEmitter {
 				if (!isScalarType(baseGoType, this.mod.checker, this.mod)) return;
 				const box = this.mod.getBoxType(baseGoType);
 				const ptr = this.mod.getPtrType(baseGoType);
-				const acc = this.mod.getAccType(baseGoType);
-				if (box && ptr && acc) {
+				if (box && ptr) {
 					const ptrWType = {
 						kind: "ref",
 						nullable: true,
@@ -1801,13 +1651,6 @@ export class StmtsEmitter {
 					this.emitExpr(operand, ptrWType);
 					this.pushInstruction({ op: "local.set", index: ptrTmp });
 
-					this.pushInstruction({ op: "local.get", index: ptrTmp });
-					this.pushInstruction({
-						op: "ref.test",
-						typeIndex: box.typeIndex,
-						typeName: box.name,
-					});
-					this.pushInstruction({ op: "if", blockType: "void" });
 					this.pushInstruction({ op: "local.get", index: ptrTmp });
 					this.pushInstruction({
 						op: "ref.cast",
@@ -1833,90 +1676,6 @@ export class StmtsEmitter {
 						typeName: box.name,
 						fieldIndex: 0,
 					});
-
-					this.pushInstruction("else");
-					this.pushInstruction({ op: "local.get", index: ptrTmp });
-					this.pushInstruction({
-						op: "ref.cast",
-						typeIndex: acc.typeIndex,
-						typeName: acc.name,
-					});
-					this.pushInstruction({
-						op: "struct.get",
-						typeIndex: acc.typeIndex,
-						typeName: acc.name,
-						fieldIndex: 0,
-					});
-					this.pushInstruction({ op: "local.get", index: ptrTmp });
-					this.pushInstruction({
-						op: "ref.cast",
-						typeIndex: acc.typeIndex,
-						typeName: acc.name,
-					});
-					this.pushInstruction({
-						op: "struct.get",
-						typeIndex: acc.typeIndex,
-						typeName: acc.name,
-						fieldIndex: 1,
-					});
-					this.pushInstruction({ op: "local.get", index: ptrTmp });
-					this.pushInstruction({
-						op: "ref.cast",
-						typeIndex: acc.typeIndex,
-						typeName: acc.name,
-					});
-					this.pushInstruction({
-						op: "struct.get",
-						typeIndex: acc.typeIndex,
-						typeName: acc.name,
-						fieldIndex: 0,
-					});
-					this.pushInstruction({ op: "local.get", index: ptrTmp });
-					this.pushInstruction({
-						op: "ref.cast",
-						typeIndex: acc.typeIndex,
-						typeName: acc.name,
-					});
-					this.pushInstruction({
-						op: "struct.get",
-						typeIndex: acc.typeIndex,
-						typeName: acc.name,
-						fieldIndex: 1,
-					});
-					this.pushInstruction({ op: "local.get", index: ptrTmp });
-					this.pushInstruction({
-						op: "ref.cast",
-						typeIndex: acc.typeIndex,
-						typeName: acc.name,
-					});
-					this.pushInstruction({
-						op: "struct.get",
-						typeIndex: acc.typeIndex,
-						typeName: acc.name,
-						fieldIndex: 2,
-					});
-					this.pushInstruction({
-						op: "call_ref",
-						typeIndex: acc.getFuncTypeIndex,
-					});
-					this._emitIncDecStep(op, box.wType, baseGoType);
-					this.pushInstruction({ op: "local.get", index: ptrTmp });
-					this.pushInstruction({
-						op: "ref.cast",
-						typeIndex: acc.typeIndex,
-						typeName: acc.name,
-					});
-					this.pushInstruction({
-						op: "struct.get",
-						typeIndex: acc.typeIndex,
-						typeName: acc.name,
-						fieldIndex: 3,
-					});
-					this.pushInstruction({
-						op: "call_ref",
-						typeIndex: acc.setFuncTypeIndex,
-					});
-					this.pushInstruction("end");
 
 					this.releaseTemp(ptrTmp, ptrWType);
 					return;
@@ -2677,7 +2436,7 @@ export class StmtsEmitter {
 			this.emitExpr(iterExpr, arrWType);
 			// Go ranges over a copy of an array (the range expression is
 			// evaluated once), so body writes to the array do not reach `v`.
-			if (hasVal && !isPtrToArr && !this._arrayCopyElidable(iterExpr, null))
+			if (hasVal && !isPtrToArr)
 				this._emitCopyIfValue(iterExpr, iterType, arrWType);
 			if (hasVal) {
 				this.pushInstruction({ op: "local.set", index: arrTmp });

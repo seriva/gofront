@@ -353,25 +353,7 @@ func Main() float64 {
 	assertEqual(res.wasmRes, 19);
 });
 
-section("WASM Arrays — clone elision");
-
-test("copy between unmutated locals is elided", () => {
-	const src = `
-package main
-
-func Main() int {
-	a := [3]int{1, 2, 3}
-	b := a
-	return a[0] + b[2]
-}
-`;
-	const res = compileHybrid(src, { emitWat: true });
-	assertEqual(res.run("Main").jsRes, 4);
-	assert(
-		!res.wat.includes("array.copy"),
-		"elided copy must not emit array.copy",
-	);
-});
+section("WASM Arrays — copies on assignment");
 
 test("copy stays when the source is mutated afterwards", () => {
 	const src = `
@@ -387,24 +369,6 @@ func Main() int {
 	const res = compileHybrid(src, { emitWat: true });
 	assertEqual(res.run("Main").jsRes, 91);
 	assert(res.wat.includes("array.copy"), "copy must remain");
-});
-
-test("range over an unmutated local array does not copy it", () => {
-	const src = `
-package main
-
-func Main() int {
-	a := [3]int{1, 2, 3}
-	s := 0
-	for _, v := range a {
-		s += v
-	}
-	return s
-}
-`;
-	const res = compileHybrid(src, { emitWat: true });
-	assertEqual(res.run("Main").jsRes, 6);
-	assert(!res.wat.includes("array.copy"), "range copy must be elided");
 });
 
 section("WASM Arrays — equality");
@@ -1632,22 +1596,6 @@ parity(
 	o = o[:3]
 	oal[0] = 99
 	p.buf[0], p.buf = 5, o
-	return al[0]*10000 + oal[0]*10 + len(p.buf)`,
-	50993,
-	"type S struct{ buf []int }",
-);
-
-parity(
-	"a write to a chain another LHS deref reassigns goes to the old slice",
-	`	p := &S{buf: []int{1, 2, 3, 4}}
-	pb := &p.buf
-	al := p.buf
-	p.buf = p.buf[:3]
-	o := []int{10, 20, 30, 40}
-	oal := o
-	o = o[:3]
-	oal[0] = 99
-	p.buf[0], *pb = 5, o
 	return al[0]*10000 + oal[0]*10 + len(p.buf)`,
 	50993,
 	"type S struct{ buf []int }",

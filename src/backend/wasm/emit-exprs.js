@@ -1629,75 +1629,6 @@ export class ExprsEmitter {
 		}
 	}
 
-	_emitSelectorAddressOf(operand) {
-		const baseStructInfo = this._resolveStructInfo(operand.expr);
-		if (!baseStructInfo) return false;
-		const path = this._resolveFieldPath(baseStructInfo, operand.field);
-		if (!path || path.length === 0) return false;
-
-		const lastStep = path[path.length - 1];
-		if (!isScalarType(lastStep.field.goType, this.mod.checker, this.mod)) {
-			return false;
-		}
-		const baseWType = this.toWasmType(operand.expr._type);
-		this.emitExpr(operand.expr, baseWType);
-		for (let i = 0; i < path.length - 1; i++) {
-			this.pushInstruction({
-				op: "struct.get",
-				typeIndex: path[i].structInfo.typeIndex,
-				typeName: path[i].structInfo.name,
-				fieldIndex: path[i].fieldIndex,
-			});
-		}
-		const h = this.mod.getStructAccessorHelpers(
-			lastStep.structInfo,
-			lastStep.fieldIndex,
-		);
-		this.pushInstruction({ op: "i32.const", value: lastStep.fieldIndex });
-		const getIdx = this.mod.resolveFuncIndex(h.getterName);
-		const setIdx = this.mod.resolveFuncIndex(h.setterName);
-		this.pushInstruction({ op: "ref.func", funcIndex: getIdx });
-		this.pushInstruction({ op: "ref.func", funcIndex: setIdx });
-		this.pushInstruction({
-			op: "struct.new",
-			typeIndex: h.accInfo.typeIndex,
-			typeName: h.accInfo.name,
-		});
-		return true;
-	}
-
-	_emitIndexAddressOf(operand) {
-		const baseNode = operand.expr;
-		const baseType = baseNode._type ?? this._resolveExprGoType(baseNode);
-		const isSlice = isSliceType(baseType, this.mod.checker);
-		const isArr = isArrayType(baseType, this.mod.checker);
-		const isPtrToArr =
-			baseType?.kind === "pointer" &&
-			isArrayType(baseType.base, this.mod.checker);
-		if (!isSlice && !isArr && !isPtrToArr) return false;
-
-		const elemGoType = this._getArrayElemType(
-			isPtrToArr ? baseType.base : baseType,
-		);
-		if (!elemGoType || !isScalarType(elemGoType, this.mod.checker, this.mod)) {
-			return false;
-		}
-		const arrInfo = this.mod.getArrayType(elemGoType);
-		const sliceInfo = isSlice ? this.mod.getSliceType(elemGoType) : null;
-		this._emitElemAddr(baseNode, operand.index, sliceInfo, arrInfo);
-		const h = this.mod.getElemAccessorHelpers(elemGoType);
-		const getIdx = this.mod.resolveFuncIndex(h.getterName);
-		const setIdx = this.mod.resolveFuncIndex(h.setterName);
-		this.pushInstruction({ op: "ref.func", funcIndex: getIdx });
-		this.pushInstruction({ op: "ref.func", funcIndex: setIdx });
-		this.pushInstruction({
-			op: "struct.new",
-			typeIndex: h.accInfo.typeIndex,
-			typeName: h.accInfo.name,
-		});
-		return true;
-	}
-
 	_emitAddressOf(operand) {
 		if (operand.kind === "Ident") {
 			const loc = this.resolveLocal(operand.name);
@@ -1728,15 +1659,6 @@ export class ExprsEmitter {
 		const structInfo = this._resolveStructInfo(operand);
 		if (structInfo) {
 			this.emitExpr(operand);
-			return;
-		}
-		if (
-			operand.kind === "SelectorExpr" &&
-			this._emitSelectorAddressOf(operand)
-		) {
-			return;
-		}
-		if (operand.kind === "IndexExpr" && this._emitIndexAddressOf(operand)) {
 			return;
 		}
 		const opWType = this.toWasmType(operand._type);
@@ -1775,24 +1697,13 @@ export class ExprsEmitter {
 		}
 		const box = this.mod.getBoxType(baseGoType);
 		const ptr = this.mod.getPtrType(baseGoType);
-		const acc = this.mod.getAccType(baseGoType);
 		const ptrWType = {
 			kind: "ref",
 			nullable: true,
 			typeIndex: ptr.typeIndex,
 			typeName: ptr.name,
 		};
-		const pTmp = this.acquireTemp(ptrWType);
 		this.emitExpr(operand, ptrWType);
-		this.pushInstruction({ op: "local.set", index: pTmp });
-		this.pushInstruction({ op: "local.get", index: pTmp });
-		this.pushInstruction({
-			op: "ref.test",
-			typeIndex: box.typeIndex,
-			typeName: box.name,
-		});
-		this.pushInstruction({ op: "if", blockType: box.wType });
-		this.pushInstruction({ op: "local.get", index: pTmp });
 		this.pushInstruction({
 			op: "ref.cast",
 			typeIndex: box.typeIndex,
@@ -1804,49 +1715,6 @@ export class ExprsEmitter {
 			typeName: box.name,
 			fieldIndex: 0,
 		});
-		this.pushInstruction("else");
-		this.pushInstruction({ op: "local.get", index: pTmp });
-		this.pushInstruction({
-			op: "ref.cast",
-			typeIndex: acc.typeIndex,
-			typeName: acc.name,
-		});
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: acc.typeIndex,
-			typeName: acc.name,
-			fieldIndex: 0,
-		});
-		this.pushInstruction({ op: "local.get", index: pTmp });
-		this.pushInstruction({
-			op: "ref.cast",
-			typeIndex: acc.typeIndex,
-			typeName: acc.name,
-		});
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: acc.typeIndex,
-			typeName: acc.name,
-			fieldIndex: 1,
-		});
-		this.pushInstruction({ op: "local.get", index: pTmp });
-		this.pushInstruction({
-			op: "ref.cast",
-			typeIndex: acc.typeIndex,
-			typeName: acc.name,
-		});
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: acc.typeIndex,
-			typeName: acc.name,
-			fieldIndex: 2,
-		});
-		this.pushInstruction({
-			op: "call_ref",
-			typeIndex: acc.getFuncTypeIndex,
-		});
-		this.pushInstruction("end");
-		this.releaseTemp(pTmp, ptrWType);
 	}
 
 	_emitComplexEq(aTmp, bTmp, info, f, op) {
@@ -2252,7 +2120,6 @@ export class ExprsEmitter {
 			return {
 				ptr,
 				box: this.mod.getBoxType(ptr.goType),
-				acc: this.mod.getAccType(ptr.goType),
 			};
 		}
 		const box = this._findScalarPtrByWType(wType, this.mod.boxTypes);
@@ -2260,15 +2127,6 @@ export class ExprsEmitter {
 			return {
 				ptr: this.mod.getPtrType(box.goType),
 				box,
-				acc: this.mod.getAccType(box.goType),
-			};
-		}
-		const acc = this._findScalarPtrByWType(wType, this.mod.accTypes);
-		if (acc) {
-			return {
-				ptr: this.mod.getPtrType(acc.goType),
-				box: this.mod.getBoxType(acc.goType),
-				acc,
 			};
 		}
 		return null;
@@ -2294,7 +2152,6 @@ export class ExprsEmitter {
 		return {
 			ptr: this.mod.getPtrType(base),
 			box: this.mod.getBoxType(base),
-			acc: this.mod.getAccType(base),
 		};
 	}
 
@@ -2308,117 +2165,8 @@ export class ExprsEmitter {
 		return this._getScalarPtrInfo(wType, goType) !== null;
 	}
 
-	_emitScalarPtrEq(ptrInfo) {
-		const ptrWType = {
-			kind: "ref",
-			nullable: true,
-			typeIndex: ptrInfo.ptr.typeIndex,
-			typeName: ptrInfo.ptr.name,
-		};
-		const qTmp = this.acquireTemp(ptrWType);
-		const pTmp = this.acquireTemp(ptrWType);
-		this.pushInstruction({ op: "local.set", index: qTmp });
-		this.pushInstruction({ op: "local.set", index: pTmp });
-
-		const acc = ptrInfo.acc;
-
-		// 1. Fast path: ref.eq(p, q)
-		this.pushInstruction({ op: "local.get", index: pTmp });
-		this.pushInstruction({ op: "local.get", index: qTmp });
+	_emitScalarPtrEq(_ptrInfo) {
 		this.pushInstruction("ref.eq");
-		this.pushInstruction({ op: "if", blockType: "i32" });
-		this.pushInstruction({ op: "i32.const", value: 1 });
-		this.pushInstruction("else");
-
-		// 2. Else: test if both p and q are $acc_T
-		this.pushInstruction({ op: "local.get", index: pTmp });
-		this.pushInstruction({
-			op: "ref.test",
-			typeIndex: acc.typeIndex,
-			typeName: acc.name,
-		});
-		this.pushInstruction({ op: "if", blockType: "i32" });
-		this.pushInstruction({ op: "local.get", index: qTmp });
-		this.pushInstruction({
-			op: "ref.test",
-			typeIndex: acc.typeIndex,
-			typeName: acc.name,
-		});
-		this.pushInstruction({ op: "if", blockType: "i32" });
-
-		// Both are $acc_T: cast and compare ref.eq(p.target, q.target)
-		this.pushInstruction({ op: "local.get", index: pTmp });
-		this.pushInstruction({
-			op: "ref.cast",
-			typeIndex: acc.typeIndex,
-			typeName: acc.name,
-		});
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: acc.typeIndex,
-			typeName: acc.name,
-			fieldIndex: 0,
-		});
-		this.pushInstruction({ op: "ref.cast", heapType: "eq" });
-		this.pushInstruction({ op: "local.get", index: qTmp });
-		this.pushInstruction({
-			op: "ref.cast",
-			typeIndex: acc.typeIndex,
-			typeName: acc.name,
-		});
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: acc.typeIndex,
-			typeName: acc.name,
-			fieldIndex: 0,
-		});
-		this.pushInstruction({ op: "ref.cast", heapType: "eq" });
-		this.pushInstruction("ref.eq");
-		this.pushInstruction({ op: "if", blockType: "i32" });
-
-		// Compare i32.eq(p.index, q.index)
-		this.pushInstruction({ op: "local.get", index: pTmp });
-		this.pushInstruction({
-			op: "ref.cast",
-			typeIndex: acc.typeIndex,
-			typeName: acc.name,
-		});
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: acc.typeIndex,
-			typeName: acc.name,
-			fieldIndex: 1,
-		});
-		this.pushInstruction({ op: "local.get", index: qTmp });
-		this.pushInstruction({
-			op: "ref.cast",
-			typeIndex: acc.typeIndex,
-			typeName: acc.name,
-		});
-		this.pushInstruction({
-			op: "struct.get",
-			typeIndex: acc.typeIndex,
-			typeName: acc.name,
-			fieldIndex: 1,
-		});
-		this.pushInstruction("i32.eq");
-
-		this.pushInstruction("else");
-		this.pushInstruction({ op: "i32.const", value: 0 });
-		this.pushInstruction("end"); // target eq if
-
-		this.pushInstruction("else");
-		this.pushInstruction({ op: "i32.const", value: 0 });
-		this.pushInstruction("end"); // q is acc if
-
-		this.pushInstruction("else");
-		this.pushInstruction({ op: "i32.const", value: 0 });
-		this.pushInstruction("end"); // p is acc if
-
-		this.pushInstruction("end"); // fast path if
-
-		this.releaseTemp(pTmp, ptrWType);
-		this.releaseTemp(qTmp, ptrWType);
 	}
 
 	_emitStructEq(structInfo) {
