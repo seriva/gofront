@@ -642,7 +642,7 @@ func Main() int {
 	const { errors } = compileWasm(src);
 	assertErrorContains(
 		errors,
-		"cannot take the address of a scalar field, element or package-level variable in a wasm package",
+		"cannot take the address of a field, element or package-level variable of type",
 	);
 });
 
