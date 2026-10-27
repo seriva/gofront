@@ -58,6 +58,35 @@ copies its arguments, so the loop usually belongs on the WASM side, or the data 
 
 ---
 
+## Pointers in `wasm` and `both` packages
+
+Pointers to structs, to local variables and to struct-typed fields, elements and package-level variables work as in Go. A pointer to a scalar (number, string or bool) that lives inside a struct field, a slice or array element, or a package-level variable is a compile error, because WebAssembly cannot point into the middle of a managed object:
+
+```go
+//gofront:target wasm
+package sim
+
+type Body struct{ X int }
+
+func bump(p *int) { *p++ }
+
+// Rejected: cannot take the address of a scalar field, element or
+// package-level variable in a wasm package
+func Step(b *Body) { bump(&b.X) }
+```
+
+Pass the parent pointer or the index instead, or copy the value to a local:
+
+```go
+func bumpBody(b *Body) { b.X++ }
+
+func Step(b *Body) { bumpBody(b) }
+```
+
+The same rule covers `&xs[i]` on a `[]float64`, `&pkgVar` on a package-level `int`, and a pointer-receiver call on such an operand (`s.Count.Inc()` where `type Counter int` is the field type). Pointers to struct-typed fields and elements (`&items[i]` on a `[]Item`) are fine. `js` packages are unchanged and accept all of these.
+
+---
+
 ## `both` packages
 
 A `both` package is compiled twice and the two copies share no state, so the compiler
@@ -92,7 +121,7 @@ copies agree bit-for-bit:
 
 ## What `wasm` packages support
 
-The backend (`src/backend/wasm/`) implements: structs, pointers (including pointers to scalar struct fields and slice/array elements), methods (including method expressions and method values), value-copied fixed-size arrays, slices (`append`, slicing, `copy`), strings, maps (including struct-typed, array-typed, and interface-typed keys), interfaces (including anonymous interfaces), generics, closures (including closures inside methods and per-iteration loop variable captures), `for … range` over iterator functions (`iter.Seq`, `iter.Seq2`), complex numbers (`complex64`, `complex128`, `complex`, `real`, `imag`), `defer`/`panic`/`recover`, `error` values, and non-literal package constants.
+The backend (`src/backend/wasm/`) implements: structs, pointers (to locals, structs and struct-typed fields, elements and globals; see [Pointers in `wasm` and `both` packages](#pointers-in-wasm-and-both-packages)), methods (including method expressions and method values), value-copied fixed-size arrays, slices (`append`, slicing, `copy`), strings, maps (including struct-typed, array-typed, and interface-typed keys), interfaces (including anonymous interfaces), generics, closures (including closures inside methods and per-iteration loop variable captures), `for … range` over iterator functions (`iter.Seq`, `iter.Seq2`), complex numbers (`complex64`, `complex128`, `complex`, `real`, `imag`), `defer`/`panic`/`recover`, `error` values, and non-literal package constants.
 
 Packages that `wasm` and `both` packages can import (JS-only packages such as `regexp` and `gom` are rejected there):
 
