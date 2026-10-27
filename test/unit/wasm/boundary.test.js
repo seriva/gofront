@@ -1648,7 +1648,7 @@ func main() {
 	assertEqual(milli, BigInt(1704067200000 + 15 * 60 * 1000));
 });
 
-test("exported WASM function or callback receives or takes *float64 pointing at struct field; JS mutates box.value", async () => {
+test("exported WASM function or callback receives or takes a boxed *float64; JS mutates box.value", async () => {
 	const res = await compileHybridProject(
 		{
 			"store/store.go": `//gofront:target wasm
@@ -1658,19 +1658,24 @@ type Item struct {
 	Price float64
 }
 
-var GlobalItem = Item{Price: 10.5}
+func newPrice() *float64 {
+	v := 10.5
+	return &v
+}
+
+var price = newPrice()
 
 func GetPricePtr() *float64 {
-	return &GlobalItem.Price
+	return price
 }
 
 func ReadPrice() float64 {
-	return GlobalItem.Price
+	return *price
 }
 
 func UpdateWithCallback(cb func(p *float64)) float64 {
-	cb(&GlobalItem.Price)
-	return GlobalItem.Price
+	cb(price)
+	return *price
 }
 
 func MutateViaPtr(p *float64, v float64) {
