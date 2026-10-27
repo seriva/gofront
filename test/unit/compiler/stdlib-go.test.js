@@ -4,8 +4,10 @@
 import { STDLIB_PACKAGES } from "../../../src/typechecker/types.js";
 import {
 	assert,
+	assertContains,
 	assertEqual,
 	assertThrows,
+	compile,
 	compileDir,
 	compileHybridProject,
 	join,
@@ -227,63 +229,6 @@ func AfterStoppable(ms int, fire func()) func() {
 	return func() { stopDeadline(&ms) }
 }
 `;
-
-test("deadline_timer arms setTimeout in JS and is a no-op in wasm", async () => {
-	const project = (target) => ({
-		"lib/lib.go": `//gofront:target ${target}
-package lib
-
-import "timer"
-
-func Run() string {
-	timer.After(1, func() { println("fired") })
-	return "armed"
-}
-`,
-		"main.go": `package main\n\nimport "./lib"\n\nfunc main() { println(lib.Run()) }\n`,
-	});
-	await withTempDir({ "timer/timer.go": TIMER_PKG }, async (stdlib) => {
-		const js = await compileHybridProject(project("both"), {
-			stdlibRoot: stdlib,
-		});
-		const wasm = await compileHybridProject(project("wasm"), {
-			stdlibRoot: stdlib,
-		});
-		assert(wasm.wasm instanceof Uint8Array, "expected linked wasm");
-		await new Promise((r) => setTimeout(r, 20));
-		assertEqual(js.lines.join("\n"), "armed\nfired");
-		assertEqual(wasm.lines.join("\n"), "armed");
-	});
-});
-
-test("the deadline_timer stop func clears the JS timer", async () => {
-	const project = (target) => ({
-		"lib/lib.go": `//gofront:target ${target}
-package lib
-
-import "timer"
-
-func Run() string {
-	stop := timer.AfterStoppable(1, func() { println("fired") })
-	stop()
-	return "stopped"
-}
-`,
-		"main.go": `package main\n\nimport "./lib"\n\nfunc main() { println(lib.Run()) }\n`,
-	});
-	await withTempDir({ "timer/timer.go": TIMER_PKG }, async (stdlib) => {
-		const js = await compileHybridProject(project("both"), {
-			stdlibRoot: stdlib,
-		});
-		const wasm = await compileHybridProject(project("wasm"), {
-			stdlibRoot: stdlib,
-		});
-		assert(wasm.wasm instanceof Uint8Array, "expected linked wasm");
-		await new Promise((r) => setTimeout(r, 20));
-		assertEqual(js.lines.join("\n"), "stopped");
-		assertEqual(wasm.lines.join("\n"), "stopped");
-	});
-});
 
 test("an unknown intrinsic name is rejected", () => {
 	withTempDir(
@@ -644,59 +589,29 @@ func Run() string {
 	assertEqual(out, "n=6 err=<nil> out1=世界 out2=世界");
 });
 
-test("context.Context.Done reports exclusion diagnostic", () => {
-	withTempDir(
-		{
-			"main.go": `package main
-
-import "context"
-
-func use(ctx context.Context) {
-	_ = ctx.Done()
-}
-
-func main() {}
-`,
-		},
-		(dir) => {
-			let threw = false;
-			try {
-				compileDir(dir);
-			} catch (err) {
-				threw = true;
-				assert(
-					err.message.includes("Done() returns a channel"),
-					`expected channel diagnostic, got: ${err.message}`,
-				);
-			}
-			assert(threw, "expected compile error for ctx.Done()");
-		},
-	);
-});
-
 test("type assertion to a Go-source package struct pointer (JS and WASM parity)", async () => {
 	const out = await stdParity(`import (
-	"encoding/csv"
+	"encoding/json"
 	"io"
-	"strings"
+	"strconv"
 )
 
 func Run() string {
 	var eof error = io.EOF
-	_, isParse := eof.(*csv.ParseError)
-	r := csv.NewReader(strings.NewReader("a\\"b,c\\n"))
-	_, err := r.Read()
-	pe, ok := err.(*csv.ParseError)
+	_, isSyntax := eof.(*json.SyntaxError)
+	var v any
+	err := json.Unmarshal([]byte("{x"), &v)
+	se, ok := err.(*json.SyntaxError)
 	if !ok {
-		return "not a ParseError"
+		return "not a SyntaxError"
 	}
-	if isParse {
-		return "EOF reported as ParseError"
+	if isSyntax {
+		return "EOF reported as SyntaxError"
 	}
-	return "ok line=" + string(rune('0'+pe.Line))
+	return "ok offset=" + strconv.Itoa(int(se.Offset))
 }
 `);
-	assertEqual(out, "ok line=1");
+	assertEqual(out, "ok offset=2");
 });
 
 test("interface dispatch skips same-named methods with other parameters (WASM)", async () => {
@@ -727,111 +642,6 @@ func Run() string {
 	assertEqual(out, "abc,2");
 });
 
-const LOG_SINK = `type sink struct{ buf []byte }
-
-func (s *sink) Write(p []byte) (int, error) {
-	s.buf = append(s.buf, p...)
-	return len(p), nil
-}
-`;
-
-test("log.Fatal writes the message, then exits in JS and panics in WASM", async () => {
-	const realExit = process.exit;
-	const codes = [];
-	process.exit = (code) => {
-		codes.push(code);
-	};
-	try {
-		const out = await stdParity(`import "log"
-
-${LOG_SINK}
-func Run() (res string) {
-	s := &sink{}
-	l := log.New(s, "fatal: ", 0)
-	defer func() {
-		res = string(s.buf) + "|" + recover().(string)
-	}()
-	l.Fatalf("code %d", 7)
-	return "not reached"
-}
-`);
-		assertEqual(out, "fatal: code 7\n|code 7");
-		assertEqual(codes.join(","), "1");
-	} finally {
-		process.exit = realExit;
-	}
-});
-
-test("log prints ???:0 for Lshortfile and Llongfile (JS and WASM parity)", async () => {
-	const out = await stdParity(`import "log"
-
-${LOG_SINK}
-func Run() string {
-	s := &sink{}
-	l := log.New(s, "p ", log.Lshortfile)
-	l.Print("a")
-	l.SetFlags(log.Llongfile | log.Lmsgprefix)
-	l.Print("b")
-	return string(s.buf)
-}
-`);
-	assertEqual(out, "p ???:0: a\n???:0: p b\n");
-});
-
-test("math/rand/v2 argument panics carry Go's messages (JS and WASM parity)", async () => {
-	const out = await stdParity(`import "math/rand/v2"
-
-func try(f func()) (msg string) {
-	defer func() { msg = recover().(string) }()
-	f()
-	return ""
-}
-
-func Run() string {
-	r := rand.New(rand.NewPCG(1, 2))
-	return try(func() { r.IntN(0) }) + "|" +
-		try(func() { r.Int64N(-1) }) + "|" +
-		try(func() { r.Uint64N(0) }) + "|" +
-		try(func() { r.Int32N(0) }) + "|" +
-		try(func() { r.Uint32N(0) }) + "|" +
-		try(func() { rand.IntN(0) }) + "|" +
-		try(func() { rand.N(0) }) + "|" +
-		try(func() { r.Shuffle(-1, func(i, j int) {}) })
-}
-`);
-	assertEqual(
-		out,
-		"invalid argument to IntN|invalid argument to Int64N|invalid argument to Uint64N|invalid argument to Int32N|invalid argument to Uint32N|invalid argument to IntN|invalid argument to N|invalid argument to Shuffle",
-	);
-});
-
-test("math/rand/v2 ChaCha8 reports the deferred exclusion", () => {
-	withTempDir(
-		{
-			"main.go": `package main
-
-import "math/rand/v2"
-
-func main() {
-	_ = rand.NewChaCha8([32]byte{})
-}
-`,
-		},
-		(dir) => {
-			let msg = "";
-			try {
-				compileDir(dir);
-			} catch (err) {
-				msg = err.message;
-			}
-			assert(
-				msg.includes("ChaCha8 is deferred"),
-				`expected the deferred diagnostic, got: ${msg}`,
-			);
-		},
-	);
-});
-
 section("Go-source stdlib: slices.Repeat panics");
 
 test("slices.Repeat panics with Go's messages on both backends", async () => {
@@ -859,4 +669,101 @@ func Run() string {
 		out,
 		"ok|cannot be negative|the result of (len(x) * count) overflows",
 	);
+});
+
+section("Go-source stdlib: pruned packages");
+
+const PRUNED_PACKAGES = [
+	"bufio",
+	"net/url",
+	"context",
+	"encoding/csv",
+	"container/heap",
+	"container/list",
+	"container/ring",
+	"hash/adler32",
+	"hash/crc32",
+	"hash/fnv",
+	"crypto/hmac",
+	"crypto/md5",
+	"crypto/sha1",
+	"crypto/sha512",
+	"crypto/subtle",
+	"encoding/base32",
+	"log",
+	"math/rand/v2",
+	"unicode/utf16",
+	"math/cmplx",
+	"sync/atomic",
+];
+
+for (const pkg of PRUNED_PACKAGES) {
+	test(`import "${pkg}" reports that the package is not available`, () => {
+		withTempDir(
+			{
+				"main.go": `package main\n\nimport _ "${pkg}"\n\nfunc main() {}\n`,
+			},
+			(dir) => {
+				let msg = "";
+				try {
+					compileDir(dir);
+				} catch (err) {
+					msg = err.message;
+				}
+				assertContains(msg, `package '${pkg}' is not available`);
+			},
+		);
+	});
+}
+
+test("a pruned package gets no missing-types warning", () => {
+	const realError = console.error;
+	const logged = [];
+	console.error = (m) => logged.push(String(m));
+	try {
+		compile(`package main\nimport _ "net/url"\nfunc main() {}\n`);
+	} finally {
+		console.error = realError;
+	}
+	assert(
+		!logged.some((m) => m.includes("cannot find types")),
+		`unexpected warning: ${logged.join("|")}`,
+	);
+});
+
+test("an unknown third-party path still compiles with the missing-types warning", () => {
+	const realError = console.error;
+	const logged = [];
+	console.error = (m) => logged.push(String(m));
+	let errors;
+	try {
+		({ errors } = compile(
+			`package main\nimport _ "nope/zzz"\nfunc main() {}\n`,
+		));
+	} finally {
+		console.error = realError;
+	}
+	assertEqual(errors.length, 0);
+	assert(
+		logged.some((m) => m.includes("cannot find types for 'nope/zzz'")),
+		`expected the warning, got: ${logged.join("|")}`,
+	);
+});
+
+test("kept packages still compile on both backends", async () => {
+	const out = await stdParity(`import (
+	"encoding/json"
+	"hash"
+	"strconv"
+	"unicode"
+)
+
+var _ hash.Hash
+
+func Run() string {
+	b, _ := json.Marshal([]int{1, 2})
+	return strconv.Itoa(len(b)) + string(unicode.ToUpper('a'))
+}
+`);
+	assertEqual(out, "5A");
 });
