@@ -6,6 +6,7 @@ import {
 	assert,
 	assertEqual,
 	assertErrorContains,
+	assertProgramOutput,
 	assertThrows,
 	compileHybridProject,
 	section,
@@ -800,4 +801,301 @@ func Run() int {
 }
 `);
 	assertEqual(out, "2");
+});
+
+// ── Real-Go conformance (expected output captured from go run) ──
+
+test("real Go output: slices/iter on JS and WASM", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"fmt"
+	"iter"
+	"slices"
+	"strings"
+)
+
+type person struct {
+	name string
+	age  int
+}
+
+// countdown yields n, n-1, ..., 1.
+func countdown(n int) iter.Seq[int] {
+	return func(yield func(int) bool) {
+		for i := n; i > 0; i-- {
+			if !yield(i) {
+				return
+			}
+		}
+	}
+}
+
+func chunkPanic() (msg string) {
+	defer func() { msg = fmt.Sprintf("%v", recover()) }()
+	slices.Chunk([]int{1, 2}, 0)
+	return "no panic"
+}
+
+func main() {
+	words := []string{"pear", "apple", "fig"}
+
+	// All, Values, Backward
+	for i, w := range slices.All(words) {
+		fmt.Println("all", i, w)
+	}
+	for w := range slices.Values(words) {
+		fmt.Println("value", w)
+	}
+	for i, w := range slices.Backward(words) {
+		fmt.Println("backward", i, w)
+	}
+	for i, w := range slices.All(words) {
+		if i == 1 {
+			break
+		}
+		fmt.Println("first", w)
+	}
+
+	// Collect, AppendSeq
+	fmt.Println(slices.Collect(countdown(4)))
+	fmt.Println(slices.AppendSeq([]int{10, 20}, countdown(2)))
+	fmt.Println(len(slices.Collect(countdown(0))))
+	up := slices.Collect(slices.Values(words))
+	up[0] = strings.ToUpper(up[0])
+	fmt.Println(words, up)
+
+	// Sorted, SortedFunc, SortedStableFunc
+	fmt.Println(slices.Sorted(slices.Values(words)))
+	fmt.Println(slices.Sorted(countdown(5)))
+	fmt.Println(slices.SortedFunc(slices.Values(words), func(a, b string) int {
+		return len(a) - len(b)
+	}))
+	people := []person{{"dan", 30}, {"ann", 25}, {"bob", 30}, {"cat", 25}}
+	byAge := slices.SortedStableFunc(slices.Values(people), func(a, b person) int {
+		return a.age - b.age
+	})
+	for _, p := range byAge {
+		fmt.Println("stable", p.name, p.age)
+	}
+
+	// Chunk
+	for c := range slices.Chunk([]int{1, 2, 3, 4, 5, 6, 7}, 3) {
+		fmt.Println("chunk", c, len(c), cap(c))
+	}
+	n := 0
+	for range slices.Chunk([]int{}, 2) {
+		n++
+	}
+	fmt.Println("empty chunks", n)
+	fmt.Println("chunk panic:", chunkPanic())
+}
+`,
+		`all 0 pear
+all 1 apple
+all 2 fig
+value pear
+value apple
+value fig
+backward 2 fig
+backward 1 apple
+backward 0 pear
+first pear
+[4 3 2 1]
+[10 20 2 1]
+0
+[pear apple fig] [PEAR apple fig]
+[apple fig pear]
+[1 2 3 4 5]
+[fig pear apple]
+stable ann 25
+stable cat 25
+stable dan 30
+stable bob 30
+chunk [1 2 3] 3 3
+chunk [4 5 6] 3 3
+chunk [7] 1 1
+empty chunks 0
+chunk panic: cannot be less than 1
+`,
+	);
+});
+
+test("real Go output: sort/find on JS and WASM", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+)
+
+func main() {
+	a := []int{1, 3, 5, 7, 9}
+	for _, x := range []int{0, 1, 4, 5, 9, 10} {
+		i, found := sort.Find(len(a), func(i int) int { return x - a[i] })
+		fmt.Println(x, i, found)
+	}
+	i, found := sort.Find(0, func(i int) int { panic("not called") })
+	fmt.Println(i, found)
+
+	words := []string{"apple", "banana", "cherry"}
+	i, found = sort.Find(len(words), func(i int) int { return strings.Compare("banana", words[i]) })
+	fmt.Println(i, found)
+	i, found = sort.Find(len(words), func(i int) int { return strings.Compare("blueberry", words[i]) })
+	fmt.Println(i, found)
+
+	calls := 0
+	i, found = sort.Find(1000, func(i int) int {
+		calls++
+		return 637 - i
+	})
+	fmt.Println(i, found, calls)
+}
+`,
+		`0 0 false
+1 0 true
+4 2 false
+5 2 true
+9 4 true
+10 5 false
+0 false
+1 true
+2 false
+637 true 11
+`,
+	);
+});
+
+test("real Go output: sort/sort on JS and WASM", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"fmt"
+	"math"
+	"sort"
+)
+
+type item struct {
+	key int
+	val string
+}
+
+type byKey []item
+
+func (b byKey) Len() int           { return len(b) }
+func (b byKey) Less(i, j int) bool { return b[i].key < b[j].key }
+func (b byKey) Swap(i, j int)      { b[i], b[j] = b[j], b[i] }
+
+func main() {
+	// 1. pdqsort with duplicate keys
+	items := byKey{
+		{key: 3, val: "a"},
+		{key: 1, val: "b"},
+		{key: 2, val: "c"},
+		{key: 2, val: "d"},
+		{key: 1, val: "e"},
+		{key: 3, val: "f"},
+		{key: 2, val: "g"},
+		{key: 0, val: "h"},
+		{key: 5, val: "i"},
+		{key: 4, val: "j"},
+		{key: 2, val: "k"},
+		{key: 1, val: "l"},
+		{key: 3, val: "m"},
+		{key: 0, val: "n"},
+	}
+	sort.Sort(items)
+	fmt.Print("pdqsort:")
+	for _, it := range items {
+		fmt.Printf(" %d:%s", it.key, it.val)
+	}
+	fmt.Println()
+	fmt.Println("IsSorted:", sort.IsSorted(items))
+
+	// 2. Stable sort
+	items2 := byKey{
+		{key: 3, val: "a"},
+		{key: 1, val: "b"},
+		{key: 2, val: "c"},
+		{key: 2, val: "d"},
+		{key: 1, val: "e"},
+		{key: 3, val: "f"},
+		{key: 2, val: "g"},
+		{key: 0, val: "h"},
+	}
+	sort.Stable(items2)
+	fmt.Print("stable:")
+	for _, it := range items2 {
+		fmt.Printf(" %d:%s", it.key, it.val)
+	}
+	fmt.Println()
+
+	// 3. Reverse
+	sort.Sort(sort.Reverse(items2))
+	fmt.Print("reverse:")
+	for _, it := range items2 {
+		fmt.Printf(" %d:%s", it.key, it.val)
+	}
+	fmt.Println()
+	fmt.Println("IsSorted reverse:", sort.IsSorted(sort.Reverse(items2)))
+
+	// 4. IntSlice, StringSlice, Float64Slice
+	ints := sort.IntSlice{5, 2, 6, 3, 1, 4}
+	ints.Sort()
+	fmt.Println("IntSlice:", ints)
+
+	strings := sort.StringSlice{"banana", "apple", "cherry", "date"}
+	strings.Sort()
+	fmt.Println("StringSlice:", strings)
+
+	floats := sort.Float64Slice{3.14, 1.41, math.NaN(), 2.71, math.NaN(), 0.58}
+	floats.Sort()
+	fmt.Print("Float64Slice:")
+	for _, f := range floats {
+		if math.IsNaN(f) {
+			fmt.Print(" NaN")
+		} else {
+			fmt.Printf(" %.2f", f)
+		}
+	}
+	fmt.Println()
+
+	// 5. SearchInts, SearchStrings, SearchFloat64s
+	sortedInts := []int{10, 20, 30, 40, 50}
+	fmt.Println("SearchInts 30:", sort.SearchInts(sortedInts, 30))
+	fmt.Println("SearchInts 25:", sort.SearchInts(sortedInts, 25))
+	fmt.Println("SearchInts 5:", sort.SearchInts(sortedInts, 5))
+	fmt.Println("SearchInts 60:", sort.SearchInts(sortedInts, 60))
+
+	sortedStrings := []string{"apple", "banana", "cherry", "date"}
+	fmt.Println("SearchStrings banana:", sort.SearchStrings(sortedStrings, "banana"))
+	fmt.Println("SearchStrings blueberry:", sort.SearchStrings(sortedStrings, "blueberry"))
+
+	sortedFloats := []float64{1.1, 2.2, 3.3, 4.4}
+	fmt.Println("SearchFloat64s 3.3:", sort.SearchFloat64s(sortedFloats, 3.3))
+	fmt.Println("SearchFloat64s 0.5:", sort.SearchFloat64s(sortedFloats, 0.5))
+}
+`,
+		`pdqsort: 0:h 0:n 1:b 1:l 1:e 2:g 2:k 2:d 2:c 3:a 3:f 3:m 4:j 5:i
+IsSorted: true
+stable: 0:h 1:b 1:e 2:c 2:d 2:g 3:a 3:f
+reverse: 3:a 3:f 2:c 2:d 2:g 1:b 1:e 0:h
+IsSorted reverse: true
+IntSlice: [1 2 3 4 5 6]
+StringSlice: [apple banana cherry date]
+Float64Slice: NaN NaN 0.58 1.41 2.71 3.14
+SearchInts 30: 2
+SearchInts 25: 2
+SearchInts 5: 0
+SearchInts 60: 5
+SearchStrings banana: 1
+SearchStrings blueberry: 2
+SearchFloat64s 3.3: 2
+SearchFloat64s 0.5: 0
+`,
+	);
 });
