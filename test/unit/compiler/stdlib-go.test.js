@@ -6,6 +6,7 @@ import {
 	assert,
 	assertContains,
 	assertEqual,
+	assertErrorContains,
 	assertThrows,
 	compile,
 	compileDir,
@@ -482,29 +483,22 @@ func Run() int {
 	assertEqual(out, "113");
 });
 
-section("Portable Go Phase 3.2 review feedback: io & fmt.Fscan fixes");
+section("Portable Go Phase 3.2 review feedback: io & fmt.Sscan fixes");
 
-test("fmt.Fscan returns n=0 on parse failure (JS and WASM parity)", async () => {
-	const out = await stdParity(`import (
-	"fmt"
-	"strings"
-)
+test("fmt.Sscan returns n=0 on parse failure (JS and WASM parity)", async () => {
+	const out = await stdParity(`import "fmt"
 
 func Run() string {
-	r := strings.NewReader("xyz")
 	var a int
-	n, err := fmt.Fscan(r, &a)
+	n, err := fmt.Sscan("xyz", &a)
 	return fmt.Sprintf("n=%d err=%t a=%d", n, err != nil, a)
 }
 `);
 	assertEqual(out, "n=0 err=true a=0");
 });
 
-test("fmt.Fscan with all integer pointer types (JS and WASM parity)", async () => {
-	const out = await stdParity(`import (
-	"fmt"
-	"strings"
-)
+test("fmt.Sscan with all integer pointer types (JS and WASM parity)", async () => {
+	const out = await stdParity(`import "fmt"
 
 func Run() string {
 	var (
@@ -517,8 +511,7 @@ func Run() string {
 		i16 int16
 		i8  int8
 	)
-	r := strings.NewReader("10 20 30 40 50 60 70 80")
-	n, err := fmt.Fscan(r, &i64, &u, &u64, &u32, &u16, &u8, &i16, &i8)
+	n, err := fmt.Sscan("10 20 30 40 50 60 70 80", &i64, &u, &u64, &u32, &u16, &u8, &i16, &i8)
 	return fmt.Sprintf("n=%d err=%t vals=%d,%d,%d,%d,%d,%d,%d,%d",
 		n, err != nil, i64, u, u64, u32, u16, u8, i16, i8)
 }
@@ -766,4 +759,92 @@ func Run() string {
 }
 `);
 	assertEqual(out, "5A");
+});
+
+section("Go-source stdlib: trimmed overlays");
+
+const TRIMMED_MEMBERS = [
+	// [package, import path, member, how to mention it]
+	...[
+		"Is",
+		"In",
+		"IsOneOf",
+		"IsMark",
+		"IsNumber",
+		"IsSymbol",
+		"IsTitle",
+		"To",
+		"UpperCase",
+		"LowerCase",
+		"TitleCase",
+		"MaxCase",
+		"Letter",
+		"Digit",
+		"Space",
+		"Upper",
+		"Lower",
+		"Punct",
+		"Symbol",
+		"Mark",
+		"Number",
+	].map((m) => ["unicode", "unicode", m, "value"]),
+	...["RangeTable", "Range16", "Range32"].map((m) => [
+		"unicode",
+		"unicode",
+		m,
+		"type",
+	]),
+	["math", "math", "Gamma", "value"],
+	["math", "math", "Erf", "value"],
+	["sync", "sync", "Pool", "type"],
+	["sync", "sync", "Map", "type"],
+	["fmt", "fmt", "Fscan", "value"],
+	["fmt", "fmt", "Fscanf", "value"],
+	["fmt", "fmt", "Fscanln", "value"],
+	["strconv", "strconv", "QuoteToGraphic", "value"],
+	["strconv", "strconv", "QuoteRuneToGraphic", "value"],
+	["strconv", "strconv", "AppendQuoteToGraphic", "value"],
+	["strconv", "strconv", "AppendQuoteRuneToGraphic", "value"],
+];
+
+for (const [pkg, path, member, how] of TRIMMED_MEMBERS) {
+	for (const target of ["js", "wasm"]) {
+		test(`${pkg}.${member} is not supported in a ${target} package`, () => {
+			const use =
+				how === "type" ? `var _ ${pkg}.${member}` : `var _ = ${pkg}.${member}`;
+			const { errors } = compile(
+				`//gofront:target ${target}\npackage main\nimport "${path}"\n${use}\nfunc main() {}\n`,
+				{ target },
+			);
+			assertErrorContains(errors, "not supported");
+			assertErrorContains(errors, `${pkg}.${member} is not available`);
+		});
+	}
+}
+
+test("the trimmed overlays keep the members the emitters reach", async () => {
+	const out = await stdParity(`import (
+	"fmt"
+	"math"
+	"strconv"
+	"strings"
+	"sync"
+)
+
+func Run() string {
+	frac, exp := math.Frexp(8)
+	ip, fp := math.Modf(3.25)
+	get := sync.OnceValue(func() int { return 7 })
+	var a, b int
+	n, _ := fmt.Sscan("4 5", &a, &b)
+	return fmt.Sprint(
+		strings.EqualFold("σ", "Σ"), " ",
+		strings.ToTitle("héllo"), " ",
+		strconv.Quote("\u00e9"), " ",
+		frac, " ", exp, " ", math.Ldexp(frac, exp), " ", ip, " ", fp, " ",
+		get(), get(), " ", n, a, b,
+	)
+}
+`);
+	assertEqual(out, 'true HÉLLO "é" 0.5 4 8 3 0.25 7 7 2 4 5');
 });
