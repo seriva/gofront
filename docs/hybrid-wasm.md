@@ -60,7 +60,7 @@ copies its arguments, so the loop usually belongs on the WASM side, or the data 
 
 ## Pointers in `wasm` and `both` packages
 
-Pointers to structs, to local variables and to struct-typed fields, elements and package-level variables work as in Go. A pointer to a number, string, bool, slice, map or interface that lives inside a struct field, a slice or array element, or a package-level variable is a compile error, because WebAssembly cannot point into the middle of a managed object:
+Pointers to structs, to local variables and to struct-typed fields, elements and package-level variables work as in Go. A pointer to a number, string, bool, slice, map or `any` value that lives inside a struct field, a slice or array element, or a package-level variable is a compile error, because WebAssembly cannot point into the middle of a managed object:
 
 ```go
 //gofront:target wasm
@@ -128,20 +128,20 @@ Packages that `wasm` and `both` packages can import (JS-only packages such as `r
 | Package | Targets | Notes |
 |---|---|---|
 | `bytes` | js, wasm, both | Buffer, Reader and the search/split/trim helpers |
-| `cmp` | js, wasm, both | Go source |
+| `cmp` | js, wasm, both | `Ordered`, `Compare`, `Less`, `Or` |
 | `crypto/rand` | js, wasm, both | `Read`, `Reader` |
 | `crypto/sha256` | js, wasm, both | `Sum256`, `New` |
 | `encoding/base64` | js, wasm, both | Std, URL and Raw encodings |
 | `encoding/binary` | js, wasm, both | `BigEndian` and `LittleEndian` byte-order accessors, `Read`, `Write`, `Size`, `Append*`; no varints |
 | `encoding/hex` | js, wasm, both | `EncodeToString`, `DecodeString`, `Encode`, `Decode`, `EncodedLen`, `DecodedLen` |
-| `encoding/json` | js, wasm, both | Go source; struct tags, `Marshal`, `Unmarshal`, `Decoder`, `Encoder` |
+| `encoding/json` | js, wasm, both | Struct tags, `Marshal`, `Unmarshal`, `Decoder`, `Encoder` |
 | `errors` | js, wasm, both | `New`, `Is`, `As`, `Unwrap`, `Join` |
 | `fmt` | js, wasm, both | Print, Sprint, Fprint, Errorf, Append, `Sscan*` |
-| `hash` | js, wasm, both | Go source |
+| `hash` | js, wasm, both | `Hash`, `Hash32`, `Hash64` interfaces |
 | `html` | js, wasm, both | `EscapeString`, `UnescapeString` |
 | `io` | js, wasm, both | Reader/Writer interfaces and helpers; no `Pipe` |
 | `iter`, `maps`, `slices`, `sort` | js, wasm, both | Go 1.23 iterator APIs; no `iter.Pull` |
-| `math`, `math/bits` | js, wasm, both | Some `math` members are Go source |
+| `math`, `math/bits` | js, wasm, both | Elementary functions, constants and float bit conversions |
 | `math/rand` | js, wasm, both | Seeded generators (a subset in `wasm`/`both`) |
 | `os` | js, wasm, both | `Stdout`, `Stderr`, `Stdin`, `File`; JS also has `Exit`, `Args`, `Getenv` |
 | `path`, `path/filepath` | js, wasm, both | Lexical helpers only; no file-system walking |
