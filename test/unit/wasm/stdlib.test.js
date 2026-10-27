@@ -6,7 +6,6 @@ import {
 	assertEqual,
 	assertThrows,
 	compileHybrid,
-	compileHybridProject,
 	compileWasm,
 	runWasm,
 	section,
