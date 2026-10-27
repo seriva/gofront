@@ -145,7 +145,7 @@ Notable members per package:
 - `time` (`Duration` with `.Truncate()`, `.Round()`, `.Abs()`, `ParseDuration`; `Time` with calendar arithmetic, `.AppendFormat()`, `.Compare()`, `FixedZone`, `Date`, `Parse`, `Unix*`; `time.Sleep` stays JS-only), `context` (`Background`, `TODO`, `WithCancel`, `WithCancelCause`, `WithDeadline`, `WithTimeout`, `WithValue`, `AfterFunc`, `WithoutCancel`, `Cause`)
 - `sync` (`Mutex`, `RWMutex`, `Once`, `WaitGroup`, `Map`, `Pool`, `Cond`, `OnceFunc`, `OnceValue`, `OnceValues`), `sync/atomic` (`Bool`, `Int32`, `Int64`, `Uint32`, `Uint64`, `Uintptr`, `Pointer[T]`, `Value`, package-level `Load*`/`Store*`/`Add*`/`Swap*`/`CompareAndSwap*`)
 - `hash` (`Hash`, `Hash32`, `Hash64`), `hash/fnv`, `hash/crc32`, `hash/adler32`, `crypto/rand` (`Read`, `Prime`), `crypto/sha256`, `crypto/sha512`, `crypto/sha1`, `crypto/md5`, `crypto/hmac`, `crypto/subtle`
-- `encoding/binary` (`LittleEndian`, `BigEndian`, `Read`, `Write`, `Append*`, `Size`, `Uvarint`, `Varint`, `PutUvarint`, `PutVarint`, `AppendUvarint`, `AppendVarint`), `encoding/hex`, `encoding/base64`, `encoding/base32`, `encoding/csv` (`Reader`, `Writer`, `ParseError`)
+- `encoding/binary` (`LittleEndian`, `BigEndian`, `Read`, `Write`, `Append*`, `Size`; no varints), `encoding/hex`, `encoding/base64`, `encoding/base32`, `encoding/csv` (`Reader`, `Writer`, `ParseError`)
 - `encoding/json` (`Marshal`, `MarshalIndent`, `Unmarshal`, `Valid`, `RawMessage`, `Number`, `Encoder`, `Decoder`, `Compact`, `Indent`, `HTMLEscape`; the codecs are generated Go linked into `app.wasm`)
 - `testing` (`T`, `B`, `M`, `TB`, `Run`, `Cleanup`, `Setenv`, `TempDir`), `gofront/shared`, and `gofront/simd` (experimental).
 
