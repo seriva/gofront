@@ -98,6 +98,7 @@ function goSource(pkg) {
 		const errors = pkgChecker.checkAll(programs);
 		if (errors.length > 0)
 			throw new Error(`${pkg}: ${errors.map((e) => e.message).join("; ")}`);
+		collectInterfaceMethods(programs, pkgChecker, names);
 		src = { names, checker: pkgChecker };
 	}
 	goSourceCache.set(pkg, src);
@@ -146,6 +147,26 @@ function qualifiedType(t, name) {
 	t.name = name;
 	if (t._generic) t._generic.declNode = { ...t._generic.declNode, name };
 	return t;
+}
+
+// Method names of an interface type (named or not), embedded ones included.
+function interfaceMethods(t) {
+	const u = t?.kind === "named" ? t.underlying : t;
+	return u?.kind === "interface" && u.methods instanceof Map
+		? [...u.methods.keys()]
+		: [];
+}
+
+// Interface method sets, embedded interfaces expanded by the checker
+// (`io.ReadCloser.Read` comes from `Reader`).
+function collectInterfaceMethods(programs, pkgChecker, names) {
+	const decls = programs.flatMap((p) => p.decls ?? []);
+	for (const d of decls) {
+		if (d.kind !== "TypeDecl" || d.type?.kind !== "InterfaceType") continue;
+		if (!/^[A-Z]/.test(d.name)) continue;
+		for (const m of interfaceMethods(pkgChecker.types.get(d.name)))
+			if (/^[A-Z]/.test(m)) names.add(`${d.name}.${m}`);
+	}
 }
 
 function collectDecl(d, names) {
@@ -570,6 +591,20 @@ test("strconv.ParseInt returns int64, as in Go", () => {
 		compile(src("var x int = n")).errors,
 		"Cannot assign int64 to int",
 	);
+});
+
+test("interface method sets are indexed, embedded interfaces expanded", () => {
+	for (const [pkg, name] of [
+		["io", "ReadCloser.Close"],
+		["io", "ReadCloser.Read"],
+		["hash", "Hash32.Sum32"],
+		["hash", "Hash32.Write"],
+	]) {
+		const found = findMember(pkg, name);
+		if (!found) throw new Error(`${pkg}.${name} not found`);
+		const e = entryOf.get(`${pkg}.${name}`);
+		assertEqual(signatureOf(e, found), e.signature);
+	}
 });
 
 test("the known gaps only name manifest entries", () => {
