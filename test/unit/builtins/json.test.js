@@ -1883,6 +1883,51 @@ Encode MarshalerError: msg=json: error calling MarshalJSON for type main.FailIte
 	);
 });
 
+test("json.Decoder reads a multi-value stream from a one-byte reader", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"strings"
+)
+
+type oneByte struct{ r io.Reader }
+
+func (o oneByte) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	n, err := o.r.Read(p[:1])
+	return n, err
+}
+
+type Item struct {
+	A int
+	B string
+}
+
+func main() {
+	dec := json.NewDecoder(oneByte{strings.NewReader(\`{"A":1,"B":"x"} {"A":2,"B":"y"}  {"B":"end"}\`)})
+	for dec.More() {
+		var it Item
+		err := dec.Decode(&it)
+		fmt.Println(it.A, it.B, err, dec.InputOffset())
+	}
+	var v Item
+	fmt.Println(dec.Decode(&v) == io.EOF)
+}
+`,
+		`1 x <nil> 15
+2 y <nil> 31
+0 end <nil> 44
+true
+`,
+	);
+});
+
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
