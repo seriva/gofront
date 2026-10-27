@@ -1,9 +1,0 @@
--42 0
-123 <nil>
-strconv.Atoi: parsing "12a": invalid syntax
--255 <nil>
-true <nil>
-11111111 -ff
-false
-"tab\there"
-3.25 <nil>

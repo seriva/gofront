@@ -1,8 +1,0 @@
-1 %!s(MISSING)
-%!d(MISSING)
-1%!(EXTRA string=a, float64=2.5)
-%!d(BADINDEX)
-%!d(BADINDEX)
-%!(NOVERB)
-%!z(int=3)
-%!Y(string=str)

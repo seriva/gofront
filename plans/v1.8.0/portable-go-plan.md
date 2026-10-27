@@ -1519,7 +1519,7 @@ Removed packages and the D4 overlay members were added in this unreleased cycle,
   - Test: `npm run check`
   - Done when: `npm run check` passes; `grep -rn "docs:stdlib\|plans/" docs/ package.json` is empty; every package directory under `stdlib/` and every name in `STDLIB_PACKAGES` appears in the list.
 
-- [ ] **Task 8.3 — Retire the conformance harness**
+- [x] **Task 8.3 — Retire the conformance harness**
   - Files: `test/conformance/` (whole directory, incl. `run.js`, `update.js`, `README.md`), `package.json` (`conformance`, `conformance:update`, and `&& npm run conformance` in `test`)
   - Do: before deleting, port fixtures as follows, then delete the directory. CI (`.github/workflows/ci.yml`) calls `npm test`, so it needs no change.
     - **Drop** (package removed by D2): `bufio`, `url`, `context`, `csv`, `container`, `hash`, `base32`, `utf16`, `cmplx`, `atomic`, `log`, `rand` (`math/rand/v2`), and the `crypto` fixtures for `hmac`/`md5`/`sha1`/`sha512`/`subtle`. Also drop any fixture case that only exercises a member Task 9.4 removes (`fmt.Fscan*`, `math.Gamma`/`Erf`, `sync.Map`/`Pool`, `unicode.Is`/`In`/`IsMark`/`IsNumber`/`IsSymbol`/`IsTitle`/`To`, `strconv.*ToGraphic`); split mixed fixtures and port the rest.
