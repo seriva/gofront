@@ -83,7 +83,7 @@ func bumpBody(b *Body) { b.X++ }
 func Step(b *Body) { bumpBody(b) }
 ```
 
-The same rule covers `&xs[i]` on a `[]float64`, `&pkgVar` on a package-level `int`, and a pointer-receiver call on such an operand (`s.Count.Inc()` where `type Counter int` is the field type). Pointers to struct- and array-typed fields and elements (`&items[i]` on a `[]Item`, `&g.Cells` on a `[4]int` field) are fine. `js` packages are unchanged and accept all of these.
+The same rule covers `&xs[i]` on a `[]float64`, `&pkgVar` on a package-level `int`, and a pointer-receiver call on such an operand (`s.Count.Inc()` where `type Counter int` is the field type). Pointers to struct- and array-typed fields and elements (`&items[i]` on a `[]Item`, `&g.Cells` on a `[4]int` field) are fine. A pointer to a func-typed variable is rejected even for a local (`&f`, or a pointer-receiver call on a named func type); return the new func instead. `js` packages are unchanged and accept all of these.
 
 ---
 
