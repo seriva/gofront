@@ -1601,7 +1601,7 @@ All in Go-source overlays compiled for both targets; each task adds a conformanc
   - Test: fixture including `SplitAfterN` with n = -1, 0, 1 and an empty separator.
   - Done when: fixture matches Go; the 8 entries leave `gaps.missing`.
 
-- [ ] **Task 9.3 — `strings` and `slices` members**
+- [x] **Task 9.3 — `strings` and `slices` members**
   - Files: `stdlib/strings/extra.go`, `stdlib/slices/extra.go` (new overlays), `test/conformance/strings/extra.go` (+ `.out`)
   - Do: `strings.Clone`, `Compare`, `ContainsFunc`, `Replacer.WriteString` (writes `Replace(s)` to the `io.Writer`); `slices.CompareFunc`, `EqualFunc`, `Repeat` (panics on negative count / overflow with Go's message).
   - Test: fixture; plus a parity test for the `Repeat` panic message in `test/unit/builtins/stdlib.test.js`.
