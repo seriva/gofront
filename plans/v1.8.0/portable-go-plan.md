@@ -1589,7 +1589,7 @@ Scheduled from the Step 4.4 full-branch audit (2026-10-26), re-planned the same 
 
 All in Go-source overlays compiled for both targets; each task adds a conformance fixture compared with real Go on JS and WASM. Triage rows `bytes`, `strings`, `slices`, `sort`, `errors`. `ToUpperSpecial`/`ToLowerSpecial`/`ToTitleSpecial` (both packages) are not here: they take `unicode.SpecialCase`, an `excluded:deferred` table (Phase 16).
 
-- [ ] **Task 9.1 — `bytes` search and compare**
+- [x] **Task 9.1 — `bytes` search and compare**
   - Files: `stdlib/bytes/search.go` (new overlay), `test/conformance/bytes/search.go`, `test/conformance/bytes/search.out`
   - Do: `Compare`, `EqualFold`, `IndexAny`, `LastIndexAny`, `IndexRune`, `IndexFunc`, `LastIndexFunc`, `ContainsFunc`, `CutPrefix`, `CutSuffix`; byte offsets, invalid UTF-8 handled as Go (`IndexRune(s, utf8.RuneError)` matches invalid sequences).
   - Test: fixture over ASCII, multi-byte and invalid-UTF-8 inputs (byte slices, per §1.1).
