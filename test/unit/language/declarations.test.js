@@ -965,11 +965,12 @@ func other() int { return iter.Pull() }
 
 test("importing excluded stdlib packages reports manifest reason", () => {
 	const cases = [
-		["reflect", "runtime"],
-		["net/http", "host"],
-		["text/template", "reflection"],
-		["math/big", "deferred"],
-		["compress/gzip", "deferred"],
+		["reflect", "needs the Go runtime"],
+		["unsafe", "needs the Go runtime"],
+		["net/http", "needs host services"],
+		["text/template", "needs runtime reflection"],
+		["math/big", "deferred; open an issue if you need it"],
+		["compress/gzip", "deferred; open an issue if you need it"],
 	];
 	for (const [pkg, reason] of cases) {
 		const { errors } = compile(`package main

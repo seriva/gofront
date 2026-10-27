@@ -132,7 +132,13 @@ export const expressionParserMethods = {
 		const t = this.peek();
 		if (UNARY_OPS.has(t.type)) {
 			const op = this.advance().value;
-			return { kind: "UnaryExpr", op, operand: this.parseUnary(noCompLit) };
+			return {
+				kind: "UnaryExpr",
+				op,
+				operand: this.parseUnary(noCompLit),
+				_line: t.line,
+				_col: t.col,
+			};
 		}
 		if (t.type === T.AWAIT) {
 			this.advance();

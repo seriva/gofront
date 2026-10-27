@@ -313,12 +313,15 @@ export const expressionCheckMethods = {
 		);
 	},
 
-	// Scalars (basic, slice, map) live inline in their parent struct, array or
-	// global, so wasm has no stable address for them.
+	// Only structs and arrays are their own managed objects in wasm; every other
+	// value (numbers, strings, slices, maps, interfaces, pointers, funcs, SIMD
+	// vectors) lives inline in its parent struct, array or global, so wasm has
+	// no stable address for it.  Type parameters are checked per instantiation.
 	_isScalarStorageType(t) {
-		const u = this.resolveType(t?.kind === "named" ? t.underlying : t);
-		const k = (u ?? t)?.kind;
-		return k === "basic" || k === "slice" || k === "map";
+		const u = this.resolveType(t?.kind === "named" ? t.underlying : t) ?? t;
+		const k = u?.kind;
+		if (!k || u._tainted) return false;
+		return k !== "struct" && k !== "array" && k !== "typeParam";
 	},
 
 	// True when `operand` is a struct field, array/slice element or package-level
@@ -342,16 +345,50 @@ export const expressionCheckMethods = {
 		return this._isScalarStorageType(type);
 	},
 
-	_errScalarInteriorAddress(node) {
+	// Postfix selectors and index expressions carry no position; report at
+	// their innermost positioned operand.
+	_positioned(node) {
+		let at = node;
+		while (at && !at._line && !at.line) at = at.operand ?? at.expr;
+		return at ?? node;
+	},
+
+	_errScalarInteriorAddress(node, type) {
 		return this.err(
-			"cannot take the address of a scalar field, element or package-level variable in a wasm package; pass the parent struct pointer or the index instead, or copy the value to a local variable",
-			node,
+			`cannot take the address of a field, element or package-level variable of type ${typeStr(type)} in a ${this.target} package; only struct and array values have a stable address in WebAssembly. Pass the parent struct pointer or the index instead, or copy the value to a local variable`,
+			this._positioned(node),
+		);
+	},
+
+	// Go: map elements are not addressable, nor are fields and array elements
+	// reached from one by value (`&m[k]`, `&m[k].f`, `&m[k][i]` on an array).
+	_isMapElementOperand(operand) {
+		let node = operand;
+		while (node?.kind === "ParenExpr") node = node.expr;
+		if (node?.kind !== "SelectorExpr" && node?.kind !== "IndexExpr")
+			return false;
+		const bt = node.expr?._type;
+		const b = this.resolveType(bt?.kind === "named" ? bt.underlying : bt) ?? bt;
+		if (node.kind === "IndexExpr" && b?.kind === "map") return true;
+		if (b?.kind === "pointer" || b?.kind === "slice") return false;
+		if (node.kind === "SelectorExpr" && b?.kind !== "struct") return false;
+		return this._isMapElementOperand(node.expr);
+	},
+
+	_errMapElementAddress(node) {
+		return this.err(
+			"cannot take the address of a map element; copy it to a local variable, or store pointers in the map",
+			this._positioned(node),
 		);
 	},
 
 	_checkAddressOfExpr(expr, scope, ot) {
+		if (this._isMapElementOperand(expr.operand)) {
+			this._errMapElementAddress(expr);
+			return { kind: "pointer", base: ot };
+		}
 		if (this._isScalarInteriorOperand(expr.operand, ot, scope)) {
-			this._errScalarInteriorAddress(expr);
+			this._errScalarInteriorAddress(expr, ot);
 			return { kind: "pointer", base: ot };
 		}
 		if (expr.operand.kind === "Ident") {
@@ -410,9 +447,13 @@ export const expressionCheckMethods = {
 	// `&x`, so `x` must be boxed like an explicit `&x`.
 	_markPtrRecvAddress(expr, base, ft, scope) {
 		if (!ft._ptrRecv) return;
+		if (this._isMapElementOperand(expr.expr)) {
+			this._errMapElementAddress(expr.expr);
+			return;
+		}
 		if (base?.kind !== "basic" && base?.kind !== "slice") return;
 		if (this._isScalarInteriorOperand(expr.expr, expr.expr._type, scope)) {
-			this._errScalarInteriorAddress(expr);
+			this._errScalarInteriorAddress(expr, expr.expr._type);
 			return;
 		}
 		if (expr.expr.kind !== "Ident") return;
