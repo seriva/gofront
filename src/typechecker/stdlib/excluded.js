@@ -141,8 +141,59 @@ const EXCLUDED_PACKAGE_GROUPS = {
 	],
 };
 
+const TRIMMED_UNICODE_TABLES =
+	"removed in v1.8.0; range tables are not supported";
+const TRIMMED_UNICODE_CASE =
+	"removed in v1.8.0; case ranges are not supported, use ToUpper, ToLower or ToTitle";
+const TRIMMED_FSCAN =
+	"removed in v1.8.0; scanning from an io.Reader is not supported, use fmt.Sscan on the text";
+
 // reason -> package path -> excluded member names
 const EXCLUDED_MEMBER_GROUPS = {
+	[TRIMMED_UNICODE_TABLES]: {
+		unicode: [
+			"Is",
+			"In",
+			"IsOneOf",
+			"IsMark",
+			"IsNumber",
+			"IsSymbol",
+			"IsTitle",
+			"RangeTable",
+			"Range16",
+			"Range32",
+			"Letter",
+			"Digit",
+			"Space",
+			"Upper",
+			"Lower",
+			"Punct",
+			"Symbol",
+			"Mark",
+			"Number",
+		],
+	},
+	[TRIMMED_UNICODE_CASE]: {
+		unicode: ["To", "UpperCase", "LowerCase", "TitleCase", "MaxCase"],
+	},
+	[TRIMMED_FSCAN]: {
+		fmt: ["Fscan", "Fscanf", "Fscanln"],
+	},
+	"removed in v1.8.0; this function is not supported": {
+		math: ["Gamma", "Erf"],
+	},
+	"removed in v1.8.0; not supported, use a plain struct or map": {
+		sync: ["Pool", "Map"],
+	},
+	"removed in v1.8.0; graphic quoting is not supported, use Quote or QuoteToASCII":
+		{
+			strconv: [
+				"QuoteToGraphic",
+				"QuoteRuneToGraphic",
+				"AppendQuoteToGraphic",
+				"AppendQuoteRuneToGraphic",
+			],
+		},
 	"needs math/big": {
 		"crypto/rand": ["Int", "Prime"],
 	},
