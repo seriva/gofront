@@ -1605,7 +1605,7 @@ Removed packages and the D4 overlay members were added in this unreleased cycle,
 
 No gate-only tasks: `/dev-loop` runs the suites per phase and the Phase 10 tasks already record the benchmark numbers (D7, Task 10.4).
 
-- [ ] **Task 11.1 — Fix `fmt` `%p` parity on boxed scalar pointers** (carried over from the 2026-10-26 audit)
+- [x] **Task 11.1 — Fix `fmt` `%p` parity on boxed scalar pointers** (carried over from the 2026-10-26 audit)
   - Files: `src/backend/js/fmt-runtime.js`, `src/backend/js/fmt-types.js`, `src/backend/wasm/stdlib/core.js`, `test/unit/builtins/fmt-verbs.test.js`
   - Test (first, failing): `compileHybrid` parity test for `fmt.Sprintf("%p|%p|%p", &x, &s, nilPtr)` (`x` a boxed int local, `s` a struct).
   - Done when: identical output on JS and WASM.

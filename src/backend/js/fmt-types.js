@@ -104,7 +104,7 @@ export function fmtWantsTypes(format, nargs) {
 	for (const m of format.matchAll(re)) {
 		const verb = m[3];
 		if (verb === "%") continue;
-		if (verb === "T") return true;
+		if (verb === "T" || verb === "p") return true;
 		if (verb === "v" && m[1].includes("#")) return true;
 		if (verb !== "" && !VERBS.includes(verb) && verb !== "w") return true;
 		if (/[[*]/.test(m[2])) indexed = true;
