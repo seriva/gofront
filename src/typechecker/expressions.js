@@ -327,7 +327,7 @@ export const expressionCheckMethods = {
 	// True when `operand` is a struct field, array/slice element or package-level
 	// variable holding a scalar, in a package compiled to wasm.
 	_isScalarInteriorOperand(operand, type, scope) {
-		if (this.target !== "wasm" && this.target !== "both") return false;
+		if (!this._isWasmPackage()) return false;
 		let node = operand;
 		while (node?.kind === "ParenExpr") node = node.expr;
 		if (!node) return false;
@@ -372,12 +372,61 @@ export const expressionCheckMethods = {
 		if (node.kind === "IndexExpr" && b?.kind === "map") return true;
 		if (b?.kind === "pointer" || b?.kind === "slice") return false;
 		if (node.kind === "SelectorExpr" && b?.kind !== "struct") return false;
+		if (
+			node.kind === "SelectorExpr" &&
+			this._promotedThroughPointer(bt, node.field)
+		)
+			return false;
 		return this._isMapElementOperand(node.expr);
+	},
+
+	// Whether field or method `name` of struct type `t` is promoted through an
+	// embedded pointer, so selecting it dereferences and is addressable.
+	_promotedThroughPointer(t, name) {
+		return this._selectorPath(t, name, 0) === "pointer";
+	},
+
+	// "pointer" when `name` is reached through an embedded pointer, "value"
+	// when it is found without one, null when `t` has no such member.
+	_selectorPath(t, name, depth) {
+		if (!t || depth > 8) return null;
+		if (t.kind === "named" && t.methods?.has(name)) return "value";
+		const st = this.resolveType(t.kind === "named" ? t.underlying : t) ?? t;
+		if (st?.kind !== "struct") return null;
+		for (const f of st._structFields ?? [])
+			if (!f.embedded && f.names?.includes(name)) return "value";
+		for (const e of st._embeds ?? []) {
+			const found = this._selectorPath(
+				e.kind === "pointer" ? e.base : e,
+				name,
+				depth + 1,
+			);
+			if (found) return e.kind === "pointer" ? "pointer" : found;
+		}
+		return null;
 	},
 
 	_errMapElementAddress(node) {
 		return this.err(
 			"cannot take the address of a map element; copy it to a local variable, or store pointers in the map",
+			this._positioned(node),
+		);
+	},
+
+	_isWasmPackage() {
+		return this.target === "wasm" || this.target === "both";
+	},
+
+	_isFuncType(t) {
+		const u = this.resolveType(t?.kind === "named" ? t.underlying : t) ?? t;
+		return u?.kind === "func";
+	},
+
+	// The WASM backend represents a func value by its closure reference and has
+	// no box for it, so a pointer to a func variable would lose writes.
+	_errFuncAddress(node, type) {
+		return this.err(
+			`cannot take the address of a variable of func type ${typeStr(type)} in a ${this.target} package; return the new func, or pass a pointer to a struct that holds it`,
 			this._positioned(node),
 		);
 	},
@@ -389,6 +438,10 @@ export const expressionCheckMethods = {
 		}
 		if (this._isScalarInteriorOperand(expr.operand, ot, scope)) {
 			this._errScalarInteriorAddress(expr, ot);
+			return { kind: "pointer", base: ot };
+		}
+		if (this._isWasmPackage() && this._isFuncType(ot)) {
+			this._errFuncAddress(expr, ot);
 			return { kind: "pointer", base: ot };
 		}
 		if (expr.operand.kind === "Ident") {
@@ -447,13 +500,21 @@ export const expressionCheckMethods = {
 	// `&x`, so `x` must be boxed like an explicit `&x`.
 	_markPtrRecvAddress(expr, base, ft, scope) {
 		if (!ft._ptrRecv) return;
-		if (this._isMapElementOperand(expr.expr)) {
+		if (
+			!this._promotedThroughPointer(expr.expr._type, expr.field) &&
+			this._isMapElementOperand(expr.expr)
+		) {
 			this._errMapElementAddress(expr.expr);
 			return;
 		}
-		if (base?.kind !== "basic" && base?.kind !== "slice") return;
+		const k = base?.kind;
+		if (k !== "basic" && k !== "slice" && k !== "map" && k !== "func") return;
 		if (this._isScalarInteriorOperand(expr.expr, expr.expr._type, scope)) {
 			this._errScalarInteriorAddress(expr, expr.expr._type);
+			return;
+		}
+		if (k === "func" && this._isWasmPackage()) {
+			this._errFuncAddress(expr, expr.expr._type);
 			return;
 		}
 		if (expr.expr.kind !== "Ident") return;
