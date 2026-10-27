@@ -1578,11 +1578,12 @@ Scheduled from the Step 4.4 full-branch audit (2026-10-26), re-planned the same 
   - Done when: those 41 entries leave `gaps.missing` (`bufio.ReadWriter.Reader`/`Writer` stay: they are a checker bug, Task 11.1).
   - Landed: `goSourceMember` resolves through embedded fields (`promotedMember`: shallowest wins, equal depth ambiguous) and through aliases; 41 entries left `gaps.missing`; `ReadWriter.Reader`/`Writer` stay. Four new `signature` entries: `json.{InvalidUnmarshalError,MarshalerError,UnmarshalTypeError,UnsupportedTypeError}.Type` is `string`, Go has `reflect.Type`.
 
-- [ ] **Task 8.4 — Gate: gap honesty check**
+- [x] **Task 8.4 — Gate: gap honesty check**
   - Files: `test/unit/types/stdlib-coverage.test.js`
   - Do: for every `gaps.missing` entry, compile the use-probe the audit used (`var _ pkg.T`; `_ = pkg.X`; `func use(x [*]pkg.T) { _ = x.M }`; directory build for Go-source packages). A probe that compiles fails the gate with `implemented but not recognised by the gate: <pkg>.<name>`. This is the automated form of the audit's triage probe, so unindexed members cannot accumulate again.
   - Test: the gate itself, plus a unit case that feeds a synthetic gaps list containing `io.Reader.Read` and asserts the message.
   - Done when: the gate passes on the tree after Tasks 8.2–8.3 (251 entries, each probe failing), and runtime of `node test/unit/types/stdlib-coverage.test.js` is recorded in the commit body.
+  - Landed: `implementedGaps` compiles each listed `missing` entry's use-probe and fails with `implemented but not recognised by the gate: <pkg>.<name>`; the real gap list passes and a synthetic `io.Reader.Read` case asserts the message. Gate runtime about 15 s (was about 11 s).
 
 ### Phase 9: `bytes`, `strings`, `slices`, `sort`, `errors` members (Go source)
 

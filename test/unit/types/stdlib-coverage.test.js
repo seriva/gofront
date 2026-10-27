@@ -329,6 +329,43 @@ function reportsExclusion(e) {
 	return text.includes(reason);
 }
 
+// ── Gap honesty ─────────────────────────────────────────────────────────
+
+// True when the use-probe of manifest entry `e` compiles.  A crash or a
+// thrown error is a failed compile.
+function probeCompiles(e) {
+	const source = exclusionProbe(e);
+	const { warn, error } = console;
+	console.warn = console.error = () => {};
+	try {
+		if (goSource(e.pkg) !== null)
+			return withTempDir({ "main.go": source }, (dir) => {
+				try {
+					compileDir(dir);
+					return true;
+				} catch {
+					return false;
+				}
+			});
+		return compile(source).errors.length === 0;
+	} catch {
+		return false;
+	} finally {
+		Object.assign(console, { warn, error });
+	}
+}
+
+// One message per listed `missing` entry whose use-probe compiles.
+function implementedGaps(names) {
+	const messages = [];
+	for (const n of names) {
+		const e = entryOf.get(n);
+		if (e && probeCompiles(e))
+			messages.push(`implemented but not recognised by the gate: ${n}`);
+	}
+	return messages;
+}
+
 // ── Signatures ──────────────────────────────────────────────────────────
 
 // GoFront's signature of manifest entry `e`, in the manifest's notation.
@@ -380,6 +417,8 @@ const flatten = (gaps, check) =>
 		names.map((n) => `${pkg}.${n}`),
 	);
 
+const entryOf = new Map(manifest.entries.map((e) => [`${e.pkg}.${e.name}`, e]));
+
 const gaps = currentGaps();
 
 if (process.argv.includes("--update-gaps")) {
@@ -425,9 +464,19 @@ test("every excluded package and member reports its exclusion reason", () => {
 	checkGaps("exclusion", "exclusions without their diagnostic");
 });
 
-section("Stdlib coverage gate: by signature");
+test("no listed missing member is actually implemented", () => {
+	const messages = implementedGaps(flatten(gaps, "missing"));
+	if (messages.length > 0) throw new Error(messages.join("\n"));
+});
 
-const entryOf = new Map(manifest.entries.map((e) => [`${e.pkg}.${e.name}`, e]));
+test("gap honesty check names members that already compile", () => {
+	assertEqual(
+		implementedGaps(["io.Reader.Read"]).join("\n"),
+		"implemented but not recognised by the gate: io.Reader.Read",
+	);
+});
+
+section("Stdlib coverage gate: by signature");
 
 // Fails on a mismatch that is not listed, or listed with another GoFront
 // signature, and on a listed mismatch that is gone.
