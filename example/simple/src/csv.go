@@ -1,38 +1,86 @@
 package main
 
 import (
-	"bytes"
-	"encoding/csv"
+	"errors"
 	"strconv"
 	"strings"
 )
 
+// quoteCSVField wraps a field in quotes when it holds a comma, quote or newline.
+func quoteCSVField(s string) string {
+	if !strings.ContainsAny(s, ",\"\n\r") {
+		return s
+	}
+	return "\"" + strings.ReplaceAll(s, "\"", "\"\"") + "\""
+}
+
 // ExportCSV encodes a slice of todos as CSV text.
 func ExportCSV(items []Todo) (string, error) {
-	var buf bytes.Buffer
-	w := csv.NewWriter(&buf)
-	if err := w.Write([]string{"id", "text", "done", "priority"}); err != nil {
-		return "", err
-	}
+	var sb strings.Builder
+	sb.WriteString("id,text,done,priority\n")
 	for _, t := range items {
-		record := []string{
+		fields := []string{
 			strconv.Itoa(t.id),
-			t.text,
+			quoteCSVField(t.text),
 			strconv.FormatBool(t.done),
 			strconv.Itoa(t.priority),
 		}
-		if err := w.Write(record); err != nil {
-			return "", err
+		sb.WriteString(strings.Join(fields, ","))
+		sb.WriteString("\n")
+	}
+	return sb.String(), nil
+}
+
+// parseCSV splits CSV text into records, honouring quoted fields.
+func parseCSV(data string) ([][]string, error) {
+	var records [][]string
+	var row []string
+	var field strings.Builder
+	inQuotes := false
+	for i := 0; i < len(data); i++ {
+		c := data[i]
+		if inQuotes {
+			if c == '"' {
+				if i+1 < len(data) && data[i+1] == '"' {
+					field.WriteByte('"')
+					i++
+				} else {
+					inQuotes = false
+				}
+			} else {
+				field.WriteByte(c)
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inQuotes = true
+		case ',':
+			row = append(row, field.String())
+			field.Reset()
+		case '\r':
+		case '\n':
+			row = append(row, field.String())
+			field.Reset()
+			records = append(records, row)
+			row = nil
+		default:
+			field.WriteByte(c)
 		}
 	}
-	w.Flush()
-	return buf.String(), w.Error()
+	if inQuotes {
+		return nil, errors.New("csv: unterminated quoted field")
+	}
+	if field.Len() > 0 || len(row) > 0 {
+		row = append(row, field.String())
+		records = append(records, row)
+	}
+	return records, nil
 }
 
 // ImportCSV parses CSV text into a slice of Todo items.
 func ImportCSV(data string) ([]Todo, error) {
-	r := csv.NewReader(strings.NewReader(data))
-	records, err := r.ReadAll()
+	records, err := parseCSV(data)
 	if err != nil {
 		return nil, err
 	}
