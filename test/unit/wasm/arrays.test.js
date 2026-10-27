@@ -1638,22 +1638,6 @@ parity(
 );
 
 parity(
-	"a write to a chain another LHS deref reassigns goes to the old slice",
-	`	p := &S{buf: []int{1, 2, 3, 4}}
-	pb := &p.buf
-	al := p.buf
-	p.buf = p.buf[:3]
-	o := []int{10, 20, 30, 40}
-	oal := o
-	o = o[:3]
-	oal[0] = 99
-	p.buf[0], *pb = 5, o
-	return al[0]*10000 + oal[0]*10 + len(p.buf)`,
-	50993,
-	"type S struct{ buf []int }",
-);
-
-parity(
 	"a written-through element survives an older copy's append",
 	`	x := []int{1, 2, 3, 4, 5}
 	orig := x

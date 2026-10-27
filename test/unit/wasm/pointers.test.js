@@ -1,17 +1,22 @@
 // test/unit/wasm/pointers.test.js
-// Tests for Task 0.1b: Accessor refs for &s.F and &xs[i] / &arr[i]
+// Addresses of scalar fields, elements and package-level variables are compile errors in wasm packages.
 
 import {
 	assertEqual,
+	assertErrorContains,
 	compileHybrid,
+	compileWasm,
 	runWasm,
 	section,
 	test,
 } from "../helpers.js";
 
-section("WASM Pointers — Accessor Refs for Fields and Elements");
+const SCALAR_ADDR_MSG =
+	"cannot take the address of a scalar field, element or package-level variable in a wasm package";
 
-test("set(&s.X, 7) mutates struct scalar field through pointer parameter", () => {
+section("WASM Pointers — Scalar Interior Addresses Are Rejected");
+
+test("set(&s.X, 7) mutates struct scalar field through pointer parameter (rejected in wasm)", () => {
 	const src = `
 package main
 
@@ -30,13 +35,11 @@ func Main() int {
 	return s.X*10 + s.Y
 }
 `;
-	const hybrid = compileHybrid(src);
-	const res = hybrid.run("Main");
-	assertEqual(res.wasmRes, 72n);
-	assertEqual(res.jsRes, 72);
+	const { errors } = compileWasm(src);
+	assertErrorContains(errors, SCALAR_ADDR_MSG);
 });
 
-test("*(&xs[1]) = 9 mutates slice element through dereference assignment", () => {
+test("*(&xs[1]) = 9 mutates slice element through dereference assignment (rejected in wasm)", () => {
 	const src = `
 package main
 
@@ -46,13 +49,11 @@ func Main() int {
 	return xs[0] + xs[1] + xs[2]
 }
 `;
-	const hybrid = compileHybrid(src);
-	const res = hybrid.run("Main");
-	assertEqual(res.wasmRes, 49n);
-	assertEqual(res.jsRes, 49);
+	const { errors } = compileWasm(src);
+	assertErrorContains(errors, SCALAR_ADDR_MSG);
 });
 
-test("&s.Inner.X mutates nested struct scalar field through accessor ref", () => {
+test("&s.Inner.X mutates nested struct scalar field through accessor ref (rejected in wasm)", () => {
 	const src = `
 package main
 
@@ -75,13 +76,11 @@ func Main() int {
 	return s.Inner.X*10 + s.Y
 }
 `;
-	const hybrid = compileHybrid(src);
-	const res = hybrid.run("Main");
-	assertEqual(res.wasmRes, 72n);
-	assertEqual(res.jsRes, 72);
+	const { errors } = compileWasm(src);
+	assertErrorContains(errors, SCALAR_ADDR_MSG);
 });
 
-test("&arr[0].X and *(&arr[1].Y) mutate array element fields", () => {
+test("&arr[0].X and *(&arr[1].Y) mutate array element fields (rejected in wasm)", () => {
 	const src = `
 package main
 
@@ -101,13 +100,11 @@ func Main() int {
 	return arr[0].X*1000 + arr[0].Y*100 + arr[1].X*10 + arr[1].Y
 }
 `;
-	const hybrid = compileHybrid(src);
-	const res = hybrid.run("Main");
-	assertEqual(res.wasmRes, 7239n);
-	assertEqual(res.jsRes, 7239);
+	const { errors } = compileWasm(src);
+	assertErrorContains(errors, SCALAR_ADDR_MSG);
 });
 
-test("p := &xs[1]; xs = xs[1:]; *p = 9 preserves backing array aliasing after reslicing", () => {
+test("p := &xs[1]; xs = xs[1:]; *p = 9 preserves backing array aliasing after reslicing (rejected in wasm)", () => {
 	const src = `
 package main
 
@@ -119,13 +116,11 @@ func Main() int32 {
 	return xs[0]
 }
 `;
-	const hybrid = compileHybrid(src);
-	const res = hybrid.run("Main");
-	assertEqual(res.wasmRes, 9);
-	assertEqual(res.jsRes, 9);
+	const { errors } = compileWasm(src);
+	assertErrorContains(errors, SCALAR_ADDR_MSG);
 });
 
-test("reading *p through accessor ref reads struct field", () => {
+test("reading *p through accessor ref reads struct field (rejected in wasm)", () => {
 	const src = `
 package main
 
@@ -142,13 +137,11 @@ func Main() int {
 	return get(&s.X)
 }
 `;
-	const hybrid = compileHybrid(src);
-	const res = hybrid.run("Main");
-	assertEqual(res.wasmRes, 42n);
-	assertEqual(res.jsRes, 42);
+	const { errors } = compileWasm(src);
+	assertErrorContains(errors, SCALAR_ADDR_MSG);
 });
 
-test("reading *p through accessor ref reads slice element", () => {
+test("reading *p through accessor ref reads slice element (rejected in wasm)", () => {
 	const src = `
 package main
 
@@ -161,13 +154,11 @@ func Main() int32 {
 	return get(&xs[2])
 }
 `;
-	const hybrid = compileHybrid(src);
-	const res = hybrid.run("Main");
-	assertEqual(res.wasmRes, 30);
-	assertEqual(res.jsRes, 30);
+	const { errors } = compileWasm(src);
+	assertErrorContains(errors, SCALAR_ADDR_MSG);
 });
 
-test("*(&arr[1]) = 99 on fixed-size array element", () => {
+test("*(&arr[1]) = 99 on fixed-size array element (rejected in wasm)", () => {
 	const src = `
 package main
 
@@ -177,13 +168,11 @@ func Main() int {
 	return arr[1]
 }
 `;
-	const hybrid = compileHybrid(src);
-	const res = hybrid.run("Main");
-	assertEqual(res.wasmRes, 99n);
-	assertEqual(res.jsRes, 99);
+	const { errors } = compileWasm(src);
+	assertErrorContains(errors, SCALAR_ADDR_MSG);
 });
 
-test("p == q for two separate &s.X evaluates to true", () => {
+test("p == q for two separate &s.X evaluates to true (rejected in wasm)", () => {
 	const src = `
 package main
 
@@ -202,13 +191,11 @@ func Main() int {
 	return 0
 }
 `;
-	const hybrid = compileHybrid(src);
-	const res = hybrid.run("Main");
-	assertEqual(res.wasmRes, 1n);
-	assertEqual(res.jsRes, 1);
+	const { errors } = compileWasm(src);
+	assertErrorContains(errors, SCALAR_ADDR_MSG);
 });
 
-test("p == q for &s.X and &s.Y evaluates to false", () => {
+test("p == q for &s.X and &s.Y evaluates to false (rejected in wasm)", () => {
 	const src = `
 package main
 
@@ -227,13 +214,11 @@ func Main() int {
 	return 0
 }
 `;
-	const hybrid = compileHybrid(src);
-	const res = hybrid.run("Main");
-	assertEqual(res.wasmRes, 0n);
-	assertEqual(res.jsRes, 0);
+	const { errors } = compileWasm(src);
+	assertErrorContains(errors, SCALAR_ADDR_MSG);
 });
 
-test("p != q for &s.X and &s.Y evaluates to true", () => {
+test("p != q for &s.X and &s.Y evaluates to true (rejected in wasm)", () => {
 	const src = `
 package main
 
@@ -252,13 +237,11 @@ func Main() int {
 	return 0
 }
 `;
-	const hybrid = compileHybrid(src);
-	const res = hybrid.run("Main");
-	assertEqual(res.wasmRes, 1n);
-	assertEqual(res.jsRes, 1);
+	const { errors } = compileWasm(src);
+	assertErrorContains(errors, SCALAR_ADDR_MSG);
 });
 
-test("p == q for &s.X and &x (box) evaluates to false", () => {
+test("p == q for &s.X and &x (box) evaluates to false (rejected in wasm)", () => {
 	const src = `
 package main
 
@@ -277,13 +260,11 @@ func Main() int {
 	return 0
 }
 `;
-	const hybrid = compileHybrid(src);
-	const res = hybrid.run("Main");
-	assertEqual(res.wasmRes, 0n);
-	assertEqual(res.jsRes, 0);
+	const { errors } = compileWasm(src);
+	assertErrorContains(errors, SCALAR_ADDR_MSG);
 });
 
-test("p := &xs[1]; xs = append(xs, 4); *p = 9 preserves old backing array", () => {
+test("p := &xs[1]; xs = append(xs, 4); *p = 9 preserves old backing array (rejected in wasm)", () => {
 	const src = `
 package main
 
@@ -297,13 +278,11 @@ func Main() int {
 	return xs[1]
 }
 `;
-	const hybrid = compileHybrid(src);
-	const res = hybrid.run("Main");
-	assertEqual(res.wasmRes, 20n);
-	assertEqual(res.jsRes, 20);
+	const { errors } = compileWasm(src);
+	assertErrorContains(errors, SCALAR_ADDR_MSG);
 });
 
-test("struct field of type *int holding accessor ref survives struct copy", () => {
+test("struct field of type *int holding accessor ref survives struct copy (rejected in wasm)", () => {
 	const src = `
 package main
 
@@ -323,13 +302,11 @@ func Main() int {
 	return other.X
 }
 `;
-	const hybrid = compileHybrid(src);
-	const res = hybrid.run("Main");
-	assertEqual(res.wasmRes, 99n);
-	assertEqual(res.jsRes, 99);
+	const { errors } = compileWasm(src);
+	assertErrorContains(errors, SCALAR_ADDR_MSG);
 });
 
-test("struct equality when fields are scalar pointers holding accessor refs", () => {
+test("struct equality when fields are scalar pointers holding accessor refs (rejected in wasm)", () => {
 	const src = `
 package main
 
@@ -361,13 +338,11 @@ func Main() int {
 	return res
 }
 `;
-	const hybrid = compileHybrid(src);
-	const res = hybrid.run("Main");
-	assertEqual(res.wasmRes, 11n);
-	assertEqual(res.jsRes, 11);
+	const { errors } = compileWasm(src);
+	assertErrorContains(errors, SCALAR_ADDR_MSG);
 });
 
-test("*p += 5 compound assignment on accessor ref to struct scalar field &s.X", () => {
+test("*p += 5 compound assignment on accessor ref to struct scalar field &s.X (rejected in wasm)", () => {
 	const src = `
 package main
 
@@ -383,13 +358,11 @@ func Main() int {
 	return s.X*100 + s.Y
 }
 `;
-	const hybrid = compileHybrid(src);
-	const res = hybrid.run("Main");
-	assertEqual(res.wasmRes, 1520n);
-	assertEqual(res.jsRes, 1520);
+	const { errors } = compileWasm(src);
+	assertErrorContains(errors, SCALAR_ADDR_MSG);
 });
 
-test("(*p)++ and (*p)-- increment/decrement on accessor ref to struct scalar field &s.X", () => {
+test("(*p)++ and (*p)-- increment/decrement on accessor ref to struct scalar field &s.X (rejected in wasm)", () => {
 	const src = `
 package main
 
@@ -407,13 +380,11 @@ func Main() int {
 	return s.X*100 + s.Y
 }
 `;
-	const hybrid = compileHybrid(src);
-	const res = hybrid.run("Main");
-	assertEqual(res.wasmRes, 1119n);
-	assertEqual(res.jsRes, 1119);
+	const { errors } = compileWasm(src);
+	assertErrorContains(errors, SCALAR_ADDR_MSG);
 });
 
-test("*p += 5 compound assignment on accessor ref to slice element &xs[1]", () => {
+test("*p += 5 compound assignment on accessor ref to slice element &xs[1] (rejected in wasm)", () => {
 	const src = `
 package main
 
@@ -424,13 +395,11 @@ func Main() int {
 	return xs[0] + xs[1] + xs[2]
 }
 `;
-	const hybrid = compileHybrid(src);
-	const res = hybrid.run("Main");
-	assertEqual(res.wasmRes, 65n);
-	assertEqual(res.jsRes, 65);
+	const { errors } = compileWasm(src);
+	assertErrorContains(errors, SCALAR_ADDR_MSG);
 });
 
-test("&s.Slice takes address of struct slice field without invalid accessor ref", () => {
+test("&s.Slice takes address of struct slice field without invalid accessor ref (rejected in wasm)", () => {
 	const src = `
 package main
 
@@ -445,15 +414,11 @@ func Main() int {
 	return s.X + len(*p) + (*p)[1]
 }
 `;
-	const hybrid = compileHybrid(src);
-	const res = hybrid.run("Main");
-	assertEqual(res.wasmRes, 47n);
-	assertEqual(res.jsRes, 47);
+	const { errors } = compileWasm(src);
+	assertErrorContains(errors, SCALAR_ADDR_MSG);
 });
 
-section("Pointer stability on whole-value assignment (Task 0.33)");
-
-test("whole array assignment writes into storage seen by &a[1] (P20)", () => {
+test("whole array assignment writes into storage seen by &a[1] (P20) (rejected in wasm)", () => {
 	const src = `
 package main
 
@@ -464,9 +429,8 @@ func Main() int {
 	return *p
 }
 `;
-	const res = compileHybrid(src).run("Main");
-	assertEqual(res.wasmRes, 5n);
-	assertEqual(res.jsRes, 5);
+	const { errors } = compileWasm(src);
+	assertErrorContains(errors, SCALAR_ADDR_MSG);
 });
 
 test("whole struct assignment writes into storage seen by &s (P25)", () => {
@@ -487,7 +451,7 @@ func Main() int {
 	assertEqual(res.jsRes, 5);
 });
 
-test("whole struct assignment keeps field pointer &s.A valid", () => {
+test("whole struct assignment keeps field pointer &s.A valid (rejected in wasm)", () => {
 	const src = `
 package main
 
@@ -500,12 +464,11 @@ func Main() int {
 	return *p
 }
 `;
-	const res = compileHybrid(src).run("Main");
-	assertEqual(res.wasmRes, 7n);
-	assertEqual(res.jsRes, 7);
+	const { errors } = compileWasm(src);
+	assertErrorContains(errors, SCALAR_ADDR_MSG);
 });
 
-test("whole struct assignment through a field array pointer &w.arr[0]", () => {
+test("whole struct assignment through a field array pointer &w.arr[0] (rejected in wasm)", () => {
 	const src = `
 package main
 
@@ -518,12 +481,11 @@ func Main() int {
 	return *p
 }
 `;
-	const res = compileHybrid(src).run("Main");
-	assertEqual(res.wasmRes, 8n);
-	assertEqual(res.jsRes, 8);
+	const { errors } = compileWasm(src);
+	assertErrorContains(errors, SCALAR_ADDR_MSG);
 });
 
-test("assigning a field array wholesale keeps &w.arr[1] valid", () => {
+test("assigning a field array wholesale keeps &w.arr[1] valid (rejected in wasm)", () => {
 	const src = `
 package main
 
@@ -536,12 +498,9 @@ func Main() int {
 	return *p
 }
 `;
-	const res = compileHybrid(src).run("Main");
-	assertEqual(res.wasmRes, 4n);
-	assertEqual(res.jsRes, 4);
+	const { errors } = compileWasm(src);
+	assertErrorContains(errors, SCALAR_ADDR_MSG);
 });
-
-section("Review fixes for whole-value assignment (Task 0.33 follow-up)");
 
 test("tuple swap of address-taken structs reads before it writes", () => {
 	const src = `
@@ -562,7 +521,7 @@ func Main() int {
 	assertEqual(runWasm(wasm, { stringTable }).exports.Main(), 221n);
 });
 
-test("tuple swap of address-taken arrays reads before it writes", () => {
+test("tuple swap of address-taken arrays reads before it writes (rejected in wasm)", () => {
 	const src = `
 package main
 
@@ -574,9 +533,8 @@ func Main() int {
 	return *p*10 + b[0]
 }
 `;
-	// WASM-only: the JS backend's tuple swap of address-taken values differs.
-	const { wasm, stringTable } = compileHybrid(src);
-	assertEqual(runWasm(wasm, { stringTable }).exports.Main(), 31n);
+	const { errors } = compileWasm(src);
+	assertErrorContains(errors, SCALAR_ADDR_MSG);
 });
 
 test("whole array of structs assignment keeps &a[i] valid", () => {
@@ -597,7 +555,7 @@ func Main() int {
 	assertEqual(res.jsRes, 6);
 });
 
-test("package-level array assignment keeps &g[0] valid", () => {
+test("package-level array assignment keeps &g[0] valid (rejected in wasm)", () => {
 	const src = `
 package main
 
@@ -609,9 +567,8 @@ func Main() int {
 	return *p
 }
 `;
-	const res = compileHybrid(src).run("Main");
-	assertEqual(res.wasmRes, 4n);
-	assertEqual(res.jsRes, 4);
+	const { errors } = compileWasm(src);
+	assertErrorContains(errors, SCALAR_ADDR_MSG);
 });
 
 test("package-level struct assignment keeps &g valid", () => {
