@@ -239,8 +239,8 @@ export function toWasmType(goType, checker = null, mod = null) {
 				typeof baseWType === "object" &&
 				baseWType !== null &&
 				baseWType.kind === "ref" &&
-				// A pointer to a slice or map goes through the scalar box /
-				// accessor pair: the pointee is a replaceable reference value.
+				// A pointer to a slice or map goes through the scalar box:
+				// the pointee is a replaceable reference value.
 				!isReplaceableRef(goType.base, checker)
 			) {
 				return baseWType;
@@ -492,7 +492,7 @@ function isReplaceableRef(goType, checker) {
 export function isScalarType(goType, checker = null, mod = null) {
 	if (!goType) return false;
 	// A slice or map is a pointee "scalar": the pointer to it is a
-	// box or accessor, so the pointee can be replaced (`*p = make(...)`).
+	// box, so the pointee can be replaced (`*p = make(...)`).
 	if (isReplaceableRef(goType, checker)) return true;
 	if (
 		isStructType(goType, checker, mod) ||
