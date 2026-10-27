@@ -332,6 +332,14 @@ export function setupExtendedGlobals(globals, types) {
 			fields: new Map([["_pairs", STR_SLICE_T]]),
 			methods: new Map([
 				["Replace", { kind: "func", params: [STRING], returns: [STRING] }],
+				[
+					"WriteString",
+					{
+						kind: "func",
+						params: [IO_WRITER, STRING],
+						returns: [INT, ERROR],
+					},
+				],
 			]),
 		},
 	});
