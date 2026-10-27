@@ -35,6 +35,7 @@ export const TEST_FILES = [
 	"./types/checks.test.js",
 	"./types/inference.test.js",
 	"./types/arrays.test.js",
+	"./types/pointers.test.js",
 	"./types/shadowing.test.js",
 	"./types/complex.test.js",
 	"./types/generics.test.js",
