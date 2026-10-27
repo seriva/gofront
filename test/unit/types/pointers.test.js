@@ -63,6 +63,11 @@ func Main() int { s := S{}; x := 3; pp := &s.P; *pp = &x; return *s.P }`,
 	"&s.F (func field)": `
 type S struct{ F func() int }
 func Main() int { s := S{}; pf := &s.F; *pf = func() int { return 4 }; return s.F() }`,
+	"s.M.Reset() (named map field)": `
+type M map[string]int
+func (m *M) Reset() { *m = M{"z": 9} }
+type S struct{ M M }
+func Main() int { s := S{}; s.M.Reset(); return s.M["z"] }`,
 	"&s.V (simd.F32x4 field)": `
 import "gofront/simd"
 type S struct{ V simd.F32x4 }
@@ -84,6 +89,49 @@ for (const target of ["wasm", "both"]) {
 		});
 	}
 }
+
+const FUNC_MSG = "cannot take the address of a variable of func type";
+
+const funcCases = {
+	"&g (func local)": `
+type F func() int
+func Main() int { g := F(func() int { return 1 }); p := &g; *p = func() int { return 5 }; return g() }`,
+	"f.Set() (pointer method on a named func local)": `
+type F func() int
+func (f *F) Set() { *f = func() int { return 5 } }
+func Main() int { var f F = func() int { return 1 }; f.Set(); return f() }`,
+};
+
+for (const target of ["wasm", "both"]) {
+	for (const [name, body] of Object.entries(funcCases)) {
+		test(`${target}: ${name} is rejected`, () => {
+			const src = `//gofront:target ${target}\npackage main\n${body}\n`;
+			const { errors } = compile(src);
+			assertErrorContains(errors, FUNC_MSG);
+			assertErrorContains(errors, `in a ${target} package`);
+		});
+	}
+}
+
+test("js: writes through a pointer to a func variable reach it", () => {
+	const src = `package main
+type F func() int
+func (f *F) Set() { *f = func() int { return 5 } }
+func setF(p *F) { *p = func() int { return 6 } }
+func main() {
+	g := F(func() int { return 1 })
+	pg := &g
+	pg.Set()
+	var f F = func() int { return 1 }
+	f.Set()
+	h := F(func() int { return 1 })
+	setF(&h)
+	println(g(), f(), h())
+}`;
+	const { js, errors } = compile(src);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "5 5 6");
+});
 
 test("js package still mutates through pointer to scalar field", () => {
 	const src = `package main
@@ -160,6 +208,25 @@ for (const target of ["js", "both"]) {
 		});
 	}
 }
+
+test("js: members promoted through an embedded pointer of a map value compile", () => {
+	const src = `package main
+type In struct{ X int }
+func (p *In) Bump() { p.X++ }
+type V struct{ *In }
+type Mid struct{ V }
+func main() {
+	m := map[string]V{"a": {&In{1}}}
+	m["a"].Bump()
+	mm := map[string]Mid{"a": {V{&In{1}}}}
+	mm["a"].Bump()
+	mm["a"].Bump()
+	println(m["a"].X, mm["a"].X)
+}`;
+	const { js, errors } = compile(src);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "2 3");
+});
 
 test("js: addresses through map values that are pointers or slices compile", () => {
 	const src = `package main

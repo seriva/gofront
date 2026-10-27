@@ -133,15 +133,18 @@ function getSpecializedName(baseName, typeArgs) {
 	return `${baseName}$${keys}`;
 }
 
+const KEPT_CLONE_KEYS = new Set(["_typeArgs", "_line", "_col"]);
+
 function cloneAst(node) {
 	if (!node || typeof node !== "object") return node;
 	if (Array.isArray(node)) return node.map(cloneAst);
 	const copy = {};
 	for (const [k, v] of Object.entries(node)) {
-		// Side tables are dropped, except the inferred type arguments of a
-		// generic call inside a generic body: substitution needs them to
-		// specialise the callee (`isNaN(x)` inside `Compare[T]`).
-		if (k.startsWith("_") && k !== "_typeArgs") continue;
+		// Side tables are dropped, except source positions (for diagnostics in
+		// the specialised body) and the inferred type arguments of a generic
+		// call inside a generic body: substitution needs them to specialise the
+		// callee (`isNaN(x)` inside `Compare[T]`).
+		if (k.startsWith("_") && !KEPT_CLONE_KEYS.has(k)) continue;
 		copy[k] = cloneAst(v);
 	}
 	return copy;
