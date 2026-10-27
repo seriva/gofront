@@ -1,8 +1,10 @@
 # Native Go Compiler Engine — Design Plan
 
 **Version:** v2.0.0  
-**Status:** Confirmed Baseline (2026-10-26) — JS engine feature-frozen at v1.8.0  
-**Related:** Depends on v1.8.0 ([`plans/v1.8.0/portable-go-plan.md`](../v1.8.0/portable-go-plan.md)), the **last feature release of the JS engine**. Followed by v2.1.0 (continuous feature evolution on the native Go engine)  
+**Status:** Shelved (2026-10-27) — Pure Node.js ESM compiler architecture retained; compiler complexity pruned in v1.8.0.  
+**Related:** Shelved in favor of keeping the pure Node.js ESM compiler architecture lean and maintainable. Preserved for future architectural reference.  
+
+> **Frozen content.** Everything below describes the pre-simplification v1.8.0 baseline (coverage manifest, real-Go conformance suite, accessor-ref pointers, `bufio`/`net/url`/`context`/`encoding/csv`, a JS-engine feature freeze). None of that holds any more: see [v1.8.0 Simplification](../v1.8.0/portable-go-plan.md#simplification-phases-811-decided-2026-10-27) and [v1.9.0](../v1.9.0/stdlib-in-go-plan.md). Do not execute or update this plan; if the port is ever revived, re-baseline it against the release current at that time.  
 
 **Baseline Spec:** v1.8.0, comprising:
 - The v1.4.0 language (including `.templ` and component-colocated scoped `css`);
