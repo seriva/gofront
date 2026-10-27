@@ -1,9 +1,0 @@
-ctxPast ok: true, dl == past: true, err: true
-ctxFuture ok: true, dl == future: true, err before: <nil>
-ctxFuture err after cancel: true
-ctxCause err: true, cause: true
-ctxTimeout err: true
-ctxTimeoutCause err: true, cause: true
-afterFunc stopped: true, stoppedAgain: false, fired: 0
-afterFunc fired: 1, stoppedAfterFire: false
-afterFunc on expired fired: 1, stopped: false
