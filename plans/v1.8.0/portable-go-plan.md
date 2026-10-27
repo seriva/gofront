@@ -1564,11 +1564,12 @@ Scheduled from the Step 4.4 full-branch audit (2026-10-26), re-planned the same 
   - Landed: `src/typechecker/stdlib/excluded.js` loads `stdlib/manifest.json` and populates `EXCLUDED_STDLIB_PACKAGES` and `EXCLUDED_STDLIB_MEMBERS` with each excluded entry's `note` or category reason while preserving custom wordings. `_checkDirectivesAndImportsPass` in `src/typechecker/index.js` reports `//go:embed is not supported yet` on `//go:embed` directives and reports the manifest exclusion reason on excluded package imports. `_checkSelectorExpr` in `src/typechecker/expressions.js` checks excluded package members and type methods/fields. `gaps.exclusion` in `test/unit/types/stdlib-coverage.gaps.json` is now `{}` (0 entries).
   - Audit (2026-10-26): landed ahead of the re-planned order (commit `30324c2`, unmerged). Kept as the interim engine: it reads the manifest at import, so the entries Phase 16 adds get diagnostics without a code change, and `gaps.exclusion == {}` is re-checked by the gate in every later phase rather than being a one-time gate. Its defects are scheduled, not accepted: the runtime manifest read (Task 17.1) and three false positives that the epic branch does not have (user type `Context.Done`, a local package shadowed by `crypto/rand`, `//go:embed` inside a raw string; Tasks 17.2, 17.3).
 
-- [ ] **Task 8.2 — Gate: interface method sets**
+- [x] **Task 8.2 — Gate: interface method sets**
   - Files: `test/unit/types/stdlib-coverage.test.js`, `test/unit/types/stdlib-coverage.gaps.json`
   - Do: `collectDecl` adds `I.M` for every method of an exported `InterfaceType` declaration (embedded interfaces expanded, so `io.ReadCloser.Read` comes from `Reader`); `memberOf` reads an emitter-backed interface type's method set. Covers `io` (30), `hash` (27), `container/heap` (5), `sort` (3), `context` (3), `math/rand/v2` (1).
   - Test: a gate unit case asserting `findMember("io", "ReadCloser.Close")` and `findMember("hash", "Hash32.Sum32")` are found and that their signatures go through `signatureOf` (a new signature mismatch is recorded under `signature`, not hidden).
   - Done when: those 69 entries leave `gaps.missing`; `--update-gaps` produces no other change except new `signature` entries, each listed in the commit body.
+  - Landed: the gate indexes interface method sets from the checker's resolved interface types (embedded expanded); 69 entries left `gaps.missing`, no new `signature` entries.
 
 - [ ] **Task 8.3 — Gate: promoted members and aliased types**
   - Files: `test/unit/types/stdlib-coverage.test.js`, `test/unit/types/stdlib-coverage.gaps.json`
