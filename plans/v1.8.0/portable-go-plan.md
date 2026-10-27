@@ -1599,6 +1599,7 @@ Removed packages and the D4 overlay members were added in this unreleased cycle,
   - Do: replace `__bounds_panic`, `__nil_panic` and `__slice_bounds_panic` (and `getBoundsPanicFuncIndex`/`getNilPanicFuncIndex`/the slice variant) with one `__runtime_panic` path taking the message; keep `__index_panic` and `__push_panic`.
   - Test: existing `strict-panics.test.js` parity cases unchanged (messages and `recover()` behaviour identical on both backends).
   - Done when: `grep -rn "__bounds_panic\|__nil_panic\|__slice_bounds_panic" src/` is empty; strict-panic tests pass; raycast `app.wasm` not larger than before.
+  - Gate failed, reverted (not landed): a `__runtime_panic(msg)` helper taking the interned message index (`__shared_len_panic` folded in too) passed `npm test` but grew the raycast hybrid `app.wasm` from 82672 B to 82848 B (+176 B): every panic site gains an `i32.const`, which outweighs the three removed helper bodies. Retry only with a call shape that adds no per-site bytes (e.g. one helper per message kept, or message selected inside the helper from a code the site already pushes).
 
 ### Phase 11: `%p` parity & user docs
 
