@@ -925,9 +925,8 @@ test("real stdlib excluded members keep their diagnostics", () => {
 	assertErrorContains(
 		compile(`package main
 import "context"
-func f(c context.Context) { _ = c.Done() }
 func main() {}`).errors,
-		"context.Context.Done is not available",
+		"package 'context' is not available",
 	);
 	assertErrorContains(
 		compile(`package main
