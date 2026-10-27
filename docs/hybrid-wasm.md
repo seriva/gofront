@@ -94,8 +94,6 @@ copies agree bit-for-bit:
 
 The backend (`src/backend/wasm/`) implements: structs, pointers (including pointers to scalar struct fields and slice/array elements), methods (including method expressions and method values), value-copied fixed-size arrays, slices (`append`, slicing, `copy`), strings, maps (including struct-typed, array-typed, and interface-typed keys), interfaces (including anonymous interfaces), generics, closures (including closures inside methods and per-iteration loop variable captures), `for … range` over iterator functions (`iter.Seq`, `iter.Seq2`), complex numbers (`complex64`, `complex128`, `complex`, `real`, `imag`), `defer`/`panic`/`recover`, `error` values, and non-literal package constants.
 
-Stdlib coverage in `wasm`/`both` packages, per package:
-
 Packages that `wasm` and `both` packages can import (JS-only packages such as `regexp` and `gom` are rejected there):
 
 | Package | Targets | Notes |
@@ -110,9 +108,9 @@ Packages that `wasm` and `both` packages can import (JS-only packages such as `r
 | `crypto/sha256` | js, wasm, both | `Sum256`, `New` |
 | `encoding/base32` | js, wasm, both | Go source |
 | `encoding/base64` | js, wasm, both | Std, URL and Raw encodings |
-| `encoding/binary` | js, wasm, both | Byte-order helpers and varints |
+| `encoding/binary` | js, wasm, both | `BigEndian` and `LittleEndian` byte-order accessors, `Read`, `Write`, `Size`, `Append*`; no varints |
 | `encoding/csv` | js, wasm, both | Go source |
-| `encoding/hex` | js, wasm, both | Encode, decode, `Dump` |
+| `encoding/hex` | js, wasm, both | `EncodeToString`, `DecodeString`, `Encode`, `Decode`, `EncodedLen`, `DecodedLen` |
 | `encoding/json` | js, wasm, both | Go source; struct tags, `Marshal`, `Unmarshal`, `Decoder`, `Encoder` |
 | `errors` | js, wasm, both | `New`, `Is`, `As`, `Unwrap`, `Join` |
 | `fmt` | js, wasm, both | Print, Sprint, Fprint, Errorf, Append, `Sscan*` |
