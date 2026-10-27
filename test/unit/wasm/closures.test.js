@@ -4,6 +4,7 @@
 import {
 	assert,
 	assertEqual,
+	assertErrorContains,
 	compile,
 	compileHybrid,
 	compileWasm,
@@ -624,7 +625,7 @@ func Main() int {
 	assertEqual(res.jsRes, 12);
 });
 
-test("&p.X of a struct loop variable points into that iteration's struct", () => {
+test("&p.X of a struct loop variable is rejected in wasm", () => {
 	const src = `
 package main
 
@@ -638,8 +639,11 @@ func Main() int {
 	return *ps[0]*100 + *ps[1]*10 + *ps[2]
 }
 `;
-	const res = compileHybrid(src).run("Main");
-	assertEqual(res.jsRes, 12);
+	const { errors } = compileWasm(src);
+	assertErrorContains(
+		errors,
+		"cannot take the address of a scalar field, element or package-level variable in a wasm package",
+	);
 });
 
 test("pointer-receiver method call on a loop var sees a distinct var per iteration", () => {

@@ -1573,7 +1573,7 @@ Removed packages and the D4 overlay members were added in this unreleased cycle,
 
 ### Phase 10: WASM backend simplification (D5–D7)
 
-- [ ] **Task 10.1 — Diagnostic for pointers into scalar storage in `wasm`/`both` (D5)**
+- [x] **Task 10.1 — Diagnostic for pointers into scalar storage in `wasm`/`both` (D5)**
   - Files: `src/typechecker/expressions.js` (unary `&` and the implicit `&` of pointer-receiver method calls), new `test/unit/types/pointers.test.js`, `test/unit/wasm/pointers.test.js`, `test/unit/language/parity-matrix.test.js`, `plans/follow-ups.md` (and any kept `stdlib/` file if it takes a scalar field/element/global address)
   - Test (write first, failing):
     - `both` and `wasm` packages, explicit: `&s.X` (int field), `&xs[i]` (`[]float64`), `&arr[i]` (`[4]int32`), `&s.A[1]` (`A [2]int`, the ledger's stale-pointer repro), `&g` with `var g int` at package level (the ledger's writes-nowhere repro) → `assertErrorContains(errors, "cannot take the address of a scalar field, element or package-level variable in a wasm package")`; the message suggests passing the parent struct pointer, the index, or copying to a local.
