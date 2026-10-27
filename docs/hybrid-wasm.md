@@ -60,7 +60,7 @@ copies its arguments, so the loop usually belongs on the WASM side, or the data 
 
 ## Pointers in `wasm` and `both` packages
 
-Pointers to structs, to local variables and to struct-typed fields, elements and package-level variables work as in Go. A pointer to a scalar (number, string or bool) that lives inside a struct field, a slice or array element, or a package-level variable is a compile error, because WebAssembly cannot point into the middle of a managed object:
+Pointers to structs, to local variables and to struct-typed fields, elements and package-level variables work as in Go. A pointer to a number, string, bool, slice, map or interface that lives inside a struct field, a slice or array element, or a package-level variable is a compile error, because WebAssembly cannot point into the middle of a managed object:
 
 ```go
 //gofront:target wasm
