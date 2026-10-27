@@ -26,6 +26,7 @@ function findNodeModules(startDir) {
 	}
 }
 
+import { EXCLUDED_STDLIB_PACKAGES } from "./typechecker/stdlib/excluded.js";
 import { STDLIB_PACKAGES } from "./typechecker/types.js";
 
 // Returns true for local relative paths (start with ./ or ../)
@@ -111,6 +112,7 @@ export function resolveAll(imports, fromFile, parseDts, stdlibRoot = null) {
 		for (const { path } of imp.imports) {
 			if (path.startsWith("js:")) continue; // handled separately
 			if (isLocalPath(path)) continue; // local .go packages — handled by compiler
+			if (EXCLUDED_STDLIB_PACKAGES.has(path)) continue; // the checker reports it
 			if (isBuiltinPackage(path)) continue; // built-in stdlib namespaces — always available
 			if (resolveStdlibSource(path, stdlibRoot)) continue; // Go-source stdlib — handled by compiler
 
