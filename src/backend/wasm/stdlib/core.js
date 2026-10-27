@@ -8173,6 +8173,14 @@ export class StdlibCoreEmitter {
 			this.releaseTemp(rTmp, replacerW);
 			return;
 		}
+		if (method === "WriteString") {
+			const strTmp = this.acquireTemp("externref");
+			this.emitReplacerMethodCall("Replace", recvExpr, [args[1]]);
+			this.pushInstruction({ op: "local.set", index: strTmp });
+			this._emitWriterWrite(args[0], strTmp);
+			this.releaseTemp(strTmp, "externref");
+			return;
+		}
 		throw new Error(`Unsupported Replacer method: ${method}`);
 	}
 
