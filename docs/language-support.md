@@ -128,7 +128,7 @@ Members of each Go package (functions, types, methods, fields, constants and var
 | `path/filepath` | 9 of 19 | 10 | 0 | 8 |
 | `regexp` | 15 of 49 | 34 | 49 | 0 |
 | `slices` | 40 of 40 | 0 | 0 | 0 |
-| `sort` | 39 of 40 | 1 | 0 | 0 |
+| `sort` | 40 of 40 | 0 | 0 | 0 |
 | `strconv` | 41 of 43 | 2 | 0 | 0 |
 | `strings` | 79 of 82 | 3 | 0 | 0 |
 | `sync` | 39 of 39 | 0 | 0 | 7 |

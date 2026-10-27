@@ -201,7 +201,6 @@
 			"Regexp.SubexpNames",
 			"Regexp.UnmarshalText"
 		],
-		"sort": ["Find"],
 		"strconv": ["FormatComplex", "ParseComplex"],
 		"strings": ["ToLowerSpecial", "ToTitleSpecial", "ToUpperSpecial"],
 		"time": [
