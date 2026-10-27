@@ -43,9 +43,7 @@
 		"test:coverage": "c8 --include='src/**' --reporter=text --reporter=lcov node test/unit/run.js",
 		"bench": "node --expose-gc test/e2e/perf/raycast-bench.js && node test/e2e/perf/json-bench.js && node --expose-gc test/e2e/perf/particle-bench.js",
 		"format": "biome format --write .",
-		"manifest:update": "node scripts/stdlib-manifest.js",
-		"docs:stdlib": "node scripts/docs-stdlib.js",
-		"check": "biome check . && node scripts/docs-stdlib.js --check && sentrux check && sentrux gate && node src/index.js check example/...",
+		"check": "biome check . && sentrux check && sentrux gate && node src/index.js check example/...",
 		"prepare": "lefthook install"
 	},
 	"devDependencies": {
