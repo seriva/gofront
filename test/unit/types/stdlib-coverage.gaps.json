@@ -1,19 +1,7 @@
 {
 	"missing": {
 		"bufio": ["ReadWriter.Reader", "ReadWriter.Writer"],
-		"bytes": [
-			"ErrTooLarge",
-			"MinRead",
-			"Runes",
-			"SplitAfter",
-			"SplitAfterN",
-			"Title",
-			"ToLowerSpecial",
-			"ToTitleSpecial",
-			"ToUpperSpecial",
-			"TrimLeftFunc",
-			"TrimRightFunc"
-		],
+		"bytes": ["ToLowerSpecial", "ToTitleSpecial", "ToUpperSpecial"],
 		"crypto/rand": ["Text"],
 		"crypto/sha256": ["New224", "Size224", "Sum224"],
 		"encoding/base64": [
