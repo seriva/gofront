@@ -179,7 +179,7 @@ Probed on `feat/portable-go-phase-8` at `30324c2` (Task 8.1 landed, unmerged) an
 | `bufio.ReadWriter` promoted methods; `encoding/json` aliased error/`Number` members | 41 | Implemented, unindexed | Task 8.3 |
 | `bytes` search/compare/split/trim/`Title`/`Runes`/`ErrTooLarge`/`MinRead` | 18 | Implement | Tasks 9.1–9.2 |
 | `strings` `Clone`/`Compare`/`ContainsFunc`/`Replacer.WriteString`; `slices` `CompareFunc`/`EqualFunc`/`Repeat` | 7 | Implement | Task 9.3 |
-| `sort.Find`, `errors.AsType` | 2 | Implement | Task 9.4 |
+| `sort.Find` | 1 | Implement | Task 9.4 |
 | `encoding/binary` (varints, `AppendByteOrder`, `NativeEndian`, `Append`/`Encode`/`Decode`) | 20 | Implement | Tasks 10.1–10.2 |
 | `encoding/hex`, `encoding/base64` streams, append forms, error types | 15 | Implement | Tasks 10.3–10.4 |
 | `crypto/sha256` SHA-224, `crypto/rand.Text` | 4 | Implement | Task 10.5 |
@@ -199,6 +199,7 @@ Probed on `feat/portable-go-phase-8` at `30324c2` (Task 8.1 landed, unmerged) an
 | **Excluded:** `fmt.Scanner`, `Scanner.Scan`, `ScanState` (+6) | 9 | `excluded:deferred`: user `Scan` methods need dispatch inside both `Sscan*` emitters; reading from `os.Stdin` (always EOF) gains nothing in a frontend | Task 16.1 |
 | **Excluded:** `regexp.CompilePOSIX`, `MustCompilePOSIX`, `Regexp.Longest` | 3 | `excluded:host`: JS `RegExp` has no leftmost-longest mode | Task 16.1 |
 | **Excluded:** `json.UnsupportedValueError.Value` | 1 | `excluded:reflection`: its type is `reflect.Value` | Task 16.1 |
+| **Excluded:** `errors.AsType` | 1 | `excluded:deferred`: `err.(E)` with `E` a type parameter needs runtime type arguments (JS never checks, WASM ICE `.for is not iterable`); follow-up in `plans/follow-ups.md` | Task 16.1 |
 
 Totals: 110 unindexed + 193 implemented + 58 excluded = 361 `missing`; 9 `wasm` implemented.
 
@@ -1607,12 +1608,12 @@ All in Go-source overlays compiled for both targets; each task adds a conformanc
   - Test: fixture; plus a parity test for the `Repeat` panic message in `test/unit/builtins/stdlib.test.js`.
   - Done when: fixture and parity test pass; the 7 entries leave `gaps.missing`.
 
-- [ ] **Task 9.4 — `sort.Find` and `errors.AsType`**
+- [x] **Task 9.4 — `sort.Find` and `errors.AsType`**
   - Files: `stdlib/sort/sort.go`, `stdlib/errors/overlay.go`, `test/conformance/sort/find.go` (+ `.out`)
   - Do: `sort.Find(n, cmp func(int) int) (int, bool)`; `errors.AsType[E error](err error) (E, bool)` walking `Unwrap() error` and `Unwrap() []error` like `errors.As`. If explicit instantiation of a type-parameter-only generic with a type assertion to `E` does not compile on WASM, stop and ask (do not ship JS-only).
   - Test: fixture for `Find`; parity test for `AsType[*MyErr]` through a `fmt.Errorf("%w")` chain and an `errors.Join` tree.
   - Done when: both pass; the 2 entries leave `gaps.missing`.
-  - Status: `sort.Find` landed. `errors.AsType` BLOCKED (stop-and-ask): `errors.AsType[*T](err)` over `err.(E)` fails to compile on WASM (`.for is not iterable`), and on JS the assertion to a type parameter compiles to `true ? [cur, true] : ...` (never checks the type) while `Unwrap() error` and `Unwrap() []error` both lower to a `typeof .Unwrap === "function"` check. Needs a compiler decision (type-param assertions with runtime type args) before the overlay can be written.
+  - Status: `sort.Find` landed. `errors.AsType` DEFERRED by decision (user chose defer; row added to the triage table, classified in Task 16.1 as `excluded:deferred`, note `needs type-parameter assertions with runtime type arguments`). Blocker: `errors.AsType[*T](err)` over `err.(E)` fails to compile on WASM (`.for is not iterable`), and on JS the assertion to a type parameter compiles to `true ? [cur, true] : ...` (never checks the type) while `Unwrap() error` and `Unwrap() []error` both lower to a `typeof .Unwrap === "function"` check. Needs a compiler decision (type-param assertions with runtime type args) before the overlay can be written.
 
 ### Phase 10: `encoding/binary`, `hex`, `base64`, digests
 
@@ -1792,7 +1793,7 @@ Triage row `regexp` (31 of 34; `CompilePOSIX`, `MustCompilePOSIX`, `Regexp.Longe
 
 - [ ] **Task 16.1 — Classify the remaining families**
   - Files: `scripts/manifest-overrides.json`, `stdlib/manifest.json`, `test/unit/types/stdlib-coverage.gaps.json`
-  - Do: one override rule per family in the triage table's **Excluded** rows, each with its own `note`, never a blanket `"*"` rule: `math/rand` v1 (`Rand.*`, `Source.*`, `Source64.*`, `Zipf.*`, `New`, `NewSource`, `NewZipf`, `ExpFloat64`, `NormFloat64`, `Uint32`, `Uint64` → `excluded:deferred`, note `legacy API; use math/rand/v2`); Bessel (`J0`, `J1`, `Jn`, `Y0`, `Y1`, `Yn` → `excluded:deferred`); `bytes`/`strings` `To*Special` (→ `excluded:deferred`, note `needs unicode.SpecialCase`); `fmt.Scanner`, `Scanner.Scan`, `ScanState.*` (→ `excluded:deferred`); `regexp.CompilePOSIX`, `MustCompilePOSIX`, `Regexp.Longest` (→ `excluded:host`, note `JS RegExp has no leftmost-longest mode`); `json.UnsupportedValueError.Value` (→ `excluded:reflection`). `npm run manifest:update`, then `--update-gaps`. Any member still in `gaps.missing`/`gaps.wasm` that no rule names is a stop-and-ask, not a new rule.
+  - Do: one override rule per family in the triage table's **Excluded** rows, each with its own `note`, never a blanket `"*"` rule: `math/rand` v1 (`Rand.*`, `Source.*`, `Source64.*`, `Zipf.*`, `New`, `NewSource`, `NewZipf`, `ExpFloat64`, `NormFloat64`, `Uint32`, `Uint64` → `excluded:deferred`, note `legacy API; use math/rand/v2`); Bessel (`J0`, `J1`, `Jn`, `Y0`, `Y1`, `Yn` → `excluded:deferred`); `bytes`/`strings` `To*Special` (→ `excluded:deferred`, note `needs unicode.SpecialCase`); `fmt.Scanner`, `Scanner.Scan`, `ScanState.*` (→ `excluded:deferred`); `regexp.CompilePOSIX`, `MustCompilePOSIX`, `Regexp.Longest` (→ `excluded:host`, note `JS RegExp has no leftmost-longest mode`); `json.UnsupportedValueError.Value` (→ `excluded:reflection`). `errors.AsType` (→ `excluded:deferred`, note `needs type-parameter assertions with runtime type arguments`). `npm run manifest:update`, then `--update-gaps`. Any member still in `gaps.missing`/`gaps.wasm` that no rule names is a stop-and-ask, not a new rule.
   - Test: `test/unit/compiler/manifest.test.js` case: no override rule in this set uses `"*"`, and each listed family has the expected status and note.
   - Done when: `gaps.missing` and `gaps.wasm` are `{}`, `gaps.exclusion` is still `{}` (the new entries report their notes through the Task 8.1 engine), `npm test` passes.
 
