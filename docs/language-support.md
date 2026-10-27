@@ -87,7 +87,7 @@ Members of each Go package (functions, types, methods, fields, constants and var
 | Package | Available | Not yet | JS-only | Excluded |
 |---|---|---|---|---|
 | `bufio` | 77 of 79 | 2 | 0 | 0 |
-| `bytes` | 88 of 99 | 11 | 0 | 0 |
+| `bytes` | 96 of 99 | 3 | 0 | 0 |
 | `cmp` | 4 of 4 | 0 | 0 | 0 |
 | `container/heap` | 11 of 11 | 0 | 0 | 0 |
 | `container/list` | 21 of 21 | 0 | 0 | 0 |
