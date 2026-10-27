@@ -12,7 +12,6 @@
 package jsonrt
 
 import (
-	"bufio"
 	"io"
 	"strconv"
 )
@@ -601,7 +600,7 @@ func CheckValid(data []byte) error {
 // along with the number of leading whitespace bytes that were skipped.
 // If EOF is encountered before any non-whitespace bytes, it returns io.EOF.
 // If the stream ends before the JSON value completes, it returns io.ErrUnexpectedEOF.
-func ScanNext(r *bufio.Reader) ([]byte, int64, error) {
+func ScanNext(r *Reader) ([]byte, int64, error) {
 	var skipped int64
 	var c byte
 	for {
@@ -639,7 +638,7 @@ func ScanNext(r *bufio.Reader) ([]byte, int64, error) {
 		scan.bytes++
 		op := scan.step(scan, b)
 		if op == scanEnd {
-			_ = r.UnreadByte()
+			r.UnreadByte()
 			return buf, skipped, nil
 		}
 		if op == scanError {
