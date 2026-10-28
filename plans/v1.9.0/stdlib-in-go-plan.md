@@ -126,7 +126,7 @@ func Index(s, substr string) int { /* Go body: the specification */ }
 - **Unused imports cost nothing.** Reachability from v1.8.0 still applies: 0 bytes in `app.js` and dev-mode `app.wasm`.
 - **No new boundary types.** `time.Time` and `time.Duration` keep their names, field layout and boundary conversion; exported Go-source types follow the ordinary struct rules.
 - **JS output of natives matches today's.** Built `example/` outputs are diffed before and after each phase; differences are limited to the listed behaviour fixes.
-- **Performance gates are measured, not assumed.** The raycast and zero-allocation benchmarks (`npm run bench`, `test/e2e/perf/zero-alloc.js`) stay within their v1.8.0 bounds after every phase.
+- **Performance gates are measured, not assumed.** The raycast and zero-allocation benchmarks (`npm run bench`, `test/perf/zero-alloc.js`) stay within their v1.8.0 bounds after every phase.
 - **No new runtime dependencies.** The generator script is plain Node.
 
 ### 3. Edge Cases & Error Handling
@@ -199,7 +199,7 @@ Execution follows [v1.8.0 → How to execute a task](../v1.8.0/portable-go-plan.
 ### Phase 2: Natives, differential testing and lazy checking
 
 - [ ] **Task 2.1 — `//gofront:native` directive and registries**
-  - Files: `src/lexer.js`, `src/parser/declarations.js`, `src/typechecker/index.js`, new `src/backend/js/natives.js`, new `src/backend/wasm/natives.js`
+  - Files: `src/lexer/lexer.js`, `src/parser/declarations.js`, `src/typechecker/index.js`, new `src/backend/js/natives.js`, new `src/backend/wasm/natives.js`
   - Do: parse `//gofront:native <name>` before a func **with a body**, as `//gofront:intrinsic` is parsed; the checker rejects an unknown name (`unknown native 'x'`), a native on a body-less func, and any use outside `stdlib/` (`//gofront:native is reserved for the standard library`). The registries start empty.
   - Test: `test/unit/compiler/stdlib-go.test.js` — each of the three diagnostics via a temp-dir stdlib root; a valid directive compiles with an empty registry entry for a test-only name.
   - Done when: the four tests pass.
@@ -217,13 +217,13 @@ Execution follows [v1.8.0 → How to execute a task](../v1.8.0/portable-go-plan.
   - Done when: native-on and native-off WASM modules give the same results on the test fixtures.
 
 - [ ] **Task 2.4 — Natives-off mode and the four-way test helper**
-  - Files: `src/compiler.js` (`natives` option), `src/cli-core.js` (`--no-natives`, debugging only), new `test/unit/stdlib/harness.js`
+  - Files: `src/compiler.js` (`natives` option), `src/cli/cli-core.js` (`--no-natives`, debugging only), new `test/unit/stdlib/harness.js`
   - Do: `natives: false` makes every backend ignore the registries. `harness.js` exports `runFourWay(source, expected)`, which compiles the program as a `both` package and compares JS, JS natives-off, WASM and WASM natives-off output with `expected`, naming the failing configuration.
   - Test: `test/unit/compiler/stdlib-go.test.js` — a case whose test-only native disagrees with its Go body fails and names `js (natives on)`.
   - Done when: the bootstrap cases pass in four configurations.
 
 - [ ] **Task 2.5 — Lazy body checking for Go-source packages**
-  - Files: `src/typechecker/index.js`, `src/compiler.js` (`checkStdlibPrograms`), `src/lower/reachability.js`
+  - Files: `src/typechecker/index.js`, `src/link/stdlib.js` (`checkStdlibPrograms`), `src/lower/reachability.js`
   - Do: check declarations of a Go-source package eagerly and function and method bodies when first reached (call, used type's method, interface satisfaction); report stdlib body errors at the user's call site. Expose `checker.stats.bodiesChecked` for tests.
   - Test: `stdlib-go.test.js` — a synthetic 5,600-line Go-source package of which the program calls one function checks ≤ 10 bodies; a type error in an unreached body is not reported; the same error in a reached body is reported at the call site with the `internal stdlib error` note; user-visible diagnostics for existing packages are unchanged.
   - Done when: the synthetic import type-checks in ≤ 5 ms more than without the import (recorded in [Performance and size](#performance-and-size)).
@@ -245,7 +245,7 @@ Execution follows [v1.8.0 → How to execute a task](../v1.8.0/portable-go-plan.
 - [ ] **Task 3.3 — `slices` sort and search family in Go**
   - Files: `stdlib/slices/sort.go`, `src/backend/js/natives.js` (`slices.Sort` for `int`/`string`), `src/backend/js/stdlib/slices.js`, `src/backend/wasm/stdlib/core.js` (delete `emitSlicesSort*`, `BinarySearch*`, `IsSorted*`, `MinMax*`)
   - Do: `Sort`, `SortFunc`, `SortStableFunc`, `IsSorted*`, `BinarySearch*`, `Min*`, `Max*` over the generated pdqsort; `Sort` of floats orders `NaN` first via `cmp.Less`. The JS native for `Sort` accepts only integer and string element types and declines otherwise.
-  - Test: cases `slices/sort.go` (NaN, ±0, ties via `SortFunc`, stability of `SortStableFunc`, large n); `test/unit/wasm/slices.test.js` — a comparison-counting `SortFunc` on 20,000 elements makes ≤ 400,000 calls (O(n log n)); `test/e2e/perf` records the 200,000-int WASM sort.
+  - Test: cases `slices/sort.go` (NaN, ±0, ties via `SortFunc`, stability of `SortStableFunc`, large n); `test/unit/wasm/slices.test.js` — a comparison-counting `SortFunc` on 20,000 elements makes ≤ 400,000 calls (O(n log n)); `test/perf` records the 200,000-int WASM sort.
   - Done when: cases match Go; the 200,000-int WASM sort runs in ≤ 100 ms; JS `SortFunc` is within 1.5× of `Array.prototype.sort` with a comparator.
 
 - [ ] **Task 3.4 — `sort` in Go**
@@ -317,7 +317,7 @@ Execution follows [v1.8.0 → How to execute a task](../v1.8.0/portable-go-plan.
 - [ ] **Task 6.3 — `strings` functions: Go bodies with host natives**
   - Files: `stdlib/strings/strings.go` (absorbs `stdlib/strings/{iter,extra}.go`), `src/backend/js/natives.js`, `src/backend/wasm/natives.js` (host-import calls for `Index`, `Contains`, `HasPrefix`, `ToUpper`, … — the same imports the emitters use today), `src/backend/js/stdlib/strings.js`, `src/backend/wasm/stdlib/core.js` (delete `emitStrings*` except natives)
   - Do: all `strings` functions with Go's `rune`/`byte` types; each function with a host primitive gets a native whose template reproduces today's output; the rest (`FieldsFunc`, `TrimFunc`, `Map`, `IndexFunc`, `Title`, `Fields`, `EqualFold`, …) run as Go over `[]byte`/`[]rune`, following [v1.8.0 §1.1](../v1.8.0/portable-go-plan.md#11-string-semantics-both-backends). Absorbs v1.8.0 Tasks 2.4, 3.4c, and `extra.go`'s `strings` members.
-  - Test: cases `strings/functions.go` (ASCII only, per the harness lint) in four configurations; `test/e2e/perf` records `strings.Index` on 1 MB: WASM with natives within 2× of v1.8.0 (0.9 ms/20 calls baseline), natives-off result equal but not timed.
+  - Test: cases `strings/functions.go` (ASCII only, per the harness lint) in four configurations; `test/perf` records `strings.Index` on 1 MB: WASM with natives within 2× of v1.8.0 (0.9 ms/20 calls baseline), natives-off result equal but not timed.
   - Done when: cases match Go; the string-search benchmark is within the bound.
 
 - [ ] **Task 6.4 — `strings.Replacer` in Go**
@@ -426,4 +426,4 @@ Baselines measured on this machine for this plan (Node 25.2.0, no Binaryen, dev-
 - **Negative cases & diagnostics:** `unknown native 'x'`; a native on a body-less function; `//gofront:native is reserved for the standard library`; `Cannot index type S` still reported for a constraint with several underlying types; an unreached stdlib body error is not reported, a reached one is reported at the call site with the `internal stdlib error` note; a migrated package imported from a `js` package behaves as before (no new diagnostics).
 - **Differential tests:** for each native, the same cases run with natives on and off; a disagreement names the configuration. This is the main protection against a template that drifts from Go.
 - **Generated-file checks:** `npm run gen:pdq` is a no-op.
-- **Benchmarks:** `npm run bench` (raycast) and `test/e2e/perf/zero-alloc.js` after every phase; `test/e2e/perf/` gains the sort and string-search measurements from the table above; `example/` outputs are built before and after each phase and diffed, with differences limited to listed behaviour fixes.
+- **Benchmarks:** `npm run bench` (raycast) and `test/perf/zero-alloc.js` after every phase; `test/perf/` gains the sort and string-search measurements from the table above; `example/` outputs are built before and after each phase and diffed, with differences limited to listed behaviour fixes.
