@@ -40,6 +40,7 @@
 		"test:e2e": "playwright test",
 		"test:coverage": "c8 --include='src/**' --reporter=text --reporter=lcov node test/unit/run.js",
 		"bench": "node --expose-gc test/e2e/perf/raycast-bench.js && node test/e2e/perf/json-bench.js && node --expose-gc test/e2e/perf/particle-bench.js",
+		"check:layers": "node scripts/check-layers.js",
 		"format": "biome format --write .",
 		"check": "biome check . && sentrux check && sentrux gate && node src/index.js check example/...",
 		"prepare": "lefthook install"
