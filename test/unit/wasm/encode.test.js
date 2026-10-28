@@ -1,6 +1,7 @@
 // test/unit/wasm/encode.test.js
 // Tests for WebAssembly binary encoder (LEB128, sections, GC types, execution).
 
+import { readFileSync } from "node:fs";
 import {
 	encodeF32,
 	encodeF64,
@@ -9,6 +10,7 @@ import {
 	encodeModule,
 	encodeU32LEB,
 } from "../../../src/backend/wasm/encode.js";
+import { compileWasm } from "../../../src/compiler.js";
 import { assert, assertEqual, section, test } from "../helpers.js";
 
 section("WASM Encoder — LEB128 and Floats");
@@ -466,5 +468,30 @@ test("SIMD comparison and rounding opcodes pass Binaryen optimized and unoptimiz
 		const ref = new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports
 			.f;
 		assertEqual(f(1.5, 2.5), ref(1.5, 2.5));
+	}
+});
+
+section("WASM Backend — module layout");
+
+test("compileWasm is exported from src/compiler.js", () => {
+	assertEqual(typeof compileWasm, "function");
+	const res = compileWasm("package main\nfunc main() {}\n");
+	assertEqual(res.errors.length, 0);
+	assert(res.wasm instanceof Uint8Array, "compileWasm returns wasm bytes");
+});
+
+test("wasm/index.js does not import the lexer, parser or typechecker", () => {
+	const src = readFileSync(
+		new URL("../../../src/backend/wasm/index.js", import.meta.url),
+		"utf8",
+	);
+	for (const m of src.matchAll(/^import[^;]*?from\s+"([^"]+)";/gms)) {
+		const spec = m[1];
+		assert(!/lexer/.test(spec), `index.js must not import ${spec}`);
+		assert(!/\/parser\//.test(spec), `index.js must not import ${spec}`);
+		assert(
+			!/typechecker\/index\.js$/.test(spec),
+			`index.js must not import ${spec}`,
+		);
 	}
 });

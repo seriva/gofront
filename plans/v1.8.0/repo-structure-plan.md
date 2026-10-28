@@ -304,7 +304,7 @@ Only paths change. No task, scope or number in those plans is edited.
 
 ### Phase 4: `wasm/index.js` split
 
-- [ ] Task 4.1: `compileWasm` → `src/compiler.js`
+- [x] Task 4.1: `compileWasm` → `src/compiler.js`
   - Files: `src/backend/wasm/index.js`, `src/compiler.js`, `test/unit/helpers.js` (plus the import line in `wasm/scalars.test.js`, `wasm/arrays.test.js` and `types/arrays.test.js`)
   - Test: `test/unit/wasm/encode.test.js` asserts that `compileWasm` is exported from `src/compiler.js` and that the source of `wasm/index.js` has no import from `lexer`, `parser/` or `typechecker/index.js`. Fails first
   - Done when: all `wasm/` tests pass through the new import, the hashes match, and `wc -l src/compiler.js` ≤ 750
