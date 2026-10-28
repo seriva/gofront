@@ -377,7 +377,7 @@ Only paths change. No task, scope or number in those plans is edited.
     - `plans/v2.0.0/native-go-engine.md` is shelved and keeps its historical paths.
   - Test: new `test/unit/compiler/plan-paths.test.js`: every backticked `src/…`, `stdlib/…`, `test/…` and `scripts/…` path in `plans/roadmap.md` exists, except an explicit list of paths a plan creates itself
   - Done when: the test passes
-- [ ] Task 7.3: v1.9.0 plan paths
+- [x] Task 7.3: v1.9.0 plan paths
   - Files: `plans/v1.9.0/stdlib-in-go-plan.md`, `test/unit/compiler/plan-paths.test.js` (add the file)
   - Changes (paths only; no task, scope or number changes):
     - `src/lexer.js` → `src/lexer/lexer.js`, `src/cli-core.js` → `src/cli/cli-core.js`, `src/compiler.js` (`checkStdlibPrograms`) → `src/link/stdlib.js`.
