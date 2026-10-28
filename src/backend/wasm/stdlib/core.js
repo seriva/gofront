@@ -10133,5 +10133,3 @@ function _wrapVerbIndex(format) {
 	}
 	return -1;
 }
-
-export { StdlibCoreEmitter as StdlibEmitter };

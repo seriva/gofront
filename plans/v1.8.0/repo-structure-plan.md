@@ -251,7 +251,7 @@ Only paths change. No task, scope or number in those plans is edited.
   - Files: `.sentrux/rules.toml`
   - Test: the real-repo layer-gap case from Task 1.1 is turned on. The cross-backend case stays `todo` until Task 5.1
   - Done when: the layer-gap check is clean, `sentrux check` and `sentrux gate` pass, and the `rules.toml` comment documents `math` as the only allowed gap
-- [ ] Task 1.3: Remove the dead WASM compatibility shims
+- [x] Task 1.3: Remove the dead WASM compatibility shims
   - Files: `src/backend/wasm/emit-stdlib.js` (delete), `src/backend/wasm/stdlib/index.js`, `src/backend/wasm/stdlib/core.js` (the trailing alias line only); also the comment at `src/typechecker/types.js:105`
   - Test: none new (deletion only). `grep -rn 'emit-stdlib\|Phase[678]Emitter\|StdlibEmitter\b' src test` must be empty
   - Done when: grep is empty, the hashes match and `wasm/golden.test.js` passes
