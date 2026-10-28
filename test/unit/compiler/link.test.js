@@ -2,7 +2,14 @@
 // Go-source stdlib name mangling)
 
 import { mergeCompilationChunks } from "../../../src/link/sourcemap.js";
-import { assert, assertEqual, section, test } from "../helpers.js";
+import { checkLinkCollisions } from "../../../src/link/wasm.js";
+import {
+	assert,
+	assertEqual,
+	assertThrows,
+	section,
+	test,
+} from "../helpers.js";
 
 // ── Source-map merging ───────────────────────────────────────
 
@@ -56,5 +63,51 @@ test("string and empty chunks are normalised or dropped", () => {
 	assert(
 		mergeCompilationChunks([]).js === "",
 		"no chunks gives an empty bundle",
+	);
+});
+
+// ── WASM unit linking ────────────────────────────────────────
+
+section("Link — checkLinkCollisions");
+
+const unit = (pkgName, decls) => ({ pkgName, programs: [{ decls }] });
+const fn = (name) => ({ kind: "FuncDecl", name });
+
+test("a duplicate top-level name across two units is rejected", () => {
+	assertThrows(
+		() =>
+			checkLinkCollisions([
+				unit("a", [fn("Run"), fn("OnlyA")]),
+				unit("b", [fn("Run")]),
+			]),
+		"cannot link wasm packages: 'Run' is declared in both 'a' and 'b' (linked wasm packages share one namespace)",
+	);
+});
+
+test("distinct names, `_`, and repeats inside one unit are accepted", () => {
+	checkLinkCollisions([
+		unit("a", [
+			fn("One"),
+			fn("One"),
+			{ kind: "VarDecl", decls: [{ names: ["_"] }] },
+		]),
+		unit("b", [fn("Two"), { kind: "VarDecl", decls: [{ names: ["_"] }] }]),
+	]);
+});
+
+test("methods are keyed by receiver type", () => {
+	const m = (recv, name) => ({
+		kind: "MethodDecl",
+		name,
+		recvType: { name: recv },
+	});
+	checkLinkCollisions([unit("a", [m("T", "Get")]), unit("b", [m("U", "Get")])]);
+	assertThrows(
+		() =>
+			checkLinkCollisions([
+				unit("a", [m("T", "Get")]),
+				unit("b", [m("T", "Get")]),
+			]),
+		"'T.Get' is declared in both 'a' and 'b'",
 	);
 });
