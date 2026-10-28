@@ -1,15 +1,12 @@
 // src/backend/wasm/index.js
 // WASM Backend compiler entry point: lowered AST + types -> Module IR -> binary / WAT.
 
-import { Lexer } from "../../lexer.js";
 import { lower, lowerFunction } from "../../lower/index.js";
 import {
 	getOrCreateIteratorFuncLit,
 	isIteratorRangeFor,
 } from "../../lower/range.js";
-import { Parser } from "../../parser/index.js";
 import { foldConstExpr } from "../../typechecker/const-fold.js";
-import { TypeChecker } from "../../typechecker/index.js";
 import {
 	addBoundaryHelpers,
 	collectBoundaryMeta,
@@ -3386,33 +3383,6 @@ function _scanImportsInBody(node, mod) {
 			_scanImportsInBody(child, mod);
 		}
 	}
-}
-
-export function compileWasm(source, options = {}) {
-	const filename = options.filename ?? "main.go";
-	const tokens = new Lexer(source, filename).tokenize();
-	const ast = new Parser(tokens, filename, source).parse();
-
-	const checker = new TypeChecker();
-	checker.target = "wasm";
-	checker.pkgName = ast.pkg?.name ?? "main";
-
-	const errors = checker.check(ast);
-	if (errors.length > 0) {
-		return { wasm: null, errors };
-	}
-
-	const lowerRes = lower([ast], checker);
-	const res = compileWasmModule([ast], checker, lowerRes, {
-		...options,
-		exportAll: options.exportAll ?? true,
-	});
-
-	if (checker.errors?.length > 0) {
-		return { wasm: null, errors: checker.errors };
-	}
-
-	return { ...res, errors: [] };
 }
 
 function _isPointerGoType(t, mod) {
