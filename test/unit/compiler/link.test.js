@@ -1,7 +1,7 @@
 // GoFront test suite — src/link/ (source-map merging, wasm unit linking,
 // Go-source stdlib name mangling)
 
-import { Lexer } from "../../../src/lexer.js";
+import { Lexer } from "../../../src/lexer/lexer.js";
 import { mergeCompilationChunks } from "../../../src/link/sourcemap.js";
 import { mangleStdlibAst } from "../../../src/link/stdlib.js";
 import { checkLinkCollisions } from "../../../src/link/wasm.js";

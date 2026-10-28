@@ -1,4 +1,4 @@
-import { T } from "../tokens.js";
+import { T } from "../lexer/tokens.js";
 
 export const declarationParseMethods = {
 	parseTopDecl() {

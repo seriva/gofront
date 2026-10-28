@@ -2,7 +2,7 @@
 // Unit tests for lowering analyses: captures, escape analysis, boxing, and side-tables.
 
 import assert from "node:assert";
-import { Lexer } from "../../../src/lexer.js";
+import { Lexer } from "../../../src/lexer/lexer.js";
 import {
 	analyzeCaptures,
 	lower,

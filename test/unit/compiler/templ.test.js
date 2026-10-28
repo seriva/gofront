@@ -2,8 +2,8 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { TemplLexer } from "../../../src/templ-lexer.js";
-import { TemplParser } from "../../../src/templ-parser.js";
+import { TemplLexer } from "../../../src/lexer/templ-lexer.js";
+import { TemplParser } from "../../../src/parser/templ.js";
 import {
 	assert,
 	assertContains,
