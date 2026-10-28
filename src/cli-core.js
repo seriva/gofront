@@ -1,5 +1,5 @@
 // CLI compilation core — extracted for direct import in tests.
-// index.js retains only arg parsing, file I/O, watch mode, and process.exit.
+// index.js retains only arg parsing, dispatch, and process.exit.
 
 import {
 	copyFileSync,
@@ -24,7 +24,7 @@ import {
 } from "node:path";
 import { copyAssets } from "./asset-manager.js";
 import { isGoFrontWasm } from "./backend/wasm/index.js";
-import { colors, log } from "./colors.js";
+import { colors, log, ms } from "./colors.js";
 import { compileDir, compileSingleFile } from "./compiler.js";
 import { createDevServer } from "./dev-server.js";
 import { minify } from "./minifier.js";
@@ -917,6 +917,113 @@ export function parseLegacyArgs(argv) {
 		mangle: argv.includes("--mangle") || release,
 		port: portFlag !== -1 ? parseInt(argv[portFlag + 1], 10) : 3000,
 	};
+}
+
+// Copy the project's static assets into place; failures only warn.
+export function copyProjectAssets(verbose) {
+	try {
+		const { copied, skipped } = copyAssets(resolve("."));
+		if (verbose && (copied > 0 || skipped > 0)) {
+			log.info(`copied ${copied} assets (${skipped} skipped)`);
+		}
+	} catch (e) {
+		log.warn(`asset copy failed: ${e.message}`);
+	}
+}
+
+// Legacy `gofront <input> [flags]` single-shot flow. `flags` is the result of
+// parseLegacyArgs. Returns the process exit code.
+export function runSingleShot(inputPath, isDir, flags) {
+	const {
+		inputArg,
+		outputFile,
+		checkOnly,
+		dumpAst,
+		dumpTokens,
+		sourceMap,
+		copyAssets: copyAssetsFlag,
+		wasmOpt,
+		minify: minifyOutput,
+		mangle: mangleOutput,
+		forceTarget,
+	} = flags;
+
+	let result;
+	const startMs = performance.now();
+	try {
+		result = runCompile(inputPath, isDir, {
+			sourceMap,
+			outputFile,
+			dumpTokens,
+			dumpAst,
+			wasmOpt,
+			forceTarget,
+		});
+	} catch (e) {
+		log.fail(e.message);
+		return 1;
+	}
+
+	if (result.tokens) {
+		for (const tok of result.tokens) console.log(tok.toString());
+		return 0;
+	}
+	if (result.ast) {
+		console.log(JSON.stringify(result.ast, null, 2));
+		return 0;
+	}
+
+	if (checkOnly) {
+		const elapsedMs = (performance.now() - startMs).toFixed(0);
+		log.info(
+			`${colors.cyan(inputArg)} — ${colors.green("OK")} ${ms(elapsedMs)}`,
+		);
+		return 0;
+	}
+
+	let js;
+	try {
+		js = maybeMinify(result.js, {
+			minify: minifyOutput,
+			mangle: mangleOutput,
+			sourceMap,
+		});
+	} catch (e) {
+		log.fail(`minify failed: ${e.message}`);
+		return 1;
+	}
+
+	const elapsedMs = (performance.now() - startMs).toFixed(0);
+
+	if (outputFile) {
+		try {
+			const written = writeCompileOutput(resolve(outputFile), result, js);
+			log.info(
+				`wrote ${formatWrittenDesc(written, outputFile)} ${ms(elapsedMs)}`,
+			);
+			if (result.wasmOptInfo && result.wasmOptInfo.originalSize > 0) {
+				const origKb = (result.wasmOptInfo.originalSize / 1024).toFixed(1);
+				const optKb = (result.wasmOptInfo.optimizedSize / 1024).toFixed(1);
+				log.info(
+					`wasm-opt: app.wasm ${origKb} kB → ${optKb} kB (-${result.wasmOptInfo.percentSaved}%) [${result.wasmOptInfo.engine}]`,
+				);
+			}
+		} catch (e) {
+			log.fail(`cannot write '${outputFile}': ${e.message}`);
+			return 1;
+		}
+	} else {
+		console.log(js);
+		if (result.wasm) {
+			log.warn(
+				"wasm packages were linked but app.wasm needs -o <file> to be written",
+			);
+		}
+	}
+
+	if (copyAssetsFlag) copyProjectAssets(true);
+
+	return 0;
 }
 
 // ── dev command ───────────────────────────────────────────────
