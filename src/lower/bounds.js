@@ -6,7 +6,11 @@
 //   - `for i := range xs { … xs[i] … }`
 //   - `for i := K; i < len(xs); i++ { … xs[i] … }` with a constant K >= 0
 //   - a constant index into an array (the checker rejects out-of-range ones)
+//   - constant indexes into a slice after a length proof: the hint `_ = xs[K]`,
+//     `if len(xs) > K { … }`, or `if len(xs) <= K { return }` (also `>=`, `<`
+//     and the mirrored `K < len(xs)` forms); proves `xs[0]` through `xs[K]`
 //
+
 // The loop forms need `xs` to be a local slice or array that the body never
 // assigns or shadows, `i` to be written only by the loop, and neither to be
 // address-taken, used as a method receiver, or assigned inside any closure
@@ -188,6 +192,140 @@ const SCOPE_KINDS = new Set([
 	"TypeSwitchStmt",
 ]);
 
+// How often each name is declared in the function (parameters included) and
+// which names are assigned anywhere.  A slice declared once and never
+// assigned keeps its length for the whole function.
+function nameStats(params, body) {
+	const declared = new Map();
+	const assigned = new Set();
+	const bump = (n) => n && declared.set(n, (declared.get(n) ?? 0) + 1);
+	for (const n of params) bump(n);
+	const visit = (node) => {
+		if (!node || typeof node !== "object") return;
+		if (Array.isArray(node)) {
+			for (const n of node) visit(n);
+			return;
+		}
+		for (const n of declaredNames(node)) bump(n);
+		for (const n of assignedNames(node)) assigned.add(n);
+		forEachChild(node, visit);
+	};
+	visit(body);
+	return { declared, assigned };
+}
+
+// A slice whose length no statement in the function can change.
+function isStableSlice(node, stats, unsafe) {
+	if (!isIdent(node) || underlying(node._type)?.kind !== "slice") return false;
+	const { name } = node;
+	return (
+		stats.declared.get(name) === 1 &&
+		!stats.assigned.has(name) &&
+		!unsafe.has(name)
+	);
+}
+
+// `_ = xs[K]` with a constant K >= 0: the slice and K, or null.
+function hintOf(stmt, stats, unsafe) {
+	if (stmt?.kind !== "AssignStmt" || stmt.op !== "=") return null;
+	const [lhs] = stmt.lhs;
+	const rhs = stmt.rhs?.[0];
+	if (stmt.lhs.length !== 1 || !isIdent(lhs, "_")) return null;
+	if (rhs?.kind !== "IndexExpr" || !isStableSlice(rhs.expr, stats, unsafe))
+		return null;
+	const k = constInt(rhs.index);
+	return k !== null && k >= 0n ? { xs: rhs.expr.name, k } : null;
+}
+
+const FLIPPED = { ">": "<", ">=": "<=", "<": ">", "<=": ">=" };
+
+// `len(xs) op K` (or `K op len(xs)`) over a stable slice: [xs, op, K] or null.
+function lenComparison(cond, stats, unsafe) {
+	if (cond?.kind !== "BinaryExpr" || !(cond.op in FLIPPED)) return null;
+	const direct = cond.left?.kind === "CallExpr";
+	const call = direct ? cond.left : cond.right;
+	const k = constInt(direct ? cond.right : cond.left);
+	const arg = call?.args?.[0];
+	const ok =
+		k !== null &&
+		isIdent(call?.func, "len") &&
+		call.args.length === 1 &&
+		isStableSlice(arg, stats, unsafe);
+	if (!ok || stats.declared.has("len")) return null;
+	return [arg.name, direct ? cond.op : FLIPPED[cond.op], k];
+}
+
+// Highest index `len(xs) op K` proves when it holds (`holds`) or fails.
+function provenMax(op, k, holds) {
+	let max = null;
+	if (holds && op === ">") max = k;
+	else if (holds && op === ">=") max = k - 1n;
+	else if (!holds && op === "<=") max = k;
+	else if (!holds && op === "<") max = k - 1n;
+	return max !== null && max >= 0n ? max : null;
+}
+
+function isTerminating(stmt) {
+	if (stmt?.kind === "ReturnStmt") return true;
+	const call = stmt?.kind === "ExprStmt" ? stmt.expr : null;
+	return call?.kind === "CallExpr" && isIdent(call.func, "panic");
+}
+
+// Marks `xs[0]` … `xs[max]` (constant indexes) anywhere under `root`.
+function markProven(root, xs, max) {
+	const visit = (node) => {
+		if (!node || typeof node !== "object") return;
+		if (Array.isArray(node)) {
+			for (const n of node) visit(n);
+			return;
+		}
+		if (node.kind === "IndexExpr" && isIdent(node.expr, xs)) {
+			const k = constInt(node.index);
+			if (k !== null && k >= 0n && k <= max) node._inBounds = true;
+		}
+		forEachChild(node, visit);
+	};
+	visit(root);
+}
+
+// Length facts a statement establishes for what follows it in its block.
+function factAfter(stmt, stats, unsafe) {
+	const hint = hintOf(stmt, stats, unsafe);
+	if (hint) return { xs: hint.xs, max: hint.k };
+	const exits =
+		stmt?.kind === "IfStmt" &&
+		!stmt.init &&
+		!stmt.elseBody &&
+		isTerminating(stmt.body?.stmts?.at(-1));
+	const cmp = exits ? lenComparison(stmt.cond, stats, unsafe) : null;
+	const max = cmp ? provenMax(cmp[1], cmp[2], false) : null;
+	return max === null ? null : { xs: cmp[0], max };
+}
+
+// Slice length proofs: hints and guards over every statement list.
+function markSliceFacts(body, stats, unsafe) {
+	const visit = (node) => {
+		if (!node || typeof node !== "object") return;
+		if (Array.isArray(node)) {
+			for (const n of node) visit(n);
+			return;
+		}
+		if (node.kind === "IfStmt") {
+			const cmp = lenComparison(node.cond, stats, unsafe);
+			const max = cmp ? provenMax(cmp[1], cmp[2], true) : null;
+			if (max !== null) markProven(node.body, cmp[0], max);
+		}
+		if (Array.isArray(node.stmts)) {
+			node.stmts.forEach((stmt, i) => {
+				const fact = factAfter(stmt, stats, unsafe);
+				if (fact) markProven(node.stmts.slice(i + 1), fact.xs, fact.max);
+			});
+		}
+		forEachChild(node, visit);
+	};
+	visit(body);
+}
+
 function analyzeFunc(params, body) {
 	const unsafe = collectUnsafeNames(body);
 	// Walk in source order with a scope chain of local names, so `xs` counts
@@ -213,6 +351,7 @@ function analyzeFunc(params, body) {
 	const root = new LocalScope(null);
 	for (const n of params) root.add(n);
 	visit(body, root);
+	markSliceFacts(body, nameStats(params, body), unsafe);
 }
 
 function markConstArrayIndex(node) {
