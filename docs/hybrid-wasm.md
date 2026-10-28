@@ -160,7 +160,7 @@ Notable members per package:
 - `strconv` (including `Unquote`, `QuotedPrefix`, `CanBackquote`, `Append*`, `Parse*`, `Format*`, `NumError`)
 - `unicode` (character classes and case conversion; range tables are not supported), `unicode/utf8`
 - `slices` (including `Compare`, `SortFunc`, `BinarySearch*`, `Min*`, `Max*`, `Compact*`, `Concat`, `Delete*`, `Insert`, `Replace`, `Grow`, `Clip`, `All`, `Values`, `Backward`, `Collect`, `AppendSeq`, `Sorted*`, `Chunk`), `maps` (including `All`, `Keys`, `Values`, `Insert`, `Collect`), `sort` (`Interface`, `Search*`, `Find`, `Slice*`)
-- `io` (`Reader`, `Writer`, `ReadWriter`, `Closer`, `Seeker`, `ReaderAt`, `WriterTo`, `ByteReader`, `RuneReader`, `SectionReader`, `LimitedReader`, `MultiReader`, `MultiWriter`, `TeeReader`, `NopCloser`, `ReadAll`, `ReadFull`, `Copy`, `CopyN`), `os` (`Stdout`, `Stderr`, `Stdin`; `Getenv`, `Args`, `Exit` stay JS-only)
+- `io` (`Reader`, `Writer`, `ReadWriter`, `Closer`, `Seeker`, `ReaderAt`, `WriterTo`, `ByteReader`, `RuneReader`, `SectionReader` (not yet over `strings.Reader` or `bytes.Reader`), `LimitedReader`, `MultiReader`, `MultiWriter`, `TeeReader`, `NopCloser`, `ReadAll`, `ReadFull`, `Copy`, `CopyN`), `os` (`Stdout`, `Stderr`, `Stdin`; `Getenv`, `Args`, `Exit` stay JS-only)
 - `path`, `path/filepath`, `html` (`EscapeString`, `UnescapeString`)
 - `time` (`Duration` with `.Truncate()`, `.Round()`, `.Abs()`, `ParseDuration`; `Time` with calendar arithmetic, `.Compare()`, `FixedZone`, `Date`, `Parse`, `Unix`, `UnixMilli`, `UnixNano`; `time.Sleep` stays JS-only)
 - `sync` (`Mutex`, `RWMutex`, `Once`, `WaitGroup`, `OnceFunc`, `OnceValue`, `OnceValues`)
