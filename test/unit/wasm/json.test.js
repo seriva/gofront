@@ -27,6 +27,33 @@ async function runLib(libSource) {
 
 section("encoding/json in wasm packages");
 
+for (const target of ["wasm", "both"]) {
+	test(`MarshalIndent encodes and indents in a ${target} package`, async () => {
+		const src = `//gofront:target ${target}
+package lib
+
+import "encoding/json"
+
+type Item struct {
+	Name string \`json:"name"\`
+	Tags []int  \`json:"tags"\`
+}
+
+func Run() string {
+	b, err := json.MarshalIndent(Item{"a", []int{1, 2}}, ">", "  ")
+	if err != nil {
+		return "error: " + err.Error()
+	}
+	return string(b)
+}
+`;
+		assertEqual(
+			await runLib(src),
+			'{\n>  "name": "a",\n>  "tags": [\n>    1,\n>    2\n>  ]\n>}',
+		);
+	});
+}
+
 test("Marshal primitives and HTML-safe escaping", async () => {
 	const src = `//gofront:target wasm
 package lib
