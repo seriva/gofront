@@ -1087,7 +1087,13 @@ export class FunctionEmitter {
 			return [{ structInfo, fieldIndex: idx, field: structInfo.fields[idx] }];
 		}
 		for (const embed of structInfo.embeds) {
-			const embedInfo = this.mod.structTypes.get(embed.name);
+			// A generic instance is registered under its specialised name
+			// (`Inner$int`), which the field's type carries.
+			const ft = structInfo.fields[embed.fieldIndex]?.goType;
+			const instName = (ft?.kind === "PointerType" ? ft.base : ft)?.name;
+			const embedInfo =
+				(instName && this.mod.structTypes.get(instName)) ??
+				this.mod.structTypes.get(embed.name);
 			if (embedInfo) {
 				const sub = this._resolveFieldPath(embedInfo, fieldName);
 				if (sub) {

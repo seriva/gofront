@@ -5,6 +5,7 @@ import {
 	assert,
 	assertEqual,
 	assertErrorContains,
+	assertProgramOutput,
 	compile,
 	compileHybrid,
 	Lexer,
@@ -847,6 +848,71 @@ func Main() int {
 `,
 	1022,
 );
+
+section("Generics — embedded instances and array type arguments");
+
+test("an embedded generic instance promotes its fields on every target", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type Inner[T any] struct{ v T }
+
+type W[T any] struct {
+	Inner[T]
+	w int
+}
+
+func main() {
+	x := W[int]{Inner: Inner[int]{v: 4}, w: 1}
+	fmt.Println(x.v, x.w)
+}
+`,
+		"4 1\n",
+	);
+});
+
+test("an array field named like a generic still parses as a field", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type A struct {
+	a [2]int
+	b int
+}
+
+func main() {
+	x := A{a: [2]int{1, 2}, b: 3}
+	fmt.Println(x.a[1], x.b)
+}
+`,
+		"2 3\n",
+	);
+});
+
+test("a type assertion accepts an array type argument", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type Stack[T any] struct{ items []T }
+
+func main() {
+	var s Stack[[2]int]
+	var x any = s
+	_, ok := x.(Stack[[2]int])
+	fmt.Println(ok)
+	_, ok = x.(Stack[int])
+	fmt.Println(ok)
+}
+`,
+		"true\nfalse\n",
+	);
+});
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);

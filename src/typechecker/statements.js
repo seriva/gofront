@@ -355,9 +355,15 @@ export const statementCheckMethods = {
 				if (base?.kind === "GenericTypeName") this.resolveTypeNode(t, inner);
 			}
 			if (stmt.assign) {
-				// Bind the variable to the single case type, or any for multi/default
-				const bindType =
-					c.types?.length === 1 ? this.resolveTypeNode(c.types[0], inner) : ANY;
+				// Bind the variable to the single case type, or any for multi/default.
+				// `case nil` binds the switch expression's own type, as in Go.
+				const only = c.types?.length === 1 ? c.types[0] : null;
+				const isNilCase = only?.kind === "TypeName" && only.name === "nil";
+				const bindType = isNilCase
+					? (stmt.expr._type ?? ANY)
+					: only
+						? this.resolveTypeNode(only, inner)
+						: ANY;
 				caseScope.defineLocal(stmt.assign, bindType);
 				// The capture variable is always considered used — it's the whole
 				// point of the switch-with-assign form. Each case body uses its own

@@ -390,9 +390,14 @@ export class ModuleEmitter {
 				for (const f of s.astFields) {
 					const names = f.embedded
 						? [
-								f.type?.kind === "PointerType"
-									? f.type.base?.name
-									: f.type?.name,
+								(
+									f.embeddedName ??
+									(f.type?.kind === "PointerType"
+										? f.type.base?.name
+										: f.type?.name)
+								)
+									?.split(".")
+									.pop(),
 							]
 						: f.names?.length
 							? f.names
