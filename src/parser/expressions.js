@@ -252,6 +252,8 @@ export const expressionParserMethods = {
 			if (tt === T.RBRACKET) {
 				depth--;
 				if (depth === 0) break;
+				// `a[i].F` selects from an index result: a value, never a type.
+				if (src[i + 1]?.type === T.DOT) return false;
 				i++;
 				continue;
 			}
