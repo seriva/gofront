@@ -15,7 +15,6 @@
 
 import { statSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
-import { copyAssets } from "./asset-manager.js";
 import {
 	formatBuildSummary,
 	formatPrepSummary,
@@ -27,15 +26,13 @@ import {
 	handleInit,
 	handlePrep,
 	handleTest,
-	maybeMinify,
 	parseBuildArgs,
 	parseCheckArgs,
 	parseDevArgs,
 	parseLegacyArgs,
 	parsePrepArgs,
 	parseTestArgs,
-	runCompile,
-	writeCompileOutput,
+	runSingleShot,
 } from "./cli-core.js";
 import { colors, formatDiagnostic, log, ms, stamp } from "./colors.js";
 
@@ -200,22 +197,19 @@ if (args[0] === "dev") {
 	}
 }
 
+const flags = parseLegacyArgs(args);
 const {
 	inputArg,
 	outputFile,
-	checkOnly,
-	dumpAst,
-	dumpTokens,
 	sourceMap,
 	serve: serveMode,
 	watch: watchMode,
 	copyAssets: copyAssetsFlag,
-	wasmOpt,
 	minify: minifyOutput,
 	mangle: mangleOutput,
 	port: servePort,
 	forceTarget,
-} = parseLegacyArgs(args);
+} = flags;
 
 // ── Determine input mode ─────────────────────────────────────
 
@@ -228,96 +222,10 @@ try {
 	process.exit(1);
 }
 
-function copyProjectAssets(verbose) {
-	try {
-		const { copied, skipped } = copyAssets(resolve("."));
-		if (verbose && (copied > 0 || skipped > 0)) {
-			log.info(`copied ${copied} assets (${skipped} skipped)`);
-		}
-	} catch (e) {
-		log.warn(`asset copy failed: ${e.message}`);
-	}
-}
-
 // ── Single-shot mode ─────────────────────────────────────────
 
 if (!watchMode) {
-	let result;
-	const startMs = performance.now();
-	try {
-		result = runCompile(inputPath, isDir, {
-			sourceMap,
-			outputFile,
-			dumpTokens,
-			dumpAst,
-			wasmOpt,
-			forceTarget,
-		});
-	} catch (e) {
-		log.fail(e.message);
-		process.exit(1);
-	}
-
-	if (result.tokens) {
-		for (const tok of result.tokens) console.log(tok.toString());
-		process.exit(0);
-	}
-	if (result.ast) {
-		console.log(JSON.stringify(result.ast, null, 2));
-		process.exit(0);
-	}
-
-	if (checkOnly) {
-		const elapsedMs = (performance.now() - startMs).toFixed(0);
-		log.info(
-			`${colors.cyan(inputArg)} — ${colors.green("OK")} ${ms(elapsedMs)}`,
-		);
-		process.exit(0);
-	}
-
-	let js;
-	try {
-		js = maybeMinify(result.js, {
-			minify: minifyOutput,
-			mangle: mangleOutput,
-			sourceMap,
-		});
-	} catch (e) {
-		log.fail(`minify failed: ${e.message}`);
-		process.exit(1);
-	}
-
-	const elapsedMs = (performance.now() - startMs).toFixed(0);
-
-	if (outputFile) {
-		try {
-			const written = writeCompileOutput(resolve(outputFile), result, js);
-			log.info(
-				`wrote ${formatWrittenDesc(written, outputFile)} ${ms(elapsedMs)}`,
-			);
-			if (result.wasmOptInfo && result.wasmOptInfo.originalSize > 0) {
-				const origKb = (result.wasmOptInfo.originalSize / 1024).toFixed(1);
-				const optKb = (result.wasmOptInfo.optimizedSize / 1024).toFixed(1);
-				log.info(
-					`wasm-opt: app.wasm ${origKb} kB → ${optKb} kB (-${result.wasmOptInfo.percentSaved}%) [${result.wasmOptInfo.engine}]`,
-				);
-			}
-		} catch (e) {
-			log.fail(`cannot write '${outputFile}': ${e.message}`);
-			process.exit(1);
-		}
-	} else {
-		console.log(js);
-		if (result.wasm) {
-			log.warn(
-				"wasm packages were linked but app.wasm needs -o <file> to be written",
-			);
-		}
-	}
-
-	if (copyAssetsFlag) copyProjectAssets(true);
-
-	process.exit(0);
+	process.exit(runSingleShot(inputPath, isDir, flags));
 }
 
 // ── Watch mode ───────────────────────────────────────────────
