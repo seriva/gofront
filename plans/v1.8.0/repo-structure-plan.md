@@ -367,7 +367,7 @@ Only paths change. No task, scope or number in those plans is edited.
 
 ### Phase 7: Typechecker entry & cross-plan paths
 
-- [ ] Task 7.1: `typechecker/stdlib.js` → `typechecker/stdlib/index.js`
+- [x] Task 7.1: `typechecker/stdlib.js` → `typechecker/stdlib/index.js`
   - Files: `src/typechecker/stdlib.js` → `src/typechecker/stdlib/index.js` (`git mv`), its importers
   - Test: none new (rename). The full unit suite passes
   - Done when: `ls src/typechecker/stdlib.js` fails, and the hashes match
