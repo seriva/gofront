@@ -1,6 +1,10 @@
 // GoFront test suite — orchestrator
 // Runs unit tests across worker threads in parallel (or sequentially if TEST_PARALLEL=0).
 //
+// Test files are discovered by ./discover.js: every *.test.js below this
+// directory except fixtures/. HEAVIEST_TEST_FILES there only schedules the slow
+// files first.
+//
 // Test directories:
 //   language/ — core language features, control flow, declarations, expressions, structs
 //   types/    — type errors, type checks, type inference, generics, typed arrays
@@ -12,95 +16,12 @@ import os from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
+import { HEAVIEST_TEST_FILES, TEST_FILES } from "./discover.js";
 import { summarize, waitForPending } from "./helpers.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
-export const TEST_FILES = [
-	"./language/core.test.js",
-	"./language/control-flow.test.js",
-	"./language/declarations.test.js",
-	"./language/expressions.test.js",
-	"./language/range-iter.test.js",
-	"./language/loops.test.js",
-	"./language/pointers.test.js",
-	"./language/struct_unboxing.test.js",
-	"./language/value-semantics.test.js",
-	"./language/codegen-regressions.test.js",
-	"./language/named-type-methods.test.js",
-	"./language/structs.test.js",
-	"./language/constants.test.js",
-	"./language/parity-matrix.test.js",
-	"./types/errors.test.js",
-	"./types/checks.test.js",
-	"./types/inference.test.js",
-	"./types/arrays.test.js",
-	"./types/pointers.test.js",
-	"./types/shadowing.test.js",
-	"./types/complex.test.js",
-	"./types/generics.test.js",
-	"./types/typedarrays.test.js",
-	"./types/webgl.test.js",
-	"./builtins/core.test.js",
-	"./builtins/operators.test.js",
-	"./builtins/stdlib.test.js",
-	"./builtins/bytes.test.js",
-	"./builtins/fmt-stringer.test.js",
-	"./builtins/fmt-verbs.test.js",
-	"./builtins/iter.test.js",
-	"./builtins/json.test.js",
-	"./builtins/gom.test.js",
-	"./builtins/dom.test.js",
-	"./compiler/packages.test.js",
-	"./compiler/cli.test.js",
-	"./compiler/cli-core.test.js",
-	"./compiler/imports.test.js",
-	"./compiler/dev-server.test.js",
-	"./compiler/asset-manager.test.js",
-	"./compiler/prep.test.js",
-	"./compiler/pwa.test.js",
-	"./compiler/test-runner.test.js",
-	"./compiler/targets.test.js",
-	"./compiler/strict-mode.test.js",
-	"./compiler/strict-panics.test.js",
-	"./compiler/templ.test.js",
-	"./compiler/lexer-parser.test.js",
-	"./compiler/minifier.test.js",
-	"./compiler/lower.test.js",
-	"./compiler/optimize-build.test.js",
-	"./compiler/semantics.test.js",
-	"./compiler/stdlib-go.test.js",
-	"./compiler/link.test.js",
-	"./compiler/check-layers.test.js",
-	"./compiler/build-examples.test.js",
-	"./wasm/encode.test.js",
-	"./wasm/wat.test.js",
-	"./wasm/scalars.test.js",
-	"./wasm/traps.test.js",
-	"./wasm/structs.test.js",
-	"./wasm/slices.test.js",
-	"./wasm/strings_any.test.js",
-	"./wasm/closures.test.js",
-	"./wasm/boundary.test.js",
-	"./wasm/interfaces.test.js",
-	"./wasm/generics.test.js",
-	"./wasm/variadic.test.js",
-	"./wasm/maps.test.js",
-	"./wasm/defer_recover.test.js",
-	"./wasm/go_semantics.test.js",
-	"./wasm/optimize.test.js",
-	"./wasm/shared.test.js",
-	"./wasm/simd.test.js",
-	"./wasm/pointers.test.js",
-	"./wasm/arrays.test.js",
-	"./wasm/range_func.test.js",
-	"./wasm/complex.test.js",
-	"./wasm/stdlib.test.js",
-	"./wasm/fmt-any.test.js",
-	"./wasm/json.test.js",
-	"./wasm/mixins.test.js",
-	"./wasm/golden.test.js",
-];
+export { HEAVIEST_TEST_FILES, TEST_FILES };
 
 // Sequential fallback for debugging or constrained single-thread environments
 if (process.env.TEST_PARALLEL === "0") {
@@ -123,21 +44,6 @@ let totalFailed = 0;
 const allFailures = [];
 const fileTimings = [];
 
-const HEAVIEST_TEST_FILES = [
-	"./wasm/optimize.test.js",
-	"./compiler/optimize-build.test.js",
-	"./builtins/gom.test.js",
-	"./compiler/templ.test.js",
-	"./builtins/dom.test.js",
-	"./compiler/test-runner.test.js",
-	"./compiler/prep.test.js",
-	"./wasm/boundary.test.js",
-	"./compiler/cli.test.js",
-	"./wasm/stdlib.test.js",
-	"./compiler/cli-core.test.js",
-	"./builtins/stdlib.test.js",
-	"./compiler/packages.test.js",
-];
 const heaviestSet = new Set(HEAVIEST_TEST_FILES);
 
 const queue = [
