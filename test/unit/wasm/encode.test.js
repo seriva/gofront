@@ -19,7 +19,7 @@ import {
 } from "../../../src/backend/wasm/optimize.js";
 import { _usesFmtAny } from "../../../src/backend/wasm/prescan.js";
 import { compileWasm } from "../../../src/compiler.js";
-import { Lexer } from "../../../src/lexer.js";
+import { Lexer } from "../../../src/lexer/lexer.js";
 import { Parser } from "../../../src/parser/index.js";
 import { TypeChecker } from "../../../src/typechecker/index.js";
 import { assert, assertEqual, section, test } from "../helpers.js";

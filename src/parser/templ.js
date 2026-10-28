@@ -32,9 +32,9 @@
 //   forTokens  TemplFor only: stmtTokens without trailing semicolons
 //   attr.expr / attr.exprError on `expr` and `cond-bool` attributes
 
-import { Parser } from "./parser/index.js";
-import { TT } from "./templ-lexer.js";
-import { T, Token } from "./tokens.js";
+import { TT } from "../lexer/templ-lexer.js";
+import { T, Token } from "../lexer/tokens.js";
+import { Parser } from "./index.js";
 
 const VOID_ELEMENTS = new Set([
 	"area",

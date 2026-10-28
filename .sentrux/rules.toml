@@ -37,17 +37,17 @@ order = 4
 
 [[layers]]
 name  = "parser"
-paths = ["src/templ-parser.js", "src/parser/*"]
+paths = ["src/parser/*"]
 order = 5
 
 [[layers]]
 name  = "lexer"
-paths = ["src/lexer.js", "src/templ-lexer.js"]
+paths = ["src/lexer/lexer.js", "src/lexer/templ-lexer.js"]
 order = 6
 
 [[layers]]
 name  = "types"
-paths = ["src/typechecker/types.js", "src/tokens.js"]
+paths = ["src/typechecker/types.js", "src/lexer/tokens.js"]
 order = 7
 
 # Go standard library (stdlib/, GoFront Go) — same rule: a layer can only import from layers

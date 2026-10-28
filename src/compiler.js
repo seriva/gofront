@@ -23,7 +23,8 @@ import { CodeGen } from "./backend/js/index.js";
 import { compileWasmModule, optimizeWasm } from "./backend/wasm/index.js";
 import { log } from "./cli/colors.js";
 import { parseDts } from "./dts-parser.js";
-import { Lexer } from "./lexer.js";
+import { Lexer } from "./lexer/lexer.js";
+import { TemplLexer } from "./lexer/templ-lexer.js";
 import {
 	attachSourceMap,
 	buildWasmMap,
@@ -43,6 +44,7 @@ import {
 } from "./link/wasm.js";
 import { lower } from "./lower/index.js";
 import { Parser } from "./parser/index.js";
+import { TemplParser } from "./parser/templ.js";
 import {
 	isBuiltinPackage,
 	isLocalPath,
@@ -50,8 +52,6 @@ import {
 	resolveGwDir,
 	resolveStdlibSource,
 } from "./resolver.js";
-import { TemplLexer } from "./templ-lexer.js";
-import { TemplParser } from "./templ-parser.js";
 import { TypeChecker } from "./typechecker/index.js";
 import { WASM_SUPPORTED_STDLIB } from "./typechecker/types.js";
 
