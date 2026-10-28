@@ -20,6 +20,10 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 export const ALLOW = {
 	"stdlib/math/extra.go":
 		"imports the built-in math/bits, which Sentrux resolves by suffix to src/backend/js/stdlib/bits.js (a false layer violation)",
+	"stdlib/internal/jsonrt/dec.go":
+		"imports the built-in encoding/base64, which Sentrux resolves by suffix to src/backend/js/stdlib/base64.js (a false layer violation)",
+	"stdlib/internal/jsonrt/enc.go":
+		"imports the built-in encoding/base64, which Sentrux resolves by suffix to src/backend/js/stdlib/base64.js (a false layer violation)",
 };
 
 // Cross-backend imports that are allowed by design: [importer, imported].
