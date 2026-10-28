@@ -102,7 +102,7 @@ export const BROWSER_GLOBALS = new Set([
 	"TextDecoder",
 ]);
 
-// Stdlib packages the WASM backend can emit. Extend as src/backend/wasm/emit-stdlib.js
+// Stdlib packages the WASM backend can emit. Extend as src/backend/wasm/stdlib/
 // gains support; anything not listed is rejected at import with "not yet available in
 // wasm packages".
 export const WASM_SUPPORTED_STDLIB = new Set([
