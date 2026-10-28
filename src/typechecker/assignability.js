@@ -97,6 +97,8 @@ export const assignabilityMethods = {
 	// type or an untyped constant representable as uint.
 	_binaryResultTypeShift(_op, lt, rt, node) {
 		if (node) this.checkShiftCount(rt, node.right);
+		if (node && lt.kind !== "untyped" && !isInteger(lt))
+			this.err(`shifted operand ${typeStr(lt)} must be integer`, node.left);
 		return lt;
 	},
 
@@ -544,10 +546,47 @@ export const assignabilityMethods = {
 
 	// ── Interface satisfaction ────────────────────────────────────────
 
+	// `interface{}` and `any` are the same type, but print differently.
+	_sigTypeStr(t) {
+		switch (t?.kind) {
+			case "interface":
+				if (
+					!t.name &&
+					t.methods.size === 0 &&
+					!t.unionConstraint &&
+					!t._typeSetEmbeds
+				)
+					return "any";
+				return typeStr(t);
+			case "slice":
+				return `[]${this._sigTypeStr(t.elem)}`;
+			case "array":
+				return `[${t.size ?? "..."}]${this._sigTypeStr(t.elem)}`;
+			case "pointer":
+				return `*${this._sigTypeStr(t.base)}`;
+			case "map":
+				return `map[${this._sigTypeStr(t.key)}]${this._sigTypeStr(t.value)}`;
+			case "tuple":
+				return `(${t.types.map((x) => this._sigTypeStr(x)).join(", ")})`;
+			case "func": {
+				const ret =
+					t.returns.length > 1
+						? `(${t.returns.map((x) => this._sigTypeStr(x)).join(", ")})`
+						: t.returns[0]
+							? this._sigTypeStr(t.returns[0])
+							: "void";
+				return `func(${t.params.map((x) => this._sigTypeStr(x)).join(", ")}) ${ret}`;
+			}
+			default:
+				return typeStr(t);
+		}
+	},
+
 	_sigParamsMatch(reqList, actList) {
 		if (reqList.length !== actList.length) return false;
 		for (let i = 0; i < reqList.length; i++) {
-			if (typeStr(reqList[i]) !== typeStr(actList[i])) return false;
+			if (this._sigTypeStr(reqList[i]) !== this._sigTypeStr(actList[i]))
+				return false;
 		}
 		return true;
 	},
