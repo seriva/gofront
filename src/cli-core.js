@@ -24,7 +24,7 @@ import {
 } from "node:path";
 import { copyAssets } from "./asset-manager.js";
 import { isGoFrontWasm } from "./backend/wasm/index.js";
-import { colors, log, ms } from "./colors.js";
+import { colors, formatDiagnostic, log, ms, stamp } from "./colors.js";
 import { compileDir, compileSingleFile } from "./compiler.js";
 import { createDevServer } from "./dev-server.js";
 import { minify } from "./minifier.js";
@@ -919,10 +919,66 @@ export function parseLegacyArgs(argv) {
 	};
 }
 
+// `gofront --help` text.
+export const HELP_TEXT = `
+GoFront — a Go-inspired language that compiles to JavaScript and WebAssembly
+
+Usage:
+  gofront dev [dir] [options]    Start dev server with live reload (default port 3000)
+  gofront build [dir] [options]  Build production bundle (-o <dir>, --pwa, --minify, --emit-wat, --release, --wasm-opt, --js-only)
+  gofront check [dir|dir/...]    Type-check only (dir/... recurses into every package)
+  gofront test [dir|dir/...] [--dom]  Run unit tests (-v verbose, -run <regex>, -bench <regex>)
+  gofront prep [dir] [--minify]  Copy static assets and bundle vendor dependencies
+  gofront init [dir]             Scaffold a new GoFront project
+  gofront <file.go>              Compile single file and print to stdout
+  gofront <dir>  (or gofront .)  Compile all *.go in directory as one bundle
+  gofront <input> -o out.js      Compile and write to file (wasm packages also emit app.wasm)
+  gofront <input> --release      Production build with minification and Binaryen wasm optimization
+  gofront <input> --wasm-opt     Optimize wasm output with Binaryen (-O3 + GUFA)
+  gofront <input> --check        Type-check only
+  gofront <input> --watch        Watch for changes and recompile
+  gofront <input> -o out.js --serve          Watch + serve with live reload (default port 3000)
+  gofront <input> -o out.js --serve --port 8080  Use a custom port
+  gofront <input> -o out.js --copy-assets    Compile and synchronize static assets
+  gofront <input> --source-map   Append inline source map to output
+  gofront <input> --minify       Minify output
+  gofront <input> --minify --mangle  Minify and mangle identifiers
+  gofront <file.go> --ast        Dump AST (debug)
+  gofront <file.go> --tokens     Dump tokens (debug)
+  gofront --version              Print version
+`.trim();
+
+// Print the `gofront check` result: one OK line per package, then a total.
+export function reportCheck({ elapsedMs, packages }, targetDir) {
+	const okLine = (label, t) =>
+		log.info(`${colors.cyan(label)} — ${colors.green("OK")} ${ms(t)}`);
+	if (packages) {
+		for (const pkg of packages) {
+			okLine(relative(process.cwd(), pkg.dir) || ".", pkg.elapsedMs);
+		}
+		log.info(
+			`${colors.bold(`${packages.length} packages`)} — ${colors.bold(colors.green("OK"))} ${ms(elapsedMs)}`,
+		);
+	} else {
+		okLine(targetDir, elapsedMs);
+	}
+}
+
+// Print the `gofront build` summary lines.
+export function reportBuild(result) {
+	for (const line of formatBuildSummary(result)) {
+		log.info(
+			line
+				.replace(/^build complete/, colors.green("build complete"))
+				.replace(/\(([\d.]+ kB)\)$/, (_, s) => colors.dim(`(${s})`)),
+		);
+	}
+}
+
 // Copy the project's static assets into place; failures only warn.
-export function copyProjectAssets(verbose) {
+export function copyProjectAssets(verbose, projectDir = ".") {
 	try {
-		const { copied, skipped } = copyAssets(resolve("."));
+		const { copied, skipped } = copyAssets(resolve(projectDir));
 		if (verbose && (copied > 0 || skipped > 0)) {
 			log.info(`copied ${copied} assets (${skipped} skipped)`);
 		}
@@ -1024,6 +1080,38 @@ export function runSingleShot(inputPath, isDir, flags) {
 	if (copyAssetsFlag) copyProjectAssets(true);
 
 	return 0;
+}
+
+// Reporters for the legacy `--watch` mode: build and error lines on stderr
+// (the compiled JS goes to stdout when there is no output file).
+export function devReporters({
+	outputFile = null,
+	copyAssets = false,
+	projectDir = ".",
+} = {}) {
+	const prefix = () => `${stamp()} ${colors.bold("gofront:")}`;
+	return {
+		onBuild: ({ js, written, elapsedMs, changedFile }) => {
+			const changeNote = changedFile ? ` — ${changedFile} changed` : "";
+			const timing = colors.dim(`(${elapsedMs}ms${changeNote})`);
+			if (outputFile) {
+				console.error(
+					`${prefix()} ${colors.green("OK")} — wrote ${formatWrittenDesc(written, outputFile)} ${timing}`,
+				);
+			} else {
+				// Clear screen then print
+				process.stdout.write("\x1Bc");
+				console.log(js);
+				console.error(`${prefix()} ${colors.green("OK")} ${timing}`);
+			}
+			if (copyAssets) copyProjectAssets(false, projectDir);
+		},
+		onError: (e) => {
+			console.error(`${prefix()} ${colors.bold(colors.red("ERROR"))}`);
+			for (const line of formatDiagnostic(e.message).split("\n"))
+				console.error(`  ${line}`);
+		},
+	};
 }
 
 // ── dev command ───────────────────────────────────────────────

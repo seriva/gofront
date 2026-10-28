@@ -14,12 +14,13 @@
 //   gofront init [dir]             — scaffold a new GoFront project
 
 import { statSync } from "node:fs";
-import { dirname, relative, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import {
-	formatBuildSummary,
+	devReporters,
 	formatPrepSummary,
 	formatWrittenDesc,
 	GOFRONT_VERSION,
+	HELP_TEXT,
 	handleBuild,
 	handleCheck,
 	handleDev,
@@ -32,9 +33,11 @@ import {
 	parseLegacyArgs,
 	parsePrepArgs,
 	parseTestArgs,
+	reportBuild,
+	reportCheck,
 	runSingleShot,
 } from "./cli-core.js";
-import { colors, formatDiagnostic, log, ms, stamp } from "./colors.js";
+import { colors, log, stamp } from "./colors.js";
 
 // ── Parse CLI args ───────────────────────────────────────────
 
@@ -45,35 +48,7 @@ if (args[0] === "--version" || args[0] === "-v") {
 }
 
 if (args.length === 0 || args[0] === "--help" || args[0] === "-h") {
-	console.log(
-		`
-GoFront — a Go-inspired language that compiles to JavaScript and WebAssembly
-
-Usage:
-  gofront dev [dir] [options]    Start dev server with live reload (default port 3000)
-  gofront build [dir] [options]  Build production bundle (-o <dir>, --pwa, --minify, --emit-wat, --release, --wasm-opt, --js-only)
-  gofront check [dir|dir/...]    Type-check only (dir/... recurses into every package)
-  gofront test [dir|dir/...] [--dom]  Run unit tests (-v verbose, -run <regex>, -bench <regex>)
-  gofront prep [dir] [--minify]  Copy static assets and bundle vendor dependencies
-  gofront init [dir]             Scaffold a new GoFront project
-  gofront <file.go>              Compile single file and print to stdout
-  gofront <dir>  (or gofront .)  Compile all *.go in directory as one bundle
-  gofront <input> -o out.js      Compile and write to file (wasm packages also emit app.wasm)
-  gofront <input> --release      Production build with minification and Binaryen wasm optimization
-  gofront <input> --wasm-opt     Optimize wasm output with Binaryen (-O3 + GUFA)
-  gofront <input> --check        Type-check only
-  gofront <input> --watch        Watch for changes and recompile
-  gofront <input> -o out.js --serve          Watch + serve with live reload (default port 3000)
-  gofront <input> -o out.js --serve --port 8080  Use a custom port
-  gofront <input> -o out.js --copy-assets    Compile and synchronize static assets
-  gofront <input> --source-map   Append inline source map to output
-  gofront <input> --minify       Minify output
-  gofront <input> --minify --mangle  Minify and mangle identifiers
-  gofront <file.go> --ast        Dump AST (debug)
-  gofront <file.go> --tokens     Dump tokens (debug)
-  gofront --version              Print version
-`.trim(),
-	);
+	console.log(HELP_TEXT);
 	process.exit(0);
 }
 
@@ -128,19 +103,7 @@ if (args[0] === "test") {
 if (args[0] === "check") {
 	const { targetDir, forceTarget } = parseCheckArgs(args.slice(1));
 	try {
-		const { elapsedMs, packages } = handleCheck(targetDir, { forceTarget });
-		const okLine = (label, t) =>
-			log.info(`${colors.cyan(label)} — ${colors.green("OK")} ${ms(t)}`);
-		if (packages) {
-			for (const pkg of packages) {
-				okLine(relative(process.cwd(), pkg.dir) || ".", pkg.elapsedMs);
-			}
-			log.info(
-				`${colors.bold(`${packages.length} packages`)} — ${colors.bold(colors.green("OK"))} ${ms(elapsedMs)}`,
-			);
-		} else {
-			okLine(targetDir, elapsedMs);
-		}
+		reportCheck(handleCheck(targetDir, { forceTarget }), targetDir);
 		process.exit(0);
 	} catch (e) {
 		log.fail(e.message);
@@ -154,13 +117,7 @@ if (args[0] === "build") {
 	const buildOptions = parseBuildArgs(args.slice(1));
 	try {
 		const result = await handleBuild(buildOptions.targetDir, buildOptions);
-		for (const line of formatBuildSummary(result)) {
-			log.info(
-				line
-					.replace(/^build complete/, colors.green("build complete"))
-					.replace(/\(([\d.]+ kB)\)$/, (_, s) => colors.dim(`(${s})`)),
-			);
-		}
+		reportBuild(result);
 		process.exit(0);
 	} catch (e) {
 		log.fail(e.message);
@@ -250,26 +207,7 @@ try {
 		mangle: mangleOutput,
 		copyAssets: copyAssetsFlag,
 		forceTarget,
-		onBuild: ({ js, written, elapsedMs, changedFile }) => {
-			const changeNote = changedFile ? ` — ${changedFile} changed` : "";
-			const timing = colors.dim(`(${elapsedMs}ms${changeNote})`);
-			if (outputFile) {
-				console.error(
-					`${prefix()} ${colors.green("OK")} — wrote ${formatWrittenDesc(written, outputFile)} ${timing}`,
-				);
-			} else {
-				// Clear screen then print
-				process.stdout.write("\x1Bc");
-				console.log(js);
-				console.error(`${prefix()} ${colors.green("OK")} ${timing}`);
-			}
-			if (copyAssetsFlag) copyProjectAssets(false);
-		},
-		onError: (e) => {
-			console.error(`${prefix()} ${colors.bold(colors.red("ERROR"))}`);
-			for (const line of formatDiagnostic(e.message).split("\n"))
-				console.error(`  ${line}`);
-		},
+		...devReporters({ outputFile, copyAssets: copyAssetsFlag }),
 	});
 } catch (e) {
 	log.fail(e.message);
