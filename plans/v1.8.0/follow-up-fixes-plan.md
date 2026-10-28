@@ -152,7 +152,7 @@ No longer reproducing (deleted from the ledger): promoted field through `Deep2{*
   - Test: Unit test with nested selector indexing inside function arguments (`fn(s.Meshes[s.Entries[i].Index])`) parses as `CallExpr` containing `IndexExpr`, not `InstantiationExpr`.
   - Done when: `gofront check` passes on the repro and on SimpleFPS (`app/src/game`, `app/src/engine/scene`, `app/src`).
 
-- [ ] Task 1.2: Slice Bounds-Check Elimination (BCE) in lowering
+- [x] Task 1.2: Slice Bounds-Check Elimination (BCE) in lowering
   - Files: `src/lower/bounds.js`, `test/unit/compiler/bounds.test.js`
   - Test: In a `both` package, a function starting with `_ = xs[15]` or `if len(xs) > 15 { ... }` marks `xs[0]` through `xs[15]` as `_inBounds = true`. Emitted JS contains raw `xs[0]` instead of `__at(xs, 0)`.
   - Done when: Constant slice indices preceded by a length proof or BCE hint are elided in the JS backend for `both` packages.
