@@ -9,7 +9,8 @@
 //   language/ — core language features, control flow, declarations, expressions, structs
 //   types/    — type errors, type checks, type inference, generics, typed arrays
 //   builtins/ — built-in functions, operators, stdlib shims, bytes, gom, dom
-//   compiler/ — multi-file packages, CLI, test-runner, templ, lexer-parser, lower, minifier
+//   compiler/ — multi-file packages, imports, targets, templ, lexer-parser, lower, link, minifier, layers, runner
+//   cli/      — CLI, cli-core, dev server, test-runner, prep, pwa, assets, example build
 //   wasm/     — WebAssembly backend, GC semantics, stdlib parity, optimizations
 
 import os from "node:os";
