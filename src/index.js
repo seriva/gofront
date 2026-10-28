@@ -14,30 +14,30 @@
 //   gofront init [dir]             — scaffold a new GoFront project
 
 import { statSync } from "node:fs";
-import { dirname, relative, resolve } from "node:path";
-import { copyAssets } from "./asset-manager.js";
+import { dirname, resolve } from "node:path";
 import {
-	formatBuildSummary,
+	devReporters,
 	formatPrepSummary,
 	formatWrittenDesc,
 	GOFRONT_VERSION,
+	HELP_TEXT,
 	handleBuild,
 	handleCheck,
 	handleDev,
 	handleInit,
 	handlePrep,
 	handleTest,
-	maybeMinify,
 	parseBuildArgs,
 	parseCheckArgs,
 	parseDevArgs,
 	parseLegacyArgs,
 	parsePrepArgs,
 	parseTestArgs,
-	runCompile,
-	writeCompileOutput,
+	reportBuild,
+	reportCheck,
+	runSingleShot,
 } from "./cli-core.js";
-import { colors, formatDiagnostic, log, ms, stamp } from "./colors.js";
+import { colors, log, stamp } from "./colors.js";
 
 // ── Parse CLI args ───────────────────────────────────────────
 
@@ -48,35 +48,7 @@ if (args[0] === "--version" || args[0] === "-v") {
 }
 
 if (args.length === 0 || args[0] === "--help" || args[0] === "-h") {
-	console.log(
-		`
-GoFront — a Go-inspired language that compiles to JavaScript and WebAssembly
-
-Usage:
-  gofront dev [dir] [options]    Start dev server with live reload (default port 3000)
-  gofront build [dir] [options]  Build production bundle (-o <dir>, --pwa, --minify, --emit-wat, --release, --wasm-opt, --js-only)
-  gofront check [dir|dir/...]    Type-check only (dir/... recurses into every package)
-  gofront test [dir|dir/...] [--dom]  Run unit tests (-v verbose, -run <regex>, -bench <regex>)
-  gofront prep [dir] [--minify]  Copy static assets and bundle vendor dependencies
-  gofront init [dir]             Scaffold a new GoFront project
-  gofront <file.go>              Compile single file and print to stdout
-  gofront <dir>  (or gofront .)  Compile all *.go in directory as one bundle
-  gofront <input> -o out.js      Compile and write to file (wasm packages also emit app.wasm)
-  gofront <input> --release      Production build with minification and Binaryen wasm optimization
-  gofront <input> --wasm-opt     Optimize wasm output with Binaryen (-O3 + GUFA)
-  gofront <input> --check        Type-check only
-  gofront <input> --watch        Watch for changes and recompile
-  gofront <input> -o out.js --serve          Watch + serve with live reload (default port 3000)
-  gofront <input> -o out.js --serve --port 8080  Use a custom port
-  gofront <input> -o out.js --copy-assets    Compile and synchronize static assets
-  gofront <input> --source-map   Append inline source map to output
-  gofront <input> --minify       Minify output
-  gofront <input> --minify --mangle  Minify and mangle identifiers
-  gofront <file.go> --ast        Dump AST (debug)
-  gofront <file.go> --tokens     Dump tokens (debug)
-  gofront --version              Print version
-`.trim(),
-	);
+	console.log(HELP_TEXT);
 	process.exit(0);
 }
 
@@ -131,19 +103,7 @@ if (args[0] === "test") {
 if (args[0] === "check") {
 	const { targetDir, forceTarget } = parseCheckArgs(args.slice(1));
 	try {
-		const { elapsedMs, packages } = handleCheck(targetDir, { forceTarget });
-		const okLine = (label, t) =>
-			log.info(`${colors.cyan(label)} — ${colors.green("OK")} ${ms(t)}`);
-		if (packages) {
-			for (const pkg of packages) {
-				okLine(relative(process.cwd(), pkg.dir) || ".", pkg.elapsedMs);
-			}
-			log.info(
-				`${colors.bold(`${packages.length} packages`)} — ${colors.bold(colors.green("OK"))} ${ms(elapsedMs)}`,
-			);
-		} else {
-			okLine(targetDir, elapsedMs);
-		}
+		reportCheck(handleCheck(targetDir, { forceTarget }), targetDir);
 		process.exit(0);
 	} catch (e) {
 		log.fail(e.message);
@@ -157,13 +117,7 @@ if (args[0] === "build") {
 	const buildOptions = parseBuildArgs(args.slice(1));
 	try {
 		const result = await handleBuild(buildOptions.targetDir, buildOptions);
-		for (const line of formatBuildSummary(result)) {
-			log.info(
-				line
-					.replace(/^build complete/, colors.green("build complete"))
-					.replace(/\(([\d.]+ kB)\)$/, (_, s) => colors.dim(`(${s})`)),
-			);
-		}
+		reportBuild(result);
 		process.exit(0);
 	} catch (e) {
 		log.fail(e.message);
@@ -200,22 +154,19 @@ if (args[0] === "dev") {
 	}
 }
 
+const flags = parseLegacyArgs(args);
 const {
 	inputArg,
 	outputFile,
-	checkOnly,
-	dumpAst,
-	dumpTokens,
 	sourceMap,
 	serve: serveMode,
 	watch: watchMode,
 	copyAssets: copyAssetsFlag,
-	wasmOpt,
 	minify: minifyOutput,
 	mangle: mangleOutput,
 	port: servePort,
 	forceTarget,
-} = parseLegacyArgs(args);
+} = flags;
 
 // ── Determine input mode ─────────────────────────────────────
 
@@ -228,96 +179,10 @@ try {
 	process.exit(1);
 }
 
-function copyProjectAssets(verbose) {
-	try {
-		const { copied, skipped } = copyAssets(resolve("."));
-		if (verbose && (copied > 0 || skipped > 0)) {
-			log.info(`copied ${copied} assets (${skipped} skipped)`);
-		}
-	} catch (e) {
-		log.warn(`asset copy failed: ${e.message}`);
-	}
-}
-
 // ── Single-shot mode ─────────────────────────────────────────
 
 if (!watchMode) {
-	let result;
-	const startMs = performance.now();
-	try {
-		result = runCompile(inputPath, isDir, {
-			sourceMap,
-			outputFile,
-			dumpTokens,
-			dumpAst,
-			wasmOpt,
-			forceTarget,
-		});
-	} catch (e) {
-		log.fail(e.message);
-		process.exit(1);
-	}
-
-	if (result.tokens) {
-		for (const tok of result.tokens) console.log(tok.toString());
-		process.exit(0);
-	}
-	if (result.ast) {
-		console.log(JSON.stringify(result.ast, null, 2));
-		process.exit(0);
-	}
-
-	if (checkOnly) {
-		const elapsedMs = (performance.now() - startMs).toFixed(0);
-		log.info(
-			`${colors.cyan(inputArg)} — ${colors.green("OK")} ${ms(elapsedMs)}`,
-		);
-		process.exit(0);
-	}
-
-	let js;
-	try {
-		js = maybeMinify(result.js, {
-			minify: minifyOutput,
-			mangle: mangleOutput,
-			sourceMap,
-		});
-	} catch (e) {
-		log.fail(`minify failed: ${e.message}`);
-		process.exit(1);
-	}
-
-	const elapsedMs = (performance.now() - startMs).toFixed(0);
-
-	if (outputFile) {
-		try {
-			const written = writeCompileOutput(resolve(outputFile), result, js);
-			log.info(
-				`wrote ${formatWrittenDesc(written, outputFile)} ${ms(elapsedMs)}`,
-			);
-			if (result.wasmOptInfo && result.wasmOptInfo.originalSize > 0) {
-				const origKb = (result.wasmOptInfo.originalSize / 1024).toFixed(1);
-				const optKb = (result.wasmOptInfo.optimizedSize / 1024).toFixed(1);
-				log.info(
-					`wasm-opt: app.wasm ${origKb} kB → ${optKb} kB (-${result.wasmOptInfo.percentSaved}%) [${result.wasmOptInfo.engine}]`,
-				);
-			}
-		} catch (e) {
-			log.fail(`cannot write '${outputFile}': ${e.message}`);
-			process.exit(1);
-		}
-	} else {
-		console.log(js);
-		if (result.wasm) {
-			log.warn(
-				"wasm packages were linked but app.wasm needs -o <file> to be written",
-			);
-		}
-	}
-
-	if (copyAssetsFlag) copyProjectAssets(true);
-
-	process.exit(0);
+	process.exit(runSingleShot(inputPath, isDir, flags));
 }
 
 // ── Watch mode ───────────────────────────────────────────────
@@ -342,26 +207,7 @@ try {
 		mangle: mangleOutput,
 		copyAssets: copyAssetsFlag,
 		forceTarget,
-		onBuild: ({ js, written, elapsedMs, changedFile }) => {
-			const changeNote = changedFile ? ` — ${changedFile} changed` : "";
-			const timing = colors.dim(`(${elapsedMs}ms${changeNote})`);
-			if (outputFile) {
-				console.error(
-					`${prefix()} ${colors.green("OK")} — wrote ${formatWrittenDesc(written, outputFile)} ${timing}`,
-				);
-			} else {
-				// Clear screen then print
-				process.stdout.write("\x1Bc");
-				console.log(js);
-				console.error(`${prefix()} ${colors.green("OK")} ${timing}`);
-			}
-			if (copyAssetsFlag) copyProjectAssets(false);
-		},
-		onError: (e) => {
-			console.error(`${prefix()} ${colors.bold(colors.red("ERROR"))}`);
-			for (const line of formatDiagnostic(e.message).split("\n"))
-				console.error(`  ${line}`);
-		},
+		...devReporters({ outputFile, copyAssets: copyAssetsFlag }),
 	});
 } catch (e) {
 	log.fail(e.message);
