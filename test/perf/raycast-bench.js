@@ -7,7 +7,7 @@
 // and V8 new-space growth per run, so the numbers decide whether the hybrid
 // backend earns its keep.
 //
-//   node --expose-gc test/e2e/perf/raycast-bench.js [--tris 100352] [--rays 100000]
+//   node --expose-gc test/perf/raycast-bench.js [--tris 100352] [--rays 100000]
 //        [--runs 5] [--mode js|hybrid|both] [--wasm-opt /path/to/wasm-opt] [--json]
 //
 // `--expose-gc` is optional; without it the allocation column is the smallest
@@ -29,8 +29,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import v8 from "node:v8";
-import { optimizeWasm } from "../../../src/backend/wasm/optimize.js";
-import { compileDir } from "../../../src/compiler.js";
+import { optimizeWasm } from "../../src/backend/wasm/optimize.js";
+import { compileDir } from "../../src/compiler.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = join(here, "raycast");
