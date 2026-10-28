@@ -1,6 +1,7 @@
 // test/unit/wasm/encode.test.js
 // Tests for WebAssembly binary encoder (LEB128, sections, GC types, execution).
 
+import { readFileSync } from "node:fs";
 import {
 	encodeF32,
 	encodeF64,
@@ -8,7 +9,19 @@ import {
 	encodeI64LEB,
 	encodeModule,
 	encodeU32LEB,
+	isGoFrontWasm,
 } from "../../../src/backend/wasm/encode.js";
+import { _orderConstInits } from "../../../src/backend/wasm/globals.js";
+import * as wasmIndex from "../../../src/backend/wasm/index.js";
+import {
+	hasNativeWasmOpt,
+	optimizeWasm,
+} from "../../../src/backend/wasm/optimize.js";
+import { _usesFmtAny } from "../../../src/backend/wasm/prescan.js";
+import { compileWasm } from "../../../src/compiler.js";
+import { Lexer } from "../../../src/lexer/lexer.js";
+import { Parser } from "../../../src/parser/index.js";
+import { TypeChecker } from "../../../src/typechecker/index.js";
 import { assert, assertEqual, section, test } from "../helpers.js";
 
 section("WASM Encoder — LEB128 and Floats");
@@ -467,4 +480,91 @@ test("SIMD comparison and rounding opcodes pass Binaryen optimized and unoptimiz
 			.f;
 		assertEqual(f(1.5, 2.5), ref(1.5, 2.5));
 	}
+});
+
+section("WASM Backend — module layout");
+
+test("compileWasm is exported from src/compiler.js", () => {
+	assertEqual(typeof compileWasm, "function");
+	const res = compileWasm("package main\nfunc main() {}\n");
+	assertEqual(res.errors.length, 0);
+	assert(res.wasm instanceof Uint8Array, "compileWasm returns wasm bytes");
+});
+
+test("wasm/index.js export list is unchanged", () => {
+	assertArrayEqual(Object.keys(wasmIndex).sort(), [
+		"compileWasmModule",
+		"hasNativeWasmOpt",
+		"isGoFrontWasm",
+		"optimizeWasm",
+	]);
+	assertEqual(wasmIndex.hasNativeWasmOpt, hasNativeWasmOpt);
+	assertEqual(wasmIndex.isGoFrontWasm, isGoFrontWasm);
+	assertEqual(wasmIndex.optimizeWasm, optimizeWasm);
+	assertEqual(typeof wasmIndex.compileWasmModule, "function");
+});
+
+test("wasm/index.js does not import the lexer, parser or typechecker", () => {
+	const src = readFileSync(
+		new URL("../../../src/backend/wasm/index.js", import.meta.url),
+		"utf8",
+	);
+	for (const m of src.matchAll(/^import[^;]*?from\s+"([^"]+)";/gms)) {
+		const spec = m[1];
+		assert(!/lexer/.test(spec), `index.js must not import ${spec}`);
+		assert(!/\/parser\//.test(spec), `index.js must not import ${spec}`);
+		assert(
+			!/typechecker\/index\.js$/.test(spec),
+			`index.js must not import ${spec}`,
+		);
+	}
+});
+
+function checkedProgram(src) {
+	const tokens = new Lexer(src, "main.go").tokenize();
+	const ast = new Parser(tokens, "main.go", src).parse();
+	const checker = new TypeChecker();
+	checker.target = "wasm";
+	const errors = checker.check(ast);
+	assertEqual(errors.length, 0);
+	const funcDecls = ast.decls.filter((d) => d.kind === "FuncDecl");
+	return { funcDecls, mod: { checker } };
+}
+
+test("_usesFmtAny is true for fmt.Println(any(x))", () => {
+	const { funcDecls, mod } = checkedProgram(`package main
+import "fmt"
+func main() {
+	x := 1
+	fmt.Println(any(x))
+}
+`);
+	assertEqual(_usesFmtAny(funcDecls, mod), true);
+});
+
+test("_usesFmtAny is false for scalar-only fmt calls", () => {
+	const { funcDecls, mod } = checkedProgram(`package main
+import "fmt"
+func main() {
+	x := 1
+	fmt.Println(x)
+}
+`);
+	assertEqual(_usesFmtAny(funcDecls, mod), false);
+});
+
+test("_orderConstInits orders dependent constants topologically", () => {
+	const ident = (name) => ({ kind: "Ident", name });
+	const lit = (value) => ({ kind: "BasicLit", value });
+	const entries = [
+		{
+			name: "A",
+			expr: { kind: "BinaryExpr", op: "+", left: ident("B"), right: lit("1") },
+		},
+		{ name: "B", expr: ident("C") },
+		{ name: "C", expr: lit("2") },
+		{ name: "D", expr: lit("3") },
+	];
+	const names = _orderConstInits(entries).map((e) => e.name);
+	assertArrayEqual(names, ["C", "B", "A", "D"]);
 });

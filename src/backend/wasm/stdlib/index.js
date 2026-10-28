@@ -16,20 +16,15 @@ import { PurePackagesEmitter } from "./pure.js";
 import { SimdEmitter } from "./simd.js";
 import { TimeEmitter } from "./time.js";
 
-// Aliases for backwards compatibility
 export {
 	BINARY_MATH_IMPORTS,
 	BytesEmitter,
 	ExtendedPackagesEmitter,
 	IoEmitter,
-	IoEmitter as Phase7Emitter,
 	PurePackagesEmitter,
-	PurePackagesEmitter as Phase6Emitter,
 	SimdEmitter,
 	StdlibCoreEmitter,
-	StdlibCoreEmitter as StdlibEmitter,
 	TimeEmitter,
-	TimeEmitter as Phase8Emitter,
 };
 
 export const stdlibEmitters = [

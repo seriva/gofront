@@ -1,6 +1,6 @@
 // CodeGen for Go `fmt` package — installed onto CodeGen.prototype via stdlibGenMethods.
 
-import { fmtTypeDesc, fmtWantsTypes } from "../fmt-types.js";
+import { fmtTypeDesc, fmtWantsTypes } from "../../shared/fmt-types.js";
 
 /** @typedef {import('../index.js').CodeGen} CodeGen */
 

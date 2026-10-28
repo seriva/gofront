@@ -6,7 +6,7 @@
 // allocated per step (new-space growth over a timed run).
 //
 // Usage:
-//   node --expose-gc test/e2e/perf/particle-bench.js [--n 65536] [--steps 200] [--runs 7] [--json]
+//   node --expose-gc test/perf/particle-bench.js [--n 65536] [--steps 200] [--runs 7] [--json]
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { pathToFileURL } from "node:url";
 import v8 from "node:v8";
-import { compileDir } from "../../../src/compiler.js";
+import { compileDir } from "../../src/compiler.js";
 
 const args = process.argv.slice(2);
 const flag = (name, dflt) => {

@@ -1,0 +1,21 @@
+{
+	"vendor": {
+		"dest": "vendor.js",
+		"packages": ["preact", "preact/hooks"],
+		"globals": {
+			"preact": "preact",
+			"preact/hooks": ["preact/hooks", "preact_hooks"]
+		},
+		"namedExports": {
+			"preact": ["h", "render", "Component"],
+			"preact/hooks": [
+				"useState",
+				"useEffect",
+				"useRef",
+				"useMemo",
+				"useCallback",
+				"useReducer"
+			]
+		}
+	}
+}

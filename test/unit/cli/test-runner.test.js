@@ -5,12 +5,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { handleCheck, handleTest } from "../../../src/cli-core.js";
-import {
-	compileDir,
-	compilePackageTests,
-	gwFilesIn,
-} from "../../../src/compiler.js";
+import { handleCheck, handleTest } from "../../../src/cli/cli-core.js";
 import {
 	checkWasmRuntime,
 	discoverTests,
@@ -19,7 +14,12 @@ import {
 	MIN_WASM_NODE_MAJOR,
 	resolveJsdomPath,
 	runTests,
-} from "../../../src/test-runner.js";
+} from "../../../src/cli/test-runner.js";
+import {
+	compileDir,
+	compilePackageTests,
+	gwFilesIn,
+} from "../../../src/compiler.js";
 import {
 	assert,
 	assertContains,

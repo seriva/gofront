@@ -14,9 +14,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+	devReporters,
 	formatBuildSummary,
 	formatPrepSummary,
 	formatWrittenDesc,
+	HELP_TEXT,
 	handleBuild,
 	handleCheck,
 	handleDev,
@@ -30,10 +32,13 @@ import {
 	parsePrepArgs,
 	parseTargetFlag,
 	parseTestArgs,
+	reportBuild,
+	reportCheck,
 	resolveAssetExtensions,
 	runCompile,
+	runSingleShot,
 	writeCompileOutput,
-} from "../../../src/cli-core.js";
+} from "../../../src/cli/cli-core.js";
 import {
 	colorEnabled,
 	createColors,
@@ -41,7 +46,7 @@ import {
 	log,
 	ms,
 	stamp,
-} from "../../../src/colors.js";
+} from "../../../src/cli/colors.js";
 import {
 	clearParseCache,
 	compileDir as compileDirCached,
@@ -1153,6 +1158,244 @@ test("handleBuild warns when bundleVendor throws", async () => {
 			assert(res, "build completed");
 		},
 	);
+});
+
+// ── runSingleShot ─────────────────────────────────────────────
+
+// Run fn while capturing console.log (stdout) and console.error (stderr).
+function captureConsole(fn) {
+	const out = [];
+	const err = [];
+	const origLog = console.log;
+	const origError = console.error;
+	console.log = (...a) => out.push(a.join(" "));
+	console.error = (...a) => err.push(a.join(" "));
+	try {
+		return { code: fn(), out: out.join("\n"), err: err.join("\n") };
+	} finally {
+		console.log = origLog;
+		console.error = origError;
+	}
+}
+
+const singleShotFlags = (inputArg, extra = {}) => ({
+	inputArg,
+	...parseLegacyArgs([inputArg]),
+	...extra,
+});
+
+section("cli-core — runSingleShot");
+
+test("runSingleShot --check returns 0 and prints an OK line", () => {
+	withTempDir(
+		{ "main.go": 'package main\nfunc main() { console.log("hi") }\n' },
+		(dir) => {
+			const file = join(dir, "main.go");
+			const res = captureConsole(() =>
+				runSingleShot(file, false, singleShotFlags(file, { checkOnly: true })),
+			);
+			assertEqual(res.code, 0);
+			assertContains(res.err, "OK");
+			assertEqual(res.out, "");
+		},
+	);
+});
+
+test("runSingleShot -o writes the same JS that compileDir produces", () => {
+	withTempDir(
+		{ "main.go": 'package main\nfunc main() { console.log("hi") }\n' },
+		(dir) => {
+			const outFile = join(dir, "out", "app.js");
+			const res = captureConsole(() =>
+				runSingleShot(dir, true, singleShotFlags(dir, { outputFile: outFile })),
+			);
+			assertEqual(res.code, 0);
+			assertContains(res.err, "wrote");
+			const expected = compileDirCached(dir, {
+				outputDir: join(dir, "out"),
+			}).js;
+			assertEqual(readFileSync(outFile, "utf8").trimEnd(), expected.trimEnd());
+		},
+	);
+});
+
+test("runSingleShot prints the JS to stdout without -o", () => {
+	withTempDir(
+		{ "main.go": 'package main\nfunc main() { console.log("hi") }\n' },
+		(dir) => {
+			const file = join(dir, "main.go");
+			const res = captureConsole(() =>
+				runSingleShot(file, false, singleShotFlags(file)),
+			);
+			assertEqual(res.code, 0);
+			assertContains(res.out, "console.log");
+		},
+	);
+});
+
+test("runSingleShot returns 1 and logs the compile error", () => {
+	withTempDir({ "main.go": "package main\nfunc main() { x := }\n" }, (dir) => {
+		const file = join(dir, "main.go");
+		const res = captureConsole(() =>
+			runSingleShot(file, false, singleShotFlags(file)),
+		);
+		assertEqual(res.code, 1);
+		assertContains(res.err, "ERROR");
+		assertEqual(res.out, "");
+	});
+});
+
+test("runSingleShot --tokens dumps tokens and returns 0", () => {
+	withTempDir({ "main.go": "package main\nfunc main() {}\n" }, (dir) => {
+		const file = join(dir, "main.go");
+		const res = captureConsole(() =>
+			runSingleShot(file, false, singleShotFlags(file, { dumpTokens: true })),
+		);
+		assertEqual(res.code, 0);
+		assertContains(res.out, "package");
+	});
+});
+
+test("runSingleShot --ast dumps the AST as JSON and returns 0", () => {
+	withTempDir({ "main.go": "package main\nfunc main() {}\n" }, (dir) => {
+		const file = join(dir, "main.go");
+		const res = captureConsole(() =>
+			runSingleShot(file, false, singleShotFlags(file, { dumpAst: true })),
+		);
+		assertEqual(res.code, 0);
+		assertEqual(typeof JSON.parse(res.out), "object");
+	});
+});
+
+test("runSingleShot --minify prints minified JS and returns 0", () => {
+	withTempDir({ "main.go": "package main\nfunc main() {}\n" }, (dir) => {
+		const file = join(dir, "main.go");
+		const res = captureConsole(() =>
+			runSingleShot(file, false, singleShotFlags(file, { minify: true })),
+		);
+		assertEqual(res.code, 0);
+	});
+});
+
+// ── devReporters ──────────────────────────────────────────────
+
+section("cli-core — devReporters");
+
+test("devReporters onBuild with an output file prints OK — wrote …", () => {
+	const { onBuild } = devReporters({ outputFile: "out/app.js" });
+	const res = captureConsole(() =>
+		onBuild({
+			js: "x",
+			written: ["out/app.js"],
+			elapsedMs: 12,
+			changedFile: "main.go",
+		}),
+	);
+	assertContains(res.err, "OK");
+	assertContains(res.err, "wrote out/app.js");
+	assertContains(res.err, "12ms — main.go changed");
+	assertEqual(res.out, "");
+});
+
+test("devReporters onBuild without an output file prints the JS", () => {
+	const { onBuild } = devReporters({ outputFile: null });
+	const origWrite = process.stdout.write;
+	process.stdout.write = () => true;
+	let res;
+	try {
+		res = captureConsole(() =>
+			onBuild({ js: "console.log(1);", elapsedMs: 3 }),
+		);
+	} finally {
+		process.stdout.write = origWrite;
+	}
+	assertContains(res.out, "console.log(1);");
+	assertContains(res.err, "OK");
+});
+
+test("devReporters onError prints ERROR plus the formatted diagnostic", () => {
+	const { onError } = devReporters({ outputFile: "out/app.js" });
+	const res = captureConsole(() =>
+		onError(new Error("main.go:1:1: boom\n  detail line")),
+	);
+	assertContains(res.err, "ERROR");
+	assertContains(res.err, "boom");
+	assertContains(res.err, "detail line");
+});
+
+test("devReporters copyAssets copies project assets after a build", () => {
+	withTempDir(
+		{
+			"gofront.json": JSON.stringify({
+				assetCopy: [
+					{ source: "a.txt", dest: "on/a.txt" },
+					{ source: "a.txt", dest: "off/a.txt" },
+				],
+			}),
+			"a.txt": "hi",
+		},
+		(dir) => {
+			const info = { js: "", written: ["app.js"], elapsedMs: 1 };
+			const without = devReporters({ outputFile: "app.js", projectDir: dir });
+			captureConsole(() => without.onBuild(info));
+			assert(!existsSync(join(dir, "on/a.txt")), "no copy by default");
+			const withCopy = devReporters({
+				outputFile: "app.js",
+				copyAssets: true,
+				projectDir: dir,
+			});
+			captureConsole(() => withCopy.onBuild(info));
+			assert(existsSync(join(dir, "on/a.txt")), "assets copied");
+			assert(existsSync(join(dir, "off/a.txt")), "all entries copied");
+		},
+	);
+});
+
+// ── CLI report helpers ────────────────────────────────────────
+
+section("cli-core — report helpers");
+
+test("reportCheck prints one line for a single package", () => {
+	const res = captureConsole(() =>
+		reportCheck({ elapsedMs: 5, packages: null }, "app"),
+	);
+	assertContains(res.err, "app");
+	assertContains(res.err, "OK");
+});
+
+test("reportCheck prints each package and a total for dir/...", () => {
+	const res = captureConsole(() =>
+		reportCheck(
+			{
+				elapsedMs: 9,
+				packages: [
+					{ dir: process.cwd(), elapsedMs: 4 },
+					{ dir: join(process.cwd(), "sub"), elapsedMs: 5 },
+				],
+			},
+			"./...",
+		),
+	);
+	assertContains(res.err, "sub");
+	assertContains(res.err, "2 packages");
+});
+
+test("reportBuild logs every summary line", () => {
+	const res = captureConsole(() =>
+		reportBuild({
+			outDir: "dist",
+			elapsedMs: 7,
+			files: [{ name: "app.js", size: 2048 }],
+		}),
+	);
+	assertContains(res.err, "build complete");
+	assertContains(res.err, "app.js");
+	assertContains(res.err, "2.0 kB");
+});
+
+test("HELP_TEXT lists the subcommands", () => {
+	assertContains(HELP_TEXT, "gofront build");
+	assertContains(HELP_TEXT, "gofront --version");
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

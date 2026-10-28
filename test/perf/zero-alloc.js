@@ -3,7 +3,7 @@
 
 import assert from "node:assert";
 import v8 from "node:v8";
-import { compile } from "../../unit/helpers.js";
+import { compile } from "../unit/helpers.js";
 
 const { js, errors } = compile(`package main
 
