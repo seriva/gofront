@@ -237,6 +237,17 @@ export const declarationParseMethods = {
 				types.push(this.parseType());
 			} while (this.match(T.COMMA));
 			this.expect(T.RPAREN);
+			// Grouped names `(r, theta float64)`: a bare identifier before a
+			// named entry is a name sharing that entry's type.
+			if (isNamed) {
+				for (let i = types.length - 2; i >= 0; i--) {
+					if (names[i] !== null) continue;
+					if (types[i]?.kind !== "TypeName" || types[i].typeArgs?.length)
+						continue;
+					names[i] = types[i].name;
+					types[i] = { ...types[i + 1] };
+				}
+			}
 			const typeNode =
 				types.length === 1 ? types[0] : { kind: "TupleType", types };
 			// Attach named return info so typechecker can inject them into scope

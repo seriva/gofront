@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import {
 	assertEqual,
 	assertErrorContains,
+	assertProgramOutput,
 	compile,
 	compileHybrid,
 	runJs,
@@ -502,6 +503,27 @@ func Main() int {
 }`).run("Main");
 	assertEqual(res.wasmRes, 2n);
 	assertEqual(res.jsRes, 2);
+});
+
+section("Defined types over named structs");
+
+test("type S3 Base keeps the fields of Base on every target", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type Base struct{ n int }
+type S3 Base
+
+func (s S3) N() int { return s.n }
+
+func main() {
+	fmt.Println(S3{n: 5}.N())
+}
+`,
+		"5\n",
+	);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
