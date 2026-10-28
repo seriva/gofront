@@ -16,7 +16,11 @@ import {
 	hasNativeWasmOpt,
 	optimizeWasm,
 } from "../../../src/backend/wasm/optimize.js";
+import { _usesFmtAny } from "../../../src/backend/wasm/prescan.js";
 import { compileWasm } from "../../../src/compiler.js";
+import { Lexer } from "../../../src/lexer.js";
+import { Parser } from "../../../src/parser/index.js";
+import { TypeChecker } from "../../../src/typechecker/index.js";
 import { assert, assertEqual, section, test } from "../helpers.js";
 
 section("WASM Encoder — LEB128 and Floats");
@@ -513,4 +517,37 @@ test("wasm/index.js does not import the lexer, parser or typechecker", () => {
 			`index.js must not import ${spec}`,
 		);
 	}
+});
+
+function checkedProgram(src) {
+	const tokens = new Lexer(src, "main.go").tokenize();
+	const ast = new Parser(tokens, "main.go", src).parse();
+	const checker = new TypeChecker();
+	checker.target = "wasm";
+	const errors = checker.check(ast);
+	assertEqual(errors.length, 0);
+	const funcDecls = ast.decls.filter((d) => d.kind === "FuncDecl");
+	return { funcDecls, mod: { checker } };
+}
+
+test("_usesFmtAny is true for fmt.Println(any(x))", () => {
+	const { funcDecls, mod } = checkedProgram(`package main
+import "fmt"
+func main() {
+	x := 1
+	fmt.Println(any(x))
+}
+`);
+	assertEqual(_usesFmtAny(funcDecls, mod), true);
+});
+
+test("_usesFmtAny is false for scalar-only fmt calls", () => {
+	const { funcDecls, mod } = checkedProgram(`package main
+import "fmt"
+func main() {
+	x := 1
+	fmt.Println(x)
+}
+`);
+	assertEqual(_usesFmtAny(funcDecls, mod), false);
 });
