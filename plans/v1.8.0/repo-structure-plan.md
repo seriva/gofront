@@ -278,7 +278,7 @@ Only paths change. No task, scope or number in those plans is edited.
   - Files: `.gitignore` (`/example/*/app.js`, `/example/*/app.wasm`, with a comment that `vendor.js` stays tracked); `git rm --cached` for the 7 outputs
   - Test: `build-examples.test.js`: `git ls-files example` has no `app.js`/`app.wasm` and still has `example/preact/vendor.js`
   - Done when: on a fresh clone, `npm ci && npm test && npm run test:e2e` pass
-- [ ] Task 2.4: Move the preact vendor config into `example/preact/gofront.json`
+- [x] Task 2.4: Move the preact vendor config into `example/preact/gofront.json`
   - Files: `package.json` (drop the `gofront` block), `example/preact/gofront.json` (new, `dest: "vendor.js"`), `docs/usage.md` (how to regenerate)
   - Test: in `test/unit/compiler/prep.test.js`, `loadProjectConfig("example/preact").vendor` has the preact packages and `loadProjectConfig(".")` has no `vendor`. After `npm ci`, `node src/index.js prep example/preact` → `sha256sum -c` on the recorded `vendor.js` hash
   - Done when: `vendor.js` is byte-identical, or the task stops per Edge Cases

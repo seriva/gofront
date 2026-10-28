@@ -86,6 +86,10 @@ GoFront code can call them through `.d.ts` declarations. Subpath entries such as
 }
 ```
 
+The Preact example keeps this configuration in `example/preact/gofront.json`. After
+`npm install`, regenerate its committed `vendor.js` from the repository root with
+`node src/index.js prep example/preact`.
+
 ### Hybrid builds
 
 When any package reached by the build carries `//gofront:target wasm` or `both`, `dev`,
