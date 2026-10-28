@@ -946,6 +946,15 @@ test("if, switch, case and component expressions are parsed", () => {
 	assertEqual(raw.expr.kind, "Ident");
 });
 
+test("for headers are parsed into forStmt", () => {
+	const [loop] = parseTempl("for i, x := range xs {\n<p>{ x }</p>\n}");
+	assertEqual(loop.kind, "TemplFor");
+	assertEqual(loop.forStmt.kind, "ForStmt");
+	assertEqual(loop.forStmt.init.rhs[0].kind, "RangeExpr");
+	const [bad] = parseTempl("for x := range {\n<p>hi</p>\n}");
+	assertEqual(bad.forStmt, null);
+});
+
 test("a malformed expression is kept on the node, not thrown", () => {
 	const [node] = parseTempl("<p>{ name + }</p>")[0].children;
 	assertEqual(node.expr, null);
@@ -957,11 +966,13 @@ test("parsed expressions are invisible to generic AST walkers", () => {
 	assert(!Object.keys(node).includes("expr"), "expr must not be enumerable");
 });
 
-test("the JS code generator parses no templ expressions", () => {
+test("the JS code generator does not import the parser", () => {
 	const src = readFileSync(
 		join(ROOT, "src", "backend", "js", "templ.js"),
 		"utf8",
 	);
+	assert(!/from\s+["'][^"']*parser\//.test(src), "templ.js imports parser/");
+	assert(!src.includes("new Parser"), "templ.js builds a Parser");
 	assert(!src.includes("parseExpr"), "templ.js calls parseExpr");
 });
 
