@@ -312,7 +312,7 @@ Only paths change. No task, scope or number in those plans is edited.
   - Files: `wasm/index.js`, `wasm/module-emitter.js`
   - Test: `wasm/encode.test.js`: the export list of `wasm/index.js` equals a snapshot taken after Task 4.1. Write the snapshot first
   - Done when: the snapshot is unchanged and the hashes match
-- [ ] Task 4.3: Pre-scan helpers → `wasm/prescan.js`
+- [x] Task 4.3: Pre-scan helpers → `wasm/prescan.js`
   - Files: `wasm/index.js`, `wasm/prescan.js`
   - Test: `wasm/encode.test.js`: `_usesFmtAny` returns true for a parsed program calling `fmt.Println(any(x))` and false otherwise
   - Done when: the hashes match
