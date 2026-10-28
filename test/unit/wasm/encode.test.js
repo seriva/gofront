@@ -9,7 +9,13 @@ import {
 	encodeI64LEB,
 	encodeModule,
 	encodeU32LEB,
+	isGoFrontWasm,
 } from "../../../src/backend/wasm/encode.js";
+import * as wasmIndex from "../../../src/backend/wasm/index.js";
+import {
+	hasNativeWasmOpt,
+	optimizeWasm,
+} from "../../../src/backend/wasm/optimize.js";
 import { compileWasm } from "../../../src/compiler.js";
 import { assert, assertEqual, section, test } from "../helpers.js";
 
@@ -478,6 +484,19 @@ test("compileWasm is exported from src/compiler.js", () => {
 	const res = compileWasm("package main\nfunc main() {}\n");
 	assertEqual(res.errors.length, 0);
 	assert(res.wasm instanceof Uint8Array, "compileWasm returns wasm bytes");
+});
+
+test("wasm/index.js export list is unchanged", () => {
+	assertArrayEqual(Object.keys(wasmIndex).sort(), [
+		"compileWasmModule",
+		"hasNativeWasmOpt",
+		"isGoFrontWasm",
+		"optimizeWasm",
+	]);
+	assertEqual(wasmIndex.hasNativeWasmOpt, hasNativeWasmOpt);
+	assertEqual(wasmIndex.isGoFrontWasm, isGoFrontWasm);
+	assertEqual(wasmIndex.optimizeWasm, optimizeWasm);
+	assertEqual(typeof wasmIndex.compileWasmModule, "function");
 });
 
 test("wasm/index.js does not import the lexer, parser or typechecker", () => {
