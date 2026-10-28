@@ -255,7 +255,7 @@ Only paths change. No task, scope or number in those plans is edited.
   - Files: `src/backend/wasm/emit-stdlib.js` (delete), `src/backend/wasm/stdlib/index.js`, `src/backend/wasm/stdlib/core.js` (the trailing alias line only); also the comment at `src/typechecker/types.js:105`
   - Test: none new (deletion only). `grep -rn 'emit-stdlib\|Phase[678]Emitter\|StdlibEmitter\b' src test` must be empty
   - Done when: grep is empty, the hashes match and `wasm/golden.test.js` passes
-- [ ] Task 1.4: Register stdlib mixins through `stdlibEmitters`
+- [x] Task 1.4: Register stdlib mixins through `stdlibEmitters`
   - Files: `src/backend/wasm/emit.js`, `src/backend/wasm/stdlib/index.js`
   - Test: new `test/unit/wasm/mixins.test.js`: every class in `stdlibEmitters` has its prototype methods on `FunctionEmitter.prototype`, and a duplicate name throws. Fails first against a temporary probe mixin added to the array
   - Done when: `emit.js` has no hand-listed stdlib `copyMethods` lines, and the hashes match
