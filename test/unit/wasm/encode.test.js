@@ -11,6 +11,7 @@ import {
 	encodeU32LEB,
 	isGoFrontWasm,
 } from "../../../src/backend/wasm/encode.js";
+import { _orderConstInits } from "../../../src/backend/wasm/globals.js";
 import * as wasmIndex from "../../../src/backend/wasm/index.js";
 import {
 	hasNativeWasmOpt,
@@ -550,4 +551,20 @@ func main() {
 }
 `);
 	assertEqual(_usesFmtAny(funcDecls, mod), false);
+});
+
+test("_orderConstInits orders dependent constants topologically", () => {
+	const ident = (name) => ({ kind: "Ident", name });
+	const lit = (value) => ({ kind: "BasicLit", value });
+	const entries = [
+		{
+			name: "A",
+			expr: { kind: "BinaryExpr", op: "+", left: ident("B"), right: lit("1") },
+		},
+		{ name: "B", expr: ident("C") },
+		{ name: "C", expr: lit("2") },
+		{ name: "D", expr: lit("3") },
+	];
+	const names = _orderConstInits(entries).map((e) => e.name);
+	assertArrayEqual(names, ["C", "B", "A", "D"]);
 });
