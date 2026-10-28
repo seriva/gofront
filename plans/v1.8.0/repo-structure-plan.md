@@ -266,7 +266,7 @@ Only paths change. No task, scope or number in those plans is edited.
 
 ### Phase 2: CLI entry, build outputs & example config
 
-- [ ] Task 2.1: Move single-shot compilation into `cli-core.js`
+- [x] Task 2.1: Move single-shot compilation into `cli-core.js`
   - Files: `src/index.js`, `src/cli-core.js`
   - Test: `test/unit/compiler/cli-core.test.js` adds `runSingleShot` cases: `--check` returns 0 with an `OK` line; `-o` output equals `compileDir`; a compile error returns 1 with the `log.fail` text; `--tokens` dumps tokens. Fails first because the export is missing
   - Done when: `index.js` has no compile/minify/write code, and the `cli.test.js` smoke tests pass unchanged

@@ -32,6 +32,7 @@ import {
 	parseTestArgs,
 	resolveAssetExtensions,
 	runCompile,
+	runSingleShot,
 	writeCompileOutput,
 } from "../../../src/cli-core.js";
 import {
@@ -1153,6 +1154,123 @@ test("handleBuild warns when bundleVendor throws", async () => {
 			assert(res, "build completed");
 		},
 	);
+});
+
+// ── runSingleShot ─────────────────────────────────────────────
+
+// Run fn while capturing console.log (stdout) and console.error (stderr).
+function captureConsole(fn) {
+	const out = [];
+	const err = [];
+	const origLog = console.log;
+	const origError = console.error;
+	console.log = (...a) => out.push(a.join(" "));
+	console.error = (...a) => err.push(a.join(" "));
+	try {
+		return { code: fn(), out: out.join("\n"), err: err.join("\n") };
+	} finally {
+		console.log = origLog;
+		console.error = origError;
+	}
+}
+
+const singleShotFlags = (inputArg, extra = {}) => ({
+	inputArg,
+	...parseLegacyArgs([inputArg]),
+	...extra,
+});
+
+section("cli-core — runSingleShot");
+
+test("runSingleShot --check returns 0 and prints an OK line", () => {
+	withTempDir(
+		{ "main.go": 'package main\nfunc main() { console.log("hi") }\n' },
+		(dir) => {
+			const file = join(dir, "main.go");
+			const res = captureConsole(() =>
+				runSingleShot(file, false, singleShotFlags(file, { checkOnly: true })),
+			);
+			assertEqual(res.code, 0);
+			assertContains(res.err, "OK");
+			assertEqual(res.out, "");
+		},
+	);
+});
+
+test("runSingleShot -o writes the same JS that compileDir produces", () => {
+	withTempDir(
+		{ "main.go": 'package main\nfunc main() { console.log("hi") }\n' },
+		(dir) => {
+			const outFile = join(dir, "out", "app.js");
+			const res = captureConsole(() =>
+				runSingleShot(dir, true, singleShotFlags(dir, { outputFile: outFile })),
+			);
+			assertEqual(res.code, 0);
+			assertContains(res.err, "wrote");
+			const expected = compileDirCached(dir, {
+				outputDir: join(dir, "out"),
+			}).js;
+			assertEqual(readFileSync(outFile, "utf8").trimEnd(), expected.trimEnd());
+		},
+	);
+});
+
+test("runSingleShot prints the JS to stdout without -o", () => {
+	withTempDir(
+		{ "main.go": 'package main\nfunc main() { console.log("hi") }\n' },
+		(dir) => {
+			const file = join(dir, "main.go");
+			const res = captureConsole(() =>
+				runSingleShot(file, false, singleShotFlags(file)),
+			);
+			assertEqual(res.code, 0);
+			assertContains(res.out, "console.log");
+		},
+	);
+});
+
+test("runSingleShot returns 1 and logs the compile error", () => {
+	withTempDir({ "main.go": "package main\nfunc main() { x := }\n" }, (dir) => {
+		const file = join(dir, "main.go");
+		const res = captureConsole(() =>
+			runSingleShot(file, false, singleShotFlags(file)),
+		);
+		assertEqual(res.code, 1);
+		assertContains(res.err, "ERROR");
+		assertEqual(res.out, "");
+	});
+});
+
+test("runSingleShot --tokens dumps tokens and returns 0", () => {
+	withTempDir({ "main.go": "package main\nfunc main() {}\n" }, (dir) => {
+		const file = join(dir, "main.go");
+		const res = captureConsole(() =>
+			runSingleShot(file, false, singleShotFlags(file, { dumpTokens: true })),
+		);
+		assertEqual(res.code, 0);
+		assertContains(res.out, "package");
+	});
+});
+
+test("runSingleShot --ast dumps the AST as JSON and returns 0", () => {
+	withTempDir({ "main.go": "package main\nfunc main() {}\n" }, (dir) => {
+		const file = join(dir, "main.go");
+		const res = captureConsole(() =>
+			runSingleShot(file, false, singleShotFlags(file, { dumpAst: true })),
+		);
+		assertEqual(res.code, 0);
+		assertEqual(typeof JSON.parse(res.out), "object");
+	});
+});
+
+test("runSingleShot --minify prints minified JS and returns 0", () => {
+	withTempDir({ "main.go": "package main\nfunc main() {}\n" }, (dir) => {
+		const file = join(dir, "main.go");
+		const res = captureConsole(() =>
+			runSingleShot(file, false, singleShotFlags(file, { minify: true })),
+		);
+		assertEqual(res.code, 0);
+	});
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
