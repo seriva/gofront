@@ -22,10 +22,10 @@ import {
 	resolve,
 	sep,
 } from "node:path";
+import { isGoFrontWasm } from "../backend/wasm/index.js";
+import { compileDir, compileSingleFile } from "../compiler.js";
 import { copyAssets } from "./asset-manager.js";
-import { isGoFrontWasm } from "./backend/wasm/index.js";
 import { colors, formatDiagnostic, log, ms, stamp } from "./colors.js";
-import { compileDir, compileSingleFile } from "./compiler.js";
 import { createDevServer } from "./dev-server.js";
 import { minify } from "./minifier.js";
 import { loadProjectConfig } from "./project-config.js";
@@ -34,7 +34,7 @@ import { runTests } from "./test-runner.js";
 import { bundleVendor } from "./vendor.js";
 
 export const GOFRONT_VERSION = JSON.parse(
-	readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+	readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
 ).version;
 
 export function runCompile(inputPath, isDir, options) {

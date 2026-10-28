@@ -344,7 +344,7 @@ Only paths change. No task, scope or number in those plans is edited.
   - Files: `test/unit/run.js`
   - Test: new `test/unit/compiler/runner.test.js`: the exported `TEST_FILES` equals the sorted `find` result and contains every `HEAVIEST_TEST_FILES` entry. Fails first while the list is hand-written and a temporary extra test file exists
   - Done when: the same files plus the new ones run with the same pass count, and a missing heavy entry throws at startup
-- [ ] Task 6.2: Move the CLI and tooling modules to `src/cli/`
+- [x] Task 6.2: Move the CLI and tooling modules to `src/cli/`
   - Files: `git mv` of `cli-core`, `dev-server`, `test-runner`, `asset-manager`, `vendor`, `pwa`, `project-config`, `colors` and `minifier` to `src/cli/`; import rewrites in `src/` and `test/`; `.sentrux/rules.toml`. Mechanical; exceeds the 3-file rule by design
   - Test: the `check-layers` real-repo cases and `sentrux check`
   - Done when: the hashes match, the suites pass, and `npm pack --dry-run` shows the new paths with `bin` unchanged

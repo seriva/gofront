@@ -38,7 +38,7 @@ import {
 	runCompile,
 	runSingleShot,
 	writeCompileOutput,
-} from "../../../src/cli-core.js";
+} from "../../../src/cli/cli-core.js";
 import {
 	colorEnabled,
 	createColors,
@@ -46,7 +46,7 @@ import {
 	log,
 	ms,
 	stamp,
-} from "../../../src/colors.js";
+} from "../../../src/cli/colors.js";
 import {
 	clearParseCache,
 	compileDir as compileDirCached,
