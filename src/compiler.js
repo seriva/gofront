@@ -20,7 +20,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { CodeGen } from "./backend/js/index.js";
-import { optimizeWasm } from "./backend/wasm/index.js";
+import { compileWasmModule, optimizeWasm } from "./backend/wasm/index.js";
 import { log } from "./colors.js";
 import { parseDts } from "./dts-parser.js";
 import { Lexer } from "./lexer.js";
@@ -41,6 +41,7 @@ import {
 	registerWasmUnit,
 	wasmMarker,
 } from "./link/wasm.js";
+import { lower } from "./lower/index.js";
 import { Parser } from "./parser/index.js";
 import {
 	isBuiltinPackage,
@@ -670,4 +671,31 @@ export function compileFiles(files, options = {}) {
 		sourcesContent: merged.sourcesContent,
 		mappings: merged.mappings,
 	};
+}
+
+export function compileWasm(source, options = {}) {
+	const filename = options.filename ?? "main.go";
+	const tokens = new Lexer(source, filename).tokenize();
+	const ast = new Parser(tokens, filename, source).parse();
+
+	const checker = new TypeChecker();
+	checker.target = "wasm";
+	checker.pkgName = ast.pkg?.name ?? "main";
+
+	const errors = checker.check(ast);
+	if (errors.length > 0) {
+		return { wasm: null, errors };
+	}
+
+	const lowerRes = lower([ast], checker);
+	const res = compileWasmModule([ast], checker, lowerRes, {
+		...options,
+		exportAll: options.exportAll ?? true,
+	});
+
+	if (checker.errors?.length > 0) {
+		return { wasm: null, errors: checker.errors };
+	}
+
+	return { ...res, errors: [] };
 }

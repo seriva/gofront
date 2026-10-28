@@ -3,7 +3,6 @@
 
 import { isGoFrontWasm } from "../../../src/backend/wasm/encode.js";
 import { instantiateWasm } from "../../../src/backend/wasm/glue.js";
-import { compileWasm } from "../../../src/backend/wasm/index.js";
 import {
 	DEFAULT_WASM_FEATURES,
 	hasNativeWasmOpt,
@@ -11,6 +10,7 @@ import {
 	optimizeWasm,
 	optimizeWithBinaryen,
 } from "../../../src/backend/wasm/optimize.js";
+import { compileWasm } from "../../../src/compiler.js";
 import { assert, assertEqual, section, test } from "../helpers.js";
 
 section("WASM Optimizer — Core Pipeline (Binaryen)");
