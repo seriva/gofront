@@ -210,19 +210,19 @@ No longer reproducing (deleted from the ledger): promoted field through `Deep2{*
 
 ### Phase 4: Generics Typechecking
 
-- [ ] Task 4.1: Receiver type parameters in method bodies
+- [x] Task 4.1: Receiver type parameters in method bodies
   - Files: `src/typechecker/assignability.js`, `src/typechecker/types.js`, `test/unit/types/generics.test.js`
   - Test: `Stack[T].Copy` (`c := s; return c`) → `0`; `(*List[T]).Last` walking `p = p.Next` → `2`.
   - Done when: both compile and run on all targets.
-- [ ] Task 4.2: Instantiated generic functions as values
+- [x] Task 4.2: Instantiated generic functions as values
   - Files: `src/typechecker/expressions.js`, `src/backend/js/expressions.js`, `src/backend/wasm/monomorph.js`
   - Test: in `test/unit/types/generics.test.js`, `f := Id[int]; fmt.Println(f(3))` → `3` via `assertProgramOutput`.
   - Done when: repro runs on all targets.
-- [ ] Task 4.3: Validate explicit type arguments
+- [x] Task 4.3: Validate explicit type arguments
   - Files: `src/typechecker/expressions.js`, `test/unit/types/generics.test.js`
   - Test: `return 3 + Sum[float64](1, 2)` in an `int` func → `mismatched types`; `Id[int, int](1)` → `got 2 type arguments`; `strings.ToUpper[int]("a")` → `not a generic function`; `T(n)` with `T any` → `cannot convert`.
   - Done when: the four negative tests pass with those messages; valid explicit instantiations still compile.
-- [ ] Task 4.4: Instantiation cycles and package-qualified type arguments
+- [x] Task 4.4: Instantiation cycles and package-qualified type arguments
   - Files: `src/typechecker/types.js`, `src/typechecker/resolve.js`, `test/unit/types/generics.test.js`
   - Test: `type T[X any] struct{ n *T[[]X] }; var t T[int]` → `instantiation cycle`; a two-package project (`compileDir` with `a.Pt{X int}`, `b.Pt{Y string}`) using `Box[a.Pt]` and `Box[b.Pt]` compiles and prints `1 s`.
   - Done when: no stack overflow; the two-package project builds.

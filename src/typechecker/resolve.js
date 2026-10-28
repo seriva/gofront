@@ -23,6 +23,38 @@ import {
 /** @typedef {import('./index.js').TypeChecker} TypeChecker */
 
 // Dispatch table for substituteType — keyed by type.kind.
+// Nesting depth of in-progress instances of one generic type before the
+// instantiation is reported as a cycle.
+const MAX_INSTANTIATION_DEPTH = 32;
+
+// Two imported packages may both declare `Pt`, so the cache key of an
+// instance tells declarations apart by identity instead of by display name.
+const declIds = new WeakMap();
+let nextDeclId = 0;
+function declId(t) {
+	if (!declIds.has(t)) declIds.set(t, ++nextDeclId);
+	return declIds.get(t);
+}
+
+function instanceKey(t) {
+	switch (t?.kind) {
+		case "named":
+			return t.typeArgs?.length
+				? `${typeStr(t)}`
+				: `${typeStr(t)}#${declId(t)}`;
+		case "pointer":
+			return `*${instanceKey(t.base)}`;
+		case "slice":
+			return `[]${instanceKey(t.elem)}`;
+		case "array":
+			return `[${t.size ?? "..."}]${instanceKey(t.elem)}`;
+		case "map":
+			return `map[${instanceKey(t.key)}]${instanceKey(t.value)}`;
+		default:
+			return typeStr(t);
+	}
+}
+
 const SUBSTITUTE_DISPATCH = {
 	basic: (_s, type) => type,
 	untyped: (_s, type) => type,
@@ -416,12 +448,27 @@ export const resolveMethods = {
 	// *List[T]`, `Children []Tree[T]`, or a cycle through another generic type)
 	// reaches the same object instead of recursing forever.
 	instantiateGenericWithArgs(generic, typeArgs) {
-		const key = typeArgs.map(typeStr).join(",");
+		const key = typeArgs.map(instanceKey).join(",");
 		generic._instances ??= new Map();
 		const cached = generic._instances.get(key);
 		if (cached) {
 			this._syncInstanceMethods(generic, cached);
 			return cached;
+		}
+		// `type T[X any] struct{ n *T[[]X] }` asks for T[[]X], then T[[][]X], and
+		// so on: an instance still being built that keeps asking for a larger
+		// one never settles.
+		generic._building ??= [];
+		const building = generic._building;
+		if (building.length >= MAX_INSTANTIATION_DEPTH) {
+			if (!generic._cycleReported) {
+				generic._cycleReported = true;
+				this.err(
+					`instantiation cycle: ${generic.declNode.name} instantiates itself with ever larger type arguments`,
+					generic.declNode,
+				);
+			}
+			return ANY;
 		}
 		const map = new Map();
 		for (let i = 0; i < generic.typeParams.length; i++)
@@ -438,8 +485,14 @@ export const resolveMethods = {
 		// never as value symbols), then substitute the concrete arguments.
 		const typeScope = new Scope(this.globals);
 		for (const tp of generic.typeParams) typeScope.define(tp.name, tp);
-		const underlying = this.resolveTypeNode(generic.declNode.type, typeScope);
-		const instantiated = this.substituteType(underlying, map);
+		building.push(key);
+		let instantiated;
+		try {
+			const underlying = this.resolveTypeNode(generic.declNode.type, typeScope);
+			instantiated = this.substituteType(underlying, map);
+		} finally {
+			building.pop();
+		}
 		if (instantiated.kind === "struct") {
 			instantiated.name = generic.declNode.name;
 			instantiated.typeArgs = typeArgs;
@@ -608,7 +661,11 @@ export const resolveMethods = {
 			(!t.underlying || !t.methods)
 		) {
 			const found = this.types.get(t.name);
-			if (found) return found;
+			// Two imported packages can both declare `Pt`; the bare name only
+			// reaches the last one registered, so a declaration that came from
+			// an import's own type table stays itself.
+			if (found && !(t.underlying && this._ambiguousImported?.has(t)))
+				return found;
 		}
 		if (t.kind === "named" && t.typeArgs?.length)
 			return this._withGenericMethods(t);
