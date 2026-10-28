@@ -289,7 +289,7 @@ Only paths change. No task, scope or number in those plans is edited.
 
 ### Phase 3: `src/link/` extracted from `compiler.js`
 
-- [ ] Task 3.1: Source-map merging → `src/link/sourcemap.js`
+- [x] Task 3.1: Source-map merging → `src/link/sourcemap.js`
   - Files: `src/compiler.js`, `src/link/sourcemap.js`, `.sentrux/rules.toml` (add `"src/link/*"` to support)
   - Test: `test/unit/compiler/link.test.js`: `mergeCompilationChunks` on two fixture chunks gives the expected offset `mappings`. Fails first because the module is missing
   - Done when: source-map tests and hashes are unchanged, and `check-layers` passes

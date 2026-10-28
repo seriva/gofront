@@ -19,15 +19,17 @@
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
-import {
-	buildSourceMap,
-	buildWasmSourceMap,
-	CodeGen,
-} from "./backend/js/index.js";
+import { CodeGen } from "./backend/js/index.js";
 import { compileWasmModule, optimizeWasm } from "./backend/wasm/index.js";
 import { log } from "./colors.js";
 import { parseDts } from "./dts-parser.js";
 import { Lexer } from "./lexer.js";
+import {
+	attachSourceMap,
+	buildWasmMap,
+	mergeCompilationChunks,
+	WASM_MAP_URL,
+} from "./link/sourcemap.js";
 import { lower } from "./lower/index.js";
 import { generateJsonCodecs } from "./lower/json-codecs.js";
 import { reachableStdlibDecls } from "./lower/reachability.js";
@@ -91,98 +93,6 @@ export function gwFilesIn(dir, { includeTests = false } = {}) {
 		})
 		.sort() // deterministic order
 		.map((f) => join(dir, f));
-}
-
-function normalizeChunk(c) {
-	if (typeof c === "string") {
-		return { js: c, sourceFiles: [], sourcesContent: [], mappings: [] };
-	}
-	return c;
-}
-
-function appendChunkMappings(dest, mappings, localToUnifiedIdx, lineOffset) {
-	if (!mappings) return;
-	for (const m of mappings) {
-		dest.push({
-			genLine: m.genLine + lineOffset,
-			srcLine: m.srcLine,
-			srcFileIdx: localToUnifiedIdx[m.srcFileIdx ?? 0] ?? 0,
-		});
-	}
-}
-
-function mergeCompilationChunks(chunks) {
-	const activeChunks = chunks
-		.filter(Boolean)
-		.map(normalizeChunk)
-		.filter((c) => c.js.length > 0);
-
-	if (activeChunks.length === 0) {
-		return { js: "", sourceFiles: [], sourcesContent: [], mappings: [] };
-	}
-
-	const unifiedSources = [];
-	const unifiedSourcesContent = [];
-	const fileIdxMap = new Map();
-
-	function getOrAddFile(filePath, content) {
-		const key = resolve(filePath);
-		let idx = fileIdxMap.get(key);
-		if (idx === undefined) {
-			idx = unifiedSources.length;
-			fileIdxMap.set(key, idx);
-			unifiedSources.push(key);
-			unifiedSourcesContent.push(content);
-		}
-		return idx;
-	}
-
-	const combinedJsParts = [];
-	const mergedMappings = [];
-	let currentLineOffset = 0;
-
-	for (const chunk of activeChunks) {
-		combinedJsParts.push(chunk.js);
-		const localToUnifiedIdx = (chunk.sourceFiles ?? []).map((file, i) =>
-			getOrAddFile(file, chunk.sourcesContent?.[i] ?? ""),
-		);
-		appendChunkMappings(
-			mergedMappings,
-			chunk.mappings,
-			localToUnifiedIdx,
-			currentLineOffset,
-		);
-		currentLineOffset += chunk.js.split("\n").length;
-	}
-
-	return {
-		js: combinedJsParts.join("\n"),
-		sourceFiles: unifiedSources,
-		sourcesContent: unifiedSourcesContent,
-		mappings: mergedMappings,
-	};
-}
-
-function attachSourceMap(merged, outputDir) {
-	const relativeSources = merged.sourceFiles.map((f) => relative(outputDir, f));
-	const mapJson = buildSourceMap(
-		relativeSources,
-		merged.mappings,
-		merged.sourcesContent,
-	);
-	const b64 = Buffer.from(mapJson).toString("base64");
-	merged.js += `\n//# sourceMappingURL=data:application/json;base64,${b64}`;
-}
-
-const WASM_MAP_URL = "app.wasm.map";
-
-// Function-level `app.wasm.map` (sources relative to the output dir).
-function buildWasmMap(info, outputDir) {
-	if (!info || info.mappings.length === 0) return null;
-	return buildWasmSourceMap(
-		info.sources.map((f) => relative(outputDir, f)),
-		info.mappings,
-	);
 }
 
 // Shared tail of compileFiles / compileSingleFile: link `app.wasm`, run
