@@ -1,7 +1,7 @@
 # Repository Structure Cleanup — Design Plan
 
 **Version:** v1.8.0
-**Status:** Draft (revised 2026-10-27 for the simplification direction)
+**Status:** In Progress  
 **Base branch:** main
 **Related:**
 - **Order.** Assumes [`portable-go-plan.md`](portable-go-plan.md) is completed and merged into `main`, including WASM JSON (Phase 5), SIMD (Phase 6), the docs and baseline work (Phase 7) and the simplification Phases 8–11 (manifest and conformance retired, stdlib pruned, WASM accessor refs and clone elision removed). Must be merged **before [`v1.9.0/stdlib-in-go-plan.md`](../v1.9.0/stdlib-in-go-plan.md) starts**.
