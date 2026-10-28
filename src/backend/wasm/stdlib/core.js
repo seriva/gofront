@@ -550,8 +550,20 @@ export class StdlibCoreEmitter {
 	// Pushes `arg` as the externref the fmt host helpers format.
 	_emitOperandExternref(arg, goType, allowNil = false) {
 		if (goType?.name === "time.Duration") {
+			// The raw count stays available for %d; %v and %s use the string.
+			const durTmp = this.acquireTemp("i64");
 			this.emitExpr(arg, "i64");
+			this.pushInstruction({ op: "local.set", index: durTmp });
+			this.pushInstruction({ op: "local.get", index: durTmp });
+			this._emitToExternrefPlain({ kind: "basic", name: "int64" });
+			this.pushInstruction({ op: "local.get", index: durTmp });
 			this._callStdlib("time_duration_string");
+			this.pushInstruction({ op: "i32.const", value: 0 });
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getFmtNewStringerIndex(),
+			});
+			this.releaseTemp(durTmp, "i64");
 			return;
 		}
 		if (isAnyType(goType, this.mod.checker)) {

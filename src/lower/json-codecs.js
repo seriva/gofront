@@ -973,7 +973,8 @@ export class JsonCodecGen {
 			"\tif err != nil {",
 			"\t\treturn nil, err",
 			"\t}",
-			"\treturn jsonrt.AppendIndent(nil, b, prefix, indent)",
+			"\tout, err := jsonrt.AppendIndent(nil, b, prefix, indent)",
+			"\treturn out, err",
 			"}",
 		);
 		this.entries.push(lines.join("\n"));
