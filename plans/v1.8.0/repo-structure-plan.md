@@ -360,7 +360,7 @@ Only paths change. No task, scope or number in those plans is edited.
   - Files: `git mv test/e2e/perf test/perf`; relative imports and fixture paths in `raycast-bench.js`, `zero-alloc.js`, `json-bench.js` and `particle-bench.js`; `package.json` (`test`, `bench`)
   - Test: `node test/perf/zero-alloc.js` passes (already part of `npm test`). `node --expose-gc test/perf/raycast-bench.js --tris 1000 --rays 1000` completes
   - Done when: `npm test` passes, `ls test/e2e` has only specs and helpers, and `npm run test:e2e` is unchanged
-- [ ] Task 6.6: Update the path references in the docs and agent guide
+- [x] Task 6.6: Update the path references in the docs and agent guide
   - Files: `docs/architecture.md`, `docs/usage.md`, `docs/hybrid-wasm.md`, `AGENTS.md` (Part 2 **Architecture** only: the final `src/` layout, `src/link/`, `src/cli/`, `src/lexer/`, `src/backend/shared/`, `test/perf/`)
   - Test: `grep -rnE 'src/(lexer|templ-lexer|templ-parser|tokens|dev-server|pwa|minifier|vendor|asset-manager|test-runner|colors|project-config|cli-core)\.js|test/e2e/perf' docs AGENTS.md .sentrux package.json` is empty
   - Done when: grep is empty

@@ -20,7 +20,7 @@ source text (.templ files)
   → Code Gen       TemplDecl → direct DOM calls (createElement / setAttribute / appendChild)
 ```
 
-### 1. Lexer (`src/lexer.js`)
+### 1. Lexer (`src/lexer/`)
 
 Tokenises the source into a stream of tokens. Implements Go's semicolon insertion rules:
 a semicolon is automatically inserted after a line's final token if that token is an
@@ -77,7 +77,12 @@ a WebAssembly GC module:
 
 | File | Role |
 |---|---|
-| `index.js` | `ModuleEmitter` — lowers the typed AST into module IR (types, functions, imports, exports) |
+| `index.js` | `compileWasmModule` entry — lowered AST + types → module IR → binary / WAT |
+| `module-emitter.js` | `ModuleEmitter` — the module IR builder: types, imports, globals, functions, exports |
+| `prescan.js` | Pre-scan of the lowered AST to decide which imports, runtime helpers and interface dispatchers a module needs |
+| `globals.js` | Package-level constants and variables, zero values, the synthesised global init function and interface dispatchers |
+| `method-expr.js` | Method expressions (`T.M`) and method values (`x.M`) |
+| `variadic.js` | Variadic parameters as `[]T` parameters and call-site packing |
 | `monomorph.js` | Monomorphisation of generic functions and struct types for the WASM target |
 | `types.js` | GoFront types → WasmGC types; recursive structs share one `rec` group |
 | `emit.js` | `FunctionEmitter` core — prologue/epilogue, defer/recover frames, locals, control stack; composed from the mixins below |
@@ -119,28 +124,32 @@ stdlib/               Go-source standard library packages (//gofront:target both
   <pkg>/              Pure Go implementations (cmp, iter, slices, strings, etc.)
 src/
   index.js            CLI entry: argument routing, file I/O, watch mode
-  cli-core.js         dev / build / check / test / prep / init command implementations
-  colors.js           ANSI color helpers and diagnostic formatting
-  compiler.js         compileDir / compileSingleFile: parse → check → lower → emit, package linking
+  compiler.js         compileDir / compileSingleFile / compileWasm: parse → check → lower → emit
   resolver.js         import resolution: local packages, npm types, .d.ts, builtin package list, stdlib/
-  project-config.js   gofront.json / package.json "gofront" settings
-  dev-server.js       static server, SSE live reload, error overlay
-  test-runner.js      *_test.go discovery and Go-style harness (JS, wasm and dual-target)
-  asset-manager.js    assetCopy and serveDir mirroring
-  vendor.js           npm dependency bundling via rolldown / esbuild
-  pwa.js              service worker + precache manifest for --pwa
-  minifier.js         built-in minifier (--minify, --mangle)
   dts-parser.js       TypeScript .d.ts → GoFront types
-  lexer.js, tokens.js             Go lexer with semicolon insertion and //gofront: directives
-  templ-lexer.js, templ-parser.js .templ dual-mode lexer and parser
-  parser/             declarations, statements, expressions, types (mixins on Parser)
+  cli/                command layer
+    cli-core.js         dev / build / check / test / prep / init command implementations
+    colors.js           ANSI color helpers and diagnostic formatting
+    project-config.js   gofront.json / package.json "gofront" settings
+    dev-server.js       static server, SSE live reload, error overlay
+    test-runner.js      *_test.go discovery and Go-style harness (JS, wasm and dual-target)
+    asset-manager.js    assetCopy and serveDir mirroring
+    vendor.js           npm dependency bundling via rolldown / esbuild
+    pwa.js              service worker + precache manifest for --pwa
+    minifier.js         built-in minifier (--minify, --mangle)
+  link/               bundle linking: source maps, wasm units into one app.wasm, Go-source stdlib
+  lexer/              lexer.js and tokens.js (Go lexer with semicolon insertion and //gofront: directives), templ-lexer.js (.templ dual-mode lexer)
+  parser/             declarations, statements, expressions, types (mixins on Parser); templ.js is the .templ parser
   typechecker/        resolve, assignability, statements, expressions, termination; stdlib/ typings
   lower/              backend-independent analyses stored as side tables
+  backend/shared/     fmt type descriptors used by both backends
   backend/js/         JS code generator: statements, expressions, templ, runtime helpers, source maps, stdlib/ shims
   backend/wasm/       WasmGC backend (see table above)
 test/
-  unit/               Compiler, parser, type checker, and backend unit tests
-  e2e/                End-to-end and performance benchmark suites
+  unit/               Compiler, parser, type checker, and backend unit tests; run.js discovers every *.test.js
+    cli/              CLI, dev server, test runner, prep, PWA and asset tests
+  e2e/                Playwright specs against the compiled examples
+  perf/               Benchmarks (raycast, JSON, particles) and the zero-allocation check
 ```
 
 Layer boundaries (`cli → support → backend → lower → typechecker → parser → lexer → types`)
