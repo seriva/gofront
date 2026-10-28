@@ -15,7 +15,7 @@ import { CodeGen } from "../../src/backend/js/index.js";
 import { instantiateWasm } from "../../src/backend/wasm/glue.js";
 import { compileDir, compileFiles, compileWasm } from "../../src/compiler.js";
 import { DtsParser, parseDts } from "../../src/dts-parser.js";
-import { Lexer } from "../../src/lexer.js";
+import { Lexer } from "../../src/lexer/lexer.js";
 import { Parser } from "../../src/parser/index.js";
 import { resolveAll } from "../../src/resolver.js";
 import { TypeChecker } from "../../src/typechecker/index.js";

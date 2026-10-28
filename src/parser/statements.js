@@ -1,6 +1,6 @@
 // Parser statement methods — installed as a mixin on Parser.prototype.
 
-import { T } from "../tokens.js";
+import { T } from "../lexer/tokens.js";
 
 // Method-name dispatch for pure-delegation cases in _parseStmt.
 const PARSE_STMT_DELEGATE = {

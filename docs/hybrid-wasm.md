@@ -299,7 +299,7 @@ for (let i = 0; i < sim.Positions.length; i += 2) {
   - **JS:** compiles to frozen 4-element arrays using `Math.fround` per lane for bit-level 32-bit float parity.
   - **Boundary:** an `F32x4` crosses the JS↔WASM boundary as a copied 4-element `Float32Array` and a `Mask32x4` as a 4-element array of booleans, in exported function parameters and results and in exported struct fields. In `wasm` packages a `[]F32x4` crosses as one copied `Float32Array` of `4n` floats; in `both` packages, which run as plain JavaScript, it stays an array of 4-element arrays. A `[]Mask32x4` crosses as an array of boolean arrays. Vectors live in garbage-collected memory, so they cannot be viewed zero-copy from JavaScript; move bulk data through `gofront/shared.Float32` buffers.
 - **Performance:**
-  - Particle kinematics (65,536 particles, gravity, damping and a box bounce with `Select`, release build): about 1.6× faster than the equivalent scalar loop in the same module, with a small reported allocation per step (`node --expose-gc test/e2e/perf/particle-bench.js`).
+  - Particle kinematics (65,536 particles, gravity, damping and a box bounce with `Select`, release build): about 1.6× faster than the equivalent scalar loop in the same module, with a small reported allocation per step (`node --expose-gc test/perf/particle-bench.js`).
   - Octree raycast (131,072 triangles, triangle-packet kernel): within noise of scalar WebAssembly, because spatial traversal dominates the 3-wide triangle checks. Use SIMD for flat, data-parallel loops over `shared.Float32` buffers rather than for pointer-chasing traversals.
   - `example/hybrid` runs its particle `Step` on `simd.F32x4`, two interleaved `x, y` particles per vector.
 
@@ -382,7 +382,7 @@ main guard that strict numeric mode is doing its job.
 
 ## Benchmarking
 
-`npm run bench` (or `test/e2e/perf/raycast-bench.js`) compiles a snapshot of the simplefps
+`npm run bench` (or `test/perf/raycast-bench.js`) compiles a snapshot of the simplefps
 `mathx` (`both`) and `collision` (`wasm`) packages twice — all-JS and hybrid — casts 100k rays
 through 131k triangles and reports rays/s, allocation per ray, and binary size.
 Pass `--wasm-opt` to run the built-in Binaryen optimization pipeline over the emitted module.

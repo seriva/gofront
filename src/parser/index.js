@@ -17,7 +17,7 @@
 //   CallExpr, SelectorExpr, IndexExpr, SliceExpr
 //   CompositeLit, KeyValueExpr, FuncLit, AwaitExpr
 
-import { T } from "../tokens.js";
+import { T } from "../lexer/tokens.js";
 import { declarationParseMethods } from "./declarations.js";
 import { expressionParserMethods } from "./expressions.js";
 import { statementParserMethods } from "./statements.js";
