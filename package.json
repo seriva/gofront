@@ -36,7 +36,7 @@
 	},
 	"scripts": {
 		"build": "node scripts/build-examples.js",
-		"test": "node test/unit/run.js && node test/perf/zero-alloc.js && node src/index.js test --dom example/...",
+		"test": "node test/unit/run.js && node test/perf/zero-alloc.js && node test/perf/bce-mathx.js && node src/index.js test --dom example/...",
 		"test:e2e": "playwright test",
 		"test:coverage": "c8 --include='src/**' --reporter=text --reporter=lcov node test/unit/run.js",
 		"bench": "node --expose-gc test/perf/raycast-bench.js && node test/perf/json-bench.js && node --expose-gc test/perf/particle-bench.js",
