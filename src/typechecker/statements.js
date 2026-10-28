@@ -262,6 +262,26 @@ export const statementCheckMethods = {
 		if (!isVoid(returnType) && types.length > 0) {
 			const expected =
 				returnType.kind === "tuple" ? returnType.types : [returnType];
+			// `return f()` forwards every result of a multi-value call.
+			if (types.length === 1 && types[0]?.kind === "tuple") {
+				const forwarded = types[0].types;
+				if (forwarded.length !== expected.length) {
+					this.err(
+						`return count mismatch: have ${forwarded.length} values, want ${expected.length}`,
+						stmt,
+					);
+					return;
+				}
+				for (let i = 0; i < expected.length; i++) {
+					this.assertAssignable(
+						expected[i],
+						forwarded[i],
+						stmt.values[0],
+						"return statement",
+					);
+				}
+				return;
+			}
 			for (let i = 0; i < expected.length; i++) {
 				if (types[i])
 					this.assertAssignable(

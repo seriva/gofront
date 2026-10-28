@@ -187,23 +187,23 @@ No longer reproducing (deleted from the ledger): promoted field through `Deep2{*
 
 ### Phase 3: Typechecker Signatures and Constants
 
-- [ ] Task 3.1: Forward multi-value calls in `return`
+- [x] Task 3.1: Forward multi-value calls in `return`
   - Files: `src/typechecker/statements.js`, `test/unit/types/checks.test.js`
   - Test: the four repros (interface field `Write`, `t.App(make(...))`, `r.ReadRune()`, `s.sb.Write(p)` on a `strings.Builder` field) compile and print `2 <nil>` / `[1] <nil>` / `97 1 <nil>` / `2`; a count mismatch still errors.
   - Done when: all four compile on all targets.
-- [ ] Task 3.2: Grouped named result lists
+- [x] Task 3.2: Grouped named result lists
   - Files: `src/typechecker/resolve.js`, `test/unit/types/checks.test.js`
   - Test: `func Polar(x float64) (r, theta float64) { return x, 0 }` → `2 0`.
   - Done when: repro runs on all targets; `(a, b int, err error)` also accepted.
-- [ ] Task 3.3: `interface{}` and `any` are identical in method signatures
+- [x] Task 3.3: `interface{}` and `any` are identical in method signatures
   - Files: `src/typechecker/assignability.js`, `test/unit/types/checks.test.js`
   - Test: `impl` with `Do(func(uint8) interface{}) []interface{}` satisfies `Bag` declared with `any` → `true`.
   - Done when: repro compiles; a real signature mismatch still reports `does not implement`.
-- [ ] Task 3.4: Defined types over named structs keep their fields
+- [x] Task 3.4: Defined types over named structs keep their fields
   - Files: `src/typechecker/types.js`, `src/backend/wasm/emit-exprs.js`, `test/unit/language/named-type-methods.test.js`
   - Test: `type Base struct{n int}; type S3 Base; func (s S3) N() int { return s.n }; S3{n: 5}.N()` → `5` on all targets.
   - Done when: JS no longer prints `<nil>` and WASM no longer reports `Cannot resolve struct for selector`.
-- [ ] Task 3.5: Shift and constant diagnostics
+- [x] Task 3.5: Shift and constant diagnostics
   - Files: `src/typechecker/const-fold.js`, `src/typechecker/expressions.js`, `test/unit/language/constants.test.js`
   - Test: `f << 2` (float64 `f`) → error containing `must be integer`; `-uint16(c+1)` (typed const `c uint16 = 3`) → `constant -4 overflows uint16` for `both` and `wasm` too; `const c = 1 << -1` → exactly one error.
   - Done when: the three negative tests pass on every target.
