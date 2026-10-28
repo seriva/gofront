@@ -297,7 +297,7 @@ Only paths change. No task, scope or number in those plans is edited.
   - Files: `src/compiler.js`, `src/link/wasm.js`
   - Test: `link.test.js`: `checkLinkCollisions` reports a duplicate top-level name across two units with the existing message
   - Done when: `test/unit/wasm/*` and the `example/hybrid` hashes are unchanged
-- [ ] Task 3.3: Go-source stdlib pipeline → `src/link/stdlib.js` with injected dependencies
+- [x] Task 3.3: Go-source stdlib pipeline → `src/link/stdlib.js` with injected dependencies
   - Files: `src/compiler.js`, `src/link/stdlib.js`
   - Test: `link.test.js`: the mangling helper renames a top-level stdlib declaration with the package suffix, and leaves type parameters and overlay names alone
   - Done when: `stdlib-go.test.js` passes, `sentrux check` reports 0 cycles, and `wc -l src/compiler.js` ≤ 700
