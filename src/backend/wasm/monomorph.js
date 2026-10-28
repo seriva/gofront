@@ -78,7 +78,7 @@ function typeKey(t) {
 /**
  * Converts a Go type representation or AST type node into a concrete AST type node.
  */
-function typeToTypeNode(t) {
+export function typeToTypeNode(t) {
 	if (!t) return { kind: "TypeName", name: "any" };
 	if (typeof t === "string") return { kind: "TypeName", name: t };
 	if (
@@ -133,11 +133,18 @@ function getSpecializedName(baseName, typeArgs) {
 	return `${baseName}$${keys}`;
 }
 
+const KEPT_CLONE_KEYS = new Set(["_typeArgs", "_line", "_col"]);
+
 function cloneAst(node) {
 	if (!node || typeof node !== "object") return node;
 	if (Array.isArray(node)) return node.map(cloneAst);
 	const copy = {};
 	for (const [k, v] of Object.entries(node)) {
+		// Side tables are dropped, except source positions (for diagnostics in
+		// the specialised body) and the inferred type arguments of a generic
+		// call inside a generic body: substitution needs them to specialise the
+		// callee (`isNaN(x)` inside `Compare[T]`).
+		if (k.startsWith("_") && !KEPT_CLONE_KEYS.has(k)) continue;
 		copy[k] = cloneAst(v);
 	}
 	return copy;
@@ -246,6 +253,23 @@ function substituteTypesInAst(
 
 	// 4. CallExpr
 	if (node.kind === "CallExpr") {
+		// `T(x)` with T a type parameter becomes the conversion `int8(x)`.
+		const conv =
+			node.func?.kind === "Ident" ? typeSubstMap.get(node.func.name) : null;
+		if (conv && node.args?.length === 1) {
+			return {
+				kind: "TypeConversion",
+				targetType: cloneAst(conv),
+				expr: substituteTypesInAst(
+					node.args[0],
+					typeSubstMap,
+					onGenericUsage,
+					genericTypes,
+					genericFuncs,
+				),
+				_line: node._line,
+			};
+		}
 		if (node.func?.kind === "Ident") {
 			let typeArgs = node._typeArgs ?? node.func._typeArgs;
 			if (typeArgs) {
@@ -703,9 +727,9 @@ export function monomorphise(programs, checker) {
 		}
 	}
 
-	for (const p of progs) {
-		monoChecker.check(p);
-	}
+	// One pass over all programs: declarations of every linked package are
+	// visible to the others (cross-package references are dequalified).
+	monoChecker.checkAll(progs);
 
 	return { programs: progs, checker: monoChecker };
 }

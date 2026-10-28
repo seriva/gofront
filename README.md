@@ -398,7 +398,7 @@ The compiler analyzes both sides of the boundary and synthesizes a facade into `
 - **Slices & Arrays:** Slices and arrays copy element-wise in both directions; TypedArrays (`Float32Array`, `Int32Array`, etc.) are natively accepted.
 - **Closures & Interfaces:** Function values, callbacks, and named non-empty interfaces cross the boundary transparently.
 - **Shared Linear-Memory Buffers:** `gofront/shared` (`shared.NewFloat32`, etc.) exposes zero-copy TypedArray views over linear memory for bulk per-frame data.
-- **WASM SIMD (`gofront/simd`):** Experimental 4-wide float vector type (`simd.F32x4`) compiling directly to native `v128` instructions with zero GC overhead, including `simd.LoadF32x4`/`StoreF32x4` for direct linear-memory access.
+- **WASM SIMD (`gofront/simd`, experimental):** 4-wide float vector type (`simd.F32x4`) compiling directly to native `v128` instructions with zero GC overhead, including `simd.LoadF32x4`/`StoreF32x4` for direct linear-memory access (about 1.6× faster than a scalar loop on a particle-integration benchmark).
 - **WASM Loader:** The generated JS bundle automatically fetches `app.wasm` relative to `app.js` (`import.meta.url`, customizable via `globalThis.__GOFRONT_WASM_URL` or `globalThis.__GOFRONT_WASM_BYTES`).
 - **WAT Inspection:** Passing `--emit-wat` writes human-readable `app.wat` alongside the binary module.
 - **Binaryen Optimization:** Passing `--release` or `--wasm-opt` optimizes `app.wasm` via Binaryen (`-O3` + GUFA), achieving ~23% smaller binaries and generating `app.wasm.map` source maps.
@@ -447,26 +447,19 @@ For detailed command flags, project configuration (`gofront.json`), multi-file p
 * [Go to JS Mapping](docs/compilation-mapping.md) — what each construct compiles to
 * [Go Compatibility Differences](docs/go-compatibility.md) — where GoFront deliberately differs from Go
 * [Compiler Architecture & Internals](docs/architecture.md) — pipeline stages and source layout
-
----
-
-## Roadmap
-
-See [`plans/roadmap.md`](plans/roadmap.md) for the full roadmap and release history.
-Design documents for planned features are organised by release under `plans/v*/`
-(e.g. [`plans/v1.2.0/`](plans/v1.2.0/), [`plans/v1.3.0/`](plans/v1.3.0/), [`plans/v1.6.0/`](plans/v1.6.0/), [`plans/v1.8.0/`](plans/v1.8.0/)).
+* [Changelog](CHANGELOG.md) — release history and upgrade notes
 
 ---
 
 ## Tests
 
 ```sh
-npm test                  # unit, zero-alloc perf, and example tests (~1,920+ tests, no browser required)
+npm test                  # unit, zero-alloc perf, and example tests (~2,900 tests, no browser required)
 npm run test:e2e          # E2E browser tests (Playwright, headless Chromium)
-npm run bench             # Möller–Trumbore raycast benchmark comparing pure JS vs hybrid WASM
+npm run bench             # Raycast, JSON, and SIMD particle benchmarks (pure JS vs hybrid WASM)
 ```
 
-**Unit tests** (~1,920+) cover language features, type errors, edge cases, DOM (jsdom),
+**Unit tests** (~2,900) cover language features, type errors, edge cases, DOM (jsdom),
 external `.d.ts`, npm resolver, TypeScript tuple return signatures, multi-file compilation,
 embedded structs, string formatting, compile-time `encoding/json` serialization with struct tags,
 map iteration order, integer overflow semantics, unused variable detection,

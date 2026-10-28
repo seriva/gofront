@@ -33,6 +33,18 @@ function isRawMessageType(t) {
 	);
 }
 
+const NUMBER_NAMES = new Set(["json.Number", "encoding/json.Number"]);
+
+function isNumberType(t) {
+	if (!t) return false;
+	const name = t.name ?? "";
+	if (NUMBER_NAMES.has(name)) return true;
+	if (name.startsWith("Number$$") || name.endsWith(".Number")) return true;
+	return (
+		t.kind === "named" && name === "Number" && unwrapNamed(t)?.name === "string"
+	);
+}
+
 function isByteSliceType(t) {
 	const base = unwrapNamed(t);
 	return (
@@ -106,7 +118,8 @@ export const jsonMethods = {
 		if (fn === "Unmarshal") {
 			const targetType = expr.args[1]?._type;
 			const dec = this._getJsonDecoder(targetType);
-			return `__json_unmarshal(${dec}, ${args[0]}, ${args[1]})`;
+			const typeName = targetType ? this._jsonTypeName(targetType) : "";
+			return `__json_unmarshal(${dec}, ${args[0]}, ${args[1]}, ${JSON.stringify(typeName)})`;
 		}
 		if (fn === "Valid") {
 			return `__json_valid(${args[0]})`;
@@ -116,6 +129,7 @@ export const jsonMethods = {
 
 	_getJsonEncoder(type, addr = false) {
 		if (!type) return "__json_enc_any";
+		if (isNumberType(type)) return "__json_enc_number";
 		if (isRawMessageType(type)) {
 			const fnName = "__json_enc_RawMessage";
 			if (!this._jsonCodecs.has(fnName)) {
@@ -224,6 +238,12 @@ export const jsonMethods = {
 
 	_jsonTypeName(type) {
 		const name = type?.name ?? "value";
+		const at = name.indexOf("$$");
+		if (at >= 0) {
+			const orig = name.slice(0, at);
+			const modPath = name.slice(at + 2).replaceAll("$", "/");
+			return `${modPath}.${orig}`;
+		}
 		if (name.includes(".")) return name;
 		const pkg = this.checker?.pkgName;
 		return pkg ? `${pkg}.${name}` : name;
@@ -387,7 +407,7 @@ export const jsonMethods = {
 			case "float32":
 				return "__json_float32";
 			case "float64":
-				return "(v => { if (!isFinite(v)) throw new Error('json: unsupported value: ' + v); return String(v); })";
+				return "(v => { if (!isFinite(v)) throw __json_unsupported_value(String(v)); return String(v); })";
 			default:
 				return "__json_enc_any";
 		}
@@ -465,6 +485,7 @@ export const jsonMethods = {
 	_genFieldEncoderExpr(f, addr = false) {
 		const quotedKind = this._jsonQuotedKind(f);
 		if (quotedKind) return this._genQuotedFieldEncoderExpr(f, quotedKind);
+		if (isNumberType(f.type)) return (v) => `__json_enc_number(${v})`;
 		if (isRawMessageType(f.type)) {
 			return (v) =>
 				`((typeof ${v} === "string" ? ${v} : new TextDecoder().decode(${v})).trim() || "null")`;
@@ -524,7 +545,7 @@ export const jsonMethods = {
 				return (v) => `__json_float32(${v})`;
 			case "float64":
 				return (v) =>
-					`(!isFinite(${v}) ? (() => { throw new Error("json: unsupported value: " + ${v}); })() : String(${v}))`;
+					`(!isFinite(${v}) ? (() => { throw __json_unsupported_value(String(${v})); })() : String(${v}))`;
 			default:
 				return (v) => `__json_enc_any(${v})`;
 		}
@@ -535,6 +556,10 @@ export const jsonMethods = {
 		const baseType =
 			targetType.kind === "pointer" ? targetType.base : targetType;
 		if (!baseType) return "__json_dec_any_target";
+
+		if (isNumberType(baseType)) {
+			return "__json_dec_number";
+		}
 
 		if (this._jsonUnmarshalerInfo(baseType)) {
 			return this._getUnmarshalerDecoder(baseType);
@@ -683,6 +708,9 @@ export const jsonMethods = {
 
 	_genElemDecoder(elemType) {
 		if (!elemType) return (v) => `__json_dec_any(${v})`;
+		if (isNumberType(elemType))
+			return (v, rawExpr) =>
+				`__json_number_decode(${v}, "json.Number", ${rawExpr})`;
 		const unmarshaler = this._unmarshalerElemDecoder(elemType);
 		if (unmarshaler) return unmarshaler;
 		if (isRawMessageType(elemType)) {
@@ -736,6 +764,11 @@ export const jsonMethods = {
 			`    return __json_err("cannot unmarshal " + __json_type(parsed) + " into " + __json_ctx(${JSON.stringify(this._jsonDisplayType(structType))}));`,
 		);
 		lines.push(`  }`);
+		const knownKeys = fields.flatMap((f) => [f.jsonKey, f.goName]);
+		lines.push(
+			`  var disallowErr = __json_check_unknown(parsed, ${JSON.stringify(knownKeys)});`,
+		);
+		lines.push(`  if (disallowErr) return disallowErr;`);
 		// Go reports errors as "Go struct field <innermost struct>.<json key path>".
 		lines.push(`  __json_structs.push(${JSON.stringify(structName)});`);
 		lines.push(`  try {`);
@@ -750,6 +783,9 @@ export const jsonMethods = {
 			lines.push(`    try {`);
 			lines.push(`    var val = parsed[fieldKey];`);
 			lines.push(`    var raw = __json_raw_child(parsed, fieldKey);`);
+			lines.push(
+				`    __json_current_offset = __json_raw_end(parsed, fieldKey) || 0;`,
+			);
 			const quotedKind = this._jsonQuotedKind(f);
 			if (quotedKind) {
 				const valueType = f.type?.kind === "pointer" ? f.type.base : f.type;
@@ -809,10 +845,22 @@ export const jsonMethods = {
 		}
 	},
 
+	_emitNumberFieldDecoder(f, lines, rawExpr) {
+		lines.push(
+			`      var nv = __json_number_decode(val, "json.Number", ${rawExpr}); if (nv && nv._msg) return nv;`,
+		);
+		const val = f.type?.kind === "pointer" ? "{ value: nv }" : "nv";
+		this._emitAssign(f, val, lines);
+	},
+
 	_emitFieldDecoder(f, structName, lines, rawExpr) {
 		const valueType = f.type?.kind === "pointer" ? f.type.base : f.type;
 		if (this._jsonUnmarshalerInfo(valueType)) {
 			this._emitUnmarshalerField(f, lines, rawExpr);
+			return;
+		}
+		if (isNumberType(valueType)) {
+			this._emitNumberFieldDecoder(f, lines, rawExpr);
 			return;
 		}
 		if (isRawMessageType(f.type)) {

@@ -58,6 +58,35 @@ copies its arguments, so the loop usually belongs on the WASM side, or the data 
 
 ---
 
+## Pointers in `wasm` and `both` packages
+
+Pointers to structs, to local variables and to struct-typed fields, elements and package-level variables work as in Go. A pointer to any other value (a number, string, bool, slice, map, interface such as `error`, pointer, func or SIMD vector) that lives inside a struct field, a slice or array element, or a package-level variable is a compile error, because WebAssembly cannot point into the middle of a managed object:
+
+```go
+//gofront:target wasm
+package sim
+
+type Body struct{ X int }
+
+func bump(p *int) { *p++ }
+
+// Rejected: cannot take the address of a field, element or
+// package-level variable of type int in a wasm package
+func Step(b *Body) { bump(&b.X) }
+```
+
+Pass the parent pointer or the index instead, or copy the value to a local:
+
+```go
+func bumpBody(b *Body) { b.X++ }
+
+func Step(b *Body) { bumpBody(b) }
+```
+
+The same rule covers `&xs[i]` on a `[]float64`, `&pkgVar` on a package-level `int`, and a pointer-receiver call on such an operand (`s.Count.Inc()` where `type Counter int` is the field type). Pointers to struct- and array-typed fields and elements (`&items[i]` on a `[]Item`, `&g.Cells` on a `[4]int` field) are fine. A pointer to a func-typed variable is rejected even for a local (`&f`, or a pointer-receiver call on a named func type); return the new func instead. `js` packages are unchanged and accept all of these.
+
+---
+
 ## `both` packages
 
 A `both` package is compiled twice and the two copies share no state, so the compiler
@@ -82,6 +111,9 @@ copies agree bit-for-bit:
 | Integer `/`, `%` by zero | panics |
 | Shift count ≥ width | yields `0` (or `-1` for negative signed `>>`) |
 | `x op= y`, `x++`, `x--` | covered for locals, struct fields and slice/array elements; the index expression is evaluated once |
+| `xs[i]` on a slice, array or string out of range | panics with `runtime error: index out of range [i] with length n` (`[i]` alone for a negative index) |
+| Write to a nil map | panics with `assignment to entry in nil map`; reads, `len`, `range` and `delete` see an empty map |
+| Field access through a nil struct pointer | panics with `runtime error: invalid memory address or nil pointer dereference` |
 
 `wasm` packages get these semantics natively from the WASM instruction set.
 
@@ -89,42 +121,55 @@ copies agree bit-for-bit:
 
 ## What `wasm` packages support
 
-The backend (`src/backend/wasm/`) implements: structs, pointers, methods, arrays, slices
-(`append`, slicing, `copy`), strings, maps (including array-typed and interface-typed keys),
-interfaces (including anonymous interfaces), generics, closures (including closures inside methods),
-`defer`/`panic`/`recover`, `error` values, and non-literal package constants.
+The backend (`src/backend/wasm/`) implements: structs, pointers (to locals, structs and struct-typed fields, elements and globals; see [Pointers in `wasm` and `both` packages](#pointers-in-wasm-and-both-packages)), methods (including method expressions and method values), value-copied fixed-size arrays, slices (`append`, slicing, `copy`), strings, maps (including struct-typed, array-typed, and interface-typed keys), interfaces (including anonymous interfaces), generics, closures (including closures inside methods and per-iteration loop variable captures), `for … range` over iterator functions (`iter.Seq`, `iter.Seq2`), complex numbers (`complex64`, `complex128`, `complex`, `real`, `imag`), `defer`/`panic`/`recover`, `error` values, and non-literal package constants.
 
-**Known limitations** (fixes planned for [v1.8.0](../plans/v1.8.0/portable-go-plan.md)); a `both` package's
-`[wasm]` test run is the quickest way to spot them:
+Packages that `wasm` and `both` packages can import (JS-only packages such as `regexp` and `gom` are rejected there):
 
-- Fixed-size arrays (`[N]T`) are not copied on assignment or when passed to a function, so the
-  copy aliases the original.
-- A pointer to a scalar struct field or slice/array element (`&s.X`, `&xs[i]`) points at a copy;
-  writes through it do not reach the original.
-- `for … range` over an iterator function and complex numbers (`complex`, `real`, `imag`) are
-  not supported in `wasm` packages.
+| Package | Targets | Notes |
+|---|---|---|
+| `bytes` | js, wasm, both | Buffer, Reader and the search/split/trim helpers |
+| `cmp` | js, wasm, both | `Ordered`, `Compare`, `Less`, `Or` |
+| `crypto/rand` | js, wasm, both | `Read`, `Reader` |
+| `crypto/sha256` | js, wasm, both | `Sum256`, `New` |
+| `encoding/base64` | js, wasm, both | Std, URL and Raw encodings |
+| `encoding/binary` | js, wasm, both | `BigEndian` and `LittleEndian` byte-order accessors, `Read`, `Write`, `Size`, `Append*`; no varints |
+| `encoding/hex` | js, wasm, both | `EncodeToString`, `DecodeString`, `Encode`, `Decode`, `EncodedLen`, `DecodedLen` |
+| `encoding/json` | js, wasm, both | Struct tags, `Marshal`, `Unmarshal`, `Decoder`, `Encoder` |
+| `errors` | js, wasm, both | `New`, `Is`, `As`, `Unwrap`, `Join` |
+| `fmt` | js, wasm, both | Print, Sprint, Fprint, Errorf, Append, `Sscan*` |
+| `hash` | js, wasm, both | `Hash`, `Hash32`, `Hash64` interfaces |
+| `html` | js, wasm, both | `EscapeString`, `UnescapeString` |
+| `io` | js, wasm, both | Reader/Writer interfaces and helpers; no `Pipe` |
+| `iter`, `maps`, `slices`, `sort` | js, wasm, both | Go 1.23 iterator APIs; no `iter.Pull` |
+| `math`, `math/bits` | js, wasm, both | Elementary functions, constants and float bit conversions |
+| `math/rand` | js, wasm, both | Seeded generators (a subset in `wasm`/`both`) |
+| `os` | js, wasm, both | `Stdout`, `Stderr`, `Stdin`, `File`; JS also has `Exit`, `Args`, `Getenv` |
+| `path`, `path/filepath` | js, wasm, both | Lexical helpers only; no file-system walking |
+| `strconv`, `strings`, `unicode`, `unicode/utf8` | js, wasm, both | `strings.Builder`, `Reader`, `Replacer` included |
+| `sync` | js, wasm, both | No `sync.Cond`, no `WaitGroup.Go` |
+| `testing` | js, wasm, both | `T`, `B`, subtests, benchmarks; no fuzzing |
+| `time` | js, wasm, both | `Sleep` is JS-only; no timers or tickers |
+| `gofront/shared`, `gofront/simd` | wasm, both | Shared memory and SIMD helpers |
 
-The stdlib packages available in `wasm`/`both` packages are:
-- `math` (including 24 constants, `Float64bits`/`Float64frombits`, `Float32bits`/`Float32frombits`, `Sinh`, `Cosh`, `Tanh`, `Remainder`), `math/bits` (including `Len*`, `Reverse*`, `ReverseBytes*`), `math/rand` (pure inline 64-bit PRNG with deterministic `Seed`, `Read`, `Shuffle`, `Perm`)
-- `errors` (`New`, `Is`, `Unwrap`, `As`, `Join`)
-- `fmt` (`Sprintf`, `Printf`, `Println`, `Errorf`, `Fprintf`, `Fprintln`, `Fprint`, `Sscan`, `Sscanln`, `Sscanf`, including `%v`/`%+v` composite formatting over slices, arrays, maps, and structs)
-- `strings` (including `Builder`, `NewReplacer`, `NewReader`, `Cut*`, `Split*`, `*Func`, `FieldsFunc`)
-- `bytes` (including `Buffer`, `NewReader`, `FieldsFunc`, `Clone`)
-- `strconv` (including `Unquote`, `AppendInt`, `AppendFloat`, `AppendUint`, `AppendBool`, `ParseUint`, `FormatUint`)
-- `unicode`, `unicode/utf8`
-- `slices` (including `Compare`, `SortFunc`, `IndexFunc`, `ContainsFunc`, `BinarySearch`, `BinarySearchFunc`, `Min`, `Max`, `Compact`, `Concat`, `Delete`, `Insert`, `Replace`, `Grow`, `Clip`), `maps`, `sort`
-- `io` (`Reader`, `Writer`, `ReadWriter`, `Closer`, `ReadAll`, `Discard`, `WriteString`, `Copy`, `CopyN`, `LimitReader`, `EOF`)
-- `path`, `path/filepath`
-- `html` (`EscapeString`, `UnescapeString`)
-- `time` (pure parts: `Duration` with methods `.Seconds()`, `.Milliseconds()`, `.Minutes()`, `.Hours()`, `.String()`; `Time` with methods `.IsZero()`, `.UnixNano()`, `.Nanosecond()`, `.UTC()`, `.Local()`, calendar arithmetic, parsing, formatting; `time.Sleep` stays JS-only)
-- `sync` (`Mutex`, `RWMutex`, `Once`, `WaitGroup`)
-- `crypto/rand` (`Read`), `crypto/sha256` (`Sum256`, `New`)
-- `encoding/binary` (`LittleEndian`, `BigEndian`, `Read`, `Write`, `Append*`, `Size`)
-- `encoding/hex` (`EncodeToString`, `DecodeString`, `EncodedLen`, `DecodedLen`)
-- `encoding/base64` (`StdEncoding`, `URLEncoding`, `RawStdEncoding`, `RawURLEncoding`)
-- `testing`, `gofront/shared`, and `gofront/simd` (experimental).
+Notable members per package:
+- `math` (including 24 constants, `Float64bits`/`Float64frombits`, `Float32bits`/`Float32frombits`, `Sinh`, `Cosh`, `Tanh`, `Remainder`), `math/bits` (including `Len*`, `Reverse*`, `ReverseBytes*`), `math/rand`
+- `cmp` (`Ordered`, `Compare`, `Less`, `Or`), `iter` (`Seq`, `Seq2`)
+- `errors` (`New`, `Is`, `Unwrap`, `As`, `Join`, `ErrUnsupported`)
+- `fmt` (`Sprintf`, `Printf`, `Println`, `Errorf`, `Fprintf`, `Fprintln`, `Fprint`, `Sscan`, `Sscanln`, `Sscanf`, including `%v`/`%+v`/`%#v`/`%T` and `fmt.Stringer`; `%p` prints Go's bad-verb form as in `js` packages)
+- `strings` (including `Builder`, `Reader`, `Replacer`, `Cut*`, `Split*`, `*Func`, `FieldsFunc`, `Lines`, `*Seq`), `bytes` (including `Buffer`, `Reader`, `FieldsFunc`, `Clone`, `Lines`, `*Seq`)
+- `strconv` (including `Unquote`, `QuotedPrefix`, `CanBackquote`, `Append*`, `Parse*`, `Format*`, `NumError`)
+- `unicode` (character classes and case conversion; range tables are not supported), `unicode/utf8`
+- `slices` (including `Compare`, `SortFunc`, `BinarySearch*`, `Min*`, `Max*`, `Compact*`, `Concat`, `Delete*`, `Insert`, `Replace`, `Grow`, `Clip`, `All`, `Values`, `Backward`, `Collect`, `AppendSeq`, `Sorted*`, `Chunk`), `maps` (including `All`, `Keys`, `Values`, `Insert`, `Collect`), `sort` (`Interface`, `Search*`, `Find`, `Slice*`)
+- `io` (`Reader`, `Writer`, `ReadWriter`, `Closer`, `Seeker`, `ReaderAt`, `WriterTo`, `ByteReader`, `RuneReader`, `SectionReader` (not yet over `strings.Reader` or `bytes.Reader`), `LimitedReader`, `MultiReader`, `MultiWriter`, `TeeReader`, `NopCloser`, `ReadAll`, `ReadFull`, `Copy`, `CopyN`), `os` (`Stdout`, `Stderr`, `Stdin`; `Getenv`, `Args`, `Exit` stay JS-only)
+- `path`, `path/filepath`, `html` (`EscapeString`, `UnescapeString`)
+- `time` (`Duration` with `.Truncate()`, `.Round()`, `.Abs()`, `ParseDuration`; `Time` with calendar arithmetic, `.Compare()`, `FixedZone`, `Date`, `Parse`, `Unix`, `UnixMilli`, `UnixNano`; `time.Sleep` stays JS-only)
+- `sync` (`Mutex`, `RWMutex`, `Once`, `WaitGroup`, `OnceFunc`, `OnceValue`, `OnceValues`)
+- `hash` (`Hash`, `Hash32`, `Hash64`), `crypto/rand` (`Reader`, `Read`), `crypto/sha256`
+- `encoding/binary` (`LittleEndian`, `BigEndian`, `Read`, `Write`, `Append*`, `Size`; no varints), `encoding/hex`, `encoding/base64`
+- `encoding/json` (`Marshal`, `MarshalIndent`, `Unmarshal`, `Valid`, `RawMessage`, `Number`, `Encoder`, `Decoder`, `Compact`, `Indent`, `HTMLEscape`; the codecs are generated Go linked into `app.wasm`)
+- `testing` (`T`, `B`, `M`, `TB`, `Run`, `Cleanup`, `Setenv`), `gofront/shared`, and `gofront/simd` (experimental).
 
-Any other import, or JS-only API (`os`, `regexp`, `encoding/json`, `time.Sleep`), reports a targeted diagnostic
+Any other import, or JS-only API (`regexp`, `time.Sleep`, `os.Getenv`, `os.Args`, `os.Exit`), reports a targeted diagnostic
 (e.g. `'time.Sleep' is not yet available in wasm packages`) with a hint to keep the call in a JS package.
 The `math` functions without a native WASM instruction (`Sin`, `Cos`, `Atan2`, `Pow`, `Mod`, `Hypot`,
 `Cbrt`, `Round`, …) are imported from JS `Math` with Go semantics (`Round` rounds half away
@@ -155,6 +200,8 @@ compile error.
 | Struct from a `both` package (`T`, `*T`) | Copied into its JS class. `*T` parameters are written back after the call. |
 | Struct from a `wasm` package (`T`, `*T`) | Opaque **handle** class with stable identity. Scalar fields are read/written through accessors; aggregate fields (`b.Pos.X = 1`, `b.Tags[0] = 2`) are live views, so writes reach WASM memory. |
 | `[]T`, `[N]T` | Copied element-wise in both directions. TypedArray inputs (`Float32Array`, `Int32Array`, …) are accepted. |
+| `simd.F32x4`, `simd.Mask32x4` | Copied: a 4-element `Float32Array` and a 4-element array of booleans. |
+| `[]simd.F32x4`, `[]simd.Mask32x4` | In `wasm` packages a `[]F32x4` crosses as one copied `Float32Array` of `4n` floats; in `both` packages, which run as plain JavaScript, it stays an array of 4-element arrays. A `[]Mask32x4` crosses as an array of boolean arrays. |
 | `func` values | Wrapped in both directions, so callbacks work either way. |
 | Named non-empty interfaces | **WASM → JS:** an exported `*T` arrives as its handle class (or `both` live view); other dynamic types arrive as a facade object whose methods call into WASM. **JS → WASM:** only WASM-owned values (handles, facades) are accepted. A `js` type implementing a `wasm` interface is a compile error (`type '*tri' (js) cannot implement wasm interface 'Shape' across the boundary; …`); keep implementations in WASM or pass a `func` callback. |
 | `*testing.T` | Stays a JS object; `t.Errorf`, `t.Fatal`, `t.Log`, `t.Skip`, `t.Name`, `t.Failed`, … are routed back to the harness. |
@@ -216,33 +263,52 @@ for (let i = 0; i < sim.Positions.length; i += 2) {
 
 `example/hybrid` is a complete particle demo built this way.
 
-### WASM SIMD (`gofront/simd`, experimental)
+### WASM SIMD (`gofront/simd`)
 
-`gofront/simd` provides 4-wide 32-bit floating-point SIMD vector operations lowering to native WebAssembly `v128` instructions without GC overhead.
+`gofront/simd` is experimental. It provides 4-wide 32-bit floating-point SIMD vector operations lowering to native WebAssembly `v128` instructions without GC overhead.
 
 - **Types & Methods:**
   - `simd.F32x4` — 4-lane `float32` vector value type: `simd.F32x4{a, b, c, d}`, `simd.Splat(f)`.
-  - Arithmetic & math: `v.Add(u)`, `v.Sub(u)`, `v.Mul(u)`, `v.Div(u)`, `v.Min(u)`, `v.Max(u)`.
-  - Dot products: `v.Dot3(u)`, `v.Dot4(u)`.
+  - Arithmetic & math: `v.Add(u)`, `v.Sub(u)`, `v.Mul(u)`, `v.Div(u)`, `v.Min(u)`, `v.Max(u)`, `v.MulAdd(u, w)` (`v*u + w`, rounded twice, not fused), `v.Neg()`, `v.Abs()`, `v.Sqrt()`, `v.Floor()`, `v.Ceil()`, `v.Trunc()`, `v.RoundToEven()`. `Min` and `Max` propagate `NaN` and order `-0` before `+0`, like `math.Min`/`math.Max`.
+  - Dot products and sums: `v.Dot3(u)`, `v.Dot4(u)`, `v.Sum()`.
   - Lane access: `v.Lane(i)` (where index `i` is a constant $0 \le i \le 3$), `v.WithLane(i, f)`.
+  - Shuffles with constant indexes: `v.Swizzle(i0, i1, i2, i3)` and `simd.Shuffle(a, b, i0, i1, i2, i3)` (lanes 0–3 come from `a`, 4–7 from `b`).
+  - Comparisons return a `simd.Mask32x4`: `v.Equal(u)`, `NotEqual`, `Less`, `LessEqual`, `Greater`, `GreaterEqual`. A mask has `And`, `Or`, `Xor`, `AndNot`, `Not`, `Any()`, `All()`, `Bits()` (lane `i` is bit `i`) and `Lane(i)`; `simd.Select(m, a, b)` takes lane `i` from `a` where the mask is set and from `b` elsewhere.
   - Zero value: `var v simd.F32x4` initializes to `(0, 0, 0, 0)` (`v128.const` zeros in WASM, frozen `[0, 0, 0, 0]` in JS).
 - **Direct Linear-Memory Load / Store:**
   - `simd.LoadF32x4(buf shared.Float32, i)` — loads 4 consecutive floats from element offset `i` (`v128.load`).
   - `simd.StoreF32x4(buf, i, v)` — stores vector `v` at element offset `i` (`v128.store`).
   - Bounds checks enforce $i + 4 \le \text{len}(buf)$ and trap with a panic on out-of-bounds access.
+- **Slices and padding:**
+  - `simd.LoadF32x4Slice(xs []float32, i)` and `simd.StoreF32x4Slice(xs, i, v)` do the same on an ordinary `[]float32`. A garbage-collected array cannot be read as a `v128`, so each lane moves separately in WASM; prefer `shared.Float32` buffers for hot loops.
+  - `simd.Pad4(n)` rounds `n` up to a multiple of 4, for sizing a `shared.NewFloat32` buffer that is processed four lanes at a time. When the data is not padded, finish with a scalar loop:
+
+    ```go
+    i := 0
+    for ; i+4 <= len(xs); i += 4 {
+        simd.StoreF32x4Slice(xs, i, simd.LoadF32x4Slice(xs, i).Mul(simd.Splat(2)))
+    }
+    for ; i < len(xs); i++ {
+        xs[i] *= 2
+    }
+    ```
+  - An out-of-range offset panics with an index-out-of-range error on both backends.
 - **Lowering & Semantics:**
   - **WASM:** compiles directly to unboxed `v128` locals, parameters, and struct fields using `0xFD` opcodes.
-  - **Current limits (planned for v1.8.0):** in `wasm`/`both` packages, `F32x4` cannot appear in exported struct fields or exported function signatures (they would cross the boundary), `==`/`!=` on `F32x4` is not supported, and `fmt` cannot format `F32x4` values. Keep `F32x4` in unexported types and functions, and compare or print lanes individually.
+  - **Value semantics:** `F32x4` and `Mask32x4` are ordinary values: struct fields, array and slice elements, map keys and values, generic type arguments, closure captures, and values stored in `any`. `==` and `!=` compare lane by lane on vector operands and on structs and arrays containing them (`NaN != NaN`, `-0 == +0`), and `fmt` prints `[1 2 3 4]` for `%v` and `%+v`, and `simd.F32x4{1, 2, 3, 4}` for `%#v`. Converting a vector to `any` inside an expression (`any(v) == any(v)`), comparing a vector with an `any` (`v == a`), and taking the address of a vector (`&v`) are not supported and currently produce an invalid WebAssembly module instead of a compile error; two `any` variables holding vectors compare by identity in JavaScript.
   - **JS:** compiles to frozen 4-element arrays using `Math.fround` per lane for bit-level 32-bit float parity.
-  - **Boundary:** In v1.7.0, `F32x4` is restricted from crossing the JS↔WASM boundary directly (compile diagnostic advises passing data via `gofront/shared.Float32`).
-- **Benchmark & Gating:**
-  - Tested on the 131,072-triangle raycast benchmark: 1.34× faster than pure JS, but 1.02× over scalar hybrid (spatial octree traversal dominates runtime over 3-wide triangle checks). Per the release plan's $\ge 1.30\times$ gate, `gofront/simd` stays experimental; its completion and the promotion decision are planned for v1.8.0 ([`plans/v1.8.0/portable-go-plan.md`](../plans/v1.8.0/portable-go-plan.md)).
+  - **Boundary:** an `F32x4` crosses the JS↔WASM boundary as a copied 4-element `Float32Array` and a `Mask32x4` as a 4-element array of booleans, in exported function parameters and results and in exported struct fields. In `wasm` packages a `[]F32x4` crosses as one copied `Float32Array` of `4n` floats; in `both` packages, which run as plain JavaScript, it stays an array of 4-element arrays. A `[]Mask32x4` crosses as an array of boolean arrays. Vectors live in garbage-collected memory, so they cannot be viewed zero-copy from JavaScript; move bulk data through `gofront/shared.Float32` buffers.
+- **Performance:**
+  - Particle kinematics (65,536 particles, gravity, damping and a box bounce with `Select`, release build): about 1.6× faster than the equivalent scalar loop in the same module, with a small reported allocation per step (`node --expose-gc test/e2e/perf/particle-bench.js`).
+  - Octree raycast (131,072 triangles, triangle-packet kernel): within noise of scalar WebAssembly, because spatial traversal dominates the 3-wide triangle checks. Use SIMD for flat, data-parallel loops over `shared.Float32` buffers rather than for pointer-chasing traversals.
+  - `example/hybrid` runs its particle `Step` on `simd.F32x4`, two interleaved `x, y` particles per vector.
 
 ### Panics and traps
 
 A Go `panic` inside WASM surfaces in JS as a thrown `Error` carrying the panic message.
-Nil dereferences trap in hardware and are mapped to the matching Go panic message by the
-facade.
+A field access through a nil struct pointer is checked and raises the same Go panic,
+so `recover()` catches it. A whole-value dereference of a nil pointer (`*p`) still traps
+in hardware; the facade maps that trap to the matching Go panic message.
 
 ### Loading `app.wasm`
 

@@ -2,9 +2,13 @@
 // Tests for Phase 4d: Closures, Function Values, and Trampolines in WASM.
 
 import {
+	assert,
 	assertEqual,
+	assertErrorContains,
+	compile,
 	compileHybrid,
 	compileWasm,
+	runJs,
 	runWasm,
 	section,
 	test,
@@ -420,3 +424,564 @@ func Main() int {
 	}
 	assertEqual(threwWasm, true);
 });
+
+section("WASM Closures — Per-iteration loop variables (Go 1.22)");
+
+test("closures in a three-clause for capture a distinct i per iteration", () => {
+	const src = `
+package main
+
+func Main() int {
+	var fs []func() int
+	for i := 0; i < 3; i++ {
+		fs = append(fs, func() int { return i })
+	}
+	return fs[0]()*100 + fs[1]()*10 + fs[2]()
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.jsRes, 12);
+});
+
+test("a closure writing i affects its own iteration and the post statement sees it", () => {
+	const src = `
+package main
+
+func Main() int {
+	s := 0
+	for i := 0; i < 10; i++ {
+		inc := func() { i += 2 }
+		inc()
+		s = s*10 + i
+	}
+	return s
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.jsRes, 2591);
+});
+
+test("a later write through one iteration's closure leaves the others alone", () => {
+	const src = `
+package main
+
+func Main() int {
+	var gets []func() int
+	var sets []func()
+	for i := 0; i < 3; i++ {
+		gets = append(gets, func() int { return i })
+		sets = append(sets, func() { i = 100 })
+	}
+	sets[0]()
+	return gets[0]()*100 + gets[1]()*10 + gets[2]()
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.jsRes, 10012);
+});
+
+test("continue still gets a fresh per-iteration variable", () => {
+	const src = `
+package main
+
+func Main() int {
+	var fs []func() int
+	for i := 0; i < 4; i++ {
+		if i%2 == 1 {
+			continue
+		}
+		fs = append(fs, func() int { return i })
+	}
+	return fs[0]()*10 + fs[1]()
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.jsRes, 2);
+});
+
+test("an uncaptured loop variable stays a plain local (no struct.new in the loop)", () => {
+	const src = `
+package main
+
+func Main() int {
+	s := 0
+	for i := 0; i < 10; i++ {
+		s += i
+	}
+	return s
+}
+`;
+	const res = compileHybrid(src, { emitWat: true });
+	assertEqual(res.run("Main").jsRes, 45);
+	const start = res.wat.indexOf('(export "Main")');
+	const main = res.wat.slice(start, res.wat.indexOf("\n  (func", start));
+	assert(
+		!main.includes("struct.new"),
+		`unexpected struct.new in Main:\n${main}`,
+	);
+});
+
+test("a hot uncaptured loop does not allocate when another loop captures the same name", () => {
+	const src = `
+package main
+
+func Main() int {
+	s := 0
+	for i := 0; i < 1000; i++ {
+		s += i * 2
+	}
+	f := func() int { return 0 }
+	for i := 0; i < 2; i++ {
+		f = func() int { return i }
+	}
+	return s + f()
+}
+`;
+	const res = compileHybrid(src, { emitWat: true });
+	assertEqual(res.run("Main").jsRes, 999001);
+	const start = res.wat.indexOf('(export "Main")');
+	const main = res.wat.slice(start, res.wat.indexOf("\n  (func", start));
+	const at = main.indexOf("loop");
+	const firstLoop = main.slice(at, main.indexOf("br 0", at));
+	assert(
+		!firstLoop.includes("struct.new"),
+		`first loop allocates:\n${firstLoop}`,
+	);
+});
+
+test("captured struct and array loop variables get a per-iteration copy", () => {
+	const src = `
+package main
+
+type Pt struct{ X int }
+
+func Main() int {
+	var fs []func() int
+	for p := (Pt{0}); p.X < 3; p.X++ {
+		fs = append(fs, func() int { return p.X })
+	}
+	var gs []func() int
+	for a := [1]int{0}; a[0] < 3; a[0]++ {
+		gs = append(gs, func() int { return a[0] })
+	}
+	return (fs[0]()*100+fs[1]()*10+fs[2]())*1000 + gs[0]()*100 + gs[1]()*10 + gs[2]()
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.jsRes, 12012);
+});
+
+section("Per-iteration loop variables — address-of (Go 1.22)");
+
+test("&i in a three-clause for points at a distinct i per iteration", () => {
+	const src = `
+package main
+
+func Main() int {
+	var ps []*int
+	for i := 0; i < 3; i++ {
+		ps = append(ps, &i)
+	}
+	return *ps[0]*100 + *ps[1]*10 + *ps[2]
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.jsRes, 12);
+});
+
+test("a write through &i is seen by the post statement", () => {
+	const src = `
+package main
+
+func Main() int {
+	s := 0
+	for i := 0; i < 10; i++ {
+		p := &i
+		*p += 2
+		s = s*10 + i
+	}
+	return s
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.jsRes, 2591);
+});
+
+test("&p of a struct loop variable points at a distinct struct per iteration", () => {
+	const src = `
+package main
+
+type P struct{ X int }
+
+func Main() int {
+	var ps []*P
+	for p := (P{0}); p.X < 3; p.X++ {
+		ps = append(ps, &p)
+	}
+	return ps[0].X*100 + ps[1].X*10 + ps[2].X
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.jsRes, 12);
+});
+
+test("&p.X of a struct loop variable is rejected in wasm", () => {
+	const src = `
+package main
+
+type P struct{ X int }
+
+func Main() int {
+	var ps []*int
+	for p := (P{0}); p.X < 3; p.X++ {
+		ps = append(ps, &p.X)
+	}
+	return *ps[0]*100 + *ps[1]*10 + *ps[2]
+}
+`;
+	const { errors } = compileWasm(src);
+	assertErrorContains(
+		errors,
+		"cannot take the address of a field, element or package-level variable of type",
+	);
+});
+
+test("pointer-receiver method call on a loop var sees a distinct var per iteration", () => {
+	const src = `
+package main
+
+type P struct{ X int }
+
+func (p *P) Self() *P { return p }
+
+func Main() int {
+	var ps []*P
+	for p := (P{}); p.X < 3; p.X++ {
+		ps = append(ps, p.Self())
+	}
+	return ps[0].X*100 + ps[1].X*10 + ps[2].X
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.jsRes, 12);
+});
+
+// JS only: method values do not compile in WASM yet.
+test("pointer-receiver method value on a loop var binds that iteration's var (js)", () => {
+	const { js, errors } = compile(`
+package main
+
+type P struct{ X int }
+
+func (p *P) Get() int { return p.X }
+
+func main() {
+	var fs []func() int
+	for p := (P{}); p.X < 3; p.X++ {
+		fs = append(fs, p.Get)
+	}
+	println(fs[0]()*100 + fs[1]()*10 + fs[2]())
+}
+`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "12");
+});
+
+test("slicing an array loop var aliases that iteration's array", () => {
+	const src = `
+package main
+
+func Main() int {
+	var ss [][]int
+	for a := [2]int{}; a[0] < 3; a[0]++ {
+		ss = append(ss, a[:])
+	}
+	return ss[0][0]*100 + ss[1][0]*10 + ss[2][0]
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.jsRes, 12);
+	assertEqual(res.wasmRes, 12n);
+});
+
+test("value-receiver method call keeps the loop var a plain local", () => {
+	const src = `
+package main
+
+type P struct{ X int }
+
+func (p P) Val() int { return p.X }
+
+func Main() int {
+	s := 0
+	for p := (P{}); p.X < 3; p.X++ {
+		s = s*10 + p.Val()
+	}
+	return s
+}
+`;
+	const hybrid = compileHybrid(src);
+	assertEqual(hybrid.run("Main").jsRes, 12);
+	assert(
+		hybrid.js.includes("for (let p = new P(); p.X < 3; p.X++)"),
+		"no per-iteration copy",
+	);
+});
+
+section("WASM scoping and method values (Task 0.19c)");
+
+function parity(name, body, expected, prelude = "") {
+	test(name, () => {
+		const src = `
+package main
+${prelude}
+func Main() int {
+${body}
+}
+`;
+		const res = compileHybrid(src).run("Main");
+		assertEqual(res.jsRes, expected);
+		assertEqual(res.wasmRes, BigInt(expected));
+	});
+}
+
+parity(
+	"inner x := 5 does not write the outer x",
+	`	x := 1
+	if true {
+		x := 5
+		x++
+	}
+	return x`,
+	1,
+);
+
+parity(
+	"inner redeclaration with a different type",
+	`	x := 2
+	{
+		x := "abc"
+		_ = x
+	}
+	for i := 0; i < 2; i++ {
+		x := 10
+		x += i
+	}
+	return x`,
+	2,
+);
+
+test("inner x := x reads the outer x (wasm)", () => {
+	const { wasm, errors } = compileWasm(`
+package main
+
+func Main() int {
+	x := 3
+	y := 0
+	{
+		x := x * 2
+		y = x
+	}
+	return x*100 + y
+}
+`);
+	assertEqual(errors.length, 0);
+	assertEqual(runWasm(wasm).exports.Main(), 306n);
+});
+
+parity(
+	"closure capturing and mutating a range value variable",
+	`	s := 0
+	for _, v := range []int{1, 2, 3} {
+		f := func() { v *= 10 }
+		f()
+		s += v
+	}
+	return s`,
+	60,
+);
+
+parity(
+	"closure capturing and mutating a range key variable",
+	`	s := 0
+	for i := range 3 {
+		inc := func() { i += 100 }
+		inc()
+		s += i
+	}
+	return s`,
+	303,
+);
+
+parity(
+	"method value on a pointer receiver",
+	`	c := &C{1}
+	f := c.Inc
+	f()
+	f()
+	g := c.Get
+	return g()`,
+	3,
+	"type C struct{ N int }\n\nfunc (c *C) Inc() { c.N++ }\n\nfunc (c *C) Get() int { return c.N }",
+);
+
+parity(
+	"method value on an addressable value with a pointer receiver",
+	`	var c C
+	f := c.Inc
+	f()
+	return c.N`,
+	1,
+	"type C struct{ N int }\n\nfunc (c *C) Inc() { c.N++ }",
+);
+
+parity(
+	"method value on a value receiver copies the receiver",
+	`	c := C{4}
+	g := c.Get
+	c.N = 9
+	return g()`,
+	4,
+	"type C struct{ N int }\n\nfunc (c C) Get() int { return c.N }",
+);
+
+parity(
+	"promoted pointer-receiver method on a loop variable",
+	`	var os []Outer
+	for k := 1; k <= 2; k++ {
+		var o Outer
+		o.N = k
+		os = append(os, o)
+	}
+	s := 0
+	for _, o := range os {
+		o.Bump()
+		s = s*10 + o.N
+	}
+	return s*100 + os[0].N*10 + os[1].N`,
+	2312,
+	"type Inner struct{ N int }\n\nfunc (in *Inner) Bump() { in.N++ }\n\ntype Outer struct{ Inner }",
+);
+
+parity(
+	"promoted pointer-receiver method value on a three-clause loop variable",
+	`	s := 0
+	var fs []func()
+	for o := (Outer{}); o.N < 2; o.N++ {
+		fs = append(fs, o.Bump)
+		s += o.N
+	}
+	for _, f := range fs {
+		f()
+	}
+	return s`,
+	1,
+	"type Inner struct{ N int }\n\nfunc (in *Inner) Bump() { in.N++ }\n\ntype Outer struct{ Inner }",
+);
+
+parity(
+	"++ and += on a promoted field",
+	`	var o Outer
+	o.N++
+	o.N += 2
+	return o.N`,
+	3,
+	"type Inner struct{ N int }\n\ntype Outer struct{ Inner }",
+);
+
+section("WASM method values (review fixes)");
+
+parity(
+	"two method values with different receiver types",
+	`	a := A{1}
+	b := &B{"hey"}
+	f := a.Get
+	g := b.Len
+	return f()*10 + g()`,
+	13,
+	"type A struct{ n int }\n\nfunc (a A) Get() int { return a.n }\n\ntype B struct{ s string }\n\nfunc (b *B) Len() int { return len(b.s) }",
+);
+
+parity(
+	"method values on a named array and a named int",
+	`	v := V{1, 2, 3}
+	n := N(4)
+	f := v.Sum
+	g := n.Twice
+	return f()*100 + g()`,
+	608,
+	"type V [3]int\n\nfunc (v V) Sum() int {\n\ts := 0\n\tfor _, x := range v {\n\t\ts += x\n\t}\n\treturn s\n}\n\ntype N int\n\nfunc (n N) Twice() int { return int(n) * 2 }",
+);
+
+parity(
+	"value-receiver method value copies even when &c was taken by another method value",
+	`	c := C{1}
+	inc := c.Inc
+	get := c.Get
+	inc()
+	return get()`,
+	1,
+	"type C struct{ n int }\n\nfunc (c *C) Inc() { c.n++ }\n\nfunc (c C) Get() int { return c.n }",
+);
+
+parity(
+	"method value through a pointer to a value-receiver method copies *p",
+	`	p := &C{10}
+	pg := p.Get
+	p.n = 50
+	return pg()`,
+	10,
+	"type C struct{ n int }\n\nfunc (c C) Get() int { return c.n }",
+);
+
+parity(
+	"method value on a named-array value receiver copies the array",
+	`	v := V{1, 2, 3}
+	f := v.Sum
+	v[0] = 100
+	return f()`,
+	6,
+	"type V [3]int\n\nfunc (v V) Sum() int {\n\ts := 0\n\tfor _, x := range v {\n\t\ts += x\n\t}\n\treturn s\n}",
+);
+
+parity(
+	"pointer-receiver method value on a named int writes through to x",
+	`	x := N(1)
+	g := x.Inc
+	g()
+	g()
+	return int(x)`,
+	3,
+	"type N int\n\nfunc (n *N) Inc() { *n++ }",
+);
+
+parity(
+	"pointer-receiver method value on a named float64 writes through to x",
+	`	x := F(1)
+	g := x.Inc
+	g()
+	g()
+	return int(x)`,
+	4,
+	"type F float64\n\nfunc (f *F) Inc() { *f += 1.5 }",
+);
+
+parity(
+	"direct pointer-receiver call on a named int local",
+	`	x := N(1)
+	x.Inc()
+	x.Inc()
+	return int(x)`,
+	3,
+	"type N int\n\nfunc (n *N) Inc() { *n++ }",
+);
+
+parity(
+	"direct pointer-receiver call on a named float64 local",
+	`	x := F(1)
+	x.Inc()
+	x.Inc()
+	return int(x)`,
+	4,
+	"type F float64\n\nfunc (f *F) Inc() { *f += 1.5 }",
+);

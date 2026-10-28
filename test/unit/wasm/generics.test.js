@@ -3,8 +3,12 @@
 
 import {
 	assertEqual,
+	assertErrorContains,
+	compile,
 	compileHybrid,
+	compileHybridProject,
 	compileWasm,
+	runJs,
 	runWasm,
 	section,
 	test,
@@ -495,4 +499,633 @@ func Main() string {
 	const { exports } = runWasm(wasm, { stringTable });
 	const res = exports.Main();
 	assertEqual(res, "wasm_monomorph_strict");
+});
+
+// ── Task 0.3 — Generic Named Func Types ───────────────────────
+
+section("WASM Generics — Generic Named Func Types (Task 0.3)");
+
+test("function returning Seq[int] ranged over in a parity test", () => {
+	const src = `
+package main
+
+type Seq[V any] func(yield func(V) bool)
+
+func Count() Seq[int] {
+	return func(yield func(int) bool) {
+		if !yield(10) { return }
+		if !yield(20) { return }
+		if !yield(30) { return }
+	}
+}
+
+func Main() int {
+	sum := 0
+	for v := range Count() {
+		sum += v
+	}
+	return sum
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, 60n);
+	assertEqual(Number(jsRes), 60);
+});
+
+test("generic Map[A, B any](s Seq[A], f func(A) B) Seq[B]", () => {
+	const src = `
+package main
+
+type Seq[V any] func(yield func(V) bool)
+
+func FromSlice[T any](xs []T) Seq[T] {
+	return func(yield func(T) bool) {
+		for _, x := range xs {
+			if !yield(x) { return }
+		}
+	}
+}
+
+func Map[A, B any](s Seq[A], f func(A) B) Seq[B] {
+	return func(yield func(B) bool) {
+		for a := range s {
+			if !yield(f(a)) { return }
+		}
+	}
+}
+
+func Main() int {
+	xs := []int{1, 2, 3}
+	double := func(x int) int { return x * 2 }
+	sum := 0
+	for v := range Map(FromSlice(xs), double) {
+		sum += v
+	}
+	return sum
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, 12n);
+	assertEqual(Number(jsRes), 12);
+});
+
+section("WASM Generics — Generic Calls Inside Generic Bodies");
+
+test("generic function calling another generic with its type parameter", () => {
+	const src = `
+package main
+
+type Number interface { ~int | ~float64 }
+
+func less[T Number](a, b T) bool { return a < b }
+
+func Max[T Number](a, b T) T {
+	if less(a, b) {
+		return b
+	}
+	return a
+}
+
+func Main() float64 {
+	return float64(Max(3, 7)) + Max(2.5, 1.5)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, 9.5);
+	assertEqual(jsRes, wasmRes);
+});
+
+test("linked wasm program with generics and a cross-package call", async () => {
+	const res = await compileHybridProject({
+		"util/util.go": `//gofront:target both
+package util
+
+func Two() int { return 2 }
+
+func Id[T any](x T) T { return x }
+`,
+		"lib/lib.go": `//gofront:target wasm
+package lib
+
+import "../util"
+
+func Run() int { return util.Two() + util.Id(40) }
+`,
+		"main.go": `package main
+
+import "./lib"
+
+func main() { println(lib.Run()) }
+`,
+	});
+	assertEqual(res.lines.join("\n"), "42");
+});
+
+test("a recursive generic struct in a both package links into wasm and js", async () => {
+	const res = await compileHybridProject({
+		"util/util.go": `//gofront:target both
+package util
+
+type List[T any] struct {
+	V    T
+	Next *List[T]
+}
+
+func (l *List[T]) Len() int {
+	if l.Next == nil {
+		return 1
+	}
+	return 1 + l.Next.Len()
+}
+
+func Three() int {
+	l := &List[int]{V: 1, Next: &List[int]{V: 2, Next: &List[int]{V: 3}}}
+	return l.Len()
+}
+`,
+		"lib/lib.go": `//gofront:target wasm
+package lib
+
+import "../util"
+
+func Run() int { return util.Three() * 10 }
+`,
+		"main.go": `package main
+
+import (
+	"./lib"
+	"./util"
+)
+
+func main() { println(lib.Run() + util.Three()) }
+`,
+	});
+	assertEqual(res.lines.join("\n"), "33");
+});
+
+section("Generic zero values and type-parameter operators (Task 0.18)");
+
+// Builds \`lib\` once as \`both\` (JS code path) and once as \`wasm\`, prints
+// \`lib.Run()\` from a JS root and throws when the two backends disagree.
+async function libParity(libBody) {
+	const run = async (target) => {
+		const res = await compileHybridProject({
+			"lib/lib.go": `//gofront:target ${target}\npackage lib\n\n${libBody}`,
+			"main.go": `package main\n\nimport "./lib"\n\nfunc main() { println(lib.Run()) }\n`,
+		});
+		return res.lines.join("\n");
+	};
+	const js = await run("both");
+	const wasm = await run("wasm");
+	if (js !== wasm)
+		throw new Error(
+			`Output mismatch:\n  JS:   ${JSON.stringify(js)}\n  WASM: ${JSON.stringify(wasm)}`,
+		);
+	return js;
+}
+
+test('cmp.Or("", "x") and cmp.Or(0, 3) skip zero values', async () => {
+	const out = await libParity(`import (
+	"cmp"
+	"fmt"
+)
+
+func Run() string {
+	return fmt.Sprintf("%s|%d|%q|%d", cmp.Or("", "x"), cmp.Or(0, 3), cmp.Or("", ""), cmp.Or(0, 0))
+}
+`);
+	assertEqual(out, 'x|3|""|0');
+});
+
+const STACK = `
+type Stack[T any] struct {
+	items []T
+}
+
+func (s *Stack[T]) Push(v T) { s.items = append(s.items, v) }
+
+func (s *Stack[T]) Pop() (T, bool) {
+	var zero T
+	if len(s.items) == 0 {
+		return zero, false
+	}
+	v := s.items[len(s.items)-1]
+	s.items = s.items[:len(s.items)-1]
+	return v, true
+}
+`;
+
+test("Stack[int].Pop on an empty stack returns 0", () => {
+	const src = `
+package main
+${STACK}
+func Main() int {
+	s := &Stack[int]{}
+	s.Push(4)
+	a, _ := s.Pop()
+	b, ok := s.Pop()
+	var t Stack[string]
+	c, _ := t.Pop()
+	if ok || c != "" {
+		return -1
+	}
+	return a*10 + b
+}
+`;
+	const { wasmRes } = compileHybrid(src).run("Main");
+	assertEqual(Number(wasmRes), 40);
+});
+
+test("Stack[int].Pop through an interface returns 0", () => {
+	const src = `
+package main
+
+import "fmt"
+${STACK}
+
+type IntPopper interface {
+	Pop() (int, bool)
+}
+
+func Main() {
+	var p IntPopper = &Stack[int]{}
+	v, ok := p.Pop()
+	fmt.Println(v, ok)
+}
+`;
+	const { output } = compileHybrid(src).run("Main");
+	assertEqual(output, "0 false");
+});
+
+test("Abs[T Number](x T) T using -x", () => {
+	const src = `
+package main
+
+import "fmt"
+
+type Number interface {
+	~int | ~int64 | ~float64
+}
+
+func Abs[T Number](x T) T {
+	if x < 0 {
+		return -x
+	}
+	return +x
+}
+
+func Main() {
+	fmt.Println(Abs(-3), Abs(2), Abs(int64(-5)), Abs(-1.5))
+}
+`;
+	const { output } = compileHybrid(src).run("Main");
+	assertEqual(output, "3 2 5 1.5");
+});
+
+test("^x on an integer type parameter", () => {
+	const src = `
+package main
+
+type Signed interface {
+	~int | ~int32
+}
+
+func Flip[T Signed](x T) T { return ^x }
+
+func Main() int {
+	return Flip(5) + int(Flip(int32(-1)))
+}
+`;
+	const { wasmRes } = compileHybrid(src).run("Main");
+	assertEqual(Number(wasmRes), -6);
+});
+
+test("[2]T zero value in a generic body", () => {
+	const src = `
+package main
+
+import "fmt"
+
+type Point struct {
+	X, Y int
+}
+
+func Pair[T any]() [2]T {
+	var a [2]T
+	return a
+}
+
+func Main() {
+	p := Pair[Point]()
+	p[0].X = 5
+	fmt.Println(p[0].X, p[1].X, Pair[bool]()[0], Pair[float64]()[1])
+}
+`;
+	const { output } = compileHybrid(src).run("Main");
+	assertEqual(output, "5 0 false 0");
+});
+
+// JS only: WASM monomorphisation does not substitute T in \`new(T)\` and drops
+// named results when it copies a generic body (both fail to compile there).
+test("*new(T), named results and recovered results are zero in JS", () => {
+	const { js, errors } = compile(
+		`
+package main
+
+import "fmt"
+
+type Point struct {
+	X, Y int
+}
+
+func NewZero[T any]() T { return *new(T) }
+
+func Named[T any]() (r T, ok bool) { return }
+
+func Recovered[T any]() T {
+	defer func() { recover() }()
+	panic("boom")
+}
+
+func main() {
+	a, _ := Named[float64]()
+	b, ok := Named[Point]()
+	fmt.Println(NewZero[int](), NewZero[string]() == "", NewZero[Point]().X, a, b.X, ok, Recovered[int](), Recovered[bool]())
+}
+`,
+		{ strict: true },
+	);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "0 true 0 0 0 false 0 false");
+});
+
+test("generic body forwards its type parameter's zero value", () => {
+	const src = `
+package main
+
+import "fmt"
+
+func Zero[T any]() T {
+	var z T
+	return z
+}
+
+func Wrap[T any]() T { return Zero[T]() }
+
+func Apply(f func() int) int { return f() }
+
+func Main() {
+	fmt.Println(Wrap[int](), Apply(Zero[int]), len(Wrap[string]()), Wrap[bool]())
+}
+`;
+	const { output } = compileHybrid(src).run("Main");
+	assertEqual(output, "0 0 0 false");
+});
+
+test("generic struct fields of type T start at T's zero value", () => {
+	const src = `
+package main
+
+import "fmt"
+
+type Box[T any] struct {
+	V T
+	N int
+}
+
+func (b Box[T]) Get() T { return b.V }
+
+func Main() {
+	var a Box[int]
+	b := Box[int]{N: 2}
+	c := &Box[string]{}
+	fmt.Println(a.V, b.Get(), b.N, c.Get() == "", len(c.V))
+}
+`;
+	const { output } = compileHybrid(src).run("Main");
+	assertEqual(output, "0 0 2 true 0");
+});
+
+test("unary - on a non-numeric type parameter is rejected", () => {
+	const { errors } = compile(`
+package main
+
+func Neg[T ~string](x T) T { return -x }
+`);
+	assertErrorContains(errors, "- requires numeric");
+});
+
+test("unary ^ on a float type parameter is rejected", () => {
+	const { errors } = compile(`
+package main
+
+type Float interface {
+	~float32 | ~float64
+}
+
+func Flip[T Float](x T) T { return ^x }
+`);
+	assertErrorContains(errors, "^ requires integer");
+});
+
+test("unary ^, - and + on a type parameter whose constraint embeds a type set", () => {
+	const src = `
+package main
+
+import "fmt"
+
+type Integer interface{ ~int | ~int64 }
+
+type Num2 interface{ Integer }
+
+type Num3 interface {
+	Integer
+	String() string
+}
+
+type MyInt int
+
+func (m MyInt) String() string { return "m" }
+
+func B[T Num2](x T) T { return ^x }
+
+func E[T Num3](x T) T { return ^x }
+
+func G[T interface{ Integer }](x T) T { return ^x }
+
+func N[T Num2](x T) T { return -x }
+
+func P[T Num2](x T) T { return +x }
+
+func Main() {
+	fmt.Println(B(2), int(E(MyInt(3))), G(int64(4)), N(7), P(8))
+}
+`;
+	const { output } = compileHybrid(src).run("Main");
+	assertEqual(output, "-3 -4 -5 -7 8");
+});
+
+test("unary operators on type parameters reject constraints outside their type set", () => {
+	const cases = [
+		["func F[T ~int | ~string](x T) T { return -x }", "- requires numeric"],
+		["func F[T ~float64 | ~int](x T) T { return ^x }", "^ requires integer"],
+		["func F[T any](x T) T { return +x }", "+ requires numeric"],
+		["func F[T comparable](x T) T { return ^x }", "^ requires integer"],
+		[
+			"type Mixed interface{ ~int | ~string }\ntype Wrap interface{ Mixed }\nfunc F[T Wrap](x T) T { return -x }",
+			"- requires numeric",
+		],
+	];
+	for (const [decl, msg] of cases) {
+		const { errors } = compile(`package main\n\n${decl}\n`);
+		assertErrorContains(errors, msg);
+	}
+});
+
+// JS only: WASM does not support partial explicit instantiation (pre-existing).
+test("partial explicit instantiation infers the remaining type arguments in JS", () => {
+	const { js, errors } = compile(
+		`
+package main
+
+import "fmt"
+
+func Two[A, B any](b B) (A, B) {
+	var a A
+	var bb B
+	return a, bb
+}
+
+func Conv[U, T any](x T) U {
+	var u U
+	return u
+}
+
+func main() {
+	a, b := Two[int](true)
+	fmt.Println(a, b)
+	fmt.Println(Conv[int]("a"), Conv[string](1) == "")
+}
+`,
+		{ strict: true },
+	);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "0 false\n0 true");
+});
+
+section("Recursive generic types (Task 0.31)");
+
+function genericParity(name, src, expected) {
+	test(name, () => {
+		const res = compileHybrid(src).run("Main");
+		assertEqual(res.jsRes, expected);
+		assertEqual(Number(res.wasmRes), expected);
+	});
+}
+
+genericParity(
+	"a generic list refers to its own instantiation (P10)",
+	`package main
+
+type List[T any] struct {
+	V    T
+	Next *List[T]
+}
+
+func (l *List[T]) Len() int {
+	if l.Next == nil {
+		return 1
+	}
+	return 1 + l.Next.Len()
+}
+
+func Main() int {
+	l := &List[int]{V: 1, Next: &List[int]{V: 2, Next: &List[int]{V: 3}}}
+	return l.Next.V*10 + l.Len()
+}
+`,
+	23,
+);
+
+genericParity(
+	"a generic tree holds a slice of its own instantiation",
+	`package main
+
+type Tree[T any] struct {
+	V        T
+	Children []Tree[T]
+}
+
+func count[T any](t Tree[T]) int {
+	n := 1
+	for _, c := range t.Children {
+		n += count(c)
+	}
+	return n
+}
+
+func Main() int {
+	t := Tree[string]{V: "a", Children: []Tree[string]{{V: "bb"}, {V: "ccc", Children: []Tree[string]{{V: "d"}}}}}
+	return count(t)*10 + len(t.Children[1].V)
+}
+`,
+	43,
+);
+
+genericParity(
+	"mutually recursive generic types A[T] and B[T]",
+	`package main
+
+type A[T any] struct {
+	V T
+	B *B[T]
+}
+
+type B[T any] struct {
+	W T
+	A *A[T]
+}
+
+func Main() int {
+	a := &A[int]{V: 1}
+	b := &B[int]{W: 5, A: a}
+	a.B = b
+	return a.B.A.B.W*10 + a.V
+}
+`,
+	51,
+);
+
+test("Conversion to a type parameter (JS and WASM parity for in-range values)", () => {
+	const src = `
+package main
+
+type num interface {
+	~int | ~int8 | ~uint16 | ~int64 | ~uint64 | ~float64
+}
+
+func conv[T num](n uint64) T {
+	return T(n)
+}
+
+func Main() int {
+	return int(conv[int](7)) + int(conv[int8](100)) + int(conv[uint16](60000)) + int(conv[int64](1<<40)/1099511627776) + int(conv[float64](3))
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, 60111);
+	assertEqual(jsRes, wasmRes);
+});
+
+test("Conversion to a type parameter rejects a non-numeric operand", () => {
+	const { errors } = compile(`package main
+
+type num interface{ ~int | ~int64 }
+
+func conv[T num](s string) T {
+	return T(s)
+}
+
+func main() {}`);
+	assertErrorContains(errors, "cannot convert string to T");
 });

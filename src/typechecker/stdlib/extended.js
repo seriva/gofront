@@ -165,18 +165,6 @@ export function setupExtendedGlobals(globals, types) {
 		kind: "namespace",
 		name: "maps",
 		members: {
-			Keys: {
-				kind: "func",
-				params: [ANY],
-				returns: [ANY],
-				_derivedReturn: "keysOfArg0",
-			},
-			Values: {
-				kind: "func",
-				params: [ANY],
-				returns: [ANY],
-				_derivedReturn: "valuesOfArg0",
-			},
 			Clone: {
 				kind: "func",
 				params: [ANY],
@@ -274,12 +262,26 @@ export function setupExtendedGlobals(globals, types) {
 							["_self", ANY],
 						]
 					: name === "bytes.Buffer"
-						? [["_buf", BYTE_SLICE_T]]
+						? [
+								["_buf", BYTE_SLICE_T],
+								["_lastOp", INT],
+								["_lastRuneLen", INT],
+							]
 						: [],
 			),
 			methods: new Map([..._builderBase, ...extra]),
 		},
 	});
+	const ioPkg = globals.lookup("io");
+	const IO_READER = ioPkg?.members?.Reader ?? {
+		kind: "interface",
+		name: "io.Reader",
+	};
+	const IO_WRITER = ioPkg?.members?.Writer ?? {
+		kind: "interface",
+		name: "io.Writer",
+	};
+
 	types.set(
 		"strings.Builder",
 		_makeBuilderType("strings.Builder", [
@@ -292,6 +294,34 @@ export function setupExtendedGlobals(globals, types) {
 			["WriteRune", { kind: "func", params: [INT], returns: [INT, ERROR] }],
 			["Bytes", { kind: "func", params: [], returns: [BYTE_SLICE_T] }],
 			["Read", { kind: "func", params: [BYTE_SLICE_T], returns: [INT, ERROR] }],
+			["ReadRune", { kind: "func", params: [], returns: [INT32, INT, ERROR] }],
+			["UnreadRune", { kind: "func", params: [], returns: [ERROR] }],
+			["ReadByte", { kind: "func", params: [], returns: [UINT8, ERROR] }],
+			["UnreadByte", { kind: "func", params: [], returns: [ERROR] }],
+			[
+				"ReadBytes",
+				{ kind: "func", params: [UINT8], returns: [BYTE_SLICE_T, ERROR] },
+			],
+			[
+				"ReadString",
+				{ kind: "func", params: [UINT8], returns: [STRING, ERROR] },
+			],
+			[
+				"ReadFrom",
+				{ kind: "func", params: [IO_READER], returns: [INT64, ERROR] },
+			],
+			[
+				"WriteTo",
+				{ kind: "func", params: [IO_WRITER], returns: [INT64, ERROR] },
+			],
+			["Next", { kind: "func", params: [INT], returns: [BYTE_SLICE_T] }],
+			["Truncate", { kind: "func", params: [INT], returns: [VOID] }],
+			["Available", { kind: "func", params: [], returns: [INT] }],
+			[
+				"AvailableBuffer",
+				{ kind: "func", params: [], returns: [BYTE_SLICE_T] },
+			],
+			["Peek", { kind: "func", params: [INT], returns: [BYTE_SLICE_T, ERROR] }],
 		]),
 	);
 	types.set("strings.Replacer", {
@@ -302,6 +332,14 @@ export function setupExtendedGlobals(globals, types) {
 			fields: new Map([["_pairs", STR_SLICE_T]]),
 			methods: new Map([
 				["Replace", { kind: "func", params: [STRING], returns: [STRING] }],
+				[
+					"WriteString",
+					{
+						kind: "func",
+						params: [IO_WRITER, STRING],
+						returns: [INT, ERROR],
+					},
+				],
 			]),
 		},
 	});
@@ -313,11 +351,36 @@ export function setupExtendedGlobals(globals, types) {
 			fields: new Map([
 				["_src", srcType],
 				["_pos", INT],
+				["_prev", INT],
 			]),
 			methods: new Map([
 				[
 					"Read",
 					{ kind: "func", params: [BYTE_SLICE_T], returns: [INT, ERROR] },
+				],
+				[
+					"ReadAt",
+					{
+						kind: "func",
+						params: [BYTE_SLICE_T, INT64],
+						returns: [INT, ERROR],
+					},
+				],
+				["ReadByte", { kind: "func", params: [], returns: [UINT8, ERROR] }],
+				["UnreadByte", { kind: "func", params: [], returns: [ERROR] }],
+				[
+					"ReadRune",
+					{ kind: "func", params: [], returns: [INT32, INT, ERROR] },
+				],
+				["UnreadRune", { kind: "func", params: [], returns: [ERROR] }],
+				[
+					"Seek",
+					{ kind: "func", params: [INT64, INT], returns: [INT64, ERROR] },
+				],
+				["Size", { kind: "func", params: [], returns: [INT64] }],
+				[
+					"WriteTo",
+					{ kind: "func", params: [IO_WRITER], returns: [INT64, ERROR] },
 				],
 				["Len", { kind: "func", params: [], returns: [INT] }],
 				["Reset", { kind: "func", params: [resetArgType], returns: [VOID] }],
@@ -347,11 +410,6 @@ export function setupExtendedGlobals(globals, types) {
 			]),
 		},
 	});
-	const ioPkg = globals.lookup("io");
-	const IO_READER = ioPkg?.members?.Reader ?? {
-		kind: "interface",
-		name: "io.Reader",
-	};
 	types.set("io.LimitedReader", {
 		kind: "named",
 		name: "io.LimitedReader",
@@ -389,6 +447,7 @@ export function setupExtendedGlobals(globals, types) {
 			returns: [{ kind: "pointer", base: types.get("bytes.Reader") }],
 		};
 		bytesPkg.members.Reader = types.get("bytes.Reader");
+		bytesPkg.members.Buffer = types.get("bytes.Buffer");
 	}
 
 	globals.define("rand", {
@@ -484,6 +543,23 @@ export function setupExtendedGlobals(globals, types) {
 		members: globals.lookup("path").members,
 	});
 
+	const TIME_TIME = types.get("time.Time");
+	const TIME_DURATION = types.get("time.Duration");
+
+	const CONTEXT_T = {
+		kind: "named",
+		name: "context.Context",
+		underlying: {
+			kind: "interface",
+			methods: new Map([
+				["Deadline", { kind: "func", params: [], returns: [TIME_TIME, BOOL] }],
+				["Err", { kind: "func", params: [], returns: [ERROR] }],
+				["Value", { kind: "func", params: [ANY], returns: [ANY] }],
+			]),
+		},
+	};
+	types.set("context.Context", CONTEXT_T);
+
 	const TESTING_T = {
 		kind: "named",
 		name: "testing.T",
@@ -529,18 +605,237 @@ export function setupExtendedGlobals(globals, types) {
 			},
 		],
 		["Name", { kind: "func", params: [], returns: [STRING] }],
+		[
+			"Cleanup",
+			{
+				kind: "func",
+				params: [{ kind: "func", params: [], returns: [VOID] }],
+				returns: [VOID],
+			},
+		],
+		["Setenv", { kind: "func", params: [STRING, STRING], returns: [VOID] }],
+		["Deadline", { kind: "func", params: [], returns: [TIME_TIME, BOOL] }],
+		["Context", { kind: "func", params: [], returns: [CONTEXT_T] }],
+		["Parallel", { kind: "func", params: [], returns: [VOID] }],
+		["SkipNow", { kind: "func", params: [], returns: [VOID] }],
+		["Attr", { kind: "func", params: [STRING, STRING], returns: [VOID] }],
+		["Output", { kind: "func", params: [], returns: [IO_WRITER] }],
 	]);
+
+	const TESTING_B = {
+		kind: "named",
+		name: "testing.B",
+		underlying: {
+			kind: "struct",
+			fields: new Map([["N", INT]]),
+			methods: new Map(),
+		},
+	};
+	const TESTING_B_PTR = { kind: "pointer", base: TESTING_B };
+
+	TESTING_B.underlying.methods = new Map([
+		[
+			"Cleanup",
+			{
+				kind: "func",
+				params: [{ kind: "func", params: [], returns: [VOID] }],
+				returns: [VOID],
+			},
+		],
+		["Error", { kind: "func", params: [ANY], returns: [VOID], variadic: true }],
+		[
+			"Errorf",
+			{ kind: "func", params: [STRING, ANY], returns: [VOID], variadic: true },
+		],
+		["Fatal", { kind: "func", params: [ANY], returns: [VOID], variadic: true }],
+		[
+			"Fatalf",
+			{ kind: "func", params: [STRING, ANY], returns: [VOID], variadic: true },
+		],
+		["Fail", { kind: "func", params: [], returns: [VOID] }],
+		["Failed", { kind: "func", params: [], returns: [BOOL] }],
+		["FailNow", { kind: "func", params: [], returns: [VOID] }],
+		["Log", { kind: "func", params: [ANY], returns: [VOID], variadic: true }],
+		[
+			"Logf",
+			{ kind: "func", params: [STRING, ANY], returns: [VOID], variadic: true },
+		],
+		["Skip", { kind: "func", params: [ANY], returns: [VOID], variadic: true }],
+		[
+			"Skipf",
+			{ kind: "func", params: [STRING, ANY], returns: [VOID], variadic: true },
+		],
+		["Skipped", { kind: "func", params: [], returns: [BOOL] }],
+		["SkipNow", { kind: "func", params: [], returns: [VOID] }],
+		["Helper", { kind: "func", params: [], returns: [VOID] }],
+		["Name", { kind: "func", params: [], returns: [STRING] }],
+		["Attr", { kind: "func", params: [STRING, STRING], returns: [VOID] }],
+		["Context", { kind: "func", params: [], returns: [CONTEXT_T] }],
+		["Elapsed", { kind: "func", params: [], returns: [TIME_DURATION] }],
+		["Loop", { kind: "func", params: [], returns: [BOOL] }],
+		["Output", { kind: "func", params: [], returns: [IO_WRITER] }],
+		["ReportAllocs", { kind: "func", params: [], returns: [VOID] }],
+		[
+			"ReportMetric",
+			{ kind: "func", params: [FLOAT64, STRING], returns: [VOID] },
+		],
+		["ResetTimer", { kind: "func", params: [], returns: [VOID] }],
+		[
+			"Run",
+			{
+				kind: "func",
+				params: [
+					STRING,
+					{ kind: "func", params: [TESTING_B_PTR], returns: [VOID] },
+				],
+				returns: [BOOL],
+			},
+		],
+		["SetBytes", { kind: "func", params: [INT64], returns: [VOID] }],
+		["Setenv", { kind: "func", params: [STRING, STRING], returns: [VOID] }],
+		["StartTimer", { kind: "func", params: [], returns: [VOID] }],
+		["StopTimer", { kind: "func", params: [], returns: [VOID] }],
+	]);
+
+	const TESTING_M = {
+		kind: "named",
+		name: "testing.M",
+		underlying: {
+			kind: "struct",
+			fields: new Map(),
+			methods: new Map([["Run", { kind: "func", params: [], returns: [INT] }]]),
+		},
+	};
+
+	const TESTING_TB = {
+		kind: "named",
+		name: "testing.TB",
+		underlying: {
+			kind: "interface",
+			methods: new Map([
+				["Attr", { kind: "func", params: [STRING, STRING], returns: [VOID] }],
+				[
+					"Cleanup",
+					{
+						kind: "func",
+						params: [{ kind: "func", params: [], returns: [VOID] }],
+						returns: [VOID],
+					},
+				],
+				["Context", { kind: "func", params: [], returns: [CONTEXT_T] }],
+				[
+					"Error",
+					{ kind: "func", params: [ANY], returns: [VOID], variadic: true },
+				],
+				[
+					"Errorf",
+					{
+						kind: "func",
+						params: [STRING, ANY],
+						returns: [VOID],
+						variadic: true,
+					},
+				],
+				["Fail", { kind: "func", params: [], returns: [VOID] }],
+				["Failed", { kind: "func", params: [], returns: [BOOL] }],
+				["FailNow", { kind: "func", params: [], returns: [VOID] }],
+				[
+					"Fatal",
+					{ kind: "func", params: [ANY], returns: [VOID], variadic: true },
+				],
+				[
+					"Fatalf",
+					{
+						kind: "func",
+						params: [STRING, ANY],
+						returns: [VOID],
+						variadic: true,
+					},
+				],
+				["Helper", { kind: "func", params: [], returns: [VOID] }],
+				[
+					"Log",
+					{ kind: "func", params: [ANY], returns: [VOID], variadic: true },
+				],
+				[
+					"Logf",
+					{
+						kind: "func",
+						params: [STRING, ANY],
+						returns: [VOID],
+						variadic: true,
+					},
+				],
+				["Name", { kind: "func", params: [], returns: [STRING] }],
+				["Output", { kind: "func", params: [], returns: [IO_WRITER] }],
+				["Setenv", { kind: "func", params: [STRING, STRING], returns: [VOID] }],
+				[
+					"Skip",
+					{ kind: "func", params: [ANY], returns: [VOID], variadic: true },
+				],
+				[
+					"Skipf",
+					{
+						kind: "func",
+						params: [STRING, ANY],
+						returns: [VOID],
+						variadic: true,
+					},
+				],
+				["SkipNow", { kind: "func", params: [], returns: [VOID] }],
+				["Skipped", { kind: "func", params: [], returns: [BOOL] }],
+			]),
+		},
+	};
+
+	const BENCHMARK_RESULT_T = {
+		kind: "named",
+		name: "testing.BenchmarkResult",
+		underlying: {
+			kind: "struct",
+			fields: new Map([
+				["N", INT],
+				["T", TIME_DURATION],
+				["Bytes", INT64],
+				["MemAllocs", UINT64],
+				["MemBytes", UINT64],
+				["Extra", { kind: "map", key: STRING, value: FLOAT64 }],
+			]),
+			methods: new Map([
+				["AllocedBytesPerOp", { kind: "func", params: [], returns: [INT64] }],
+				["AllocsPerOp", { kind: "func", params: [], returns: [INT64] }],
+				["MemString", { kind: "func", params: [], returns: [STRING] }],
+				["NsPerOp", { kind: "func", params: [], returns: [INT64] }],
+				["String", { kind: "func", params: [], returns: [STRING] }],
+			]),
+		},
+	};
 
 	globals.define("testing", {
 		kind: "namespace",
 		name: "testing",
 		members: {
 			T: TESTING_T,
+			B: TESTING_B,
+			M: TESTING_M,
+			TB: TESTING_TB,
+			BenchmarkResult: BENCHMARK_RESULT_T,
+			Benchmark: {
+				kind: "func",
+				params: [{ kind: "func", params: [TESTING_B_PTR], returns: [VOID] }],
+				returns: [BENCHMARK_RESULT_T],
+			},
+			Init: { kind: "func", params: [], returns: [VOID] },
 			Short: { kind: "func", params: [], returns: [BOOL] },
+			Testing: { kind: "func", params: [], returns: [BOOL] },
 			Verbose: { kind: "func", params: [], returns: [BOOL] },
 		},
 	});
 	types.set("testing.T", TESTING_T);
+	types.set("testing.B", TESTING_B);
+	types.set("testing.M", TESTING_M);
+	types.set("testing.TB", TESTING_TB);
+	types.set("testing.BenchmarkResult", BENCHMARK_RESULT_T);
 
 	// ── sync ──────────────────────────────────────────────────────
 	const MUTEX_T = {
@@ -553,6 +848,14 @@ export function setupExtendedGlobals(globals, types) {
 			["TryLock", { kind: "func", params: [], returns: [BOOL] }],
 		]),
 	};
+	const LOCKER_T = {
+		kind: "interface",
+		name: "sync.Locker",
+		methods: new Map([
+			["Lock", { kind: "func", params: [], returns: [VOID] }],
+			["Unlock", { kind: "func", params: [], returns: [VOID] }],
+		]),
+	};
 	const RWMUTEX_T = {
 		kind: "named",
 		name: "sync.RWMutex",
@@ -562,6 +865,7 @@ export function setupExtendedGlobals(globals, types) {
 			["Unlock", { kind: "func", params: [], returns: [VOID] }],
 			["RLock", { kind: "func", params: [], returns: [VOID] }],
 			["RUnlock", { kind: "func", params: [], returns: [VOID] }],
+			["RLocker", { kind: "func", params: [], returns: [LOCKER_T] }],
 			["TryLock", { kind: "func", params: [], returns: [BOOL] }],
 			["TryRLock", { kind: "func", params: [], returns: [BOOL] }],
 		]),
@@ -589,14 +893,6 @@ export function setupExtendedGlobals(globals, types) {
 			["Add", { kind: "func", params: [INT], returns: [VOID] }],
 			["Done", { kind: "func", params: [], returns: [VOID] }],
 			["Wait", { kind: "func", params: [], returns: [VOID] }],
-		]),
-	};
-	const LOCKER_T = {
-		kind: "interface",
-		name: "sync.Locker",
-		methods: new Map([
-			["Lock", { kind: "func", params: [], returns: [VOID] }],
-			["Unlock", { kind: "func", params: [], returns: [VOID] }],
 		]),
 	};
 	globals.define("sync", {

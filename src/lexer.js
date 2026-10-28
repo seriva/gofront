@@ -54,6 +54,7 @@ const KEYWORDS = new Set([
 	"map",
 	"new",
 	"fallthrough",
+	"goto",
 	"defer",
 	"async",
 	"await",
@@ -103,6 +104,17 @@ export class LexError extends Error {
 	}
 }
 
+const SIMPLE_ESCAPES = {
+	a: 7,
+	b: 8,
+	f: 12,
+	n: 10,
+	r: 13,
+	t: 9,
+	v: 11,
+	"\\": 92,
+};
+
 export class Lexer {
 	constructor(source, filename = null) {
 		this.src = source;
@@ -113,6 +125,8 @@ export class Lexer {
 		this.filename = filename;
 		this.target = null;
 		this.targetDirective = null;
+		this.intrinsics = new Map(); // line -> name of a //gofront:intrinsic
+		this.embedDirectives = []; // {line, col} of each //go:embed line comment
 	}
 
 	// ── Primitives ──────────────────────────────────────────────
@@ -158,6 +172,15 @@ export class Lexer {
 				while (this.pos < this.src.length && this.peek() !== "\n")
 					this.advance();
 				const comment = this.src.slice(start, this.pos);
+				if (
+					/^\/\/go:embed(?:\s|$)/.test(comment) &&
+					/^[ \t]*$/.test(
+						this.src.slice(this.src.lastIndexOf("\n", start - 1) + 1, start),
+					)
+				)
+					this.embedDirectives.push({ line, col });
+				const intrinsic = comment.match(/^\/\/gofront:intrinsic\s+(\S+)/);
+				if (intrinsic) this.intrinsics.set(line, intrinsic[1]);
 				const match = comment.match(/^\/\/gofront:target\s+(\S+)/);
 				if (match) {
 					this.target = match[1];
@@ -222,35 +245,53 @@ export class Lexer {
 				if (parts === null) parts = [];
 				if (this.pos > start) parts.push(this.src.slice(start, this.pos));
 				this.advance(); // skip \
-				const esc = this.advance();
-				switch (esc) {
-					case "n":
-						parts.push("\n");
-						break;
-					case "t":
-						parts.push("\t");
-						break;
-					case "r":
-						parts.push("\r");
-						break;
-					case '"':
-						parts.push('"');
-						break;
-					case "\\":
-						parts.push("\\");
-						break;
-					case "0":
-						parts.push("\0");
-						break;
-					default:
-						parts.push(`\\${esc}`);
-				}
+				parts.push(String.fromCodePoint(this.readEscape('"')));
 				start = this.pos;
 			} else {
 				this.advance();
 			}
 		}
 		throw new LexError("Unterminated string", l, c, this.filename, this.src);
+	}
+
+	// Reads the escape after a consumed backslash and returns its code point.
+	// `quote` is the enclosing delimiter: `\'` is valid only in runes and
+	// `\"` only in strings. `\xNN` and octal escapes give U+0000-U+00FF (see
+	// plan §1.1: strings are JS strings, so \x80-\xff are code points, not raw bytes).
+	readEscape(quote) {
+		const l = this.line,
+			c = this.col;
+		const fail = (msg) => {
+			throw new LexError(msg, l, c, this.filename, this.src);
+		};
+		const esc = this.advance();
+		const simple = SIMPLE_ESCAPES[esc];
+		if (simple !== undefined) return simple;
+		if (esc === quote) return esc.charCodeAt(0);
+		if (esc === "x") return this.readEscapeDigits(2, 16, fail);
+		if (esc === "u" || esc === "U") {
+			const v = this.readEscapeDigits(esc === "u" ? 4 : 8, 16, fail);
+			if (v > 0x10ffff || (v >= 0xd800 && v < 0xe000))
+				fail("escape is invalid Unicode code point");
+			return v;
+		}
+		if (esc >= "0" && esc <= "7") {
+			const v = Number(esc) * 64 + this.readEscapeDigits(2, 8, fail);
+			if (v > 255) fail("octal escape value exceeds 255");
+			return v;
+		}
+		return fail(`unknown escape sequence: \\${esc}`);
+	}
+
+	readEscapeDigits(n, radix, fail) {
+		let v = 0;
+		for (let i = 0; i < n; i++) {
+			const d = Number.parseInt(this.src[this.pos] ?? "", radix);
+			if (Number.isNaN(d)) fail("invalid character in escape sequence");
+			v = v * radix + d;
+			this.advance();
+		}
+		return v;
 	}
 
 	readRawString() {
@@ -279,35 +320,7 @@ export class Lexer {
 		let code;
 		if (this.peek() === "\\") {
 			this.advance();
-			const esc = this.advance();
-			switch (esc) {
-				case "n":
-					code = 10;
-					break;
-				case "t":
-					code = 9;
-					break;
-				case "r":
-					code = 13;
-					break;
-				case "'":
-					code = 39;
-					break;
-				case "\\":
-					code = 92;
-					break;
-				case "0":
-					code = 0;
-					break;
-				default:
-					throw new LexError(
-						`Unknown escape in rune literal: \\${esc}`,
-						l,
-						c,
-						this.filename,
-						this.src,
-					);
-			}
+			code = this.readEscape("'");
 		} else if (this.peek() !== "'") {
 			code = this.src.codePointAt(this.pos);
 			this.advance();
@@ -541,6 +554,8 @@ export class Lexer {
 		this.push(T.EOF, "", this.line, this.col);
 		this.tokens.target = this.target;
 		this.tokens.targetDirective = this.targetDirective;
+		this.tokens.intrinsics = this.intrinsics;
+		this.tokens.embedDirectives = this.embedDirectives;
 		return this.tokens;
 	}
 	_readPlusOp(l, c) {

@@ -27,6 +27,7 @@ import {
 	assertErrorContains,
 	assertThrows,
 	compile,
+	compileWasm,
 	section,
 	summarize,
 	test,
@@ -1006,6 +1007,352 @@ func TestSub(t *testing.T) {
 			assertContains(result.stdout, "--- FAIL: TestSub/bad");
 			assertContains(result.stdout, "one is 1");
 			assert(!result.stdout.includes("inner should pass"));
+		},
+	);
+});
+
+section("test-runner — testing additions (Task 3.6)");
+
+test("t.Cleanup runs in LIFO order even after t.Fatal (JS)", async () => {
+	await withTempDir(
+		{
+			"cleanup_test.go": `package cleanup
+import "testing"
+import "fmt"
+import "os"
+
+func TestCleanupOrder(t *testing.T) {
+  t.Cleanup(func() {
+    fmt.Fprintln(os.Stderr, "cleanup 1")
+  })
+  t.Cleanup(func() {
+    fmt.Fprintln(os.Stderr, "cleanup 2")
+  })
+  t.Fatal("fatal error")
+}
+`,
+		},
+		async (dir) => {
+			const result = await runTests(dir, {
+				captureOutput: true,
+				verbose: true,
+			});
+			assertEqual(result.exitCode, 1);
+			assertContains(result.stdout, "--- FAIL: TestCleanupOrder");
+			assertContains(result.stdout, "fatal error");
+			const combined = result.stdout + result.stderr;
+			const idx2 = combined.indexOf("cleanup 2");
+			const idx1 = combined.indexOf("cleanup 1");
+			assert(idx2 !== -1 && idx1 !== -1 && idx2 < idx1);
+		},
+	);
+});
+
+test("t.Cleanup runs in LIFO order in wasm packages", async () => {
+	await withTempDir(
+		{
+			"w.go": `//gofront:target wasm
+package w
+`,
+			"w_test.go": `package w
+import "testing"
+import "fmt"
+import "os"
+
+func TestWasmCleanup(t *testing.T) {
+  t.Cleanup(func() {
+    fmt.Fprintln(os.Stderr, "wasm cleanup 1")
+  })
+  t.Cleanup(func() {
+    fmt.Fprintln(os.Stderr, "wasm cleanup 2")
+  })
+  t.Fatal("wasm fatal")
+}
+`,
+		},
+		async (dir) => {
+			const result = await runTests(dir, {
+				captureOutput: true,
+				verbose: true,
+			});
+			assertEqual(result.exitCode, 1);
+			assertContains(result.stdout, "--- FAIL: TestWasmCleanup");
+			assertContains(result.stdout, "wasm fatal");
+			const combined = result.stdout + result.stderr;
+			const idx2 = combined.indexOf("wasm cleanup 2");
+			const idx1 = combined.indexOf("wasm cleanup 1");
+			assert(idx2 !== -1 && idx1 !== -1 && idx2 < idx1);
+		},
+	);
+});
+
+test("t.TempDir and t.Chdir report host exclusion diagnostic", () => {
+	const srcTemp = `package p
+import "testing"
+func TestTemp(t *testing.T) {
+  _ = t.TempDir()
+}
+`;
+	const resTemp = compile(srcTemp);
+	assert(resTemp.errors.length > 0);
+	assertErrorContains(
+		resTemp.errors,
+		"testing.T.TempDir is not available: file system",
+	);
+
+	const srcChdir = `package p
+import "testing"
+func TestCd(t *testing.T) {
+  t.Chdir("dir")
+}
+`;
+	const resChdir = compile(srcChdir);
+	assert(resChdir.errors.length > 0);
+	assertErrorContains(
+		resChdir.errors,
+		"testing.T.Chdir is not available: file system",
+	);
+});
+
+test("runTests executes benchmarks matching -bench flag", async () => {
+	await withTempDir(
+		{
+			"bench_test.go": `package bench
+import "testing"
+
+func BenchmarkClassic(b *testing.B) {
+  var count int
+  for i := 0; i < b.N; i++ {
+    count++
+  }
+}
+
+func BenchmarkLoop(b *testing.B) {
+  var count int
+  for b.Loop() {
+    count++
+  }
+}
+`,
+		},
+		async (dir) => {
+			const result = await runTests(dir, {
+				captureOutput: true,
+				bench: ".",
+			});
+			assertEqual(result.exitCode, 0);
+			assertContains(result.stdout, "BenchmarkClassic");
+			assertContains(result.stdout, "BenchmarkLoop");
+			assertContains(result.stdout, "ns/op");
+		},
+	);
+});
+
+test("runTests executes TestMain and skips tests when m.Run() is not called", async () => {
+	await withTempDir(
+		{
+			"main_test.go": `package tm
+import "testing"
+import "fmt"
+import "os"
+
+var testRan = false
+
+func TestMain(m *testing.M) {
+  fmt.Fprintln(os.Stderr, "TestMain running without m.Run()")
+  // Omitting m.Run() skips tests
+}
+
+func TestSkippedByMain(t *testing.T) {
+  testRan = true
+  t.Error("should not run")
+}
+`,
+		},
+		async (dir) => {
+			const result = await runTests(dir, {
+				captureOutput: true,
+			});
+			assertEqual(result.exitCode, 0);
+			assertContains(
+				result.stdout + result.stderr,
+				"TestMain running without m.Run()",
+			);
+			assert(!result.stdout.includes("should not run"));
+		},
+	);
+});
+
+test("runTests executes TestMain and runs tests when m.Run() is called", async () => {
+	await withTempDir(
+		{
+			"main2_test.go": `package tm2
+import "testing"
+import "fmt"
+import "os"
+
+func TestMain(m *testing.M) {
+  fmt.Fprintln(os.Stderr, "setup before m.Run()")
+  code := m.Run()
+  fmt.Fprintf(os.Stderr, "exit code: %d\\n", code)
+}
+
+func TestPass(t *testing.T) {
+  t.Log("test passed")
+}
+`,
+		},
+		async (dir) => {
+			const result = await runTests(dir, {
+				captureOutput: true,
+				verbose: true,
+			});
+			assertEqual(result.exitCode, 0);
+			const combined = result.stdout + result.stderr;
+			assertContains(combined, "setup before m.Run()");
+			assertContains(combined, "exit code: 0");
+			assertContains(result.stdout, "--- PASS: TestPass");
+		},
+	);
+});
+
+test("testing.Benchmark compiles and runs in JS without ICE or constant reassignment", () => {
+	const src = `package main
+import "testing"
+func main() {
+  res := testing.Benchmark(func(b *testing.B) {
+    for i := 0; i < b.N; i++ {}
+  })
+  _ = res
+}
+`;
+	const out = compile(src);
+	assertEqual(out.errors.length, 0);
+	new Function(out.js)();
+});
+
+test("package-level testing functions in wasm package produce clean diagnostic", () => {
+	const src = `package main
+import "testing"
+func main() {
+  _ = testing.Short()
+}
+`;
+	const res = compileWasm(src);
+	assert(res.errors.length > 0);
+	assertErrorContains(
+		res.errors,
+		"'testing.Short' is not yet available in wasm packages",
+	);
+});
+
+test("WASM benchmarks and testing types (b.N, b.Loop, BenchmarkResult.N, testing.TB, m.Run)", () => {
+	const src = `package main
+import "testing"
+func helper(tb testing.TB) {
+  tb.Helper()
+}
+func BenchmarkWasm(b *testing.B) {
+  for i := 0; i < b.N; i++ {}
+  for b.Loop() {}
+  var res testing.BenchmarkResult
+  _ = res.N
+  helper(b)
+  _ = b.Elapsed()
+}
+func TestWasmTB(t *testing.T) {
+  helper(t)
+  t.Context()
+  t.Output()
+  t.Deadline()
+}
+func TestMain(m *testing.M) {
+  code := m.Run()
+  _ = code
+}
+`;
+	const out = compileWasm(src);
+	assertEqual(out.errors.length, 0);
+	new WebAssembly.Module(out.wasm);
+});
+
+test("runTests propagates failure when TestMain calls os.Exit(m.Run())", async () => {
+	await withTempDir(
+		{
+			"tm_fail_test.go": `package tmfail
+import "testing"
+import "os"
+
+func TestMain(m *testing.M) {
+  os.Exit(m.Run())
+}
+
+func TestShouldFail(t *testing.T) {
+  t.Fatal("expected failure")
+}
+`,
+		},
+		async (dir) => {
+			const result = await runTests(dir, {
+				captureOutput: true,
+			});
+			assertEqual(result.exitCode, 1);
+			assertContains(result.stdout, "--- FAIL: TestShouldFail");
+		},
+	);
+});
+
+test("sync.OnceFunc, OnceValue, and OnceValues re-panic on subsequent calls", async () => {
+	await withTempDir(
+		{
+			"main.go": `package main
+import "sync"
+
+func main() {
+  f := sync.OnceFunc(func() { panic("panic-func") })
+  func() {
+    defer func() { _ = recover() }()
+    f()
+  }()
+  func() {
+    defer func() {
+      r := recover()
+      if r != "panic-func" { panic("expected re-panic") }
+    }()
+    f()
+  }()
+
+  fVal := sync.OnceValue(func() int { panic("panic-val") })
+  func() {
+    defer func() { _ = recover() }()
+    fVal()
+  }()
+  func() {
+    defer func() {
+      r := recover()
+      if r != "panic-val" { panic("expected re-panic") }
+    }()
+    fVal()
+  }()
+
+  fVals := sync.OnceValues(func() (int, string) { panic("panic-vals") })
+  func() {
+    defer func() { _ = recover() }()
+    fVals()
+  }()
+  func() {
+    defer func() {
+      r := recover()
+      if r != "panic-vals" { panic("expected re-panic") }
+    }()
+    fVals()
+  }()
+}
+`,
+		},
+		async (dir) => {
+			const out = compileDir(dir);
+			new Function(out.js)();
 		},
 	);
 });

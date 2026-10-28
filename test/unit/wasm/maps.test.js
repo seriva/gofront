@@ -3,11 +3,27 @@
 
 import {
 	assertEqual,
-	assertThrows,
+	compile,
 	compileHybrid,
+	compileHybridProject,
+	runJs,
 	section,
 	test,
 } from "../helpers.js";
+
+// maps.Keys/Values are Go-source (iter.Seq), which the single-file
+// `compileHybrid` helper does not load: build `src` (a package with
+// `Main() string`) as a project's lib, once as wasm and once as both.
+async function runMapsProject(src) {
+	const run = async (target) => {
+		const res = await compileHybridProject({
+			"lib/lib.go": `//gofront:target ${target}\n${src.replace("package main", "package lib")}`,
+			"main.go": `package main\n\nimport "./lib"\n\nfunc main() { println(lib.Main()) }\n`,
+		});
+		return res.lines.join("\n");
+	};
+	return { wasmRes: await run("wasm"), jsRes: await run("both") };
+}
 
 section("WASM Maps — Basics & CRUD");
 
@@ -219,14 +235,18 @@ test("Assignment to entry in nil map traps with runtime panic", () => {
 	const src = `
 package main
 
-func Main() {
+func Main() (res string) {
+	defer func() {
+		if r := recover(); r != nil { res = r.(string) }
+	}()
 	var m map[string]int
 	m["key"] = 123
+	return "nopanic"
 }
 `;
-	assertThrows(() => {
-		compileHybrid(src).run("Main");
-	}, "assignment to entry in nil map");
+	// Both backends panic (strict mode in JS) with the same message.
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.wasmRes, "assignment to entry in nil map");
 });
 
 section("WASM Maps — Growth & Rehashing");
@@ -356,16 +376,19 @@ func Main() string {
 
 section("WASM Stdlib — maps Package");
 
-test("maps.Keys and maps.Values in insertion order", () => {
+test("maps.Keys and maps.Values in insertion order", async () => {
 	const src = `
 package main
 
-import "maps"
+import (
+	"maps"
+	"slices"
+)
 
 func Main() string {
 	m := map[string]int{"x": 10, "y": 20, "z": 30}
-	keys := maps.Keys(m)
-	vals := maps.Values(m)
+	keys := slices.Collect(maps.Keys(m))
+	vals := slices.Collect(maps.Values(m))
 	if len(keys) != 3 || len(vals) != 3 {
 		return "fail len"
 	}
@@ -378,7 +401,7 @@ func Main() string {
 	return "ok"
 }
 `;
-	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	const { wasmRes, jsRes } = await runMapsProject(src);
 	assertEqual(wasmRes, "ok");
 	assertEqual(jsRes, wasmRes);
 });
@@ -498,7 +521,7 @@ func Main() string {
 	assertEqual(jsRes, wasmRes);
 });
 
-test("slices.Sort on map keys", () => {
+test("slices.Sort on map keys", async () => {
 	const src = `
 package main
 
@@ -509,7 +532,7 @@ import (
 
 func Main() string {
 	m := map[string]int{"zebra": 1, "apple": 2, "monkey": 3}
-	keys := maps.Keys(m)
+	keys := slices.Collect(maps.Keys(m))
 	slices.Sort(keys)
 	if keys[0] != "apple" || keys[1] != "monkey" || keys[2] != "zebra" {
 		return "fail sorted keys"
@@ -517,7 +540,7 @@ func Main() string {
 	return "ok"
 }
 `;
-	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	const { wasmRes, jsRes } = await runMapsProject(src);
 	assertEqual(wasmRes, "ok");
 	assertEqual(jsRes, wasmRes);
 });
@@ -550,4 +573,38 @@ func Main() string {
 	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
 	assertEqual(wasmRes, "ok");
 	assertEqual(jsRes, wasmRes);
+});
+
+test("m == nil is true for a nil map, false for an empty one (P60)", () => {
+	const res = compileHybrid(`package main
+
+import "fmt"
+
+func Main() string {
+	var m map[string]int
+	n := map[string]int{}
+	k := make(map[string]int)
+	return fmt.Sprint(m == nil, n == nil, k == nil, m != nil, len(m))
+}
+`).run("Main");
+	assertEqual(res.jsRes, "true false false false 0");
+	assertEqual(res.wasmRes, res.jsRes);
+});
+
+test("m == nil in a non-strict js package", () => {
+	const { js, errors } = compile(`package main
+
+type S struct{ m map[string]int }
+
+func main() {
+	var m map[string]int
+	n := map[string]int{}
+	var s S
+	println(m == nil, n == nil, s.m == nil)
+	m["a"] = 1
+	println(m == nil)
+}
+`);
+	assertEqual(errors.length, 0, errors.join("\n"));
+	assertEqual(runJs(js), "true false true\nfalse");
 });

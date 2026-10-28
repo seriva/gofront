@@ -4,12 +4,35 @@
 
 import {
 	isArrayType,
+	isComplex,
+	isComplex64,
 	isInterfaceType,
 	isPointerToStruct,
 	isSigned,
 	isStringType,
 	toWasmType,
 } from "./types.js";
+
+function _complexTypeFor(mod, t) {
+	if (!isComplex(t)) return null;
+	const is64 = isComplex64(t);
+	return mod.getComplexType(is64 ? "complex64" : "complex128");
+}
+
+function _resolveStructType(mod, goType) {
+	let t = goType;
+	while (t && (t.kind === "TypeName" || t.kind === "Ident")) {
+		const info = mod.getStructType(t.name);
+		if (info) return info;
+		const resolved = mod.checker?.types?.get(t.name);
+		if (!resolved || resolved === t) break;
+		t = resolved;
+	}
+	if (t?.kind === "named") return mod.getStructType(t.name) ?? null;
+	if ((t?.kind === "struct" || t?.kind === "StructType") && t.name)
+		return mod.getStructType(t.name) ?? null;
+	return null;
+}
 
 export class MapsEmitter {
 	emitMapHelper(fn) {
@@ -49,20 +72,11 @@ export class MapsEmitter {
 		}
 	}
 
-	// Struct info for a Go type used as a map key (named struct or alias).
+	// Struct info for a Go type used as a map key (named struct, alias, or complex).
 	_structInfoForGoType(goType) {
-		let t = goType;
-		while (t && (t.kind === "TypeName" || t.kind === "Ident")) {
-			const info = this.mod.getStructType(t.name);
-			if (info) return info;
-			const resolved = this.mod.checker?.types?.get(t.name);
-			if (!resolved || resolved === t) break;
-			t = resolved;
-		}
-		if (t?.kind === "named") return this.mod.getStructType(t.name) ?? null;
-		if ((t?.kind === "struct" || t?.kind === "StructType") && t.name)
-			return this.mod.getStructType(t.name) ?? null;
-		return null;
+		return (
+			_complexTypeFor(this.mod, goType) ?? _resolveStructType(this.mod, goType)
+		);
 	}
 
 	_unsupportedMapKey(_keyGoType) {
@@ -164,6 +178,34 @@ export class MapsEmitter {
 			this.pushInstruction("i32.xor");
 			this.pushInstruction({ op: "i32.const", value: 0x45d9f3b });
 			this.pushInstruction("i32.mul");
+			return;
+		}
+		if (wType === "v128") {
+			// Lane-wise like a [4]float32 key: h = 17; h = h*31 + hash(lane).
+			const isMask = this._isSimdMaskType(keyGoType);
+			const laneType = {
+				kind: "basic",
+				name: isMask ? "int32" : "float32",
+			};
+			const h = this.allocLocal(null, "i32");
+			this.pushInstruction({ op: "i32.const", value: 17 });
+			this.pushInstruction({ op: "local.set", index: h });
+			for (let lane = 0; lane < 4; lane++) {
+				const lt = this.allocLocal(null, isMask ? "i32" : "f32");
+				this.pushInstruction({ op: "local.get", index: keyLocal });
+				this.pushInstruction({
+					op: isMask ? "i32x4.extract_lane" : "f32x4.extract_lane",
+					lane,
+				});
+				this.pushInstruction({ op: "local.set", index: lt });
+				this.pushInstruction({ op: "local.get", index: h });
+				this.pushInstruction({ op: "i32.const", value: 31 });
+				this.pushInstruction("i32.mul");
+				this.emitKeyHash(lt, laneType);
+				this.pushInstruction("i32.add");
+				this.pushInstruction({ op: "local.set", index: h });
+			}
+			this.pushInstruction({ op: "local.get", index: h });
 			return;
 		}
 		// Floats: `x + 0.0` folds -0 onto +0 (they are equal keys in Go) and
@@ -334,6 +376,12 @@ export class MapsEmitter {
 			this.pushInstruction({ op: "local.get", index: k1Local });
 			this.pushInstruction({ op: "local.get", index: k2Local });
 			this.pushInstruction("f64.eq");
+			return;
+		}
+		if (wType === "v128") {
+			this.pushInstruction({ op: "local.get", index: k1Local });
+			this.pushInstruction({ op: "local.get", index: k2Local });
+			this._emitSimdEq(keyGoType);
 			return;
 		}
 		const structInfo = this._structInfoForGoType(keyGoType);

@@ -363,6 +363,14 @@ test("parseTestArgs: trailing -run without value yields null", () => {
 	assertEqual(parseTestArgs(["-run"]).run, null);
 });
 
+test("parseTestArgs accepts all -bench spellings", () => {
+	assertEqual(parseTestArgs(["-bench", "."]).bench, ".");
+	assertEqual(parseTestArgs(["--bench", "BenchmarkFoo"]).bench, "BenchmarkFoo");
+	assertEqual(parseTestArgs(["-bench=^Benchmark"]).bench, "^Benchmark");
+	assertEqual(parseTestArgs(["--bench=a=b"]).bench, "a=b");
+	assertEqual(parseTestArgs(["-bench"]).bench, true);
+});
+
 section("cli-core — parseLegacyArgs");
 
 test("parseLegacyArgs defaults: no flags", () => {

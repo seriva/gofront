@@ -37,7 +37,8 @@ const STRINGS_DISPATCH = {
 	TrimRight: ([s, s2]) =>
 		`((str, cut) => { const cs = new Set(cut); let j = str.length; while (j > 0 && cs.has(str[j - 1])) j--; return str.slice(0, j); })(${s}, ${s2})`,
 	EqualFold: ([s, s2]) => `${s}.toLowerCase() === ${s2}.toLowerCase()`,
-	Fields: ([s]) => `(${s}).trim() === '' ? [] : (${s}).trim().split(/\\s+/)`,
+	Fields: ([s]) =>
+		`(${s}).split(/[ \\t\\n\\v\\f\\r\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]+/).filter(p => p !== "")`,
 	FieldsFunc: ([s, f]) =>
 		`((s, fn) => { const res = []; const runes = Array.from(s ?? ""); let cur = ""; for (const ch of runes) { const cp = ch.codePointAt(0); if (fn(cp)) { if (cur.length > 0) { res.push(cur); cur = ""; } } else { cur += ch; } } if (cur.length > 0) res.push(cur); return res; })(${s}, ${f})`,
 	Cut: ([s, s2]) =>
@@ -169,8 +170,83 @@ const STRINGS_DISPATCH = {
 		`((s, f) => { for (let i = 0; i < s.length; i++) { const cp = s.codePointAt(i); if (f(cp)) return i; if (cp > 0xFFFF) i++; } return -1; })(${s}, ${s2})`,
 	LastIndexFunc: ([s, s2]) =>
 		`((s, f) => { for (let i = s.length - 1; i >= 0; i--) { let cp = s.codePointAt(i); if (i > 0 && s.charCodeAt(i) >= 0xDC00 && s.charCodeAt(i) <= 0xDFFF && s.charCodeAt(i - 1) >= 0xD800 && s.charCodeAt(i - 1) <= 0xDBFF) { cp = s.codePointAt(i - 1); i--; } if (f(cp)) return i; } return -1; })(${s}, ${s2})`,
+	ToValidUTF8: ([s, repl]) =>
+		`(${s} ? ${s}.replace(/(?:[\\uD800-\\uDBFF](?![\\uDC00-\\uDFFF])|(?<![\\uD800-\\uDBFF])[\\uDC00-\\uDFFF])+/g, ${repl} ?? "") : (${s} ?? ""))`,
 	NewReader: ([s]) =>
-		`((s) => ({ _bytes: new TextEncoder().encode(s), _pos: 0, Read(p) { if (this._pos >= this._bytes.length) return [0, __io_eof]; const n = Math.min(p.length, this._bytes.length - this._pos); for (let i = 0; i < n; i++) p[i] = this._bytes[this._pos + i]; this._pos += n; return [n, null]; }, Len() { return Math.max(0, this._bytes.length - this._pos); }, Reset(s2) { this._bytes = new TextEncoder().encode(s2); this._pos = 0; } }))(${s})`,
+		`((s) => ({
+			_bytes: new TextEncoder().encode(s ?? ""),
+			_pos: 0,
+			_prevRune: -1,
+			Read(p) {
+				if (this._pos >= this._bytes.length) return [0, __io_eof];
+				const n = Math.min(p.length, this._bytes.length - this._pos);
+				for (let i = 0; i < n; i++) p[i] = this._bytes[this._pos + i];
+				this._pos += n;
+				this._prevRune = -1;
+				return [n, null];
+			},
+			ReadAt(b, off) {
+				const o = Number(off);
+				if (o < 0) return [0, __error("strings.Reader.ReadAt: negative offset")];
+				if (o >= this._bytes.length) return [0, __io_eof];
+				const n = Math.min(b.length, this._bytes.length - o);
+				for (let i = 0; i < n; i++) b[i] = this._bytes[o + i];
+				return [n, n < b.length ? __io_eof : null];
+			},
+			ReadByte() {
+				if (this._pos >= this._bytes.length) return [0, __io_eof];
+				this._prevRune = -1;
+				return [this._bytes[this._pos++], null];
+			},
+			UnreadByte() {
+				if (this._pos <= 0) return __error("strings.Reader.UnreadByte: at beginning of string");
+				this._prevRune = -1;
+				this._pos--;
+				return null;
+			},
+			ReadRune() {
+				if (this._pos >= this._bytes.length) return [0, 0, __io_eof];
+				const rem = this._bytes.subarray(this._pos);
+				const str = new TextDecoder().decode(rem);
+				const cp = str.codePointAt(0);
+				const runeStr = str.slice(0, cp > 0xffff ? 2 : 1);
+				const sz = new TextEncoder().encode(runeStr).length;
+				this._prevRune = this._pos;
+				this._pos += sz;
+				return [cp, sz, null];
+			},
+			UnreadRune() {
+				if (this._prevRune === undefined || this._prevRune < 0 || this._prevRune >= this._pos) {
+					return __error("strings.Reader.UnreadRune: previous operation was not ReadRune");
+				}
+				this._pos = this._prevRune;
+				this._prevRune = -1;
+				return null;
+			},
+			Seek(offset, whence) {
+				const off = BigInt(offset);
+				const w = Number(whence);
+				let newPos;
+				if (w === 0) newPos = off;
+				else if (w === 1) newPos = BigInt(this._pos) + off;
+				else if (w === 2) newPos = BigInt(this._bytes.length) + off;
+				else return [0n, __error("strings.Reader.Seek: invalid whence")];
+				if (newPos < 0n) return [0n, __error("strings.Reader.Seek: negative position")];
+				this._pos = Number(newPos);
+				this._prevRune = -1;
+				return [newPos, null];
+			},
+			Size() { return BigInt(this._bytes.length); },
+			WriteTo(w) {
+				if (this._pos >= this._bytes.length) return [0, null];
+				const rem = this._bytes.subarray(this._pos);
+				const [n, err] = w.Write(rem);
+				this._pos += n;
+				return [n, err];
+			},
+			Len() { return Math.max(0, this._bytes.length - this._pos); },
+			Reset(s2) { this._bytes = new TextEncoder().encode(s2 ?? ""); this._pos = 0; this._prevRune = -1; }
+		}))(${s})`,
 	NewReplacer: (args) =>
 		`((...pairs) => {
 			const p = [];
@@ -211,7 +287,10 @@ const STRINGS_DISPATCH = {
 /** @type {ThisType<CodeGen>} */
 export const stringsMethods = {
 	_genStrings(fn, a) {
-		if (fn === "NewReader") this.useHelper("ioEOF");
+		if (fn === "NewReader") {
+			this.useHelper("ioEOF");
+			this.useHelper("error");
+		}
 		const args = a();
 		const [s, s2] = args;
 		if (STRINGS_M1[fn]) return `${s}.${STRINGS_M1[fn]}()`;

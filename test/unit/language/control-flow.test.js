@@ -4,7 +4,9 @@ import { fileURLToPath } from "node:url";
 import {
 	assert,
 	assertEqual,
+	assertErrorContains,
 	compile,
+	compileWasm,
 	runJs,
 	section,
 	summarize,
@@ -221,7 +223,7 @@ func main() {
   e := Empty{}
   console.log(e)
 }`);
-	assertEqual(runJs(js), "[object Object]");
+	assertEqual(runJs(js), "{}");
 });
 
 test("nil slice has zero length", () => {
@@ -497,6 +499,45 @@ func main() {
 
 // ═════════════════════════════════════════════════════════════
 // Pointer receivers
+section("goto (Task 0.17)");
+
+const GOTO_SRC = `package main
+func Main() int {
+	i := 0
+loop:
+	i++
+	if i < 3 { goto loop }
+	return i
+}`;
+
+for (const target of ["js", "wasm", "both"]) {
+	test(`goto reports a targeted diagnostic in a ${target} package`, () => {
+		const { errors } = compile(GOTO_SRC, { target });
+		assertErrorContains(
+			errors,
+			"goto is not supported; restructure with labeled break/continue",
+		);
+		const msgs = errors.map((e) => e.message).join("\n");
+		assert(!msgs.includes("Undefined: 'goto'"), msgs);
+		assert(!msgs.includes("missing return"), msgs);
+	});
+}
+
+test("goto is rejected by the WASM compile too", () => {
+	const { errors } = compileWasm(GOTO_SRC);
+	assertErrorContains(errors, "goto is not supported");
+});
+
+test("goto without a label is a parse error", () => {
+	let err = null;
+	try {
+		compile("package main\nfunc main() { goto }");
+	} catch (e) {
+		err = e;
+	}
+	assert(err !== null, "expected a parse error");
+});
+
 // ═════════════════════════════════════════════════════════════
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

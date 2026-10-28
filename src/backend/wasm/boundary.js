@@ -34,6 +34,7 @@
 //   - `*testing.T`: the harness's JS test object, passed as an opaque
 //     externref (test methods are routed back to JS via `env.testing_*`).
 
+import { BROWSER_GLOBALS } from "../../typechecker/types.js";
 import {
 	HELPER_BASE64,
 	HELPER_DURATION,
@@ -41,6 +42,7 @@ import {
 	HELPER_HEX,
 	HELPER_PATH_CLEAN,
 	HELPER_SHA256,
+	HELPER_SPRINT,
 	HELPER_SPRINTF,
 	HELPER_STRCONV,
 } from "../js/runtime.js";
@@ -98,6 +100,10 @@ function funcSigFromAst(t) {
 				? t.returnType.types
 				: [t.returnType]
 			: [],
+		// `_variadic`: already desugared to a slice by variadic.js
+		variadic: Boolean(
+			t.params?.at(-1)?.variadic || t.params?.at(-1)?._variadic,
+		),
 	};
 }
 
@@ -148,10 +154,7 @@ function classifyType(goType, mod) {
 		case "interface":
 			return classifyInterface(t, mod);
 		case "simd":
-			return {
-				k: "unsupported",
-				what: "simd.F32x4 cannot cross the JS↔WASM boundary in 1.7.0 (use shared.Float32 instead)",
-			};
+			return classifySimd(t, mod);
 		default:
 			return {
 				k: "unsupported",
@@ -219,12 +222,11 @@ function classifyNamed(t, mod) {
 	if (
 		t.name === "simd.F32x4" ||
 		t.name === "F32x4" ||
+		t.name === "simd.Mask32x4" ||
+		t.name === "Mask32x4" ||
 		t.underlying?.kind === "simd"
 	) {
-		return {
-			k: "unsupported",
-			what: "simd.F32x4 cannot cross the JS↔WASM boundary in 1.7.0 (use shared.Float32 instead)",
-		};
+		return classifySimd(t.underlying ?? t, mod, t.name);
 	}
 	if (t.name === "error") return { k: "error", wType: "anyref" };
 	if (t.name === "time.Duration")
@@ -237,6 +239,18 @@ function classifyNamed(t, mod) {
 	if (info) return structDesc(info, false);
 	if (t.underlying) return classifyType(t.underlying, mod);
 	return { k: "unsupported", what: `named type '${t.name}'` };
+}
+
+// F32x4 crosses as a copied 4-element Float32Array, Mask32x4 as a 4-element
+// boolean array.  Both travel through the wasm boundary as a GC array of the
+// four i32 lane words (`arr`), converted by __v128_from/__v128_to.
+function classifySimd(t, mod, name = "") {
+	const isMask = t.simd === "Mask32x4" || name.endsWith("Mask32x4");
+	const arr = classifyArray(
+		{ kind: "array", elem: { kind: "basic", name: "int32" }, size: 4 },
+		mod,
+	);
+	return { k: isMask ? "mask4" : "f32x4", wType: "v128", arr };
 }
 
 function classifyAnonStruct(t, mod) {
@@ -282,13 +296,22 @@ function classifyPointer(t, mod) {
 	if (base.k === "anon_struct" && !base.ptr) return { ...base, ptr: true };
 	if (base.k === "time" && !base.ptr) return { ...base, ptr: true };
 	const boxInfo = mod.getBoxType(t.base);
+	const ptrInfo = mod.getPtrType ? mod.getPtrType(t.base) : null;
 	const key = `${base.k}${base.unsigned ? "_u" : ""}_${boxInfo.typeIndex}`;
 	return {
 		k: "ptr_box",
 		base,
 		boxInfo,
+		ptrInfo,
 		key,
-		wType: { kind: "ref", nullable: true, typeIndex: boxInfo.typeIndex },
+		wType: ptrInfo
+			? {
+					kind: "ref",
+					nullable: true,
+					typeIndex: ptrInfo.typeIndex,
+					typeName: ptrInfo.name,
+				}
+			: { kind: "ref", nullable: true, typeIndex: boxInfo.typeIndex },
 	};
 }
 
@@ -352,7 +375,11 @@ function classifySlice(t, mod) {
 		k: "slice",
 		elem,
 		sliceInfo,
-		key: wTypeKey(sliceInfo.elemWType),
+		// []F32x4 and []Mask32x4 share a wasm slice type but cross differently,
+		// so they get separate helper keys.
+		key:
+			wTypeKey(sliceInfo.elemWType) +
+			(elem.k === "f32x4" || elem.k === "mask4" ? `_${elem.k}` : ""),
 		wType: { kind: "ref", nullable: true, typeIndex: sliceInfo.typeIndex },
 	};
 }
@@ -387,6 +414,9 @@ function classifySig(t, mod) {
 }
 
 function classifyFunc(t, mod) {
+	// A variadic func value is a slice-taking closure in wasm but a rest-param
+	// function in JS; no adapter yet, so it may not cross.
+	if (t.variadic) return { k: "unsupported", what: "variadic func value" };
 	const sig = classifySig(t, mod);
 	if (sig.k === "unsupported") return sig;
 	const closureInfo = mod.getClosureType(t);
@@ -550,7 +580,7 @@ export function collectBoundaryMeta(progs, funcDecls, mod) {
 			} else if (d.kind === "ConstDecl" && pkgTarget === "wasm") {
 				collectConstDecl(d, pkgName, meta, errors);
 			} else if (d.kind === "VarDecl" && pkgTarget === "wasm") {
-				collectSharedVarDecl(d, meta, mod);
+				collectVarDecl(d, meta, mod);
 			}
 		}
 	}
@@ -632,17 +662,24 @@ function checkDesc(desc, where, errors) {
 }
 
 // Exported `var Buf = shared.NewFloat32(n)` globals are exposed to JS as
-// TypedArray views (read once after instantiation; sizing is fixed).
-function collectSharedVarDecl(d, meta, mod) {
+// TypedArray views (read once after instantiation; sizing is fixed).  Other
+// exported vars of a supported boundary type are read once when the module
+// loads, after package initialization (`var Limit = 40` is `Limit` in the
+// facade); a var of an unsupported type is left out.
+function collectVarDecl(d, meta, mod) {
 	for (const spec of d.decls ?? d.specs ?? [d]) {
 		const names = spec.names ?? (spec.name ? [spec.name] : []);
 		const values = spec.value ?? (spec.init ? [spec.init] : []);
 		for (let i = 0; i < names.length; i++) {
 			const name = names[i];
 			if (!isExported(name)) continue;
-			const goType = spec.type ?? values[i]?._type;
-			if (!getSharedInfo(goType, mod.checker)) continue;
-			meta.vars.push({ name, desc: classifyType(goType, mod) });
+			const goType =
+				spec.type ?? mod.resolveGlobal(name)?.goType ?? values[i]?._type;
+			const shared = Boolean(getSharedInfo(goType, mod.checker));
+			const desc = classifyType(goType, mod);
+			if (!shared && (!desc || desc.k === "unsupported" || desc.k === "void"))
+				continue;
+			meta.vars.push({ name, desc, shared });
 		}
 	}
 }
@@ -657,6 +694,7 @@ function collectMethodMeta(fn, meta, errors, mod) {
 		exportName: fn._exportName,
 		fnName: fn.name,
 		ptrRecv: fn.params[0].type?.kind === "pointer",
+		variadic: Boolean(fn.params.at(-1)?._variadic),
 		params: fn.params
 			.slice(1)
 			.map((p) => checkDesc(classifyType(p.type, mod), where, errors)),
@@ -673,6 +711,7 @@ function collectFuncMeta(fn, meta, errors, mod) {
 		name: fn.name,
 		exportName: fn.name,
 		pkgName: fn._pkgName,
+		variadic: Boolean(fn.params?.at(-1)?._variadic),
 		params: (fn.params ?? []).map((p) =>
 			checkDesc(classifyType(p.type, mod), where, errors),
 		),
@@ -710,6 +749,11 @@ function visitNeed(desc, needs, errors, mod) {
 			return;
 		case "error":
 			needs.error = true;
+			return;
+		case "f32x4":
+		case "mask4":
+			needs.simd = desc.arr;
+			visitNeed(desc.arr, needs, errors, mod);
 			return;
 		case "time":
 			needs.time = true;
@@ -791,6 +835,7 @@ function collectNeeds(meta) {
 		ifaces: new Map(), // interface name -> desc
 		error: false,
 		time: false,
+		simd: null, // array desc carrying vectors across the boundary
 		shared: false, // any shared buffer on the surface
 	};
 	const errors = [];
@@ -835,16 +880,22 @@ export function scanBoundaryImports(mod, meta) {
 function isGcRef(wType) {
 	return wType === "anyref" || (typeof wType === "object" && wType !== null);
 }
+// A v128 crosses as an externref holding a GC array of its four i32 lanes;
+// the converting helpers are registered first thing in addBoundaryHelpers.
+const v128Conv = { from: null, to: null };
+
 function extType(wType) {
+	if (wType === "v128") return "externref";
 	if (wType === "i64") return "f64";
 	if (isGcRef(wType)) return "externref";
 	return wType;
 }
 function needsConv(wTypes) {
-	return wTypes.some((w) => w === "i64" || isGcRef(w));
+	return wTypes.some((w) => w === "i64" || w === "v128" || isGcRef(w));
 }
 // Instructions converting the value on the stack from its boundary form.
 function fromExt(wType) {
+	if (wType === "v128") return [{ op: "call", funcIndex: v128Conv.from }];
 	if (wType === "i64") return [{ op: "i64.trunc_sat_f64_s" }];
 	if (wType === "anyref") return [{ op: "any.convert_extern" }];
 	if (isGcRef(wType)) {
@@ -857,6 +908,7 @@ function fromExt(wType) {
 }
 // Instructions converting the value on the stack to its boundary form.
 function toExt(wType) {
+	if (wType === "v128") return [{ op: "call", funcIndex: v128Conv.to }];
 	if (wType === "i64") return [{ op: "f64.convert_i64_s" }];
 	if (isGcRef(wType)) return [{ op: "extern.convert_any" }];
 	return [];
@@ -875,6 +927,8 @@ function convertResults(wTypes, conv, localBase) {
 }
 
 function zeroInstr(wType) {
+	if (wType === "v128")
+		return { op: "v128.const", bytes: new Array(16).fill(0) };
 	if (wType === "i64") return { op: "i64.const", value: 0n };
 	if (wType === "f32" || wType === "f64")
 		return { op: `${wType}.const`, value: 0 };
@@ -926,6 +980,47 @@ export function addBoundaryHelpers(mod, meta) {
 		return idx;
 	};
 	const get = (i) => ({ op: "local.get", index: i });
+	if (needs.simd) {
+		const { arrInfo } = needs.simd;
+		const arrRef = needs.simd.wType;
+		v128Conv.to = addFunc(
+			"__v128_to",
+			["v128"],
+			["externref"],
+			[
+				...[0, 1, 2, 3].flatMap((lane) => [
+					get(0),
+					{ op: "i32x4.extract_lane", lane },
+				]),
+				{ op: "array.new_fixed", typeIndex: arrInfo.typeIndex, size: 4 },
+				{ op: "extern.convert_any" },
+			],
+			false,
+		);
+		v128Conv.from = addFunc(
+			"__v128_from",
+			["externref"],
+			["v128"],
+			[
+				get(0),
+				{ op: "any.convert_extern" },
+				{ op: "ref.cast_null", typeIndex: arrInfo.typeIndex },
+				{ op: "local.set", index: 1 },
+				get(1),
+				{ op: "i32.const", value: 0 },
+				{ op: "array.get", typeIndex: arrInfo.typeIndex },
+				{ op: "i32x4.splat" },
+				...[1, 2, 3].flatMap((lane) => [
+					get(1),
+					{ op: "i32.const", value: lane },
+					{ op: "array.get", typeIndex: arrInfo.typeIndex },
+					{ op: "i32x4.replace_lane", lane },
+				]),
+			],
+			false,
+			[arrRef],
+		);
+	}
 	// Parameter `i` converted from its boundary form.
 	const getIn = (i, wType) => [get(i), ...fromExt(wType)];
 	const EXT = "externref";
@@ -1210,7 +1305,7 @@ export function addBoundaryHelpers(mod, meta) {
 			[get(0), get(1), { op: "struct.new", typeIndex }, ...toExt(wType)],
 		);
 		for (const v of meta.vars ?? []) {
-			const g = mod.resolveGlobal(v.name);
+			const g = v.shared ? mod.resolveGlobal(v.name) : null;
 			if (!g) continue;
 			addFunc(
 				`__var_${v.name}`,
@@ -1282,12 +1377,18 @@ export function addBoundaryHelpers(mod, meta) {
 			[EXT],
 			[...getIn(0, w), { op: "struct.new", typeIndex: ti }, ...toExt(ref)],
 		);
+		const cast = {
+			op: "ref.cast",
+			typeIndex: boxInfo.typeIndex,
+			typeName: boxInfo.name,
+		};
 		addFunc(
 			`__box_get_${key}`,
 			[EXT],
 			[extType(w)],
 			[
 				...getIn(0, ref),
+				cast,
 				{ op: "struct.get", typeIndex: ti, fieldIndex: 0 },
 				...toExt(w),
 			],
@@ -1298,6 +1399,7 @@ export function addBoundaryHelpers(mod, meta) {
 			[],
 			[
 				...getIn(0, ref),
+				cast,
 				...getIn(1, w),
 				{ op: "struct.set", typeIndex: ti, fieldIndex: 0 },
 			],
@@ -1390,10 +1492,11 @@ export function addBoundaryHelpers(mod, meta) {
 				[EXT],
 				[
 					get(0),
-					{ op: "f64.const", value: 1000000 },
-					{ op: "f64.mul" },
 					{ op: "i64.trunc_sat_f64_s" },
+					{ op: "i64.const", value: 1000000n },
+					{ op: "i64.mul" },
 					get(1),
+					{ op: "ref.null", heapType: "any" },
 					{ op: "struct.new", typeIndex: timeInfo.typeIndex },
 					...toExt(timeWType),
 				],
@@ -1443,6 +1546,16 @@ export function addBoundaryHelpers(mod, meta) {
 			[],
 			[extType(c.desc.wType)],
 			[{ op: "global.get", index: g.index }, ...toExt(c.desc.wType)],
+		);
+	}
+	for (const v of meta.vars ?? []) {
+		const g = v.shared ? null : mod.resolveGlobal(v.name);
+		if (!g) continue;
+		addFunc(
+			`__var_${v.name}`,
+			[],
+			[extType(v.desc.wType)],
+			[{ op: "global.get", index: g.index }, ...toExt(v.desc.wType)],
 		);
 	}
 }
@@ -1529,6 +1642,10 @@ function inExpr(desc, v) {
 			return `(${v} === undefined ? null : ${v})`;
 		case "error":
 			return `${P}errin(${v})`;
+		case "f32x4":
+			return `${P}f32x4in(${v})`;
+		case "mask4":
+			return `${P}mask4in(${v})`;
 		case "time":
 			return desc.ptr ? `${P}timein_ptr(${v})` : `${P}timein(${v})`;
 		case "map":
@@ -1573,6 +1690,10 @@ function outExpr(desc, v) {
 			return `(${v} ?? "")`;
 		case "error":
 			return `${P}errout(${v})`;
+		case "f32x4":
+			return `${P}f32x4out(${v})`;
+		case "mask4":
+			return `${P}mask4out(${v})`;
 		case "time":
 			return desc.ptr ? `${P}timeout_ptr(${v})` : `${P}timeout(${v})`;
 		case "map":
@@ -1613,6 +1734,10 @@ function zeroExpr(desc) {
 			return "0";
 		case "string":
 			return '""';
+		case "f32x4":
+			return "new Float32Array(4)";
+		case "mask4":
+			return "[false, false, false, false]";
 		case "error":
 		case "time":
 		case "map":
@@ -1733,17 +1858,21 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 	let lineBuf = "";
 	let targs = [];
 	let fmtStructMap = new WeakMap();
+	// A value whose type has String()/Error(): the method already ran in WASM.
+	// __gfUnbox hands fmt the raw value for the other verbs.
+	class FmtStr { constructor(r, s) { this.r = r; this.s = s; } __gfUnbox() { return this.r; } String() { return this.s; } }
+	class FmtErr { constructor(r, s) { this.r = r; this.s = s; } __gfUnbox() { return this.r; } Error() { return this.s; } }
 	const late = { exports: null };
 	const flush = () => { write(lineBuf); lineBuf = ""; };
 	const print = (v) => {
-		const s = String(v);
+		const s = Object.is(v, -0) ? "-0" : String(v);
 		if (lineBuf.length > 0 && !lineBuf.endsWith(" ") && !s.startsWith(" ")) {
 			lineBuf += " ";
 		}
 		lineBuf += s;
 	};
 	const println = (v) => {
-		const s = String(v);
+		const s = Object.is(v, -0) ? "-0" : String(v);
 		if (lineBuf.length > 0 && !lineBuf.endsWith(" ") && !s.startsWith(" ")) {
 			lineBuf += " ";
 		}
@@ -1787,6 +1916,7 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		},
 		"str_to_upper": (s) => (s ? s.toUpperCase() : ""),
 		"str_to_lower": (s) => (s ? s.toLowerCase() : ""),
+		"str_to_valid_utf8": (s, repl) => (s ? s.replace(/(?:[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF])+/g, repl ?? "") : (s ?? "")),
 		"str_trim_space": (s) => (s ? s.trim() : ""),
 		"str_contains": (s, sub) => (s && sub !== undefined ? (s.includes(sub) ? 1 : 0) : 0),
 		"str_has_prefix": (s, pre) => (s && pre !== undefined ? (s.startsWith(pre) ? 1 : 0) : 0),
@@ -1803,7 +1933,7 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		},
 		"str_from_i64": (n) => String(n),
 		"str_from_i32": (n) => String(n),
-		"str_from_f64": (f) => String(f),
+		"str_from_f64": (f) => (Object.is(f, -0) ? "-0" : String(f)),
 		"is_string": (v) => (typeof v === "string" ? 1 : 0),
 		"str_to_bytes": (s) => {
 			utf8Encoded = new TextEncoder().encode(s ?? "");
@@ -1845,19 +1975,29 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 			if (ref !== null && ref !== undefined && typeof ref === "object") fmtStructMap.set(ref, o);
 			return o;
 		},
+		"fmt_struct_type": (o, i) => { Object.defineProperty(o, "__tn", { value: stringTable[i], configurable: true }); },
 		"fmt_struct_set": (o, k, v) => { o[typeof k === "number" ? stringTable[k] : k] = v; },
 		"fmt_box_i32": (v) => v,
 		"fmt_box_i64": (v) => (v > ${P}MAX || v < -${P}MAX ? v : Number(v)),
 		"fmt_box_f64": (v) => v,
 		"fmt_box_bool": (v) => v !== 0,
+		"fmt_new_stringer": (r, s, isErr) => (isErr !== 0 ? new FmtErr(r, s) : new FmtStr(r, s)),
 		"fmt_new_box": () => ({ value: null, __p: true, __box: true }),
 		"testing_arg_i32": targ, "testing_arg_f32": targ, "testing_arg_f64": targ,
 		"testing_arg_str": targ, "testing_arg_any": targ,
 		"testing_arg_i64": (v) => targ(v > ${P}MAX || v < -${P}MAX ? v : Number(v)),
 		"testing_arg_bool": (v) => targ(v !== 0),
+		"testing_arg_u64": (v) => { v = BigInt.asUintN(64, v); targ(v > ${P}MAX ? v : Number(v)); },
+		"fmt_arg_type": (i) => { if (targs.length > 0) targs[targs.length - 1] = __ft(targs[targs.length - 1], JSON.parse(stringTable[i])); },
+		"testing_arg_spread": (a) => { if (a) for (const v of a) targs.push(v); },
+		"testing_arg_err": (s) => targ({ Error() { return s; } }),
 		"testing_call": (t, i) => { const a = targs; targs = []; fmtStructMap = new WeakMap(); t[stringTable[i]](...a); },
 		"testing_name": (t) => t.Name(),
-		"testing_flag": (t, i) => (t[stringTable[i]]() ? 1 : 0),
+		"testing_flag": (t, i) => Number(t[stringTable[i]]()),
+		"testing_n": (t) => BigInt(t.N ?? 0),
+		"testing_elapsed": (t) => BigInt(t.Elapsed()),
+		"testing_context": (t) => t.Context(),
+		"testing_output": (t) => t.Output(),
 	};
 	// Stdlib imports (strings/strconv/utf8/fmt/t.Run) are a separate block so
 	// modules that never call them do not ship it (see WASM_STDLIB_JS).
@@ -1874,7 +2014,7 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 	}
 	Object.assign(env, extraEnv);
 	const m = {};
-	for (const k of ["sin", "cos", "tan", "asin", "acos", "atan", "atan2", "pow", "exp", "log", "log2", "log10", "cbrt", "hypot", "random", "sinh", "cosh", "tanh"]) m[k] = Math[k];
+	for (const k of ["sin", "cos", "tan", "asin", "acos", "atan", "atan2", "pow", "exp", "log", "log2", "log10", "cbrt", "hypot", "random", "sinh", "cosh", "tanh", "log1p", "expm1"]) m[k] = Math[k];
 	m.mod = (x, y) => x % y;
 	// Go rounds half away from zero; Math.round rounds half toward +Infinity.
 	m.round = (x) => Math.sign(x) * Math.round(Math.abs(x));
@@ -1886,30 +2026,16 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 // module imports one of the packages that use it.
 export const WASM_STDLIB_JS = `${HELPER_ERROR}
 ${HELPER_SPRINTF}
+${HELPER_SPRINT}
 ${HELPER_STRCONV}
 ${HELPER_PATH_CLEAN}
 ${HELPER_DURATION}
 ${HELPER_SHA256}
 ${HELPER_HEX}
 ${HELPER_BASE64}
-function ${P}stdlib(stringTable, io) {
-	let parts = [];
-	let cutBefore = "", cutAfter = "";
-	let strconvErr = null, strconvErrKind = 0;
-	let decodeSize = 0;
-	let replacerTarget = "", replacerPairs = [];
-	let splitDir = "", splitFile = "";
-	let joinParts = [];
-	let matchHasErr = 0;
-	let trimStart = 0, trimEnd = 0;
+function ${P}stdlib_fmt(stringTable, io) {
 	let sscanTokens = [];
 	let sscanHasErr = 0, sscanErrMsg = "";
-	let timeParseErr = null, timeParseOffset = 0;
-	let rawBytes = new Uint8Array(0);
-	let rawPos = 0;
-	let hexErr = null;
-	let base64Err = null;
-	let customBase64Encodings = [];
 	return {
 		"fmt_sscan_init": (s, mode) => {
 			sscanHasErr = 0;
@@ -2020,9 +2146,26 @@ function ${P}stdlib(stringTable, io) {
 			return 0;
 		},
 		"testing_run": (t, name, fn) => (t.Run(name, (sub) => { io.late.exports.__testing_run_cb(fn, sub); }) ? 1 : 0),
+		"testing_cleanup": (t, fn) => { t.Cleanup(() => { io.late.exports.__testing_cleanup_cb(fn); }); },
+		"testing_n": (t) => BigInt(t.N ?? 0),
+		"testing_elapsed": (t) => BigInt(t.Elapsed()),
+		"testing_context": (t) => t.Context(),
+		"testing_output": (t) => t.Output(),
 		"fmt_sprintf": (f) => __sprintf(f ?? "", ...io.take()),
+		"fmt_sprint": (ln) => __sprint(ln !== 0, ...io.take()),
+		"fmt_print": (ln) => { io.printf(__sprint(ln !== 0, ...io.take())); },
+		"fmt_print_raw": (s) => { io.printf(s ?? ""); },
 		"fmt_printf": (f) => { io.printf(__sprintf(f ?? "", ...io.take())); },
 		"fmt_format_v": (v) => { const res = __sprintf("%v", v); io.take(); return res; },
+	};
+}
+function ${P}stdlib_str(stringTable, io) {
+	let parts = [];
+	let cutBefore = "", cutAfter = "";
+	let replacerTarget = "", replacerPairs = [];
+	let strconvErr = null, strconvErrKind = 0;
+	let decodeSize = 0;
+	return {
 		"str_trim": (s, c) => ${P}trim(s ?? "", c ?? "", true, true),
 		"str_trim_left": (s, c) => ${P}trim(s ?? "", c ?? "", true, false),
 		"str_trim_right": (s, c) => ${P}trim(s ?? "", c ?? "", false, true),
@@ -2139,7 +2282,7 @@ function ${P}stdlib(stringTable, io) {
 			parts = r;
 			return parts.length;
 		},
-		"str_fields": (s) => { parts = (s ?? "").split(/\\s+/).filter((p) => p !== ""); return parts.length; },
+		"str_fields": (s) => { parts = (s ?? "").split(/[ \\t\\n\\v\\f\\r\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]+/).filter((p) => p !== ""); return parts.length; },
 		"str_part": (i) => parts[i] ?? "",
 		"str_replacer_init": (s) => {
 			replacerTarget = s ?? "";
@@ -2254,7 +2397,7 @@ function ${P}stdlib(stringTable, io) {
 		// unicode
 		"unicode_is_letter": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{L}/u.test(c)) ? 1 : 0; },
 		"unicode_is_digit": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{Nd}/u.test(c)) ? 1 : 0; },
-		"unicode_is_space": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\s/u.test(c)) ? 1 : 0; },
+		"unicode_is_space": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /[ \\t\\n\\v\\f\\r\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]/.test(c)) ? 1 : 0; },
 		"unicode_is_upper": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{Lu}/u.test(c)) ? 1 : 0; },
 		"unicode_is_lower": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{Ll}/u.test(c)) ? 1 : 0; },
 		"unicode_is_punct": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{P}/u.test(c)) ? 1 : 0; },
@@ -2263,6 +2406,22 @@ function ${P}stdlib(stringTable, io) {
 		"unicode_is_graphic": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && !/\\p{Cc}/u.test(c)) ? 1 : 0; },
 		"unicode_to_upper": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return c ? (c.toUpperCase().codePointAt(0) ?? r) : r; },
 		"unicode_to_lower": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return c ? (c.toLowerCase().codePointAt(0) ?? r) : r; },
+	};
+}
+function ${P}stdlib_sys(stringTable, io) {
+	let splitDir = "", splitFile = "";
+	let joinParts = [];
+	let matchHasErr = 0;
+	let trimStart = 0, trimEnd = 0;
+	let timeParseErr = null, timeParseOffset = 0, timeParseDurationErr = null, timeParseSubNs = 0;
+	let rawBytes = new Uint8Array(0);
+	let rawPos = 0;
+	let hexErr = null;
+	let base64Err = null;
+	let customBase64Encodings = [];
+	let bitsRem32 = 0;
+	let bitsRem64 = 0n;
+	return {
 		// html
 		"html_escape": (s) => (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&#34;").replace(/'/g, "&#39;"),
 		"html_unescape": (s) => (s ?? "").replace(/&(?:quot|apos|#39|#34|gt|lt|amp|#(?:[0-9]+|[xX][0-9a-fA-F]+));/g, (m) => {
@@ -2327,32 +2486,66 @@ function ${P}stdlib(stringTable, io) {
 		"time_now_ms": () => (typeof globalThis.__GOFRONT_CLOCK === "function" ? globalThis.__GOFRONT_CLOCK() : Date.now()),
 		"time_timezone_offset": (ms) => -new Date(ms).getTimezoneOffset() * 60,
 		"time_duration_string": (d) => __durationString(d),
+		"time_parse_duration": (s) => {
+			const res = __timeParseDuration(s);
+			if (res[1]) {
+				timeParseDurationErr = res[1].message || String(res[1]);
+				return 0n;
+			}
+			timeParseDurationErr = null;
+			return BigInt(res[0]);
+		},
+		"time_parse_duration_err": () => timeParseDurationErr,
+		"time_month_string": (m) => __monthString(m),
+		"time_weekday_string": (w) => __weekdayString(w),
 		"time_parse": (layout, val) => {
 			try {
-				const d = new Date(val ?? "");
+				let s = String(val ?? "");
+				if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) {
+					s = s.slice(1, -1);
+				}
+				const d = new Date(s);
 				if (isNaN(d.getTime())) throw 0;
+				let subNs = 0;
+				const m = /\\.([0-9]{1,9})/.exec(s);
+				if (m) {
+					subNs = Number(m[1].padEnd(9, "0")) % 1000000;
+				}
 				timeParseErr = null;
-				timeParseOffset = -d.getTimezoneOffset() * 60;
+				if (s.endsWith("Z") || s.endsWith("z")) {
+					timeParseOffset = 0;
+				} else {
+					const tzMatch = /([+-])(\\d{2}):?(\\d{2})$/.exec(s);
+					if (tzMatch) {
+						const sign = tzMatch[1] === "+" ? 1 : -1;
+						timeParseOffset = sign * (Number(tzMatch[2]) * 3600 + Number(tzMatch[3]) * 60);
+					} else {
+						timeParseOffset = -d.getTimezoneOffset() * 60;
+					}
+				}
+				timeParseSubNs = subNs;
 				return d.getTime();
 			} catch {
 				timeParseErr = "parsing time: cannot parse";
 				timeParseOffset = 0;
+				timeParseSubNs = 0;
 				return 0;
 			}
 		},
 		"time_parse_err": () => timeParseErr,
 		"time_parse_offset": () => timeParseOffset,
+		"time_parse_sub_ns": () => timeParseSubNs,
 		"time_format": (y, m, d, hr, min, sec, wd, ms, offsetSec, layout) => {
 			const DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
 			const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 			const pad = (n, w = 2) => String(n).padStart(w, "0");
-			return (layout ?? "").replace(/2006|06|Monday|Mon|January|Jan|01|02|15|PM|pm|03|04|05|Z07:00|\\.(?:0+|9+)|1|2|3|4|5/g, t => {
+			return (layout ?? "").replace(/2006|06|Monday|Mon|January|Jan|01|02|15|PM|pm|03|04|05|Z07:00|-07:00|-0700|MST|\\.(?:0+|9+)|1|2|3|4|5/g, t => {
 				if (t.startsWith(".")) {
 					const isZeroPad = t.includes("0");
 					const maxLen = t.length - 1;
-					let frac = pad(ms % 1000, 3);
-					if (maxLen > 3) frac = frac.padEnd(maxLen, "0");
-					else frac = frac.slice(0, maxLen);
+					let frac = pad(ms % 1000000000, 9);
+					if (maxLen <= 9) frac = frac.slice(0, maxLen);
+					else frac = frac.padEnd(maxLen, "0");
 					if (!isZeroPad) {
 						frac = frac.replace(/0+$/, "");
 						return frac.length > 0 ? "." + frac : "";
@@ -2383,6 +2576,15 @@ function ${P}stdlib(stringTable, io) {
 						const o = Math.floor(offsetSec / 60);
 						return o === 0 ? "Z" : (o > 0 ? "+" : "-") + pad(Math.floor(Math.abs(o) / 60)) + ":" + pad(Math.abs(o) % 60);
 					}
+					case "-07:00": {
+						const o = Math.floor(offsetSec / 60);
+						return (o >= 0 ? "+" : "-") + pad(Math.floor(Math.abs(o) / 60)) + ":" + pad(Math.abs(o) % 60);
+					}
+					case "-0700": {
+						const o = Math.floor(offsetSec / 60);
+						return (o >= 0 ? "+" : "-") + pad(Math.floor(Math.abs(o) / 60)) + pad(Math.abs(o) % 60);
+					}
+					case "MST": return offsetSec === 0 ? "UTC" : "LOCAL";
 					default: return t;
 				}
 			});
@@ -2442,7 +2644,49 @@ function ${P}stdlib(stringTable, io) {
 			return rawBytes.length;
 		},
 		"base64_get_err": () => base64Err,
+		"bits_div32": (hi, lo, y) => {
+			const yu = y >>> 0;
+			if (yu === 0) throw new Error("runtime error: integer divide by zero");
+			const hiu = hi >>> 0;
+			if (hiu >= yu) throw new Error("runtime error: integer overflow");
+			const z = (BigInt(hiu) << 32n) | BigInt(lo >>> 0);
+			const yB = BigInt(yu);
+			bitsRem32 = Number(z % yB);
+			return Number(z / yB);
+		},
+		"bits_div32_rem": () => bitsRem32,
+		"bits_rem32": (hi, lo, y) => {
+			const yu = y >>> 0;
+			if (yu === 0) throw new Error("runtime error: integer divide by zero");
+			const z = (BigInt(hi >>> 0) << 32n) | BigInt(lo >>> 0);
+			return Number(z % BigInt(yu));
+		},
+		"bits_div64": (hi, lo, y) => {
+			const yB = BigInt.asUintN(64, BigInt(y));
+			if (yB === 0n) throw new Error("runtime error: integer divide by zero");
+			const hiB = BigInt.asUintN(64, BigInt(hi));
+			if (hiB >= yB) throw new Error("runtime error: integer overflow");
+			const loB = BigInt.asUintN(64, BigInt(lo));
+			const z = (hiB << 64n) | loB;
+			bitsRem64 = z % yB;
+			return z / yB;
+		},
+		"bits_div64_rem": () => bitsRem64,
+		"bits_rem64": (hi, lo, y) => {
+			const yB = BigInt.asUintN(64, BigInt(y));
+			if (yB === 0n) throw new Error("runtime error: integer divide by zero");
+			const z = ((BigInt.asUintN(64, BigInt(hi)) % yB) << 64n) | BigInt.asUintN(64, BigInt(lo));
+			return z % yB;
+		},
 	};
+}
+function ${P}stdlib(stringTable, io) {
+	return Object.assign(
+		{},
+		${P}stdlib_fmt(stringTable, io),
+		${P}stdlib_str(stringTable, io),
+		${P}stdlib_sys(stringTable, io),
+	);
 }
 function ${P}trim(s, cutset, left, right) {
 	const cs = new Set(Array.from(cutset));
@@ -2536,6 +2780,13 @@ function ${P}idxview(n, getAt, setAt) {
 }`;
 
 // Generates the JS facade for the linked wasm module.
+// A facade binding for a Go name that shadows a browser global carries the
+// same `$` suffix as JS output uses (see jsBindingName in backend/js), so the
+// flat bundle keeps reaching the real global.
+function facadeName(name) {
+	return BROWSER_GLOBALS.has(name) ? `${name}$` : name;
+}
+
 export function generateFacade(
 	meta,
 	{ stringTable = [], callMain = false, stdlibEnv = true } = {},
@@ -2547,18 +2798,42 @@ export function generateFacade(
 	out.push(`const ${P}env = {};`);
 	for (const [key, desc] of needs.funcs) {
 		const names = desc.params.map((_, i) => `a${i}`);
-		const args = desc.params.map((d, i) =>
-			isPtrBoth(d) ? `${P}view_${d.name}(${names[i]})` : outExpr(d, names[i]),
-		);
-		const call = `fn(${args.join(", ")})`;
+		const hasPtrBox = desc.params.some((d) => d.k === "ptr_box");
 		let body;
-		if (desc.returns.length === 0) body = `${call};`;
-		else if (desc.returns.length === 1)
-			body = `return ${inExpr(desc.returns[0], call)};`;
-		else
-			body = `const __r = ${call}; return [${desc.returns
-				.map((d, i) => inExpr(d, `__r[${i}]`))
-				.join(", ")}];`;
+		if (hasPtrBox) {
+			const argVars = desc.params.map((_, i) => `__arg${i}`);
+			const decls = desc.params.map(
+				(d, i) =>
+					`const __arg${i} = ${isPtrBoth(d) ? `${P}view_${d.name}(${names[i]})` : outExpr(d, names[i])};`,
+			);
+			const call = `fn(${argVars.join(", ")})`;
+			const writebacks = desc.params
+				.map((d, i) =>
+					d.k === "ptr_box"
+						? `if (__arg${i} && __arg${i}.value !== undefined) __w.__box_set_${d.key}(${names[i]}, ${inExpr(d.base, `__arg${i}.value`)});`
+						: "",
+				)
+				.filter(Boolean);
+			if (desc.returns.length === 0) {
+				body = `${decls.join(" ")} ${call}; ${writebacks.join(" ")}`;
+			} else if (desc.returns.length === 1) {
+				body = `${decls.join(" ")} const __r = ${call}; ${writebacks.join(" ")} return ${inExpr(desc.returns[0], "__r")};`;
+			} else {
+				body = `${decls.join(" ")} const __r = ${call}; ${writebacks.join(" ")} return [${desc.returns.map((d, i) => inExpr(d, `__r[${i}]`)).join(", ")}];`;
+			}
+		} else {
+			const args = desc.params.map((d, i) =>
+				isPtrBoth(d) ? `${P}view_${d.name}(${names[i]})` : outExpr(d, names[i]),
+			);
+			const call = `fn(${args.join(", ")})`;
+			if (desc.returns.length === 0) body = `${call};`;
+			else if (desc.returns.length === 1)
+				body = `return ${inExpr(desc.returns[0], call)};`;
+			else
+				body = `const __r = ${call}; return [${desc.returns
+					.map((d, i) => inExpr(d, `__r[${i}]`))
+					.join(", ")}];`;
+		}
 		const sig = ["fn", ...names].join(", ");
 		out.push(
 			`${P}env["__invoke$${key}"] = (${sig}) => { try { ${body} } catch (__e) { if (__w && __w.__push_panic) __w.__push_panic(__e.message ?? String(__e)); throw __e; } };`,
@@ -2596,12 +2871,17 @@ ${desc.fields.map((f) => `\to.${f.name} = ${outExpr(f.desc, `__w.__get_${name}_$
 	for (const [key, desc] of needs.boxes) {
 		out.push(`function ${P}boxin_${key}(b) {
 	if (b == null) return null;
+	if (b.__ref) return b.__ref;
 	const v = b.value !== undefined ? b.value : ${zeroExpr(desc.base)};
 	return __w.__box_new_${key}(${inExpr(desc.base, "v")});
 }
 function ${P}boxout_${key}(r) {
 	if (r == null) return null;
-	return { "value": ${outExpr(desc.base, `__w.__box_get_${key}(r)`)} };
+	return {
+		__ref: r,
+		get value() { return ${outExpr(desc.base, `__w.__box_get_${key}(r)`)}; },
+		set value(v) { __w.__box_set_${key}(r, ${inExpr(desc.base, "v")}); }
+	};
 }
 function ${P}boxback_${key}(r, b) {
 	if (r == null || b == null) return;
@@ -2610,6 +2890,27 @@ function ${P}boxback_${key}(r, b) {
 	}
 
 	for (const [key, desc] of needs.slices) {
+		if (desc.elem.k === "f32x4") {
+			// []F32x4 travels as one Float32Array of 4n lanes.
+			out.push(`function ${P}slin_${key}(arr) {
+	if (arr == null) return __w.__slice_nil_${key}();
+	const n = arr.length >> 2;
+	const s = __w.__slice_new_${key}(n);
+	for (let i = 0; i < n; i++) __w.__slice_set_${key}(s, i, ${P}f32x4in(arr.subarray ? arr.subarray(4 * i, 4 * i + 4) : arr.slice(4 * i, 4 * i + 4)));
+	return s;
+}
+function ${P}slout_${key}(s) {
+	if (s == null || __w.__slice_is_nil_${key}(s)) return null;
+	const n = __w.__slice_len_${key}(s);
+	const out = new Float32Array(4 * n);
+	for (let i = 0; i < n; i++) out.set(${P}f32x4out(__w.__slice_get_${key}(s, i)), 4 * i);
+	return out;
+}
+function ${P}slview_${key}(s) {
+	return ${P}slout_${key}(s);
+}`);
+			continue;
+		}
 		out.push(`function ${P}slin_${key}(arr) {
 	if (arr == null) return __w.__slice_nil_${key}();
 	const n = arr.length;
@@ -2652,6 +2953,34 @@ function ${P}mapout_${key}(m) {
 		}
 	}
 	return out;
+}`);
+	}
+
+	if (needs.simd) {
+		const k = needs.simd.key;
+		out.push(`function ${P}v4in(words) {
+	const a = __w.__array_new_${k}(4);
+	for (let i = 0; i < 4; i++) __w.__array_set_${k}(a, i, words[i]);
+	return a;
+}
+function ${P}v4out(a) {
+	const words = new Int32Array(4);
+	for (let i = 0; i < 4; i++) words[i] = __w.__array_get_${k}(a, i);
+	return words;
+}
+function ${P}f32x4in(v) {
+	return ${P}v4in(new Int32Array(new Float32Array(v ?? 4).buffer));
+}
+function ${P}f32x4out(a) {
+	return new Float32Array(${P}v4out(a).buffer);
+}
+function ${P}mask4in(v) {
+	const w = new Int32Array(4);
+	if (v) for (let i = 0; i < 4; i++) w[i] = v[i] ? -1 : 0;
+	return ${P}v4in(w);
+}
+function ${P}mask4out(a) {
+	return Array.from(${P}v4out(a), (w) => w !== 0);
 }`);
 	}
 
@@ -2794,15 +3123,17 @@ function ${P}shin(v, Ctor) {
 	for (const c of meta.consts) {
 		if (c.dynamic) {
 			out.push(
-				`const ${c.name} = ${outExpr(c.desc, `__w.__const_${c.name}()`)};`,
+				`const ${facadeName(c.name)} = ${outExpr(c.desc, `__w.__const_${c.name}()`)};`,
 			);
 		} else {
-			out.push(`const ${c.name} = ${c.value};`);
+			out.push(`const ${facadeName(c.name)} = ${c.value};`);
 		}
 	}
 	for (const v of meta.vars ?? [])
 		out.push(
-			`const ${v.name} = ${P}shout(__w.__var_${v.name}(), ${v.desc.ctor});`,
+			v.shared
+				? `const ${facadeName(v.name)} = ${P}shout(__w.__var_${v.name}(), ${v.desc.ctor});`
+				: `const ${facadeName(v.name)} = ${outExpr(v.desc, `__w.__var_${v.name}()`)};`,
 		);
 
 	for (const f of meta.funcs) {
@@ -2811,11 +3142,20 @@ function ${P}shin(v, Ctor) {
 			f.params,
 			f.returns,
 		);
-		out.push(`function ${f.name}(${names.join(", ")}) {\n${body}\n}`);
+		out.push(
+			`function ${facadeName(f.name)}(${restParams(names, f.variadic)}) {\n${body}\n}`,
+		);
 	}
 
 	if (callMain) out.push("__w.main();");
 	return bindExports(out.join("\n"));
+}
+
+// A variadic Go function is a slice parameter in wasm; JS callers pass the
+// trailing arguments spread, so the facade collects them with a rest param.
+function restParams(names, variadic) {
+	if (!variadic || names.length === 0) return names.join(", ");
+	return [...names.slice(0, -1), `...${names.at(-1)}`].join(", ");
 }
 
 // Rewrites `__w.name(...)` into calls through module-level `const` bindings.
@@ -2974,7 +3314,7 @@ class ${name} {
 			[recv],
 		);
 		lines.push(
-			`\t${m.name}(${names.join(", ")}) {\n${indent(body, "\t")}\n\t}`,
+			`\t${m.name}(${restParams(names, m.variadic)}) {\n${indent(body, "\t")}\n\t}`,
 		);
 	}
 	lines.push("}");
