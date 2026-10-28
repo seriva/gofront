@@ -36,6 +36,41 @@ function declId(t) {
 	return declIds.get(t);
 }
 
+// Go infers T from the "largest" untyped constant kind (int < rune < float <
+// complex), and a typed argument beats any untyped one.
+const UNTYPED_RANK = { int: 0, int32: 1, float64: 2, complex128: 3 };
+function untypedWins(prev, next) {
+	if (prev.kind !== "untyped") return false;
+	if (next.kind !== "untyped") return true;
+	return (UNTYPED_RANK[next.base] ?? 0) > (UNTYPED_RANK[prev.base] ?? 0);
+}
+
+// Node count of a type, so a request that keeps growing can be told from one
+// that merely repeats.
+function typeSize(t) {
+	switch (t?.kind) {
+		case "named":
+			return 1 + (t.typeArgs ?? []).reduce((n, a) => n + typeSize(a), 0);
+		case "pointer":
+			return 1 + typeSize(t.base);
+		case "slice":
+		case "array":
+			return 1 + typeSize(t.elem);
+		case "map":
+			return 1 + typeSize(t.key) + typeSize(t.value);
+		case "func":
+			return (
+				1 +
+				[...(t.params ?? []), ...(t.returns ?? [])].reduce(
+					(n, a) => n + typeSize(a),
+					0,
+				)
+			);
+		default:
+			return 1;
+	}
+}
+
 function instanceKey(t) {
 	switch (t?.kind) {
 		case "named":
@@ -459,8 +494,17 @@ export const resolveMethods = {
 		// so on: an instance still being built that keeps asking for a larger
 		// one never settles.
 		generic._building ??= [];
+		generic._buildSizes ??= [];
 		const building = generic._building;
-		if (building.length >= MAX_INSTANTIATION_DEPTH) {
+		const size = typeArgs.reduce((n, a) => n + typeSize(a), 0);
+		// A request for a larger instance while one is being built never
+		// settles (`T[X]` containing `T[[]X]`), and doubling forms such as
+		// `T[Pair[X, X]]` blow up long before a depth limit is reached.
+		const top = generic._buildSizes[generic._buildSizes.length - 1];
+		if (
+			building.length >= MAX_INSTANTIATION_DEPTH ||
+			(top !== undefined && size > top)
+		) {
 			if (!generic._cycleReported) {
 				generic._cycleReported = true;
 				this.err(
@@ -486,12 +530,14 @@ export const resolveMethods = {
 		const typeScope = new Scope(this.globals);
 		for (const tp of generic.typeParams) typeScope.define(tp.name, tp);
 		building.push(key);
+		generic._buildSizes.push(size);
 		let instantiated;
 		try {
 			const underlying = this.resolveTypeNode(generic.declNode.type, typeScope);
 			instantiated = this.substituteType(underlying, map);
 		} finally {
 			building.pop();
+			generic._buildSizes.pop();
 		}
 		if (instantiated.kind === "struct") {
 			instantiated.name = generic.declNode.name;
@@ -595,7 +641,8 @@ export const resolveMethods = {
 	_inferFromPair(paramType, argType, map) {
 		if (!paramType || !argType) return;
 		if (paramType.kind === "typeParam") {
-			if (!map.has(paramType.name)) map.set(paramType.name, argType);
+			const prev = map.get(paramType.name);
+			if (!prev || untypedWins(prev, argType)) map.set(paramType.name, argType);
 			return;
 		}
 		if (paramType.kind === "named" && paramType.typeArgs) {

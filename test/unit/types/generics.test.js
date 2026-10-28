@@ -1015,6 +1015,37 @@ func main() {
 	assertEqual(errors.length, 0);
 });
 
+test("untyped constants infer T from the widest constant kind", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"fmt"
+	"math"
+)
+
+func Max[T ~int | ~float64](a, b T) T {
+	if a > b {
+		return a
+	}
+	return b
+}
+func Sum[T ~int | ~float64](a, b T) T { return a + b }
+func takes(f float64) float64         { return f }
+
+func main() {
+	fmt.Println(math.Sqrt(Max(4, 9.0)))
+	fmt.Println(takes(Sum(1, 2.5)))
+	var f float64 = Max(1, 2.5)
+	fmt.Println(f)
+	var h float64 = Sum(1, 2.5) + 1
+	fmt.Println(h)
+}
+`,
+		"3\n3.5\n2.5\n4.5\n",
+	);
+});
+
 test("a self-referential instantiation reports a cycle", () => {
 	assertErrorContains(
 		compile(`package main
@@ -1025,6 +1056,40 @@ func main() {
 }`).errors,
 		"instantiation cycle",
 	);
+});
+
+test("growing instantiation cycles report an error quickly", () => {
+	for (const src of [
+		`package main
+type Pair[A, B any] struct{ a A; b B }
+type Chain[T any] struct{ next *Chain[Pair[T, T]] }
+func main() {
+	var c Chain[int]
+	_ = c
+}`,
+		`package main
+type Chain[T any] struct{ next *Chain[[]T]; m map[string]*Chain[*T] }
+func main() {
+	var c Chain[int]
+	_ = c
+}`,
+	]) {
+		const start = Date.now();
+		assertErrorContains(compile(src).errors, "instantiation cycle");
+		assert(Date.now() - start < 5000, "cycle detection took too long");
+	}
+});
+
+test("non-cyclic recursive generic types still compile", () => {
+	const { errors } = compile(`package main
+type List[T any] struct{ next *List[T]; v T }
+type Tree[T any] struct{ kids []Tree[T] }
+func main() {
+	var a List[List[int]]
+	var b Tree[Tree[string]]
+	_, _ = a, b
+}`);
+	assertEqual(errors.length, 0);
 });
 
 const TWO_PACKAGES = {
