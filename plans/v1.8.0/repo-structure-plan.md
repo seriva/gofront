@@ -323,17 +323,17 @@ Only paths change. No task, scope or number in those plans is edited.
 
 ### Phase 5: Backend boundaries
 
-- [ ] Task 5.1: `fmt-types.js` → `src/backend/shared/`
+- [x] Task 5.1: `fmt-types.js` → `src/backend/shared/`
   - Files: `src/backend/shared/fmt-types.js` (moved), its importers (`js/stdlib/fmt.js`, `js/fmt-runtime.js`, `wasm/stdlib/core.js` — the import line only), `.sentrux/rules.toml` (backend globs)
   - Test: the Task 1.1 real-repo cross-backend case is turned on and lists only the allowlisted edge
   - Done when: `check-layers` passes with the cross-backend check on, and the hashes match
-- [ ] Task 5.2: Parse templ `{ expr }` and attribute expressions in `TemplParser`
+- [x] Task 5.2: Parse templ `{ expr }` and attribute expressions in `TemplParser`
   - Files: `src/templ-parser.js`, `src/backend/js/templ.js`
   - Test: `test/unit/compiler/templ.test.js`:
     - Written first, passing on the old code: pinned error text, position and exit code for a malformed `{ a + }` under `build` and `check`.
     - New (fails first): the parsed templ AST for `{ name }` has `node.expr.kind === "Ident"`.
   - Done when: the pinned errors are unchanged, `templ.js` has no `parseExpr` call, and the `example/templ`/`gom` hashes match
-- [ ] Task 5.3: Parse templ `for` headers in `TemplParser`; drop the parser import from JS codegen
+- [x] Task 5.3: Parse templ `for` headers in `TemplParser`; drop the parser import from JS codegen
   - Files: `src/templ-parser.js`, `src/backend/js/templ.js`
   - Test: `templ.test.js`: pinned error for a malformed `for` header; parsed `for` nodes carry `node.forStmt`; the source of `templ.js` does not import `parser/`
   - Done when: `grep -n 'new Parser\|parser/index' src/backend/js/templ.js` is empty, and the hashes match
