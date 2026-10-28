@@ -240,26 +240,26 @@ Only paths change. No task, scope or number in those plans is edited.
 ### Phase 1: Architecture gate coverage & repo hygiene
 *Before Task 1.1, record the baseline hashes on `main` (see [Baseline build hashes](#baseline-build-hashes)).*
 
-- [ ] Task 1.1: Layer guard script
+- [x] Task 1.1: Layer guard script
   - Files: `scripts/check-layers.js`, `package.json` (add to `check` before `sentrux check`)
   - Test: `test/unit/compiler/check-layers.test.js`:
     - `findLayerGaps` on fixture TOML and file lists flags an unlayered file, a dead glob, `*` vs `**` depth, and `ALLOW`.
     - `findCrossBackendImports` flags a fixture `js → wasm` import and a non-allowlisted `wasm → js` import, and passes the `boundary.js → js/runtime.js` edge.
     - Real-repo cases land as `todo`: they list the unlayered src and stdlib files found on the base commit (re-probed after portable-go Phase 9) and the `core.js → fmt-types.js` edge.
   - Done when: the fixture cases pass, and the real-repo cases list exactly the files in Verified Gaps
-- [ ] Task 1.2: Complete the Sentrux layers
+- [x] Task 1.2: Complete the Sentrux layers
   - Files: `.sentrux/rules.toml`
   - Test: the real-repo layer-gap case from Task 1.1 is turned on. The cross-backend case stays `todo` until Task 5.1
   - Done when: the layer-gap check is clean, `sentrux check` and `sentrux gate` pass, and the `rules.toml` comment documents `math` as the only allowed gap
-- [ ] Task 1.3: Remove the dead WASM compatibility shims
+- [x] Task 1.3: Remove the dead WASM compatibility shims
   - Files: `src/backend/wasm/emit-stdlib.js` (delete), `src/backend/wasm/stdlib/index.js`, `src/backend/wasm/stdlib/core.js` (the trailing alias line only); also the comment at `src/typechecker/types.js:105`
   - Test: none new (deletion only). `grep -rn 'emit-stdlib\|Phase[678]Emitter\|StdlibEmitter\b' src test` must be empty
   - Done when: grep is empty, the hashes match and `wasm/golden.test.js` passes
-- [ ] Task 1.4: Register stdlib mixins through `stdlibEmitters`
+- [x] Task 1.4: Register stdlib mixins through `stdlibEmitters`
   - Files: `src/backend/wasm/emit.js`, `src/backend/wasm/stdlib/index.js`
   - Test: new `test/unit/wasm/mixins.test.js`: every class in `stdlibEmitters` has its prototype methods on `FunctionEmitter.prototype`, and a duplicate name throws. Fails first against a temporary probe mixin added to the array
   - Done when: `emit.js` has no hand-listed stdlib `copyMethods` lines, and the hashes match
-- [ ] Task 1.5: Looped example build and `.gitignore` dedupe
+- [x] Task 1.5: Looped example build and `.gitignore` dedupe
   - Files: `scripts/build-examples.js` (exports `listExamples(root)`), `package.json` (`build`), `.gitignore`
   - Test: `test/unit/compiler/build-examples.test.js`: `listExamples` returns exactly the example directories that have `src/`, and skips a temp directory without one
   - Done when: `npm run build` reproduces the hashes, and the `.gitignore` duplicate check is empty
