@@ -240,7 +240,7 @@ Only paths change. No task, scope or number in those plans is edited.
 ### Phase 1: Architecture gate coverage & repo hygiene
 *Before Task 1.1, record the baseline hashes on `main` (see [Baseline build hashes](#baseline-build-hashes)).*
 
-- [ ] Task 1.1: Layer guard script
+- [x] Task 1.1: Layer guard script
   - Files: `scripts/check-layers.js`, `package.json` (add to `check` before `sentrux check`)
   - Test: `test/unit/compiler/check-layers.test.js`:
     - `findLayerGaps` on fixture TOML and file lists flags an unlayered file, a dead glob, `*` vs `**` depth, and `ALLOW`.
