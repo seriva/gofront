@@ -247,7 +247,7 @@ Only paths change. No task, scope or number in those plans is edited.
     - `findCrossBackendImports` flags a fixture `js → wasm` import and a non-allowlisted `wasm → js` import, and passes the `boundary.js → js/runtime.js` edge.
     - Real-repo cases land as `todo`: they list the unlayered src and stdlib files found on the base commit (re-probed after portable-go Phase 9) and the `core.js → fmt-types.js` edge.
   - Done when: the fixture cases pass, and the real-repo cases list exactly the files in Verified Gaps
-- [ ] Task 1.2: Complete the Sentrux layers
+- [x] Task 1.2: Complete the Sentrux layers
   - Files: `.sentrux/rules.toml`
   - Test: the real-repo layer-gap case from Task 1.1 is turned on. The cross-backend case stays `todo` until Task 5.1
   - Done when: the layer-gap check is clean, `sentrux check` and `sentrux gate` pass, and the `rules.toml` comment documents `math` as the only allowed gap

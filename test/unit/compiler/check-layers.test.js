@@ -3,6 +3,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import {
+	ALLOW,
 	ALLOW_CROSS,
 	findCrossBackendImports,
 	findLayerGaps,
@@ -182,37 +183,20 @@ const repoFiles = [
 	...walk(join(ROOT, "stdlib"), [".go"]),
 ].map(rel);
 
-// Task 1.2 completes the layers and flips these two cases to expect nothing.
-const KNOWN_UNLAYERED = [
-	"src/colors.js",
-	"src/project-config.js",
-	"src/pwa.js",
-	"src/typechecker/const-fold.js",
-	"src/typechecker/constants.js",
-	"src/typechecker/expressions.js",
-	"stdlib/encoding/json/errors.go",
-	"stdlib/encoding/json/indent.go",
-	"stdlib/encoding/json/number.go",
-	"stdlib/encoding/json/stream.go",
-	"stdlib/internal/jsonrt/dec.go",
-	"stdlib/internal/jsonrt/enc.go",
-	"stdlib/internal/jsonrt/indent.go",
-	"stdlib/internal/jsonrt/number.go",
-	"stdlib/internal/jsonrt/reader.go",
-	"stdlib/internal/jsonrt/scanner.go",
-	"stdlib/unicode/utf8/bytes.go",
-];
-
-test("real repo: unlayered files are exactly the known gaps", () => {
+test("every src and stdlib file is in a Sentrux layer", () => {
 	const gaps = findLayerGaps(rules, repoFiles);
-	assertEqual(gaps.unlayered.join("\n"), KNOWN_UNLAYERED.join("\n"));
+	assertEqual(gaps.unlayered.join("\n"), "");
 });
 
-test("real repo: dead layer globs are exactly the known ones", () => {
+test("no Sentrux layer glob is dead", () => {
 	const gaps = findLayerGaps(rules, repoFiles);
+	assertEqual(gaps.dead.join("\n"), "");
+});
+
+test("only documented files are exempt from layering", () => {
 	assertEqual(
-		gaps.dead.join(","),
-		"src/typechecker/expressions/*,stdlib/encoding/*",
+		Object.keys(ALLOW).sort().join(","),
+		"stdlib/internal/jsonrt/dec.go,stdlib/internal/jsonrt/enc.go,stdlib/math/extra.go",
 	);
 });
 
