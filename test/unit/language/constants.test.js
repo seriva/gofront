@@ -432,6 +432,39 @@ test("warning: integral float and named constants in integer contexts (M3)", () 
 	assertEqual(quiet.warnings.length, 0);
 });
 
+section("Shift and constant diagnostics");
+
+test("error: shifting a float64 operand", () => {
+	const { errors } = compile(`package main
+func main() {
+	var f float64 = 1
+	y := f << 2
+	_ = y
+}`);
+	assertErrorContains(errors, "must be integer");
+});
+
+for (const target of ["js", "both", "wasm"]) {
+	test(`error: -uint16(c+1) overflows on ${target}`, () => {
+		const { errors } = compile(
+			`package main
+const c uint16 = 3
+var v = -uint16(c + 1)
+func main() { _ = v }`,
+			{ target },
+		);
+		assertErrorContains(errors, "constant -4 overflows uint16");
+	});
+}
+
+test("error: const shifted by a negative count reports once", () => {
+	const { errors } = compile(`package main
+const c = 1 << -1
+func main() { _ = c }`);
+	assertEqual(errors.length, 1);
+	assertErrorContains(errors, "is negative");
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

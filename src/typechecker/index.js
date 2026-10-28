@@ -770,6 +770,9 @@ export class TypeChecker {
 		if (!decl.isAlias && underlying.kind === "named") {
 			const inner = this._deepUnderlying(underlying);
 			if (inner?.kind === "array") underlying = inner;
+			// `type S Base` with Base a struct: S gets its own copy of the fields.
+			else if (inner?.kind === "struct")
+				underlying = { ...inner, name: decl.name, methods: new Map() };
 		}
 		if (decl.isAlias) {
 			// type A = B — transparent alias, A and B are identical types

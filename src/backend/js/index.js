@@ -264,6 +264,9 @@ export class CodeGen {
 	}
 
 	_emitTypeDecls(program, methods) {
+		this._typeDeclsByName = new Map();
+		for (const d of program.decls)
+			if (d.kind === "TypeDecl") this._typeDeclsByName.set(d.name, d);
 		for (const d of program.decls) {
 			if (d.kind === "TypeDecl") {
 				this._currentSrcFileIdx = d._srcFileIdx ?? 0;
@@ -620,9 +623,30 @@ export class CodeGen {
 
 	// ── Type declarations ────────────────────────────────────────
 
+	// `type S Base` with Base a struct declared in this package: the struct
+	// AST S inherits its fields from, or null.
+	_definedStructAst(decl) {
+		if (decl.isAlias || decl.typeParams) return null;
+		if (this.checker?.types.get(decl.name)?.underlying?.kind !== "struct")
+			return null;
+		let t = decl.type;
+		for (let depth = 0; depth < 16 && t; depth++) {
+			if (t.kind === "StructType") return t;
+			if (t.kind !== "TypeName" && t.kind !== "Ident") return null;
+			const next = this._typeDeclsByName?.get(t.name);
+			if (!next || next.isAlias) return null;
+			t = next.type;
+		}
+		return null;
+	}
+
 	genTypeDeclWithMethods(decl, methodDecls) {
+		const definedStruct =
+			decl.type.kind === "StructType" ? null : this._definedStructAst(decl);
 		if (decl.type.kind === "StructType") {
 			this.genStruct(decl.name, decl.type, methodDecls);
+		} else if (definedStruct) {
+			this.genStruct(decl.name, definedStruct, methodDecls);
 		} else if (decl.type.kind === "InterfaceType") {
 			// Interfaces are compile-time only — no JS output needed.
 			this.line(`// interface ${decl.name} (compile-time only)`);
