@@ -221,7 +221,14 @@ export const assignabilityMethods = {
 			return;
 		}
 		if (isUntyped(source) && this._isUntypedAssignable(target, source)) return;
-		if (this._isNumericCoercible(target, source)) return;
+		if (this._isNumericCoercible(target, source)) {
+			if (!this._isGenericCallResult(node)) return;
+			this.err(
+				`mismatched types ${typeStr(source)} and ${typeStr(target)} in ${ctx}`,
+				node,
+			);
+			return;
+		}
 		if (this._checkArrayAssignable(target, source, node)) return;
 		if (this._checkTypedArrayAssignable(target, source, node)) return;
 		if (this._checkFuncAssignable(target, source, node)) return;
@@ -456,6 +463,20 @@ export const assignabilityMethods = {
 			(isComplex(target) &&
 				(source.base === "int" || source.base === "float64"))
 		);
+	},
+
+	// A value computed from a generic call (`3 + Sum[float64](1, 2)`) has the
+	// exact instantiated type, so the loose int/float64 promotion that plain
+	// code enjoys does not apply to it.
+	_isGenericCallResult(node) {
+		if (!node || typeof node !== "object") return false;
+		if (node.kind === "ParenExpr") return this._isGenericCallResult(node.expr);
+		if (node.kind === "BinaryExpr")
+			return (
+				this._isGenericCallResult(node.left) ||
+				this._isGenericCallResult(node.right)
+			);
+		return node.kind === "CallExpr" && Boolean(node.func?._genericFnType);
 	},
 
 	_isNumericCoercible(target, source) {

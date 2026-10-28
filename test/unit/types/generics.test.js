@@ -7,12 +7,14 @@ import {
 	assertErrorContains,
 	assertProgramOutput,
 	compile,
+	compileDir,
 	compileHybrid,
 	Lexer,
 	runJs,
 	section,
 	summarize,
 	test,
+	withTempDir,
 } from "../helpers.js";
 
 // ═════════════════════════════════════════════════════════════
@@ -911,6 +913,160 @@ func main() {
 }
 `,
 		"true\nfalse\n",
+	);
+});
+
+section(
+	"Generics — receiver type parameters, function values, explicit arguments",
+);
+
+test("a generic receiver value copies into a local of its own type", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type Stack[T any] struct{ items []T }
+
+func (s Stack[T]) Copy() Stack[T] {
+	c := s
+	return c
+}
+
+type List[T any] struct {
+	Val  T
+	Next *List[T]
+}
+
+func (l *List[T]) Last() T {
+	p := l
+	for p.Next != nil {
+		p = p.Next
+	}
+	return p.Val
+}
+
+func main() {
+	s := Stack[int]{}
+	fmt.Println(len(s.Copy().items))
+	l := &List[int]{Val: 1, Next: &List[int]{Val: 2}}
+	fmt.Println(l.Last())
+}
+`,
+		"0\n2\n",
+	);
+});
+
+test("an instantiated generic function is a value", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func Id[T any](x T) T { return x }
+
+func main() {
+	f := Id[int]
+	fmt.Println(f(3))
+}
+`,
+		"3\n",
+	);
+});
+
+test("explicit type arguments are checked", () => {
+	assertErrorContains(
+		compile(`package main
+func Sum[T int | float64](a, b T) T { return a + b }
+func f() int {
+	return 3 + Sum[float64](1, 2)
+}
+func main() { f() }`).errors,
+		"mismatched types",
+	);
+	assertErrorContains(
+		compile(`package main
+func Id[T any](x T) T { return x }
+func main() { Id[int, int](1) }`).errors,
+		"got 2 type arguments",
+	);
+	assertErrorContains(
+		compile(`package main
+import "strings"
+func main() { strings.ToUpper[int]("a") }`).errors,
+		"not a generic function",
+	);
+	assertErrorContains(
+		compile(`package main
+func C[T any](n int) T { return T(n) }
+func main() { C[int](1) }`).errors,
+		"cannot convert",
+	);
+});
+
+test("valid explicit instantiations still compile", () => {
+	const { errors } = compile(`package main
+func Sum[T int | float64](a, b T) T { return a + b }
+func Conv[T int | float64](n int) T { return T(n) }
+func main() {
+	_ = 3 + Sum[int](1, 2)
+	_ = Conv[float64](1)
+}`);
+	assertEqual(errors.length, 0);
+});
+
+test("a self-referential instantiation reports a cycle", () => {
+	assertErrorContains(
+		compile(`package main
+type T[X any] struct{ n *T[[]X] }
+func main() {
+	var t T[int]
+	_ = t
+}`).errors,
+		"instantiation cycle",
+	);
+});
+
+const TWO_PACKAGES = {
+	"a/a.go": `package a
+
+type Pt struct{ X int }
+`,
+	"b/b.go": `package b
+
+type Pt struct{ Y string }
+`,
+};
+
+const twoPackageMain = (body) => `package main
+
+import (
+	"fmt"
+
+	"./a"
+	"./b"
+)
+
+type Box[T any] struct{ v T }
+
+func main() {
+${body}
+}
+`;
+
+test("package-qualified type arguments keep their own fields", () => {
+	withTempDir(
+		{
+			...TWO_PACKAGES,
+			"main.go": twoPackageMain(`	x := Box[a.Pt]{a.Pt{X: 1}}
+	y := Box[b.Pt]{b.Pt{Y: "s"}}
+	fmt.Println(x.v.X, y.v.Y)`),
+		},
+		(dir) => {
+			// Type-checks: `y.v.Y` resolves against b.Pt, `x.v.X` against a.Pt.
+			const { errors } = compileDir(dir);
+			assertEqual(errors?.length ?? 0, 0);
+		},
 	);
 });
 
