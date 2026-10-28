@@ -1,7 +1,7 @@
 # Portable Go Completion — Design Plan
 
 **Version:** v1.8.0
-**Status:** Done (2026-10-27); simplification phases 8–11 added and completed 2026-10-27
+**Status:** Completed (2026-10-28); simplification phases 8–11 added and completed 2026-10-27  
 **Base branch:** main
 **Related:** Depends on v1.7.0 ([`json-preact-simd-plan.md`](../v1.7.0/json-preact-simd-plan.md)), including the JS `encoding/json` hardening on the v1.7.0 branch. Replaces the dropped v1.7.1 plans. Their stdlib items (`bufio`, `context`, `net/url`; built in Phase 4, removed again by D2), the WASM interior-pointer problem and the SIMD completion and SoA work move here. Boundary slice borrowing (a performance optimisation, not a completeness item) is not part of this plan. The v2.0.0 native Go engine ([`native-go-engine.md`](../v2.0.0/native-go-engine.md)) is shelved, so v1.8.0 is no longer a JS-engine feature freeze.
 
