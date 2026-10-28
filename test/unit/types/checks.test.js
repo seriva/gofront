@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import {
 	assertEqual,
 	assertErrorContains,
+	assertProgramOutput,
 	compile,
 	runJs,
 	section,
@@ -983,6 +984,45 @@ func main() {
 // ═════════════════════════════════════════════════════════════
 // Additional coverage
 // ═════════════════════════════════════════════════════════════
+
+section("Type switch nil binding and elided map keys");
+
+test("type switch: case nil with a binding runs on every target", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+func check(err error) {
+	switch e := err.(type) {
+	case nil:
+		_ = e
+		fmt.Println("nil")
+	default:
+		fmt.Println("err", e)
+	}
+}
+
+func main() {
+	check(nil)
+	check(errors.New("x"))
+}
+`,
+		"nil\nerr x\n",
+	);
+});
+
+test("composite literal: elided key of a non-composite key type is an error", () => {
+	const { errors } = compile(`package main
+func main() {
+	_ = map[string]int{{1}: 1}
+}
+`);
+	assertErrorContains(errors, "invalid composite literal type string");
+});
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
