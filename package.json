@@ -35,13 +35,14 @@
 		"gofront": "src/index.js"
 	},
 	"scripts": {
-		"build": "node src/index.js example/simple/src -o example/simple/app.js && node src/index.js example/preact/src -o example/preact/app.js && node src/index.js example/gom/src -o example/gom/app.js && node src/index.js example/templ/src -o example/templ/app.js && node src/index.js example/webgl/src -o example/webgl/app.js && node src/index.js example/hybrid/src -o example/hybrid/app.js",
-		"test": "node test/unit/run.js && node test/e2e/perf/zero-alloc.js && node src/index.js test --dom example/...",
+		"build": "node scripts/build-examples.js",
+		"test": "node test/unit/run.js && node test/perf/zero-alloc.js && node src/index.js test --dom example/...",
 		"test:e2e": "playwright test",
 		"test:coverage": "c8 --include='src/**' --reporter=text --reporter=lcov node test/unit/run.js",
-		"bench": "node --expose-gc test/e2e/perf/raycast-bench.js && node test/e2e/perf/json-bench.js && node --expose-gc test/e2e/perf/particle-bench.js",
+		"bench": "node --expose-gc test/perf/raycast-bench.js && node test/perf/json-bench.js && node --expose-gc test/perf/particle-bench.js",
+		"check:layers": "node scripts/check-layers.js",
 		"format": "biome format --write .",
-		"check": "biome check . && sentrux check && sentrux gate && node src/index.js check example/...",
+		"check": "biome check . && node scripts/check-layers.js && sentrux check && sentrux gate && node src/index.js check example/...",
 		"prepare": "lefthook install"
 	},
 	"devDependencies": {
@@ -56,36 +57,5 @@
 	},
 	"optionalDependencies": {
 		"binaryen": "^132.0.0"
-	},
-	"gofront": {
-		"vendor": {
-			"dest": "example/preact/vendor.js",
-			"packages": [
-				"preact",
-				"preact/hooks"
-			],
-			"globals": {
-				"preact": "preact",
-				"preact/hooks": [
-					"preact/hooks",
-					"preact_hooks"
-				]
-			},
-			"namedExports": {
-				"preact": [
-					"h",
-					"render",
-					"Component"
-				],
-				"preact/hooks": [
-					"useState",
-					"useEffect",
-					"useRef",
-					"useMemo",
-					"useCallback",
-					"useReducer"
-				]
-			}
-		}
 	}
 }
