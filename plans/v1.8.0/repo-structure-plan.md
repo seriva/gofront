@@ -293,7 +293,7 @@ Only paths change. No task, scope or number in those plans is edited.
   - Files: `src/compiler.js`, `src/link/sourcemap.js`, `.sentrux/rules.toml` (add `"src/link/*"` to support)
   - Test: `test/unit/compiler/link.test.js`: `mergeCompilationChunks` on two fixture chunks gives the expected offset `mappings`. Fails first because the module is missing
   - Done when: source-map tests and hashes are unchanged, and `check-layers` passes
-- [ ] Task 3.2: WASM unit linking → `src/link/wasm.js`
+- [x] Task 3.2: WASM unit linking → `src/link/wasm.js`
   - Files: `src/compiler.js`, `src/link/wasm.js`
   - Test: `link.test.js`: `checkLinkCollisions` reports a duplicate top-level name across two units with the existing message
   - Done when: `test/unit/wasm/*` and the `example/hybrid` hashes are unchanged
