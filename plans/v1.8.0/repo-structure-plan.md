@@ -323,7 +323,7 @@ Only paths change. No task, scope or number in those plans is edited.
 
 ### Phase 5: Backend boundaries
 
-- [ ] Task 5.1: `fmt-types.js` → `src/backend/shared/`
+- [x] Task 5.1: `fmt-types.js` → `src/backend/shared/`
   - Files: `src/backend/shared/fmt-types.js` (moved), its importers (`js/stdlib/fmt.js`, `js/fmt-runtime.js`, `wasm/stdlib/core.js` — the import line only), `.sentrux/rules.toml` (backend globs)
   - Test: the Task 1.1 real-repo cross-backend case is turned on and lists only the allowlisted edge
   - Done when: `check-layers` passes with the cross-backend check on, and the hashes match

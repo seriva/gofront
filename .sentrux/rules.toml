@@ -22,7 +22,7 @@ order = 1
 
 [[layers]]
 name  = "backend"
-paths = ["src/backend/js/*", "src/backend/js/stdlib/*", "src/backend/wasm/*", "src/backend/wasm/stdlib/*"]
+paths = ["src/backend/js/*", "src/backend/js/stdlib/*", "src/backend/wasm/*", "src/backend/wasm/stdlib/*", "src/backend/shared/*"]
 order = 2
 
 [[layers]]
