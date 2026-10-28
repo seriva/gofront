@@ -34,10 +34,7 @@ export const PERMANENT_CROSS = [
 
 // Known edges that are scheduled for removal. Delete an entry when the move
 // that fixes it lands.
-export const PENDING_CROSS = [
-	// fmt-types.js moves to src/backend/shared/ in the repo-structure plan.
-	["src/backend/wasm/stdlib/core.js", "src/backend/js/fmt-types.js"],
-];
+export const PENDING_CROSS = [];
 
 export const ALLOW_CROSS = [...PERMANENT_CROSS, ...PENDING_CROSS];
 
