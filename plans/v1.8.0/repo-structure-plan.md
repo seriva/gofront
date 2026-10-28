@@ -348,7 +348,7 @@ Only paths change. No task, scope or number in those plans is edited.
   - Files: `git mv` of `cli-core`, `dev-server`, `test-runner`, `asset-manager`, `vendor`, `pwa`, `project-config`, `colors` and `minifier` to `src/cli/`; import rewrites in `src/` and `test/`; `.sentrux/rules.toml`. Mechanical; exceeds the 3-file rule by design
   - Test: the `check-layers` real-repo cases and `sentrux check`
   - Done when: the hashes match, the suites pass, and `npm pack --dry-run` shows the new paths with `bin` unchanged
-- [ ] Task 6.3: Move the lexer files to `src/lexer/`, and `templ-parser.js` to `src/parser/templ.js`
+- [x] Task 6.3: Move the lexer files to `src/lexer/`, and `templ-parser.js` to `src/parser/templ.js`
   - Files: `git mv` of `lexer`, `templ-lexer` and `tokens` to `src/lexer/`, and `templ-parser.js` to `src/parser/templ.js`; import rewrites; `.sentrux/rules.toml`
   - Test: as for 6.2
   - Done when: the hashes match, and `ls src/*.js` lists only `index.js`, `compiler.js`, `resolver.js` and `dts-parser.js`

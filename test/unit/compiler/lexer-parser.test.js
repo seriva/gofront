@@ -1,6 +1,6 @@
 // GoFront test suite — lexer, parser, dts-parser, codegen
 import { fileURLToPath } from "node:url";
-import { T } from "../../../src/lexer.js";
+import { T } from "../../../src/lexer/lexer.js";
 import {
 	parseJsonTag,
 	parseStructTag,
