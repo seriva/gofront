@@ -274,7 +274,7 @@ Only paths change. No task, scope or number in those plans is edited.
   - Files: `src/index.js`, `src/cli-core.js`
   - Test: `cli-core.test.js`: `devReporters` with captured stderr. `onBuild` prints `OK — wrote …`; `onError` prints `ERROR` plus the formatted diagnostic; `copyAssets: true` calls the asset copy
   - Done when: `wc -l src/index.js` ≤ 220, and the dev-server tests pass unchanged
-- [ ] Task 2.3: Stop tracking the compiled examples
+- [x] Task 2.3: Stop tracking the compiled examples
   - Files: `.gitignore` (`/example/*/app.js`, `/example/*/app.wasm`, with a comment that `vendor.js` stays tracked); `git rm --cached` for the 7 outputs
   - Test: `build-examples.test.js`: `git ls-files example` has no `app.js`/`app.wasm` and still has `example/preact/vendor.js`
   - Done when: on a fresh clone, `npm ci && npm test && npm run test:e2e` pass
