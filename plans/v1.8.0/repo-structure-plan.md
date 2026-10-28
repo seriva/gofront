@@ -340,7 +340,7 @@ Only paths change. No task, scope or number in those plans is edited.
 
 ### Phase 6: `src/cli/`, `src/lexer/` and the test layout
 
-- [ ] Task 6.1: Test discovery in `run.js`
+- [x] Task 6.1: Test discovery in `run.js`
   - Files: `test/unit/run.js`
   - Test: new `test/unit/compiler/runner.test.js`: the exported `TEST_FILES` equals the sorted `find` result and contains every `HEAVIEST_TEST_FILES` entry. Fails first while the list is hand-written and a temporary extra test file exists
   - Done when: the same files plus the new ones run with the same pass count, and a missing heavy entry throws at startup
