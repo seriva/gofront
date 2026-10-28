@@ -17,8 +17,8 @@
 //   TemplCase   { kind, caseTokens: tokens | null (null = default), body: TemplNode[] }
 //
 // Go expressions embedded in templ (`{ expr }`, attribute values, `if`
-// conditions, `switch` and `case` expressions, `@Comp(...)` calls) are also
-// parsed here, so the code generator does not parse them.
+// conditions, `switch` and `case` expressions, `@Comp(...)` calls) and `for`
+// headers are also parsed here, so the code generator never runs the parser.
 // The results sit on the node as non-enumerable properties (the generic AST
 // walkers in rename/lowering visit enumerable keys only, and these ASTs have
 // no type information):
@@ -27,6 +27,9 @@
 //              it instead of throwing, so the error still surfaces when the
 //              code generator reads the node (after type-checking), as before
 //   raw        TemplComponent only: `@templ.Raw(arg)`; `expr` is then `arg`
+//   forStmt    TemplFor only: the parsed ForStmt, or null when the header does
+//              not parse as a Go `for` clause
+//   forTokens  TemplFor only: stmtTokens without trailing semicolons
 //   attr.expr / attr.exprError on `expr` and `cond-bool` attributes
 
 import { Parser } from "./parser/index.js";
@@ -87,6 +90,39 @@ function isTemplRaw(toks) {
 		toks[2]?.value === "Raw" &&
 		toks[3]?.type === T.LPAREN
 	);
+}
+
+// Strips the trailing semicolons the Go lexer inserts at a newline.
+function trimSemicolons(tokens) {
+	let end = tokens.length;
+	while (end > 0 && tokens[end - 1].type === T.SEMICOLON) end--;
+	return tokens.slice(0, end);
+}
+
+// Parses a `for` header (the `for` keyword plus the clause, no body) as a
+// ForStmt, with a fake empty body `{ }` so the parser can complete it. Returns
+// null when it is not a valid Go `for` clause.
+function parseForHeader(tokens) {
+	const eofTok = new Token(T.EOF, "", 1, 1);
+	const lbrace = new Token(T.LBRACE, "{", 1, 1);
+	const rbrace = new Token(T.RBRACE, "}", 1, 1);
+	const semi = new Token(T.SEMICOLON, ";", 1, 1);
+	const withFor =
+		tokens[0]?.type === T.FOR
+			? [...tokens, lbrace, rbrace, semi, eofTok]
+			: [
+					new Token(T.FOR, "for", 1, 1),
+					...tokens,
+					lbrace,
+					rbrace,
+					semi,
+					eofTok,
+				];
+	try {
+		return new Parser(withFor).parseFor();
+	} catch {
+		return null;
+	}
 }
 
 // Parses the `expr` and `cond-bool` attribute expressions of an element.
@@ -268,7 +304,11 @@ export class TemplParser extends Parser {
 	parseTemplFor(tok) {
 		const stmtTokens = tok.value;
 		const body = this.parseHtmlChildren();
-		return { kind: "TemplFor", stmtTokens, body };
+		const forTokens = trimSemicolons(stmtTokens);
+		return attach(
+			{ kind: "TemplFor", stmtTokens, body },
+			{ forTokens, forStmt: parseForHeader(forTokens) },
+		);
 	}
 
 	// Parse a TemplSwitch node. `tok` is the TEMPL_SWITCH token (already advanced).

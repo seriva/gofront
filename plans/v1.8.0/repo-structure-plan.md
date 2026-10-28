@@ -333,7 +333,7 @@ Only paths change. No task, scope or number in those plans is edited.
     - Written first, passing on the old code: pinned error text, position and exit code for a malformed `{ a + }` under `build` and `check`.
     - New (fails first): the parsed templ AST for `{ name }` has `node.expr.kind === "Ident"`.
   - Done when: the pinned errors are unchanged, `templ.js` has no `parseExpr` call, and the `example/templ`/`gom` hashes match
-- [ ] Task 5.3: Parse templ `for` headers in `TemplParser`; drop the parser import from JS codegen
+- [x] Task 5.3: Parse templ `for` headers in `TemplParser`; drop the parser import from JS codegen
   - Files: `src/templ-parser.js`, `src/backend/js/templ.js`
   - Test: `templ.test.js`: pinned error for a malformed `for` header; parsed `for` nodes carry `node.forStmt`; the source of `templ.js` does not import `parser/`
   - Done when: `grep -n 'new Parser\|parser/index' src/backend/js/templ.js` is empty, and the hashes match

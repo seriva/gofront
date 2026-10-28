@@ -2,9 +2,6 @@
 // Mounts an HTML/expression tree onto a parent DOM node by emitting plain
 // document.createElement / appendChild / setAttribute calls.
 
-import { Parser } from "../../parser/index.js";
-import { T, Token } from "../../tokens.js";
-
 /** @typedef {import('./index.js').CodeGen} CodeGen */
 
 /** @type {ThisType<CodeGen>} */
@@ -214,35 +211,15 @@ export const templGenMethods = {
 	},
 
 	_genTemplFor(node, p) {
-		// stmtTokens include the `for` keyword plus the range clause (no body).
-		// Strip any trailing semicolons (inserted by the Go lexer on newlines),
-		// then add a fake empty body `{ }` so the parser can complete the ForStmt.
-		let tokens = node.stmtTokens;
-		while (tokens.length > 0 && tokens[tokens.length - 1].type === T.SEMICOLON)
-			tokens = tokens.slice(0, -1);
-		const eofTok = new Token(T.EOF, "", 1, 1);
-		const lbrace = new Token(T.LBRACE, "{", 1, 1);
-		const rbrace = new Token(T.RBRACE, "}", 1, 1);
-		const semi = new Token(T.SEMICOLON, ";", 1, 1);
-		const withFor =
-			tokens[0]?.type === T.FOR
-				? [...tokens, lbrace, rbrace, semi, eofTok]
-				: [
-						new Token(T.FOR, "for", 1, 1),
-						...tokens,
-						lbrace,
-						rbrace,
-						semi,
-						eofTok,
-					];
-		try {
-			const p2 = new Parser(withFor);
-			const forStmt = p2.parseFor();
-			this._genTemplRangeFor(forStmt, node.body, p);
-		} catch {
-			// Fallback for non-range loops: emit a comment + skip
-			this.line(`/* templ for: ${this._tokensToSource(tokens)} */`);
+		if (node.forStmt) {
+			try {
+				return this._genTemplRangeFor(node.forStmt, node.body, p);
+			} catch {
+				// Fall through to the non-range fallback below.
+			}
 		}
+		// Fallback for non-range loops: emit a comment + skip
+		this.line(`/* templ for: ${this._tokensToSource(node.forTokens)} */`);
 	},
 
 	_genTemplRangeFor(forStmt, templBody, mountParent) {
