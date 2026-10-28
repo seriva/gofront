@@ -356,7 +356,7 @@ Only paths change. No task, scope or number in those plans is edited.
   - Files: `git mv` of the `cli`, `cli-core`, `dev-server`, `pwa`, `asset-manager`, `test-runner`, `prep` and `build-examples` tests; the `run.js` header comment and `HEAVIEST_TEST_FILES` paths
   - Test: the Task 6.1 discovery test
   - Done when: the unit pass count is unchanged
-- [ ] Task 6.5: `test/e2e/perf/` → `test/perf/`
+- [x] Task 6.5: `test/e2e/perf/` → `test/perf/`
   - Files: `git mv test/e2e/perf test/perf`; relative imports and fixture paths in `raycast-bench.js`, `zero-alloc.js`, `json-bench.js` and `particle-bench.js`; `package.json` (`test`, `bench`)
   - Test: `node test/perf/zero-alloc.js` passes (already part of `npm test`). `node --expose-gc test/perf/raycast-bench.js --tris 1000 --rays 1000` completes
   - Done when: `npm test` passes, `ls test/e2e` has only specs and helpers, and `npm run test:e2e` is unchanged

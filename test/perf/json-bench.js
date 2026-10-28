@@ -4,10 +4,10 @@
 // Gate: WASM <= 2x JS execution time.
 //
 // Usage:
-//   node test/e2e/perf/json-bench.js [--runs 5] [--items 18000] [--json]
+//   node test/perf/json-bench.js [--runs 5] [--items 18000] [--json]
 
 import { performance } from "node:perf_hooks";
-import { compileHybridProject } from "../../../test/unit/helpers.js";
+import { compileHybridProject } from "../unit/helpers.js";
 
 const args = process.argv.slice(2);
 const flag = (name, dflt) => {
