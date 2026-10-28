@@ -28,7 +28,8 @@
 	},
 	"type": "module",
 	"files": [
-		"src/"
+		"src/",
+		"stdlib/"
 	],
 	"bin": {
 		"gofront": "src/index.js"
@@ -38,7 +39,7 @@
 		"test": "node test/unit/run.js && node test/e2e/perf/zero-alloc.js && node src/index.js test --dom example/...",
 		"test:e2e": "playwright test",
 		"test:coverage": "c8 --include='src/**' --reporter=text --reporter=lcov node test/unit/run.js",
-		"bench": "node --expose-gc test/e2e/perf/raycast-bench.js",
+		"bench": "node --expose-gc test/e2e/perf/raycast-bench.js && node test/e2e/perf/json-bench.js && node --expose-gc test/e2e/perf/particle-bench.js",
 		"format": "biome format --write .",
 		"check": "biome check . && sentrux check && sentrux gate && node src/index.js check example/...",
 		"prepare": "lefthook install"

@@ -1,18 +1,16 @@
 // GoFront test suite — encoding/json package
 
 import { fileURLToPath } from "node:url";
-import { compileSingleFile } from "../../../src/compiler.js";
 import {
 	assert,
 	assertContains,
 	assertEqual,
+	assertProgramOutput,
 	compile,
-	join,
 	runJs,
 	section,
 	summarize,
 	test,
-	withTempDir,
 } from "../helpers.js";
 
 // ═════════════════════════════════════════════════════════════
@@ -175,7 +173,7 @@ func main() {
 	console.log(string(b))
 }`);
 	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), '{"title":"Book","id":42}');
+	assertEqual(runJs(js), '{"id":42,"title":"Book"}');
 });
 
 test("json.Marshal embedded struct with explicit tag name is not promoted", () => {
@@ -584,7 +582,8 @@ test("Probe 12: Float NaN / Infinity returns unsupported value error", () => {
 	const { js, errors } = compile(`package main
 import "encoding/json"
 func main() {
-	nan := 0.0 / 0.0
+	zero := 0.0
+	nan := zero / zero
 	_, err := json.Marshal(nan)
 	console.log(err != nil, err.Error())
 }`);
@@ -612,7 +611,7 @@ func main() {
 	console.log(string(b2))
 }`);
 	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), '{"title":"Book"}\n{"title":"Book","id":42}');
+	assertEqual(runJs(js), '{"title":"Book"}\n{"id":42,"title":"Book"}');
 });
 
 test("Probe 14: Numeric slices decode to typed arrays and []byte accepts number arrays", () => {
@@ -1289,56 +1288,643 @@ func main() {
 // WASM Diagnostic (Task 1.5)
 // ═════════════════════════════════════════════════════════════
 
-section("encoding/json — wasm diagnostic");
+section("encoding/json — wasm enablement");
 
-test("json.Marshal rejected in wasm target", () => {
+test("json.MarshalIndent accepted in wasm target", () => {
 	const res = compile(`//gofront:target wasm
 package main
 import "encoding/json"
 func main() {
-	_, _ = json.Marshal(42)
+	_, _ = json.MarshalIndent(42, "", "  ")
 }`);
-	assert(res.errors.length > 0, "expected compile error in wasm package");
-	assertContains(
-		res.errors[0].message,
-		"'json.Marshal' is not yet available in wasm packages",
-	);
+	assertEqual(res.errors.length, 0);
 });
 
-test("json.Marshal rejected in both target", () => {
+test("json.MarshalIndent accepted in both target", () => {
 	const res = compile(`//gofront:target both
 package main
 import "encoding/json"
 func main() {
-	_, _ = json.Marshal(42)
+	_, _ = json.MarshalIndent(42, "", "  ")
 }`);
-	assert(res.errors.length > 0, "expected compile error in both package");
-	assertContains(
-		res.errors[0].message,
-		"'json.Marshal' is not yet available in wasm packages",
+	assertEqual(res.errors.length, 0);
+});
+
+// ── Real-Go conformance (expected output captured from go run) ──
+
+test("real Go output: json/decode on JS and WASM", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type Address struct {
+	Street string \`json:"street"\`
+	City   string \`json:"city"\`
+}
+
+type Person struct {
+	Name   string         \`json:"name"\`
+	Age    int            \`json:"age"\`
+	Score  float64        \`json:"score"\`
+	Active bool           \`json:"active"\`
+	Tags   []string       \`json:"tags"\`
+	Addr   Address        \`json:"addr"\`
+	Home   *Address       \`json:"home"\`
+	Attrs  map[string]int \`json:"attrs"\`
+	Extra  any            \`json:"extra"\`
+	Count  int8           \`json:"count"\`
+}
+
+type Base struct {
+	ID int \`json:"id"\`
+}
+
+type Extended struct {
+	Base
+	Title string \`json:"title"\`
+}
+
+type Point struct{ X, Y int }
+
+func report(label string, err error) {
+	if err != nil {
+		fmt.Println(label, "error:", err)
+	} else {
+		fmt.Println(label, "ok")
+	}
+}
+
+func main() {
+	var p Person
+	err := json.Unmarshal([]byte(\`{"name":"Ann","AGE":31,"Score":1.5,"active":true,"tags":["a","b"],"addr":{"street":"S","city":"C"},"home":{"street":"H"},"attrs":{"x":1,"y":2},"extra":[1,"two",{"k":null}],"unknown":5}\`), &p)
+	report("person", err)
+	fmt.Println(p.Name, p.Age, p.Score, p.Active, p.Tags, p.Addr, *p.Home, p.Attrs["x"], p.Attrs["y"])
+	extra := p.Extra.([]any)
+	fmt.Println(len(extra), extra[0].(float64), extra[1].(string), extra[2].(map[string]any)["k"] == nil)
+
+	var n int
+	report("int", json.Unmarshal([]byte("42"), &n))
+	fmt.Println(n)
+	report("int from string", json.Unmarshal([]byte(\`"x"\`), &n))
+	report("int fraction", json.Unmarshal([]byte("1.5"), &n))
+	var i8 int8
+	report("int8 range", json.Unmarshal([]byte("200"), &i8))
+	var u8 uint8
+	report("uint8 negative", json.Unmarshal([]byte("-1"), &u8))
+
+	var q Person
+	report("field type", json.Unmarshal([]byte(\`{"name":5}\`), &q))
+	report("nested field type", json.Unmarshal([]byte(\`{"addr":{"street":1}}\`), &q))
+	report("count range", json.Unmarshal([]byte(\`{"count":300}\`), &q))
+
+	var keep Person
+	keep.Name = "keep"
+	keep.Age = 9
+	keep.Tags = []string{"old"}
+	keep.Home = &Address{Street: "S"}
+	keep.Attrs = map[string]int{"k": 1}
+	keep.Extra = 5
+	report("null", json.Unmarshal([]byte(\`{"name":null,"age":null,"tags":null,"home":null,"attrs":null,"extra":null}\`), &keep))
+	fmt.Println(keep.Name, keep.Age, keep.Tags == nil, keep.Home == nil, keep.Attrs == nil, keep.Extra == nil)
+
+	var xs []int
+	report("slice", json.Unmarshal([]byte("[1,2,3]"), &xs))
+	fmt.Println(xs, len(xs))
+	report("empty slice", json.Unmarshal([]byte("[]"), &xs))
+	fmt.Println(xs == nil, len(xs))
+	var m map[string]int
+	report("map", json.Unmarshal([]byte(\`{"b":2,"a":1}\`), &m))
+	fmt.Println(m["a"], m["b"])
+	var mi map[int]string
+	report("int keys", json.Unmarshal([]byte(\`{"10":"ten","2":"two"}\`), &mi))
+	fmt.Println(mi[10], mi[2])
+	var pts []*Point
+	report("pointers", json.Unmarshal([]byte(\`[{"X":1},null,{"Y":2}]\`), &pts))
+	fmt.Println(len(pts), *pts[0], pts[1] == nil, *pts[2])
+
+	var e Extended
+	report("embedded", json.Unmarshal([]byte(\`{"id":42,"title":"Book"}\`), &e))
+	fmt.Println(e.ID, e.Title)
+
+	var v any
+	report("any", json.Unmarshal([]byte(\`{"a":[1,2.5,"x",true,null],"b":{"c":"d"}}\`), &v))
+	obj := v.(map[string]any)
+	list := obj["a"].([]any)
+	fmt.Println(len(list), list[0].(float64), list[1].(float64), list[2], list[3], list[4] == nil, obj["b"].(map[string]any)["c"])
+	report("any number", json.Unmarshal([]byte("12345.5"), &v))
+	fmt.Println(v.(float64))
+
+	var bs []byte
+	report("bytes", json.Unmarshal([]byte(\`"aGVsbG8="\`), &bs))
+	fmt.Println(string(bs))
+
+	var f32 float32
+	report("float32", json.Unmarshal([]byte("0.1"), &f32))
+	fmt.Println(f32 > 0.09 && f32 < 0.11)
+
+	var str string
+	report("string escapes", json.Unmarshal([]byte(\`"a\\n\\t\\"b\\\\ A"\`), &str))
+	fmt.Println(str)
+}
+`,
+		`person ok
+Ann 31 1.5 true [a b] {S C} {H } 1 2
+3 1 two true
+int ok
+42
+int from string error: json: cannot unmarshal string into Go value of type int
+int fraction error: json: cannot unmarshal number 1.5 into Go value of type int
+int8 range error: json: cannot unmarshal number 200 into Go value of type int8
+uint8 negative error: json: cannot unmarshal number -1 into Go value of type uint8
+field type error: json: cannot unmarshal number into Go struct field Person.name of type string
+nested field type error: json: cannot unmarshal number into Go struct field Address.addr.street of type string
+count range error: json: cannot unmarshal number 300 into Go struct field Person.count of type int8
+null ok
+keep 9 true true true true
+slice ok
+[1 2 3] 3
+empty slice ok
+false 0
+map ok
+1 2
+int keys ok
+ten two
+pointers ok
+3 {1 0} true {0 2}
+embedded ok
+42 Book
+any ok
+5 1 2.5 x true true d
+any number ok
+12345.5
+bytes ok
+hello
+float32 ok
+true
+string escapes ok
+a
+	"b\\ A
+`,
 	);
 });
 
-test("encoding/json import rejected in wasm package", () => {
-	withTempDir(
-		{
-			"main.go": `//gofront:target wasm
-package main
-import "encoding/json"
-func main() {}`,
-		},
-		(dir) => {
-			let err = "";
-			try {
-				compileSingleFile(join(dir, "main.go"));
-			} catch (e) {
-				err = e.message;
-			}
-			assertContains(
-				err,
-				"'encoding/json' is not yet available in wasm packages",
-			);
-		},
+test("real Go output: json/encode on JS and WASM", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"errors"
+	"fmt"
+	"math"
+
+	"encoding/json"
+)
+
+type Address struct {
+	Street string \`json:"street"\`
+	City   string \`json:"city,omitempty"\`
+}
+
+type Person struct {
+	Name     string            \`json:"name"\`
+	Age      int               \`json:"age"\`
+	Email    string            \`json:"email,omitempty"\`
+	Addr     Address           \`json:"addr"\`
+	Home     *Address          \`json:"home"\`
+	Tags     []string          \`json:"tags"\`
+	Attrs    map[string]string \`json:"attrs"\`
+	Score    float64           \`json:"score"\`
+	Active   bool              \`json:"active"\`
+	Skip     string            \`json:"-"\`
+	Dash     string            \`json:"-,"\`
+	hidden   int
+	NoTag    int
+	Renamed  int \`json:"r_name"\`
+	Quoted   int \`json:"quoted,string"\`
+	QuotedS  string \`json:"qs,string"\`
+	QuotedB  bool   \`json:"qb,string"\`
+	QuotedF  float64 \`json:"qf,string"\`
+}
+
+type Base struct {
+	ID   int    \`json:"id"\`
+	Kind string \`json:"kind"\`
+}
+
+type Derived struct {
+	Extra string \`json:"extra"\`
+	Base
+}
+
+type PtrEmbed struct {
+	*Base
+	Z int
+}
+
+type Level struct {
+	Name  string
+	Child *Level
+}
+
+type Celsius float64
+
+type Color int
+
+func (c Color) MarshalJSON() ([]byte, error) {
+	return []byte(fmt.Sprintf("\\"color-%d\\"", int(c))), nil
+}
+
+type Temp struct{ V int }
+
+func (t *Temp) MarshalJSON() ([]byte, error) {
+	return []byte(fmt.Sprintf("{\\"temp\\": %d}", t.V)), nil
+}
+
+type Bad struct{}
+
+func (Bad) MarshalJSON() ([]byte, error) { return nil, errors.New("boom") }
+
+type Wrapper struct {
+	C  Color
+	T  Temp
+	PT *Temp
+}
+
+type Shape interface{ Area() float64 }
+
+type Sq struct{ S float64 }
+
+func (s Sq) Area() float64 { return s.S * s.S }
+
+type Holder struct {
+	V any
+	S Shape
+}
+
+func show(v any, b []byte, err error) {
+	if err != nil {
+		fmt.Println("error:", err)
+		return
+	}
+	fmt.Println(string(b))
+}
+
+func main() {
+	b, err := json.Marshal(42)
+	show(nil, b, err)
+	b, err = json.Marshal(3.14)
+	show(nil, b, err)
+	b, err = json.Marshal("hello <b>&\\"q\\"\\n\\t\\\\")
+	show(nil, b, err)
+	b, err = json.Marshal(true)
+	show(nil, b, err)
+	b, err = json.Marshal(nil)
+	show(nil, b, err)
+	b, err = json.Marshal(int64(9007199254740991))
+	show(nil, b, err)
+	b, err = json.Marshal(uint8(255))
+	show(nil, b, err)
+	b, err = json.Marshal(float32(0.1))
+	show(nil, b, err)
+	b, err = json.Marshal(1e21)
+	show(nil, b, err)
+	b, err = json.Marshal(1e-7)
+	show(nil, b, err)
+	b, err = json.Marshal(100.0)
+	show(nil, b, err)
+	b, err = json.Marshal(math.NaN())
+	show(nil, b, err)
+
+	var sNil []int
+	b, err = json.Marshal(sNil)
+	show(nil, b, err)
+	b, err = json.Marshal([]int{})
+	show(nil, b, err)
+	b, err = json.Marshal([]int{1, 2, 3})
+	show(nil, b, err)
+	b, err = json.Marshal([3]string{"a", "b", "c"})
+	show(nil, b, err)
+	b, err = json.Marshal([]byte("hello"))
+	show(nil, b, err)
+	var bNil []byte
+	b, err = json.Marshal(bNil)
+	show(nil, b, err)
+
+	b, err = json.Marshal(map[string]int{})
+	show(nil, b, err)
+	b, err = json.Marshal(map[string]int{"z": 3, "a": 1, "m": 2})
+	show(nil, b, err)
+	b, err = json.Marshal(map[int]string{10: "ten", 2: "two", -1: "neg"})
+	show(nil, b, err)
+	b, err = json.Marshal(map[string][]int{"x": {1}, "y": nil})
+	show(nil, b, err)
+
+	p := Person{
+		Name: "Ann <A&B>", Age: 30, Addr: Address{Street: "Main"},
+		Tags: []string{"a", "b"}, Attrs: map[string]string{}, Score: 1.5, Active: true,
+		Skip: "skipped", Dash: "dashed", hidden: 9, NoTag: 7, Renamed: 8,
+		Quoted: 12, QuotedS: "hi", QuotedB: true, QuotedF: 2.5,
+	}
+	b, err = json.Marshal(p)
+	show(nil, b, err)
+	b, err = json.Marshal(&p)
+	show(nil, b, err)
+	p.Home = &Address{Street: "Elm", City: "Paris"}
+	p.Attrs = map[string]string{"k": "v"}
+	p.Email = "a@b.c"
+	b, err = json.Marshal(p)
+	show(nil, b, err)
+	b, err = json.Marshal([]Person{})
+	show(nil, b, err)
+
+	b, err = json.Marshal(Derived{Extra: "x", Base: Base{ID: 1}})
+	show(nil, b, err)
+
+	b, err = json.Marshal(Level{Name: "a", Child: &Level{Name: "b", Child: &Level{Name: "c"}}})
+	show(nil, b, err)
+
+	b, err = json.Marshal(Celsius(36.6))
+	show(nil, b, err)
+	b, err = json.Marshal([]Celsius{1, 2.5})
+	show(nil, b, err)
+
+	b, err = json.Marshal(Color(3))
+	show(nil, b, err)
+	b, err = json.Marshal(Wrapper{C: 1, T: Temp{2}, PT: &Temp{3}})
+	show(nil, b, err)
+	w := Wrapper{C: 1, T: Temp{2}}
+	b, err = json.Marshal(&w)
+	show(nil, b, err)
+	b, err = json.Marshal(Bad{})
+	show(nil, b, err)
+	b, err = json.Marshal([]Bad{{}})
+	show(nil, b, err)
+
+	var np *Address
+	b, err = json.Marshal(np)
+	show(nil, b, err)
+	n7 := 7
+	b, err = json.Marshal(&n7)
+	show(nil, b, err)
+	b, err = json.Marshal([]*int{&n7, nil})
+	show(nil, b, err)
+
+	b, err = json.Marshal(map[string]any{"n": 1, "s": "x", "l": []any{1, "two", nil}, "m": map[string]any{"k": true}, "f": 2.5})
+	show(nil, b, err)
+	b, err = json.Marshal(Holder{V: 12, S: Sq{2}})
+	show(nil, b, err)
+	b, err = json.Marshal(Holder{})
+	show(nil, b, err)
+	var anyV any = []string{"a", "b"}
+	b, err = json.Marshal(anyV)
+	show(nil, b, err)
+
+	fmt.Println(json.Valid([]byte(\`{"a":[1,2,{"b":null}]}\`)), json.Valid([]byte(\`{"a":\`)), json.Valid([]byte(\` 1 \`)), json.Valid([]byte(\`01\`)))
+}
+`,
+		`42
+3.14
+"hello \\u003cb\\u003e\\u0026\\"q\\"\\n\\t\\\\"
+true
+null
+9007199254740991
+255
+0.1
+1e+21
+1e-7
+100
+error: json: unsupported value: NaN
+null
+[]
+[1,2,3]
+["a","b","c"]
+"aGVsbG8="
+null
+{}
+{"a":1,"m":2,"z":3}
+{"-1":"neg","10":"ten","2":"two"}
+{"x":[1],"y":null}
+{"name":"Ann \\u003cA\\u0026B\\u003e","age":30,"addr":{"street":"Main"},"home":null,"tags":["a","b"],"attrs":{},"score":1.5,"active":true,"-":"dashed","NoTag":7,"r_name":8,"quoted":"12","qs":"\\"hi\\"","qb":"true","qf":"2.5"}
+{"name":"Ann \\u003cA\\u0026B\\u003e","age":30,"addr":{"street":"Main"},"home":null,"tags":["a","b"],"attrs":{},"score":1.5,"active":true,"-":"dashed","NoTag":7,"r_name":8,"quoted":"12","qs":"\\"hi\\"","qb":"true","qf":"2.5"}
+{"name":"Ann \\u003cA\\u0026B\\u003e","age":30,"email":"a@b.c","addr":{"street":"Main"},"home":{"street":"Elm","city":"Paris"},"tags":["a","b"],"attrs":{"k":"v"},"score":1.5,"active":true,"-":"dashed","NoTag":7,"r_name":8,"quoted":"12","qs":"\\"hi\\"","qb":"true","qf":"2.5"}
+[]
+{"extra":"x","id":1,"kind":""}
+{"Name":"a","Child":{"Name":"b","Child":{"Name":"c","Child":null}}}
+36.6
+[1,2.5]
+"color-3"
+{"C":"color-1","T":{"V":2},"PT":{"temp":3}}
+{"C":"color-1","T":{"temp":2},"PT":null}
+error: json: error calling MarshalJSON for type main.Bad: boom
+error: json: error calling MarshalJSON for type main.Bad: boom
+null
+7
+[7,null]
+{"f":2.5,"l":[1,"two",null],"m":{"k":true},"n":1,"s":"x"}
+{"V":12,"S":{"S":2}}
+{"V":null,"S":null}
+["a","b"]
+true false true false
+`,
+	);
+});
+
+test("real Go output: json/stream on JS and WASM", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"math"
+	"strings"
+)
+
+type Item struct {
+	ID   int    \`json:"id"\`
+	Name string \`json:"name"\`
+}
+
+type StrictItem struct {
+	ID int \`json:"id"\`
+}
+
+type FailItem struct{}
+
+func (FailItem) MarshalJSON() ([]byte, error) {
+	return nil, errors.New("cannot marshal item")
+}
+
+func main() {
+	// --- 1. Encoder basic & multiple values ---
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	err := enc.Encode(Item{ID: 1, Name: "apple"})
+	fmt.Printf("Encode 1 err=%v: %s", err, buf.String())
+
+	err = enc.Encode(Item{ID: 2, Name: "banana"})
+	fmt.Printf("Encode 2 err=%v: %s", err, buf.String())
+
+	// --- 2. Encoder SetIndent ---
+	buf.Reset()
+	enc = json.NewEncoder(&buf)
+	enc.SetIndent(">>", "  ")
+	err = enc.Encode(Item{ID: 3, Name: "cherry"})
+	fmt.Printf("Encode indented err=%v:\\n%s", err, buf.String())
+
+	// --- 3. Encoder SetEscapeHTML ---
+	buf.Reset()
+	enc = json.NewEncoder(&buf)
+	enc.SetEscapeHTML(true)
+	err = enc.Encode("<b>test & ' \\"</b>")
+	fmt.Printf("Encode escapeHTML true: %s", buf.String())
+
+	buf.Reset()
+	enc = json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	err = enc.Encode("<b>test & ' \\"</b>")
+	fmt.Printf("Encode escapeHTML false: %s", buf.String())
+
+	// --- 4. Decoder basic & multiple values ---
+	input := \`{"id":10,"name":"ten"} {"id":20,"name":"twenty"}\`
+	dec := json.NewDecoder(strings.NewReader(input))
+
+	for dec.More() {
+		var it Item
+		offsetBefore := dec.InputOffset()
+		err := dec.Decode(&it)
+		fmt.Printf("Decode item: id=%d name=%s err=%v offsetBefore=%d offsetAfter=%d\\n",
+			it.ID, it.Name, err, offsetBefore, dec.InputOffset())
+	}
+
+	// Next decode at EOF
+	var it Item
+	err = dec.Decode(&it)
+	fmt.Printf("Decode at EOF: err=%v (isEOF=%v)\\n", err, err == io.EOF)
+
+	// --- 5. Decoder ErrUnexpectedEOF on truncated stream ---
+	truncDec := json.NewDecoder(strings.NewReader(\`{"id": 100\`))
+	err = truncDec.Decode(&it)
+	fmt.Printf("Decode truncated: err=%v (isUnexpectedEOF=%v)\\n", err, err == io.ErrUnexpectedEOF)
+
+	// --- 6. Decoder UseNumber ---
+	numInput := \`{"val": 1234567890123456789}\`
+	numDec := json.NewDecoder(strings.NewReader(numInput))
+	numDec.UseNumber()
+	var anyMap map[string]any
+	err = numDec.Decode(&anyMap)
+	val := anyMap["val"]
+	_, isNum := val.(json.Number)
+	fmt.Printf("Decode UseNumber: val=%v isNumber=%v err=%v\\n", val, isNum, err)
+
+	// --- 7. Decoder DisallowUnknownFields ---
+	unknownInput := \`{"id": 42, "unknown": "extra"}\`
+	strictDec := json.NewDecoder(strings.NewReader(unknownInput))
+	strictDec.DisallowUnknownFields()
+	var sItem StrictItem
+	err = strictDec.Decode(&sItem)
+	fmt.Printf("Decode DisallowUnknownFields: err=%v\\n", err)
+
+	// --- 8. Decoder Buffered ---
+	bufInput := \`{"id": 1} trailing data\`
+	bufDec := json.NewDecoder(strings.NewReader(bufInput))
+	var itBuf Item
+	err = bufDec.Decode(&itBuf)
+	rest, _ := io.ReadAll(bufDec.Buffered())
+	fmt.Printf("Decode Buffered: id=%d rest=%q\\n", itBuf.ID, string(rest))
+
+	// --- 9. Encoder error handling ---
+	buf.Reset()
+	enc = json.NewEncoder(&buf)
+	err = enc.Encode(math.NaN())
+	var valErr *json.UnsupportedValueError
+	if errors.As(err, &valErr) {
+		fmt.Printf("Encode UnsupportedValueError NaN: Str=%s msg=%s\\n", valErr.Str, valErr.Error())
+	} else {
+		fmt.Printf("Encode NaN unexpected: err=%v\\n", err)
+	}
+
+	err = enc.Encode(FailItem{})
+	var marshErr *json.MarshalerError
+	if errors.As(err, &marshErr) {
+		fmt.Printf("Encode MarshalerError: msg=%s unwrap=%v\\n", marshErr.Error(), errors.Unwrap(marshErr))
+	} else {
+		fmt.Printf("Encode FailItem unexpected: err=%v\\n", err)
+	}
+}
+`,
+		`Encode 1 err=<nil>: {"id":1,"name":"apple"}
+Encode 2 err=<nil>: {"id":1,"name":"apple"}
+{"id":2,"name":"banana"}
+Encode indented err=<nil>:
+{
+>>  "id": 3,
+>>  "name": "cherry"
+>>}
+Encode escapeHTML true: "\\u003cb\\u003etest \\u0026 ' \\"\\u003c/b\\u003e"
+Encode escapeHTML false: "<b>test & ' \\"</b>"
+Decode item: id=10 name=ten err=<nil> offsetBefore=0 offsetAfter=22
+Decode item: id=20 name=twenty err=<nil> offsetBefore=23 offsetAfter=48
+Decode at EOF: err=EOF (isEOF=true)
+Decode truncated: err=unexpected EOF (isUnexpectedEOF=true)
+Decode UseNumber: val=1234567890123456789 isNumber=true err=<nil>
+Decode DisallowUnknownFields: err=json: unknown field "unknown"
+Decode Buffered: id=1 rest=" trailing data"
+Encode UnsupportedValueError NaN: Str=NaN msg=json: unsupported value: NaN
+Encode MarshalerError: msg=json: error calling MarshalJSON for type main.FailItem: cannot marshal item unwrap=cannot marshal item
+`,
+	);
+});
+
+test("json.Decoder reads a multi-value stream from a one-byte reader", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"strings"
+)
+
+type oneByte struct{ r io.Reader }
+
+func (o oneByte) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	n, err := o.r.Read(p[:1])
+	return n, err
+}
+
+type Item struct {
+	A int
+	B string
+}
+
+func main() {
+	dec := json.NewDecoder(oneByte{strings.NewReader(\`{"A":1,"B":"x"} {"A":2,"B":"y"}  {"B":"end"}\`)})
+	for dec.More() {
+		var it Item
+		err := dec.Decode(&it)
+		fmt.Println(it.A, it.B, err, dec.InputOffset())
+	}
+	var v Item
+	fmt.Println(dec.Decode(&v) == io.EOF)
+}
+`,
+		`1 x <nil> 15
+2 y <nil> 31
+0 end <nil> 44
+true
+`,
 	);
 });
 

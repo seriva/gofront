@@ -7,10 +7,12 @@ import {
 	assertErrorContains,
 	assertThrows,
 	compile,
+	compileHybrid,
 	Lexer,
 	Parser,
 	runJs,
 	section,
+	summarize,
 	test,
 } from "../helpers.js";
 
@@ -651,6 +653,204 @@ func main() {
 }`);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "6 4");
+});
+
+// ── Method expressions (Task 0.15) ────────────────────────────
+
+section("Method expressions");
+
+const METHOD_EXPR_TYPES = `
+type C struct { N int }
+func (c *C) Inc() { c.N++ }
+func (c *C) Add(d int) int { c.N += d; return c.N }
+func (c C) Get() int { return c.N }
+func (c C) Bump() int { c.N += 100; return c.N }
+`;
+
+test("(*T).M and T.M as values (parity)", () => {
+	const h = compileHybrid(`package main
+${METHOD_EXPR_TYPES}
+func Main() int {
+	inc := (*C).Inc
+	get := C.Get
+	c := &C{N: 1}
+	inc(c)
+	inc(c)
+	return get(*c)
+}`);
+	assertEqual(Number(h.run("Main").wasmRes), 3);
+});
+
+test("method expressions passed to a function (parity)", () => {
+	const h = compileHybrid(`package main
+${METHOD_EXPR_TYPES}
+func apply(f func(*C), c *C) { f(c) }
+func read(f func(C) int, c C) int { return f(c) }
+func Main() int {
+	c := &C{N: 5}
+	apply((*C).Inc, c)
+	return read(C.Get, *c)
+}`);
+	assertEqual(Number(h.run("Main").wasmRes), 6);
+});
+
+test("method expressions called with an explicit receiver (parity)", () => {
+	const h = compileHybrid(`package main
+${METHOD_EXPR_TYPES}
+func Main() int {
+	c := C{N: 1}
+	r := (*C).Add(&c, 10)
+	b := C.Bump(c)
+	g := (*C).Get(&c)
+	return r*10000 + b*10 + g + c.N*0
+}`);
+	assertEqual(Number(h.run("Main").wasmRes), 111121);
+});
+
+test("value-receiver method expression copies its receiver (parity)", () => {
+	const h = compileHybrid(`package main
+${METHOD_EXPR_TYPES}
+func Main() int {
+	c := C{N: 1}
+	bump := C.Bump
+	r := bump(c)
+	return r*10 + c.N
+}`);
+	assertEqual(Number(h.run("Main").wasmRes), 1011);
+});
+
+test("method expressions with variadic and multi-value methods (parity)", () => {
+	const h = compileHybrid(`package main
+type C struct { N int }
+func (c *C) Sum(xs ...int) int { for _, x := range xs { c.N += x }; return c.N }
+func (c *C) Div(d int) (int, int) { return c.N / d, c.N % d }
+func Main() int {
+	c := C{N: 1}
+	sum := (*C).Sum
+	s := sum(&c, 1, 2, 3)
+	div := (*C).Div
+	q, m := div(&c, 4)
+	q2, m2 := (*C).Div(&c, 5)
+	return s*1000 + q*100 + m*10 + q2 + m2
+}`);
+	assertEqual(Number(h.run("Main").wasmRes), 7133);
+});
+
+test("method expressions on a generic type (parity)", () => {
+	const h = compileHybrid(`package main
+type Box[T any] struct { V T }
+func (b *Box[T]) Set(v T) { b.V = v }
+func (b Box[T]) Get() T { return b.V }
+func Main() int {
+	set := (*Box[int]).Set
+	b := &Box[int]{}
+	set(b, 7)
+	(*Box[int]).Set(b, (*Box[int]).Get(b)+1)
+	get := Box[int].Get
+	return get(*b)
+}`);
+	assertEqual(Number(h.run("Main").wasmRes), 8);
+});
+
+test("(*T).M does not report a dereference error", () => {
+	const { errors } = compile(`package main
+type C struct { N int }
+func (c *C) Inc() { c.N++ }
+func main() { f := (*C).Inc; c := &C{}; f(c); console.log(c.N) }`);
+	assertEqual(errors.map((e) => e.message).join("\n"), "");
+});
+
+test("(*p).M on a pointer variable still dereferences", () => {
+	const { js, errors } = compile(`package main
+type C struct { N int }
+func (c C) Get() int { return c.N }
+func main() { p := &C{N: 4}; console.log((*p).Get()) }`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "4");
+});
+
+test("(*x).M on a non-pointer value is still a dereference error", () => {
+	const { errors } = compile(`package main
+type C struct { N int }
+func (c C) Get() int { return c.N }
+func main() { x := C{}; console.log((*x).Get()) }`);
+	assertErrorContains(errors, "cannot dereference non-pointer type C");
+});
+
+test("a type in value position is an error", () => {
+	const decls = `type C struct { n int }
+type Box[T any] struct { v T }
+func f(p *C) int { return p.n }
+func g(b Box[int]) int { return b.v }`;
+	for (const body of [
+		"return f(*C)",
+		"return g(Box[int])",
+		"x := *C; _ = x; return 0",
+		"x := (*C); _ = x; return 0",
+		"x := Box[int]; _ = x; return 0",
+	]) {
+		const { errors } = compile(`package main
+${decls}
+func Main() int { ${body} }`);
+		assertErrorContains(errors, "is not an expression");
+	}
+});
+
+test("T.M on a pointer-receiver method is an error", () => {
+	const { errors } = compile(`package main
+type C struct { n int }
+func (c *C) Inc() { c.n++ }
+func Main() int { c := C{}; f := C.Inc; f(c); return c.n }`);
+	assertErrorContains(
+		errors,
+		"invalid method expression C.Inc (needs pointer receiver (*C).Inc)",
+	);
+});
+
+test("T.M on a generic pointer-receiver method is an error", () => {
+	for (const target of ["both", "wasm"]) {
+		for (const body of [
+			"b := Box[int]{}; Box[int].Set(b, 3); return b.v",
+			"b := Box[int]{}; f := Box[int].Set; f(b, 3); return b.v",
+		]) {
+			const { errors } = compile(`//gofront:target ${target}
+package main
+type Box[T any] struct { v T }
+func (b *Box[T]) Set(v T) { b.v = v }
+func Main() int { ${body} }`);
+			assertErrorContains(
+				errors,
+				"invalid method expression Box[int].Set (needs pointer receiver (*Box[int]).Set)",
+			);
+		}
+	}
+});
+
+section("Composite-literal keys and named array types (Task 0.29)");
+
+test("map keys may elide their composite type (P13)", () => {
+	const res = compileHybrid(`package main
+type P struct{ X int }
+func Main() int {
+	a := map[P]int{{1}: 2}
+	b := map[[2]int]string{{1, 2}: "a"}
+	return len(a)*100 + a[P{1}]*10 + len(b[[2]int{1, 2}])
+}`).run("Main");
+	assertEqual(res.jsRes, 121);
+	assertEqual(Number(res.wasmRes), 121);
+});
+
+test("a type defined over a named array is indexable (P24)", () => {
+	const res = compileHybrid(`package main
+type V [2]int
+type W V
+func (w W) Sum() int { return w[0] + w[1] }
+func Main() int {
+	w := W{1, 2}
+	return w[1] + len(w)*10 + len(w[:])*100 + w.Sum()*1000
+}`).run("Main");
+	assertEqual(res.jsRes, 3222);
+	assertEqual(Number(res.wasmRes), 3222);
 });
 
 // ── Entry point ───────────────────────────────────────────────

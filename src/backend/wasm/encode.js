@@ -354,6 +354,7 @@ const OPCODES = {
 	"ref.func": 0xd2,
 	"ref.eq": 0xd3,
 	"ref.as_non_null": 0xd4,
+	br_on_null: 0xd5,
 };
 
 // 0xFC prefixed saturating truncations
@@ -418,11 +419,26 @@ const SIMD_OPCODES = {
 	"i64x2.replace_lane": 30,
 	"f32x4.extract_lane": 31,
 	"f32x4.replace_lane": 32,
+	"i32x4.eq": 55,
+	"f32x4.eq": 65,
+	"f32x4.ne": 66,
+	"f32x4.lt": 67,
+	"f32x4.gt": 68,
+	"f32x4.le": 69,
+	"f32x4.ge": 70,
 	"v128.not": 77,
 	"v128.and": 78,
 	"v128.andnot": 79,
 	"v128.or": 80,
 	"v128.xor": 81,
+	"v128.bitselect": 82,
+	"v128.any_true": 83,
+	"i32x4.all_true": 163,
+	"i32x4.bitmask": 164,
+	"f32x4.ceil": 103,
+	"f32x4.floor": 104,
+	"f32x4.trunc": 105,
+	"f32x4.nearest": 106,
 	"f32x4.abs": 224,
 	"f32x4.neg": 225,
 	"f32x4.sqrt": 227,
@@ -579,6 +595,7 @@ function encodeInstruction(inst) {
 
 			case "br":
 			case "br_if":
+			case "br_on_null":
 				return [byte, ...encodeU32LEB(inst.depth ?? inst.index ?? 0)];
 
 			case "br_table": {
@@ -703,35 +720,48 @@ function encodeTypeEntry(t) {
 		return [0x4e, ...count, ...innerBytes];
 	}
 
+	let compositeBytes;
 	if (t.form === "struct") {
 		// Struct type: 0x5F, vector of fields [valtype, mutability]
 		const fields = t.fields ?? [];
-		return [
+		compositeBytes = [
 			0x5f,
 			...encodeVector(fields, (f) => [
 				...encodeValType(f.type),
 				f.mutable ? 0x01 : 0x00,
 			]),
 		];
-	}
-
-	if (t.form === "array") {
+	} else if (t.form === "array") {
 		// Array type: 0x5E, field [valtype, mutability]
-		return [
+		compositeBytes = [
 			0x5e,
 			...encodeValType(t.elemType ?? t.type),
 			t.mutable ? 0x01 : 0x00,
 		];
+	} else {
+		// Function type: 0x60, params vector, results vector
+		const params = t.params ?? [];
+		const results = t.results ?? [];
+		compositeBytes = [
+			0x60,
+			...encodeVector(params, encodeValType),
+			...encodeVector(results, encodeValType),
+		];
 	}
 
-	// Function type: 0x60, params vector, results vector
-	const params = t.params ?? [];
-	const results = t.results ?? [];
-	return [
-		0x60,
-		...encodeVector(params, encodeValType),
-		...encodeVector(results, encodeValType),
-	];
+	if (t.sub) {
+		const superIndices =
+			t.superTypeIndex !== undefined
+				? [t.superTypeIndex]
+				: (t.superTypeIndices ?? []);
+		return [
+			0x50,
+			...encodeVector(superIndices, encodeU32LEB),
+			...compositeBytes,
+		];
+	}
+
+	return compositeBytes;
 }
 
 function encodeTypeSection(types) {

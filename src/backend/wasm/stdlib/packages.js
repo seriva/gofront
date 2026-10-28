@@ -96,6 +96,8 @@ export class ExtendedPackagesEmitter {
 		this.pushInstruction("drop");
 		if (method === "TryLock" || method === "TryRLock") {
 			this.pushInstruction({ op: "i32.const", value: 1 });
+		} else if (method === "RLocker") {
+			this.pushInstruction({ op: "ref.null", type: "any" });
 		}
 	}
 

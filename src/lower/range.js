@@ -1,8 +1,93 @@
 // src/lower/range.js
 // Classifies for-range loop shapes and variable scoping/redelcarations.
 
-import { isNumeric } from "../typechecker/types.js";
+import { isNumeric, iteratorYieldParams } from "../typechecker/types.js";
 import { someChild } from "./walk.js";
+
+let iterStateCounter = 0;
+
+export function isIteratorRangeFor(stmt) {
+	if (stmt?.kind !== "ForStmt") return false;
+	const rangeExpr =
+		stmt.cond?.kind === "RangeExpr" ? stmt.cond : stmt.init?.rhs?.[0];
+	if (rangeExpr?.kind !== "RangeExpr") return false;
+	if (rangeExpr._isIterator) return true;
+	const iterType = rangeExpr.expr?._type;
+	return Boolean(iteratorYieldParams(iterType));
+}
+
+function buildYieldParamsAndAssignments(lhs, yieldTypes, isAssign) {
+	const params = [];
+	const assignStmts = [];
+	for (let i = 0; i < yieldTypes.length; i++) {
+		const yType = yieldTypes[i] ?? { kind: "basic", name: "any" };
+		const lhsElem = lhs[i];
+		if (!isAssign && lhsElem?.name && lhsElem.name !== "_") {
+			params.push({ name: lhsElem.name, type: yType });
+		} else {
+			const paramName = `__yield_p${i}`;
+			params.push({ name: paramName, type: yType });
+			if (isAssign && lhsElem && lhsElem.name !== "_") {
+				assignStmts.push({
+					kind: "AssignStmt",
+					lhs: [lhsElem],
+					rhs: [{ kind: "Ident", name: paramName, _type: yType }],
+					op: "=",
+				});
+			}
+		}
+	}
+	return { params, assignStmts };
+}
+
+export function getOrCreateIteratorFuncLit(stmt) {
+	if (stmt._yieldFuncLit) return stmt._yieldFuncLit;
+
+	const rangeExpr =
+		stmt.cond?.kind === "RangeExpr" ? stmt.cond : stmt.init?.rhs?.[0];
+	const iterType = rangeExpr?.expr?._type;
+	const info = iteratorYieldParams(iterType);
+	const yieldTypes = rangeExpr?._yieldParams ?? info?.yieldParams ?? [];
+
+	if (!stmt._iterStateName) {
+		stmt._iterStateName = `__iterState$${++iterStateCounter}`;
+	}
+
+	const isAssign = stmt.init?.kind === "AssignStmt";
+	const lhs = stmt.init?.lhs ?? [];
+	const { params, assignStmts } = buildYieldParamsAndAssignments(
+		lhs,
+		yieldTypes,
+		isAssign,
+	);
+
+	const rawStmts = stmt.body?.stmts ?? stmt.body?.list ?? [];
+	const bodyStmts =
+		assignStmts.length > 0 ? [...assignStmts, ...rawStmts] : rawStmts;
+
+	const funcLit = {
+		kind: "FuncLit",
+		params,
+		returnType: { kind: "basic", name: "bool" },
+		body: {
+			kind: "Block",
+			stmts: bodyStmts,
+			list: bodyStmts,
+		},
+		_type: {
+			kind: "func",
+			params: params.map((p) => p.type),
+			returns: [{ kind: "basic", name: "bool" }],
+		},
+		_isYieldClosure: true,
+		_iterStateName: stmt._iterStateName,
+		_forStmt: stmt,
+		_line: stmt._line,
+	};
+
+	stmt._yieldFuncLit = funcLit;
+	return funcLit;
+}
 
 export function isRangeFor(stmt) {
 	if (!stmt?.init) return false;

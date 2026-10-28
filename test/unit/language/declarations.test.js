@@ -8,12 +8,14 @@ import {
 	assertEqual,
 	assertErrorContains,
 	compile,
+	compileDir,
 	compileFile,
 	FIXTURES,
 	runJs,
 	section,
 	summarize,
 	test,
+	withTempDir,
 } from "../helpers.js";
 
 section("Package init & redeclarations");
@@ -374,7 +376,7 @@ func main() {
 	assertEqual(runJs(js), "2");
 });
 
-test("integer division with untyped int constants uses Math.trunc", () => {
+test("integer division with untyped int constants folds to the truncated value", () => {
 	const { js, errors } = compile(`package main
 const a = 7
 const b = 2
@@ -383,8 +385,8 @@ func main() {
 }`);
 	assertEqual(errors.length, 0);
 	assert(
-		js.includes("Math.trunc"),
-		"should use Math.trunc for integer division",
+		js.includes("console.log(3)"),
+		"should emit the folded integer quotient",
 	);
 	assertEqual(runJs(js), "3");
 });
@@ -883,6 +885,100 @@ func main() {
 });
 
 // ── Unimplemented Go features ─────────────────────────────────
+
+section("Excluded packages and //go:embed diagnostics");
+
+test("//go:embed reports targeted diagnostic", () => {
+	const { errors } = compile(`package main
+//go:embed hello.txt
+var s string
+func main() {}`);
+	assertErrorContains(errors, "//go:embed is not supported yet");
+});
+
+test("//go:embed inside raw strings and block comments is not a directive", () => {
+	const raw = compile(
+		"package main\nvar s = `\n//go:embed x\n`\nfunc main() { _ = s }",
+	);
+	assertEqual(raw.errors.length, 0);
+	const blk = compile("package main\n/*\n//go:embed x\n*/\nfunc main() {}");
+	assertEqual(blk.errors.length, 0);
+});
+
+test("user types named like excluded stdlib receivers compile", () => {
+	const cases = [
+		`package main
+type Context struct{}
+func (Context) Done() int { return 1 }
+func main() { c := Context{}; _ = c.Done() }`,
+		`package main
+type time struct{ After int }
+func main() { t := time{}; _ = t.After }`,
+		`package main
+type sync struct{ Cond int }
+func main() { x := sync{}; _ = x.Cond }`,
+	];
+	for (const src of cases) assertEqual(compile(src).errors.length, 0);
+});
+
+test("real stdlib excluded members keep their diagnostics", () => {
+	assertErrorContains(
+		compile(`package main
+import "context"
+func main() {}`).errors,
+		"package 'context' is not available",
+	);
+	assertErrorContains(
+		compile(`package main
+import "time"
+func main() { _ = time.After(1) }`).errors,
+		"time.After is not available: channels",
+	);
+	assertErrorContains(
+		compile(`package main
+import "sync"
+func main() { var c sync.Cond; _ = c }`).errors,
+		"sync.Cond is not available",
+	);
+});
+
+test("local package sharing a stdlib identifier is not excluded", () => {
+	withTempDir(
+		{
+			"iter/i.go": `package iter
+func Pull() int { return 1 }
+`,
+			"a.go": `package main
+import "iter"
+func main() { _ = other(); var _ iter.Seq[int] }
+`,
+			"b.go": `package main
+import iter "./iter"
+func other() int { return iter.Pull() }
+`,
+		},
+		(dir) => {
+			compileDir(dir);
+		},
+	);
+});
+
+test("importing excluded stdlib packages reports manifest reason", () => {
+	const cases = [
+		["reflect", "needs the Go runtime"],
+		["unsafe", "needs the Go runtime"],
+		["net/http", "needs host services"],
+		["text/template", "needs runtime reflection"],
+		["math/big", "deferred; open an issue if you need it"],
+		["compress/gzip", "deferred; open an issue if you need it"],
+	];
+	for (const [pkg, reason] of cases) {
+		const { errors } = compile(`package main
+import _ "${pkg}"
+func main() {}`);
+		assertErrorContains(errors, reason);
+	}
+});
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);

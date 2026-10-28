@@ -11,15 +11,18 @@
 //   assignability.js  — assertAssignable, binaryResultType, implements
 
 import { assignabilityMethods } from "./assignability.js";
+import { constantCheckMethods } from "./constants.js";
 import { expressionCheckMethods } from "./expressions.js";
 import { resolveMethods } from "./resolve.js";
 import { statementCheckMethods } from "./statements.js";
+import { EXCLUDED_STDLIB_PACKAGES } from "./stdlib/excluded.js";
 import { setupGlobals } from "./stdlib.js";
 import { terminationMethods } from "./termination.js";
 import {
 	ANY,
 	defaultType,
 	ERROR,
+	INTRINSICS,
 	isVoid,
 	Scope,
 	TAINTED_ANY,
@@ -40,10 +43,54 @@ function rootIdentName(e) {
 // Re-export for consumers that import from typechecker.js
 export { TypeCheckError, typeStr };
 
+// JavaScript built-ins that generated JS relies on; a JS class of the same
+// name in the bundle would shadow them (see _checkGlobalTypeNamesPass).
+const JS_BUILTIN_CLASSES = new Set([
+	"Array",
+	"ArrayBuffer",
+	"BigInt",
+	"BigInt64Array",
+	"BigUint64Array",
+	"Boolean",
+	"DataView",
+	"Date",
+	"Error",
+	"Float32Array",
+	"Float64Array",
+	"Int16Array",
+	"Int32Array",
+	"Int8Array",
+	"JSON",
+	"Map",
+	"Math",
+	"Number",
+	"Object",
+	"Promise",
+	"RangeError",
+	"Reflect",
+	"RegExp",
+	"Set",
+	"String",
+	"Symbol",
+	"TextDecoder",
+	"TextEncoder",
+	"TypeError",
+	"Uint16Array",
+	"Uint32Array",
+	"Uint8Array",
+	"Uint8ClampedArray",
+	"WeakMap",
+	"WebAssembly",
+]);
+
 export class TypeChecker {
 	constructor() {
 		this.types = new Map(); // named types
-		this.globals = new Scope();
+		// Go's universe scope: builtins, browser globals and built-in package
+		// namespaces.  Package declarations live in `globals` above it, so they
+		// shadow predeclared names (`func Array()`, `var document int`).
+		this.universe = new Scope();
+		this.globals = new Scope(this.universe);
 		this.errors = [];
 		this.warnings = []; // non-fatal diagnostics (e.g. boundary-call-in-loop hints)
 		this.target = "js";
@@ -58,21 +105,34 @@ export class TypeChecker {
 		this._deferCount = 0; // tracks defer usage in current function body
 		this._imports = []; // tracked imports for unused-import detection
 		this._constExprs = new Map(); // name -> AST initializer expr
+		this._importedConsts = new Map(); // dot-imported const name -> value
+		this._externalNames = new Set(); // package-scope names from .d.ts / npm definitions
 		this._setupGlobals();
 		// Register error as a named type (interface)
 		this.types.set("error", ERROR);
 	}
 
 	_setupGlobals() {
-		setupGlobals(this.globals, this.types);
+		setupGlobals(this.universe, this.types);
 	}
 
-	addDefinitions(types, values) {
+	// `external` marks values as real JS names (.d.ts / npm definitions) that
+	// must not be renamed; dot-imported GoFront packages pass false so their
+	// browser-global-named members get the same `$` renaming as local ones.
+	// `consts` (dot-imported GoFront packages) maps constant names to their
+	// folded values.
+	addDefinitions(types, values, { external = true, consts = null } = {}) {
 		for (const [name, type] of types) {
 			this.types.set(name, type);
 		}
 		for (const [name, type] of values) {
 			this.globals.define(name, type);
+			if (external) this._externalNames.add(name);
+		}
+		for (const [name, v] of consts ?? []) {
+			if (!v || !values.has(name)) continue;
+			this.globals._consts.add(name);
+			this._importedConsts.set(name, v);
 		}
 	}
 
@@ -80,7 +140,9 @@ export class TypeChecker {
 	// e.g. addPackageNamespace('utils', symbolsMap, typesMap)
 	// lets callers type-check `utils.Foo` via SelectorExpr.
 	// `target` is the imported package's compile target ("js"/"wasm"/"both").
-	addPackageNamespace(pkgName, symbols, types, target = null) {
+	// `consts` maps the package's constant names to their folded value (see
+	// typechecker/const-fold.js), or null when the folder cannot evaluate one.
+	addPackageNamespace(pkgName, symbols, types, target = null, consts = null) {
 		const members = {};
 		for (const [name, type] of symbols) members[name] = type;
 		// _gofront: true marks this as a GoFront package — exported identifier rules apply
@@ -90,6 +152,7 @@ export class TypeChecker {
 			members,
 			_gofront: true,
 			_target: target,
+			_consts: consts,
 		});
 		for (const [name, type] of types) {
 			this.types.set(name, type);
@@ -108,7 +171,7 @@ export class TypeChecker {
 	// Report any tracked imports whose package name was never referenced.
 	reportUnusedImports() {
 		for (const { name, node, filename, source } of this._imports) {
-			if (!this.globals._used.has(name)) {
+			if (!this.globals._used.has(name) && !this.universe._used.has(name)) {
 				const saved = [this._currentFile, this._currentSource];
 				this._currentFile = filename;
 				this._currentSource = source;
@@ -126,6 +189,15 @@ export class TypeChecker {
 			if (type?.kind === "builtin") continue; // skip built-ins
 			if (type === ANY && !name[0].match(/[A-Z]/)) continue; // skip browser globals
 			out.set(name, type);
+		}
+		return out;
+	}
+
+	getExportedConsts() {
+		const out = new Map();
+		for (const name of this.globals._consts) {
+			if (!this.globals.lookupConstExpr(name)) continue;
+			out.set(name, this._constValue({ kind: "Ident", name }, this.globals));
 		}
 		return out;
 	}
@@ -269,8 +341,11 @@ export class TypeChecker {
 			}
 		}
 
+		this._checkDirectivesAndImportsPass(programs);
+		this._registerConstExprs(programs);
 		this._collectTypesPass(programs);
 		this._collectFuncsPass(programs);
+		this._checkGlobalTypeNamesPass(programs);
 		this._promoteEmbeddedMethods();
 		this._collectVarsConstsPass(programs);
 		this._checkTopDeclsPass(programs);
@@ -288,6 +363,42 @@ export class TypeChecker {
 		}
 
 		return this.errors;
+	}
+
+	_checkEmbedDirectives(directives) {
+		for (const { line, col } of directives ?? []) {
+			this.err("//go:embed is not supported yet", { line, col });
+		}
+	}
+
+	_checkDirectivesAndImportsPass(programs) {
+		this._importedPaths = new Set();
+		this._fileImports = new Map();
+		for (const p of programs) {
+			this._setCurrentFile(p);
+			const names = new Map();
+			this._fileImports.set(this._currentFile, names);
+			this._checkEmbedDirectives(p._embedDirectives);
+			for (const imp of p.imports ?? []) {
+				for (const spec of imp.imports ?? []) {
+					this._importedPaths.add(spec.path);
+					names.set(
+						spec.alias ??
+							spec.path
+								.split("/")
+								.filter((s) => !/^v\d+$/.test(s))
+								.at(-1),
+						spec.path,
+					);
+					if (EXCLUDED_STDLIB_PACKAGES.has(spec.path)) {
+						this.err(
+							`package '${spec.path}' is not available: ${EXCLUDED_STDLIB_PACKAGES.get(spec.path)}`,
+							spec,
+						);
+					}
+				}
+			}
+		}
 	}
 
 	_checkMutablePackageVars(programs) {
@@ -409,6 +520,18 @@ export class TypeChecker {
 			for (const d of p.decls) {
 				if (d.kind === "TypeDecl" && !d.isAlias && !this.types.has(d.name)) {
 					const placeholder = { kind: "named", name: d.name, underlying: null };
+					// A generic type is known to be generic before any field resolves,
+					// so types declared earlier can instantiate it.
+					if (d.typeParams) {
+						placeholder._generic = {
+							typeParams: d.typeParams.map((tp) => ({
+								kind: "typeParam",
+								name: tp.name,
+								constraint: tp.constraint,
+							})),
+							declNode: d,
+						};
+					}
 					this.types.set(d.name, placeholder);
 					this.globals.define(d.name, placeholder);
 				}
@@ -418,6 +541,7 @@ export class TypeChecker {
 		for (const p of programs) {
 			for (const d of p.decls) if (d.kind === "TypeDecl") all.push({ p, d });
 		}
+		this._expandGenericStructDefs(all.map((x) => x.d));
 		// Collect in dependency order so aliases, generics, embedded and by-value
 		// field types declared later (or in other files) are ready when needed.
 		let pending = all;
@@ -433,6 +557,57 @@ export class TypeChecker {
 			}
 			pending =
 				ready.length > 0 ? pending.filter((x) => !ready.includes(x)) : [];
+		}
+	}
+
+	// `type S[T any] Base` with `Base` a struct declared in the package: S is a
+	// new struct type with Base's fields (and none of its methods), so its
+	// declaration becomes a copy of Base's struct type.
+	_expandGenericStructDefs(decls) {
+		const byName = new Map(decls.map((d) => [d.name, d]));
+		for (const d of decls) {
+			if (!d.typeParams || d.isAlias) continue;
+			let target = d.type;
+			for (let i = 0; i < 16 && target?.kind === "TypeName"; i++) {
+				const base = byName.get(target.name);
+				if (!base || base.typeParams || base.isAlias) break;
+				target = base.type;
+			}
+			// A struct written in place is already this declaration's own copy;
+			// cloning it would also choke on an AST a previous target pass
+			// annotated with cycles.
+			if (target?.kind === "StructType" && target !== d.type)
+				d.type = JSON.parse(JSON.stringify(target));
+		}
+	}
+
+	// A struct type, or a named type with methods, becomes a JS class of the
+	// same name in `js` and `both` packages.  Functions and variables that
+	// shadow a browser global get a `$` suffix, but type names reach the
+	// output through the checker's types (class declarations, `new T`,
+	// `instanceof T`, static methods), so a class named after a JavaScript
+	// built-in the generated code calls (`Array.isArray`, `new Error`) is
+	// rejected instead.  Interfaces and method-less named types emit no class.
+	_checkGlobalTypeNamesPass(programs) {
+		if (this.target === "wasm" || this.isStdlib) return;
+		for (const p of programs) {
+			for (const d of p.decls) {
+				if (
+					d.kind !== "TypeDecl" ||
+					d.isAlias ||
+					!JS_BUILTIN_CLASSES.has(d.name)
+				)
+					continue;
+				const t = this.types.get(d.name);
+				const isClass =
+					t?.underlying?.kind === "struct" || (t?.methods?.size ?? 0) > 0;
+				if (!isClass) continue;
+				this._setCurrentFile(p);
+				this.err(
+					`type ${d.name} shadows the JavaScript global ${d.name}; rename the type`,
+					d,
+				);
+			}
 		}
 	}
 
@@ -475,6 +650,22 @@ export class TypeChecker {
 		}
 	}
 
+	// Constant initializers are known before types are resolved, so an array
+	// length may name a constant declared later (`[N]int`, `[N + 1]T`).
+	_registerConstExprs(programs) {
+		for (const p of programs) {
+			for (const d of p.decls) {
+				if (d.kind !== "ConstDecl") continue;
+				for (const spec of d.decls) {
+					spec.names.forEach((name, i) => {
+						const expr = spec.value?.[i] ?? spec.value?.[0] ?? null;
+						if (expr) this.globals._constExprs.set(name, expr);
+					});
+				}
+			}
+		}
+	}
+
 	_collectVarsConstsPass(programs) {
 		for (const p of programs) {
 			this._setCurrentFile(p);
@@ -512,16 +703,20 @@ export class TypeChecker {
 
 	_promoteEmbeddedMethods() {
 		for (const type of this.types.values()) {
-			const struct = type.underlying;
-			if (struct?.kind === "struct" && struct._embeds) {
-				for (const embed of struct._embeds) {
-					const inner = embed.kind === "pointer" ? embed.base : embed;
-					const base = inner.kind === "named" ? inner.underlying : inner;
-					if (base?.kind !== "struct" || !base.methods) continue;
-					for (const [mName, mType] of base.methods.entries()) {
-						if (!struct.methods.has(mName)) struct.methods.set(mName, mType);
-					}
-				}
+			this._promoteEmbeddedInto(type.underlying);
+			for (const inst of type._generic?._instances?.values() ?? [])
+				this._promoteEmbeddedInto(inst.underlying);
+		}
+	}
+
+	_promoteEmbeddedInto(struct) {
+		if (struct?.kind !== "struct" || !struct._embeds) return;
+		for (const embed of struct._embeds) {
+			const inner = embed.kind === "pointer" ? embed.base : embed;
+			const base = inner.kind === "named" ? inner.underlying : inner;
+			if (base?.kind !== "struct" || !base.methods) continue;
+			for (const [mName, mType] of base.methods.entries()) {
+				if (!struct.methods.has(mName)) struct.methods.set(mName, mType);
 			}
 		}
 	}
@@ -529,30 +724,39 @@ export class TypeChecker {
 	// ── Type collection ──────────────────────────────────────────
 
 	collectType(decl) {
+		if (decl.typeParams && decl.isAlias) {
+			this._collectGenericAlias(decl);
+			return;
+		}
 		if (decl.typeParams) {
 			// Generic type — resolve underlying with type params as ANY for struct fields
 			const typeScope = new Scope(this.globals);
-			const typeParamTypes = decl.typeParams.map((tp) => {
-				const t = {
-					kind: "typeParam",
-					name: tp.name,
-					constraint: tp.constraint,
-				};
+			const preset = this.types.get(decl.name)?._generic;
+			const typeParamTypes = decl.typeParams.map((tp, i) => {
+				const t =
+					preset?.declNode === decl
+						? preset.typeParams[i]
+						: {
+								kind: "typeParam",
+								name: tp.name,
+								constraint: tp.constraint,
+							};
 				typeScope.define(tp.name, t);
 				return t;
 			});
-			const underlying = this.resolveTypeNode(decl.type, typeScope);
 			const existing = this.types.get(decl.name);
 			const named =
 				existing?.kind === "named"
 					? existing
 					: { kind: "named", name: decl.name };
+			// Registered before the fields resolve so `Next *List[T]` finds the
+			// generic declaration it is part of.
+			if (preset?.declNode === decl) named._generic = preset;
+			else named._generic = { typeParams: typeParamTypes, declNode: decl };
+			this.types.set(decl.name, named);
+			const underlying = this.resolveTypeNode(decl.type, typeScope);
 			named.underlying = underlying;
 			named._target = this.target;
-			named._generic = {
-				typeParams: typeParamTypes,
-				declNode: decl,
-			};
 			if (underlying.kind === "struct") {
 				underlying.name = decl.name;
 				underlying.methods = new Map();
@@ -561,7 +765,12 @@ export class TypeChecker {
 			this.globals.define(decl.name, named);
 			return;
 		}
-		const underlying = this.resolveTypeNode(decl.type, this.globals);
+		let underlying = this.resolveTypeNode(decl.type, this.globals);
+		// `type W V` with V a named array: W's underlying type is V's array.
+		if (!decl.isAlias && underlying.kind === "named") {
+			const inner = this._deepUnderlying(underlying);
+			if (inner?.kind === "array") underlying = inner;
+		}
 		if (decl.isAlias) {
 			// type A = B — transparent alias, A and B are identical types
 			this.types.set(decl.name, underlying);
@@ -586,6 +795,29 @@ export class TypeChecker {
 		}
 		this.types.set(decl.name, named);
 		this.globals.define(decl.name, named);
+	}
+
+	// type A[P any] = T[P] — Go 1.24 generic alias. The declaration is a
+	// template only: each instantiation A[X] substitutes X into the aliased
+	// type and resolves to exactly that type (no new named type).
+	_collectGenericAlias(decl) {
+		const typeScope = new Scope(this.globals);
+		const typeParamTypes = decl.typeParams.map((tp) => {
+			const t = { kind: "typeParam", name: tp.name, constraint: tp.constraint };
+			typeScope.define(tp.name, t);
+			return t;
+		});
+		// Resolve once with the parameters in scope to report errors in the
+		// aliased type at the declaration.
+		const underlying = this.resolveTypeNode(decl.type, typeScope);
+		const alias = {
+			kind: "named",
+			name: decl.name,
+			underlying,
+			_generic: { typeParams: typeParamTypes, declNode: decl, isAlias: true },
+		};
+		this.types.set(decl.name, alias);
+		this.globals.define(decl.name, alias);
 	}
 
 	_buildCollectFuncScope(decl) {
@@ -663,8 +895,11 @@ export class TypeChecker {
 		const recvType = this.resolveTypeNodeName(decl.recvType, this.globals);
 		const base = recvType?.underlying ?? recvType;
 		if (base?.kind === "struct") {
+			base.methods ??= new Map();
 			base.methods.set(decl.name, funcType);
-		} else if (recvType?.kind === "named" && recvType.methods) {
+		}
+		if (recvType?.kind === "named") {
+			recvType.methods ??= new Map();
 			recvType.methods.set(decl.name, funcType);
 		}
 	}
@@ -786,7 +1021,24 @@ export class TypeChecker {
 		this.globals.define(decl.name, funcType);
 	}
 
+	_checkIntrinsic(decl) {
+		const want = INTRINSICS.get(decl.intrinsic);
+		if (!want) return this.err(`unknown intrinsic '${decl.intrinsic}'`, decl);
+		if (!decl._bodyless)
+			return this.err(
+				`intrinsic '${decl.intrinsic}' must not have a body`,
+				decl,
+			);
+		const got = typeStr(this.globals.symbols.get(decl.name));
+		if (got !== want)
+			this.err(
+				`intrinsic '${decl.intrinsic}' must have type ${want}, not ${got}`,
+				decl,
+			);
+	}
+
 	checkFuncDecl(decl, outer) {
+		if (decl.intrinsic) this._checkIntrinsic(decl);
 		if (
 			(this.target === "wasm" || this.target === "both") &&
 			(decl.async || decl.isAsync)
@@ -800,9 +1052,9 @@ export class TypeChecker {
 		const inner = new Scope(outer);
 		this._injectTypeParams(decl, inner, outer);
 		for (const p of decl.params) {
-			inner.define(p.name, this.resolveTypeNode(p.type, inner));
+			inner.define(p.name, this._paramType(p, inner));
 		}
-		const returnType = this._setupFuncReturnType(decl, inner, outer);
+		const returnType = this._setupFuncReturnType(decl, inner);
 		const savedSharedAlloc = this._sharedAllocOk;
 		this._sharedAllocOk = decl.name === "init";
 		this._runFuncBody(decl, inner, returnType);
@@ -834,11 +1086,18 @@ export class TypeChecker {
 			decl.recvPointer ? { kind: "pointer", base: recvType } : recvType,
 		);
 		for (const p of decl.params) {
-			inner.define(p.name, this.resolveTypeNode(p.type, inner));
+			inner.define(p.name, this._paramType(p, inner));
 		}
-		const returnType = this._setupFuncReturnType(decl, inner, inner);
+		const returnType = this._setupFuncReturnType(decl, inner);
 		this._runFuncBody(decl, inner, returnType);
 		this._checkMissingReturn(decl, returnType, "method");
+	}
+
+	// A variadic parameter `xs ...T` is a `[]T` inside the body (the signature
+	// keeps the element type plus the `variadic` flag).
+	_paramType(p, scope) {
+		const t = this.resolveTypeNode(p.type, scope);
+		return p.variadic ? { kind: "slice", elem: t } : t;
 	}
 
 	_injectTypeParams(decl, inner, outer) {
@@ -858,15 +1117,11 @@ export class TypeChecker {
 		}
 	}
 
-	_setupFuncReturnType(decl, inner, outer) {
+	_setupFuncReturnType(decl, inner) {
 		let returnType = decl.returnType
 			? this.resolveTypeNode(decl.returnType, inner)
 			: VOID;
-		const hasNamedReturns = this._injectNamedReturns(
-			decl.returnType,
-			inner,
-			outer,
-		);
+		const hasNamedReturns = this._injectNamedReturns(decl.returnType, inner);
 		if (hasNamedReturns && returnType)
 			returnType = { ...returnType, _hasNamedReturns: true };
 		return returnType;
@@ -890,10 +1145,12 @@ export class TypeChecker {
 		}
 	}
 
-	_injectNamedReturns(returnTypeNode, scope, outer) {
+	// Named result types resolve in the function scope, so a result of a type
+	// parameter's type (`(r T)`) sees T.
+	_injectNamedReturns(returnTypeNode, scope) {
 		if (!returnTypeNode?._namedReturns) return false;
 		for (const { name, type } of returnTypeNode._namedReturns) {
-			if (name) scope.define(name, this.resolveTypeNode(type, outer));
+			if (name) scope.define(name, this.resolveTypeNode(type, scope));
 		}
 		return true;
 	}
@@ -922,8 +1179,15 @@ export class TypeChecker {
 				for (let i = 0; i < spec.names.length; i++) {
 					const vt = valTypesFlat[i] ?? ANY;
 					const varType = type ?? defaultType(vt) ?? ANY;
+					if (!type && spec.names.length === spec.value.length)
+						this._checkConstDefault(vt, spec.value[i], "variable declaration");
 					if (type)
-						this.assertAssignable(type, vt, spec.value[i] ?? spec.value[0]);
+						this.assertAssignable(
+							type,
+							vt,
+							spec.value[i] ?? spec.value[0],
+							"variable declaration",
+						);
 					scope.defineLocal(spec.names[i], varType);
 				}
 			} else {
@@ -944,6 +1208,13 @@ export class TypeChecker {
 			for (let i = 0; i < spec.names.length; i++) {
 				const name = spec.names[i];
 				const expr = spec.value?.[i] ?? spec.value?.[0] ?? null;
+				if (spec.type && expr)
+					this._checkConstOverflow(
+						type,
+						valTypes[i] ?? valTypes[0],
+						expr,
+						"constant declaration",
+					);
 				scope.defineConst(name, type, expr);
 			}
 		}
@@ -957,3 +1228,4 @@ Object.assign(TypeChecker.prototype, expressionCheckMethods);
 Object.assign(TypeChecker.prototype, terminationMethods);
 Object.assign(TypeChecker.prototype, resolveMethods);
 Object.assign(TypeChecker.prototype, assignabilityMethods);
+Object.assign(TypeChecker.prototype, constantCheckMethods);

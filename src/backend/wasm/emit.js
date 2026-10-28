@@ -20,6 +20,8 @@ import {
 } from "./stdlib/index.js";
 import {
 	isArrayType,
+	isComplex,
+	isComplex64,
 	isPointerToStruct,
 	isSliceType,
 	isStringType,
@@ -30,6 +32,36 @@ import {
 // The emitter is one class split over several files by concern. Methods from
 // the emit-*.js modules are assigned to FunctionEmitter.prototype below; `this`
 // is shared, so cross-file calls are plain method calls.
+const SCOPED_STMTS = new Set([
+	"Block",
+	"IfStmt",
+	"ForStmt",
+	"SwitchStmt",
+	"TypeSwitchStmt",
+]);
+
+// A same-named method with another arity (strings.Reader.Reset(s) vs
+// hash.Hash.Reset()) cannot satisfy this interface method.  Neither can one
+// whose parameters or results have other types (csv.Writer.Write(record
+// []string) error vs io.Writer.Write(p []byte) (int, error)).
+function sameTypes(a, b) {
+	return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function sameParams(c, params, paramTypes) {
+	if (c.targetParamTypes.length !== params.length) return false;
+	if (paramTypes?.length !== params.length) return true;
+	return c.targetParamTypes.every(
+		(t, i) => i === 0 || sameTypes(t, paramTypes[i]),
+	);
+}
+
+function sameSignature(c, params, paramTypes, want, got) {
+	if (!Array.isArray(c.targetParamTypes)) return true;
+	if (!sameParams(c, params, paramTypes)) return false;
+	return want === undefined || got === undefined || sameTypes(got, want);
+}
+
 export class FunctionEmitter {
 	constructor(moduleEmitter, funcDecl, funcIndex) {
 		this.mod = moduleEmitter;
@@ -118,7 +150,75 @@ export class FunctionEmitter {
 		this.recoverOkLocalIndex = local;
 	}
 
+	_checkYieldClosureReentry() {
+		if (!this.funcDecl._isYieldClosure || !this.funcDecl._iterStateName) return;
+		const stateLoc = this.resolveLocal(this.funcDecl._iterStateName);
+		if (!stateLoc?.isBoxed) return;
+		this.pushInstruction({ op: "local.get", index: stateLoc.index });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: stateLoc.boxInfo.typeIndex,
+			fieldIndex: 0,
+		});
+		this.pushInstruction({ op: "i64.const", value: 0n });
+		this.pushInstruction("i64.ne");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.emitPanic(
+			"range function continued iteration after function for loop body returned false",
+		);
+		this.pushInstruction("end");
+	}
+
+	_finishYieldClosureBody() {
+		if (!this.funcDecl._isYieldClosure) return false;
+		const lastOp = this.body[this.body.length - 1]?.op;
+		if (lastOp !== "return" && lastOp !== "unreachable") {
+			this.pushInstruction({ op: "i32.const", value: 1 });
+			this.pushInstruction({ op: "return" });
+		}
+		return true;
+	}
+
+	_collectLabelTargets(body) {
+		const targets = new Map();
+		let nextTag = 3;
+		const scan = (node) => {
+			if (!node || typeof node !== "object") return;
+			if (Array.isArray(node)) {
+				for (const item of node) scan(item);
+				return;
+			}
+			if (node.kind === "LabeledStmt" && node.label) {
+				const bTag = nextTag++;
+				const cTag = nextTag++;
+				targets.set(bTag, { tag: bTag, label: node.label, role: "break" });
+				targets.set(cTag, { tag: cTag, label: node.label, role: "continue" });
+			} else if (node.kind === "ForStmt" && node.label) {
+				const bTag = nextTag++;
+				const cTag = nextTag++;
+				targets.set(bTag, { tag: bTag, label: node.label, role: "break" });
+				targets.set(cTag, { tag: cTag, label: node.label, role: "continue" });
+			}
+			for (const k of Object.keys(node)) {
+				if (k.startsWith("_")) continue;
+				scan(node[k]);
+			}
+		};
+		scan(body);
+		return targets;
+	}
+
+	_findLabelTarget(label, role) {
+		for (const target of this.rootFuncDecl?._labelTargets?.values() ?? []) {
+			if (target.label === label && target.role === role) return target;
+		}
+		return null;
+	}
+
 	emitFunctionBody(body) {
+		if (!this.funcDecl._isClosure && !this.funcDecl._labelTargets) {
+			this.funcDecl._labelTargets = this._collectLabelTargets(body);
+		}
 		if (
 			this.funcDecl._isClosure &&
 			!this.funcDecl._isTrampoline &&
@@ -132,6 +232,7 @@ export class FunctionEmitter {
 		this._cacheScratchGlobals();
 
 		this._emitRecoverArmPrologue(body);
+		this._checkYieldClosureReentry();
 
 		const hasDef = hasDefer(body);
 		this.hasDefer = hasDef;
@@ -143,31 +244,139 @@ export class FunctionEmitter {
 
 		this._initNamedReturns();
 
-		const needsOobBlock = this._needsOobBlock(body);
-		if (needsOobBlock) {
-			this.pushInstruction({ op: "block", blockType: "void" });
-			this.pushControl("oob");
-		}
+		const closeChecks = this._openCheckBlocks(body);
 
 		this.emitBlock(body);
+		if (this._finishYieldClosureBody()) {
+			closeChecks?.(() => {});
+			return;
+		}
 
-		if (needsOobBlock) {
+		closeChecks?.(() =>
+			this.pushInstruction({
+				op: this.returnTypes.length === 0 ? "return" : "unreachable",
+			}),
+		);
+	}
+
+	// Opens the nil and index-check blocks `body` needs and returns the
+	// function that closes them (null when none are needed).  The closer runs
+	// `terminate` first unless the body already ends in a return or trap.
+	_openCheckBlocks(body) {
+		const nil = this._needsNilBlock(body);
+		const oob = this._needsOobBlock(body);
+		if (!nil && !oob) return null;
+		if (nil) this._openNilBlock();
+		if (oob) this._openOobBlocks();
+		return (terminate) => {
 			const lastOp = this.body[this.body.length - 1]?.op;
-			if (lastOp !== "return" && lastOp !== "unreachable") {
-				if (this.returnTypes.length === 0) {
-					this.pushInstruction({ op: "return" });
-				} else {
-					this.pushInstruction({ op: "unreachable" });
-				}
+			if (lastOp !== "return" && lastOp !== "unreachable") terminate();
+			if (oob) this._closeOobBlocks();
+			if (nil) this._closeNilBlock();
+		};
+	}
+
+	// Field access through a nil struct pointer branches (`br_on_null`) out
+	// of the body to a block wrapped around it, whose handler raises Go's
+	// panic, so `recover()` sees it where a trap would skip the defers.
+	_openNilBlock() {
+		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushControl("nil");
+	}
+
+	// Closes the block opened by _openNilBlock; the body must already end in
+	// a branch, return or unreachable.
+	_closeNilBlock() {
+		this.pushInstruction("end");
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getNilPanicFuncIndex(),
+		});
+		this.pushInstruction("unreachable");
+	}
+
+	// Index checks branch out of the body to one of two blocks wrapped around
+	// it, `oob32` for i32 indexes and `oob64` for i64 indexes, carrying the
+	// index and the check's site id as block results (`_pushOobSite`).  The
+	// handlers after the blocks recompute that site's length and raise Go's
+	// `index out of range [i] with length n`.  Nothing extra stays live in
+	// the hot path: a site id is an immediate.
+	_openOobBlocks() {
+		this.pushInstruction({
+			op: "block",
+			blockType: this.mod.getTypeIndex([], ["i64", "i32"]),
+		});
+		this.pushControl("oob64");
+		this.pushInstruction({
+			op: "block",
+			blockType: this.mod.getTypeIndex([], ["i32", "i32"]),
+		});
+		this.pushControl("oob32");
+	}
+
+	// Closes the blocks opened by _openOobBlocks; the body must already end
+	// in a branch, return or unreachable.
+	_closeOobBlocks() {
+		const site = this.acquireTemp("i32");
+		const idx = this.acquireTemp("i64");
+		const len = this.acquireTemp("i32");
+		// oob32 lands here with [i32 index, site]: widen the index and fall
+		// through to the oob64 handler.
+		this.pushInstruction("end");
+		this.pushInstruction({ op: "local.set", index: site });
+		this.pushInstruction("i64.extend_i32_s");
+		this.pushInstruction({ op: "local.get", index: site });
+		this.pushInstruction("end");
+		this.pushInstruction({ op: "local.set", index: site });
+		this.pushInstruction({ op: "local.set", index: idx });
+		// Sites whose length code is identical (same temp, same field) share
+		// one br_table target.
+		const codes = [];
+		const target = (this.oobSites ?? []).map((emitLen) => {
+			const saved = this.body;
+			this.body = [];
+			emitLen();
+			const code = this.body;
+			this.body = saved;
+			const key = JSON.stringify(code);
+			let k = codes.findIndex((c) => c.key === key);
+			if (k < 0) k = codes.push({ key, code }) - 1;
+			return k;
+		});
+		const sites = codes.map(({ code }) => () => {
+			for (const inst of code) this.pushInstruction(inst);
+		});
+		if (sites.length === 0) {
+			this.pushInstruction({ op: "i32.const", value: 0 });
+		} else {
+			// block $len (result i32) { block … block { br_table } emitLen_0; br $len … }
+			this.pushInstruction({ op: "block", blockType: "i32" });
+			for (let k = 0; k < sites.length; k++)
+				this.pushInstruction({ op: "block", blockType: "void" });
+			this.pushInstruction({ op: "local.get", index: site });
+			this.pushInstruction({
+				op: "br_table",
+				targets: target,
+				defaultTarget: sites.length - 1,
+			});
+			for (let k = 0; k < sites.length; k++) {
+				this.pushInstruction("end");
+				sites[k]();
+				this.pushInstruction({ op: "br", depth: sites.length - 1 - k });
 			}
 			this.pushInstruction("end");
-
-			this.pushInstruction({
-				op: "call",
-				funcIndex: this.mod.getBoundsPanicFuncIndex(),
-			});
-			this.pushInstruction("unreachable");
 		}
+		this.pushInstruction({ op: "local.set", index: len });
+		this.pushInstruction({ op: "local.get", index: idx });
+		this.pushInstruction({ op: "local.get", index: len });
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.getIndexPanicFuncIndex(),
+		});
+		this.pushInstruction("unreachable");
+		this.releaseTemp(site, "i32");
+		this.releaseTemp(idx, "i64");
+		this.releaseTemp(len, "i32");
 	}
 
 	_initNamedReturns() {
@@ -180,13 +389,6 @@ export class FunctionEmitter {
 			const varName = isBlank ? `__ret_blank$${i}` : r.name;
 			const wType = this.toWasmType(r.type);
 			const localIdx = this.allocLocal(varName, wType, r.type, isBlank);
-			this.namedReturnVars.push({
-				name: varName,
-				localIdx,
-				type: wType,
-				goType: r.type,
-				isBlank,
-			});
 			this.emitZeroValue(r.type, wType);
 			const localInfo = this.locals.get(varName);
 			if (localInfo?.isBoxed) {
@@ -196,6 +398,13 @@ export class FunctionEmitter {
 				});
 			}
 			this.pushInstruction({ op: "local.set", index: localIdx });
+			this.namedReturnVars.push({
+				name: varName,
+				localIdx,
+				type: wType,
+				goType: r.type,
+				isBlank,
+			});
 		}
 		return true;
 	}
@@ -256,30 +465,16 @@ export class FunctionEmitter {
 		});
 		this.pushControl("try_table");
 
-		const needsOobBlock = this._needsOobBlock(body);
-		if (needsOobBlock) {
-			this.pushInstruction({ op: "block", blockType: "void" });
-			this.pushControl("oob");
-		}
+		const closeChecks = this._openCheckBlocks(body);
 
 		this.emitBlock(body);
 
-		if (needsOobBlock) {
-			const lastOp = this.body[this.body.length - 1]?.op;
-			if (lastOp !== "return" && lastOp !== "unreachable") {
-				this.pushInstruction({
-					op: "br",
-					depth: this.resolveBranchDepthToRole("runDefers"),
-				});
-			}
-			this.pushInstruction("end");
-
+		closeChecks?.(() =>
 			this.pushInstruction({
-				op: "call",
-				funcIndex: this.mod.getBoundsPanicFuncIndex(),
-			});
-			this.pushInstruction("unreachable");
-		}
+				op: "br",
+				depth: this.resolveBranchDepthToRole("runDefers"),
+			}),
+		);
 
 		// Close try_table
 		this.pushInstruction("end");
@@ -575,6 +770,20 @@ export class FunctionEmitter {
 		return false;
 	}
 
+	// True when the body reads or writes a field through a pointer.
+	_needsNilBlock(node) {
+		if (!node || typeof node !== "object") return false;
+		if (Array.isArray(node)) return node.some((n) => this._needsNilBlock(n));
+		if (node.kind === "FuncLit") return false;
+		if (node.kind === "SelectorExpr" && node.expr?._type?.kind === "pointer")
+			return true;
+		for (const key of Object.keys(node)) {
+			if (key.startsWith("_")) continue;
+			if (this._needsNilBlock(node[key])) return true;
+		}
+		return false;
+	}
+
 	_needsOobBlock(node) {
 		if (!node || typeof node !== "object") return false;
 		if (Array.isArray(node)) {
@@ -640,6 +849,10 @@ export class FunctionEmitter {
 			for (let i = 0; i < lhs.length; i++) {
 				if (lhs[i].name === varName) {
 					if (lhs[i]._type) return lhs[i]._type;
+					// `for k, v := range x`: the range expression is a tuple.
+					const rt = node.rhs?.[0]?._type;
+					if (node.rhs?.[0]?.kind === "RangeExpr" && rt?.kind === "tuple")
+						return rt.types?.[i] ?? null;
 					if (node.rhs?.[i]?._type) return node.rhs[i]._type;
 				}
 			}
@@ -868,7 +1081,7 @@ export class FunctionEmitter {
 					for (const n of names) rawFields.push({ name: n, goType: f.type });
 				}
 			}
-			if (rawFields.length > 0 && this.mod.getAnonStructType) {
+			if (this.mod.getAnonStructType) {
 				return this.mod.getAnonStructType(rawFields);
 			}
 		}
@@ -910,6 +1123,18 @@ export class FunctionEmitter {
 				typeIndex: structInfo.typeIndex,
 				fieldIndex: i,
 			});
+			// Array and value-struct fields are values: copy them with the struct.
+			const f = structInfo.fields[i];
+			if (!f.goType || f.goType.kind === "pointer") continue;
+			if (isArrayType(f.goType, this.mod.checker)) {
+				this.emitCopyArray(f.goType);
+			} else if (
+				isStructType(f.goType, this.mod.checker, this.mod) &&
+				!isPointerToStruct(f.goType, this.mod.checker, this.mod)
+			) {
+				const inner = this._resolveStructInfo({ _type: f.goType });
+				if (inner) this.emitCloneStruct(inner, f.wType);
+			}
 		}
 		this.pushInstruction({
 			op: "struct.new",
@@ -918,10 +1143,97 @@ export class FunctionEmitter {
 		this.releaseTemp(tmp, baseWType);
 	}
 
-	// Go copies structs on assignment.  After `node` has been emitted (value on
-	// the stack), clone it unless it is already a fresh temporary
-	// (composite literal or `*p` deref) or not a value struct at all.
-	_emitCopyIfValueStruct(node, goType, wType) {
+	// Copies the fixed-size array on top of the stack into a fresh array.
+	// Elements that are themselves arrays or value structs are copied deeply.
+	// A null source (an array slot that was never written, e.g. an element of
+	// `make([][2]int, n)`) yields the zero array, so every copy is non-null.
+	emitCopyArray(goType) {
+		const elemType = this._getArrayElemType(goType);
+		const arrInfo = this.mod.getArrayType(elemType);
+		const arrWType = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: arrInfo.typeIndex,
+		};
+		const src = this.acquireTemp(arrWType);
+		const dst = this.acquireTemp(arrWType);
+		this.pushInstruction({ op: "local.tee", index: src });
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction({ op: "if", blockType: arrWType });
+		this.emitZeroValue(goType, arrWType);
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "local.get", index: src });
+		this.pushInstruction("array.len");
+		this.pushInstruction({
+			op: "array.new_default",
+			typeIndex: arrInfo.typeIndex,
+		});
+		this.pushInstruction({ op: "local.set", index: dst });
+		const elemIsArray =
+			elemType?.kind !== "pointer" && isArrayType(elemType, this.mod.checker);
+		const elemStruct =
+			!elemIsArray &&
+			isStructType(elemType, this.mod.checker, this.mod) &&
+			!isPointerToStruct(elemType, this.mod.checker, this.mod)
+				? (this._resolveStructInfo({ _type: elemType }) ??
+					this.mod.getStructType(elemType?.name))
+				: null;
+		if (elemIsArray || elemStruct) {
+			const i = this.acquireTemp("i32");
+			this.pushInstruction({ op: "i32.const", value: 0 });
+			this.pushInstruction({ op: "local.set", index: i });
+			this.pushInstruction({ op: "block", blockType: "void" });
+			this.pushInstruction({ op: "loop", blockType: "void" });
+			this.pushInstruction({ op: "local.get", index: i });
+			this.pushInstruction({ op: "local.get", index: dst });
+			this.pushInstruction("array.len");
+			this.pushInstruction("i32.ge_u");
+			this.pushInstruction({ op: "br_if", depth: 1 });
+			this.pushInstruction({ op: "local.get", index: dst });
+			this.pushInstruction({ op: "local.get", index: i });
+			this.pushInstruction({ op: "local.get", index: src });
+			this.pushInstruction({ op: "local.get", index: i });
+			this.pushInstruction({ op: "array.get", typeIndex: arrInfo.typeIndex });
+			if (elemIsArray) this.emitCopyArray(elemType);
+			else this.emitCloneStruct(elemStruct, arrInfo.elemWType);
+			this.pushInstruction({ op: "array.set", typeIndex: arrInfo.typeIndex });
+			this.pushInstruction({ op: "local.get", index: i });
+			this.pushInstruction({ op: "i32.const", value: 1 });
+			this.pushInstruction("i32.add");
+			this.pushInstruction({ op: "local.set", index: i });
+			this.pushInstruction({ op: "br", depth: 0 });
+			this.pushInstruction("end");
+			this.pushInstruction("end");
+			this.releaseTemp(i, "i32");
+		} else {
+			this.pushInstruction({ op: "local.get", index: dst });
+			this.pushInstruction({ op: "i32.const", value: 0 });
+			this.pushInstruction({ op: "local.get", index: src });
+			this.pushInstruction({ op: "i32.const", value: 0 });
+			this.pushInstruction({ op: "local.get", index: src });
+			this.pushInstruction("array.len");
+			this.pushInstruction({
+				op: "array.copy",
+				typeIndex: arrInfo.typeIndex,
+			});
+		}
+		this.pushInstruction({ op: "local.get", index: dst });
+		this.pushInstruction("end");
+		this.releaseTemp(dst, arrWType);
+		this.releaseTemp(src, arrWType);
+	}
+
+	// Go copies structs and arrays on assignment.  After `node` has been
+	// emitted (value on the stack), copy it unless it is already a fresh
+	// temporary (composite literal, call result, or a struct `*p` deref) or not
+	// a value type at all.
+	_emitCopyIfValue(node, goType, wType) {
+		if (goType?.kind !== "pointer" && isArrayType(goType, this.mod.checker)) {
+			if (node.kind === "CompositeLit" || node._freshArray) return;
+			if (node.kind === "CallExpr" && !node._isTypeConversion) return;
+			this.emitCopyArray(goType);
+			return;
+		}
 		if (
 			!isStructType(goType, this.mod.checker, this.mod) ||
 			isPointerToStruct(goType, this.mod.checker, this.mod)
@@ -963,7 +1275,8 @@ export class FunctionEmitter {
 				const pkg = t.expr?.name;
 				if (pkg) return `${pkg}.${t.field}`;
 			}
-			if (t.kind === "simd") return "simd.F32x4";
+			if (t.kind === "simd")
+				return t.simd === "Mask32x4" ? "simd.Mask32x4" : "simd.F32x4";
 			if (t.name) return t.name;
 			if (t.kind === "named") return t.name;
 			if (t.kind === "TypeName" || t.kind === "Ident") return t.name;
@@ -981,11 +1294,23 @@ export class FunctionEmitter {
 		return null;
 	}
 
-	emitInterfaceDispatcher(fn) {
-		let candidates = this.mod.findInterfaceCandidates(
+	// Concrete methods the dispatcher `fn` can call: same name, same signature.
+	_dispatchCandidates(fn) {
+		const candidates = this.mod.findInterfaceCandidates(
 			fn._ifaceType,
 			fn._methodName,
 		);
+		if (!Array.isArray(fn.params)) return candidates;
+		const paramTypes = this.mod.getFuncParamTypes(fn.name);
+		const results = this.mod.funcReturnTypesByIdx;
+		const want = results.get(fn._globalFuncIndex);
+		return candidates.filter((c) =>
+			sameSignature(c, fn.params, paramTypes, want, results.get(c.funcIndex)),
+		);
+	}
+
+	emitInterfaceDispatcher(fn) {
+		let candidates = this._dispatchCandidates(fn);
 		const recvLocal = 0; // __recv is local 0
 		// Soft dispatchers (errors.Unwrap) return nil instead of panicking when
 		// the receiver is nil or has no such method.
@@ -1046,6 +1371,12 @@ export class FunctionEmitter {
 				});
 				if (cand.embedPath) {
 					for (const step of cand.embedPath) {
+						if (step.castTypeIndex) {
+							this.pushInstruction({
+								op: "ref.cast",
+								typeIndex: step.castTypeIndex,
+							});
+						}
 						this.pushInstruction({
 							op: "struct.get",
 							typeIndex: step.parentTypeIndex,
@@ -1088,6 +1419,10 @@ export class FunctionEmitter {
 		if (typeof t.len === "number") return t.len;
 		if (t.len?.value !== undefined) return Number(t.len.value);
 		if (t.underlying) return this._getArraySize(t.underlying, defaultSize);
+		if (t.name && this.mod.checker?.types?.has(t.name)) {
+			const resolved = this.mod.checker.types.get(t.name);
+			if (resolved !== t) return this._getArraySize(resolved, defaultSize);
+		}
 		return defaultSize;
 	}
 
@@ -1120,13 +1455,32 @@ export class FunctionEmitter {
 			wType.kind === "ref"
 		) {
 			if (
+				(goType && isComplex(goType)) ||
+				wType.typeName === "$complex64" ||
+				wType.typeName === "$complex128"
+			) {
+				const is64 = isComplex64(goType) || wType.typeName === "$complex64";
+				const info = this.mod.getComplexType(is64 ? "complex64" : "complex128");
+				this.pushInstruction({ op: `${info.elemWType}.const`, value: 0.0 });
+				this.pushInstruction({ op: `${info.elemWType}.const`, value: 0.0 });
+				this.pushInstruction({
+					op: "struct.new",
+					typeIndex: info.typeIndex,
+					typeName: info.name,
+				});
+				return;
+			}
+			if (
 				goType &&
 				goType.kind !== "pointer" &&
 				isStructType(goType, this.mod.checker)
 			) {
 				const sName =
 					goType.name ?? (goType.kind === "named" ? goType.name : null);
-				const structInfo = this.mod.getStructType(sName);
+				// An anonymous struct type has no name to look up.
+				const structInfo =
+					this.mod.getStructType(sName) ??
+					this._resolveStructInfo({ _type: goType });
 				if (structInfo) {
 					for (const f of structInfo.fields) {
 						this.emitZeroValue(f.goType, f.wType);
@@ -1143,10 +1497,15 @@ export class FunctionEmitter {
 				goType.kind !== "pointer" &&
 				isArrayType(goType, this.mod.checker)
 			) {
-				const elemType = goType.elem;
+				const elemType = this._getArrayElemType(goType);
 				const arrInfo = this.mod.getArrayType(elemType);
 				const size = this._getArraySize(goType);
-				if (isStructType(elemType, this.mod.checker, this.mod)) {
+				if (
+					isStructType(elemType, this.mod.checker, this.mod) ||
+					isComplex(elemType) ||
+					(elemType?.kind !== "pointer" &&
+						isArrayType(elemType, this.mod.checker))
+				) {
 					for (let i = 0; i < size; i++) {
 						this.emitZeroValue(elemType, arrInfo.elemWType);
 					}
@@ -1286,8 +1645,9 @@ export class FunctionEmitter {
 		return 0;
 	}
 
-	resolveBranchDepthToOob() {
-		return this.resolveBranchDepthToRole("oob");
+	// Depth of the index-check block for i32 or i64 indexes, or null.
+	resolveBranchDepthToOob(width = 64) {
+		return this.resolveBranchDepthToRole(width === 32 ? "oob32" : "oob64");
 	}
 
 	resolveBranchDepthToRole(targetRole) {
@@ -1308,8 +1668,24 @@ export class FunctionEmitter {
 		}
 	}
 
+	// Go scopes: a block, `if`, `for` and `switch` (with their init
+	// statements) end the names they declare, so an inner `x := 5` does not
+	// rebind the outer `x` for the code after it.
 	emitStmt(stmt) {
 		if (!stmt) return;
+		if (!SCOPED_STMTS.has(stmt.kind)) {
+			this._emitStmtKind(stmt);
+			return;
+		}
+		const saved = new Map(this.locals);
+		try {
+			this._emitStmtKind(stmt);
+		} finally {
+			this.locals = saved;
+		}
+	}
+
+	_emitStmtKind(stmt) {
 		switch (stmt.kind) {
 			case "Block":
 				this.emitBlock(stmt);

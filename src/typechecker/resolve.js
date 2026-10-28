@@ -2,11 +2,14 @@
 // Installed as a mixin on TypeChecker.prototype.
 
 import { parseJsonTag } from "../parser/struct-tag.js";
+import { foldConstExpr } from "./const-fold.js";
+import { EXCLUDED_STDLIB_MEMBERS } from "./stdlib/excluded.js";
 import {
 	ANY,
 	BASIC_TYPES,
 	COMPARABLE,
 	defaultType,
+	displayTypeName,
 	isAny,
 	isTypedArraySlice,
 	Scope,
@@ -63,6 +66,7 @@ const SUBSTITUTE_DISPATCH = {
 			fields,
 			methods,
 			_embeds: type._embeds,
+			_structFields: type._structFields,
 		};
 	},
 	interface: (s, type, map) => {
@@ -70,11 +74,24 @@ const SUBSTITUTE_DISPATCH = {
 		for (const [k, v] of type.methods) methods.set(k, s.substituteType(v, map));
 		return { kind: "interface", name: type.name, methods };
 	},
-	named: (s, type, map) => ({
-		kind: "named",
-		name: type.name,
-		underlying: s.substituteType(type.underlying, map),
-	}),
+	named: (s, type, map) => {
+		// An instance of a generic type: re-instantiate with the substituted
+		// arguments (through the instance cache) rather than copying its
+		// possibly cyclic underlying type.
+		if (type._genericOf)
+			return s.instantiateGenericWithArgs(
+				type._genericOf,
+				type.typeArgs.map((t) => s.substituteType(t, map)),
+			);
+		return {
+			kind: "named",
+			name: type.name,
+			...(type.typeArgs && {
+				typeArgs: type.typeArgs.map((t) => s.substituteType(t, map)),
+			}),
+			underlying: s.substituteType(type.underlying, map),
+		};
+	},
 };
 
 /** @type {ThisType<TypeChecker>} */
@@ -88,40 +105,27 @@ export const resolveMethods = {
 				if (scope) {
 					const fromScope = scope.lookup(node.name);
 					if (fromScope?.kind === "typeParam") return fromScope;
+					if (fromScope?.kind === "aliasArg") return fromScope.type;
 				}
 				const named = this.types.get(node.name);
 				if (named) {
-					// `pkg.T` in a type position counts as using the import.
-					const dot = node.name.indexOf(".");
-					if (dot > 0) this.globals.lookup(node.name.slice(0, dot));
+					const wasmErr = this._checkWasmStdlibTypeMember(node);
+					if (wasmErr) return wasmErr;
+					this._useQualifiedTypeName(node, named);
 					return named;
+				}
+				if (EXCLUDED_STDLIB_MEMBERS.has(node.name)) {
+					return this.err(
+						`${node.name} is not available: ${EXCLUDED_STDLIB_MEMBERS.get(node.name)}`,
+						node,
+					);
 				}
 				return this.err(`Unknown type '${node.name}'`, node);
 			}
 			case "GenericTypeName":
 			case "InstantiationExpr":
-			case "IndexExpr": {
-				const name =
-					node.name ?? (node.expr?.kind === "Ident" ? node.expr.name : null);
-				const typeArgs = node.typeArgs ?? (node.index ? [node.index] : []);
-				const base = name
-					? this.types.get(name)
-					: node.expr
-						? this.resolveTypeNode(node.expr, scope)
-						: null;
-				if (!base) return this.err(`Unknown type '${name ?? "?"}'`, node);
-				if (base.kind === "named" && base._generic) {
-					const res = this.instantiateGenericType(
-						base._generic,
-						typeArgs,
-						scope,
-					);
-					node._typeArgs = res.typeArgs;
-					node._genericType = base;
-					return res;
-				}
-				return this.err(`Type '${name ?? "?"}' is not generic`, node);
-			}
+			case "IndexExpr":
+				return this._resolveGenericTypeName(node, scope);
 			case "TypeParam": {
 				const constraint = node.constraint
 					? this.resolveTypeNode(node.constraint, scope)
@@ -157,11 +161,14 @@ export const resolveMethods = {
 				// SelectorExpr; resolve it like a qualified TypeName.
 				if (node.expr?.kind === "Ident" && typeof node.field === "string") {
 					const qualified = `${node.expr.name}.${node.field}`;
-					if (this.types.has(qualified))
-						return this.resolveTypeNode(
+					if (this.types.has(qualified)) {
+						const resolved = this.resolveTypeNode(
 							{ kind: "TypeName", name: qualified },
 							scope,
 						);
+						this._useQualifiedTypeName(node, resolved);
+						return resolved;
+					}
 				}
 				return ANY;
 			case "ArrayType":
@@ -178,16 +185,106 @@ export const resolveMethods = {
 		}
 	},
 
+	_checkWasmStdlibTypeMember(node) {
+		if (this.target !== "wasm" && this.target !== "both") return null;
+		const dot = node.name.indexOf(".");
+		if (dot === -1) return null;
+		const pkg = node.name.slice(0, dot);
+		if (pkg !== "time") return null;
+		const field = node.name.slice(dot + 1);
+		const allowed = WASM_STDLIB_MEMBERS.get(pkg);
+		if (allowed && !allowed.has(field)) {
+			this.recordBlocker("unsupported stdlib member", node.name);
+			return this.err(
+				`'${node.name}' is not yet available in wasm packages`,
+				node,
+				"move this call to a JS package, or use a supported alternative",
+			);
+		}
+		return null;
+	},
+
+	// `pkg.T` in a type position counts as using the import; a Go-source
+	// stdlib type is emitted under its mangled name.
+	_useQualifiedTypeName(node, named) {
+		const name =
+			node.name ?? (node.expr ? `${node.expr.name}.${node.field}` : "");
+		const dot = name.indexOf(".");
+		if (dot <= 0) return;
+		this.globals.lookup(name.slice(0, dot));
+		if (named.name?.includes("$$")) node._stdName = named.name;
+	},
+
+	// `[N]T` with a named constant (or constant expression) length folds to a number.
+	_foldArrayLen(size, scope) {
+		const resolve = (name, depth = 0) => {
+			const e = depth < 16 ? scope.lookupConstExpr(name) : null;
+			return e ? foldConstExpr(e, (n) => resolve(n, depth + 1)) : undefined;
+		};
+		try {
+			const lit = foldConstExpr(size, resolve);
+			const n = lit ? Number(lit.value) : Number.NaN;
+			return Number.isInteger(n) && n >= 0 ? n : size;
+		} catch {
+			return size;
+		}
+	},
+
 	_resolveArrayTypeNode(node, scope) {
+		// Fold in place so backends that read the type node see a literal length.
+		if (!node.inferLen && node.size?.value === undefined) {
+			const n = this._foldArrayLen(node.size, scope);
+			if (typeof n === "number")
+				node.size = {
+					kind: "BasicLit",
+					litKind: "INT",
+					value: String(n),
+					_line: node.size._line,
+					_col: node.size._col,
+				};
+		}
 		return {
 			kind: "array",
 			size: node.inferLen
 				? null
 				: node.size?.value !== undefined
 					? Number(node.size.value)
-					: node.size,
+					: this._foldArrayLen(node.size, scope),
 			elem: this.resolveTypeNode(node.elem, scope),
 		};
+	},
+
+	// `G[X]`: instantiate a generic named type, or expand a generic alias.
+	_resolveGenericTypeName(node, scope) {
+		const sel = node.expr?.kind === "SelectorExpr" ? node.expr : null;
+		const qualified =
+			sel?.expr?.kind === "Ident" ? `${sel.expr.name}.${sel.field}` : null;
+		const name =
+			node.name ??
+			(node.expr?.kind === "Ident" ? node.expr.name : null) ??
+			qualified;
+		const typeArgs = node.typeArgs ?? (node.index ? [node.index] : []);
+		const base = name
+			? this.types.get(name)
+			: node.expr
+				? this.resolveTypeNode(node.expr, scope)
+				: null;
+		if (!base) return this.err(`Unknown type '${name ?? "?"}'`, node);
+		if (qualified) this.globals.lookup(sel.expr.name);
+		else if (name)
+			this._useQualifiedTypeName(node.name ? node : node.expr, base);
+		if (base.kind === "named" && base._generic?.isAlias) {
+			const aliasArgs = typeArgs.map((n) => this.resolveTypeNode(n, scope));
+			node._typeArgs = aliasArgs;
+			return this._instantiateGenericAlias(base._generic, aliasArgs);
+		}
+		if (base.kind === "named" && base._generic) {
+			const res = this.instantiateGenericType(base._generic, typeArgs, scope);
+			node._typeArgs = res.typeArgs;
+			node._genericType = base;
+			return res;
+		}
+		return this.err(`Type '${name ?? "?"}' is not generic`, node);
 	},
 
 	_resolveFuncTypeNode(node, scope) {
@@ -195,7 +292,9 @@ export const resolveMethods = {
 		const returns = node.returnType
 			? [this.resolveTypeNode(node.returnType, scope)]
 			: [VOID];
-		return { kind: "func", params, returns };
+		const fn = { kind: "func", params, returns };
+		if (node.params.at(-1)?.variadic) fn.variadic = true;
+		return fn;
 	},
 
 	resolveTypeNodeName(node, scope) {
@@ -262,6 +361,9 @@ export const resolveMethods = {
 			if (isVariadic) mType.variadic = true;
 			methods.set(m.name, mType);
 		}
+		// Embedded interfaces that carry a type set (`interface{ Integer }`):
+		// kept so type-parameter operator checks can follow them.
+		const typeSetEmbeds = [];
 		if (node.embeds) {
 			for (const embed of node.embeds) {
 				const resolved = this.resolveTypeNode(embed, scope);
@@ -271,6 +373,8 @@ export const resolveMethods = {
 					for (const [mName, mType] of base.methods) {
 						if (!methods.has(mName)) methods.set(mName, mType);
 					}
+					if (base.unionConstraint || base._typeSetEmbeds)
+						typeSetEmbeds.push(base);
 				} else if (!isAny(resolved)) {
 					this.err(
 						`cannot embed non-interface type ${typeStr(resolved)}`,
@@ -281,6 +385,7 @@ export const resolveMethods = {
 		}
 		const result = { kind: "interface", methods };
 		if (node.unionConstraint) result.unionConstraint = node.unionConstraint;
+		if (typeSetEmbeds.length > 0) result._typeSetEmbeds = typeSetEmbeds;
 		return result;
 	},
 
@@ -301,10 +406,33 @@ export const resolveMethods = {
 	},
 
 	instantiateGenericType(generic, typeArgNodes, scope) {
-		const map = new Map();
 		const typeArgs = typeArgNodes.map((n) => this.resolveTypeNode(n, scope));
+		return this.instantiateGenericWithArgs(generic, typeArgs);
+	},
+
+	// One instance per type-argument list.  The instance is cached before its
+	// fields are resolved, so a field that names the instance again (`Next
+	// *List[T]`, `Children []Tree[T]`, or a cycle through another generic type)
+	// reaches the same object instead of recursing forever.
+	instantiateGenericWithArgs(generic, typeArgs) {
+		const key = typeArgs.map(typeStr).join(",");
+		generic._instances ??= new Map();
+		const cached = generic._instances.get(key);
+		if (cached) {
+			this._syncInstanceMethods(generic, cached);
+			return cached;
+		}
+		const map = new Map();
 		for (let i = 0; i < generic.typeParams.length; i++)
 			map.set(generic.typeParams[i].name, typeArgs[i] ?? ANY);
+		const named = {
+			kind: "named",
+			name: generic.declNode.name,
+			typeArgs,
+			underlying: null,
+			_genericOf: generic,
+		};
+		generic._instances.set(key, named);
 		// Resolve the declaration with its type params in scope (as typeParams,
 		// never as value symbols), then substitute the concrete arguments.
 		const typeScope = new Scope(this.globals);
@@ -315,22 +443,58 @@ export const resolveMethods = {
 			instantiated.name = generic.declNode.name;
 			instantiated.typeArgs = typeArgs;
 			if (!instantiated.methods) instantiated.methods = new Map();
-			if (generic.methods) {
-				for (const [mName, mType] of generic.methods)
-					instantiated.methods.set(mName, this.substituteType(mType, map));
-			}
 		}
-		return {
-			kind: "named",
-			name: generic.declNode.name,
-			typeArgs,
-			underlying: instantiated,
-			methods: instantiated.methods,
-		};
+		named.underlying = instantiated;
+		named.methods = instantiated.methods;
+		named._instMap = map;
+		this._syncInstanceMethods(generic, named);
+		return named;
 	},
 
-	inferTypeArgs(genericType, argTypes) {
+	// Methods are collected after types, so an instance created earlier picks
+	// up the methods declared since.
+	_syncInstanceMethods(generic, named) {
+		const methods = named.methods;
+		if (!methods || !named._instMap || named._syncing) return;
+		// A method signature that names the instance reaches this again.
+		named._syncing = true;
+		for (const [mName, mType] of generic.methods ?? [])
+			if (!methods.has(mName))
+				methods.set(mName, this.substituteType(mType, named._instMap));
+		// Methods promoted from embedded structs (`Outer[T]` embedding `Base`).
+		this._promoteEmbeddedInto(named.underlying);
+		named._syncing = false;
+	},
+
+	// A[X] for `type A[P any] = T`: resolve T with each P bound to the
+	// concrete X, so A[int] is exactly T[int] (generic named types inside T
+	// are instantiated normally and keep their identity).
+	_instantiateGenericAlias(generic, typeArgs) {
+		const { typeParams, declNode } = generic;
+		if (typeArgs.length !== typeParams.length) {
+			return this.err(
+				`got ${typeArgs.length} type arguments but ${declNode.name} has ${typeParams.length} type parameters`,
+				declNode,
+			);
+		}
+		const aliasScope = new Scope(this.globals);
+		for (let i = 0; i < typeParams.length; i++) {
+			const tp = typeParams[i];
+			if (tp.constraint) {
+				const constraint = this.resolveTypeNode(tp.constraint, this.globals);
+				this.checkConstraint(typeArgs[i], constraint, declNode);
+			}
+			aliasScope.define(tp.name, { kind: "aliasArg", type: typeArgs[i] });
+		}
+		return this.resolveTypeNode(declNode.type, aliasScope);
+	},
+
+	// `explicit` seeds the leading type arguments of a partial instantiation
+	// (`F[int](x)`); the rest are inferred from the call arguments.
+	inferTypeArgs(genericType, argTypes, explicit = []) {
 		const map = new Map();
+		for (let i = 0; i < explicit.length; i++)
+			map.set(genericType.typeParams[i].name, explicit[i]);
 		const params = genericType.underlying.params;
 		for (let i = 0; i < params.length && i < argTypes.length; i++)
 			this._inferFromPair(params[i], argTypes[i], map);
@@ -364,6 +528,14 @@ export const resolveMethods = {
 		}
 		if (paramType.kind === "func" && argType.kind === "func")
 			this._inferFromFuncPair(paramType, argType, map);
+		if (paramType.kind === "tuple" && argType.kind === "tuple") {
+			for (
+				let i = 0;
+				i < paramType.types.length && i < argType.types.length;
+				i++
+			)
+				this._inferFromPair(paramType.types[i], argType.types[i], map);
+		}
 	},
 
 	_inferFromPair(paramType, argType, map) {
@@ -372,6 +544,19 @@ export const resolveMethods = {
 			if (!map.has(paramType.name)) map.set(paramType.name, argType);
 			return;
 		}
+		if (paramType.kind === "named" && paramType.typeArgs) {
+			// `iter.Seq[E]` against `iter.Seq[int]`: unify the type arguments;
+			// against any other type, its underlying type.
+			if (argType.kind === "named" && argType.name === paramType.name) {
+				const args = argType.typeArgs ?? [];
+				for (let i = 0; i < paramType.typeArgs.length; i++)
+					this._inferFromPair(paramType.typeArgs[i], args[i], map);
+				return;
+			}
+			paramType = paramType.underlying;
+		}
+		if (argType.kind === "named" && argType.underlying)
+			argType = argType.underlying;
 		this._inferFromStructuredPair(paramType, argType, map);
 	},
 
@@ -424,7 +609,29 @@ export const resolveMethods = {
 			const found = this.types.get(t.name);
 			if (found) return found;
 		}
+		if (t.kind === "named" && t.typeArgs?.length)
+			return this._withGenericMethods(t);
 		return t;
+	},
+
+	// A substituted generic instance (e.g. Stack[int] from an inferred call)
+	// drops the methods map; re-derive it from the generic declaration.
+	_withGenericMethods(t) {
+		const decl = this.types.get(t.name);
+		const generic = decl?._generic;
+		// Struct generics only: codegen has no receiver support for generic
+		// slice/map/func named types, so those keep the baseline diagnostics.
+		if (this.resolveType(decl?.underlying)?.kind !== "struct") return t;
+		if (!generic?.methods || generic.methods.size === 0) return t;
+		if (t.methods && generic.methods.size <= t.methods.size) return t;
+		const map = new Map();
+		for (let i = 0; i < generic.typeParams.length; i++)
+			map.set(generic.typeParams[i].name, t.typeArgs[i] ?? ANY);
+		const methods = new Map(t.methods);
+		for (const [name, mType] of generic.methods)
+			if (!methods.has(name))
+				methods.set(name, this.substituteType(mType, map));
+		return { ...t, methods };
 	},
 
 	// ── Field type lookup ─────────────────────────────────────────────
@@ -490,12 +697,54 @@ export const resolveMethods = {
 			return base.fields.get(field);
 		}
 		if (base.methods?.has(field)) return base.methods.get(field);
+		const typeName = baseType?.name || base.name;
+		if (typeName) {
+			const dName = displayTypeName(typeName);
+			const shortName = typeName.includes("$$")
+				? typeName.split("$$")[0]
+				: typeName.includes(".")
+					? typeName.split(".").pop()
+					: typeName;
+			for (const key of [
+				`${dName}.${field}`,
+				`${typeName}.${field}`,
+				`${shortName}.${field}`,
+			]) {
+				if (EXCLUDED_STDLIB_MEMBERS.has(key)) {
+					return this.err(
+						`${dName}.${field} is not available: ${EXCLUDED_STDLIB_MEMBERS.get(key)}`,
+						node,
+					);
+				}
+			}
+		}
 		return this.err(`No field '${field}' on ${typeStr(baseType)}`, node);
 	},
 
 	_fieldTypeInterface(base, baseType, field, node) {
 		if (base.methods?.has(field)) return base.methods.get(field);
 		if (base.fields?.has(field)) return base.fields.get(field);
+		const typeName = baseType?.name || base.name;
+		if (typeName) {
+			const dName = displayTypeName(typeName);
+			const shortName = typeName.includes("$$")
+				? typeName.split("$$")[0]
+				: typeName.includes(".")
+					? typeName.split(".").pop()
+					: typeName;
+			for (const key of [
+				`${dName}.${field}`,
+				`${typeName}.${field}`,
+				`${shortName}.${field}`,
+			]) {
+				if (EXCLUDED_STDLIB_MEMBERS.has(key)) {
+					return this.err(
+						`${dName}.${field} is not available: ${EXCLUDED_STDLIB_MEMBERS.get(key)}`,
+						node,
+					);
+				}
+			}
+		}
 		if (base._excluded?.has(field))
 			return this.err(`No member '${field}' on ${typeStr(baseType)}`, node);
 		if (base._isOpen) return ANY;
@@ -543,6 +792,12 @@ export const resolveMethods = {
 				`cannot refer to unexported name ${base.name}.${field}`,
 				node,
 			);
+		// Go-source stdlib member: backends emit the mangled top-level name.
+		const mangled = base._mangle?.get(field);
+		if (mangled) {
+			node._stdName = mangled;
+			return base.members[field];
+		}
 		if (field in base.members) {
 			if (
 				(this.target === "wasm" || this.target === "both") &&
@@ -561,6 +816,12 @@ export const resolveMethods = {
 			}
 			return base.members[field];
 		}
+		const excluded = EXCLUDED_STDLIB_MEMBERS.get(`${base.name}.${field}`);
+		if (excluded)
+			return this.err(
+				`${base.name}.${field} is not available: ${excluded}`,
+				node,
+			);
 		return this.err(`No member '${field}' in namespace ${base.name}`, node);
 	},
 
@@ -575,7 +836,16 @@ function isExported(name) {
 	return code >= 65 && code <= 90;
 }
 
-function _processJsonField(f, depth, path, visited, queue, candidates) {
+function _processJsonField(
+	f,
+	depth,
+	path,
+	visited,
+	queue,
+	candidates,
+	index,
+	pos,
+) {
 	const tagInfo = parseJsonTag(f.tag);
 	if (tagInfo.ignored) return;
 
@@ -602,6 +872,7 @@ function _processJsonField(f, depth, path, visited, queue, candidates) {
 					depth,
 					tagged: true,
 					isEmbedded: true,
+					index: [...index, pos],
 					path: [...path, { name: embedName, isPtr, typeName: embedName }],
 				});
 			}
@@ -612,6 +883,7 @@ function _processJsonField(f, depth, path, visited, queue, candidates) {
 				queue.push({
 					struct: embedStruct,
 					depth: depth + 1,
+					index: [...index, pos],
 					path: [...path, { name: embedName, isPtr, typeName: embedName }],
 					visited: nextVisited,
 				});
@@ -620,9 +892,10 @@ function _processJsonField(f, depth, path, visited, queue, candidates) {
 		return;
 	}
 
-	for (const name of f.names) {
+	for (const [i, name] of f.names.entries()) {
 		if (!isExported(name)) continue;
 		candidates.push({
+			index: [...index, pos + i],
 			jsonKey: tagInfo.name !== null ? tagInfo.name : name,
 			goName: name,
 			type: f.type,
@@ -658,8 +931,16 @@ function _resolveCandidateCollisions(candidates) {
 		}
 	}
 
-	winningFields.sort((a, b) => candidates.indexOf(a) - candidates.indexOf(b));
+	// Go orders the fields of a struct by their index sequence, so a promoted
+	// field sits where its embedded struct is declared.
+	winningFields.sort((a, b) => compareIndex(a.index, b.index));
 	return winningFields;
+}
+
+function compareIndex(a, b) {
+	for (let i = 0; i < a.length && i < b.length; i++)
+		if (a[i] !== b[i]) return a[i] - b[i];
+	return a.length - b.length;
 }
 
 export function resolveJsonFields(structType) {
@@ -670,16 +951,25 @@ export function resolveJsonFields(structType) {
 	if (underlying._jsonFields) return underlying._jsonFields;
 
 	const queue = [
-		{ struct: underlying, depth: 0, path: [], visited: new Set([underlying]) },
+		{
+			struct: underlying,
+			depth: 0,
+			path: [],
+			index: [],
+			visited: new Set([underlying]),
+		},
 	];
 	const candidates = [];
 
 	while (queue.length > 0) {
-		const { struct: curr, depth, path, visited } = queue.shift();
+		const { struct: curr, depth, path, index, visited } = queue.shift();
 		if (curr?.kind !== "struct") continue;
 
+		// Each name of a `A, B int` field is its own field, as in Go.
+		let pos = 0;
 		for (const f of curr._structFields || []) {
-			_processJsonField(f, depth, path, visited, queue, candidates);
+			_processJsonField(f, depth, path, visited, queue, candidates, index, pos);
+			pos += f.embedded ? 1 : (f.names?.length ?? 1);
 		}
 	}
 

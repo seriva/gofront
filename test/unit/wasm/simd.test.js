@@ -332,44 +332,6 @@ func main() {
 	}
 });
 
-test("simd.F32x4 crossing JS<->WASM boundary is rejected with diagnostic", async () => {
-	let caught = null;
-	try {
-		await compileHybridProject(
-			{
-				"math/math.go": `//gofront:target wasm
-package math
-
-import "gofront/simd"
-
-func ExportedSimd(v simd.F32x4) simd.F32x4 {
-	return v
-}
-`,
-				"main.go": `package main
-
-import "./math"
-
-func main() {
-	_ = math.ExportedSimd
-}
-`,
-			},
-			{ exports: ["ExportedSimd"] },
-		);
-	} catch (e) {
-		caught = e;
-	}
-
-	assert(caught !== null, "Must fail compilation when F32x4 crosses boundary");
-	assert(
-		caught.message.includes(
-			"simd.F32x4 cannot cross the JS↔WASM boundary in 1.7.0 (use shared.Float32 instead)",
-		),
-		`Error message must suggest shared.Float32, got: ${caught.message}`,
-	);
-});
-
 test("Typechecker diagnostics for invalid SIMD usage", () => {
 	const c1 = compile(`
 package main
@@ -566,3 +528,662 @@ func main() {
 	assert(Number.isNaN(jsOut[1]), "JS Min must return NaN when operand is NaN");
 	assert(Number.isNaN(jsOut[2]), "JS Max must return NaN when operand is NaN");
 });
+
+// ── Value type, operations, masks and overlay ────────────────
+
+const TARGETS = ["wasm", "js"];
+
+async function compileBoth(files, exports, options = {}) {
+	const out = {};
+	for (const target of TARGETS) {
+		const src = {};
+		for (const [name, text] of Object.entries(files)) {
+			src[name] = text.replace(
+				"//gofront:target X",
+				`//gofront:target ${target}`,
+			);
+		}
+		out[target] = (
+			await compileHybridProject(src, { exports, ...options })
+		).mod;
+	}
+	return out;
+}
+
+const f32 = Math.fround;
+const sameFloat = (x, y) =>
+	(Number.isNaN(x) && Number.isNaN(y)) || Object.is(x, y);
+
+function assertLanes(actual, expected, what) {
+	assertEqual(actual.length, expected.length);
+	for (let i = 0; i < expected.length; i++) {
+		assert(
+			sameFloat(actual[i], expected[i]),
+			`${what}: lane ${i} got ${actual[i]} want ${expected[i]}`,
+		);
+	}
+}
+
+const REF_VALUES = [
+	[1.5, -2.5, 0.5, 2],
+	[2.5, 3.5, -0.5, -1.5],
+	[0, -0, Infinity, -Infinity],
+	[Number.NaN, 1, -3, 7.25],
+	[1, 2, 3, 4],
+	[-0, 0, 5, Number.NaN],
+];
+
+const SIMD_OPS_SOURCE = `//gofront:target X
+package ops
+
+import "gofront/simd"
+
+func vec(a0, a1, a2, a3 float32) simd.F32x4 { return simd.F32x4{a0, a1, a2, a3} }
+
+func Unary(op int, a0, a1, a2, a3 float32) (float32, float32, float32, float32) {
+	a := vec(a0, a1, a2, a3)
+	var r simd.F32x4
+	switch op {
+	case 0:
+		r = a.Neg()
+	case 1:
+		r = a.Abs()
+	case 2:
+		r = a.Sqrt()
+	case 3:
+		r = a.Floor()
+	case 4:
+		r = a.Ceil()
+	case 5:
+		r = a.Trunc()
+	case 6:
+		r = a.RoundToEven()
+	case 7:
+		r = a.Swizzle(3, 3, 0, 1)
+	}
+	return r.Lane(0), r.Lane(1), r.Lane(2), r.Lane(3)
+}
+
+func Binary(op int, a0, a1, a2, a3, b0, b1, b2, b3 float32) (float32, float32, float32, float32) {
+	a := vec(a0, a1, a2, a3)
+	b := vec(b0, b1, b2, b3)
+	var r simd.F32x4
+	switch op {
+	case 0:
+		r = a.Add(b)
+	case 1:
+		r = a.Sub(b)
+	case 2:
+		r = a.Mul(b)
+	case 3:
+		r = a.Div(b)
+	case 4:
+		r = a.Min(b)
+	case 5:
+		r = a.Max(b)
+	case 6:
+		r = a.MulAdd(b, a)
+	case 7:
+		r = simd.Shuffle(a, b, 0, 5, 2, 7)
+	}
+	return r.Lane(0), r.Lane(1), r.Lane(2), r.Lane(3)
+}
+
+func Horizontal(a0, a1, a2, a3 float32) float32 {
+	return vec(a0, a1, a2, a3).Sum()
+}
+
+func Compare(op int, a0, a1, a2, a3, b0, b1, b2, b3 float32) (int, bool, bool, bool, bool, bool, bool) {
+	a := vec(a0, a1, a2, a3)
+	b := vec(b0, b1, b2, b3)
+	var m simd.Mask32x4
+	switch op {
+	case 0:
+		m = a.Equal(b)
+	case 1:
+		m = a.NotEqual(b)
+	case 2:
+		m = a.Less(b)
+	case 3:
+		m = a.LessEqual(b)
+	case 4:
+		m = a.Greater(b)
+	case 5:
+		m = a.GreaterEqual(b)
+	}
+	return m.Bits(), m.Any(), m.All(), m.Lane(0), m.Lane(1), m.Lane(2), m.Lane(3)
+}
+
+func MaskOps(op int, a0, a1, a2, a3, b0, b1, b2, b3 float32) (int, bool, bool) {
+	a := vec(a0, a1, a2, a3)
+	b := vec(b0, b1, b2, b3)
+	x := a.Less(b)
+	y := a.Greater(simd.Splat(1))
+	var m simd.Mask32x4
+	switch op {
+	case 0:
+		m = x.And(y)
+	case 1:
+		m = x.Or(y)
+	case 2:
+		m = x.Xor(y)
+	case 3:
+		m = x.AndNot(y)
+	case 4:
+		m = x.Not()
+	}
+	return m.Bits(), m.Any(), m.All()
+}
+
+func Select(a0, a1, a2, a3, b0, b1, b2, b3 float32) (float32, float32, float32, float32) {
+	a := vec(a0, a1, a2, a3)
+	b := vec(b0, b1, b2, b3)
+	r := simd.Select(a.Less(b), a, b)
+	return r.Lane(0), r.Lane(1), r.Lane(2), r.Lane(3)
+}
+`;
+
+const refBinary = [
+	(a, b) => f32(a + b),
+	(a, b) => f32(a - b),
+	(a, b) => f32(a * b),
+	(a, b) => f32(a / b),
+	(a, b) => f32(Math.min(a, b)),
+	(a, b) => f32(Math.max(a, b)),
+	(a, b) => f32(f32(a * b) + a),
+];
+
+function nearestEven(x) {
+	if (!Number.isFinite(x)) return x;
+	const f = Math.floor(x);
+	const d = x - f;
+	let r;
+	if (d < 0.5) r = f;
+	else if (d > 0.5) r = f + 1;
+	else r = f % 2 === 0 ? f : f + 1;
+	return r === 0 && (x < 0 || Object.is(x, -0)) ? -0 : r;
+}
+
+const refUnary = [
+	(a) => -a,
+	Math.abs,
+	(a) => f32(Math.sqrt(a)),
+	Math.floor,
+	Math.ceil,
+	Math.trunc,
+	nearestEven,
+];
+
+test("F32x4 operations match a scalar [4]float32 reference on both backends", async () => {
+	const mods = await compileBoth(
+		{
+			"ops/ops.go": SIMD_OPS_SOURCE,
+			"main.go":
+				'package main\nimport "./ops"\nfunc main() { _ = ops.Unary }\n',
+		},
+		["Unary", "Binary", "Horizontal", "Compare", "MaskOps", "Select"],
+	);
+	for (const [target, mod] of Object.entries(mods)) {
+		for (const a of REF_VALUES) {
+			const fa = a.map(f32);
+			for (let op = 0; op < refUnary.length; op++) {
+				assertLanes(
+					mod.Unary(op, ...fa),
+					fa.map((x) => f32(refUnary[op](x))),
+					`${target} unary ${op} ${fa}`,
+				);
+			}
+			assertLanes(
+				mod.Unary(7, ...fa),
+				[fa[3], fa[3], fa[0], fa[1]],
+				`${target} swizzle`,
+			);
+			assert(
+				sameFloat(
+					mod.Horizontal(...fa),
+					f32(f32(f32(fa[0] + fa[1]) + fa[2]) + fa[3]),
+				),
+				`${target} sum ${fa}`,
+			);
+			for (const b of REF_VALUES) {
+				const fb = b.map(f32);
+				for (let op = 0; op < refBinary.length; op++) {
+					assertLanes(
+						mod.Binary(op, ...fa, ...fb),
+						fa.map((x, i) => refBinary[op](x, fb[i])),
+						`${target} binary ${op} ${fa} ${fb}`,
+					);
+				}
+				assertLanes(
+					mod.Binary(7, ...fa, ...fb),
+					[fa[0], fb[1], fa[2], fb[3]],
+					`${target} shuffle`,
+				);
+				const cmps = [
+					(x, y) => x === y,
+					(x, y) => x !== y,
+					(x, y) => x < y,
+					(x, y) => x <= y,
+					(x, y) => x > y,
+					(x, y) => x >= y,
+				];
+				for (let op = 0; op < cmps.length; op++) {
+					const lanes = fa.map((x, i) => cmps[op](x, fb[i]));
+					const bits = lanes.reduce((n, l, i) => n | (l ? 1 << i : 0), 0);
+					assertEqual(
+						JSON.stringify(mod.Compare(op, ...fa, ...fb)),
+						JSON.stringify([bits, bits !== 0, bits === 15, ...lanes]),
+					);
+				}
+				const x = fa.map((v, i) => v < fb[i]);
+				const y = fa.map((v) => v > 1);
+				const masks = [
+					x.map((v, i) => v && y[i]),
+					x.map((v, i) => v || y[i]),
+					x.map((v, i) => v !== y[i]),
+					x.map((v, i) => v && !y[i]),
+					x.map((v) => !v),
+				];
+				for (let op = 0; op < masks.length; op++) {
+					const bits = masks[op].reduce((n, l, i) => n | (l ? 1 << i : 0), 0);
+					assertEqual(
+						JSON.stringify(mod.MaskOps(op, ...fa, ...fb)),
+						JSON.stringify([bits, bits !== 0, bits === 15]),
+					);
+				}
+				assertLanes(
+					mod.Select(...fa, ...fb),
+					fa.map((v, i) => (v < fb[i] ? v : fb[i])),
+					`${target} select`,
+				);
+			}
+		}
+	}
+});
+
+test("F32x4 rounding ties go to even, Min and Max propagate NaN and order signed zeros", async () => {
+	const mods = await compileBoth(
+		{
+			"ops/ops.go": SIMD_OPS_SOURCE,
+			"main.go":
+				'package main\nimport "./ops"\nfunc main() { _ = ops.Unary }\n',
+		},
+		["Unary", "Binary"],
+	);
+	for (const mod of Object.values(mods)) {
+		assertLanes(mod.Unary(6, 0.5, 1.5, 2.5, -2.5), [0, 2, 2, -2], "nearest");
+		assertLanes(
+			mod.Unary(6, -0.5, -0.4, 3.5, -3.5),
+			[-0, -0, 4, -4],
+			"nearest sign",
+		);
+		assertLanes(
+			mod.Binary(4, -0, 0, Number.NaN, 1, 0, -0, 1, Number.NaN),
+			[-0, -0, Number.NaN, Number.NaN],
+			"min",
+		);
+		assertLanes(
+			mod.Binary(5, -0, 0, Number.NaN, 1, 0, -0, 1, Number.NaN),
+			[0, 0, Number.NaN, Number.NaN],
+			"max",
+		);
+		// MulAdd rounds twice: 16777217 * 1 + -16777216 is exact only when fused.
+		assertLanes(mod.Binary(6, 3, 0, 0, 0, 5, 0, 0, 0), [18, 0, 0, 0], "muladd");
+	}
+});
+
+const VALUE_SOURCE = `//gofront:target X
+package vt
+
+import (
+	"fmt"
+	"gofront/simd"
+	"math"
+)
+
+type pt struct {
+	V simd.F32x4
+	N int
+}
+
+type Box[T any] struct{ v T }
+
+func (b *Box[T]) Set(v T) { b.v = v }
+func (b Box[T]) Get() T   { return b.v }
+func id[T any](x T) T     { return x }
+
+func Equality() string {
+	nan := float32(math.NaN())
+	a := simd.F32x4{1, 2, 3, 4}
+	n := simd.F32x4{nan, 0, 0, 0}
+	z1 := simd.F32x4{0, 0, 0, 0}
+	z2 := simd.F32x4{float32(math.Copysign(0, -1)), 0, 0, 0}
+	out := fmt.Sprint(n == n, n != n, z1 == z2, z1 != z2, a == a, a != z1)
+	p1, p2 := pt{a, 1}, pt{a, 1}
+	out += fmt.Sprint(" ", p1 == p2, pt{n, 1} == pt{n, 1}, p1 != pt{z1, 1})
+	arr1 := [2]simd.F32x4{a, z1}
+	arr2 := arr1
+	arr2[0] = z1
+	out += fmt.Sprint(" ", arr1 == arr2, arr1[0] == a, arr2[0] == z1)
+	m1 := a.Less(simd.Splat(2))
+	m2 := a.Less(simd.Splat(2))
+	out += fmt.Sprint(" ", m1 == m2, m1 != m2, m1 == a.Less(simd.Splat(3)))
+	return out
+}
+
+func Containers() string {
+	a := simd.F32x4{1, 2, 3, 4}
+	z1 := simd.F32x4{}
+	z2 := simd.F32x4{float32(math.Copysign(0, -1)), 0, 0, 0}
+	m := map[simd.F32x4]int{}
+	m[a] = 5
+	m[simd.F32x4{1, 2, 3, 4}]++
+	m[z1] = 1
+	m[z2] = 2
+	out := fmt.Sprint(len(m), m[a], m[z1])
+	v := map[string]simd.F32x4{"k": a}
+	out += fmt.Sprint(" ", v["k"] == a, v["missing"] == z1)
+	s := []simd.F32x4{a, a}
+	t := append(s, z1)
+	t[0] = z1
+	out += fmt.Sprint(" ", s[0] == a, t[0] == z1, len(t))
+	arr := [2]simd.F32x4{a, a}
+	cp := arr
+	cp[0] = z1
+	out += fmt.Sprint(" ", arr[0] == a, cp[0] == z1)
+	var i any = a
+	var k any = a
+	j, ok := i.(simd.F32x4)
+	out += fmt.Sprint(" ", ok, j == a, i == k)
+	var b Box[simd.F32x4]
+	b.Set(a)
+	out += fmt.Sprint(" ", b.Get() == a, id(a) == a)
+	f := func() simd.F32x4 { a = a.Add(a); return a }
+	f()
+	out += fmt.Sprint(" ", a.Lane(0))
+	masks := map[simd.Mask32x4]int{}
+	masks[a.Less(simd.Splat(3))]++
+	masks[a.Less(simd.Splat(3))]++
+	out += fmt.Sprint(" ", len(masks))
+	return out
+}
+
+func Formatting() string {
+	a := simd.F32x4{0.5, 2, 3, 4}
+	m := a.Less(simd.Splat(1))
+	var i any = a
+	var mi any = m
+	return fmt.Sprintf("%v|%+v|%#v|%T|%v|%v|%v|%#v|%T|%v", a, pt{a, 1}, a, a, i, m, mi, m, m, []simd.F32x4{a})
+}
+`;
+
+test("F32x4 and Mask32x4 are value types on both backends", async () => {
+	const mods = await compileBoth(
+		{
+			"vt/vt.go": VALUE_SOURCE,
+			"main.go":
+				'package main\nimport "./vt"\nfunc main() { _ = vt.Equality }\n',
+		},
+		["Equality", "Containers", "Formatting"],
+	);
+	for (const [target, mod] of Object.entries(mods)) {
+		assertEqual(
+			mod.Equality(),
+			"false true true false true true true false true false true true true false false",
+		);
+		assertEqual(
+			mod.Containers(),
+			"2 6 2 true true true true 3 true true true true true true true 2 1",
+		);
+		assertEqual(
+			mod.Formatting(),
+			"[0.5 2 3 4]|{V:[0.5 2 3 4] N:1}|simd.F32x4{0.5, 2, 3, 4}|simd.F32x4|[0.5 2 3 4]|[true false false false]|[true false false false]|simd.Mask32x4{true, false, false, false}|simd.Mask32x4|[[0.5 2 3 4]]",
+			target,
+		);
+	}
+});
+
+test("Typechecker diagnostics for masks, swizzles and shuffles", () => {
+	const check = (body) =>
+		compile(`package main
+
+import "gofront/simd"
+
+func T() {
+	${body}
+}
+`).errors;
+	assertErrorContains(
+		check("v := simd.F32x4{}; _ = v.Swizzle(0, 1, 2, 4)"),
+		"lane index must be a constant integer in range [0, 3]",
+	);
+	assertErrorContains(
+		check("i := 1; v := simd.F32x4{}; _ = v.Swizzle(0, i, 2, 3)"),
+		"lane index must be a constant integer in range [0, 3]",
+	);
+	assertErrorContains(
+		check("v := simd.F32x4{}; _ = simd.Shuffle(v, v, 0, 1, 2, 8)"),
+		"lane index must be a constant integer in range [0, 7]",
+	);
+	assertEqual(
+		check("v := simd.F32x4{}; _ = simd.Shuffle(v, v, 0, 1, 2, 7)").length,
+		0,
+	);
+	assertErrorContains(
+		check("m := simd.F32x4{}.Less(simd.F32x4{}); _ = m.Lane(4)"),
+		"lane index must be a constant integer in range [0, 3]",
+	);
+	assertErrorContains(
+		check("m := simd.Mask32x4{true}; _ = m"),
+		"simd.Mask32x4 literal cannot have values",
+	);
+	assertErrorContains(
+		check("v := simd.F32x4{}; _ = simd.Select(v, v, v)"),
+		"Cannot assign simd.F32x4 to simd.Mask32x4",
+	);
+	assertErrorContains(
+		check("v := simd.F32x4{}; var f simd.F32x4 = v.Less(v); _ = f"),
+		"Cannot assign simd.Mask32x4 to simd.F32x4",
+	);
+});
+
+test("F32x4 operations give the same results in a Binaryen release build", async () => {
+	const plain = (
+		await compileBoth(
+			{
+				"ops/ops.go": SIMD_OPS_SOURCE,
+				"main.go":
+					'package main\nimport "./ops"\nfunc main() { _ = ops.Unary }\n',
+			},
+			["Unary", "Binary", "Compare", "MaskOps", "Select", "Horizontal"],
+		)
+	).wasm;
+	const release = (
+		await compileBoth(
+			{
+				"ops/ops.go": SIMD_OPS_SOURCE,
+				"main.go":
+					'package main\nimport "./ops"\nfunc main() { _ = ops.Unary }\n',
+			},
+			["Unary", "Binary", "Compare", "MaskOps", "Select", "Horizontal"],
+			{ wasmOpt: true, release: true },
+		)
+	).wasm;
+	for (const a of REF_VALUES) {
+		const fa = a.map(f32);
+		for (let op = 0; op < 8; op++) {
+			assertLanes(
+				release.Unary(op, ...fa),
+				plain.Unary(op, ...fa),
+				`unary ${op}`,
+			);
+		}
+		for (const b of REF_VALUES) {
+			const fb = b.map(f32);
+			for (let op = 0; op < 8; op++) {
+				assertLanes(
+					release.Binary(op, ...fa, ...fb),
+					plain.Binary(op, ...fa, ...fb),
+					`binary ${op}`,
+				);
+			}
+			for (let op = 0; op < 6; op++) {
+				assertEqual(
+					JSON.stringify(release.Compare(op, ...fa, ...fb)),
+					JSON.stringify(plain.Compare(op, ...fa, ...fb)),
+				);
+			}
+			for (let op = 0; op < 5; op++) {
+				assertEqual(
+					JSON.stringify(release.MaskOps(op, ...fa, ...fb)),
+					JSON.stringify(plain.MaskOps(op, ...fa, ...fb)),
+				);
+			}
+			assertLanes(
+				release.Select(...fa, ...fb),
+				plain.Select(...fa, ...fb),
+				"select",
+			);
+		}
+		assert(
+			sameFloat(release.Horizontal(...fa), plain.Horizontal(...fa)),
+			"sum",
+		);
+	}
+});
+
+test("F32x4 and Mask32x4 stay distinct inside any (type switch and assertion)", async () => {
+	const mods = await compileBoth(
+		{
+			"anyv/anyv.go": `//gofront:target X
+package anyv
+
+import (
+	"fmt"
+	"gofront/simd"
+)
+
+func ts(x any) string {
+	switch v := x.(type) {
+	case simd.F32x4:
+		return fmt.Sprint("f", v)
+	case simd.Mask32x4:
+		return fmt.Sprint("m", v)
+	}
+	return "?"
+}
+
+func Switch() string {
+	a := simd.Splat(1)
+	return ts(a) + ts(a.Less(a))
+}
+
+func Assert() bool {
+	a := simd.Splat(1)
+	var v any = a.Less(a)
+	_, ok := v.(simd.F32x4)
+	return ok
+}
+`,
+			"main.go": `package main
+
+import "./anyv"
+
+func main() {
+	_ = anyv.Switch
+	_ = anyv.Assert
+}
+`,
+		},
+		["Switch", "Assert"],
+	);
+	for (const target of TARGETS) {
+		assertEqual(mods[target].Switch(), "f[1 1 1 1]m[false false false false]");
+		assertEqual(mods[target].Assert(), false);
+	}
+});
+
+section("WASM SIMD — memory helpers and slice transport");
+
+for (const target of ["wasm", "js"]) {
+	test(`LoadF32x4Slice, StoreF32x4Slice and Pad4 on a []float32 in ${target}`, async () => {
+		const res = await compileHybridProject(
+			{
+				"sim/sim.go": `//gofront:target ${target}
+package sim
+
+import "gofront/simd"
+
+var Xs = make([]float32, 10)
+
+func Fill() {
+	for i := range Xs {
+		Xs[i] = float32(i) * 1.5
+	}
+}
+
+func AddAt(i int) {
+	v := simd.LoadF32x4Slice(Xs, i)
+	simd.StoreF32x4Slice(Xs, i, v.Add(simd.Splat(100)))
+}
+
+func Sub(i int) []float32 {
+	part := Xs[2:8]
+	simd.StoreF32x4Slice(part, i, simd.Splat(7))
+	return Xs
+}
+
+func Bad(i int) float32 { return simd.LoadF32x4Slice(Xs, i).Lane(0) }
+
+func BadStore(i int) { simd.StoreF32x4Slice(Xs, i, simd.Splat(1)) }
+
+func Nil() float32 {
+	var n []float32
+	return simd.LoadF32x4Slice(n, 0).Lane(0)
+}
+
+func Pad(n int) int { return simd.Pad4(n) }
+
+func PadConst() int { return simd.Pad4(5) }
+
+func PadLen() int { return simd.Pad4(len(Xs)) + simd.Pad4(len(Xs)+1) }
+`,
+				"main.go": `package main
+
+import "./sim"
+
+func main() { _ = sim.Fill }
+`,
+			},
+			{
+				exports: [
+					"Fill",
+					"AddAt",
+					"Sub",
+					"Bad",
+					"BadStore",
+					"Nil",
+					"Pad",
+					"PadConst",
+					"PadLen",
+				],
+			},
+		);
+		const m = res.mod;
+		m.Fill();
+		m.AddAt(3);
+		const xs = Array.from(m.Sub(0));
+		assertDeep(xs, [0, 1.5, 7, 7, 7, 7, 109, 10.5, 12, 13.5]);
+		assertThrows(() => m.Bad(7));
+		assertThrows(() => m.Bad(-1));
+		assertThrows(() => m.BadStore(7));
+		assertThrows(() => m.BadStore(-1));
+		assertThrows(() => m.Nil());
+		assertEqual(Number(m.Pad(0)), 0);
+		assertEqual(Number(m.Pad(1)), 4);
+		assertEqual(Number(m.Pad(4)), 4);
+		assertEqual(Number(m.Pad(5)), 8);
+		assertEqual(Number(m.PadConst()), 8);
+		assertEqual(Number(m.PadLen()), 24);
+	});
+}

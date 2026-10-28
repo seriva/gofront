@@ -4,6 +4,7 @@
 import {
 	assertEqual,
 	compileHybrid,
+	compileWasm,
 	runWasm,
 	section,
 	test,
@@ -488,4 +489,78 @@ func Main() string {
 	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
 	assertEqual(wasmRes, "Hi Alice, Greetings from Mars, Hi Bob");
 	assertEqual(wasmRes, jsRes);
+});
+
+test("Interface dispatch skips same-named methods with a different arity", () => {
+	const src = `
+package main
+
+type Resetter interface {
+	Reset()
+}
+
+type Counter struct{ n int }
+
+func (c *Counter) Reset() { c.n = 0 }
+
+type Reader struct{ s string }
+
+func (r *Reader) Reset(s string) { r.s = s }
+
+func Main() int {
+	c := &Counter{n: 5}
+	var r Resetter = c
+	r.Reset()
+	rd := &Reader{}
+	rd.Reset("x")
+	return c.n + len(rd.s)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, 1);
+	assertEqual(wasmRes, jsRes);
+});
+
+test("type assertions to a named string, a map and a pointer to an anonymous struct", () => {
+	const src = `
+package main
+
+type Label string
+
+func Main() string {
+	var a any = Label("x")
+	l, ok := a.(Label)
+	_, isStr := a.(string)
+	var s any = "plain"
+	_, isLabel := s.(Label)
+	var m any = map[string]int{"k": 2}
+	mm, isMap := m.(map[string]int)
+	anon := &struct{ N int }{5}
+	var p any = anon
+	pp, isPtr := p.(*struct{ N int })
+	if !isPtr {
+		return "no pointer"
+	}
+	return string(l) + " " + boolStr(ok) + boolStr(isStr) + boolStr(isLabel) + boolStr(isMap) + " " + itoa(mm["k"]+pp.N)
+}
+
+func boolStr(b bool) string {
+	if b {
+		return "T"
+	}
+	return "F"
+}
+
+func itoa(n int) string {
+	if n == 7 {
+		return "7"
+	}
+	return "?"
+}
+`;
+	// Go's answer; the JS backend still treats a named string as a string here
+	// (plans/follow-ups.md), so only WASM is compared.
+	const { wasm, stringTable } = compileWasm(src);
+	const wasmRes = runWasm(wasm, { stringTable }).exports.Main();
+	assertEqual(wasmRes, "x TFFT 7");
 });

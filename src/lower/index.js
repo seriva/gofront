@@ -1,6 +1,7 @@
 // src/lower/index.js
 // Lowering step: analyzes AST and types to populate side-tables for backends (JS and WASM).
 
+export * from "./bounds.js";
 export * from "./boxing.js";
 export * from "./captures.js";
 export * from "./embedding.js";
@@ -43,6 +44,30 @@ class LowerResult {
 }
 
 /**
+ * Runs the per-function analyses for `d` and records them in `res`.  Also
+ * used for synthesized functions (the package-level initializer).
+ */
+export function lowerFunction(res, d) {
+	if (!d.body) return;
+	const boxed = scanAddressTaken(d.body, new Set());
+	res.boxedVars.set(d, boxed);
+	res.ownership.set(d, new OwnershipContext(d.body));
+	res.functions.set(d, {
+		hasDefer: hasDefer(d.body),
+		namedReturns: extractNamedReturns(d),
+	});
+	res.captures.set(d, analyzeCaptures(d));
+
+	const escapingParams = new Set();
+	for (const p of d.params ?? []) {
+		if (p.name && p.name !== "_" && paramEscapes(d.body, p.name)) {
+			escapingParams.add(p.name);
+		}
+	}
+	res.escapes.set(d, escapingParams);
+}
+
+/**
  * Runs lowering analyses across an AST or collection of programs, returning side-tables.
  * @param {Object} programOrPrograms
  * @param {Object} checker
@@ -74,24 +99,7 @@ export function lower(programOrPrograms, checker = null) {
 
 		for (const d of program.decls) {
 			if (d.kind === "FuncDecl" || d.kind === "MethodDecl") {
-				if (d.body) {
-					const boxed = scanAddressTaken(d.body, new Set());
-					res.boxedVars.set(d, boxed);
-					res.ownership.set(d, new OwnershipContext(d.body));
-					res.functions.set(d, {
-						hasDefer: hasDefer(d.body),
-						namedReturns: extractNamedReturns(d),
-					});
-					res.captures.set(d, analyzeCaptures(d));
-
-					const escapingParams = new Set();
-					for (const p of d.params ?? []) {
-						if (p.name && p.name !== "_" && paramEscapes(d.body, p.name)) {
-							escapingParams.add(p.name);
-						}
-					}
-					res.escapes.set(d, escapingParams);
-				}
+				lowerFunction(res, d);
 			}
 		}
 
