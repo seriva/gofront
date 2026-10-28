@@ -9,15 +9,7 @@ import { ExprsEmitter } from "./emit-exprs.js";
 import { MapsEmitter } from "./emit-maps.js";
 import { SharedEmitter } from "./emit-shared.js";
 import { StmtsEmitter } from "./emit-stmts.js";
-import {
-	BytesEmitter,
-	ExtendedPackagesEmitter,
-	IoEmitter,
-	PurePackagesEmitter,
-	SimdEmitter,
-	StdlibCoreEmitter,
-	TimeEmitter,
-} from "./stdlib/index.js";
+import { stdlibEmitters } from "./stdlib/index.js";
 import {
 	isArrayType,
 	isComplex,
@@ -1762,7 +1754,7 @@ export class FunctionEmitter {
 	}
 }
 
-function copyMethods(target, source) {
+export function copyMethods(target, source) {
 	const descriptors = Object.getOwnPropertyDescriptors(source.prototype);
 	delete descriptors.constructor;
 	for (const key of Object.keys(descriptors)) {
@@ -1779,11 +1771,5 @@ copyMethods(FunctionEmitter, MapsEmitter);
 copyMethods(FunctionEmitter, StmtsEmitter);
 copyMethods(FunctionEmitter, ExprsEmitter);
 copyMethods(FunctionEmitter, BuiltinsEmitter);
-copyMethods(FunctionEmitter, StdlibCoreEmitter);
-copyMethods(FunctionEmitter, BytesEmitter);
-copyMethods(FunctionEmitter, PurePackagesEmitter);
-copyMethods(FunctionEmitter, IoEmitter);
-copyMethods(FunctionEmitter, TimeEmitter);
-copyMethods(FunctionEmitter, ExtendedPackagesEmitter);
+for (const emitter of stdlibEmitters) copyMethods(FunctionEmitter, emitter);
 copyMethods(FunctionEmitter, SharedEmitter);
-copyMethods(FunctionEmitter, SimdEmitter);

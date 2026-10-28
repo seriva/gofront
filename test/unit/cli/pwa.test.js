@@ -8,14 +8,14 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { handleBuild } from "../../../src/cli-core.js";
+import { handleBuild } from "../../../src/cli/cli-core.js";
 import {
 	collectPwaAssets,
 	generatePwa,
 	generateServiceWorkerSource,
 	injectPwaRegistration,
 	PWA_REGISTER_SNIPPET,
-} from "../../../src/pwa.js";
+} from "../../../src/cli/pwa.js";
 import {
 	assert,
 	assertContains,

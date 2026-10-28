@@ -9,7 +9,7 @@ import {
 	injectLiveReload,
 	liveReloadClient,
 	MIME,
-} from "../../../src/dev-server.js";
+} from "../../../src/cli/dev-server.js";
 import {
 	assert,
 	assertContains,

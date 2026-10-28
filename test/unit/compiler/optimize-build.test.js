@@ -8,7 +8,7 @@ import {
 	formatBuildSummary,
 	handleBuild,
 	parseBuildArgs,
-} from "../../../src/cli-core.js";
+} from "../../../src/cli/cli-core.js";
 import { compileSingleFile } from "../../../src/compiler.js";
 import {
 	assert,

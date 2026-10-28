@@ -6,7 +6,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { compileWasm } from "../../../src/backend/wasm/index.js";
+import { compileWasm } from "../../../src/compiler.js";
 import {
 	assertEqual,
 	compile,

@@ -1,7 +1,7 @@
 # Repository Structure Cleanup — Design Plan
 
 **Version:** v1.8.0
-**Status:** Draft (revised 2026-10-27 for the simplification direction)
+**Status:** In Progress  
 **Base branch:** main
 **Related:**
 - **Order.** Assumes [`portable-go-plan.md`](portable-go-plan.md) is completed and merged into `main`, including WASM JSON (Phase 5), SIMD (Phase 6), the docs and baseline work (Phase 7) and the simplification Phases 8–11 (manifest and conformance retired, stdlib pruned, WASM accessor refs and clone elision removed). Must be merged **before [`v1.9.0/stdlib-in-go-plan.md`](../v1.9.0/stdlib-in-go-plan.md) starts**.
@@ -103,22 +103,25 @@ All probes ran at `ade5edb` on `feat/portable-go`, using a throwaway `git worktr
 
 ### Baseline build hashes
 
-The prefixes below are from `ade5edb`. They show the format and confirm determinism, but they are **not** the oracle, because the finished portable-go plan changes the output. Before Phase 1, run the following on `main` and commit the full list into this section:
+Recorded on `main` at `e2d49f2` (portable-go merged, 2026-10-28) with:
 
 ```
 npm run build && sha256sum example/*/app.js example/hybrid/app.wasm example/preact/vendor.js
 ```
 
-Every phase checks against that list with `sha256sum -c` and pastes the output into its PR body.
+Two consecutive builds were byte-identical. The unit suite at this commit is **2882/2882** (`node test/unit/run.js`), which replaces the 2680 figure above as the test-count floor. `vendor.js` is the committed file: `prep` is not part of `build`, and Task 2.4 compares a regenerated one against it.
+
+Every phase checks against this list with `sha256sum -c` and pastes the output into its PR body.
 
 ```
-63c424ab66b0 example/gom/app.js
-101ef64d3b6f example/hybrid/app.js
-78390fedd5f1 example/preact/app.js
-9dfe0a3cd112 example/simple/app.js
-39b6ed40c07e example/templ/app.js
-4adf32f93d43 example/webgl/app.js
-662ece013a8b example/hybrid/app.wasm
+213aa9f8565a252a48444c887c50c5f44badd5abeb621247555149a715de3fe5  example/gom/app.js
+73f46a95f6e3339f8f1e0c26a338b71950f25cc1fea47410250973ed10213cff  example/hybrid/app.js
+e96672af6e470062450911671ad94abac326309557765dafde8210ef90b73734  example/preact/app.js
+05bcb401ec26abb5f2073c8514d03d68f6d315a56626024e44393522da27ad07  example/simple/app.js
+51c3ef87554af5b0fcb7ff2950d82335ed831fe855836a77741f9c2e0ded7896  example/templ/app.js
+4adf32f93d4374d737b1a748912d9830c61af5cda808ad4751b036f848796ea1  example/webgl/app.js
+a6f198ae77289396b4029a784c52a0a7392c5ed7c426b78ba17458fe073ea680  example/hybrid/app.wasm
+55b3244ba3786a45225ac45ba59cb729ae4f36692f502fdc25b6e9fb26031761  example/preact/vendor.js
 ```
 
 ---
@@ -237,144 +240,144 @@ Only paths change. No task, scope or number in those plans is edited.
 ### Phase 1: Architecture gate coverage & repo hygiene
 *Before Task 1.1, record the baseline hashes on `main` (see [Baseline build hashes](#baseline-build-hashes)).*
 
-- [ ] Task 1.1: Layer guard script
+- [x] Task 1.1: Layer guard script
   - Files: `scripts/check-layers.js`, `package.json` (add to `check` before `sentrux check`)
   - Test: `test/unit/compiler/check-layers.test.js`:
     - `findLayerGaps` on fixture TOML and file lists flags an unlayered file, a dead glob, `*` vs `**` depth, and `ALLOW`.
     - `findCrossBackendImports` flags a fixture `js → wasm` import and a non-allowlisted `wasm → js` import, and passes the `boundary.js → js/runtime.js` edge.
     - Real-repo cases land as `todo`: they list the unlayered src and stdlib files found on the base commit (re-probed after portable-go Phase 9) and the `core.js → fmt-types.js` edge.
   - Done when: the fixture cases pass, and the real-repo cases list exactly the files in Verified Gaps
-- [ ] Task 1.2: Complete the Sentrux layers
+- [x] Task 1.2: Complete the Sentrux layers
   - Files: `.sentrux/rules.toml`
   - Test: the real-repo layer-gap case from Task 1.1 is turned on. The cross-backend case stays `todo` until Task 5.1
   - Done when: the layer-gap check is clean, `sentrux check` and `sentrux gate` pass, and the `rules.toml` comment documents `math` as the only allowed gap
-- [ ] Task 1.3: Remove the dead WASM compatibility shims
+- [x] Task 1.3: Remove the dead WASM compatibility shims
   - Files: `src/backend/wasm/emit-stdlib.js` (delete), `src/backend/wasm/stdlib/index.js`, `src/backend/wasm/stdlib/core.js` (the trailing alias line only); also the comment at `src/typechecker/types.js:105`
   - Test: none new (deletion only). `grep -rn 'emit-stdlib\|Phase[678]Emitter\|StdlibEmitter\b' src test` must be empty
   - Done when: grep is empty, the hashes match and `wasm/golden.test.js` passes
-- [ ] Task 1.4: Register stdlib mixins through `stdlibEmitters`
+- [x] Task 1.4: Register stdlib mixins through `stdlibEmitters`
   - Files: `src/backend/wasm/emit.js`, `src/backend/wasm/stdlib/index.js`
   - Test: new `test/unit/wasm/mixins.test.js`: every class in `stdlibEmitters` has its prototype methods on `FunctionEmitter.prototype`, and a duplicate name throws. Fails first against a temporary probe mixin added to the array
   - Done when: `emit.js` has no hand-listed stdlib `copyMethods` lines, and the hashes match
-- [ ] Task 1.5: Looped example build and `.gitignore` dedupe
+- [x] Task 1.5: Looped example build and `.gitignore` dedupe
   - Files: `scripts/build-examples.js` (exports `listExamples(root)`), `package.json` (`build`), `.gitignore`
   - Test: `test/unit/compiler/build-examples.test.js`: `listExamples` returns exactly the example directories that have `src/`, and skips a temp directory without one
   - Done when: `npm run build` reproduces the hashes, and the `.gitignore` duplicate check is empty
 
 ### Phase 2: CLI entry, build outputs & example config
 
-- [ ] Task 2.1: Move single-shot compilation into `cli-core.js`
+- [x] Task 2.1: Move single-shot compilation into `cli-core.js`
   - Files: `src/index.js`, `src/cli-core.js`
   - Test: `test/unit/compiler/cli-core.test.js` adds `runSingleShot` cases: `--check` returns 0 with an `OK` line; `-o` output equals `compileDir`; a compile error returns 1 with the `log.fail` text; `--tokens` dumps tokens. Fails first because the export is missing
   - Done when: `index.js` has no compile/minify/write code, and the `cli.test.js` smoke tests pass unchanged
-- [ ] Task 2.2: Move the watch-mode reporters and asset copy into `cli-core.js`
+- [x] Task 2.2: Move the watch-mode reporters and asset copy into `cli-core.js`
   - Files: `src/index.js`, `src/cli-core.js`
   - Test: `cli-core.test.js`: `devReporters` with captured stderr. `onBuild` prints `OK — wrote …`; `onError` prints `ERROR` plus the formatted diagnostic; `copyAssets: true` calls the asset copy
   - Done when: `wc -l src/index.js` ≤ 220, and the dev-server tests pass unchanged
-- [ ] Task 2.3: Stop tracking the compiled examples
+- [x] Task 2.3: Stop tracking the compiled examples
   - Files: `.gitignore` (`/example/*/app.js`, `/example/*/app.wasm`, with a comment that `vendor.js` stays tracked); `git rm --cached` for the 7 outputs
   - Test: `build-examples.test.js`: `git ls-files example` has no `app.js`/`app.wasm` and still has `example/preact/vendor.js`
   - Done when: on a fresh clone, `npm ci && npm test && npm run test:e2e` pass
-- [ ] Task 2.4: Move the preact vendor config into `example/preact/gofront.json`
+- [x] Task 2.4: Move the preact vendor config into `example/preact/gofront.json`
   - Files: `package.json` (drop the `gofront` block), `example/preact/gofront.json` (new, `dest: "vendor.js"`), `docs/usage.md` (how to regenerate)
   - Test: in `test/unit/compiler/prep.test.js`, `loadProjectConfig("example/preact").vendor` has the preact packages and `loadProjectConfig(".")` has no `vendor`. After `npm ci`, `node src/index.js prep example/preact` → `sha256sum -c` on the recorded `vendor.js` hash
   - Done when: `vendor.js` is byte-identical, or the task stops per Edge Cases
-- [ ] Task 2.5: Document building the examples
+- [x] Task 2.5: Document building the examples
   - Files: `README.md` (examples section), `docs/usage.md`
   - Test: none (docs); reviewed against the AGENTS.md docs and changelog rules
   - Done when: both say to run `npm run build` before opening an example, and the `CHANGELOG.md` `[Unreleased]` entry matches the Release note
 
 ### Phase 3: `src/link/` extracted from `compiler.js`
 
-- [ ] Task 3.1: Source-map merging → `src/link/sourcemap.js`
+- [x] Task 3.1: Source-map merging → `src/link/sourcemap.js`
   - Files: `src/compiler.js`, `src/link/sourcemap.js`, `.sentrux/rules.toml` (add `"src/link/*"` to support)
   - Test: `test/unit/compiler/link.test.js`: `mergeCompilationChunks` on two fixture chunks gives the expected offset `mappings`. Fails first because the module is missing
   - Done when: source-map tests and hashes are unchanged, and `check-layers` passes
-- [ ] Task 3.2: WASM unit linking → `src/link/wasm.js`
+- [x] Task 3.2: WASM unit linking → `src/link/wasm.js`
   - Files: `src/compiler.js`, `src/link/wasm.js`
   - Test: `link.test.js`: `checkLinkCollisions` reports a duplicate top-level name across two units with the existing message
   - Done when: `test/unit/wasm/*` and the `example/hybrid` hashes are unchanged
-- [ ] Task 3.3: Go-source stdlib pipeline → `src/link/stdlib.js` with injected dependencies
+- [x] Task 3.3: Go-source stdlib pipeline → `src/link/stdlib.js` with injected dependencies
   - Files: `src/compiler.js`, `src/link/stdlib.js`
   - Test: `link.test.js`: the mangling helper renames a top-level stdlib declaration with the package suffix, and leaves type parameters and overlay names alone
   - Done when: `stdlib-go.test.js` passes, `sentrux check` reports 0 cycles, and `wc -l src/compiler.js` ≤ 700
 
 ### Phase 4: `wasm/index.js` split
 
-- [ ] Task 4.1: `compileWasm` → `src/compiler.js`
+- [x] Task 4.1: `compileWasm` → `src/compiler.js`
   - Files: `src/backend/wasm/index.js`, `src/compiler.js`, `test/unit/helpers.js` (plus the import line in `wasm/scalars.test.js`, `wasm/arrays.test.js` and `types/arrays.test.js`)
   - Test: `test/unit/wasm/encode.test.js` asserts that `compileWasm` is exported from `src/compiler.js` and that the source of `wasm/index.js` has no import from `lexer`, `parser/` or `typechecker/index.js`. Fails first
   - Done when: all `wasm/` tests pass through the new import, the hashes match, and `wc -l src/compiler.js` ≤ 750
-- [ ] Task 4.2: `ModuleEmitter` → `wasm/module-emitter.js`
+- [x] Task 4.2: `ModuleEmitter` → `wasm/module-emitter.js`
   - Files: `wasm/index.js`, `wasm/module-emitter.js`
   - Test: `wasm/encode.test.js`: the export list of `wasm/index.js` equals a snapshot taken after Task 4.1. Write the snapshot first
   - Done when: the snapshot is unchanged and the hashes match
-- [ ] Task 4.3: Pre-scan helpers → `wasm/prescan.js`
+- [x] Task 4.3: Pre-scan helpers → `wasm/prescan.js`
   - Files: `wasm/index.js`, `wasm/prescan.js`
   - Test: `wasm/encode.test.js`: `_usesFmtAny` returns true for a parsed program calling `fmt.Println(any(x))` and false otherwise
   - Done when: the hashes match
-- [ ] Task 4.4: Global and zero-init helpers → `wasm/globals.js`
+- [x] Task 4.4: Global and zero-init helpers → `wasm/globals.js`
   - Files: `wasm/index.js`, `wasm/globals.js`
   - Test: `wasm/encode.test.js`: `_orderConstInits` orders dependent constants topologically on a fixture
   - Done when: `wc -l src/backend/wasm/index.js` ≤ 1,800, and the hashes match
 
 ### Phase 5: Backend boundaries
 
-- [ ] Task 5.1: `fmt-types.js` → `src/backend/shared/`
+- [x] Task 5.1: `fmt-types.js` → `src/backend/shared/`
   - Files: `src/backend/shared/fmt-types.js` (moved), its importers (`js/stdlib/fmt.js`, `js/fmt-runtime.js`, `wasm/stdlib/core.js` — the import line only), `.sentrux/rules.toml` (backend globs)
   - Test: the Task 1.1 real-repo cross-backend case is turned on and lists only the allowlisted edge
   - Done when: `check-layers` passes with the cross-backend check on, and the hashes match
-- [ ] Task 5.2: Parse templ `{ expr }` and attribute expressions in `TemplParser`
+- [x] Task 5.2: Parse templ `{ expr }` and attribute expressions in `TemplParser`
   - Files: `src/templ-parser.js`, `src/backend/js/templ.js`
   - Test: `test/unit/compiler/templ.test.js`:
     - Written first, passing on the old code: pinned error text, position and exit code for a malformed `{ a + }` under `build` and `check`.
     - New (fails first): the parsed templ AST for `{ name }` has `node.expr.kind === "Ident"`.
   - Done when: the pinned errors are unchanged, `templ.js` has no `parseExpr` call, and the `example/templ`/`gom` hashes match
-- [ ] Task 5.3: Parse templ `for` headers in `TemplParser`; drop the parser import from JS codegen
+- [x] Task 5.3: Parse templ `for` headers in `TemplParser`; drop the parser import from JS codegen
   - Files: `src/templ-parser.js`, `src/backend/js/templ.js`
   - Test: `templ.test.js`: pinned error for a malformed `for` header; parsed `for` nodes carry `node.forStmt`; the source of `templ.js` does not import `parser/`
   - Done when: `grep -n 'new Parser\|parser/index' src/backend/js/templ.js` is empty, and the hashes match
 
 ### Phase 6: `src/cli/`, `src/lexer/` and the test layout
 
-- [ ] Task 6.1: Test discovery in `run.js`
+- [x] Task 6.1: Test discovery in `run.js`
   - Files: `test/unit/run.js`
   - Test: new `test/unit/compiler/runner.test.js`: the exported `TEST_FILES` equals the sorted `find` result and contains every `HEAVIEST_TEST_FILES` entry. Fails first while the list is hand-written and a temporary extra test file exists
   - Done when: the same files plus the new ones run with the same pass count, and a missing heavy entry throws at startup
-- [ ] Task 6.2: Move the CLI and tooling modules to `src/cli/`
+- [x] Task 6.2: Move the CLI and tooling modules to `src/cli/`
   - Files: `git mv` of `cli-core`, `dev-server`, `test-runner`, `asset-manager`, `vendor`, `pwa`, `project-config`, `colors` and `minifier` to `src/cli/`; import rewrites in `src/` and `test/`; `.sentrux/rules.toml`. Mechanical; exceeds the 3-file rule by design
   - Test: the `check-layers` real-repo cases and `sentrux check`
   - Done when: the hashes match, the suites pass, and `npm pack --dry-run` shows the new paths with `bin` unchanged
-- [ ] Task 6.3: Move the lexer files to `src/lexer/`, and `templ-parser.js` to `src/parser/templ.js`
+- [x] Task 6.3: Move the lexer files to `src/lexer/`, and `templ-parser.js` to `src/parser/templ.js`
   - Files: `git mv` of `lexer`, `templ-lexer` and `tokens` to `src/lexer/`, and `templ-parser.js` to `src/parser/templ.js`; import rewrites; `.sentrux/rules.toml`
   - Test: as for 6.2
   - Done when: the hashes match, and `ls src/*.js` lists only `index.js`, `compiler.js`, `resolver.js` and `dts-parser.js`
-- [ ] Task 6.4: Split `test/unit/compiler/` → `test/unit/cli/`
+- [x] Task 6.4: Split `test/unit/compiler/` → `test/unit/cli/`
   - Files: `git mv` of the `cli`, `cli-core`, `dev-server`, `pwa`, `asset-manager`, `test-runner`, `prep` and `build-examples` tests; the `run.js` header comment and `HEAVIEST_TEST_FILES` paths
   - Test: the Task 6.1 discovery test
   - Done when: the unit pass count is unchanged
-- [ ] Task 6.5: `test/e2e/perf/` → `test/perf/`
+- [x] Task 6.5: `test/e2e/perf/` → `test/perf/`
   - Files: `git mv test/e2e/perf test/perf`; relative imports and fixture paths in `raycast-bench.js`, `zero-alloc.js`, `json-bench.js` and `particle-bench.js`; `package.json` (`test`, `bench`)
   - Test: `node test/perf/zero-alloc.js` passes (already part of `npm test`). `node --expose-gc test/perf/raycast-bench.js --tris 1000 --rays 1000` completes
   - Done when: `npm test` passes, `ls test/e2e` has only specs and helpers, and `npm run test:e2e` is unchanged
-- [ ] Task 6.6: Update the path references in the docs and agent guide
+- [x] Task 6.6: Update the path references in the docs and agent guide
   - Files: `docs/architecture.md`, `docs/usage.md`, `docs/hybrid-wasm.md`, `AGENTS.md` (Part 2 **Architecture** only: the final `src/` layout, `src/link/`, `src/cli/`, `src/lexer/`, `src/backend/shared/`, `test/perf/`)
   - Test: `grep -rnE 'src/(lexer|templ-lexer|templ-parser|tokens|dev-server|pwa|minifier|vendor|asset-manager|test-runner|colors|project-config|cli-core)\.js|test/e2e/perf' docs AGENTS.md .sentrux package.json` is empty
   - Done when: grep is empty
 
 ### Phase 7: Typechecker entry & cross-plan paths
 
-- [ ] Task 7.1: `typechecker/stdlib.js` → `typechecker/stdlib/index.js`
+- [x] Task 7.1: `typechecker/stdlib.js` → `typechecker/stdlib/index.js`
   - Files: `src/typechecker/stdlib.js` → `src/typechecker/stdlib/index.js` (`git mv`), its importers
   - Test: none new (rename). The full unit suite passes
   - Done when: `ls src/typechecker/stdlib.js` fails, and the hashes match
-- [ ] Task 7.2: Roadmap paths
+- [x] Task 7.2: Roadmap paths
   - Files: `plans/roadmap.md`
     - Any JS-engine source path the roadmap cites matches the new layout (`src/cli/`, `src/lexer/`, `src/link/`, `test/perf/`).
     - `plans/v2.0.0/native-go-engine.md` is shelved and keeps its historical paths.
   - Test: new `test/unit/compiler/plan-paths.test.js`: every backticked `src/…`, `stdlib/…`, `test/…` and `scripts/…` path in `plans/roadmap.md` exists, except an explicit list of paths a plan creates itself
   - Done when: the test passes
-- [ ] Task 7.3: v1.9.0 plan paths
+- [x] Task 7.3: v1.9.0 plan paths
   - Files: `plans/v1.9.0/stdlib-in-go-plan.md`, `test/unit/compiler/plan-paths.test.js` (add the file)
   - Changes (paths only; no task, scope or number changes):
     - `src/lexer.js` → `src/lexer/lexer.js`, `src/cli-core.js` → `src/cli/cli-core.js`, `src/compiler.js` (`checkStdlibPrograms`) → `src/link/stdlib.js`.
