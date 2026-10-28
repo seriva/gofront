@@ -340,27 +340,27 @@ Only paths change. No task, scope or number in those plans is edited.
 
 ### Phase 6: `src/cli/`, `src/lexer/` and the test layout
 
-- [ ] Task 6.1: Test discovery in `run.js`
+- [x] Task 6.1: Test discovery in `run.js`
   - Files: `test/unit/run.js`
   - Test: new `test/unit/compiler/runner.test.js`: the exported `TEST_FILES` equals the sorted `find` result and contains every `HEAVIEST_TEST_FILES` entry. Fails first while the list is hand-written and a temporary extra test file exists
   - Done when: the same files plus the new ones run with the same pass count, and a missing heavy entry throws at startup
-- [ ] Task 6.2: Move the CLI and tooling modules to `src/cli/`
+- [x] Task 6.2: Move the CLI and tooling modules to `src/cli/`
   - Files: `git mv` of `cli-core`, `dev-server`, `test-runner`, `asset-manager`, `vendor`, `pwa`, `project-config`, `colors` and `minifier` to `src/cli/`; import rewrites in `src/` and `test/`; `.sentrux/rules.toml`. Mechanical; exceeds the 3-file rule by design
   - Test: the `check-layers` real-repo cases and `sentrux check`
   - Done when: the hashes match, the suites pass, and `npm pack --dry-run` shows the new paths with `bin` unchanged
-- [ ] Task 6.3: Move the lexer files to `src/lexer/`, and `templ-parser.js` to `src/parser/templ.js`
+- [x] Task 6.3: Move the lexer files to `src/lexer/`, and `templ-parser.js` to `src/parser/templ.js`
   - Files: `git mv` of `lexer`, `templ-lexer` and `tokens` to `src/lexer/`, and `templ-parser.js` to `src/parser/templ.js`; import rewrites; `.sentrux/rules.toml`
   - Test: as for 6.2
   - Done when: the hashes match, and `ls src/*.js` lists only `index.js`, `compiler.js`, `resolver.js` and `dts-parser.js`
-- [ ] Task 6.4: Split `test/unit/compiler/` → `test/unit/cli/`
+- [x] Task 6.4: Split `test/unit/compiler/` → `test/unit/cli/`
   - Files: `git mv` of the `cli`, `cli-core`, `dev-server`, `pwa`, `asset-manager`, `test-runner`, `prep` and `build-examples` tests; the `run.js` header comment and `HEAVIEST_TEST_FILES` paths
   - Test: the Task 6.1 discovery test
   - Done when: the unit pass count is unchanged
-- [ ] Task 6.5: `test/e2e/perf/` → `test/perf/`
+- [x] Task 6.5: `test/e2e/perf/` → `test/perf/`
   - Files: `git mv test/e2e/perf test/perf`; relative imports and fixture paths in `raycast-bench.js`, `zero-alloc.js`, `json-bench.js` and `particle-bench.js`; `package.json` (`test`, `bench`)
   - Test: `node test/perf/zero-alloc.js` passes (already part of `npm test`). `node --expose-gc test/perf/raycast-bench.js --tris 1000 --rays 1000` completes
   - Done when: `npm test` passes, `ls test/e2e` has only specs and helpers, and `npm run test:e2e` is unchanged
-- [ ] Task 6.6: Update the path references in the docs and agent guide
+- [x] Task 6.6: Update the path references in the docs and agent guide
   - Files: `docs/architecture.md`, `docs/usage.md`, `docs/hybrid-wasm.md`, `AGENTS.md` (Part 2 **Architecture** only: the final `src/` layout, `src/link/`, `src/cli/`, `src/lexer/`, `src/backend/shared/`, `test/perf/`)
   - Test: `grep -rnE 'src/(lexer|templ-lexer|templ-parser|tokens|dev-server|pwa|minifier|vendor|asset-manager|test-runner|colors|project-config|cli-core)\.js|test/e2e/perf' docs AGENTS.md .sentrux package.json` is empty
   - Done when: grep is empty

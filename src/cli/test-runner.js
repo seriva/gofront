@@ -6,13 +6,13 @@ import { statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { basename, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { HELPER_SPRINTF, HELPER_TESTING } from "./backend/js/runtime.js";
-import { colorEnabled, createColors, formatDiagnostic } from "./colors.js";
+import { HELPER_SPRINTF, HELPER_TESTING } from "../backend/js/runtime.js";
 import {
 	compilePackageTests,
 	compilePackageTestsWasm,
 	gwFilesIn,
-} from "./compiler.js";
+} from "../compiler.js";
+import { colorEnabled, createColors, formatDiagnostic } from "./colors.js";
 
 // WasmGC + exception handling (what the wasm backend emits) ship enabled by
 // default from Node 22 (V8 11.9+). Older runtimes fail at instantiate time

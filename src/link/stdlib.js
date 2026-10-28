@@ -8,7 +8,7 @@
 import { readFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { CodeGen } from "../backend/js/index.js";
-import { Lexer } from "../lexer.js";
+import { Lexer } from "../lexer/lexer.js";
 import { generateJsonCodecs } from "../lower/json-codecs.js";
 import { reachableStdlibDecls } from "../lower/reachability.js";
 import { forEachChild } from "../lower/walk.js";
