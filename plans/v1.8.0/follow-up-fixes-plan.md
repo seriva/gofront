@@ -157,7 +157,7 @@ No longer reproducing (deleted from the ledger): promoted field through `Deep2{*
   - Test: In a `both` package, a function starting with `_ = xs[15]` or `if len(xs) > 15 { ... }` marks `xs[0]` through `xs[15]` as `_inBounds = true`. Emitted JS contains raw `xs[0]` instead of `__at(xs, 0)`.
   - Done when: Constant slice indices preceded by a length proof or BCE hint are elided in the JS backend for `both` packages.
 
-- [ ] Task 1.3: End-to-end SimpleFPS verification
+- [x] Task 1.3: End-to-end SimpleFPS verification
   - Files: `test/perf/`
   - Test: Run `gofront check` across SimpleFPS; compile `engine/mathx` with BCE hints and verify `__at` count in matrix functions drops to 0.
   - Done when: `check` passes cleanly across all SimpleFPS packages; `mathx` matrix functions emit zero `__at` calls.
