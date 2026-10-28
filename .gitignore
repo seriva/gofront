@@ -13,6 +13,11 @@ dist/
 out/
 *.min.js
 
+# Compiled examples (run `npm run build`); example/preact/vendor.js stays
+# tracked because only `gofront prep` writes it
+/example/*/app.js
+/example/*/app.wasm
+
 # OS
 .DS_Store
 Thumbs.db

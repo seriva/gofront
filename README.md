@@ -329,10 +329,16 @@ example/hybrid/
 
 ### Build and run
 
+The examples are not committed pre-built. Build them once, then serve an example's
+directory and open it in a browser:
+
 ```sh
 npm run build             # compile all example applications
-# open the respective index.html in a browser
+npx serve example/simple  # then open the printed address
 ```
+
+`example/preact/vendor.js` is the exception: it is committed, and
+`node src/index.js prep example/preact` regenerates it.
 
 ---
 
