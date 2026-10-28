@@ -1591,6 +1591,10 @@ export const expressionCheckMethods = {
 				: this.resolveTypeNode(expr.typeExpr, scope);
 		const base = t.kind === "named" ? t.underlying : t;
 		const typeNode = expr.typeExpr;
+		if (expr.typeExpr === null && hintType && base?.kind === "basic") {
+			this.err(`invalid composite literal type ${typeStr(t)}`, expr);
+			return t;
+		}
 		if (this._isSliceOrArray(base)) this._checkArrayLitKeys(expr, scope);
 		this._inferArraySize(expr, typeNode, base);
 		if (base?.kind === "struct")

@@ -3056,8 +3056,13 @@ export class StmtsEmitter {
 			ifCount++;
 
 			if (stmt.assign) {
-				const targetGoType =
-					types.length === 1
+				// `case nil` binds the switch expression's own (null) value.
+				const isNilCase =
+					types.length === 1 &&
+					(types[0].name === "nil" || types[0]._type?.name === "nil");
+				const targetGoType = isNilCase
+					? (stmt.expr._type ?? { kind: "basic", name: "any" })
+					: types.length === 1
 						? (types[0]._type ?? types[0])
 						: { kind: "basic", name: "any" };
 				const targetWType = this.toWasmType(targetGoType);
@@ -3066,7 +3071,7 @@ export class StmtsEmitter {
 					targetWType,
 					targetGoType,
 				);
-				if (types.length === 1) {
+				if (types.length === 1 && !isNilCase) {
 					this.pushInstruction({ op: "local.get", index: tswTmp });
 					this._emitTypeCast(targetGoType, targetWType);
 					// The bound array is a copy of the boxed value.
