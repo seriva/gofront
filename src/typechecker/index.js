@@ -3,7 +3,7 @@
 //
 // Split into sub-modules under typechecker/:
 //   types.js          — shared type constants, predicates, Scope
-//   stdlib.js         — browser globals + all built-in package registrations
+//   stdlib/index.js   — browser globals + all built-in package registrations
 //   statements.js     — checkBlock, checkStmt
 //   expressions.js    — checkExpr, checkCall, checkBuiltin, checkCompositeLit
 //   termination.js    — _isTerminating* family
@@ -16,7 +16,7 @@ import { expressionCheckMethods } from "./expressions.js";
 import { resolveMethods } from "./resolve.js";
 import { statementCheckMethods } from "./statements.js";
 import { EXCLUDED_STDLIB_PACKAGES } from "./stdlib/excluded.js";
-import { setupGlobals } from "./stdlib.js";
+import { setupGlobals } from "./stdlib/index.js";
 import { terminationMethods } from "./termination.js";
 import {
 	ANY,

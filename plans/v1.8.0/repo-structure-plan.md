@@ -367,17 +367,17 @@ Only paths change. No task, scope or number in those plans is edited.
 
 ### Phase 7: Typechecker entry & cross-plan paths
 
-- [ ] Task 7.1: `typechecker/stdlib.js` → `typechecker/stdlib/index.js`
+- [x] Task 7.1: `typechecker/stdlib.js` → `typechecker/stdlib/index.js`
   - Files: `src/typechecker/stdlib.js` → `src/typechecker/stdlib/index.js` (`git mv`), its importers
   - Test: none new (rename). The full unit suite passes
   - Done when: `ls src/typechecker/stdlib.js` fails, and the hashes match
-- [ ] Task 7.2: Roadmap paths
+- [x] Task 7.2: Roadmap paths
   - Files: `plans/roadmap.md`
     - Any JS-engine source path the roadmap cites matches the new layout (`src/cli/`, `src/lexer/`, `src/link/`, `test/perf/`).
     - `plans/v2.0.0/native-go-engine.md` is shelved and keeps its historical paths.
   - Test: new `test/unit/compiler/plan-paths.test.js`: every backticked `src/…`, `stdlib/…`, `test/…` and `scripts/…` path in `plans/roadmap.md` exists, except an explicit list of paths a plan creates itself
   - Done when: the test passes
-- [ ] Task 7.3: v1.9.0 plan paths
+- [x] Task 7.3: v1.9.0 plan paths
   - Files: `plans/v1.9.0/stdlib-in-go-plan.md`, `test/unit/compiler/plan-paths.test.js` (add the file)
   - Changes (paths only; no task, scope or number changes):
     - `src/lexer.js` → `src/lexer/lexer.js`, `src/cli-core.js` → `src/cli/cli-core.js`, `src/compiler.js` (`checkStdlibPrograms`) → `src/link/stdlib.js`.
