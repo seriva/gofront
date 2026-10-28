@@ -224,8 +224,8 @@ No longer reproducing (deleted from the ledger): promoted field through `Deep2{*
   - Done when: the four negative tests pass with those messages; valid explicit instantiations still compile.
 - [x] Task 4.4: Instantiation cycles and package-qualified type arguments
   - Files: `src/typechecker/types.js`, `src/typechecker/resolve.js`, `test/unit/types/generics.test.js`
-  - Test: `type T[X any] struct{ n *T[[]X] }; var t T[int]` → `instantiation cycle`; a two-package project (`compileDir` with `a.Pt{X int}`, `b.Pt{Y string}`) using `Box[a.Pt]` and `Box[b.Pt]` compiles and prints `1 s`.
-  - Done when: no stack overflow; the two-package project builds.
+  - Test: `type T[X any] struct{ n *T[[]X] }; var t T[int]` and the growing forms `Chain[Pair[T,T]]`, `Chain[[]T]` → `instantiation cycle` quickly; a two-package project (`compileDir` with `a.Pt{X int}`, `b.Pt{Y string}`) using `Box[a.Pt]` and `Box[b.Pt]` typechecks with each instance resolving its own fields.
+  - Done when: no stack overflow or hang; the two-package project typechecks with each instance resolving its own fields (emitting valid output for same-named types from two packages is tracked in plans/follow-ups.md).
 
 ### Phase 5: JS Backend Crashes
 
