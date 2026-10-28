@@ -2,6 +2,7 @@
 // ModuleEmitter: Module IR builder that registers types, imports, globals and functions.
 
 import { wTypeKey } from "./boundary.js";
+import { hasErrorUsage, importsAnyOf } from "./prescan.js";
 import { BINARY_MATH_IMPORTS } from "./stdlib/index.js";
 import {
 	ERROR_STRUCT,
@@ -69,43 +70,6 @@ const STDLIB_ENV_PKGS = new Set([
 	"math/bits",
 	"bits",
 ]);
-
-export function importsAnyOf(programs, pkgs) {
-	const has = (p) => (pkgs instanceof Set ? pkgs.has(p) : pkgs.includes(p));
-	return (programs ?? []).some((p) =>
-		(p.imports ?? []).some((decl) =>
-			(decl.imports ?? [decl]).some((imp) => has(imp.path)),
-		),
-	);
-}
-
-export function hasErrorUsage(programs) {
-	return (programs ?? []).some((p) => {
-		let found = false;
-		const scan = (n) => {
-			if (!n || found || typeof n !== "object") return;
-			if (Array.isArray(n)) {
-				for (const x of n) scan(x);
-				return;
-			}
-			if (
-				(n.kind === "Ident" ||
-					n.kind === "TypeName" ||
-					n.kind === "basic" ||
-					n.kind === "interface") &&
-				n.name === "error"
-			) {
-				found = true;
-				return;
-			}
-			for (const k of Object.keys(n)) {
-				if (!k.startsWith("_")) scan(n[k]);
-			}
-		};
-		scan(p);
-		return found;
-	});
-}
 
 // [name, params, results] for `env.*` imports backing stdlib calls; the JS
 // side lives in WASM_STDLIB_JS (boundary.js).  All are registered eagerly
