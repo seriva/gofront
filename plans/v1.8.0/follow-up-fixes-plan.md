@@ -168,19 +168,19 @@ No longer reproducing (deleted from the ledger): promoted field through `Deep2{*
 
 *Phases 2–14 were scheduled from review follow-ups on 2026-10-28 (see Verified Gaps → Review follow-ups).*
 
-- [ ] Task 2.1: Lexer: leading-dot floats and Unicode identifiers
+- [x] Task 2.1: Lexer: leading-dot floats and Unicode identifiers
   - Files: `src/lexer/lexer.js`, `test/unit/compiler/lexer-parser.test.js`
   - Test: `x := .5; fmt.Println(x)` prints `0.5`; `θ := 1.5; fmt.Println(θ)` prints `1.5` (all targets via `assertProgramOutput`); a lone `.` still errors.
   - Done when: both repros compile and run on js/both/wasm.
-- [ ] Task 2.2: Parser: predeclared names as identifiers and empty labeled statements
+- [x] Task 2.2: Parser: predeclared names as identifiers and empty labeled statements
   - Files: `src/parser/declarations.js`, `src/parser/statements.js`, `test/unit/compiler/lexer-parser.test.js`
   - Test: `func (x *T) Swap(new int32) (old int32) { old = x.v; x.v = new; return old }` → `1 2`; `func f() { L: }` parses.
   - Done when: both repros compile; `new(T)` still works in the same file.
-- [ ] Task 2.3: Parser: embedded generic instances and array type arguments in assertions
+- [x] Task 2.3: Parser: embedded generic instances and array type arguments in assertions
   - Files: `src/parser/types.js`, `src/parser/expressions.js`, `test/unit/types/generics.test.js`
   - Test: `type W[T any] struct{ Inner[T]; w int }` compiles and promotes `v`; `x.(Stack[[2]int])` → `true`.
   - Done when: both repros compile and run on all targets.
-- [ ] Task 2.4: Typechecker: `case nil` with a binding; invalid elided map key
+- [x] Task 2.4: Typechecker: `case nil` with a binding; invalid elided map key
   - Files: `src/typechecker/statements.js`, `src/typechecker/expressions.js`, `test/unit/types/checks.test.js`
   - Test: `switch e := err.(type) { case nil: _ = e; fmt.Println("nil") }` → `nil`; `map[string]int{{1}: 1}` → `assertErrorContains(errors, "invalid composite literal type string")`.
   - Done when: the switch runs on all targets; the map literal is a type error, never emitted JS.
