@@ -3,7 +3,7 @@
 // math/bits, maps, slices, strings, strconv, fmt, errors, sort, unicode/utf8,
 // testing) plus the runtime helper bodies they rely on.
 
-import { fmtTypeDesc, fmtWantsTypes } from "../../js/fmt-types.js";
+import { fmtTypeDesc, fmtWantsTypes } from "../../shared/fmt-types.js";
 import {
 	ERROR_STRUCT,
 	getMapKeyValTypes,

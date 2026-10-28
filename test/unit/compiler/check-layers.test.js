@@ -7,7 +7,7 @@ import {
 	ALLOW_CROSS,
 	findCrossBackendImports,
 	findLayerGaps,
-	PERMANENT_CROSS,
+	PENDING_CROSS,
 } from "../../../scripts/check-layers.js";
 import { assert, assertEqual, ROOT, section, test } from "../helpers.js";
 
@@ -200,17 +200,19 @@ test("only documented files are exempt from layering", () => {
 	);
 });
 
-// Task 5.1 moves fmt-types.js to src/backend/shared/. Until then the one
-// known edge is the only cross-backend import beyond the allowlisted one.
-test("cross-backend imports: only the known fmt-types edge remains", () => {
+// With fmt-types.js in src/backend/shared/, the only cross-backend import
+// left in the repo is the allowlisted boundary.js -> js/runtime.js edge.
+test("cross-backend imports: only the allowlisted boundary edge remains", () => {
 	const sources = Object.fromEntries(
 		repoFiles
 			.filter((f) => f.startsWith("src/backend/"))
 			.map((f) => [f, readFileSync(join(ROOT, f), "utf8")]),
 	);
-	const found = findCrossBackendImports(sources, PERMANENT_CROSS);
+	const found = findCrossBackendImports(sources, []);
 	assertEqual(
 		found.map((x) => `${x.from} -> ${x.to}`).join("\n"),
-		"src/backend/wasm/stdlib/core.js -> src/backend/js/fmt-types.js",
+		"src/backend/wasm/boundary.js -> src/backend/js/runtime.js",
 	);
+	assertEqual(findCrossBackendImports(sources).length, 0);
+	assertEqual(PENDING_CROSS.length, 0);
 });
