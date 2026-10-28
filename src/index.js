@@ -36,8 +36,8 @@ import {
 	reportBuild,
 	reportCheck,
 	runSingleShot,
-} from "./cli-core.js";
-import { colors, log, stamp } from "./colors.js";
+} from "./cli/cli-core.js";
+import { colors, log, stamp } from "./cli/colors.js";
 
 // ── Parse CLI args ───────────────────────────────────────────
 

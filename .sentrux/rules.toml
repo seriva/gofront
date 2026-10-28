@@ -17,7 +17,7 @@ order = 0
 
 [[layers]]
 name  = "support"
-paths = ["src/compiler.js", "src/link/*", "src/resolver.js", "src/dts-parser.js", "src/dev-server.js", "src/minifier.js", "src/cli-core.js", "src/asset-manager.js", "src/vendor.js", "src/test-runner.js", "src/colors.js", "src/project-config.js", "src/pwa.js"]
+paths = ["src/compiler.js", "src/link/*", "src/resolver.js", "src/dts-parser.js", "src/cli/*"]
 order = 1
 
 [[layers]]
@@ -37,17 +37,17 @@ order = 4
 
 [[layers]]
 name  = "parser"
-paths = ["src/templ-parser.js", "src/parser/*"]
+paths = ["src/parser/*"]
 order = 5
 
 [[layers]]
 name  = "lexer"
-paths = ["src/lexer.js", "src/templ-lexer.js"]
+paths = ["src/lexer/lexer.js", "src/lexer/templ-lexer.js"]
 order = 6
 
 [[layers]]
 name  = "types"
-paths = ["src/typechecker/types.js", "src/tokens.js"]
+paths = ["src/typechecker/types.js", "src/lexer/tokens.js"]
 order = 7
 
 # Go standard library (stdlib/, GoFront Go) — same rule: a layer can only import from layers

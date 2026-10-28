@@ -11,8 +11,8 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { handlePrep } from "../../../src/cli-core.js";
-import { loadProjectConfig } from "../../../src/project-config.js";
+import { handlePrep } from "../../../src/cli/cli-core.js";
+import { loadProjectConfig } from "../../../src/cli/project-config.js";
 import {
 	bundleVendor,
 	findNodePolyfills,
@@ -23,7 +23,7 @@ import {
 	loadVendorConfig,
 	NODE_BUILTINS,
 	NODE_POLYFILLS_TIP,
-} from "../../../src/vendor.js";
+} from "../../../src/cli/vendor.js";
 import {
 	assert,
 	assertContains,
