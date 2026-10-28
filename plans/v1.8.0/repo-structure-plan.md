@@ -371,7 +371,7 @@ Only paths change. No task, scope or number in those plans is edited.
   - Files: `src/typechecker/stdlib.js` → `src/typechecker/stdlib/index.js` (`git mv`), its importers
   - Test: none new (rename). The full unit suite passes
   - Done when: `ls src/typechecker/stdlib.js` fails, and the hashes match
-- [ ] Task 7.2: Roadmap paths
+- [x] Task 7.2: Roadmap paths
   - Files: `plans/roadmap.md`
     - Any JS-engine source path the roadmap cites matches the new layout (`src/cli/`, `src/lexer/`, `src/link/`, `test/perf/`).
     - `plans/v2.0.0/native-go-engine.md` is shelved and keeps its historical paths.
