@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import {
 	assertEqual,
 	assertErrorContains,
+	assertProgramOutput,
 	compile,
 	compileHybrid,
 	runJs,
@@ -502,6 +503,94 @@ func Main() int {
 }`).run("Main");
 	assertEqual(res.wasmRes, 2n);
 	assertEqual(res.jsRes, 2);
+});
+
+section("Defined types over named structs");
+
+test("type S3 Base keeps the fields of Base on every target", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type Base struct{ n int }
+type S3 Base
+
+func (s S3) N() int { return s.n }
+
+func main() {
+	fmt.Println(S3{n: 5}.N())
+}
+`,
+		"5\n",
+	);
+});
+
+test("converting to a defined struct type uses its methods (value receiver)", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type Base struct{ n int }
+type S3 Base
+
+func (s S3) M() int { return s.n * 2 }
+
+func main() {
+	b := Base{4}
+	fmt.Println(S3(b).M())
+}
+`,
+		"8\n",
+	);
+});
+
+test("converting to a defined struct type uses its methods (pointer receiver, copy)", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type Base struct{ n int }
+type S3 Base
+
+func (s *S3) Inc() { s.n++ }
+
+func main() {
+	b := Base{7}
+	s := S3(b)
+	s.Inc()
+	fmt.Println(s.n, b.n)
+	t := S3(Base{1})
+	t.Inc()
+	fmt.Println(t.n)
+}
+`,
+		"8 7\n2\n",
+	);
+});
+
+test("promoted fields of an embedded struct through a defined type", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type In struct{ v int }
+type Base struct {
+	In
+	n int
+}
+type A Base
+
+func main() {
+	a := A{In{1}, 2}
+	fmt.Println(a.v, a.n)
+}
+`,
+		"1 2\n",
+	);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

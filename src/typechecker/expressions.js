@@ -831,6 +831,19 @@ export const expressionCheckMethods = {
 		);
 	},
 
+	// Struct types with identical field names and types convert to each other.
+	_sameStructFields(a, b) {
+		if (a?.kind !== "struct" || b?.kind !== "struct") return false;
+		if (a.fields.size !== b.fields.size) return false;
+		const bf = [...b.fields];
+		let i = 0;
+		for (const [name, type] of a.fields) {
+			const [bn, bt] = bf[i++];
+			if (name !== bn || typeStr(type) !== typeStr(bt)) return false;
+		}
+		return true;
+	},
+
 	_isInvalidArrayConv(tgt, src, srcType) {
 		return tgt?.kind === "array" && src?.kind !== "array" && !isAny(srcType);
 	},
@@ -919,6 +932,7 @@ export const expressionCheckMethods = {
 			return;
 		}
 		if (typeStr(srcResolved) === typeStr(tgtResolved)) return;
+		if (this._sameStructFields(srcResolved, tgtResolved)) return;
 		if (isNumeric(srcResolved) && isNumeric(tgtResolved)) return;
 		if (isString(srcResolved) && isString(tgtResolved)) return;
 		if (isBool(srcResolved) && isBool(tgtResolved)) return;
