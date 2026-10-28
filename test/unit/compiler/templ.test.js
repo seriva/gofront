@@ -1,10 +1,16 @@
+import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { TemplLexer } from "../../../src/templ-lexer.js";
+import { TemplParser } from "../../../src/templ-parser.js";
 import {
 	assert,
 	assertContains,
 	assertEqual,
 	assertThrows,
 	compileDir,
+	ROOT,
 	runInDom,
 	section,
 	summarize,
@@ -754,6 +760,258 @@ css broken() {
 			}),
 		"unclosed",
 	);
+});
+
+// ── Syntax errors in templ expressions (pinned output) ────────
+
+section("templ — expression syntax errors");
+
+const CLI = join(ROOT, "src", "index.js");
+
+function cli(args) {
+	const r = spawnSync(process.execPath, [CLI, ...args], { encoding: "utf8" });
+	return {
+		stdout: r.stdout ?? "",
+		stderr: r.stderr ?? "",
+		code: r.status ?? 1,
+	};
+}
+
+// Runs `build` and `check` on a package holding the given files.
+function runBoth(files) {
+	return withTempDir(files, (dir) => ({
+		build: cli(["build", dir, "-o", join(dir, "out")]),
+		check: cli(["check", dir]),
+	}));
+}
+
+const EOF_PARSE_ERROR =
+	"Parse error at 1:1: Unexpected token in expression: '' (got EOF \"\")";
+
+const MAIN_GO = "package main\nfunc main() {}\n";
+
+for (const [name, body] of [
+	["text expression", "<p>{ a + }</p>"],
+	["attribute expression", "<p class={ a + }>x</p>"],
+	["conditional attribute", "<p disabled?={ a + }>x</p>"],
+	["if condition", "if a + {\n\t\t<p>x</p>\n\t}"],
+	["switch expression", "switch a + {\n\tcase 1:\n\t\t<p>x</p>\n\t}"],
+]) {
+	test(`malformed ${name} fails build and check with the synthetic EOF position`, () => {
+		const { build, check } = runBoth({
+			"main.go": MAIN_GO,
+			"bad.templ": `package main
+templ Bad(a int) {
+	${body}
+}
+templ Other(a int) {
+	<i>x</i>
+}`,
+		});
+		for (const r of [build, check]) {
+			assertEqual(r.code, 1);
+			assertEqual(r.stderr, `gofront: ERROR\n  ${EOF_PARSE_ERROR}\n`);
+		}
+	});
+}
+
+for (const [name, body] of [
+	["if", "if {\n\t\t<p>a</p>\n\t} else {\n\t\t<p>b</p>\n\t}"],
+	["else if", "if a {\n\t\t<p>a</p>\n\t} else if {\n\t\t<p>b</p>\n\t}"],
+	[
+		"chained else if",
+		"if a {\n\t\t<p>a</p>\n\t} else if a {\n\t\t<p>b</p>\n\t} else if {\n\t\t<p>c</p>\n\t} else {\n\t\t<p>d</p>\n\t}",
+	],
+]) {
+	test(`empty ${name} condition fails build and check with the synthetic EOF position`, () => {
+		const { build, check } = runBoth({
+			"main.go": MAIN_GO,
+			"bad.templ": `package main
+templ Bad(a bool) {
+	${body}
+}`,
+		});
+		for (const r of [build, check]) {
+			assertEqual(r.code, 1);
+			assertEqual(r.stderr, `gofront: ERROR\n  ${EOF_PARSE_ERROR}\n`);
+		}
+	});
+}
+
+test("malformed component call fails build and check at the real token position", () => {
+	const { build, check } = runBoth({
+		"main.go": MAIN_GO,
+		"bad.templ": `package main
+templ Bad(a int) {
+	@Other(a +)
+}
+templ Other(a int) {
+	<i>x</i>
+}`,
+	});
+	for (const r of [build, check]) {
+		assertEqual(r.code, 1);
+		assertEqual(
+			r.stderr,
+			"gofront: ERROR\n  Parse error at 1:10: Unexpected token in expression: ')' (got ) \")\")\n",
+		);
+	}
+});
+
+test("malformed for header is skipped silently by build and check", () => {
+	const files = {
+		"main.go": MAIN_GO,
+		"bad.templ": `package main
+templ Bad(xs []int) {
+	for x := range {
+		<p>hi</p>
+	}
+}`,
+	};
+	const { build, check } = runBoth(files);
+	assertEqual(build.code, 0);
+	assertEqual(check.code, 0);
+	assert(!build.stderr.includes("ERROR"), build.stderr);
+	assertEqual(check.stderr.includes("ERROR"), false);
+	const { js } = compilePkg(files);
+	assertContains(js, "/* templ for: for x := range */");
+});
+
+test("malformed expression inside a for body is swallowed with the loop", () => {
+	const files = {
+		"main.go": MAIN_GO,
+		"bad.templ": `package main
+templ Bad(xs []int) {
+	for _, x := range xs {
+		<p>{ x + }</p>
+	}
+}`,
+	};
+	const { build, check } = runBoth(files);
+	assertEqual(build.code, 0);
+	assertEqual(check.code, 0);
+	assert(!build.stderr.includes("ERROR"), build.stderr);
+	assertEqual(check.stderr.includes("ERROR"), false);
+	const { js } = compilePkg(files);
+	assertContains(js, "for (const x of xs) {");
+});
+
+test("a type error is reported before a malformed templ expression", () => {
+	const { build, check } = runBoth({
+		"main.go": 'package main\nfunc main() { var x int = "s"; _ = x }\n',
+		"bad.templ": `package main
+templ Bad(a int) {
+	<p>{ a + }</p>
+}`,
+	});
+	for (const r of [build, check]) {
+		assertEqual(r.code, 1);
+		assertContains(r.stderr, "Type error in main.go at line 2:27");
+		assert(!r.stderr.includes("Parse error"), r.stderr);
+	}
+});
+
+test("a malformed templ expression is not reported by the parser", () => {
+	const src = `package main
+templ Bad(a int) {
+	<p>{ a + }</p>
+}
+`;
+	const tokens = new TemplLexer(src, "bad.templ").tokenize();
+	const ast = new TemplParser(tokens, "bad.templ", src).parse();
+	assertEqual(ast.decls[0].kind, "TemplDecl");
+});
+
+// ── Parsed expressions on the templ AST ───────────────────────
+
+section("templ — parsed expressions");
+
+function parseTempl(body) {
+	const src = `package main
+templ V(name string, xs []int) {
+${body}
+}
+`;
+	const tokens = new TemplLexer(src, "v.templ").tokenize();
+	const ast = new TemplParser(tokens, "v.templ", src).parse();
+	return ast.decls[0].body;
+}
+
+test("{ name } carries its parsed expression", () => {
+	const [node] = parseTempl("<p>{ name }</p>")[0].children;
+	assertEqual(node.kind, "TemplExpr");
+	assertEqual(node.expr.kind, "Ident");
+	assertEqual(node.expr.name, "name");
+});
+
+test("attribute expressions are parsed on the attribute", () => {
+	const [el] = parseTempl(
+		'<p class={ name } hidden?={ name != "" } id="a">x</p>',
+	);
+	const [cls, hidden, id] = el.attrs;
+	assertEqual(cls.expr.kind, "Ident");
+	assertEqual(hidden.expr.kind, "BinaryExpr");
+	assertEqual(id.expr, undefined);
+});
+
+test("if, switch, case and component expressions are parsed", () => {
+	const nodes = parseTempl(
+		'if name != "" {\n<p>x</p>\n}\nswitch name {\ncase "a":\n<p>a</p>\ndefault:\n<p>b</p>\n}\n@V(name, xs)\n@templ.Raw(name)',
+	);
+	const [ifNode, sw, comp, raw] = nodes;
+	assertEqual(ifNode.expr.kind, "BinaryExpr");
+	assertEqual(sw.expr.kind, "Ident");
+	assertEqual(sw.cases[0].expr.kind, "BasicLit");
+	assertEqual(sw.cases[1].expr, null);
+	assertEqual(comp.expr.kind, "CallExpr");
+	assertEqual(comp.raw, false);
+	assertEqual(raw.raw, true);
+	assertEqual(raw.expr.kind, "Ident");
+});
+
+test("for headers are parsed into forStmt", () => {
+	const [loop] = parseTempl("for i, x := range xs {\n<p>{ x }</p>\n}");
+	assertEqual(loop.kind, "TemplFor");
+	assertEqual(loop.forStmt.kind, "ForStmt");
+	assertEqual(loop.forStmt.init.rhs[0].kind, "RangeExpr");
+	const [bad] = parseTempl("for x := range {\n<p>hi</p>\n}");
+	assertEqual(bad.forStmt, null);
+});
+
+test("a malformed expression is kept on the node, not thrown", () => {
+	const [node] = parseTempl("<p>{ name + }</p>")[0].children;
+	assertEqual(node.expr, null);
+	assertContains(node.exprError.message, "Unexpected token in expression");
+});
+
+test("parsed expressions are invisible to generic AST walkers", () => {
+	const [node] = parseTempl("<p>{ name }</p>")[0].children;
+	assert(!Object.keys(node).includes("expr"), "expr must not be enumerable");
+});
+
+test("the JS code generator does not import the parser", () => {
+	const src = readFileSync(
+		join(ROOT, "src", "backend", "js", "templ.js"),
+		"utf8",
+	);
+	assert(!/from\s+["'][^"']*parser\//.test(src), "templ.js imports parser/");
+	assert(!src.includes("new Parser"), "templ.js builds a Parser");
+	assert(!src.includes("parseExpr"), "templ.js calls parseExpr");
+});
+
+test("compiling the same templ package twice gives the same output", () => {
+	const files = {
+		"main.go": MAIN_GO,
+		"v.templ": `package main
+templ V(xs []int, name string) {
+	<ul class={ name }>
+		for _, x := range xs {
+			<li>{ x }</li>
+		}
+	</ul>
+}`,
+	};
+	assertEqual(compilePkg(files).js, compilePkg(files).js);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
