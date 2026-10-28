@@ -316,7 +316,7 @@ Only paths change. No task, scope or number in those plans is edited.
   - Files: `wasm/index.js`, `wasm/prescan.js`
   - Test: `wasm/encode.test.js`: `_usesFmtAny` returns true for a parsed program calling `fmt.Println(any(x))` and false otherwise
   - Done when: the hashes match
-- [ ] Task 4.4: Global and zero-init helpers → `wasm/globals.js`
+- [x] Task 4.4: Global and zero-init helpers → `wasm/globals.js`
   - Files: `wasm/index.js`, `wasm/globals.js`
   - Test: `wasm/encode.test.js`: `_orderConstInits` orders dependent constants topologically on a fixture
   - Done when: `wc -l src/backend/wasm/index.js` ≤ 1,800, and the hashes match
