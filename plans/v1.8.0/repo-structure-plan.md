@@ -103,22 +103,25 @@ All probes ran at `ade5edb` on `feat/portable-go`, using a throwaway `git worktr
 
 ### Baseline build hashes
 
-The prefixes below are from `ade5edb`. They show the format and confirm determinism, but they are **not** the oracle, because the finished portable-go plan changes the output. Before Phase 1, run the following on `main` and commit the full list into this section:
+Recorded on `main` at `e2d49f2` (portable-go merged, 2026-10-28) with:
 
 ```
 npm run build && sha256sum example/*/app.js example/hybrid/app.wasm example/preact/vendor.js
 ```
 
-Every phase checks against that list with `sha256sum -c` and pastes the output into its PR body.
+Two consecutive builds were byte-identical. The unit suite at this commit is **2882/2882** (`node test/unit/run.js`), which replaces the 2680 figure above as the test-count floor. `vendor.js` is the committed file: `prep` is not part of `build`, and Task 2.4 compares a regenerated one against it.
+
+Every phase checks against this list with `sha256sum -c` and pastes the output into its PR body.
 
 ```
-63c424ab66b0 example/gom/app.js
-101ef64d3b6f example/hybrid/app.js
-78390fedd5f1 example/preact/app.js
-9dfe0a3cd112 example/simple/app.js
-39b6ed40c07e example/templ/app.js
-4adf32f93d43 example/webgl/app.js
-662ece013a8b example/hybrid/app.wasm
+213aa9f8565a252a48444c887c50c5f44badd5abeb621247555149a715de3fe5  example/gom/app.js
+73f46a95f6e3339f8f1e0c26a338b71950f25cc1fea47410250973ed10213cff  example/hybrid/app.js
+e96672af6e470062450911671ad94abac326309557765dafde8210ef90b73734  example/preact/app.js
+05bcb401ec26abb5f2073c8514d03d68f6d315a56626024e44393522da27ad07  example/simple/app.js
+51c3ef87554af5b0fcb7ff2950d82335ed831fe855836a77741f9c2e0ded7896  example/templ/app.js
+4adf32f93d4374d737b1a748912d9830c61af5cda808ad4751b036f848796ea1  example/webgl/app.js
+a6f198ae77289396b4029a784c52a0a7392c5ed7c426b78ba17458fe073ea680  example/hybrid/app.wasm
+55b3244ba3786a45225ac45ba59cb729ae4f36692f502fdc25b6e9fb26031761  example/preact/vendor.js
 ```
 
 ---
