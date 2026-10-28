@@ -1461,9 +1461,29 @@ export const expressionGenMethods = {
 		return false;
 	},
 
+	// Converting a struct to a different defined struct type builds a copy in
+	// the target's class (so its methods exist); null when not applicable.
+	_genStructClassConversion(targetName, srcType, inner) {
+		if (!targetName || targetName.includes("[")) return null;
+		const target = this.checker?.types.get(targetName);
+		if (target?.kind !== "named" || target.underlying?.kind !== "struct")
+			return null;
+		if (srcType?.name === targetName) return null;
+		const srcU = srcType?.kind === "named" ? srcType.underlying : srcType;
+		if (srcU?.kind !== "struct") return null;
+		const cls = this._dequalify(targetName);
+		return `Object.assign(new ${cls}(), ${this._cloneJs(srcType, inner)})`;
+	},
+
 	_genTypeConversionCall(expr) {
 		const targetType = expr._conversionTargetType;
 		const arg = this.genExpr(expr.args[0]);
+		const structConv = this._genStructClassConversion(
+			targetType?.kind === "named" ? targetType.name : undefined,
+			expr.args[0]?._type,
+			arg,
+		);
+		if (structConv) return structConv;
 		const isRaw =
 			targetType?.name === "json.RawMessage" ||
 			targetType?.name === "encoding/json.RawMessage";
@@ -2729,6 +2749,12 @@ export const expressionGenMethods = {
 		if (t?.kind === "SliceType")
 			return this._genSliceTypeConversion(expr, inner, t);
 		const target = t?.name;
+		const structConv = this._genStructClassConversion(
+			target,
+			expr.expr._type,
+			inner,
+		);
+		if (structConv) return structConv;
 		if (target === "error") {
 			this.useHelper("error");
 			return `__error(${inner})`;

@@ -1111,7 +1111,7 @@ export class FunctionEmitter {
 		return null;
 	}
 
-	emitCloneStruct(structInfo, baseWType) {
+	emitCloneStruct(structInfo, baseWType, dstInfo = structInfo) {
 		const tmp = this.acquireTemp(baseWType);
 		this.pushInstruction({ op: "local.set", index: tmp });
 		for (let i = 0; i < structInfo.fields.length; i++) {
@@ -1136,7 +1136,7 @@ export class FunctionEmitter {
 		}
 		this.pushInstruction({
 			op: "struct.new",
-			typeIndex: structInfo.typeIndex,
+			typeIndex: dstInfo.typeIndex,
 		});
 		this.releaseTemp(tmp, baseWType);
 	}
