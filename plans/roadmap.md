@@ -287,7 +287,7 @@ concerns identified after v1.0.0 shipped. Design documents for this release were
 | Parser declarations split | Low | ✓ | Extract `parseTopDecl`, `parseFuncOrMethod`, `parseSignature`, `parseTypeDecl`, `parseVarDecl`, `parseConstDecl` from `parser/index.js` → `parser/declarations.js`. Mirrors the existing `statements.js`/`expressions.js` split. |
 | Mixin `@this` JSDoc annotations | Low | ✓ | Add `/** @this {TypeChecker} */` and `/** @this {CodeGen} */` to all exported method objects in sub-modules. Fixes IDE autocomplete / "go to definition" on `this.*` calls without any runtime change. |
 | ANY error cascade suppression | Medium | ✓ | Introduce `TAINTED_ANY` marker returned from error-recovery paths. Suppress downstream type errors whose sole cause is propagating tainted ANY. Root errors always emitted. |
-| CLI core extraction | Medium | ✓ | Extract compile/minify/init logic from `src/index.js` into `src/cli-core.js`. Enables direct import in tests; removes the subprocess-only coverage gap (~21% of `index.js`). |
+| CLI core extraction | Medium | ✓ | Extract compile/minify/init logic from `src/index.js` into `src/cli/cli-core.js`. Enables direct import in tests; removes the subprocess-only coverage gap (~21% of `index.js`). |
 
 ---
 
