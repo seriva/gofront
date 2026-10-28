@@ -9,6 +9,7 @@ import {
 	assert,
 	assertContains,
 	assertEqual,
+	assertProgramOutput,
 	assertThrows,
 	compile,
 	compileHybrid,
@@ -1066,6 +1067,89 @@ test("parser: {1}: 2 parses as a key/value pair with an elided key type", () => 
 	assertEqual(kv.kind, "KeyValueExpr");
 	assertEqual(kv.key.kind, "CompositeLit");
 	assertEqual(kv.key.typeExpr, null);
+});
+
+section("Lexer: leading-dot floats and Unicode identifiers");
+
+test("lexer: leading-dot float and Unicode identifier run on every target", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	x := .5
+	y := .25e1
+	fmt.Println(x, y)
+	θ := 1.5
+	fmt.Println(θ)
+}
+`,
+		"0.5 2.5\n1.5\n",
+	);
+});
+
+test("lexer: lone dot still errors", () => {
+	assertThrows(
+		() =>
+			new Parser(new Lexer("package main\nfunc f() { . }").tokenize()).parse(),
+		"Unexpected token in expression: '.'",
+	);
+});
+
+section("Parser: predeclared names as identifiers, empty labeled statements");
+
+test("parser: new and other predeclared names work as parameter and result names", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type T struct{ v int32 }
+
+func (x *T) Swap(new int32) (old int32) {
+	old = x.v
+	x.v = new
+	return old
+}
+
+func main() {
+	t := &T{1}
+	old := t.Swap(2)
+	fmt.Println(old, t.v)
+	p := new(T)
+	fmt.Println(p.v)
+}
+`,
+		"1 2\n0\n",
+	);
+});
+
+test("parser: empty labeled statement before a closing brace parses", () => {
+	const ast = new Parser(
+		new Lexer("package main\nfunc f() { L: }").tokenize(),
+	).parse();
+	const fn = ast.decls.find((d) => d.kind === "FuncDecl");
+	assertEqual(fn.body.stmts[0].kind, "LabeledStmt");
+});
+
+test("parser: empty labeled statement compiles and runs", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func f() {
+L:
+}
+
+func main() {
+	f()
+	fmt.Println("ok")
+}
+`,
+		"ok\n",
+	);
 });
 
 // ── Entry point ───────────────────────────────────────────────
