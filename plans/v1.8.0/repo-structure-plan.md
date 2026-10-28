@@ -259,7 +259,7 @@ Only paths change. No task, scope or number in those plans is edited.
   - Files: `src/backend/wasm/emit.js`, `src/backend/wasm/stdlib/index.js`
   - Test: new `test/unit/wasm/mixins.test.js`: every class in `stdlibEmitters` has its prototype methods on `FunctionEmitter.prototype`, and a duplicate name throws. Fails first against a temporary probe mixin added to the array
   - Done when: `emit.js` has no hand-listed stdlib `copyMethods` lines, and the hashes match
-- [ ] Task 1.5: Looped example build and `.gitignore` dedupe
+- [x] Task 1.5: Looped example build and `.gitignore` dedupe
   - Files: `scripts/build-examples.js` (exports `listExamples(root)`), `package.json` (`build`), `.gitignore`
   - Test: `test/unit/compiler/build-examples.test.js`: `listExamples` returns exactly the example directories that have `src/`, and skips a temp directory without one
   - Done when: `npm run build` reproduces the hashes, and the `.gitignore` duplicate check is empty
