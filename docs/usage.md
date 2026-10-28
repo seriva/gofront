@@ -38,6 +38,15 @@ gofront init [dir]                           scaffold a new project
 gofront --version / -v                       print version
 gofront --help / -h                          print this help
 ```
+
+### Building the examples
+
+The apps under `example/` are not committed pre-built. Run `npm run build` in the
+repository root to compile every example into `example/<name>/app.js` (the hybrid
+example also writes `app.wasm`), then serve the example's directory, for example
+`npx serve example/simple`, and open it in a browser. Without the build step the page
+cannot load `app.js`.
+
 ### Project configuration
 
 `gofront dev`, `build`, `prep`, `check` and `test` read optional settings from a `gofront.json`
