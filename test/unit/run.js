@@ -70,6 +70,7 @@ export const TEST_FILES = [
 	"./compiler/optimize-build.test.js",
 	"./compiler/semantics.test.js",
 	"./compiler/stdlib-go.test.js",
+	"./compiler/link.test.js",
 	"./compiler/check-layers.test.js",
 	"./compiler/build-examples.test.js",
 	"./wasm/encode.test.js",
