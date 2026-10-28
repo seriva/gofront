@@ -266,23 +266,23 @@ Only paths change. No task, scope or number in those plans is edited.
 
 ### Phase 2: CLI entry, build outputs & example config
 
-- [ ] Task 2.1: Move single-shot compilation into `cli-core.js`
+- [x] Task 2.1: Move single-shot compilation into `cli-core.js`
   - Files: `src/index.js`, `src/cli-core.js`
   - Test: `test/unit/compiler/cli-core.test.js` adds `runSingleShot` cases: `--check` returns 0 with an `OK` line; `-o` output equals `compileDir`; a compile error returns 1 with the `log.fail` text; `--tokens` dumps tokens. Fails first because the export is missing
   - Done when: `index.js` has no compile/minify/write code, and the `cli.test.js` smoke tests pass unchanged
-- [ ] Task 2.2: Move the watch-mode reporters and asset copy into `cli-core.js`
+- [x] Task 2.2: Move the watch-mode reporters and asset copy into `cli-core.js`
   - Files: `src/index.js`, `src/cli-core.js`
   - Test: `cli-core.test.js`: `devReporters` with captured stderr. `onBuild` prints `OK — wrote …`; `onError` prints `ERROR` plus the formatted diagnostic; `copyAssets: true` calls the asset copy
   - Done when: `wc -l src/index.js` ≤ 220, and the dev-server tests pass unchanged
-- [ ] Task 2.3: Stop tracking the compiled examples
+- [x] Task 2.3: Stop tracking the compiled examples
   - Files: `.gitignore` (`/example/*/app.js`, `/example/*/app.wasm`, with a comment that `vendor.js` stays tracked); `git rm --cached` for the 7 outputs
   - Test: `build-examples.test.js`: `git ls-files example` has no `app.js`/`app.wasm` and still has `example/preact/vendor.js`
   - Done when: on a fresh clone, `npm ci && npm test && npm run test:e2e` pass
-- [ ] Task 2.4: Move the preact vendor config into `example/preact/gofront.json`
+- [x] Task 2.4: Move the preact vendor config into `example/preact/gofront.json`
   - Files: `package.json` (drop the `gofront` block), `example/preact/gofront.json` (new, `dest: "vendor.js"`), `docs/usage.md` (how to regenerate)
   - Test: in `test/unit/compiler/prep.test.js`, `loadProjectConfig("example/preact").vendor` has the preact packages and `loadProjectConfig(".")` has no `vendor`. After `npm ci`, `node src/index.js prep example/preact` → `sha256sum -c` on the recorded `vendor.js` hash
   - Done when: `vendor.js` is byte-identical, or the task stops per Edge Cases
-- [ ] Task 2.5: Document building the examples
+- [x] Task 2.5: Document building the examples
   - Files: `README.md` (examples section), `docs/usage.md`
   - Test: none (docs); reviewed against the AGENTS.md docs and changelog rules
   - Done when: both say to run `npm run build` before opening an example, and the `CHANGELOG.md` `[Unreleased]` entry matches the Release note

@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { handlePrep } from "../../../src/cli-core.js";
+import { loadProjectConfig } from "../../../src/project-config.js";
 import {
 	bundleVendor,
 	findNodePolyfills,
@@ -254,6 +255,26 @@ test("handlePrep preserves vendor.minify from package.json when CLI flag omitted
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
+});
+
+section("vendor — preact example config");
+
+test("example/preact/gofront.json holds the preact vendor config", () => {
+	const vendor = loadProjectConfig(join(ROOT, "example/preact")).vendor;
+	assertEqual(vendor.dest, "vendor.js");
+	assertEqual(vendor.packages.join(","), "preact,preact/hooks");
+	assert(vendor.namedExports.preact.includes("render"), "preact exports");
+	assert(vendor.namedExports["preact/hooks"].includes("useState"), "hooks");
+});
+
+test("loadVendorConfig resolves the preact example with its own dest", () => {
+	const config = loadVendorConfig(join(ROOT, "example/preact"));
+	assertEqual(config.dest, "vendor.js");
+	assertEqual(config.packages.join(","), "preact,preact/hooks");
+});
+
+test("the repository root has no vendor config", () => {
+	assertEqual(loadProjectConfig(ROOT).vendor, undefined);
 });
 
 section("vendor — bundling workflow");
