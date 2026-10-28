@@ -424,7 +424,17 @@ export class ModuleEmitter {
 				}
 			} else if (resolvedStruct?.fields) {
 				let fIdx = 0;
-				for (const [fName, fType] of resolvedStruct.fields.entries()) {
+				// `fields` also holds promoted fields; the declared fields
+				// (`_structFields`) give the real layout of a defined struct.
+				const declared = resolvedStruct._structFields
+					? resolvedStruct._structFields.flatMap((sf) => {
+							if (!sf.embedded) return sf.names.map((n) => [n, sf.type]);
+							const inner = sf.type.kind === "pointer" ? sf.type.base : sf.type;
+							const n = (inner?.name ?? "").split(".").pop();
+							return n ? [[n, sf.type]] : [];
+						})
+					: [...resolvedStruct.fields.entries()];
+				for (const [fName, fType] of declared) {
 					const wType = toWasmType(fType, this.checker, this);
 					fields.push({ name: fName, goType: fType, wType });
 					fieldIndexMap.set(fName, fIdx);

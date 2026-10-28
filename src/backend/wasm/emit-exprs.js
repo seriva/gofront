@@ -2695,6 +2695,21 @@ export class ExprsEmitter {
 			return;
 		}
 
+		// Struct to a different defined struct type: a copy in the target's type.
+		if (
+			isStructType(fromType, this.mod.checker, this.mod) &&
+			isStructType(targetType, this.mod.checker, this.mod) &&
+			!isPointerToStruct(fromType, this.mod.checker, this.mod) &&
+			!isPointerToStruct(targetType, this.mod.checker, this.mod)
+		) {
+			const src = this._resolveStructInfo({ _type: fromType });
+			const dst = this._resolveStructInfo({ _type: targetType });
+			if (src && dst && src.typeIndex !== dst.typeIndex) {
+				this.emitCloneStruct(src, fromWType, dst);
+				return;
+			}
+		}
+
 		if (fromWType === toWType) {
 			this.emitNarrowIntWrap(targetType);
 			return;
