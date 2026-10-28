@@ -15,10 +15,23 @@
 //   TemplFor    { kind, stmtTokens, body: TemplNode[] }
 //   TemplSwitch { kind, exprTokens, cases: TemplCase[] }
 //   TemplCase   { kind, caseTokens: tokens | null (null = default), body: TemplNode[] }
+//
+// Go expressions embedded in templ (`{ expr }`, attribute values, `if`
+// conditions, `switch` and `case` expressions, `@Comp(...)` calls) are also
+// parsed here, so the code generator does not parse them.
+// The results sit on the node as non-enumerable properties (the generic AST
+// walkers in rename/lowering visit enumerable keys only, and these ASTs have
+// no type information):
+//   expr       Expression AST, or null when there are no tokens to parse
+//   exprError  The ParseError a malformed expression raised. The parser keeps
+//              it instead of throwing, so the error still surfaces when the
+//              code generator reads the node (after type-checking), as before
+//   raw        TemplComponent only: `@templ.Raw(arg)`; `expr` is then `arg`
+//   attr.expr / attr.exprError on `expr` and `cond-bool` attributes
 
 import { Parser } from "./parser/index.js";
 import { TT } from "./templ-lexer.js";
-import { T } from "./tokens.js";
+import { T, Token } from "./tokens.js";
 
 const VOID_ELEMENTS = new Set([
 	"area",
@@ -36,6 +49,54 @@ const VOID_ELEMENTS = new Set([
 	"track",
 	"wbr",
 ]);
+
+function attach(node, props) {
+	for (const [name, value] of Object.entries(props)) {
+		Object.defineProperty(node, name, {
+			value,
+			enumerable: false,
+			writable: true,
+			configurable: true,
+		});
+	}
+	return node;
+}
+
+// Parses `tokens` as one Go expression, ending at a synthetic EOF token.
+function parseExprTokens(tokens) {
+	if (!tokens || tokens.length === 0) return { expr: null };
+	try {
+		const eofTok = new Token(T.EOF, "", 1, 1);
+		return { expr: new Parser([...tokens, eofTok]).parseExpr() };
+	} catch (exprError) {
+		return { expr: null, exprError };
+	}
+}
+
+// Parses an `if` condition; the lexer may leave the `if` keyword in front.
+function parseCondTokens(tokens) {
+	if (!tokens || tokens.length === 0) return { expr: null };
+	return parseExprTokens(tokens[0]?.type === T.IF ? tokens.slice(1) : tokens);
+}
+
+function isTemplRaw(toks) {
+	return (
+		toks.length >= 4 &&
+		toks[0]?.value === "templ" &&
+		toks[1]?.type === T.DOT &&
+		toks[2]?.value === "Raw" &&
+		toks[3]?.type === T.LPAREN
+	);
+}
+
+// Parses the `expr` and `cond-bool` attribute expressions of an element.
+function parseAttrExprs(attrs) {
+	for (const attr of attrs) {
+		if (attr.kind === "expr" || attr.kind === "cond-bool")
+			attach(attr, parseExprTokens(attr.tokens));
+	}
+	return attrs;
+}
 
 export class TemplParser extends Parser {
 	// ── Top-level declaration override ───────────────────────────
@@ -101,7 +162,7 @@ export class TemplParser extends Parser {
 				return {
 					kind: "TemplElement",
 					tag: t.value.tag,
-					attrs: t.value.attrs,
+					attrs: parseAttrExprs(t.value.attrs),
 					children: [],
 				};
 			}
@@ -110,10 +171,13 @@ export class TemplParser extends Parser {
 				return { kind: "TemplText", value: t.value };
 			case TT.TEMPL_EXPR:
 				this.advance();
-				return { kind: "TemplExpr", tokens: t.value };
+				return attach(
+					{ kind: "TemplExpr", tokens: t.value },
+					parseExprTokens(t.value),
+				);
 			case TT.TEMPL_COMP:
 				this.advance();
-				return { kind: "TemplComponent", tokens: t.value };
+				return this.templComponent(t.value);
 			case TT.TEMPL_CHILDREN:
 				this.advance();
 				return { kind: "TemplChildren" };
@@ -136,10 +200,18 @@ export class TemplParser extends Parser {
 		}
 	}
 
+	// `@templ.Raw(arg)` parses `arg`; any other component parses the whole call.
+	templComponent(tokens) {
+		const raw = isTemplRaw(tokens);
+		const parsed = parseExprTokens(raw ? tokens.slice(4, -1) : tokens);
+		return attach({ kind: "TemplComponent", tokens }, { raw, ...parsed });
+	}
+
 	// Parse children of an element until the matching close tag.
 	parseHtmlElement() {
 		const openTok = this.advance(); // HTML_OPEN
-		const { tag, attrs } = openTok.value;
+		const { tag } = openTok.value;
+		const attrs = parseAttrExprs(openTok.value.attrs);
 
 		// Void elements have no children and no close tag even without />
 		if (VOID_ELEMENTS.has(tag)) {
@@ -186,7 +258,10 @@ export class TemplParser extends Parser {
 				else_ = this.parseHtmlChildren(); // else body until RBRACE
 			}
 		}
-		return { kind: "TemplIf", condTokens, then, else_ };
+		return attach(
+			{ kind: "TemplIf", condTokens, then, else_ },
+			parseCondTokens(condTokens),
+		);
 	}
 
 	// Parse a TemplFor node. `tok` is the TEMPL_FOR token (already advanced).
@@ -209,17 +284,22 @@ export class TemplParser extends Parser {
 				const isDefault = this.check(TT.TEMPL_DEFAULT);
 				const caseTok = this.advance();
 				const body = this.parseTemplCaseBody();
-				cases.push({
-					kind: "TemplCase",
-					caseTokens: isDefault ? null : caseTok.value,
-					body,
-				});
+				const caseTokens = isDefault ? null : caseTok.value;
+				cases.push(
+					attach(
+						{ kind: "TemplCase", caseTokens, body },
+						isDefault ? { expr: null } : parseExprTokens(caseTokens),
+					),
+				);
 			} else {
 				this.advance(); // skip unexpected
 			}
 		}
 		if (this.check(TT.TEMPL_END)) this.advance(); // consume closing }
-		return { kind: "TemplSwitch", exprTokens, cases };
+		return attach(
+			{ kind: "TemplSwitch", exprTokens, cases },
+			parseExprTokens(exprTokens),
+		);
 	}
 
 	// Parse HTML nodes for a switch case body — stops at CASE/DEFAULT/END/RBRACE.
