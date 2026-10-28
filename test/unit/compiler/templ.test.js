@@ -815,6 +815,29 @@ templ Other(a int) {
 	});
 }
 
+for (const [name, body] of [
+	["if", "if {\n\t\t<p>a</p>\n\t} else {\n\t\t<p>b</p>\n\t}"],
+	["else if", "if a {\n\t\t<p>a</p>\n\t} else if {\n\t\t<p>b</p>\n\t}"],
+	[
+		"chained else if",
+		"if a {\n\t\t<p>a</p>\n\t} else if a {\n\t\t<p>b</p>\n\t} else if {\n\t\t<p>c</p>\n\t} else {\n\t\t<p>d</p>\n\t}",
+	],
+]) {
+	test(`empty ${name} condition fails build and check with the synthetic EOF position`, () => {
+		const { build, check } = runBoth({
+			"main.go": MAIN_GO,
+			"bad.templ": `package main
+templ Bad(a bool) {
+	${body}
+}`,
+		});
+		for (const r of [build, check]) {
+			assertEqual(r.code, 1);
+			assertEqual(r.stderr, `gofront: ERROR\n  ${EOF_PARSE_ERROR}\n`);
+		}
+	});
+}
+
 test("malformed component call fails build and check at the real token position", () => {
 	const { build, check } = runBoth({
 		"main.go": MAIN_GO,

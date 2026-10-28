@@ -66,8 +66,8 @@ function attach(node, props) {
 }
 
 // Parses `tokens` as one Go expression, ending at a synthetic EOF token.
-function parseExprTokens(tokens) {
-	if (!tokens || tokens.length === 0) return { expr: null };
+function parseExprTokens(tokens, allowEmpty = true) {
+	if (allowEmpty && (!tokens || tokens.length === 0)) return { expr: null };
 	try {
 		const eofTok = new Token(T.EOF, "", 1, 1);
 		return { expr: new Parser([...tokens, eofTok]).parseExpr() };
@@ -79,7 +79,10 @@ function parseExprTokens(tokens) {
 // Parses an `if` condition; the lexer may leave the `if` keyword in front.
 function parseCondTokens(tokens) {
 	if (!tokens || tokens.length === 0) return { expr: null };
-	return parseExprTokens(tokens[0]?.type === T.IF ? tokens.slice(1) : tokens);
+	return parseExprTokens(
+		tokens[0]?.type === T.IF ? tokens.slice(1) : tokens,
+		false,
+	);
 }
 
 function isTemplRaw(toks) {
