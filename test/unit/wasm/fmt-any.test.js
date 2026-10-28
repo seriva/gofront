@@ -34,6 +34,17 @@ test("any holding int, string, float, bool and nil", () => {
 	assertEqual(o, "5 hi 2.5 true <nil>\n5 5|5");
 });
 
+test("time.Duration prints as a count for %d and as text for %v and %s", () => {
+	const o = out(
+		`
+	d := 1500 * time.Millisecond
+	fmt.Println(fmt.Sprintf("%d|%5d|%v|%s", d, d, d, d))`,
+		"",
+		'"fmt"; "time"',
+	);
+	assertEqual(o, "1500000000|1500000000|1.5s|1.5s");
+});
+
 test("any holding a slice, a map, a struct and a struct pointer", () => {
 	const o = out(
 		`
