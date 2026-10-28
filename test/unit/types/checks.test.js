@@ -580,6 +580,14 @@ const interfaceMismatchCases = [
 		"interface not satisfied when method has fewer return values",
 		`package main\ntype Loader interface { Load() (string, error) }\ntype Cache struct{}\nfunc (c Cache) Load() string { return "x" }\nfunc fetch(l Loader) {}\nfunc main() { fetch(Cache{}) }`,
 	],
+	[
+		"interface not satisfied when method parameter has distinct named type sharing underlying primitive",
+		`package main\ntype USD int\ntype EUR int\ntype Converter interface { Convert(amount USD) }\ntype Bank struct{}\nfunc (b Bank) Convert(amount EUR) {}\nfunc run(c Converter) {}\nfunc main() { run(Bank{}) }`,
+	],
+	[
+		"interface not satisfied when method return has distinct named type sharing underlying primitive",
+		`package main\ntype USD int\ntype EUR int\ntype Exchanger interface { Exchange() USD }\ntype Bank struct{}\nfunc (b Bank) Exchange() EUR { return 0 }\nfunc run(e Exchanger) {}\nfunc main() { run(Bank{}) }`,
+	],
 ];
 
 for (const [name, code] of interfaceMismatchCases) {

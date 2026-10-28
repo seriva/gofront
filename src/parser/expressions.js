@@ -108,9 +108,9 @@ function _isTypeIntroducerToken(tt) {
 }
 
 export const expressionParserMethods = {
-	parseExprList() {
-		const exprs = [this.parseExpr()];
-		while (this.match(T.COMMA)) exprs.push(this.parseExpr());
+	parseExprList(noCompLit = false) {
+		const exprs = [this.parseExpr(0, noCompLit)];
+		while (this.match(T.COMMA)) exprs.push(this.parseExpr(0, noCompLit));
 		return exprs;
 	},
 
@@ -132,7 +132,13 @@ export const expressionParserMethods = {
 		const t = this.peek();
 		if (UNARY_OPS.has(t.type)) {
 			const op = this.advance().value;
-			return { kind: "UnaryExpr", op, operand: this.parseUnary(noCompLit) };
+			return {
+				kind: "UnaryExpr",
+				op,
+				operand: this.parseUnary(noCompLit),
+				_line: t.line,
+				_col: t.col,
+			};
 		}
 		if (t.type === T.AWAIT) {
 			this.advance();
@@ -166,7 +172,12 @@ export const expressionParserMethods = {
 				}
 			} else if (t.type === T.LBRACKET) {
 				// Check if this looks like generic type args: Ident[Type](...)  or Ident[Type]{...}
-				if (expr.kind === "Ident" && this.looksLikeTypeArgList()) {
+				// `pkg.F[int](x)` / `pkg.T[X]{...}` instantiate through a qualifier.
+				if (
+					(expr.kind === "Ident" ||
+						(expr.kind === "SelectorExpr" && expr.expr.kind === "Ident")) &&
+					this.looksLikeTypeArgList()
+				) {
 					this.advance(); // consume [
 					const typeArgs = [this.parseType()];
 					while (this.match(T.COMMA)) typeArgs.push(this.parseType());
@@ -369,7 +380,16 @@ export const expressionParserMethods = {
 		while (!this.check(T.RBRACE) && !this.check(T.EOF)) {
 			// Implicit composite literal: {X: 1} inside []Point{{X:1}} or map[string]Point{"a": {X:1}}
 			if (this.check(T.LBRACE)) {
-				elems.push(this.parseCompositeLit(null)); // null typeExpr = inferred
+				const lit = this.parseCompositeLit(null); // null typeExpr = inferred
+				if (this.match(T.COLON)) {
+					// Elided key type: map[P]int{{1}: 2}
+					const val = this.check(T.LBRACE)
+						? this.parseCompositeLit(null)
+						: this.parseExpr();
+					elems.push({ kind: "KeyValueExpr", key: lit, value: val });
+				} else {
+					elems.push(lit);
+				}
 			} else {
 				const first = this.parseExpr();
 				if (this.match(T.COLON)) {

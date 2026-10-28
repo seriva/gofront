@@ -18,7 +18,7 @@ gofront prep [dir] [--minify]                run asset copying + vendor bundling
 gofront check <dir>                          type-check a single package
 gofront check <dir>/...                      type-check every package under <dir> (Go-style `./...`)
 gofront test <dir> [--dom]                   run tests for a single package
-gofront test <dir>/... [--dom] [-v] [-run <regex>]  run tests recursively
+gofront test <dir>/... [--dom] [-v] [-run <regex>] [-bench <regex>]  run tests recursively
 gofront <file.go>                            compile single file → stdout
 gofront <dir>                                compile all *.go in directory → stdout
 gofront <input> -o out.js                    write output to file (prints elapsed compile time; hybrid projects also write app.wasm)
@@ -128,11 +128,16 @@ gofront test app/src/...           # every package under app/src, Go-style summa
 gofront test app/src -v            # === RUN / --- PASS lines for every test and subtest
 gofront test app/src -run 'Plural' # only tests whose name matches the regex
 gofront test app/src --dom         # run under JSDOM: document/window available for gom and .templ components
+gofront test app/src -bench .      # also run BenchmarkXxx functions and print ns/op
 ```
 
 - `testing.T` supports `Error`, `Errorf`, `Fatal`, `Fatalf`, `Fail`, `FailNow`, `Failed`,
-  `Log`, `Logf`, `Skip`, `Skipf`, `Skipped`, `Helper`, `Run` and `Name`; `testing.Short()`
-  and `testing.Verbose()` are available at package level.
+  `Log`, `Logf`, `Skip`, `Skipf`, `Skipped`, `Helper`, `Run`, `Name`, `Cleanup`, `Setenv`,
+  `Context`, `Deadline` and `Parallel`. `testing.Short()` and `testing.Verbose()` are
+  available at package level in `js` packages.
+- `func TestMain(m *testing.M)` runs setup and teardown around the tests; call `m.Run()`.
+- `BenchmarkXxx(b *testing.B)` functions run with `-bench <regex>`; use `b.N` or `b.Loop()`,
+  and `b.ResetTimer()` or `b.ReportAllocs()` as in Go.
 - Output follows `go test`: `ok` / `FAIL` / `?  [no test files]` per package, non-zero exit
   when anything fails.
 - `--dom` requires `jsdom` to be installed (it is a devDependency of GoFront itself; add it to

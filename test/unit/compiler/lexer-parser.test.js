@@ -1,5 +1,6 @@
 // GoFront test suite — lexer, parser, dts-parser, codegen
 import { fileURLToPath } from "node:url";
+import { T } from "../../../src/lexer.js";
 import {
 	parseJsonTag,
 	parseStructTag,
@@ -10,6 +11,7 @@ import {
 	assertEqual,
 	assertThrows,
 	compile,
+	compileHybrid,
 	DtsParser,
 	Lexer,
 	Parser,
@@ -275,23 +277,56 @@ func main() {
 	assertEqual(runJs(js), "10");
 });
 
-test("string escape \\0 is a null byte", () => {
+test("string escape \\000 is a null byte", () => {
 	const js = compile(`package main
 func main() {
-	s := "a\\0b"
+	s := "a\\000b"
 	console.log(len(s))
 }`).js;
 	assertEqual(runJs(js), "3");
 });
 
-test("unknown string escape falls back to literal \\x form", () => {
-	// The lexer preserves unknown escape sequences as-is (backslash + char)
-	const js = compile(`package main
-func main() {
-	s := "\\q"
-	console.log(len(s))
-}`).js;
-	assertEqual(runJs(js), "2");
+test("unknown string escape is a lex error", () => {
+	assertThrows(
+		() => new Lexer('package main\nvar x = "\\q"', "test.go").tokenize(),
+		"unknown escape sequence",
+	);
+});
+
+test("\\' is rejected in strings and \\\" in runes", () => {
+	assertThrows(
+		() => new Lexer('package main\nvar x = "\\\'"', "test.go").tokenize(),
+		"unknown escape sequence",
+	);
+	assertThrows(
+		() => new Lexer("package main\nvar x = '\\\"'", "test.go").tokenize(),
+		"unknown escape sequence",
+	);
+});
+
+test("string and rune escapes decode every Go form", () => {
+	const str = (lit) =>
+		new Lexer(`package main\nvar x = ${lit}`, "t.go")
+			.tokenize()
+			.find((t) => t.type === T.STRING)?.value;
+	assertEqual(str('"\\a\\b\\f\\v"'), "\x07\x08\x0c\x0b");
+	assertEqual(str('"\\x41\\101\\u00e9\\U0001F600"'), "AA\u00e9\u{1F600}");
+	assertEqual(str('"\\xc3"'), "\u00c3");
+});
+
+test("invalid numeric escapes are lex errors", () => {
+	for (const lit of [
+		'"\\xZZ"',
+		'"\\400"',
+		'"\\ud800"',
+		'"\\U00110000"',
+		'"\\0"',
+	]) {
+		assertThrows(
+			() => new Lexer(`package main\nvar x = ${lit}`, "t.go").tokenize(),
+			"",
+		);
+	}
 });
 
 test("rune literal escape \\r is carriage return (13)", () => {
@@ -302,10 +337,10 @@ func main() {
 	assertEqual(runJs(js), "13");
 });
 
-test("rune literal escape \\0 is null (0)", () => {
+test("rune literal escape \\000 is null (0)", () => {
 	const js = compile(`package main
 func main() {
-	console.log('\\0')
+	console.log('\\000')
 }`).js;
 	assertEqual(runJs(js), "0");
 });
@@ -327,7 +362,7 @@ test("multi-char rune literal 'ab' throws a lex error", () => {
 test("unknown rune escape \\q throws a lex error", () => {
 	assertThrows(
 		() => new Lexer("package main\nvar x = '\\q'", "test.go").tokenize(),
-		"Unknown escape in rune literal",
+		"unknown escape sequence",
 	);
 });
 
@@ -979,6 +1014,58 @@ type User struct {
 	assertEqual(fields[3].type.kind, "PointerType");
 	assertEqual(fields[3].type.base.name, "Local");
 	assertEqual(fields[3].tag, null);
+});
+
+section("Result lists with instantiated generic types (Task 0.19d)");
+
+test("parser accepts func mk() (Box[int], *Box[int])", () => {
+	const src = `package main
+func mk() (Box[int], *Box[int]) { return Box[int]{}, nil }
+func named() (a []int, b [2]Box[int]) { return }
+`;
+	const file = new Parser(new Lexer(src).tokenize()).parse();
+	const mk = file.decls[0].returnType;
+	assertEqual(mk.kind, "TupleType");
+	assertEqual(mk.types.length, 2);
+	assertEqual(mk._namedReturns, undefined);
+	assertEqual(mk.types[1].kind, "PointerType");
+	const named = file.decls[1].returnType;
+	assertEqual(named._namedReturns.map((r) => r.name).join(","), "a,b");
+});
+
+test("generic results run on both backends", () => {
+	const res = compileHybrid(`
+package main
+
+type Box[T any] struct{ V T }
+
+func mk() (Box[int], *Box[int]) {
+	return Box[int]{1}, &Box[int]{2}
+}
+
+func Main() int {
+	x, y := mk()
+	return x.V*10 + y.V
+}
+`).run("Main");
+	assertEqual(res.jsRes, 12);
+	assertEqual(res.wasmRes, 12n);
+});
+
+section("Composite-literal elided keys (Task 0.29)");
+
+test("parser: {1}: 2 parses as a key/value pair with an elided key type", () => {
+	const ast = new Parser(
+		new Lexer(
+			"package main\ntype P struct{ X int }\nvar m = map[P]int{{1}: 2}",
+		).tokenize(),
+	).parse();
+	const decl = ast.decls.find((d) => d.kind === "VarDecl");
+	const lit = decl.decls[0].value[0];
+	const kv = lit.elems[0];
+	assertEqual(kv.kind, "KeyValueExpr");
+	assertEqual(kv.key.kind, "CompositeLit");
+	assertEqual(kv.key.typeExpr, null);
 });
 
 // ── Entry point ───────────────────────────────────────────────

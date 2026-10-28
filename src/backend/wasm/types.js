@@ -2,6 +2,9 @@
 // Maps GoFront types to WasmGC types and manages type registry.
 
 import { SHARED_KINDS } from "../../typechecker/stdlib/shared.js";
+import { isComplex, isComplex64 } from "../../typechecker/types.js";
+
+export { isComplex, isComplex64 };
 
 // Name of the runtime's error struct (`errors.New`, `fmt.Errorf`, strconv).
 export const ERROR_STRUCT = "__errorString";
@@ -15,8 +18,14 @@ export function isTestingT(goType) {
 			? goType.base
 			: goType.kind === "StarExpr"
 				? (goType.expr ?? goType.operand)
-				: null;
-	return base?.name === "testing.T";
+				: goType;
+	const name = base?.name ?? (typeof base === "string" ? base : null);
+	return (
+		name === "testing.T" ||
+		name === "testing.B" ||
+		name === "testing.M" ||
+		name === "testing.TB"
+	);
 }
 
 export function toWasmType(goType, checker = null, mod = null) {
@@ -105,16 +114,27 @@ export function toWasmType(goType, checker = null, mod = null) {
 		) {
 			return "v128";
 		}
-		if (mod?.getStructType(goType.name)) {
+		// An instance written `Box[int]` is the monomorphised struct `Box$int`.
+		const instance = goType.typeArgs?.length
+			? mod?.getStructType(
+					`${goType.name}$${goType.typeArgs.map(goTypeKey).join("$")}`,
+				)
+			: null;
+		const struct = instance ?? mod?.getStructType(goType.name);
+		if (struct) {
 			return {
 				kind: "ref",
 				nullable: true,
-				typeIndex: mod.getStructType(goType.name).typeIndex,
+				typeIndex: struct.typeIndex,
 			};
 		}
 		if (goType.underlying) {
 			return toWasmType(goType.underlying, checker, mod);
 		}
+		// A bare `{ kind: "named", name }` (method receivers): look it up.
+		const resolved = checker?.types?.get(goType.name);
+		if (resolved?.underlying)
+			return toWasmType(resolved.underlying, checker, mod);
 	}
 
 	// Untyped constants
@@ -128,6 +148,17 @@ export function toWasmType(goType, checker = null, mod = null) {
 				return "externref";
 			case "bool":
 				return "i32";
+			case "complex128":
+				if (mod?.getComplexType) {
+					const info = mod.getComplexType("complex128");
+					return {
+						kind: "ref",
+						nullable: true,
+						typeIndex: info.typeIndex,
+						typeName: info.name,
+					};
+				}
+				return { kind: "ref", nullable: true, heapType: "struct" };
 			default:
 				return "i64";
 		}
@@ -159,6 +190,32 @@ export function toWasmType(goType, checker = null, mod = null) {
 			case "float64":
 				return "f64";
 
+			case "complex64": {
+				if (mod?.getComplexType) {
+					const info = mod.getComplexType("complex64");
+					return {
+						kind: "ref",
+						nullable: true,
+						typeIndex: info.typeIndex,
+						typeName: info.name,
+					};
+				}
+				return { kind: "ref", nullable: true, heapType: "struct" };
+			}
+
+			case "complex128": {
+				if (mod?.getComplexType) {
+					const info = mod.getComplexType("complex128");
+					return {
+						kind: "ref",
+						nullable: true,
+						typeIndex: info.typeIndex,
+						typeName: info.name,
+					};
+				}
+				return { kind: "ref", nullable: true, heapType: "struct" };
+			}
+
 			case "string":
 				return "externref";
 
@@ -181,14 +238,32 @@ export function toWasmType(goType, checker = null, mod = null) {
 			if (
 				typeof baseWType === "object" &&
 				baseWType !== null &&
-				baseWType.kind === "ref"
+				baseWType.kind === "ref" &&
+				// A pointer to a slice or map goes through the scalar box:
+				// the pointee is a replaceable reference value.
+				!isReplaceableRef(goType.base, checker)
 			) {
 				return baseWType;
 			}
-			if (mod?.getBoxType) {
+			if (mod?.getPtrType) {
+				const ptr = mod.getPtrType(goType.base);
+				if (mod.getBoxType) mod.getBoxType(goType.base);
+				if (ptr)
+					return {
+						kind: "ref",
+						nullable: true,
+						typeIndex: ptr.typeIndex,
+						typeName: ptr.name,
+					};
+			} else if (mod?.getBoxType) {
 				const box = mod.getBoxType(goType.base);
 				if (box)
-					return { kind: "ref", nullable: true, typeIndex: box.typeIndex };
+					return {
+						kind: "ref",
+						nullable: true,
+						typeIndex: box.typeIndex,
+						typeName: box.name,
+					};
 			}
 		}
 		return { kind: "ref", nullable: true, heapType: "any" };
@@ -262,10 +337,8 @@ export function toWasmType(goType, checker = null, mod = null) {
 					for (const n of names) rawFields.push({ name: n, goType: f.type });
 				}
 			}
-			if (rawFields.length > 0) {
-				const info = mod.getAnonStructType(rawFields);
-				return { kind: "ref", nullable: true, typeIndex: info.typeIndex };
-			}
+			const info = mod.getAnonStructType(rawFields);
+			return { kind: "ref", nullable: true, typeIndex: info.typeIndex };
 		}
 		return { kind: "ref", nullable: true, heapType: "struct" };
 	}
@@ -294,14 +367,19 @@ export function getInterfaceMethodList(iface) {
 	if (iface.methods instanceof Map) {
 		return Array.from(iface.methods.entries()).map(([name, sig]) => ({
 			name,
-			params: (sig.params ?? []).map((p) => p.type ?? p),
+			params: variadicAsSlice(
+				(sig.params ?? []).map((p) => p.type ?? p),
+				sig.variadic,
+			),
 			returns: (sig.returns ?? []).map((r) => r.type ?? r),
 		}));
 	}
 	if (Array.isArray(iface.methods)) {
 		return iface.methods.map((m) => ({
 			name: m.name?.value ?? m.name ?? m,
-			params: (m.params ?? []).map((p) => p.type ?? p),
+			params: (m.params ?? []).map((p) =>
+				p.variadic ? { kind: "SliceType", elem: p.type } : (p.type ?? p),
+			),
 			returns: m.returnType
 				? m.returnType.kind === "TupleType" || m.returnType.kind === "tuple"
 					? m.returnType.types
@@ -404,6 +482,34 @@ export function isPointerToStruct(goType, checker = null, mod = null) {
 	return false;
 }
 
+// Slices and maps are reference values that an assignment through a pointer
+// replaces (a nil map becomes a new one), unlike structs and arrays, whose
+// pointer is the value's own reference.
+function isReplaceableRef(goType, checker) {
+	return isSliceType(goType, checker) || isMapType(goType, checker);
+}
+
+export function isScalarType(goType, checker = null, mod = null) {
+	if (!goType) return false;
+	// A slice or map is a pointee "scalar": the pointer to it is a
+	// box, so the pointee can be replaced (`*p = make(...)`).
+	if (isReplaceableRef(goType, checker)) return true;
+	if (
+		isStructType(goType, checker, mod) ||
+		isArrayType(goType, checker) ||
+		isMapType(goType, checker) ||
+		isFuncType(goType, checker) ||
+		isComplex(goType)
+	) {
+		return false;
+	}
+	const wType = toWasmType(goType, checker, mod);
+	if (typeof wType === "object" && wType !== null && wType.kind === "ref") {
+		return false;
+	}
+	return true;
+}
+
 export function isSliceType(goType, checker = null) {
 	if (!goType) return false;
 	if (goType.kind === "TypeName" || goType.kind === "Ident") {
@@ -413,7 +519,36 @@ export function isSliceType(goType, checker = null) {
 	if (goType.kind === "named" && goType.underlying) {
 		return isSliceType(goType.underlying, checker);
 	}
+	if (goType.kind === "named" && !goType.underlying) {
+		const resolved = checker?.types?.get(goType.name);
+		if (resolved && resolved !== goType) return isSliceType(resolved, checker);
+	}
 	return goType.kind === "slice" || goType.kind === "SliceType";
+}
+
+export function getSliceElemType(t, checker = null) {
+	if (!t) return null;
+	if (t.elem) return t.elem;
+	if (t.underlying?.elem) return t.underlying.elem;
+	if (t.name && checker?.types?.has(t.name)) {
+		const resolved = checker.types.get(t.name);
+		return getSliceElemType(resolved, checker);
+	}
+	return null;
+}
+
+// `[]rune` / `[]int32` (also through named types): the target of `[]rune(s)`.
+export function isRuneSlice(goType, checker = null) {
+	if (!isSliceType(goType, checker)) return false;
+	let t = goType;
+	while (t && !t.elem) {
+		if (t.kind === "named") t = t.underlying;
+		else if (t.kind === "TypeName" || t.kind === "Ident")
+			t = checker?.types?.get(t.name);
+		else return false;
+	}
+	const name = t?.elem?.name;
+	return name === "rune" || name === "int32";
 }
 
 // `gofront/shared` linear-memory buffer: returns the SHARED_KINDS entry
@@ -483,6 +618,10 @@ export function isStringType(goType, checker = null) {
 	if (goType.kind === "named") {
 		if (goType.name === "string") return true;
 		if (goType.underlying) return isStringType(goType.underlying, checker);
+		// A bare `{ kind: "named", name }` (interface candidates) resolves by name.
+		const resolved = checker?.types?.get(goType.name);
+		if (resolved && resolved !== goType && resolved.kind === "named")
+			return isStringType(resolved, checker);
 	}
 	if (goType.kind === "basic") return goType.name === "string";
 	if (goType.kind === "untyped") return goType.base === "string";
@@ -639,7 +778,9 @@ export function getFuncSignature(goType, checker = null) {
 		goType.kind === "FuncLit" ||
 		goType.kind === "FuncDecl"
 	) {
-		const params = (goType.params ?? []).map((p) => p.type ?? p);
+		const params = (goType.params ?? []).map((p) =>
+			p.variadic ? { kind: "SliceType", elem: p.type } : (p.type ?? p),
+		);
 		const returns = [];
 		if (goType.returnType) {
 			if (
@@ -672,9 +813,20 @@ export function getFuncSignature(goType, checker = null) {
 				returns.push(r);
 			}
 		}
-		return { params: goType.params ?? [], returns };
+		return {
+			params: variadicAsSlice(goType.params ?? [], goType.variadic),
+			returns,
+		};
 	}
 	return { params: [], returns: [] };
+}
+
+// Checker func types keep a variadic parameter's element type; in WASM the
+// parameter is a slice (see variadic.js).
+export function variadicAsSlice(params, variadic) {
+	if (!variadic || params.length === 0) return params;
+	const last = params[params.length - 1];
+	return [...params.slice(0, -1), { kind: "slice", elem: last }];
 }
 
 export function isUnhashableGoType(goType, checker = null, seen = new Set()) {

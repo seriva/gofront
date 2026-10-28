@@ -49,3 +49,24 @@ order = 6
 name  = "types"
 paths = ["src/typechecker/types.js", "src/tokens.js"]
 order = 7
+
+# Go standard library (stdlib/, GoFront Go) — same rule: a layer can only import from layers
+# with HIGHER order numbers.
+# stdlib-high(9) → stdlib-mid(10) → stdlib-leaf(11)
+# stdlib/math is unlayered: it imports the built-in math/bits, which
+# sentrux resolves by suffix to src/backend/js/stdlib/bits.js (a false layer violation).
+
+[[layers]]
+name  = "stdlib-high"
+paths = ["stdlib/encoding/*"]
+order = 9
+
+[[layers]]
+name  = "stdlib-mid"
+paths = ["stdlib/io/*", "stdlib/hash/*", "stdlib/bytes/*", "stdlib/strings/*", "stdlib/strconv/*", "stdlib/slices/*", "stdlib/maps/*"]
+order = 10
+
+[[layers]]
+name  = "stdlib-leaf"
+paths = ["stdlib/cmp/*", "stdlib/errors/*", "stdlib/iter/*", "stdlib/sort/*", "stdlib/sync/*", "stdlib/unicode/*"]
+order = 11

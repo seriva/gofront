@@ -32,6 +32,22 @@ export function nodeWritesVar(node, name) {
 	}
 }
 
+// The variable whose address `node` takes without an explicit `&`, or null:
+// a pointer-receiver method call or method value (`v.M()`, `v.M` with
+// `func (*T) M`) takes `&v`, and slicing an array (`a[:]`) aliases it.
+export function implicitAddrRoot(node) {
+	if (node.kind === "SelectorExpr" && node._type?._ptrRecv === true)
+		return rootIdentName(node.expr);
+	if (node.kind === "SliceExpr" && isArrayTyped(node.expr?._type))
+		return rootIdentName(node.expr);
+	return null;
+}
+
+function isArrayTyped(t) {
+	while (t?.kind === "named") t = t.underlying;
+	return t?.kind === "array";
+}
+
 // True when `node` may modify (or take the address of) the value held by variable `name`.
 export function nodeMutatesVar(node, name, addrOnly = false) {
 	if (!node || typeof node !== "object") return false;
@@ -43,11 +59,13 @@ export function nodeMutatesVar(node, name, addrOnly = false) {
 		rootIdentName(node.operand) === name
 	)
 		return true;
+	if (addrOnly && implicitAddrRoot(node) === name) return true;
 	if (!addrOnly && nodeWritesVar(node, name)) return true;
 	return someChild(node, (child) => nodeMutatesVar(child, name, addrOnly));
 }
 
 // Single-pass collector of all mutated or address-taken variables in an AST node.
+// With `addrOnly`, only address-taken ones, implicit address-taking included.
 export function collectMutatedVars(
 	node,
 	mutated = new Set(),
@@ -62,7 +80,10 @@ export function collectMutatedVars(
 	if (node.kind === "UnaryExpr" && node.op === "&") {
 		const root = rootIdentName(node.operand);
 		if (root) mutated.add(root);
-	} else if (!addrOnly) {
+	} else if (addrOnly) {
+		const root = implicitAddrRoot(node);
+		if (root) mutated.add(root);
+	} else {
 		if (node.kind === "AssignStmt") {
 			for (const e of node.lhs) {
 				const root = rootIdentName(e);

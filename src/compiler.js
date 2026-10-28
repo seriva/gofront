@@ -29,12 +29,16 @@ import { log } from "./colors.js";
 import { parseDts } from "./dts-parser.js";
 import { Lexer } from "./lexer.js";
 import { lower } from "./lower/index.js";
+import { generateJsonCodecs } from "./lower/json-codecs.js";
+import { reachableStdlibDecls } from "./lower/reachability.js";
+import { forEachChild } from "./lower/walk.js";
 import { Parser } from "./parser/index.js";
 import {
 	isBuiltinPackage,
 	isLocalPath,
 	resolveAll,
 	resolveGwDir,
+	resolveStdlibSource,
 } from "./resolver.js";
 import { TemplLexer } from "./templ-lexer.js";
 import { TemplParser } from "./templ-parser.js";
@@ -265,12 +269,19 @@ function linkWasmUnits(
 	const types = new Map();
 	const bundledPackages = new Set();
 	const programs = [];
+	const stdlibPrograms = [];
 	for (const u of units) {
-		for (const [k, v] of u.types) types.set(k, v);
 		for (const b of u.bundledPackages) bundledPackages.add(b);
-		programs.push(...u.programs);
+		const copies = u.programs.map((p) => cloneAstForWasm(p));
+		programs.push(...copies);
+		if (u.key.startsWith("stdlib:")) stdlibPrograms.push(...copies);
 	}
-	const checker = {
+	lowerStdlibRefs(programs);
+	dequalifyBundledRefs(programs, bundledPackages);
+	const keepType = pruneStdlibPrograms(programs, stdlibPrograms);
+	for (const u of units)
+		for (const [k, v] of u.types) if (keepType(v)) types.set(k, v);
+	const checker = Object.assign(new TypeChecker(), {
 		types,
 		errors: [],
 		err(msg, node) {
@@ -283,7 +294,7 @@ function linkWasmUnits(
 			this.errors.push(e);
 			return e;
 		},
-	};
+	});
 	const lowerRes = lower(programs, checker);
 	return compileWasmModule(programs, checker, lowerRes, {
 		boundary: true,
@@ -292,6 +303,78 @@ function linkWasmUnits(
 		callMain: rootTarget === "wasm",
 		sourceMappingURL,
 	});
+}
+
+// The WASM pipeline rewrites ASTs in place (package dequalification,
+// monomorphisation, variadic desugaring).  Parsed ASTs are cached across
+// builds and shared with JS codegen, so the link works on a structural copy;
+// side tables (`_type`, …) are shared by reference.
+function cloneAstForWasm(node, seen = new Map()) {
+	if (!node || typeof node !== "object") return node;
+	const prev = seen.get(node);
+	if (prev) return prev;
+	const copy = Array.isArray(node) ? [] : {};
+	seen.set(node, copy);
+	if (Array.isArray(node)) {
+		for (const n of node) copy.push(cloneAstForWasm(n, seen));
+		return copy;
+	}
+	for (const [k, v] of Object.entries(node)) {
+		copy[k] = k.charCodeAt(0) === 95 ? v : cloneAstForWasm(v, seen);
+	}
+	return copy;
+}
+
+// Drops unreachable Go-source stdlib declarations from the link copy and
+// returns a filter that drops their (mangled) named types.
+function pruneStdlibPrograms(programs, stdlibPrograms) {
+	if (stdlibPrograms.length === 0) return () => true;
+	const std = new Set(stdlibPrograms);
+	const reached = reachableStdlibDecls(
+		programs.filter((p) => !std.has(p)),
+		stdlibPrograms,
+	);
+	const types = new Set();
+	for (const p of stdlibPrograms) {
+		p.decls = p.decls.filter((d) => reached.has(d));
+		for (const d of p.decls) if (d.kind === "TypeDecl") types.add(d.name);
+	}
+	return (t) => {
+		const name = typeof t?.name === "string" ? t.name : "";
+		return !name.includes("$$") || types.has(name.replace(/\[.*$/, ""));
+	};
+}
+
+// The linked module is flat, so `util.Two` names the top-level `Two`.  Done on
+// the link copy before monomorphisation, whose re-check of all programs has no
+// package namespaces.  A local variable that shadows the package is typed and
+// is left alone.
+function isBundledSelector(node, bundled) {
+	const base = node.expr;
+	return (
+		base?.kind === "Ident" &&
+		bundled.has(base.name) &&
+		(base._type == null || base._type.kind === "namespace")
+	);
+}
+
+function dequalifyBundledRefs(node, bundled) {
+	if (!node || typeof node !== "object") return;
+	if (Array.isArray(node)) {
+		for (const n of node) dequalifyBundledRefs(n, bundled);
+		return;
+	}
+	if (node.kind === "SelectorExpr" && isBundledSelector(node, bundled)) {
+		node.kind = "Ident";
+		node.name = node.field;
+		delete node.expr;
+		delete node.field;
+	} else if (node.kind === "TypeName" || node.kind === "GenericTypeName") {
+		const dot = node.name?.indexOf(".") ?? -1;
+		if (dot > 0 && bundled.has(node.name.slice(0, dot)))
+			node.name = node.name.slice(dot + 1);
+	}
+	forEachChild(node, (child) => dequalifyBundledRefs(child, bundled));
 }
 
 // The linked module is one flat namespace (like the JS bundle), so a top-level
@@ -377,6 +460,535 @@ function linkIntoBundle(options, merged, pkgTarget, { sourceMappingURL } = {}) {
 	};
 }
 
+// ── Go-source stdlib ──────────────────────────────────────────
+//
+// Packages under stdlib/<path>/ are GoFront Go.  Each is type-checked
+// and compiled once per build as a `both` package (strict numerics): its JS
+// is bundled for js/both importers and its programs are linked into app.wasm
+// for wasm/both importers, never through the boundary facade.  Top-level
+// names are mangled to `Name$$path` so they cannot collide with user
+// declarations in the flat JS bundle or the linked module.  A directory for an
+// emitter-backed package (`errors`) is an overlay: its members join that
+// namespace and unqualified references to emitter members become `errors.X`.
+
+function stdlibSuffix(importPath) {
+	return `$$${importPath.replaceAll("/", "$")}`;
+}
+
+function parseStdlibFiles(dir) {
+	return gwFilesIn(dir).map((f) => {
+		const source = readFileSync(f, "utf8");
+		const filename = basename(f);
+		const tokens = new Lexer(source, filename).tokenize();
+		const ast = new Parser(tokens, filename, source).parse();
+		ast._source = source;
+		ast._path = resolve(f);
+		ast.target = "both";
+		return ast;
+	});
+}
+
+// Top-level value and type names declared by the package.
+function stdlibTopLevelNames(programs) {
+	const values = new Set();
+	const types = new Set();
+	for (const p of programs) {
+		for (const d of p.decls ?? []) {
+			if (d.kind === "TypeDecl") types.add(d.name);
+			else if (d.kind === "FuncDecl" && d.name !== "init") values.add(d.name);
+			else if (d.kind === "VarDecl" || d.kind === "ConstDecl")
+				for (const spec of d.decls ?? [])
+					for (const n of spec.names ?? []) if (n !== "_") values.add(n);
+		}
+	}
+	return { values, types };
+}
+
+// Renames the package's top-level declarations and every reference to them.
+// `refs` holds the `file:line:col` of identifiers the first type-check
+// resolved to package scope; type names are resolved by name (GoFront types
+// are package-flat) except where a type parameter shadows them.
+function mangleStdlibAst(programs, ctx) {
+	for (const p of programs) {
+		for (const d of p.decls ?? []) mangleDeclNames(d, ctx);
+		mangleRefs(p.decls, p._filename, new Set(), ctx);
+	}
+}
+
+function mangleDeclNames(d, { suffix, values }) {
+	if (d.kind === "TypeDecl" || (d.kind === "FuncDecl" && values.has(d.name))) {
+		d.name += suffix;
+	} else if (d.kind === "VarDecl" || d.kind === "ConstDecl") {
+		for (const spec of d.decls ?? [])
+			spec.names = spec.names.map((n) => (values.has(n) ? n + suffix : n));
+	}
+}
+
+function mangleRefs(node, file, tparams, ctx) {
+	if (!node || typeof node !== "object") return;
+	if (Array.isArray(node)) {
+		for (const n of node) mangleRefs(n, file, tparams, ctx);
+		return;
+	}
+	const tp =
+		node.typeParams?.length > 0
+			? new Set([...tparams, ...node.typeParams.map((t) => t.name)])
+			: tparams;
+	switch (node.kind) {
+		case "TypeName":
+		case "GenericTypeName":
+			mangleTypeRef(node, tp, ctx);
+			break;
+		case "CompositeLit":
+			if (node.typeExpr?.kind === "Ident")
+				mangleTypeRef(node.typeExpr, tp, ctx);
+			break;
+		case "InstantiationExpr": // `Stack[T]{}`, `Pair[K, V](x)`
+		case "IndexExpr":
+			if (node.expr?.kind === "Ident") mangleTypeRef(node.expr, tp, ctx);
+			break;
+		case "CallExpr":
+			if (
+				(node.func?.name === "new" || node.func?.name === "make") &&
+				node.args?.[0]?.kind === "Ident"
+			) {
+				mangleTypeRef(node.args[0], tp, ctx);
+			}
+			break;
+		case "Ident":
+			if (ctx.refs.has(`${file}:${node._line}:${node._col}`))
+				mangleIdentRef(node, ctx);
+			break;
+	}
+	forEachChild(node, (child) => mangleRefs(child, file, tp, ctx));
+}
+
+function mangleTypeRef(node, tparams, { suffix, types, overlay }) {
+	if (types.has(node.name) && !tparams.has(node.name)) {
+		node.name += suffix;
+	} else if (overlay && node.name in overlay.members) {
+		node.name = `${overlay.name}.${node.name}`;
+	}
+}
+
+// A package-scope identifier: a package declaration gets the suffix; in an
+// overlay, an emitter member (`New` in errors) becomes `errors.New`.
+function mangleIdentRef(node, { suffix, values, types, overlay }) {
+	if (values.has(node.name) || types.has(node.name)) {
+		node.name += suffix;
+	} else if (overlay && node.name in overlay.members) {
+		const field = node.name;
+		delete node.name;
+		Object.assign(node, {
+			kind: "SelectorExpr",
+			expr: { kind: "Ident", name: overlay.name, _line: node._line },
+			field,
+		});
+	}
+}
+
+function checkStdlibPrograms(programs, pkgName, options, overlay) {
+	const checker = new TypeChecker();
+	checker.target = "both";
+	checker.pkgName = pkgName;
+	checker.isStdlib = true;
+	if (overlay) {
+		for (const [name, t] of Object.entries(overlay.members)) {
+			checker.globals.define(name, t);
+			if (t.kind === "interface" || t.kind === "named" || t.kind === "struct") {
+				checker.types.set(name, t);
+			}
+		}
+	}
+	resolveImports(
+		programs,
+		programs[0]._path,
+		checker,
+		new Map(),
+		new Set(),
+		[],
+		new Set(),
+		options,
+	);
+	return checker;
+}
+
+// Errors in stdlib source are compiler bugs; the importer reports them at its
+// import (see reportStdlibLoadError), so only the message text is kept, never
+// a location inside stdlib/.
+function throwStdlibErrors(errors) {
+	if (errors.length === 0) return;
+	const detail = (e) =>
+		e.message
+			.split("\n")[0]
+			.replace(/^Type error(?: in \S+)?(?: at line \d+:\d+)?:\s*/, "");
+	throw new Error([...new Set(errors.map(detail))].join("; "));
+}
+
+// Pass 1: type-check the package as written and record which identifiers
+// refer to package scope.  An overlay sees its emitter members unqualified.
+function probeStdlibPackage(_importPath, dir, options, overlay) {
+	const programs = parseStdlibFiles(dir);
+	const pkgName = programs[0].pkg.name;
+	const { values, types } = stdlibTopLevelNames(programs);
+	for (const n of [...values, ...types])
+		if (overlay && n in overlay.members)
+			throw new Error(`overlay redeclares ${overlay.name}.${n}`);
+	const probe = checkStdlibPrograms(programs, pkgName, options, overlay);
+	probe._pkgRefs = new Set();
+	throwStdlibErrors(probe.checkAll(programs));
+	return { pkgName, values, types, refs: probe._pkgRefs };
+}
+
+// Exported members as seen by importers (original name -> type) and the
+// original -> mangled name map; an overlay keeps the emitter members too.
+function stdlibNamespace(checker, { pkgName, values, types, suffix }, overlay) {
+	const members = overlay ? { ...overlay.members } : {};
+	const mangle = new Map();
+	for (const name of [...values, ...types]) {
+		const t = checker.globals.symbols.get(name + suffix);
+		if (!/^[A-Z]/.test(name) || t === undefined) continue;
+		members[name] = t;
+		mangle.set(name, name + suffix);
+	}
+	return {
+		...(overlay ?? {}),
+		kind: "namespace",
+		name: pkgName,
+		members,
+		_gofront: !overlay,
+		_target: "both",
+		_mangle: mangle,
+	};
+}
+
+// Mangled type names (needed by the backends) plus `pkg.T` for exported ones.
+function stdlibExportedTypes(checker, { pkgName, suffix }) {
+	const out = new Map();
+	for (const [k, t] of checker.types) {
+		const at = k.indexOf("$$");
+		if (at < 0) continue;
+		out.set(k, t);
+		const orig = k.slice(0, at);
+		if (k === orig + suffix && /^[A-Z]/.test(orig))
+			out.set(`${pkgName}.${orig}`, t);
+	}
+	return out;
+}
+
+// Loads (once per build) and compiles the Go-source package at `dir`.  A
+// failure is cached too, so every importer reports it.
+function loadStdlibPackage(importPath, dir, options) {
+	const cache = options.stdlibCache;
+	const cached = cache.get(importPath);
+	if (cached === null)
+		throw new Error(`import cycle in Go-source stdlib: ${importPath}`);
+	if (cached instanceof Error) throw cached;
+	if (cached) return cached;
+	cache.set(importPath, null);
+	try {
+		const pkg = buildStdlibPackage(importPath, dir, options);
+		cache.set(importPath, pkg);
+		return pkg;
+	} catch (e) {
+		cache.set(importPath, e);
+		throw e;
+	}
+}
+
+function buildStdlibPackage(importPath, dir, options) {
+	const cache = options.stdlibCache;
+	const overlay = isBuiltinPackage(importPath)
+		? new TypeChecker().globals.lookup(importPath.split("/").at(-1))
+		: null;
+	const info = {
+		...probeStdlibPackage(importPath, dir, options, overlay),
+		suffix: stdlibSuffix(importPath),
+	};
+
+	// Pass 2: mangle a fresh parse and check it again.
+	const programs = parseStdlibFiles(dir);
+	mangleStdlibAst(programs, { ...info, overlay });
+	const checker = checkStdlibPrograms(programs, info.pkgName, options, null);
+	throwStdlibErrors(checker.checkAll(programs));
+	lowerStdlibRefs(programs);
+
+	const pkg = {
+		importPath,
+		checker,
+		pkgName: info.pkgName,
+		overlay,
+		namespace: stdlibNamespace(checker, info, overlay),
+		exportedTypes: stdlibExportedTypes(checker, info),
+		deps: programs
+			.flatMap((p) => p.imports.flatMap((imp) => imp.imports))
+			.map(({ path }) => cache.get(path))
+			.filter(Boolean),
+		unit: {
+			key: `stdlib:${importPath}`,
+			pkgName: info.pkgName,
+			target: "both",
+			programs,
+			types: checker.types,
+			bundledPackages: new Set(),
+		},
+	};
+	return pkg;
+}
+
+// Turns `cmp.Compare` / `cmp.Ordered` references (marked `_stdName` by the
+// checker) into plain identifiers with the mangled name, so WASM
+// monomorphisation sees ordinary top-level references.  Only for ASTs that
+// are not cached: a stdlib package's own parse and the WASM link copy (user
+// ASTs are re-checked on the next build; the JS backend reads `_stdName`).
+function lowerStdlibRefs(node) {
+	if (!node || typeof node !== "object") return;
+	if (Array.isArray(node)) {
+		for (const n of node) lowerStdlibRefs(n);
+		return;
+	}
+	if (node._stdName) {
+		if (node.kind === "SelectorExpr") {
+			delete node.expr;
+			delete node.field;
+			node.kind = "Ident";
+		}
+		node.name = node._stdName;
+		delete node._stdName;
+	}
+	if (node.kind === "CallExpr" && node.func?._jsonStream) {
+		const entry = node.func._jsonGen;
+		node.args.unshift(node.func.expr);
+		delete node.func.expr;
+		delete node.func.field;
+		delete node.func._jsonStream;
+		delete node.func._jsonGen;
+		node.func.kind = "Ident";
+		node.func.name = entry;
+	} else if (node._jsonGen && node.kind === "SelectorExpr") {
+		delete node.expr;
+		delete node.field;
+		node.kind = "Ident";
+		node.name = node._jsonGen;
+	}
+	forEachChild(node, lowerStdlibRefs);
+}
+
+// A Go-source package's JS is generated at the root compile, once every
+// JS-emitted user program is known, so only reachable declarations are
+// emitted (see lower/reachability.js).  Importers leave a marker line.
+const STDLIB_MARKER_RE = /^\/\*__GOFRONT_STDLIB:([^*]*)\*\/$/;
+
+// Prints non-fatal diagnostics (e.g. JS Number precision of a constant).
+function logWarnings(warnings) {
+	for (const w of warnings) log.warn(w);
+}
+
+function stdlibMarker(importPath) {
+	return `/*__GOFRONT_STDLIB:${importPath}*/`;
+}
+
+function stdlibJs(pkg, reached) {
+	const programs = pkg.unit.programs.map((p) => ({
+		...p,
+		decls: p.decls.filter((d) => reached.has(d)),
+	}));
+	if (programs.every((p) => p.decls.length === 0)) return "";
+	return new CodeGen(pkg.checker, new Map(), new Set(), {
+		target: "both",
+		strict: true,
+	}).generateAll(programs, { isTest: false });
+}
+
+// The API a wasm package exposes to JS through the facade: exported func and
+// method signatures and exported type declarations.
+function wasmExportedSignatures(units) {
+	const out = [];
+	for (const u of units) {
+		if (u.target !== "wasm" || u.key.startsWith("stdlib:")) continue;
+		for (const d of u.programs.flatMap((p) => p.decls ?? [])) {
+			if (!/^[A-Z]/.test(d.name ?? "")) continue;
+			if (d.kind === "TypeDecl") out.push(d.type);
+			else if (d.kind === "FuncDecl" || d.kind === "MethodDecl")
+				out.push(d.params, d.returnType);
+		}
+	}
+	return out;
+}
+
+// Replaces each marker with the package's reachable code (no line at all when
+// nothing is reachable) and shifts the source-map lines that follow.
+function spliceStdlibJs(merged, options) {
+	const lines = merged.js.split("\n");
+	const pkgs = lines
+		.map((l) => l.match(STDLIB_MARKER_RE)?.[1])
+		.filter(Boolean)
+		.map((path) => options.stdlibCache.get(path));
+	if (pkgs.length === 0) return;
+	const reached = reachableStdlibDecls(
+		[options.jsRootPrograms, wasmExportedSignatures(options.wasmUnits)],
+		pkgs.flatMap((pkg) => pkg.unit.programs),
+	);
+	const out = [];
+	const spliced = new Set();
+	for (const line of lines) {
+		const path = line.match(STDLIB_MARKER_RE)?.[1];
+		if (!path) {
+			out.push(line);
+			continue;
+		}
+		if (spliced.has(path)) continue;
+		spliced.add(path);
+		const js = stdlibJs(options.stdlibCache.get(path), reached);
+		const code = js === "" ? [] : js.split("\n");
+		const delta = code.length - 1;
+		for (const m of merged.mappings)
+			if (m.genLine > out.length) m.genLine += delta;
+		out.push(...code);
+	}
+	merged.js = out.join("\n");
+}
+
+// Records a package's JS-emitted programs as reachability roots; the root
+// compile then splices in the stdlib code they reach.
+function finishStdlibJs(merged, options, programs, emitTarget) {
+	if (emitTarget !== "wasm") options.jsRootPrograms.push(...programs);
+	if (!options.isDependency) spliceStdlibJs(merged, options);
+}
+
+// Adds a loaded package (and, first, its Go-source dependencies) to the
+// importer's output: JS for js/both importers, a link unit for wasm/both.
+function emitStdlibPackage(
+	pkg,
+	importerTarget,
+	preambles,
+	bundledDirs,
+	options,
+) {
+	for (const dep of pkg.deps)
+		emitStdlibPackage(dep, importerTarget, preambles, bundledDirs, options);
+	// Every importer leaves a JS marker: the facade of a wasm package may
+	// expose a stdlib type; unreachable code splices to nothing.
+	const key = `${pkg.unit.key}:js`;
+	if (!bundledDirs.has(key)) {
+		bundledDirs.add(key);
+		preambles.push(stdlibMarker(pkg.importPath));
+	}
+	if (importerTarget !== "js") registerWasmUnit(options, pkg.unit);
+}
+
+function importNode({ _line, _col, line, col }) {
+	return { _line, _col, line: line ?? _line, col: col ?? _col ?? 1 };
+}
+
+// Reports `msg` at an import spec of program `p`.
+function errAtImport(checker, p, spec, msg, hint = null) {
+	const saved = [checker._currentFile, checker._currentSource];
+	checker._currentFile = p._filename ?? null;
+	checker._currentSource = p._source ?? null;
+	checker.err(msg, importNode(spec), hint);
+	[checker._currentFile, checker._currentSource] = saved;
+}
+
+// Defines the import's namespace (and `pkg.T` type names) in the importer.
+function bindStdlibImport(checker, p, spec, pkg) {
+	const { path, alias } = spec;
+	if (alias === "_") return;
+	if (alias === ".") {
+		errAtImport(checker, p, spec, `dot-import of '${path}' is not supported`);
+		return;
+	}
+	const name = alias ?? pkg.pkgName;
+	// Emitter-backed members are emitted by package name, so an overlaid
+	// package cannot be renamed (aliases of emitter packages never worked).
+	if (pkg.overlay && name !== pkg.pkgName) {
+		errAtImport(
+			checker,
+			p,
+			spec,
+			`import alias for '${path}' is not supported`,
+		);
+		return;
+	}
+	checker.globals.define(name, { ...pkg.namespace, name });
+	for (const [k, t] of pkg.exportedTypes) {
+		const dot = k.indexOf(".");
+		checker.types.set(dot < 0 ? k : `${name}${k.slice(dot)}`, t);
+	}
+	if (!pkg.overlay)
+		checker.trackImport(name, importNode(spec), p._filename, p._source);
+}
+
+// Generates, imports and checks the codecs for the package's `encoding/json`
+// calls as one more (wasm-only) file.  Returns the generated programs: none
+// for a js package, a package with errors, or one that makes no json calls.
+function checkJsonCodecs(programs, checker, preambles, options) {
+	const wasm = checker.target === "wasm" || checker.target === "both";
+	if (!wasm || checker.errors.length > 0) return [];
+	const gen = generateJsonCodecs(programs, checker, checker.pkgName);
+	if (!gen) return [];
+	for (const { program, node, message, hint } of gen.diagnostics) {
+		checker._setCurrentFile(program);
+		checker.recordBlocker("unsupported stdlib member", message);
+		checker.err(message, node, hint);
+	}
+	if (gen.diagnostics.length > 0) return [];
+	const filename = "json_codecs.go";
+	const ast = new Parser(
+		new Lexer(gen.source, filename).tokenize(),
+		filename,
+		gen.source,
+	).parse();
+	ast._source = gen.source;
+	ast._path = join(dirname(programs[0]._path ?? "."), filename);
+	ast.target = checker.target;
+	importStdlibPackages(
+		[ast],
+		checker,
+		preambles,
+		options.bundledDirs ?? new Set(),
+		options,
+	);
+	const before = checker.errors.length;
+	checker.checkAll([ast]);
+	if (checker.errors.length > before) {
+		const detail = checker.errors
+			.slice(before)
+			.map((e) => e.message)
+			.join("\n");
+		throw new Error(
+			`internal error in the generated encoding/json codecs; please report\n${detail}`,
+		);
+	}
+	return [ast];
+}
+
+function importStdlibPackages(
+	programs,
+	checker,
+	preambles,
+	bundledDirs,
+	options,
+) {
+	for (const p of programs) {
+		for (const spec of p.imports.flatMap((imp) => imp.imports)) {
+			if (spec.path.startsWith("js:") || isLocalPath(spec.path)) continue;
+			const dir = resolveStdlibSource(spec.path, options.stdlibRoot);
+			if (!dir) continue;
+			let pkg;
+			try {
+				pkg = loadStdlibPackage(spec.path, dir, options);
+			} catch (e) {
+				const msg = `internal stdlib error in ${spec.path}; please report`;
+				errAtImport(checker, p, spec, msg, e.message);
+				continue;
+			}
+			emitStdlibPackage(pkg, checker.target, preambles, bundledDirs, options);
+			bindStdlibImport(checker, p, spec, pkg);
+		}
+	}
+}
+
 // ── Import resolution ─────────────────────────────────────────
 //
 // Shared by compileFiles (multi-file) and the single-file path in index.js.
@@ -428,7 +1040,11 @@ function resolveImports(
 							"'gofront/shared' requires a wasm-only package (//gofront:target wasm): a both package has no linear memory on the JS side",
 							impNode,
 						);
-					} else if (!isLocalPath(path)) {
+					} else if (
+						!isLocalPath(path) &&
+						(isBuiltinPackage(path) ||
+							!resolveStdlibSource(path, options.stdlibRoot))
+					) {
 						if (!isBuiltinPackage(path)) {
 							checker.recordBlocker("js: import", path);
 							checker.err(
@@ -469,12 +1085,19 @@ function resolveImports(
 		...imp,
 		imports: imp.imports.filter(({ alias }) => alias !== "_"),
 	}));
-	const resolved = resolveAll(allImportsNoSideEffect, fromFile, parseDts);
+	const resolved = resolveAll(
+		allImportsNoSideEffect,
+		fromFile,
+		parseDts,
+		options.stdlibRoot,
+	);
 	for (const [path, info] of resolved) {
 		if (!info) continue;
 		checker.addDefinitions(info.types, info.values);
 		jsImports.set(path, [...info.values.keys()]);
 	}
+
+	importStdlibPackages(programs, checker, preambles, bundledDirs, options);
 
 	// local GoFront packages (./subdir)
 	const seenLocalPaths = new Set();
@@ -541,7 +1164,10 @@ function resolveImports(
 
 				if (alias === "_") continue;
 				if (alias === ".") {
-					checker.addDefinitions(dep.exportedTypes, dep.exportedSymbols);
+					checker.addDefinitions(dep.exportedTypes, dep.exportedSymbols, {
+						external: false,
+						consts: dep.exportedConsts,
+					});
 					continue;
 				}
 				const nameUsed = alias ?? dep.pkgName;
@@ -551,6 +1177,7 @@ function resolveImports(
 					dep.exportedSymbols,
 					dep.exportedTypes,
 					dep.target,
+					dep.exportedConsts,
 				);
 				checker.trackImport(nameUsed, { _line }, p._filename, p._source);
 			}
@@ -590,7 +1217,13 @@ export function compileSingleFile(inputPath, options = {}) {
 		dumpTokens = false,
 		dumpAst = false,
 	} = options;
-	options = { ...options, wasmUnits: options.wasmUnits ?? [] };
+	options = {
+		...options,
+		wasmUnits: options.wasmUnits ?? [],
+		stdlibCache: options.stdlibCache ?? new Map(),
+		jsRootPrograms: options.jsRootPrograms ?? [],
+		bundledDirs: options.bundledDirs ?? new Set(),
+	};
 
 	let source;
 	try {
@@ -661,6 +1294,7 @@ export function compileSingleFile(inputPath, options = {}) {
 	});
 	const mainJs =
 		pkgTarget === "wasm" ? wasmMarker(checker.pkgName) : cg.generate(ast);
+	logWarnings(cg.warnings);
 
 	const mainChunk = {
 		js: mainJs,
@@ -670,6 +1304,7 @@ export function compileSingleFile(inputPath, options = {}) {
 	};
 
 	const merged = mergeCompilationChunks([...preambles, mainChunk]);
+	finishStdlibJs(merged, options, [ast], pkgTarget);
 	const { wasm, wat, wasmOptInfo, wasmSourceMap } = finishWasm(
 		{ ...options, sourceMap },
 		merged,
@@ -716,7 +1351,10 @@ export function compileFiles(files, options = {}) {
 	options = {
 		...options,
 		wasmUnits: options.wasmUnits ?? [],
+		stdlibCache: options.stdlibCache ?? new Map(),
+		jsRootPrograms: options.jsRootPrograms ?? [],
 		rootDir: options.rootDir ?? fromDir,
+		bundledDirs: options.bundledDirs ?? new Set(),
 	};
 	const outputDir =
 		options.outputDir ??
@@ -792,6 +1430,7 @@ export function compileFiles(files, options = {}) {
 
 	// ── 3. Type-check ─────────────────────────────────────────────
 	const errors = checker.checkAll(programs);
+	const codecs = checkJsonCodecs(programs, checker, preambles, options);
 	checker.reportUnusedImports();
 	if (errors.length > 0) {
 		const msgs = errors.map((e) => e.message).join("\n");
@@ -804,7 +1443,7 @@ export function compileFiles(files, options = {}) {
 		key: resolve(fromDir),
 		pkgName,
 		pkgTarget,
-		programs,
+		programs: [...programs, ...codecs],
 		types: checker.types,
 		bundledPackages,
 	});
@@ -820,6 +1459,7 @@ export function compileFiles(files, options = {}) {
 			: codegen.generateAll(programs, {
 					isTest: options.isTest ?? false,
 				});
+	logWarnings(codegen.warnings);
 
 	const mainChunk = {
 		js: mainJs,
@@ -829,6 +1469,7 @@ export function compileFiles(files, options = {}) {
 	};
 
 	const merged = mergeCompilationChunks([...preambles, mainChunk]);
+	finishStdlibJs(merged, options, programs, emitTarget);
 	const { wasm, wat, wasmOptInfo, wasmSourceMap } = finishWasm(
 		options,
 		merged,
@@ -857,6 +1498,7 @@ export function compileFiles(files, options = {}) {
 		programs,
 		exportedSymbols: checker.getExportedSymbols(),
 		exportedTypes: checker.getExportedTypes(),
+		exportedConsts: checker.getExportedConsts(),
 		sourceFiles: merged.sourceFiles,
 		sourcesContent: merged.sourcesContent,
 		mappings: merged.mappings,

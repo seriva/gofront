@@ -7,100 +7,138 @@ packages is listed in the [hybrid guide](hybrid-wasm.md#what-wasm-packages-suppo
 
 | Feature | Status |
 |---|---|
-| Variables (`var`, `:=` short re-declaration) | ✓ |
-| Constants (`const`, `iota`, untyped constants) | ✓ |
-| Functions, multiple returns, named returns, variadic | ✓ |
-| `init()` functions | ✓ |
-| Closures / function literals | ✓ |
-| `async func` / `await` expressions | ✓ |
-| `defer`, `panic()` / `recover()` | ✓ |
-| `print` / `println` builtins | ✓ — compile to `console.log` |
+| Variables (`var`, `:=` short re-declaration) | ✓ <!-- fixture: package main; func Main() int { var a = 1; a, b := 2, 3; return a + b } --> |
+| Constants (`const`, `iota`, untyped constants) | ✓ <!-- fixture: package main; const ( A = iota; B; C ); func Main() int { return A + B + C } --> |
+| Constant expressions | ✓ <!-- fixture: package main; const X = (1 << 10) + 24; func Main() int { return X } --> |
+| Functions, multiple returns, named returns, variadic | ✓ <!-- fixture: package main; func f(a int, b int) int { return a + b }; func Main() int { return f(20, 22) } --> |
+| `init()` functions | ✓ <!-- fixture: package main; var x = 1; func init() { x += 41 }; func Main() int { return x } --> |
+| Closures / function literals | ✓ <!-- fixture: package main; func Main() int { f := func(x int) int { return x * 2 }; return f(21) } --> |
+| `async func` / `await` expressions | ✓ <!-- no-fixture: JS-only language extension; not supported in WASM --> |
+| `defer`, `panic()` / `recover()` | ✓ <!-- fixture: package main; func Main() int { defer func() { recover() }(); panic("test"); return 0 } --> |
+| `print` / `println` builtins | ✓ — compile to `console.log` <!-- no-fixture: output side-effect only --> |
+| Runtime panics (index, nil map, nil deref) | ✓ — `both` packages panic with Go's message on both backends (JS strict mode), and `recover()` catches them on both <!-- fixture: package main; func Main() (res int) { defer func() { if recover() != nil { res = 1 } }(); var m map[string]int; m["k"] = 1; return 0 } --> |
 
 ### Types & data structures
 
 | Feature | Status |
 |---|---|
-| Structs + methods (value & pointer receivers) | ✓ |
-| Embedded structs (flattened fields + promoted methods) | ✓ |
-| Anonymous struct types | ✓ — compile to plain JS objects |
-| Interfaces (with embedding) | ✓ |
-| Slices (`append`, `len`, `make`) | ✓ |
-| Maps (`make`, `delete`, comma-ok) | ✓ |
-| Arrays with compile-time enforcement | ✓ — reject `append`, bounds checking, size matching, `[...]T` inference, compile-time `len()` |
-| Slice → array conversion (`[N]T(slice)`) | ✓ — Go 1.20 |
-| Pointers (`&x`, `*p`, `new(T)`) | ✓ — scalar locals boxed as `{ value: T }` for shared mutation |
-| `error` type | ✓ — interface `{ Error() string }`; custom error types, `errors.Is`/`Unwrap`, `%w` wrapping |
-| Complex numbers (`complex64`, `complex128`, `3i`) | ✓ — `complex()`, `real()`, `imag()` builtins; `__cmul`/`__cdiv` helpers |
-| Type definitions, type aliases (`type A = B`) | ✓ |
-| Methods on named non-struct types | ✓ — basic, slice, map and func types (`type Celsius float64`, `type Names []string`); value and pointer receivers; values stay plain JS values, methods dispatch statically, and values are boxed only inside interfaces; satisfies interfaces, type assertions and switches |
-| Type conversions, type assertions (plain & comma-ok) | ✓ |
-| Type switch (`switch v := x.(type)`) | ✓ — compiles to `if/else if` with `typeof` / `instanceof` |
-| Sized integers (`int8`–`int64`, `uint8`–`uint64`, `float32`) | ✓ — distinct types in the checker; `rune` = `int32`, `byte` = `uint8`; conversions truncate to width; arithmetic is float64 in `js` packages, exact in `wasm`/`both` |
-| Generics (`func F[T any]`, `type S[T any] struct`) | ✓ — type erasure to JS; generic functions, structs, constraints (`any`, `comparable`, interfaces, unions), type inference |
-| Struct field tags | ✓ — parsed and preserved; `json:"…"` tags drive the compile-time `encoding/json` codecs (no reflection) |
-| Struct and array equality (`a == b`) | ✓ — deep comparison via `__equal` helper |
+| Structs + methods (value & pointer receivers) | ✓ <!-- fixture: package main; type S struct { N int }; func (s S) Val() int { return s.N }; func (s *S) Inc() { s.N++ }; func Main() int { s := S{41}; (&s).Inc(); return s.Val() } --> |
+| Embedded structs (flattened fields + promoted methods) | ✓ <!-- fixture: package main; type Inner struct { X int }; func (i Inner) Get() int { return i.X }; type Outer struct { Inner }; func Main() int { o := Outer{Inner: Inner{X: 42}}; return o.X } --> |
+| Anonymous struct types | ✓ — compile to plain JS objects <!-- fixture: package main; func Main() int { s := struct { X int }{X: 42}; return s.X } --> |
+| Interfaces (with embedding) | ✓ <!-- fixture: package main; type Reader interface { Read() int }; type ReadCloser interface { Reader; Close() int }; type Impl struct { V int }; func (i Impl) Read() int { return i.V }; func (i Impl) Close() int { return 0 }; func Main() int { var rc ReadCloser = Impl{42}; return rc.Read() } --> |
+| Slices (`append`, `len`, `make`) | ✓ <!-- fixture: package main; func Main() int { s := make([]int, 0, 2); s = append(s, 10, 32); return len(s)*100 + s[0] + s[1] } --> |
+| Maps (`make`, `delete`, comma-ok) | ✓ <!-- fixture: package main; func Main() int { m := make(map[string]int); m["a"] = 42; v, ok := m["a"]; delete(m, "a"); _, ok2 := m["a"]; if ok && !ok2 { return v }; return 0 } --> |
+| Arrays with compile-time enforcement | ✓ — reject `append`, bounds checking, size matching, `[...]T` inference, compile-time `len()` <!-- fixture: package main; func Main() int { a := [...]int{1, 2, 3}; return len(a)*10 + a[1] } --> |
+| Slice → array conversion (`[N]T(slice)`) | ✓ — Go 1.20 <!-- no-fixture: JS-only; covered by test/unit/types/arrays.test.js --> |
+| Pointers (`&x`, `*p`, `new(T)`) | ✓ — scalar locals boxed as `{ value: T }` for shared mutation <!-- fixture: package main; func Main() int { x := 42; p := &x; *p = 100; return x } --> |
+| `error` type | ✓ — interface `{ Error() string }`; custom error types, `errors.Is`/`Unwrap`, `%w` wrapping <!-- fixture: package main; import "errors"; func Main() int { err := errors.New("err"); if err != nil && err.Error() == "err" { return 1 }; return 0 } --> |
+| Complex numbers (`complex64`, `complex128`, `3i`) | ✓ — `complex()`, `real()`, `imag()` builtins; `__cmul`/`__cdiv` helpers <!-- fixture: package main; func Main() int { c := complex(1.0, 2.0) + 3i; if real(c) == 1.0 && imag(c) == 5.0 { return 1 }; return 0 } --> |
+| Type definitions, type aliases (`type A = B`) | ✓ <!-- fixture: package main; type MyInt int; type Alias = MyInt; func Main() int { var a Alias = 42; return int(a) } --> |
+| Generic type aliases (Go 1.24) | ✓ — `type A[T any] = B[T]` <!-- fixture: package main; type Box[T any] struct { Val T }; type Alias[T any] = Box[T]; func Main() int { b := Alias[int]{Val: 42}; return b.Val } --> |
+| Methods on named non-struct types | ✓ — basic, slice, map and func types (`type Celsius float64`, `type Names []string`); value and pointer receivers; values stay plain JS values, methods dispatch statically, and values are boxed only inside interfaces; satisfies interfaces, type assertions and switches <!-- fixture: package main; type MyInt int; func (m MyInt) Double() int { return int(m * 2) }; func Main() int { x := MyInt(21); return x.Double() } --> |
+| Type conversions, type assertions (plain & comma-ok) | ✓ <!-- fixture: package main; func Main() int { var x any = 42; n, ok := x.(int); if ok { return n }; return 0 } --> |
+| Type switch (`switch v := x.(type)`) | ✓ — compiles to `if/else if` with `typeof` / `instanceof` <!-- fixture: package main; func check(x any) int { switch v := x.(type) { case int: return v; default: return 0 } }; func Main() int { return check(42) } --> |
+| Sized integers (`int8`–`int64`, `uint8`–`uint64`, `float32`) | ✓ — distinct types in the checker; `rune` = `int32`, `byte` = `uint8`; conversions truncate to width; arithmetic is float64 in `js` packages, exact in `wasm`/`both` <!-- fixture: package main; func Main() int { var a int8 = 10; var b int16 = 20; var c int32 = 30; return int(a) + int(b) + int(c) } --> |
+| Generics (`func F[T any]`, `type S[T any] struct`) | ✓ — type erasure to JS; generic functions, structs, constraints (`any`, `comparable`, interfaces, unions), type inference <!-- fixture: package main; func Identity[T any](x T) T { return x }; func Main() int { return Identity(42) } --> |
+| Struct field tags | ✓ — parsed and preserved; `json:"…"` tags drive the compile-time `encoding/json` codecs (no reflection) <!-- no-fixture: struct tags are compile-time metadata for encoding/json --> |
+| Struct and array equality (`a == b`) | ✓ — deep comparison via `__equal` helper <!-- fixture: package main; type Pt struct { X, Y int }; func Main() int { p1 := Pt{1, 2}; p2 := Pt{1, 2}; p3 := Pt{1, 3}; if p1 == p2 && p1 != p3 { return 1 }; return 0 } --> |
+| Builtin `min`, `max`, and `clear` (Go 1.21) | ✓ — numbers and strings; float `NaN` propagates and `min(-0.0, 0.0)` is `-0` <!-- fixture: package main; func Main() int { a, b := 10, 20; s := min("b", "a"); if s != "a" { return 0 }; return min(a, b) + max(1, 2) } --> |
 
 ### Control flow
 
 | Feature | Status |
 |---|---|
-| `if` / `else if` / `else` (with init statement) | ✓ |
-| `for` (C-style, condition-only, infinite, `range`) | ✓ |
-| `range` over slice, map, string, integer | ✓ |
-| Range over iterator functions (Go 1.23) | ✓ — `func(yield func(K, V) bool)` protocol; break/continue/return propagation |
-| `switch` / `fallthrough` (with init statement) | ✓ |
-| `break` / `continue` / labeled variants | ✓ |
-| Terminating statement analysis | ✓ — missing `return` in non-void functions is a type error |
+| `if` / `else if` / `else` (with init statement) | ✓ <!-- fixture: package main; func Main() int { if x := 10; x > 5 { return x } else { return 0 } } --> |
+| `for` (C-style, condition-only, infinite, `range`) | ✓ <!-- fixture: package main; func Main() int { sum := 0; for i := 0; i < 5; i++ { sum += i }; return sum } --> |
+| Per-iteration loop variables (Go 1.22) | ✓ <!-- fixture: package main; func Main() int { var fs []func() int; for i := 0; i < 3; i++ { fs = append(fs, func() int { return i }) }; return fs[0]()*100 + fs[1]()*10 + fs[2]() } --> |
+| `range` over slice, map, string, integer | ✓ <!-- fixture: package main; func Main() int { sum := 0; for i, v := range []int{10, 20, 30} { sum += i + v }; return sum } --> |
+| Range over iterator functions (Go 1.23) | ✓ — `func(yield func(K, V) bool)` protocol; break/continue/return propagation <!-- fixture: package main; func count(yield func(int) bool) { yield(1); yield(2); yield(3) }; func Main() int { sum := 0; for v := range count { sum += v }; return sum } --> |
+| `switch` / `fallthrough` (with init statement) | ✓ <!-- fixture: package main; func Main() int { switch x := 2; x { case 1: return 10; case 2: return 20; default: return 0 } } --> |
+| `break` / `continue` / labeled variants | ✓ <!-- fixture: package main; func Main() int { sum := 0; Outer: for i := 0; i < 5; i++ { for j := 0; j < 5; j++ { if i == 2 { break Outer }; sum++ } }; return sum } --> |
+| Terminating statement analysis | ✓ — missing `return` in non-void functions is a type error <!-- no-fixture: compile-time analysis rejecting missing return --> |
+| `goto` statement | ✗ — targeted diagnostic: `goto is not supported; restructure with labeled break/continue` <!-- fixture: diagnostic: goto is not supported => package main; func Main() int { goto L; L: return 1 } --> |
 
 ### Expressions & literals
 
 | Feature | Status |
 |---|---|
-| Arithmetic, comparison, logical, bitwise operators | ✓ — includes `&^` (bit clear) |
-| Compound assignment, increment / decrement | ✓ |
-| Slice expressions (`s[lo:hi]`, `s[lo:hi:max]`) | ✓ |
-| Variadic spread (`f(slice...)`, `append(a, b...)`) | ✓ |
-| Positional struct literals (`Point{1, 2}`) | ✓ |
-| Method expressions (`T.Method`) / method values (`x.Method`) | ✓ |
-| Multi-value function forwarding (`f(g())`) | ✓ |
-| Raw string literals (backticks), rune literals | ✓ |
-| Numeric separators (`1_000_000`), binary/octal/hex literals | ✓ |
-| `[]byte(s)` / `[]rune(s)` conversions | ✓ |
+| Arithmetic, comparison, logical, bitwise operators | ✓ — includes `&^` (bit clear) <!-- fixture: package main; func Main() int { a := 10 + 2; b := 5 &^ 1; if a > 10 && b == 4 { return a + b }; return 0 } --> |
+| Compound assignment, increment / decrement | ✓ <!-- fixture: package main; func Main() int { x := 10; x += 5; x++; x--; return x } --> |
+| Slice expressions (`s[lo:hi]`, `s[lo:hi:max]`) | ✓ <!-- fixture: package main; func Main() int { s := []int{1, 2, 3, 4, 5}; sub := s[1:3]; return sub[0]*10 + sub[1] } --> |
+| Variadic spread (`f(slice...)`, `append(a, b...)`) | ✓ <!-- fixture: package main; func Main() int { a := []int{10, 20}; b := []int{30, 40}; c := append(a, b...); return c[0] + c[1] + c[2] + c[3] } --> |
+| Positional struct literals (`Point{1, 2}`) | ✓ <!-- fixture: package main; type Pt struct { X, Y int }; func Main() int { p := Pt{10, 20}; return p.X + p.Y } --> |
+| Method expressions with value receiver (`T.Method`) / method values (`x.Method`) | ✓ <!-- fixture: package main; type C struct { N int }; func (c C) Add(k int) int { return c.N + k }; func Main() int { c := C{N: 10}; f := C.Add; g := c.Add; return f(c, 5) + g(7) } --> |
+| Method expressions on pointer receivers (`(*T).Method`) | ✓ — `(*T).M` is a `func(*T, …)`, also on generic types (`(*Box[int]).Set`) <!-- fixture: package main; type C struct { N int }; func (c *C) Inc() { c.N++ }; func Main() int { f := (*C).Inc; c := &C{N: 1}; f(c); return c.N } --> |
+| Multi-value function forwarding (`f(g())`) | ✓ <!-- fixture: package main; func g() (int, int) { return 10, 20 }; func f(a, b int) int { return a + b }; func Main() int { return f(g()) } --> |
+| Raw string literals (backticks), rune literals | ✓ <!-- fixture: package main; func Main() int { s := `raw`; r := 'A'; if s == "raw" && r == 65 { return 1 }; return 0 } --> |
+| Numeric separators (`1_000_000`), binary/octal/hex literals | ✓ <!-- fixture: package main; func Main() int { a := 1_000; b := 0b101; c := 0o12; d := 0x1f; return a + b + c + d } --> |
+| `[]byte(s)` conversions | ✓ <!-- fixture: package main; func Main() int { b := []byte("hello"); return len(b)*10 + int(b[0]) } --> |
+| `[]rune(s)` conversions | ✓ — code points; `string(r)` and `string(r[i])` <!-- fixture: package main; func Main() int { r := []rune("héllo"); r = append(r, 'x'); if string(r[1]) != "é" || string(r) != "héllox" { return 0 }; return len(r) } --> |
 
 ### Standard library shims
 
+Coverage of the Go standard library, per package. Anything not listed here is not available; importing it gives an error naming the package.
+
+| Package | Targets | Notes |
+|---|---|---|
+| `bytes` | js, wasm, both | Buffer, Reader and the search/split/trim helpers |
+| `cmp` | js, wasm, both | `Ordered`, `Compare`, `Less`, `Or` |
+| `crypto/rand` | js, wasm, both | `Read`, `Reader` |
+| `crypto/sha256` | js, wasm, both | `Sum256`, `New` |
+| `encoding/base64` | js, wasm, both | Std, URL and Raw encodings |
+| `encoding/binary` | js, wasm, both | `BigEndian` and `LittleEndian` byte-order accessors, `Read`, `Write`, `Size`, `Append*`; no varints |
+| `encoding/hex` | js, wasm, both | `EncodeToString`, `DecodeString`, `Encode`, `Decode`, `EncodedLen`, `DecodedLen` |
+| `encoding/json` | js, wasm, both | Struct tags, `Marshal`, `Unmarshal`, `Decoder`, `Encoder` |
+| `errors` | js, wasm, both | `New`, `Is`, `As`, `Unwrap`, `Join` |
+| `fmt` | js, wasm, both | Print, Sprint, Fprint, Errorf, Append, `Sscan*` |
+| `hash` | js, wasm, both | `Hash`, `Hash32`, `Hash64` interfaces |
+| `html` | js, wasm, both | `EscapeString`, `UnescapeString` |
+| `io` | js, wasm, both | Reader/Writer interfaces and helpers; no `Pipe` |
+| `iter`, `maps`, `slices`, `sort` | js, wasm, both | Go 1.23 iterator APIs; no `iter.Pull` |
+| `math`, `math/bits` | js, wasm, both | Elementary functions, constants and float bit conversions |
+| `math/rand` | js, wasm, both | Seeded generators (a subset in `wasm`/`both`) |
+| `os` | js, wasm, both | `Stdout`, `Stderr`, `Stdin`, `File`; JS also has `Exit`, `Args`, `Getenv` |
+| `path`, `path/filepath` | js, wasm, both | Lexical helpers only; no file-system walking |
+| `regexp` | js | Backed by the JS `RegExp` engine |
+| `strconv`, `strings`, `unicode`, `unicode/utf8` | js, wasm, both | `strings.Builder`, `Reader`, `Replacer` included |
+| `sync` | js, wasm, both | No `sync.Cond`, no `WaitGroup.Go` |
+| `testing` | js, wasm, both | `T`, `B`, subtests, benchmarks; no fuzzing |
+| `time` | js, wasm, both | `Sleep` is JS-only; no timers or tickers |
+| `gom` | js | GoFront DOM package |
+| `gofront/shared`, `gofront/simd` | wasm, both | Shared memory and SIMD helpers |
+
+Notable members and behaviour per package, including GoFront's own packages:
+
 | Package | Functions |
 |---|---|
-| `fmt` | `Sprintf`, `Printf`, `Println`, `Print`, `Errorf`, `Fprintf`, `Fprintln`, `Fprint` — format verbs: `%v`, `%d`, `%s`, `%t`, `%x`, `%o`, `%b`, `%q`, `%e`, `%g`, `%w`, width/precision; **scanning**: `Sscan`, `Sscanln`, `Sscanf` |
-| `strings` | `Contains`, `HasPrefix`, `HasSuffix`, `Index`, `LastIndex`, `Count`, `Repeat`, `Replace`, `ReplaceAll`, `ToUpper`, `ToLower`, `TrimSpace`, `Trim`, `TrimPrefix`, `TrimSuffix`, `TrimLeft`, `TrimRight`, `Split`, `Join`, `EqualFold`, `Fields`, `FieldsFunc`, `Cut`, `CutPrefix`, `CutSuffix`, `SplitN`, `SplitAfter`, `SplitAfterN`, `IndexAny`, `LastIndexAny`, `ContainsAny`, `ContainsRune`, `IndexRune`, `IndexByte`, `LastIndexByte`, `Map`, `Title`, `ToTitle`, `TrimFunc`, `TrimLeftFunc`, `TrimRightFunc`, `IndexFunc`, `LastIndexFunc`, `NewReplacer`; **`Builder`** type; **`NewReader`** → reader shim |
-| `bytes` | `Contains`, `HasPrefix`, `HasSuffix`, `Index`, `Join`, `Split`, `Replace`, `ToUpper`, `ToLower`, `TrimSpace`, `Equal`, `Count`, `Repeat`, `ReplaceAll`, `TrimPrefix`, `TrimSuffix`, `TrimLeft`, `TrimRight`, `TrimFunc`, `IndexByte`, `LastIndex`, `LastIndexByte`, `Fields`, `FieldsFunc`, `Cut`, `ContainsAny`, `ContainsRune`, `Map`, `SplitN`, `Clone`; **`Buffer`** type; **`NewReader`** → reader shim |
-| `strconv` | `Itoa`, `Atoi`, `FormatBool`, `FormatInt`, `FormatFloat`, `FormatUint`, `ParseFloat`, `ParseInt`, `ParseBool`, `ParseUint`, `Quote`, `Unquote`, `AppendInt`, `AppendFloat`, `AppendUint`, `AppendBool` |
-| `sort` | `Ints`, `Float64s`, `Strings`, `Slice`, `SliceStable`, `SliceIsSorted`, `Search`, `IntsAreSorted`, `Float64sAreSorted`, `StringsAreSorted` |
-| `math` | `Abs`, `Floor`, `Ceil`, `Round`, `Sqrt`, `Cbrt`, `Pow`, `Log`, `Log2`, `Log10`, `Sin`, `Cos`, `Tan`, `Atan`, `Atan2`, `Asin`, `Acos`, `Exp`, `Exp2`, `Trunc`, `Hypot`, `Signbit`, `Copysign`, `Dim`, `Remainder`, `Sinh`, `Cosh`, `Tanh`, `Float64bits`, `Float64frombits`, `Float32bits`, `Float32frombits`, `Min`, `Max`, `Mod`, `Inf`, `IsNaN`, `IsInf`, `NaN` + 24 constants (`Pi`, `E`, `Phi`, `Sqrt2`, `SqrtE`, `SqrtPi`, `SqrtPhi`, `Ln2`, `Log2E`, `Ln10`, `Log10E`, `MaxFloat64`, `SmallestNonzeroFloat64`, `MaxFloat32`, `SmallestNonzeroFloat32`, `MaxInt`, `MinInt`, `MaxInt32`, `MinInt32`, `MaxInt64`, `MinInt64`, `MaxUint32`, `MaxUint64`) |
-| `math/rand` | `Intn`, `Float64`, `Float32`, `Int`, `Int63`, `Int63n`, `Int31`, `Int31n`, `Seed` (deterministic pure WASM PRNG), `Shuffle`, `Perm`, `Read` |
-| `math/bits` | `LeadingZeros32`, `TrailingZeros32`, `OnesCount32`, `RotateLeft32`, `Reverse32`, `Len32`, `ReverseBytes16`, `ReverseBytes32`, `LeadingZeros64`, `TrailingZeros64`, `OnesCount64`, `RotateLeft64`, `Reverse64`, `Len64`, `ReverseBytes64` |
-| `errors` | `New`, `Is`, `Unwrap`, `As`, `Join` — custom error types via interface satisfaction |
-| `time` | `Now` → `time.Time`, `Since`, `Sleep` (JS-only), `Parse`, `Unix`, `Date`; **`time.Duration`** methods: `Seconds`, `Milliseconds`, `Microseconds`, `Nanoseconds`, `Minutes`, `Hours`, `String`; **`time.Time`** methods: `Format`, `String`, `Year`, `Month`, `Day`, `Hour`, `Minute`, `Second`, `Weekday`, `Unix`, `UnixMilli`, `UnixNano`, `Nanosecond`, `UTC`, `Local`, `IsZero`, `Add`, `Sub`, `Before`, `After`, `Equal`; layout constants: `RFC3339`, `RFC3339Nano`, `DateOnly`, `TimeOnly`, `DateTime`; duration constants: `Millisecond`, `Second`, `Minute`, `Hour`; month/weekday constants |
+| `fmt` | `Sprintf`, `Printf`, `Println`, `Print`, `Errorf`, `Fprintf`, `Fprintln`, `Fprint`, `Sprint`, `Sprintln`, `Append`, `Appendf`, `Appendln` — format verbs: `%v`, `%+v`, `%#v`, `%T`, `%d`, `%s`, `%t`, `%x`, `%X`, `%o`, `%O`, `%b`, `%q`, `%c`, `%U`, `%e`, `%E`, `%f`, `%F`, `%g`, `%G`, `%w`, width/precision, positional indexes (`%[1]d`), `fmt.Stringer` (`%p` prints Go's bad-verb form, see [Go compatibility](go-compatibility.md)); **scanning**: `Sscan`, `Sscanln`, `Sscanf` |
+| `strings` | `Contains`, `HasPrefix`, `HasSuffix`, `Index`, `LastIndex`, `Count`, `Repeat`, `Replace`, `ReplaceAll`, `ToUpper`, `ToLower`, `TrimSpace`, `Trim`, `TrimPrefix`, `TrimSuffix`, `TrimLeft`, `TrimRight`, `Split`, `Join`, `EqualFold`, `Fields`, `FieldsFunc`, `Cut`, `CutPrefix`, `CutSuffix`, `SplitN`, `SplitAfter`, `SplitAfterN`, `IndexAny`, `LastIndexAny`, `ContainsAny`, `ContainsRune`, `ContainsFunc`, `IndexRune`, `IndexByte`, `LastIndexByte`, `Map`, `Title`, `ToTitle`, `ToValidUTF8`, `TrimFunc`, `TrimLeftFunc`, `TrimRightFunc`, `IndexFunc`, `LastIndexFunc`, `Compare`, `Clone`, `Lines`, `SplitSeq`, `SplitAfterSeq`, `FieldsSeq`, `FieldsFuncSeq`, `NewReplacer`; **`Builder`**, **`Reader`**, **`Replacer`** types |
+| `bytes` | `Contains`, `HasPrefix`, `HasSuffix`, `Index`, `Join`, `Split`, `Replace`, `ToUpper`, `ToLower`, `TrimSpace`, `Equal`, `EqualFold`, `Compare`, `Count`, `Repeat`, `ReplaceAll`, `Trim`, `TrimPrefix`, `TrimSuffix`, `TrimLeft`, `TrimRight`, `TrimFunc`, `TrimLeftFunc`, `TrimRightFunc`, `IndexByte`, `LastIndex`, `LastIndexByte`, `IndexAny`, `LastIndexAny`, `IndexRune`, `IndexFunc`, `LastIndexFunc`, `Fields`, `FieldsFunc`, `Cut`, `CutPrefix`, `CutSuffix`, `ContainsAny`, `ContainsRune`, `ContainsFunc`, `Map`, `SplitN`, `SplitAfter`, `SplitAfterN`, `ToTitle`, `ToValidUTF8`, `Runes`, `Clone`, `Lines`, `SplitSeq`, `SplitAfterSeq`, `FieldsSeq`, `FieldsFuncSeq`; **`Buffer`**, **`Reader`** types. `bytes.ToTitle` is not available yet in `wasm` packages |
+| `strconv` | `Itoa`, `Atoi`, `FormatBool`, `FormatInt`, `FormatFloat`, `FormatUint`, `ParseFloat`, `ParseInt`, `ParseBool`, `ParseUint`, `Quote`, `QuoteToASCII`, `QuoteRune`, `QuoteRuneToASCII`, `Unquote`, `UnquoteChar`, `QuotedPrefix`, `CanBackquote`, `AppendInt`, `AppendFloat`, `AppendUint`, `AppendBool`, `AppendQuote`, `AppendQuoteToASCII`, `AppendQuoteRune`, `AppendQuoteRuneToASCII`, `IntSize`, `NumError`, `ErrRange`, `ErrSyntax` |
+| `sort` | `Interface`, `Sort`, `Stable`, `Reverse`, `IsSorted`, `Ints`, `Float64s`, `Strings`, `Slice`, `SliceStable`, `SliceIsSorted`, `Search`, `SearchInts`, `SearchFloat64s`, `SearchStrings`, `Find`, `IntsAreSorted`, `Float64sAreSorted`, `StringsAreSorted`, `IntSlice`, `Float64Slice`, `StringSlice` |
+| `math` | `Abs`, `Floor`, `Ceil`, `Round`, `RoundToEven`, `Sqrt`, `Cbrt`, `Pow`, `Log`, `Log2`, `Log10`, `Log1p`, `Sin`, `Cos`, `Tan`, `Atan`, `Atan2`, `Asin`, `Acos`, `Sinh`, `Cosh`, `Tanh`, `Exp`, `Exp2`, `Expm1`, `Trunc`, `Hypot`, `Signbit`, `Copysign`, `Dim`, `Remainder`, `Mod`, `Modf`, `Frexp`, `Ldexp`, `Nextafter`, `Nextafter32`, `FMA`, `Float64bits`, `Float64frombits`, `Float32bits`, `Float32frombits`, `Min`, `Max`, `Inf`, `IsNaN`, `IsInf`, `NaN` + constants |
+| `math/rand` | Deterministic `Seed`, `Intn`, `Float64`, `Float32`, `Int`, `Int63`, `Int63n`, `Int31`, `Int31n`, `Shuffle`, `Perm`, `Read` |
+| `math/bits` | `LeadingZeros*`, `TrailingZeros*`, `OnesCount*`, `RotateLeft*`, `Reverse*`, `ReverseBytes*`, `Len*`, `Add*`, `Sub*`, `Mul*`, `Div*`, `Rem*`, `UintSize` |
+| `errors` | `New`, `Is`, `Unwrap`, `As`, `Join`, `ErrUnsupported` — custom error types via interface satisfaction |
+| `time` | `Now` → `time.Time`, `Since`, `Sleep` (JS-only), `Parse`, `ParseDuration`, `Unix`, `UnixMilli`, `UnixMicro`, `Date`, `FixedZone`; **`time.Duration`** methods: `Seconds`, `Milliseconds`, `Microseconds`, `Nanoseconds`, `Minutes`, `Hours`, `Truncate`, `Round`, `Abs`, `String`; **`time.Time`** methods: `Format`, `String`, `Year`, `Month`, `Day`, `YearDay`, `ISOWeek`, `Clock`, `Date`, `Hour`, `Minute`, `Second`, `Weekday`, `Unix`, `UnixMilli`, `UnixNano`, `Nanosecond`, `UTC`, `Local`, `In`, `Location`, `Zone`, `IsZero`, `Add`, `AddDate`, `Sub`, `Before`, `After`, `Equal`, `Compare`, `Truncate`, `Round`, `MarshalJSON`, `UnmarshalJSON`, `MarshalText`, `UnmarshalText`; layout, duration, month, and weekday constants. In `wasm` packages `Time.Date`, `Time.Clock`, `Time.In`, `time.UnixMilli` and `time.UnixMicro` are not available yet |
 | `html` | `EscapeString`, `UnescapeString` |
-| `maps` | `Keys`, `Values`, `Clone`, `Copy`, `Equal`, `EqualFunc`, `Delete`, `DeleteFunc` |
-| `slices` | `Contains`, `ContainsFunc`, `Index`, `IndexFunc`, `BinarySearch`, `BinarySearchFunc`, `Equal`, `Compare`, `Sort`, `SortFunc`, `SortStableFunc`, `IsSorted`, `IsSortedFunc`, `Reverse`, `Max`, `Min`, `MaxFunc`, `MinFunc`, `Clone`, `Compact`, `CompactFunc`, `Concat`, `Delete`, `DeleteFunc`, `Insert`, `Replace`, `Grow`, `Clip` |
+| `cmp` | `Ordered`, `Compare`, `Less`, `Or` |
+| `iter` | `Seq`, `Seq2` — range over them with `for v := range seq`. `Pull` and `Pull2` require coroutines and report `requires coroutines; out of scope (no runtime)`. |
+| `maps` | `Clone`, `Copy`, `Equal`, `EqualFunc`, `Delete`, `DeleteFunc`, `All`, `Keys`, `Values`, `Insert`, `Collect`. `Keys` and `Values` return `iter.Seq`, as in Go 1.23: use `slices.Collect(maps.Keys(m))` or `slices.Sorted(maps.Keys(m))` for a slice. |
+| `slices` | `Contains`, `ContainsFunc`, `Index`, `IndexFunc`, `BinarySearch`, `BinarySearchFunc`, `Equal`, `EqualFunc`, `Compare`, `CompareFunc`, `Sort`, `SortFunc`, `SortStableFunc`, `IsSorted`, `IsSortedFunc`, `Reverse`, `Max`, `Min`, `MaxFunc`, `MinFunc`, `Clone`, `Compact`, `CompactFunc`, `Concat`, `Delete`, `DeleteFunc`, `Insert`, `Replace`, `Grow`, `Clip`, `Repeat`, `All`, `Values`, `Backward`, `Collect`, `AppendSeq`, `Sorted`, `SortedFunc`, `SortedStableFunc`, `Chunk`. Iterator functions take `[]E` rather than a `Slice ~[]E` type parameter, so `Chunk` and `AppendSeq` of a named slice type return `[]E`. |
 | `regexp` | `MustCompile`, `Compile`, `MatchString`, `QuoteMeta`; **`*Regexp`** methods: `MatchString`, `FindString`, `FindStringIndex`, `FindAllString`, `FindStringSubmatch`, `FindAllStringSubmatch`, `ReplaceAllString`, `ReplaceAllLiteralString`, `Split`, `String`. Inline flags (`(?i)`, `(?m)`, `(?s)`) are extracted automatically into the JS `RegExp` constructor. |
-| `unicode` | `IsLetter`, `IsDigit`, `IsSpace`, `IsUpper`, `IsLower`, `IsPunct`, `IsControl`, `IsPrint`, `IsGraphic`, `ToUpper`, `ToLower` |
-| `unicode/utf8` | `RuneCountInString`, `RuneLen`, `ValidString`, `ValidRune`, `DecodeRuneInString`, `DecodeLastRuneInString`, `FullRuneInString`; constants `RuneError`, `MaxRune`, `UTFMax` |
-| `path` | `Base`, `Dir`, `Ext`, `Join`, `Clean`, `IsAbs`, `Split`, `Match`; `"path/filepath"` is an alias |
-| `os` | `Exit`, `Args`, `Getenv` |
-| `io` | `Writer`, `Reader`, `ReadWriter`, `Closer` interface types; `ReadAll`, `EOF`, `Discard`, `WriteString`, `Copy`, `CopyN`, `LimitReader` |
-| `sync` | `Mutex`, `RWMutex`, `Once` (`Do`), `WaitGroup` (`Add`, `Done`, `Wait`) — single-threaded lightweight runtime shims |
-| `crypto/rand` | `Read(b []byte)` backed by host `crypto.getRandomValues()` |
-| `crypto/sha256` | `Sum256(data []byte)`, `New()` |
-| `encoding/binary` | `LittleEndian`, `BigEndian` (`Uint16`, `Uint32`, `Uint64`, `PutUint16`, `PutUint32`, `PutUint64`, `AppendUint16`, `AppendUint32`, `AppendUint64`), `Read`, `Write`, `Size` |
-| `encoding/hex` | `EncodeToString`, `DecodeString`, `EncodedLen`, `DecodedLen`, `Encode`, `Decode` |
-| `encoding/base64` | `StdEncoding`, `URLEncoding`, `RawStdEncoding`, `RawURLEncoding` (`EncodeToString`, `DecodeString`, `EncodedLen`, `DecodedLen`), `NewEncoding` |
-| `encoding/json` | `Marshal`, `MarshalIndent`, `Unmarshal`, `Valid`, `RawMessage` — codecs generated per type at compile time from `json` struct tags (`omitempty`, `string`, `-`, embedded-field promotion); calls `MarshalJSON` / `UnmarshalJSON` methods. `js` packages only. No `Encoder`/`Decoder`, `Number` or typed error values (`*json.SyntaxError`, …) |
+| `unicode`, `utf8` | `unicode`: `IsLetter`, `IsDigit`, `IsSpace`, `IsUpper`, `IsLower`, `IsPunct`, `IsControl`, `IsPrint`, `IsGraphic`, `ToUpper`, `ToLower`, `ToTitle`, `SimpleFold`. Range tables (`RangeTable`, `unicode.Is`, `unicode.In`, the category tables) are not supported. `unicode/utf8`: `RuneCount*`, `RuneLen`, `RuneStart`, `Valid*`, `DecodeRune*`, `DecodeLastRune*`, `EncodeRune`, `AppendRune`, `FullRune*`, constants |
+| `path`, `path/filepath` | `Base`, `Dir`, `Ext`, `Join`, `Clean`, `IsAbs`, `Split`, `Match` |
+| `os` | `Stdout`, `Stderr`, `Stdin` (`both` and `wasm` packages); `Exit`, `Args`, `Getenv` (`js` packages) |
+| `io` | `Reader`, `Writer`, `ReadWriter`, `Closer`, `ReadCloser`, `WriteCloser`, `ReadWriteCloser`, `Seeker`, `ReadSeeker`, `WriteSeeker`, `ReadWriteSeeker`, `ReaderFrom`, `WriterTo`, `ReaderAt`, `WriterAt`, `ByteReader`, `ByteScanner`, `ByteWriter`, `RuneReader`, `RuneScanner`, `StringWriter`; `ReadAll`, `ReadFull`, `ReadAtLeast`, `WriteString`, `Copy`, `CopyN`, `LimitReader`, `NewSectionReader`, `TeeReader`, `MultiReader`, `MultiWriter`, `NopCloser`, `Discard`, `EOF`, `ErrUnexpectedEOF`, `ErrShortWrite`, `ErrShortBuffer`, `ErrNoProgress`, `SeekStart`, `SeekCurrent`, `SeekEnd`; `LimitedReader`, `SectionReader`. `io.ReadAll` of a `LimitedReader` or `SectionReader` fails in `js` packages, and a `SectionReader` over a `strings.Reader` or `bytes.Reader` panics in `wasm` packages |
+| `sync` | `Locker`, `Mutex`, `RWMutex`, `Once`, `WaitGroup`, `OnceFunc`, `OnceValue`, `OnceValues`; no `sync.Cond` |
+| `hash`, `crypto/*` | `hash`: `Hash`, `Hash32`, `Hash64`. `crypto/rand`: `Reader`, `Read`. `crypto/sha256`: `New`, `Sum256` |
+| `encoding/binary`, `hex`, `base64` | `encoding/binary`: `LittleEndian`, `BigEndian`, `ByteOrder`, `Read`, `Write`, `Size`; no varints, `NativeEndian` or `AppendByteOrder`. `encoding/hex`: `EncodeToString`, `DecodeString`, `EncodedLen`, `DecodedLen`, `Encode`, `Decode`, `ErrLength`. `encoding/base64`: `StdEncoding`, `URLEncoding`, `RawStdEncoding`, `RawURLEncoding`, `NewEncoding`, `Encoding` methods (`Encode*`, `Decode*`, `WithPadding`) |
+| `encoding/json` | `Marshal`, `MarshalIndent`, `Unmarshal`, `Valid`, `RawMessage`, `Number`, `Compact`, `Indent`, `HTMLEscape`, `Encoder` (`NewEncoder`, `Encode`, `SetIndent`, `SetEscapeHTML`), `Decoder` (`NewDecoder`, `Decode`, `Buffered`, `More`, `UseNumber`, `DisallowUnknownFields`, `InputOffset`), and typed error values (`*SyntaxError`, `*UnmarshalTypeError`, `*InvalidUnmarshalError`, `*UnsupportedTypeError`, `*UnsupportedValueError`, `*MarshalerError`) — codecs generated per type at compile time from `json` struct tags (`omitempty`, `string`, `-`, embedded-field promotion) on both `js` and `wasm`/`both` backends; calls `MarshalJSON`/`UnmarshalJSON` methods (see [compatibility notes](go-compatibility.md)). |
 | `gom` | Browser-native declarative DOM component library. **Types**: `Node` (interface), `NodeFunc`, `Group`. **Core**: `El(tag, children...)`, `Text(s)`, `Mount(sel, node[, refs])`, `MountTo(sel, node[, refs])` — the optional `refs map[string]any` receives elements marked `ref="name"` in `.templ` templates. **Attributes**: `Attr`, `Class`, `Href`, `Type`, `Src`, `Placeholder`, `DataAttr`, `Style`, `For`, `Name`, `Value`, `Target`, `Rel`, `Alt`, `Title`, `Draggable`, `Role`, `AriaLabel`, `StyleAttr`; boolean: `Disabled`, `Checked`, `Selected`, `Readonly`. **Logic**: `If(cond, node)`, `Map(slice, fn)`. **Elements**: full HTML element set (`Div`, `Span`, `Button`, `Input`, `Ul`, `Li`, `Table`, `Form`, `Img`, `A`, `H1`–`H6`, …) |
 | `gofront/shared` | Fixed-size linear-memory buffers for zero-copy JS↔WASM sharing (`Float32`, `Float64`, `Int8`, `Int16`, `Int32`, `Uint8`, `Uint16`, `Uint32` via `shared.NewXxx(n)` and `.Subarray(lo, hi)`). Lowered to plain TypedArrays in `--js-only` builds. See the [hybrid guide](hybrid-wasm.md#shared-linear-memory-buffers-gofrontshared). |
-| `gofront/simd` (experimental) | `F32x4` 4-lane `float32` vector: `F32x4{a, b, c, d}`, `Splat`, `NewF32x4`, `Add`, `Sub`, `Mul`, `Div`, `Min`, `Max`, `Dot3`, `Dot4`, `Lane`, `WithLane` (constant lane index); `LoadF32x4`/`StoreF32x4` on `shared.Float32`. WASM `v128` in `wasm` packages, `Math.fround` arrays in `js`. See the [hybrid guide](hybrid-wasm.md#wasm-simd-gofrontsimd-experimental). |
-| `testing` | **`testing.T`**: `Error`, `Errorf`, `Fatal`, `Fatalf`, `Fail`, `Failed`, `FailNow`, `Log`, `Logf`, `Skip`, `Skipf`, `Skipped`, `Helper`, `Run`, `Name`. **Package functions**: `Short()`, `Verbose()`. Tests are `func TestXxx(t *testing.T)` in `*_test.go` files, excluded from normal compilation and run via `gofront test`. |
+| `gofront/simd` (experimental) | `F32x4` 4-lane `float32` vector: `F32x4{a, b, c, d}`, `Splat`, `NewF32x4`, `Add`, `Sub`, `Mul`, `Div`, `Min`, `Max`, `MulAdd`, `Neg`, `Abs`, `Sqrt`, `Floor`, `Ceil`, `Trunc`, `RoundToEven`, `Dot3`, `Dot4`, `Sum`, `Lane`, `WithLane`, `Swizzle` (constant lane indexes), `Shuffle`; comparisons returning `Mask32x4` (`And`, `Or`, `Xor`, `AndNot`, `Not`, `Any`, `All`, `Bits`, `Lane`) and `Select`; `LoadF32x4`/`StoreF32x4` on `shared.Float32`, `LoadF32x4Slice`/`StoreF32x4Slice` on `[]float32`, and `Pad4`. WASM `v128` in `wasm` packages, `Math.fround` arrays in `js`. See the [hybrid guide](hybrid-wasm.md#wasm-simd-gofrontsimd). |
+| `testing` | **`testing.T`**: `Error`, `Errorf`, `Fatal`, `Fatalf`, `Fail`, `Failed`, `FailNow`, `Log`, `Logf`, `Skip`, `Skipf`, `Skipped`, `Helper`, `Run`, `Name`, `Cleanup`, `Setenv`, `Context`, `Deadline`, `Parallel`. **`testing.B`**: `N`, `Loop`, `ResetTimer`, `StartTimer`, `StopTimer`, `Elapsed`, `ReportAllocs`, `ReportMetric`, `SetBytes`, `Run`. **`testing.M`** (`TestMain(m *testing.M)` with `m.Run()`) and **`testing.TB`** interface. **Package functions** (`js` packages only): `Short()`, `Verbose()`, `Testing()`. Run via `gofront test` (and `gofront test -bench`). |
 
 ### Packages & imports
 

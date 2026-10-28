@@ -1,19 +1,58 @@
 // src/backend/wasm/emit-stmts.js
 // FunctionEmitter mixin: statement emission (decls, assignment, control flow, return).
 
-import { isIntRangeType, isRangeFor } from "../../lower/range.js";
+import { loopVarsCapturedInLoop } from "../../lower/captures.js";
+import { rootIdentName } from "../../lower/ownership.js";
+import {
+	getOrCreateIteratorFuncLit,
+	isIntRangeType,
+	isIteratorRangeFor,
+	isRangeFor,
+} from "../../lower/range.js";
+import { someChild } from "../../lower/walk.js";
 import {
 	getMapKeyValTypes,
 	isArrayType,
+	isComplex,
+	isComplex64,
 	isFuncType,
 	isInterfaceType,
 	isMapType,
 	isNonEmptyInterface,
 	isPointerToStruct,
+	isScalarType,
 	isSliceType,
 	isStringType,
 	isStructType,
 } from "./types.js";
+
+function hasReturnInBlock(n) {
+	let found = false;
+	const check = (x) => {
+		if (!x || typeof x !== "object" || found) return;
+		if (Array.isArray(x)) {
+			for (const elem of x) check(elem);
+			return;
+		}
+		if (x.kind === "ReturnStmt") {
+			found = true;
+			return;
+		}
+		if (x.kind === "FuncLit" && !x._isYieldClosure) return;
+		for (const k of Object.keys(x)) {
+			if (k.startsWith("_")) continue;
+			check(x[k]);
+		}
+	};
+	check(n);
+	return found;
+}
+
+// A plain `string`: the one string type that lives in `any` as the bare
+// string. A named string type is boxed like any other scalar (see emitExpr).
+function isBareStringType(t, checker) {
+	return isStringType(t, checker) && t.kind !== "named";
+}
 
 export class StmtsEmitter {
 	emitVarDecl(stmt) {
@@ -31,7 +70,7 @@ export class StmtsEmitter {
 				if (values?.[i]) {
 					const r = values[i];
 					this.emitExpr(r, wType);
-					this._emitCopyIfValueStruct(r, rawType, wType);
+					this._emitCopyIfValue(r, rawType, wType);
 					if (localInfo?.isBoxed) {
 						this.pushInstruction({
 							op: "struct.new",
@@ -88,9 +127,11 @@ export class StmtsEmitter {
 			return;
 		}
 
+		const rhsVals = this._parallelAssignValues(lhsNodes, rhsNodes, true);
 		for (let i = 0; i < lhsNodes.length; i++) {
-			this._emitDefineSingle(lhsNodes[i], rhsNodes[i]);
+			this._emitDefineSingle(lhsNodes[i], rhsVals[i]);
 		}
+		this._releaseParallelTemps(rhsVals, rhsNodes);
 	}
 
 	_emitDefineSingle(l, r) {
@@ -100,11 +141,17 @@ export class StmtsEmitter {
 			this.pushInstruction("drop");
 			return;
 		}
+		if (l._redecl && this.resolveLocal(l.name)) {
+			this._emitAssignSingle(l, r, "=");
+			return;
+		}
 		const wType = this.toWasmType(r._type);
+		// The value is computed before the new name exists: `x := x * 2`
+		// in an inner block reads the outer `x`.
+		this.emitExpr(r, wType);
+		this._emitCopyIfValue(r, r._type, wType);
 		const idx = this.allocLocal(l.name, wType, r._type);
 		const localInfo = this.locals.get(l.name);
-		this.emitExpr(r, wType);
-		this._emitCopyIfValueStruct(r, r._type, wType);
 		if (localInfo?.isBoxed) {
 			this.pushInstruction({
 				op: "struct.new",
@@ -200,9 +247,140 @@ export class StmtsEmitter {
 			return;
 		}
 
+		const rhsVals = this._parallelAssignValues(lhsNodes, rhsNodes);
 		for (let i = 0; i < lhsNodes.length; i++) {
-			this._emitAssignSingle(lhsNodes[i], rhsNodes[i], op);
+			this._emitAssignSingle(lhsNodes[i], rhsVals[i], op);
 		}
+		this._releaseParallelTemps(rhsVals, rhsNodes);
+	}
+
+	// `x, y = y, x`: Go evaluates every right-hand side before assigning.
+	// When a later value could see an earlier assignment, every value that
+	// is not pure is stored in a temporary first (in source order, so side
+	// effects keep their order).  Pure values stay inline, so `i, n = 0,
+	// len(xs)` is unchanged.  A definition only exposes its redeclared
+	// names: a new name is not visible to the values being assigned to it.
+	_parallelAssignValues(lhsNodes, rhsNodes, define = false) {
+		if (lhsNodes.length < 2 || rhsNodes.length !== lhsNodes.length)
+			return rhsNodes;
+		const roots = new Set(
+			lhsNodes.map((l) => rootIdentName(l)).filter((n) => n && n !== "_"),
+		);
+		const pure = rhsNodes.map((r) => this._independentOf(r, roots));
+		const redecl = lhsNodes.some((l) => l._redecl);
+		const observes = (r, i) =>
+			define ? this._mentions(r, roots) || (redecl && !pure[i]) : !pure[i];
+		if (!rhsNodes.some((r, i) => i > 0 && observes(r, i))) return rhsNodes;
+		const inPlace = lhsNodes.some(
+			(l) => this._isInPlaceArrayStore(l) || this._isStableTarget(l),
+		);
+		return rhsNodes.map((r, i) => {
+			if (pure[i]) return r;
+			const goType = r._type ?? this._resolveExprGoType(r);
+			const wType = this.toWasmType(goType);
+			const name = `__par_tmp_${this.tempCounter++}`;
+			const idx = this.allocLocal(name, wType, goType, true);
+			this.emitExpr(r, wType);
+			// An array temp must snapshot the value when a target is stored in
+			// place (`a, b = b, a` with `p := &a`): the store would otherwise
+			// change what the temp holds.  The snapshot is already a fresh
+			// copy, so assigning from the temp does not copy it again.
+			const isArr = this._isValueArray(goType);
+			const snapshot = inPlace && (isArr || this._isValueStruct(goType));
+			if (snapshot) this._emitCopyIfValue(r, goType, wType);
+			this.pushInstruction({ op: "local.set", index: idx });
+			return {
+				kind: "Ident",
+				name,
+				_type: goType,
+				_parTmp: true,
+				_freshArray: snapshot && isArr,
+			};
+		});
+	}
+
+	// True when assigning to `l` writes into an existing array object (so an
+	// earlier-read array value sharing that object would see the write): a
+	// boxed (address-taken) array local, `*p` on an array pointer, or an
+	// element of an array.
+	_isInPlaceArrayStore(l) {
+		if (l.kind === "Ident") {
+			const info = this.resolveLocal(l.name);
+			return !!info?.isBoxed && this._isValueArray(info.goType);
+		}
+		if ((l.kind === "UnaryExpr" && l.op === "*") || l.kind === "StarExpr") {
+			const t = (l.operand ?? l.expr)?._type;
+			return this._isValueArray(t?.base ?? t);
+		}
+		if (l.kind === "IndexExpr") {
+			const t = l.expr._type ?? this._resolveExprGoType(l.expr);
+			return (
+				this._isValueArray(t) ||
+				(t?.kind === "pointer" && this._isValueArray(t.base))
+			);
+		}
+		return false;
+	}
+
+	// True when `l` is an array or struct target that a whole-value
+	// assignment writes in place (see `_needsStableStore`).
+	_isStableTarget(l) {
+		const t = l._type ?? this._resolveExprGoType(l);
+		return this._needsStableStore(l, t);
+	}
+
+	_mentions(node, names) {
+		if (!node || typeof node !== "object") return false;
+		if (node.kind === "Ident" && names.has(node.name)) return true;
+		return someChild(node, (child) => this._mentions(child, names));
+	}
+
+	_releaseParallelTemps(rhsVals, rhsNodes) {
+		if (rhsVals === rhsNodes) return;
+		for (const r of rhsVals) if (r?._parTmp) this.locals.delete(r.name);
+	}
+
+	// True when evaluating `node` cannot observe an assignment to `roots`
+	// (or through a pointer) and has no side effects.
+	_independentOf(node, roots) {
+		if (!node || typeof node !== "object") return true;
+		switch (node.kind) {
+			case "BasicLit":
+				return true;
+			case "Ident":
+				return this._independentIdent(node, roots);
+			case "BinaryExpr":
+				return (
+					this._independentOf(node.left, roots) &&
+					this._independentOf(node.right, roots)
+				);
+			case "UnaryExpr":
+				return (
+					node.op !== "*" &&
+					node.op !== "&" &&
+					this._independentOf(node.operand, roots)
+				);
+			case "CallExpr":
+				return this._isPureLenCall(node, roots);
+			default:
+				return false;
+		}
+	}
+
+	_independentIdent(node, roots) {
+		if (node._const || node.name === "nil") return true;
+		if (roots.has(node.name)) return false;
+		const local = this.resolveLocal(node.name);
+		return !!local && !local.isBoxed;
+	}
+
+	// `len`/`cap` of a pure operand.
+	_isPureLenCall(node, roots) {
+		const fn = node.func;
+		if (fn?.kind !== "Ident" || (fn.name !== "len" && fn.name !== "cap"))
+			return false;
+		if (this.resolveLocal(fn.name) || node.args?.length !== 1) return false;
+		return this._independentOf(node.args[0], roots);
 	}
 
 	_emitAssignToTarget(target, wasmType, goType, emitValue) {
@@ -244,10 +422,48 @@ export class StmtsEmitter {
 				this.allocLocal(l.name, wType, r._type);
 				localInfo = this.locals.get(l.name);
 			}
+			if (
+				localInfo &&
+				op !== ":=" &&
+				this._needsStableStore(l, localInfo.goType)
+			) {
+				this._emitStableStore(localInfo.goType, r, () => {
+					this.pushInstruction({ op: "local.get", index: localInfo.index });
+					if (localInfo.isBoxed)
+						this.pushInstruction({
+							op: "struct.get",
+							typeIndex: localInfo.boxInfo.typeIndex,
+							fieldIndex: 0,
+						});
+				});
+				return;
+			}
+			const globalStable =
+				!localInfo && op !== ":=" && this.mod.resolveGlobal(l.name);
+			if (globalStable && this._needsStableStore(l, globalStable.goType)) {
+				this._emitStableStore(globalStable.goType, r, () => {
+					this.pushInstruction({ op: "global.get", index: globalStable.index });
+				});
+				return;
+			}
 			if (localInfo) {
+				if (localInfo.isBoxed && this._isValueArray(localInfo.goType)) {
+					// Pointers to the array (`&a`) hold its reference: write in place.
+					this._emitArrayStoreInto(localInfo.goType, r, () => {
+						this.pushInstruction({ op: "local.get", index: localInfo.index });
+						this.pushInstruction({
+							op: "struct.get",
+							typeIndex: localInfo.boxInfo.typeIndex,
+							fieldIndex: 0,
+						});
+					});
+					return;
+				}
 				if (localInfo.isBoxed) {
 					this.pushInstruction({ op: "local.get", index: localInfo.index });
 					this.emitExpr(r, localInfo.boxInfo.wType);
+					if (isArrayType(localInfo.goType, this.mod.checker))
+						this._emitCopyIfValue(r, localInfo.goType, localInfo.boxInfo.wType);
 					this.pushInstruction({
 						op: "struct.set",
 						typeIndex: localInfo.boxInfo.typeIndex,
@@ -256,13 +472,13 @@ export class StmtsEmitter {
 					return;
 				}
 				this.emitExpr(r, localInfo.type);
-				this._emitCopyIfValueStruct(r, localInfo.goType, localInfo.type);
+				this._emitCopyIfValue(r, localInfo.goType, localInfo.type);
 				this.pushInstruction({ op: "local.set", index: localInfo.index });
 			} else {
 				const globalInfo = this.mod.resolveGlobal(l.name);
 				if (globalInfo) {
 					this.emitExpr(r, globalInfo.type);
-					this._emitCopyIfValueStruct(r, globalInfo.goType, globalInfo.type);
+					this._emitCopyIfValue(r, globalInfo.goType, globalInfo.type);
 					this.pushInstruction({
 						op: "global.set",
 						index: globalInfo.index,
@@ -292,7 +508,22 @@ export class StmtsEmitter {
 				this._resolveExprGoType(l.expr);
 			const baseWType = this.toWasmType(exprGoType);
 
+			if (this._needsStableStore(l, lastStep.field.goType)) {
+				this._emitStableStore(lastStep.field.goType, r, () => {
+					this.emitExpr(l.expr, baseWType);
+					this._emitNilCheck(exprGoType);
+					for (const step of path) {
+						this.pushInstruction({
+							op: "struct.get",
+							typeIndex: step.structInfo.typeIndex,
+							fieldIndex: step.fieldIndex,
+						});
+					}
+				});
+				return;
+			}
 			this.emitExpr(l.expr, baseWType);
+			this._emitNilCheck(exprGoType);
 			for (let i = 0; i < path.length - 1; i++) {
 				const step = path[i];
 				this.pushInstruction({
@@ -302,11 +533,7 @@ export class StmtsEmitter {
 				});
 			}
 			this.emitExpr(r, lastStep.field.wType);
-			this._emitCopyIfValueStruct(
-				r,
-				lastStep.field.goType,
-				lastStep.field.wType,
-			);
+			this._emitCopyIfValue(r, lastStep.field.goType, lastStep.field.wType);
 			this.pushInstruction({
 				op: "struct.set",
 				typeIndex: lastStep.structInfo.typeIndex,
@@ -315,57 +542,8 @@ export class StmtsEmitter {
 			return;
 		}
 
-		if (l.kind === "UnaryExpr" && l.op === "*") {
-			const structInfo = this._resolveStructInfo(l.operand);
-			if (structInfo) {
-				const baseWType = this.toWasmType(l.operand._type);
-				const tmpL = this.acquireTemp(baseWType);
-				const tmpR = this.acquireTemp(baseWType);
-				this.emitExpr(l.operand, baseWType);
-				this.pushInstruction({ op: "local.set", index: tmpL });
-				this.emitExpr(r, baseWType);
-				this.pushInstruction({ op: "local.set", index: tmpR });
-				for (let i = 0; i < structInfo.fields.length; i++) {
-					this.pushInstruction({ op: "local.get", index: tmpL });
-					this.pushInstruction({ op: "local.get", index: tmpR });
-					this.pushInstruction({
-						op: "struct.get",
-						typeIndex: structInfo.typeIndex,
-						fieldIndex: i,
-					});
-					this.pushInstruction({
-						op: "struct.set",
-						typeIndex: structInfo.typeIndex,
-						fieldIndex: i,
-					});
-				}
-				this.releaseTemp(tmpR, baseWType);
-				this.releaseTemp(tmpL, baseWType);
-				return;
-			}
-			const operandGoType =
-				l.operand._type ??
-				(l.operand.kind === "Ident"
-					? this.resolveLocal(l.operand.name)?.goType
-					: null) ??
-				this._resolveExprGoType(l.operand);
-			const box = this.mod.getBoxType(operandGoType?.base ?? operandGoType);
-			const baseWType = {
-				kind: "ref",
-				nullable: true,
-				typeIndex: box.typeIndex,
-			};
-			const boxTmp = this.acquireTemp(baseWType);
-			this.emitExpr(l.operand, baseWType);
-			this.pushInstruction({ op: "local.set", index: boxTmp });
-			this.pushInstruction({ op: "local.get", index: boxTmp });
-			this.emitExpr(r, box.wType);
-			this.pushInstruction({
-				op: "struct.set",
-				typeIndex: box.typeIndex,
-				fieldIndex: 0,
-			});
-			this.releaseTemp(boxTmp, baseWType);
+		if ((l.kind === "UnaryExpr" && l.op === "*") || l.kind === "StarExpr") {
+			this._emitDerefAssign(l, r);
 			return;
 		}
 
@@ -381,7 +559,7 @@ export class StmtsEmitter {
 				this.emitExpr(baseNode, mapInfo.wType);
 				this.emitExpr(l.index, mapInfo.keyWType);
 				this.emitExpr(r, mapInfo.valWType);
-				this._emitCopyIfValueStruct(r, valType, mapInfo.valWType);
+				this._emitCopyIfValue(r, valType, mapInfo.valWType);
 				this.pushInstruction({
 					op: "call",
 					funcIndex: this.mod.resolveFuncIndex(mapInfo.setFuncName),
@@ -400,18 +578,16 @@ export class StmtsEmitter {
 				baseType?.kind === "pointer" &&
 				isArrayType(baseType.base, this.mod.checker);
 
-			const elemGoType = isSlice
-				? baseType.elem
-				: isPtrToArr
-					? baseType.base.elem
-					: baseType.elem;
+			const elemGoType = this._getArrayElemType(
+				isPtrToArr ? baseType.base : baseType,
+			);
 			const arrInfo = this.mod.getArrayType(elemGoType);
 			const sliceInfo = isSlice ? this.mod.getSliceType(elemGoType) : null;
 
 			this._emitElemAddr(baseNode, l.index, sliceInfo, arrInfo);
 
 			this.emitExpr(r, arrInfo.elemWType);
-			this._emitCopyIfValueStruct(r, elemGoType, arrInfo.elemWType);
+			this._emitCopyIfValue(r, elemGoType, arrInfo.elemWType);
 
 			this.pushInstruction({
 				op: "array.set",
@@ -419,6 +595,315 @@ export class StmtsEmitter {
 			});
 			return;
 		}
+	}
+
+	// A range variable that a closure captures and mutates lives in a box,
+	// but the loop writes the plain value each iteration.  It gets a raw
+	// local here, and `_emitRangeBoxes` (at the top of the body) wraps the
+	// value in a fresh box per iteration, so each iteration's closures keep
+	// their own variable (Go 1.22) and the loop never stores a raw value
+	// into a box local.
+	_allocRangeVar(name, wType, goType) {
+		if (!this.mutatedCaptures.has(name))
+			return this.allocLocal(name, wType, goType);
+		const idx = this.allocLocal(name, wType, goType, true);
+		if (!this._pendingRangeBoxes) this._pendingRangeBoxes = [];
+		this._pendingRangeBoxes.push({ name, idx, wType, goType });
+		return idx;
+	}
+
+	_emitRangeBoxes() {
+		const pending = this._pendingRangeBoxes ?? [];
+		this._pendingRangeBoxes = [];
+		for (const { name, idx, wType, goType } of pending) {
+			const boxIdx = this.allocLocal(name, wType, goType);
+			const info = this.locals.get(name);
+			this.pushInstruction({ op: "local.get", index: idx });
+			this.pushInstruction({
+				op: "struct.new",
+				typeIndex: info.boxInfo.typeIndex,
+			});
+			this.pushInstruction({ op: "local.set", index: boxIdx });
+		}
+	}
+
+	// The struct that holds the last field of `path`: a promoted field
+	// (`o.N` on an embedded `Inner`) lives on the embedded struct.
+	_fieldHolderWType(path, baseWType) {
+		if (path.length <= 1) return baseWType;
+		const holder = path[path.length - 1].structInfo;
+		return { kind: "ref", nullable: true, typeIndex: holder.typeIndex };
+	}
+
+	// Copy the array value `r` into the existing array that `emitDst` pushes,
+	// so every pointer to that array sees the new elements.
+	_emitArrayStoreInto(goType, r, emitDst) {
+		const elemGoType = this._getArrayElemType(goType);
+		const arrInfo = this.mod.getArrayType(elemGoType);
+		const wType = { kind: "ref", nullable: true, typeIndex: arrInfo.typeIndex };
+		if (this._isValueStruct(elemGoType)) {
+			this._emitStructElemsStoreInto(elemGoType, arrInfo, wType, r, emitDst);
+			return;
+		}
+		const dst = this.acquireTemp(wType);
+		emitDst();
+		this.pushInstruction({ op: "local.tee", index: dst });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.emitExpr(r, wType);
+		this._emitCopyIfValue(r, goType, wType);
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.get", index: dst });
+		this.pushInstruction("array.len");
+		this.pushInstruction({
+			op: "array.copy",
+			typeIndex: arrInfo.typeIndex,
+		});
+		this.releaseTemp(dst, wType);
+	}
+
+	_isValueStruct(goType) {
+		return (
+			!!goType &&
+			goType.kind !== "pointer" &&
+			isStructType(goType, this.mod.checker, this.mod) &&
+			!isPointerToStruct(goType, this.mod.checker, this.mod)
+		);
+	}
+
+	// An array of structs holds element references, so `array.copy` would
+	// swap them and leave `&a[i]` pointing at the old element.  Copy each
+	// element's fields into the existing element struct instead.
+	_emitStructElemsStoreInto(elemGoType, arrInfo, wType, r, emitDst) {
+		const elemInfo = this._resolveStructInfo({ _type: elemGoType });
+		const eType = arrInfo.elemWType;
+		const dst = this.acquireTemp(wType);
+		const src = this.acquireTemp(wType);
+		const i = this.acquireTemp("i32");
+		const d = this.acquireTemp(eType);
+		const s = this.acquireTemp(eType);
+		emitDst();
+		this.pushInstruction({ op: "local.set", index: dst });
+		this.emitExpr(r, wType);
+		this.pushInstruction({ op: "local.set", index: src });
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "local.set", index: i });
+		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushInstruction({ op: "loop", blockType: "void" });
+		this.pushInstruction({ op: "local.get", index: i });
+		this.pushInstruction({ op: "local.get", index: dst });
+		this.pushInstruction("array.len");
+		this.pushInstruction("i32.ge_s");
+		this.pushInstruction({ op: "br_if", depth: 1 });
+		for (const [tmp, arr] of [
+			[d, dst],
+			[s, src],
+		]) {
+			this.pushInstruction({ op: "local.get", index: arr });
+			this.pushInstruction({ op: "local.get", index: i });
+			this.pushInstruction({ op: "array.get", typeIndex: arrInfo.typeIndex });
+			this.pushInstruction({ op: "local.set", index: tmp });
+		}
+		this._emitStructFieldsInto(elemInfo, d, s);
+		this.pushInstruction({ op: "local.get", index: i });
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction("i32.add");
+		this.pushInstruction({ op: "local.set", index: i });
+		this.pushInstruction({ op: "br", depth: 0 });
+		this.pushInstruction("end");
+		this.pushInstruction("end");
+		this.releaseTemp(s, eType);
+		this.releaseTemp(d, eType);
+		this.releaseTemp(i, "i32");
+		this.releaseTemp(src, wType);
+		this.releaseTemp(dst, wType);
+	}
+
+	// Whole-value assignment to a variable (or a field of one) whose address
+	// is taken writes into the existing storage, so earlier pointers to it or
+	// to its parts see the new value (Task 0.33).  Other variables keep the
+	// plain local.set / struct.set path.
+	_needsStableStore(l, goType) {
+		if (!goType || goType.kind === "pointer") return false;
+		const isArr = this._isValueArray(goType);
+		if (
+			!isArr &&
+			!(
+				isStructType(goType, this.mod.checker, this.mod) &&
+				!isPointerToStruct(goType, this.mod.checker, this.mod)
+			)
+		)
+			return false;
+		const root = rootIdentName(l);
+		if (!root) return false;
+		// Any code may hold the address of a package-level variable.
+		if (!this.resolveLocal(root)) return !!this.mod.resolveGlobal(root);
+		const decl = this.rootFuncDecl._sourceDecl ?? this.rootFuncDecl;
+		const ctx = this.mod.lowerResult?.ownership?.get(decl);
+		return Boolean(ctx?.fnMutates(root, true));
+	}
+
+	_emitStableStore(goType, r, emitDst) {
+		if (this._isValueArray(goType)) {
+			this._emitArrayStoreInto(goType, r, emitDst);
+			return;
+		}
+		const info = this._resolveStructInfo({ _type: goType });
+		const wType = this.toWasmType(goType);
+		const dst = this.acquireTemp(wType);
+		const src = this.acquireTemp(wType);
+		emitDst();
+		this.pushInstruction({ op: "local.set", index: dst });
+		this.emitExpr(r, wType);
+		this.pushInstruction({ op: "local.set", index: src });
+		this._emitStructFieldsInto(info, dst, src);
+		this.releaseTemp(src, wType);
+		this.releaseTemp(dst, wType);
+	}
+
+	// Copies every field of the struct in `src` into the struct in `dst`;
+	// array and value-struct fields are copied into the existing storage.
+	_emitStructFieldsInto(info, dst, src) {
+		const get = (tmp, i) => {
+			this.pushInstruction({ op: "local.get", index: tmp });
+			this.pushInstruction({
+				op: "struct.get",
+				typeIndex: info.typeIndex,
+				fieldIndex: i,
+			});
+		};
+		for (let i = 0; i < info.fields.length; i++) {
+			const f = info.fields[i];
+			const gt = f.goType;
+			if (gt && gt.kind !== "pointer" && this._isValueArray(gt)) {
+				const arrInfo = this.mod.getArrayType(this._getArrayElemType(gt));
+				get(dst, i);
+				this.pushInstruction({ op: "i32.const", value: 0 });
+				get(src, i);
+				const elem = this._getArrayElemType(gt);
+				if (
+					isArrayType(elem, this.mod.checker) ||
+					isStructType(elem, this.mod.checker, this.mod)
+				)
+					this.emitCopyArray(gt);
+				this.pushInstruction({ op: "i32.const", value: 0 });
+				get(dst, i);
+				this.pushInstruction("array.len");
+				this.pushInstruction({
+					op: "array.copy",
+					typeIndex: arrInfo.typeIndex,
+				});
+				continue;
+			}
+			const inner =
+				gt &&
+				gt.kind !== "pointer" &&
+				isStructType(gt, this.mod.checker, this.mod) &&
+				!isPointerToStruct(gt, this.mod.checker, this.mod)
+					? this._resolveStructInfo({ _type: gt })
+					: null;
+			if (inner) {
+				const d = this.acquireTemp(f.wType);
+				const s = this.acquireTemp(f.wType);
+				get(dst, i);
+				this.pushInstruction({ op: "local.set", index: d });
+				get(src, i);
+				this.pushInstruction({ op: "local.set", index: s });
+				this._emitStructFieldsInto(inner, d, s);
+				this.releaseTemp(s, f.wType);
+				this.releaseTemp(d, f.wType);
+				continue;
+			}
+			this.pushInstruction({ op: "local.get", index: dst });
+			get(src, i);
+			this.pushInstruction({
+				op: "struct.set",
+				typeIndex: info.typeIndex,
+				fieldIndex: i,
+			});
+		}
+	}
+
+	_emitStructDerefAssign(operand, r, structInfo) {
+		const baseWType = this.toWasmType(operand._type);
+		const tmpL = this.acquireTemp(baseWType);
+		const tmpR = this.acquireTemp(baseWType);
+		this.emitExpr(operand, baseWType);
+		this.pushInstruction({ op: "local.set", index: tmpL });
+		this.emitExpr(r, baseWType);
+		this.pushInstruction({ op: "local.set", index: tmpR });
+		for (let i = 0; i < structInfo.fields.length; i++) {
+			this.pushInstruction({ op: "local.get", index: tmpL });
+			this.pushInstruction({ op: "local.get", index: tmpR });
+			this.pushInstruction({
+				op: "struct.get",
+				typeIndex: structInfo.typeIndex,
+				fieldIndex: i,
+			});
+			this.pushInstruction({
+				op: "struct.set",
+				typeIndex: structInfo.typeIndex,
+				fieldIndex: i,
+			});
+		}
+		this.releaseTemp(tmpR, baseWType);
+		this.releaseTemp(tmpL, baseWType);
+	}
+
+	_emitDerefAssign(l, r) {
+		const operand = l.operand ?? l.expr;
+		const structInfo = this._resolveStructInfo(operand);
+		if (structInfo) {
+			this._emitStructDerefAssign(operand, r, structInfo);
+			return;
+		}
+		const operandGoType =
+			operand._type ??
+			(operand.kind === "Ident"
+				? this.resolveLocal(operand.name)?.goType
+				: null) ??
+			this._resolveExprGoType(operand);
+		const baseGoType = operandGoType?.base ?? operandGoType;
+		if (this._isValueArray(baseGoType)) {
+			this._emitArrayStoreInto(baseGoType, r, () => {
+				this.emitExpr(operand);
+				this._emitNilCheck(operandGoType);
+			});
+			return;
+		}
+		if (!isScalarType(baseGoType, this.mod.checker, this.mod)) {
+			return;
+		}
+		const box = this.mod.getBoxType(baseGoType);
+		const ptr = this.mod.getPtrType(baseGoType);
+		const ptrWType = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: ptr.typeIndex,
+			typeName: ptr.name,
+		};
+		const ptrTmp = this.acquireTemp(ptrWType);
+		const valTmp = this.acquireTemp(box.wType);
+		this.emitExpr(operand, ptrWType);
+		this.pushInstruction({ op: "local.set", index: ptrTmp });
+		this.emitExpr(r, box.wType);
+		this.pushInstruction({ op: "local.set", index: valTmp });
+
+		this.pushInstruction({ op: "local.get", index: ptrTmp });
+		this.pushInstruction({
+			op: "ref.cast",
+			typeIndex: box.typeIndex,
+			typeName: box.name,
+		});
+		this.pushInstruction({ op: "local.get", index: valTmp });
+		this.pushInstruction({
+			op: "struct.set",
+			typeIndex: box.typeIndex,
+			typeName: box.name,
+			fieldIndex: 0,
+		});
+
+		this.releaseTemp(valTmp, box.wType);
+		this.releaseTemp(ptrTmp, ptrWType);
 	}
 
 	_emitTupleAssign(lhsNodes, rhsNode, op) {
@@ -509,12 +994,20 @@ export class StmtsEmitter {
 		this.releaseTemp(okTmp, "i32");
 	}
 
+	// Pushes a comma-ok result (map value / asserted value).  An array is a
+	// value: the stored one must not alias the map entry or boxed interface.
+	_emitGetTempValue(tempIdx, goType) {
+		this.pushInstruction({ op: "local.get", index: tempIdx });
+		if (goType?.kind !== "pointer" && isArrayType(goType, this.mod.checker))
+			this.emitCopyArray(goType);
+	}
+
 	_emitStoreLhsFromTemp(lhsNode, tempIdx, wType, goType, isDefine) {
 		if (lhsNode.kind !== "Ident" || lhsNode.name === "_") return;
 		if (isDefine) {
 			const idx = this.allocLocal(lhsNode.name, wType, goType);
 			const local = this.locals.get(lhsNode.name);
-			this.pushInstruction({ op: "local.get", index: tempIdx });
+			this._emitGetTempValue(tempIdx, goType);
 			if (local?.isBoxed) {
 				this.pushInstruction({
 					op: "struct.new",
@@ -528,19 +1021,19 @@ export class StmtsEmitter {
 		if (local) {
 			if (local.isBoxed) {
 				this.pushInstruction({ op: "local.get", index: local.index });
-				this.pushInstruction({ op: "local.get", index: tempIdx });
+				this._emitGetTempValue(tempIdx, goType);
 				this.pushInstruction({
 					op: "struct.set",
 					typeIndex: local.boxInfo.typeIndex,
 					fieldIndex: 0,
 				});
 			} else {
-				this.pushInstruction({ op: "local.get", index: tempIdx });
+				this._emitGetTempValue(tempIdx, goType);
 				this.pushInstruction({ op: "local.set", index: local.index });
 			}
 		} else {
 			const global = this.mod.resolveGlobal(lhsNode.name);
-			this.pushInstruction({ op: "local.get", index: tempIdx });
+			this._emitGetTempValue(tempIdx, goType);
 			this.pushInstruction({ op: "global.set", index: global.index });
 		}
 	}
@@ -591,6 +1084,15 @@ export class StmtsEmitter {
 		return goType.name ?? null;
 	}
 
+	// The struct a type assertion target refers to; an anonymous struct type
+	// has no name to look up.
+	_structInfoOfType(goType) {
+		return (
+			this.mod.getStructType(this._structNameOf(goType)) ??
+			this._resolveStructInfo({ _type: goType })
+		);
+	}
+
 	_emitTypeTest(targetGoType) {
 		if (!targetGoType) {
 			this.pushInstruction("drop");
@@ -638,7 +1140,9 @@ export class StmtsEmitter {
 			return;
 		}
 
-		if (isStringType(targetGoType, this.mod.checker)) {
+		// A named string type is boxed like any other scalar (see emitExpr); only
+		// a plain `string` lives in `any` as the bare string.
+		if (isBareStringType(targetGoType, this.mod.checker)) {
 			const isStrIdx = this.mod.getIsStringImportIndex();
 			this.pushInstruction({ op: "call", funcIndex: isStrIdx });
 			return;
@@ -656,7 +1160,7 @@ export class StmtsEmitter {
 		// `*T` lives in `any` as the bare struct ref; a `T` value as a boxed
 		// clone (see emitExpr).  Fall through to the scalar box for values.
 		if (isPointerToStruct(targetGoType, this.mod.checker, this.mod)) {
-			const sInfo = this.mod.getStructType(this._structNameOf(targetGoType));
+			const sInfo = this._structInfoOfType(targetGoType);
 			if (sInfo) {
 				this.pushInstruction({ op: "ref.test", typeIndex: sInfo.typeIndex });
 				return;
@@ -681,6 +1185,17 @@ export class StmtsEmitter {
 			}
 		}
 
+		// A map lives in `any` as its bare map struct.
+		if (isMapType(targetGoType, this.mod.checker)) {
+			const { keyType, valType } = getMapKeyValTypes(
+				targetGoType,
+				this.mod.checker,
+			);
+			const mInfo = this.mod.getMapType(keyType, valType);
+			this.pushInstruction({ op: "ref.test", typeIndex: mInfo.typeIndex });
+			return;
+		}
+
 		// Scalar types
 		const box = this.mod.getIfaceBoxType(targetGoType);
 		if (box) {
@@ -697,7 +1212,7 @@ export class StmtsEmitter {
 			return;
 		}
 
-		if (isStringType(targetGoType, this.mod.checker)) {
+		if (isBareStringType(targetGoType, this.mod.checker)) {
 			this.pushInstruction("extern.convert_any");
 			return;
 		}
@@ -712,7 +1227,7 @@ export class StmtsEmitter {
 		}
 
 		if (isPointerToStruct(targetGoType, this.mod.checker, this.mod)) {
-			const sInfo = this.mod.getStructType(this._structNameOf(targetGoType));
+			const sInfo = this._structInfoOfType(targetGoType);
 			if (sInfo) {
 				this.pushInstruction({
 					op: "ref.cast_null",
@@ -722,7 +1237,7 @@ export class StmtsEmitter {
 			}
 		}
 		if (isStructType(targetGoType, this.mod.checker, this.mod)) {
-			const sInfo = this.mod.getStructType(this._structNameOf(targetGoType));
+			const sInfo = this._structInfoOfType(targetGoType);
 			const box = this.mod.getIfaceBoxType(targetGoType);
 			if (sInfo && box) {
 				this._emitUnbox(box);
@@ -755,6 +1270,19 @@ export class StmtsEmitter {
 			}
 		}
 
+		if (isMapType(targetGoType, this.mod.checker)) {
+			const { keyType, valType } = getMapKeyValTypes(
+				targetGoType,
+				this.mod.checker,
+			);
+			const mInfo = this.mod.getMapType(keyType, valType);
+			this.pushInstruction({
+				op: "ref.cast_null",
+				typeIndex: mInfo.typeIndex,
+			});
+			return;
+		}
+
 		// Scalar types
 		const box = this.mod.getIfaceBoxType(targetGoType);
 		if (box) {
@@ -780,6 +1308,44 @@ export class StmtsEmitter {
 		const l = Array.isArray(lhs) ? lhs[0] : lhs;
 		const r = Array.isArray(rhs) ? rhs[0] : rhs;
 
+		if (isComplex(l._type)) {
+			const synthBinary = {
+				kind: "BinaryExpr",
+				op: baseOp,
+				left: l,
+				right: r,
+				_type: l._type,
+			};
+			const is64 = isComplex64(l._type);
+			const info = this.mod.getComplexType(is64 ? "complex64" : "complex128");
+			const cWType = {
+				kind: "ref",
+				nullable: true,
+				typeIndex: info.typeIndex,
+				typeName: info.name,
+			};
+			if (l.kind === "Ident") {
+				const localInfo = this.resolveLocal(l.name);
+				const globalInfo = !localInfo ? this.mod.resolveGlobal(l.name) : null;
+				if (localInfo?.isBoxed) {
+					this.pushInstruction({ op: "local.get", index: localInfo.index });
+					this.emitComplexBinary(synthBinary, cWType);
+					this.pushInstruction({
+						op: "struct.set",
+						typeIndex: localInfo.boxInfo.typeIndex,
+						fieldIndex: 0,
+					});
+				} else if (localInfo) {
+					this.emitComplexBinary(synthBinary, cWType);
+					this.pushInstruction({ op: "local.set", index: localInfo.index });
+				} else if (globalInfo) {
+					this.emitComplexBinary(synthBinary, cWType);
+					this.pushInstruction({ op: "global.set", index: globalInfo.index });
+				}
+				return;
+			}
+		}
+
 		if (l.kind === "SelectorExpr") {
 			const structInfo = this._resolveStructInfo(l.expr);
 			if (!structInfo) {
@@ -796,9 +1362,11 @@ export class StmtsEmitter {
 			const lastStep = path[path.length - 1];
 			const targetType = lastStep.field.wType;
 			const baseWType = this.toWasmType(l.expr._type);
+			const holderWType = this._fieldHolderWType(path, baseWType);
 
-			const baseTmp = this.acquireTemp(baseWType);
+			const baseTmp = this.acquireTemp(holderWType);
 			this.emitExpr(l.expr, baseWType);
+			this._emitNilCheck(l.expr._type);
 			for (let i = 0; i < path.length - 1; i++) {
 				const step = path[i];
 				this.pushInstruction({
@@ -825,7 +1393,7 @@ export class StmtsEmitter {
 				typeIndex: lastStep.structInfo.typeIndex,
 				fieldIndex: lastStep.fieldIndex,
 			});
-			this.releaseTemp(baseTmp, baseWType);
+			this.releaseTemp(baseTmp, holderWType);
 			return;
 		}
 
@@ -882,11 +1450,9 @@ export class StmtsEmitter {
 				baseType?.kind === "pointer" &&
 				isArrayType(baseType.base, this.mod.checker);
 
-			const elemGoType = isSlice
-				? baseType.elem
-				: isPtrToArr
-					? baseType.base.elem
-					: baseType.elem;
+			const elemGoType = this._getArrayElemType(
+				isPtrToArr ? baseType.base : baseType,
+			);
 			const arrInfo = this.mod.getArrayType(elemGoType);
 			const sliceInfo = isSlice ? this.mod.getSliceType(elemGoType) : null;
 			const targetType = arrInfo.elemWType;
@@ -925,32 +1491,56 @@ export class StmtsEmitter {
 
 		if ((l.kind === "UnaryExpr" && l.op === "*") || l.kind === "StarExpr") {
 			const operand = l.operand ?? l.expr;
-			const box = this.mod.getBoxType(operand._type?.base ?? operand._type);
-			if (box) {
-				const baseWType = {
+			const operandGoType =
+				operand._type ??
+				(operand.kind === "Ident"
+					? this.resolveLocal(operand.name)?.goType
+					: null) ??
+				this._resolveExprGoType(operand);
+			const baseGoType = operandGoType?.base ?? operandGoType;
+			if (!isScalarType(baseGoType, this.mod.checker, this.mod)) return;
+			const box = this.mod.getBoxType(baseGoType);
+			const ptr = this.mod.getPtrType(baseGoType);
+			if (box && ptr) {
+				const ptrWType = {
 					kind: "ref",
 					nullable: true,
-					typeIndex: box.typeIndex,
+					typeIndex: ptr.typeIndex,
+					typeName: ptr.name,
 				};
-				const boxTmp = this.acquireTemp(baseWType);
-				this.emitExpr(operand, baseWType);
-				this.pushInstruction({ op: "local.set", index: boxTmp });
-				this.pushInstruction({ op: "local.get", index: boxTmp });
-				this.pushInstruction({ op: "local.get", index: boxTmp });
+				const targetType = box.wType;
+				const ptrTmp = this.acquireTemp(ptrWType);
+				this.emitExpr(operand, ptrWType);
+				this.pushInstruction({ op: "local.set", index: ptrTmp });
+
+				this.pushInstruction({ op: "local.get", index: ptrTmp });
+				this.pushInstruction({
+					op: "ref.cast",
+					typeIndex: box.typeIndex,
+					typeName: box.name,
+				});
+				this.pushInstruction({ op: "local.get", index: ptrTmp });
+				this.pushInstruction({
+					op: "ref.cast",
+					typeIndex: box.typeIndex,
+					typeName: box.name,
+				});
 				this.pushInstruction({
 					op: "struct.get",
 					typeIndex: box.typeIndex,
+					typeName: box.name,
 					fieldIndex: 0,
 				});
-				const targetType = box.wType;
 				this.emitExpr(r, targetType);
-				this.emitBinaryOp(baseOp, targetType, l._type ?? operand._type?.base);
+				this.emitBinaryOp(baseOp, targetType, l._type ?? baseGoType);
 				this.pushInstruction({
 					op: "struct.set",
 					typeIndex: box.typeIndex,
+					typeName: box.name,
 					fieldIndex: 0,
 				});
-				this.releaseTemp(boxTmp, baseWType);
+
+				this.releaseTemp(ptrTmp, ptrWType);
 				return;
 			}
 		}
@@ -1040,34 +1630,54 @@ export class StmtsEmitter {
 			const operand = expr.operand ?? expr.expr;
 			const structInfo = this._resolveStructInfo(operand);
 			if (!structInfo) {
-				const box = this.mod.getBoxType(operand._type?.base ?? operand._type);
-				if (box) {
-					const baseWType = {
+				const operandGoType =
+					operand._type ??
+					(operand.kind === "Ident"
+						? this.resolveLocal(operand.name)?.goType
+						: null) ??
+					this._resolveExprGoType(operand);
+				const baseGoType = operandGoType?.base ?? operandGoType;
+				if (!isScalarType(baseGoType, this.mod.checker, this.mod)) return;
+				const box = this.mod.getBoxType(baseGoType);
+				const ptr = this.mod.getPtrType(baseGoType);
+				if (box && ptr) {
+					const ptrWType = {
 						kind: "ref",
 						nullable: true,
-						typeIndex: box.typeIndex,
+						typeIndex: ptr.typeIndex,
+						typeName: ptr.name,
 					};
-					const boxTmp = this.acquireTemp(baseWType);
-					this.emitExpr(operand, baseWType);
-					this.pushInstruction({ op: "local.set", index: boxTmp });
-					this.pushInstruction({ op: "local.get", index: boxTmp });
-					this.pushInstruction({ op: "local.get", index: boxTmp });
+					const ptrTmp = this.acquireTemp(ptrWType);
+					this.emitExpr(operand, ptrWType);
+					this.pushInstruction({ op: "local.set", index: ptrTmp });
+
+					this.pushInstruction({ op: "local.get", index: ptrTmp });
+					this.pushInstruction({
+						op: "ref.cast",
+						typeIndex: box.typeIndex,
+						typeName: box.name,
+					});
+					this.pushInstruction({ op: "local.get", index: ptrTmp });
+					this.pushInstruction({
+						op: "ref.cast",
+						typeIndex: box.typeIndex,
+						typeName: box.name,
+					});
 					this.pushInstruction({
 						op: "struct.get",
 						typeIndex: box.typeIndex,
+						typeName: box.name,
 						fieldIndex: 0,
 					});
-					this._emitIncDecStep(
-						op,
-						box.wType,
-						operand._type?.base ?? operand._type,
-					);
+					this._emitIncDecStep(op, box.wType, baseGoType);
 					this.pushInstruction({
 						op: "struct.set",
 						typeIndex: box.typeIndex,
+						typeName: box.name,
 						fieldIndex: 0,
 					});
-					this.releaseTemp(boxTmp, baseWType);
+
+					this.releaseTemp(ptrTmp, ptrWType);
 					return;
 				}
 			}
@@ -1081,9 +1691,11 @@ export class StmtsEmitter {
 			const lastStep = path[path.length - 1];
 			const targetType = lastStep.field.wType;
 			const baseWType = this.toWasmType(expr.expr._type);
+			const holderWType = this._fieldHolderWType(path, baseWType);
 
-			const baseTmp = this.acquireTemp(baseWType);
+			const baseTmp = this.acquireTemp(holderWType);
 			this.emitExpr(expr.expr, baseWType);
+			this._emitNilCheck(expr.expr._type);
 			for (let i = 0; i < path.length - 1; i++) {
 				const step = path[i];
 				this.pushInstruction({
@@ -1170,11 +1782,9 @@ export class StmtsEmitter {
 				baseType?.kind === "pointer" &&
 				isArrayType(baseType.base, this.mod.checker);
 
-			const elemGoType = isSlice
-				? baseType.elem
-				: isPtrToArr
-					? baseType.base.elem
-					: baseType.elem;
+			const elemGoType = this._getArrayElemType(
+				isPtrToArr ? baseType.base : baseType,
+			);
 			const arrInfo = this.mod.getArrayType(elemGoType);
 			const sliceInfo = isSlice ? this.mod.getSliceType(elemGoType) : null;
 			const targetType = arrInfo.elemWType;
@@ -1325,7 +1935,7 @@ export class StmtsEmitter {
 						!this.capturedNames?.includes(lhs[0].name) &&
 						!this._varMutatesOrEscapes(bodyBlock, lhs[0].name);
 					const wType = isNonEscaping ? "i32" : "i64";
-					const lIdx = this.allocLocal(lhs[0].name, wType, {
+					const lIdx = this._allocRangeVar(lhs[0].name, wType, {
 						kind: "basic",
 						name: "int",
 					});
@@ -1378,6 +1988,7 @@ export class StmtsEmitter {
 			// Emit body
 			const bodyBlock = stmt.body ?? stmt.block;
 			if (bodyBlock) {
+				this._emitRangeBoxes();
 				this.emitBlock(bodyBlock);
 			}
 
@@ -1425,7 +2036,7 @@ export class StmtsEmitter {
 			let idxLocalInfo = null;
 			if (lhs[0] && lhs[0].name !== "_") {
 				if (!isAssign) {
-					const lIdx = this.allocLocal(lhs[0].name, "i64", {
+					const lIdx = this._allocRangeVar(lhs[0].name, "i64", {
 						kind: "basic",
 						name: "int",
 					});
@@ -1440,7 +2051,7 @@ export class StmtsEmitter {
 			let valLocalInfo = null;
 			if (lhs[1] && lhs[1].name !== "_") {
 				if (!isAssign) {
-					const lIdx = this.allocLocal(lhs[1].name, "i32", {
+					const lIdx = this._allocRangeVar(lhs[1].name, "i32", {
 						kind: "basic",
 						name: "rune",
 					});
@@ -1519,6 +2130,7 @@ export class StmtsEmitter {
 			// Body
 			const bodyBlock = stmt.body ?? stmt.block;
 			if (bodyBlock) {
+				this._emitRangeBoxes();
 				this.emitBlock(bodyBlock);
 			}
 
@@ -1596,7 +2208,11 @@ export class StmtsEmitter {
 			let keyLocalInfo = null;
 			if (lhs[0] && lhs[0].name !== "_") {
 				if (!isAssign) {
-					const lIdx = this.allocLocal(lhs[0].name, mapInfo.keyWType, keyType);
+					const lIdx = this._allocRangeVar(
+						lhs[0].name,
+						mapInfo.keyWType,
+						keyType,
+					);
 					keyLocalInfo = { index: lIdx, type: mapInfo.keyWType };
 				} else {
 					keyLocalInfo =
@@ -1608,7 +2224,11 @@ export class StmtsEmitter {
 			let valLocalInfo = null;
 			if (lhs[1] && lhs[1].name !== "_") {
 				if (!isAssign) {
-					const lIdx = this.allocLocal(lhs[1].name, mapInfo.valWType, valType);
+					const lIdx = this._allocRangeVar(
+						lhs[1].name,
+						mapInfo.valWType,
+						valType,
+					);
 					valLocalInfo = { index: lIdx, type: mapInfo.valWType };
 				} else {
 					valLocalInfo =
@@ -1707,6 +2327,11 @@ export class StmtsEmitter {
 					if (sInfo) {
 						this.emitCloneStruct(sInfo, mapInfo.valWType);
 					}
+				} else if (
+					valType?.kind !== "pointer" &&
+					isArrayType(valType, this.mod.checker)
+				) {
+					this.emitCopyArray(valType);
 				}
 				if (this.resolveLocal(lhs[1].name)) {
 					this.pushInstruction({
@@ -1724,6 +2349,7 @@ export class StmtsEmitter {
 			// Body
 			const bodyBlock = stmt.body ?? stmt.block;
 			if (bodyBlock) {
+				this._emitRangeBoxes();
 				this.emitBlock(bodyBlock);
 			}
 
@@ -1768,11 +2394,9 @@ export class StmtsEmitter {
 			iterType?.kind === "pointer" &&
 			isArrayType(iterType.base, this.mod.checker);
 
-		const elemGoType = isSlice
-			? iterType.elem
-			: isPtrToArr
-				? iterType.base.elem
-				: iterType.elem;
+		const elemGoType = this._getArrayElemType(
+			isPtrToArr ? iterType.base : iterType,
+		);
 		const arrInfo = this.mod.getArrayType(elemGoType);
 		const sliceInfo = isSlice ? this.mod.getSliceType(elemGoType) : null;
 
@@ -1810,6 +2434,10 @@ export class StmtsEmitter {
 			this.releaseTemp(sliceTmp, sliceWType);
 		} else {
 			this.emitExpr(iterExpr, arrWType);
+			// Go ranges over a copy of an array (the range expression is
+			// evaluated once), so body writes to the array do not reach `v`.
+			if (hasVal && !isPtrToArr)
+				this._emitCopyIfValue(iterExpr, iterType, arrWType);
 			if (hasVal) {
 				this.pushInstruction({ op: "local.set", index: arrTmp });
 				this.pushInstruction({ op: "i32.const", value: 0 });
@@ -1833,7 +2461,7 @@ export class StmtsEmitter {
 					!this.capturedNames?.includes(lhs[0].name) &&
 					!this._varMutatesOrEscapes(bodyBlock, lhs[0].name);
 				const wType = isNonEscaping ? "i32" : "i64";
-				const lIdx = this.allocLocal(lhs[0].name, wType, {
+				const lIdx = this._allocRangeVar(lhs[0].name, wType, {
 					kind: "basic",
 					name: "int",
 				});
@@ -1847,7 +2475,7 @@ export class StmtsEmitter {
 		let valLocalInfo = null;
 		if (lhs[1] && lhs[1].name !== "_") {
 			if (!isAssign) {
-				const lIdx = this.allocLocal(
+				const lIdx = this._allocRangeVar(
 					lhs[1].name,
 					arrInfo.elemWType,
 					elemGoType,
@@ -1912,6 +2540,11 @@ export class StmtsEmitter {
 				if (sInfo) {
 					this.emitCloneStruct(sInfo, arrInfo.elemWType);
 				}
+			} else if (
+				elemGoType?.kind !== "pointer" &&
+				isArrayType(elemGoType, this.mod.checker)
+			) {
+				this.emitCopyArray(elemGoType);
 			}
 			if (this.resolveLocal(lhs[1].name)) {
 				this.pushInstruction({ op: "local.set", index: valLocalInfo.index });
@@ -1926,6 +2559,7 @@ export class StmtsEmitter {
 		// Body
 		const bodyBlock = stmt.body ?? stmt.block;
 		if (bodyBlock) {
+			this._emitRangeBoxes();
 			this.emitBlock(bodyBlock);
 		}
 
@@ -1955,7 +2589,102 @@ export class StmtsEmitter {
 		restoreShadowed();
 	}
 
+	_initIterState(stmt) {
+		if (!stmt._iterStateName) return;
+		let stateLoc = this.resolveLocal(stmt._iterStateName);
+		if (!stateLoc) {
+			this.allocLocal(stmt._iterStateName, "i64", {
+				kind: "basic",
+				name: "int",
+			});
+			stateLoc = this.resolveLocal(stmt._iterStateName);
+		}
+		if (stateLoc?.isBoxed) {
+			this.pushInstruction({ op: "i64.const", value: 0n });
+			this.pushInstruction({
+				op: "struct.new",
+				typeIndex: stateLoc.boxInfo.typeIndex,
+			});
+			this.pushInstruction({ op: "local.set", index: stateLoc.index });
+		}
+	}
+
+	_emitIteratorRange(stmt, rangeExpr) {
+		const funcLit = getOrCreateIteratorFuncLit(stmt);
+		const iterExpr = rangeExpr.expr;
+		const iterType = this._resolveExprGoType(iterExpr) ?? iterExpr._type;
+		const iterInfo = this.mod.getClosureType(iterType);
+		const iterWType = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: iterInfo.typeIndex,
+		};
+
+		this._initIterState(stmt);
+
+		const iterTmp = this.acquireTemp(iterWType);
+		this.emitExpr(iterExpr, iterWType);
+		this.pushInstruction({ op: "local.set", index: iterTmp });
+
+		const yieldClosureInfo = this.mod.getClosureType(funcLit._type ?? funcLit);
+		const yieldClosureWType = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: yieldClosureInfo.typeIndex,
+		};
+		const yieldTmp = this.acquireTemp(yieldClosureWType);
+		this.emitFuncLit(funcLit);
+		this.pushInstruction({ op: "local.set", index: yieldTmp });
+
+		// Outer block for break
+		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushControl("break", stmt.label);
+
+		// Push env of iterTmp (param 0)
+		this.pushInstruction({ op: "local.get", index: iterTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: iterInfo.typeIndex,
+			fieldIndex: 1,
+		});
+
+		// Push yield callback closure (param 1)
+		this.pushInstruction({ op: "local.get", index: yieldTmp });
+
+		// Push funcref of iterTmp
+		this.pushInstruction({ op: "local.get", index: iterTmp });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: iterInfo.typeIndex,
+			fieldIndex: 0,
+		});
+
+		// Call iterator via call_ref
+		this.pushInstruction({
+			op: "call_ref",
+			typeIndex: iterInfo.funcTypeIndex,
+		});
+
+		// If iterator returned any values, drop them
+		for (let i = 0; i < (iterInfo.returnWTypes?.length ?? 0); i++) {
+			this.pushInstruction("drop");
+		}
+
+		this.pushInstruction("end");
+
+		this.releaseTemp(yieldTmp, yieldClosureWType);
+		this.releaseTemp(iterTmp, iterWType);
+
+		this._emitIteratorUnwind(stmt);
+	}
+
 	emitForStmt(stmt) {
+		if (isIteratorRangeFor(stmt)) {
+			const rangeExpr =
+				stmt.cond?.kind === "RangeExpr" ? stmt.cond : stmt.init.rhs[0];
+			this._emitIteratorRange(stmt, rangeExpr);
+			return;
+		}
 		if (isRangeFor(stmt) || stmt.cond?.kind === "RangeExpr") {
 			this.emitRangeForStmt(stmt);
 			return;
@@ -2008,6 +2737,8 @@ export class StmtsEmitter {
 		// End inner continue block
 		this.pushInstruction("end");
 
+		this._emitPerIterationBoxes(stmt);
+
 		if (iv) {
 			this.pushInstruction({ op: "local.get", index: ivLocalInfo.index });
 			this.pushInstruction({ op: "i32.const", value: iv.step });
@@ -2032,6 +2763,46 @@ export class StmtsEmitter {
 			} else {
 				this.locals.delete(iv.name);
 			}
+		}
+	}
+
+	// Go 1.22 per-iteration loop variables.  For each three-clause `for`
+	// variable that a closure in this loop captures, give the next iteration a
+	// fresh copy before the post statement: closures created in this
+	// iteration keep their own variable, the post statement (and the next
+	// iteration) work on the new one, which starts from the current value.
+	// A boxed scalar gets a new box; a value struct or array (a ref) is also
+	// cloned.  Uncaptured variables stay plain locals with no allocation.
+	_emitPerIterationBoxes(stmt) {
+		for (const name of loopVarsCapturedInLoop(stmt)) {
+			const info = this.locals.get(name);
+			if (!info) continue;
+			const goType = info.goType;
+			const cloneValue = (wType) => {
+				if (goType?.kind === "pointer") return;
+				if (isArrayType(goType, this.mod.checker)) {
+					this.emitCopyArray(goType);
+				} else if (isStructType(goType, this.mod.checker, this.mod)) {
+					const sInfo = this._resolveStructInfo({ _type: goType });
+					if (sInfo) this.emitCloneStruct(sInfo, wType);
+				}
+			};
+			this.pushInstruction({ op: "local.get", index: info.index });
+			if (info.isBoxed) {
+				this.pushInstruction({
+					op: "struct.get",
+					typeIndex: info.boxInfo.typeIndex,
+					fieldIndex: 0,
+				});
+				cloneValue(info.boxInfo.wType);
+				this.pushInstruction({
+					op: "struct.new",
+					typeIndex: info.boxInfo.typeIndex,
+				});
+			} else {
+				cloneValue(info.type);
+			}
+			this.pushInstruction({ op: "local.set", index: info.index });
 		}
 	}
 
@@ -2298,6 +3069,12 @@ export class StmtsEmitter {
 				if (types.length === 1) {
 					this.pushInstruction({ op: "local.get", index: tswTmp });
 					this._emitTypeCast(targetGoType, targetWType);
+					// The bound array is a copy of the boxed value.
+					if (
+						targetGoType?.kind !== "pointer" &&
+						isArrayType(targetGoType, this.mod.checker)
+					)
+						this.emitCopyArray(targetGoType);
 				} else {
 					this.pushInstruction({ op: "local.get", index: tswTmp });
 				}
@@ -2340,13 +3117,199 @@ export class StmtsEmitter {
 		this.pushInstruction("end");
 	}
 
+	_propagateYieldExit(tag) {
+		if (this.funcDecl._iterStateName) {
+			const outerLoc = this.resolveLocal(this.funcDecl._iterStateName);
+			if (outerLoc?.isBoxed) {
+				this.pushInstruction({ op: "local.get", index: outerLoc.index });
+				this.pushInstruction({ op: "i64.const", value: tag });
+				this.pushInstruction({
+					op: "struct.set",
+					typeIndex: outerLoc.boxInfo.typeIndex,
+					fieldIndex: 0,
+				});
+			}
+		}
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "return" });
+	}
+
+	_unwindIteratorReturn() {
+		if (this.funcDecl._isYieldClosure) {
+			this._propagateYieldExit(2n);
+			return;
+		}
+		if (this.hasDefer) {
+			const depth = this.resolveBranchDepthToRole("runDefers");
+			this.pushInstruction({ op: "br", depth });
+			return;
+		}
+		const rootNamed = this.funcDecl.returnType?._namedReturns ?? [];
+		for (const nr of rootNamed) {
+			const loc = this.locals.get(nr.name);
+			if (loc?.isBoxed) {
+				this.pushInstruction({ op: "local.get", index: loc.index });
+				this.pushInstruction({
+					op: "struct.get",
+					typeIndex: loc.boxInfo.typeIndex,
+					fieldIndex: 0,
+				});
+			} else if (loc) {
+				this.pushInstruction({ op: "local.get", index: loc.index });
+			}
+		}
+		this.pushInstruction({ op: "return" });
+	}
+
+	_unwindIteratorTargets(stmt, stateTmp, labelTargets) {
+		for (const target of labelTargets) {
+			this.pushInstruction({ op: "local.get", index: stateTmp });
+			this.pushInstruction({ op: "i64.const", value: BigInt(target.tag) });
+			this.pushInstruction("i64.eq");
+			this.pushInstruction({ op: "if", blockType: "void" });
+			if (target.role !== "break" || stmt.label !== target.label) {
+				if (this.funcDecl._isYieldClosure) {
+					this._propagateYieldExit(BigInt(target.tag));
+				} else {
+					const depth = this.resolveBranchDepth(
+						target.label,
+						target.role === "continue",
+					);
+					this.pushInstruction({ op: "br", depth });
+				}
+			}
+			this.pushInstruction("end");
+		}
+	}
+
+	_emitIteratorUnwind(stmt) {
+		if (!stmt._iterStateName) return;
+		const stateLoc = this.resolveLocal(stmt._iterStateName);
+		if (!stateLoc?.isBoxed) return;
+
+		const funcLit = getOrCreateIteratorFuncLit(stmt);
+		const hasRet = hasReturnInBlock(funcLit?.body);
+		const labelTargets = Array.from(
+			this.rootFuncDecl?._labelTargets?.values() ?? [],
+		);
+		if (!hasRet && labelTargets.length === 0) return;
+
+		const stateTmp = this.acquireTemp("i64");
+		this.pushInstruction({ op: "local.get", index: stateLoc.index });
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: stateLoc.boxInfo.typeIndex,
+			fieldIndex: 0,
+		});
+		this.pushInstruction({ op: "local.set", index: stateTmp });
+
+		if (hasRet) {
+			this.pushInstruction({ op: "local.get", index: stateTmp });
+			this.pushInstruction({ op: "i64.const", value: 2n });
+			this.pushInstruction("i64.eq");
+			this.pushInstruction({ op: "if", blockType: "void" });
+			this._unwindIteratorReturn();
+			this.pushInstruction("end");
+		}
+
+		this._unwindIteratorTargets(stmt, stateTmp, labelTargets);
+		this.releaseTemp(stateTmp, "i64");
+	}
+
+	_tryEmitYieldBranch(stmt) {
+		if (!this.funcDecl._isYieldClosure) return false;
+		const isContinue = stmt.keyword === "continue";
+		const targetRole = isContinue ? "continue" : "break";
+		const hasInnerTarget = this.controlStack.some((c) =>
+			stmt.label
+				? c.label === stmt.label && c.role === targetRole
+				: c.role === targetRole,
+		);
+		if (hasInnerTarget) return false;
+
+		if (!stmt.label) {
+			if (stmt.keyword === "break") {
+				this._propagateYieldExit(1n);
+				return true;
+			}
+			if (stmt.keyword === "continue") {
+				this.pushInstruction({ op: "i32.const", value: 1 });
+				this.pushInstruction({ op: "return" });
+				return true;
+			}
+			return false;
+		}
+
+		if (
+			stmt.keyword === "continue" &&
+			stmt.label === this.funcDecl._forStmt?.label
+		) {
+			this.pushInstruction({ op: "i32.const", value: 1 });
+			this.pushInstruction({ op: "return" });
+			return true;
+		}
+
+		const target = this._findLabelTarget(stmt.label, targetRole);
+		const tag = target ? BigInt(target.tag) : 1n;
+		this._propagateYieldExit(tag);
+		return true;
+	}
+
+	_emitYieldReturn(stmt) {
+		const values = stmt.values ?? [];
+		const rootNamed = this.rootFuncDecl?.returnType?._namedReturns ?? [];
+		if (values.length === 1 && rootNamed.length > 1) {
+			this.emitExpr(values[0]);
+			for (let i = rootNamed.length - 1; i >= 0; i--) {
+				this._assignToNamedReturnVar(rootNamed[i]);
+			}
+		} else if (values.length > 0 && rootNamed.length > 0) {
+			const temps = [];
+			for (let i = 0; i < values.length; i++) {
+				const val = values[i];
+				const nr = rootNamed[i];
+				const targetWType = this.toWasmType(nr?.type ?? val._type);
+				this.emitExpr(val, targetWType);
+				this._emitCopyIfValue(val, val._type, targetWType);
+				const tmp = this.acquireTemp(targetWType);
+				this.pushInstruction({ op: "local.set", index: tmp });
+				temps.push({ tmp, type: targetWType });
+			}
+			for (let i = 0; i < temps.length; i++) {
+				this.pushInstruction({ op: "local.get", index: temps[i].tmp });
+				this._assignToNamedReturnVar(rootNamed[i]);
+				this.releaseTemp(temps[i].tmp, temps[i].type);
+			}
+		}
+
+		if (this.funcDecl._iterStateName) {
+			const stateLoc = this.resolveLocal(this.funcDecl._iterStateName);
+			if (stateLoc?.isBoxed) {
+				this.pushInstruction({ op: "local.get", index: stateLoc.index });
+				this.pushInstruction({ op: "i64.const", value: 2n });
+				this.pushInstruction({
+					op: "struct.set",
+					typeIndex: stateLoc.boxInfo.typeIndex,
+					fieldIndex: 0,
+				});
+			}
+		}
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "return" });
+	}
+
 	emitBranchStmt(stmt) {
+		if (this._tryEmitYieldBranch(stmt)) return;
 		const isContinue = stmt.keyword === "continue";
 		const depth = this.resolveBranchDepth(stmt.label, isContinue);
 		this.pushInstruction({ op: "br", depth });
 	}
 
 	emitReturnStmt(stmt) {
+		if (this.funcDecl._isYieldClosure) {
+			this._emitYieldReturn(stmt);
+			return;
+		}
 		const values = stmt.values ?? [];
 		if (this.hasDefer) {
 			if (this.namedReturnVars?.length > 0) {
@@ -2365,7 +3328,7 @@ export class StmtsEmitter {
 						const val = values[i];
 						const targetWType = this.returnTypes[i] ?? null;
 						this.emitExpr(val, targetWType);
-						this._emitCopyIfValueStruct(val, val._type, targetWType);
+						this._emitCopyIfValue(val, val._type, targetWType);
 						const tmp = this.acquireTemp(targetWType);
 						this.pushInstruction({ op: "local.set", index: tmp });
 						temps.push({ tmp, type: targetWType });
@@ -2390,7 +3353,7 @@ export class StmtsEmitter {
 						const val = values[i];
 						const targetWType = this.returnTypes[i] ?? null;
 						this.emitExpr(val, targetWType);
-						this._emitCopyIfValueStruct(val, val._type, targetWType);
+						this._emitCopyIfValue(val, val._type, targetWType);
 						this.pushInstruction({
 							op: "local.set",
 							index: this.returnTempLocals[i],
@@ -2421,17 +3384,31 @@ export class StmtsEmitter {
 			return;
 		}
 
+		if (values.length === 1 && this.returnTypes.length > 1) {
+			this.emitExpr(values[0]);
+			this.pushInstruction("return");
+			return;
+		}
+
 		for (let i = 0; i < values.length; i++) {
 			const val = values[i];
 			const targetWType = this.returnTypes[i] ?? null;
 			this.emitExpr(val, targetWType);
-			this._emitCopyIfValueStruct(val, val._type, targetWType);
+			this._emitCopyIfValue(val, val._type, targetWType);
 		}
 		this.pushInstruction("return");
 	}
 
 	_assignToNamedReturnVar(nr) {
+		if (!nr?.name || nr.name === "_") {
+			this.pushInstruction("drop");
+			return;
+		}
 		const loc = this.locals.get(nr.name);
+		if (!loc) {
+			this.pushInstruction("drop");
+			return;
+		}
 		if (loc.isBoxed) {
 			const valTmp = this.acquireTemp(loc.boxInfo.wType);
 			this.pushInstruction({ op: "local.set", index: valTmp });

@@ -14,7 +14,7 @@ import vm from "node:vm";
 import { CodeGen } from "../../src/backend/js/index.js";
 import { instantiateWasm } from "../../src/backend/wasm/glue.js";
 import { compileWasm } from "../../src/backend/wasm/index.js";
-import { compileDir } from "../../src/compiler.js";
+import { compileDir, compileFiles } from "../../src/compiler.js";
 import { DtsParser, parseDts } from "../../src/dts-parser.js";
 import { Lexer } from "../../src/lexer.js";
 import { Parser } from "../../src/parser/index.js";
@@ -111,11 +111,12 @@ export function compile(
 	if (errors.length > 0) return { js: null, errors };
 
 	const isStrict = Boolean(strict || pkgTarget === "both");
-	const js = new CodeGen(checker, jsImports, new Set(), {
+	const cg = new CodeGen(checker, jsImports, new Set(), {
 		target: pkgTarget,
 		strict: isStrict,
-	}).generate(ast);
-	return { js, errors: [] };
+	});
+	const js = cg.generate(ast);
+	return { js, errors: [], warnings: [...checker.warnings, ...cg.warnings] };
 }
 
 export function compileFile(path) {
@@ -363,9 +364,12 @@ export function compileHybrid(source, options = {}) {
 // Compiles the root directory through the real compiler pipeline, embeds the
 // linked app.wasm bytes and imports the resulting ES module so the test can
 // call the facade's exports directly.  `exports` lists the top-level names to
-// re-export from the bundle.
+// re-export from the bundle; other options go to compileDir.
 
-export async function compileHybridProject(files, { exports = [] } = {}) {
+export async function compileHybridProject(
+	files,
+	{ exports = [], ...compileOptions } = {},
+) {
 	const root = mkdtempSync(join(tmpdir(), "gofront-hybrid-"));
 	try {
 		for (const [rel, src] of Object.entries(files)) {
@@ -373,7 +377,7 @@ export async function compileHybridProject(files, { exports = [] } = {}) {
 			mkdirSync(dirname(full), { recursive: true });
 			writeFileSync(full, src);
 		}
-		const result = compileDir(root);
+		const result = compileDir(root, compileOptions);
 		const parts = [];
 		if (result.wasm) {
 			assertValidWasm(result.wasm);
@@ -397,6 +401,87 @@ export async function compileHybridProject(files, { exports = [] } = {}) {
 		return { ...result, mod, lines: mod.__lines, root };
 	} finally {
 		rmSync(root, { recursive: true, force: true });
+	}
+}
+
+// ── Whole-program parity (expected output captured from real Go) ──
+//
+// Compiles a `package main` program as a `both` package (JS backend) and as a
+// `wasm` package (linked app.wasm behind the facade), runs `main` on each, and
+// returns the stdout of both.  `assertProgramOutput` compares both with the
+// text real Go printed for the same program.
+
+const PROGRAM_SINKS = "__gofrontProgramSinks";
+let nextProgramSink = 0;
+
+async function runProgramModule(js, wasm) {
+	const id = nextProgramSink++;
+	let out = "";
+	globalThis[PROGRAM_SINKS] ??= new Map();
+	globalThis[PROGRAM_SINKS].set(id, (s) => {
+		out += s;
+	});
+	const prelude = [
+		`const __sink = globalThis.${PROGRAM_SINKS}.get(${id});`,
+		"const process = { stdout: { write: (s) => __sink(String(s)) } };",
+		'const console = { log: (...a) => __sink(a.map(String).join(" ") + "\\n") };',
+		wasm
+			? `const __wasmBytes = new Uint8Array(Buffer.from("${Buffer.from(wasm).toString("base64")}", "base64"));`
+			: "",
+	];
+	const body = js
+		.replace(/^import\s[^;]+;\n?/gm, "")
+		.replaceAll("globalThis.__GOFRONT_WASM_BYTES", "__wasmBytes");
+	const dir = mkdtempSync(join(tmpdir(), "gofront-program-"));
+	try {
+		const file = join(dir, "bundle.mjs");
+		writeFileSync(file, `${prelude.join("\n")}\n${body}`);
+		await import(pathToFileURL(file).href);
+		return out;
+	} finally {
+		globalThis[PROGRAM_SINKS].delete(id);
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
+export async function compileHybridProgram(source) {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-program-src-"));
+	try {
+		const goPath = join(dir, "main.go");
+		writeFileSync(goPath, source);
+		const run = async (target, label) => {
+			let res;
+			try {
+				res = compileFiles([goPath], { forceTarget: target });
+			} catch (e) {
+				throw new Error(`${label} compile failed:\n${e.message}`);
+			}
+			if (target === "wasm") assertValidWasm(res.wasm);
+			return runProgramModule(res.js, target === "wasm" ? res.wasm : null);
+		};
+		return {
+			js: await run("both", "JS"),
+			wasm: await run("wasm", "WASM"),
+		};
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
+export async function assertProgramOutput(source, expected) {
+	const { js, wasm } = await compileHybridProgram(source);
+	for (const [backend, out] of [
+		["JS", js],
+		["WASM", wasm],
+	]) {
+		if (out === expected) continue;
+		const w = expected.split("\n");
+		const g = out.split("\n");
+		let i = 0;
+		while (i < Math.max(w.length, g.length) && w[i] === g[i]) i++;
+		throw new Error(
+			`${backend} output differs from real Go at line ${i + 1}: want ${JSON.stringify(w[i] ?? "<EOF>")}, got ${JSON.stringify(g[i] ?? "<EOF>")}`,
+		);
 	}
 }
 

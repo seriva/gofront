@@ -104,15 +104,25 @@ reported as `pkg [js]` and `pkg [wasm]` — ensuring both backends produce ident
 
 ---
 
+## Standard library
+
+### Go-source standard library (`stdlib/`)
+
+GoFront provides pure Go implementations of standard library packages (such as `cmp`, `iter`, `slices`, `strings`, and the `encoding/json` support code), located in `stdlib/`. Most of these packages are written in GoFront Go with `//gofront:target both` and `//go:build gofront`. The resolver loads them before built-in fallbacks and compiles them into the caller's target (`js`, `wasm`, or `both`) with no external runtime dependencies. Package overlays extend emitter-backed namespaces with pure Go implementations.
+
+---
+
 ## Source layout
 
 ```
+stdlib/               Go-source standard library packages (//gofront:target both)
+  <pkg>/              Pure Go implementations (cmp, iter, slices, strings, etc.)
 src/
   index.js            CLI entry: argument routing, file I/O, watch mode
   cli-core.js         dev / build / check / test / prep / init command implementations
   colors.js           ANSI color helpers and diagnostic formatting
   compiler.js         compileDir / compileSingleFile: parse → check → lower → emit, package linking
-  resolver.js         import resolution: local packages, npm types, .d.ts, builtin package list
+  resolver.js         import resolution: local packages, npm types, .d.ts, builtin package list, stdlib/
   project-config.js   gofront.json / package.json "gofront" settings
   dev-server.js       static server, SSE live reload, error overlay
   test-runner.js      *_test.go discovery and Go-style harness (JS, wasm and dual-target)
@@ -128,6 +138,9 @@ src/
   lower/              backend-independent analyses stored as side tables
   backend/js/         JS code generator: statements, expressions, templ, runtime helpers, source maps, stdlib/ shims
   backend/wasm/       WasmGC backend (see table above)
+test/
+  unit/               Compiler, parser, type checker, and backend unit tests
+  e2e/                End-to-end and performance benchmark suites
 ```
 
 Layer boundaries (`cli → support → backend → lower → typechecker → parser → lexer → types`)

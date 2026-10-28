@@ -77,8 +77,9 @@ func render() {
             clearBtn = `<button class="clear-btn" data-action="clear-completed">Clear completed (` +
                 String(completed) + `)</button>`
         }
+        exportBtn := `<button class="clear-btn" data-action="export-csv">Export CSV</button>`
         footer.innerHTML = `<span class="count">` + html.EscapeString(countText) + `</span>` +
-            renderFilterBar() + clearBtn
+            renderFilterBar() + exportBtn + clearBtn
     }
 
     // Badge

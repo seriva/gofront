@@ -5,8 +5,12 @@
 import {
 	getMapKeyValTypes,
 	isArrayType,
+	isComplex,
+	isComplex64,
 	isMapType,
 	isNonEmptyInterface,
+	isScalarType,
+	isSigned,
 	isSliceType,
 	isStringType,
 	isStructType,
@@ -228,7 +232,12 @@ export class BuiltinsEmitter {
 			this.emitPanic("runtime error: makeslice: len out of range");
 			this.pushInstruction("end");
 
-			if (isStructType(elemGoType, this.mod.checker, this.mod)) {
+			if (
+				isStructType(elemGoType, this.mod.checker, this.mod) ||
+				isComplex(elemGoType) ||
+				(elemGoType?.kind !== "pointer" &&
+					isArrayType(elemGoType, this.mod.checker))
+			) {
 				const arrTmp = this.acquireTemp({
 					kind: "ref",
 					nullable: true,
@@ -300,6 +309,49 @@ export class BuiltinsEmitter {
 			this.releaseTemp(capTmp, "i32");
 			this.releaseTemp(lenTmp, "i32");
 		}
+	}
+
+	_emitBuiltinNew(call) {
+		const targetType =
+			call._type?.base ??
+			(call.args[0]?.kind === "TypeExpr"
+				? call.args[0].type
+				: call.args[0]?._type) ??
+			call.args[0];
+		if (isStructType(targetType, this.mod.checker, this.mod)) {
+			let structInfo = this._resolveStructInfo({ _type: targetType });
+			if (!structInfo) {
+				const typeName =
+					targetType.kind === "named" ? targetType.name : targetType.name;
+				if (typeName) structInfo = this.mod.getStructType(typeName);
+			}
+			if (!structInfo) {
+				throw new Error(
+					`Unknown struct in new: ${targetType.name ?? targetType}`,
+				);
+			}
+			for (const f of structInfo.fields) {
+				this.emitZeroValue(f.goType, f.wType);
+			}
+			this.pushInstruction({
+				op: "struct.new",
+				typeIndex: structInfo.typeIndex,
+			});
+			return;
+		}
+		if (isArrayType(targetType, this.mod.checker)) {
+			const wType = this.toWasmType(targetType);
+			this.emitZeroValue(targetType, wType);
+			return;
+		}
+		const box = this.mod.getBoxType(targetType);
+		const valWType = this.toWasmType(targetType);
+		this.emitZeroValue(targetType, valWType);
+		this.pushInstruction({
+			op: "struct.new",
+			typeIndex: box.typeIndex,
+			typeName: box.name,
+		});
 	}
 
 	// With `newLen` already computed: when it exceeds the old capacity, allocate
@@ -487,7 +539,7 @@ export class BuiltinsEmitter {
 					this.pushInstruction("i32.add");
 				}
 				this.emitExpr(elemNode, arrInfo.elemWType);
-				this._emitCopyIfValueStruct(elemNode, elemGoType, arrInfo.elemWType);
+				this._emitCopyIfValue(elemNode, elemGoType, arrInfo.elemWType);
 				this.pushInstruction({
 					op: "array.set",
 					typeIndex: arrInfo.typeIndex,
@@ -795,6 +847,136 @@ export class BuiltinsEmitter {
 		}
 	}
 
+	_emitBuiltinComplex(call, targetWasmType) {
+		const arg0 = call.args[0];
+		const arg1 = call.args[1];
+		const callType = call._type;
+		const is64 =
+			callType?.name === "complex64" ||
+			arg0._type?.name === "float32" ||
+			arg1._type?.name === "float32" ||
+			targetWasmType?.typeName === "$complex64";
+		const complexName = is64 ? "complex64" : "complex128";
+		const info = this.mod.getComplexType(complexName);
+		this.emitExpr(arg0, info.elemWType);
+		this.emitExpr(arg1, info.elemWType);
+		this.pushInstruction({
+			op: "struct.new",
+			typeIndex: info.typeIndex,
+			typeName: info.name,
+		});
+	}
+
+	_emitBuiltinReal(call, targetWasmType) {
+		const arg = call.args[0];
+		const argType = arg._type ?? this._resolveExprGoType(arg);
+		const is64 = isComplex64(argType);
+		const complexName = is64 ? "complex64" : "complex128";
+		const info = this.mod.getComplexType(complexName);
+		const complexWType = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: info.typeIndex,
+			typeName: info.name,
+		};
+		this.emitExpr(arg, complexWType);
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: info.typeIndex,
+			typeName: info.name,
+			fieldIndex: 0,
+		});
+		if (targetWasmType && targetWasmType !== info.elemWType) {
+			if (info.elemWType === "f32" && targetWasmType === "f64") {
+				this.pushInstruction("f64.promote_f32");
+			} else if (info.elemWType === "f64" && targetWasmType === "f32") {
+				this.pushInstruction("f32.demote_f64");
+			}
+		}
+	}
+
+	_emitBuiltinImag(call, targetWasmType) {
+		const arg = call.args[0];
+		const argType = arg._type ?? this._resolveExprGoType(arg);
+		const is64 = isComplex64(argType);
+		const complexName = is64 ? "complex64" : "complex128";
+		const info = this.mod.getComplexType(complexName);
+		const complexWType = {
+			kind: "ref",
+			nullable: true,
+			typeIndex: info.typeIndex,
+			typeName: info.name,
+		};
+		this.emitExpr(arg, complexWType);
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: info.typeIndex,
+			typeName: info.name,
+			fieldIndex: 1,
+		});
+		if (targetWasmType && targetWasmType !== info.elemWType) {
+			if (info.elemWType === "f32" && targetWasmType === "f64") {
+				this.pushInstruction("f64.promote_f32");
+			} else if (info.elemWType === "f64" && targetWasmType === "f32") {
+				this.pushInstruction("f32.demote_f64");
+			}
+		}
+	}
+
+	// min/max fold left over the operands: floats use f32/f64.min/max (NaN
+	// propagates, -0 < +0), integers `select` on lt/gt, strings compare via the
+	// string import.  A single operand is the result itself.
+	_emitBuiltinMinMax(call, targetWasmType) {
+		const isMin = call.func.name === "min";
+		const goType = call._type ?? this._resolveExprGoType(call.args[0]);
+		const wType =
+			goType?.kind === "untyped" && typeof targetWasmType === "string"
+				? targetWasmType
+				: toWasmType(goType, this.mod.checker);
+		const [first, ...rest] = call.args;
+		this.emitExpr(first, wType);
+		if (rest.length === 0) return;
+		const acc = this.acquireTemp(wType);
+		const next = this.acquireTemp(wType);
+		const isStr = isStringType(goType, this.mod.checker);
+		const isFloatType = wType === "f32" || wType === "f64";
+		const cmp = isMin ? "lt" : "gt";
+		for (const arg of rest) {
+			this.pushInstruction({ op: "local.set", index: acc });
+			this.emitExpr(arg, wType);
+			this.pushInstruction({ op: "local.set", index: next });
+			if (isFloatType) {
+				this.pushInstruction({ op: "local.get", index: acc });
+				this.pushInstruction({ op: "local.get", index: next });
+				this.pushInstruction(`${wType}.${isMin ? "min" : "max"}`);
+				continue;
+			}
+			if (isStr) {
+				// next < acc (min) / next > acc (max) ? next : acc
+				this.pushInstruction({ op: "local.get", index: next });
+				this.pushInstruction({ op: "local.get", index: acc });
+				this.pushInstruction({
+					op: "call",
+					funcIndex: this.mod.getStringCmpImportIndex(isMin ? "<" : ">"),
+				});
+				this.pushInstruction({ op: "if", blockType: wType });
+				this.pushInstruction({ op: "local.get", index: next });
+				this.pushInstruction("else");
+				this.pushInstruction({ op: "local.get", index: acc });
+				this.pushInstruction("end");
+				continue;
+			}
+			this.pushInstruction({ op: "local.get", index: next });
+			this.pushInstruction({ op: "local.get", index: acc });
+			this.pushInstruction({ op: "local.get", index: next });
+			this.pushInstruction({ op: "local.get", index: acc });
+			this.pushInstruction(`${wType}.${cmp}_${isSigned(goType) ? "s" : "u"}`);
+			this.pushInstruction("select");
+		}
+		this.releaseTemp(next, wType);
+		this.releaseTemp(acc, wType);
+	}
+
 	_emitBuiltinCall(call, targetWasmType) {
 		const { func } = call;
 		if (func.kind !== "Ident") return false;
@@ -807,6 +989,9 @@ export class BuiltinsEmitter {
 				return true;
 			case "cap":
 				this._emitBuiltinCap(call, targetWasmType);
+				return true;
+			case "new":
+				this._emitBuiltinNew(call);
 				return true;
 			case "make":
 				this._emitBuiltinMake(call);
@@ -833,6 +1018,19 @@ export class BuiltinsEmitter {
 			case "recover":
 				this._emitBuiltinRecover(call, targetWasmType);
 				return true;
+			case "complex":
+				this._emitBuiltinComplex(call, targetWasmType);
+				return true;
+			case "real":
+				this._emitBuiltinReal(call, targetWasmType);
+				return true;
+			case "imag":
+				this._emitBuiltinImag(call, targetWasmType);
+				return true;
+			case "min":
+			case "max":
+				this._emitBuiltinMinMax(call, targetWasmType);
+				return true;
 			default:
 				return false;
 		}
@@ -845,6 +1043,12 @@ export class BuiltinsEmitter {
 			this.emitTestingCall(func, args);
 			return true;
 		}
+		if (
+			func.expr?.name &&
+			(this.resolveLocal(func.expr.name) ||
+				this.mod.resolveGlobal(func.expr.name))
+		)
+			return false;
 		const pkgName = func.expr?.name;
 		switch (pkgName) {
 			case "math":
@@ -901,6 +1105,14 @@ export class BuiltinsEmitter {
 			case "bytes":
 				if (func.field === "NewReader") {
 					this.emitBytesNewReader(call, targetWasmType);
+					return true;
+				}
+				if (func.field === "NewBuffer") {
+					this.emitBytesNewBuffer(call, targetWasmType);
+					return true;
+				}
+				if (func.field === "NewBufferString") {
+					this.emitBytesNewBufferString(call, targetWasmType);
 					return true;
 				}
 				this.emitBytesCall(func.field, args, targetWasmType);
@@ -961,6 +1173,9 @@ export class BuiltinsEmitter {
 				func.expr,
 				args,
 				targetWasmType,
+				recvTypeName === "simd.Mask32x4" ||
+					recvType?.underlying?.simd === "Mask32x4" ||
+					recvType?.simd === "Mask32x4",
 			);
 		}
 		if (
@@ -994,7 +1209,7 @@ export class BuiltinsEmitter {
 					const pType = targetParamTypes[i + 1] ?? null;
 					const pGoType = paramGoTypes[i + 1] ?? null;
 					this.emitExpr(args[i], pType);
-					this._emitCopyIfValueStruct(args[i], pGoType, pType);
+					this._emitCopyIfValue(args[i], pGoType, pType);
 				}
 				this.pushInstruction({ op: "call", funcIndex: targetFuncIdx });
 				return true;
@@ -1016,20 +1231,52 @@ export class BuiltinsEmitter {
 			if (targetFuncIdx !== null) {
 				const recvWType = targetParamTypes[0] ?? null;
 				const recvGoType = this.mod.getFuncParamGoTypes(methodName)[0] ?? null;
-				this.emitExpr(func.expr, recvWType);
-				this._emitCopyIfValueStruct(func.expr, recvGoType, recvWType);
+				this.emitExpr(this._recvOperand(func, recvGoType), recvWType);
+				this._emitCopyIfValue(func.expr, recvGoType, recvWType);
 				const paramGoTypes = this.mod.getFuncParamGoTypes(methodName);
 				for (let i = 0; i < args.length; i++) {
 					const pType = targetParamTypes[i + 1] ?? null;
 					const pGoType = paramGoTypes[i + 1] ?? null;
 					this.emitExpr(args[i], pType);
-					this._emitCopyIfValueStruct(args[i], pGoType, pType);
+					this._emitCopyIfValue(args[i], pGoType, pType);
 				}
 				this.pushInstruction({ op: "call", funcIndex: targetFuncIdx });
 				return true;
 			}
 		}
 		return false;
+	}
+
+	// The receiver operand of a method call: `p.Get()` with a value receiver
+	// and `p *N` (a named scalar or slice) passes `*p`.
+	_recvOperand(func, recvGoType) {
+		const t = func.expr._type;
+		if (
+			t?.kind === "pointer" &&
+			recvGoType?.kind !== "pointer" &&
+			(isScalarType(t.base, this.mod.checker, this.mod) ||
+				isSliceType(t.base, this.mod.checker))
+		)
+			return { kind: "UnaryExpr", op: "*", operand: func.expr, _type: t.base };
+		return this._ptrRecvOperand(func);
+	}
+
+	// `x.M()` with a pointer receiver on a named scalar value passes `&x`
+	// (the typechecker boxed `x`).
+	_ptrRecvOperand(func) {
+		const t = func.expr._type;
+		if (!func._type?._ptrRecv || t?.kind !== "named") return func.expr;
+		if (
+			!isScalarType(t, this.mod.checker, this.mod) &&
+			!isSliceType(t, this.mod.checker)
+		)
+			return func.expr;
+		return {
+			kind: "UnaryExpr",
+			op: "&",
+			operand: func.expr,
+			_type: { kind: "pointer", base: t },
+		};
 	}
 
 	_emitStdlibReceiverMethod(
@@ -1067,11 +1314,28 @@ export class BuiltinsEmitter {
 			this.emitDurationMethodCall(field, expr, args, targetWasmType);
 			return true;
 		}
+		if (
+			recvTypeName === "time.Month" ||
+			recvTypeName === "time.Weekday" ||
+			recvTypeName === "time.Location"
+		) {
+			this.emitTimeAuxMethodCall(
+				recvTypeName,
+				field,
+				expr,
+				args,
+				targetWasmType,
+			);
+			return true;
+		}
 		if (recvTypeName === "io.LimitedReader") {
 			this.emitIoLimitedReaderMethodCall(field, expr, args, targetWasmType);
 			return true;
 		}
-		if (recvTypeName === "sync.Mutex" || recvTypeName === "sync.RWMutex") {
+		if (
+			(recvTypeName === "sync.Mutex" || recvTypeName === "sync.RWMutex") &&
+			field !== "RLocker"
+		) {
 			this.emitSyncMutexMethodCall(field, expr, args, targetWasmType);
 			return true;
 		}
@@ -1154,7 +1418,7 @@ export class BuiltinsEmitter {
 					const pType = paramTypes[i] ?? null;
 					const pGoType = paramGoTypes[i] ?? null;
 					this.emitExpr(arg, pType);
-					this._emitCopyIfValueStruct(arg, pGoType, pType);
+					this._emitCopyIfValue(arg, pGoType, pType);
 				}
 				this.pushInstruction({ op: "call", funcIndex: targetFuncIdx });
 				return true;
@@ -1191,7 +1455,7 @@ export class BuiltinsEmitter {
 			const pWType = closureInfo.paramWTypes[i] ?? null;
 			const pGoType = closureInfo.sig.params[i] ?? null;
 			this.emitExpr(arg, pWType);
-			this._emitCopyIfValueStruct(arg, pGoType, pWType);
+			this._emitCopyIfValue(arg, pGoType, pWType);
 		}
 
 		// Push funcref

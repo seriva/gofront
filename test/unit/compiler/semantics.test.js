@@ -211,9 +211,11 @@ func main() {
 	_ = binary.Write(&buf, binary.LittleEndian, s.F)
 	_ = binary.Write(&buf, binary.LittleEndian, s.I)
 
-	var s2 S
-	_ = binary.Read(&buf, binary.LittleEndian, &s2.F)
-	_ = binary.Read(&buf, binary.LittleEndian, &s2.I)
+	var f2 float32
+	var i2 int16
+	_ = binary.Read(&buf, binary.LittleEndian, &f2)
+	_ = binary.Read(&buf, binary.LittleEndian, &i2)
+	s2 := S{F: f2, I: i2}
 	fmt.Printf("%.2f %d\\n", s2.F, s2.I)
 
 	var buf2 bytes.Buffer
@@ -403,9 +405,13 @@ func scanToPtr(p *int) {
 }
 func main() {
 	s := S{x: 0}
-	fmt.Sscan("15", &s.x)
+	x := 0
+	fmt.Sscan("15", &x)
+	s.x = x
 	arr := []int{0, 0}
-	fmt.Sscan("25", &arr[1])
+	e := 0
+	fmt.Sscan("25", &e)
+	arr[1] = e
 	v := 0
 	scanToPtr(&v)
 	fmt.Printf("%d %d %d\\n", s.x, arr[1], v)
@@ -620,6 +626,69 @@ func main() {
 	const wasmRes = runWasm(compiled.wasm, { stringTable: compiled.stringTable });
 	wasmRes.exports.main();
 	assertEqual(wasmRes.lines.join("\n"), "6");
+});
+
+test("math/bits 64-bit functions return Number values for arithmetic", () => {
+	const code = `package main
+import (
+	"fmt"
+	"math/bits"
+)
+func main() {
+	r := bits.RotateLeft64(1, 1)
+	fmt.Println(r + 1)
+	s, c := bits.Add64(1, 2, 0)
+	fmt.Println(s + 1, c + 1)
+	diff, b := bits.Sub64(5, 3, 0)
+	fmt.Println(diff + 1, b + 1)
+	hi, lo := bits.Mul64(2, 3)
+	fmt.Println(hi + 1, lo + 1)
+	q, rem := bits.Div64(0, 10, 2)
+	fmt.Println(q + 1, rem + 1)
+	rm := bits.Rem64(0, 10, 3)
+	fmt.Println(rm + 1)
+	rev := bits.Reverse64(1)
+	fmt.Println(rev == 0x8000000000000000)
+	revb := bits.ReverseBytes64(0x0102030405060708)
+	fmt.Println(revb == 0x0807060504030201)
+}`;
+	const { js, errors } = compile(code);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "3\n4 1\n3 1\n1 7\n6 1\n2\ntrue\ntrue");
+});
+
+test("time.ParseDuration returns Number duration compatible with arithmetic", () => {
+	const code = `package main
+import (
+	"fmt"
+	"time"
+)
+func main() {
+	d, _ := time.ParseDuration("5s")
+	fmt.Println(d + time.Second)
+	fmt.Println(d == 5*time.Second)
+}`;
+	const { js, errors } = compile(code);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "6s\ntrue");
+});
+
+test("time.FixedZone calendar components and RFC3339 formatting", () => {
+	const code = `package main
+import (
+	"fmt"
+	"time"
+)
+func main() {
+	loc := time.FixedZone("EST", -5*3600)
+	t := time.Date(2026, 4, 15, 12, 0, 0, 0, loc)
+	fmt.Println(t.Hour())
+	fmt.Println(t.Year(), int(t.Month()), t.Day(), t.Minute(), t.Second())
+	fmt.Println(t.Format(time.RFC3339))
+}`;
+	const { js, errors } = compile(code);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "12\n2026 4 15 0 0\n2026-04-15T12:00:00-05:00");
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

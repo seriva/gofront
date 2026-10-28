@@ -1,10 +1,10 @@
 # Stdlib in Go — Design Plan
 
 **Version:** v1.9.0
-**Status:** Draft (2026-10-23)
-**Depends on:** v1.8.0 ([`../v1.8.0/portable-go-plan.md`](../v1.8.0/portable-go-plan.md)) **released**: the Go-source stdlib loader, overlays, reachability, `//gofront:intrinsic`, the coverage manifest and the conformance harness must all exist. Phases 3–9 of this plan also assume the v1.8.0 member tasks that touch the same packages have landed (see [Relationship to v1.8.0 and v2.0.0](#4-relationship-to-v180-and-v200)).
+**Status:** Draft (2026-10-23), revised 2026-10-27 for the v1.8.0 simplification
+**Depends on:** v1.8.0 ([`../v1.8.0/portable-go-plan.md`](../v1.8.0/portable-go-plan.md)) **released**, including its simplification Phases 8–11: the Go-source stdlib loader, overlays, reachability and `//gofront:intrinsic` exist; the coverage manifest and the real-Go conformance harness **do not** (retired by v1.8.0 Phase 8), so this plan verifies with unit-test cases instead (see [Test Plan](#test-plan)). Builds on the layout from [`../v1.8.0/repo-structure-plan.md`](../v1.8.0/repo-structure-plan.md). See [Relationship to v1.8.0](#4-relationship-to-v180).
 **Replaces:** None
-**Followed by:** [`plans/v2.0.0/native-go-engine.md`](../v2.0.0/native-go-engine.md), whose baseline moves from v1.8.0 to this release. After it the stdlib that the native engine must port is a fraction of today's, because Go-source packages are embedded, not ported.
+**Followed by:** None. The v2.0.0 native Go engine is shelved, so this is an ordinary feature release, not a port baseline.
 
 ---
 
@@ -12,15 +12,15 @@
 
 v1.8.0 introduced a way to write a stdlib package **once, in Go**, and left every existing package on the old path: a hand-written type table in [`src/typechecker/stdlib/`](../../src/typechecker/stdlib/), a JS shim in [`src/backend/js/stdlib/`](../../src/backend/js/stdlib/) and a WASM instruction emitter in [`src/backend/wasm/stdlib/`](../../src/backend/wasm/stdlib/). That is 26,119 lines of JavaScript (2,426 typings, 2,976 JS shims, 20,717 WASM emitters) against 77 lines of Go-source stdlib. v1.9.0 moves **every package whose behaviour is ordinary Go over GoFront values** onto the Go-source path, and keeps host-backed fast paths as small, named **natives** that are checked against the Go body.
 
-This is not only a cleanup. The probes below show that the old path is where the correctness and speed bugs are: every WASM sort is quadratic, sorting `NaN` gives an unsorted result on both backends, `sort.Slice` breaks ties in a different order than Go, and 163 signatures differ from Go's. It also shows the opposite risk: a naive Go rewrite of host-backed string functions is about 300× slower in WASM. So the plan has one rule: **Go is the specification and the default implementation; a native may replace it only where the host has a faster primitive, and only while a differential test proves the two agree.**
+It is the largest simplification left after v1.8.0: about 13,000 lines of hand-written WASM emitters go. It is also not only a cleanup. The probes below show that the old path is where the correctness and speed bugs are: every WASM sort is quadratic, sorting `NaN` gives an unsorted result on both backends, `sort.Slice` breaks ties in a different order than Go, and 163 signatures differ from Go's. It also shows the opposite risk: a naive Go rewrite of host-backed string functions is about 300× slower in WASM. So the plan has one rule: **Go is the specification and the default implementation; a native may replace it only where the host has a faster primitive, and only while a differential test proves the two agree.**
 
 **Done means:**
-- Every package marked *Go-only* or *Native-accelerated* in the [Scope rule](#scope-rule) is a directory under `runtime/stdlib/`, with no entry in `src/typechecker/stdlib/`, no WASM emitter and no JS shim body beyond its registered natives. `STDLIB_PACKAGES` and `WASM_STDLIB_MEMBERS` lose those names.
+- Every package marked *Go-only* or *Native-accelerated* in the [Scope rule](#scope-rule) is a directory under `stdlib/`, with no entry in `src/typechecker/stdlib/`, no WASM emitter and no JS shim body beyond its registered natives. `STDLIB_PACKAGES` and `WASM_STDLIB_MEMBERS` lose those names.
 - Line counts, measured with `wc -l` and recorded in this document at the end of Phase 9: `src/backend/wasm/stdlib/` ≤ 8,000 (from 20,717), `src/typechecker/stdlib/{core,extended}.js` ≤ 1,500 (from 1,715), `src/backend/js/stdlib/` ≤ 2,200 (from 2,976).
-- Every conformance fixture produces Go's exact output in **four** configurations: JS with natives, JS with natives off, WASM with natives, WASM with natives off. Fixtures for `sort`, `slices` and `bits` include `NaN` and tie-order cases captured from real Go.
+- Every migrated package has Go-output cases (expected output taken once from Go 1.26 and pasted into the test) that pass in **four** configurations: JS with natives, JS with natives off, WASM with natives, WASM with natives off. Cases for `sort`, `slices` and `bits` include `NaN` and tie-order cases.
 - WASM sorting is O(n log n): `slices.Sort` of 200,000 `int` values runs in ≤ 100 ms (today 20,443 ms), and `slices.SortFunc` and `sort.Slice` in JS stay within 1.5× of `Array.prototype.sort` with a comparator at 200,000 elements (the Go-source quicksort probe measured 0.73×).
 - Compile time does not regress: a program that imports all migrated packages and uses one function from each type-checks at most 5 ms slower than the same program on v1.8.0, and an unused import costs 0 bytes in `app.js` and dev-mode `app.wasm`.
-- `strconv.ParseInt`-style signature drift is gone for migrated packages: the signature gate reports 0 mismatches for every package with implementation `source`, and the manifest records `source`, `native` or `emitter` per member.
+- `strconv.ParseInt`-style signature drift is gone for migrated packages by construction: their signatures are Go declarations, not hand-written type-table entries.
 - `npm test`, `npm run check` and `npm run test:e2e` pass, and built `example/` outputs differ from v1.8.0 only where [Edge Cases](#3-edge-cases--error-handling) list a behaviour fix.
 
 ---
@@ -31,11 +31,11 @@ A package or member is **moved to Go** when its behaviour can be written as ordi
 
 | Category | Rule | Packages and members |
 |---|---|---|
-| **In scope: Go-only** | Whole package in Go, no natives, on both backends | `sort` (except the JS `Ints`/`Strings` natives below), `slices`, `maps`, `errors` (`New`, `Is`, `Unwrap`, `Join`, `ErrUnsupported`; `As` stays an emitter member), `unicode/utf8` (except `RuneCountInString` native), `path`, `path/filepath`, `html`, `encoding/hex`, `encoding/base64`, `encoding/binary` (`ByteOrder`, `Append*`, `Put*`, varints), `crypto/sha256`, `sync`, `io`, `bytes`, `strings.Reader`, `bytes.Reader`, `bytes.Buffer`, `strings.Replacer` |
+| **In scope: Go-only** | Whole package in Go, no natives, on both backends | `sort` (except the JS `Ints`/`Strings` natives below), `slices`, `maps`, `errors` (`New`, `Is`, `Unwrap`, `Join`, `ErrUnsupported`; `As` stays an emitter member), `unicode/utf8` (except `RuneCountInString` native), `path` (`path/filepath` stays an alias of it, as today), `html`, `encoding/hex` (core codec only), `encoding/base64`, `encoding/binary` (`ByteOrder`, `Append*`, `Put*`, varints), `crypto/sha256`, `sync`, `io`, `bytes`, `strings.Reader`, `bytes.Reader`, `bytes.Buffer`, `strings.Replacer` |
 | **In scope: Native-accelerated** | Go body is the specification; a registered native replaces calls when the host primitive wins | `strings` (`Contains`, `Index*`, `Has*`, `Repeat`, `ToUpper`/`ToLower`, `Split*`, `Join`, `Replace*`, `Trim*`, `EqualFold`, ... where JS or a WASM import has the primitive), `bytes` (`IndexByte`, `Equal`, `Compare` on typed arrays), `slices.Sort`/`Contains`/`Index`/`Reverse`/`Clone` for `int`/`string`/`float64` element types where JS equals Go, `sort.Ints`/`Strings`, `math/bits` (`Len`, `LeadingZeros`, `OnesCount` via `Math.clz32`/WASM instructions), `math/rand` (top-level functions over `Math.random` or the existing random import), `unicode` `Is*`/`To*` (JS `\p{…}` classes and the existing WASM tables), `strconv` (`FormatFloat`/`ParseFloat`/`AppendFloat` shortest-repr), `time` (`Now`, `Since`, local zone offset) |
 | **In scope: Stays emitter** | Needs type tables, generated code or the host | `fmt` (verb engine, `%T`/`%v` type tables, `Fprint*` dispatch), `encoding/json` (generated codecs), `regexp`, `os`, `testing`, `gom`, `gofront/shared`, `gofront/simd`, browser and WebGL/WebGPU typings, `math` (single instructions and imports), `crypto/rand`, `errors.As` (tests the dynamic type of its target), `strings.Builder` (JS string append, WASM builder state), `encoding/binary` `Read`/`Write` (take `any` and walk struct fields), `time.Sleep` |
 | **Excluded: runtime / platform** | Unchanged from v1.8.0 | goroutines, channels, `reflect`, `unsafe`, `runtime`, file I/O |
-| **Excluded: deferred** | Valid, but not part of this release | A user-visible `//gofront:native` for user packages (natives are a closed, compiler-owned registry); generating a Go-source `fmt`; moving `regexp` to Go (RE2 port); the `go/*`, `compress/*`, `math/big` families already deferred in v1.8.0 |
+| **Excluded: deferred** | Valid, but not part of this release | A user-visible `//gofront:native` for user packages (natives are a closed, compiler-owned registry); generating a Go-source `fmt`; moving `regexp` to Go (RE2 port); the `go/*`, `compress/*`, `math/big` families already deferred in v1.8.0; the members v1.8.0 Task 9.4 removed (`unicode` range tables, `math.Gamma`/`Erf`, `sync.Map`/`Pool`, `fmt.Fscan*`, `strconv.*ToGraphic`); `hex.Dump`/`Dumper`, `hex.NewEncoder`/`NewDecoder`, `base64.NewEncoder`/`NewDecoder` and `Encoding.Strict` (streaming and strict variants nothing in the tree needs) |
 
 ---
 
@@ -54,11 +54,10 @@ Audit run 2026-10-23 on `feat/portable-go` (HEAD `04aa0c6`, Node 25.2.0, local G
 | Cost of naive Go | A Go loop over `[]byte` replacing `strings.Index` on a 1 MB string is **~300× slower in WASM**: 271.2 ms for 20 calls against 0.9 ms for the emitter (which calls the host `indexOf`). Module size is similar (6,816 vs 6,381 bytes). Blanket migration of string functions would be a regression. | P3: `node .probes/p3.mjs` |
 | Native vs Go in JS | A Go-source quicksort compiled to JS: ordered `Sort[E]` takes 349 ms against 89.7 ms for `Array.prototype.sort` at 200,000 elements (3.9× slower), but `SortFunc` with a comparator takes 65.6 ms (0.73×). So the JS native for ordered sorts is worth keeping, and comparator sorts can use Go. | P11: `node .probes/p11.mjs` |
 | Module size | A WASM module that uses `bytes.Buffer` is 6,957 bytes; the same program with a 6-line Go `Buffer` is 3,293 bytes. | P8: `compileWasm` of both programs |
-| Compile cost | The checker handles about 110 lines of generic Go per millisecond: 5,604 lines type-check in 49.9 ms (JS) and 56.0 ms (WASM), against 0.4 ms / 1.2 ms for hello world. Checking every body of every migrated package on every build would add tens of milliseconds, against v2.0.0's sub-10 ms rebuild target. | P10: `node .probes/p10.mjs` |
-| Signature drift | 163 coverage-gate signature mismatches come from the hand-written type tables: `time` 33, `slices` 28, `math` 18, `strings` 14, `unicode` 11, `bytes` 9, `encoding/base64` 8, `maps` 7, `unicode/utf8` 7, `fmt` 6, `math/rand` 6, `encoding/binary` 4, `sort` 4, `crypto/sha256` 3, `os` 3, `strconv` 2. | P7: `node .probes/p7.mjs` over [`stdlib-coverage.gaps.json`](../../test/unit/types/stdlib-coverage.gaps.json) |
+| Compile cost | The checker handles about 110 lines of generic Go per millisecond: 5,604 lines type-check in 49.9 ms (JS) and 56.0 ms (WASM), against 0.4 ms / 1.2 ms for hello world. Checking every body of every migrated package on every build would add tens of milliseconds to every `gofront dev` rebuild. | P10: `node .probes/p10.mjs` |
+| Signature drift | 163 coverage-gate signature mismatches come from the hand-written type tables: `time` 33, `slices` 28, `math` 18, `strings` 14, `unicode` 11, `bytes` 9, `encoding/base64` 8, `maps` 7, `unicode/utf8` 7, `fmt` 6, `math/rand` 6, `encoding/binary` 4, `sort` 4, `crypto/sha256` 3, `os` 3, `strconv` 2. | P7: `node .probes/p7.mjs` over the coverage gaps file (`test/unit/types/stdlib-coverage.gaps.json` at `04aa0c6`; deleted by v1.8.0 Task 8.1) |
 | Name coupling | Backends and the checker special-case emitter types by name outside the stdlib directories: `strings.Builder` 11 sites, `bytes.Buffer` 12, `strings.Reader` 9, `bytes.Reader` 9, `time.Time` 10, `time.Duration` 5, `sha256.` 14, `strings.Replacer` 4, `io.LimitedReader` 5, `io.Writer`/`io.Reader` 4 each, and `_derivedReturn` 3. A migrated type needs these sites unwound or it keeps two representations. | grep over `src/` excluding `*/stdlib/`: [`emit-builtins.js`](../../src/backend/wasm/emit-builtins.js), [`wasm/index.js`](../../src/backend/wasm/index.js), [`boundary.js`](../../src/backend/wasm/boundary.js), [`js/expressions.js`](../../src/backend/js/expressions.js), [`typechecker/expressions.js`](../../src/typechecker/expressions.js) |
-| Manifest | `runtime/stdlib/manifest.json` entries have `pkg, name, kind, signature, status` only. The `implementation` field (`emitter`/`source`) that [v1.8.0 §3](../v1.8.0/portable-go-plan.md#3-coverage-manifest-and-conformance) and [v2.0.0](../v2.0.0/native-go-engine.md) rely on does not exist. | Inspection of `runtime/stdlib/manifest.json` (2,476 entries, 4 key sets) |
-| Tooling | `npm run conformance:update` accepts only `go1.26.x` ([`update.js:13`](../../test/conformance/update.js)). This machine has `go1.27.2`, so new fixtures cannot be captured here without a pinned 1.26 toolchain. | `go version`; `GO_VERSION = "go1.26"` |
+| Manifest & conformance (obsolete) | Both are retired by v1.8.0 Phase 8. The original findings (no `implementation` field; `conformance:update` pinned to `go1.26.x`) no longer apply. Expected outputs are pasted into unit tests; no Go toolchain is needed to run or update them. | v1.8.0 plan, Simplification D1 |
 | No gap found | `unicode.IsLetter/IsUpper/IsLower/IsDigit/IsSpace/IsPunct/ToUpper/ToLower` on `a é Σ σ 中 ٣ ǅ U+00A0 €` give identical results on JS, WASM and Go. The `unicode` natives can be kept as they are. | P8 against `.probes/gop8/main.go` |
 | Found, not in this plan | (1) `'\u00e9'` as a rune literal throws a `LexError` (`Unknown escape in rune literal: \u`); string literals and `'\x41'` need a separate check. (2) `fmt.Sprintf("%v", math.Inf(-1))` prints `-Infinity`; Go prints `-Inf`. | P9, P6. (2) joins the `fmt` defects already listed in v1.8.0 Task 3.7; (1) is a lexer bug for a v1.8.x fix |
 
@@ -69,7 +68,7 @@ Audit run 2026-10-23 on `feat/portable-go` (HEAD `04aa0c6`, Node 25.2.0, local G
 - **`fmt`.** The verb engine needs per-type name tables and `Stringer`/`error` dispatch, and it is the most host-coupled package. It stays an emitter. Its `Fprint*` dispatch is rewritten only as far as the `io.Writer` change in Phase 6 requires.
 - **`encoding/json`.** The generated per-type codecs are compile-time specialisation, not library code.
 - **`regexp`.** Needs an RE2 engine or a host call per match; stays JS-only.
-- **User-visible natives.** `//gofront:native` is accepted only in files under `runtime/stdlib/`. A user package that uses it reports `//gofront:native is reserved for the standard library`.
+- **User-visible natives.** `//gofront:native` is accepted only in files under `stdlib/`. A user package that uses it reports `//gofront:native is reserved for the standard library`.
 - **Generating `strings.Builder` in Go.** A Go builder over `[]byte` makes `String()` an O(n) conversion on every call and `WriteString` a UTF-8 encode, against a JS `+=`. Revisit only after the string representation changes (v2.x).
 - **Byte-for-byte JS output of migrated calls for programs that do not use them.** Output changes are limited to calls that now use a native template; the template text reproduces today's emitter text where the host primitive is the same.
 - **New stdlib surface.** No member is added by this release unless a migrated package needs it to match Go's signature. New members stay with v1.8.0 and later.
@@ -86,11 +85,11 @@ Audit run 2026-10-23 on `feat/portable-go` (HEAD `04aa0c6`, Node 25.2.0, local G
 
 | Today (per package) | After |
 |---|---|
-| Type table in `src/typechecker/stdlib/*.js` | Go declarations in `runtime/stdlib/<path>/*.go`; the checker reads them like user code |
+| Type table in `src/typechecker/stdlib/*.js` | Go declarations in `stdlib/<path>/*.go`; the checker reads them like user code |
 | JS shim `src/backend/js/stdlib/<pkg>.js` | Go body compiled by the normal pipeline, plus registered natives in `src/backend/js/natives.js` |
 | WASM emitter `src/backend/wasm/stdlib/*.js` | Go body compiled by the normal pipeline, plus registered natives in `src/backend/wasm/natives.js` |
 
-Signatures are written once as real Go, so the signature gate compares Go with Go and drift for migrated packages is impossible by construction.
+Signatures are written once as real Go, so drift for migrated packages is impossible by construction.
 
 **`//gofront:native <name>` (new in this release).** A directive on a function **with a Go body**:
 
@@ -102,8 +101,8 @@ func Index(s, substr string) int { /* Go body: the specification */ }
 - `<name>` must exist in the backend's native registry (`unknown native 'x'` otherwise); the registry is compiler-owned and closed, like `INTRINSICS` in [`types.js`](../../src/typechecker/types.js). This plan is the "plan change" that v1.8.0 requires for new intrinsics.
 - At a **call site**, the backend asks the registry for a template: JS returns an expression string from the argument strings and the instantiated type arguments (for example `` `${s}.indexOf(${sub})` ``); WASM returns an emitter or a host-import call. A template may **decline** (return `null`) for an instantiation it does not cover, for example `slices.Sort` of `float64`; the Go body is then called.
 - A native used as a **value** (`f := strings.Index`, `defer`, a method value) always calls the Go body, so a native never has to exist as a standalone function.
-- The Go body is always compiled when reachable, so removing a native never breaks a program. The body is the specification: the conformance harness runs every fixture with natives off ([Test & Conformance Plan](#test--conformance-plan)).
-- This differs from `//gofront:intrinsic` (v1.8.0), which is body-less and closed to one function. Intrinsics stay for host services that have no Go body (the `context` deadline timer).
+- The Go body is always compiled when reachable, so removing a native never breaks a program. The body is the specification: the differential tests run every case with natives off ([Test Plan](#test-plan)).
+- This differs from `//gofront:intrinsic` (v1.8.0), which is body-less and closed to one function. Intrinsics stay for host services that have no Go body. v1.8.0 Phase 9 removes `context` and `log`, leaving `INTRINSICS` empty; Task 7.3 adds `rand_source`, which is then the only intrinsic.
 
 **Generic core types.** `slices` and `maps` use Go's real signatures (`func Sort[S ~[]E, E cmp.Ordered](x S)`). The checker gains the notion of a type parameter's **core type** (the single underlying type of its constraint's type set) and uses it for index, slice, `range`, `len`, `cap`, `append`, `make`, `copy` and conversion. Inference unifies `S` with the argument type and `E` with its element, so a named slice argument returns the named type. WASM monomorphisation substitutes the concrete named type.
 
@@ -111,7 +110,7 @@ func Index(s, substr string) int { /* Go body: the specification */ }
 
 **Lazy body checking.** Today the checker verifies every function body of every imported Go-source package. With an estimated 9,000 lines of Go behind `slices`, `strings`, `bytes`, `sort`, `io` and `time`, that costs tens of milliseconds per build (P10). The checker verifies **declarations** (types, signatures, package vars, constants) of a Go-source package eagerly and **function bodies on demand**, when a call from checked code, a method of a used type, or an interface satisfaction check reaches them. Diagnostics inside a stdlib body are still reported at the user's call site (v1.8.0 Task 0.6c). The existing reachability pass (Task 0.7) then sees only what was checked.
 
-**Package-by-package migration order.** Each package moves in one phase: write or finish the Go, register natives, run the four-way conformance fixture, delete the typing, the shim and the emitter, unwind the name coupling listed in [Verified Gaps](#verified-gaps--baseline-audit). A package is not half-moved: either all its members come from Go (with natives) or none.
+**Package-by-package migration order.** Each package moves in one phase: write or finish the Go, register natives, run the four-way Go-output cases, delete the typing, the shim and the emitter, unwind the name coupling listed in [Verified Gaps](#verified-gaps--baseline-audit). A package is not half-moved: either all its members come from Go (with natives) or none.
 
 **Rejected alternatives:**
 - **Move everything to Go with no natives.** The string-search probe is 300× slower in WASM, and the ordered-sort probe is 3.9× slower in JS.
@@ -121,9 +120,9 @@ func Index(s, substr string) int { /* Go body: the specification */ }
 
 ### 2. Invariants & Safety Bounds
 
-- **Go is the specification.** For every native, the Go body and the native give identical results on the conformance corpus, on both backends. CI runs both.
+- **Go is the specification.** For every native, the Go body and the native give identical results on the Go-output cases, on both backends. CI runs both.
 - **Natives never change semantics for programs that do not decline.** A template either reproduces Go's behaviour for the instantiation it accepts or declines.
-- **Stdlib dependency direction.** A Go-source stdlib package imports only other stdlib packages (migrated or emitter-backed) and never a user package; `cmp`, `iter`, `errors`, `io` and `unicode/utf8` form the base layer. The resolver rejects cycles in `runtime/stdlib/`.
+- **Stdlib dependency direction.** A Go-source stdlib package imports only other stdlib packages (migrated or emitter-backed) and never a user package; `cmp`, `iter`, `errors`, `io` and `unicode/utf8` form the base layer. The resolver rejects cycles in `stdlib/`.
 - **Unused imports cost nothing.** Reachability from v1.8.0 still applies: 0 bytes in `app.js` and dev-mode `app.wasm`.
 - **No new boundary types.** `time.Time` and `time.Duration` keep their names, field layout and boundary conversion; exported Go-source types follow the ordinary struct rules.
 - **JS output of natives matches today's.** Built `example/` outputs are diffed before and after each phase; differences are limited to the listed behaviour fixes.
@@ -136,7 +135,7 @@ func Index(s, substr string) int { /* Go body: the specification */ }
 - A native declined for an instantiation (`slices.Sort[float64]`, a named element type, a struct element) calls the Go body with no diagnostic.
 - Function values, method values, `defer` and arguments evaluated in a different order than the template emits all go through the Go body or evaluate arguments exactly once, in order. A template that repeats an argument must bind it to a temporary first.
 - Natives in a `both` package use strict numeric semantics in the JS copy, like any other code there.
-- A native named in `runtime/stdlib/` but missing from a backend registry is a compiler self-test failure, not a user error.
+- A native named in `stdlib/` but missing from a backend registry is a compiler self-test failure, not a user error.
 
 **Behaviour fixes (user-visible, recorded in the CHANGELOG)**
 - `slices.Sort`, `slices.SortFunc`, `sort.Float64s`, `sort.Slice`, `sort.Sort` order `NaN` and break ties exactly like Go; programs that depended on the previous stable tie order change output.
@@ -144,10 +143,10 @@ func Index(s, substr string) int { /* Go body: the specification */ }
 - Results of `slices.Insert`, `Delete`, `Clone`, `Compact` and `Grow` keep a named slice type (`S`) as Go does.
 
 **Migration hazards**
-- `fmt.Errorf("%w")` wrapping is built by the `fmt` emitter. `errors.Is`/`Unwrap` in Go call the `Unwrap() error` method, so the emitter's wrapper type must expose that method on both backends; a fixture covers `%w` chains and multiple `%w`.
+- `fmt.Errorf("%w")` wrapping is built by the `fmt` emitter. `errors.Is`/`Unwrap` in Go call the `Unwrap() error` method, so the emitter's wrapper type must expose that method on both backends; a case covers `%w` chains and multiple `%w`.
 - `errors.As` stays an emitter member: it tests the dynamic type of `*target`, which Go source cannot express.
 - `io.Writer` becomes a real Go interface. `fmt.Fprint*(w, …)` currently dispatches on the argument's concrete emitter type; after Phase 6 it calls `w.Write`, with `os.Stdout`/`os.Stderr` (v1.8.0 Task 3.1e) and `strings.Builder` implementing it.
-- `bytes.Buffer`, `strings.Reader` and `time.Time` are used by value and by pointer across the boundary and in interfaces; fixtures cover copy semantics, `io.Reader`/`io.Writer` satisfaction, embedding and use as map values.
+- `bytes.Buffer`, `strings.Reader` and `time.Time` are used by value and by pointer across the boundary and in interfaces; cases cover copy semantics, `io.Reader`/`io.Writer` satisfaction, embedding and use as map values.
 - `sha256` is used by `io.Copy` through `hash.Hash`; the digest object is a Go struct with `Write`, `Sum`, `Reset`, `Size`, `BlockSize`.
 - `math/rand` seeding: top-level functions keep drawing from the host random source; `rand.New(rand.NewSource(seed))` must give Go's exact sequence only if v1.8.0 documents that guarantee (it does not today); the plan keeps today's behaviour and records it.
 - Large generated Go (pdqsort) in JS output uses strict numeric helpers only inside `both` packages; the JS copy of a `js` caller uses plain operators.
@@ -157,15 +156,17 @@ func Index(s, substr string) int { /* Go body: the specification */ }
 - A diagnostic raised while lazily checking a stdlib body is reported once, at the user's call site, with the `internal stdlib error in <path>; please report` note.
 - Body checking order must not change which diagnostics a user program reports.
 
-### 4. Relationship to v1.8.0 and v2.0.0
+### 4. Relationship to v1.8.0
 
-- **Release placement.** This is a feature release after v1.8.0, so v1.8.0 is no longer the last feature release of the JS engine: v1.9.0 takes that role, and the v2.0.0 port's baseline moves from v1.8.0 to v1.9.0. That trade is deliberate: the port gets smaller, because migrated packages are embedded instead of ported. Task 9.3 updates the v1.8.0 and v2.0.0 plans and the roadmap accordingly. v1.8.x stays bug-fix only.
-- **Unfinished v1.8.0 member tasks.** Tasks 2.2/2.3 (`slices`/`maps` iterator members, already Go overlays), 3.2 (`sort`, Go), 3.3a–3.3c, 3.4a–3.4c (these edit emitters), 3.5 and 3.7 add members to packages this plan migrates. Members written as Go overlays are absorbed by the matching phase here. Members written as emitters (3.3c, 3.4a, 3.4b, 3.4c, parts of 3.7) are rework: **write them as Go overlays in v1.8.0 where a native is not needed**, so this release only deletes code.
-- **v2.0.0 baseline.** The native engine ports the compiler core plus the *remaining* emitters; migrated packages are embedded `.go` files. Task 9.3 updates the v2.0.0 plan's "ported stdlib" list and its 22k-line estimate. The natives registry becomes a table the native engine ports (an estimated 60 small templates instead of ≈ 21,000 lines).
+- **Release placement.** An ordinary feature release after v1.8.0. The v2.0.0 native engine is shelved, so there is no JS-engine feature freeze and no port baseline to move.
+- **v1.8.0 member work.** v1.8.0 Phases 0–7 have landed. Members written there as Go overlays are absorbed by the matching phase here; members written as emitters (v1.8.0 Tasks 3.3c, 3.4a, 3.4b, 3.4c, parts of 3.7) are rework. Each phase re-audits its packages on its base commit.
+- **v1.8.0 simplification.** Phase 9 there removed `bufio`, `context`, `log`, `encoding/csv`, `container/*`, the `hash/*` checksums, extra `crypto/*`, `base32`, `math/rand/v2`, `utf16`, `cmplx` and `sync/atomic`. None of them is in this plan's scope, and no migrated package may import them. The kept `hash` package (`hash.Hash`) is what the Go `sha256` digest implements (Task 7.2). Task 9.4 there also removed the `unicode` range tables (`Is`/`In`/`RangeTable`), `math.Gamma`/`Erf`, `sync.Map`/`Pool`, `fmt.Fscan*` and `strconv.*ToGraphic`; they are not reintroduced here (the Scope Rule's `unicode` row covers only the emitter `Is*`/`To*` predicates plus `SimpleFold`/`ToTitle`), and new migrations keep the same bar: no API that nothing in the tree uses.
 
 ---
 
 ## Implementation Tasks
+
+**Go-output cases.** "Cases `pkg/name.go`" in a task means a case group in `test/unit/stdlib/<pkg>.test.js`: a small program plus its expected output, taken once from Go 1.26 and pasted in, run in four configurations by the Task 2.4 helper. There is no conformance directory and no Go toolchain step.
 
 Execution follows [v1.8.0 → How to execute a task](../v1.8.0/portable-go-plan.md#how-to-execute-a-task): failing test first, one task per commit (`feat(<scope>): <summary> (Task N.M)`), `npm run check` before each, ticking the box here. 1 phase = 1 branch (`feat/stdlib-go-phase-<N>`), 1 PR into `feat/stdlib-go`, 1 two-pass review. Phase budget: 3–5 tasks and ≈ 150–500 net lines of **hand-written** source (compiler JS and Go stdlib); generated files and deletions do not count. Phases 1–2 are prerequisites. Phases 3–8 are independent of each other once those two are done; Phase 9 closes.
 
@@ -199,7 +200,7 @@ Execution follows [v1.8.0 → How to execute a task](../v1.8.0/portable-go-plan.
 
 - [ ] **Task 2.1 — `//gofront:native` directive and registries**
   - Files: `src/lexer.js`, `src/parser/declarations.js`, `src/typechecker/index.js`, new `src/backend/js/natives.js`, new `src/backend/wasm/natives.js`
-  - Do: parse `//gofront:native <name>` before a func **with a body**, as `//gofront:intrinsic` is parsed; the checker rejects an unknown name (`unknown native 'x'`), a native on a body-less func, and any use outside `runtime/stdlib/` (`//gofront:native is reserved for the standard library`). The registries start empty.
+  - Do: parse `//gofront:native <name>` before a func **with a body**, as `//gofront:intrinsic` is parsed; the checker rejects an unknown name (`unknown native 'x'`), a native on a body-less func, and any use outside `stdlib/` (`//gofront:native is reserved for the standard library`). The registries start empty.
   - Test: `test/unit/compiler/stdlib-go.test.js` — each of the three diagnostics via a temp-dir stdlib root; a valid directive compiles with an empty registry entry for a test-only name.
   - Done when: the four tests pass.
 
@@ -215,11 +216,11 @@ Execution follows [v1.8.0 → How to execute a task](../v1.8.0/portable-go-plan.
   - Test: `test/unit/wasm/stdlib.test.js` — a test-only native that calls an import; the same decline and value-fallback cases as Task 2.2, as parity tests against the Go body.
   - Done when: native-on and native-off WASM modules give the same results on the test fixtures.
 
-- [ ] **Task 2.4 — Natives-off mode, four-way conformance, pinned Go toolchain**
-  - Files: `src/compiler.js` (`natives` option), `src/cli-core.js` (`--no-natives`, debugging only), `test/conformance/run.js`, `test/conformance/update.js`
-  - Do: `natives: false` makes every backend ignore the registries. The conformance runner compares JS, JS natives-off, WASM and WASM natives-off with `<name>.out`, naming the failing configuration. `update.js` reads `GOFRONT_GO` (default `go`) so a pinned `go1.26.x` binary works when the default `go` is newer.
-  - Test: `test/unit/compiler/conformance.test.js` — a fixture whose test-only native disagrees with its Go body fails and names `js (natives on)`; `GOFRONT_GO` pointing at a stub reporting `go1.27` is rejected with the install hint.
-  - Done when: the bootstrap fixtures pass in four configurations and the stub tests pass.
+- [ ] **Task 2.4 — Natives-off mode and the four-way test helper**
+  - Files: `src/compiler.js` (`natives` option), `src/cli-core.js` (`--no-natives`, debugging only), new `test/unit/stdlib/harness.js`
+  - Do: `natives: false` makes every backend ignore the registries. `harness.js` exports `runFourWay(source, expected)`, which compiles the program as a `both` package and compares JS, JS natives-off, WASM and WASM natives-off output with `expected`, naming the failing configuration.
+  - Test: `test/unit/compiler/stdlib-go.test.js` — a case whose test-only native disagrees with its Go body fails and names `js (natives on)`.
+  - Done when: the bootstrap cases pass in four configurations.
 
 - [ ] **Task 2.5 — Lazy body checking for Go-source packages**
   - Files: `src/typechecker/index.js`, `src/compiler.js` (`checkStdlibPrograms`), `src/lower/reachability.js`
@@ -230,67 +231,67 @@ Execution follows [v1.8.0 → How to execute a task](../v1.8.0/portable-go-plan.
 ### Phase 3: `sort` and `slices`
 
 - [ ] **Task 3.1 — pdqsort variant generator**
-  - Files: new `scripts/gen-pdq.js`, new `scripts/pdq-template.txt`, generated `runtime/stdlib/sort/zsort_iface.go`, `zsort_func.go`, `runtime/stdlib/slices/zsort_ordered.go`, `zsort_cmp.go`, `package.json` (`gen:pdq`, checked by `npm run check`)
-  - Do: one template with the four substitutions Go's `gen_sort_variants` uses; keep Go's BSD notice. `npm run check` fails when the generated files are stale.
-  - Test: `test/unit/compiler/manifest.test.js`  — regenerating is a no-op; fixture `test/conformance/sort/ties.go` prints the order of equal-key elements for n = 5, 13, 40, 1000 and matches Go.
-  - Done when: the tie-order fixture matches Go on all four configurations.
+  - Files: new `scripts/gen-pdq.js`, new `scripts/pdq-template.txt`, generated `stdlib/sort/zsort_iface.go`, `zsort_func.go`, `stdlib/slices/zsort_ordered.go`, `zsort_cmp.go`, `package.json` (`gen:pdq`, checked by `npm run check`)
+  - Do: one template with the four substitutions Go's `gen_sort_variants` uses; keep Go's BSD notice. `pdq-template.txt` swaps and inspects elements by index (`data[a], data[b] = data[b], data[a]`) and never takes `&data[i]`, obeying v1.8.0 D5 (`both` target forbids scalar element pointers). `npm run check` fails when the generated files are stale.
+  - Test: new `test/unit/compiler/gen-pdq.test.js` — regenerating is a no-op; cases `sort/ties.go` print the order of equal-key elements for n = 5, 13, 40, 1000.
+  - Done when: the tie-order cases match Go's recorded order in all four configurations.
 
 - [ ] **Task 3.2 — `slices` (non-sorting members) in Go**
-  - Files: `runtime/stdlib/slices/slices.go`, `src/backend/js/natives.js` (`slices.Contains`, `Index`, `Reverse`, `Clone` for primitive `E`), `src/backend/js/stdlib/slices.js`, `src/backend/wasm/stdlib/core.js` (delete `emitSlices*` non-sort), `src/typechecker/stdlib/extended.js`
+  - Files: `stdlib/slices/slices.go` (absorbs `stdlib/slices/extra.go` and `iter.go`), `src/backend/js/natives.js` (`slices.Contains`, `Index`, `Reverse`, `Clone` for primitive `E`), `src/backend/js/stdlib/slices.js`, `src/backend/wasm/stdlib/core.js` (delete `emitSlices*` non-sort), `src/typechecker/stdlib/extended.js`
   - Do: every existing `slices` member except the sort/search family, with Go's signatures (`S ~[]E`). JS natives keep today's `includes`/`indexOf` output; WASM uses the Go body. Remove the typings, the shim bodies and the WASM emitters for these members.
-  - Test: conformance `test/conformance/slices/members.go` (Insert/Delete/Compact/Concat/Clip/Grow/Equal/Compare/Min/Max with named slice types, empty and nil slices) in four configurations; `test/unit/types/stdlib-coverage.test.js` shows the `slices` signature mismatches for these members gone.
-  - Done when: fixture matches Go; built `example/` JS differs only where a native's text differs (diff recorded).
+  - Test: cases `slices/members.go` (Insert/Delete/Compact/Concat/Clip/Grow/Equal/Compare/Min/Max with named slice types, empty and nil slices) in four configurations; a named slice type (`type IDs []int`) comes back as `IDs` from `Insert`/`Delete`/`Clone`/`Compact`/`Grow`.
+  - Done when: cases match Go; built `example/` JS differs only where a native's text differs (diff recorded).
 
 - [ ] **Task 3.3 — `slices` sort and search family in Go**
-  - Files: `runtime/stdlib/slices/sort.go`, `src/backend/js/natives.js` (`slices.Sort` for `int`/`string`), `src/backend/js/stdlib/slices.js`, `src/backend/wasm/stdlib/core.js` (delete `emitSlicesSort*`, `BinarySearch*`, `IsSorted*`, `MinMax*`)
+  - Files: `stdlib/slices/sort.go`, `src/backend/js/natives.js` (`slices.Sort` for `int`/`string`), `src/backend/js/stdlib/slices.js`, `src/backend/wasm/stdlib/core.js` (delete `emitSlicesSort*`, `BinarySearch*`, `IsSorted*`, `MinMax*`)
   - Do: `Sort`, `SortFunc`, `SortStableFunc`, `IsSorted*`, `BinarySearch*`, `Min*`, `Max*` over the generated pdqsort; `Sort` of floats orders `NaN` first via `cmp.Less`. The JS native for `Sort` accepts only integer and string element types and declines otherwise.
-  - Test: conformance `slices/sort.go` (NaN, ±0, ties via `SortFunc`, stability of `SortStableFunc`, large n); `test/unit/wasm/slices.test.js` — a comparison-counting `SortFunc` on 20,000 elements makes ≤ 400,000 calls (O(n log n)); `test/e2e/perf` records the 200,000-int WASM sort.
-  - Done when: fixtures match Go; the 200,000-int WASM sort runs in ≤ 100 ms; JS `SortFunc` is within 1.5× of `Array.prototype.sort` with a comparator.
+  - Test: cases `slices/sort.go` (NaN, ±0, ties via `SortFunc`, stability of `SortStableFunc`, large n); `test/unit/wasm/slices.test.js` — a comparison-counting `SortFunc` on 20,000 elements makes ≤ 400,000 calls (O(n log n)); `test/e2e/perf` records the 200,000-int WASM sort.
+  - Done when: cases match Go; the 200,000-int WASM sort runs in ≤ 100 ms; JS `SortFunc` is within 1.5× of `Array.prototype.sort` with a comparator.
 
 - [ ] **Task 3.4 — `sort` in Go**
-  - Files: `runtime/stdlib/sort/sort.go`, `src/backend/js/natives.js` (`sort.Ints`, `sort.Strings`), `src/backend/js/stdlib/sort.js`, `src/backend/wasm/stdlib/core.js` (delete `emitSort*`), `src/typechecker/stdlib/core.js`
+  - Files: `stdlib/sort/sort.go`, `src/backend/js/natives.js` (`sort.Ints`, `sort.Strings`), `src/backend/js/stdlib/sort.js`, `src/backend/wasm/stdlib/core.js` (delete `emitSort*`), `src/typechecker/stdlib/core.js`
   - Do: the whole `sort` package: `Ints`, `Strings`, `Float64s`, `Slice`, `SliceStable`, `Sort`, `Stable`, `Reverse`, `Search*`, `IntSlice`/`StringSlice`/`Float64Slice`, `IsSorted`, `Find`, `SliceIsSorted` (this absorbs v1.8.0 Task 3.2).
-  - Test: conformance `sort/sort.go` and `sort/ties.go` from Task 3.1 across all four configurations; `stdlib-coverage` reports no `sort` mismatches.
-  - Done when: fixtures match Go and `sort.Slice`'s tie order equals Go's.
+  - Test: cases `sort/sort.go` and `sort/ties.go` from Task 3.1 across all four configurations.
+  - Done when: cases match Go and `sort.Slice`'s tie order equals Go's.
 
 ### Phase 4: `maps`, `errors`, `unicode/utf8`, `path`, `html`
 
 - [ ] **Task 4.1 — `maps` in Go**
-  - Files: `runtime/stdlib/maps/maps.go`, `src/backend/js/stdlib/maps.js`, `src/backend/wasm/stdlib/core.js` (delete `emitMaps*`), `src/typechecker/stdlib/extended.js`, `src/typechecker/expressions.js` (remove `_derivedReturn`)
+  - Files: `stdlib/maps/maps.go`, `src/backend/js/stdlib/maps.js`, `src/backend/wasm/stdlib/core.js` (delete `emitMaps*`), `src/typechecker/stdlib/extended.js`, `src/typechecker/expressions.js` (remove `_derivedReturn`)
   - Do: `Clone`, `Copy`, `Equal`, `EqualFunc`, `DeleteFunc`, and the iterator forms (`All`, `Keys`, `Values`, `Insert`, `Collect`) with `M ~map[K]V`. Map iteration order is unchanged from today.
-  - Test: conformance `maps/members.go` (sorted output, `NaN` keys kept once each); `stdlib-coverage` shows `maps` signatures match.
-  - Done when: fixture matches Go in four configurations and `_derivedReturn` is gone.
+  - Test: cases `maps/members.go` (sorted output, `NaN` keys kept once each).
+  - Done when: cases match Go in four configurations and `_derivedReturn` is gone.
 
 - [ ] **Task 4.2 — `errors` in Go, `As` stays an emitter member**
-  - Files: `runtime/stdlib/errors/errors.go` (absorbs `overlay.go`), `src/backend/js/stdlib/errors.js`, `src/backend/wasm/stdlib/core.js` (delete `emitErrorsCall` except `As`), `src/typechecker/stdlib/core.js` (keep only `As`)
-  - Do: `New`, `Is`, `Unwrap`, `Join`, `ErrUnsupported` in Go. `errors` remains an overlay on the emitter namespace (the v1.8.0 mechanism) with `As` as its only emitter member, because it tests the dynamic type of `*target`, which Go source cannot express; the manifest records it as `emitter`. The `fmt.Errorf("%w")` wrapper exposes `Unwrap() error` so Go's `Is` and `Unwrap` see it.
-  - Test: conformance `errors/wrap.go` (`%w`, multiple `%w`, `Join`, `Is` with `Is(error) bool` methods, `As` on pointer and value targets) in four configurations.
-  - Done when: fixture matches Go and `errors.Is(err, strconv.ErrRange)`-style cases pass.
+  - Files: `stdlib/errors/errors.go` (absorbs `overlay.go`), `src/backend/js/stdlib/errors.js`, `src/backend/wasm/stdlib/core.js` (delete `emitErrorsCall` except `As`), `src/typechecker/stdlib/core.js` (keep only `As`)
+  - Do: `New`, `Is`, `Unwrap`, `Join`, `ErrUnsupported` in Go. `errors` remains an overlay on the emitter namespace (the v1.8.0 mechanism) with `As` as its only emitter member, because it tests the dynamic type of `*target`, which Go source cannot express. The `fmt.Errorf("%w")` wrapper exposes `Unwrap() error` so Go's `Is` and `Unwrap` see it.
+  - Test: cases `errors/wrap.go` (`%w`, multiple `%w`, `Join`, `Is` with `Is(error) bool` methods, `As` on pointer and value targets) in four configurations.
+  - Done when: cases match Go and `errors.Is(err, strconv.ErrRange)`-style cases pass.
 
 - [ ] **Task 4.3 — `unicode/utf8` in Go**
-  - Files: `runtime/stdlib/unicode/utf8/utf8.go`, `src/backend/js/natives.js` (`RuneCountInString`), `src/backend/js/stdlib/utf8.js`, `src/backend/wasm/stdlib/core.js` (`emitUtf8Call`), `src/typechecker/stdlib/core.js`
+  - Files: `stdlib/unicode/utf8/utf8.go`, `src/backend/js/natives.js` (`RuneCountInString`), `src/backend/js/stdlib/utf8.js`, `src/backend/wasm/stdlib/core.js` (`emitUtf8Call`), `src/typechecker/stdlib/core.js`
   - Do: the whole package over `[]byte` (this absorbs v1.8.0 Task 3.3b's utf8 part), with Go's constants and signatures (`RuneError` and `UTFMax` untyped).
-  - Test: conformance `utf8/bytes.go` (invalid sequences, surrogates, `FullRune`, `DecodeLastRune`) in four configurations.
-  - Done when: fixture matches Go and `unicode/utf8` has no signature mismatch.
+  - Test: cases `utf8/bytes.go` (invalid sequences, surrogates, `FullRune`, `DecodeLastRune`) in four configurations.
+  - Done when: cases match Go and `unicode/utf8` has no typechecker table entry left.
 
-- [ ] **Task 4.4 — `path`, `path/filepath` and `html` in Go**
-  - Files: `runtime/stdlib/path/path.go`, `runtime/stdlib/path/filepath/filepath.go`, `runtime/stdlib/html/html.go`, `src/backend/js/stdlib/{path,html}.js`, `src/backend/wasm/stdlib/pure.js`
-  - Do: `Join`, `Clean`, `Base`, `Dir`, `Ext`, `Split`, `IsAbs`, `Match`; `EscapeString`/`UnescapeString` with Go's entity table subset documented. Delete the emitters and typings.
-  - Test: conformance `path/path.go`, `html/escape.go`.
-  - Done when: fixtures match Go and `pure.js` keeps only `unicode` and `rand`.
+- [ ] **Task 4.4 — `path` and `html` in Go**
+  - Files: `stdlib/path/path.go`, `stdlib/html/html.go`, `src/backend/js/stdlib/{path,html}.js`, `src/backend/wasm/stdlib/pure.js`, `src/typechecker/types.js` and `src/typechecker/stdlib/extended.js` (`path/filepath` alias)
+  - Do: `Join`, `Clean`, `Base`, `Dir`, `Ext`, `Split`, `IsAbs`, `Match`; `EscapeString`/`UnescapeString` with Go's entity table subset documented. Delete the emitters and typings. `path/filepath` keeps resolving to the same package (today's alias in `types.js:123` / `extended.js:540`), re-pointed at the Go `path`; it gets no file of its own.
+  - Test: cases `path/path.go` (run once more with `import "path/filepath"`), `html/escape.go`.
+  - Done when: cases match Go and `pure.js` keeps only `unicode` and `rand`.
 
 ### Phase 5: `bytes`
 
 - [ ] **Task 5.1 — `bytes` functions in Go with typed-array natives**
-  - Files: `runtime/stdlib/bytes/bytes.go`, `src/backend/js/natives.js` (`IndexByte`, `Equal`, `Compare`), `src/backend/js/stdlib/bytes.js`, `src/backend/wasm/stdlib/bytes.js` (delete `emitBytesCall` and `_emitBytes*`)
-  - Do: every existing `bytes` function with Go's signatures (`ContainsRune`, `IndexByte`, `Map`, `FieldsFunc`, `TrimFunc` get their `rune`/`byte` types), absorbing the v1.8.0 Task 3.4c `bytes` functions.
-  - Test: conformance `bytes/functions.go` in four configurations; `test/unit/builtins/bytes.test.js` runs unchanged.
-  - Done when: fixture matches Go and `bytes` function signatures match.
+  - Files: `stdlib/bytes/bytes.go` (absorbs `stdlib/bytes/{iter,search,split}.go`), `src/backend/js/natives.js` (`IndexByte`, `Equal`, `Compare`), `src/backend/js/stdlib/bytes.js`, `src/backend/wasm/stdlib/bytes.js` (delete `emitBytesCall` and `_emitBytes*`)
+  - Do: every existing `bytes` function with Go's signatures (`ContainsRune`, `IndexByte`, `Map`, `FieldsFunc`, `TrimFunc` get their `rune`/`byte` types), absorbing the v1.8.0 Task 3.4c and `search.go`/`split.go` `bytes` functions.
+  - Test: cases `bytes/functions.go` in four configurations; `test/unit/builtins/bytes.test.js` runs unchanged.
+  - Done when: cases match Go and the `bytes` functions have no typechecker table entries left.
 
 - [ ] **Task 5.2 — `bytes.Buffer` in Go**
-  - Files: `runtime/stdlib/bytes/buffer.go`, `src/backend/js/stdlib/bytes.js`, `src/backend/wasm/stdlib/bytes.js` (`emitBytesBufferMethodCall`), `src/backend/js/expressions.js`, `src/backend/wasm/emit-builtins.js`, `src/backend/wasm/index.js` (12 `bytes.Buffer` sites)
+  - Files: `stdlib/bytes/buffer.go`, `src/backend/js/stdlib/bytes.js`, `src/backend/wasm/stdlib/bytes.js` (`emitBytesBufferMethodCall`), `src/backend/js/expressions.js`, `src/backend/wasm/emit-builtins.js`, `src/backend/wasm/index.js` (12 `bytes.Buffer` sites)
   - Do: `Buffer` with `Write*`, `Read*`, `Bytes`, `String`, `Len`, `Cap`, `Grow`, `Truncate`, `Reset`, `Next`, `ReadFrom`, `WriteTo`, `UnreadByte`, `UnreadRune`, `NewBuffer`, `NewBufferString`; remove the special cases in the backends; `fmt.Fprint*` into a `Buffer` goes through `io.Writer` (Task 6.1).
-  - Test: conformance `bytes/buffer.go`; `test/unit/builtins/bytes.test.js` value-copy, pointer, interface and map-value cases; a module-size assertion: a program using `Buffer` is ≤ 4,500 bytes of dev `app.wasm` (P8: 6,957 → 3,293).
+  - Test: cases `bytes/buffer.go`; `test/unit/builtins/bytes.test.js` value-copy, pointer, interface and map-value cases; a module-size assertion: a program using `Buffer` is ≤ 4,500 bytes of dev `app.wasm` (P8: 6,957 → 3,293).
   - Done when: both pass and `bytes.js` in the WASM stdlib directory is gone.
 
 - [ ] **Task 5.3 — Remove dead `bytes` internals and `bytes.Reader` coupling**
@@ -302,68 +303,68 @@ Execution follows [v1.8.0 → How to execute a task](../v1.8.0/portable-go-plan.
 ### Phase 6: `io` and `strings`
 
 - [ ] **Task 6.1 — `io` in Go**
-  - Files: `runtime/stdlib/io/io.go`, `src/backend/js/stdlib/io.js`, `src/backend/wasm/stdlib/io.js` (`emitIo*`, `_emitIoCopy*`, `_emitIoReadAll`), `src/backend/wasm/index.js` (`io.Writer`/`io.Reader` sites), `src/typechecker/stdlib/core.js`
+  - Files: `stdlib/io/io.go`, `src/backend/js/stdlib/io.js`, `src/backend/wasm/stdlib/io.js` (`emitIo*`, `_emitIoCopy*`, `_emitIoReadAll`), `src/backend/wasm/index.js` (`io.Writer`/`io.Reader` sites), `src/typechecker/stdlib/core.js`
   - Do: `Reader`, `Writer`, `Closer`, `Seeker` and the composites, `EOF`, `ErrUnexpectedEOF`, `ErrShortWrite`, `Discard`, `Copy`, `CopyN`, `CopyBuffer`, `ReadAll`, `ReadFull`, `ReadAtLeast`, `WriteString`, `LimitReader`/`LimitedReader`, `MultiReader`, `MultiWriter`, `TeeReader`, `NopCloser`, `SectionReader`; `fmt.Fprint*` and `Sscan` stay emitters but call `w.Write` through the interface (absorbs v1.8.0 Task 3.3a).
-  - Test: conformance `io/io.go` and `fmt/fprint.go` (`Fprintf` into `Buffer`, `Builder`, `os.Stdout`, a user `Writer`) in four configurations.
-  - Done when: fixtures match Go and `fmt.Fprintf(w, …)` type-checks against `io.Writer`.
+  - Test: cases `io/io.go` and `fmt/fprint.go` (`Fprintf` into `Buffer`, `Builder`, `os.Stdout`, a user `Writer`) in four configurations.
+  - Done when: cases match Go and `fmt.Fprintf(w, …)` type-checks against `io.Writer`.
 
 - [ ] **Task 6.2 — `strings.Reader` and `bytes.Reader` in Go**
-  - Files: `runtime/stdlib/strings/reader.go`, `runtime/stdlib/bytes/reader.go`, `src/backend/wasm/stdlib/io.js`, `src/backend/wasm/emit-builtins.js`, `src/backend/wasm/index.js` (9 + 9 sites)
+  - Files: `stdlib/strings/reader.go`, `stdlib/bytes/reader.go`, `src/backend/wasm/stdlib/io.js`, `src/backend/wasm/emit-builtins.js`, `src/backend/wasm/index.js` (9 + 9 sites)
   - Do: `NewReader`, `Read`, `ReadByte`, `UnreadByte`, `ReadRune`, `UnreadRune`, `Len`, `Size`, `Reset`, `Seek`, `ReadAt`, `WriteTo`.
-  - Test: conformance `strings/reader.go`, `bytes/reader.go`; `io.ReadAll` over each.
-  - Done when: fixtures match Go and the reader special cases are gone from the backends.
+  - Test: cases `strings/reader.go`, `bytes/reader.go`; `io.ReadAll` over each.
+  - Done when: cases match Go and the reader special cases are gone from the backends.
 
 - [ ] **Task 6.3 — `strings` functions: Go bodies with host natives**
-  - Files: `runtime/stdlib/strings/strings.go`, `src/backend/js/natives.js`, `src/backend/wasm/natives.js` (host-import calls for `Index`, `Contains`, `HasPrefix`, `ToUpper`, … — the same imports the emitters use today), `src/backend/js/stdlib/strings.js`, `src/backend/wasm/stdlib/core.js` (delete `emitStrings*` except natives)
-  - Do: all `strings` functions with Go's `rune`/`byte` types; each function with a host primitive gets a native whose template reproduces today's output; the rest (`FieldsFunc`, `TrimFunc`, `Map`, `IndexFunc`, `Title`, `Fields`, `EqualFold`, …) run as Go over `[]byte`/`[]rune`, following [v1.8.0 §1.1](../v1.8.0/portable-go-plan.md#11-string-semantics-both-backends). Absorbs v1.8.0 Tasks 2.4 and 3.4c's `strings` members.
-  - Test: conformance `strings/functions.go` (ASCII only, per the harness lint) in four configurations; `test/e2e/perf` records `strings.Index` on 1 MB: WASM with natives within 2× of v1.8.0 (0.9 ms/20 calls baseline), natives-off result equal but not timed.
-  - Done when: fixtures match Go; the string-search benchmark is within the bound.
+  - Files: `stdlib/strings/strings.go` (absorbs `stdlib/strings/{iter,extra}.go`), `src/backend/js/natives.js`, `src/backend/wasm/natives.js` (host-import calls for `Index`, `Contains`, `HasPrefix`, `ToUpper`, … — the same imports the emitters use today), `src/backend/js/stdlib/strings.js`, `src/backend/wasm/stdlib/core.js` (delete `emitStrings*` except natives)
+  - Do: all `strings` functions with Go's `rune`/`byte` types; each function with a host primitive gets a native whose template reproduces today's output; the rest (`FieldsFunc`, `TrimFunc`, `Map`, `IndexFunc`, `Title`, `Fields`, `EqualFold`, …) run as Go over `[]byte`/`[]rune`, following [v1.8.0 §1.1](../v1.8.0/portable-go-plan.md#11-string-semantics-both-backends). Absorbs v1.8.0 Tasks 2.4, 3.4c, and `extra.go`'s `strings` members.
+  - Test: cases `strings/functions.go` (ASCII only, per the harness lint) in four configurations; `test/e2e/perf` records `strings.Index` on 1 MB: WASM with natives within 2× of v1.8.0 (0.9 ms/20 calls baseline), natives-off result equal but not timed.
+  - Done when: cases match Go; the string-search benchmark is within the bound.
 
 - [ ] **Task 6.4 — `strings.Replacer` in Go**
-  - Files: `runtime/stdlib/strings/replacer.go`, `src/backend/js/expressions.js`, `src/backend/wasm/emit-builtins.js` (4 sites), `src/backend/wasm/stdlib/core.js` (`emitReplacerMethodCall`, `emitStringsNewReplacer`)
+  - Files: `stdlib/strings/replacer.go`, `src/backend/js/expressions.js`, `src/backend/wasm/emit-builtins.js` (4 sites), `src/backend/wasm/stdlib/core.js` (`emitReplacerMethodCall`, `emitStringsNewReplacer`)
   - Do: `NewReplacer`, `Replace`, `WriteString` with Go's generic algorithm (first-match, argument order).
-  - Test: conformance `strings/replacer.go` (overlapping old strings, empty old string, `WriteString` into a `Buffer`).
-  - Done when: fixture matches Go and `strings.Builder` is the only emitter type left in `strings`.
+  - Test: cases `strings/replacer.go` (overlapping old strings, empty old string, `WriteString` into a `Buffer`).
+  - Done when: cases match Go and `strings.Builder` is the only emitter type left in `strings`.
 
 ### Phase 7: encodings, `sha256`, `bits`, `rand`, `sync`
 
 - [ ] **Task 7.1 — `encoding/hex` and `encoding/base64` in Go**
-  - Files: `runtime/stdlib/encoding/hex/hex.go`, `runtime/stdlib/encoding/base64/base64.go`, `src/backend/js/stdlib/{hex,base64}.js`, `src/backend/wasm/stdlib/packages.js` (`emitHexCall`, `emitBase64*`)
-  - Do: Go's full APIs (`*Encoding`, `NewEncoding`, `WithPadding`, `Strict`, `Append*`, `NewEncoder`/`NewDecoder`, `Dump`), index `[]byte` per §1.1; `StdEncoding`, `URLEncoding`, `RawStdEncoding`, `RawURLEncoding` become package vars of type `*Encoding`.
-  - Test: conformance `hex/codec.go`, `base64/codec.go` (invalid input errors with Go's messages) in four configurations.
-  - Done when: fixtures match Go and the 8 `base64` signature mismatches are gone.
+  - Files: `stdlib/encoding/hex/hex.go`, `stdlib/encoding/base64/base64.go`, `src/backend/js/stdlib/{hex,base64}.js`, `src/backend/wasm/stdlib/packages.js` (`emitHexCall`, `emitBase64*`)
+  - Do: the core codecs, index `[]byte` per §1.1: `hex` `EncodeToString`, `DecodeString`, `Encode`, `Decode`, `EncodedLen`, `DecodedLen`, `AppendEncode`, `AppendDecode`, `ErrLength`, `InvalidByteError`; `base64` `*Encoding` with `NewEncoding`, `WithPadding`, `EncodeToString`, `DecodeString`, `Encode`, `Decode`, `EncodedLen`, `DecodedLen`, `AppendEncode`, `AppendDecode`, `CorruptInputError`; `StdEncoding`, `URLEncoding`, `RawStdEncoding`, `RawURLEncoding` become package vars of type `*Encoding`. Not built (Scope Rule, deferred): `hex.Dump`/`Dumper`, the `NewEncoder`/`NewDecoder` streams in both packages, `Encoding.Strict`.
+  - Test: cases `hex/codec.go`, `base64/codec.go` (invalid input errors with Go's messages) in four configurations.
+  - Done when: cases match Go and `StdEncoding`/`URLEncoding`/`RawStdEncoding`/`RawURLEncoding` are `*Encoding` values.
 
 - [ ] **Task 7.2 — `encoding/binary` (ByteOrder) and `crypto/sha256` in Go**
-  - Files: `runtime/stdlib/encoding/binary/binary.go`, `runtime/stdlib/crypto/sha256/sha256.go`, `src/backend/js/stdlib/{binary,sha256}.js`, `src/backend/wasm/stdlib/packages.js`, `src/backend/wasm/stdlib/io.js` (sha256 write cores), `src/backend/wasm/boundary.js` (14 `sha256` sites)
+  - Files: `stdlib/encoding/binary/binary.go`, `stdlib/crypto/sha256/sha256.go`, `src/backend/js/stdlib/{binary,sha256}.js`, `src/backend/wasm/stdlib/packages.js`, `src/backend/wasm/stdlib/io.js` (sha256 write cores), `src/backend/wasm/boundary.js` (14 `sha256` sites)
   - Do: `ByteOrder` implementations with `Uint*`/`PutUint*`/`Append*`, varints, `MaxVarintLen*`; `Read`/`Write` stay native (they take `any` and walk fields). `sha256` `Sum256`, `New`, `Sum224`, `New224` as a Go digest satisfying `hash.Hash`.
-  - Test: conformance `binary/order.go`, `crypto/sha256.go` (FIPS vectors, `io.Copy` into the hash, `Reset`).
-  - Done when: fixtures match Go and `sha256.go` special cases are removed from the backends.
+  - Test: cases `binary/order.go`, `crypto/sha256.go` (FIPS vectors, `io.Copy` into the hash, `Reset`).
+  - Done when: cases match Go and `sha256.go` special cases are removed from the backends.
 
 - [ ] **Task 7.3 — `math/bits` and `math/rand` in Go**
-  - Files: `runtime/stdlib/math/bits/bits.go`, `runtime/stdlib/math/rand/rand.go`, `src/backend/js/natives.js` (`bits.Len*`, `LeadingZeros*`, `OnesCount*`, `rand.Float64`), `src/backend/js/stdlib/{bits,rand}.js`, `src/backend/wasm/stdlib/core.js` (`emitBitsCall`), `src/backend/wasm/stdlib/pure.js` (rand)
+  - Files: `stdlib/math/bits/bits.go`, `stdlib/math/rand/rand.go`, `src/backend/js/natives.js` (`bits.Len*`, `LeadingZeros*`, `OnesCount*`, `rand.Float64`), `src/backend/js/stdlib/{bits,rand}.js`, `src/backend/wasm/stdlib/core.js` (`emitBitsCall`), `src/backend/wasm/stdlib/pure.js` (rand)
   - Do: every existing member with Go's signatures (`uint` vs `uint64`, `rune`); rand's top-level functions call a single `//gofront:intrinsic rand_source` for host entropy and implement `Intn`, `Perm`, `Shuffle`, `Rand`/`NewSource` in Go. Absorbs the v1.8.0 `bits.Add64`/`Mul64` members.
-  - Test: conformance `bits/wide.go`; `test/unit/wasm/stdlib.test.js` rand distribution checks (range, `Perm` is a permutation, `Shuffle` keeps the multiset).
-  - Done when: fixtures match Go, and the zero-alloc and raycast benches are unchanged.
+  - Test: cases `bits/wide.go`; `test/unit/wasm/stdlib.test.js` rand distribution checks (range, `Perm` is a permutation, `Shuffle` keeps the multiset).
+  - Done when: cases match Go, and the zero-alloc and raycast benches are unchanged.
 
 - [ ] **Task 7.4 — `sync` in Go**
-  - Files: `runtime/stdlib/sync/sync.go`, `src/backend/js/stdlib/sync.js`, `src/backend/wasm/stdlib/packages.js` (`emitSync*`)
-  - Do: `Mutex`, `RWMutex`, `Once`, `WaitGroup` as single-threaded Go structs (absorbs v1.8.0 Task 3.5's `Map`, `Pool`, `OnceFunc/Value/Values`); `Mutex.Unlock` of an unlocked mutex panics with Go's message.
-  - Test: conformance `sync/sync.go`; `sync.Mutex` as a struct field copied by value keeps `go vet`-style behaviour (documented, not diagnosed).
-  - Done when: fixture matches Go in four configurations.
+  - Files: `stdlib/sync/sync.go`, `src/backend/js/stdlib/sync.js`, `src/backend/wasm/stdlib/packages.js` (`emitSync*`)
+  - Do: `Mutex`, `RWMutex`, `Once`, `WaitGroup` as single-threaded Go structs (absorbs the kept `OnceFunc`/`OnceValue`/`OnceValues` from v1.8.0 `sync/extra.go`; `Map` and `Pool` were removed by v1.8.0 Task 9.4 and are not rebuilt); `Mutex.Unlock` of an unlocked mutex panics with Go's message.
+  - Test: cases `sync/sync.go`; `sync.Mutex` as a struct field copied by value keeps `go vet`-style behaviour (documented, not diagnosed).
+  - Done when: cases match Go in four configurations.
 
 ### Phase 8: `time` and `strconv`
 
 - [ ] **Task 8.1 — `time` core: `Duration`, `Month`, `Weekday`, civil dates**
-  - Files: `runtime/stdlib/time/time.go`, `runtime/stdlib/time/duration.go`, `src/backend/js/stdlib/time.js`, `src/backend/wasm/stdlib/time.js` (civil-day helpers, `emitDurationMethodCall`), `src/typechecker/stdlib/core.js` (`DURATION_T`, `TIME_T`)
+  - Files: `stdlib/time/time.go`, `stdlib/time/duration.go`, `src/backend/js/stdlib/time.js`, `src/backend/wasm/stdlib/time.js` (civil-day helpers, `emitDurationMethodCall`), `src/typechecker/stdlib/core.js` (`DURATION_T`, `TIME_T`)
   - Do: `Duration` and its methods and constants, `Month`/`Weekday` as named `int` types with `String`, `Time` with the existing field layout (`unixNano int64`, `offset int32`), `Date`, `Unix`, `Add`, `Sub`, `AddDate`, `Truncate`, `Round`, `YearDay`, `ISOWeek`, `Compare`, `FixedZone`, `UTC`; `Now`/`Since`/`Until` and the local zone offset stay natives (`//gofront:native time.Now`) over the existing clock import. Absorbs v1.8.0 Task 3.4b's arithmetic members.
-  - Test: conformance `time/members.go` (fixed dates, DST-free zones, leap years, ISO week edges) in four configurations; `test/unit/builtins/stdlib.test.js` time tests unchanged.
-  - Done when: fixture matches Go and `Month`/`Weekday` are no longer `int` in the signature gate.
+  - Test: cases `time/members.go` (fixed dates, DST-free zones, leap years, ISO week edges) in four configurations; `test/unit/builtins/stdlib.test.js` time tests unchanged.
+  - Done when: cases match Go and `Month`/`Weekday` are named types with `String()`.
 
 - [ ] **Task 8.2 — `time` layouts: `Format`, `Parse`, `ParseDuration`, JSON**
-  - Files: `runtime/stdlib/time/format.go`, `runtime/stdlib/time/parse.go`, `src/backend/wasm/stdlib/time.js` (`_emitTimeMethodFormat`, `_emitTimeParse`), `src/backend/js/stdlib/time.js`
+  - Files: `stdlib/time/format.go`, `stdlib/time/parse.go`, `src/backend/wasm/stdlib/time.js` (`_emitTimeMethodFormat`, `_emitTimeParse`), `src/backend/js/stdlib/time.js`
   - Do: Go's layout engine for the supported layouts and constants (`RFC3339`, `Kitchen`, …), `ParseError` with Go's messages, `ParseDuration`, `MarshalJSON`/`UnmarshalJSON`/`MarshalText`/`UnmarshalText` (absorbs v1.8.0 Task 3.4b's layout members).
-  - Test: conformance `time/layout.go` (all constants, 12-hour clocks, fractional seconds, parse errors).
-  - Done when: fixture matches Go and `time.js` in the WASM stdlib directory holds only clock natives.
+  - Test: cases `time/layout.go` (all constants, 12-hour clocks, fractional seconds, parse errors).
+  - Done when: cases match Go and `time.js` in the WASM stdlib directory holds only clock natives.
 
 - [ ] **Task 8.3 — `time` at the boundary and in the backends**
   - Files: `src/backend/wasm/boundary.js` (10 `time.Time` + 5 `time.Duration` sites), `src/backend/js/expressions.js`, `src/backend/wasm/emit-builtins.js`, `src/typechecker/assignability.js`
@@ -372,18 +373,18 @@ Execution follows [v1.8.0 → How to execute a task](../v1.8.0/portable-go-plan.
   - Done when: boundary tests pass unchanged and `grep -rn "time\.Time" src --include='*.js'` finds only the boundary conversion.
 
 - [ ] **Task 8.4 — `strconv` in Go with float natives**
-  - Files: `runtime/stdlib/strconv/strconv.go`, `runtime/stdlib/strconv/quote.go`, `src/backend/js/natives.js`/`wasm/natives.js` (`FormatFloat`, `ParseFloat`, `AppendFloat`), `src/backend/js/stdlib/strconv.js`, `src/backend/wasm/stdlib/core.js` (`emitStrconvCall`)
-  - Do: `Itoa`, `Atoi`, `ParseInt` (returning `int64`), `ParseUint`, `ParseBool`, `FormatInt`, `FormatUint`, `Quote*`, `Unquote*`, `NumError`, `ErrRange`/`ErrSyntax` in Go (absorbs v1.8.0 Task 3.3c); float formatting and parsing remain natives because shortest-representation needs the host's number printer.
-  - Test: conformance `strconv/errors.go`, `strconv/quote.go`, `strconv/float.go` (round trips, `'g'`/`'e'`/`'f'`, bit sizes 32 and 64) in four configurations; `fmt/basic.go` unchanged.
-  - Done when: fixtures match Go and `strconv` has no signature mismatch.
+  - Files: `stdlib/strconv/strconv.go`, `stdlib/strconv/quote.go`, `src/backend/js/natives.js`/`wasm/natives.js` (`FormatFloat`, `ParseFloat`, `AppendFloat`), `src/backend/js/stdlib/strconv.js`, `src/backend/wasm/stdlib/core.js` (`emitStrconvCall`)
+  - Do: `Itoa`, `Atoi`, `ParseInt` (returning `int64`), `ParseUint`, `ParseBool`, `FormatInt`, `FormatUint`, `Quote`/`QuoteRune`/`QuoteToASCII`/`QuoteRuneToASCII` and their `Append*` forms, `Unquote`/`UnquoteChar`/`QuotedPrefix`, `CanBackquote`, `IsPrint`/`IsGraphic`, `NumError`, `ErrRange`/`ErrSyntax` in Go (absorbs v1.8.0 Task 3.3c and the kept `quote.go`; the `*ToGraphic` variants were removed by v1.8.0 Task 9.4 and are not rebuilt); float formatting and parsing remain natives because shortest-representation needs the host's number printer.
+  - Test: cases `strconv/errors.go`, `strconv/quote.go`, `strconv/float.go` (round trips, `'g'`/`'e'`/`'f'`, bit sizes 32 and 64) in four configurations; `fmt/basic.go` unchanged.
+  - Done when: cases match Go and `ParseInt` returns `int64`.
 
-### Phase 9: Typings removal, manifest and documentation
+### Phase 9: Typings removal, native self-check and documentation
 
-- [ ] **Task 9.1 — Manifest `implementation` field and gate**
-  - Files: `scripts/stdlib-manifest.js`, `runtime/stdlib/manifest.json`, `test/unit/types/stdlib-coverage.test.js`, `test/unit/compiler/manifest.test.js`
-  - Do: record `implementation: source | native | emitter` per member (derived from the tree: a Go declaration, a Go declaration carrying `//gofront:native`, or an emitter-backed namespace member); the gate requires every `source`/`native` member's signature to equal Go's, and requires every `native` member to have registry entries in both backends (or a documented single-target exception).
-  - Test: `manifest.test.js` — the field is present on every entry and regeneration is a no-op; the gate fails if a native loses its registry entry.
-  - Done when: both pass and the signature-mismatch count for `source`/`native` members is 0.
+- [ ] **Task 9.1 — Native registry self-check**
+  - Files: new `test/unit/compiler/natives.test.js`, `src/backend/js/natives.js`, `src/backend/wasm/natives.js`
+  - Do: a unit test scans `stdlib/**/*.go` for `//gofront:native <name>` and requires a registry entry for each name in both backends, except a documented single-target list; it also fails on a registry entry no Go file names.
+  - Test: the test itself; it fails first against a temporary Go file naming an unregistered native.
+  - Done when: the test passes on the real tree.
 
 - [ ] **Task 9.2 — Delete leftover typings and shrink the registries**
   - Files: `src/typechecker/stdlib/core.js`, `src/typechecker/stdlib/extended.js`, `src/typechecker/types.js` (`STDLIB_PACKAGES`, `WASM_STDLIB_MEMBERS`, `WASM_SUPPORTED_STDLIB`), `src/backend/js/stdlib/index.js`, `src/backend/wasm/stdlib/index.js`
@@ -391,11 +392,11 @@ Execution follows [v1.8.0 → How to execute a task](../v1.8.0/portable-go-plan.
   - Test: `npm test`, `npm run check`, `npm run test:e2e`; a unit test asserts `STDLIB_PACKAGES` contains none of the migrated names.
   - Done when: the line-count targets in [Done means](#goal) hold.
 
-- [ ] **Task 9.3 — Documentation, v2.0.0 baseline and release notes**
-  - Files: `docs/go-compatibility.md`, `docs/hybrid-wasm.md`, `docs/language-support.md` (regenerated by `npm run docs:stdlib`), `docs/architecture.md`, `plans/v1.8.0/portable-go-plan.md` (header: no longer the last feature release), `plans/v2.0.0/native-go-engine.md`, `plans/roadmap.md`, `CHANGELOG.md`, `README.md`
-  - Do: document the new sort tie order and `NaN` ordering, natives (what they are, `--no-natives`), the Go-source stdlib layout, `errors.As` as the one emitter member of `errors`; move the v2.0.0 plan's baseline from v1.8.0 to v1.9.0 (header, roadmap theme), replace its "emitter-backed packages" list and its 22k-line estimate with the post-migration list and the natives registry; set this document's status to *Completed* and record the final numbers in [Performance and size](#performance-and-size).
-  - Test: `npm run docs:stdlib -- --check` and `npm run check` pass; the v2.0.0 plan's package list equals the manifest's `emitter` packages (a one-line assertion in `manifest.test.js`).
-  - Done when: docs are generated and the check passes.
+- [ ] **Task 9.3 — Documentation and release notes**
+  - Files: `docs/go-compatibility.md`, `docs/hybrid-wasm.md`, `docs/language-support.md` (hand-written package tables since v1.8.0 Task 8.2), `docs/architecture.md`, `plans/roadmap.md`, `CHANGELOG.md`, `README.md`
+  - Do: document the new sort tie order and `NaN` ordering, natives (what they are, `--no-natives`), the Go-source stdlib layout, `errors.As` as the one emitter member of `errors`; add a per-package "where does a stdlib package live" table to `docs/architecture.md` (one Go directory plus natives, or an emitter); set this document's status to *Completed* and record the final numbers in [Performance and size](#performance-and-size).
+  - Test: `npm run check` passes.
+  - Done when: docs describe the post-migration layout and the check passes.
 
 ---
 
@@ -418,11 +419,11 @@ Baselines measured on this machine for this plan (Node 25.2.0, no Binaryen, dev-
 
 ---
 
-## Test & Conformance Plan
+## Test Plan
 
-- **Unit tests:** `test/unit/types/generics.test.js` (core types), `test/unit/wasm/generics.test.js` (named `S` in WASM), `test/unit/compiler/stdlib-go.test.js` (natives directive, call-site substitution, decline and value fallback, lazy checking and body counts), `test/unit/wasm/slices.test.js` (comparison-count bound), `test/unit/wasm/stdlib.test.js` (natives parity), `test/unit/wasm/boundary.test.js` (`time`), `test/unit/builtins/bytes.test.js` (`Buffer` semantics). New test files are added to `TEST_FILES` in [`test/unit/run.js`](../../test/unit/run.js).
-- **Integration / conformance:** `test/conformance/{sort,slices,maps,errors,utf8,path,html,bytes,io,strings,hex,base64,binary,crypto,bits,sync,time,strconv,fmt}/*.go`, each with a `.out` captured from real Go 1.26 (`GOFRONT_GO=go1.26.x npm run conformance:update`). The runner compares **four configurations** per fixture (JS, JS natives-off, WASM, WASM natives-off) byte for byte. Sort fixtures include `NaN`, `-0` and tie-order cases.
+- **Unit tests:** `test/unit/types/generics.test.js` (core types), `test/unit/wasm/generics.test.js` (named `S` in WASM), `test/unit/compiler/stdlib-go.test.js` (natives directive, call-site substitution, decline and value fallback, lazy checking and body counts), `test/unit/wasm/slices.test.js` (comparison-count bound), `test/unit/wasm/stdlib.test.js` (natives parity), `test/unit/wasm/boundary.test.js` (`time`), `test/unit/builtins/bytes.test.js` (`Buffer` semantics).
+- **Go-output cases:** `test/unit/stdlib/{sort,slices,maps,errors,utf8,path,html,bytes,io,strings,hex,base64,binary,crypto,bits,sync,time,strconv,fmt}.test.js`, each case a program plus its expected output taken once from Go 1.26 and pasted in. `runFourWay` (Task 2.4) compares **four configurations** per case (JS, JS natives-off, WASM, WASM natives-off). Sort cases include `NaN`, `-0` and tie-order cases. Non-ASCII string cases follow [v1.8.0 §1.1](../v1.8.0/portable-go-plan.md#11-string-semantics-both-backends).
 - **Negative cases & diagnostics:** `unknown native 'x'`; a native on a body-less function; `//gofront:native is reserved for the standard library`; `Cannot index type S` still reported for a constraint with several underlying types; an unreached stdlib body error is not reported, a reached one is reported at the call site with the `internal stdlib error` note; a migrated package imported from a `js` package behaves as before (no new diagnostics).
-- **Differential tests:** for each native, the same fixtures run with natives on and off; a disagreement names the configuration. This is the main protection against a template that drifts from Go.
-- **Generated-file checks:** `npm run gen:pdq` is a no-op; `npm run docs:stdlib -- --check` and `npm run manifest:update -- --check` pass.
+- **Differential tests:** for each native, the same cases run with natives on and off; a disagreement names the configuration. This is the main protection against a template that drifts from Go.
+- **Generated-file checks:** `npm run gen:pdq` is a no-op.
 - **Benchmarks:** `npm run bench` (raycast) and `test/e2e/perf/zero-alloc.js` after every phase; `test/e2e/perf/` gains the sort and string-search measurements from the table above; `example/` outputs are built before and after each phase and diffed, with differences limited to listed behaviour fixes.

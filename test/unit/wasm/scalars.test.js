@@ -5,6 +5,7 @@ import {
 	assertEqual,
 	compileHybrid,
 	compileWasm,
+	runWasm,
 	section,
 	test,
 } from "../helpers.js";
@@ -538,4 +539,151 @@ func Main() float64 {
 	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
 	assertEqual(wasmRes, 9);
 	assertEqual(wasmRes, jsRes);
+});
+
+section("WASM Scalars — min/max builtins (Task 0.11)");
+
+test("min/max over ints fold left and pick the extreme", () => {
+	const src = `
+package main
+
+func Main() {
+    a, b, c := 3, 1, 2
+    println(min(a, b, c), max(a, b, c))
+    var x int32 = -7
+    println(min(x, 4), max(x, 4))
+    var u uint8 = 200
+    println(min(u, 10), max(u, 10))
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.output, "1 3\n-7 4\n10 200");
+});
+
+test("min/max over int64 extremes compare signed and unsigned correctly", () => {
+	const src = `
+package main
+
+import "math"
+
+func Main() {
+    var lo int64 = math.MinInt64
+    var hi int64 = math.MaxInt64
+    println(min(lo, hi) == lo, max(lo, hi) == hi, min(hi, lo, 0) == lo)
+    var big uint64 = 9223372036854775808
+    var one uint64 = 1
+    println(max(one, big) == big, min(one, big) == one)
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.output, "true true true\ntrue true");
+	const { wasm, stringTable } = compileWasm(`
+package main
+
+import "math"
+
+func Main() {
+    var lo int64 = math.MinInt64
+    var hi int64 = math.MaxInt64
+    println(min(lo, hi), max(lo, hi))
+}
+`);
+	const { exports, lines } = runWasm(wasm, { stringTable });
+	exports.Main();
+	assertEqual(lines.join("\n"), "-9223372036854775808 9223372036854775807");
+});
+
+test("min/max over floats: NaN wins, min(-0, 0) is -0", () => {
+	const src = `
+package main
+
+func Main() {
+    var z32 float32
+    nan := z32 / z32
+    println(min(nan, 1) != min(nan, 1), max(float32(2), nan) != max(float32(2), nan))
+    var z float64
+    nz := -z
+    println(1/min(nz, z) < 0, 1/min(z, nz) < 0, 1/max(nz, z) > 0)
+    var f float32 = 1.5
+    println(min(f, 2.5, 0.5), max(f, 2))
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.output, "true true\ntrue true true\n0.5 2");
+});
+
+test("min/max over strings, one argument and mixed untyped constants", () => {
+	const src = `
+package main
+
+func Main() {
+    s, t := "b", "a"
+    println(min(s, t), max(s, t), min("b", "a"), max(s, t, "c"))
+    n := 42
+    println(min(n), max(n))
+    var f float64 = 2.5
+    println(min(f, 3), max(1, f, 2), min(1, 2.5, f))
+    var i int64 = 5
+    println(min(9, i), max(9, i))
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.output, "a b a c\n42 42\n2.5 2.5 1\n5 9");
+});
+
+test("min/max on a type parameter that includes strings (review M1)", () => {
+	const src = `
+package main
+
+type Ordered interface{ ~int | ~float64 | ~string }
+
+func Mn[T Ordered](a, b T) T { return min(a, b) }
+func Mx[T Ordered](a, b T) T { return max(a, b) }
+func Mn1[T Ordered](a T) T { return min(a) }
+
+func Main() {
+    println(Mn("b", "a"), Mx("b", "a"), Mn(3, 2), Mx(1.5, 2.5))
+    z := 0.0
+    n := z / z
+    println(Mn(n, 1.0) != Mn(n, 1.0), Mx(1.0, n) != Mx(1.0, n))
+    println(Mn1("z"), Mn1(7))
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.output, "a b 2 2.5\ntrue true\nz 7");
+});
+
+test("min/max mixing a typed integer with an untyped float constant (review M5)", () => {
+	const src = `
+package main
+
+func Main() {
+    x := 3
+    println(min(x, 2.0))
+    var y int64 = 3
+    println(max(y, 1e3))
+    var z int32
+    println(min(2.0, z))
+    var w int = 2.0
+    a := []int{1, 2, 3}
+    println(w, a[2.0])
+}
+`;
+	const res = compileHybrid(src).run("Main");
+	assertEqual(res.output, "2\n1000\n0\n2 3");
+});
+
+test("integral float constant inside a conversion stays exact in WASM (review M4)", () => {
+	const src = `
+package main
+
+func Main() {
+    x := int64(1e18 + 1)
+    println(x)
+}
+`;
+	const { wasm, stringTable } = compileWasm(src);
+	const { exports, lines } = runWasm(wasm, { stringTable });
+	exports.Main();
+	assertEqual(lines.join("\n"), "1000000000000000001");
 });

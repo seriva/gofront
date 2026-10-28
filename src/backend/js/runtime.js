@@ -1,3 +1,5 @@
+import { HELPER_FMT_LOOP, HELPER_FMT_UTIL } from "./fmt-runtime.js";
+
 // Runtime helpers emitted by the code generator when the corresponding feature is used.
 // Each export is a single JS statement (var __x = __x || function(...){...};) so that
 // multiple compiled files bundled together can safely repeat the declaration.
@@ -7,12 +9,221 @@ export const HELPER_LEN = `var __len = __len || function(a) {
   return a?.length ?? 0;
 };`;
 
+// Slice views (Go's `b[lo:hi:max]` shares the backing store).  A view of a
+// plain array is a Proxy over an empty `__SV` array that holds the backing
+// array `b`, offset `o`, length `n` and capacity `c`: Array.isArray, length,
+// indexing, iteration and the Array.prototype methods work through the traps,
+// so the rest of the runtime and JS callers see an ordinary array (`__SV`
+// makes Array.prototype methods return plain arrays and Node print the
+// elements).  A view covering its whole backing array is that array.  A
+// typed-array view is a `subarray`; a capacity beyond its length is kept in a
+// WeakMap shared by every compiled module.  `__slice` also accepts strings
+// (generic code).  `__reslice` is `x = x[lo:hi]`: within `len(x)` a plain
+// array is copied instead (a Proxy is much slower to index, and the old
+// value of `x` is usually dead), see docs/go-compatibility.md.
+// The copy keeps the capacity of the old value: its `__rcap` symbol property
+// (shared by every compiled module) is `{b, o, c, s, so, own}` (backing array,
+// offset, capacity, snapshot of the copy, its offset in `s`, and false while
+// `s` is shared with another copy).  An index
+// write `x[i] = v` to a chain that the package self-reslices is followed by
+// `__rcs(x, i)`, which writes the element through to `b` (and `s`), so it is
+// ordered with writes through other slices of `b`.  A slice or `append`
+// beyond the copy's length writes the remaining elements that differ from the
+// snapshot (written through other references to the copy) back into `b`
+// first and continues with a view over `b`.  `__mkslice` is `make([]T, n, cap)`.
+// `__sv` is its own helper ("sv") so range loops can unwrap a view without
+// pulling in the rest.
+export const HELPER_SV = `var __sv = __sv || Symbol.for("gofront.sliceView");`;
+
+export const HELPER_SLICE = `var __tcap = __tcap || (globalThis[Symbol.for("gofront.typedCap")] ??= new WeakMap());
+var __SV = __SV || class extends Array {
+  static get [Symbol.species]() { return Array; }
+  [Symbol.for("nodejs.util.inspect.custom")]() { return Array.from(this); }
+};
+var __rcap = __rcap || Symbol.for("gofront.resliceCap");
+var __svh = __svh || {
+  get(t, k) {
+    if (typeof k === "string") {
+      const ch = k.charCodeAt(0);
+      if (ch >= 48 && ch <= 57) { const i = +k; return i < t.n ? t.b[t.o + i] : undefined; }
+      if (k === "length") return t.n;
+    } else if (k === __sv) return t;
+    return t[k];
+  },
+  set(t, k, v) {
+    if (typeof k === "string") {
+      const ch = k.charCodeAt(0);
+      if (ch >= 48 && ch <= 57) { const i = +k; if (i < t.n) t.b[t.o + i] = v; return true; }
+      if (k === "length") return true;
+    }
+    t[k] = v;
+    return true;
+  },
+  has(t, k) {
+    if (typeof k === "string") {
+      const ch = k.charCodeAt(0);
+      if (ch >= 48 && ch <= 57) return +k < t.n;
+    }
+    return k in t;
+  },
+  defineProperty(t, k, d) {
+    if (typeof k === "string") {
+      const ch = k.charCodeAt(0);
+      if (ch >= 48 && ch <= 57) {
+        const i = +k;
+        if (i >= t.n || d.get || d.set || d.configurable === false) return false;
+        if ("value" in d) t.b[t.o + i] = d.value;
+        return true;
+      }
+    }
+    return Reflect.defineProperty(t, k, d);
+  },
+  preventExtensions() { return false; },
+  deleteProperty(t, k) {
+    if (typeof k === "string" && k.charCodeAt(0) >= 48 && k.charCodeAt(0) <= 57) return true;
+    return delete t[k];
+  },
+  ownKeys(t) {
+    const ks = [];
+    for (let i = 0; i < t.n; i++) ks.push(String(i));
+    ks.push("length");
+    return ks;
+  },
+  getOwnPropertyDescriptor(t, k) {
+    if (typeof k === "string") {
+      const ch = k.charCodeAt(0);
+      if (ch >= 48 && ch <= 57) {
+        const i = +k;
+        return i < t.n ? { value: t.b[t.o + i], writable: true, enumerable: true, configurable: true } : undefined;
+      }
+      if (k === "length") return { value: t.n, writable: true, enumerable: false, configurable: false };
+    }
+    return Reflect.getOwnPropertyDescriptor(t, k);
+  },
+};
+var __mkview = __mkview || function(b, o, n, c, f) {
+  if (o === 0 && n === b.length && c === n && !f) return b;
+  if (c === 0) return [];
+  const t = new __SV();
+  t.b = b; t.o = o; t.n = n; t.c = c;
+  return new Proxy(t, __svh);
+};
+var __cap = __cap || function(a) {
+  if (a == null) return 0;
+  const s = a[__sv];
+  if (s !== undefined) return s.c;
+  if (ArrayBuffer.isView(a)) return __tcap.get(a) ?? a.length;
+  return a[__rcap]?.c ?? a.length;
+};
+// A snapshot shared by a copy of a copy (e.own false) is cloned before it is
+// updated, so the update does not reach the other copy's snapshot (whose
+// write-back would then revert the element).
+var __rcown = __rcown || function(e, a) {
+  if (e.own === false) { e.s = e.s.slice(e.so, e.so + a.length); e.so = 0; e.own = true; }
+  return e.s;
+};
+// Write back only the elements of a __reslice copy that changed since it was
+// made (e.s from e.so is its snapshot, kept up to date by __rcs), so writes
+// made meanwhile through other slices of the backing array are kept.
+var __rcput = __rcput || function(e, a, from, to) {
+  for (let i = from; i < to; i++) {
+    const v = a[i];
+    if (!Object.is(v, e.s[e.so + i])) { e.b[e.o + i] = v; __rcown(e, a)[e.so + i] = v; }
+  }
+};
+// After an index write to a possible __reslice copy: write element i through.
+var __rcs = __rcs || function(a, i) {
+  const e = a?.[__rcap];
+  if (e !== undefined && i >= 0 && i < e.c && i < a.length) { const v = a[i]; e.b[e.o + i] = v; __rcown(e, a)[e.so + i] = v; }
+};
+var __rcdef = __rcdef || function(r, e) {
+  Object.defineProperty(r, __rcap, { value: e, writable: true });
+};
+var __rcflush = __rcflush || function(a) {
+  const e = a[__rcap];
+  if (e !== undefined) __rcput(e, a, 0, a.length);
+  return e;
+};
+var __slice = __slice || function(a, lo, hi, max) {
+  if (typeof a === "string") return a.slice(lo, hi);
+  const s = a == null ? undefined : a[__sv];
+  const n = s !== undefined ? s.n : a == null ? 0 : a.length;
+  const c = s !== undefined ? s.c : __cap(a);
+  const mx = max;
+  if (hi === undefined) hi = n;
+  if (max === undefined) max = c;
+  if (!(lo >= 0 && lo <= hi && hi <= max && max <= c)) throw new Error("runtime error: slice bounds out of range");
+  if (a == null) return a;
+  if (s !== undefined) return __mkview(s.b, s.o + lo, hi - lo, max - lo);
+  if (c > n && Array.isArray(a)) {
+    // a is a __reslice copy (only those have cap > len): reach past its
+    // length or capacity through the backing array, else stay on the copy
+    // (an explicit max needs a view: the copy itself keeps the old cap).
+    if (hi <= n && (mx === undefined || mx <= n)) return __mkview(a, lo, hi - lo, Math.min(max, n) - lo, mx !== undefined);
+    else { const e = __rcflush(a); return __mkview(e.b, e.o + lo, hi - lo, max - lo); }
+  }
+  if (ArrayBuffer.isView(a)) {
+    const r = hi <= n ? a.subarray(lo, hi) : new a.constructor(a.buffer, a.byteOffset + lo * a.BYTES_PER_ELEMENT, hi - lo);
+    if (max - lo > hi - lo) __tcap.set(r, max - lo);
+    return r;
+  }
+  return __mkview(a, lo, hi - lo, max - lo);
+};
+var __reslice = __reslice || function(a, lo, hi) {
+  if (Array.isArray(a) && a[__sv] === undefined) {
+    const n = a.length;
+    if (hi === undefined) hi = n;
+    if (lo >= 0 && lo <= hi && hi <= n) {
+      if (lo === 0 && hi === n) return a;
+      const e = a[__rcap];
+      const r = a.slice(lo, hi);
+      if (e === undefined) {
+        __rcdef(r, { b: a, o: lo, c: n - lo, s: a.slice(lo, hi), so: 0 });
+        return r;
+      }
+      // A copy of a copy: write back the changed elements it drops and share
+      // the snapshot (copied on write, __rcown), so a pop costs no more than
+      // the copy itself.
+      if (lo > 0) __rcput(e, a, 0, lo);
+      __rcput(e, a, hi, n);
+      e.own = false;
+      __rcdef(r, { b: e.b, o: e.o + lo, c: e.c - lo, s: e.s, so: e.so + lo, own: false });
+      return r;
+    }
+  }
+  return __slice(a, lo, hi);
+};
+var __mkslice = __mkslice || function(n, b) {
+  if (!(n >= 0 && n <= b.length)) throw new Error("runtime error: makeslice: cap out of range");
+  return __slice(b, 0, n);
+};`;
+
 export const HELPER_APPEND = `var __append = __append || function(a, ...b) {
   if (a && ArrayBuffer.isView(a)) {
+    const c = __tcap.get(a);
+    if (c !== undefined && a.length + b.length <= c) {
+      const r = new a.constructor(a.buffer, a.byteOffset, a.length + b.length);
+      r.set(b, a.length);
+      if (c > r.length) __tcap.set(r, c);
+      return r;
+    }
     const res = new a.constructor(a.length + b.length);
     res.set(a);
     res.set(b, a.length);
     return res;
+  }
+  const s = a ? a[__sv] : undefined;
+  if (s !== undefined && s.n + b.length <= s.c) {
+    for (let i = 0; i < b.length; i++) s.b[s.o + s.n + i] = b[i];
+    return __mkview(s.b, s.o, s.n + b.length, s.c);
+  }
+  if (s === undefined && a) {
+    const e = a[__rcap];
+    if (e !== undefined && a.length + b.length <= e.c) {
+      __rcflush(a);
+      for (let i = 0; i < b.length; i++) e.b[e.o + a.length + i] = b[i];
+      return __mkview(e.b, e.o, a.length + b.length, e.c);
+    }
   }
   return a ? [...a, ...b] : b;
 };`;
@@ -39,6 +250,39 @@ export const HELPER_SCLONE = `var __sclone = __sclone || function(x) {
   if (x === null || typeof x !== "object") return x;
   if (typeof x.__clone === "function") return x.__clone();
   return Object.assign(Object.create(Object.getPrototypeOf(x)), x);
+};`;
+
+// Variadic prologue.  `f(xs...)` to a Go-compiled variadic function passes
+// `{ __sp: xs }`, so the parameter is the caller's slice itself (or nil).
+export const HELPER_VA = `var __va = __va || function(a) {
+  const f = a.length === 1 ? a[0] : undefined;
+  return f !== null && typeof f === "object" && f.__sp !== undefined ? f.__sp : a;
+};`;
+
+// Copy of a value whose type is a type parameter.  `z` is the argument's
+// zero-value factory: an object zero means a struct or array (copied by
+// value); anything else (scalars, pointers, interfaces) is returned as is.
+export const HELPER_VCLONE = `var __vclone = __vclone || function __vclone(z, x) {
+  if (x === null || typeof x !== "object") return x;
+  const zero = z?.();
+  if (zero === null || zero === undefined || typeof zero !== "object") return x;
+  const cp = (v) => {
+    if (v === null || typeof v !== "object") return v;
+    if (Array.isArray(v)) return v.map(cp);
+    if (typeof v.__clone === "function") return v.__clone();
+    return Object.assign(Object.create(Object.getPrototypeOf(v)), v);
+  };
+  return cp(x);
+};`;
+
+// == on type-parameter operands: structs and arrays compare by value, other
+// type arguments with ===.  Decided at run time from the zero-value factory.
+export const HELPER_GEQ = `var __geq = __geq || function(z, a, b) {
+  if (a === b) return true;
+  if (a === null || b === null || typeof a !== "object" || typeof b !== "object") return false;
+  const zero = z?.();
+  if (zero === null || zero === undefined || typeof zero !== "object") return false;
+  return __equal(a, b);
 };`;
 
 // Interface boxing: tag struct values (__v) vs struct pointers (__p) so type
@@ -69,10 +313,54 @@ export const HELPER_IFACE_BOX = `var __ifv = __ifv || function(x, ptrFields) {
   }
   return c;
 };
+var __buffer_proto = __buffer_proto || {
+  Write(d) {
+    this._lastOp = 0;
+    for (let i = 0; i < d.length; i++) this._buf.push(d[i]);
+    return [d.length, null];
+  },
+  WriteString(s) {
+    this._lastOp = 0;
+    const bytes = new TextEncoder().encode(s);
+    for (let i = 0; i < bytes.length; i++) this._buf.push(bytes[i]);
+    return [bytes.length, null];
+  },
+  Read(p) {
+    if (!this._buf || this._buf.length === 0) return [0, typeof __io_eof !== "undefined" ? __io_eof : "EOF"];
+    const n = Math.min(p.length, this._buf.length);
+    for (let i = 0; i < n; i++) p[i] = this._buf.shift();
+    if (n > 0) { this._lastOp = 1; this._lastByte = p[n - 1]; } else { this._lastOp = 0; }
+    return [n, null];
+  },
+  String() {
+    return new TextDecoder().decode(new Uint8Array(this._buf));
+  },
+  Reset() {
+    this._buf = [];
+  }
+};
+var __builder_proto = __builder_proto || {
+  Write(d) {
+    this._buf += new TextDecoder().decode(new Uint8Array(d));
+    return [d.length, null];
+  },
+  WriteString(s) {
+    this._buf += s;
+    return [new TextEncoder().encode(s).length, null];
+  },
+  String() {
+    return this._buf;
+  },
+  Reset() {
+    this._buf = "";
+  }
+};
 var __ifp = __ifp || function(x, ptrFields, seen) {
   if (x === null || typeof x !== "object") return x;
+  if (Array.isArray(x._buf) && typeof x.Write !== "function") Object.assign(x, __buffer_proto);
+  else if (typeof x._buf === "string" && typeof x.WriteString !== "function") Object.assign(x, __builder_proto);
   if (x.__p !== true && Object.isExtensible(x))
-    Object.defineProperty(x, "__p", { value: true, configurable: true });
+    Object.defineProperty(x, "__p", { value: true, configurable: true, writable: true });
   if (Array.isArray(ptrFields)) {
     seen = seen || new Set();
     if (seen.has(x)) return x;
@@ -124,11 +412,67 @@ var __ifps = __ifps || function(x) {
   return x;
 };`;
 
+// fmt metadata: the Stringer/error element types of a slice, array or map
+// converted to an interface (the elements are raw numbers/strings at run
+// time), as a non-enumerable __fd descriptor that __sprintf reads.
+export const HELPER_IFD = `var __ifd = __ifd || function(x, d) {
+  if (x !== null && typeof x === "object" && Object.isExtensible(x))
+    Object.defineProperty(x, "__fd", { value: d, configurable: true });
+  return x;
+};`;
+
 // Nil-interface method call guard (strict mode only): matches Go's panic
 // message instead of a JS TypeError.
 export const HELPER_NIL_CALL = `var __nilcall = __nilcall || function(x) {
   if (x == null) throw new Error("runtime error: invalid memory address or nil pointer dereference");
   return x;
+};`;
+
+// Strict-mode index checks (`both` packages): Go's out-of-range panic for
+// slices, arrays and strings.  `__at` reads an element; `__ix` returns the
+// checked index for writes, compound assignments and string reads.  A nil
+// slice (`null`) has length 0.
+export const HELPER_BOUNDS = `var __ixerr = __ixerr || function(i, n) {
+  throw new Error(i < 0 ? "runtime error: index out of range [" + i + "]" : "runtime error: index out of range [" + i + "] with length " + n);
+};
+var __at = __at || function(a, i) {
+  if (a != null && i >= 0 && i < a.length) return a[i];
+  return __ixerr(i, a == null ? 0 : a.length);
+};
+var __ix = __ix || function(a, i) {
+  if (a != null && i >= 0 && i < a.length) return i;
+  return __ixerr(i, a == null ? 0 : a.length);
+};
+var __lv;`;
+
+// Generic zero values (generics are erased in JS): a generic function takes
+// one zero-value factory per type parameter as leading arguments, and an
+// instance of a generic struct keeps its factories under the `__tz` symbol
+// (a symbol, so field iteration, equality and JSON never see it).  Shared
+// factories for the common zero values avoid a closure per call.
+export const HELPER_GENERICS = `var __tz = __tz || Symbol.for("gofront.typeArgs");
+var __zn = __zn || (() => null);
+var __z0 = __z0 || (() => 0);
+var __zs = __zs || (() => "");
+var __zf = __zf || (() => false);`;
+
+// Strict-mode nil maps: the zero value of a map type is one frozen empty
+// object, so reads, `len` and `range` behave as on an empty map, and every
+// write goes through `__mw`, which panics with Go's message.
+export const HELPER_NIL_MAP = `var __nilmap = __nilmap || Object.freeze(Object.defineProperties({}, { __map: { value: true }, __nilm: { value: true } }));
+var __mw = __mw || function(m) {
+  if (m == null || m === __nilmap) throw new Error("assignment to entry in nil map");
+  return m;
+};
+var __isnm = __isnm || function(m) {
+  return m == null || m.__nilm === true || (m.__nm === true && Object.keys(m).length === 0);
+};`;
+
+// js-package nil maps: the zero value is a fresh `{}` carrying a hidden tag;
+// `m == nil` holds while it stays empty (writes are allowed, as in plain JS).
+export const HELPER_NM = `var __nm = __nm || function() { return Object.defineProperty({}, "__nm", { value: true }); };
+var __isnm = __isnm || function(m) {
+  return m == null || m.__nilm === true || (m.__nm === true && Object.keys(m).length === 0);
 };`;
 
 // Interface equality: named non-struct values are boxed in interfaces, so two
@@ -143,8 +487,11 @@ export const HELPER_IFEQ = `var __ifeq = __ifeq || function(a, b) {
 };`;
 
 export const HELPER_EQUAL = `var __equal = __equal || function __equal(a, b) {
-  if (a === b) return true;
+  if (a === b && !Array.isArray(a)) return true;
   if (a === null || b === null) return false;
+  if (a.__target !== undefined && b.__target !== undefined) {
+    return a.__target === b.__target && a.__index === b.__index;
+  }
   if (a instanceof Date && b instanceof Date) return a.getTime() === b.getTime();
   if (ArrayBuffer.isView(a) && ArrayBuffer.isView(b)) {
     if (a.byteLength !== b.byteLength || a.length !== b.length) return false;
@@ -174,8 +521,17 @@ export const HELPER_CDIV = `var __cdiv = __cdiv || function(a, b) {
   return { re: (a.re * b.re + a.im * b.im) / d, im: (a.im * b.re - a.re * b.im) / d };
 };`;
 
-// Panic/defer runtime.  \`stack\` holds the in-flight panic of every frame
-// currently running its defers; \`armed\` is set right before a deferred
+export const HELPER_PTREQ = `var __ptreq = __ptreq || function __ptreq(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.__target !== undefined && b.__target !== undefined) {
+    return a.__target === b.__target && a.__index === b.__index;
+  }
+  return false;
+};`;
+
+// Panic/defer runtime.  `stack` holds the in-flight panic of every frame
+// currently running its defers; `armed` is set right before a deferred
 // function is invoked and consumed by that function's prologue, so recover()
 // only takes effect when called directly by the deferred function (Go spec).
 export const HELPER_PANIC = `var __gopanic = __gopanic || { stack: [], armed: false };
@@ -203,7 +559,10 @@ var __recover = __recover || function(ok) {
   return top.err?.message ?? String(top.err);
 };`;
 
-export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
+export const HELPER_SPRINTF =
+	HELPER_FMT_UTIL +
+	`
+var __sprintf = __sprintf || function(f, ...a) {
   let i = 0;
   const ptrMap = new WeakMap();
   const ptrSet = new WeakSet();
@@ -219,26 +578,72 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
   const markPtr = (o) => {
     if (o !== null && typeof o === "object") ptrSet.add(o);
   };
-  const isPointer = (o) => {
-    return o !== null && typeof o === "object" && (o.__p === true || ptrSet.has(o));
+  // el: o is a value element of a slice, array or map or a struct value field
+  // (per the static descriptor), so the __p tag left by an earlier &x does not
+  // make it a pointer; only the container's own pointer marking does.
+  const isPointer = (o, el) => {
+    return o !== null && typeof o === "object" && ((o.__p === true && !el) || ptrSet.has(o));
   };
-  const formatV = (val, isPlus, isTopLevel) => {
+  const isExported = (k) => /^\\p{Lu}/u.test(k);
+  // %#v never calls String (nor, in Go, Error); the Error dispatch stays as it
+  // was before Stringer support.
+  let sharp = false;
+  // The method fmt calls on val: Error before String, and a pointer-receiver
+  // method (listed in the class's __pr) only for a pointer, as Go's method sets.
+  // __pe maps Error/String to the embedded interface field that provides it.
+  const stringMethod = (val, el) => {
+    for (const name of sharp ? ["Error"] : ["Error", "String"]) {
+      if (typeof val[name] === "function") {
+        if (val[name].length !== 0) continue;
+        if (!sharp && val.__pr !== undefined && val.__pr.includes(name) && !isPointer(val, el)) continue;
+        return name;
+      }
+      const pe = sharp ? undefined : val.__pe?.[name];
+      if (pe !== undefined && typeof val[pe]?.[name] === "function") return name;
+    }
+    return "";
+  };
+  const callMethod = (val, name) => typeof val[name] === "function" ? val[name]() : val[val.__pe[name]][name]();
+  // Errors from errors.New/Errorf and the stdlib are plain runtime objects, not
+  // instances of a user class; they print their message wherever they are.
+  const isRuntimeError = (val) => {
+    const proto = Object.getPrototypeOf(val);
+    return (proto === null || Object.getPrototypeOf(proto) === null) && typeof val.Error === "function" && val.Error.length === 0;
+  };
+  // ro: val was reached through an unexported field, where Go cannot call
+  // methods on user types. fd: descriptor of val's type when it is not carried
+  // by val itself (raw named values and the elements of slices and maps).
+  // el: val is a value element or value field, see isPointer.
+  const formatV = (val, isPlus, isTopLevel, ro, fd, el) => {
+    if (typeof __FT !== "undefined" && val instanceof __FT) {
+      if (val.t?.n === "time.Duration") {
+        return typeof __durationString === "function" ? __durationString(val.v) : String(val.v);
+      }
+      return formatV(val.v, isPlus, isTopLevel, ro, val.t, el);
+    }
+    if (fd?.n === "time.Duration") {
+      return typeof __durationString === "function" ? __durationString(val) : String(val);
+    }
+    if (fd?.b && !ro && !(val instanceof fd.b)) val = new fd.b(val);
     if (val === null || val === undefined) return "<nil>";
     if (typeof val === "boolean") return String(val);
-    if (typeof val === "number" || typeof val === "bigint") return String(val);
+    if (typeof val === "number" || typeof val === "bigint") return Object.is(val, -0) ? "-0" : String(val);
     if (typeof val === "string") return val;
     if (typeof val === "object") {
       if (val._d instanceof Date) {
         return typeof __timeFmt === "function" ? __timeFmt(val, "2006-01-02 15:04:05.999999999 -0700 MST") : String(val._d);
       }
       if ("re" in val && "im" in val) {
-        const sign = val.im >= 0 ? "+" : "";
-        return "(" + val.re + sign + val.im + "i)";
+        const isNeg = val.im < 0 || Object.is(val.im, -0);
+        const sign = isNeg ? "" : "+";
+        const imStr = Object.is(val.im, -0) ? "-0" : String(val.im);
+        const reStr = Object.is(val.re, -0) ? "-0" : String(val.re);
+        return "(" + reStr + sign + imStr + "i)";
       }
-      if (typeof val.Error === "function") {
-        return String(val.Error());
-      }
-      if (typeof val.__gfUnbox === "function") return formatV(val.__gfUnbox(), isPlus, isTopLevel);
+      const sm = ro ? (isRuntimeError(val) ? "Error" : "") : stringMethod(val, el);
+      if (sm) return String(callMethod(val, sm));
+      if (typeof val.__gfUnbox === "function") return formatV(val.__gfUnbox(), isPlus, isTopLevel, ro);
+      const cd = fd ?? val.__fd;
       if (Array.isArray(val) || ArrayBuffer.isView(val)) {
         const isElemPtr = val.__ptr_slice === true;
         const pf = val.__ptr_fields;
@@ -260,7 +665,7 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
               }
             }
           }
-          parts.push(formatV(item, isPlus, false));
+          parts.push(formatV(item, isPlus, false, ro, cd?.e, cd?.e?.sv === 1));
         }
         return "[" + parts.join(" ") + "]";
       }
@@ -268,7 +673,10 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
         const isElemPtr = val.__ptr_map === true;
         const parts = [];
         if (val instanceof Map) {
-          const entries = Array.from(val.entries()).sort(([k1], [k2]) => {
+          // Keys of a type with String()/Error() sort by their raw value, as in Go.
+          const raw = (k) => (k !== null && typeof k === "object" && typeof k.__gfUnbox === "function" ? k.__gfUnbox() : k);
+          const entries = Array.from(val.entries()).sort(([a], [b]) => {
+            const k1 = raw(a), k2 = raw(b);
             if (typeof k1 === "number" && typeof k2 === "number") return k1 - k2;
             const na = Number(k1), nb = Number(k2);
             if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
@@ -278,12 +686,23 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
             if (isElemPtr && v !== null && typeof v === "object") {
               markPtr(v);
             }
-            parts.push(formatV(k, isPlus, false) + ":" + formatV(v, isPlus, false));
+            parts.push(formatV(k, isPlus, false, ro, cd?.k, cd?.k?.sv === 1) + ":" + formatV(v, isPlus, false, ro, cd?.v, cd?.v?.sv === 1));
           }
         } else {
           const keys = Object.keys(val).sort((a, b) => {
             const na = Number(a), nb = Number(b);
             if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
+            if (a[0] === "{" && b[0] === "{") {
+              // Struct keys (their %v text) sort field by field, as in Go.
+              const ta = a.slice(1, -1).split(/[ {}]+/), tb = b.slice(1, -1).split(/[ {}]+/);
+              for (let i = 0; i < ta.length && i < tb.length; i++) {
+                if (ta[i] === tb[i]) continue;
+                const x = Number(ta[i]), y = Number(tb[i]);
+                if (ta[i] !== "" && tb[i] !== "" && !Number.isNaN(x) && !Number.isNaN(y)) return x - y;
+                return ta[i].localeCompare(tb[i]);
+              }
+              return ta.length - tb.length;
+            }
             return a.localeCompare(b);
           });
           for (const k of keys) {
@@ -291,7 +710,8 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
             if (isElemPtr && v !== null && typeof v === "object") {
               markPtr(v);
             }
-            parts.push(formatV(k, isPlus, false) + ":" + formatV(v, isPlus, false));
+            const kv = cd?.k?.n ? Number(k) : k;
+            parts.push(formatV(kv, isPlus, false, ro, cd?.k, cd?.k?.sv === 1) + ":" + formatV(v, isPlus, false, ro, cd?.v, cd?.v?.sv === 1));
           }
         }
         return "map[" + parts.join(" ") + "]";
@@ -299,7 +719,7 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
       if ("value" in val && (val.__box === true || (!val.__struct && !("__v" in val) && Object.keys(val).length === 1 && (val.constructor === Object || !val.constructor || val.constructor?.name === "Object")))) {
         return getPtr(val);
       }
-      const isPtr = isPointer(val);
+      const isPtr = isPointer(val, el);
       if (isPtr) {
         if (!isTopLevel) {
           return getPtr(val);
@@ -309,77 +729,28 @@ export const HELPER_SPRINTF = `var __sprintf = __sprintf || function(f, ...a) {
       const prefix = isPtr ? "&{" : "{";
       const keys = Object.keys(val);
       const parts = [];
+      const ff = typeof val.__ff === "function" ? val.__ff() : null;
       for (const k of keys) {
-        const fv = formatV(val[k], isPlus, false);
+        const fv = formatV(val[k], isPlus, false, ro || !isExported(k), ff?.[k], ff?.[k]?.sv === 1);
         parts.push(isPlus ? k + ":" + fv : fv);
       }
       return prefix + parts.join(" ") + "}";
     }
     return String(val);
   };
-  return f.replace(/%([#+\\- 0]*)([0-9]*)\\.?([0-9]*)[sdvftxXqobeEgGwc%]/g, (m) => {
-    if (m === "%%") return "%";
-    const verb = m.slice(-1);
-    let v = a[i++];
-    // Boxed named values format as their underlying value; Error() still applies to %v/%s/%q/%w.
-    if (v && typeof v.__gfUnbox === "function" && !(typeof v.Error === "function" && "vsqw".includes(verb))) v = v.__gfUnbox();
-    const [, flags, width, prec] = m.match(/^%([#+\\- 0]*)([0-9]*)\\.?([0-9]*)/) || [];
-    const zero = flags?.includes("0") && !flags?.includes("-");
-    const pad = (s, w, z) => {
-      w = parseInt(w) || 0;
-      if (!w) return s;
-      const p = (z ? "0" : " ").repeat(Math.max(0, w - s.length));
-      return flags.includes("-") ? s + p : p + s;
-    };
-    switch (verb) {
-      case "s": return pad(String(v == null ? "<nil>" : v), width, false);
-      case "c": return pad(String.fromCodePoint(Number(v)), width, false);
-      case "d": return pad(String(typeof v === "bigint" ? v : Math.trunc(Number(v))), width, zero);
-      case "v": {
-        const isPlus = flags?.includes("+") ?? false;
-        return pad(formatV(v, isPlus, true), width, false);
-      }
-      case "f": { const n = Number(v), p = prec !== "" ? parseInt(prec) : 6; return pad(n.toFixed(p), width, zero); }
-      case "t": return pad(String(!!v), width, false);
-      case "x": {
-        let hex;
-        if (Array.isArray(v) || ArrayBuffer.isView(v)) {
-          hex = Array.from(v).map((b) => (Number(b) & 0xff).toString(16).padStart(2, "0")).join("");
-        } else if (typeof v === "string") {
-          hex = Array.from(new TextEncoder().encode(v)).map((b) => b.toString(16).padStart(2, "0")).join("");
-        } else if (typeof v === "bigint") {
-          hex = BigInt.asUintN(64, v).toString(16);
-        } else if (Math.abs(Number(v)) > 0xffffffff) {
-          hex = (Math.trunc(Number(v) / 0x100000000) >>> 0).toString(16) + (Number(v) >>> 0).toString(16).padStart(8, "0");
-        } else {
-          hex = (Number(v) >>> 0).toString(16);
-        }
-        return pad(hex, width, zero);
-      }
-      case "X": {
-        let hex;
-        if (Array.isArray(v) || ArrayBuffer.isView(v)) {
-          hex = Array.from(v).map((b) => (Number(b) & 0xff).toString(16).padStart(2, "0").toUpperCase()).join("");
-        } else if (typeof v === "string") {
-          hex = Array.from(new TextEncoder().encode(v)).map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join("");
-        } else if (typeof v === "bigint") {
-          hex = BigInt.asUintN(64, v).toString(16).toUpperCase();
-        } else if (Math.abs(Number(v)) > 0xffffffff) {
-          hex = (Math.trunc(Number(v) / 0x100000000) >>> 0).toString(16).toUpperCase() + (Number(v) >>> 0).toString(16).padStart(8, "0").toUpperCase();
-        } else {
-          hex = (Number(v) >>> 0).toString(16).toUpperCase();
-        }
-        return pad(hex, width, zero);
-      }
-      case "o": return pad((typeof v === "bigint" ? BigInt.asUintN(64, v).toString(8) : (Number(v) >>> 0).toString(8)), width, zero);
-      case "b": return pad((typeof v === "bigint" ? BigInt.asUintN(64, v).toString(2) : (Number(v) >>> 0).toString(2)), width, zero);
-      case "q": return pad('"' + String(v == null ? "" : v).replace(/\\\\/g, "\\\\\\\\").replace(/"/g, '\\\\"') + '"', width, false);
-      case "e": case "E": { const n = Number(v), p = prec !== "" ? parseInt(prec) : 6; return pad(n.toExponential(p), width, zero); }
-      case "g": case "G": { const n = Number(v); return pad(prec !== "" ? n.toPrecision(parseInt(prec)) : String(n), width, zero); }
-      case "w": return pad(String(v == null ? "<nil>" : typeof v === "object" && v.Error ? v.Error() : v), width, false);
-      default: return m;
-    }
-  });
+` +
+	HELPER_FMT_LOOP;
+
+// fmt.Sprint/Print/Append: a space goes between two operands when neither is a
+// string; `ln` (Sprintln, Println, Appendln) separates always and ends with a newline.
+export const HELPER_SPRINT = `var __sprint = __sprint || function(ln, ...a) {
+  const isStr = (x) => typeof x === "string" || (x !== null && typeof x === "object" && typeof x.__gfUnbox === "function" && typeof x.__gfUnbox() === "string");
+  let f = "";
+  for (let i = 0; i < a.length; i++) {
+    if (i > 0 && (ln || (!isStr(a[i - 1]) && !isStr(a[i])))) f += " ";
+    f += "%v";
+  }
+  return __sprintf(ln ? f + "\\n" : f, ...a);
 };`;
 
 export const HELPER_ERROR = `var __error = __error || function(msg, cause) {
@@ -392,6 +763,38 @@ var __strconv_err_range = __strconv_err_range || __error("value out of range");`
 export const HELPER_PATH_ERROR = `var __path_err_bad_pattern = __path_err_bad_pattern || __error("syntax error in pattern");`;
 
 export const HELPER_IO_EOF = `var __io_eof = __io_eof || __error("EOF");`;
+
+export const HELPER_OS = `var __os_buf = "";
+var __os_write = __os_write || function(s, isErr) {
+  if (typeof process !== "undefined" && process?.stdout?.write) {
+    process.stdout.write(s);
+    return [s.length, null];
+  }
+  __os_buf += s;
+  const nl = __os_buf.lastIndexOf(String.fromCharCode(10));
+  if (nl >= 0) {
+    const fn = (isErr && typeof console.error === "function") ? console.error : console.log;
+    fn(__os_buf.slice(0, nl));
+    __os_buf = __os_buf.slice(nl + 1);
+  }
+  return [s.length, null];
+};
+var __os_file = __os_file || class {
+  constructor(fd) { this.fd = fd; }
+  WriteString(s) { return __os_write(s, this.fd === 2); }
+  Write(b) {
+    const s = typeof b === "string" ? b : new TextDecoder().decode(b);
+    __os_write(s, this.fd === 2);
+    const n = typeof b === "string" ? s.length : (b?.byteLength ?? b?.length ?? s.length);
+    return [n, null];
+  }
+  Read(b) { return [0, typeof __io_eof !== "undefined" ? __io_eof : __error("EOF")]; }
+  Close() { return null; }
+};
+var __os_stdout = __os_stdout || new __os_file(1);
+var __os_stderr = __os_stderr || new __os_file(2);
+var __os_stdin = __os_stdin || new __os_file(0);
+`;
 
 export const HELPER_ERROR_IS = `var __errorIs = __errorIs || function __errorIs(err, target) {
   if (err === null || err === undefined) return false;
@@ -669,28 +1072,78 @@ var __pathMatch = __pathMatch || function(pat, name) {
   }
 };`;
 
-export const HELPER_TIME_FMT = `var __timeFmt = __timeFmt || function(d, layout) {
+export const HELPER_TIME_FMT = `var __timeLocalDt = __timeLocalDt || function(t) {
+  const dt = t instanceof Date ? t : (t?._d ?? t);
+  if (typeof t?._offset === "number") {
+    return new Date(dt.getTime() + t._offset * 1000);
+  }
+  return null;
+};
+var __timeYear = __timeYear || function(t) {
+  var ld = __timeLocalDt(t);
+  return ld ? ld.getUTCFullYear() : (t instanceof Date ? t : t._d).getFullYear();
+};
+var __timeMonth = __timeMonth || function(t) {
+  var ld = __timeLocalDt(t);
+  return (ld ? ld.getUTCMonth() : (t instanceof Date ? t : t._d).getMonth()) + 1;
+};
+var __timeDay = __timeDay || function(t) {
+  var ld = __timeLocalDt(t);
+  return ld ? ld.getUTCDate() : (t instanceof Date ? t : t._d).getDate();
+};
+var __timeHour = __timeHour || function(t) {
+  var ld = __timeLocalDt(t);
+  return ld ? ld.getUTCHours() : (t instanceof Date ? t : t._d).getHours();
+};
+var __timeMinute = __timeMinute || function(t) {
+  var ld = __timeLocalDt(t);
+  return ld ? ld.getUTCMinutes() : (t instanceof Date ? t : t._d).getMinutes();
+};
+var __timeSecond = __timeSecond || function(t) {
+  var ld = __timeLocalDt(t);
+  return ld ? ld.getUTCSeconds() : (t instanceof Date ? t : t._d).getSeconds();
+};
+var __timeWeekday = __timeWeekday || function(t) {
+  var ld = __timeLocalDt(t);
+  return ld ? ld.getUTCDay() : (t instanceof Date ? t : t._d).getDay();
+};
+var __timeDate = __timeDate || function(t) {
+  var ld = __timeLocalDt(t);
+  var dt = t instanceof Date ? t : t._d;
+  return ld ? [ld.getUTCFullYear(), ld.getUTCMonth() + 1, ld.getUTCDate()] : [dt.getFullYear(), dt.getMonth() + 1, dt.getDate()];
+};
+var __timeClock = __timeClock || function(t) {
+  var ld = __timeLocalDt(t);
+  var dt = t instanceof Date ? t : t._d;
+  return ld ? [ld.getUTCHours(), ld.getUTCMinutes(), ld.getUTCSeconds()] : [dt.getHours(), dt.getMinutes(), dt.getSeconds()];
+};
+var __timeFmt = __timeFmt || function(d, layout) {
   const dt = d instanceof Date ? d : (d?._d ?? d);
-  const isUtc = d?._offset === 0;
+  const hasOff = typeof d?._offset === "number" || typeof d?._loc?._offset === "number";
+  const offSec = typeof d?._offset === "number" ? d._offset : (d?._loc?._offset ?? 0);
+  const localDt = hasOff ? new Date(dt.getTime() + offSec * 1000) : null;
   const pad = (n, w = 2) => String(n).padStart(w, "0");
   const DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
   const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-  const getFullYear = () => isUtc ? dt.getUTCFullYear() : dt.getFullYear();
-  const getMonth = () => isUtc ? dt.getUTCMonth() : dt.getMonth();
-  const getDate = () => isUtc ? dt.getUTCDate() : dt.getDate();
-  const getDay = () => isUtc ? dt.getUTCDay() : dt.getDay();
-  const getHours = () => isUtc ? dt.getUTCHours() : dt.getHours();
-  const getMinutes = () => isUtc ? dt.getUTCMinutes() : dt.getMinutes();
-  const getSeconds = () => isUtc ? dt.getUTCSeconds() : dt.getSeconds();
-  const getMilliseconds = () => isUtc ? dt.getUTCMilliseconds() : dt.getMilliseconds();
-  const getTimezoneOffset = () => isUtc ? 0 : dt.getTimezoneOffset();
+  const getFullYear = () => localDt ? localDt.getUTCFullYear() : dt.getFullYear();
+  const getMonth = () => localDt ? localDt.getUTCMonth() : dt.getMonth();
+  const getDate = () => localDt ? localDt.getUTCDate() : dt.getDate();
+  const getDay = () => localDt ? localDt.getUTCDay() : dt.getDay();
+  const getHours = () => localDt ? localDt.getUTCHours() : dt.getHours();
+  const getMinutes = () => localDt ? localDt.getUTCMinutes() : dt.getMinutes();
+  const getSeconds = () => localDt ? localDt.getUTCSeconds() : dt.getSeconds();
+  const getMilliseconds = () => localDt ? localDt.getUTCMilliseconds() : dt.getMilliseconds();
+  const getTimezoneOffset = () => hasOff ? Math.round(-offSec / 60) : dt.getTimezoneOffset();
   return layout.replace(/2006|06|Monday|Mon|January|Jan|01|02|15|PM|pm|03|04|05|Z07:00|-07:00|-0700|MST|\\.(?:0+|9+)|1|2|3|4|5/g, t => {
     if (t.startsWith(".")) {
       const isZeroPad = t.includes("0");
       const maxLen = t.length - 1;
       const ms = getMilliseconds();
       let frac = pad(ms, 3);
-      if (maxLen > 3) frac = frac.padEnd(maxLen, "0");
+      if (d?._ns) {
+        frac += String(d._ns).padStart(6, "0");
+      }
+      if (maxLen > frac.length) frac = frac.padEnd(maxLen, "0");
       else frac = frac.slice(0, maxLen);
       if (!isZeroPad) {
         frac = frac.replace(/0+$/, "");
@@ -731,17 +1184,199 @@ export const HELPER_TIME_FMT = `var __timeFmt = __timeFmt || function(d, layout)
         const o = -getTimezoneOffset();
         return (o >= 0 ? "+" : "-") + pad(Math.floor(Math.abs(o) / 60)) + pad(Math.abs(o) % 60);
       }
-      case "MST": return isUtc ? "UTC" : "LOCAL";
+      case "MST": return d?._loc ? d._loc._name : (hasOff && offSec === 0 ? "UTC" : "LOCAL");
       default: return t;
     }
   });
+};
+var __timeTruncate = __timeTruncate || function(t, d) {
+  d = BigInt(d);
+  if (d <= 0n) return t;
+  var nano = BigInt(t._d.getTime()) * 1000000n + BigInt(t._ns || 0);
+  var dt = nano + 62135596800000000000n;
+  var r = dt % d;
+  if (r < 0n) r += d;
+  var newNano = nano - r;
+  var newMs = Number(newNano / 1000000n);
+  var remNs = Number(newNano % 1000000n);
+  if (remNs < 0) { newMs--; remNs += 1000000; }
+  return { _d: new Date(newMs), _offset: t._offset, _loc: t._loc, _ns: remNs };
+};
+var __timeRound = __timeRound || function(t, d) {
+  d = BigInt(d);
+  if (d <= 0n) return t;
+  var nano = BigInt(t._d.getTime()) * 1000000n + BigInt(t._ns || 0);
+  var dt = nano + 62135596800000000000n;
+  var r = dt % d;
+  if (r < 0n) r += d;
+  var newNano = (r + r < d) ? (nano - r) : (nano + d - r);
+  var newMs = Number(newNano / 1000000n);
+  var remNs = Number(newNano % 1000000n);
+  if (remNs < 0) { newMs--; remNs += 1000000; }
+  return { _d: new Date(newMs), _offset: t._offset, _loc: t._loc, _ns: remNs };
+};
+var __timeAddDate = __timeAddDate || function(t, years, months, days) {
+  var d = t._d;
+  if (typeof t._offset === "number") {
+    var offSec = t._offset;
+    var localD = new Date(d.getTime() + offSec * 1000);
+    var newLocalD = new Date(Date.UTC(
+      localD.getUTCFullYear() + Number(years),
+      localD.getUTCMonth() + Number(months),
+      localD.getUTCDate() + Number(days),
+      localD.getUTCHours(),
+      localD.getUTCMinutes(),
+      localD.getUTCSeconds(),
+      localD.getUTCMilliseconds()
+    ));
+    var newDate = new Date(newLocalD.getTime() - offSec * 1000);
+    return { _d: newDate, _offset: t._offset, _loc: t._loc, _ns: t._ns };
+  }
+  var newDate = new Date(
+    d.getFullYear() + Number(years),
+    d.getMonth() + Number(months),
+    d.getDate() + Number(days),
+    d.getHours(),
+    d.getMinutes(),
+    d.getSeconds(),
+    d.getMilliseconds()
+  );
+  return { _d: newDate, _offset: t._offset, _loc: t._loc, _ns: t._ns };
+};
+var __timeYearDay = __timeYearDay || function(t) {
+  var d = t._d;
+  if (typeof t._offset === "number") {
+    var localD = new Date(d.getTime() + t._offset * 1000);
+    var start = new Date(Date.UTC(localD.getUTCFullYear(), 0, 0));
+    return Math.floor((localD.getTime() - start.getTime()) / 86400000);
+  }
+  var start = new Date(d.getFullYear(), 0, 0);
+  return Math.floor((d.getTime() - start.getTime()) / 86400000);
+};
+var __timeISOWeek = __timeISOWeek || function(t) {
+  if (typeof t._offset === "number") {
+    var d = new Date(t._d.getTime() + t._offset * 1000);
+    var day = (d.getUTCDay() + 6) % 7;
+    d.setUTCDate(d.getUTCDate() - day + 3);
+    var year = d.getUTCFullYear();
+    var firstThu = new Date(Date.UTC(year, 0, 4));
+    var firstDay = (firstThu.getUTCDay() + 6) % 7;
+    firstThu.setUTCDate(firstThu.getUTCDate() - firstDay + 3);
+    var week = 1 + Math.round((d.getTime() - firstThu.getTime()) / 604800000);
+    return [year, week];
+  }
+  var d = new Date(t._d.getTime());
+  var day = (d.getDay() + 6) % 7;
+  d.setDate(d.getDate() - day + 3);
+  var year = d.getFullYear();
+  var firstThu = new Date(year, 0, 4);
+  var firstDay = (firstThu.getDay() + 6) % 7;
+  firstThu.setDate(firstThu.getDate() - firstDay + 3);
+  var week = 1 + Math.round((d.getTime() - firstThu.getTime()) / 604800000);
+  return [year, week];
+};
+var __timeMarshalJSON = __timeMarshalJSON || function(t) {
+  var y = (typeof t._offset === "number") ? new Date(t._d.getTime() + t._offset * 1000).getUTCFullYear() : t._d.getFullYear();
+  if (y < 0 || y > 9999) {
+    return [new Uint8Array(0), typeof __error === "function" ? __error("Time.MarshalJSON: year outside of range [0,9999]") : new Error("Time.MarshalJSON: year outside of range [0,9999]")];
+  }
+  var s = '"' + __timeFmt(t, "2006-01-02T15:04:05.999999999Z07:00") + '"';
+  return [new TextEncoder().encode(s), null];
+};
+var __timeMarshalText = __timeMarshalText || function(t) {
+  var y = (typeof t._offset === "number") ? new Date(t._d.getTime() + t._offset * 1000).getUTCFullYear() : t._d.getFullYear();
+  if (y < 0 || y > 9999) {
+    return [new Uint8Array(0), typeof __error === "function" ? __error("Time.MarshalText: year outside of range [0,9999]") : new Error("Time.MarshalText: year outside of range [0,9999]")];
+  }
+  var s = __timeFmt(t, "2006-01-02T15:04:05.999999999Z07:00");
+  return [new TextEncoder().encode(s), null];
+};
+var __timeUnmarshalJSON = __timeUnmarshalJSON || function(t, data) {
+  var s = typeof data === "string" ? data : new TextDecoder().decode(data);
+  s = s.trim();
+  if (s === "null") return null;
+  if (!s.startsWith('"') || !s.endsWith('"') || s.length < 2) {
+    return typeof __error === "function" ? __error("Time.UnmarshalJSON: input is not a JSON string") : new Error("Time.UnmarshalJSON: input is not a JSON string");
+  }
+  var inner = s.slice(1, -1);
+  var parsed = __timeParse("2006-01-02T15:04:05.999999999Z07:00", inner);
+  if (parsed[1]) parsed = __timeParse("2006-01-02T15:04:05Z07:00", inner);
+  if (parsed[1]) return parsed[1];
+  t._d = parsed[0]._d;
+  t._offset = parsed[0]._offset;
+  t._loc = parsed[0]._loc;
+  t._ns = parsed[0]._ns;
+  return null;
+};
+var __timeUnmarshalText = __timeUnmarshalText || function(t, data) {
+  var s = typeof data === "string" ? data : new TextDecoder().decode(data);
+  s = s.trim();
+  var parsed = __timeParse("2006-01-02T15:04:05.999999999Z07:00", s);
+  if (parsed[1]) parsed = __timeParse("2006-01-02T15:04:05Z07:00", s);
+  if (parsed[1]) return parsed[1];
+  t._d = parsed[0]._d;
+  t._offset = parsed[0]._offset;
+  t._loc = parsed[0]._loc;
+  t._ns = parsed[0]._ns;
+  return null;
+};
+var __timeAfterFunc = __timeAfterFunc || function(d, f) {
+  var timer = {
+    _id: null,
+    _active: true,
+    _f: f,
+    Stop: function() {
+      var act = this._active;
+      if (act) {
+        clearTimeout(this._id);
+        this._active = false;
+      }
+      return act;
+    },
+    Reset: function(newD) {
+      var act = this._active;
+      if (act) clearTimeout(this._id);
+      var self = this;
+      this._active = true;
+      this._id = setTimeout(function() {
+        self._active = false;
+        self._f();
+      }, Math.round(Number(newD) / 1000000));
+      return act;
+    }
+  };
+  timer._id = setTimeout(function() {
+    timer._active = false;
+    timer._f();
+  }, Math.round(Number(d) / 1000000));
+  return timer;
 };`;
 
 export const HELPER_TIME_PARSE = `var __timeParse = __timeParse || function(layout, value) {
   try {
-    const d = new Date(value);
+    const val = String(value);
+    const d = new Date(val);
     if (isNaN(d.getTime())) throw 0;
-    return [{ _d: d }, null];
+    let offset = undefined;
+    let loc = null;
+    let ns = 0;
+    const m = /\\.(\\d{1,9})/.exec(val);
+    if (m) {
+      const fracStr = m[1].padEnd(9, "0");
+      ns = Number(fracStr.slice(3));
+    }
+    if (val.endsWith("Z") || val.endsWith("z")) {
+      offset = 0;
+    } else {
+      const tzMatch = /([+-])(\\d{2}):?(\\d{2})$/.exec(val);
+      if (tzMatch) {
+        const sign = tzMatch[1] === "+" ? 1 : -1;
+        const offSec = sign * (Number(tzMatch[2]) * 3600 + Number(tzMatch[3]) * 60);
+        offset = offSec;
+        loc = { _name: tzMatch[0], _offset: offSec, String() { return this._name; } };
+      }
+    }
+    return [{ _d: d, _offset: offset, _loc: loc, _ns: ns }, null];
   } catch {
     return [{ _d: new Date(0) }, { Error() { return "parsing time: cannot parse"; }, toString() { return "parsing time: cannot parse"; }, _msg: "parsing time: cannot parse", _cause: null }];
   }
@@ -760,6 +1395,7 @@ var __GoFront_T = __GoFront_T || class {
     this.failed = false;
     this.skipped = false;
     this._logs = [];
+    this._cleanups = [];
     this._start = typeof performance !== "undefined" ? performance.now() : Date.now();
   }
   Name() { return this._name; }
@@ -812,15 +1448,71 @@ var __GoFront_T = __GoFront_T || class {
     throw new __GoFront_SkipNow();
   }
   Skipped() { return this.skipped; }
+  SkipNow() {
+    this.skipped = true;
+    throw new __GoFront_SkipNow();
+  }
   Helper() {}
+  Parallel() {}
+  Attr(k, v) {}
+  Output() {
+    return {
+      Write(p) {
+        process.stdout.write(typeof p === "string" ? p : Buffer.from(p));
+        return [p.length, null];
+      }
+    };
+  }
+  Deadline() {
+    return [null, false];
+  }
+  Context() {
+    if (!this._ctx) {
+      let canceled = false;
+      this._ctx = {
+        Deadline() { return [null, false]; },
+        Done() { return null; },
+        Err() { return canceled ? new Error("context canceled") : null; },
+        Value(k) { return null; },
+      };
+      this.Cleanup(() => { canceled = true; });
+    }
+    return this._ctx;
+  }
+  Setenv(key, val) {
+    const prev = process.env[key];
+    const hasPrev = Object.prototype.hasOwnProperty.call(process.env, key);
+    process.env[key] = String(val);
+    this.Cleanup(() => {
+      if (hasPrev) process.env[key] = prev;
+      else delete process.env[key];
+    });
+  }
+  Cleanup(fn) {
+    this._cleanups.push(fn);
+  }
+  _runCleanups() {
+    while (this._cleanups.length > 0) {
+      const fn = this._cleanups.pop();
+      try {
+        fn();
+      } catch (e) {
+        this.Fail();
+        this.Log("panic in cleanup: " + (e?.message ?? String(e)));
+      }
+    }
+  }
   Run(name, fn) {
     const subName = this._name ? \`\${this._name}/\${name}\` : name;
-    const subT = new __GoFront_T(subName, this);
+    const subT = new this.constructor(subName, this);
     if (typeof globalThis.__onSubtestStart === "function") globalThis.__onSubtestStart(subName);
+    let isAsync = false;
     try {
       const res = fn(subT);
       if (res && typeof res.then === "function") {
+        isAsync = true;
         return res.then(() => {
+          subT._runCleanups();
           if (typeof globalThis.__onSubtestEnd === "function") globalThis.__onSubtestEnd(subT);
           return !subT.failed;
         }).catch(e => {
@@ -832,6 +1524,7 @@ var __GoFront_T = __GoFront_T || class {
             subT.Fail();
             subT.Log("panic: " + (e?.message ?? String(e)));
           }
+          subT._runCleanups();
           if (typeof globalThis.__onSubtestEnd === "function") globalThis.__onSubtestEnd(subT);
           return false;
         });
@@ -845,12 +1538,157 @@ var __GoFront_T = __GoFront_T || class {
         subT.Fail();
         subT.Log("panic: " + (e?.message ?? String(e)));
       }
+    } finally {
+      if (!isAsync) {
+        subT._runCleanups();
+      }
     }
     if (typeof globalThis.__onSubtestEnd === "function") globalThis.__onSubtestEnd(subT);
     return !subT.failed;
   }
 };
-var __testing_T = __GoFront_T;`;
+var __testing_T = __GoFront_T;
+var __GoFront_B = __GoFront_B || class extends __GoFront_T {
+  constructor(name = "", parent = null) {
+    super(name, parent);
+    this.N = 1;
+    this._bytes = 0n;
+    this._reportAllocs = false;
+    this._timerStart = typeof performance !== "undefined" ? performance.now() : Date.now();
+    this._elapsedMs = 0;
+    this._timerRunning = true;
+    this._loopStarted = false;
+  }
+  ResetTimer() {
+    this._timerStart = typeof performance !== "undefined" ? performance.now() : Date.now();
+    this._elapsedMs = 0;
+  }
+  StartTimer() {
+    if (!this._timerRunning) {
+      this._timerStart = typeof performance !== "undefined" ? performance.now() : Date.now();
+      this._timerRunning = true;
+    }
+  }
+  StopTimer() {
+    if (this._timerRunning) {
+      const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+      this._elapsedMs += now - this._timerStart;
+      this._timerRunning = false;
+    }
+  }
+  ReportAllocs() {
+    this._reportAllocs = true;
+  }
+  ReportMetric(n, unit) {}
+  SetBytes(n) {
+    this._bytes = BigInt(n);
+  }
+  Elapsed() {
+    const ms = this._timerRunning
+      ? this._elapsedMs + ((typeof performance !== "undefined" ? performance.now() : Date.now()) - this._timerStart)
+      : this._elapsedMs;
+    return BigInt(Math.round(ms * 1e6));
+  }
+  Loop() {
+    if (!this._loopStarted) {
+      this._loopStarted = true;
+      this.ResetTimer();
+      this._loopTargetNs = this._benchDurationNs || 1e9;
+      this._loopIters = 0;
+      this._nextCheck = 1;
+    }
+    if (this.failed || this.skipped) return false;
+    this._loopIters++;
+    this.N = this._loopIters;
+    if (this._loopIters >= this._nextCheck) {
+      const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+      const elapsedNs = (now - this._timerStart) * 1e6;
+      if (elapsedNs >= this._loopTargetNs || this._loopIters >= 1e9) {
+        this.StopTimer();
+        return false;
+      }
+      const nsPerOp = Math.max(1, elapsedNs / this._loopIters);
+      const remainingNs = this._loopTargetNs - elapsedNs;
+      const addIters = Math.max(1, Math.min(100000, Math.floor(remainingNs / (nsPerOp * 2))));
+      this._nextCheck = this._loopIters + addIters;
+    }
+    return true;
+  }
+};
+var __testing_B = __GoFront_B;
+var __GoFront_M = __GoFront_M || class {
+  constructor(runFn) {
+    this._run = runFn;
+    this._ran = false;
+    this._exitCode = 0;
+  }
+  Run() {
+    this._ran = true;
+    const res = this._run();
+    if (res && typeof res.then === "function") {
+      this._promise = res.then(code => { this._exitCode = code; return code; });
+      return 0;
+    }
+    this._exitCode = res ?? 0;
+    return this._exitCode;
+  }
+};
+var __testing_M = __GoFront_M;
+var __GoFront_BenchmarkResult = __GoFront_BenchmarkResult || class {
+  constructor(b = null) {
+    this.N = b?.N ?? 0;
+    this.T = b ? b.Elapsed() : 0n;
+    this.Bytes = b?._bytes ?? 0n;
+    this.MemAllocs = 0n;
+    this.MemBytes = 0n;
+    this.Extra = new Map();
+  }
+  AllocedBytesPerOp() { return this.N > 0 ? this.MemBytes / BigInt(this.N) : 0n; }
+  AllocsPerOp() { return this.N > 0 ? this.MemAllocs / BigInt(this.N) : 0n; }
+  MemString() { return \`\${this.AllocedBytesPerOp()} B/op\\t\${this.AllocsPerOp()} allocs/op\`; }
+  NsPerOp() { return this.N > 0 ? this.T / BigInt(this.N) : 0n; }
+  String() {
+    const ns = this.NsPerOp();
+    let s = \`\${this.N}\\t\${ns} ns/op\`;
+    if (this.Bytes > 0n && this.T > 0n) {
+      const mbPerSec = (Number(this.Bytes * BigInt(this.N)) / (Number(this.T) / 1e9) / (1024 * 1024)).toFixed(2);
+      s += \`\\t\${mbPerSec} MB/s\`;
+    }
+    return s;
+  }
+};
+var __testing_BenchmarkResult = __GoFront_BenchmarkResult;
+var __testing_Benchmark = __testing_Benchmark || function(fn) {
+  let b = new __GoFront_B("Benchmark");
+  b._benchDurationNs = 1e9;
+  b.N = 1;
+  b.ResetTimer();
+  fn(b);
+  if (!b._loopStarted) {
+    b.StopTimer();
+    b._runCleanups();
+    let n = 1;
+    while (!b.failed && !b.skipped) {
+      const elapsedNs = Number(b.Elapsed());
+      if (elapsedNs >= 1e9 || n >= 1e9) break;
+      let nextN;
+      if (elapsedNs === 0) nextN = n * 100;
+      else nextN = Math.max(n + 1, Math.min(1e9, Math.floor(n * (1e9 / elapsedNs) * 1.2)));
+      if (nextN <= n) break;
+      n = nextN;
+      b = new __GoFront_B("Benchmark");
+      b._benchDurationNs = 1e9;
+      b.N = n;
+      b.ResetTimer();
+      fn(b);
+      b.StopTimer();
+      b._runCleanups();
+    }
+  } else {
+    b._runCleanups();
+  }
+  return new __GoFront_BenchmarkResult(b);
+};`;
 
 export const HELPER_INJECT_STYLES = `var __injectStyles = __injectStyles || function(css) {
   if (typeof document === "undefined" || !document || !document.head || !css) return;
@@ -910,6 +1748,73 @@ export const HELPER_DURATION = `var __durationString = __durationString || funct
     }
   }
   return neg ? "-" + s : s;
+};
+var __durationRound = __durationRound || function(d, m) {
+  d = BigInt(d);
+  m = BigInt(m);
+  if (m <= 0n) return Number(d);
+  var r = d % m;
+  if (d < 0n) {
+    r = -r;
+    if (r + r < m) return Number(d + r);
+    return Number(d - m + r);
+  }
+  if (r + r < m) return Number(d - r);
+  return Number(d + m - r);
+};
+var __monthString = __monthString || function(m) {
+  var names = ["", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  var n = Number(m);
+  if (n >= 1 && n <= 12) return names[n];
+  return "%!Month(" + n + ")";
+};
+var __weekdayString = __weekdayString || function(w) {
+  var names = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  var n = Number(w);
+  if (n >= 0 && n <= 6) return names[n];
+  return "%!Weekday(" + n + ")";
+};
+var __timeParseDuration = __timeParseDuration || function(s) {
+  var orig = String(s);
+  if (orig === "0") return [0, null];
+  var str = orig.trim();
+  var neg = false;
+  if (str.startsWith("-")) { neg = true; str = str.slice(1); }
+  else if (str.startsWith("+")) { str = str.slice(1); }
+  if (str === "0") return [0, null];
+  if (str === "") return [0, typeof __error === "function" ? __error('time: invalid duration ""') : new Error('time: invalid duration ""')];
+
+  var totalNs = 0n;
+  var re = /^(\\d*(?:\\.\\d+)?)(ns|us|µs|\\u00b5s|\\u03bcs|ms|s|m|h)/;
+  while (str.length > 0) {
+    var m = re.exec(str);
+    if (!m || m[1] === "" || m[1] === ".") {
+      return [0, typeof __error === "function" ? __error('time: invalid duration "' + orig + '"') : new Error('time: invalid duration "' + orig + '"')];
+    }
+    var numStr = m[1];
+    var unitStr = m[2];
+    var unitMult = 1n;
+    if (unitStr === "ns") unitMult = 1n;
+    else if (unitStr === "us" || unitStr === "µs" || unitStr === "\\u00b5s" || unitStr === "\\u03bcs") unitMult = 1000n;
+    else if (unitStr === "ms") unitMult = 1000000n;
+    else if (unitStr === "s") unitMult = 1000000000n;
+    else if (unitStr === "m") unitMult = 60000000000n;
+    else if (unitStr === "h") unitMult = 3600000000000n;
+
+    if (numStr.includes(".")) {
+      var parts = numStr.split(".");
+      var whole = parts[0] ? BigInt(parts[0]) : 0n;
+      var frac = parts[1];
+      var fracScale = Math.pow(10, frac.length);
+      var fracVal = BigInt(Math.round((Number(frac) / fracScale) * Number(unitMult)));
+      totalNs += whole * unitMult + fracVal;
+    } else {
+      totalNs += BigInt(numStr) * unitMult;
+    }
+    str = str.slice(m[0].length);
+  }
+  if (neg) totalNs = -totalNs;
+  return [Number(totalNs), null];
 };`;
 
 export const HELPER_SYNC = `var __sync_mutex = __sync_mutex || function() {
@@ -1345,20 +2250,70 @@ var __base64_raw_url = __base64_raw_url || __base64_make("ABCDEFGHIJKLMNOPQRSTUV
 
 export const HELPER_JSON = `var __json_esc = __json_esc || function(s) {
   if (typeof s !== "string") s = String(s);
-  return JSON.stringify(s)
-    .replace(/[<>&]/g, function(c) {
-      return c === "<" ? "\\\\u003c" : (c === ">" ? "\\\\u003e" : "\\\\u0026");
-    })
-    .replace(/\\u2028/g, "\\\\u2028")
-    .replace(/\\u2029/g, "\\\\u2029");
+  var out = JSON.stringify(s);
+  var escHtml = typeof OptEscapeHTML$$internal$jsonrt === "undefined" || OptEscapeHTML$$internal$jsonrt;
+  if (escHtml) {
+    out = out
+      .replace(/[<>&]/g, function(c) {
+        return c === "<" ? "\\\\u003c" : (c === ">" ? "\\\\u003e" : "\\\\u0026");
+      })
+      .replace(/\\u2028/g, "\\\\u2028")
+      .replace(/\\u2029/g, "\\\\u2029");
+  }
+  return out;
 };
-var __json_err = __json_err || function(msg) {
-  return typeof __error === "function" ? __error("json: " + msg) : new Error("json: " + msg);
+var __json_check_unknown = __json_check_unknown || function(parsed, knownKeys) {
+  var disallow = typeof OptDisallowUnknownFields$$internal$jsonrt !== "undefined" && OptDisallowUnknownFields$$internal$jsonrt;
+  if (!disallow || !parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  var lowerSet = new Set(knownKeys.map(function(k) { return k.toLowerCase(); }));
+  for (var k in parsed) {
+    if (Object.prototype.hasOwnProperty.call(parsed, k) && !k.startsWith("__")) {
+      if (!lowerSet.has(k.toLowerCase())) {
+        var msg = "json: unknown field " + JSON.stringify(k);
+        return typeof __error === "function" ? __error(msg) : new Error(msg);
+      }
+    }
+  }
+  return null;
+};
+var __json_err = __json_err || function(msg, valKind, targetType) {
+  var fullMsg = "json: " + msg;
+  var valDesc = valKind || "";
+  var typeDesc = targetType || "";
+  if (!valDesc && msg.startsWith("cannot unmarshal ")) {
+    var parts = msg.slice(17).split(" into ");
+    valDesc = parts[0];
+    var rest = parts[1] || "";
+    var idx = rest.indexOf(" of type ");
+    if (idx >= 0) typeDesc = rest.slice(idx + 9);
+    else if (rest.startsWith("Go value of type ")) typeDesc = rest.slice(17);
+  }
+  var structName = __json_structs.length > 0 ? __json_structs[__json_structs.length - 1] : "";
+  var fieldPath = __json_path.join(".");
+  var offset = typeof __json_current_offset === "number" ? __json_current_offset : 0;
+  var e;
+  if (typeof UnmarshalTypeError$$internal$jsonrt === "function") {
+    e = new UnmarshalTypeError$$internal$jsonrt(valDesc, typeDesc, BigInt(offset), structName, fieldPath);
+    if (e.__p !== true && Object.isExtensible(e)) Object.defineProperty(e, "__p", { value: true, configurable: true, writable: true });
+  } else {
+    e = typeof __error === "function" ? __error(fullMsg) : new Error(fullMsg);
+    e.Value = valDesc;
+    e.Type = typeDesc;
+    e.Offset = BigInt(offset);
+    e.Struct = structName;
+    e.Field = fieldPath;
+    if (e.__p !== true && Object.isExtensible(e)) Object.defineProperty(e, "__p", { value: true, configurable: true, writable: true });
+  }
+  e.Error = function() { return fullMsg; };
+  e._msg = fullMsg;
+  e.__struct = "UnmarshalTypeError$$internal$jsonrt";
+  return e;
 };
 // Decode error context, as in Go: innermost struct being decoded plus the path
 // of JSON field names from the root. Reset by every __json_unmarshal call.
 var __json_structs = __json_structs || [];
 var __json_path = __json_path || [];
+var __json_current_offset = __json_current_offset || 0;
 var __json_ctx = __json_ctx || function(typeName) {
   if (__json_path.length > 0 && __json_structs.length > 0) {
     return "Go struct field " + __json_structs[__json_structs.length - 1] + "." + __json_path.join(".") + " of type " + typeName;
@@ -1369,6 +2324,36 @@ var __json_ctx = __json_ctx || function(typeName) {
 var __json_lit = __json_lit || function(v, raw) {
   if (raw !== undefined && raw !== null) return String(raw).trim();
   return typeof v === "string" ? v.replace(/__bigint$/, "") : String(v);
+};
+var __json_is_valid_number = __json_is_valid_number || function(s) {
+  return typeof s === "string" && /^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$/.test(s);
+};
+var __json_enc_number = __json_enc_number || function(v) {
+  var s = typeof v === "string" ? v : (v != null ? String(v) : "");
+  if (s === "") return "0";
+  if (!__json_is_valid_number(s)) {
+    throw new Error("json: invalid number literal " + JSON.stringify(s));
+  }
+  return s;
+};
+var __json_number_decode = __json_number_decode || function(v, ctxType, raw) {
+  if (typeof v === "number" || (typeof v === "string" && v.endsWith("__bigint"))) {
+    return __json_lit(v, raw);
+  }
+  if (typeof v === "string") {
+    if (!__json_is_valid_number(v)) {
+      return __json_err("invalid number literal, trying to unmarshal " + JSON.stringify(v) + " into Number");
+    }
+    return v;
+  }
+  return __json_err("cannot unmarshal " + __json_type(v) + " into " + __json_ctx(ctxType));
+};
+var __json_dec_number = __json_dec_number || function(parsed, target, box, rawData, rawStr) {
+  if (parsed === null) return null;
+  var nv = __json_number_decode(parsed, "json.Number", rawStr);
+  if (nv && nv._msg) return nv;
+  if (box) box.value = nv;
+  return null;
 };
 var __json_float_decode = __json_float_decode || function(v, bits, ctxType, raw) {
   var n = __json_number_value(v);
@@ -1429,9 +2414,32 @@ var __json_compact = __json_compact || function(s) {
   }
   return out;
 };
+var __json_unsupported_value = __json_unsupported_value || function(str) {
+  if (typeof UnsupportedValueError$$internal$jsonrt === "function") {
+    var e = new UnsupportedValueError$$internal$jsonrt(null, str);
+    e.Str = str;
+    if (e.__p !== true && Object.isExtensible(e)) Object.defineProperty(e, "__p", { value: true, configurable: true, writable: true });
+    e.__struct = "UnsupportedValueError$$internal$jsonrt";
+    return e;
+  }
+  var e = new Error("json: unsupported value: " + str);
+  e.Str = str;
+  e.__struct = "UnsupportedValueError$$internal$jsonrt";
+  return e;
+};
 var __json_marshaler_out = __json_marshaler_out || function(res, typeName) {
   var err = res && res[1];
-  if (err) throw new Error("json: error calling MarshalJSON for type " + typeName + ": " + (typeof err.Error === "function" ? err.Error() : String(err)));
+  if (err) {
+    var merr;
+    if (typeof MarshalerError$$internal$jsonrt === "function") {
+      merr = new MarshalerError$$internal$jsonrt(typeName, err, "MarshalJSON");
+      if (merr.__p !== true && Object.isExtensible(merr)) Object.defineProperty(merr, "__p", { value: true, configurable: true, writable: true });
+      merr.__struct = "MarshalerError$$internal$jsonrt";
+    } else {
+      merr = new Error("json: error calling MarshalJSON for type " + typeName + ": " + (typeof err.Error === "function" ? err.Error() : String(err)));
+    }
+    throw merr;
+  }
   var b = res ? res[0] : null;
   var s = b === null || b === undefined ? "" : (typeof b === "string" ? b : new TextDecoder().decode(b));
   var c = __json_compact(s);
@@ -1523,6 +2531,8 @@ var __json_parse_raw_node = __json_parse_raw_node || function(s) {
       while (i < s.length && !/[\\t\\n\\r ,}\\]]/.test(s[i])) i++;
     }
     node.raw = s.slice(start, i);
+    node.start = start;
+    node.end = i;
     return node;
   }
   return value();
@@ -1534,6 +2544,9 @@ var __json_bind_raw = __json_bind_raw || function(value, node) {
 };
 var __json_raw_child = __json_raw_child || function(parent, key) {
   return __json_raw_index.get(parent)?.get(String(key))?.raw;
+};
+var __json_raw_end = __json_raw_end || function(parent, key) {
+  return __json_raw_index.get(parent)?.get(String(key))?.end;
 };
 var __json_raw_bytes = __json_raw_bytes || function(raw) {
   return new TextEncoder().encode(raw ?? "null");
@@ -1551,7 +2564,7 @@ var __json_match_field = __json_match_field || function(obj, tagName, fieldName)
 };
 var __json_float32 = __json_float32 || function(v) {
   var f = Math.fround(v);
-  if (!isFinite(f)) throw new Error("json: unsupported value: " + f);
+  if (!isFinite(f)) throw __json_unsupported_value(String(f));
   if (Object.is(f, -0)) return "-0";
   var candidate;
   for (var precision = 1; precision <= 9; precision++) {
@@ -1647,7 +2660,7 @@ var __json_enc_any = __json_enc_any || function(v) {
   var t = typeof v;
   if (t === "boolean") return v ? "true" : "false";
   if (t === "number") {
-    if (!isFinite(v)) throw new Error("json: unsupported value: " + v);
+    if (!isFinite(v)) throw __json_unsupported_value(String(v));
     return String(v);
   }
   if (t === "bigint") return v.toString();
@@ -1698,11 +2711,23 @@ var __json_enc_any = __json_enc_any || function(v) {
 };
 var __json_dec_any = __json_dec_any || function(parsed) {
   if (parsed === null) return null;
+  var useNum = typeof OptUseNumber$$internal$jsonrt !== "undefined" && OptUseNumber$$internal$jsonrt;
   if (typeof parsed === "string") {
-    if (parsed.endsWith("__bigint")) return Number(parsed.slice(0, -8));
+    if (parsed.endsWith("__bigint")) {
+      var rawBig = parsed.slice(0, -8);
+      if (useNum) return typeof Number$$internal$jsonrt === "function" ? new Number$$internal$jsonrt(rawBig) : rawBig;
+      return Number(rawBig);
+    }
     return parsed;
   }
-  if (typeof parsed === "number" || typeof parsed === "boolean") return parsed;
+  if (typeof parsed === "number") {
+    if (useNum) {
+      var rawNum = String(parsed);
+      return typeof Number$$internal$jsonrt === "function" ? new Number$$internal$jsonrt(rawNum) : rawNum;
+    }
+    return parsed;
+  }
+  if (typeof parsed === "boolean") return parsed;
   if (Array.isArray(parsed)) {
     var outSlice = [];
     for (var i = 0; i < parsed.length; i++) outSlice.push(__json_dec_any(parsed[i]));
@@ -1756,7 +2781,8 @@ var __json_marshal = __json_marshal || function(enc, val) {
     var str = enc(val);
     return [new TextEncoder().encode(str), null];
   } catch (e) {
-    return [new Uint8Array(0), typeof __error === "function" ? __error(e.message) : e];
+    if (e && typeof e.Error === "function") return [new Uint8Array(0), e];
+    return [new Uint8Array(0), typeof __error === "function" ? __error(e.message || String(e)) : e];
   }
 };
 var __json_indent = __json_indent || function(jsonStr, prefix, indent) {
@@ -1814,18 +2840,45 @@ var __json_valid = __json_valid || function(data) {
     return false;
   }
 };
-var __json_unmarshal = __json_unmarshal || function(dec, data, target) {
+var __json_unmarshal = __json_unmarshal || function(dec, data, target, targetTypeName) {
   __json_structs.length = 0;
   __json_path.length = 0;
+  __json_current_offset = 0;
   if (target === null || target === undefined) {
+    if (typeof InvalidUnmarshalError$$internal$jsonrt === "function") {
+      var e = new InvalidUnmarshalError$$internal$jsonrt("", false);
+      if (e.__p !== true && Object.isExtensible(e)) Object.defineProperty(e, "__p", { value: true, configurable: true, writable: true });
+      e.__struct = "InvalidUnmarshalError$$internal$jsonrt";
+      return e;
+    }
     return typeof __error === "function" ? __error("json: Unmarshal(nil)") : new Error("json: Unmarshal(nil)");
   }
   if (typeof target !== "object" || target.__v === true) {
-    return typeof __error === "function" ? __error("json: Unmarshal(non-pointer " + typeof target + ")") : new Error("json: Unmarshal(non-pointer " + typeof target + ")");
+    var tname = targetTypeName || (target && target.constructor && target.constructor.name && target.constructor.name !== "Object" ? target.constructor.name : typeof target);
+    if (typeof InvalidUnmarshalError$$internal$jsonrt === "function") {
+      var e = new InvalidUnmarshalError$$internal$jsonrt(tname, false);
+      if (e.__p !== true && Object.isExtensible(e)) Object.defineProperty(e, "__p", { value: true, configurable: true, writable: true });
+      e.__struct = "InvalidUnmarshalError$$internal$jsonrt";
+      return e;
+    }
+    return typeof __error === "function" ? __error("json: Unmarshal(non-pointer " + tname + ")") : new Error("json: Unmarshal(non-pointer " + tname + ")");
+  }
+  var u8data = ((typeof ArrayBuffer !== "undefined" && ArrayBuffer.isView(data)) || data instanceof Uint8Array) ? data : new Uint8Array(data);
+  if (typeof CheckValid$$internal$jsonrt === "function") {
+    var syntaxErr = CheckValid$$internal$jsonrt(u8data);
+    if (syntaxErr) {
+      if (typeof syntaxErr === "object" && syntaxErr !== null) {
+        if (syntaxErr.__p !== true && Object.isExtensible(syntaxErr)) {
+          Object.defineProperty(syntaxErr, "__p", { value: true, configurable: true, writable: true });
+        }
+        syntaxErr.__struct = "SyntaxError$$internal$jsonrt";
+      }
+      return syntaxErr;
+    }
   }
   var str;
   try {
-    str = typeof data === "string" ? data : new TextDecoder().decode(((typeof ArrayBuffer !== "undefined" && ArrayBuffer.isView(data)) || data instanceof Uint8Array) ? data : new Uint8Array(data));
+    str = typeof data === "string" ? data : new TextDecoder().decode(u8data);
   } catch (e) {
     return typeof __error === "function" ? __error("invalid UTF-8 data") : e;
   }
@@ -1838,11 +2891,56 @@ var __json_unmarshal = __json_unmarshal || function(dec, data, target) {
   }
   var rootRaw = __json_parse_raw_node(str);
   __json_bind_raw(parsed, rootRaw);
+  __json_current_offset = str.length;
   var isBox = target && typeof target === "object" && (Object.prototype.hasOwnProperty.call(target, "value") || typeof target.__gfUnbox === "function");
   var dest = isBox ? target.value : target;
   var err = dec(parsed, dest, isBox ? target : null, data, rootRaw.raw);
   if (err) return err.__userErr || err;
   return null;
+};
+var __json_encoder_encode = __json_encoder_encode || function(enc, codec, v) {
+  var e = enc?.value ?? enc;
+  if (e.err != null) return e.err;
+  OptEscapeHTML$$internal$jsonrt = e.escapeHTML;
+  var jsonStr;
+  try {
+    jsonStr = codec(v);
+  } catch (err) {
+    if (err && typeof err.Error === "function") return err;
+    return typeof __error === "function" ? __error(err.message || String(err)) : err;
+  } finally {
+    OptEscapeHTML$$internal$jsonrt = true;
+  }
+  if (e.indent !== "" || e.prefix !== "") {
+    var indented = __json_indent(jsonStr, e.prefix, e.indent);
+    if (indented != null) jsonStr = indented;
+  }
+  var bytes = new TextEncoder().encode(jsonStr + "\\n");
+  var res = e.w.Write(bytes);
+  var err = Array.isArray(res) ? res[1] : null;
+  if (err != null) {
+    e.err = err;
+    return err;
+  }
+  return null;
+};
+var __json_decoder_decode = __json_decoder_decode || function(dec, decFn, target, targetTypeName) {
+  var d = dec?.value ?? dec;
+  var res = ScanNext$$internal$jsonrt(d.r);
+  var data = res[0], skipped = res[1], err = res[2];
+  d.offset += skipped;
+  if (err != null) return err;
+  d.offset += data.length;
+  OptUseNumber$$internal$jsonrt = d.useNumber;
+  OptDisallowUnknownFields$$internal$jsonrt = d.disallowUnknownFields;
+  var uerr;
+  try {
+    uerr = __json_unmarshal(decFn, data, target, targetTypeName);
+  } finally {
+    OptUseNumber$$internal$jsonrt = false;
+    OptDisallowUnknownFields$$internal$jsonrt = false;
+  }
+  return uerr;
 };`;
 
 export const HELPER_SIMD = `var __simd_f32x4 = __simd_f32x4 || function(a, b, c, d) {
@@ -1881,6 +2979,59 @@ var __simd_with_lane = __simd_with_lane || function(a, i, v) {
   r[i] = Math.fround(v);
   return Object.freeze(r);
 };
+var __simd_map = __simd_map || function(a, f) {
+  return Object.freeze([Math.fround(f(a[0])), Math.fround(f(a[1])), Math.fround(f(a[2])), Math.fround(f(a[3]))]);
+};
+var __simd_neg = __simd_neg || function(a) { return __simd_map(a, function(x) { return -x; }); };
+var __simd_abs = __simd_abs || function(a) { return __simd_map(a, Math.abs); };
+var __simd_sqrt = __simd_sqrt || function(a) { return __simd_map(a, Math.sqrt); };
+var __simd_floor = __simd_floor || function(a) { return __simd_map(a, Math.floor); };
+var __simd_ceil = __simd_ceil || function(a) { return __simd_map(a, Math.ceil); };
+var __simd_trunc = __simd_trunc || function(a) { return __simd_map(a, Math.trunc); };
+var __simd_nearest = __simd_nearest || function(a) {
+  return __simd_map(a, function(x) {
+    if (!isFinite(x)) return x;
+    var f = Math.floor(x), d = x - f, r;
+    if (d < 0.5) r = f; else if (d > 0.5) r = f + 1; else r = (f % 2 === 0) ? f : f + 1;
+    return (r === 0 && (x < 0 || Object.is(x, -0))) ? -0 : r;
+  });
+};
+var __simd_muladd = __simd_muladd || function(a, b, c) {
+  return Object.freeze([Math.fround(Math.fround(a[0] * b[0]) + c[0]), Math.fround(Math.fround(a[1] * b[1]) + c[1]), Math.fround(Math.fround(a[2] * b[2]) + c[2]), Math.fround(Math.fround(a[3] * b[3]) + c[3])]);
+};
+var __simd_sum = __simd_sum || function(a) {
+  return Math.fround(Math.fround(Math.fround(a[0] + a[1]) + a[2]) + a[3]);
+};
+var __simd_cmp = __simd_cmp || function(a, b, f) {
+  return Object.freeze([f(a[0], b[0]), f(a[1], b[1]), f(a[2], b[2]), f(a[3], b[3])]);
+};
+var __simd_eq = __simd_eq || function(a, b) { return __simd_cmp(a, b, function(x, y) { return x === y; }); };
+var __simd_ne = __simd_ne || function(a, b) { return __simd_cmp(a, b, function(x, y) { return x !== y; }); };
+var __simd_lt = __simd_lt || function(a, b) { return __simd_cmp(a, b, function(x, y) { return x < y; }); };
+var __simd_le = __simd_le || function(a, b) { return __simd_cmp(a, b, function(x, y) { return x <= y; }); };
+var __simd_gt = __simd_gt || function(a, b) { return __simd_cmp(a, b, function(x, y) { return x > y; }); };
+var __simd_ge = __simd_ge || function(a, b) { return __simd_cmp(a, b, function(x, y) { return x >= y; }); };
+var __simd_equal = __simd_equal || function(a, b) {
+  return a[0] === b[0] && a[1] === b[1] && a[2] === b[2] && a[3] === b[3];
+};
+var __simd_mask_and = __simd_mask_and || function(a, b) { return __simd_cmp(a, b, function(x, y) { return x && y; }); };
+var __simd_mask_or = __simd_mask_or || function(a, b) { return __simd_cmp(a, b, function(x, y) { return x || y; }); };
+var __simd_mask_xor = __simd_mask_xor || function(a, b) { return __simd_cmp(a, b, function(x, y) { return x !== y; }); };
+var __simd_mask_andnot = __simd_mask_andnot || function(a, b) { return __simd_cmp(a, b, function(x, y) { return x && !y; }); };
+var __simd_mask_not = __simd_mask_not || function(a) { return Object.freeze([!a[0], !a[1], !a[2], !a[3]]); };
+var __simd_mask_any = __simd_mask_any || function(a) { return a[0] || a[1] || a[2] || a[3]; };
+var __simd_mask_all = __simd_mask_all || function(a) { return a[0] && a[1] && a[2] && a[3]; };
+var __simd_mask_bits = __simd_mask_bits || function(a) { return (a[0] ? 1 : 0) | (a[1] ? 2 : 0) | (a[2] ? 4 : 0) | (a[3] ? 8 : 0); };
+var __simd_select = __simd_select || function(m, a, b) {
+  return Object.freeze([m[0] ? a[0] : b[0], m[1] ? a[1] : b[1], m[2] ? a[2] : b[2], m[3] ? a[3] : b[3]]);
+};
+var __simd_shuffle = __simd_shuffle || function(a, b, i0, i1, i2, i3) {
+  var c = [a[0], a[1], a[2], a[3], b[0], b[1], b[2], b[3]];
+  return Object.freeze([c[i0], c[i1], c[i2], c[i3]]);
+};
+var __simd_swizzle = __simd_swizzle || function(a, i0, i1, i2, i3) {
+  return Object.freeze([a[i0], a[i1], a[i2], a[i3]]);
+};
 var __simd_load = __simd_load || function(buf, i) {
   if (i < 0 || i + 4 > buf.length) throw new Error("panic: runtime error: index out of range");
   return Object.freeze([Math.fround(buf[i]), Math.fround(buf[i + 1]), Math.fround(buf[i + 2]), Math.fround(buf[i + 3])]);
@@ -1888,4 +3039,12 @@ var __simd_load = __simd_load || function(buf, i) {
 var __simd_store = __simd_store || function(buf, i, v) {
   if (i < 0 || i + 4 > buf.length) throw new Error("panic: runtime error: index out of range");
   buf[i] = v[0]; buf[i + 1] = v[1]; buf[i + 2] = v[2]; buf[i + 3] = v[3];
+};
+var __simd_load_slice = __simd_load_slice || function(xs, i) {
+  if (xs == null || i < 0 || i + 4 > xs.length) throw new Error("panic: runtime error: index out of range");
+  return Object.freeze([xs[i], xs[i + 1], xs[i + 2], xs[i + 3]]);
+};
+var __simd_store_slice = __simd_store_slice || function(xs, i, v) {
+  if (xs == null || i < 0 || i + 4 > xs.length) throw new Error("panic: runtime error: index out of range");
+  xs[i] = v[0]; xs[i + 1] = v[1]; xs[i + 2] = v[2]; xs[i + 3] = v[3];
 };`;

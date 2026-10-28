@@ -1,6 +1,7 @@
 // Assignability, binary result types, and interface satisfaction.
 // Installed as a mixin on TypeChecker.prototype.
 
+import { constIntValue } from "./const-fold.js";
 import { sharedInfo } from "./stdlib/shared.js";
 import {
 	ANY,
@@ -10,7 +11,9 @@ import {
 	FLOAT64,
 	isAny,
 	isComplex,
+	isComplex64,
 	isComplexOrNumeric,
+	isInteger,
 	isNil,
 	isNumeric,
 	isPointer,
@@ -79,6 +82,8 @@ export const assignabilityMethods = {
 		if (isAny(lt) || isAny(rt)) return ANY;
 		if (isComplex(lt) || isComplex(rt))
 			return this._binaryResultTypeComplex(op, lt, rt, node);
+		if ((op === "<<" || op === ">>") && isNumeric(lt) && isNumeric(rt))
+			return this._binaryResultTypeShift(op, lt, rt, node);
 		if (isNumeric(lt) && isNumeric(rt))
 			return this._binaryResultTypeNumeric(lt, rt);
 		if (isString(lt) && isString(rt) && op === "+")
@@ -86,6 +91,35 @@ export const assignabilityMethods = {
 		if (node)
 			this.err(`Invalid operation: ${typeStr(lt)} ${op} ${typeStr(rt)}`, node);
 		return ANY;
+	},
+
+	// A shift has the type of its left operand; the count may be any integer
+	// type or an untyped constant representable as uint.
+	_binaryResultTypeShift(_op, lt, rt, node) {
+		if (node) this.checkShiftCount(rt, node.right);
+		return lt;
+	},
+
+	// Reports a shift count that is not an integer or is a negative constant.
+	checkShiftCount(rt, countExpr) {
+		const v = this._constValue(countExpr);
+		if (v) {
+			const n = constIntValue(v);
+			if (n === null) {
+				this.err(
+					`invalid shift count ${typeStr(rt)} constant: not an integer`,
+					countExpr,
+				);
+			} else if (n < 0n) {
+				this.err(`invalid shift count: ${n} is negative`, countExpr);
+			}
+			return;
+		}
+		if (!isInteger(rt))
+			this.err(
+				`invalid shift count: ${typeStr(rt)} is not an integer type`,
+				countExpr,
+			);
 	},
 
 	_binaryResultTypeString(lt, rt) {
@@ -111,6 +145,9 @@ export const assignabilityMethods = {
 			return ANY;
 		}
 		if (lt.kind === "untyped" && rt.kind === "untyped") return UNTYPED_COMPLEX;
+		if (lt.kind === "untyped") return rt;
+		if (rt.kind === "untyped") return lt;
+		if (isComplex64(lt) && isComplex64(rt)) return lt;
 		return COMPLEX128;
 	},
 
@@ -165,8 +202,9 @@ export const assignabilityMethods = {
 
 	// ── Assignability ─────────────────────────────────────────────────
 
-	assertAssignable(target, source, node) {
+	assertAssignable(target, source, node, ctx = "assignment") {
 		if (!target || !source) return;
+		if (this._checkConstOverflow(target, source, node, ctx)) return;
 		target = this.resolveType(target);
 		source = this.resolveType(source);
 		this._markIfaceBox(target, source, node);
@@ -201,10 +239,12 @@ export const assignabilityMethods = {
 		)
 			return;
 		if (target.kind === "typeParam") return;
-		const tBase = this.resolveType(
-			target.kind === "named" ? target.underlying : target,
-		);
+		let tBase = this.resolveType(target);
+		if (tBase?.kind === "named") tBase = this.resolveType(tBase.underlying);
 		if (!isAny(target) && tBase?.kind !== "interface") return;
+		// The static type behind the interface value: codegen derives the
+		// fmt metadata (Stringer elements of slices and maps) from it.
+		node._ifaceSrc = source;
 		const named = this._namedMethodBoxSource(source);
 		if (named) {
 			node._ifaceBox = named.ptr ? "named_ptr" : "named";
@@ -225,7 +265,8 @@ export const assignabilityMethods = {
 	// dynamic method dispatch works.
 	_namedMethodBoxSource(source) {
 		const isPtr = source?.kind === "pointer";
-		const t = isPtr ? source.base : source;
+		let t = isPtr ? source.base : source;
+		if (t?.kind === "TypeName" || t?.kind === "Ident") t = this.resolveType(t);
 		if (t?.kind !== "named") return null;
 		const u = this.resolveType(t.underlying);
 		if (!u || u.kind === "struct" || u.kind === "interface") return null;
@@ -351,7 +392,45 @@ export const assignabilityMethods = {
 			return;
 		}
 		if (this._identicalUnderlyingLiteral(target, source, tBase, sBase)) return;
-		this.err(`Cannot assign ${typeStr(source)} to ${typeStr(target)}`, node);
+		this.err(
+			`Cannot assign ${typeStr(source)} to ${typeStr(target)}`,
+			node,
+			this._seqToSliceHint(source, tBase, node),
+		);
+	},
+
+	// maps.Keys/Values (and every iter.Seq) no longer return a slice: point the
+	// slice-expecting caller at slices.Collect.
+	_seqToSliceHint(source, tBase, node) {
+		if (tBase?.kind !== "slice" || !this._isIterSeq(source)) return null;
+		return this._seqCollectHint(node);
+	},
+
+	_isIterSeq(t) {
+		return t?.kind === "named" && /^iter\.Seq\d*\[/.test(typeStr(t));
+	},
+
+	_seqCollectHint(node) {
+		const f = node?.kind === "CallExpr" ? node.func : null;
+		if (
+			f?.kind === "SelectorExpr" &&
+			f.expr?.kind === "Ident" &&
+			f.expr.name === "maps" &&
+			(f.field === "Keys" || f.field === "Values")
+		)
+			return `use slices.Collect(maps.${f.field}(m)) for a slice`;
+		return "use slices.Collect(seq) for a slice";
+	},
+
+	// len/cap, spread and slice conversion are lenient on func types, and an
+	// iter.Seq value is one: reject it there instead of miscompiling.
+	_rejectSeqAsSlice(type, node, use) {
+		if (!this._isIterSeq(type)) return;
+		this.err(
+			`cannot use ${typeStr(type)} in ${use}`,
+			node,
+			this._seqCollectHint(node),
+		);
 	},
 
 	// Identical underlying types are assignable when one side is an unnamed
@@ -511,7 +590,9 @@ export const assignabilityMethods = {
 		}
 		const methodMap =
 			base?.kind === "struct"
-				? base.methods || srcType.methods
+				? base.methods?.size
+					? base.methods
+					: srcType.methods || base.methods
 				: srcType.kind === "named"
 					? srcType.methods
 					: null;

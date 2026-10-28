@@ -79,6 +79,12 @@ export const statementCheckMethods = {
 			const name = stmt.lhs[i].name ?? stmt.lhs[i];
 			if (name === "_") continue;
 			if (scope.symbols.has(name)) stmt.lhs[i]._redecl = true;
+			if (stmt.rhs.length === stmt.lhs.length)
+				this._checkConstDefault(
+					rhsFlat[i],
+					stmt.rhs[i],
+					"variable declaration",
+				);
 			scope.defineLocal(name, defaultType(rhsFlat[i]) ?? ANY);
 		}
 	},
@@ -191,6 +197,16 @@ export const statementCheckMethods = {
 					this.resolveType(r),
 					stmt.rhs[i],
 				);
+			// A shift count is not converted to the left operand's type.
+			if (stmt.op === "<<=" || stmt.op === ">>=") {
+				if (r && !isAny(r)) this.checkShiftCount(r, stmt.rhs[i]);
+				continue;
+			}
+			if (
+				stmt.rhs.length === lhsTypes.length &&
+				this._checkConstOverflow(lhsTypes[i], r, stmt.rhs[i], "assignment")
+			)
+				continue;
 			if (!isAny(lhsTypes[i]) && !isAny(r)) {
 				this._skipIfaceMark = true;
 				this.assertAssignable(lhsTypes[i], r, stmt.lhs[i]);
@@ -248,7 +264,12 @@ export const statementCheckMethods = {
 				returnType.kind === "tuple" ? returnType.types : [returnType];
 			for (let i = 0; i < expected.length; i++) {
 				if (types[i])
-					this.assertAssignable(expected[i], types[i], stmt.values[i] ?? stmt);
+					this.assertAssignable(
+						expected[i],
+						types[i],
+						stmt.values[i] ?? stmt,
+						"return statement",
+					);
 			}
 		}
 	},
@@ -327,6 +348,12 @@ export const statementCheckMethods = {
 		this._typeSwitchDepth++;
 		for (const c of stmt.cases) {
 			const caseScope = new Scope(inner);
+			// Resolve instantiated generic case types so backends can tell
+			// `*Stack[int]` from `*Stack[string]`.
+			for (const t of c.types ?? []) {
+				const base = t?.kind === "PointerType" ? t.base : t;
+				if (base?.kind === "GenericTypeName") this.resolveTypeNode(t, inner);
+			}
 			if (stmt.assign) {
 				// Bind the variable to the single case type, or any for multi/default
 				const bindType =
@@ -346,7 +373,12 @@ export const statementCheckMethods = {
 
 	_checkBranchStmt(stmt) {
 		const kw = stmt.keyword;
-		if (kw === "continue" && this._loopDepth === 0)
+		if (kw === "goto")
+			this.err(
+				"goto is not supported; restructure with labeled break/continue",
+				stmt,
+			);
+		else if (kw === "continue" && this._loopDepth === 0)
 			this.err("continue statement outside for loop", stmt);
 		else if (kw === "break" && this._loopDepth === 0 && this._switchDepth === 0)
 			this.err("break statement outside for loop or switch", stmt);

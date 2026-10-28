@@ -293,3 +293,178 @@ test("SIMD integer extract and replace lane encoding (i32x4, i16x8, i8x16)", () 
 	const instance = new WebAssembly.Instance(new WebAssembly.Module(bytes));
 	assertEqual(instance.exports.test_i32(), 123);
 });
+
+section("WASM Encoder — SIMD comparisons, masks and rounding");
+
+// Builds a module exporting f(a, b: f32) -> i32 with `body` reading the two
+// params splatted into v128 values via locals 2 (a) and 3 (b).
+function simdCompareModule(body, result = "i32") {
+	return {
+		types: [{ form: "func", params: ["f32", "f32"], results: [result] }],
+		funcs: [
+			{
+				typeIndex: 0,
+				locals: ["v128", "v128"],
+				body: [
+					{ op: "local.get", index: 0 },
+					{ op: "f32x4.splat" },
+					{ op: "local.set", index: 2 },
+					{ op: "local.get", index: 1 },
+					{ op: "f32x4.splat" },
+					{ op: "local.set", index: 3 },
+					...body,
+				],
+			},
+		],
+		exports: [{ name: "f", kind: "func", index: 0 }],
+	};
+}
+
+const getA = { op: "local.get", index: 2 };
+const getB = { op: "local.get", index: 3 };
+
+test("SIMD f32x4 comparisons with bitmask (multi-byte LEB128 sub-opcodes)", () => {
+	// i32x4.bitmask is sub-opcode 164 = 0xA4 0x01.
+	const expected = {
+		"f32x4.eq": (a, b) => a === b,
+		"f32x4.ne": (a, b) => a !== b,
+		"f32x4.lt": (a, b) => a < b,
+		"f32x4.gt": (a, b) => a > b,
+		"f32x4.le": (a, b) => a <= b,
+		"f32x4.ge": (a, b) => a >= b,
+	};
+	for (const [op, ref] of Object.entries(expected)) {
+		const bytes = encodeModule(
+			simdCompareModule([getA, getB, { op }, { op: "i32x4.bitmask" }]),
+		);
+		assert(WebAssembly.validate(bytes), `${op} module must validate`);
+		const f = new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports.f;
+		for (const [a, b] of [
+			[1, 2],
+			[2, 2],
+			[3, 2],
+			[Number.NaN, 1],
+			[0, -0],
+		]) {
+			assertEqual(f(a, b), ref(Math.fround(a), Math.fround(b)) ? 15 : 0);
+		}
+	}
+	const sub = encodeModule(
+		simdCompareModule([
+			getA,
+			getB,
+			{ op: "f32x4.lt" },
+			{ op: "i32x4.bitmask" },
+		]),
+	);
+	assert(
+		sub.join(",").includes("253,164,1"),
+		"bitmask sub-opcode encodes as 0xFD 0xA4 0x01",
+	);
+});
+
+test("SIMD any_true, all_true, bitselect, not and andnot", () => {
+	const run = (body, a, b) => {
+		const bytes = encodeModule(simdCompareModule(body));
+		assert(WebAssembly.validate(bytes), "module must validate");
+		return new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports.f(
+			a,
+			b,
+		);
+	};
+	const lt = [getA, getB, { op: "f32x4.lt" }];
+	assertEqual(run([...lt, { op: "v128.any_true" }], 1, 2), 1);
+	assertEqual(run([...lt, { op: "v128.any_true" }], 2, 1), 0);
+	assertEqual(run([...lt, { op: "i32x4.all_true" }], 1, 2), 1);
+	assertEqual(run([...lt, { op: "i32x4.all_true" }], 2, 1), 0);
+	assertEqual(
+		run([...lt, { op: "v128.not" }, { op: "i32x4.bitmask" }], 1, 2),
+		0,
+	);
+	assertEqual(
+		run([...lt, ...lt, { op: "v128.andnot" }, { op: "v128.any_true" }], 1, 2),
+		0,
+	);
+	// bitselect(a, b, mask) picks a where mask is set: min(a, b) via lt mask.
+	const select = [
+		getA,
+		getB,
+		...lt,
+		{ op: "v128.bitselect" },
+		{ op: "f32x4.extract_lane", lane: 3 },
+		{ op: "i32.trunc_f32_s" },
+	];
+	assertEqual(run(select, 1, 2), 1);
+	assertEqual(run(select, 5, 2), 2);
+});
+
+test("SIMD ceil, floor, trunc and nearest", () => {
+	const ops = ["f32x4.ceil", "f32x4.floor", "f32x4.trunc", "f32x4.nearest"];
+	const inputs = [1.5, -1.5, 2.5, 2];
+	for (const op of ops) {
+		const lanes = [0, 1, 2, 3].map((lane) => {
+			const bytes = encodeModule({
+				types: [{ form: "func", params: [], results: ["f32"] }],
+				funcs: [
+					{
+						typeIndex: 0,
+						locals: [],
+						body: [
+							{ op: "v128.const", values: inputs },
+							{ op },
+							{ op: "f32x4.extract_lane", lane },
+						],
+					},
+				],
+				exports: [{ name: "f", kind: "func", index: 0 }],
+			});
+			assert(WebAssembly.validate(bytes), `${op} must validate`);
+			return new WebAssembly.Instance(
+				new WebAssembly.Module(bytes),
+			).exports.f();
+		});
+		const ref = {
+			"f32x4.ceil": inputs.map(Math.ceil),
+			"f32x4.floor": inputs.map(Math.floor),
+			"f32x4.trunc": inputs.map(Math.trunc),
+			"f32x4.nearest": [2, -2, 2, 2],
+		}[op];
+		assertEqual(JSON.stringify(lanes), JSON.stringify(ref));
+	}
+});
+
+test("SIMD comparison and rounding opcodes pass Binaryen optimized and unoptimized", async () => {
+	const { optimizeWithBinaryen } = await import(
+		"../../../src/backend/wasm/optimize.js"
+	);
+	const bytes = encodeModule(
+		simdCompareModule([
+			getA,
+			getB,
+			{ op: "f32x4.lt" },
+			{ op: "v128.any_true" },
+			getA,
+			{ op: "f32x4.floor" },
+			getB,
+			{ op: "f32x4.nearest" },
+			{ op: "f32x4.ceil" },
+			{ op: "f32x4.trunc" },
+			getA,
+			getB,
+			{ op: "f32x4.ge" },
+			{ op: "v128.bitselect" },
+			{ op: "f32x4.extract_lane", lane: 0 },
+			{ op: "i32.trunc_f32_s" },
+			{ op: "i32.add" },
+		]),
+	);
+	for (const level of [0, 3]) {
+		const res = optimizeWithBinaryen(bytes, { level });
+		assert(WebAssembly.validate(res.wasm), `Binaryen -O${level} output valid`);
+		const f = new WebAssembly.Instance(new WebAssembly.Module(res.wasm)).exports
+			.f;
+		const ref = new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports
+			.f;
+		assertEqual(f(1.5, 2.5), ref(1.5, 2.5));
+	}
+});

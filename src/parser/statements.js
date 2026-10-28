@@ -78,6 +78,13 @@ export const statementParserMethods = {
 				this.advance();
 				this.semi();
 				return { kind: "BranchStmt", keyword: "fallthrough" };
+			case T.GOTO: {
+				// Parsed so the checker can reject it with a targeted message.
+				this.advance();
+				const label = this.expect(T.IDENT).value;
+				this.semi();
+				return { kind: "BranchStmt", keyword: "goto", label };
+			}
 			case T.GO:
 				return this.err("goroutines are not supported in GoFront");
 			case T.SELECT:
@@ -150,27 +157,30 @@ export const statementParserMethods = {
 			};
 		}
 
-		const first = this.parseSimpleStmtRaw(true);
+		let first = null;
+		if (!this.check(T.SEMICOLON)) {
+			first = this.parseSimpleStmtRaw(true);
 
-		if (this.check(T.LBRACE)) {
-			// for k, v := range expr { }  — range stmt ends right before {
-			if (this.isRangeStmt(first)) {
+			if (this.check(T.LBRACE)) {
+				// for k, v := range expr { }  — range stmt ends right before {
+				if (this.isRangeStmt(first)) {
+					return {
+						kind: "ForStmt",
+						init: first,
+						cond: null,
+						post: null,
+						body: this.parseBlock(),
+					};
+				}
+				// for cond { }
 				return {
 					kind: "ForStmt",
-					init: first,
-					cond: null,
+					init: null,
+					cond: this.stmtToExpr(first),
 					post: null,
 					body: this.parseBlock(),
 				};
 			}
-			// for cond { }
-			return {
-				kind: "ForStmt",
-				init: null,
-				cond: this.stmtToExpr(first),
-				post: null,
-				body: this.parseBlock(),
-			};
 		}
 
 		this.expect(T.SEMICOLON);
@@ -180,7 +190,7 @@ export const statementParserMethods = {
 		if (!this.check(T.SEMICOLON)) cond = this.parseExpr(0, true);
 		this.expect(T.SEMICOLON);
 		let post = null;
-		if (!this.check(T.LBRACE)) post = this.parseSimpleStmtRaw();
+		if (!this.check(T.LBRACE)) post = this.parseSimpleStmtRaw(true);
 		const body = this.parseBlock();
 		return { kind: "ForStmt", init: first, cond, post, body };
 	},
@@ -290,9 +300,9 @@ export const statementParserMethods = {
 		// a, b, c := ...  or  x, y = ...
 		if (t.type === T.COMMA) {
 			const lhs = [first];
-			while (this.match(T.COMMA)) lhs.push(this.parseExpr());
+			while (this.match(T.COMMA)) lhs.push(this.parseExpr(0, noCompLit));
 			const op = this.advance(); // := or =
-			const rhs = this.parseExprList();
+			const rhs = this.parseExprList(noCompLit);
 			if (op.type === T.DEFINE) return { kind: "DefineStmt", lhs, rhs };
 			return { kind: "AssignStmt", lhs, op: "=", rhs };
 		}
@@ -300,14 +310,14 @@ export const statementParserMethods = {
 		// x := expr
 		if (t.type === T.DEFINE) {
 			this.advance();
-			const rhs = this.parseExprList();
+			const rhs = this.parseExprList(noCompLit);
 			return { kind: "DefineStmt", lhs: [first], rhs };
 		}
 
 		// x = expr  or  x += expr  etc.
 		if (ASSIGN_OPS.has(t.type)) {
 			const op = this.advance().value;
-			const rhs = this.parseExprList();
+			const rhs = this.parseExprList(noCompLit);
 			return { kind: "AssignStmt", lhs: [first], op, rhs };
 		}
 

@@ -5,7 +5,7 @@
 // - Lowered to WASM v128 in wasm packages.
 // - Lowered to a frozen 4-number array with Math.fround in js packages.
 
-import { FLOAT32, INT } from "../types.js";
+import { BOOL, FLOAT32, INT } from "../types.js";
 
 export function setupSimdGlobals(globals, types) {
 	const f32x4Type = {
@@ -19,25 +19,69 @@ export function setupSimdGlobals(globals, types) {
 		},
 	};
 
+	const mask32x4Type = {
+		kind: "named",
+		name: "simd.Mask32x4",
+		underlying: {
+			kind: "simd",
+			simd: "Mask32x4",
+			elem: BOOL,
+			lanes: 4,
+		},
+	};
+
+	const fn = (params, returns) => ({ kind: "func", params, returns });
+	const unary = fn([], [f32x4Type]);
+	const binary = fn([f32x4Type], [f32x4Type]);
+	const compare = fn([f32x4Type], [mask32x4Type]);
+
 	f32x4Type.underlying.methods = new Map([
-		["Add", { kind: "func", params: [f32x4Type], returns: [f32x4Type] }],
-		["Sub", { kind: "func", params: [f32x4Type], returns: [f32x4Type] }],
-		["Mul", { kind: "func", params: [f32x4Type], returns: [f32x4Type] }],
-		["Div", { kind: "func", params: [f32x4Type], returns: [f32x4Type] }],
-		["Min", { kind: "func", params: [f32x4Type], returns: [f32x4Type] }],
-		["Max", { kind: "func", params: [f32x4Type], returns: [f32x4Type] }],
-		["Dot3", { kind: "func", params: [f32x4Type], returns: [FLOAT32] }],
-		["Dot4", { kind: "func", params: [f32x4Type], returns: [FLOAT32] }],
-		["Lane", { kind: "func", params: [INT], returns: [FLOAT32] }],
-		[
-			"WithLane",
-			{ kind: "func", params: [INT, FLOAT32], returns: [f32x4Type] },
-		],
-		["Splat", { kind: "func", params: [FLOAT32], returns: [f32x4Type] }],
+		["Add", binary],
+		["Sub", binary],
+		["Mul", binary],
+		["Div", binary],
+		["Min", binary],
+		["Max", binary],
+		["MulAdd", fn([f32x4Type, f32x4Type], [f32x4Type])],
+		["Neg", unary],
+		["Abs", unary],
+		["Sqrt", unary],
+		["Floor", unary],
+		["Ceil", unary],
+		["Trunc", unary],
+		["RoundToEven", unary],
+		["Dot3", fn([f32x4Type], [FLOAT32])],
+		["Dot4", fn([f32x4Type], [FLOAT32])],
+		["Sum", fn([], [FLOAT32])],
+		["Lane", fn([INT], [FLOAT32])],
+		["WithLane", fn([INT, FLOAT32], [f32x4Type])],
+		["Splat", fn([FLOAT32], [f32x4Type])],
+		["Swizzle", fn([INT, INT, INT, INT], [f32x4Type])],
+		["Equal", compare],
+		["NotEqual", compare],
+		["Less", compare],
+		["LessEqual", compare],
+		["Greater", compare],
+		["GreaterEqual", compare],
+	]);
+
+	const maskBinary = fn([mask32x4Type], [mask32x4Type]);
+	mask32x4Type.underlying.methods = new Map([
+		["And", maskBinary],
+		["Or", maskBinary],
+		["Xor", maskBinary],
+		["AndNot", maskBinary],
+		["Not", fn([], [mask32x4Type])],
+		["Any", fn([], [BOOL])],
+		["All", fn([], [BOOL])],
+		["Bits", fn([], [INT])],
+		["Lane", fn([INT], [BOOL])],
 	]);
 
 	types.set("simd.F32x4", f32x4Type);
 	types.set("F32x4", f32x4Type);
+	types.set("simd.Mask32x4", mask32x4Type);
+	types.set("Mask32x4", mask32x4Type);
 
 	const sharedFloat32 = types.get("shared.Float32") ?? {
 		kind: "named",
@@ -47,6 +91,9 @@ export function setupSimdGlobals(globals, types) {
 
 	const members = {
 		F32x4: f32x4Type,
+		Mask32x4: mask32x4Type,
+		Select: fn([mask32x4Type, f32x4Type, f32x4Type], [f32x4Type]),
+		Shuffle: fn([f32x4Type, f32x4Type, INT, INT, INT, INT], [f32x4Type]),
 		NewF32x4: {
 			kind: "func",
 			params: [FLOAT32, FLOAT32, FLOAT32, FLOAT32],
@@ -62,6 +109,9 @@ export function setupSimdGlobals(globals, types) {
 			params: [sharedFloat32, INT],
 			returns: [f32x4Type],
 		},
+		LoadF32x4Slice: fn([{ kind: "slice", elem: FLOAT32 }, INT], [f32x4Type]),
+		StoreF32x4Slice: fn([{ kind: "slice", elem: FLOAT32 }, INT, f32x4Type], []),
+		Pad4: fn([INT], [INT]),
 		StoreF32x4: {
 			kind: "func",
 			params: [sharedFloat32, INT, f32x4Type],

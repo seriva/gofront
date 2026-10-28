@@ -5,7 +5,10 @@ import {
 	assert,
 	assertContains,
 	assertEqual,
+	assertProgramOutput,
 	compile,
+	compileHybrid,
+	compileHybridProject,
 	runJs,
 	section,
 	summarize,
@@ -328,7 +331,7 @@ func main() {
 	console.log(fmt.Sprintf("%.2e", 12345.6789))
 }`);
 	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "1.23e+4");
+	assertEqual(runJs(js), "1.23e+04");
 });
 
 // ═════════════════════════════════════════════════════════════
@@ -424,6 +427,18 @@ func main() {
 }`);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "4\n1024");
+});
+
+test("math.IsInf(x, 0) is false for NaN", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	console.log(math.IsInf(math.NaN(), 0))
+	console.log(math.IsInf(math.Inf(1), 0))
+	console.log(math.IsInf(math.Inf(-1), 0))
+	console.log(math.IsInf(1.5, 0))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "false\ntrue\ntrue\nfalse");
 });
 
 test("math.Floor, Ceil, Round", () => {
@@ -577,6 +592,57 @@ func main() {
 	assertEqual(runJs(js), "true\ntrue\ntrue");
 });
 
+test("WASM package rejects JS-only time members (time.AfterFunc, time.Timer, time.Sleep)", () => {
+	let res = compile(
+		'package main\nimport "time"\nfunc main() { time.AfterFunc(time.Second, func(){}) }',
+		{ target: "wasm" },
+	);
+	assert(
+		res.errors.some((e) =>
+			e.message?.includes(
+				"'time.AfterFunc' is not yet available in wasm packages",
+			),
+		),
+	);
+	res = compile(
+		'package main\nimport "time"\nfunc main() { var t time.Timer; _ = t }',
+		{ target: "wasm" },
+	);
+	assert(
+		res.errors.some((e) =>
+			e.message?.includes("'time.Timer' is not yet available in wasm packages"),
+		),
+	);
+	res = compile(
+		'package main\nimport "time"\nfunc main() { time.Sleep(time.Second) }',
+		{ target: "wasm" },
+	);
+	assert(
+		res.errors.some((e) =>
+			e.message?.includes("'time.Sleep' is not yet available in wasm packages"),
+		),
+	);
+});
+
+test("channel exclusions for time package (time.After, time.Tick, time.NewTicker, time.NewTimer)", () => {
+	for (const member of [
+		"time.After",
+		"time.Tick",
+		"time.NewTicker",
+		"time.NewTimer",
+	]) {
+		const res = compile(
+			`package main\nimport "time"\nfunc main() { _ = ${member} }`,
+		);
+		assert(
+			res.errors.some((e) =>
+				e.message?.includes(`${member} is not available: channels`),
+			),
+			`expected channel error for ${member}`,
+		);
+	}
+});
+
 // ── unicode package ──────────────────────────────────────────
 
 section("unicode package");
@@ -638,6 +704,51 @@ func main() {
   os.Exit(0)
 }`);
 	assertEqual(errors.length, 0);
+});
+
+test("os.Stdout and os.Stderr as io.Writer, shared line buffer", () => {
+	const src = `package main
+import (
+	"fmt"
+	"io"
+	"os"
+)
+func writeTo(w io.Writer) {
+	fmt.Fprintf(w, "a")
+	fmt.Fprintln(w, "b")
+}
+func Main() {
+	writeTo(os.Stderr)
+	var w io.Writer = os.Stdout
+	var r io.Reader = os.Stdin
+	_ = w
+	_ = r
+	var buf [4]byte
+	n, err := os.Stdin.Read(buf[:])
+	if n != 0 || err != io.EOF {
+		panic("expected 0, io.EOF")
+	}
+}`;
+	const { output } = compileHybrid(src).run("Main");
+	assertEqual(output, "ab");
+});
+
+test("os.File.Write returns byte slice length for multi-byte UTF-8", () => {
+	const src = `package main
+import (
+	"os"
+)
+func Main() int {
+	b := []byte("世界\\n")
+	n, err := os.Stdout.Write(b)
+	if err != nil {
+		panic("write failed")
+	}
+	return n
+}`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, 7n);
+	assertEqual(jsRes, 7);
 });
 
 // ═════════════════════════════════════════════════════════════
@@ -1093,6 +1204,29 @@ func main() {
 	assertEqual(runJs(js), "true\nfalse");
 });
 
+test("slices.Contains and slices.Index compare structs and arrays by value (Task 0.19d)", () => {
+	const res = compileHybrid(`//gofront:target both
+package main
+
+import "slices"
+
+type P struct{ X, Y int }
+
+func Main() int {
+	ps := []P{{1, 2}, {3, 4}}
+	as := [][2]int{{5, 6}, {7, 8}}
+	r := slices.Index(ps, P{3, 4})*100 + slices.Index(as, [2]int{7, 8})*10
+	if slices.Contains(ps, P{1, 2}) && !slices.Contains(ps, P{2, 1}) {
+		r++
+	}
+	var none []P
+	return r + slices.Index(none, P{})*1000
+}
+`).run("Main");
+	assertEqual(res.jsRes, -889);
+	assertEqual(res.wasmRes, -889n);
+});
+
 test("slices.Index", () => {
 	const { js, errors } = compile(`package main
 func main() {
@@ -1373,38 +1507,76 @@ func main() {
 	assertEqual(runJs(js), "3");
 });
 
+test("slices functions on slice views (Task 0.20)", () => {
+	const { js, errors } = compile(`package main
+func main() {
+	b := []int{9, 1, 2, 2, 3, 4, 9}
+	c := slices.Compact(b[1:6])
+	console.log(len(c), c[0], c[3], b[2], b[3])
+	e := []int{9, 1, 2, 3, 4, 9}
+	d := slices.Delete(e[1:5], 1, 2)
+	console.log(len(d), d[1], e[2])
+	f := []int{9, 1, 2, 3, 9}
+	g := slices.DeleteFunc(f[1:4], func(n int) bool { return n == 2 })
+	console.log(len(g), g[1], f[2])
+	h := []int{9, 1, 2}
+	k := slices.Insert(h[1:3], 1, 7)
+	console.log(len(k), k[1], k[2])
+	q := []int{9, 1, 2}
+	r := slices.Replace(q[1:3], 0, 1, 5, 6)
+	console.log(len(r), r[0], r[2])
+	s := []int{9, 3, 1, 2, 0}
+	slices.Sort(s[1:4])
+	slices.Reverse(s[3:])
+	console.log(s[1], s[2], s[3], s[4])
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "4 1 4 2 3\n3 3 3\n2 3 3\n3 7 2\n3 5 2\n1 2 0 3");
+});
+
 // ═════════════════════════════════════════════════════════════
 // maps package
 // ═════════════════════════════════════════════════════════════
 
 section("maps package");
 
-test("maps.Keys", () => {
-	const { js, errors } = compile(`package main
+// maps.Keys/Values are Go-source (iter.Seq), which the single-file `compile`
+// helper does not load: build `body` as a project's main package instead.
+async function runMapsMain(body) {
+	const res = await compileHybridProject({
+		"main.go": `package main
+
+import (
+	"maps"
+	"slices"
+)
+
 func main() {
-	m := map[string]int{"a": 1, "b": 2, "c": 3}
-	keys := maps.Keys(m)
+${body}
+}
+`,
+	});
+	return res.lines.join("\n");
+}
+
+test("maps.Keys", async () => {
+	const out = await runMapsMain(`	m := map[string]int{"a": 1, "b": 2, "c": 3}
+	keys := slices.Collect(maps.Keys(m))
 	slices.Sort(keys)
 	for _, k := range keys {
 		console.log(k)
-	}
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "a\nb\nc");
+	}`);
+	assertEqual(out, "a\nb\nc");
 });
 
-test("maps.Values", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	m := map[string]int{"x": 10, "y": 20}
-	vals := maps.Values(m)
+test("maps.Values", async () => {
+	const out = await runMapsMain(`	m := map[string]int{"x": 10, "y": 20}
+	vals := slices.Collect(maps.Values(m))
 	slices.Sort(vals)
 	for _, v := range vals {
 		console.log(v)
-	}
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "10\n20");
+	}`);
+	assertEqual(out, "10\n20");
 });
 
 test("maps.Clone", () => {
@@ -1420,20 +1592,16 @@ func main() {
 	assertEqual(runJs(js), "1\n2");
 });
 
-test("maps.Copy", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	dst := map[string]int{"a": 1}
+test("maps.Copy", async () => {
+	const out = await runMapsMain(`	dst := map[string]int{"a": 1}
 	src := map[string]int{"b": 2, "c": 3}
 	maps.Copy(dst, src)
-	keys := maps.Keys(dst)
+	keys := slices.Collect(maps.Keys(dst))
 	slices.Sort(keys)
 	for _, k := range keys {
 		console.log(k)
-	}
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "a\nb\nc");
+	}`);
+	assertEqual(out, "a\nb\nc");
 });
 
 test("maps.Equal", () => {
@@ -1449,19 +1617,15 @@ func main() {
 	assertEqual(runJs(js), "true\nfalse");
 });
 
-test("maps.Delete", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	m := map[string]int{"a": 1, "b": 2, "c": 3}
+test("maps.Delete", async () => {
+	const out = await runMapsMain(`	m := map[string]int{"a": 1, "b": 2, "c": 3}
 	maps.Delete(m, "b")
-	keys := maps.Keys(m)
+	keys := slices.Collect(maps.Keys(m))
 	slices.Sort(keys)
 	for _, k := range keys {
 		console.log(k)
-	}
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "a\nc");
+	}`);
+	assertEqual(out, "a\nc");
 });
 
 test("maps.EqualFunc", () => {
@@ -1476,19 +1640,15 @@ func main() {
 	assertEqual(runJs(js), "true");
 });
 
-test("maps.DeleteFunc", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	m := map[string]int{"a": 1, "b": 2, "c": 3}
+test("maps.DeleteFunc", async () => {
+	const out = await runMapsMain(`	m := map[string]int{"a": 1, "b": 2, "c": 3}
 	maps.DeleteFunc(m, func(k string, v int) bool { return v > 1 })
-	keys := maps.Keys(m)
+	keys := slices.Collect(maps.Keys(m))
 	slices.Sort(keys)
 	for _, k := range keys {
 		console.log(k)
-	}
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "a");
+	}`);
+	assertEqual(out, "a");
 });
 
 // ═════════════════════════════════════════════════════════════
@@ -2456,6 +2616,1387 @@ func main() {
 }`);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "1\ntrue\nhello");
+});
+
+test("strings.ToValidUTF8", () => {
+	const { js, errors } = compile(`package main
+import "strings"
+func main() {
+	console.log(strings.ToValidUTF8("hello", "X"))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "hello");
+});
+
+test("strings.Reader method gaps", () => {
+	const { js, errors } = compile(`package main
+import (
+	"strings"
+)
+func main() {
+	r := strings.NewReader("hello world")
+	console.log(r.Len())
+	console.log(r.Size())
+	b, _ := r.ReadByte()
+	console.log(string(b))
+	_ = r.UnreadByte()
+	b, _ = r.ReadByte()
+	console.log(string(b))
+	pos, _ := r.Seek(0, 0)
+	console.log(pos)
+	buf := make([]byte, 4)
+	n, _ := r.ReadAt(buf, 6)
+	console.log(n)
+	console.log(string(buf[:n]))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "11\n11\nh\nh\n0\n4\nworl");
+});
+
+// ── Real-Go conformance (expected output captured from go run) ──
+
+test("real Go output: strconv/basic on JS and WASM", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"fmt"
+	"strconv"
+)
+
+func main() {
+	fmt.Println(strconv.Itoa(-42), strconv.Itoa(0))
+	n, err := strconv.Atoi("123")
+	fmt.Println(n, err)
+	_, err = strconv.Atoi("12a")
+	fmt.Println(err)
+	i, err := strconv.ParseInt("-ff", 16, 64)
+	fmt.Println(i, err)
+	b, err := strconv.ParseBool("true")
+	fmt.Println(b, err)
+	fmt.Println(strconv.FormatInt(255, 2), strconv.FormatInt(-255, 16))
+	fmt.Println(strconv.FormatBool(false))
+	fmt.Println(strconv.Quote("tab\\there"))
+	f, err := strconv.ParseFloat("3.25", 64)
+	fmt.Println(f, err)
+}
+`,
+		`-42 0
+123 <nil>
+strconv.Atoi: parsing "12a": invalid syntax
+-255 <nil>
+true <nil>
+11111111 -ff
+false
+"tab\\there"
+3.25 <nil>
+`,
+	);
+});
+
+test("real Go output: strconv/errors on JS and WASM", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"errors"
+	"fmt"
+	"strconv"
+)
+
+func testAtoiErrors() {
+	_, err := strconv.Atoi("123")
+	fmt.Printf("Atoi valid err: %v\\n", err)
+
+	_, err = strconv.Atoi("abc")
+	var numErr *strconv.NumError
+	asNumErr := errors.As(err, &numErr)
+	fmt.Printf("Atoi invalid: isSyntax=%v isRange=%v isUnsupported=%v asNumErr=%v\\n",
+		errors.Is(err, strconv.ErrSyntax),
+		errors.Is(err, strconv.ErrRange),
+		errors.Is(err, errors.ErrUnsupported),
+		asNumErr,
+	)
+	if asNumErr {
+		fmt.Printf("NumError fields: Func=%s Num=%s isErrSyntax=%v\\n",
+			numErr.Func, numErr.Num, errors.Is(numErr.Err, strconv.ErrSyntax))
+	}
+	fmt.Printf("Error string: %s\\n", err.Error())
+
+	_, err = strconv.Atoi("9999999999999999999999999999999999")
+	fmt.Printf("Atoi range: isSyntax=%v isRange=%v\\n",
+		errors.Is(err, strconv.ErrSyntax),
+		errors.Is(err, strconv.ErrRange),
+	)
+}
+
+func testParseIntErrors() {
+	_, err := strconv.ParseInt("xyz", 10, 64)
+	fmt.Printf("ParseInt syntax: isSyntax=%v isRange=%v\\n",
+		errors.Is(err, strconv.ErrSyntax),
+		errors.Is(err, strconv.ErrRange),
+	)
+
+	_, err = strconv.ParseInt("200", 10, 8)
+	var numErr *strconv.NumError
+	asNumErr := errors.As(err, &numErr)
+	fmt.Printf("ParseInt range: isSyntax=%v isRange=%v asNumErr=%v Func=%s\\n",
+		errors.Is(err, strconv.ErrSyntax),
+		errors.Is(err, strconv.ErrRange),
+		asNumErr,
+		numErr.Func,
+	)
+}
+
+func testParseUintAndFloatAndBool() {
+	_, err := strconv.ParseUint("300", 10, 8)
+	fmt.Printf("ParseUint range: isSyntax=%v isRange=%v\\n",
+		errors.Is(err, strconv.ErrSyntax),
+		errors.Is(err, strconv.ErrRange),
+	)
+
+	_, err = strconv.ParseFloat("notafloat", 64)
+	fmt.Printf("ParseFloat syntax: isSyntax=%v isRange=%v\\n",
+		errors.Is(err, strconv.ErrSyntax),
+		errors.Is(err, strconv.ErrRange),
+	)
+
+	_, err = strconv.ParseBool("maybe")
+	fmt.Printf("ParseBool syntax: isSyntax=%v isRange=%v\\n",
+		errors.Is(err, strconv.ErrSyntax),
+		errors.Is(err, strconv.ErrRange),
+	)
+
+	fmt.Printf("ErrUnsupported: isSelf=%v\\n", errors.Is(errors.ErrUnsupported, errors.ErrUnsupported))
+}
+
+func testQuoting() {
+	fmt.Printf("QuoteRune: %s %s %s\\n",
+		strconv.QuoteRune('a'),
+		strconv.QuoteRune('\\n'),
+		strconv.QuoteRune('世'),
+	)
+
+	fmt.Printf("QuoteToASCII: %s\\n", strconv.QuoteToASCII("hello 世界\\n"))
+	fmt.Printf("QuoteRuneToASCII: %s\\n", strconv.QuoteRuneToASCII('世'))
+
+	b := strconv.AppendQuote(nil, "abc")
+	b = append(b, ' ')
+	b = strconv.AppendQuoteToASCII(b, "世界")
+	b = append(b, ' ')
+	b = strconv.AppendQuoteRune(b, '\\U0001F680')
+	b = append(b, ' ')
+	b = strconv.AppendQuoteRuneToASCII(b, '\\U0001F680')
+	fmt.Printf("Appends: %s\\n", string(b))
+
+	fmt.Printf("CanBackquote: %v %v %v\\n",
+		strconv.CanBackquote("hello world\\t"),
+		strconv.CanBackquote("hello\\nworld"),
+		strconv.CanBackquote("hello\`world"),
+	)
+
+	v, mb, tail, err := strconv.UnquoteChar(\`\\n\`, 0)
+	fmt.Printf("UnquoteChar \\\\n: val=%U mb=%v tail=%q err=%v\\n", v, mb, tail, err)
+
+	v, mb, tail, err = strconv.UnquoteChar("abc", 0)
+	fmt.Printf("UnquoteChar abc: val=%U mb=%v tail=%q err=%v\\n", v, mb, tail, err)
+
+	v, mb, tail, err = strconv.UnquoteChar(\`\\u4e16\`, 0)
+	fmt.Printf("UnquoteChar \\\\u4e16: val=%U mb=%v tail=%q err=%v\\n", v, mb, tail, err)
+
+	prefix, pErr := strconv.QuotedPrefix(\`"hello" world\`)
+	fmt.Printf("QuotedPrefix: prefix=%q err=%v\\n", prefix, pErr)
+
+	fmt.Printf("IsPrint: a=%v newline=%v world=%v\\n",
+		strconv.IsPrint('a'),
+		strconv.IsPrint('\\n'),
+		strconv.IsPrint('世'),
+	)
+}
+
+func main() {
+	testAtoiErrors()
+	testParseIntErrors()
+	testParseUintAndFloatAndBool()
+	testQuoting()
+}
+`,
+		`Atoi valid err: <nil>
+Atoi invalid: isSyntax=true isRange=false isUnsupported=false asNumErr=true
+NumError fields: Func=Atoi Num=abc isErrSyntax=true
+Error string: strconv.Atoi: parsing "abc": invalid syntax
+Atoi range: isSyntax=false isRange=true
+ParseInt syntax: isSyntax=true isRange=false
+ParseInt range: isSyntax=false isRange=true asNumErr=true Func=ParseInt
+ParseUint range: isSyntax=false isRange=true
+ParseFloat syntax: isSyntax=true isRange=false
+ParseBool syntax: isSyntax=true isRange=false
+ErrUnsupported: isSelf=true
+QuoteRune: 'a' '\\n' '世'
+QuoteToASCII: "hello \\u4e16\\u754c\\n"
+QuoteRuneToASCII: '\\u4e16'
+Appends: "abc" "\\u4e16\\u754c" '🚀' '\\U0001f680'
+CanBackquote: true false false
+UnquoteChar \\n: val=U+000A mb=false tail="" err=<nil>
+UnquoteChar abc: val=U+0061 mb=false tail="bc" err=<nil>
+UnquoteChar \\u4e16: val=U+4E16 mb=true tail="" err=<nil>
+QuotedPrefix: prefix="\\"hello\\"" err=<nil>
+IsPrint: a=true newline=false world=true
+`,
+	);
+});
+
+test("real Go output: io/io on JS and WASM", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"io"
+	"strings"
+)
+
+type customByteWriter struct {
+	buf []byte
+}
+
+func (w *customByteWriter) WriteByte(c byte) error {
+	w.buf = append(w.buf, c)
+	return nil
+}
+
+type memWriter struct {
+	buf []byte
+}
+
+func (w *memWriter) Write(p []byte) (n int, err error) {
+	w.buf = append(w.buf, p...)
+	return len(p), nil
+}
+
+func (w *memWriter) WriteString(s string) (n int, err error) {
+	bs := []byte(s)
+	w.buf = append(w.buf, bs...)
+	return len(s), nil
+}
+
+func (w *memWriter) String() string {
+	return string(w.buf)
+}
+
+type stringReaderAt string
+
+func (s stringReaderAt) ReadAt(p []byte, off int64) (n int, err error) {
+	if off < 0 {
+		return 0, errors.New("negative offset")
+	}
+	if off >= int64(len(s)) {
+		return 0, io.EOF
+	}
+	sub := s[off:]
+	n = copy(p, []byte(sub))
+	if n < len(p) {
+		err = io.EOF
+	}
+	return n, err
+}
+
+func main() {
+	// 1. Errors
+	fmt.Println("ErrUnexpectedEOF:", io.ErrUnexpectedEOF)
+	fmt.Println("ErrShortWrite:", io.ErrShortWrite)
+	fmt.Println("ErrShortBuffer:", io.ErrShortBuffer)
+	fmt.Println("Is unexpected EOF:", errors.Is(io.ErrUnexpectedEOF, io.ErrUnexpectedEOF))
+
+	// 2. ReadAtLeast & ReadFull
+	r := strings.NewReader("Hello, GoFront!")
+	buf := make([]byte, 5)
+	n, err := io.ReadFull(r, buf)
+	fmt.Printf("ReadFull: n=%d err=%v str=%s\\n", n, err, string(buf))
+
+	buf2 := make([]byte, 10)
+	n, err = io.ReadAtLeast(r, buf2, 5)
+	fmt.Printf("ReadAtLeast 5/10: n=%d err=%v str=%s\\n", n, err, string(buf2[:n]))
+
+	// ReadFull with insufficient data -> ErrUnexpectedEOF
+	buf3 := make([]byte, 10)
+	rShort := strings.NewReader("123")
+	n, err = io.ReadFull(rShort, buf3)
+	fmt.Printf("ReadFull short: n=%d err=%v\\n", n, err == io.ErrUnexpectedEOF)
+
+	// ReadAtLeast min > len(buf) -> ErrShortBuffer
+	_, err = io.ReadAtLeast(r, buf[:2], 5)
+	fmt.Printf("ReadAtLeast short buffer: %v\\n", err == io.ErrShortBuffer)
+
+	// 3. MultiReader
+	mr := io.MultiReader(
+		strings.NewReader("foo "),
+		strings.NewReader("bar "),
+		strings.NewReader("baz"),
+	)
+	var all bytes.Buffer
+	b := make([]byte, 4)
+	for {
+		rn, rerr := mr.Read(b)
+		if rn > 0 {
+			all.Write(b[:rn])
+		}
+		if rerr == io.EOF {
+			break
+		}
+		if rerr != nil {
+			fmt.Println("MultiReader error:", rerr)
+			break
+		}
+	}
+	fmt.Println("MultiReader result:", all.String())
+
+	// 4. MultiWriter
+	var out1, out2 memWriter
+	mw := io.MultiWriter(&out1, &out2)
+	wn, werr := mw.Write([]byte("multi write test"))
+	fmt.Printf("MultiWriter: n=%d err=%v out1=%s out2=%s\\n", wn, werr, out1.String(), out2.String())
+
+	// 5. TeeReader
+	src := strings.NewReader("tee data")
+	var teeBuf memWriter
+	tr := io.TeeReader(src, &teeBuf)
+	tread := make([]byte, 8)
+	tn, _ := tr.Read(tread)
+	fmt.Printf("TeeReader: read=%s teeBuf=%s\\n", string(tread[:tn]), teeBuf.String())
+
+	// 6. NopCloser
+	nc := io.NopCloser(strings.NewReader("closed"))
+	fmt.Printf("NopCloser close: %v\\n", nc.Close())
+	cp := make([]byte, 6)
+	cn, _ := nc.Read(cp)
+	fmt.Printf("NopCloser read: %s\\n", string(cp[:cn]))
+
+	// 7. SectionReader
+	srSrc := stringReaderAt("0123456789abcdef")
+	sr := io.NewSectionReader(srSrc, 4, 8)
+	fmt.Printf("SectionReader Size: %d\\n", sr.Size())
+	sbuf := make([]byte, 4)
+	sn, _ := sr.Read(sbuf)
+	fmt.Printf("SectionReader Read 1: %s\\n", string(sbuf[:sn]))
+	sn, _ = sr.Read(sbuf)
+	fmt.Printf("SectionReader Read 2: %s\\n", string(sbuf[:sn]))
+	_, eofErr := sr.Read(sbuf)
+	fmt.Printf("SectionReader EOF: %v\\n", eofErr == io.EOF)
+
+	// Seek
+	newOff, _ := sr.Seek(2, io.SeekStart)
+	fmt.Printf("SectionReader Seek: off=%d\\n", newOff)
+	sn, _ = sr.Read(sbuf)
+	fmt.Printf("SectionReader Read after seek: %s\\n", string(sbuf[:sn]))
+
+	// ReadAt
+	atBuf := make([]byte, 4)
+	atN, _ := sr.ReadAt(atBuf, 1)
+	fmt.Printf("SectionReader ReadAt 1: %s (n=%d)\\n", string(atBuf[:atN]), atN)
+
+	// 8. ByteWriter interface check
+	cbw := &customByteWriter{}
+	var bw io.ByteWriter = cbw
+	bw.WriteByte('A')
+	bw.WriteByte('B')
+	fmt.Printf("ByteWriter: %s\\n", string(cbw.buf))
+
+	// 9. StringWriter interface check
+	var sw io.StringWriter = &out1
+	sw.WriteString(" string writer")
+	fmt.Println("StringWriter:", out1.String())
+}
+`,
+		`ErrUnexpectedEOF: unexpected EOF
+ErrShortWrite: short write
+ErrShortBuffer: short buffer
+Is unexpected EOF: true
+ReadFull: n=5 err=<nil> str=Hello
+ReadAtLeast 5/10: n=10 err=<nil> str=, GoFront!
+ReadFull short: n=3 err=true
+ReadAtLeast short buffer: true
+MultiReader result: foo bar baz
+MultiWriter: n=16 err=<nil> out1=multi write test out2=multi write test
+TeeReader: read=tee data teeBuf=tee data
+NopCloser close: <nil>
+NopCloser read: closed
+SectionReader Size: 8
+SectionReader Read 1: 4567
+SectionReader Read 2: 89ab
+SectionReader EOF: true
+SectionReader Seek: off=2
+SectionReader Read after seek: 6789
+SectionReader ReadAt 1: 5678 (n=4)
+ByteWriter: AB
+StringWriter: multi write test string writer
+`,
+	);
+});
+
+test("real Go output: strings/basic on JS and WASM", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"fmt"
+	"strings"
+)
+
+func main() {
+	fmt.Println(strings.ToUpper("hello"), strings.ToLower("WORLD"))
+	fmt.Println(strings.Contains("seafood", "foo"), strings.Contains("seafood", "bar"))
+	fmt.Println(strings.HasPrefix("golang", "go"), strings.HasSuffix("golang", "ng"))
+	fmt.Println(strings.Index("chicken", "ken"), strings.Index("chicken", "dmr"))
+	fmt.Println(strings.LastIndex("go gopher", "go"))
+	fmt.Println(strings.Repeat("ab", 3))
+	fmt.Println(strings.Replace("oink oink oink", "k", "ky", 2))
+	fmt.Println(strings.ReplaceAll("oink oink oink", "oink", "moo"))
+	fmt.Println(strings.Split("a,b,c", ","), len(strings.Split("a,b,c", ",")))
+	fmt.Println(strings.Fields("  foo bar  baz   "), len(strings.Fields(" x  y ")))
+	fmt.Println(strings.Join([]string{"x", "y", "z"}, "-"))
+	fmt.Printf("[%s]\\n", strings.TrimSpace("  \\t padded \\n "))
+	fmt.Println(strings.Trim("xxhixx", "x"), strings.TrimPrefix("prefix-body", "prefix-"))
+	fmt.Println(strings.Count("cheese", "e"), strings.Count("five", ""))
+	fmt.Println(strings.EqualFold("Go", "GO"))
+}
+`,
+		`HELLO world
+true false
+true true
+4 -1
+3
+ababab
+oinky oinky oink
+moo moo moo
+[a b c] 3
+[foo bar baz] 2
+x-y-z
+[padded]
+hi body
+3 5
+true
+`,
+	);
+});
+
+test("real Go output: strings/extra on JS and WASM", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"bytes"
+	"fmt"
+	"strings"
+	"slices"
+	"unicode"
+)
+
+func main() {
+	fmt.Println(strings.Clone("héllo"), strings.Clone(""))
+	fmt.Println(strings.Compare("a", "b"), strings.Compare("b", "a"), strings.Compare("a", "a"), strings.Compare("", "a"), strings.Compare("ab", "a"))
+	isUpper := func(r rune) bool { return unicode.IsUpper(r) }
+	fmt.Println(strings.ContainsFunc("abC", isUpper), strings.ContainsFunc("abc", isUpper), strings.ContainsFunc("", isUpper), strings.ContainsFunc("日本Ä", isUpper))
+
+	r := strings.NewReplacer("a", "1", "b", "22", "<", "&lt;")
+	var buf bytes.Buffer
+	n, err := r.WriteString(&buf, "abc<abc")
+	fmt.Println(n, err, buf.String())
+	var sb strings.Builder
+	n, err = r.WriteString(&sb, "")
+	fmt.Println(n, err, sb.String())
+	n, err = r.WriteString(&sb, "ba")
+	fmt.Println(n, err, sb.String())
+
+	cmpLen := func(a string, b int) int { return len(a) - b }
+	fmt.Println(slices.CompareFunc([]string{"a", "bb"}, []int{1, 2}, cmpLen))
+	fmt.Println(slices.CompareFunc([]string{"a", "bb"}, []int{1, 3}, cmpLen))
+	fmt.Println(slices.CompareFunc([]string{"a", "bb"}, []int{1}, cmpLen))
+	fmt.Println(slices.CompareFunc([]string{"a"}, []int{1, 2}, cmpLen))
+	fmt.Println(slices.CompareFunc([]string{"a"}, []int{0}, cmpLen))
+	var n1 []string
+	var n2 []int
+	fmt.Println(slices.CompareFunc(n1, n2, cmpLen))
+	eqLen := func(a string, b int) bool { return len(a) == b }
+	fmt.Println(slices.EqualFunc([]string{"a", "bb"}, []int{1, 2}, eqLen))
+	fmt.Println(slices.EqualFunc([]string{"a", "bb"}, []int{1, 3}, eqLen))
+	fmt.Println(slices.EqualFunc([]string{"a"}, []int{1, 2}, eqLen))
+
+	rep := slices.Repeat([]int{1, 2, 3}, 3)
+	fmt.Println(rep, len(rep), cap(rep))
+	rep = slices.Repeat([]int{1, 2}, 0)
+	fmt.Println(rep, len(rep), cap(rep), rep == nil)
+	var nilInts []int
+	rep = slices.Repeat(nilInts, 5)
+	fmt.Println(rep, len(rep), rep == nil)
+	src := []string{"x"}
+	rs := slices.Repeat(src, 3)
+	rs[0] = "y"
+	fmt.Println(rs, src)
+}
+`,
+		`héllo 
+-1 1 0 -1 1
+true false false true
+12 <nil> 122c&lt;122c
+0 <nil> 
+3 <nil> 221
+0
+-1
+1
+-1
+1
+0
+true
+false
+false
+[1 2 3 1 2 3 1 2 3] 9 9
+[] 0 0 false
+[] 0 false
+[y x x] [x]
+`,
+	);
+});
+
+test("real Go output: strings/members on JS and WASM", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"fmt"
+	"io"
+	"strings"
+)
+
+func main() {
+	// ToValidUTF8
+	fmt.Println(strings.ToValidUTF8("hello", "X"))
+	fmt.Println(strings.ToValidUTF8("héllo", "X"))
+
+	// NewReader
+	r := strings.NewReader("hello world")
+	fmt.Println(r.Len(), r.Size())
+
+	b := make([]byte, 5)
+	n, err := r.Read(b)
+	fmt.Printf("%d %s %v\\n", n, string(b[:n]), err)
+
+	ch, err := r.ReadByte()
+	fmt.Printf("%c %v\\n", ch, err)
+
+	err = r.UnreadByte()
+	fmt.Println(err == nil)
+
+	ch, err = r.ReadByte()
+	fmt.Printf("%c %v\\n", ch, err)
+
+	r2 := strings.NewReader("héllo")
+	rn, rsz, err := r2.ReadRune()
+	fmt.Printf("%c %d %v\\n", rn, rsz, err)
+	rn, rsz, err = r2.ReadRune()
+	fmt.Printf("%c %d %v\\n", rn, rsz, err)
+	err = r2.UnreadRune()
+	fmt.Println(err == nil)
+	rn, rsz, err = r2.ReadRune()
+	fmt.Printf("%c %d %v\\n", rn, rsz, err)
+
+	atBuf := make([]byte, 4)
+	n, err = r.ReadAt(atBuf, 6)
+	fmt.Printf("%d %s %v\\n", n, string(atBuf[:n]), err)
+
+	pos, err := r.Seek(0, io.SeekStart)
+	fmt.Printf("%d %v\\n", pos, err)
+	pos, err = r.Seek(2, io.SeekCurrent)
+	fmt.Printf("%d %v\\n", pos, err)
+	pos, err = r.Seek(-3, io.SeekEnd)
+	fmt.Printf("%d %v\\n", pos, err)
+
+	r.Reset("reset string")
+	fmt.Println(r.Len(), r.Size())
+}
+`,
+		`hello
+héllo
+11 11
+5 hello <nil>
+  <nil>
+true
+  <nil>
+h 1 <nil>
+é 2 <nil>
+true
+é 2 <nil>
+4 worl <nil>
+0 <nil>
+2 <nil>
+8 <nil>
+12 12
+`,
+	);
+});
+
+test("real Go output: strings/seq on JS and WASM", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"fmt"
+	"slices"
+	"strings"
+	"unicode"
+)
+
+// vis makes newlines visible: the fmt %q verb does not escape them yet.
+func vis(s string) string { return "<" + strings.ReplaceAll(s, "\\n", "\\\\n") + ">" }
+
+// list shows parts between brackets, separated by "|": the fmt %q verb on a
+// []string does not quote element by element yet.
+func list(parts []string) string { return "[" + strings.Join(parts, "|") + "]" }
+
+func isDigit(r rune) bool { return unicode.IsDigit(r) }
+
+func main() {
+	// Lines keeps the terminators; no line for an empty string.
+	for l := range strings.Lines("one\\ntwo\\n\\nthree") {
+		fmt.Println("line", vis(l))
+	}
+	fmt.Println(len(slices.Collect(strings.Lines(""))))
+	fmt.Println(len(slices.Collect(strings.Lines("\\n"))), len(slices.Collect(strings.Lines("a\\r\\nb\\n"))))
+
+	// SplitSeq / SplitAfterSeq
+	fmt.Println(list(slices.Collect(strings.SplitSeq("a,b,,c", ","))))
+	fmt.Println(list(slices.Collect(strings.SplitAfterSeq("a,b,,c", ","))))
+	fmt.Println(list(slices.Collect(strings.SplitSeq("a--b--c", "--"))))
+	fmt.Println(list(slices.Collect(strings.SplitSeq("", ","))))
+	fmt.Println(list(slices.Collect(strings.SplitSeq("abc", ""))))
+	fmt.Println(list(slices.Collect(strings.SplitAfterSeq("abc", ""))))
+	fmt.Println(list(slices.Collect(strings.SplitSeq("trailing,", ","))))
+	fmt.Println(list(slices.Collect(strings.SplitSeq("no separator", ","))))
+	fmt.Println(slices.Collect(strings.SplitSeq("héllo wörld", "ö")))
+	fmt.Println(slices.Collect(strings.SplitSeq("日本語", "")))
+
+	// FieldsSeq / FieldsFuncSeq
+	fmt.Println(list(slices.Collect(strings.FieldsSeq("  foo bar\\t baz\\n"))))
+	fmt.Println(len(slices.Collect(strings.FieldsSeq("   "))), len(slices.Collect(strings.FieldsSeq(""))))
+	fmt.Println(slices.Collect(strings.FieldsSeq("α β γ")))
+	isSep := func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }
+	fmt.Println(list(slices.Collect(strings.FieldsFuncSeq("  foo1bar2  baz  ", isDigit))))
+	fmt.Println(list(slices.Collect(strings.FieldsFuncSeq("a1,b2;; c3", isSep))))
+	fmt.Println(len(slices.Collect(strings.FieldsFuncSeq("", isSep))))
+
+	// The sequences give what the slice functions return.
+	s := "x=1;y=2;;z=3"
+	fmt.Println(slices.Equal(slices.Collect(strings.SplitSeq(s, ";")), strings.Split(s, ";")))
+	fmt.Println(slices.Equal(slices.Collect(strings.SplitAfterSeq(s, ";")), strings.SplitAfter(s, ";")))
+	fmt.Println(slices.Equal(slices.Collect(strings.FieldsSeq(" a b  c ")), strings.Fields(" a b  c ")))
+
+	// Early break stops the iteration.
+	n := 0
+	for part := range strings.SplitSeq("a b c d e", " ") {
+		n++
+		if part == "c" {
+			break
+		}
+	}
+	fmt.Println("visited", n)
+	for f := range strings.FieldsSeq("first second third") {
+		fmt.Println("first field", f)
+		break
+	}
+	for l := range strings.Lines("x\\ny\\n") {
+		fmt.Println("first line", vis(l))
+		break
+	}
+}
+`,
+		`line <one\\n>
+line <two\\n>
+line <\\n>
+line <three>
+0
+1 2
+[a|b||c]
+[a,|b,|,|c]
+[a|b|c]
+[]
+[a|b|c]
+[a|b|c]
+[trailing|]
+[no separator]
+[héllo w rld]
+[日 本 語]
+[foo|bar|baz]
+0 0
+[α β γ]
+[  foo|bar|  baz  ]
+[a1|b2|c3]
+0
+true
+true
+true
+visited 3
+first field first
+first line <x\\n>
+`,
+	);
+});
+
+test("real Go output: utf8/bytes on JS and WASM", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"fmt"
+	"unicode/utf8"
+)
+
+func main() {
+	// EncodeRune & AppendRune
+	var buf [4]byte
+	n := utf8.EncodeRune(buf[:], 'A')
+	fmt.Printf("Encode ASCII: %d %x\\n", n, buf[:n])
+	n = utf8.EncodeRune(buf[:], 'é')
+	fmt.Printf("Encode 2-byte: %d %x\\n", n, buf[:n])
+	n = utf8.EncodeRune(buf[:], '界')
+	fmt.Printf("Encode 3-byte: %d %x\\n", n, buf[:n])
+	n = utf8.EncodeRune(buf[:], '\\U0001F680')
+	fmt.Printf("Encode 4-byte: %d %x\\n", n, buf[:n])
+	n = utf8.EncodeRune(buf[:], -1)
+	fmt.Printf("Encode invalid: %d %x\\n", n, buf[:n])
+
+	var b []byte
+	b = utf8.AppendRune(b, 'H')
+	b = utf8.AppendRune(b, 'e')
+	b = utf8.AppendRune(b, 'l')
+	b = utf8.AppendRune(b, 'l')
+	b = utf8.AppendRune(b, 'o')
+	b = utf8.AppendRune(b, ' ')
+	b = utf8.AppendRune(b, '世')
+	b = utf8.AppendRune(b, '界')
+	b = utf8.AppendRune(b, '!')
+	fmt.Printf("Append: %s (%d bytes)\\n", string(b), len(b))
+
+	// DecodeRune
+	sample := []byte("Hello 世界 \\U0001F680")
+	pos := 0
+	for pos < len(sample) {
+		r, sz := utf8.DecodeRune(sample[pos:])
+		fmt.Printf("Decode at %d: %c (%U) size=%d\\n", pos, r, r, sz)
+		pos += sz
+	}
+	r, sz := utf8.DecodeRune([]byte{})
+	fmt.Printf("Decode empty: %U size=%d\\n", r, sz)
+	r, sz = utf8.DecodeRune([]byte{0xff})
+	fmt.Printf("Decode invalid: %U size=%d\\n", r, sz)
+
+	// DecodeLastRune
+	pos = len(sample)
+	for pos > 0 {
+		r, sz := utf8.DecodeLastRune(sample[:pos])
+		fmt.Printf("DecodeLast at %d: %c (%U) size=%d\\n", pos, r, r, sz)
+		pos -= sz
+	}
+	r, sz = utf8.DecodeLastRune([]byte{})
+	fmt.Printf("DecodeLast empty: %U size=%d\\n", r, sz)
+	r, sz = utf8.DecodeLastRune([]byte{0xff})
+	fmt.Printf("DecodeLast invalid: %U size=%d\\n", r, sz)
+
+	// RuneCount
+	fmt.Printf("RuneCount sample: %d\\n", utf8.RuneCount(sample))
+	fmt.Printf("RuneCount empty: %d\\n", utf8.RuneCount([]byte{}))
+	fmt.Printf("RuneCount with invalid: %d\\n", utf8.RuneCount([]byte("abc\\xffdef")))
+
+	// FullRune
+	fmt.Printf("FullRune empty: %v\\n", utf8.FullRune([]byte{}))
+	fmt.Printf("FullRune ASCII: %v\\n", utf8.FullRune([]byte("a")))
+	fmt.Printf("FullRune partial 2-byte: %v\\n", utf8.FullRune([]byte{0xc3}))
+	fmt.Printf("FullRune full 2-byte: %v\\n", utf8.FullRune([]byte{0xc3, 0xa9}))
+	fmt.Printf("FullRune partial 3-byte: %v\\n", utf8.FullRune([]byte{0xe4, 0xb8}))
+	fmt.Printf("FullRune full 3-byte: %v\\n", utf8.FullRune([]byte{0xe4, 0xb8, 0x96}))
+	fmt.Printf("FullRune partial 4-byte: %v\\n", utf8.FullRune([]byte{0xf0, 0x9f, 0x9a}))
+	fmt.Printf("FullRune full 4-byte: %v\\n", utf8.FullRune([]byte{0xf0, 0x9f, 0x9a, 0x80}))
+	fmt.Printf("FullRune invalid byte: %v\\n", utf8.FullRune([]byte{0xff}))
+
+	// Valid
+	fmt.Printf("Valid sample: %v\\n", utf8.Valid(sample))
+	fmt.Printf("Valid empty: %v\\n", utf8.Valid([]byte{}))
+	fmt.Printf("Valid truncated: %v\\n", utf8.Valid([]byte{0xc3}))
+	fmt.Printf("Valid invalid 0xff: %v\\n", utf8.Valid([]byte{0xff}))
+	fmt.Printf("Valid surrogate: %v\\n", utf8.Valid([]byte{0xed, 0xa0, 0x80}))
+
+	// RuneStart & RuneSelf
+	fmt.Printf("RuneSelf: %d\\n", utf8.RuneSelf)
+	fmt.Printf("RuneStart 'a': %v\\n", utf8.RuneStart('a'))
+	fmt.Printf("RuneStart 0xc3: %v\\n", utf8.RuneStart(0xc3))
+	fmt.Printf("RuneStart 0x80: %v\\n", utf8.RuneStart(0x80))
+}
+`,
+		`Encode ASCII: 1 41
+Encode 2-byte: 2 c3a9
+Encode 3-byte: 3 e7958c
+Encode 4-byte: 4 f09f9a80
+Encode invalid: 3 efbfbd
+Append: Hello 世界! (13 bytes)
+Decode at 0: H (U+0048) size=1
+Decode at 1: e (U+0065) size=1
+Decode at 2: l (U+006C) size=1
+Decode at 3: l (U+006C) size=1
+Decode at 4: o (U+006F) size=1
+Decode at 5:   (U+0020) size=1
+Decode at 6: 世 (U+4E16) size=3
+Decode at 9: 界 (U+754C) size=3
+Decode at 12:   (U+0020) size=1
+Decode at 13: 🚀 (U+1F680) size=4
+Decode empty: U+FFFD size=0
+Decode invalid: U+FFFD size=1
+DecodeLast at 17: 🚀 (U+1F680) size=4
+DecodeLast at 13:   (U+0020) size=1
+DecodeLast at 12: 界 (U+754C) size=3
+DecodeLast at 9: 世 (U+4E16) size=3
+DecodeLast at 6:   (U+0020) size=1
+DecodeLast at 5: o (U+006F) size=1
+DecodeLast at 4: l (U+006C) size=1
+DecodeLast at 3: l (U+006C) size=1
+DecodeLast at 2: e (U+0065) size=1
+DecodeLast at 1: H (U+0048) size=1
+DecodeLast empty: U+FFFD size=0
+DecodeLast invalid: U+FFFD size=1
+RuneCount sample: 10
+RuneCount empty: 0
+RuneCount with invalid: 7
+FullRune empty: false
+FullRune ASCII: true
+FullRune partial 2-byte: false
+FullRune full 2-byte: true
+FullRune partial 3-byte: false
+FullRune full 3-byte: true
+FullRune partial 4-byte: false
+FullRune full 4-byte: true
+FullRune invalid byte: true
+Valid sample: true
+Valid empty: true
+Valid truncated: false
+Valid invalid 0xff: false
+Valid surrogate: false
+RuneSelf: 128
+RuneStart 'a': true
+RuneStart 0xc3: true
+RuneStart 0x80: false
+`,
+	);
+});
+
+test("real Go output: unicode/categories on JS and WASM", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"bytes"
+	"fmt"
+	"strings"
+	"unicode"
+)
+
+var testRunes = []rune{'a', 'Z', '5', ' ', '\\t', '\\n', '\\u0085', '\\u00a0', '\\u2000', '\\ufeff', '.', '$', '+', '\\u0300', '1', 'Ⅸ'}
+
+func testCategories() {
+	fmt.Print("IsLetter:")
+	for _, r := range testRunes {
+		fmt.Printf(" %c:%v", r, unicode.IsLetter(r))
+	}
+	fmt.Println()
+
+	fmt.Print("IsDigit:")
+	for _, r := range testRunes {
+		fmt.Printf(" %c:%v", r, unicode.IsDigit(r))
+	}
+	fmt.Println()
+
+	fmt.Print("IsSpace table:")
+	for _, r := range testRunes {
+		fmt.Printf(" %U:%v", r, unicode.IsSpace(r))
+	}
+	fmt.Println()
+
+	fmt.Print("IsUpper table:")
+	for _, r := range testRunes {
+		fmt.Printf(" %c:%v", r, unicode.IsUpper(r))
+	}
+	fmt.Println()
+
+	fmt.Print("IsLower table:")
+	for _, r := range testRunes {
+		fmt.Printf(" %c:%v", r, unicode.IsLower(r))
+	}
+	fmt.Println()
+
+	fmt.Print("IsPunct:")
+	for _, r := range testRunes {
+		fmt.Printf(" %c:%v", r, unicode.IsPunct(r))
+	}
+	fmt.Println()
+
+}
+
+func testHelpers() {
+}
+
+func testCaseFold() {
+	foldRunes := []rune{'A', 'a', 'K', 'k', 0x212A, '1', 's', 'S', 0x017F}
+	fmt.Print("SimpleFold:")
+	for _, r := range foldRunes {
+		fmt.Printf(" %U->%U", r, unicode.SimpleFold(r))
+	}
+	fmt.Println()
+	fmt.Printf("SimpleFold(-2): %d\\n", unicode.SimpleFold(-2))
+
+	for _, r := range []rune{'a', 'Z', 0x1C4, 0x1C5, 0x1C6, 0x10D0} {
+		fmt.Printf("%U: ToUpper=%U ToLower=%U ToTitle=%U ToTitle=%U\\n",
+			r,
+			unicode.ToUpper(r),
+			unicode.ToLower(r),
+			unicode.ToTitle(r),
+			unicode.ToTitle(r),
+		)
+	}
+}
+
+func testWhitespaceFields() {
+	spaceRunes := []rune{'\\t', '\\n', '\\v', '\\f', '\\r', ' ', 0x85, 0xA0, 0x1680, 0x2000, 0x2028, 0x2029, 0x202F, 0x205F, 0x3000, 0xFEFF, 'x'}
+	fmt.Print("unicode.IsSpace:")
+	for _, r := range spaceRunes {
+		fmt.Printf(" %U:%v", r, unicode.IsSpace(r))
+	}
+	fmt.Println()
+
+	p16Str := "a\\u0085b\\vc\\u00a0d\\ufeffe"
+	fmt.Printf("strings.Fields: %#v\\n", strings.Fields(p16Str))
+	byFields := bytes.Fields([]byte(p16Str))
+	fmt.Print("bytes.Fields:")
+	for _, b := range byFields {
+		fmt.Printf(" %q", string(b))
+	}
+	fmt.Println()
+
+	fmt.Print("strings.FieldsSeq:")
+	for w := range strings.FieldsSeq(p16Str) {
+		fmt.Printf(" %q", w)
+	}
+	fmt.Println()
+
+	fmt.Print("bytes.FieldsSeq:")
+	for w := range bytes.FieldsSeq([]byte(p16Str)) {
+		fmt.Printf(" %q", string(w))
+	}
+	fmt.Println()
+}
+
+func main() {
+	testCategories()
+	testHelpers()
+	testCaseFold()
+	testWhitespaceFields()
+}
+`,
+		`IsLetter: a:true Z:true 5:false  :false 	:false 
+:false :false  :false  :false ﻿:false .:false $:false +:false ̀:false 1:false Ⅸ:false
+IsDigit: a:false Z:false 5:true  :false 	:false 
+:false :false  :false  :false ﻿:false .:false $:false +:false ̀:false 1:true Ⅸ:false
+IsSpace table: U+0061:false U+005A:false U+0035:false U+0020:true U+0009:true U+000A:true U+0085:true U+00A0:true U+2000:true U+FEFF:false U+002E:false U+0024:false U+002B:false U+0300:false U+0031:false U+2168:false
+IsUpper table: a:false Z:true 5:false  :false 	:false 
+:false :false  :false  :false ﻿:false .:false $:false +:false ̀:false 1:false Ⅸ:false
+IsLower table: a:true Z:false 5:false  :false 	:false 
+:false :false  :false  :false ﻿:false .:false $:false +:false ̀:false 1:false Ⅸ:false
+IsPunct: a:false Z:false 5:false  :false 	:false 
+:false :false  :false  :false ﻿:false .:true $:false +:false ̀:false 1:false Ⅸ:false
+SimpleFold: U+0041->U+0061 U+0061->U+0041 U+004B->U+006B U+006B->U+212A U+212A->U+004B U+0031->U+0031 U+0073->U+017F U+0053->U+0073 U+017F->U+0053
+SimpleFold(-2): -2
+U+0061: ToUpper=U+0041 ToLower=U+0061 ToTitle=U+0041 ToTitle=U+0041
+U+005A: ToUpper=U+005A ToLower=U+007A ToTitle=U+005A ToTitle=U+005A
+U+01C4: ToUpper=U+01C4 ToLower=U+01C6 ToTitle=U+01C5 ToTitle=U+01C5
+U+01C5: ToUpper=U+01C4 ToLower=U+01C6 ToTitle=U+01C5 ToTitle=U+01C5
+U+01C6: ToUpper=U+01C4 ToLower=U+01C6 ToTitle=U+01C5 ToTitle=U+01C5
+U+10D0: ToUpper=U+1C90 ToLower=U+10D0 ToTitle=U+10D0 ToTitle=U+10D0
+unicode.IsSpace: U+0009:true U+000A:true U+000B:true U+000C:true U+000D:true U+0020:true U+0085:true U+00A0:true U+1680:true U+2000:true U+2028:true U+2029:true U+202F:true U+205F:true U+3000:true U+FEFF:false U+0078:false
+strings.Fields: []string{"a", "b", "c", "d\\ufeffe"}
+bytes.Fields: "a" "b" "c" "d\\ufeffe"
+strings.FieldsSeq: "a" "b" "c" "d\\ufeffe"
+bytes.FieldsSeq: "a" "b" "c" "d\\ufeffe"
+`,
+	);
+});
+
+test("real Go output: math/extra on JS and WASM", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"fmt"
+	"math"
+)
+
+func main() {
+	// Log1p, Expm1
+	fmt.Printf("%.6f %.6f\\n", math.Log1p(0.5), math.Log1p(0.0))
+	fmt.Printf("%.6f %.6f\\n", math.Expm1(0.5), math.Expm1(0.0))
+
+	// Frexp, Ldexp
+	frac, exp := math.Frexp(8.0)
+	fmt.Printf("%.4f %d\\n", frac, exp)
+	frac, exp = math.Frexp(0.0)
+	fmt.Printf("%.4f %d\\n", frac, exp)
+	fmt.Printf("%.4f\\n", math.Ldexp(0.5, 4))
+	fmt.Printf("%.4f\\n", math.Ldexp(0.75, 2))
+
+	// Modf
+	i, f := math.Modf(3.25)
+	fmt.Printf("%.2f %.2f\\n", i, f)
+	i, f = math.Modf(-3.25)
+	fmt.Printf("%.2f %.2f\\n", i, f)
+
+	// FMA
+	fmt.Printf("%.4f\\n", math.FMA(2.0, 3.0, 4.0))
+	fmt.Printf("%.4f\\n", math.FMA(1.5, -2.0, 5.0))
+
+	// RoundToEven
+	fmt.Println(math.RoundToEven(0.5), math.RoundToEven(1.5), math.RoundToEven(2.5), math.RoundToEven(3.5))
+	fmt.Println(math.RoundToEven(-0.5), math.RoundToEven(-1.5), math.RoundToEven(-2.5))
+
+	// Nextafter, Nextafter32
+	fmt.Println(math.Nextafter(1.0, 2.0) > 1.0)
+	fmt.Println(math.Nextafter(1.0, 0.0) < 1.0)
+	fmt.Println(math.Nextafter32(1.0, 2.0) > 1.0)
+	fmt.Println(math.Nextafter32(1.0, 0.0) < 1.0)
+}
+`,
+		`0.405465 0.000000
+0.648721 0.000000
+0.5000 4
+0.0000 0
+8.0000
+3.0000
+3.00 0.25
+-3.00 -0.25
+10.0000
+2.0000
+0 2 2 4
+-0 -2 -2
+true
+true
+true
+true
+`,
+	);
+});
+
+test("real Go output: bits/wide on JS and WASM", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"fmt"
+	"math/bits"
+)
+
+func main() {
+	// Add32, Add64, Add
+	s32, c32 := bits.Add32(0xffffffff, 1, 0)
+	fmt.Printf("%x %d\\n", s32, c32)
+	s32, c32 = bits.Add32(0xffffffff, 0, 1)
+	fmt.Printf("%x %d\\n", s32, c32)
+	s64, c64 := bits.Add64(0xffffffffffffffff, 1, 0)
+	fmt.Printf("%x %d\\n", s64, c64)
+	s64, c64 = bits.Add64(0xffffffffffffffff, 0, 1)
+	fmt.Printf("%x %d\\n", s64, c64)
+	su, cu := bits.Add(0xffffffffffffffff, 2, 1)
+	fmt.Printf("%x %d\\n", su, cu)
+
+	// Sub32, Sub64, Sub
+	d32, b32 := bits.Sub32(0, 1, 0)
+	fmt.Printf("%x %d\\n", d32, b32)
+	d32, b32 = bits.Sub32(5, 3, 1)
+	fmt.Printf("%x %d\\n", d32, b32)
+	d64, b64 := bits.Sub64(0x100000000, 1, 0)
+	fmt.Printf("%x %d\\n", d64, b64)
+	d64, b64 = bits.Sub64(5, 3, 1)
+	fmt.Printf("%x %d\\n", d64, b64)
+	du, bu := bits.Sub(10, 4, 1)
+	fmt.Printf("%x %d\\n", du, bu)
+
+	// Mul32, Mul64, Mul
+	h32, l32 := bits.Mul32(0xffffffff, 0xffffffff)
+	fmt.Printf("%x %x\\n", h32, l32)
+	h64, l64 := bits.Mul64(0x100000000, 0x100000000)
+	fmt.Printf("%x %x\\n", h64, l64)
+	hu, lu := bits.Mul(0x100000000, 2)
+	fmt.Printf("%x %x\\n", hu, lu)
+
+	// Div32, Div64, Div
+	q32, r32 := bits.Div32(1, 0, 2)
+	fmt.Printf("%x %x\\n", q32, r32)
+	q64, r64 := bits.Div64(1, 0, 2)
+	fmt.Printf("%x %x\\n", q64, r64)
+	qu, ru := bits.Div(0, 100, 7)
+	fmt.Printf("%d %d\\n", qu, ru)
+
+	// Rem32, Rem64, Rem
+	fmt.Println(bits.Rem32(1, 0, 3))
+	fmt.Println(bits.Rem64(1, 0, 3))
+	fmt.Println(bits.Rem(0, 100, 7))
+
+	// LeadingZeros, TrailingZeros, OnesCount, Len
+	fmt.Println(bits.LeadingZeros8(0), bits.LeadingZeros8(1), bits.LeadingZeros8(0x80))
+	fmt.Println(bits.LeadingZeros16(0), bits.LeadingZeros16(1), bits.LeadingZeros16(0x8000))
+	fmt.Println(bits.LeadingZeros(0), bits.LeadingZeros(1))
+
+	fmt.Println(bits.TrailingZeros8(0), bits.TrailingZeros8(2), bits.TrailingZeros8(0x80))
+	fmt.Println(bits.TrailingZeros16(0), bits.TrailingZeros16(4), bits.TrailingZeros16(0x8000))
+	fmt.Println(bits.TrailingZeros(0), bits.TrailingZeros(8))
+
+	fmt.Println(bits.OnesCount8(0), bits.OnesCount8(0xff), bits.OnesCount8(0x55))
+	fmt.Println(bits.OnesCount16(0), bits.OnesCount16(0xffff), bits.OnesCount16(0x1234))
+	fmt.Println(bits.OnesCount(0), bits.OnesCount(0x1010101010101010))
+
+	fmt.Println(bits.Len8(0), bits.Len8(1), bits.Len8(0x80), bits.Len8(0xff))
+	fmt.Println(bits.Len16(0), bits.Len16(1), bits.Len16(0x8000), bits.Len16(0xffff))
+	fmt.Println(bits.Len(0), bits.Len(1), bits.Len(0xffffffffffffffff))
+
+	// RotateLeft8, RotateLeft16, RotateLeft
+	fmt.Printf("%x %x\\n", bits.RotateLeft8(0x81, 1), bits.RotateLeft8(0x81, -1))
+	fmt.Printf("%x %x\\n", bits.RotateLeft16(0x8001, 1), bits.RotateLeft16(0x8001, -1))
+	fmt.Printf("%x %x\\n", bits.RotateLeft(0x8000000000000001, 1), bits.RotateLeft(0x8000000000000001, -1))
+
+	// Reverse8, Reverse16, Reverse, ReverseBytes
+	fmt.Printf("%x %x\\n", bits.Reverse8(0x80), bits.Reverse8(0x0f))
+	fmt.Printf("%x %x\\n", bits.Reverse16(0x8000), bits.Reverse16(0x00ff))
+	fmt.Printf("%x\\n", bits.Reverse(0x8000000000000000))
+	fmt.Printf("%x\\n", bits.ReverseBytes(0x1234000000000000))
+
+	// UintSize
+	fmt.Println(bits.UintSize)
+}
+`,
+		`0 1
+0 1
+0 1
+0 1
+2 1
+ffffffff 1
+1 0
+ffffffff 0
+1 0
+5 0
+fffffffe 1
+1 0
+0 200000000
+80000000 0
+8000000000000000 0
+14 2
+1
+1
+2
+8 7 0
+16 15 0
+64 63
+8 1 7
+16 2 15
+64 3
+0 8 4
+0 16 5
+0 8
+0 1 8 8
+0 1 16 16
+0 1 64
+3 c0
+3 c000
+3 c000000000000000
+1 f0
+1 ff00
+1
+3412
+64
+`,
+	);
+});
+
+test("real Go output: time/members on JS and WASM", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"fmt"
+	"time"
+)
+
+func main() {
+	// 1. Duration: ParseDuration, Truncate, Round, Abs
+	for _, s := range []string{"10s", "-1.5h", "300ms", "20us", "20µs", "50ns", "2h45m", "0", "1h2m3.456s"} {
+		d, err := time.ParseDuration(s)
+		if err != nil {
+			fmt.Printf("err: %v\\n", err)
+		} else {
+			fmt.Printf("%s: %d\\n", s, int64(d))
+		}
+	}
+	_, err := time.ParseDuration("invalid")
+	fmt.Println("invalid err:", err != nil)
+
+	d := 123456789 * time.Nanosecond
+	fmt.Println(d.Truncate(time.Millisecond))
+	fmt.Println(d.Round(time.Millisecond))
+	fmt.Println((-d).Truncate(time.Millisecond))
+	fmt.Println((-d).Round(time.Millisecond))
+	fmt.Println((-d).Abs())
+
+	// 2. Time: AddDate, Truncate, Round, Compare, YearDay, ISOWeek
+	t := time.Date(2026, time.April, 15, 12, 34, 56, 789123456, time.UTC)
+	fmt.Println(t.AddDate(1, 2, 3).Format(time.RFC3339))
+	fmt.Println(t.Truncate(time.Hour).Format(time.RFC3339Nano))
+	fmt.Println(t.Truncate(time.Minute).Format(time.RFC3339Nano))
+	fmt.Println(t.Truncate(time.Second).Format(time.RFC3339Nano))
+	fmt.Println(t.Round(time.Hour).Format(time.RFC3339Nano))
+	fmt.Println(t.Round(time.Minute).Format(time.RFC3339Nano))
+	fmt.Println(t.Round(time.Second).Format(time.RFC3339Nano))
+
+	t2 := time.Date(2026, time.April, 15, 12, 34, 56, 789123456, time.UTC)
+	tEarly := time.Date(2025, time.January, 1, 0, 0, 0, 0, time.UTC)
+	tLate := time.Date(2027, time.December, 31, 0, 0, 0, 0, time.UTC)
+	fmt.Println(t.Compare(t2), t.Compare(tEarly), t.Compare(tLate))
+
+	fmt.Println(t.YearDay())
+	fmt.Println(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC).YearDay())
+	fmt.Println(time.Date(2024, time.December, 31, 0, 0, 0, 0, time.UTC).YearDay())
+
+	yw, w := t.ISOWeek()
+	fmt.Println(yw, w)
+	yw, w = time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC).ISOWeek()
+	fmt.Println(yw, w)
+	yw, w = time.Date(2024, time.December, 30, 0, 0, 0, 0, time.UTC).ISOWeek()
+	fmt.Println(yw, w)
+
+	// 3. FixedZone, Location
+	loc := time.FixedZone("EST", -5*3600)
+	tLoc := time.Date(2026, time.April, 15, 12, 0, 0, 0, loc)
+	zoneName, zoneOffset := tLoc.Zone()
+	fmt.Println(loc.String(), zoneName, zoneOffset)
+
+	// 4. Month.String, Weekday.String
+	fmt.Println(time.January.String(), time.December.String(), time.Month(0).String())
+	fmt.Println(time.Sunday.String(), time.Saturday.String(), time.Weekday(7).String())
+	fmt.Println(t.Month().String(), t.Weekday().String())
+
+	// 5. MarshalJSON, UnmarshalJSON, MarshalText, UnmarshalText
+	mj, _ := t.MarshalJSON()
+	fmt.Println(string(mj))
+	mt, _ := t.MarshalText()
+	fmt.Println(string(mt))
+
+	var tUnmarshaled time.Time
+	_ = tUnmarshaled.UnmarshalJSON(mj)
+	fmt.Println(tUnmarshaled.Equal(t))
+
+	var tTextUnmarshaled time.Time
+	_ = tTextUnmarshaled.UnmarshalText(mt)
+	fmt.Println(tTextUnmarshaled.Equal(t))
+}
+`,
+		`10s: 10000000000
+-1.5h: -5400000000000
+300ms: 300000000
+20us: 20000
+20µs: 20000
+50ns: 50
+2h45m: 9900000000000
+0: 0
+1h2m3.456s: 3723456000000
+invalid err: true
+123ms
+123ms
+-123ms
+-123ms
+123.456789ms
+2027-06-18T12:34:56Z
+2026-04-15T12:00:00Z
+2026-04-15T12:34:00Z
+2026-04-15T12:34:56Z
+2026-04-15T13:00:00Z
+2026-04-15T12:35:00Z
+2026-04-15T12:34:57Z
+0 1 -1
+105
+1
+366
+2026 16
+2026 1
+2025 1
+EST EST -18000
+January December %!Month(0)
+Sunday Saturday %!Weekday(7)
+April Wednesday
+"2026-04-15T12:34:56.789123456Z"
+2026-04-15T12:34:56.789123456Z
+true
+true
+`,
+	);
+});
+
+test("real Go output: sync/extra on JS and WASM", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"fmt"
+	"sync"
+)
+
+func main() {
+	// ── OnceFunc ──
+	cnt1 := 0
+	f1 := sync.OnceFunc(func() {
+		cnt1++
+	})
+	f1()
+	f1()
+	f1()
+	fmt.Println(cnt1)
+
+	// ── OnceValue ──
+	cnt2 := 0
+	f2 := sync.OnceValue(func() int {
+		cnt2++
+		return 42
+	})
+	res1 := f2()
+	res2 := f2()
+	fmt.Println(res1, res2, cnt2)
+
+	// ── OnceValues ──
+	cnt3 := 0
+	f3 := sync.OnceValues(func() (string, int) {
+		cnt3++
+		return "result", 99
+	})
+	s1, n1 := f3()
+	s2, n2 := f3()
+	fmt.Println(s1, n1, s2, n2, cnt3)
+
+	// ── RWMutex.RLocker ──
+	var rw sync.RWMutex
+	l := rw.RLocker()
+	l.Lock()
+	l.Unlock()
+	fmt.Println("rlocker ok")
+}
+`,
+		`1
+42 42 1
+result 99 result 99 1
+rlocker ok
+`,
+	);
 });
 
 // ── Entry point ───────────────────────────────────────────────

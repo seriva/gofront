@@ -56,7 +56,11 @@ export const declarationParseMethods = {
 			typeParams = this.parseTypeParamList();
 		}
 		const { params, returnType } = this.parseSignature();
-		const body = this.parseBlock();
+		// `//gofront:intrinsic name` on the line before a body-less func: the
+		// backend provides the implementation; every pass sees an empty body.
+		const intrinsic = this.tokens?.intrinsics?.get(_line - 1) ?? null;
+		const bodyless = intrinsic !== null && !this.check(T.LBRACE);
+		const body = bodyless ? { kind: "Block", stmts: [] } : this.parseBlock();
 		this.semi();
 		return {
 			kind: "FuncDecl",
@@ -65,6 +69,7 @@ export const declarationParseMethods = {
 			params,
 			returnType,
 			body,
+			...(intrinsic && { intrinsic, _bodyless: bodyless }),
 			_line,
 		};
 	},
@@ -91,17 +96,40 @@ export const declarationParseMethods = {
 	// Type param lists contain IDENT followed by a constraint (another IDENT or keyword),
 	// not expressions like integers or operators.
 	_looksLikeTypeParamList() {
-		const i = this.pos + 1; // skip [
+		let i = this.pos + 1; // skip [
 		const src = this.tokens;
-		// First token must be an IDENT (the type param name)
 		if (!src[i] || src[i].type !== T.IDENT) return false;
-		// Second token should be a constraint (IDENT like 'any', 'comparable', another type name)
-		// or TILDE for union constraints
-		const second = src[i + 1];
-		if (!second) return false;
-		if (second.type === T.IDENT) return true; // T any, T Stringer
-		if (second.type === T.TILDE) return true; // T ~int
-		if (second.type === T.INTERFACE) return true; // T interface{...}
+		while (
+			src[i] &&
+			src[i].type === T.IDENT &&
+			src[i + 1] &&
+			src[i + 1].type === T.COMMA
+		) {
+			i += 2;
+		}
+		if (!src[i] || src[i].type !== T.IDENT) return false;
+		const afterName = src[i + 1];
+		if (!afterName) return false;
+		if (afterName.type === T.IDENT) return true; // T any, T Stringer
+		if (afterName.type === T.TILDE) return true; // T ~int
+		if (afterName.type === T.INTERFACE) return true; // T interface{...}
+		return false;
+	},
+
+	// `Name[…]` followed by `,` or `)` in a result list is an instantiated
+	// generic type; a result name is followed by its type (`a []int`).
+	_isGenericResultType() {
+		if (this.peek2()?.type !== T.LBRACKET) return false;
+		const src = this.tokens;
+		let depth = 0;
+		for (let i = this.pos + 1; i < src.length; i++) {
+			const t = src[i].type;
+			if (t === T.LBRACKET) depth++;
+			else if (t === T.RBRACKET && --depth === 0) {
+				const next = src[i + 1]?.type;
+				return next === T.COMMA || next === T.RPAREN;
+			} else if (t === T.EOF || t === T.LBRACE) return false;
+		}
 		return false;
 	},
 
@@ -195,7 +223,12 @@ export const declarationParseMethods = {
 			let isNamed = false;
 			do {
 				// Named returns: only treat IDENT as a name if peek2 is an actual type token
-				if (this.check(T.IDENT) && this.looksLikeType(this.peek2())) {
+				// (`Box[int]` is an instantiated type, not a name followed by `[int]`).
+				if (
+					this.check(T.IDENT) &&
+					this.looksLikeType(this.peek2()) &&
+					!this._isGenericResultType()
+				) {
 					names.push(this.advance().value);
 					isNamed = true;
 				} else {

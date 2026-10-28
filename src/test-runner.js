@@ -30,11 +30,55 @@ export function checkWasmRuntime(version = process.version) {
 export function isTestFunc(decl) {
 	if (decl.kind !== "FuncDecl") return false;
 	if (!decl.name.startsWith("Test")) return false;
+	if (decl.name === "TestMain") return false;
 	if (decl.params?.length !== 1) return false;
 	const pType = decl.params[0].type;
-	if (pType?.kind === "PointerType" && pType.base?.name === "testing.T")
+	if (
+		pType?.kind === "PointerType" &&
+		(pType.base?.name === "testing.T" || pType.base?.name === "T")
+	)
 		return true;
-	if (pType?.kind === "TypeName" && pType.name === "testing.T") return true;
+	if (
+		pType?.kind === "TypeName" &&
+		(pType.name === "testing.T" || pType.name === "T")
+	)
+		return true;
+	return false;
+}
+
+export function isBenchmarkFunc(decl) {
+	if (decl.kind !== "FuncDecl") return false;
+	if (!decl.name.startsWith("Benchmark")) return false;
+	if (decl.params?.length !== 1) return false;
+	const pType = decl.params[0].type;
+	if (
+		pType?.kind === "PointerType" &&
+		(pType.base?.name === "testing.B" || pType.base?.name === "B")
+	)
+		return true;
+	if (
+		pType?.kind === "TypeName" &&
+		(pType.name === "testing.B" || pType.name === "B")
+	)
+		return true;
+	return false;
+}
+
+export function isTestMainFunc(decl) {
+	if (decl.kind !== "FuncDecl") return false;
+	if (decl.name !== "TestMain") return false;
+	if (decl.params?.length !== 1) return false;
+	const pType = decl.params[0].type;
+	if (
+		pType?.kind === "PointerType" &&
+		(pType.base?.name === "testing.M" || pType.base?.name === "M")
+	)
+		return true;
+	if (
+		pType?.kind === "TypeName" &&
+		(pType.name === "testing.M" || pType.name === "M")
+	)
+		return true;
 	return false;
 }
 
@@ -53,8 +97,38 @@ export function discoverTests(programs) {
 	return testNames;
 }
 
+export function discoverBenchmarks(programs) {
+	const benchNames = [];
+	for (const p of programs) {
+		if (p._filename && !p._filename.endsWith("_test.go")) continue;
+		for (const d of p.decls) {
+			if (isBenchmarkFunc(d) && !benchNames.includes(d.name)) {
+				benchNames.push(d.name);
+			}
+		}
+	}
+	return benchNames;
+}
+
+export function discoverTestMain(programs) {
+	for (const p of programs) {
+		if (p._filename && !p._filename.endsWith("_test.go")) continue;
+		for (const d of p.decls) {
+			if (isTestMainFunc(d)) return d.name;
+		}
+	}
+	return null;
+}
+
 export function generateTestHarness(bundleJs, testNames, options = {}) {
 	const runRegex = options.run ? options.run : null;
+	const benchRegex = options.bench
+		? options.bench === true
+			? "."
+			: options.bench
+		: null;
+	const benchNames = options.benchNames ?? [];
+	const testMainName = options.testMain ?? null;
 	const verbose = Boolean(options.verbose);
 	const dom = Boolean(options.dom);
 	const color = Boolean(options.color);
@@ -64,6 +138,14 @@ export function generateTestHarness(bundleJs, testNames, options = {}) {
 	const jsdomSpec = options.jsdomPath
 		? pathToFileURL(options.jsdomPath).href
 		: "jsdom";
+
+	const allFuncNames = [
+		...new Set([
+			...testNames,
+			...benchNames,
+			...(testMainName ? [testMainName] : []),
+		]),
+	];
 
 	return `
 ${
@@ -112,7 +194,10 @@ ${bundleJs}
 
 async function __runGoFrontSuite() {
   const allTests = ${JSON.stringify(testNames)};
+  const allBenchmarks = ${JSON.stringify(benchNames)};
+  const testMainName = ${JSON.stringify(testMainName)};
   const runFilter = ${runRegex ? `new RegExp(${JSON.stringify(runRegex)})` : "null"};
+  const benchFilter = ${benchRegex ? `new RegExp(${JSON.stringify(benchRegex)})` : "null"};
   const verbose = ${verbose};
   const pkgName = ${JSON.stringify(pkgName)};
   const paint = ${color}
@@ -126,19 +211,23 @@ async function __runGoFrontSuite() {
     ? allTests.filter((name) => runFilter.test(name))
     : allTests;
 
-  if (testsToRun.length === 0) {
+  const benchesToRun = benchFilter
+    ? allBenchmarks.filter((name) => benchFilter.test(name))
+    : [];
+
+  if (testsToRun.length === 0 && benchesToRun.length === 0) {
     if (allTests.length > 0 && runFilter) {
       console.log(yellow("testing: warning: no tests to run matching " + ${JSON.stringify(runRegex)}));
+    }
+    if (allBenchmarks.length > 0 && benchFilter) {
+      console.log(yellow("testing: warning: no benchmarks to run matching " + ${JSON.stringify(benchRegex)}));
     }
     console.log(PASS);
     okLine(pkgName, "0.000");
     process.exit(0);
   }
 
-  let totalFailures = 0;
-  let totalSkipped = 0;
   const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
-  const suiteStart = now();
 
   // Go-style streaming report. In non-verbose mode only failures and skips are
   // shown, so the "=== RUN" header is emitted late for failures.
@@ -157,6 +246,28 @@ async function __runGoFrontSuite() {
     }
   };
 
+  const reportBenchmark = (b) => {
+    if (b.skipped) {
+      console.log("--- " + SKIP + ": " + b._name);
+      for (const log of b._logs) console.log("    " + log);
+      return;
+    }
+    if (b.failed) {
+      console.log("--- " + FAIL + ": " + b._name);
+      for (const log of b._logs) console.log("    " + red(log));
+      return;
+    }
+    const elapsedNs = Number(b.Elapsed());
+    const nsPerOp = b.N > 0 ? (elapsedNs / b.N).toFixed(0) : "0";
+    let line = \`\${b._name.padEnd(20)}\\t\${String(b.N).padStart(8)}\\t\${nsPerOp.padStart(10)} ns/op\`;
+    if (b._bytes > 0n && elapsedNs > 0) {
+      const mbPerSec = (Number(b._bytes * BigInt(b.N)) / (elapsedNs / 1e9) / (1024 * 1024)).toFixed(2);
+      line += \`\\t\${mbPerSec.padStart(8)} MB/s\`;
+    }
+    console.log(line);
+    for (const log of b._logs) console.log("    " + log);
+  };
+
   // FailNow/SkipNow are control flow; anything else is a panic → failure.
   const recordTestError = (t, e) => {
     if (e instanceof __GoFront_FailNow || e instanceof __GoFront_SkipNow) return;
@@ -170,43 +281,221 @@ async function __runGoFrontSuite() {
   globalThis.__onSubtestEnd = report;
 
   const __testRegistry = {
-${testNames.map((n) => `    ${JSON.stringify(n)}: typeof ${n} !== "undefined" ? ${n} : null`).join(",\n")}
+${allFuncNames.map((n) => `    ${JSON.stringify(n)}: typeof ${n} !== "undefined" ? ${n} : null`).join(",\n")}
   };
 
-  for (const name of testsToRun) {
-    const fn = __testRegistry[name] ?? (typeof globalThis[name] === "function" ? globalThis[name] : null);
-    if (typeof fn !== "function") {
-      console.error(red("testing: cannot find test function " + name));
-      totalFailures++;
-      continue;
+  function runAll() {
+    let totalFailures = 0;
+    let totalSkipped = 0;
+    const suiteStart = now();
+
+    const finish = () => {
+      const suiteElapsed = ((now() - suiteStart) / 1000).toFixed(3);
+      if (totalFailures > 0) {
+        console.log(FAIL);
+        console.log(FAIL + "\\t" + pkgName + "\\t" + dim(suiteElapsed + "s"));
+        return 1;
+      } else {
+        console.log(PASS);
+        okLine(pkgName, suiteElapsed);
+        return 0;
+      }
+    };
+
+    const runOneTest = (name) => {
+      const fn = __testRegistry[name] ?? (typeof globalThis[name] === "function" ? globalThis[name] : null);
+      if (typeof fn !== "function") {
+        console.error(red("testing: cannot find test function " + name));
+        totalFailures++;
+        return null;
+      }
+
+      const t = new __GoFront_T(name);
+      if (verbose) console.log(dim("=== RUN   ") + name);
+
+      let res;
+      try {
+        res = fn(t);
+      } catch (e) {
+        recordTestError(t, e);
+        t._runCleanups();
+        if (t.skipped) totalSkipped++;
+        else if (t.failed) totalFailures++;
+        report(t);
+        return null;
+      }
+
+      if (res && typeof res.then === "function") {
+        return res
+          .catch((e) => { recordTestError(t, e); })
+          .finally(() => {
+            t._runCleanups();
+            if (t.skipped) totalSkipped++;
+            else if (t.failed) totalFailures++;
+            report(t);
+          });
+      }
+
+      t._runCleanups();
+      if (t.skipped) totalSkipped++;
+      else if (t.failed) totalFailures++;
+      report(t);
+      return null;
+    };
+
+    const runOneBench = (name) => {
+      const fn = __testRegistry[name] ?? (typeof globalThis[name] === "function" ? globalThis[name] : null);
+      if (typeof fn !== "function") {
+        console.error(red("testing: cannot find benchmark function " + name));
+        totalFailures++;
+        return null;
+      }
+      if (verbose) console.log(dim("=== RUN   ") + name);
+      const b = new __GoFront_B(name);
+      b._benchDurationNs = 1e8; // 100ms
+      const runIters = () => {
+        b.N = 1;
+        b.ResetTimer();
+        const res = fn(b);
+        if (res && typeof res.then === "function") {
+          return res.then(() => loopBench(b, fn));
+        }
+        return loopBench(b, fn);
+      };
+      const loopBench = (b, fn) => {
+        if (!b._loopStarted && !b.failed && !b.skipped) {
+          b.StopTimer();
+          b._runCleanups();
+          let n = 1;
+          while (!b.failed && !b.skipped) {
+            const elapsedNs = Number(b.Elapsed());
+            if (elapsedNs >= b._benchDurationNs || n >= 1e9) break;
+            let nextN;
+            if (elapsedNs === 0) nextN = n * 100;
+            else nextN = Math.max(n + 1, Math.min(1e9, Math.floor(n * (b._benchDurationNs / elapsedNs) * 1.2)));
+            if (nextN <= n) break;
+            n = nextN;
+            const nextB = new __GoFront_B(name);
+            nextB._benchDurationNs = b._benchDurationNs;
+            nextB.N = n;
+            nextB.ResetTimer();
+            const res = fn(nextB);
+            if (res && typeof res.then === "function") {
+              return res.then(() => {
+                nextB.StopTimer();
+                nextB._runCleanups();
+                b.N = nextB.N;
+                b._elapsedMs = nextB._elapsedMs;
+                b._timerRunning = false;
+                b.failed = nextB.failed;
+                b.skipped = nextB.skipped;
+                b._logs = nextB._logs;
+              });
+            }
+            nextB.StopTimer();
+            nextB._runCleanups();
+            b.N = nextB.N;
+            b._elapsedMs = nextB._elapsedMs;
+            b._timerRunning = false;
+            b.failed = nextB.failed;
+            b.skipped = nextB.skipped;
+            b._logs = nextB._logs;
+          }
+        }
+      };
+
+      let res;
+      try {
+        res = runIters();
+      } catch (e) {
+        recordTestError(b, e);
+        b._runCleanups();
+        if (b.failed) totalFailures++;
+        else if (b.skipped) totalSkipped++;
+        reportBenchmark(b);
+        return null;
+      }
+
+      if (res && typeof res.then === "function") {
+        return res
+          .catch((e) => { recordTestError(b, e); })
+          .finally(() => {
+            b._runCleanups();
+            if (b.failed) totalFailures++;
+            else if (b.skipped) totalSkipped++;
+            reportBenchmark(b);
+          });
+      }
+
+      b._runCleanups();
+      if (b.failed) totalFailures++;
+      else if (b.skipped) totalSkipped++;
+      reportBenchmark(b);
+      return null;
+    };
+
+    let ti = 0;
+    while (ti < testsToRun.length) {
+      const p = runOneTest(testsToRun[ti++]);
+      if (p) {
+        return p.then(async () => {
+          while (ti < testsToRun.length) {
+            const nextP = runOneTest(testsToRun[ti++]);
+            if (nextP) await nextP;
+          }
+          for (const bName of benchesToRun) {
+            const nextP = runOneBench(bName);
+            if (nextP) await nextP;
+          }
+          return finish();
+        });
+      }
     }
 
-    const t = new __GoFront_T(name);
-    if (verbose) console.log(dim("=== RUN   ") + name);
-
-    try {
-      const res = fn(t);
-      if (res && typeof res.then === "function") await res;
-    } catch (e) {
-      recordTestError(t, e);
+    let bi = 0;
+    while (bi < benchesToRun.length) {
+      const p = runOneBench(benchesToRun[bi++]);
+      if (p) {
+        return p.then(async () => {
+          while (bi < benchesToRun.length) {
+            const nextP = runOneBench(benchesToRun[bi++]);
+            if (nextP) await nextP;
+          }
+          return finish();
+        });
+      }
     }
 
-    if (t.skipped) totalSkipped++;
-    else if (t.failed) totalFailures++;
-    report(t);
+    return finish();
   }
 
-  const suiteElapsed = ((now() - suiteStart) / 1000).toFixed(3);
-
-  if (totalFailures > 0) {
-    console.log(FAIL);
-    console.log(FAIL + "\\t" + pkgName + "\\t" + dim(suiteElapsed + "s"));
-    process.exit(1);
-  } else {
-    console.log(PASS);
-    okLine(pkgName, suiteElapsed);
-    process.exit(0);
+  if (testMainName) {
+    const mainFn = __testRegistry[testMainName] ?? (typeof globalThis[testMainName] === "function" ? globalThis[testMainName] : null);
+    if (typeof mainFn === "function") {
+      let exitCode = 0;
+      const m = new __GoFront_M(() => {
+        const res = runAll();
+        if (res && typeof res.then === "function") {
+          return res.then((code) => { exitCode = code; return code; });
+        }
+        exitCode = res;
+        return exitCode;
+      });
+      try {
+        const res = mainFn(m);
+        if (res && typeof res.then === "function") await res;
+      } catch (e) {
+        console.error(red("panic in TestMain: " + (e?.message ?? String(e))));
+        process.exit(1);
+      }
+      if (m._promise) await m._promise;
+      process.exit(exitCode);
+    }
   }
+
+  const res = runAll();
+  const exitCode = res && typeof res.then === "function" ? await res : res;
+  process.exit(exitCode);
 }
 
 __runGoFrontSuite();
@@ -374,8 +663,10 @@ export async function runTests(targetDir, options = {}) {
 
 	const { pkgName, js, programs } = compiled;
 	const testNames = discoverTests(programs);
+	const benchNames = discoverBenchmarks(programs);
+	const testMain = discoverTestMain(programs);
 
-	if (testNames.length === 0) {
+	if (testNames.length === 0 && benchNames.length === 0 && !testMain) {
 		return reportEmptyTests(pkgName, "no tests to run", options);
 	}
 
@@ -384,12 +675,14 @@ export async function runTests(targetDir, options = {}) {
 			resolvedDir,
 			generateTestHarness(bundleJs, testNames, {
 				...options,
+				benchNames,
+				testMain,
 				pkgName: label,
 				jsdomPath,
 				wasmBytes,
 				color: colorsFor(options, options.stdout ?? process.stdout).enabled,
 			}),
-			testNames.length,
+			testNames.length + benchNames.length,
 			options,
 		);
 

@@ -220,3 +220,21 @@ func main() {
 }`);
 	assertEqual(out, "false true 3 false");
 });
+
+section("Full slice expressions alias (Task 0.19a)");
+
+test("b[:] and a[:] share the backing store in a js package", () => {
+	const { js, out } = run(`package main
+
+func main() {
+	b := []int{1, 2, 3}
+	s := b[:]
+	s[0] = 9
+	a := [2]string{"x", "y"}
+	t := a[0:]
+	t[1] = "z"
+	println(b[0], a[1])
+}`);
+	assertEqual(out, "9 z");
+	assert(!js.includes(".slice()"), "full slice must not copy");
+});

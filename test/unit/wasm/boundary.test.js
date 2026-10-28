@@ -541,6 +541,25 @@ func main() {
 	assertEqual(c.Y, 6);
 });
 
+test("JS slice views cross into wasm element-wise (Task 0.20)", async () => {
+	const res = await compileHybridProject({
+		"coll/coll.go": COLL_WASM,
+		"main.go": `package main
+
+import "./coll"
+
+func main() {
+	xs := []int{1, 2, 3, 4}
+	fs := []float64{1, 2, 3}
+	ss := []string{"a", "b", "c"}
+	d := coll.Doubled(fs[1:])
+	println(coll.Sum(xs[1:3]), coll.Sum(xs[:0]), len(d), d[0], d[1], coll.Join(ss[1:]))
+}
+`,
+	});
+	assertEqual(res.lines.join("\n"), "5 0 2 4 6 bc");
+});
+
 test("func values cross as callbacks in both directions", async () => {
 	const res = await compileHybridProject(
 		{
@@ -1627,4 +1646,309 @@ func main() {
 	assertEqual(resT._d.getTime(), 1704067200000 + 15 * 60 * 1000);
 	const milli = res.mod.GetUnixMilli(resT);
 	assertEqual(milli, BigInt(1704067200000 + 15 * 60 * 1000));
+});
+
+test("exported WASM function or callback receives or takes a boxed *float64; JS mutates box.value", async () => {
+	const res = await compileHybridProject(
+		{
+			"store/store.go": `//gofront:target wasm
+package store
+
+type Item struct {
+	Price float64
+}
+
+func newPrice() *float64 {
+	v := 10.5
+	return &v
+}
+
+var price = newPrice()
+
+func GetPricePtr() *float64 {
+	return price
+}
+
+func ReadPrice() float64 {
+	return *price
+}
+
+func UpdateWithCallback(cb func(p *float64)) float64 {
+	cb(price)
+	return *price
+}
+
+func MutateViaPtr(p *float64, v float64) {
+	*p = v
+}
+`,
+			"main.go": `package main
+
+import "./store"
+
+func main() {
+	_ = store.GetPricePtr
+}
+`,
+		},
+		{
+			exports: [
+				"GetPricePtr",
+				"ReadPrice",
+				"UpdateWithCallback",
+				"MutateViaPtr",
+			],
+		},
+	);
+
+	// 1. Exported function returns accessor ref to struct field. JS reads and mutates it.
+	const p = res.mod.GetPricePtr();
+	assertEqual(p.value, 10.5);
+	p.value = 42.0;
+	assertEqual(res.mod.ReadPrice(), 42.0);
+
+	// 2. Exported function takes accessor ref passed back in from JS and mutates it in WASM.
+	res.mod.MutateViaPtr(p, 77.5);
+	assertEqual(res.mod.ReadPrice(), 77.5);
+	assertEqual(p.value, 77.5);
+
+	// 3. Exported function invokes JS callback with *float64 accessor ref; JS mutates box.value.
+	const finalPrice = res.mod.UpdateWithCallback((box) => {
+		assertEqual(box.value, 77.5);
+		box.value = 99.25;
+	});
+	assertEqual(finalPrice, 99.25);
+	assertEqual(res.mod.ReadPrice(), 99.25);
+});
+
+test("exported non-shared vars of a wasm package appear in the facade (Task 0.19d)", async () => {
+	const res = await compileHybridProject(
+		{
+			"cfg/cfg.go": `//gofront:target wasm
+package cfg
+
+type Item struct {
+	Price float64
+}
+
+var Limit = 40
+var Name = "gofront"
+var Ratio float64
+var Default = Item{Price: 2.5}
+var hidden = 2
+
+func init() { Ratio = 0.5 }
+
+func Get() int { return Limit + hidden }
+`,
+			"main.go": `package main
+
+import "./cfg"
+
+func main() {
+	println(cfg.Limit, cfg.Name, cfg.Ratio, cfg.Default.Price, cfg.Get())
+}
+`,
+		},
+		{ exports: ["Limit", "Name", "Ratio", "Default"] },
+	);
+	assertEqual(res.lines[0], "40 gofront 0.5 2.5 42");
+	assertEqual(res.mod.Limit, 40);
+	assertEqual(res.mod.Name, "gofront");
+	assertEqual(res.mod.Ratio, 0.5);
+	assertEqual(res.mod.Default.Price, 2.5);
+});
+
+section("JS <-> WASM boundary — SIMD vectors");
+
+const SIMD_BOUNDARY = (target) => `//gofront:target ${target}
+package sim
+
+import "gofront/simd"
+
+type Body struct {
+	Pos simd.F32x4
+	Hit simd.Mask32x4
+	N   int
+}
+
+func Scale(v simd.F32x4, k float32) simd.F32x4 { return v.Mul(simd.Splat(k)) }
+
+func Less(a, b simd.F32x4) simd.Mask32x4 { return a.Less(b) }
+
+func NewBody() *Body { return &Body{Pos: simd.F32x4{1, 2, 3, 4}} }
+
+func (b *Body) Move(d simd.F32x4) { b.Pos = b.Pos.Add(d) }
+
+func Pair(a simd.F32x4) (simd.F32x4, simd.Mask32x4) {
+	return a, a.Greater(simd.Splat(2))
+}
+`;
+
+for (const target of ["wasm", "both"]) {
+	test(`F32x4 and Mask32x4 cross the boundary by value in a ${target} package`, async () => {
+		const res = await compileHybridProject(
+			{
+				"sim/sim.go": SIMD_BOUNDARY(target),
+				"main.go": `package main
+
+import "./sim"
+
+func main() { _ = sim.Scale }
+`,
+			},
+			{ exports: ["Scale", "Less", "NewBody", "Pair"] },
+		);
+		const m = res.mod;
+		const arr = (v) => Array.from(v);
+		assertEqual(
+			JSON.stringify(arr(m.Scale(new Float32Array([1, 2, 3, 4]), 2))),
+			"[2,4,6,8]",
+		);
+		assertEqual(
+			JSON.stringify(arr(m.Less([1, 5, 3, 9], [2, 4, 3, 10]))),
+			"[true,false,false,true]",
+		);
+		const input = new Float32Array([1, 2, 3, 4]);
+		const [back, mask] = m.Pair(input);
+		input[0] = 99;
+		// A wasm package gets a copy; a both package runs as plain JS.
+		if (target === "wasm") assertEqual(back[0], 1);
+		assertEqual(JSON.stringify(arr(mask)), "[false,false,true,true]");
+		const body = m.NewBody();
+		assertEqual(JSON.stringify(arr(body.Pos)), "[1,2,3,4]");
+		assertEqual(JSON.stringify(arr(body.Hit)), "[false,false,false,false]");
+		body.Move(new Float32Array([1, 1, 1, 1]));
+		assertEqual(JSON.stringify(arr(body.Pos)), "[2,3,4,5]");
+		body.Pos = new Float32Array([9, 8, 7, 6]);
+		assertEqual(JSON.stringify(arr(body.Pos)), "[9,8,7,6]");
+	});
+}
+
+test("F32x4 crossing the boundary keeps NaN and signed zero", async () => {
+	const res = await compileHybridProject(
+		{
+			"sim/sim.go": SIMD_BOUNDARY("wasm"),
+			"main.go": `package main
+
+import "./sim"
+
+func main() { _ = sim.Scale }
+`,
+		},
+		{ exports: ["Scale"] },
+	);
+	const out = res.mod.Scale(new Float32Array([Number.NaN, -0, 1, 2]), 1);
+	assert(Number.isNaN(out[0]), "NaN survives");
+	assert(Object.is(out[1], -0), "-0 survives");
+});
+
+section("JS <-> WASM boundary — []simd.F32x4");
+
+for (const target of ["wasm"]) {
+	test(`[]F32x4 crosses the boundary as one Float32Array in a ${target} package`, async () => {
+		const res = await compileHybridProject(
+			{
+				"sim/sim.go": `//gofront:target ${target}
+package sim
+
+import "gofront/simd"
+
+type Cloud struct {
+	Pts []simd.F32x4
+}
+
+func Double(vs []simd.F32x4) []simd.F32x4 {
+	out := make([]simd.F32x4, len(vs))
+	for i, v := range vs {
+		out[i] = v.Add(v)
+	}
+	return out
+}
+
+func Count(vs []simd.F32x4) int { return len(vs) }
+
+func NewCloud() *Cloud {
+	return &Cloud{Pts: []simd.F32x4{{1, 2, 3, 4}, {5, 6, 7, 8}}}
+}
+
+func Nil() []simd.F32x4 { return nil }
+`,
+				"main.go": `package main
+
+import "./sim"
+
+func main() { _ = sim.Count }
+`,
+			},
+			{ exports: ["Double", "Count", "NewCloud", "Nil"] },
+		);
+		const m = res.mod;
+		const out = m.Double(new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]));
+		assert(out instanceof Float32Array, "result is a Float32Array");
+		assertEqual(JSON.stringify(Array.from(out)), "[2,4,6,8,10,12,14,16]");
+		assertEqual(m.Count(new Float32Array(12)), 3);
+		assertEqual(m.Count(new Float32Array(0)), 0);
+		const cloud = m.NewCloud();
+		assertEqual(JSON.stringify(Array.from(cloud.Pts)), "[1,2,3,4,5,6,7,8]");
+		assertEqual(m.Nil() == null || m.Nil().length === 0, true);
+	});
+}
+
+test("[]F32x4 argument is copied, not shared with the caller", async () => {
+	const res = await compileHybridProject(
+		{
+			"sim/sim.go": `//gofront:target wasm
+package sim
+
+import "gofront/simd"
+
+func Poke(vs []simd.F32x4) float32 {
+	vs[0] = simd.Splat(9)
+	return vs[0].Lane(0)
+}
+`,
+			"main.go": `package main
+
+import "./sim"
+
+func main() { _ = sim.Poke }
+`,
+		},
+		{ exports: ["Poke"] },
+	);
+	const input = new Float32Array([1, 2, 3, 4]);
+	assertEqual(res.mod.Poke(input), 9);
+	assertEqual(input[0], 1);
+});
+
+test("[]Mask32x4 and []F32x4 in one module keep their own transport", async () => {
+	const res = await compileHybridProject(
+		{
+			"sim/sim.go": `//gofront:target wasm
+package sim
+
+import "gofront/simd"
+
+func Vecs(vs []simd.F32x4) int { return len(vs) }
+func Mask(vs []simd.Mask32x4) int { return len(vs) }
+func MaskAny(vs []simd.Mask32x4) bool { return vs[1].All() }
+`,
+			"main.go": `package main
+
+import "./sim"
+
+func main() { _ = sim.Vecs }
+`,
+		},
+		{ exports: ["Vecs", "Mask", "MaskAny"] },
+	);
+	const m = res.mod;
+	const masks = [
+		[true, false, true, false],
+		[true, true, true, true],
+	];
+	assertEqual(m.Vecs(new Float32Array(8)), 2);
+	assertEqual(m.Mask(masks), 2);
+	assertEqual(m.MaskAny(masks), true);
 });

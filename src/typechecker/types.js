@@ -133,21 +133,21 @@ export const WASM_SUPPORTED_STDLIB = new Set([
 	"encoding/binary",
 	"encoding/hex",
 	"encoding/base64",
+	"os",
+	"encoding/json",
 ]);
 
 export const STDLIB_PACKAGES = new Set([
 	...WASM_SUPPORTED_STDLIB,
-	"os",
 	"gom",
 	"regexp",
-	"encoding/json",
 ]);
 
 // Per-namespace member subset the WASM backend implements. `null` means every
 // member the checker knows about. Members outside the set are rejected in
 // wasm/both packages with "'strings.Split' is not yet available in wasm packages".
 export const WASM_STDLIB_MEMBERS = new Map([
-	["json", new Set()],
+	["os", new Set(["Stdout", "Stderr", "Stdin", "File"])],
 	[
 		"math",
 		new Set([
@@ -179,8 +179,10 @@ export const WASM_STDLIB_MEMBERS = new Map([
 			"Exp",
 			"Exp2",
 			"Log",
+			"Log1p",
 			"Log2",
 			"Log10",
+			"Expm1",
 			"Round",
 			"Remainder",
 			"Float64bits",
@@ -226,21 +228,56 @@ export const WASM_STDLIB_MEMBERS = new Map([
 	[
 		"bits",
 		new Set([
+			"Add",
+			"Add32",
+			"Add64",
+			"Sub",
+			"Sub32",
+			"Sub64",
+			"Mul",
+			"Mul32",
+			"Mul64",
+			"Div",
+			"Div32",
+			"Div64",
+			"Rem",
+			"Rem32",
+			"Rem64",
+			"LeadingZeros",
+			"LeadingZeros8",
+			"LeadingZeros16",
 			"LeadingZeros32",
 			"LeadingZeros64",
+			"TrailingZeros",
+			"TrailingZeros8",
+			"TrailingZeros16",
 			"TrailingZeros32",
 			"TrailingZeros64",
+			"OnesCount",
+			"OnesCount8",
+			"OnesCount16",
 			"OnesCount32",
 			"OnesCount64",
+			"RotateLeft",
+			"RotateLeft8",
+			"RotateLeft16",
 			"RotateLeft32",
 			"RotateLeft64",
+			"Reverse",
+			"Reverse8",
+			"Reverse16",
+			"Reverse32",
+			"Reverse64",
+			"ReverseBytes",
 			"ReverseBytes16",
 			"ReverseBytes32",
 			"ReverseBytes64",
+			"Len",
+			"Len8",
+			"Len16",
 			"Len32",
 			"Len64",
-			"Reverse32",
-			"Reverse64",
+			"UintSize",
 		]),
 	],
 	["errors", new Set(["New", "Is", "Unwrap", "As", "Join"])],
@@ -257,6 +294,15 @@ export const WASM_STDLIB_MEMBERS = new Map([
 			"RuneError",
 			"MaxRune",
 			"UTFMax",
+			"RuneSelf",
+			"EncodeRune",
+			"AppendRune",
+			"DecodeRune",
+			"DecodeLastRune",
+			"RuneCount",
+			"FullRune",
+			"Valid",
+			"RuneStart",
 		]),
 	],
 	[
@@ -278,6 +324,11 @@ export const WASM_STDLIB_MEMBERS = new Map([
 		"fmt",
 		new Set([
 			"Sprintf",
+			"Sprint",
+			"Sprintln",
+			"Append",
+			"Appendf",
+			"Appendln",
 			"Errorf",
 			"Printf",
 			"Println",
@@ -288,6 +339,7 @@ export const WASM_STDLIB_MEMBERS = new Map([
 			"Sscan",
 			"Sscanln",
 			"Sscanf",
+			"Stringer",
 		]),
 	],
 	[
@@ -337,9 +389,11 @@ export const WASM_STDLIB_MEMBERS = new Map([
 			"TrimRightFunc",
 			"FieldsFunc",
 			"NewReplacer",
+			"Replacer",
 			"Builder",
 			"NewReader",
 			"Reader",
+			"ToValidUTF8",
 		]),
 	],
 	[
@@ -363,6 +417,20 @@ export const WASM_STDLIB_MEMBERS = new Map([
 			"AppendBool",
 			"ErrSyntax",
 			"ErrRange",
+			"IntSize",
+			"NumError",
+			"QuoteRune",
+			"QuoteToASCII",
+			"QuoteRuneToASCII",
+			"AppendQuote",
+			"AppendQuoteToASCII",
+			"AppendQuoteRune",
+			"AppendQuoteRuneToASCII",
+			"CanBackquote",
+			"UnquoteChar",
+			"QuotedPrefix",
+			"IsPrint",
+			"IsGraphic",
 		]),
 	],
 	[
@@ -400,16 +468,7 @@ export const WASM_STDLIB_MEMBERS = new Map([
 	],
 	[
 		"maps",
-		new Set([
-			"Keys",
-			"Values",
-			"Clone",
-			"Copy",
-			"Equal",
-			"EqualFunc",
-			"Delete",
-			"DeleteFunc",
-		]),
+		new Set(["Clone", "Copy", "Equal", "EqualFunc", "Delete", "DeleteFunc"]),
 	],
 	[
 		"unicode",
@@ -481,8 +540,11 @@ export const WASM_STDLIB_MEMBERS = new Map([
 			"Map",
 			"SplitN",
 			"Buffer",
+			"NewBuffer",
+			"NewBufferString",
 			"NewReader",
 			"Reader",
+			"ToValidUTF8",
 		]),
 	],
 	[
@@ -522,9 +584,6 @@ export const WASM_STDLIB_MEMBERS = new Map([
 			"ReadWriter",
 			"Closer",
 			"EOF",
-			"ErrUnexpectedEOF",
-			"ErrShortWrite",
-			"ReadFull",
 			"ReadAll",
 			"Discard",
 			"WriteString",
@@ -539,10 +598,12 @@ export const WASM_STDLIB_MEMBERS = new Map([
 			"Now",
 			"Since",
 			"Parse",
+			"ParseDuration",
 			"Unix",
 			"UnixMicro",
 			"UnixMilli",
 			"Date",
+			"FixedZone",
 			"Duration",
 			"Nanosecond",
 			"Microsecond",
@@ -577,9 +638,12 @@ export const WASM_STDLIB_MEMBERS = new Map([
 			"Friday",
 			"Saturday",
 			"Time",
+			"Month",
+			"Weekday",
+			"Location",
 		]),
 	],
-	["testing", new Set(["T"])],
+	["testing", new Set(["T", "B", "M", "TB", "BenchmarkResult"])],
 	["sync", new Set(["Mutex", "RWMutex", "Once", "WaitGroup", "Locker"])],
 	["sha256", new Set(["Sum256", "New", "Size", "BlockSize"])],
 	[
@@ -625,6 +689,11 @@ export const WASM_STDLIB_MEMBERS = new Map([
 
 export const VALID_TARGETS = new Set(["js", "wasm", "both"]);
 
+// Backend-provided implementations for body-less Go-source stdlib functions
+// marked `//gofront:intrinsic <name>`: name -> required signature.  New
+// intrinsics need a plan change.
+export const INTRINSICS = new Map([]);
+
 // ── Static operator sets (module-level for reuse) ────────────
 export const CMP_OPS = new Set(["==", "!=", "<", ">", "<=", ">="]);
 export const LOG_OPS = new Set(["&&", "||"]);
@@ -669,7 +738,7 @@ export const UNTYPED_BOOL = { kind: "untyped", base: "bool" };
 
 // ── Complex types ────────────────────────────────────────────
 export const COMPLEX128 = { kind: "basic", name: "complex128" };
-const COMPLEX64 = { kind: "basic", name: "complex64" };
+export const COMPLEX64 = { kind: "basic", name: "complex64" };
 export const UNTYPED_COMPLEX = { kind: "untyped", base: "complex128" };
 
 export const BASIC_TYPES = {
@@ -750,6 +819,32 @@ const TYPED_ARRAY_CONSTRUCTORS = {
 	rune: "Int32Array",
 };
 
+// Element indices of an array or slice literal (Go spec): `i: v` puts v at
+// index i, any other element goes right after the previous one, so
+// `[5]int{1, 3: 4, 5}` fills indices 0, 3 and 4.  Array literal keys are
+// resolved by the type checker (`_index`, which handles named constants and
+// constant expressions); otherwise only integer-literal keys are known and
+// another key is treated as a positional element.
+export function compositeLitIndices(elems) {
+	const out = [];
+	let next = 0;
+	for (const e of elems) {
+		if (e.kind === "KeyValueExpr" && e._index !== undefined) next = e._index;
+		else if (e.kind === "KeyValueExpr" && e.key?.value !== undefined)
+			next = Number(e.key.value);
+		out.push(next++);
+	}
+	return out;
+}
+
+// Highest element index of an array or slice literal (-1 when empty).  A
+// loop, not `Math.max(...)`: spreading a huge literal overflows the stack.
+export function compositeLitMaxIndex(elems) {
+	let max = -1;
+	for (const i of compositeLitIndices(elems)) if (i > max) max = i;
+	return max;
+}
+
 export function typedArrayConstructorForElem(elemType) {
 	if (!elemType) return null;
 	const name = elemType.kind === "basic" ? elemType.name : null;
@@ -765,10 +860,26 @@ export function isTypedArraySlice(type) {
 
 export function isComplex(t) {
 	if (!t) return false;
-	if (t.kind === "basic" && (t.name === "complex128" || t.name === "complex64"))
+	if (
+		(t.kind === "basic" || t.kind === "TypeName" || t.kind === "Ident") &&
+		(t.name === "complex128" || t.name === "complex64")
+	)
 		return true;
 	if (t.kind === "untyped" && t.base === "complex128") return true;
 	if (t.kind === "named") return isComplex(t.underlying);
+	return false;
+}
+export function isComplex64(t) {
+	if (!t) return false;
+	if (
+		(t.kind === "basic" || t.kind === "TypeName" || t.kind === "Ident") &&
+		t.name === "complex64"
+	)
+		return true;
+	if (t.kind === "untyped" && t.base === "complex64") return true;
+	if (t.kind === "named") return isComplex64(t.underlying);
+	if (t.name === "complex64") return true;
+	if (t.underlying) return isComplex64(t.underlying);
 	return false;
 }
 export function isComplexOrNumeric(t) {
@@ -851,10 +962,12 @@ export function typeStr(t) {
 		}
 		case "tuple":
 			return `(${t.types.map(typeStr).join(", ")})`;
-		case "named":
+		case "named": {
+			const name = displayTypeName(t.name);
 			return t.typeArgs && t.typeArgs.length > 0
-				? `${t.name}[${t.typeArgs.map(typeStr).join(", ")}]`
-				: t.name;
+				? `${name}[${t.typeArgs.map(typeStr).join(", ")}]`
+				: name;
+		}
 		case "pointer":
 			return `*${typeStr(t.base)}`;
 		case "typeParam":
@@ -864,6 +977,17 @@ export function typeStr(t) {
 		default:
 			return "?";
 	}
+}
+
+// Go-source stdlib names are mangled to `Name$$path` (`List$$container$list`);
+// diagnostics show them qualified, as Go does (`list.List`).
+export function displayTypeName(name) {
+	const i = typeof name === "string" ? name.indexOf("$$") : -1;
+	if (i < 0) return name;
+	return `${name
+		.slice(i + 2)
+		.split("$")
+		.at(-1)}.${name.slice(0, i)}`;
 }
 
 // ── Iterator function detection (Go 1.23 range-over-func) ───

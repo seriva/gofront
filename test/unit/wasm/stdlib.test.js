@@ -6,6 +6,7 @@ import {
 	assertEqual,
 	assertThrows,
 	compileHybrid,
+	compileWasm,
 	runWasm,
 	section,
 	test,
@@ -555,7 +556,7 @@ func Main() string {
 }
 `;
 	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
-	assertEqual(wasmRes, "1 1 2147483648 true 1 1 9223372036854776000");
+	assertEqual(wasmRes, "1 1 2147483648 true 1 1 9223372036854775808");
 	assertEqual(wasmRes, jsRes);
 });
 
@@ -1981,4 +1982,117 @@ func Main() string {
 `;
 	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
 	assertEqual(wasmRes, jsRes);
+});
+
+section("WASM stdlib — functions as values (Task 0.35)");
+
+test("fmt.Sprint as a package-level func value (P72)", () => {
+	const src = `
+package main
+
+import "fmt"
+
+var sp = fmt.Sprint
+
+func Main() string { return sp(1) + "|" + sp(1, 2) + "|" + sp() + "|" + sp("a", 2) }
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "1|1 2||a2");
+	assertEqual(jsRes, "1|1 2||a2");
+});
+
+test("strings.ToUpper passed to a func(string) string parameter", () => {
+	const src = `
+package main
+
+import "strings"
+
+func apply(f func(string) string, s string) string { return f(s) }
+
+func Main() string {
+	g := strings.TrimSpace
+	return apply(strings.ToUpper, "abc") + g("  x ")
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "ABCx");
+	assertEqual(jsRes, "ABCx");
+});
+
+test("fmt.Sprintf and sort.Ints as local func values", () => {
+	const src = `
+package main
+
+import (
+	"fmt"
+	"sort"
+)
+
+func Main() string {
+	f := fmt.Sprintf
+	xs := []int{3, 1, 2}
+	sl := sort.Ints
+	sl(xs)
+	return f("%d-%s-%v", 3, "x", xs[0])
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, "3-x-1");
+	assertEqual(jsRes, "3-x-1");
+});
+
+test("a stdlib member that cannot be a value names itself in the error", () => {
+	assertThrows(
+		() =>
+			compileWasm(`
+package main
+
+import "regexp"
+
+func Main() int {
+	f := regexp.QuoteMeta
+	_ = f
+	return 1
+}
+`),
+		"regexp.QuoteMeta cannot be used as a value",
+	);
+});
+
+const valueSrc = (imp, body) => `
+package main
+
+import "${imp}"
+
+func Main() int {
+${body}
+	return 0
+}
+`;
+
+test("stdlib functions taking a callback or returning several values name themselves in the error", () => {
+	const cases = [
+		[
+			"sort",
+			"f := sort.Slice\n\t_ = f",
+			"sort.Slice cannot be used as a value",
+		],
+		[
+			"strings",
+			"f := strings.Map\n\t_ = f",
+			"strings.Map cannot be used as a value",
+		],
+		[
+			"strings",
+			"f := strings.FieldsFunc\n\t_ = f",
+			"strings.FieldsFunc cannot be used as a value",
+		],
+		[
+			"strconv",
+			'f := strconv.Atoi\n\t_, _ = f("42")',
+			"strconv.Atoi cannot be used as a value",
+		],
+	];
+	for (const [imp, body, msg] of cases)
+		assertThrows(() => compileWasm(valueSrc(imp, body)), msg);
 });

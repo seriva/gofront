@@ -2,8 +2,13 @@
 // WASM Backend compiler entry point: lowered AST + types -> Module IR -> binary / WAT.
 
 import { Lexer } from "../../lexer.js";
-import { lower } from "../../lower/index.js";
+import { lower, lowerFunction } from "../../lower/index.js";
+import {
+	getOrCreateIteratorFuncLit,
+	isIteratorRangeFor,
+} from "../../lower/range.js";
 import { Parser } from "../../parser/index.js";
+import { foldConstExpr } from "../../typechecker/const-fold.js";
 import { TypeChecker } from "../../typechecker/index.js";
 import {
 	addBoundaryHelpers,
@@ -12,9 +17,9 @@ import {
 	scanBoundaryImports,
 	wTypeKey,
 } from "./boundary.js";
-import { foldConstExpr } from "./const-fold.js";
 import { FunctionEmitter } from "./emit.js";
 import { encodeModule, isGoFrontWasm } from "./encode.js";
+import { desugarMethodExprs } from "./method-expr.js";
 import { hasGenerics, monomorphise } from "./monomorph.js";
 import { hasNativeWasmOpt, optimizeWasm } from "./optimize.js";
 import { BINARY_MATH_IMPORTS } from "./stdlib/index.js";
@@ -25,13 +30,19 @@ import {
 	getInterfaceMethodList,
 	getMapKeyValTypes,
 	getReceiverTypeName,
+	getSliceElemType,
 	goTypeKey,
+	isAnyType,
 	isInterfaceType,
 	isMapType,
 	isNonEmptyInterface,
+	isSliceType,
+	isStructType,
 	isTestingT,
 	toWasmType,
+	variadicAsSlice,
 } from "./types.js";
+import { desugarVariadics } from "./variadic.js";
 import { emitWat } from "./wat.js";
 
 export { hasNativeWasmOpt, isGoFrontWasm, optimizeWasm };
@@ -43,6 +54,7 @@ const ERROR_PRODUCING_PKGS = new Set([
 	"path",
 	"path/filepath",
 	"io",
+	"os",
 	"strings",
 	"bytes",
 	"time",
@@ -57,6 +69,8 @@ const ERROR_PRODUCING_PKGS = new Set([
 	"hex",
 	"encoding/base64",
 	"base64",
+	"math/bits",
+	"bits",
 ]);
 // Packages whose calls lower to the `env.*` imports in STDLIB_IMPORTS (the
 // matching JS lives in WASM_STDLIB_JS).  Only modules importing one of them
@@ -74,6 +88,7 @@ const STDLIB_ENV_PKGS = new Set([
 	"html",
 	"bytes",
 	"io",
+	"os",
 	"time",
 	"sync",
 	"crypto/rand",
@@ -86,6 +101,8 @@ const STDLIB_ENV_PKGS = new Set([
 	"hex",
 	"encoding/base64",
 	"base64",
+	"math/bits",
+	"bits",
 ]);
 
 function importsAnyOf(programs, pkgs) {
@@ -183,6 +200,9 @@ const STDLIB_IMPORTS = [
 	// fmt (arguments travel through the testing_arg_* buffer)
 	["fmt_sprintf", [S], [S]],
 	["fmt_printf", [S], []],
+	["fmt_sprint", ["i32"], [S]],
+	["fmt_print", ["i32"], []],
+	["fmt_print_raw", [S], []],
 	["fmt_format_v", [S], [S]],
 	["fmt_sscan_init", [S, "i32"], ["i32"]],
 	["fmt_sscanf_init", [S, S], ["i32"]],
@@ -194,6 +214,11 @@ const STDLIB_IMPORTS = [
 	["fmt_sscan_token_bool", ["i32"], ["i32"]],
 	// testing.T.Run: the harness calls back into the exported __testing_run_cb
 	["testing_run", [S, S, "anyref"], ["i32"]],
+	["testing_cleanup", [S, "anyref"], []],
+	["testing_n", [S], ["i64"]],
+	["testing_elapsed", [S], ["i64"]],
+	["testing_context", [S], [S]],
+	["testing_output", [S], [S]],
 	// unicode
 	["unicode_is_letter", ["i32"], ["i32"]],
 	["unicode_is_digit", ["i32"], ["i32"]],
@@ -232,12 +257,17 @@ const STDLIB_IMPORTS = [
 	["time_parse", [S, S], ["f64"]],
 	["time_parse_err", [], [S]],
 	["time_parse_offset", [], ["i32"]],
+	["time_parse_sub_ns", [], ["i32"]],
 	[
 		"time_format",
 		["i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", S],
 		[S],
 	],
 	["time_duration_string", ["i64"], [S]],
+	["time_parse_duration", [S], ["i64"]],
+	["time_parse_duration_err", [], [S]],
+	["time_month_string", ["i32"], [S]],
+	["time_weekday_string", ["i32"], [S]],
 	// raw binary buffer for crypto/rand, crypto/sha256, hex, base64
 	["raw_bytes_init", ["i32"], []],
 	["raw_bytes_push", ["i32"], []],
@@ -255,6 +285,12 @@ const STDLIB_IMPORTS = [
 	["base64_encode_to_string", ["i32"], [S]],
 	["base64_decode_string", ["i32", S], ["i32"]],
 	["base64_get_err", [], [S]],
+	["bits_div32", ["i32", "i32", "i32"], ["i32"]],
+	["bits_div32_rem", [], ["i32"]],
+	["bits_rem32", ["i32", "i32", "i32"], ["i32"]],
+	["bits_div64", ["i64", "i64", "i64"], ["i64"]],
+	["bits_div64_rem", [], ["i64"]],
+	["bits_rem64", ["i64", "i64", "i64"], ["i64"]],
 ];
 
 class ModuleEmitter {
@@ -272,6 +308,8 @@ class ModuleEmitter {
 		this._openRec = null; // rec group receiving new types while structs are resolved
 
 		this.structTypes = new Map(); // name -> struct info
+		this.complexTypes = new Map(); // key -> complex struct info
+		this.ptrTypes = new Map(); // key -> ptr supertype info
 		this.boxTypes = new Map(); // wType key -> box info
 		this.ifaceBoxTypes = new Map(); // key -> iface box info
 		this.arrayTypes = new Map(); // wType key -> array info
@@ -309,6 +347,7 @@ class ModuleEmitter {
 		this.hasErrorType =
 			importsAnyOf(programs, ERROR_PRODUCING_PKGS) || hasErrorUsage(programs);
 		this.usesStdlibEnv = importsAnyOf(programs, STDLIB_ENV_PKGS);
+		this.importsTesting = importsAnyOf(programs, ["testing"]);
 
 		if (programs && programs.length > 0) {
 			this.initTypes(programs);
@@ -340,7 +379,11 @@ class ModuleEmitter {
 
 		for (const p of progs) {
 			for (const d of p.decls ?? []) {
-				if (d.kind === "TypeDecl" && d.type?.kind === "StructType") {
+				if (
+					d.kind === "TypeDecl" &&
+					!d.isAlias &&
+					d.type?.kind === "StructType"
+				) {
 					if (!seen.has(d.name)) {
 						seen.add(d.name);
 						rawStructs.push({
@@ -358,6 +401,11 @@ class ModuleEmitter {
 			for (const [key, t] of this.checker.types.entries()) {
 				if (t.kind === "named" && t.underlying?.kind === "struct") {
 					const name = t.name ?? key;
+					if (
+						name.startsWith("testing.") &&
+						(!this.importsTesting || name !== "testing.BenchmarkResult")
+					)
+						continue;
 					if (!seen.has(name)) {
 						seen.add(name);
 						rawStructs.push({ name, structType: t.underlying });
@@ -412,7 +460,11 @@ class ModuleEmitter {
 				let fIdx = 0;
 				for (const f of s.astFields) {
 					const names = f.embedded
-						? [f.type.name]
+						? [
+								f.type?.kind === "PointerType"
+									? f.type.base?.name
+									: f.type?.name,
+							]
 						: f.names?.length
 							? f.names
 							: f.name
@@ -446,7 +498,8 @@ class ModuleEmitter {
 				}
 				if (resolvedStruct?._embeds) {
 					for (const embed of resolvedStruct._embeds) {
-						const embedName = embed.kind === "named" ? embed.name : null;
+						const inner = embed.kind === "pointer" ? embed.base : embed;
+						const embedName = inner?.kind === "named" ? inner.name : null;
 						if (embedName && fieldIndexMap.has(embedName)) {
 							embeds.push({
 								name: embedName,
@@ -512,19 +565,98 @@ class ModuleEmitter {
 		return info;
 	}
 
+	getComplexType(name = "complex128") {
+		const key = name === "complex64" ? "complex64" : "complex128";
+		if (this.complexTypes.has(key)) {
+			return this.complexTypes.get(key);
+		}
+		const isF32 = key === "complex64";
+		const elemWType = isF32 ? "f32" : "f64";
+		const elemGoType = { kind: "basic", name: isF32 ? "float32" : "float64" };
+		const typeName = `$${key}`;
+		const typeIndex = this._getTotalTypeCount();
+		const typeEntry = {
+			form: "struct",
+			name: typeName,
+			fields: [
+				{ type: elemWType, mutable: false },
+				{ type: elemWType, mutable: false },
+			],
+		};
+		this._pushType(typeEntry);
+		const fields = [
+			{ name: "re", fieldIndex: 0, wType: elemWType, goType: elemGoType },
+			{ name: "im", fieldIndex: 1, wType: elemWType, goType: elemGoType },
+		];
+		const info = {
+			name: typeName,
+			typeIndex,
+			typeEntry,
+			fields,
+			fieldIndexMap: new Map([
+				["re", 0],
+				["im", 1],
+			]),
+			embeds: [],
+			pkgName: null,
+			pkgTarget: "wasm",
+			isComplex: true,
+			elemWType,
+			elemGoType,
+		};
+		this.complexTypes.set(key, info);
+		this.structTypes.set(key, info);
+		this.structTypes.set(typeName, info);
+		return info;
+	}
+
+	getPtrType(goType) {
+		const key = goTypeKey(goType);
+		if (this.ptrTypes.has(key)) {
+			return this.ptrTypes.get(key);
+		}
+		const typeIndex = this._getTotalTypeCount();
+		const name = `$ptr_${key}`;
+		const typeEntry = {
+			form: "struct",
+			name,
+			sub: true,
+			fields: [],
+		};
+		this._pushType(typeEntry);
+		const ptrInfo = { key, name, typeIndex, typeEntry, goType };
+		this.ptrTypes.set(key, ptrInfo);
+		return ptrInfo;
+	}
+
 	getBoxType(goType) {
 		const key = goTypeKey(goType);
 		if (this.boxTypes.has(key)) {
 			return this.boxTypes.get(key);
 		}
+		const ptrInfo = this.getPtrType(goType);
 		const wType = toWasmType(goType, this.checker, this);
 		const typeIndex = this._getTotalTypeCount();
+		const name = `$box_${key}`;
 		const typeEntry = {
 			form: "struct",
+			name,
+			sub: true,
+			superType: ptrInfo.name,
+			superTypeIndex: ptrInfo.typeIndex,
 			fields: [{ type: wType, mutable: true }],
 		};
 		this._pushType(typeEntry);
-		const boxInfo = { key, typeIndex, typeEntry, wType, goType };
+		const boxInfo = {
+			key,
+			name,
+			typeIndex,
+			typeEntry,
+			ptrType: ptrInfo,
+			ptrTypeIndex: ptrInfo.typeIndex,
+			wType,
+			goType,
+		};
 		this.boxTypes.set(key, boxInfo);
 		return boxInfo;
 	}
@@ -649,7 +781,11 @@ class ModuleEmitter {
 	getMapType(keyGoType, valGoType) {
 		const keyWType = toWasmType(keyGoType, this.checker, this);
 		const valWType = toWasmType(valGoType, this.checker, this);
-		const key = `${wTypeKey(keyWType)}:${wTypeKey(valWType)}`;
+		// Vector keys share one wasm type but compare differently (floats vs
+		// mask words), so the Go type is part of the key.
+		const keyPart =
+			keyWType === "v128" ? `v128_${goTypeKey(keyGoType)}` : wTypeKey(keyWType);
+		const key = `${keyPart}:${wTypeKey(valWType)}`;
 		if (this.mapTypes.has(key)) {
 			return this.mapTypes.get(key);
 		}
@@ -871,6 +1007,7 @@ class ModuleEmitter {
 		this.getStringReplaceAllImportIndex();
 		this.getStringEqualFoldImportIndex();
 		this.getStringCountImportIndex();
+		this.getStringToValidUTF8ImportIndex();
 		this.getStrFromI64ImportIndex();
 		this.getStrFromI32ImportIndex();
 		this.getStrFromF64ImportIndex();
@@ -887,6 +1024,11 @@ class ModuleEmitter {
 			this.getTestingArgImportIndex(t, false);
 		}
 		this.getTestingArgImportIndex("i32", true);
+		this.getTestingArgErrImportIndex();
+		this.getTestingArgSpreadImportIndex();
+		this.getTestingArgU64ImportIndex();
+		this.getFmtArgTypeImportIndex();
+		this.getFmtStructTypeImportIndex();
 		this.getFmtNewArrayIndex();
 		this.getFmtArrayPushIndex();
 		this.getFmtNewMapIndex();
@@ -898,6 +1040,7 @@ class ModuleEmitter {
 		this.getFmtBoxF64Index();
 		this.getFmtBoxBoolIndex();
 		this.getFmtNewBoxIndex();
+		this.getFmtNewStringerIndex();
 		if (this.usesStdlibEnv) {
 			for (const [name, params, results] of STDLIB_IMPORTS) {
 				this.getOrAddFuncImport("env", name, params, results);
@@ -928,6 +1071,8 @@ class ModuleEmitter {
 			"log10",
 			"round",
 			"cbrt",
+			"log1p",
+			"expm1",
 		];
 		for (const m of unaryMath) {
 			this.getMathImportIndex(m, false);
@@ -1090,6 +1235,19 @@ class ModuleEmitter {
 		return gIdx;
 	}
 
+	getOsGlobalIndex(field) {
+		this.osGlobals ??= new Map();
+		if (this.osGlobals.has(field)) return this.osGlobals.get(field);
+		const gIdx = this.globals.length;
+		this.globals.push({
+			type: "anyref",
+			mutable: true,
+			init: [{ op: "ref.null", heapType: "any" }],
+		});
+		this.osGlobals.set(field, gIdx);
+		return gIdx;
+	}
+
 	getDeferNodeTypeIndex() {
 		if (this.deferNodeTypeIndex !== undefined) {
 			return this.deferNodeTypeIndex;
@@ -1185,6 +1343,14 @@ class ModuleEmitter {
 		return this.resolveFuncIndex("__bounds_panic");
 	}
 
+	getIndexPanicFuncIndex() {
+		return this.resolveFuncIndex("__index_panic");
+	}
+
+	getNilPanicFuncIndex() {
+		return this.resolveFuncIndex("__nil_panic");
+	}
+
 	// `gofront/shared` buffers are `(base i32, len i32)` views over the single
 	// exported linear memory, bump-allocated by `__shared_new` during start.
 	getSharedType() {
@@ -1245,12 +1411,31 @@ class ModuleEmitter {
 		);
 	}
 
+	getFmtNewStringerIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"fmt_new_stringer",
+			["externref", "externref", "i32"],
+			["externref"],
+		);
+	}
+
 	getFmtNewStructIndex() {
 		return this.getOrAddFuncImport(
 			"env",
 			"fmt_new_struct",
 			["anyref", "i32"],
 			["externref"],
+		);
+	}
+
+	// Names the Go type of a struct built for fmt (`%T`, `%#v` of an any).
+	getFmtStructTypeImportIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"fmt_struct_type",
+			["externref", "i32"],
+			[],
 		);
 	}
 
@@ -1321,6 +1506,31 @@ class ModuleEmitter {
 			[suffix === "str" ? "externref" : suffix === "any" ? "anyref" : wType],
 			[],
 		);
+	}
+
+	// Error operands of fmt.Sprint/Print/Append: a non-string for the host.
+	getTestingArgSpreadImportIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"testing_arg_spread",
+			["externref"],
+			[],
+		);
+	}
+
+	// An unsigned 64-bit operand: the host reinterprets the i64 as unsigned.
+	getTestingArgU64ImportIndex() {
+		return this.getOrAddFuncImport("env", "testing_arg_u64", ["i64"], []);
+	}
+
+	// Tags the last operand in the argument buffer with the static type
+	// descriptor (JSON) held in string table entry `i32`, for `%T` and `%#v`.
+	getFmtArgTypeImportIndex() {
+		return this.getOrAddFuncImport("env", "fmt_arg_type", ["i32"], []);
+	}
+
+	getTestingArgErrImportIndex() {
+		return this.getOrAddFuncImport("env", "testing_arg_err", ["externref"], []);
 	}
 
 	getTestingCallImportIndex() {
@@ -1567,6 +1777,15 @@ class ModuleEmitter {
 		);
 	}
 
+	getStringToValidUTF8ImportIndex() {
+		return this.getOrAddFuncImport(
+			"env",
+			"str_to_valid_utf8",
+			["externref", "externref"],
+			["externref"],
+		);
+	}
+
 	getStrFromI64ImportIndex() {
 		return this.getOrAddFuncImport(
 			"env",
@@ -1649,6 +1868,15 @@ class ModuleEmitter {
 		return this.getClosureType({
 			kind: "func",
 			params: [{ kind: "pointer", base: { kind: "named", name: "testing.T" } }],
+			returns: [],
+		});
+	}
+
+	// Closure type of `func()` (the t.Cleanup body).
+	getTestingCleanupClosureType() {
+		return this.getClosureType({
+			kind: "func",
+			params: [],
 			returns: [],
 		});
 	}
@@ -1810,20 +2038,88 @@ class ModuleEmitter {
 			if (fnName.endsWith(`.${methodName}`)) {
 				const rName = fnName.slice(0, fnName.length - methodName.length - 1);
 				if (!this.structTypes.has(rName)) {
-					const box = this.getIfaceBoxType({ kind: "named", name: rName });
-					const key = `named:${rName}`;
-					if (box && !seenKeys.has(key)) {
-						seenKeys.add(key);
-						const paramWTypes = this.getFuncParamTypes(fnName);
-						candidates.push({
-							recvTypeName: rName,
-							testTypeIndex: box.typeIndex,
-							isBoxedValue: true,
-							needsValueDeref: false,
-							embedPath: null,
-							funcIndex: fIdx,
-							targetParamTypes: paramWTypes,
+					const rType = this.checker?.types?.get(rName) ?? {
+						kind: "named",
+						name: rName,
+					};
+					const paramGoTypes = this.getFuncParamGoTypes(fnName);
+					const paramWTypes = this.getFuncParamTypes(fnName);
+					const isPtrRecv = paramGoTypes[0]?.kind === "pointer";
+					const isSlice = isSliceType(rType, this.checker);
+
+					if (isSlice) {
+						const elemType = getSliceElemType(rType, this.checker);
+						const sliceInfo = this.getSliceType(elemType);
+						const ptrIfaceBox = this.getIfaceBoxType({
+							kind: "pointer",
+							base: rType,
 						});
+						const box = this.getBoxType(rType);
+						if (isPtrRecv) {
+							const ptrKey = `ptr:${rName}`;
+							if (ptrIfaceBox && !seenKeys.has(ptrKey)) {
+								seenKeys.add(ptrKey);
+								candidates.push({
+									recvTypeName: rName,
+									testTypeIndex: ptrIfaceBox.typeIndex,
+									isBoxedValue: true,
+									needsValueDeref: false,
+									embedPath: null,
+									funcIndex: fIdx,
+									targetParamTypes: paramWTypes,
+								});
+							}
+						} else {
+							const ptrKey = `ptr:${rName}`;
+							if (ptrIfaceBox && box && !seenKeys.has(ptrKey)) {
+								seenKeys.add(ptrKey);
+								candidates.push({
+									recvTypeName: rName,
+									testTypeIndex: ptrIfaceBox.typeIndex,
+									isBoxedValue: true,
+									needsValueDeref: false,
+									embedPath: [
+										{
+											castTypeIndex: box.typeIndex,
+											parentTypeIndex: box.typeIndex,
+											fieldIndex: 0,
+										},
+									],
+									funcIndex: fIdx,
+									targetParamTypes: paramWTypes,
+								});
+							}
+							const key = `slice:${rName}`;
+							if (sliceInfo && !seenKeys.has(key)) {
+								seenKeys.add(key);
+								candidates.push({
+									recvTypeName: rName,
+									testTypeIndex: sliceInfo.typeIndex,
+									isBoxedValue: false,
+									needsValueDeref: false,
+									embedPath: null,
+									funcIndex: fIdx,
+									targetParamTypes: paramWTypes,
+								});
+							}
+						}
+					} else {
+						const box = isPtrRecv
+							? this.getIfaceBoxType({ kind: "pointer", base: rType })
+							: this.getIfaceBoxType(rType);
+						const key = `${isPtrRecv ? "ptr" : "named"}:${rName}`;
+						if (box && !seenKeys.has(key)) {
+							seenKeys.add(key);
+							candidates.push({
+								recvTypeName: rName,
+								testTypeIndex: box.typeIndex,
+								isBoxedValue: true,
+								needsValueDeref: false,
+								embedPath: null,
+								funcIndex: fIdx,
+								targetParamTypes: paramWTypes,
+							});
+						}
 					}
 				}
 			}
@@ -1874,7 +2170,7 @@ class ModuleEmitter {
 					tVal.underlying?.kind !== "struct" &&
 					tVal.underlying?.kind !== "interface"
 				) {
-					if (this.checker.implements(tVal, ifaceResolved)) {
+					if (this.checker?.implements?.(tVal, ifaceResolved)) {
 						const box = this.getIfaceBoxType(tVal);
 						if (box && !seen.has(box.typeIndex)) {
 							seen.add(box.typeIndex);
@@ -1887,6 +2183,47 @@ class ModuleEmitter {
 
 		return candidates;
 	}
+}
+
+// Body of `__index_panic(i i64, n i32)`: builds Go's message with the string
+// imports and raises it like any other runtime panic.
+function emitIndexPanicBody(mod, emitter) {
+	const str = (text) => {
+		emitter.pushInstruction({ op: "i32.const", value: mod.internString(text) });
+		emitter.pushInstruction({
+			op: "call",
+			funcIndex: mod.getStringImportIndex(),
+		});
+	};
+	const concat = () =>
+		emitter.pushInstruction({
+			op: "call",
+			funcIndex: mod.getStringConcatImportIndex(),
+		});
+	str("runtime error: index out of range [");
+	emitter.pushInstruction({ op: "local.get", index: 0 });
+	emitter.pushInstruction({
+		op: "call",
+		funcIndex: mod.getStrFromI64ImportIndex(),
+	});
+	concat();
+	emitter.pushInstruction({ op: "local.get", index: 0 });
+	emitter.pushInstruction({ op: "i64.const", value: 0n });
+	emitter.pushInstruction("i64.lt_s");
+	emitter.pushInstruction({ op: "if", blockType: "externref" });
+	str("]");
+	emitter.pushInstruction("else");
+	str("] with length ");
+	emitter.pushInstruction({ op: "local.get", index: 1 });
+	emitter.pushInstruction({
+		op: "call",
+		funcIndex: mod.getStrFromI32ImportIndex(),
+	});
+	concat();
+	emitter.pushInstruction("end");
+	concat();
+	emitter.pushInstruction("any.convert_extern");
+	emitter.emitPanicThrow();
 }
 
 function peepholeOptimize(instructions) {
@@ -1963,10 +2300,17 @@ export function compileWasmModule(
 		const mono = monomorphise(progs, checker);
 		progs = mono.programs;
 		resolvedChecker = mono.checker;
-		resolvedLowerResult = lower(progs, resolvedChecker);
-	} else if (!resolvedLowerResult) {
+		resolvedLowerResult = null;
+	}
+	// Variadic parameters become slices (after monomorphisation: concrete types).
+	// Method expressions become method calls or forwarding func literals,
+	// before variadics so a variadic method's forwarder packs its arguments.
+	const methodExprs = desugarMethodExprs(progs, options.bundledPackages);
+	if (desugarVariadics(progs) || methodExprs || !resolvedLowerResult) {
 		resolvedLowerResult = lower(progs, resolvedChecker);
 	}
+	checker = resolvedChecker;
+	lowerResult = resolvedLowerResult;
 
 	const mod = new ModuleEmitter(resolvedChecker, resolvedLowerResult, progs, {
 		bundledPackages: options.bundledPackages,
@@ -2029,6 +2373,13 @@ export function compileWasmModule(
 			for (const item of node) scanClosures(item, rootFn);
 			return;
 		}
+		if (isIteratorRangeFor(node)) {
+			const yieldFuncLit = getOrCreateIteratorFuncLit(node);
+			scanClosures(yieldFuncLit, rootFn);
+			// A func literal ranged over directly is a closure of its own.
+			scanClosures(node.cond?.expr ?? node.init?.rhs?.[0]?.expr, rootFn);
+			return;
+		}
 		if (node.kind === "FuncLit") {
 			closureCounter++;
 			const closureName = `_closure$${closureCounter}`;
@@ -2045,6 +2396,8 @@ export function compileWasmModule(
 				returnType: node.returnType,
 				body: node.body,
 				_isClosure: true,
+				_isYieldClosure: Boolean(node._isYieldClosure),
+				_iterStateName: node._iterStateName ?? null,
 				_funcLit: node,
 				_rootFuncDecl: rootFn,
 				_srcFile: rootFn?._srcFile ?? null,
@@ -2148,7 +2501,15 @@ export function compileWasmModule(
 		pendingInits.length > 0 || initNames.length > 0
 			? _makeGlobalInitFunc(pendingInits, initNames)
 			: null;
-	if (globalInitFn) funcDecls.push(globalInitFn);
+	if (globalInitFn) {
+		// Func literals in package-level initializers are lifted like any other.
+		globalInitFn._rootFuncDecl = globalInitFn;
+		// Captured variables of those literals need the same analysis.
+		lowerFunction(lowerResult, globalInitFn);
+		const before = closures.length;
+		scanClosures(globalInitFn.body, globalInitFn);
+		funcDecls.push(globalInitFn, ...closures.slice(before));
+	}
 
 	const boundsPanicFn = {
 		kind: "FuncDecl",
@@ -2159,6 +2520,30 @@ export function compileWasmModule(
 		_panicMsg: "runtime error: index out of range",
 	};
 	funcDecls.push(boundsPanicFn);
+
+	// Go's index panic: `index out of range [i] with length n`, or
+	// `index out of range [i]` for a negative index.
+	funcDecls.push({
+		kind: "FuncDecl",
+		name: "__index_panic",
+		params: [
+			{ name: "i", type: { kind: "basic", name: "int64" } },
+			{ name: "n", type: { kind: "basic", name: "int32" } },
+		],
+		returnType: null,
+		_isIndexPanic: true,
+	});
+
+	// Target of the per-function `nil` block (`_openNilBlock` in emit.js).
+	funcDecls.push({
+		kind: "FuncDecl",
+		name: "__nil_panic",
+		params: [],
+		returnType: null,
+		_isRuntimePanic: true,
+		_panicMsg:
+			"runtime error: invalid memory address or nil pointer dereference",
+	});
 
 	const sliceBoundsPanicFn = {
 		kind: "FuncDecl",
@@ -2405,6 +2790,7 @@ export function compileWasmModule(
 
 	// 1e3. Runtime helpers: error values, interface equality, t.Run callback.
 	mod.usesTestingRun = funcDecls.some((fn) => _usesTestingRun(fn.body));
+	mod.usesTestingCleanup = funcDecls.some((fn) => _usesTestingCleanup(fn.body));
 	mod.usesAnyEq = _usesAnyEq(funcDecls, mod);
 	const ANY_T = { kind: "basic", name: "any" };
 	const STR_T = { kind: "basic", name: "string" };
@@ -2531,7 +2917,25 @@ export function compileWasmModule(
 			),
 		);
 	}
+	if (mod.usesTestingCleanup) {
+		funcDecls.push(
+			helper(
+				"__testing_cleanup_cb",
+				[{ name: "fn", type: ANY_T }],
+				null,
+				"testing_cleanup_cb",
+				{ _forceExport: true },
+			),
+		);
+	}
 	_registerIoSyntheticMethods(funcDecls, mod, STR_T, progs);
+	// `__any_fmt` turns an `any` operand of fmt into the host value; its body
+	// is emitted last-but-one so every type registered by user code is seen.
+	if (_usesFmtAny(funcDecls, mod)) {
+		funcDecls.push(
+			helper("__any_fmt", [{ name: "a", type: ANY_T }], STR_T, "any_fmt"),
+		);
+	}
 
 	// 1f. Boundary metadata (exported surface of wasm packages)
 	const boundaryMeta = options.boundary
@@ -2626,7 +3030,9 @@ export function compileWasmModule(
 	// 4. Emit function bodies
 	for (const fn of funcDecls) {
 		const emitter = new FunctionEmitter(mod, fn, fn._globalFuncIndex);
-		if (fn._isRuntimePanic) {
+		if (fn._isIndexPanic) {
+			emitIndexPanicBody(mod, emitter);
+		} else if (fn._isRuntimePanic) {
 			const strIdx = mod.internString(fn._panicMsg);
 			const funcIdx = mod.getStringImportIndex();
 			emitter.pushInstruction({ op: "i32.const", value: strIdx });
@@ -2827,6 +3233,17 @@ function _usesTestingRun(node) {
 	);
 }
 
+function _usesTestingCleanup(node) {
+	return _someNode(
+		node,
+		(n) =>
+			n.kind === "CallExpr" &&
+			n.func?.kind === "SelectorExpr" &&
+			n.func.field === "Cleanup" &&
+			isTestingT(n.func.expr?._type),
+	);
+}
+
 // `__any_eq` is only needed when some `==`/`!=` (or switch case) compares
 // anyref operands, a struct with an anyref field is compared, or the error
 // runtime (`errors.Is`) is present.  `_emitAnyEq` throws if this misses a
@@ -2848,6 +3265,27 @@ function _usesAnyEq(funcDecls, mod) {
 			if (n.kind === "SwitchStmt" && n.tag) return isAnyRef(n.tag);
 			return false;
 		}),
+	);
+}
+
+// An `fmt` call with an `any`/interface operand or a `xs...` spread needs
+// `__any_fmt`.  `emitFmtCall` falls back to scalar-only dispatch without it.
+function _usesFmtAny(funcDecls, mod) {
+	return funcDecls.some((fn) =>
+		_someNode(
+			fn.body,
+			(n) =>
+				n.kind === "CallExpr" &&
+				n.func?.kind === "SelectorExpr" &&
+				n.func.expr?.kind === "Ident" &&
+				n.func.expr.name === "fmt" &&
+				n.args?.some(
+					(a) =>
+						a._spread ||
+						isAnyType(a._type, mod.checker) ||
+						isInterfaceType(a._type, mod.checker),
+				),
+		),
 	);
 }
 
@@ -2892,8 +3330,10 @@ function _scanImportsInBody(node, mod) {
 				Cbrt: "cbrt",
 				Exp: "exp",
 				Log: "log",
+				Log1p: "log1p",
 				Log2: "log2",
 				Log10: "log10",
+				Expm1: "expm1",
 				Round: "round",
 				Sinh: "sinh",
 				Cosh: "cosh",
@@ -2915,6 +3355,8 @@ function _scanImportsInBody(node, mod) {
 			else if (func.field === "Run") {
 				// closure type for func(*testing.T) must exist before bodies are emitted
 				mod.getTestingRunClosureType();
+			} else if (func.field === "Cleanup") {
+				mod.getTestingCleanupClosureType();
 			} else {
 				mod.getTestingCallImportIndex();
 				for (const arg of args) {
@@ -3013,6 +3455,58 @@ function _zeroFieldConst(f, mod) {
 	return [{ op: "ref.null", heapType: ti ?? "any" }];
 }
 
+// Length and element type of an array type (checker type, AST node or name).
+function _arrayShape(t, checker) {
+	if (!t) return null;
+	if (t.kind === "array" || t.kind === "ArrayType") {
+		const size = typeof t.size === "number" ? t.size : Number(t.size?.value);
+		return Number.isInteger(size) ? { size, elem: t.elem } : null;
+	}
+	if (t.kind === "named" && t.underlying)
+		return _arrayShape(t.underlying, checker);
+	if (t.kind === "TypeName" || t.kind === "Ident")
+		return _arrayShape(checker?.types?.get(t.name), checker);
+	return null;
+}
+
+// Constant-expression zero value of a package-level array global (a null ref
+// would trap on the first element access); null when it cannot be built.
+function _zeroArrayConst(goType, mod, depth = 0) {
+	const checker = mod.checker;
+	if (!goType || goType.kind === "pointer" || depth > 4) return null;
+	const shape = _arrayShape(goType, checker);
+	if (!shape) return null;
+	const { size, elem } = shape;
+	const arrInfo = mod.getArrayType(elem);
+	const elemW = toWasmType(elem, checker, mod);
+	let one = null;
+	if (_arrayShape(elem, checker)) {
+		one = _zeroArrayConst(elem, mod, depth + 1);
+		if (!one) return null;
+	} else if (
+		elem?.kind !== "pointer" &&
+		elem?.kind !== "StarExpr" &&
+		typeof elemW === "object" &&
+		isStructType(elem, checker, mod)
+	) {
+		const info = Array.from(mod.structTypes.values()).find(
+			(x) => x.typeIndex === elemW.typeIndex,
+		);
+		if (!info) return null;
+		one = _zeroStructConst(info, mod);
+	}
+	if (!one)
+		return [
+			{ op: "i32.const", value: size },
+			{ op: "array.new_default", typeIndex: arrInfo.typeIndex },
+		];
+	if (size > 64) return null;
+	const out = [];
+	for (let i = 0; i < size; i++) out.push(...one);
+	out.push({ op: "array.new_fixed", typeIndex: arrInfo.typeIndex, size });
+	return out;
+}
+
 function _collectPackageGlobals(progs, mod, checker) {
 	const pending = []; // non-constant initializers, run by the start function
 	const pendingConsts = []; // unfoldable consts; they run before any var
@@ -3055,8 +3549,11 @@ function _collectPackageGlobals(progs, mod, checker) {
 							const structInfo = Array.from(mod.structTypes.values()).find(
 								(s) => s.typeIndex === wType.typeIndex,
 							);
+							const arrZero = structInfo ? null : _zeroArrayConst(rawType, mod);
 							if (structInfo) {
 								initInsts = _zeroStructConst(structInfo, mod);
+							} else if (arrZero) {
+								initInsts = arrZero;
 							} else {
 								initInsts = [
 									{ op: "ref.null", heapType: wType.typeIndex ?? "any" },
@@ -3260,21 +3757,25 @@ function _scanInterfaceTypeDecls(progs, interfaceCalls, checker) {
 function _makeInterfaceDispatcher(info, checker) {
 	let methodSig = info.methodSig;
 	if (!methodSig) {
-		const ifaceResolved =
-			checker?.resolveType?.(
-				info.ifaceType?.kind === "named"
-					? info.ifaceType.underlying
-					: info.ifaceType,
-			) ?? info.ifaceType;
-		if (ifaceResolved?.methods instanceof Map) {
-			methodSig = ifaceResolved.methods.get(info.methodName);
+		const raw =
+			info.ifaceType?.kind === "named" && info.ifaceType.underlying
+				? info.ifaceType.underlying
+				: info.ifaceType;
+		const ifaceResolved = checker?.resolveType?.(raw) ?? raw;
+		const methods =
+			ifaceResolved?.methods ?? ifaceResolved?.underlying?.methods;
+		if (methods instanceof Map) {
+			methodSig = methods.get(info.methodName);
+		} else if (Array.isArray(methods)) {
+			methodSig = methods.find((m) => (m.name ?? m) === info.methodName);
 		}
 	}
 
 	const params = [{ name: "__recv", type: { kind: "basic", name: "any" } }];
 	if (methodSig?.params) {
-		for (let p = 0; p < methodSig.params.length; p++) {
-			params.push({ name: `__arg${p}`, type: methodSig.params[p] });
+		const sigParams = variadicAsSlice(methodSig.params, methodSig.variadic);
+		for (let p = 0; p < sigParams.length; p++) {
+			params.push({ name: `__arg${p}`, type: sigParams[p] });
 		}
 	} else if (info.callNode?.args) {
 		for (let p = 0; p < info.callNode.args.length; p++) {
@@ -3683,6 +4184,56 @@ function _registerIoSyntheticMethods(funcDecls, mod, strType, programs) {
 					_recvTypeName: "io.LimitedReader",
 					_methodName: "Read",
 				},
+			),
+		);
+	}
+	const hasOs = importsAnyOf(progs, ["os"]);
+	if (hasOs && mod.structTypes.has("os.File")) {
+		const fPtr = {
+			kind: "pointer",
+			base: { kind: "named", name: "os.File" },
+		};
+		funcDecls.push(
+			ioHelper(
+				"os.File.Write",
+				[
+					{ name: "f", type: fPtr },
+					{ name: "p", type: BYTE_SLICE_T },
+				],
+				INT_ERR_RET,
+				"os_file_write",
+				{ _isMethod: true, _recvTypeName: "os.File", _methodName: "Write" },
+			),
+			ioHelper(
+				"os.File.WriteString",
+				[
+					{ name: "f", type: fPtr },
+					{ name: "s", type: strType },
+				],
+				INT_ERR_RET,
+				"os_file_write_string",
+				{
+					_isMethod: true,
+					_recvTypeName: "os.File",
+					_methodName: "WriteString",
+				},
+			),
+			ioHelper(
+				"os.File.Read",
+				[
+					{ name: "f", type: fPtr },
+					{ name: "p", type: BYTE_SLICE_T },
+				],
+				INT_ERR_RET,
+				"os_file_read",
+				{ _isMethod: true, _recvTypeName: "os.File", _methodName: "Read" },
+			),
+			ioHelper(
+				"os.File.Close",
+				[{ name: "f", type: fPtr }],
+				ERR_T,
+				"os_file_close",
+				{ _isMethod: true, _recvTypeName: "os.File", _methodName: "Close" },
 			),
 		);
 	}
