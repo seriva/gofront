@@ -327,7 +327,7 @@ Only paths change. No task, scope or number in those plans is edited.
   - Files: `src/backend/shared/fmt-types.js` (moved), its importers (`js/stdlib/fmt.js`, `js/fmt-runtime.js`, `wasm/stdlib/core.js` — the import line only), `.sentrux/rules.toml` (backend globs)
   - Test: the Task 1.1 real-repo cross-backend case is turned on and lists only the allowlisted edge
   - Done when: `check-layers` passes with the cross-backend check on, and the hashes match
-- [ ] Task 5.2: Parse templ `{ expr }` and attribute expressions in `TemplParser`
+- [x] Task 5.2: Parse templ `{ expr }` and attribute expressions in `TemplParser`
   - Files: `src/templ-parser.js`, `src/backend/js/templ.js`
   - Test: `test/unit/compiler/templ.test.js`:
     - Written first, passing on the old code: pinned error text, position and exit code for a malformed `{ a + }` under `build` and `check`.

@@ -79,7 +79,7 @@ export const templGenMethods = {
 				);
 			case "TemplExpr":
 				return this.line(
-					`${p}.appendChild(document.createTextNode(String(${this._genTemplTokenExpr(node.tokens)})));`,
+					`${p}.appendChild(document.createTextNode(String(${this._genTemplExpr(node, '""')})));`,
 				);
 			case "TemplComponent":
 				return this._genTemplComponentMount(node, p);
@@ -101,20 +101,12 @@ export const templGenMethods = {
 
 	_genTemplComponentMount(node, p) {
 		// Special case: @templ.Raw(expr) → insertAdjacentHTML
-		const toks = node.tokens;
-		if (
-			toks.length >= 4 &&
-			toks[0]?.value === "templ" &&
-			toks[1]?.type === T.DOT &&
-			toks[2]?.value === "Raw" &&
-			toks[3]?.type === T.LPAREN
-		) {
-			const argTokens = toks.slice(4, toks.length - 1);
-			const argJs = this._genTemplTokenExpr(argTokens);
+		if (node.raw) {
+			const argJs = this._genTemplExpr(node, '""');
 			return this.line(`${p}.insertAdjacentHTML("beforeend", ${argJs});`);
 		}
 		return this.line(
-			`(${this._genTemplTokenCallExpr(node.tokens)}).Mount(${p}, ___refs);`,
+			`(${this._genTemplExpr(node, "null")}).Mount(${p}, ___refs);`,
 		);
 	},
 
@@ -160,7 +152,7 @@ export const templGenMethods = {
 				);
 			}
 		} else if (attr.kind === "expr") {
-			const exprJs = this._genTemplTokenExpr(attr.tokens);
+			const exprJs = this._genTemplExpr(attr, '""');
 			if (name === "class") {
 				this.line(setClass(exprJs));
 			} else {
@@ -171,7 +163,7 @@ export const templGenMethods = {
 		} else if (attr.kind === "bool") {
 			this.line(`${el}.setAttribute(${JSON.stringify(name)}, "");`);
 		} else if (attr.kind === "cond-bool") {
-			const exprJs = this._genTemplTokenExpr(attr.tokens);
+			const exprJs = this._genTemplExpr(attr, '""');
 			this.line(
 				`if(${exprJs})${el}.setAttribute(${JSON.stringify(name)}, "");`,
 			);
@@ -179,7 +171,7 @@ export const templGenMethods = {
 	},
 
 	_genTemplIf(node, p) {
-		const condJs = this._genTemplCondTokens(node.condTokens);
+		const condJs = this._genTemplExpr(node, "false");
 		this.line(`if (${condJs}) {`);
 		this.indented(() => this._genTemplNodes(node.then, p));
 		this._genTemplIfElse(node.else_, p);
@@ -192,7 +184,7 @@ export const templGenMethods = {
 		}
 		if (else_.length === 1 && else_[0].kind === "TemplIf") {
 			const elseIf = else_[0];
-			this.line(`} else if (${this._genTemplCondTokens(elseIf.condTokens)}) {`);
+			this.line(`} else if (${this._genTemplExpr(elseIf, "false")}) {`);
 			this.indented(() => this._genTemplNodes(elseIf.then, p));
 			this._genTemplIfElse(elseIf.else_, p);
 		} else {
@@ -203,16 +195,16 @@ export const templGenMethods = {
 	},
 
 	_genTemplSwitch(node, p) {
-		const { exprTokens, cases } = node;
+		const { cases } = node;
 		if (cases.length === 0) return;
-		const exprJs = this._genTemplTokenExpr(exprTokens);
+		const exprJs = this._genTemplExpr(node, '""');
 		this.line(`switch (${exprJs}) {`);
 		this.indented(() => {
 			for (const c of cases) {
 				const label =
 					c.caseTokens === null
 						? "default"
-						: `case ${this._genTemplTokenExpr(c.caseTokens)}`;
+						: `case ${this._genTemplExpr(c, '""')}`;
 				this.line(`${label}: {`);
 				this.indented(() => this._genTemplNodes(c.body, p));
 				this.line(`break; }`);
@@ -290,33 +282,14 @@ export const templGenMethods = {
 		return `for (const [${keyName}, ${valName}] of __s(${iterJs}).entries()) {`;
 	},
 
-	// Parse a token array as a Go expression and emit JS.
-	_genTemplTokenExpr(tokens) {
-		if (!tokens || tokens.length === 0) return '""';
-		const eofTok = new Token(T.EOF, "", 1, 1);
-		const p = new Parser([...tokens, eofTok]);
-		const ast = p.parseExpr();
-		return this.genExpr(ast);
-	},
-
-	// Parse a token array as a Go call expression and emit JS.
-	_genTemplTokenCallExpr(tokens) {
-		if (!tokens || tokens.length === 0) return "null";
-		const eofTok = new Token(T.EOF, "", 1, 1);
-		const p = new Parser([...tokens, eofTok]);
-		const ast = p.parseExpr();
-		return this.genExpr(ast);
-	},
-
-	// Extract condition JS from condTokens (which may start with `if`).
-	_genTemplCondTokens(tokens) {
-		if (!tokens || tokens.length === 0) return "false";
-		let toks = tokens;
-		if (toks[0]?.type === T.IF) toks = toks.slice(1); // skip `if` keyword
-		const eofTok = new Token(T.EOF, "", 1, 1);
-		const p = new Parser([...toks, eofTok]);
-		const ast = p.parseExpr();
-		return this.genExpr(ast);
+	// Emit JS for the Go expression TemplParser parsed onto `node`. `emptyJs` is
+	// the value when the node holds no tokens. A parse error is raised here,
+	// not in the parser, so it surfaces at the same point as it always did.
+	_genTemplExpr(node, emptyJs) {
+		if (node.exprError) throw node.exprError;
+		if (node.expr === undefined)
+			throw new Error("templ expression was not parsed by TemplParser");
+		return node.expr ? this.genExpr(node.expr) : emptyJs;
 	},
 
 	_tokensToSource(tokens) {
