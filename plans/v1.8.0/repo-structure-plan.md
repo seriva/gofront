@@ -352,7 +352,7 @@ Only paths change. No task, scope or number in those plans is edited.
   - Files: `git mv` of `lexer`, `templ-lexer` and `tokens` to `src/lexer/`, and `templ-parser.js` to `src/parser/templ.js`; import rewrites; `.sentrux/rules.toml`
   - Test: as for 6.2
   - Done when: the hashes match, and `ls src/*.js` lists only `index.js`, `compiler.js`, `resolver.js` and `dts-parser.js`
-- [ ] Task 6.4: Split `test/unit/compiler/` → `test/unit/cli/`
+- [x] Task 6.4: Split `test/unit/compiler/` → `test/unit/cli/`
   - Files: `git mv` of the `cli`, `cli-core`, `dev-server`, `pwa`, `asset-manager`, `test-runner`, `prep` and `build-examples` tests; the `run.js` header comment and `HEAVIEST_TEST_FILES` paths
   - Test: the Task 6.1 discovery test
   - Done when: the unit pass count is unchanged
