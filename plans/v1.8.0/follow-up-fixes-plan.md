@@ -147,7 +147,7 @@ No longer reproducing (deleted from the ledger): promoted field through `Deep2{*
 
 ### Phase 1: Critical Compiler Fixes & BCE Optimization
 
-- [ ] Task 1.1: Fix generic instantiation lookahead in parser
+- [x] Task 1.1: Fix generic instantiation lookahead in parser
   - Files: `src/parser/expressions.js`, `test/unit/parser/generics.test.js`
   - Test: Unit test with nested selector indexing inside function arguments (`fn(s.Meshes[s.Entries[i].Index])`) parses as `CallExpr` containing `IndexExpr`, not `InstantiationExpr`.
   - Done when: `gofront check` passes on the repro and on SimpleFPS (`app/src/game`, `app/src/engine/scene`, `app/src`).
