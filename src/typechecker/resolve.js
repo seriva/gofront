@@ -322,6 +322,7 @@ export const resolveMethods = {
 			if (f.embedded) {
 				const inner = ft.kind === "pointer" ? ft.base : ft;
 				const embedName = (
+					f.embeddedName ??
 					f.astType?.name ??
 					f.type?.name ??
 					f.type?.base?.name ??
