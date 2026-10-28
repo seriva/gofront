@@ -70,6 +70,8 @@ export const TEST_FILES = [
 	"./compiler/optimize-build.test.js",
 	"./compiler/semantics.test.js",
 	"./compiler/stdlib-go.test.js",
+	"./compiler/check-layers.test.js",
+	"./compiler/build-examples.test.js",
 	"./wasm/encode.test.js",
 	"./wasm/wat.test.js",
 	"./wasm/scalars.test.js",
@@ -95,6 +97,7 @@ export const TEST_FILES = [
 	"./wasm/stdlib.test.js",
 	"./wasm/fmt-any.test.js",
 	"./wasm/json.test.js",
+	"./wasm/mixins.test.js",
 	"./wasm/golden.test.js",
 ];
 
