@@ -325,23 +325,23 @@ No longer reproducing (deleted from the ledger): promoted field through `Deep2{*
 
 ### Phase 9: WASM fmt Parity
 
-- [ ] Task 9.1: `Println` separators around empty and space-ended strings
+- [x] Task 9.1: `Println` separators around empty and space-ended strings
   - Files: `src/backend/wasm/stdlib/core.js`, `src/backend/wasm/emit-builtins.js`, `test/unit/wasm/fmt-any.test.js`
   - Test: `Println("", "|")` → ` |`; `Println(0, "a ", true)` → `0 a  true`; `Println(2, "", nil)` → `2  <nil>` (all targets).
   - Done when: WASM matches Go and the third module validates.
-- [ ] Task 9.2: Unsigned values print unsigned
+- [x] Task 9.2: Unsigned values print unsigned
   - Files: `src/backend/wasm/stdlib/core.js`, `src/backend/wasm/emit-builtins.js`, `test/unit/wasm/fmt-any.test.js`
   - Test: `[1]uint32{3465168386}` → `[3465168386]`; uint32 method result `^uint32(0)` → `4294967295`; `uint32(3304433030)` → `3304433030`; `any(uint64(1<<63))` → `9223372036854775808`; `-u` (uint64 1) → `18446744073709551615` (wasm).
   - Done when: all five match Go on WASM.
-- [ ] Task 9.3: Struct map key order and stable `%p` ids
+- [x] Task 9.3: Struct map key order and stable `%p` ids
   - Files: `src/backend/wasm/stdlib/core.js`, `test/unit/wasm/fmt-any.test.js`
   - Test: `map[K]int{K{2}:2, K{1}:3}` → `map[{1}:3 {2}:2]`; `Sprintf("%p|%p", &x, &x)` → equal ids on JS and WASM.
   - Done when: both match across targets.
-- [ ] Task 9.4: Multi-value calls as `Println` arguments
+- [x] Task 9.4: Multi-value calls as `Println` arguments
   - Files: `src/backend/js/stdlib/fmt.js`, `src/backend/wasm/emit-builtins.js`, `test/unit/builtins/fmt-verbs.test.js`
   - Test: `Println(strings.Cut("a=b", "="))` → `a b true`; `Println(strconv.ParseFloat("1.5", 64))` → `1.5 <nil>` (all targets).
   - Done when: JS spreads the tuple and WASM prints every value.
-- [ ] Task 9.5: Func values in WASM `fmt`
+- [x] Task 9.5: Func values in WASM `fmt`
   - Files: `src/backend/wasm/emit-builtins.js`, `test/unit/wasm/fmt-any.test.js`
   - Test: `fmt.Println(func(){})` in a wasm package → a valid module that prints an address-style `0x…` value, or `assertErrorContains(errors, "func values cannot be formatted")`.
   - Done when: no module validation failure.

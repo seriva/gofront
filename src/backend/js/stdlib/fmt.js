@@ -231,6 +231,8 @@ export const fmtMethods = {
 	_fmtArgJs(e, typed = false) {
 		// `xs...` passes each element as its own operand.
 		if (e?._spread) return `...(${this.genExpr(e)} ?? [])`;
+		// A multi-value call (`f()` returning a tuple) passes every result.
+		if (e?._type?.kind === "tuple") return this._fmtTupleJs(e);
 		const nilOperand = this._fmtNilPtrOperand(e?._type);
 		if (nilOperand) return `(${this.genExpr(e)} ?? ${nilOperand})`;
 		const js = this.genExpr(e);
@@ -257,6 +259,39 @@ export const fmtMethods = {
 			return `__ft(${js}, ${JSON.stringify(desc)})`;
 		}
 		return base?.kind === "slice" ? `(${js} ?? [])` : js;
+	},
+
+	// The results of a multi-value call as separate operands.  Each result is
+	// boxed as if it were assigned to an `any`, so pointers print as `&{...}`
+	// and floats keep their width.
+	_fmtTupleJs(e) {
+		const resolve = (t) => this.checker?.resolveType?.(t) ?? t;
+		const boxFns = {
+			ptr: "__ifp",
+			ptr_slice: "__ifps",
+			ptr_map: "__ifpm",
+			map: "__ifm",
+			slice: "__ifs",
+			value: "__ifv",
+		};
+		const parts = e._type.types.map((t, i) => {
+			const v = `__t[${i}]`;
+			const desc = fmtTypeDesc(t, resolve);
+			if (fmtDescHasFloat(desc) && desc.k !== "i") {
+				this.useHelper("sprintf");
+				return `__ft(${v}, ${JSON.stringify(desc)})`;
+			}
+			let base = resolve(t);
+			if (base?.kind === "named") base = resolve(base.underlying);
+			const info = this.checker?._classifyIfaceBox?.(base);
+			if (!info || !boxFns[info.box]) return v;
+			this.useHelper("ifaceBox");
+			const extra = info.ptrFields?.length
+				? `, ${JSON.stringify(info.ptrFields)}`
+				: "";
+			return `${boxFns[info.box]}(${v}${extra})`;
+		});
+		return `...((__t) => [${parts.join(", ")}])(${this.genExpr(e)})`;
 	},
 
 	// The operands of a Printf-style call whose format is args[fmtIdx].
@@ -450,7 +485,7 @@ export const fmtMethods = {
 	_genPrintOperands(expr, sep, suffix) {
 		const argc = expr.args.length;
 		if (argc === 0) return JSON.stringify(suffix);
-		if (expr.args.some((e) => e._spread)) {
+		if (expr.args.some((e) => e._spread || e._type?.kind === "tuple")) {
 			// The operand count is only known at run time: join with Sprint's rules.
 			this.useHelper("sprint");
 			const joined = `__sprint(${sep === " "}, ${expr.args.map((e) => this._fmtArgJs(e)).join(", ")})`;

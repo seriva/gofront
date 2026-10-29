@@ -5,6 +5,8 @@
 import {
 	assertEqual,
 	compileHybrid,
+	compileWasm,
+	instantiateWasm,
 	section,
 	summarize,
 	test,
@@ -177,6 +179,126 @@ test("a pointer to a named scalar with a value-receiver String", () => {
 			'type Color int\nfunc (c Color) String() string { return "col" }',
 		),
 		"col col",
+	);
+});
+
+section("fmt on WASM: Println separators, unsigned values, func values");
+
+test("Println separates empty and space-ended strings like Go", () => {
+	assertEqual(out(`fmt.Println("", "|")`), " |");
+	assertEqual(out(`fmt.Println(0, "a ", true)`), "0 a  true");
+	assertEqual(out(`fmt.Println(2, "", nil)`), "2  <nil>");
+	assertEqual(out(`fmt.Println("a", "", "b")`), "a  b");
+	assertEqual(out(`fmt.Println("", "", "")`), "  ");
+});
+
+test("Println after a partial Print line does not add a space", () => {
+	assertEqual(
+		out(`fmt.Print("x")
+	fmt.Println("a")`),
+		"xa",
+	);
+});
+
+test("Println keeps plain int and string operands on the direct path", () => {
+	assertEqual(out(`fmt.Println(1, "a", 2)`), "1 a 2");
+	assertEqual(
+		out(`fmt.Println(int32(-5), int64(-5), -5, uint8(250), int8(-3))`),
+		"-5 -5 -5 250 -3",
+	);
+});
+
+test("unsigned 32 and 64-bit values print unsigned", () => {
+	assertEqual(out(`fmt.Println([1]uint32{3465168386})`), "[3465168386]");
+	assertEqual(
+		out(
+			`fmt.Println(T{}.F(), uint32(3304433030))`,
+			`type T struct{}
+func (T) F() uint32 { return ^uint32(0) }`,
+		),
+		"4294967295 3304433030",
+	);
+	assertEqual(out(`fmt.Println(any(uint64(1<<63)))`), "9223372036854775808");
+	assertEqual(
+		out(`var u uint = 1 << 63
+	fmt.Println(u, []uint{u}, map[uint32]uint64{4000000000: 1 << 63})`),
+		"9223372036854775808 [9223372036854775808] map[4000000000:9223372036854775808]",
+	);
+	assertEqual(
+		out(
+			`s := S{4000000000, 1 << 63}
+	fmt.Println(s, &s)
+	fmt.Printf("%+v %d\\n", s, s.A)`,
+			`type S struct{ A uint32; B uint64 }`,
+		),
+		"{4000000000 9223372036854775808} &{4000000000 9223372036854775808}\n{A:4000000000 B:9223372036854775808} 4000000000",
+	);
+	assertEqual(
+		out(`var a any = uint32(4000000000)
+	fmt.Println(a, fmt.Sprint(a), fmt.Sprintf("%v|%d", a, a))`),
+		"4000000000 4000000000 4000000000|4000000000",
+	);
+});
+
+test("negating an unsigned 64-bit value wraps on WASM", () => {
+	const src = `package main
+import "fmt"
+func Main() {
+	u := uint64(1)
+	fmt.Println(-u)
+}`;
+	const { wasm, stringTable } = compileWasm(src);
+	const lines = [];
+	const { exports } = instantiateWasm(wasm, {
+		stringTable,
+		stdout: (m) => lines.push(m),
+	});
+	exports.Main();
+	assertEqual(lines.join("\n"), "18446744073709551615");
+});
+
+test("Print takes every result of a multi-value call", () => {
+	assertEqual(
+		out(
+			`fmt.Print(two())
+	fmt.Println()`,
+			`func two() (int, string) { return 1, "x" }`,
+		),
+		"1x",
+	);
+});
+
+test("a pointer to a scalar formats with a stable id per target", () => {
+	assertEqual(
+		out(`x := 1
+	y := 2
+	fmt.Println(fmt.Sprintf("%p|%p|%p", &x, &x, &y))`),
+		"%!p(*int=0x1)|%!p(*int=0x1)|%!p(*int=0x2)",
+	);
+});
+
+test("func values print as an address-style value, nil as <nil>", () => {
+	assertEqual(out(`fmt.Println(func() {})`), "0x1");
+	assertEqual(
+		out(`f := func(x int) int { return x }
+	var g func()
+	fmt.Println(f, g)
+	fmt.Println(fmt.Sprint(f))`),
+		"0x1 <nil>\n0x1",
+	);
+});
+
+test("struct map keys print in Go's key order", () => {
+	assertEqual(
+		out(
+			`m := map[K]int{K{2}: 2, K{1}: 3}
+	fmt.Println(m)
+	n := map[L]int{L{"b", 1}: 2, L{"a", 9}: 3, L{"a", 2}: 4}
+	fmt.Println(n)`,
+			`type K struct{ A int }
+type L struct{ S string; N int }`,
+		),
+		"map[{1}:3 {2}:2]\nmap[{a 2}:4 {a 9}:3 {b 1}:2]",
 	);
 });
 
