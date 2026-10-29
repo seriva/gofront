@@ -69,6 +69,7 @@ export const typeInfoGenMethods = {
 	},
 
 	_nodeUsesTypeInfo(node, names) {
+		if (node._ifaceKeyDyn && names.has(node._ifaceKeyParam)) return true;
 		switch (node.kind) {
 			case "TypeAssertExpr":
 				return typeNodeMentions(node.type, names);
@@ -137,7 +138,15 @@ export const typeInfoGenMethods = {
 		const check = this._typeCheckForType(t, "__v");
 		const is = check ? `(__v) => ${check}` : "null";
 		const unbox = this._boxesInInterface(t) ? "true" : "false";
-		return `__ti(${base}, ${JSON.stringify(k)}, ${JSON.stringify(typeStr(t))}, ${is}, ${unbox})`;
+		const box = this._ifaceKeyBox(t);
+		return `__ti(${base}, ${JSON.stringify(k)}, ${JSON.stringify(typeStr(t))}, ${is}, ${unbox}${box ? `, ${box}` : ""})`;
+	},
+
+	// A function boxing a plain value of named basic type `t`, as converting
+	// it to an interface does; null when `t` is not boxed.
+	_ifaceKeyBox(t) {
+		if (!this._boxesInInterface(t) || t?.kind !== "named") return null;
+		return `(__v) => ${this._genNamedIfaceBox("__v", t, false)}`;
 	},
 
 	_underlyingOf(t) {

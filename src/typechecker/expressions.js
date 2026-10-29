@@ -685,6 +685,16 @@ export const expressionCheckMethods = {
 	_markIfaceKey(mapType, node, srcType) {
 		const key = this.resolveType(mapType.key);
 		const kb = key?.kind === "named" ? this.resolveType(key.underlying) : key;
+		const src = srcType && this.resolveType(srcType);
+		if (node && src?.kind === "typeParam") {
+			// Generic code: whether the key is boxed depends on the type argument,
+			// so the backend decides at run time (`__ikt`).
+			if (key?.kind === "typeParam" || isAny(key) || kb?.kind === "interface") {
+				node._ifaceKeyDyn = key?.kind === "typeParam" ? "same" : "box";
+				node._ifaceKeyParam = src.name;
+			}
+			return;
+		}
 		if (!node || !srcType || (!isAny(key) && kb?.kind !== "interface")) return;
 		node._ifaceKey = true;
 		this._markIfaceBox(key, this.resolveType(srcType), node);
