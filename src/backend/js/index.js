@@ -24,7 +24,6 @@ import {
 	markInBoundsIndexes,
 	normalizeDefers,
 	scanAddressTaken,
-	someChild,
 } from "../../lower/index.js";
 import {
 	BROWSER_GLOBALS,
