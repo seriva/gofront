@@ -16,9 +16,9 @@ const STRINGS_M2 = {
 	LastIndex: "lastIndexOf",
 	Repeat: "repeat",
 	Split: "split",
-	Join: "join",
 };
 const STRINGS_DISPATCH = {
+	Join: ([a, sep]) => `(${a} ?? []).join(${sep})`,
 	Count: ([s, s2]) =>
 		`((s, sep) => sep === "" ? s.length + 1 : s.split(sep).length - 1)(${s}, ${s2})`,
 	Replace: ([s, s2, s3, n]) =>

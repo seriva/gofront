@@ -38,9 +38,22 @@ function packCallArgs(call) {
 	if (args.length < n - 1) return false;
 	const elem = fn.params[n - 1];
 	const sliceType = { kind: "slice", elem };
+	// No variadic arguments: the parameter is the nil slice, as in Go.
+	const rest = args.slice(n - 1);
+	const packed =
+		rest.length === 0
+			? {
+					kind: "TypeConversion",
+					targetType: sliceType,
+					expr: { kind: "Ident", name: "nil" },
+					_type: sliceType,
+					_line: call._line,
+					_col: call._col,
+				}
+			: null;
 	call.args = [
 		...args.slice(0, n - 1),
-		{
+		packed ?? {
 			kind: "CompositeLit",
 			typeExpr: { kind: "SliceType", elem: typeToTypeNode(elem) },
 			elems: args.slice(n - 1),

@@ -256,6 +256,7 @@ export const HELPER_SCLONE = `var __sclone = __sclone || function(x) {
 // `{ __sp: xs }`, so the parameter is the caller's slice itself (or nil).
 export const HELPER_VA = `var __va = __va || function(a) {
   const f = a.length === 1 ? a[0] : undefined;
+  if (a.length === 0) return null;
   return f !== null && typeof f === "object" && f.__sp !== undefined ? f.__sp : a;
 };`;
 
@@ -423,6 +424,22 @@ export const HELPER_IFD = `var __ifd = __ifd || function(x, d) {
 
 // Nil-interface method call guard (strict mode only): matches Go's panic
 // message instead of a JS TypeError.
+// Strict-mode 64-bit shifts (`both` packages): Go's wrap-around on `<<`, the
+// sign fill on `>>`, and the negative-count panic.
+export const HELPER_SHIFT = `var __shl64 = __shl64 || function(x, n, u) {
+  if (n < 0) throw new Error("runtime error: negative shift amount");
+  if (n >= 64) return 0;
+  const r = x * 2 ** n;
+  if (Number.isSafeInteger(r)) return r;
+  const b = BigInt(x) << BigInt(n);
+  return Number(u ? BigInt.asUintN(64, b) : BigInt.asIntN(64, b));
+};
+var __shr64 = __shr64 || function(x, n, u) {
+  if (n < 0) throw new Error("runtime error: negative shift amount");
+  if (n >= 64) return u || x >= 0 ? 0 : -1;
+  return Math.floor(x / 2 ** n);
+};`;
+
 export const HELPER_NIL_CALL = `var __nilcall = __nilcall || function(x) {
   if (x == null) throw new Error("runtime error: invalid memory address or nil pointer dereference");
   return x;
@@ -627,6 +644,7 @@ var __sprintf = __sprintf || function(f, ...a) {
     if (fd?.b && !ro && !(val instanceof fd.b)) val = new fd.b(val);
     if (val === null || val === undefined) return "<nil>";
     if (typeof val === "boolean") return String(val);
+    if (typeof val === "number" && Math.abs(val) >= 9007199254740992 && Math.abs(val) < 18446744073709551616 && Number.isInteger(val)) return BigInt(val).toString();
     if (typeof val === "number" || typeof val === "bigint") return Object.is(val, -0) ? "-0" : String(val);
     if (typeof val === "string") return val;
     if (typeof val === "object") {

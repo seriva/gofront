@@ -3,6 +3,7 @@ import {
 	assertContains,
 	assertEqual,
 	assertErrorContains,
+	assertProgramOutput,
 	compile,
 	runJs,
 	section,
@@ -389,6 +390,36 @@ for (const target of ["js", "both"]) {
 		assertEqual(out[3], "[0 0]");
 	});
 }
+
+section("Element pointers");
+
+test("whole-element stores keep element pointers valid", async () => {
+	const src = `package main
+
+import "fmt"
+
+type S struct{ A int }
+type T struct{ V int }
+
+func first[X any](xs []X) *X { return &xs[0] }
+
+func main() {
+	xs := []S{{1}, {2}}
+	p := &xs[0]
+	xs[0] = S{9}
+	fmt.Println(p.A, xs[0].A)
+	ys := []T{{1}}
+	q := first(ys)
+	q.V = 7
+	fmt.Println(ys[0].V)
+	arr := [2]S{{1}, {2}}
+	r := &arr[1]
+	arr[1] = S{8}
+	fmt.Println(r.A)
+}
+`;
+	await assertProgramOutput(src, "9 9\n7\n8\n");
+});
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
