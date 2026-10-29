@@ -258,7 +258,16 @@ export const fmtMethods = {
 			this.useHelper("sprintf");
 			return `__ft(${js}, ${JSON.stringify(desc)})`;
 		}
-		return base?.kind === "slice" ? `(${js} ?? [])` : js;
+		return this._fmtNilValue(base, js, false);
+	},
+
+	// A nil slice or map operand prints as `[]` / `map[]`: coalesce the null
+	// to an empty value.  Shared by the single-operand and the tuple path.
+	// `unboxed`: the map still needs its marker (the caller boxes the result).
+	_fmtNilValue(base, js, unboxed = true) {
+		if (base?.kind === "slice") return `(${js} ?? [])`;
+		if (unboxed && base?.kind === "map") return `(${js} ?? {})`;
+		return js;
 	},
 
 	// The results of a multi-value call as separate operands.  Each result is
@@ -284,12 +293,12 @@ export const fmtMethods = {
 			let base = resolve(t);
 			if (base?.kind === "named") base = resolve(base.underlying);
 			const info = this.checker?._classifyIfaceBox?.(base);
-			if (!info || !boxFns[info.box]) return v;
+			if (!info || !boxFns[info.box]) return this._fmtNilValue(base, v);
 			this.useHelper("ifaceBox");
 			const extra = info.ptrFields?.length
 				? `, ${JSON.stringify(info.ptrFields)}`
 				: "";
-			return `${boxFns[info.box]}(${v}${extra})`;
+			return `${boxFns[info.box]}(${this._fmtNilValue(base, v)}${extra})`;
 		});
 		return `...((__t) => [${parts.join(", ")}])(${this.genExpr(e)})`;
 	},
