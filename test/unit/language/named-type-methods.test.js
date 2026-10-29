@@ -593,6 +593,24 @@ func main() {
 	);
 });
 
+test("explicit conversion to an interface boxes named basic types", () => {
+	const { js, errors } = compile(`package main
+type L string
+type Level int
+type N int
+func main() {
+	console.log(any(L("x")).(L))
+	z := any(Level(1))
+	console.log(z.(Level) + 1)
+	var e any = N(2)
+	console.log(e == any(N(2)))
+	_, ok := any(L("x")).(string)
+	console.log(ok)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "x\n2\ntrue\nfalse");
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
