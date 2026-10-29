@@ -68,9 +68,39 @@ export function fmtTypeDesc(t, resolve = (x) => x, depth = 0) {
 	}
 }
 
+/**
+ * The fields a struct declares itself, in declaration order: named fields and
+ * one entry per embedded type.  Fields promoted from an embedded struct are
+ * not listed (`fields` also holds them for selector lookup).
+ * @param {any} st checker struct type
+ * @returns {[string, any][]}
+ */
+export function structOwnFields(st) {
+	if (!st._structFields) return [...(st.fields ?? [])];
+	const own = [];
+	for (const sf of st._structFields) {
+		if (!sf.embedded) {
+			for (const n of sf.names) own.push([n, st.fields.get(n)]);
+			continue;
+		}
+		const inner = sf.type?.kind === "pointer" ? sf.type.base : sf.type;
+		const name = (
+			sf.embeddedName ??
+			sf.astType?.name ??
+			sf.type?.name ??
+			sf.type?.base?.name ??
+			(inner?.kind === "named" ? inner.name : "")
+		)
+			.split(".")
+			.pop();
+		if (name) own.push([name, st.fields.get(name) ?? sf.type]);
+	}
+	return own;
+}
+
 function structDesc(n, st, sub) {
 	const f = [];
-	for (const [name, ft] of st.fields ?? []) f.push([name, sub(ft)]);
+	for (const [name, ft] of structOwnFields(st)) f.push([name, sub(ft)]);
 	return { k: "struct", n, f };
 }
 
@@ -87,13 +117,56 @@ function namedDesc(t, resolve, depth, sub) {
 }
 
 /**
+ * Whether a type descriptor mentions a float32 or float64.  Such operands
+ * travel with their static type: a number alone cannot tell `float64(1e6)`
+ * (Go prints 1e+06) from an `int`, or a float32 from the float64 holding the
+ * same bits.
+ * @param {any} desc result of fmtTypeDesc
+ * @returns {boolean}
+ */
+export function fmtDescHasFloat(desc) {
+	if (!desc || typeof desc !== "object") return false;
+	switch (desc.k) {
+		case "b":
+			return desc.n === "float32" || desc.n === "float64";
+		case "named":
+			return fmtDescHasFloat(desc.u);
+		case "struct":
+			return (desc.f ?? []).some(([, ft]) => fmtDescHasFloat(ft));
+		case "ptr":
+		case "slice":
+		case "array":
+			return fmtDescHasFloat(desc.e);
+		case "map":
+			return fmtDescHasFloat(desc.key) || fmtDescHasFloat(desc.val);
+		default:
+			return false;
+	}
+}
+
+/**
+ * Whether a type descriptor is a slice or array (possibly named).  `%s`, `%q`
+ * and `%x` read a byte slice as text, which a plain list of numbers cannot
+ * tell from any other slice of small numbers.
+ * @param {any} desc result of fmtTypeDesc
+ * @returns {boolean}
+ */
+export function fmtDescIsSeq(desc) {
+	let d = desc;
+	while (d?.k === "named") d = d.u;
+	return d?.k === "slice" || d?.k === "array";
+}
+
+/**
  * Whether a call with this literal format string needs operand types: `%T`,
  * `%#v`, an unknown verb (`%!z(int=5)`), or more operands than verbs
  * (`%!(EXTRA int=1)`).
  * @param {unknown} format
  * @param {number} nargs operand count, -1 when not known statically
+ * @param {boolean} [seqArgs] some operand is a slice or array, whose element
+ *   type decides how `%s`, `%q`, `%x` and `%X` read it
  */
-export function fmtWantsTypes(format, nargs) {
+export function fmtWantsTypes(format, nargs, seqArgs = false) {
 	if (typeof format !== "string") return false;
 	const re = new RegExp(
 		`%([${FLAGS}]*)((?:\\[\\d+\\])?(?:\\*|\\d+)?(?:\\.(?:\\[\\d+\\])?(?:\\*|\\d*))?(?:\\[\\d+\\])?)([^]?)`,
@@ -106,6 +179,7 @@ export function fmtWantsTypes(format, nargs) {
 		if (verb === "%") continue;
 		if (verb === "T" || verb === "p") return true;
 		if (verb === "v" && m[1].includes("#")) return true;
+		if (seqArgs && "sqxX".includes(verb)) return true;
 		if (verb !== "" && !VERBS.includes(verb) && verb !== "w") return true;
 		if (/[[*]/.test(m[2])) indexed = true;
 		count++;

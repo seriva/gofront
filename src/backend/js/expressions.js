@@ -1197,7 +1197,7 @@ export const expressionGenMethods = {
 	_genNamedIfaceBox(js, type, isPtr) {
 		const info = this._namedBoxInfo(type);
 		if (!info) return js;
-		return isPtr ? `new ${info.cls}$Ptr(${js})` : `new ${info.cls}(${js})`;
+		return isPtr ? `${info.cls}$Ptr.of(${js})` : `new ${info.cls}(${js})`;
 	},
 
 	// Static target of `x.M` on a named non-struct type: its class and the
