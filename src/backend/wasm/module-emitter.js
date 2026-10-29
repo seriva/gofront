@@ -2064,6 +2064,7 @@ export class ModuleEmitter {
 									recvTypeName: rName,
 									testTypeIndex: ptrIfaceBox.typeIndex,
 									isBoxedValue: true,
+									nilPtrPanic: true,
 									needsValueDeref: false,
 									embedPath: [
 										{
@@ -2145,6 +2146,7 @@ export class ModuleEmitter {
 			recvTypeName: rName,
 			testTypeIndex: ptrBox.typeIndex,
 			isBoxedValue: true,
+			nilPtrPanic: true,
 			needsValueDeref: false,
 			embedPath: [
 				{
