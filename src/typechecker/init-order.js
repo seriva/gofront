@@ -49,38 +49,80 @@ function declaredNames(node, out = new Set()) {
 	return out;
 }
 
-function recvTypeNameOf(t) {
+// The `Type.method` key of the declaration `name` selects on a value of type
+// `t`, found the way the checker finds it: on the type itself, else on an
+// embedded type (through pointers too).  Interface methods have no body to
+// follow, so a call through an interface adds no dependency (Go does the same).
+function methodKeyOf(t, name, funcs, depth = 0) {
 	let x = t;
 	if (x?.kind === "pointer") x = x.base;
-	return x?.kind === "named" ? x.name : null;
+	if (x?.kind !== "named" || depth > 8) return null;
+	for (const typeName of [x.name, x._generic?.name]) {
+		const key = `${typeName}.${name}`;
+		if (typeName && funcs.has(key)) return key;
+	}
+	for (const e of x.underlying?._embeds ?? []) {
+		const key = methodKeyOf(e, name, funcs, depth + 1);
+		if (key) return key;
+	}
+	return null;
 }
 
-/**
- * Collects what `node` refers to: package-level names (`names`) and methods
- * (`Type.method` keys in `methods`).
- */
-function collectRefs(node, shadow, pkgNames, out) {
+// Whether the keys of a composite literal are expressions (map, slice and
+// array literals) rather than field names (struct literals).  Before the
+// literal is checked its written type decides; an unnamed one stays ambiguous
+// and its keys are skipped.
+function litHasExprKeys(lit) {
+	let t = lit._type;
+	for (let i = 0; t && i < 8; i++) {
+		if (t.kind === "named") t = t.underlying;
+		else if (t.kind === "pointer") t = t.base;
+		else break;
+	}
+	if (t?.kind) return ["map", "slice", "array"].includes(t.kind);
+	return ["MapType", "SliceType", "ArrayType"].includes(lit.typeExpr?.kind);
+}
+
+function walkRefs(node, shadow, ctx, out) {
 	if (!node || typeof node !== "object") return;
 	if (Array.isArray(node)) {
-		for (const n of node) collectRefs(n, shadow, pkgNames, out);
+		for (const n of node) walkRefs(n, shadow, ctx, out);
 		return;
 	}
 	if (node.kind === "Ident") {
-		if (pkgNames.has(node.name) && !shadow.has(node.name))
+		if (ctx.pkgNames.has(node.name) && !shadow.has(node.name))
 			out.names.add(node.name);
 		return;
 	}
 	if (node.kind === "SelectorExpr") {
-		const recv = recvTypeNameOf(node.expr?._type);
-		if (recv) out.methods.add(`${recv}.${node.field}`);
+		const key = methodKeyOf(node.expr?._type, node.field, ctx.funcs);
+		if (key) out.methods.add(key);
 	}
-	if (node.kind === "KeyValueExpr" && node.key?.kind === "Ident") {
-		// A struct literal field name is not a reference.
-		collectRefs(node.value, shadow, pkgNames, out);
-		if (node._isMapKey) collectRefs(node.key, shadow, pkgNames, out);
+	if (node.kind === "CompositeLit") {
+		const exprKeys = litHasExprKeys(node);
+		for (const el of node.elems ?? []) {
+			if (el?.kind !== "KeyValueExpr") walkRefs(el, shadow, ctx, out);
+			else {
+				// A struct literal's key is a field name, not a reference.
+				if (exprKeys || el.key?.kind !== "Ident")
+					walkRefs(el.key, shadow, ctx, out);
+				walkRefs(el.value, shadow, ctx, out);
+			}
+		}
+		walkRefs(node.typeExpr, shadow, ctx, out);
 		return;
 	}
-	forEachChildNode(node, (c) => collectRefs(c, shadow, pkgNames, out));
+	forEachChildNode(node, (c) => walkRefs(c, shadow, ctx, out));
+}
+
+/**
+ * Collects what `root` (an initialiser expression or a function declaration)
+ * refers to: package-level names (`names`) and declarations selected as methods
+ * (`methods`, keyed `Type.method`).  The single place shadowing is decided:
+ * a name declared anywhere inside `root` never counts as the package-level one.
+ */
+function collectRefs(root, ctx, out) {
+	walkRefs(root, declaredNames(root), ctx, out);
 }
 
 const emptyRefs = () => ({ names: new Set(), methods: new Set() });
@@ -117,13 +159,14 @@ function buildVarDeps({ varEntries, constEntries, funcs }) {
 		...funcs.keys(),
 		...constEntries.flatMap((e) => e.names),
 	]);
+	const ctx = { pkgNames, funcs };
 	const funcRefs = new Map();
 	const refsOfFunc = (key) => {
 		if (funcRefs.has(key)) return funcRefs.get(key);
 		const decl = funcs.get(key);
 		const out = emptyRefs();
 		funcRefs.set(key, out);
-		if (decl) collectRefs(decl.body, declaredNames(decl), pkgNames, out);
+		if (decl) collectRefs(decl, ctx, out);
 		return out;
 	};
 	const depsOf = (entry) => {
@@ -144,21 +187,38 @@ function buildVarDeps({ varEntries, constEntries, funcs }) {
 			for (const m of refs.methods) follow(m, path);
 		};
 		const refs = emptyRefs();
-		for (const v of entry.spec.value ?? [])
-			collectRefs(v, new Set(), pkgNames, refs);
+		for (const v of entry.spec.value ?? []) collectRefs(v, ctx, refs);
 		visit(refs, []);
 		return deps;
 	};
 	return new Map(varEntries.map((e) => [e, depsOf(e)]));
 }
 
-function cycleMessage(entry, deps) {
+// A chain of names leading from `start` back to itself through the specs in
+// `pending`, e.g. ["a", "f", "b", "a"]; null when `start` is on no cycle.
+function findCycle(start, depsOf, pending) {
+	const visited = new Set();
+	const walk = (entry, chain) => {
+		for (const [dep, path] of depsOf.get(entry)) {
+			const next = [...chain, ...path];
+			if (dep === start) return next;
+			if (!pending.has(dep) || visited.has(dep)) continue;
+			visited.add(dep);
+			const found = walk(dep, next);
+			if (found) return found;
+		}
+		return null;
+	};
+	const chain = walk(start, [start.names[0]]);
+	return chain && chain.length === 2 ? [chain[0]] : chain;
+}
+
+function cycleMessage(entry, chain) {
 	const name = entry.names[0];
-	const selfPath = deps.get(entry);
-	if (!selfPath) return `initialization cycle for ${name}`;
-	if (selfPath.length === 1)
+	if (!chain) return `initialization cycle for ${name}`;
+	if (chain.length === 1)
 		return `initialization cycle: ${name} refers to itself`;
-	return `initialization cycle for ${name}: ${[name, ...selfPath].join(" refers to ")}`;
+	return `initialization cycle for ${name}: ${chain.join(" refers to ")}`;
 }
 
 // Go's rule: repeatedly take the earliest spec whose dependencies are done.
@@ -176,19 +236,22 @@ function orderVars(varEntries, depsOf) {
 	while (remaining.length > 0) {
 		const idx = remaining.findIndex(ready);
 		if (idx === -1) {
-			// Everything left is on or behind a cycle: report the first
-			// self-referencing spec, else the first one.
-			const culprit =
-				remaining.find((e) => depsOf.get(e).has(e)) ?? remaining[0];
+			// Everything left is on or behind a cycle: report the first spec
+			// that is on one.
+			const pending = new Set(remaining);
+			let culprit = remaining[0];
+			let chain = null;
+			for (const e of remaining) {
+				chain = findCycle(e, depsOf, pending);
+				if (chain) {
+					culprit = e;
+					break;
+				}
+			}
 			vars.push(...remaining);
 			return {
 				vars,
-				cycles: [
-					{
-						spec: culprit.spec,
-						message: cycleMessage(culprit, depsOf.get(culprit)),
-					},
-				],
+				cycles: [{ spec: culprit.spec, message: cycleMessage(culprit, chain) }],
 			};
 		}
 		const [e] = remaining.splice(idx, 1);
@@ -201,6 +264,7 @@ function orderVars(varEntries, depsOf) {
 // Constants depend on other constants only.
 function orderConsts(constEntries) {
 	const constNames = new Set(constEntries.flatMap((e) => e.names));
+	const ctx = { pkgNames: constNames, funcs: new Map() };
 	const owner = new Map();
 	for (const e of constEntries) for (const n of e.names) owner.set(n, e);
 	const consts = [];
@@ -209,8 +273,7 @@ function orderConsts(constEntries) {
 		if (state.has(e)) return;
 		state.add(e);
 		const refs = emptyRefs();
-		for (const v of e.spec.value ?? [])
-			collectRefs(v, new Set(), constNames, refs);
+		for (const v of e.spec.value ?? []) collectRefs(v, ctx, refs);
 		for (const n of refs.names) if (owner.has(n)) visit(owner.get(n));
 		consts.push(e);
 	};
@@ -246,7 +309,7 @@ export function orderVarSpecsForTyping(programs) {
 					entries.push({ program, decl: d, spec });
 	const owner = new Map();
 	for (const e of entries) for (const n of e.spec.names) owner.set(n, e);
-	const names = new Set(owner.keys());
+	const ctx = { pkgNames: new Set(owner.keys()), funcs: new Map() };
 	const out = [];
 	const state = new Set();
 	const visit = (e) => {
@@ -254,8 +317,7 @@ export function orderVarSpecsForTyping(programs) {
 		state.add(e);
 		if (!e.spec.type) {
 			const refs = emptyRefs();
-			for (const v of e.spec.value ?? [])
-				collectRefs(v, declaredNames(v), names, refs);
+			for (const v of e.spec.value ?? []) collectRefs(v, ctx, refs);
 			for (const n of refs.names) {
 				const o = owner.get(n);
 				if (o && o !== e) visit(o);

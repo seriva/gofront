@@ -1264,6 +1264,11 @@ export class BuiltinsEmitter {
 	// and `p *N` (a named scalar or slice) passes `*p`.
 	_recvOperand(func, recvGoType) {
 		const t = func.expr._type;
+		// A pointer receiver on `*p` gets `p` itself, so the method mutates *p.
+		if (recvGoType?.kind === "pointer") {
+			const pointer = this._structDerefPointer(func.expr);
+			if (pointer) return pointer;
+		}
 		if (
 			t?.kind === "pointer" &&
 			recvGoType?.kind !== "pointer" &&

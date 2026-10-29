@@ -721,3 +721,92 @@ true
 `,
 	);
 });
+
+section("WASM Pointers — Writes Through A Dereferenced Struct Pointer");
+
+const DEREF_TYPES = `
+package main
+
+import "fmt"
+
+type In struct{ Y int }
+type T struct {
+	X   int
+	Arr [3]int
+	In  In
+	S   string
+}
+
+func (t *T) Inc()    { t.X++ }
+func (t T) Get() int { return t.X }
+`;
+
+test("(*p).X and (**pp).X assignments, op-assigns and inc/dec write the pointee", async () => {
+	await assertProgramOutput(
+		`${DEREF_TYPES}
+func setPP(pp **T, v *T) { *pp = v }
+func incPP(pp **T)       { (**pp).X++ }
+
+func main() {
+	p := &T{X: 1}
+	pp := &p
+	(**pp).X++
+	fmt.Println(p.X)
+	(**pp).X += 2
+	fmt.Println(p.X)
+	(**pp).X = 50
+	fmt.Println(p.X)
+	(*pp).X++
+	(*p).X++
+	fmt.Println(p.X)
+	q := &T{X: 5}
+	setPP(pp, q)
+	incPP(pp)
+	fmt.Println(q.X, p.X)
+}
+`,
+		"2\n4\n50\n52\n6 6\n",
+	);
+});
+
+test("nested field, array and index stores through (**pp) and (***ppp) write the pointee", async () => {
+	await assertProgramOutput(
+		`${DEREF_TYPES}
+func main() {
+	p := &T{X: 1}
+	pp := &p
+	ppp := &pp
+	(**pp).Arr[1] = 3
+	(**pp).Arr[2] += 4
+	(**pp).In.Y++
+	(**pp).S = "hi"
+	fmt.Println(p.Arr, p.In.Y, p.S)
+	(***ppp).X = 9
+	(***ppp).X++
+	(***ppp).Arr[0] = 8
+	(*p).In.Y += 5
+	fmt.Println(p.X, p.Arr, p.In.Y)
+}
+`,
+		"[0 3 4] 1 hi\n10 [8 3 4] 6\n",
+	);
+});
+
+test("pointer-receiver methods on (*p) and (**pp) mutate the pointee, and a plain *p read still copies", async () => {
+	await assertProgramOutput(
+		`${DEREF_TYPES}
+func main() {
+	p := &T{X: 1}
+	pp := &p
+	(**pp).Inc()
+	(*p).Inc()
+	fmt.Println(p.X, (**pp).Get())
+	v := **pp
+	v.X = 99
+	v.In.Y = 5
+	fmt.Println(p.X, p.In.Y, v.X)
+}
+`,
+		"3 3\n3 0 99\n",
+	);
+});
