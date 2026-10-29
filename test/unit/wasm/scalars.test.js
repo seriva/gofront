@@ -3,6 +3,8 @@
 
 import {
 	assertEqual,
+	assertProgramOutput,
+	assertWasmProgramOutput,
 	compileHybrid,
 	compileWasm,
 	runWasm,
@@ -686,4 +688,126 @@ func Main() {
 	const { exports, lines } = runWasm(wasm, { stringTable });
 	exports.Main();
 	assertEqual(lines.join("\n"), "1000000000000000001");
+});
+
+section(
+	"WASM Constants — local constants, mixed-width compares, complex results",
+);
+
+test("local constants, untyped constant operands and bool constants match Go", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type Color int
+type Name string
+
+const (
+	pa = iota * 10
+	pb
+)
+const pk = 5
+const pb2 = true
+
+func main() {
+	s := "\xe0\xa0\x80z"
+	i := 0
+	var c rune = 0xd000
+	fmt.Println(c <= rune(s[i+1]) && rune(s[i+1]) < 0xe000)
+	var b byte = 200
+	var r rune = 200
+	var u16 uint16 = 65535
+	var i8 int8 = -1
+	var u32 uint32 = 1 << 31
+	var i64 int64 = -5
+	var u64 uint64 = 5
+	fmt.Println(b == 200, int(b) == int(r), rune(b) == r, uint32(u16) < u32, int64(i8) < i64, u64 > 4, r >= 128 && r < 256, b > 127)
+	fmt.Println(rune(s[i]) >= 0xe0, s[i] == 0xe0, s[1] < 0xc0, 'a' < rune(s[3]), rune(s[3]) == 'z', s[3] == 'z', 'z' >= rune(s[3]), 0x7f < s[2])
+	fmt.Println(i8 < 0, u16 > 60000, u32 > 1<<30, i64 < 0, uint8(i8) == 255, uint16(i8) == 65535)
+	const (
+		pa = iota + 1
+		pb
+		pc
+	)
+	fmt.Println(pa, pb, pc)
+	{
+		const pk = "shadow"
+		fmt.Println(pk)
+	}
+	fmt.Println(pk, pb2)
+	{
+		pk := 9
+		fmt.Println(pk)
+	}
+	const f32 float32 = 1.5
+	const cr rune = 'x'
+	const bb = true
+	const col Color = 3
+	const nm Name = "nm"
+	const big = 1 << 40
+	const fl = 2.5
+	const ratio = fl * 2
+	var f float64 = 3
+	fmt.Println(f32, cr, bb, !bb, col, nm, big, fl, ratio, f*fl, f/2, f*big, float32(f)*f32, string(cr), col+1, nm+"x")
+	fn := func() float64 { return fl * 2 }
+	fmt.Println(fn(), func() int { return big >> 38 }(), func() bool { return bb }())
+	var x8 uint8 = 250
+	const inc = 10
+	x8 += inc
+	fmt.Println(x8, x8+inc, x8*2)
+	for i := 0; i < 3; i++ {
+		const lc = 100
+		fmt.Println(lc + i)
+	}
+	const th float64 = 1 << 30
+	fmt.Println(th/(1<<30), th)
+	const e = 'a' + 1
+	fmt.Println(e, string(rune(e)))
+	const str = "hello"
+	const L = len(str)
+	var arr [L]int
+	fmt.Println(len(arr), L, str[1], str+"!")
+}
+`,
+		`false
+true true true true false true true true
+true true true true true true true true
+true true true true true true
+1 2 3
+shadow
+5 true
+9
+1.5 120 true false 3 nm 1099511627776 2.5 5 7.5 1.5 3.298534883328e+12 4.5 x 4 nmx
+5 4 true
+4 14 8
+100
+101
+102
+1 1.073741824e+09
+98 b
+5 5 101 hello!
+`,
+	);
+});
+
+test("an untyped constant converts to a complex result", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+func f() complex128 { return 1 }
+func g() complex64  { return 2.5 }
+func h() (complex128, int) { return 3, 4 }
+
+func main() {
+	fmt.Println(f(), g())
+	fmt.Println(h())
+}
+`,
+		`(1+0i) (2.5+0i)
+(3+0i) 4
+`,
+	);
 });

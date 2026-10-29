@@ -3,6 +3,7 @@
 // synthesised `__init_globals` start function; plus interface dispatcher synthesis.
 
 import { foldConstExpr } from "../../typechecker/const-fold.js";
+import { orderPackageInits } from "../../typechecker/init-order.js";
 import { _someNode } from "./prescan.js";
 import { isStructType, toWasmType, variadicAsSlice } from "./types.js";
 
@@ -82,9 +83,14 @@ function _isPointerGoType(t, mod) {
 
 // Constant-expression zero value of a struct global. Nested struct values are
 // built in place: a null ref would trap on the first field access.
+// Null when a nested array is too large to build as a constant expression.
 function _zeroStructConst(structInfo, mod) {
 	const out = [];
-	for (const f of structInfo.fields) out.push(..._zeroFieldConst(f, mod));
+	for (const f of structInfo.fields) {
+		const zero = _zeroFieldConst(f, mod);
+		if (!zero) return null;
+		out.push(...zero);
+	}
 	out.push({ op: "struct.new", typeIndex: structInfo.typeIndex });
 	return out;
 }
@@ -103,6 +109,9 @@ function _zeroFieldConst(f, mod) {
 	if (typeof ti === "number" && !_isPointerGoType(f.goType, mod)) {
 		for (const s of mod.structTypes.values())
 			if (s.typeIndex === ti) return _zeroStructConst(s, mod);
+		// An array field is a value: a null ref would trap on first use.
+		if (_arrayShape(f.goType, mod.checker))
+			return _zeroArrayConst(f.goType, mod);
 	}
 	return [{ op: "ref.null", heapType: ti ?? "any" }];
 }
@@ -146,6 +155,7 @@ function _zeroArrayConst(goType, mod, depth = 0) {
 		);
 		if (!info) return null;
 		one = _zeroStructConst(info, mod);
+		if (!one) return null;
 	}
 	if (!one)
 		return [
@@ -173,9 +183,14 @@ export function _collectPackageGlobals(progs, mod, checker) {
 					const name = names[i];
 					// Foldable consts live in `constCache`, not in a global.
 					if (isConst && !mod.isNonLiteralConst(name)) continue;
-					const rawType = spec.type ?? values[i]?._type;
+					const rawType =
+						spec.type ??
+						(values.length === 1 && names.length > 1
+							? values[0]?._type?.types?.[i]
+							: values[i]?._type);
 					const wType = toWasmType(rawType, checker, mod);
 					const gIdx = mod.globals.length;
+					let needsRuntimeZero = false;
 					let initInsts = [{ op: `${wType}.const`, value: 0 }];
 					if (wType === "i64") initInsts = [{ op: "i64.const", value: 0n }];
 					else if (wType === "f32" || wType === "f64")
@@ -202,10 +217,23 @@ export function _collectPackageGlobals(progs, mod, checker) {
 								(s) => s.typeIndex === wType.typeIndex,
 							);
 							const arrZero = structInfo ? null : _zeroArrayConst(rawType, mod);
-							if (structInfo) {
-								initInsts = _zeroStructConst(structInfo, mod);
+							const structZero = structInfo
+								? _zeroStructConst(structInfo, mod)
+								: null;
+							if (structZero) {
+								initInsts = structZero;
 							} else if (arrZero) {
 								initInsts = arrZero;
+							} else if (
+								(structInfo || _arrayShape(rawType, checker)) &&
+								!values[i]
+							) {
+								// Too large for a constant expression: the start
+								// function builds the zero value.
+								needsRuntimeZero = true;
+								initInsts = [
+									{ op: "ref.null", heapType: wType.typeIndex ?? "any" },
+								];
 							} else {
 								initInsts = [
 									{ op: "ref.null", heapType: wType.typeIndex ?? "any" },
@@ -271,6 +299,11 @@ export function _collectPackageGlobals(progs, mod, checker) {
 							];
 						}
 					}
+					if (needsRuntimeZero) pending.push({ name, zeroType: rawType });
+					if (!isConst && i === 0 && values.length === 1 && names.length > 1) {
+						// `var q, r = pair()`: one call fills every name.
+						pending.push({ name, names, expr: values[0] });
+					}
 					if (values[i] && !isConstInit && names.length === values.length) {
 						(isConst ? pendingConsts : pending).push({
 							name,
@@ -291,6 +324,11 @@ export function _collectPackageGlobals(progs, mod, checker) {
 			}
 		}
 	}
+	// Initialisers run in dependency order (Go spec), not declaration order.
+	const rank = new Map();
+	for (const e of orderPackageInits(progs).vars)
+		for (const n of e.names) rank.set(n, rank.size);
+	pending.sort((a, b) => (rank.get(a.name) ?? 0) - (rank.get(b.name) ?? 0));
 	return [..._orderConstInits(pendingConsts), ...pending];
 }
 
@@ -317,12 +355,22 @@ export function _orderConstInits(entries) {
 // initializer in declaration order and invoking package `init()` functions;
 // registered as the module start function.
 export function _makeGlobalInitFunc(pending, initNames = []) {
-	const stmts = pending.map(({ name, expr }) => ({
-		kind: "AssignStmt",
-		lhs: [{ kind: "Ident", name, _type: expr._type }],
-		op: "=",
-		rhs: [expr],
-	}));
+	const stmts = pending.map(({ name, names, expr, zeroType }) =>
+		zeroType
+			? { kind: "GlobalZeroInit", name, goType: zeroType }
+			: {
+					kind: "AssignStmt",
+					lhs: names
+						? names.map((n, i) => ({
+								kind: "Ident",
+								name: n,
+								_type: expr._type?.types?.[i],
+							}))
+						: [{ kind: "Ident", name, _type: expr._type }],
+					op: "=",
+					rhs: [expr],
+				},
+	);
 	for (const initName of initNames) {
 		stmts.push({
 			kind: "ExprStmt",

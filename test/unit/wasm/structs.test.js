@@ -3,6 +3,10 @@
 
 import {
 	assertEqual,
+	assertErrorContains,
+	assertProgramOutput,
+	assertWasmProgramOutput,
+	compile,
 	compileHybrid,
 	compileWasm,
 	runWasm,
@@ -378,4 +382,136 @@ func Main() int {
 	const res = compileHybrid(src).run("Main");
 	assertEqual(res.wasmRes, 7n);
 	assertEqual(res.jsRes, 7);
+});
+
+section("WASM Globals — initialisation order and zero values");
+
+test("package variables and constants initialise in dependency order", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func compute() int { return 2 }
+
+var x1 = y1 + 1
+var y1 = compute()
+
+const (
+	A = B + 1
+	B = C * 2
+	C = 3
+)
+
+var z1 = A + 1
+
+type P struct{ A, B int }
+
+var big [100]P
+
+type Q struct{ X [3]int }
+
+var q Q
+
+type T struct{ n int }
+
+func (t T) Get() int  { return t.n + base }
+func (t *T) Ptr() int { return t.n*2 + base }
+
+var (
+	a    = T{1}.Get()
+	b    = (&T{2}).Ptr()
+	c    = func() int { return d + 1 }()
+	d    = helper()
+	e    = sum(f, g)
+	f    = 10
+	g    = h * 2
+	h    = 4
+	base = 100
+	m    = map[string]int{"k": base}
+	s    = []int{base, h}
+)
+
+func sum(x, y int) int { return x + y }
+func helper() int      { return h + g }
+
+func main() {
+	fmt.Println(x1, y1, z1, big[99].B, q.X[1])
+	fmt.Println(a, b, c, d, e, f, g, h, base, m, s)
+}
+`,
+		`3 2 8 0 0
+101 104 13 12 18 10 8 4 100 map[k:100] [100 4]
+`,
+	);
+});
+
+test("multi-value initialisers, blank variables and large zero arrays", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+var q, r = pair()
+var u, v = v2, 3
+var v2 = 7
+var rows [200]struct{ N int }
+var order []string
+
+func pair() (int, int) { return base + 1, 2 }
+
+var base = 10
+var _ = trace("blank")
+
+func trace(s string) int { order = append(order, s); return 0 }
+
+func init() { order = append(order, "init") }
+
+func main() {
+	fmt.Println(q, r, u, v, v2, rows[199].N, order)
+}
+`,
+		`11 2 7 3 7 0 [blank init]
+`,
+	);
+});
+
+test("an initialisation cycle through variables, functions or methods is an error", () => {
+	const cases = [
+		["var a = a + 1", "initialization cycle: a refers to itself"],
+		[
+			"var a = f()\nvar b = a + 1\nfunc f() int { return b }",
+			"initialization cycle for a",
+		],
+		[
+			"type T struct{}\nfunc (T) M() int { return a }\nvar a = T{}.M()",
+			"initialization cycle for a",
+		],
+		[
+			"var a = func() int { return b }()\nvar b = a",
+			"initialization cycle for a",
+		],
+	];
+	for (const [decls, msg] of cases) {
+		for (const target of ["js", "wasm"]) {
+			const { errors } = compile(
+				`//gofront:target ${target}\npackage main\n\n${decls}\n\nfunc main() { println(1) }\n`,
+			);
+			assertErrorContains(errors, msg);
+		}
+	}
+});
+
+test("a local shadow of a package variable is not an initialisation cycle", () => {
+	const { errors } = compile(
+		`package main
+
+var a = g()
+
+func g() int { a := 5; return a }
+
+func main() { println(a) }
+`,
+	);
+	assertEqual(errors.length, 0);
 });

@@ -16,6 +16,7 @@ import {
 	goTypeKey,
 	isAnyType,
 	isArrayType,
+	isBoolGoType,
 	isComplex,
 	isComplex64,
 	isErrorType,
@@ -661,7 +662,7 @@ export class StdlibCoreEmitter {
 			this.releaseTemp(valTmp, valW);
 			return true;
 		}
-		if (goType?.name === "bool" || goType === "bool") {
+		if (isBoolGoType(goType) || goType === "bool") {
 			this.pushInstruction({ op: "local.get", index: valTmp });
 			this.pushInstruction({
 				op: "call",
@@ -1526,7 +1527,7 @@ export class StdlibCoreEmitter {
 		for (const arg of args) {
 			const goType = arg._type ?? this._resolveExprGoType(arg);
 			const isBool =
-				goType?.name === "bool" ||
+				isBoolGoType(goType) ||
 				(arg.kind === "BasicLit" && arg.litKind === "BOOL");
 			const isErr =
 				this.mod.hasErrorType &&
@@ -8851,7 +8852,7 @@ export class StdlibCoreEmitter {
 				const isLast = i === args.length - 1 && isPrintln;
 				const goType = arg._type ?? this._resolveExprGoType(arg);
 				const isBool =
-					goType?.name === "bool" ||
+					isBoolGoType(goType) ||
 					(arg.kind === "BasicLit" && arg.litKind === "BOOL");
 				if (isErrorType(goType) && this.mod.hasErrorType) {
 					this.emitExpr(arg, "anyref");
@@ -9772,8 +9773,29 @@ export class StdlibCoreEmitter {
 			this._emitAnyFmtContainers(done);
 			this._fmtNoScalarMethods = false;
 		}
+		this._emitAnyFmtNilMaps();
 		this.pushInstruction({ op: "ref.null", heapType: "extern" });
 		this.pushInstruction("return");
+	}
+
+	// A nil map in an interface prints as an empty map; nil pointers and funcs
+	// fall through to `<nil>`.
+	_emitAnyFmtNilMaps() {
+		for (const nb of [...this.mod.nilBoxTypes.values()]) {
+			if (!isMapType(nb.goType, this.mod.checker)) continue;
+			const { keyType, valType } = getMapKeyValTypes(
+				nb.goType,
+				this.mod.checker,
+			);
+			const mapInfo = this.mod.getMapType(keyType, valType);
+			this.pushInstruction({ op: "local.get", index: 0 });
+			this.pushInstruction({ op: "ref.test", typeIndex: nb.typeIndex });
+			this.pushInstruction({ op: "if", blockType: "void" });
+			this.pushInstruction({ op: "ref.null", heapType: mapInfo.typeIndex });
+			this.emitToExternref(nb.goType);
+			this.pushInstruction("return");
+			this.pushInstruction("end");
+		}
 	}
 
 	// One arm of the `__any_fmt` chain: if `a` is a `typeIndex`, format it as

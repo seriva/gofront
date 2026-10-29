@@ -455,7 +455,8 @@ const BUILTIN_GEN = {
 		return `(delete ${m}[${k}])`;
 	},
 	copy: (s, e) => {
-		const [dst, src] = e.args.map((a) => s.genExpr(a));
+		const dst = s.genExpr(e.args[0]);
+		const src = s._genSliceSource(e.args[1]);
 		// Array elements are values: the copied elements must not alias src.
 		const t = e.args[1]._type;
 		const elem = (t?.kind === "named" ? t.underlying : t)?.elem;
@@ -1946,6 +1947,15 @@ export const expressionGenMethods = {
 		return gen ? gen(this, expr) : undefined;
 	},
 
+	// The source operand of `append(b, x...)` / `copy(b, x)`: a string
+	// contributes its UTF-8 bytes.
+	_genSliceSource(node) {
+		const js = this.genExpr(node);
+		return this._isStringExprType(node._type)
+			? `new TextEncoder().encode(${js})`
+			: js;
+	},
+
 	genAppend(expr) {
 		const retType = expr._type;
 		const wrapField = this._namedWrapperField(retType, expr.args[0]);
@@ -1955,7 +1965,9 @@ export const expressionGenMethods = {
 			const elems = expr.args
 				.slice(1)
 				.map((a) =>
-					a._spread ? `...(${this.genExpr(a)} ?? [])` : this.genValueExpr(a),
+					a._spread
+						? `...(${this._genSliceSource(a)} ?? [])`
+						: this.genValueExpr(a),
 				);
 			if (elems.length === 0) return this.genExpr(expr.args[0]);
 			this.useHelper("append");
@@ -1968,7 +1980,7 @@ export const expressionGenMethods = {
 		const spreadOf = (a) =>
 			this._aggregateBase(elemT)?.kind === "array"
 				? `...(${this.genExpr(a)} ?? []).map((__e) => ${this._cloneJs(elemT, "__e")})`
-				: `...(${this.genExpr(a)} ?? [])`;
+				: `...(${this._genSliceSource(a)} ?? [])`;
 		const elems = expr.args
 			.slice(1)
 			.map((a) => (a._spread ? spreadOf(a) : this.genValueExpr(a)));
