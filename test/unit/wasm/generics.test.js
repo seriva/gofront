@@ -4,6 +4,7 @@
 import {
 	assertEqual,
 	assertErrorContains,
+	assertProgramOutput,
 	compile,
 	compileHybrid,
 	compileHybridProject,
@@ -1128,4 +1129,63 @@ func conv[T num](s string) T {
 
 func main() {}`);
 	assertErrorContains(errors, "cannot convert string to T");
+});
+
+section("Generics — nested instances and named results");
+
+test("nested generic instances through slices.Values and named results in generic methods", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+type Box[T any] struct{ V T }
+
+type Pointer[T any] struct{ p *T }
+
+func (x *Pointer[T]) Swap(nv *T) (old *T) {
+	old = x.p
+	x.p = nv
+	return
+}
+
+type Pair[K comparable, V any] struct {
+	Key K
+	Val V
+}
+
+func Both[T any](a, b T) (first, second T) {
+	first, second = b, a
+	return
+}
+
+func main() {
+	bs := []Box[Box[int]]{{Box[int]{1}}, {Box[int]{2}}}
+	t := 0
+	for v := range slices.Values(bs) {
+		t += v.V.V
+	}
+	fmt.Println(t)
+	var pp Pointer[int]
+	a, b := 1, 2
+	pp.p = &a
+	old := pp.Swap(&b)
+	fmt.Println(*old, *pp.p)
+	ps := []Pair[string, Box[int]]{{"a", Box[int]{5}}}
+	for _, p := range slices.All(ps) {
+		fmt.Println(p.Key, p.Val.V)
+	}
+	x, y := Both("a", "b")
+	fmt.Println(x, y)
+}
+`,
+		`3
+1 2
+a 5
+b a
+`,
+	);
 });

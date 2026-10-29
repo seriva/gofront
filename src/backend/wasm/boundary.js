@@ -481,7 +481,7 @@ function classifyNamedInterface(t, mod) {
 	const desc = {
 		k: "iface",
 		name: t.name,
-		key: t.name,
+		key: t.name.replaceAll(".", "_"),
 		wType: "anyref",
 		methods: [],
 		concrete: [],
@@ -1264,7 +1264,8 @@ export function addBoundaryHelpers(mod, meta) {
 		const paramW = sig.params;
 		const resultW = sig.results;
 		if (!needsConv(paramW) && !needsConv(resultW)) return;
-		entry.callName = `__x_${entry.exportName}`;
+		// Exported names become JS identifiers: no dot of a qualified type.
+		entry.callName = `__x_${entry.exportName}`.replaceAll(".", "_");
 		addFunc(
 			entry.callName,
 			paramW.map(extType),

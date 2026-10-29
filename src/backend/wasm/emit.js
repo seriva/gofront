@@ -14,6 +14,7 @@ import {
 	isArrayType,
 	isComplex,
 	isComplex64,
+	isFuncType,
 	isPointerToStruct,
 	isSliceType,
 	isStringType,
@@ -762,18 +763,50 @@ export class FunctionEmitter {
 		return false;
 	}
 
-	// True when the body reads or writes a field through a pointer.
+	// True when the body reads or writes a field or the target of a pointer.
 	_needsNilBlock(node) {
 		if (!node || typeof node !== "object") return false;
 		if (Array.isArray(node)) return node.some((n) => this._needsNilBlock(n));
 		if (node.kind === "FuncLit") return false;
 		if (node.kind === "SelectorExpr" && node.expr?._type?.kind === "pointer")
 			return true;
+		if (this._isNilTrapSite(node)) return true;
 		for (const key of Object.keys(node)) {
 			if (key.startsWith("_")) continue;
 			if (this._needsNilBlock(node[key])) return true;
 		}
 		return false;
+	}
+
+	// A pointer dereference or a call through a func value: sites whose nil
+	// operand raises Go's panic through the `nil` block.
+	_isNilTrapSite(node) {
+		if (node.kind === "CallExpr") return this._isFuncValueCall(node);
+		const star =
+			(node.kind === "UnaryExpr" && node.op === "*") ||
+			node.kind === "StarExpr";
+		return star && (node.operand ?? node.expr)?._type?.kind === "pointer";
+	}
+
+	// A call through a func variable, parameter or expression (not a declared
+	// function or a method), which panics when the value is nil.
+	_isFuncValueCall(call) {
+		const f = call.func;
+		if (!f || call._isTypeConversion) return false;
+		if (f.kind === "Ident")
+			return (
+				isFuncType(f._type, this.mod.checker) &&
+				this.mod.resolveFuncIndex(f.name) === null
+			);
+		if (f.kind === "SelectorExpr") {
+			const t = f.expr?._type;
+			const base = t?.kind === "pointer" ? t.base : t;
+			const fields = (base?.underlying ?? base)?.fields;
+			return fields instanceof Map && fields.has(f.field);
+		}
+		return (
+			f.kind === "IndexExpr" || f.kind === "CallExpr" || f.kind === "ParenExpr"
+		);
 	}
 
 	_needsOobBlock(node) {
