@@ -2537,13 +2537,15 @@ var __json_syntax_msg = __json_syntax_msg || function(s) {
 var __json_compact = __json_compact || function(s) {
   try { JSON.parse(s); } catch (e) { return null; }
   var out = "", inStr = false, esc = false;
+  var escHtml = typeof OptEscapeHTML$$internal$jsonrt === "undefined" || OptEscapeHTML$$internal$jsonrt;
   for (var i = 0; i < s.length; i++) {
     var c = s[i];
     if (inStr) {
       if (esc) { esc = false; out += c; continue; }
       if (c === "\\\\") { esc = true; out += c; continue; }
       if (c === '"') inStr = false;
-      if (c === "<") out += "\\\\u003c";
+      if (!escHtml) out += c;
+      else if (c === "<") out += "\\\\u003c";
       else if (c === ">") out += "\\\\u003e";
       else if (c === "&") out += "\\\\u0026";
       else if (c === "\\u2028") out += "\\\\u2028";
@@ -2823,7 +2825,7 @@ var __json_enc_any = __json_enc_any || function(v) {
   if (t === "boolean") return v ? "true" : "false";
   if (t === "number") {
     if (!isFinite(v)) throw __json_unsupported_value(String(v));
-    return String(v);
+    return Object.is(v, -0) ? "-0" : String(v);
   }
   if (t === "bigint") return v.toString();
   if (t === "string") return __json_esc(v);

@@ -457,7 +457,17 @@ export const expressionCheckMethods = {
 		return { kind: "pointer", base: ot };
 	},
 
+	// Go constants have no negative zero: `-0.0` is plain 0, so it is rewritten
+	// to a unary plus that both backends compile to +0.
+	_foldNegativeZeroLiteral(expr) {
+		const o = expr.operand;
+		if (expr.op !== "-" || o?.kind !== "BasicLit") return;
+		if (o.litKind !== "INT" && o.litKind !== "FLOAT") return;
+		if (Number(String(o.value).replaceAll("_", "")) === 0) expr.op = "+";
+	},
+
 	_checkUnaryExpr(expr, scope) {
+		this._foldNegativeZeroLiteral(expr);
 		if (expr.op === "*") expr.operand._typeRefOk = true;
 		const ot = this.checkExpr(expr.operand, scope);
 		if (expr.op === "!") return this._checkBoolUnaryOp(ot, expr);
