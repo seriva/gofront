@@ -95,6 +95,14 @@ export const typeInfoGenMethods = {
 	_callUsesTypeInfo(call) {
 		if (call._isTypeConversion)
 			return call._conversionTargetType?.kind === "typeParam";
+		// A fmt operand of a type parameter type is formatted by its instantiated
+		// type (a Stringer type argument), see _fmtArgJs.
+		if (
+			call.func?.kind === "SelectorExpr" &&
+			call.func.expr?.name === "fmt" &&
+			call.args.some((a) => a?._type?.kind === "typeParam")
+		)
+			return true;
 		const site = call._genericFnType ? call : call.func;
 		if (!site?._genericFnType) return false;
 		if (!site._typeArgs?.some((t) => mentionsTypeParam(t))) return false;
@@ -139,7 +147,13 @@ export const typeInfoGenMethods = {
 		const is = check ? `(__v) => ${check}` : "null";
 		const unbox = this._boxesInInterface(t) ? "true" : "false";
 		const box = this._ifaceKeyBox(t);
-		return `__ti(${base}, ${JSON.stringify(k)}, ${JSON.stringify(typeStr(t))}, ${is}, ${unbox}${box ? `, ${box}` : ""})`;
+		const fmtBox = this._fmtBoxFor(t);
+		const tail = fmtBox
+			? `, ${box ?? "null"}, ${fmtBox}`
+			: box
+				? `, ${box}`
+				: "";
+		return `__ti(${base}, ${JSON.stringify(k)}, ${JSON.stringify(typeStr(t))}, ${is}, ${unbox}${tail})`;
 	},
 
 	// A function boxing a plain value of named basic type `t`, as converting
@@ -147,6 +161,27 @@ export const typeInfoGenMethods = {
 	_ifaceKeyBox(t) {
 		if (!this._boxesInInterface(t) || t?.kind !== "named") return null;
 		return `(__v) => ${this._genNamedIfaceBox("__v", t, false)}`;
+	},
+
+	// A function giving a plain value of type `t` the type information fmt
+	// needs once it is an `any` operand (see _fmtDesc); null when it needs none.
+	_fmtBoxFor(t) {
+		if (!t || t.kind === "typeParam" || mentionsTypeParam(t)) return null;
+		if (this._ifaceKeyBox(t)) return null; // boxed by the key box already
+		const u = this._underlyingOf(t);
+		if (t.kind === "pointer" && this._underlyingOf(t.base)?.kind === "struct") {
+			this.useHelper("ifaceBox");
+			return "(__v) => __ifp(__v)";
+		}
+		const desc = this._fmtDesc(t);
+		if (desc) this.useHelper("ifd");
+		const tagged = (v) => (desc ? `__ifd(${v}, ${desc})` : v);
+		if (u?.kind === "map") {
+			this.useHelper("ifaceBox");
+			return `(__v) => __ifm(${tagged("__v")})`;
+		}
+		if (u?.kind === "slice") return `(__v) => ${tagged("(__v ?? [])")}`;
+		return desc ? `(__v) => ${tagged("__v")}` : null;
 	},
 
 	_underlyingOf(t) {
