@@ -254,9 +254,9 @@ export const HELPER_SCLONE = `var __sclone = __sclone || function(x) {
 
 // Variadic prologue.  `f(xs...)` to a Go-compiled variadic function passes
 // `{ __sp: xs }`, so the parameter is the caller's slice itself (or nil).
-export const HELPER_VA = `var __va = __va || function(a) {
+export const HELPER_VA = `var __va = __va || function(a, nilEmpty) {
   const f = a.length === 1 ? a[0] : undefined;
-  if (a.length === 0) return null;
+  if (a.length === 0 && nilEmpty) return null;
   return f !== null && typeof f === "object" && f.__sp !== undefined ? f.__sp : a;
 };`;
 

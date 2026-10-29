@@ -242,6 +242,26 @@ func main() {
 
 section("Tuple assignment order");
 
+test("tuple targets that name struct or array storage are not copied", async () => {
+	const src = `package main
+
+import "fmt"
+
+type S struct{ A, B int }
+
+func main() {
+	var s, t S = S{1, 2}, S{3, 4}
+	s, s.A = t, 9
+	fmt.Println(s, t)
+	other := [2]int{7, 8}
+	var arr [2]int
+	arr, arr[0] = other, 5
+	fmt.Println(arr)
+}
+`;
+	await assertProgramOutput(src, "{9 4} {3 4}\n[5 8]\n");
+});
+
 test("index operands are evaluated before the assignment", async () => {
 	const src = `package main
 

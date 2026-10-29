@@ -616,8 +616,11 @@ export const statementGenMethods = {
 		if (this._isTypeParamDerefAssign(stmt)) {
 			const ptr = this.genExpr(stmt.lhs[0].operand);
 			const val = this.genValueExpr(stmt.rhs[0]);
+			const isStruct = this._typeParamIsStructJs(
+				stmt.lhs[0].operand._type.base.name,
+			);
 			this.line(
-				`((__p, __v) => { if (__p !== null && typeof __p === "object" && "value" in __p) __p.value = __v; else Object.assign(__p, __v); })(${ptr}, ${val});`,
+				`((__p, __v) => { if (${isStruct}) Object.assign(__p, __v); else __p.value = __v; })(${ptr}, ${val});`,
 			);
 			return;
 		}
@@ -728,6 +731,8 @@ export const statementGenMethods = {
 			for (const key of keys) {
 				const operand = l[key];
 				if (!mentions(operand)) continue;
+				// A struct or array value names the variable's storage in Go.
+				if (key === "expr" && this._aggregateBase(operand._type)) continue;
 				this._tmpCounter = (this._tmpCounter ?? 0) + 1;
 				const name = `__h${this._tmpCounter}`;
 				lines.push(`const ${name} = ${this.genExpr(operand)};`);

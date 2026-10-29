@@ -298,6 +298,26 @@ func Main() int {
 
 section("Variadic spread");
 
+test("empty variadic call keeps an empty slice for stdlib helpers", async () => {
+	const src = `package main
+
+import (
+	"fmt"
+	"slices"
+	"sort"
+)
+
+func has(x int, xs ...int) bool { return slices.Contains(xs, x) }
+func idx(xs ...int) int        { sort.Ints(xs); return slices.Index(xs, 3) }
+func keep(xs ...int) map[string][]int { return map[string][]int{"a": xs} }
+
+func main() {
+	fmt.Println(has(1), idx(), keep())
+}
+`;
+	await assertProgramOutput(src, "false -1 map[a:[]]\n");
+});
+
 test("spread aliases the slice, nil spread and empty call are nil", async () => {
 	const src = `package main
 

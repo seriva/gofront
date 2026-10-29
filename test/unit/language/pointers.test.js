@@ -421,6 +421,38 @@ func main() {
 	await assertProgramOutput(src, "9 9\n7\n8\n");
 });
 
+test("erased generic element pointers follow the type argument", () => {
+	const src = `package main
+
+import "fmt"
+
+type S struct{ A int }
+
+func first[T any](xs []T) *T { return &xs[0] }
+func set[T any](p *T, v T)   { *p = v }
+
+func main() {
+	a, b := &S{1}, &S{2}
+	ps := []*S{a}
+	set(first(ps), b)
+	fmt.Println(a.A, b.A, ps[0].A)
+	ms := []map[string]int{{"x": 1}}
+	set(first(ms), map[string]int{"y": 2})
+	fmt.Println(ms[0]["x"], ms[0]["y"])
+	as := []any{S{1}}
+	set(first(as), any(5))
+	fmt.Println(as[0])
+	vs := []S{{1}}
+	set(first(vs), S{4})
+	first(vs).A++
+	fmt.Println(vs[0].A)
+}
+`;
+	const { js, errors } = compile(src, { target: "both" });
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "1 2 2\n0 2\n5\n5");
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

@@ -279,6 +279,12 @@ export class StmtsEmitter {
 				const operand = l[key];
 				if (!this._mentions(operand, assigned)) continue;
 				const goType = operand._type ?? this._resolveExprGoType(operand);
+				// A struct or array value names the variable's storage in Go.
+				if (
+					key === "expr" &&
+					(this._isValueStruct(goType) || this._isValueArray(goType))
+				)
+					continue;
 				const wType = this.toWasmType(goType);
 				const name = `__lhs_tmp_${this.tempCounter++}`;
 				const idx = this.allocLocal(name, wType, goType, true);
