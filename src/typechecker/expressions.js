@@ -82,7 +82,11 @@ const BUILTIN_CHECK = {
 		return st;
 	},
 	copy: (s, _n, e, at) => s._checkBuiltinCopy(e, at),
-	delete: () => VOID,
+	delete: (s, _n, e, at) => {
+		const mt = s._deepUnderlying(at[0]);
+		if (mt?.kind === "map" && e.args[1]) s._markIfaceKey(mt, e.args[1], at[1]);
+		return VOID;
+	},
 	make: (s, _n, e, _at, sc) => {
 		if (e.args.length < 1) return ANY;
 		const ta = e.args[0];
@@ -674,6 +678,22 @@ export const expressionCheckMethods = {
 		return u;
 	},
 
+	// A key of an interface-keyed map (`map[any]T`): the backend encodes it
+	// with its dynamic type, so `L("1")`, `N(1)`, `"1"` and `1` stay distinct.
+	// A named basic value is boxed first, exactly as in any interface
+	// conversion; other values are keyed as they are.
+	_markIfaceKey(mapType, node, srcType) {
+		const key = this.resolveType(mapType.key);
+		const kb = key?.kind === "named" ? this.resolveType(key.underlying) : key;
+		if (!node || !srcType || (!isAny(key) && kb?.kind !== "interface")) return;
+		node._ifaceKey = true;
+		this._markIfaceBox(key, this.resolveType(srcType), node);
+		if (node._ifaceBox === "named" || node._ifaceBox === "named_ptr") return;
+		node._ifaceBox = undefined;
+		node._ifaceSrc = undefined;
+		node._ifacePtrFields = undefined;
+	},
+
 	_checkIndexExpr(expr, scope) {
 		const typeRef = this._genericTypeRef(expr, scope);
 		if (typeRef) return typeRef;
@@ -686,7 +706,7 @@ export const expressionCheckMethods = {
 			const inst = this._genericFuncValueAsInstantiation(expr);
 			if (inst) return this._checkInstantiationExpr(inst, scope);
 		}
-		this.checkExpr(expr.index, scope);
+		const indexType = this.checkExpr(expr.index, scope);
 		if (bt?._tainted) return TAINTED_ANY;
 		if (isAny(bt)) return ANY;
 		const btu = this._deepUnderlying(bt);
@@ -696,6 +716,7 @@ export const expressionCheckMethods = {
 		}
 		if (btu.kind === "map") {
 			expr._mapValueType = btu.value;
+			this._markIfaceKey(btu, expr.index, indexType);
 			return btu.value;
 		}
 		if (btu.kind === "shared") {
@@ -1861,6 +1882,7 @@ export const expressionCheckMethods = {
 					vt = this.checkExpr(elem.value, scope);
 				}
 				this.assertAssignable(base.key, kt, elem.key);
+				this._markIfaceKey(base, elem.key, kt);
 				this.assertAssignable(base.value, vt, elem.value);
 			}
 		}

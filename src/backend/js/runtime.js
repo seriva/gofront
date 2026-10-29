@@ -525,10 +525,29 @@ var __sk = __sk || function(o) {
   if (!__kt.has(s)) __kt.set(s, typeof o.__clone === "function" ? o.__clone() : o);
   return s;
 };
+var __ik = __ik || function(k) {
+  const t = typeof k;
+  if (t === "number" || t === "boolean" || t === "bigint") return "\\u0001" + t + ":" + String(k);
+  if (k !== null && t === "object" && typeof k.__gfUnbox === "function" && !k.constructor.name.endsWith("$Ptr")) {
+    const v = k.__gfUnbox(), vt = typeof v;
+    if (vt === "string" || vt === "number" || vt === "boolean" || vt === "bigint") {
+      const s = "\\u0001" + k.constructor.name + ":" + vt + ":" + String(v);
+      if (!__kt.has(s)) __kt.set(s, k);
+      return s;
+    }
+  }
+  return k;
+};
 var __kd = __kd || function(s, copy) {
   if (typeof s !== "string" || s.charCodeAt(0) !== 1) return s;
   const k = __kt.get(s);
-  return k === undefined ? s : copy && typeof k.__clone === "function" ? k.__clone() : k;
+  if (k === undefined) {
+    if (s.startsWith("\\u0001number:")) return Number(s.slice(8));
+    if (s.startsWith("\\u0001boolean:")) return s.slice(9) === "true";
+    if (s.startsWith("\\u0001bigint:")) return BigInt(s.slice(8));
+    return s;
+  }
+  return copy && typeof k.__clone === "function" ? k.__clone() : k;
 };
 var __kcmp = __kcmp || function(a, b) {
   if (a !== null && b !== null && typeof a === "object" && typeof b === "object") {
