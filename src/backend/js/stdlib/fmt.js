@@ -270,35 +270,36 @@ export const fmtMethods = {
 		return js;
 	},
 
+	// `js` (a value of static type `t`) boxed as converting it to an `any` does,
+	// with the same boxing the single-operand path gets from the checker
+	// (_markIfaceBox): named types with methods, pointers, slices, maps, structs
+	// and the fmt descriptor of Stringer elements.
+	_fmtBoxValue(js, t) {
+		const resolve = (x) => this.checker?.resolveType?.(x) ?? x;
+		let base = resolve(t);
+		if (base?.kind === "named") base = resolve(base.underlying);
+		const meta = this.checker?._ifaceBoxMeta?.(t);
+		if (meta?.type)
+			return this._genNamedIfaceBox(js, meta.type, meta.box === "named_ptr");
+		let out = this._fmtNilValue(base, js);
+		if (meta) out = this._ifaceBoxWrap(out, meta.box, meta.ptrFields);
+		const desc = this._fmtDesc(t);
+		return desc ? this._fmtDescWrap(out, desc) : out;
+	},
+
 	// The results of a multi-value call as separate operands.  Each result is
 	// boxed as if it were assigned to an `any`, so pointers print as `&{...}`
 	// and floats keep their width.
 	_fmtTupleJs(e) {
 		const resolve = (t) => this.checker?.resolveType?.(t) ?? t;
-		const boxFns = {
-			ptr: "__ifp",
-			ptr_slice: "__ifps",
-			ptr_map: "__ifpm",
-			map: "__ifm",
-			slice: "__ifs",
-			value: "__ifv",
-		};
 		const parts = e._type.types.map((t, i) => {
-			const v = `__t[${i}]`;
+			const boxed = this._fmtBoxValue(`__t[${i}]`, t);
 			const desc = fmtTypeDesc(t, resolve);
 			if (fmtDescHasFloat(desc) && desc.k !== "i") {
 				this.useHelper("sprintf");
-				return `__ft(${v}, ${JSON.stringify(desc)})`;
+				return `__ft(${boxed}, ${JSON.stringify(desc)})`;
 			}
-			let base = resolve(t);
-			if (base?.kind === "named") base = resolve(base.underlying);
-			const info = this.checker?._classifyIfaceBox?.(base);
-			if (!info || !boxFns[info.box]) return this._fmtNilValue(base, v);
-			this.useHelper("ifaceBox");
-			const extra = info.ptrFields?.length
-				? `, ${JSON.stringify(info.ptrFields)}`
-				: "";
-			return `${boxFns[info.box]}(${this._fmtNilValue(base, v)}${extra})`;
+			return boxed;
 		});
 		return `...((__t) => [${parts.join(", ")}])(${this.genExpr(e)})`;
 	},
