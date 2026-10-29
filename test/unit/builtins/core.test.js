@@ -5,6 +5,7 @@ import {
 	assert,
 	assertContains,
 	assertEqual,
+	assertProgramOutput,
 	assertThrows,
 	compile,
 	runJs,
@@ -897,6 +898,29 @@ func main() {
 });
 
 // ── fmt.Sprintf %f format verb ────────────────────────────────
+
+section("make of a named slice and new of an array");
+
+test("make of a named slice type and new of an array", async () => {
+	const src = `package main
+
+import "fmt"
+
+type S []int
+
+func main() {
+	s := make(S, 5)
+	fmt.Println(len(s), s)
+	p := new([4]byte)
+	(*p)[0] = 1
+	fmt.Println(*p)
+}
+`;
+	const { js, errors } = compile(src);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "5 [0 0 0 0 0]\n[1 0 0 0]");
+	await assertProgramOutput(src, "5 [0 0 0 0 0]\n[1 0 0 0]\n");
+});
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
