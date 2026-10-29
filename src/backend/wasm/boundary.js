@@ -1966,13 +1966,19 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		"fmt_new_map": () => new Map(),
 		"fmt_map_set": (m, k, v) => { m.set(k, v); },
 		"fmt_new_struct": (ref, isPtr) => {
-			if (ref !== null && ref !== undefined && typeof ref === "object" && fmtStructMap.has(ref)) {
-				return fmtStructMap.get(ref);
-			}
+			// One object per struct and per kind: a value and a pointer to it
+			// in the same call (fmt.Println(&s, s)) must stay distinct.
+			const slot = isPtr !== 0 ? 1 : 0;
+			const isRef = ref !== null && ref !== undefined && typeof ref === "object";
+			const seen = isRef ? fmtStructMap.get(ref) : undefined;
+			if (seen?.[slot]) return seen[slot];
 			const o = {};
 			Object.defineProperty(o, "__struct", { value: true, configurable: true });
 			if (isPtr !== 0) Object.defineProperty(o, "__p", { value: true, configurable: true });
-			if (ref !== null && ref !== undefined && typeof ref === "object") fmtStructMap.set(ref, o);
+			if (isRef) {
+				if (seen) seen[slot] = o;
+				else fmtStructMap.set(ref, slot ? [undefined, o] : [o, undefined]);
+			}
 			return o;
 		},
 		"fmt_struct_type": (o, i) => { Object.defineProperty(o, "__tn", { value: stringTable[i], configurable: true }); },

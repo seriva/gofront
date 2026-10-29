@@ -6,6 +6,7 @@ import {
 	assertContains,
 	assertEqual,
 	assertErrorContains,
+	assertProgramOutput,
 	compile,
 	compileHybrid,
 	runJs,
@@ -588,6 +589,127 @@ test("plain maps, nil slices and pointers print as Go through a type parameter",
 func Show[T any](x T) string { return fmt.Sprint(x) }`,
 		),
 		"map[a:1] [1] {1 map[z:1]} [] map[] &{2 map[]}",
+	);
+});
+
+section(
+	"fmt: typed formatting composes with Stringer dispatch (js, both, wasm)",
+);
+
+// Runs a whole program on the js target, as a `both` package and on
+// WebAssembly and compares with the text real Go printed.
+async function realGo(source, expected) {
+	const js = compile(source);
+	assertEqual(js.errors.length, 0, js.errors.join("\n"));
+	let out = "";
+	runJs(js.js, {
+		console: {
+			log: (...a) => {
+				out += `${a.join(" ")}\n`;
+			},
+		},
+		process: {
+			stdout: {
+				write: (t) => {
+					out += t;
+				},
+			},
+		},
+	});
+	assertEqual(out, expected);
+	await assertProgramOutput(source, expected);
+}
+
+test("Stringers inside containers, typed floats and nil pointers of named types match real Go", async () => {
+	await realGo(
+		`package main
+
+import "fmt"
+
+type Dir int
+
+func (Dir) String() string { return "D" }
+
+type N2 int
+
+func (n N2) String() string { return [...]string{"N", "E"}[n] }
+
+type NS []int
+
+func (NS) String() string { return "NS" }
+
+type M map[string]int
+
+func (M) String() string { return "M" }
+
+type Temp float64
+
+func (t Temp) String() string { return fmt.Sprintf("%.1f°C", float64(t)) }
+
+type Color int
+
+func (c Color) String() string { return "c" }
+
+type PS struct{ F float64 }
+
+func (p *PS) String() string { return "ps" }
+
+type It struct{ V PS }
+
+func main() {
+	fmt.Printf("%s=%v\\n", "k", []Dir{1})
+	fmt.Printf("%s %v\\n", "n", []NS{{1}})
+	fmt.Printf("%s %v\\n", "n", []M{{"a": 1}})
+	fmt.Printf("%q %v\\n", []string{"a"}, []Dir{1})
+	fmt.Printf("%s %v\\n", "x", [][]Dir{{1}})
+	fmt.Printf("%s %v\\n", "x", [2]Dir{})
+	fmt.Printf("%s %v\\n", "x", map[string][]Dir{"a": {1}})
+	fmt.Printf("%v|%s\\n", [2]N2{0, 1}, [2]N2{0, 1})
+	fmt.Println([]Temp{1.5})
+	fmt.Println(map[string]Temp{"a": 3})
+	fmt.Println([2]Temp{})
+	fmt.Println(map[Dir]float64{1: 0.5})
+	fmt.Printf("%v\\n", struct{ T Temp }{1})
+	fmt.Println([]float64{1e6, 2.5}, map[string]float64{"a": 1e6})
+	var p *Color
+	var x any = p
+	fmt.Println(x == nil)
+	_, ok := x.(*Color)
+	fmt.Println(ok)
+	switch x.(type) {
+	case *Color:
+		fmt.Println("ptr")
+	default:
+		fmt.Println("default")
+	}
+	var s fmt.Stringer = p
+	fmt.Println(s == nil)
+	fmt.Println(p)
+	it := It{PS{2}}
+	fmt.Println(&it.V, it.V)
+}
+`,
+		`k=[D]
+n [NS]
+n [M]
+["a"] [D]
+x [[D]]
+x [D D]
+x map[a:[D]]
+[N E]|[N E]
+[1.5°C]
+map[a:3.0°C]
+[0.0°C 0.0°C]
+map[D:0.5]
+{1.0°C}
+[1e+06 2.5] map[a:1e+06]
+false
+true
+ptr
+false
+<nil>
+ps {2}
+`,
 	);
 });
 
