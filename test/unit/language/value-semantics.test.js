@@ -3,6 +3,7 @@
 import {
 	assert,
 	assertEqual,
+	assertProgramOutput,
 	compile,
 	runJs,
 	section,
@@ -237,4 +238,60 @@ func main() {
 }`);
 	assertEqual(out, "9 z");
 	assert(!js.includes(".slice()"), "full slice must not copy");
+});
+
+section("Tuple assignment order");
+
+test("tuple targets that name struct or array storage are not copied", async () => {
+	const src = `package main
+
+import "fmt"
+
+type S struct{ A, B int }
+
+func main() {
+	var s, t S = S{1, 2}, S{3, 4}
+	s, s.A = t, 9
+	fmt.Println(s, t)
+	other := [2]int{7, 8}
+	var arr [2]int
+	arr, arr[0] = other, 5
+	fmt.Println(arr)
+}
+`;
+	await assertProgramOutput(src, "{9 4} {3 4}\n[5 8]\n");
+});
+
+test("index operands are evaluated before the assignment", async () => {
+	const src = `package main
+
+import "fmt"
+
+type S struct{ A, B int }
+
+func main() {
+	k := 0
+	xs := []int{0, 2}
+	k, xs[k] = 1, 5
+	fmt.Println(k, xs)
+	i := 0
+	ys := []int{1, 2, 3}
+	i, ys[i] = ys[i], i+10
+	fmt.Println(i, ys)
+	ys[0], ys[1] = ys[1], ys[0]
+	fmt.Println(ys)
+	m := map[int]int{}
+	j := 1
+	j, m[j] = 4, 7
+	fmt.Println(j, m)
+	p := &S{1, 2}
+	q := &S{3, 4}
+	p, p.A = q, 9
+	fmt.Println(*p, *q)
+}
+`;
+	await assertProgramOutput(
+		src,
+		"1 [5 2]\n1 [10 2 3]\n[2 10 3]\n4 map[1:7]\n{3 4} {3 4}\n",
+	);
 });

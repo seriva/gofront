@@ -24,14 +24,13 @@ import {
 	markInBoundsIndexes,
 	normalizeDefers,
 	scanAddressTaken,
-	someChild,
 } from "../../lower/index.js";
 import {
 	BROWSER_GLOBALS,
 	isComplex,
 	isNumeric,
 } from "../../typechecker/types.js";
-import { expressionGenMethods } from "./expressions.js";
+import { comparesToNil, expressionGenMethods } from "./expressions.js";
 import {
 	HELPER_APPEND,
 	HELPER_BASE64,
@@ -67,6 +66,7 @@ import {
 	HELPER_S,
 	HELPER_SCLONE,
 	HELPER_SHA256,
+	HELPER_SHIFT,
 	HELPER_SIMD,
 	HELPER_SLICE,
 	HELPER_SORT_SLICE,
@@ -155,6 +155,7 @@ const HELPER_MAP = [
 	["cmul", HELPER_CMUL],
 	["cdiv", HELPER_CDIV],
 	["panicRt", HELPER_PANIC],
+	["shift", HELPER_SHIFT],
 	["nilCall", HELPER_NIL_CALL],
 	["bounds", HELPER_BOUNDS],
 	["nilMap", HELPER_NIL_MAP],
@@ -190,25 +191,6 @@ const HELPER_MAP = [
 // JS bodies of `//gofront:intrinsic` functions (names: INTRINSICS in
 // typechecker/types.js).  The WASM backend keeps their empty body.
 const JS_INTRINSICS = {};
-
-// True when `node` compares the identifier `name` with nil (`l == nil`): a
-// pointer-receiver method that does so is meant to run on a nil receiver.
-function comparesToNil(node, name) {
-	if (Array.isArray(node)) return node.some((n) => comparesToNil(n, name));
-	if (!node || typeof node !== "object") return false;
-	if (node.kind === "BinaryExpr" && (node.op === "==" || node.op === "!=")) {
-		const isRecv = (e) => e?.kind === "Ident" && e.name === name;
-		const isNil = (e) =>
-			(e?.kind === "Ident" && e.name === "nil") ||
-			(e?.kind === "BasicLit" && e.litKind === "NIL");
-		if (
-			(isRecv(node.left) && isNil(node.right)) ||
-			(isRecv(node.right) && isNil(node.left))
-		)
-			return true;
-	}
-	return someChild(node, (c) => comparesToNil(c, name));
-}
 
 export class CodeGen {
 	// jsImports:       Map<importPath, string[]> — npm package imports to emit at top of file

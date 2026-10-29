@@ -244,6 +244,7 @@ export const statementGenMethods = {
 				break;
 			case "IncDecStmt": {
 				this._markIndexLvalues([stmt.expr]);
+				this._markDerefOpTarget(stmt.expr);
 				if (stmt.expr.kind === "IndexExpr" && stmt.expr._mapValueType) {
 					const zero = this.zeroValueForType(stmt.expr._mapValueType);
 					const wrapField = this._namedWrapperField(
@@ -433,6 +434,68 @@ export const statementGenMethods = {
 		);
 	},
 
+	// `*p = v` where `p` points at a type parameter: erased, so the pointer is
+	// either a struct (copy into it) or a get/set wrapper.
+	_isTypeParamDerefAssign(stmt) {
+		if (stmt.lhs.length !== 1 || stmt.rhs.length !== 1 || stmt.op !== "=")
+			return false;
+		const l = stmt.lhs[0];
+		return (
+			l.kind === "UnaryExpr" &&
+			l.op === "*" &&
+			l.operand?._type?.base?.kind === "typeParam"
+		);
+	},
+
+	_isTypeParamDerefTarget(l) {
+		return (
+			l.kind === "UnaryExpr" &&
+			l.op === "*" &&
+			l.operand?._type?.base?.kind === "typeParam"
+		);
+	},
+
+	// `*a, *b = *b, *a` with type-parameter pointers: `*p` is not a settable
+	// JS destructuring target, so evaluate the right-hand side into temporaries
+	// and assign each target on its own.
+	_hasTypeParamDerefTarget(stmt) {
+		return (
+			stmt.op === "=" &&
+			stmt.lhs.length > 1 &&
+			stmt.lhs.some((l) => this._isTypeParamDerefTarget(l))
+		);
+	},
+
+	_genTypeParamDerefMultiAssign(stmt) {
+		const n = stmt.lhs.length;
+		const names = stmt.lhs.map((_, i) => `__t${i}`);
+		this.line("{");
+		this.indented(() => {
+			if (stmt.rhs.length === n) {
+				const vals = stmt.rhs.map((e, i) =>
+					stmt.lhs[i].name !== "_" ? this.genValueExpr(e) : this.genExpr(e),
+				);
+				this.line(`const [${names.join(", ")}] = [${vals.join(", ")}];`);
+			} else {
+				this.line(
+					`const [${names.join(", ")}] = ${this.genExpr(stmt.rhs[0])};`,
+				);
+			}
+			stmt.lhs.forEach((l, i) => {
+				if (l.name === "_") return;
+				if (this._isTypeParamDerefTarget(l)) {
+					const isStruct = this._typeParamIsStructJs(l.operand._type.base.name);
+					this.line(
+						`((__p, __v) => { if (${isStruct}) Object.assign(__p, __v); else __p.value = __v; })(${this.genExpr(l.operand)}, ${names[i]});`,
+					);
+				} else {
+					this.line(`${this._genAssignLhsExpr(l)} = ${names[i]};`);
+				}
+			});
+		});
+		this.line("}");
+	},
+
 	_isStructDerefAssign(stmt) {
 		if (stmt.lhs.length !== 1 || stmt.rhs.length !== 1 || stmt.op !== "=")
 			return false;
@@ -452,6 +515,13 @@ export const statementGenMethods = {
 
 	_markIndexLvalues(exprs) {
 		for (const e of exprs) if (e.kind === "IndexExpr") e._lvalue = true;
+	},
+
+	// Op-assign / inc-dec through a type-parameter pointer needs a settable
+	// target: the erased pointer is a get/set wrapper (struct instantiations
+	// cannot be op-assigned), so target `.value` directly.
+	_markDerefOpTarget(e) {
+		if (this._isTypeParamDerefTarget(e)) e._derefOpTarget = true;
 	},
 
 	_genAssignMulti(stmt, lhs, rhs, active, pairs) {
@@ -587,6 +657,7 @@ export const statementGenMethods = {
 
 	_genAssignStmt(stmt) {
 		this._markIndexLvalues(stmt.lhs);
+		if (stmt.op !== "=") for (const l of stmt.lhs) this._markDerefOpTarget(l);
 		this._markSelfReslice(stmt);
 		if (this._isComplexCompoundAssign(stmt)) {
 			this._genComplexCompoundAssign(stmt);
@@ -598,6 +669,21 @@ export const statementGenMethods = {
 		}
 		if (this._isCommaOkAssertStmt(stmt)) {
 			this._genCommaOkTypeAssert(stmt);
+			return;
+		}
+		if (this._isTypeParamDerefAssign(stmt)) {
+			const ptr = this.genExpr(stmt.lhs[0].operand);
+			const val = this.genValueExpr(stmt.rhs[0]);
+			const isStruct = this._typeParamIsStructJs(
+				stmt.lhs[0].operand._type.base.name,
+			);
+			this.line(
+				`((__p, __v) => { if (${isStruct}) Object.assign(__p, __v); else __p.value = __v; })(${ptr}, ${val});`,
+			);
+			return;
+		}
+		if (this._hasTypeParamDerefTarget(stmt)) {
+			this._genTypeParamDerefMultiAssign(stmt);
 			return;
 		}
 		if (this._isStructDerefAssign(stmt)) {
@@ -614,7 +700,9 @@ export const statementGenMethods = {
 				? this.genValueExpr(e)
 				: this.genExpr(e),
 		);
+		const hoisted = this._hoistLhsOperands(stmt);
 		const lhs = stmt.lhs.map((e) => this._genAssignLhsExpr(e));
+		hoisted?.restore();
 		const pairs = lhs.map((l, i) => ({ l, r: rhs[i] ?? rhs[0] }));
 		const active = pairs.filter((p) => p.l !== "_");
 		if (active.length === 0) {
@@ -667,9 +755,60 @@ export const statementGenMethods = {
 					? `(${active[0].l})`
 					: active[0].l;
 			this.line(`${targetL} ${stmt.op} ${active[0].r};`);
+		} else if (hoisted) {
+			this.line("{");
+			this.indented(() => {
+				for (const l of hoisted.lines) this.line(l);
+				this._genAssignMulti(stmt, lhs, rhs, active, pairs);
+			});
+			this.line("}");
 		} else {
 			this._genAssignMulti(stmt, lhs, rhs, active, pairs);
 		}
+	},
+
+	// `k, xs[k] = 1, 5`: Go evaluates the operands of every index and field
+	// target before any assignment, but a JS destructuring target reads its
+	// operands after the earlier ones are stored.  Operands that mention a
+	// variable assigned by the same statement are bound to temporaries first.
+	_hoistLhsOperands(stmt) {
+		if (stmt.op !== "=" || stmt.lhs.length < 2) return null;
+		const assigned = new Set(
+			stmt.lhs
+				.filter((l) => l.kind === "Ident" && l.name !== "_")
+				.map((l) => l.name),
+		);
+		if (assigned.size === 0) return null;
+		const mentions = (n) =>
+			!!n &&
+			typeof n === "object" &&
+			((n.kind === "Ident" && assigned.has(n.name)) || someChild(n, mentions));
+		const lines = [];
+		const undo = [];
+		for (const l of stmt.lhs) {
+			let keys;
+			if (l.kind === "IndexExpr") keys = ["expr", "index"];
+			else if (l.kind === "SelectorExpr" && !l._isMethodExpr) keys = ["expr"];
+			else continue;
+			for (const key of keys) {
+				const operand = l[key];
+				if (!mentions(operand)) continue;
+				// A struct or array value names the variable's storage in Go.
+				if (key === "expr" && this._aggregateBase(operand._type)) continue;
+				this._tmpCounter = (this._tmpCounter ?? 0) + 1;
+				const name = `__h${this._tmpCounter}`;
+				lines.push(`const ${name} = ${this.genExpr(operand)};`);
+				undo.push([l, key, operand]);
+				l[key] = { kind: "Ident", name, _type: operand._type };
+			}
+		}
+		if (lines.length === 0) return null;
+		return {
+			lines,
+			restore: () => {
+				for (const [node, key, v] of undo) node[key] = v;
+			},
+		};
 	},
 
 	_genCommaOkTypeAssert(stmt) {
@@ -689,7 +828,13 @@ export const statementGenMethods = {
 		if (stmt.op !== "=" || stmt.lhs.length !== 1 || stmt.rhs.length !== 1)
 			return false;
 		const l = stmt.lhs[0];
-		if (l.kind !== "Ident" && l.kind !== "SelectorExpr") return false;
+		if (l.kind === "IndexExpr" && l._mapValueType) return false;
+		if (
+			l.kind !== "Ident" &&
+			l.kind !== "SelectorExpr" &&
+			l.kind !== "IndexExpr"
+		)
+			return false;
 		if (l.kind === "Ident" && l.name === "_") return false;
 		if (
 			!this._aggregateBase(l._type) ||
@@ -701,11 +846,16 @@ export const statementGenMethods = {
 	},
 
 	_genStableWholeAssign(stmt) {
-		const target = this._genAssignLhsExpr(stmt.lhs[0]);
+		let target = this._genAssignLhsExpr(stmt.lhs[0]);
 		const type = stmt.lhs[0]._type;
 		this._tmpCounter = (this._tmpCounter ?? 0) + 1;
 		const src = `__s${this._tmpCounter}`;
 		this.line(`{ const ${src} = ${this.genExpr(stmt.rhs[0])};`);
+		if (stmt.lhs[0].kind === "IndexExpr") {
+			// Evaluate the element reference once.
+			target = `__d${this._tmpCounter}`;
+			this.line(`const ${target} = ${this._genAssignLhsExpr(stmt.lhs[0])};`);
+		}
 		this._emitCopyInto(target, src, type);
 		this.line("}");
 	},
@@ -1456,6 +1606,7 @@ export const statementGenMethods = {
 			case "IncDecStmt": {
 				const syncs = this._resliceSyncs([stmt.expr], stmt, true);
 				this._markIndexLvalues([stmt.expr]);
+				this._markDerefOpTarget(stmt.expr);
 				return this._withInlineSyncs(
 					syncs,
 					`${this.genExpr(stmt.expr)}${stmt.op}`,
