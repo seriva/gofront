@@ -5,6 +5,7 @@
 
 import {
 	assertEqual,
+	assertProgramOutput,
 	assertThrows,
 	compile,
 	compileHybrid,
@@ -515,4 +516,170 @@ func Main() int { return int(Half * 100) }
 	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
 	assertEqual(wasmRes, jsRes);
 	assertEqual(wasmRes, 314);
+});
+
+section("Go semantics — fallthrough and multi-value assignment");
+
+test("fallthrough runs every fallen-through body in each switch shape", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func chain() int {
+	v := 0
+	switch 3 {
+	case 3:
+		v += 100
+		fallthrough
+	case 2:
+		v += 10
+		fallthrough
+	case 1:
+		v++
+	}
+	return v
+}
+
+func tagless(n int) string {
+	out := ""
+	switch {
+	case n > 0:
+		out += "p"
+		fallthrough
+	case n > 10:
+		out += "big?"
+		fallthrough
+	default:
+		out += "."
+	}
+	return out
+}
+
+func middleDefault(x int) string {
+	out := ""
+	switch x {
+	case 1:
+		out += "one"
+	default:
+		out += "def"
+		fallthrough
+	case 3:
+		out += "three"
+	}
+	return out
+}
+
+func nested(s string) (r string) {
+outer:
+	for i := 0; i < 3; i++ {
+		switch t := s + "x"; t {
+		case "ax", "bx":
+			r += "1"
+			switch i {
+			case 0:
+				r += "z"
+				fallthrough
+			case 1:
+				if i == 1 {
+					break outer
+				}
+				r += "y"
+			}
+			fallthrough
+		case "cx":
+			r += "2"
+			continue outer
+		default:
+			r += "d"
+		}
+		r += "|"
+	}
+	return
+}
+
+func main() {
+	fmt.Println(chain())
+	fmt.Println(tagless(1), tagless(-1), tagless(11))
+	fmt.Println(middleDefault(1), middleDefault(2), middleDefault(3))
+	fmt.Println(nested("a"), nested("c"), nested("q"))
+}
+`,
+		`111
+pbig?. . pbig?.
+one defthree three
+1zy21 222 d|d|d|
+`,
+	);
+});
+
+test("multi-value results assign to indexes, fields, derefs, map entries and mixed := targets", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func add(a, b int) (int, int) { return a + b, a - b }
+
+func addc(x, y, c uint32) (uint32, uint32) {
+	s := uint64(x) + uint64(y) + uint64(c)
+	return uint32(s), uint32(s >> 32)
+}
+
+type P struct{ A, B int }
+
+func idx(n int) int { fmt.Println("idx", n); return n }
+
+func main() {
+	w := make([]int, 10)
+	w[2*3], w[2*3+1] = add(1, 2)
+	fmt.Println(w[6], w[7])
+	var x, y, c0 uint32 = 0xffffffff, 0, 1
+	h, c1 := addc(x, y, 0)
+	h, c2 := addc(h, 0, c0)
+	fmt.Println(h, c1, c2)
+	m := map[string]int{}
+	var p P
+	pp := &p
+	m["a"], pp.B = add(5, 1)
+	fmt.Println(m, p)
+	q := new(int)
+	*q, p.A = add(9, 2)
+	fmt.Println(*q, p)
+	_, p.B = add(1, 1)
+	fmt.Println(p)
+	arr := [3]int{}
+	arr[idx(1)], arr[idx(2)] = add(8, 3)
+	fmt.Println(arr)
+	k, e := add(1, 1)
+	k, f := add(k, e)
+	fmt.Println(k, e, f)
+	v := 10
+	if true {
+		v, z := add(7, 1)
+		fmt.Println(v, z)
+	}
+	fmt.Println(v)
+	ps := []P{{1, 2}, {3, 4}}
+	ps[0].A, ps[1].B = add(4, 4)
+	fmt.Println(ps)
+	k, z := add(5, 5)
+	fmt.Println(k, z)
+}
+`,
+		`3 -1
+0 0 1
+map[a:6] {0 4}
+11 {7 4}
+{7 0}
+idx 1
+idx 2
+[0 11 5]
+2 0 2
+8 6
+10
+[{8 2} {3 0}]
+10 0
+`,
+	);
 });

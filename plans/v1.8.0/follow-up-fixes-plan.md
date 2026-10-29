@@ -371,23 +371,23 @@ No longer reproducing (deleted from the ledger): promoted field through `Deep2{*
 
 ### Phase 11: WASM Statements, Generics, Interfaces and Facade
 
-- [ ] Task 11.1: `fallthrough` chains
+- [x] Task 11.1: `fallthrough` chains
   - Files: `src/backend/wasm/emit-stmts.js`, `test/unit/wasm/go_semantics.test.js`
   - Test: `switch 3 { case 3: v += 100; fallthrough; case 2: v += 10; fallthrough; case 1: v++ }` → `111` (all targets).
   - Done when: WASM runs every fallen-through body.
-- [ ] Task 11.2: Multi-value assignment to computed indexes and mixed `:=`
+- [x] Task 11.2: Multi-value assignment to computed indexes and mixed `:=`
   - Files: `src/backend/wasm/emit-stmts.js`, `test/unit/wasm/go_semantics.test.js`
   - Test: `w[2*3], w[2*3+1] = add(1, 2)` → `w[6] == 3`; `h, c1 := addc(x, y); h, c2 := addc(h, c0)` (x=0xffffffff, y=0, c0=1) → `0 0 1` (all targets).
   - Done when: both match Go on WASM.
-- [ ] Task 11.3: Nested generic instances and named results in generic methods
+- [x] Task 11.3: Nested generic instances and named results in generic methods
   - Files: `src/backend/wasm/monomorph.js`, `test/unit/wasm/generics.test.js`
   - Test: `[]Box[Box[int]]` summed via `slices.Values` → `3`; `(*Pointer[T]).Swap(nv *T) (old *T)` → `1` (all targets).
   - Done when: module validates and `old` resolves.
-- [ ] Task 11.4: Interface dispatch and recoverable nil traps
+- [x] Task 11.4: Interface dispatch and recoverable nil traps
   - Files: `src/backend/wasm/emit-exprs.js`, `src/backend/wasm/types.js`, `test/unit/wasm/interfaces.test.js`
   - Test: `fmt.Println(w.Write([]byte("xy")))` via interface → `2 <nil>`; `var g Getter = &x` (`MyInt(42)`) → `42`; nil `*N` value-method call under `recover` → recovered; `var p *S; _ = *p` under `recover` → recovered (all targets; recover tests in `test/unit/wasm/defer_recover.test.js`).
   - Done when: no validation failure, no `interface conversion` error, no uncatchable trap.
-- [ ] Task 11.5: Facade identifiers for qualified type names
+- [x] Task 11.5: Facade identifiers for qualified type names
   - Files: `src/backend/wasm/boundary.js`, `test/unit/wasm/boundary.test.js`
   - Test: wasm package exporting `G[time.Duration]` → facade JS parses and `Make().Get()` returns `1000000000`; wasm main with `Mk(n Named) fmt.Stringer` → builds and prints `x`.
   - Done when: both projects build and run via `compileHybridProject`.
