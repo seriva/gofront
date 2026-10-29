@@ -988,8 +988,10 @@ export const expressionGenMethods = {
 			if (this._isStructPointerType(expr.operand._type)) {
 				return this._genNilChecked(this.genExpr(expr.operand));
 			}
-			if (expr.operand._type?.base?.kind === "typeParam")
+			if (expr.operand._type?.base?.kind === "typeParam") {
+				if (expr._derefOpTarget) return `${this.genExpr(expr.operand)}.value`;
 				return `((__p) => (${this._typeParamIsStructJs(expr.operand._type.base.name)} ? __p : __p.value))(${this.genExpr(expr.operand)})`;
+			}
 			return `${this.genExpr(expr.operand)}.value`;
 		}
 		// Unary minus/plus on complex

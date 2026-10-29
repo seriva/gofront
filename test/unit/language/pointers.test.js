@@ -487,6 +487,38 @@ func main() {
 	}
 });
 
+test("op-assign and inc/dec through type-parameter pointers", () => {
+	const src = `package main
+
+import "fmt"
+
+type Num interface{ ~int | ~int64 }
+
+func add[T ~int](a *T) { *a += 5 }
+func inc[T ~int](a *T) { *a++ }
+func adj[T Num](a, b *T) {
+	*a += *b
+	*b -= 1
+}
+
+func main() {
+	x := 1
+	add[int](&x)
+	fmt.Println(x)
+	inc[int](&x)
+	fmt.Println(x)
+	p, q := 1, 10
+	adj[int](&p, &q)
+	fmt.Println(p, q)
+}
+`;
+	for (const target of ["js", "both"]) {
+		const { js, errors } = compile(src, { target });
+		assertEqual(errors.length, 0);
+		assertEqual(runJs(js), "6\n7\n11 9");
+	}
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
