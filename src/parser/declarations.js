@@ -305,6 +305,7 @@ export const declarationParseMethods = {
 	},
 
 	parseVarSpec() {
+		const at = this.peek();
 		const names = this.parseIdentList();
 		let type = null;
 		let value = null;
@@ -316,7 +317,7 @@ export const declarationParseMethods = {
 			type = this.parseType();
 		}
 		if (this.match(T.ASSIGN)) value = this.parseExprList();
-		return { names, type, value };
+		return { names, type, value, _line: at.line, _col: at.col };
 	},
 
 	parseConstDecl() {
