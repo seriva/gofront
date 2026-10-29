@@ -5,7 +5,9 @@
 
 import {
 	assertEqual,
+	assertProgramOutput,
 	assertThrows,
+	assertWasmProgramOutput,
 	compile,
 	compileHybrid,
 	runWasm,
@@ -515,4 +517,344 @@ func Main() int { return int(Half * 100) }
 	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
 	assertEqual(wasmRes, jsRes);
 	assertEqual(wasmRes, 314);
+});
+
+section("Go semantics — fallthrough and multi-value assignment");
+
+test("fallthrough runs every fallen-through body in each switch shape", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func chain() int {
+	v := 0
+	switch 3 {
+	case 3:
+		v += 100
+		fallthrough
+	case 2:
+		v += 10
+		fallthrough
+	case 1:
+		v++
+	}
+	return v
+}
+
+func tagless(n int) string {
+	out := ""
+	switch {
+	case n > 0:
+		out += "p"
+		fallthrough
+	case n > 10:
+		out += "big?"
+		fallthrough
+	default:
+		out += "."
+	}
+	return out
+}
+
+func middleDefault(x int) string {
+	out := ""
+	switch x {
+	case 1:
+		out += "one"
+	default:
+		out += "def"
+		fallthrough
+	case 3:
+		out += "three"
+	}
+	return out
+}
+
+func nested(s string) (r string) {
+outer:
+	for i := 0; i < 3; i++ {
+		switch t := s + "x"; t {
+		case "ax", "bx":
+			r += "1"
+			switch i {
+			case 0:
+				r += "z"
+				fallthrough
+			case 1:
+				if i == 1 {
+					break outer
+				}
+				r += "y"
+			}
+			fallthrough
+		case "cx":
+			r += "2"
+			continue outer
+		default:
+			r += "d"
+		}
+		r += "|"
+	}
+	return
+}
+
+func main() {
+	fmt.Println(chain())
+	fmt.Println(tagless(1), tagless(-1), tagless(11))
+	fmt.Println(middleDefault(1), middleDefault(2), middleDefault(3))
+	fmt.Println(nested("a"), nested("c"), nested("q"))
+}
+`,
+		`111
+pbig?. . pbig?.
+one defthree three
+1zy21 222 d|d|d|
+`,
+	);
+});
+
+test("multi-value results assign to indexes, fields, derefs, map entries and mixed := targets", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func add(a, b int) (int, int) { return a + b, a - b }
+
+func addc(x, y, c uint32) (uint32, uint32) {
+	s := uint64(x) + uint64(y) + uint64(c)
+	return uint32(s), uint32(s >> 32)
+}
+
+type P struct{ A, B int }
+
+func idx(n int) int { fmt.Println("idx", n); return n }
+
+func main() {
+	w := make([]int, 10)
+	w[2*3], w[2*3+1] = add(1, 2)
+	fmt.Println(w[6], w[7])
+	var x, y, c0 uint32 = 0xffffffff, 0, 1
+	h, c1 := addc(x, y, 0)
+	h, c2 := addc(h, 0, c0)
+	fmt.Println(h, c1, c2)
+	m := map[string]int{}
+	var p P
+	pp := &p
+	m["a"], pp.B = add(5, 1)
+	fmt.Println(m, p)
+	q := new(int)
+	*q, p.A = add(9, 2)
+	fmt.Println(*q, p)
+	_, p.B = add(1, 1)
+	fmt.Println(p)
+	arr := [3]int{}
+	arr[idx(1)], arr[idx(2)] = add(8, 3)
+	fmt.Println(arr)
+	k, e := add(1, 1)
+	k, f := add(k, e)
+	fmt.Println(k, e, f)
+	v := 10
+	if true {
+		v, z := add(7, 1)
+		fmt.Println(v, z)
+	}
+	fmt.Println(v)
+	ps := []P{{1, 2}, {3, 4}}
+	ps[0].A, ps[1].B = add(4, 4)
+	fmt.Println(ps)
+	k, z := add(5, 5)
+	fmt.Println(k, z)
+}
+`,
+		`3 -1
+0 0 1
+map[a:6] {0 4}
+11 {7 4}
+{7 0}
+idx 1
+idx 2
+[0 11 5]
+2 0 2
+8 6
+10
+[{8 2} {3 0}]
+10 0
+`,
+	);
+});
+
+section("Go semantics — switch clause scopes");
+
+test("fallthrough clauses and plain clauses each declare their own names", async () => {
+	await assertWasmProgramOutput(
+		`
+package main
+
+import "fmt"
+
+func f(k int) {
+	x := 10
+	switch k {
+	case 1:
+		x := 20
+		_ = x
+		fallthrough
+	case 2:
+		fmt.Println("x", x)
+	}
+	fmt.Println("after", x)
+}
+
+func g() {
+	x := 1
+	switch x := x + 1; x {
+	case 2:
+		x := x * 100
+		fmt.Println(x)
+		fallthrough
+	case 3:
+		fmt.Println("three", x)
+	}
+}
+
+func h(k int) {
+	x := 5
+	switch k {
+	case 1:
+		x := 7
+		fmt.Println(x)
+	case 2:
+		fmt.Println("c2", x)
+	}
+	var fs []func() int
+	switch k {
+	case 1:
+		v := 3
+		fs = append(fs, func() int { v++; return v })
+		fallthrough
+	case 2:
+		v := 9
+		fs = append(fs, func() int { return v })
+	}
+	for _, q := range fs {
+		fmt.Println(q())
+	}
+	var i any = k
+	switch i.(type) {
+	case int:
+		y := 1
+		fmt.Println("y", y)
+	default:
+		fmt.Println("default", x)
+	}
+}
+
+func main() {
+	f(1)
+	f(2)
+	g()
+	h(1)
+	h(2)
+}
+`,
+		`x 10
+after 10
+x 10
+after 10
+200
+three 2
+7
+4
+9
+y 1
+c2 5
+9
+y 1
+`,
+	);
+});
+
+section("Go semantics — nil pointer inside an interface");
+
+test("a value-receiver call through a nil pointer to a named type is a recoverable panic", async () => {
+	await assertWasmProgramOutput(
+		`
+package main
+
+import "fmt"
+
+type Getter interface{ Get() int }
+type PGetter interface{ PGet() int }
+
+type MyInt int
+
+func (m MyInt) Get() int { return int(m) }
+func (m *MyInt) PGet() int {
+	if m == nil {
+		return -1
+	}
+	return int(*m)
+}
+
+type Names []string
+
+func (n Names) Get() int { return len(n) }
+
+type Label string
+
+func (l Label) Get() int { return len(l) }
+
+type Ratio float64
+
+func (r Ratio) Get() int { return int(r) }
+
+func try(name string, f func()) {
+	defer func() { fmt.Println(name, "rec:", recover()) }()
+	f()
+}
+
+func main() {
+	try("int", func() {
+		var np *MyInt
+		var g Getter = np
+		var pg PGetter = np
+		fmt.Println(g != nil, g == nil, pg.PGet())
+		_, ok := g.(*MyInt)
+		fmt.Println(ok)
+		fmt.Println(g.Get())
+	})
+	try("slice", func() {
+		var np *Names
+		var g Getter = np
+		fmt.Println(g != nil)
+		fmt.Println(g.Get())
+	})
+	try("string", func() {
+		var np *Label
+		var g Getter = np
+		fmt.Println(g.Get())
+	})
+	try("float", func() {
+		var np *Ratio
+		var g Getter = np
+		fmt.Println(g.Get())
+	})
+	v := MyInt(4)
+	var g Getter = &v
+	var pg PGetter = &v
+	fmt.Println(g.Get(), pg.PGet())
+}
+`,
+		`true false -1
+true
+int rec: runtime error: invalid memory address or nil pointer dereference
+true
+slice rec: runtime error: invalid memory address or nil pointer dereference
+string rec: runtime error: invalid memory address or nil pointer dereference
+float rec: runtime error: invalid memory address or nil pointer dereference
+4 4
+`,
+	);
 });

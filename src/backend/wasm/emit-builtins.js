@@ -1245,6 +1245,12 @@ export class BuiltinsEmitter {
 				const recvWType = targetParamTypes[0] ?? null;
 				const recvGoType = this.mod.getFuncParamGoTypes(methodName)[0] ?? null;
 				this.emitExpr(this._recvOperand(func, recvGoType), recvWType);
+				// `p.M()` with a value receiver reads `*p`: a nil `p` panics here.
+				if (
+					recvGoType?.kind !== "pointer" &&
+					isStructType(recvGoType, this.mod.checker, this.mod)
+				)
+					this._emitNilCheck(func.expr._type);
 				this._emitCopyIfValue(func.expr, recvGoType, recvWType);
 				const paramGoTypes = this.mod.getFuncParamGoTypes(methodName);
 				for (let i = 0; i < args.length; i++) {
@@ -1457,6 +1463,8 @@ export class BuiltinsEmitter {
 
 		const closureTmp = this.acquireTemp(closureWType);
 		this.emitExpr(func, closureWType);
+		// Calling a nil func value panics like a nil pointer dereference.
+		this._emitNilBranch();
 		this.pushInstruction({ op: "local.set", index: closureTmp });
 
 		// Push param 0: env (anyref)

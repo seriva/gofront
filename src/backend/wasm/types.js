@@ -116,9 +116,7 @@ export function toWasmType(goType, checker = null, mod = null) {
 		}
 		// An instance written `Box[int]` is the monomorphised struct `Box$int`.
 		const instance = goType.typeArgs?.length
-			? mod?.getStructType(
-					`${goType.name}$${goType.typeArgs.map(goTypeKey).join("$")}`,
-				)
+			? mod?.getStructType(`${goType.name}$${instanceArgsKey(goType.typeArgs)}`)
 			: null;
 		const struct = instance ?? mod?.getStructType(goType.name);
 		if (struct) {
@@ -390,6 +388,12 @@ export function getInterfaceMethodList(iface) {
 	return [];
 }
 
+// The type-argument part of a monomorphised name (see monomorph.js typeKey):
+// the dot of a qualified argument is replaced to keep the name an identifier.
+function instanceArgsKey(typeArgs) {
+	return typeArgs.map(goTypeKey).join("$").replaceAll(".", "_");
+}
+
 export function goTypeKey(t) {
 	if (!t) return "any";
 	if (typeof t === "string") {
@@ -439,6 +443,9 @@ export function goTypeKey(t) {
 		return `struct_${rawFields.join("_")}`;
 	}
 	if (t.kind === "named") {
+		// An instance of a generic type is the monomorphised `Box$int`.
+		if (t.name && t.typeArgs?.length && !t.name.includes("$"))
+			return `${t.name}$${instanceArgsKey(t.typeArgs)}`;
 		return t.name ?? (t.underlying ? goTypeKey(t.underlying) : "any");
 	}
 	if (t.name) return t.name;

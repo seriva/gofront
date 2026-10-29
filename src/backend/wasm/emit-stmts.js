@@ -161,7 +161,38 @@ export class StmtsEmitter {
 		this.pushInstruction({ op: "local.set", index: idx });
 	}
 
+	// Stores a multi-value call into temporaries (last result first), then
+	// assigns each one to its target.  Used when a target is not a plain new
+	// local: an index, field or dereference, or a name redeclared by `:=`.
+	_emitTupleViaTemps(lhsNodes, rhsNode, assignOne, hoist) {
+		const tupleTypes = rhsNode._type.types;
+		this.emitExpr(rhsNode);
+		const temps = [];
+		for (let i = lhsNodes.length - 1; i >= 0; i--) {
+			const goType = tupleTypes[i];
+			const wType = this.toWasmType(goType);
+			const name = `__tup_tmp_${this.tempCounter++}`;
+			const idx = this.allocLocal(name, wType, goType, true);
+			this.pushInstruction({ op: "local.set", index: idx });
+			temps[i] = { kind: "Ident", name, _type: goType, _parTmp: true };
+		}
+		const undo = hoist ? this._hoistLhsOperands(lhsNodes) : null;
+		for (let i = 0; i < lhsNodes.length; i++) assignOne(lhsNodes[i], temps[i]);
+		undo?.();
+		for (const t of temps) this.locals.delete(t.name);
+	}
+
+	_isPlainTupleTarget(l) {
+		return l.kind === "Ident";
+	}
+
 	_emitTupleDefine(lhsNodes, rhsNode) {
+		if (lhsNodes.some((l) => !this._isPlainTupleTarget(l) || l._redecl)) {
+			this._emitTupleViaTemps(lhsNodes, rhsNode, (l, t) =>
+				this._emitDefineSingle(l, t),
+			);
+			return;
+		}
 		const tupleTypes = rhsNode._type.types;
 		const localIndices = [];
 		for (let i = 0; i < lhsNodes.length; i++) {
@@ -966,6 +997,15 @@ export class StmtsEmitter {
 	}
 
 	_emitTupleAssign(lhsNodes, rhsNode, op) {
+		if (op === "=" && lhsNodes.some((l) => !this._isPlainTupleTarget(l))) {
+			this._emitTupleViaTemps(
+				lhsNodes,
+				rhsNode,
+				(l, t) => this._emitAssignSingle(l, t, "="),
+				true,
+			);
+			return;
+		}
 		const tupleTypes = rhsNode._type.types;
 		const dests = [];
 		for (let i = 0; i < lhsNodes.length; i++) {
@@ -3050,7 +3090,91 @@ export class StmtsEmitter {
 		return false;
 	}
 
+	// Each case clause is its own scope: a name declared in one clause must not
+	// stay visible in the clauses after it.
+	_emitClauseBody(stmts) {
+		const outer = new Map(this.locals);
+		try {
+			for (const s of stmts ?? []) this.emitStmt(s);
+		} finally {
+			this.locals = outer;
+		}
+	}
+
+	// A switch with `fallthrough` dispatches to one block per clause, in source
+	// order, so a clause that falls through simply runs into the next body.
+	_emitFallthroughSwitch(stmt) {
+		const getCaseVals = (c) => c.list ?? c.values ?? [];
+		const cases = stmt.cases ?? [];
+		const n = cases.length;
+		const isFall = (s) =>
+			s?.kind === "BranchStmt" && s.keyword === "fallthrough";
+
+		this.pushInstruction({ op: "block", blockType: "void" });
+		this.pushControl("break", stmt.label);
+		if (stmt.init) this.emitStmt(stmt.init);
+
+		let tagGoType = null;
+		let tagWType = null;
+		let tagTmp = -1;
+		if (stmt.tag) {
+			tagGoType = stmt.tag._type ?? this._resolveExprGoType(stmt.tag);
+			tagWType = this.toWasmType(tagGoType);
+			tagTmp = this.acquireTemp(tagWType);
+			this.emitExpr(stmt.tag, tagWType);
+			this.pushInstruction({ op: "local.set", index: tagTmp });
+		}
+		for (let i = 0; i < n; i++) {
+			this.pushInstruction({ op: "block", blockType: "void" });
+		}
+		let defaultIdx = -1;
+		for (let i = 0; i < n; i++) {
+			const vals = getCaseVals(cases[i]);
+			if (vals.length === 0) {
+				defaultIdx = i;
+				continue;
+			}
+			for (let j = 0; j < vals.length; j++) {
+				if (stmt.tag) {
+					this.pushInstruction({ op: "local.get", index: tagTmp });
+					this.emitExpr(vals[j], tagWType);
+					this.emitBinaryOp("==", tagWType, tagGoType);
+				} else {
+					this.emitExpr(vals[j], "i32");
+				}
+				if (j > 0) this.pushInstruction("i32.or");
+			}
+			// The innermost block ends the first clause, so clause i is depth i.
+			this.pushInstruction({ op: "br_if", depth: i });
+		}
+		this.pushInstruction({ op: "br", depth: defaultIdx >= 0 ? defaultIdx : n });
+		if (stmt.tag) this.releaseTemp(tagTmp, tagWType);
+
+		for (let i = 0; i < n; i++) {
+			this.pushInstruction("end");
+			const body = cases[i].stmts ?? [];
+			const falls = isFall(body[body.length - 1]);
+			this._emitClauseBody(falls ? body.slice(0, -1) : body);
+			if (!falls && i < n - 1) {
+				this.pushInstruction({ op: "br", depth: n - 1 - i });
+			}
+		}
+		this.pushInstruction("end");
+	}
+
 	emitSwitchStmt(stmt) {
+		if (
+			(stmt.cases ?? []).some((c) => {
+				const b = c.stmts ?? [];
+				return (
+					b[b.length - 1]?.kind === "BranchStmt" &&
+					b[b.length - 1].keyword === "fallthrough"
+				);
+			})
+		) {
+			this._emitFallthroughSwitch(stmt);
+			return;
+		}
 		this.pushInstruction({ op: "block", blockType: "void" });
 		this.pushControl("break", stmt.label);
 
@@ -3091,12 +3215,12 @@ export class StmtsEmitter {
 			this.pushInstruction({ op: "if", blockType: "void" });
 			ifCount++;
 
-			for (const s of c.stmts ?? []) this.emitStmt(s);
+			this._emitClauseBody(c.stmts);
 			this.pushInstruction("else");
 		}
 
 		if (defaultCase) {
-			for (const s of defaultCase.stmts ?? []) this.emitStmt(s);
+			this._emitClauseBody(defaultCase.stmts);
 		}
 
 		for (let i = 0; i < ifCount; i++) {
@@ -3172,9 +3296,7 @@ export class StmtsEmitter {
 				this.pushInstruction({ op: "local.set", index: assignLocal });
 			}
 
-			for (const s of c.stmts ?? []) {
-				this.emitStmt(s);
-			}
+			this._emitClauseBody(c.stmts);
 
 			this.pushInstruction("else");
 		}
@@ -3188,9 +3310,7 @@ export class StmtsEmitter {
 				this.pushInstruction({ op: "local.get", index: tswTmp });
 				this.pushInstruction({ op: "local.set", index: assignLocal });
 			}
-			for (const s of defaultCase.stmts ?? []) {
-				this.emitStmt(s);
-			}
+			this._emitClauseBody(defaultCase.stmts);
 		}
 
 		for (let i = 0; i < ifCount; i++) {
@@ -3361,7 +3481,7 @@ export class StmtsEmitter {
 				const nr = rootNamed[i];
 				const targetWType = this.toWasmType(nr?.type ?? val._type);
 				this.emitExpr(val, targetWType);
-				this._emitCopyIfValue(val, val._type, targetWType);
+				this._emitCopyReturnValue(val, targetWType);
 				const tmp = this.acquireTemp(targetWType);
 				this.pushInstruction({ op: "local.set", index: tmp });
 				temps.push({ tmp, type: targetWType });
@@ -3419,7 +3539,7 @@ export class StmtsEmitter {
 						const val = values[i];
 						const targetWType = this.returnTypes[i] ?? null;
 						this.emitExpr(val, targetWType);
-						this._emitCopyIfValue(val, val._type, targetWType);
+						this._emitCopyReturnValue(val, targetWType);
 						const tmp = this.acquireTemp(targetWType);
 						this.pushInstruction({ op: "local.set", index: tmp });
 						temps.push({ tmp, type: targetWType });
@@ -3444,7 +3564,7 @@ export class StmtsEmitter {
 						const val = values[i];
 						const targetWType = this.returnTypes[i] ?? null;
 						this.emitExpr(val, targetWType);
-						this._emitCopyIfValue(val, val._type, targetWType);
+						this._emitCopyReturnValue(val, targetWType);
 						this.pushInstruction({
 							op: "local.set",
 							index: this.returnTempLocals[i],
@@ -3485,9 +3605,16 @@ export class StmtsEmitter {
 			const val = values[i];
 			const targetWType = this.returnTypes[i] ?? null;
 			this.emitExpr(val, targetWType);
-			this._emitCopyIfValue(val, val._type, targetWType);
+			this._emitCopyReturnValue(val, targetWType);
 		}
 		this.pushInstruction("return");
+	}
+
+	// A value returned as an interface was copied when it was boxed; copying it
+	// again by its own type would treat the box as the struct.
+	_emitCopyReturnValue(val, targetWType) {
+		if (targetWType === "anyref") return;
+		this._emitCopyIfValue(val, val._type, targetWType);
 	}
 
 	_assignToNamedReturnVar(nr) {
