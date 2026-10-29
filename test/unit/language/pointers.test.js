@@ -344,6 +344,52 @@ func main() {
 	assertEqual(runJs(js), ["10 2", "7 108", "3 40", "30 7 80 5"].join("\n"));
 });
 
+section("Nil pointers in JS");
+
+const NIL_PTR_SRC = `package main
+
+import "fmt"
+
+type List struct {
+	next *List
+}
+
+func (l *List) Len() int {
+	if l == nil {
+		return 0
+	}
+	return 1 + l.next.Len()
+}
+
+type S struct{ A int }
+
+func main() {
+	l := &List{&List{nil}}
+	fmt.Println(l.Len())
+	fmt.Println((*List).Len(l))
+	func() {
+		defer func() { fmt.Println(recover()) }()
+		var p *S
+		_ = *p
+	}()
+	xs := []int{1, 2}
+	clear(xs)
+	fmt.Println(xs)
+}
+`;
+
+for (const target of ["js", "both"]) {
+	test(`nil receivers, nil dereference and clear on ${target}`, () => {
+		const { js, errors } = compile(NIL_PTR_SRC, { target });
+		assertEqual(errors.length, 0);
+		const out = runJs(js).split("\n");
+		assertEqual(out[0], "2");
+		assertEqual(out[1], "2");
+		assertContains(out[2], "nil pointer dereference");
+		assertEqual(out[3], "[0 0]");
+	});
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

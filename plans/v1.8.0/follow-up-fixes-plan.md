@@ -229,23 +229,23 @@ No longer reproducing (deleted from the ledger): promoted field through `Deep2{*
 
 ### Phase 5: JS Backend Crashes
 
-- [ ] Task 5.1: Positional embedded literal inside a keyed literal
+- [x] Task 5.1: Positional embedded literal inside a keyed literal
   - Files: `src/backend/js/expressions.js`, `test/unit/language/structs.test.js`
   - Test: `Out{In: In{3}}` → `o.A == 3`; `Outer{Base: Base{7}, v: "x"}` → `7 x` (all targets).
   - Done when: no `unhandled expression kind` error.
-- [ ] Task 5.2: Shadowed loop variable
+- [x] Task 5.2: Shadowed loop variable
   - Files: `src/backend/js/statements.js`, `src/backend/wasm/emit-stmts.js`, `test/unit/language/loops.test.js`
   - Test: `for i := 0; i < 2; i++ { i := i; println(i) }` → `0`,`1` on all targets (WASM run under a loop guard that fails instead of hanging).
   - Done when: JS has no TDZ error and WASM terminates.
-- [ ] Task 5.3: Repeated `var _` and `[]T(nil)`
+- [x] Task 5.3: Repeated `var _` and `[]T(nil)`
   - Files: `src/backend/js/index.js`, `src/backend/js/expressions.js`, `src/backend/wasm/emit-exprs.js`
   - Test: in `test/unit/language/declarations.test.js`, `var _ = f(); var _ = g()` runs both initialisers; `fmt.Println([]int(nil))` → `[]` (all targets).
   - Done when: no `already been declared` / `not iterable` / validation errors.
-- [ ] Task 5.4: `make` of a named slice and `new` of an array
+- [x] Task 5.4: `make` of a named slice and `new` of an array
   - Files: `src/backend/js/expressions.js`, `src/backend/wasm/emit-builtins.js`, `test/unit/builtins/core.test.js`
   - Test: `type S []int; make(S, 5)` → `5 [0 0 0 0 0]`; `p := new([4]byte); (*p)[0] = 1` → `[1 0 0 0]` (all targets).
   - Done when: both repros match on all targets.
-- [ ] Task 5.5: Nil pointers in JS: receivers, dereference, `clear`
+- [x] Task 5.5: Nil pointers in JS: receivers, dereference, `clear`
   - Files: `src/backend/js/expressions.js`, `src/backend/js/runtime.js`, `test/unit/language/pointers.test.js`
   - Test: `(*List).Len` on a list ending in nil → `2`; `var p *S; _ = *p` under `recover` → message containing `nil pointer dereference`; `clear(xs)` on `[]int{1,2}` → `[0 0]`.
   - Done when: the three repros pass on `js` and `both`.
