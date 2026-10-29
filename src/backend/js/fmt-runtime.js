@@ -321,7 +321,12 @@ var __fmtu = __fmtu || (() => {
       default: return String(v);
     }
   };
-  return { runes, pad, quote, quoteRune, runeStr, validRune, fmtInt, fmtFloat, utf8, fmtHex, baseOf, isFloatN, isComplexN, typeName, descOf, sortedEntries, gs, PRINTABLE, hex, keys, isNumKey };
+  // both(t, s): the descriptor of a value with a static type descriptor t and a
+  // Stringer descriptor s; split() undoes it.  A Stringer descriptor never has a
+  // string "k", a type descriptor always does.
+  const both = (t, s) => (t && s ? { $both: 1, t, s } : (t ?? s));
+  const split = (fd) => (fd?.$both ? [fd.t, fd.s] : typeof fd?.k === "string" ? [fd, null] : [null, fd]);
+  return { both, split, runes, pad, quote, quoteRune, runeStr, validRune, fmtInt, fmtFloat, utf8, fmtHex, baseOf, isFloatN, isComplexN, typeName, descOf, sortedEntries, gs, PRINTABLE, hex, keys, isNumKey };
 })();`;
 
 // The format-string scanner and per-verb dispatch, spliced into `__sprintf`
@@ -384,7 +389,10 @@ export const HELPER_FMT_LOOP = String.raw`
   // for its text under %s, %q, %x and %X: the descriptor carries its stand-in.
   const nilStand = (e, d, verb) => (e == null && d?.np !== undefined && "sqxX".includes(verb) ? d.np : e);
   // Applies a non-%v verb to v; composites apply it to each element, as Go does.
-  const fmtv = (verb, v, t, fl, wid, hasWid, prec, hasPrec, top) => {
+  // sd: Stringer descriptor of v when it is not carried by v itself (see formatV).
+  const fmtv = (verb, v, t, fl, wid, hasWid, prec, hasPrec, top, sd) => {
+    sd = sd ?? v?.__fd;
+    if (sd?.b && v != null && !(v instanceof sd.b)) v = new sd.b(v);
     v = unbox(v, verb);
     const bt = U.baseOf(t);
     if (v === null || v === undefined) {
@@ -431,7 +439,7 @@ export const HELPER_FMT_LOOP = String.raw`
       }
       const et = elemOf(t);
       if (v.__ptr_slice === true) items.forEach(markPtr);
-      return "[" + items.map((e) => fmtv(verb, nilStand(e, v.__fd?.e, verb), et, fl, wid, hasWid, prec, hasPrec, false)).join(" ") + "]";
+      return "[" + items.map((e) => fmtv(verb, nilStand(e, sd?.e, verb), et, fl, wid, hasWid, prec, hasPrec, false, sd?.e)).join(" ") + "]";
     }
     if (v instanceof Map || v.__map === true || U.baseOf(t)?.k === "map") {
       const bm = U.baseOf(t);
@@ -439,11 +447,11 @@ export const HELPER_FMT_LOOP = String.raw`
       const vt = bm?.k === "map" ? bm.val : null;
       const entries = U.sortedEntries(v, kt);
       if (v.__ptr_map === true) entries.forEach(([, x]) => markPtr(x));
-      return "map[" + entries.map(([k, x]) => fmtv(verb, k, kt, fl, wid, hasWid, prec, hasPrec, false) + ":" + fmtv(verb, nilStand(x, v.__fd?.v, verb), vt, fl, wid, hasWid, prec, hasPrec, false)).join(" ") + "]";
+      return "map[" + entries.map(([k, x]) => fmtv(verb, k, kt, fl, wid, hasWid, prec, hasPrec, false, sd?.k) + ":" + fmtv(verb, nilStand(x, sd?.v, verb), vt, fl, wid, hasWid, prec, hasPrec, false, sd?.v)).join(" ") + "]";
     }
     if (isPointer(v) && !top) return getPtr(v);
-    const ff = typeof v.__ff === "function" ? v.__ff() : null;
-    const body = U.keys(v).map((k) => fmtv(verb, nilStand(v[k], ff?.[k], verb), fieldOf(t, k), fl, wid, hasWid, prec, hasPrec, false)).join(" ");
+    const ff = typeof v.__ff === "function" ? v.__ff() : (sd?.ff ?? null);
+    const body = U.keys(v).map((k) => fmtv(verb, nilStand(v[k], ff?.[k], verb), fieldOf(t, k), fl, wid, hasWid, prec, hasPrec, false, ff?.[k])).join(" ");
     return (isPointer(v) ? "&{" : "{") + body + "}";
   };
   const typedArg = (x) => (x instanceof __FT ? { v: x.v, t: x.t } : { v: x, t: null });
@@ -543,7 +551,7 @@ export const HELPER_FMT_LOOP = String.raw`
         const bt0 = U.baseOf(t);
         v = bt0?.k === "slice" ? [] : v;
       }
-      const vStr = t?.n === "time.Duration" && typeof __durationString === "function" ? __durationString(v) : formatV(unbox(v, "v"), fl.plus, true, false, t);
+      const vStr = t?.n === "time.Duration" && typeof __durationString === "function" ? __durationString(v) : formatV(unbox(v, "v"), fl.plus, true, false, U.both(t, v?.__fd));
       out += U.pad(sharp ? U.gs(v, t, true) : vStr, fl, wid);
       continue;
     }

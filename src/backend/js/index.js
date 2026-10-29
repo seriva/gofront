@@ -700,10 +700,6 @@ export class CodeGen {
 		this.line(`class ${name}$Ptr {`);
 		this.indented(() => {
 			this.line("constructor(_p) { this._p = _p; }");
-			// A nil *T stays nil in an interface operand.
-			this.line(
-				`static of(p) { return p == null ? null : new ${name}$Ptr(p); }`,
-			);
 			this.line("__gfUnbox() { return this._p; }");
 			this.line("get value() { return this._p.value; }");
 			this.line("set value(v) { this._p.value = v; }");
