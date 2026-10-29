@@ -32,7 +32,7 @@ order = 3
 
 [[layers]]
 name  = "typechecker"
-paths = ["src/typechecker/index.js", "src/typechecker/expressions.js", "src/typechecker/constants.js", "src/typechecker/const-fold.js", "src/typechecker/statements.js", "src/typechecker/resolve.js", "src/typechecker/assignability.js", "src/typechecker/termination.js", "src/typechecker/stdlib/*"]
+paths = ["src/typechecker/index.js", "src/typechecker/expressions.js", "src/typechecker/constants.js", "src/typechecker/const-fold.js", "src/typechecker/init-order.js", "src/typechecker/statements.js", "src/typechecker/resolve.js", "src/typechecker/assignability.js", "src/typechecker/termination.js", "src/typechecker/stdlib/*"]
 order = 4
 
 [[layers]]

@@ -210,3 +210,35 @@ func Add64(x int64) int64 { return x + 10 }
 	const { exports } = await instantiateWasm(wasm);
 	assertEqual(exports.Add64(32), 42n);
 });
+
+test("a named integer boxed into any and the nil-able kinds survive Binaryen", () => {
+	const { wasm, stringTable } = compileWasm(`//gofront:target wasm
+package main
+
+import "fmt"
+
+type Color int
+type P struct{ X int }
+
+func Run() {
+	var nm map[string]int
+	var np *P
+	var nf func()
+	fmt.Println(any(Color(1)), any(uint64(2)), any(nm) == nil, any(np) == nil, any(nf) == nil, any(nm))
+}
+`);
+	const plain = [];
+	instantiateWasm(wasm, {
+		stringTable,
+		stdout: (m) => plain.push(m),
+	}).exports.Run();
+	const opt = optimizeWasm(wasm);
+	assert(WebAssembly.validate(opt.wasm ?? opt), "optimised module validates");
+	const optLines = [];
+	instantiateWasm(opt.wasm ?? opt, {
+		stringTable,
+		stdout: (m) => optLines.push(m),
+	}).exports.Run();
+	assertEqual(plain.join("\n"), "1 2 false false false map[]");
+	assertEqual(optLines.join("\n"), plain.join("\n"));
+});

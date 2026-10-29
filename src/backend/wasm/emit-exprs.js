@@ -80,6 +80,7 @@ export class ExprsEmitter {
 			// for type switches and assertions.
 			if (isPointerToStruct(goType, this.mod.checker, this.mod)) {
 				this._emitRawExpr(expr, this.toWasmType(goType));
+				this._emitNilAwareAny(goType, expr);
 				return;
 			}
 			if (isStructType(goType, this.mod.checker, this.mod)) {
@@ -111,6 +112,11 @@ export class ExprsEmitter {
 				// An array stored in an interface is a copy.
 				if (isArrayType(goType, this.mod.checker))
 					this._emitCopyIfValue(expr, goType, refWType);
+				if (
+					isFuncType(goType, this.mod.checker) ||
+					isMapType(goType, this.mod.checker)
+				)
+					this._emitNilAwareAny(goType, expr);
 				return;
 			}
 
@@ -123,6 +129,23 @@ export class ExprsEmitter {
 		}
 
 		this._emitRawExpr(expr, targetWasmType);
+	}
+
+	// The nullable ref on the stack becomes an interface value: a nil map, func
+	// or pointer turns into the marker of its type (never a nil interface).
+	_emitNilAwareAny(goType, expr) {
+		if (expr.kind === "UnaryExpr" && expr.op === "&") return;
+		if (expr.kind === "CompositeLit" || expr.kind === "FuncLit") return;
+		const nilBox = this.mod.getNilBoxType(goType);
+		const tmp = this.acquireTemp(this.toWasmType(goType));
+		this.pushInstruction({ op: "local.tee", index: tmp });
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction({ op: "if", blockType: "anyref" });
+		this.pushInstruction({ op: "global.get", index: nilBox.globalIndex });
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "local.get", index: tmp });
+		this.pushInstruction("end");
+		this.releaseTemp(tmp, this.toWasmType(goType));
 	}
 
 	_emitBoxValue(box) {
@@ -164,6 +187,14 @@ export class ExprsEmitter {
 		return null;
 	}
 
+	_emitLocalConst(ident, targetWasmType) {
+		const lit = constLitFor(ident._const, targetWasmType);
+		if (!lit) return false;
+		lit._type = ident._type;
+		this.emitBasicLit(lit, targetWasmType);
+		return true;
+	}
+
 	_emitRawExpr(expr, targetWasmType = null) {
 		if (expr.kind === "BinaryExpr" || expr.kind === "UnaryExpr") {
 			// The checker's exact value (src/typechecker/const-fold.js) when it has one.
@@ -176,6 +207,15 @@ export class ExprsEmitter {
 				return;
 			}
 		}
+		// A function-local constant is a local slot (so closures can capture it)
+		// but reads as the checker's exact value, which adapts to the context.
+		if (
+			expr.kind === "Ident" &&
+			expr._const &&
+			this.resolveLocal(expr.name) &&
+			this._emitLocalConst(expr, targetWasmType)
+		)
+			return;
 		if (this._emitFoldedIntConversion(expr, targetWasmType)) return;
 
 		switch (expr.kind) {
@@ -1295,14 +1335,26 @@ export class ExprsEmitter {
 		}
 	}
 
+	// "complex64" | "complex128" when `w` is the struct type of a complex value.
+	_complexKindOfWType(w) {
+		if (typeof w?.typeIndex !== "number") return null;
+		for (const [kind, info] of this.mod.complexTypes) {
+			if (info.typeIndex === w.typeIndex) return kind;
+		}
+		return null;
+	}
+
 	emitBasicLit(lit, targetWasmType) {
+		const targetComplex = this._complexKindOfWType(targetWasmType);
 		const isTargetComplex64 =
 			lit._type?.name === "complex64" ||
-			targetWasmType?.typeName === "$complex64";
+			targetWasmType?.typeName === "$complex64" ||
+			targetComplex === "complex64";
 		const isTargetComplex128 =
 			lit._type?.name === "complex128" ||
 			lit._type?.base === "complex128" ||
-			targetWasmType?.typeName === "$complex128";
+			targetWasmType?.typeName === "$complex128" ||
+			targetComplex === "complex128";
 		if (isTargetComplex64 || isTargetComplex128) {
 			const info = this.mod.getComplexType(
 				isTargetComplex64 ? "complex64" : "complex128",
@@ -1675,8 +1727,27 @@ export class ExprsEmitter {
 		});
 	}
 
+	_isPointerGoType(t) {
+		let x = t;
+		if (x?.kind === "named" && x.underlying) x = x.underlying;
+		return x?.kind === "pointer" || x?.kind === "PointerType";
+	}
+
+	_ptrBaseType(t) {
+		let x = t;
+		if (x?.kind === "named" && x.underlying) x = x.underlying;
+		return x?.kind === "pointer" ? x.base : null;
+	}
+
+	// The struct a `*operand` reads or writes, or null when the operand points
+	// at something else: `*pp` with `pp **T` loads a pointer, not a struct.
+	_derefStructInfo(operand) {
+		if (this._isPointerGoType(this._ptrBaseType(operand._type))) return null;
+		return this._resolveStructInfo(operand);
+	}
+
 	_emitDerefExpr(operand) {
-		const structInfo = this._resolveStructInfo(operand);
+		const structInfo = this._derefStructInfo(operand);
 		if (structInfo) {
 			const baseWType = this.toWasmType(operand._type);
 			this.emitExpr(operand, baseWType);
@@ -2059,10 +2130,17 @@ export class ExprsEmitter {
 			return;
 		}
 
-		const leftType = left._type;
+		// An untyped constant operand takes the type of the typed one
+		// (`'a' < rune(b)`), so both sides share one wasm representation.
+		const leftType =
+			left._type?.kind === "untyped" &&
+			right._type &&
+			right._type.kind !== "untyped"
+				? right._type
+				: left._type;
 		const isLeftI32 = this._isI32IndexExpr(left);
 		const isRightI32 = this._isI32IndexExpr(right);
-		const leftGoType = left._type ?? this._resolveExprGoType(left);
+		const leftGoType = leftType ?? this._resolveExprGoType(left);
 		const isIntType =
 			!leftGoType ||
 			(leftGoType.kind === "basic" &&

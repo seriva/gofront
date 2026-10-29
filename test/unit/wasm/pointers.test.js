@@ -4,6 +4,7 @@
 import {
 	assertEqual,
 	assertErrorContains,
+	assertProgramOutput,
 	compileHybrid,
 	compileWasm,
 	runWasm,
@@ -613,4 +614,110 @@ func Main() int {
 	const res = compileHybrid(src).run("Main");
 	assertEqual(res.wasmRes, 11n);
 	assertEqual(res.jsRes, 11);
+});
+
+section(
+	"WASM Pointers — pointers to pointers and pointer receivers on named maps",
+);
+
+test("pointers to pointers and pointer receivers on named maps and slices match Go", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type T struct{ X int }
+type M map[string]int
+type S []int
+
+func (m *M) Put(k string, v int) {
+	if *m == nil {
+		*m = M{}
+	}
+	(*m)[k] = v
+}
+func (m M) Get(k string) int { return m[k] }
+func (s *S) Add(v int)       { *s = append(*s, v) }
+func (s S) Sum() (t int) {
+	for _, v := range s {
+		t += v
+	}
+	return
+}
+
+func setPP(pp **T, v *T)   { *pp = v }
+func readPP(pp **T) int    { return (*pp).X }
+func bump(pi **int)        { **pi += 5 }
+func swap(a, b **T)        { *a, *b = *b, *a }
+func newPP() **T           { t := &T{77}; return &t }
+func nilcheck(pp **T) bool { return pp == nil || *pp == nil }
+
+func main() {
+	p := &T{3}
+	pp := &p
+	fmt.Println((*pp).X, (**pp).X)
+	(*pp).X = 9
+	fmt.Println(p.X)
+	q := &T{5}
+	*pp = q
+	fmt.Println(p.X, (*pp).X, *pp == q, p == q)
+	ppp := &pp
+	(**ppp).X = 11
+	fmt.Println(q.X, (***ppp).X, **ppp == q)
+	var np *T
+	pn := &np
+	*pn = &T{1}
+	fmt.Println(np.X, *pn != nil)
+
+	x := 1
+	px := &x
+	ppx := &px
+	**ppx = 2
+	bump(ppx)
+	fmt.Println(x, *px == x, **ppx)
+	a, b := &T{1}, &T{2}
+	setPP(&a, b)
+	fmt.Println(a.X, readPP(&a), a == b)
+	c := &T{3}
+	swap(&a, &c)
+	fmt.Println(a.X, c.X)
+	fmt.Println(readPP(newPP()), nilcheck(nil))
+	var nn *T
+	fmt.Println(nilcheck(&nn))
+	pps := []**T{&a, &c}
+	fmt.Println((*pps[1]).X)
+
+	g := M{}
+	g.Put("a", 1)
+	fmt.Println(len(g), g["a"], g.Get("a"))
+	var m M
+	m.Put("a", 1)
+	(&m).Put("d", 4)
+	pm := &m
+	pm.Put("e", 5)
+	fmt.Println(len(m), len(*pm), (*pm).Get("e"))
+	var sl S
+	sl.Add(1)
+	sl.Add(2)
+	psl := &sl
+	psl.Add(3)
+	fmt.Println(sl, sl.Sum(), psl.Sum(), len(sl))
+}
+`,
+		`3 3
+9
+5 5 true true
+11 11 true
+1 true
+7 true 7
+2 2 true
+3 2
+77 true
+true
+2
+1 1 1
+3 3 5
+[1 2 3] 6 6 3
+`,
+	);
 });

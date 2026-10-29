@@ -13,6 +13,7 @@
 import { assignabilityMethods } from "./assignability.js";
 import { constantCheckMethods } from "./constants.js";
 import { expressionCheckMethods } from "./expressions.js";
+import { orderPackageInits, orderVarSpecsForTyping } from "./init-order.js";
 import { resolveMethods } from "./resolve.js";
 import { statementCheckMethods } from "./statements.js";
 import { EXCLUDED_STDLIB_PACKAGES } from "./stdlib/excluded.js";
@@ -355,6 +356,7 @@ export class TypeChecker {
 		this._promoteEmbeddedMethods();
 		this._collectVarsConstsPass(programs);
 		this._checkTopDeclsPass(programs);
+		this._reportInitCycles(programs);
 
 		if (this.target === "both") {
 			this._checkMutablePackageVars(programs);
@@ -682,14 +684,30 @@ export class TypeChecker {
 		}
 	}
 
+	// Go rejects package variables whose initialisers depend on each other.
+	_reportInitCycles(programs) {
+		if (this.errors.length > 0) return;
+		const { cycles } = orderPackageInits(programs);
+		for (const c of cycles) {
+			const owner = programs.find((p) =>
+				p.decls?.some((d) => d.kind === "VarDecl" && d.decls?.includes(c.spec)),
+			);
+			if (owner) this._setCurrentFile(owner);
+			this.err(c.message, c.spec.value?.[0] ?? c.spec);
+		}
+	}
+
 	_checkTopDeclsPass(programs) {
-		for (const p of programs) {
-			this._setCurrentFile(p);
-			for (const d of p.decls) {
-				if (d.kind === "VarDecl" || d.kind === "ConstDecl") {
-					this.checkTopDecl(d, this.globals);
-				}
-			}
+		// A constant may name one declared later, so each is typed after those.
+		for (const e of orderPackageInits(programs).consts) {
+			this._setCurrentFile(e.program);
+			this.checkTopDecl({ ...e.decl, decls: [e.spec] }, this.globals);
+		}
+		// A variable's type may come from one declared later (`var a = b + 1;
+		// var b = f()`), so initialisers are typed after what they name.
+		for (const e of orderVarSpecsForTyping(programs)) {
+			this._setCurrentFile(e.program);
+			this.checkTopDecl({ ...e.decl, decls: [e.spec] }, this.globals);
 		}
 		for (const p of programs) {
 			this._setCurrentFile(p);
