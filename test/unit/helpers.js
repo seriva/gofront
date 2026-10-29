@@ -484,6 +484,24 @@ export async function assertProgramOutput(source, expected) {
 	}
 }
 
+// Same as assertProgramOutput for a program only the JS side of a `both`
+// package is expected to run (the WASM backend cannot compile it yet).
+export async function assertJsProgramOutput(source, expected) {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-program-src-"));
+	try {
+		const goPath = join(dir, "main.go");
+		writeFileSync(goPath, source);
+		const res = compileFiles([goPath], { forceTarget: "both" });
+		const out = await runProgramModule(res.js, res.wasm);
+		if (out !== expected)
+			throw new Error(
+				`JS output differs: want ${JSON.stringify(expected)}, got ${JSON.stringify(out)}`,
+			);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
 // Same as assertProgramOutput for a program only the WASM backend can run
 // the way Go does (the JS representation cannot tell the cases apart).
 export async function assertWasmProgramOutput(source, expected) {

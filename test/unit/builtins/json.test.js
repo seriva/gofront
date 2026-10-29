@@ -5,6 +5,7 @@ import {
 	assert,
 	assertContains,
 	assertEqual,
+	assertJsProgramOutput,
 	assertProgramOutput,
 	compile,
 	runJs,
@@ -2133,6 +2134,242 @@ func main() {
 	);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "<nil> 1 map[a:map[b:1]]\na");
+});
+
+section("encoding/json — review feedback regressions");
+
+test("Unmarshal into a pointer held in a type-parameter value (js)", async () => {
+	await assertJsProgramOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+type Item struct{ A int }
+type Box[T any] struct{ P T }
+type Any interface{}
+type Cfg struct{ N int }
+
+func Load[P any](b []byte, p P) error { return json.Unmarshal(b, p) }
+func LoadBox[T any](b []byte, bx Box[T]) error { return json.Unmarshal(b, bx.P) }
+func LoadNamed(b []byte, p Any) error { return json.Unmarshal(b, p) }
+func Dec[P any](s string, p P) error { return json.NewDecoder(strings.NewReader(s)).Decode(p) }
+
+func main() {
+	it := &Item{}
+	fmt.Println(Load([]byte(\`{"A":3}\`), it), it.A)
+	bx := Box[*Item]{&Item{}}
+	fmt.Println(LoadBox([]byte(\`{"A":4}\`), bx), bx.P.A)
+	i2 := &Item{}
+	fmt.Println(LoadNamed([]byte(\`{"A":5}\`), i2), i2.A)
+	i3 := &Item{}
+	fmt.Println(Dec(\`{"A":6}\`, i3), i3.A)
+	fmt.Println(json.Unmarshal([]byte(\`[1]\`), []int{1}))
+}
+`,
+		`<nil> 3
+<nil> 4
+<nil> 5
+<nil> 6
+json: Unmarshal(non-pointer []int)
+`,
+	);
+});
+
+test("function-local structs with tags marshal in js, methods, closures and generics", () => {
+	const { js, errors } = compile(`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type Top struct{ Q int \`json:"qq"\` }
+type W[T any] struct{ V T }
+
+func (w W[T]) M() {
+	type InM struct{ Z int \`json:"zm"\` }
+	b, _ := json.Marshal(InM{4})
+	fmt.Println(string(b))
+	b, _ = json.Marshal(any(InM{5}))
+	fmt.Println(string(b))
+}
+
+func gen[T any](x T) {
+	type InG struct{ Z int \`json:"zg"\`; O int \`json:",omitempty"\` }
+	b, _ := json.Marshal(InG{6, 0})
+	fmt.Println(string(b))
+	var a any = InG{7, 1}
+	b, _ = json.Marshal(a)
+	fmt.Println(string(b))
+}
+
+func f() {
+	type Dup struct{ X int }
+	b, _ := json.Marshal(Dup{1})
+	fmt.Println(string(b))
+}
+
+func main() {
+	type Local struct{ Z int \`json:"zz"\` }
+	b, _ := json.Marshal(Local{1})
+	fmt.Println(string(b))
+	var a any = Local{2}
+	b, _ = json.Marshal(a)
+	fmt.Println(string(b))
+	b, _ = json.Marshal([]any{Local{3}, Top{4}})
+	fmt.Println(string(b))
+	func() {
+		type InC struct{ Z int \`json:"zc"\` }
+		var a any = InC{8}
+		b, _ := json.Marshal(a)
+		fmt.Println(string(b))
+	}()
+	W[int]{}.M()
+	gen(1)
+	f()
+	b, _ = json.Marshal(any(Top{9}))
+	fmt.Println(string(b))
+}
+`);
+	assertEqual(errors.length, 0);
+	assertEqual(
+		runJs(js),
+		`{"zz":1}
+{"zz":2}
+[{"zz":3},{"qq":4}]
+{"zc":8}
+{"zm":4}
+{"zm":5}
+{"zg":6}
+{"zg":7,"O":1}
+{"X":1}
+{"qq":9}
+`.trimEnd(),
+	);
+});
+
+test("function-local structs with tags marshal in both and wasm", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type Top struct{ Q int \`json:"qq"\` }
+func f() {
+	type Dup struct{ X int }
+	b, _ := json.Marshal(Dup{1})
+	fmt.Println(string(b))
+}
+
+func main() {
+	type Local struct{ Z int \`json:"zz"\` }
+	b, _ := json.Marshal(Local{1})
+	fmt.Println(string(b))
+	var a any = Local{2}
+	b, _ = json.Marshal(a)
+	fmt.Println(string(b))
+	b, _ = json.Marshal([]any{Local{3}, Top{4}})
+	fmt.Println(string(b))
+	func() {
+		type InC struct{ Z int \`json:"zc"\` }
+		var a any = InC{8}
+		b, _ := json.Marshal(a)
+		fmt.Println(string(b))
+	}()
+	f()
+	b, _ = json.Marshal(any(Top{9}))
+	fmt.Println(string(b))
+}
+`,
+		`{"zz":1}
+{"zz":2}
+[{"zz":3},{"qq":4}]
+{"zc":8}
+{"X":1}
+{"qq":9}
+`,
+	);
+});
+
+test("Encoder.SetEscapeHTML(false) keeps RawMessage and Marshaler output unescaped", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+)
+
+type M struct{}
+
+func (M) MarshalJSON() ([]byte, error) { return []byte(\`"<m>&"\`), nil }
+
+func main() {
+	e := json.NewEncoder(os.Stdout)
+	e.SetEscapeHTML(false)
+	e.Encode(json.RawMessage(\`"<a>"\`))
+	e.Encode(M{})
+	e.Encode("<s>")
+	e.Encode(map[string]any{"k": json.RawMessage(\`"<b>"\`), "m": M{}})
+	e2 := json.NewEncoder(os.Stdout)
+	e2.Encode(json.RawMessage(\`"<a>"\`))
+	e2.Encode(M{})
+	b, _ := json.Marshal(json.RawMessage(\`"<a>"\`))
+	fmt.Println(string(b))
+}
+`,
+		`"<a>"
+"<m>&"
+"<s>"
+{"k":"<b>","m":"<m>&"}
+"\\u003ca\\u003e"
+"\\u003cm\\u003e\\u0026"
+"\\u003ca\\u003e"
+`,
+	);
+});
+
+test("negative zero: -0.0 constant is 0, computed -0 is kept in any", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"math"
+)
+
+type S struct{ F float64 }
+
+func main() {
+	z := 0.0
+	z = -z
+	b, _ := json.Marshal(any(z))
+	fmt.Println(string(b))
+	b, _ = json.Marshal(S{-0.0})
+	fmt.Println(string(b))
+	fmt.Println(-0.0, math.Copysign(0, -1), 1/math.Inf(-1))
+	x := -0.0
+	fmt.Println(x, -0, S{-0.0})
+	const c = -0.0
+	fmt.Println(c)
+}
+`,
+		`-0
+{"F":0}
+0 -0 -0
+0 0 {0}
+0
+`,
+	);
 });
 
 // ── Entry point ───────────────────────────────────────────────
