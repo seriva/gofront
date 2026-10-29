@@ -880,6 +880,8 @@ export const expressionCheckMethods = {
 	_checkTypeConversion(expr, scope) {
 		const srcType = this.checkExpr(expr.expr, scope);
 		const targetType = this.resolveTypeNode(expr.targetType, scope);
+		// `any(x)` / `error(x)`: box x as an implicit conversion would.
+		this._markIfaceBox(targetType, srcType, expr.expr);
 		const srcResolved =
 			srcType?.kind === "named" ? srcType.underlying : srcType;
 		const tgtResolved =
@@ -1351,6 +1353,9 @@ export const expressionCheckMethods = {
 		const argTypes = this._resolveCallArgTypes(expr, scope);
 
 		if (fnType?._tainted) return TAINTED_ANY;
+		// `any(x)` / `error(x)` / `Iface(x)`: box x as an implicit conversion would.
+		if (expr.func._isTypeRef && expr.args.length === 1 && argTypes[0])
+			this._markIfaceBox(fnType, argTypes[0], expr.args[0]);
 		if (isAny(fnType)) return ANY;
 
 		// Named type used as a constructor/conversion: Greeter(fn), NodeFunc(fn)

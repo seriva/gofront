@@ -1316,6 +1316,36 @@ func main() {
 	);
 });
 
+test("mutually recursive generic functions keep their type information", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func B[T any](x any, n int) bool {
+	if n == 0 {
+		return false
+	}
+	return A[T](x, n-1)
+}
+
+func A[T any](x any, n int) bool {
+	if n > 0 {
+		return B[T](x, n)
+	}
+	_, ok := x.(T)
+	return ok
+}
+
+func main() {
+	fmt.Println(B[string](1, 1))
+	fmt.Println(A[int](1, 0), A[string](1, 2), B[int](1, 2))
+}
+`,
+		"false\ntrue false true\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
