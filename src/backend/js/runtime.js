@@ -2519,6 +2519,10 @@ var __json_esc_noh = __json_esc_noh || function(s) {
   return JSON.stringify(String(s)).replace(/\\u2028/g, "\\\\u2028").replace(/\\u2029/g, "\\\\u2029");
 };
 var __json_syntax_msg = __json_syntax_msg || function(s) {
+  if (typeof CheckValid$$internal$jsonrt === "function") {
+    var se = CheckValid$$internal$jsonrt(new TextEncoder().encode(String(s)));
+    if (se && typeof se.Error === "function") return se.Error();
+  }
   var t = String(s).trim();
   if (t === "") return "unexpected end of JSON input";
   var m;
@@ -2533,13 +2537,15 @@ var __json_syntax_msg = __json_syntax_msg || function(s) {
 var __json_compact = __json_compact || function(s) {
   try { JSON.parse(s); } catch (e) { return null; }
   var out = "", inStr = false, esc = false;
+  var escHtml = typeof OptEscapeHTML$$internal$jsonrt === "undefined" || OptEscapeHTML$$internal$jsonrt;
   for (var i = 0; i < s.length; i++) {
     var c = s[i];
     if (inStr) {
       if (esc) { esc = false; out += c; continue; }
       if (c === "\\\\") { esc = true; out += c; continue; }
       if (c === '"') inStr = false;
-      if (c === "<") out += "\\\\u003c";
+      if (!escHtml) out += c;
+      else if (c === "<") out += "\\\\u003c";
       else if (c === ">") out += "\\\\u003e";
       else if (c === "&") out += "\\\\u0026";
       else if (c === "\\u2028") out += "\\\\u2028";
@@ -2554,6 +2560,7 @@ var __json_compact = __json_compact || function(s) {
   return out;
 };
 var __json_unsupported_value = __json_unsupported_value || function(str) {
+  str = str === "Infinity" ? "+Inf" : (str === "-Infinity" ? "-Inf" : str);
   if (typeof UnsupportedValueError$$internal$jsonrt === "function") {
     var e = new UnsupportedValueError$$internal$jsonrt(null, str);
     e.Str = str;
@@ -2701,6 +2708,10 @@ var __json_match_field = __json_match_field || function(obj, tagName, fieldName)
   }
   return null;
 };
+var __json_float64 = __json_float64 || function(v) {
+  if (!isFinite(v)) throw __json_unsupported_value(String(v));
+  return Object.is(v, -0) ? "-0" : String(v);
+};
 var __json_float32 = __json_float32 || function(v) {
   var f = Math.fround(v);
   if (!isFinite(f)) throw __json_unsupported_value(String(f));
@@ -2774,8 +2785,9 @@ var __json_b64_dec = __json_b64_dec || function(str) {
   for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
   return u8;
 };
-var __json_is_zero = __json_is_zero || function(val, isStruct) {
+var __json_is_zero = __json_is_zero || function(val, isStruct, isMap) {
   if (isStruct) return false;
+  if (isMap) return __json_nilmap(val) || (val instanceof Map ? val.size === 0 : Object.keys(val).length === 0);
   if (val === null || val === undefined || val === false || val === 0 || val === "") return true;
   if (typeof val === "bigint") return val === 0n;
   if (Array.isArray(val) || (ArrayBuffer.isView(val) && !val.__raw)) return val.length === 0;
@@ -2794,22 +2806,37 @@ var __json_preserve_int64 = __json_preserve_int64 || function(str) {
     return m;
   });
 };
+// Go maps: a nil map is the __nm()/__nilmap marker, an empty one a plain object.
+var __json_nilmap = __json_nilmap || function(m) {
+  return m === null || m === undefined || m.__nilm === true || m.__nm === true;
+};
+// Decoded maps carry a hidden marker so fmt and json treat them as maps.
+var __json_newmap = __json_newmap || function() {
+  return Object.defineProperty(Object.create(null), "__map", { value: true, configurable: true });
+};
+// json.RawMessage is compacted (and validated) like any Marshaler output; nil is null.
+var __json_enc_raw = __json_enc_raw || function(v) {
+  if (v === null || v === undefined) return "null";
+  return __json_marshaler_out([v, null], "json.RawMessage");
+};
 var __json_enc_any = __json_enc_any || function(v) {
   if (v === null || v === undefined) return "null";
   var t = typeof v;
   if (t === "boolean") return v ? "true" : "false";
   if (t === "number") {
     if (!isFinite(v)) throw __json_unsupported_value(String(v));
-    return String(v);
+    return Object.is(v, -0) ? "-0" : String(v);
   }
   if (t === "bigint") return v.toString();
   if (t === "string") return __json_esc(v);
-  if ((typeof ArrayBuffer !== "undefined" && ArrayBuffer.isView(v)) || v instanceof Uint8Array) {
-    if (v.__raw) {
-      var s = (typeof v === "string" ? v : new TextDecoder().decode(v)).trim();
-      return s.length > 0 ? s : "null";
-    }
+  if (Object.prototype.toString.call(v) === "[object Uint8Array]") {
+    if (v.__raw) return __json_enc_raw(v);
     return __json_b64(v);
+  }
+  if (typeof ArrayBuffer !== "undefined" && ArrayBuffer.isView(v)) {
+    var titems = [];
+    for (var ti = 0; ti < v.length; ti++) titems.push(v instanceof Float32Array ? __json_float32(v[ti]) : (typeof v[ti] === "bigint" ? v[ti].toString() : String(v[ti])));
+    return "[" + titems.join(",") + "]";
   }
   if (Array.isArray(v)) {
     var items = [];
@@ -2835,6 +2862,7 @@ var __json_enc_any = __json_enc_any || function(v) {
     return __json_enc_any(inner);
   }
   if (typeof v === "object") {
+    if (__json_nilmap(v)) return "null";
     var okeys = Object.keys(v).filter(function(k) { return !k.startsWith("__") || k === "__proto__"; });
     if (!v.__map && v.constructor && v.constructor !== Object && v.constructor.name !== "Object") {
       okeys = okeys.filter(function(k) { return !(k.length > 0 && k[0] >= "a" && k[0] <= "z"); });
@@ -2873,8 +2901,7 @@ var __json_dec_any = __json_dec_any || function(parsed) {
     return outSlice;
   }
   if (typeof parsed === "object") {
-    var outMap = Object.create(null);
-    outMap.__map = true;
+    var outMap = __json_newmap();
     for (var k in parsed) {
       if (Object.prototype.hasOwnProperty.call(parsed, k)) {
         outMap[k] = __json_dec_any(parsed[k]);
@@ -2899,7 +2926,7 @@ var __json_enc_slice = __json_enc_slice || function(slice, elemEnc) {
   return "[" + items.join(",") + "]";
 };
 var __json_enc_map = __json_enc_map || function(m, valEnc) {
-  if (m === null || m === undefined) return "null";
+  if (__json_nilmap(m)) return "null";
   if (m instanceof Map) {
     var mkeys = Array.from(m.keys()).map(String).sort();
     var mentries = [];
@@ -2979,29 +3006,23 @@ var __json_valid = __json_valid || function(data) {
     return false;
   }
 };
-var __json_unmarshal = __json_unmarshal || function(dec, data, target, targetTypeName) {
+// The static type of the target decides the argument errors, as in Go:
+// targetKind is "ptr" (a pointer), "val" (neither pointer nor interface) or
+// empty (an interface, judged by the dynamic value).
+var __json_invalid_target = __json_invalid_target || function(name, isPtr) {
+  if (typeof InvalidUnmarshalError$$internal$jsonrt === "function") {
+    var e = new InvalidUnmarshalError$$internal$jsonrt(name, isPtr);
+    if (e.__p !== true && Object.isExtensible(e)) Object.defineProperty(e, "__p", { value: true, configurable: true, writable: true });
+    e.__struct = "InvalidUnmarshalError$$internal$jsonrt";
+    return e;
+  }
+  var msg = name === "" ? "json: Unmarshal(nil)" : (isPtr ? "json: Unmarshal(nil " + name + ")" : "json: Unmarshal(non-pointer " + name + ")");
+  return typeof __error === "function" ? __error(msg) : new Error(msg);
+};
+var __json_unmarshal = __json_unmarshal || function(dec, data, target, targetTypeName, targetKind) {
   __json_structs.length = 0;
   __json_path.length = 0;
   __json_current_offset = 0;
-  if (target === null || target === undefined) {
-    if (typeof InvalidUnmarshalError$$internal$jsonrt === "function") {
-      var e = new InvalidUnmarshalError$$internal$jsonrt("", false);
-      if (e.__p !== true && Object.isExtensible(e)) Object.defineProperty(e, "__p", { value: true, configurable: true, writable: true });
-      e.__struct = "InvalidUnmarshalError$$internal$jsonrt";
-      return e;
-    }
-    return typeof __error === "function" ? __error("json: Unmarshal(nil)") : new Error("json: Unmarshal(nil)");
-  }
-  if (typeof target !== "object" || target.__v === true) {
-    var tname = targetTypeName || (target && target.constructor && target.constructor.name && target.constructor.name !== "Object" ? target.constructor.name : typeof target);
-    if (typeof InvalidUnmarshalError$$internal$jsonrt === "function") {
-      var e = new InvalidUnmarshalError$$internal$jsonrt(tname, false);
-      if (e.__p !== true && Object.isExtensible(e)) Object.defineProperty(e, "__p", { value: true, configurable: true, writable: true });
-      e.__struct = "InvalidUnmarshalError$$internal$jsonrt";
-      return e;
-    }
-    return typeof __error === "function" ? __error("json: Unmarshal(non-pointer " + tname + ")") : new Error("json: Unmarshal(non-pointer " + tname + ")");
-  }
   var u8data = ((typeof ArrayBuffer !== "undefined" && ArrayBuffer.isView(data)) || data instanceof Uint8Array) ? data : new Uint8Array(data);
   if (typeof CheckValid$$internal$jsonrt === "function") {
     var syntaxErr = CheckValid$$internal$jsonrt(u8data);
@@ -3014,6 +3035,14 @@ var __json_unmarshal = __json_unmarshal || function(dec, data, target, targetTyp
       }
       return syntaxErr;
     }
+  }
+  if (targetKind === "val") return __json_invalid_target(targetTypeName, false);
+  if (target === null || target === undefined) {
+    return targetKind === "ptr" ? __json_invalid_target(targetTypeName, true) : __json_invalid_target("", false);
+  }
+  if (typeof target !== "object" || target.__v === true) {
+    var tname = targetTypeName || (target && target.constructor && target.constructor.name && target.constructor.name !== "Object" ? target.constructor.name : typeof target);
+    return __json_invalid_target(tname, false);
   }
   var str;
   try {
@@ -3063,7 +3092,7 @@ var __json_encoder_encode = __json_encoder_encode || function(enc, codec, v) {
   }
   return null;
 };
-var __json_decoder_decode = __json_decoder_decode || function(dec, decFn, target, targetTypeName) {
+var __json_decoder_decode = __json_decoder_decode || function(dec, decFn, target, targetTypeName, targetKind) {
   var d = dec?.value ?? dec;
   var res = ScanNext$$internal$jsonrt(d.r);
   var data = res[0], skipped = res[1], err = res[2];
@@ -3074,7 +3103,7 @@ var __json_decoder_decode = __json_decoder_decode || function(dec, decFn, target
   OptDisallowUnknownFields$$internal$jsonrt = d.disallowUnknownFields;
   var uerr;
   try {
-    uerr = __json_unmarshal(decFn, data, target, targetTypeName);
+    uerr = __json_unmarshal(decFn, data, target, targetTypeName, targetKind);
   } finally {
     OptUseNumber$$internal$jsonrt = false;
     OptDisallowUnknownFields$$internal$jsonrt = false;
