@@ -611,6 +611,49 @@ func main() {
 	assertEqual(runJs(js), "x\n2\ntrue\nfalse");
 });
 
+test("interface-keyed maps keep named and plain keys distinct", () => {
+	const { js, errors } = compile(`package main
+import "fmt"
+type L string
+type N int
+func main() {
+	set := map[any]bool{}
+	set[any(L("a"))] = true
+	set[any(L("b"))] = true
+	fmt.Println(len(set), set[any(L("a"))])
+	m := map[any]int{}
+	var k any = L("a")
+	m[k] = 1
+	m[any(N(1))] = 2
+	fmt.Println(len(m), m[k], m[any(L("a"))], m[any(N(1))])
+	m2 := map[any]int{}
+	m2[L("a")] = 1
+	var k2 any = L("a")
+	fmt.Println(m2[k2])
+	m3 := map[any]int{L("a"): 1, N(1): 2, "1": 3, 1: 4, L("1"): 5}
+	fmt.Println(len(m3), m3[L("a")], m3[N(1)], m3["1"], m3[1], m3[L("1")])
+	m3[L("a")] += 10
+	n := 0
+	for key, v := range m3 {
+		if l, ok := key.(L); ok && l == "a" { n += v }
+		if x, ok := key.(N); ok && x == 1 { n += v * 100 }
+	}
+	fmt.Println(n)
+	v, ok := m3[any(L("a"))]
+	fmt.Println(v, ok)
+	delete(m3, L("a"))
+	_, ok = m3[L("a")]
+	fmt.Println(len(m3), ok)
+	m4 := map[any]int{"x": 1, 2: 2, struct{ A int }{1}: 3}
+	fmt.Println(len(m4), m4["x"], m4[2], m4[struct{ A int }{1}])
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(
+		runJs(js),
+		"2 true\n2 1 1 2\n1\n5 1 2 3 4 5\n211\n11 true\n4 false\n3 1 2 3",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

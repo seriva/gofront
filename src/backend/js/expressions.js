@@ -589,6 +589,21 @@ function hasTypeParamType(t) {
 
 export const expressionGenMethods = {
 	genExpr(expr) {
+		if (expr._ifaceKey && !expr._ifaceKeying) {
+			// A string key is its own property key; any other dynamic value is
+			// encoded with its type (see HELPER_STRUCT_KEY).
+			const plain =
+				!this._isNamedBoxKind(expr) && this._isStringExprType(expr._type);
+			if (!plain) {
+				expr._ifaceKeying = true;
+				try {
+					this.useHelper("structKey");
+					return `__ik(${this.genExpr(expr)})`;
+				} finally {
+					expr._ifaceKeying = false;
+				}
+			}
+		}
 		if (this._isNamedIfaceBox(expr)) return this._genNamedIfaceBoxExpr(expr);
 		if (expr._ifaceSrc && !expr._fmtDescing && !this._isNamedBoxKind(expr)) {
 			const desc = this._fmtDesc(expr._ifaceSrc);
