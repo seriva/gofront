@@ -157,6 +157,10 @@ func (e *Enc) Float(f float64, bits int) {
 		e.Fail(&UnsupportedValueError{strconv.FormatFloat(f, 'g', -1, bits)})
 		return
 	}
+	if f == 0 && math.Signbit(f) {
+		e.B = append(e.B, "-0"...)
+		return
+	}
 	format := floatFormat(f, bits)
 	if bits == 32 {
 		f = shortest32(f)

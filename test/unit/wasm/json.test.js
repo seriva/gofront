@@ -2583,6 +2583,84 @@ func Run() string {
 	assertEqual(out, "1x<nil> 15;2y<nil> 31;0end<nil> 44;true");
 });
 
+test("Types that reach `any` only through a function result or variable encode", async () => {
+	const src = `//gofront:target wasm
+package lib
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type T struct{ A int }
+
+func get() []T            { return nil }
+func getm() map[string]T  { return nil }
+func geta() [2]T          { return [2]T{{1}, {2}} }
+func gets() []string      { return []string{"x"} }
+func getmi() map[int]bool { return map[int]bool{2: true, 1: false} }
+
+func Run() string {
+	out := ""
+	for _, v := range []any{get(), getm(), geta(), gets(), getmi()} {
+		b, err := json.Marshal(v)
+		out += fmt.Sprint(string(b), " ", err, ";")
+	}
+	var a any = get()
+	b, err := json.Marshal(a)
+	return out + fmt.Sprint(string(b), " ", err)
+}
+`;
+	assertEqual(
+		await runLib(src),
+		'null <nil>;null <nil>;[{"A":1},{"A":2}] <nil>;["x"] <nil>;{"1":false,"2":true} <nil>;null <nil>',
+	);
+});
+
+test("A []byte conversion does not change how an int32 slice in any encodes", async () => {
+	const src = `//gofront:target wasm
+package lib
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+func Run() string {
+	var v any = []int32{1, 2}
+	in := []byte("[1]")
+	var out []int32
+	err := json.Unmarshal(in, &out)
+	b, merr := json.Marshal(v)
+	return fmt.Sprint(string(b), " ", merr, " ", err, " ", out)
+}
+`;
+	assertEqual(await runLib(src), "[1,2] <nil> <nil> [1]");
+});
+
+test("Negative zero float64 encodes as -0", async () => {
+	const src = `//gofront:target wasm
+package lib
+
+import (
+	"encoding/json"
+	"fmt"
+	"math"
+)
+
+type W struct{ A float64 }
+
+func Run() string {
+	z := math.Copysign(0, -1)
+	a, _ := json.Marshal(W{A: z})
+	b, _ := json.Marshal(z)
+	c, _ := json.Marshal([]float32{float32(z), 1})
+	return fmt.Sprint(string(a), string(b), string(c))
+}
+`;
+	assertEqual(await runLib(src), '{"A":-0}-0[-0,1]');
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

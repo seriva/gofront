@@ -241,6 +241,7 @@ export const statementGenMethods = {
 		switch (stmt.kind) {
 			case "TypeDecl":
 				this.genTypeDeclWithMethods(stmt, []);
+				this._noteLocalTypeDecl(stmt);
 				break;
 			case "IncDecStmt": {
 				this._markIndexLvalues([stmt.expr]);
