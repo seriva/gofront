@@ -1182,8 +1182,11 @@ export class JsonCodecGen {
 		const found = new Map();
 		for (const p of this.programs) {
 			walkNodes(p.decls, (node) => {
-				if (!buildsValue(node)) return;
+				if (!node._type) return;
 				const t = defaultType(node._type);
+				// Slices, arrays and maps reach an interface from any expression
+				// (a function result, a variable), not only from a literal
+				if (!buildsValue(node) && !isCompositeType(t)) return;
 				if (this.spellable(t) && under(t)?.kind !== "interface")
 					found.set(this.key(t), t);
 			});
@@ -1232,6 +1235,53 @@ function walkNodes(root, fn) {
 	}
 	fn(root);
 	forEachChild(root, (c) => walkNodes(c, fn));
+}
+
+// Slices and maps of these share one WebAssembly representation (and so one
+// type-switch case), so only literals may register them: a `[]byte` conversion
+// must not shadow a `[]int32` that is stored in an interface.
+const SHARED_REPR = new Set([
+	"bool",
+	"int8",
+	"int16",
+	"int32",
+	"uint8",
+	"uint16",
+	"uint32",
+	"byte",
+	"rune",
+]);
+
+const isCompositeType = (t) => {
+	const k = under(t)?.kind;
+	return (
+		(k === "slice" || k === "array" || k === "map") &&
+		!holdsFunc(t) &&
+		!hasSharedRepr(t)
+	);
+};
+
+function hasSharedRepr(t, depth = 0) {
+	if (!t || depth > 8) return false;
+	const u = under(t);
+	if (u?.kind === "basic") return SHARED_REPR.has(u.name);
+	if (u?.kind === "slice" || u?.kind === "array")
+		return hasSharedRepr(u.elem, depth + 1);
+	if (u?.kind === "map")
+		return hasSharedRepr(u.key, depth + 1) || hasSharedRepr(u.value, depth + 1);
+	return false;
+}
+
+// Func values are not JSON-encodable, and `case []func():` does not parse.
+function holdsFunc(t, depth = 0) {
+	if (!t || depth > 8) return false;
+	const u = under(t);
+	if (u?.kind === "func") return true;
+	if (u?.kind === "slice" || u?.kind === "array")
+		return holdsFunc(u.elem, depth + 1);
+	if (u?.kind === "map")
+		return holdsFunc(u.key, depth + 1) || holdsFunc(u.value, depth + 1);
+	return false;
 }
 
 // A composite literal, `&x`, make or new: an expression that builds a value.

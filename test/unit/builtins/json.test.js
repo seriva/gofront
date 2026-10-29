@@ -538,7 +538,7 @@ func main() {
 	assertEqual(runJs(js), '{"num":9223372036854775807}');
 });
 
-test("Probe 9: Boxed json.RawMessage inside any marshaled verbatim", () => {
+test("Probe 9: Boxed json.RawMessage inside any is compacted like Go", () => {
 	const { js, errors } = compile(`package main
 import "encoding/json"
 func main() {
@@ -547,7 +547,7 @@ func main() {
 	console.log(string(b))
 }`);
 	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), '{"key": 123}');
+	assertEqual(runJs(js), '{"key":123}');
 });
 
 test("Probe 10: Defined byte slices type MyBytes []byte unmarshal from base64", () => {
@@ -1926,6 +1926,213 @@ func main() {
 true
 `,
 	);
+});
+
+// ── JS parity: Marshal and Unmarshal forms (expected output is real Go's) ──
+
+section("encoding/json — Marshal parity with Go");
+
+test("real Go output: json/marshal parity on JS and WASM", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"math"
+)
+
+type P struct {
+	M map[string]int
+}
+
+type Q struct {
+	M map[string]int \`json:",omitempty"\`
+}
+
+type Addr struct {
+	Street string \`json:"street"\`
+	Zip    int    \`json:"zip,omitempty"\`
+}
+
+type In struct{ Z int }
+
+type Emb struct {
+	In
+	Y int \`json:"y,omitempty"\`
+}
+
+type W struct {
+	A float64
+	B []float32
+	C [2]float32
+	D json.RawMessage
+}
+
+func show(name string, v any) {
+	b, err := json.Marshal(v)
+	fmt.Println(name, string(b), err)
+}
+
+func emit(name string, f func() ([]byte, error)) {
+	b, err := f()
+	fmt.Println(name, string(b), err)
+}
+
+func main() {
+	var nilMap map[string]int
+	show("nil map", nilMap)
+	show("nil map field", P{})
+	show("empty map field", P{M: map[string]int{}})
+	show("omitempty nil map", Q{})
+	show("omitempty empty map", Q{M: map[string]int{}})
+	show("omitempty map", Q{M: map[string]int{"a": 1}})
+	show("struct in any", map[string]any{"p": Addr{"S", 0}})
+	show("struct ptr in any", []any{&Addr{"T", 2}})
+	show("embedded in any", Emb{In{1}, 2})
+	emit("+Inf", func() ([]byte, error) { return json.Marshal(math.Inf(1)) })
+	emit("-Inf", func() ([]byte, error) { return json.Marshal(math.Inf(-1)) })
+	emit("NaN", func() ([]byte, error) { return json.Marshal(math.NaN()) })
+	emit("float32 +Inf", func() ([]byte, error) { return json.Marshal(float32(math.Inf(1))) })
+	emit("raw", func() ([]byte, error) { return json.Marshal(json.RawMessage("[1, 2]")) })
+	show("raw in struct", W{D: json.RawMessage(\`{ "a" : [1, 2] }\`)})
+	var rawNil json.RawMessage
+	emit("raw nil", func() ([]byte, error) { return json.Marshal(rawNil) })
+	emit("raw invalid", func() ([]byte, error) { return json.Marshal(json.RawMessage(\`{"a":\`)) })
+	show("float arrays", W{B: []float32{0.1, 2}, C: [2]float32{0.1, 0.2}})
+	show("array", [3]int{1, 2, 3})
+}
+`,
+		`nil map null <nil>
+nil map field {"M":null} <nil>
+empty map field {"M":{}} <nil>
+omitempty nil map {} <nil>
+omitempty empty map {} <nil>
+omitempty map {"M":{"a":1}} <nil>
+struct in any {"p":{"street":"S"}} <nil>
+struct ptr in any [{"street":"T","zip":2}] <nil>
+embedded in any {"Z":1,"y":2} <nil>
++Inf  json: unsupported value: +Inf
+-Inf  json: unsupported value: -Inf
+NaN  json: unsupported value: NaN
+float32 +Inf  json: unsupported value: +Inf
+raw [1,2] <nil>
+raw in struct {"A":0,"B":null,"C":[0,0],"D":{"a":[1,2]}} <nil>
+raw nil null <nil>
+raw invalid  json: error calling MarshalJSON for type json.RawMessage: unexpected end of JSON input
+float arrays {"A":0,"B":[0.1,2],"C":[0.1,0.2],"D":null} <nil>
+array [1,2,3] <nil>
+`,
+	);
+});
+
+test("float64 negative zero encodes as -0", () => {
+	const { js, errors } = compile(`package main
+import ("encoding/json"; "math")
+type W struct { A float64; B *float64 }
+func main() {
+	z := math.Copysign(0, -1)
+	b, _ := json.Marshal(W{z, &z})
+	c, _ := json.Marshal([]float64{z, 1})
+	d, _ := json.Marshal(map[string]float64{"a": z})
+	console.log(string(b), string(c), string(d))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), '{"A":-0,"B":-0} [-0,1] {"a":-0}');
+});
+
+test('[]byte("null") is the bytes of the string, not nil', () => {
+	const { js, errors } = compile(`package main
+import ("encoding/json"; "fmt")
+func main() {
+	var x int
+	fmt.Println(json.Valid([]byte("null")), json.Unmarshal([]byte("null"), &x), len([]byte("null")))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true <nil> 4");
+});
+
+section("encoding/json — Unmarshal parity with Go");
+
+test("real Go output: json/unmarshal parity on JS and WASM", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type Item struct{ A int }
+
+type S struct {
+	Arr  [3]int
+	F    [2]float32
+	Grid [][2]int
+	Nest [][]int
+	M    map[string][]int
+}
+
+func main() {
+	var m map[string]int
+	fmt.Println(json.Unmarshal([]byte(\`{"a":1,"b":2}\`), &m), len(m), m)
+	var ma map[string]any
+	fmt.Println(json.Unmarshal([]byte(\`{"a":1}\`), &ma), len(ma), ma)
+	var arr [3]int
+	fmt.Println(json.Unmarshal([]byte(\`[1,2]\`), &arr), arr)
+	fmt.Println(json.Unmarshal([]byte(\`[7,8,9,10]\`), &arr), arr)
+	fmt.Println(json.Unmarshal([]byte(\`null\`), &arr), arr)
+	fmt.Println(json.Unmarshal([]byte(\`"x"\`), &arr), arr)
+	var ip *Item
+	fmt.Println(json.Unmarshal([]byte(\`{}\`), ip))
+	var sl []int
+	fmt.Println(json.Unmarshal([]byte(\`[1]\`), sl))
+	fmt.Println(json.Unmarshal([]byte(\`{\`), sl))
+	fmt.Println(json.Unmarshal([]byte(\`{}\`), nil))
+	fmt.Println(json.Unmarshal([]byte(\`{}\`), Item{}))
+	var s S
+	err := json.Unmarshal([]byte(\`{"Arr":[1],"F":[1.5,2.5,3],"Grid":[[1,2],[3]],"Nest":[[1],[2,3]],"M":{"a":[1,2]}}\`), &s)
+	fmt.Println(err, s.Arr, s.F, s.Grid, s.Nest, len(s.M["a"]))
+	var nested map[string]map[string]int
+	fmt.Println(json.Unmarshal([]byte(\`{"a":{"b":1},"c":{}}\`), &nested), len(nested), len(nested["c"]), nested["a"]["b"])
+	var null1 any
+	fmt.Println(json.Unmarshal([]byte(\`null\`), &null1), null1 == nil)
+}
+`,
+		`<nil> 2 map[a:1 b:2]
+<nil> 1 map[a:1]
+<nil> [1 2 0]
+<nil> [7 8 9]
+<nil> [7 8 9]
+json: cannot unmarshal string into Go value of type [3]int [7 8 9]
+json: Unmarshal(nil *main.Item)
+json: Unmarshal(non-pointer []int)
+unexpected end of JSON input
+json: Unmarshal(nil)
+json: Unmarshal(non-pointer main.Item)
+<nil> [1 0 0] [1.5 2.5] [[1 2] [3 0]] [[1] [2 3]] 2
+<nil> 2 0 1
+<nil> true
+`,
+	);
+});
+
+test("decoded maps have no marker key in JS", () => {
+	const { js, errors } = compile(
+		`package main
+import ("encoding/json"; "fmt")
+func main() {
+	var m map[string]any
+	fmt.Println(json.Unmarshal([]byte(` +
+			"`" +
+			`{"a":{"b":1}}` +
+			"`" +
+			`), &m), len(m), m)
+	for k := range m { fmt.Println(k) }
+}`,
+	);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "<nil> 1 map[a:map[b:1]]\na");
 });
 
 // ── Entry point ───────────────────────────────────────────────

@@ -1743,6 +1743,7 @@ export const expressionGenMethods = {
 		if (isEnc && expr.func.field === "Encode") {
 			this.useHelper("json");
 			const enc = this.genExpr(expr.func.expr);
+			this._markJsonAnyEncoders();
 			const argType = expr.args[0]?._type;
 			const codec = this._getJsonEncoder(argType);
 			const arg = this.genExpr(expr.args[0]);
@@ -1757,9 +1758,8 @@ export const expressionGenMethods = {
 			const dec = this.genExpr(expr.func.expr);
 			const targetType = expr.args[0]?._type;
 			const codec = this._getJsonDecoder(targetType);
-			const typeName = targetType ? this._jsonTypeName(targetType) : "";
 			const arg = this.genExpr(expr.args[0]);
-			return `__json_decoder_decode(${dec}, ${codec}, ${arg}, ${JSON.stringify(typeName)})`;
+			return `__json_decoder_decode(${dec}, ${codec}, ${arg}, ${this._jsonTargetArgs(targetType)})`;
 		}
 		return undefined;
 	},
@@ -2937,7 +2937,7 @@ export const expressionGenMethods = {
 	_isNilLiteral(expr) {
 		return (
 			(expr.kind === "Ident" && expr.name === "nil") ||
-			(expr.kind === "BasicLit" && expr.value === "null")
+			(expr.kind === "BasicLit" && expr.litKind === "NIL")
 		);
 	},
 
