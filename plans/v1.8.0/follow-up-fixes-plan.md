@@ -252,23 +252,23 @@ No longer reproducing (deleted from the ledger): promoted field through `Deep2{*
 
 ### Phase 6: JS Numeric and Value Semantics
 
-- [ ] Task 6.1: Strict 32-bit and 8-bit integer operators; `math.Modf` sign
+- [x] Task 6.1: Strict 32-bit and 8-bit integer operators; `math.Modf` sign
   - Files: `src/backend/js/expressions.js`, `src/backend/js/stdlib/math.js`, `test/unit/builtins/operators.test.js`
   - Test: `byte(0x80 | r>>6&0x3F)` (r=0xFFFD) → `191`; `int(((x32-y32-1)>>31)&1)` → `1`; `int64(-a)` (int8 -128) → `-128`; `math.Signbit(frac of Modf(-3))` → `true` (all targets).
   - Done when: `both` matches WASM and Go for all four.
-- [ ] Task 6.2: 64-bit shifts in `both`
+- [x] Task 6.2: 64-bit shifts in `both`
   - Files: `src/backend/js/expressions.js`, `src/backend/js/runtime.js`, `src/backend/wasm/emit-exprs.js`
   - Test: in `test/unit/builtins/operators.test.js`, `(x<<3)+(x>>3)` (x=1<<40) → `8933531975680`; `3<<62` → `-4611686018427387904`; `(1<<50)<<35` → `0`; runtime count `-1` → panic `negative shift amount` (all targets).
   - Done when: all four match Go on js(both)/wasm.
-- [ ] Task 6.3: Variadic spread aliasing and nil
+- [x] Task 6.3: Variadic spread aliasing and nil
   - Files: `src/backend/js/expressions.js`, `src/backend/wasm/variadic.js`, `test/unit/wasm/variadic.test.js`
   - Test: closure `set(a[1:]...)` writing `xs[0] = -1` → `[1 -1 3]`; `set(nx...)` with nil `nx` → no panic; `nilp()` → `true` (all targets).
   - Done when: the three repros match Go everywhere.
-- [ ] Task 6.4: Tuple assignment evaluates index operands first
+- [x] Task 6.4: Tuple assignment evaluates index operands first
   - Files: `src/backend/js/statements.js`, `src/backend/wasm/emit-stmts.js`, `test/unit/language/value-semantics.test.js`
   - Test: `k := 0; xs := []int{0, 2}; k, xs[k] = 1, 5` → `[5 2]` (all targets).
   - Done when: repro matches Go; existing swap tests stay green.
-- [ ] Task 6.5: Whole-element stores keep element pointers valid
+- [x] Task 6.5: Whole-element stores keep element pointers valid
   - Files: `src/backend/js/statements.js`, `src/backend/wasm/emit-stmts.js`, `test/unit/language/pointers.test.js`
   - Test: `p := &xs[0]; xs[0] = S{9}; p.A` → `9`; `first[T]` + `p.V = 7` → `xs[0].V == 7` (all targets).
   - Done when: both repros print Go's values on js/both/wasm.

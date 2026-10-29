@@ -247,11 +247,59 @@ export class StmtsEmitter {
 			return;
 		}
 
+		const hoisted = op === "=" ? this._hoistLhsOperands(lhsNodes) : null;
 		const rhsVals = this._parallelAssignValues(lhsNodes, rhsNodes);
 		for (let i = 0; i < lhsNodes.length; i++) {
 			this._emitAssignSingle(lhsNodes[i], rhsVals[i], op);
 		}
 		this._releaseParallelTemps(rhsVals, rhsNodes);
+		hoisted?.();
+	}
+
+	// `k, xs[k] = 1, 5`: Go evaluates the operands of every index and field
+	// target before any assignment.  An operand that mentions a variable
+	// assigned by the same statement is evaluated into a temporary first.
+	// Returns a function that restores the AST and releases the temporaries.
+	_hoistLhsOperands(lhsNodes) {
+		if (lhsNodes.length < 2) return null;
+		const assigned = new Set(
+			lhsNodes
+				.filter((l) => l.kind === "Ident" && l.name !== "_")
+				.map((l) => l.name),
+		);
+		if (assigned.size === 0) return null;
+		const undo = [];
+		const names = [];
+		for (const l of lhsNodes) {
+			let keys;
+			if (l.kind === "IndexExpr") keys = ["expr", "index"];
+			else if (l.kind === "SelectorExpr" && !l._isMethodExpr) keys = ["expr"];
+			else continue;
+			for (const key of keys) {
+				const operand = l[key];
+				if (!this._mentions(operand, assigned)) continue;
+				const goType = operand._type ?? this._resolveExprGoType(operand);
+				// A struct or array value names the variable's storage in Go.
+				if (
+					key === "expr" &&
+					(this._isValueStruct(goType) || this._isValueArray(goType))
+				)
+					continue;
+				const wType = this.toWasmType(goType);
+				const name = `__lhs_tmp_${this.tempCounter++}`;
+				const idx = this.allocLocal(name, wType, goType, true);
+				this.emitExpr(operand, wType);
+				this.pushInstruction({ op: "local.set", index: idx });
+				undo.push([l, key, operand]);
+				names.push(name);
+				l[key] = { kind: "Ident", name, _type: goType, _parTmp: true };
+			}
+		}
+		if (undo.length === 0) return null;
+		return () => {
+			for (const [node, key, v] of undo) node[key] = v;
+			for (const n of names) this.locals.delete(n);
+		};
 	}
 
 	// `x, y = y, x`: Go evaluates every right-hand side before assigning.
@@ -583,6 +631,19 @@ export class StmtsEmitter {
 			);
 			const arrInfo = this.mod.getArrayType(elemGoType);
 			const sliceInfo = isSlice ? this.mod.getSliceType(elemGoType) : null;
+
+			// A whole struct or array stored into an element whose address is
+			// taken writes into the existing element, so `p := &xs[0]` stays valid.
+			if (this._needsStableStore(l, elemGoType)) {
+				this._emitStableStore(elemGoType, r, () => {
+					this._emitElemAddr(baseNode, l.index, sliceInfo, arrInfo);
+					this.pushInstruction({
+						op: "array.get",
+						typeIndex: arrInfo.typeIndex,
+					});
+				});
+				return;
+			}
 
 			this._emitElemAddr(baseNode, l.index, sliceInfo, arrInfo);
 
