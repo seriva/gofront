@@ -7,6 +7,7 @@ import {
 	assertEqual,
 	assertErrorContains,
 	compile,
+	compileHybrid,
 	runJs,
 	section,
 	summarize,
@@ -456,6 +457,138 @@ test("a nil pointer with a pointer-receiver String uses it for %v, %s and %q but
 		'type C struct{ n int }\nfunc (c *C) String() string { return "c" }',
 	);
 	assertEqual(o, 'c|c|<nil>|"c"\n');
+});
+
+// Runs `body` (which returns a string) on the js target, as a `both` package
+// and on WebAssembly, and returns the result when all three agree.
+function allTargets(body, decls = "") {
+	const src = `package main
+import "fmt"
+${decls}
+func Main() string {
+${body}
+}`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, jsRes);
+	const both = compile(
+		`//gofront:target both\n${src}\nfunc main() { fmt.Print(Main()) }`,
+	);
+	assertEqual(both.errors.length, 0, both.errors.join("\n"));
+	assertEqual(runJs(both.js), jsRes);
+	return jsRes;
+}
+
+const NIL_C = `type C struct{ n int }
+func (c *C) String() string { return "c" }`;
+
+section("fmt Stringer: nil pointers (all targets)");
+
+test("nil elements of a pointer slice call a pointer-receiver String", () => {
+	assertEqual(allTargets("return fmt.Sprint([]*C{nil, {1}})", NIL_C), "[c c]");
+});
+
+test("a nil *G[int] with a pointer-receiver String prints through it", () => {
+	assertEqual(
+		allTargets(
+			`var g *G[int]
+	return fmt.Sprint(g) + "|" + fmt.Sprintf("%v|%s", g, []*G[int]{nil, {1}})`,
+			`type G[T any] struct{ v T }
+func (g *G[T]) String() string { return "g" }`,
+		),
+		"g|g|[g g]",
+	);
+});
+
+test("a nil pointer to a type with a value-receiver String prints <nil>", () => {
+	assertEqual(
+		allTargets(
+			`var p *Color
+	var v *V
+	return fmt.Sprint(p) + "|" + fmt.Sprintf("%v|%s|%v", p, v, []*Color{nil})`,
+			`type Color int
+func (c Color) String() string { return "col" }
+type V struct{ n int }
+func (v V) String() string { return "v" }`,
+		),
+		"<nil>|<nil>|<nil>|[<nil>]",
+	);
+});
+
+test("nil pointers in maps and struct fields use String and Error", () => {
+	assertEqual(
+		allTargets(
+			`return fmt.Sprint(map[string]*C{"a": nil}, W{}) + "|" + fmt.Sprintf("%s|%q|%v", []*E{nil}, []*E{nil}, W{})`,
+			`${NIL_C}
+type E struct{ n int }
+func (e *E) Error() string { return "e" }
+type V struct{ n int }
+func (v V) String() string { return "v" }
+type W struct{ P *C; Q *V; R *E }`,
+		),
+		'map[a:c] {c <nil> e}|[e]|["e"]|{c <nil> e}',
+	);
+});
+
+test("a String that dereferences its nil receiver prints <nil> (js)", () => {
+	assertEqual(
+		run(
+			`var c *C
+fmt.Println(fmt.Sprint(c, []*C{nil, {2}}))`,
+			`type C struct{ n int }
+func (c *C) String() string { return fmt.Sprint("c", c.n) }`,
+		),
+		"<nil> [<nil> c2]",
+	);
+});
+
+test("%s and %q reach the String of non-nil pointers in slices and maps", () => {
+	assertEqual(
+		allTargets(
+			`return fmt.Sprintf("%s|%v|%q|%s", []*C{{1}}, []*C{{1}}, []*C{{1}}, map[string]*C{"a": {1}})`,
+			NIL_C,
+		),
+		'[c]|[c]|["c"]|map[a:c]',
+	);
+});
+
+section("fmt Stringer: through a type parameter (all targets)");
+
+const TP_DECLS = `type Color int
+func (c Color) String() string { return "col" }
+type P struct{ N int }
+func (p P) String() string { return "P!" }
+type Pt struct{ N int }
+func (p *Pt) String() string { return "Pt!" }
+type L []Color
+func Show[T any](x T) string { return fmt.Sprint(x) }
+func Showf[T any](x T) string { return fmt.Sprintf("%v|%s|%d|%+v", x, x, x, x) }
+func Wrap[T any](x T) string { return Show(x) }`;
+
+test("Sprint of a type-parameter value uses the type argument's String", () => {
+	assertEqual(allTargets("return Show(Color(2))", TP_DECLS), "col");
+});
+
+test("String dispatch through a type parameter covers named, struct, pointer, slice and map arguments", () => {
+	assertEqual(
+		allTargets(
+			`return Show(Color(2)) + " " + Show(P{1}) + " " + Show(&Pt{1}) + " " + Show(L{1}) + " " + Show(map[string]Color{"a": 1}) + " " + Showf(Color(2)) + " " + Showf(P{1}) + " " + Wrap(Color(1)) + " " + Show(3) + " " + Show("s") + " " + Show([]string{"a"})`,
+			TP_DECLS,
+		),
+		"col P! Pt! [col] map[a:col] col|col|2|col P!|P!|{1}|P! col 3 s [a]",
+	);
+});
+
+test("plain maps, nil slices and pointers print as Go through a type parameter", () => {
+	assertEqual(
+		allTargets(
+			`var ns []int
+	var nm map[string]int
+	return Show(map[string]int{"a": 1}) + " " + Show([]int{1}) + " " + Show(S{1, map[string]int{"z": 1}}) + " " + Show(ns) + " " + Show(nm) + " " + Show(&S{2, nil})`,
+			`type S struct{ A int; M map[string]int }
+func Show[T any](x T) string { return fmt.Sprint(x) }`,
+		),
+		"map[a:1] [1] {1 map[z:1]} [] map[] &{2 map[]}",
+	);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

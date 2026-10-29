@@ -95,6 +95,67 @@ var __fmtu = __fmtu || (() => {
     if (x >= 0) return ds.slice(0, x + 1).padEnd(x + 1, "0") + (ds.length > x + 1 ? "." + ds.slice(x + 1) : "");
     return "0." + "0".repeat(-x - 1) + ds;
   };
+  // %x of a float: 0x1.8p+01, mantissa digits rounded to prec (shortest when absent).
+  const fmtHexFloat = (abs, prec, upper, f32) => {
+    let body;
+    if (abs === 0) {
+      body = "0x0" + (prec > 0 ? "." + "0".repeat(prec) : "") + "p+00";
+    } else {
+      const dv = new DataView(new ArrayBuffer(8));
+      dv.setFloat64(0, abs);
+      const bits = dv.getBigUint64(0);
+      let e = Number((bits >> 52n) & 0x7ffn);
+      let m = bits & 0xfffffffffffffn;
+      if (e === 0) {
+        // Subnormal: normalise so the leading bit is the implicit 1.
+        e = -1022;
+        while (m < (1n << 52n)) { m <<= 1n; e--; }
+        m &= 0xfffffffffffffn;
+      } else e -= 1023;
+      let frac = m; // 52 bits = 13 hex digits
+      let digits = 13;
+      let lead = 1n;
+      if (prec >= 0 && prec < 13) {
+        const drop = BigInt((13 - prec) * 4);
+        const full = (1n << 52n) | m;
+        let q = full >> drop;
+        const rem = full & ((1n << drop) - 1n);
+        const half = 1n << (drop - 1n);
+        if (rem > half || (rem === half && (q & 1n) === 1n)) q += 1n;
+        if (q >> BigInt(prec * 4) >= 2n) { q >>= 1n; e++; }
+        lead = q >> BigInt(prec * 4);
+        frac = q & ((1n << BigInt(prec * 4)) - 1n);
+        digits = prec;
+      }
+      let hs = digits > 0 ? frac.toString(16).padStart(digits, "0") : "";
+      if (prec < 0) hs = hs.replace(/0+$/, "");
+      else if (prec > 13) hs = hs.padEnd(prec, "0");
+      body = "0x" + lead + (hs ? "." + hs : "") + "p" + (e < 0 ? "-" : "+") + String(Math.abs(e)).padStart(2, "0");
+    }
+    return upper ? body.toUpperCase() : body;
+  };
+  // %b of a float: mantissa "p" exponent, as strconv 'b'.
+  const fmtBinFloat = (abs, f32) => {
+    if (abs === 0) return "0p-" + (f32 ? 149 : 1074);
+    const dv = new DataView(new ArrayBuffer(8));
+    let mant, ex;
+    if (f32) {
+      dv.setFloat32(0, abs);
+      const b = dv.getUint32(0);
+      ex = (b >>> 23) & 0xff;
+      mant = BigInt(b & 0x7fffff);
+      if (ex === 0) ex++; else mant |= 1n << 23n;
+      ex += -127 - 23;
+    } else {
+      dv.setFloat64(0, abs);
+      const b = dv.getBigUint64(0);
+      ex = Number((b >> 52n) & 0x7ffn);
+      mant = b & 0xfffffffffffffn;
+      if (ex === 0) ex++; else mant |= 1n << 52n;
+      ex += -1023 - 52;
+    }
+    return mant.toString() + "p" + (ex >= 0 ? "+" : "") + ex;
+  };
   const fmtFloat = (n, verb, fl, wid, hasWid, prec, hasPrec, f32) => {
     n = Number(n);
     if (Number.isNaN(n)) return pad(fl.plus ? "+NaN" : fl.space ? " NaN" : "NaN", fl, wid);
@@ -103,7 +164,9 @@ var __fmtu = __fmtu || (() => {
     if (abs === Infinity) return pad(neg ? "-Inf" : fl.space && !fl.plus ? " Inf" : "+Inf", fl, wid);
     const upper = verb === "E" || verb === "G";
     let body;
-    if (verb === "e" || verb === "E") body = fmtE(abs, hasPrec ? prec : 6, upper);
+    if (verb === "x" || verb === "X") body = fmtHexFloat(abs, hasPrec ? prec : -1, verb === "X", f32);
+    else if (verb === "b") body = fmtBinFloat(abs, f32);
+    else if (verb === "e" || verb === "E") body = fmtE(abs, hasPrec ? prec : 6, upper);
     else if (verb === "f" || verb === "F") body = fmtF(abs, hasPrec ? prec : 6);
     else body = fmtG(abs, hasPrec ? prec : -1, upper, f32);
     const sign = neg ? "-" : fl.plus ? "+" : fl.space ? " " : "";
@@ -187,12 +250,15 @@ var __fmtu = __fmtu || (() => {
       return { k: "ptr", e: { k: "struct", n: "errors.errorString", f: [] } };
     }
     if (v.constructor && v.constructor !== Object) {
-      const st = { k: "struct", n: "main." + v.constructor.name.replace(/\$Ptr$/, ""), f: Object.keys(v).map((k) => [k, descOf(v[k]) ?? IFACE]) };
+      const st = { k: "struct", n: "main." + v.constructor.name.replace(/\$Ptr$/, ""), f: keys(v).map((k) => [k, descOf(v[k]) ?? IFACE]) };
       return v.__p === true ? { k: "ptr", e: st } : st;
     }
     const host = { k: "struct", n: v.__tn ?? "", f: Object.keys(v).map((k) => [k, descOf(v[k]) ?? IFACE]) };
     return v.__tn !== undefined && v.__p === true ? { k: "ptr", e: host } : host;
   };
+  // The fields a struct value declares: a class that also keeps a copy of the
+  // fields promoted from an embedded struct lists its own in __fk.
+  const keys = (v) => v.__fk ?? Object.keys(v);
   const sortedEntries = (m, kd) => {
     const es = m instanceof Map
       ? Array.from(m.entries())
@@ -241,7 +307,7 @@ var __fmtu = __fmtu || (() => {
         return u && (u.k === "slice" || u.k === "array" || u.k === "map") ? gsComp(v, u, t.n, top, gs) : gs(v, u, top);
       }
       case "struct": {
-        const f = t.f ?? Object.keys(v ?? {}).map((k) => [k, null]);
+        const f = t.f ?? keys(v ?? {}).map((k) => [k, null]);
         if (v == null) return typeName(t) + "{}";
         return typeName({ k: "struct", n: t.n, f }) + "{" + f.map(([k, ft]) => k + ":" + gs(v[k], ft, false)).join(", ") + "}";
       }
@@ -255,7 +321,7 @@ var __fmtu = __fmtu || (() => {
       default: return String(v);
     }
   };
-  return { runes, pad, quote, quoteRune, runeStr, validRune, fmtInt, fmtFloat, utf8, fmtHex, baseOf, isFloatN, isComplexN, typeName, descOf, sortedEntries, gs, PRINTABLE, hex };
+  return { runes, pad, quote, quoteRune, runeStr, validRune, fmtInt, fmtFloat, utf8, fmtHex, baseOf, isFloatN, isComplexN, typeName, descOf, sortedEntries, gs, PRINTABLE, hex, keys, isNumKey };
 })();`;
 
 // The format-string scanner and per-verb dispatch, spliced into `__sprintf`
@@ -288,17 +354,23 @@ export const HELPER_FMT_LOOP = String.raw`
     const bn = bt?.k === "b" ? bt.n : "";
     const isFloatT = U.isFloatN(bn);
     const isIntT = bn !== "" && !isFloatT && !U.isComplexN(bn);
+    // A number that is not an integer (or is typed as a float) is a float.
+    const isFloatV = isFloatT || (!isIntT && typeof v === "number" && !Number.isInteger(v));
+    if (isFloatV && (verb === "x" || verb === "X" || verb === "b")) return U.fmtFloat(v, verb, fl, wid, hasWid, prec, hasPrec, bn === "float32");
+    if (isFloatV && "cqUdoO".includes(verb)) return null;
     switch (verb) {
       case "d": case "b": case "o": case "O": case "x": case "X": {
-        if (typeof v === "number" && (!Number.isInteger(v) || isFloatT)) return null;
         const base = verb === "d" ? 10 : verb === "b" ? 2 : verb === "o" || verb === "O" ? 8 : 16;
         return U.fmtInt(v, base, verb === "X", verb === "O", fl, wid, hasWid, prec, hasPrec);
       }
+      case "v": return isFloatV ? U.fmtFloat(v, "g", fl, wid, hasWid, prec, hasPrec, bn === "float32") : U.fmtInt(v, 10, false, false, fl, wid, hasWid, prec, hasPrec);
       case "c": return U.pad(U.runeStr(Number(v)), fl, wid);
       case "q": return U.pad(U.quoteRune(Number(v), fl.plus), fl, wid);
       case "U": {
         const c = Number(v);
-        let s = "U+" + U.hex(Math.abs(c), 1).toUpperCase().padStart(Math.max(4, hasPrec ? prec : 0), "0");
+        // A negative value prints as its 64-bit two's complement, as Go's uint64 conversion.
+        const hx = c < 0 ? BigInt.asUintN(64, BigInt(c)).toString(16) : U.hex(c, 1);
+        let s = "U+" + hx.toUpperCase().padStart(Math.max(4, hasPrec ? prec : 0), "0");
         if (fl.sharp && U.validRune(c) && U.PRINTABLE.test(String.fromCodePoint(c))) s += " '" + String.fromCodePoint(c) + "'";
         return U.pad(s, fl, wid);
       }
@@ -308,6 +380,9 @@ export const HELPER_FMT_LOOP = String.raw`
       default: return null;
     }
   };
+  // A nil *T element whose Error/String has a pointer receiver is still asked
+  // for its text under %s, %q, %x and %X: the descriptor carries its stand-in.
+  const nilStand = (e, d, verb) => (e == null && d?.np !== undefined && "sqxX".includes(verb) ? d.np : e);
   // Applies a non-%v verb to v; composites apply it to each element, as Go does.
   const fmtv = (verb, v, t, fl, wid, hasWid, prec, hasPrec, top) => {
     v = unbox(v, verb);
@@ -317,26 +392,27 @@ export const HELPER_FMT_LOOP = String.raw`
       else if (bt?.k === "map") v = {};
       // A nil *T with a String/Error method prints <nil> under %s (Go recovers
       // the nil-dereference panic); a bare null cannot tell it from a nil interface.
-      else return verb === "s" ? U.pad("<nil>", fl, wid) : bad(verb, v, t);
+      else return verb === "s" || verb === "v" ? U.pad("<nil>", fl, wid) : bad(verb, v, t);
     }
     if (t?.n === "time.Duration" && "vs".includes(verb)) {
       return typeof __durationString === "function" ? __durationString(v) : String(v);
     }
     switch (typeof v) {
-      case "boolean": return verb === "t" ? U.pad(String(v), fl, wid) : bad(verb, v, t);
+      case "boolean": return verb === "t" || verb === "v" ? U.pad(String(v), fl, wid) : bad(verb, v, t);
       case "string": {
         // Integer-keyed object maps hand their keys over as numeric strings.
         if (verb === "d" && (bt == null || bt.k !== "b") && /^-?\d+$/.test(v)) return fmtNum(verb, BigInt(v), null, fl, wid, hasWid, prec, hasPrec);
-        return fmtStr(verb, v, fl, wid, prec, hasPrec) ?? bad(verb, v, t);
+        return fmtStr(verb === "v" ? "s" : verb, v, fl, wid, prec, hasPrec) ?? bad(verb, v, t);
       }
       case "number": case "bigint": return fmtNum(verb, v, t, fl, wid, hasWid, prec, hasPrec) ?? bad(verb, v, t);
       default: break;
     }
-    if ("sqxX".includes(verb)) {
+    if ("vsqxX".includes(verb)) {
       const sm = stringMethod(v);
-      if (sm) return fmtStr(verb, String(callMethod(v, sm)), fl, wid, prec, hasPrec);
+      if (sm) return fmtStr(verb === "v" ? "s" : verb, String(callMethod(v, sm)), fl, wid, prec, hasPrec);
     }
     if ("re" in v && "im" in v) {
+      if (verb === "v") verb = "g";
       if (!"eEfFgG".includes(verb)) return bad(verb, v, t);
       const one = (n, pl) => U.fmtFloat(n, verb, pl ? { ...fl, plus: true } : fl, wid, hasWid, prec, hasPrec, false);
       return "(" + one(v.re, false) + one(v.im, true) + "i)";
@@ -354,16 +430,20 @@ export const HELPER_FMT_LOOP = String.raw`
         return fmtStr(verb, new TextDecoder().decode(Uint8Array.from(items)), fl, wid, prec, hasPrec);
       }
       const et = elemOf(t);
-      return "[" + items.map((e) => fmtv(verb, e, et, fl, wid, hasWid, prec, hasPrec, false)).join(" ") + "]";
+      if (v.__ptr_slice === true) items.forEach(markPtr);
+      return "[" + items.map((e) => fmtv(verb, nilStand(e, v.__fd?.e, verb), et, fl, wid, hasWid, prec, hasPrec, false)).join(" ") + "]";
     }
-    if (v instanceof Map || v.__map === true) {
+    if (v instanceof Map || v.__map === true || U.baseOf(t)?.k === "map") {
       const bm = U.baseOf(t);
       const kt = bm?.k === "map" ? bm.key : null;
       const vt = bm?.k === "map" ? bm.val : null;
-      return "map[" + U.sortedEntries(v, kt).map(([k, x]) => fmtv(verb, k, kt, fl, wid, hasWid, prec, hasPrec, false) + ":" + fmtv(verb, x, vt, fl, wid, hasWid, prec, hasPrec, false)).join(" ") + "]";
+      const entries = U.sortedEntries(v, kt);
+      if (v.__ptr_map === true) entries.forEach(([, x]) => markPtr(x));
+      return "map[" + entries.map(([k, x]) => fmtv(verb, k, kt, fl, wid, hasWid, prec, hasPrec, false) + ":" + fmtv(verb, nilStand(x, v.__fd?.v, verb), vt, fl, wid, hasWid, prec, hasPrec, false)).join(" ") + "]";
     }
     if (isPointer(v) && !top) return getPtr(v);
-    const body = Object.keys(v).map((k) => fmtv(verb, v[k], fieldOf(t, k), fl, wid, hasWid, prec, hasPrec, false)).join(" ");
+    const ff = typeof v.__ff === "function" ? v.__ff() : null;
+    const body = U.keys(v).map((k) => fmtv(verb, nilStand(v[k], ff?.[k], verb), fieldOf(t, k), fl, wid, hasWid, prec, hasPrec, false)).join(" ");
     return (isPointer(v) ? "&{" : "{") + body + "}";
   };
   const typedArg = (x) => (x instanceof __FT ? { v: x.v, t: x.t } : { v: x, t: null });
@@ -453,6 +533,11 @@ export const HELPER_FMT_LOOP = String.raw`
     // The stand-in for a nil pointer with a pointer-receiver String/Error only serves %v and %s.
     if (v && v.__nilp === true && !(verb === "s" || verb === "q" || (verb === "v" && !sharp))) v = null;
     if (verb === "T") { out += U.pad(U.typeName(t ?? U.descOf(unbox(v, "T"))), fl, wid); continue; }
+    if (verb === "v" && hasPrec && !sharp) {
+      // A precision applies to each scalar (%.3v of 3.14159 is 3.14, of "abc" is abc cut to 3 runes).
+      out += fmtv("v", v, t, fl, wid, hasWid, prec, hasPrec, true);
+      continue;
+    }
     if (verb === "v") {
       if (v === null || v === undefined) {
         const bt0 = U.baseOf(t);

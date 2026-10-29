@@ -700,6 +700,10 @@ export class CodeGen {
 		this.line(`class ${name}$Ptr {`);
 		this.indented(() => {
 			this.line("constructor(_p) { this._p = _p; }");
+			// A nil *T stays nil in an interface operand.
+			this.line(
+				`static of(p) { return p == null ? null : new ${name}$Ptr(p); }`,
+			);
 			this.line("__gfUnbox() { return this._p; }");
 			this.line("get value() { return this._p.value; }");
 			this.line("set value(v) { this._p.value = v; }");
@@ -1003,7 +1007,7 @@ export class CodeGen {
 	_genMethodBody(decl, staticNamed, recvParam, tpNames) {
 		this._withFnCtx(decl.body, () =>
 			this.indented(() => {
-				if (tpNames) this._genTypeParamBindings(tpNames, "this[__tz]");
+				if (tpNames) this._genTypeParamBindings(tpNames, "this?.[__tz]");
 				if (decl.recvName) this._fnCtx.params.add(decl.recvName);
 				if (!staticNamed && decl.recvName && decl.recvName !== "_") {
 					this.line(`let ${decl.recvName} = ${this._receiverValue(decl)};`);

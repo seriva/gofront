@@ -3,7 +3,12 @@
 // math/bits, maps, slices, strings, strconv, fmt, errors, sort, unicode/utf8,
 // testing) plus the runtime helper bodies they rely on.
 
-import { fmtTypeDesc, fmtWantsTypes } from "../../shared/fmt-types.js";
+import {
+	fmtDescHasFloat,
+	fmtDescIsSeq,
+	fmtTypeDesc,
+	fmtWantsTypes,
+} from "../../shared/fmt-types.js";
 import {
 	ERROR_STRUCT,
 	getMapKeyValTypes,
@@ -1527,9 +1532,19 @@ export class StdlibCoreEmitter {
 			if (markErr) funcIndex = this.mod.getTestingArgErrImportIndex();
 			if (spread) funcIndex = this.mod.getTestingArgSpreadImportIndex();
 			this.pushInstruction({ op: "call", funcIndex });
-			if (typed && !spread) this._emitFmtArgType(args[i]);
+			if (!spread && (typed || this._fmtOperandHasFloat(args[i])))
+				this._emitFmtArgType(args[i]);
 		}
 		return temps;
+	}
+
+	// Whether the operand's static type mentions a float: those travel with
+	// their type so the host prints float32 and Go's %v exponent forms.
+	_fmtOperandHasFloat(arg) {
+		const goType = arg._type ?? this._resolveExprGoType(arg);
+		return fmtDescHasFloat(
+			fmtTypeDesc(goType, (t) => this.mod.checker?.resolveType?.(t) ?? t),
+		);
 	}
 
 	// Tags the operand just pushed with its static type (see _emitArgBuffer).
@@ -1556,7 +1571,15 @@ export class StdlibCoreEmitter {
 	_fmtNeedsTypes(format, operands) {
 		if (format?.kind !== "BasicLit") return false;
 		const spread = operands.some((a) => a._spread);
-		return fmtWantsTypes(format.value, spread ? -1 : operands.length);
+		const seqArgs = operands.some((a) =>
+			fmtDescIsSeq(
+				fmtTypeDesc(
+					a._type ?? this._resolveExprGoType(a),
+					(t) => this.mod.checker?.resolveType?.(t) ?? t,
+				),
+			),
+		);
+		return fmtWantsTypes(format.value, spread ? -1 : operands.length, seqArgs);
 	}
 
 	_releaseArgBuffer(temps) {
@@ -8718,7 +8741,9 @@ export class StdlibCoreEmitter {
 				this.pushInstruction({ op: "call", funcIndex: logIdx });
 				return;
 			}
-			if (args.some((a) => a._spread)) {
+			// Float operands need their static type (float32, Go's exponent
+			// forms), which only the argument buffer carries.
+			if (args.some((a) => a._spread || this._fmtOperandHasFloat(a))) {
 				const temps = this._emitArgBuffer(args, true);
 				this.pushInstruction({ op: "i32.const", value: 1 });
 				this._callStdlib("fmt_print");
