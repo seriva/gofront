@@ -1163,6 +1163,23 @@ test("Println spreads the results of a multi-value call", () => {
 	);
 });
 
+test("nil slices and maps in a multi-value call print as empty", () => {
+	const decls = `
+type P struct{ A int }
+func f() ([]*P, []int, map[string]int) { return nil, nil, nil }
+func three() (uint64, error, []int) { var u uint64 = 1 << 63; return u, nil, nil }`;
+	assertEqual(
+		printAllTargets(
+			`fmt.Println(f())
+fmt.Println(three())
+fmt.Println(fmt.Sprint(three()))
+fmt.Print(fmt.Sprintln(three()))`,
+			decls,
+		),
+		"[] [] map[]\n9223372036854775808 <nil> []\n9223372036854775808 <nil> []\n9223372036854775808 <nil> []",
+	);
+});
+
 test("Sprint and Sprintln take every result of a multi-value call", () => {
 	assertEqual(
 		printAllTargets(
