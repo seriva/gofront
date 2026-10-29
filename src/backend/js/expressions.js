@@ -589,6 +589,20 @@ function hasTypeParamType(t) {
 
 export const expressionGenMethods = {
 	genExpr(expr) {
+		if (expr._ifaceKeyDyn && !expr._ifaceKeying) {
+			// A key typed by a type parameter: encode it for the instantiated type.
+			const f = this._typeParamZeroFactory(expr._ifaceKeyParam);
+			if (f) {
+				expr._ifaceKeying = true;
+				try {
+					this.useHelper("structKey");
+					const box = expr._ifaceKeyDyn === "box" ? ", true" : "";
+					return `__ikt(${f}, ${this.genExpr(expr)}${box})`;
+				} finally {
+					expr._ifaceKeying = false;
+				}
+			}
+		}
 		if (expr._ifaceKey && !expr._ifaceKeying) {
 			// A string key is its own property key; any other dynamic value is
 			// encoded with its type (see HELPER_STRUCT_KEY).
@@ -2035,22 +2049,35 @@ export const expressionGenMethods = {
 		return t?.kind === "MapType";
 	},
 
+	// The one place a map literal key becomes a JS property name: a plain
+	// string literal stays as is, any other key is computed so that the key
+	// encoding of `genExpr` (`__ik`, struct keys) applies.
+	_genMapLitKey(key) {
+		return key.litKind === "STRING"
+			? JSON.stringify(key.value)
+			: `[${this.genExpr(key)}]`;
+	},
+
 	_genMapLitEntries(elems) {
 		return elems
-			.map((e) => {
-				if (e.kind === "KeyValueExpr") {
-					const k =
-						e.key.litKind === "STRING"
-							? JSON.stringify(e.key.value)
-							: `[${this.genExpr(e.key)}]`;
-					return `${k}: ${this.genValueExpr(e.value)}`;
-				}
-				return this.genValueExpr(e);
-			})
+			.map((e) =>
+				e.kind === "KeyValueExpr"
+					? `${this._genMapLitKey(e.key)}: ${this.genValueExpr(e.value)}`
+					: this.genValueExpr(e),
+			)
 			.join(", ");
 	},
 
+	// A literal whose (possibly elided or named) type is a map type.
+	_isMapLit(expr) {
+		let t = expr._type;
+		for (let i = 0; t?.kind === "named" && i < 32; i++) t = t.underlying;
+		return t?.kind === "map";
+	},
+
 	_genFallbackCompositeLit(expr) {
+		if (this._isMapLit(expr))
+			return `{ ${this._genMapLitEntries(expr.elems)} }`;
 		const at = this._litArrayType(expr);
 		if (at) {
 			// A named array type without methods (`type V [3]int; V{1}`).
@@ -2355,6 +2382,8 @@ export const expressionGenMethods = {
 		if (typeName && this.structNames.has(typeName)) {
 			return this._genPositionalStructLit(typeName, expr);
 		}
+		if (this._isMapLit(expr))
+			return `{ ${this._genMapLitEntries(expr.elems)} }`;
 		const hasPositional = expr.elems.some((e) => e._positionalField);
 		const hasKeyed = expr.elems.some((e) => e.kind === "KeyValueExpr");
 		// `{2: 5}` inside `[2][3]int{…}` is an array, not an object.
