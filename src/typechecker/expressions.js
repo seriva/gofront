@@ -681,6 +681,10 @@ export const expressionCheckMethods = {
 			"expr",
 			this.checkExpr(expr.expr, scope),
 		);
+		if (bt?.kind === "generic") {
+			const inst = this._genericFuncValueAsInstantiation(expr);
+			if (inst) return this._checkInstantiationExpr(inst, scope);
+		}
 		this.checkExpr(expr.index, scope);
 		if (bt?._tainted) return TAINTED_ANY;
 		if (isAny(bt)) return ANY;
@@ -702,6 +706,30 @@ export const expressionCheckMethods = {
 		}
 		if (isString(bt)) return INT;
 		return this.err(`Cannot index type ${typeStr(bt)}`, expr);
+	},
+
+	// `Id[int]` used as a value reaches the typechecker as an IndexExpr (the
+	// parser only commits to type arguments before a call or literal).  The
+	// node becomes an InstantiationExpr so both backends specialise it.
+	_genericFuncValueAsInstantiation(expr) {
+		const toTypeNode = (n) => {
+			if (n?.kind === "TypeExpr") return n.type;
+			const parts = [];
+			let cur = n;
+			while (cur?.kind === "SelectorExpr") {
+				parts.unshift(cur.field);
+				cur = cur.expr;
+			}
+			if (cur?.kind !== "Ident") return null;
+			parts.unshift(cur.name);
+			return { kind: "TypeName", name: parts.join("."), _line: n._line };
+		};
+		const typeArg = toTypeNode(expr.index);
+		if (!typeArg) return null;
+		expr.kind = "InstantiationExpr";
+		expr.typeArgs = [typeArg];
+		delete expr.index;
+		return expr;
 	},
 
 	// copy(dst, src): element types must be identical when either side is a
@@ -1033,6 +1061,12 @@ export const expressionCheckMethods = {
 			const typeArgs = expr.typeArgs.map((ta) =>
 				this.resolveTypeNode(ta, scope),
 			);
+			if (typeArgs.length > baseType.typeParams.length) {
+				return this.err(
+					`got ${typeArgs.length} type arguments but ${baseType.name ?? "function"} has ${baseType.typeParams.length} type parameters`,
+					expr,
+				);
+			}
 			// Check constraints
 			for (
 				let i = 0;
@@ -1056,7 +1090,26 @@ export const expressionCheckMethods = {
 		// rewrite the node in place into an IndexExpr and check that instead.
 		const indexExpr = this._instantiationAsIndex(expr, baseType);
 		if (indexExpr) return this._checkIndexExpr(indexExpr, scope);
+		if (baseType?.kind === "func" && !this._isPseudoGenericStdFunc(baseType))
+			return this.err(
+				`cannot instantiate ${this._calleeName(expr.expr)}: not a generic function`,
+				expr,
+			);
 		return baseType;
+	},
+
+	// Emitter-backed stdlib helpers (`slices.Sort`, `maps.Keys`) take `any`
+	// parameters in place of type parameters and accept (and ignore) explicit
+	// type arguments; a stdlib function with concrete parameters does not.
+	_isPseudoGenericStdFunc(fnType) {
+		return (fnType.params ?? []).some((p) => isAny(p));
+	},
+
+	_calleeName(node) {
+		if (node?.kind === "Ident") return node.name;
+		if (node?.kind === "SelectorExpr")
+			return `${this._calleeName(node.expr)}.${node.field}`;
+		return "expression";
 	},
 
 	_instantiationAsIndex(expr, baseType) {
@@ -1235,6 +1288,11 @@ export const expressionCheckMethods = {
 				expr,
 			);
 		}
+		if (isNumeric(argTypes[0]) && !this._constraintHasTypeSet(tp.constraint))
+			return this.err(
+				`cannot convert ${typeStr(argTypes[0])} to type ${typeStr(tp)}: ${typeStr(tp)} is not constrained to a set of convertible types`,
+				expr,
+			);
 		if (
 			!isNumeric(argTypes[0]) &&
 			!isAny(argTypes[0]) &&
@@ -1245,6 +1303,21 @@ export const expressionCheckMethods = {
 				expr,
 			);
 		return tp;
+	},
+
+	// A conversion to a type parameter needs a constraint that lists types
+	// (`~int | ~float64`, or an interface embedding such a union); `any`,
+	// `comparable` and method-only constraints allow every type argument.
+	_constraintHasTypeSet(constraint) {
+		if (!constraint) return true;
+		if (constraint.kind === "UnionConstraint") return true;
+		const c = this.resolveType(constraint);
+		const base = c?.kind === "named" ? this.resolveType(c.underlying) : c;
+		if (base?.kind !== "interface") return false;
+		if (base.unionConstraint) return true;
+		return (base._typeSetEmbeds ?? []).some((e) =>
+			this._constraintHasTypeSet(e),
+		);
 	},
 
 	checkCall(expr, scope) {
