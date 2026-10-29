@@ -3,6 +3,7 @@
 import {
 	assert,
 	assertEqual,
+	assertProgramOutput,
 	compile,
 	compileHybrid,
 	runJs,
@@ -195,4 +196,50 @@ func Main() int {
 `).run("Main");
 	assertEqual(res.jsRes, 1010203050813);
 	assertEqual(res.wasmRes, 1010203050813n);
+});
+
+section("Shadowed loop variable");
+
+test("i := i inside a three-clause for body", async () => {
+	const src = `package main
+
+import "fmt"
+
+func main() {
+	guard := 0
+	for i := 0; i < 2; i++ {
+		guard++
+		if guard > 10 {
+			panic("loop guard")
+		}
+		i := i
+		fmt.Println(i)
+	}
+}
+`;
+	const { js, errors } = compile(src);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "0\n1");
+	await assertProgramOutput(src, "0\n1\n");
+});
+
+test("a shadowing := that reads the outer variable in nested blocks", () => {
+	const { js, errors } = compile(`package main
+
+import "fmt"
+
+func main() {
+	x := 1
+	{
+		x := x + 1
+		fmt.Println(x)
+	}
+	if x := x * 5; x > 2 {
+		fmt.Println(x)
+	}
+	fmt.Println(x)
+}
+`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "2\n5\n1");
 });

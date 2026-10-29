@@ -2688,6 +2688,15 @@ export class ExprsEmitter {
 		const fromWType = this.toWasmType(fromType);
 		const toWType = this.toWasmType(targetType);
 
+		// `[]T(nil)` and `(*T)(nil)`: the target type's nil, not a converted value.
+		if (
+			(expr.kind === "Ident" && expr.name === "nil") ||
+			(expr.kind === "BasicLit" && expr.litKind === "NIL")
+		) {
+			this._emitNilValue(targetType, toWType);
+			return;
+		}
+
 		this.emitExpr(expr, fromWType);
 
 		if (isComplex(targetType)) {

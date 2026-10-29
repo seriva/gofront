@@ -24,6 +24,7 @@ import {
 	markInBoundsIndexes,
 	normalizeDefers,
 	scanAddressTaken,
+	someChild,
 } from "../../lower/index.js";
 import {
 	BROWSER_GLOBALS,
@@ -189,6 +190,25 @@ const HELPER_MAP = [
 // JS bodies of `//gofront:intrinsic` functions (names: INTRINSICS in
 // typechecker/types.js).  The WASM backend keeps their empty body.
 const JS_INTRINSICS = {};
+
+// True when `node` compares the identifier `name` with nil (`l == nil`): a
+// pointer-receiver method that does so is meant to run on a nil receiver.
+function comparesToNil(node, name) {
+	if (Array.isArray(node)) return node.some((n) => comparesToNil(n, name));
+	if (!node || typeof node !== "object") return false;
+	if (node.kind === "BinaryExpr" && (node.op === "==" || node.op === "!=")) {
+		const isRecv = (e) => e?.kind === "Ident" && e.name === name;
+		const isNil = (e) =>
+			(e?.kind === "Ident" && e.name === "nil") ||
+			(e?.kind === "BasicLit" && e.litKind === "NIL");
+		if (
+			(isRecv(node.left) && isNil(node.right)) ||
+			(isRecv(node.right) && isNil(node.left))
+		)
+			return true;
+	}
+	return someChild(node, (c) => comparesToNil(c, name));
+}
 
 export class CodeGen {
 	// jsImports:       Map<importPath, string[]> — npm package imports to emit at top of file
@@ -501,11 +521,14 @@ export class CodeGen {
 
 	_collectMethodMap(program) {
 		const methods = new Map();
+		this.nilSafeMethods = new Set();
 		for (const d of program.decls) {
 			if (d.kind === "MethodDecl") {
 				const name = d.recvType.name;
 				if (!methods.has(name)) methods.set(name, []);
 				methods.get(name).push(d);
+				if (d.recvPointer && comparesToNil(d.body, d.recvName))
+					this.nilSafeMethods.add(`${name}.${d.name}`);
 			}
 		}
 		return methods;
@@ -1225,6 +1248,7 @@ export class CodeGen {
 			} else {
 				const zero = spec.type ? this.zeroValueForTypeNode(spec.type) : "null";
 				for (const name of spec.names) {
+					if (name === "_") continue;
 					this._markOwnership(name, true);
 					const val = this._boxedVars.has(name) ? `{ value: ${zero} }` : zero;
 					this.line(`let ${name} = ${val};`);
@@ -1235,6 +1259,11 @@ export class CodeGen {
 
 	// `var a = v` / `var a, b = v1, v2` / `var a, b = f()`, boxing address-taken names.
 	_emitVarBindings(names, vals, paired) {
+		if (names.length === 1 && names[0] === "_") {
+			// A blank binding only runs its initialiser (`var _ = f()` may repeat).
+			this.line(`void (${vals[0]});`);
+			return;
+		}
 		if (names.length === 1) {
 			const val = this._boxedVars.has(names[0])
 				? `{ value: ${vals[0]} }`
@@ -1243,7 +1272,8 @@ export class CodeGen {
 			return;
 		}
 		const rhs = paired ? `[${vals.join(", ")}]` : vals[0];
-		this.line(`let [${names.join(", ")}] = ${rhs};`);
+		const targets = names.map((n) => (n === "_" ? "" : n));
+		this.line(`let [${targets.join(", ")}] = ${rhs};`);
 		this._boxDeclaredNames(names);
 	}
 

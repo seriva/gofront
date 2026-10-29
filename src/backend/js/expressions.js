@@ -457,7 +457,9 @@ const BUILTIN_GEN = {
 			const name = t.name ?? (t.kind === "named" ? t.name : null);
 			if (name) return `new ${name}()`;
 		}
-		return `{ value: ${s.zeroValueForExpr(arg)} }`;
+		// `new([4]byte)`: the type argument is wrapped in a TypeExpr node.
+		const zero = s.zeroValueForExpr(arg.kind === "TypeExpr" ? arg.type : arg);
+		return `{ value: ${zero} }`;
 	},
 	// `print` writes without a trailing newline (Go semantics); the wasm glue
 	// buffers the same way, so output parity holds across backends.
@@ -945,7 +947,7 @@ export const expressionGenMethods = {
 		// Dereference: *p
 		if (op === "*") {
 			if (this._isStructPointerType(expr.operand._type)) {
-				return this.genExpr(expr.operand);
+				return this._genNilChecked(this.genExpr(expr.operand));
 			}
 			return `${this.genExpr(expr.operand)}.value`;
 		}
@@ -1530,6 +1532,15 @@ export const expressionGenMethods = {
 			if (result !== undefined) return result;
 		}
 
+		const nilSafe = this._nilSafeMethodClass(expr.func);
+		if (nilSafe) {
+			// The method tests its receiver for nil: call it through the
+			// prototype so a nil `this` reaches it instead of a TypeError.
+			const recv = this.genExpr(expr.func.expr);
+			const rest = this._genCallArgs(expr);
+			return `${nilSafe}.prototype.${expr.func.field}.call(${rest ? `${recv}, ${rest}` : recv})`;
+		}
+
 		expr.func._callee = true;
 		const rawFn = this.genExpr(expr.func);
 		const fn = expr.func.kind === "FuncLit" ? `(${rawFn})` : rawFn;
@@ -1537,6 +1548,17 @@ export const expressionGenMethods = {
 		const zeros = this._genericCallZeros(expr);
 		if (!zeros) return `${fn}(${args})`;
 		return `${fn}(${args ? `${zeros}, ${args}` : zeros})`;
+	},
+
+	// The class of a pointer-receiver struct method that accepts a nil receiver
+	// when `func` selects it on a pointer of exactly that struct, else null.
+	_nilSafeMethodClass(func) {
+		if (func?.kind !== "SelectorExpr" || func._isMethodExpr) return null;
+		const t = func.expr?._type;
+		if (t?.kind !== "pointer" || t.base?.kind !== "named") return null;
+		const cls = t.base.name;
+		if (t.base.typeArgs?.length) return null;
+		return this.nilSafeMethods?.has(`${cls}.${func.field}`) ? cls : null;
 	},
 
 	// The leading zero-value factories of a call to a generic function
@@ -1770,7 +1792,12 @@ export const expressionGenMethods = {
 			(t?.kind === "named" && t.underlying?.kind === "map")
 		)
 			return `((__m) => { for (const __k in __m) delete __m[__k]; })(${js})`;
-		return `(${js}).length = 0`;
+		// A slice: every element goes back to its zero value (the length stays).
+		const st = t?.kind === "named" ? t.underlying : t;
+		const zero = this.zeroValueForType(st?.elem);
+		if (/^(new |\{|\[|Array|__nm\()|\$z_/.test(zero))
+			return `((__s) => { if (__s) for (let __i = 0; __i < __s.length; __i++) __s[__i] = ${zero}; })(${js})`;
+		return `(${js})?.fill(${zero})`;
 	},
 
 	_genBuiltinIdent(name, expr) {
@@ -1822,12 +1849,16 @@ export const expressionGenMethods = {
 		// make(map[K]V) → {}
 		const typeArg = expr.args[0];
 		const typeNode = typeArg.kind === "TypeExpr" ? typeArg.type : typeArg;
-		const resolvedKind = typeArg._type?.kind;
+		// A defined type (`type S []int`) makes like its underlying type.
+		const madeType =
+			typeArg._type?.kind === "named"
+				? typeArg._type.underlying
+				: typeArg._type;
+		const resolvedKind = madeType?.kind;
 		if (typeNode.kind === "SliceType" || resolvedKind === "slice") {
 			const n = expr.args[1] ? this.genExpr(expr.args[1]) : "0";
 			const elemNode = typeNode.kind === "SliceType" ? typeNode.elem : null;
-			const elemResolved =
-				typeArg._type?.kind === "slice" ? typeArg._type.elem : null;
+			const elemResolved = madeType?.kind === "slice" ? madeType.elem : null;
 			const typedCtor =
 				typedArrayConstructorForElem(elemResolved) ??
 				(elemNode?.name
@@ -1949,7 +1980,7 @@ export const expressionGenMethods = {
 				(ce) => (ce._positionalField ?? ce.key?.name) === ef,
 			);
 			values[idx] = match
-				? this.genValueExpr(match.value ?? match)
+				? this.genValueExpr(match.kind === "KeyValueExpr" ? match.value : match)
 				: fields[idx].zero;
 		} else {
 			const valExpr = this.genExpr(e.value);
@@ -2783,6 +2814,8 @@ export const expressionGenMethods = {
 	},
 
 	_genSliceTypeConversion(expr, inner, t) {
+		// `[]T(nil)` is the nil slice, not a copy of anything.
+		if (this._isNilLiteral(expr.expr)) return "null";
 		const elem = t.elem?.name;
 		if (elem === "byte" || elem === "uint8") {
 			if (this._isStringExprType(expr.expr._type))
