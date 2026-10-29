@@ -100,7 +100,8 @@ export const statementCheckMethods = {
 		const resolvedBase =
 			mapBaseType?.kind === "named" ? mapBaseType.underlying : mapBaseType;
 		if (resolvedBase?.kind !== "map") return false;
-		this.checkExpr(stmt.rhs[0].index, scope);
+		const keyType = this.checkExpr(stmt.rhs[0].index, scope);
+		this._markIfaceKey(resolvedBase, stmt.rhs[0].index, keyType);
 		stmt._commaOkMap = true;
 		stmt.rhs[0]._mapValueType = resolvedBase.value;
 		this._declareDefineVars(stmt, [resolvedBase.value, BOOL], scope);
@@ -158,7 +159,8 @@ export const statementCheckMethods = {
 		const resolvedBase =
 			mapBaseType?.kind === "named" ? mapBaseType.underlying : mapBaseType;
 		if (resolvedBase?.kind !== "map") return null;
-		this.checkExpr(stmt.rhs[0].index, scope);
+		const keyType = this.checkExpr(stmt.rhs[0].index, scope);
+		this._markIfaceKey(resolvedBase, stmt.rhs[0].index, keyType);
 		stmt._commaOkMap = true;
 		stmt.rhs[0]._mapValueType = resolvedBase.value;
 		return [resolvedBase.value, BOOL];
@@ -361,6 +363,19 @@ export const statementCheckMethods = {
 		this._reportUnused(inner, stmt);
 	},
 
+	// A case naming an interface (literal or declared) records the resolved
+	// type so backends test its method set.
+	_markInterfaceCaseType(t, scope) {
+		if (!t || (t.kind !== "InterfaceType" && t.kind !== "TypeName")) return;
+		if (t.kind === "TypeName" && (t.name === "nil" || t.name === "error"))
+			return;
+		const resolved = this.resolveTypeNode(t, scope);
+		const u = this.resolveType(
+			resolved?.kind === "named" ? resolved.underlying : resolved,
+		);
+		if (u?.kind === "interface") t._type = resolved;
+	},
+
 	_checkTypeSwitchStmt(stmt, scope, returnType) {
 		const inner = new Scope(scope);
 		this.checkExpr(stmt.expr, inner);
@@ -373,6 +388,7 @@ export const statementCheckMethods = {
 			for (const t of c.types ?? []) {
 				const base = t?.kind === "PointerType" ? t.base : t;
 				if (base?.kind === "GenericTypeName") this.resolveTypeNode(t, inner);
+				this._markInterfaceCaseType(t, inner);
 			}
 			if (stmt.assign) {
 				// Bind the variable to the single case type, or any for multi/default.

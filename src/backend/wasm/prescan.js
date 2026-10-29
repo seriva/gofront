@@ -239,7 +239,9 @@ export function _scanInterfaceCallNodes(node, interfaceCalls, checker) {
 	if (node.kind === "CallExpr" && node.func?.kind === "SelectorExpr") {
 		const recvType = node.func.expr?._type;
 		if (isNonEmptyInterface(recvType, checker)) {
-			const ifaceName = getReceiverTypeName(recvType, node.func.expr) || "anon";
+			const ifaceName =
+				getReceiverTypeName(recvType, node.func.expr) ||
+				anonIfaceName(recvType);
 			const methodName = node.func.field;
 			const key = `${ifaceName}.${methodName}`;
 			if (!interfaceCalls.has(key)) {

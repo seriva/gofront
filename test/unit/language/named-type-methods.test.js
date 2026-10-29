@@ -593,6 +593,293 @@ func main() {
 	);
 });
 
+test("explicit conversion to an interface boxes named basic types", () => {
+	const { js, errors } = compile(`package main
+type L string
+type Level int
+type N int
+func main() {
+	console.log(any(L("x")).(L))
+	z := any(Level(1))
+	console.log(z.(Level) + 1)
+	var e any = N(2)
+	console.log(e == any(N(2)))
+	_, ok := any(L("x")).(string)
+	console.log(ok)
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "x\n2\ntrue\nfalse");
+});
+
+test("interface-keyed maps keep named and plain keys distinct", () => {
+	const { js, errors } = compile(`package main
+import "fmt"
+type L string
+type N int
+func main() {
+	set := map[any]bool{}
+	set[any(L("a"))] = true
+	set[any(L("b"))] = true
+	fmt.Println(len(set), set[any(L("a"))])
+	m := map[any]int{}
+	var k any = L("a")
+	m[k] = 1
+	m[any(N(1))] = 2
+	fmt.Println(len(m), m[k], m[any(L("a"))], m[any(N(1))])
+	m2 := map[any]int{}
+	m2[L("a")] = 1
+	var k2 any = L("a")
+	fmt.Println(m2[k2])
+	m3 := map[any]int{L("a"): 1, N(1): 2, "1": 3, 1: 4, L("1"): 5}
+	fmt.Println(len(m3), m3[L("a")], m3[N(1)], m3["1"], m3[1], m3[L("1")])
+	m3[L("a")] += 10
+	n := 0
+	for key, v := range m3 {
+		if l, ok := key.(L); ok && l == "a" { n += v }
+		if x, ok := key.(N); ok && x == 1 { n += v * 100 }
+	}
+	fmt.Println(n)
+	v, ok := m3[any(L("a"))]
+	fmt.Println(v, ok)
+	delete(m3, L("a"))
+	_, ok = m3[L("a")]
+	fmt.Println(len(m3), ok)
+	m4 := map[any]int{"x": 1, 2: 2, struct{ A int }{1}: 3}
+	fmt.Println(len(m4), m4["x"], m4[2], m4[struct{ A int }{1}])
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(
+		runJs(js),
+		"2 true\n2 1 1 2\n1\n5 1 2 3 4 5\n211\n11 true\n4 false\n3 1 2 3",
+	);
+});
+
+test("interface-keyed map literals encode keys when named, nested or elided", () => {
+	const { js, errors } = compile(`package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+type L string
+type M map[any]int
+type Named map[any]int
+type E map[error]int
+type S map[fmt.Stringer]int
+type Str string
+
+func (s Str) String() string { return string(s) }
+
+func main() {
+	x := M{1: 1}
+	fmt.Println(x[1])
+	a := map[string]map[any]int{"a": {1: 2}}
+	fmt.Println(a["a"][1])
+	b := []map[any]int{{1: 2}}
+	fmt.Println(b[0][1])
+	c := [1]map[any]int{{1: 1}}
+	fmt.Println(c[0][1])
+	d := map[any]map[any]int{1: {2: 3}}
+	fmt.Println(d[1][2])
+	n := Named{L("x"): 1, "x": 2, 3: 4}
+	fmt.Println(len(n), n[L("x")], n["x"], n[3])
+	e1 := errors.New("e")
+	e := E{e1: 5}
+	fmt.Println(e[e1])
+	ee := []map[error]int{{e1: 6}}
+	fmt.Println(ee[0][e1])
+	s := S{Str("q"): 7}
+	fmt.Println(s[Str("q")])
+	ss := map[string]S{"k": {Str("z"): 8}}
+	fmt.Println(ss["k"][Str("z")])
+	f := map[string]any{"a": 1}
+	_ = f
+	g := map[any]int{"s": 1, 2: 2}
+	fmt.Println(g["s"], g[2])
+	h := map[string]Named{"a": {L("y"): 9, 1: 10}}
+	fmt.Println(h["a"][L("y")], h["a"][1])
+	var p *map[any]int
+	_ = p
+	m2 := map[any]int{L("a"): 1}
+	m2[L("a")]++
+	m2[L("a")] += 3
+	fmt.Println(m2[L("a")])
+}
+`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "1\n2\n2\n1\n3\n3 1 2 4\n5\n6\n7\n8\n1 2\n9 10\n5");
+});
+
+test("generic functions key map[any] like plain code", () => {
+	const { js, errors } = compile(`package main
+
+import "fmt"
+
+type L string
+type K struct {
+	A string
+	B int
+}
+
+func Inc[K comparable](m map[K]int, k K) { m[k]++ }
+func Set[K comparable, V any](m map[K]V, k K, v V) { m[k] = v }
+func Get[K comparable, V any](m map[K]V, k K) V { return m[k] }
+func Has[K comparable, V any](m map[K]V, k K) bool { _, ok := m[k]; return ok }
+func Del[K comparable, V any](m map[K]V, k K) { delete(m, k) }
+func Add[K comparable](m map[K]int, k K, n int) { m[k] += n }
+func Put[K comparable](m map[any]int, k K) { m[k] = 5 }
+func Cnt[K comparable](m map[K]int) int { return len(m) }
+func Lit[K comparable](k K) map[K]int { return map[K]int{k: 3} }
+func Rng[K comparable](m map[K]int) int {
+	n := 0
+	for k, v := range m {
+		_ = k
+		n += v
+	}
+	return n
+}
+func Keys[K comparable](m map[K]int) []K {
+	var r []K
+	for k := range m {
+		r = append(r, k)
+	}
+	return r
+}
+
+func main() {
+	g := map[any]int{}
+	Inc(g, any(1))
+	fmt.Println(g[1])
+	Set(g, any(2), 5)
+	fmt.Println(g[2])
+	g[3] = 7
+	fmt.Println(Get(g, any(3)))
+	fmt.Println(Has(g, any(3)), Has(g, any(4)))
+	Add(g, any(1), 10)
+	fmt.Println(g[1], Cnt(g), Rng(g))
+	Del(g, any(1))
+	fmt.Println(len(g))
+	m := map[any]int{}
+	Put(m, L("a"))
+	fmt.Println(m[L("a")], m["a"])
+	Put(m, 7)
+	fmt.Println(m[7])
+	Inc(g, any(L("z")))
+	fmt.Println(g[L("z")])
+	for _, k := range Keys(g) {
+		_ = k
+	}
+	l := Lit(any(L("q")))
+	fmt.Println(l[L("q")])
+	l2 := Lit(5)
+	fmt.Println(l2[5])
+	l3 := Lit("s")
+	fmt.Println(l3["s"])
+
+	mi := map[int]int{}
+	Inc(mi, 4)
+	Set(mi, 5, 6)
+	fmt.Println(mi, Get(mi, 5))
+	ms := map[string]int{}
+	Inc(ms, "a")
+	Set(ms, "b", 2)
+	fmt.Println(ms, Get(ms, "b"), Rng(ms))
+	mk := map[K]int{}
+	Inc(mk, K{"a", 1})
+	Inc(mk, K{"a", 1})
+	Set(mk, K{"b", 2}, 9)
+	fmt.Println(mk, Get(mk, K{"a", 1}), Has(mk, K{"b", 2}), Rng(mk))
+	mka := map[any]int{}
+	Inc(mka, any(K{"a", 1}))
+	Set(mka, any(K{"a", 1}), 4)
+	fmt.Println(mka[K{"a", 1}], len(mka))
+}
+`);
+	assertEqual(errors.length, 0);
+	assertEqual(
+		runJs(js),
+		"1\n5\n7\ntrue false\n11 3 23\n2\n5 0\n5\n1\n3\n3\n3\nmap[4:1 5:6] 6\nmap[a:1 b:2] 2 3\nmap[{a 1}:2 {b 2}:9] 2 true 11\n4 1",
+	);
+});
+
+test("generic types key map[K] by the instantiated type", () => {
+	const { js, errors } = compile(`package main
+
+import "fmt"
+
+type L string
+type P struct{ X, Y int }
+type USet[K comparable] struct{ m map[K]int }
+
+func NewUSet[K comparable]() *USet[K] { return &USet[K]{m: map[K]int{}} }
+func (s *USet[K]) Add(k K)           { s.m[k]++ }
+func (s *USet[K]) Has(k K) bool      { _, ok := s.m[k]; return ok }
+func (s *USet[K]) Count(k K) int     { return s.m[k] }
+func (s *USet[K]) Del(k K)           { delete(s.m, k) }
+
+func Wrap[K comparable](m map[any]int, k K) int { m[k] += 2; return m[k] }
+func Outer[K comparable](m map[K]int, k K) { Inc2(m, k); Inc2(m, k) }
+func Inc2[K comparable](m map[K]int, k K) { m[k]++ }
+
+func main() {
+	a := NewUSet[any]()
+	a.Add(L("x"))
+	a.Add("x")
+	a.Add(1)
+	a.Add(1)
+	fmt.Println(a.Has(L("x")), a.Has("x"), a.Count(1), a.Has(2), len(a.m))
+	a.Del(1)
+	fmt.Println(a.Has(1))
+	b := NewUSet[int]()
+	b.Add(3)
+	fmt.Println(b.Has(3), b.Count(3), b.m)
+	c := NewUSet[P]()
+	c.Add(P{1, 2})
+	c.Add(P{1, 2})
+	fmt.Println(c.Count(P{1, 2}), c.Has(P{2, 1}), len(c.m))
+	d := NewUSet[string]()
+	d.Add("q")
+	fmt.Println(d.m, d.Has("q"))
+	m := map[any]int{}
+	fmt.Println(Wrap(m, 5), Wrap(m, L("z")), Wrap(m, "z"), Wrap(m, 5), m[5], m[L("z")], m["z"])
+	g := map[any]int{}
+	Outer(g, any(L("k")))
+	fmt.Println(g[L("k")], len(g))
+	e := NewUSet[L]()
+	e.Add("a")
+	fmt.Println(e.Has("a"), e.m)
+}
+`);
+	assertEqual(errors.length, 0);
+	assertEqual(
+		runJs(js),
+		"true true 2 false 3\nfalse\ntrue 1 map[3:1]\n2 false 1\nmap[q:1] true\n2 2 2 4 4 2 2\n2 1\ntrue map[a:1]",
+	);
+});
+
+test("named map literals with struct keys compile", () => {
+	const { js, errors } = compile(`package main
+
+import "fmt"
+
+type K struct {
+	A string
+	B int
+}
+type KS map[K]int
+
+func main() {
+	x := KS{{"x", 1}: 9}
+	fmt.Println(x[K{"x", 1}], len(x))
+	y := map[string]KS{"a": {{"q", 2}: 3}}
+	fmt.Println(y["a"][K{"q", 2}])
+}
+`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "9 1\n3");
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

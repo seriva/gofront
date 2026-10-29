@@ -280,6 +280,7 @@ export const HELPER_VCLONE = `var __vclone = __vclone || function __vclone(z, x)
 // type arguments with ===.  Decided at run time from the zero-value factory.
 export const HELPER_GEQ = `var __geq = __geq || function(z, a, b) {
   if (a === b) return true;
+  if (z?.k === "iface") return __ifeq(a, b);
   if (a === null || b === null || typeof a !== "object" || typeof b !== "object") return false;
   const zero = z?.();
   if (zero === null || zero === undefined || typeof zero !== "object") return false;
@@ -471,7 +472,30 @@ export const HELPER_GENERICS = `var __tz = __tz || Symbol.for("gofront.typeArgs"
 var __zn = __zn || (() => null);
 var __z0 = __z0 || (() => 0);
 var __zs = __zs || (() => "");
-var __zf = __zf || (() => false);`;
+var __zf = __zf || (() => false);
+var __ti = __ti || function(f, k, id, is, u, b) {
+  const g = () => f();
+  g.k = k; g.id = id; g.is = is; g.u = u; g.b = b;
+  return g;
+};
+var __tid = __tid || function(...ids) {
+  return ids.every((i) => i !== undefined) ? ids.join(",") : undefined;
+};
+var __tconv = __tconv || function(f, v) {
+  v = typeof v === "bigint" ? Number(v) : v;
+  switch (f?.k) {
+    case "int": case "int64": case "uint": case "uint64": case "uintptr": return Math.trunc(Number(v));
+    case "int8": return (Number(v) << 24) >> 24;
+    case "int16": return (Number(v) << 16) >> 16;
+    case "int32": case "rune": return Number(v) | 0;
+    case "uint8": case "byte": return Number(v) & 0xFF;
+    case "uint16": return Number(v) & 0xFFFF;
+    case "uint32": return Number(v) >>> 0;
+    case "float32": return Math.fround(Number(v));
+    case "float64": return Number(v);
+    default: return v;
+  }
+};`;
 
 // Strict-mode nil maps: the zero value of a map type is one frozen empty
 // object, so reads, `len` and `range` behave as on an empty map, and every
@@ -492,6 +516,57 @@ var __isnm = __isnm || function(m) {
   return m == null || m.__nilm === true || (m.__nm === true && Object.keys(m).length === 0);
 };`;
 
+// Struct map keys: a JS object key is a string, so a struct key is coerced
+// through `toString` to an injective encoding, and the key value is kept in
+// a table so ranging and fmt can recover it.
+export const HELPER_STRUCT_KEY = `var __kt = __kt || new Map();
+var __sk = __sk || function(o) {
+  const s = "\\u0001" + JSON.stringify(o, (k, v) => typeof v === "bigint" ? v.toString() + "n" : v);
+  if (!__kt.has(s)) __kt.set(s, typeof o.__clone === "function" ? o.__clone() : o);
+  return s;
+};
+var __ik = __ik || function(k) {
+  const t = typeof k;
+  if (t === "number" || t === "boolean" || t === "bigint") return "\\u0001" + t + ":" + String(k);
+  if (k !== null && t === "object" && typeof k.__gfUnbox === "function" && !k.constructor.name.endsWith("$Ptr")) {
+    const v = k.__gfUnbox(), vt = typeof v;
+    if (vt === "string" || vt === "number" || vt === "boolean" || vt === "bigint") {
+      const s = "\\u0001" + k.constructor.name + ":" + vt + ":" + String(v);
+      if (!__kt.has(s)) __kt.set(s, k);
+      return s;
+    }
+  }
+  return k;
+};
+// A key typed by a type parameter whose factory is \`f\`: interface type
+// arguments key by dynamic type; \`box\` (an \`any\`-keyed map) boxes a named
+// basic value first, other keys are left as they are.
+var __ikt = __ikt || function(f, k, box) {
+  if (f?.k === "iface") return __ik(k);
+  return box ? __ik(f?.b ? f.b(k) : k) : k;
+};
+var __kd = __kd || function(s, copy) {
+  if (typeof s !== "string" || s.charCodeAt(0) !== 1) return s;
+  const k = __kt.get(s);
+  if (k === undefined) {
+    if (s.startsWith("\\u0001number:")) return Number(s.slice(8));
+    if (s.startsWith("\\u0001boolean:")) return s.slice(9) === "true";
+    if (s.startsWith("\\u0001bigint:")) return BigInt(s.slice(8));
+    return s;
+  }
+  return copy && typeof k.__clone === "function" ? k.__clone() : k;
+};
+var __kcmp = __kcmp || function(a, b) {
+  if (a !== null && b !== null && typeof a === "object" && typeof b === "object") {
+    for (const f of Object.keys(a)) {
+      const c = __kcmp(a[f], b[f]);
+      if (c !== 0) return c;
+    }
+    return 0;
+  }
+  return a < b ? -1 : a > b ? 1 : 0;
+};`;
+
 // Interface equality: named non-struct values are boxed in interfaces, so two
 // boxes are equal when they share a type and hold the same value (as in Go).
 export const HELPER_IFEQ = `var __ifeq = __ifeq || function(a, b) {
@@ -499,6 +574,10 @@ export const HELPER_IFEQ = `var __ifeq = __ifeq || function(a, b) {
   if (a === null || a === undefined || b === null || b === undefined) return a == null && b == null;
   if (typeof a === "object" && typeof b === "object" && a.constructor === b.constructor && typeof a.__gfUnbox === "function") {
     return a.__gfUnbox() === b.__gfUnbox();
+  }
+  // Struct values boxed by __ifv compare field by field.
+  if (typeof a === "object" && typeof b === "object" && a.__v === true && b.__v === true && a.constructor === b.constructor) {
+    return __equal(a, b);
   }
   return false;
 };`;
@@ -708,6 +787,9 @@ var __sprintf = __sprintf || function(f, ...a) {
           }
         } else {
           const keys = Object.keys(val).sort((a, b) => {
+            // Struct keys (encoded, see __sk) sort field by field, as in Go.
+            if (a.charCodeAt(0) === 1 && b.charCodeAt(0) === 1 && typeof __kd === "function")
+              return __kcmp(__kd(a), __kd(b));
             const na = Number(a), nb = Number(b);
             if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
             if (a[0] === "{" && b[0] === "{") {
@@ -728,7 +810,7 @@ var __sprintf = __sprintf || function(f, ...a) {
             if (isElemPtr && v !== null && typeof v === "object") {
               markPtr(v);
             }
-            const kv = cd?.k?.n ? Number(k) : k;
+            const kv = k.charCodeAt(0) === 1 && typeof __kd === "function" ? __kd(k) : cd?.k?.n ? Number(k) : k;
             parts.push(formatV(kv, isPlus, false, ro, cd?.k, cd?.k?.sv === 1) + ":" + formatV(v, isPlus, false, ro, cd?.v, cd?.v?.sv === 1));
           }
         }
@@ -893,6 +975,7 @@ export const HELPER_ERROR_JOIN = `var __errorJoin = __errorJoin || function(...e
   const joined = __error(msg);
   joined._errs = filtered;
   joined.Unwrap = function() { return filtered; };
+  joined.Unwrap.__multi = true;
   return joined;
 };`;
 

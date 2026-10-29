@@ -864,6 +864,7 @@ export class TypeChecker {
 				name: decl.name,
 				typeParams: typeParamTypes,
 				underlying: funcType,
+				declNode: decl,
 			});
 		} else {
 			this.globals.define(decl.name, funcType);
@@ -915,6 +916,7 @@ export class TypeChecker {
 
 	_attachMethod(decl, funcType) {
 		funcType._ptrRecv = Boolean(decl.recvPointer);
+		funcType._decl = decl;
 		const recvNamedType = this.types.get(decl.recvType.name);
 		if (recvNamedType?._generic)
 			this._attachGenericMethod(recvNamedType, decl, funcType);

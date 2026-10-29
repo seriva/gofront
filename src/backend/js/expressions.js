@@ -40,7 +40,7 @@ export function comparesToNil(node, name) {
 /** @typedef {import('./index.js').CodeGen} CodeGen */
 
 // True when type `t` mentions a type parameter anywhere.
-function mentionsTypeParam(t, depth = 0) {
+export function mentionsTypeParam(t, depth = 0) {
 	if (!t || depth > 16) return false;
 	switch (t.kind) {
 		case "typeParam":
@@ -70,7 +70,7 @@ function mentionsTypeParam(t, depth = 0) {
 // arguments' printed form, kept after the zero-value factories in the
 // instance's `__tz` array.  Null when an argument is a type parameter (the
 // instantiation is not known inside erased generic code).
-function instanceId(typeArgs) {
+export function instanceId(typeArgs) {
 	if (!typeArgs?.length || typeArgs.some((t) => mentionsTypeParam(t)))
 		return null;
 	return typeArgs.map(typeStr).join(",");
@@ -589,6 +589,35 @@ function hasTypeParamType(t) {
 
 export const expressionGenMethods = {
 	genExpr(expr) {
+		if (expr._ifaceKeyDyn && !expr._ifaceKeying) {
+			// A key typed by a type parameter: encode it for the instantiated type.
+			const f = this._typeParamZeroFactory(expr._ifaceKeyParam);
+			if (f) {
+				expr._ifaceKeying = true;
+				try {
+					this.useHelper("structKey");
+					const box = expr._ifaceKeyDyn === "box" ? ", true" : "";
+					return `__ikt(${f}, ${this.genExpr(expr)}${box})`;
+				} finally {
+					expr._ifaceKeying = false;
+				}
+			}
+		}
+		if (expr._ifaceKey && !expr._ifaceKeying) {
+			// A string key is its own property key; any other dynamic value is
+			// encoded with its type (see HELPER_STRUCT_KEY).
+			const plain =
+				!this._isNamedBoxKind(expr) && this._isStringExprType(expr._type);
+			if (!plain) {
+				expr._ifaceKeying = true;
+				try {
+					this.useHelper("structKey");
+					return `__ik(${this.genExpr(expr)})`;
+				} finally {
+					expr._ifaceKeying = false;
+				}
+			}
+		}
 		if (this._isNamedIfaceBox(expr)) return this._genNamedIfaceBoxExpr(expr);
 		if (expr._ifaceSrc && !expr._fmtDescing && !this._isNamedBoxKind(expr)) {
 			const desc = this._fmtDesc(expr._ifaceSrc);
@@ -1244,7 +1273,11 @@ export const expressionGenMethods = {
 		const fn = this.genExpr(expr.expr);
 		if (!expr._genericFnType || expr._callee) return fn;
 		const { typeParams } = expr._genericFnType;
-		const zeros = this._typeArgFactories(typeParams, expr._typeArgs);
+		const zeros = this._typeArgFactories(
+			typeParams,
+			expr._typeArgs,
+			this._genericFnNeedsTypeInfo(expr._genericFnType),
+		);
 		return `((...a) => ${fn}(${zeros.join(", ")}, ...a))`;
 	},
 
@@ -1440,9 +1473,7 @@ export const expressionGenMethods = {
 		const check = this._typeCheckExpr(expr.type, val);
 		const wrap = (body) => (hoist ? `((__v) => ${body})(${src})` : body);
 		// Named non-struct values sit in interfaces as boxes; the asserted value is raw.
-		const out = this._isNamedBoxTypeNode(expr.type)
-			? `${val}.__gfUnbox()`
-			: val;
+		const out = this._assertedValueJs(expr.type, val);
 		if (!expr._commaOk) {
 			// plain assertion: panic if check fails (matches Go behavior)
 			if (check === "true") return src; // can't check at runtime — pass through
@@ -1466,6 +1497,9 @@ export const expressionGenMethods = {
 	},
 
 	_typeNameCheckExpr(typeName, val) {
+		// A type parameter: the instantiated type's test travels with its factory.
+		const factory = this._typeParamZeroFactory(typeName);
+		if (factory) return `(${factory}?.is?.(${val}) ?? true)`;
 		const name = this._qualifiedStructName(typeName);
 		if (TYPEOF_NUMBER_NAMES.has(name)) return `typeof ${val} === "number"`;
 		if (name === "string") return `typeof ${val} === "string"`;
@@ -1485,7 +1519,11 @@ export const expressionGenMethods = {
 		if (namedInfo) return `(${val} instanceof ${namedInfo.cls})`;
 		// User-declared interfaces: check the dynamic value has every method.
 		if (!name.includes(".") && named?.underlying?.kind === "interface")
-			return this._ifaceMethodCheck(val, [...named.underlying.methods.keys()]);
+			return this._ifaceMethodCheck(
+				val,
+				[...named.underlying.methods.keys()],
+				this._unwrapIsMulti(named.underlying.methods.get("Unwrap")),
+			);
 		return "true"; // unknown type — can't check at runtime
 	},
 
@@ -1495,6 +1533,9 @@ export const expressionGenMethods = {
 			return this._ifaceMethodCheck(
 				val,
 				(typeNode.methods ?? []).map((m) => m.name),
+				this._unwrapIsMulti(
+					(typeNode.methods ?? []).find((m) => m.name === "Unwrap"),
+				),
 			);
 		if (typeNode.kind === "PointerType" && typeNode.base?.kind === "TypeName") {
 			const info = this._namedBoxInfo(
@@ -1505,9 +1546,35 @@ export const expressionGenMethods = {
 		return null;
 	},
 
-	_ifaceMethodCheck(val, methodNames) {
-		const checks = methodNames.map((m) => `typeof ${val}.${m} === "function"`);
+	// `Unwrap() []error` (errors.Join) and `Unwrap() error` share a name: the
+	// JS function of a multi-error `Unwrap` is tagged `__multi`.  `method` is
+	// a func type or an interface method AST; null when there is no `Unwrap`.
+	_unwrapIsMulti(method) {
+		if (!method) return null;
+		const ret = method.returnType ?? method.returns?.[0];
+		const u = ret?.kind === "named" ? ret.underlying : ret;
+		return u?.kind === "slice" || u?.kind === "SliceType";
+	},
+
+	_ifaceMethodCheck(val, methodNames, multiUnwrap = null) {
+		const checks = methodNames.map((m) =>
+			m === "Unwrap" && multiUnwrap !== null
+				? `typeof ${val}.${m} === "function" && (${val}.${m}.__multi === true) === ${multiUnwrap}`
+				: `typeof ${val}.${m} === "function"`,
+		);
 		return `(${[`${val} != null`, ...checks].join(" && ")})`;
+	},
+
+	// The value an assertion to `typeNode` yields: raw, unboxed from the
+	// interface's box for a named non-struct type (known only at run time
+	// for a type parameter).
+	_assertedValueJs(typeNode, val) {
+		if (this._isNamedBoxTypeNode(typeNode)) return `${val}.__gfUnbox()`;
+		const factory =
+			typeNode?.kind === "TypeName"
+				? this._typeParamZeroFactory(typeNode.name)
+				: null;
+		return factory ? `(${factory}?.u ? ${val}.__gfUnbox() : ${val})` : val;
 	},
 
 	_isNamedBoxTypeNode(typeNode) {
@@ -1539,6 +1606,8 @@ export const expressionGenMethods = {
 	_genTypeConversionCall(expr) {
 		const targetType = expr._conversionTargetType;
 		const arg = this.genExpr(expr.args[0]);
+		const viaParam = this._genTypeParamConversion(targetType?.name, arg);
+		if (targetType?.kind === "typeParam" && viaParam) return viaParam;
 		const structConv = this._genStructClassConversion(
 			targetType?.kind === "named" ? targetType.name : undefined,
 			expr.args[0]?._type,
@@ -1630,7 +1699,11 @@ export const expressionGenMethods = {
 				: null;
 		if (!site) return null;
 		const { typeParams } = site._genericFnType;
-		return this._typeArgFactories(typeParams, site._typeArgs).join(", ");
+		return this._typeArgFactories(
+			typeParams,
+			site._typeArgs,
+			this._genericFnNeedsTypeInfo(site._genericFnType),
+		).join(", ");
 	},
 
 	_isErrorInterfaceType(t) {
@@ -1976,22 +2049,35 @@ export const expressionGenMethods = {
 		return t?.kind === "MapType";
 	},
 
+	// The one place a map literal key becomes a JS property name: a plain
+	// string literal stays as is, any other key is computed so that the key
+	// encoding of `genExpr` (`__ik`, struct keys) applies.
+	_genMapLitKey(key) {
+		return key.litKind === "STRING"
+			? JSON.stringify(key.value)
+			: `[${this.genExpr(key)}]`;
+	},
+
 	_genMapLitEntries(elems) {
 		return elems
-			.map((e) => {
-				if (e.kind === "KeyValueExpr") {
-					const k =
-						e.key.litKind === "STRING"
-							? JSON.stringify(e.key.value)
-							: `[${this.genExpr(e.key)}]`;
-					return `${k}: ${this.genValueExpr(e.value)}`;
-				}
-				return this.genValueExpr(e);
-			})
+			.map((e) =>
+				e.kind === "KeyValueExpr"
+					? `${this._genMapLitKey(e.key)}: ${this.genValueExpr(e.value)}`
+					: this.genValueExpr(e),
+			)
 			.join(", ");
 	},
 
+	// A literal whose (possibly elided or named) type is a map type.
+	_isMapLit(expr) {
+		let t = expr._type;
+		for (let i = 0; t?.kind === "named" && i < 32; i++) t = t.underlying;
+		return t?.kind === "map";
+	},
+
 	_genFallbackCompositeLit(expr) {
+		if (this._isMapLit(expr))
+			return `{ ${this._genMapLitEntries(expr.elems)} }`;
 		const at = this._litArrayType(expr);
 		if (at) {
 			// A named array type without methods (`type V [3]int; V{1}`).
@@ -2296,6 +2382,8 @@ export const expressionGenMethods = {
 		if (typeName && this.structNames.has(typeName)) {
 			return this._genPositionalStructLit(typeName, expr);
 		}
+		if (this._isMapLit(expr))
+			return `{ ${this._genMapLitEntries(expr.elems)} }`;
 		const hasPositional = expr.elems.some((e) => e._positionalField);
 		const hasKeyed = expr.elems.some((e) => e.kind === "KeyValueExpr");
 		// `{2: 5}` inside `[2][3]int{…}` is an array, not an object.
@@ -2429,8 +2517,13 @@ export const expressionGenMethods = {
 	},
 
 	// One factory per type parameter of generic function or type `generic`.
-	_typeArgFactories(typeParams, typeArgs) {
-		return typeParams.map((_, i) => this.zeroFactoryFor(typeArgs?.[i]));
+	// `withInfo`: the callee needs the instantiated types (see type-info.js).
+	_typeArgFactories(typeParams, typeArgs, withInfo = false) {
+		return typeParams.map((_, i) =>
+			withInfo
+				? this._typeInfoFactory(typeArgs?.[i])
+				: this.zeroFactoryFor(typeArgs?.[i]),
+		);
 	},
 
 	// `new Box(args…, [factories])` for an instance of generic struct `name`
@@ -2448,9 +2541,18 @@ export const expressionGenMethods = {
 			{ length: st.fields.size },
 			(_, i) => args[i] ?? "undefined",
 		);
-		const tz = this._typeArgFactories(tps, typeArgs);
+		const tz = this._typeArgFactories(
+			tps,
+			typeArgs,
+			this._genericTypeNeedsTypeInfo(generic) ||
+				typeArgs?.some((t) => mentionsTypeParam(t)),
+		);
 		const id = instanceId(typeArgs);
 		if (id !== null) tz.push(JSON.stringify(id));
+		else {
+			const runtimeId = this._runtimeInstanceId(typeArgs);
+			if (runtimeId) tz.push(runtimeId);
+		}
 		vals.push(`[${tz.join(", ")}]`);
 		return `new ${cls}(${vals.join(", ")})`;
 	},
@@ -2839,9 +2941,19 @@ export const expressionGenMethods = {
 		return expr.op;
 	},
 
+	// `T(x)` with T a type parameter: converts by the instantiated type.
+	_genTypeParamConversion(name, inner) {
+		const factory = name ? this._typeParamZeroFactory(name) : null;
+		if (!factory) return null;
+		this.useHelper("generics");
+		return `__tconv(${factory}, ${inner})`;
+	},
+
 	_genTypeConversion(expr) {
 		const inner = this.genExpr(expr.expr);
 		const t = expr.targetType;
+		const viaParam = this._genTypeParamConversion(t?.name, inner);
+		if (viaParam) return viaParam;
 		if (t?.name === "complex128" || t?.name === "complex64") {
 			return isComplex(expr.expr._type) ? inner : `{ re: ${inner}, im: 0 }`;
 		}
@@ -2857,6 +2969,8 @@ export const expressionGenMethods = {
 		);
 		if (structConv) return structConv;
 		if (target === "error") {
+			// A boxed named value that implements error is already an error.
+			if (this._isNamedBoxKind(expr.expr)) return inner;
 			this.useHelper("error");
 			return `__error(${inner})`;
 		}
