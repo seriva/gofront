@@ -394,15 +394,15 @@ No longer reproducing (deleted from the ledger): promoted field through `Deep2{*
 
 ### Phase 12: JSON
 
-- [ ] Task 12.1: JS `json.Marshal` parity
+- [x] Task 12.1: JS `json.Marshal` parity
   - Files: `src/backend/js/stdlib/json.js`, `test/unit/builtins/json.test.js`
   - Test: nil map → `null`; `P{}` nil map field → `{"M":null}` (also in `both`); `omitempty` empty map → `{}`; struct with tags inside `any` → `{"p":{"street":"S"}}`; `+Inf` → `json: unsupported value: +Inf`; `RawMessage("[1, 2]")` → `[1,2]` (all targets).
   - Done when: all six match WASM and Go.
-- [ ] Task 12.2: JS `json.Unmarshal` parity
+- [x] Task 12.2: JS `json.Unmarshal` parity
   - Files: `src/backend/js/stdlib/json.js`, `test/unit/builtins/json.test.js`
   - Test: `map[string]int` len → `2`; `map[string]any` len → `1`; `[3]int` from `[1,2]` → `[1 2 0]`; nil `*Item` → `json: Unmarshal(nil *main.Item)`; non-pointer `[]int` → `json: Unmarshal(non-pointer []int)` (all targets).
   - Done when: all five match WASM and Go.
-- [ ] Task 12.3: WASM JSON for types reached only through `any`
+- [x] Task 12.3: WASM JSON for types reached only through `any`
   - Files: `src/lower/json-codecs.js`, `test/unit/wasm/json.test.js`
   - Test: `var a any = get()` (`get() []T` returns nil); `json.Marshal(a)` → `null <nil>` (wasm).
   - Done when: no `unsupported dynamic type` error for slice/array/map types stored in `any`.
