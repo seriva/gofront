@@ -453,6 +453,40 @@ func main() {
 	assertEqual(runJs(js), "1 2 2\n0 2\n5\n5");
 });
 
+test("tuple assignment through type-parameter pointers swaps values", () => {
+	const src = `package main
+
+import "fmt"
+
+type S struct{ A int }
+
+func swap[T any](a, b *T) { *a, *b = *b, *a }
+
+func main() {
+	x, y := 1, 2
+	swap[int](&x, &y)
+	fmt.Println(x, y)
+	s, t := S{1}, S{2}
+	swap[S](&s, &t)
+	fmt.Println(s, t)
+	ps, pt := &S{1}, &S{2}
+	swap[*S](&ps, &pt)
+	fmt.Println(ps.A, pt.A)
+	m, n := map[string]int{"a": 1}, map[string]int{"b": 2}
+	swap[map[string]int](&m, &n)
+	fmt.Println(m["b"], n["a"])
+	var i, j any = 1, "z"
+	swap[any](&i, &j)
+	fmt.Println(i, j)
+}
+`;
+	for (const target of ["js", "both"]) {
+		const { js, errors } = compile(src, { target });
+		assertEqual(errors.length, 0);
+		assertEqual(runJs(js), "2 1\n{2} {1}\n2 1\n2 1\nz 1");
+	}
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

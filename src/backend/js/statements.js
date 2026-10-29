@@ -446,6 +446,55 @@ export const statementGenMethods = {
 		);
 	},
 
+	_isTypeParamDerefTarget(l) {
+		return (
+			l.kind === "UnaryExpr" &&
+			l.op === "*" &&
+			l.operand?._type?.base?.kind === "typeParam"
+		);
+	},
+
+	// `*a, *b = *b, *a` with type-parameter pointers: `*p` is not a settable
+	// JS destructuring target, so evaluate the right-hand side into temporaries
+	// and assign each target on its own.
+	_hasTypeParamDerefTarget(stmt) {
+		return (
+			stmt.op === "=" &&
+			stmt.lhs.length > 1 &&
+			stmt.lhs.some((l) => this._isTypeParamDerefTarget(l))
+		);
+	},
+
+	_genTypeParamDerefMultiAssign(stmt) {
+		const n = stmt.lhs.length;
+		const names = stmt.lhs.map((_, i) => `__t${i}`);
+		this.line("{");
+		this.indented(() => {
+			if (stmt.rhs.length === n) {
+				const vals = stmt.rhs.map((e, i) =>
+					stmt.lhs[i].name !== "_" ? this.genValueExpr(e) : this.genExpr(e),
+				);
+				this.line(`const [${names.join(", ")}] = [${vals.join(", ")}];`);
+			} else {
+				this.line(
+					`const [${names.join(", ")}] = ${this.genExpr(stmt.rhs[0])};`,
+				);
+			}
+			stmt.lhs.forEach((l, i) => {
+				if (l.name === "_") return;
+				if (this._isTypeParamDerefTarget(l)) {
+					const isStruct = this._typeParamIsStructJs(l.operand._type.base.name);
+					this.line(
+						`((__p, __v) => { if (${isStruct}) Object.assign(__p, __v); else __p.value = __v; })(${this.genExpr(l.operand)}, ${names[i]});`,
+					);
+				} else {
+					this.line(`${this._genAssignLhsExpr(l)} = ${names[i]};`);
+				}
+			});
+		});
+		this.line("}");
+	},
+
 	_isStructDerefAssign(stmt) {
 		if (stmt.lhs.length !== 1 || stmt.rhs.length !== 1 || stmt.op !== "=")
 			return false;
@@ -622,6 +671,10 @@ export const statementGenMethods = {
 			this.line(
 				`((__p, __v) => { if (${isStruct}) Object.assign(__p, __v); else __p.value = __v; })(${ptr}, ${val});`,
 			);
+			return;
+		}
+		if (this._hasTypeParamDerefTarget(stmt)) {
+			this._genTypeParamDerefMultiAssign(stmt);
 			return;
 		}
 		if (this._isStructDerefAssign(stmt)) {
