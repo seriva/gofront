@@ -275,27 +275,27 @@ No longer reproducing (deleted from the ledger): promoted field through `Deep2{*
 
 ### Phase 7: Dynamic Types, Erased Generics and Map Keys
 
-- [ ] Task 7.1: Assertions from named types to predeclared types
+- [x] Task 7.1: Assertions from named types to predeclared types
   - Files: `src/backend/js/expressions.js`, `src/backend/js/runtime.js`, `test/unit/language/parity-matrix.test.js`
   - Test: `var a any = L("x"); _, ok := a.(string)` → `false` (all targets); `a.(L)` → `true`.
   - Done when: JS matches WASM.
-- [ ] Task 7.2: Type assertion to a type parameter
+- [x] Task 7.2: Type assertion to a type parameter
   - Files: `src/backend/js/expressions.js`, `test/unit/types/generics.test.js`
   - Test: `As[*Other](fmt.Errorf("%w", &MyErr{}))` → `false`; `As[*MyErr](&MyErr{})` → `true` (all targets).
   - Done when: JS checks the instantiated type.
-- [ ] Task 7.3: Type switch on interfaces with same-named methods
+- [x] Task 7.3: Type switch on interfaces with same-named methods
   - Files: `src/backend/js/statements.js`, `src/backend/wasm/emit-stmts.js`, `test/unit/wasm/interfaces.test.js`
   - Test: `errors.Join(a, b)` against `interface{ Unwrap() error }` then `interface{ Unwrap() []error }` → `multi` (all targets).
   - Done when: JS picks the right case and WASM compiles.
-- [ ] Task 7.4: Conversions to a type parameter in JS
+- [x] Task 7.4: Conversions to a type parameter in JS
   - Files: `src/backend/js/expressions.js`, `test/unit/types/generics.test.js`
   - Test: `Half[int](9)`, `conv[int8](200)`, `Wrap[uint8](255)` → `4 -56 0` (all targets).
   - Done when: JS truncates and wraps like WASM.
-- [ ] Task 7.5: Erased generics: instantiation identity, `==` on `any`, zero values
+- [x] Task 7.5: Erased generics: instantiation identity, `==` on `any`, zero values
   - Files: `src/backend/js/expressions.js`, `src/backend/js/runtime.js`, `src/backend/wasm/monomorph.js`
   - Test: in `test/unit/types/generics.test.js`, `mk[int]().(*Stack[string])` → `false`; `eq[any](P{1}, P{1})` → `true`; `mut(c...)` with `var z T` on `[]int{4,5}` → `[0 5]` (all targets).
   - Done when: all three match Go and the WASM module validates.
-- [ ] Task 7.6: Struct map keys in JS
+- [x] Task 7.6: Struct map keys in JS
   - Files: `src/backend/js/runtime.js`, `test/unit/wasm/maps.test.js`
   - Test: `len(map[T]int{T{"x y","z"}:1, T{"x","y z"}:2})` → `2`; `Println(map[K]int{K{"a",5}:1, K{"a 1",0}:2})` → `map[{a 5}:1 {a 1 0}:2]`; ranging yields struct keys (all targets).
   - Done when: no key collisions; print order matches Go.

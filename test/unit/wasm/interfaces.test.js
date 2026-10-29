@@ -3,8 +3,10 @@
 
 import {
 	assertEqual,
+	assertProgramOutput,
+	compile,
 	compileHybrid,
-	compileWasm,
+	runJs,
 	runWasm,
 	section,
 	test,
@@ -558,9 +560,100 @@ func itoa(n int) string {
 	return "?"
 }
 `;
-	// Go's answer; the JS backend still treats a named string as a string here
-	// (plans/follow-ups.md), so only WASM is compared.
-	const { wasm, stringTable } = compileWasm(src);
-	const wasmRes = runWasm(wasm, { stringTable }).exports.Main();
+	// Go's answer: a named string is not a string in an interface.
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
 	assertEqual(wasmRes, "x TFFT 7");
+	assertEqual(jsRes, "x TFFT 7");
+});
+
+test("type switch tells interfaces with the same method name apart", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type one struct{}
+
+func (one) Error() string { return "one" }
+func (one) Unwrap() error { return nil }
+
+type many struct{}
+
+func (many) Error() string   { return "many" }
+func (many) Unwrap() []error { return nil }
+
+type plain struct{}
+
+func (plain) Error() string { return "plain" }
+
+func kind(e error) string {
+	switch e.(type) {
+	case interface{ Unwrap() error }:
+		return "single"
+	case interface{ Unwrap() []error }:
+		return "multi"
+	}
+	return "none"
+}
+
+type Unwrapper interface{ Unwrap() []error }
+
+func named(e error) string {
+	switch e.(type) {
+	case Unwrapper:
+		return "named multi"
+	}
+	return "named none"
+}
+
+func main() {
+	fmt.Println(kind(one{}), kind(many{}), kind(plain{}), kind(&many{}), kind(&one{}))
+	fmt.Println(named(one{}), named(many{}), named(plain{}))
+	var em error = many{}
+	_, ok := em.(interface{ Unwrap() []error })
+	_, ok2 := em.(interface{ Unwrap() error })
+	fmt.Println(ok, ok2)
+	var e error = one{}
+	switch x := e.(type) {
+	case interface{ Unwrap() []error }:
+		fmt.Println("multi", x.Unwrap() == nil)
+	case interface{ Unwrap() error }:
+		fmt.Println("single", x.Unwrap() == nil)
+	}
+}
+`,
+		"single multi none multi single\nnamed none named multi named none\ntrue false\nsingle true\n",
+	);
+});
+
+test("errors.Join matches the multi-error Unwrap interface in JS", () => {
+	const src = `package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+func kind(e error) string {
+	switch e.(type) {
+	case interface{ Unwrap() error }:
+		return "single"
+	case interface{ Unwrap() []error }:
+		return "multi"
+	}
+	return "none"
+}
+
+func main() {
+	a, b := errors.New("a"), errors.New("b")
+	j := errors.Join(a, b)
+	fmt.Println(kind(j), kind(a))
+	_, one := j.(interface{ Unwrap() error })
+	_, many := j.(interface{ Unwrap() []error })
+	fmt.Println(one, many, errors.Is(j, b))
+}
+`;
+	const { js, errors } = compile(src, { target: "both" });
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "multi none\nfalse true true");
 });
