@@ -8,6 +8,7 @@ import {
 	getInterfaceMethodList,
 	getReceiverTypeName,
 	isAnyType,
+	isBoolGoType,
 	isInterfaceType,
 	isNonEmptyInterface,
 	isTestingT,
@@ -183,7 +184,7 @@ export function _scanImportsInBody(node, mod) {
 				const arg = args[i];
 				const isLast = i === args.length - 1 && isPrintln;
 				const isBool =
-					arg._type?.name === "bool" ||
+					isBoolGoType(arg._type) ||
 					(arg.kind === "BasicLit" && arg.litKind === "BOOL");
 				const wType = toWasmType(arg._type, mod.checker);
 				mod.getLogImportIndex(wType, isLast, isBool);
@@ -239,7 +240,7 @@ export function _scanImportsInBody(node, mod) {
 				for (const arg of args) {
 					mod.getTestingArgImportIndex(
 						toWasmType(arg._type, mod.checker),
-						arg._type?.name === "bool" ||
+						isBoolGoType(arg._type) ||
 							(arg.kind === "BasicLit" && arg.litKind === "BOOL"),
 					);
 				}
