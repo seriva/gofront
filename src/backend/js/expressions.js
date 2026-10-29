@@ -80,6 +80,14 @@ const SMALL_UNSIGNED_WRAP = {
 	uint32: ">>> 0",
 };
 
+// Signed types narrower than 64 bits: `-x` wraps back into range.
+const SIGNED_NEG_WRAP = {
+	int8: "<< 24 >> 24",
+	int16: "<< 16 >> 16",
+	int32: "| 0",
+	rune: "| 0",
+};
+
 // Integer types whose JS shifts must follow Go's 64-bit semantics.
 const WIDE_INT_NAMES = new Set(["int", "int64", "uint", "uint64", "uintptr"]);
 
@@ -932,6 +940,10 @@ export const expressionGenMethods = {
 					"__o",
 					"__i",
 				);
+				// Erased generic element: a struct is its own pointer, anything
+				// else gets the get/set wrapper.
+				if (expr.operand._type?.kind === "typeParam")
+					return `((__o, __i) => { ${check ? `${check}; ` : ""}const __e = __o[__i]; return __e !== null && typeof __e === "object" && !Array.isArray(__e) && !ArrayBuffer.isView(__e) ? __e : Object.defineProperties({ get value() { return __o[__i]; }, set value(v) { __o[__i] = v; } }, { __target: { value: __o }, __index: { value: __i } }); })(${obj}, ${idx})`;
 				if (check)
 					return `((__o, __i) => (${check}, Object.defineProperties({ get value() { return __o[__i]; }, set value(v) { __o[__i] = v; } }, { __target: { value: __o }, __index: { value: __i } })))(${obj}, ${idx})`;
 				return `((__o, __i) => Object.defineProperties({ get value() { return __o[__i]; }, set value(v) { __o[__i] = v; } }, { __target: { value: __o }, __index: { value: __i } }))(${obj}, ${idx})`;
@@ -949,6 +961,8 @@ export const expressionGenMethods = {
 			if (this._isStructPointerType(expr.operand._type)) {
 				return this._genNilChecked(this.genExpr(expr.operand));
 			}
+			if (expr.operand._type?.base?.kind === "typeParam")
+				return `((__p) => (__p !== null && typeof __p === "object" && "value" in __p ? __p.value : __p))(${this.genExpr(expr.operand)})`;
 			return `${this.genExpr(expr.operand)}.value`;
 		}
 		// Unary minus/plus on complex
@@ -962,6 +976,12 @@ export const expressionGenMethods = {
 			? SMALL_UNSIGNED_WRAP[this._typeName(expr._type)]
 			: null;
 		if (wrap && (op === "-" || op === "~")) return `(${op}(${code}) ${wrap})`;
+		// -MinInt wraps back to itself for signed narrow integers.
+		const signedWrap =
+			this.strict && op === "-"
+				? SIGNED_NEG_WRAP[this._typeName(expr._type)]
+				: null;
+		if (signedWrap) return `(-(${code}) ${signedWrap})`;
 		const needsParens =
 			this._emittedBinaryOp(expr.operand) !== null ||
 			((op === "-" || op === "+") && /^[-+]/.test(code));
@@ -1221,7 +1241,14 @@ export const expressionGenMethods = {
 
 	_calleeIsGoVariadic(call) {
 		const f = call.func;
-		if (f.kind === "Ident") return !!this.variadicFns?.has(f.name);
+		if (f.kind === "Ident") {
+			if (this.variadicFns?.has(f.name)) return true;
+			// A local func value (closure or parameter) compiled from Go source.
+			const imported = [...(this.jsImports?.values() ?? [])].some((names) =>
+				names.includes(f.name),
+			);
+			return !imported && f._type?.kind === "func" && !!f._type.variadic;
+		}
 		if (f.kind !== "SelectorExpr" || f._isMethodExpr) return false;
 		const recv = this._resolveRecvName(f.expr._type);
 		return !!recv && !!this.variadicFns?.has(`${recv}.${f.field}`);
@@ -1814,7 +1841,7 @@ export const expressionGenMethods = {
 			const elems = expr.args
 				.slice(1)
 				.map((a) =>
-					a._spread ? `...${this.genExpr(a)}` : this.genValueExpr(a),
+					a._spread ? `...(${this.genExpr(a)} ?? [])` : this.genValueExpr(a),
 				);
 			if (elems.length === 0) return this.genExpr(expr.args[0]);
 			this.useHelper("append");
@@ -1827,7 +1854,7 @@ export const expressionGenMethods = {
 		const spreadOf = (a) =>
 			this._aggregateBase(elemT)?.kind === "array"
 				? `...(${this.genExpr(a)} ?? []).map((__e) => ${this._cloneJs(elemT, "__e")})`
-				: `...${this.genExpr(a)}`;
+				: `...(${this.genExpr(a)} ?? [])`;
 		const elems = expr.args
 			.slice(1)
 			.map((a) => (a._spread ? spreadOf(a) : this.genValueExpr(a)));
@@ -2963,9 +2990,9 @@ export const expressionGenMethods = {
 			if (op === "<<" || op === ">>") {
 				const ovf = signed && op === ">>" ? `((${l}) < 0 ? -1 : 0)` : "0";
 				const jsOp = !signed && op === ">>" ? ">>>" : op;
-				return `((${r}) >= 32 ? ${ovf} : ((${l}) ${jsOp} (${r}))) ${cast}`;
+				return `(((${r}) >= 32 ? ${ovf} : ((${l}) ${jsOp} (${r}))) ${cast})`;
 			}
-			if (op === "&^") return `((${l}) & ~(${r})) ${cast}`;
+			if (op === "&^") return `(((${l}) & ~(${r})) ${cast})`;
 			return `((${l} ${op} ${r}) ${cast})`;
 		}
 		if (tName === "int8" || tName === "int16") {
@@ -2996,19 +3023,12 @@ export const expressionGenMethods = {
 			return `((${l} ${op} ${r}) & ${mask})`;
 		}
 		if (op === "<<" || op === ">>") {
-			// A constant count below 32 keeps the plain 32-bit operator.
-			if (/^\d+$/.test(r) && Number(r) < 32) return `${l} ${op} ${r}`;
-			// Evaluate a side-effecting count once, after the operand (Go order).
-			const pure = /^[\w$]+$/.test(r);
-			const n = pure ? r : "__n";
-			const wrap = (body) =>
-				pure ? body : `((__x, __n) => ${body})(${l}, ${r})`;
-			const x = pure ? l : "__x";
-			if (op === "<<") return wrap(`((${n}) >= 64 ? 0 : (${x}) * 2 ** (${n}))`);
-			const ovf = this._typeName(type).startsWith("u")
-				? "0"
-				: `((${x}) < 0 ? -1 : 0)`;
-			return wrap(`((${n}) >= 64 ? ${ovf} : Math.floor((${x}) / 2 ** (${n})))`);
+			// 64-bit semantics: operand first, then count (Go order); a negative
+			// count panics and the result wraps to 64 bits.
+			this.useHelper("shift");
+			const unsigned = this._typeName(type).startsWith("u");
+			if (op === "<<") return `__shl64(${l}, ${r}, ${unsigned})`;
+			return `__shr64(${l}, ${r}, ${unsigned})`;
 		}
 		if (this.isIntType(type)) {
 			if (op === "/")

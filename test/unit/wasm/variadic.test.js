@@ -6,6 +6,7 @@ import {
 	assertContains,
 	assertEqual,
 	assertErrorContains,
+	assertProgramOutput,
 	compileDir,
 	compileHybrid,
 	compileHybridProject,
@@ -293,4 +294,31 @@ func Main() int {
 `).run("Main");
 	assertEqual(res.jsRes, 1000 + 500 + 30 + 1);
 	assertEqual(Number(res.wasmRes), 1531);
+});
+
+section("Variadic spread");
+
+test("spread aliases the slice, nil spread and empty call are nil", async () => {
+	const src = `package main
+
+import "fmt"
+
+func nilp(xs ...int) bool { return xs == nil }
+
+func main() {
+	a := []int{1, 2, 3}
+	set := func(xs ...int) { xs[0] = -1 }
+	set(a[1:]...)
+	fmt.Println(a)
+	var nx []int
+	set2 := func(xs ...int) { fmt.Println(len(xs)) }
+	set2(nx...)
+	fmt.Println(nilp(), nilp(nx...), nilp(a...))
+	b := []int{5, 6}
+	f := func(xs ...int) { xs[1] = 9 }
+	f(b...)
+	fmt.Println(b)
+}
+`;
+	await assertProgramOutput(src, "[1 -1 3]\n0\ntrue true false\n[5 9]\n");
 });
