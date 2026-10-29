@@ -796,6 +796,20 @@ var __sprintf = __sprintf || function(f, ...a) {
           const entries = Array.from(val.entries()).sort(([a], [b]) => {
             const k1 = raw(a), k2 = raw(b);
             if (typeof k1 === "number" && typeof k2 === "number") return k1 - k2;
+            // Struct and array keys compare field by field, as in Go.
+            if (k1 !== null && k2 !== null && typeof k1 === "object" && typeof k2 === "object" && !k1.__p && !k2.__p) {
+              const cmp = (x, y) => {
+                if (x !== null && y !== null && typeof x === "object" && typeof y === "object") {
+                  for (const f of Object.keys(x)) {
+                    const c = cmp(x[f], y[f]);
+                    if (c !== 0) return c;
+                  }
+                  return 0;
+                }
+                return x < y ? -1 : x > y ? 1 : 0;
+              };
+              return cmp(k1, k2);
+            }
             const na = Number(k1), nb = Number(k2);
             if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
             return String(k1).localeCompare(String(k2));
@@ -858,6 +872,8 @@ var __sprintf = __sprintf || function(f, ...a) {
       }
       return prefix + parts.join(" ") + "}";
     }
+    // A func value prints as an address; the targets share one fixed text.
+    if (typeof val === "function") return "0x1";
     return String(val);
   };
 ` +

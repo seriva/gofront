@@ -2712,6 +2712,12 @@ export class ExprsEmitter {
 			return;
 		}
 
+		// `any(x)` boxes x exactly like an assignment to an `any` variable.
+		if (isAnyType(targetType, this.mod.checker)) {
+			this.emitExpr(expr, "anyref");
+			return;
+		}
+
 		this.emitExpr(expr, fromWType);
 
 		if (isComplex(targetType)) {

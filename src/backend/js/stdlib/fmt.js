@@ -231,6 +231,8 @@ export const fmtMethods = {
 	_fmtArgJs(e, typed = false) {
 		// `xs...` passes each element as its own operand.
 		if (e?._spread) return `...(${this.genExpr(e)} ?? [])`;
+		// A multi-value call (`f()` returning a tuple) passes every result.
+		if (e?._type?.kind === "tuple") return this._fmtTupleJs(e);
 		const nilOperand = this._fmtNilPtrOperand(e?._type);
 		if (nilOperand) return `(${this.genExpr(e)} ?? ${nilOperand})`;
 		const js = this.genExpr(e);
@@ -256,7 +258,50 @@ export const fmtMethods = {
 			this.useHelper("sprintf");
 			return `__ft(${js}, ${JSON.stringify(desc)})`;
 		}
-		return base?.kind === "slice" ? `(${js} ?? [])` : js;
+		return this._fmtNilValue(base, js, false);
+	},
+
+	// A nil slice or map operand prints as `[]` / `map[]`: coalesce the null
+	// to an empty value.  Shared by the single-operand and the tuple path.
+	// `unboxed`: the map still needs its marker (the caller boxes the result).
+	_fmtNilValue(base, js, unboxed = true) {
+		if (base?.kind === "slice") return `(${js} ?? [])`;
+		if (unboxed && base?.kind === "map") return `(${js} ?? {})`;
+		return js;
+	},
+
+	// `js` (a value of static type `t`) boxed as converting it to an `any` does,
+	// with the same boxing the single-operand path gets from the checker
+	// (_markIfaceBox): named types with methods, pointers, slices, maps, structs
+	// and the fmt descriptor of Stringer elements.
+	_fmtBoxValue(js, t) {
+		const resolve = (x) => this.checker?.resolveType?.(x) ?? x;
+		let base = resolve(t);
+		if (base?.kind === "named") base = resolve(base.underlying);
+		const meta = this.checker?._ifaceBoxMeta?.(t);
+		if (meta?.type)
+			return this._genNamedIfaceBox(js, meta.type, meta.box === "named_ptr");
+		let out = this._fmtNilValue(base, js);
+		if (meta) out = this._ifaceBoxWrap(out, meta.box, meta.ptrFields);
+		const desc = this._fmtDesc(t);
+		return desc ? this._fmtDescWrap(out, desc) : out;
+	},
+
+	// The results of a multi-value call as separate operands.  Each result is
+	// boxed as if it were assigned to an `any`, so pointers print as `&{...}`
+	// and floats keep their width.
+	_fmtTupleJs(e) {
+		const resolve = (t) => this.checker?.resolveType?.(t) ?? t;
+		const parts = e._type.types.map((t, i) => {
+			const boxed = this._fmtBoxValue(`__t[${i}]`, t);
+			const desc = fmtTypeDesc(t, resolve);
+			if (fmtDescHasFloat(desc) && desc.k !== "i") {
+				this.useHelper("sprintf");
+				return `__ft(${boxed}, ${JSON.stringify(desc)})`;
+			}
+			return boxed;
+		});
+		return `...((__t) => [${parts.join(", ")}])(${this.genExpr(e)})`;
 	},
 
 	// The operands of a Printf-style call whose format is args[fmtIdx].
@@ -450,7 +495,7 @@ export const fmtMethods = {
 	_genPrintOperands(expr, sep, suffix) {
 		const argc = expr.args.length;
 		if (argc === 0) return JSON.stringify(suffix);
-		if (expr.args.some((e) => e._spread)) {
+		if (expr.args.some((e) => e._spread || e._type?.kind === "tuple")) {
 			// The operand count is only known at run time: join with Sprint's rules.
 			this.useHelper("sprint");
 			const joined = `__sprint(${sep === " "}, ${expr.args.map((e) => this._fmtArgJs(e)).join(", ")})`;
