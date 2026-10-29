@@ -91,7 +91,17 @@ const BASIC_DISPLAY = { any: "interface {}", byte: "uint8", rune: "int32" };
 
 // Unmarshal targets whose argument errors depend on the static type alone:
 // pointers can be nil, interfaces are judged by their dynamic value.
-const TARGET_KIND = { any: "", interface: "", pointer: "ptr" };
+// Only statically concrete non-pointer kinds are rejected up front; anything
+// else (type parameters, unknown kinds) is judged by its dynamic value.
+const TARGET_KIND = { pointer: "ptr" };
+const VALUE_TARGET_KINDS = new Set([
+	"slice",
+	"array",
+	"map",
+	"struct",
+	"func",
+	"chan",
+]);
 
 const COMPOSITE_KINDS = new Set(["slice", "array", "map"]);
 const COMPOSITE_DECODERS = {
@@ -145,7 +155,9 @@ export const jsonMethods = {
 		const base = unwrapNamed(targetType);
 		const key = base?.kind === "basic" ? base.name : base?.kind;
 		if (!targetType || key === "nil") return '"", ""';
-		const kind = TARGET_KIND[key] ?? "val";
+		const isValue =
+			base?.kind === "basic" ? key !== "any" : VALUE_TARGET_KINDS.has(key);
+		const kind = TARGET_KIND[key] ?? (isValue ? "val" : "");
 		return `${JSON.stringify(this._jsonDisplayType(targetType))}, ${JSON.stringify(kind)}`;
 	},
 
@@ -268,17 +280,53 @@ export const jsonMethods = {
 	},
 
 	_markJsonAnyEncoders() {
-		if (this._jsonAnyMarked) return;
 		this._jsonAnyMarked = true;
+	},
+
+	// Runs once all function bodies are generated, so function-local structs are
+	// known: package-level structs get their hook at top level, local ones at the
+	// placeholder left next to their class declaration (the only place in scope).
+	_emitJsonAnyHooks() {
+		if (!this._jsonAnyMarked || this._jsonAnyHooked) return;
+		this._jsonAnyHooked = true;
+		const hook = (cls, enc) =>
+			`Object.defineProperty(${cls}.prototype, "__json_enc", { value: function() { return ${enc}(this); }, configurable: true, writable: true });`;
+		const local = this._localTypeNames;
 		for (const [name, type] of this.checker?.types ?? []) {
-			if (!this._isPlainPackageStruct(name, type)) continue;
-			const enc = this._getJsonEncoder(type, false);
+			if (local.has(name) || !this._isPlainPackageStruct(name, type)) continue;
 			const cls = safeIdent(name);
 			this._jsonCodecs.set(
 				`__json_anyenc_${cls}`,
-				`Object.defineProperty(${cls}.prototype, "__json_enc", { value: function() { return ${enc}(this); }, configurable: true, writable: true });`,
+				hook(cls, this._getJsonEncoder(type, false)),
 			);
 		}
+		this._localJsonHookText = new Map();
+		for (const [id, name] of this._localJsonHooks.entries()) {
+			const type = this.checker?.types.get(name);
+			if (!this._isPlainPackageStruct(name, type)) continue;
+			const enc = this._getJsonEncoder(type, false);
+			this._localJsonHookText.set(id, hook(safeIdent(name), enc));
+		}
+	},
+
+	// Replaces the placeholders left by _noteLocalTypeDecl in the final text
+	// (closure bodies are joined into strings, so lines cannot be patched in place).
+	_fillLocalJsonHooks(text) {
+		if (!this._localJsonHooks.length) return text;
+		return text.replace(
+			/\/\*__gf_json_hook_(\d+)__\*\//g,
+			(_, id) => this._localJsonHookText?.get(Number(id)) ?? "",
+		);
+	},
+
+	// Leaves a placeholder line after a function-local struct class; filled in by
+	// _emitJsonAnyHooks when the program marshals structs held in `any`.
+	_noteLocalTypeDecl(stmt) {
+		this._localTypeNames.add(stmt.name);
+		if (stmt.type.kind !== "StructType") return;
+		const hooks = this._localJsonHooks;
+		this.line(`/*__gf_json_hook_${hooks.length}__*/`);
+		hooks.push(stmt.name);
 	},
 
 	_jsonTypeName(type) {
