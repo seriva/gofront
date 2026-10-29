@@ -82,7 +82,11 @@ const BUILTIN_CHECK = {
 		return st;
 	},
 	copy: (s, _n, e, at) => s._checkBuiltinCopy(e, at),
-	delete: () => VOID,
+	delete: (s, _n, e, at) => {
+		const mt = s._deepUnderlying(at[0]);
+		if (mt?.kind === "map" && e.args[1]) s._markIfaceKey(mt, e.args[1], at[1]);
+		return VOID;
+	},
 	make: (s, _n, e, _at, sc) => {
 		if (e.args.length < 1) return ANY;
 		const ta = e.args[0];
@@ -674,6 +678,32 @@ export const expressionCheckMethods = {
 		return u;
 	},
 
+	// A key of an interface-keyed map (`map[any]T`): the backend encodes it
+	// with its dynamic type, so `L("1")`, `N(1)`, `"1"` and `1` stay distinct.
+	// A named basic value is boxed first, exactly as in any interface
+	// conversion; other values are keyed as they are.
+	_markIfaceKey(mapType, node, srcType) {
+		const key = this.resolveType(mapType.key);
+		const kb = key?.kind === "named" ? this.resolveType(key.underlying) : key;
+		const src = srcType && this.resolveType(srcType);
+		if (node && src?.kind === "typeParam") {
+			// Generic code: whether the key is boxed depends on the type argument,
+			// so the backend decides at run time (`__ikt`).
+			if (key?.kind === "typeParam" || isAny(key) || kb?.kind === "interface") {
+				node._ifaceKeyDyn = key?.kind === "typeParam" ? "same" : "box";
+				node._ifaceKeyParam = src.name;
+			}
+			return;
+		}
+		if (!node || !srcType || (!isAny(key) && kb?.kind !== "interface")) return;
+		node._ifaceKey = true;
+		this._markIfaceBox(key, this.resolveType(srcType), node);
+		if (node._ifaceBox === "named" || node._ifaceBox === "named_ptr") return;
+		node._ifaceBox = undefined;
+		node._ifaceSrc = undefined;
+		node._ifacePtrFields = undefined;
+	},
+
 	_checkIndexExpr(expr, scope) {
 		const typeRef = this._genericTypeRef(expr, scope);
 		if (typeRef) return typeRef;
@@ -686,7 +716,7 @@ export const expressionCheckMethods = {
 			const inst = this._genericFuncValueAsInstantiation(expr);
 			if (inst) return this._checkInstantiationExpr(inst, scope);
 		}
-		this.checkExpr(expr.index, scope);
+		const indexType = this.checkExpr(expr.index, scope);
 		if (bt?._tainted) return TAINTED_ANY;
 		if (isAny(bt)) return ANY;
 		const btu = this._deepUnderlying(bt);
@@ -696,6 +726,7 @@ export const expressionCheckMethods = {
 		}
 		if (btu.kind === "map") {
 			expr._mapValueType = btu.value;
+			this._markIfaceKey(btu, expr.index, indexType);
 			return btu.value;
 		}
 		if (btu.kind === "shared") {
@@ -880,6 +911,8 @@ export const expressionCheckMethods = {
 	_checkTypeConversion(expr, scope) {
 		const srcType = this.checkExpr(expr.expr, scope);
 		const targetType = this.resolveTypeNode(expr.targetType, scope);
+		// `any(x)` / `error(x)`: box x as an implicit conversion would.
+		this._markIfaceBox(targetType, srcType, expr.expr);
 		const srcResolved =
 			srcType?.kind === "named" ? srcType.underlying : srcType;
 		const tgtResolved =
@@ -1265,7 +1298,11 @@ export const expressionCheckMethods = {
 		const generic = inst?.kind === "InstantiationExpr" && inst._genericFnType;
 		if (!generic || inst._typeArgs.length >= generic.typeParams.length)
 			return null;
-		const typeArgs = this.inferTypeArgs(generic, argTypes, inst._typeArgs);
+		const typeArgs = this.inferTypeArgs(
+			generic,
+			this._inferArgTypes(expr, argTypes),
+			inst._typeArgs,
+		);
 		if (!typeArgs) {
 			this.err(
 				`Cannot infer type arguments for generic function '${generic.name}'`,
@@ -1347,6 +1384,9 @@ export const expressionCheckMethods = {
 		const argTypes = this._resolveCallArgTypes(expr, scope);
 
 		if (fnType?._tainted) return TAINTED_ANY;
+		// `any(x)` / `error(x)` / `Iface(x)`: box x as an implicit conversion would.
+		if (expr.func._isTypeRef && expr.args.length === 1 && argTypes[0])
+			this._markIfaceBox(fnType, argTypes[0], expr.args[0]);
 		if (isAny(fnType)) return ANY;
 
 		// Named type used as a constructor/conversion: Greeter(fn), NodeFunc(fn)
@@ -1446,8 +1486,21 @@ export const expressionCheckMethods = {
 		}
 	},
 
+	// Argument types for inference: a spread argument `xs...` stands for its
+	// elements, which is what the variadic parameter type describes.
+	_inferArgTypes(expr, argTypes) {
+		return argTypes.map((t, i) => {
+			if (!expr.args?.[i]?._spread) return t;
+			const u = this.resolveType(t?.kind === "named" ? t.underlying : t);
+			return u?.kind === "slice" ? u.elem : t;
+		});
+	},
+
 	_resolveGenericFnType(fnType, argTypes, expr, scope) {
-		const typeArgs = this.inferTypeArgs(fnType, argTypes);
+		const typeArgs = this.inferTypeArgs(
+			fnType,
+			this._inferArgTypes(expr, argTypes),
+		);
 		if (!typeArgs) {
 			this.err(
 				`Cannot infer type arguments for generic function '${fnType.name}'`,
@@ -1839,6 +1892,7 @@ export const expressionCheckMethods = {
 					vt = this.checkExpr(elem.value, scope);
 				}
 				this.assertAssignable(base.key, kt, elem.key);
+				this._markIfaceKey(base, elem.key, kt);
 				this.assertAssignable(base.value, vt, elem.value);
 			}
 		}
