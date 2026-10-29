@@ -25,15 +25,17 @@ const PLANS = [
 	{
 		file: "plans/v1.9.0/stdlib-in-go-plan.md",
 		exempt: [
-			// Native registries (listed as "new" in Tasks 2.2/2.3; Task 12.1 adds the test).
+			// Native registries (listed as "new" in Tasks 3.2/3.3; Task 13.1 adds the test).
 			"src/backend/{js,wasm}/natives.js",
-			// Pdq generator and template (Task 3.1 "new"), and the new tests of Tasks 3.1 and 12.1.
+			// Pdq generator and template (Task 4.1 "new"), and the new tests of Tasks 4.1 and 13.1.
 			"scripts/{gen-pdq.js,pdq-template.txt}",
 			"test/unit/compiler/{gen-pdq,natives}.test.js",
 			// Go-output cases (one file per package).
 			"test/unit/stdlib/*",
-			// Sort and string-search benchmark (Task 3.3 "new").
+			// Sort and string-search benchmark (Task 4.3 "new").
 			"test/perf/stdlib-bench.js",
+			// int64 cost benchmark (Task 1.5 "new").
+			"test/perf/int64-bench.js",
 			// The Go files each migration task adds under stdlib/.  Files that
 			// exist today (for example stdlib/sort/sort.go) are not listed.
 			"stdlib/bytes/{buffer,bytes,reader}.go",
