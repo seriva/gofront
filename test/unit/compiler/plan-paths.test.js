@@ -25,13 +25,15 @@ const PLANS = [
 	{
 		file: "plans/v1.9.0/stdlib-in-go-plan.md",
 		exempt: [
-			// Native registries (listed as "new" in Task 2.1; Task 9.1 adds the test).
+			// Native registries (listed as "new" in Tasks 2.2/2.3; Task 12.1 adds the test).
 			"src/backend/{js,wasm}/natives.js",
-			// Pdq generator and template (Task 3.1 "new"), and the new tests of Tasks 3.1 and 9.1.
+			// Pdq generator and template (Task 3.1 "new"), and the new tests of Tasks 3.1 and 12.1.
 			"scripts/{gen-pdq.js,pdq-template.txt}",
 			"test/unit/compiler/{gen-pdq,natives}.test.js",
-			// Go-output cases (one file per package) and the harness of Task 2.4.
+			// Go-output cases (one file per package).
 			"test/unit/stdlib/*",
+			// Sort and string-search benchmark (Task 3.3 "new").
+			"test/perf/stdlib-bench.js",
 			// The Go files each migration task adds under stdlib/.  Files that
 			// exist today (for example stdlib/sort/sort.go) are not listed.
 			"stdlib/bytes/{buffer,bytes,reader}.go",
@@ -39,15 +41,12 @@ const PLANS = [
 			"stdlib/encoding/{base64/base64,binary/binary,hex/hex}.go",
 			"stdlib/{errors/errors,html/html,maps/maps,path/path,sync/sync}.go",
 			"stdlib/math/{bits/bits,rand/rand}.go",
-			"stdlib/slices/{slices,sort,zsort_ordered}.go",
-			"stdlib/sort/zsort_iface.go",
-			"stdlib/strconv/strconv.go",
+			"stdlib/slices/{slices,sort,zsort_cmp,zsort_ordered}.go",
+			"stdlib/sort/{zsort_func,zsort_iface}.go",
+			"stdlib/strconv/{float,strconv}.go",
 			"stdlib/strings/{reader,replacer,strings}.go",
 			"stdlib/time/{duration,format,parse,time}.go",
 			"stdlib/unicode/utf8/utf8.go",
-			// Historical: the plan cites the gaps file "at 04aa0c6; deleted by
-			// v1.8.0 Task 8.1" as the provenance of a probe, not as a live path.
-			"test/unit/types/stdlib-coverage.gaps.json",
 		],
 	},
 ];
