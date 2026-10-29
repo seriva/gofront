@@ -241,6 +241,7 @@ export class ModuleEmitter {
 		this.ptrTypes = new Map(); // key -> ptr supertype info
 		this.boxTypes = new Map(); // wType key -> box info
 		this.ifaceBoxTypes = new Map(); // key -> iface box info
+		this.nilBoxTypes = new Map(); // key -> typed-nil marker info
 		this.arrayTypes = new Map(); // wType key -> array info
 		this.sliceTypes = new Map(); // wType key -> slice info
 		this.sliceTypesByIndex = new Map(); // typeIndex -> slice info
@@ -640,6 +641,36 @@ export class ModuleEmitter {
 		const boxInfo = { key, typeIndex, typeEntry, wType, goType, tagTypeIndex };
 		this.ifaceBoxTypes.set(key, boxInfo);
 		return boxInfo;
+	}
+
+	// The value a nil map, func or `*T` takes inside an interface: a marker
+	// object per Go type, so `any(nilMap) != nil` and a type switch still sees
+	// the dynamic type.  Struct types are structural, so each marker gets a
+	// distinct field count to keep them apart.
+	getNilBoxType(goType) {
+		const key = goTypeKey(goType);
+		if (this.nilBoxTypes.has(key)) return this.nilBoxTypes.get(key);
+		const n = this.nilBoxTypes.size + 1;
+		const typeIndex = this._getTotalTypeCount();
+		this._pushType({
+			form: "struct",
+			fields: Array.from({ length: n }, () => ({
+				type: "i32",
+				mutable: true,
+			})),
+		});
+		const globalIndex = this.globals.length;
+		this.globals.push({
+			type: { kind: "ref", nullable: true, typeIndex },
+			mutable: false,
+			init: [
+				...Array.from({ length: n }, () => ({ op: "i32.const", value: 0 })),
+				{ op: "struct.new", typeIndex },
+			],
+		});
+		const info = { key, goType, typeIndex, globalIndex };
+		this.nilBoxTypes.set(key, info);
+		return info;
 	}
 
 	getArrayType(elemGoType) {
