@@ -1,7 +1,13 @@
 // test/unit/wasm/defer_recover.test.js
 // Tests for Task H4.4: Defer & Recover in WASM backend and JS-strict parity.
 
-import { assertEqual, compileHybrid, section, test } from "../helpers.js";
+import {
+	assertEqual,
+	assertProgramOutput,
+	compileHybrid,
+	section,
+	test,
+} from "../helpers.js";
 
 section("WASM Defer — LIFO Execution Order");
 
@@ -552,4 +558,80 @@ func Main() {
 `;
 	const hybrid = compileHybrid(src);
 	hybrid.run("Main");
+});
+
+section("Recoverable nil traps");
+
+test("nil dereferences, nil func calls and other traps are recoverable panics", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type N struct{ v int }
+
+func (n N) Val() int { return n.v }
+func (n *N) Inc()    { n.v++ }
+
+type S struct{ A int }
+
+type St struct{ cb func() int }
+
+type H func()
+
+func try(name string, f func()) {
+	defer func() { fmt.Println(name, "recovered:", recover() != nil) }()
+	f()
+}
+
+func nested(f func()) {
+	defer func() { recover() }()
+	func() { f() }()
+}
+
+func Bump(old int) (res int) {
+	defer func() { res = old + 1 }()
+	return 0
+}
+
+func main() {
+	var np *N
+	try("value method on nil pointer", func() { fmt.Println(np.Val()) })
+	try("pointer method on nil pointer", func() { np.Inc() })
+	var p *S
+	try("deref nil struct pointer", func() { _ = *p })
+	try("field of nil pointer", func() { fmt.Println(p.A) })
+	var ip *int
+	try("deref nil int pointer", func() { fmt.Println(*ip) })
+	var fn func()
+	try("nil func", func() { fn() })
+	var h H
+	try("nil named func", func() { h() })
+	var st St
+	try("nil func field", func() { st.cb() })
+	fs := make([]func() int, 2)
+	try("nil func element", func() { fs[1]() })
+	z := 0
+	try("division by zero", func() { fmt.Println(1 / z) })
+	try("index out of range", func() { var xs []int; _ = xs[3] })
+	try("nil map write", func() { var m map[string]int; m["a"] = 1 })
+	nested(func() { var q *S; _ = *q })
+	fmt.Println(Bump(1))
+}
+`,
+		`value method on nil pointer recovered: true
+pointer method on nil pointer recovered: true
+deref nil struct pointer recovered: true
+field of nil pointer recovered: true
+deref nil int pointer recovered: true
+nil func recovered: true
+nil named func recovered: true
+nil func field recovered: true
+nil func element recovered: true
+division by zero recovered: true
+index out of range recovered: true
+nil map write recovered: true
+2
+`,
+	);
 });

@@ -330,6 +330,27 @@ export function _scanInterfaceTypeDecls(progs, interfaceCalls, checker) {
 	}
 }
 
+// A qualified interface (`fmt.Stringer`) in a signature is a boundary type
+// when the function is exported, so its dispatchers must exist.  Returns true
+// when `t` names such a type.
+function _registerQualifiedIface(t, interfaceCalls, checker) {
+	if (t.kind !== "TypeName" || !t.name?.includes(".")) return false;
+	const resolved = checker?.types?.get(t.name);
+	const iface = resolved?.underlying ?? resolved;
+	if (!resolved || !isNonEmptyInterface(iface, checker)) return true;
+	for (const m of getInterfaceMethodList(iface)) {
+		const key = `${t.name}.${m.name}`;
+		if (interfaceCalls.has(key)) continue;
+		interfaceCalls.set(key, {
+			ifaceName: t.name,
+			ifaceType: resolved,
+			methodName: m.name,
+			methodSig: { kind: "func", params: m.params, returns: m.returns },
+		});
+	}
+	return true;
+}
+
 export function _scanFuncSigInterfaces(
 	progs,
 	funcDecls,
@@ -339,6 +360,7 @@ export function _scanFuncSigInterfaces(
 ) {
 	const scanType = (t) => {
 		if (!t) return;
+		if (_registerQualifiedIface(t, interfaceCalls, checker)) return;
 		if (t.kind === "InterfaceType" || (t.kind === "interface" && !t.name)) {
 			const mList = getInterfaceMethodList(t);
 			if (mList.length === 0) return;

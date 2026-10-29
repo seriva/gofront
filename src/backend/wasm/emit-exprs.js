@@ -466,7 +466,9 @@ export class ExprsEmitter {
 		const value = (e) => (e.kind === "KeyValueExpr" ? e.value : e);
 		const emitElem = (e) => {
 			this.emitExpr(e, arrInfo.elemWType);
-			this._emitCopyIfValue(e, e._type, arrInfo.elemWType);
+			// Copy by the element type: a struct stored in an `any` element
+			// is already boxed, and a keyed element wraps its value.
+			this._emitCopyIfValue(e, elemType, arrInfo.elemWType);
 		};
 		if (ascending && size <= MAX_NEW_FIXED) {
 			const slots = new Array(size).fill(null);
@@ -523,6 +525,10 @@ export class ExprsEmitter {
 	// (_openNilBlock) when it is null.  Outside one, the access traps.
 	_emitNilCheck(goType) {
 		if (goType?.kind !== "pointer") return;
+		this._emitNilBranch();
+	}
+
+	_emitNilBranch() {
 		const depth = this.resolveBranchDepthToRole("nil");
 		if (depth == null) return;
 		this.pushInstruction({ op: "br_on_null", depth });
@@ -1777,6 +1783,7 @@ export class ExprsEmitter {
 		if (structInfo) {
 			const baseWType = this.toWasmType(operand._type);
 			this.emitExpr(operand, baseWType);
+			this._emitNilCheck(operand._type);
 			this.emitCloneStruct(structInfo, baseWType);
 			return;
 		}
@@ -1801,6 +1808,7 @@ export class ExprsEmitter {
 			typeName: ptr.name,
 		};
 		this.emitExpr(operand, ptrWType);
+		this._emitNilCheck(operandGoType);
 		this.pushInstruction({
 			op: "ref.cast",
 			typeIndex: box.typeIndex,

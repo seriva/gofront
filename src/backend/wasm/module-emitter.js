@@ -9,6 +9,7 @@ import {
 	getFuncSignature,
 	getSliceElemType,
 	goTypeKey,
+	isScalarType,
 	isSliceType,
 	toWasmType,
 } from "./types.js";
@@ -2063,6 +2064,7 @@ export class ModuleEmitter {
 									recvTypeName: rName,
 									testTypeIndex: ptrIfaceBox.typeIndex,
 									isBoxedValue: true,
+									nilPtrPanic: true,
 									needsValueDeref: false,
 									embedPath: [
 										{
@@ -2106,12 +2108,56 @@ export class ModuleEmitter {
 								targetParamTypes: paramWTypes,
 							});
 						}
+						if (!isPtrRecv)
+							this._addPtrScalarCandidate(
+								candidates,
+								seenKeys,
+								rName,
+								rType,
+								fIdx,
+								paramWTypes,
+							);
 					}
 				}
 			}
 		}
 
 		return candidates;
+	}
+
+	// A value-receiver method of a named scalar is also in the method set of
+	// the pointer: `var g Getter = &x` holds a pointer box whose target is read
+	// before the call.
+	_addPtrScalarCandidate(
+		candidates,
+		seenKeys,
+		rName,
+		rType,
+		fIdx,
+		paramWTypes,
+	) {
+		if (!isScalarType(rType, this.checker, this)) return;
+		const ptrBox = this.getIfaceBoxType({ kind: "pointer", base: rType });
+		const target = this.getBoxType(rType);
+		const ptrKey = `ptr:${rName}`;
+		if (!ptrBox || seenKeys.has(ptrKey)) return;
+		seenKeys.add(ptrKey);
+		candidates.push({
+			recvTypeName: rName,
+			testTypeIndex: ptrBox.typeIndex,
+			isBoxedValue: true,
+			nilPtrPanic: true,
+			needsValueDeref: false,
+			embedPath: [
+				{
+					castTypeIndex: target.typeIndex,
+					parentTypeIndex: target.typeIndex,
+					fieldIndex: 0,
+				},
+			],
+			funcIndex: fIdx,
+			targetParamTypes: paramWTypes,
+		});
 	}
 
 	getTypesImplementingInterface(ifaceType) {
@@ -2163,10 +2209,32 @@ export class ModuleEmitter {
 							candidates.push({ name: tName, typeIndex: box.typeIndex });
 						}
 					}
+					this._addPtrNamedImplementor(
+						tVal,
+						tName,
+						ifaceResolved,
+						seen,
+						candidates,
+					);
 				}
 			}
 		}
 
 		return candidates;
+	}
+
+	// `*T` of a named scalar or slice is boxed apart from `T`.
+	_addPtrNamedImplementor(tVal, tName, ifaceResolved, seen, candidates) {
+		const ptrType = { kind: "pointer", base: tVal };
+		if (
+			!isScalarType(tVal, this.checker, this) &&
+			!isSliceType(tVal, this.checker)
+		)
+			return;
+		if (!this.checker?.implements?.(ptrType, ifaceResolved)) return;
+		const box = this.getIfaceBoxType(ptrType);
+		if (!box || seen.has(box.typeIndex)) return;
+		seen.add(box.typeIndex);
+		candidates.push({ name: `*${tName}`, typeIndex: box.typeIndex });
 	}
 }
