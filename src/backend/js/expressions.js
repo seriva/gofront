@@ -1736,10 +1736,7 @@ export const expressionGenMethods = {
 	},
 
 	_genJsonStreamCall(recvName, expr) {
-		const isEnc =
-			recvName === "json.Encoder" ||
-			recvName === "encoding/json.Encoder" ||
-			recvName?.startsWith("Encoder$$");
+		const isEnc = this._isJsonEncoderName(recvName);
 		if (isEnc && expr.func.field === "Encode") {
 			this.useHelper("json");
 			const enc = this.genExpr(expr.func.expr);
