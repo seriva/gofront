@@ -3090,6 +3090,17 @@ export class StmtsEmitter {
 		return false;
 	}
 
+	// Each case clause is its own scope: a name declared in one clause must not
+	// stay visible in the clauses after it.
+	_emitClauseBody(stmts) {
+		const outer = new Map(this.locals);
+		try {
+			for (const s of stmts ?? []) this.emitStmt(s);
+		} finally {
+			this.locals = outer;
+		}
+	}
+
 	// A switch with `fallthrough` dispatches to one block per clause, in source
 	// order, so a clause that falls through simply runs into the next body.
 	_emitFallthroughSwitch(stmt) {
@@ -3143,7 +3154,7 @@ export class StmtsEmitter {
 			this.pushInstruction("end");
 			const body = cases[i].stmts ?? [];
 			const falls = isFall(body[body.length - 1]);
-			for (const s of falls ? body.slice(0, -1) : body) this.emitStmt(s);
+			this._emitClauseBody(falls ? body.slice(0, -1) : body);
 			if (!falls && i < n - 1) {
 				this.pushInstruction({ op: "br", depth: n - 1 - i });
 			}
@@ -3204,12 +3215,12 @@ export class StmtsEmitter {
 			this.pushInstruction({ op: "if", blockType: "void" });
 			ifCount++;
 
-			for (const s of c.stmts ?? []) this.emitStmt(s);
+			this._emitClauseBody(c.stmts);
 			this.pushInstruction("else");
 		}
 
 		if (defaultCase) {
-			for (const s of defaultCase.stmts ?? []) this.emitStmt(s);
+			this._emitClauseBody(defaultCase.stmts);
 		}
 
 		for (let i = 0; i < ifCount; i++) {
@@ -3285,9 +3296,7 @@ export class StmtsEmitter {
 				this.pushInstruction({ op: "local.set", index: assignLocal });
 			}
 
-			for (const s of c.stmts ?? []) {
-				this.emitStmt(s);
-			}
+			this._emitClauseBody(c.stmts);
 
 			this.pushInstruction("else");
 		}
@@ -3301,9 +3310,7 @@ export class StmtsEmitter {
 				this.pushInstruction({ op: "local.get", index: tswTmp });
 				this.pushInstruction({ op: "local.set", index: assignLocal });
 			}
-			for (const s of defaultCase.stmts ?? []) {
-				this.emitStmt(s);
-			}
+			this._emitClauseBody(defaultCase.stmts);
 		}
 
 		for (let i = 0; i < ifCount; i++) {

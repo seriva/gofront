@@ -7,6 +7,7 @@ import {
 	assertEqual,
 	assertProgramOutput,
 	assertThrows,
+	assertWasmProgramOutput,
 	compile,
 	compileHybrid,
 	runWasm,
@@ -680,6 +681,180 @@ idx 2
 10
 [{8 2} {3 0}]
 10 0
+`,
+	);
+});
+
+section("Go semantics — switch clause scopes");
+
+test("fallthrough clauses and plain clauses each declare their own names", async () => {
+	await assertWasmProgramOutput(
+		`
+package main
+
+import "fmt"
+
+func f(k int) {
+	x := 10
+	switch k {
+	case 1:
+		x := 20
+		_ = x
+		fallthrough
+	case 2:
+		fmt.Println("x", x)
+	}
+	fmt.Println("after", x)
+}
+
+func g() {
+	x := 1
+	switch x := x + 1; x {
+	case 2:
+		x := x * 100
+		fmt.Println(x)
+		fallthrough
+	case 3:
+		fmt.Println("three", x)
+	}
+}
+
+func h(k int) {
+	x := 5
+	switch k {
+	case 1:
+		x := 7
+		fmt.Println(x)
+	case 2:
+		fmt.Println("c2", x)
+	}
+	var fs []func() int
+	switch k {
+	case 1:
+		v := 3
+		fs = append(fs, func() int { v++; return v })
+		fallthrough
+	case 2:
+		v := 9
+		fs = append(fs, func() int { return v })
+	}
+	for _, q := range fs {
+		fmt.Println(q())
+	}
+	var i any = k
+	switch i.(type) {
+	case int:
+		y := 1
+		fmt.Println("y", y)
+	default:
+		fmt.Println("default", x)
+	}
+}
+
+func main() {
+	f(1)
+	f(2)
+	g()
+	h(1)
+	h(2)
+}
+`,
+		`x 10
+after 10
+x 10
+after 10
+200
+three 2
+7
+4
+9
+y 1
+c2 5
+9
+y 1
+`,
+	);
+});
+
+section("Go semantics — nil pointer inside an interface");
+
+test("a value-receiver call through a nil pointer to a named type is a recoverable panic", async () => {
+	await assertWasmProgramOutput(
+		`
+package main
+
+import "fmt"
+
+type Getter interface{ Get() int }
+type PGetter interface{ PGet() int }
+
+type MyInt int
+
+func (m MyInt) Get() int { return int(m) }
+func (m *MyInt) PGet() int {
+	if m == nil {
+		return -1
+	}
+	return int(*m)
+}
+
+type Names []string
+
+func (n Names) Get() int { return len(n) }
+
+type Label string
+
+func (l Label) Get() int { return len(l) }
+
+type Ratio float64
+
+func (r Ratio) Get() int { return int(r) }
+
+func try(name string, f func()) {
+	defer func() { fmt.Println(name, "rec:", recover()) }()
+	f()
+}
+
+func main() {
+	try("int", func() {
+		var np *MyInt
+		var g Getter = np
+		var pg PGetter = np
+		fmt.Println(g != nil, g == nil, pg.PGet())
+		_, ok := g.(*MyInt)
+		fmt.Println(ok)
+		fmt.Println(g.Get())
+	})
+	try("slice", func() {
+		var np *Names
+		var g Getter = np
+		fmt.Println(g != nil)
+		fmt.Println(g.Get())
+	})
+	try("string", func() {
+		var np *Label
+		var g Getter = np
+		fmt.Println(g.Get())
+	})
+	try("float", func() {
+		var np *Ratio
+		var g Getter = np
+		fmt.Println(g.Get())
+	})
+	v := MyInt(4)
+	var g Getter = &v
+	var pg PGetter = &v
+	fmt.Println(g.Get(), pg.PGet())
+}
+`,
+		`true false -1
+true
+int rec: runtime error: invalid memory address or nil pointer dereference
+true
+slice rec: runtime error: invalid memory address or nil pointer dereference
+string rec: runtime error: invalid memory address or nil pointer dereference
+float rec: runtime error: invalid memory address or nil pointer dereference
+4 4
 `,
 	);
 });

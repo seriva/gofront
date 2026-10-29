@@ -1387,6 +1387,8 @@ export class FunctionEmitter {
 			this.pushInstruction("i32.eqz");
 			this.pushInstruction({ op: "br_if", depth: 0 });
 
+			this._emitNilPtrBoxPanic(cand, recvLocal);
+
 			// Matched! Cast receiver
 			this.pushInstruction({ op: "local.get", index: recvLocal });
 			this.pushInstruction({
@@ -1441,6 +1443,28 @@ export class FunctionEmitter {
 		}
 
 		emitMiss("interface conversion: nil or unmatched type for method call");
+	}
+
+	// A value-receiver method reached through a pointer box reads the pointee
+	// first, so a nil pointer inside the interface is a catchable panic.
+	_emitNilPtrBoxPanic(cand, recvLocal) {
+		if (!cand.nilPtrPanic) return;
+		this.pushInstruction({ op: "local.get", index: recvLocal });
+		this.pushInstruction({
+			op: "ref.cast_null",
+			typeIndex: cand.testTypeIndex,
+		});
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: cand.testTypeIndex,
+			fieldIndex: 0,
+		});
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.emitPanic(
+			"runtime error: invalid memory address or nil pointer dereference",
+		);
+		this.pushInstruction("end");
 	}
 
 	_getArraySize(t, defaultSize = 0) {
