@@ -558,8 +558,7 @@ export class StmtsEmitter {
 
 			if (this._needsStableStore(l, lastStep.field.goType)) {
 				this._emitStableStore(lastStep.field.goType, r, () => {
-					this.emitExpr(l.expr, baseWType);
-					this._emitNilCheck(exprGoType);
+					this.emitSelectorBase(l.expr, baseWType, exprGoType);
 					for (const step of path) {
 						this.pushInstruction({
 							op: "struct.get",
@@ -570,8 +569,7 @@ export class StmtsEmitter {
 				});
 				return;
 			}
-			this.emitExpr(l.expr, baseWType);
-			this._emitNilCheck(exprGoType);
+			this.emitSelectorBase(l.expr, baseWType, exprGoType);
 			for (let i = 0; i < path.length - 1; i++) {
 				const step = path[i];
 				this.pushInstruction({
@@ -912,7 +910,7 @@ export class StmtsEmitter {
 
 	_emitDerefAssign(l, r) {
 		const operand = l.operand ?? l.expr;
-		const structInfo = this._resolveStructInfo(operand);
+		const structInfo = this._derefStructInfo(operand);
 		if (structInfo) {
 			this._emitStructDerefAssign(operand, r, structInfo);
 			return;
@@ -1211,10 +1209,7 @@ export class StmtsEmitter {
 
 		if (isFuncType(targetGoType, this.mod.checker)) {
 			const closureInfo = this.mod.getClosureType(targetGoType);
-			this.pushInstruction({
-				op: "ref.test",
-				typeIndex: closureInfo.typeIndex,
-			});
+			this._emitRefTestOrNil(targetGoType, closureInfo.typeIndex);
 			return;
 		}
 
@@ -1223,7 +1218,7 @@ export class StmtsEmitter {
 		if (isPointerToStruct(targetGoType, this.mod.checker, this.mod)) {
 			const sInfo = this._structInfoOfType(targetGoType);
 			if (sInfo) {
-				this.pushInstruction({ op: "ref.test", typeIndex: sInfo.typeIndex });
+				this._emitRefTestOrNil(targetGoType, sInfo.typeIndex);
 				return;
 			}
 		}
@@ -1253,7 +1248,7 @@ export class StmtsEmitter {
 				this.mod.checker,
 			);
 			const mInfo = this.mod.getMapType(keyType, valType);
-			this.pushInstruction({ op: "ref.test", typeIndex: mInfo.typeIndex });
+			this._emitRefTestOrNil(targetGoType, mInfo.typeIndex);
 			return;
 		}
 
@@ -1268,6 +1263,40 @@ export class StmtsEmitter {
 		this.pushInstruction({ op: "i32.const", value: 1 });
 	}
 
+	// `ref.test` for a map, func or `*T`, which also accepts the typed-nil
+	// marker of the same Go type (see getNilBoxType).
+	_emitRefTestOrNil(goType, typeIndex) {
+		const nilBox = this.mod.getNilBoxType(goType);
+		const tmp = this.acquireTemp("anyref");
+		this.pushInstruction({ op: "local.set", index: tmp });
+		this.pushInstruction({ op: "local.get", index: tmp });
+		this.pushInstruction({ op: "ref.test", typeIndex });
+		this.pushInstruction({ op: "local.get", index: tmp });
+		this.pushInstruction({ op: "ref.test", typeIndex: nilBox.typeIndex });
+		this.pushInstruction("i32.or");
+		this.releaseTemp(tmp, "anyref");
+	}
+
+	// `ref.cast_null` to `typeIndex`, turning the typed-nil marker of `goType`
+	// back into a nil value.
+	_emitRefCastOrNil(goType, typeIndex) {
+		const nilBox = this.mod.getNilBoxType(goType);
+		const tmp = this.acquireTemp("anyref");
+		this.pushInstruction({ op: "local.set", index: tmp });
+		this.pushInstruction({ op: "local.get", index: tmp });
+		this.pushInstruction({ op: "ref.test", typeIndex: nilBox.typeIndex });
+		this.pushInstruction({
+			op: "if",
+			blockType: { kind: "ref", nullable: true, typeIndex },
+		});
+		this.pushInstruction({ op: "ref.null", heapType: typeIndex });
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "local.get", index: tmp });
+		this.pushInstruction({ op: "ref.cast_null", typeIndex });
+		this.pushInstruction("end");
+		this.releaseTemp(tmp, "anyref");
+	}
+
 	_emitTypeCast(targetGoType, targetWType) {
 		if (isInterfaceType(targetGoType, this.mod.checker)) {
 			return;
@@ -1280,20 +1309,14 @@ export class StmtsEmitter {
 
 		if (isFuncType(targetGoType, this.mod.checker)) {
 			const closureInfo = this.mod.getClosureType(targetGoType);
-			this.pushInstruction({
-				op: "ref.cast_null",
-				typeIndex: closureInfo.typeIndex,
-			});
+			this._emitRefCastOrNil(targetGoType, closureInfo.typeIndex);
 			return;
 		}
 
 		if (isPointerToStruct(targetGoType, this.mod.checker, this.mod)) {
 			const sInfo = this._structInfoOfType(targetGoType);
 			if (sInfo) {
-				this.pushInstruction({
-					op: "ref.cast_null",
-					typeIndex: sInfo.typeIndex,
-				});
+				this._emitRefCastOrNil(targetGoType, sInfo.typeIndex);
 				return;
 			}
 		}
@@ -1337,10 +1360,7 @@ export class StmtsEmitter {
 				this.mod.checker,
 			);
 			const mInfo = this.mod.getMapType(keyType, valType);
-			this.pushInstruction({
-				op: "ref.cast_null",
-				typeIndex: mInfo.typeIndex,
-			});
+			this._emitRefCastOrNil(targetGoType, mInfo.typeIndex);
 			return;
 		}
 
@@ -1426,8 +1446,7 @@ export class StmtsEmitter {
 			const holderWType = this._fieldHolderWType(path, baseWType);
 
 			const baseTmp = this.acquireTemp(holderWType);
-			this.emitExpr(l.expr, baseWType);
-			this._emitNilCheck(l.expr._type);
+			this.emitSelectorBase(l.expr, baseWType);
 			for (let i = 0; i < path.length - 1; i++) {
 				const step = path[i];
 				this.pushInstruction({
@@ -1689,7 +1708,7 @@ export class StmtsEmitter {
 			expr.kind === "StarExpr"
 		) {
 			const operand = expr.operand ?? expr.expr;
-			const structInfo = this._resolveStructInfo(operand);
+			const structInfo = this._derefStructInfo(operand);
 			if (!structInfo) {
 				const operandGoType =
 					operand._type ??
@@ -1755,8 +1774,7 @@ export class StmtsEmitter {
 			const holderWType = this._fieldHolderWType(path, baseWType);
 
 			const baseTmp = this.acquireTemp(holderWType);
-			this.emitExpr(expr.expr, baseWType);
-			this._emitNilCheck(expr.expr._type);
+			this.emitSelectorBase(expr.expr, baseWType);
 			for (let i = 0; i < path.length - 1; i++) {
 				const step = path[i];
 				this.pushInstruction({

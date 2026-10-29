@@ -1690,8 +1690,18 @@ export class FunctionEmitter {
 				break;
 
 			case "VarDecl":
+			case "ConstDecl":
 				this.emitVarDecl(stmt);
 				break;
+
+			// A package-level array or struct too large to build as a constant
+			// expression gets its zero value when the module starts.
+			case "GlobalZeroInit": {
+				const g = this.mod.resolveGlobal(stmt.name);
+				this.emitZeroValue(stmt.goType, g.type);
+				this.pushInstruction({ op: "global.set", index: g.index });
+				break;
+			}
 
 			case "DefineStmt":
 				this.emitDefineStmt(stmt);

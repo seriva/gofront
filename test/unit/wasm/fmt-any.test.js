@@ -4,6 +4,7 @@
 
 import {
 	assertEqual,
+	assertWasmProgramOutput,
 	compileHybrid,
 	compileWasm,
 	instantiateWasm,
@@ -325,4 +326,144 @@ func Main() string {
 	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
 	assertEqual(wasmRes, "&{[1 2] [3 4]}");
 	assertEqual(wasmRes, jsRes);
+});
+
+section("any: wide integers and typed nil values");
+
+test("64-bit and sized integers, named ints and iter.Seq conversions box into any", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import (
+	"fmt"
+	"iter"
+)
+
+type Color int
+type U8 uint8
+
+func main() {
+	x := any(uint64(1))
+	fmt.Println(x)
+	var y any = int64(-3)
+	var z any = uint32(7)
+	var w any = uint64(1) << 63
+	var i8 any = int8(-8)
+	var u8 any = uint8(8)
+	var u16 any = uint16(16)
+	var i16 any = int16(-16)
+	var i32 any = int32(-32)
+	var f32 any = float32(1.5)
+	var r any = 'r'
+	var by any = byte('b')
+	fmt.Println(y, z, w, i8, u8, u16, i16, i32, f32, r, by)
+	fmt.Println(any(Color(1)), any(U8(3)), any(Color(1)) == any(Color(1)), any(Color(1)) == any(1), any(Color(1)) == any(Color(2)))
+	fmt.Println(any(uint64(1)) == any(uint64(1)), any(uint64(1)) == any(uint32(1)), any(int64(2)) == any(2))
+	m := map[any]int{uint64(1): 1, int64(1): 2, Color(1): 3, 1: 4}
+	fmt.Println(len(m), m[uint64(1)], m[int64(1)], m[Color(1)], m[1])
+	switch v := x.(type) {
+	case uint64:
+		fmt.Println("u64", v)
+	case int:
+		fmt.Println("int")
+	}
+	if v, ok := x.(uint64); ok {
+		fmt.Println(v + 1)
+	}
+	_, ok := x.(int64)
+	fmt.Println(ok)
+	f := func(yield func(int) bool) { yield(1) }
+	n := 0
+	for v := range iter.Seq[int](f) {
+		n += v
+	}
+	fmt.Println(n)
+}
+`,
+		`1
+-3 7 9223372036854775808 -8 8 16 -16 -32 1.5 114 98
+1 3 true false false
+true false false
+4 1 2 3 4
+u64 1
+2
+false
+1
+`,
+	);
+});
+
+test("a nil map, pointer or func in an interface is not a nil interface", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+type P struct{ X int }
+type MyMap map[string]int
+
+type myErr struct{}
+
+func (*myErr) Error() string { return "e" }
+
+func main() {
+	var nilMap map[string]int
+	var a any = nilMap
+	fmt.Println(a == nil, a != nil)
+	var nilSlice []int
+	var b any = nilSlice
+	fmt.Println(b == nil)
+	var np *P
+	var c any = np
+	fmt.Println(c == nil, np == nil)
+	var nf func()
+	var d any = nf
+	fmt.Println(d == nil)
+	var nm MyMap
+	var e any = nm
+	fmt.Println(e == nil)
+	var err error
+	var ee any = err
+	fmt.Println(ee == nil)
+	var ep *myErr
+	var e2 error = ep
+	fmt.Println(e2 == nil, e2 != nil)
+	fmt.Println(a, c, d, e)
+	switch v := a.(type) {
+	case map[string]int:
+		fmt.Println("map", v == nil, len(v))
+	}
+	switch v := c.(type) {
+	case *P:
+		fmt.Println("ptr", v == nil)
+	}
+	if m, ok := e.(MyMap); ok {
+		fmt.Println("named map", m == nil)
+	}
+	_, ok := e.(map[string]int)
+	fmt.Println(ok)
+	if f, ok := d.(func()); ok {
+		fmt.Println("func", f == nil)
+	}
+	a = map[string]int{"k": 1}
+	c = &P{4}
+	fmt.Println(a.(map[string]int)["k"], c.(*P).X, a == nil, c == nil)
+}
+`,
+		`false true
+false
+false true
+false
+false
+true
+false true
+map[] <nil> <nil> map[]
+map true 0
+ptr true
+named map true
+false
+func true
+1 4 false false
+`,
+	);
 });

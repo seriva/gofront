@@ -482,11 +482,20 @@ export function isPointerToStruct(goType, checker = null, mod = null) {
 	return false;
 }
 
-// Slices and maps are reference values that an assignment through a pointer
-// replaces (a nil map becomes a new one), unlike structs and arrays, whose
-// pointer is the value's own reference.
+// Slices, maps and pointers are reference values that an assignment through a
+// pointer replaces (a nil map becomes a new one, `*pp = q` repoints `p`),
+// unlike structs and arrays, whose pointer is the value's own reference.
 function isReplaceableRef(goType, checker) {
-	return isSliceType(goType, checker) || isMapType(goType, checker);
+	let t = goType;
+	if (t?.kind === "TypeName" && checker?.types?.has(t.name))
+		t = checker.types.get(t.name);
+	if (t?.kind === "named" && t.underlying) t = t.underlying;
+	return (
+		isSliceType(goType, checker) ||
+		isMapType(goType, checker) ||
+		t?.kind === "pointer" ||
+		t?.kind === "PointerType"
+	);
 }
 
 export function isScalarType(goType, checker = null, mod = null) {
@@ -586,6 +595,10 @@ export function isMapType(goType, checker = null) {
 	if (goType.kind === "named" && goType.underlying) {
 		return isMapType(goType.underlying, checker);
 	}
+	if (goType.kind === "named" && !goType.underlying) {
+		const resolved = checker?.types?.get(goType.name);
+		if (resolved && resolved !== goType) return isMapType(resolved, checker);
+	}
 	return goType.kind === "map" || goType.kind === "MapType";
 }
 
@@ -598,6 +611,11 @@ export function getMapKeyValTypes(goType, checker = null) {
 	}
 	if (goType.kind === "named" && goType.underlying) {
 		return getMapKeyValTypes(goType.underlying, checker);
+	}
+	if (goType.kind === "named" && !goType.underlying) {
+		const resolved = checker?.types?.get(goType.name);
+		if (resolved && resolved !== goType)
+			return getMapKeyValTypes(resolved, checker);
 	}
 	if (goType.kind === "map" || goType.kind === "MapType") {
 		const key = goType.key ?? goType.keyType;
@@ -665,6 +683,14 @@ export function isInterfaceType(goType, checker = null) {
 		if (resolved) return isInterfaceType(resolved, checker);
 	}
 	return false;
+}
+
+// `bool`, including the untyped boolean of a constant (`const ok = true`).
+export function isBoolGoType(goType) {
+	return (
+		goType?.name === "bool" ||
+		(goType?.kind === "untyped" && goType.base === "bool")
+	);
 }
 
 // The built-in `error` interface (checker ERROR type or its name).
