@@ -348,23 +348,23 @@ No longer reproducing (deleted from the ledger): promoted field through `Deep2{*
 
 ### Phase 10: WASM Expressions and Globals
 
-- [ ] Task 10.1: `append` and `copy` from a string
+- [x] Task 10.1: `append` and `copy` from a string
   - Files: `src/backend/wasm/emit-builtins.js`, `test/unit/wasm/slices.test.js`
   - Test: `append(b, "hello"...)` → `len 5`; `copy(e.enc[:], "ABC…567")` → `e.enc[1] == 'B'` (66) (all targets).
   - Done when: both modules validate and match JS.
-- [ ] Task 10.2: Constants in WASM: mixed-width compare, complex results, local consts
+- [x] Task 10.2: Constants in WASM: mixed-width compare, complex results, local consts
   - Files: `src/backend/wasm/emit-exprs.js`, `src/backend/wasm/emit-stmts.js`, `test/unit/wasm/scalars.test.js`
   - Test: `c <= rune(s[i+1]) && rune(s[i+1]) < 0xe000` → `true`; `func f() complex128 { return 1 }` → `(1+0i)`; local `const th float64 = 1 << 30` → `1` (all targets).
   - Done when: all three validate and match.
-- [ ] Task 10.3: Boxing into `any`: 64-bit ints, typed nil maps, named ints under `--wasm-opt`
+- [x] Task 10.3: Boxing into `any`: 64-bit ints, typed nil maps, named ints under `--wasm-opt`
   - Files: `src/backend/wasm/emit-exprs.js`, `src/backend/wasm/types.js`, `test/unit/wasm/fmt-any.test.js`
   - Test: `x := any(uint64(1)); fmt.Println(x)` → `1`; `var a any = nilMap; a == nil` → `false`; `iter.Seq[int](f)` ranges once; `fmt.Println(any(Color(1)))` builds with `--wasm-opt` (in `test/unit/wasm/optimize.test.js`).
   - Done when: all modules validate (incl. Binaryen) and outputs match Go.
-- [ ] Task 10.4: Package initialisation order and zero values
+- [x] Task 10.4: Package initialisation order and zero values
   - Files: `src/backend/wasm/globals.js`, `test/unit/wasm/structs.test.js`
   - Test: `var x1 = y1 + 1; var y1 = compute()` → `3`; `const (A = B + 1; B = C * 2; C = 3); var z1 = A + 1` → `8`; `var big [100]P; big[99].B` → `0`; `type Q struct{X [3]int}; var q Q; q.X[1]` → `0` (wasm).
   - Done when: all four compile and run without traps.
-- [ ] Task 10.5: Pointers to pointers and pointer receivers on named maps
+- [x] Task 10.5: Pointers to pointers and pointer receivers on named maps
   - Files: `src/backend/wasm/emit-exprs.js`, `src/backend/wasm/method-expr.js`, `test/unit/wasm/pointers.test.js`
   - Test: `p := &T{3}; pp := &p; (*pp).X` → `3`; `type M map[int]int; (m *M) Set` then `len(g)` → `1` (all targets).
   - Done when: both modules validate and match Go.

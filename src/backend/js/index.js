@@ -25,6 +25,7 @@ import {
 	normalizeDefers,
 	scanAddressTaken,
 } from "../../lower/index.js";
+import { orderPackageInits } from "../../typechecker/init-order.js";
 import {
 	BROWSER_GLOBALS,
 	isComplex,
@@ -282,20 +283,28 @@ export class CodeGen {
 	}
 
 	_emitVarConstDecls(program) {
-		for (const d of program.decls) {
-			if (d.kind === "ConstDecl") {
-				this._currentSrcFileIdx = d._srcFileIdx ?? 0;
-				this.genConstDecl(d);
+		const { consts, vars } = orderPackageInits([program]);
+		const emit = (decls, gen, ordered) => {
+			const natural = decls.flatMap((d) => d.decls ?? []);
+			const inOrder = ordered.every((e, i) => e.spec === natural[i]);
+			if (inOrder) {
+				for (const d of decls) {
+					this._currentSrcFileIdx = d._srcFileIdx ?? 0;
+					gen.call(this, d);
+					this.blank();
+				}
+				return;
+			}
+			// Initialisers depend on declarations that come later (Go allows it).
+			for (const e of ordered) {
+				this._currentSrcFileIdx = e.decl._srcFileIdx ?? 0;
+				gen.call(this, { ...e.decl, decls: [e.spec] });
 				this.blank();
 			}
-		}
-		for (const d of program.decls) {
-			if (d.kind === "VarDecl") {
-				this._currentSrcFileIdx = d._srcFileIdx ?? 0;
-				this.genVarDecl(d);
-				this.blank();
-			}
-		}
+		};
+		const declsOf = (kind) => program.decls.filter((d) => d.kind === kind);
+		emit(declsOf("ConstDecl"), this.genConstDecl, consts);
+		emit(declsOf("VarDecl"), this.genVarDecl, vars);
 	}
 
 	_callInitAndMain(initNames, program, isTest = false) {
