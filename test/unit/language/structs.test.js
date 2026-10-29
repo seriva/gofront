@@ -5,6 +5,7 @@ import {
 	assert,
 	assertEqual,
 	assertErrorContains,
+	assertProgramOutput,
 	compile,
 	compileHybrid,
 	runJs,
@@ -742,6 +743,37 @@ func main() {
 `);
 	assertEqual(errors.length, 0, errors.join("\n"));
 	assertEqual(runJs(js), "map[{2 3}:3 {2 5}:2 {10 1}:1]");
+});
+
+section("Positional embedded literal inside a keyed literal");
+
+test("a positional struct literal as a keyed field value", async () => {
+	const src = `package main
+
+import "fmt"
+
+type In struct{ X int }
+type Out struct {
+	A In
+	B int
+}
+type Base struct{ n int }
+type Outer struct {
+	Base
+	v string
+}
+
+func main() {
+	o := Out{A: In{3}}
+	fmt.Println(o.A.X)
+	x := Outer{Base: Base{7}, v: "x"}
+	fmt.Println(x.n, x.v)
+}
+`;
+	const { js, errors } = compile(src);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "3\n7 x");
+	await assertProgramOutput(src, "3\n7 x\n");
 });
 
 // ── Entry point ───────────────────────────────────────────────

@@ -140,7 +140,53 @@ const STMT_GEN_DELEGATE = {
 /** @type {ThisType<CodeGen>} */
 export const statementGenMethods = {
 	genBlock(block) {
-		for (const stmt of block.stmts) this.genStmt(stmt);
+		let nested = 0;
+		for (const stmt of block.stmts) {
+			if (this._definesShadowedRead(stmt)) {
+				this._genShadowingDefine(stmt);
+				nested++;
+			} else {
+				this.genStmt(stmt);
+			}
+		}
+		for (; nested > 0; nested--) {
+			this.indent--;
+			this.line("}");
+		}
+	},
+
+	// `x := f(x)` declaring a new `x` that its own right-hand side reads (the
+	// outer `x`): JS `let` would put the read in its temporal dead zone.
+	_definesShadowedRead(stmt) {
+		if (stmt.kind !== "DefineStmt" || this._isCommaOkMapExpr(stmt, stmt.rhs[0]))
+			return false;
+		const names = new Set(
+			stmt.lhs.filter((l) => !l._redecl && l.name !== "_").map((l) => l.name),
+		);
+		if (names.size === 0) return false;
+		const reads = (n) => {
+			if (Array.isArray(n)) return n.some(reads);
+			if (!n || typeof n !== "object") return false;
+			if (n.kind === "Ident" && names.has(n.name)) return true;
+			return someChild(n, reads);
+		};
+		return stmt.rhs.some(reads);
+	},
+
+	// Evaluates the right-hand side in the enclosing scope, then opens a nested
+	// block (closed at the end of the enclosing block) that declares the names.
+	_genShadowingDefine(stmt) {
+		const rhs = this._defineRhs(stmt);
+		this._tmpCounter = (this._tmpCounter ?? 0) + 1;
+		const tmp = `__t${this._tmpCounter}`;
+		const all = rhs.length === 1 ? rhs[0] : `[${rhs.join(", ")}]`;
+		this.line(`const ${tmp} = ${all};`);
+		this.line("{");
+		this.indent++;
+		this._genDefineStmt(
+			stmt,
+			rhs.length === 1 ? [tmp] : rhs.map((_, i) => `${tmp}[${i}]`),
+		);
 	},
 
 	// Shared helper for comma-ok map index in both DefineStmt and AssignStmt.
@@ -245,8 +291,14 @@ export const statementGenMethods = {
 				if (stmt.init) {
 					this.line("{");
 					this.indented(() => {
-						this.genStmt(stmt.init);
+						const shadowing = this._definesShadowedRead(stmt.init);
+						if (shadowing) this._genShadowingDefine(stmt.init);
+						else this.genStmt(stmt.init);
 						this._genIf(stmt);
+						if (shadowing) {
+							this.indent--;
+							this.line("}");
+						}
 					});
 					this.line("}");
 				} else {
@@ -334,19 +386,23 @@ export const statementGenMethods = {
 		}
 	},
 
-	_genDefineStmt(stmt) {
-		const rhsNode = stmt.rhs[0];
-		if (this._isCommaOkMapExpr(stmt, rhsNode)) {
-			this._genCommaOkMapIndex(stmt, rhsNode, true);
-			return;
-		}
+	_defineRhs(stmt) {
 		const paired = stmt.rhs.length === stmt.lhs.length;
-		const rhs = stmt.rhs.map((e, i) => {
+		return stmt.rhs.map((e, i) => {
 			const l = paired ? stmt.lhs[i] : null;
 			if (!l || l.name === "_") return this.genExpr(e);
 			if (l._redecl) return this.genValueExpr(e);
 			return this._genDeclValue(l.name, e);
 		});
+	},
+
+	_genDefineStmt(stmt, preEvaluated = null) {
+		const rhsNode = stmt.rhs[0];
+		if (this._isCommaOkMapExpr(stmt, rhsNode)) {
+			this._genCommaOkMapIndex(stmt, rhsNode, true);
+			return;
+		}
+		const rhs = preEvaluated ?? this._defineRhs(stmt);
 		const lhs = stmt.lhs.map((e) => e.name ?? this.genExpr(e));
 		const redecls = stmt.lhs.map((e) => !!e._redecl);
 		const anyRedecl = redecls.some((r) => r);

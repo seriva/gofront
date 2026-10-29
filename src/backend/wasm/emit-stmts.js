@@ -2729,9 +2729,16 @@ export class StmtsEmitter {
 		this.pushInstruction({ op: "block", blockType: "void" });
 		this.pushControl("continue", stmt.label);
 
+		// The body is its own scope: `i := i` must not rebind the loop
+		// variable that the post statement increments.
 		const bodyBlock = stmt.body ?? stmt.block;
 		if (bodyBlock) {
-			this.emitBlock(bodyBlock);
+			const outer = new Map(this.locals);
+			try {
+				this.emitBlock(bodyBlock);
+			} finally {
+				this.locals = outer;
+			}
 		}
 
 		// End inner continue block
