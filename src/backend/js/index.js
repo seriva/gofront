@@ -225,7 +225,7 @@ export class CodeGen {
 		this._boxedVars = new Set(); // address-taken scalar variables that need boxing
 		this._jsonCodecs = new Map(); // memoized JSON encoders and decoders
 		this._localTypeNames = new Set(); // function-local type declarations
-		this._localJsonHooks = []; // local struct names, by placeholder id
+		this._jsonAnyUsed = false; // program calls json.Marshal / Encoder.Encode
 		// Runtime helper usage tracking — only emit helpers that are actually used
 		this._helpers = new Set();
 		// Per-function context for Go value semantics (see _withFnCtx)
@@ -344,6 +344,7 @@ export class CodeGen {
 		this._boxedGlobals = this._collectBoxedGlobals(program);
 		this._boxedVars = new Set(this._boxedGlobals);
 		this._collectResliceNames(program);
+		this._jsonAnyUsed = this._usesJsonAnyMarshal(program.decls);
 		const methods = this._collectDecls(program);
 		this._emitJsImports();
 		this._emitTypeDecls(program, methods);
@@ -367,7 +368,7 @@ export class CodeGen {
 				m.genLine = Math.max(0, m.genLine + netShift);
 			}
 		}
-		return this._fillLocalJsonHooks(this.out.join("\n"));
+		return this.out.join("\n");
 	}
 
 	// Emits FuncDecl, TemplDecl, and CssDecl nodes; returns renamed init function names.

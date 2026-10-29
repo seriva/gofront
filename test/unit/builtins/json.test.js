@@ -2298,6 +2298,90 @@ func main() {
 	);
 });
 
+test("string literals next to function-local structs are emitted unchanged", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	type Local struct{ Z int }
+	l := Local{1}
+	fmt.Println(l, "/*__gf_json_hook_0__*/")
+}
+`,
+		"{1} /*__gf_json_hook_0__*/\n",
+	);
+	await assertProgramOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+func main() {
+	type Local struct{ Z int \`json:"zz"\` }
+	l := Local{1}
+	fmt.Println(l, "/*__gf_json_hook_0__*/")
+	b, _ := json.Marshal(any(Local{3}))
+	fmt.Println(string(b))
+}
+`,
+		'{1} /*__gf_json_hook_0__*/\n{"zz":3}\n',
+	);
+});
+
+test("function-local structs add no lines to programs that do not marshal", () => {
+	const { js, errors } = compile(`package main
+
+import "fmt"
+
+func main() {
+	type Local struct{ Z int }
+	fmt.Println(Local{1})
+}
+`);
+	assertEqual(errors.length, 0);
+	const lines = js.split("\n");
+	const at = lines.findIndex((l) =>
+		l.includes('Object.defineProperty(Local.prototype, "value"'),
+	);
+	assert(at >= 0, "local struct class emitted");
+	assertEqual(
+		lines[at + 1],
+		'  console.log(__sprintf("%v", __ifv(new Local(1))));',
+		"the statement after the local struct follows directly",
+	);
+	assert(!js.includes("__json_enc"), "no json hook without encoding/json");
+});
+
+test("a json.Encoder in main reaches local structs declared in earlier functions", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+func mk() any {
+	type Early struct{ Z int \`json:"ze"\` }
+	return Early{5}
+}
+
+func main() {
+	var buf bytes.Buffer
+	json.NewEncoder(&buf).Encode(mk())
+	fmt.Println(strings.TrimSpace(buf.String()))
+}
+`,
+		'{"ze":5}\n',
+	);
+});
+
 test("Encoder.SetEscapeHTML(false) keeps RawMessage and Marshaler output unescaped", async () => {
 	await assertProgramOutput(
 		`package main
