@@ -91,7 +91,8 @@ const BUILTIN_CHECK = {
 	},
 	new: (s, _n, e, _at, sc) => {
 		if (e.args.length < 1) return ANY;
-		const inner = s.resolveTypeNode(e.args[0], sc);
+		const ta = e.args[0];
+		const inner = s.resolveTypeNode(ta.kind === "TypeExpr" ? ta.type : ta, sc);
 		return { kind: "pointer", base: inner };
 	},
 	print: (s, n, e, at) => s._checkPrintArgs(n, e, at),
