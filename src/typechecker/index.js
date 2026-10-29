@@ -155,6 +155,12 @@ export class TypeChecker {
 			_consts: consts,
 		});
 		for (const [name, type] of types) {
+			const prior = this.types.get(name);
+			if (prior && prior !== type && prior.kind === "named") {
+				this._ambiguousImported ??= new WeakSet();
+				this._ambiguousImported.add(prior);
+				this._ambiguousImported.add(type);
+			}
 			this.types.set(name, type);
 			this.types.set(`${pkgName}.${name}`, type);
 		}
@@ -1083,7 +1089,7 @@ export class TypeChecker {
 				: decl.recvType.name;
 		const recvNamedType = this.types.get(recvTypeName);
 		this._injectGenericReceiverTypeParams(inner, recvNamedType);
-		const recvType = this.resolveTypeNodeName(decl.recvType, outer);
+		const recvType = this._methodReceiverType(decl, recvNamedType, outer);
 		inner.define(
 			decl.recvName,
 			decl.recvPointer ? { kind: "pointer", base: recvType } : recvType,
@@ -1111,6 +1117,16 @@ export class TypeChecker {
 				: ANY;
 			inner.define(tp.name, { kind: "typeParam", name: tp.name, constraint });
 		}
+	}
+
+	// Inside a method of `G[T]` the receiver is the instance `G[T]` over the
+	// receiver's own type parameters, so it is assignable to results and locals
+	// written as `G[T]`.
+	_methodReceiverType(decl, recvNamedType, outer) {
+		const generic = recvNamedType?._generic;
+		if (!generic || generic.isAlias || !generic.typeParams?.length)
+			return this.resolveTypeNodeName(decl.recvType, outer);
+		return this.instantiateGenericWithArgs(generic, generic.typeParams);
 	}
 
 	_injectGenericReceiverTypeParams(inner, recvNamedType) {
