@@ -1410,6 +1410,17 @@ export class ModuleEmitter {
 		);
 	}
 
+	// Registered only for programs whose fmt operands may hold a uint64
+	// (see scanFmtU64), so other modules keep their import table.
+	getFmtBoxU64Index() {
+		return this.getOrAddFuncImport(
+			"env",
+			"fmt_box_u64",
+			["i64"],
+			["externref"],
+		);
+	}
+
 	getFmtBoxF64Index() {
 		return this.getOrAddFuncImport(
 			"env",

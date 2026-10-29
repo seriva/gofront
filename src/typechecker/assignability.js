@@ -254,19 +254,26 @@ export const assignabilityMethods = {
 		// The static type behind the interface value: codegen derives the
 		// fmt metadata (Stringer elements of slices and maps) from it.
 		node._ifaceSrc = source;
+		const meta = this._ifaceBoxMeta(source);
+		if (!meta) return;
+		node._ifaceBox = meta.box;
+		if (meta.type) node._ifaceNamedType = meta.type;
+		if (meta.ptrFields) node._ifacePtrFields = meta.ptrFields;
+	},
+
+	// How a value of static type `source` is boxed on entering an interface:
+	// { box, type? (named kinds), ptrFields? }, or null when it stays raw.
+	// Shared by _markIfaceBox and the JS backend's multi-value fmt operands.
+	_ifaceBoxMeta(source) {
 		const named = this._namedMethodBoxSource(source);
-		if (named) {
-			node._ifaceBox = named.ptr ? "named_ptr" : "named";
-			node._ifaceNamedType = named.type;
-			return;
-		}
+		if (named)
+			return { box: named.ptr ? "named_ptr" : "named", type: named.type };
 		const sBase = this.resolveType(
 			source.kind === "named" ? source.underlying : source,
 		);
 		const info = this._classifyIfaceBox(sBase);
-		if (!info) return;
-		node._ifaceBox = info.box;
-		if (info.ptrFields) node._ifacePtrFields = info.ptrFields;
+		if (!info) return null;
+		return { box: info.box, ptrFields: info.ptrFields };
 	},
 
 	// A named non-struct type with methods (or a pointer to one) entering an
