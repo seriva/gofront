@@ -4,6 +4,7 @@ import {
 	nodeMutatesVar,
 	nodeWritesVar,
 	rootIdentName,
+	someChild,
 } from "../../lower/index.js";
 import { constIntValue } from "../../typechecker/const-fold.js";
 import {
@@ -16,6 +17,25 @@ import {
 	typedArrayConstructorForElem,
 	typeStr,
 } from "../../typechecker/types.js";
+
+// True when `node` compares the identifier `name` with nil (`l == nil`): a
+// pointer-receiver method that does so is meant to run on a nil receiver.
+export function comparesToNil(node, name) {
+	if (Array.isArray(node)) return node.some((n) => comparesToNil(n, name));
+	if (!node || typeof node !== "object") return false;
+	if (node.kind === "BinaryExpr" && (node.op === "==" || node.op === "!=")) {
+		const isRecv = (e) => e?.kind === "Ident" && e.name === name;
+		const isNil = (e) =>
+			(e?.kind === "Ident" && e.name === "nil") ||
+			(e?.kind === "BasicLit" && e.litKind === "NIL");
+		if (
+			(isRecv(node.left) && isNil(node.right)) ||
+			(isRecv(node.right) && isNil(node.left))
+		)
+			return true;
+	}
+	return someChild(node, (c) => comparesToNil(c, name));
+}
 
 /** @typedef {import('./index.js').CodeGen} CodeGen */
 
@@ -467,6 +487,9 @@ const BUILTIN_GEN = {
 		}
 		// `new([4]byte)`: the type argument is wrapped in a TypeExpr node.
 		const zero = s.zeroValueForExpr(arg.kind === "TypeExpr" ? arg.type : arg);
+		// Erased type parameter: a struct instantiation is its own pointer.
+		if (base?.kind === "typeParam")
+			return `((__v) => (${s._typeParamIsStructJs(base.name)} ? __v : { value: __v }))(${zero})`;
 		return `{ value: ${zero} }`;
 	},
 	// `print` writes without a trailing newline (Go semantics); the wasm glue
@@ -877,7 +900,11 @@ export const expressionGenMethods = {
 			if (p.name) this._fnCtx?.params.add(p.name);
 			if (p.variadic && p.name && p.name !== "_") {
 				this.useHelper("va");
-				this.line(`${p.name} = __va(${p.name});`);
+				// Only a function that tests the parameter against nil needs an
+				// empty call to be nil; others keep an empty slice so stdlib
+				// helpers and printing see `[]`.
+				const nilTested = comparesToNil(this._fnCtx?.body, p.name);
+				this.line(`${p.name} = __va(${p.name}${nilTested ? ", true" : ""});`);
 			}
 			if (p.variadic || !p.name || p.name === "_") continue;
 			if (this._boxedVars.has(p.name)) {
@@ -940,10 +967,10 @@ export const expressionGenMethods = {
 					"__o",
 					"__i",
 				);
-				// Erased generic element: a struct is its own pointer, anything
-				// else gets the get/set wrapper.
+				// Erased generic element: a struct instantiation is its own
+				// pointer, anything else gets the get/set wrapper.
 				if (expr.operand._type?.kind === "typeParam")
-					return `((__o, __i) => { ${check ? `${check}; ` : ""}const __e = __o[__i]; return __e !== null && typeof __e === "object" && !Array.isArray(__e) && !ArrayBuffer.isView(__e) ? __e : Object.defineProperties({ get value() { return __o[__i]; }, set value(v) { __o[__i] = v; } }, { __target: { value: __o }, __index: { value: __i } }); })(${obj}, ${idx})`;
+					return `((__o, __i) => { ${check ? `${check}; ` : ""}if (${this._typeParamIsStructJs(expr.operand._type.name)}) return __o[__i]; return Object.defineProperties({ get value() { return __o[__i]; }, set value(v) { __o[__i] = v; } }, { __target: { value: __o }, __index: { value: __i } }); })(${obj}, ${idx})`;
 				if (check)
 					return `((__o, __i) => (${check}, Object.defineProperties({ get value() { return __o[__i]; }, set value(v) { __o[__i] = v; } }, { __target: { value: __o }, __index: { value: __i } })))(${obj}, ${idx})`;
 				return `((__o, __i) => Object.defineProperties({ get value() { return __o[__i]; }, set value(v) { __o[__i] = v; } }, { __target: { value: __o }, __index: { value: __i } }))(${obj}, ${idx})`;
@@ -962,7 +989,7 @@ export const expressionGenMethods = {
 				return this._genNilChecked(this.genExpr(expr.operand));
 			}
 			if (expr.operand._type?.base?.kind === "typeParam")
-				return `((__p) => (__p !== null && typeof __p === "object" && "value" in __p ? __p.value : __p))(${this.genExpr(expr.operand)})`;
+				return `((__p) => (${this._typeParamIsStructJs(expr.operand._type.base.name)} ? __p : __p.value))(${this.genExpr(expr.operand)})`;
 			return `${this.genExpr(expr.operand)}.value`;
 		}
 		// Unary minus/plus on complex
@@ -2351,6 +2378,17 @@ export const expressionGenMethods = {
 	},
 
 	// ── Generic zero values (see HELPER_GENERICS) ─────────────────
+
+	// JS condition: type parameter `name` was instantiated with a struct (its
+	// zero value is a struct object, which is its own pointer when erased; a
+	// map's zero is a bare `{}`, so only a class instance or a populated
+	// object counts).
+	_typeParamIsStructJs(name) {
+		const f = this._typeParamZeroFactory(name);
+		return f
+			? `((__z) => __z !== null && typeof __z === "object" && !Array.isArray(__z) && !ArrayBuffer.isView(__z) && (Object.getPrototypeOf(Object.getPrototypeOf(__z)) !== null || Object.keys(__z).length > 0))(${f}())`
+			: "false";
+	},
 
 	// The zero-value factory bound to type parameter `name` in the code being
 	// emitted (`$z_T`), or null outside a generic body.
