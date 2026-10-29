@@ -693,7 +693,7 @@ export class TypeChecker {
 				p.decls?.some((d) => d.kind === "VarDecl" && d.decls?.includes(c.spec)),
 			);
 			if (owner) this._setCurrentFile(owner);
-			this.err(c.message, c.spec.value?.[0] ?? c.spec);
+			this.err(c.message, c.spec);
 		}
 	}
 

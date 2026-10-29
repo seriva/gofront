@@ -558,8 +558,7 @@ export class StmtsEmitter {
 
 			if (this._needsStableStore(l, lastStep.field.goType)) {
 				this._emitStableStore(lastStep.field.goType, r, () => {
-					this.emitExpr(l.expr, baseWType);
-					this._emitNilCheck(exprGoType);
+					this.emitSelectorBase(l.expr, baseWType, exprGoType);
 					for (const step of path) {
 						this.pushInstruction({
 							op: "struct.get",
@@ -570,8 +569,7 @@ export class StmtsEmitter {
 				});
 				return;
 			}
-			this.emitExpr(l.expr, baseWType);
-			this._emitNilCheck(exprGoType);
+			this.emitSelectorBase(l.expr, baseWType, exprGoType);
 			for (let i = 0; i < path.length - 1; i++) {
 				const step = path[i];
 				this.pushInstruction({
@@ -1448,8 +1446,7 @@ export class StmtsEmitter {
 			const holderWType = this._fieldHolderWType(path, baseWType);
 
 			const baseTmp = this.acquireTemp(holderWType);
-			this.emitExpr(l.expr, baseWType);
-			this._emitNilCheck(l.expr._type);
+			this.emitSelectorBase(l.expr, baseWType);
 			for (let i = 0; i < path.length - 1; i++) {
 				const step = path[i];
 				this.pushInstruction({
@@ -1777,8 +1774,7 @@ export class StmtsEmitter {
 			const holderWType = this._fieldHolderWType(path, baseWType);
 
 			const baseTmp = this.acquireTemp(holderWType);
-			this.emitExpr(expr.expr, baseWType);
-			this._emitNilCheck(expr.expr._type);
+			this.emitSelectorBase(expr.expr, baseWType);
 			for (let i = 0; i < path.length - 1; i++) {
 				const step = path[i];
 				this.pushInstruction({

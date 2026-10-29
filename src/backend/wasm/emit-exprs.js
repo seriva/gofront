@@ -528,6 +528,34 @@ export class ExprsEmitter {
 		this.pushInstruction({ op: "br_on_null", depth });
 	}
 
+	// Emits the struct (or struct pointer) a field access or store goes
+	// through, nil-checked.  A `*p` base is the pointee itself, not the copy a
+	// value read of `*p` makes, so a store through it lands in the pointee.
+	// Every selector read and every field store/op-assign/inc-dec starts here.
+	emitSelectorBase(node, wType = null, goType = node._type) {
+		const pointer = this._structDerefPointer(node);
+		if (pointer) {
+			this.emitSelectorBase(pointer);
+			return;
+		}
+		this.emitExpr(node, wType ?? this.toWasmType(goType));
+		this._emitNilCheck(goType);
+	}
+
+	// For `*p` (possibly parenthesised) with `p` pointing at a struct, the
+	// pointer `p`, which is the struct's own reference; otherwise null.
+	_structDerefPointer(node) {
+		let base = node;
+		while (base?.kind === "ParenExpr") base = base.expr;
+		if (
+			(base?.kind !== "UnaryExpr" || base.op !== "*") &&
+			base?.kind !== "StarExpr"
+		)
+			return null;
+		const operand = base.operand ?? base.expr;
+		return this._derefStructInfo(operand) ? operand : null;
+	}
+
 	_emitPkgConst(expr, targetWasmType) {
 		if (this._isMathConst(expr)) {
 			this.emitMathConst(expr.field, targetWasmType);
@@ -592,9 +620,7 @@ export class ExprsEmitter {
 			);
 		}
 
-		const baseWType = this.toWasmType(expr.expr._type);
-		this.emitExpr(expr.expr, baseWType);
-		this._emitNilCheck(expr.expr._type);
+		this.emitSelectorBase(expr.expr);
 
 		for (let i = 0; i < path.length; i++) {
 			const step = path[i];
