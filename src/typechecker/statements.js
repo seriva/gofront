@@ -100,7 +100,8 @@ export const statementCheckMethods = {
 		const resolvedBase =
 			mapBaseType?.kind === "named" ? mapBaseType.underlying : mapBaseType;
 		if (resolvedBase?.kind !== "map") return false;
-		this.checkExpr(stmt.rhs[0].index, scope);
+		const keyType = this.checkExpr(stmt.rhs[0].index, scope);
+		this._markIfaceKey(resolvedBase, stmt.rhs[0].index, keyType);
 		stmt._commaOkMap = true;
 		stmt.rhs[0]._mapValueType = resolvedBase.value;
 		this._declareDefineVars(stmt, [resolvedBase.value, BOOL], scope);
@@ -158,7 +159,8 @@ export const statementCheckMethods = {
 		const resolvedBase =
 			mapBaseType?.kind === "named" ? mapBaseType.underlying : mapBaseType;
 		if (resolvedBase?.kind !== "map") return null;
-		this.checkExpr(stmt.rhs[0].index, scope);
+		const keyType = this.checkExpr(stmt.rhs[0].index, scope);
+		this._markIfaceKey(resolvedBase, stmt.rhs[0].index, keyType);
 		stmt._commaOkMap = true;
 		stmt.rhs[0]._mapValueType = resolvedBase.value;
 		return [resolvedBase.value, BOOL];

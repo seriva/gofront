@@ -1375,7 +1375,7 @@ export const statementGenMethods = {
 		const base = iterType?.kind === "named" ? iterType.underlying : iterType;
 		const key = base?.kind === "map" ? base.key : null;
 		const keyBase = key?.kind === "named" ? key.underlying : key;
-		if (keyBase?.kind !== "struct") return false;
+		if (keyBase?.kind !== "struct" && !this._isIfaceType(key)) return false;
 		this.useHelper("structKey");
 		return true;
 	},
