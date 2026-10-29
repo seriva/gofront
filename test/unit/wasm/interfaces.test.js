@@ -657,3 +657,88 @@ func main() {
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "multi none\nfalse true true");
 });
+
+section("Interfaces — pointers to named scalars and values stored in any");
+
+test("interface dispatch through pointers to named scalars, type switches and any elements", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"fmt"
+	"io"
+)
+
+type Getter interface{ Get() int }
+type MyInt int
+
+func (m MyInt) Get() int { return int(m) }
+
+type Str string
+
+func (s Str) Name() string { return string(s) }
+
+type Namer interface{ Name() string }
+
+type F float64
+
+func (f F) Size() int { return int(f) }
+
+type Sizer interface{ Size() int }
+
+type W struct{ n int }
+
+func (w *W) Write(p []byte) (int, error) { w.n += len(p); return len(p), nil }
+
+type T struct{ n int }
+
+func (t T) Name() string { return fmt.Sprint("T", t.n) }
+
+func main() {
+	var w io.Writer = &W{}
+	fmt.Println(w.Write([]byte("xy")))
+	var mi MyInt = 42
+	var g Getter = &mi
+	fmt.Println(g.Get())
+	g = mi
+	fmt.Println(g.Get())
+	s := Str("hello")
+	var n Namer = &s
+	fmt.Println(n.Name())
+	f := F(7.9)
+	var sz Sizer = &f
+	fmt.Println(sz.Size())
+	t := T{4}
+	for _, v := range []any{s, &s, 3, &t, t, nil, f, &f} {
+		switch x := v.(type) {
+		case Namer:
+			fmt.Println("namer", x.Name())
+		case Sizer:
+			fmt.Println("sizer", x.Size())
+		case nil:
+			fmt.Println("nil")
+		default:
+			fmt.Println("other")
+		}
+	}
+	vs := []any{t, &t}
+	fmt.Println(len(vs))
+}
+`,
+		`2 <nil>
+42
+42
+hello
+7
+namer hello
+namer hello
+other
+namer T4
+namer T4
+nil
+sizer 7
+sizer 7
+2
+`,
+	);
+});
