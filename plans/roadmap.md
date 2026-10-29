@@ -20,6 +20,7 @@ features (e.g. `plans/v1.8.0/`).
 
 | Area | Difficulty | Status | Notes |
 |---|---|---|---|
+| Exact 64-bit integers in JS | High | Planned | `int64`/`uint64` as BigInt in all JS output and across the WASM facade (today Numbers: `int64` `*`/`+` and the pdqsort `uint64` xorshift round above 2⁵³); struct copies through `T` in erased JS generics. Prerequisite for the Go-source packages. |
 | Generic core types | Medium | Planned | `S ~[]E` / `M ~map[K]V` index, slice, conversion and constraint type inference (today `Cannot index type S`, `Cannot infer type arguments`); type-literal type arguments (`Id[[]int, int]` fails to parse); valid WASM for named `S`. |
 | Natives, differential testing, lazy checking | High | Planned | `//gofront:native` name set and per-backend registries (decline and value fallback); `assertFourWay`; declarations checked eagerly, stdlib bodies on demand. |
 | `sort` & `slices` | High | Planned | Generated pdqsort variants (Go's tie order), `NaN` ordering, O(n log n) in WASM (200k ints: ≈20 s → ≤ 100 ms), JS comparator sorts ≤ 2× `Array.prototype.sort`. |
