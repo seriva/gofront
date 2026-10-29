@@ -74,6 +74,7 @@ import {
 	HELPER_SPRINTF,
 	HELPER_STRCONV,
 	HELPER_STRCONV_ERROR,
+	HELPER_STRUCT_KEY,
 	HELPER_SV,
 	HELPER_SYNC,
 	HELPER_TESTING,
@@ -86,6 +87,7 @@ import { buildSourceMap, buildWasmSourceMap } from "./source-map.js";
 import { statementGenMethods } from "./statements.js";
 import { stdlibGenMethods } from "./stdlib/index.js";
 import { templGenMethods } from "./templ.js";
+import { typeInfoGenMethods } from "./type-info.js";
 
 export { buildSourceMap, buildWasmSourceMap };
 
@@ -160,6 +162,7 @@ const HELPER_MAP = [
 	["bounds", HELPER_BOUNDS],
 	["nilMap", HELPER_NIL_MAP],
 	["nm", HELPER_NM],
+	["structKey", HELPER_STRUCT_KEY],
 	["generics", HELPER_GENERICS],
 	["sprintf", HELPER_SPRINTF],
 	["sprint", HELPER_SPRINT],
@@ -539,6 +542,8 @@ export class CodeGen {
 	/** Marks a runtime helper (key of HELPER_MAP) as needed by the output. */
 	useHelper(name) {
 		this._helpers.add(name);
+		if (name === "ifeq" || name === "geq") this._helpers.add("equal");
+		if (name === "geq") this._helpers.add("ifeq");
 		if (
 			name === "strconvError" ||
 			name === "pathError" ||
@@ -655,8 +660,13 @@ export class CodeGen {
 		} else if (decl.type.kind === "InterfaceType") {
 			// Interfaces are compile-time only — no JS output needed.
 			this.line(`// interface ${decl.name} (compile-time only)`);
-		} else if (methodDecls.length > 0) {
+		} else if (
+			methodDecls.length > 0 ||
+			this._isPlainNamedBox(this.checker?.types.get(decl.name))
+		) {
 			// Named non-struct type with methods — emit an ES6 wrapper class.
+			if (methodDecls.length === 0)
+				this.line(`// type ${decl.name} = ${this.typeComment(decl.type)}`);
 			this.genNamedTypeClass(decl.name, methodDecls);
 		} else {
 			this.line(`// type ${decl.name} = ${this.typeComment(decl.type)}`);
@@ -709,12 +719,28 @@ export class CodeGen {
 		return "_items";
 	}
 
+	// A user-declared named basic type without methods: still boxed in an
+	// interface so `any(L("x")).(string)` fails like Go.
+	_isPlainNamedBox(type) {
+		if (type?.kind !== "named" || type._generic) return false;
+		if (type._target === undefined || type._target === "wasm") return false;
+		if (type.underlying?.kind !== "basic" || type.methods?.size > 0)
+			return false;
+		return type.methods instanceof Map;
+	}
+
 	// Box/dispatch info for a named non-struct type with methods, or null.
 	_namedBoxInfo(type) {
 		if (type?.kind !== "named") return null;
 		const u = type.underlying;
 		if (!u || u.kind === "struct" || u.kind === "interface") return null;
 		const methods = type.methods ?? type._generic?.methods;
+		if (this._isPlainNamedBox(type))
+			return {
+				cls: this._dequalify(type.name),
+				field: this._namedBoxField(u),
+				methods: new Map(),
+			};
 		if (!methods || methods.size === 0) return null;
 		if (![...methods.values()].some((m) => Object.hasOwn(m ?? {}, "_ptrRecv")))
 			return null;
@@ -811,20 +837,17 @@ export class CodeGen {
 		this.line("}");
 	}
 
-	// JS object keys are strings: a struct used as a map key becomes its Go
-	// `%v` text (`{1 x}`), so equal values share a key and fmt prints it as Go does.
-	_genStructKeyString(name, fields) {
+	// JS object keys are strings: a struct used as a map key becomes an
+	// injective encoding of its fields (see HELPER_STRUCT_KEY), so equal values
+	// share a key and distinct values never collide.
+	_genStructKeyString(_name, fields) {
 		if (fields.some((f) => f.name === "toString")) return;
-		const resolved = this.checker?.types.get(name)?.underlying;
-		const parts = fields.map((f) => {
-			const base = this._aggregateBase(resolved?.fields?.get(f.name));
-			return base?.kind === "array"
-				? `"[" + this.${f.name}.join(" ") + "]"`
-				: `this.${f.name}`;
-		});
-		this.line(
-			`toString() { return "{" + [${parts.join(", ")}].join(" ") + "}"; }`,
-		);
+		if (fields.length === 0) {
+			this.line('toString() { return "{}"; }');
+			return;
+		}
+		this.useHelper("structKey");
+		this.line("toString() { return __sk(this); }");
 	}
 
 	_genStructClone(name, structTypeAst, fields) {
@@ -967,6 +990,13 @@ export class CodeGen {
 		);
 		this._boxedVars = prevBoxed;
 		this.line("}");
+		// `Unwrap() []error` is told apart from `Unwrap() error` in type tests.
+		if (
+			!staticNamed &&
+			decl.name === "Unwrap" &&
+			decl.returnType?.kind === "SliceType"
+		)
+			this.line("static { this.prototype.Unwrap.__multi = true; }");
 		this._currentSrcFileIdx = prevFileIdx;
 	}
 
@@ -1275,5 +1305,6 @@ export class CodeGen {
 
 Object.assign(CodeGen.prototype, statementGenMethods);
 Object.assign(CodeGen.prototype, expressionGenMethods);
+Object.assign(CodeGen.prototype, typeInfoGenMethods);
 Object.assign(CodeGen.prototype, stdlibGenMethods);
 Object.assign(CodeGen.prototype, templGenMethods);

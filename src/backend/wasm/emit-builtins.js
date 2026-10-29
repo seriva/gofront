@@ -3,6 +3,7 @@
 // call expression dispatch (static, method, closure, package).
 
 import {
+	anonIfaceName,
 	getMapKeyValTypes,
 	isArrayType,
 	isComplex,
@@ -1198,7 +1199,7 @@ export class BuiltinsEmitter {
 			return true;
 		}
 		if (isNonEmptyInterface(recvType, this.mod.checker)) {
-			const ifaceName = recvTypeName ?? "anon";
+			const ifaceName = recvTypeName ?? anonIfaceName(recvType);
 			const dispatchName = `__dispatch_${ifaceName}_${func.field}`;
 			const targetFuncIdx = this.mod.resolveFuncIndex(dispatchName);
 			if (targetFuncIdx !== null) {

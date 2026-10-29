@@ -1265,7 +1265,11 @@ export const expressionCheckMethods = {
 		const generic = inst?.kind === "InstantiationExpr" && inst._genericFnType;
 		if (!generic || inst._typeArgs.length >= generic.typeParams.length)
 			return null;
-		const typeArgs = this.inferTypeArgs(generic, argTypes, inst._typeArgs);
+		const typeArgs = this.inferTypeArgs(
+			generic,
+			this._inferArgTypes(expr, argTypes),
+			inst._typeArgs,
+		);
 		if (!typeArgs) {
 			this.err(
 				`Cannot infer type arguments for generic function '${generic.name}'`,
@@ -1446,8 +1450,21 @@ export const expressionCheckMethods = {
 		}
 	},
 
+	// Argument types for inference: a spread argument `xs...` stands for its
+	// elements, which is what the variadic parameter type describes.
+	_inferArgTypes(expr, argTypes) {
+		return argTypes.map((t, i) => {
+			if (!expr.args?.[i]?._spread) return t;
+			const u = this.resolveType(t?.kind === "named" ? t.underlying : t);
+			return u?.kind === "slice" ? u.elem : t;
+		});
+	},
+
 	_resolveGenericFnType(fnType, argTypes, expr, scope) {
-		const typeArgs = this.inferTypeArgs(fnType, argTypes);
+		const typeArgs = this.inferTypeArgs(
+			fnType,
+			this._inferArgTypes(expr, argTypes),
+		);
 		if (!typeArgs) {
 			this.err(
 				`Cannot infer type arguments for generic function '${fnType.name}'`,

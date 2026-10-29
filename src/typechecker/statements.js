@@ -361,6 +361,19 @@ export const statementCheckMethods = {
 		this._reportUnused(inner, stmt);
 	},
 
+	// A case naming an interface (literal or declared) records the resolved
+	// type so backends test its method set.
+	_markInterfaceCaseType(t, scope) {
+		if (!t || (t.kind !== "InterfaceType" && t.kind !== "TypeName")) return;
+		if (t.kind === "TypeName" && (t.name === "nil" || t.name === "error"))
+			return;
+		const resolved = this.resolveTypeNode(t, scope);
+		const u = this.resolveType(
+			resolved?.kind === "named" ? resolved.underlying : resolved,
+		);
+		if (u?.kind === "interface") t._type = resolved;
+	},
+
 	_checkTypeSwitchStmt(stmt, scope, returnType) {
 		const inner = new Scope(scope);
 		this.checkExpr(stmt.expr, inner);
@@ -373,6 +386,7 @@ export const statementCheckMethods = {
 			for (const t of c.types ?? []) {
 				const base = t?.kind === "PointerType" ? t.base : t;
 				if (base?.kind === "GenericTypeName") this.resolveTypeNode(t, inner);
+				this._markInterfaceCaseType(t, inner);
 			}
 			if (stmt.assign) {
 				// Bind the variable to the single case type, or any for multi/default.

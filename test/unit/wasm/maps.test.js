@@ -3,6 +3,7 @@
 
 import {
 	assertEqual,
+	assertProgramOutput,
 	compile,
 	compileHybrid,
 	compileHybridProject,
@@ -607,4 +608,133 @@ func main() {
 `);
 	assertEqual(errors.length, 0, errors.join("\n"));
 	assertEqual(runJs(js), "true false true\nfalse");
+});
+
+test("struct map keys never collide and range yields struct keys", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type T struct{ A, B string }
+type K struct {
+	S string
+	N int
+}
+type P struct{ X, Y int }
+
+func main() {
+	m := map[T]int{T{"x y", "z"}: 1, T{"x", "y z"}: 2}
+	fmt.Println(len(m), m[T{"x y", "z"}], m[T{"x", "y z"}], m[T{"x y z", ""}])
+	m2 := map[K]int{K{"a", 5}: 1, K{"a 1", 0}: 2}
+	fmt.Println(m2)
+	n := 0
+	for k := range m {
+		n += len(k.A) + len(k.B)
+	}
+	fmt.Println(n)
+	sum := 0
+	for k, v := range m2 {
+		sum += len(k.S) + k.N + v
+	}
+	fmt.Println(sum)
+	fmt.Println(m2[K{"a", 5}], m2[K{"a 1", 0}], m2[K{"a", 6}])
+	delete(m2, K{"a", 5})
+	fmt.Println(len(m2), m2)
+	m4 := map[P][]int{}
+	m4[P{1, 2}] = append(m4[P{1, 2}], 5)
+	m4[P{1, 2}] = append(m4[P{1, 2}], 6)
+	fmt.Println(m4, len(m4))
+	m6 := map[T]int{{"a", "b"}: 1}
+	m6[T{"a", "b"}]++
+	v, ok := m6[T{"a", "b"}]
+	_, ok2 := m6[T{"b", "a"}]
+	fmt.Println(m6, v, ok, ok2)
+	var k2 K
+	for k2 = range m2 {
+	}
+	fmt.Println(k2)
+}
+`,
+		"2 1 2 0\nmap[{a 5}:1 {a 1 0}:2]\n8\n12\n1 2 0\n1 map[{a 1 0}:2]\nmap[{1 2}:[5 6]] 1\nmap[{a b}:2] 2 true false\n{a 1 0}\n",
+	);
+});
+
+test("struct map keys print in Go order and decode in range (JS)", () => {
+	const src = `package main
+
+import (
+	"fmt"
+	"sort"
+)
+
+type K struct {
+	S string
+	N int
+}
+type In struct{ A, B int }
+type Nest struct {
+	I In
+	T string
+}
+type G[T comparable] struct{ V T }
+
+
+func main() {
+	m := map[K]int{{"b", 1}: 1, {"a", 2}: 2, {"a", 10}: 3}
+	fmt.Println(m)
+	fmt.Println(fmt.Sprintf("%v|%+v|%#v", m, m, m))
+	fmt.Println(fmt.Sprint(m), len(m))
+	n := map[Nest]bool{{In{1, 2}, "x y"}: true, {In{1, 2}, "x"}: false, {In{0, 5}, "z"}: true}
+	fmt.Println(n)
+	total := 0
+	for k, v := range n {
+		total += k.I.A + len(k.T)
+		if v {
+			total += 100
+		}
+	}
+	fmt.Println(total)
+	g := map[G[string]]int{{"a b"}: 1, {"a"}: 2}
+	fmt.Println(g, len(g))
+	var a any = m
+	fmt.Println(a)
+	keys := []K{}
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i].N < keys[j].N })
+	fmt.Println(keys)
+	for k := range m {
+		k.N = 99
+	}
+	fmt.Println(m)
+	var k2 K
+	for k2 = range m {
+	}
+	fmt.Println(k2.S != "")
+	two := map[In]string{{1, 2}: "x", {2, 1}: "y"}
+	cnt := 0
+	for k, v := range two {
+		if (k == In{1, 2} && v == "x") || (k == In{2, 1} && v == "y") {
+			cnt++
+		}
+	}
+	fmt.Println(cnt, len(two))
+	m[K{"z", 0}]++
+	m[K{"z", 0}] += 4
+	v, ok := m[K{"z", 0}]
+	fmt.Println(v, ok)
+	clear(m)
+	fmt.Println(len(m), m)
+}
+`;
+	for (const target of ["js", "both"]) {
+		const { js, errors } = compile(src, { target });
+		assertEqual(errors.length, 0);
+		assertEqual(
+			runJs(js),
+			'map[{a 2}:2 {a 10}:3 {b 1}:1]\nmap[{a 2}:2 {a 10}:3 {b 1}:1]|map[{S:a N:2}:2 {S:a N:10}:3 {S:b N:1}:1]|map[main.K]int{main.K{S:"a", N:2}:2, main.K{S:"a", N:10}:3, main.K{S:"b", N:1}:1}\nmap[{a 2}:2 {a 10}:3 {b 1}:1] 3\nmap[{{0 5} z}:true {{1 2} x}:false {{1 2} x y}:true]\n207\nmap[{a}:2 {a b}:1] 2\nmap[{a 2}:2 {a 10}:3 {b 1}:1]\n[{b 1} {a 2} {a 10}]\nmap[{a 2}:2 {a 10}:3 {b 1}:1]\ntrue\n2 2\n5 true\n0 map[]',
+		);
+	}
 });
