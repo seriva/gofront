@@ -244,6 +244,7 @@ export const statementGenMethods = {
 				break;
 			case "IncDecStmt": {
 				this._markIndexLvalues([stmt.expr]);
+				this._markDerefOpTarget(stmt.expr);
 				if (stmt.expr.kind === "IndexExpr" && stmt.expr._mapValueType) {
 					const zero = this.zeroValueForType(stmt.expr._mapValueType);
 					const wrapField = this._namedWrapperField(
@@ -516,6 +517,13 @@ export const statementGenMethods = {
 		for (const e of exprs) if (e.kind === "IndexExpr") e._lvalue = true;
 	},
 
+	// Op-assign / inc-dec through a type-parameter pointer needs a settable
+	// target: the erased pointer is a get/set wrapper (struct instantiations
+	// cannot be op-assigned), so target `.value` directly.
+	_markDerefOpTarget(e) {
+		if (this._isTypeParamDerefTarget(e)) e._derefOpTarget = true;
+	},
+
 	_genAssignMulti(stmt, lhs, rhs, active, pairs) {
 		const rhsStr = rhs.length === 1 ? rhs[0] : `[${rhs.join(", ")}]`;
 		if (active.length === pairs.length) {
@@ -649,6 +657,7 @@ export const statementGenMethods = {
 
 	_genAssignStmt(stmt) {
 		this._markIndexLvalues(stmt.lhs);
+		if (stmt.op !== "=") for (const l of stmt.lhs) this._markDerefOpTarget(l);
 		this._markSelfReslice(stmt);
 		if (this._isComplexCompoundAssign(stmt)) {
 			this._genComplexCompoundAssign(stmt);
@@ -1597,6 +1606,7 @@ export const statementGenMethods = {
 			case "IncDecStmt": {
 				const syncs = this._resliceSyncs([stmt.expr], stmt, true);
 				this._markIndexLvalues([stmt.expr]);
+				this._markDerefOpTarget(stmt.expr);
 				return this._withInlineSyncs(
 					syncs,
 					`${this.genExpr(stmt.expr)}${stmt.op}`,
