@@ -53,7 +53,7 @@ const MATH_EXTRA = {
 	Ldexp: ([frac, exp]) =>
 		`((frac, exp) => { if (frac === 0 || !Number.isFinite(frac)) return frac; if (exp > 1023) return frac < 0 ? -Infinity : Infinity; if (exp < -1074) return frac < 0 ? -0 : 0; if (exp >= -1022) return frac * Math.pow(2, exp); return frac * Math.pow(2, exp + 54) * Math.pow(2, -54); })(${frac}, ${exp})`,
 	Modf: ([f]) =>
-		`((x) => { if (Number.isNaN(x)) return [NaN, NaN]; if (!Number.isFinite(x)) return [x, NaN]; const i = Math.trunc(x); const frac = Object.is(x, -0) ? -0 : x - i; return [i, frac]; })(${f})`,
+		`((x) => { if (Number.isNaN(x)) return [NaN, NaN]; if (!Number.isFinite(x)) return [x, NaN]; const i = Math.trunc(x); const frac = x === i ? (x < 0 || Object.is(x, -0) ? -0 : 0) : x - i; return [i, frac]; })(${f})`,
 	FMA: ([x, y, z]) =>
 		`((x, y, z) => { if (Number.isNaN(x) || Number.isNaN(y) || Number.isNaN(z)) return NaN; if ((x === 0 && !Number.isFinite(y)) || (y === 0 && !Number.isFinite(x))) return NaN; const p = x * y; if (!Number.isFinite(p) && !Number.isFinite(z) && ((p > 0 && z < 0) || (p < 0 && z > 0))) return NaN; return p + z; })(${x}, ${y}, ${z})`,
 	RoundToEven: ([x]) =>
