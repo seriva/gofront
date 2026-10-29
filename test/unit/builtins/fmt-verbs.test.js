@@ -1122,6 +1122,69 @@ test("float32 and float64 fields, elements and values print shortest in containe
 	);
 });
 
+section("fmt: multi-value calls as operands (all targets)");
+
+// Runs Main on the JS and WASM backends and as a `both` package; returns the
+// printed text.
+function printAllTargets(body, decls = "", imports = '"fmt"') {
+	const src = `package main
+import (${imports})
+${decls}
+func Main() {
+${body}
+}`;
+	const { output } = compileHybrid(src).run("Main");
+	const both = compile(`//gofront:target both\n${src}\nfunc main() { Main() }`);
+	assertEqual(both.errors.length, 0, both.errors.join("\n"));
+	assertEqual(runJs(both.js).trimEnd(), output);
+	return output;
+}
+
+test("Println spreads the results of a multi-value call", () => {
+	assertEqual(
+		printAllTargets(
+			`fmt.Println(strings.Cut("a=b", "="))`,
+			"",
+			'"fmt"; "strings"',
+		),
+		"a b true",
+	);
+	assertEqual(
+		printAllTargets(
+			`fmt.Println(strconv.ParseFloat("1.5", 64))`,
+			"",
+			'"fmt"; "strconv"',
+		),
+		"1.5 <nil>",
+	);
+	assertEqual(
+		printAllTargets(`fmt.Println(strconv.Atoi("zz"))`, "", '"fmt"; "strconv"'),
+		'0 strconv.Atoi: parsing "zz": invalid syntax',
+	);
+});
+
+test("Sprint and Sprintln take every result of a multi-value call", () => {
+	assertEqual(
+		printAllTargets(
+			`fmt.Println(fmt.Sprint(two()))
+	fmt.Print(fmt.Sprintln(two()))`,
+			'func two() (int, string) { return 1, "x" }',
+		),
+		"1x\n1 x",
+	);
+});
+
+test("multi-value operands keep pointers, values, floats and unsigned integers", () => {
+	assertEqual(
+		printAllTargets(
+			`fmt.Println(g())`,
+			`type T struct{ A int }
+func g() (*T, T, float32, uint32, any) { return &T{2}, T{3}, 0.1, 4000000000, uint64(1 << 63) }`,
+		),
+		"&{2} {3} 0.1 4000000000 9223372036854775808",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
