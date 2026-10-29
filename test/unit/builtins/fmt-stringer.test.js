@@ -713,6 +713,107 @@ ps {2}
 	);
 });
 
+test("multi-value calls dispatch String and Error on named results like real Go", async () => {
+	await realGo(
+		`package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+type C int
+
+func (c C) String() string { return fmt.Sprintf("C<%d>", int(c)) }
+
+type F float64
+
+func (f F) String() string { return "F!" }
+
+type U uint8
+
+func (u U) String() string { return "U!" }
+
+type S string
+
+func (s S) String() string { return "S!" }
+
+type L []int
+
+func (L) String() string { return "L!" }
+
+type E struct{ m string }
+
+func (e E) Error() string { return "E:" + e.m }
+
+type P struct{ n int }
+
+func (p *P) String() string { return "P!" }
+
+type St struct{ a int }
+
+func (s St) String() string { return "St!" }
+
+type Col int
+
+func (c Col) String() string { return "COL" }
+
+func pair[T any](a, b T) (T, T) { return a, b }
+
+func a() (C, int)                  { return 3, 4 }
+func b() (int, C)                  { return 3, 4 }
+func c() ([]C, map[C]int)          { return []C{1}, map[C]int{2: 3} }
+func d() (error, C)                { return errors.New("E!"), 1 }
+func e() (F, U, S)                 { return 1.5, 7, "x" }
+func f() (L, E, *P)                { return L{1}, E{"m"}, &P{1} }
+func g() (St, *St, float32)        { return St{1}, &St{2}, 2.5 }
+func h() ([]C, map[string]C, []F)  { return nil, nil, []F{1} }
+func i() (*C, float64)             { x := C(5); return &x, 3 }
+func j() ([]int, map[int]int, int) { return nil, nil, 1 }
+
+func main() {
+	fmt.Println(a())
+	fmt.Println(b())
+	fmt.Println(c())
+	fmt.Println(d())
+	fmt.Println(e())
+	fmt.Println(f())
+	fmt.Println(g())
+	fmt.Println(h())
+	fmt.Println(j())
+	fmt.Print(a())
+	fmt.Println()
+	fmt.Print(c())
+	fmt.Println()
+	fmt.Println(fmt.Sprint(a()), fmt.Sprintln(c()))
+	fmt.Println(fmt.Sprint(e()))
+	fmt.Println(pair(Col(1), Col(2)))
+	fmt.Println(pair(1.5, 2))
+	x, _ := i()
+	fmt.Println(*x)
+}
+`,
+		`C<3> 4
+3 C<4>
+[C<1>] map[C<2>:3]
+E! C<1>
+F! U! S!
+L! E:m P!
+St! St! 2.5
+[] map[] [F!]
+[] map[] 1
+C<3> 4
+[C<1>] map[C<2>:3]
+C<3> 4 [C<1>] map[C<2>:3]
+
+F! U!S!
+COL COL
+1.5 2
+C<5>
+`,
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

@@ -624,8 +624,7 @@ export const expressionGenMethods = {
 			if (desc) {
 				expr._fmtDescing = true;
 				try {
-					this.useHelper("ifd");
-					return `__ifd(${this.genExpr(expr)}, ${desc})`;
+					return this._fmtDescWrap(this.genExpr(expr), desc);
 				} finally {
 					expr._fmtDescing = false;
 				}
@@ -635,22 +634,11 @@ export const expressionGenMethods = {
 			expr._ifaceBoxing = true;
 			try {
 				this.useHelper("ifaceBox");
-				const fn =
-					expr._ifaceBox === "ptr"
-						? "__ifp"
-						: expr._ifaceBox === "ptr_slice"
-							? "__ifps"
-							: expr._ifaceBox === "ptr_map"
-								? "__ifpm"
-								: expr._ifaceBox === "map"
-									? "__ifm"
-									: expr._ifaceBox === "slice"
-										? "__ifs"
-										: "__ifv";
-				const extra = expr._ifacePtrFields?.length
-					? `, ${JSON.stringify(expr._ifacePtrFields)}`
-					: "";
-				return `${fn}(${this.genExpr(expr)}${extra})`;
+				return this._ifaceBoxWrap(
+					this.genExpr(expr),
+					expr._ifaceBox,
+					expr._ifacePtrFields,
+				);
 			} finally {
 				expr._ifaceBoxing = false;
 			}
@@ -705,6 +693,27 @@ export const expressionGenMethods = {
 		if (i === null || (i <= JS_SAFE_INT && i >= -JS_SAFE_INT)) return;
 		if (BigInt(Number(i)) !== i)
 			this._warn(`constant ${i} exceeds JS Number precision`, expr);
+	},
+
+	// `js` boxed as `box` (a checker _ifaceBoxMeta kind) for an interface.
+	_ifaceBoxWrap(js, box, ptrFields) {
+		this.useHelper("ifaceBox");
+		const fn =
+			{
+				ptr: "__ifp",
+				ptr_slice: "__ifps",
+				ptr_map: "__ifpm",
+				map: "__ifm",
+				slice: "__ifs",
+			}[box] ?? "__ifv";
+		const extra = ptrFields?.length ? `, ${JSON.stringify(ptrFields)}` : "";
+		return `${fn}(${js}${extra})`;
+	},
+
+	// `js` tagged with the fmt descriptor source `desc` (see _fmtDesc).
+	_fmtDescWrap(js, desc) {
+		this.useHelper("ifd");
+		return `__ifd(${js}, ${desc})`;
 	},
 
 	_isNamedBoxKind(expr) {
