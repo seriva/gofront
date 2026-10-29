@@ -473,9 +473,9 @@ var __zn = __zn || (() => null);
 var __z0 = __z0 || (() => 0);
 var __zs = __zs || (() => "");
 var __zf = __zf || (() => false);
-var __ti = __ti || function(f, k, id, is, u) {
+var __ti = __ti || function(f, k, id, is, u, b) {
   const g = () => f();
-  g.k = k; g.id = id; g.is = is; g.u = u;
+  g.k = k; g.id = id; g.is = is; g.u = u; g.b = b;
   return g;
 };
 var __tid = __tid || function(...ids) {
@@ -537,6 +537,13 @@ var __ik = __ik || function(k) {
     }
   }
   return k;
+};
+// A key typed by a type parameter whose factory is \`f\`: interface type
+// arguments key by dynamic type; \`box\` (an \`any\`-keyed map) boxes a named
+// basic value first, other keys are left as they are.
+var __ikt = __ikt || function(f, k, box) {
+  if (f?.k === "iface") return __ik(k);
+  return box ? __ik(f?.b ? f.b(k) : k) : k;
 };
 var __kd = __kd || function(s, copy) {
   if (typeof s !== "string" || s.charCodeAt(0) !== 1) return s;
