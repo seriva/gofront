@@ -1273,9 +1273,12 @@ export const expressionGenMethods = {
 		if (f.kind === "Ident") {
 			if (this.variadicFns?.has(f.name)) return true;
 			// A local func value (closure or parameter) compiled from Go source.
-			const imported = [...(this.jsImports?.values() ?? [])].some((names) =>
-				names.includes(f.name),
-			);
+			const imported =
+				this.checker?._externalNames?.has(f.name) ||
+				BROWSER_GLOBALS.has(f.name) ||
+				[...(this.jsImports?.values() ?? [])].some((names) =>
+					names.includes(f.name),
+				);
 			return !imported && f._type?.kind === "func" && !!f._type.variadic;
 		}
 		if (f.kind !== "SelectorExpr" || f._isMethodExpr) return false;
