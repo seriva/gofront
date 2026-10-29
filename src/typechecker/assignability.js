@@ -280,6 +280,17 @@ export const assignabilityMethods = {
 		const u = this.resolveType(t.underlying);
 		if (!u || u.kind === "struct" || u.kind === "interface") return null;
 		const methods = t.methods ?? t._generic?.methods;
+		// A user-declared named basic type without methods is boxed as well, so
+		// a type assertion to its underlying type fails like Go.
+		if (
+			u.kind === "basic" &&
+			!t._generic &&
+			t.methods instanceof Map &&
+			t.methods.size === 0 &&
+			t._target !== undefined &&
+			t._target !== "wasm"
+		)
+			return { type: t, ptr: isPtr };
 		if (!methods || methods.size === 0) return null;
 		// Only user-declared types (methods carry _ptrRecv); stdlib named types
 		// such as time.Duration have no box class.

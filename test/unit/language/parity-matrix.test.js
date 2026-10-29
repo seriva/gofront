@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { compileWasm } from "../../../src/compiler.js";
 import {
 	assertEqual,
+	assertProgramOutput,
 	compile,
 	compileHybrid,
 	section,
@@ -178,6 +179,63 @@ for (const [tableName, rows] of tables) {
 		});
 	}
 }
+
+section("Parity Matrix — Dynamic types");
+
+test("assertions from named types to predeclared types fail like Go", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type L string
+type N int
+type F float64
+type B bool
+type M map[string]int
+
+func (n N) Double() N { return n * 2 }
+
+func show(v any) string {
+	switch x := v.(type) {
+	case string:
+		return "string " + x
+	case int:
+		return fmt.Sprint("int ", x)
+	case N:
+		return fmt.Sprint("N ", int(x)+1)
+	case F:
+		return fmt.Sprint("F ", float64(x)*2)
+	case B:
+		return fmt.Sprint("B ", bool(x))
+	}
+	return "other"
+}
+
+func main() {
+	var a any = L("x")
+	_, ok := a.(string)
+	l, okl := a.(L)
+	fmt.Println(ok, okl, l)
+	var b any = N(3)
+	_, ok = b.(int)
+	n, okn := b.(N)
+	fmt.Println(ok, okn, n.Double())
+	for _, v := range []any{L("a"), N(2), F(1.5), B(true), "s", 3} {
+		fmt.Println(show(v))
+	}
+	var p any = new(L)
+	_, okq := p.(*L)
+	fmt.Println(okq)
+	var s any = "plain"
+	_, ok = s.(L)
+	fmt.Println(ok)
+	fmt.Println(a.(L) + "!")
+}
+`,
+		"false true x\nfalse true 6\nother\nN 3\nF 3\nB true\nstring s\nint 3\ntrue\nfalse\nx!\n",
+	);
+});
 
 section("Parity Matrix — Summary");
 
