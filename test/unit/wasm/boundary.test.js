@@ -1952,3 +1952,75 @@ func main() { _ = sim.Vecs }
 	assertEqual(m.Mask(masks), 2);
 	assertEqual(m.MaskAny(masks), true);
 });
+
+section("WASM Boundary — facade identifiers");
+
+test("a generic type instantiated with a qualified type gets a valid facade", async () => {
+	const res = await compileHybridProject({
+		"g/g.go": `//gofront:target wasm
+package g
+
+import "time"
+
+type G[T any] struct{ v T }
+
+func (g G[T]) Get() T { return g.v }
+
+type Box[T any] struct{ V T }
+
+func Make() G[time.Duration] { return G[time.Duration]{v: time.Second} }
+func Nested() G[Box[time.Month]] { return G[Box[time.Month]]{v: Box[time.Month]{V: time.March}} }
+`,
+		"main.go": `package main
+
+import "./g"
+
+func main() { println(g.Make().Get(), g.Nested().Get().V) }
+`,
+	});
+	assertEqual(res.lines.join("\n"), "1000000000 3");
+});
+
+test("a wasm main that returns a qualified interface builds and runs", async () => {
+	const res = await compileHybridProject({
+		"main.go": `//gofront:target wasm
+package main
+
+import "fmt"
+
+type Named struct{ s string }
+
+func (n Named) String() string { return n.s }
+
+func Mk(n Named) fmt.Stringer { return n }
+
+func main() { fmt.Println(Mk(Named{"x"})) }
+`,
+	});
+	assertEqual(res.lines.join("\n"), "x");
+});
+
+test("exported names that are JS reserved words get a valid facade", async () => {
+	const res = await compileHybridProject({
+		"g/g.go": `//gofront:target wasm
+package g
+
+type Class struct{ Delete int }
+
+func (c Class) This() int { return c.Delete }
+func (c *Class) Typeof(void int) int { return void + c.Delete }
+func Default(class int, var_ int) int { return class + var_ }
+func MakeClass() Class { return Class{Delete: 4} }
+`,
+		"main.go": `package main
+
+import "./g"
+
+func main() {
+	c := g.MakeClass()
+	println(c.This(), c.Typeof(2), g.Default(1, 2))
+}
+`,
+	});
+	assertEqual(res.lines.join("\n"), "4 6 3");
+});
