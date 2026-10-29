@@ -3,6 +3,7 @@
 import { fileURLToPath } from "node:url";
 import {
 	assertEqual,
+	assertProgramOutput,
 	compile,
 	compileHybrid,
 	runJs,
@@ -417,6 +418,57 @@ test("x <<= n with a wide count shifts past 32 bits", () => {
 });
 
 // ═════════════════════════════════════════════════════════════
+
+section("Strict narrow integer operators");
+
+test("narrow integer conversions, negation and Modf sign match Go", async () => {
+	const src = `package main
+
+import (
+	"fmt"
+	"math"
+)
+
+func main() {
+	r := rune(0xFFFD)
+	fmt.Println(byte(0x80 | r>>6&0x3F))
+	var x32, y32 int32 = 0, 0
+	fmt.Println(int(((x32 - y32 - 1) >> 31) & 1))
+	var a int8 = -128
+	fmt.Println(int64(-a))
+	_, frac := math.Modf(-3)
+	fmt.Println(math.Signbit(frac))
+}
+`;
+	await assertProgramOutput(src, "191\n1\n-128\ntrue\n");
+});
+
+section("64-bit shifts");
+
+test("64-bit shifts wrap and negative counts panic", async () => {
+	const src = `package main
+
+import "fmt"
+
+func shift(x, n int) int { return x << n }
+
+func main() {
+	x := 1 << 40
+	fmt.Println((x << 3) + (x >> 3))
+	y := 3
+	fmt.Println(y << 62)
+	z := 1 << 50
+	fmt.Println(z << 35)
+	defer func() { fmt.Println(recover()) }()
+	n := -1
+	fmt.Println(shift(x, n))
+}
+`;
+	await assertProgramOutput(
+		src,
+		"8933531975680\n-4611686018427387904\n0\nruntime error: negative shift amount\n",
+	);
+});
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);

@@ -2642,6 +2642,21 @@ export class ExprsEmitter {
 		this.pushInstruction({ op: "local.set", index: tmpVal });
 
 		this.emitExpr(right, rightWType);
+		// A negative signed count panics before the shift is evaluated.
+		if (isSigned(right._type) && right.kind !== "BasicLit") {
+			const tmpCount = this.acquireTemp(rightWType);
+			this.pushInstruction({ op: "local.tee", index: tmpCount });
+			this.pushInstruction({
+				op: `${rightWType}.const`,
+				value: rightWType === "i64" ? 0n : 0,
+			});
+			this.pushInstruction(`${rightWType}.lt_s`);
+			this.pushInstruction({ op: "if", blockType: "void" });
+			this.emitPanic("runtime error: negative shift amount");
+			this.pushInstruction("end");
+			this.pushInstruction({ op: "local.get", index: tmpCount });
+			this.releaseTemp(tmpCount, rightWType);
+		}
 		if (wType === "i64" && rightWType === "i32") {
 			this.pushInstruction("i64.extend_i32_u");
 		} else if (wType === "i32" && rightWType === "i64") {

@@ -4,6 +4,7 @@ import {
 	nodeMutatesVar,
 	nodeWritesVar,
 	rootIdentName,
+	someChild,
 } from "../../lower/index.js";
 import { constIntValue } from "../../typechecker/const-fold.js";
 import {
@@ -16,6 +17,25 @@ import {
 	typedArrayConstructorForElem,
 	typeStr,
 } from "../../typechecker/types.js";
+
+// True when `node` compares the identifier `name` with nil (`l == nil`): a
+// pointer-receiver method that does so is meant to run on a nil receiver.
+export function comparesToNil(node, name) {
+	if (Array.isArray(node)) return node.some((n) => comparesToNil(n, name));
+	if (!node || typeof node !== "object") return false;
+	if (node.kind === "BinaryExpr" && (node.op === "==" || node.op === "!=")) {
+		const isRecv = (e) => e?.kind === "Ident" && e.name === name;
+		const isNil = (e) =>
+			(e?.kind === "Ident" && e.name === "nil") ||
+			(e?.kind === "BasicLit" && e.litKind === "NIL");
+		if (
+			(isRecv(node.left) && isNil(node.right)) ||
+			(isRecv(node.right) && isNil(node.left))
+		)
+			return true;
+	}
+	return someChild(node, (c) => comparesToNil(c, name));
+}
 
 /** @typedef {import('./index.js').CodeGen} CodeGen */
 
@@ -78,6 +98,14 @@ const SMALL_UNSIGNED_WRAP = {
 	byte: "& 0xFF",
 	uint16: "& 0xFFFF",
 	uint32: ">>> 0",
+};
+
+// Signed types narrower than 64 bits: `-x` wraps back into range.
+const SIGNED_NEG_WRAP = {
+	int8: "<< 24 >> 24",
+	int16: "<< 16 >> 16",
+	int32: "| 0",
+	rune: "| 0",
 };
 
 // Integer types whose JS shifts must follow Go's 64-bit semantics.
@@ -459,6 +487,9 @@ const BUILTIN_GEN = {
 		}
 		// `new([4]byte)`: the type argument is wrapped in a TypeExpr node.
 		const zero = s.zeroValueForExpr(arg.kind === "TypeExpr" ? arg.type : arg);
+		// Erased type parameter: a struct instantiation is its own pointer.
+		if (base?.kind === "typeParam")
+			return `((__v) => (${s._typeParamIsStructJs(base.name)} ? __v : { value: __v }))(${zero})`;
 		return `{ value: ${zero} }`;
 	},
 	// `print` writes without a trailing newline (Go semantics); the wasm glue
@@ -869,7 +900,11 @@ export const expressionGenMethods = {
 			if (p.name) this._fnCtx?.params.add(p.name);
 			if (p.variadic && p.name && p.name !== "_") {
 				this.useHelper("va");
-				this.line(`${p.name} = __va(${p.name});`);
+				// Only a function that tests the parameter against nil needs an
+				// empty call to be nil; others keep an empty slice so stdlib
+				// helpers and printing see `[]`.
+				const nilTested = comparesToNil(this._fnCtx?.body, p.name);
+				this.line(`${p.name} = __va(${p.name}${nilTested ? ", true" : ""});`);
 			}
 			if (p.variadic || !p.name || p.name === "_") continue;
 			if (this._boxedVars.has(p.name)) {
@@ -932,6 +967,10 @@ export const expressionGenMethods = {
 					"__o",
 					"__i",
 				);
+				// Erased generic element: a struct instantiation is its own
+				// pointer, anything else gets the get/set wrapper.
+				if (expr.operand._type?.kind === "typeParam")
+					return `((__o, __i) => { ${check ? `${check}; ` : ""}if (${this._typeParamIsStructJs(expr.operand._type.name)}) return __o[__i]; return Object.defineProperties({ get value() { return __o[__i]; }, set value(v) { __o[__i] = v; } }, { __target: { value: __o }, __index: { value: __i } }); })(${obj}, ${idx})`;
 				if (check)
 					return `((__o, __i) => (${check}, Object.defineProperties({ get value() { return __o[__i]; }, set value(v) { __o[__i] = v; } }, { __target: { value: __o }, __index: { value: __i } })))(${obj}, ${idx})`;
 				return `((__o, __i) => Object.defineProperties({ get value() { return __o[__i]; }, set value(v) { __o[__i] = v; } }, { __target: { value: __o }, __index: { value: __i } }))(${obj}, ${idx})`;
@@ -949,6 +988,10 @@ export const expressionGenMethods = {
 			if (this._isStructPointerType(expr.operand._type)) {
 				return this._genNilChecked(this.genExpr(expr.operand));
 			}
+			if (expr.operand._type?.base?.kind === "typeParam") {
+				if (expr._derefOpTarget) return `${this.genExpr(expr.operand)}.value`;
+				return `((__p) => (${this._typeParamIsStructJs(expr.operand._type.base.name)} ? __p : __p.value))(${this.genExpr(expr.operand)})`;
+			}
 			return `${this.genExpr(expr.operand)}.value`;
 		}
 		// Unary minus/plus on complex
@@ -962,6 +1005,12 @@ export const expressionGenMethods = {
 			? SMALL_UNSIGNED_WRAP[this._typeName(expr._type)]
 			: null;
 		if (wrap && (op === "-" || op === "~")) return `(${op}(${code}) ${wrap})`;
+		// -MinInt wraps back to itself for signed narrow integers.
+		const signedWrap =
+			this.strict && op === "-"
+				? SIGNED_NEG_WRAP[this._typeName(expr._type)]
+				: null;
+		if (signedWrap) return `(-(${code}) ${signedWrap})`;
 		const needsParens =
 			this._emittedBinaryOp(expr.operand) !== null ||
 			((op === "-" || op === "+") && /^[-+]/.test(code));
@@ -1221,7 +1270,14 @@ export const expressionGenMethods = {
 
 	_calleeIsGoVariadic(call) {
 		const f = call.func;
-		if (f.kind === "Ident") return !!this.variadicFns?.has(f.name);
+		if (f.kind === "Ident") {
+			if (this.variadicFns?.has(f.name)) return true;
+			// A local func value (closure or parameter) compiled from Go source.
+			const imported = [...(this.jsImports?.values() ?? [])].some((names) =>
+				names.includes(f.name),
+			);
+			return !imported && f._type?.kind === "func" && !!f._type.variadic;
+		}
 		if (f.kind !== "SelectorExpr" || f._isMethodExpr) return false;
 		const recv = this._resolveRecvName(f.expr._type);
 		return !!recv && !!this.variadicFns?.has(`${recv}.${f.field}`);
@@ -1814,7 +1870,7 @@ export const expressionGenMethods = {
 			const elems = expr.args
 				.slice(1)
 				.map((a) =>
-					a._spread ? `...${this.genExpr(a)}` : this.genValueExpr(a),
+					a._spread ? `...(${this.genExpr(a)} ?? [])` : this.genValueExpr(a),
 				);
 			if (elems.length === 0) return this.genExpr(expr.args[0]);
 			this.useHelper("append");
@@ -1827,7 +1883,7 @@ export const expressionGenMethods = {
 		const spreadOf = (a) =>
 			this._aggregateBase(elemT)?.kind === "array"
 				? `...(${this.genExpr(a)} ?? []).map((__e) => ${this._cloneJs(elemT, "__e")})`
-				: `...${this.genExpr(a)}`;
+				: `...(${this.genExpr(a)} ?? [])`;
 		const elems = expr.args
 			.slice(1)
 			.map((a) => (a._spread ? spreadOf(a) : this.genValueExpr(a)));
@@ -2324,6 +2380,17 @@ export const expressionGenMethods = {
 	},
 
 	// ── Generic zero values (see HELPER_GENERICS) ─────────────────
+
+	// JS condition: type parameter `name` was instantiated with a struct (its
+	// zero value is a struct object, which is its own pointer when erased; a
+	// map's zero is a bare `{}`, so only a class instance or a populated
+	// object counts).
+	_typeParamIsStructJs(name) {
+		const f = this._typeParamZeroFactory(name);
+		return f
+			? `((__z) => __z !== null && typeof __z === "object" && !Array.isArray(__z) && !ArrayBuffer.isView(__z) && (Object.getPrototypeOf(Object.getPrototypeOf(__z)) !== null || Object.keys(__z).length > 0))(${f}())`
+			: "false";
+	},
 
 	// The zero-value factory bound to type parameter `name` in the code being
 	// emitted (`$z_T`), or null outside a generic body.
@@ -2963,9 +3030,9 @@ export const expressionGenMethods = {
 			if (op === "<<" || op === ">>") {
 				const ovf = signed && op === ">>" ? `((${l}) < 0 ? -1 : 0)` : "0";
 				const jsOp = !signed && op === ">>" ? ">>>" : op;
-				return `((${r}) >= 32 ? ${ovf} : ((${l}) ${jsOp} (${r}))) ${cast}`;
+				return `(((${r}) >= 32 ? ${ovf} : ((${l}) ${jsOp} (${r}))) ${cast})`;
 			}
-			if (op === "&^") return `((${l}) & ~(${r})) ${cast}`;
+			if (op === "&^") return `(((${l}) & ~(${r})) ${cast})`;
 			return `((${l} ${op} ${r}) ${cast})`;
 		}
 		if (tName === "int8" || tName === "int16") {
@@ -2996,19 +3063,12 @@ export const expressionGenMethods = {
 			return `((${l} ${op} ${r}) & ${mask})`;
 		}
 		if (op === "<<" || op === ">>") {
-			// A constant count below 32 keeps the plain 32-bit operator.
-			if (/^\d+$/.test(r) && Number(r) < 32) return `${l} ${op} ${r}`;
-			// Evaluate a side-effecting count once, after the operand (Go order).
-			const pure = /^[\w$]+$/.test(r);
-			const n = pure ? r : "__n";
-			const wrap = (body) =>
-				pure ? body : `((__x, __n) => ${body})(${l}, ${r})`;
-			const x = pure ? l : "__x";
-			if (op === "<<") return wrap(`((${n}) >= 64 ? 0 : (${x}) * 2 ** (${n}))`);
-			const ovf = this._typeName(type).startsWith("u")
-				? "0"
-				: `((${x}) < 0 ? -1 : 0)`;
-			return wrap(`((${n}) >= 64 ? ${ovf} : Math.floor((${x}) / 2 ** (${n})))`);
+			// 64-bit semantics: operand first, then count (Go order); a negative
+			// count panics and the result wraps to 64 bits.
+			this.useHelper("shift");
+			const unsigned = this._typeName(type).startsWith("u");
+			if (op === "<<") return `__shl64(${l}, ${r}, ${unsigned})`;
+			return `__shr64(${l}, ${r}, ${unsigned})`;
 		}
 		if (this.isIntType(type)) {
 			if (op === "/")
