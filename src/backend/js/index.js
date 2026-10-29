@@ -1003,7 +1003,7 @@ export class CodeGen {
 	_genMethodBody(decl, staticNamed, recvParam, tpNames) {
 		this._withFnCtx(decl.body, () =>
 			this.indented(() => {
-				if (tpNames) this._genTypeParamBindings(tpNames, "this[__tz]");
+				if (tpNames) this._genTypeParamBindings(tpNames, "this?.[__tz]");
 				if (decl.recvName) this._fnCtx.params.add(decl.recvName);
 				if (!staticNamed && decl.recvName && decl.recvName !== "_") {
 					this.line(`let ${decl.recvName} = ${this._receiverValue(decl)};`);

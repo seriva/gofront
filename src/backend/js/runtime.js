@@ -308,7 +308,7 @@ export const HELPER_IFACE_BOX = `var __ifv = __ifv || function(x, ptrFields) {
   }
   for (const k of Object.keys(c)) {
     if (c[k] !== null && typeof c[k] === "object" && !Array.isArray(c[k]) && !ArrayBuffer.isView(c[k])) {
-      if (!c[k].__v && !c[k].__p && (!Array.isArray(ptrFields) || !ptrFields.includes(k))) {
+      if (!c[k].__v && !c[k].__p && Object.isExtensible(c[k]) && (!Array.isArray(ptrFields) || !ptrFields.includes(k))) {
         Object.defineProperty(c[k], "__v", { value: true, configurable: true });
       }
     }
@@ -473,9 +473,9 @@ var __zn = __zn || (() => null);
 var __z0 = __z0 || (() => 0);
 var __zs = __zs || (() => "");
 var __zf = __zf || (() => false);
-var __ti = __ti || function(f, k, id, is, u, b) {
+var __ti = __ti || function(f, k, id, is, u, b, fb) {
   const g = () => f();
-  g.k = k; g.id = id; g.is = is; g.u = u; g.b = b;
+  g.k = k; g.id = id; g.is = is; g.u = u; g.b = b; g.fb = fb;
   return g;
 };
 var __tid = __tid || function(...ids) {
@@ -699,7 +699,13 @@ var __sprintf = __sprintf || function(f, ...a) {
     }
     return "";
   };
-  const callMethod = (val, name) => typeof val[name] === "function" ? val[name]() : val[val.__pe[name]][name]();
+  // A nil *T boxed in an interface (a named non-struct type) has no value to call
+  // a value-receiver method on: fmt prints <nil>, as Go does after recovering.
+  const callMethod = (val, name) => {
+    if (typeof val[name] !== "function") return val[val.__pe[name]][name]();
+    if (typeof val.__gfUnbox !== "function" || val.__gfUnbox() !== null) return val[name]();
+    try { return val[name](); } catch (e) { return "<nil>"; }
+  };
   // Errors from errors.New/Errorf and the stdlib are plain runtime objects, not
   // instances of a user class; they print their message wherever they are.
   const isRuntimeError = (val) => {
@@ -710,19 +716,30 @@ var __sprintf = __sprintf || function(f, ...a) {
   // methods on user types. fd: descriptor of val's type when it is not carried
   // by val itself (raw named values and the elements of slices and maps).
   // el: val is a value element or value field, see isPointer.
+  // A value can have two descriptors: the Stringer one (see _fmtDesc) and the
+  // static type (fmt-types.js, set by __ft).  fd is either one, or { $both, t, s }
+  // holding both, so typed formatting and Stringer dispatch compose.
+  const both = __fmtu.both;
   const formatV = (val, isPlus, isTopLevel, ro, fd, el) => {
     if (typeof __FT !== "undefined" && val instanceof __FT) {
       if (val.t?.n === "time.Duration") {
         return typeof __durationString === "function" ? __durationString(val.v) : String(val.v);
       }
-      return formatV(val.v, isPlus, isTopLevel, ro, val.t, el);
+      return formatV(val.v, isPlus, isTopLevel, ro, both(val.t, val.v?.__fd), el);
     }
-    if (fd?.n === "time.Duration") {
+    const [td, sdesc] = __fmtu.split(fd);
+    if (td?.n === "time.Duration") {
       return typeof __durationString === "function" ? __durationString(val) : String(val);
     }
-    if (fd?.b && !ro && !(val instanceof fd.b)) val = new fd.b(val);
+    if (sdesc?.b && !ro && !(val instanceof sdesc.b)) val = new sdesc.b(val);
+    if (sdesc?.m === 1 && (val === null || val === undefined)) return "map[]";
+    if (sdesc?.np !== undefined && (val === null || val === undefined)) val = sdesc.np;
     if (val === null || val === undefined) return "<nil>";
     if (typeof val === "boolean") return String(val);
+    if (typeof val === "number" && td) {
+      const fb = __fmtu.baseOf(td);
+      if (fb?.k === "b" && __fmtu.isFloatN(fb.n)) return __fmtu.fmtFloat(val, "g", {}, 0, false, -1, false, fb.n === "float32");
+    }
     if (typeof val === "number" && Math.abs(val) >= 9007199254740992 && Math.abs(val) < 18446744073709551616 && Number.isInteger(val)) return BigInt(val).toString();
     if (typeof val === "number" || typeof val === "bigint") return Object.is(val, -0) ? "-0" : String(val);
     if (typeof val === "string") return val;
@@ -740,7 +757,11 @@ var __sprintf = __sprintf || function(f, ...a) {
       const sm = ro ? (isRuntimeError(val) ? "Error" : "") : stringMethod(val, el);
       if (sm) return String(callMethod(val, sm));
       if (typeof val.__gfUnbox === "function") return formatV(val.__gfUnbox(), isPlus, isTopLevel, ro);
-      const cd = fd ?? val.__fd;
+      // fd is either a Stringer descriptor (see _fmtDesc) or, for operands that
+      // carry their static type, a type descriptor (fmt-types.js); sd is the
+      // latter with pointers and named types resolved.
+      const sd = td ? __fmtu.baseOf(td.k === "ptr" ? td.e : td) : null;
+      const cd = sdesc ?? val.__fd;
       if (Array.isArray(val) || ArrayBuffer.isView(val)) {
         const isElemPtr = val.__ptr_slice === true;
         const pf = val.__ptr_fields;
@@ -762,11 +783,11 @@ var __sprintf = __sprintf || function(f, ...a) {
               }
             }
           }
-          parts.push(formatV(item, isPlus, false, ro, cd?.e, cd?.e?.sv === 1));
+          parts.push(formatV(item, isPlus, false, ro, both(sd?.e, cd?.e), cd?.e?.sv === 1));
         }
         return "[" + parts.join(" ") + "]";
       }
-      if (val instanceof Map || val.__map === true) {
+      if (val instanceof Map || val.__map === true || sdesc?.m === 1) {
         const isElemPtr = val.__ptr_map === true;
         const parts = [];
         if (val instanceof Map) {
@@ -783,7 +804,7 @@ var __sprintf = __sprintf || function(f, ...a) {
             if (isElemPtr && v !== null && typeof v === "object") {
               markPtr(v);
             }
-            parts.push(formatV(k, isPlus, false, ro, cd?.k, cd?.k?.sv === 1) + ":" + formatV(v, isPlus, false, ro, cd?.v, cd?.v?.sv === 1));
+            parts.push(formatV(k, isPlus, false, ro, both(sd?.key, cd?.k), cd?.k?.sv === 1) + ":" + formatV(v, isPlus, false, ro, both(sd?.val, cd?.v), cd?.v?.sv === 1));
           }
         } else {
           const keys = Object.keys(val).sort((a, b) => {
@@ -810,8 +831,8 @@ var __sprintf = __sprintf || function(f, ...a) {
             if (isElemPtr && v !== null && typeof v === "object") {
               markPtr(v);
             }
-            const kv = k.charCodeAt(0) === 1 && typeof __kd === "function" ? __kd(k) : cd?.k?.n ? Number(k) : k;
-            parts.push(formatV(kv, isPlus, false, ro, cd?.k, cd?.k?.sv === 1) + ":" + formatV(v, isPlus, false, ro, cd?.v, cd?.v?.sv === 1));
+            const kv = k.charCodeAt(0) === 1 && typeof __kd === "function" ? __kd(k) : ((sd && __fmtu.isNumKey(sd.key)) || cd?.k?.n) ? Number(k) : k;
+            parts.push(formatV(kv, isPlus, false, ro, both(sd?.key, cd?.k), cd?.k?.sv === 1) + ":" + formatV(v, isPlus, false, ro, both(sd?.val, cd?.v), cd?.v?.sv === 1));
           }
         }
         return "map[" + parts.join(" ") + "]";
@@ -827,11 +848,12 @@ var __sprintf = __sprintf || function(f, ...a) {
         getPtr(val);
       }
       const prefix = isPtr ? "&{" : "{";
-      const keys = Object.keys(val);
+      const keys = __fmtu.keys(val);
       const parts = [];
-      const ff = typeof val.__ff === "function" ? val.__ff() : null;
+      const ff = typeof val.__ff === "function" ? val.__ff() : (sdesc?.ff ?? null);
       for (const k of keys) {
-        const fv = formatV(val[k], isPlus, false, ro || !isExported(k), ff?.[k], ff?.[k]?.sv === 1);
+        const fk = both(sd?.f?.find((x) => x[0] === k)?.[1], ff?.[k]);
+        const fv = formatV(val[k], isPlus, false, ro || !isExported(k), fk, ff?.[k]?.sv === 1);
         parts.push(isPlus ? k + ":" + fv : fv);
       }
       return prefix + parts.join(" ") + "}";
