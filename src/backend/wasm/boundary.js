@@ -1863,20 +1863,18 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 	class FmtStr { constructor(r, s) { this.r = r; this.s = s; } __gfUnbox() { return this.r; } String() { return this.s; } }
 	class FmtErr { constructor(r, s) { this.r = r; this.s = s; } __gfUnbox() { return this.r; } Error() { return this.s; } }
 	const late = { exports: null };
-	const flush = () => { write(lineBuf); lineBuf = ""; };
+	// Go separates operands with a space unconditionally, so track whether the
+	// current line already holds an operand (an empty string leaves lineBuf empty).
+	let started = false;
+	const flush = () => { write(lineBuf); lineBuf = ""; started = false; };
 	const print = (v) => {
 		const s = Object.is(v, -0) ? "-0" : String(v);
-		if (lineBuf.length > 0 && !lineBuf.endsWith(" ") && !s.startsWith(" ")) {
-			lineBuf += " ";
-		}
+		if (started) lineBuf += " ";
+		started = true;
 		lineBuf += s;
 	};
 	const println = (v) => {
-		const s = Object.is(v, -0) ? "-0" : String(v);
-		if (lineBuf.length > 0 && !lineBuf.endsWith(" ") && !s.startsWith(" ")) {
-			lineBuf += " ";
-		}
-		lineBuf += s;
+		print(v);
 		flush();
 	};
 	const targ = (v) => { targs.push(v); };
@@ -1968,7 +1966,17 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		"fmt_new_struct": (ref, isPtr) => {
 			// One object per struct and per kind: a value and a pointer to it
 			// in the same call (fmt.Println(&s, s)) must stay distinct.
-			const slot = isPtr !== 0 ? 1 : 0;
+			const slot = isPtr;
+			if (isPtr === 2) {
+				const seenBox = ref !== null && ref !== undefined && typeof ref === "object" ? fmtStructMap.get(ref) : undefined;
+				if (seenBox?.[2]) return seenBox[2];
+				const b = { value: null, __p: true, __box: true };
+				if (ref !== null && ref !== undefined && typeof ref === "object") {
+					if (seenBox) seenBox[2] = b;
+					else fmtStructMap.set(ref, [undefined, undefined, b]);
+				}
+				return b;
+			}
 			const isRef = ref !== null && ref !== undefined && typeof ref === "object";
 			const seen = isRef ? fmtStructMap.get(ref) : undefined;
 			if (seen?.[slot]) return seen[slot];
@@ -1985,6 +1993,7 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		"fmt_struct_set": (o, k, v) => { o[typeof k === "number" ? stringTable[k] : k] = v; },
 		"fmt_box_i32": (v) => v,
 		"fmt_box_i64": (v) => (v > ${P}MAX || v < -${P}MAX ? v : Number(v)),
+		"fmt_box_u64": (v) => { v = BigInt.asUintN(64, v); return v > ${P}MAX ? v : Number(v); },
 		"fmt_box_f64": (v) => v,
 		"fmt_box_bool": (v) => v !== 0,
 		"fmt_new_stringer": (r, s, isErr) => (isErr !== 0 ? new FmtErr(r, s) : new FmtStr(r, s)),

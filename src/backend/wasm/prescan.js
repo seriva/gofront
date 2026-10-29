@@ -130,11 +130,47 @@ export function _usesFmtAny(funcDecls, mod) {
 	);
 }
 
+// Whether a value of this static type may print a 64-bit unsigned integer
+// (directly, inside a container or struct, or behind `any`/an interface).
+export function typeMayHoldU64(t, mod, seen = new Set(), depth = 0) {
+	if (!t || typeof t !== "object" || seen.has(t) || depth > 8) return false;
+	seen.add(t);
+	if (isAnyType(t, mod.checker) || isInterfaceType(t, mod.checker)) return true;
+	const sub = (x) => typeMayHoldU64(x, mod, seen, depth + 1);
+	switch (t.kind) {
+		case "basic":
+			return t.name === "uint64" || t.name === "uint" || t.name === "uintptr";
+		case "TypeName":
+		case "Ident":
+			return sub(
+				mod.checker?.resolveType?.(t) ?? { kind: "basic", name: t.name },
+			);
+		case "named":
+			return sub(t.underlying);
+		case "tuple":
+			return (t.types ?? []).some(sub);
+		case "pointer":
+			return sub(t.base);
+		case "slice":
+		case "array":
+			return sub(t.elem);
+		case "map":
+			return sub(t.key) || sub(t.value);
+		case "struct":
+			return [...(t.fields?.values?.() ?? [])].some(sub);
+		default:
+			return false;
+	}
+}
+
 export function _scanImportsInBody(node, mod) {
 	if (!node || typeof node !== "object") return;
 
 	if (node.kind === "CallExpr") {
 		const { func, args } = node;
+		if ((args ?? []).some((a) => a._spread || typeMayHoldU64(a._type, mod))) {
+			mod.getFmtBoxU64Index();
+		}
 		if (
 			func.kind === "Ident" &&
 			(func.name === "print" || func.name === "println")
