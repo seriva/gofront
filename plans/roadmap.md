@@ -16,18 +16,18 @@ features (e.g. `plans/v1.8.0/`).
 
 ## v1.9.0
 
-**Theme: Stdlib in Go.** Move every remaining stdlib package whose behaviour is ordinary Go over GoFront values onto the Go-source path (`stdlib/`), and keep host-backed fast paths as small registered **natives** (`//gofront:native`) that a differential test checks against the Go body. Removes the hand-written type tables, JS shims and WASM emitters for `sort`, `slices`, `maps`, `errors`, `unicode/utf8`, `path`, `html`, `bytes`, `io`, `strings`, `encoding/{hex,base64,binary}`, `crypto/sha256`, `math/{bits,rand}`, `sync`, `time` and `strconv` (WASM stdlib emitters 20,717 → ≤ 8,000 lines). Fixes what the old path got wrong: every WASM sort is O(n²), sorting `NaN` is wrong on both backends, `sort.Slice` tie order differs from Go, and the hand-written signatures drift from Go's. Verified with Go-output unit cases (no manifest or real-Go harness). Needs v1.8.0 released, including its simplification phases, and the repository structure cleanup. Design document in [`plans/v1.9.0/stdlib-in-go-plan.md`](v1.9.0/stdlib-in-go-plan.md).
+**Theme: Stdlib in Go.** Move every remaining stdlib package whose behaviour is ordinary Go over GoFront values onto the Go-source path (`stdlib/`), and keep host-backed fast paths as small registered **natives** (`//gofront:native`) that a four-way differential test (JS/WASM × natives on/off) checks against the Go body. Removes the hand-written type tables, JS shims and WASM emitters for `sort`, `slices`, `maps`, `errors`, `unicode/utf8`, `path`, `html`, `io`, `bytes`, `strings`, `encoding/{hex,base64,binary}`, `crypto/sha256`, `math/{bits,rand}`, `sync`, `time` and `strconv` (WASM stdlib emitters 26,438 → ≤ 8,000 lines). Fixes what the old path gets wrong: every WASM sort is O(n²), sorting `NaN` is wrong on both backends, `sort.Slice` tie order differs from Go, generic helpers reject named slice and map types, and 24 deferred member bugs from the v1.8.0 follow-up fixes. Verified with Go-output unit cases (no manifest or real-Go harness). Starts after the v1.8.0 follow-up fixes complete. Design document in [`plans/v1.9.0/stdlib-in-go-plan.md`](v1.9.0/stdlib-in-go-plan.md).
 
 | Area | Difficulty | Status | Notes |
 |---|---|---|---|
-| Generic core types | Medium | Planned | `S ~[]E` / `M ~map[K]V` index, slice, conversion and inference in the checker; valid WASM for named slice arguments (today `Cannot index type S`, invalid module). |
-| Natives, differential testing, lazy checking | High | Planned | `//gofront:native` registry (JS templates, WASM emitters, decline and value fallback); every Go-output case runs four ways (JS/WASM × natives on/off); declarations checked eagerly, stdlib bodies on demand. |
-| `sort` & `slices` | High | Planned | Generated pdqsort variants (Go's tie order), `NaN` ordering, O(n log n) in WASM (200k ints: 20 s → ≤ 100 ms). |
-| `maps`, `errors`, `utf8`, `path`, `html` | Medium | Planned | Go source with Go's signatures; `errors.As` stays the one emitter member. |
-| `bytes`, `io`, `strings` | High | Planned | `Buffer`, `Reader`, `Replacer`, `io` as Go with host natives for search and case mapping; name-coupled backend special cases removed. |
-| Encodings, `sha256`, `bits`, `rand`, `sync` | Medium | Planned | Go source; `binary.Read`/`Write` stay emitters. |
-| `time` & `strconv` | High | Planned | Civil dates, layouts and `Duration` in Go; clock and shortest-repr floats native. |
-| Typings removal & docs | Medium | Planned | Leftover type tables deleted, native registry self-check, stdlib layout documented. |
+| Generic core types | Medium | Planned | `S ~[]E` / `M ~map[K]V` index, slice, conversion and constraint type inference (today `Cannot index type S`, `Cannot infer type arguments`); type-literal type arguments (`Id[[]int, int]` fails to parse); valid WASM for named `S`. |
+| Natives, differential testing, lazy checking | High | Planned | `//gofront:native` name set and per-backend registries (decline and value fallback); `assertFourWay`; declarations checked eagerly, stdlib bodies on demand. |
+| `sort` & `slices` | High | Planned | Generated pdqsort variants (Go's tie order), `NaN` ordering, O(n log n) in WASM (200k ints: ≈20 s → ≤ 100 ms), JS comparator sorts ≤ 2× `Array.prototype.sort`. |
+| `maps`, `errors`, `utf8`, `path`, `html` | Medium | Planned | Go source with Go's signatures; JS generic map range fixed; `errors.As` stays the one emitter member. |
+| `io`, readers, `bytes`, `strings` | High | Planned | `io.Writer`-based `fmt.Fprint*`, `Reader`/`Buffer`/`Replacer` in Go, host natives for search and case mapping; name-coupled backend special cases removed. |
+| Encodings, `sha256`, `bits`, `rand`, `sync` | Medium | Planned | Go source; `binary.Read`/`Write` stay emitters; `rand_source` intrinsic. |
+| `time` & `strconv` | High | Planned | Civil dates, layouts and `Duration` in Go; clock and shortest-repr floats native; user docs. |
+| Typings removal | Medium | Planned | Leftover type tables deleted, native registry self-check, stdlib layout in the architecture docs. |
 
 ---
 
