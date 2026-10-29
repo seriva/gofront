@@ -172,7 +172,7 @@ var __fmtu = __fmtu || (() => {
       const ks = v instanceof Map ? Array.from(v.keys()) : Object.keys(v);
       const k0 = ks[0];
       const v0 = v instanceof Map ? v.get(k0) : v[k0];
-      const kd = k0 === undefined ? IFACE : v instanceof Map ? descOf(k0) : /^-?\d+$/.test(k0) ? { k: "b", n: "int" } : { k: "b", n: "string" };
+      const kd = k0 === undefined ? IFACE : v instanceof Map ? descOf(k0) : k0.charCodeAt(0) === 1 && typeof __kd === "function" ? descOf(__kd(k0)) : /^-?\d+$/.test(k0) ? { k: "b", n: "int" } : { k: "b", n: "string" };
       return { k: "map", key: kd, val: k0 === undefined || v0 == null ? IFACE : descOf(v0) };
     }
     if (v._d instanceof Date) return { k: "struct", n: "time.Time", f: [] };
@@ -196,9 +196,10 @@ var __fmtu = __fmtu || (() => {
   const sortedEntries = (m, kd) => {
     const es = m instanceof Map
       ? Array.from(m.entries())
-      : Object.keys(m).map((k) => [isNumKey(kd) || (!kd && /^-?\d+$/.test(k)) ? Number(k) : k, m[k]]);
+      : Object.keys(m).map((k) => [k.charCodeAt(0) === 1 && typeof __kd === "function" ? __kd(k) : isNumKey(kd) || (!kd && /^-?\d+$/.test(k)) ? Number(k) : k, m[k]]);
     const raw = (k) => (k !== null && typeof k === "object" && typeof k.__gfUnbox === "function" ? k.__gfUnbox() : k);
     return es.sort(([a], [b]) => {
+      if (a !== null && b !== null && typeof a === "object" && typeof b === "object" && typeof __kcmp === "function" && !a.__gfUnbox) return __kcmp(a, b);
       const x = raw(a), y = raw(b);
       if (typeof x === "number" && typeof y === "number") return x - y;
       const p = String(x), q = String(y);

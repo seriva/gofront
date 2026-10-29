@@ -1350,6 +1350,7 @@ export const statementGenMethods = {
 
 	_genIterFor(init, iterType, iteree, lhs, body) {
 		const iterExpr = this._genRangeIterExpr(iterType, iteree, lhs);
+		const keyDecode = this._structKeyRange(iterType);
 		const binding =
 			lhs.length === 1
 				? lhs[0] === "_"
@@ -1359,10 +1360,24 @@ export const statementGenMethods = {
 		const kw = init.kind === "AssignStmt" ? "" : "let ";
 		this.line(`for (${kw}${binding} of ${iterExpr}) {`);
 		this.indented(() => {
+			if (keyDecode && lhs[0] !== "_")
+				this.line(`${lhs[0]} = __kd(${lhs[0]}, true);`);
 			this._cloneMapRangeValue(init, iterType, lhs[1]);
 			this.genBlock(body);
 		});
 		this.line("}");
+	},
+
+	// Ranging over a map whose keys are structs: the key variable is decoded
+	// from its encoded string (see HELPER_STRUCT_KEY).
+	_structKeyRange(iterType) {
+		if (!this._isMapRangeType(iterType)) return false;
+		const base = iterType?.kind === "named" ? iterType.underlying : iterType;
+		const key = base?.kind === "map" ? base.key : null;
+		const keyBase = key?.kind === "named" ? key.underlying : key;
+		if (keyBase?.kind !== "struct") return false;
+		this.useHelper("structKey");
+		return true;
 	},
 
 	// A map range value of array or struct type is a copy: clone it when the
@@ -1740,9 +1755,11 @@ export const statementGenMethods = {
 					if (
 						stmt.assign &&
 						c.types.length === 1 &&
-						this._isNamedBoxTypeNode(c.types[0])
+						this._assertedValueJs(c.types[0], "__tsw") !== "__tsw"
 					)
-						this.line(`const ${stmt.assign} = __tsw.__gfUnbox();`);
+						this.line(
+							`const ${stmt.assign} = ${this._assertedValueJs(c.types[0], "__tsw")};`,
+						);
 					// An array case binds a copy of the boxed value.
 					else if (
 						stmt.assign &&

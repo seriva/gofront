@@ -19,7 +19,7 @@ readable and debuggable — no name mangling, no opaque wrappers. This page desc
 | `nil` | `null` | `== nil` compiles to loose `== null` so JS `undefined` also counts as nil |
 | `error` | `__error` object | `error("msg")` → `__error("msg")`, `.Error()` → real method call. `toString()` for string context compat |
 | `*T` where `T` is a struct | The struct object itself | `&s` and `*p` are no-ops; struct instances are already references |
-| Named non-struct type with methods (`type Celsius float64`) | The underlying JS value | Methods compile to static class methods called with the receiver: `c.F()` → `Celsius.$F(c)`; pointer receivers get the `{ value }` box. Only when stored in an interface is the value boxed (`new Celsius(c)`, or `new Celsius$Ptr(p)` for `*T`) so dynamic calls, type assertions and `==` work |
+| Named non-struct type with methods (`type Celsius float64`) | The underlying JS value | Methods compile to static class methods called with the receiver: `c.F()` → `Celsius.$F(c)`; pointer receivers get the `{ value }` box. Only when stored in an interface is the value boxed (`new Celsius(c)`, or `new Celsius$Ptr(p)` for `*T`) so dynamic calls, type assertions and `==` work. A named basic type without methods (`type Name string`) is boxed in an interface the same way, so `any(Name("x")).(string)` fails as in Go |
 | `*T` where `T` is a scalar | `{ value: T }` box | `&x` boxes the variable, every read/write of `x` goes through `.value`; `new(T)` allocates a boxed zero value |
 
 ### Functions
