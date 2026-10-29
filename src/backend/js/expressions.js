@@ -2925,6 +2925,8 @@ export const expressionGenMethods = {
 		);
 		if (structConv) return structConv;
 		if (target === "error") {
+			// A boxed named value that implements error is already an error.
+			if (this._isNamedBoxKind(expr.expr)) return inner;
 			this.useHelper("error");
 			return `__error(${inner})`;
 		}

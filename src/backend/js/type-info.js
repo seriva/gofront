@@ -36,11 +36,23 @@ export const typeInfoGenMethods = {
 	// needs the instantiated types of `names`.
 	_declNeedsTypeInfo(decl, names) {
 		this._typeInfoMemo ??= new Map();
+		this._typeInfoActive ??= new Set();
 		if (this._typeInfoMemo.has(decl)) return this._typeInfoMemo.get(decl);
-		this._typeInfoMemo.set(decl, false); // recursion guard
-		const set = new Set(names);
-		const result = this._scanTypeInfoUse(decl.body, set);
-		this._typeInfoMemo.set(decl, result);
+		if (this._typeInfoActive.has(decl)) {
+			this._typeInfoCycle = true; // answer depends on an unfinished scan
+			return false;
+		}
+		const outer = this._typeInfoCycle;
+		this._typeInfoCycle = false;
+		this._typeInfoActive.add(decl);
+		const result = this._scanTypeInfoUse(decl.body, new Set(names));
+		this._typeInfoActive.delete(decl);
+		// A false that leaned on an in-progress scan is provisional: only cache
+		// it once no scan is in progress, otherwise a mutually recursive
+		// function would keep a stale answer.
+		if (result || !this._typeInfoCycle || this._typeInfoActive.size === 0)
+			this._typeInfoMemo.set(decl, result);
+		this._typeInfoCycle = outer || this._typeInfoCycle;
 		return result;
 	},
 
