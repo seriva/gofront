@@ -302,23 +302,23 @@ No longer reproducing (deleted from the ledger): promoted field through `Deep2{*
 
 ### Phase 8: fmt Parity (JS and Shared Verbs)
 
-- [ ] Task 8.1: Nil pointers with `String` methods in JS
+- [x] Task 8.1: Nil pointers with `String` methods in JS
   - Files: `src/backend/js/fmt-runtime.js`, `test/unit/builtins/fmt-stringer.test.js`
   - Test: `[]*C{nil, {1}}` → `[c c]`; `var g *G[int]` → `g`; `var p *Color` (value `String`) → `<nil>` (all targets).
   - Done when: JS matches WASM and Go.
-- [ ] Task 8.2: `String` dispatch through a type parameter
+- [x] Task 8.2: `String` dispatch through a type parameter
   - Files: `src/backend/js/expressions.js`, `src/backend/js/fmt-runtime.js`, `test/unit/builtins/fmt-stringer.test.js`
   - Test: `Show(Color(2))` with `fmt.Sprint(x)` → `col` (all targets).
   - Done when: repro prints `col` on JS.
-- [ ] Task 8.3: Composite values inside `any` and embedded structs
+- [x] Task 8.3: Composite values inside `any` and embedded structs
   - Files: `src/backend/js/fmt-runtime.js`, `src/backend/shared/fmt-types.js`, `test/unit/builtins/fmt-verbs.test.js`
   - Test: `var a any = A{M: map[string]int{"k":1}}` → `{map[k:1]}`; `Out{In{3},1}` → `{{3} 1}` (all targets).
   - Done when: both repros match Go on JS.
-- [ ] Task 8.4: Bad verbs and precision
+- [x] Task 8.4: Bad verbs and precision
   - Files: `src/backend/js/fmt-runtime.js`, `src/backend/wasm/stdlib/core.js`, `test/unit/builtins/fmt-verbs.test.js`
   - Test: `%x` of 3.5 → `0x1.cp+01`; `%c` of 3.5 → `%!c(float64=3.5)`; `%.3v|%.2v` → `3.14|ab`; `%U` of `int32(-1)` → `U+FFFFFFFFFFFFFFFF`; `%q` of nil `[]string` → `[]` (all targets).
   - Done when: all five match Go; no throw.
-- [ ] Task 8.5: Shortest float formatting
+- [x] Task 8.5: Shortest float formatting
   - Files: `src/backend/js/fmt-runtime.js`, `src/backend/wasm/stdlib/core.js`, `test/unit/builtins/fmt-verbs.test.js`
   - Test: `float32(0.1)` → `0.1`; `float32(1)/3` → `0.33333334`; `[]float32{0.1}` → `[0.1]`; `float64(9007199254740992)` → `9.007199254740992e+15` (all targets).
   - Done when: `%v` uses Go's shortest `%g` rules for both widths.
