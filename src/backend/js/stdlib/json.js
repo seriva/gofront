@@ -1,6 +1,7 @@
 // src/backend/js/stdlib/json.js
 // CodeGen for Go encoding/json package with compile-time static encoders and decoders.
 
+import { someChild } from "../../../lower/walk.js";
 import { typedArrayConstructorForElem } from "../../../typechecker/types.js";
 
 function safeIdent(name) {
@@ -283,50 +284,68 @@ export const jsonMethods = {
 		this._jsonAnyMarked = true;
 	},
 
-	// Runs once all function bodies are generated, so function-local structs are
-	// known: package-level structs get their hook at top level, local ones at the
-	// placeholder left next to their class declaration (the only place in scope).
+	_isJsonEncoderName(recvName) {
+		return (
+			recvName === "json.Encoder" ||
+			recvName === "encoding/json.Encoder" ||
+			recvName?.startsWith("Encoder$$")
+		);
+	},
+
+	// True when `node` contains a call that marks the any-encoders when
+	// generated (`json.Marshal`, `json.MarshalIndent`, `Encoder.Encode`).
+	// Decided before any body is generated, so a function-local struct can get
+	// its hook right after its class even when the call comes later.
+	_usesJsonAnyMarshal(node) {
+		if (Array.isArray(node))
+			return node.some((n) => this._usesJsonAnyMarshal(n));
+		if (!node || typeof node !== "object") return false;
+		if (node.kind === "CallExpr" && node.func?.kind === "SelectorExpr") {
+			const { expr, field } = node.func;
+			if (
+				expr?.kind === "Ident" &&
+				expr.name === "json" &&
+				(field === "Marshal" || field === "MarshalIndent")
+			)
+				return true;
+			if (
+				field === "Encode" &&
+				this._isJsonEncoderName(this._resolveRecvName(expr?._type))
+			)
+				return true;
+		}
+		return someChild(node, (n) => this._usesJsonAnyMarshal(n));
+	},
+
+	_jsonAnyHook(cls, enc) {
+		return `Object.defineProperty(${cls}.prototype, "__json_enc", { value: function() { return ${enc}(this); }, configurable: true, writable: true });`;
+	},
+
+	// Runs once all function bodies are generated; package-level structs get
+	// their hook at top level (function-local ones get it in _noteLocalTypeDecl).
 	_emitJsonAnyHooks() {
 		if (!this._jsonAnyMarked || this._jsonAnyHooked) return;
 		this._jsonAnyHooked = true;
-		const hook = (cls, enc) =>
-			`Object.defineProperty(${cls}.prototype, "__json_enc", { value: function() { return ${enc}(this); }, configurable: true, writable: true });`;
 		const local = this._localTypeNames;
 		for (const [name, type] of this.checker?.types ?? []) {
 			if (local.has(name) || !this._isPlainPackageStruct(name, type)) continue;
 			const cls = safeIdent(name);
 			this._jsonCodecs.set(
 				`__json_anyenc_${cls}`,
-				hook(cls, this._getJsonEncoder(type, false)),
+				this._jsonAnyHook(cls, this._getJsonEncoder(type, false)),
 			);
 		}
-		this._localJsonHookText = new Map();
-		for (const [id, name] of this._localJsonHooks.entries()) {
-			const type = this.checker?.types.get(name);
-			if (!this._isPlainPackageStruct(name, type)) continue;
-			const enc = this._getJsonEncoder(type, false);
-			this._localJsonHookText.set(id, hook(safeIdent(name), enc));
-		}
 	},
 
-	// Replaces the placeholders left by _noteLocalTypeDecl in the final text
-	// (closure bodies are joined into strings, so lines cannot be patched in place).
-	_fillLocalJsonHooks(text) {
-		if (!this._localJsonHooks.length) return text;
-		return text.replace(
-			/\/\*__gf_json_hook_(\d+)__\*\//g,
-			(_, id) => this._localJsonHookText?.get(Number(id)) ?? "",
-		);
-	},
-
-	// Leaves a placeholder line after a function-local struct class; filled in by
-	// _emitJsonAnyHooks when the program marshals structs held in `any`.
+	// A function-local struct class is only in scope inside its function, so
+	// its hook goes right after the class, and only when the program marshals.
 	_noteLocalTypeDecl(stmt) {
 		this._localTypeNames.add(stmt.name);
-		if (stmt.type.kind !== "StructType") return;
-		const hooks = this._localJsonHooks;
-		this.line(`/*__gf_json_hook_${hooks.length}__*/`);
-		hooks.push(stmt.name);
+		if (!this._jsonAnyUsed || stmt.type.kind !== "StructType") return;
+		const type = this.checker?.types.get(stmt.name);
+		if (!this._isPlainPackageStruct(stmt.name, type)) return;
+		const enc = this._getJsonEncoder(type, false);
+		this.line(this._jsonAnyHook(safeIdent(stmt.name), enc));
 	},
 
 	_jsonTypeName(type) {
