@@ -29,7 +29,8 @@
 //   raw        TemplComponent only: `@templ.Raw(arg)`; `expr` is then `arg`
 //   forStmt    TemplFor only: the parsed ForStmt, or null when the header does
 //              not parse as a Go `for` clause
-//   forTokens  TemplFor only: stmtTokens without trailing semicolons
+//   forError   TemplFor only: the ParseError the header raised (kept, like
+//              exprError, for the code generator to throw)
 //   attr.expr / attr.exprError on `expr` and `cond-bool` attributes
 
 import { TT } from "../lexer/templ-lexer.js";
@@ -103,8 +104,8 @@ function trimSemicolons(tokens) {
 }
 
 // Parses a `for` header (the `for` keyword plus the clause, no body) as a
-// ForStmt, with a fake empty body `{ }` so the parser can complete it. Returns
-// null when it is not a valid Go `for` clause.
+// ForStmt, with a fake empty body `{ }` so the parser can complete it. A header
+// that is not a valid Go `for` clause gives `forStmt: null` plus its error.
 function parseForHeader(tokens) {
 	const eofTok = new Token(T.EOF, "", 1, 1);
 	const lbrace = new Token(T.LBRACE, "{", 1, 1);
@@ -122,9 +123,9 @@ function parseForHeader(tokens) {
 					eofTok,
 				];
 	try {
-		return new Parser(withFor).parseFor();
-	} catch {
-		return null;
+		return { forStmt: new Parser(withFor).parseFor() };
+	} catch (forError) {
+		return { forStmt: null, forError };
 	}
 }
 
@@ -307,10 +308,9 @@ export class TemplParser extends Parser {
 	parseTemplFor(tok) {
 		const stmtTokens = tok.value;
 		const body = this.parseHtmlChildren();
-		const forTokens = trimSemicolons(stmtTokens);
 		return attach(
 			{ kind: "TemplFor", stmtTokens, body },
-			{ forTokens, forStmt: parseForHeader(forTokens) },
+			parseForHeader(trimSemicolons(stmtTokens)),
 		);
 	}
 
