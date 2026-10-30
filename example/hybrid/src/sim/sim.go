@@ -122,10 +122,13 @@ func Step(dt float32, ax float32, ay float32, width float32, height float32) {
 		v = v.Mul(drag)
 		p = p.Add(v.Mul(vdt))
 
+		// Both masks come from the unbounced position, as in stepOne's
+		// `if … else if`: a particle reflected off the low wall is not then
+		// tested against the high one.
 		low := p.Less(zero)
+		high := p.Greater(limit)
 		p = simd.Select(low, p.Neg(), p)
 		v = simd.Select(low, v.Neg(), v)
-		high := p.Greater(limit)
 		p = simd.Select(high, limit2.Sub(p), p)
 		v = simd.Select(high, v.Neg(), v)
 

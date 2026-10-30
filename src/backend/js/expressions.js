@@ -649,6 +649,8 @@ export const expressionGenMethods = {
 		switch (expr.kind) {
 			case "BasicLit":
 				if (expr.litKind === "STRING") return JSON.stringify(expr.value);
+				if (expr._const?.k === "INT")
+					this._warnConstPrecision(expr._const, expr);
 				return expr.value; // int, float, bool, nil(null)
 			case "ImagLit":
 				return `{ re: 0, im: ${expr.value} }`;
@@ -688,12 +690,16 @@ export const expressionGenMethods = {
 		return CONST_LITS[val.k]?.(val.v) ?? null;
 	},
 
-	// Warns when an integer constant outside ±2⁵³ has no exact Number.
+	// Warns when an integer constant outside ±2⁵³ has no exact Number (once
+	// per node per generate run: some forms generate the same node more than
+	// once, and cached ASTs are generated again by later compiles).
 	_warnConstPrecision(val, expr) {
 		const i = constIntValue(val);
 		if (i === null || (i <= JS_SAFE_INT && i >= -JS_SAFE_INT)) return;
-		if (BigInt(Number(i)) !== i)
+		if (BigInt(Number(i)) !== i && !this._precisionWarned.has(expr)) {
+			this._precisionWarned.add(expr);
 			this._warn(`constant ${i} exceeds JS Number precision`, expr);
+		}
 	},
 
 	// `js` boxed as `box` (a checker _ifaceBoxMeta kind) for an interface.

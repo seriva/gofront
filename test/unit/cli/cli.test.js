@@ -1,11 +1,13 @@
 // GoFront test suite — CLI process smoke tests
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	assert,
 	assertContains,
+	assertRejects,
 	ROOT,
 	section,
 	summarize,
@@ -24,6 +26,48 @@ function cli(args) {
 		stderr: r.stderr ?? "",
 		code: r.status ?? 1,
 	};
+}
+
+// A long-running command is killed as soon as stderr shows `needle`, so the
+// test waits only as long as startup takes; the deadline only bounds a hang.
+const DEV_DEADLINE_MS = 10_000;
+
+function waitForStderr(args, needle, deadlineMs) {
+	return new Promise((resolve, reject) => {
+		const child = spawn(process.execPath, args, {
+			stdio: ["ignore", "ignore", "pipe"],
+		});
+		let stderr = "";
+		let done = false;
+		const finish = (err) => {
+			if (done) return;
+			done = true;
+			clearTimeout(timer);
+			child.kill();
+			if (err) reject(err);
+			else resolve(stderr);
+		};
+		const timer = setTimeout(
+			() =>
+				finish(
+					new Error(
+						`no "${needle}" on stderr within ${deadlineMs} ms; got: ${stderr}`,
+					),
+				),
+			deadlineMs,
+		);
+		child.stderr.setEncoding("utf8");
+		child.stderr.on("data", (s) => {
+			stderr += s;
+			if (stderr.includes(needle)) finish();
+		});
+		child.on("error", finish);
+		child.on("exit", (code) =>
+			finish(
+				new Error(`exited with ${code} before "${needle}"; stderr: ${stderr}`),
+			),
+		);
+	});
 }
 
 test("--version prints version", () => {
@@ -120,81 +164,77 @@ test("gofront test smoke test", () => {
 	);
 });
 
-test("gofront dev <dir> starts dev server and prints running url", () => {
+test("waitForStderr returns once the needle appears and kills the child", async () => {
+	const keepAlive =
+		"process.stderr.write('ready\\n'); setInterval(() => {}, 1000)";
+	const start = Date.now();
+	const stderr = await waitForStderr(["-e", keepAlive], "ready", 5000);
+	assertContains(stderr, "ready");
+	assert(Date.now() - start < 5000, "returned before the deadline");
+	await assertRejects(
+		() => waitForStderr(["-e", keepAlive], "never", 300),
+		'no "never" on stderr within 300 ms',
+	);
+});
+
+test("gofront dev <dir> starts dev server and prints running url", () =>
 	withTempDir(
 		{
 			"src/main.go":
 				'package main\nfunc main() { console.log("dev running") }\n',
 			"index.html": "<h1>Dev</h1>",
 		},
-		(dir) => {
-			const r = spawnSync(
-				process.execPath,
+		async (dir) => {
+			const stderr = await waitForStderr(
 				[CLI, "dev", dir, "--port", "3899"],
-				{
-					encoding: "utf8",
-					timeout: 500,
-				},
+				"dev server running",
+				DEV_DEADLINE_MS,
 			);
-			assertContains(r.stderr, "dev server running → http://localhost:3899");
+			assertContains(stderr, "dev server running → http://localhost:3899");
 		},
-	);
-});
+	));
 
-test("--watch starts, builds, and emits 'watching' message", () => {
+test("--watch starts, builds, and emits 'watching' message", () =>
 	withTempDir(
 		{ "main.go": 'package main\nfunc main() { console.log("hi") }\n' },
-		(dir) => {
-			const file = join(dir, "main.go");
-			const r = spawnSync(process.execPath, [CLI, file, "--watch"], {
-				encoding: "utf8",
-				timeout: 900,
-			});
-			assert(r.stderr.includes("OK"), `expected OK in stderr: ${r.stderr}`);
-			assert(
-				r.stderr.includes("watching"),
-				`expected 'watching' in stderr: ${r.stderr}`,
+		async (dir) => {
+			const stderr = await waitForStderr(
+				[CLI, join(dir, "main.go"), "--watch"],
+				"watching",
+				DEV_DEADLINE_MS,
 			);
+			assertContains(stderr, "OK");
 		},
-	);
-});
+	));
 
-test("--watch with compile error logs ERROR without exiting", () => {
+test("--watch with compile error logs ERROR without exiting", () =>
 	withTempDir(
 		{ "bad.go": "package main\nfunc main() { notDefined }\n" },
-		(dir) => {
-			const file = join(dir, "bad.go");
-			const r = spawnSync(process.execPath, [CLI, file, "--watch"], {
-				encoding: "utf8",
-				timeout: 900,
-			});
-			assert(
-				r.stderr.includes("ERROR"),
-				`expected ERROR in stderr: ${r.stderr}`,
+		async (dir) => {
+			const stderr = await waitForStderr(
+				[CLI, join(dir, "bad.go"), "--watch"],
+				"watching",
+				DEV_DEADLINE_MS,
 			);
+			assertContains(stderr, "ERROR");
 		},
-	);
-});
+	));
 
-test("--watch -o writes output file on initial build", () => {
+test("--watch -o writes output file on initial build", () =>
 	withTempDir(
 		{ "main.go": 'package main\nfunc main() { console.log("hi") }\n' },
-		(dir) => {
-			const file = join(dir, "main.go");
+		async (dir) => {
 			const outFile = join(dir, "out.js");
-			const r = spawnSync(
-				process.execPath,
-				[CLI, file, "--watch", "-o", outFile],
-				{ encoding: "utf8", timeout: 900 },
+			const stderr = await waitForStderr(
+				[CLI, join(dir, "main.go"), "--watch", "-o", outFile],
+				"watching",
+				DEV_DEADLINE_MS,
 			);
-			assert(r.stderr.includes("OK"), `expected OK in stderr: ${r.stderr}`);
-			assert(
-				r.stderr.includes("wrote"),
-				`expected 'wrote' in stderr: ${r.stderr}`,
-			);
+			assertContains(stderr, "OK");
+			assertContains(stderr, "wrote");
+			assert(existsSync(outFile), "out.js written");
 		},
-	);
-});
+	));
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
