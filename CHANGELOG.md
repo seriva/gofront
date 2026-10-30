@@ -5,7 +5,7 @@ All notable changes to this project will be documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
-## [Unreleased]
+## [1.8.0] - 2026-10-30
 
 ### Added
 - **Iterators and a wider standard library**: `iter` and `cmp`, the Go 1.23 iterator functions in `slices`, `maps`, `strings` and `bytes`, `os.Stdout`/`Stderr`/`Stdin` as `io.Writer`/`io.Reader`, and many more functions in `math`, `math/bits`, `time`, `io`, `sort`, `unicode`, `unicode/utf8`, `strconv` and `sync` now work on both backends. Only the functions your code reaches end up in the bundle; see [the package list](docs/language-support.md#standard-library-shims).
