@@ -409,15 +409,15 @@ No longer reproducing (deleted from the ledger): promoted field through `Deep2{*
 
 ### Phase 13: Templ
 
-- [ ] Task 13.1: Rename reserved-name parameters in templ bodies
+- [x] Task 13.1: Rename reserved-name parameters in templ bodies
   - Files: `src/backend/js/templ.js`, `test/unit/compiler/templ.test.js`
   - Test: `templ V(class string) { <p class={ class }>{ class }</p> }` → body uses `class$`; output parses (`new Function`) for `class`, `function`, `delete`, `let`, `this`, `typeof`.
   - Done when: generated JS is valid for every reserved name the signature renames.
-- [ ] Task 13.2: Report errors in templ `for` loops
+- [x] Task 13.2: Report errors in templ `for` loops
   - Files: `src/backend/js/templ.js`, `test/unit/compiler/templ.test.js`
   - Test: `for _, x := range xs { <p>{ x + }</p> }` and `for x := range { <p>hi</p> }` → build fails with `Parse error`; update the tests that pinned the old swallow behaviour.
   - Done when: `gofront build` exits 1 for both; valid loops unchanged.
-- [ ] Task 13.3: Type-check templ expressions
+- [x] Task 13.3: Type-check templ expressions
   - Files: `src/typechecker/index.js`, `src/parser/templ.js`, `test/unit/compiler/templ.test.js`
   - Test: `{ name + undefinedVar }` → `Undefined: 'undefinedVar'`; `{ name + 5 }` → mismatched-types error; `example/templ` still checks clean.
   - Done when: both negative tests pass and `npm run check` is green.
