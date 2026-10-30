@@ -8,11 +8,12 @@ import { fileURLToPath } from "node:url";
 const UNIT_DIR = fileURLToPath(new URL(".", import.meta.url));
 
 // Every *.test.js below `dir` (skipping fixtures/ directories), as sorted
-// "./relative/path.test.js" specifiers.
-export function discoverTestFiles(dir = UNIT_DIR) {
+// "./relative/path.test.js" specifiers.  `readdir` is replaceable so a test
+// can feed entries in an order the file system would not.
+export function discoverTestFiles(dir = UNIT_DIR, readdir = readdirSync) {
 	const found = [];
 	const walk = (rel) => {
-		for (const entry of readdirSync(join(dir, rel), { withFileTypes: true })) {
+		for (const entry of readdir(join(dir, rel), { withFileTypes: true })) {
 			if (entry.isDirectory()) {
 				if (entry.name !== "fixtures") walk(posix.join(rel, entry.name));
 			} else if (entry.name.endsWith(".test.js")) {
