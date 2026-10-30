@@ -1,7 +1,7 @@
 # v1.8.0 Follow-up Fixes & Performance Hardening — Design Plan
 
 **Version:** v1.8.0  
-**Status:** In Progress  
+**Status:** Completed (2026-10-30)  
 **Base branch:** main  
 **Related:** Follows [`portable-go-plan.md`](portable-go-plan.md) and [`repo-structure-plan.md`](repo-structure-plan.md); unblocks downstream adoption ([`simplefps/plans/gofront-v1.8.0-adoption-plan.md`](../../../simplefps/plans/gofront-v1.8.0-adoption-plan.md)); addresses open ledger items from [`../follow-ups.md`](../follow-ups.md).  
 **Release note:** Constant slice indexes in `both` packages no longer pay for bounds checks when the code proves the length first (for example with `_ = xs[15]`), and calls like `f(s.Items[s.Idx[i].N])` parse again. Many Go programs that failed to compile, built an invalid WebAssembly module, or printed different results on JS and WebAssembly now behave like Go.
