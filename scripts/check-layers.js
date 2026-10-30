@@ -6,15 +6,17 @@
 //   1. Every src/**/*.js and stdlib/**/*.go file must match a layer glob in
 //      .sentrux/rules.toml, and every glob must match at least one file.
 //   2. src/backend/js and src/backend/wasm are peers, so neither may import
-//      the other (Sentrux cannot express that).
+//      the other, and src/backend/shared (code both use) may import neither
+//      (Sentrux cannot express that).
+//   3. Every ALLOW and cross-backend allowlist entry is still needed.
 //
-// Run: node scripts/check-layers.js   (exit 1 on any finding)
+// Run: node scripts/check-layers.js [root]   (exit 1 on any finding)
 
-import { readdirSync, readFileSync } from "node:fs";
-import { dirname, join, posix, relative } from "node:path";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { dirname, join, posix, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 // Unlayered files that are allowed, with the reason.
 export const ALLOW = {
@@ -91,13 +93,21 @@ export function findLayerGaps(tomlText, files, allow = ALLOW) {
 
 const JS_DIR = "src/backend/js/";
 const WASM_DIR = "src/backend/wasm/";
+const SHARED_DIR = "src/backend/shared/";
+// Quoted or template-literal (``import(`../x.js`)``) module specifiers.
 const SPEC_RE =
-	/(?:\bfrom\s*|\bimport\s*\(?\s*)["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']/g;
+	/(?:\bfrom\s*|\bimport\s*\(?\s*)(["'`])([^"'`]+)\1|\bimport\s*\(\s*(["'`])([^"'`]+)\3/g;
 
 function backendOf(path) {
 	if (path.startsWith(JS_DIR)) return "js";
 	if (path.startsWith(WASM_DIR)) return "wasm";
+	if (path.startsWith(SHARED_DIR)) return "shared";
 	return null;
+}
+
+// js and wasm may import shared code; nothing else crosses a backend line.
+function isCrossing(own, other) {
+	return other !== null && other !== own && other !== "shared";
 }
 
 // sources: { "src/backend/js/x.js": "<file text>" }
@@ -107,11 +117,10 @@ export function findCrossBackendImports(sources, allow = ALLOW_CROSS) {
 		const own = backendOf(from);
 		if (!own) continue;
 		for (const m of text.matchAll(SPEC_RE)) {
-			const spec = m[1] ?? m[2];
+			const spec = m[2] ?? m[4];
 			if (!spec.startsWith(".")) continue;
 			const to = posix.normalize(posix.join(posix.dirname(from), spec));
-			const other = backendOf(to);
-			if (!other || other === own) continue;
+			if (!isCrossing(own, backendOf(to))) continue;
 			if (allow.some(([a, b]) => a === from && b === to)) continue;
 			found.push({ from, to });
 		}
@@ -119,9 +128,42 @@ export function findCrossBackendImports(sources, allow = ALLOW_CROSS) {
 	return found;
 }
 
+// ── Stale exemptions ─────────────────────────────────────────
+
+// An ALLOW key must name an existing file no layer covers, and an allowlisted
+// cross-backend pair must match a real import.
+export function findStaleExemptions({
+	tomlText,
+	files,
+	sources,
+	allow = ALLOW,
+	allowCross = ALLOW_CROSS,
+}) {
+	const stale = [];
+	const present = new Set(files);
+	const { unlayered } = findLayerGaps(tomlText, files, {});
+	for (const file of Object.keys(allow)) {
+		if (!present.has(file))
+			stale.push(`ALLOW entry for a missing file: ${file}`);
+		else if (!unlayered.includes(file))
+			stale.push(`ALLOW entry for a file a layer already covers: ${file}`);
+	}
+	const edges = new Set(
+		findCrossBackendImports(sources, []).map((x) => `${x.from} -> ${x.to}`),
+	);
+	for (const [a, b] of allowCross) {
+		if (!edges.has(`${a} -> ${b}`))
+			stale.push(
+				`cross-backend allowlist entry with no matching import: ${a} -> ${b}`,
+			);
+	}
+	return stale;
+}
+
 // ── CLI ──────────────────────────────────────────────────────
 
 function walk(dir, ext, out = []) {
+	if (!existsSync(dir)) return out;
 	for (const e of readdirSync(dir, { withFileTypes: true })) {
 		const p = join(dir, e.name);
 		if (e.isDirectory()) walk(p, ext, out);
@@ -130,12 +172,12 @@ function walk(dir, ext, out = []) {
 	return out;
 }
 
-function main() {
-	const rel = (p) => relative(ROOT, p).split("\\").join("/");
-	const rules = readFileSync(join(ROOT, ".sentrux/rules.toml"), "utf8");
+function main(root = REPO_ROOT) {
+	const rel = (p) => relative(root, p).split("\\").join("/");
+	const rules = readFileSync(join(root, ".sentrux/rules.toml"), "utf8");
 	const files = [
-		...walk(join(ROOT, "src"), ".js"),
-		...walk(join(ROOT, "stdlib"), ".go"),
+		...walk(join(root, "src"), ".js"),
+		...walk(join(root, "stdlib"), ".go"),
 	].map(rel);
 	const problems = [];
 
@@ -148,10 +190,12 @@ function main() {
 	const sources = Object.fromEntries(
 		files
 			.filter((f) => backendOf(f))
-			.map((f) => [f, readFileSync(join(ROOT, f), "utf8")]),
+			.map((f) => [f, readFileSync(join(root, f), "utf8")]),
 	);
 	for (const x of findCrossBackendImports(sources))
 		problems.push(`cross-backend import: ${x.from} -> ${x.to}`);
+	for (const s of findStaleExemptions({ tomlText: rules, files, sources }))
+		problems.push(`stale exemption: ${s}`);
 
 	if (problems.length > 0) {
 		console.error(`check-layers: ${problems.length} problem(s)`);
@@ -162,4 +206,4 @@ function main() {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
-	main();
+	main(process.argv[2] ? resolve(process.argv[2]) : REPO_ROOT);

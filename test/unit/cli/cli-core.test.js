@@ -1,5 +1,6 @@
 // GoFront test suite — cli-core direct-import tests
 
+import { spawnSync } from "node:child_process";
 import {
 	chmodSync,
 	existsSync,
@@ -15,6 +16,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
 	devReporters,
+	ensureDir,
 	formatBuildSummary,
 	formatPrepSummary,
 	formatWrittenDesc,
@@ -59,6 +61,7 @@ import {
 	assertRejects,
 	assertThrows,
 	FIXTURES,
+	ROOT,
 	section,
 	summarize,
 	test,
@@ -959,6 +962,42 @@ test("writeCompileOutput throws on write failure", () => {
 				chmodSync(dir, 0o755);
 			} catch {}
 		}
+	});
+});
+
+// Under /proc, mkdir fails with ENOENT although the parent exists, which
+// Node's recursive mkdirSync retries forever; the CLI must fail instead.
+const UNCREATABLE = "/proc/gofront-no-such-dir";
+const CLI = join(ROOT, "src", "index.js");
+
+test("an uncreatable -o directory fails with exit 1 instead of hanging", () => {
+	if (!existsSync("/proc/self")) return;
+	withTempDir(
+		{ "main.go": 'package main\nfunc main() { println("x") }\n' },
+		(dir) => {
+			for (const args of [
+				[join(dir, "main.go"), "-o", `${UNCREATABLE}/app.js`],
+				[dir, "-o", `${UNCREATABLE}/app.js`],
+				["build", dir, "-o", UNCREATABLE],
+			]) {
+				const r = spawnSync(process.execPath, [CLI, ...args], {
+					encoding: "utf8",
+					timeout: 5000,
+				});
+				assertEqual(r.signal, null, `${args.join(" ")} hung`);
+				assertEqual(r.status, 1);
+				assertContains(r.stderr, `cannot write '${UNCREATABLE}`);
+			}
+		},
+	);
+});
+
+test("ensureDir creates nested directories and rejects a file in the path", () => {
+	withTempDir({ "f.txt": "" }, (dir) => {
+		ensureDir(join(dir, "a", "b", "c"));
+		assert(existsSync(join(dir, "a", "b", "c")), "nested dirs created");
+		ensureDir(join(dir, "a", "b"));
+		assertThrows(() => ensureDir(join(dir, "f.txt", "x")), "ENOTDIR");
 	});
 });
 

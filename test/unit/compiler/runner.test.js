@@ -1,7 +1,7 @@
 // GoFront test suite — test discovery in test/unit/discover.js
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
 	assertHeaviestPresent,
@@ -54,6 +54,25 @@ test("discoverTestFiles walks nested directories and skips fixtures", () => {
 			"./a/deep/one.test.js,./a/zero.test.js,./b/two.test.js",
 		);
 	});
+});
+
+test("discoverTestFiles sorts what the file system lists in any order", () => {
+	withTempDir(
+		{
+			"a/one.test.js": "",
+			"a/two.test.js": "",
+			"b/three.test.js": "",
+			"c.test.js": "",
+		},
+		(dir) => {
+			const reversed = (p, o) =>
+				readdirSync(p, o).sort((x, y) => (x.name < y.name ? 1 : -1));
+			assertEqual(
+				discoverTestFiles(dir, reversed).join(","),
+				"./a/one.test.js,./a/two.test.js,./b/three.test.js,./c.test.js",
+			);
+		},
+	);
 });
 
 section("Test runner — scheduling hint");

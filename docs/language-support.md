@@ -162,7 +162,9 @@ Notable members and behaviour per package, including GoFront's own packages:
 | `templ Name(params) { <html/> }` components | ✓ — compile to direct `createElement` calls; return a `gom.Node` |
 | `{ expr }` interpolation, `attr={ expr }`, `attr?={ bool }` | ✓ |
 | `@Component(args)`, `@templ.Raw(html)` | ✓ |
-| `if` / `else if` / `else`, `for range`, `switch` inside bodies | ✓ |
+| `if` / `else if` / `else`, `switch` inside bodies | ✓ |
+| `for` inside bodies | ✓ — `for i, v := range slice`, `for _, v := range slice` and condition loops; index-only loops (`for i := range slice`, `for i, _ := range slice`), ranging over a map, string or integer, and three-clause loops are not supported yet |
+| Type checking | ✓ — Go expressions in templ bodies are checked like Go code (undefined names, mismatched types, unused loop variables); a malformed expression or `for` header fails the build |
 | `css Name() { … }` scoped styles | ✓ — class `gfc_<name>_<hash>`, injected into `<head>` once; nested `&`, media queries and keyframes supported |
 | `ref="name"` element capture | ✓ — stripped from output; populated into the `refs` map passed to `gom.Mount`/`gom.MountTo`; forwarded through nested `@Component()` calls |
 | SVG elements | ✓ — created in the SVG namespace, `class` set via `setAttribute` |
