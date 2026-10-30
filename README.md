@@ -228,6 +228,7 @@ Key syntax features:
 - `@Component(args)` — call another templ component and mount it as a child
 - `if cond { } else if cond { } else { }` — conditional rendering (arbitrary depth)
 - `for _, v := range slice { }` — loop rendering inside template bodies
+- Go expressions in template bodies are type-checked like the rest of the package
 - `switch expr { case v: ... default: ... }` — switch rendering inside template bodies
 - `@templ.Raw(htmlStr)` — inject raw/trusted HTML (uses `insertAdjacentHTML`)
 - `ref="name"` — capture the element at mount time into an optional `refs map[string]any`

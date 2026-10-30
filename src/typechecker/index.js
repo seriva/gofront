@@ -54,7 +54,7 @@ function rootIdentName(e) {
 }
 
 // Re-export for consumers that import from typechecker.js
-export { TypeCheckError, typeStr };
+export { EXCLUDED_STDLIB_PACKAGES, TypeCheckError, typeStr };
 
 // JavaScript built-ins that generated JS relies on; a JS class of the same
 // name in the bundle would shadow them (see _checkGlobalTypeNamesPass).

@@ -147,6 +147,20 @@ export function findMissingPaths(paths, root, exempt = []) {
 	});
 }
 
+// Exempt entries (brace-expanded) that are no longer needed: the entry cites
+// nothing in `paths`, or every path it cites now exists under `root`.
+export function findStaleExempt(paths, root, exempt) {
+	const stale = [];
+	for (const e of exempt.flatMap(expandBraces)) {
+		const re = globToRegExp(e);
+		const cited = paths.filter((p) => re.test(p));
+		if (cited.length === 0) stale.push(`${e} (cites nothing)`);
+		else if (findMissingPaths(cited, root).length === 0)
+			stale.push(`${e} (every cited path exists)`);
+	}
+	return stale;
+}
+
 // ── Extraction ───────────────────────────────────────────────
 
 section("Plan paths — extraction");
@@ -234,6 +248,35 @@ test("the root comes from the test file, not the working directory", () => {
 	);
 });
 
+test("an exempt entry is stale once every path it cites exists", () => {
+	const paths = ["src/a.js", "src/new.js", "test/unit/s/a.test.js"];
+	const exempt = ["src/new.js", "test/unit/s/*"];
+	withTempDir(FILES, (dir) => {
+		assertEqual(findStaleExempt(paths, dir, exempt).join(","), "");
+	});
+	withTempDir({ ...FILES, "src/new.js": "" }, (dir) => {
+		assertEqual(
+			findStaleExempt(paths, dir, exempt).join(","),
+			"src/new.js (every cited path exists)",
+		);
+	});
+	withTempDir({ ...FILES, "test/unit/s/a.test.js": "" }, (dir) => {
+		assertEqual(
+			findStaleExempt(paths, dir, exempt).join(","),
+			"test/unit/s/* (every cited path exists)",
+		);
+	});
+});
+
+test("an exempt entry that cites nothing is stale", () => {
+	withTempDir(FILES, (dir) => {
+		assertEqual(
+			findStaleExempt(["src/a.js"], dir, ["src/{x,a}.js"]).join(","),
+			"src/x.js (cites nothing),src/a.js (every cited path exists)",
+		);
+	});
+});
+
 // ── The real plans ───────────────────────────────────────────
 
 for (const { file, exempt } of PLANS) {
@@ -248,12 +291,10 @@ for (const { file, exempt } of PLANS) {
 
 	test(`${file}: every exempt entry is still needed`, () => {
 		const paths = extractPlanPaths(readFileSync(join(REPO_ROOT, file), "utf8"));
-		for (const e of exempt.flatMap(expandBraces)) {
-			const re = globToRegExp(e);
-			assert(
-				paths.some((p) => re.test(p)),
-				`exempt entry cites nothing in ${file}: ${e}`,
-			);
-		}
+		const stale = findStaleExempt(paths, REPO_ROOT, exempt);
+		assert(
+			stale.length === 0,
+			`stale exempt entries in ${file}: ${stale.join(", ")}`,
+		);
 	});
 }
