@@ -216,6 +216,7 @@ export class CodeGen {
 		this.namedWrapperNames = new Set();
 		this.collectedCss = [];
 		this.warnings = []; // non-fatal diagnostics; the compiler prints them
+		this._precisionWarned = new Set(); // nodes already given a precision warning
 		this._srcFileNames = []; // source file name per _srcFileIdx
 		this.jsImports = jsImports;
 		this.bundledPackages = bundledPackages;
@@ -324,6 +325,7 @@ export class CodeGen {
 
 	generate(program, options = {}) {
 		const isTest = options.isTest ?? false;
+		this._precisionWarned = new Set();
 		// Defer lowering (argument/receiver hoisting, recover-target marking) is
 		// idempotent and owned by the backends: the wasm path runs it via
 		// `lower()`, the JS path here.

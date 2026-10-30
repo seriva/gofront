@@ -424,27 +424,27 @@ No longer reproducing (deleted from the ledger): promoted field through `Deep2{*
 
 ### Phase 14: Tooling, Diagnostics, Example and Docs
 
-- [ ] Task 14.1: Layer guard: stale entries, template-literal imports, shared code
+- [x] Task 14.1: Layer guard: stale entries, template-literal imports, shared code
   - Files: `scripts/check-layers.js`, `test/unit/compiler/check-layers.test.js`
   - Test: an `ALLOW` key for a missing file and a `PENDING_CROSS` pair with no matching import → reported stale; ``import(`../wasm/emit.js`)`` from a JS backend file → cross-backend finding; `src/backend/shared/x.js` importing `../js/runtime.js` → finding.
   - Done when: the three fixtures fail the guard and the real tree passes.
-- [ ] Task 14.2: Deterministic test-harness checks
+- [x] Task 14.2: Deterministic test-harness checks
   - Files: `test/unit/cli/cli.test.js`, `test/unit/compiler/runner.test.js`, `test/unit/compiler/plan-paths.test.js`
   - Test: dev smoke test polls stderr for `dev server running` (deadline ≥ 5 s) then kills the child; discovery test builds an unsorted fixture and fails if `found.sort()` is removed; plan-paths test fails when every path an exempt entry matches exists (probe file in a temp root).
   - Done when: each new assertion fails against a mutated helper (recorded in the commit body) and passes on the real one.
-- [ ] Task 14.3: CLI: unwritable output paths and reproducible vendor bundles
+- [x] Task 14.3: CLI: unwritable output paths and reproducible vendor bundles
   - Files: `src/cli/cli-core.js`, `src/cli/vendor.js`, `test/unit/cli/cli-core.test.js`
   - Test: `-o /proc/x/app.js` → `cannot write` error and exit 1 within 5 s; two `prep` runs of `example/preact` (in `test/unit/cli/prep.test.js`) produce byte-identical `vendor.js`.
   - Done when: no hang; vendor hash stable.
-- [ ] Task 14.4: Diagnostics: one error for unavailable wasm imports; precision warning for literals
+- [x] Task 14.4: Diagnostics: one error for unavailable wasm imports; precision warning for literals
   - Files: `src/compiler.js`, `src/backend/js/expressions.js`, `test/unit/compiler/targets.test.js`
   - Test: wasm `import "reflect"` → exactly one error, `package 'reflect' is not available`; `const c = 9007199254740993` in js → warning containing `exceeds JS Number precision`.
   - Done when: both assertions pass.
-- [ ] Task 14.5: `example/hybrid` SIMD bounce and test isolation
+- [x] Task 14.5: `example/hybrid` SIMD bounce and test isolation
   - Files: `example/hybrid/src/sim/sim.go`, `example/hybrid/src/sim/sim_test.go`
-  - Test: in `sim_test.go`, `Reset(1001,800,600)` then 300× `Step(0.016,400,300,100,100)` → energy equals the scalar `stepOne` result (674529.9 ± 0.1); `TestLoadConfig` restores `DefaultConfigJSON` (assert `ConfigName()` after cleanup).
+  - Test: in `sim_test.go`, `Reset(1001,800,600)` then 300× `Step(0.016,400,300,100,100)` → energy equals the scalar `stepOne` result (668568.7 ± 0.1; 674529.9 did not reproduce under either config — measured on the fixed code); `TestLoadConfig` restores `DefaultConfigJSON` (assert `ConfigName()` after cleanup).
   - Done when: `gofront test example/hybrid/src/sim` passes and E2E hybrid spec stays green.
-- [ ] Task 14.6: User docs
+- [x] Task 14.6: User docs
   - Files: `docs/language-support.md`, `docs/go-compatibility.md`, `README.md`
   - Test: `node test/unit/compiler/plan-paths.test.js` and `npm run check` stay green.
   - Done when: limitations fixed in Phases 2–13 (leading-dot floats, Unicode identifiers, `fallthrough` in WASM, generic function values, templ type checking, etc.) are no longer listed, and remaining known gaps match the Boundary Matrix.
