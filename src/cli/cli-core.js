@@ -133,13 +133,29 @@ function stripTargetFlag(argv) {
 	return out;
 }
 
+// Creates `dir` and any missing parents.  `mkdirSync(dir, { recursive: true })`
+// retries forever when mkdir fails with ENOENT under an existing parent (as it
+// does below /proc), so each missing segment is created on its own and the
+// first failure is thrown.
+export function ensureDir(dir) {
+	const missing = [];
+	let cur = resolve(dir);
+	while (!existsSync(cur)) {
+		missing.push(cur);
+		const parent = dirname(cur);
+		if (parent === cur) break;
+		cur = parent;
+	}
+	for (const d of missing.reverse()) mkdirSync(d);
+}
+
 // Writes the JS bundle plus, when the project links wasm packages, the
 // sibling `app.wasm` (and `app.wat` when requested).  Stale wasm artifacts
 // are removed so a project that drops its wasm packages serves clean output —
 // but only when the existing file is one GoFront produced (recognised by its
 // `gofront` custom section), so a hand-placed `app.wasm` is left alone.
 export function writeCompileOutput(outputFile, result, js = result.js) {
-	mkdirSync(dirname(outputFile), { recursive: true });
+	ensureDir(dirname(outputFile));
 	writeFileSync(outputFile, `${js}\n`);
 	const wasmFile = join(dirname(outputFile), "app.wasm");
 	const watFile = join(dirname(outputFile), "app.wat");
@@ -273,7 +289,7 @@ node_modules/
 
 export function handleInit(targetDir) {
 	try {
-		mkdirSync(targetDir, { recursive: true });
+		ensureDir(targetDir);
 	} catch (e) {
 		throw new Error(`cannot create '${targetDir}': ${e.message}`);
 	}
@@ -286,7 +302,7 @@ export function handleInit(targetDir) {
 
 	for (const { path: filePath, content } of templates) {
 		try {
-			mkdirSync(dirname(filePath), { recursive: true });
+			ensureDir(dirname(filePath));
 			writeFileSync(filePath, content);
 		} catch (e) {
 			throw new Error(`cannot write '${filePath}': ${e.message}`);
@@ -673,7 +689,11 @@ function cleanOutputDir(outDir, project, srcDir) {
 	if (isSafe && existsSync(resolvedOut)) {
 		rmSync(resolvedOut, { recursive: true, force: true });
 	}
-	mkdirSync(resolvedOut, { recursive: true });
+	try {
+		ensureDir(resolvedOut);
+	} catch (e) {
+		throw new Error(`cannot write '${outDir}': ${e.message}`);
+	}
 }
 
 const STATIC_ASSET_EXTS = new Set([
@@ -745,7 +765,7 @@ function copyServeDirAssets(project, outDir, srcDir) {
 	const copyFile = (full) => {
 		const dest = join(out, relative(serveDir, full));
 		if (existsSync(dest)) return;
-		mkdirSync(dirname(dest), { recursive: true });
+		ensureDir(dirname(dest));
 		copyFileSync(full, dest);
 		copied++;
 	};

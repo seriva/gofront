@@ -1,6 +1,7 @@
 // GoFront test suite — DOM and external .d.ts
 import { fileURLToPath } from "node:url";
 import {
+	assert,
 	assertEqual,
 	assertErrorContains,
 	compile,
@@ -12,6 +13,7 @@ import {
 	section,
 	summarize,
 	test,
+	withTempDir,
 } from "../helpers.js";
 
 section("DOM (jsdom)");
@@ -236,6 +238,31 @@ func main() {
 	);
 	// RequestInit is resolved from .d.ts — type checker accepts this without errors
 	assertEqual(errors.length, 0);
+});
+
+test("variadic function from .d.ts emits spread rather than { __sp: ... }", () => {
+	withTempDir(
+		{
+			"ext.d.ts":
+				"declare function customTag(tag: string, ...items: any[]): any;\n",
+			"main.go": `package main
+import "js:ext.d.ts"
+func main() {
+	xs := []any{1, 2}
+	customTag("div", xs...)
+}
+`,
+		},
+		(dir) => {
+			const { js, errors } = compileFile(join(dir, "main.go"));
+			assertEqual(errors.length, 0);
+			assert(
+				!js.includes("__sp"),
+				"expected external variadic function not to use __sp",
+			);
+			assert(js.includes('customTag("div", ...xs)'), "expected spread call");
+		},
+	);
 });
 
 // ═════════════════════════════════════════════════════════════

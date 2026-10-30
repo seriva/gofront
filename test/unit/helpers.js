@@ -484,6 +484,47 @@ export async function assertProgramOutput(source, expected) {
 	}
 }
 
+// Same as assertProgramOutput for a program only the JS side of a `both`
+// package is expected to run (the WASM backend cannot compile it yet).
+export async function assertJsProgramOutput(source, expected) {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-program-src-"));
+	try {
+		const goPath = join(dir, "main.go");
+		writeFileSync(goPath, source);
+		const res = compileFiles([goPath], { forceTarget: "both" });
+		const out = await runProgramModule(res.js, res.wasm);
+		if (out !== expected)
+			throw new Error(
+				`JS output differs: want ${JSON.stringify(expected)}, got ${JSON.stringify(out)}`,
+			);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
+// Same as assertProgramOutput for a program only the WASM backend can run
+// the way Go does (the JS representation cannot tell the cases apart).
+export async function assertWasmProgramOutput(source, expected) {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-program-src-"));
+	try {
+		const goPath = join(dir, "main.go");
+		writeFileSync(goPath, source);
+		const res = compileFiles([goPath], { forceTarget: "wasm" });
+		assertValidWasm(res.wasm);
+		const out = await runProgramModule(res.js, res.wasm);
+		if (out === expected) return;
+		const w = expected.split("\n");
+		const g = out.split("\n");
+		let i = 0;
+		while (i < Math.max(w.length, g.length) && w[i] === g[i]) i++;
+		throw new Error(
+			`WASM output differs from real Go at line ${i + 1}: want ${JSON.stringify(w[i] ?? "<EOF>")}, got ${JSON.stringify(g[i] ?? "<EOF>")}`,
+		);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
 // ── Test harness ─────────────────────────────────────────────
 
 let passed = 0,

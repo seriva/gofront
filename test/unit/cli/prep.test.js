@@ -1,11 +1,14 @@
 // GoFront test suite — prep command & vendor bundling
 import { spawnSync } from "node:child_process";
 import {
+	copyFileSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	readdirSync,
 	readFileSync,
 	rmSync,
+	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -275,6 +278,36 @@ test("loadVendorConfig resolves the preact example with its own dest", () => {
 
 test("the repository root has no vendor config", () => {
 	assertEqual(loadProjectConfig(ROOT).vendor, undefined);
+});
+
+test("two prep runs of the preact example write byte-identical vendor.js", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-prep-repro-"));
+	try {
+		copyFileSync(
+			join(ROOT, "example/preact/gofront.json"),
+			join(dir, "gofront.json"),
+		);
+		symlinkSync(join(ROOT, "node_modules"), join(dir, "node_modules"), "dir");
+		const runs = [];
+		for (let i = 0; i < 2; i++) {
+			const { code, stderr } = cli(["prep", dir]);
+			assertEqual(code, 0);
+			assert(!stderr.includes("ERROR"), stderr);
+			runs.push(readFileSync(join(dir, "vendor.js")));
+		}
+		assert(runs[0].length > 0, "vendor.js is empty");
+		assert(runs[0].equals(runs[1]), "vendor.js differs between prep runs");
+		assert(
+			!/vendor-entry-\d/.test(runs[0].toString()),
+			"vendor.js names a timestamped entry file",
+		);
+		assert(
+			!readdirSync(dir).some((f) => f.startsWith(".gofront-vendor-entry")),
+			"the entry file is removed after bundling",
+		);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
 });
 
 section("vendor — bundling workflow");

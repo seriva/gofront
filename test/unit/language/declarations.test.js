@@ -7,6 +7,7 @@ import {
 	assertContains,
 	assertEqual,
 	assertErrorContains,
+	assertProgramOutput,
 	compile,
 	compileDir,
 	compileFile,
@@ -578,14 +579,14 @@ func main() {
 
 section("clear() builtin");
 
-test("clear() empties a slice", () => {
+test("clear() zeroes a slice and keeps its length", () => {
 	const js = compile(`package main
 func main() {
 	s := []int{1, 2, 3}
 	clear(s)
-	console.log(len(s))
+	console.log(len(s), s[0] + s[1] + s[2])
 }`).js;
-	assertEqual(runJs(js), "0");
+	assertEqual(runJs(js), "3 0");
 });
 
 test("clear() empties a map", () => {
@@ -978,6 +979,46 @@ import _ "${pkg}"
 func main() {}`);
 		assertErrorContains(errors, reason);
 	}
+});
+
+section("Blank package variables and nil slice conversions");
+
+test("repeated var _ runs every initialiser", async () => {
+	const src = `package main
+
+import "fmt"
+
+func f() int { fmt.Println("f"); return 1 }
+func g() int { fmt.Println("g"); return 2 }
+
+var _ = f()
+var _ = g()
+
+func main() {
+	fmt.Println("main")
+}
+`;
+	const { js, errors } = compile(src);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "f\ng\nmain");
+	await assertProgramOutput(src, "f\ng\nmain\n");
+});
+
+test("[]T(nil) is the nil slice", async () => {
+	const src = `package main
+
+import "fmt"
+
+func main() {
+	xs := []int(nil)
+	fmt.Println(xs == nil, len(xs), []int(nil))
+	fmt.Println([]int(nil))
+}
+`;
+	const { js, errors } = compile(src);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true 0 []\n[]");
+	await assertProgramOutput(src, "true 0 []\n[]\n");
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

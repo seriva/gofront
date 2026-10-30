@@ -3,8 +3,10 @@
 
 import {
 	assertEqual,
+	assertProgramOutput,
+	compile,
 	compileHybrid,
-	compileWasm,
+	runJs,
 	runWasm,
 	section,
 	test,
@@ -558,9 +560,185 @@ func itoa(n int) string {
 	return "?"
 }
 `;
-	// Go's answer; the JS backend still treats a named string as a string here
-	// (plans/follow-ups.md), so only WASM is compared.
-	const { wasm, stringTable } = compileWasm(src);
-	const wasmRes = runWasm(wasm, { stringTable }).exports.Main();
+	// Go's answer: a named string is not a string in an interface.
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
 	assertEqual(wasmRes, "x TFFT 7");
+	assertEqual(jsRes, "x TFFT 7");
+});
+
+test("type switch tells interfaces with the same method name apart", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type one struct{}
+
+func (one) Error() string { return "one" }
+func (one) Unwrap() error { return nil }
+
+type many struct{}
+
+func (many) Error() string   { return "many" }
+func (many) Unwrap() []error { return nil }
+
+type plain struct{}
+
+func (plain) Error() string { return "plain" }
+
+func kind(e error) string {
+	switch e.(type) {
+	case interface{ Unwrap() error }:
+		return "single"
+	case interface{ Unwrap() []error }:
+		return "multi"
+	}
+	return "none"
+}
+
+type Unwrapper interface{ Unwrap() []error }
+
+func named(e error) string {
+	switch e.(type) {
+	case Unwrapper:
+		return "named multi"
+	}
+	return "named none"
+}
+
+func main() {
+	fmt.Println(kind(one{}), kind(many{}), kind(plain{}), kind(&many{}), kind(&one{}))
+	fmt.Println(named(one{}), named(many{}), named(plain{}))
+	var em error = many{}
+	_, ok := em.(interface{ Unwrap() []error })
+	_, ok2 := em.(interface{ Unwrap() error })
+	fmt.Println(ok, ok2)
+	var e error = one{}
+	switch x := e.(type) {
+	case interface{ Unwrap() []error }:
+		fmt.Println("multi", x.Unwrap() == nil)
+	case interface{ Unwrap() error }:
+		fmt.Println("single", x.Unwrap() == nil)
+	}
+}
+`,
+		"single multi none multi single\nnamed none named multi named none\ntrue false\nsingle true\n",
+	);
+});
+
+test("errors.Join matches the multi-error Unwrap interface in JS", () => {
+	const src = `package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+func kind(e error) string {
+	switch e.(type) {
+	case interface{ Unwrap() error }:
+		return "single"
+	case interface{ Unwrap() []error }:
+		return "multi"
+	}
+	return "none"
+}
+
+func main() {
+	a, b := errors.New("a"), errors.New("b")
+	j := errors.Join(a, b)
+	fmt.Println(kind(j), kind(a))
+	_, one := j.(interface{ Unwrap() error })
+	_, many := j.(interface{ Unwrap() []error })
+	fmt.Println(one, many, errors.Is(j, b))
+}
+`;
+	const { js, errors } = compile(src, { target: "both" });
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "multi none\nfalse true true");
+});
+
+section("Interfaces — pointers to named scalars and values stored in any");
+
+test("interface dispatch through pointers to named scalars, type switches and any elements", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"fmt"
+	"io"
+)
+
+type Getter interface{ Get() int }
+type MyInt int
+
+func (m MyInt) Get() int { return int(m) }
+
+type Str string
+
+func (s Str) Name() string { return string(s) }
+
+type Namer interface{ Name() string }
+
+type F float64
+
+func (f F) Size() int { return int(f) }
+
+type Sizer interface{ Size() int }
+
+type W struct{ n int }
+
+func (w *W) Write(p []byte) (int, error) { w.n += len(p); return len(p), nil }
+
+type T struct{ n int }
+
+func (t T) Name() string { return fmt.Sprint("T", t.n) }
+
+func main() {
+	var w io.Writer = &W{}
+	fmt.Println(w.Write([]byte("xy")))
+	var mi MyInt = 42
+	var g Getter = &mi
+	fmt.Println(g.Get())
+	g = mi
+	fmt.Println(g.Get())
+	s := Str("hello")
+	var n Namer = &s
+	fmt.Println(n.Name())
+	f := F(7.9)
+	var sz Sizer = &f
+	fmt.Println(sz.Size())
+	t := T{4}
+	for _, v := range []any{s, &s, 3, &t, t, nil, f, &f} {
+		switch x := v.(type) {
+		case Namer:
+			fmt.Println("namer", x.Name())
+		case Sizer:
+			fmt.Println("sizer", x.Size())
+		case nil:
+			fmt.Println("nil")
+		default:
+			fmt.Println("other")
+		}
+	}
+	vs := []any{t, &t}
+	fmt.Println(len(vs))
+}
+`,
+		`2 <nil>
+42
+42
+hello
+7
+namer hello
+namer hello
+other
+namer T4
+namer T4
+nil
+sizer 7
+sizer 7
+2
+`,
+	);
 });

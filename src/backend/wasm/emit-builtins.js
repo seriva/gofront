@@ -3,8 +3,10 @@
 // call expression dispatch (static, method, closure, package).
 
 import {
+	anonIfaceName,
 	getMapKeyValTypes,
 	isArrayType,
+	isBoolGoType,
 	isComplex,
 	isComplex64,
 	isMapType,
@@ -426,6 +428,17 @@ export class BuiltinsEmitter {
 		this.pushInstruction("end");
 	}
 
+	// The source operand of `append(b, x...)` and `copy(b, x)`: a string
+	// (the only non-slice form Go allows) is converted to a fresh byte slice.
+	_emitSliceOperand(node, elemGoType, sliceWType) {
+		if (isStringType(node._type, this.mod.checker)) {
+			this.emitExpr(node, "externref");
+			this._emitStringToByteSlice({ kind: "slice", elem: elemGoType });
+			return;
+		}
+		this.emitExpr(node, sliceWType);
+	}
+
 	_emitBuiltinAppend(call) {
 		const { args } = call;
 		const sNode = args[0];
@@ -480,7 +493,7 @@ export class BuiltinsEmitter {
 
 		if (args.length === 2 && args[1]._spread) {
 			const s2Tmp = this.acquireTemp(sliceWType);
-			this.emitExpr(args[1], sliceWType);
+			this._emitSliceOperand(args[1], elemGoType, sliceWType);
 			this.pushInstruction({ op: "local.set", index: s2Tmp });
 
 			const s2ArrTmp = this.acquireTemp(arrWType);
@@ -590,7 +603,7 @@ export class BuiltinsEmitter {
 		this.pushInstruction({ op: "local.set", index: dstTmp });
 
 		const srcTmp = this.acquireTemp(sliceWType);
-		this.emitExpr(srcNode, sliceWType);
+		this._emitSliceOperand(srcNode, elemGoType, sliceWType);
 		this.pushInstruction({ op: "local.set", index: srcTmp });
 
 		const nTmp = this.acquireTemp("i32");
@@ -719,7 +732,7 @@ export class BuiltinsEmitter {
 			const arg = args[i];
 			const isLast = i === args.length - 1 && isPrintln;
 			const isBool =
-				arg._type?.name === "bool" ||
+				isBoolGoType(arg._type) ||
 				(arg.kind === "BasicLit" && arg.litKind === "BOOL");
 			const wType = toWasmType(arg._type, this.mod.checker);
 			this.emitExpr(arg, wType);
@@ -1198,7 +1211,7 @@ export class BuiltinsEmitter {
 			return true;
 		}
 		if (isNonEmptyInterface(recvType, this.mod.checker)) {
-			const ifaceName = recvTypeName ?? "anon";
+			const ifaceName = recvTypeName ?? anonIfaceName(recvType);
 			const dispatchName = `__dispatch_${ifaceName}_${func.field}`;
 			const targetFuncIdx = this.mod.resolveFuncIndex(dispatchName);
 			if (targetFuncIdx !== null) {
@@ -1232,6 +1245,12 @@ export class BuiltinsEmitter {
 				const recvWType = targetParamTypes[0] ?? null;
 				const recvGoType = this.mod.getFuncParamGoTypes(methodName)[0] ?? null;
 				this.emitExpr(this._recvOperand(func, recvGoType), recvWType);
+				// `p.M()` with a value receiver reads `*p`: a nil `p` panics here.
+				if (
+					recvGoType?.kind !== "pointer" &&
+					isStructType(recvGoType, this.mod.checker, this.mod)
+				)
+					this._emitNilCheck(func.expr._type);
 				this._emitCopyIfValue(func.expr, recvGoType, recvWType);
 				const paramGoTypes = this.mod.getFuncParamGoTypes(methodName);
 				for (let i = 0; i < args.length; i++) {
@@ -1251,6 +1270,11 @@ export class BuiltinsEmitter {
 	// and `p *N` (a named scalar or slice) passes `*p`.
 	_recvOperand(func, recvGoType) {
 		const t = func.expr._type;
+		// A pointer receiver on `*p` gets `p` itself, so the method mutates *p.
+		if (recvGoType?.kind === "pointer") {
+			const pointer = this._structDerefPointer(func.expr);
+			if (pointer) return pointer;
+		}
 		if (
 			t?.kind === "pointer" &&
 			recvGoType?.kind !== "pointer" &&
@@ -1439,6 +1463,8 @@ export class BuiltinsEmitter {
 
 		const closureTmp = this.acquireTemp(closureWType);
 		this.emitExpr(func, closureWType);
+		// Calling a nil func value panics like a nil pointer dereference.
+		this._emitNilBranch();
 		this.pushInstruction({ op: "local.set", index: closureTmp });
 
 		// Push param 0: env (anyref)

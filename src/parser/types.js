@@ -76,8 +76,10 @@ export const typeParserMethods = {
 				i++;
 				continue;
 			}
-			// Reject literals — it's an index/array expression
-			if (tt === T.INT || tt === T.FLOAT || tt === T.STRING) return false;
+			// Reject literals — it's an index/array expression. A literal nested
+			// deeper is an array length inside a type argument: Stack[[2]int].
+			if (depth === 1 && (tt === T.INT || tt === T.FLOAT || tt === T.STRING))
+				return false;
 			i++;
 		}
 		return depth === 0;
@@ -191,7 +193,7 @@ export const typeParserMethods = {
 				}
 				const type = {
 					kind: "PointerType",
-					base: { kind: "TypeName", name: typeName },
+					base: this._embeddedTypeName(typeName, true),
 				};
 				let tag = null;
 				if (this.check(T.STRING)) {
@@ -201,6 +203,7 @@ export const typeParserMethods = {
 					names: [],
 					type,
 					embedded: true,
+					embeddedName: type.base.name,
 					tag,
 				});
 				this.semi();
@@ -212,14 +215,38 @@ export const typeParserMethods = {
 			if (names.length === 1 && this.check(T.DOT)) {
 				this.advance();
 				const typeName = `${names[0]}.${this.expect(T.IDENT).value}`;
+				const embeddedType = this._embeddedTypeName(typeName, true);
 				let tag = null;
 				if (this.check(T.STRING)) {
 					tag = this.advance().value;
 				}
 				fields.push({
 					names: [],
-					type: { kind: "TypeName", name: typeName },
+					type: embeddedType,
 					embedded: true,
+					embeddedName: typeName,
+					tag,
+				});
+				this.semi();
+				continue;
+			}
+
+			// Embedded generic instance: Inner[T] (not an array field `a [N]T`)
+			if (
+				names.length === 1 &&
+				this.check(T.LBRACKET) &&
+				this._bracketEndsEmbeddedField()
+			) {
+				const embeddedType = this._embeddedTypeName(names[0], true);
+				let tag = null;
+				if (this.check(T.STRING)) {
+					tag = this.advance().value;
+				}
+				fields.push({
+					names: [],
+					type: embeddedType,
+					embedded: true,
+					embeddedName: names[0],
 					tag,
 				});
 				this.semi();
@@ -259,6 +286,33 @@ export const typeParserMethods = {
 		}
 		this.expect(T.RBRACE);
 		return { kind: "StructType", fields };
+	},
+
+	// True when the `[...]` at the cursor is followed by the end of a field
+	// (`Inner[T]` embedded), rather than an element type (`a [N]T`).
+	_bracketEndsEmbeddedField() {
+		let depth = 0;
+		for (let i = this.pos; i < this.tokens.length; i++) {
+			const tt = this.tokens[i].type;
+			if (tt === T.LBRACKET) depth++;
+			else if (tt === T.RBRACKET && --depth === 0) {
+				const next = this.tokens[i + 1]?.type;
+				return next === T.SEMICOLON || next === T.RBRACE || next === T.STRING;
+			}
+		}
+		return false;
+	},
+
+	// Embedded field type: `name`, or `name[Args]` when type arguments follow.
+	_embeddedTypeName(name, allowArgs) {
+		if (allowArgs && this.check(T.LBRACKET)) {
+			this.expect(T.LBRACKET);
+			const typeArgs = [this.parseType()];
+			while (this.match(T.COMMA)) typeArgs.push(this.parseType());
+			this.expect(T.RBRACKET);
+			return { kind: "GenericTypeName", name, typeArgs };
+		}
+		return { kind: "TypeName", name };
 	},
 
 	parseInterfaceType() {

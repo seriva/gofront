@@ -14,6 +14,12 @@ export const templGenMethods = {
 			.join(", ");
 		this.line(`function ${decl.name}(${params}) {`);
 		this.indented(() => {
+			// `@W(xs...)` passes `{ __sp: xs }` like any Go variadic call.
+			const last = decl.params[decl.params.length - 1];
+			if (last?.variadic && last.name && last.name !== "_") {
+				this.useHelper("va");
+				this.line(`${last.name} = __va(${last.name});`);
+			}
 			this.line(`return {Mount(___p, ___refs) {`);
 			this.indented(() => {
 				this._genTemplNodes(decl.body, "___p");
@@ -211,15 +217,10 @@ export const templGenMethods = {
 	},
 
 	_genTemplFor(node, p) {
-		if (node.forStmt) {
-			try {
-				return this._genTemplRangeFor(node.forStmt, node.body, p);
-			} catch {
-				// Fall through to the non-range fallback below.
-			}
-		}
-		// Fallback for non-range loops: emit a comment + skip
-		this.line(`/* templ for: ${this._tokensToSource(node.forTokens)} */`);
+		if (node.forError) throw node.forError;
+		if (!node.forStmt)
+			throw new Error("templ for header was not parsed by TemplParser");
+		this._genTemplRangeFor(node.forStmt, node.body, p);
 	},
 
 	_genTemplRangeFor(forStmt, templBody, mountParent) {
@@ -269,8 +270,19 @@ export const templGenMethods = {
 		return node.expr ? this.genExpr(node.expr) : emptyJs;
 	},
 
-	_tokensToSource(tokens) {
-		return tokens.map((t) => t.value).join(" ");
+	// Rename handlers for `_renameReservedIdents`: templ bodies keep their Go
+	// expressions in non-enumerable props (see parser/templ.js), which its
+	// generic walk does not visit, so `class` in `{ class }` would stay unsafe.
+	_renameTemplExprNode(node) {
+		this._renameReservedIdents(node.expr);
+	},
+
+	_renameTemplForNode(node) {
+		this._renameReservedIdents(node.forStmt);
+	},
+
+	_renameTemplElementNode(node) {
+		for (const attr of node.attrs ?? []) this._renameReservedIdents(attr.expr);
 	},
 
 	// Fresh variable name counter

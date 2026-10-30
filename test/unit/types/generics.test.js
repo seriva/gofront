@@ -5,13 +5,16 @@ import {
 	assert,
 	assertEqual,
 	assertErrorContains,
+	assertProgramOutput,
 	compile,
+	compileDir,
 	compileHybrid,
 	Lexer,
 	runJs,
 	section,
 	summarize,
 	test,
+	withTempDir,
 } from "../helpers.js";
 
 // ═════════════════════════════════════════════════════════════
@@ -847,6 +850,501 @@ func Main() int {
 `,
 	1022,
 );
+
+section("Generics — embedded instances and array type arguments");
+
+test("an embedded generic instance promotes its fields on every target", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type Inner[T any] struct{ v T }
+
+type W[T any] struct {
+	Inner[T]
+	w int
+}
+
+func main() {
+	x := W[int]{Inner: Inner[int]{v: 4}, w: 1}
+	fmt.Println(x.v, x.w)
+}
+`,
+		"4 1\n",
+	);
+});
+
+test("an array field named like a generic still parses as a field", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type A struct {
+	a [2]int
+	b int
+}
+
+func main() {
+	x := A{a: [2]int{1, 2}, b: 3}
+	fmt.Println(x.a[1], x.b)
+}
+`,
+		"2 3\n",
+	);
+});
+
+test("a type assertion accepts an array type argument", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type Stack[T any] struct{ items []T }
+
+func main() {
+	var s Stack[[2]int]
+	var x any = s
+	_, ok := x.(Stack[[2]int])
+	fmt.Println(ok)
+	_, ok = x.(Stack[int])
+	fmt.Println(ok)
+}
+`,
+		"true\nfalse\n",
+	);
+});
+
+section(
+	"Generics — receiver type parameters, function values, explicit arguments",
+);
+
+test("a generic receiver value copies into a local of its own type", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type Stack[T any] struct{ items []T }
+
+func (s Stack[T]) Copy() Stack[T] {
+	c := s
+	return c
+}
+
+type List[T any] struct {
+	Val  T
+	Next *List[T]
+}
+
+func (l *List[T]) Last() T {
+	p := l
+	for p.Next != nil {
+		p = p.Next
+	}
+	return p.Val
+}
+
+func main() {
+	s := Stack[int]{}
+	fmt.Println(len(s.Copy().items))
+	l := &List[int]{Val: 1, Next: &List[int]{Val: 2}}
+	fmt.Println(l.Last())
+}
+`,
+		"0\n2\n",
+	);
+});
+
+test("an instantiated generic function is a value", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func Id[T any](x T) T { return x }
+
+func main() {
+	f := Id[int]
+	fmt.Println(f(3))
+}
+`,
+		"3\n",
+	);
+});
+
+test("explicit type arguments are checked", () => {
+	assertErrorContains(
+		compile(`package main
+func Sum[T int | float64](a, b T) T { return a + b }
+func f() int {
+	return 3 + Sum[float64](1, 2)
+}
+func main() { f() }`).errors,
+		"mismatched types",
+	);
+	assertErrorContains(
+		compile(`package main
+func Id[T any](x T) T { return x }
+func main() { Id[int, int](1) }`).errors,
+		"got 2 type arguments",
+	);
+	assertErrorContains(
+		compile(`package main
+import "strings"
+func main() { strings.ToUpper[int]("a") }`).errors,
+		"not a generic function",
+	);
+	assertErrorContains(
+		compile(`package main
+func C[T any](n int) T { return T(n) }
+func main() { C[int](1) }`).errors,
+		"cannot convert",
+	);
+});
+
+test("valid explicit instantiations still compile", () => {
+	const { errors } = compile(`package main
+func Sum[T int | float64](a, b T) T { return a + b }
+func Conv[T int | float64](n int) T { return T(n) }
+func main() {
+	_ = 3 + Sum[int](1, 2)
+	_ = Conv[float64](1)
+}`);
+	assertEqual(errors.length, 0);
+});
+
+test("untyped constants infer T from the widest constant kind", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"fmt"
+	"math"
+)
+
+func Max[T ~int | ~float64](a, b T) T {
+	if a > b {
+		return a
+	}
+	return b
+}
+func Sum[T ~int | ~float64](a, b T) T { return a + b }
+func takes(f float64) float64         { return f }
+
+func main() {
+	fmt.Println(math.Sqrt(Max(4, 9.0)))
+	fmt.Println(takes(Sum(1, 2.5)))
+	var f float64 = Max(1, 2.5)
+	fmt.Println(f)
+	var h float64 = Sum(1, 2.5) + 1
+	fmt.Println(h)
+}
+`,
+		"3\n3.5\n2.5\n4.5\n",
+	);
+});
+
+test("a self-referential instantiation reports a cycle", () => {
+	assertErrorContains(
+		compile(`package main
+type T[X any] struct{ n *T[[]X] }
+func main() {
+	var t T[int]
+	_ = t
+}`).errors,
+		"instantiation cycle",
+	);
+});
+
+test("growing instantiation cycles report an error quickly", () => {
+	for (const src of [
+		`package main
+type Pair[A, B any] struct{ a A; b B }
+type Chain[T any] struct{ next *Chain[Pair[T, T]] }
+func main() {
+	var c Chain[int]
+	_ = c
+}`,
+		`package main
+type Chain[T any] struct{ next *Chain[[]T]; m map[string]*Chain[*T] }
+func main() {
+	var c Chain[int]
+	_ = c
+}`,
+	]) {
+		const start = Date.now();
+		assertErrorContains(compile(src).errors, "instantiation cycle");
+		assert(Date.now() - start < 5000, "cycle detection took too long");
+	}
+});
+
+test("non-cyclic recursive generic types still compile", () => {
+	const { errors } = compile(`package main
+type List[T any] struct{ next *List[T]; v T }
+type Tree[T any] struct{ kids []Tree[T] }
+func main() {
+	var a List[List[int]]
+	var b Tree[Tree[string]]
+	_, _ = a, b
+}`);
+	assertEqual(errors.length, 0);
+});
+
+const TWO_PACKAGES = {
+	"a/a.go": `package a
+
+type Pt struct{ X int }
+`,
+	"b/b.go": `package b
+
+type Pt struct{ Y string }
+`,
+};
+
+const twoPackageMain = (body) => `package main
+
+import (
+	"fmt"
+
+	"./a"
+	"./b"
+)
+
+type Box[T any] struct{ v T }
+
+func main() {
+${body}
+}
+`;
+
+test("package-qualified type arguments keep their own fields", () => {
+	withTempDir(
+		{
+			...TWO_PACKAGES,
+			"main.go": twoPackageMain(`	x := Box[a.Pt]{a.Pt{X: 1}}
+	y := Box[b.Pt]{b.Pt{Y: "s"}}
+	fmt.Println(x.v.X, y.v.Y)`),
+		},
+		(dir) => {
+			// Type-checks: `y.v.Y` resolves against b.Pt, `x.v.X` against a.Pt.
+			const { errors } = compileDir(dir);
+			assertEqual(errors?.length ?? 0, 0);
+		},
+	);
+});
+
+section("Generics — dynamic types, conversions and identity");
+
+test("type assertions and switches to a type parameter use the instantiated type", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+type MyErr struct{}
+
+func (*MyErr) Error() string { return "my" }
+
+type Other struct{}
+
+func (*Other) Error() string { return "o" }
+
+type Code int
+
+func (c Code) Error() string { return fmt.Sprint("code ", int(c)) }
+
+type Name string
+
+type Stack[T any] struct{ items []T }
+
+func As[T any](err error) bool {
+	for err != nil {
+		if _, ok := err.(T); ok {
+			return true
+		}
+		err = errors.Unwrap(err)
+	}
+	return false
+}
+
+func Is2[T any](v any) bool {
+	_, ok := v.(T)
+	return ok
+}
+
+func Cast[T any](v any) T { return v.(T) }
+
+func Kind[T any](v any) string {
+	switch v.(type) {
+	case T:
+		return "T"
+	case string:
+		return "str"
+	}
+	return "none"
+}
+
+func Bind[T any](v any) string {
+	switch x := v.(type) {
+	case T:
+		_ = x
+		return "T"
+	}
+	return "no"
+}
+
+func main() {
+	wrapped := fmt.Errorf("%w", &MyErr{})
+	fmt.Println(As[*Other](wrapped), As[*MyErr](&MyErr{}), As[*MyErr](wrapped))
+	fmt.Println(Is2[int](1), Is2[string](1), Is2[string]("a"), Is2[bool](true), Is2[bool]("a"))
+	fmt.Println(Is2[*MyErr](&MyErr{}), Is2[*Other](&MyErr{}), Is2[error](&MyErr{}), Is2[error](1))
+	fmt.Println(Is2[Code](Code(1)), Is2[int](Code(1)), Is2[Name](Name("n")), Is2[string](Name("n")))
+	fmt.Println(Is2[Stack[int]](Stack[int]{}), Is2[Stack[int]](Stack[string]{}), Is2[*Stack[int]](&Stack[int]{}), Is2[*Stack[int]](&Stack[string]{}))
+	fmt.Println(Cast[int](3), Cast[string]("q"), Cast[Code](Code(7)), Cast[Name](Name("nm")) + "!")
+	fmt.Println(Kind[int](1), Kind[string]("a"), Kind[bool](1), Kind[*MyErr](&MyErr{}))
+	fmt.Println(Bind[Code](Code(4)), Bind[int](5), Bind[bool](5), Bind[*MyErr](&MyErr{}))
+}
+`,
+		"false true true\ntrue false true true false\ntrue false true false\ntrue false true false\ntrue false true false\n3 q code 7 nm!\nT T none T\nT T no T\n",
+	);
+});
+
+test("conversions to a type parameter truncate and wrap like the instantiated type", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type Num interface {
+	~int | ~int8 | ~uint8 | ~int16 | ~uint16 | ~int32 | ~uint32 | ~float32 | ~float64
+}
+
+type Small int8
+
+type Box[T Num] struct{ v T }
+
+
+func Half[T Num](x int) T      { return T(x / 2) }
+func conv[T Num](x int) T      { return T(x) }
+func Wrap[T Num](x int) T      { return T(x + 1) }
+func FromF[T Num](f float64) T { return T(f) }
+func Twice[T Num](x int) T     { return conv[T](x) }
+
+func main() {
+	fmt.Println(Half[int](9), conv[int8](200), Wrap[uint8](255))
+	fmt.Println(conv[uint8](-1), conv[int16](40000), conv[uint16](-1), conv[int32](1<<31), conv[int](7))
+	fmt.Println(FromF[int](3.9), FromF[int](-3.9), FromF[float32](0.1) == float32(0.1), FromF[float64](2.5))
+	fmt.Println(Twice[int8](300), Twice[uint8](300))
+	var b Box[int8]
+	b.v = conv[int8](200)
+	fmt.Println(b.v)
+}
+`,
+		"4 -56 0\n255 -25536 65535 -2147483648 7\n3 -3 true 2.5\n44 44\n-56\n",
+	);
+});
+
+test("erased generics keep instance identity, compare any by value and zero T", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type Stack[T any] struct{ items []T }
+
+type Pair[A, B any] struct {
+	a A
+	b B
+}
+
+type P struct{ X int }
+
+type Arr [2]int
+
+func mk[T any]() any            { return &Stack[T]{} }
+func mkv[T any]() any           { return Stack[T]{} }
+func mkp[A, B any]() any        { return &Pair[A, B]{} }
+func eq[T comparable](a, b T) bool { return a == b }
+func ne[T comparable](a, b T) bool { return a != b }
+
+func mut[T any](xs ...T) {
+	var z T
+	xs[0] = z
+}
+
+func zeros[T any](n int) []T {
+	out := make([]T, n)
+	var z T
+	for i := range out {
+		out[i] = z
+	}
+	return out
+}
+
+func main() {
+	_, ok := mk[int]().(*Stack[string])
+	_, ok2 := mk[int]().(*Stack[int])
+	_, ok3 := mkv[string]().(Stack[string])
+	_, ok4 := mkv[string]().(Stack[int])
+	fmt.Println(ok, ok2, ok3, ok4)
+	_, ok5 := mkp[int, string]().(*Pair[int, string])
+	_, ok6 := mkp[int, string]().(*Pair[string, int])
+	fmt.Println(ok5, ok6)
+	fmt.Println(eq[any](P{1}, P{1}), eq[any](P{1}, P{2}), eq[P](P{1}, P{1}), eq[int](1, 1), eq[string]("a", "b"), ne[any](P{1}, P{1}))
+	fmt.Println(eq[any](1, "a"), eq[any](nil, nil), eq[*P](&P{1}, &P{1}), eq[any](P{1}, 1))
+	p := &P{1}
+	fmt.Println(eq[*P](p, p), eq[any](p, p), eq[any](p, &P{1}), eq[Arr](Arr{1, 2}, Arr{1, 2}), eq[Arr](Arr{1, 2}, Arr{2, 1}))
+	c := []int{4, 5}
+	mut(c...)
+	fmt.Println(c)
+	d := []string{"a", "b"}
+	mut(d...)
+	fmt.Println(d, len(d[0]))
+	e := []P{{1}, {2}}
+	mut(e...)
+	fmt.Println(e)
+	mut(1, 2)
+	fmt.Println(zeros[int](2), zeros[string](2), zeros[P](1), zeros[bool](1))
+}
+`,
+		"false true true false\ntrue false\ntrue false true true false false\nfalse true false false\ntrue true false true false\n[0 5]\n[ b] 0\n[{0} {2}]\n[0 0] [ ] [{0}] [false]\n",
+	);
+});
+
+test("mutually recursive generic functions keep their type information", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func B[T any](x any, n int) bool {
+	if n == 0 {
+		return false
+	}
+	return A[T](x, n-1)
+}
+
+func A[T any](x any, n int) bool {
+	if n > 0 {
+		return B[T](x, n)
+	}
+	_, ok := x.(T)
+	return ok
+}
+
+func main() {
+	fmt.Println(B[string](1, 1))
+	fmt.Println(A[int](1, 0), A[string](1, 2), B[int](1, 2))
+}
+`,
+		"false\ntrue false true\n",
+	);
+});
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);

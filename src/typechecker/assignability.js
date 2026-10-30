@@ -97,6 +97,8 @@ export const assignabilityMethods = {
 	// type or an untyped constant representable as uint.
 	_binaryResultTypeShift(_op, lt, rt, node) {
 		if (node) this.checkShiftCount(rt, node.right);
+		if (node && lt.kind !== "untyped" && !isInteger(lt))
+			this.err(`shifted operand ${typeStr(lt)} must be integer`, node.left);
 		return lt;
 	},
 
@@ -219,7 +221,14 @@ export const assignabilityMethods = {
 			return;
 		}
 		if (isUntyped(source) && this._isUntypedAssignable(target, source)) return;
-		if (this._isNumericCoercible(target, source)) return;
+		if (this._isNumericCoercible(target, source)) {
+			if (!this._isGenericCallResult(node)) return;
+			this.err(
+				`mismatched types ${typeStr(source)} and ${typeStr(target)} in ${ctx}`,
+				node,
+			);
+			return;
+		}
 		if (this._checkArrayAssignable(target, source, node)) return;
 		if (this._checkTypedArrayAssignable(target, source, node)) return;
 		if (this._checkFuncAssignable(target, source, node)) return;
@@ -245,19 +254,26 @@ export const assignabilityMethods = {
 		// The static type behind the interface value: codegen derives the
 		// fmt metadata (Stringer elements of slices and maps) from it.
 		node._ifaceSrc = source;
+		const meta = this._ifaceBoxMeta(source);
+		if (!meta) return;
+		node._ifaceBox = meta.box;
+		if (meta.type) node._ifaceNamedType = meta.type;
+		if (meta.ptrFields) node._ifacePtrFields = meta.ptrFields;
+	},
+
+	// How a value of static type `source` is boxed on entering an interface:
+	// { box, type? (named kinds), ptrFields? }, or null when it stays raw.
+	// Shared by _markIfaceBox and the JS backend's multi-value fmt operands.
+	_ifaceBoxMeta(source) {
 		const named = this._namedMethodBoxSource(source);
-		if (named) {
-			node._ifaceBox = named.ptr ? "named_ptr" : "named";
-			node._ifaceNamedType = named.type;
-			return;
-		}
+		if (named)
+			return { box: named.ptr ? "named_ptr" : "named", type: named.type };
 		const sBase = this.resolveType(
 			source.kind === "named" ? source.underlying : source,
 		);
 		const info = this._classifyIfaceBox(sBase);
-		if (!info) return;
-		node._ifaceBox = info.box;
-		if (info.ptrFields) node._ifacePtrFields = info.ptrFields;
+		if (!info) return null;
+		return { box: info.box, ptrFields: info.ptrFields };
 	},
 
 	// A named non-struct type with methods (or a pointer to one) entering an
@@ -271,6 +287,17 @@ export const assignabilityMethods = {
 		const u = this.resolveType(t.underlying);
 		if (!u || u.kind === "struct" || u.kind === "interface") return null;
 		const methods = t.methods ?? t._generic?.methods;
+		// A user-declared named basic type without methods is boxed as well, so
+		// a type assertion to its underlying type fails like Go.
+		if (
+			u.kind === "basic" &&
+			!t._generic &&
+			t.methods instanceof Map &&
+			t.methods.size === 0 &&
+			t._target !== undefined &&
+			t._target !== "wasm"
+		)
+			return { type: t, ptr: isPtr };
 		if (!methods || methods.size === 0) return null;
 		// Only user-declared types (methods carry _ptrRecv); stdlib named types
 		// such as time.Duration have no box class.
@@ -456,6 +483,20 @@ export const assignabilityMethods = {
 		);
 	},
 
+	// A value computed from a generic call (`3 + Sum[float64](1, 2)`) has the
+	// exact instantiated type, so the loose int/float64 promotion that plain
+	// code enjoys does not apply to it.
+	_isGenericCallResult(node) {
+		if (!node || typeof node !== "object") return false;
+		if (node.kind === "ParenExpr") return this._isGenericCallResult(node.expr);
+		if (node.kind === "BinaryExpr")
+			return (
+				this._isGenericCallResult(node.left) ||
+				this._isGenericCallResult(node.right)
+			);
+		return node.kind === "CallExpr" && Boolean(node.func?._genericFnType);
+	},
+
 	_isNumericCoercible(target, source) {
 		if (target.kind !== "basic" || source.kind !== "basic") return false;
 		const pair = `${target.name}:${source.name}`;
@@ -544,10 +585,47 @@ export const assignabilityMethods = {
 
 	// ── Interface satisfaction ────────────────────────────────────────
 
+	// `interface{}` and `any` are the same type, but print differently.
+	_sigTypeStr(t) {
+		switch (t?.kind) {
+			case "interface":
+				if (
+					!t.name &&
+					t.methods.size === 0 &&
+					!t.unionConstraint &&
+					!t._typeSetEmbeds
+				)
+					return "any";
+				return typeStr(t);
+			case "slice":
+				return `[]${this._sigTypeStr(t.elem)}`;
+			case "array":
+				return `[${t.size ?? "..."}]${this._sigTypeStr(t.elem)}`;
+			case "pointer":
+				return `*${this._sigTypeStr(t.base)}`;
+			case "map":
+				return `map[${this._sigTypeStr(t.key)}]${this._sigTypeStr(t.value)}`;
+			case "tuple":
+				return `(${t.types.map((x) => this._sigTypeStr(x)).join(", ")})`;
+			case "func": {
+				const ret =
+					t.returns.length > 1
+						? `(${t.returns.map((x) => this._sigTypeStr(x)).join(", ")})`
+						: t.returns[0]
+							? this._sigTypeStr(t.returns[0])
+							: "void";
+				return `func(${t.params.map((x) => this._sigTypeStr(x)).join(", ")}) ${ret}`;
+			}
+			default:
+				return typeStr(t);
+		}
+	},
+
 	_sigParamsMatch(reqList, actList) {
 		if (reqList.length !== actList.length) return false;
 		for (let i = 0; i < reqList.length; i++) {
-			if (typeStr(reqList[i]) !== typeStr(actList[i])) return false;
+			if (this._sigTypeStr(reqList[i]) !== this._sigTypeStr(actList[i]))
+				return false;
 		}
 		return true;
 	},

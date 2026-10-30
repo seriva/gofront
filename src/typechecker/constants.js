@@ -39,6 +39,8 @@ const CONST_KINDS = new Set([
 	"SelectorExpr",
 ]);
 
+const NEGATIVE_SHIFT_ERROR = "invalid shift count: negative shift count";
+
 /** @type {ThisType<import('./index.js').TypeChecker>} */
 export const constantCheckMethods = {
 	// The value of a constant expression, or null when `expr` is not one (or
@@ -87,6 +89,8 @@ export const constantCheckMethods = {
 		if (!raw || expr._constReported) return;
 		if (raw.error) {
 			expr._constReported = true;
+			// checkShiftCount already reports a negative count at its operand.
+			if (raw.error === NEGATIVE_SHIFT_ERROR) return;
 			this.err(raw.error, expr);
 		} else if (raw.overflow) {
 			expr._constReported = true;

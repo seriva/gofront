@@ -938,6 +938,270 @@ true [1 2]
 	);
 });
 
+// Runs `body` (which returns a string) on the js target, as a `both` package
+// and on WebAssembly, and returns the result when all three agree.
+function allTargets(body, decls = "") {
+	const src = `package main
+import "fmt"
+${decls}
+func Main() string {
+${body}
+}`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, jsRes);
+	const both = compile(
+		`//gofront:target both\n${src}\nfunc main() { fmt.Print(Main()) }`,
+	);
+	assertEqual(both.errors.length, 0, both.errors.join("\n"));
+	assertEqual(runJs(both.js), jsRes);
+	return jsRes;
+}
+
+section("fmt parity: composites in any and embedded structs (all targets)");
+
+test("a map field of a struct held in an any prints as a map", () => {
+	assertEqual(
+		allTargets(
+			`var a any = A{M: map[string]int{"k": 1}}
+return fmt.Sprint(a) + "|" + fmt.Sprintf("%v|%+v", a, a) + "|" + fmt.Sprint([]any{a})`,
+			`type A struct{ M map[string]int }`,
+		),
+		"{map[k:1]}|{map[k:1]}|{M:map[k:1]}|[{map[k:1]}]",
+	);
+});
+
+test("map fields print as maps in structs, pointers, nested maps, slices and anonymous structs", () => {
+	assertEqual(
+		allTargets(
+			`a := A{M: map[string]int{"k": 1}, MM: map[string]map[string]int{"a": {"b": 1}}, SM: []map[string]int{{"x": 1}}, m: map[int]string{1: "z"}}
+n := N{Q: Named{"a": 1}}
+n.E.M = map[string]bool{"t": true}
+var x any = a
+return fmt.Sprint(x) + "|" + fmt.Sprintf("%+v|%v|%v", a, &A{M: map[string]int{"k": 1}, MM: map[string]map[string]int{}, SM: []map[string]int{}, m: map[int]string{}}, n) + "|" + fmt.Sprint(map[string]map[string]int{"a": {"b": 1}})`,
+			`type A struct{ M map[string]int; MM map[string]map[string]int; SM []map[string]int; m map[int]string }
+type Named map[string]int
+type N struct{ Q Named; E struct{ M map[string]bool } }`,
+		),
+		"{map[k:1] map[a:map[b:1]] [map[x:1]] map[1:z]}|{M:map[k:1] MM:map[a:map[b:1]] SM:[map[x:1]] m:map[1:z]}|&{map[k:1] map[] [] map[]}|{map[a:1] {map[t:true]}}|map[a:map[b:1]]",
+	);
+});
+
+test("promoted fields of an embedded struct print once", () => {
+	assertEqual(
+		allTargets(
+			`o := Out{In{3}, 1}
+var b any = o
+d := Deep{o, 2}
+return fmt.Sprint(o) + "|" + fmt.Sprintf("%+v|%#v|%v|%v", o, o, b, []any{b}) + "|" + fmt.Sprintf("%v|%+v|%v", d, d, &Out{In{3}, 1})`,
+			`type In struct{ X int }
+type Out struct{ In; Y int }
+type Out2 struct{ *In; Y int }
+type Deep struct{ Out; Z int }`,
+		),
+		"{{3} 1}|{In:{X:3} Y:1}|main.Out{In:main.In{X:3}, Y:1}|{{3} 1}|[{{3} 1}]|{{{3} 1} 2}|{Out:{In:{X:3} Y:1} Z:2}|&{{3} 1}",
+	);
+});
+
+test("an embedded struct with a map field prints like Go", () => {
+	assertEqual(
+		allTargets(
+			`o := Out{In{3, map[string]int{"m": 2}}, 1}
+var oi any = o
+return fmt.Sprint(o, oi, &Out{In{3, map[string]int{"m": 2}}, 1}) + "|" + fmt.Sprintf("%+v|%#v|%v", o, o, []Out{o})`,
+			`type In struct{ X int; M map[string]int }
+type Out struct{ In; Y int }`,
+		),
+		'{{3 map[m:2]} 1} {{3 map[m:2]} 1} &{{3 map[m:2]} 1}|{In:{X:3 M:map[m:2]} Y:1}|main.Out{In:main.In{X:3, M:map[string]int{"m":2}}, Y:1}|[{{3 map[m:2]} 1}]',
+	);
+});
+
+test("%x, %c, %.3v, %U and %q of a nil slice follow Go", () => {
+	assertEqual(
+		allTargets(
+			`var s []string
+return fmt.Sprintf("%x|%c|%.3v|%.2v|%U|%q", 3.5, 3.5, 3.14159, "abc", int32(-1), s)`,
+		),
+		"0x1.cp+01|%!c(float64=3.5)|3.14|ab|U+FFFFFFFFFFFFFFFF|[]",
+	);
+});
+
+test("%x of floats prints hexadecimal floats", () => {
+	assertEqual(
+		allTargets(
+			`return fmt.Sprintf("%x|%X|%.2x|%.0x|%x|%x|%x|%x|%x", 1.0, 255.5, 3.14159, 2.5, -0.5, 0.0, 1e300, float32(0.1), []float64{1, 0.5})`,
+		),
+		"0x1p+00|0X1.FFP+07|0x1.92p+01|0x1p+01|-0x1p-01|0x0p+00|0x1.7e43c8800759cp+996|0x1.99999ap-04|[0x1p+00 0x1p-01]",
+	);
+});
+
+test("%b of floats prints mantissa and exponent", () => {
+	assertEqual(
+		allTargets(`return fmt.Sprintf("%b|%b", float32(3.5), 0.1)`),
+		"14680064p-22|7205759403792794p-56",
+	);
+});
+
+test("integer verbs reject floats and %c, %q, %U reject them as bad verbs", () => {
+	assertEqual(
+		allTargets(
+			`return fmt.Sprintf("%c|%c|%q|%U|%d|%d|%o", 65.0, 65, 65.0, 65.0, 3.0, float32(2), 8.5)`,
+		),
+		"%!c(float64=65)|A|%!q(float64=65)|%!U(float64=65)|%!d(float64=3)|%!d(float32=2)|%!o(float64=8.5)",
+	);
+});
+
+test("%c, %q and %U on integers, with a negative value as 64-bit", () => {
+	assertEqual(
+		allTargets(
+			`return fmt.Sprintf("%c|%q|%U|%U|%#U|%08.3U", 65, 'x', 0x1F600, int8(-1), 'x', 65)`,
+		),
+		"A|'x'|U+1F600|U+FFFFFFFFFFFFFFFF|U+0078 'x'|  U+0041",
+	);
+});
+
+test("a precision on %v applies to numbers and strings", () => {
+	assertEqual(
+		allTargets(
+			`return fmt.Sprintf("%.3v|%.2v|%.2v|%5.1v|%.0v|%.3v|%.2v", 3.14159, "héllo", true, 2.55, 7, 5, []string{"abc", "def"})`,
+		),
+		"3.14|h\u00e9|true|    3|7|005|[ab de]",
+	);
+});
+
+test("a precision on %v reaches Stringer, error, map, nil and complex operands", () => {
+	assertEqual(
+		allTargets(
+			`return fmt.Sprintf("%.2v|%.3v|%.2v|%.3v|%.3v", Color(1), E{}, map[string]float64{"a": 1.2345}, nil, 2+3i)`,
+			`type Color int
+func (c Color) String() string { return "color" }
+type E struct{}
+func (E) Error() string { return "errorstring" }`,
+		),
+		"co|err|map[a:1.2]|<nil>|(2+3i)",
+	);
+});
+
+test("%s, %q and %x on nil and empty slices read the element type", () => {
+	assertEqual(
+		allTargets(
+			`var bs []byte
+var ss []string
+var is []int
+return fmt.Sprintf("%q|%q|%s|%s|%x|%x|%s", bs, ss, bs, ss, bs, is, is) + fmt.Sprintf("|%s|%x|%q|%v|%q|%x|%s", []byte("hi"), []byte("hi"), []byte("hi"), []byte("hi"), []string{"a"}, []string{"ab"}, [2]string{"a", "b"})`,
+		),
+		'""|[]||[]||[]|[]|hi|6869|"hi"|[104 105]|["a"]|[6162]|[a b]',
+	);
+});
+
+test("float32 and float64 print the shortest form that round-trips", () => {
+	assertEqual(
+		allTargets(
+			`var f32 float32 = 0.1
+return fmt.Sprint(float32(0.1), " ", float32(1)/3, " ", []float32{0.1}, " ", float64(9007199254740992), " ", f32) + fmt.Sprintf("|%v|%g|%v", float32(0.1), float32(16777216), float32(1e21))`,
+		),
+		"0.1 0.33333334 [0.1] 9.007199254740992e+15 0.1|0.1|1.6777216e+07|1e+21",
+	);
+});
+
+test("floats use Go's exponent forms in Print and in containers", () => {
+	assertEqual(
+		allTargets(
+			`return fmt.Sprint(1e20, " ", 1e21, " ", 123456789.0, " ", float32(123456789), " ", float64(1e6), " ", 100000.0, " ", 1e-5) + fmt.Sprintf("|%v|%v", float64(1e6), map[string]float64{"a": 1e6})`,
+		),
+		"1e+20 1e+21 1.23456789e+08 1.2345679e+08 1e+06 100000 1e-05|1e+06|map[a:1e+06]",
+	);
+});
+
+test("float32 and float64 fields, elements and values print shortest in containers", () => {
+	assertEqual(
+		allTargets(
+			`return fmt.Sprint(map[string]float32{"a": 0.1}, struct{ F float32 }{0.1}, F{0.1, 1e6, 7}, &F{0.2, 0.5, 1}, [2]float32{0.1, 0.25}, []F{{0.1, 2, 3}})`,
+			`type F struct{ A float32; B float64; C int }`,
+		),
+		"map[a:0.1] {0.1} {0.1 1e+06 7} &{0.2 0.5 1} [0.1 0.25] [{0.1 2 3}]",
+	);
+});
+
+section("fmt: multi-value calls as operands (all targets)");
+
+// Runs Main on the JS and WASM backends and as a `both` package; returns the
+// printed text.
+function printAllTargets(body, decls = "", imports = '"fmt"') {
+	const src = `package main
+import (${imports})
+${decls}
+func Main() {
+${body}
+}`;
+	const { output } = compileHybrid(src).run("Main");
+	const both = compile(`//gofront:target both\n${src}\nfunc main() { Main() }`);
+	assertEqual(both.errors.length, 0, both.errors.join("\n"));
+	assertEqual(runJs(both.js).trimEnd(), output);
+	return output;
+}
+
+test("Println spreads the results of a multi-value call", () => {
+	assertEqual(
+		printAllTargets(
+			`fmt.Println(strings.Cut("a=b", "="))`,
+			"",
+			'"fmt"; "strings"',
+		),
+		"a b true",
+	);
+	assertEqual(
+		printAllTargets(
+			`fmt.Println(strconv.ParseFloat("1.5", 64))`,
+			"",
+			'"fmt"; "strconv"',
+		),
+		"1.5 <nil>",
+	);
+	assertEqual(
+		printAllTargets(`fmt.Println(strconv.Atoi("zz"))`, "", '"fmt"; "strconv"'),
+		'0 strconv.Atoi: parsing "zz": invalid syntax',
+	);
+});
+
+test("nil slices and maps in a multi-value call print as empty", () => {
+	const decls = `
+type P struct{ A int }
+func f() ([]*P, []int, map[string]int) { return nil, nil, nil }
+func three() (uint64, error, []int) { var u uint64 = 1 << 63; return u, nil, nil }`;
+	assertEqual(
+		printAllTargets(
+			`fmt.Println(f())
+fmt.Println(three())
+fmt.Println(fmt.Sprint(three()))
+fmt.Print(fmt.Sprintln(three()))`,
+			decls,
+		),
+		"[] [] map[]\n9223372036854775808 <nil> []\n9223372036854775808 <nil> []\n9223372036854775808 <nil> []",
+	);
+});
+
+test("Sprint and Sprintln take every result of a multi-value call", () => {
+	assertEqual(
+		printAllTargets(
+			`fmt.Println(fmt.Sprint(two()))
+	fmt.Print(fmt.Sprintln(two()))`,
+			'func two() (int, string) { return 1, "x" }',
+		),
+		"1x\n1 x",
+	);
+});
+
+test("multi-value operands keep pointers, values, floats and unsigned integers", () => {
+	assertEqual(
+		printAllTargets(
+			`fmt.Println(g())`,
+			`type T struct{ A int }
+func g() (*T, T, float32, uint32, any) { return &T{2}, T{3}, 0.1, 4000000000, uint64(1 << 63) }`,
+		),
+		"&{2} {3} 0.1 4000000000 9223372036854775808",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

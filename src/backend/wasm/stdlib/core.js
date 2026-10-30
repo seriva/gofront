@@ -3,7 +3,12 @@
 // math/bits, maps, slices, strings, strconv, fmt, errors, sort, unicode/utf8,
 // testing) plus the runtime helper bodies they rely on.
 
-import { fmtTypeDesc, fmtWantsTypes } from "../../shared/fmt-types.js";
+import {
+	fmtDescHasFloat,
+	fmtDescIsSeq,
+	fmtTypeDesc,
+	fmtWantsTypes,
+} from "../../shared/fmt-types.js";
 import {
 	ERROR_STRUCT,
 	getMapKeyValTypes,
@@ -11,9 +16,11 @@ import {
 	goTypeKey,
 	isAnyType,
 	isArrayType,
+	isBoolGoType,
 	isComplex,
 	isComplex64,
 	isErrorType,
+	isFuncType,
 	isMapType,
 	isPointerToStruct,
 	isSigned,
@@ -36,6 +43,14 @@ function _isFmtMethodSig(sig, isPtr) {
 	if (sig._ptrRecv && !isPtr) return false;
 	const ret = sig.returns ?? [];
 	return ret.length === 1 && ret[0]?.name === "string";
+}
+
+function _isUint32(goType) {
+	let t = goType;
+	while (t && (t.kind === "named" || t.kind === "TypeName") && t.underlying) {
+		t = t.underlying;
+	}
+	return t?.name === "uint32";
 }
 
 function _isSimplePrimitive(t) {
@@ -541,6 +556,7 @@ export class StdlibCoreEmitter {
 			return true;
 		}
 		return (
+			isFuncType(goType, this.mod.checker) ||
 			isAnyType(goType, this.mod.checker) ||
 			this._isCompositeGoType(goType) ||
 			this._fmtMethodOf(goType) !== null
@@ -569,6 +585,25 @@ export class StdlibCoreEmitter {
 		if (isAnyType(goType, this.mod.checker)) {
 			this.emitExpr(arg, "anyref");
 			this._emitAnyToExternref();
+			return;
+		}
+		if (isFuncType(goType, this.mod.checker)) {
+			// A func value has no address in WebAssembly: a nil one prints
+			// <nil>, any other prints a fixed address-style text.
+			this.emitExpr(arg, toWasmType(goType, this.mod.checker, this.mod));
+			this.pushInstruction("ref.is_null");
+			this.pushInstruction({ op: "if", blockType: "externref" });
+			this.pushInstruction({ op: "ref.null", heapType: "extern" });
+			this.pushInstruction("else");
+			this.pushInstruction({
+				op: "i32.const",
+				value: this.mod.internString("0x1"),
+			});
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getStringImportIndex(),
+			});
+			this.pushInstruction("end");
 			return;
 		}
 		this.emitExpr(arg, toWasmType(goType, this.mod.checker, this.mod));
@@ -627,7 +662,7 @@ export class StdlibCoreEmitter {
 			this.releaseTemp(valTmp, valW);
 			return true;
 		}
-		if (goType?.name === "bool" || goType === "bool") {
+		if (isBoolGoType(goType) || goType === "bool") {
 			this.pushInstruction({ op: "local.get", index: valTmp });
 			this.pushInstruction({
 				op: "call",
@@ -642,6 +677,32 @@ export class StdlibCoreEmitter {
 				op: "call",
 				funcIndex: this.mod.resolveFuncIndex("__error_str"),
 			});
+			this.releaseTemp(valTmp, valW);
+			return true;
+		}
+		if ((valW === "i32" || valW === "i64") && !isSigned(goType)) {
+			// Unsigned operands are widened (uint32) or reinterpreted by the
+			// host (uint64), so the top bit is not read as a sign.
+			this.pushInstruction({ op: "local.get", index: valTmp });
+			if (valW === "i32") {
+				if (_isUint32(goType)) {
+					this.pushInstruction("i64.extend_i32_u");
+					this.pushInstruction({
+						op: "call",
+						funcIndex: this.mod.getFmtBoxI64Index(),
+					});
+				} else {
+					this.pushInstruction({
+						op: "call",
+						funcIndex: this.mod.getFmtBoxI32Index(),
+					});
+				}
+			} else {
+				this.pushInstruction({
+					op: "call",
+					funcIndex: this.mod.getFmtBoxU64Index(),
+				});
+			}
 			this.releaseTemp(valTmp, valW);
 			return true;
 		}
@@ -1054,9 +1115,13 @@ export class StdlibCoreEmitter {
 		this.pushInstruction({ op: "ref.null", heapType: "extern" });
 		this.pushInstruction({ op: "local.set", index: resTmp });
 		this.pushInstruction("else");
+		// Kind 2 is a pointer to a scalar: the host keeps one box per target,
+		// so the same pointer formatted twice (%p) gets the same id.
+		this.pushInstruction({ op: "local.get", index: valTmp });
+		this.pushInstruction({ op: "i32.const", value: 2 });
 		this.pushInstruction({
 			op: "call",
-			funcIndex: this.mod.getFmtNewBoxIndex(),
+			funcIndex: this.mod.getFmtNewStructIndex(),
 		});
 		this.pushInstruction({ op: "local.set", index: resTmp });
 		this.pushInstruction("end");
@@ -1462,7 +1527,7 @@ export class StdlibCoreEmitter {
 		for (const arg of args) {
 			const goType = arg._type ?? this._resolveExprGoType(arg);
 			const isBool =
-				goType?.name === "bool" ||
+				isBoolGoType(goType) ||
 				(arg.kind === "BasicLit" && arg.litKind === "BOOL");
 			const isErr =
 				this.mod.hasErrorType &&
@@ -1527,9 +1592,37 @@ export class StdlibCoreEmitter {
 			if (markErr) funcIndex = this.mod.getTestingArgErrImportIndex();
 			if (spread) funcIndex = this.mod.getTestingArgSpreadImportIndex();
 			this.pushInstruction({ op: "call", funcIndex });
-			if (typed && !spread) this._emitFmtArgType(args[i]);
+			if (!spread && (typed || this._fmtOperandHasFloat(args[i])))
+				this._emitFmtArgType(args[i]);
 		}
 		return temps;
+	}
+
+	// Operands the per-argument Println imports cannot print: spreads, a bare
+	// nil, floats (static type), and unsigned 32/64-bit integers, whose
+	// signedness only the argument buffer preserves.
+	_fmtOperandNeedsBuffer(arg) {
+		if (arg._spread || this._fmtOperandHasFloat(arg)) return true;
+		const goType = arg._type ?? this._resolveExprGoType(arg);
+		if (
+			(arg.kind === "Ident" && arg.name === "nil") ||
+			goType?.name === "nil" ||
+			goType?.kind === "nil"
+		) {
+			return true;
+		}
+		if (isSigned(goType)) return false;
+		const valW = toWasmType(goType, this.mod.checker, this.mod);
+		return valW === "i64" || (valW === "i32" && _isUint32(goType));
+	}
+
+	// Whether the operand's static type mentions a float: those travel with
+	// their type so the host prints float32 and Go's %v exponent forms.
+	_fmtOperandHasFloat(arg) {
+		const goType = arg._type ?? this._resolveExprGoType(arg);
+		return fmtDescHasFloat(
+			fmtTypeDesc(goType, (t) => this.mod.checker?.resolveType?.(t) ?? t),
+		);
 	}
 
 	// Tags the operand just pushed with its static type (see _emitArgBuffer).
@@ -1556,7 +1649,15 @@ export class StdlibCoreEmitter {
 	_fmtNeedsTypes(format, operands) {
 		if (format?.kind !== "BasicLit") return false;
 		const spread = operands.some((a) => a._spread);
-		return fmtWantsTypes(format.value, spread ? -1 : operands.length);
+		const seqArgs = operands.some((a) =>
+			fmtDescIsSeq(
+				fmtTypeDesc(
+					a._type ?? this._resolveExprGoType(a),
+					(t) => this.mod.checker?.resolveType?.(t) ?? t,
+				),
+			),
+		);
+		return fmtWantsTypes(format.value, spread ? -1 : operands.length, seqArgs);
 	}
 
 	_releaseArgBuffer(temps) {
@@ -8671,7 +8772,26 @@ export class StdlibCoreEmitter {
 		}
 	}
 
+	// `fmt.Println(f())` with a multi-value `f`: every result becomes its own
+	// operand, held in a hidden local so the usual operand paths apply.
+	_expandTupleFmtArgs(args) {
+		const tuple = args.length === 1 ? args[0]._type : null;
+		if (tuple?.kind !== "tuple") return args;
+		const types = tuple.types;
+		this._fmtTupleSeq = (this._fmtTupleSeq ?? 0) + 1;
+		const names = types.map((_, i) => `__fmt_tuple_${this._fmtTupleSeq}_${i}`);
+		const idxs = types.map((t, i) =>
+			this.allocLocal(names[i], this.toWasmType(t), t, true),
+		);
+		this.emitExpr(args[0]);
+		for (let i = types.length - 1; i >= 0; i--) {
+			this.pushInstruction({ op: "local.set", index: idxs[i] });
+		}
+		return types.map((t, i) => ({ kind: "Ident", name: names[i], _type: t }));
+	}
+
 	emitFmtCall(name, args) {
+		args = this._expandTupleFmtArgs(args);
 		if (name === "Print" || name === "Sprint" || name === "Sprintln") {
 			// Operands travel through the argument buffer; the host joins them
 			// with Go's spacing rule (a space only between two non-strings).
@@ -8718,7 +8838,9 @@ export class StdlibCoreEmitter {
 				this.pushInstruction({ op: "call", funcIndex: logIdx });
 				return;
 			}
-			if (args.some((a) => a._spread)) {
+			// Float operands need their static type (float32, Go's exponent
+			// forms), which only the argument buffer carries.
+			if (args.some((a) => this._fmtOperandNeedsBuffer(a))) {
 				const temps = this._emitArgBuffer(args, true);
 				this.pushInstruction({ op: "i32.const", value: 1 });
 				this._callStdlib("fmt_print");
@@ -8730,7 +8852,7 @@ export class StdlibCoreEmitter {
 				const isLast = i === args.length - 1 && isPrintln;
 				const goType = arg._type ?? this._resolveExprGoType(arg);
 				const isBool =
-					goType?.name === "bool" ||
+					isBoolGoType(goType) ||
 					(arg.kind === "BasicLit" && arg.litKind === "BOOL");
 				if (isErrorType(goType) && this.mod.hasErrorType) {
 					this.emitExpr(arg, "anyref");
@@ -9651,8 +9773,29 @@ export class StdlibCoreEmitter {
 			this._emitAnyFmtContainers(done);
 			this._fmtNoScalarMethods = false;
 		}
+		this._emitAnyFmtNilMaps();
 		this.pushInstruction({ op: "ref.null", heapType: "extern" });
 		this.pushInstruction("return");
+	}
+
+	// A nil map in an interface prints as an empty map; nil pointers and funcs
+	// fall through to `<nil>`.
+	_emitAnyFmtNilMaps() {
+		for (const nb of [...this.mod.nilBoxTypes.values()]) {
+			if (!isMapType(nb.goType, this.mod.checker)) continue;
+			const { keyType, valType } = getMapKeyValTypes(
+				nb.goType,
+				this.mod.checker,
+			);
+			const mapInfo = this.mod.getMapType(keyType, valType);
+			this.pushInstruction({ op: "local.get", index: 0 });
+			this.pushInstruction({ op: "ref.test", typeIndex: nb.typeIndex });
+			this.pushInstruction({ op: "if", blockType: "void" });
+			this.pushInstruction({ op: "ref.null", heapType: mapInfo.typeIndex });
+			this.emitToExternref(nb.goType);
+			this.pushInstruction("return");
+			this.pushInstruction("end");
+		}
 	}
 
 	// One arm of the `__any_fmt` chain: if `a` is a `typeIndex`, format it as

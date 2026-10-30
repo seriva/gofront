@@ -23,6 +23,73 @@ import {
 /** @typedef {import('./index.js').TypeChecker} TypeChecker */
 
 // Dispatch table for substituteType — keyed by type.kind.
+// Nesting depth of in-progress instances of one generic type before the
+// instantiation is reported as a cycle.
+const MAX_INSTANTIATION_DEPTH = 32;
+
+// Two imported packages may both declare `Pt`, so the cache key of an
+// instance tells declarations apart by identity instead of by display name.
+const declIds = new WeakMap();
+let nextDeclId = 0;
+function declId(t) {
+	if (!declIds.has(t)) declIds.set(t, ++nextDeclId);
+	return declIds.get(t);
+}
+
+// Go infers T from the "largest" untyped constant kind (int < rune < float <
+// complex), and a typed argument beats any untyped one.
+const UNTYPED_RANK = { int: 0, int32: 1, float64: 2, complex128: 3 };
+function untypedWins(prev, next) {
+	if (prev.kind !== "untyped") return false;
+	if (next.kind !== "untyped") return true;
+	return (UNTYPED_RANK[next.base] ?? 0) > (UNTYPED_RANK[prev.base] ?? 0);
+}
+
+// Node count of a type, so a request that keeps growing can be told from one
+// that merely repeats.
+function typeSize(t) {
+	switch (t?.kind) {
+		case "named":
+			return 1 + (t.typeArgs ?? []).reduce((n, a) => n + typeSize(a), 0);
+		case "pointer":
+			return 1 + typeSize(t.base);
+		case "slice":
+		case "array":
+			return 1 + typeSize(t.elem);
+		case "map":
+			return 1 + typeSize(t.key) + typeSize(t.value);
+		case "func":
+			return (
+				1 +
+				[...(t.params ?? []), ...(t.returns ?? [])].reduce(
+					(n, a) => n + typeSize(a),
+					0,
+				)
+			);
+		default:
+			return 1;
+	}
+}
+
+function instanceKey(t) {
+	switch (t?.kind) {
+		case "named":
+			return t.typeArgs?.length
+				? `${typeStr(t)}`
+				: `${typeStr(t)}#${declId(t)}`;
+		case "pointer":
+			return `*${instanceKey(t.base)}`;
+		case "slice":
+			return `[]${instanceKey(t.elem)}`;
+		case "array":
+			return `[${t.size ?? "..."}]${instanceKey(t.elem)}`;
+		case "map":
+			return `map[${instanceKey(t.key)}]${instanceKey(t.value)}`;
+		default:
+			return typeStr(t);
+	}
+}
+
 const SUBSTITUTE_DISPATCH = {
 	basic: (_s, type) => type,
 	untyped: (_s, type) => type,
@@ -322,6 +389,7 @@ export const resolveMethods = {
 			if (f.embedded) {
 				const inner = ft.kind === "pointer" ? ft.base : ft;
 				const embedName = (
+					f.embeddedName ??
 					f.astType?.name ??
 					f.type?.name ??
 					f.type?.base?.name ??
@@ -415,12 +483,36 @@ export const resolveMethods = {
 	// *List[T]`, `Children []Tree[T]`, or a cycle through another generic type)
 	// reaches the same object instead of recursing forever.
 	instantiateGenericWithArgs(generic, typeArgs) {
-		const key = typeArgs.map(typeStr).join(",");
+		const key = typeArgs.map(instanceKey).join(",");
 		generic._instances ??= new Map();
 		const cached = generic._instances.get(key);
 		if (cached) {
 			this._syncInstanceMethods(generic, cached);
 			return cached;
+		}
+		// `type T[X any] struct{ n *T[[]X] }` asks for T[[]X], then T[[][]X], and
+		// so on: an instance still being built that keeps asking for a larger
+		// one never settles.
+		generic._building ??= [];
+		generic._buildSizes ??= [];
+		const building = generic._building;
+		const size = typeArgs.reduce((n, a) => n + typeSize(a), 0);
+		// A request for a larger instance while one is being built never
+		// settles (`T[X]` containing `T[[]X]`), and doubling forms such as
+		// `T[Pair[X, X]]` blow up long before a depth limit is reached.
+		const top = generic._buildSizes[generic._buildSizes.length - 1];
+		if (
+			building.length >= MAX_INSTANTIATION_DEPTH ||
+			(top !== undefined && size > top)
+		) {
+			if (!generic._cycleReported) {
+				generic._cycleReported = true;
+				this.err(
+					`instantiation cycle: ${generic.declNode.name} instantiates itself with ever larger type arguments`,
+					generic.declNode,
+				);
+			}
+			return ANY;
 		}
 		const map = new Map();
 		for (let i = 0; i < generic.typeParams.length; i++)
@@ -437,8 +529,16 @@ export const resolveMethods = {
 		// never as value symbols), then substitute the concrete arguments.
 		const typeScope = new Scope(this.globals);
 		for (const tp of generic.typeParams) typeScope.define(tp.name, tp);
-		const underlying = this.resolveTypeNode(generic.declNode.type, typeScope);
-		const instantiated = this.substituteType(underlying, map);
+		building.push(key);
+		generic._buildSizes.push(size);
+		let instantiated;
+		try {
+			const underlying = this.resolveTypeNode(generic.declNode.type, typeScope);
+			instantiated = this.substituteType(underlying, map);
+		} finally {
+			building.pop();
+			generic._buildSizes.pop();
+		}
 		if (instantiated.kind === "struct") {
 			instantiated.name = generic.declNode.name;
 			instantiated.typeArgs = typeArgs;
@@ -541,7 +641,8 @@ export const resolveMethods = {
 	_inferFromPair(paramType, argType, map) {
 		if (!paramType || !argType) return;
 		if (paramType.kind === "typeParam") {
-			if (!map.has(paramType.name)) map.set(paramType.name, argType);
+			const prev = map.get(paramType.name);
+			if (!prev || untypedWins(prev, argType)) map.set(paramType.name, argType);
 			return;
 		}
 		if (paramType.kind === "named" && paramType.typeArgs) {
@@ -607,7 +708,11 @@ export const resolveMethods = {
 			(!t.underlying || !t.methods)
 		) {
 			const found = this.types.get(t.name);
-			if (found) return found;
+			// Two imported packages can both declare `Pt`; the bare name only
+			// reaches the last one registered, so a declaration that came from
+			// an import's own type table stays itself.
+			if (found && !(t.underlying && this._ambiguousImported?.has(t)))
+				return found;
 		}
 		if (t.kind === "named" && t.typeArgs?.length)
 			return this._withGenericMethods(t);

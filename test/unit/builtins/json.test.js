@@ -5,6 +5,7 @@ import {
 	assert,
 	assertContains,
 	assertEqual,
+	assertJsProgramOutput,
 	assertProgramOutput,
 	compile,
 	runJs,
@@ -538,7 +539,7 @@ func main() {
 	assertEqual(runJs(js), '{"num":9223372036854775807}');
 });
 
-test("Probe 9: Boxed json.RawMessage inside any marshaled verbatim", () => {
+test("Probe 9: Boxed json.RawMessage inside any is compacted like Go", () => {
 	const { js, errors } = compile(`package main
 import "encoding/json"
 func main() {
@@ -547,7 +548,7 @@ func main() {
 	console.log(string(b))
 }`);
 	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), '{"key": 123}');
+	assertEqual(runJs(js), '{"key":123}');
 });
 
 test("Probe 10: Defined byte slices type MyBytes []byte unmarshal from base64", () => {
@@ -1924,6 +1925,533 @@ func main() {
 2 y <nil> 31
 0 end <nil> 44
 true
+`,
+	);
+});
+
+// ── JS parity: Marshal and Unmarshal forms (expected output is real Go's) ──
+
+section("encoding/json — Marshal parity with Go");
+
+test("real Go output: json/marshal parity on JS and WASM", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"math"
+)
+
+type P struct {
+	M map[string]int
+}
+
+type Q struct {
+	M map[string]int \`json:",omitempty"\`
+}
+
+type Addr struct {
+	Street string \`json:"street"\`
+	Zip    int    \`json:"zip,omitempty"\`
+}
+
+type In struct{ Z int }
+
+type Emb struct {
+	In
+	Y int \`json:"y,omitempty"\`
+}
+
+type W struct {
+	A float64
+	B []float32
+	C [2]float32
+	D json.RawMessage
+}
+
+func show(name string, v any) {
+	b, err := json.Marshal(v)
+	fmt.Println(name, string(b), err)
+}
+
+func emit(name string, f func() ([]byte, error)) {
+	b, err := f()
+	fmt.Println(name, string(b), err)
+}
+
+func main() {
+	var nilMap map[string]int
+	show("nil map", nilMap)
+	show("nil map field", P{})
+	show("empty map field", P{M: map[string]int{}})
+	show("omitempty nil map", Q{})
+	show("omitempty empty map", Q{M: map[string]int{}})
+	show("omitempty map", Q{M: map[string]int{"a": 1}})
+	show("struct in any", map[string]any{"p": Addr{"S", 0}})
+	show("struct ptr in any", []any{&Addr{"T", 2}})
+	show("embedded in any", Emb{In{1}, 2})
+	emit("+Inf", func() ([]byte, error) { return json.Marshal(math.Inf(1)) })
+	emit("-Inf", func() ([]byte, error) { return json.Marshal(math.Inf(-1)) })
+	emit("NaN", func() ([]byte, error) { return json.Marshal(math.NaN()) })
+	emit("float32 +Inf", func() ([]byte, error) { return json.Marshal(float32(math.Inf(1))) })
+	emit("raw", func() ([]byte, error) { return json.Marshal(json.RawMessage("[1, 2]")) })
+	show("raw in struct", W{D: json.RawMessage(\`{ "a" : [1, 2] }\`)})
+	var rawNil json.RawMessage
+	emit("raw nil", func() ([]byte, error) { return json.Marshal(rawNil) })
+	emit("raw invalid", func() ([]byte, error) { return json.Marshal(json.RawMessage(\`{"a":\`)) })
+	show("float arrays", W{B: []float32{0.1, 2}, C: [2]float32{0.1, 0.2}})
+	show("array", [3]int{1, 2, 3})
+}
+`,
+		`nil map null <nil>
+nil map field {"M":null} <nil>
+empty map field {"M":{}} <nil>
+omitempty nil map {} <nil>
+omitempty empty map {} <nil>
+omitempty map {"M":{"a":1}} <nil>
+struct in any {"p":{"street":"S"}} <nil>
+struct ptr in any [{"street":"T","zip":2}] <nil>
+embedded in any {"Z":1,"y":2} <nil>
++Inf  json: unsupported value: +Inf
+-Inf  json: unsupported value: -Inf
+NaN  json: unsupported value: NaN
+float32 +Inf  json: unsupported value: +Inf
+raw [1,2] <nil>
+raw in struct {"A":0,"B":null,"C":[0,0],"D":{"a":[1,2]}} <nil>
+raw nil null <nil>
+raw invalid  json: error calling MarshalJSON for type json.RawMessage: unexpected end of JSON input
+float arrays {"A":0,"B":[0.1,2],"C":[0.1,0.2],"D":null} <nil>
+array [1,2,3] <nil>
+`,
+	);
+});
+
+test("float64 negative zero encodes as -0", () => {
+	const { js, errors } = compile(`package main
+import ("encoding/json"; "math")
+type W struct { A float64; B *float64 }
+func main() {
+	z := math.Copysign(0, -1)
+	b, _ := json.Marshal(W{z, &z})
+	c, _ := json.Marshal([]float64{z, 1})
+	d, _ := json.Marshal(map[string]float64{"a": z})
+	console.log(string(b), string(c), string(d))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), '{"A":-0,"B":-0} [-0,1] {"a":-0}');
+});
+
+test('[]byte("null") is the bytes of the string, not nil', () => {
+	const { js, errors } = compile(`package main
+import ("encoding/json"; "fmt")
+func main() {
+	var x int
+	fmt.Println(json.Valid([]byte("null")), json.Unmarshal([]byte("null"), &x), len([]byte("null")))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "true <nil> 4");
+});
+
+section("encoding/json — Unmarshal parity with Go");
+
+test("real Go output: json/unmarshal parity on JS and WASM", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type Item struct{ A int }
+
+type S struct {
+	Arr  [3]int
+	F    [2]float32
+	Grid [][2]int
+	Nest [][]int
+	M    map[string][]int
+}
+
+func main() {
+	var m map[string]int
+	fmt.Println(json.Unmarshal([]byte(\`{"a":1,"b":2}\`), &m), len(m), m)
+	var ma map[string]any
+	fmt.Println(json.Unmarshal([]byte(\`{"a":1}\`), &ma), len(ma), ma)
+	var arr [3]int
+	fmt.Println(json.Unmarshal([]byte(\`[1,2]\`), &arr), arr)
+	fmt.Println(json.Unmarshal([]byte(\`[7,8,9,10]\`), &arr), arr)
+	fmt.Println(json.Unmarshal([]byte(\`null\`), &arr), arr)
+	fmt.Println(json.Unmarshal([]byte(\`"x"\`), &arr), arr)
+	var ip *Item
+	fmt.Println(json.Unmarshal([]byte(\`{}\`), ip))
+	var sl []int
+	fmt.Println(json.Unmarshal([]byte(\`[1]\`), sl))
+	fmt.Println(json.Unmarshal([]byte(\`{\`), sl))
+	fmt.Println(json.Unmarshal([]byte(\`{}\`), nil))
+	fmt.Println(json.Unmarshal([]byte(\`{}\`), Item{}))
+	var s S
+	err := json.Unmarshal([]byte(\`{"Arr":[1],"F":[1.5,2.5,3],"Grid":[[1,2],[3]],"Nest":[[1],[2,3]],"M":{"a":[1,2]}}\`), &s)
+	fmt.Println(err, s.Arr, s.F, s.Grid, s.Nest, len(s.M["a"]))
+	var nested map[string]map[string]int
+	fmt.Println(json.Unmarshal([]byte(\`{"a":{"b":1},"c":{}}\`), &nested), len(nested), len(nested["c"]), nested["a"]["b"])
+	var null1 any
+	fmt.Println(json.Unmarshal([]byte(\`null\`), &null1), null1 == nil)
+}
+`,
+		`<nil> 2 map[a:1 b:2]
+<nil> 1 map[a:1]
+<nil> [1 2 0]
+<nil> [7 8 9]
+<nil> [7 8 9]
+json: cannot unmarshal string into Go value of type [3]int [7 8 9]
+json: Unmarshal(nil *main.Item)
+json: Unmarshal(non-pointer []int)
+unexpected end of JSON input
+json: Unmarshal(nil)
+json: Unmarshal(non-pointer main.Item)
+<nil> [1 0 0] [1.5 2.5] [[1 2] [3 0]] [[1] [2 3]] 2
+<nil> 2 0 1
+<nil> true
+`,
+	);
+});
+
+test("decoded maps have no marker key in JS", () => {
+	const { js, errors } = compile(
+		`package main
+import ("encoding/json"; "fmt")
+func main() {
+	var m map[string]any
+	fmt.Println(json.Unmarshal([]byte(` +
+			"`" +
+			`{"a":{"b":1}}` +
+			"`" +
+			`), &m), len(m), m)
+	for k := range m { fmt.Println(k) }
+}`,
+	);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "<nil> 1 map[a:map[b:1]]\na");
+});
+
+section("encoding/json — review feedback regressions");
+
+test("Unmarshal into a pointer held in a type-parameter value (js)", async () => {
+	await assertJsProgramOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+type Item struct{ A int }
+type Box[T any] struct{ P T }
+type Any interface{}
+type Cfg struct{ N int }
+
+func Load[P any](b []byte, p P) error { return json.Unmarshal(b, p) }
+func LoadBox[T any](b []byte, bx Box[T]) error { return json.Unmarshal(b, bx.P) }
+func LoadNamed(b []byte, p Any) error { return json.Unmarshal(b, p) }
+func Dec[P any](s string, p P) error { return json.NewDecoder(strings.NewReader(s)).Decode(p) }
+
+func main() {
+	it := &Item{}
+	fmt.Println(Load([]byte(\`{"A":3}\`), it), it.A)
+	bx := Box[*Item]{&Item{}}
+	fmt.Println(LoadBox([]byte(\`{"A":4}\`), bx), bx.P.A)
+	i2 := &Item{}
+	fmt.Println(LoadNamed([]byte(\`{"A":5}\`), i2), i2.A)
+	i3 := &Item{}
+	fmt.Println(Dec(\`{"A":6}\`, i3), i3.A)
+	fmt.Println(json.Unmarshal([]byte(\`[1]\`), []int{1}))
+}
+`,
+		`<nil> 3
+<nil> 4
+<nil> 5
+<nil> 6
+json: Unmarshal(non-pointer []int)
+`,
+	);
+});
+
+test("function-local structs with tags marshal in js, methods, closures and generics", () => {
+	const { js, errors } = compile(`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type Top struct{ Q int \`json:"qq"\` }
+type W[T any] struct{ V T }
+
+func (w W[T]) M() {
+	type InM struct{ Z int \`json:"zm"\` }
+	b, _ := json.Marshal(InM{4})
+	fmt.Println(string(b))
+	b, _ = json.Marshal(any(InM{5}))
+	fmt.Println(string(b))
+}
+
+func gen[T any](x T) {
+	type InG struct{ Z int \`json:"zg"\`; O int \`json:",omitempty"\` }
+	b, _ := json.Marshal(InG{6, 0})
+	fmt.Println(string(b))
+	var a any = InG{7, 1}
+	b, _ = json.Marshal(a)
+	fmt.Println(string(b))
+}
+
+func f() {
+	type Dup struct{ X int }
+	b, _ := json.Marshal(Dup{1})
+	fmt.Println(string(b))
+}
+
+func main() {
+	type Local struct{ Z int \`json:"zz"\` }
+	b, _ := json.Marshal(Local{1})
+	fmt.Println(string(b))
+	var a any = Local{2}
+	b, _ = json.Marshal(a)
+	fmt.Println(string(b))
+	b, _ = json.Marshal([]any{Local{3}, Top{4}})
+	fmt.Println(string(b))
+	func() {
+		type InC struct{ Z int \`json:"zc"\` }
+		var a any = InC{8}
+		b, _ := json.Marshal(a)
+		fmt.Println(string(b))
+	}()
+	W[int]{}.M()
+	gen(1)
+	f()
+	b, _ = json.Marshal(any(Top{9}))
+	fmt.Println(string(b))
+}
+`);
+	assertEqual(errors.length, 0);
+	assertEqual(
+		runJs(js),
+		`{"zz":1}
+{"zz":2}
+[{"zz":3},{"qq":4}]
+{"zc":8}
+{"zm":4}
+{"zm":5}
+{"zg":6}
+{"zg":7,"O":1}
+{"X":1}
+{"qq":9}
+`.trimEnd(),
+	);
+});
+
+test("function-local structs with tags marshal in both and wasm", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type Top struct{ Q int \`json:"qq"\` }
+func f() {
+	type Dup struct{ X int }
+	b, _ := json.Marshal(Dup{1})
+	fmt.Println(string(b))
+}
+
+func main() {
+	type Local struct{ Z int \`json:"zz"\` }
+	b, _ := json.Marshal(Local{1})
+	fmt.Println(string(b))
+	var a any = Local{2}
+	b, _ = json.Marshal(a)
+	fmt.Println(string(b))
+	b, _ = json.Marshal([]any{Local{3}, Top{4}})
+	fmt.Println(string(b))
+	func() {
+		type InC struct{ Z int \`json:"zc"\` }
+		var a any = InC{8}
+		b, _ := json.Marshal(a)
+		fmt.Println(string(b))
+	}()
+	f()
+	b, _ = json.Marshal(any(Top{9}))
+	fmt.Println(string(b))
+}
+`,
+		`{"zz":1}
+{"zz":2}
+[{"zz":3},{"qq":4}]
+{"zc":8}
+{"X":1}
+{"qq":9}
+`,
+	);
+});
+
+test("string literals next to function-local structs are emitted unchanged", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	type Local struct{ Z int }
+	l := Local{1}
+	fmt.Println(l, "/*__gf_json_hook_0__*/")
+}
+`,
+		"{1} /*__gf_json_hook_0__*/\n",
+	);
+	await assertProgramOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+func main() {
+	type Local struct{ Z int \`json:"zz"\` }
+	l := Local{1}
+	fmt.Println(l, "/*__gf_json_hook_0__*/")
+	b, _ := json.Marshal(any(Local{3}))
+	fmt.Println(string(b))
+}
+`,
+		'{1} /*__gf_json_hook_0__*/\n{"zz":3}\n',
+	);
+});
+
+test("function-local structs add no lines to programs that do not marshal", () => {
+	const { js, errors } = compile(`package main
+
+import "fmt"
+
+func main() {
+	type Local struct{ Z int }
+	fmt.Println(Local{1})
+}
+`);
+	assertEqual(errors.length, 0);
+	const lines = js.split("\n");
+	const at = lines.findIndex((l) =>
+		l.includes('Object.defineProperty(Local.prototype, "value"'),
+	);
+	assert(at >= 0, "local struct class emitted");
+	assertEqual(
+		lines[at + 1],
+		'  console.log(__sprintf("%v", __ifv(new Local(1))));',
+		"the statement after the local struct follows directly",
+	);
+	assert(!js.includes("__json_enc"), "no json hook without encoding/json");
+});
+
+test("a json.Encoder in main reaches local structs declared in earlier functions", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+func mk() any {
+	type Early struct{ Z int \`json:"ze"\` }
+	return Early{5}
+}
+
+func main() {
+	var buf bytes.Buffer
+	json.NewEncoder(&buf).Encode(mk())
+	fmt.Println(strings.TrimSpace(buf.String()))
+}
+`,
+		'{"ze":5}\n',
+	);
+});
+
+test("Encoder.SetEscapeHTML(false) keeps RawMessage and Marshaler output unescaped", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+)
+
+type M struct{}
+
+func (M) MarshalJSON() ([]byte, error) { return []byte(\`"<m>&"\`), nil }
+
+func main() {
+	e := json.NewEncoder(os.Stdout)
+	e.SetEscapeHTML(false)
+	e.Encode(json.RawMessage(\`"<a>"\`))
+	e.Encode(M{})
+	e.Encode("<s>")
+	e.Encode(map[string]any{"k": json.RawMessage(\`"<b>"\`), "m": M{}})
+	e2 := json.NewEncoder(os.Stdout)
+	e2.Encode(json.RawMessage(\`"<a>"\`))
+	e2.Encode(M{})
+	b, _ := json.Marshal(json.RawMessage(\`"<a>"\`))
+	fmt.Println(string(b))
+}
+`,
+		`"<a>"
+"<m>&"
+"<s>"
+{"k":"<b>","m":"<m>&"}
+"\\u003ca\\u003e"
+"\\u003cm\\u003e\\u0026"
+"\\u003ca\\u003e"
+`,
+	);
+});
+
+test("negative zero: -0.0 constant is 0, computed -0 is kept in any", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"math"
+)
+
+type S struct{ F float64 }
+
+func main() {
+	z := 0.0
+	z = -z
+	b, _ := json.Marshal(any(z))
+	fmt.Println(string(b))
+	b, _ = json.Marshal(S{-0.0})
+	fmt.Println(string(b))
+	fmt.Println(-0.0, math.Copysign(0, -1), 1/math.Inf(-1))
+	x := -0.0
+	fmt.Println(x, -0, S{-0.0})
+	const c = -0.0
+	fmt.Println(c)
+}
+`,
+		`-0
+{"F":0}
+0 -0 -0
+0 0 {0}
+0
 `,
 	);
 });
