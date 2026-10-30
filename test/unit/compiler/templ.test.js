@@ -311,6 +311,56 @@ templ Layout(children ...gom.Node) {
 	);
 });
 
+const variadicWrapper = `package main
+templ V() {
+	<p>v</p>
+}
+templ W(children ...gom.Node) {
+	<div>{ children... }</div>
+}
+templ X(ns []gom.Node) {
+	@W(ns...)
+}
+templ Y() {
+	@W(V(), V())
+}
+templ Z() {
+	@W()
+}`;
+
+for (const [name, call] of [
+	["templ→templ spread @W(ns...)", "X([]gom.Node{V(), V()})"],
+	["Go→templ spread W(ns...)", "W([]gom.Node{V(), V()}...)"],
+	["plain @W(V(), V())", "Y()"],
+]) {
+	test(`variadic children: ${name}`, () => {
+		const { js } = compilePkg({
+			"main.go": `package main
+func main() {
+	gom.Mount("#app", ${call})
+}`,
+			"w.templ": variadicWrapper,
+		});
+		const { document } = runInDom(js, '<div id="app"></div>');
+		assertEqual(
+			document.querySelector("#app").innerHTML,
+			"<div><p>v</p><p>v</p></div>",
+		);
+	});
+}
+
+test("variadic children: @W() with no args renders an empty wrapper", () => {
+	const { js } = compilePkg({
+		"main.go": `package main
+func main() {
+	gom.Mount("#app", Z())
+}`,
+		"w.templ": variadicWrapper,
+	});
+	const { document } = runInDom(js, '<div id="app"></div>');
+	assertEqual(document.querySelector("#app").innerHTML, "<div></div>");
+});
+
 // ── Multi-file package ────────────────────────────────────────
 
 section("templ — multi-file packages");
@@ -858,8 +908,8 @@ templ Other(a int) {
 	}
 });
 
-test("malformed for header is skipped silently by build and check", () => {
-	const files = {
+test("malformed for header fails build and check with a parse error", () => {
+	const { build, check } = runBoth({
 		"main.go": MAIN_GO,
 		"bad.templ": `package main
 templ Bad(xs []int) {
@@ -867,18 +917,15 @@ templ Bad(xs []int) {
 		<p>hi</p>
 	}
 }`,
-	};
-	const { build, check } = runBoth(files);
-	assertEqual(build.code, 0);
-	assertEqual(check.code, 0);
-	assert(!build.stderr.includes("ERROR"), build.stderr);
-	assertEqual(check.stderr.includes("ERROR"), false);
-	const { js } = compilePkg(files);
-	assertContains(js, "/* templ for: for x := range */");
+	});
+	for (const r of [build, check]) {
+		assertEqual(r.code, 1);
+		assertContains(r.stderr, "Parse error");
+	}
 });
 
-test("malformed expression inside a for body is swallowed with the loop", () => {
-	const files = {
+test("malformed expression inside a for body fails build and check", () => {
+	const { build, check } = runBoth({
 		"main.go": MAIN_GO,
 		"bad.templ": `package main
 templ Bad(xs []int) {
@@ -886,14 +933,37 @@ templ Bad(xs []int) {
 		<p>{ x + }</p>
 	}
 }`,
-	};
-	const { build, check } = runBoth(files);
-	assertEqual(build.code, 0);
-	assertEqual(check.code, 0);
-	assert(!build.stderr.includes("ERROR"), build.stderr);
-	assertEqual(check.stderr.includes("ERROR"), false);
-	const { js } = compilePkg(files);
-	assertContains(js, "for (const x of xs) {");
+	});
+	for (const r of [build, check]) {
+		assertEqual(r.code, 1);
+		assertEqual(r.stderr, `gofront: ERROR\n  ${EOF_PARSE_ERROR}\n`);
+	}
+});
+
+test("valid for loops still build: range forms and a condition loop", () => {
+	const { js } = compilePkg({
+		"main.go": `package main
+func main() {
+	gom.Mount("#app", L([]string{"a", "b"}))
+}`,
+		"l.templ": `package main
+templ L(xs []string) {
+	for i, x := range xs {
+		<p>{ i }{ x }</p>
+	}
+	for _, x := range xs {
+		<i>{ x }</i>
+	}
+	for false {
+		<s>never</s>
+	}
+}`,
+	});
+	const { document } = runInDom(js, '<div id="app"></div>');
+	const ps = [...document.querySelectorAll("#app p")].map((e) => e.textContent);
+	assertEqual(ps.join(","), "0a,1b");
+	assertEqual(document.querySelectorAll("#app i").length, 2);
+	assertEqual(document.querySelectorAll("#app s").length, 0);
 });
 
 test("a type error is reported before a malformed templ expression", () => {
@@ -976,6 +1046,7 @@ test("for headers are parsed into forStmt", () => {
 	assertEqual(loop.forStmt.init.rhs[0].kind, "RangeExpr");
 	const [bad] = parseTempl("for x := range {\n<p>hi</p>\n}");
 	assertEqual(bad.forStmt, null);
+	assertContains(bad.forError.message, "Parse error");
 });
 
 test("a malformed expression is kept on the node, not thrown", () => {
@@ -1012,6 +1083,182 @@ templ V(xs []int, name string) {
 }`,
 	};
 	assertEqual(compilePkg(files).js, compilePkg(files).js);
+});
+
+// ── Reserved-name parameters ──────────────────────────────────
+
+section("templ — reserved-name parameters");
+
+for (const name of ["class", "function", "delete", "let", "this", "typeof"]) {
+	test(`a parameter named ${name} is renamed in the templ body`, () => {
+		const { js } = compilePkg({
+			"main.go": MAIN_GO,
+			"v.templ": `package main
+templ V(${name} string) {
+	<p class={ ${name} }>{ ${name} }</p>
+}`,
+		});
+		assertContains(js, `String(${name}$)`);
+		assert(!js.includes(`String(${name})`), `raw ${name} in body`);
+		new Function(js);
+	});
+}
+
+test("reserved-name parameters render in the DOM", () => {
+	const { js } = compilePkg({
+		"main.go": `package main
+func main() {
+	gom.Mount("#app", V("c", []string{"a", "b"}))
+}`,
+		"v.templ": `package main
+templ V(class string, function []string) {
+	<p class={ class }>{ class }</p>
+	if class != "" {
+		for _, let := range function {
+			<i>{ let }</i>
+		}
+	}
+	switch class {
+	case "c":
+		<b>{ class }</b>
+	}
+}`,
+	});
+	const { document } = runInDom(js, '<div id="app"></div>');
+	assertEqual(document.querySelector("#app p").className, "c");
+	assertEqual(document.querySelector("#app p").textContent, "c");
+	const items = [...document.querySelectorAll("#app i")].map(
+		(e) => e.textContent,
+	);
+	assertEqual(items.join(","), "a,b");
+	assertEqual(document.querySelector("#app b").textContent, "c");
+});
+
+// ── Type checking templ expressions ───────────────────────────
+
+section("templ — type checking");
+
+function checkTempl(templBody, params = "name string, xs []int") {
+	return runBoth({
+		"main.go": MAIN_GO,
+		"v.templ": `package main
+templ V(${params}) {
+	${templBody}
+}`,
+	});
+}
+
+test("an undefined name in a templ expression is a type error", () => {
+	const { build, check } = checkTempl("<p>{ name + undefinedVar }</p>");
+	for (const r of [build, check]) {
+		assertEqual(r.code, 1);
+		assertContains(r.stderr, "Undefined: 'undefinedVar'");
+	}
+});
+
+test("mismatched operand types in a templ expression are a type error", () => {
+	const { build, check } = checkTempl("<p>{ name + 5 }</p>");
+	for (const r of [build, check]) {
+		assertEqual(r.code, 1);
+		assertContains(r.stderr, "Invalid operation: string + untyped int");
+	}
+});
+
+for (const [where, body] of [
+	["an attribute", "<p class={ nope }>x</p>"],
+	["a conditional attribute", "<p hidden?={ nope }>x</p>"],
+	["an if condition", "if nope {\n\t\t<p>x</p>\n\t}"],
+	["a switch expression", "switch nope {\n\tcase 1:\n\t\t<p>x</p>\n\t}"],
+	["a case expression", "switch name {\n\tcase nope:\n\t\t<p>x</p>\n\t}"],
+	["a component call", "@V(nope, xs)"],
+	["templ.Raw", "@templ.Raw(nope)"],
+	["a for header", "for _, x := range nope {\n\t\t<p>{ x }</p>\n\t}"],
+	["a for body", "for _, x := range xs {\n\t\t<p>{ x + nope }</p>\n\t}"],
+]) {
+	test(`an undefined name in ${where} is a type error`, () => {
+		const { build, check } = checkTempl(body);
+		for (const r of [build, check]) {
+			assertEqual(r.code, 1);
+			assertContains(r.stderr, "Undefined: 'nope'");
+		}
+	});
+}
+
+test("a non-bool if condition is a type error", () => {
+	const { build, check } = checkTempl("if name {\n\t\t<p>x</p>\n\t}");
+	for (const r of [build, check]) {
+		assertEqual(r.code, 1);
+		assertContains(r.stderr, "If condition must be bool");
+	}
+});
+
+test("a wrong component argument type is a type error", () => {
+	const { build, check } = checkTempl("@V(5, xs)");
+	for (const r of [build, check]) {
+		assertEqual(r.code, 1);
+		assertContains(r.stderr, "Type error");
+	}
+});
+
+test("loop variables are scoped to the templ for body", () => {
+	const { build, check } = checkTempl(
+		"for _, x := range xs {\n\t\t<p>{ x }</p>\n\t}\n\t<p>{ x }</p>",
+	);
+	for (const r of [build, check]) {
+		assertEqual(r.code, 1);
+		assertContains(r.stderr, "Undefined: 'x'");
+	}
+});
+
+test("an unused templ loop variable is reported as in Go", () => {
+	const { build, check } = checkTempl(
+		"for i, x := range xs {\n\t\t<p>{ x }</p>\n\t}",
+	);
+	for (const r of [build, check]) {
+		assertEqual(r.code, 1);
+		assertContains(r.stderr, "declared and not used");
+	}
+});
+
+test("well-typed templ expressions check clean", () => {
+	const { build, check } = runBoth({
+		"main.go": `package main
+type Item struct{ Name string; N int }
+func label(i Item) string { return i.Name }
+func main() {}`,
+		"v.templ": `package main
+templ Row(it Item) {
+	<li class={ label(it) } data-n={ it.N } hidden?={ it.N == 0 }>{ it.Name }{ it.N * 2 }</li>
+}
+templ V(items []Item, title string, children ...gom.Node) {
+	@templ.Raw("<b>" + title + "</b>")
+	if len(items) == 0 {
+		<p>none</p>
+	} else if title != "" {
+		for i, it := range items {
+			<span>{ i }</span>
+			@Row(it)
+		}
+	}
+	switch len(items) {
+	case 0:
+		<p>zero</p>
+	default:
+		<p>{ len(items) }</p>
+	}
+	{ children... }
+}`,
+	});
+	for (const r of [build, check]) {
+		assertEqual(r.code, 0);
+		assert(!r.stderr.includes("ERROR"), r.stderr);
+	}
+});
+
+test("example/templ checks clean", () => {
+	const r = cli(["check", join(ROOT, "example", "templ")]);
+	assertEqual(r.code, 0);
+	assert(!r.stderr.includes("ERROR"), r.stderr);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

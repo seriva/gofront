@@ -331,7 +331,14 @@ export const statementCheckMethods = {
 		}
 	},
 
-	_checkForStmt(stmt, scope, returnType) {
+	// `checkBody(bodyScope)` checks the loop body; templ `for` loops pass one
+	// that checks their HTML nodes in place of the header's empty block.
+	_checkForStmt(
+		stmt,
+		scope,
+		returnType,
+		checkBody = (s) => this.checkBlock(stmt.body, s, returnType),
+	) {
 		const inner = new Scope(scope);
 		let iterInfo = null;
 		if (stmt.init?.rhs?.[0]?.kind === "RangeExpr") {
@@ -342,7 +349,7 @@ export const statementCheckMethods = {
 		if (stmt.post) this.checkStmt(stmt.post, inner, returnType);
 		this._loopDepth++;
 		const bodyScope = new Scope(inner);
-		this.checkBlock(stmt.body, bodyScope, returnType);
+		checkBody(bodyScope);
 		this._reportUnused(bodyScope, stmt);
 		this._loopDepth--;
 		this._reportUnused(inner, stmt);
