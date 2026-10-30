@@ -464,6 +464,13 @@ export class CodeGen {
 		MethodDecl: "_renameMethodDeclNode",
 		FuncLit: "_renameSignature",
 		TemplDecl: "_renameSignature",
+		TemplExpr: "_renameTemplExprNode",
+		TemplComponent: "_renameTemplExprNode",
+		TemplIf: "_renameTemplExprNode",
+		TemplSwitch: "_renameTemplExprNode",
+		TemplCase: "_renameTemplExprNode",
+		TemplFor: "_renameTemplForNode",
+		TemplElement: "_renameTemplElementNode",
 		CssDecl: "_renameSignature",
 		DefineStmt: "_renameDefineNode",
 		VarDecl: "_renameDeclSpecs",
@@ -491,13 +498,15 @@ export class CodeGen {
 	// Collects struct names, method map, and named wrapper names from program decls.
 	// Returns the method map (typeName → MethodDecl[]).
 	_collectStructNames(program) {
-		// Go-compiled variadic functions and methods: a `f(xs...)` call to one
-		// passes the slice itself (see `_genCallArgs`, `_emitParamCopies`).
+		// Go-compiled variadic functions, methods and templ components: a
+		// `f(xs...)` call to one passes the slice itself (see `_genCallArgs`,
+		// `_emitParamCopies`).
 		this.variadicFns = new Set();
 		for (const d of program.decls) {
 			const last = d.params?.[d.params.length - 1];
 			if (!last?.variadic) continue;
-			if (d.kind === "FuncDecl") this.variadicFns.add(d.name);
+			if (d.kind === "FuncDecl" || d.kind === "TemplDecl")
+				this.variadicFns.add(d.name);
 			else if (d.kind === "MethodDecl")
 				this.variadicFns.add(`${d.recvType.name}.${d.name}`);
 		}

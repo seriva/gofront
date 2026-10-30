@@ -24,6 +24,8 @@ import {
 	defaultType,
 	ERROR,
 	INTRINSICS,
+	isAny,
+	isBool,
 	isVoid,
 	Scope,
 	TAINTED_ANY,
@@ -32,6 +34,16 @@ import {
 	VALID_TARGETS,
 	VOID,
 } from "./types.js";
+
+// Checker method per templ body node kind (see _checkTemplNodes).
+const TEMPL_NODE_CHECKS = {
+	TemplElement: "_checkTemplElement",
+	TemplExpr: "_checkTemplLeaf",
+	TemplComponent: "_checkTemplLeaf",
+	TemplIf: "_checkTemplIf",
+	TemplFor: "_checkTemplFor",
+	TemplSwitch: "_checkTemplSwitch",
+};
 
 function rootIdentName(e) {
 	if (!e) return null;
@@ -961,42 +973,111 @@ export class TypeChecker {
 			case "CssDecl":
 				break;
 			case "TemplDecl":
-				this._markTemplNodesUsed(decl.body);
+				this._checkTemplDecl(decl, scope);
 				break;
 		}
 	}
 
-	_markTokensUsed(tokens) {
+	// A templ body is checked like a function body whose parameters are the
+	// templ's: every Go expression TemplParser attached to a node (`expr`,
+	// attribute `expr`, `forStmt`) is type-checked in the enclosing scope.
+	_checkTemplDecl(decl, outer) {
+		const inner = new Scope(outer);
+		for (const p of decl.params)
+			inner.define(p.name, this._paramType(p, inner));
+		this._checkTemplNodes(decl.body, inner);
+	}
+
+	_checkTemplNodes(nodes, scope) {
+		for (const n of nodes ?? []) {
+			const m = TEMPL_NODE_CHECKS[n.kind];
+			if (m) this[m](n, scope);
+		}
+	}
+
+	// A malformed expression has no AST: the code generator reports its parse
+	// error. Its names count as used so that error is not preceded by a
+	// misleading `declared and not used`.
+	_checkTemplExpr(node, tokens, scope) {
+		if (node.exprError) {
+			this._markTokensUsed(tokens, scope);
+			return null;
+		}
+		return node.expr ? this.checkExpr(node.expr, scope) : null;
+	}
+
+	_checkTemplElement(n, scope) {
+		for (const a of n.attrs ?? []) {
+			if (a.kind === "expr" || a.kind === "cond-bool")
+				this._checkTemplExpr(a, a.tokens, scope);
+		}
+		this._checkTemplNodes(n.children, scope);
+	}
+
+	_checkTemplLeaf(n, scope) {
+		this._checkTemplExpr(n, n.tokens, scope);
+	}
+
+	_checkTemplIf(n, scope) {
+		const ct = this._checkTemplExpr(n, n.condTokens, scope);
+		if (ct && !isBool(ct) && !isAny(ct))
+			this.err("If condition must be bool", n.expr);
+		this._checkTemplNodes(n.then, scope);
+		this._checkTemplNodes(n.else_, scope);
+	}
+
+	_checkTemplSwitch(n, scope) {
+		this._checkTemplExpr(n, n.exprTokens, scope);
+		for (const c of n.cases ?? []) {
+			this._checkTemplExpr(c, c.caseTokens, scope);
+			this._checkTemplNodes(c.body, scope);
+		}
+	}
+
+	// A header that did not parse is reported by the code generator; its body
+	// is not checked, since the loop variables it would declare are unknown.
+	_checkTemplFor(n, scope) {
+		if (!n.forStmt) {
+			this._markTokensUsed(n.stmtTokens, scope);
+			this._markTemplNodesUsed(n.body, scope);
+			return;
+		}
+		this._checkForStmt(n.forStmt, scope, VOID, (bodyScope) =>
+			this._checkTemplNodes(n.body, bodyScope),
+		);
+	}
+
+	_markTokensUsed(tokens, scope) {
 		if (!tokens) return;
 		for (const t of tokens) {
 			if (t.type === "IDENT" || t.type?.name === "IDENT") {
-				this.globals.lookup(t.value);
+				scope.lookup(t.value);
 			}
 		}
 	}
 
-	_markTemplNodesUsed(nodes) {
+	_markTemplNodesUsed(nodes, scope) {
 		if (!nodes) return;
 		for (const n of nodes) {
 			if (n.kind === "TemplElement") {
 				for (const a of n.attrs || []) {
-					if (a.tokens) this._markTokensUsed(a.tokens);
+					if (a.tokens) this._markTokensUsed(a.tokens, scope);
 				}
-				this._markTemplNodesUsed(n.children);
+				this._markTemplNodesUsed(n.children, scope);
 			} else if (n.kind === "TemplExpr" || n.kind === "TemplComponent") {
-				this._markTokensUsed(n.tokens);
+				this._markTokensUsed(n.tokens, scope);
 			} else if (n.kind === "TemplIf") {
-				this._markTokensUsed(n.condTokens);
-				this._markTemplNodesUsed(n.then);
-				this._markTemplNodesUsed(n.else_);
+				this._markTokensUsed(n.condTokens, scope);
+				this._markTemplNodesUsed(n.then, scope);
+				this._markTemplNodesUsed(n.else_, scope);
 			} else if (n.kind === "TemplFor") {
-				this._markTokensUsed(n.stmtTokens);
-				this._markTemplNodesUsed(n.body);
+				this._markTokensUsed(n.stmtTokens, scope);
+				this._markTemplNodesUsed(n.body, scope);
 			} else if (n.kind === "TemplSwitch") {
-				this._markTokensUsed(n.exprTokens);
+				this._markTokensUsed(n.exprTokens, scope);
 				for (const c of n.cases || []) {
-					this._markTokensUsed(c.caseTokens);
-					this._markTemplNodesUsed(c.body);
+					this._markTokensUsed(c.caseTokens, scope);
+					this._markTemplNodesUsed(c.body, scope);
 				}
 			}
 		}
