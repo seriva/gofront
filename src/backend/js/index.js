@@ -25,12 +25,13 @@ import {
 	normalizeDefers,
 	scanAddressTaken,
 } from "../../lower/index.js";
+import { orderPackageInits } from "../../typechecker/init-order.js";
 import {
 	BROWSER_GLOBALS,
 	isComplex,
 	isNumeric,
 } from "../../typechecker/types.js";
-import { expressionGenMethods } from "./expressions.js";
+import { comparesToNil, expressionGenMethods } from "./expressions.js";
 import {
 	HELPER_APPEND,
 	HELPER_BASE64,
@@ -66,6 +67,7 @@ import {
 	HELPER_S,
 	HELPER_SCLONE,
 	HELPER_SHA256,
+	HELPER_SHIFT,
 	HELPER_SIMD,
 	HELPER_SLICE,
 	HELPER_SORT_SLICE,
@@ -73,6 +75,7 @@ import {
 	HELPER_SPRINTF,
 	HELPER_STRCONV,
 	HELPER_STRCONV_ERROR,
+	HELPER_STRUCT_KEY,
 	HELPER_SV,
 	HELPER_SYNC,
 	HELPER_TESTING,
@@ -85,6 +88,7 @@ import { buildSourceMap, buildWasmSourceMap } from "./source-map.js";
 import { statementGenMethods } from "./statements.js";
 import { stdlibGenMethods } from "./stdlib/index.js";
 import { templGenMethods } from "./templ.js";
+import { typeInfoGenMethods } from "./type-info.js";
 
 export { buildSourceMap, buildWasmSourceMap };
 
@@ -154,10 +158,12 @@ const HELPER_MAP = [
 	["cmul", HELPER_CMUL],
 	["cdiv", HELPER_CDIV],
 	["panicRt", HELPER_PANIC],
+	["shift", HELPER_SHIFT],
 	["nilCall", HELPER_NIL_CALL],
 	["bounds", HELPER_BOUNDS],
 	["nilMap", HELPER_NIL_MAP],
 	["nm", HELPER_NM],
+	["structKey", HELPER_STRUCT_KEY],
 	["generics", HELPER_GENERICS],
 	["sprintf", HELPER_SPRINTF],
 	["sprint", HELPER_SPRINT],
@@ -210,6 +216,7 @@ export class CodeGen {
 		this.namedWrapperNames = new Set();
 		this.collectedCss = [];
 		this.warnings = []; // non-fatal diagnostics; the compiler prints them
+		this._precisionWarned = new Set(); // nodes already given a precision warning
 		this._srcFileNames = []; // source file name per _srcFileIdx
 		this.jsImports = jsImports;
 		this.bundledPackages = bundledPackages;
@@ -218,6 +225,8 @@ export class CodeGen {
 		this._currentSrcFileIdx = 0; // updated as each top-level decl is generated
 		this._boxedVars = new Set(); // address-taken scalar variables that need boxing
 		this._jsonCodecs = new Map(); // memoized JSON encoders and decoders
+		this._localTypeNames = new Set(); // function-local type declarations
+		this._jsonAnyUsed = false; // program calls json.Marshal / Encoder.Encode
 		// Runtime helper usage tracking — only emit helpers that are actually used
 		this._helpers = new Set();
 		// Per-function context for Go value semantics (see _withFnCtx)
@@ -264,6 +273,9 @@ export class CodeGen {
 	}
 
 	_emitTypeDecls(program, methods) {
+		this._typeDeclsByName = new Map();
+		for (const d of program.decls)
+			if (d.kind === "TypeDecl") this._typeDeclsByName.set(d.name, d);
 		for (const d of program.decls) {
 			if (d.kind === "TypeDecl") {
 				this._currentSrcFileIdx = d._srcFileIdx ?? 0;
@@ -274,20 +286,28 @@ export class CodeGen {
 	}
 
 	_emitVarConstDecls(program) {
-		for (const d of program.decls) {
-			if (d.kind === "ConstDecl") {
-				this._currentSrcFileIdx = d._srcFileIdx ?? 0;
-				this.genConstDecl(d);
+		const { consts, vars } = orderPackageInits([program]);
+		const emit = (decls, gen, ordered) => {
+			const natural = decls.flatMap((d) => d.decls ?? []);
+			const inOrder = ordered.every((e, i) => e.spec === natural[i]);
+			if (inOrder) {
+				for (const d of decls) {
+					this._currentSrcFileIdx = d._srcFileIdx ?? 0;
+					gen.call(this, d);
+					this.blank();
+				}
+				return;
+			}
+			// Initialisers depend on declarations that come later (Go allows it).
+			for (const e of ordered) {
+				this._currentSrcFileIdx = e.decl._srcFileIdx ?? 0;
+				gen.call(this, { ...e.decl, decls: [e.spec] });
 				this.blank();
 			}
-		}
-		for (const d of program.decls) {
-			if (d.kind === "VarDecl") {
-				this._currentSrcFileIdx = d._srcFileIdx ?? 0;
-				this.genVarDecl(d);
-				this.blank();
-			}
-		}
+		};
+		const declsOf = (kind) => program.decls.filter((d) => d.kind === kind);
+		emit(declsOf("ConstDecl"), this.genConstDecl, consts);
+		emit(declsOf("VarDecl"), this.genVarDecl, vars);
 	}
 
 	_callInitAndMain(initNames, program, isTest = false) {
@@ -305,6 +325,7 @@ export class CodeGen {
 
 	generate(program, options = {}) {
 		const isTest = options.isTest ?? false;
+		this._precisionWarned = new Set();
 		// Defer lowering (argument/receiver hoisting, recover-target marking) is
 		// idempotent and owned by the backends: the wasm path runs it via
 		// `lower()`, the JS path here.
@@ -325,6 +346,7 @@ export class CodeGen {
 		this._boxedGlobals = this._collectBoxedGlobals(program);
 		this._boxedVars = new Set(this._boxedGlobals);
 		this._collectResliceNames(program);
+		this._jsonAnyUsed = this._usesJsonAnyMarshal(program.decls);
 		const methods = this._collectDecls(program);
 		this._emitJsImports();
 		this._emitTypeDecls(program, methods);
@@ -444,6 +466,13 @@ export class CodeGen {
 		MethodDecl: "_renameMethodDeclNode",
 		FuncLit: "_renameSignature",
 		TemplDecl: "_renameSignature",
+		TemplExpr: "_renameTemplExprNode",
+		TemplComponent: "_renameTemplExprNode",
+		TemplIf: "_renameTemplExprNode",
+		TemplSwitch: "_renameTemplExprNode",
+		TemplCase: "_renameTemplExprNode",
+		TemplFor: "_renameTemplForNode",
+		TemplElement: "_renameTemplElementNode",
 		CssDecl: "_renameSignature",
 		DefineStmt: "_renameDefineNode",
 		VarDecl: "_renameDeclSpecs",
@@ -471,13 +500,15 @@ export class CodeGen {
 	// Collects struct names, method map, and named wrapper names from program decls.
 	// Returns the method map (typeName → MethodDecl[]).
 	_collectStructNames(program) {
-		// Go-compiled variadic functions and methods: a `f(xs...)` call to one
-		// passes the slice itself (see `_genCallArgs`, `_emitParamCopies`).
+		// Go-compiled variadic functions, methods and templ components: a
+		// `f(xs...)` call to one passes the slice itself (see `_genCallArgs`,
+		// `_emitParamCopies`).
 		this.variadicFns = new Set();
 		for (const d of program.decls) {
 			const last = d.params?.[d.params.length - 1];
 			if (!last?.variadic) continue;
-			if (d.kind === "FuncDecl") this.variadicFns.add(d.name);
+			if (d.kind === "FuncDecl" || d.kind === "TemplDecl")
+				this.variadicFns.add(d.name);
 			else if (d.kind === "MethodDecl")
 				this.variadicFns.add(`${d.recvType.name}.${d.name}`);
 		}
@@ -498,11 +529,14 @@ export class CodeGen {
 
 	_collectMethodMap(program) {
 		const methods = new Map();
+		this.nilSafeMethods = new Set();
 		for (const d of program.decls) {
 			if (d.kind === "MethodDecl") {
 				const name = d.recvType.name;
 				if (!methods.has(name)) methods.set(name, []);
 				methods.get(name).push(d);
+				if (d.recvPointer && comparesToNil(d.body, d.recvName))
+					this.nilSafeMethods.add(`${name}.${d.name}`);
 			}
 		}
 		return methods;
@@ -531,6 +565,8 @@ export class CodeGen {
 	/** Marks a runtime helper (key of HELPER_MAP) as needed by the output. */
 	useHelper(name) {
 		this._helpers.add(name);
+		if (name === "ifeq" || name === "geq") this._helpers.add("equal");
+		if (name === "geq") this._helpers.add("ifeq");
 		if (
 			name === "strconvError" ||
 			name === "pathError" ||
@@ -620,14 +656,40 @@ export class CodeGen {
 
 	// ── Type declarations ────────────────────────────────────────
 
+	// `type S Base` with Base a struct declared in this package: the struct
+	// AST S inherits its fields from, or null.
+	_definedStructAst(decl) {
+		if (decl.isAlias || decl.typeParams) return null;
+		if (this.checker?.types.get(decl.name)?.underlying?.kind !== "struct")
+			return null;
+		let t = decl.type;
+		for (let depth = 0; depth < 16 && t; depth++) {
+			if (t.kind === "StructType") return t;
+			if (t.kind !== "TypeName" && t.kind !== "Ident") return null;
+			const next = this._typeDeclsByName?.get(t.name);
+			if (!next || next.isAlias) return null;
+			t = next.type;
+		}
+		return null;
+	}
+
 	genTypeDeclWithMethods(decl, methodDecls) {
+		const definedStruct =
+			decl.type.kind === "StructType" ? null : this._definedStructAst(decl);
 		if (decl.type.kind === "StructType") {
 			this.genStruct(decl.name, decl.type, methodDecls);
+		} else if (definedStruct) {
+			this.genStruct(decl.name, definedStruct, methodDecls);
 		} else if (decl.type.kind === "InterfaceType") {
 			// Interfaces are compile-time only — no JS output needed.
 			this.line(`// interface ${decl.name} (compile-time only)`);
-		} else if (methodDecls.length > 0) {
+		} else if (
+			methodDecls.length > 0 ||
+			this._isPlainNamedBox(this.checker?.types.get(decl.name))
+		) {
 			// Named non-struct type with methods — emit an ES6 wrapper class.
+			if (methodDecls.length === 0)
+				this.line(`// type ${decl.name} = ${this.typeComment(decl.type)}`);
 			this.genNamedTypeClass(decl.name, methodDecls);
 		} else {
 			this.line(`// type ${decl.name} = ${this.typeComment(decl.type)}`);
@@ -680,12 +742,28 @@ export class CodeGen {
 		return "_items";
 	}
 
+	// A user-declared named basic type without methods: still boxed in an
+	// interface so `any(L("x")).(string)` fails like Go.
+	_isPlainNamedBox(type) {
+		if (type?.kind !== "named" || type._generic) return false;
+		if (type._target === undefined || type._target === "wasm") return false;
+		if (type.underlying?.kind !== "basic" || type.methods?.size > 0)
+			return false;
+		return type.methods instanceof Map;
+	}
+
 	// Box/dispatch info for a named non-struct type with methods, or null.
 	_namedBoxInfo(type) {
 		if (type?.kind !== "named") return null;
 		const u = type.underlying;
 		if (!u || u.kind === "struct" || u.kind === "interface") return null;
 		const methods = type.methods ?? type._generic?.methods;
+		if (this._isPlainNamedBox(type))
+			return {
+				cls: this._dequalify(type.name),
+				field: this._namedBoxField(u),
+				methods: new Map(),
+			};
 		if (!methods || methods.size === 0) return null;
 		if (![...methods.values()].some((m) => Object.hasOwn(m ?? {}, "_ptrRecv")))
 			return null;
@@ -782,20 +860,17 @@ export class CodeGen {
 		this.line("}");
 	}
 
-	// JS object keys are strings: a struct used as a map key becomes its Go
-	// `%v` text (`{1 x}`), so equal values share a key and fmt prints it as Go does.
-	_genStructKeyString(name, fields) {
+	// JS object keys are strings: a struct used as a map key becomes an
+	// injective encoding of its fields (see HELPER_STRUCT_KEY), so equal values
+	// share a key and distinct values never collide.
+	_genStructKeyString(_name, fields) {
 		if (fields.some((f) => f.name === "toString")) return;
-		const resolved = this.checker?.types.get(name)?.underlying;
-		const parts = fields.map((f) => {
-			const base = this._aggregateBase(resolved?.fields?.get(f.name));
-			return base?.kind === "array"
-				? `"[" + this.${f.name}.join(" ") + "]"`
-				: `this.${f.name}`;
-		});
-		this.line(
-			`toString() { return "{" + [${parts.join(", ")}].join(" ") + "}"; }`,
-		);
+		if (fields.length === 0) {
+			this.line('toString() { return "{}"; }');
+			return;
+		}
+		this.useHelper("structKey");
+		this.line("toString() { return __sk(this); }");
 	}
 
 	_genStructClone(name, structTypeAst, fields) {
@@ -877,6 +952,7 @@ export class CodeGen {
 	}
 
 	_emitJsonCodecs() {
+		this._emitJsonAnyHooks();
 		if (!this._jsonCodecs || this._jsonCodecs.size === 0) return;
 		for (const [, code] of this._jsonCodecs) {
 			this.line(code);
@@ -938,13 +1014,20 @@ export class CodeGen {
 		);
 		this._boxedVars = prevBoxed;
 		this.line("}");
+		// `Unwrap() []error` is told apart from `Unwrap() error` in type tests.
+		if (
+			!staticNamed &&
+			decl.name === "Unwrap" &&
+			decl.returnType?.kind === "SliceType"
+		)
+			this.line("static { this.prototype.Unwrap.__multi = true; }");
 		this._currentSrcFileIdx = prevFileIdx;
 	}
 
 	_genMethodBody(decl, staticNamed, recvParam, tpNames) {
 		this._withFnCtx(decl.body, () =>
 			this.indented(() => {
-				if (tpNames) this._genTypeParamBindings(tpNames, "this[__tz]");
+				if (tpNames) this._genTypeParamBindings(tpNames, "this?.[__tz]");
 				if (decl.recvName) this._fnCtx.params.add(decl.recvName);
 				if (!staticNamed && decl.recvName && decl.recvName !== "_") {
 					this.line(`let ${decl.recvName} = ${this._receiverValue(decl)};`);
@@ -1201,6 +1284,7 @@ export class CodeGen {
 			} else {
 				const zero = spec.type ? this.zeroValueForTypeNode(spec.type) : "null";
 				for (const name of spec.names) {
+					if (name === "_") continue;
 					this._markOwnership(name, true);
 					const val = this._boxedVars.has(name) ? `{ value: ${zero} }` : zero;
 					this.line(`let ${name} = ${val};`);
@@ -1211,6 +1295,11 @@ export class CodeGen {
 
 	// `var a = v` / `var a, b = v1, v2` / `var a, b = f()`, boxing address-taken names.
 	_emitVarBindings(names, vals, paired) {
+		if (names.length === 1 && names[0] === "_") {
+			// A blank binding only runs its initialiser (`var _ = f()` may repeat).
+			this.line(`void (${vals[0]});`);
+			return;
+		}
 		if (names.length === 1) {
 			const val = this._boxedVars.has(names[0])
 				? `{ value: ${vals[0]} }`
@@ -1219,7 +1308,8 @@ export class CodeGen {
 			return;
 		}
 		const rhs = paired ? `[${vals.join(", ")}]` : vals[0];
-		this.line(`let [${names.join(", ")}] = ${rhs};`);
+		const targets = names.map((n) => (n === "_" ? "" : n));
+		this.line(`let [${targets.join(", ")}] = ${rhs};`);
 		this._boxDeclaredNames(names);
 	}
 
@@ -1239,5 +1329,6 @@ export class CodeGen {
 
 Object.assign(CodeGen.prototype, statementGenMethods);
 Object.assign(CodeGen.prototype, expressionGenMethods);
+Object.assign(CodeGen.prototype, typeInfoGenMethods);
 Object.assign(CodeGen.prototype, stdlibGenMethods);
 Object.assign(CodeGen.prototype, templGenMethods);

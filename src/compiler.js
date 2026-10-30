@@ -52,7 +52,7 @@ import {
 	resolveGwDir,
 	resolveStdlibSource,
 } from "./resolver.js";
-import { TypeChecker } from "./typechecker/index.js";
+import { EXCLUDED_STDLIB_PACKAGES, TypeChecker } from "./typechecker/index.js";
 import { WASM_SUPPORTED_STDLIB } from "./typechecker/types.js";
 
 // ── Parse cache ──────────────────────────────────────────────
@@ -197,6 +197,7 @@ function resolveImports(
 						);
 					} else if (
 						!isLocalPath(path) &&
+						!EXCLUDED_STDLIB_PACKAGES.has(path) &&
 						(isBuiltinPackage(path) ||
 							!resolveStdlibSource(path, options.stdlibRoot))
 					) {

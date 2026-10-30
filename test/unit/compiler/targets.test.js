@@ -3,7 +3,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { compileSingleFile } from "../../../src/compiler.js";
+import { compileDir, compileSingleFile } from "../../../src/compiler.js";
 import { Lexer } from "../../../src/lexer/lexer.js";
 import { Parser } from "../../../src/parser/index.js";
 import { TypeChecker } from "../../../src/typechecker/index.js";
@@ -354,4 +354,78 @@ test("typechecker generates summary diagnostic line with blockers count", () => 
 		summary,
 		"package 'physics' cannot be wasm: 3 blockers — 1 browser global (console), 1 async function (Fetch), 1 defer statement",
 	);
+});
+
+section("compiler — import and precision diagnostics");
+
+test("an unavailable stdlib package in a wasm or both package gets one error", () => {
+	for (const [target, pkg] of [
+		["wasm", "reflect"],
+		["both", "unsafe"],
+	]) {
+		const err = compileTemp({
+			"main.go": `//gofront:target ${target}\npackage main\n\nimport "${pkg}"\n\nfunc main() {}\n`,
+		});
+		assertContains(err, `package '${pkg}' is not available`);
+		assertEqual(err.split("Type error").length - 1, 1);
+		assert(!err.includes("js: imports"), err);
+	}
+});
+
+test("a js: import in a wasm package is still rejected", () => {
+	const err = compileTemp({
+		"main.go":
+			'//gofront:target wasm\npackage main\n\nimport "js:./x.d.ts"\n\nfunc main() {}\n',
+		"x.d.ts": "export declare const x: number;\n",
+	});
+	assertContains(err, "js: imports are not allowed in wasm packages");
+});
+
+test("an integer literal beyond 2^53 warns in js output", () => {
+	const msgs = (src) => compile(src).warnings;
+	for (const src of [
+		"package main\n\nconst c = 9007199254740993\n\nfunc main() { println(c) }\n",
+		"package main\n\nfunc main() { x := 9007199254740993; println(x) }\n",
+		"package main\n\nfunc main() { println(0x20000000000001) }\n",
+		"package main\n\nfunc main() { y := 1; println(y + 9007199254740993) }\n",
+	]) {
+		const w = msgs(src);
+		assertEqual(
+			w.filter((m) => m.includes("exceeds JS Number precision")).length,
+			1,
+		);
+		assertContains(
+			w.join("\n"),
+			"constant 9007199254740993 exceeds JS Number precision",
+		);
+	}
+});
+
+test("a precision warning repeats when the same package compiles again", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-precision-"));
+	const logged = [];
+	const origErr = console.error;
+	try {
+		writeFileSync(
+			join(dir, "main.go"),
+			"package main\n\nvar g float64 = 1<<53 + 1\n\nfunc main() { println(g) }\n",
+		);
+		writeFileSync(join(dir, "other.go"), "package main\n\nvar h = 1\n");
+		console.error = (m) => logged.push(String(m));
+		for (let i = 0; i < 2; i++) compileDir(dir);
+	} finally {
+		console.error = origErr;
+		rmSync(dir, { recursive: true, force: true });
+	}
+	assertEqual(
+		logged.filter((m) => m.includes("exceeds JS Number precision")).length,
+		2,
+	);
+});
+
+test("exact integer literals stay quiet", () => {
+	const { warnings } = compile(
+		"package main\n\nfunc main() { println(9007199254740992, 1<<62, 123) }\n",
+	);
+	assertEqual(warnings.join("\n"), "");
 });

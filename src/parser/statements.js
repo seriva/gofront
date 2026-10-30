@@ -95,7 +95,12 @@ export const statementParserMethods = {
 				if (this.check2(T.COLON)) {
 					const label = this.advance().value;
 					this.advance(); // consume COLON
-					return { kind: "LabeledStmt", label, body: this.parseStmt() };
+					// A label may precede the end of a block: the statement is empty.
+					const body =
+						this.check(T.RBRACE) || this.check(T.CASE) || this.check(T.DEFAULT)
+							? { kind: "Block", stmts: [] }
+							: this.parseStmt();
+					return { kind: "LabeledStmt", label, body };
 				}
 				return this.parseSimpleStmt();
 			default:

@@ -6,7 +6,9 @@ import {
 	assertContains,
 	assertEqual,
 	assertErrorContains,
+	assertProgramOutput,
 	compile,
+	compileHybrid,
 	runJs,
 	section,
 	summarize,
@@ -456,6 +458,360 @@ test("a nil pointer with a pointer-receiver String uses it for %v, %s and %q but
 		'type C struct{ n int }\nfunc (c *C) String() string { return "c" }',
 	);
 	assertEqual(o, 'c|c|<nil>|"c"\n');
+});
+
+// Runs `body` (which returns a string) on the js target, as a `both` package
+// and on WebAssembly, and returns the result when all three agree.
+function allTargets(body, decls = "") {
+	const src = `package main
+import "fmt"
+${decls}
+func Main() string {
+${body}
+}`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes, jsRes);
+	const both = compile(
+		`//gofront:target both\n${src}\nfunc main() { fmt.Print(Main()) }`,
+	);
+	assertEqual(both.errors.length, 0, both.errors.join("\n"));
+	assertEqual(runJs(both.js), jsRes);
+	return jsRes;
+}
+
+const NIL_C = `type C struct{ n int }
+func (c *C) String() string { return "c" }`;
+
+section("fmt Stringer: nil pointers (all targets)");
+
+test("nil elements of a pointer slice call a pointer-receiver String", () => {
+	assertEqual(allTargets("return fmt.Sprint([]*C{nil, {1}})", NIL_C), "[c c]");
+});
+
+test("a nil *G[int] with a pointer-receiver String prints through it", () => {
+	assertEqual(
+		allTargets(
+			`var g *G[int]
+	return fmt.Sprint(g) + "|" + fmt.Sprintf("%v|%s", g, []*G[int]{nil, {1}})`,
+			`type G[T any] struct{ v T }
+func (g *G[T]) String() string { return "g" }`,
+		),
+		"g|g|[g g]",
+	);
+});
+
+test("a nil pointer to a type with a value-receiver String prints <nil>", () => {
+	assertEqual(
+		allTargets(
+			`var p *Color
+	var v *V
+	return fmt.Sprint(p) + "|" + fmt.Sprintf("%v|%s|%v", p, v, []*Color{nil})`,
+			`type Color int
+func (c Color) String() string { return "col" }
+type V struct{ n int }
+func (v V) String() string { return "v" }`,
+		),
+		"<nil>|<nil>|<nil>|[<nil>]",
+	);
+});
+
+test("nil pointers in maps and struct fields use String and Error", () => {
+	assertEqual(
+		allTargets(
+			`return fmt.Sprint(map[string]*C{"a": nil}, W{}) + "|" + fmt.Sprintf("%s|%q|%v", []*E{nil}, []*E{nil}, W{})`,
+			`${NIL_C}
+type E struct{ n int }
+func (e *E) Error() string { return "e" }
+type V struct{ n int }
+func (v V) String() string { return "v" }
+type W struct{ P *C; Q *V; R *E }`,
+		),
+		'map[a:c] {c <nil> e}|[e]|["e"]|{c <nil> e}',
+	);
+});
+
+test("a String that dereferences its nil receiver prints <nil> (js)", () => {
+	assertEqual(
+		run(
+			`var c *C
+fmt.Println(fmt.Sprint(c, []*C{nil, {2}}))`,
+			`type C struct{ n int }
+func (c *C) String() string { return fmt.Sprint("c", c.n) }`,
+		),
+		"<nil> [<nil> c2]",
+	);
+});
+
+test("%s and %q reach the String of non-nil pointers in slices and maps", () => {
+	assertEqual(
+		allTargets(
+			`return fmt.Sprintf("%s|%v|%q|%s", []*C{{1}}, []*C{{1}}, []*C{{1}}, map[string]*C{"a": {1}})`,
+			NIL_C,
+		),
+		'[c]|[c]|["c"]|map[a:c]',
+	);
+});
+
+section("fmt Stringer: through a type parameter (all targets)");
+
+const TP_DECLS = `type Color int
+func (c Color) String() string { return "col" }
+type P struct{ N int }
+func (p P) String() string { return "P!" }
+type Pt struct{ N int }
+func (p *Pt) String() string { return "Pt!" }
+type L []Color
+func Show[T any](x T) string { return fmt.Sprint(x) }
+func Showf[T any](x T) string { return fmt.Sprintf("%v|%s|%d|%+v", x, x, x, x) }
+func Wrap[T any](x T) string { return Show(x) }`;
+
+test("Sprint of a type-parameter value uses the type argument's String", () => {
+	assertEqual(allTargets("return Show(Color(2))", TP_DECLS), "col");
+});
+
+test("String dispatch through a type parameter covers named, struct, pointer, slice and map arguments", () => {
+	assertEqual(
+		allTargets(
+			`return Show(Color(2)) + " " + Show(P{1}) + " " + Show(&Pt{1}) + " " + Show(L{1}) + " " + Show(map[string]Color{"a": 1}) + " " + Showf(Color(2)) + " " + Showf(P{1}) + " " + Wrap(Color(1)) + " " + Show(3) + " " + Show("s") + " " + Show([]string{"a"})`,
+			TP_DECLS,
+		),
+		"col P! Pt! [col] map[a:col] col|col|2|col P!|P!|{1}|P! col 3 s [a]",
+	);
+});
+
+test("plain maps, nil slices and pointers print as Go through a type parameter", () => {
+	assertEqual(
+		allTargets(
+			`var ns []int
+	var nm map[string]int
+	return Show(map[string]int{"a": 1}) + " " + Show([]int{1}) + " " + Show(S{1, map[string]int{"z": 1}}) + " " + Show(ns) + " " + Show(nm) + " " + Show(&S{2, nil})`,
+			`type S struct{ A int; M map[string]int }
+func Show[T any](x T) string { return fmt.Sprint(x) }`,
+		),
+		"map[a:1] [1] {1 map[z:1]} [] map[] &{2 map[]}",
+	);
+});
+
+section(
+	"fmt: typed formatting composes with Stringer dispatch (js, both, wasm)",
+);
+
+// Runs a whole program on the js target, as a `both` package and on
+// WebAssembly and compares with the text real Go printed.
+async function realGo(source, expected) {
+	const js = compile(source);
+	assertEqual(js.errors.length, 0, js.errors.join("\n"));
+	let out = "";
+	runJs(js.js, {
+		console: {
+			log: (...a) => {
+				out += `${a.join(" ")}\n`;
+			},
+		},
+		process: {
+			stdout: {
+				write: (t) => {
+					out += t;
+				},
+			},
+		},
+	});
+	assertEqual(out, expected);
+	await assertProgramOutput(source, expected);
+}
+
+test("Stringers inside containers, typed floats and nil pointers of named types match real Go", async () => {
+	await realGo(
+		`package main
+
+import "fmt"
+
+type Dir int
+
+func (Dir) String() string { return "D" }
+
+type N2 int
+
+func (n N2) String() string { return [...]string{"N", "E"}[n] }
+
+type NS []int
+
+func (NS) String() string { return "NS" }
+
+type M map[string]int
+
+func (M) String() string { return "M" }
+
+type Temp float64
+
+func (t Temp) String() string { return fmt.Sprintf("%.1f°C", float64(t)) }
+
+type Color int
+
+func (c Color) String() string { return "c" }
+
+type PS struct{ F float64 }
+
+func (p *PS) String() string { return "ps" }
+
+type It struct{ V PS }
+
+func main() {
+	fmt.Printf("%s=%v\\n", "k", []Dir{1})
+	fmt.Printf("%s %v\\n", "n", []NS{{1}})
+	fmt.Printf("%s %v\\n", "n", []M{{"a": 1}})
+	fmt.Printf("%q %v\\n", []string{"a"}, []Dir{1})
+	fmt.Printf("%s %v\\n", "x", [][]Dir{{1}})
+	fmt.Printf("%s %v\\n", "x", [2]Dir{})
+	fmt.Printf("%s %v\\n", "x", map[string][]Dir{"a": {1}})
+	fmt.Printf("%v|%s\\n", [2]N2{0, 1}, [2]N2{0, 1})
+	fmt.Println([]Temp{1.5})
+	fmt.Println(map[string]Temp{"a": 3})
+	fmt.Println([2]Temp{})
+	fmt.Println(map[Dir]float64{1: 0.5})
+	fmt.Printf("%v\\n", struct{ T Temp }{1})
+	fmt.Println([]float64{1e6, 2.5}, map[string]float64{"a": 1e6})
+	var p *Color
+	var x any = p
+	fmt.Println(x == nil)
+	_, ok := x.(*Color)
+	fmt.Println(ok)
+	switch x.(type) {
+	case *Color:
+		fmt.Println("ptr")
+	default:
+		fmt.Println("default")
+	}
+	var s fmt.Stringer = p
+	fmt.Println(s == nil)
+	fmt.Println(p)
+	it := It{PS{2}}
+	fmt.Println(&it.V, it.V)
+}
+`,
+		`k=[D]
+n [NS]
+n [M]
+["a"] [D]
+x [[D]]
+x [D D]
+x map[a:[D]]
+[N E]|[N E]
+[1.5°C]
+map[a:3.0°C]
+[0.0°C 0.0°C]
+map[D:0.5]
+{1.0°C}
+[1e+06 2.5] map[a:1e+06]
+false
+true
+ptr
+false
+<nil>
+ps {2}
+`,
+	);
+});
+
+test("multi-value calls dispatch String and Error on named results like real Go", async () => {
+	await realGo(
+		`package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+type C int
+
+func (c C) String() string { return fmt.Sprintf("C<%d>", int(c)) }
+
+type F float64
+
+func (f F) String() string { return "F!" }
+
+type U uint8
+
+func (u U) String() string { return "U!" }
+
+type S string
+
+func (s S) String() string { return "S!" }
+
+type L []int
+
+func (L) String() string { return "L!" }
+
+type E struct{ m string }
+
+func (e E) Error() string { return "E:" + e.m }
+
+type P struct{ n int }
+
+func (p *P) String() string { return "P!" }
+
+type St struct{ a int }
+
+func (s St) String() string { return "St!" }
+
+type Col int
+
+func (c Col) String() string { return "COL" }
+
+func pair[T any](a, b T) (T, T) { return a, b }
+
+func a() (C, int)                  { return 3, 4 }
+func b() (int, C)                  { return 3, 4 }
+func c() ([]C, map[C]int)          { return []C{1}, map[C]int{2: 3} }
+func d() (error, C)                { return errors.New("E!"), 1 }
+func e() (F, U, S)                 { return 1.5, 7, "x" }
+func f() (L, E, *P)                { return L{1}, E{"m"}, &P{1} }
+func g() (St, *St, float32)        { return St{1}, &St{2}, 2.5 }
+func h() ([]C, map[string]C, []F)  { return nil, nil, []F{1} }
+func i() (*C, float64)             { x := C(5); return &x, 3 }
+func j() ([]int, map[int]int, int) { return nil, nil, 1 }
+
+func main() {
+	fmt.Println(a())
+	fmt.Println(b())
+	fmt.Println(c())
+	fmt.Println(d())
+	fmt.Println(e())
+	fmt.Println(f())
+	fmt.Println(g())
+	fmt.Println(h())
+	fmt.Println(j())
+	fmt.Print(a())
+	fmt.Println()
+	fmt.Print(c())
+	fmt.Println()
+	fmt.Println(fmt.Sprint(a()), fmt.Sprintln(c()))
+	fmt.Println(fmt.Sprint(e()))
+	fmt.Println(pair(Col(1), Col(2)))
+	fmt.Println(pair(1.5, 2))
+	x, _ := i()
+	fmt.Println(*x)
+}
+`,
+		`C<3> 4
+3 C<4>
+[C<1>] map[C<2>:3]
+E! C<1>
+F! U! S!
+L! E:m P!
+St! St! 2.5
+[] map[] [F!]
+[] map[] 1
+C<3> 4
+[C<1>] map[C<2>:3]
+C<3> 4 [C<1>] map[C<2>:3]
+
+F! U!S!
+COL COL
+1.5 2
+C<5>
+`,
+	);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

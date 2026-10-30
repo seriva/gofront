@@ -14,6 +14,7 @@ import {
 	isArrayType,
 	isComplex,
 	isComplex64,
+	isFuncType,
 	isPointerToStruct,
 	isSliceType,
 	isStringType,
@@ -762,18 +763,50 @@ export class FunctionEmitter {
 		return false;
 	}
 
-	// True when the body reads or writes a field through a pointer.
+	// True when the body reads or writes a field or the target of a pointer.
 	_needsNilBlock(node) {
 		if (!node || typeof node !== "object") return false;
 		if (Array.isArray(node)) return node.some((n) => this._needsNilBlock(n));
 		if (node.kind === "FuncLit") return false;
 		if (node.kind === "SelectorExpr" && node.expr?._type?.kind === "pointer")
 			return true;
+		if (this._isNilTrapSite(node)) return true;
 		for (const key of Object.keys(node)) {
 			if (key.startsWith("_")) continue;
 			if (this._needsNilBlock(node[key])) return true;
 		}
 		return false;
+	}
+
+	// A pointer dereference or a call through a func value: sites whose nil
+	// operand raises Go's panic through the `nil` block.
+	_isNilTrapSite(node) {
+		if (node.kind === "CallExpr") return this._isFuncValueCall(node);
+		const star =
+			(node.kind === "UnaryExpr" && node.op === "*") ||
+			node.kind === "StarExpr";
+		return star && (node.operand ?? node.expr)?._type?.kind === "pointer";
+	}
+
+	// A call through a func variable, parameter or expression (not a declared
+	// function or a method), which panics when the value is nil.
+	_isFuncValueCall(call) {
+		const f = call.func;
+		if (!f || call._isTypeConversion) return false;
+		if (f.kind === "Ident")
+			return (
+				isFuncType(f._type, this.mod.checker) &&
+				this.mod.resolveFuncIndex(f.name) === null
+			);
+		if (f.kind === "SelectorExpr") {
+			const t = f.expr?._type;
+			const base = t?.kind === "pointer" ? t.base : t;
+			const fields = (base?.underlying ?? base)?.fields;
+			return fields instanceof Map && fields.has(f.field);
+		}
+		return (
+			f.kind === "IndexExpr" || f.kind === "CallExpr" || f.kind === "ParenExpr"
+		);
 	}
 
 	_needsOobBlock(node) {
@@ -1087,7 +1120,13 @@ export class FunctionEmitter {
 			return [{ structInfo, fieldIndex: idx, field: structInfo.fields[idx] }];
 		}
 		for (const embed of structInfo.embeds) {
-			const embedInfo = this.mod.structTypes.get(embed.name);
+			// A generic instance is registered under its specialised name
+			// (`Inner$int`), which the field's type carries.
+			const ft = structInfo.fields[embed.fieldIndex]?.goType;
+			const instName = (ft?.kind === "PointerType" ? ft.base : ft)?.name;
+			const embedInfo =
+				(instName && this.mod.structTypes.get(instName)) ??
+				this.mod.structTypes.get(embed.name);
 			if (embedInfo) {
 				const sub = this._resolveFieldPath(embedInfo, fieldName);
 				if (sub) {
@@ -1105,7 +1144,7 @@ export class FunctionEmitter {
 		return null;
 	}
 
-	emitCloneStruct(structInfo, baseWType) {
+	emitCloneStruct(structInfo, baseWType, dstInfo = structInfo) {
 		const tmp = this.acquireTemp(baseWType);
 		this.pushInstruction({ op: "local.set", index: tmp });
 		for (let i = 0; i < structInfo.fields.length; i++) {
@@ -1130,7 +1169,7 @@ export class FunctionEmitter {
 		}
 		this.pushInstruction({
 			op: "struct.new",
-			typeIndex: structInfo.typeIndex,
+			typeIndex: dstInfo.typeIndex,
 		});
 		this.releaseTemp(tmp, baseWType);
 	}
@@ -1348,6 +1387,8 @@ export class FunctionEmitter {
 			this.pushInstruction("i32.eqz");
 			this.pushInstruction({ op: "br_if", depth: 0 });
 
+			this._emitNilPtrBoxPanic(cand, recvLocal);
+
 			// Matched! Cast receiver
 			this.pushInstruction({ op: "local.get", index: recvLocal });
 			this.pushInstruction({
@@ -1402,6 +1443,28 @@ export class FunctionEmitter {
 		}
 
 		emitMiss("interface conversion: nil or unmatched type for method call");
+	}
+
+	// A value-receiver method reached through a pointer box reads the pointee
+	// first, so a nil pointer inside the interface is a catchable panic.
+	_emitNilPtrBoxPanic(cand, recvLocal) {
+		if (!cand.nilPtrPanic) return;
+		this.pushInstruction({ op: "local.get", index: recvLocal });
+		this.pushInstruction({
+			op: "ref.cast_null",
+			typeIndex: cand.testTypeIndex,
+		});
+		this.pushInstruction({
+			op: "struct.get",
+			typeIndex: cand.testTypeIndex,
+			fieldIndex: 0,
+		});
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction({ op: "if", blockType: "void" });
+		this.emitPanic(
+			"runtime error: invalid memory address or nil pointer dereference",
+		);
+		this.pushInstruction("end");
 	}
 
 	_getArraySize(t, defaultSize = 0) {
@@ -1684,8 +1747,18 @@ export class FunctionEmitter {
 				break;
 
 			case "VarDecl":
+			case "ConstDecl":
 				this.emitVarDecl(stmt);
 				break;
+
+			// A package-level array or struct too large to build as a constant
+			// expression gets its zero value when the module starts.
+			case "GlobalZeroInit": {
+				const g = this.mod.resolveGlobal(stmt.name);
+				this.emitZeroValue(stmt.goType, g.type);
+				this.pushInstruction({ op: "global.set", index: g.index });
+				break;
+			}
 
 			case "DefineStmt":
 				this.emitDefineStmt(stmt);

@@ -80,6 +80,7 @@ export class ExprsEmitter {
 			// for type switches and assertions.
 			if (isPointerToStruct(goType, this.mod.checker, this.mod)) {
 				this._emitRawExpr(expr, this.toWasmType(goType));
+				this._emitNilAwareAny(goType, expr);
 				return;
 			}
 			if (isStructType(goType, this.mod.checker, this.mod)) {
@@ -111,6 +112,11 @@ export class ExprsEmitter {
 				// An array stored in an interface is a copy.
 				if (isArrayType(goType, this.mod.checker))
 					this._emitCopyIfValue(expr, goType, refWType);
+				if (
+					isFuncType(goType, this.mod.checker) ||
+					isMapType(goType, this.mod.checker)
+				)
+					this._emitNilAwareAny(goType, expr);
 				return;
 			}
 
@@ -123,6 +129,23 @@ export class ExprsEmitter {
 		}
 
 		this._emitRawExpr(expr, targetWasmType);
+	}
+
+	// The nullable ref on the stack becomes an interface value: a nil map, func
+	// or pointer turns into the marker of its type (never a nil interface).
+	_emitNilAwareAny(goType, expr) {
+		if (expr.kind === "UnaryExpr" && expr.op === "&") return;
+		if (expr.kind === "CompositeLit" || expr.kind === "FuncLit") return;
+		const nilBox = this.mod.getNilBoxType(goType);
+		const tmp = this.acquireTemp(this.toWasmType(goType));
+		this.pushInstruction({ op: "local.tee", index: tmp });
+		this.pushInstruction("ref.is_null");
+		this.pushInstruction({ op: "if", blockType: "anyref" });
+		this.pushInstruction({ op: "global.get", index: nilBox.globalIndex });
+		this.pushInstruction("else");
+		this.pushInstruction({ op: "local.get", index: tmp });
+		this.pushInstruction("end");
+		this.releaseTemp(tmp, this.toWasmType(goType));
 	}
 
 	_emitBoxValue(box) {
@@ -164,6 +187,14 @@ export class ExprsEmitter {
 		return null;
 	}
 
+	_emitLocalConst(ident, targetWasmType) {
+		const lit = constLitFor(ident._const, targetWasmType);
+		if (!lit) return false;
+		lit._type = ident._type;
+		this.emitBasicLit(lit, targetWasmType);
+		return true;
+	}
+
 	_emitRawExpr(expr, targetWasmType = null) {
 		if (expr.kind === "BinaryExpr" || expr.kind === "UnaryExpr") {
 			// The checker's exact value (src/typechecker/const-fold.js) when it has one.
@@ -176,6 +207,15 @@ export class ExprsEmitter {
 				return;
 			}
 		}
+		// A function-local constant is a local slot (so closures can capture it)
+		// but reads as the checker's exact value, which adapts to the context.
+		if (
+			expr.kind === "Ident" &&
+			expr._const &&
+			this.resolveLocal(expr.name) &&
+			this._emitLocalConst(expr, targetWasmType)
+		)
+			return;
 		if (this._emitFoldedIntConversion(expr, targetWasmType)) return;
 
 		switch (expr.kind) {
@@ -426,7 +466,9 @@ export class ExprsEmitter {
 		const value = (e) => (e.kind === "KeyValueExpr" ? e.value : e);
 		const emitElem = (e) => {
 			this.emitExpr(e, arrInfo.elemWType);
-			this._emitCopyIfValue(e, e._type, arrInfo.elemWType);
+			// Copy by the element type: a struct stored in an `any` element
+			// is already boxed, and a keyed element wraps its value.
+			this._emitCopyIfValue(e, elemType, arrInfo.elemWType);
 		};
 		if (ascending && size <= MAX_NEW_FIXED) {
 			const slots = new Array(size).fill(null);
@@ -483,9 +525,41 @@ export class ExprsEmitter {
 	// (_openNilBlock) when it is null.  Outside one, the access traps.
 	_emitNilCheck(goType) {
 		if (goType?.kind !== "pointer") return;
+		this._emitNilBranch();
+	}
+
+	_emitNilBranch() {
 		const depth = this.resolveBranchDepthToRole("nil");
 		if (depth == null) return;
 		this.pushInstruction({ op: "br_on_null", depth });
+	}
+
+	// Emits the struct (or struct pointer) a field access or store goes
+	// through, nil-checked.  A `*p` base is the pointee itself, not the copy a
+	// value read of `*p` makes, so a store through it lands in the pointee.
+	// Every selector read and every field store/op-assign/inc-dec starts here.
+	emitSelectorBase(node, wType = null, goType = node._type) {
+		const pointer = this._structDerefPointer(node);
+		if (pointer) {
+			this.emitSelectorBase(pointer);
+			return;
+		}
+		this.emitExpr(node, wType ?? this.toWasmType(goType));
+		this._emitNilCheck(goType);
+	}
+
+	// For `*p` (possibly parenthesised) with `p` pointing at a struct, the
+	// pointer `p`, which is the struct's own reference; otherwise null.
+	_structDerefPointer(node) {
+		let base = node;
+		while (base?.kind === "ParenExpr") base = base.expr;
+		if (
+			(base?.kind !== "UnaryExpr" || base.op !== "*") &&
+			base?.kind !== "StarExpr"
+		)
+			return null;
+		const operand = base.operand ?? base.expr;
+		return this._derefStructInfo(operand) ? operand : null;
 	}
 
 	_emitPkgConst(expr, targetWasmType) {
@@ -552,9 +626,7 @@ export class ExprsEmitter {
 			);
 		}
 
-		const baseWType = this.toWasmType(expr.expr._type);
-		this.emitExpr(expr.expr, baseWType);
-		this._emitNilCheck(expr.expr._type);
+		this.emitSelectorBase(expr.expr);
 
 		for (let i = 0; i < path.length; i++) {
 			const step = path[i];
@@ -1295,14 +1367,26 @@ export class ExprsEmitter {
 		}
 	}
 
+	// "complex64" | "complex128" when `w` is the struct type of a complex value.
+	_complexKindOfWType(w) {
+		if (typeof w?.typeIndex !== "number") return null;
+		for (const [kind, info] of this.mod.complexTypes) {
+			if (info.typeIndex === w.typeIndex) return kind;
+		}
+		return null;
+	}
+
 	emitBasicLit(lit, targetWasmType) {
+		const targetComplex = this._complexKindOfWType(targetWasmType);
 		const isTargetComplex64 =
 			lit._type?.name === "complex64" ||
-			targetWasmType?.typeName === "$complex64";
+			targetWasmType?.typeName === "$complex64" ||
+			targetComplex === "complex64";
 		const isTargetComplex128 =
 			lit._type?.name === "complex128" ||
 			lit._type?.base === "complex128" ||
-			targetWasmType?.typeName === "$complex128";
+			targetWasmType?.typeName === "$complex128" ||
+			targetComplex === "complex128";
 		if (isTargetComplex64 || isTargetComplex128) {
 			const info = this.mod.getComplexType(
 				isTargetComplex64 ? "complex64" : "complex128",
@@ -1675,11 +1759,31 @@ export class ExprsEmitter {
 		});
 	}
 
+	_isPointerGoType(t) {
+		let x = t;
+		if (x?.kind === "named" && x.underlying) x = x.underlying;
+		return x?.kind === "pointer" || x?.kind === "PointerType";
+	}
+
+	_ptrBaseType(t) {
+		let x = t;
+		if (x?.kind === "named" && x.underlying) x = x.underlying;
+		return x?.kind === "pointer" ? x.base : null;
+	}
+
+	// The struct a `*operand` reads or writes, or null when the operand points
+	// at something else: `*pp` with `pp **T` loads a pointer, not a struct.
+	_derefStructInfo(operand) {
+		if (this._isPointerGoType(this._ptrBaseType(operand._type))) return null;
+		return this._resolveStructInfo(operand);
+	}
+
 	_emitDerefExpr(operand) {
-		const structInfo = this._resolveStructInfo(operand);
+		const structInfo = this._derefStructInfo(operand);
 		if (structInfo) {
 			const baseWType = this.toWasmType(operand._type);
 			this.emitExpr(operand, baseWType);
+			this._emitNilCheck(operand._type);
 			this.emitCloneStruct(structInfo, baseWType);
 			return;
 		}
@@ -1704,6 +1808,7 @@ export class ExprsEmitter {
 			typeName: ptr.name,
 		};
 		this.emitExpr(operand, ptrWType);
+		this._emitNilCheck(operandGoType);
 		this.pushInstruction({
 			op: "ref.cast",
 			typeIndex: box.typeIndex,
@@ -2059,10 +2164,17 @@ export class ExprsEmitter {
 			return;
 		}
 
-		const leftType = left._type;
+		// An untyped constant operand takes the type of the typed one
+		// (`'a' < rune(b)`), so both sides share one wasm representation.
+		const leftType =
+			left._type?.kind === "untyped" &&
+			right._type &&
+			right._type.kind !== "untyped"
+				? right._type
+				: left._type;
 		const isLeftI32 = this._isI32IndexExpr(left);
 		const isRightI32 = this._isI32IndexExpr(right);
-		const leftGoType = left._type ?? this._resolveExprGoType(left);
+		const leftGoType = leftType ?? this._resolveExprGoType(left);
 		const isIntType =
 			!leftGoType ||
 			(leftGoType.kind === "basic" &&
@@ -2642,6 +2754,21 @@ export class ExprsEmitter {
 		this.pushInstruction({ op: "local.set", index: tmpVal });
 
 		this.emitExpr(right, rightWType);
+		// A negative signed count panics before the shift is evaluated.
+		if (isSigned(right._type) && right.kind !== "BasicLit") {
+			const tmpCount = this.acquireTemp(rightWType);
+			this.pushInstruction({ op: "local.tee", index: tmpCount });
+			this.pushInstruction({
+				op: `${rightWType}.const`,
+				value: rightWType === "i64" ? 0n : 0,
+			});
+			this.pushInstruction(`${rightWType}.lt_s`);
+			this.pushInstruction({ op: "if", blockType: "void" });
+			this.emitPanic("runtime error: negative shift amount");
+			this.pushInstruction("end");
+			this.pushInstruction({ op: "local.get", index: tmpCount });
+			this.releaseTemp(tmpCount, rightWType);
+		}
 		if (wType === "i64" && rightWType === "i32") {
 			this.pushInstruction("i64.extend_i32_u");
 		} else if (wType === "i32" && rightWType === "i64") {
@@ -2688,11 +2815,41 @@ export class ExprsEmitter {
 		const fromWType = this.toWasmType(fromType);
 		const toWType = this.toWasmType(targetType);
 
+		// `[]T(nil)` and `(*T)(nil)`: the target type's nil, not a converted value.
+		if (
+			(expr.kind === "Ident" && expr.name === "nil") ||
+			(expr.kind === "BasicLit" && expr.litKind === "NIL")
+		) {
+			this._emitNilValue(targetType, toWType);
+			return;
+		}
+
+		// `any(x)` boxes x exactly like an assignment to an `any` variable.
+		if (isAnyType(targetType, this.mod.checker)) {
+			this.emitExpr(expr, "anyref");
+			return;
+		}
+
 		this.emitExpr(expr, fromWType);
 
 		if (isComplex(targetType)) {
 			this._emitComplexConversion(targetType, fromType, fromWType);
 			return;
+		}
+
+		// Struct to a different defined struct type: a copy in the target's type.
+		if (
+			isStructType(fromType, this.mod.checker, this.mod) &&
+			isStructType(targetType, this.mod.checker, this.mod) &&
+			!isPointerToStruct(fromType, this.mod.checker, this.mod) &&
+			!isPointerToStruct(targetType, this.mod.checker, this.mod)
+		) {
+			const src = this._resolveStructInfo({ _type: fromType });
+			const dst = this._resolveStructInfo({ _type: targetType });
+			if (src && dst && src.typeIndex !== dst.typeIndex) {
+				this.emitCloneStruct(src, fromWType, dst);
+				return;
+			}
 		}
 
 		if (fromWType === toWType) {

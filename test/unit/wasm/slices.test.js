@@ -3,6 +3,7 @@
 
 import {
 	assertEqual,
+	assertProgramOutput,
 	compileHybrid,
 	runWasm,
 	section,
@@ -689,4 +690,61 @@ func Main() int64 {
 	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
 	assertEqual(wasmRes, 2n);
 	assertEqual(wasmRes, jsRes);
+});
+
+section("WASM Slices — append and copy from a string");
+
+test("append(b, s...) and copy(b, s) take the bytes of a string", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+const pc = "pkgconst"
+
+type S string
+type MB []byte
+type E struct{ enc [64]byte }
+
+func main() {
+	var b []byte
+	b = append(b, "hello"...)
+	var e E
+	copy(e.enc[:], "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/")
+	fmt.Println(e.enc[1], len(b))
+	n := copy(b, "xy")
+	fmt.Println(n, string(b))
+	b = append(b[:0], pc...)
+	fmt.Println(string(b))
+	var ns S = "named"
+	b = append(b, ns...)
+	fmt.Println(string(b))
+	var a [3]byte
+	fmt.Println(copy(a[:], "héllo"), a)
+	fmt.Println(copy(b, ""))
+	var mb MB
+	mb = append(mb, "mb"...)
+	copy(mb, S("zz"))
+	fmt.Println(string(mb), len(mb))
+	g := func() string { return "g" + string(rune(66)) }
+	b = append(b[:0], g()...)
+	fmt.Println(string(b))
+	fmt.Println(copy(b[1:], g()+"!!"), string(b))
+	var empty []byte
+	empty = append(empty, "é"...)
+	fmt.Println(empty)
+}
+`,
+		`66 5
+2 xyllo
+pkgconst
+pkgconstnamed
+3 [104 195 169]
+0
+zz 2
+gB
+1 gg
+[195 169]
+`,
+	);
 });

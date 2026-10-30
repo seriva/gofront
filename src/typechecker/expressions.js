@@ -82,7 +82,11 @@ const BUILTIN_CHECK = {
 		return st;
 	},
 	copy: (s, _n, e, at) => s._checkBuiltinCopy(e, at),
-	delete: () => VOID,
+	delete: (s, _n, e, at) => {
+		const mt = s._deepUnderlying(at[0]);
+		if (mt?.kind === "map" && e.args[1]) s._markIfaceKey(mt, e.args[1], at[1]);
+		return VOID;
+	},
 	make: (s, _n, e, _at, sc) => {
 		if (e.args.length < 1) return ANY;
 		const ta = e.args[0];
@@ -91,7 +95,8 @@ const BUILTIN_CHECK = {
 	},
 	new: (s, _n, e, _at, sc) => {
 		if (e.args.length < 1) return ANY;
-		const inner = s.resolveTypeNode(e.args[0], sc);
+		const ta = e.args[0];
+		const inner = s.resolveTypeNode(ta.kind === "TypeExpr" ? ta.type : ta, sc);
 		return { kind: "pointer", base: inner };
 	},
 	print: (s, n, e, at) => s._checkPrintArgs(n, e, at),
@@ -452,7 +457,17 @@ export const expressionCheckMethods = {
 		return { kind: "pointer", base: ot };
 	},
 
+	// Go constants have no negative zero: `-0.0` is plain 0, so it is rewritten
+	// to a unary plus that both backends compile to +0.
+	_foldNegativeZeroLiteral(expr) {
+		const o = expr.operand;
+		if (expr.op !== "-" || o?.kind !== "BasicLit") return;
+		if (o.litKind !== "INT" && o.litKind !== "FLOAT") return;
+		if (Number(String(o.value).replaceAll("_", "")) === 0) expr.op = "+";
+	},
+
 	_checkUnaryExpr(expr, scope) {
+		this._foldNegativeZeroLiteral(expr);
 		if (expr.op === "*") expr.operand._typeRefOk = true;
 		const ot = this.checkExpr(expr.operand, scope);
 		if (expr.op === "!") return this._checkBoolUnaryOp(ot, expr);
@@ -673,6 +688,32 @@ export const expressionCheckMethods = {
 		return u;
 	},
 
+	// A key of an interface-keyed map (`map[any]T`): the backend encodes it
+	// with its dynamic type, so `L("1")`, `N(1)`, `"1"` and `1` stay distinct.
+	// A named basic value is boxed first, exactly as in any interface
+	// conversion; other values are keyed as they are.
+	_markIfaceKey(mapType, node, srcType) {
+		const key = this.resolveType(mapType.key);
+		const kb = key?.kind === "named" ? this.resolveType(key.underlying) : key;
+		const src = srcType && this.resolveType(srcType);
+		if (node && src?.kind === "typeParam") {
+			// Generic code: whether the key is boxed depends on the type argument,
+			// so the backend decides at run time (`__ikt`).
+			if (key?.kind === "typeParam" || isAny(key) || kb?.kind === "interface") {
+				node._ifaceKeyDyn = key?.kind === "typeParam" ? "same" : "box";
+				node._ifaceKeyParam = src.name;
+			}
+			return;
+		}
+		if (!node || !srcType || (!isAny(key) && kb?.kind !== "interface")) return;
+		node._ifaceKey = true;
+		this._markIfaceBox(key, this.resolveType(srcType), node);
+		if (node._ifaceBox === "named" || node._ifaceBox === "named_ptr") return;
+		node._ifaceBox = undefined;
+		node._ifaceSrc = undefined;
+		node._ifacePtrFields = undefined;
+	},
+
 	_checkIndexExpr(expr, scope) {
 		const typeRef = this._genericTypeRef(expr, scope);
 		if (typeRef) return typeRef;
@@ -681,7 +722,11 @@ export const expressionCheckMethods = {
 			"expr",
 			this.checkExpr(expr.expr, scope),
 		);
-		this.checkExpr(expr.index, scope);
+		if (bt?.kind === "generic") {
+			const inst = this._genericFuncValueAsInstantiation(expr);
+			if (inst) return this._checkInstantiationExpr(inst, scope);
+		}
+		const indexType = this.checkExpr(expr.index, scope);
 		if (bt?._tainted) return TAINTED_ANY;
 		if (isAny(bt)) return ANY;
 		const btu = this._deepUnderlying(bt);
@@ -691,6 +736,7 @@ export const expressionCheckMethods = {
 		}
 		if (btu.kind === "map") {
 			expr._mapValueType = btu.value;
+			this._markIfaceKey(btu, expr.index, indexType);
 			return btu.value;
 		}
 		if (btu.kind === "shared") {
@@ -702,6 +748,30 @@ export const expressionCheckMethods = {
 		}
 		if (isString(bt)) return INT;
 		return this.err(`Cannot index type ${typeStr(bt)}`, expr);
+	},
+
+	// `Id[int]` used as a value reaches the typechecker as an IndexExpr (the
+	// parser only commits to type arguments before a call or literal).  The
+	// node becomes an InstantiationExpr so both backends specialise it.
+	_genericFuncValueAsInstantiation(expr) {
+		const toTypeNode = (n) => {
+			if (n?.kind === "TypeExpr") return n.type;
+			const parts = [];
+			let cur = n;
+			while (cur?.kind === "SelectorExpr") {
+				parts.unshift(cur.field);
+				cur = cur.expr;
+			}
+			if (cur?.kind !== "Ident") return null;
+			parts.unshift(cur.name);
+			return { kind: "TypeName", name: parts.join("."), _line: n._line };
+		};
+		const typeArg = toTypeNode(expr.index);
+		if (!typeArg) return null;
+		expr.kind = "InstantiationExpr";
+		expr.typeArgs = [typeArg];
+		delete expr.index;
+		return expr;
 	},
 
 	// copy(dst, src): element types must be identical when either side is a
@@ -831,6 +901,19 @@ export const expressionCheckMethods = {
 		);
 	},
 
+	// Struct types with identical field names and types convert to each other.
+	_sameStructFields(a, b) {
+		if (a?.kind !== "struct" || b?.kind !== "struct") return false;
+		if (a.fields.size !== b.fields.size) return false;
+		const bf = [...b.fields];
+		let i = 0;
+		for (const [name, type] of a.fields) {
+			const [bn, bt] = bf[i++];
+			if (name !== bn || typeStr(type) !== typeStr(bt)) return false;
+		}
+		return true;
+	},
+
 	_isInvalidArrayConv(tgt, src, srcType) {
 		return tgt?.kind === "array" && src?.kind !== "array" && !isAny(srcType);
 	},
@@ -838,6 +921,8 @@ export const expressionCheckMethods = {
 	_checkTypeConversion(expr, scope) {
 		const srcType = this.checkExpr(expr.expr, scope);
 		const targetType = this.resolveTypeNode(expr.targetType, scope);
+		// `any(x)` / `error(x)`: box x as an implicit conversion would.
+		this._markIfaceBox(targetType, srcType, expr.expr);
 		const srcResolved =
 			srcType?.kind === "named" ? srcType.underlying : srcType;
 		const tgtResolved =
@@ -919,6 +1004,7 @@ export const expressionCheckMethods = {
 			return;
 		}
 		if (typeStr(srcResolved) === typeStr(tgtResolved)) return;
+		if (this._sameStructFields(srcResolved, tgtResolved)) return;
 		if (isNumeric(srcResolved) && isNumeric(tgtResolved)) return;
 		if (isString(srcResolved) && isString(tgtResolved)) return;
 		if (isBool(srcResolved) && isBool(tgtResolved)) return;
@@ -1019,6 +1105,12 @@ export const expressionCheckMethods = {
 			const typeArgs = expr.typeArgs.map((ta) =>
 				this.resolveTypeNode(ta, scope),
 			);
+			if (typeArgs.length > baseType.typeParams.length) {
+				return this.err(
+					`got ${typeArgs.length} type arguments but ${baseType.name ?? "function"} has ${baseType.typeParams.length} type parameters`,
+					expr,
+				);
+			}
 			// Check constraints
 			for (
 				let i = 0;
@@ -1042,7 +1134,26 @@ export const expressionCheckMethods = {
 		// rewrite the node in place into an IndexExpr and check that instead.
 		const indexExpr = this._instantiationAsIndex(expr, baseType);
 		if (indexExpr) return this._checkIndexExpr(indexExpr, scope);
+		if (baseType?.kind === "func" && !this._isPseudoGenericStdFunc(baseType))
+			return this.err(
+				`cannot instantiate ${this._calleeName(expr.expr)}: not a generic function`,
+				expr,
+			);
 		return baseType;
+	},
+
+	// Emitter-backed stdlib helpers (`slices.Sort`, `maps.Keys`) take `any`
+	// parameters in place of type parameters and accept (and ignore) explicit
+	// type arguments; a stdlib function with concrete parameters does not.
+	_isPseudoGenericStdFunc(fnType) {
+		return (fnType.params ?? []).some((p) => isAny(p));
+	},
+
+	_calleeName(node) {
+		if (node?.kind === "Ident") return node.name;
+		if (node?.kind === "SelectorExpr")
+			return `${this._calleeName(node.expr)}.${node.field}`;
+		return "expression";
 	},
 
 	_instantiationAsIndex(expr, baseType) {
@@ -1197,7 +1308,11 @@ export const expressionCheckMethods = {
 		const generic = inst?.kind === "InstantiationExpr" && inst._genericFnType;
 		if (!generic || inst._typeArgs.length >= generic.typeParams.length)
 			return null;
-		const typeArgs = this.inferTypeArgs(generic, argTypes, inst._typeArgs);
+		const typeArgs = this.inferTypeArgs(
+			generic,
+			this._inferArgTypes(expr, argTypes),
+			inst._typeArgs,
+		);
 		if (!typeArgs) {
 			this.err(
 				`Cannot infer type arguments for generic function '${generic.name}'`,
@@ -1221,6 +1336,11 @@ export const expressionCheckMethods = {
 				expr,
 			);
 		}
+		if (isNumeric(argTypes[0]) && !this._constraintHasTypeSet(tp.constraint))
+			return this.err(
+				`cannot convert ${typeStr(argTypes[0])} to type ${typeStr(tp)}: ${typeStr(tp)} is not constrained to a set of convertible types`,
+				expr,
+			);
 		if (
 			!isNumeric(argTypes[0]) &&
 			!isAny(argTypes[0]) &&
@@ -1231,6 +1351,21 @@ export const expressionCheckMethods = {
 				expr,
 			);
 		return tp;
+	},
+
+	// A conversion to a type parameter needs a constraint that lists types
+	// (`~int | ~float64`, or an interface embedding such a union); `any`,
+	// `comparable` and method-only constraints allow every type argument.
+	_constraintHasTypeSet(constraint) {
+		if (!constraint) return true;
+		if (constraint.kind === "UnionConstraint") return true;
+		const c = this.resolveType(constraint);
+		const base = c?.kind === "named" ? this.resolveType(c.underlying) : c;
+		if (base?.kind !== "interface") return false;
+		if (base.unionConstraint) return true;
+		return (base._typeSetEmbeds ?? []).some((e) =>
+			this._constraintHasTypeSet(e),
+		);
 	},
 
 	checkCall(expr, scope) {
@@ -1259,6 +1394,9 @@ export const expressionCheckMethods = {
 		const argTypes = this._resolveCallArgTypes(expr, scope);
 
 		if (fnType?._tainted) return TAINTED_ANY;
+		// `any(x)` / `error(x)` / `Iface(x)`: box x as an implicit conversion would.
+		if (expr.func._isTypeRef && expr.args.length === 1 && argTypes[0])
+			this._markIfaceBox(fnType, argTypes[0], expr.args[0]);
 		if (isAny(fnType)) return ANY;
 
 		// Named type used as a constructor/conversion: Greeter(fn), NodeFunc(fn)
@@ -1358,8 +1496,21 @@ export const expressionCheckMethods = {
 		}
 	},
 
+	// Argument types for inference: a spread argument `xs...` stands for its
+	// elements, which is what the variadic parameter type describes.
+	_inferArgTypes(expr, argTypes) {
+		return argTypes.map((t, i) => {
+			if (!expr.args?.[i]?._spread) return t;
+			const u = this.resolveType(t?.kind === "named" ? t.underlying : t);
+			return u?.kind === "slice" ? u.elem : t;
+		});
+	},
+
 	_resolveGenericFnType(fnType, argTypes, expr, scope) {
-		const typeArgs = this.inferTypeArgs(fnType, argTypes);
+		const typeArgs = this.inferTypeArgs(
+			fnType,
+			this._inferArgTypes(expr, argTypes),
+		);
 		if (!typeArgs) {
 			this.err(
 				`Cannot infer type arguments for generic function '${fnType.name}'`,
@@ -1591,6 +1742,10 @@ export const expressionCheckMethods = {
 				: this.resolveTypeNode(expr.typeExpr, scope);
 		const base = t.kind === "named" ? t.underlying : t;
 		const typeNode = expr.typeExpr;
+		if (expr.typeExpr === null && hintType && base?.kind === "basic") {
+			this.err(`invalid composite literal type ${typeStr(t)}`, expr);
+			return t;
+		}
 		if (this._isSliceOrArray(base)) this._checkArrayLitKeys(expr, scope);
 		this._inferArraySize(expr, typeNode, base);
 		if (base?.kind === "struct")
@@ -1747,6 +1902,7 @@ export const expressionCheckMethods = {
 					vt = this.checkExpr(elem.value, scope);
 				}
 				this.assertAssignable(base.key, kt, elem.key);
+				this._markIfaceKey(base, elem.key, kt);
 				this.assertAssignable(base.value, vt, elem.value);
 			}
 		}

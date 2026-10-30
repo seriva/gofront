@@ -658,8 +658,9 @@ func Main() string {
 	c2 := slices.Compare([]float64{math.NaN()}, []float64{1.0})
 	c3 := slices.Compare([]float64{1.0}, []float64{math.NaN()})
 	sorted1 := slices.IsSorted([]float64{1.0, math.NaN(), 2.0})
-	min0 := slices.Min([]float64{0.0, -0.0})
-	max0 := slices.Max([]float64{-0.0, 0.0})
+	negZero := math.Copysign(0, -1)
+	min0 := slices.Min([]float64{0.0, negZero})
+	max0 := slices.Max([]float64{negZero, 0.0})
 	return fmt.Sprintf("%d %d %d %v %v %v", c1, c2, c3, sorted1, math.Signbit(min0), math.Signbit(max0))
 }
 `;

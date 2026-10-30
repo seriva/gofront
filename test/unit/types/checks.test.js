@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import {
 	assertEqual,
 	assertErrorContains,
+	assertProgramOutput,
 	compile,
 	runJs,
 	section,
@@ -983,6 +984,200 @@ func main() {
 // ═════════════════════════════════════════════════════════════
 // Additional coverage
 // ═════════════════════════════════════════════════════════════
+
+section("Type switch nil binding and elided map keys");
+
+test("type switch: case nil with a binding runs on every target", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+func check(err error) {
+	switch e := err.(type) {
+	case nil:
+		_ = e
+		fmt.Println("nil")
+	default:
+		fmt.Println("err", e)
+	}
+}
+
+func main() {
+	check(nil)
+	check(errors.New("x"))
+}
+`,
+		"nil\nerr x\n",
+	);
+});
+
+test("composite literal: elided key of a non-composite key type is an error", () => {
+	const { errors } = compile(`package main
+func main() {
+	_ = map[string]int{{1}: 1}
+}
+`);
+	assertErrorContains(errors, "invalid composite literal type string");
+});
+
+section("Multi-value returns, grouped results, interface{} identity");
+
+test("return forwards a multi-value call from an interface field", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type W interface{ Write(p []byte) (int, error) }
+type bw struct{}
+
+func (bw) Write(p []byte) (int, error) { return len(p), nil }
+
+type hm struct{ inner W }
+
+func (h *hm) Write(p []byte) (n int, err error) { return h.inner.Write(p) }
+
+func main() {
+	h := &hm{inner: bw{}}
+	n, err := h.Write([]byte("xy"))
+	fmt.Println(n, err)
+}
+`,
+		"2 <nil>\n",
+	);
+});
+
+test("return forwards a multi-value call with make argument", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type T struct{}
+
+func (t T) App(b []byte) ([]byte, error) { return append(b, 1), nil }
+
+func (t T) Go() ([]byte, error) { return t.App(make([]byte, 0, 20)) }
+
+func main() {
+	b, err := T{}.Go()
+	fmt.Println(b, err)
+}
+`,
+		"[1] <nil>\n",
+	);
+});
+
+test("return forwards ReadRune from a strings.Reader", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"fmt"
+	"strings"
+)
+
+type rd struct{ r *strings.Reader }
+
+func (x rd) Next() (rune, int, error) { return x.r.ReadRune() }
+
+func main() {
+	r, n, err := rd{strings.NewReader("a")}.Next()
+	fmt.Println(r, n, err)
+}
+`,
+		"97 1 <nil>\n",
+	);
+});
+
+test("return forwards Write from a strings.Builder field", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"fmt"
+	"strings"
+)
+
+type sw struct{ sb strings.Builder }
+
+func (s *sw) Write(p []byte) (int, error) { return s.sb.Write(p) }
+
+func main() {
+	s := &sw{}
+	n, _ := s.Write([]byte("hi"))
+	fmt.Println(n)
+}
+`,
+		"2\n",
+	);
+});
+
+test("return forwarding a call with the wrong result count still errors", () => {
+	const { errors } = compile(`package main
+func two() (int, int) { return 1, 2 }
+func f() (int, int, int) { return two() }
+func main() { _, _, _ = f() }`);
+	assertErrorContains(errors, "return count mismatch");
+});
+
+test("grouped named results (r, theta float64)", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func Polar(x float64) (r, theta float64) { return x, 0 }
+
+func Three() (a, b int, err error) { return 1, 2, nil }
+
+func main() {
+	r, th := Polar(2)
+	fmt.Println(r, th)
+	a, b, err := Three()
+	fmt.Println(a, b, err)
+}
+`,
+		"2 0\n1 2 <nil>\n",
+	);
+});
+
+test("interface{} and any are identical in method signatures", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type Bag interface {
+	Do(func(uint8) any) []any
+}
+type impl struct{}
+
+func (impl) Do(f func(uint8) interface{}) []interface{} { return []interface{}{f(1)} }
+
+func main() {
+	var b Bag = impl{}
+	fmt.Println(len(b.Do(func(x uint8) any { return x })))
+	_, ok := any(impl{}).(Bag)
+	fmt.Println(ok)
+}
+`,
+		"1\ntrue\n",
+	);
+});
+
+test("a real method signature mismatch still reports does not implement", () => {
+	const { errors } = compile(`package main
+type Bag interface{ Do(func(uint8) any) []any }
+type impl struct{}
+func (impl) Do(f func(uint8) int) []any { return nil }
+func main() { var b Bag = impl{}; _ = b }`);
+	assertErrorContains(errors, "does not implement");
+});
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);

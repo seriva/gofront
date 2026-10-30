@@ -100,7 +100,8 @@ export const statementCheckMethods = {
 		const resolvedBase =
 			mapBaseType?.kind === "named" ? mapBaseType.underlying : mapBaseType;
 		if (resolvedBase?.kind !== "map") return false;
-		this.checkExpr(stmt.rhs[0].index, scope);
+		const keyType = this.checkExpr(stmt.rhs[0].index, scope);
+		this._markIfaceKey(resolvedBase, stmt.rhs[0].index, keyType);
 		stmt._commaOkMap = true;
 		stmt.rhs[0]._mapValueType = resolvedBase.value;
 		this._declareDefineVars(stmt, [resolvedBase.value, BOOL], scope);
@@ -158,7 +159,8 @@ export const statementCheckMethods = {
 		const resolvedBase =
 			mapBaseType?.kind === "named" ? mapBaseType.underlying : mapBaseType;
 		if (resolvedBase?.kind !== "map") return null;
-		this.checkExpr(stmt.rhs[0].index, scope);
+		const keyType = this.checkExpr(stmt.rhs[0].index, scope);
+		this._markIfaceKey(resolvedBase, stmt.rhs[0].index, keyType);
 		stmt._commaOkMap = true;
 		stmt.rhs[0]._mapValueType = resolvedBase.value;
 		return [resolvedBase.value, BOOL];
@@ -262,6 +264,26 @@ export const statementCheckMethods = {
 		if (!isVoid(returnType) && types.length > 0) {
 			const expected =
 				returnType.kind === "tuple" ? returnType.types : [returnType];
+			// `return f()` forwards every result of a multi-value call.
+			if (types.length === 1 && types[0]?.kind === "tuple") {
+				const forwarded = types[0].types;
+				if (forwarded.length !== expected.length) {
+					this.err(
+						`return count mismatch: have ${forwarded.length} values, want ${expected.length}`,
+						stmt,
+					);
+					return;
+				}
+				for (let i = 0; i < expected.length; i++) {
+					this.assertAssignable(
+						expected[i],
+						forwarded[i],
+						stmt.values[0],
+						"return statement",
+					);
+				}
+				return;
+			}
 			for (let i = 0; i < expected.length; i++) {
 				if (types[i])
 					this.assertAssignable(
@@ -309,7 +331,14 @@ export const statementCheckMethods = {
 		}
 	},
 
-	_checkForStmt(stmt, scope, returnType) {
+	// `checkBody(bodyScope)` checks the loop body; templ `for` loops pass one
+	// that checks their HTML nodes in place of the header's empty block.
+	_checkForStmt(
+		stmt,
+		scope,
+		returnType,
+		checkBody = (s) => this.checkBlock(stmt.body, s, returnType),
+	) {
 		const inner = new Scope(scope);
 		let iterInfo = null;
 		if (stmt.init?.rhs?.[0]?.kind === "RangeExpr") {
@@ -320,7 +349,7 @@ export const statementCheckMethods = {
 		if (stmt.post) this.checkStmt(stmt.post, inner, returnType);
 		this._loopDepth++;
 		const bodyScope = new Scope(inner);
-		this.checkBlock(stmt.body, bodyScope, returnType);
+		checkBody(bodyScope);
 		this._reportUnused(bodyScope, stmt);
 		this._loopDepth--;
 		this._reportUnused(inner, stmt);
@@ -341,6 +370,19 @@ export const statementCheckMethods = {
 		this._reportUnused(inner, stmt);
 	},
 
+	// A case naming an interface (literal or declared) records the resolved
+	// type so backends test its method set.
+	_markInterfaceCaseType(t, scope) {
+		if (!t || (t.kind !== "InterfaceType" && t.kind !== "TypeName")) return;
+		if (t.kind === "TypeName" && (t.name === "nil" || t.name === "error"))
+			return;
+		const resolved = this.resolveTypeNode(t, scope);
+		const u = this.resolveType(
+			resolved?.kind === "named" ? resolved.underlying : resolved,
+		);
+		if (u?.kind === "interface") t._type = resolved;
+	},
+
 	_checkTypeSwitchStmt(stmt, scope, returnType) {
 		const inner = new Scope(scope);
 		this.checkExpr(stmt.expr, inner);
@@ -353,11 +395,18 @@ export const statementCheckMethods = {
 			for (const t of c.types ?? []) {
 				const base = t?.kind === "PointerType" ? t.base : t;
 				if (base?.kind === "GenericTypeName") this.resolveTypeNode(t, inner);
+				this._markInterfaceCaseType(t, inner);
 			}
 			if (stmt.assign) {
-				// Bind the variable to the single case type, or any for multi/default
-				const bindType =
-					c.types?.length === 1 ? this.resolveTypeNode(c.types[0], inner) : ANY;
+				// Bind the variable to the single case type, or any for multi/default.
+				// `case nil` binds the switch expression's own type, as in Go.
+				const only = c.types?.length === 1 ? c.types[0] : null;
+				const isNilCase = only?.kind === "TypeName" && only.name === "nil";
+				const bindType = isNilCase
+					? (stmt.expr._type ?? ANY)
+					: only
+						? this.resolveTypeNode(only, inner)
+						: ANY;
 				caseScope.defineLocal(stmt.assign, bindType);
 				// The capture variable is always considered used — it's the whole
 				// point of the switch-with-assign form. Each case body uses its own

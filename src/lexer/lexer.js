@@ -52,7 +52,6 @@ const KEYWORDS = new Set([
 	"case",
 	"default",
 	"map",
-	"new",
 	"fallthrough",
 	"goto",
 	"defer",
@@ -86,6 +85,11 @@ const ASSIGN_OP = {
 	"^": [T.CARET_ASSIGN, "^=", T.CARET, "^"],
 	":": [T.DEFINE, ":=", T.COLON, ":"],
 };
+
+const UNICODE_LETTER = /^\p{L}$/u;
+const UNICODE_DIGIT = /^\p{Nd}$/u;
+const isUnicodeLetter = (cp) => UNICODE_LETTER.test(String.fromCodePoint(cp));
+const isUnicodeDigit = (cp) => UNICODE_DIGIT.test(String.fromCodePoint(cp));
 
 export class LexError extends Error {
 	constructor(msg, line, col, filename, sourceCode) {
@@ -405,6 +409,20 @@ export class Lexer {
 		return { n, isFloat: false };
 	}
 
+	// The leading "." is already consumed; reads digits and an optional exponent.
+	_readLeadingDotFloat() {
+		let n = "0.";
+		while (this.pos < this.src.length) {
+			const c = this.src.charCodeAt(this.pos);
+			if (c >= 48 && c <= 57) n += this.advance();
+			else if (c === 95) this.advance();
+			else break;
+		}
+		const c = this.src.charCodeAt(this.pos);
+		if (c === 101 || c === 69) n = this._readDecimalExponent(n);
+		return { n };
+	}
+
 	_readDecimalExponent(n) {
 		n += this.advance(); // consume e/E
 		if (this.peek() === "+" || this.peek() === "-") n += this.advance();
@@ -463,6 +481,13 @@ export class Lexer {
 		return { n, isFloat };
 	}
 
+	_startsUnicodeIdent() {
+		return (
+			this.peek().charCodeAt(0) > 127 &&
+			isUnicodeLetter(this.src.codePointAt(this.pos))
+		);
+	}
+
 	readIdent() {
 		const start = this.pos;
 		while (this.pos < this.src.length) {
@@ -474,6 +499,10 @@ export class Lexer {
 				code === 95
 			) {
 				this.pos++;
+			} else if (code > 127) {
+				const cp = this.src.codePointAt(this.pos);
+				if (!isUnicodeLetter(cp) && !isUnicodeDigit(cp)) break;
+				this.pos += cp > 0xffff ? 2 : 1;
 			} else {
 				break;
 			}
@@ -539,7 +568,7 @@ export class Lexer {
 			}
 
 			// Identifiers & keywords
-			if (/[a-zA-Z_]/.test(ch)) {
+			if (/[a-zA-Z_]/.test(ch) || this._startsUnicodeIdent()) {
 				const id = this.readIdent();
 				this.push(KEYWORDS.has(id) ? id : T.IDENT, id, l, c);
 				continue;
@@ -629,7 +658,10 @@ export class Lexer {
 				else this.push(T.PIPE, "|", l, c);
 				break;
 			case ".":
-				if (this.peek() === "." && this.peek(1) === ".") {
+				if (/[0-9]/.test(this.peek() ?? "")) {
+					const { n } = this._readLeadingDotFloat();
+					this.push(T.FLOAT, n, l, c);
+				} else if (this.peek() === "." && this.peek(1) === ".") {
 					this.advance();
 					this.advance();
 					this.push(T.ELLIPSIS, "...", l, c);

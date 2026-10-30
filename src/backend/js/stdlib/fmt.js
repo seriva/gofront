@@ -1,6 +1,12 @@
 // CodeGen for Go `fmt` package — installed onto CodeGen.prototype via stdlibGenMethods.
 
-import { fmtTypeDesc, fmtWantsTypes } from "../../shared/fmt-types.js";
+import {
+	fmtDescHasFloat,
+	fmtDescIsSeq,
+	fmtTypeDesc,
+	fmtWantsTypes,
+	structOwnFields,
+} from "../../shared/fmt-types.js";
 
 /** @typedef {import('../index.js').CodeGen} CodeGen */
 
@@ -42,26 +48,50 @@ export const fmtMethods = {
 	//   { sv: 1 }        a struct value with a pointer-receiver Error/String
 	//   { e }            elements of a slice or array
 	//   { k, v }         keys and values of a map
-	_fmtDesc(t, seen = new Set()) {
+	//   { np: obj }      a *T whose Error/String has a pointer receiver: obj
+	//                    stands in for a nil element (see _fmtNilPtrOperand)
+	//   { m: 1, ... }    a map that is not boxed itself (a struct field or an
+	//                    element): the object map carries no marker of its own
+	//   `bare`: the value is the operand being boxed (a map is then marked by
+	//   the boxing itself).
+	_fmtDesc(t, seen = new Set(), bare = true) {
 		t = this.checker?.resolveType?.(t) ?? t;
 		if (!t || seen.has(t)) return null;
 		const next = new Set(seen).add(t);
-		if (t.kind === "named") return this._fmtNamedDesc(t, next);
+		if (t.kind === "named") return this._fmtNamedDesc(t, next, bare);
 		if (t.kind === "slice" || t.kind === "array") {
-			const e = this._fmtDesc(t.elem, next);
+			const e = this._fmtDesc(t.elem, next, false);
 			return e ? `{ e: ${e} }` : null;
+		}
+		if (t.kind === "struct") return this._fmtAnonStructDesc(t, next);
+		if (t.kind === "pointer") {
+			if (bare) return null;
+			const np = this._fmtNilPtrOperand(t);
+			return np ? `{ np: ${np} }` : null;
 		}
 		if (t.kind !== "map") return null;
 		const parts = [
-			["k", this._fmtDesc(t.key, next)],
-			["v", this._fmtDesc(t.value, next)],
+			["k", this._fmtDesc(t.key, next, false)],
+			["v", this._fmtDesc(t.value, next, false)],
 		].filter(([, d]) => d);
+		if (!bare) parts.unshift(["m", "1"]);
 		return parts.length
 			? `{ ${parts.map(([n, d]) => `${n}: ${d}`).join(", ")} }`
 			: null;
 	},
 
-	_fmtNamedDesc(t, seen) {
+	// An anonymous struct has no class to carry field descriptors: { ff } holds
+	// them, keyed by field name.
+	_fmtAnonStructDesc(st, seen) {
+		const fields = [];
+		for (const [fname, ftype] of structOwnFields(st)) {
+			const desc = this._fmtDesc(ftype, seen, false);
+			if (desc) fields.push(`${JSON.stringify(fname)}: ${desc}`);
+		}
+		return fields.length > 0 ? `{ ff: { ${fields.join(", ")} } }` : null;
+	},
+
+	_fmtNamedDesc(t, seen, bare = true) {
 		const u = this.checker?.resolveType?.(t.underlying) ?? t.underlying;
 		const info = this._namedBoxInfo(t);
 		if (
@@ -74,7 +104,7 @@ export const fmtMethods = {
 		if (u?.kind === "struct" && this._fmtHasPtrMethod(u))
 			return FMT_STRUCT_VALUE;
 		if (!u || u.kind === "struct" || u.kind === "interface") return null;
-		return this._fmtDesc(u, seen);
+		return this._fmtDesc(u, seen, bare);
 	},
 
 	// Whether struct `st` has a pointer-receiver Error/String, declared or
@@ -127,10 +157,23 @@ export const fmtMethods = {
 				`Object.defineProperty(${name}.prototype, "__pe", { value: ${JSON.stringify(promoted)} });`,
 			);
 		const fields = [];
-		for (const [fname, ftype] of st.fields.entries()) {
-			const desc = this._fmtDesc(ftype);
-			// Unexported fields get no method dispatch, only the value marker.
-			if (desc && (isExportedName(fname) || desc === FMT_STRUCT_VALUE))
+		const own = structOwnFields(st);
+		// The class also carries a copy of every promoted field (see
+		// _promotedPath); fmt lists only the fields the struct declares.
+		if (own.length < st.fields.size)
+			this.line(
+				`Object.defineProperty(${name}.prototype, "__fk", { value: ${JSON.stringify(own.map(([n]) => n))} });`,
+			);
+		for (const [fname, ftype] of own) {
+			const desc = this._fmtDesc(ftype, new Set(), false);
+			// Unexported fields get no method dispatch, only the value marker
+			// (and the map marker).
+			if (
+				desc &&
+				(isExportedName(fname) ||
+					desc === FMT_STRUCT_VALUE ||
+					/\bm: 1\b/.test(desc))
+			)
 				fields.push(`${fname}: ${desc}`);
 		}
 		// A thunk: the descriptors name classes declared further down.
@@ -168,9 +211,14 @@ export const fmtMethods = {
 			return null;
 		for (const mn of FMT_METHODS) {
 			const m = st.methods?.get(mn) ?? base.methods?.get(mn);
-			if (!m?._ptrRecv || m.params?.length > 0) continue;
-			const cls = this._dequalify(base.name);
-			if (/[[.]/.test(cls)) return null;
+			// Instantiated generic methods are copies without _ptrRecv.
+			const generic = base.typeArgs
+				? this.checker?.types.get(base.name)?._generic
+				: null;
+			const ptrRecv = m?._ptrRecv ?? generic?.methods?.get(mn)?._ptrRecv;
+			if (!m || !ptrRecv || m.params?.length > 0) continue;
+			const cls = this._dequalify(base.name).replace(/\[.*$/, "");
+			if (cls.includes(".")) return null;
 			return `{ ${mn}() { try { return ${cls}.prototype.${mn}.call(null); } catch (e) { return "<nil>"; } }, __p: true, __nilp: true }`;
 		}
 		return null;
@@ -183,9 +231,18 @@ export const fmtMethods = {
 	_fmtArgJs(e, typed = false) {
 		// `xs...` passes each element as its own operand.
 		if (e?._spread) return `...(${this.genExpr(e)} ?? [])`;
+		// A multi-value call (`f()` returning a tuple) passes every result.
+		if (e?._type?.kind === "tuple") return this._fmtTupleJs(e);
 		const nilOperand = this._fmtNilPtrOperand(e?._type);
 		if (nilOperand) return `(${this.genExpr(e)} ?? ${nilOperand})`;
 		const js = this.genExpr(e);
+		// An operand of a type parameter type: the type argument knows how fmt
+		// should see it (a Stringer named type is boxed, a slice gets its elements).
+		const tpf =
+			e?._type?.kind === "typeParam"
+				? this._typeParamZeroFactory(e._type.name)
+				: null;
+		if (tpf) return `(${tpf}.fb ?? ${tpf}.b ?? ((__v) => __v))(${js})`;
 		const base =
 			e?._type?.kind === "named" ? (e._type.underlying ?? e._type) : e?._type;
 		if (e?._type?.name === "time.Duration") {
@@ -193,23 +250,71 @@ export const fmtMethods = {
 			this.useHelper("sprintf");
 			return `__ft(${js}, { k: "named", n: "time.Duration" })`;
 		}
-		if (typed) {
-			const desc = fmtTypeDesc(
-				e?._type,
-				(t) => this.checker?.resolveType?.(t) ?? t,
-			);
-			if (desc && desc.k !== "i") return `__ft(${js}, ${JSON.stringify(desc)})`;
+		const desc = fmtTypeDesc(
+			e?._type,
+			(t) => this.checker?.resolveType?.(t) ?? t,
+		);
+		if ((typed || fmtDescHasFloat(desc)) && desc && desc.k !== "i") {
+			this.useHelper("sprintf");
+			return `__ft(${js}, ${JSON.stringify(desc)})`;
 		}
-		return base?.kind === "slice" ? `(${js} ?? [])` : js;
+		return this._fmtNilValue(base, js, false);
+	},
+
+	// A nil slice or map operand prints as `[]` / `map[]`: coalesce the null
+	// to an empty value.  Shared by the single-operand and the tuple path.
+	// `unboxed`: the map still needs its marker (the caller boxes the result).
+	_fmtNilValue(base, js, unboxed = true) {
+		if (base?.kind === "slice") return `(${js} ?? [])`;
+		if (unboxed && base?.kind === "map") return `(${js} ?? {})`;
+		return js;
+	},
+
+	// `js` (a value of static type `t`) boxed as converting it to an `any` does,
+	// with the same boxing the single-operand path gets from the checker
+	// (_markIfaceBox): named types with methods, pointers, slices, maps, structs
+	// and the fmt descriptor of Stringer elements.
+	_fmtBoxValue(js, t) {
+		const resolve = (x) => this.checker?.resolveType?.(x) ?? x;
+		let base = resolve(t);
+		if (base?.kind === "named") base = resolve(base.underlying);
+		const meta = this.checker?._ifaceBoxMeta?.(t);
+		if (meta?.type)
+			return this._genNamedIfaceBox(js, meta.type, meta.box === "named_ptr");
+		let out = this._fmtNilValue(base, js);
+		if (meta) out = this._ifaceBoxWrap(out, meta.box, meta.ptrFields);
+		const desc = this._fmtDesc(t);
+		return desc ? this._fmtDescWrap(out, desc) : out;
+	},
+
+	// The results of a multi-value call as separate operands.  Each result is
+	// boxed as if it were assigned to an `any`, so pointers print as `&{...}`
+	// and floats keep their width.
+	_fmtTupleJs(e) {
+		const resolve = (t) => this.checker?.resolveType?.(t) ?? t;
+		const parts = e._type.types.map((t, i) => {
+			const boxed = this._fmtBoxValue(`__t[${i}]`, t);
+			const desc = fmtTypeDesc(t, resolve);
+			if (fmtDescHasFloat(desc) && desc.k !== "i") {
+				this.useHelper("sprintf");
+				return `__ft(${boxed}, ${JSON.stringify(desc)})`;
+			}
+			return boxed;
+		});
+		return `...((__t) => [${parts.join(", ")}])(${this.genExpr(e)})`;
 	},
 
 	// The operands of a Printf-style call whose format is args[fmtIdx].
 	_fmtFormatArgsJs(args, fmtIdx) {
 		const lit = args[fmtIdx];
 		const spread = args.some((e) => e?._spread);
+		const resolve = (t) => this.checker?.resolveType?.(t) ?? t;
+		const seqArgs = args
+			.slice(fmtIdx + 1)
+			.some((e) => fmtDescIsSeq(fmtTypeDesc(e?._type, resolve)));
 		const typed =
 			lit?.kind === "BasicLit" &&
-			fmtWantsTypes(lit.value, spread ? -1 : args.length - fmtIdx - 1);
+			fmtWantsTypes(lit.value, spread ? -1 : args.length - fmtIdx - 1, seqArgs);
 		if (typed) this.useHelper("sprintf");
 		return args.map((e, idx) =>
 			idx < fmtIdx
@@ -390,7 +495,7 @@ export const fmtMethods = {
 	_genPrintOperands(expr, sep, suffix) {
 		const argc = expr.args.length;
 		if (argc === 0) return JSON.stringify(suffix);
-		if (expr.args.some((e) => e._spread)) {
+		if (expr.args.some((e) => e._spread || e._type?.kind === "tuple")) {
 			// The operand count is only known at run time: join with Sprint's rules.
 			this.useHelper("sprint");
 			const joined = `__sprint(${sep === " "}, ${expr.args.map((e) => this._fmtArgJs(e)).join(", ")})`;

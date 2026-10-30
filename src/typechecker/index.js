@@ -13,6 +13,7 @@
 import { assignabilityMethods } from "./assignability.js";
 import { constantCheckMethods } from "./constants.js";
 import { expressionCheckMethods } from "./expressions.js";
+import { orderPackageInits, orderVarSpecsForTyping } from "./init-order.js";
 import { resolveMethods } from "./resolve.js";
 import { statementCheckMethods } from "./statements.js";
 import { EXCLUDED_STDLIB_PACKAGES } from "./stdlib/excluded.js";
@@ -23,6 +24,8 @@ import {
 	defaultType,
 	ERROR,
 	INTRINSICS,
+	isAny,
+	isBool,
 	isVoid,
 	Scope,
 	TAINTED_ANY,
@@ -31,6 +34,16 @@ import {
 	VALID_TARGETS,
 	VOID,
 } from "./types.js";
+
+// Checker method per templ body node kind (see _checkTemplNodes).
+const TEMPL_NODE_CHECKS = {
+	TemplElement: "_checkTemplElement",
+	TemplExpr: "_checkTemplLeaf",
+	TemplComponent: "_checkTemplLeaf",
+	TemplIf: "_checkTemplIf",
+	TemplFor: "_checkTemplFor",
+	TemplSwitch: "_checkTemplSwitch",
+};
 
 function rootIdentName(e) {
 	if (!e) return null;
@@ -41,7 +54,7 @@ function rootIdentName(e) {
 }
 
 // Re-export for consumers that import from typechecker.js
-export { TypeCheckError, typeStr };
+export { EXCLUDED_STDLIB_PACKAGES, TypeCheckError, typeStr };
 
 // JavaScript built-ins that generated JS relies on; a JS class of the same
 // name in the bundle would shadow them (see _checkGlobalTypeNamesPass).
@@ -155,6 +168,12 @@ export class TypeChecker {
 			_consts: consts,
 		});
 		for (const [name, type] of types) {
+			const prior = this.types.get(name);
+			if (prior && prior !== type && prior.kind === "named") {
+				this._ambiguousImported ??= new WeakSet();
+				this._ambiguousImported.add(prior);
+				this._ambiguousImported.add(type);
+			}
 			this.types.set(name, type);
 			this.types.set(`${pkgName}.${name}`, type);
 		}
@@ -349,6 +368,7 @@ export class TypeChecker {
 		this._promoteEmbeddedMethods();
 		this._collectVarsConstsPass(programs);
 		this._checkTopDeclsPass(programs);
+		this._reportInitCycles(programs);
 
 		if (this.target === "both") {
 			this._checkMutablePackageVars(programs);
@@ -676,14 +696,30 @@ export class TypeChecker {
 		}
 	}
 
+	// Go rejects package variables whose initialisers depend on each other.
+	_reportInitCycles(programs) {
+		if (this.errors.length > 0) return;
+		const { cycles } = orderPackageInits(programs);
+		for (const c of cycles) {
+			const owner = programs.find((p) =>
+				p.decls?.some((d) => d.kind === "VarDecl" && d.decls?.includes(c.spec)),
+			);
+			if (owner) this._setCurrentFile(owner);
+			this.err(c.message, c.spec);
+		}
+	}
+
 	_checkTopDeclsPass(programs) {
-		for (const p of programs) {
-			this._setCurrentFile(p);
-			for (const d of p.decls) {
-				if (d.kind === "VarDecl" || d.kind === "ConstDecl") {
-					this.checkTopDecl(d, this.globals);
-				}
-			}
+		// A constant may name one declared later, so each is typed after those.
+		for (const e of orderPackageInits(programs).consts) {
+			this._setCurrentFile(e.program);
+			this.checkTopDecl({ ...e.decl, decls: [e.spec] }, this.globals);
+		}
+		// A variable's type may come from one declared later (`var a = b + 1;
+		// var b = f()`), so initialisers are typed after what they name.
+		for (const e of orderVarSpecsForTyping(programs)) {
+			this._setCurrentFile(e.program);
+			this.checkTopDecl({ ...e.decl, decls: [e.spec] }, this.globals);
 		}
 		for (const p of programs) {
 			this._setCurrentFile(p);
@@ -770,6 +806,9 @@ export class TypeChecker {
 		if (!decl.isAlias && underlying.kind === "named") {
 			const inner = this._deepUnderlying(underlying);
 			if (inner?.kind === "array") underlying = inner;
+			// `type S Base` with Base a struct: S gets its own copy of the fields.
+			else if (inner?.kind === "struct")
+				underlying = { ...inner, name: decl.name, methods: new Map() };
 		}
 		if (decl.isAlias) {
 			// type A = B — transparent alias, A and B are identical types
@@ -855,6 +894,7 @@ export class TypeChecker {
 				name: decl.name,
 				typeParams: typeParamTypes,
 				underlying: funcType,
+				declNode: decl,
 			});
 		} else {
 			this.globals.define(decl.name, funcType);
@@ -906,6 +946,7 @@ export class TypeChecker {
 
 	_attachMethod(decl, funcType) {
 		funcType._ptrRecv = Boolean(decl.recvPointer);
+		funcType._decl = decl;
 		const recvNamedType = this.types.get(decl.recvType.name);
 		if (recvNamedType?._generic)
 			this._attachGenericMethod(recvNamedType, decl, funcType);
@@ -932,42 +973,111 @@ export class TypeChecker {
 			case "CssDecl":
 				break;
 			case "TemplDecl":
-				this._markTemplNodesUsed(decl.body);
+				this._checkTemplDecl(decl, scope);
 				break;
 		}
 	}
 
-	_markTokensUsed(tokens) {
+	// A templ body is checked like a function body whose parameters are the
+	// templ's: every Go expression TemplParser attached to a node (`expr`,
+	// attribute `expr`, `forStmt`) is type-checked in the enclosing scope.
+	_checkTemplDecl(decl, outer) {
+		const inner = new Scope(outer);
+		for (const p of decl.params)
+			inner.define(p.name, this._paramType(p, inner));
+		this._checkTemplNodes(decl.body, inner);
+	}
+
+	_checkTemplNodes(nodes, scope) {
+		for (const n of nodes ?? []) {
+			const m = TEMPL_NODE_CHECKS[n.kind];
+			if (m) this[m](n, scope);
+		}
+	}
+
+	// A malformed expression has no AST: the code generator reports its parse
+	// error. Its names count as used so that error is not preceded by a
+	// misleading `declared and not used`.
+	_checkTemplExpr(node, tokens, scope) {
+		if (node.exprError) {
+			this._markTokensUsed(tokens, scope);
+			return null;
+		}
+		return node.expr ? this.checkExpr(node.expr, scope) : null;
+	}
+
+	_checkTemplElement(n, scope) {
+		for (const a of n.attrs ?? []) {
+			if (a.kind === "expr" || a.kind === "cond-bool")
+				this._checkTemplExpr(a, a.tokens, scope);
+		}
+		this._checkTemplNodes(n.children, scope);
+	}
+
+	_checkTemplLeaf(n, scope) {
+		this._checkTemplExpr(n, n.tokens, scope);
+	}
+
+	_checkTemplIf(n, scope) {
+		const ct = this._checkTemplExpr(n, n.condTokens, scope);
+		if (ct && !isBool(ct) && !isAny(ct))
+			this.err("If condition must be bool", n.expr);
+		this._checkTemplNodes(n.then, scope);
+		this._checkTemplNodes(n.else_, scope);
+	}
+
+	_checkTemplSwitch(n, scope) {
+		this._checkTemplExpr(n, n.exprTokens, scope);
+		for (const c of n.cases ?? []) {
+			this._checkTemplExpr(c, c.caseTokens, scope);
+			this._checkTemplNodes(c.body, scope);
+		}
+	}
+
+	// A header that did not parse is reported by the code generator; its body
+	// is not checked, since the loop variables it would declare are unknown.
+	_checkTemplFor(n, scope) {
+		if (!n.forStmt) {
+			this._markTokensUsed(n.stmtTokens, scope);
+			this._markTemplNodesUsed(n.body, scope);
+			return;
+		}
+		this._checkForStmt(n.forStmt, scope, VOID, (bodyScope) =>
+			this._checkTemplNodes(n.body, bodyScope),
+		);
+	}
+
+	_markTokensUsed(tokens, scope) {
 		if (!tokens) return;
 		for (const t of tokens) {
 			if (t.type === "IDENT" || t.type?.name === "IDENT") {
-				this.globals.lookup(t.value);
+				scope.lookup(t.value);
 			}
 		}
 	}
 
-	_markTemplNodesUsed(nodes) {
+	_markTemplNodesUsed(nodes, scope) {
 		if (!nodes) return;
 		for (const n of nodes) {
 			if (n.kind === "TemplElement") {
 				for (const a of n.attrs || []) {
-					if (a.tokens) this._markTokensUsed(a.tokens);
+					if (a.tokens) this._markTokensUsed(a.tokens, scope);
 				}
-				this._markTemplNodesUsed(n.children);
+				this._markTemplNodesUsed(n.children, scope);
 			} else if (n.kind === "TemplExpr" || n.kind === "TemplComponent") {
-				this._markTokensUsed(n.tokens);
+				this._markTokensUsed(n.tokens, scope);
 			} else if (n.kind === "TemplIf") {
-				this._markTokensUsed(n.condTokens);
-				this._markTemplNodesUsed(n.then);
-				this._markTemplNodesUsed(n.else_);
+				this._markTokensUsed(n.condTokens, scope);
+				this._markTemplNodesUsed(n.then, scope);
+				this._markTemplNodesUsed(n.else_, scope);
 			} else if (n.kind === "TemplFor") {
-				this._markTokensUsed(n.stmtTokens);
-				this._markTemplNodesUsed(n.body);
+				this._markTokensUsed(n.stmtTokens, scope);
+				this._markTemplNodesUsed(n.body, scope);
 			} else if (n.kind === "TemplSwitch") {
-				this._markTokensUsed(n.exprTokens);
+				this._markTokensUsed(n.exprTokens, scope);
 				for (const c of n.cases || []) {
-					this._markTokensUsed(c.caseTokens);
-					this._markTemplNodesUsed(c.body);
+					this._markTokensUsed(c.caseTokens, scope);
+					this._markTemplNodesUsed(c.body, scope);
 				}
 			}
 		}
@@ -1080,7 +1190,7 @@ export class TypeChecker {
 				: decl.recvType.name;
 		const recvNamedType = this.types.get(recvTypeName);
 		this._injectGenericReceiverTypeParams(inner, recvNamedType);
-		const recvType = this.resolveTypeNodeName(decl.recvType, outer);
+		const recvType = this._methodReceiverType(decl, recvNamedType, outer);
 		inner.define(
 			decl.recvName,
 			decl.recvPointer ? { kind: "pointer", base: recvType } : recvType,
@@ -1108,6 +1218,16 @@ export class TypeChecker {
 				: ANY;
 			inner.define(tp.name, { kind: "typeParam", name: tp.name, constraint });
 		}
+	}
+
+	// Inside a method of `G[T]` the receiver is the instance `G[T]` over the
+	// receiver's own type parameters, so it is assignable to results and locals
+	// written as `G[T]`.
+	_methodReceiverType(decl, recvNamedType, outer) {
+		const generic = recvNamedType?._generic;
+		if (!generic || generic.isAlias || !generic.typeParams?.length)
+			return this.resolveTypeNodeName(decl.recvType, outer);
+		return this.instantiateGenericWithArgs(generic, generic.typeParams);
 	}
 
 	_injectGenericReceiverTypeParams(inner, recvNamedType) {

@@ -3,6 +3,7 @@ import {
 	assertContains,
 	assertEqual,
 	assertErrorContains,
+	assertProgramOutput,
 	compile,
 	runJs,
 	section,
@@ -342,6 +343,180 @@ func main() {
 }`);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), ["10 2", "7 108", "3 40", "30 7 80 5"].join("\n"));
+});
+
+section("Nil pointers in JS");
+
+const NIL_PTR_SRC = `package main
+
+import "fmt"
+
+type List struct {
+	next *List
+}
+
+func (l *List) Len() int {
+	if l == nil {
+		return 0
+	}
+	return 1 + l.next.Len()
+}
+
+type S struct{ A int }
+
+func main() {
+	l := &List{&List{nil}}
+	fmt.Println(l.Len())
+	fmt.Println((*List).Len(l))
+	func() {
+		defer func() { fmt.Println(recover()) }()
+		var p *S
+		_ = *p
+	}()
+	xs := []int{1, 2}
+	clear(xs)
+	fmt.Println(xs)
+}
+`;
+
+for (const target of ["js", "both"]) {
+	test(`nil receivers, nil dereference and clear on ${target}`, () => {
+		const { js, errors } = compile(NIL_PTR_SRC, { target });
+		assertEqual(errors.length, 0);
+		const out = runJs(js).split("\n");
+		assertEqual(out[0], "2");
+		assertEqual(out[1], "2");
+		assertContains(out[2], "nil pointer dereference");
+		assertEqual(out[3], "[0 0]");
+	});
+}
+
+section("Element pointers");
+
+test("whole-element stores keep element pointers valid", async () => {
+	const src = `package main
+
+import "fmt"
+
+type S struct{ A int }
+type T struct{ V int }
+
+func first[X any](xs []X) *X { return &xs[0] }
+
+func main() {
+	xs := []S{{1}, {2}}
+	p := &xs[0]
+	xs[0] = S{9}
+	fmt.Println(p.A, xs[0].A)
+	ys := []T{{1}}
+	q := first(ys)
+	q.V = 7
+	fmt.Println(ys[0].V)
+	arr := [2]S{{1}, {2}}
+	r := &arr[1]
+	arr[1] = S{8}
+	fmt.Println(r.A)
+}
+`;
+	await assertProgramOutput(src, "9 9\n7\n8\n");
+});
+
+test("erased generic element pointers follow the type argument", () => {
+	const src = `package main
+
+import "fmt"
+
+type S struct{ A int }
+
+func first[T any](xs []T) *T { return &xs[0] }
+func set[T any](p *T, v T)   { *p = v }
+
+func main() {
+	a, b := &S{1}, &S{2}
+	ps := []*S{a}
+	set(first(ps), b)
+	fmt.Println(a.A, b.A, ps[0].A)
+	ms := []map[string]int{{"x": 1}}
+	set(first(ms), map[string]int{"y": 2})
+	fmt.Println(ms[0]["x"], ms[0]["y"])
+	as := []any{S{1}}
+	set(first(as), any(5))
+	fmt.Println(as[0])
+	vs := []S{{1}}
+	set(first(vs), S{4})
+	first(vs).A++
+	fmt.Println(vs[0].A)
+}
+`;
+	const { js, errors } = compile(src, { target: "both" });
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "1 2 2\n0 2\n5\n5");
+});
+
+test("tuple assignment through type-parameter pointers swaps values", () => {
+	const src = `package main
+
+import "fmt"
+
+type S struct{ A int }
+
+func swap[T any](a, b *T) { *a, *b = *b, *a }
+
+func main() {
+	x, y := 1, 2
+	swap[int](&x, &y)
+	fmt.Println(x, y)
+	s, t := S{1}, S{2}
+	swap[S](&s, &t)
+	fmt.Println(s, t)
+	ps, pt := &S{1}, &S{2}
+	swap[*S](&ps, &pt)
+	fmt.Println(ps.A, pt.A)
+	m, n := map[string]int{"a": 1}, map[string]int{"b": 2}
+	swap[map[string]int](&m, &n)
+	fmt.Println(m["b"], n["a"])
+	var i, j any = 1, "z"
+	swap[any](&i, &j)
+	fmt.Println(i, j)
+}
+`;
+	for (const target of ["js", "both"]) {
+		const { js, errors } = compile(src, { target });
+		assertEqual(errors.length, 0);
+		assertEqual(runJs(js), "2 1\n{2} {1}\n2 1\n2 1\nz 1");
+	}
+});
+
+test("op-assign and inc/dec through type-parameter pointers", () => {
+	const src = `package main
+
+import "fmt"
+
+type Num interface{ ~int | ~int64 }
+
+func add[T ~int](a *T) { *a += 5 }
+func inc[T ~int](a *T) { *a++ }
+func adj[T Num](a, b *T) {
+	*a += *b
+	*b -= 1
+}
+
+func main() {
+	x := 1
+	add[int](&x)
+	fmt.Println(x)
+	inc[int](&x)
+	fmt.Println(x)
+	p, q := 1, 10
+	adj[int](&p, &q)
+	fmt.Println(p, q)
+}
+`;
+	for (const target of ["js", "both"]) {
+		const { js, errors } = compile(src, { target });
+		assertEqual(errors.length, 0);
+		assertEqual(runJs(js), "6\n7\n11 9");
+	}
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

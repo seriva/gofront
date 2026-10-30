@@ -9,6 +9,7 @@ import {
 	getFuncSignature,
 	getSliceElemType,
 	goTypeKey,
+	isScalarType,
 	isSliceType,
 	toWasmType,
 } from "./types.js";
@@ -241,6 +242,7 @@ export class ModuleEmitter {
 		this.ptrTypes = new Map(); // key -> ptr supertype info
 		this.boxTypes = new Map(); // wType key -> box info
 		this.ifaceBoxTypes = new Map(); // key -> iface box info
+		this.nilBoxTypes = new Map(); // key -> typed-nil marker info
 		this.arrayTypes = new Map(); // wType key -> array info
 		this.sliceTypes = new Map(); // wType key -> slice info
 		this.sliceTypesByIndex = new Map(); // typeIndex -> slice info
@@ -390,9 +392,14 @@ export class ModuleEmitter {
 				for (const f of s.astFields) {
 					const names = f.embedded
 						? [
-								f.type?.kind === "PointerType"
-									? f.type.base?.name
-									: f.type?.name,
+								(
+									f.embeddedName ??
+									(f.type?.kind === "PointerType"
+										? f.type.base?.name
+										: f.type?.name)
+								)
+									?.split(".")
+									.pop(),
 							]
 						: f.names?.length
 							? f.names
@@ -419,7 +426,17 @@ export class ModuleEmitter {
 				}
 			} else if (resolvedStruct?.fields) {
 				let fIdx = 0;
-				for (const [fName, fType] of resolvedStruct.fields.entries()) {
+				// `fields` also holds promoted fields; the declared fields
+				// (`_structFields`) give the real layout of a defined struct.
+				const declared = resolvedStruct._structFields
+					? resolvedStruct._structFields.flatMap((sf) => {
+							if (!sf.embedded) return sf.names.map((n) => [n, sf.type]);
+							const inner = sf.type.kind === "pointer" ? sf.type.base : sf.type;
+							const n = (inner?.name ?? "").split(".").pop();
+							return n ? [[n, sf.type]] : [];
+						})
+					: [...resolvedStruct.fields.entries()];
+				for (const [fName, fType] of declared) {
 					const wType = toWasmType(fType, this.checker, this);
 					fields.push({ name: fName, goType: fType, wType });
 					fieldIndexMap.set(fName, fIdx);
@@ -625,6 +642,36 @@ export class ModuleEmitter {
 		const boxInfo = { key, typeIndex, typeEntry, wType, goType, tagTypeIndex };
 		this.ifaceBoxTypes.set(key, boxInfo);
 		return boxInfo;
+	}
+
+	// The value a nil map, func or `*T` takes inside an interface: a marker
+	// object per Go type, so `any(nilMap) != nil` and a type switch still sees
+	// the dynamic type.  Struct types are structural, so each marker gets a
+	// distinct field count to keep them apart.
+	getNilBoxType(goType) {
+		const key = goTypeKey(goType);
+		if (this.nilBoxTypes.has(key)) return this.nilBoxTypes.get(key);
+		const n = this.nilBoxTypes.size + 1;
+		const typeIndex = this._getTotalTypeCount();
+		this._pushType({
+			form: "struct",
+			fields: Array.from({ length: n }, () => ({
+				type: "i32",
+				mutable: true,
+			})),
+		});
+		const globalIndex = this.globals.length;
+		this.globals.push({
+			type: { kind: "ref", nullable: true, typeIndex },
+			mutable: false,
+			init: [
+				...Array.from({ length: n }, () => ({ op: "i32.const", value: 0 })),
+				{ op: "struct.new", typeIndex },
+			],
+		});
+		const info = { key, goType, typeIndex, globalIndex };
+		this.nilBoxTypes.set(key, info);
+		return info;
 	}
 
 	getArrayType(elemGoType) {
@@ -1395,6 +1442,17 @@ export class ModuleEmitter {
 		);
 	}
 
+	// Registered only for programs whose fmt operands may hold a uint64
+	// (see scanFmtU64), so other modules keep their import table.
+	getFmtBoxU64Index() {
+		return this.getOrAddFuncImport(
+			"env",
+			"fmt_box_u64",
+			["i64"],
+			["externref"],
+		);
+	}
+
 	getFmtBoxF64Index() {
 		return this.getOrAddFuncImport(
 			"env",
@@ -2006,6 +2064,7 @@ export class ModuleEmitter {
 									recvTypeName: rName,
 									testTypeIndex: ptrIfaceBox.typeIndex,
 									isBoxedValue: true,
+									nilPtrPanic: true,
 									needsValueDeref: false,
 									embedPath: [
 										{
@@ -2049,12 +2108,56 @@ export class ModuleEmitter {
 								targetParamTypes: paramWTypes,
 							});
 						}
+						if (!isPtrRecv)
+							this._addPtrScalarCandidate(
+								candidates,
+								seenKeys,
+								rName,
+								rType,
+								fIdx,
+								paramWTypes,
+							);
 					}
 				}
 			}
 		}
 
 		return candidates;
+	}
+
+	// A value-receiver method of a named scalar is also in the method set of
+	// the pointer: `var g Getter = &x` holds a pointer box whose target is read
+	// before the call.
+	_addPtrScalarCandidate(
+		candidates,
+		seenKeys,
+		rName,
+		rType,
+		fIdx,
+		paramWTypes,
+	) {
+		if (!isScalarType(rType, this.checker, this)) return;
+		const ptrBox = this.getIfaceBoxType({ kind: "pointer", base: rType });
+		const target = this.getBoxType(rType);
+		const ptrKey = `ptr:${rName}`;
+		if (!ptrBox || seenKeys.has(ptrKey)) return;
+		seenKeys.add(ptrKey);
+		candidates.push({
+			recvTypeName: rName,
+			testTypeIndex: ptrBox.typeIndex,
+			isBoxedValue: true,
+			nilPtrPanic: true,
+			needsValueDeref: false,
+			embedPath: [
+				{
+					castTypeIndex: target.typeIndex,
+					parentTypeIndex: target.typeIndex,
+					fieldIndex: 0,
+				},
+			],
+			funcIndex: fIdx,
+			targetParamTypes: paramWTypes,
+		});
 	}
 
 	getTypesImplementingInterface(ifaceType) {
@@ -2106,10 +2209,32 @@ export class ModuleEmitter {
 							candidates.push({ name: tName, typeIndex: box.typeIndex });
 						}
 					}
+					this._addPtrNamedImplementor(
+						tVal,
+						tName,
+						ifaceResolved,
+						seen,
+						candidates,
+					);
 				}
 			}
 		}
 
 		return candidates;
+	}
+
+	// `*T` of a named scalar or slice is boxed apart from `T`.
+	_addPtrNamedImplementor(tVal, tName, ifaceResolved, seen, candidates) {
+		const ptrType = { kind: "pointer", base: tVal };
+		if (
+			!isScalarType(tVal, this.checker, this) &&
+			!isSliceType(tVal, this.checker)
+		)
+			return;
+		if (!this.checker?.implements?.(ptrType, ifaceResolved)) return;
+		const box = this.getIfaceBoxType(ptrType);
+		if (!box || seen.has(box.typeIndex)) return;
+		seen.add(box.typeIndex);
+		candidates.push({ name: `*${tName}`, typeIndex: box.typeIndex });
 	}
 }

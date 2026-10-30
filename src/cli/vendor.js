@@ -442,10 +442,9 @@ export async function bundleVendor(projectDir = ".", options = {}) {
 	}
 
 	const entryCode = generateVendorEntry(packages, globals, namedExports);
-	const entryFile = join(
-		projectRoot,
-		`.gofront-vendor-entry-${Date.now()}.mjs`,
-	);
+	// A fixed name: the bundler records the entry path in vendor.js, so a
+	// per-run name would make every prep produce different bytes.
+	const entryFile = join(projectRoot, ".gofront-vendor-entry.mjs");
 	writeFileSync(entryFile, entryCode);
 
 	try {

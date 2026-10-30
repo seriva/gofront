@@ -33,7 +33,13 @@ export function hasGenerics(programs) {
 /**
  * Returns a stable identifier-safe string key for any Go type or AST type node.
  */
+// A qualified type argument (`time.Duration`) becomes part of a JS and wasm
+// export identifier, so its dot is replaced.
 function typeKey(t) {
+	return rawTypeKey(t).replaceAll(".", "_");
+}
+
+function rawTypeKey(t) {
 	if (!t) return "any";
 	if (typeof t === "string") return t;
 	if (t.kind === "basic") return t.name;
@@ -147,7 +153,32 @@ function cloneAst(node) {
 		if (k.startsWith("_") && !KEPT_CLONE_KEYS.has(k)) continue;
 		copy[k] = cloneAst(v);
 	}
+	// Named results hang off the return type node and alias its types; keep
+	// just the names so `rebindNamedResults` can rebuild them after the types
+	// are substituted.
+	const named = node.returnType?._namedReturns;
+	if (named) copy._resultNames = named.map((r) => r.name);
 	return copy;
+}
+
+// Re-attaches named results (`(old *T)`) to every function in a cloned and
+// substituted tree, pointing at the substituted type nodes.
+function rebindNamedResults(node) {
+	if (!node || typeof node !== "object") return;
+	if (Array.isArray(node)) {
+		for (const n of node) rebindNamedResults(n);
+		return;
+	}
+	if (node._resultNames && node.returnType) {
+		const rt = node.returnType;
+		rt._namedReturns = node._resultNames.map((name, i) => ({
+			name,
+			type: rt.kind === "TupleType" ? rt.types[i] : rt,
+		}));
+	}
+	for (const [k, v] of Object.entries(node)) {
+		if (!k.startsWith("_")) rebindNamedResults(v);
+	}
 }
 
 /**
@@ -617,6 +648,7 @@ export function monomorphise(programs, checker) {
 				genericTypes,
 				genericFuncs,
 			);
+			rebindNamedResults(monoTypeDecl);
 			specializedTypes.set(item.specializedName, monoTypeDecl);
 
 			// Specialize all methods declared on this generic type
@@ -634,6 +666,7 @@ export function monomorphise(programs, checker) {
 					genericTypes,
 					genericFuncs,
 				);
+				rebindNamedResults(monoMethod);
 				const mKey = `${item.specializedName}.${monoMethod.name}`;
 				specializedMethods.set(mKey, monoMethod);
 			}
@@ -658,6 +691,7 @@ export function monomorphise(programs, checker) {
 				genericTypes,
 				genericFuncs,
 			);
+			rebindNamedResults(monoFuncDecl);
 			specializedFuncs.set(item.specializedName, monoFuncDecl);
 		}
 	}
