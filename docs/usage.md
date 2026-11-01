@@ -12,7 +12,6 @@ gofront build [dir] --pwa                    also generate offline service worke
 gofront build [dir] --source-map             include source maps (app.js.map and app.wasm.map)
 gofront build [dir] --no-minify              skip minification
 gofront build [dir] --no-mangle              minify but keep original identifiers
-gofront build [dir] --no-natives             debugging: compile standard-library functions from their Go source instead of host shortcuts
 gofront build [dir] --emit-wat               also write app.wat next to app.wasm (hybrid projects)
 gofront build [dir] --js-only                compile every package to JS (alias --target js; also for dev/check/-o)
 gofront prep [dir] [--minify]                run asset copying + vendor bundling only (alias: gofront vendor)

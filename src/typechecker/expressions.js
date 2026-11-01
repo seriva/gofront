@@ -1433,7 +1433,8 @@ export const expressionCheckMethods = {
 		const native = fnType?.native ?? fnType?.underlying?.native ?? null;
 		const direct =
 			callee.kind === "Ident"
-				? scope.lookupScope(callee.name) === this.globals
+				? scope.lookupScope(callee.name) === this.globals &&
+					Boolean(this._funcDeclNames?.has(callee.name))
 				: callee.kind === "SelectorExpr" && Boolean(callee._stdName);
 		expr._native = native && direct ? native : null;
 	},

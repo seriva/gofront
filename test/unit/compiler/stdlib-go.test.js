@@ -1127,6 +1127,65 @@ test("assertFourWay names a WASM native that disagrees with its Go body", async 
 	});
 });
 
+const FX_PKG = `//go:build gofront
+
+//gofront:target both
+
+package fx
+
+//gofront:native fx.Hit
+func Hit() int {
+	println("body")
+	return 1
+}
+`;
+NATIVES.add("fx.Hit");
+JS_NATIVES.set("fx.Hit", () => "1");
+WASM_NATIVES.set("fx.Hit", {
+	emit(e) {
+		e.pushInstruction({ op: "i64.const", value: 1n });
+		return true;
+	},
+});
+
+test("a deferred native call runs the Go body on both backends", async () => {
+	await withTempDir({ "fx/fx.go": FX_PKG }, async (stdlib) => {
+		const res = await compileHybridProgram(
+			`package main
+
+import "fx"
+
+func main() {
+	defer fx.Hit()
+}
+`,
+			{ stdlibRoot: stdlib },
+		);
+		assertEqual(`wasm:${res.wasm}`, "wasm:body\n");
+		assertEqual(`js:${res.js}`, "js:body\n");
+	});
+});
+
+test("a package-level variable holding a native is not a native call", async () => {
+	await withTempDir({ "fx/fx.go": FX_PKG }, async (stdlib) => {
+		const res = await compileHybridProgram(
+			`package main
+
+import "fx"
+
+var F = fx.Hit
+
+func main() {
+	F()
+}
+`,
+			{ stdlibRoot: stdlib },
+		);
+		assertEqual(res.js, "body\n");
+		assertEqual(res.wasm, "body\n");
+	});
+});
+
 test("natives off runs the Go body on both backends", async () => {
 	await withTempDir({ "four/four.go": FOUR_PKG }, async (stdlib) => {
 		for (const fn of ["Disagree", "WasmDisagree"]) {

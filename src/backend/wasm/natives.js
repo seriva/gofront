@@ -24,7 +24,7 @@ export function prepareWasmNative(mod, call) {
 
 // Emits the call as host code; false (nothing emitted) calls the Go body.
 export function emitWasmNative(emitter, call, targetWasmType) {
-	if (!emitter.mod.natives || !call._native) return false;
+	if (!emitter.mod.natives || !call._native || call._noNative) return false;
 	if (call.args.some((a) => a._spread)) return false;
 	const entry = WASM_NATIVES.get(call._native);
 	if (!entry) return false;

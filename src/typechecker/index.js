@@ -918,6 +918,8 @@ export class TypeChecker {
 		if (this.globals.symbols.has(decl.name) && decl.name !== "init")
 			this.err(`${decl.name} redeclared in this block`, decl);
 		if (decl.native) funcType.native = decl.native;
+		this._funcDeclNames ??= new Set();
+		this._funcDeclNames.add(decl.name);
 		if (typeParamTypes) {
 			this.globals.define(decl.name, {
 				kind: "generic",
