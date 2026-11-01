@@ -153,11 +153,11 @@ func Main() string {
 		exports.Main(),
 		"9223372036854775813 8000000000000005 1000000000000000000005",
 	);
-	// JS Number precision limit: prints the nearest Number.
+	// Exact 64-bit integer formatting in JS.
 	assertEqual(
 		runJsBody(`var u uint64 = 1<<63 + 5
 	fmt.Println(fmt.Sprintf("%d %x %o", u, u, u))`),
-		"9223372036854775808 8000000000000000 1000000000000000000000",
+		"9223372036854775813 8000000000000005 1000000000000000000005",
 	);
 });
 
@@ -1260,6 +1260,26 @@ return {
 	assertEqual(res.kcmpEq, 0);
 	assertEqual(res.kcmpLt, -1);
 	assertEqual(res.kcmpGt, 1);
+});
+
+test("64-bit int and uint Printf verbs and any boxing (Task 1.3)", async () => {
+	const src = `package main
+
+import (
+	"fmt"
+	"math"
+)
+
+func main() {
+	a, b := int64(math.MaxInt64), uint64(math.MaxUint64)
+	fmt.Printf("%d|%x|%22d|%v\\n", a, a, b, b)
+	fmt.Println(any(uint64(1 << 63)))
+}
+`;
+	await assertProgramOutput(
+		src,
+		"9223372036854775807|7fffffffffffffff|  18446744073709551615|18446744073709551615\n9223372036854775808\n",
+	);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

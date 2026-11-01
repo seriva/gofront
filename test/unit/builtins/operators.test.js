@@ -470,6 +470,75 @@ func main() {
 	);
 });
 
+section("Exact 64-bit integer arithmetic (Task 1.3)");
+
+test("int64 and uint64 exact arithmetic, overflow wrap and conversions", async () => {
+	const src = `package main
+
+import (
+	"fmt"
+	"math"
+)
+
+type xorshift uint64
+
+func (r *xorshift) Next() uint64 {
+	*r ^= *r << 13
+	*r ^= *r >> 7
+	*r ^= *r << 17
+	return uint64(*r)
+}
+
+func main() {
+	var a int64 = 3037000500
+	fmt.Println(a * a)
+
+	var t int64 = 1577934245000000000
+	t += 1
+	fmt.Println(t, t%1000)
+
+	rnd := xorshift(40)
+	fmt.Println(rnd.Next(), rnd.Next(), rnd.Next())
+
+	var u uint64 = 5
+	fmt.Println(^u, -u)
+
+	var m uint64 = 1<<64 - 1
+	fmt.Println(m)
+
+	minA, minB := int64(math.MinInt64), int64(-1)
+	fmt.Println(minA / minB)
+
+	xs := []int{10, 20, 30}
+	fmt.Println(xs[int64(1)])
+
+	x := int64(1<<40 + 5)
+	fmt.Println(int32(x))
+
+	y := int64(1<<53 + 1)
+	fmt.Println(float64(y))
+
+	divZero := func() {
+		defer func() { fmt.Println(recover()) }()
+		var z int64
+		_ = int64(1) / z
+	}
+	divZero()
+
+	negShift := func() {
+		defer func() { fmt.Println(recover()) }()
+		n := -1
+		_ = int64(1) << n
+	}
+	negShift()
+}
+`;
+	await assertProgramOutput(
+		src,
+		"-9223372036709301616\n1577934245000000001 1\n43290790440 9226231805932350012 13632027486628815208\n18446744073709551610 18446744073709551611\n18446744073709551615\n-9223372036854775808\n20\n5\n9.007199254740992e+15\nruntime error: integer divide by zero\nruntime error: negative shift amount\n",
+	);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

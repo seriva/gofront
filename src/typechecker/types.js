@@ -805,6 +805,33 @@ export const isFloat = makeBasicPredicate(...SIZED_FLOAT_NAMES);
 export const isString = makeBasicPredicate("string");
 export const isBool = makeBasicPredicate("bool");
 
+// True when type t represents an int64 or uint64 (including named types like time.Duration).
+export function is64BitInt(t) {
+	if (!t) return false;
+	if (t.kind === "untyped") return t.base === "int64" || t.base === "uint64";
+	let cur = t;
+	while (cur?.kind === "named") cur = cur.underlying;
+	return (
+		cur?.kind === "basic" && (cur.name === "int64" || cur.name === "uint64")
+	);
+}
+
+export function is64BitSigned(t) {
+	if (!t) return false;
+	if (t.kind === "untyped") return t.base === "int64";
+	let cur = t;
+	while (cur?.kind === "named") cur = cur.underlying;
+	return cur?.kind === "basic" && cur.name === "int64";
+}
+
+export function is64BitUnsigned(t) {
+	if (!t) return false;
+	if (t.kind === "untyped") return t.base === "uint64";
+	let cur = t;
+	while (cur?.kind === "named") cur = cur.underlying;
+	return cur?.kind === "basic" && cur.name === "uint64";
+}
+
 // ── TypedArray mappings ──────────────────────────────────────
 // []float64 deliberately stays a plain Array for JSON / JS-library interop.
 const TYPED_ARRAY_CONSTRUCTORS = {

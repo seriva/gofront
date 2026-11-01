@@ -14,6 +14,7 @@ import {
 	FLOAT32,
 	FLOAT64,
 	INT,
+	is64BitInt,
 	isAny,
 	isArray,
 	isBool,
@@ -68,15 +69,18 @@ const BUILTIN_CHECK = {
 		}
 		const sb = s.resolveType(st?.kind === "named" ? st.underlying : st);
 		if (sb?.kind === "slice") {
+			const is64 = is64BitInt(sb.elem);
 			for (let i = 1; i < e.args.length; i++) {
 				if (e.args[i]._spread)
 					s._rejectSeqAsSlice(at[i], e.args[i], "a spread argument");
-				if (!e.args[i]._spread && at[i])
+				if (!e.args[i]._spread && at[i]) {
+					if (is64) e.args[i]._is64Bit = true;
 					s._markIfaceBox(
 						s.resolveType(sb.elem),
 						s.resolveType(at[i]),
 						e.args[i],
 					);
+				}
 			}
 		}
 		return st;
@@ -205,7 +209,12 @@ export const expressionCheckMethods = {
 				if (isAny(lt) || isAny(rt))
 					return this.binaryResultType(expr.op, ANY, ANY, expr);
 				this._checkConstOperands(expr.op, lt, rt, expr);
-				return this.binaryResultType(expr.op, lt, rt, expr);
+				const res = this.binaryResultType(expr.op, lt, rt, expr);
+				if (is64BitInt(lt) && rt?.kind === "untyped" && expr.right)
+					expr.right._is64Bit = true;
+				if (is64BitInt(rt) && lt?.kind === "untyped" && expr.left)
+					expr.left._is64Bit = true;
+				return res;
 			}
 			case "AwaitExpr": {
 				if (this.target === "wasm" || this.target === "both") {

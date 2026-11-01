@@ -742,3 +742,27 @@ sizer 7
 `,
 	);
 });
+
+test("type switch on any(int64(1)) with case int before case int64 (Task 1.3)", async () => {
+	const src = `package main
+
+import "fmt"
+
+func check(x any) string {
+	switch x.(type) {
+	case int:
+		return "int"
+	case int64:
+		return "int64"
+	default:
+		return "other"
+	}
+}
+
+func main() {
+	fmt.Println(check(any(int64(1))))
+	fmt.Println(check(any(int(1))))
+}
+`;
+	await assertProgramOutput(src, "int64\nint\n");
+});

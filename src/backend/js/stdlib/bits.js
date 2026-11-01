@@ -105,7 +105,7 @@ const BITS_MAP = {
 	ReverseBytes32: ([x]) =>
 		`((v => (((v & 0xff) << 24) | ((v & 0xff00) << 8) | ((v >>> 8) & 0xff00) | ((v >>> 24) & 0xff)) >>> 0)((${x}) >>> 0))`,
 	ReverseBytes64: ([x]) =>
-		`((() => { const v = BigInt.asUintN(64, ${toBig64(x)}); let r = 0n; for (let i = 0n; i < 8n; i++) r = (r << 8n) | ((v >> (i * 8n)) & 0xffn); return Number(r); })())`,
+		`((() => { const v = BigInt.asUintN(64, ${toBig64(x)}); let r = 0n; for (let i = 0n; i < 8n; i++) r = (r << 8n) | ((v >> (i * 8n)) & 0xffn); return r; })())`,
 	ReverseBytes: (args) => BITS_MAP.ReverseBytes64(args),
 };
 

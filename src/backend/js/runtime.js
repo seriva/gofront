@@ -425,20 +425,42 @@ export const HELPER_IFD = `var __ifd = __ifd || function(x, d) {
 
 // Nil-interface method call guard (strict mode only): matches Go's panic
 // message instead of a JS TypeError.
-// Strict-mode 64-bit shifts (`both` packages): Go's wrap-around on `<<`, the
-// sign fill on `>>`, and the negative-count panic.
+// 64-bit shifts: count is converted to BigInt; negative count panics;
+// wraps with BigInt.asIntN / BigInt.asUintN.
 export const HELPER_SHIFT = `var __shl64 = __shl64 || function(x, n, u) {
-  if (n < 0) throw new Error("runtime error: negative shift amount");
-  if (n >= 64) return 0;
-  const r = x * 2 ** n;
+  var b = BigInt(n);
+  if (b < 0n) throw new Error("runtime error: negative shift amount");
+  if (typeof x === "bigint") {
+    var bx = u ? BigInt.asUintN(64, x) : BigInt.asIntN(64, x);
+    var r = bx << b;
+    return u ? BigInt.asUintN(64, r) : BigInt.asIntN(64, r);
+  }
+  if (b >= 64n) return 0;
+  var nb = Number(b);
+  var r = x * 2 ** nb;
   if (Number.isSafeInteger(r)) return r;
-  const b = BigInt(x) << BigInt(n);
-  return Number(u ? BigInt.asUintN(64, b) : BigInt.asIntN(64, b));
+  var bxx = BigInt(Math.trunc(x)) << b;
+  return Number(u ? BigInt.asUintN(64, bxx) : BigInt.asIntN(64, bxx));
 };
 var __shr64 = __shr64 || function(x, n, u) {
-  if (n < 0) throw new Error("runtime error: negative shift amount");
-  if (n >= 64) return u || x >= 0 ? 0 : -1;
-  return Math.floor(x / 2 ** n);
+  var b = BigInt(n);
+  if (b < 0n) throw new Error("runtime error: negative shift amount");
+  if (typeof x === "bigint") {
+    var bx = u ? BigInt.asUintN(64, x) : BigInt.asIntN(64, x);
+    var r = bx >> b;
+    return u ? BigInt.asUintN(64, r) : BigInt.asIntN(64, r);
+  }
+  if (b >= 64n) return u || x >= 0 ? 0 : -1;
+  return Math.floor(x / 2 ** Number(b));
+};`;
+
+export const HELPER_TO64 = `var __to_i64 = __to_i64 || function(v) {
+  if (typeof v === "bigint") return BigInt.asIntN(64, v);
+  return Number.isFinite(v) ? BigInt.asIntN(64, BigInt(Math.trunc(v))) : -9223372036854775808n;
+};
+var __to_u64 = __to_u64 || function(v) {
+  if (typeof v === "bigint") return BigInt.asUintN(64, v);
+  return Number.isFinite(v) ? BigInt.asUintN(64, BigInt(Math.trunc(v))) : 9223372036854775808n;
 };`;
 
 export const HELPER_NIL_CALL = `var __nilcall = __nilcall || function(x) {
@@ -485,8 +507,8 @@ var __tid = __tid || function(...ids) {
 };
 var __tconv = __tconv || function(f, v) {
   switch (f?.k) {
-    case "int64": return typeof v === "bigint" ? BigInt.asIntN(64, v) : Math.trunc(Number(v));
-    case "uint64": return typeof v === "bigint" ? BigInt.asUintN(64, v) : (Number(v) >>> 0);
+    case "int64": return typeof v === "bigint" ? BigInt.asIntN(64, v) : (typeof v === "number" ? BigInt.asIntN(64, BigInt(Math.trunc(v))) : v);
+    case "uint64": return typeof v === "bigint" ? BigInt.asUintN(64, v) : (typeof v === "number" ? BigInt.asUintN(64, BigInt(Math.trunc(v))) : v);
     case "int": case "uint": case "uintptr": return Math.trunc(Number(typeof v === "bigint" ? Number(v) : v));
     case "int8": return (Number(typeof v === "bigint" ? Number(v) : v) << 24) >> 24;
     case "int16": return (Number(typeof v === "bigint" ? Number(v) : v) << 16) >> 16;
@@ -496,7 +518,7 @@ var __tconv = __tconv || function(f, v) {
     case "uint32": return Number(typeof v === "bigint" ? Number(v) : v) >>> 0;
     case "float32": return Math.fround(Number(typeof v === "bigint" ? Number(v) : v));
     case "float64": return Number(typeof v === "bigint" ? Number(v) : v);
-    default: return v;
+    default: return typeof v === "number" && f && (f() === 0n || typeof f() === "bigint") ? BigInt(v) : v;
   }
 };`;
 
@@ -2774,7 +2796,7 @@ var __json_int_decode = __json_int_decode || function(v, typeName, ctxType, raw)
     if (integer !== undefined) {
       var min64 = typeName === "int64" ? -(1n << 63n) : 0n;
       var max64 = typeName === "int64" ? (1n << 63n) - 1n : (1n << 64n) - 1n;
-      if (integer >= min64 && integer <= max64) return typeof v === "number" ? v : integer;
+      if (integer >= min64 && integer <= max64) return integer;
     }
     return fail();
   }
@@ -3126,9 +3148,9 @@ var __json_decoder_decode = __json_decoder_decode || function(dec, decFn, target
   var d = dec?.value ?? dec;
   var res = ScanNext$$internal$jsonrt(d.r);
   var data = res[0], skipped = res[1], err = res[2];
-  d.offset += skipped;
+  d.offset += typeof d.offset === "bigint" ? BigInt(skipped) : skipped;
   if (err != null) return err;
-  d.offset += data.length;
+  d.offset += typeof d.offset === "bigint" ? BigInt(data.length) : data.length;
   OptUseNumber$$internal$jsonrt = d.useNumber;
   OptDisallowUnknownFields$$internal$jsonrt = d.disallowUnknownFields;
   var uerr;

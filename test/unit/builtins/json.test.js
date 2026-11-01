@@ -2509,6 +2509,31 @@ return {
 });
 
 // ── Entry point ───────────────────────────────────────────────
+test("json.Marshal and Unmarshal with int64 Math.MaxInt64 (Task 1.3)", async () => {
+	const src = `package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"math"
+)
+
+type S struct {
+	N int64
+}
+
+func main() {
+	b, _ := json.Marshal(S{N: math.MaxInt64})
+	fmt.Println(string(b))
+
+	var out S
+	_ = json.Unmarshal(b, &out)
+	fmt.Println(out.N == math.MaxInt64)
+}
+`;
+	await assertProgramOutput(src, '{"N":9223372036854775807}\ntrue\n');
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

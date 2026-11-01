@@ -81,6 +81,7 @@ import {
 	HELPER_TESTING,
 	HELPER_TIME_FMT,
 	HELPER_TIME_PARSE,
+	HELPER_TO64,
 	HELPER_VA,
 	HELPER_VCLONE,
 } from "./runtime.js";
@@ -159,6 +160,7 @@ const HELPER_MAP = [
 	["cdiv", HELPER_CDIV],
 	["panicRt", HELPER_PANIC],
 	["shift", HELPER_SHIFT],
+	["to64", HELPER_TO64],
 	["nilCall", HELPER_NIL_CALL],
 	["bounds", HELPER_BOUNDS],
 	["nilMap", HELPER_NIL_MAP],
@@ -1276,6 +1278,15 @@ export class CodeGen {
 							(isNumeric(v._type) || v._type?.kind === "untyped")
 						) {
 							return `{ re: ${js}, im: 0 }`;
+						}
+					}
+					if (spec.type?.name === "int64" || spec.type?.name === "uint64") {
+						if (
+							v._type?.kind === "untyped" &&
+							!js.endsWith("n") &&
+							/^-?\d+$/.test(js)
+						) {
+							return `${js}n`;
 						}
 					}
 					return js;

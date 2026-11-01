@@ -1410,6 +1410,27 @@ func main() {
 	assertEqual(runJs(js), "[{a 1} {b 2}]");
 });
 
+test("generic Sum over int64 and int slices (Task 1.3)", async () => {
+	const src = `package main
+
+import "fmt"
+
+func Sum[T ~int | ~int64](xs []T) T {
+	var s T
+	for _, x := range xs {
+		s += x + 1
+	}
+	return s
+}
+
+func main() {
+	fmt.Println(Sum([]int64{1 << 60, 1}))
+	fmt.Println(Sum([]int{1, 2}))
+}
+`;
+	await assertProgramOutput(src, "1152921504606846979\n5\n");
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }
