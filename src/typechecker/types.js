@@ -497,6 +497,8 @@ export const WASM_STDLIB_MEMBERS = new Map([
 			"Int63n",
 			"Int31",
 			"Int31n",
+			"Uint32",
+			"Uint64",
 			"Seed",
 			"Shuffle",
 			"Perm",

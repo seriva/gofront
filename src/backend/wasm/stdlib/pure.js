@@ -245,6 +245,19 @@ export class PurePackagesEmitter {
 				}
 				return;
 			}
+			case "Uint32": {
+				this._emitRandNextU64();
+				this.pushInstruction({ op: "i64.const", value: 0xffffffffn });
+				this.pushInstruction("i64.and");
+				if (targetWasmType === "i32") {
+					this.pushInstruction("i32.wrap_i64");
+				}
+				return;
+			}
+			case "Uint64": {
+				this._emitRandNextU64();
+				return;
+			}
 			case "Intn":
 			case "Int31n":
 			case "Int63n": {

@@ -247,7 +247,7 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
   - Test: `test/unit/builtins/stdlib.test.js` — `(3 * time.Second).String()` → `3s`, `time.Duration(1 << 62)` prints Go's text, `time.Since(t) >= 0`, `strconv.ParseInt("9223372036854775807", 10, 64)` exact, `binary.LittleEndian.Uint64` of eight `0xff` bytes → `18446744073709551615`; `test/unit/wasm/boundary.test.js` — a wasm package exporting `func Inc(x int64) int64 { return x + 1 }` called from a `js` main with `1 << 60` → `1152921504606846977`; existing `int` boundary tests unchanged.
   - Done when: cases pass and `npm run test:e2e` is green (the examples use `time.Duration`).
 
-- [ ] **Task 1.5 — 64-bit `bits`, `math` and `rand` JS shims**
+- [x] **Task 1.5 — 64-bit `bits`, `math` and `rand` JS shims**
   - Files: `src/backend/js/stdlib/bits.js`, `src/backend/js/stdlib/math.js`, `src/backend/js/stdlib/rand.js`
   - Do: the `…64` functions in `bits.js` (`Add64`, `Sub64`, `Mul64`, `Div64`, `Rem64`, `RotateLeft64`, `Reverse64`, `ReverseBytes64`) return BigInt while `Add`, `Sub`, `Mul`, `Div`, `Rem`, `RotateLeft`, `Reverse`, `ReverseBytes` keep returning `Number` (`uint`); `math.Float64bits` returns `new BigUint64Array(b)[0]` directly (used by `stdlib/math/extra.go`); `rand.Int63`, `Int63n` and `Uint64` take and return BigInt.
   - Test: `test/unit/builtins/stdlib.test.js` — `bits.OnesCount64(1<<63 | 1)` → `2`, `bits.Mul64(1<<32, 1<<32)` → `1 0`, `math.Float64bits(1.0)` as `uint64` BigInt, `math.FMA` unchanged, `rand.Int63()` and `rand.Int63n(1 << 40)`.

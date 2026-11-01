@@ -4030,6 +4030,43 @@ true
 	);
 });
 
+test("real Go output: 64-bit bits, math, and rand on JS and WASM (Task 1.5)", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"fmt"
+	"math"
+	"math/bits"
+	"math/rand"
+)
+
+func main() {
+	fmt.Println(bits.OnesCount64(1<<63 | 1))
+	hi, lo := bits.Mul64(1<<32, 1<<32)
+	fmt.Println(hi, lo)
+	var u uint64 = math.Float64bits(1.0)
+	fmt.Println(u)
+	fmt.Println(math.FMA(2.0, 3.0, 4.0))
+	rand.Seed(42)
+	fmt.Println(rand.Int63() >= 0)
+	fmt.Println(rand.Int63n(1<<40) >= 0)
+	var r int64 = rand.Int63()
+	_ = r
+	var u2 uint64 = rand.Uint64()
+	_ = u2
+}
+`,
+		`2
+1 0
+4607182418800017408
+10
+true
+true
+`,
+	);
+});
+
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
