@@ -1346,6 +1346,70 @@ func main() {
 	);
 });
 
+test("Clone over []P copies range values when appending", async () => {
+	const src = `package main
+
+import "fmt"
+
+type P struct{ V int }
+
+func Clone[T any](s []T) []T {
+	var out []T
+	for _, v := range s {
+		out = append(out, v)
+	}
+	return out
+}
+
+func main() {
+	a := []P{{1}}
+	b := Clone(a)
+	b[0].V = 9
+	fmt.Println(a, b)
+}
+`;
+	await assertProgramOutput(src, "[{1}] [{9}]\n");
+	const { js, errors } = compile(src);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "[{1}] [{9}]");
+});
+
+test("List[T].Map with callback mutating Pair leaves source intact", async () => {
+	const src = `package main
+
+import "fmt"
+
+type Pair struct {
+	Key string
+	Val int
+}
+
+type List[T any] struct {
+	items []T
+}
+
+func (l List[T]) Map(f func(T) T) (out List[T]) {
+	for _, item := range l.items {
+		out.items = append(out.items, f(item))
+	}
+	return out
+}
+
+func main() {
+	l := List[Pair]{items: []Pair{{"a", 1}, {"b", 2}}}
+	_ = l.Map(func(p Pair) Pair {
+		p.Val *= 10
+		return p
+	})
+	fmt.Println(l.items)
+}
+`;
+	await assertProgramOutput(src, "[{a 1} {b 2}]\n");
+	const { js, errors } = compile(src);
+	assertEqual(errors.length, 0);
+	assertEqual(runJs(js), "[{a 1} {b 2}]");
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

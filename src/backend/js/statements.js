@@ -1217,10 +1217,14 @@ export const statementGenMethods = {
 		const iterType = iterNode._type;
 		const base = iterType?.kind === "named" ? iterType.underlying : iterType;
 		const elemType = base?.elem;
-		if (!valNode || !this._aggregateBase(elemType)) return js;
-		if (isAssign || valNode.kind !== "Ident")
+		if (
+			!valNode ||
+			(!this._aggregateBase(elemType) && !this._typeParamClone(elemType, js))
+		)
+			return js;
+		if (valNode.kind === "Ident" && valNode.name === "_") return js;
+		if (isAssign || valNode.kind !== "Ident" || elemType?.kind === "typeParam")
 			return this._cloneJs(elemType, js);
-		if (valNode.name === "_") return js;
 		const root = this._rootIdentName(iterNode);
 		const mutated =
 			this._fnMutates(valNode.name) ||

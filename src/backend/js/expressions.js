@@ -413,6 +413,7 @@ const SHARED_ZERO_FACTORIES = {
 	0: "__z0",
 	'""': "__zs",
 	false: "__zf",
+	"0n": "__z64",
 };
 
 // Zero-value JS literals for basic Go types.
@@ -857,7 +858,9 @@ export const expressionGenMethods = {
 	_isAddressableExpr(e) {
 		switch (e?.kind) {
 			case "Ident":
-				return e.name !== "_" && !e._isTypeRef;
+				return (
+					e.name !== "_" && (!e._isTypeRef || e._type?.kind === "typeParam")
+				);
 			case "SelectorExpr":
 				return !e._isMethodValue && !e._isMethodExpr;
 			case "IndexExpr":

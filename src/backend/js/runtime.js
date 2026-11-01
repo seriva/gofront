@@ -473,6 +473,8 @@ var __zn = __zn || (() => null);
 var __z0 = __z0 || (() => 0);
 var __zs = __zs || (() => "");
 var __zf = __zf || (() => false);
+var __z64 = __z64 || Object.assign(() => 0n, { k: "int64" });
+var __zu64 = __zu64 || Object.assign(() => 0n, { k: "uint64" });
 var __ti = __ti || function(f, k, id, is, u, b, fb) {
   const g = () => f();
   g.k = k; g.id = id; g.is = is; g.u = u; g.b = b; g.fb = fb;
@@ -482,17 +484,18 @@ var __tid = __tid || function(...ids) {
   return ids.every((i) => i !== undefined) ? ids.join(",") : undefined;
 };
 var __tconv = __tconv || function(f, v) {
-  v = typeof v === "bigint" ? Number(v) : v;
   switch (f?.k) {
-    case "int": case "int64": case "uint": case "uint64": case "uintptr": return Math.trunc(Number(v));
-    case "int8": return (Number(v) << 24) >> 24;
-    case "int16": return (Number(v) << 16) >> 16;
-    case "int32": case "rune": return Number(v) | 0;
-    case "uint8": case "byte": return Number(v) & 0xFF;
-    case "uint16": return Number(v) & 0xFFFF;
-    case "uint32": return Number(v) >>> 0;
-    case "float32": return Math.fround(Number(v));
-    case "float64": return Number(v);
+    case "int64": return typeof v === "bigint" ? BigInt.asIntN(64, v) : Math.trunc(Number(v));
+    case "uint64": return typeof v === "bigint" ? BigInt.asUintN(64, v) : (Number(v) >>> 0);
+    case "int": case "uint": case "uintptr": return Math.trunc(Number(typeof v === "bigint" ? Number(v) : v));
+    case "int8": return (Number(typeof v === "bigint" ? Number(v) : v) << 24) >> 24;
+    case "int16": return (Number(typeof v === "bigint" ? Number(v) : v) << 16) >> 16;
+    case "int32": case "rune": return Number(typeof v === "bigint" ? Number(v) : v) | 0;
+    case "uint8": case "byte": return Number(typeof v === "bigint" ? Number(v) : v) & 0xFF;
+    case "uint16": return Number(typeof v === "bigint" ? Number(v) : v) & 0xFFFF;
+    case "uint32": return Number(typeof v === "bigint" ? Number(v) : v) >>> 0;
+    case "float32": return Math.fround(Number(typeof v === "bigint" ? Number(v) : v));
+    case "float64": return Number(typeof v === "bigint" ? Number(v) : v);
     default: return v;
   }
 };`;
