@@ -2,15 +2,18 @@
 // compiled into the caller's target (js, wasm, or both).
 
 import { JS_NATIVES } from "../../../src/backend/js/natives.js";
+import { WASM_NATIVES } from "../../../src/backend/wasm/natives.js";
 import { NATIVES, STDLIB_PACKAGES } from "../../../src/typechecker/types.js";
 import {
 	assert,
 	assertContains,
 	assertEqual,
 	assertErrorContains,
+	assertFourWay,
 	assertThrows,
 	compile,
 	compileDir,
+	compileHybridProgram,
 	compileHybridProject,
 	join,
 	section,
@@ -1039,4 +1042,100 @@ func main() {
 	assertContains(js, "[1, 2]");
 	assertEqual(js.split(".indexOf(").length - 1, 1);
 	assertContains(js, "IndexOf$$str(");
+});
+
+section("Go-source stdlib: natives off and assertFourWay");
+
+const FOUR_PKG = `//go:build gofront
+
+//gofront:target both
+
+package four
+
+//gofront:native four.Agree
+func Agree(s, sub string) int {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return i
+		}
+	}
+	return -1
+}
+
+//gofront:native four.Disagree
+func Disagree(s, sub string) int { return Agree(s, sub) }
+
+//gofront:native four.WasmDisagree
+func WasmDisagree(s, sub string) int { return Agree(s, sub) }
+`;
+for (const n of ["Agree", "Disagree", "WasmDisagree"]) NATIVES.add(`four.${n}`);
+
+JS_NATIVES.set("four.Agree", (a) => `${a[0]}.indexOf(${a[1]})`);
+JS_NATIVES.set("four.Disagree", (a) => `(${a[0]}.indexOf(${a[1]}) + 1)`);
+WASM_NATIVES.set("four.WasmDisagree", {
+	emit(e, call, _typeArgs, target) {
+		e.emitExpr(call.args[0], "externref");
+		e.emitExpr(call.args[1], "externref");
+		e.pushInstruction("drop");
+		e.pushInstruction("drop");
+		e.pushInstruction({ op: "i32.const", value: 41 });
+		if ((target ?? "i64") === "i64") e.pushInstruction("i64.extend_i32_s");
+		return true;
+	},
+});
+
+const fourProgram = (fn) => `package main
+
+import "four"
+
+func main() { println(four.${fn}("hello", "ll")) }
+`;
+
+test("assertFourWay passes when a native agrees with its Go body", async () => {
+	await withTempDir({ "four/four.go": FOUR_PKG }, (stdlib) =>
+		assertFourWay(fourProgram("Agree"), "2\n", { stdlibRoot: stdlib }),
+	);
+});
+
+test("assertFourWay names a JS native that disagrees with its Go body", async () => {
+	await withTempDir({ "four/four.go": FOUR_PKG }, async (stdlib) => {
+		let msg = null;
+		try {
+			await assertFourWay(fourProgram("Disagree"), "2\n", {
+				stdlibRoot: stdlib,
+			});
+		} catch (e) {
+			msg = e.message;
+		}
+		assert(msg !== null, "a disagreeing native must fail");
+		assertContains(msg, "js (natives on)");
+	});
+});
+
+test("assertFourWay names a WASM native that disagrees with its Go body", async () => {
+	await withTempDir({ "four/four.go": FOUR_PKG }, async (stdlib) => {
+		let msg = null;
+		try {
+			await assertFourWay(fourProgram("WasmDisagree"), "2\n", {
+				stdlibRoot: stdlib,
+			});
+		} catch (e) {
+			msg = e.message;
+		}
+		assert(msg !== null, "a disagreeing native must fail");
+		assertContains(msg, "wasm (natives on)");
+	});
+});
+
+test("natives off runs the Go body on both backends", async () => {
+	await withTempDir({ "four/four.go": FOUR_PKG }, async (stdlib) => {
+		for (const fn of ["Disagree", "WasmDisagree"]) {
+			const off = await compileHybridProgram(fourProgram(fn), {
+				natives: false,
+				stdlibRoot: stdlib,
+			});
+			assertEqual(off.js, "2\n");
+			assertEqual(off.wasm, "2\n");
+		}
+	});
 });

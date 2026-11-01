@@ -51,7 +51,12 @@ export function registerPackageUnit(options, unit) {
 
 function linkWasmUnits(
 	units,
-	{ emitWat = false, rootTarget = "js", sourceMappingURL = null } = {},
+	{
+		emitWat = false,
+		rootTarget = "js",
+		sourceMappingURL = null,
+		natives = true,
+	} = {},
 ) {
 	if (!units.some((u) => u.target === "wasm")) return null;
 	checkLinkCollisions(units);
@@ -89,6 +94,7 @@ function linkWasmUnits(
 	return compileWasmModule(programs, checker, lowerRes, {
 		boundary: true,
 		bundledPackages,
+		natives,
 		emitWat,
 		callMain: rootTarget === "wasm",
 		sourceMappingURL,
@@ -243,6 +249,7 @@ export function linkIntoBundle(
 	if (options.isDependency) return none;
 	const linked = linkWasmUnits(options.wasmUnits, {
 		emitWat: options.emitWat,
+		natives: options.natives,
 		rootTarget: pkgTarget,
 		sourceMappingURL,
 	});

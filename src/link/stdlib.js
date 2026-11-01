@@ -311,7 +311,7 @@ function stdlibMarker(importPath) {
 	return `/*__GOFRONT_STDLIB:${importPath}*/`;
 }
 
-function stdlibJs(pkg, reached) {
+function stdlibJs(pkg, reached, natives) {
 	const programs = pkg.unit.programs.map((p) => ({
 		...p,
 		decls: p.decls.filter((d) => reached.has(d)),
@@ -320,6 +320,7 @@ function stdlibJs(pkg, reached) {
 	return new CodeGen(pkg.checker, new Map(), new Set(), {
 		target: "both",
 		strict: true,
+		natives,
 	}).generateAll(programs, { isTest: false });
 }
 
@@ -362,7 +363,11 @@ function spliceStdlibJs(merged, options) {
 		}
 		if (spliced.has(path)) continue;
 		spliced.add(path);
-		const js = stdlibJs(options.stdlibCache.get(path), reached);
+		const js = stdlibJs(
+			options.stdlibCache.get(path),
+			reached,
+			options.natives,
+		);
 		const code = js === "" ? [] : js.split("\n");
 		const delta = code.length - 1;
 		for (const m of merged.mappings)

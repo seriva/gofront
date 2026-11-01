@@ -311,7 +311,7 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
   - Test: `test/unit/wasm/stdlib.test.js` — a test-only native calling an import; decline and value-fallback cases as parity tests against the Go body.
   - Done when: native-on and native-off modules validate and give the same output.
 
-- [ ] **Task 3.4 — Natives-off mode and `assertFourWay`**
+- [x] **Task 3.4 — Natives-off mode and `assertFourWay`**
   - Files: `src/compiler.js` (`natives` option), `src/link/stdlib.js` (pass it to the stdlib `CodeGen` and WASM unit), `src/cli/cli-core.js` (`--no-natives`, debugging only)
   - Do: `natives: false` makes both backends ignore their registries. Extend `compileHybridProgram` in `test/unit/helpers.js` with a `natives` option and add `assertFourWay(source, expected)`, which reports the failing configuration (`js (natives on)`, …).
   - Test: `stdlib-go.test.js` — a test-only native that disagrees with its Go body fails `assertFourWay` naming `js (natives on)`; an agreeing one passes.

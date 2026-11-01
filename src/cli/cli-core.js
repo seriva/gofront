@@ -45,11 +45,12 @@ export function runCompile(inputPath, isDir, options) {
 		dumpAst = false,
 		emitWat = false,
 		wasmOpt = false,
+		natives = true,
 		forceTarget = null,
 		targetOverrides = null,
 		rootDir = null,
 	} = options ?? {};
-	const targetOpts = {};
+	const targetOpts = { natives };
 	if (forceTarget) targetOpts.forceTarget = forceTarget;
 	if (targetOverrides) targetOpts.targetOverrides = targetOverrides;
 	if (rootDir) targetOpts.rootDir = rootDir;
@@ -632,6 +633,7 @@ export function parseBuildArgs(argv) {
 	const noWasmOpt = argv.includes("--no-wasm-opt");
 	const wasmOpt = !noWasmOpt && (argv.includes("--wasm-opt") || release);
 	const forceTarget = parseTargetFlag(argv);
+	const natives = !argv.includes("--no-natives");
 
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
@@ -656,6 +658,7 @@ export function parseBuildArgs(argv) {
 		mangle: !noMangle && !noMinify,
 		release,
 		wasmOpt,
+		natives,
 		forceTarget,
 	};
 }
@@ -858,6 +861,7 @@ export async function handleBuild(targetDir = ".", options = {}) {
 		sourceMap: options.sourceMap ?? false,
 		emitWat: options.emitWat ?? false,
 		wasmOpt: options.wasmOpt ?? false,
+		natives: options.natives ?? true,
 		forceTarget: options.forceTarget ?? null,
 		...projectTargetOptions(project, options),
 	});

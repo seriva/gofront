@@ -454,6 +454,7 @@ export function compileSingleFile(inputPath, options = {}) {
 	const cg = new CodeGen(checker, jsImports, bundledPackages, {
 		target: pkgTarget,
 		strict: isStrict,
+		natives: options.natives,
 	});
 	const mainJs =
 		pkgTarget === "wasm" ? wasmMarker(checker.pkgName) : cg.generate(ast);
@@ -621,6 +622,7 @@ export function compileFiles(files, options = {}) {
 	const codegen = new CodeGen(checker, jsImports, bundledPackages, {
 		target: pkgTarget,
 		strict: isStrict,
+		natives: options.natives,
 	});
 	const mainJs =
 		emitTarget === "wasm"
