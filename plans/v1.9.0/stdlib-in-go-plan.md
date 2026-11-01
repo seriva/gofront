@@ -299,7 +299,7 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
   - Test: `test/unit/compiler/stdlib-go.test.js` — `unknown native 'x'`, the body-less error, `//gofront:native is reserved for the standard library` (user package), via a temp-dir stdlib root; a valid test-only name compiles.
   - Done when: the four tests pass with those messages.
 
-- [ ] **Task 3.2 — JS call-site substitution with decline and value fallback**
+- [x] **Task 3.2 — JS call-site substitution with decline and value fallback**
   - Files: `src/backend/js/expressions.js`, new `src/backend/js/natives.js`
   - Do: at a call whose callee carries a native, ask the registry with the argument expressions and instantiated type arguments; emit the string, else call the Go function. Values, `defer` and method values call the Go function. Repeated arguments are bound to temporaries.
   - Test: `stdlib-go.test.js` — a test-only native `str.Index` emits `.indexOf(`; `f := str.Index; f(a, b)` calls the Go body; a template that declines for `float64` calls the Go body; `str.Index(next(), next())` evaluates each argument once, in order.

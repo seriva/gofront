@@ -20,6 +20,7 @@ import {
 	typedArrayConstructorForElem,
 	typeStr,
 } from "../../typechecker/types.js";
+import { jsNativeCall } from "./natives.js";
 
 // True when `node` compares the identifier `name` with nil (`l == nil`): a
 // pointer-receiver method that does so is meant to run on a nil receiver.
@@ -1352,15 +1353,27 @@ export const expressionGenMethods = {
 
 	_genCallArgs(expr) {
 		if (expr._multiForward) return `...${this.genExpr(expr.args[0])}`;
-		return expr.args
-			.map((a, i) =>
-				a._spread
-					? this._genSpreadArg(expr, a)
-					: this._callerCopiesArg(expr, i)
-						? this.genValueExpr(a)
-						: this.genExpr(a),
-			)
-			.join(", ");
+		return this._genCallArgList(expr).join(", ");
+	},
+
+	_genCallArgList(expr) {
+		return expr.args.map((a, i) =>
+			a._spread
+				? this._genSpreadArg(expr, a)
+				: this._callerCopiesArg(expr, i)
+					? this.genValueExpr(a)
+					: this.genExpr(a),
+		);
+	},
+
+	// A direct call of a `//gofront:native` function: host code from the
+	// registry, or null (declined, natives off, spread arguments) to call the
+	// Go body.
+	_genNativeCall(expr) {
+		if (!this.natives || !expr._native) return null;
+		if (expr._multiForward || expr.args.some((a) => a._spread)) return null;
+		const typeArgs = expr._typeArgs ?? expr.func._typeArgs ?? [];
+		return jsNativeCall(expr._native, this._genCallArgList(expr), typeArgs);
 	},
 
 	// `f(xs...)`: a Go-compiled variadic callee receives the slice itself in a
@@ -1734,6 +1747,9 @@ export const expressionGenMethods = {
 
 	genCall(expr) {
 		if (expr._isTypeConversion) return this._genTypeConversionCall(expr);
+
+		const native = this._genNativeCall(expr);
+		if (native !== null) return native;
 
 		const funcExpr =
 			expr.func.kind === "InstantiationExpr" ? expr.func.expr : expr.func;
@@ -2633,6 +2649,16 @@ export const expressionGenMethods = {
 	},
 
 	// Runs `fn` with type parameters `names` bound to the factories `$z_<name>`.
+	_withoutNatives(fn) {
+		const saved = this.natives;
+		this.natives = false;
+		try {
+			return fn();
+		} finally {
+			this.natives = saved;
+		}
+	},
+
 	_withTypeParamZeros(names, fn) {
 		const prev = this._typeParamZeros;
 		this._typeParamZeros = names

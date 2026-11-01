@@ -1,6 +1,7 @@
 // Go-source stdlib: packages written in GoFront Go under stdlib/,
 // compiled into the caller's target (js, wasm, or both).
 
+import { JS_NATIVES } from "../../../src/backend/js/natives.js";
 import { NATIVES, STDLIB_PACKAGES } from "../../../src/typechecker/types.js";
 import {
 	assert,
@@ -931,4 +932,111 @@ func (T) M() {}
 test("a registered native name compiles", () => {
 	const res = compileWithStr(STR_PKG);
 	assert(res.js.includes("Index$$str"), "the Go body is still emitted");
+});
+
+section("Go-source stdlib: JS native call sites");
+
+JS_NATIVES.set("str.Index", (a, targs) =>
+	targs.length === 0 ? `${a[0]}.indexOf(${a[1]})` : null,
+);
+
+const callJs = (body) =>
+	compileWithStr(
+		STR_PKG,
+		`package main\n\nimport "str"\n\nfunc main() {\n${body}\n}\n`,
+	).js;
+
+test("a native call site emits the host code", () => {
+	const js = callJs(`println(str.Index("hello", "ll"))`);
+	assertContains(js, `"hello".indexOf("ll")`);
+});
+
+test("a native used as a value calls the Go body", () => {
+	const js = callJs(`f := str.Index\nprintln(f("hello", "ll"))`);
+	assert(!js.includes(".indexOf("), "a function value must not be inlined");
+	assertContains(js, "f(");
+});
+
+test("a deferred native call runs the Go body", () => {
+	const js = callJs(`defer str.Index("hello", "ll")`);
+	assert(!js.includes(".indexOf("), "defer must call the Go body");
+});
+
+test("a native that declines calls the Go body", () => {
+	JS_NATIVES.set("str.Index", () => null);
+	try {
+		const js = callJs(`println(str.Index("hello", "ll"))`);
+		assert(!js.includes(".indexOf("), "a declined call must not be inlined");
+		assertContains(js, "Index$$str(");
+	} finally {
+		JS_NATIVES.set("str.Index", (a) => `${a[0]}.indexOf(${a[1]})`);
+	}
+});
+
+test("a native evaluates each argument once, in order", async () => {
+	// The template repeats its second argument.
+	JS_NATIVES.set(
+		"str.Index",
+		(a) => `(${a[0]}.indexOf(${a[1]}) + ${a[1]}.length * 0)`,
+	);
+	try {
+		await withTempDir({ "str/str.go": STR_PKG }, async (stdlib) => {
+			const res = await compileHybridProject(
+				{
+					"main.go": `package main
+
+import "str"
+
+var log string
+
+func next(s string) string {
+	log += s
+	return s
+}
+
+func main() {
+	println(str.Index(next("hello"), next("ll")), log)
+}
+`,
+				},
+				{ stdlibRoot: stdlib },
+			);
+			assertEqual(res.lines.join("\n"), "2 helloll");
+		});
+	} finally {
+		JS_NATIVES.set("str.Index", (a) => `${a[0]}.indexOf(${a[1]})`);
+	}
+});
+
+test("a generic native that declines one instantiation calls the Go body", () => {
+	NATIVES.add("str.IndexOf");
+	JS_NATIVES.set("str.IndexOf", (a, targs) =>
+		targs[0]?.name === "float64" ? null : `${a[0]}.indexOf(${a[1]})`,
+	);
+	const pkg = `${STR_PKG}
+//gofront:native str.IndexOf
+func IndexOf[T comparable](xs []T, v T) int {
+	for i, x := range xs {
+		if x == v {
+			return i
+		}
+	}
+	return -1
+}
+`;
+	const js = compileWithStr(
+		pkg,
+		`package main
+
+import "str"
+
+func main() {
+	println(str.IndexOf([]int{1, 2}, 2))
+	println(str.IndexOf([]float64{1, 2}, 2))
+}
+`,
+	).js;
+	assertContains(js, "[1, 2]");
+	assertEqual(js.split(".indexOf(").length - 1, 1);
+	assertContains(js, "IndexOf$$str(");
 });

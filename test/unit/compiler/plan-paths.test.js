@@ -25,8 +25,8 @@ const PLANS = [
 	{
 		file: "plans/v1.9.0/stdlib-in-go-plan.md",
 		exempt: [
-			// Native registries (listed as "new" in Tasks 3.2/3.3; Task 13.1 adds the test).
-			"src/backend/{js,wasm}/natives.js",
+			// WASM native registry (listed as "new" in Task 3.3; Task 13.1 adds the test).
+			"src/backend/wasm/natives.js",
 			// Pdq generator and template (Task 4.1 "new"), and the new tests of Tasks 4.1 and 13.1.
 			"scripts/{gen-pdq.js,pdq-template.txt}",
 			"test/unit/compiler/{gen-pdq,natives}.test.js",

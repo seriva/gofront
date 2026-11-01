@@ -331,7 +331,10 @@ export const statementGenMethods = {
 				}
 				break;
 			case "DeferStmt":
-				this.line(`__defers.push(() => { ${this.genExpr(stmt.call)}; });`);
+				// A deferred native call runs the Go body.
+				this._withoutNatives(() =>
+					this.line(`__defers.push(() => { ${this.genExpr(stmt.call)}; });`),
+				);
 				break;
 			case "LabeledStmt":
 				if (stmt.body && stmt.body.kind === "ForStmt") {
