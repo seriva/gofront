@@ -65,6 +65,14 @@ function linkWasmUnits(
 	const bundledPackages = new Set();
 	const programs = [];
 	const stdlibPrograms = [];
+	// Check the stdlib bodies the linked code reaches before the ASTs are
+	// copied; lazily checked bodies are annotated and mangled in place.
+	reachableStdlibDecls(
+		units
+			.filter((u) => !u.key.startsWith("stdlib:"))
+			.flatMap((u) => u.programs),
+		units.filter((u) => u.key.startsWith("stdlib:")).flatMap((u) => u.programs),
+	);
 	for (const u of units) {
 		for (const b of u.bundledPackages) bundledPackages.add(b);
 		const copies = u.programs.map((p) => cloneAstForWasm(p));

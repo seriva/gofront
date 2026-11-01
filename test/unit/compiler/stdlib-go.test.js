@@ -1139,3 +1139,131 @@ test("natives off runs the Go body on both backends", async () => {
 		}
 	});
 });
+
+section("Go-source stdlib: lazy body checking");
+
+// A Go-source package of `count` functions of 14 lines each (about 5,600
+// lines for 400): Fn returns a distinct value, so the bodies are checkable
+// but never call one another.
+function bigPackage(count, extra = "") {
+	const fns = [];
+	for (let i = 0; i < count; i++)
+		fns.push(`func F${i}(x int) int {
+	total := 0
+	for i := 0; i < x; i++ {
+		if i%2 == 0 {
+			total += i * ${i + 1}
+		} else {
+			total -= ${i}
+		}
+	}
+	return total
+}
+`);
+	return `//go:build gofront
+
+//gofront:target both
+
+package big
+
+${fns.join("\n")}
+${extra}
+`;
+}
+
+// Compiles `main` against a temp stdlib holding `big`; returns the build and
+// the stdlib cache (to read the checker's statistics).
+function compileBig(pkg, mainBody) {
+	const stdlibCache = new Map();
+	const res = withTempDir(
+		{
+			"stdlib/big/big.go": pkg,
+			"app/main.go": `package main\n\nimport "big"\n\nfunc main() {\n${mainBody}\n}\n`,
+		},
+		(dir) =>
+			compileDir(join(dir, "app"), {
+				stdlibRoot: join(dir, "stdlib"),
+				stdlibCache,
+			}),
+	);
+	return { res, checker: stdlibCache.get("big").checker };
+}
+
+test("a large package checks only the bodies a call reaches", () => {
+	const pkg = bigPackage(480);
+	assert(pkg.split("\n").length >= 5600, "the package is about 5,600 lines");
+	const { checker } = compileBig(pkg, "println(big.F7(3))");
+	assert(
+		checker.stats.bodiesChecked <= 10,
+		`checked ${checker.stats.bodiesChecked} bodies`,
+	);
+	assertEqual(checker.stats.bodiesChecked, 1);
+});
+
+test("a type error in an unreached body is not reported", () => {
+	const pkg = bigPackage(3, `func Broken() int { return "x" }`);
+	const { res } = compileBig(pkg, "println(big.F1(3))");
+	assertContains(res.js, "F1$$big");
+	assert(!res.js.includes("Broken"), "an unreached function is not emitted");
+});
+
+test("a type error in a reached body is reported at the call", () => {
+	const pkg = bigPackage(3, `func Broken() int { return "x" }`);
+	assertThrows(
+		() => compileBig(pkg, "println(big.Broken())"),
+		"internal stdlib error in big; please report",
+	);
+	assertThrows(
+		() => compileBig(pkg, "println(big.Broken())"),
+		"Type error in main.go",
+	);
+});
+
+test("a body reached through another body is checked and reported", () => {
+	const pkg = bigPackage(
+		3,
+		`func Outer() int { return inner() }\nfunc inner() int { return "x" }`,
+	);
+	assertThrows(
+		() => compileBig(pkg, "println(big.Outer())"),
+		"internal stdlib error in big; please report",
+	);
+});
+
+test("a wasm package checks the Go-source bodies it reaches", async () => {
+	const pkg = bigPackage(3, `func Broken() int { return "x" }`);
+	await withTempDir({ "big/big.go": pkg }, async (stdlib) => {
+		const res = await compileHybridProject(
+			{
+				"lib/lib.go": `//gofront:target wasm
+package lib
+
+import "big"
+
+func Run() int { return big.F2(4) }
+`,
+				"main.go": `package main\n\nimport "./lib"\n\nfunc main() { println(lib.Run()) }\n`,
+			},
+			{ stdlibRoot: stdlib },
+		);
+		assertEqual(res.lines.join("\n"), "2");
+	});
+});
+
+test("diagnostics for an existing package are unchanged", () => {
+	withTempDir(
+		{
+			"main.go": `package main
+
+import "cmp"
+
+func main() { println(cmp.Compare(1, "a")) }
+`,
+		},
+		(dir) =>
+			assertThrows(
+				() => compileDir(dir),
+				`Type error in main.go at line 5:38: Cannot assign untyped string to int`,
+			),
+	);
+});

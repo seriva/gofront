@@ -167,7 +167,7 @@ func Index(s, substr string) int { /* Go body: the specification */ }
 | `slices.SortFunc` / `sort.Slice` vs `Array.prototype.sort` with comparator, JS, 200,000 | Go pdqsort path ≈1.3–1.7× | ≤ 2× |
 | `strings.Index`, 1 MB `"a…ab"`, 20 calls, WASM | 145 ms (host `str_index`) | ≤ 1.25× |
 | Dev `app.wasm`, program using `bytes.Buffer` | 6,957 bytes (`04aa0c6`) | ≤ 4,500 bytes |
-| Type-check, program importing every migrated package | measured in Task 3.5 | ≤ +5 ms (lazy) |
+| Type-check, program importing every migrated package | Task 3.5, 5,600-line synthetic package, one call (Node 25.2.0): +0.9 ms (two declaration passes at 0.45 ms; eager bodies 6.05 ms per pass). Whole `compileDir` +18 ms (eager 33 ms), all of it lex and parse at 7.6 ms per pass, two passes | ≤ +5 ms (lazy) |
 | `src/backend/wasm/stdlib/` | 26,460 lines | ≤ 8,000 |
 | `src/typechecker/stdlib/{core,extended}.js` | 2,289 lines | ≤ 1,500 |
 | `src/backend/js/stdlib/` | 4,003 lines | ≤ 2,400 |
@@ -317,7 +317,7 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
   - Test: `stdlib-go.test.js` — a test-only native that disagrees with its Go body fails `assertFourWay` naming `js (natives on)`; an agreeing one passes.
   - Done when: both cases behave as stated.
 
-- [ ] **Task 3.5 — Lazy body checking for Go-source packages**
+- [x] **Task 3.5 — Lazy body checking for Go-source packages**
   - Files: `src/typechecker/index.js`, `src/link/stdlib.js` (`checkStdlibPrograms`, both passes), `src/lower/reachability.js`
   - Do: check declarations eagerly and function and method bodies when first reached (call, used type's method, interface satisfaction) in both the probe and the mangled pass; report stdlib body errors at the user's call site. Expose `checker.stats.bodiesChecked`.
   - Test: `stdlib-go.test.js` — a synthetic 5,600-line Go-source package of which the program calls one function checks ≤ 10 bodies; a type error in an unreached body is not reported; the same error in a reached body is reported at the call site with the `internal stdlib error` note; diagnostics for existing packages are unchanged.
