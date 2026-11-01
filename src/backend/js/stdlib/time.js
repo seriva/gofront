@@ -10,12 +10,12 @@ const TIME_METHOD_DISPATCH = {
 	Minute: (r) => `__timeMinute(${r})`,
 	Second: (r) => `__timeSecond(${r})`,
 	Weekday: (r) => `__timeWeekday(${r})`,
-	Unix: (r) => `Math.floor(${r}._d.getTime() / 1000)`,
-	UnixMilli: (r) => `${r}._d.getTime()`,
+	Unix: (r) => `BigInt(Math.floor(${r}._d.getTime() / 1000))`,
+	UnixMilli: (r) => `BigInt(${r}._d.getTime())`,
 	Add: (r, a) =>
 		`{_d: new Date(${r}._d.getTime() + Math.round(Number(${a[0]}) / 1000000)), _offset: ${r}._offset, _loc: ${r}._loc, _ns: ${r}._ns}`,
 	Sub: (r, a) =>
-		`Math.round((${r}._d.getTime() - (${a[0]})._d.getTime()) * 1000000)`,
+		`(BigInt(${r}._d.getTime() - (${a[0]})._d.getTime()) * 1000000n + BigInt((${r}._ns || 0) - ((${a[0]})._ns || 0)))`,
 	Before: (r, a) => `(${r}._d < (${a[0]})._d)`,
 	After: (r, a) => `(${r}._d > (${a[0]})._d)`,
 	Equal: (r, a) =>
@@ -23,7 +23,7 @@ const TIME_METHOD_DISPATCH = {
 	IsZero: (r) =>
 		`(!${r} || !${r}._d || ${r}._isZero === true || ${r}._d.getTime() === -62135596800000 || (${r}._d.getUTCFullYear() <= 1 && ${r}._d.getUTCMonth() === 0 && ${r}._d.getUTCDate() === 1 && ${r}._d.getUTCHours() === 0 && ${r}._d.getUTCMinutes() === 0 && ${r}._d.getUTCSeconds() === 0 && ${r}._d.getUTCMilliseconds() === 0))`,
 	UnixNano: (r) =>
-		`(${r}?._d ? Math.round(${r}._d.getTime() * 1000000) + (${r}._ns || 0) : 0)`,
+		`(${r}?._d ? BigInt(${r}._d.getTime()) * 1000000n + BigInt(${r}._ns || 0) : 0n)`,
 	Nanosecond: (r) =>
 		`(${r}?._d ? (typeof ${r}._offset === "number" ? ${r}._d.getUTCMilliseconds() : ${r}._d.getMilliseconds()) * 1000000 + (${r}._ns || 0) : 0)`,
 	UTC: (r) =>
@@ -53,22 +53,22 @@ const TIME_METHOD_DISPATCH = {
 
 const DURATION_METHOD_DISPATCH = {
 	Nanoseconds: (r) => `${r}`,
-	Microseconds: (r) => `Math.trunc(Number(${r}) / 1000)`,
-	Milliseconds: (r) => `Math.trunc(Number(${r}) / 1000000)`,
+	Microseconds: (r) => `${r} / 1000n`,
+	Milliseconds: (r) => `${r} / 1000000n`,
 	Seconds: (r) => `(Number(${r}) / 1000000000)`,
 	Minutes: (r) => `(Number(${r}) / 60000000000)`,
 	Hours: (r) => `(Number(${r}) / 3600000000000)`,
 	String: (r) => `__durationString(${r})`,
-	Truncate: (r, a) => `(${a[0]} <= 0 ? ${r} : ${r} - (${r} % ${a[0]}))`,
+	Truncate: (r, a) => `(${a[0]} <= 0n ? ${r} : ${r} - (${r} % ${a[0]}))`,
 	Round: (r, a) => `__durationRound(${r}, ${a[0]})`,
-	Abs: (r) => `(${r} >= 0 ? ${r} : -(${r}))`,
+	Abs: (r) => `(${r} >= 0n ? ${r} : -(${r}))`,
 };
 
 const TIME_DISPATCH = {
 	Now: () =>
 		'(typeof globalThis.__GOFRONT_CLOCK === "function" ? {_d: new Date(globalThis.__GOFRONT_CLOCK())} : {_d: new Date()})',
 	Since: (a) =>
-		`(Math.round(((typeof globalThis.__GOFRONT_CLOCK === "function" ? globalThis.__GOFRONT_CLOCK() : Date.now()) - (${a[0]})._d.getTime()) * 1000000))`,
+		`(BigInt((typeof globalThis.__GOFRONT_CLOCK === "function" ? globalThis.__GOFRONT_CLOCK() : Date.now()) - (${a[0]})._d.getTime()) * 1000000n - BigInt((${a[0]})._ns || 0))`,
 	Sleep: (a) =>
 		`await new Promise(r => setTimeout(r, Number(${a[0]}) / 1000000))`,
 	Unix: (a) =>

@@ -3999,6 +3999,37 @@ rlocker ok
 	);
 });
 
+test("real Go output: 64-bit time, strconv, and binary on JS and WASM (Task 1.4)", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"encoding/binary"
+	"fmt"
+	"strconv"
+	"time"
+)
+
+func main() {
+	fmt.Println((3 * time.Second).String())
+	fmt.Println(time.Duration(1 << 62))
+	t0 := time.Now()
+	fmt.Println(time.Since(t0) >= 0)
+	n, err := strconv.ParseInt("9223372036854775807", 10, 64)
+	fmt.Println(n, err == nil)
+	bs := []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
+	fmt.Println(binary.LittleEndian.Uint64(bs))
+}
+`,
+		`3s
+1281023h53m38.427387904s
+true
+9223372036854775807 true
+18446744073709551615
+`,
+	);
+});
+
 // ── Entry point ───────────────────────────────────────────────
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);

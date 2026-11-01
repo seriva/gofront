@@ -2129,7 +2129,7 @@ export const HELPER_BINARY = `var __binary_le = __binary_le || {
   Uint64: function(b) {
     const lo = BigInt((b[0] | (b[1] << 8) | (b[2] << 16) | (b[3] << 24)) >>> 0);
     const hi = BigInt((b[4] | (b[5] << 8) | (b[6] << 16) | (b[7] << 24)) >>> 0);
-    return Number(lo | (hi << 32n));
+    return (lo | (hi << 32n));
   },
   PutUint16: function(b, v) { b[0] = v & 0xff; b[1] = (v >> 8) & 0xff; },
   PutUint32: function(b, v) { b[0] = v & 0xff; b[1] = (v >> 8) & 0xff; b[2] = (v >> 16) & 0xff; b[3] = (v >>> 24) & 0xff; },
@@ -2171,7 +2171,7 @@ var __binary_be = __binary_be || {
   Uint64: function(b) {
     const hi = BigInt(((b[0] << 24) | (b[1] << 16) | (b[2] << 8) | b[3]) >>> 0);
     const lo = BigInt(((b[4] << 24) | (b[5] << 16) | (b[6] << 8) | b[7]) >>> 0);
-    return Number((hi << 32n) | lo);
+    return ((hi << 32n) | lo);
   },
   PutUint16: function(b, v) { b[0] = (v >> 8) & 0xff; b[1] = v & 0xff; },
   PutUint32: function(b, v) { b[0] = (v >>> 24) & 0xff; b[1] = (v >> 16) & 0xff; b[2] = (v >> 8) & 0xff; b[3] = v & 0xff; },
