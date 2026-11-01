@@ -385,6 +385,17 @@ test("int64 shifts by 64 or more follow Go", () => {
 	);
 });
 
+test("64-bit shifts by large count (> 2^32) evaluate to 0 or -1 without BigInt size error", () => {
+	parity(
+		`	var x int64 = 1
+	var neg int64 = -1
+	var u uint64 = 0x8000000000000000
+	n := 1 << 35
+	return (x << n) + (neg >> n) + int64(u >> n)`,
+		-1,
+	);
+});
+
 test("int64(-1) >> 64 is -1 and int64(-1) << 64 is 0", () => {
 	parity(
 		`	var a int64 = -1

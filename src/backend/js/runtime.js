@@ -431,6 +431,7 @@ export const HELPER_SHIFT = `var __shl64 = __shl64 || function(x, n, u) {
   var b = BigInt(n);
   if (b < 0n) throw new Error("runtime error: negative shift amount");
   if (typeof x === "bigint") {
+    if (b >= 64n) return 0n;
     var bx = u ? BigInt.asUintN(64, x) : BigInt.asIntN(64, x);
     var r = bx << b;
     return u ? BigInt.asUintN(64, r) : BigInt.asIntN(64, r);
@@ -447,6 +448,7 @@ var __shr64 = __shr64 || function(x, n, u) {
   if (b < 0n) throw new Error("runtime error: negative shift amount");
   if (typeof x === "bigint") {
     var bx = u ? BigInt.asUintN(64, x) : BigInt.asIntN(64, x);
+    if (b >= 64n) return u || bx >= 0n ? 0n : -1n;
     var r = bx >> b;
     return u ? BigInt.asUintN(64, r) : BigInt.asIntN(64, r);
   }
