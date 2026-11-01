@@ -48,11 +48,11 @@ Each package has a target, declared once in any of its files:
 package physics           // no directive = js (default, today's behaviour)
 ```
 
-| Target | Compiled to | May import | Restrictions |
-|---|---|---|---|
-| `js` (default) | JS | anything | none (today's language) |
-| `wasm` | WASM | `wasm`, `both`, stdlib (WASM-supported subset) | WASM subset (below) |
-| `both` | JS + WASM | `both`, stdlib (subset) | WASM subset. **No package-level mutable state** (each side would get its own copy). |
+| Target         | Compiled to | May import                                     | Restrictions                                                                        |
+| -------------- | ----------- | ---------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `js` (default) | JS          | anything                                       | none (today's language)                                                             |
+| `wasm`         | WASM        | `wasm`, `both`, stdlib (WASM-supported subset) | WASM subset (below)                                                                 |
+| `both`         | JS + WASM   | `both`, stdlib (subset)                        | WASM subset. **No package-level mutable state** (each side would get its own copy). |
 
 - **The boundary exists only where a `js` package imports a `wasm` package.** `both` packages never create a boundary: a JS caller uses the JS copy and a WASM caller uses the WASM copy.
 - **Values of `both` types cross the boundary by layout.** A `Vec3` returned from WASM arrives in JS as the JS backend's `Vec3` class instance, and the reverse.
@@ -75,18 +75,18 @@ Allowed:
 
 The type checker rejects anything outside the subset in `check`, `dev` and `build`. Each case has a **targeted message** naming the package's target and where the code should go instead:
 
-| Inside a `wasm`/`both` package | Diagnostic |
-|---|---|
-| `.templ` file in the package | `.templ files are not allowed in wasm packages; move 'hud.templ' to a js package` |
-| `css` declaration | `css declarations are not allowed in wasm packages` |
-| Browser global (`document`, `window`, `console`, `localStorage`, …) | `'document' is not available in wasm packages` |
-| `import "js:…"` or npm/`.d.ts` types | `js: imports are not allowed in wasm packages` |
-| `gom` usage | `package 'gom' is not available in wasm packages` |
-| `async func` / `await` | `async functions are not supported in wasm packages; keep async code in a js package` |
-| Importing a `js` package | `package 'physics' (wasm) cannot import 'systems' (js)` |
-| `both` package importing a `wasm` package | `package 'mathx' (both) can only import 'both' packages; 'physics' is wasm` |
-| Package-level `var` written after init in a `both` package | `package-level variable '_scratch' is mutated; not allowed in 'both' packages (each target gets its own copy)` |
-| Stdlib shim not yet ported | `'regexp' is not yet available in wasm packages` |
+| Inside a `wasm`/`both` package                                      | Diagnostic                                                                                                     |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `.templ` file in the package                                        | `.templ files are not allowed in wasm packages; move 'hud.templ' to a js package`                              |
+| `css` declaration                                                   | `css declarations are not allowed in wasm packages`                                                            |
+| Browser global (`document`, `window`, `console`, `localStorage`, …) | `'document' is not available in wasm packages`                                                                 |
+| `import "js:…"` or npm/`.d.ts` types                                | `js: imports are not allowed in wasm packages`                                                                 |
+| `gom` usage                                                         | `package 'gom' is not available in wasm packages`                                                              |
+| `async func` / `await`                                              | `async functions are not supported in wasm packages; keep async code in a js package`                          |
+| Importing a `js` package                                            | `package 'physics' (wasm) cannot import 'systems' (js)`                                                        |
+| `both` package importing a `wasm` package                           | `package 'mathx' (both) can only import 'both' packages; 'physics' is wasm`                                    |
+| Package-level `var` written after init in a `both` package          | `package-level variable '_scratch' is mutated; not allowed in 'both' packages (each target gets its own copy)` |
+| Stdlib shim not yet ported                                          | `'regexp' is not yet available in wasm packages`                                                               |
 
 Example output, using the existing diagnostic format:
 
@@ -133,13 +133,13 @@ The rule of thumb: **the engine computes, the JS side shows.** When WASM code se
 
 A `both` package runs as two separate implementations of the same code, so they must agree. Otherwise a raycast in WASM and the same raycast in JS return different results. The JS backend therefore compiles `both` packages in **strict numeric mode**:
 
-| Operation | Normal JS codegen | Strict mode (`both` packages) |
-|---|---|---|
-| `float32` arithmetic | float64 | `Math.fround(...)` after each op (JIT intrinsic, cheap) |
-| `int32`/`int16`/`int8` arithmetic | float64 | `\| 0` / sign-extend after each op |
-| `uint32`/… arithmetic | float64 | `>>> 0` / mask after each op |
-| `int`/`int64` | float64 (safe to 2⁵³) | unchanged. Dev builds check the safe range in strict mode. |
-| Integer `/` and `%` by zero | `Infinity`/`NaN` | panic |
+| Operation                         | Normal JS codegen     | Strict mode (`both` packages)                              |
+| --------------------------------- | --------------------- | ---------------------------------------------------------- |
+| `float32` arithmetic              | float64               | `Math.fround(...)` after each op (JIT intrinsic, cheap)    |
+| `int32`/`int16`/`int8` arithmetic | float64               | `\| 0` / sign-extend after each op                         |
+| `uint32`/… arithmetic             | float64               | `>>> 0` / mask after each op                               |
+| `int`/`int64`                     | float64 (safe to 2⁵³) | unchanged. Dev builds check the safe range in strict mode. |
+| Integer `/` and `%` by zero       | `Infinity`/`NaN`      | panic                                                      |
 
 Strings (JS strings in both targets, see below) and map iteration order (insertion order in both targets) already agree. The remaining known divergence is `int64` beyond 2⁵³, documented as unsupported in `both` packages.
 
@@ -149,22 +149,22 @@ Strict mode could become a general opt-in for `js` packages later (`//gofront:st
 
 ## WASM Code Generation (WasmGC)
 
-| GoFront | WasmGC representation | Notes |
-|---|---|---|
-| `bool`, `int8…int32`, `uint8…uint32` | `i32` | narrow types re-extended after arithmetic |
-| `int`, `uint`, `int64`, `uint64` | `i64` | converted via `number` at the boundary |
-| `float32` / `float64` | `f32` / `f64` | native `sqrt/floor/ceil/trunc/nearest/abs/min/max/copysign` |
-| `complex64/128` | immutable `(struct f32 f32)` / `(struct f64 f64)` | |
-| `struct T` | `(struct (mut …))` | value copies via `struct.new`, elided by `lower`'s ownership analysis |
-| `*T` (struct) | `(ref null $T)` | |
-| `*T` (scalar), address-taken scalars | `(struct (mut T))` box | same `Info.Boxed` decision as JS. No interior pointers on either target. |
-| `[N]T` | `(array (mut T))` | |
-| `[]T` | `(struct (ref $arr) i32 off, i32 len, i32 cap)` | real slices: `cap`, 3-index, amortised `append` |
-| `string` | JS string as `externref` via JS String Builtins (`wasm:js-string`), polyfilled through imports where unavailable | same semantics as JS (`len` = UTF-16 units), zero-copy across the boundary |
-| `map[K]V` | insertion-ordered hash map (runtime) | same iteration order as JS |
-| interface | boxed value as `anyref` (concrete struct ref, or box for scalars); method calls dispatch via `ref.test` chains over the candidate implementing types, no itab | the "itab" design in H4.1 was replaced by static candidate sets: cheaper for the small type sets of game code, no runtime tables |
-| func values / closures | `(struct funcref, anyref env)` + `call_ref` | |
-| generics | monomorphised (deduplicated by layout) | JS stays erased |
+| GoFront                              | WasmGC representation                                                                                                                                         | Notes                                                                                                                            |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `bool`, `int8…int32`, `uint8…uint32` | `i32`                                                                                                                                                         | narrow types re-extended after arithmetic                                                                                        |
+| `int`, `uint`, `int64`, `uint64`     | `i64`                                                                                                                                                         | converted via `number` at the boundary                                                                                           |
+| `float32` / `float64`                | `f32` / `f64`                                                                                                                                                 | native `sqrt/floor/ceil/trunc/nearest/abs/min/max/copysign`                                                                      |
+| `complex64/128`                      | immutable `(struct f32 f32)` / `(struct f64 f64)`                                                                                                             |                                                                                                                                  |
+| `struct T`                           | `(struct (mut …))`                                                                                                                                            | value copies via `struct.new`, elided by `lower`'s ownership analysis                                                            |
+| `*T` (struct)                        | `(ref null $T)`                                                                                                                                               |                                                                                                                                  |
+| `*T` (scalar), address-taken scalars | `(struct (mut T))` box                                                                                                                                        | same `Info.Boxed` decision as JS. No interior pointers on either target.                                                         |
+| `[N]T`                               | `(array (mut T))`                                                                                                                                             |                                                                                                                                  |
+| `[]T`                                | `(struct (ref $arr) i32 off, i32 len, i32 cap)`                                                                                                               | real slices: `cap`, 3-index, amortised `append`                                                                                  |
+| `string`                             | JS string as `externref` via JS String Builtins (`wasm:js-string`), polyfilled through imports where unavailable                                              | same semantics as JS (`len` = UTF-16 units), zero-copy across the boundary                                                       |
+| `map[K]V`                            | insertion-ordered hash map (runtime)                                                                                                                          | same iteration order as JS                                                                                                       |
+| interface                            | boxed value as `anyref` (concrete struct ref, or box for scalars); method calls dispatch via `ref.test` chains over the candidate implementing types, no itab | the "itab" design in H4.1 was replaced by static candidate sets: cheaper for the small type sets of game code, no runtime tables |
+| func values / closures               | `(struct funcref, anyref env)` + `call_ref`                                                                                                                   |                                                                                                                                  |
+| generics                             | monomorphised (deduplicated by layout)                                                                                                                        | JS stays erased                                                                                                                  |
 
 - **Control flow:** structured (`block`/`loop`/`br`/`br_table`). No `goto` means no relooper. `fallthrough` becomes nested blocks.
 - **Multiple results:** native multi-value.
@@ -182,20 +182,20 @@ The no-runtime rule still holds for JS output. The WASM runtime is a target-scop
 
 For every `wasm` package imported by `js` code, the compiler generates a **JS facade module** with the same API shape the JS backend would have produced (functions, classes, methods, fields), backed by WASM exports. JS callers are compiled exactly as if the package were JS.
 
-| Type in an exported signature | Crossing strategy |
-|---|---|
-| bool, ints ≤ 32-bit, floats | direct (`i32`/`f32`/`f64` ↔ `number`) |
-| `int`, `int64`, `uint64` | via `number` (safe-range check in dev builds) |
-| `string` | zero-copy (`externref`) |
-| struct **value** (`T`) | marshalled field-wise into or out of the JS class instance (`both` types: the class from the JS copy of the package) |
-| pointer to a **`wasm`-package struct** (`*Body`) | **handle**: facade class wrapping the WasmGC ref. Fields become getters/setters calling generated accessors. Methods call exports. Identity is preserved (one facade object per ref, via a `WeakMap`-style cache). |
-| pointer to a **`both`-package struct** (`*Vec3`) | **copy-in / copy-out** for the duration of the call (mutation is visible to the caller). If escape analysis in `lower` shows the WASM side *retains* the pointer, it's a compile error: "pointer to JS-owned `Vec3` retained by wasm; store a value or use a wasm-owned handle". |
-| numeric slices (`[]float32`, `[]int32`, …) | copied into or out of TypedArrays (matches the JS backend's TypedArray mapping) |
-| other slices | element-wise copy |
-| shared buffers | zero-copy (see below) |
-| func values (callbacks) | **JS → WASM:** JS function held as `externref`, called through a generic invoke import. **WASM → JS:** closure wrapped in a cached JS function calling an exported trampoline. Covers `OnBounce`-style hooks. |
-| interfaces | **WASM value passed to JS:** the handle class (or `both` live view) when the dynamic type is an exported `*T` whose JS class has every method; otherwise a facade object with the interface's methods calling WASM exports. Identity is stable per WASM object. **JS-implemented value passed into WASM:** not supported via dynamic itab proxies. `check` rejects a `js`/`both` type converted to a `wasm` interface, and the facade throws a `TypeError` for anything without a WASM ref or whose WASM type does not implement the interface. Values that reach the interface through `any` (e.g. stored in an `any` field and type-asserted on the WASM side) bypass the `check` diagnostic and are only caught by that runtime check. Keep provider implementations in WASM or pass typed function callbacks (`func`). Avoids slow double-boundary hops. Named interfaces only. |
-| maps | not allowed in exported signatures in v1.6.0. Use slices or methods. |
+| Type in an exported signature                    | Crossing strategy                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| bool, ints ≤ 32-bit, floats                      | direct (`i32`/`f32`/`f64` ↔ `number`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `int`, `int64`, `uint64`                         | via `number` (safe-range check in dev builds)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `string`                                         | zero-copy (`externref`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| struct **value** (`T`)                           | marshalled field-wise into or out of the JS class instance (`both` types: the class from the JS copy of the package)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| pointer to a **`wasm`-package struct** (`*Body`) | **handle**: facade class wrapping the WasmGC ref. Fields become getters/setters calling generated accessors. Methods call exports. Identity is preserved (one facade object per ref, via a `WeakMap`-style cache).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| pointer to a **`both`-package struct** (`*Vec3`) | **copy-in / copy-out** for the duration of the call (mutation is visible to the caller). If escape analysis in `lower` shows the WASM side _retains_ the pointer, it's a compile error: "pointer to JS-owned `Vec3` retained by wasm; store a value or use a wasm-owned handle".                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| numeric slices (`[]float32`, `[]int32`, …)       | copied into or out of TypedArrays (matches the JS backend's TypedArray mapping)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| other slices                                     | element-wise copy                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| shared buffers                                   | zero-copy (see below)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| func values (callbacks)                          | **JS → WASM:** JS function held as `externref`, called through a generic invoke import. **WASM → JS:** closure wrapped in a cached JS function calling an exported trampoline. Covers `OnBounce`-style hooks.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| interfaces                                       | **WASM value passed to JS:** the handle class (or `both` live view) when the dynamic type is an exported `*T` whose JS class has every method; otherwise a facade object with the interface's methods calling WASM exports. Identity is stable per WASM object. **JS-implemented value passed into WASM:** not supported via dynamic itab proxies. `check` rejects a `js`/`both` type converted to a `wasm` interface, and the facade throws a `TypeError` for anything without a WASM ref or whose WASM type does not implement the interface. Values that reach the interface through `any` (e.g. stored in an `any` field and type-asserted on the WASM side) bypass the `check` diagnostic and are only caught by that runtime check. Keep provider implementations in WASM or pass typed function callbacks (`func`). Avoids slow double-boundary hops. Named interfaces only. |
+| maps                                             | not allowed in exported signatures in v1.6.0. Use slices or methods.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
 **Design rule: keep the boundary coarse and per-frame.** One `world.Step(dt)`, a few controller updates and a handful of raycasts per frame are cheap. Fine-grained calls such as `Vec3.Add` from JS into WASM thousands of times per frame are exactly what `both` packages exist to avoid. `gofront check` can report boundary call sites inside loops in `js` packages as **hints**, not errors.
 
@@ -263,13 +263,13 @@ WasmGC object references and boundary handles (`externref`) **cannot** be transf
 
 Current imports: `physics` is the only pure leaf (imports `math` only). `rendering`, `scene`, `game` and `animation` use `physics.Vec3`/`Mat4`/`BoundingBox` about 300 times. `animation` imports `systems` for `NewBinaryReader`.
 
-| Package | v1.5.0 | v1.6.0 (end state) | Contents |
-|---|---|---|---|
-| `engine/mathx` (new) | `both` | `both` | `Vec3`, `Mat4`, `Quat`, `Transform`, `BoundingBox` (moved from `physics`) |
-| `engine/collision` (new) | `wasm` | `wasm` | `Trimesh`, `Octree`, `Ray` + raycasting (moved from `physics`). Needs only the v1.5 core subset (`any` fields, JS callbacks). |
-| `engine/physics` | `js` | `wasm` | `DynamicBody`, `FPSController`. Done in H5.3: the static-world provider is `collision.StaticWorld` (WASM), so controller/body raycasts never cross the boundary; the controller owns a `CameraPose` value that the game copies in/out per frame; `OnBounce`/`OnRest`/`OnLand`/`OnJump` call back into JS. |
-| `engine/rendering`, `scene`, `systems`, `assets`, `game` | `js` | `js` | Import `mathx` instead of `physics` for math types |
-| `engine/animation` | `js` | `wasm` | Done in H7.1: `NewBinaryReader` and `ParseBinaryAnimation` moved to `assets`, so `animation` imports only `mathx`. As a first cut it returned `[]mathx.Mat4` and measured at parity with JS (copied out per frame); `ComputeSkinningMatrices` now writes the palette into a `gofront/shared` buffer (`animation.SkinMatrices`) and returns the joint count — 1.27× JS on a 64-joint frame. |
+| Package                                                  | v1.5.0 | v1.6.0 (end state) | Contents                                                                                                                                                                                                                                                                                                                                                                                   |
+| -------------------------------------------------------- | ------ | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `engine/mathx` (new)                                     | `both` | `both`             | `Vec3`, `Mat4`, `Quat`, `Transform`, `BoundingBox` (moved from `physics`)                                                                                                                                                                                                                                                                                                                  |
+| `engine/collision` (new)                                 | `wasm` | `wasm`             | `Trimesh`, `Octree`, `Ray` + raycasting (moved from `physics`). Needs only the v1.5 core subset (`any` fields, JS callbacks).                                                                                                                                                                                                                                                              |
+| `engine/physics`                                         | `js`   | `wasm`             | `DynamicBody`, `FPSController`. Done in H5.3: the static-world provider is `collision.StaticWorld` (WASM), so controller/body raycasts never cross the boundary; the controller owns a `CameraPose` value that the game copies in/out per frame; `OnBounce`/`OnRest`/`OnLand`/`OnJump` call back into JS.                                                                                  |
+| `engine/rendering`, `scene`, `systems`, `assets`, `game` | `js`   | `js`               | Import `mathx` instead of `physics` for math types                                                                                                                                                                                                                                                                                                                                         |
+| `engine/animation`                                       | `js`   | `wasm`             | Done in H7.1: `NewBinaryReader` and `ParseBinaryAnimation` moved to `assets`, so `animation` imports only `mathx`. As a first cut it returned `[]mathx.Mat4` and measured at parity with JS (copied out per frame); `ComputeSkinningMatrices` now writes the palette into a `gofront/shared` buffer (`animation.SkinMatrices`) and returns the joint count — 1.27× JS on a 64-joint frame. |
 
 The per-frame boundary in the end state: controller and body updates, raycasts from gameplay, and `OnBounce` callbacks back into JS (sound). That is a small, coarse set.
 
@@ -288,14 +288,14 @@ The per-frame boundary in the end state: controller and body updates, raycasts f
 
 ## Risks & Honest Expectations
 
-| Risk | Mitigation |
-|---|---|
-| Speedup is modest. V8 is strong on monomorphic numeric JS. | **Go/no-go benchmark at H3.** Correct ints/`float32` and determinism are value even at speed parity. |
-| Boundary design is subtle (copy-in/out, retention, proxies) | Compiler-owned glue, escape analysis, exhaustive boundary fixtures |
-| Strict mode slows `both` packages on the JS side | Applies only to `both` packages. Measured. `Math.fround`/`\|0` are JIT intrinsics. |
-| Users split in the wrong place and make the boundary chatty | Boundary-in-loop hints, documented guidance, `simplefps` as the reference split |
-| Shared-buffer lifetime (no free) | Fixed-size, program-lifetime buffers in v1.6.0. Freeing/pools later if needed. |
-| Platform support varies | Fixed baseline, feature detection, clear error |
+| Risk                                                        | Mitigation                                                                                           |
+| ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Speedup is modest. V8 is strong on monomorphic numeric JS.  | **Go/no-go benchmark at H3.** Correct ints/`float32` and determinism are value even at speed parity. |
+| Boundary design is subtle (copy-in/out, retention, proxies) | Compiler-owned glue, escape analysis, exhaustive boundary fixtures                                   |
+| Strict mode slows `both` packages on the JS side            | Applies only to `both` packages. Measured. `Math.fround`/`\|0` are JIT intrinsics.                   |
+| Users split in the wrong place and make the boundary chatty | Boundary-in-loop hints, documented guidance, `simplefps` as the reference split                      |
+| Shared-buffer lifetime (no free)                            | Fixed-size, program-lifetime buffers in v1.6.0. Freeing/pools later if needed.                       |
+| Platform support varies                                     | Fixed baseline, feature detection, clear error                                                       |
 
 ---
 
@@ -303,11 +303,11 @@ The per-frame boundary in the end state: controller and body updates, raycasts f
 
 The hybrid design is delivered over three releases. Both WASM releases land in the JS compiler, so the feature is complete before the rewrite:
 
-| Release | Delivers | Plan |
-|---|---|---|
-| **v1.5.0** (JS compiler) | `src/lower/` extraction, targets + diagnostics, JS strict mode, encoder + WAT, core subset (scalars, structs, pointers, methods, arrays, slices, strings, `any`, closures, `panic`), boundary v1 (values, handles, copy-in/out + retention check, numeric slices, `any`, JS → WASM callbacks), simplefps `mathx` (both) + `collision` (wasm), **go/no-go benchmark** | [`plans/v1.5.0/wasm-mvp-plan.md`](../v1.5.0/wasm-mvp-plan.md) |
-| **v1.6.0** (JS compiler, this document) | The rest of the hybrid (phases below) | — |
-| **v2.0.0** (Go engine) | Port of the complete JS + WASM compiler to Go, with **byte-identical JS and `.wasm` output** as oracle gates. No new WASM features. | [`plans/v2.0.0/native-go-engine.md`](../v2.0.0/native-go-engine.md) |
+| Release                                 | Delivers                                                                                                                                                                                                                                                                                                                                                             | Plan                                                                |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| **v1.5.0** (JS compiler)                | `src/lower/` extraction, targets + diagnostics, JS strict mode, encoder + WAT, core subset (scalars, structs, pointers, methods, arrays, slices, strings, `any`, closures, `panic`), boundary v1 (values, handles, copy-in/out + retention check, numeric slices, `any`, JS → WASM callbacks), simplefps `mathx` (both) + `collision` (wasm), **go/no-go benchmark** | [`plans/v1.5.0/wasm-mvp-plan.md`](../v1.5.0/wasm-mvp-plan.md)       |
+| **v1.6.0** (JS compiler, this document) | The rest of the hybrid (phases below)                                                                                                                                                                                                                                                                                                                                | —                                                                   |
+| **v2.0.0** (Go engine)                  | Port of the complete JS + WASM compiler to Go, with **byte-identical JS and `.wasm` output** as oracle gates. No new WASM features.                                                                                                                                                                                                                                  | [`plans/v2.0.0/native-go-engine.md`](../v2.0.0/native-go-engine.md) |
 
 ---
 
@@ -316,17 +316,20 @@ The hybrid design is delivered over three releases. Both WASM releases land in t
 <!-- v1.6.0 execution tasks (pending positive v1.5.0 go/no-go benchmark) -->
 
 ### Phase H4: Language Completeness in WASM
+
 - [x] **Task H4.1 — Non-empty interfaces:** `ref.test` dynamic dispatch over static candidate sets (itabs were not needed).
 - [x] **Task H4.2 — Generics:** Monomorphisation of generic types and functions for WASM target.
 - [x] **Task H4.3 — Maps & stdlib:** Insertion-ordered map runtime and remaining stdlib subset in WASM.
 - [x] **Task H4.4 — Defer & recover:** Exception handling emission (`exnref` vs legacy EH encoding). Language fixtures pass on WASM == JS-strict.
 
 ### Phase H5: Boundary v2 (WASM Closures & Boundary Discipline)
+
 - [x] **Task H5.1 — WASM to JS closures:** Passing WASM closures across boundary into JS callers via cached trampolines.
 - [x] **Task H5.2 — Boundary interface resolution:** Resolve boundary interfaces by keeping provider implementations on the WASM side or passing function callbacks, avoiding cross-boundary dynamic itab proxies.
 - [x] **Task H5.3 — Physics migration:** Move `physics` (`DynamicBody`, `FPSController`) to `wasm` with full test suite passing.
 
 ### Phase H6: Shared Memory & Hybrid Example
+
 - [x] **Task H6.1 — Linear-memory buffers:** Implement `gofront/shared` TypedArray zero-copy views.
   - Memory grows only inside the start function (allocation is startup-only), so no JS view can ever be detached; JS facade getters still verify view validity.
   - Typechecker diagnostics enforcing startup/package-level allocation discipline, rejecting implicit `shared.*` -> GC slice parameter conversions without explicit copy, and requiring identical element types in `copy()`.
@@ -336,6 +339,7 @@ The hybrid design is delivered over three releases. Both WASM releases land in t
   - CLI flag `--js-only` (or `gofront build --target js`) and `gofront.json` `"targets"` config overrides for zero-code-change A/B benchmarking and Safari < 18.2 fallback builds.
 
 ### Phase H7: simplefps Full Split & Verification
+
 - [x] **Task H7.1 — simplefps final split:** Physics and collision in WASM; extract `NewBinaryReader` from `systems` to `assets` and migrate `animation` to WASM candidate. Done: `assets.NewBinaryReader`/`assets.ParseBinaryAnimation`; `animation` is `wasm` with skinning matrices published through `gofront/shared` (see table above). Surfaced and fixed three compiler bugs: method trampolines never generated (handle methods with `int` params threw `Cannot convert 0 to a BigInt`), `math.Mod`/`Hypot`/`Cbrt` unsupported in WASM plus `math.Round` half-even divergence, and the parse cache leaking an overridden `target` between `forceTarget` compiles. Follow-ups: (a) `__gfw_slout_*` returns a plain `Array` for numeric slices (`[]float32`) — the "numeric slices ↔ TypedArrays" intent is not met yet because the out-marshaller is keyed by wasm element type (`uint8` and `int32` both `i32`), so it needs the Go element type; (b) an exported constant in a `wasm` package that shares its name with a top-level symbol of a `js` package (`animation.MaxJoints` vs `rendering.MaxJoints`) produces `SyntaxError: Identifier 'MaxJoints' has already been declared` in the bundle — facade constants should be namespaced like the JS packages' symbols (simplefps renamed to `MaxSkinJoints` for now).
 - [x] **Task H7.2 — Binaryen optimization pipeline & tooling:**
   - Add `binaryen` npm package as an `optionalDependency` (cross-platform, no native build tools); `--release`/`--wasm-opt` fail with an actionable error when neither it nor a native `wasm-opt` is present.
@@ -361,7 +365,6 @@ Pre-port cleanup from the 2026-10-09 codebase review. Every task is a pure refac
 - [x] **Task H8.5 — JS backend helper registry:** Replace the 40 scattered `this._usesXxx = true` flags (13 files) + constructor field list + `HELPER_MAP` entry per helper with `this.useHelper(name)` writing into a `Set`; `HELPER_MAP` iterates the set. Adding a runtime helper becomes a one-line change.
 - [x] **Task H8.6 — Export surface & dead code:** Drop `export` from the 47 symbols nothing imports (17 section encoders in `encode.js`, `classifyType`, `WASM_LOADER_JS`, `peepholeOptimize`, `ModuleEmitter`, `typeKey`, `cloneAst`, `evaluatesToPointer`, `LowerResult`, `INT64`/`UINTPTR`/`COMPLEX64`, …). Delete the two fully dead symbols: `COMPARABLE` in `typechecker/types.js` (resolve.js builds the literal inline — use the constant there instead) and `resetNativeWasmOptCheck` in `backend/wasm/optimize.js`. Re-run `sentrux check` to confirm coupling metrics improve.
 - [x] **Task H8.7 — Hygiene:** `package.json` description → "compiles to JavaScript and WebAssembly"; remove the empty untracked `gen/` and `dist/` directories; keep `files: ["src/"]` as the single npm whitelist and drop the redundant `.npmignore`.
-
 
 ---
 

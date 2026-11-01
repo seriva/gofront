@@ -2,7 +2,7 @@
 
 **Version:** v2.0.0  
 **Status:** Shelved (2026-10-27) — Pure Node.js ESM compiler architecture retained; compiler complexity pruned in v1.8.0.  
-**Related:** Shelved in favor of keeping the pure Node.js ESM compiler architecture lean and maintainable. Preserved for future architectural reference.  
+**Related:** Shelved in favor of keeping the pure Node.js ESM compiler architecture lean and maintainable. Preserved for future architectural reference.
 
 > **Frozen content.** Everything below describes the pre-simplification v1.8.0 baseline (coverage manifest, real-Go conformance suite, accessor-ref pointers, `bufio`/`net/url`/`context`/`encoding/csv`, a JS-engine feature freeze). None of that holds any more: see [v1.8.0 Simplification](../v1.8.0/portable-go-plan.md#simplification-phases-811-decided-2026-10-27) and [v1.9.0](../v1.9.0/stdlib-in-go-plan.md). Do not execute or update this plan; if the port is ever revived, re-baseline it against the release current at that time.  
 
@@ -25,7 +25,7 @@ See [`plans/v1.6.1/wasm-gaps-plan.md`](../v1.6.1/wasm-gaps-plan.md), [`plans/v1.
 Rewrite GoFront's compiler core and CLI from Node.js (currently 107 ESM files, 67,679 LOC under `src/`) into a native Go binary (`cmd/gofront`) that produces **the same JavaScript output, the same WebAssembly output, the same diagnostics, and the same CLI behaviour** as the v1.8.0 JS engine.
 
 Motivation:
-1. **Compilation speed:** Remove V8 process startup and ESM module-graph loading (~775–1,100 ms per CLI subprocess), JIT warm-up (~50–185 ms cold in-process compile), and GC pauses. The *target* is sub-10 ms incremental rebuilds in `gofront dev` for projects the size of `simplefps`.
+1. **Compilation speed:** Remove V8 process startup and ESM module-graph loading (~775–1,100 ms per CLI subprocess), JIT warm-up (~50–185 ms cold in-process compile), and GC pauses. The _target_ is sub-10 ms incremental rebuilds in `gofront dev` for projects the size of `simplefps`.
 2. **No Node.js for the core loop:** `dev`, `build` (without npm vendor deps), `check`, and `init` run from a single static Go binary (`go install github.com/seriva/gofront/cmd/gofront@latest` or prebuilt GitHub releases).
 3. **Unchanged npm workflow:** `npm i -g gofront` and `npx gofront` keep working. As with `esbuild` and `biome`, the npm package becomes a thin launcher that runs a prebuilt platform binary (`@gofront/linux-x64`, `@gofront/darwin-arm64`, `@gofront/windows-x64`, etc.) installed through `optionalDependencies`.
 4. **Maintainability:** Statically typed AST/type structs, sealed interfaces, and typed side tables (`types.Info`, `lower.Info`) replace ad-hoc JS objects whose properties are mutated across compilation passes (`_type`, `_lvalue`, `_className`, `_boxed`).
@@ -45,28 +45,28 @@ Motivation:
 
 The v2.0.0 release is strictly a **1:1 behavioural port of the v1.8.0 compiler and CLI**. It introduces zero new language syntax, zero new stdlib packages, and zero changes to emitted JS or WASM semantics.
 
-| Category | Rule | Examples / Members |
-|---|---|---|
-| **In scope: core** | Full native Go port of compiler pipeline, tooling, and CLI | `cmd/gofront`, `internal/token`, `internal/lexer`, `internal/ast`, `internal/parser`, `internal/types`, `internal/check`, `internal/stdlib`, `internal/dts`, `internal/resolve`, `internal/lower`, `internal/compiler`, `internal/minify`, `internal/devserver`, `internal/cli`, `internal/oracle` |
-| **In scope: target-specific** | Target codegen faithful to v1.8.0 `js`, `wasm`, and `both` rules | `internal/backend/js` (ES6 classes, strict numerics + panics, templ DOM, scoped CSS, VLQ source maps, emitter stdlib, JSON codecs, SIMD fallback), `internal/backend/wasm` (WasmGC IR, deterministic binary encoder, WAT printer, monomorphiser, insertion-ordered maps, `try_table` defer/recover, accessor-ref pointers, WASM stdlib + JSON + SIMD, boundary facades/loader, Binaryen wrapper) |
-| **Excluded: runtime / platform** | Incompatible with GoFront's "no runtime" invariant; targeted diagnostics | Goroutines (`go`), channels (`chan`, `<-`), `select`, `goto`, `unsafe`, runtime `reflect`, `cgo`, embedded JS VMs (Goja/QuickJS) |
-| **Excluded: deferred** | Desirable improvements deferred to v2.x to preserve byte parity | Multi-error parser recovery (stops at first `ParseError` like JS engine), public Go compiler API (all packages stay under `internal/`), replacing minifier with `esbuild` Go API (breaks byte parity), migrating existing emitter-backed stdlib packages to Go-source |
-| **Excluded: this plan** | Inside the boundary but not built in v2.0.0, each with its reason | Everything listed under [Out of Scope](#out-of-scope) |
+| Category                         | Rule                                                                     | Examples / Members                                                                                                                                                                                                                                                                                                                                                                               |
+| -------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **In scope: core**               | Full native Go port of compiler pipeline, tooling, and CLI               | `cmd/gofront`, `internal/token`, `internal/lexer`, `internal/ast`, `internal/parser`, `internal/types`, `internal/check`, `internal/stdlib`, `internal/dts`, `internal/resolve`, `internal/lower`, `internal/compiler`, `internal/minify`, `internal/devserver`, `internal/cli`, `internal/oracle`                                                                                               |
+| **In scope: target-specific**    | Target codegen faithful to v1.8.0 `js`, `wasm`, and `both` rules         | `internal/backend/js` (ES6 classes, strict numerics + panics, templ DOM, scoped CSS, VLQ source maps, emitter stdlib, JSON codecs, SIMD fallback), `internal/backend/wasm` (WasmGC IR, deterministic binary encoder, WAT printer, monomorphiser, insertion-ordered maps, `try_table` defer/recover, accessor-ref pointers, WASM stdlib + JSON + SIMD, boundary facades/loader, Binaryen wrapper) |
+| **Excluded: runtime / platform** | Incompatible with GoFront's "no runtime" invariant; targeted diagnostics | Goroutines (`go`), channels (`chan`, `<-`), `select`, `goto`, `unsafe`, runtime `reflect`, `cgo`, embedded JS VMs (Goja/QuickJS)                                                                                                                                                                                                                                                                 |
+| **Excluded: deferred**           | Desirable improvements deferred to v2.x to preserve byte parity          | Multi-error parser recovery (stops at first `ParseError` like JS engine), public Go compiler API (all packages stay under `internal/`), replacing minifier with `esbuild` Go API (breaks byte parity), migrating existing emitter-backed stdlib packages to Go-source                                                                                                                            |
+| **Excluded: this plan**          | Inside the boundary but not built in v2.0.0, each with its reason        | Everything listed under [Out of Scope](#out-of-scope)                                                                                                                                                                                                                                                                                                                                            |
 
 ### Node.js Dependency Matrix
 
-| Command | Native binary alone | Needs Node | Why |
-|---|---|---|---|
-| `gofront check` | ✓ | | Pure compile |
-| `gofront <input> [-o] [--watch] [--serve] [--minify] [--source-map]` | ✓ | | Pure compile + native HTTP/SSE dev server |
-| `gofront dev` | ✓ | | Compile, watch (`fsnotify`), serve, asset sync |
-| `gofront build` (no npm `dependencies`) | ✓ | | Compile, minify, assets, PWA |
-| `gofront build` (with npm `dependencies`) | | ✓ | Vendor step delegates to `src/vendor.js` (Rolldown/esbuild) |
-| `gofront build --release` / `--wasm-opt` (hybrid app) | ✓ with `wasm-opt` on `PATH` | ✓ otherwise | Binaryen: prefers native `wasm-opt` binary, falls back to `binaryen` npm package via Node |
-| `gofront build --emit-wat` | ✓ | | Native WAT printer |
-| `gofront prep` / `vendor` | | ✓ | Rolldown/esbuild from consumer `devDependencies` |
-| `gofront test [--dom]` | | ✓ | Executes compiled JS (and JSDOM) in `node:vm` via `src/test-runner.js` |
-| `gofront init` | ✓ | | Pure filesystem scaffolding |
+| Command                                                              | Native binary alone         | Needs Node  | Why                                                                                       |
+| -------------------------------------------------------------------- | --------------------------- | ----------- | ----------------------------------------------------------------------------------------- |
+| `gofront check`                                                      | ✓                           |             | Pure compile                                                                              |
+| `gofront <input> [-o] [--watch] [--serve] [--minify] [--source-map]` | ✓                           |             | Pure compile + native HTTP/SSE dev server                                                 |
+| `gofront dev`                                                        | ✓                           |             | Compile, watch (`fsnotify`), serve, asset sync                                            |
+| `gofront build` (no npm `dependencies`)                              | ✓                           |             | Compile, minify, assets, PWA                                                              |
+| `gofront build` (with npm `dependencies`)                            |                             | ✓           | Vendor step delegates to `src/vendor.js` (Rolldown/esbuild)                               |
+| `gofront build --release` / `--wasm-opt` (hybrid app)                | ✓ with `wasm-opt` on `PATH` | ✓ otherwise | Binaryen: prefers native `wasm-opt` binary, falls back to `binaryen` npm package via Node |
+| `gofront build --emit-wat`                                           | ✓                           |             | Native WAT printer                                                                        |
+| `gofront prep` / `vendor`                                            |                             | ✓           | Rolldown/esbuild from consumer `devDependencies`                                          |
+| `gofront test [--dom]`                                               |                             | ✓           | Executes compiled JS (and JSDOM) in `node:vm` via `src/test-runner.js`                    |
+| `gofront init`                                                       | ✓                           |             | Pure filesystem scaffolding                                                               |
 
 If Node is missing (or, for `--release`, neither `wasm-opt` nor Node is available), the native binary prints an actionable error naming the subcommand and the missing prerequisite. The npm launcher resolves Node-side scripts (`src/vendor.js`, `src/test-runner.js`) relative to its own package root so `npx gofront prep` and `npx gofront test` work with zero extra configuration.
 
@@ -76,26 +76,26 @@ If Node is missing (or, for `--release`, neither `wasm-opt` nor Node is availabl
 
 Empirically audited against the repository on 2026-10-21:
 
-| Area | Finding | Evidence & Probe Reference |
-|---|---|---|
-| Go Module Root & GoFront Files | No `go.mod` exists at root. Running `go vet ./...` at root once initialized would parse 68 existing GoFront `.go` files under `example/`, `test/unit/fixtures/`, and `test/e2e/perf/raycast/` that use GoFront extensions (`async func`, relative `import "./utils"`, `mixed_packages/{a,b}.go` in one directory) and fail. Modifying `test/unit/fixtures/*_error.go` to add build tags would shift line numbers asserted by existing tests. | Probe: `find example test -name '*.go' \| wc -l` → 68 files. Probe with `go1.27.2`: adding `ignore ( example / test/unit/fixtures / test/e2e )` in `go.mod` plus `//go:build gofront` on `runtime/stdlib/` makes `go vet ./...` exit 0 without modifying any existing fixture or example `.go` file. |
-| `//go:embed` Parent Path Restriction | Go's `embed` package rejects `..` in `//go:embed` patterns, so packages under `internal/backend/js` or `internal/stdlib` cannot directly declare `//go:embed ../../runtime/js`. | Go `embed` spec: embedding across sibling directories requires an `embed.FS` exported from `runtime/assets.go` (`package runtime`) at the `runtime/` root. |
-| CLI & Rebuild Latency Baseline | Every CLI invocation pays ~775–1,100 ms to boot Node and parse 107 ESM files (67,679 LOC). Cold in-process compiles take 49–184 ms; warm parse-cached rebuilds take 17.4–69.4 ms (up to 7× above the 10 ms target). | Probe across all 6 examples (`example/{simple,gom,templ,preact,webgl,hybrid}/src`): `simple` = 776.5 ms CLI / 168.4 ms cold / 53.6 ms warm; `hybrid` = 1,091.1 ms CLI / 184.4 ms cold / 69.4 ms warm; `webgl` = 887.9 ms CLI / 49.3 ms cold / 17.4 ms warm. |
-| Synchronous Test Helpers vs Async Child Process | All 1,953 unit tests call `compile()`, `compileWasm()`, and `compileDir()` synchronously (`test/unit/helpers.js:73-120`, `216-238`). A naive `child_process.spawn` oracle requires async stream reads on Node's event loop, whereas `fs.readSync` on libuv pipes throws `EAGAIN` (`O_NONBLOCK`). | Probe: `compile.constructor.name === "Function"`. Synchronous IPC to a persistent `gofront oracle` process per test worker requires a dedicated sidecar `node:worker_threads` bridge using `SharedArrayBuffer` + `Atomics.wait` + `receiveMessageOnPort`. |
-| Test Runner File Filtering | `test/unit/run.js` hardcodes `TEST_FILES` (64 suites) and ignores `process.argv.slice(2)`, preventing targeted execution of a single test file during incremental subsystem porting. | Inspection of `test/unit/run.js:19-92`: `process.argv` is never read; running `node test/unit/run.js <file>` executes all 64 suites. |
-| Coupled Runtime Helpers & Host Glue | 35 JS runtime helpers (`HELPER_LEN` .. `HELPER_SIMD`, 1,891 LOC) are inline template strings in `src/backend/js/runtime.js`, and 808 LOC of WASM host imports (`WASM_IMPORTS_JS`, `WASM_STDLIB_JS`) live inside `src/backend/wasm/boundary.js:1731-2538`. Furthermore, `package.json:30` sets `"files": ["src/"]`, which would exclude `runtime/` from npm tarballs if not updated. | Inspection of `src/backend/js/runtime.js:5-1848`, `src/backend/wasm/boundary.js:1731, 1887`, and `package.json:30-32`. |
-| Subsystem Scale in WASM & Stdlib | `src/backend/wasm/` totals 39,850 LOC: 19,150 LOC of core compiler/boundary (`index.js` 3,759, `boundary.js` 2,982, `emit-stmts.js` 2,466, `emit-exprs.js` 2,107, `emit-maps.js` 1,999, `emit.js` 1,413, `emit-builtins.js` 1,247, `encode.js` 1,048) and 20,700 LOC of WASM stdlib emitters (`core.js` 8,903, `bytes.js` 5,039, `packages.js` 2,400, `io.js` 2,161, `time.js` 1,200). | Probe: `find src -type f \| xargs wc -l` (total 67,679 LOC). Requires fine-grained phase decomposition across JS stdlib (Phases 15–16) and WASM backend/stdlib/boundary (Phases 17–21). |
+| Area                                            | Finding                                                                                                                                                                                                                                                                                                                                                                                                                                      | Evidence & Probe Reference                                                                                                                                                                                                                                                                           |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Go Module Root & GoFront Files                  | No `go.mod` exists at root. Running `go vet ./...` at root once initialized would parse 68 existing GoFront `.go` files under `example/`, `test/unit/fixtures/`, and `test/e2e/perf/raycast/` that use GoFront extensions (`async func`, relative `import "./utils"`, `mixed_packages/{a,b}.go` in one directory) and fail. Modifying `test/unit/fixtures/*_error.go` to add build tags would shift line numbers asserted by existing tests. | Probe: `find example test -name '*.go' \| wc -l` → 68 files. Probe with `go1.27.2`: adding `ignore ( example / test/unit/fixtures / test/e2e )` in `go.mod` plus `//go:build gofront` on `runtime/stdlib/` makes `go vet ./...` exit 0 without modifying any existing fixture or example `.go` file. |
+| `//go:embed` Parent Path Restriction            | Go's `embed` package rejects `..` in `//go:embed` patterns, so packages under `internal/backend/js` or `internal/stdlib` cannot directly declare `//go:embed ../../runtime/js`.                                                                                                                                                                                                                                                              | Go `embed` spec: embedding across sibling directories requires an `embed.FS` exported from `runtime/assets.go` (`package runtime`) at the `runtime/` root.                                                                                                                                           |
+| CLI & Rebuild Latency Baseline                  | Every CLI invocation pays ~775–1,100 ms to boot Node and parse 107 ESM files (67,679 LOC). Cold in-process compiles take 49–184 ms; warm parse-cached rebuilds take 17.4–69.4 ms (up to 7× above the 10 ms target).                                                                                                                                                                                                                          | Probe across all 6 examples (`example/{simple,gom,templ,preact,webgl,hybrid}/src`): `simple` = 776.5 ms CLI / 168.4 ms cold / 53.6 ms warm; `hybrid` = 1,091.1 ms CLI / 184.4 ms cold / 69.4 ms warm; `webgl` = 887.9 ms CLI / 49.3 ms cold / 17.4 ms warm.                                          |
+| Synchronous Test Helpers vs Async Child Process | All 1,953 unit tests call `compile()`, `compileWasm()`, and `compileDir()` synchronously (`test/unit/helpers.js:73-120`, `216-238`). A naive `child_process.spawn` oracle requires async stream reads on Node's event loop, whereas `fs.readSync` on libuv pipes throws `EAGAIN` (`O_NONBLOCK`).                                                                                                                                             | Probe: `compile.constructor.name === "Function"`. Synchronous IPC to a persistent `gofront oracle` process per test worker requires a dedicated sidecar `node:worker_threads` bridge using `SharedArrayBuffer` + `Atomics.wait` + `receiveMessageOnPort`.                                            |
+| Test Runner File Filtering                      | `test/unit/run.js` hardcodes `TEST_FILES` (64 suites) and ignores `process.argv.slice(2)`, preventing targeted execution of a single test file during incremental subsystem porting.                                                                                                                                                                                                                                                         | Inspection of `test/unit/run.js:19-92`: `process.argv` is never read; running `node test/unit/run.js <file>` executes all 64 suites.                                                                                                                                                                 |
+| Coupled Runtime Helpers & Host Glue             | 35 JS runtime helpers (`HELPER_LEN` .. `HELPER_SIMD`, 1,891 LOC) are inline template strings in `src/backend/js/runtime.js`, and 808 LOC of WASM host imports (`WASM_IMPORTS_JS`, `WASM_STDLIB_JS`) live inside `src/backend/wasm/boundary.js:1731-2538`. Furthermore, `package.json:30` sets `"files": ["src/"]`, which would exclude `runtime/` from npm tarballs if not updated.                                                          | Inspection of `src/backend/js/runtime.js:5-1848`, `src/backend/wasm/boundary.js:1731, 1887`, and `package.json:30-32`.                                                                                                                                                                               |
+| Subsystem Scale in WASM & Stdlib                | `src/backend/wasm/` totals 39,850 LOC: 19,150 LOC of core compiler/boundary (`index.js` 3,759, `boundary.js` 2,982, `emit-stmts.js` 2,466, `emit-exprs.js` 2,107, `emit-maps.js` 1,999, `emit.js` 1,413, `emit-builtins.js` 1,247, `encode.js` 1,048) and 20,700 LOC of WASM stdlib emitters (`core.js` 8,903, `bytes.js` 5,039, `packages.js` 2,400, `io.js` 2,161, `time.js` 1,200).                                                       | Probe: `find src -type f \| xargs wc -l` (total 67,679 LOC). Requires fine-grained phase decomposition across JS stdlib (Phases 15–16) and WASM backend/stdlib/boundary (Phases 17–21).                                                                                                              |
 
 ---
 
 ## Out of Scope
 
-- **Language or semantic changes:** v2.0.0 is a strict port. New syntax, type rules, stdlib packages, or WASM features wait for v2.1+. Known v1.8.0 quirks are ported *as-is* and logged for v2.x.
+- **Language or semantic changes:** v2.0.0 is a strict port. New syntax, type rules, stdlib packages, or WASM features wait for v2.1+. Known v1.8.0 quirks are ported _as-is_ and logged for v2.x.
 - **Expanding the stdlib surface:** The v1.8.0 coverage manifest (`stdlib/manifest.json`) is the frozen stdlib surface. Excluded entries remain excluded with identical diagnostics. `gofront/simd` retains the stability status decided in v1.8.0 (retained as experimental per the promotion gate benchmark).
 - **Porting Go-source stdlib packages:** Pure packages and overlays written in GoFront Go under `stdlib/` in v1.8.0 are shared directly and embedded via `runtime/assets.go` (`//go:embed`). They are compiled by GoFront, not rewritten in host Go.
 - **Rewriting vendor bundling:** `gofront prep` / `vendor` (and the vendor step of `gofront build` when npm `dependencies` are present) continues delegating to [`src/vendor.js`](../../src/vendor.js), which invokes Rolldown or esbuild from the consumer's `devDependencies`.
 - **Embedding a JS runtime for `gofront test`:** GoFront will not embed Goja (incomplete modern ES/WasmGC/JSDOM support) or QuickJS (requires CGO). Node is already present wherever JS/WASM unit tests and JSDOM run.
-- **Using standard `go/parser` / `go/ast` / `go/types`:** The standard library packages enforce the official Go grammar and type rules strictly, rejecting GoFront extensions (`async`/`await`, `.templ`, `css`, `js:` imports, browser globals). `go/constant` and `math/big` *are* used for exact untyped constant arithmetic.
+- **Using standard `go/parser` / `go/ast` / `go/types`:** The standard library packages enforce the official Go grammar and type rules strictly, rejecting GoFront extensions (`async`/`await`, `.templ`, `css`, `js:` imports, browser globals). `go/constant` and `math/big` _are_ used for exact untyped constant arithmetic.
 - **Parser multi-error recovery:** The JS parser stops at the first `ParseError`. The native parser matches that behaviour; multi-error recovery is deferred until parity is locked.
 - **Public Go compiler API:** All compiler packages reside under `internal/` so internal interfaces can evolve freely after cutover.
 
@@ -228,15 +228,15 @@ type Type interface {
 - **Shared Lowering (`internal/lower`):** Mechanical port of `src/lower/` producing `lower.Info` side tables for struct and `[N]T` array clone elision (`ownership.go`), address-taken scalar boxing (`boxing.go`), closure-captured mutable variables and per-iteration loop variable boxing (`captures.go`), pointer-retention escape analysis (`escape.go`), struct/method promotion (`embedding.go`), range/defer shapes (`range.go`, `functions.go`), constant-folded literals (`globals.go`), and Go-source stdlib reachability.
 - **JavaScript Backend (`internal/backend/js`):** Reproduces v1.8.0 output byte-for-byte:
 
-| Area | Emitted JS Representation |
-|---|---|
-| Structs & Value Semantics | ES6 classes with zero-value constructor defaults and `__clone()`; cloned on assign/call/return/`append`/`range` unless elided by `lower.Info` |
-| Pointers | Address-taken scalars boxed as `{ value: T }`; structs, slices, and maps passed by reference |
-| Embedding & Wrapper Types | Flattened struct fields + delegation stubs (`Base.prototype.M.call(this, ...a)`); ES6 wrapper classes for named non-struct types with methods |
-| Interfaces & Type Switches | `__ifv` / `__ifp` / `__ifs` / `__ifm` tagging so `case T` vs `case *T` is distinguished via `typeof` / `instanceof` |
-| Control Flow & `defer` | Zero-alloc indexed slice `range`; `Object.keys`/`entries` map `range`; `Array.from` rune `range`; yield closure for `range`-over-func; `try/finally` defer stack |
-| Numerics & Strict Mode | Integer `/` → `Math.trunc(a / b)`; `&^` → `(a & ~b)`; in `both`/strict mode: `Math.fround`, `\| 0`, `>>> 0`, `Math.imul`, shift/div-by-zero checks, and v1.8.0 `__at`/`__set`/nil-map/nil-ptr runtime panics (elided when proven in-bounds) |
-| TypedArrays | `[]float32`, `[]int8..int32`, `[]uint8..uint32`, `[]rune` → TypedArrays with `.subarray()` zero-copy slicing; `[]float64` / `[]int` → `Array` |
+| Area                            | Emitted JS Representation                                                                                                                                                                                                                                    |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Structs & Value Semantics       | ES6 classes with zero-value constructor defaults and `__clone()`; cloned on assign/call/return/`append`/`range` unless elided by `lower.Info`                                                                                                                |
+| Pointers                        | Address-taken scalars boxed as `{ value: T }`; structs, slices, and maps passed by reference                                                                                                                                                                 |
+| Embedding & Wrapper Types       | Flattened struct fields + delegation stubs (`Base.prototype.M.call(this, ...a)`); ES6 wrapper classes for named non-struct types with methods                                                                                                                |
+| Interfaces & Type Switches      | `__ifv` / `__ifp` / `__ifs` / `__ifm` tagging so `case T` vs `case *T` is distinguished via `typeof` / `instanceof`                                                                                                                                          |
+| Control Flow & `defer`          | Zero-alloc indexed slice `range`; `Object.keys`/`entries` map `range`; `Array.from` rune `range`; yield closure for `range`-over-func; `try/finally` defer stack                                                                                             |
+| Numerics & Strict Mode          | Integer `/` → `Math.trunc(a / b)`; `&^` → `(a & ~b)`; in `both`/strict mode: `Math.fround`, `\| 0`, `>>> 0`, `Math.imul`, shift/div-by-zero checks, and v1.8.0 `__at`/`__set`/nil-map/nil-ptr runtime panics (elided when proven in-bounds)                  |
+| TypedArrays                     | `[]float32`, `[]int8..int32`, `[]uint8..uint32`, `[]rune` → TypedArrays with `.subarray()` zero-copy slicing; `[]float64` / `[]int` → `Array`                                                                                                                |
 | Stdlib, JSON, SIMD, templ & CSS | All 30 emitter-backed stdlib modules (`src/backend/js/stdlib/*`), compile-time tag-driven `encoding/json` codecs, `gofront/simd` fallback, `templ` DOM `{ Mount(___p, ___refs) }`, 32-bit FNV-1a base-36 `gfc_<name>_<hash>` scoped CSS, and VLQ source maps |
 
 #### 1.7 WebAssembly Backend (`internal/backend/wasm`)
@@ -293,6 +293,7 @@ Ports the complete 39,850-LOC `src/backend/wasm/` subsystem as shipped in v1.8.0
 ## Implementation Tasks
 
 ### Phase 1: Go Module, Build Isolation & Shared Runtime Assets
+
 - [ ] Task 1.1: Root Go module, `ignore` directives, and `runtime` embed package
   - Files: `go.mod`, `runtime/assets.go`, `cmd/gofront/main.go`
   - Test: `go vet ./...` and `go build ./cmd/gofront` exit 0 without modifying any file in `example/` or `test/unit/fixtures/`.
@@ -311,6 +312,7 @@ Ports the complete 39,850-LOC `src/backend/wasm/` subsystem as shipped in v1.8.0
   - Done when: `runtime/assets_test.go` verifies `runtime.FS` embeds all `runtime/js/*.js` and `runtime/js/wasm/*.js` files non-empty and matching the JS exports.
 
 ### Phase 2: Differential Testing Oracle & Timing Baseline
+
 - [ ] Task 2.1: `gofront oracle` JSON-lines server & CLI dispatch stub
   - Files: `cmd/gofront/main.go`, `internal/oracle/oracle.go`, `internal/oracle/oracle_test.go`
   - Test: `go test ./internal/oracle/...` verifying `{"id":1,"op":"ping"}` returns `{"id":1,"ok":true}`.
@@ -329,6 +331,7 @@ Ports the complete 39,850-LOC `src/backend/wasm/` subsystem as shipped in v1.8.0
   - Done when: Baseline script outputs structured JSON/table timings matching the baseline audit metrics.
 
 ### Phase 3: Token Model & Core Go Lexer
+
 - [ ] Task 3.1: Token kinds, positions & UTF-16 column table
   - Files: `internal/token/token.go`, `internal/token/position.go`, `internal/token/token_test.go`
   - Test: `go test ./internal/token/...` testing ASCII and multi-byte/astral UTF-8 rune column calculations against UTF-16 code unit offsets.
@@ -347,6 +350,7 @@ Ports the complete 39,850-LOC `src/backend/wasm/` subsystem as shipped in v1.8.0
   - Done when: `op: "tokens"` returns canonical token arrays matching `new Lexer().tokenize()` byte-for-byte on Go inputs.
 
 ### Phase 4: Extensions, Directives & templ/css Dual-Mode Lexer
+
 - [ ] Task 4.1: GoFront extension keywords & `//gofront:` directives
   - Files: `internal/token/token.go`, `internal/lexer/lexer.go`, `internal/lexer/lexer_test.go`
   - Test: `go test ./internal/lexer/...` verifying `async`, `await`, `templ`, `css`, `//gofront:target`, and `//gofront:intrinsic`.
@@ -365,6 +369,7 @@ Ports the complete 39,850-LOC `src/backend/wasm/` subsystem as shipped in v1.8.0
   - Done when: 100% of `.go` and `.templ` files in `example/` and `test/unit/fixtures/` produce byte-identical token streams on both engines.
 
 ### Phase 5: AST Hierarchy & Expression Parser
+
 - [ ] Task 5.1: Sealed AST node interfaces & structs
   - Files: `internal/ast/ast.go`, `internal/ast/templ.go`, `internal/ast/walk.go`
   - Test: `go test ./internal/ast/...` verifying node constructors, positions, and AST walker traversal.
@@ -383,6 +388,7 @@ Ports the complete 39,850-LOC `src/backend/wasm/` subsystem as shipped in v1.8.0
   - Done when: All expression ambiguities match `src/parser/expressions.js` and v1.8.0 rules.
 
 ### Phase 6: Statement, Declaration & templ/css Parser
+
 - [ ] Task 6.1: Statement & control-flow parser
   - Files: `internal/parser/statements.go`, `internal/parser/statements_test.go`
   - Test: `go test ./internal/parser/...` covering `if`, 3-clause/cond/infinite `for`, `range`, `switch`, `type switch`, `defer`, `return`, assignments, `incdec`, labels, and targeted errors for `go`/`chan`/`select`/`goto`/`<-`.
@@ -401,6 +407,7 @@ Ports the complete 39,850-LOC `src/backend/wasm/` subsystem as shipped in v1.8.0
   - Done when: `ParseError` message, `file:line:col`, and UTF-16 caret alignment match the JS parser byte-for-byte.
 
 ### Phase 7: Type System, Universe Scope & Side Tables
+
 - [ ] Task 7.1: Core `Type` representations & underlying resolution
   - Files: `internal/types/types.go`, `internal/types/types_test.go`
   - Test: `go test ./internal/types/...` testing `Basic` (incl. untyped & `complex64`/`128`), `Array`, `Slice`, `Map`, `Pointer`, `Struct`, `Interface`, `Signature`, `Tuple`, `Named`, `TypeParam`, `Union`, and `External` (`TAINTED_ANY`).
@@ -419,6 +426,7 @@ Ports the complete 39,850-LOC `src/backend/wasm/` subsystem as shipped in v1.8.0
   - Done when: Type names in diagnostics match the JS type checker character-for-character.
 
 ### Phase 8: Package Resolution, `.d.ts` Parser & Target Graph
+
 - [ ] Task 8.1: Multi-file package discovery & recursive local imports
   - Files: `internal/resolve/package.go`, `internal/resolve/imports.go`, `internal/resolve/package_test.go`
   - Test: `go test ./internal/resolve/...` testing sorted `.go`/`.templ` loading, `*_test.go` exclusion, and relative `import "./sub"` resolution with aliases, `.`, and `_`.
@@ -437,6 +445,7 @@ Ports the complete 39,850-LOC `src/backend/wasm/` subsystem as shipped in v1.8.0
   - Done when: Target validation diagnostics match `src/compiler.js` and `src/typechecker/`.
 
 ### Phase 9: Type Checker Passes 1–4 (Declarations & Constants)
+
 - [ ] Task 9.1: Pass 1: Type declarations, cycle detection & generic type aliases
   - Files: `internal/check/check.go`, `internal/check/types.go`, `internal/check/types_test.go`
   - Test: `go test ./internal/check/...` testing forward type refs, recursive pointers/slices, invalid value cycles, and v1.8.0 generic type aliases (`type Set[T comparable] = map[T]struct{}`).
@@ -455,6 +464,7 @@ Ports the complete 39,850-LOC `src/backend/wasm/` subsystem as shipped in v1.8.0
   - Done when: Pass 4 evaluates untyped constants with exact precision matching v1.8.0.
 
 ### Phase 10: Type Checker Pass 5 (Statements, Expressions & Generics)
+
 - [ ] Task 10.1: Assignability, structural interfaces & `TAINTED_ANY` suppression
   - Files: `internal/check/assign.go`, `internal/check/interface.go`, `internal/check/assign_test.go`
   - Test: `go test ./internal/check/...` verifying untyped promotion, structural interface implementation, pointer-receiver method set diagnostics, and `TAINTED_ANY` error cascade suppression.
@@ -473,6 +483,7 @@ Ports the complete 39,850-LOC `src/backend/wasm/` subsystem as shipped in v1.8.0
   - Done when: `TypeCheckError` messages, hints, line/UTF-16 columns, and carets match the JS engine across `test/unit/types/*.test.js`.
 
 ### Phase 11: Stdlib Built-in Registry, Web Typings & Go-Source Stdlib
+
 - [ ] Task 11.1: Emitter-backed stdlib package typings
   - Files: `internal/stdlib/core.go`, `internal/stdlib/extended.go`, `internal/stdlib/simd.go`
   - Test: `go test ./internal/stdlib/...` verifying all package members from `src/typechecker/stdlib/{core,extended,shared,simd}.js`.
@@ -491,6 +502,7 @@ Ports the complete 39,850-LOC `src/backend/wasm/` subsystem as shipped in v1.8.0
   - Done when: Every in-scope entry in `stdlib/manifest.json` is verified present with matching Go signature in the native engine.
 
 ### Phase 12: Shared Lowering & Semantic Analyses (`internal/lower`)
+
 - [ ] Task 12.1: Ownership, mutation & struct/array clone elision
   - Files: `internal/lower/lower.go`, `internal/lower/ownership.go`, `internal/lower/walk.go`
   - Test: `go test ./internal/lower/...` testing `_fnMutates` and `_markOwnership` on value structs and v1.8.0 `[N]T` arrays.
@@ -509,6 +521,7 @@ Ports the complete 39,850-LOC `src/backend/wasm/` subsystem as shipped in v1.8.0
   - Done when: Range/defer lowering, named-return pre-declaration, constant-folded values, and Go-source stdlib reachability pass `lower.test.js`.
 
 ### Phase 13: JS Core Emitter: Declarations, Structs & Statements
+
 - [ ] Task 13.1: Module skeleton, exports, `init()` IIFE & identifier sanitization
   - Files: `internal/backend/js/codegen.go`, `internal/backend/js/identifiers.go`, `internal/backend/js/codegen_test.go`
   - Test: `go test ./internal/backend/js/...` testing ES module imports/exports, `init()` IIFE ordering, and `JS_RESERVED` `$` suffix renaming (`in` → `in$`).
@@ -527,6 +540,7 @@ Ports the complete 39,850-LOC `src/backend/wasm/` subsystem as shipped in v1.8.0
   - Done when: Strict-mode JS emission matches v1.8.0 `both`-target semantics.
 
 ### Phase 14: JS Expressions, Runtime Helpers, Source Maps & Package Compiler
+
 - [ ] Task 14.1: Expression codegen, JS operator precedence & TypedArray slicing
   - Files: `internal/backend/js/exprs.go`, `internal/backend/js/typedarrays.go`, `internal/backend/js/exprs_test.go`
   - Test: `go test ./internal/backend/js/...` testing JS operator parenthesization, `Math.trunc` int division, `& ~` bit-clear, `- -a` spacing, folded constants, scalar `{ value }` boxes, and TypedArray `.subarray()`.
@@ -545,6 +559,7 @@ Ports the complete 39,850-LOC `src/backend/wasm/` subsystem as shipped in v1.8.0
   - Done when: All 12 `test/unit/language/*.test.js` suites plus `strict-mode`, `packages`, and `imports` pass with byte-identical JS output.
 
 ### Phase 15: JS Stdlib Codegen: Core, Strings, Math & Collections
+
 - [ ] Task 15.1: `fmt`, `errors`, `strconv`, `os` & `testing` JS emitters
   - Files: `internal/backend/js/stdlib/core.go`, `internal/backend/js/stdlib/fmt.go`, `internal/backend/js/stdlib/errors.go`, `internal/backend/js/stdlib/strconv.go`
   - Test: `GOFRONT_ENGINE=native node test/unit/run.js test/unit/builtins/core.test.js test/unit/builtins/operators.test.js`.
@@ -563,6 +578,7 @@ Ports the complete 39,850-LOC `src/backend/wasm/` subsystem as shipped in v1.8.0
   - Done when: All remaining non-JSON emitter-backed JS stdlib modules pass `test/unit/builtins/stdlib.test.js` with byte-identical JS output.
 
 ### Phase 16: JS Compile-Time JSON, SIMD Fallback & templ/css Codegen
+
 - [ ] Task 16.1: Compile-time `encoding/json` codec generator in JS
   - Files: `internal/backend/js/stdlib/json.go`, `internal/backend/js/stdlib/json_test.go`
   - Test: `GOFRONT_ENGINE=native node test/unit/run.js test/unit/builtins/json.test.js`.
@@ -581,6 +597,7 @@ Ports the complete 39,850-LOC `src/backend/wasm/` subsystem as shipped in v1.8.0
   - Done when: 32-bit FNV-1a base-36 class hashing (`gfc_<name>_<hash>`) and static CSS extraction across packages pass `test/unit/compiler/templ.test.js` byte-for-byte.
 
 ### Phase 17: WASM Module IR, WasmGC Types, Binary Encoder & WAT Printer
+
 - [ ] Task 17.1: WasmGC type hierarchy, rec groups & v1.8.0 pointer/complex types
   - Files: `internal/backend/wasm/types.go`, `internal/backend/wasm/types_test.go`
   - Test: `go test ./internal/backend/wasm/... -run TestWasmTypes`.
@@ -599,6 +616,7 @@ Ports the complete 39,850-LOC `src/backend/wasm/` subsystem as shipped in v1.8.0
   - Done when: Compile-time constant folding for WASM globals and expressions matches `src/backend/wasm/const-fold.js`.
 
 ### Phase 18: WASM Module Builder, Monomorphisation & Control Flow
+
 - [ ] Task 18.1: WASM module orchestrator, interface itabs & synthetic runtime helpers
   - Files: `internal/backend/wasm/module.go`, `internal/backend/wasm/runtime_helpers.go`
   - Test: `go test ./internal/backend/wasm/... -run TestModuleBuilder`.
@@ -617,6 +635,7 @@ Ports the complete 39,850-LOC `src/backend/wasm/` subsystem as shipped in v1.8.0
   - Done when: Trap-based nil dereferences, `panic` tags, and scoped `defer`/`recover` pass `traps.test.js` and `defer_recover.test.js` with byte-identical `.wasm`.
 
 ### Phase 19: WASM Expressions, Builtins, Value Semantics & Maps
+
 - [ ] Task 19.1: Expressions, structs, slices, strings, complex & `[N]T` array copies
   - Files: `internal/backend/wasm/emit_exprs.go`
   - Test: `GOFRONT_ENGINE=native node test/unit/run.js test/unit/wasm/structs.test.js test/unit/wasm/slices.test.js test/unit/wasm/strings_any.test.js`.
@@ -635,6 +654,7 @@ Ports the complete 39,850-LOC `src/backend/wasm/` subsystem as shipped in v1.8.0
   - Done when: Insertion-ordered map allocation, lookup, deletion, iteration, and `test/unit/fixtures/wasm/golden.wat` match byte-for-byte.
 
 ### Phase 20: WASM Stdlib Emitter Port (`internal/backend/wasm/stdlib`)
+
 - [ ] Task 20.1: WASM `core` stdlib emitter (`fmt`, `strings`, `strconv`, `math`, `slices`, `maps`, `sort`)
   - Files: `internal/backend/wasm/stdlib/core.go`, `internal/backend/wasm/stdlib/strings.go`, `internal/backend/wasm/stdlib/fmt.go`
   - Test: `go test ./internal/backend/wasm/stdlib/... -run TestWasmStdlibCore`.
@@ -653,6 +673,7 @@ Ports the complete 39,850-LOC `src/backend/wasm/` subsystem as shipped in v1.8.0
   - Done when: v1.8.0 pure-WASM JSON codecs, `gofront/simd` (`F32x4`, `Mask32x4`, slice load/store helpers; experimental), and `gofront/shared` linear-memory views pass all tests.
 
 ### Phase 21: JS ↔ WASM Boundary, Facades & Binaryen Optimizer
+
 - [ ] Task 21.1: Boundary metadata collection, import scanning & WASM boundary helpers
   - Files: `internal/backend/wasm/boundary_meta.go`, `internal/backend/wasm/boundary_helpers.go`
   - Test: `go test ./internal/backend/wasm/... -run TestBoundaryMeta`.
@@ -671,6 +692,7 @@ Ports the complete 39,850-LOC `src/backend/wasm/` subsystem as shipped in v1.8.0
   - Done when: the oracle serves hybrid (`js` + `wasm` + `both`) compiles, and unoptimized `.wasm` and `.wat` outputs match the JS engine byte-for-byte across all WASM and hybrid test suites, with every divergence fixed in this task.
 
 ### Phase 22: Native Minifier & Dev Server
+
 - [ ] Task 22.1: 3-stage JavaScript minifier & local identifier mangler
   - Files: `internal/minify/minify.go`, `internal/minify/mangle.go`, `internal/oracle/oracle.go`
   - Test: `GOFRONT_ENGINE=native node test/unit/run.js test/unit/compiler/minifier.test.js`.
@@ -689,6 +711,7 @@ Ports the complete 39,850-LOC `src/backend/wasm/` subsystem as shipped in v1.8.0
   - Done when: HTML stream injection of the live-reload client, keep-alive pings, CSS hot swap without full reload, and interactive compiler error replay match `src/dev-server.js`.
 
 ### Phase 23: Project Config, Assets, PWA & Full CLI Surface
+
 - [ ] Task 23.1: Project config reader & terminal color/diagnostic formatter
   - Files: `internal/cli/config.go`, `internal/cli/colors.go`, `internal/cli/config_test.go`
   - Test: `go test ./internal/cli/... -run TestConfigAndColors`.
@@ -707,6 +730,7 @@ Ports the complete 39,850-LOC `src/backend/wasm/` subsystem as shipped in v1.8.0
   - Done when: `gofront prep`/`vendor` and `gofront test [--dom] [-v] [-run]` delegate to `src/vendor.js` and `src/test-runner.js` with clear diagnostics when Node is absent.
 
 ### Phase 24: Multi-Platform Packaging & NPM Launcher
+
 - [ ] Task 24.1: Cross-compilation build script & GitHub Actions release workflow
   - Files: `scripts/build-binaries.sh`, `.github/workflows/release.yml`
   - Test: `bash scripts/build-binaries.sh` builds static binaries for `linux-x64`, `linux-arm64`, `darwin-x64`, `darwin-arm64`, and `windows-x64` with `CGO_ENABLED=0`.
@@ -725,6 +749,7 @@ Ports the complete 39,850-LOC `src/backend/wasm/` subsystem as shipped in v1.8.0
   - Done when: Packed launcher invokes the native binary transparently with inherited stdio and exit codes.
 
 ### Phase 25: Full Conformance, E2E & Hybrid Parity
+
 - [ ] Task 25.1: Route the remaining `js-only` unit tests and zero-alloc through the native engine
   - Files: `test/unit/helpers.js`, `test/e2e/perf/zero-alloc.js`
   - Test: `GOFRONT_ENGINE=native npm test` (runs all 64 unit test files, `zero-alloc.js`, and `gofront test --dom example/...`).
@@ -743,6 +768,7 @@ Ports the complete 39,850-LOC `src/backend/wasm/` subsystem as shipped in v1.8.0
   - Done when: Native-compiled hybrid raycast and SIMD particle benchmarks run within $\pm 3\%$ of v1.8.0, and `simplefps` builds and runs at 60 FPS.
 
 ### Phase 26: Performance Audit, Documentation & Default Cutover
+
 - [ ] Task 26.1: Rebuild latency audit & sub-10ms verification
   - Files: `test/e2e/perf/compile-bench.js`, `plans/v2.0.0/native-go-engine.md`
   - Test: `GOFRONT_ENGINE=native node test/e2e/perf/compile-bench.js`.

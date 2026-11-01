@@ -34,12 +34,15 @@ Done means:
 ## Approach
 
 ### 1. CLI Test Deduplication (`cli.test.js` vs `cli-core.test.js`)
+
 - `test/unit/compiler/cli.test.js` currently spawns 43 separate Node.js child processes (`spawnSync(process.execPath, [CLI, ...args])`) to test CLI flag parsing (`--version`, `--help`, `-o`, `--minify`, `--tokens`, `--ast`, `init`, etc.). This single file takes **11.2s** to run.
 - `test/unit/compiler/cli-core.test.js` already tests the identical functionality directly in-process via `cli-core.js` in **~0.8s**.
 - **Action:** Retain 3–4 smoke tests in `cli.test.js` to ensure the CLI shebang, command execution, and exit codes work in an actual process. Move any unique assertions into `cli-core.test.js` and remove the other 40 subprocess spawns.
 
 ### 2. Standardized Filesystem Helper (`withTempDir`)
+
 - 145 test blocks manually execute:
+
   ```js
   const dir = mkdtempSync(join(tmpdir(), "gofront-..."));
   try {
@@ -49,8 +52,10 @@ Done means:
     rmSync(dir, { recursive: true, force: true });
   }
   ```
+
   Found across `test-runner.test.js` (25 times), `packages.test.js` (10 times), `asset-manager.test.js` (9 times), etc.
 - **Action:** Provide a robust helper in `test/unit/helpers.js`:
+
   ```js
   export function withTempDir(files, fn) {
     const dir = mkdtempSync(join(tmpdir(), "gofront-test-"));
@@ -69,6 +74,7 @@ Done means:
 - Simplifies multi-file fixtures into clean declarative object maps and guarantees cleanup on failure.
 
 ### 3. Table-Driven Test Structure for Declarative Suites
+
 - Several test files repeat 5–8 lines of boilerplate per assertion:
   - `types/errors.test.js` (64 tests, 735 lines)
   - `minifier.test.js` (50 tests, 460 lines)
@@ -77,6 +83,7 @@ Done means:
 - Preserves individual test reporting in `helpers.js` while reducing thousands of lines of boilerplate.
 
 ### 4. Stdlib Consolidation & Parity Unification
+
 - Pure standard library packages (`fmt`, `strings`, `strconv`, `math`, `math/bits`, `slices`, `bytes`, `io`, `path`, `html`, `unicode`, `time`) have separate, disjoint test implementations:
   - `builtins/stdlib.test.js` (2,428 lines, 204 tests) tests JS only.
   - `wasm/stdlib.test.js` (1,468 lines, 45 tests) tests WASM and parity.
@@ -88,6 +95,7 @@ Done means:
   - Merge `wasm/gaps_postaudit.test.js` into the main stdlib suite.
 
 ### 5. Test Suite Taxonomy & Organization
+
 - Move orphan test files currently in `test/unit/` root to proper subdirectories:
   - `dom.test.js` → `builtins/dom.test.js` (or `dom/dom.test.js`)
   - `structs.test.js` → `language/structs.test.js`
@@ -98,6 +106,7 @@ Done means:
 - Clean up outdated historical section headers (`"New features"`, `"New type checks"`).
 
 ### 6. Parallel Test Execution
+
 - `test/unit/run.js` currently imports 60 test files sequentially in a single process.
 - **Action:** Support parallel execution across CPU cores (via worker threads or Node 20+ native runner `node --test`).
 - With 60 independent test files running concurrently across available cores, execution time drops by 4x–5x.

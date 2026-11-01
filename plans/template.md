@@ -3,7 +3,7 @@
 **Version:** vX.Y.Z (or `continuous` for unversioned projects)  
 **Status:** Draft | In Progress | Completed (YYYY-MM-DD)  
 **Related:** [Predecessor or successor plans, superseded plans, foundational PRs, or `None`]  
-**Release note:** [One or two plain sentences for `CHANGELOG.md`, written for someone upgrading: what they can do now and why it matters. No task IDs, file paths, or symbol lists. The rest of this plan is for agents and may be as dense as needed.]  
+**Release note:** [One or two plain sentences for `CHANGELOG.md`, written for someone upgrading: what they can do now and why it matters. No task IDs, file paths, or symbol lists. The rest of this plan is for agents and may be as dense as needed.]
 
 ---
 
@@ -21,14 +21,14 @@
 
 ## Scope Rule & Boundary Matrix
 
-[Define explicit rules for what is allowed in this feature versus what is rejected, and why. This table is the single record of what the plan will not do: every `Excluded` row states its reason so scope creep is stopped before coding and the final audit can check nothing excluded leaked in. The two *(optional)* rows only apply to projects with multiple targets or runtimes (compilers, cross-platform libraries); delete them otherwise.]
+[Define explicit rules for what is allowed in this feature versus what is rejected, and why. This table is the single record of what the plan will not do: every `Excluded` row states its reason so scope creep is stopped before coding and the final audit can check nothing excluded leaked in. The two _(optional)_ rows only apply to projects with multiple targets or runtimes (compilers, cross-platform libraries); delete them otherwise.]
 
-| Category | Rule | Examples / Members | Reason (Excluded rows) |
-|---|---|---|---|
-| **In scope: core** | Built in this plan | [e.g. New settings page, data model change, core algorithm] | |
-| **In scope: target-specific** *(optional)* | Supported on specific targets only; clear error elsewhere | [e.g. Browser DOM APIs in JS only, SIMD in WASM only] | |
-| **Excluded: runtime / platform** *(optional)* | Out of architectural scope; clear error | [e.g. Reflection, raw OS threads, unsupported host calls] | [e.g. Incompatible with the single-threaded runtime invariant] |
-| **Excluded: deferred** | Inside architectural boundary, but deferred to a future plan | [e.g. Admin UI, extra export formats, non-critical optimizations] | [e.g. Needs its own design; benchmark-gated follow-up] |
+| Category                                      | Rule                                                         | Examples / Members                                                | Reason (Excluded rows)                                         |
+| --------------------------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------- | -------------------------------------------------------------- |
+| **In scope: core**                            | Built in this plan                                           | [e.g. New settings page, data model change, core algorithm]       |                                                                |
+| **In scope: target-specific** _(optional)_    | Supported on specific targets only; clear error elsewhere    | [e.g. Browser DOM APIs in JS only, SIMD in WASM only]             |                                                                |
+| **Excluded: runtime / platform** _(optional)_ | Out of architectural scope; clear error                      | [e.g. Reflection, raw OS threads, unsupported host calls]         | [e.g. Incompatible with the single-threaded runtime invariant] |
+| **Excluded: deferred**                        | Inside architectural boundary, but deferred to a future plan | [e.g. Admin UI, extra export formats, non-critical optimizations] | [e.g. Needs its own design; benchmark-gated follow-up]         |
 
 ---
 
@@ -36,22 +36,25 @@
 
 [Empirically confirmed limitations or bugs found before implementation. Do not guess—run active probes, inspect code/types/output, or write minimal failing tests to prove every finding.]
 
-| Area | Finding | Evidence & Probe Reference |
-|---|---|---|
+| Area              | Finding                                                                            | Evidence & Probe Reference                                                        |
+| ----------------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
 | [Component / API] | [Exact behavior observed: e.g. Silent wrong result, missing type, unhandled error] | [Probe: specific command, test fixture, or source citation `src/path/file.js:42`] |
-| [Component / API] | [Exact behavior observed] | [Probe: test output or code reference] |
+| [Component / API] | [Exact behavior observed]                                                          | [Probe: test output or code reference]                                            |
 
 ---
 
 ## Approach
 
 ### 1. Architecture & Design Decisions
+
 [What changes and where (directory/module boundaries), data structures and types, key decisions and why, rejected alternatives and trade-offs.]
 
 ### 2. Invariants & Safety Bounds
+
 [Invariants that must hold: e.g. immutable structures stay immutable across function boundaries; zero allocations on hot paths; backward compatibility with existing serialized data.]
 
 ### 3. Edge Cases & Error Handling
+
 [Non-obvious scenarios and how each is handled.]
 
 ---
@@ -61,6 +64,7 @@
 [Phased sequential tasks; check them off (`- [x]`) as they land. Sizing and the task contract are defined in `/design-plan` Step 4: 1 phase = 1 PR with 3–5 tasks, each task = one commit with `Files:` / `Test:` / `Done when:`. Phases scheduled later from review follow-ups are appended with the next number; existing phases are never renumbered.]
 
 ### Phase 1: [Subsystem or Capability]
+
 - [ ] Task 1.1: [Implement core data structures / types]
   - Files: `[1–3 source files]`
   - Test: `[failing unit test written first]`
@@ -75,6 +79,7 @@
   - Done when: `[invalid input yields the specified error instead of a crash]`
 
 ### Phase 2: [Next Subsystem or Capability]
+
 - [ ] Task 2.1: [...; put user-facing docs updates in the last phase that changes behavior]
   - Files: `[1–3 source files]`
   - Test: `[failing test written first]`

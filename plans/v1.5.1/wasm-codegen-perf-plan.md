@@ -16,18 +16,18 @@ Phase 6b produced the first honest number and it is the wrong way round:
 
 | mode   | rays/s | ms/run | alloc/ray | wasm    |
 | ------ | -----: | -----: | --------: | ------- |
-| js     | 25,660 |  3,897 |    6.2 B  | —       |
-| hybrid | 16,678 |  5,996 |    0.8 B  | 86.6 KB |
+| js     | 25,660 |  3,897 |     6.2 B | —       |
+| hybrid | 16,678 |  5,996 |     0.8 B | 86.6 KB |
 
 **hybrid = 0.65× JS.** Profiling (see [Findings](#findings)) shows the boundary is not the problem (0.5 % of samples) and neither is allocation (0.8 B/ray). The time is spent inside the WASM functions themselves, and the WAT dump shows why: the emitter produces correct but naive code, and unlike V8's JS JIT — which rewrites naive JS into tight machine code for free — the WASM tier compiles roughly what it is given.
 
 Two measurements bound the opportunity:
 
-| experiment                                                                | rays/s | vs JS |
-| ------------------------------------------------------------------------- | -----: | ----: |
-| hybrid, as emitted                                                        | 16,678 | 0.65× |
-| hybrid + forced V8 inlining (`--wasm-inlining-*` flags, not shippable)    | 21,619 | 0.84× |
-| hybrid + Binaryen `wasm-opt -O3` on the emitted module (`--wasm-opt`)      | 21,266 | 0.83× |
+| experiment                                                             | rays/s | vs JS |
+| ---------------------------------------------------------------------- | -----: | ----: |
+| hybrid, as emitted                                                     | 16,678 | 0.65× |
+| hybrid + forced V8 inlining (`--wasm-inlining-*` flags, not shippable) | 21,619 | 0.84× |
+| hybrid + Binaryen `wasm-opt -O3` on the emitted module (`--wasm-opt`)  | 21,266 | 0.83× |
 
 A general-purpose optimiser only recovers a third of the gap, because it cannot see Go's semantics: it does not know that a slice header is immutable after construction, that `int` indices fit in i32 once bounds-checked, or that a nil check followed by a `struct.get` is a trap we would be happy to take. The emitter does, so the fixes live in the emitter.
 
@@ -156,13 +156,13 @@ After each item: `npm run bench:raycast`, `npm test`, WAT size of the benchmark 
 - **Slice header sharing.** With immutable headers and a shared empty header per element type, `s1 == nil` must not be true for a non-nil zero-length slice (`make([]T, 0)`). `make` allocates a fresh header with a non-null (possibly zero-length) array; only the literal/zero value uses the shared one. Equality against nil compares the `arr` field for null, not header identity.
 - **Reslicing a nil slice** (`var s []int; s = s[0:0]`) is legal and yields nil; `s[:0]` on the shared empty header must return the same shared header.
 - **`append` on nil** must keep allocating from the shared header's zero capacity; the `cap` field is immutable so growth always builds a new header. Already the case; add a test that the shared header is never written.
-- **Bounds check with negative `int` index.** `i64.ge_u` treats negative as huge, which is the current trick; the i32 path must preserve it (wrap *after* the unsigned compare, or compare in i32 only when the index is a proven-non-negative induction variable).
+- **Bounds check with negative `int` index.** `i64.ge_u` treats negative as huge, which is the current trick; the i32 path must preserve it (wrap _after_ the unsigned compare, or compare in i32 only when the index is a proven-non-negative induction variable).
 - **Induction-variable i32 fast path when the loop bound exceeds 2³¹.** Only applies when the bound is `len(x)` (always < 2³¹ for WasmGC arrays), a constant < 2³¹, or an i32-typed expression. Anything else keeps i64.
 - **Induction variable escapes** (address taken, captured by a closure, assigned in the body, used after the loop): no fast path. `lower` already computes escapes for closures; reuse.
 - **Nil check removed, trap message differs by engine.** V8: `RuntimeError: dereferencing a null pointer`; SpiderMonkey/JSC use other wordings. The boundary matches on `instanceof WebAssembly.RuntimeError` plus a small wording list, falling back to the raw message with the Go prefix. Document the list.
-- **Nil method receiver that is never dereferenced** must keep working (Go permits `var p *T; p.Method()` if `Method` does not touch `*p`). Removing the eager check makes this *more* correct than v1.5.0, which panics eagerly today. Add a test.
+- **Nil method receiver that is never dereferenced** must keep working (Go permits `var p *T; p.Method()` if `Method` does not touch `*p`). Removing the eager check makes this _more_ correct than v1.5.0, which panics eagerly today. Add a test.
 - **`unreachable` after `env.panic`.** Unchanged, but the panic arms move out of line (`br_if` to a block at function end); the validator still needs `unreachable` to type the cold block.
-- **Scratch global cache and package initialisation order.** The cached local is loaded at function entry, after the start function has run, so initialisers are visible. Functions called *from* the start function (package init helpers) are excluded from caching since globals may not be set yet.
+- **Scratch global cache and package initialisation order.** The cached local is loaded at function entry, after the start function has run, so initialisers are visible. Functions called _from_ the start function (package init helpers) are excluded from caching since globals may not be set yet.
 - **JS backend parity.** None of this touches `src/backend/js` or `lower`'s output for JS; the parity suite (`both` packages compiled twice) is the regression net.
 - **WAT golden tests** ([`test/unit/wasm/wat.test.js`](../../test/unit/wasm/wat.test.js)) will change for every item; update them per item, not in one sweep, so the diff per change stays reviewable.
 
@@ -212,18 +212,18 @@ After each item: `npm run bench:raycast`, `npm test`, WAT size of the benchmark 
 
 Filled in as tasks land. Benchmark: 131,072 triangles, 100,000 rays, median of 5, Node v25, same machine as the baseline.
 
-| after task | js rays/s | hybrid rays/s | hybrid/js | wasm size | GetVertex instrs | IntersectTrimesh instrs |
-| ---------- | --------: | ------------: | --------: | --------: | ---------------: | ----------------------: |
-| baseline (v1.5.0 6b) | 25,660 | 16,678 | 0.65× | 86.6 KB | 199 | 2,237 |
-| 1 slice headers      | 26,302 | 23,281 | 0.89× | 112.4 KB | 166 | 1,900 |
-| 2 i32 indices        | 26,856 | 25,620 | 0.95× | 102.0 KB | 155 | 1,654 |
-| 3 trap nil           | 28,013 | 30,981 | 1.11× | 87.5 KB | 101 | 1,259 |
-| 4 inlining           | 27,238 | 31,275 | 1.15× | 84.1 KB | 95 | 1,194 |
-| 5 scratch globals    | 26,720 | 31,293 | 1.17× | 84.3 KB | 95 | 1,222 |
-| perf pass (temp reuse, stack indexing) | 25,457 | 29,509 | 1.16× | 64.9 KB | 71 | 1,007 |
+| after task                             | js rays/s | hybrid rays/s | hybrid/js | wasm size | GetVertex instrs | IntersectTrimesh instrs |
+| -------------------------------------- | --------: | ------------: | --------: | --------: | ---------------: | ----------------------: |
+| baseline (v1.5.0 6b)                   |    25,660 |        16,678 |     0.65× |   86.6 KB |              199 |                   2,237 |
+| 1 slice headers                        |    26,302 |        23,281 |     0.89× |  112.4 KB |              166 |                   1,900 |
+| 2 i32 indices                          |    26,856 |        25,620 |     0.95× |  102.0 KB |              155 |                   1,654 |
+| 3 trap nil                             |    28,013 |        30,981 |     1.11× |   87.5 KB |              101 |                   1,259 |
+| 4 inlining                             |    27,238 |        31,275 |     1.15× |   84.1 KB |               95 |                   1,194 |
+| 5 scratch globals                      |    26,720 |        31,293 |     1.17× |   84.3 KB |               95 |                   1,222 |
+| perf pass (temp reuse, stack indexing) |    25,457 |        29,509 |     1.16× |   64.9 KB |               71 |                   1,007 |
 
 Reference points, not targets: forced V8 inlining 21,619 (0.84×); `wasm-opt -O3` on the baseline module 21,266 (0.83×).
 
-Post-task-5 ceiling checks (same machine, interleaved A/B runs; run-to-run noise on hybrid is ±8 %, 26k–30.5k for identical code): `wasm-opt -O3` over the task-5 module 29,427 vs 30,476 unoptimised, and a build with *every* slice bounds check removed 30,214 vs 30,542. Neither moves throughput, so the remaining instruction-level slack is code size, not speed. `--cpu-prof` on hybrid: 84.5 % self time in `Ray.IntersectTrimesh` (leaf methods inlined by V8), 12.5 % `RayQueryLocal`, 0.5 % GC, boundary < 0.2 %.
+Post-task-5 ceiling checks (same machine, interleaved A/B runs; run-to-run noise on hybrid is ±8 %, 26k–30.5k for identical code): `wasm-opt -O3` over the task-5 module 29,427 vs 30,476 unoptimised, and a build with _every_ slice bounds check removed 30,214 vs 30,542. Neither moves throughput, so the remaining instruction-level slack is code size, not speed. `--cpu-prof` on hybrid: 84.5 % self time in `Ray.IntersectTrimesh` (leaf methods inlined by V8), 12.5 % `RayQueryLocal`, 0.5 % GC, boundary < 0.2 %.
 
-The perf-pass row is code-size only: ref-typed temps are now recycled (the free list was keyed by type *object*, so every `s[i]` site allocated two fresh ref locals), and slice/array indexing keeps `arr`, `off` and the checked index on the operand stack instead of spilling the header to three locals. Module −23 %, 30,780 → 23,306 instructions.
+The perf-pass row is code-size only: ref-typed temps are now recycled (the free list was keyed by type _object_, so every `s[i]` site allocated two fresh ref locals), and slice/array indexing keeps `arr`, `off` and the checked index on the operand stack instead of spilling the header to three locals. Module −23 %, 30,780 → 23,306 instructions.

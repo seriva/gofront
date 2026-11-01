@@ -1,7 +1,7 @@
 # Post-Release Hardening (v1.2.0 review follow-ups) — Design Plan
 
 **Version:** v1.2.1  
-**Status:** Completed (2026-09-23)  
+**Status:** Completed (2026-09-23)
 
 ---
 
@@ -37,10 +37,12 @@ Address the findings of the v1.2.0 code review: two real bugs (dev-server path t
 `handleDevRequest` guards with `filePath.startsWith(resolvedServe)`. This is a string-prefix check, so serving `/x/app` also allows `/x/app-secret/...` via `/../app-secret/secret.txt` (reproduced: `200 LEAKED`).
 
 - Replace with a `relative()`-based containment check, extracted to `isInsideDir(root, target)`:
+
   ```js
   const rel = relative(root, target);
   return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
   ```
+
   A bare `startsWith("..")` would also reject legitimate names like `..cache/`; the
   exact `..` / `../` match avoids that. `asset-manager.js` uses the same check for
   `assetCopy` destinations.
@@ -77,6 +79,7 @@ Commit `1d3cc4f` contained two semantic changes with no changelog entry:
 `getExportNames` hardcodes `@emailjs/browser → emailjs`, `fuse.js → Fuse`, `prismjs → Prism`, `marked`. These are the `website` project's dependencies and do not belong in the compiler.
 
 - Add `vendor.globals` to the vendor config schema (`package.json` / `gofront.json`):
+
   ```json
   "vendor": {
     "dest": ["app/vendor.js", "public/vendor.js"],
@@ -118,34 +121,42 @@ Commit `1d3cc4f` contained two semantic changes with no changelog entry:
 ## Tasks
 
 ### Task 0: Async-aware test harness
+
 - Make `test()`/`summarize()` async-aware; update all `process.exit(summarize()...)` sites.
 - Run `npm run test:unit`; triage every newly-red async test.
 
 ### Task 1: Dev server traversal fix
+
 - Failing test first in `test/unit/compiler/dev-server.test.js`: sibling-prefix directory (`app` vs `app-secret`) must return 403 for `/../app-secret/secret.txt`; `serveDir` root and legitimate nested files still 200.
 - Implement `relative()`/`isAbsolute()` check.
 
 ### Task 2: jsdom resolution
+
 - Failing test in `test/unit/compiler/test-runner.test.js`: `generateTestHarness(js, names, { dom: true, jsdomPath })` emits a `file://` import specifier, not the bare `"jsdom"`.
 - Refactor `validateTestOptions` → returns `{ jsdomPath }`; thread into `runTests`.
 
 ### Task 3: CLI extraction
+
 - Tests in `test/unit/compiler/cli-core.test.js` for `parseTestArgs` (all `-run` forms, `-v`, `--dom`, positional dir, default `.`), `parsePrepArgs`, and `formatPrepSummary` (empty, assets-only, vendor-only with array dest + minify).
 - Move logic; shrink `index.js`; confirm `sentrux gate` passes.
 
 ### Task 4: `vendor.globals`
+
 - Tests in `test/unit/compiler/prep.test.js`: `getExportNames("fuse.js")` no longer includes `Fuse` by default; includes it when `globals["fuse.js"] = ["Fuse"]`; `loadVendorConfig` reads `globals` from both `package.json` and `gofront.json` (`gofront.json` wins); invalid shape throws.
 - Remove hardcoded branches; update `website` config in its own repo/commit.
 
 ### Task 5: Test-runner cleanups
+
 - Test: a `TestXxx` in a non-`_test.go` fixture file is not discovered/run.
 - Capture current stdout of a fixture with pass + fail + skip + subtests (verbose and non-verbose) **before** the harness dedup; assert byte-equality after.
 - Remove `bundleJsClean`.
 
 ### Task 6: Docs & changelog
+
 - Retroactive 1.2.0 entries (§3), new 1.2.1 section, README updates, roadmap.
 
 ### Task 7: Verification
+
 - `npm run check`, `npm run test:all` (unit + examples + examples:dom + e2e).
 - Manual: `gofront --serve` on `example/simple`, request `/../` sibling path → 403; `gofront test --dom example/gom/src` from a directory that has no local jsdom (e.g. `cd /tmp && node /home/luuk/dev/gofront/src/index.js test --dom /home/luuk/dev/gofront/example/gom/src`) → runs instead of `ERR_MODULE_NOT_FOUND`.
 

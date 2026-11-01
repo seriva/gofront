@@ -1,7 +1,7 @@
 # Frontend Asset Management & Vendor Bundling — Design Plan
 
 **Version:** v1.1.0  
-**Status:** Completed (2026-09-22)  
+**Status:** Completed (2026-09-22)
 
 ---
 
@@ -27,6 +27,7 @@ Currently, GoFront compiles `.go` and `.templ` files cleanly to JavaScript, but 
 
 Add a dedicated, zero-dependency asset manager built with standard `node:fs` (`cpSync`, `copyFileSync`, `mkdirSync`, `statSync`):
 - Reads the `"assetCopy"` configuration array from `package.json` (or `gofront.json`):
+
   ```json
   "assetCopy": [
     { "source": "node_modules/@fontsource/raleway/files", "dest": "app/fonts" },
@@ -67,15 +68,18 @@ In accordance with GoFront's architectural rules:
 ## Tasks
 
 ### Task 1: SPA Fallback in Dev Server
+
 - Modify `src/dev-server.js` to inspect path extensions when files do not exist and serve `index.html`.
 - Add unit test in `test/unit/compiler/dev-server.test.js`.
 
 ### Task 2: Asset Copy Manager
+
 - Create `src/asset-manager.js` with `copyAssets(projectDir, config)`.
 - Support directory recursive copy and file single copy with directory creation.
 - Add unit tests in `test/unit/compiler/asset-manager.test.js`.
 
 ### Task 3: Vendor Bundling & Prep Command
+
 - Create `src/vendor.js` with dynamic bundler invocation.
 - Add `handlePrep(targetDir)` in `src/cli-core.js` orchestrating asset copy and vendor bundling.
 - Wire `gofront prep` command in `src/index.js`.
@@ -95,10 +99,12 @@ In accordance with GoFront's architectural rules:
 ## Test Plan
 
 ### Unit Tests
+
 - `test/unit/compiler/asset-manager.test.js`: verify file copying, recursive directory copying, and graceful handling of missing sources.
 - `test/unit/compiler/dev-server.test.js`: verify SPA fallback returns `index.html` for clean URLs and 404 for missing static assets.
 - `test/unit/compiler/prep.test.js`: verify `gofront prep` reads `package.json` config and executes asset copy.
 
 ### Quality Gates
+
 - Run `npm run check` (Biome lint/format + Sentrux architectural boundaries).
 - Run `npm run test:unit` and `npm run test:e2e`.

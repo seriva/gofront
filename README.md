@@ -1,4 +1,5 @@
 # GoFront
+
 [![npm version](https://img.shields.io/npm/v/gofront.svg)](https://www.npmjs.com/package/gofront) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 
@@ -163,14 +164,14 @@ example/preact/
 
 The preact example covers:
 
-| Category | Features used |
-|---|---|
-| Hyperscript | `h(type, props, ...children)` with variadic and array children |
-| Function components | Pure function components with Go struct props |
-| Hooks | `useState` with tuple destructuring (`state, setState := useState(init)`), `useEffect` |
-| Tuples | Multi-value returns from TypeScript `.d.ts` tuple types |
-| Vendoring | Bundled subpath packages (`preact/hooks`) with named global exports |
-| Typed persistence | `encoding/json` `Marshal`/`Unmarshal` of `[]Todo` to `localStorage`, driven by struct tags |
+| Category            | Features used                                                                              |
+| ------------------- | ------------------------------------------------------------------------------------------ |
+| Hyperscript         | `h(type, props, ...children)` with variadic and array children                             |
+| Function components | Pure function components with Go struct props                                              |
+| Hooks               | `useState` with tuple destructuring (`state, setState := useState(init)`), `useEffect`     |
+| Tuples              | Multi-value returns from TypeScript `.d.ts` tuple types                                    |
+| Vendoring           | Bundled subpath packages (`preact/hooks`) with named global exports                        |
+| Typed persistence   | `encoding/json` `Marshal`/`Unmarshal` of `[]Todo` to `localStorage`, driven by struct tags |
 
 ### templ (template files + direct DOM codegen)
 
@@ -375,11 +376,11 @@ Each package declares its target at the top of any of its source files (before t
 package physics           // no directive = js (default)
 ```
 
-| Target | Compiled to | May import | Best for |
-|---|---|---|---|
-| `js` (default) | JavaScript ES module | anything | DOM manipulation, UI components (`gom`, `.templ`), browser APIs, `async`/`await` |
-| `wasm` | WebAssembly GC module | `wasm`, `both`, stdlib (WASM subset) | Physics, spatial indexing, raycasting, simulation, tight numeric loops |
-| `both` | JS *and* WASM | `both`, stdlib (WASM subset) | Shared math/utility libraries (e.g. `mathx`, `vec3`). Strict Go numeric semantics; no package-level mutable state |
+| Target         | Compiled to           | May import                           | Best for                                                                                                          |
+| -------------- | --------------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `js` (default) | JavaScript ES module  | anything                             | DOM manipulation, UI components (`gom`, `.templ`), browser APIs, `async`/`await`                                  |
+| `wasm`         | WebAssembly GC module | `wasm`, `both`, stdlib (WASM subset) | Physics, spatial indexing, raycasting, simulation, tight numeric loops                                            |
+| `both`         | JS _and_ WASM         | `both`, stdlib (WASM subset)         | Shared math/utility libraries (e.g. `mathx`, `vec3`). Strict Go numeric semantics; no package-level mutable state |
 
 - **Zero Boundary Overhead for Shared Types:** `both` packages never create a boundary overhead — JS callers use the JS copy and WASM callers use the WASM copy.
 - **Strict Go Numeric Semantics:** Code compiled to `wasm` (and JS emitted for `both` packages) follows strict Go numeric rules: sized-integer wrapping, true `float32` rounding, and integer divide-by-zero panics.
@@ -414,9 +415,9 @@ The compiler analyzes both sides of the boundary and synthesizes a facade into `
 
 Splitting an app into high-level JavaScript orchestration and low-level WebAssembly compute delivers the best of both worlds. On a real-world Möller–Trumbore raycast benchmark (131,072 triangles, 100,000 rays; run via `npm run bench`):
 
-| Target | Throughput | Allocation | Engine Stability |
-| :--- | :--- | :--- | :--- |
-| **Pure JS** | `26,720 rays/s` ▰▰▰▰▰▰▰▰▱▱ | `6.20 B / ray` | Subject to periodic V8 young-gen GC pauses |
+| Target          | Throughput                 | Allocation     | Engine Stability                               |
+| :-------------- | :------------------------- | :------------- | :--------------------------------------------- |
+| **Pure JS**     | `26,720 rays/s` ▰▰▰▰▰▰▰▰▱▱ | `6.20 B / ray` | Subject to periodic V8 young-gen GC pauses     |
 | **Hybrid WASM** | `31,293 rays/s` ▰▰▰▰▰▰▰▰▰▰ | `0.86 B / ray` | **Near-zero alloc (7.2× less)**, smooth 60 FPS |
 
 - **+17.1% higher throughput:** Direct WasmGC typed arrays, local-cached scratch globals, and hardware-trapped nil dereferences outperform JIT-compiled JS.
@@ -425,12 +426,12 @@ Splitting an app into high-level JavaScript orchestration and low-level WebAssem
 
 **Full application: [simplefps](https://github.com/seriva/simplefps).** The game ships `mathx` as `both`, `collision`, `physics` and `animation` as `wasm`, and everything else (WebGPU renderer, scene, UI) as `js`. Its `npm run bench` compiles `physics` and `animation` once with `--js-only` and once hybrid and runs the same workload against both (Node 25):
 
-| Workload | Pure JS | Hybrid WASM | Ratio |
-| :--- | :--- | :--- | :--- |
-| Closest-hit raycasts, 2048-triangle octree (200k casts) | ~240k casts/s | ~263k casts/s | **1.11–1.15×** |
-| FPS-controller fixed step across the boundary (pose in → `Update` + `MoveWithCamera` + `SyncCamera` → pose out, 50k frames) | ~46k frames/s | ~108k frames/s | **2.4×**, 0.2 B/frame |
-| 64-joint skinned-character frame (`AnimationPlayer.Update` + `ComputeSkinningMatrices` + palette copy-out via `gofront/shared`) | ~141k frames/s | ~179k frames/s | **1.27×** |
-| `app.wasm` (`mathx` + `collision` + `physics` + `animation`) | — | 98.5 kB unoptimised → **79.7 kB** with `--release` | −19% |
+| Workload                                                                                                                        | Pure JS        | Hybrid WASM                                        | Ratio                 |
+| :------------------------------------------------------------------------------------------------------------------------------ | :------------- | :------------------------------------------------- | :-------------------- |
+| Closest-hit raycasts, 2048-triangle octree (200k casts)                                                                         | ~240k casts/s  | ~263k casts/s                                      | **1.11–1.15×**        |
+| FPS-controller fixed step across the boundary (pose in → `Update` + `MoveWithCamera` + `SyncCamera` → pose out, 50k frames)     | ~46k frames/s  | ~108k frames/s                                     | **2.4×**, 0.2 B/frame |
+| 64-joint skinned-character frame (`AnimationPlayer.Update` + `ComputeSkinningMatrices` + palette copy-out via `gofront/shared`) | ~141k frames/s | ~179k frames/s                                     | **1.27×**             |
+| `app.wasm` (`mathx` + `collision` + `physics` + `animation`)                                                                    | —              | 98.5 kB unoptimised → **79.7 kB** with `--release` | −19%                  |
 
 The controller step is where WASM wins most: each fixed step issues several raycasts, and keeping `physics` next to `collision` means those never cross the boundary — only the camera pose does. `animation` is the cautionary tale for step 3: compiled as `wasm` while `ComputeSkinningMatrices` still returned a `[]Mat4`, it measured at parity with JS (the slice was copied out every frame); writing the palette into a `gofront/shared` buffer instead turned that into a 1.27× win.
 
@@ -448,13 +449,13 @@ For detailed command flags, project configuration (`gofront.json`), multi-file p
 
 ## Documentation
 
-* [Usage & Tooling Guide](docs/usage.md) — CLI, project config, testing, multi-file packages
-* [Hybrid JS + WebAssembly Guide](docs/hybrid-wasm.md) — package targets, `both` rules, boundary types, loader
-* [Language Features & Stdlib](docs/language-support.md) — what is implemented, stdlib shims
-* [Go to JS Mapping](docs/compilation-mapping.md) — what each construct compiles to
-* [Go Compatibility Differences](docs/go-compatibility.md) — where GoFront deliberately differs from Go
-* [Compiler Architecture & Internals](docs/architecture.md) — pipeline stages and source layout
-* [Changelog](CHANGELOG.md) — release history and upgrade notes
+- [Usage & Tooling Guide](docs/usage.md) — CLI, project config, testing, multi-file packages
+- [Hybrid JS + WebAssembly Guide](docs/hybrid-wasm.md) — package targets, `both` rules, boundary types, loader
+- [Language Features & Stdlib](docs/language-support.md) — what is implemented, stdlib shims
+- [Go to JS Mapping](docs/compilation-mapping.md) — what each construct compiles to
+- [Go Compatibility Differences](docs/go-compatibility.md) — where GoFront deliberately differs from Go
+- [Compiler Architecture & Internals](docs/architecture.md) — pipeline stages and source layout
+- [Changelog](CHANGELOG.md) — release history and upgrade notes
 
 ---
 

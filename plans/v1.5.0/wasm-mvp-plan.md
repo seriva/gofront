@@ -9,7 +9,7 @@
 
 ## Goal
 
-Ship the first version of **per-package WebAssembly output** in the existing JS compiler, so GoFront can transpile to JS *and* compile to WasmGC in the same app, before the native Go rewrite.
+Ship the first version of **per-package WebAssembly output** in the existing JS compiler, so GoFront can transpile to JS _and_ compile to WasmGC in the same app, before the native Go rewrite.
 
 The release answers one question with real numbers: **is the hybrid model worth it?** It does that by moving simplefps's heaviest compute (octree + trimesh raycasting) to WASM and its math types to a `both` package, then benchmarking against the JS-only build.
 
@@ -37,7 +37,7 @@ Concretely, v1.5.0 delivers:
 - **Generics in WASM packages** (monomorphisation).
 - **Maps** in WASM packages.
 - **`defer` / `recover`.** `panic` exists (bounds checks, explicit `panic`), but it can't be recovered inside WASM. It reaches JS as a thrown error.
-- **WASM → JS closures** (passing a WASM closure to JS as a callback). The JS → WASM direction *is* in scope.
+- **WASM → JS closures** (passing a WASM closure to JS as a callback). The JS → WASM direction _is_ in scope.
 - **Shared linear-memory buffers** (`gofront/shared`), `example/hybrid`, `wasm-opt` integration.
 - **DOM, `.templ`, `gom`, `js:` imports, `async`** in WASM packages. These are permanently rejected: browser-facing code stays in `js` packages.
 - **WASM source maps.**
@@ -51,20 +51,20 @@ Concretely, v1.5.0 delivers:
 
 Today the analyses are spread through codegen and stored as `_`-prefixed fields on AST nodes (`_type`, `_lvalue`, `_className`, …). Move the decision-making into `src/lower/`, which produces **side tables** (`Map`s keyed by AST node):
 
-| Analysis | Currently in | Moves to |
-|---|---|---|
+| Analysis                                                                                         | Currently in                                      | Moves to             |
+| ------------------------------------------------------------------------------------------------ | ------------------------------------------------- | -------------------- |
 | Clone elision / ownership (`_fnMutates`, `_markOwnership`, `_nodeMutatesVar`, `_rangeElemValue`) | `codegen/statements.js`, `codegen/expressions.js` | `lower/ownership.js` |
-| Address-taken boxing (`{ value }`) | codegen + typechecker | `lower/boxing.js` |
-| Range shape (indexed / map / string / int / iterator) | `codegen/statements.js` | `lower/range.js` |
-| Named-return pre-declaration, `defer` structure | codegen | `lower/functions.js` |
-| Embedded promotion / delegation stubs | codegen | `lower/embedding.js` |
-| **New:** captured-and-mutated variables (needed by WASM closures) | — | `lower/captures.js` |
-| **New:** pointer-retention escape analysis (boundary rule) | — | `lower/escape.js` |
+| Address-taken boxing (`{ value }`)                                                               | codegen + typechecker                             | `lower/boxing.js`    |
+| Range shape (indexed / map / string / int / iterator)                                            | `codegen/statements.js`                           | `lower/range.js`     |
+| Named-return pre-declaration, `defer` structure                                                  | codegen                                           | `lower/functions.js` |
+| Embedded promotion / delegation stubs                                                            | codegen                                           | `lower/embedding.js` |
+| **New:** captured-and-mutated variables (needed by WASM closures)                                | —                                                 | `lower/captures.js`  |
+| **New:** pointer-retention escape analysis (boundary rule)                                       | —                                                 | `lower/escape.js`    |
 
 - **Two-step implementation:**
-  - **1a. Extract existing side-tables (zero behavior change):** Move ownership/clone elision, boxing, range, functions, and embedding to `src/lower/`. The WASM backend reads the side tables; JS codegen keeps using the same `_`-prefixed node fields (the `lower/` passes are the shared source of those decisions, JS codegen is not rewired in 1.5). *Safety net:* All ~1,400 existing tests and E2E must be byte-identical to v1.4.0.
+  - **1a. Extract existing side-tables (zero behavior change):** Move ownership/clone elision, boxing, range, functions, and embedding to `src/lower/`. The WASM backend reads the side tables; JS codegen keeps using the same `_`-prefixed node fields (the `lower/` passes are the shared source of those decisions, JS codegen is not rewired in 1.5). _Safety net:_ All ~1,400 existing tests and E2E must be byte-identical to v1.4.0.
   - **1b. Add new analyses:** Implement `captures.js` (tracked mutated variables for WASM closure env boxing) and `escape.js` (pointer retention across the WASM boundary). Unused by JS codegen, tested via targeted AST analysis tests. `escape.js` is intra-procedural: it flags pointer parameters stored into struct fields, globals, closures or returned, but does not follow a pointer through a call into another function.
-- **Bonus:** v2.0.0 then *ports* a clean `lower` instead of untangling codegen during the port.
+- **Bonus:** v2.0.0 then _ports_ a clean `lower` instead of untangling codegen during the port.
 
 ### 2. Package targets & diagnostics
 
@@ -78,15 +78,15 @@ Today the analyses are spread through codegen and stored as `_`-prefixed fields 
 
 ### 3. JS strict numeric mode (`both` packages only)
 
-| Operation | Strict codegen |
-|---|---|
-| `float32` arithmetic | `Math.fround(a op b)` |
-| `int8/16/32` arithmetic | `(a op b) \| 0`, then sign-extend for 8/16 (`<< 24 >> 24`) |
-| `uint8/16/32` arithmetic | `(a op b) >>> 0` / `& 0xFF` / `& 0xFFFF` |
-| `int32 * int32` | `Math.imul(a, b)` |
-| Shifts | Go semantics: counts ≥ width give `0` (or `-1` for negative signed `>>`), not JS's `count & 31` |
-| Integer `/`, `%` by zero | panic |
-| `int`/`int64` | unchanged (float64). Dev builds assert the safe-integer range. |
+| Operation                | Strict codegen                                                                                  |
+| ------------------------ | ----------------------------------------------------------------------------------------------- |
+| `float32` arithmetic     | `Math.fround(a op b)`                                                                           |
+| `int8/16/32` arithmetic  | `(a op b) \| 0`, then sign-extend for 8/16 (`<< 24 >> 24`)                                      |
+| `uint8/16/32` arithmetic | `(a op b) >>> 0` / `& 0xFF` / `& 0xFFFF`                                                        |
+| `int32 * int32`          | `Math.imul(a, b)`                                                                               |
+| Shifts                   | Go semantics: counts ≥ width give `0` (or `-1` for negative signed `>>`), not JS's `count & 31` |
+| Integer `/`, `%` by zero | panic                                                                                           |
+| `int`/`int64`            | unchanged (float64). Dev builds assert the safe-integer range.                                  |
 
 Normal `js` packages are unaffected.
 
@@ -107,21 +107,21 @@ runtime/wasm/*.go   runtime written in GoFront (slice growth, string helpers, pa
 
 **v1.5 language subset:**
 
-| Feature | Representation |
-|---|---|
-| `bool`, `int8…int32`, `uint8…uint32` | `i32` (narrow types re-extended) |
-| `int`, `uint`, `int64`, `uint64` | `i64` |
-| `float32`, `float64` | `f32`, `f64`. `math.Sqrt/Floor/Ceil/Trunc/Abs/Min/Max/Copysign` native. `math.Sin/Cos/Atan2/Pow/…` imported from JS `Math`. |
-| Structs, pointers, methods, embedding | `(struct (mut …))`, `(ref null $T)`, boxed scalars |
-| Arrays `[N]T` | `(array (mut T))` |
-| Slices `[]T` | `(struct (ref $arr) i32 off, i32 len, i32 cap)` with `append`, `copy`, `len`, `cap`, 3-index slicing |
-| Strings | JS strings as `externref` via JS String Builtins (polyfilled through imports): literals, `+`, `==`/`<`, `len`, indexing, `range` |
-| `any` / `interface{}` | `anyref`. Assertions and type switches on **concrete types** via `ref.test`/`ref.cast`. Holds JS values opaquely. |
-| Func values & closures | `(struct funcref, anyref env)` + `call_ref`. Captured-mutated vars boxed (`lower/captures.js`). |
-| `if`/`for`/`switch`/labels/`fallthrough`, multi-value returns | structured control flow, native multi-value |
-| `panic`, bounds/nil/div-zero checks | `throw` with one exception tag. **No `try` blocks are needed in v1.5**, so the exception-handling encoding question (`exnref` vs. legacy) waits until v1.6 brings `recover`. |
-| `print`/`println`, `fmt.Println` | imported `console.log` |
-| Stdlib | `math`, `math/bits`, `errors.New`, `strconv.Itoa/FormatFloat`, `fmt.Sprintf` (subset via runtime) |
+| Feature                                                       | Representation                                                                                                                                                               |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bool`, `int8…int32`, `uint8…uint32`                          | `i32` (narrow types re-extended)                                                                                                                                             |
+| `int`, `uint`, `int64`, `uint64`                              | `i64`                                                                                                                                                                        |
+| `float32`, `float64`                                          | `f32`, `f64`. `math.Sqrt/Floor/Ceil/Trunc/Abs/Min/Max/Copysign` native. `math.Sin/Cos/Atan2/Pow/…` imported from JS `Math`.                                                  |
+| Structs, pointers, methods, embedding                         | `(struct (mut …))`, `(ref null $T)`, boxed scalars                                                                                                                           |
+| Arrays `[N]T`                                                 | `(array (mut T))`                                                                                                                                                            |
+| Slices `[]T`                                                  | `(struct (ref $arr) i32 off, i32 len, i32 cap)` with `append`, `copy`, `len`, `cap`, 3-index slicing                                                                         |
+| Strings                                                       | JS strings as `externref` via JS String Builtins (polyfilled through imports): literals, `+`, `==`/`<`, `len`, indexing, `range`                                             |
+| `any` / `interface{}`                                         | `anyref`. Assertions and type switches on **concrete types** via `ref.test`/`ref.cast`. Holds JS values opaquely.                                                            |
+| Func values & closures                                        | `(struct funcref, anyref env)` + `call_ref`. Captured-mutated vars boxed (`lower/captures.js`).                                                                              |
+| `if`/`for`/`switch`/labels/`fallthrough`, multi-value returns | structured control flow, native multi-value                                                                                                                                  |
+| `panic`, bounds/nil/div-zero checks                           | `throw` with one exception tag. **No `try` blocks are needed in v1.5**, so the exception-handling encoding question (`exnref` vs. legacy) waits until v1.6 brings `recover`. |
+| `print`/`println`, `fmt.Println`                              | imported `console.log`                                                                                                                                                       |
+| Stdlib                                                        | `math`, `math/bits`, `errors.New`, `strconv.Itoa/FormatFloat`, `fmt.Sprintf` (subset via runtime)                                                                            |
 
 **Linking:** all `wasm` + `both` packages in the build go into **one `app.wasm`** with one runtime instance.
 
@@ -129,18 +129,18 @@ runtime/wasm/*.go   runtime written in GoFront (slice growth, string helpers, pa
 
 For each imported `wasm` package, the backend generates a facade with the same API shape the JS backend would have emitted:
 
-| Exported type | Crossing |
-|---|---|
-| bool, ints ≤ 32-bit, floats | direct |
-| `int`, `int64` | via `number` (safe-range check in dev) |
-| `string` | zero-copy `externref` |
-| struct value (`both` types like `mathx.Vec3`) | marshalled field-wise to/from the JS class from the JS copy of the package |
-| `*T` where `T` is in a `wasm` package (`*collision.Trimesh`) | handle facade: getters/setters, methods, stable identity |
-| `*T` where `T` is in a `both` package (`*mathx.Vec3`) | copy-in/copy-out per call. A compile error if `lower/escape.js` finds the WASM side retains it. |
-| `[]float32`, `[]int32`, `[]uint8`, … | copied to/from TypedArrays |
-| `any` | JS values round-trip opaquely. WASM refs become handle facades. |
-| JS func passed into WASM (e.g. `RayOptions.Callback`) | `externref` + generic invoke import |
-| WASM func returned to JS, maps, non-empty interfaces | compile error: `not yet supported across the wasm boundary (planned)` |
+| Exported type                                                | Crossing                                                                                        |
+| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| bool, ints ≤ 32-bit, floats                                  | direct                                                                                          |
+| `int`, `int64`                                               | via `number` (safe-range check in dev)                                                          |
+| `string`                                                     | zero-copy `externref`                                                                           |
+| struct value (`both` types like `mathx.Vec3`)                | marshalled field-wise to/from the JS class from the JS copy of the package                      |
+| `*T` where `T` is in a `wasm` package (`*collision.Trimesh`) | handle facade: getters/setters, methods, stable identity                                        |
+| `*T` where `T` is in a `both` package (`*mathx.Vec3`)        | copy-in/copy-out per call. A compile error if `lower/escape.js` finds the WASM side retains it. |
+| `[]float32`, `[]int32`, `[]uint8`, …                         | copied to/from TypedArrays                                                                      |
+| `any`                                                        | JS values round-trip opaquely. WASM refs become handle facades.                                 |
+| JS func passed into WASM (e.g. `RayOptions.Callback`)        | `externref` + generic invoke import                                                             |
+| WASM func returned to JS, maps, non-empty interfaces         | compile error: `not yet supported across the wasm boundary (planned)`                           |
 
 **Loader:** `app.js` starts with `await WebAssembly.instantiateStreaming(fetch("app.wasm"), imports)` (top-level await), feature-detects the required proposals, and reports a clear error otherwise.
 
@@ -175,12 +175,12 @@ From an inspection of `engine/physics`:
 - `ray.go` adds `interface{}` fields (`Shape`, `Body`) and a `Callback func(*RaycastResult)`. Both are covered by the `any` and JS-func-into-WASM support.
 - `dynamicbody.go` needs the non-empty `RaycastProvider` interface, which is deferred.
 
-| Package | Target | Contents |
-|---|---|---|
-| `engine/mathx` (new) | `both` | `vec3`, `mat4`, `quat`, `transform`, `boundingbox` (moved from `physics`) |
-| `engine/collision` (new) | `wasm` | `trimesh`, `octree`, `ray` (moved from `physics`) |
-| `engine/physics` | `js` (for v1.5) | `dynamicbody`, `fpscontroller`. Imports `mathx` + `collision`. Moves to `wasm` in v1.6 once interfaces land. |
-| `rendering`, `scene`, `systems`, `assets`, `animation`, `game` | `js` | import `mathx` instead of `physics` for math types |
+| Package                                                        | Target          | Contents                                                                                                     |
+| -------------------------------------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------ |
+| `engine/mathx` (new)                                           | `both`          | `vec3`, `mat4`, `quat`, `transform`, `boundingbox` (moved from `physics`)                                    |
+| `engine/collision` (new)                                       | `wasm`          | `trimesh`, `octree`, `ray` (moved from `physics`)                                                            |
+| `engine/physics`                                               | `js` (for v1.5) | `dynamicbody`, `fpscontroller`. Imports `mathx` + `collision`. Moves to `wasm` in v1.6 once interfaces land. |
+| `rendering`, `scene`, `systems`, `assets`, `animation`, `game` | `js`            | import `mathx` instead of `physics` for math types                                                           |
 
 The boundary per frame is then raycasts (gameplay, bodies, controller), each a single call into `collision`.
 
@@ -224,25 +224,30 @@ The boundary per frame is then raycasts (gameplay, bodies, controller), each a s
 ## Implementation Tasks
 
 ### Phase 1: Shared Lowering & Analyses (`src/lower/`)
+
 - [x] **Phase 1a — Side-table extraction:** Move ownership, boxing, range, functions, embedding to `src/lower/`. All ~1,400 tests, `test:examples`, E2E byte-identical to v1.4.0.
 - [x] **Phase 1b — New analyses:** Implement `lower/captures.js` (closure envs) and `lower/escape.js` (pointer retention). Dedicated AST analysis unit tests pass.
 
 ### Phase 2: Package Targets & Diagnostics
+
 - [x] **Phase 2a — Target directives & rules:** `//gofront:target` in lexer, target import rules, package summary diagnostic line. Target and negative diagnostic tests pass.
 - [x] **Phase 2b — JS strict numeric mode:** JS strict numeric mode for `both` packages (`Math.fround`, `|0`, `Math.imul`, Go shifts, div-zero). Parity tests pass against normal JS.
 
 ### Phase 3: Core WASM Backend & Scalars
+
 - [x] **Phase 3a — Minimal binary encoder & WAT writer:** LEB128, headers, type/func/export/code sections (`encode.js`, `wat.js`). Hardcoded `add(i32, i32)` passes `WebAssembly.validate()` & runs.
 - [x] **Phase 3b — Module IR & scalar emission:** `i32/i64/f32/f64`, locals, Go arithmetic & control flow (`block/loop/br_if`). Numeric & loop fixtures: WASM == JS-strict.
 - [x] **Phase 3c — Traps & Math imports:** `panic` tag, div-zero & nil guards, and JS `Math` imports (`math.Sin/Cos/...`). Parity tests and math tests pass.
 
 ### Phase 4: Types & Runtime Constructs
+
 - [x] **Phase 4a — Structs, pointers & methods:** `struct.new`, `struct.get/set`, and rec groups. `mathx.Vec3` operations and methods run in WASM.
-- [x] **Phase 4b — Arrays & slices:** `(array (mut T))`, slice header struct, `len`/`cap`/indexing, `append` with growth. Slice manipulation & growth fixtures pass. *(Deviation: `append` is emitted directly by `emit.js` instead of a GoFront-written `runtime/wasm/slice.go`; the Go-source runtime is deferred.)*
+- [x] **Phase 4b — Arrays & slices:** `(array (mut T))`, slice header struct, `len`/`cap`/indexing, `append` with growth. Slice manipulation & growth fixtures pass. _(Deviation: `append` is emitted directly by `emit.js` instead of a GoFront-written `runtime/wasm/slice.go`; the Go-source runtime is deferred.)_
 - [x] **Phase 4c — Strings & any:** JS String Builtins (`externref`) + `anyref` with concrete casts (`ref.test`/`ref.cast`). String concatenation/comparison and `any` fixtures pass.
 - [x] **Phase 4d — Closures:** `(struct funcref, anyref env)` + `call_ref`, boxed environments via `captures.js`. Closure and callback fixtures pass.
 
 ### Phase 5: Boundary & Tooling Integration
+
 - [x] **Phase 5a — Boundary v1 (Values):** Facades for primitives and struct values (`mathx.Vec3` <-> JS class). Struct passing across boundary matches JS-only results.
 - [x] **Phase 5b — Boundary v1 (Slices & Handles):** TypedArray copy for slices and opaque handles (`*collision.Trimesh` with stable identity). Identity & slice tests pass.
 - [x] **Phase 5c — Tooling & linking:**
@@ -253,6 +258,7 @@ The boundary per frame is then raycasts (gameplay, bodies, controller), each a s
   Boundary v1 limitations (deferred): maps, `error`, non-empty interfaces and pointers to non-structs are rejected at the boundary with a "planned" diagnostic; slices are copied in but not back; `*T` fields inside `both` struct values lose identity; `t.Run` subtests are not available in wasm test packages; non-literal package constants are not exposed.
 
 ### Phase 5.1: Backend Structure Cleanups & Encapsulation
+
 - [x] **Phase 5.1a — Codegen shim removal:**
   - Delete `src/codegen/index.js` and remove the obsolete `src/codegen/` directory.
   - Remove `src/codegen/*` path pattern from `.sentrux/rules.toml` (layer order 2 `backend`).
@@ -269,6 +275,7 @@ The boundary per frame is then raycasts (gameplay, bodies, controller), each a s
   - Verify all unit tests, linters, and architectural rules pass (`npm test`, `npm run check`).
 
 ### Phase 6: simplefps Validation & Go/No-Go Benchmark
+
 - [x] **Phase 6a — simplefps split:** `engine/mathx` (`both`) and `engine/collision` (`wasm`). `mathx` passes on both targets, `collision` passes in WASM.
 - [x] **Phase 6b — Raycast benchmark harness:** `test/e2e/perf/raycast-bench.js` (100k+ triangles, 100k rays). Automated benchmark produces repeatable rays/s & alloc numbers. (`npm run bench:raycast`; fixture under `test/e2e/perf/raycast/` is a snapshot of simplefps `engine/{mathx,collision}`.)
 - [x] **Phase 6c — Verification & publish:** simplefps runs hybrid and is verified (`check`, `test`, `test:dom`, `test:perf` zero-alloc gate, `test:e2e`, `build` → `app.wasm`). The benchmark number is **deferred to [v1.5.1](../v1.5.1/wasm-codegen-perf-plan.md)**: the 6b baseline is hybrid = 0.65× JS (16,678 vs 25,660 rays/s) and the cause is emitter output quality, so the go/no-go is published — together with the manual 60 FPS play check — after the codegen work (v1.5.1 Task 6), not before.

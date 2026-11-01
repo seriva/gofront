@@ -88,6 +88,7 @@ In `TemplParser.prototype.parseTopDecl`:
   5. Consume `TT.CSS_BODY` $\to$ `cssText`.
   6. Expect `TT.TEMPL_END` / `T.RBRACE`.
   7. Return AST node:
+
      ```js
      {
        kind: "CssDecl",
@@ -110,11 +111,14 @@ During Pass 2 (collecting top-level declarations):
 ### 4. Code Generation & Scoping (`src/codegen/templ.js` & `src/compiler.js`)
 
 #### A. Class Name Scoping
+
 - For each `CssDecl`, compute a deterministic short hash from the package name, function name, and CSS text.
 - Generated class name format: `gfc_<name>_<hash>` (e.g. `gfc_cardStyle_9b2e`).
 
 #### B. CSS Transformation
+
 - Wrap the declared CSS body with the scoped class selector:
+
   ```css
   .gfc_cardStyle_9b2e {
       background-color: var(--background-color);
@@ -135,7 +139,9 @@ During Pass 2 (collecting top-level declarations):
 - Redundant comments and excess whitespace are stripped to minimize payload size.
 
 #### C. JavaScript Function Emission
+
 - Emit a simple, inlineable function in the generated JavaScript:
+
   ```javascript
   function cardStyle() {
     return "gfc_cardStyle_9b2e";
@@ -143,10 +149,12 @@ During Pass 2 (collecting top-level declarations):
   ```
 
 #### D. Stylesheet Delivery (Compile Pipeline & CLI)
+
 All compiled CSS rules across all `.templ` files in the package (and bundled local dependencies) are collected into a unified stylesheet.
 
 1. **Self-Contained Module Injection (`__injectStyles`):**
    - For standalone compiles (`gofront <input> -o bundle.js`) and tests, codegen emits a tree-shaken preamble that injects the styles once into `<head>` upon module evaluation:
+
      ```javascript
      (function() {
        if (typeof document === "undefined") return;
@@ -183,14 +191,17 @@ All compiled CSS rules across all `.templ` files in the package (and bundled loc
 ## Implementation Tasks
 
 ### Phase 1: Lexer & Parser
+
 - [x] **Task 1.1 — CSS keyword and body tokens:** Add `TT.CSS_KW` and `TT.CSS_BODY` brace-counting scanning in `src/templ-lexer.js`.
 - [x] **Task 1.2 — `CssDecl` AST node:** Parse top-level `css Name() { ... }` declarations in `src/templ-parser.js`.
 
 ### Phase 2: Type Checking & Scope
+
 - [x] **Task 2.1 — Scope registration:** Register `css` declarations as package-scoped callables returning `string` in `src/typechecker/index.js`.
 - [x] **Task 2.2 — Attribute integration:** Validate `cssName()` calls in `class={ ... }` and `gom.Class(...)`.
 
 ### Phase 3: CodeGen & Stylesheet Emission
+
 - [x] **Task 3.1 — Scoped class hashing:** Emit deterministic `gfc_<name>_<hash>` class identifiers.
 - [x] **Task 3.2 — Scoped stylesheet generation:** Emit scoped CSS rules and runtime injection via `<style id="gofront-styles">`.
 - [x] **Task 3.3 — CLI build integration:** Collect extracted styles into build output in `compiler.js` and `cli-core.js`.
@@ -200,6 +211,7 @@ All compiled CSS rules across all `.templ` files in the package (and bundled loc
 ## Test Plan
 
 ### Unit Tests (`test/unit/templ.test.js`)
+
 - **Lexer:**
   - Tokenize `css name() { ... }` with simple properties.
   - Tokenize with nested braces (CSS nesting, media queries).
@@ -221,7 +233,7 @@ All compiled CSS rules across all `.templ` files in the package (and bundled loc
   - Verify CSS nesting and media queries are preserved.
 
 ### Integration / E2E Tests
+
 - Render a `.templ` component with `css` declaration in Playwright.
 - Verify `window.getComputedStyle(element)` matches expected values.
 - Verify theme switching via CSS variables updates element styles dynamically without JS re-rendering.
-

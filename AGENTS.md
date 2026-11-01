@@ -1,12 +1,14 @@
 # GoFront Agent Guide
 
 # Part 1: Agent Workflow
+
 > [!IMPORTANT]
 > **IMMUTABLE SECTION:** Do not modify Part 1 unless explicitly instructed. This is a universal standard. Only adjust Part 2 (Project Context) for project-specific needs.
 
 ## 1. Context & Rules
+
 - **Caveman Speak:** Progress updates and tool-call narration use "caveman" style (extreme density, zero fluff, drop grammar, `->` for correlations). Explanations and answers to the user use normal readable prose.
-- **Audiences:** Every file has one reader. *People* read `README.md`, `docs/`, `CHANGELOG.md`, commit bodies, and PR summaries: plain prose, no task/phase/follow-up IDs, no references to plans. *Agents* read `plans/` (plans, `roadmap.md`, `follow-ups.md`): dense, symbol-heavy, ID-heavy text is fine there.
+- **Audiences:** Every file has one reader. _People_ read `README.md`, `docs/`, `CHANGELOG.md`, commit bodies, and PR summaries: plain prose, no task/phase/follow-up IDs, no references to plans. _Agents_ read `plans/` (plans, `roadmap.md`, `follow-ups.md`): dense, symbol-heavy, ID-heavy text is fine there.
 - **Skills Override:** While running a skill (`/design-plan`, `/execute-plan`, `/dev-loop`), its rules override **Audiences**, **Blockers**, **Quality**, **Branches**, and **Commits & PR Titles** here.
 - **Plan-first:** Non-trivial features (multi-component, arch-altering, risky) require a design plan created with `/design-plan` and tracked in `plans/roadmap.md`. Active plans live under `plans/` (or milestone subfolders like `plans/vX.Y.Z/`); on completion `/execute-plan` moves continuous plans to `plans/archive/`, while versioned plans stay in their milestone folder. Track execution by checking off tasks (`- [x]`) as they land.
 - **TDD:** Write failing tests first for non-trivial logic (if applicable).
@@ -21,9 +23,10 @@
 - **Code Preservation:** Do not delete existing comments, docstrings, or unrelated code unless explicitly instructed.
 
 ## 2. Git Standards
+
 - **No Auto-Commit:** Never run `git commit`, `git push`, or history-rewriting commands unless the user explicitly asks in the current turn. Make changes, run quality gates, report, then wait for the user to commit or instruct. Exception: invoking `/dev-loop` or `/execute-plan` is explicit permission to branch, commit, push, and open/merge PRs exactly as that workflow defines, including for the subagents it spawns.
 - **Branches:** Default branch is releasable; the pre-commit hook is the gate. Commit directly to it. Use a `<type>/<task-slug>` (`feat/` or `fix/`) branch + PR only when the user asks, via `/dev-loop`, or when the change is risky enough to want CI green before merge. Multi-phase plans use epic branch `feat/<plan-slug>` and phase branches `feat/<plan-slug>-phase-<N>`.
-- **Commits & PR Titles:** Conventional Commits (`<type>(<scope>): <summary>`). Subject ≤72 chars, imperative mood. Body explains *why*. One logical change per commit.
+- **Commits & PR Titles:** Conventional Commits (`<type>(<scope>): <summary>`). Subject ≤72 chars, imperative mood. Body explains _why_. One logical change per commit.
 - **Artifacts:** Never commit temporary agent session files (e.g., scratchpads, tool-specific session state). Official feature plans (including task checklists) should be committed.
 - **Security:** Never commit secrets/API keys. Ensure `.env` is gitignored.
 - **Self-Review:** Review `git diff` before commit. Strip debug logs/stray changes.
@@ -57,5 +60,3 @@ The compiler pipeline lives in `src/` and flows strictly downward: `index.js` (C
 - **Never modify `src/index.js` for logic.** It is the CLI entry point only — business logic belongs in `cli-core.js` or deeper.
 - **Never add runtime dependencies.** The compiler must remain zero-dependency; all stdlib support compiles to inline JS or WASM opcodes.
 - **Never commit without `npm run check` passing.** This runs Biome lint, Sentrux quality gate, and GoFront type-checks on the examples.
-
-

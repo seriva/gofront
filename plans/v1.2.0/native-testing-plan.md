@@ -1,7 +1,7 @@
 # Native Unit Testing (`gofront test`) — Design Plan
 
 **Version:** v1.2.0  
-**Status:** Completed (2026-09-23)  
+**Status:** Completed (2026-09-23)
 
 ---
 
@@ -41,6 +41,7 @@ In Go, files ending in `_test.go` are excluded from regular package builds and a
 Register the `testing` package as a standard library built-in, similar to `fmt`, `strings`, and `bytes`.
 
 #### TypeChecker (`src/typechecker/stdlib/testing.js` or `core.js`)
+
 - Type definitions:
   - `testing.T`: struct pointer type with methods:
     - `t.Error(args ...any)`: marks test as failed and logs message.
@@ -60,6 +61,7 @@ Register the `testing` package as a standard library built-in, similar to `fmt`,
     - `t.Name() string`: returns test name.
 
 #### CodeGen (`src/codegen/stdlib/testing.js`)
+
 - Emits an inline JavaScript class `__GoFront_T` supporting:
   - Failure tracking (`this.failed = false`).
   - Sentinel exception for immediate aborts: `class __GoFront_FailNow extends Error {}`.
@@ -72,9 +74,11 @@ Add a dedicated test runner engine:
 
 - **AST Inspection:**
   - After parsing the test files, scan top-level declarations for functions matching:
+
     ```go
     func Test<Name>(t *testing.T)
     ```
+
 - **Harness Generation:**
   - Generate an executable JavaScript runner module that:
     1. Optionally initializes JSDOM (if `--dom` flag is active or DOM globals are referenced).
@@ -95,6 +99,7 @@ Add a dedicated test runner engine:
 In accordance with GoFront architecture rules (`src/index.js` = argument routing only, `src/cli-core.js` = business logic):
 
 - **Command Syntax:**
+
   ```bash
   gofront test                     # run tests in current directory
   gofront test <dir>               # run tests in specified directory
@@ -115,17 +120,20 @@ In accordance with GoFront architecture rules (`src/index.js` = argument routing
 ## Tasks
 
 ### Task 1: Test File Filtering in Compiler
+
 - Update `gwFilesIn` in `src/compiler.js` to exclude `*_test.go` by default.
 - Verify regular builds ignore `*_test.go`.
 - Add unit test verifying `*_test.go` is excluded from standard package compilation.
 
 ### Task 2: `testing` Package in TypeChecker & CodeGen
+
 - Add `testing.T` type definition and methods to `src/typechecker/stdlib/core.js` (or `src/typechecker/stdlib/testing.js`).
 - Implement `src/codegen/stdlib/testing.js` with `__GoFront_T` runtime class, `FailNow` sentinel, and log formatting.
 - Wire into `src/codegen/stdlib/index.js`.
 - Add unit tests verifying `import "testing"` and `t.*` method type checking and JS emission.
 
 ### Task 3: Test Discovery & Harness Generator
+
 - Create `src/test-runner.js`:
   - Identify `Test*` functions from AST.
   - Generate the runner entrypoint with Go-compatible test formatting (`=== RUN`, `--- PASS`, `--- FAIL`).
@@ -134,11 +142,13 @@ In accordance with GoFront architecture rules (`src/index.js` = argument routing
   - Support `--dom` environment via JSDOM.
 
 ### Task 4: CLI Integration (`src/cli-core.js` & `src/index.js`)
+
 - Add `handleTest(targetDir, options)` in `src/cli-core.js`.
 - Add `gofront test` command handler in `src/index.js`.
 - Add `--help` documentation for `gofront test`.
 
 ### Task 5: Testing & Verification
+
 - Add compiler unit tests in `test/unit/compiler/test-runner.test.js`.
 - Create fixture packages with passing tests, failing tests, fatal aborts, and subtests.
 - Verify Sentrux architecture gate passes (`npm run check`).
@@ -163,6 +173,7 @@ In accordance with GoFront architecture rules (`src/index.js` = argument routing
 ## Test Plan
 
 ### Unit Tests
+
 - `test/unit/compiler/test-runner.test.js`:
   - File filtering: ensures `*_test.go` is ignored during regular `compileDir` and included during `compilePackageTests`.
   - Type checking: validates correct signatures for `func TestFoo(t *testing.T)` and catches invalid signatures.
@@ -176,5 +187,6 @@ In accordance with GoFront architecture rules (`src/index.js` = argument routing
     - DOM test: verifies `document.createElement` works when `--dom` is enabled.
 
 ### Regression & Quality Gate
+
 - Run `npm run test:unit` to ensure all 1,184 existing tests pass.
 - Run `npm run check` to verify Biome formatting, Sentrux quality gate, and example type checking.

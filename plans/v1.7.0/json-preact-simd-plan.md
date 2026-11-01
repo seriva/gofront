@@ -20,7 +20,7 @@ Three features, each held to the **no runtime** rule ([roadmap](../roadmap.md#ou
 - Goroutines, channels, `select`. Out of scope by design: a userland scheduler is a runtime. Async stays `async`/`await` + Promises.
 - `reflect`, `json.Decoder`/`Encoder` streams, `json.Number`, and typed error values (`*json.SyntaxError`, …).
 - Cyclic object graph serialization.
-- *(Originally also `json.Marshaler`/`Unmarshaler` and the `,string` tag option; both were added in Task 1.7.)*
+- _(Originally also `json.Marshaler`/`Unmarshaler` and the `,string` tag option; both were added in Task 1.7.)_
 - Auto-vectorization of scalar code. SIMD is opt-in through `gofront/simd`.
 - `encoding/json` inside `wasm`/`both` packages. It gets a targeted diagnostic in 1.7.0. Asset and config loading lives in `js` packages already (simplefps `assets`).
 
@@ -35,19 +35,19 @@ Three features, each held to the **no runtime** rule ([roadmap](../roadmap.md#ou
 
 ## Findings from review (why the plan changed)
 
-| Finding | Evidence | Plan impact |
-|---|---|---|
-| Struct tags are parsed and **discarded** | [`src/parser/types.js#L192-L193`](../../src/parser/types.js#L192-L193) consumes the backtick string and drops it | Phase 1 starts in the parser, not the typechecker |
-| Embedded field tag disambiguation in parser | [`src/parser/types.js#L181`](../../src/parser/types.js#L181) expects `;` or `}` for embedded fields; backtick tags cause syntax error | Parser must recognize optional tags on embedded types (`Base `json:"base"`` and `*Base`) |
-| Go multi-value returns already lower to JS arrays | `a, b := f()` emits `let [a, b] = f();` | TS tuple `[A, B]` → Go `(A, B)` is almost free; makes React/Preact hooks usable without wrapper code |
-| `.d.ts` parser has no tuple support | [`src/dts-parser.js`](../../src/dts-parser.js) handles `T[]` only; tuples fall back to `any` | Phase 2 task |
-| `dts-parser` drops variadic flag on function types | [`src/dts-parser.js#L409`](../../src/dts-parser.js#L409), [`L553`](../../src/dts-parser.js#L553) maps types but ignores `p.variadic` | Fixed in `_parseFuncDecl` and `_parseMemberDefault` so `...children: any[]` becomes `variadic: true` |
-| Preact hooks live in `preact/hooks` subpath | Preact npm package separates root from hooks | Vendor bundler and config must support `preact/hooks` subpath and globals mapping |
-| `v128` valtype byte exists, no SIMD opcodes | [`src/backend/wasm/encode.js#L103`](../../src/backend/wasm/encode.js#L103) | SIMD needs `0xFD`-prefix with unsigned LEB128 sub-opcodes (e.g. `f32x4.add` is `0xFD 0xE4 0x01`, not 2 bytes) |
-| Binaryen feature flag missing SIMD bit | [`src/backend/wasm/optimize.js#L28`](../../src/backend/wasm/optimize.js#L28) bitmask is 2006 | Bitmask updated to 2014 (`+ 8`), `--enable-simd` added to CLI args and bench script |
-| Auto-vectorizing `Vec3` is not realistic | `Vec3` is 3-wide, lives in WasmGC structs | Explicit `simd.F32x4` type instead; go/no-go gate |
-| CDN imports break offline CI | Playwright runs headless in CI | Vendor Preact via `gofront vendor` ([`src/vendor.js`](../../src/vendor.js)) |
-| Channels conflict with the stated principle | [go-compatibility.md#L27](../../docs/go-compatibility.md#L27) | Dropped from the plan |
+| Finding                                            | Evidence                                                                                                                              | Plan impact                                                                                                   |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Struct tags are parsed and **discarded**           | [`src/parser/types.js#L192-L193`](../../src/parser/types.js#L192-L193) consumes the backtick string and drops it                      | Phase 1 starts in the parser, not the typechecker                                                             |
+| Embedded field tag disambiguation in parser        | [`src/parser/types.js#L181`](../../src/parser/types.js#L181) expects `;` or `}` for embedded fields; backtick tags cause syntax error | Parser must recognize optional tags on embedded types (`Base `json:"base"`` and `*Base`)                      |
+| Go multi-value returns already lower to JS arrays  | `a, b := f()` emits `let [a, b] = f();`                                                                                               | TS tuple `[A, B]` → Go `(A, B)` is almost free; makes React/Preact hooks usable without wrapper code          |
+| `.d.ts` parser has no tuple support                | [`src/dts-parser.js`](../../src/dts-parser.js) handles `T[]` only; tuples fall back to `any`                                          | Phase 2 task                                                                                                  |
+| `dts-parser` drops variadic flag on function types | [`src/dts-parser.js#L409`](../../src/dts-parser.js#L409), [`L553`](../../src/dts-parser.js#L553) maps types but ignores `p.variadic`  | Fixed in `_parseFuncDecl` and `_parseMemberDefault` so `...children: any[]` becomes `variadic: true`          |
+| Preact hooks live in `preact/hooks` subpath        | Preact npm package separates root from hooks                                                                                          | Vendor bundler and config must support `preact/hooks` subpath and globals mapping                             |
+| `v128` valtype byte exists, no SIMD opcodes        | [`src/backend/wasm/encode.js#L103`](../../src/backend/wasm/encode.js#L103)                                                            | SIMD needs `0xFD`-prefix with unsigned LEB128 sub-opcodes (e.g. `f32x4.add` is `0xFD 0xE4 0x01`, not 2 bytes) |
+| Binaryen feature flag missing SIMD bit             | [`src/backend/wasm/optimize.js#L28`](../../src/backend/wasm/optimize.js#L28) bitmask is 2006                                          | Bitmask updated to 2014 (`+ 8`), `--enable-simd` added to CLI args and bench script                           |
+| Auto-vectorizing `Vec3` is not realistic           | `Vec3` is 3-wide, lives in WasmGC structs                                                                                             | Explicit `simd.F32x4` type instead; go/no-go gate                                                             |
+| CDN imports break offline CI                       | Playwright runs headless in CI                                                                                                        | Vendor Preact via `gofront vendor` ([`src/vendor.js`](../../src/vendor.js))                                   |
+| Channels conflict with the stated principle        | [go-compatibility.md#L27](../../docs/go-compatibility.md#L27)                                                                         | Dropped from the plan                                                                                         |
 
 ---
 
@@ -114,6 +114,7 @@ Three features, each held to the **no runtime** rule ([roadmap](../roadmap.md#ou
   - Update `src/vendor.js` and `gofront` vendor config to support subpath exports (e.g. `preact/hooks`) and named export global assignments (`window.h = preact.h`, `window.useState = preact_hooks.useState`).
   - Provide checked-in `preact.d.ts` with ambient or module declarations for Preact and hooks.
 - **Example:** `example/preact` reimplements TodoMVC (sharing `test/e2e/selectors.js`) with function components:
+
   ```go
   func TodoItem(p TodoProps) VNode {
       editing, setEditing := useState(false)
@@ -188,16 +189,16 @@ Octree node queries (`RayQueryLocal` and `IntersectRayAABB`) dominate runtime ov
 
 ## Risks
 
-| Risk | Mitigation |
-|---|---|
+| Risk                                                                              | Mitigation                                                                                                                        |
+| --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | JSON edge cases diverge from Go (escaping, float formatting, embedding conflicts) | Golden files generated by real Go; float32 formatting uses shortest-round-trip digits and the `encoding/json` exponent thresholds |
-| `BigInt` serialization crash in JS | Codegen explicitly serializes 64-bit integers to JSON numeric literals without calling raw `JSON.stringify(bigint)` |
-| `RawMessage` base64 corruption | Generated encoder explicitly treats `RawMessage` as raw JSON bytes, bypassing standard `[]byte` base64 formatting |
-| Preact submodule export incompatibility | `src/vendor.js` supports entry points and explicit named exports mapping to window globals |
-| Tuple mapping allows invalid Go assignments | Typechecker enforces multi-value destination count matching Go compile rules |
-| WASM SIMD LEB128 encoding bugs | Explicit tests for multi-byte sub-opcodes (> 127) against Binaryen validation |
-| SIMD gain too small for 3-wide data | Go/no-go gate (≥ 1.3×); promotion moves to a later release (now v1.8.0) without blocking JSON/Preact |
-| Sentrux architectural layering violation | Standalone stdlib modules located under `src/backend/` importing only allowed layer dependencies |
+| `BigInt` serialization crash in JS                                                | Codegen explicitly serializes 64-bit integers to JSON numeric literals without calling raw `JSON.stringify(bigint)`               |
+| `RawMessage` base64 corruption                                                    | Generated encoder explicitly treats `RawMessage` as raw JSON bytes, bypassing standard `[]byte` base64 formatting                 |
+| Preact submodule export incompatibility                                           | `src/vendor.js` supports entry points and explicit named exports mapping to window globals                                        |
+| Tuple mapping allows invalid Go assignments                                       | Typechecker enforces multi-value destination count matching Go compile rules                                                      |
+| WASM SIMD LEB128 encoding bugs                                                    | Explicit tests for multi-byte sub-opcodes (> 127) against Binaryen validation                                                     |
+| SIMD gain too small for 3-wide data                                               | Go/no-go gate (≥ 1.3×); promotion moves to a later release (now v1.8.0) without blocking JSON/Preact                              |
+| Sentrux architectural layering violation                                          | Standalone stdlib modules located under `src/backend/` importing only allowed layer dependencies                                  |
 
 ---
 
