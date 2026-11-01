@@ -172,7 +172,7 @@ func Index(s, substr string) int { /* Go body: the specification */ }
 | `src/typechecker/stdlib/{core,extended}.js` | 2,289 lines | ≤ 1,500 |
 | `src/backend/js/stdlib/` | 4,003 lines | ≤ 2,400 |
 | `npm run bench`, `test/perf/zero-alloc.js`, `test/perf/bce-mathx.js` | `9e22f74` numbers | unchanged (±3%) after every phase |
-| JS `int64` add/multiply loop vs the same loop on `int`, 10⁷ iterations (`test/perf/int64-bench.js`) | ≈20× (micro-benchmark, Verified Gaps) | ≤ 25× (Task 1.6) |
+| JS `int64` add/multiply loop vs the same loop on `int`, 10⁷ iterations (`test/perf/int64-bench.js`) | 14.3× (measured in Task 1.6) | ≤ 25× (Task 1.6) |
 
 ### 3. Edge Cases & Error Handling
 
@@ -223,37 +223,37 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
 
 *Added 2026-10-29 from the follow-ups review; ordered bottom-up 2026-11-01 so `npm test` stays green after every task commit. Phases 4–12 compile Go that computes in `int64`/`uint64` (pdqsort's `xorshift`, `time.Time.unixNano`, `strconv` limits, `bits.Mul64`, `rand.Int63`) or copies `T` values (`slices.Clone`, `Insert`, `Compact`); JS gets both wrong today (Verified Gaps → 64-bit integers in JS, Generic value copies in JS). Takes over the v1.8.0 follow-up-fixes deferred row "JS-only representation limits". Design: Approach → 64-bit integers are BigInt in JS. Every case runs through `assertProgramOutput` (`both` vs WASM) and additionally as a `js` package.*
 
-- [ ] **Task 1.1 — Erased generics: value copies and 64-bit type-parameter plumbing**
+- [x] **Task 1.1 — Erased generics: value copies and 64-bit type-parameter plumbing**
   - Files: `src/backend/js/expressions.js` (`_isAddressableExpr`, `_typeArgFactories`, `_typeParamClone`, conversions to `T`), `src/backend/js/statements.js` (`_rangeValueExpr`, assignment), `src/backend/js/type-info.js`
   - Do: treat value identifiers whose type is `typeParam` as addressable in `_isAddressableExpr` (`!e._isTypeRef || e._type?.kind === "typeParam"`) and clone `T` values with `_typeParamClone` wherever Go copies them (`range` value variables in `_rangeValueExpr`, assignment, `append` arguments, call arguments and results). Thread per-type-parameter 64-bit metadata through `_typeArgFactories` and `__tconv` so `var z T`, untyped constants in `T` context (`s + 1`), `T(x)` and arithmetic on `T` operands know whether `T` is instantiated with `int64`/`uint64` (`T` stays a Number for every other integer type).
   - Test: `test/unit/types/generics.test.js` — `Clone[T any]` over `[]P{{1}}` appending each `range` value, then `b[0].V = 9` → `[{1}] [{9}]`; `func (l List[T]) Map(f func(T) T) (out List[T])` with a callback doing `p.Val *= 10` on a `Pair` leaves the source `[{a 1} {b 2}]`.
   - Done when: value-copy cases match Go on `js`, `both` and `wasm` and `npm test` is green.
 
-- [ ] **Task 1.2 — BigInt through the JS runtime: fmt, `any`, map keys, JSON**
+- [x] **Task 1.2 — BigInt through the JS runtime: fmt, `any`, map keys, JSON**
   - Files: `src/backend/js/fmt-runtime.js`, `src/backend/js/runtime.js` (key encoding, interface boxing, `__json_*`), `src/backend/js/type-info.js` (basic-type checks in type switches and assertions)
   - Do: work through the audit list in Edge Cases so the runtime accepts BigInt before codegen flips. fmt verbs (`%d %x %X %o %O %b %c %q %U %v`, width and flags) and `print`/`println` accept BigInt; 64-bit map keys and struct keys with 64-bit fields encode without `JSON.stringify` throwing and range back as BigInt; `encoding/json` writes all digits of 64-bit integers and `__json_int_decode` decodes `int64`/`uint64` into BigInt with Go's range errors.
   - Test: `test/unit/builtins/fmt-verbs.test.js` and `test/unit/builtins/json.test.js` unit checks for BigInt formatting, key encoding and JSON encode/decode helpers.
   - Done when: helpers accept BigInt cleanly and `npm test` is green.
 
-- [ ] **Task 1.3 — `int64`/`uint64` as BigInt in JS codegen**
+- [x] **Task 1.3 — `int64`/`uint64` as BigInt in JS codegen**
   - Files: `src/backend/js/expressions.js` (`_genStrictBinary`, `_genPrimitiveConversion`, `_typeNameCheckExpr`, constant and zero-value emission, `time` duration constants, `_genSelectorCall`), `src/backend/js/statements.js` (`++`/`--`, compound assignment, `for` counters), `src/backend/js/runtime.js` (`HELPER_SHIFT`, `__durationRound`, `__timeParseDuration`, `__binary_le`, `__binary_be`, `__binary_read`)
   - Do: every value whose underlying type is `int64`/`uint64` is a BigInt in all JS output; `int`, `uint`, `uintptr` stay Numbers. Constants and zero values emit `5n`/`0n` (no `exceeds JS Number precision` warning for constants typed `int64`/`uint64`); `+ - * & | ^ &^` wrap with `BigInt.asIntN/asUintN(64, …)`; `/` and `%` keep the zero-divisor panic and wrap `MinInt64 / -1`; shifts take `BigInt(count)` and keep the negative-count panic; unary `-` and `^` wrap, unary `+` emits the operand. Conversions: into 64-bit `BigInt.asIntN/asUintN(64, BigInt(x))`, floats truncated first with `NaN`/`±Inf` mapped as in Edge Cases; out of 64-bit `Number(BigInt.asIntN/asUintN(w, x))` for narrower integers and `Number(x)` for `int`, `uint` and floats. Type switches and assertions (`_typeNameCheckExpr`) match `case int64`/`case uint64` for a BigInt and never `case int`. 64-bit indexes, slice bounds, `make` lengths and shift counts on Number operands go through `Number(…)`. Until Tasks 1.4–1.5 update the remaining stdlib shims, `_genSelectorCall` coerces any `Number` returned for an `int64`/`uint64` stdlib call to `BigInt`.
   - Test: `test/unit/builtins/operators.test.js` — `var a int64 = 3037000500; a*a` → `-9223372036709301616`; `var t int64 = 1577934245000000000; t += 1; t, t%1000` → `1577934245000000001 1`; the `xorshift uint64` of `stdlib/sort/sort.go` from seed 40, three calls → `43290790440`, `9226231805932350012`, `13632027486628815208`; `var u uint64 = 5; ^u, -u` → `18446744073709551610 18446744073709551611` (v1.8.0 deferred row); `var m uint64 = 1<<64 - 1` → `18446744073709551615`; `a, b := int64(math.MinInt64), int64(-1); a / b` → `-9223372036854775808`; `int64(1) / z` (`z` zero) → recovered `integer divide by zero`; `int64(1) << n` with `n := -1` → recovered `negative shift amount`; `xs[int64(1)]` indexes; `x := int64(1<<40 + 5); int32(x)` → `5`; `y := int64(1<<53 + 1); float64(y)` → `9.007199254740992e+15`; `test/unit/types/generics.test.js` — `func Sum[T ~int | ~int64](xs []T) T { var s T; for _, x := range xs { s += x + 1 }; return s }` over `[]int64{1 << 60, 1}` → `1152921504606846979`, over `[]int{1, 2}` → `5`; `test/unit/builtins/fmt-verbs.test.js` — `a, b := int64(math.MaxInt64), uint64(math.MaxUint64); fmt.Printf("%d|%x|%22d|%v\n", a, a, b, b)` → `9223372036854775807|7fffffffffffffff|  18446744073709551615|18446744073709551615`; `fmt.Println(any(uint64(1 << 63)))` → `9223372036854775808`; `test/unit/wasm/maps.test.js` — `for k := range map[int64]string{1 << 60: "a"} { fmt.Println(k + 1) }` → `1152921504606846977`, `len(map[struct{ A int64 }]int{{1}: 1, {2}: 2})` → `2`; `test/unit/builtins/json.test.js` — `json.Marshal(struct{ N int64 }{math.MaxInt64})` → `{"N":9223372036854775807}` and back; `test/unit/wasm/interfaces.test.js` — a type switch on `any(int64(1))` with `case int:` before `case int64:` → `int64`.
   - Done when: every case matches Go on `js`, `both` and `wasm`; existing `int` tests and `npm run bench` unchanged.
 
-- [ ] **Task 1.4 — 64-bit `time` and `strconv` JS shims and the WASM facade**
+- [x] **Task 1.4 — 64-bit `time` and `strconv` JS shims and the WASM facade**
   - Files: `src/backend/js/stdlib/time.js`, `src/backend/js/stdlib/strconv.js`, `src/backend/wasm/boundary.js`
   - Do: `time.Duration` and `time.Time` 64-bit methods (`Unix`, `UnixMilli`, `UnixNano`, `Sub`, `Since`, `Microseconds`, `Milliseconds`, `Truncate`, `Abs`) use BigInt; `time.Sleep`, timers and `Date` conversions go through `Number(…)`. `strconv.ParseInt` and `ParseUint` return the BigInt from `__strconv_parse_int`/`__strconv_parse_uint` without wrapping in `Number(…)`. The WASM facade passes `int64`/`uint64` as `i64` (BigInt in the JS API) instead of `f64`; `int` and `uint` keep `f64`.
   - Test: `test/unit/builtins/stdlib.test.js` — `(3 * time.Second).String()` → `3s`, `time.Duration(1 << 62)` prints Go's text, `time.Since(t) >= 0`, `strconv.ParseInt("9223372036854775807", 10, 64)` exact, `binary.LittleEndian.Uint64` of eight `0xff` bytes → `18446744073709551615`; `test/unit/wasm/boundary.test.js` — a wasm package exporting `func Inc(x int64) int64 { return x + 1 }` called from a `js` main with `1 << 60` → `1152921504606846977`; existing `int` boundary tests unchanged.
   - Done when: cases pass and `npm run test:e2e` is green (the examples use `time.Duration`).
 
-- [ ] **Task 1.5 — 64-bit `bits`, `math` and `rand` JS shims**
+- [x] **Task 1.5 — 64-bit `bits`, `math` and `rand` JS shims**
   - Files: `src/backend/js/stdlib/bits.js`, `src/backend/js/stdlib/math.js`, `src/backend/js/stdlib/rand.js`
   - Do: the `…64` functions in `bits.js` (`Add64`, `Sub64`, `Mul64`, `Div64`, `Rem64`, `RotateLeft64`, `Reverse64`, `ReverseBytes64`) return BigInt while `Add`, `Sub`, `Mul`, `Div`, `Rem`, `RotateLeft`, `Reverse`, `ReverseBytes` keep returning `Number` (`uint`); `math.Float64bits` returns `new BigUint64Array(b)[0]` directly (used by `stdlib/math/extra.go`); `rand.Int63`, `Int63n` and `Uint64` take and return BigInt.
   - Test: `test/unit/builtins/stdlib.test.js` — `bits.OnesCount64(1<<63 | 1)` → `2`, `bits.Mul64(1<<32, 1<<32)` → `1 0`, `math.Float64bits(1.0)` as `uint64` BigInt, `math.FMA` unchanged, `rand.Int63()` and `rand.Int63n(1 << 40)`.
   - Done when: cases pass on `js`, `both` and `wasm` and `npm test` is green.
 
-- [ ] **Task 1.6 — Docs and the `int64` cost bound**
+- [x] **Task 1.6 — Docs and the `int64` cost bound**
   - Files: `docs/language-support.md`, `docs/go-compatibility.md`, `docs/hybrid-wasm.md`
   - Do: say that `int64`/`uint64` are exact on every target and are BigInt in JS output and across the WASM facade, that `int`/`uint` stay JS numbers exact up to 2⁵³, and that hot loops should use `int`; update the boundary type table (`int64`, `uint64`, `time.Duration` cross as BigInt). Add new `test/perf/int64-bench.js` (an `int64` add/multiply loop against the same loop on `int`, 10⁷ iterations) and record its ratio in [§2](#2-invariants--safety-bounds).
   - Test: `test/unit/compiler/plan-paths.test.js` and the `language-support.md` fixture rows pass; `node test/perf/int64-bench.js` prints the ratio.

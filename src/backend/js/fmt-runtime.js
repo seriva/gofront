@@ -35,7 +35,7 @@ var __fmtu = __fmtu || (() => {
     }
     return out + q;
   };
-  const validRune = (c) => c >= 0 && c <= 0x10ffff && !(c >= 0xd800 && c < 0xe000);
+  const validRune = (c) => typeof c === "number" && c >= 0 && c <= 0x10ffff && !(c >= 0xd800 && c < 0xe000);
   const runeStr = (c) => String.fromCodePoint(validRune(c) ? c : 0xfffd);
   const quoteRune = (c, ascii) => quote(runeStr(c), ascii, "'");
   const toBig = (n) => (typeof n === "bigint" ? n : BigInt(Math.trunc(n)));
@@ -262,12 +262,25 @@ var __fmtu = __fmtu || (() => {
   const sortedEntries = (m, kd) => {
     const es = m instanceof Map
       ? Array.from(m.entries())
-      : Object.keys(m).map((k) => [k.charCodeAt(0) === 1 && typeof __kd === "function" ? __kd(k) : isNumKey(kd) || (!kd && /^-?\d+$/.test(k)) ? Number(k) : k, m[k]]);
+      : Object.keys(m).map((k) => {
+          if (k.charCodeAt(0) === 1 && typeof __kd === "function") return [__kd(k), m[k]];
+          const bkd = baseOf(kd);
+          if (bkd?.k === "b" && (bkd.n === "int64" || bkd.n === "uint64")) return [BigInt(k), m[k]];
+          if (isNumKey(kd)) return [Number(k), m[k]];
+          if (!kd && /^-?\d+$/.test(k)) {
+            try {
+              const b = BigInt(k);
+              return [b > 9007199254740991n || b < -9007199254740991n ? b : Number(k), m[k]];
+            } catch (_) { return [Number(k), m[k]]; }
+          }
+          return [k, m[k]];
+        });
     const raw = (k) => (k !== null && typeof k === "object" && typeof k.__gfUnbox === "function" ? k.__gfUnbox() : k);
     return es.sort(([a], [b]) => {
       if (a !== null && b !== null && typeof a === "object" && typeof b === "object" && typeof __kcmp === "function" && !a.__gfUnbox) return __kcmp(a, b);
       const x = raw(a), y = raw(b);
       if (typeof x === "number" && typeof y === "number") return x - y;
+      if (typeof x === "bigint" && typeof y === "bigint") return x < y ? -1 : x > y ? 1 : 0;
       const p = String(x), q = String(y);
       return p < q ? -1 : p > q ? 1 : 0;
     });
@@ -326,7 +339,7 @@ var __fmtu = __fmtu || (() => {
   // string "k", a type descriptor always does.
   const both = (t, s) => (t && s ? { $both: 1, t, s } : (t ?? s));
   const split = (fd) => (fd?.$both ? [fd.t, fd.s] : typeof fd?.k === "string" ? [fd, null] : [null, fd]);
-  return { both, split, runes, pad, quote, quoteRune, runeStr, validRune, fmtInt, fmtFloat, utf8, fmtHex, baseOf, isFloatN, isComplexN, typeName, descOf, sortedEntries, gs, PRINTABLE, hex, keys, isNumKey };
+  return { both, split, runes, pad, quote, quoteRune, runeStr, validRune, toBig, fmtInt, fmtFloat, utf8, fmtHex, baseOf, isFloatN, isComplexN, typeName, descOf, sortedEntries, gs, PRINTABLE, hex, keys, isNumKey };
 })();`;
 
 // The format-string scanner and per-verb dispatch, spliced into `__sprintf`
@@ -369,18 +382,26 @@ export const HELPER_FMT_LOOP = String.raw`
         return U.fmtInt(v, base, verb === "X", verb === "O", fl, wid, hasWid, prec, hasPrec);
       }
       case "v": return isFloatV ? U.fmtFloat(v, "g", fl, wid, hasWid, prec, hasPrec, bn === "float32") : U.fmtInt(v, 10, false, false, fl, wid, hasWid, prec, hasPrec);
-      case "c": return U.pad(U.runeStr(Number(v)), fl, wid);
-      case "q": return U.pad(U.quoteRune(Number(v), fl.plus), fl, wid);
+      case "c": {
+        const b = U.toBig(v);
+        const c = b >= 0n && b <= 0x10ffffn ? Number(b) : -1;
+        return U.pad(U.runeStr(c), fl, wid);
+      }
+      case "q": {
+        const b = U.toBig(v);
+        const c = b >= 0n && b <= 0x10ffffn ? Number(b) : -1;
+        return U.pad(U.quoteRune(c, fl.plus), fl, wid);
+      }
       case "U": {
-        const c = Number(v);
-        // A negative value prints as its 64-bit two's complement, as Go's uint64 conversion.
-        const hx = c < 0 ? BigInt.asUintN(64, BigInt(c)).toString(16) : U.hex(c, 1);
+        const b = U.toBig(v);
+        const hx = b < 0n ? BigInt.asUintN(64, b).toString(16) : b.toString(16);
         let s = "U+" + hx.toUpperCase().padStart(Math.max(4, hasPrec ? prec : 0), "0");
+        const c = b >= 0n && b <= 0x10ffffn ? Number(b) : -1;
         if (fl.sharp && U.validRune(c) && U.PRINTABLE.test(String.fromCodePoint(c))) s += " '" + String.fromCodePoint(c) + "'";
         return U.pad(s, fl, wid);
       }
       case "e": case "E": case "f": case "F": case "g": case "G":
-        if (isIntT) return null;
+        if (isIntT || typeof v === "bigint") return null;
         return U.fmtFloat(v, verb, fl, wid, hasWid, prec, hasPrec, bn === "float32");
       default: return null;
     }

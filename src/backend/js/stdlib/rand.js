@@ -6,14 +6,18 @@ const RAND_DISPATCH = {
 	Intn: (a) =>
 		`((n) => { if (n <= 0) throw new Error("invalid argument to Intn"); return Math.floor(Math.random() * n); })(${a[0]})`,
 	Int63n: (a) =>
-		`((n) => { if (n <= 0) throw new Error("invalid argument to Int63n"); return Math.floor(Math.random() * n); })(${a[0]})`,
+		`((n) => { const nB = BigInt(n); if (nB <= 0n) throw new Error("invalid argument to Int63n"); const rnd = (BigInt(Math.floor(Math.random() * 0x80000000)) << 32n) | BigInt(Math.floor(Math.random() * 0x100000000)); return rnd % nB; })(${a[0]})`,
 	Int31n: (a) =>
 		`((n) => { if (n <= 0) throw new Error("invalid argument to Int31n"); return Math.floor(Math.random() * n); })(${a[0]})`,
 	Float64: () => "Math.random()",
 	Float32: () => "Math.random()",
 	Int: () => "Math.floor(Math.random() * 2147483647)",
 	Int31: () => "Math.floor(Math.random() * 2147483647)",
-	Int63: () => "Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)",
+	Int63: () =>
+		"((BigInt(Math.floor(Math.random() * 0x80000000)) << 32n) | BigInt(Math.floor(Math.random() * 0x100000000)))",
+	Uint32: () => "(Math.floor(Math.random() * 0x100000000) >>> 0)",
+	Uint64: () =>
+		"BigInt.asUintN(64, (BigInt(Math.floor(Math.random() * 0x100000000)) << 32n) | BigInt(Math.floor(Math.random() * 0x100000000)))",
 	Seed: () => "(void 0)",
 	Shuffle: (a) =>
 		`((n, f) => { if (n < 0) throw new Error("invalid argument to Shuffle"); for (let i = n - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); f(i, j); } })(${a[0]}, ${a[1]})`,

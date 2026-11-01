@@ -11,6 +11,9 @@ import {
 	BROWSER_GLOBALS,
 	compositeLitIndices,
 	ERROR,
+	is64BitInt,
+	is64BitSigned,
+	is64BitUnsigned,
 	isAny,
 	isComplex,
 	isTypedArraySlice,
@@ -260,13 +263,13 @@ const NS_CONSTANTS = {
 		MinInt16: "-32768",
 		MaxInt32: "2147483647",
 		MinInt32: "-2147483648",
-		MaxInt64: "9223372036854775807",
-		MinInt64: "-9223372036854775808",
+		MaxInt64: "9223372036854775807n",
+		MinInt64: "-9223372036854775808n",
 		MaxUint8: "255",
 		MaxUint16: "65535",
 		MaxUint32: "4294967295",
 		MaxUint: "18446744073709551615",
-		MaxUint64: "18446744073709551615",
+		MaxUint64: "18446744073709551615n",
 	},
 	strconv: {
 		ErrSyntax: "__strconv_err_syntax",
@@ -315,12 +318,12 @@ const NS_CONSTANTS = {
 		Stdin: "__os_stdin",
 	},
 	time: {
-		Nanosecond: "1",
-		Microsecond: "1000",
-		Millisecond: "1000000",
-		Second: "1000000000",
-		Minute: "60000000000",
-		Hour: "3600000000000",
+		Nanosecond: "1n",
+		Microsecond: "1000n",
+		Millisecond: "1000000n",
+		Second: "1000000000n",
+		Minute: "60000000000n",
+		Hour: "3600000000000n",
 		RFC3339: '"2006-01-02T15:04:05Z07:00"',
 		RFC3339Nano: '"2006-01-02T15:04:05.999999999Z07:00"',
 		DateOnly: '"2006-01-02"',
@@ -413,6 +416,7 @@ const SHARED_ZERO_FACTORIES = {
 	0: "__z0",
 	'""': "__zs",
 	false: "__zf",
+	"0n": "__z64",
 };
 
 // Zero-value JS literals for basic Go types.
@@ -422,11 +426,11 @@ const ZERO_FOR_BASIC = {
 	int8: "0",
 	int16: "0",
 	int32: "0",
-	int64: "0",
+	int64: "0n",
 	uint8: "0",
 	uint16: "0",
 	uint32: "0",
-	uint64: "0",
+	uint64: "0n",
 	uintptr: "0",
 	float32: "0",
 	float64: "0",
@@ -439,7 +443,11 @@ const ZERO_FOR_BASIC = {
 };
 
 // Set of all numeric type names (for type-assertion codegen).
-const TYPEOF_NUMBER_NAMES = new Set([...INT_TYPE_NAMES, "float32", "float64"]);
+const TYPEOF_NUMBER_NAMES = new Set([
+	...[...INT_TYPE_NAMES].filter((n) => n !== "int64" && n !== "uint64"),
+	"float32",
+	"float64",
+]);
 
 // Builtin function codegen — keyed by builtin name, value is (self, expr) => string.
 const BUILTIN_GEN = {
@@ -521,13 +529,25 @@ const BUILTIN_GEN = {
 // A type parameter may be a string or a number: pick the form at run time
 // (Math.min/max keeps NaN propagation and -0 for floats).
 function genMinMax(s, e, fn, cmp) {
-	const args = e.args.map((a) => s.genExpr(a));
+	const is64 = s._is64BitInt(e._type);
+	const args = e.args.map((a) => {
+		const js = s.genExpr(a);
+		if (
+			is64 &&
+			a._type?.kind === "untyped" &&
+			!js.endsWith("n") &&
+			/^-?\d+$/.test(js)
+		) {
+			return `${js}n`;
+		}
+		return js;
+	});
 	const fold = (xs) => `${xs}.reduce((a, b) => (b ${cmp} a ? b : a))`;
 	if (args.length === 1) return args[0];
 	if (e._type?.kind === "typeParam")
-		return `((...v) => (typeof v[0] === "string" ? ${fold("v")} : Math.${fn}(...v)))(${args.join(", ")})`;
-	if (!s._isStringExprType(e._type)) return `Math.${fn}(${args.join(", ")})`;
-	return fold(`[${args.join(", ")}]`);
+		return `((...v) => (typeof v[0] === "string" || typeof v[0] === "bigint" ? ${fold("v")} : Math.${fn}(...v)))(${args.join(", ")})`;
+	if (is64 || s._isStringExprType(e._type)) return fold(`[${args.join(", ")}]`);
+	return `Math.${fn}(${args.join(", ")})`;
 }
 
 // Expression kinds whose folded constant value (`_const`, attached by the
@@ -649,6 +669,12 @@ export const expressionGenMethods = {
 		switch (expr.kind) {
 			case "BasicLit":
 				if (expr.litKind === "STRING") return JSON.stringify(expr.value);
+				if (
+					(this._is64BitInt(expr._type) || expr._is64Bit) &&
+					(expr.litKind === "INT" || expr._const?.k === "INT")
+				) {
+					return `${expr.value}n`;
+				}
 				if (expr._const?.k === "INT")
 					this._warnConstPrecision(expr._const, expr);
 				return expr.value; // int, float, bool, nil(null)
@@ -672,6 +698,17 @@ export const expressionGenMethods = {
 		}
 	},
 
+	_gen64BitFoldedConst(expr, val) {
+		if (
+			(this._is64BitInt(expr._type) || expr._is64Bit) &&
+			(val.k === "INT" || expr._intConst)
+		) {
+			const n = constIntValue(val);
+			if (n !== null) return n < 0n ? `(${n}n)` : `${n}n`;
+		}
+		return null;
+	},
+
 	// The literal for a folded constant expression (`1 << 40` →
 	// `1099511627776`), or null.  Integers outside ±2⁵³ emit the nearest
 	// Number and a precision warning.
@@ -686,6 +723,8 @@ export const expressionGenMethods = {
 			return null;
 		}
 		if (!FOLDED_CONST_KINDS.has(expr.kind) || isSignedLit(expr)) return null;
+		const lit64 = this._gen64BitFoldedConst(expr, val);
+		if (lit64 !== null) return lit64;
 		if (val.k === "INT" || expr._intConst) this._warnConstPrecision(val, expr);
 		return CONST_LITS[val.k]?.(val.v) ?? null;
 	},
@@ -694,6 +733,7 @@ export const expressionGenMethods = {
 	// per node per generate run: some forms generate the same node more than
 	// once, and cached ASTs are generated again by later compiles).
 	_warnConstPrecision(val, expr) {
+		if (this._is64BitInt(expr?._type) || expr?._is64Bit) return;
 		const i = constIntValue(val);
 		if (i === null || (i <= JS_SAFE_INT && i >= -JS_SAFE_INT)) return;
 		if (BigInt(Number(i)) !== i && !this._precisionWarned.has(expr)) {
@@ -857,7 +897,9 @@ export const expressionGenMethods = {
 	_isAddressableExpr(e) {
 		switch (e?.kind) {
 			case "Ident":
-				return e.name !== "_" && !e._isTypeRef;
+				return (
+					e.name !== "_" && (!e._isTypeRef || e._type?.kind === "typeParam")
+				);
 			case "SelectorExpr":
 				return !e._isMethodValue && !e._isMethodExpr;
 			case "IndexExpr":
@@ -1046,6 +1088,17 @@ export const expressionGenMethods = {
 			return inner;
 		}
 		const code = this.genExpr(expr.operand);
+		if (this._is64BitInt(expr._type) || expr._is64Bit) {
+			let operandCode = code;
+			if (!operandCode.endsWith("n") && /^-?\d+$/.test(operandCode)) {
+				operandCode = `${operandCode}n`;
+			}
+			if (op === "+") return operandCode;
+			const wrap = this._is64BitUnsigned(expr._type)
+				? "BigInt.asUintN"
+				: "BigInt.asIntN";
+			if (op === "-" || op === "~") return `${wrap}(64, ${op}(${operandCode}))`;
+		}
 		const wrap = this.strict
 			? SMALL_UNSIGNED_WRAP[this._typeName(expr._type)]
 			: null;
@@ -1382,11 +1435,12 @@ export const expressionGenMethods = {
 		const base = wrapField
 			? `${this.genExpr(expr.expr)}.${wrapField}`
 			: this.genExpr(expr.expr);
-		const idx = this.genExpr(expr.index);
+		let idx = this.genExpr(expr.index);
 		if (expr._mapValueType) {
 			if (!expr._lvalue) return this._genMapIndexExpr(expr, base, idx);
 			return `${this._genMapWriteBase(base)}[${idx}]`;
 		}
+		if (this._is64BitInt(expr.index?._type)) idx = `Number(${idx})`;
 		const checked = this._genStrictIndex(expr, base, idx);
 		if (checked) return checked;
 		if (this._isStringExprType(exprType) && !expr._lvalue)
@@ -1442,8 +1496,16 @@ export const expressionGenMethods = {
 
 	_genSliceExpr(expr) {
 		const base = this.genExpr(expr.expr);
-		const lo = expr.low ? this.genExpr(expr.low) : "0";
-		const hi = expr.high ? this.genExpr(expr.high) : "undefined";
+		const lo = expr.low
+			? this._is64BitInt(expr.low._type)
+				? `Number(${this.genExpr(expr.low)})`
+				: this.genExpr(expr.low)
+			: "0";
+		const hi = expr.high
+			? this._is64BitInt(expr.high._type)
+				? `Number(${this.genExpr(expr.high)})`
+				: this.genExpr(expr.high)
+			: "undefined";
 		if (this._isStringExprType(expr.expr._type))
 			return expr.high ? `${base}.slice(${lo}, ${hi})` : `${base}.slice(${lo})`;
 		// `b[:]`, `b[0:]` and `a[:]` have the operand's length and capacity:
@@ -1456,7 +1518,9 @@ export const expressionGenMethods = {
 		// the result stays within `len(x)`; typed arrays always share.
 		if (expr._selfReslice && !isTypedArraySlice(expr.expr._type))
 			return `__reslice(${base}, ${lo}, ${hi})`;
-		const max = expr.max ? `, ${this.genExpr(expr.max)}` : "";
+		const max = expr.max
+			? `, ${this._is64BitInt(expr.max._type) ? `Number(${this.genExpr(expr.max)})` : this.genExpr(expr.max)}`
+			: "";
 		return `__slice(${base}, ${lo}, ${hi}${max})`;
 	},
 
@@ -1512,20 +1576,27 @@ export const expressionGenMethods = {
 		return cls && this.structNames.has(cls) ? cls : name;
 	},
 
+	_simdCheckExpr(name, val) {
+		if (name === "simd.F32x4" || name === "F32x4")
+			return `(Array.isArray(${val}) && ${val}.length === 4 && typeof ${val}[0] === "number")`;
+		if (name === "simd.Mask32x4" || name === "Mask32x4")
+			return `(Array.isArray(${val}) && ${val}.length === 4 && typeof ${val}[0] === "boolean")`;
+		return null;
+	},
+
 	_typeNameCheckExpr(typeName, val) {
 		// A type parameter: the instantiated type's test travels with its factory.
 		const factory = this._typeParamZeroFactory(typeName);
 		if (factory) return `(${factory}?.is?.(${val}) ?? true)`;
 		const name = this._qualifiedStructName(typeName);
+		if (name === "int64" || name === "uint64")
+			return `typeof ${val} === "bigint"`;
 		if (TYPEOF_NUMBER_NAMES.has(name)) return `typeof ${val} === "number"`;
 		if (name === "string") return `typeof ${val} === "string"`;
 		if (name === "bool") return `typeof ${val} === "boolean"`;
 		if (name === "nil") return `${val} === null`;
-		// F32x4 and Mask32x4 are both frozen 4-element arrays; lanes tell them apart.
-		if (name === "simd.F32x4" || name === "F32x4")
-			return `(Array.isArray(${val}) && ${val}.length === 4 && typeof ${val}[0] === "number")`;
-		if (name === "simd.Mask32x4" || name === "Mask32x4")
-			return `(Array.isArray(${val}) && ${val}.length === 4 && typeof ${val}[0] === "boolean")`;
+		const simd = this._simdCheckExpr(name, val);
+		if (simd) return simd;
 		if (name === "error")
 			return `(typeof ${val} === "object" && ${val} !== null && typeof ${val}.Error === "function")`;
 		if (this.structNames.has(name))
@@ -1889,12 +1960,44 @@ export const expressionGenMethods = {
 			const ns = expr.func.expr.name;
 			const fn = expr.func.field;
 			const result = this._genStdlibCall(ns, fn, expr);
-			if (result !== undefined) return result;
+			if (result !== undefined) {
+				if (this._is64BitInt(expr._type)) {
+					return `((__r) => typeof __r === "number" ? BigInt(__r) : __r)(${result})`;
+				}
+				if (
+					expr._type?.kind === "tuple" &&
+					expr._type.types.some((t) => this._is64BitInt(t))
+				) {
+					const casts = expr._type.types.map((t, i) =>
+						this._is64BitInt(t)
+							? `typeof __r[${i}] === "number" ? BigInt(__r[${i}]) : __r[${i}]`
+							: `__r[${i}]`,
+					);
+					return `((__r) => [${casts.join(", ")}])(${result})`;
+				}
+				return result;
+			}
 		}
 		const recvType = expr.func.expr._type;
 		const recvName = this._resolveRecvName(recvType);
 		const typed = this._genReceiverTypeCall(recvName, expr);
-		if (typed !== undefined) return typed;
+		if (typed !== undefined) {
+			if (this._is64BitInt(expr._type)) {
+				return `((__r) => typeof __r === "number" ? BigInt(__r) : __r)(${typed})`;
+			}
+			if (
+				expr._type?.kind === "tuple" &&
+				expr._type.types.some((t) => this._is64BitInt(t))
+			) {
+				const casts = expr._type.types.map((t, i) =>
+					this._is64BitInt(t)
+						? `typeof __r[${i}] === "number" ? BigInt(__r[${i}]) : __r[${i}]`
+						: `__r[${i}]`,
+				);
+				return `((__r) => [${casts.join(", ")}])(${typed})`;
+			}
+			return typed;
+		}
 		const namedCall = this._genNamedMethodCall(expr);
 		if (namedCall !== undefined) return namedCall;
 		if (this.strict && this._isInterfaceType(recvType)) {
@@ -1984,9 +2087,20 @@ export const expressionGenMethods = {
 			this._aggregateBase(elemT)?.kind === "array"
 				? `...(${this.genExpr(a)} ?? []).map((__e) => ${this._cloneJs(elemT, "__e")})`
 				: `...(${this._genSliceSource(a)} ?? [])`;
-		const elems = expr.args
-			.slice(1)
-			.map((a) => (a._spread ? spreadOf(a) : this.genValueExpr(a)));
+		const is64Elem = this._is64BitInt(elemT);
+		const elems = expr.args.slice(1).map((a) => {
+			if (a._spread) return spreadOf(a);
+			const val = this.genValueExpr(a);
+			if (
+				is64Elem &&
+				a._type?.kind === "untyped" &&
+				!val.endsWith("n") &&
+				/^-?\d+$/.test(val)
+			) {
+				return `${val}n`;
+			}
+			return val;
+		});
 		if (elems.length === 0) return slice;
 		this.useHelper("append");
 		const sliceType = expr._type ?? expr.args[0]._type;
@@ -2012,7 +2126,9 @@ export const expressionGenMethods = {
 				: typeArg._type;
 		const resolvedKind = madeType?.kind;
 		if (typeNode.kind === "SliceType" || resolvedKind === "slice") {
-			const n = expr.args[1] ? this.genExpr(expr.args[1]) : "0";
+			let n = expr.args[1] ? this.genExpr(expr.args[1]) : "0";
+			if (expr.args[1] && this._is64BitInt(expr.args[1]._type))
+				n = `Number(${n})`;
 			const elemNode = typeNode.kind === "SliceType" ? typeNode.elem : null;
 			const elemResolved = madeType?.kind === "slice" ? madeType.elem : null;
 			const typedCtor =
@@ -2025,7 +2141,9 @@ export const expressionGenMethods = {
 					: null);
 			// make([]T, n, cap) allocates cap elements and returns a view of
 			// the first n (`__mkslice`), so append within cap shares them.
-			const capArg = expr.args[2] ? this.genExpr(expr.args[2]) : null;
+			let capArg = expr.args[2] ? this.genExpr(expr.args[2]) : null;
+			if (capArg && expr.args[2] && this._is64BitInt(expr.args[2]._type))
+				capArg = `Number(${capArg})`;
 			if (capArg) this.useHelper("slice");
 			const withCap = (alloc) =>
 				capArg ? `__mkslice(${n}, ${alloc(capArg)})` : alloc(n);
@@ -2534,6 +2652,7 @@ export const expressionGenMethods = {
 			if (bound) return bound;
 		}
 		this.useHelper("generics");
+		if (this._is64BitUnsigned(t)) return "__zu64";
 		const zero = this.zeroValueForType(t);
 		return Object.hasOwn(SHARED_ZERO_FACTORIES, zero)
 			? SHARED_ZERO_FACTORIES[zero]
@@ -2833,12 +2952,79 @@ export const expressionGenMethods = {
 		const ptrCmp = this._genPointerEquality(expr);
 		if (ptrCmp !== null) return ptrCmp;
 
+		if (this._is64BitInt(expr._type)) return this._gen64BitBinaryExpr(expr);
+
 		if (this.strict && this._needsStrictOp(expr.op, expr._type)) {
 			const l = this.genExpr(expr.left);
 			const r = this.genExpr(expr.right);
 			return this._genStrictBinary(expr.op, l, r, expr._type);
 		}
 
+		return this._genStandardBinaryExpr(expr);
+	},
+
+	_gen64BitBinaryExpr(expr) {
+		let l = this.genExpr(expr.left);
+		let r = this.genExpr(expr.right);
+		if (expr.left._type?.kind === "untyped" && !l.endsWith("n")) l = `${l}n`;
+		else if (!this._is64BitInt(expr.left?._type)) l = `BigInt(${l})`;
+		if (expr.right._type?.kind === "untyped" && !r.endsWith("n")) r = `${r}n`;
+		else if (!this._is64BitInt(expr.right?._type)) r = `BigInt(${r})`;
+		return this._gen64BitBinary(expr.op, l, r, expr._type);
+	},
+
+	_tconvBinaryOperands(expr, l, r) {
+		if (
+			expr.left._type?.kind === "typeParam" &&
+			expr.right._type?.kind === "untyped"
+		) {
+			const factory = this._typeParamZeroFactory(expr.left._type.name);
+			if (factory) {
+				this.useHelper("generics");
+				r = `__tconv(${factory}, ${r})`;
+			}
+		} else if (
+			expr.right._type?.kind === "typeParam" &&
+			expr.left._type?.kind === "untyped"
+		) {
+			const factory = this._typeParamZeroFactory(expr.right._type.name);
+			if (factory) {
+				this.useHelper("generics");
+				l = `__tconv(${factory}, ${l})`;
+			}
+		}
+		return [l, r];
+	},
+
+	_coerceUntyped64(expr, l, r, isLeft64, isRight64) {
+		if (isLeft64 && expr.right?._type?.kind === "untyped") {
+			if (!r.endsWith("n") && /^-?\d+$/.test(r)) return [l, `${r}n`];
+		} else if (isRight64 && expr.left?._type?.kind === "untyped") {
+			if (!l.endsWith("n") && /^-?\d+$/.test(l)) return [`${l}n`, r];
+		}
+		return [l, r];
+	},
+
+	_coerceMixed64(expr, l, r, isLeft64, isRight64) {
+		const isShift = expr.op === "<<" || expr.op === ">>";
+		if (isLeft64 && !isRight64 && !isShift) r = `BigInt(${r})`;
+		else if (isRight64 && !isLeft64 && !isShift) l = `BigInt(${l})`;
+		if (isShift && isRight64) r = `Number(${r})`;
+		return [l, r];
+	},
+
+	_wrapBinaryResult(expr, res, isLeft64, isRight64) {
+		const isCmp =
+			expr.op === "==" ||
+			expr.op === "!=" ||
+			expr.op === "<" ||
+			expr.op === "<=" ||
+			expr.op === ">" ||
+			expr.op === ">=";
+		return (isLeft64 || isRight64) && !isCmp ? `Number(${res})` : res;
+	},
+
+	_genStandardBinaryExpr(expr) {
 		const jsOp = this._emittedBinaryOp(expr) ?? "/";
 		const operand = (child, isRight) =>
 			wrapForJsOp(
@@ -2847,17 +3033,29 @@ export const expressionGenMethods = {
 				jsOp,
 				isRight,
 			);
-		const l = operand(expr.left, false);
+		let [l, r] = this._tconvBinaryOperands(
+			expr,
+			operand(expr.left, false),
+			operand(expr.right, true),
+		);
+		const isLeft64 = this._is64BitInt(expr.left?._type);
+		const isRight64 = this._is64BitInt(expr.right?._type);
+		[l, r] = this._coerceUntyped64(expr, l, r, isLeft64, isRight64);
+		[l, r] = this._coerceMixed64(expr, l, r, isLeft64, isRight64);
 
 		if (expr.op === "&^") {
 			const rCode = this.genExpr(expr.right);
-			const r =
+			const rP =
 				this._emittedBinaryOp(expr.right) !== null ? `(${rCode})` : rCode;
-			return `${l} & ~${r}`;
+			return this._wrapBinaryResult(expr, `${l} & ~${rP}`, isLeft64, isRight64);
 		}
-		const r = operand(expr.right, true);
 		if (this._isIntDivision(expr)) return `Math.trunc(${l} / ${r})`;
-		return `${l} ${jsOp} ${r}`;
+		return this._wrapBinaryResult(
+			expr,
+			`${l} ${jsOp} ${r}`,
+			isLeft64,
+			isRight64,
+		);
 	},
 
 	// `m == nil` / `m != nil` on a map: true for a nil map (null, the strict
@@ -3060,29 +3258,52 @@ export const expressionGenMethods = {
 	},
 
 	_genPrimitiveConversion(expr, inner, target) {
+		const srcType = expr.expr?._type;
+		const isSrc64 = this._is64BitInt(srcType);
 		switch (target) {
 			case "string":
-				return this._genStringConversion(expr.expr._type, inner);
+				return this._genStringConversion(
+					srcType,
+					isSrc64 ? `Number(${inner})` : inner,
+				);
+			case "int64": {
+				this.useHelper("to64");
+				return `__to_i64(${inner})`;
+			}
+			case "uint64": {
+				this.useHelper("to64");
+				return `__to_u64(${inner})`;
+			}
 			case "int":
-			case "int64":
 			case "uint":
-			case "uint64":
 			case "uintptr":
-				return `Math.trunc(Number(${inner}))`;
+				return isSrc64 ? `Number(${inner})` : `Math.trunc(Number(${inner}))`;
 			case "int8":
-				return `(Number(${inner}) << 24 >> 24)`;
+				return isSrc64
+					? `Number(BigInt.asIntN(8, ${inner}))`
+					: `(Number(${inner}) << 24 >> 24)`;
 			case "int16":
-				return `(Number(${inner}) << 16 >> 16)`;
+				return isSrc64
+					? `Number(BigInt.asIntN(16, ${inner}))`
+					: `(Number(${inner}) << 16 >> 16)`;
 			case "int32":
 			case "rune":
-				return `(Number(${inner}) | 0)`;
+				return isSrc64
+					? `Number(BigInt.asIntN(32, ${inner}))`
+					: `(Number(${inner}) | 0)`;
 			case "uint8":
 			case "byte":
-				return `(Number(${inner}) & 0xFF)`;
+				return isSrc64
+					? `Number(BigInt.asUintN(8, ${inner}))`
+					: `(Number(${inner}) & 0xFF)`;
 			case "uint16":
-				return `(Number(${inner}) & 0xFFFF)`;
+				return isSrc64
+					? `Number(BigInt.asUintN(16, ${inner}))`
+					: `(Number(${inner}) & 0xFFFF)`;
 			case "uint32":
-				return `(Number(${inner}) >>> 0)`;
+				return isSrc64
+					? `Number(BigInt.asUintN(32, ${inner}))`
+					: `(Number(${inner}) >>> 0)`;
 			case "float32":
 				return `Math.fround(Number(${inner}))`;
 			case "float64":
@@ -3106,7 +3327,40 @@ export const expressionGenMethods = {
 		return STRICT_NUMERIC_TYPES.has(typeName);
 	},
 
+	_is64BitInt(t) {
+		return is64BitInt(t);
+	},
+
+	_is64BitSigned(t) {
+		return is64BitSigned(t);
+	},
+
+	_is64BitUnsigned(t) {
+		return is64BitUnsigned(t);
+	},
+
+	_gen64BitBinary(op, l, r, type) {
+		const unsigned = this._is64BitUnsigned(type);
+		const wrap = unsigned ? "BigInt.asUintN" : "BigInt.asIntN";
+		const divZero =
+			'(() => { throw new Error("runtime error: integer divide by zero"); })()';
+		if (op === "/")
+			return `((${r}) === 0n ? ${divZero} : ${wrap}(64, (${l}) / (${r})))`;
+		if (op === "%")
+			return `((${r}) === 0n ? ${divZero} : ${wrap}(64, (${l}) % (${r})))`;
+		if (op === "<<" || op === ">>") {
+			this.useHelper("shift");
+			return op === "<<"
+				? `__shl64(${l}, ${r}, ${unsigned})`
+				: `__shr64(${l}, ${r}, ${unsigned})`;
+		}
+		if (op === "&^") return `${wrap}(64, (${l}) & ~(${r}))`;
+		return `${wrap}(64, (${l}) ${op} (${r}))`;
+	},
+
 	_needsStrictOp(op, type) {
+		if (this._is64BitInt(type))
+			return STRICT_OPS.has(op) || op === "<<" || op === ">>" || op === "&^";
 		if (!STRICT_OPS.has(op)) return false;
 		if (this._isStrictAtomicOp(op, this._typeName(type))) return true;
 		if (op === "<<" || op === ">>")
@@ -3151,6 +3405,9 @@ export const expressionGenMethods = {
 	},
 
 	_genStrictBinary(op, l, r, type) {
+		if (this._is64BitInt(type)) {
+			return this._gen64BitBinary(op, l, r, type);
+		}
 		const tName = this._typeName(type);
 		if (tName === "float32") {
 			return `Math.fround(${l} ${op} ${r})`;

@@ -738,3 +738,27 @@ func main() {
 		);
 	}
 });
+
+test("64-bit int and struct with 64-bit int field as map keys (Task 1.3)", () => {
+	const src = `package main
+
+import "fmt"
+
+type Key struct{ A int64 }
+
+func main() {
+	m := map[int64]string{1 << 60: "a"}
+	for k := range m {
+		fmt.Println(k + 1)
+	}
+
+	m2 := map[Key]int{{A: 1}: 1, {A: 2}: 2}
+	fmt.Println(len(m2))
+}
+`;
+	for (const target of ["js", "both"]) {
+		const { js, errors } = compile(src, { target });
+		assertEqual(errors.length, 0);
+		assertEqual(runJs(js), "1152921504606846977\n2");
+	}
+});

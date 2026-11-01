@@ -425,20 +425,44 @@ export const HELPER_IFD = `var __ifd = __ifd || function(x, d) {
 
 // Nil-interface method call guard (strict mode only): matches Go's panic
 // message instead of a JS TypeError.
-// Strict-mode 64-bit shifts (`both` packages): Go's wrap-around on `<<`, the
-// sign fill on `>>`, and the negative-count panic.
+// 64-bit shifts: count is converted to BigInt; negative count panics;
+// wraps with BigInt.asIntN / BigInt.asUintN.
 export const HELPER_SHIFT = `var __shl64 = __shl64 || function(x, n, u) {
-  if (n < 0) throw new Error("runtime error: negative shift amount");
-  if (n >= 64) return 0;
-  const r = x * 2 ** n;
+  var b = BigInt(n);
+  if (b < 0n) throw new Error("runtime error: negative shift amount");
+  if (typeof x === "bigint") {
+    if (b >= 64n) return 0n;
+    var bx = u ? BigInt.asUintN(64, x) : BigInt.asIntN(64, x);
+    var r = bx << b;
+    return u ? BigInt.asUintN(64, r) : BigInt.asIntN(64, r);
+  }
+  if (b >= 64n) return 0;
+  var nb = Number(b);
+  var r = x * 2 ** nb;
   if (Number.isSafeInteger(r)) return r;
-  const b = BigInt(x) << BigInt(n);
-  return Number(u ? BigInt.asUintN(64, b) : BigInt.asIntN(64, b));
+  var bxx = BigInt(Math.trunc(x)) << b;
+  return Number(u ? BigInt.asUintN(64, bxx) : BigInt.asIntN(64, bxx));
 };
 var __shr64 = __shr64 || function(x, n, u) {
-  if (n < 0) throw new Error("runtime error: negative shift amount");
-  if (n >= 64) return u || x >= 0 ? 0 : -1;
-  return Math.floor(x / 2 ** n);
+  var b = BigInt(n);
+  if (b < 0n) throw new Error("runtime error: negative shift amount");
+  if (typeof x === "bigint") {
+    var bx = u ? BigInt.asUintN(64, x) : BigInt.asIntN(64, x);
+    if (b >= 64n) return u || bx >= 0n ? 0n : -1n;
+    var r = bx >> b;
+    return u ? BigInt.asUintN(64, r) : BigInt.asIntN(64, r);
+  }
+  if (b >= 64n) return u || x >= 0 ? 0 : -1;
+  return Math.floor(x / 2 ** Number(b));
+};`;
+
+export const HELPER_TO64 = `var __to_i64 = __to_i64 || function(v) {
+  if (typeof v === "bigint") return BigInt.asIntN(64, v);
+  return Number.isFinite(v) ? BigInt.asIntN(64, BigInt(Math.trunc(v))) : -9223372036854775808n;
+};
+var __to_u64 = __to_u64 || function(v) {
+  if (typeof v === "bigint") return BigInt.asUintN(64, v);
+  return Number.isFinite(v) ? BigInt.asUintN(64, BigInt(Math.trunc(v))) : 9223372036854775808n;
 };`;
 
 export const HELPER_NIL_CALL = `var __nilcall = __nilcall || function(x) {
@@ -473,6 +497,8 @@ var __zn = __zn || (() => null);
 var __z0 = __z0 || (() => 0);
 var __zs = __zs || (() => "");
 var __zf = __zf || (() => false);
+var __z64 = __z64 || Object.assign(() => 0n, { k: "int64" });
+var __zu64 = __zu64 || Object.assign(() => 0n, { k: "uint64" });
 var __ti = __ti || function(f, k, id, is, u, b, fb) {
   const g = () => f();
   g.k = k; g.id = id; g.is = is; g.u = u; g.b = b; g.fb = fb;
@@ -482,18 +508,19 @@ var __tid = __tid || function(...ids) {
   return ids.every((i) => i !== undefined) ? ids.join(",") : undefined;
 };
 var __tconv = __tconv || function(f, v) {
-  v = typeof v === "bigint" ? Number(v) : v;
   switch (f?.k) {
-    case "int": case "int64": case "uint": case "uint64": case "uintptr": return Math.trunc(Number(v));
-    case "int8": return (Number(v) << 24) >> 24;
-    case "int16": return (Number(v) << 16) >> 16;
-    case "int32": case "rune": return Number(v) | 0;
-    case "uint8": case "byte": return Number(v) & 0xFF;
-    case "uint16": return Number(v) & 0xFFFF;
-    case "uint32": return Number(v) >>> 0;
-    case "float32": return Math.fround(Number(v));
-    case "float64": return Number(v);
-    default: return v;
+    case "int64": return typeof v === "bigint" ? BigInt.asIntN(64, v) : (typeof v === "number" ? BigInt.asIntN(64, BigInt(Math.trunc(v))) : v);
+    case "uint64": return typeof v === "bigint" ? BigInt.asUintN(64, v) : (typeof v === "number" ? BigInt.asUintN(64, BigInt(Math.trunc(v))) : v);
+    case "int": case "uint": case "uintptr": return Math.trunc(Number(typeof v === "bigint" ? Number(v) : v));
+    case "int8": return (Number(typeof v === "bigint" ? Number(v) : v) << 24) >> 24;
+    case "int16": return (Number(typeof v === "bigint" ? Number(v) : v) << 16) >> 16;
+    case "int32": case "rune": return Number(typeof v === "bigint" ? Number(v) : v) | 0;
+    case "uint8": case "byte": return Number(typeof v === "bigint" ? Number(v) : v) & 0xFF;
+    case "uint16": return Number(typeof v === "bigint" ? Number(v) : v) & 0xFFFF;
+    case "uint32": return Number(typeof v === "bigint" ? Number(v) : v) >>> 0;
+    case "float32": return Math.fround(Number(typeof v === "bigint" ? Number(v) : v));
+    case "float64": return Number(typeof v === "bigint" ? Number(v) : v);
+    default: return typeof v === "number" && f && (f() === 0n || typeof f() === "bigint") ? BigInt(v) : v;
   }
 };`;
 
@@ -796,6 +823,7 @@ var __sprintf = __sprintf || function(f, ...a) {
           const entries = Array.from(val.entries()).sort(([a], [b]) => {
             const k1 = raw(a), k2 = raw(b);
             if (typeof k1 === "number" && typeof k2 === "number") return k1 - k2;
+            if (typeof k1 === "bigint" && typeof k2 === "bigint") return k1 < k2 ? -1 : k1 > k2 ? 1 : 0;
             // Struct and array keys compare field by field, as in Go.
             if (k1 !== null && k2 !== null && typeof k1 === "object" && typeof k2 === "object" && !k1.__p && !k2.__p) {
               const cmp = (x, y) => {
@@ -825,6 +853,12 @@ var __sprintf = __sprintf || function(f, ...a) {
             // Struct keys (encoded, see __sk) sort field by field, as in Go.
             if (a.charCodeAt(0) === 1 && b.charCodeAt(0) === 1 && typeof __kd === "function")
               return __kcmp(__kd(a), __kd(b));
+            if (/^-?\\d+$/.test(a) && /^-?\\d+$/.test(b)) {
+              try {
+                const ba = BigInt(a), bb = BigInt(b);
+                return ba < bb ? -1 : ba > bb ? 1 : 0;
+              } catch (_) {}
+            }
             const na = Number(a), nb = Number(b);
             if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
             if (a[0] === "{" && b[0] === "{") {
@@ -845,7 +879,15 @@ var __sprintf = __sprintf || function(f, ...a) {
             if (isElemPtr && v !== null && typeof v === "object") {
               markPtr(v);
             }
-            const kv = k.charCodeAt(0) === 1 && typeof __kd === "function" ? __kd(k) : ((sd && __fmtu.isNumKey(sd.key)) || cd?.k?.n) ? Number(k) : k;
+            const bkd = sd ? __fmtu.baseOf(sd.key) : null;
+            const is64 = bkd?.k === "b" && (bkd.n === "int64" || bkd.n === "uint64");
+            const kv = k.charCodeAt(0) === 1 && typeof __kd === "function"
+              ? __kd(k)
+              : is64
+                ? BigInt(k)
+                : ((sd && __fmtu.isNumKey(sd.key)) || cd?.k?.n)
+                  ? (/^-?\\d+$/.test(k) && (BigInt(k) > 9007199254740991n || BigInt(k) < -9007199254740991n) ? BigInt(k) : Number(k))
+                  : k;
             parts.push(formatV(kv, isPlus, false, ro, both(sd?.key, cd?.k), cd?.k?.sv === 1) + ":" + formatV(v, isPlus, false, ro, both(sd?.val, cd?.v), cd?.v?.sv === 1));
           }
         }
@@ -2089,7 +2131,7 @@ export const HELPER_BINARY = `var __binary_le = __binary_le || {
   Uint64: function(b) {
     const lo = BigInt((b[0] | (b[1] << 8) | (b[2] << 16) | (b[3] << 24)) >>> 0);
     const hi = BigInt((b[4] | (b[5] << 8) | (b[6] << 16) | (b[7] << 24)) >>> 0);
-    return Number(lo | (hi << 32n));
+    return (lo | (hi << 32n));
   },
   PutUint16: function(b, v) { b[0] = v & 0xff; b[1] = (v >> 8) & 0xff; },
   PutUint32: function(b, v) { b[0] = v & 0xff; b[1] = (v >> 8) & 0xff; b[2] = (v >> 16) & 0xff; b[3] = (v >>> 24) & 0xff; },
@@ -2131,7 +2173,7 @@ var __binary_be = __binary_be || {
   Uint64: function(b) {
     const hi = BigInt(((b[0] << 24) | (b[1] << 16) | (b[2] << 8) | b[3]) >>> 0);
     const lo = BigInt(((b[4] << 24) | (b[5] << 16) | (b[6] << 8) | b[7]) >>> 0);
-    return Number((hi << 32n) | lo);
+    return ((hi << 32n) | lo);
   },
   PutUint16: function(b, v) { b[0] = (v >> 8) & 0xff; b[1] = v & 0xff; },
   PutUint32: function(b, v) { b[0] = (v >>> 24) & 0xff; b[1] = (v >> 16) & 0xff; b[2] = (v >> 8) & 0xff; b[3] = v & 0xff; },
@@ -2736,7 +2778,7 @@ var __json_number_value = __json_number_value || function(v) {
   return typeof v === "string" && v.endsWith("__bigint") ? Number(v.slice(0, -8)) : v;
 };
 var __json_int_decode = __json_int_decode || function(v, typeName, ctxType, raw) {
-  var type = typeof v === "string" && v.endsWith("__bigint") ? "number" : __json_type(v);
+  var type = typeof v === "string" && v.endsWith("__bigint") ? "number" : typeof v === "bigint" ? "number" : __json_type(v);
   var fail = function() {
     return __json_err("cannot unmarshal " + (type === "number" ? "number " + __json_lit(v, raw) : type) + " into " + __json_ctx(ctxType));
   };
@@ -2746,7 +2788,9 @@ var __json_int_decode = __json_int_decode || function(v, typeName, ctxType, raw)
   var integer;
   var signed = typeName === "int" || typeName.startsWith("int");
   if (typeName === "int64" || typeName === "uint64") {
-    if (typeof v === "string" && v.endsWith("__bigint")) {
+    if (typeof v === "bigint") {
+      integer = v;
+    } else if (typeof v === "string" && v.endsWith("__bigint")) {
       try { integer = BigInt(v.slice(0, -8)); } catch (_) {}
     } else if (typeof v === "number" && Number.isSafeInteger(v)) {
       integer = BigInt(v);
@@ -2754,17 +2798,27 @@ var __json_int_decode = __json_int_decode || function(v, typeName, ctxType, raw)
     if (integer !== undefined) {
       var min64 = typeName === "int64" ? -(1n << 63n) : 0n;
       var max64 = typeName === "int64" ? (1n << 63n) - 1n : (1n << 64n) - 1n;
-      if (integer >= min64 && integer <= max64) return typeof v === "number" ? v : integer;
+      if (integer >= min64 && integer <= max64) return integer;
     }
     return fail();
   }
-  if (typeof v === "number" && Number.isSafeInteger(v)) {
-    if (typeName === "int") return v;
+  if (typeof v === "bigint") {
+    integer = v;
+  } else if (typeof v === "string" && v.endsWith("__bigint")) {
+    try { integer = BigInt(v.slice(0, -8)); } catch (_) {}
+  } else if (typeof v === "number" && Number.isSafeInteger(v)) {
+    integer = BigInt(v);
+  }
+  if (integer !== undefined) {
+    if (typeName === "int") {
+      if (integer >= -9007199254740991n && integer <= 9007199254740991n) return Number(integer);
+      return fail();
+    }
     var bits = typeName === "uint" ? 53 : Number(typeName.replace(/^(u?int|byte|rune)/, ""));
     if (!bits) bits = typeName === "byte" ? 8 : typeName === "rune" ? 32 : 53;
-    var min = signed ? -(2 ** (bits - 1)) : 0;
-    var max = signed ? (2 ** (bits - 1)) - 1 : (2 ** bits) - 1;
-    if (v >= min && v <= max) return v;
+    var min = signed ? -(1n << BigInt(bits - 1)) : 0n;
+    var max = signed ? (1n << BigInt(bits - 1)) - 1n : (1n << BigInt(bits)) - 1n;
+    if (integer >= min && integer <= max) return Number(integer);
   }
   return fail();
 };
@@ -3096,9 +3150,9 @@ var __json_decoder_decode = __json_decoder_decode || function(dec, decFn, target
   var d = dec?.value ?? dec;
   var res = ScanNext$$internal$jsonrt(d.r);
   var data = res[0], skipped = res[1], err = res[2];
-  d.offset += skipped;
+  d.offset += typeof d.offset === "bigint" ? BigInt(skipped) : skipped;
   if (err != null) return err;
-  d.offset += data.length;
+  d.offset += typeof d.offset === "bigint" ? BigInt(data.length) : data.length;
   OptUseNumber$$internal$jsonrt = d.useNumber;
   OptDisallowUnknownFields$$internal$jsonrt = d.disallowUnknownFields;
   var uerr;

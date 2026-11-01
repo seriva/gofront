@@ -317,7 +317,7 @@ func Main() int {
 	assertEqual(res.jsRes, 510);
 });
 
-test("warning: 1<<63 + 5 exceeds JS Number precision", () => {
+test("uint64 exact 64-bit constant in JS and no precision warning", () => {
 	const src = `package main
 
 func main() {
@@ -326,16 +326,10 @@ func main() {
 }
 `;
 	const { js, warnings } = compile(src);
-	assertEqual(js.includes("9223372036854775808"), true);
-	assertErrorContains(
-		warnings.map((message) => ({ message })),
-		"constant 9223372036854775813 exceeds JS Number precision",
-	);
+	assertEqual(js.includes("9223372036854775813n"), true);
+	assertEqual(warnings.length, 0);
 	const both = compile(src, { target: "both" });
-	assertErrorContains(
-		both.warnings.map((message) => ({ message })),
-		"constant 9223372036854775813 exceeds JS Number precision",
-	);
+	assertEqual(both.warnings.length, 0);
 });
 
 section("Constants — review fixes (overflow contexts, precision warning)");
@@ -415,17 +409,13 @@ test("in-range constants in the same contexts still compile (M2)", () => {
 test("warning: integral float and named constants in integer contexts (M3)", () => {
 	const msgs = (src) => compile(src).warnings.map((message) => ({ message }));
 	assertErrorContains(
-		msgs(mainWith("var x int64 = 1e18 + 1\nprintln(x)")),
+		msgs(mainWith("var x int = int(1e18 + 1)\nprintln(x)")),
 		"constant 1000000000000000001 exceeds JS Number precision",
 	);
-	assertErrorContains(
-		msgs(mainWith("var x int64 = math.MaxInt64\nprintln(x)", 'import "math"')),
-		"constant 9223372036854775807 exceeds JS Number precision",
-	);
-	// Float contexts and exactly representable values stay quiet.
+	// Float contexts, exact int64/uint64 BigInts and exactly representable values stay quiet.
 	const quiet = compile(
 		mainWith(
-			"var f float64 = 1e18 + 1\nvar x int64 = 1e18\nvar u uint64 = 1 << 63\nprintln(f, x, u, math.MaxInt32)",
+			"var f float64 = 1e18 + 1\nvar x int64 = 1e18 + 1\nvar m int64 = math.MaxInt64\nvar u uint64 = 1 << 63\nprintln(f, x, m, u, math.MaxInt32)",
 			'import "math"',
 		),
 	);

@@ -116,7 +116,7 @@ function classifyType(goType, mod) {
 	if (goType.kind === "TypeName" || goType.kind === "Ident") {
 		if (goType.name === "error") return { k: "error", wType: "anyref" };
 		if (goType.name === "time.Duration" || goType.name === "Duration")
-			return { k: "i64", unsigned: false, wType: "i64" };
+			return { k: "i64", unsigned: false, is64: true, wType: "i64" };
 		if (goType.name === "time.Time" || goType.name === "Time") {
 			const info = mod.getStructType("time.Time");
 			if (info)
@@ -213,7 +213,12 @@ function classifyBasic(n) {
 	if (I32_INTS.has(n))
 		return { k: "i32", unsigned: UNSIGNED.has(n), wType: "i32" };
 	if (I64_INTS.has(n))
-		return { k: "i64", unsigned: UNSIGNED.has(n), wType: "i64" };
+		return {
+			k: "i64",
+			unsigned: UNSIGNED.has(n),
+			is64: n === "int64" || n === "uint64",
+			wType: "i64",
+		};
 	const d = BASIC_DESCS[n];
 	return d ? { ...d } : { k: "unsupported", what: `type '${n}'` };
 }
@@ -230,7 +235,7 @@ function classifyNamed(t, mod) {
 	}
 	if (t.name === "error") return { k: "error", wType: "anyref" };
 	if (t.name === "time.Duration")
-		return { k: "i64", unsigned: false, wType: "i64" };
+		return { k: "i64", unsigned: false, is64: true, wType: "i64" };
 	if (t.name === "time.Time") {
 		const info = mod.getStructType("time.Time");
 		if (info) return { k: "time", name: "time.Time", info, wType: toRef(info) };
@@ -297,7 +302,7 @@ function classifyPointer(t, mod) {
 	if (base.k === "time" && !base.ptr) return { ...base, ptr: true };
 	const boxInfo = mod.getBoxType(t.base);
 	const ptrInfo = mod.getPtrType ? mod.getPtrType(t.base) : null;
-	const key = `${base.k}${base.unsigned ? "_u" : ""}_${boxInfo.typeIndex}`;
+	const key = `${base.k}${base.unsigned ? "_u" : ""}${base.is64 ? "_64" : ""}_${boxInfo.typeIndex}`;
 	return {
 		k: "ptr_box",
 		base,
@@ -379,7 +384,11 @@ function classifySlice(t, mod) {
 		// so they get separate helper keys.
 		key:
 			wTypeKey(sliceInfo.elemWType) +
-			(elem.k === "f32x4" || elem.k === "mask4" ? `_${elem.k}` : ""),
+			(elem.k === "f32x4" || elem.k === "mask4"
+				? `_${elem.k}`
+				: elem.is64
+					? "_i64"
+					: ""),
 		wType: { kind: "ref", nullable: true, typeIndex: sliceInfo.typeIndex },
 	};
 }
@@ -399,7 +408,7 @@ function classifyArray(t, mod) {
 		elem,
 		size: arraySize(t),
 		arrInfo,
-		key: wTypeKey(arrInfo.elemWType),
+		key: wTypeKey(arrInfo.elemWType) + (elem.is64 ? "_i64" : ""),
 		wType: { kind: "ref", nullable: true, typeIndex: arrInfo.typeIndex },
 	};
 }
@@ -862,11 +871,20 @@ export function scanBoundaryImports(mod, meta) {
 	const needs = collectNeeds(meta);
 	meta._needs = needs;
 	for (const [key, desc] of needs.funcs) {
+		const paramDescs = desc.params ?? [];
+		const returnDescs = desc.returns ?? [];
 		mod.getOrAddFuncImport(
 			"env",
 			`__invoke$${key}`,
-			["externref", ...desc.closureInfo.paramWTypes.map(extType)],
-			desc.closureInfo.returnWTypes.map(extType),
+			[
+				"externref",
+				...desc.closureInfo.paramWTypes.map((w, i) =>
+					extType(w, paramDescs[i]?.is64),
+				),
+			],
+			desc.closureInfo.returnWTypes.map((w, i) =>
+				extType(w, returnDescs[i]?.is64),
+			),
 		);
 	}
 }
@@ -884,19 +902,21 @@ function isGcRef(wType) {
 // the converting helpers are registered first thing in addBoundaryHelpers.
 const v128Conv = { from: null, to: null };
 
-function extType(wType) {
+function extType(wType, is64 = false) {
 	if (wType === "v128") return "externref";
-	if (wType === "i64") return "f64";
+	if (wType === "i64") return is64 ? "i64" : "f64";
 	if (isGcRef(wType)) return "externref";
 	return wType;
 }
-function needsConv(wTypes) {
-	return wTypes.some((w) => w === "i64" || w === "v128" || isGcRef(w));
+function needsConv(wTypes, descs = []) {
+	return wTypes.some(
+		(w, i) => (w === "i64" && !descs[i]?.is64) || w === "v128" || isGcRef(w),
+	);
 }
 // Instructions converting the value on the stack from its boundary form.
-function fromExt(wType) {
+function fromExt(wType, is64 = false) {
 	if (wType === "v128") return [{ op: "call", funcIndex: v128Conv.from }];
-	if (wType === "i64") return [{ op: "i64.trunc_sat_f64_s" }];
+	if (wType === "i64") return is64 ? [] : [{ op: "i64.trunc_sat_f64_s" }];
 	if (wType === "anyref") return [{ op: "any.convert_extern" }];
 	if (isGcRef(wType)) {
 		const out = [{ op: "any.convert_extern" }];
@@ -907,22 +927,25 @@ function fromExt(wType) {
 	return [];
 }
 // Instructions converting the value on the stack to its boundary form.
-function toExt(wType) {
+function toExt(wType, is64 = false) {
 	if (wType === "v128") return [{ op: "call", funcIndex: v128Conv.to }];
-	if (wType === "i64") return [{ op: "f64.convert_i64_s" }];
+	if (wType === "i64") return is64 ? [] : [{ op: "f64.convert_i64_s" }];
 	if (isGcRef(wType)) return [{ op: "extern.convert_any" }];
 	return [];
 }
 // Rewrites the values on top of the stack (types `wTypes`) with `conv`,
 // spilling through locals starting at `localBase` when more than one.
-function convertResults(wTypes, conv, localBase) {
-	if (wTypes.length === 0 || !needsConv(wTypes)) return [];
-	if (wTypes.length === 1) return conv(wTypes[0]);
+function convertResults(wTypes, conv, localBase, descs = []) {
+	if (wTypes.length === 0 || !needsConv(wTypes, descs)) return [];
+	if (wTypes.length === 1) return conv(wTypes[0], descs[0]?.is64);
 	const out = [];
 	for (let i = wTypes.length - 1; i >= 0; i--)
 		out.push({ op: "local.set", index: localBase + i });
 	for (let i = 0; i < wTypes.length; i++)
-		out.push({ op: "local.get", index: localBase + i }, ...conv(wTypes[i]));
+		out.push(
+			{ op: "local.get", index: localBase + i },
+			...conv(wTypes[i], descs[i]?.is64),
+		);
 	return out;
 }
 
@@ -1022,19 +1045,19 @@ export function addBoundaryHelpers(mod, meta) {
 		);
 	}
 	// Parameter `i` converted from its boundary form.
-	const getIn = (i, wType) => [get(i), ...fromExt(wType)];
+	const getIn = (i, wType, is64 = false) => [get(i), ...fromExt(wType, is64)];
 	const EXT = "externref";
 
-	for (const [name, { info }] of needs.structs) {
+	for (const [name, { info, fields }] of needs.structs) {
 		const ref = toRef(info);
 		const ti = info.typeIndex;
 		const fieldWTypes = info.fields.map((f) => f.wType);
 		addFunc(
 			`__new_${name}`,
-			fieldWTypes.map(extType),
+			fieldWTypes.map((w, i) => extType(w, fields[i]?.desc?.is64)),
 			[EXT],
 			[
-				...fieldWTypes.flatMap((w, i) => getIn(i, w)),
+				...fieldWTypes.flatMap((w, i) => getIn(i, w, fields[i]?.desc?.is64)),
 				{ op: "struct.new", typeIndex: ti },
 				...toExt(ref),
 			],
@@ -1064,23 +1087,24 @@ export function addBoundaryHelpers(mod, meta) {
 		);
 		for (let i = 0; i < info.fields.length; i++) {
 			const f = info.fields[i];
+			const is64 = Boolean(fields[i]?.desc?.is64);
 			addFunc(
 				`__get_${name}_${f.name}`,
 				[EXT],
-				[extType(f.wType)],
+				[extType(f.wType, is64)],
 				[
 					...getIn(0, ref),
 					{ op: "struct.get", typeIndex: ti, fieldIndex: i },
-					...toExt(f.wType),
+					...toExt(f.wType, is64),
 				],
 			);
 			addFunc(
 				`__set_${name}_${f.name}`,
-				[EXT, extType(f.wType)],
+				[EXT, extType(f.wType, is64)],
 				[],
 				[
 					...getIn(0, ref),
-					...getIn(1, f.wType),
+					...getIn(1, f.wType, is64),
 					{ op: "struct.set", typeIndex: ti, fieldIndex: i },
 				],
 			);
@@ -1106,25 +1130,26 @@ export function addBoundaryHelpers(mod, meta) {
 			["i32"],
 			[...getIn(0, ref), { op: "array.len" }],
 		);
+		const is64 = Boolean(desc.elem?.is64);
 		addFunc(
 			`__array_get_${key}`,
 			[EXT, "i32"],
-			[extType(arrInfo.elemWType)],
+			[extType(arrInfo.elemWType, is64)],
 			[
 				...getIn(0, ref),
 				get(1),
 				{ op: "array.get", typeIndex: arrInfo.typeIndex },
-				...toExt(arrInfo.elemWType),
+				...toExt(arrInfo.elemWType, is64),
 			],
 		);
 		addFunc(
 			`__array_set_${key}`,
-			[EXT, "i32", extType(arrInfo.elemWType)],
+			[EXT, "i32", extType(arrInfo.elemWType, is64)],
 			[],
 			[
 				...getIn(0, ref),
 				get(1),
-				...getIn(2, arrInfo.elemWType),
+				...getIn(2, arrInfo.elemWType, is64),
 				{ op: "array.set", typeIndex: arrInfo.typeIndex },
 			],
 		);
@@ -1135,6 +1160,7 @@ export function addBoundaryHelpers(mod, meta) {
 		const ref = desc.wType;
 		const arrTI = sliceInfo.arrInfo.typeIndex;
 		const sTI = sliceInfo.typeIndex;
+		const is64 = Boolean(desc.elem?.is64);
 		const elemAddr = [
 			...getIn(0, ref),
 			{ op: "struct.get", typeIndex: sTI, fieldIndex: 0 },
@@ -1166,11 +1192,11 @@ export function addBoundaryHelpers(mod, meta) {
 		addFunc(
 			`__slice_get_${key}`,
 			[EXT, "i32"],
-			[extType(sliceInfo.elemWType)],
+			[extType(sliceInfo.elemWType, is64)],
 			[
 				...elemAddr,
 				{ op: "array.get", typeIndex: arrTI },
-				...toExt(sliceInfo.elemWType),
+				...toExt(sliceInfo.elemWType, is64),
 			],
 		);
 		addFunc(
@@ -1191,11 +1217,11 @@ export function addBoundaryHelpers(mod, meta) {
 		);
 		addFunc(
 			`__slice_set_${key}`,
-			[EXT, "i32", extType(sliceInfo.elemWType)],
+			[EXT, "i32", extType(sliceInfo.elemWType, is64)],
 			[],
 			[
 				...elemAddr,
-				...getIn(2, sliceInfo.elemWType),
+				...getIn(2, sliceInfo.elemWType, is64),
 				{ op: "array.set", typeIndex: arrTI },
 			],
 		);
@@ -1205,6 +1231,8 @@ export function addBoundaryHelpers(mod, meta) {
 		const ci = desc.closureInfo;
 		const invokeIdx = mod.importCache.get(`env.__invoke$${key}`);
 		const nParams = ci.paramWTypes.length;
+		const paramDescs = desc.params ?? [];
+		const returnDescs = desc.returns ?? [];
 		// Thunk: wasm closure body calling the JS callback (boundary forms out, back in).
 		const thunkIdx = addFunc(
 			`__jsthunk$${key}`,
@@ -1213,12 +1241,17 @@ export function addBoundaryHelpers(mod, meta) {
 			[
 				get(0),
 				{ op: "extern.convert_any" },
-				...ci.paramWTypes.flatMap((w, i) => [get(i + 1), ...toExt(w)]),
+				...ci.paramWTypes.flatMap((w, i) => [
+					get(i + 1),
+					...toExt(w, paramDescs[i]?.is64),
+				]),
 				{ op: "call", funcIndex: invokeIdx },
-				...convertResults(ci.returnWTypes, fromExt, nParams + 1),
+				...convertResults(ci.returnWTypes, fromExt, nParams + 1, returnDescs),
 			],
 			false,
-			ci.returnWTypes.length > 1 ? ci.returnWTypes.map(extType) : [],
+			ci.returnWTypes.length > 1
+				? ci.returnWTypes.map((w, i) => extType(w, returnDescs[i]?.is64))
+				: [],
 		);
 		mod.addRefFuncElement(thunkIdx);
 		addFunc(
@@ -1236,16 +1269,18 @@ export function addBoundaryHelpers(mod, meta) {
 		// JS calling a wasm closure (boundary forms in, results out).
 		addFunc(
 			`__call_fn$${key}`,
-			[EXT, ...ci.paramWTypes.map(extType)],
-			ci.returnWTypes.map(extType),
+			[EXT, ...ci.paramWTypes.map((w, i) => extType(w, paramDescs[i]?.is64))],
+			ci.returnWTypes.map((w, i) => extType(w, returnDescs[i]?.is64)),
 			[
 				...getIn(0, desc.wType),
 				{ op: "struct.get", typeIndex: ci.typeIndex, fieldIndex: 1 },
-				...ci.paramWTypes.flatMap((w, i) => getIn(i + 1, w)),
+				...ci.paramWTypes.flatMap((w, i) =>
+					getIn(i + 1, w, paramDescs[i]?.is64),
+				),
 				...getIn(0, desc.wType),
 				{ op: "struct.get", typeIndex: ci.typeIndex, fieldIndex: 0 },
 				{ op: "call_ref", typeIndex: ci.funcTypeIndex },
-				...convertResults(ci.returnWTypes, toExt, nParams + 1),
+				...convertResults(ci.returnWTypes, toExt, nParams + 1, returnDescs),
 			],
 			true,
 			ci.returnWTypes.length > 1 ? ci.returnWTypes : [],
@@ -1263,17 +1298,20 @@ export function addBoundaryHelpers(mod, meta) {
 		if (sig?.form !== "func") return;
 		const paramW = sig.params;
 		const resultW = sig.results;
-		if (!needsConv(paramW) && !needsConv(resultW)) return;
+		const paramDescs = entry.params ?? [];
+		const resultDescs = entry.returns ?? [];
+		if (!needsConv(paramW, paramDescs) && !needsConv(resultW, resultDescs))
+			return;
 		// Exported names become JS identifiers: no dot of a qualified type.
 		entry.callName = `__x_${entry.exportName}`.replaceAll(".", "_");
 		addFunc(
 			entry.callName,
-			paramW.map(extType),
-			resultW.map(extType),
+			paramW.map((w, i) => extType(w, paramDescs[i]?.is64)),
+			resultW.map((w, i) => extType(w, resultDescs[i]?.is64)),
 			[
-				...paramW.flatMap((w, i) => getIn(i, w)),
+				...paramW.flatMap((w, i) => getIn(i, w, paramDescs[i]?.is64)),
 				{ op: "call", funcIndex: fnIdx },
-				...convertResults(resultW, toExt, paramW.length),
+				...convertResults(resultW, toExt, paramW.length, resultDescs),
 			],
 			true,
 			resultW.length > 1 ? resultW : [],
@@ -1318,16 +1356,16 @@ export function addBoundaryHelpers(mod, meta) {
 	}
 
 	for (const [name, desc] of needs.anonStructs) {
-		const { info } = desc;
+		const { info, fields } = desc;
 		const ref = desc.wType;
 		const ti = info.typeIndex;
 		const fieldWTypes = info.fields.map((f) => f.wType);
 		addFunc(
 			`__new_${name}`,
-			fieldWTypes.map(extType),
+			fieldWTypes.map((w, i) => extType(w, fields[i]?.desc?.is64)),
 			[EXT],
 			[
-				...fieldWTypes.flatMap((w, i) => getIn(i, w)),
+				...fieldWTypes.flatMap((w, i) => getIn(i, w, fields[i]?.desc?.is64)),
 				{ op: "struct.new", typeIndex: ti },
 				...toExt(ref),
 			],
@@ -1344,23 +1382,24 @@ export function addBoundaryHelpers(mod, meta) {
 		);
 		for (let i = 0; i < info.fields.length; i++) {
 			const f = info.fields[i];
+			const is64 = Boolean(fields[i]?.desc?.is64);
 			addFunc(
 				`__get_${name}_${f.name}`,
 				[EXT],
-				[extType(f.wType)],
+				[extType(f.wType, is64)],
 				[
 					...getIn(0, ref),
 					{ op: "struct.get", typeIndex: ti, fieldIndex: i },
-					...toExt(f.wType),
+					...toExt(f.wType, is64),
 				],
 			);
 			addFunc(
 				`__set_${name}_${f.name}`,
-				[EXT, extType(f.wType)],
+				[EXT, extType(f.wType, is64)],
 				[],
 				[
 					...getIn(0, ref),
-					...getIn(1, f.wType),
+					...getIn(1, f.wType, is64),
 					{ op: "struct.set", typeIndex: ti, fieldIndex: i },
 				],
 			);
@@ -1368,15 +1407,20 @@ export function addBoundaryHelpers(mod, meta) {
 	}
 
 	for (const [key, desc] of needs.boxes) {
-		const { boxInfo } = desc;
+		const { boxInfo, base } = desc;
 		const ref = desc.wType;
 		const ti = boxInfo.typeIndex;
 		const w = boxInfo.wType;
+		const is64 = Boolean(base?.is64);
 		addFunc(
 			`__box_new_${key}`,
-			[extType(w)],
+			[extType(w, is64)],
 			[EXT],
-			[...getIn(0, w), { op: "struct.new", typeIndex: ti }, ...toExt(ref)],
+			[
+				...getIn(0, w, is64),
+				{ op: "struct.new", typeIndex: ti },
+				...toExt(ref),
+			],
 		);
 		const cast = {
 			op: "ref.cast",
@@ -1386,29 +1430,29 @@ export function addBoundaryHelpers(mod, meta) {
 		addFunc(
 			`__box_get_${key}`,
 			[EXT],
-			[extType(w)],
+			[extType(w, is64)],
 			[
 				...getIn(0, ref),
 				cast,
 				{ op: "struct.get", typeIndex: ti, fieldIndex: 0 },
-				...toExt(w),
+				...toExt(w, is64),
 			],
 		);
 		addFunc(
 			`__box_set_${key}`,
-			[EXT, extType(w)],
+			[EXT, extType(w, is64)],
 			[],
 			[
 				...getIn(0, ref),
 				cast,
-				...getIn(1, w),
+				...getIn(1, w, is64),
 				{ op: "struct.set", typeIndex: ti, fieldIndex: 0 },
 			],
 		);
 	}
 
 	for (const [key, desc] of needs.maps) {
-		const { mapInfo, keySliceDesc, valSliceDesc } = desc;
+		const { mapInfo, keySliceDesc, valSliceDesc, keyDesc, valDesc } = desc;
 		const makeIdx = mod.resolveFuncIndex(mapInfo.makeFuncName);
 		addFunc(
 			`__map_new_${key}`,
@@ -1419,12 +1463,16 @@ export function addBoundaryHelpers(mod, meta) {
 		const setIdx = mod.resolveFuncIndex(mapInfo.setFuncName);
 		addFunc(
 			`__map_set_${key}`,
-			[EXT, extType(mapInfo.keyWType), extType(mapInfo.valWType)],
+			[
+				EXT,
+				extType(mapInfo.keyWType, keyDesc?.is64),
+				extType(mapInfo.valWType, valDesc?.is64),
+			],
 			[],
 			[
 				...getIn(0, desc.wType),
-				...getIn(1, mapInfo.keyWType),
-				...getIn(2, mapInfo.valWType),
+				...getIn(1, mapInfo.keyWType, keyDesc?.is64),
+				...getIn(2, mapInfo.valWType, valDesc?.is64),
 				{ op: "call", funcIndex: setIdx },
 			],
 		);
@@ -1542,21 +1590,23 @@ export function addBoundaryHelpers(mod, meta) {
 		if (!c.dynamic) continue;
 		const g = mod.resolveGlobal(c.name);
 		if (!g) continue;
+		const is64 = Boolean(c.desc?.is64);
 		addFunc(
 			`__const_${c.name}`,
 			[],
-			[extType(c.desc.wType)],
-			[{ op: "global.get", index: g.index }, ...toExt(c.desc.wType)],
+			[extType(c.desc.wType, is64)],
+			[{ op: "global.get", index: g.index }, ...toExt(c.desc.wType, is64)],
 		);
 	}
 	for (const v of meta.vars ?? []) {
 		const g = v.shared ? null : mod.resolveGlobal(v.name);
 		if (!g) continue;
+		const is64 = Boolean(v.desc?.is64);
 		addFunc(
 			`__var_${v.name}`,
 			[],
-			[extType(v.desc.wType)],
-			[{ op: "global.get", index: g.index }, ...toExt(v.desc.wType)],
+			[extType(v.desc.wType, is64)],
+			[{ op: "global.get", index: g.index }, ...toExt(v.desc.wType, is64)],
 		);
 	}
 }
@@ -1633,7 +1683,7 @@ function inExpr(desc, v) {
 		case "i32":
 			return `(${v} | 0)`;
 		case "i64":
-			return `${P}i64in(${v})`;
+			return desc.is64 ? `BigInt(${v})` : `${P}i64in(${v})`;
 		case "f32":
 		case "f64":
 			return `(+${v})`;
@@ -1686,6 +1736,10 @@ function outExpr(desc, v) {
 		case "i32":
 			return desc.unsigned ? `(${v} >>> 0)` : v;
 		case "i64":
+			if (desc.is64)
+				return desc.unsigned
+					? `BigInt.asUintN(64, ${v})`
+					: `BigInt.asIntN(64, ${v})`;
 			return desc.unsigned ? `${P}u64out(${v})` : `${P}i64out(${v})`;
 		case "string":
 			return `(${v} ?? "")`;
@@ -1729,10 +1783,11 @@ function zeroExpr(desc) {
 		case "bool":
 			return "false";
 		case "i32":
-		case "i64":
 		case "f32":
 		case "f64":
 			return "0";
+		case "i64":
+			return desc.is64 ? "0n" : "0";
 		case "string":
 			return '""';
 		case "f32x4":

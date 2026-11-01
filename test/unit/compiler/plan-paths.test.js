@@ -34,8 +34,6 @@ const PLANS = [
 			"test/unit/stdlib/*",
 			// Sort and string-search benchmark (Task 4.3 "new").
 			"test/perf/stdlib-bench.js",
-			// int64 cost benchmark (Task 1.6 "new").
-			"test/perf/int64-bench.js",
 			// The Go files each migration task adds under stdlib/.  Files that
 			// exist today (for example stdlib/sort/sort.go) are not listed.
 			"stdlib/bytes/{buffer,bytes,reader}.go",

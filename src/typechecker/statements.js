@@ -19,6 +19,7 @@ import {
 	ANY,
 	BOOL,
 	defaultType,
+	is64BitInt,
 	isAny,
 	isBool,
 	isVoid,
@@ -359,10 +360,16 @@ export const statementCheckMethods = {
 		const inner = new Scope(scope);
 		if (stmt.init) this.checkStmt(stmt.init, inner, returnType);
 		if (stmt.tag) this.checkExpr(stmt.tag, inner);
+		const tagIs64 = stmt.tag && is64BitInt(stmt.tag._type);
 		this._switchDepth++;
 		for (const c of stmt.cases) {
 			const caseScope = new Scope(inner);
-			if (c.list) for (const e of c.list) this.checkExpr(e, caseScope);
+			if (c.list) {
+				for (const e of c.list) {
+					this.checkExpr(e, caseScope);
+					if (tagIs64 && e._type?.kind === "untyped") e._is64Bit = true;
+				}
+			}
 			for (const s of c.stmts) this.checkStmt(s, caseScope, returnType);
 			this._reportUnused(caseScope, stmt);
 		}

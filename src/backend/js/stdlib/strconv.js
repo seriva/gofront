@@ -23,7 +23,6 @@ const STRCONV_DISPATCH = {
 			"ParseInt",
 			a[0],
 			`__strconv_parse_int(${a[0]}, ${a[1]}, ${a[2] ?? 64})`,
-			"Number(r[0])",
 		),
 	ParseBool: (a) => parsed("ParseBool", a[0], `__strconv_parse_bool(${a[0]})`),
 	Quote: (a) => `JSON.stringify(${a[0]})`,
@@ -43,7 +42,6 @@ const STRCONV_DISPATCH = {
 			"ParseUint",
 			a[0],
 			`__strconv_parse_uint(${a[0]}, ${a[1]}, ${a[2] ?? 64})`,
-			"Number(r[0])",
 		),
 };
 
