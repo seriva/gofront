@@ -1,7 +1,8 @@
 # Stdlib in Go — Design Plan
 
 **Version:** v1.9.0  
-**Status:** Draft (2026-10-23; revised 2026-10-27 for the v1.8.0 simplification; re-audited 2026-10-29; re-audited 2026-11-01 on v1.8.0)  
+**Status:** In Progress  
+**Base branch:** main  
 **Related:** Follows [`../v1.8.0/portable-go-plan.md`](../v1.8.0/portable-go-plan.md) (Go-source stdlib loader, overlays, reachability, `//gofront:intrinsic`; its Phase 8 retired the coverage manifest and the real-Go conformance harness, so this plan verifies with pasted Go-output unit cases), [`../v1.8.0/repo-structure-plan.md`](../v1.8.0/repo-structure-plan.md) (layout), and [`../v1.8.0/follow-up-fixes-plan.md`](../v1.8.0/follow-up-fixes-plan.md) (Completed 2026-10-30; its Boundary Matrix deferred stdlib-member bugs and the JS `uint64` representation limit to this plan, absorbed below). The v2.0.0 native engine is shelved, so this is an ordinary feature release.  
 **Release note:** Sorting now matches Go on both targets: `NaN` values sort first, equal elements keep Go's order, and WebAssembly sorts of large slices are fast instead of quadratic. Most standard-library packages now follow Go's real signatures and behaviour, so generic helpers such as `slices` and `maps` work with named slice and map types, and many small differences from Go in `strings`, `bytes`, `io`, `errors`, `strconv` and `time` are gone. `int64` and `uint64` are now exact in JavaScript output: they are BigInt values there, including across the WebAssembly boundary, while `int` stays a JavaScript number.  
 
