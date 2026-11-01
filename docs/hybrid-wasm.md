@@ -106,6 +106,7 @@ copies agree bit-for-bit:
 | Construct | JS emission |
 |---|---|
 | `float32` arithmetic | `Math.fround(a op b)` |
+| `int64` / `uint64` arithmetic | `BigInt.asIntN(64, …)` / `BigInt.asUintN(64, …)`; exact on all targets (hot loops should use `int`) |
 | `int32` / `uint32` arithmetic | `(a op b) \| 0` / `(a op b) >>> 0`; `Math.imul` for `*` |
 | `int8` / `int16` / `uint8` / `uint16` | masked and sign-extended to width |
 | Integer `/`, `%` by zero | panics |
@@ -195,7 +196,8 @@ compile error.
 
 | Go type | Crossing JS → WASM / WASM → JS |
 |---|---|
-| `bool`, `float32`, `float64`, sized ints | Converted directly. `int`/`int64` are a JS `Number` on the JS side. |
+| `bool`, `float32`, `float64`, narrow ints, `int`/`uint` | Converted directly as JS `Number`. |
+| `int64`, `uint64` | Passed as JS `BigInt` across the boundary (matching WebAssembly JS API `i64`). |
 | `string`, `any` | Passed through. |
 | Struct from a `both` package (`T`, `*T`) | Copied into its JS class. `*T` parameters are written back after the call. |
 | Struct from a `wasm` package (`T`, `*T`) | Opaque **handle** class with stable identity. Scalar fields are read/written through accessors; aggregate fields (`b.Pos.X = 1`, `b.Tags[0] = 2`) are live views, so writes reach WASM memory. |
@@ -212,7 +214,7 @@ compile error.
 | Anonymous structs | Copied as plain JS objects `{ [field]: value }` with the same field names. |
 | Anonymous interfaces (`interface{ … }`) | Keyed on the sorted method set; identical method sets share the same facade class. Same JS → WASM rule as named interfaces (only WASM-owned values). |
 | Exported non-literal constants | Exposed on the facade as module constants read once after the `start` function runs. |
-| `time.Duration` | Nanoseconds crossing as a JS `Number` (`int64`). |
+| `time.Duration` | Nanoseconds crossing as a JS `BigInt` (`int64`). |
 | `time.Time` | Copied into the JS backend's `time.Time` object via Unix milliseconds (preserving timezone offset). Rounded to the JS shim's millisecond precision. |
 | `chan` | **Rejected** with `chan is not yet supported across the wasm boundary (planned)`. |
 

@@ -172,7 +172,7 @@ func Index(s, substr string) int { /* Go body: the specification */ }
 | `src/typechecker/stdlib/{core,extended}.js` | 2,289 lines | ≤ 1,500 |
 | `src/backend/js/stdlib/` | 4,003 lines | ≤ 2,400 |
 | `npm run bench`, `test/perf/zero-alloc.js`, `test/perf/bce-mathx.js` | `9e22f74` numbers | unchanged (±3%) after every phase |
-| JS `int64` add/multiply loop vs the same loop on `int`, 10⁷ iterations (`test/perf/int64-bench.js`) | ≈20× (micro-benchmark, Verified Gaps) | ≤ 25× (Task 1.6) |
+| JS `int64` add/multiply loop vs the same loop on `int`, 10⁷ iterations (`test/perf/int64-bench.js`) | 14.3× (measured in Task 1.6) | ≤ 25× (Task 1.6) |
 
 ### 3. Edge Cases & Error Handling
 
@@ -253,7 +253,7 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
   - Test: `test/unit/builtins/stdlib.test.js` — `bits.OnesCount64(1<<63 | 1)` → `2`, `bits.Mul64(1<<32, 1<<32)` → `1 0`, `math.Float64bits(1.0)` as `uint64` BigInt, `math.FMA` unchanged, `rand.Int63()` and `rand.Int63n(1 << 40)`.
   - Done when: cases pass on `js`, `both` and `wasm` and `npm test` is green.
 
-- [ ] **Task 1.6 — Docs and the `int64` cost bound**
+- [x] **Task 1.6 — Docs and the `int64` cost bound**
   - Files: `docs/language-support.md`, `docs/go-compatibility.md`, `docs/hybrid-wasm.md`
   - Do: say that `int64`/`uint64` are exact on every target and are BigInt in JS output and across the WASM facade, that `int`/`uint` stay JS numbers exact up to 2⁵³, and that hot loops should use `int`; update the boundary type table (`int64`, `uint64`, `time.Duration` cross as BigInt). Add new `test/perf/int64-bench.js` (an `int64` add/multiply loop against the same loop on `int`, 10⁷ iterations) and record its ratio in [§2](#2-invariants--safety-bounds).
   - Test: `test/unit/compiler/plan-paths.test.js` and the `language-support.md` fixture rows pass; `node test/perf/int64-bench.js` prints the ratio.
