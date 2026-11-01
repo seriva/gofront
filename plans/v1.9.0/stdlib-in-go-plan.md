@@ -293,7 +293,7 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
 
 ### Phase 3: Natives, differential testing and lazy checking
 
-- [ ] **Task 3.1 — `//gofront:native` directive and name set**
+- [x] **Task 3.1 — `//gofront:native` directive and name set**
   - Files: `src/lexer/lexer.js`, `src/parser/declarations.js`, `src/typechecker/types.js` (`NATIVES` beside `INTRINSICS`), `src/typechecker/index.js:1135`
   - Do: parse `//gofront:native <name>` before a func with a body, like `//gofront:intrinsic`; reject an unknown name, a native on a body-less func, and use outside `stdlib/`.
   - Test: `test/unit/compiler/stdlib-go.test.js` — `unknown native 'x'`, the body-less error, `//gofront:native is reserved for the standard library` (user package), via a temp-dir stdlib root; a valid test-only name compiles.

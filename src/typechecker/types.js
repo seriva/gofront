@@ -696,6 +696,11 @@ export const VALID_TARGETS = new Set(["js", "wasm", "both"]);
 // intrinsics need a plan change.
 export const INTRINSICS = new Map([]);
 
+// Names a standard-library function may carry in `//gofront:native <name>`:
+// the function keeps its Go body, and a backend registry may replace calls to
+// it with host code (or decline).  A closed set; new names need a plan change.
+export const NATIVES = new Set([]);
+
 // ── Static operator sets (module-level for reuse) ────────────
 export const CMP_OPS = new Set(["==", "!=", "<", ">", "<=", ">="]);
 export const LOG_OPS = new Set(["&&", "||"]);

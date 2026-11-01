@@ -34,10 +34,12 @@ export const declarationParseMethods = {
 			this.expect(T.RPAREN);
 			const name = this.expect(T.IDENT).value;
 			const { params, returnType } = this.parseSignature();
+			const native = this.tokens?.natives?.get(_line - 1) ?? null;
 			const body = this.parseBlock();
 			this.semi();
 			return {
 				kind: "MethodDecl",
+				...(native && { native }),
 				recvName,
 				recvType,
 				recvPointer,
@@ -59,7 +61,11 @@ export const declarationParseMethods = {
 		// `//gofront:intrinsic name` on the line before a body-less func: the
 		// backend provides the implementation; every pass sees an empty body.
 		const intrinsic = this.tokens?.intrinsics?.get(_line - 1) ?? null;
-		const bodyless = intrinsic !== null && !this.check(T.LBRACE);
+		// `//gofront:native name` marks a func that keeps its Go body; a
+		// body-less one parses (and is rejected by the checker).
+		const native = this.tokens?.natives?.get(_line - 1) ?? null;
+		const bodyless =
+			(intrinsic !== null || native !== null) && !this.check(T.LBRACE);
 		const body = bodyless ? { kind: "Block", stmts: [] } : this.parseBlock();
 		this.semi();
 		return {
@@ -70,6 +76,7 @@ export const declarationParseMethods = {
 			returnType,
 			body,
 			...(intrinsic && { intrinsic, _bodyless: bodyless }),
+			...(native && { native, _bodyless: bodyless }),
 			_line,
 		};
 	},

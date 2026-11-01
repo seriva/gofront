@@ -27,6 +27,7 @@ import {
 	isAny,
 	isBool,
 	isVoid,
+	NATIVES,
 	Scope,
 	TAINTED_ANY,
 	TypeCheckError,
@@ -1147,8 +1148,26 @@ export class TypeChecker {
 			);
 	}
 
+	_checkNative(decl) {
+		if (!this.isStdlib)
+			return this.err(
+				"//gofront:native is reserved for the standard library",
+				decl,
+			);
+		if (decl.kind !== "FuncDecl")
+			return this.err(
+				`native '${decl.native}' must mark a function, not a method`,
+				decl,
+			);
+		if (!NATIVES.has(decl.native))
+			return this.err(`unknown native '${decl.native}'`, decl);
+		if (decl._bodyless)
+			this.err(`native '${decl.native}' must have a Go body`, decl);
+	}
+
 	checkFuncDecl(decl, outer) {
 		if (decl.intrinsic) this._checkIntrinsic(decl);
+		if (decl.native) this._checkNative(decl);
 		if (
 			(this.target === "wasm" || this.target === "both") &&
 			(decl.async || decl.isAsync)
@@ -1173,6 +1192,7 @@ export class TypeChecker {
 	}
 
 	checkMethodDecl(decl, outer) {
+		if (decl.native) this._checkNative(decl);
 		if (
 			(this.target === "wasm" || this.target === "both") &&
 			(decl.async || decl.isAsync)

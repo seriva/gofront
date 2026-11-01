@@ -1,7 +1,7 @@
 // Go-source stdlib: packages written in GoFront Go under stdlib/,
 // compiled into the caller's target (js, wasm, or both).
 
-import { STDLIB_PACKAGES } from "../../../src/typechecker/types.js";
+import { NATIVES, STDLIB_PACKAGES } from "../../../src/typechecker/types.js";
 import {
 	assert,
 	assertContains,
@@ -847,4 +847,88 @@ func Run() string {
 }
 `);
 	assertEqual(out, 'true HÉLLO "é" 0.5 4 8 3 0.25 7 7 2 4 5');
+});
+
+section("Go-source stdlib: //gofront:native");
+
+// A test-only native name; the production set is closed (see NATIVES).
+NATIVES.add("str.Index");
+
+const STR_PKG = `//go:build gofront
+
+//gofront:target both
+
+package str
+
+//gofront:native str.Index
+func Index(s, sub string) int {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return i
+		}
+	}
+	return -1
+}
+`;
+
+const STR_APP = `package main\n\nimport "str"\n\nfunc main() { println(str.Index("hello", "ll")) }\n`;
+
+function compileWithStr(pkg, app = STR_APP) {
+	return withTempDir({ "stdlib/str/str.go": pkg, "app/main.go": app }, (dir) =>
+		compileDir(join(dir, "app"), { stdlibRoot: join(dir, "stdlib") }),
+	);
+}
+
+test("an unknown native name is rejected", () => {
+	assertThrows(
+		() => compileWithStr(STR_PKG.replace("str.Index\n", "x\n")),
+		"unknown native 'x'",
+	);
+});
+
+test("a native on a body-less func is rejected", () => {
+	assertThrows(
+		() =>
+			compileWithStr(
+				STR_PKG.replace(
+					/func Index[\s\S]*$/,
+					"func Index(s, sub string) int\n",
+				),
+			),
+		"native 'str.Index' must have a Go body",
+	);
+});
+
+test("a native outside the standard library is rejected", () => {
+	const src = `package main
+
+//gofront:native str.Index
+func idx(s, sub string) int { return 0 }
+
+func main() { println(idx("a", "b")) }
+`;
+	assertErrorContains(
+		compile(src).errors,
+		"//gofront:native is reserved for the standard library",
+	);
+});
+
+test("a native on a method is rejected", () => {
+	assertThrows(
+		() =>
+			compileWithStr(
+				`${STR_PKG}
+type T struct{}
+
+//gofront:native str.Index
+func (T) M() {}
+`,
+			),
+		"must mark a function, not a method",
+	);
+});
+
+test("a registered native name compiles", () => {
+	const res = compileWithStr(STR_PKG);
+	assert(res.js.includes("Index$$str"), "the Go body is still emitted");
 });
