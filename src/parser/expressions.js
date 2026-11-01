@@ -259,6 +259,9 @@ export const expressionParserMethods = {
 			while (this.match(T.COMMA)) typeArgs.push(this.parseType());
 			this.expect(T.RBRACKET);
 			if (!startsLiteral && typeArgs.length < 2) throw new Error("not types");
+			// `a[foo, bar]` is not an instantiation: names alone need a literal.
+			if (!startsLiteral && typeArgs.every((a) => a.kind === "TypeName"))
+				throw new Error("not type literals");
 			return typeArgs;
 		} catch {
 			this.pos = start;

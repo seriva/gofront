@@ -8,7 +8,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 ## [Unreleased]
 
 ### Added
-- **Generics over named slice and map types**: functions declared with `[S ~[]E, E any]` or `[M ~map[K]V, K comparable, V any]` can now index, slice, range over, `append` to, `make` and convert their parameter, infer `E`, `K` and `V` from the argument, and run in WebAssembly with named types such as `type IDs []int`. Type arguments can be written as type literals, for example `Index[[]int, int]`.
+- **Exact 64-bit integers and generics over named slice and map types**: `int64` and `uint64` are now exact BigInt values in JavaScript output, including across the WebAssembly boundary, while `int` stays a JavaScript number. Functions declared with `[S ~[]E, E any]` or `[M ~map[K]V, K comparable, V any]` now work with named types such as `type IDs []int` on both backends, with type arguments writable as type literals like `Index[[]int, int]`.
 
 ## [1.8.0] - 2026-10-30
 
