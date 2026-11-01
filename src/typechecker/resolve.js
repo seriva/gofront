@@ -598,10 +598,30 @@ export const resolveMethods = {
 		const params = genericType.underlying.params;
 		for (let i = 0; i < params.length && i < argTypes.length; i++)
 			this._inferFromPair(params[i], argTypes[i], map);
+		this._inferFromCoreTypes(genericType.typeParams, map);
 		for (const tp of genericType.typeParams) {
 			if (!map.has(tp.name)) return null;
 		}
 		return genericType.typeParams.map((tp) => defaultType(map.get(tp.name)));
+	},
+
+	// Constraint type inference: a type parameter `S` constrained by `~[]E`
+	// whose argument is known unifies `E` with that argument's element type.
+	_inferFromCoreTypes(typeParams, map) {
+		const scope = new Scope(this.globals);
+		for (const tp of typeParams) scope.define(tp.name, tp);
+		for (let round = 0; round < typeParams.length; round++) {
+			const before = map.size;
+			for (const tp of typeParams) {
+				const arg = map.get(tp.name);
+				if (!arg || !tp.constraint) continue;
+				const terms = this._constraintTerms(tp.constraint, new Set(), scope);
+				if (terms?.length !== 1) continue;
+				const argUnder = this._deepUnderlying(this.resolveType(arg));
+				if (argUnder) this._inferFromPair(terms[0], argUnder, map);
+			}
+			if (map.size === before) break;
+		}
 	},
 
 	_inferFromFuncPair(paramType, argType, map) {

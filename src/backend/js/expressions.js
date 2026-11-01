@@ -2121,9 +2121,10 @@ export const expressionGenMethods = {
 		const typeNode = typeArg.kind === "TypeExpr" ? typeArg.type : typeArg;
 		// A defined type (`type S []int`) makes like its underlying type.
 		const madeType =
-			typeArg._type?.kind === "named"
+			typeArg._coreType ??
+			(typeArg._type?.kind === "named"
 				? typeArg._type.underlying
-				: typeArg._type;
+				: typeArg._type);
 		const resolvedKind = madeType?.kind;
 		if (typeNode.kind === "SliceType" || resolvedKind === "slice") {
 			let n = expr.args[1] ? this.genExpr(expr.args[1]) : "0";

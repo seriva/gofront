@@ -1189,3 +1189,77 @@ b a
 `,
 	);
 });
+
+section("WASM Generics — named slice and map type arguments");
+
+test("append of S, a method on a returned S and make(S) match Go", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type IDs []int
+
+func (s IDs) Sum() int {
+	t := 0
+	for _, v := range s {
+		t += v
+	}
+	return t
+}
+
+func Id[S ~[]E, E any](s S) S { return append(s, s...) }
+func Tail[S ~[]E, E any](s S) S { return s[1:] }
+func Mk[S ~[]E, E any](n int) S { return make(S, n) }
+func Lit[S ~[]E, E any](a, b E) S { return S{a, b} }
+func First[S ~[]E, E any](s S) E { return s[0] }
+
+func main() {
+	fmt.Println(Id[IDs, int](IDs{1, 2}).Sum())
+	fmt.Println(Tail[IDs, int](IDs{1, 2, 3}).Sum())
+	fmt.Println(len(Mk[IDs, int](3)))
+	fmt.Println(Lit[IDs, int](3, 4).Sum())
+	fmt.Println(First(IDs{7, 8}), First([]string{"a"}))
+}
+`,
+		"6\n5\n3\n7\n7 a\n",
+	);
+});
+
+test("M ~map[K]V over a named map type matches Go", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type Set map[string]bool
+
+func Clone[M ~map[K]V, K comparable, V any](m M) M {
+	out := make(M, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+func Has[M ~map[K]V, K comparable, V any](m M, k K) bool {
+	_, ok := m[k]
+	return ok
+}
+func Count[M ~map[K]V, K comparable, V any](m M) int {
+	n := 0
+	for range m {
+		n++
+	}
+	return n
+}
+
+func main() {
+	s := Set{"a": true, "b": true}
+	c := Clone(s)
+	c["z"] = true
+	fmt.Println(len(s), len(c), Has(c, "z"), Has(s, "z"), Count(c))
+}
+`,
+		"2 3 true false 3\n",
+	);
+});

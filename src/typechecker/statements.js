@@ -98,8 +98,7 @@ export const statementCheckMethods = {
 		)
 			return false;
 		const mapBaseType = this.checkExpr(stmt.rhs[0].expr, scope);
-		const resolvedBase =
-			mapBaseType?.kind === "named" ? mapBaseType.underlying : mapBaseType;
+		const resolvedBase = this._underlyingOrCore(mapBaseType, scope);
 		if (resolvedBase?.kind !== "map") return false;
 		const keyType = this.checkExpr(stmt.rhs[0].index, scope);
 		this._markIfaceKey(resolvedBase, stmt.rhs[0].index, keyType);
@@ -157,8 +156,7 @@ export const statementCheckMethods = {
 		)
 			return null;
 		const mapBaseType = this.checkExpr(stmt.rhs[0].expr, scope);
-		const resolvedBase =
-			mapBaseType?.kind === "named" ? mapBaseType.underlying : mapBaseType;
+		const resolvedBase = this._underlyingOrCore(mapBaseType, scope);
 		if (resolvedBase?.kind !== "map") return null;
 		const keyType = this.checkExpr(stmt.rhs[0].index, scope);
 		this._markIfaceKey(resolvedBase, stmt.rhs[0].index, keyType);
@@ -322,6 +320,8 @@ export const statementCheckMethods = {
 				this.err("For condition must be bool", stmt);
 		} else {
 			const ct = this.checkExpr(stmt.cond.expr, inner);
+			const core = ct?.kind === "typeParam" ? this._coreType(ct, inner) : null;
+			if (core) stmt.cond.expr._coreType = core;
 			const info = iteratorYieldParams(ct);
 			if (info) {
 				stmt.cond._isIterator = true;

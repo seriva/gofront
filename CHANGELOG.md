@@ -5,6 +5,11 @@ All notable changes to this project will be documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
+## [Unreleased]
+
+### Added
+- **Generics over named slice and map types**: functions declared with `[S ~[]E, E any]` or `[M ~map[K]V, K comparable, V any]` can now index, slice, range over, `append` to, `make` and convert their parameter, infer `E`, `K` and `V` from the argument, and run in WebAssembly with named types such as `type IDs []int`. Type arguments can be written as type literals, for example `Index[[]int, int]`.
+
 ## [1.8.0] - 2026-10-30
 
 ### Added
