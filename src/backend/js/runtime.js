@@ -799,6 +799,7 @@ var __sprintf = __sprintf || function(f, ...a) {
           const entries = Array.from(val.entries()).sort(([a], [b]) => {
             const k1 = raw(a), k2 = raw(b);
             if (typeof k1 === "number" && typeof k2 === "number") return k1 - k2;
+            if (typeof k1 === "bigint" && typeof k2 === "bigint") return k1 < k2 ? -1 : k1 > k2 ? 1 : 0;
             // Struct and array keys compare field by field, as in Go.
             if (k1 !== null && k2 !== null && typeof k1 === "object" && typeof k2 === "object" && !k1.__p && !k2.__p) {
               const cmp = (x, y) => {
@@ -828,6 +829,12 @@ var __sprintf = __sprintf || function(f, ...a) {
             // Struct keys (encoded, see __sk) sort field by field, as in Go.
             if (a.charCodeAt(0) === 1 && b.charCodeAt(0) === 1 && typeof __kd === "function")
               return __kcmp(__kd(a), __kd(b));
+            if (/^-?\\d+$/.test(a) && /^-?\\d+$/.test(b)) {
+              try {
+                const ba = BigInt(a), bb = BigInt(b);
+                return ba < bb ? -1 : ba > bb ? 1 : 0;
+              } catch (_) {}
+            }
             const na = Number(a), nb = Number(b);
             if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
             if (a[0] === "{" && b[0] === "{") {
@@ -848,7 +855,15 @@ var __sprintf = __sprintf || function(f, ...a) {
             if (isElemPtr && v !== null && typeof v === "object") {
               markPtr(v);
             }
-            const kv = k.charCodeAt(0) === 1 && typeof __kd === "function" ? __kd(k) : ((sd && __fmtu.isNumKey(sd.key)) || cd?.k?.n) ? Number(k) : k;
+            const bkd = sd ? __fmtu.baseOf(sd.key) : null;
+            const is64 = bkd?.k === "b" && (bkd.n === "int64" || bkd.n === "uint64");
+            const kv = k.charCodeAt(0) === 1 && typeof __kd === "function"
+              ? __kd(k)
+              : is64
+                ? BigInt(k)
+                : ((sd && __fmtu.isNumKey(sd.key)) || cd?.k?.n)
+                  ? (/^-?\\d+$/.test(k) && (BigInt(k) > 9007199254740991n || BigInt(k) < -9007199254740991n) ? BigInt(k) : Number(k))
+                  : k;
             parts.push(formatV(kv, isPlus, false, ro, both(sd?.key, cd?.k), cd?.k?.sv === 1) + ":" + formatV(v, isPlus, false, ro, both(sd?.val, cd?.v), cd?.v?.sv === 1));
           }
         }
@@ -2739,7 +2754,7 @@ var __json_number_value = __json_number_value || function(v) {
   return typeof v === "string" && v.endsWith("__bigint") ? Number(v.slice(0, -8)) : v;
 };
 var __json_int_decode = __json_int_decode || function(v, typeName, ctxType, raw) {
-  var type = typeof v === "string" && v.endsWith("__bigint") ? "number" : __json_type(v);
+  var type = typeof v === "string" && v.endsWith("__bigint") ? "number" : typeof v === "bigint" ? "number" : __json_type(v);
   var fail = function() {
     return __json_err("cannot unmarshal " + (type === "number" ? "number " + __json_lit(v, raw) : type) + " into " + __json_ctx(ctxType));
   };
@@ -2749,7 +2764,9 @@ var __json_int_decode = __json_int_decode || function(v, typeName, ctxType, raw)
   var integer;
   var signed = typeName === "int" || typeName.startsWith("int");
   if (typeName === "int64" || typeName === "uint64") {
-    if (typeof v === "string" && v.endsWith("__bigint")) {
+    if (typeof v === "bigint") {
+      integer = v;
+    } else if (typeof v === "string" && v.endsWith("__bigint")) {
       try { integer = BigInt(v.slice(0, -8)); } catch (_) {}
     } else if (typeof v === "number" && Number.isSafeInteger(v)) {
       integer = BigInt(v);
@@ -2761,13 +2778,23 @@ var __json_int_decode = __json_int_decode || function(v, typeName, ctxType, raw)
     }
     return fail();
   }
-  if (typeof v === "number" && Number.isSafeInteger(v)) {
-    if (typeName === "int") return v;
+  if (typeof v === "bigint") {
+    integer = v;
+  } else if (typeof v === "string" && v.endsWith("__bigint")) {
+    try { integer = BigInt(v.slice(0, -8)); } catch (_) {}
+  } else if (typeof v === "number" && Number.isSafeInteger(v)) {
+    integer = BigInt(v);
+  }
+  if (integer !== undefined) {
+    if (typeName === "int") {
+      if (integer >= -9007199254740991n && integer <= 9007199254740991n) return Number(integer);
+      return fail();
+    }
     var bits = typeName === "uint" ? 53 : Number(typeName.replace(/^(u?int|byte|rune)/, ""));
     if (!bits) bits = typeName === "byte" ? 8 : typeName === "rune" ? 32 : 53;
-    var min = signed ? -(2 ** (bits - 1)) : 0;
-    var max = signed ? (2 ** (bits - 1)) - 1 : (2 ** bits) - 1;
-    if (v >= min && v <= max) return v;
+    var min = signed ? -(1n << BigInt(bits - 1)) : 0n;
+    var max = signed ? (1n << BigInt(bits - 1)) - 1n : (1n << BigInt(bits)) - 1n;
+    if (integer >= min && integer <= max) return Number(integer);
   }
   return fail();
 };

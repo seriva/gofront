@@ -3,6 +3,10 @@
 
 import { fileURLToPath } from "node:url";
 import {
+	HELPER_SPRINTF,
+	HELPER_STRUCT_KEY,
+} from "../../../src/backend/js/runtime.js";
+import {
 	assertEqual,
 	assertProgramOutput,
 	compile,
@@ -1200,6 +1204,62 @@ func g() (*T, T, float32, uint32, any) { return &T{2}, T{3}, 0.1, 4000000000, ui
 		),
 		"&{2} {3} 0.1 4000000000 9223372036854775808",
 	);
+});
+
+section("fmt BigInt formatting and key encoding helpers (Task 1.2)");
+
+test("BigInt with fmt verbs (%d %x %X %o %O %b %c %q %U %v, width and flags)", () => {
+	const sprintf = new Function(`${HELPER_SPRINTF}; return __sprintf;`)();
+	const max64 = 9223372036854775807n;
+	const min64 = -9223372036854775808n;
+	const umax64 = 18446744073709551615n;
+
+	assertEqual(sprintf("%d", max64), "9223372036854775807");
+	assertEqual(sprintf("%d", min64), "-9223372036854775808");
+	assertEqual(sprintf("%d", umax64), "18446744073709551615");
+	assertEqual(sprintf("%x", max64), "7fffffffffffffff");
+	assertEqual(sprintf("%X", max64), "7FFFFFFFFFFFFFFF");
+	assertEqual(sprintf("%o", max64), "777777777777777777777");
+	assertEqual(sprintf("%O", max64), "0o777777777777777777777");
+	assertEqual(sprintf("%b", 15n), "1111");
+	assertEqual(sprintf("%b", -15n), "-1111");
+	assertEqual(sprintf("%c", 65n), "A");
+	assertEqual(sprintf("%q", 65n), "'A'");
+	assertEqual(sprintf("%U", 65n), "U+0041");
+	assertEqual(sprintf("%#U", 65n), "U+0041 'A'");
+	assertEqual(sprintf("%U", -1n), "U+FFFFFFFFFFFFFFFF");
+	assertEqual(sprintf("%U", 1n << 60n), "U+1000000000000000");
+	assertEqual(sprintf("%v", max64), "9223372036854775807");
+	assertEqual(sprintf("%22d", max64), "   9223372036854775807");
+	assertEqual(sprintf("%-22d", max64), "9223372036854775807   ");
+	assertEqual(sprintf("%022d", max64), "0009223372036854775807");
+	assertEqual(sprintf("%+d", max64), "+9223372036854775807");
+	assertEqual(sprintf("% d", max64), " 9223372036854775807");
+	assertEqual(sprintf("%+d", min64), "-9223372036854775808");
+	assertEqual(sprintf("%f", 42n), "%!f(int64=42)");
+});
+
+test("BigInt and struct keys encoding and comparison helpers", () => {
+	const code = `
+${HELPER_STRUCT_KEY};
+const s1 = { A: 1n, toString() { return __sk(this); } };
+const s2 = { A: 2n, toString() { return __sk(this); } };
+const m = { [s1]: 10, [s2]: 20 };
+return {
+  keysLen: Object.keys(m).length,
+  ik: __ik(123n),
+  kd: __kd(__ik(123n)),
+  kcmpEq: __kcmp(s1, s1),
+  kcmpLt: __kcmp(s1, s2),
+  kcmpGt: __kcmp(s2, s1),
+};`;
+	const res = new Function(code)();
+	assertEqual(res.keysLen, 2);
+	assertEqual(res.ik, "\u0001bigint:123");
+	assertEqual(res.kd, 123n);
+	assertEqual(res.kcmpEq, 0);
+	assertEqual(res.kcmpLt, -1);
+	assertEqual(res.kcmpGt, 1);
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

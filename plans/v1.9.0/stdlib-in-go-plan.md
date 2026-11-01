@@ -229,7 +229,7 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
   - Test: `test/unit/types/generics.test.js` — `Clone[T any]` over `[]P{{1}}` appending each `range` value, then `b[0].V = 9` → `[{1}] [{9}]`; `func (l List[T]) Map(f func(T) T) (out List[T])` with a callback doing `p.Val *= 10` on a `Pair` leaves the source `[{a 1} {b 2}]`.
   - Done when: value-copy cases match Go on `js`, `both` and `wasm` and `npm test` is green.
 
-- [ ] **Task 1.2 — BigInt through the JS runtime: fmt, `any`, map keys, JSON**
+- [x] **Task 1.2 — BigInt through the JS runtime: fmt, `any`, map keys, JSON**
   - Files: `src/backend/js/fmt-runtime.js`, `src/backend/js/runtime.js` (key encoding, interface boxing, `__json_*`), `src/backend/js/type-info.js` (basic-type checks in type switches and assertions)
   - Do: work through the audit list in Edge Cases so the runtime accepts BigInt before codegen flips. fmt verbs (`%d %x %X %o %O %b %c %q %U %v`, width and flags) and `print`/`println` accept BigInt; 64-bit map keys and struct keys with 64-bit fields encode without `JSON.stringify` throwing and range back as BigInt; `encoding/json` writes all digits of 64-bit integers and `__json_int_decode` decodes `int64`/`uint64` into BigInt with Go's range errors.
   - Test: `test/unit/builtins/fmt-verbs.test.js` and `test/unit/builtins/json.test.js` unit checks for BigInt formatting, key encoding and JSON encode/decode helpers.
