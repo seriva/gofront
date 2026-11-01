@@ -2,6 +2,7 @@
 // Pre-scan helpers: walk the lowered AST to decide which imports, runtime helpers
 // and interface dispatchers a module needs before emission starts.
 
+import { prepareWasmNative } from "./natives.js";
 import { BINARY_MATH_IMPORTS } from "./stdlib/core.js";
 import {
 	anonIfaceName,
@@ -169,6 +170,7 @@ export function _scanImportsInBody(node, mod) {
 
 	if (node.kind === "CallExpr") {
 		const { func, args } = node;
+		prepareWasmNative(mod, node);
 		if ((args ?? []).some((a) => a._spread || typeMayHoldU64(a._type, mod))) {
 			mod.getFmtBoxU64Index();
 		}

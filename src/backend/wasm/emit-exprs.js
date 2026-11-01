@@ -11,6 +11,7 @@ import {
 	compositeLitIndices,
 	compositeLitMaxIndex,
 } from "../../typechecker/types.js";
+import { emitWasmNative } from "./natives.js";
 import {
 	getMapKeyValTypes,
 	isAnyType,
@@ -240,7 +241,8 @@ export class ExprsEmitter {
 				break;
 
 			case "CallExpr":
-				this.emitCallExpr(expr, targetWasmType);
+				if (!emitWasmNative(this, expr, targetWasmType))
+					this.emitCallExpr(expr, targetWasmType);
 				break;
 
 			case "TypeConversion":

@@ -305,7 +305,7 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
   - Test: `stdlib-go.test.js` — a test-only native `str.Index` emits `.indexOf(`; `f := str.Index; f(a, b)` calls the Go body; a template that declines for `float64` calls the Go body; `str.Index(next(), next())` evaluates each argument once, in order.
   - Done when: all four assertions pass on the generated JS.
 
-- [ ] **Task 3.3 — WASM call-site substitution**
+- [x] **Task 3.3 — WASM call-site substitution**
   - Files: `src/backend/wasm/emit-exprs.js`, new `src/backend/wasm/natives.js`
   - Do: the same contract for WASM; an implementation pushes instructions or a host-import call and returns `true`, or `false` to decline. The Go body is emitted whenever reachable.
   - Test: `test/unit/wasm/stdlib.test.js` — a test-only native calling an import; decline and value-fallback cases as parity tests against the Go body.

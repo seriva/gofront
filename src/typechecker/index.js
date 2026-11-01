@@ -1150,7 +1150,7 @@ export class TypeChecker {
 	}
 
 	_checkNative(decl) {
-		if (!this.isStdlib)
+		if (!this.isStdlib && !this.nativesChecked)
 			return this.err(
 				"//gofront:native is reserved for the standard library",
 				decl,
