@@ -261,31 +261,31 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
 
 ### Phase 2: Generic core types
 
-- [ ] **Task 2.1 — Core type of a constrained type parameter in expressions**
+- [x] **Task 2.1 — Core type of a constrained type parameter in expressions**
   - Files: `src/typechecker/types.js` (`coreType`), `src/typechecker/expressions.js`, `src/typechecker/statements.js` (`range`)
   - Do: for a type parameter whose constraint has one underlying type (`~[]E`, `~map[K]V`), use it for index, slice, `range`, `len`, `cap`, `append`, `copy`, `make(S, n)` and composite literals. A constraint with several underlying types keeps `Cannot index type S`.
   - Test: `test/unit/types/generics.test.js` — `First`, `Tail`, `Len`, `make(S, n)` over `[S ~[]E, E any]` and `[M ~map[K]V, K comparable, V any]` called with explicit type arguments; negative: `[T int | string]` indexing keeps its message.
   - Done when: `First[[]int, int]`-style calls print Go's output via `assertProgramOutput` on JS and WASM.
 
-- [ ] **Task 2.2 — Constraint type inference and conversions through core types**
+- [x] **Task 2.2 — Constraint type inference and conversions through core types**
   - Files: `src/typechecker/resolve.js` (unification), `src/typechecker/expressions.js`
   - Do: unify `S`'s core type with the argument's underlying type to derive `E`/`K`/`V`; `S(nil)` and `S(x)` convert when the core type accepts the operand; a call returning `S` has the argument's named type.
   - Test: `generics.test.js` — `First([]int{7, 8})` → `7`; `Z([]int{1}) == nil` → `true`; `Len(map[string]int{"a": 1})` → `1`; `Id(IDs{1, 2}).Sum()` with a method on `IDs` → `3`.
   - Done when: none of these reports `Cannot infer type arguments` or `cannot convert nil to S`, and all print Go's output on JS.
 
-- [ ] **Task 2.3 — Type-literal type arguments in explicit instantiation**
+- [x] **Task 2.3 — Type-literal type arguments in explicit instantiation**
   - Files: `src/parser/expressions.js`
   - Do: the index-or-instantiation parse at `expressions.js:182` accepts a type literal (`[]T`, `map[K]V`, `func(…)`, `*T`, `chan` excluded) as any type argument.
   - Test: `test/unit/parser/` — `Id[[]int, int]`, `slices.Index[[]int, int]`, `slices.Sort[[]int]`, `Keys[map[string]int, string, int]` parse; `a[[]int{1}[0]]` (index by composite literal) still parses as an index.
   - Done when: `f := slices.Index[[]int, int]; fmt.Println(f([]int{1}, 1))` prints `0` on JS and WASM.
 
-- [ ] **Task 2.4 — WASM: valid modules for named slice and map type arguments**
+- [x] **Task 2.4 — WASM: valid modules for named slice and map type arguments**
   - Files: `src/backend/wasm/monomorph.js`, `src/backend/wasm/types.js`
   - Do: substitute the concrete named type for `S`/`M` when a generic body is copied, so locals, parameters, results and `append` of `S` use the named type's representation.
   - Test: `test/unit/wasm/generics.test.js` — `Id[IDs, int](IDs{1, 2}).Sum()` with `return append(s, s...)` (today `array.set[2] expected type i64`), a function returning `S` with a method called on the result, `M ~map[K]V` over `type Set map[string]bool`; all as parity tests.
   - Done when: the modules validate and print the JS output.
 
-- [ ] **Task 2.5 — JS zero values for core-typed parameters and parity rows**
+- [x] **Task 2.5 — JS zero values for core-typed parameters and parity rows**
   - Files: `src/backend/js/expressions.js` (`S(nil)`, zero factory for `S`), `docs/language-support.md` (fixture rows)
   - Do: zero-value factories cover type parameters with a core type; add `<!-- fixture: … -->` rows for each pattern in Tasks 2.1–2.4.
   - Test: `test/unit/language/parity-matrix.test.js` picks up the rows; `generics.test.js` — `var zero S`, `S(nil)`, `append(S(nil), s...)`.

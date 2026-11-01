@@ -1144,7 +1144,7 @@ export const statementGenMethods = {
 			this.genIteratorForCond(stmt);
 			return;
 		}
-		const iterType = stmt.cond.expr._type;
+		const iterType = stmt.cond.expr._coreType ?? stmt.cond.expr._type;
 		const iteree = this.genExpr(stmt.cond.expr);
 		const limit = this._rangeExprLimit(iterType, iteree);
 		this.line(`for (let _$ = 0; _$ < ${limit}; _$++) {`);
@@ -1469,7 +1469,7 @@ export const statementGenMethods = {
 		const init = stmt.init;
 		const range = init.rhs[0];
 		const lhs = init.lhs.map((e) => e.name ?? this.genExpr(e));
-		const iterType = range.expr._type;
+		const iterType = range.expr._coreType ?? range.expr._type;
 		const wrapField = this._namedWrapperField(iterType, range.expr);
 		const iteree = wrapField
 			? `${this.genExpr(range.expr)}.${wrapField}`

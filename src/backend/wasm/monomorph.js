@@ -139,7 +139,7 @@ function getSpecializedName(baseName, typeArgs) {
 	return `${baseName}$${keys}`;
 }
 
-const KEPT_CLONE_KEYS = new Set(["_typeArgs", "_line", "_col"]);
+const KEPT_CLONE_KEYS = new Set(["_typeArgs", "_line", "_col", "_spread"]);
 
 function cloneAst(node) {
 	if (!node || typeof node !== "object") return node;
@@ -271,6 +271,13 @@ function substituteTypesInAst(
 	// 3b. CompositeLit
 	if (node.kind === "CompositeLit") {
 		const targetProp = node.typeExpr ? "typeExpr" : node.type ? "type" : null;
+		// `S{a, b}` with S a type parameter: the type is a bare identifier.
+		if (
+			targetProp &&
+			node[targetProp]?.kind === "Ident" &&
+			typeSubstMap.has(node[targetProp].name)
+		)
+			node[targetProp] = cloneAst(typeSubstMap.get(node[targetProp].name));
 		if (targetProp && node[targetProp]) {
 			node[targetProp] = substituteTypesInAst(
 				node[targetProp],
@@ -299,6 +306,18 @@ function substituteTypesInAst(
 					genericFuncs,
 				),
 				_line: node._line,
+			};
+		}
+		// `make(S, n)` / `new(S)`: the type argument is a bare identifier.
+		if (
+			node.func?.kind === "Ident" &&
+			(node.func.name === "make" || node.func.name === "new") &&
+			node.args?.[0]?.kind === "Ident" &&
+			typeSubstMap.has(node.args[0].name)
+		) {
+			node.args[0] = {
+				kind: "TypeExpr",
+				type: cloneAst(typeSubstMap.get(node.args[0].name)),
 			};
 		}
 		if (node.func?.kind === "Ident") {

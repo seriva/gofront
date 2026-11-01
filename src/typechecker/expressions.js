@@ -95,7 +95,11 @@ const BUILTIN_CHECK = {
 		if (e.args.length < 1) return ANY;
 		const ta = e.args[0];
 		const tn = ta.kind === "TypeExpr" ? ta.type : ta;
-		return s.resolveTypeNode(tn, sc) ?? ANY;
+		const made = s.resolveTypeNode(tn, sc) ?? ANY;
+		// `make(S, n)` with S a type parameter makes its core type.
+		const core = made.kind === "typeParam" ? s._coreType(made, sc) : null;
+		if (core) ta._coreType = core;
+		return made;
 	},
 	new: (s, _n, e, _at, sc) => {
 		if (e.args.length < 1) return ANY;
@@ -290,23 +294,26 @@ export const expressionCheckMethods = {
 		return terms !== null && terms.length > 0 && terms.every(pred);
 	},
 
-	_constraintTerms(c, seen) {
+	// `scope` resolves the type parameters a term mentions (`~[]E`); it
+	// defaults to the package scope.
+	_constraintTerms(c, seen, scope = this.globals) {
 		if (!c || seen.has(c)) return null;
 		seen.add(c);
 		// Receiver type parameters keep their constraint as an AST node.
 		if (c.kind === "TypeName" || c.kind === "InterfaceType")
-			return this._constraintTerms(this.resolveTypeNode(c, this.globals), seen);
-		if (c.kind === "named") return this._constraintTerms(c.underlying, seen);
-		if (c.kind === "interface") return this._interfaceTerms(c, seen);
+			return this._constraintTerms(this.resolveTypeNode(c, scope), seen, scope);
+		if (c.kind === "named")
+			return this._constraintTerms(c.underlying, seen, scope);
+		if (c.kind === "interface") return this._interfaceTerms(c, seen, scope);
 		if (c.kind === "typeParam")
-			return this._constraintTerms(c.constraint, seen);
+			return this._constraintTerms(c.constraint, seen, scope);
 		if (c.kind !== "UnionConstraint") return isAny(c) ? null : [c];
 		const out = [];
 		for (const term of c.terms) {
-			const t = this.resolveTypeNode(term.type, this.globals);
+			const t = this.resolveTypeNode(term.type, scope);
 			const inner =
 				t?.kind === "named" && t.underlying?.kind === "interface"
-					? this._constraintTerms(t, seen)
+					? this._constraintTerms(t, seen, scope)
 					: [t];
 			if (inner === null) return null;
 			out.push(...inner);
@@ -316,10 +323,10 @@ export const expressionCheckMethods = {
 
 	// An interface's type set is the intersection of its own union and the
 	// type sets of the interfaces it embeds; null when it has none.
-	_interfaceTerms(iface, seen) {
+	_interfaceTerms(iface, seen, scope) {
 		const sets = [iface.unionConstraint, ...(iface._typeSetEmbeds ?? [])]
 			.filter(Boolean)
-			.map((s) => this._constraintTerms(s, new Set(seen)));
+			.map((s) => this._constraintTerms(s, new Set(seen), scope));
 		if (sets.length === 0 || sets.includes(null)) return null;
 		const [first, ...rest] = sets;
 		return first.filter((t) =>
@@ -697,6 +704,31 @@ export const expressionCheckMethods = {
 		return u;
 	},
 
+	// Core type of type parameter `tp`: the one underlying type shared by every
+	// type in its constraint (`~[]E`, `~map[K]V`), or null when there is none.
+	_coreType(tp, scope) {
+		if (tp?.kind !== "typeParam") return null;
+		const terms = this._constraintTerms(tp.constraint, new Set(), scope);
+		if (!terms || terms.length === 0) return null;
+		const unders = terms.map((t) => this._deepUnderlying(this.resolveType(t)));
+		const key = typeStr(unders[0]);
+		if (unders.some((u) => !u || typeStr(u) !== key)) return null;
+		return unders[0];
+	},
+
+	// Underlying type of `t` for indexing, slicing, ranging and the like; a
+	// type parameter stands for its core type.
+	_coreUnderlying(t, scope) {
+		if (t?.kind === "typeParam") return this._coreType(t, scope) ?? t;
+		return this._deepUnderlying(t);
+	},
+
+	// One step of underlying type, or the core type for a type parameter.
+	_underlyingOrCore(t, scope) {
+		if (t?.kind === "typeParam") return this._coreType(t, scope) ?? t;
+		return t?.kind === "named" ? t.underlying : t;
+	},
+
 	// A key of an interface-keyed map (`map[any]T`): the backend encodes it
 	// with its dynamic type, so `L("1")`, `N(1)`, `"1"` and `1` stay distinct.
 	// A named basic value is boxed first, exactly as in any interface
@@ -738,7 +770,7 @@ export const expressionCheckMethods = {
 		const indexType = this.checkExpr(expr.index, scope);
 		if (bt?._tainted) return TAINTED_ANY;
 		if (isAny(bt)) return ANY;
-		const btu = this._deepUnderlying(bt);
+		const btu = this._coreUnderlying(bt, scope);
 		if (btu.kind === "slice" || btu.kind === "array") {
 			this._checkArrayBoundsExpr(btu, bt, expr, scope);
 			return btu.elem;
@@ -832,7 +864,7 @@ export const expressionCheckMethods = {
 		if (expr.max) this.checkExpr(expr.max, scope);
 		if (bt?._tainted) return TAINTED_ANY;
 		if (isAny(bt)) return ANY;
-		const btu = this._deepUnderlying(bt);
+		const btu = this._coreUnderlying(bt, scope);
 		if (btu.kind === "slice" || btu.kind === "array")
 			return { kind: "slice", elem: btu.elem };
 		if (isString(bt)) return STRING;
@@ -1100,8 +1132,10 @@ export const expressionCheckMethods = {
 			"expr",
 			this.checkExpr(expr.expr, scope),
 		);
-		const resolved =
-			collType?.kind === "named" ? collType.underlying : collType;
+		const resolved = this._underlyingOrCore(collType, scope);
+		// Backends range over the core type of a type parameter.
+		if (collType?.kind === "typeParam" && resolved !== collType)
+			expr.expr._coreType = resolved;
 		return this._rangeCollTypeTuple(resolved, collType);
 	},
 
@@ -1336,7 +1370,7 @@ export const expressionCheckMethods = {
 
 	// `T(x)` with T a type parameter: only a numeric x converts (the constraint
 	// decides the target at instantiation).
-	_checkTypeParamConversion(tp, argTypes, expr) {
+	_checkTypeParamConversion(tp, argTypes, expr, scope) {
 		expr._isTypeConversion = true;
 		expr._conversionTargetType = tp;
 		if (expr.args.length !== 1) {
@@ -1344,6 +1378,19 @@ export const expressionCheckMethods = {
 				`cannot convert ${expr.args.length} arguments to type ${typeStr(tp)}`,
 				expr,
 			);
+		}
+		// A constraint with a core type (`~[]E`) converts as that type does.
+		const core = this._coreType(tp, scope);
+		if (core) {
+			const src = argTypes[0];
+			const nilOk = ["slice", "map", "pointer", "func", "chan", "interface"];
+			if (src === NIL || (src?.kind === "basic" && src.name === "nil")) {
+				if (!nilOk.includes(core.kind))
+					this.err(`cannot convert nil to ${typeStr(tp)}`, expr);
+			} else if (src?.kind !== "typeParam") {
+				this._checkConversionValidity(src, core, expr);
+			}
+			return tp;
 		}
 		if (isNumeric(argTypes[0]) && !this._constraintHasTypeSet(tp.constraint))
 			return this.err(
@@ -1425,7 +1472,7 @@ export const expressionCheckMethods = {
 		}
 
 		if (fnType.kind === "typeParam" && expr.func._isTypeRef) {
-			return this._checkTypeParamConversion(fnType, argTypes, expr);
+			return this._checkTypeParamConversion(fnType, argTypes, expr, scope);
 		}
 
 		fnType = this._resolveCallFnType(fnType, argTypes, expr, scope);
