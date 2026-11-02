@@ -11,7 +11,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - **Sorting that matches Go, exact 64-bit integers and generics over named types**: `slices` and `sort` now follow Go's signatures, order `NaN` first, break ties like Go and keep named slice types such as `type IDs []int`, and sorting a large slice in WebAssembly takes milliseconds instead of seconds. `int64` and `uint64` are now exact BigInt values in JavaScript output, including across the WebAssembly boundary, while `int` stays a JavaScript number.
 
 ### Changed
-- **Breaking:** `slices` and `sort` must be imported, as in Go (`import "slices"`), and programs that relied on the previous tie order of `sort.Slice` or `slices.SortFunc` may print a different order.
+- **Breaking:** `slices` and `sort` must be imported, as in Go (`import "slices"`), and programs that relied on the previous tie order of `sort.Slice` or `slices.SortFunc` should switch to `sort.SliceStable` or `slices.SortStableFunc` to preserve equal element order.
 
 ## [1.8.0] - 2026-10-30
 
