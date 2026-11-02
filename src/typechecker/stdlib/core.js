@@ -14,7 +14,6 @@ import {
 	STRING,
 	UINT,
 	UINT8,
-	UINT16,
 	UINT32,
 	UINT64,
 	UNTYPED_INT,

@@ -2,7 +2,7 @@
 // FunctionEmitter mixin: the encoding/binary members that walk an `any`
 // (Read, Write, Size).
 
-import { isSliceType, toWasmType } from "../types.js";
+import { isSliceType } from "../types.js";
 
 export class ExtendedPackagesEmitter {
 	// `binary.BigEndian`, or a value of its Go-source type (`bigEndian`).
