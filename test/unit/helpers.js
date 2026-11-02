@@ -83,6 +83,7 @@ const GO_OVERLAID_PACKAGES = new Set([
 	"errors",
 	"encoding/binary",
 	"encoding/json",
+	"time",
 ]);
 
 // Emitter-backed packages that also carry Go-source members (all of `strings`

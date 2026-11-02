@@ -241,7 +241,6 @@ var __fmtu = __fmtu || (() => {
       const kd = k0 === undefined ? IFACE : v instanceof Map ? descOf(k0) : k0.charCodeAt(0) === 1 && typeof __kd === "function" ? descOf(__kd(k0)) : /^-?\d+$/.test(k0) ? { k: "b", n: "int" } : { k: "b", n: "string" };
       return { k: "map", key: kd, val: k0 === undefined || v0 == null ? IFACE : descOf(v0) };
     }
-    if (v._d instanceof Date) return { k: "struct", n: "time.Time", f: [] };
     if (v.re !== undefined && v.im !== undefined) return { k: "b", n: "complex128" };
     if (typeof v.__gfUnbox === "function") {
       const nm = v.constructor?.name ?? "";
@@ -426,9 +425,6 @@ export const HELPER_FMT_LOOP = String.raw`
       // the nil-dereference panic); a bare null cannot tell it from a nil interface.
       else return verb === "s" || verb === "v" ? U.pad("<nil>", fl, wid) : bad(verb, v, t);
     }
-    if (t?.n === "time.Duration" && "vs".includes(verb)) {
-      return typeof __durationString === "function" ? __durationString(v) : String(v);
-    }
     switch (typeof v) {
       case "boolean": return verb === "t" || verb === "v" ? U.pad(String(v), fl, wid) : bad(verb, v, t);
       case "string": {
@@ -575,7 +571,7 @@ export const HELPER_FMT_LOOP = String.raw`
         const bt0 = U.baseOf(t);
         v = bt0?.k === "slice" ? [] : v;
       }
-      const vStr = t?.n === "time.Duration" && typeof __durationString === "function" ? __durationString(v) : formatV(unbox(v, "v"), fl.plus, true, false, U.both(t, v?.__fd));
+      const vStr = formatV(unbox(v, "v"), fl.plus, true, false, U.both(t, v?.__fd));
       out += U.pad(sharp ? U.gs(v, t, true) : vStr, fl, wid);
       continue;
     }

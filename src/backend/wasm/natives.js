@@ -28,6 +28,33 @@ const WASM_INTRINSICS = {
 				funcIndex: e.mod.getMathRandomImportIndex(),
 			}),
 	},
+	// time: the host clock (`env.time_now_ms`, milliseconds) as nanoseconds.
+	time_now: {
+		emit: (e) => {
+			e.pushInstruction({
+				op: "call",
+				funcIndex: e.mod.getStdlibImportIndex("time_now_ms"),
+			});
+			e.pushInstruction("i64.trunc_sat_f64_s");
+			e.pushInstruction({ op: "i64.const", value: 1000000n });
+			e.pushInstruction("i64.mul");
+		},
+	},
+	// time: the host zone's offset at a Unix time (`env.time_timezone_offset`
+	// takes milliseconds and returns seconds).
+	time_zone_offset: {
+		emit: (e) => {
+			e.pushInstruction({ op: "local.get", index: 0 });
+			e.pushInstruction("f64.convert_i64_s");
+			e.pushInstruction({ op: "f64.const", value: 1000 });
+			e.pushInstruction("f64.mul");
+			e.pushInstruction({
+				op: "call",
+				funcIndex: e.mod.getStdlibImportIndex("time_timezone_offset"),
+			});
+			e.pushInstruction("i64.extend_i32_s");
+		},
+	},
 };
 
 function wasmIntrinsic(fn) {

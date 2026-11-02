@@ -581,10 +581,6 @@ export class ExprsEmitter {
 			this.emitOsConst(expr.field, targetWasmType);
 			return true;
 		}
-		if (this._isTimeConst(expr)) {
-			this.emitTimeConst(expr.field, targetWasmType);
-			return true;
-		}
 		return false;
 	}
 

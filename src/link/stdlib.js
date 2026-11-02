@@ -520,7 +520,20 @@ function bindStdlibImport(checker, p, spec, pkg) {
 		);
 		return;
 	}
-	checker.globals.define(name, { ...pkg.namespace, name });
+	const ns = { ...pkg.namespace, name };
+	// Emitter members come from this checker's own namespace: some resolve
+	// types of the Go source against its type table when first used.
+	const own = pkg.overlay ? checker.globals.lookup(name)?.members : null;
+	if (own)
+		ns.members = {
+			...ns.members,
+			...Object.fromEntries(
+				Object.keys(pkg.overlay.members)
+					.filter((k) => k in own)
+					.map((k) => [k, own[k]]),
+			),
+		};
+	checker.globals.define(name, ns);
 	for (const [k, t] of pkg.exportedTypes) {
 		const dot = k.indexOf(".");
 		checker.types.set(dot < 0 ? k : `${name}${k.slice(dot)}`, t);

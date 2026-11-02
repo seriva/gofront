@@ -288,8 +288,18 @@ export function setupExtendedGlobals(globals, types) {
 		},
 	});
 
-	const TIME_TIME = types.get("time.Time");
-	const TIME_DURATION = types.get("time.Duration");
+	// Time and Duration are declared by the Go source of the time package,
+	// loaded after these definitions: they are looked up when first used
+	// (`any` and `int64` while the package is not part of the build).
+	const lateTime = () => types.get("time.Time") ?? ANY;
+	const lateDuration = () => types.get("time.Duration") ?? INT64;
+	const deadlineFunc = () => ({
+		kind: "func",
+		params: [],
+		get returns() {
+			return [lateTime(), BOOL];
+		},
+	});
 
 	const CONTEXT_T = {
 		kind: "named",
@@ -297,7 +307,7 @@ export function setupExtendedGlobals(globals, types) {
 		underlying: {
 			kind: "interface",
 			methods: new Map([
-				["Deadline", { kind: "func", params: [], returns: [TIME_TIME, BOOL] }],
+				["Deadline", deadlineFunc()],
 				["Err", { kind: "func", params: [], returns: [ERROR] }],
 				["Value", { kind: "func", params: [ANY], returns: [ANY] }],
 			]),
@@ -359,7 +369,7 @@ export function setupExtendedGlobals(globals, types) {
 			},
 		],
 		["Setenv", { kind: "func", params: [STRING, STRING], returns: [VOID] }],
-		["Deadline", { kind: "func", params: [], returns: [TIME_TIME, BOOL] }],
+		["Deadline", deadlineFunc()],
 		["Context", { kind: "func", params: [], returns: [CONTEXT_T] }],
 		["Parallel", { kind: "func", params: [], returns: [VOID] }],
 		["SkipNow", { kind: "func", params: [], returns: [VOID] }],
@@ -416,7 +426,16 @@ export function setupExtendedGlobals(globals, types) {
 		["Name", { kind: "func", params: [], returns: [STRING] }],
 		["Attr", { kind: "func", params: [STRING, STRING], returns: [VOID] }],
 		["Context", { kind: "func", params: [], returns: [CONTEXT_T] }],
-		["Elapsed", { kind: "func", params: [], returns: [TIME_DURATION] }],
+		[
+			"Elapsed",
+			{
+				kind: "func",
+				params: [],
+				get returns() {
+					return [lateDuration()];
+				},
+			},
+		],
 		["Loop", { kind: "func", params: [], returns: [BOOL] }],
 		["Output", { kind: "func", params: [], returns: [IO_WRITER] }],
 		["ReportAllocs", { kind: "func", params: [], returns: [VOID] }],
@@ -538,9 +557,13 @@ export function setupExtendedGlobals(globals, types) {
 		name: "testing.BenchmarkResult",
 		underlying: {
 			kind: "struct",
-			fields: new Map([
+			fields: new (class extends Map {
+				get(key) {
+					return key === "T" ? lateDuration() : super.get(key);
+				}
+			})([
 				["N", INT],
-				["T", TIME_DURATION],
+				["T", INT64],
 				["Bytes", INT64],
 				["MemAllocs", UINT64],
 				["MemBytes", UINT64],

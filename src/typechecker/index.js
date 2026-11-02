@@ -1392,6 +1392,8 @@ export class TypeChecker {
 						expr,
 						"constant declaration",
 					);
+				// `const D Duration = 1` is a BigInt in JS.
+				if (spec.type && expr) this._tag64BitNode(this.resolveType(type), expr);
 				scope.defineConst(name, type, expr);
 			}
 		}

@@ -39,7 +39,6 @@ import {
 	HELPER_CDIV,
 	HELPER_CMUL,
 	HELPER_CRYPTO_RAND,
-	HELPER_DURATION,
 	HELPER_EQUAL,
 	HELPER_ERROR,
 	HELPER_ERROR_AS,
@@ -70,8 +69,7 @@ import {
 	HELPER_STRUCT_KEY,
 	HELPER_SV,
 	HELPER_TESTING,
-	HELPER_TIME_FMT,
-	HELPER_TIME_PARSE,
+	HELPER_TIMER,
 	HELPER_TO64,
 	HELPER_VA,
 	HELPER_VCLONE,
@@ -166,9 +164,7 @@ const HELPER_MAP = [
 	["ioEOF", HELPER_IO_EOF],
 	["os", HELPER_OS],
 	["strconv", HELPER_STRCONV],
-	["timeFmt", HELPER_TIME_FMT],
-	["timeParse", HELPER_TIME_PARSE],
-	["duration", HELPER_DURATION],
+	["timer", HELPER_TIMER],
 	["testing", HELPER_TESTING],
 	["cryptoRand", HELPER_CRYPTO_RAND],
 	["binary", HELPER_BINARY],
@@ -180,6 +176,10 @@ const HELPER_MAP = [
 // typechecker/types.js).  The WASM backend keeps their empty body.
 const JS_INTRINSICS = {
 	rand_source: () => "return Math.random();",
+	time_now: () =>
+		'return BigInt(Math.floor(typeof globalThis.__GOFRONT_CLOCK === "function" ? globalThis.__GOFRONT_CLOCK() : Date.now())) * 1000000n;',
+	time_zone_offset: ([unix]) =>
+		`return (-new Date(Number(${unix}) * 1000).getTimezoneOffset() * 60) | 0;`,
 };
 
 export class CodeGen {

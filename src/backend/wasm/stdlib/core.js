@@ -526,10 +526,6 @@ export class StdlibCoreEmitter {
 	}
 
 	_isFmtExternOperand(goType) {
-		const name = goType?.name;
-		if (name === "time.Duration") {
-			return true;
-		}
 		return (
 			isFuncType(goType, this.mod.checker) ||
 			isAnyType(goType, this.mod.checker) ||
@@ -540,23 +536,6 @@ export class StdlibCoreEmitter {
 
 	// Pushes `arg` as the externref the fmt host helpers format.
 	_emitOperandExternref(arg, goType, allowNil = false) {
-		if (goType?.name === "time.Duration") {
-			// The raw count stays available for %d; %v and %s use the string.
-			const durTmp = this.acquireTemp("i64");
-			this.emitExpr(arg, "i64");
-			this.pushInstruction({ op: "local.set", index: durTmp });
-			this.pushInstruction({ op: "local.get", index: durTmp });
-			this._emitToExternrefPlain({ kind: "basic", name: "int64" });
-			this.pushInstruction({ op: "local.get", index: durTmp });
-			this._callStdlib("time_duration_string");
-			this.pushInstruction({ op: "i32.const", value: 0 });
-			this.pushInstruction({
-				op: "call",
-				funcIndex: this.mod.getFmtNewStringerIndex(),
-			});
-			this.releaseTemp(durTmp, "i64");
-			return;
-		}
 		if (isAnyType(goType, this.mod.checker)) {
 			this.emitExpr(arg, "anyref");
 			this._emitAnyToExternref();
@@ -1356,7 +1335,16 @@ export class StdlibCoreEmitter {
 		}
 		this.pushInstruction({ op: "local.get", index: rawTmp });
 		this.pushInstruction({ op: "local.get", index: valTmp });
-		if (nilGuard && !isPointerToStruct(goType, this.mod.checker, this.mod)) {
+		if (m.embed) {
+			this.pushInstruction({
+				op: "struct.get",
+				typeIndex: m.embed.typeIndex,
+				fieldIndex: m.embed.fieldIndex,
+			});
+		} else if (
+			nilGuard &&
+			!isPointerToStruct(goType, this.mod.checker, this.mod)
+		) {
 			// A pointer to a scalar is a box; the value receiver takes the scalar.
 			const box = this.mod.getBoxType(goType.base ?? goType.elem);
 			this.pushInstruction({

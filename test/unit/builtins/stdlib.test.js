@@ -583,6 +583,7 @@ section("time package");
 
 test("time.Now returns a time object (has _d property)", () => {
 	const { js, errors } = compile(`package main
+import "time"
 func main() {
 	t := time.Now()
 	console.log(t.Year() > 2000)
@@ -593,6 +594,7 @@ func main() {
 
 test("time.Since returns elapsed time", () => {
 	const { js, errors } = compile(`package main
+import "time"
 func main() {
 	start := time.Now()
 	elapsed := time.Since(start)
@@ -604,6 +606,7 @@ func main() {
 
 test("time constants are defined", () => {
 	const { js, errors } = compile(`package main
+import "time"
 func main() {
 	console.log(time.Second > time.Millisecond)
 	console.log(time.Minute > time.Second)
@@ -2401,6 +2404,7 @@ section("time additions");
 
 test("time.Now returns time.Time object", () => {
 	const { js, errors } = compile(`package main
+import "time"
 func main() {
 	t := time.Now()
 	console.log(t.Year() > 2000)
@@ -2411,6 +2415,7 @@ func main() {
 
 test("time.Since returns duration in ms", () => {
 	const { js, errors } = compile(`package main
+import "time"
 func main() {
 	t := time.Now()
 	elapsed := time.Since(t)
@@ -2422,6 +2427,7 @@ func main() {
 
 test("time.Now().Year() Month() Day()", () => {
 	const { js, errors } = compile(`package main
+import "time"
 func main() {
 	t := time.Now()
 	console.log(t.Year() > 0)
@@ -2434,6 +2440,7 @@ func main() {
 
 test("time.Unix creates time from epoch seconds", () => {
 	const { js, errors } = compile(`package main
+import "time"
 func main() {
 	t := time.Unix(0, 0)
 	console.log(t.Year())
@@ -2444,6 +2451,7 @@ func main() {
 
 test("time.RFC3339 constant", () => {
 	const { js, errors } = compile(`package main
+import "time"
 func main() {
 	console.log(len(time.RFC3339) > 0)
 }`);
@@ -2453,6 +2461,7 @@ func main() {
 
 test("time.Month constants", () => {
 	const { js, errors } = compile(`package main
+import "time"
 func main() {
 	console.log(time.January)
 	console.log(time.December)
@@ -2463,6 +2472,7 @@ func main() {
 
 test("time.Weekday constants", () => {
 	const { js, errors } = compile(`package main
+import "time"
 func main() {
 	console.log(time.Sunday)
 	console.log(time.Saturday)
@@ -2473,6 +2483,7 @@ func main() {
 
 test("time.Time.UnixMilli", () => {
 	const { js, errors } = compile(`package main
+import "time"
 func main() {
 	t := time.Unix(1000, 0)
 	console.log(t.UnixMilli())
@@ -2483,6 +2494,7 @@ func main() {
 
 test("time.Time.Before and After", () => {
 	const { js, errors } = compile(`package main
+import "time"
 func main() {
 	t1 := time.Unix(1000, 0)
 	t2 := time.Unix(2000, 0)
@@ -2495,6 +2507,7 @@ func main() {
 
 test("time.Parse parses date string", () => {
 	const { js, errors } = compile(`package main
+import "time"
 func main() {
 	t, err := time.Parse(time.RFC3339, "2024-01-15T10:30:00Z")
 	console.log(err == nil)
@@ -2506,6 +2519,7 @@ func main() {
 
 test("time.Format DateOnly layout", () => {
 	const { js, errors } = compile(`package main
+import "time"
 func main() {
 	t := time.Unix(1704067200, 0)
 	console.log(t.Format(time.DateOnly))
@@ -2518,6 +2532,7 @@ func main() {
 
 test("time.Format year containing token digits (2015)", () => {
 	const { js, errors } = compile(`package main
+import "time"
 func main() {
 	t := time.Unix(1420070400, 0)
 	console.log(t.Format(time.DateOnly))

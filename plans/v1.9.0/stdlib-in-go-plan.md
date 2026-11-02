@@ -499,7 +499,7 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
 
 ### Phase 11: `time`
 
-- [ ] **Task 11.1 — `time` core: `Duration`, `Month`, `Weekday`, civil dates**
+- [x] **Task 11.1 — `time` core: `Duration`, `Month`, `Weekday`, civil dates**
   - Files: `stdlib/time/time.go`, `stdlib/time/duration.go`, `src/backend/wasm/natives.js` (`time.Now`, local offset over the existing clock import)
   - Removes: civil-day helpers and `emitDurationMethodCall` in `src/backend/wasm/stdlib/time.js`, matching members of `src/backend/js/stdlib/time.js`, `DURATION_T`/`TIME_T` tables in `src/typechecker/stdlib/core.js`
   - Do: `Duration` with methods and constants, `Month`/`Weekday` as named `int` types with `String`, `Time` with today's field layout (`unixNano int64`, `offset int32`), `Date`, `Unix`, `UnixMilli`, `UnixMicro`, `Add`, `Sub`, `AddDate`, `Truncate`, `Round`, `Clock`, `Date()`, `In`, `YearDay`, `ISOWeek`, `Compare`, `FixedZone`, `UTC`; `Now`/`Since`/`Until` stay natives.

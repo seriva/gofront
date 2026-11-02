@@ -1093,9 +1093,6 @@ export class BuiltinsEmitter {
 			case "rand":
 				this.emitRandCall(func.field, args, targetWasmType);
 				return true;
-			case "time":
-				this.emitTimeCall(func.field, call, targetWasmType);
-				return true;
 			case "binary":
 				this.emitBinaryCall(func.field, call, targetWasmType);
 				return true;
@@ -1252,28 +1249,6 @@ export class BuiltinsEmitter {
 	) {
 		if (recvTypeName === "strings.Builder") {
 			this.emitBuilderMethodCall(field, expr, args, targetWasmType);
-			return true;
-		}
-		if (recvTypeName === "time.Time") {
-			this.emitTimeMethodCall(field, expr, args, targetWasmType);
-			return true;
-		}
-		if (recvTypeName === "time.Duration") {
-			this.emitDurationMethodCall(field, expr, args, targetWasmType);
-			return true;
-		}
-		if (
-			recvTypeName === "time.Month" ||
-			recvTypeName === "time.Weekday" ||
-			recvTypeName === "time.Location"
-		) {
-			this.emitTimeAuxMethodCall(
-				recvTypeName,
-				field,
-				expr,
-				args,
-				targetWasmType,
-			);
 			return true;
 		}
 		return false;

@@ -176,7 +176,7 @@ export const resolveMethods = {
 				}
 				const named = this.types.get(node.name);
 				if (named) {
-					const wasmErr = this._checkWasmStdlibTypeMember(node);
+					const wasmErr = this._checkWasmStdlibTypeMember(node, named);
 					if (wasmErr) return wasmErr;
 					this._useQualifiedTypeName(node, named);
 					return named;
@@ -252,8 +252,10 @@ export const resolveMethods = {
 		}
 	},
 
-	_checkWasmStdlibTypeMember(node) {
+	_checkWasmStdlibTypeMember(node, named) {
 		if (this.target !== "wasm" && this.target !== "both") return null;
+		// Types of Go-source packages are compiled for both targets.
+		if (named?.name?.includes("$$")) return null;
 		const dot = node.name.indexOf(".");
 		if (dot === -1) return null;
 		const pkg = node.name.slice(0, dot);
