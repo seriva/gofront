@@ -8,10 +8,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 ## [Unreleased]
 
 ### Added
-- **Sorting that matches Go, exact 64-bit integers and generics over named types**: `slices` and `sort` now follow Go's signatures, order `NaN` first, break ties like Go and keep named slice types such as `type IDs []int`, and sorting a large slice in WebAssembly takes milliseconds instead of seconds. `int64` and `uint64` are now exact BigInt values in JavaScript output, including across the WebAssembly boundary, while `int` stays a JavaScript number.
+- **Standard library that matches Go, and exact 64-bit integers**: `slices`, `sort`, `maps`, `errors`, `unicode/utf8`, `path` and `html` now follow Go's signatures and behaviour, so sorting orders `NaN` first and breaks ties like Go, generic helpers accept named slice and map types such as `type IDs []int`, and `errors.Is` walks `errors.Join` trees and several `%w` verbs. `int64` and `uint64` are now exact BigInt values in JavaScript output, including across the WebAssembly boundary, while `int` stays a JavaScript number.
 
 ### Changed
-- **Breaking:** `slices` and `sort` must be imported, as in Go (`import "slices"`), and programs that relied on the previous tie order of `sort.Slice` or `slices.SortFunc` should switch to `sort.SliceStable` or `slices.SortStableFunc` to preserve equal element order.
+- **Breaking:** `slices`, `sort`, `maps`, `errors`, `unicode/utf8`, `path`, `path/filepath` and `html` must be imported, as in Go (`import "errors"`), `maps.Delete` is gone (use `delete`), and two `errors.New` values with the same text are no longer equal under `errors.Is`. Programs that relied on the previous tie order of `sort.Slice` or `slices.SortFunc` should switch to `sort.SliceStable` or `slices.SortStableFunc` to preserve equal element order.
 
 ## [1.8.0] - 2026-10-30
 

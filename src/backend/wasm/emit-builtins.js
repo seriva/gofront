@@ -1070,9 +1070,6 @@ export class BuiltinsEmitter {
 			case "bits":
 				this.emitBitsCall(func.field, args);
 				return true;
-			case "maps":
-				this.emitMapsCall(func.field, args, targetWasmType);
-				return true;
 			case "strings":
 				if (func.field === "NewReader") {
 					this.emitStringsNewReader(call, targetWasmType);
@@ -1097,9 +1094,6 @@ export class BuiltinsEmitter {
 			case "errors":
 				this.emitErrorsCall(func.field, args);
 				return true;
-			case "utf8":
-				this.emitUtf8Call(func.field, args, targetWasmType);
-				return true;
 			case "shared":
 				this.emitSharedNew(func.field, args);
 				return true;
@@ -1123,13 +1117,6 @@ export class BuiltinsEmitter {
 					return true;
 				}
 				this.emitBytesCall(func.field, args, targetWasmType);
-				return true;
-			case "path":
-			case "filepath":
-				this.emitPathCall(func.field, args);
-				return true;
-			case "html":
-				this.emitHtmlCall(func.field, args);
 				return true;
 			case "io":
 				this.emitIoCall(func.field, call, targetWasmType);

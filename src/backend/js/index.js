@@ -44,8 +44,6 @@ import {
 	HELPER_EQUAL,
 	HELPER_ERROR,
 	HELPER_ERROR_AS,
-	HELPER_ERROR_IS,
-	HELPER_ERROR_JOIN,
 	HELPER_GENERICS,
 	HELPER_GEQ,
 	HELPER_HEX,
@@ -61,8 +59,6 @@ import {
 	HELPER_NM,
 	HELPER_OS,
 	HELPER_PANIC,
-	HELPER_PATH_CLEAN,
-	HELPER_PATH_ERROR,
 	HELPER_PTREQ,
 	HELPER_S,
 	HELPER_SCLONE,
@@ -169,15 +165,11 @@ const HELPER_MAP = [
 	["sprintf", HELPER_SPRINTF],
 	["sprint", HELPER_SPRINT],
 	["error", HELPER_ERROR],
-	["errorIs", HELPER_ERROR_IS],
 	["errorAs", HELPER_ERROR_AS],
-	["errorJoin", HELPER_ERROR_JOIN],
 	["strconvError", HELPER_STRCONV_ERROR],
-	["pathError", HELPER_PATH_ERROR],
 	["ioEOF", HELPER_IO_EOF],
 	["os", HELPER_OS],
 	["strconv", HELPER_STRCONV],
-	["pathClean", HELPER_PATH_CLEAN],
 	["timeFmt", HELPER_TIME_FMT],
 	["timeParse", HELPER_TIME_PARSE],
 	["duration", HELPER_DURATION],
@@ -570,7 +562,6 @@ export class CodeGen {
 		if (name === "geq") this._helpers.add("ifeq");
 		if (
 			name === "strconvError" ||
-			name === "pathError" ||
 			name === "ioEOF" ||
 			name === "base64" ||
 			name === "hex" ||

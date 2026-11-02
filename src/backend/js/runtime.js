@@ -568,6 +568,17 @@ var __kd = __kd || function(s, copy) {
   }
   return copy && typeof k.__clone === "function" ? k.__clone() : k;
 };
+var __kdt = __kdt || function(f, s) {
+  if (typeof s !== "string") return s;
+  const z = f?.();
+  switch (typeof z) {
+    case "number": return Number(s);
+    case "bigint": return BigInt(s);
+    case "boolean": return s === "true";
+    case "string": return s;
+    default: return __kd(s, true);
+  }
+};
 var __kcmp = __kcmp || function(a, b) {
   if (a !== null && b !== null && typeof a === "object" && typeof b === "object") {
     for (const f of Object.keys(a)) {
@@ -918,14 +929,23 @@ export const HELPER_SPRINT = `var __sprint = __sprint || function(ln, ...a) {
   return __sprintf(ln ? f + "\\n" : f, ...a);
 };`;
 
+// A runtime error value (\`fmt.Errorf\`, parse failures, io.EOF).  A wrapped
+// cause is exposed through \`Unwrap() error\`; an array of causes (several %w
+// verbs) through \`Unwrap() []error\`, tagged \`__multi\` so type assertions tell
+// the two apart.
 export const HELPER_ERROR = `var __error = __error || function(msg, cause) {
-  return { Error() { return msg; }, toString() { return msg; }, _msg: msg, _cause: cause ?? null };
+  const e = { Error() { return msg; }, toString() { return msg; }, _msg: msg, _cause: cause ?? null };
+  if (Array.isArray(cause)) {
+    e.Unwrap = function() { return cause; };
+    e.Unwrap.__multi = true;
+  } else if (cause !== undefined && cause !== null) {
+    e.Unwrap = function() { return cause; };
+  }
+  return e;
 };`;
 
 export const HELPER_STRCONV_ERROR = `var __strconv_err_syntax = __strconv_err_syntax || __error("invalid syntax");
 var __strconv_err_range = __strconv_err_range || __error("value out of range");`;
-
-export const HELPER_PATH_ERROR = `var __path_err_bad_pattern = __path_err_bad_pattern || __error("syntax error in pattern");`;
 
 export const HELPER_IO_EOF = `var __io_eof = __io_eof || __error("EOF");`;
 
@@ -961,37 +981,6 @@ var __os_stderr = __os_stderr || new __os_file(2);
 var __os_stdin = __os_stdin || new __os_file(0);
 `;
 
-export const HELPER_ERROR_IS = `var __errorIs = __errorIs || function __errorIs(err, target) {
-  if (err === null || err === undefined) return false;
-  if (err === target) return true;
-  if (typeof err === "object" && typeof target === "object" && target !== null &&
-      typeof err.__gfUnbox === "function" && err.constructor === target.constructor &&
-      err.__gfUnbox() === target.__gfUnbox()) return true;
-  if (typeof err === "object" && typeof target === "object" &&
-      err._msg !== undefined && target._msg !== undefined &&
-      err._msg === target._msg) return true;
-  if (typeof err.Is === "function" && err.Is(target)) return true;
-  if (Array.isArray(err._errs)) {
-    for (const sub of err._errs) {
-      if (__errorIs(sub, target)) return true;
-    }
-  }
-  if (typeof err.Unwrap === "function") {
-    const unwrapped = err.Unwrap();
-    if (Array.isArray(unwrapped)) {
-      for (const sub of unwrapped) {
-        if (__errorIs(sub, target)) return true;
-      }
-    } else if (unwrapped !== null && unwrapped !== undefined) {
-      if (__errorIs(unwrapped, target)) return true;
-    }
-  }
-  if (err._cause !== undefined && err._cause !== null) {
-    return __errorIs(err._cause, target);
-  }
-  return false;
-};`;
-
 export const HELPER_ERROR_AS = `var __errorAs = __errorAs || function(err, target, matcher, extract) {
   if (err === null || err === undefined || target === null || typeof target !== "object") return false;
   let cur = err;
@@ -1006,42 +995,17 @@ export const HELPER_ERROR_AS = `var __errorAs = __errorAs || function(err, targe
       }
       return true;
     }
-    if (Array.isArray(cur._errs)) {
-      for (const sub of cur._errs) {
+    if (typeof cur.Unwrap !== "function") return false;
+    const unwrapped = cur.Unwrap();
+    if (Array.isArray(unwrapped)) {
+      for (const sub of unwrapped) {
         if (__errorAs(sub, target, matcher, extract)) return true;
       }
+      return false;
     }
-    if (typeof cur.Unwrap === "function") {
-      const unwrapped = cur.Unwrap();
-      if (Array.isArray(unwrapped)) {
-        for (const sub of unwrapped) {
-          if (__errorAs(sub, target, matcher, extract)) return true;
-        }
-      } else if (unwrapped !== null && unwrapped !== undefined) {
-        if (__errorAs(unwrapped, target, matcher, extract)) return true;
-      }
-    }
-    cur = cur?._cause ?? null;
+    cur = unwrapped;
   }
   return false;
-};`;
-
-export const HELPER_ERROR_JOIN = `var __errorJoin = __errorJoin || function(...errs) {
-  const filtered = [];
-  for (const e of errs) {
-    if (Array.isArray(e)) {
-      for (const sub of e) if (sub !== null && sub !== undefined) filtered.push(sub);
-    } else if (e !== null && e !== undefined) {
-      filtered.push(e);
-    }
-  }
-  if (filtered.length === 0) return null;
-  const msg = filtered.map(e => (typeof e === "object" && typeof e.Error === "function") ? e.Error() : String(e)).join("\\n");
-  const joined = __error(msg);
-  joined._errs = filtered;
-  joined.Unwrap = function() { return filtered; };
-  joined.Unwrap.__multi = true;
-  return joined;
 };`;
 
 // Go-semantics strconv parsers shared by the JS backend and the wasm runtime
@@ -1134,108 +1098,6 @@ var __strconv_format_float = __strconv_format_float || function(f, fmtc, prec) {
     return c === "G" ? r.toUpperCase() : r;
   }
   return String(f);
-};`;
-
-export const HELPER_PATH_CLEAN = `var __pathClean = __pathClean || function(p) {
-  if (!p) return ".";
-  const abs = p.startsWith("/");
-  const parts = p.split("/").reduce((acc, s) => {
-    if (s === "" || s === ".") return acc;
-    if (s === "..") {
-      if (acc.length && acc[acc.length - 1] !== "..") acc.pop();
-      else if (!abs) acc.push("..");
-    } else acc.push(s);
-    return acc;
-  }, []);
-  return (abs ? "/" : "") + (parts.join("/") || ".");
-};
-var __pathMatch = __pathMatch || function(pat, name) {
-  let rx = "^";
-  let hasErr = false;
-  let i = 0;
-  while (i < pat.length) {
-    const c = pat[i];
-    if (c === "\\\\") {
-      if (i + 1 >= pat.length) { hasErr = true; break; }
-      const next = pat[++i];
-      if (/[.^$*+?()|{}\\[\\]\\\\]/.test(next)) rx += "\\\\" + next;
-      else rx += next;
-      i++;
-    } else if (c === "*") {
-      rx += "[^/]*";
-      i++;
-    } else if (c === "?") {
-      rx += "[^/]";
-      i++;
-    } else if (c === "[") {
-      i++;
-      let negated = false;
-      if (i < pat.length && pat[i] === "^") {
-        negated = true;
-        i++;
-      }
-      if (i >= pat.length || pat[i] === "]") {
-        return [false, true];
-      }
-      let classContent = "";
-      let closed = false;
-      while (i < pat.length) {
-        let ch = pat[i];
-        if (ch === "]") {
-          closed = true;
-          i++;
-          break;
-        }
-        if (ch === "\\\\") {
-          if (i + 1 >= pat.length) { hasErr = true; break; }
-          ch = pat[++i];
-        }
-        if (ch === "/") {
-          return [false, true];
-        }
-        i++;
-        if (i + 1 < pat.length && pat[i] === "-" && pat[i + 1] !== "]") {
-          i++;
-          let end = pat[i];
-          if (end === "\\\\") {
-            if (i + 1 >= pat.length) { hasErr = true; break; }
-            end = pat[++i];
-          }
-          if (end === "/") return [false, true];
-          i++;
-          if (ch.charCodeAt(0) > end.charCodeAt(0)) return [false, true];
-          if (ch.charCodeAt(0) <= 47 && 47 <= end.charCodeAt(0)) return [false, true];
-          const isSpec = (c) => c === "-" || c === "^" || c === "\\\\" || c === "[" || c === "]";
-          const escCh = isSpec(ch) ? "\\\\" + ch : ch;
-          const escEnd = isSpec(end) ? "\\\\" + end : end;
-          classContent += escCh + "-" + escEnd;
-        } else {
-          const isSpec = (c) => c === "-" || c === "^" || c === "\\\\" || c === "[" || c === "]";
-          const escCh = isSpec(ch) ? "\\\\" + ch : ch;
-          classContent += escCh;
-        }
-      }
-      if (!closed || hasErr) return [false, true];
-      if (negated) {
-        rx += "[^/" + classContent + "]";
-      } else {
-        rx += "[" + classContent + "]";
-      }
-    } else if (/[.^$*+?()|{}\\[\\]\\\\]/.test(c)) {
-      rx += "\\\\" + c;
-      i++;
-    } else {
-      rx += c;
-      i++;
-    }
-  }
-  if (hasErr) return [false, true];
-  try {
-    const re = new RegExp(rx + "$");
-    return [re.test(name), false];
-  } catch (e) {
-    return [false, true];
-  }
 };`;
 
 export const HELPER_TIME_FMT = `var __timeLocalDt = __timeLocalDt || function(t) {

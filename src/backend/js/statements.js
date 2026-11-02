@@ -1418,6 +1418,7 @@ export const statementGenMethods = {
 	_genIterFor(init, iterType, iteree, lhs, body) {
 		const iterExpr = this._genRangeIterExpr(iterType, iteree, lhs);
 		const keyDecode = this._structKeyRange(iterType);
+		const paramKey = this._typeParamKeyRange(iterType);
 		const is64Key = this._is64BitMapRange(iterType);
 		const binding =
 			lhs.length === 1
@@ -1428,7 +1429,9 @@ export const statementGenMethods = {
 		const kw = init.kind === "AssignStmt" ? "" : "let ";
 		this.line(`for (${kw}${binding} of ${iterExpr}) {`);
 		this.indented(() => {
-			if (keyDecode && lhs[0] !== "_")
+			if (paramKey && lhs[0] !== "_")
+				this.line(`${lhs[0]} = __kdt(${paramKey}, ${lhs[0]});`);
+			else if (keyDecode && lhs[0] !== "_")
 				this.line(`${lhs[0]} = __kd(${lhs[0]}, true);`);
 			else if (is64Key && lhs[0] !== "_")
 				this.line(`${lhs[0]} = BigInt(${lhs[0]});`);
@@ -1443,6 +1446,19 @@ export const statementGenMethods = {
 		const base = iterType?.kind === "named" ? iterType.underlying : iterType;
 		const key = base?.kind === "map" ? base.key : null;
 		return is64BitInt(key);
+	},
+
+	// Ranging over a map whose key type is a type parameter: the key is decoded
+	// from its property string by the instantiated key type's zero factory.
+	_typeParamKeyRange(iterType) {
+		if (!this._isMapRangeType(iterType)) return null;
+		const base = iterType?.kind === "named" ? iterType.underlying : iterType;
+		const key = base?.kind === "map" ? base.key : null;
+		if (key?.kind !== "typeParam") return null;
+		const factory = this._typeParamZeroFactory(key.name);
+		if (!factory) return null;
+		this.useHelper("structKey");
+		return factory;
 	},
 
 	// Ranging over a map whose keys are structs: the key variable is decoded

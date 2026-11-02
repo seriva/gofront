@@ -1,6 +1,7 @@
 package main
 
 import "js:./browser.d.ts"
+import "errors"
 import "slices"
 
 // ── Application state ─────────────────────────────────────────

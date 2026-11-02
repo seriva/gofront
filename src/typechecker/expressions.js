@@ -213,6 +213,7 @@ export const expressionCheckMethods = {
 				if (isAny(lt) || isAny(rt))
 					return this.binaryResultType(expr.op, ANY, ANY, expr);
 				this._checkConstOperands(expr.op, lt, rt, expr);
+				this._markTypeParamMapNil(expr, lt, rt, scope);
 				const res = this.binaryResultType(expr.op, lt, rt, expr);
 				if (is64BitInt(lt) && rt?.kind === "untyped" && expr.right)
 					expr.right._is64Bit = true;
@@ -714,6 +715,21 @@ export const expressionCheckMethods = {
 		const key = typeStr(unders[0]);
 		if (unders.some((u) => !u || typeStr(u) !== key)) return null;
 		return unders[0];
+	},
+
+	// `m == nil` on a type parameter whose core type is a map: the backends
+	// compare it as a map, so record the core type on the operand.
+	_markTypeParamMapNil(expr, lt, rt, scope) {
+		if (expr.op !== "==" && expr.op !== "!=") return;
+		const [operand, other] =
+			rt === NIL
+				? [expr.left, lt]
+				: lt === NIL
+					? [expr.right, rt]
+					: [null, null];
+		if (!operand || other?.kind !== "typeParam") return;
+		const core = this._coreType(other, scope);
+		if (core?.kind === "map") operand._coreType = core;
 	},
 
 	// Underlying type of `t` for indexing, slicing, ranging and the like; a
@@ -1500,13 +1516,6 @@ export const expressionCheckMethods = {
 
 		this._checkCallArgs(fnType, argTypes, expr, scope);
 
-		// Pseudo-generic stdlib helpers (maps.Keys, slices.Clone, ...) declare
-		// how their result derives from the first argument.
-		if (fnType._derivedReturn) {
-			const derived = this._derivedReturnType(fnType._derivedReturn, argTypes);
-			if (derived) return derived;
-		}
-
 		const ret = fnType.returns;
 		if (!ret || ret.length === 0) return VOID;
 		if (ret.length === 1) return ret[0];
@@ -1554,17 +1563,6 @@ export const expressionCheckMethods = {
 			`shared.${f.field} must be called from a package-level var initializer or init(); ${why}`,
 			expr,
 		);
-	},
-
-	_derivedReturnType(mode, argTypes) {
-		const arg = argTypes[0];
-		const under = arg?.kind === "named" ? arg.underlying : arg;
-		switch (mode) {
-			case "arg0":
-				return under ? arg : null;
-			default:
-				return null;
-		}
 	},
 
 	// Argument types for inference: a spread argument `xs...` stands for its

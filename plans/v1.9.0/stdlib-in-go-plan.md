@@ -355,28 +355,28 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
 
 ### Phase 5: `maps`, `errors`, `unicode/utf8`, `path`, `html`
 
-- [ ] **Task 5.1 — `maps` in Go and generic map range in JS**
+- [x] **Task 5.1 — `maps` in Go and generic map range in JS**
   - Files: `stdlib/maps/maps.go`, `src/backend/js/statements.js` (`_structKeyRange` for type-parameter maps), `src/typechecker/expressions.js` (remove `_derivedReturn`)
   - Removes: `stdlib/maps/iter.go`, `src/backend/js/stdlib/maps.js`, `emitMaps*` in `core.js`, `maps` typings in `extended.js`
   - Do: `Clone`, `Copy`, `Equal`, `EqualFunc`, `DeleteFunc`, `All`, `Keys`, `Values`, `Insert`, `Collect` with `M ~map[K]V`; `range` over a type-parameter map decodes keys from the instantiated key type.
   - Test: `test/unit/stdlib/maps.test.js` — sorted output, `NaN` keys kept once each; `slices.Collect(maps.Keys(map[K]int{{"a",1}:1}))` → `[{a 1}]`; `maps.Keys(map[any]int{L("a"):1})` keeps `L`; `for k := range maps.Keys(map[any]int{1:1}) { fmt.Printf("%T %v", k, k) }` → `int 1`.
   - Done when: cases pass four ways and `grep -rn _derivedReturn src` finds nothing.
 
-- [ ] **Task 5.2 — `errors` in Go, `As` stays an emitter member**
+- [x] **Task 5.2 — `errors` in Go, `As` stays an emitter member**
   - Files: `stdlib/errors/errors.go`, `src/backend/js/runtime.js` (`%w`/`Join` wrappers' `Unwrap`), `src/backend/wasm/module-emitter.js` (runtime error struct method set)
   - Removes: `stdlib/errors/overlay.go`, `emitErrorsCall` except `As` in `core.js`; `src/backend/js/stdlib/errors.js` except `As`; `errors` typings except `As`
   - Do: `New` (an `*errorString`), `Is`, `Unwrap`, `Join`, `ErrUnsupported` in Go, as an overlay with `As` the only emitter member; wrappers expose `Unwrap() error` / `Unwrap() []error` to type switches and assertions on both backends.
   - Test: `test/unit/stdlib/errors.test.js` — `%w`, multiple `%w`, `Join`, `Is` with `Is(error) bool` methods, `As` on pointer and value targets; `errors.Is(nil, nil)` → `true`; `%T` of `errors.New("x")` → `*errors.errorString`; `Errorf("%w")` matches `interface{ Unwrap() error }`; `Join` matches `interface{ Unwrap() []error }`; `Is2[error](errors.New("x"))` → `true`; `errors.Is(err, strconv.ErrRange)`.
   - Done when: cases pass four ways.
 
-- [ ] **Task 5.3 — `unicode/utf8` in Go**
+- [x] **Task 5.3 — `unicode/utf8` in Go**
   - Files: `stdlib/unicode/utf8/utf8.go`, `src/backend/js/natives.js` (`RuneCountInString`)
   - Removes: `stdlib/unicode/utf8/bytes.go`, `src/backend/js/stdlib/utf8.js`, `emitUtf8Call` in `core.js`, `utf8` typings in `core.js`
   - Do: the whole package over `[]byte` with Go's constants and signatures (`RuneError`, `UTFMax` untyped).
   - Test: `test/unit/stdlib/utf8.test.js` — invalid sequences, surrogates, `FullRune`, `DecodeLastRune`.
   - Done when: cases pass four ways and `unicode/utf8` has no typechecker table entry.
 
-- [ ] **Task 5.4 — `path` and `html` in Go**
+- [x] **Task 5.4 — `path` and `html` in Go**
   - Files: `stdlib/path/path.go`, `stdlib/html/html.go`, `src/typechecker/types.js` (`path/filepath` alias, `types.js:123`)
   - Removes: `src/backend/js/stdlib/{path,html}.js`, `path`/`html` emitters in `src/backend/wasm/stdlib/pure.js`, typings in `extended.js` (the alias at `extended.js:540` re-points to the Go `path`)
   - Do: `Join`, `Clean`, `Base`, `Dir`, `Ext`, `Split`, `IsAbs`, `Match`; `EscapeString`/`UnescapeString` with Go's entity subset documented in the file.

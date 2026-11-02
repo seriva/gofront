@@ -8,6 +8,8 @@ export { isComplex, isComplex64 };
 
 // Name of the runtime's error struct (`errors.New`, `fmt.Errorf`, strconv).
 export const ERROR_STRUCT = "__errorString";
+// Runtime error of an `fmt.Errorf` with several `%w` verbs: `Unwrap() []error`.
+export const WRAP_ERRORS_STRUCT = "__wrapErrors";
 
 // `*testing.T` is a JS-side object (the harness's __GoFront_T) passed through
 // the boundary as an opaque externref.

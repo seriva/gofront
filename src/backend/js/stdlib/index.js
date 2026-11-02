@@ -10,13 +10,10 @@ import { errorsMethods } from "./errors.js";
 import { fmtMethods } from "./fmt.js";
 import { gomMethods } from "./gom.js";
 import { hexMethods } from "./hex.js";
-import { htmlMethods } from "./html.js";
 import { ioMethods } from "./io.js";
 import { jsonMethods } from "./json.js";
-import { mapsMethods } from "./maps.js";
 import { mathMethods } from "./math.js";
 import { osMethods } from "./os.js";
-import { pathMethods } from "./path.js";
 import { randMethods } from "./rand.js";
 import { regexpMethods } from "./regexp.js";
 import { sha256Methods } from "./sha256.js";
@@ -28,7 +25,6 @@ import { syncMethods } from "./sync.js";
 import { testingMethods } from "./testing.js";
 import { timeMethods } from "./time.js";
 import { unicodeMethods } from "./unicode.js";
-import { utf8Methods } from "./utf8.js";
 
 /** @typedef {import('../index.js').CodeGen} CodeGen */
 
@@ -46,13 +42,8 @@ const STDLIB_METHOD_MAP = {
 	errors: "_genErrors",
 	time: "_genTime",
 	regexp: "_genRegexp",
-	maps: "_genMaps",
-	html: "_genHtml",
 	io: "_genIo",
 	rand: "_genRand",
-	utf8: "_genUtf8",
-	path: "_genPath",
-	filepath: "_genPath",
 	testing: "_genTesting",
 	shared: "_genShared",
 	sync: "_genSync",
@@ -108,12 +99,9 @@ export const stdlibGenMethods = {
 	...errorsMethods,
 	...fmtMethods,
 	...gomMethods,
-	...htmlMethods,
 	...ioMethods,
-	...mapsMethods,
 	...mathMethods,
 	...osMethods,
-	...pathMethods,
 	...randMethods,
 	...regexpMethods,
 	...sharedMethods,
@@ -122,7 +110,6 @@ export const stdlibGenMethods = {
 	...stringsMethods,
 	...timeMethods,
 	...unicodeMethods,
-	...utf8Methods,
 	...testingMethods,
 	...syncMethods,
 	...sha256Methods,

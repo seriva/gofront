@@ -76,6 +76,10 @@ export const FIXTURES = join(__dirname, "fixtures");
 
 // ── Compiler ─────────────────────────────────────────────────
 
+// Packages whose typechecker table keeps only emitter members (`errors.As`):
+// the rest is Go source, so a program importing one is linked like the others.
+const GO_OVERLAID_PACKAGES = new Set(["errors"]);
+
 // Whether the program imports a package that exists only as Go source under
 // stdlib/ (no typechecker table).  The in-memory `compile` and `compileWasm`
 // helpers do not link those; they go through `compileFiles` instead.
@@ -85,7 +89,7 @@ function importsGoSourceStdlib(ast) {
 			({ path }) =>
 				!path.startsWith("js:") &&
 				!path.startsWith(".") &&
-				!isBuiltinPackage(path) &&
+				(!isBuiltinPackage(path) || GO_OVERLAID_PACKAGES.has(path)) &&
 				resolveStdlibSource(path) !== null,
 		),
 	);

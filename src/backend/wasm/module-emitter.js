@@ -12,14 +12,13 @@ import {
 	isScalarType,
 	isSliceType,
 	toWasmType,
+	WRAP_ERRORS_STRUCT,
 } from "./types.js";
 
 const ERROR_PRODUCING_PKGS = new Set([
 	"errors",
 	"fmt",
 	"strconv",
-	"path",
-	"path/filepath",
 	"io",
 	"os",
 	"strings",
@@ -45,14 +44,10 @@ const ERROR_PRODUCING_PKGS = new Set([
 const STDLIB_ENV_PKGS = new Set([
 	"strings",
 	"strconv",
-	"unicode/utf8",
 	"fmt",
 	"testing",
 	"unicode",
 	"math/rand",
-	"path",
-	"path/filepath",
-	"html",
 	"bytes",
 	"io",
 	"os",
@@ -120,13 +115,6 @@ const STDLIB_IMPORTS = [
 	["strconv_parse_uint", [S, "i32", "i32"], ["i64"]],
 	["strconv_quote", [S], [S]],
 	["strconv_unquote", [S], [S]],
-	// unicode/utf8
-	["utf8_rune_count", [S], ["i32"]],
-	["utf8_rune_len", ["i32"], ["i32"]],
-	["utf8_valid_string", [S], ["i32"]],
-	["utf8_decode_rune", [S, "i32"], ["i32"]],
-	["utf8_decode_size", [], ["i32"]],
-	["utf8_full_rune", [S], ["i32"]],
 	// fmt (arguments travel through the testing_arg_* buffer)
 	["fmt_sprintf", [S], [S]],
 	["fmt_printf", [S], []],
@@ -161,23 +149,6 @@ const STDLIB_IMPORTS = [
 	["unicode_is_graphic", ["i32"], ["i32"]],
 	["unicode_to_upper", ["i32"], ["i32"]],
 	["unicode_to_lower", ["i32"], ["i32"]],
-	// html
-	["html_escape", [S], [S]],
-	["html_unescape", [S], [S]],
-	// path
-	["path_base", [S], [S]],
-	["path_dir", [S], [S]],
-	["path_ext", [S], [S]],
-	["path_is_abs", [S], ["i32"]],
-	["path_clean", [S], [S]],
-	["path_split", [S], []],
-	["path_split_dir", [], [S]],
-	["path_split_file", [], [S]],
-	["path_join_init", [], []],
-	["path_join_push", [S], []],
-	["path_join_run", [], [S]],
-	["path_match", [S, S], ["i32"]],
-	["path_match_has_err", [], ["i32"]],
 	["bytes_trim", [S, S, "i32", "i32"], []],
 	["bytes_trim_start", [], ["i32"]],
 	["bytes_trim_end", [], ["i32"]],
@@ -289,6 +260,33 @@ export class ModuleEmitter {
 		this._initRuntimeImports();
 	}
 
+	// The runtime error struct is not declared in Go source: give the checker a
+	// named type with its method set (`Error() string`, `Unwrap() error`) so
+	// type assertions to `interface{ Unwrap() error }` find it as a candidate.
+	_registerRuntimeErrorType() {
+		const types = this.checker?.types;
+		if (!types || types.has(ERROR_STRUCT)) return;
+		const STRING = { kind: "basic", name: "string" };
+		const ERROR = { kind: "interface", name: "error" };
+		const named = (name, unwrapReturn) => ({
+			kind: "named",
+			name,
+			underlying: {
+				kind: "struct",
+				fields: new Map(),
+				methods: new Map([
+					["Error", { kind: "func", params: [], returns: [STRING] }],
+					["Unwrap", { kind: "func", params: [], returns: [unwrapReturn] }],
+				]),
+			},
+		});
+		types.set(ERROR_STRUCT, named(ERROR_STRUCT, ERROR));
+		types.set(
+			WRAP_ERRORS_STRUCT,
+			named(WRAP_ERRORS_STRUCT, { kind: "slice", elem: ERROR }),
+		);
+	}
+
 	initTypes(programs) {
 		const progs = Array.isArray(programs) ? programs : [programs];
 		const rawStructs = [];
@@ -296,6 +294,7 @@ export class ModuleEmitter {
 		const aliases = []; // qualified key (pkg.T) -> unqualified struct name
 
 		if (this.hasErrorType) {
+			this._registerRuntimeErrorType();
 			seen.add(ERROR_STRUCT);
 			rawStructs.push({
 				name: ERROR_STRUCT,
@@ -304,6 +303,20 @@ export class ModuleEmitter {
 					fields: new Map([
 						["msg", { kind: "basic", name: "string" }],
 						["cause", { kind: "basic", name: "any" }],
+					]),
+				},
+			});
+			seen.add(WRAP_ERRORS_STRUCT);
+			rawStructs.push({
+				name: WRAP_ERRORS_STRUCT,
+				structType: {
+					kind: "struct",
+					fields: new Map([
+						["msg", { kind: "basic", name: "string" }],
+						[
+							"errs",
+							{ kind: "slice", elem: { kind: "interface", name: "error" } },
+						],
 					]),
 				},
 			});
@@ -1164,21 +1177,6 @@ export class ModuleEmitter {
 			init: [{ op: "ref.null", heapType: "any" }],
 		});
 		this.strconvErrGlobals.set(field, gIdx);
-		return gIdx;
-	}
-
-	getPathErrGlobalIndex(field) {
-		if (!this.pathErrGlobals) this.pathErrGlobals = new Map();
-		if (this.pathErrGlobals.has(field)) {
-			return this.pathErrGlobals.get(field);
-		}
-		const gIdx = this.globals.length;
-		this.globals.push({
-			type: "anyref",
-			mutable: true,
-			init: [{ op: "ref.null", heapType: "any" }],
-		});
-		this.pathErrGlobals.set(field, gIdx);
 		return gIdx;
 	}
 

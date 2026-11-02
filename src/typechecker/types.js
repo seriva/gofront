@@ -115,11 +115,6 @@ export const WASM_SUPPORTED_STDLIB = new Set([
 	"bytes",
 	"strconv",
 	"unicode",
-	"unicode/utf8",
-	"maps",
-	"path",
-	"path/filepath",
-	"html",
 	"io",
 	"time",
 	"testing",
@@ -278,31 +273,7 @@ export const WASM_STDLIB_MEMBERS = new Map([
 			"UintSize",
 		]),
 	],
-	["errors", new Set(["New", "Is", "Unwrap", "As", "Join"])],
-	[
-		"utf8",
-		new Set([
-			"RuneCountInString",
-			"RuneLen",
-			"ValidString",
-			"ValidRune",
-			"DecodeRuneInString",
-			"DecodeLastRuneInString",
-			"FullRuneInString",
-			"RuneError",
-			"MaxRune",
-			"UTFMax",
-			"RuneSelf",
-			"EncodeRune",
-			"AppendRune",
-			"DecodeRune",
-			"DecodeLastRune",
-			"RuneCount",
-			"FullRune",
-			"Valid",
-			"RuneStart",
-		]),
-	],
+	["errors", new Set(["As"])],
 	[
 		"fmt",
 		new Set([
@@ -417,10 +388,6 @@ export const WASM_STDLIB_MEMBERS = new Map([
 		]),
 	],
 	[
-		"maps",
-		new Set(["Clone", "Copy", "Equal", "EqualFunc", "Delete", "DeleteFunc"]),
-	],
-	[
 		"unicode",
 		new Set([
 			"IsLetter",
@@ -499,35 +466,6 @@ export const WASM_STDLIB_MEMBERS = new Map([
 			"ToValidUTF8",
 		]),
 	],
-	[
-		"path",
-		new Set([
-			"Base",
-			"Dir",
-			"Ext",
-			"Join",
-			"Clean",
-			"IsAbs",
-			"Split",
-			"Match",
-			"ErrBadPattern",
-		]),
-	],
-	[
-		"filepath",
-		new Set([
-			"Base",
-			"Dir",
-			"Ext",
-			"Join",
-			"Clean",
-			"IsAbs",
-			"Split",
-			"Match",
-			"ErrBadPattern",
-		]),
-	],
-	["html", new Set(["EscapeString", "UnescapeString"])],
 	[
 		"io",
 		new Set([
@@ -657,6 +595,7 @@ export const NATIVES = new Set([
 	"slices.Sort",
 	"sort.Ints",
 	"sort.Strings",
+	"utf8.RuneCountInString",
 ]);
 
 // ── Static operator sets (module-level for reuse) ────────────

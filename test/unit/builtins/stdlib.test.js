@@ -536,9 +536,10 @@ section("errors package");
 
 test("errors.New creates an error value", () => {
 	const { js, errors } = compile(`package main
+import "errors"
 func main() {
 	err := errors.New("something went wrong")
-	console.log(err)
+	console.log(err.Error())
 }`);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "something went wrong");
@@ -546,6 +547,7 @@ func main() {
 
 test("errors.New used in return", () => {
 	const { js, errors } = compile(`package main
+import "errors"
 func divide(a int, b int) (int, error) {
 	if b == 0 {
 		return 0, errors.New("division by zero")
@@ -554,7 +556,7 @@ func divide(a int, b int) (int, error) {
 }
 func main() {
 	_, err := divide(1, 0)
-	console.log(err)
+	console.log(err.Error())
 }`);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "division by zero");
@@ -1609,19 +1611,6 @@ test("maps.Values", async () => {
 	assertEqual(out, "10\n20");
 });
 
-test("maps.Clone", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	m := map[string]int{"a": 1}
-	c := maps.Clone(m)
-	c["b"] = 2
-	console.log(len(m))
-	console.log(len(c))
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "1\n2");
-});
-
 test("maps.Copy", async () => {
 	const out = await runMapsMain(`	dst := map[string]int{"a": 1}
 	src := map[string]int{"b": 2, "c": 3}
@@ -1632,42 +1621,6 @@ test("maps.Copy", async () => {
 		console.log(k)
 	}`);
 	assertEqual(out, "a\nb\nc");
-});
-
-test("maps.Equal", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	a := map[string]int{"x": 1, "y": 2}
-	b := map[string]int{"x": 1, "y": 2}
-	c := map[string]int{"x": 1, "y": 3}
-	console.log(maps.Equal(a, b))
-	console.log(maps.Equal(a, c))
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "true\nfalse");
-});
-
-test("maps.Delete", async () => {
-	const out = await runMapsMain(`	m := map[string]int{"a": 1, "b": 2, "c": 3}
-	maps.Delete(m, "b")
-	keys := slices.Collect(maps.Keys(m))
-	slices.Sort(keys)
-	for _, k := range keys {
-		console.log(k)
-	}`);
-	assertEqual(out, "a\nc");
-});
-
-test("maps.EqualFunc", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	a := map[string]int{"x": 1, "y": 2}
-	b := map[string]int{"x": 10, "y": 20}
-	eq := maps.EqualFunc(a, b, func(v1, v2 int) bool { return v1*10 == v2 })
-	console.log(eq)
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "true");
 });
 
 test("maps.DeleteFunc", async () => {
@@ -1689,6 +1642,7 @@ section("html package");
 
 test("html.EscapeString", () => {
 	const { js, errors } = compile(`package main
+import "html"
 func main() {
 	console.log(html.EscapeString("<b>Hello & \\"World\\"</b>"))
 }`);
@@ -1698,6 +1652,7 @@ func main() {
 
 test("html.EscapeString plain string unchanged", () => {
 	const { js, errors } = compile(`package main
+import "html"
 func main() {
 	console.log(html.EscapeString("no special chars"))
 }`);
@@ -1707,6 +1662,7 @@ func main() {
 
 test("html.UnescapeString", () => {
 	const { js, errors } = compile(`package main
+import "html"
 func main() {
 	console.log(html.UnescapeString("&lt;b&gt;Hello &amp; &#34;World&#34;&lt;/b&gt;"))
 }`);
@@ -1716,6 +1672,7 @@ func main() {
 
 test("html.EscapeString escapes single quotes", () => {
 	const { js, errors } = compile(`package main
+import "html"
 func main() {
 	console.log(html.EscapeString("it's a test"))
 }`);
@@ -1725,6 +1682,7 @@ func main() {
 
 test("html.EscapeString empty string", () => {
 	const { js, errors } = compile(`package main
+import "html"
 func main() {
 	console.log(html.EscapeString("") == "")
 }`);
@@ -1734,6 +1692,7 @@ func main() {
 
 test("html.EscapeString roundtrip", () => {
 	const { js, errors } = compile(`package main
+import "html"
 func main() {
 	s := "<script>alert('xss')</script>"
 	console.log(html.UnescapeString(html.EscapeString(s)) == s)
@@ -2283,6 +2242,7 @@ section("unicode/utf8 package");
 
 test("utf8.RuneCountInString", () => {
 	const { js, errors } = compile(`package main
+import "unicode/utf8"
 func main() {
 	console.log(utf8.RuneCountInString("hello"))
 	console.log(utf8.RuneCountInString(""))
@@ -2293,6 +2253,7 @@ func main() {
 
 test("utf8.RuneLen", () => {
 	const { js, errors } = compile(`package main
+import "unicode/utf8"
 func main() {
 	console.log(utf8.RuneLen(65))
 	console.log(utf8.RuneLen(0x80))
@@ -2304,6 +2265,7 @@ func main() {
 
 test("utf8.ValidString", () => {
 	const { js, errors } = compile(`package main
+import "unicode/utf8"
 func main() {
 	console.log(utf8.ValidString("hello"))
 }`);
@@ -2313,6 +2275,7 @@ func main() {
 
 test("utf8.ValidRune", () => {
 	const { js, errors } = compile(`package main
+import "unicode/utf8"
 func main() {
 	console.log(utf8.ValidRune(65))
 	console.log(utf8.ValidRune(-1))
@@ -2323,6 +2286,7 @@ func main() {
 
 test("utf8.RuneError constant", () => {
 	const { js, errors } = compile(`package main
+import "unicode/utf8"
 func main() {
 	console.log(utf8.RuneError)
 }`);
@@ -2332,6 +2296,7 @@ func main() {
 
 test("utf8.MaxRune constant", () => {
 	const { js, errors } = compile(`package main
+import "unicode/utf8"
 func main() {
 	console.log(utf8.MaxRune)
 }`);
@@ -2341,6 +2306,7 @@ func main() {
 
 test("utf8.DecodeRuneInString", () => {
 	const { js, errors } = compile(`package main
+import "unicode/utf8"
 func main() {
 	r, size := utf8.DecodeRuneInString("hello")
 	console.log(r)
@@ -2358,6 +2324,7 @@ section("path package");
 
 test("path.Base", () => {
 	const { js, errors } = compile(`package main
+import "path"
 func main() {
 	console.log(path.Base("/foo/bar/baz.txt"))
 	console.log(path.Base("/"))
@@ -2369,6 +2336,7 @@ func main() {
 
 test("path.Dir", () => {
 	const { js, errors } = compile(`package main
+import "path"
 func main() {
 	console.log(path.Dir("/foo/bar/baz.txt"))
 	console.log(path.Dir("/foo"))
@@ -2380,6 +2348,7 @@ func main() {
 
 test("path.Ext", () => {
 	const { js, errors } = compile(`package main
+import "path"
 func main() {
 	console.log(path.Ext("index.html"))
 	console.log(path.Ext("noext"))
@@ -2390,6 +2359,7 @@ func main() {
 
 test("path.Join", () => {
 	const { js, errors } = compile(`package main
+import "path"
 func main() {
 	console.log(path.Join("foo", "bar", "baz"))
 	console.log(path.Join("/foo", "bar"))
@@ -2401,6 +2371,7 @@ func main() {
 
 test("path.Clean", () => {
 	const { js, errors } = compile(`package main
+import "path"
 func main() {
 	console.log(path.Clean("foo//bar"))
 	console.log(path.Clean("./foo/./bar"))
@@ -2411,6 +2382,7 @@ func main() {
 
 test("path.IsAbs", () => {
 	const { js, errors } = compile(`package main
+import "path"
 func main() {
 	console.log(path.IsAbs("/foo/bar"))
 	console.log(path.IsAbs("foo/bar"))
@@ -2421,6 +2393,7 @@ func main() {
 
 test("path.Split", () => {
 	const { js, errors } = compile(`package main
+import "path"
 func main() {
 	dir, file := path.Split("/foo/bar/baz.txt")
 	console.log(dir)

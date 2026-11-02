@@ -279,12 +279,6 @@ const NS_CONSTANTS = {
 	bits: {
 		UintSize: "64",
 	},
-	path: {
-		ErrBadPattern: "__path_err_bad_pattern",
-	},
-	filepath: {
-		ErrBadPattern: "__path_err_bad_pattern",
-	},
 	io: {
 		EOF: "__io_eof",
 		Discard:
@@ -352,7 +346,6 @@ const NS_CONSTANTS = {
 		Friday: "5",
 		Saturday: "6",
 	},
-	utf8: { RuneError: "0xFFFD", MaxRune: "0x10FFFF", UTFMax: "4" },
 };
 
 // JavaScript precedence of the operators emitted for Go binary expressions.
@@ -1132,8 +1125,6 @@ export const expressionGenMethods = {
 			if (nsConst !== undefined) {
 				if (expr.expr.name === "strconv") {
 					this.useHelper("strconvError");
-				} else if (expr.expr.name === "path" || expr.expr.name === "filepath") {
-					if (expr.field === "ErrBadPattern") this.useHelper("pathError");
 				} else if (expr.expr.name === "io" && expr.field === "EOF") {
 					this.useHelper("ioEOF");
 				} else if (expr.expr.name === "binary") {
@@ -3097,7 +3088,7 @@ export const expressionGenMethods = {
 		if (!other) return null;
 		const t =
 			other._type?.kind === "named" ? other._type.underlying : other._type;
-		return t?.kind === "map" ? other : null;
+		return t?.kind === "map" || other._coreType?.kind === "map" ? other : null;
 	},
 
 	_genNilMapCompare(expr) {
