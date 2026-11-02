@@ -577,10 +577,6 @@ export class ExprsEmitter {
 			this.emitStrconvConst(expr.field, targetWasmType);
 			return true;
 		}
-		if (this._isIoConst(expr)) {
-			this.emitIoConst(expr.field, targetWasmType);
-			return true;
-		}
 		if (this._isOsConst?.(expr)) {
 			this.emitOsConst(expr.field, targetWasmType);
 			return true;

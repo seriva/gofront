@@ -1071,10 +1071,6 @@ export class BuiltinsEmitter {
 				this.emitBitsCall(func.field, args);
 				return true;
 			case "strings":
-				if (func.field === "NewReader") {
-					this.emitStringsNewReader(call, targetWasmType);
-					return true;
-				}
 				this.emitStringsCall(func.field, args, targetWasmType);
 				return true;
 			case "strconv":
@@ -1104,10 +1100,6 @@ export class BuiltinsEmitter {
 				this.emitRandCall(func.field, args, targetWasmType);
 				return true;
 			case "bytes":
-				if (func.field === "NewReader") {
-					this.emitBytesNewReader(call, targetWasmType);
-					return true;
-				}
 				if (func.field === "NewBuffer") {
 					this.emitBytesNewBuffer(call, targetWasmType);
 					return true;
@@ -1117,9 +1109,6 @@ export class BuiltinsEmitter {
 					return true;
 				}
 				this.emitBytesCall(func.field, args, targetWasmType);
-				return true;
-			case "io":
-				this.emitIoCall(func.field, call, targetWasmType);
 				return true;
 			case "time":
 				this.emitTimeCall(func.field, call, targetWasmType);
@@ -1185,10 +1174,6 @@ export class BuiltinsEmitter {
 		}
 		if (recvTypeName === "strings.Builder") {
 			this.emitBuilderMethodCall(func.field, func.expr, args);
-			return true;
-		}
-		if (recvTypeName === "strings.Replacer") {
-			this.emitReplacerMethodCall(func.field, func.expr, args);
 			return true;
 		}
 		if (isNonEmptyInterface(recvType, this.mod.checker)) {
@@ -1295,20 +1280,8 @@ export class BuiltinsEmitter {
 			this.emitBuilderMethodCall(field, expr, args, targetWasmType);
 			return true;
 		}
-		if (recvTypeName === "strings.Replacer") {
-			this.emitReplacerMethodCall(field, expr, args);
-			return true;
-		}
 		if (recvTypeName === "bytes.Buffer") {
 			this.emitBytesBufferMethodCall(field, expr, args, targetWasmType);
-			return true;
-		}
-		if (recvTypeName === "strings.Reader") {
-			this.emitStringsReaderMethodCall(field, expr, args, targetWasmType);
-			return true;
-		}
-		if (recvTypeName === "bytes.Reader") {
-			this.emitBytesReaderMethodCall(field, expr, args, targetWasmType);
 			return true;
 		}
 		if (recvTypeName === "time.Time") {
@@ -1331,10 +1304,6 @@ export class BuiltinsEmitter {
 				args,
 				targetWasmType,
 			);
-			return true;
-		}
-		if (recvTypeName === "io.LimitedReader") {
-			this.emitIoLimitedReaderMethodCall(field, expr, args, targetWasmType);
 			return true;
 		}
 		if (

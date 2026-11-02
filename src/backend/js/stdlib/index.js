@@ -10,7 +10,6 @@ import { errorsMethods } from "./errors.js";
 import { fmtMethods } from "./fmt.js";
 import { gomMethods } from "./gom.js";
 import { hexMethods } from "./hex.js";
-import { ioMethods } from "./io.js";
 import { jsonMethods } from "./json.js";
 import { mathMethods } from "./math.js";
 import { osMethods } from "./os.js";
@@ -42,7 +41,6 @@ const STDLIB_METHOD_MAP = {
 	errors: "_genErrors",
 	time: "_genTime",
 	regexp: "_genRegexp",
-	io: "_genIo",
 	rand: "_genRand",
 	testing: "_genTesting",
 	shared: "_genShared",
@@ -99,7 +97,6 @@ export const stdlibGenMethods = {
 	...errorsMethods,
 	...fmtMethods,
 	...gomMethods,
-	...ioMethods,
 	...mathMethods,
 	...osMethods,
 	...randMethods,

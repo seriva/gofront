@@ -168,10 +168,6 @@ TIME_T.underlying.methods = new Map([
 	],
 ]);
 TIME_T.methods = TIME_T.underlying.methods;
-const REPLACER_T = {
-	kind: "pointer",
-	base: { kind: "named", name: "strings.Replacer" },
-};
 const BUFFER_T = {
 	kind: "named",
 	name: "bytes.Buffer",
@@ -200,6 +196,21 @@ export function setupCoreGlobals(globals, types) {
 		name: "fmt.Stringer",
 		methods: new Map([
 			["String", { kind: "func", params: [], returns: [STRING] }],
+		]),
+	};
+	// The writer of Fprint*: any value with Write([]byte) (int, error), as io.Writer.
+	const FMT_WRITER = {
+		kind: "interface",
+		name: "io.Writer",
+		methods: new Map([
+			[
+				"Write",
+				{
+					kind: "func",
+					params: [{ kind: "slice", elem: UINT8 }],
+					returns: [INT, ERROR],
+				},
+			],
 		]),
 	};
 	globals.define("fmt", {
@@ -234,19 +245,19 @@ export function setupCoreGlobals(globals, types) {
 			Print: fmtPrintVariadic(VOID),
 			Fprintf: {
 				kind: "func",
-				params: [ANY, STRING, ANY],
+				params: [FMT_WRITER, STRING, ANY],
 				returns: [INT, ERROR],
 				variadic: true,
 			},
 			Fprintln: {
 				kind: "func",
-				params: [ANY, ANY],
+				params: [FMT_WRITER, ANY],
 				returns: [INT, ERROR],
 				variadic: true,
 			},
 			Fprint: {
 				kind: "func",
-				params: [ANY, ANY],
+				params: [FMT_WRITER, ANY],
 				returns: [INT, ERROR],
 				variadic: true,
 			},
@@ -353,13 +364,6 @@ export function setupCoreGlobals(globals, types) {
 			TrimRightFunc: { kind: "func", params: [STRING, ANY], returns: [STRING] },
 			IndexFunc: { kind: "func", params: [STRING, ANY], returns: [INT] },
 			LastIndexFunc: { kind: "func", params: [STRING, ANY], returns: [INT] },
-			NewReplacer: {
-				kind: "func",
-				params: [STRING],
-				returns: [REPLACER_T],
-				variadic: true,
-			},
-			NewReader: { kind: "func", params: [STRING], returns: [ANY] },
 			ToValidUTF8: strFn2(STRING, STRING),
 			Builder: ANY,
 		},
@@ -436,7 +440,6 @@ export function setupCoreGlobals(globals, types) {
 				params: [BYTE_SLICE, BYTE_SLICE, INT],
 				returns: [{ kind: "slice", elem: BYTE_SLICE }],
 			},
-			NewReader: { kind: "func", params: [BYTE_SLICE], returns: [ANY] },
 			NewBuffer: {
 				kind: "func",
 				params: [BYTE_SLICE],
@@ -867,87 +870,5 @@ export function setupCoreGlobals(globals, types) {
 		},
 	});
 
-	const IO_WRITER = {
-		kind: "interface",
-		name: "io.Writer",
-		methods: new Map([
-			[
-				"Write",
-				{ kind: "func", params: [BYTE_SLICE_IO], returns: [INT, ERROR] },
-			],
-		]),
-	};
-	const IO_READER = {
-		kind: "interface",
-		name: "io.Reader",
-		methods: new Map([
-			[
-				"Read",
-				{ kind: "func", params: [BYTE_SLICE_IO], returns: [INT, ERROR] },
-			],
-		]),
-	};
-	const IO_CLOSER = {
-		kind: "interface",
-		name: "io.Closer",
-		methods: new Map([
-			["Close", { kind: "func", params: [], returns: [ERROR] }],
-		]),
-	};
-	const IO_READWRITER = {
-		kind: "interface",
-		name: "io.ReadWriter",
-		methods: new Map([
-			[
-				"Read",
-				{ kind: "func", params: [BYTE_SLICE_IO], returns: [INT, ERROR] },
-			],
-			[
-				"Write",
-				{ kind: "func", params: [BYTE_SLICE_IO], returns: [INT, ERROR] },
-			],
-		]),
-	};
-	globals.define("io", {
-		kind: "namespace",
-		name: "io",
-		members: {
-			Writer: IO_WRITER,
-			Reader: IO_READER,
-			Closer: IO_CLOSER,
-			ReadWriter: IO_READWRITER,
-			EOF: ERROR,
-			WriteString: {
-				kind: "func",
-				params: [IO_WRITER, STRING],
-				returns: [INT, ERROR],
-			},
-			ReadAll: {
-				kind: "func",
-				params: [IO_READER],
-				returns: [BYTE_SLICE_IO, ERROR],
-			},
-			LimitReader: {
-				kind: "func",
-				params: [IO_READER, INT64],
-				returns: [IO_READER],
-			},
-			Copy: {
-				kind: "func",
-				params: [IO_WRITER, IO_READER],
-				returns: [INT64, ERROR],
-			},
-			CopyN: {
-				kind: "func",
-				params: [IO_WRITER, IO_READER, INT64],
-				returns: [INT64, ERROR],
-			},
-			Discard: IO_WRITER,
-		},
-	});
 	types.set("fmt.Stringer", FMT_STRINGER);
-	types.set("io.Writer", IO_WRITER);
-	types.set("io.Reader", IO_READER);
-	types.set("io.Closer", IO_CLOSER);
-	types.set("io.ReadWriter", IO_READWRITER);
 }

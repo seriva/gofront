@@ -80,16 +80,24 @@ export const FIXTURES = join(__dirname, "fixtures");
 // the rest is Go source, so a program importing one is linked like the others.
 const GO_OVERLAID_PACKAGES = new Set(["errors"]);
 
+// Emitter-backed packages that also carry Go-source members (readers and
+// replacers); a program names one of them as `pkg.Member`.
+const GO_MEMBER_PACKAGES = new Set(["strings", "bytes"]);
+const GO_MEMBER_RE =
+	/\b(?:strings|bytes)\.(?:NewReader|Reader|NewReplacer|Replacer)\b/;
+
 // Whether the program imports a package that exists only as Go source under
 // stdlib/ (no typechecker table).  The in-memory `compile` and `compileWasm`
 // helpers do not link those; they go through `compileFiles` instead.
-function importsGoSourceStdlib(ast) {
+function importsGoSourceStdlib(ast, source = "") {
 	return ast.imports.some((imp) =>
 		imp.imports.some(
 			({ path }) =>
 				!path.startsWith("js:") &&
 				!path.startsWith(".") &&
-				(!isBuiltinPackage(path) || GO_OVERLAID_PACKAGES.has(path)) &&
+				(!isBuiltinPackage(path) ||
+					GO_OVERLAID_PACKAGES.has(path) ||
+					(GO_MEMBER_PACKAGES.has(path) && GO_MEMBER_RE.test(source))) &&
 				resolveStdlibSource(path) !== null,
 		),
 	);
@@ -119,7 +127,8 @@ export function compileWasm(source, options = {}) {
 		"main.go",
 		source,
 	).parse();
-	if (!importsGoSourceStdlib(ast)) return compileWasmSource(source, options);
+	if (!importsGoSourceStdlib(ast, source))
+		return compileWasmSource(source, options);
 	const { res, errors } = compileSourceFile(source, "wasm", {
 		exportAll: options.exportAll ?? true,
 	});
@@ -165,7 +174,7 @@ export function compile(
 		jsImports.set(path, [...info.values.keys()]);
 	}
 
-	if (importsGoSourceStdlib(ast)) {
+	if (importsGoSourceStdlib(ast, source)) {
 		const { res, errors } = compileSourceFile(source, pkgTarget);
 		return errors.length > 0
 			? { js: null, errors }

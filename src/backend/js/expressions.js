@@ -148,7 +148,6 @@ const NAMED_ZERO_TABLE = {
 	"time.Time": [null, "{ _d: new Date(0), _isZero: true }"],
 	"strings.Builder": [null, '{ _buf: "" }'],
 	"bytes.Buffer": [null, "{ _buf: [] }"],
-	"strings.Replacer": [null, "{ _p: [], Replace(s) { return s; } }"],
 	"sync.Mutex": ["sync", "__sync_mutex()"],
 	"sync.RWMutex": ["sync", "__sync_rwmutex()"],
 	"sync.Once": ["sync", "__sync_once()"],
@@ -278,11 +277,6 @@ const NS_CONSTANTS = {
 	},
 	bits: {
 		UintSize: "64",
-	},
-	io: {
-		EOF: "__io_eof",
-		Discard:
-			"{ WriteString(s) { return [s.length, null]; }, Write(b) { return [b.length, null]; } }",
 	},
 	sha256: {
 		Size: "32",
@@ -1125,8 +1119,6 @@ export const expressionGenMethods = {
 			if (nsConst !== undefined) {
 				if (expr.expr.name === "strconv") {
 					this.useHelper("strconvError");
-				} else if (expr.expr.name === "io" && expr.field === "EOF") {
-					this.useHelper("ioEOF");
 				} else if (expr.expr.name === "binary") {
 					this.useHelper("binary");
 				} else if (expr.expr.name === "hex") {
@@ -1882,16 +1874,6 @@ export const expressionGenMethods = {
 			recvName === "testing.TB"
 		)
 			return this._genTestingMethodCall(expr.func.field, expr);
-		if (recvName === "strings.Replacer") {
-			const recv = this.genExpr(expr.func.expr);
-			if (expr.func.field === "WriteString") {
-				const w = this.genExpr(expr.args[0]);
-				const s = this.genExpr(expr.args[1]);
-				return `((r,w,s) => { s = r ? r.Replace(s) : s; const x = w?.value ?? w; if (typeof x.WriteString === "function") return x.WriteString(s); if (typeof x._buf === "string") { x._buf += s; return [s.length, null]; } if (Array.isArray(x._buf)) { const bytes = new TextEncoder().encode(s); for (let i = 0; i < bytes.length; i++) x._buf.push(bytes[i]); return [bytes.length, null]; } if (typeof x.Write === "function") return x.Write(new TextEncoder().encode(s)); return [0, "strings.Replacer.WriteString: unsupported writer"]; })(${recv}, ${w}, ${s})`;
-			}
-			const arg = this.genExpr(expr.args[0]);
-			return `(${recv} ? ${recv}.Replace(${arg}) : ${arg})`;
-		}
 		if (recvName?.startsWith("shared.") && expr.func.field === "Subarray") {
 			const args = expr.args.map((a) => this.genExpr(a)).join(", ");
 			return `${this.genExpr(expr.func.expr)}.subarray(${args})`;
