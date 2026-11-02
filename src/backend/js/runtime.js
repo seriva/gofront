@@ -929,8 +929,19 @@ export const HELPER_SPRINT = `var __sprint = __sprint || function(ln, ...a) {
   return __sprintf(ln ? f + "\\n" : f, ...a);
 };`;
 
+// A runtime error value (\`fmt.Errorf\`, parse failures, io.EOF).  A wrapped
+// cause is exposed through \`Unwrap() error\`; an array of causes (several %w
+// verbs) through \`Unwrap() []error\`, tagged \`__multi\` so type assertions tell
+// the two apart.
 export const HELPER_ERROR = `var __error = __error || function(msg, cause) {
-  return { Error() { return msg; }, toString() { return msg; }, _msg: msg, _cause: cause ?? null };
+  const e = { Error() { return msg; }, toString() { return msg; }, _msg: msg, _cause: cause ?? null };
+  if (Array.isArray(cause)) {
+    e.Unwrap = function() { return cause; };
+    e.Unwrap.__multi = true;
+  } else if (cause !== undefined && cause !== null) {
+    e.Unwrap = function() { return cause; };
+  }
+  return e;
 };`;
 
 export const HELPER_STRCONV_ERROR = `var __strconv_err_syntax = __strconv_err_syntax || __error("invalid syntax");
@@ -972,37 +983,6 @@ var __os_stderr = __os_stderr || new __os_file(2);
 var __os_stdin = __os_stdin || new __os_file(0);
 `;
 
-export const HELPER_ERROR_IS = `var __errorIs = __errorIs || function __errorIs(err, target) {
-  if (err === null || err === undefined) return false;
-  if (err === target) return true;
-  if (typeof err === "object" && typeof target === "object" && target !== null &&
-      typeof err.__gfUnbox === "function" && err.constructor === target.constructor &&
-      err.__gfUnbox() === target.__gfUnbox()) return true;
-  if (typeof err === "object" && typeof target === "object" &&
-      err._msg !== undefined && target._msg !== undefined &&
-      err._msg === target._msg) return true;
-  if (typeof err.Is === "function" && err.Is(target)) return true;
-  if (Array.isArray(err._errs)) {
-    for (const sub of err._errs) {
-      if (__errorIs(sub, target)) return true;
-    }
-  }
-  if (typeof err.Unwrap === "function") {
-    const unwrapped = err.Unwrap();
-    if (Array.isArray(unwrapped)) {
-      for (const sub of unwrapped) {
-        if (__errorIs(sub, target)) return true;
-      }
-    } else if (unwrapped !== null && unwrapped !== undefined) {
-      if (__errorIs(unwrapped, target)) return true;
-    }
-  }
-  if (err._cause !== undefined && err._cause !== null) {
-    return __errorIs(err._cause, target);
-  }
-  return false;
-};`;
-
 export const HELPER_ERROR_AS = `var __errorAs = __errorAs || function(err, target, matcher, extract) {
   if (err === null || err === undefined || target === null || typeof target !== "object") return false;
   let cur = err;
@@ -1017,42 +997,17 @@ export const HELPER_ERROR_AS = `var __errorAs = __errorAs || function(err, targe
       }
       return true;
     }
-    if (Array.isArray(cur._errs)) {
-      for (const sub of cur._errs) {
+    if (typeof cur.Unwrap !== "function") return false;
+    const unwrapped = cur.Unwrap();
+    if (Array.isArray(unwrapped)) {
+      for (const sub of unwrapped) {
         if (__errorAs(sub, target, matcher, extract)) return true;
       }
+      return false;
     }
-    if (typeof cur.Unwrap === "function") {
-      const unwrapped = cur.Unwrap();
-      if (Array.isArray(unwrapped)) {
-        for (const sub of unwrapped) {
-          if (__errorAs(sub, target, matcher, extract)) return true;
-        }
-      } else if (unwrapped !== null && unwrapped !== undefined) {
-        if (__errorAs(unwrapped, target, matcher, extract)) return true;
-      }
-    }
-    cur = cur?._cause ?? null;
+    cur = unwrapped;
   }
   return false;
-};`;
-
-export const HELPER_ERROR_JOIN = `var __errorJoin = __errorJoin || function(...errs) {
-  const filtered = [];
-  for (const e of errs) {
-    if (Array.isArray(e)) {
-      for (const sub of e) if (sub !== null && sub !== undefined) filtered.push(sub);
-    } else if (e !== null && e !== undefined) {
-      filtered.push(e);
-    }
-  }
-  if (filtered.length === 0) return null;
-  const msg = filtered.map(e => (typeof e === "object" && typeof e.Error === "function") ? e.Error() : String(e)).join("\\n");
-  const joined = __error(msg);
-  joined._errs = filtered;
-  joined.Unwrap = function() { return filtered; };
-  joined.Unwrap.__multi = true;
-  return joined;
 };`;
 
 // Go-semantics strconv parsers shared by the JS backend and the wasm runtime

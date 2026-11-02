@@ -362,7 +362,7 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
   - Test: `test/unit/stdlib/maps.test.js` — sorted output, `NaN` keys kept once each; `slices.Collect(maps.Keys(map[K]int{{"a",1}:1}))` → `[{a 1}]`; `maps.Keys(map[any]int{L("a"):1})` keeps `L`; `for k := range maps.Keys(map[any]int{1:1}) { fmt.Printf("%T %v", k, k) }` → `int 1`.
   - Done when: cases pass four ways and `grep -rn _derivedReturn src` finds nothing.
 
-- [ ] **Task 5.2 — `errors` in Go, `As` stays an emitter member**
+- [x] **Task 5.2 — `errors` in Go, `As` stays an emitter member**
   - Files: `stdlib/errors/errors.go`, `src/backend/js/runtime.js` (`%w`/`Join` wrappers' `Unwrap`), `src/backend/wasm/module-emitter.js` (runtime error struct method set)
   - Removes: `stdlib/errors/overlay.go`, `emitErrorsCall` except `As` in `core.js`; `src/backend/js/stdlib/errors.js` except `As`; `errors` typings except `As`
   - Do: `New` (an `*errorString`), `Is`, `Unwrap`, `Join`, `ErrUnsupported` in Go, as an overlay with `As` the only emitter member; wrappers expose `Unwrap() error` / `Unwrap() []error` to type switches and assertions on both backends.

@@ -277,7 +277,7 @@ export const WASM_STDLIB_MEMBERS = new Map([
 			"UintSize",
 		]),
 	],
-	["errors", new Set(["New", "Is", "Unwrap", "As", "Join"])],
+	["errors", new Set(["As"])],
 	[
 		"utf8",
 		new Set([

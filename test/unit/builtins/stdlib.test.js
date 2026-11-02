@@ -536,9 +536,10 @@ section("errors package");
 
 test("errors.New creates an error value", () => {
 	const { js, errors } = compile(`package main
+import "errors"
 func main() {
 	err := errors.New("something went wrong")
-	console.log(err)
+	console.log(err.Error())
 }`);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "something went wrong");
@@ -546,6 +547,7 @@ func main() {
 
 test("errors.New used in return", () => {
 	const { js, errors } = compile(`package main
+import "errors"
 func divide(a int, b int) (int, error) {
 	if b == 0 {
 		return 0, errors.New("division by zero")
@@ -554,7 +556,7 @@ func divide(a int, b int) (int, error) {
 }
 func main() {
 	_, err := divide(1, 0)
-	console.log(err)
+	console.log(err.Error())
 }`);
 	assertEqual(errors.length, 0);
 	assertEqual(runJs(js), "division by zero");

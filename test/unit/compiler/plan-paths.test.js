@@ -34,7 +34,7 @@ const PLANS = [
 			"stdlib/bytes/{buffer,bytes,reader}.go",
 			"stdlib/crypto/sha256/sha256.go",
 			"stdlib/encoding/{base64/base64,binary/binary,hex/hex}.go",
-			"stdlib/{errors/errors,html/html,path/path,sync/sync}.go",
+			"stdlib/{html/html,path/path,sync/sync}.go",
 			"stdlib/math/{bits/bits,rand/rand}.go",
 			"stdlib/strconv/{float,strconv}.go",
 			"stdlib/strings/{reader,replacer,strings}.go",
@@ -45,6 +45,7 @@ const PLANS = [
 			"stdlib/slices/{extra,iter}.go",
 			"src/backend/js/stdlib/maps.js",
 			"stdlib/maps/iter.go",
+			"stdlib/errors/overlay.go",
 		],
 	},
 ];

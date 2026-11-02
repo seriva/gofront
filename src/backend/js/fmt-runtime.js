@@ -190,6 +190,9 @@ var __fmtu = __fmtu || (() => {
     while (t && t.k === "named") t = t.u;
     return t;
   };
+  // Go-source standard-library types are mangled Name$$pkg: print pkg.Name.
+  const unmangle = (n) => typeof n === "string" ? n.replace(/^main\.(.+)\$\$(.+)$/, (_, t, p) => p.split("$").at(-1) + "." + t) : n;
+  const qualName = (n) => unmangle("main." + n);
   const isFloatN = (n) => n === "float32" || n === "float64";
   const isComplexN = (n) => n === "complex64" || n === "complex128";
   const IFACE = { k: "i", n: "interface {}" };
@@ -197,9 +200,9 @@ var __fmtu = __fmtu || (() => {
     if (t == null) return "<nil>";
     switch (t.k) {
       case "b": return t.n === "any" ? "interface {}" : t.n;
-      case "named": case "i": return t.n;
+      case "named": case "i": return unmangle(t.n);
       case "struct":
-        if (t.n) return t.n;
+        if (t.n) return unmangle(t.n);
         return !t.f || t.f.length === 0 ? "struct {}" : "struct { " + t.f.map(([k, ft]) => k + " " + typeName(ft ?? IFACE)).join("; ") + " }";
       case "ptr": return "*" + typeName(t.e ?? IFACE);
       case "slice": return "[]" + typeName(t.e ?? IFACE);
@@ -243,14 +246,14 @@ var __fmtu = __fmtu || (() => {
     if (typeof v.__gfUnbox === "function") {
       const nm = v.constructor?.name ?? "";
       if (nm === "FmtStr" || nm === "FmtErr") return descOf(v.__gfUnbox());
-      return { k: "named", n: "main." + nm.replace(/\$Ptr$/, ""), u: descOf(v.__gfUnbox()) };
+      return { k: "named", n: qualName(nm.replace(/\$Ptr$/, "")), u: descOf(v.__gfUnbox()) };
     }
     const proto = Object.getPrototypeOf(v);
     if ((proto === null || Object.getPrototypeOf(proto) === null) && typeof v.Error === "function") {
       return { k: "ptr", e: { k: "struct", n: "errors.errorString", f: [] } };
     }
     if (v.constructor && v.constructor !== Object) {
-      const st = { k: "struct", n: "main." + v.constructor.name.replace(/\$Ptr$/, ""), f: keys(v).map((k) => [k, descOf(v[k]) ?? IFACE]) };
+      const st = { k: "struct", n: qualName(v.constructor.name.replace(/\$Ptr$/, "")), f: keys(v).map((k) => [k, descOf(v[k]) ?? IFACE]) };
       return v.__p === true ? { k: "ptr", e: st } : st;
     }
     const host = { k: "struct", n: v.__tn ?? "", f: Object.keys(v).map((k) => [k, descOf(v[k]) ?? IFACE]) };

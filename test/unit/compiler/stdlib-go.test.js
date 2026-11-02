@@ -131,19 +131,19 @@ test("an overlay that redeclares an emitter member is rejected", () => {
 
 package errors
 
-func New(text string) error { return nil }
+func As(err error, target any) bool { return false }
 `,
 			"app/main.go": `package main
 
 import "errors"
 
-func main() { println(errors.New("x") != nil) }
+func main() { println(errors.As(nil, nil)) }
 `,
 		},
 		(dir) => {
 			assertThrows(
 				() => compileDir(join(dir, "app"), { stdlibRoot: join(dir, "stdlib") }),
-				"overlay redeclares errors.New",
+				"overlay redeclares errors.As",
 			);
 		},
 	);

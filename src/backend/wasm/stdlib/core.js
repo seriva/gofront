@@ -3,6 +3,7 @@
 // math/bits, maps, slices, strings, strconv, fmt, errors, sort, unicode/utf8,
 // testing) plus the runtime helper bodies they rely on.
 
+import { wrappedErrorfIndices } from "../../shared/errorf.js";
 import {
 	fmtDescHasFloat,
 	fmtDescIsSeq,
@@ -22,12 +23,14 @@ import {
 	isErrorType,
 	isFuncType,
 	isMapType,
+	isNonEmptyInterface,
 	isPointerToStruct,
 	isSigned,
 	isSliceType,
 	isStructType,
 	isUnhashableGoType,
 	toWasmType,
+	WRAP_ERRORS_STRUCT,
 } from "../types.js";
 
 function _isPointerKind(t) {
@@ -1226,7 +1229,12 @@ export class StdlibCoreEmitter {
 		const checker = this.mod.checker;
 		const isPtr = _isPointerKind(goType);
 		const named = this._fmtNamed(isPtr ? (goType.base ?? goType.elem) : goType);
-		if (!named || named.name === ERROR_STRUCT) return null;
+		if (
+			!named ||
+			named.name === ERROR_STRUCT ||
+			named.name === WRAP_ERRORS_STRUCT
+		)
+			return null;
 		// Elements of an `any`-held container share a wasm type across Go types
 		// (`[]Color` and `[]int`), so scalar-backed named types are not dispatched.
 		if (
@@ -1283,7 +1291,12 @@ export class StdlibCoreEmitter {
 		let t = _isPointerKind(goType) ? (goType.base ?? goType.elem) : goType;
 		if (t?.kind === "TypeName" || t?.kind === "Ident")
 			t = this.mod.checker?.types?.get(t.name) ?? t;
-		if (t?.kind !== "named" || t.name === ERROR_STRUCT) return null;
+		if (
+			t?.kind !== "named" ||
+			t.name === ERROR_STRUCT ||
+			t.name === WRAP_ERRORS_STRUCT
+		)
+			return null;
 		const sInfo = this.mod.getStructType(t.name);
 		const field = sInfo?.fields?.find(
 			(f) => f.embedded && isErrorType(f.goType),
@@ -1593,7 +1606,7 @@ export class StdlibCoreEmitter {
 			if (spread) funcIndex = this.mod.getTestingArgSpreadImportIndex();
 			this.pushInstruction({ op: "call", funcIndex });
 			if (!spread && (typed || this._fmtOperandHasFloat(args[i])))
-				this._emitFmtArgType(args[i]);
+				this._emitOperandType(args[i], temp.errTmp);
 		}
 		return temps;
 	}
@@ -1625,6 +1638,20 @@ export class StdlibCoreEmitter {
 		);
 	}
 
+	// An error-interface operand carries its dynamic type; any other operand
+	// its static one (see _emitFmtArgType).
+	_emitOperandType(arg, errTmp) {
+		const goType = arg._type ?? this._resolveExprGoType(arg);
+		const isIface =
+			fmtTypeDesc(goType, (t) => this.mod.checker?.resolveType?.(t) ?? t)?.k ===
+			"i";
+		if (isIface && errTmp !== null && errTmp !== undefined) {
+			this._emitErrorDynamicType(errTmp);
+		} else {
+			this._emitFmtArgType(arg);
+		}
+	}
+
 	// Tags the operand just pushed with its static type (see _emitArgBuffer).
 	// Interface-typed operands carry their dynamic type and stay untagged.
 	_emitFmtArgType(arg) {
@@ -1642,6 +1669,65 @@ export class StdlibCoreEmitter {
 			op: "call",
 			funcIndex: this.mod.getFmtArgTypeImportIndex(),
 		});
+	}
+
+	// Tags the error operand just pushed with the type its value holds, so
+	// `%T` prints `*errors.errorString` rather than the message's type.
+	_emitErrorDynamicType(errTmp) {
+		const checker = this.mod.checker;
+		const tag = (desc) => {
+			this.pushInstruction({
+				op: "i32.const",
+				value: this.mod.internString(JSON.stringify(desc)),
+			});
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getFmtArgTypeImportIndex(),
+			});
+		};
+		const when = (typeIndex, body) => {
+			this.pushInstruction({ op: "local.get", index: errTmp });
+			this.pushInstruction({ op: "ref.test", typeIndex });
+			this.pushInstruction({ op: "if", blockType: "void" });
+			body();
+			this.pushInstruction("end");
+		};
+		const ptrTo = (name) => ({
+			k: "ptr",
+			e: { k: "struct", n: name, f: [] },
+		});
+		const errInfo = this.mod.getStructType(ERROR_STRUCT);
+		const wrapInfo = this.mod.getStructType(WRAP_ERRORS_STRUCT);
+		when(wrapInfo.typeIndex, () => tag(ptrTo("fmt.wrapErrors")));
+		when(errInfo.typeIndex, () => {
+			this.pushInstruction({ op: "local.get", index: errTmp });
+			this.pushInstruction({ op: "ref.cast", typeIndex: errInfo.typeIndex });
+			this.pushInstruction({
+				op: "struct.get",
+				typeIndex: errInfo.typeIndex,
+				fieldIndex: 1,
+			});
+			this.pushInstruction("ref.is_null");
+			this.pushInstruction({ op: "if", blockType: "void" });
+			tag(ptrTo("errors.errorString"));
+			this.pushInstruction("else");
+			tag(ptrTo("fmt.wrapError"));
+			this.pushInstruction("end");
+		});
+		const errIface = checker?.types?.get("error");
+		const candidates = errIface
+			? this.mod.getTypesImplementingInterface(errIface)
+			: [];
+		for (const c of candidates) {
+			const isPtr = c.name.startsWith("*");
+			const base = checker.types.get(isPtr ? c.name.slice(1) : c.name);
+			if (!base) continue;
+			const desc = fmtTypeDesc(
+				isPtr ? { kind: "pointer", base } : base,
+				(t) => checker.resolveType?.(t) ?? t,
+			);
+			if (desc) when(c.typeIndex, () => tag(desc));
+		}
 	}
 
 	// Whether a Printf-style call's operands need their static types: the
@@ -4712,61 +4798,131 @@ export class StdlibCoreEmitter {
 				return;
 			}
 			this._callStdlib("fmt_sprintf");
-			if (name === "Errorf") {
-				// `%w` wraps its operand as the cause (first %w only, like Go 1.13).
-				const wIdx = _wrapVerbIndex(format);
-				const cause = wIdx >= 0 ? temps[wIdx] : null;
-				const causeTmp = cause?.errTmp ?? cause?.tmp ?? null;
-				if (causeTmp !== null && causeTmp !== undefined) {
-					this.pushInstruction({ op: "local.get", index: causeTmp });
-				} else {
-					this.pushInstruction({ op: "ref.null", heapType: "any" });
-				}
-				this.pushInstruction({
-					op: "call",
-					funcIndex: this.mod.resolveFuncIndex("__mk_error"),
-				});
-			}
+			if (name === "Errorf") this._emitErrorfResult(format, temps);
 			this._releaseArgBuffer(temps);
 			return;
 		}
 		throw new Error(`Unsupported fmt function: fmt.${name}`);
 	}
 
-	emitErrorsCall(name, args) {
-		switch (name) {
-			case "New":
-				this.emitExpr(args[0], "externref");
-				this.pushInstruction({ op: "ref.null", heapType: "any" });
-				this.pushInstruction({
-					op: "call",
-					funcIndex: this.mod.resolveFuncIndex("__mk_error"),
-				});
-				return;
-			case "Unwrap":
-				this.emitExpr(args[0], "anyref");
-				this.pushInstruction({
-					op: "call",
-					funcIndex: this.mod.resolveFuncIndex("__errors_unwrap"),
-				});
-				return;
-			case "Is":
-				this.emitExpr(args[0], "anyref");
-				this.emitExpr(args[1], "anyref");
-				this.pushInstruction({
-					op: "call",
-					funcIndex: this.mod.resolveFuncIndex("__errors_is"),
-				});
-				return;
-			case "As":
-				this._emitErrorsAs(args);
-				return;
-			case "Join":
-				this._emitErrorsJoin(args);
-				return;
-			default:
-				throw new Error(`Unsupported errors function: errors.${name}`);
+	// With the formatted message on the stack: makes the error value, wrapping
+	// the operands of the format's `%w` verbs (one cause, or several as a
+	// `[]error`).
+	_emitErrorfResult(format, temps) {
+		const causeOf = (i) => temps[i]?.errTmp ?? temps[i]?.tmp ?? null;
+		const causes = wrappedErrorfIndices(format)
+			.map(causeOf)
+			.filter((t) => t !== null);
+		if (causes.length > 1) {
+			this._emitWrapErrors(causes);
+			return;
 		}
+		if (causes.length === 1) {
+			this.pushInstruction({ op: "local.get", index: causes[0] });
+		} else {
+			this.pushInstruction({ op: "ref.null", heapType: "any" });
+		}
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.resolveFuncIndex("__mk_error"),
+		});
+	}
+
+	// With the formatted message on the stack: wraps the `causes` (temps
+	// holding the `%w` operands) in a runtime error whose `Unwrap` returns
+	// them as a `[]error`.
+	_emitWrapErrors(causes) {
+		const sliceInfo = this.mod.getSliceType({
+			kind: "interface",
+			name: "error",
+		});
+		for (const t of causes) this.pushInstruction({ op: "local.get", index: t });
+		this.pushInstruction({
+			op: "array.new_fixed",
+			typeIndex: sliceInfo.arrInfo.typeIndex,
+			size: causes.length,
+		});
+		this.pushInstruction({ op: "i32.const", value: 0 });
+		this.pushInstruction({ op: "i32.const", value: causes.length });
+		this.pushInstruction({ op: "i32.const", value: causes.length });
+		this.pushInstruction({
+			op: "struct.new",
+			typeIndex: sliceInfo.typeIndex,
+		});
+		this.pushInstruction({
+			op: "call",
+			funcIndex: this.mod.resolveFuncIndex("__mk_wrap_errors"),
+		});
+	}
+
+	emitErrorsCall(name, args) {
+		if (name === "As") {
+			this._emitErrorsAs(args);
+			return;
+		}
+		throw new Error(`Unsupported errors function: errors.${name}`);
+	}
+
+	// `errors.As` with an interface target: stores the first error in the chain
+	// that implements it.  The caller's `block`/`loop` are depth 2 away.
+	_emitErrorsAsInterface(
+		ifaceType,
+		{ targetLocal, targetTmp, box, errTmp, resLoc },
+	) {
+		// An interface target takes the first error that implements it.
+		this.pushInstruction({ op: "local.get", index: errTmp });
+		this._emitTypeTest(ifaceType);
+		this.pushInstruction({ op: "if", blockType: "void" });
+		if (targetLocal?.isBoxed) {
+			this.pushInstruction({ op: "local.get", index: targetLocal.index });
+			this.pushInstruction({ op: "local.get", index: errTmp });
+			this.pushInstruction({
+				op: "struct.set",
+				typeIndex: targetLocal.boxInfo.typeIndex,
+				fieldIndex: 0,
+			});
+		} else if (targetLocal) {
+			this.pushInstruction({ op: "local.get", index: errTmp });
+			this.pushInstruction({ op: "local.set", index: targetLocal.index });
+		} else if (box && targetTmp !== null) {
+			this.pushInstruction({ op: "local.get", index: targetTmp });
+			this.pushInstruction({ op: "ref.cast", typeIndex: box.typeIndex });
+			this.pushInstruction({ op: "local.get", index: errTmp });
+			this.pushInstruction({
+				op: "struct.set",
+				typeIndex: box.typeIndex,
+				fieldIndex: 0,
+			});
+		}
+		this.pushInstruction({ op: "i32.const", value: 1 });
+		this.pushInstruction({ op: "local.set", index: resLoc });
+		this.pushInstruction({ op: "br", depth: 2 });
+		this.pushInstruction("end");
+	}
+
+	// What `errors.As` looks for: the pointee type of the target argument, its
+	// struct layout and, for a struct value target, the box a value-typed error
+	// sits in (a pointer target matches the bare struct ref).
+	_errorsAsTarget(target) {
+		const targetGoType = target._type ?? this._resolveExprGoType(target);
+		const baseGoType = targetGoType?.base ?? targetGoType;
+		const concreteGoType = baseGoType?.base ?? baseGoType;
+		const sName = concreteGoType?.name;
+		const sInfo = sName
+			? (this.mod.getStructType(sName) ??
+				(concreteGoType.pkg
+					? this.mod.getStructType(`${concreteGoType.pkg}.${sName}`)
+					: null))
+			: null;
+		// A struct value target (`var v V; errors.As(err, &v)`) matches the box a
+		// value-typed error sits in; a pointer target matches the bare struct ref.
+		const valueBox =
+			sInfo && baseGoType?.kind !== "pointer"
+				? this.mod.getIfaceBoxType(
+						baseGoType?.kind === "named" ? baseGoType : concreteGoType,
+					)
+				: null;
+		return { baseGoType, sInfo, valueBox };
 	}
 
 	_emitErrorsAs(args) {
@@ -4784,16 +4940,18 @@ export class StdlibCoreEmitter {
 			targetLocal = this.resolveLocal(args[1].operand.name);
 		}
 
-		const targetGoType = args[1]._type ?? this._resolveExprGoType(args[1]);
-		const baseGoType = targetGoType?.base ?? targetGoType;
-		const concreteGoType = baseGoType?.base ?? baseGoType;
-		const sName = concreteGoType?.name;
-		const sInfo = sName
-			? (this.mod.getStructType(sName) ??
-				(concreteGoType.pkg
-					? this.mod.getStructType(`${concreteGoType.pkg}.${sName}`)
-					: null))
-			: null;
+		const { baseGoType, sInfo, valueBox } = this._errorsAsTarget(args[1]);
+		const matchIndex = valueBox ? valueBox.typeIndex : sInfo?.typeIndex;
+		const pushMatched = () => {
+			this.pushInstruction({ op: "local.get", index: errTmp });
+			this.pushInstruction({ op: "ref.cast", typeIndex: matchIndex });
+			if (valueBox)
+				this.pushInstruction({
+					op: "struct.get",
+					typeIndex: valueBox.typeIndex,
+					fieldIndex: 0,
+				});
+		};
 		const box = this.mod.getBoxType(baseGoType);
 		const boxWType = box
 			? { kind: "ref", nullable: true, typeIndex: box.typeIndex }
@@ -4821,30 +4979,36 @@ export class StdlibCoreEmitter {
 		this.pushInstruction("ref.is_null");
 		this.pushInstruction({ op: "br_if", depth: 1 });
 
+		if (!sInfo && isNonEmptyInterface(baseGoType, this.mod.checker)) {
+			this._emitErrorsAsInterface(baseGoType, {
+				targetLocal,
+				targetTmp,
+				box,
+				errTmp,
+				resLoc,
+			});
+		}
 		if (sInfo) {
 			this.pushInstruction({ op: "local.get", index: errTmp });
-			this.pushInstruction({ op: "ref.test", typeIndex: sInfo.typeIndex });
+			this.pushInstruction({ op: "ref.test", typeIndex: matchIndex });
 			this.pushInstruction({ op: "if", blockType: "void" });
 			if (targetLocal) {
 				if (targetLocal.isBoxed) {
 					this.pushInstruction({ op: "local.get", index: targetLocal.index });
-					this.pushInstruction({ op: "local.get", index: errTmp });
-					this.pushInstruction({ op: "ref.cast", typeIndex: sInfo.typeIndex });
+					pushMatched();
 					this.pushInstruction({
 						op: "struct.set",
 						typeIndex: targetLocal.boxInfo.typeIndex,
 						fieldIndex: 0,
 					});
 				} else {
-					this.pushInstruction({ op: "local.get", index: errTmp });
-					this.pushInstruction({ op: "ref.cast", typeIndex: sInfo.typeIndex });
+					pushMatched();
 					this.pushInstruction({ op: "local.set", index: targetLocal.index });
 				}
 			} else if (box && targetTmp !== null) {
 				this.pushInstruction({ op: "local.get", index: targetTmp });
 				this.pushInstruction({ op: "ref.cast", typeIndex: box.typeIndex });
-				this.pushInstruction({ op: "local.get", index: errTmp });
-				this.pushInstruction({ op: "ref.cast", typeIndex: sInfo.typeIndex });
+				pushMatched();
 				this.pushInstruction({
 					op: "struct.set",
 					typeIndex: box.typeIndex,
@@ -4873,246 +5037,6 @@ export class StdlibCoreEmitter {
 			this.releaseTemp(targetTmp, "anyref");
 		}
 		this.releaseTemp(errTmp, "anyref");
-	}
-
-	_emitErrorsJoin(args) {
-		const errSliceInfo = this.mod.getSliceType({
-			kind: "interface",
-			name: "error",
-		});
-		if (
-			args.length === 1 &&
-			(args[0]._type?.kind === "slice" || args[0].kind === "SliceLit")
-		) {
-			const sTmp = this.acquireTemp({
-				kind: "ref",
-				nullable: true,
-				typeIndex: errSliceInfo.typeIndex,
-			});
-			this.emitExpr(args[0], {
-				kind: "ref",
-				nullable: true,
-				typeIndex: errSliceInfo.typeIndex,
-			});
-			this.pushInstruction({ op: "local.set", index: sTmp });
-
-			this.pushInstruction({ op: "local.get", index: sTmp });
-			this.pushInstruction("ref.is_null");
-			this.pushInstruction({ op: "if", blockType: "void" });
-			this.pushInstruction({ op: "ref.null", heapType: "any" });
-			this.pushInstruction("return");
-			this.pushInstruction("end");
-
-			const arrTmp = this.acquireTemp({
-				kind: "ref",
-				nullable: true,
-				typeIndex: errSliceInfo.arrInfo.typeIndex,
-			});
-			const offTmp = this.acquireTemp("i32");
-			const lenTmp = this.acquireTemp("i32");
-			this._emitSliceUnpack(sTmp, errSliceInfo, {
-				arr: arrTmp,
-				off: offTmp,
-				len: lenTmp,
-			});
-
-			const iTmp = this.acquireTemp("i32");
-			const countTmp = this.acquireTemp("i32");
-			const strAccTmp = this.acquireTemp("externref");
-			const eTmp = this.acquireTemp("anyref");
-
-			this.pushInstruction({ op: "i32.const", value: 0 });
-			this.pushInstruction({ op: "local.set", index: countTmp });
-			this.pushInstruction({
-				op: "i32.const",
-				value: this.mod.internString(""),
-			});
-			this.pushInstruction({
-				op: "call",
-				funcIndex: this.mod.getStringImportIndex(),
-			});
-			this.pushInstruction({ op: "local.set", index: strAccTmp });
-			this.pushInstruction({ op: "i32.const", value: 0 });
-			this.pushInstruction({ op: "local.set", index: iTmp });
-
-			this.pushInstruction({ op: "block", blockType: "void" });
-			this.pushInstruction({ op: "loop", blockType: "void" });
-			this.pushInstruction({ op: "local.get", index: iTmp });
-			this.pushInstruction({ op: "local.get", index: lenTmp });
-			this.pushInstruction("i32.ge_s");
-			this.pushInstruction({ op: "br_if", depth: 1 });
-
-			this.pushInstruction({ op: "local.get", index: arrTmp });
-			this.pushInstruction({ op: "local.get", index: offTmp });
-			this.pushInstruction({ op: "local.get", index: iTmp });
-			this.pushInstruction("i32.add");
-			this.pushInstruction({
-				op: "array.get",
-				typeIndex: errSliceInfo.arrInfo.typeIndex,
-			});
-			this.pushInstruction({ op: "local.set", index: eTmp });
-
-			this.pushInstruction({ op: "local.get", index: eTmp });
-			this.pushInstruction("ref.is_null");
-			this.pushInstruction({ op: "if", blockType: "void" });
-			this.pushInstruction("else");
-
-			this.pushInstruction({ op: "local.get", index: countTmp });
-			this.pushInstruction({ op: "if", blockType: "void" });
-			this.pushInstruction({ op: "local.get", index: strAccTmp });
-			this.pushInstruction({
-				op: "i32.const",
-				value: this.mod.internString("\n"),
-			});
-			this.pushInstruction({
-				op: "call",
-				funcIndex: this.mod.getStringImportIndex(),
-			});
-			this.pushInstruction({
-				op: "call",
-				funcIndex: this.mod.getStringConcatImportIndex(),
-			});
-			this.pushInstruction({ op: "local.set", index: strAccTmp });
-			this.pushInstruction("end");
-
-			this.pushInstruction({ op: "local.get", index: strAccTmp });
-			this.pushInstruction({ op: "local.get", index: eTmp });
-			this.pushInstruction({
-				op: "call",
-				funcIndex: this.mod.resolveFuncIndex("__error_str"),
-			});
-			this.pushInstruction({
-				op: "call",
-				funcIndex: this.mod.getStringConcatImportIndex(),
-			});
-			this.pushInstruction({ op: "local.set", index: strAccTmp });
-
-			this.pushInstruction({ op: "local.get", index: countTmp });
-			this.pushInstruction({ op: "i32.const", value: 1 });
-			this.pushInstruction("i32.add");
-			this.pushInstruction({ op: "local.set", index: countTmp });
-			this.pushInstruction("end");
-
-			this.pushInstruction({ op: "local.get", index: iTmp });
-			this.pushInstruction({ op: "i32.const", value: 1 });
-			this.pushInstruction("i32.add");
-			this.pushInstruction({ op: "local.set", index: iTmp });
-			this.pushInstruction({ op: "br", depth: 0 });
-			this.pushInstruction("end");
-			this.pushInstruction("end");
-
-			this.pushInstruction({ op: "local.get", index: countTmp });
-			this.pushInstruction("i32.eqz");
-			this.pushInstruction({ op: "if", blockType: "anyref" });
-			this.pushInstruction({ op: "ref.null", heapType: "any" });
-			this.pushInstruction("else");
-			this.pushInstruction({ op: "local.get", index: strAccTmp });
-			this.pushInstruction({ op: "ref.null", heapType: "any" });
-			this.pushInstruction({
-				op: "call",
-				funcIndex: this.mod.resolveFuncIndex("__mk_error"),
-			});
-			this.pushInstruction("end");
-
-			this.releaseTemp(eTmp, "anyref");
-			this.releaseTemp(strAccTmp, "externref");
-			this.releaseTemp(countTmp, "i32");
-			this.releaseTemp(iTmp, "i32");
-			this.releaseTemp(lenTmp, "i32");
-			this.releaseTemp(offTmp, "i32");
-			this.releaseTemp(arrTmp, {
-				kind: "ref",
-				nullable: true,
-				typeIndex: errSliceInfo.arrInfo.typeIndex,
-			});
-			this.releaseTemp(sTmp, {
-				kind: "ref",
-				nullable: true,
-				typeIndex: errSliceInfo.typeIndex,
-			});
-			return;
-		}
-
-		if (args.length === 0) {
-			this.pushInstruction({ op: "ref.null", heapType: "any" });
-			return;
-		}
-
-		const countTmp = this.acquireTemp("i32");
-		const strAccTmp = this.acquireTemp("externref");
-		const eTmp = this.acquireTemp("anyref");
-
-		this.pushInstruction({ op: "i32.const", value: 0 });
-		this.pushInstruction({ op: "local.set", index: countTmp });
-		this.pushInstruction({ op: "i32.const", value: this.mod.internString("") });
-		this.pushInstruction({
-			op: "call",
-			funcIndex: this.mod.getStringImportIndex(),
-		});
-		this.pushInstruction({ op: "local.set", index: strAccTmp });
-
-		for (const arg of args) {
-			this.emitExpr(arg, "anyref");
-			this.pushInstruction({ op: "local.set", index: eTmp });
-
-			this.pushInstruction({ op: "local.get", index: eTmp });
-			this.pushInstruction("ref.is_null");
-			this.pushInstruction({ op: "if", blockType: "void" });
-			this.pushInstruction("else");
-
-			this.pushInstruction({ op: "local.get", index: countTmp });
-			this.pushInstruction({ op: "if", blockType: "void" });
-			this.pushInstruction({ op: "local.get", index: strAccTmp });
-			this.pushInstruction({
-				op: "i32.const",
-				value: this.mod.internString("\n"),
-			});
-			this.pushInstruction({
-				op: "call",
-				funcIndex: this.mod.getStringImportIndex(),
-			});
-			this.pushInstruction({
-				op: "call",
-				funcIndex: this.mod.getStringConcatImportIndex(),
-			});
-			this.pushInstruction({ op: "local.set", index: strAccTmp });
-			this.pushInstruction("end");
-
-			this.pushInstruction({ op: "local.get", index: strAccTmp });
-			this.pushInstruction({ op: "local.get", index: eTmp });
-			this.pushInstruction({
-				op: "call",
-				funcIndex: this.mod.resolveFuncIndex("__error_str"),
-			});
-			this.pushInstruction({
-				op: "call",
-				funcIndex: this.mod.getStringConcatImportIndex(),
-			});
-			this.pushInstruction({ op: "local.set", index: strAccTmp });
-
-			this.pushInstruction({ op: "local.get", index: countTmp });
-			this.pushInstruction({ op: "i32.const", value: 1 });
-			this.pushInstruction("i32.add");
-			this.pushInstruction({ op: "local.set", index: countTmp });
-			this.pushInstruction("end");
-		}
-
-		this.pushInstruction({ op: "local.get", index: countTmp });
-		this.pushInstruction("i32.eqz");
-		this.pushInstruction({ op: "if", blockType: "anyref" });
-		this.pushInstruction({ op: "ref.null", heapType: "any" });
-		this.pushInstruction("else");
-		this.pushInstruction({ op: "local.get", index: strAccTmp });
-		this.pushInstruction({ op: "ref.null", heapType: "any" });
-		this.pushInstruction({
-			op: "call",
-			funcIndex: this.mod.resolveFuncIndex("__mk_error"),
-		});
-		this.pushInstruction("end");
-
-		this.releaseTemp(eTmp, "anyref");
-		this.releaseTemp(strAccTmp, "externref");
-		this.releaseTemp(countTmp, "i32");
 	}
 
 	emitUtf8Call(name, args, targetWasmType) {
@@ -5287,31 +5211,31 @@ export class StdlibCoreEmitter {
 
 	// errors.New / fmt.Errorf values print their message.
 	_emitAnyFmtError(done) {
-		const errInfo = this.mod.hasErrorType
-			? this.mod.getStructType(ERROR_STRUCT)
-			: null;
-		if (!errInfo) return;
+		if (!this.mod.hasErrorType) return;
 		const msgTmp = this.acquireTemp("externref");
-		this.pushInstruction({ op: "local.get", index: 0 });
-		this.pushInstruction({ op: "ref.test", typeIndex: errInfo.typeIndex });
-		this.pushInstruction({ op: "if", blockType: "void" });
-		this.pushInstruction({ op: "local.get", index: 0 });
-		this.pushInstruction({
-			op: "call",
-			funcIndex: this.mod.resolveFuncIndex("__error_str"),
-		});
-		this.pushInstruction({ op: "local.set", index: msgTmp });
-		this.pushInstruction({ op: "local.get", index: msgTmp });
-		this.pushInstruction({ op: "local.get", index: msgTmp });
-		this.pushInstruction({ op: "i32.const", value: 1 });
-		this.pushInstruction({
-			op: "call",
-			funcIndex: this.mod.getFmtNewStringerIndex(),
-		});
-		this.pushInstruction("return");
-		this.pushInstruction("end");
+		for (const name of [ERROR_STRUCT, WRAP_ERRORS_STRUCT]) {
+			const errInfo = this.mod.getStructType(name);
+			this.pushInstruction({ op: "local.get", index: 0 });
+			this.pushInstruction({ op: "ref.test", typeIndex: errInfo.typeIndex });
+			this.pushInstruction({ op: "if", blockType: "void" });
+			this.pushInstruction({ op: "local.get", index: 0 });
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.resolveFuncIndex("__error_str"),
+			});
+			this.pushInstruction({ op: "local.set", index: msgTmp });
+			this.pushInstruction({ op: "local.get", index: msgTmp });
+			this.pushInstruction({ op: "local.get", index: msgTmp });
+			this.pushInstruction({ op: "i32.const", value: 1 });
+			this.pushInstruction({
+				op: "call",
+				funcIndex: this.mod.getFmtNewStringerIndex(),
+			});
+			this.pushInstruction("return");
+			this.pushInstruction("end");
+			done.add(errInfo.typeIndex);
+		}
 		this.releaseTemp(msgTmp, "externref");
-		done.add(errInfo.typeIndex);
 	}
 
 	_emitAnyFmtBoxes(done) {
@@ -5335,7 +5259,10 @@ export class StdlibCoreEmitter {
 	_emitAnyFmtStructs(done) {
 		const checker = this.mod.checker;
 		for (const [name, sInfo] of [...this.mod.structTypes.entries()]) {
-			const named = name === ERROR_STRUCT ? null : checker?.types?.get(name);
+			const named =
+				name === ERROR_STRUCT || name === WRAP_ERRORS_STRUCT
+					? null
+					: checker?.types?.get(name);
 			if (!named) continue;
 			const ptrType = { kind: "pointer", base: named };
 			const w = toWasmType(ptrType, checker, this.mod);
@@ -5569,6 +5496,29 @@ export class StdlibCoreEmitter {
 				});
 				this.pushInstruction("return");
 				return;
+			case "wrap_msg":
+			case "wrap_errs": {
+				const wrapInfo = this.mod.getStructType(WRAP_ERRORS_STRUCT);
+				this.pushInstruction({ op: "local.get", index: 0 });
+				this.pushInstruction({
+					op: "struct.get",
+					typeIndex: wrapInfo.typeIndex,
+					fieldIndex: fn._isRuntimeHelper === "wrap_msg" ? 0 : 1,
+				});
+				this.pushInstruction("return");
+				return;
+			}
+			case "mk_wrap_errors": {
+				const wrapInfo = this.mod.getStructType(WRAP_ERRORS_STRUCT);
+				this.pushInstruction({ op: "local.get", index: 0 });
+				this.pushInstruction({ op: "local.get", index: 1 });
+				this.pushInstruction({
+					op: "struct.new",
+					typeIndex: wrapInfo.typeIndex,
+				});
+				this.pushInstruction("return");
+				return;
+			}
 			case "mk_error":
 				// nil message (strconv success) → nil error
 				this.pushInstruction({ op: "local.get", index: 0 });
@@ -5730,18 +5680,4 @@ export class StdlibCoreEmitter {
 				throw new Error(`Unknown runtime helper: ${fn._isRuntimeHelper}`);
 		}
 	}
-}
-
-// Index of the argument consumed by the first `%w` verb in a literal format
-// string, or -1.
-function _wrapVerbIndex(format) {
-	if (format?.kind !== "BasicLit" || format.litKind !== "STRING") return -1;
-	const re = /%([#+\- 0]*)([0-9]*)\.?([0-9]*)([sdvftxXqobeEgGw%])/g;
-	let i = 0;
-	for (const m of String(format.value ?? "").matchAll(re)) {
-		if (m[4] === "%") continue;
-		if (m[4] === "w") return i;
-		i++;
-	}
-	return -1;
 }

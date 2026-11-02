@@ -12,6 +12,7 @@ import {
 	isScalarType,
 	isSliceType,
 	toWasmType,
+	WRAP_ERRORS_STRUCT,
 } from "./types.js";
 
 const ERROR_PRODUCING_PKGS = new Set([
@@ -289,6 +290,33 @@ export class ModuleEmitter {
 		this._initRuntimeImports();
 	}
 
+	// The runtime error struct is not declared in Go source: give the checker a
+	// named type with its method set (`Error() string`, `Unwrap() error`) so
+	// type assertions to `interface{ Unwrap() error }` find it as a candidate.
+	_registerRuntimeErrorType() {
+		const types = this.checker?.types;
+		if (!types || types.has(ERROR_STRUCT)) return;
+		const STRING = { kind: "basic", name: "string" };
+		const ERROR = { kind: "interface", name: "error" };
+		const named = (name, unwrapReturn) => ({
+			kind: "named",
+			name,
+			underlying: {
+				kind: "struct",
+				fields: new Map(),
+				methods: new Map([
+					["Error", { kind: "func", params: [], returns: [STRING] }],
+					["Unwrap", { kind: "func", params: [], returns: [unwrapReturn] }],
+				]),
+			},
+		});
+		types.set(ERROR_STRUCT, named(ERROR_STRUCT, ERROR));
+		types.set(
+			WRAP_ERRORS_STRUCT,
+			named(WRAP_ERRORS_STRUCT, { kind: "slice", elem: ERROR }),
+		);
+	}
+
 	initTypes(programs) {
 		const progs = Array.isArray(programs) ? programs : [programs];
 		const rawStructs = [];
@@ -296,6 +324,7 @@ export class ModuleEmitter {
 		const aliases = []; // qualified key (pkg.T) -> unqualified struct name
 
 		if (this.hasErrorType) {
+			this._registerRuntimeErrorType();
 			seen.add(ERROR_STRUCT);
 			rawStructs.push({
 				name: ERROR_STRUCT,
@@ -304,6 +333,20 @@ export class ModuleEmitter {
 					fields: new Map([
 						["msg", { kind: "basic", name: "string" }],
 						["cause", { kind: "basic", name: "any" }],
+					]),
+				},
+			});
+			seen.add(WRAP_ERRORS_STRUCT);
+			rawStructs.push({
+				name: WRAP_ERRORS_STRUCT,
+				structType: {
+					kind: "struct",
+					fields: new Map([
+						["msg", { kind: "basic", name: "string" }],
+						[
+							"errs",
+							{ kind: "slice", elem: { kind: "interface", name: "error" } },
+						],
 					]),
 				},
 			});

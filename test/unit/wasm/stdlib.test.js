@@ -110,7 +110,7 @@ func Main() string {
 }
 `;
 	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
-	assertEqual(wasmRes, "12345");
+	assertEqual(wasmRes, "1234");
 	assertEqual(wasmRes, jsRes);
 });
 

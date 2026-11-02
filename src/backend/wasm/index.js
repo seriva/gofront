@@ -41,6 +41,7 @@ import {
 	isInterfaceType,
 	isMapType,
 	toWasmType,
+	WRAP_ERRORS_STRUCT,
 } from "./types.js";
 import { desugarVariadics } from "./variadic.js";
 import { emitWat } from "./wat.js";
@@ -703,6 +704,14 @@ export function compileWasmModule(
 			kind: "pointer",
 			base: { kind: "named", name: ERROR_STRUCT },
 		};
+		const wrapPtr = {
+			kind: "pointer",
+			base: { kind: "named", name: WRAP_ERRORS_STRUCT },
+		};
+		const ERRS_T = {
+			kind: "slice",
+			elem: { kind: "interface", name: "error" },
+		};
 		funcDecls.push(
 			helper(
 				`${ERROR_STRUCT}.Error`,
@@ -735,7 +744,48 @@ export function compileWasmModule(
 				ANY_T,
 				"mk_error",
 			),
+			helper(
+				`${WRAP_ERRORS_STRUCT}.Error`,
+				[{ name: "e", type: wrapPtr }],
+				STR_T,
+				"wrap_msg",
+				{
+					_isMethod: true,
+					_recvTypeName: WRAP_ERRORS_STRUCT,
+					_methodName: "Error",
+				},
+			),
+			helper(
+				`${WRAP_ERRORS_STRUCT}.Unwrap`,
+				[{ name: "e", type: wrapPtr }],
+				ERRS_T,
+				"wrap_errs",
+				{
+					_isMethod: true,
+					_recvTypeName: WRAP_ERRORS_STRUCT,
+					_methodName: "Unwrap",
+				},
+			),
+			helper(
+				"__mk_wrap_errors",
+				[
+					{ name: "msg", type: STR_T },
+					{ name: "errs", type: ERRS_T },
+				],
+				ANY_T,
+				"mk_wrap_errors",
+			),
 			helper("__error_str", [{ name: "e", type: ANY_T }], STR_T, "error_str"),
+			// Used by the io and bytes emitters to compare an error with io.EOF.
+			helper(
+				"__errors_is",
+				[
+					{ name: "err", type: ANY_T },
+					{ name: "target", type: ANY_T },
+				],
+				BOOL_T,
+				"errors_is",
+			),
 			{
 				kind: "FuncDecl",
 				name: "__errors_unwrap",
@@ -749,15 +799,6 @@ export function compileWasmModule(
 				_methodName: "Unwrap",
 				_rootFuncDecl: null,
 			},
-			helper(
-				"__errors_is",
-				[
-					{ name: "err", type: ANY_T },
-					{ name: "target", type: ANY_T },
-				],
-				BOOL_T,
-				"errors_is",
-			),
 		);
 	}
 	if (mod.usesTestingRun) {

@@ -697,16 +697,7 @@ export function setupCoreGlobals(globals, types) {
 		kind: "namespace",
 		name: "errors",
 		members: {
-			New: { kind: "func", params: [STRING], returns: [ERROR] },
-			Is: { kind: "func", params: [ERROR, ERROR], returns: [BOOL] },
-			Unwrap: { kind: "func", params: [ERROR], returns: [ERROR] },
 			As: { kind: "func", params: [ERROR, ANY], returns: [BOOL] },
-			Join: {
-				kind: "func",
-				params: [ERROR],
-				returns: [ERROR],
-				variadic: true,
-			},
 		},
 	});
 

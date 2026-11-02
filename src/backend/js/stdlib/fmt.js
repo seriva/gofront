@@ -1,5 +1,6 @@
 // CodeGen for Go `fmt` package — installed onto CodeGen.prototype via stdlibGenMethods.
 
+import { wrappedErrorfArgs } from "../../shared/errorf.js";
 import {
 	fmtDescHasFloat,
 	fmtDescIsSeq,
@@ -361,9 +362,13 @@ export const fmtMethods = {
 				this.useHelper("sprintf");
 				this.useHelper("error");
 				const fmtStr = expr.args[0];
-				if (fmtStr?.kind === "BasicLit" && fmtStr.value?.includes("%w")) {
-					const lastArg = this.genExpr(expr.args[expr.args.length - 1]);
-					return `__error(__sprintf(${fmtArgs}), ${lastArg})`;
+				const wrapped = wrappedErrorfArgs(fmtStr, expr.args);
+				if (wrapped.length === 1) {
+					return `__error(__sprintf(${fmtArgs}), ${this.genExpr(wrapped[0])})`;
+				}
+				if (wrapped.length > 1) {
+					const causes = wrapped.map((e) => this.genExpr(e)).join(", ");
+					return `__error(__sprintf(${fmtArgs}), [${causes}].filter((e) => e != null))`;
 				}
 				return `__error(__sprintf(${fmtArgs}))`;
 			}
