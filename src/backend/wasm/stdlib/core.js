@@ -1203,6 +1203,33 @@ export class StdlibCoreEmitter {
 			const found = this._fmtMethodFunc(named, method);
 			if (found) return { method, isPtr, ...found };
 		}
+		return this._fmtPromotedMethod(named, isPtr);
+	}
+
+	// A struct embedding a named non-struct type (`time.Duration`) gets its
+	// String/Error method: fmt calls it on the embedded field.
+	_fmtPromotedMethod(named, isPtr) {
+		const sInfo = this.mod.getStructType(named.name);
+		for (const embed of sInfo?.embeds ?? []) {
+			const embedType = embed.typeName ?? embed.name;
+			if (this.mod.getStructType(embedType)) continue;
+			for (const method of ["Error", "String"]) {
+				const n = `${embedType}.${method}`;
+				const funcIndex = this.mod.resolveFuncIndex(n);
+				if (funcIndex === null || funcIndex === undefined) continue;
+				const sig = this.mod.checker?.types
+					?.get(embedType)
+					?.methods?.get(method);
+				if (!_isFmtMethodSig(sig, false)) continue;
+				return {
+					method,
+					isPtr,
+					funcIndex,
+					valueRecv: true,
+					embed: { typeIndex: sInfo.typeIndex, fieldIndex: embed.fieldIndex },
+				};
+			}
+		}
 		return null;
 	}
 

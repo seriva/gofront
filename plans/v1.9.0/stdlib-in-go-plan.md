@@ -506,7 +506,7 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
   - Test: `test/unit/stdlib/time.test.js` — fixed dates, DST-free zones, leap years, ISO week edges; `t.Compare(t.Add(1))` → `-1`; `t.Clock()` → `3 4 5` on WASM; `var s fmt.Stringer = 3*time.Second; fmt.Println(s.String())` → `3s`; `test/unit/builtins/stdlib.test.js` time tests unchanged.
   - Done when: cases pass four ways and `Month`/`Weekday` are named types with `String()`.
 
-- [ ] **Task 11.2 — `time` layouts, printing and JSON**
+- [x] **Task 11.2 — `time` layouts, printing and JSON**
   - Files: `stdlib/time/format.go`, `stdlib/time/parse.go`, `src/backend/js/fmt-runtime.js` (promoted `String` on Go-source named types)
   - Removes: `_emitTimeMethodFormat`, `_emitTimeParse` in `src/backend/wasm/stdlib/time.js`; the rest of `src/backend/js/stdlib/time.js` except clock natives
   - Do: Go's layout engine for the supported layouts and constants (`RFC3339`, `Kitchen`, …), `ParseError`, `ParseDuration`, `Time.String`, `MarshalJSON`/`UnmarshalJSON`/`MarshalText`.

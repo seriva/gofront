@@ -14,7 +14,18 @@ export function computeEmbeddedStubs(name, methodDecls, checker) {
 		const embedName = embed.kind === "named" ? embed.name : null;
 		if (!embedName) continue;
 		const embedBase = embed.kind === "named" ? embed.underlying : embed;
-		if (embedBase?.kind !== "struct" || !embedBase.methods) continue;
+		if (embedBase?.kind !== "struct" || !embedBase.methods) {
+			// A named non-struct type (`time.Duration`) promotes its value
+			// methods; the stub passes the embedded value as the receiver.
+			if (rawEmbed.kind === "pointer" || embedBase?.kind === "interface")
+				continue;
+			for (const [mName, mType] of embed.methods?.entries() ?? []) {
+				if (declared.has(mName) || mType?._ptrRecv) continue;
+				stubs.push({ methodName: mName, embedName, valueEmbed: true });
+				declared.add(mName);
+			}
+			continue;
+		}
 
 		for (const [mName] of embedBase.methods.entries()) {
 			if (!declared.has(mName)) {

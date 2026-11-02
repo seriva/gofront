@@ -1857,7 +1857,8 @@ export const expressionCheckMethods = {
 										: f.type?.name) ?? ""
 								)
 									.split(".")
-									.pop(),
+									.pop()
+									.replace(/\$\$.*$/, ""),
 							]
 						: f.names,
 				)
@@ -1884,7 +1885,12 @@ export const expressionCheckMethods = {
 				const embed = base._embeds?.find((e) => {
 					const inner = e.kind === "pointer" ? e.base : e;
 					const name =
-						inner.kind === "named" ? inner.name.split(".").pop() : null;
+						inner.kind === "named"
+							? inner.name
+									.split(".")
+									.pop()
+									.replace(/\$\$.*$/, "")
+							: null;
 					return name === keyName;
 				});
 				if (embed) elem._isEmbedInit = true;

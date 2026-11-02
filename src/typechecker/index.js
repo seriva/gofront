@@ -779,8 +779,16 @@ export class TypeChecker {
 		for (const embed of struct._embeds) {
 			const inner = embed.kind === "pointer" ? embed.base : embed;
 			const base = inner.kind === "named" ? inner.underlying : inner;
-			if (base?.kind !== "struct" || !base.methods) continue;
-			for (const [mName, mType] of base.methods.entries()) {
+			// A named non-struct type (`time.Duration`) keeps its methods on
+			// the named type itself.
+			const methods =
+				base?.kind === "struct"
+					? base.methods
+					: inner.kind === "named" && base?.kind !== "interface"
+						? inner.methods
+						: null;
+			if (!methods) continue;
+			for (const [mName, mType] of methods.entries()) {
 				if (!struct.methods.has(mName)) struct.methods.set(mName, mType);
 			}
 		}
