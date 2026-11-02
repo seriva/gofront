@@ -115,7 +115,6 @@ export const WASM_SUPPORTED_STDLIB = new Set([
 	"bytes",
 	"strconv",
 	"unicode",
-	"unicode/utf8",
 	"path",
 	"path/filepath",
 	"html",
@@ -278,30 +277,6 @@ export const WASM_STDLIB_MEMBERS = new Map([
 		]),
 	],
 	["errors", new Set(["As"])],
-	[
-		"utf8",
-		new Set([
-			"RuneCountInString",
-			"RuneLen",
-			"ValidString",
-			"ValidRune",
-			"DecodeRuneInString",
-			"DecodeLastRuneInString",
-			"FullRuneInString",
-			"RuneError",
-			"MaxRune",
-			"UTFMax",
-			"RuneSelf",
-			"EncodeRune",
-			"AppendRune",
-			"DecodeRune",
-			"DecodeLastRune",
-			"RuneCount",
-			"FullRune",
-			"Valid",
-			"RuneStart",
-		]),
-	],
 	[
 		"fmt",
 		new Set([
@@ -652,6 +627,7 @@ export const NATIVES = new Set([
 	"slices.Sort",
 	"sort.Ints",
 	"sort.Strings",
+	"utf8.RuneCountInString",
 ]);
 
 // ── Static operator sets (module-level for reuse) ────────────

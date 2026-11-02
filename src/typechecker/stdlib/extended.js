@@ -475,31 +475,6 @@ export function setupExtendedGlobals(globals, types) {
 		},
 	});
 
-	globals.define("utf8", {
-		kind: "namespace",
-		name: "utf8",
-		members: {
-			RuneCountInString: { kind: "func", params: [STRING], returns: [INT] },
-			RuneLen: { kind: "func", params: [INT], returns: [INT] },
-			ValidString: { kind: "func", params: [STRING], returns: [BOOL] },
-			ValidRune: { kind: "func", params: [INT], returns: [BOOL] },
-			DecodeRuneInString: {
-				kind: "func",
-				params: [STRING],
-				returns: [INT, INT],
-			},
-			DecodeLastRuneInString: {
-				kind: "func",
-				params: [STRING],
-				returns: [INT, INT],
-			},
-			FullRuneInString: { kind: "func", params: [STRING], returns: [BOOL] },
-			RuneError: INT,
-			MaxRune: INT,
-			UTFMax: INT,
-		},
-	});
-
 	globals.define("path", {
 		kind: "namespace",
 		name: "path",

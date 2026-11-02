@@ -369,7 +369,7 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
   - Test: `test/unit/stdlib/errors.test.js` — `%w`, multiple `%w`, `Join`, `Is` with `Is(error) bool` methods, `As` on pointer and value targets; `errors.Is(nil, nil)` → `true`; `%T` of `errors.New("x")` → `*errors.errorString`; `Errorf("%w")` matches `interface{ Unwrap() error }`; `Join` matches `interface{ Unwrap() []error }`; `Is2[error](errors.New("x"))` → `true`; `errors.Is(err, strconv.ErrRange)`.
   - Done when: cases pass four ways.
 
-- [ ] **Task 5.3 — `unicode/utf8` in Go**
+- [x] **Task 5.3 — `unicode/utf8` in Go**
   - Files: `stdlib/unicode/utf8/utf8.go`, `src/backend/js/natives.js` (`RuneCountInString`)
   - Removes: `stdlib/unicode/utf8/bytes.go`, `src/backend/js/stdlib/utf8.js`, `emitUtf8Call` in `core.js`, `utf8` typings in `core.js`
   - Do: the whole package over `[]byte` with Go's constants and signatures (`RuneError`, `UTFMax` untyped).

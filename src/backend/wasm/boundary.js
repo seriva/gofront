@@ -2235,7 +2235,6 @@ function ${P}stdlib_str(stringTable, io) {
 	let cutBefore = "", cutAfter = "";
 	let replacerTarget = "", replacerPairs = [];
 	let strconvErr = null, strconvErrKind = 0;
-	let decodeSize = 0;
 	return {
 		"str_trim": (s, c) => ${P}trim(s ?? "", c ?? "", true, true),
 		"str_trim_left": (s, c) => ${P}trim(s ?? "", c ?? "", true, false),
@@ -2449,22 +2448,6 @@ function ${P}stdlib_str(stringTable, io) {
 				return "";
 			}
 		},
-		"utf8_rune_count": (s) => { let n = 0; for (const _ of (s ?? "")) n++; return n; },
-		"utf8_rune_len": (r) => (r < 0 || r > 0x10ffff || (r >= 0xd800 && r <= 0xdfff) ? -1 : r < 0x80 ? 1 : r < 0x800 ? 2 : r < 0x10000 ? 3 : 4),
-		"utf8_valid_string": (s) => (s ?? "").isWellFormed ? ((s ?? "").isWellFormed() ? 1 : 0) : (/[\\uD800-\\uDFFF]/.test((s ?? "").replace(/[\\uD800-\\uDBFF][\\uDC00-\\uDFFF]/g, "")) ? 0 : 1),
-		"utf8_decode_rune": (s, last) => {
-			s = s ?? "";
-			if (s.length === 0) { decodeSize = 0; return 0xfffd; }
-			let cp;
-			if (last) { const tail = s.codePointAt(s.length - 1); cp = (tail >= 0xdc00 && tail <= 0xdfff && s.length >= 2) ? s.codePointAt(s.length - 2) : tail; }
-			else cp = s.codePointAt(0);
-			if (cp >= 0xd800 && cp <= 0xdfff) { decodeSize = 1; return 0xfffd; }
-			// Size is in UTF-16 code units, matching the JS backend (strings are JS strings).
-			decodeSize = cp > 0xffff ? 2 : 1;
-			return cp;
-		},
-		"utf8_decode_size": () => decodeSize,
-		"utf8_full_rune": (s) => { s = s ?? ""; if (s.length === 0) return 0; const c = s.charCodeAt(0); return (c >= 0xd800 && c <= 0xdbff && s.length < 2) ? 0 : 1; },
 		// unicode
 		"unicode_is_letter": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{L}/u.test(c)) ? 1 : 0; },
 		"unicode_is_digit": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{Nd}/u.test(c)) ? 1 : 0; },

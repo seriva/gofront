@@ -352,7 +352,6 @@ const NS_CONSTANTS = {
 		Friday: "5",
 		Saturday: "6",
 	},
-	utf8: { RuneError: "0xFFFD", MaxRune: "0x10FFFF", UTFMax: "4" },
 };
 
 // JavaScript precedence of the operators emitted for Go binary expressions.

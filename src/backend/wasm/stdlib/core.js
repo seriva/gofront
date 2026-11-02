@@ -5039,53 +5039,6 @@ export class StdlibCoreEmitter {
 		this.releaseTemp(errTmp, "anyref");
 	}
 
-	emitUtf8Call(name, args, targetWasmType) {
-		const wide = (targetWasmType ?? "i64") === "i64";
-		switch (name) {
-			case "RuneCountInString":
-				this.emitExpr(args[0], "externref");
-				this._callStdlib("utf8_rune_count");
-				if (wide) this.pushInstruction("i64.extend_i32_s");
-				return;
-			case "RuneLen":
-				this._emitI32Arg(args[0]);
-				this._callStdlib("utf8_rune_len");
-				if (wide) this.pushInstruction("i64.extend_i32_s");
-				return;
-			case "ValidString":
-				this.emitExpr(args[0], "externref");
-				this._callStdlib("utf8_valid_string");
-				return;
-			case "FullRuneInString":
-				this.emitExpr(args[0], "externref");
-				this._callStdlib("utf8_full_rune");
-				return;
-			case "ValidRune": {
-				// 0 <= r <= MaxRune && !(0xD800 <= r <= 0xDFFF)  ⇔  RuneLen(r) > 0
-				this._emitI32Arg(args[0]);
-				this._callStdlib("utf8_rune_len");
-				this.pushInstruction({ op: "i32.const", value: 0 });
-				this.pushInstruction("i32.gt_s");
-				return;
-			}
-			case "DecodeRuneInString":
-			case "DecodeLastRuneInString":
-				// (rune, size): decode stores the size for the follow-up import.
-				this.emitExpr(args[0], "externref");
-				this.pushInstruction({
-					op: "i32.const",
-					value: name === "DecodeLastRuneInString" ? 1 : 0,
-				});
-				this._callStdlib("utf8_decode_rune");
-				this.pushInstruction("i64.extend_i32_s");
-				this._callStdlib("utf8_decode_size");
-				this.pushInstruction("i64.extend_i32_s");
-				return;
-			default:
-				throw new Error(`Unsupported utf8 function: utf8.${name}`);
-		}
-	}
-
 	// `a == b` for two anyref operands (interface values).  `ref.eq` only
 	// accepts eqref, so host strings (internalised externs) are compared via
 	// `str_eq` and anything else by identity.

@@ -2236,6 +2236,7 @@ section("unicode/utf8 package");
 
 test("utf8.RuneCountInString", () => {
 	const { js, errors } = compile(`package main
+import "unicode/utf8"
 func main() {
 	console.log(utf8.RuneCountInString("hello"))
 	console.log(utf8.RuneCountInString(""))
@@ -2246,6 +2247,7 @@ func main() {
 
 test("utf8.RuneLen", () => {
 	const { js, errors } = compile(`package main
+import "unicode/utf8"
 func main() {
 	console.log(utf8.RuneLen(65))
 	console.log(utf8.RuneLen(0x80))
@@ -2257,6 +2259,7 @@ func main() {
 
 test("utf8.ValidString", () => {
 	const { js, errors } = compile(`package main
+import "unicode/utf8"
 func main() {
 	console.log(utf8.ValidString("hello"))
 }`);
@@ -2266,6 +2269,7 @@ func main() {
 
 test("utf8.ValidRune", () => {
 	const { js, errors } = compile(`package main
+import "unicode/utf8"
 func main() {
 	console.log(utf8.ValidRune(65))
 	console.log(utf8.ValidRune(-1))
@@ -2276,6 +2280,7 @@ func main() {
 
 test("utf8.RuneError constant", () => {
 	const { js, errors } = compile(`package main
+import "unicode/utf8"
 func main() {
 	console.log(utf8.RuneError)
 }`);
@@ -2285,6 +2290,7 @@ func main() {
 
 test("utf8.MaxRune constant", () => {
 	const { js, errors } = compile(`package main
+import "unicode/utf8"
 func main() {
 	console.log(utf8.MaxRune)
 }`);
@@ -2294,6 +2300,7 @@ func main() {
 
 test("utf8.DecodeRuneInString", () => {
 	const { js, errors } = compile(`package main
+import "unicode/utf8"
 func main() {
 	r, size := utf8.DecodeRuneInString("hello")
 	console.log(r)

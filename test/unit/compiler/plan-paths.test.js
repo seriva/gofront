@@ -39,13 +39,14 @@ const PLANS = [
 			"stdlib/strconv/{float,strconv}.go",
 			"stdlib/strings/{reader,replacer,strings}.go",
 			"stdlib/time/{duration,format,parse,time}.go",
-			"stdlib/unicode/utf8/utf8.go",
 			// Files that completed tasks removed (their "Removes" lines still cite them).
 			"src/backend/js/stdlib/{slices,sort}.js",
 			"stdlib/slices/{extra,iter}.go",
 			"src/backend/js/stdlib/maps.js",
 			"stdlib/maps/iter.go",
 			"stdlib/errors/overlay.go",
+			"src/backend/js/stdlib/utf8.js",
+			"stdlib/unicode/utf8/bytes.go",
 		],
 	},
 ];

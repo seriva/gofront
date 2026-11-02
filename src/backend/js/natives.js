@@ -112,3 +112,8 @@ JS_NATIVES.set("slices.Sort", (a, targs) => {
 });
 JS_NATIVES.set("sort.Ints", (a) => sortNative({ name: "int" }, a[0]));
 JS_NATIVES.set("sort.Strings", (a) => sortNative({ name: "string" }, a[0]));
+
+// ── unicode/utf8 ──────────────────────────────────────────────
+
+// A string iterates by code point, as Go's `range` does.
+JS_NATIVES.set("utf8.RuneCountInString", (a) => `[...${a[0]}].length`);

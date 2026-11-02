@@ -27,7 +27,6 @@ import { syncMethods } from "./sync.js";
 import { testingMethods } from "./testing.js";
 import { timeMethods } from "./time.js";
 import { unicodeMethods } from "./unicode.js";
-import { utf8Methods } from "./utf8.js";
 
 /** @typedef {import('../index.js').CodeGen} CodeGen */
 
@@ -48,7 +47,6 @@ const STDLIB_METHOD_MAP = {
 	html: "_genHtml",
 	io: "_genIo",
 	rand: "_genRand",
-	utf8: "_genUtf8",
 	path: "_genPath",
 	filepath: "_genPath",
 	testing: "_genTesting",
@@ -119,7 +117,6 @@ export const stdlibGenMethods = {
 	...stringsMethods,
 	...timeMethods,
 	...unicodeMethods,
-	...utf8Methods,
 	...testingMethods,
 	...syncMethods,
 	...sha256Methods,

@@ -1094,9 +1094,6 @@ export class BuiltinsEmitter {
 			case "errors":
 				this.emitErrorsCall(func.field, args);
 				return true;
-			case "utf8":
-				this.emitUtf8Call(func.field, args, targetWasmType);
-				return true;
 			case "shared":
 				this.emitSharedNew(func.field, args);
 				return true;

@@ -46,7 +46,6 @@ const ERROR_PRODUCING_PKGS = new Set([
 const STDLIB_ENV_PKGS = new Set([
 	"strings",
 	"strconv",
-	"unicode/utf8",
 	"fmt",
 	"testing",
 	"unicode",
@@ -121,13 +120,6 @@ const STDLIB_IMPORTS = [
 	["strconv_parse_uint", [S, "i32", "i32"], ["i64"]],
 	["strconv_quote", [S], [S]],
 	["strconv_unquote", [S], [S]],
-	// unicode/utf8
-	["utf8_rune_count", [S], ["i32"]],
-	["utf8_rune_len", ["i32"], ["i32"]],
-	["utf8_valid_string", [S], ["i32"]],
-	["utf8_decode_rune", [S, "i32"], ["i32"]],
-	["utf8_decode_size", [], ["i32"]],
-	["utf8_full_rune", [S], ["i32"]],
 	// fmt (arguments travel through the testing_arg_* buffer)
 	["fmt_sprintf", [S], [S]],
 	["fmt_printf", [S], []],
