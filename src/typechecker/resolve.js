@@ -921,6 +921,14 @@ export const resolveMethods = {
 		const mangled = base._mangle?.get(field);
 		if (mangled) {
 			node._stdName = mangled;
+			// Lazy stdlib bodies: referencing a member checks what it reaches.
+			const failure = base._reach?.(mangled);
+			if (failure)
+				this.err(
+					`internal stdlib error in ${base._path}; please report`,
+					node,
+					failure,
+				);
 			return base.members[field];
 		}
 		if (field in base.members) {

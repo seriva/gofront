@@ -63,6 +63,11 @@ test("parseBuildArgs parses --release and --wasm-opt flags", () => {
 	assertEqual(parsed4.wasmOpt, false);
 });
 
+test("parseBuildArgs parses --no-natives", () => {
+	assertEqual(parseBuildArgs([]).natives, true);
+	assertEqual(parseBuildArgs(["--no-natives"]).natives, false);
+});
+
 test("formatBuildSummary includes wasm-opt reduction metric", () => {
 	const summary = formatBuildSummary({
 		outDir: "public",

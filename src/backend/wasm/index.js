@@ -176,6 +176,7 @@ export function compileWasmModule(
 
 	const mod = new ModuleEmitter(resolvedChecker, resolvedLowerResult, progs, {
 		bundledPackages: options.bundledPackages,
+		natives: options.natives,
 	});
 
 	// 1. Collect all functions, methods, and package-level globals

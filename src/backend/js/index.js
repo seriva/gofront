@@ -211,6 +211,7 @@ export class CodeGen {
 		this.checker = checker;
 		this.target = options.target ?? "js";
 		this.strict = Boolean(options.strict || this.target === "both");
+		this.natives = options.natives !== false; // replace native calls with host code
 		this.out = [];
 		this.indent = 0;
 		this.structNames = new Set();

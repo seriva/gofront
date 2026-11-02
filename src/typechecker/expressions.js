@@ -1424,6 +1424,21 @@ export const expressionCheckMethods = {
 		);
 	},
 
+	// A direct call of a `//gofront:native` function is marked `_native` so a
+	// backend may substitute host code.  A function used as a value (`f :=
+	// str.Index; f(a, b)`) is not a direct reference and calls the Go body.
+	_markNativeCall(expr, fnType, scope) {
+		const callee =
+			expr.func.kind === "InstantiationExpr" ? expr.func.expr : expr.func;
+		const native = fnType?.native ?? fnType?.underlying?.native ?? null;
+		const direct =
+			callee.kind === "Ident"
+				? scope.lookupScope(callee.name) === this.globals &&
+					Boolean(this._funcDeclNames?.has(callee.name))
+				: callee.kind === "SelectorExpr" && Boolean(callee._stdName);
+		expr._native = native && direct ? native : null;
+	},
+
 	checkCall(expr, scope) {
 		expr.func._typeRefOk = true;
 		let fnType = this.checkExpr(expr.func, scope);
@@ -1447,6 +1462,7 @@ export const expressionCheckMethods = {
 			return this.checkBuiltin(fnType.name, expr, argTypes, scope);
 		}
 
+		this._markNativeCall(expr, fnType, scope);
 		const argTypes = this._resolveCallArgTypes(expr, scope);
 
 		if (fnType?._tainted) return TAINTED_ANY;

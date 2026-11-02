@@ -443,7 +443,12 @@ async function runProgramModule(js, wasm) {
 	}
 }
 
-export async function compileHybridProgram(source) {
+// `natives: false` compiles with the native registries off (the Go bodies of
+// `//gofront:native` functions run); `stdlibRoot` swaps the stdlib directory.
+export async function compileHybridProgram(
+	source,
+	{ natives = true, stdlibRoot } = {},
+) {
 	const dir = mkdtempSync(join(tmpdir(), "gofront-program-src-"));
 	try {
 		const goPath = join(dir, "main.go");
@@ -451,7 +456,11 @@ export async function compileHybridProgram(source) {
 		const run = async (target, label) => {
 			let res;
 			try {
-				res = compileFiles([goPath], { forceTarget: target });
+				res = compileFiles([goPath], {
+					forceTarget: target,
+					natives,
+					...(stdlibRoot && { stdlibRoot }),
+				});
 			} catch (e) {
 				throw new Error(`${label} compile failed:\n${e.message}`);
 			}
@@ -481,6 +490,29 @@ export async function assertProgramOutput(source, expected) {
 		throw new Error(
 			`${backend} output differs from real Go at line ${i + 1}: want ${JSON.stringify(w[i] ?? "<EOF>")}, got ${JSON.stringify(g[i] ?? "<EOF>")}`,
 		);
+	}
+}
+
+// Runs `source` four ways -- JS (`both`) and WASM, each with natives on and
+// off -- and fails naming the first configuration whose output differs from
+// `expected` (`js (natives on)`, `wasm (natives off)`, ...).
+export async function assertFourWay(source, expected, options = {}) {
+	for (const natives of [true, false]) {
+		const state = natives ? "on" : "off";
+		const out = await compileHybridProgram(source, { ...options, natives });
+		for (const [backend, got] of [
+			["js", out.js],
+			["wasm", out.wasm],
+		]) {
+			if (got === expected) continue;
+			const w = expected.split("\n");
+			const g = got.split("\n");
+			let i = 0;
+			while (i < Math.max(w.length, g.length) && w[i] === g[i]) i++;
+			throw new Error(
+				`${backend} (natives ${state}) output differs from real Go at line ${i + 1}: want ${JSON.stringify(w[i] ?? "<EOF>")}, got ${JSON.stringify(g[i] ?? "<EOF>")}`,
+			);
+		}
 	}
 }
 

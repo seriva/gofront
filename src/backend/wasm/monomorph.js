@@ -772,6 +772,9 @@ export function monomorphise(programs, checker) {
 	const monoChecker = new TypeChecker();
 	monoChecker.target = "wasm";
 	monoChecker.pkgName = targetProg?.pkg?.name ?? "main";
+	// The programs were checked once already, where `//gofront:native` is
+	// limited to the standard library; this pass only re-annotates them.
+	monoChecker.nativesChecked = true;
 	if (checker?.types) {
 		for (const [name, type] of checker.types.entries()) {
 			if (!monoChecker.types.has(name)) {

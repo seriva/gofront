@@ -230,6 +230,7 @@ export class ModuleEmitter {
 		// Local package names whose code is linked into this module; selectors
 		// like `mathx.NewVec3` are de-qualified to `NewVec3` by the emitter.
 		this.bundledPackages = options.bundledPackages ?? new Set();
+		this.natives = options.natives !== false; // replace native calls with host code
 		this.constCache = new Map(); // name -> BasicLit (package-level literal consts)
 		this.nonLiteralConsts = new Set(); // package-level consts the backend cannot evaluate yet
 

@@ -167,7 +167,7 @@ func Index(s, substr string) int { /* Go body: the specification */ }
 | `slices.SortFunc` / `sort.Slice` vs `Array.prototype.sort` with comparator, JS, 200,000 | Go pdqsort path ≈1.3–1.7× | ≤ 2× |
 | `strings.Index`, 1 MB `"a…ab"`, 20 calls, WASM | 145 ms (host `str_index`) | ≤ 1.25× |
 | Dev `app.wasm`, program using `bytes.Buffer` | 6,957 bytes (`04aa0c6`) | ≤ 4,500 bytes |
-| Type-check, program importing every migrated package | measured in Task 3.5 | ≤ +5 ms (lazy) |
+| Type-check, program importing every migrated package | Task 3.5, 5,600-line synthetic package, one call (Node 25.2.0): +0.9 ms (two declaration passes at 0.45 ms; eager bodies 6.05 ms per pass). Whole `compileDir` +18 ms (eager 33 ms), all of it lex and parse at 7.6 ms per pass, two passes | ≤ +5 ms (lazy) |
 | `src/backend/wasm/stdlib/` | 26,460 lines | ≤ 8,000 |
 | `src/typechecker/stdlib/{core,extended}.js` | 2,289 lines | ≤ 1,500 |
 | `src/backend/js/stdlib/` | 4,003 lines | ≤ 2,400 |
@@ -293,31 +293,31 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
 
 ### Phase 3: Natives, differential testing and lazy checking
 
-- [ ] **Task 3.1 — `//gofront:native` directive and name set**
+- [x] **Task 3.1 — `//gofront:native` directive and name set**
   - Files: `src/lexer/lexer.js`, `src/parser/declarations.js`, `src/typechecker/types.js` (`NATIVES` beside `INTRINSICS`), `src/typechecker/index.js:1135`
   - Do: parse `//gofront:native <name>` before a func with a body, like `//gofront:intrinsic`; reject an unknown name, a native on a body-less func, and use outside `stdlib/`.
   - Test: `test/unit/compiler/stdlib-go.test.js` — `unknown native 'x'`, the body-less error, `//gofront:native is reserved for the standard library` (user package), via a temp-dir stdlib root; a valid test-only name compiles.
   - Done when: the four tests pass with those messages.
 
-- [ ] **Task 3.2 — JS call-site substitution with decline and value fallback**
+- [x] **Task 3.2 — JS call-site substitution with decline and value fallback**
   - Files: `src/backend/js/expressions.js`, new `src/backend/js/natives.js`
   - Do: at a call whose callee carries a native, ask the registry with the argument expressions and instantiated type arguments; emit the string, else call the Go function. Values, `defer` and method values call the Go function. Repeated arguments are bound to temporaries.
   - Test: `stdlib-go.test.js` — a test-only native `str.Index` emits `.indexOf(`; `f := str.Index; f(a, b)` calls the Go body; a template that declines for `float64` calls the Go body; `str.Index(next(), next())` evaluates each argument once, in order.
   - Done when: all four assertions pass on the generated JS.
 
-- [ ] **Task 3.3 — WASM call-site substitution**
+- [x] **Task 3.3 — WASM call-site substitution**
   - Files: `src/backend/wasm/emit-exprs.js`, new `src/backend/wasm/natives.js`
   - Do: the same contract for WASM; an implementation pushes instructions or a host-import call and returns `true`, or `false` to decline. The Go body is emitted whenever reachable.
   - Test: `test/unit/wasm/stdlib.test.js` — a test-only native calling an import; decline and value-fallback cases as parity tests against the Go body.
   - Done when: native-on and native-off modules validate and give the same output.
 
-- [ ] **Task 3.4 — Natives-off mode and `assertFourWay`**
+- [x] **Task 3.4 — Natives-off mode and `assertFourWay`**
   - Files: `src/compiler.js` (`natives` option), `src/link/stdlib.js` (pass it to the stdlib `CodeGen` and WASM unit), `src/cli/cli-core.js` (`--no-natives`, debugging only)
   - Do: `natives: false` makes both backends ignore their registries. Extend `compileHybridProgram` in `test/unit/helpers.js` with a `natives` option and add `assertFourWay(source, expected)`, which reports the failing configuration (`js (natives on)`, …).
   - Test: `stdlib-go.test.js` — a test-only native that disagrees with its Go body fails `assertFourWay` naming `js (natives on)`; an agreeing one passes.
   - Done when: both cases behave as stated.
 
-- [ ] **Task 3.5 — Lazy body checking for Go-source packages**
+- [x] **Task 3.5 — Lazy body checking for Go-source packages**
   - Files: `src/typechecker/index.js`, `src/link/stdlib.js` (`checkStdlibPrograms`, both passes), `src/lower/reachability.js`
   - Do: check declarations eagerly and function and method bodies when first reached (call, used type's method, interface satisfaction) in both the probe and the mangled pass; report stdlib body errors at the user's call site. Expose `checker.stats.bodiesChecked`.
   - Test: `stdlib-go.test.js` — a synthetic 5,600-line Go-source package of which the program calls one function checks ≤ 10 bodies; a type error in an unreached body is not reported; the same error in a reached body is reported at the call site with the `internal stdlib error` note; diagnostics for existing packages are unchanged.

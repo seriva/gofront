@@ -91,42 +91,77 @@ function addExtraRoots(names) {
 	}
 }
 
+// Incremental closure over one or more Go-source stdlib packages.  A
+// declaration's body may still be unchecked (lazy checking): `decl._ensure()`,
+// when present, checks and mangles it first and returns an error text on
+// failure, so the references collected from it are the mangled ones.  Failed
+// declarations are listed in `failures`.
+export class StdlibReach {
+	constructor(stdlibPrograms) {
+		this.programs = stdlibPrograms;
+		const { byName, methods, inits } = indexStdlib(stdlibPrograms);
+		this.byName = byName;
+		this.methods = methods;
+		this.inits = inits;
+		this.reached = new Set();
+		this.names = new Set();
+		this.fields = new Set(IMPLICIT_METHODS);
+		this.pending = [];
+		this.failures = [];
+	}
+
+	// Adds `rootNodes` (AST that is emitted) and closes over what they use.
+	add(rootNodes) {
+		const roots = new Set();
+		collectRefs(rootNodes, roots, this.fields);
+		addExtraRoots(roots);
+		for (const n of roots) this._name(n);
+		this._close();
+	}
+
+	_name(n) {
+		if (this.names.has(n)) return;
+		this.names.add(n);
+		this.pending.push(n);
+	}
+
+	_reach(d) {
+		if (this.reached.has(d)) return;
+		this.reached.add(d);
+		const failure = d._ensure?.();
+		if (failure) this.failures.push(failure);
+		const local = new Set();
+		collectRefs(d, local, this.fields);
+		for (const n of local) this._name(n);
+	}
+
+	_close() {
+		let changed = true;
+		while (changed) {
+			while (this.pending.length > 0)
+				for (const d of this.byName.get(this.pending.pop()) ?? [])
+					this._reach(d);
+			const size = this.reached.size;
+			for (const m of this.methods)
+				if (this.names.has(m.recv) && this.fields.has(m.decl.name))
+					this._reach(m.decl);
+			for (const p of this.programs)
+				if (p.decls.some((d) => this.reached.has(d)))
+					for (const d of this.inits.get(p) ?? []) this._reach(d);
+			changed = this.reached.size !== size || this.pending.length > 0;
+		}
+	}
+}
+
 /**
  * Returns the set of declarations of `stdlibPrograms` reachable from
  * `rootPrograms` (all user code that is emitted).  A program's `init` is
- * kept when anything else in that program is reached.
+ * kept when anything else in that program is reached.  A reached body that
+ * fails its (lazy) check throws.
  */
 export function reachableStdlibDecls(rootPrograms, stdlibPrograms) {
-	const { byName, methods, inits } = indexStdlib(stdlibPrograms);
-	const reached = new Set();
-	const names = new Set();
-	const fields = new Set(IMPLICIT_METHODS);
-	collectRefs(rootPrograms, names, fields);
-	addExtraRoots(names);
-
-	const pending = [...names];
-	const reach = (d) => {
-		if (reached.has(d)) return;
-		reached.add(d);
-		const local = new Set();
-		collectRefs(d, local, fields);
-		for (const n of local) {
-			if (names.has(n)) continue;
-			names.add(n);
-			pending.push(n);
-		}
-	};
-	let changed = true;
-	while (changed) {
-		while (pending.length > 0)
-			for (const d of byName.get(pending.pop()) ?? []) reach(d);
-		const size = reached.size;
-		for (const m of methods)
-			if (names.has(m.recv) && fields.has(m.decl.name)) reach(m.decl);
-		for (const p of stdlibPrograms)
-			if (p.decls.some((d) => reached.has(d)))
-				for (const d of inits.get(p) ?? []) reach(d);
-		changed = reached.size !== size || pending.length > 0;
-	}
-	return reached;
+	const reach = new StdlibReach(stdlibPrograms);
+	reach.add(rootPrograms);
+	if (reach.failures.length > 0) throw new Error(reach.failures[0]);
+	return reach.reached;
 }
