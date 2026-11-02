@@ -19,8 +19,6 @@ const ERROR_PRODUCING_PKGS = new Set([
 	"errors",
 	"fmt",
 	"strconv",
-	"path",
-	"path/filepath",
 	"io",
 	"os",
 	"strings",
@@ -50,9 +48,6 @@ const STDLIB_ENV_PKGS = new Set([
 	"testing",
 	"unicode",
 	"math/rand",
-	"path",
-	"path/filepath",
-	"html",
 	"bytes",
 	"io",
 	"os",
@@ -154,23 +149,6 @@ const STDLIB_IMPORTS = [
 	["unicode_is_graphic", ["i32"], ["i32"]],
 	["unicode_to_upper", ["i32"], ["i32"]],
 	["unicode_to_lower", ["i32"], ["i32"]],
-	// html
-	["html_escape", [S], [S]],
-	["html_unescape", [S], [S]],
-	// path
-	["path_base", [S], [S]],
-	["path_dir", [S], [S]],
-	["path_ext", [S], [S]],
-	["path_is_abs", [S], ["i32"]],
-	["path_clean", [S], [S]],
-	["path_split", [S], []],
-	["path_split_dir", [], [S]],
-	["path_split_file", [], [S]],
-	["path_join_init", [], []],
-	["path_join_push", [S], []],
-	["path_join_run", [], [S]],
-	["path_match", [S, S], ["i32"]],
-	["path_match_has_err", [], ["i32"]],
 	["bytes_trim", [S, S, "i32", "i32"], []],
 	["bytes_trim_start", [], ["i32"]],
 	["bytes_trim_end", [], ["i32"]],
@@ -1199,21 +1177,6 @@ export class ModuleEmitter {
 			init: [{ op: "ref.null", heapType: "any" }],
 		});
 		this.strconvErrGlobals.set(field, gIdx);
-		return gIdx;
-	}
-
-	getPathErrGlobalIndex(field) {
-		if (!this.pathErrGlobals) this.pathErrGlobals = new Map();
-		if (this.pathErrGlobals.has(field)) {
-			return this.pathErrGlobals.get(field);
-		}
-		const gIdx = this.globals.length;
-		this.globals.push({
-			type: "anyref",
-			mutable: true,
-			init: [{ op: "ref.null", heapType: "any" }],
-		});
-		this.pathErrGlobals.set(field, gIdx);
 		return gIdx;
 	}
 

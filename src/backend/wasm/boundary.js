@@ -40,7 +40,6 @@ import {
 	HELPER_DURATION,
 	HELPER_ERROR,
 	HELPER_HEX,
-	HELPER_PATH_CLEAN,
 	HELPER_SHA256,
 	HELPER_SPRINT,
 	HELPER_SPRINTF,
@@ -2099,7 +2098,6 @@ export const WASM_STDLIB_JS = `${HELPER_ERROR}
 ${HELPER_SPRINTF}
 ${HELPER_SPRINT}
 ${HELPER_STRCONV}
-${HELPER_PATH_CLEAN}
 ${HELPER_DURATION}
 ${HELPER_SHA256}
 ${HELPER_HEX}
@@ -2463,9 +2461,6 @@ function ${P}stdlib_str(stringTable, io) {
 	};
 }
 function ${P}stdlib_sys(stringTable, io) {
-	let splitDir = "", splitFile = "";
-	let joinParts = [];
-	let matchHasErr = 0;
 	let trimStart = 0, trimEnd = 0;
 	let timeParseErr = null, timeParseOffset = 0, timeParseDurationErr = null, timeParseSubNs = 0;
 	let rawBytes = new Uint8Array(0);
@@ -2476,53 +2471,6 @@ function ${P}stdlib_sys(stringTable, io) {
 	let bitsRem32 = 0;
 	let bitsRem64 = 0n;
 	return {
-		// html
-		"html_escape": (s) => (s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&#34;").replace(/'/g, "&#39;"),
-		"html_unescape": (s) => (s ?? "").replace(/&(?:quot|apos|#39|#34|gt|lt|amp|#(?:[0-9]+|[xX][0-9a-fA-F]+));/g, (m) => {
-			switch (m) {
-				case "&quot;": case "&#34;": return '"';
-				case "&apos;": case "&#39;": return "'";
-				case "&gt;": return ">";
-				case "&lt;": return "<";
-				case "&amp;": return "&";
-				default: {
-					if (m.startsWith("&#")) {
-						const raw = m.slice(2, -1);
-						const cp = (raw.startsWith("x") || raw.startsWith("X")) ? parseInt(raw.slice(1), 16) : parseInt(raw, 10);
-						return (cp >= 0 && cp <= 0x10FFFF && !(cp >= 0xD800 && cp <= 0xDFFF)) ? String.fromCodePoint(cp) : "\\uFFFD";
-					}
-					return m;
-				}
-			}
-		}),
-		// path
-		"path_base": (p) => { if (!p) return "."; const stripped = p.replace(/\\/+$/, ""); if (!stripped) return "/"; const i = stripped.lastIndexOf("/"); return i < 0 ? stripped : stripped.slice(i + 1) || "/"; },
-		"path_dir": (p) => { const s = p ?? ""; const i = s.lastIndexOf("/"); if (i < 0) return "."; const res = s.slice(0, i); return res === "" ? "/" : __pathClean(res); },
-		"path_ext": (p) => { const s = p ?? ""; const b = s.slice(s.lastIndexOf("/") + 1); const i = b.lastIndexOf("."); return i <= 0 ? "" : b.slice(i); },
-		"path_is_abs": (p) => (p ?? "").startsWith("/") ? 1 : 0,
-		"path_clean": (p) => __pathClean(p ?? ""),
-		"path_split": (p) => {
-			const s = p ?? "";
-			const i = s.lastIndexOf("/");
-			if (i < 0) { splitDir = ""; splitFile = s; }
-			else { splitDir = s.slice(0, i + 1); splitFile = s.slice(i + 1); }
-		},
-		"path_split_dir": () => splitDir,
-		"path_split_file": () => splitFile,
-		"path_join_init": () => { joinParts = []; },
-		"path_join_push": (s) => { if (s) joinParts.push(s); },
-		"path_join_run": () => {
-			if (joinParts.length === 0) return "";
-			const res = __pathClean(joinParts.join("/"));
-			joinParts = [];
-			return res;
-		},
-		"path_match": (pat, name) => {
-			const r = __pathMatch(pat ?? "", name ?? "");
-			matchHasErr = r[1] ? 1 : 0;
-			return r[0] ? 1 : 0;
-		},
-		"path_match_has_err": () => matchHasErr,
 		// bytes trim
 		"bytes_trim": (s, cutset, left, right) => {
 			const cs = new Set(Array.from(cutset ?? ""));

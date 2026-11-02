@@ -224,20 +224,6 @@ export class StdlibCoreEmitter {
 		);
 	}
 
-	_isPathConst(expr) {
-		return (
-			(this._isPkgExpr(expr, "path") || this._isPkgExpr(expr, "filepath")) &&
-			expr.field === "ErrBadPattern"
-		);
-	}
-
-	emitPathConst(field, _targetWasmType) {
-		this._emitLazyErrorGlobal(
-			this.mod.getPathErrGlobalIndex(field),
-			"syntax error in pattern",
-		);
-	}
-
 	emitMathCall(name, args) {
 		// Native WASM instructions
 		const unaryOp = MATH_F64_UNARY[name];

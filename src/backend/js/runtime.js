@@ -947,8 +947,6 @@ export const HELPER_ERROR = `var __error = __error || function(msg, cause) {
 export const HELPER_STRCONV_ERROR = `var __strconv_err_syntax = __strconv_err_syntax || __error("invalid syntax");
 var __strconv_err_range = __strconv_err_range || __error("value out of range");`;
 
-export const HELPER_PATH_ERROR = `var __path_err_bad_pattern = __path_err_bad_pattern || __error("syntax error in pattern");`;
-
 export const HELPER_IO_EOF = `var __io_eof = __io_eof || __error("EOF");`;
 
 export const HELPER_OS = `var __os_buf = "";
@@ -1100,108 +1098,6 @@ var __strconv_format_float = __strconv_format_float || function(f, fmtc, prec) {
     return c === "G" ? r.toUpperCase() : r;
   }
   return String(f);
-};`;
-
-export const HELPER_PATH_CLEAN = `var __pathClean = __pathClean || function(p) {
-  if (!p) return ".";
-  const abs = p.startsWith("/");
-  const parts = p.split("/").reduce((acc, s) => {
-    if (s === "" || s === ".") return acc;
-    if (s === "..") {
-      if (acc.length && acc[acc.length - 1] !== "..") acc.pop();
-      else if (!abs) acc.push("..");
-    } else acc.push(s);
-    return acc;
-  }, []);
-  return (abs ? "/" : "") + (parts.join("/") || ".");
-};
-var __pathMatch = __pathMatch || function(pat, name) {
-  let rx = "^";
-  let hasErr = false;
-  let i = 0;
-  while (i < pat.length) {
-    const c = pat[i];
-    if (c === "\\\\") {
-      if (i + 1 >= pat.length) { hasErr = true; break; }
-      const next = pat[++i];
-      if (/[.^$*+?()|{}\\[\\]\\\\]/.test(next)) rx += "\\\\" + next;
-      else rx += next;
-      i++;
-    } else if (c === "*") {
-      rx += "[^/]*";
-      i++;
-    } else if (c === "?") {
-      rx += "[^/]";
-      i++;
-    } else if (c === "[") {
-      i++;
-      let negated = false;
-      if (i < pat.length && pat[i] === "^") {
-        negated = true;
-        i++;
-      }
-      if (i >= pat.length || pat[i] === "]") {
-        return [false, true];
-      }
-      let classContent = "";
-      let closed = false;
-      while (i < pat.length) {
-        let ch = pat[i];
-        if (ch === "]") {
-          closed = true;
-          i++;
-          break;
-        }
-        if (ch === "\\\\") {
-          if (i + 1 >= pat.length) { hasErr = true; break; }
-          ch = pat[++i];
-        }
-        if (ch === "/") {
-          return [false, true];
-        }
-        i++;
-        if (i + 1 < pat.length && pat[i] === "-" && pat[i + 1] !== "]") {
-          i++;
-          let end = pat[i];
-          if (end === "\\\\") {
-            if (i + 1 >= pat.length) { hasErr = true; break; }
-            end = pat[++i];
-          }
-          if (end === "/") return [false, true];
-          i++;
-          if (ch.charCodeAt(0) > end.charCodeAt(0)) return [false, true];
-          if (ch.charCodeAt(0) <= 47 && 47 <= end.charCodeAt(0)) return [false, true];
-          const isSpec = (c) => c === "-" || c === "^" || c === "\\\\" || c === "[" || c === "]";
-          const escCh = isSpec(ch) ? "\\\\" + ch : ch;
-          const escEnd = isSpec(end) ? "\\\\" + end : end;
-          classContent += escCh + "-" + escEnd;
-        } else {
-          const isSpec = (c) => c === "-" || c === "^" || c === "\\\\" || c === "[" || c === "]";
-          const escCh = isSpec(ch) ? "\\\\" + ch : ch;
-          classContent += escCh;
-        }
-      }
-      if (!closed || hasErr) return [false, true];
-      if (negated) {
-        rx += "[^/" + classContent + "]";
-      } else {
-        rx += "[" + classContent + "]";
-      }
-    } else if (/[.^$*+?()|{}\\[\\]\\\\]/.test(c)) {
-      rx += "\\\\" + c;
-      i++;
-    } else {
-      rx += c;
-      i++;
-    }
-  }
-  if (hasErr) return [false, true];
-  try {
-    const re = new RegExp(rx + "$");
-    return [re.test(name), false];
-  } catch (e) {
-    return [false, true];
-  }
 };`;
 
 export const HELPER_TIME_FMT = `var __timeLocalDt = __timeLocalDt || function(t) {

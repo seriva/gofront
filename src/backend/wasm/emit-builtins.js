@@ -1118,13 +1118,6 @@ export class BuiltinsEmitter {
 				}
 				this.emitBytesCall(func.field, args, targetWasmType);
 				return true;
-			case "path":
-			case "filepath":
-				this.emitPathCall(func.field, args);
-				return true;
-			case "html":
-				this.emitHtmlCall(func.field, args);
-				return true;
 			case "io":
 				this.emitIoCall(func.field, call, targetWasmType);
 				return true;

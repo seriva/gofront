@@ -376,7 +376,7 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
   - Test: `test/unit/stdlib/utf8.test.js` — invalid sequences, surrogates, `FullRune`, `DecodeLastRune`.
   - Done when: cases pass four ways and `unicode/utf8` has no typechecker table entry.
 
-- [ ] **Task 5.4 — `path` and `html` in Go**
+- [x] **Task 5.4 — `path` and `html` in Go**
   - Files: `stdlib/path/path.go`, `stdlib/html/html.go`, `src/typechecker/types.js` (`path/filepath` alias, `types.js:123`)
   - Removes: `src/backend/js/stdlib/{path,html}.js`, `path`/`html` emitters in `src/backend/wasm/stdlib/pure.js`, typings in `extended.js` (the alias at `extended.js:540` re-points to the Go `path`)
   - Do: `Join`, `Clean`, `Base`, `Dir`, `Ext`, `Split`, `IsAbs`, `Match`; `EscapeString`/`UnescapeString` with Go's entity subset documented in the file.

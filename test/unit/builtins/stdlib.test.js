@@ -1642,6 +1642,7 @@ section("html package");
 
 test("html.EscapeString", () => {
 	const { js, errors } = compile(`package main
+import "html"
 func main() {
 	console.log(html.EscapeString("<b>Hello & \\"World\\"</b>"))
 }`);
@@ -1651,6 +1652,7 @@ func main() {
 
 test("html.EscapeString plain string unchanged", () => {
 	const { js, errors } = compile(`package main
+import "html"
 func main() {
 	console.log(html.EscapeString("no special chars"))
 }`);
@@ -1660,6 +1662,7 @@ func main() {
 
 test("html.UnescapeString", () => {
 	const { js, errors } = compile(`package main
+import "html"
 func main() {
 	console.log(html.UnescapeString("&lt;b&gt;Hello &amp; &#34;World&#34;&lt;/b&gt;"))
 }`);
@@ -1669,6 +1672,7 @@ func main() {
 
 test("html.EscapeString escapes single quotes", () => {
 	const { js, errors } = compile(`package main
+import "html"
 func main() {
 	console.log(html.EscapeString("it's a test"))
 }`);
@@ -1678,6 +1682,7 @@ func main() {
 
 test("html.EscapeString empty string", () => {
 	const { js, errors } = compile(`package main
+import "html"
 func main() {
 	console.log(html.EscapeString("") == "")
 }`);
@@ -1687,6 +1692,7 @@ func main() {
 
 test("html.EscapeString roundtrip", () => {
 	const { js, errors } = compile(`package main
+import "html"
 func main() {
 	s := "<script>alert('xss')</script>"
 	console.log(html.UnescapeString(html.EscapeString(s)) == s)
@@ -2318,6 +2324,7 @@ section("path package");
 
 test("path.Base", () => {
 	const { js, errors } = compile(`package main
+import "path"
 func main() {
 	console.log(path.Base("/foo/bar/baz.txt"))
 	console.log(path.Base("/"))
@@ -2329,6 +2336,7 @@ func main() {
 
 test("path.Dir", () => {
 	const { js, errors } = compile(`package main
+import "path"
 func main() {
 	console.log(path.Dir("/foo/bar/baz.txt"))
 	console.log(path.Dir("/foo"))
@@ -2340,6 +2348,7 @@ func main() {
 
 test("path.Ext", () => {
 	const { js, errors } = compile(`package main
+import "path"
 func main() {
 	console.log(path.Ext("index.html"))
 	console.log(path.Ext("noext"))
@@ -2350,6 +2359,7 @@ func main() {
 
 test("path.Join", () => {
 	const { js, errors } = compile(`package main
+import "path"
 func main() {
 	console.log(path.Join("foo", "bar", "baz"))
 	console.log(path.Join("/foo", "bar"))
@@ -2361,6 +2371,7 @@ func main() {
 
 test("path.Clean", () => {
 	const { js, errors } = compile(`package main
+import "path"
 func main() {
 	console.log(path.Clean("foo//bar"))
 	console.log(path.Clean("./foo/./bar"))
@@ -2371,6 +2382,7 @@ func main() {
 
 test("path.IsAbs", () => {
 	const { js, errors } = compile(`package main
+import "path"
 func main() {
 	console.log(path.IsAbs("/foo/bar"))
 	console.log(path.IsAbs("foo/bar"))
@@ -2381,6 +2393,7 @@ func main() {
 
 test("path.Split", () => {
 	const { js, errors } = compile(`package main
+import "path"
 func main() {
 	dir, file := path.Split("/foo/bar/baz.txt")
 	console.log(dir)

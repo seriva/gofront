@@ -475,33 +475,6 @@ export function setupExtendedGlobals(globals, types) {
 		},
 	});
 
-	globals.define("path", {
-		kind: "namespace",
-		name: "path",
-		members: {
-			Base: { kind: "func", params: [STRING], returns: [STRING] },
-			Dir: { kind: "func", params: [STRING], returns: [STRING] },
-			Ext: { kind: "func", params: [STRING], returns: [STRING] },
-			Join: {
-				kind: "func",
-				params: [STRING],
-				returns: [STRING],
-				variadic: true,
-			},
-			Clean: { kind: "func", params: [STRING], returns: [STRING] },
-			IsAbs: { kind: "func", params: [STRING], returns: [BOOL] },
-			Split: { kind: "func", params: [STRING], returns: [STRING, STRING] },
-			Match: { kind: "func", params: [STRING, STRING], returns: [BOOL, ERROR] },
-			ErrBadPattern: ERROR,
-		},
-	});
-
-	globals.define("filepath", {
-		kind: "namespace",
-		name: "filepath",
-		members: globals.lookup("path").members,
-	});
-
 	const TIME_TIME = types.get("time.Time");
 	const TIME_DURATION = types.get("time.Duration");
 

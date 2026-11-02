@@ -867,15 +867,6 @@ export function setupCoreGlobals(globals, types) {
 		},
 	});
 
-	globals.define("html", {
-		kind: "namespace",
-		name: "html",
-		members: {
-			EscapeString: { kind: "func", params: [STRING], returns: [STRING] },
-			UnescapeString: { kind: "func", params: [STRING], returns: [STRING] },
-		},
-	});
-
 	const IO_WRITER = {
 		kind: "interface",
 		name: "io.Writer",

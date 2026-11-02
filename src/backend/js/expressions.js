@@ -279,12 +279,6 @@ const NS_CONSTANTS = {
 	bits: {
 		UintSize: "64",
 	},
-	path: {
-		ErrBadPattern: "__path_err_bad_pattern",
-	},
-	filepath: {
-		ErrBadPattern: "__path_err_bad_pattern",
-	},
 	io: {
 		EOF: "__io_eof",
 		Discard:
@@ -1131,8 +1125,6 @@ export const expressionGenMethods = {
 			if (nsConst !== undefined) {
 				if (expr.expr.name === "strconv") {
 					this.useHelper("strconvError");
-				} else if (expr.expr.name === "path" || expr.expr.name === "filepath") {
-					if (expr.field === "ErrBadPattern") this.useHelper("pathError");
 				} else if (expr.expr.name === "io" && expr.field === "EOF") {
 					this.useHelper("ioEOF");
 				} else if (expr.expr.name === "binary") {
