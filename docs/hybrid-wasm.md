@@ -131,10 +131,10 @@ Packages that `wasm` and `both` packages can import (JS-only packages such as `r
 | `bytes` | js, wasm, both | Buffer, Reader and the search/split/trim helpers |
 | `cmp` | js, wasm, both | `Ordered`, `Compare`, `Less`, `Or` |
 | `crypto/rand` | js, wasm, both | `Read`, `Reader` |
-| `crypto/sha256` | js, wasm, both | `Sum256`, `New` |
-| `encoding/base64` | js, wasm, both | Std, URL and Raw encodings |
-| `encoding/binary` | js, wasm, both | `BigEndian` and `LittleEndian` byte-order accessors, `Read`, `Write`, `Size`, `Append*`; no varints |
-| `encoding/hex` | js, wasm, both | `EncodeToString`, `DecodeString`, `Encode`, `Decode`, `EncodedLen`, `DecodedLen` |
+| `crypto/sha256` | js, wasm, both | `Sum256`, `Sum224`, `New`, `New224`, `Size`, `Size224`, `BlockSize` |
+| `encoding/base64` | js, wasm, both | Std, URL and Raw encodings, `NewEncoding`, `WithPadding`, `Encode*`, `Decode*`, `Append*` |
+| `encoding/binary` | js, wasm, both | `BigEndian` and `LittleEndian` (`ByteOrder`, `AppendByteOrder`), varints, `Read`, `Write`, `Size` |
+| `encoding/hex` | js, wasm, both | `EncodeToString`, `DecodeString`, `Encode`, `Decode`, `Append*`, `EncodedLen`, `DecodedLen`, `ErrLength`, `InvalidByteError` |
 | `encoding/json` | js, wasm, both | Struct tags, `Marshal`, `Unmarshal`, `Decoder`, `Encoder` |
 | `errors` | js, wasm, both | `New`, `Is`, `As`, `Unwrap`, `Join` |
 | `fmt` | js, wasm, both | Print, Sprint, Fprint, Errorf, Append, `Sscan*` |
@@ -165,8 +165,8 @@ Notable members per package:
 - `path`, `path/filepath`, `html` (`EscapeString`, `UnescapeString`)
 - `time` (`Duration` with `.Truncate()`, `.Round()`, `.Abs()`, `ParseDuration`; `Time` with calendar arithmetic, `.Compare()`, `FixedZone`, `Date`, `Parse`, `Unix`, `UnixMilli`, `UnixNano`; `time.Sleep` stays JS-only)
 - `sync` (`Mutex`, `RWMutex`, `Once`, `WaitGroup`, `OnceFunc`, `OnceValue`, `OnceValues`)
-- `hash` (`Hash`, `Hash32`, `Hash64`), `crypto/rand` (`Reader`, `Read`), `crypto/sha256`
-- `encoding/binary` (`LittleEndian`, `BigEndian`, `Read`, `Write`, `Append*`, `Size`; no varints), `encoding/hex`, `encoding/base64`
+- `hash` (`Hash`, `Hash32`, `Hash64`), `crypto/rand` (`Reader`, `Read`), `crypto/sha256` (`Sum256`, `Sum224`, `New`, `New224`)
+- `encoding/binary` (`LittleEndian`, `BigEndian`, varints, `Read`, `Write`, `Size`), `encoding/hex`, `encoding/base64`
 - `encoding/json` (`Marshal`, `MarshalIndent`, `Unmarshal`, `Valid`, `RawMessage`, `Number`, `Encoder`, `Decoder`, `Compact`, `Indent`, `HTMLEscape`; the codecs are generated Go linked into `app.wasm`)
 - `testing` (`T`, `B`, `M`, `TB`, `Run`, `Cleanup`, `Setenv`), `gofront/shared`, and `gofront/simd` (experimental).
 

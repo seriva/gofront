@@ -123,7 +123,6 @@ function lookupMethod(type, name) {
 export const jsonMethods = {
 	_genJson(fn, a, expr) {
 		this.useHelper("json");
-		this.useHelper("base64");
 		this.useHelper("error");
 		this._markJsonPtrRecvMarshalers();
 		const args = a();

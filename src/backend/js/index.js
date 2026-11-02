@@ -34,7 +34,6 @@ import {
 import { comparesToNil, expressionGenMethods } from "./expressions.js";
 import {
 	HELPER_APPEND,
-	HELPER_BASE64,
 	HELPER_BINARY,
 	HELPER_BOUNDS,
 	HELPER_CDIV,
@@ -46,7 +45,6 @@ import {
 	HELPER_ERROR_AS,
 	HELPER_GENERICS,
 	HELPER_GEQ,
-	HELPER_HEX,
 	HELPER_IFACE_BOX,
 	HELPER_IFD,
 	HELPER_IFEQ,
@@ -62,7 +60,6 @@ import {
 	HELPER_PTREQ,
 	HELPER_S,
 	HELPER_SCLONE,
-	HELPER_SHA256,
 	HELPER_SHIFT,
 	HELPER_SIMD,
 	HELPER_SLICE,
@@ -176,10 +173,7 @@ const HELPER_MAP = [
 	["testing", HELPER_TESTING],
 	["sync", HELPER_SYNC],
 	["cryptoRand", HELPER_CRYPTO_RAND],
-	["sha256", HELPER_SHA256],
 	["binary", HELPER_BINARY],
-	["hex", HELPER_HEX],
-	["base64", HELPER_BASE64],
 	["json", HELPER_JSON],
 	["simd", HELPER_SIMD],
 ];
@@ -560,17 +554,8 @@ export class CodeGen {
 		this._helpers.add(name);
 		if (name === "ifeq" || name === "geq") this._helpers.add("equal");
 		if (name === "geq") this._helpers.add("ifeq");
-		if (
-			name === "strconvError" ||
-			name === "ioEOF" ||
-			name === "base64" ||
-			name === "hex" ||
-			name === "json"
-		) {
+		if (name === "strconvError" || name === "ioEOF" || name === "json") {
 			this._helpers.add("error");
-		}
-		if (name === "json") {
-			this.useHelper("base64");
 		}
 		if (name === "os") {
 			this.useHelper("ioEOF");

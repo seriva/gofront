@@ -1853,183 +1853,7 @@ var __crypto_rand_reader = __crypto_rand_reader || {
   Read: function(b) { return __crypto_rand_read(b); }
 };`;
 
-export const HELPER_SHA256 = `var __sha256 = __sha256 || (function() {
-  const K = [
-    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
-  ];
-  function rotr(x, n) { return (x >>> n) | (x << (32 - n)); }
-  function block(H, M) {
-    const W = new Int32Array(64);
-    for (let i = 0; i < 16; i++) {
-      W[i] = (M[i * 4] << 24) | (M[i * 4 + 1] << 16) | (M[i * 4 + 2] << 8) | M[i * 4 + 3];
-    }
-    for (let i = 16; i < 64; i++) {
-      const s0 = rotr(W[i - 15], 7) ^ rotr(W[i - 15], 18) ^ (W[i - 15] >>> 3);
-      const s1 = rotr(W[i - 2], 17) ^ rotr(W[i - 2], 19) ^ (W[i - 2] >>> 10);
-      W[i] = (W[i - 16] + s0 + W[i - 7] + s1) | 0;
-    }
-    let [a, b, c, d, e, f, g, h] = H;
-    for (let i = 0; i < 64; i++) {
-      const S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
-      const ch = (e & f) ^ (~e & g);
-      const t1 = (h + S1 + ch + K[i] + W[i]) | 0;
-      const S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
-      const maj = (a & b) ^ (a & c) ^ (b & c);
-      const t2 = (S0 + maj) | 0;
-      h = g; g = f; f = e; e = (d + t1) | 0;
-      d = c; c = b; b = a; a = (t1 + t2) | 0;
-    }
-    H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0;
-    H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
-  }
-  function digest(bytes) {
-    const H = new Int32Array([
-      0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-      0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
-    ]);
-    const len = bytes ? bytes.length : 0;
-    const padLen = (len % 64 < 56) ? (56 - (len % 64)) : (120 - (len % 64));
-    const total = len + padLen + 8;
-    const buf = new Uint8Array(total);
-    if (bytes) {
-      if (ArrayBuffer.isView(bytes)) buf.set(bytes);
-      else for (let i = 0; i < len; i++) buf[i] = bytes[i];
-    }
-    buf[len] = 0x80;
-    const bits = BigInt(len) * 8n;
-    for (let i = 0; i < 8; i++) {
-      buf[total - 1 - i] = Number((bits >> BigInt(i * 8)) & 0xffn);
-    }
-    for (let i = 0; i < total; i += 64) {
-      block(H, buf.subarray(i, i + 64));
-    }
-    const out = new Uint8Array(32);
-    for (let i = 0; i < 8; i++) {
-      out[i * 4] = (H[i] >>> 24) & 0xff;
-      out[i * 4 + 1] = (H[i] >>> 16) & 0xff;
-      out[i * 4 + 2] = (H[i] >>> 8) & 0xff;
-      out[i * 4 + 3] = H[i] & 0xff;
-    }
-    return out;
-  }
-  class Hash {
-    constructor() { this.Reset(); }
-    Reset() { this.buf = []; }
-    Write(p) {
-      if (p) {
-        for (let i = 0; i < p.length; i++) this.buf.push(p[i]);
-      }
-      return [p ? p.length : 0, null];
-    }
-    Sum(b) {
-      const d = digest(this.buf);
-      if (!b || b.length === 0) return d;
-      const res = new Uint8Array(b.length + d.length);
-      res.set(b, 0);
-      res.set(d, b.length);
-      return res;
-    }
-    Size() { return 32; }
-    BlockSize() { return 64; }
-  }
-  return {
-    Sum256: digest,
-    New: () => new Hash()
-  };
-})();`;
-
-export const HELPER_BINARY = `var __binary_le = __binary_le || {
-  Uint16: function(b) { return (b[0] | (b[1] << 8)) & 0xffff; },
-  Uint32: function(b) { return ((b[0] | (b[1] << 8) | (b[2] << 16) | (b[3] << 24)) >>> 0); },
-  Uint64: function(b) {
-    const lo = BigInt((b[0] | (b[1] << 8) | (b[2] << 16) | (b[3] << 24)) >>> 0);
-    const hi = BigInt((b[4] | (b[5] << 8) | (b[6] << 16) | (b[7] << 24)) >>> 0);
-    return (lo | (hi << 32n));
-  },
-  PutUint16: function(b, v) { b[0] = v & 0xff; b[1] = (v >> 8) & 0xff; },
-  PutUint32: function(b, v) { b[0] = v & 0xff; b[1] = (v >> 8) & 0xff; b[2] = (v >> 16) & 0xff; b[3] = (v >>> 24) & 0xff; },
-  PutUint64: function(b, v) {
-    const bv = BigInt(v);
-    for (let i = 0n; i < 8n; i++) b[Number(i)] = Number((bv >> (i * 8n)) & 0xffn);
-  },
-  AppendUint16: function(b, v) {
-    const len = b ? b.length : 0;
-    const res = new Uint8Array(len + 2);
-    if (len > 0) res.set(b, 0);
-    res[len] = v & 0xff;
-    res[len + 1] = (v >> 8) & 0xff;
-    return res;
-  },
-  AppendUint32: function(b, v) {
-    const len = b ? b.length : 0;
-    const res = new Uint8Array(len + 4);
-    if (len > 0) res.set(b, 0);
-    res[len] = v & 0xff;
-    res[len + 1] = (v >> 8) & 0xff;
-    res[len + 2] = (v >> 16) & 0xff;
-    res[len + 3] = (v >>> 24) & 0xff;
-    return res;
-  },
-  AppendUint64: function(b, v) {
-    const len = b ? b.length : 0;
-    const res = new Uint8Array(len + 8);
-    if (len > 0) res.set(b, 0);
-    const bv = BigInt(v);
-    for (let i = 0n; i < 8n; i++) res[len + Number(i)] = Number((bv >> (i * 8n)) & 0xffn);
-    return res;
-  },
-  String: function() { return "LittleEndian"; }
-};
-var __binary_be = __binary_be || {
-  Uint16: function(b) { return ((b[0] << 8) | b[1]) & 0xffff; },
-  Uint32: function(b) { return (((b[0] << 24) | (b[1] << 16) | (b[2] << 8) | b[3]) >>> 0); },
-  Uint64: function(b) {
-    const hi = BigInt(((b[0] << 24) | (b[1] << 16) | (b[2] << 8) | b[3]) >>> 0);
-    const lo = BigInt(((b[4] << 24) | (b[5] << 16) | (b[6] << 8) | b[7]) >>> 0);
-    return ((hi << 32n) | lo);
-  },
-  PutUint16: function(b, v) { b[0] = (v >> 8) & 0xff; b[1] = v & 0xff; },
-  PutUint32: function(b, v) { b[0] = (v >>> 24) & 0xff; b[1] = (v >> 16) & 0xff; b[2] = (v >> 8) & 0xff; b[3] = v & 0xff; },
-  PutUint64: function(b, v) {
-    const bv = BigInt(v);
-    for (let i = 0n; i < 8n; i++) b[Number(7n - i)] = Number((bv >> (i * 8n)) & 0xffn);
-  },
-  AppendUint16: function(b, v) {
-    const len = b ? b.length : 0;
-    const res = new Uint8Array(len + 2);
-    if (len > 0) res.set(b, 0);
-    res[len] = (v >> 8) & 0xff;
-    res[len + 1] = v & 0xff;
-    return res;
-  },
-  AppendUint32: function(b, v) {
-    const len = b ? b.length : 0;
-    const res = new Uint8Array(len + 4);
-    if (len > 0) res.set(b, 0);
-    res[len] = (v >>> 24) & 0xff;
-    res[len + 1] = (v >> 16) & 0xff;
-    res[len + 2] = (v >> 8) & 0xff;
-    res[len + 3] = v & 0xff;
-    return res;
-  },
-  AppendUint64: function(b, v) {
-    const len = b ? b.length : 0;
-    const res = new Uint8Array(len + 8);
-    if (len > 0) res.set(b, 0);
-    const bv = BigInt(v);
-    for (let i = 0n; i < 8n; i++) res[len + Number(i)] = Number((bv >> ((7n - i) * 8n)) & 0xffn);
-    return res;
-  },
-  String: function() { return "BigEndian"; }
-};
-var __binary_size = __binary_size || function(v) {
+export const HELPER_BINARY = `var __binary_size = __binary_size || function(v) {
   if (typeof v === "number" || typeof v === "bigint") return 8;
   if (Array.isArray(v) || ArrayBuffer.isView(v)) return v.length;
   if (v && typeof v === "object") {
@@ -2082,9 +1906,9 @@ var __binary_read = __binary_read || function(r, order, data, sz, typeTag) {
     else if (typeTag === "int64") target.value = Number(view.getBigInt64(0, isLe));
     else if (typeTag === "uint64") target.value = Number(view.getBigUint64(0, isLe));
     else if (s === 1) target.value = buf[0];
-    else if (s === 2) target.value = order.Uint16(buf);
-    else if (s === 4) target.value = order.Uint32(buf);
-    else if (s === 8) target.value = order.Uint64(buf);
+    else if (s === 2) target.value = view.getUint16(0, isLe);
+    else if (s === 4) target.value = view.getUint32(0, isLe);
+    else if (s === 8) target.value = view.getBigUint64(0, isLe);
     return null;
   }
   if (Array.isArray(data) || ArrayBuffer.isView(data)) {
@@ -2125,9 +1949,9 @@ var __binary_write = __binary_write || function(w, order, data, sz, typeTag) {
     if (typeTag === "float32") view.setFloat32(0, Number(v), isLe);
     else if (typeTag === "float64") view.setFloat64(0, Number(v), isLe);
     else if (s === 1) buf[0] = Number(v) & 0xff;
-    else if (s === 2) order.PutUint16(buf, Number(v));
-    else if (s === 4) order.PutUint32(buf, Number(v));
-    else order.PutUint64(buf, v);
+    else if (s === 2) view.setUint16(0, Number(v), isLe);
+    else if (s === 4) view.setUint32(0, Number(v), isLe);
+    else view.setBigUint64(0, BigInt.asUintN(64, BigInt(v)), isLe);
     const [, err] = writeChunk(buf);
     return err;
   }
@@ -2137,117 +1961,6 @@ var __binary_write = __binary_write || function(w, order, data, sz, typeTag) {
   }
   return __error("binary.Write: unsupported type");
 };`;
-
-export const HELPER_HEX = `var __hex_encode_to_string = __hex_encode_to_string || function(src) {
-  if (!src || src.length === 0) return "";
-  let s = "";
-  for (let i = 0; i < src.length; i++) s += src[i].toString(16).padStart(2, "0");
-  return s;
-};
-var __hex_decode_string = __hex_decode_string || function(s) {
-  if (s.length % 2 !== 0) return [new Uint8Array(0), __error("encoding/hex: odd length hex string")];
-  const out = new Uint8Array(s.length / 2);
-  for (let i = 0; i < s.length; i += 2) {
-    const pair = s.slice(i, i + 2);
-    if (!/^[0-9a-fA-F]{2}$/.test(pair)) {
-      return [out.subarray(0, i / 2), __error("encoding/hex: invalid byte: " + pair)];
-    }
-    out[i / 2] = parseInt(pair, 16);
-  }
-  return [out, null];
-};
-var __hex_encode = __hex_encode || function(dst, src) {
-  const hex = __hex_encode_to_string(src);
-  for (let i = 0; i < hex.length; i++) dst[i] = hex.charCodeAt(i);
-  return hex.length;
-};
-var __hex_decode = __hex_decode || function(dst, src) {
-  const str = typeof src === "string" ? src : (src instanceof Uint8Array ? new TextDecoder().decode(src) : String.fromCharCode(...src));
-  const [res, err] = __hex_decode_string(str);
-  for (let i = 0; i < res.length; i++) dst[i] = res[i];
-  return [res.length, err];
-};`;
-
-export const HELPER_BASE64 = `var __base64_make = __base64_make || function(alphabet, padChar) {
-  const encMap = alphabet.split("");
-  const decMap = {};
-  for (let i = 0; i < 64; i++) decMap[alphabet[i]] = i;
-  return {
-    EncodeToString: function(src) {
-      if (!src || src.length === 0) return "";
-      let res = "";
-      let i = 0;
-      for (; i + 2 < src.length; i += 3) {
-        const n = (src[i] << 16) | (src[i + 1] << 8) | src[i + 2];
-        res += encMap[(n >> 18) & 63] + encMap[(n >> 12) & 63] + encMap[(n >> 6) & 63] + encMap[n & 63];
-      }
-      if (i < src.length) {
-        if (src.length - i === 1) {
-          const n = src[i] << 16;
-          res += encMap[(n >> 18) & 63] + encMap[(n >> 12) & 63];
-          if (padChar) res += padChar + padChar;
-        } else {
-          const n = (src[i] << 16) | (src[i + 1] << 8);
-          res += encMap[(n >> 18) & 63] + encMap[(n >> 12) & 63] + encMap[(n >> 6) & 63];
-          if (padChar) res += padChar;
-        }
-      }
-      return res;
-    },
-    DecodeString: function(s) {
-      let str = s.replace(/\\s+/g, "");
-      if (padChar) {
-        if (str.length % 4 !== 0) return [new Uint8Array(0), __error("illegal base64 data at input byte " + str.length)];
-        if (str.endsWith(padChar + padChar)) {
-          if (str.endsWith(padChar + padChar + padChar)) return [new Uint8Array(0), __error("illegal base64 data at input byte " + (str.length - 3))];
-          str = str.slice(0, -2);
-          if (str.length % 4 !== 2) return [new Uint8Array(0), __error("illegal base64 data at input byte " + str.length)];
-        } else if (str.endsWith(padChar)) {
-          str = str.slice(0, -1);
-          if (str.length % 4 !== 3) return [new Uint8Array(0), __error("illegal base64 data at input byte " + str.length)];
-        }
-      }
-      const out = [];
-      let i = 0;
-      for (; i + 3 < str.length; i += 4) {
-        const c0 = decMap[str[i]], c1 = decMap[str[i+1]], c2 = decMap[str[i+2]], c3 = decMap[str[i+3]];
-        if (c0 === undefined || c1 === undefined || c2 === undefined || c3 === undefined) return [new Uint8Array(out), __error("illegal base64 data at input byte " + i)];
-        const n = (c0 << 18) | (c1 << 12) | (c2 << 6) | c3;
-        out.push((n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff);
-      }
-      const rem = str.length - i;
-      if (rem === 2) {
-        const c0 = decMap[str[i]], c1 = decMap[str[i+1]];
-        if (c0 === undefined || c1 === undefined) return [new Uint8Array(out), __error("illegal base64 data at input byte " + i)];
-        out.push((c0 << 2) | (c1 >> 4));
-      } else if (rem === 3) {
-        const c0 = decMap[str[i]], c1 = decMap[str[i+1]], c2 = decMap[str[i+2]];
-        if (c0 === undefined || c1 === undefined || c2 === undefined) return [new Uint8Array(out), __error("illegal base64 data at input byte " + i)];
-        out.push((c0 << 2) | (c1 >> 4), ((c1 & 15) << 4) | (c2 >> 2));
-      } else if (rem === 1) {
-        return [new Uint8Array(out), __error("illegal base64 data at input byte " + i)];
-      }
-      return [new Uint8Array(out), null];
-    },
-    Encode: function(dst, src) {
-      const s = this.EncodeToString(src);
-      for (let i = 0; i < s.length; i++) dst[i] = s.charCodeAt(i);
-    },
-    Decode: function(dst, src) {
-      const str = String.fromCharCode(...src);
-      const [res, err] = this.DecodeString(str);
-      for (let i = 0; i < res.length; i++) dst[i] = res[i];
-      return [res.length, err];
-    },
-    EncodedLen: function(n) { return padChar ? Math.ceil(n / 3) * 4 : Math.floor((n * 8 + 5) / 6); },
-    DecodedLen: function(n) { return padChar ? Math.floor(n * 3 / 4) : Math.floor(n * 6 / 8); },
-    WithPadding: function(p) { return __base64_make(alphabet, p === -1 ? "" : String.fromCharCode(p)); }
-  };
-};
-var __base64_std = __base64_std || __base64_make("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/", "=");
-var __base64_url = __base64_url || __base64_make("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_", "=");
-var __base64_raw_std = __base64_raw_std || __base64_make("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/", "");
-var __base64_raw_url = __base64_raw_url || __base64_make("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_", "");`;
 
 export const HELPER_JSON = `var __json_esc = __json_esc || function(s) {
   if (typeof s !== "string") s = String(s);
@@ -2644,20 +2357,12 @@ var __json_int_decode = __json_int_decode || function(v, typeName, ctxType, raw)
 };
 var __json_b64 = __json_b64 || function(u8) {
   if (u8 === null || u8 === undefined) return "null";
-  if (typeof __base64_std !== "undefined") return '"' + __base64_std.EncodeToString(u8) + '"';
-  var bstr = "";
-  for (var i = 0; i < u8.length; i++) bstr += String.fromCharCode(u8[i]);
-  return '"' + (typeof btoa !== "undefined" ? btoa(bstr) : Buffer.from(u8).toString("base64")) + '"';
+  return '"' + EncodeBytes$$internal$jsonrt(u8) + '"';
 };
 var __json_b64_dec = __json_b64_dec || function(str) {
-  if (typeof __base64_std !== "undefined") {
-    var res = __base64_std.DecodeString(str);
-    if (!res[1]) return res[0];
-  }
-  var bin = typeof atob !== "undefined" ? atob(str) : Buffer.from(str, "base64").toString("binary");
-  var u8 = new Uint8Array(bin.length);
-  for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
-  return u8;
+  var res = DecodeBytes$$internal$jsonrt(str);
+  if (res[1]) return { _msg: res[1].Error(), __userErr: res[1] };
+  return res[0];
 };
 var __json_is_zero = __json_is_zero || function(val, isStruct, isMap) {
   if (isStruct) return false;

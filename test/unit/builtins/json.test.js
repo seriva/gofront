@@ -568,6 +568,59 @@ func main() {
 	assertEqual(runJs(js), "hello");
 });
 
+test("[]byte decodes Go's base64 error instead of throwing on invalid input", async () => {
+	await assertProgramOutput(
+		`package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type Payload struct {
+	B []byte \`json:"b"\`
+}
+
+func main() {
+	var b []byte
+	fmt.Println(json.Unmarshal([]byte("\\"!!\\""), &b))
+	fmt.Println(json.Unmarshal([]byte("\\"aGVsbG8=\\""), &b), string(b))
+	var p Payload
+	fmt.Println(json.Unmarshal([]byte("{\\"b\\":\\"aGk\\"}"), &p))
+	fmt.Println(json.Unmarshal([]byte("{\\"b\\":\\"aGk=\\"}"), &p), string(p.B))
+	out, err := json.Marshal(Payload{B: []byte("hi?")})
+	fmt.Println(string(out), err)
+}
+`,
+		`illegal base64 data at input byte 0
+<nil> hello
+illegal base64 data at input byte 0
+<nil> hi
+{"b":"aGk/"} <nil>
+`,
+	);
+});
+
+test("[]byte in a js package reports Go's base64 error and round-trips", () => {
+	const { js, errors } = compile(`package main
+import (
+	"encoding/json"
+	"fmt"
+)
+func main() {
+	var b []byte
+	fmt.Println(json.Unmarshal([]byte("\\"!!\\""), &b))
+	fmt.Println(json.Unmarshal([]byte("\\"aGVsbG8=\\""), &b), string(b))
+	out, _ := json.Marshal(b)
+	fmt.Println(string(out))
+}`);
+	assertEqual(errors.length, 0);
+	assertEqual(
+		runJs(js).trim(),
+		'illegal base64 data at input byte 0\n<nil> hello\n"aGVsbG8="',
+	);
+});
+
 test("Probe 11: Defined string types type MyString string in []byte(s)", () => {
 	const { js, errors } = compile(`package main
 type MyString string

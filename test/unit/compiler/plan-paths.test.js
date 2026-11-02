@@ -31,8 +31,6 @@ const PLANS = [
 			"test/unit/stdlib/*",
 			// The Go files each migration task adds under stdlib/.  Files that
 			// exist today (for example stdlib/sort/sort.go) are not listed.
-			"stdlib/crypto/sha256/sha256.go",
-			"stdlib/encoding/{base64/base64,binary/binary,hex/hex}.go",
 			"stdlib/sync/sync.go",
 			"stdlib/math/{bits/bits,rand/rand}.go",
 			"stdlib/strconv/{float,strconv}.go",
@@ -51,6 +49,7 @@ const PLANS = [
 			"src/backend/{js,wasm}/stdlib/bytes.js",
 			"src/backend/js/stdlib/strings.js",
 			"stdlib/strings/{extra,iter}.go",
+			"src/backend/js/stdlib/{base64,hex,sha256}.js",
 		],
 	},
 ];
