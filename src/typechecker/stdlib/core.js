@@ -168,13 +168,6 @@ TIME_T.underlying.methods = new Map([
 	],
 ]);
 TIME_T.methods = TIME_T.underlying.methods;
-const BUFFER_T = {
-	kind: "named",
-	name: "bytes.Buffer",
-	underlying: { kind: "struct" },
-};
-const BUFFER_PTR_T = { kind: "pointer", base: BUFFER_T };
-
 export function setupCoreGlobals(globals, types) {
 	for (const g of BROWSER_GLOBALS) globals.define(g, ANY);
 
@@ -370,23 +363,6 @@ export function setupCoreGlobals(globals, types) {
 	});
 
 	const BYTE_SLICE = { kind: "slice", elem: UINT8 };
-	globals.define("bytes", {
-		kind: "namespace",
-		name: "bytes",
-		members: {
-			NewBuffer: {
-				kind: "func",
-				params: [BYTE_SLICE],
-				returns: [BUFFER_PTR_T],
-			},
-			NewBufferString: {
-				kind: "func",
-				params: [STRING],
-				returns: [BUFFER_PTR_T],
-			},
-			Buffer: BUFFER_T,
-		},
-	});
 
 	globals.define("strconv", {
 		kind: "namespace",

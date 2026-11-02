@@ -300,32 +300,6 @@ export const HELPER_IFACE_BOX = `var __ifv = __ifv || function(x, ptrFields) {
   }
   return c;
 };
-var __buffer_proto = __buffer_proto || {
-  Write(d) {
-    this._lastOp = 0;
-    for (let i = 0; i < d.length; i++) this._buf.push(d[i]);
-    return [d.length, null];
-  },
-  WriteString(s) {
-    this._lastOp = 0;
-    const bytes = new TextEncoder().encode(s);
-    for (let i = 0; i < bytes.length; i++) this._buf.push(bytes[i]);
-    return [bytes.length, null];
-  },
-  Read(p) {
-    if (!this._buf || this._buf.length === 0) return [0, typeof __io_eof !== "undefined" ? __io_eof : "EOF"];
-    const n = Math.min(p.length, this._buf.length);
-    for (let i = 0; i < n; i++) p[i] = this._buf.shift();
-    if (n > 0) { this._lastOp = 1; this._lastByte = p[n - 1]; } else { this._lastOp = 0; }
-    return [n, null];
-  },
-  String() {
-    return new TextDecoder().decode(new Uint8Array(this._buf));
-  },
-  Reset() {
-    this._buf = [];
-  }
-};
 var __builder_proto = __builder_proto || {
   Write(d) {
     this._buf += new TextDecoder().decode(new Uint8Array(d));
@@ -344,8 +318,7 @@ var __builder_proto = __builder_proto || {
 };
 var __ifp = __ifp || function(x, ptrFields, seen) {
   if (x === null || typeof x !== "object") return x;
-  if (Array.isArray(x._buf) && typeof x.Write !== "function") Object.assign(x, __buffer_proto);
-  else if (typeof x._buf === "string" && typeof x.WriteString !== "function") Object.assign(x, __builder_proto);
+  if (typeof x._buf === "string" && typeof x.WriteString !== "function") Object.assign(x, __builder_proto);
   if (x.__p !== true && Object.isExtensible(x))
     Object.defineProperty(x, "__p", { value: true, configurable: true, writable: true });
   if (Array.isArray(ptrFields)) {

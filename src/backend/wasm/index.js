@@ -1136,7 +1136,6 @@ function _collectInterfaceDispatchers(progs, funcDecls, mod, checker) {
 function _registerIoSyntheticMethods(funcDecls, mod, strType, programs) {
 	const progs = Array.isArray(programs) ? programs : [programs];
 	const hasStrings = importsAnyOf(progs, ["strings"]);
-	const hasBytes = importsAnyOf(progs, ["bytes"]);
 
 	const BYTE_SLICE_T = {
 		kind: "slice",
@@ -1188,56 +1187,6 @@ function _registerIoSyntheticMethods(funcDecls, mod, strType, programs) {
 					_isMethod: true,
 					_recvTypeName: "strings.Builder",
 					_methodName: "WriteString",
-				},
-			),
-		);
-	}
-	if (hasBytes && mod.structTypes.has("bytes.Buffer")) {
-		const bPtr = {
-			kind: "pointer",
-			base: { kind: "named", name: "bytes.Buffer" },
-		};
-		funcDecls.push(
-			ioHelper(
-				"bytes.Buffer.Write",
-				[
-					{ name: "b", type: bPtr },
-					{ name: "p", type: BYTE_SLICE_T },
-				],
-				INT_ERR_RET,
-				"buffer_write",
-				{
-					_isMethod: true,
-					_recvTypeName: "bytes.Buffer",
-					_methodName: "Write",
-				},
-			),
-			ioHelper(
-				"bytes.Buffer.WriteString",
-				[
-					{ name: "b", type: bPtr },
-					{ name: "s", type: strType },
-				],
-				INT_ERR_RET,
-				"buffer_write_string",
-				{
-					_isMethod: true,
-					_recvTypeName: "bytes.Buffer",
-					_methodName: "WriteString",
-				},
-			),
-			ioHelper(
-				"bytes.Buffer.Read",
-				[
-					{ name: "b", type: bPtr },
-					{ name: "p", type: BYTE_SLICE_T },
-				],
-				INT_ERR_RET,
-				"buffer_read",
-				{
-					_isMethod: true,
-					_recvTypeName: "bytes.Buffer",
-					_methodName: "Read",
 				},
 			),
 		);

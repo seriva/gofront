@@ -147,7 +147,6 @@ function collectFunctionLabels(node, labels = new Set()) {
 const NAMED_ZERO_TABLE = {
 	"time.Time": [null, "{ _d: new Date(0), _isZero: true }"],
 	"strings.Builder": [null, '{ _buf: "" }'],
-	"bytes.Buffer": [null, "{ _buf: [] }"],
 	"sync.Mutex": ["sync", "__sync_mutex()"],
 	"sync.RWMutex": ["sync", "__sync_rwmutex()"],
 	"sync.Once": ["sync", "__sync_once()"],
@@ -1840,7 +1839,7 @@ export const expressionGenMethods = {
 	_genReceiverTypeCall(recvName, expr) {
 		const jsonStream = this._genJsonStreamCall(recvName, expr);
 		if (jsonStream !== undefined) return jsonStream;
-		if (recvName === "strings.Builder" || recvName === "bytes.Buffer")
+		if (recvName === "strings.Builder")
 			return this._genBuilderCall(recvName, expr.func.field, expr);
 		if (recvName === "regexp.Regexp")
 			return this._genRegexpMethodCall(expr.func.field, expr);
@@ -2430,8 +2429,6 @@ export const expressionGenMethods = {
 		const t = expr.typeExpr;
 		if (t === null) return this._genImplicitCompositeLit(expr);
 		const typeName = this.getTypeName(t);
-		if (typeName === "bytes.Buffer" || typeName === "Buffer")
-			return "{ _buf: [] }";
 		if (typeName === "strings.Builder" || typeName === "Builder")
 			return '{ _buf: "" }';
 		if (typeName === "simd.Mask32x4" || typeName === "Mask32x4")

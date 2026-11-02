@@ -112,7 +112,6 @@ export const WASM_SUPPORTED_STDLIB = new Set([
 	"errors",
 	"fmt",
 	"strings",
-	"bytes",
 	"strconv",
 	"unicode",
 	"time",
@@ -418,7 +417,6 @@ export const WASM_STDLIB_MEMBERS = new Map([
 			"Reader",
 		]),
 	],
-	["bytes", new Set(["Buffer", "NewBuffer", "NewBufferString"])],
 	[
 		"time",
 		new Set([

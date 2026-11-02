@@ -861,6 +861,7 @@ section("bytes.Buffer");
 
 test("bytes.Buffer: WriteString and String", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	var b bytes.Buffer
 	b.WriteString("hello")
@@ -873,6 +874,7 @@ func main() {
 
 test("bytes.Buffer: WriteByte", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	var b bytes.Buffer
 	b.WriteByte(72)
@@ -885,6 +887,7 @@ func main() {
 
 test("Write (byte slice)", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	var b bytes.Buffer
 	b.Write([]byte{71, 111})
@@ -896,6 +899,7 @@ func main() {
 
 test("Bytes", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	var b bytes.Buffer
 	b.WriteByte(1)
@@ -909,6 +913,7 @@ func main() {
 
 test("bytes.Buffer: Len", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	var b bytes.Buffer
 	b.WriteString("hello")
@@ -920,6 +925,7 @@ func main() {
 
 test("bytes.Buffer: Reset", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	var b bytes.Buffer
 	b.WriteString("old")
@@ -933,6 +939,7 @@ func main() {
 
 test("bytes.Buffer: Grow is a no-op", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	var b bytes.Buffer
 	b.WriteString("hello")
@@ -945,6 +952,7 @@ func main() {
 
 test("fmt.Fprintf writes to bytes.Buffer", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	var b bytes.Buffer
 	fmt.Fprintf(&b, "hello %s, you are %d", "world", 42)
@@ -989,6 +997,7 @@ func main() {
 
 test("fmt.Fprintln writes to bytes.Buffer", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	var b bytes.Buffer
 	fmt.Fprintln(&b, "ping")
@@ -1000,6 +1009,7 @@ func main() {
 
 test("fmt.Fprint writes to bytes.Buffer", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	var b bytes.Buffer
 	fmt.Fprint(&b, "a", "b", "c")

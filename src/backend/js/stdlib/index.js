@@ -5,7 +5,6 @@ import { base64Methods } from "./base64.js";
 import { binaryMethods } from "./binary.js";
 import { bitsMethods } from "./bits.js";
 import { builderMethods } from "./builder.js";
-import { bytesMethods } from "./bytes.js";
 import { errorsMethods } from "./errors.js";
 import { fmtMethods } from "./fmt.js";
 import { gomMethods } from "./gom.js";
@@ -32,7 +31,6 @@ import { unicodeMethods } from "./unicode.js";
 const STDLIB_METHOD_MAP = {
 	fmt: "_genFmt",
 	strings: "_genStrings",
-	bytes: "_genBytes",
 	strconv: "_genStrconv",
 	math: "_genMath",
 	bits: "_genBits",
@@ -93,7 +91,6 @@ const dispatchMethods = {
 export const stdlibGenMethods = {
 	...bitsMethods,
 	...builderMethods,
-	...bytesMethods,
 	...errorsMethods,
 	...fmtMethods,
 	...gomMethods,

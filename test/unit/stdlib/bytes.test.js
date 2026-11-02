@@ -167,3 +167,99 @@ true true true
 `,
 	);
 });
+
+test("Buffer reads, writes and unreads like Go", async () => {
+	await assertFourWay(
+		`package main
+
+import (
+	"bytes"
+	"fmt"
+	"io"
+	"strings"
+)
+
+func main() {
+	var b bytes.Buffer
+	n, _ := fmt.Fprint(&b, "héé")
+	fmt.Println(n, b.Len(), b.String())
+	b.WriteByte('!')
+	b.WriteRune('世')
+	b.WriteString("x")
+	b.Write([]byte("yz"))
+	fmt.Println(b.String(), b.Len())
+
+	p := make([]byte, 3)
+	k, err := b.Read(p)
+	fmt.Println(k, err, string(p))
+	r, sz, err := b.ReadRune()
+	fmt.Println(string(r), sz, err)
+	fmt.Println(b.UnreadRune(), b.UnreadRune())
+	c, _ := b.ReadByte()
+	fmt.Println(c, b.UnreadByte(), b.Len())
+	line, err := b.ReadString('x')
+	fmt.Println(line, err)
+	rest, err := b.ReadString('x')
+	fmt.Println(rest, err)
+	_, err = b.ReadByte()
+	fmt.Println(err)
+
+	b.Reset()
+	b.WriteString("0123456789")
+	fmt.Println(string(b.Next(4)), b.Len())
+	b.Truncate(2)
+	fmt.Println(b.String())
+
+	nb := bytes.NewBufferString("abc")
+	var sb strings.Builder
+	m, _ := nb.WriteTo(&sb)
+	fmt.Println(m, sb.String(), nb.Len())
+
+	var rb bytes.Buffer
+	m, err = rb.ReadFrom(strings.NewReader("from reader"))
+	fmt.Println(m, err, rb.String())
+	all, err := io.ReadAll(&rb)
+	fmt.Println(string(all), err, rb.Len())
+
+	fmt.Println(string(bytes.NewBuffer([]byte("xy")).Bytes()))
+
+	var a bytes.Buffer
+	a.WriteString("x")
+	cp := a
+	cp.WriteString("y")
+	fmt.Println(a.String(), cp.String())
+	pa := &a
+	pa.WriteString("z")
+	var w io.Writer = &a
+	w.Write([]byte("!"))
+	fmt.Println(a.String())
+	bm := map[string]*bytes.Buffer{"k": new(bytes.Buffer)}
+	bm["k"].WriteString("v")
+	vm := map[string]bytes.Buffer{"k": {}}
+	v := vm["k"]
+	v.WriteString("q")
+	orig := vm["k"]
+	fmt.Println(bm["k"].String(), orig.Len(), v.String())
+}
+`,
+		`5 5 héé
+héé!世xyz 12
+3 <nil> hé
+é 2 <nil>
+<nil> bytes.Buffer: UnreadRune: previous operation was not a successful ReadRune
+195 <nil> 9
+é!世x <nil>
+yz EOF
+EOF
+0123 6
+45
+3 abc 0
+11 <nil> from reader
+from reader <nil> 0
+xy
+x xy
+xz!
+v 0 q
+`,
+	);
+});
