@@ -116,7 +116,6 @@ export const WASM_SUPPORTED_STDLIB = new Set([
 	"strconv",
 	"unicode",
 	"unicode/utf8",
-	"maps",
 	"path",
 	"path/filepath",
 	"html",
@@ -415,10 +414,6 @@ export const WASM_STDLIB_MEMBERS = new Map([
 			"IsPrint",
 			"IsGraphic",
 		]),
-	],
-	[
-		"maps",
-		new Set(["Clone", "Copy", "Equal", "EqualFunc", "Delete", "DeleteFunc"]),
 	],
 	[
 		"unicode",

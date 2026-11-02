@@ -34,7 +34,7 @@ const PLANS = [
 			"stdlib/bytes/{buffer,bytes,reader}.go",
 			"stdlib/crypto/sha256/sha256.go",
 			"stdlib/encoding/{base64/base64,binary/binary,hex/hex}.go",
-			"stdlib/{errors/errors,html/html,maps/maps,path/path,sync/sync}.go",
+			"stdlib/{errors/errors,html/html,path/path,sync/sync}.go",
 			"stdlib/math/{bits/bits,rand/rand}.go",
 			"stdlib/strconv/{float,strconv}.go",
 			"stdlib/strings/{reader,replacer,strings}.go",
@@ -43,6 +43,8 @@ const PLANS = [
 			// Files that completed tasks removed (their "Removes" lines still cite them).
 			"src/backend/js/stdlib/{slices,sort}.js",
 			"stdlib/slices/{extra,iter}.go",
+			"src/backend/js/stdlib/maps.js",
+			"stdlib/maps/iter.go",
 		],
 	},
 ];

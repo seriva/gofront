@@ -568,6 +568,17 @@ var __kd = __kd || function(s, copy) {
   }
   return copy && typeof k.__clone === "function" ? k.__clone() : k;
 };
+var __kdt = __kdt || function(f, s) {
+  if (typeof s !== "string") return s;
+  const z = f?.();
+  switch (typeof z) {
+    case "number": return Number(s);
+    case "bigint": return BigInt(s);
+    case "boolean": return s === "true";
+    case "string": return s;
+    default: return __kd(s, true);
+  }
+};
 var __kcmp = __kcmp || function(a, b) {
   if (a !== null && b !== null && typeof a === "object" && typeof b === "object") {
     for (const f of Object.keys(a)) {

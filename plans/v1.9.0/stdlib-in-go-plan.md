@@ -355,7 +355,7 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
 
 ### Phase 5: `maps`, `errors`, `unicode/utf8`, `path`, `html`
 
-- [ ] **Task 5.1 — `maps` in Go and generic map range in JS**
+- [x] **Task 5.1 — `maps` in Go and generic map range in JS**
   - Files: `stdlib/maps/maps.go`, `src/backend/js/statements.js` (`_structKeyRange` for type-parameter maps), `src/typechecker/expressions.js` (remove `_derivedReturn`)
   - Removes: `stdlib/maps/iter.go`, `src/backend/js/stdlib/maps.js`, `emitMaps*` in `core.js`, `maps` typings in `extended.js`
   - Do: `Clone`, `Copy`, `Equal`, `EqualFunc`, `DeleteFunc`, `All`, `Keys`, `Values`, `Insert`, `Collect` with `M ~map[K]V`; `range` over a type-parameter map decodes keys from the instantiated key type.

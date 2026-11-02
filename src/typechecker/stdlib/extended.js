@@ -161,24 +161,6 @@ export function setupExtendedGlobals(globals, types) {
 	types.set("gom.NodeFunc", GOM_NODE_FUNC_T);
 	types.set("gom.Group", GOM_GROUP_T);
 
-	globals.define("maps", {
-		kind: "namespace",
-		name: "maps",
-		members: {
-			Clone: {
-				kind: "func",
-				params: [ANY],
-				returns: [ANY],
-				_derivedReturn: "arg0",
-			},
-			Copy: { kind: "func", params: [ANY, ANY], returns: [VOID] },
-			Equal: { kind: "func", params: [ANY, ANY], returns: [BOOL] },
-			EqualFunc: { kind: "func", params: [ANY, ANY, ANY], returns: [BOOL] },
-			Delete: { kind: "func", params: [ANY, ANY], returns: [VOID] },
-			DeleteFunc: { kind: "func", params: [ANY, ANY], returns: [VOID] },
-		},
-	});
-
 	const REGEXP_T = {
 		kind: "named",
 		name: "regexp.Regexp",

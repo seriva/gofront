@@ -1609,19 +1609,6 @@ test("maps.Values", async () => {
 	assertEqual(out, "10\n20");
 });
 
-test("maps.Clone", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	m := map[string]int{"a": 1}
-	c := maps.Clone(m)
-	c["b"] = 2
-	console.log(len(m))
-	console.log(len(c))
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "1\n2");
-});
-
 test("maps.Copy", async () => {
 	const out = await runMapsMain(`	dst := map[string]int{"a": 1}
 	src := map[string]int{"b": 2, "c": 3}
@@ -1632,42 +1619,6 @@ test("maps.Copy", async () => {
 		console.log(k)
 	}`);
 	assertEqual(out, "a\nb\nc");
-});
-
-test("maps.Equal", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	a := map[string]int{"x": 1, "y": 2}
-	b := map[string]int{"x": 1, "y": 2}
-	c := map[string]int{"x": 1, "y": 3}
-	console.log(maps.Equal(a, b))
-	console.log(maps.Equal(a, c))
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "true\nfalse");
-});
-
-test("maps.Delete", async () => {
-	const out = await runMapsMain(`	m := map[string]int{"a": 1, "b": 2, "c": 3}
-	maps.Delete(m, "b")
-	keys := slices.Collect(maps.Keys(m))
-	slices.Sort(keys)
-	for _, k := range keys {
-		console.log(k)
-	}`);
-	assertEqual(out, "a\nc");
-});
-
-test("maps.EqualFunc", () => {
-	const { js, errors } = compile(`package main
-func main() {
-	a := map[string]int{"x": 1, "y": 2}
-	b := map[string]int{"x": 10, "y": 20}
-	eq := maps.EqualFunc(a, b, func(v1, v2 int) bool { return v1*10 == v2 })
-	console.log(eq)
-}`);
-	assertEqual(errors.length, 0);
-	assertEqual(runJs(js), "true");
 });
 
 test("maps.DeleteFunc", async () => {

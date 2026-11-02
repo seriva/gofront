@@ -1070,9 +1070,6 @@ export class BuiltinsEmitter {
 			case "bits":
 				this.emitBitsCall(func.field, args);
 				return true;
-			case "maps":
-				this.emitMapsCall(func.field, args, targetWasmType);
-				return true;
 			case "strings":
 				if (func.field === "NewReader") {
 					this.emitStringsNewReader(call, targetWasmType);

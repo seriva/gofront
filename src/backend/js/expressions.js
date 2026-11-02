@@ -3097,7 +3097,7 @@ export const expressionGenMethods = {
 		if (!other) return null;
 		const t =
 			other._type?.kind === "named" ? other._type.underlying : other._type;
-		return t?.kind === "map" ? other : null;
+		return t?.kind === "map" || other._coreType?.kind === "map" ? other : null;
 	},
 
 	_genNilMapCompare(expr) {

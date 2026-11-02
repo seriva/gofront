@@ -13,7 +13,6 @@ import { hexMethods } from "./hex.js";
 import { htmlMethods } from "./html.js";
 import { ioMethods } from "./io.js";
 import { jsonMethods } from "./json.js";
-import { mapsMethods } from "./maps.js";
 import { mathMethods } from "./math.js";
 import { osMethods } from "./os.js";
 import { pathMethods } from "./path.js";
@@ -46,7 +45,6 @@ const STDLIB_METHOD_MAP = {
 	errors: "_genErrors",
 	time: "_genTime",
 	regexp: "_genRegexp",
-	maps: "_genMaps",
 	html: "_genHtml",
 	io: "_genIo",
 	rand: "_genRand",
@@ -110,7 +108,6 @@ export const stdlibGenMethods = {
 	...gomMethods,
 	...htmlMethods,
 	...ioMethods,
-	...mapsMethods,
 	...mathMethods,
 	...osMethods,
 	...pathMethods,
