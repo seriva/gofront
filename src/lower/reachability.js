@@ -93,6 +93,13 @@ const JSON_NAMES = [
 
 function addExtraRoots(names) {
 	if (names.has("strconv")) names.add("NumError$$strconv");
+	// testing and context return time.Time and time.Duration values.
+	for (const n of names)
+		if (/^(testing|context)(\.|$)/.test(n)) {
+			names.add("Time$$time");
+			names.add("Duration$$time");
+			break;
+		}
 	if (names.has("json")) {
 		for (const n of JSON_NAMES) names.add(n);
 	}

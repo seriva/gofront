@@ -215,7 +215,7 @@ compile error.
 | Anonymous interfaces (`interface{ … }`) | Keyed on the sorted method set; identical method sets share the same facade class. Same JS → WASM rule as named interfaces (only WASM-owned values). |
 | Exported non-literal constants | Exposed on the facade as module constants read once after the `start` function runs. |
 | `time.Duration` | Nanoseconds crossing as a JS `BigInt` (`int64`). |
-| `time.Time` | Copied into the JS backend's `time.Time` object via Unix milliseconds (preserving timezone offset). Rounded to the JS shim's millisecond precision. |
+| `time.Time` | Copied field by field like any struct, so nanoseconds and the zone offset survive. A `Date` (or an object holding one in `_d`) is accepted as an argument, and a `Time` handed to JS also reads as a `Date` through `_d`. |
 | `chan` | **Rejected** with `chan is not yet supported across the wasm boundary (planned)`. |
 
 ### Shared linear-memory buffers (`gofront/shared`)

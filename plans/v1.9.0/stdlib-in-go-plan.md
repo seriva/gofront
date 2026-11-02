@@ -513,7 +513,7 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
   - Test: `time.test.js` — all layout constants, 12-hour clocks, fractional seconds, parse errors; `fmt.Println(time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC))` → `2020-01-02 03:04:05 +0000 UTC`; `fmt.Println(struct{ D time.Duration }{time.Second})` → `{1s}`; `type T struct{ time.Duration; N int }` prints `1s`; `json.Marshal(time.Date(…))` round-trips on JS and WASM.
   - Done when: cases pass four ways and `src/backend/wasm/stdlib/time.js` holds only clock natives.
 
-- [ ] **Task 11.3 — `time` at the boundary and in the backends**
+- [x] **Task 11.3 — `time` at the boundary and in the backends**
   - Files: `src/backend/wasm/boundary.js` (10 `time.Time` + `time.Duration` sites), `src/backend/js/expressions.js`, `src/typechecker/assignability.js`
   - Removes: `time.*` name checks in `wasm/emit-builtins.js`, `wasm/emit.js`, `js/runtime.js`
   - Do: `time.Time`/`Duration` follow ordinary struct and named-type rules except the documented JS `Date` conversion; the boundary representation is the one Phase 1 set (`int64` parts as BigInt).

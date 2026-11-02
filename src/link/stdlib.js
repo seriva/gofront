@@ -587,6 +587,34 @@ export function checkJsonCodecs(programs, checker, preambles, options, deps) {
 	return [ast];
 }
 
+// Built-in packages whose emitter members return `time.Time` and
+// `time.Duration` (`t.Deadline()`, `b.Elapsed()`): the Go source of `time` is
+// part of the build, and its types are known, when one of them is imported.
+const IMPLIES_TIME = new Set(["testing", "context"]);
+
+function importImpliedTime(
+	p,
+	spec,
+	checker,
+	preambles,
+	bundledDirs,
+	options,
+	deps,
+) {
+	if (!IMPLIES_TIME.has(spec.path)) return;
+	const dir = resolveStdlibSource("time", options.stdlibRoot);
+	if (!dir) return;
+	try {
+		const pkg = loadStdlibPackage("time", dir, options, deps);
+		emitStdlibPackage(pkg, checker.target, preambles, bundledDirs, options);
+		for (const [k, t] of pkg.exportedTypes)
+			if (k.includes(".")) checker.types.set(k, t);
+	} catch (e) {
+		const msg = "internal stdlib error in time; please report";
+		errAtImport(checker, p, spec, msg, e.message);
+	}
+}
+
 export function importStdlibPackages(
 	programs,
 	checker,
@@ -599,7 +627,18 @@ export function importStdlibPackages(
 		for (const spec of p.imports.flatMap((imp) => imp.imports)) {
 			if (spec.path.startsWith("js:") || isLocalPath(spec.path)) continue;
 			const dir = resolveStdlibSource(spec.path, options.stdlibRoot);
-			if (!dir) continue;
+			if (!dir) {
+				importImpliedTime(
+					p,
+					spec,
+					checker,
+					preambles,
+					bundledDirs,
+					options,
+					deps,
+				);
+				continue;
+			}
 			let pkg;
 			try {
 				pkg = loadStdlibPackage(spec.path, dir, options, deps);
