@@ -112,3 +112,95 @@ false 1
 `,
 	);
 });
+
+section("strings natives (JS)");
+
+test("search, split and trim functions use the host primitives", () => {
+	const js = jsOf(`package main
+
+import "strings"
+
+func main() {
+	s := "a,b,c"
+	println(strings.Index(s, ","), strings.Contains(s, "b"), strings.HasPrefix(s, "a"), strings.HasSuffix(s, "c"))
+	println(len(strings.Split(s, ",")), strings.Join([]string{"x"}, "-"), strings.ToUpper(s), strings.TrimSpace(s))
+	println(strings.Replace(s, ",", ";", 1), strings.TrimPrefix(s, "a"), strings.Repeat(s, 2))
+}
+`);
+	assertContains(js, ".indexOf(");
+	assertContains(js, ".includes(");
+	assertContains(js, ".startsWith(");
+	assertContains(js, ".endsWith(");
+	assertContains(js, ".toUpperCase()");
+	assertContains(js, "s.split(sep)");
+});
+
+test("a string native used as a value calls the Go body", () => {
+	const js = jsOf(`package main
+
+import "strings"
+
+func main() {
+	f := strings.Index
+	println(f("abc", "c"))
+}
+`);
+	assertContains(js, "Index$$strings(");
+});
+
+test("a string native evaluates each argument once, in order", async () => {
+	await assertFourWay(
+		`package main
+
+import (
+	"fmt"
+	"strings"
+)
+
+func s(v string) string { fmt.Print(v, " "); return v }
+func n(v int) int       { fmt.Print(v, " "); return v }
+
+func main() {
+	a := strings.Replace(s("a.b.c"), s("."), s("-"), n(1))
+	fmt.Println(a)
+	b, c := strings.Trim(s("xhx"), s("x")), strings.Count(s("aa"), s("a"))
+	fmt.Println(b, c)
+	d, e := strings.IndexRune(s("hello"), 'l'), strings.ContainsAny(s("abc"), s("c"))
+	fmt.Println(d, e)
+}
+`,
+		`a.b.c . - 1 a-b.c
+xhx x aa a h 2
+hello abc c 2 true
+`,
+	);
+});
+
+test("a string native agrees with its Go body on empty and non-ASCII input", async () => {
+	await assertFourWay(
+		`package main
+
+import (
+	"fmt"
+	"strings"
+)
+
+func main() {
+	var empty string
+	fmt.Println(strings.Index(empty, empty), strings.Contains(empty, empty), strings.Count(empty, empty), strings.HasPrefix(empty, empty), strings.LastIndex(empty, empty))
+	fmt.Println(strings.TrimSpace(empty) == "", strings.Trim(empty, "x") == "", strings.ToUpper(empty) == "", strings.Join(nil, "x") == "")
+	fmt.Println(strings.ReplaceAll("a😀b", "", "|"), strings.Count("😀😀", ""), strings.Trim("😀a😀", "😀"), strings.Split("a😀b", "") [1] == "😀")
+	fmt.Println(strings.Replace("a.b", ".", "$1", -1), strings.ReplaceAll("aaa", "a", "$&$&"))
+	fmt.Println(strings.Fields(" a\\u0085b\\u2003c ")[1], len(strings.Fields("\\u00a0 \\u3000")))
+	fmt.Println(strings.TrimSpace("\\u0085 x \\u2029") == "x", strings.IndexRune("abc", 0xD800), strings.ContainsRune("abc", 0xD800))
+}
+`,
+		`0 true 1 true 0
+true true true true
+|a|😀|b| 3 a true
+a$1b $&$&$&$&$&$&
+b 0
+true -1 false
+`,
+	);
+});

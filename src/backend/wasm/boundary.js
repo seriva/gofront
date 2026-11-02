@@ -1674,6 +1674,13 @@ function addIfaceHelpers(desc, mod, addFunc, addTrampoline) {
 
 const P = "__gfw_"; // facade helper prefix
 
+// Pieces of the strings host imports (written for use inside the templates
+// below, where a backslash escape must be doubled).
+const GO_SPACE =
+	"[ \\t\\n\\v\\f\\r\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]";
+const BAD_RUNE = "r < 0 || r > 0x10FFFF || (r >= 0xD800 && r <= 0xDFFF)";
+const SURROGATE = "(v >= 0xD800 && v <= 0xDFFF)";
+
 // JS expression converting JS value `v` into the wasm representation.
 function inExpr(desc, v) {
 	switch (desc.k) {
@@ -1967,23 +1974,69 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 			}
 			return h;
 		},
-		"str_to_upper": (s) => (s ? s.toUpperCase() : ""),
-		"str_to_lower": (s) => (s ? s.toLowerCase() : ""),
-		"str_to_valid_utf8": (s, repl) => (s ? s.replace(/(?:[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF])+/g, repl ?? "") : (s ?? "")),
-		"str_trim_space": (s) => (s ? s.trim() : ""),
-		"str_contains": (s, sub) => (s && sub !== undefined ? (s.includes(sub) ? 1 : 0) : 0),
-		"str_has_prefix": (s, pre) => (s && pre !== undefined ? (s.startsWith(pre) ? 1 : 0) : 0),
-		"str_has_suffix": (s, suf) => (s && suf !== undefined ? (s.endsWith(suf) ? 1 : 0) : 0),
-		"str_index": (s, sub) => (s ? s.indexOf(sub) : -1),
-		"str_last_index": (s, sub) => (s ? s.lastIndexOf(sub) : -1),
-		"str_repeat": (s, n) => (s && n > 0 ? s.repeat(Number(n)) : ""),
-		"str_replace_all": (s, o, n) => (s ? s.replaceAll(o, n) : ""),
-		"str_equal_fold": (a, b) => ((a ?? "").toLowerCase() === (b ?? "").toLowerCase() ? 1 : 0),
-		"str_count": (s, sep) => {
-			if (!s) return sep === "" ? 1 : 0;
-			if (sep === "") return s.length + 1;
-			return s.split(sep).length - 1;
+		"str_to_upper": (s) => ${P}mapCase(s ?? "", "toUpperCase"),
+		"str_to_lower": (s) => ${P}mapCase(s ?? "", "toLowerCase"),
+		"str_trim_space": (s) => {
+			s = s ?? "";
+			const sp = /${GO_SPACE}/;
+			let i = 0, j = s.length;
+			while (i < j && sp.test(s[i])) i++;
+			while (j > i && sp.test(s[j - 1])) j--;
+			return s.slice(i, j);
 		},
+		"str_contains": (s, sub) => ((s ?? "").includes(sub ?? "") ? 1 : 0),
+		"str_has_prefix": (s, pre) => ((s ?? "").startsWith(pre ?? "") ? 1 : 0),
+		"str_has_suffix": (s, suf) => ((s ?? "").endsWith(suf ?? "") ? 1 : 0),
+		"str_index": (s, sub) => (s ?? "").indexOf(sub ?? ""),
+		"str_last_index": (s, sub) => (s ?? "").lastIndexOf(sub ?? ""),
+		"str_index_byte": (s, b) => (s ?? "").indexOf(String.fromCharCode(b)),
+		"str_last_index_byte": (s, b) => (s ?? "").lastIndexOf(String.fromCharCode(b)),
+		"str_index_rune": (s, r) => (${BAD_RUNE} ? -1 : (s ?? "").indexOf(String.fromCodePoint(r))),
+		"str_contains_rune": (s, r) => (!(${BAD_RUNE}) && (s ?? "").includes(String.fromCodePoint(r)) ? 1 : 0),
+		"str_index_any": (s, cs) => {
+			s = s ?? "";
+			let m = -1;
+			for (const c of (cs ?? "")) {
+				const v = c.codePointAt(0);
+				if (${SURROGATE}) continue;
+				const i = s.indexOf(c);
+				if (i >= 0 && (m < 0 || i < m)) m = i;
+			}
+			return m;
+		},
+		"str_last_index_any": (s, cs) => {
+			s = s ?? "";
+			let m = -1;
+			for (const c of (cs ?? "")) {
+				const v = c.codePointAt(0);
+				if (${SURROGATE}) continue;
+				const i = s.lastIndexOf(c);
+				if (i > m) m = i;
+			}
+			return m;
+		},
+		"str_contains_any": (s, cs) => {
+			s = s ?? "";
+			for (const c of (cs ?? "")) {
+				const v = c.codePointAt(0);
+				if (!${SURROGATE} && s.includes(c)) return 1;
+			}
+			return 0;
+		},
+		"str_count": (s, t) => {
+			s = s ?? ""; t = t ?? "";
+			if (t === "") return [...s].length + 1;
+			let n = 0;
+			for (let i = s.indexOf(t); i !== -1; i = s.indexOf(t, i + t.length)) n++;
+			return n;
+		},
+		"str_replace": (s, o, w, n) => ${P}replace(s ?? "", o ?? "", w ?? "", n),
+		"str_replace_all": (s, o, w) => ${P}replace(s ?? "", o ?? "", w ?? "", -1),
+		"str_trim": (s, c) => ${P}trim(s ?? "", c ?? "", true, true),
+		"str_trim_left": (s, c) => ${P}trim(s ?? "", c ?? "", true, false),
+		"str_trim_right": (s, c) => ${P}trim(s ?? "", c ?? "", false, true),
+		"str_trim_prefix": (s, p) => ((s ?? "").startsWith(p ?? "") ? (s ?? "").slice((p ?? "").length) : (s ?? "")),
+		"str_trim_suffix": (s, p) => ((s ?? "").endsWith(p ?? "") ? (s ?? "").slice(0, (s ?? "").length - (p ?? "").length) : (s ?? "")),
 		"str_from_i64": (n) => String(n),
 		"str_from_i32": (n) => String(n),
 		"str_from_f64": (f) => (Object.is(f, -0) ? "-0" : String(f)),
@@ -2090,6 +2143,55 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 	m.round = (x) => Math.sign(x) * Math.round(Math.abs(x));
 	// Exports are needed by imports that call back into the module (t.Run).
 	return { "env": env, "Math": m, "__bind": (ex) => { late.exports = ex; } };
+}
+// strings.ToUpper/ToLower: letter by letter through the first code point of
+// the host's mapping, as unicode.ToUpper/ToLower do; ASCII text maps whole.
+function ${P}mapCase(s, method) {
+	if (/^[\\x00-\\x7f]*$/.test(s)) return s[method]();
+	return Array.from(s, (c) => String.fromCodePoint(c[method]().codePointAt(0))).join("");
+}
+// Code-point-aware Trim/TrimLeft/TrimRight of strings.
+function ${P}trim(s, cutset, left, right) {
+	if (s === "" || cutset === "") return s;
+	const set = new Set(cutset);
+	let i = 0, j = s.length;
+	if (left) while (i < j) {
+		const c = s.codePointAt(i);
+		if (!set.has(String.fromCodePoint(c))) break;
+		i += c > 0xFFFF ? 2 : 1;
+	}
+	if (right) while (j > i) {
+		let k = j - 1;
+		const lo = s.charCodeAt(k);
+		if (lo >= 0xDC00 && lo <= 0xDFFF && k > i) {
+			const hi = s.charCodeAt(k - 1);
+			if (hi >= 0xD800 && hi <= 0xDBFF) k--;
+		}
+		if (!set.has(s.slice(k, j))) break;
+		j = k;
+	}
+	return s.slice(i, j);
+}
+// strings.Replace: an empty old string matches before every code point and at
+// the end; the replacement is literal.
+function ${P}replace(s, o, w, n) {
+	if (o === w || n === 0) return s;
+	if (o !== "") {
+		if (n < 0) return s.replaceAll(o, () => w);
+		let r = "", i = 0;
+		for (let k = n; k > 0; k--) {
+			const j = s.indexOf(o, i);
+			if (j < 0) break;
+			r += s.slice(i, j) + w;
+			i = j + o.length;
+		}
+		return r + s.slice(i);
+	}
+	const cs = [...s];
+	const m = n < 0 || n > cs.length + 1 ? cs.length + 1 : n;
+	let r = "";
+	for (let k = 0; k < m; k++) r += (k > 0 ? cs[k - 1] : "") + w;
+	return r + cs.slice(m - 1).join("");
 }`;
 
 // JS side of the STDLIB_IMPORTS table (index.js); emitted only when the
@@ -2229,159 +2331,8 @@ function ${P}stdlib_fmt(stringTable, io) {
 	};
 }
 function ${P}stdlib_str(stringTable, io) {
-	let parts = [];
-	let cutBefore = "", cutAfter = "";
-	let replacerTarget = "", replacerPairs = [];
 	let strconvErr = null, strconvErrKind = 0;
 	return {
-		"str_trim": (s, c) => ${P}trim(s ?? "", c ?? "", true, true),
-		"str_trim_left": (s, c) => ${P}trim(s ?? "", c ?? "", true, false),
-		"str_trim_right": (s, c) => ${P}trim(s ?? "", c ?? "", false, true),
-		"str_trim_prefix": (s, p) => (s && p && s.startsWith(p) ? s.slice(p.length) : (s ?? "")),
-		"str_trim_suffix": (s, p) => (s && p && s.endsWith(p) ? s.slice(0, s.length - p.length) : (s ?? "")),
-		"str_cut": (s, sep) => {
-			const i = (s ?? "").indexOf(sep ?? "");
-			if (i < 0) { cutBefore = s ?? ""; cutAfter = ""; return 0; }
-			cutBefore = (s ?? "").slice(0, i);
-			cutAfter = (s ?? "").slice(i + (sep ?? "").length);
-			return 1;
-		},
-		"str_cut_before": () => cutBefore,
-		"str_cut_after": () => cutAfter,
-		"str_cut_prefix": (s, p) => {
-			s = s ?? ""; p = p ?? "";
-			if (s.startsWith(p)) { cutAfter = s.slice(p.length); return 1; }
-			cutAfter = s; return 0;
-		},
-		"str_cut_suffix": (s, suf) => {
-			s = s ?? ""; suf = suf ?? "";
-			if (s.endsWith(suf)) { cutBefore = s.slice(0, s.length - suf.length); return 1; }
-			cutBefore = s; return 0;
-		},
-		"str_replace": (s, o, n, cnt) => {
-			s = s ?? ""; o = o ?? ""; n = n ?? "";
-			if (cnt < 0) return s.replaceAll(o, n);
-			let out = "", from = 0;
-			for (let k = 0; k < cnt; k++) {
-				const at = s.indexOf(o, from);
-				if (at < 0) break;
-				out += s.slice(from, at) + n;
-				from = at + o.length;
-				if (o === "") { if (from >= s.length) break; out += s[from]; from++; }
-			}
-			return out + s.slice(from);
-		},
-		"str_contains_rune": (s, r) => ((s ?? "").includes(String.fromCodePoint(r)) ? 1 : 0),
-		"str_contains_any": (s, cs) => { for (const c of (cs ?? "")) if ((s ?? "").includes(c)) return 1; return 0; },
-		"str_index_byte": (s, b) => (s ?? "").indexOf(String.fromCharCode(b)),
-		"str_index_rune": (s, r) => (s ?? "").indexOf(String.fromCodePoint(r)),
-		"str_index_any": (s, cs) => { s = s ?? ""; let best = -1; for (const c of (cs ?? "")) { const i = s.indexOf(c); if (i >= 0 && (best < 0 || i < best)) best = i; } return best; },
-		"str_last_index_byte": (s, b) => (s ?? "").lastIndexOf(String.fromCharCode(b)),
-		"str_last_index_any": (s, cs) => {
-			s = s ?? ""; let best = -1;
-			for (const c of (cs ?? "")) {
-				const i = s.lastIndexOf(c);
-				if (i > best) best = i;
-			}
-			return best;
-		},
-		"str_title": (s) => (s ?? "").replace(/(^|[^\\p{L}\\p{N}_'])(\\p{Ll})/gu, (m, a, b) => a + b.toUpperCase()),
-		"str_split": (s, sep) => { parts = (s ?? "").split(sep ?? ""); return parts.length; },
-		"str_split_n": (s, sep, n) => {
-			s = s ?? ""; sep = sep ?? "";
-			if (n === 0) return -1;
-			if (n < 0) { parts = sep === "" ? [...s] : s.split(sep); return parts.length; }
-			if (sep === "") {
-				const chars = [...s];
-				if (chars.length <= n) { parts = chars; return parts.length; }
-				const r = chars.slice(0, n - 1);
-				r.push(chars.slice(n - 1).join(""));
-				parts = r;
-				return parts.length;
-			}
-			const r = [];
-			let cur = s;
-			for (let i = 1; i < n && cur.length; i++) {
-				const j = cur.indexOf(sep);
-				if (j < 0) break;
-				r.push(cur.slice(0, j));
-				cur = cur.slice(j + sep.length);
-			}
-			r.push(cur);
-			parts = r;
-			return parts.length;
-		},
-		"str_split_after": (s, sep) => {
-			s = s ?? ""; sep = sep ?? "";
-			if (sep === "") { parts = [...s]; return parts.length; }
-			const r = [];
-			let cur = s;
-			while (true) {
-				const j = cur.indexOf(sep);
-				if (j < 0) { r.push(cur); break; }
-				r.push(cur.slice(0, j + sep.length));
-				cur = cur.slice(j + sep.length);
-			}
-			parts = r;
-			return parts.length;
-		},
-		"str_split_after_n": (s, sep, n) => {
-			s = s ?? ""; sep = sep ?? "";
-			if (n === 0) return -1;
-			if (sep === "") {
-				const chars = [...s];
-				if (n < 0 || chars.length <= n) parts = chars;
-				else {
-					const r = chars.slice(0, n - 1);
-					r.push(chars.slice(n - 1).join(""));
-					parts = r;
-				}
-				return parts.length;
-			}
-			const r = [];
-			let cur = s;
-			for (let i = 1; (n < 0 || i < n) && cur.length; i++) {
-				const j = cur.indexOf(sep);
-				if (j < 0) break;
-				r.push(cur.slice(0, j + sep.length));
-				cur = cur.slice(j + sep.length);
-			}
-			r.push(cur);
-			parts = r;
-			return parts.length;
-		},
-		"str_fields": (s) => { parts = (s ?? "").split(/[ \\t\\n\\v\\f\\r\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]+/).filter((p) => p !== ""); return parts.length; },
-		"str_part": (i) => parts[i] ?? "",
-		"str_replacer_init": (s) => {
-			replacerTarget = s ?? "";
-			replacerPairs = [];
-		},
-		"str_replacer_add": (o, n) => {
-			replacerPairs.push([o ?? "", n ?? ""]);
-		},
-		"str_replacer_run": () => {
-			let s = replacerTarget;
-			if (!replacerPairs.length || s === "") return s;
-			let out = "";
-			let i = 0;
-			while (i < s.length) {
-				let matched = false;
-				for (let k = 0; k < replacerPairs.length; k++) {
-					const [oldStr, newStr] = replacerPairs[k];
-					if (oldStr.length > 0 && s.startsWith(oldStr, i)) {
-						out += newStr;
-						i += oldStr.length;
-						matched = true;
-						break;
-					}
-				}
-				if (!matched) {
-					out += s[i];
-					i++;
-				}
-			}
-			return out;
-		},
 		"strconv_atoi": (s) => {
 			const r = __strconv_atoi(s ?? "");
 			strconvErr = r[1];
@@ -2689,14 +2640,6 @@ function ${P}stdlib(stringTable, io) {
 		${P}stdlib_str(stringTable, io),
 		${P}stdlib_sys(stringTable, io),
 	);
-}
-function ${P}trim(s, cutset, left, right) {
-	const cs = new Set(Array.from(cutset));
-	const chars = Array.from(s);
-	let a = 0, b = chars.length;
-	if (left) while (a < b && cs.has(chars[a])) a++;
-	if (right) while (b > a && cs.has(chars[b - 1])) b--;
-	return chars.slice(a, b).join("");
 }`;
 
 // Runtime loader emitted at the top of the facade.

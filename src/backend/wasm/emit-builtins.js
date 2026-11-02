@@ -1070,9 +1070,6 @@ export class BuiltinsEmitter {
 			case "bits":
 				this.emitBitsCall(func.field, args);
 				return true;
-			case "strings":
-				this.emitStringsCall(func.field, args, targetWasmType);
-				return true;
 			case "strconv":
 				this.emitStrconvCall(func.field, args);
 				return true;

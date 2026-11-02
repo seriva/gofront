@@ -275,91 +275,11 @@ export function setupCoreGlobals(globals, types) {
 		},
 	});
 
-	const strFn1 = (ret) => ({ kind: "func", params: [STRING], returns: [ret] });
-	const strFn2 = (p2, ret) => ({
-		kind: "func",
-		params: [STRING, p2],
-		returns: [ret],
-	});
-	const strFn3 = (p2, p3, ret) => ({
-		kind: "func",
-		params: [STRING, p2, p3],
-		returns: [ret],
-	});
+	// The Go source of the strings package declares everything but Builder.
 	globals.define("strings", {
 		kind: "namespace",
 		name: "strings",
-		members: {
-			Contains: strFn2(STRING, BOOL),
-			HasPrefix: strFn2(STRING, BOOL),
-			HasSuffix: strFn2(STRING, BOOL),
-			Index: strFn2(STRING, INT),
-			LastIndex: strFn2(STRING, INT),
-			Count: strFn2(STRING, INT),
-			Repeat: strFn2(INT, STRING),
-			Replace: {
-				kind: "func",
-				params: [STRING, STRING, STRING, INT],
-				returns: [STRING],
-			},
-			ReplaceAll: strFn3(STRING, STRING, STRING),
-			ToUpper: strFn1(STRING),
-			ToLower: strFn1(STRING),
-			TrimSpace: strFn1(STRING),
-			Trim: strFn2(STRING, STRING),
-			TrimPrefix: strFn2(STRING, STRING),
-			TrimSuffix: strFn2(STRING, STRING),
-			TrimLeft: strFn2(STRING, STRING),
-			TrimRight: strFn2(STRING, STRING),
-			Split: strFn2(STRING, { kind: "slice", elem: STRING }),
-			Join: {
-				kind: "func",
-				params: [{ kind: "slice", elem: STRING }, STRING],
-				returns: [STRING],
-			},
-			EqualFold: strFn2(STRING, BOOL),
-			Fields: strFn1({ kind: "slice", elem: STRING }),
-			FieldsFunc: strFn2(ANY, { kind: "slice", elem: STRING }),
-			Cut: {
-				kind: "func",
-				params: [STRING, STRING],
-				returns: [STRING, STRING, BOOL],
-			},
-			CutPrefix: {
-				kind: "func",
-				params: [STRING, STRING],
-				returns: [STRING, BOOL],
-			},
-			CutSuffix: {
-				kind: "func",
-				params: [STRING, STRING],
-				returns: [STRING, BOOL],
-			},
-			SplitN: strFn3(STRING, INT, { kind: "slice", elem: STRING }),
-			SplitAfter: strFn2(STRING, { kind: "slice", elem: STRING }),
-			SplitAfterN: strFn3(STRING, INT, { kind: "slice", elem: STRING }),
-			IndexAny: strFn2(STRING, INT),
-			LastIndexAny: strFn2(STRING, INT),
-			ContainsAny: strFn2(STRING, BOOL),
-			ContainsRune: strFn2(INT, BOOL),
-			IndexRune: strFn2(INT, INT),
-			IndexByte: strFn2(INT, INT),
-			LastIndexByte: strFn2(INT, INT),
-			Map: {
-				kind: "func",
-				params: [ANY, STRING],
-				returns: [STRING],
-			},
-			Title: strFn1(STRING),
-			ToTitle: strFn1(STRING),
-			TrimFunc: { kind: "func", params: [STRING, ANY], returns: [STRING] },
-			TrimLeftFunc: { kind: "func", params: [STRING, ANY], returns: [STRING] },
-			TrimRightFunc: { kind: "func", params: [STRING, ANY], returns: [STRING] },
-			IndexFunc: { kind: "func", params: [STRING, ANY], returns: [INT] },
-			LastIndexFunc: { kind: "func", params: [STRING, ANY], returns: [INT] },
-			ToValidUTF8: strFn2(STRING, STRING),
-			Builder: ANY,
-		},
+		members: { Builder: ANY },
 	});
 
 	const BYTE_SLICE = { kind: "slice", elem: UINT8 };
