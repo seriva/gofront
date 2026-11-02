@@ -385,21 +385,21 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
 
 ### Phase 6: `io`, readers and `strings.Replacer`
 
-- [ ] **Task 6.1 — `io` in Go; `fmt.Fprint*` through `io.Writer`**
+- [x] **Task 6.1 — `io` in Go; `fmt.Fprint*` through `io.Writer`**
   - Files: `stdlib/io/io.go`, `src/backend/js/fmt-runtime.js` (`Fprint*` calls `w.Write`), `src/backend/wasm/stdlib/core.js` (`Fprint*` dispatch through the interface)
   - Removes: `src/backend/js/stdlib/io.js`, `emitIo*`/`_emitIoCopy*`/`_emitIoReadAll` in `src/backend/wasm/stdlib/io.js`, `io` typings, `io.Writer`/`io.Reader` sites in `wasm/index.js`
   - Do: `Reader`, `Writer`, `Closer`, `Seeker` and composites, `EOF`, `ErrUnexpectedEOF`, `ErrShortWrite`, `Discard`, `Copy`, `CopyN`, `CopyBuffer`, `ReadAll`, `ReadFull`, `ReadAtLeast`, `WriteString`, `LimitReader`/`LimitedReader`, `MultiReader`, `MultiWriter`, `TeeReader`, `NopCloser`, `SectionReader`; `Sscan` stays an emitter.
   - Test: `test/unit/stdlib/io.test.js` — `io.ReadAll(bytes.NewReader(nil))` → `0 <nil>`; `ReadAll(&io.LimitedReader{…, N: 3})` → `hel <nil>`; `NewSectionReader(…, 6, 5).Read` → `5 world`; `test/unit/stdlib/fmt.test.js` — `Fprintf` into `bytes.Buffer`, `strings.Builder`, `os.Stdout` and a user `Writer`.
   - Done when: cases pass four ways and `fmt.Fprintf(w, …)` type-checks against `io.Writer`.
 
-- [ ] **Task 6.2 — `strings.Reader` and `bytes.Reader` in Go**
+- [x] **Task 6.2 — `strings.Reader` and `bytes.Reader` in Go**
   - Files: `stdlib/strings/reader.go`, `stdlib/bytes/reader.go`, `src/backend/wasm/index.js` (10 + 9 sites)
   - Removes: reader helpers in `src/backend/wasm/stdlib/io.js`, reader sites in `wasm/emit-builtins.js` and `js/expressions.js`
   - Do: `NewReader`, `Read`, `ReadByte`, `UnreadByte`, `ReadRune`, `UnreadRune`, `Len`, `Size`, `Reset`, `Seek`, `ReadAt`, `WriteTo`.
   - Test: `test/unit/stdlib/strings.test.js`, `bytes.test.js` reader cases; `io.ReadAll` over each; `bytes.NewReader([]byte{0xff, 'a'})` then `ReadRune`, `ReadByte` → `a`.
   - Done when: cases pass four ways and `grep -rn 'strings\.Reader\|bytes\.Reader' src --include=*.js` outside `*/stdlib/` finds only comments.
 
-- [ ] **Task 6.3 — `strings.Replacer` in Go**
+- [x] **Task 6.3 — `strings.Replacer` in Go**
   - Files: `stdlib/strings/replacer.go`, `src/backend/js/expressions.js`, `src/backend/wasm/emit-builtins.js` (5 sites)
   - Removes: `emitReplacerMethodCall`, `emitStringsNewReplacer` in `core.js`
   - Do: `NewReplacer`, `Replace`, `WriteString` with Go's generic algorithm (first match, argument order).

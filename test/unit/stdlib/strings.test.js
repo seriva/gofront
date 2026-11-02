@@ -126,3 +126,86 @@ ek
 `,
 	);
 });
+
+test("Replacer follows argument order and Go's empty-match rule", async () => {
+	await assertFourWay(
+		`package main
+
+import (
+	"bytes"
+	"fmt"
+	"strings"
+)
+
+type failWriter struct{ left int }
+
+func (f *failWriter) Write(p []byte) (int, error) {
+	if len(p) > f.left {
+		n := f.left
+		f.left = 0
+		return n, fmt.Errorf("full")
+	}
+	f.left -= len(p)
+	return len(p), nil
+}
+
+func main() {
+	fmt.Println(strings.NewReplacer("a", "1", "b", "2").Replace("abcab"))
+	fmt.Println(strings.NewReplacer("ab", "1", "a", "2", "bc", "3").Replace("abc"))
+	fmt.Println(strings.NewReplacer("a", "1", "ab", "2").Replace("abab"))
+	fmt.Println(strings.NewReplacer("a", "1", "a", "2").Replace("aa"))
+	fmt.Println(strings.NewReplacer("a", "1", "", "X").Replace("ab"))
+	fmt.Println(strings.NewReplacer("", "X").Replace("ab"))
+	fmt.Println(strings.NewReplacer("", "X").Replace(""))
+	fmt.Println(strings.NewReplacer("", "X", "a", "1").Replace("a"))
+	fmt.Println(strings.NewReplacer("<", "&lt;", ">", "&gt;", "&", "&amp;").Replace("<a & b>"))
+	fmt.Println(strings.NewReplacer("a", "").Replace("banana"))
+	fmt.Println(strings.NewReplacer("日", "sun", "本", "base").Replace("日本語"))
+	fmt.Println(strings.NewReplacer().Replace("same"))
+	var zero strings.Replacer
+	fmt.Println(zero.Replace("zero"))
+
+	r := strings.NewReplacer("a", "1", "b", "22", "<", "&lt;")
+	var buf bytes.Buffer
+	n, err := r.WriteString(&buf, "abc<abc")
+	fmt.Println(n, err, buf.String())
+	var sb strings.Builder
+	n, err = r.WriteString(&sb, "")
+	fmt.Println(n, err, sb.String())
+	n, err = r.WriteString(&sb, "ba")
+	fmt.Println(n, err, sb.String())
+	n, err = r.WriteString(&failWriter{left: 3}, "abababab")
+	fmt.Println(n, err)
+
+	func() {
+		defer func() { fmt.Println("recovered:", recover()) }()
+		strings.NewReplacer("a")
+	}()
+	args := []string{"x", "y"}
+	rr := strings.NewReplacer(args...)
+	args[0] = "q"
+	fmt.Println(rr.Replace("xq"))
+}
+`,
+		`12c12
+1c
+1b1b
+11
+1XbX
+XaXbX
+X
+X1X
+&lt;a &amp; b&gt;
+bnn
+sunbase語
+same
+zero
+12 <nil> 122c&lt;122c
+0 <nil> 
+3 <nil> 221
+3 full
+recovered: strings.NewReplacer: odd argument count
+yq
+`,
+	);
+});
