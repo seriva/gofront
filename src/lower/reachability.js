@@ -50,6 +50,9 @@ function collectRefs(node, names, fields) {
 	)
 		names.add(node.name);
 	else if (node.kind === "SelectorExpr") fields.add(node.field);
+	// A reached interface needs its methods on the types that satisfy it.
+	else if (node.kind === "InterfaceType")
+		for (const m of node.methods ?? []) fields.add(m.name);
 	forEachChild(node, (child) => collectRefs(child, names, fields));
 }
 

@@ -69,7 +69,6 @@ import {
 	HELPER_STRCONV_ERROR,
 	HELPER_STRUCT_KEY,
 	HELPER_SV,
-	HELPER_SYNC,
 	HELPER_TESTING,
 	HELPER_TIME_FMT,
 	HELPER_TIME_PARSE,
@@ -171,7 +170,6 @@ const HELPER_MAP = [
 	["timeParse", HELPER_TIME_PARSE],
 	["duration", HELPER_DURATION],
 	["testing", HELPER_TESTING],
-	["sync", HELPER_SYNC],
 	["cryptoRand", HELPER_CRYPTO_RAND],
 	["binary", HELPER_BINARY],
 	["json", HELPER_JSON],
@@ -180,7 +178,9 @@ const HELPER_MAP = [
 
 // JS bodies of `//gofront:intrinsic` functions (names: INTRINSICS in
 // typechecker/types.js).  The WASM backend keeps their empty body.
-const JS_INTRINSICS = {};
+const JS_INTRINSICS = {
+	rand_source: () => "return Math.random();",
+};
 
 export class CodeGen {
 	// jsImports:       Map<importPath, string[]> — npm package imports to emit at top of file
@@ -941,8 +941,11 @@ export class CodeGen {
 	// outer struct's promoted-field accesses see the same storage.  Embedded
 	// types that are not compiled Go structs keep the borrowed-`this` form.
 	_embedStub(method, embedName) {
+		// The field is named after the type without its package suffix
+		// (`Mutex$$sync` is the field `Mutex`).
+		const field = embedName.replace(/\$\$.*$/, "");
 		const call = this.structNames.has(embedName)
-			? `this.${embedName}.${method}(...__a)`
+			? `this.${field}.${method}(...__a)`
 			: `${embedName}.prototype.${method}.call(this, ...__a)`;
 		return `${method}(...__a) { return ${call}; }`;
 	}

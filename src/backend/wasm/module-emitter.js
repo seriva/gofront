@@ -23,13 +23,10 @@ const ERROR_PRODUCING_PKGS = new Set([
 	"os",
 	"strings",
 	"time",
-	"sync",
 	"crypto/rand",
 	"rand",
 	"encoding/binary",
 	"binary",
-	"math/bits",
-	"bits",
 ]);
 // Packages whose calls lower to the `env.*` imports in STDLIB_IMPORTS (the
 // matching JS lives in WASM_STDLIB_JS).  Only modules importing one of them
@@ -40,15 +37,11 @@ const STDLIB_ENV_PKGS = new Set([
 	"fmt",
 	"testing",
 	"unicode",
-	"math/rand",
 	"io",
 	"os",
 	"time",
-	"sync",
 	"crypto/rand",
 	"rand",
-	"math/bits",
-	"bits",
 ]);
 
 // [name, params, results] for `env.*` imports backing stdlib calls; the JS
@@ -135,12 +128,6 @@ const STDLIB_IMPORTS = [
 	["raw_bytes_get", ["i32"], ["i32"]],
 	// crypto/rand
 	["crypto_rand_fill", ["i32"], ["i32"]],
-	["bits_div32", ["i32", "i32", "i32"], ["i32"]],
-	["bits_div32_rem", [], ["i32"]],
-	["bits_rem32", ["i32", "i32", "i32"], ["i32"]],
-	["bits_div64", ["i64", "i64", "i64"], ["i64"]],
-	["bits_div64_rem", [], ["i64"]],
-	["bits_rem64", ["i64", "i64", "i64"], ["i64"]],
 ];
 
 export class ModuleEmitter {
@@ -379,8 +366,16 @@ export class ModuleEmitter {
 						});
 						fieldIndexMap.set(n, fIdx);
 						if (f.embedded) {
+							// The embedded type, when it differs from the field
+							// name (`Mutex$$sync` for the field `Mutex`).
+							const ref =
+								f.type?.kind === "PointerType"
+									? f.type.base?.name
+									: f.type?.name;
+							const typeName = this.checker?.types?.get(ref)?.name;
 							embeds.push({
 								name: n,
+								...(typeName && typeName !== n && { typeName }),
 								fieldIndex: fIdx,
 							});
 						}
@@ -1087,20 +1082,6 @@ export class ModuleEmitter {
 		return gIdx;
 	}
 
-	getRandStateGlobalIndex() {
-		if (this.randStateGlobalIndex !== undefined) {
-			return this.randStateGlobalIndex;
-		}
-		const gIdx = this.globals.length;
-		this.globals.push({
-			type: "i64",
-			mutable: true,
-			init: [{ op: "i64.const", value: 1n }],
-		});
-		this.randStateGlobalIndex = gIdx;
-		return gIdx;
-	}
-
 	getStrconvErrGlobalIndex(field) {
 		if (!this.strconvErrGlobals) this.strconvErrGlobals = new Map();
 		if (this.strconvErrGlobals.has(field)) {
@@ -1766,13 +1747,14 @@ export class ModuleEmitter {
 			// Promoted methods on sName
 			if (sInfo.embeds && sInfo.embeds.length > 0) {
 				for (const embed of sInfo.embeds) {
-					const embedMethodName = `${embed.name}.${methodName}`;
+					const embedType = embed.typeName ?? embed.name;
+					const embedMethodName = `${embedType}.${methodName}`;
 					if (this.funcMap.has(embedMethodName)) {
 						const fIdx = this.resolveFuncIndex(embedMethodName);
 						const paramGoTypes = this.getFuncParamGoTypes(embedMethodName);
 						const paramWTypes = this.getFuncParamTypes(embedMethodName);
 						const isPtrRecv = paramGoTypes[0]?.kind === "pointer";
-						const embedSInfo = this.getStructType(embed.name);
+						const embedSInfo = this.getStructType(embedType);
 
 						const ptrKey = `ptr:${sName}`;
 						if (!seenKeys.has(ptrKey)) {

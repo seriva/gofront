@@ -2410,8 +2410,6 @@ function ${P}stdlib_sys(stringTable, io) {
 	let timeParseErr = null, timeParseOffset = 0, timeParseDurationErr = null, timeParseSubNs = 0;
 	let rawBytes = new Uint8Array(0);
 	let rawPos = 0;
-	let bitsRem32 = 0;
-	let bitsRem64 = 0n;
 	return {
 		// bytes trim
 		"bytes_trim": (s, cutset, left, right) => {
@@ -2555,40 +2553,6 @@ function ${P}stdlib_sys(stringTable, io) {
 				for (let i = 0; i < len; i++) rawBytes[i] = Math.floor(Math.random() * 256);
 			}
 			return len;
-		},
-		"bits_div32": (hi, lo, y) => {
-			const yu = y >>> 0;
-			if (yu === 0) throw new Error("runtime error: integer divide by zero");
-			const hiu = hi >>> 0;
-			if (hiu >= yu) throw new Error("runtime error: integer overflow");
-			const z = (BigInt(hiu) << 32n) | BigInt(lo >>> 0);
-			const yB = BigInt(yu);
-			bitsRem32 = Number(z % yB);
-			return Number(z / yB);
-		},
-		"bits_div32_rem": () => bitsRem32,
-		"bits_rem32": (hi, lo, y) => {
-			const yu = y >>> 0;
-			if (yu === 0) throw new Error("runtime error: integer divide by zero");
-			const z = (BigInt(hi >>> 0) << 32n) | BigInt(lo >>> 0);
-			return Number(z % BigInt(yu));
-		},
-		"bits_div64": (hi, lo, y) => {
-			const yB = BigInt.asUintN(64, BigInt(y));
-			if (yB === 0n) throw new Error("runtime error: integer divide by zero");
-			const hiB = BigInt.asUintN(64, BigInt(hi));
-			if (hiB >= yB) throw new Error("runtime error: integer overflow");
-			const loB = BigInt.asUintN(64, BigInt(lo));
-			const z = (hiB << 64n) | loB;
-			bitsRem64 = z % yB;
-			return z / yB;
-		},
-		"bits_div64_rem": () => bitsRem64,
-		"bits_rem64": (hi, lo, y) => {
-			const yB = BigInt.asUintN(64, BigInt(y));
-			if (yB === 0n) throw new Error("runtime error: integer divide by zero");
-			const z = ((BigInt.asUintN(64, BigInt(hi)) % yB) << 64n) | BigInt.asUintN(64, BigInt(lo));
-			return z % yB;
 		},
 	};
 }

@@ -296,7 +296,7 @@ test("no Sentrux layer glob is dead", () => {
 });
 
 test("only documented files are exempt from layering", () => {
-	assertEqual(Object.keys(ALLOW).sort().join(","), "stdlib/math/extra.go");
+	assertEqual(Object.keys(ALLOW).join(","), "");
 });
 
 // With fmt-types.js in src/backend/shared/, the only cross-backend import
@@ -367,10 +367,6 @@ test("the guard script fails on each fixture and passes on the real tree", () =>
 	withTempDir(base, (dir) => {
 		const r = run(dir);
 		assertEqual(r.status, 1, "stale fixture");
-		assertContains(
-			r.stderr,
-			"ALLOW entry for a missing file: stdlib/math/extra.go",
-		);
 		assertContains(
 			r.stderr,
 			"cross-backend allowlist entry with no matching import: src/backend/wasm/boundary.js -> src/backend/js/runtime.js",

@@ -107,8 +107,6 @@ export const BROWSER_GLOBALS = new Set([
 // wasm packages".
 export const WASM_SUPPORTED_STDLIB = new Set([
 	"math",
-	"math/bits",
-	"math/rand",
 	"errors",
 	"fmt",
 	"strings",
@@ -118,7 +116,6 @@ export const WASM_SUPPORTED_STDLIB = new Set([
 	"testing",
 	"gofront/shared",
 	"gofront/simd",
-	"sync",
 	"crypto/rand",
 	"encoding/binary",
 	"os",
@@ -213,61 +210,6 @@ export const WASM_STDLIB_MEMBERS = new Map([
 			"MaxUint64",
 		]),
 	],
-	[
-		"bits",
-		new Set([
-			"Add",
-			"Add32",
-			"Add64",
-			"Sub",
-			"Sub32",
-			"Sub64",
-			"Mul",
-			"Mul32",
-			"Mul64",
-			"Div",
-			"Div32",
-			"Div64",
-			"Rem",
-			"Rem32",
-			"Rem64",
-			"LeadingZeros",
-			"LeadingZeros8",
-			"LeadingZeros16",
-			"LeadingZeros32",
-			"LeadingZeros64",
-			"TrailingZeros",
-			"TrailingZeros8",
-			"TrailingZeros16",
-			"TrailingZeros32",
-			"TrailingZeros64",
-			"OnesCount",
-			"OnesCount8",
-			"OnesCount16",
-			"OnesCount32",
-			"OnesCount64",
-			"RotateLeft",
-			"RotateLeft8",
-			"RotateLeft16",
-			"RotateLeft32",
-			"RotateLeft64",
-			"Reverse",
-			"Reverse8",
-			"Reverse16",
-			"Reverse32",
-			"Reverse64",
-			"ReverseBytes",
-			"ReverseBytes16",
-			"ReverseBytes32",
-			"ReverseBytes64",
-			"Len",
-			"Len8",
-			"Len16",
-			"Len32",
-			"Len64",
-			"UintSize",
-		]),
-	],
 	["errors", new Set(["As"])],
 	[
 		"fmt",
@@ -345,26 +287,7 @@ export const WASM_STDLIB_MEMBERS = new Map([
 			"ToLower",
 		]),
 	],
-	[
-		"rand",
-		new Set([
-			"Intn",
-			"Float64",
-			"Float32",
-			"Int",
-			"Int63",
-			"Int63n",
-			"Int31",
-			"Int31n",
-			"Uint32",
-			"Uint64",
-			"Seed",
-			"Shuffle",
-			"Perm",
-			"Read",
-			"Reader",
-		]),
-	],
+	["rand", new Set(["Read", "Reader"])],
 	[
 		"time",
 		new Set([
@@ -417,7 +340,6 @@ export const WASM_STDLIB_MEMBERS = new Map([
 		]),
 	],
 	["testing", new Set(["T", "B", "M", "TB", "BenchmarkResult"])],
-	["sync", new Set(["Mutex", "RWMutex", "Once", "WaitGroup", "Locker"])],
 	["binary", new Set(["Read", "Write", "Size"])],
 ]);
 
@@ -426,7 +348,11 @@ export const VALID_TARGETS = new Set(["js", "wasm", "both"]);
 // Backend-provided implementations for body-less Go-source stdlib functions
 // marked `//gofront:intrinsic <name>`: name -> required signature.  New
 // intrinsics need a plan change.
-export const INTRINSICS = new Map([]);
+export const INTRINSICS = new Map([
+	// A uniformly distributed float64 in [0, 1) from the host source
+	// (`Math.random`); the only entropy math/rand draws.
+	["rand_source", "func() float64"],
+]);
 
 // Names a standard-library function may carry in `//gofront:native <name>`:
 // the function keeps its Go body, and a backend registry may replace calls to
@@ -470,6 +396,11 @@ export const NATIVES = new Set([
 	"strings.TrimRight",
 	"strings.TrimPrefix",
 	"strings.TrimSuffix",
+	// math/bits: one host instruction per width (`Math.clz32`, WASM `clz`,
+	// `ctz` and `popcnt`).
+	...["Len", "LeadingZeros", "TrailingZeros", "OnesCount"].flatMap((f) =>
+		["", "8", "16", "32", "64"].map((w) => `bits.${f}${w}`),
+	),
 ]);
 
 // ── Static operator sets (module-level for reuse) ────────────

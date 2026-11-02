@@ -143,11 +143,11 @@ Packages that `wasm` and `both` packages can import (JS-only packages such as `r
 | `io` | js, wasm, both | Reader/Writer interfaces and helpers; no `Pipe` |
 | `iter`, `maps`, `slices`, `sort` | js, wasm, both | Go 1.23 iterator APIs; no `iter.Pull` |
 | `math`, `math/bits` | js, wasm, both | Elementary functions, constants and float bit conversions |
-| `math/rand` | js, wasm, both | Seeded generators (a subset in `wasm`/`both`) |
+| `math/rand` | js, wasm, both | Top-level functions draw from the host; `New(NewSource(seed))` repeats for a seed but not in Go's sequence |
 | `os` | js, wasm, both | `Stdout`, `Stderr`, `Stdin`, `File`; JS also has `Exit`, `Args`, `Getenv` |
 | `path`, `path/filepath` | js, wasm, both | Lexical helpers only; no file-system walking |
 | `strconv`, `strings`, `unicode`, `unicode/utf8` | js, wasm, both | `strings.Builder`, `Reader`, `Replacer` included |
-| `sync` | js, wasm, both | No `sync.Cond`, no `WaitGroup.Go` |
+| `sync` | js, wasm, both | Single-threaded: locking a locked `Mutex` reports a deadlock; no `sync.Cond`, no `WaitGroup.Go` |
 | `testing` | js, wasm, both | `T`, `B`, subtests, benchmarks; no fuzzing |
 | `time` | js, wasm, both | `Sleep` is JS-only; no timers or tickers |
 | `gofront/shared`, `gofront/simd` | wasm, both | Shared memory and SIMD helpers |

@@ -1126,7 +1126,7 @@ export class FunctionEmitter {
 			const instName = (ft?.kind === "PointerType" ? ft.base : ft)?.name;
 			const embedInfo =
 				(instName && this.mod.structTypes.get(instName)) ??
-				this.mod.structTypes.get(embed.name);
+				this.mod.structTypes.get(embed.typeName ?? embed.name);
 			if (embedInfo) {
 				const sub = this._resolveFieldPath(embedInfo, fieldName);
 				if (sub) {

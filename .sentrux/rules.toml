@@ -55,9 +55,7 @@ order = 7
 # stdlib-high(9) → stdlib-internal(10) → stdlib-mid(11) → stdlib-leaf(12)
 # `*` matches one directory level, `**` any depth; nested packages need `**`.
 # scripts/check-layers.js fails when a src or stdlib file matches no layer or a glob matches
-# no file. The only allowed gap (ALLOW in that script) is a file that imports a built-in
-# package which sentrux resolves by suffix to a compiler file (a false layer violation):
-# stdlib/math (math/bits -> src/backend/js/stdlib/bits.js).
+# no file. ALLOW in that script lists the only files that may stay unlayered (none today).
 
 [[layers]]
 name  = "stdlib-high"
@@ -71,10 +69,10 @@ order = 10
 
 [[layers]]
 name  = "stdlib-mid"
-paths = ["stdlib/io/**", "stdlib/hash/**", "stdlib/bytes/**", "stdlib/strings/**", "stdlib/strconv/**", "stdlib/slices/**", "stdlib/sort/**", "stdlib/maps/**", "stdlib/path/**", "stdlib/encoding/hex/**", "stdlib/encoding/base64/**", "stdlib/crypto/**"]
+paths = ["stdlib/io/**", "stdlib/hash/**", "stdlib/bytes/**", "stdlib/strings/**", "stdlib/strconv/**", "stdlib/slices/**", "stdlib/sort/**", "stdlib/maps/**", "stdlib/path/**", "stdlib/encoding/hex/**", "stdlib/encoding/base64/**", "stdlib/crypto/**", "stdlib/math/*"]
 order = 11
 
 [[layers]]
 name  = "stdlib-leaf"
-paths = ["stdlib/cmp/**", "stdlib/errors/**", "stdlib/html/**", "stdlib/iter/**", "stdlib/sync/**", "stdlib/unicode/**"]
+paths = ["stdlib/cmp/**", "stdlib/errors/**", "stdlib/html/**", "stdlib/iter/**", "stdlib/math/bits/**", "stdlib/math/rand/**", "stdlib/sync/**", "stdlib/unicode/**"]
 order = 12
