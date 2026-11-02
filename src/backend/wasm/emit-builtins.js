@@ -1108,8 +1108,7 @@ export class BuiltinsEmitter {
 					this.emitBytesNewBufferString(call, targetWasmType);
 					return true;
 				}
-				this.emitBytesCall(func.field, args, targetWasmType);
-				return true;
+				break;
 			case "time":
 				this.emitTimeCall(func.field, call, targetWasmType);
 				return true;

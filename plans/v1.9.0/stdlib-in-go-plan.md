@@ -408,7 +408,7 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
 
 ### Phase 7: `bytes`
 
-- [ ] **Task 7.1 — `bytes` functions in Go with natives**
+- [x] **Task 7.1 — `bytes` functions in Go with natives**
   - Files: `stdlib/bytes/bytes.go`, `src/backend/js/natives.js` (`IndexByte`, `Equal`, `Compare`)
   - Removes: `stdlib/bytes/{iter,search,split}.go`, `emitBytesCall`/`_emitBytes*` in `src/backend/wasm/stdlib/bytes.js`, function members of `src/backend/js/stdlib/bytes.js`, `bytes` function typings
   - Do: every existing `bytes` function with Go's signatures (`rune`/`byte` types for `ContainsRune`, `IndexByte`, `Map`, `FieldsFunc`, `TrimFunc`).

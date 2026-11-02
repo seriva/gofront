@@ -84,7 +84,7 @@ const GO_OVERLAID_PACKAGES = new Set(["errors"]);
 // replacers); a program names one of them as `pkg.Member`.
 const GO_MEMBER_PACKAGES = new Set(["strings", "bytes"]);
 const GO_MEMBER_RE =
-	/\b(?:strings|bytes)\.(?:NewReader|Reader|NewReplacer|Replacer)\b/;
+	/\b(?:strings\.(?:NewReader|Reader|NewReplacer|Replacer)|bytes\.(?!Buffer\b|NewBuffer))/;
 
 // Whether the program imports a package that exists only as Go source under
 // stdlib/ (no typechecker table).  The in-memory `compile` and `compileWasm`

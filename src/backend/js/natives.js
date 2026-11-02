@@ -117,3 +117,18 @@ JS_NATIVES.set("sort.Strings", (a) => sortNative({ name: "string" }, a[0]));
 
 // A string iterates by code point, as Go's `range` does.
 JS_NATIVES.set("utf8.RuneCountInString", (a) => `[...${a[0]}].length`);
+
+// ── bytes ─────────────────────────────────────────────────────
+
+// A nil slice reads as empty.
+JS_NATIVES.set("bytes.IndexByte", (a) => `(${a[0]} ?? []).indexOf(${a[1]})`);
+JS_NATIVES.set(
+	"bytes.Equal",
+	(a) =>
+		`((a, b) => { a ??= []; b ??= []; if (a.length !== b.length) return false; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false; return true; })(${a[0]}, ${a[1]})`,
+);
+JS_NATIVES.set(
+	"bytes.Compare",
+	(a) =>
+		`((a, b) => { a ??= []; b ??= []; const n = Math.min(a.length, b.length); for (let i = 0; i < n; i++) if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1; return a.length < b.length ? -1 : a.length > b.length ? 1 : 0; })(${a[0]}, ${a[1]})`,
+);
