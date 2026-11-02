@@ -97,6 +97,12 @@ function _isDisallowedInTypeArgs(tt) {
 	return DISALLOWED_IN_TYPE_ARGS.has(tt);
 }
 
+// `[T]` followed by `(` or a composite literal's `{` is an instantiation.  A
+// `{` after the condition of if/for/switch opens the block (`if v == s[i] {`).
+function _opensArgs(after, noCompLit) {
+	return after.type === T.LPAREN || (after.type === T.LBRACE && !noCompLit);
+}
+
 function _isTypeIntroducerToken(tt) {
 	return (
 		tt === T.STAR ||
@@ -176,7 +182,7 @@ export const expressionParserMethods = {
 				const nameLike =
 					expr.kind === "Ident" ||
 					(expr.kind === "SelectorExpr" && expr.expr.kind === "Ident");
-				const plainArgs = nameLike && this.looksLikeTypeArgList();
+				const plainArgs = nameLike && this.looksLikeTypeArgList(noCompLit);
 				const literalArgs =
 					nameLike && !plainArgs ? this.tryParseTypeLiteralArgs() : null;
 				if (literalArgs) {
@@ -287,7 +293,7 @@ export const expressionParserMethods = {
 
 	// Lookahead: does the [ ... ] after an Ident look like generic type args?
 	// Returns true if: only type-like tokens inside brackets, AND followed by a valid continuation
-	looksLikeTypeArgList() {
+	looksLikeTypeArgList(noCompLit = false) {
 		let i = this.pos + 1; // skip [
 		const src = this.tokens;
 		let depth = 1;
@@ -333,7 +339,7 @@ export const expressionParserMethods = {
 		const after = src[i + 1];
 		if (!after) return false;
 		// Call or composite lit — always valid as type args
-		if (after.type === T.LPAREN || after.type === T.LBRACE) return true;
+		if (_opensArgs(after, noCompLit)) return true;
 		// Function value in argument list: Identity[int], 99) — only if clearly a type
 		if (after.type === T.COMMA || after.type === T.RPAREN) {
 			return hasComma || hasTypeKeyword || hasUpperIdent;

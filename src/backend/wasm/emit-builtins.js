@@ -1073,9 +1073,6 @@ export class BuiltinsEmitter {
 			case "maps":
 				this.emitMapsCall(func.field, args, targetWasmType);
 				return true;
-			case "slices":
-				this.emitSlicesCall(func.field, args, targetWasmType);
-				return true;
 			case "strings":
 				if (func.field === "NewReader") {
 					this.emitStringsNewReader(call, targetWasmType);
@@ -1102,9 +1099,6 @@ export class BuiltinsEmitter {
 				return true;
 			case "utf8":
 				this.emitUtf8Call(func.field, args, targetWasmType);
-				return true;
-			case "sort":
-				this.emitSortCall(func.field, args, targetWasmType);
 				return true;
 			case "shared":
 				this.emitSharedNew(func.field, args);

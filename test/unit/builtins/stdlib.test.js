@@ -342,6 +342,7 @@ section("sort package");
 
 test("sort.Ints", () => {
 	const { js, errors } = compile(`package main
+import "sort"
 func main() {
 	nums := []int{3, 1, 4, 1, 5}
 	sort.Ints(nums)
@@ -353,6 +354,7 @@ func main() {
 
 test("sort.Strings", () => {
 	const { js, errors } = compile(`package main
+import "sort"
 func main() {
 	words := []string{"banana", "apple", "cherry"}
 	sort.Strings(words)
@@ -364,6 +366,7 @@ func main() {
 
 test("sort.Slice with custom comparator", () => {
 	const { js, errors } = compile(`package main
+import "sort"
 func main() {
 	nums := []int{3, 1, 4}
 	sort.Slice(nums, func(i int, j int) bool { return nums[i] > nums[j] })
@@ -375,6 +378,7 @@ func main() {
 
 test("sort.Slice less receives indices, not elements", () => {
 	const { js, errors } = compile(`package main
+import "sort"
 type P struct { Name string; Score int }
 func main() {
 	ps := []P{{"a", 2}, {"b", 9}, {"c", 5}, {"d", 1}, {"e", 7}, {"f", 3}, {"g", 8}}
@@ -389,6 +393,7 @@ func main() {
 
 test("sort.SliceStable keeps equal elements in input order", () => {
 	const { js, errors } = compile(`package main
+import "sort"
 type P struct { Name string; Key int }
 func main() {
 	ps := []P{{"a", 1}, {"b", 0}, {"c", 1}, {"d", 0}, {"e", 1}}
@@ -403,6 +408,7 @@ func main() {
 
 test("sort.SliceIsSorted uses index comparator", () => {
 	const { js, errors } = compile(`package main
+import "sort"
 func main() {
 	a := []int{1, 2, 2, 5}
 	b := []int{3, 1}
@@ -1195,6 +1201,7 @@ section("slices package");
 
 test("slices.Contains", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	s := []int{1, 2, 3}
 	console.log(slices.Contains(s, 2))
@@ -1229,6 +1236,7 @@ func Main() int {
 
 test("slices.Index", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	s := []string{"a", "b", "c"}
 	console.log(slices.Index(s, "b"))
@@ -1240,6 +1248,7 @@ func main() {
 
 test("slices.Equal", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	a := []int{1, 2, 3}
 	b := []int{1, 2, 3}
@@ -1253,6 +1262,7 @@ func main() {
 
 test("slices.Sort", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	s := []int{3, 1, 4, 1, 5}
 	slices.Sort(s)
@@ -1266,6 +1276,7 @@ func main() {
 
 test("slices.SortFunc", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	s := []int{3, 1, 2}
 	slices.SortFunc(s, func(a, b int) int {
@@ -1283,6 +1294,7 @@ func main() {
 
 test("slices.Reverse", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	s := []int{1, 2, 3}
 	slices.Reverse(s)
@@ -1296,6 +1308,7 @@ func main() {
 
 test("slices.Clone", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	s := []int{1, 2, 3}
 	c := slices.Clone(s)
@@ -1309,6 +1322,7 @@ func main() {
 
 test("slices.Compact", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	s := []int{1, 1, 2, 3, 3, 3, 4}
 	s = slices.Compact(s)
@@ -1322,6 +1336,7 @@ func main() {
 
 test("slices.Insert", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	s := []int{1, 2, 4}
 	s = slices.Insert(s, 2, 3)
@@ -1335,6 +1350,7 @@ func main() {
 
 test("slices.Delete", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	s := []int{1, 2, 3, 4, 5}
 	s = slices.Delete(s, 1, 3)
@@ -1348,6 +1364,7 @@ func main() {
 
 test("slices.Replace", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	s := []int{1, 2, 3, 4}
 	s = slices.Replace(s, 1, 3, 9, 8)
@@ -1361,6 +1378,7 @@ func main() {
 
 test("slices.Max and slices.Min", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	s := []int{3, 1, 4, 1, 5, 9}
 	console.log(slices.Max(s))
@@ -1372,6 +1390,7 @@ func main() {
 
 test("slices.Concat", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	a := []int{1, 2}
 	b := []int{3, 4}
@@ -1386,6 +1405,7 @@ func main() {
 
 test("slices.IsSorted", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	console.log(slices.IsSorted([]int{1, 2, 3}))
 	console.log(slices.IsSorted([]int{3, 1, 2}))
@@ -1396,6 +1416,7 @@ func main() {
 
 test("slices.Compare", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	console.log(slices.Compare([]int{1, 2, 3}, []int{1, 2, 3}))
 	console.log(slices.Compare([]int{1, 2}, []int{1, 3}))
@@ -1407,6 +1428,7 @@ func main() {
 
 test("slices.SortStableFunc", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	s := []int{3, 1, 2}
 	slices.SortStableFunc(s, func(a, b int) int { return a - b })
@@ -1420,6 +1442,7 @@ func main() {
 
 test("slices.IsSortedFunc", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	cmp := func(a, b int) int { return a - b }
 	console.log(slices.IsSortedFunc([]int{1, 2, 3}, cmp))
@@ -1431,6 +1454,7 @@ func main() {
 
 test("slices.MaxFunc and MinFunc", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	cmp := func(a, b int) int { return a - b }
 	s := []int{3, 1, 4, 1, 5}
@@ -1443,6 +1467,7 @@ func main() {
 
 test("slices.CompactFunc", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	s := []int{1, 2, 2, 3, 3, 3}
 	s = slices.CompactFunc(s, func(a, b int) bool { return a == b })
@@ -1456,6 +1481,7 @@ func main() {
 
 test("slices.DeleteFunc", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	s := []int{1, 2, 3, 4, 5}
 	s = slices.DeleteFunc(s, func(v int) bool { return v % 2 == 0 })
@@ -1469,6 +1495,7 @@ func main() {
 
 test("slices.Insert variadic", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	s := []int{1, 5}
 	s = slices.Insert(s, 1, 2, 3, 4)
@@ -1482,6 +1509,7 @@ func main() {
 
 test("slices.Concat three slices", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	a := []int{1}
 	b := []int{2}
@@ -1497,6 +1525,7 @@ func main() {
 
 test("slices.Grow and slices.Clip are no-ops", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	s := []int{1, 2, 3}
 	s = slices.Grow(s, 10)
@@ -1509,6 +1538,7 @@ func main() {
 
 test("slices functions on slice views (Task 0.20)", () => {
 	const { js, errors } = compile(`package main
+import "slices"
 func main() {
 	b := []int{9, 1, 2, 2, 3, 4, 9}
 	c := slices.Compact(b[1:6])
@@ -1938,6 +1968,7 @@ section("sort additions");
 
 test("sort.Search binary search", () => {
 	const { js, errors } = compile(`package main
+import "sort"
 func main() {
 	a := []int{1, 3, 6, 10, 15}
 	idx := sort.Search(len(a), func(i int) bool { return a[i] >= 6 })
@@ -1949,6 +1980,7 @@ func main() {
 
 test("sort.IntsAreSorted", () => {
 	const { js, errors } = compile(`package main
+import "sort"
 func main() {
 	console.log(sort.IntsAreSorted([]int{1, 2, 3}))
 	console.log(sort.IntsAreSorted([]int{3, 1, 2}))
@@ -1959,6 +1991,7 @@ func main() {
 
 test("sort.StringsAreSorted", () => {
 	const { js, errors } = compile(`package main
+import "sort"
 func main() {
 	console.log(sort.StringsAreSorted([]string{"a", "b", "c"}))
 	console.log(sort.StringsAreSorted([]string{"c", "a", "b"}))
@@ -1969,6 +2002,7 @@ func main() {
 
 test("sort.Float64sAreSorted", () => {
 	const { js, errors } = compile(`package main
+import "sort"
 func main() {
 	console.log(sort.Float64sAreSorted([]float64{1.0, 2.0, 3.0}))
 	console.log(sort.Float64sAreSorted([]float64{3.0, 1.0, 2.0}))

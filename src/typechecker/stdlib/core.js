@@ -1,5 +1,5 @@
 // Core standard library type definitions — browser globals, fmt, strings, bytes,
-// strconv, sort, math, errors, time, unicode, os, slices, html, io.
+// strconv, math, errors, time, unicode, os, html, io.
 
 import {
 	ANY,
@@ -509,47 +509,6 @@ export function setupCoreGlobals(globals, types) {
 		},
 	});
 
-	globals.define("sort", {
-		kind: "namespace",
-		name: "sort",
-		members: {
-			Ints: {
-				kind: "func",
-				params: [{ kind: "slice", elem: INT }],
-				returns: [VOID],
-			},
-			Float64s: {
-				kind: "func",
-				params: [{ kind: "slice", elem: FLOAT64 }],
-				returns: [VOID],
-			},
-			Strings: {
-				kind: "func",
-				params: [{ kind: "slice", elem: STRING }],
-				returns: [VOID],
-			},
-			Slice: { kind: "func", params: [ANY, ANY], returns: [VOID] },
-			SliceStable: { kind: "func", params: [ANY, ANY], returns: [VOID] },
-			SliceIsSorted: { kind: "func", params: [ANY, ANY], returns: [BOOL] },
-			Search: { kind: "func", params: [INT, ANY], returns: [INT] },
-			IntsAreSorted: {
-				kind: "func",
-				params: [{ kind: "slice", elem: INT }],
-				returns: [BOOL],
-			},
-			Float64sAreSorted: {
-				kind: "func",
-				params: [{ kind: "slice", elem: FLOAT64 }],
-				returns: [BOOL],
-			},
-			StringsAreSorted: {
-				kind: "func",
-				params: [{ kind: "slice", elem: STRING }],
-				returns: [BOOL],
-			},
-		},
-	});
-
 	globals.define("math", {
 		kind: "namespace",
 		name: "math",
@@ -914,73 +873,6 @@ export function setupCoreGlobals(globals, types) {
 			Stdout: OS_FILE_PTR,
 			Stderr: OS_FILE_PTR,
 			Stdin: OS_FILE_PTR,
-		},
-	});
-
-	// Slice helpers that return a slice of the same type as their first argument.
-	const sameSlice = (params, extra = {}) => ({
-		kind: "func",
-		params,
-		returns: [ANY],
-		_derivedReturn: "arg0",
-		...extra,
-	});
-	globals.define("slices", {
-		kind: "namespace",
-		name: "slices",
-		members: {
-			Contains: { kind: "func", params: [ANY, ANY], returns: [BOOL] },
-			ContainsFunc: { kind: "func", params: [ANY, ANY], returns: [BOOL] },
-			Index: { kind: "func", params: [ANY, ANY], returns: [INT] },
-			IndexFunc: { kind: "func", params: [ANY, ANY], returns: [INT] },
-			BinarySearch: { kind: "func", params: [ANY, ANY], returns: [INT, BOOL] },
-			BinarySearchFunc: {
-				kind: "func",
-				params: [ANY, ANY, ANY],
-				returns: [INT, BOOL],
-			},
-			Equal: { kind: "func", params: [ANY, ANY], returns: [BOOL] },
-			Compare: { kind: "func", params: [ANY, ANY], returns: [INT] },
-			Sort: { kind: "func", params: [ANY], returns: [VOID] },
-			SortFunc: { kind: "func", params: [ANY, ANY], returns: [VOID] },
-			SortStableFunc: { kind: "func", params: [ANY, ANY], returns: [VOID] },
-			IsSorted: { kind: "func", params: [ANY], returns: [BOOL] },
-			IsSortedFunc: { kind: "func", params: [ANY, ANY], returns: [BOOL] },
-			Reverse: { kind: "func", params: [ANY], returns: [VOID] },
-			Max: {
-				kind: "func",
-				params: [ANY],
-				returns: [ANY],
-				_derivedReturn: "elemOfArg0",
-			},
-			Min: {
-				kind: "func",
-				params: [ANY],
-				returns: [ANY],
-				_derivedReturn: "elemOfArg0",
-			},
-			MaxFunc: {
-				kind: "func",
-				params: [ANY, ANY],
-				returns: [ANY],
-				_derivedReturn: "elemOfArg0",
-			},
-			MinFunc: {
-				kind: "func",
-				params: [ANY, ANY],
-				returns: [ANY],
-				_derivedReturn: "elemOfArg0",
-			},
-			Clone: sameSlice([ANY]),
-			Compact: sameSlice([ANY]),
-			CompactFunc: sameSlice([ANY, ANY]),
-			Concat: sameSlice([ANY], { variadic: true }),
-			Delete: sameSlice([ANY, INT, INT]),
-			DeleteFunc: sameSlice([ANY, ANY]),
-			Insert: sameSlice([ANY, INT, ANY], { variadic: true }),
-			Replace: sameSlice([ANY, INT, INT, ANY], { variadic: true }),
-			Grow: sameSlice([ANY, INT]),
-			Clip: sameSlice([ANY]),
 		},
 	});
 

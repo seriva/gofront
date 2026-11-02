@@ -748,3 +748,35 @@ gB
 `,
 	);
 });
+
+section("WASM Slices — sorting is O(n log n)");
+
+test("slices.SortFunc makes at most 400,000 comparisons for 20,000 elements", () => {
+	const src = `
+package main
+
+import "slices"
+
+func Main() int64 {
+	n := 20000
+	xs := make([]int, n)
+	s := 7
+	for i := range xs {
+		s = (s*48271 + 12345) % 2147483647
+		xs[i] = s
+	}
+	calls := 0
+	slices.SortFunc(xs, func(a, b int) int {
+		calls++
+		return a - b
+	})
+	if !slices.IsSorted(xs) {
+		return -1
+	}
+	return int64(calls)
+}
+`;
+	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
+	assertEqual(wasmRes <= 400000n && wasmRes > 0n, true);
+	assertEqual(wasmRes, jsRes);
+});

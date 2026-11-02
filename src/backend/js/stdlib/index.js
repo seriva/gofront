@@ -22,8 +22,6 @@ import { regexpMethods } from "./regexp.js";
 import { sha256Methods } from "./sha256.js";
 import { sharedMethods } from "./shared.js";
 import { simdMethods } from "./simd.js";
-import { slicesMethods } from "./slices.js";
-import { sortMethods } from "./sort.js";
 import { strconvMethods } from "./strconv.js";
 import { stringsMethods } from "./strings.js";
 import { syncMethods } from "./sync.js";
@@ -41,7 +39,6 @@ const STDLIB_METHOD_MAP = {
 	strings: "_genStrings",
 	bytes: "_genBytes",
 	strconv: "_genStrconv",
-	sort: "_genSort",
 	math: "_genMath",
 	bits: "_genBits",
 	unicode: "_genUnicode",
@@ -49,7 +46,6 @@ const STDLIB_METHOD_MAP = {
 	errors: "_genErrors",
 	time: "_genTime",
 	regexp: "_genRegexp",
-	slices: "_genSlices",
 	maps: "_genMaps",
 	html: "_genHtml",
 	io: "_genIo",
@@ -122,8 +118,6 @@ export const stdlibGenMethods = {
 	...regexpMethods,
 	...sharedMethods,
 	...simdMethods,
-	...slicesMethods,
-	...sortMethods,
 	...strconvMethods,
 	...stringsMethods,
 	...timeMethods,

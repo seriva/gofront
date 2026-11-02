@@ -1341,12 +1341,12 @@ export const expressionCheckMethods = {
 			if (!resolved) return null;
 			fnType = resolved;
 		}
-		return this._completePartialInstantiation(expr, argTypes) ?? fnType;
+		return this._completePartialInstantiation(expr, argTypes, scope) ?? fnType;
 	},
 
 	// `F[int](x)` with fewer explicit type arguments than type parameters:
 	// infer the rest from the call arguments and record the full list.
-	_completePartialInstantiation(expr, argTypes) {
+	_completePartialInstantiation(expr, argTypes, scope) {
 		const inst = expr.func;
 		const generic = inst?.kind === "InstantiationExpr" && inst._genericFnType;
 		if (!generic || inst._typeArgs.length >= generic.typeParams.length)
@@ -1355,6 +1355,7 @@ export const expressionCheckMethods = {
 			generic,
 			this._inferArgTypes(expr, argTypes),
 			inst._typeArgs,
+			scope,
 		);
 		if (!typeArgs) {
 			this.err(
@@ -1561,8 +1562,6 @@ export const expressionCheckMethods = {
 		switch (mode) {
 			case "arg0":
 				return under ? arg : null;
-			case "elemOfArg0":
-				return under?.elem ?? null;
 			default:
 				return null;
 		}
@@ -1582,6 +1581,8 @@ export const expressionCheckMethods = {
 		const typeArgs = this.inferTypeArgs(
 			fnType,
 			this._inferArgTypes(expr, argTypes),
+			[],
+			scope,
 		);
 		if (!typeArgs) {
 			this.err(

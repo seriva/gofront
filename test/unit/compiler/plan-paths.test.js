@@ -25,13 +25,10 @@ const PLANS = [
 	{
 		file: "plans/v1.9.0/stdlib-in-go-plan.md",
 		exempt: [
-			// Pdq generator and template (Task 4.1 "new"), and the new tests of Tasks 4.1 and 13.1.
-			"scripts/{gen-pdq.js,pdq-template.txt}",
-			"test/unit/compiler/{gen-pdq,natives}.test.js",
+			// The new test of Task 13.1.
+			"test/unit/compiler/natives.test.js",
 			// Go-output cases (one file per package).
 			"test/unit/stdlib/*",
-			// Sort and string-search benchmark (Task 4.3 "new").
-			"test/perf/stdlib-bench.js",
 			// The Go files each migration task adds under stdlib/.  Files that
 			// exist today (for example stdlib/sort/sort.go) are not listed.
 			"stdlib/bytes/{buffer,bytes,reader}.go",
@@ -39,12 +36,13 @@ const PLANS = [
 			"stdlib/encoding/{base64/base64,binary/binary,hex/hex}.go",
 			"stdlib/{errors/errors,html/html,maps/maps,path/path,sync/sync}.go",
 			"stdlib/math/{bits/bits,rand/rand}.go",
-			"stdlib/slices/{slices,sort,zsort_cmp,zsort_ordered}.go",
-			"stdlib/sort/{zsort_func,zsort_iface}.go",
 			"stdlib/strconv/{float,strconv}.go",
 			"stdlib/strings/{reader,replacer,strings}.go",
 			"stdlib/time/{duration,format,parse,time}.go",
 			"stdlib/unicode/utf8/utf8.go",
+			// Files that completed tasks removed (their "Removes" lines still cite them).
+			"src/backend/js/stdlib/{slices,sort}.js",
+			"stdlib/slices/{extra,iter}.go",
 		],
 	},
 ];

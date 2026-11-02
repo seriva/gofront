@@ -116,6 +116,14 @@ test("index by a conversion or dereference is still an index", () => {
 	assertEqual(firstInit("func g() { x := a[*p]; _ = x }").kind, "IndexExpr");
 });
 
+test("an index before the block of an if or for stays an index", () => {
+	const ast = parse(
+		"package p\nfunc f(s []int, v int) int { for i := 0; i < len(s); i++ { if v == s[i] { return i } }; for range s[v] { }; return -1 }",
+	);
+	const text = JSON.stringify(ast);
+	assertEqual(text.includes('"InstantiationExpr"'), false);
+});
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	process.exit((await summarize()) > 0 ? 1 : 0);
 }

@@ -44,3 +44,71 @@ export function jsNativeCall(name, args, typeArgs) {
 	const body = template.replace(MARK_RE, (_, i) => names[Number(i)]);
 	return `((${names.join(", ")}) => ${body})(${args.join(", ")})`;
 }
+
+// ── slices and sort ───────────────────────────────────────────
+//
+// Element types where JS `===`, `indexOf` and the default array methods
+// agree with Go's `==` on a raw element: numbers, bigints, strings and
+// booleans, named or not.  Slices of other elements (structs, arrays,
+// interfaces, pointers) decline and run the Go body.
+
+const PRIMITIVE_KINDS = new Set([
+	"int",
+	"int8",
+	"int16",
+	"int32",
+	"int64",
+	"uint",
+	"uint8",
+	"uint16",
+	"uint32",
+	"uint64",
+	"uintptr",
+	"float32",
+	"float64",
+	"string",
+	"bool",
+]);
+
+function baseType(t) {
+	let u = t;
+	for (let i = 0; u?.kind === "named" && i < 32; i++) u = u.underlying;
+	return u;
+}
+
+// The element type argument of `slices.F[S, E]` when it is a primitive.
+function primitiveElem(typeArgs) {
+	const e = baseType(typeArgs?.[1]);
+	return e?.kind === "basic" && PRIMITIVE_KINDS.has(e.name) ? e : null;
+}
+
+// `Contains` uses `indexOf`: `includes` would find a NaN, which Go never does.
+JS_NATIVES.set("slices.Index", (a, targs) =>
+	primitiveElem(targs) ? `(${a[0]} ?? []).indexOf(${a[1]})` : null,
+);
+JS_NATIVES.set("slices.Contains", (a, targs) =>
+	primitiveElem(targs) ? `((${a[0]} ?? []).indexOf(${a[1]}) !== -1)` : null,
+);
+JS_NATIVES.set("slices.Reverse", (a, targs) =>
+	primitiveElem(targs) ? `(${a[0]} ?? []).reverse()` : null,
+);
+JS_NATIVES.set("slices.Clone", (a, targs) =>
+	primitiveElem(targs) ? `(${a[0]}?.slice() ?? null)` : null,
+);
+
+// Sorting is only native for `int` and `string`, where equal elements cannot
+// be told apart and the host order is Go's.
+const SORT_ORDER = {
+	int: "(a, b) => a - b",
+	string: "(a, b) => (a < b ? -1 : a > b ? 1 : 0)",
+};
+function sortNative(elem, arg) {
+	const cmp = SORT_ORDER[elem?.name];
+	return cmp ? `(${arg} ?? []).sort(${cmp})` : null;
+}
+JS_NATIVES.set("slices.Sort", (a, targs) => {
+	const e = targs?.[1];
+	return e?.kind === "basic" ? sortNative(e, a[0]) : null;
+});
+JS_NATIVES.set("sort.Ints", (a) => sortNative({ name: "int" }, a[0]));
+JS_NATIVES.set("sort.Strings", (a) => sortNative({ name: "string" }, a[0]));
