@@ -71,6 +71,14 @@ const STDLIB_ENV_PKGS = new Set([
 // side lives in WASM_STDLIB_JS (boundary.js).  All are registered eagerly
 // (when any STDLIB_ENV_PKGS package is imported) because the import table is
 // locked before function bodies are emitted.
+// Emitter-backed types whose interface methods are registered as synthetic
+// functions (see _registerIoSyntheticMethods in index.js).
+const SYNTHETIC_METHOD_TYPES = new Set([
+	"strings.Builder",
+	"bytes.Buffer",
+	"os.File",
+]);
+
 const S = "externref";
 const STDLIB_IMPORTS = [
 	// strings
@@ -1195,21 +1203,6 @@ export class ModuleEmitter {
 		return gIdx;
 	}
 
-	getIoDiscardGlobalIndex() {
-		if (this.ioDiscardGlobalIndex !== undefined) {
-			return this.ioDiscardGlobalIndex;
-		}
-		this.getStructType("io.discard");
-		const gIdx = this.globals.length;
-		this.globals.push({
-			type: "anyref",
-			mutable: true,
-			init: [{ op: "ref.null", heapType: "any" }],
-		});
-		this.ioDiscardGlobalIndex = gIdx;
-		return gIdx;
-	}
-
 	getOsGlobalIndex(field) {
 		this.osGlobals ??= new Map();
 		if (this.osGlobals.has(field)) return this.osGlobals.get(field);
@@ -2159,6 +2152,16 @@ export class ModuleEmitter {
 		});
 	}
 
+	// An emitter-backed type declares more methods than it dispatches: only
+	// those with a synthetic method implement an interface.
+	_structsDispatching(iface) {
+		const dispatches = (sName) =>
+			!SYNTHETIC_METHOD_TYPES.has(sName) ||
+			!iface?.methods ||
+			[...iface.methods.keys()].every((m) => this.funcMap.has(`${sName}.${m}`));
+		return [...this.structTypes.entries()].filter(([n]) => dispatches(n));
+	}
+
 	getTypesImplementingInterface(ifaceType) {
 		const candidates = [];
 		const seen = new Set();
@@ -2168,7 +2171,7 @@ export class ModuleEmitter {
 			) ?? ifaceType;
 
 		// 1. Struct types
-		for (const [sName, sInfo] of this.structTypes.entries()) {
+		for (const [sName, sInfo] of this._structsDispatching(ifaceResolved)) {
 			const namedType = this.checker?.types?.get(sName) ?? {
 				kind: "named",
 				name: sName,

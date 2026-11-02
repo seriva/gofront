@@ -254,14 +254,22 @@ export function setupExtendedGlobals(globals, types) {
 			methods: new Map([..._builderBase, ...extra]),
 		},
 	});
-	const ioPkg = globals.lookup("io");
-	const IO_READER = ioPkg?.members?.Reader ?? {
+	const IO_READER = {
 		kind: "interface",
 		name: "io.Reader",
+		methods: new Map([
+			["Read", { kind: "func", params: [BYTE_SLICE_T], returns: [INT, ERROR] }],
+		]),
 	};
-	const IO_WRITER = ioPkg?.members?.Writer ?? {
+	const IO_WRITER = {
 		kind: "interface",
 		name: "io.Writer",
+		methods: new Map([
+			[
+				"Write",
+				{ kind: "func", params: [BYTE_SLICE_T], returns: [INT, ERROR] },
+			],
+		]),
 	};
 
 	types.set(
@@ -306,131 +314,8 @@ export function setupExtendedGlobals(globals, types) {
 			["Peek", { kind: "func", params: [INT], returns: [BYTE_SLICE_T, ERROR] }],
 		]),
 	);
-	types.set("strings.Replacer", {
-		kind: "named",
-		name: "strings.Replacer",
-		underlying: {
-			kind: "struct",
-			fields: new Map([["_pairs", STR_SLICE_T]]),
-			methods: new Map([
-				["Replace", { kind: "func", params: [STRING], returns: [STRING] }],
-				[
-					"WriteString",
-					{
-						kind: "func",
-						params: [IO_WRITER, STRING],
-						returns: [INT, ERROR],
-					},
-				],
-			]),
-		},
-	});
-	const _makeReaderType = (name, srcType, resetArgType = srcType) => ({
-		kind: "named",
-		name,
-		underlying: {
-			kind: "struct",
-			fields: new Map([
-				["_src", srcType],
-				["_pos", INT],
-				["_prev", INT],
-			]),
-			methods: new Map([
-				[
-					"Read",
-					{ kind: "func", params: [BYTE_SLICE_T], returns: [INT, ERROR] },
-				],
-				[
-					"ReadAt",
-					{
-						kind: "func",
-						params: [BYTE_SLICE_T, INT64],
-						returns: [INT, ERROR],
-					},
-				],
-				["ReadByte", { kind: "func", params: [], returns: [UINT8, ERROR] }],
-				["UnreadByte", { kind: "func", params: [], returns: [ERROR] }],
-				[
-					"ReadRune",
-					{ kind: "func", params: [], returns: [INT32, INT, ERROR] },
-				],
-				["UnreadRune", { kind: "func", params: [], returns: [ERROR] }],
-				[
-					"Seek",
-					{ kind: "func", params: [INT64, INT], returns: [INT64, ERROR] },
-				],
-				["Size", { kind: "func", params: [], returns: [INT64] }],
-				[
-					"WriteTo",
-					{ kind: "func", params: [IO_WRITER], returns: [INT64, ERROR] },
-				],
-				["Len", { kind: "func", params: [], returns: [INT] }],
-				["Reset", { kind: "func", params: [resetArgType], returns: [VOID] }],
-			]),
-		},
-	});
-	types.set(
-		"strings.Reader",
-		_makeReaderType("strings.Reader", BYTE_SLICE_T, STRING),
-	);
-	types.set("bytes.Reader", _makeReaderType("bytes.Reader", BYTE_SLICE_T));
-	types.set("io.discard", {
-		kind: "named",
-		name: "io.discard",
-		underlying: {
-			kind: "struct",
-			fields: new Map(),
-			methods: new Map([
-				[
-					"Write",
-					{ kind: "func", params: [BYTE_SLICE_T], returns: [INT, ERROR] },
-				],
-				[
-					"WriteString",
-					{ kind: "func", params: [STRING], returns: [INT, ERROR] },
-				],
-			]),
-		},
-	});
-	types.set("io.LimitedReader", {
-		kind: "named",
-		name: "io.LimitedReader",
-		underlying: {
-			kind: "struct",
-			fields: new Map([
-				["R", IO_READER],
-				["N", INT64],
-			]),
-			methods: new Map([
-				[
-					"Read",
-					{ kind: "func", params: [BYTE_SLICE_T], returns: [INT, ERROR] },
-				],
-			]),
-		},
-	});
-	if (ioPkg?.members) {
-		ioPkg.members.LimitedReader = types.get("io.LimitedReader");
-	}
-	const stringsPkg = globals.lookup("strings");
-	if (stringsPkg?.members) {
-		stringsPkg.members.NewReader = {
-			kind: "func",
-			params: [STRING],
-			returns: [{ kind: "pointer", base: types.get("strings.Reader") }],
-		};
-		stringsPkg.members.Reader = types.get("strings.Reader");
-	}
 	const bytesPkg = globals.lookup("bytes");
-	if (bytesPkg?.members) {
-		bytesPkg.members.NewReader = {
-			kind: "func",
-			params: [BYTE_SLICE_T],
-			returns: [{ kind: "pointer", base: types.get("bytes.Reader") }],
-		};
-		bytesPkg.members.Reader = types.get("bytes.Reader");
-		bytesPkg.members.Buffer = types.get("bytes.Buffer");
-	}
+	if (bytesPkg?.members) bytesPkg.members.Buffer = types.get("bytes.Buffer");
 
 	globals.define("rand", {
 		kind: "namespace",

@@ -1707,6 +1707,10 @@ section("io package");
 
 test("io.WriteString with strings.Builder", () => {
 	const { js, errors } = compile(`package main
+import (
+	"io"
+	"strings"
+)
 func main() {
 	var b strings.Builder
 	n, err := io.WriteString(&b, "hello")
@@ -1720,6 +1724,10 @@ func main() {
 
 test("io.WriteString with bytes.Buffer", () => {
 	const { js, errors } = compile(`package main
+import (
+	"bytes"
+	"io"
+)
 func main() {
 	var b bytes.Buffer
 	io.WriteString(&b, "world")
@@ -1731,6 +1739,10 @@ func main() {
 
 test("io.Writer accepted as parameter type", () => {
 	const { js, errors } = compile(`package main
+import (
+	"io"
+	"strings"
+)
 func writeAll(w io.Writer, lines []string) {
 	for _, line := range lines {
 		io.WriteString(w, line)
@@ -1747,6 +1759,9 @@ func main() {
 
 test("io.EOF is an error value", () => {
 	const { js, errors } = compile(`package main
+import (
+	"io"
+)
 func main() {
 	var err error = io.EOF
 	console.log(err != nil)
@@ -2168,6 +2183,9 @@ func main() {
 
 test("strings.NewReplacer", () => {
 	const { js, errors } = compile(`package main
+import (
+	"strings"
+)
 func main() {
 	r := strings.NewReplacer("foo", "bar", "baz", "qux")
 	console.log(r.Replace("foo and baz"))
@@ -2546,6 +2564,9 @@ section("io.Reader additions");
 
 test("strings.NewReader Len and Read", () => {
 	const { js, errors } = compile(`package main
+import (
+	"strings"
+)
 func main() {
 	r := strings.NewReader("hello")
 	console.log(r.Len())
@@ -2556,6 +2577,9 @@ func main() {
 
 test("bytes.NewReader Len", () => {
 	const { js, errors } = compile(`package main
+import (
+	"bytes"
+)
 func main() {
 	r := bytes.NewReader([]byte{1, 2, 3})
 	console.log(r.Len())
@@ -2566,6 +2590,10 @@ func main() {
 
 test("io.ReadAll from strings.NewReader", () => {
 	const { js, errors } = compile(`package main
+import (
+	"io"
+	"strings"
+)
 func main() {
 	r := strings.NewReader("hello")
 	data, err := io.ReadAll(r)

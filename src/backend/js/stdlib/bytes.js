@@ -278,90 +278,11 @@ const BYTES_DISPATCH = {
 			}
 			return new Uint8Array(res);
 		})(${a[0]}, ${a[1]})`,
-	NewReader: (a) =>
-		`((b) => ({
-			_src: b,
-			_pos: 0,
-			_prevRune: -1,
-			Read(p) {
-				if (this._pos >= this._src.length) return [0, __io_eof];
-				const n = Math.min(p.length, this._src.length - this._pos);
-				for (let i = 0; i < n; i++) p[i] = this._src[this._pos + i];
-				this._pos += n;
-				this._prevRune = -1;
-				return [n, null];
-			},
-			ReadAt(p, off) {
-				const o = Number(off);
-				if (o < 0) return [0, __error("bytes.Reader.ReadAt: negative offset")];
-				if (o >= this._src.length) return [0, __io_eof];
-				const n = Math.min(p.length, this._src.length - o);
-				for (let i = 0; i < n; i++) p[i] = this._src[o + i];
-				return [n, n < p.length ? __io_eof : null];
-			},
-			ReadByte() {
-				if (this._pos >= this._src.length) return [0, __io_eof];
-				this._prevRune = -1;
-				return [this._src[this._pos++], null];
-			},
-			UnreadByte() {
-				if (this._pos <= 0) return __error("bytes.Reader.UnreadByte: at beginning of slice");
-				this._prevRune = -1;
-				this._pos--;
-				return null;
-			},
-			ReadRune() {
-				if (this._pos >= this._src.length) return [0, 0, __io_eof];
-				const rem = this._src.subarray ? this._src.subarray(this._pos) : new Uint8Array(this._src.slice(this._pos));
-				const s = new TextDecoder().decode(rem);
-				const cp = s.codePointAt(0);
-				const runeStr = s.slice(0, cp > 0xffff ? 2 : 1);
-				const sz = new TextEncoder().encode(runeStr).length;
-				this._prevRune = this._pos;
-				this._pos += sz;
-				return [cp, sz, null];
-			},
-			UnreadRune() {
-				if (this._prevRune === undefined || this._prevRune < 0 || this._prevRune >= this._pos) {
-					return __error("bytes.Reader.UnreadRune: previous operation was not ReadRune");
-				}
-				this._pos = this._prevRune;
-				this._prevRune = -1;
-				return null;
-			},
-			Seek(offset, whence) {
-				const off = BigInt(offset);
-				const w = Number(whence);
-				let newPos;
-				if (w === 0) newPos = off;
-				else if (w === 1) newPos = BigInt(this._pos) + off;
-				else if (w === 2) newPos = BigInt(this._src.length) + off;
-				else return [0n, __error("bytes.Reader.Seek: invalid whence")];
-				if (newPos < 0n) return [0n, __error("bytes.Reader.Seek: negative position")];
-				this._pos = Number(newPos);
-				this._prevRune = -1;
-				return [newPos, null];
-			},
-			Size() { return BigInt(this._src.length); },
-			WriteTo(w) {
-				if (this._pos >= this._src.length) return [0, null];
-				const rem = this._src.subarray ? this._src.subarray(this._pos) : new Uint8Array(this._src.slice(this._pos));
-				const [n, err] = w.Write(rem);
-				this._pos += n;
-				return [n, err];
-			},
-			Len() { return Math.max(0, this._src.length - this._pos); },
-			Reset(b2) { this._src = b2; this._pos = 0; this._prevRune = -1; }
-		}))(${a[0]})`,
 };
 
 /** @type {ThisType<CodeGen>} */
 export const bytesMethods = {
 	_genBytes(fn, a) {
-		if (fn === "NewReader") {
-			this.useHelper("ioEOF");
-			this.useHelper("error");
-		}
 		const gen = BYTES_DISPATCH[fn];
 		return gen ? gen(a()) : undefined;
 	},
