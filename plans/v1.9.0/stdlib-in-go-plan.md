@@ -476,21 +476,21 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
 
 ### Phase 10: `math/bits`, `math/rand`, `sync`
 
-- [ ] **Task 10.1 — `math/bits` in Go with natives**
+- [x] **Task 10.1 — `math/bits` in Go with natives**
   - Files: `stdlib/math/bits/bits.go`, `src/backend/js/natives.js`, `src/backend/wasm/natives.js` (`Len*`, `LeadingZeros*`, `TrailingZeros*`, `OnesCount*` as `Math.clz32`/WASM `clz`/`ctz`/`popcnt`)
   - Removes: `src/backend/js/stdlib/bits.js`, `emitBitsCall` in `core.js`, typings; `stdlib/math/extra.go`'s `ALLOW` entry in `scripts/check-layers.js`
   - Do: every existing member with Go's signatures (`uint` vs `uint64`), absorbing `Add64`/`Mul64`/`Div64`.
   - Test: `test/unit/stdlib/bits.test.js` — wide arithmetic, edge widths; zero-alloc and raycast benches unchanged.
   - Done when: cases pass four ways.
 
-- [ ] **Task 10.2 — `math/rand` in Go over `rand_source`**
+- [x] **Task 10.2 — `math/rand` in Go over `rand_source`**
   - Files: `stdlib/math/rand/rand.go`, `src/typechecker/types.js` (`INTRINSICS`: `rand_source`), `src/backend/js/index.js` (`JS_INTRINSICS.rand_source`; the WASM side uses the existing random import)
   - Removes: `src/backend/js/stdlib/rand.js`, rand in `src/backend/wasm/stdlib/pure.js`, typings
   - Do: top-level functions draw from `//gofront:intrinsic rand_source`; `Intn`, `Int63`, `Float64`, `Perm`, `Shuffle`, `Rand`/`NewSource` in Go.
   - Test: `test/unit/stdlib/rand.test.js` — range checks, `Perm` is a permutation, `Shuffle` keeps the multiset; `rand.Perm(-1)` panics `runtime error: makeslice: len out of range`.
   - Done when: cases pass four ways.
 
-- [ ] **Task 10.3 — `sync` in Go**
+- [x] **Task 10.3 — `sync` in Go**
   - Files: `stdlib/sync/sync.go`
   - Removes: `stdlib/sync/extra.go`, `src/backend/js/stdlib/sync.js`, `emitSync*` in `packages.js`, typings
   - Do: `Mutex`, `RWMutex`, `Once`, `WaitGroup`, `OnceFunc`/`OnceValue`/`OnceValues` as single-threaded structs; `Unlock` of an unlocked mutex panics with Go's message (`sync: unlock of unlocked mutex`).

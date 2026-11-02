@@ -2,20 +2,18 @@
 // One file per Go package under ./stdlib/. This index merges them.
 
 import { binaryMethods } from "./binary.js";
-import { bitsMethods } from "./bits.js";
 import { builderMethods } from "./builder.js";
+import { randMethods } from "./cryptorand.js";
 import { errorsMethods } from "./errors.js";
 import { fmtMethods } from "./fmt.js";
 import { gomMethods } from "./gom.js";
 import { jsonMethods } from "./json.js";
 import { mathMethods } from "./math.js";
 import { osMethods } from "./os.js";
-import { randMethods } from "./rand.js";
 import { regexpMethods } from "./regexp.js";
 import { sharedMethods } from "./shared.js";
 import { simdMethods } from "./simd.js";
 import { strconvMethods } from "./strconv.js";
-import { syncMethods } from "./sync.js";
 import { testingMethods } from "./testing.js";
 import { timeMethods } from "./time.js";
 import { unicodeMethods } from "./unicode.js";
@@ -28,7 +26,6 @@ const STDLIB_METHOD_MAP = {
 	fmt: "_genFmt",
 	strconv: "_genStrconv",
 	math: "_genMath",
-	bits: "_genBits",
 	unicode: "_genUnicode",
 	os: "_genOs",
 	errors: "_genErrors",
@@ -37,7 +34,6 @@ const STDLIB_METHOD_MAP = {
 	rand: "_genRand",
 	testing: "_genTesting",
 	shared: "_genShared",
-	sync: "_genSync",
 	binary: "_genBinary",
 	json: "_genJson",
 	simd: "_genSimd",
@@ -81,7 +77,6 @@ const dispatchMethods = {
 
 /** @type {ThisType<CodeGen>} */
 export const stdlibGenMethods = {
-	...bitsMethods,
 	...builderMethods,
 	...errorsMethods,
 	...fmtMethods,
@@ -96,7 +91,6 @@ export const stdlibGenMethods = {
 	...timeMethods,
 	...unicodeMethods,
 	...testingMethods,
-	...syncMethods,
 	...binaryMethods,
 	...jsonMethods,
 	...dispatchMethods,

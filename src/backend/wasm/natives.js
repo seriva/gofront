@@ -14,6 +14,37 @@
 
 export const WASM_NATIVES = new Map();
 
+// Bodies of `//gofront:intrinsic` functions (names: INTRINSICS in
+// typechecker/types.js).  An entry is `{ prepare?, emit }`: `prepare(mod)`
+// registers the imports `emit(emitter)` calls (the import table is locked
+// before bodies are emitted), and `emit` leaves the result on the stack.
+const WASM_INTRINSICS = {
+	// math/rand: the host's `Math.random`.
+	rand_source: {
+		prepare: (mod) => mod.getMathRandomImportIndex(),
+		emit: (e) =>
+			e.pushInstruction({
+				op: "call",
+				funcIndex: e.mod.getMathRandomImportIndex(),
+			}),
+	},
+};
+
+function wasmIntrinsic(fn) {
+	const entry = WASM_INTRINSICS[fn.intrinsic];
+	if (!entry) throw new Error(`no WASM body for intrinsic '${fn.intrinsic}'`);
+	return entry;
+}
+
+export function prepareWasmIntrinsic(mod, fn) {
+	wasmIntrinsic(fn).prepare?.(mod);
+}
+
+export function emitWasmIntrinsic(emitter, fn) {
+	wasmIntrinsic(fn).emit(emitter);
+	emitter.pushInstruction("return");
+}
+
 // Registers the imports of the native a call site names, if any.
 export function prepareWasmNative(mod, call) {
 	if (!mod.natives || !call._native) return;
@@ -93,3 +124,65 @@ const STRING_NATIVES = {
 };
 for (const [native, [name, kinds, result]] of Object.entries(STRING_NATIVES))
 	WASM_NATIVES.set(native, hostCall(name, [...kinds], result));
+
+// ── math/bits ─────────────────────────────────────────────────
+//
+// `clz`, `ctz` and `popcnt` of the operand's width.  Operands narrower than 32
+// bits are already zero-extended in their i32; `TrailingZeros` sets a bit
+// above the operand so that a zero input counts its width.
+
+function bitsNative(family, width) {
+	const wide = width === 64;
+	const ty = wide ? "i64" : "i32";
+	const constant = (value) => ({
+		op: `${ty}.const`,
+		value: wide ? BigInt(value) : value,
+	});
+	return {
+		emit(e, call, _typeArgs, target) {
+			if (family === "Len") e.pushInstruction(constant(wide ? 64 : 32));
+			if (wide) e.emitExpr(call.args[0], "i64");
+			else e._emitI32Arg(call.args[0]);
+			switch (family) {
+				case "Len":
+					e.pushInstruction(`${ty}.clz`);
+					e.pushInstruction(`${ty}.sub`);
+					break;
+				case "LeadingZeros":
+					e.pushInstruction(`${ty}.clz`);
+					if (width < 32) {
+						e.pushInstruction(constant(32 - width));
+						e.pushInstruction("i32.sub");
+					}
+					break;
+				case "TrailingZeros":
+					if (width < 32) {
+						e.pushInstruction(constant(1 << width));
+						e.pushInstruction("i32.or");
+					}
+					e.pushInstruction(`${ty}.ctz`);
+					break;
+				case "OnesCount":
+					e.pushInstruction(`${ty}.popcnt`);
+					break;
+			}
+			if (wide) {
+				if (target === "i32") e.pushInstruction("i32.wrap_i64");
+			} else if ((target ?? "i64") === "i64") {
+				e.pushInstruction("i64.extend_i32_u");
+			}
+			return true;
+		},
+	};
+}
+
+for (const family of ["Len", "LeadingZeros", "TrailingZeros", "OnesCount"]) {
+	for (const [suffix, width] of [
+		["", 64],
+		["8", 8],
+		["16", 16],
+		["32", 32],
+		["64", 64],
+	])
+		WASM_NATIVES.set(`bits.${family}${suffix}`, bitsNative(family, width));
+}

@@ -260,3 +260,26 @@ JS_NATIVES.set(
 	"strings.TrimSuffix",
 	strFn("s, p", "s.endsWith(p) ? s.slice(0, s.length - p.length) : s"),
 );
+
+// ── math/bits ─────────────────────────────────────────────────
+//
+// Only the 8, 16 and 32 bit forms: their operands are Numbers that
+// `Math.clz32` reads exactly.  The 64 bit and `uint` forms hold BigInts or
+// imprecise Numbers, so they decline and run the Go body.
+
+for (const n of [8, 16, 32]) {
+	JS_NATIVES.set(`bits.Len${n}`, (a) => `(32 - Math.clz32(${a[0]}))`);
+	JS_NATIVES.set(
+		`bits.LeadingZeros${n}`,
+		(a) => `(Math.clz32(${a[0]}) - ${32 - n})`,
+	);
+	JS_NATIVES.set(
+		`bits.TrailingZeros${n}`,
+		(a) => `(${a[0]} === 0 ? ${n} : 31 - Math.clz32(${a[0]} & -${a[0]}))`,
+	);
+	JS_NATIVES.set(
+		`bits.OnesCount${n}`,
+		(a) =>
+			`((v) => { v -= (v >>> 1) & 0x55555555; v = (v & 0x33333333) + ((v >>> 2) & 0x33333333); return Math.imul((v + (v >>> 4)) & 0x0f0f0f0f, 0x01010101) >>> 24; })(${a[0]})`,
+	);
+}

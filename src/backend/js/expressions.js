@@ -147,10 +147,6 @@ function collectFunctionLabels(node, labels = new Set()) {
 const NAMED_ZERO_TABLE = {
 	"time.Time": [null, "{ _d: new Date(0), _isZero: true }"],
 	"strings.Builder": [null, '{ _buf: "" }'],
-	"sync.Mutex": ["sync", "__sync_mutex()"],
-	"sync.RWMutex": ["sync", "__sync_rwmutex()"],
-	"sync.Once": ["sync", "__sync_once()"],
-	"sync.WaitGroup": ["sync", "__sync_waitgroup()"],
 	"simd.F32x4": [null, "Object.freeze([0, 0, 0, 0])"],
 	F32x4: [null, "Object.freeze([0, 0, 0, 0])"],
 	"simd.Mask32x4": [null, "Object.freeze([false, false, false, false])"],
@@ -267,9 +263,6 @@ const NS_CONSTANTS = {
 	strconv: {
 		ErrSyntax: "__strconv_err_syntax",
 		ErrRange: "__strconv_err_range",
-	},
-	bits: {
-		UintSize: "64",
 	},
 	rand: {
 		Reader: "__crypto_rand_reader",

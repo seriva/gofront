@@ -2,8 +2,8 @@
 // Standard library emitters for the WebAssembly backend.
 //
 // Organized by domain:
-// - core.js:   math, math/bits, maps, strings, strconv, fmt, errors (As), testing
-// - pure.js:   stateless utilities (unicode, math/rand)
+// - core.js:   math, maps, strings, strconv, fmt, errors (As), testing
+// - pure.js:   stateless utilities (unicode, crypto/rand)
 // - io.js:     io constants/functions, readers/writers, fmt Fprint/Sscan, synthetic IO methods
 // - time.js:   time package (Duration, Time struct, components, Format/Parse, clock)
 

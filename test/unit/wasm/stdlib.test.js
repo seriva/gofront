@@ -1054,7 +1054,7 @@ package main
 
 import (
 	${goCode.includes("bytes.") ? '"bytes"' : ""}
-	"math/rand"
+	${goCode.includes("rand.") ? '"math/rand"' : ""}
 )
 
 func Main() {
@@ -1068,7 +1068,7 @@ func Main() {
 	};
 
 	testPanic("rand.Intn(0)", "invalid argument to Intn");
-	testPanic("rand.Perm(-1)", "invalid argument to Perm");
+	testPanic("rand.Perm(-1)", "makeslice: len out of range");
 	testPanic(
 		"rand.Shuffle(-1, func(i, j int){})",
 		"invalid argument to Shuffle",
@@ -1825,7 +1825,8 @@ func Main() string {
 `;
 	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
 	assertEqual(wasmRes, jsRes);
-	assertEqual(wasmRes, "true|1");
+	// A locked mutex does not TryLock, as in Go.
+	assertEqual(wasmRes, "false|1");
 });
 
 section("WASM Stdlib — crypto/rand & crypto/sha256");

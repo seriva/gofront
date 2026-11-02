@@ -1818,19 +1818,6 @@ var __timeParseDuration = __timeParseDuration || function(s) {
   return [Number(totalNs), null];
 };`;
 
-export const HELPER_SYNC = `var __sync_mutex = __sync_mutex || function() {
-  return { Lock() {}, Unlock() {}, TryLock() { return true; } };
-};
-var __sync_rwmutex = __sync_rwmutex || function() {
-  return { Lock() {}, Unlock() {}, RLock() {}, RUnlock() {}, TryLock() { return true; }, TryRLock() { return true; } };
-};
-var __sync_once = __sync_once || function() {
-  return { done: 0, Do(f) { if (!this.done) { this.done = 1; f(); } } };
-};
-var __sync_waitgroup = __sync_waitgroup || function() {
-  return { counter: 0, Add(d) { this.counter = (this.counter || 0) + d; }, Done() { this.counter = (this.counter || 0) - 1; }, Wait() {} };
-};`;
-
 export const HELPER_CRYPTO_RAND = `var __crypto_rand_read = __crypto_rand_read || function(b) {
   if (!b || b.length === 0) return [0, null];
   const u8 = ArrayBuffer.isView(b) ? b : new Uint8Array(b.length);

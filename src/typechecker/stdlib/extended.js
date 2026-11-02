@@ -5,14 +5,11 @@ import {
 	ANY,
 	BOOL,
 	ERROR,
-	FLOAT32,
 	FLOAT64,
 	INT,
-	INT32,
 	INT64,
 	STRING,
 	UINT8,
-	UINT32,
 	UINT64,
 	VOID,
 } from "../types.js";
@@ -264,27 +261,11 @@ export function setupExtendedGlobals(globals, types) {
 			["WriteRune", { kind: "func", params: [INT], returns: [INT, ERROR] }],
 		]),
 	);
+	// crypto/rand; math/rand is Go source (stdlib/math/rand).
 	globals.define("rand", {
 		kind: "namespace",
 		name: "rand",
 		members: {
-			Intn: { kind: "func", params: [INT], returns: [INT] },
-			Float64: { kind: "func", params: [], returns: [FLOAT64] },
-			Float32: { kind: "func", params: [], returns: [FLOAT32] },
-			Int: { kind: "func", params: [], returns: [INT] },
-			Int63: { kind: "func", params: [], returns: [INT64] },
-			Int63n: { kind: "func", params: [INT64], returns: [INT64] },
-			Int31: { kind: "func", params: [], returns: [INT32] },
-			Int31n: { kind: "func", params: [INT32], returns: [INT32] },
-			Uint32: { kind: "func", params: [], returns: [UINT32] },
-			Uint64: { kind: "func", params: [], returns: [UINT64] },
-			Seed: { kind: "func", params: [INT], returns: [VOID] },
-			Shuffle: { kind: "func", params: [INT, ANY], returns: [VOID] },
-			Perm: {
-				kind: "func",
-				params: [INT],
-				returns: [{ kind: "slice", elem: INT }],
-			},
 			Read: {
 				kind: "func",
 				params: [{ kind: "slice", elem: UINT8 }],
@@ -600,81 +581,6 @@ export function setupExtendedGlobals(globals, types) {
 	types.set("testing.M", TESTING_M);
 	types.set("testing.TB", TESTING_TB);
 	types.set("testing.BenchmarkResult", BENCHMARK_RESULT_T);
-
-	// ── sync ──────────────────────────────────────────────────────
-	const MUTEX_T = {
-		kind: "named",
-		name: "sync.Mutex",
-		underlying: { kind: "struct", fields: new Map([["state", INT32]]) },
-		methods: new Map([
-			["Lock", { kind: "func", params: [], returns: [VOID] }],
-			["Unlock", { kind: "func", params: [], returns: [VOID] }],
-			["TryLock", { kind: "func", params: [], returns: [BOOL] }],
-		]),
-	};
-	const LOCKER_T = {
-		kind: "interface",
-		name: "sync.Locker",
-		methods: new Map([
-			["Lock", { kind: "func", params: [], returns: [VOID] }],
-			["Unlock", { kind: "func", params: [], returns: [VOID] }],
-		]),
-	};
-	const RWMUTEX_T = {
-		kind: "named",
-		name: "sync.RWMutex",
-		underlying: { kind: "struct", fields: new Map([["state", INT32]]) },
-		methods: new Map([
-			["Lock", { kind: "func", params: [], returns: [VOID] }],
-			["Unlock", { kind: "func", params: [], returns: [VOID] }],
-			["RLock", { kind: "func", params: [], returns: [VOID] }],
-			["RUnlock", { kind: "func", params: [], returns: [VOID] }],
-			["RLocker", { kind: "func", params: [], returns: [LOCKER_T] }],
-			["TryLock", { kind: "func", params: [], returns: [BOOL] }],
-			["TryRLock", { kind: "func", params: [], returns: [BOOL] }],
-		]),
-	};
-	const ONCE_T = {
-		kind: "named",
-		name: "sync.Once",
-		underlying: { kind: "struct", fields: new Map([["done", UINT32]]) },
-		methods: new Map([
-			[
-				"Do",
-				{
-					kind: "func",
-					params: [{ kind: "func", params: [], returns: [VOID] }],
-					returns: [VOID],
-				},
-			],
-		]),
-	};
-	const WAITGROUP_T = {
-		kind: "named",
-		name: "sync.WaitGroup",
-		underlying: { kind: "struct", fields: new Map([["counter", INT]]) },
-		methods: new Map([
-			["Add", { kind: "func", params: [INT], returns: [VOID] }],
-			["Done", { kind: "func", params: [], returns: [VOID] }],
-			["Wait", { kind: "func", params: [], returns: [VOID] }],
-		]),
-	};
-	globals.define("sync", {
-		kind: "namespace",
-		name: "sync",
-		members: {
-			Mutex: MUTEX_T,
-			RWMutex: RWMUTEX_T,
-			Once: ONCE_T,
-			WaitGroup: WAITGROUP_T,
-			Locker: LOCKER_T,
-		},
-	});
-	types.set("sync.Mutex", MUTEX_T);
-	types.set("sync.RWMutex", RWMUTEX_T);
-	types.set("sync.Once", ONCE_T);
-	types.set("sync.WaitGroup", WAITGROUP_T);
-	types.set("sync.Locker", LOCKER_T);
 
 	const BYTE_SLICE = { kind: "slice", elem: UINT8 };
 

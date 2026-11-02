@@ -1311,7 +1311,11 @@ export class TypeChecker {
 	}
 
 	_checkMissingReturn(decl, returnType, kind) {
-		if (!isVoid(returnType) && !returnType._hasNamedReturns) {
+		if (
+			!decl._bodyless &&
+			!isVoid(returnType) &&
+			!returnType._hasNamedReturns
+		) {
 			if (!this._isTerminating(decl.body)) {
 				this.err(`missing return at end of ${kind} '${decl.name}'`, decl);
 			}

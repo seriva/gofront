@@ -23,6 +23,7 @@ import {
 import { desugarMethodExprs } from "./method-expr.js";
 import { ModuleEmitter } from "./module-emitter.js";
 import { hasGenerics, monomorphise } from "./monomorph.js";
+import { emitWasmIntrinsic, prepareWasmIntrinsic } from "./natives.js";
 import { hasNativeWasmOpt, optimizeWasm } from "./optimize.js";
 import {
 	_scanFuncSigInterfaces,
@@ -848,6 +849,7 @@ export function compileWasmModule(
 
 	// 2. Pre-scan for needed imports so import func indices are fixed
 	for (const fn of funcDecls) {
+		if (fn.intrinsic) prepareWasmIntrinsic(mod, fn);
 		_scanImportsInBody(fn.body, mod);
 	}
 	if (boundaryMeta) scanBoundaryImports(mod, boundaryMeta);
@@ -966,6 +968,8 @@ export function compileWasmModule(
 			emitter.emitRuntimeHelper(fn);
 		} else if (fn._isIoHelper || fn._isPhase7Helper) {
 			emitter.emitIoHelper(fn);
+		} else if (fn.intrinsic) {
+			emitWasmIntrinsic(emitter, fn);
 		} else if (fn.body) {
 			emitter.emitFunctionBody(fn.body);
 		}

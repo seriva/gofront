@@ -1067,9 +1067,6 @@ export class BuiltinsEmitter {
 			case "math":
 				this.emitMathCall(func.field, args);
 				return true;
-			case "bits":
-				this.emitBitsCall(func.field, args);
-				return true;
 			case "strconv":
 				this.emitStrconvCall(func.field, args);
 				return true;
@@ -1279,21 +1276,6 @@ export class BuiltinsEmitter {
 			);
 			return true;
 		}
-		if (
-			(recvTypeName === "sync.Mutex" || recvTypeName === "sync.RWMutex") &&
-			field !== "RLocker"
-		) {
-			this.emitSyncMutexMethodCall(field, expr, args, targetWasmType);
-			return true;
-		}
-		if (recvTypeName === "sync.Once") {
-			this.emitSyncOnceMethodCall(field, expr, args, targetWasmType);
-			return true;
-		}
-		if (recvTypeName === "sync.WaitGroup") {
-			this.emitSyncWaitGroupMethodCall(field, expr, args, targetWasmType);
-			return true;
-		}
 		return false;
 	}
 
@@ -1301,7 +1283,7 @@ export class BuiltinsEmitter {
 		const structInfo = this.mod.getStructType(recvTypeName);
 		if (!structInfo) return false;
 		for (const embed of structInfo.embeds) {
-			const embedMethodName = `${embed.name}.${func.field}`;
+			const embedMethodName = `${embed.typeName ?? embed.name}.${func.field}`;
 			const subIdx = this.mod.resolveFuncIndex(embedMethodName);
 			if (subIdx !== null) {
 				const targetParamTypes = this.mod.getFuncParamTypes(embedMethodName);

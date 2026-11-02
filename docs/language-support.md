@@ -99,12 +99,12 @@ Coverage of the Go standard library, per package. Anything not listed here is no
 | `io` | js, wasm, both | Reader/Writer interfaces and helpers; no `Pipe` |
 | `iter`, `maps`, `slices`, `sort` | js, wasm, both | Go 1.23 iterator APIs; no `iter.Pull` |
 | `math`, `math/bits` | js, wasm, both | Elementary functions, constants and float bit conversions |
-| `math/rand` | js, wasm, both | Seeded generators (a subset in `wasm`/`both`) |
+| `math/rand` | js, wasm, both | Top-level functions draw from the host; `New(NewSource(seed))` repeats for a seed but not in Go's sequence |
 | `os` | js, wasm, both | `Stdout`, `Stderr`, `Stdin`, `File`; JS also has `Exit`, `Args`, `Getenv` |
 | `path`, `path/filepath` | js, wasm, both | Lexical helpers only; no file-system walking |
 | `regexp` | js | Backed by the JS `RegExp` engine |
 | `strconv`, `strings`, `unicode`, `unicode/utf8` | js, wasm, both | `strings.Builder`, `Reader`, `Replacer` included |
-| `sync` | js, wasm, both | No `sync.Cond`, no `WaitGroup.Go` |
+| `sync` | js, wasm, both | Single-threaded: locking a locked `Mutex` reports a deadlock; no `sync.Cond`, no `WaitGroup.Go` |
 | `testing` | js, wasm, both | `T`, `B`, subtests, benchmarks; no fuzzing |
 | `time` | js, wasm, both | `Sleep` is JS-only; no timers or tickers |
 | `gom` | js | GoFront DOM package |
@@ -120,8 +120,8 @@ Notable members and behaviour per package, including GoFront's own packages:
 | `strconv` | `Itoa`, `Atoi`, `FormatBool`, `FormatInt`, `FormatFloat`, `FormatUint`, `ParseFloat`, `ParseInt`, `ParseBool`, `ParseUint`, `Quote`, `QuoteToASCII`, `QuoteRune`, `QuoteRuneToASCII`, `Unquote`, `UnquoteChar`, `QuotedPrefix`, `CanBackquote`, `AppendInt`, `AppendFloat`, `AppendUint`, `AppendBool`, `AppendQuote`, `AppendQuoteToASCII`, `AppendQuoteRune`, `AppendQuoteRuneToASCII`, `IntSize`, `NumError`, `ErrRange`, `ErrSyntax` |
 | `sort` | `Interface`, `Sort`, `Stable`, `Reverse`, `IsSorted`, `Ints`, `Float64s`, `Strings`, `Slice`, `SliceStable`, `SliceIsSorted`, `Search`, `SearchInts`, `SearchFloat64s`, `SearchStrings`, `Find`, `IntsAreSorted`, `Float64sAreSorted`, `StringsAreSorted`, `IntSlice`, `Float64Slice`, `StringSlice`. `Slice`, `SliceStable` and `SliceIsSorted` take the slice as a type parameter, so a slice held in an `any` value is not accepted. Equal elements end up in the same order as in Go. |
 | `math` | `Abs`, `Floor`, `Ceil`, `Round`, `RoundToEven`, `Sqrt`, `Cbrt`, `Pow`, `Log`, `Log2`, `Log10`, `Log1p`, `Sin`, `Cos`, `Tan`, `Atan`, `Atan2`, `Asin`, `Acos`, `Sinh`, `Cosh`, `Tanh`, `Exp`, `Exp2`, `Expm1`, `Trunc`, `Hypot`, `Signbit`, `Copysign`, `Dim`, `Remainder`, `Mod`, `Modf`, `Frexp`, `Ldexp`, `Nextafter`, `Nextafter32`, `FMA`, `Float64bits`, `Float64frombits`, `Float32bits`, `Float32frombits`, `Min`, `Max`, `Inf`, `IsNaN`, `IsInf`, `NaN` + constants |
-| `math/rand` | Deterministic `Seed`, `Intn`, `Float64`, `Float32`, `Int`, `Int63`, `Int63n`, `Int31`, `Int31n`, `Shuffle`, `Perm`, `Read` |
-| `math/bits` | `LeadingZeros*`, `TrailingZeros*`, `OnesCount*`, `RotateLeft*`, `Reverse*`, `ReverseBytes*`, `Len*`, `Add*`, `Sub*`, `Mul*`, `Div*`, `Rem*`, `UintSize` |
+| `math/rand` | `Intn`, `Float64`, `Float32`, `Int`, `Int63`, `Int63n`, `Int31`, `Int31n`, `Uint32`, `Uint64`, `Shuffle`, `Perm`, `Read`, `Seed` (does nothing), `Rand`, `Source`, `New`, `NewSource` |
+| `math/bits` | `LeadingZeros*`, `TrailingZeros*`, `OnesCount*`, `RotateLeft*`, `Reverse*`, `ReverseBytes*`, `Len*`, `Add*`, `Sub*`, `Mul*`, `Div*`, `Rem*`, `UintSize`; in JavaScript a `uint` argument is exact only below 2⁵³, so use the `*64` forms for wider values |
 | `errors` | `New`, `Is`, `Unwrap`, `As`, `Join`, `ErrUnsupported` — custom error types via interface satisfaction. `Is` follows `Unwrap() error` and `Unwrap() []error`, so wrapped errors from `fmt.Errorf` with several `%w` verbs and `Join` results match; `Unwrap` calls only `Unwrap() error`; in `wasm` and `both` packages `As` follows only `Unwrap() error` chains. |
 | `time` | `Now` → `time.Time`, `Since`, `Sleep` (JS-only), `Parse`, `ParseDuration`, `Unix`, `UnixMilli`, `UnixMicro`, `Date`, `FixedZone`; **`time.Duration`** methods: `Seconds`, `Milliseconds`, `Microseconds`, `Nanoseconds`, `Minutes`, `Hours`, `Truncate`, `Round`, `Abs`, `String`; **`time.Time`** methods: `Format`, `String`, `Year`, `Month`, `Day`, `YearDay`, `ISOWeek`, `Clock`, `Date`, `Hour`, `Minute`, `Second`, `Weekday`, `Unix`, `UnixMilli`, `UnixNano`, `Nanosecond`, `UTC`, `Local`, `In`, `Location`, `Zone`, `IsZero`, `Add`, `AddDate`, `Sub`, `Before`, `After`, `Equal`, `Compare`, `Truncate`, `Round`, `MarshalJSON`, `UnmarshalJSON`, `MarshalText`, `UnmarshalText`; layout, duration, month, and weekday constants. In `wasm` packages `Time.Date`, `Time.Clock`, `Time.In`, `time.UnixMilli` and `time.UnixMicro` are not available yet |
 | `html` | `EscapeString`, `UnescapeString` (unescapes numeric references, the Latin-1 names, `amp`, `lt`, `gt`, `quot`, `apos` and a few common symbols such as `euro` and `hellip`) |
