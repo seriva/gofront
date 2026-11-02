@@ -1438,7 +1438,7 @@ func Main() string {
 	const { wasmRes, jsRes } = compileHybrid(src).run("Main");
 	assertEqual(
 		wasmRes,
-		"ok=true yr=2024 badErr=true msg=parsing time: cannot parse zeroYr=0",
+		'ok=true yr=2024 badErr=true msg=parsing time "not-a-valid-timestamp" as "2006-01-02T15:04:05Z07:00": cannot parse "not-a-valid-timestamp" as "2006" zeroYr=-62135596800',
 	);
 	assertEqual(wasmRes, jsRes);
 });

@@ -520,7 +520,20 @@ function bindStdlibImport(checker, p, spec, pkg) {
 		);
 		return;
 	}
-	checker.globals.define(name, { ...pkg.namespace, name });
+	const ns = { ...pkg.namespace, name };
+	// Emitter members come from this checker's own namespace: some resolve
+	// types of the Go source against its type table when first used.
+	const own = pkg.overlay ? checker.globals.lookup(name)?.members : null;
+	if (own)
+		ns.members = {
+			...ns.members,
+			...Object.fromEntries(
+				Object.keys(pkg.overlay.members)
+					.filter((k) => k in own)
+					.map((k) => [k, own[k]]),
+			),
+		};
+	checker.globals.define(name, ns);
 	for (const [k, t] of pkg.exportedTypes) {
 		const dot = k.indexOf(".");
 		checker.types.set(dot < 0 ? k : `${name}${k.slice(dot)}`, t);
@@ -574,6 +587,34 @@ export function checkJsonCodecs(programs, checker, preambles, options, deps) {
 	return [ast];
 }
 
+// Built-in packages whose emitter members return `time.Time` and
+// `time.Duration` (`t.Deadline()`, `b.Elapsed()`): the Go source of `time` is
+// part of the build, and its types are known, when one of them is imported.
+const IMPLIES_TIME = new Set(["testing", "context"]);
+
+function importImpliedTime(
+	p,
+	spec,
+	checker,
+	preambles,
+	bundledDirs,
+	options,
+	deps,
+) {
+	if (!IMPLIES_TIME.has(spec.path)) return;
+	const dir = resolveStdlibSource("time", options.stdlibRoot);
+	if (!dir) return;
+	try {
+		const pkg = loadStdlibPackage("time", dir, options, deps);
+		emitStdlibPackage(pkg, checker.target, preambles, bundledDirs, options);
+		for (const [k, t] of pkg.exportedTypes)
+			if (k.includes(".")) checker.types.set(k, t);
+	} catch (e) {
+		const msg = "internal stdlib error in time; please report";
+		errAtImport(checker, p, spec, msg, e.message);
+	}
+}
+
 export function importStdlibPackages(
 	programs,
 	checker,
@@ -586,7 +627,18 @@ export function importStdlibPackages(
 		for (const spec of p.imports.flatMap((imp) => imp.imports)) {
 			if (spec.path.startsWith("js:") || isLocalPath(spec.path)) continue;
 			const dir = resolveStdlibSource(spec.path, options.stdlibRoot);
-			if (!dir) continue;
+			if (!dir) {
+				importImpliedTime(
+					p,
+					spec,
+					checker,
+					preambles,
+					bundledDirs,
+					options,
+					deps,
+				);
+				continue;
+			}
 			let pkg;
 			try {
 				pkg = loadStdlibPackage(spec.path, dir, options, deps);

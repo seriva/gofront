@@ -74,5 +74,5 @@ order = 11
 
 [[layers]]
 name  = "stdlib-leaf"
-paths = ["stdlib/cmp/**", "stdlib/errors/**", "stdlib/html/**", "stdlib/iter/**", "stdlib/math/bits/**", "stdlib/math/rand/**", "stdlib/sync/**", "stdlib/unicode/**"]
+paths = ["stdlib/cmp/**", "stdlib/errors/**", "stdlib/html/**", "stdlib/iter/**", "stdlib/math/bits/**", "stdlib/math/rand/**", "stdlib/sync/**", "stdlib/time/**", "stdlib/unicode/**"]
 order = 12

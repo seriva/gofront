@@ -145,7 +145,6 @@ function collectFunctionLabels(node, labels = new Set()) {
 }
 
 const NAMED_ZERO_TABLE = {
-	"time.Time": [null, "{ _d: new Date(0), _isZero: true }"],
 	"strings.Builder": [null, '{ _buf: "" }'],
 	"simd.F32x4": [null, "Object.freeze([0, 0, 0, 0])"],
 	F32x4: [null, "Object.freeze([0, 0, 0, 0])"],
@@ -635,10 +634,17 @@ export const expressionGenMethods = {
 				return expr.value; // int, float, bool, nil(null)
 			case "ImagLit":
 				return `{ re: 0, im: ${expr.value} }`;
-			case "Ident":
+			case "Ident": {
 				if (this._boxedVars.has(expr.name) && !expr._isAddressOf)
 					return `${expr.name}.value`;
-				return expr.name;
+				// A named untyped constant used as an int64 operand: its
+				// declaration holds a Number, so emit the exact BigInt.
+				const lit64 =
+					expr._is64Bit && expr._type?.kind === "untyped" && expr._const
+						? this._gen64BitFoldedConst(expr, expr._const)
+						: null;
+				return lit64 ?? expr.name;
+			}
 			case "AwaitExpr":
 				return `await ${this.genExpr(expr.expr)}`;
 			case "InstantiationExpr":
@@ -1802,22 +1808,6 @@ export const expressionGenMethods = {
 			return this._genBuilderCall(recvName, expr.func.field, expr);
 		if (recvName === "regexp.Regexp")
 			return this._genRegexpMethodCall(expr.func.field, expr);
-		if (recvName === "time.Time")
-			return this._genTimeMethodCall(expr.func.field, expr);
-		if (recvName === "time.Duration")
-			return this._genDurationMethodCall(expr.func.field, expr);
-		if (recvName === "time.Month") {
-			this.useHelper("duration");
-			return `__monthString(${this.genExpr(expr.func.expr)})`;
-		}
-		if (recvName === "time.Weekday") {
-			this.useHelper("duration");
-			return `__weekdayString(${this.genExpr(expr.func.expr)})`;
-		}
-		if (recvName === "time.Location") {
-			const recv = this.genExpr(expr.func.expr);
-			return `(${recv} ? ${recv}.String() : "UTC")`;
-		}
 		if (recvName === "time.Timer") {
 			const recv = this.genExpr(expr.func.expr);
 			if (expr.func.field === "Stop")
@@ -2900,9 +2890,12 @@ export const expressionGenMethods = {
 	_gen64BitBinaryExpr(expr) {
 		let l = this.genExpr(expr.left);
 		let r = this.genExpr(expr.right);
-		if (expr.left._type?.kind === "untyped" && !l.endsWith("n")) l = `${l}n`;
+		// An untyped operand is a literal (`3` -> `3n`) or a named constant,
+		// which holds a Number.
+		const lit = (js) => (/^-?\d+$/.test(js) ? `${js}n` : `BigInt(${js})`);
+		if (expr.left._type?.kind === "untyped" && !l.endsWith("n")) l = lit(l);
 		else if (!this._is64BitInt(expr.left?._type)) l = `BigInt(${l})`;
-		if (expr.right._type?.kind === "untyped" && !r.endsWith("n")) r = `${r}n`;
+		if (expr.right._type?.kind === "untyped" && !r.endsWith("n")) r = lit(r);
 		else if (!this._is64BitInt(expr.right?._type)) r = `BigInt(${r})`;
 		return this._gen64BitBinary(expr.op, l, r, expr._type);
 	},

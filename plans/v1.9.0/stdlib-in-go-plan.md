@@ -499,21 +499,21 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
 
 ### Phase 11: `time`
 
-- [ ] **Task 11.1 — `time` core: `Duration`, `Month`, `Weekday`, civil dates**
+- [x] **Task 11.1 — `time` core: `Duration`, `Month`, `Weekday`, civil dates**
   - Files: `stdlib/time/time.go`, `stdlib/time/duration.go`, `src/backend/wasm/natives.js` (`time.Now`, local offset over the existing clock import)
   - Removes: civil-day helpers and `emitDurationMethodCall` in `src/backend/wasm/stdlib/time.js`, matching members of `src/backend/js/stdlib/time.js`, `DURATION_T`/`TIME_T` tables in `src/typechecker/stdlib/core.js`
   - Do: `Duration` with methods and constants, `Month`/`Weekday` as named `int` types with `String`, `Time` with today's field layout (`unixNano int64`, `offset int32`), `Date`, `Unix`, `UnixMilli`, `UnixMicro`, `Add`, `Sub`, `AddDate`, `Truncate`, `Round`, `Clock`, `Date()`, `In`, `YearDay`, `ISOWeek`, `Compare`, `FixedZone`, `UTC`; `Now`/`Since`/`Until` stay natives.
   - Test: `test/unit/stdlib/time.test.js` — fixed dates, DST-free zones, leap years, ISO week edges; `t.Compare(t.Add(1))` → `-1`; `t.Clock()` → `3 4 5` on WASM; `var s fmt.Stringer = 3*time.Second; fmt.Println(s.String())` → `3s`; `test/unit/builtins/stdlib.test.js` time tests unchanged.
   - Done when: cases pass four ways and `Month`/`Weekday` are named types with `String()`.
 
-- [ ] **Task 11.2 — `time` layouts, printing and JSON**
+- [x] **Task 11.2 — `time` layouts, printing and JSON**
   - Files: `stdlib/time/format.go`, `stdlib/time/parse.go`, `src/backend/js/fmt-runtime.js` (promoted `String` on Go-source named types)
   - Removes: `_emitTimeMethodFormat`, `_emitTimeParse` in `src/backend/wasm/stdlib/time.js`; the rest of `src/backend/js/stdlib/time.js` except clock natives
   - Do: Go's layout engine for the supported layouts and constants (`RFC3339`, `Kitchen`, …), `ParseError`, `ParseDuration`, `Time.String`, `MarshalJSON`/`UnmarshalJSON`/`MarshalText`.
   - Test: `time.test.js` — all layout constants, 12-hour clocks, fractional seconds, parse errors; `fmt.Println(time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC))` → `2020-01-02 03:04:05 +0000 UTC`; `fmt.Println(struct{ D time.Duration }{time.Second})` → `{1s}`; `type T struct{ time.Duration; N int }` prints `1s`; `json.Marshal(time.Date(…))` round-trips on JS and WASM.
   - Done when: cases pass four ways and `src/backend/wasm/stdlib/time.js` holds only clock natives.
 
-- [ ] **Task 11.3 — `time` at the boundary and in the backends**
+- [x] **Task 11.3 — `time` at the boundary and in the backends**
   - Files: `src/backend/wasm/boundary.js` (10 `time.Time` + `time.Duration` sites), `src/backend/js/expressions.js`, `src/typechecker/assignability.js`
   - Removes: `time.*` name checks in `wasm/emit-builtins.js`, `wasm/emit.js`, `js/runtime.js`
   - Do: `time.Time`/`Duration` follow ordinary struct and named-type rules except the documented JS `Date` conversion; the boundary representation is the one Phase 1 set (`int64` parts as BigInt).

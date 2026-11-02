@@ -621,9 +621,14 @@ export function monomorphise(programs, checker) {
 	const genericFuncs = new Map();
 	const genericTypes = new Map();
 	const genericMethods = new Map(); // recvBaseName -> Array<MethodDecl>
+	// Template declaration -> its program; a specialization joins the program
+	// of its template, so a wasm package's instances stay wasm-package
+	// declarations even when a Go-source stdlib package is linked first.
+	const homeOf = new Map();
 
 	for (const p of progs) {
 		for (const d of p?.decls ?? []) {
+			homeOf.set(d, p);
 			if (d.kind === "FuncDecl" && d.typeParams && d.typeParams.length > 0) {
 				genericFuncs.set(d.name, d);
 			} else if (
@@ -712,6 +717,7 @@ export function monomorphise(programs, checker) {
 			);
 			rebindNamedResults(monoTypeDecl);
 			specializedTypes.set(item.specializedName, monoTypeDecl);
+			homeOf.set(monoTypeDecl, homeOf.get(genDecl));
 
 			// Specialize all methods declared on this generic type
 			const methods = genericMethods.get(item.genericName) ?? [];
@@ -731,6 +737,7 @@ export function monomorphise(programs, checker) {
 				rebindNamedResults(monoMethod);
 				const mKey = `${item.specializedName}.${monoMethod.name}`;
 				specializedMethods.set(mKey, monoMethod);
+				homeOf.set(monoMethod, homeOf.get(m));
 			}
 		} else if (item.kind === "func") {
 			const genDecl = genericFuncs.get(item.genericName);
@@ -755,6 +762,7 @@ export function monomorphise(programs, checker) {
 			);
 			rebindNamedResults(monoFuncDecl);
 			specializedFuncs.set(item.specializedName, monoFuncDecl);
+			homeOf.set(monoFuncDecl, homeOf.get(genDecl));
 		}
 	}
 
@@ -806,9 +814,13 @@ export function monomorphise(programs, checker) {
 
 	const targetProg = progs[0];
 	if (targetProg) {
-		targetProg.decls.push(...specializedTypes.values());
-		targetProg.decls.push(...specializedMethods.values());
-		targetProg.decls.push(...specializedFuncs.values());
+		for (const group of [
+			specializedTypes,
+			specializedMethods,
+			specializedFuncs,
+		])
+			for (const d of group.values())
+				(homeOf.get(d) ?? targetProg).decls.push(d);
 	}
 
 	// 6. Typecheck the monomorphised program to annotate all concrete types

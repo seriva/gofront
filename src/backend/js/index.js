@@ -39,7 +39,6 @@ import {
 	HELPER_CDIV,
 	HELPER_CMUL,
 	HELPER_CRYPTO_RAND,
-	HELPER_DURATION,
 	HELPER_EQUAL,
 	HELPER_ERROR,
 	HELPER_ERROR_AS,
@@ -70,8 +69,7 @@ import {
 	HELPER_STRUCT_KEY,
 	HELPER_SV,
 	HELPER_TESTING,
-	HELPER_TIME_FMT,
-	HELPER_TIME_PARSE,
+	HELPER_TIMER,
 	HELPER_TO64,
 	HELPER_VA,
 	HELPER_VCLONE,
@@ -166,9 +164,7 @@ const HELPER_MAP = [
 	["ioEOF", HELPER_IO_EOF],
 	["os", HELPER_OS],
 	["strconv", HELPER_STRCONV],
-	["timeFmt", HELPER_TIME_FMT],
-	["timeParse", HELPER_TIME_PARSE],
-	["duration", HELPER_DURATION],
+	["timer", HELPER_TIMER],
 	["testing", HELPER_TESTING],
 	["cryptoRand", HELPER_CRYPTO_RAND],
 	["binary", HELPER_BINARY],
@@ -180,6 +176,10 @@ const HELPER_MAP = [
 // typechecker/types.js).  The WASM backend keeps their empty body.
 const JS_INTRINSICS = {
 	rand_source: () => "return Math.random();",
+	time_now: () =>
+		'return BigInt(Math.floor(typeof globalThis.__GOFRONT_CLOCK === "function" ? globalThis.__GOFRONT_CLOCK() : Date.now())) * 1000000n;',
+	time_zone_offset: ([unix]) =>
+		`return (-new Date(Number(${unix}) * 1000).getTimezoneOffset() * 60) | 0;`,
 };
 
 export class CodeGen {
@@ -940,10 +940,14 @@ export class CodeGen {
 	// A promoted method runs on the embedded value (`this.In`), so it and the
 	// outer struct's promoted-field accesses see the same storage.  Embedded
 	// types that are not compiled Go structs keep the borrowed-`this` form.
-	_embedStub(method, embedName) {
+	_embedStub(method, embedName, valueEmbed = false) {
 		// The field is named after the type without its package suffix
 		// (`Mutex$$sync` is the field `Mutex`).
 		const field = embedName.replace(/\$\$.*$/, "");
+		// A named non-struct type is boxed: its methods are static, taking
+		// the value as the receiver.
+		if (valueEmbed)
+			return `${method}(...__a) { return ${embedName}.$${method}(this.${field}, ...__a); }`;
 		const call = this.structNames.has(embedName)
 			? `this.${field}.${method}(...__a)`
 			: `${embedName}.prototype.${method}.call(this, ...__a)`;
@@ -967,7 +971,9 @@ export class CodeGen {
 		const stubs = computeEmbeddedStubs(name, methodDecls, this.checker);
 		for (const stub of stubs) {
 			this.blank();
-			this.line(this._embedStub(stub.methodName, stub.embedName));
+			this.line(
+				this._embedStub(stub.methodName, stub.embedName, stub.valueEmbed),
+			);
 		}
 	}
 

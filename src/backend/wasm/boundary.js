@@ -36,7 +36,6 @@
 
 import { BROWSER_GLOBALS } from "../../typechecker/types.js";
 import {
-	HELPER_DURATION,
 	HELPER_ERROR,
 	HELPER_SPRINT,
 	HELPER_SPRINTF,
@@ -111,13 +110,6 @@ function classifyType(goType, mod) {
 
 	if (goType.kind === "TypeName" || goType.kind === "Ident") {
 		if (goType.name === "error") return { k: "error", wType: "anyref" };
-		if (goType.name === "time.Duration" || goType.name === "Duration")
-			return { k: "i64", unsigned: false, is64: true, wType: "i64" };
-		if (goType.name === "time.Time" || goType.name === "Time") {
-			const info = mod.getStructType("time.Time");
-			if (info)
-				return { k: "time", name: "time.Time", info, wType: toRef(info) };
-		}
 		const info = mod.getStructType(goType.name);
 		if (info) return structDesc(info, false);
 		const resolved = mod.checker?.types?.get(goType.name);
@@ -230,12 +222,6 @@ function classifyNamed(t, mod) {
 		return classifySimd(t.underlying ?? t, mod, t.name);
 	}
 	if (t.name === "error") return { k: "error", wType: "anyref" };
-	if (t.name === "time.Duration")
-		return { k: "i64", unsigned: false, is64: true, wType: "i64" };
-	if (t.name === "time.Time") {
-		const info = mod.getStructType("time.Time");
-		if (info) return { k: "time", name: "time.Time", info, wType: toRef(info) };
-	}
 	const info = mod.getStructType(t.name);
 	if (info) return structDesc(info, false);
 	if (t.underlying) return classifyType(t.underlying, mod);
@@ -295,7 +281,6 @@ function classifyPointer(t, mod) {
 	if (base.k === "unsupported") return base;
 	if (base.k === "struct" && !base.ptr) return { ...base, ptr: true };
 	if (base.k === "anon_struct" && !base.ptr) return { ...base, ptr: true };
-	if (base.k === "time" && !base.ptr) return { ...base, ptr: true };
 	const boxInfo = mod.getBoxType(t.base);
 	const ptrInfo = mod.getPtrType ? mod.getPtrType(t.base) : null;
 	const key = `${base.k}${base.unsigned ? "_u" : ""}${base.is64 ? "_64" : ""}_${boxInfo.typeIndex}`;
@@ -760,9 +745,6 @@ function visitNeed(desc, needs, errors, mod) {
 			needs.simd = desc.arr;
 			visitNeed(desc.arr, needs, errors, mod);
 			return;
-		case "time":
-			needs.time = true;
-			return;
 		case "slice":
 		case "array": {
 			const map = desc.k === "slice" ? needs.slices : needs.arrays;
@@ -839,7 +821,6 @@ function collectNeeds(meta) {
 		funcs: new Map(), // key -> desc
 		ifaces: new Map(), // interface name -> desc
 		error: false,
-		time: false,
 		simd: null, // array desc carrying vectors across the boundary
 		shared: false, // any shared buffer on the surface
 	};
@@ -1527,61 +1508,6 @@ export function addBoundaryHelpers(mod, meta) {
 		);
 	}
 
-	if (needs.time) {
-		const timeInfo = mod.getStructType("time.Time");
-		if (timeInfo) {
-			const timeWType = toRef(timeInfo);
-			addFunc(
-				"__time_make",
-				["f64", "i32"],
-				[EXT],
-				[
-					get(0),
-					{ op: "i64.trunc_sat_f64_s" },
-					{ op: "i64.const", value: 1000000n },
-					{ op: "i64.mul" },
-					get(1),
-					{ op: "ref.null", heapType: "any" },
-					{ op: "struct.new", typeIndex: timeInfo.typeIndex },
-					...toExt(timeWType),
-				],
-			);
-			addFunc(
-				"__time_unix_milli",
-				[EXT],
-				["f64"],
-				[
-					get(0),
-					{ op: "ref.is_null" },
-					{ op: "if", blockType: "f64" },
-					{ op: "f64.const", value: 0 },
-					{ op: "else" },
-					...getIn(0, timeWType),
-					{ op: "struct.get", typeIndex: timeInfo.typeIndex, fieldIndex: 0 },
-					{ op: "i64.const", value: 1000000n },
-					{ op: "i64.div_s" },
-					{ op: "f64.convert_i64_s" },
-					{ op: "end" },
-				],
-			);
-			addFunc(
-				"__time_offset",
-				[EXT],
-				["i32"],
-				[
-					get(0),
-					{ op: "ref.is_null" },
-					{ op: "if", blockType: "i32" },
-					{ op: "i32.const", value: 0 },
-					{ op: "else" },
-					...getIn(0, timeWType),
-					{ op: "struct.get", typeIndex: timeInfo.typeIndex, fieldIndex: 1 },
-					{ op: "end" },
-				],
-			);
-		}
-	}
-
 	for (const c of meta.consts ?? []) {
 		if (!c.dynamic) continue;
 		const g = mod.resolveGlobal(c.name);
@@ -1700,8 +1626,6 @@ function inExpr(desc, v) {
 			return `${P}f32x4in(${v})`;
 		case "mask4":
 			return `${P}mask4in(${v})`;
-		case "time":
-			return desc.ptr ? `${P}timein_ptr(${v})` : `${P}timein(${v})`;
 		case "map":
 			return `${P}mapin_${desc.key}(${v})`;
 		case "ptr_box":
@@ -1752,8 +1676,6 @@ function outExpr(desc, v) {
 			return `${P}f32x4out(${v})`;
 		case "mask4":
 			return `${P}mask4out(${v})`;
-		case "time":
-			return desc.ptr ? `${P}timeout_ptr(${v})` : `${P}timeout(${v})`;
 		case "map":
 			return `${P}mapout_${desc.key}(${v})`;
 		case "ptr_box":
@@ -1798,7 +1720,6 @@ function zeroExpr(desc) {
 		case "mask4":
 			return "[false, false, false, false]";
 		case "error":
-		case "time":
 		case "map":
 		case "ptr_box":
 			return "null";
@@ -2197,7 +2118,6 @@ export const WASM_STDLIB_JS = `${HELPER_ERROR}
 ${HELPER_SPRINTF}
 ${HELPER_SPRINT}
 ${HELPER_STRCONV}
-${HELPER_DURATION}
 function ${P}stdlib_fmt(stringTable, io) {
 	let sscanTokens = [];
 	let sscanHasErr = 0, sscanErrMsg = "";
@@ -2407,7 +2327,6 @@ function ${P}stdlib_str(stringTable, io) {
 }
 function ${P}stdlib_sys(stringTable, io) {
 	let trimStart = 0, trimEnd = 0;
-	let timeParseErr = null, timeParseOffset = 0, timeParseDurationErr = null, timeParseSubNs = 0;
 	let rawBytes = new Uint8Array(0);
 	let rawPos = 0;
 	return {
@@ -2426,111 +2345,7 @@ function ${P}stdlib_sys(stringTable, io) {
 		"bytes_trim_end": () => trimEnd,
 		// time
 		"time_now_ms": () => (typeof globalThis.__GOFRONT_CLOCK === "function" ? globalThis.__GOFRONT_CLOCK() : Date.now()),
-		"time_timezone_offset": (ms) => -new Date(ms).getTimezoneOffset() * 60,
-		"time_duration_string": (d) => __durationString(d),
-		"time_parse_duration": (s) => {
-			const res = __timeParseDuration(s);
-			if (res[1]) {
-				timeParseDurationErr = res[1].message || String(res[1]);
-				return 0n;
-			}
-			timeParseDurationErr = null;
-			return BigInt(res[0]);
-		},
-		"time_parse_duration_err": () => timeParseDurationErr,
-		"time_month_string": (m) => __monthString(m),
-		"time_weekday_string": (w) => __weekdayString(w),
-		"time_parse": (layout, val) => {
-			try {
-				let s = String(val ?? "");
-				if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) {
-					s = s.slice(1, -1);
-				}
-				const d = new Date(s);
-				if (isNaN(d.getTime())) throw 0;
-				let subNs = 0;
-				const m = /\\.([0-9]{1,9})/.exec(s);
-				if (m) {
-					subNs = Number(m[1].padEnd(9, "0")) % 1000000;
-				}
-				timeParseErr = null;
-				if (s.endsWith("Z") || s.endsWith("z")) {
-					timeParseOffset = 0;
-				} else {
-					const tzMatch = /([+-])(\\d{2}):?(\\d{2})$/.exec(s);
-					if (tzMatch) {
-						const sign = tzMatch[1] === "+" ? 1 : -1;
-						timeParseOffset = sign * (Number(tzMatch[2]) * 3600 + Number(tzMatch[3]) * 60);
-					} else {
-						timeParseOffset = -d.getTimezoneOffset() * 60;
-					}
-				}
-				timeParseSubNs = subNs;
-				return d.getTime();
-			} catch {
-				timeParseErr = "parsing time: cannot parse";
-				timeParseOffset = 0;
-				timeParseSubNs = 0;
-				return 0;
-			}
-		},
-		"time_parse_err": () => timeParseErr,
-		"time_parse_offset": () => timeParseOffset,
-		"time_parse_sub_ns": () => timeParseSubNs,
-		"time_format": (y, m, d, hr, min, sec, wd, ms, offsetSec, layout) => {
-			const DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
-			const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-			const pad = (n, w = 2) => String(n).padStart(w, "0");
-			return (layout ?? "").replace(/2006|06|Monday|Mon|January|Jan|01|02|15|PM|pm|03|04|05|Z07:00|-07:00|-0700|MST|\\.(?:0+|9+)|1|2|3|4|5/g, t => {
-				if (t.startsWith(".")) {
-					const isZeroPad = t.includes("0");
-					const maxLen = t.length - 1;
-					let frac = pad(ms % 1000000000, 9);
-					if (maxLen <= 9) frac = frac.slice(0, maxLen);
-					else frac = frac.padEnd(maxLen, "0");
-					if (!isZeroPad) {
-						frac = frac.replace(/0+$/, "");
-						return frac.length > 0 ? "." + frac : "";
-					}
-					return "." + frac;
-				}
-				switch (t) {
-					case "2006": return String(y);
-					case "06":   return String(y).slice(-2);
-					case "Monday": return DAYS[wd];
-					case "Mon":    return DAYS[wd].slice(0, 3);
-					case "January": return MONTHS[m - 1];
-					case "Jan":     return MONTHS[m - 1].slice(0, 3);
-					case "01": return pad(m);
-					case "1":  return String(m);
-					case "02": return pad(d);
-					case "2":  return String(d);
-					case "15": return pad(hr);
-					case "PM": return hr < 12 ? "AM" : "PM";
-					case "pm": return hr < 12 ? "am" : "pm";
-					case "03": return pad(hr % 12 || 12);
-					case "3":  return String(hr % 12 || 12);
-					case "04": return pad(min);
-					case "4":  return String(min);
-					case "05": return pad(sec);
-					case "5":  return String(sec);
-					case "Z07:00": {
-						const o = Math.floor(offsetSec / 60);
-						return o === 0 ? "Z" : (o > 0 ? "+" : "-") + pad(Math.floor(Math.abs(o) / 60)) + ":" + pad(Math.abs(o) % 60);
-					}
-					case "-07:00": {
-						const o = Math.floor(offsetSec / 60);
-						return (o >= 0 ? "+" : "-") + pad(Math.floor(Math.abs(o) / 60)) + ":" + pad(Math.abs(o) % 60);
-					}
-					case "-0700": {
-						const o = Math.floor(offsetSec / 60);
-						return (o >= 0 ? "+" : "-") + pad(Math.floor(Math.abs(o) / 60)) + pad(Math.abs(o) % 60);
-					}
-					case "MST": return offsetSec === 0 ? "UTC" : "LOCAL";
-					default: return t;
-				}
-			});
-		},
+		"time_timezone_offset": (ms) => (-new Date(ms).getTimezoneOffset() * 60) | 0,
 		"raw_bytes_init": (len) => {
 			rawBytes = new Uint8Array(len);
 			rawPos = 0;
@@ -2945,28 +2760,6 @@ function ${P}errin(e) {
 }`);
 	}
 
-	if (needs.time) {
-		out.push(`function ${P}timeout(r) {
-	if (r == null) return null;
-	const ms = __w.__time_unix_milli ? __w.__time_unix_milli(r) : 0;
-	const off = __w.__time_offset ? __w.__time_offset(r) : 0;
-	return { _d: new Date(ms), _offset: off };
-}
-function ${P}timeout_ptr(r) {
-	return ${P}timeout(r);
-}
-function ${P}timein(v) {
-	if (v == null) return null;
-	const d = v._d ? v._d : (v instanceof Date ? v : new Date(v));
-	const ms = d.getTime();
-	const off = typeof v?._offset === "number" ? v._offset : -d.getTimezoneOffset() * 60;
-	return __w.__time_make ? __w.__time_make(ms, off) : null;
-}
-function ${P}timein_ptr(v) {
-	return ${P}timein(v);
-}`);
-	}
-
 	if (needs.shared) {
 		// Zero-copy TypedArray views over the exported memory.  Memory never
 		// grows after the start function (allocation is startup-only), but the
@@ -3066,8 +2859,26 @@ function genBothStruct(out, name, fields) {
 		const got = `__w.__get_${name}_${f.name}(this.__ref)`;
 		return `"${f.name}": { "enumerable": true, "get"() { return ${viewExpr(f.desc, got)}; }, "set"(v) { __w.__set_${name}_${f.name}(this.__ref, ${inExpr(f.desc, "v")}); } }`;
 	});
+	// The one conversion `time.Time` has beyond the ordinary struct rules: JS
+	// code may pass a Date (or an object holding one in `_d`), and a Time
+	// handed to JS also reads as a Date through `_d`.
+	const isTime = name === "Time$$time";
+	if (isTime)
+		out.push(`function ${P}time_in(o) {
+	const d = o instanceof Date ? o : o?._d instanceof Date ? o._d : null;
+	if (d === null) return o;
+	const ms = d.getTime();
+	const off = typeof o._offset === "number" ? o._offset : -d.getTimezoneOffset() * 60;
+	const sec = Math.floor(ms / 1000);
+	return new Time$$time(BigInt(sec) + 62135596800n, (ms - sec * 1000) * 1000000, new Location$$time("", off, 0));
+}
+function ${P}time_out(t) {
+	Object.defineProperty(t, "_d", { configurable: true, get() { return new Date(Number(this.sec - 62135596800n) * 1000 + Math.floor(this.nsec / 1000000)); } });
+	Object.defineProperty(t, "_offset", { configurable: true, get() { return this.loc ? this.loc.offset : 0; } });
+	return t;
+}`);
 	out.push(`function ${P}to_${name}(o, isValue, m) {
-	if (o == null) return isValue ? __w.__zero_${name}() : null;
+${isTime ? `\to = ${P}time_in(o);\n` : ""}	if (o == null) return isValue ? __w.__zero_${name}() : null;
 	if (m) { const hit = m.get(o); if (hit) return hit; }
 	const r = __w.__new_${name}(${toArgs.join(", ")});
 	if (m) m.set(o, r);
@@ -3075,7 +2886,7 @@ function genBothStruct(out, name, fields) {
 }
 function ${P}from_${name}(r) {
 	if (r == null) return null;
-	return new ${name}(${fromArgs.join(", ")});
+	return ${isTime ? `${P}time_out(new ${name}(${fromArgs.join(", ")}))` : `new ${name}(${fromArgs.join(", ")})`};
 }
 // Live views share one prototype and are cached per wasm object so hot paths
 // (\`h.Pos.X = 1\` in a frame loop) do not allocate a wrapper per access.  The

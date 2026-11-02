@@ -288,57 +288,9 @@ export const WASM_STDLIB_MEMBERS = new Map([
 		]),
 	],
 	["rand", new Set(["Read", "Reader"])],
-	[
-		"time",
-		new Set([
-			"Now",
-			"Since",
-			"Parse",
-			"ParseDuration",
-			"Unix",
-			"UnixMicro",
-			"UnixMilli",
-			"Date",
-			"FixedZone",
-			"Duration",
-			"Nanosecond",
-			"Microsecond",
-			"Millisecond",
-			"Second",
-			"Minute",
-			"Hour",
-			"RFC3339",
-			"RFC3339Nano",
-			"DateOnly",
-			"TimeOnly",
-			"DateTime",
-			"UTC",
-			"Local",
-			"January",
-			"February",
-			"March",
-			"April",
-			"May",
-			"June",
-			"July",
-			"August",
-			"September",
-			"October",
-			"November",
-			"December",
-			"Sunday",
-			"Monday",
-			"Tuesday",
-			"Wednesday",
-			"Thursday",
-			"Friday",
-			"Saturday",
-			"Time",
-			"Month",
-			"Weekday",
-			"Location",
-		]),
-	],
+	// Go source declares the package; only the JS-only Sleep, AfterFunc and
+	// Timer are emitter members.
+	["time", new Set()],
 	["testing", new Set(["T", "B", "M", "TB", "BenchmarkResult"])],
 	["binary", new Set(["Read", "Write", "Size"])],
 ]);
@@ -352,6 +304,10 @@ export const INTRINSICS = new Map([
 	// A uniformly distributed float64 in [0, 1) from the host source
 	// (`Math.random`); the only entropy math/rand draws.
 	["rand_source", "func() float64"],
+	// The host clock in nanoseconds since the Unix epoch, and the offset in
+	// seconds east of UTC of the host's time zone at a Unix time (time).
+	["time_now", "func() int64"],
+	["time_zone_offset", "func(int64) int"],
 ]);
 
 // Names a standard-library function may carry in `//gofront:native <name>`:

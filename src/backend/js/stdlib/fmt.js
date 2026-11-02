@@ -246,11 +246,6 @@ export const fmtMethods = {
 		if (tpf) return `(${tpf}.fb ?? ${tpf}.b ?? ((__v) => __v))(${js})`;
 		const base =
 			e?._type?.kind === "named" ? (e._type.underlying ?? e._type) : e?._type;
-		if (e?._type?.name === "time.Duration") {
-			this.useHelper("duration");
-			this.useHelper("sprintf");
-			return `__ft(${js}, { k: "named", n: "time.Duration" })`;
-		}
 		const desc = fmtTypeDesc(
 			e?._type,
 			(t) => this.checker?.resolveType?.(t) ?? t,

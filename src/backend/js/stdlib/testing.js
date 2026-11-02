@@ -36,6 +36,11 @@ export const testingMethods = {
 		) {
 			this.useHelper("sprintf");
 		}
+		// There is never a deadline: the zero time and false.
+		if (method === "Deadline") {
+			const time = this.checker?.types?.get("time.Time")?.name;
+			if (time) return `(${t}, [new ${time}(), false])`;
+		}
 		return `${t}.${method}(${args})`;
 	},
 };

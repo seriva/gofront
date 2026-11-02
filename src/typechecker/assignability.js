@@ -313,7 +313,7 @@ export const assignabilityMethods = {
 			return { type: t, ptr: isPtr };
 		if (!methods || methods.size === 0) return null;
 		// Only user-declared types (methods carry _ptrRecv); stdlib named types
-		// such as time.Duration have no box class.
+		// such as strings.Builder have no box class.
 		if (![...methods.values()].some((m) => Object.hasOwn(m ?? {}, "_ptrRecv")))
 			return null;
 		return { type: t, ptr: isPtr };
