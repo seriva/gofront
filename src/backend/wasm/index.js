@@ -1084,14 +1084,8 @@ function _collectInterfaceDispatchers(progs, funcDecls, mod, checker) {
 		"fmt",
 		"strings",
 		"bytes",
-		"crypto/sha256",
-		"sha256",
 		"encoding/binary",
 		"binary",
-		"encoding/hex",
-		"hex",
-		"encoding/base64",
-		"base64",
 	]);
 	if (hasIo) {
 		const byteSliceType = {
@@ -1238,76 +1232,6 @@ function _registerIoSyntheticMethods(funcDecls, mod, strType, programs) {
 				ERR_T,
 				"os_file_close",
 				{ _isMethod: true, _recvTypeName: "os.File", _methodName: "Close" },
-			),
-		);
-	}
-	const hasSha256 = importsAnyOf(progs, ["crypto/sha256", "sha256"]);
-	if (
-		hasSha256 &&
-		(mod.structTypes.has("sha256.digest") ||
-			mod.structTypes.has("crypto/sha256.digest"))
-	) {
-		const dPtr = {
-			kind: "pointer",
-			base: { kind: "named", name: "sha256.digest" },
-		};
-		funcDecls.push(
-			ioHelper(
-				"sha256.digest.Write",
-				[
-					{ name: "d", type: dPtr },
-					{ name: "p", type: BYTE_SLICE_T },
-				],
-				INT_ERR_RET,
-				"sha256_write",
-				{
-					_isMethod: true,
-					_recvTypeName: "sha256.digest",
-					_methodName: "Write",
-				},
-			),
-			ioHelper(
-				"sha256.digest.Sum",
-				[
-					{ name: "d", type: dPtr },
-					{ name: "b", type: BYTE_SLICE_T },
-				],
-				BYTE_SLICE_T,
-				"sha256_sum",
-				{ _isMethod: true, _recvTypeName: "sha256.digest", _methodName: "Sum" },
-			),
-			ioHelper(
-				"sha256.digest.Reset",
-				[{ name: "d", type: dPtr }],
-				null,
-				"sha256_reset",
-				{
-					_isMethod: true,
-					_recvTypeName: "sha256.digest",
-					_methodName: "Reset",
-				},
-			),
-			ioHelper(
-				"sha256.digest.Size",
-				[{ name: "d", type: dPtr }],
-				INT_T,
-				"sha256_size",
-				{
-					_isMethod: true,
-					_recvTypeName: "sha256.digest",
-					_methodName: "Size",
-				},
-			),
-			ioHelper(
-				"sha256.digest.BlockSize",
-				[{ name: "d", type: dPtr }],
-				INT_T,
-				"sha256_block_size",
-				{
-					_isMethod: true,
-					_recvTypeName: "sha256.digest",
-					_methodName: "BlockSize",
-				},
 			),
 		);
 	}

@@ -80,6 +80,8 @@ const JSON_NAMES = [
 	"UnsupportedTypeError$$internal$jsonrt",
 	"MarshalerError$$internal$jsonrt",
 	"CheckValid$$internal$jsonrt",
+	"EncodeBytes$$internal$jsonrt",
+	"DecodeBytes$$internal$jsonrt",
 	"Number$$internal$jsonrt",
 	"OptEscapeHTML$$internal$jsonrt",
 	"OptUseNumber$$internal$jsonrt",

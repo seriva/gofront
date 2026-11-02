@@ -453,21 +453,21 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
 
 ### Phase 9: Encodings and `crypto/sha256`
 
-- [ ] **Task 9.1 — `encoding/hex` and `encoding/base64` in Go**
+- [x] **Task 9.1 — `encoding/hex` and `encoding/base64` in Go**
   - Files: `stdlib/encoding/hex/hex.go`, `stdlib/encoding/base64/base64.go`, `scripts/check-layers.js` (drop the `jsonrt` `ALLOW` entries once `base64.js` is gone)
   - Removes: `src/backend/js/stdlib/{hex,base64}.js`, `HELPER_HEX`/`HELPER_BASE64` and `atob` fallback in `src/backend/js/runtime.js`, `emitHexCall`/`emitBase64*` in `src/backend/wasm/stdlib/packages.js`, typings
   - Do: over `[]byte` (§1.1): `hex` `EncodeToString`, `DecodeString`, `Encode`, `Decode`, `EncodedLen`, `DecodedLen`, `AppendEncode`, `AppendDecode`, `ErrLength`, `InvalidByteError`; `base64` `*Encoding` with `NewEncoding`, `WithPadding`, `EncodeToString`, `DecodeString`, `Encode`, `Decode`, `EncodedLen`, `DecodedLen`, `AppendEncode`, `AppendDecode`, `CorruptInputError`; `StdEncoding`, `URLEncoding`, `RawStdEncoding`, `RawURLEncoding` as `*Encoding` package vars. `internal/jsonrt` and `__json_b64`/`__json_b64_dec` use the Go `base64` (returning `CorruptInputError` on invalid base64 instead of throwing from `atob`).
   - Test: `test/unit/stdlib/{hex,base64}.test.js` — codecs and Go's error messages; `DecodeString("!!!")` → `illegal base64 data at input byte 0`; `test/unit/builtins/json.test.js` — `var b []byte; fmt.Println(json.Unmarshal([]byte("\"!!\""), &b))` → `illegal base64 data at input byte 0`, and valid `[]byte` fields unchanged.
   - Done when: cases pass four ways.
 
-- [ ] **Task 9.2 — `encoding/binary` (`ByteOrder`, varints) in Go**
+- [x] **Task 9.2 — `encoding/binary` (`ByteOrder`, varints) in Go**
   - Files: `stdlib/encoding/binary/binary.go`
   - Removes: `ByteOrder`/varint members of `src/backend/js/stdlib/binary.js` and `packages.js`, typings
   - Do: `ByteOrder` implementations with `Uint*`/`PutUint*`/`Append*`, varints, `MaxVarintLen*`; `Read`/`Write` stay emitter members (overlay).
   - Test: `test/unit/stdlib/binary.test.js` — both byte orders, varint round trips and overflow.
   - Done when: cases pass four ways and `binary.Read`/`Write` still pass their existing tests.
 
-- [ ] **Task 9.3 — `crypto/sha256` in Go**
+- [x] **Task 9.3 — `crypto/sha256` in Go**
   - Files: `stdlib/crypto/sha256/sha256.go`, `src/backend/wasm/index.js` (`sha256.digest` method table, 13 sites), `src/backend/wasm/boundary.js` (1 site)
   - Removes: `src/backend/js/stdlib/sha256.js`, sha256 write cores in `src/backend/wasm/stdlib/io.js`, emitters in `packages.js`, typings
   - Do: `Sum256`, `New`, `Sum224`, `New224`, `Size`, `BlockSize` as a Go digest satisfying `hash.Hash`.

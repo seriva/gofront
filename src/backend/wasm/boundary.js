@@ -36,11 +36,8 @@
 
 import { BROWSER_GLOBALS } from "../../typechecker/types.js";
 import {
-	HELPER_BASE64,
 	HELPER_DURATION,
 	HELPER_ERROR,
-	HELPER_HEX,
-	HELPER_SHA256,
 	HELPER_SPRINT,
 	HELPER_SPRINTF,
 	HELPER_STRCONV,
@@ -2201,9 +2198,6 @@ ${HELPER_SPRINTF}
 ${HELPER_SPRINT}
 ${HELPER_STRCONV}
 ${HELPER_DURATION}
-${HELPER_SHA256}
-${HELPER_HEX}
-${HELPER_BASE64}
 function ${P}stdlib_fmt(stringTable, io) {
 	let sscanTokens = [];
 	let sscanHasErr = 0, sscanErrMsg = "";
@@ -2416,9 +2410,6 @@ function ${P}stdlib_sys(stringTable, io) {
 	let timeParseErr = null, timeParseOffset = 0, timeParseDurationErr = null, timeParseSubNs = 0;
 	let rawBytes = new Uint8Array(0);
 	let rawPos = 0;
-	let hexErr = null;
-	let base64Err = null;
-	let customBase64Encodings = [];
 	let bitsRem32 = 0;
 	let bitsRem64 = 0n;
 	return {
@@ -2565,38 +2556,6 @@ function ${P}stdlib_sys(stringTable, io) {
 			}
 			return len;
 		},
-		"crypto_sha256_sum": () => {
-			const d = __sha256.Sum256(rawBytes);
-			rawBytes = new Uint8Array(d);
-			return 32;
-		},
-		"hex_encode_to_string": () => {
-			return __hex_encode_to_string(rawBytes);
-		},
-		"hex_decode_string": (s) => {
-			const [res, err] = __hex_decode_string(s ?? "");
-			hexErr = err ? (err.message ?? String(err)) : null;
-			rawBytes = new Uint8Array(res);
-			return rawBytes.length;
-		},
-		"hex_get_err": () => hexErr,
-		"base64_new_encoding": (alphabet) => {
-			const id = customBase64Encodings.length + 4;
-			customBase64Encodings.push(__base64_make(alphabet ?? "", "="));
-			return id;
-		},
-		"base64_encode_to_string": (mode) => {
-			const enc = mode === 1 ? __base64_url : mode === 2 ? __base64_raw_std : mode === 3 ? __base64_raw_url : mode >= 4 ? customBase64Encodings[mode - 4] : __base64_std;
-			return (enc ?? __base64_std).EncodeToString(rawBytes);
-		},
-		"base64_decode_string": (mode, s) => {
-			const enc = mode === 1 ? __base64_url : mode === 2 ? __base64_raw_std : mode === 3 ? __base64_raw_url : mode >= 4 ? customBase64Encodings[mode - 4] : __base64_std;
-			const [res, err] = (enc ?? __base64_std).DecodeString(s ?? "");
-			base64Err = err ? (err.message ?? String(err)) : null;
-			rawBytes = new Uint8Array(res);
-			return rawBytes.length;
-		},
-		"base64_get_err": () => base64Err,
 		"bits_div32": (hi, lo, y) => {
 			const yu = y >>> 0;
 			if (yu === 0) throw new Error("runtime error: integer divide by zero");

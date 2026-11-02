@@ -26,14 +26,8 @@ const ERROR_PRODUCING_PKGS = new Set([
 	"sync",
 	"crypto/rand",
 	"rand",
-	"crypto/sha256",
-	"sha256",
 	"encoding/binary",
 	"binary",
-	"encoding/hex",
-	"hex",
-	"encoding/base64",
-	"base64",
 	"math/bits",
 	"bits",
 ]);
@@ -53,14 +47,6 @@ const STDLIB_ENV_PKGS = new Set([
 	"sync",
 	"crypto/rand",
 	"rand",
-	"crypto/sha256",
-	"sha256",
-	"encoding/binary",
-	"binary",
-	"encoding/hex",
-	"hex",
-	"encoding/base64",
-	"base64",
 	"math/bits",
 	"bits",
 ]);
@@ -142,23 +128,13 @@ const STDLIB_IMPORTS = [
 	["time_parse_duration_err", [], [S]],
 	["time_month_string", ["i32"], [S]],
 	["time_weekday_string", ["i32"], [S]],
-	// raw binary buffer for crypto/rand, crypto/sha256, hex, base64
+	// raw binary buffer for crypto/rand
 	["raw_bytes_init", ["i32"], []],
 	["raw_bytes_push", ["i32"], []],
 	["raw_bytes_len", [], ["i32"]],
 	["raw_bytes_get", ["i32"], ["i32"]],
 	// crypto/rand
 	["crypto_rand_fill", ["i32"], ["i32"]],
-	// crypto/sha256
-	["crypto_sha256_sum", [], ["i32"]],
-	// encoding/hex
-	["hex_encode_to_string", [], [S]],
-	["hex_decode_string", [S], ["i32"]],
-	["hex_get_err", [], [S]],
-	// encoding/base64
-	["base64_encode_to_string", ["i32"], [S]],
-	["base64_decode_string", ["i32", S], ["i32"]],
-	["base64_get_err", [], [S]],
 	["bits_div32", ["i32", "i32", "i32"], ["i32"]],
 	["bits_div32_rem", [], ["i32"]],
 	["bits_rem32", ["i32", "i32", "i32"], ["i32"]],

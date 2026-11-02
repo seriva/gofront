@@ -55,24 +55,23 @@ order = 7
 # stdlib-high(9) → stdlib-internal(10) → stdlib-mid(11) → stdlib-leaf(12)
 # `*` matches one directory level, `**` any depth; nested packages need `**`.
 # scripts/check-layers.js fails when a src or stdlib file matches no layer or a glob matches
-# no file. The only allowed gaps (ALLOW in that script) are files that import a built-in
+# no file. The only allowed gap (ALLOW in that script) is a file that imports a built-in
 # package which sentrux resolves by suffix to a compiler file (a false layer violation):
-# stdlib/math (math/bits -> src/backend/js/stdlib/bits.js) and
-# stdlib/internal/jsonrt/{dec,enc}.go (encoding/base64 -> src/backend/js/stdlib/base64.js).
+# stdlib/math (math/bits -> src/backend/js/stdlib/bits.js).
 
 [[layers]]
 name  = "stdlib-high"
-paths = ["stdlib/encoding/**"]
+paths = ["stdlib/encoding/json/**", "stdlib/encoding/binary/**"]
 order = 9
 
 [[layers]]
 name  = "stdlib-internal"
-paths = ["stdlib/internal/jsonrt/reader.go", "stdlib/internal/jsonrt/scanner.go", "stdlib/internal/jsonrt/indent.go", "stdlib/internal/jsonrt/number.go"]
+paths = ["stdlib/internal/jsonrt/*"]
 order = 10
 
 [[layers]]
 name  = "stdlib-mid"
-paths = ["stdlib/io/**", "stdlib/hash/**", "stdlib/bytes/**", "stdlib/strings/**", "stdlib/strconv/**", "stdlib/slices/**", "stdlib/sort/**", "stdlib/maps/**", "stdlib/path/**"]
+paths = ["stdlib/io/**", "stdlib/hash/**", "stdlib/bytes/**", "stdlib/strings/**", "stdlib/strconv/**", "stdlib/slices/**", "stdlib/sort/**", "stdlib/maps/**", "stdlib/path/**", "stdlib/encoding/hex/**", "stdlib/encoding/base64/**", "stdlib/crypto/**"]
 order = 11
 
 [[layers]]

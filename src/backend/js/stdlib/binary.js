@@ -91,12 +91,6 @@ export const binaryMethods = {
 			if (sz >= 0) return `${sz}`;
 			return `__binary_size(${args[0]})`;
 		}
-		if (fn === "AppendUint16")
-			return `__binary_le.AppendUint16(${args[0]}, ${args[1]})`;
-		if (fn === "AppendUint32")
-			return `__binary_le.AppendUint32(${args[0]}, ${args[1]})`;
-		if (fn === "AppendUint64")
-			return `__binary_le.AppendUint64(${args[0]}, ${args[1]})`;
 		return undefined;
 	},
 };

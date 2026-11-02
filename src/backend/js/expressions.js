@@ -151,12 +151,6 @@ const NAMED_ZERO_TABLE = {
 	"sync.RWMutex": ["sync", "__sync_rwmutex()"],
 	"sync.Once": ["sync", "__sync_once()"],
 	"sync.WaitGroup": ["sync", "__sync_waitgroup()"],
-	"binary.LittleEndian": ["binary", "__binary_le"],
-	"encoding/binary.LittleEndian": ["binary", "__binary_le"],
-	"binary.BigEndian": ["binary", "__binary_be"],
-	"encoding/binary.BigEndian": ["binary", "__binary_be"],
-	"base64.Encoding": ["base64", "__base64_std"],
-	"encoding/base64.Encoding": ["base64", "__base64_std"],
 	"simd.F32x4": [null, "Object.freeze([0, 0, 0, 0])"],
 	F32x4: [null, "Object.freeze([0, 0, 0, 0])"],
 	"simd.Mask32x4": [null, "Object.freeze([false, false, false, false])"],
@@ -276,25 +270,6 @@ const NS_CONSTANTS = {
 	},
 	bits: {
 		UintSize: "64",
-	},
-	sha256: {
-		Size: "32",
-		BlockSize: "64",
-	},
-	hex: {
-		ErrLength: '__error("encoding/hex: odd length hex string")',
-	},
-	base64: {
-		StdPadding: "61",
-		NoPadding: "-1",
-		StdEncoding: "__base64_std",
-		URLEncoding: "__base64_url",
-		RawStdEncoding: "__base64_raw_std",
-		RawURLEncoding: "__base64_raw_url",
-	},
-	binary: {
-		LittleEndian: "__binary_le",
-		BigEndian: "__binary_be",
 	},
 	rand: {
 		Reader: "__crypto_rand_reader",
@@ -1118,17 +1093,8 @@ export const expressionGenMethods = {
 			if (nsConst !== undefined) {
 				if (expr.expr.name === "strconv") {
 					this.useHelper("strconvError");
-				} else if (expr.expr.name === "binary") {
-					this.useHelper("binary");
-				} else if (expr.expr.name === "hex") {
-					this.useHelper("hex");
-					this.useHelper("error");
-				} else if (expr.expr.name === "base64") {
-					this.useHelper("base64");
 				} else if (expr.expr.name === "rand" && expr.field === "Reader") {
 					this.useHelper("cryptoRand");
-				} else if (expr.expr.name === "sha256") {
-					this.useHelper("sha256");
 				} else if (expr.expr.name === "os") {
 					this.useHelper("os");
 				}
@@ -1900,28 +1866,6 @@ export const expressionGenMethods = {
 				return `((wg) => { wg.counter = (wg.counter || 0) - 1; })(${recv})`;
 			}
 			if (expr.func.field === "Wait") return "(void 0)";
-		}
-		if (
-			recvName === "binary.LittleEndian" ||
-			recvName === "binary.BigEndian" ||
-			recvName === "encoding/binary.LittleEndian" ||
-			recvName === "encoding/binary.BigEndian" ||
-			recvName === "binary.ByteOrder" ||
-			recvName === "encoding/binary.ByteOrder"
-		) {
-			this.useHelper("binary");
-			const recv = this.genExpr(expr.func.expr);
-			const args = expr.args.map((a) => this.genExpr(a)).join(", ");
-			return `${recv}.${expr.func.field}(${args})`;
-		}
-		if (
-			recvName === "base64.Encoding" ||
-			recvName === "encoding/base64.Encoding"
-		) {
-			this.useHelper("base64");
-			const recv = this.genExpr(expr.func.expr);
-			const args = expr.args.map((a) => this.genExpr(a)).join(", ");
-			return `${recv}.${expr.func.field}(${args})`;
 		}
 		return undefined;
 	},

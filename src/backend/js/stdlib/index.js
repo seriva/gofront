@@ -1,20 +1,17 @@
 // CodeGen stdlib call generation — installed as a mixin on CodeGen.prototype.
 // One file per Go package under ./stdlib/. This index merges them.
 
-import { base64Methods } from "./base64.js";
 import { binaryMethods } from "./binary.js";
 import { bitsMethods } from "./bits.js";
 import { builderMethods } from "./builder.js";
 import { errorsMethods } from "./errors.js";
 import { fmtMethods } from "./fmt.js";
 import { gomMethods } from "./gom.js";
-import { hexMethods } from "./hex.js";
 import { jsonMethods } from "./json.js";
 import { mathMethods } from "./math.js";
 import { osMethods } from "./os.js";
 import { randMethods } from "./rand.js";
 import { regexpMethods } from "./regexp.js";
-import { sha256Methods } from "./sha256.js";
 import { sharedMethods } from "./shared.js";
 import { simdMethods } from "./simd.js";
 import { strconvMethods } from "./strconv.js";
@@ -41,10 +38,7 @@ const STDLIB_METHOD_MAP = {
 	testing: "_genTesting",
 	shared: "_genShared",
 	sync: "_genSync",
-	sha256: "_genSha256",
 	binary: "_genBinary",
-	hex: "_genHex",
-	base64: "_genBase64",
 	json: "_genJson",
 	simd: "_genSimd",
 };
@@ -103,10 +97,7 @@ export const stdlibGenMethods = {
 	...unicodeMethods,
 	...testingMethods,
 	...syncMethods,
-	...sha256Methods,
 	...binaryMethods,
-	...hexMethods,
-	...base64Methods,
 	...jsonMethods,
 	...dispatchMethods,
 };

@@ -296,10 +296,7 @@ test("no Sentrux layer glob is dead", () => {
 });
 
 test("only documented files are exempt from layering", () => {
-	assertEqual(
-		Object.keys(ALLOW).sort().join(","),
-		"stdlib/internal/jsonrt/dec.go,stdlib/internal/jsonrt/enc.go,stdlib/math/extra.go",
-	);
+	assertEqual(Object.keys(ALLOW).sort().join(","), "stdlib/math/extra.go");
 });
 
 // With fmt-types.js in src/backend/shared/, the only cross-backend import

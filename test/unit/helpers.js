@@ -76,9 +76,14 @@ export const FIXTURES = join(__dirname, "fixtures");
 
 // ── Compiler ─────────────────────────────────────────────────
 
-// Packages whose typechecker table keeps only emitter members (`errors.As`):
-// the rest is Go source, so a program importing one is linked like the others.
-const GO_OVERLAID_PACKAGES = new Set(["errors"]);
+// Packages whose typechecker table keeps only emitter members (`errors.As`,
+// `binary.Read`): the rest is Go source, so a program importing one is linked
+// like the others.
+const GO_OVERLAID_PACKAGES = new Set([
+	"errors",
+	"encoding/binary",
+	"encoding/json",
+]);
 
 // Emitter-backed packages that also carry Go-source members (all of `strings`
 // but Builder, and `bytes`); a program names one of them as `pkg.Member`.

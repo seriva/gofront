@@ -120,10 +120,7 @@ export const WASM_SUPPORTED_STDLIB = new Set([
 	"gofront/simd",
 	"sync",
 	"crypto/rand",
-	"crypto/sha256",
 	"encoding/binary",
-	"encoding/hex",
-	"encoding/base64",
 	"os",
 	"encoding/json",
 ]);
@@ -421,46 +418,7 @@ export const WASM_STDLIB_MEMBERS = new Map([
 	],
 	["testing", new Set(["T", "B", "M", "TB", "BenchmarkResult"])],
 	["sync", new Set(["Mutex", "RWMutex", "Once", "WaitGroup", "Locker"])],
-	["sha256", new Set(["Sum256", "New", "Size", "BlockSize"])],
-	[
-		"binary",
-		new Set([
-			"LittleEndian",
-			"BigEndian",
-			"ByteOrder",
-			"Read",
-			"Write",
-			"Size",
-			"AppendUint16",
-			"AppendUint32",
-			"AppendUint64",
-		]),
-	],
-	[
-		"hex",
-		new Set([
-			"EncodeToString",
-			"DecodeString",
-			"Encode",
-			"Decode",
-			"EncodedLen",
-			"DecodedLen",
-			"ErrLength",
-		]),
-	],
-	[
-		"base64",
-		new Set([
-			"StdEncoding",
-			"URLEncoding",
-			"RawStdEncoding",
-			"RawURLEncoding",
-			"Encoding",
-			"NewEncoding",
-			"StdPadding",
-			"NoPadding",
-		]),
-	],
+	["binary", new Set(["Read", "Write", "Size"])],
 ]);
 
 export const VALID_TARGETS = new Set(["js", "wasm", "both"]);

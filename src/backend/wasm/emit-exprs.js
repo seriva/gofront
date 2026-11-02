@@ -589,10 +589,6 @@ export class ExprsEmitter {
 			this.emitBitsConst(expr.field, targetWasmType);
 			return true;
 		}
-		if (this._isExtendedPkgConst?.(expr)) {
-			this.emitExtendedPkgConst(expr, targetWasmType);
-			return true;
-		}
 		return false;
 	}
 
