@@ -158,7 +158,7 @@ Notable members per package:
 - `errors` (`New`, `Is`, `Unwrap`, `As`, `Join`, `ErrUnsupported`)
 - `fmt` (`Sprintf`, `Printf`, `Println`, `Errorf`, `Fprintf`, `Fprintln`, `Fprint`, `Sscan`, `Sscanln`, `Sscanf`, including `%v`/`%+v`/`%#v`/`%T` and `fmt.Stringer`; `%p` prints Go's bad-verb form as in `js` packages)
 - `strings` (including `Builder`, `Reader`, `Replacer`, `Cut*`, `Split*`, `*Func`, `FieldsFunc`, `Lines`, `*Seq`), `bytes` (including `Buffer`, `Reader`, `FieldsFunc`, `Clone`, `Lines`, `*Seq`)
-- `strconv` (including `Unquote`, `QuotedPrefix`, `CanBackquote`, `Append*`, `Parse*`, `Format*`, `NumError`)
+- `strconv` (including `Unquote`, `QuotedPrefix`, `CanBackquote`, `Append*`, `Parse*`, `Format*`, `IsPrint`, `NumError`)
 - `unicode` (character classes and case conversion; range tables are not supported), `unicode/utf8`
 - `slices` (including `Compare`, `SortFunc`, `BinarySearch*`, `Min*`, `Max*`, `Compact*`, `Concat`, `Delete*`, `Insert`, `Replace`, `Grow`, `Clip`, `All`, `Values`, `Backward`, `Collect`, `AppendSeq`, `Sorted*`, `Chunk`), `maps` (including `All`, `Keys`, `Values`, `Insert`, `Collect`), `sort` (`Interface`, `Search*`, `Find`, `Slice*`)
 - `io` (`Reader`, `Writer`, `ReadWriter`, `Closer`, `Seeker`, `ReaderAt`, `WriterTo`, `ByteReader`, `RuneReader`, `SectionReader`, `LimitedReader`, `MultiReader`, `MultiWriter`, `TeeReader`, `NopCloser`, `ReadAll`, `ReadFull`, `Copy`, `CopyN`, `CopyBuffer`), `os` (`Stdout`, `Stderr`, `Stdin`; `Getenv`, `Args`, `Exit` stay JS-only)

@@ -64,8 +64,6 @@ import {
 	HELPER_SLICE,
 	HELPER_SPRINT,
 	HELPER_SPRINTF,
-	HELPER_STRCONV,
-	HELPER_STRCONV_ERROR,
 	HELPER_STRUCT_KEY,
 	HELPER_SV,
 	HELPER_TESTING,
@@ -160,10 +158,8 @@ const HELPER_MAP = [
 	["sprint", HELPER_SPRINT],
 	["error", HELPER_ERROR],
 	["errorAs", HELPER_ERROR_AS],
-	["strconvError", HELPER_STRCONV_ERROR],
 	["ioEOF", HELPER_IO_EOF],
 	["os", HELPER_OS],
-	["strconv", HELPER_STRCONV],
 	["timer", HELPER_TIMER],
 	["testing", HELPER_TESTING],
 	["cryptoRand", HELPER_CRYPTO_RAND],
@@ -554,7 +550,7 @@ export class CodeGen {
 		this._helpers.add(name);
 		if (name === "ifeq" || name === "geq") this._helpers.add("equal");
 		if (name === "geq") this._helpers.add("ifeq");
-		if (name === "strconvError" || name === "ioEOF" || name === "json") {
+		if (name === "ioEOF" || name === "json") {
 			this._helpers.add("error");
 		}
 		if (name === "os") {

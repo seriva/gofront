@@ -35,12 +35,7 @@
 //     externref (test methods are routed back to JS via `env.testing_*`).
 
 import { BROWSER_GLOBALS } from "../../typechecker/types.js";
-import {
-	HELPER_ERROR,
-	HELPER_SPRINT,
-	HELPER_SPRINTF,
-	HELPER_STRCONV,
-} from "../js/runtime.js";
+import { HELPER_ERROR, HELPER_SPRINT, HELPER_SPRINTF } from "../js/runtime.js";
 import {
 	anonIfaceName,
 	getInterfaceMethodList,
@@ -1905,6 +1900,8 @@ function ${P}imports(stringTable, extraEnv, tag, write) {
 		"str_contains": (s, sub) => ((s ?? "").includes(sub ?? "") ? 1 : 0),
 		"str_has_prefix": (s, pre) => ((s ?? "").startsWith(pre ?? "") ? 1 : 0),
 		"str_has_suffix": (s, suf) => ((s ?? "").endsWith(suf ?? "") ? 1 : 0),
+		"strconv_shortest": (f) => f.toExponential(),
+		"strconv_parse_decimal": (s) => Number((s ?? "").replaceAll("_", "")),
 		"str_index": (s, sub) => (s ?? "").indexOf(sub ?? ""),
 		"str_last_index": (s, sub) => (s ?? "").lastIndexOf(sub ?? ""),
 		"str_index_byte": (s, b) => (s ?? "").indexOf(String.fromCharCode(b)),
@@ -2117,7 +2114,6 @@ function ${P}replace(s, o, w, n) {
 export const WASM_STDLIB_JS = `${HELPER_ERROR}
 ${HELPER_SPRINTF}
 ${HELPER_SPRINT}
-${HELPER_STRCONV}
 function ${P}stdlib_fmt(stringTable, io) {
 	let sscanTokens = [];
 	let sscanHasErr = 0, sscanErrMsg = "";
@@ -2245,72 +2241,7 @@ function ${P}stdlib_fmt(stringTable, io) {
 	};
 }
 function ${P}stdlib_str(stringTable, io) {
-	let strconvErr = null, strconvErrKind = 0;
 	return {
-		"strconv_atoi": (s) => {
-			const r = __strconv_atoi(s ?? "");
-			strconvErr = r[1];
-			strconvErrKind = r[1] ? (r[1].includes("invalid syntax") ? 1 : r[1].includes("value out of range") ? 2 : 0) : 0;
-			return r[0];
-		},
-		"strconv_parse_int": (s, base, bits) => {
-			const r = __strconv_parse_int(s ?? "", base, bits);
-			strconvErr = r[1];
-			strconvErrKind = r[1] ? (r[1].includes("invalid syntax") ? 1 : r[1].includes("value out of range") ? 2 : 0) : 0;
-			return r[0];
-		},
-		"strconv_parse_float": (s) => {
-			const r = __strconv_parse_float(s ?? "");
-			strconvErr = r[1];
-			strconvErrKind = r[1] ? (r[1].includes("invalid syntax") ? 1 : r[1].includes("value out of range") ? 2 : 0) : 0;
-			return r[0];
-		},
-		"strconv_parse_bool": (s) => {
-			const r = __strconv_parse_bool(s ?? "");
-			strconvErr = r[1];
-			strconvErrKind = r[1] ? (r[1].includes("invalid syntax") ? 1 : r[1].includes("value out of range") ? 2 : 0) : 0;
-			return r[0] ? 1 : 0;
-		},
-		"strconv_err": () => strconvErr,
-		"strconv_err_kind": () => strconvErrKind,
-		"strconv_format_float": (f, fmtc, prec, _bits) => __strconv_format_float(f, fmtc, prec),
-		"strconv_format_int": (n, base) => n.toString(base),
-		"strconv_format_uint": (n, base) => BigInt.asUintN(64, BigInt(n)).toString(base),
-		"strconv_parse_uint": (s, base, bits) => {
-			const r = __strconv_parse_uint(s ?? "", base, bits);
-			strconvErr = r[1];
-			strconvErrKind = r[1] ? (r[1].includes("invalid syntax") ? 1 : r[1].includes("value out of range") ? 2 : 0) : 0;
-			return r[0];
-		},
-		"strconv_quote": (s) => JSON.stringify(s ?? ""),
-		"strconv_unquote": (s) => {
-			s = s ?? "";
-			if (s.startsWith("\`") && s.endsWith("\`") && s.length >= 2) {
-				if (s.slice(1, -1).includes("\`")) {
-					strconvErr = "invalid syntax";
-					strconvErrKind = 1;
-					return "";
-				}
-				strconvErr = null;
-				strconvErrKind = 0;
-				return s.slice(1, -1);
-			}
-			try {
-				const v = JSON.parse(s);
-				if (typeof v !== "string") {
-					strconvErr = "invalid syntax";
-					strconvErrKind = 1;
-					return "";
-				}
-				strconvErr = null;
-				strconvErrKind = 0;
-				return v;
-			} catch (e) {
-				strconvErr = "invalid syntax";
-				strconvErrKind = 1;
-				return "";
-			}
-		},
 		// unicode
 		"unicode_is_letter": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{L}/u.test(c)) ? 1 : 0; },
 		"unicode_is_digit": (r) => { const c = (r >= 0 && r <= 0x10ffff) ? String.fromCodePoint(r) : null; return (c && /\\p{Nd}/u.test(c)) ? 1 : 0; },

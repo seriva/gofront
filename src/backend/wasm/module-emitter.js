@@ -18,7 +18,6 @@ import {
 const ERROR_PRODUCING_PKGS = new Set([
 	"errors",
 	"fmt",
-	"strconv",
 	"io",
 	"os",
 	"strings",
@@ -33,7 +32,6 @@ const ERROR_PRODUCING_PKGS = new Set([
 // declare the imports and ship that JS block.
 const STDLIB_ENV_PKGS = new Set([
 	"strings",
-	"strconv",
 	"fmt",
 	"testing",
 	"unicode",
@@ -54,19 +52,6 @@ const SYNTHETIC_METHOD_TYPES = new Set(["strings.Builder", "os.File"]);
 
 const S = "externref";
 const STDLIB_IMPORTS = [
-	// strconv
-	["strconv_atoi", [S], ["i64"]],
-	["strconv_parse_int", [S, "i32", "i32"], ["i64"]],
-	["strconv_parse_float", [S], ["f64"]],
-	["strconv_parse_bool", [S], ["i32"]],
-	["strconv_err", [], [S]],
-	["strconv_err_kind", [], ["i32"]],
-	["strconv_format_float", ["f64", "i32", "i32", "i32"], [S]],
-	["strconv_format_int", ["i64", "i32"], [S]],
-	["strconv_format_uint", ["i64", "i32"], [S]],
-	["strconv_parse_uint", [S, "i32", "i32"], ["i64"]],
-	["strconv_quote", [S], [S]],
-	["strconv_unquote", [S], [S]],
 	// fmt (arguments travel through the testing_arg_* buffer)
 	["fmt_sprintf", [S], [S]],
 	["fmt_printf", [S], []],
@@ -1065,21 +1050,6 @@ export class ModuleEmitter {
 			init: [{ op: "i32.const", value: 0 }],
 		});
 		this.deferArmedGlobalIndex = gIdx;
-		return gIdx;
-	}
-
-	getStrconvErrGlobalIndex(field) {
-		if (!this.strconvErrGlobals) this.strconvErrGlobals = new Map();
-		if (this.strconvErrGlobals.has(field)) {
-			return this.strconvErrGlobals.get(field);
-		}
-		const gIdx = this.globals.length;
-		this.globals.push({
-			type: "anyref",
-			mutable: true,
-			init: [{ op: "ref.null", heapType: "any" }],
-		});
-		this.strconvErrGlobals.set(field, gIdx);
 		return gIdx;
 	}
 

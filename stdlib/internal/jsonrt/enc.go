@@ -172,7 +172,7 @@ func (e *Enc) Float(f float64, bits int) {
 }
 
 // floatFormat picks 'e' or 'f' as if by ES6 number to string conversion.
-func floatFormat(f float64, bits int) int {
+func floatFormat(f float64, bits int) byte {
 	abs := math.Abs(f)
 	if abs == 0 {
 		return 'f'

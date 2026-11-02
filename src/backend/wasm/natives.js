@@ -102,13 +102,18 @@ export function emitWasmNative(emitter, call, targetWasmType) {
 const EXT = "externref";
 
 function hostCall(name, argKinds, resultKind) {
-	const params = argKinds.map((k) => (k === "s" ? EXT : "i32"));
-	const results = [resultKind === "str" ? EXT : "i32"];
+	const params = argKinds.map((k) =>
+		k === "s" ? EXT : k === "f" ? "f64" : "i32",
+	);
+	const results = [
+		resultKind === "str" ? EXT : resultKind === "float" ? "f64" : "i32",
+	];
 	return {
 		imports: [[name, params, results]],
 		emit(e, call, _typeArgs, target) {
 			call.args.forEach((a, i) => {
 				if (argKinds[i] === "s") e.emitExpr(a, EXT);
+				else if (argKinds[i] === "f") e.emitExpr(a, "f64");
 				else e._emitI32Arg(a);
 			});
 			e.pushInstruction({
@@ -149,6 +154,14 @@ const STRING_NATIVES = {
 	"strings.TrimPrefix": ["str_trim_prefix", "ss", "str"],
 	"strings.TrimSuffix": ["str_trim_suffix", "ss", "str"],
 };
+// strconv: the shortest digits of a float64 (a string) and a decimal's
+// float64 (`f` is an f64 argument).
+STRING_NATIVES["strconv.shortest"] = ["strconv_shortest", "f", "str"];
+STRING_NATIVES["strconv.parseDecimal"] = [
+	"strconv_parse_decimal",
+	"s",
+	"float",
+];
 for (const [native, [name, kinds, result]] of Object.entries(STRING_NATIVES))
 	WASM_NATIVES.set(native, hostCall(name, [...kinds], result));
 

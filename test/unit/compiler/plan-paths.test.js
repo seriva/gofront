@@ -27,11 +27,8 @@ const PLANS = [
 		exempt: [
 			// The new test of Task 13.1.
 			"test/unit/compiler/natives.test.js",
-			// Go-output cases (one file per package).
-			"test/unit/stdlib/*",
 			// The Go files each migration task adds under stdlib/.  Files that
 			// exist today (for example stdlib/sort/sort.go) are not listed.
-			"stdlib/strconv/{float,strconv}.go",
 			// Files that completed tasks removed (their "Removes" lines still cite them).
 			"src/backend/js/stdlib/{slices,sort}.js",
 			"stdlib/slices/{extra,iter}.go",
@@ -50,6 +47,7 @@ const PLANS = [
 			"src/backend/js/stdlib/{bits,rand,sync}.js",
 			"stdlib/sync/extra.go",
 			"src/backend/wasm/stdlib/time.js",
+			"src/backend/js/stdlib/strconv.js",
 		],
 	},
 ];
