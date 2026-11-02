@@ -2078,16 +2078,6 @@ ${body}
 test("stdlib functions taking a callback or returning several values name themselves in the error", () => {
 	const cases = [
 		[
-			"strings",
-			"f := strings.Map\n\t_ = f",
-			"strings.Map cannot be used as a value",
-		],
-		[
-			"strings",
-			"f := strings.FieldsFunc\n\t_ = f",
-			"strings.FieldsFunc cannot be used as a value",
-		],
-		[
 			"strconv",
 			'f := strconv.Atoi\n\t_, _ = f("42")',
 			"strconv.Atoi cannot be used as a value",

@@ -80,11 +80,10 @@ export const FIXTURES = join(__dirname, "fixtures");
 // the rest is Go source, so a program importing one is linked like the others.
 const GO_OVERLAID_PACKAGES = new Set(["errors"]);
 
-// Emitter-backed packages that also carry Go-source members (readers and
-// replacers); a program names one of them as `pkg.Member`.
+// Emitter-backed packages that also carry Go-source members (all of `strings`
+// but Builder, and `bytes`); a program names one of them as `pkg.Member`.
 const GO_MEMBER_PACKAGES = new Set(["strings", "bytes"]);
-const GO_MEMBER_RE =
-	/\b(?:strings\.(?:NewReader|Reader|NewReplacer|Replacer)|bytes\.)/;
+const GO_MEMBER_RE = /\b(?:strings\.(?!Builder\b)|bytes\.)/;
 
 // Whether the program imports a package that exists only as Go source under
 // stdlib/ (no typechecker table).  The in-memory `compile` and `compileWasm`

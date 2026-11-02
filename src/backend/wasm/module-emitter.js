@@ -75,35 +75,6 @@ const SYNTHETIC_METHOD_TYPES = new Set(["strings.Builder", "os.File"]);
 
 const S = "externref";
 const STDLIB_IMPORTS = [
-	// strings
-	["str_trim", [S, S], [S]],
-	["str_trim_left", [S, S], [S]],
-	["str_trim_right", [S, S], [S]],
-	["str_trim_prefix", [S, S], [S]],
-	["str_trim_suffix", [S, S], [S]],
-	["str_cut", [S, S], ["i32"]],
-	["str_cut_before", [], [S]],
-	["str_cut_after", [], [S]],
-	["str_cut_prefix", [S, S], ["i32"]],
-	["str_cut_suffix", [S, S], ["i32"]],
-	["str_replace", [S, S, S, "i32"], [S]],
-	["str_contains_rune", [S, "i32"], ["i32"]],
-	["str_contains_any", [S, S], ["i32"]],
-	["str_index_byte", [S, "i32"], ["i32"]],
-	["str_index_rune", [S, "i32"], ["i32"]],
-	["str_index_any", [S, S], ["i32"]],
-	["str_last_index_byte", [S, "i32"], ["i32"]],
-	["str_last_index_any", [S, S], ["i32"]],
-	["str_title", [S], [S]],
-	["str_split", [S, S], ["i32"]],
-	["str_split_n", [S, S, "i32"], ["i32"]],
-	["str_split_after", [S, S], ["i32"]],
-	["str_split_after_n", [S, S, "i32"], ["i32"]],
-	["str_fields", [S], ["i32"]],
-	["str_part", ["i32"], [S]],
-	["str_replacer_init", [S], []],
-	["str_replacer_add", [S, S], []],
-	["str_replacer_run", [], [S]],
 	// strconv
 	["strconv_atoi", [S], ["i64"]],
 	["strconv_parse_int", [S, "i32", "i32"], ["i64"]],
@@ -987,19 +958,6 @@ export class ModuleEmitter {
 		this.getStringFromCodePointImportIndex(); // env.str_from_code_point
 		this.getStringCodePointAtImportIndex(); // env.str_code_point_at
 		this.getStringHashImportIndex(); // env.str_hash
-		this.getStringToUpperImportIndex();
-		this.getStringToLowerImportIndex();
-		this.getStringTrimSpaceImportIndex();
-		this.getStringContainsImportIndex();
-		this.getStringHasPrefixImportIndex();
-		this.getStringHasSuffixImportIndex();
-		this.getStringIndexImportIndex();
-		this.getStringLastIndexImportIndex();
-		this.getStringRepeatImportIndex();
-		this.getStringReplaceAllImportIndex();
-		this.getStringEqualFoldImportIndex();
-		this.getStringCountImportIndex();
-		this.getStringToValidUTF8ImportIndex();
 		this.getStrFromI64ImportIndex();
 		this.getStrFromI32ImportIndex();
 		this.getStrFromF64ImportIndex();
@@ -1640,123 +1598,6 @@ export class ModuleEmitter {
 
 	getStringHashImportIndex() {
 		return this.getOrAddFuncImport("env", "str_hash", ["externref"], ["i32"]);
-	}
-
-	getStringToUpperImportIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"str_to_upper",
-			["externref"],
-			["externref"],
-		);
-	}
-
-	getStringToLowerImportIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"str_to_lower",
-			["externref"],
-			["externref"],
-		);
-	}
-
-	getStringTrimSpaceImportIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"str_trim_space",
-			["externref"],
-			["externref"],
-		);
-	}
-
-	getStringContainsImportIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"str_contains",
-			["externref", "externref"],
-			["i32"],
-		);
-	}
-
-	getStringHasPrefixImportIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"str_has_prefix",
-			["externref", "externref"],
-			["i32"],
-		);
-	}
-
-	getStringHasSuffixImportIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"str_has_suffix",
-			["externref", "externref"],
-			["i32"],
-		);
-	}
-
-	getStringIndexImportIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"str_index",
-			["externref", "externref"],
-			["i32"],
-		);
-	}
-
-	getStringLastIndexImportIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"str_last_index",
-			["externref", "externref"],
-			["i32"],
-		);
-	}
-
-	getStringRepeatImportIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"str_repeat",
-			["externref", "i32"],
-			["externref"],
-		);
-	}
-
-	getStringReplaceAllImportIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"str_replace_all",
-			["externref", "externref", "externref"],
-			["externref"],
-		);
-	}
-
-	getStringEqualFoldImportIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"str_equal_fold",
-			["externref", "externref"],
-			["i32"],
-		);
-	}
-
-	getStringCountImportIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"str_count",
-			["externref", "externref"],
-			["i32"],
-		);
-	}
-
-	getStringToValidUTF8ImportIndex() {
-		return this.getOrAddFuncImport(
-			"env",
-			"str_to_valid_utf8",
-			["externref", "externref"],
-			["externref"],
-		);
 	}
 
 	getStrFromI64ImportIndex() {

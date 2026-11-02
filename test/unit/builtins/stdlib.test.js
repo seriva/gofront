@@ -19,6 +19,7 @@ section("strings package");
 
 test("strings.Contains", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.Contains("hello world", "world"))
 	console.log(strings.Contains("hello", "xyz"))
@@ -29,6 +30,7 @@ func main() {
 
 test("strings.HasPrefix and HasSuffix", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.HasPrefix("hello", "hel"))
 	console.log(strings.HasSuffix("hello", "llo"))
@@ -40,6 +42,7 @@ func main() {
 
 test("strings.ToUpper and ToLower", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.ToUpper("hello"))
 	console.log(strings.ToLower("HELLO"))
@@ -50,6 +53,7 @@ func main() {
 
 test("strings.TrimSpace", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.TrimSpace("  hello  "))
 }`);
@@ -59,6 +63,7 @@ func main() {
 
 test("strings.Split and Join", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	parts := strings.Split("a,b,c", ",")
 	console.log(strings.Join(parts, "-"))
@@ -69,6 +74,7 @@ func main() {
 
 test("strings.Replace and ReplaceAll", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.ReplaceAll("aaa", "a", "b"))
 }`);
@@ -78,6 +84,7 @@ func main() {
 
 test("strings.Index and Count", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.Index("hello", "ll"))
 	console.log(strings.Count("banana", "a"))
@@ -88,6 +95,7 @@ func main() {
 
 test("strings.Count with empty separator returns len+1", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.Count("hello", ""))
 	console.log(strings.Count("", ""))
@@ -98,6 +106,7 @@ func main() {
 
 test("strings.Repeat", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.Repeat("ab", 3))
 }`);
@@ -107,6 +116,7 @@ func main() {
 
 test("strings.TrimPrefix and TrimSuffix", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.TrimPrefix("hello", "hel"))
 	console.log(strings.TrimSuffix("hello", "llo"))
@@ -118,6 +128,7 @@ func main() {
 
 test("strings.TrimSuffix with empty suffix returns original", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.TrimSuffix("hello", ""))
 }`);
@@ -127,6 +138,7 @@ func main() {
 
 test("strings.TrimPrefix with empty prefix returns original", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.TrimPrefix("hello", ""))
 }`);
@@ -136,6 +148,7 @@ func main() {
 
 test("strings.EqualFold", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.EqualFold("Hello", "hello"))
 	console.log(strings.EqualFold("Go", "GO"))
@@ -2003,6 +2016,7 @@ section("strings additions");
 
 test("strings.Fields splits on whitespace", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	f := strings.Fields("  foo bar  baz  ")
 	console.log(len(f))
@@ -2016,6 +2030,7 @@ func main() {
 
 test("strings.Fields on empty/whitespace returns empty slice", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	f := strings.Fields("   ")
 	console.log(len(f))
@@ -2026,6 +2041,7 @@ func main() {
 
 test("strings.Cut found", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	before, after, found := strings.Cut("user:password", ":")
 	console.log(before)
@@ -2038,6 +2054,7 @@ func main() {
 
 test("strings.Cut not found", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	before, after, found := strings.Cut("hello", ":")
 	console.log(before)
@@ -2050,6 +2067,7 @@ func main() {
 
 test("strings.CutPrefix found", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	after, found := strings.CutPrefix("hello world", "hello ")
 	console.log(after)
@@ -2061,6 +2079,7 @@ func main() {
 
 test("strings.CutSuffix found", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	before, found := strings.CutSuffix("hello world", " world")
 	console.log(before)
@@ -2072,6 +2091,7 @@ func main() {
 
 test("strings.SplitN", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	parts := strings.SplitN("a,b,c,d", ",", 3)
 	console.log(len(parts))
@@ -2085,6 +2105,7 @@ func main() {
 
 test("strings.SplitAfter", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	parts := strings.SplitAfter("a,b,c", ",")
 	console.log(len(parts))
@@ -2098,6 +2119,7 @@ func main() {
 
 test("strings.ContainsAny", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.ContainsAny("hello", "aeiou"))
 	console.log(strings.ContainsAny("rhythm", "aeiou"))
@@ -2108,6 +2130,7 @@ func main() {
 
 test("strings.ContainsRune", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.ContainsRune("hello", 'e'))
 	console.log(strings.ContainsRune("hello", 'z'))
@@ -2118,6 +2141,7 @@ func main() {
 
 test("strings.IndexRune", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.IndexRune("hello", 'l'))
 	console.log(strings.IndexRune("hello", 'z'))
@@ -2128,6 +2152,7 @@ func main() {
 
 test("strings.IndexByte", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.IndexByte("hello", 'l'))
 	console.log(strings.IndexByte("hello", 'z'))
@@ -2138,6 +2163,7 @@ func main() {
 
 test("strings.Map transforms characters", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	result := strings.Map(func(r rune) rune {
 		if r == 'a' { return 'b' }
@@ -2151,6 +2177,7 @@ func main() {
 
 test("strings.Title capitalizes words", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.Title("hello world"))
 }`);
@@ -2160,6 +2187,7 @@ func main() {
 
 test("strings.ToTitle converts to uppercase", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.ToTitle("hello"))
 }`);
@@ -2169,6 +2197,7 @@ func main() {
 
 test("strings.TrimFunc", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	result := strings.TrimFunc("  hello  ", func(r rune) bool {
 		return r == ' '
@@ -2181,6 +2210,7 @@ func main() {
 
 test("strings.IndexFunc", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	idx := strings.IndexFunc("hello123", func(r rune) bool {
 		return r >= '0' && r <= '9'
@@ -2206,6 +2236,7 @@ func main() {
 
 test("strings.IndexAny", () => {
 	const { js, errors } = compile(`package main
+import "strings"
 func main() {
 	console.log(strings.IndexAny("hello", "aeiou"))
 	console.log(strings.IndexAny("rhythm", "aeiou"))

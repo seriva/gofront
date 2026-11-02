@@ -1,8 +1,9 @@
 // test/perf/stdlib-bench.js
-// Sorting from the Go-source standard library (Task 4.3, Task 4.4):
+// Standard library from Go source:
 //   - WASM `slices.Sort` of 200,000 ints
 //   - JS `slices.SortFunc` and `sort.Slice` against `Array.prototype.sort`
 //     with a comparator
+//   - WASM `strings.Index` over 1 MB (the host search through a native)
 // Run with `node test/perf/stdlib-bench.js`.
 
 import assert from "node:assert";
@@ -98,3 +99,49 @@ console.log(
 );
 assert(funcMs <= 2 * refMs, "slices.SortFunc exceeds 2x Array.prototype.sort");
 assert(sliceMs <= 2 * refMs, "sort.Slice exceeds 2x Array.prototype.sort");
+
+// ── WASM strings.Index ──
+// 20 searches of "ab" in "a" x (2^20 - 1) + "b".  The host search through
+// the native took 145 ms when it was a hand-written emitter; the bound is
+// 1.25x that.
+const INDEX_BASELINE_MS = 145;
+const indexSrc = `package main
+
+import "strings"
+
+var hay string
+
+func Setup() {
+	var b strings.Builder
+	for i := 0; i < 1<<20-1; i++ {
+		b.WriteByte('a')
+	}
+	b.WriteByte('b')
+	hay = b.String()
+}
+
+func Search(n int) int {
+	found := 0
+	for i := 0; i < n; i++ {
+		found += strings.Index(hay, "ab")
+	}
+	return found
+}
+
+func main() {}
+`;
+const indexRes = compileWasm(indexSrc);
+assert(indexRes.wasm, `wasm compile failed: ${indexRes.errors?.[0]?.message}`);
+const idx = runWasm(indexRes.wasm, { stringTable: indexRes.stringTable });
+idx.exports.Setup();
+idx.exports.Search(1n);
+const indexMs = Math.min(
+	...Array.from({ length: 3 }, () => time(() => idx.exports.Search(20n))[0]),
+);
+console.log(
+	`stdlib-bench: wasm strings.Index 1 MB x 20: ${indexMs.toFixed(1)}ms (baseline ${INDEX_BASELINE_MS}ms)`,
+);
+assert(
+	indexMs <= INDEX_BASELINE_MS * 1.25,
+	`WASM strings.Index took ${indexMs.toFixed(1)}ms (bound ${INDEX_BASELINE_MS * 1.25}ms)`,
+);

@@ -36,7 +36,6 @@ const PLANS = [
 			"stdlib/sync/sync.go",
 			"stdlib/math/{bits/bits,rand/rand}.go",
 			"stdlib/strconv/{float,strconv}.go",
-			"stdlib/strings/strings.go",
 			"stdlib/time/{duration,format,parse,time}.go",
 			// Files that completed tasks removed (their "Removes" lines still cite them).
 			"src/backend/js/stdlib/{slices,sort}.js",
@@ -50,6 +49,8 @@ const PLANS = [
 			"src/backend/js/stdlib/io.js",
 			"stdlib/bytes/{iter,search,split}.go",
 			"src/backend/{js,wasm}/stdlib/bytes.js",
+			"src/backend/js/stdlib/strings.js",
+			"stdlib/strings/{extra,iter}.go",
 		],
 	},
 ];

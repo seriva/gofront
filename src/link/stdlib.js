@@ -172,6 +172,10 @@ function checkStdlibPrograms(programs, pkgName, options, overlay, deps) {
 			checker.globals.define(name, t);
 			if (t.kind === "interface" || t.kind === "named" || t.kind === "struct") {
 				checker.types.set(name, t);
+			} else if (checker.types.has(`${overlay.name}.${name}`)) {
+				// An emitter type (`strings.Builder`) is declared apart from the
+				// namespace member that names it.
+				checker.types.set(name, checker.types.get(`${overlay.name}.${name}`));
 			}
 		}
 	}

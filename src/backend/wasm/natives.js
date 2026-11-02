@@ -31,3 +31,65 @@ export function emitWasmNative(emitter, call, targetWasmType) {
 	const typeArgs = call._typeArgs ?? call.func?._typeArgs ?? [];
 	return entry.emit(emitter, call, typeArgs, targetWasmType);
 }
+
+// ── strings ───────────────────────────────────────────────────
+//
+// Each native is one call of an `env.str_*` host import that gives the Go
+// body's answer.  The imports live in the always-present part of the host
+// table (`WASM_IMPORTS_JS`), so a Go-source package using one needs no
+// `strings` import of its own.  Arguments are strings (`s`, an externref) or
+// a byte or rune (`i`, an i32); results are a bool or int (`int` widens to
+// the Go int) or a string.
+
+const EXT = "externref";
+
+function hostCall(name, argKinds, resultKind) {
+	const params = argKinds.map((k) => (k === "s" ? EXT : "i32"));
+	const results = [resultKind === "str" ? EXT : "i32"];
+	return {
+		imports: [[name, params, results]],
+		emit(e, call, _typeArgs, target) {
+			call.args.forEach((a, i) => {
+				if (argKinds[i] === "s") e.emitExpr(a, EXT);
+				else e._emitI32Arg(a);
+			});
+			e.pushInstruction({
+				op: "call",
+				funcIndex: e.mod.getOrAddFuncImport("env", name, params, results),
+			});
+			if (resultKind === "int" && (target ?? "i64") === "i64")
+				e.pushInstruction("i64.extend_i32_s");
+			return true;
+		},
+	};
+}
+
+// Repeat has no WASM native: a host import cannot raise the recoverable
+// panic of a negative count, so the Go body runs.
+const STRING_NATIVES = {
+	"strings.Index": ["str_index", "ss", "int"],
+	"strings.LastIndex": ["str_last_index", "ss", "int"],
+	"strings.IndexByte": ["str_index_byte", "si", "int"],
+	"strings.LastIndexByte": ["str_last_index_byte", "si", "int"],
+	"strings.IndexRune": ["str_index_rune", "si", "int"],
+	"strings.IndexAny": ["str_index_any", "ss", "int"],
+	"strings.LastIndexAny": ["str_last_index_any", "ss", "int"],
+	"strings.Contains": ["str_contains", "ss", "bool"],
+	"strings.ContainsAny": ["str_contains_any", "ss", "bool"],
+	"strings.ContainsRune": ["str_contains_rune", "si", "bool"],
+	"strings.HasPrefix": ["str_has_prefix", "ss", "bool"],
+	"strings.HasSuffix": ["str_has_suffix", "ss", "bool"],
+	"strings.Count": ["str_count", "ss", "int"],
+	"strings.Replace": ["str_replace", "sssi", "str"],
+	"strings.ReplaceAll": ["str_replace_all", "sss", "str"],
+	"strings.ToUpper": ["str_to_upper", "s", "str"],
+	"strings.ToLower": ["str_to_lower", "s", "str"],
+	"strings.TrimSpace": ["str_trim_space", "s", "str"],
+	"strings.Trim": ["str_trim", "ss", "str"],
+	"strings.TrimLeft": ["str_trim_left", "ss", "str"],
+	"strings.TrimRight": ["str_trim_right", "ss", "str"],
+	"strings.TrimPrefix": ["str_trim_prefix", "ss", "str"],
+	"strings.TrimSuffix": ["str_trim_suffix", "ss", "str"],
+};
+for (const [native, [name, kinds, result]] of Object.entries(STRING_NATIVES))
+	WASM_NATIVES.set(native, hostCall(name, [...kinds], result));

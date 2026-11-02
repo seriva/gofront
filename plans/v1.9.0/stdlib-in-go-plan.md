@@ -430,21 +430,21 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
 
 ### Phase 8: `strings`
 
-- [ ] **Task 8.1 — Search family with host natives**
+- [x] **Task 8.1 — Search family with host natives**
   - Files: `stdlib/strings/strings.go`, `src/backend/js/natives.js`, `src/backend/wasm/natives.js` (`Index`, `LastIndex`, `IndexByte`, `IndexRune`, `IndexAny`, `Contains*`, `HasPrefix`, `HasSuffix`, `Count` via today's imports such as `str_index`)
   - Removes: `stdlib/strings/{extra,iter}.go`, matching `emitStrings*` cases in `core.js`, members of `src/backend/js/stdlib/strings.js`, typings
   - Do: Go bodies over `[]byte` (v1.8.0 §1.1); natives reproduce today's output.
   - Test: `test/unit/stdlib/strings.test.js` — search cases (ASCII, per §1.1); `stdlib-bench.js` records WASM `strings.Index` on 1 MB.
   - Done when: cases pass four ways and WASM `strings.Index` is ≤ 1.25× the 145 ms baseline.
 
-- [ ] **Task 8.2 — Split, join, repeat and replace family**
+- [x] **Task 8.2 — Split, join, repeat and replace family**
   - Files: `stdlib/strings/strings.go`, `src/backend/js/natives.js`, `src/backend/wasm/natives.js`
   - Removes: matching `emitStrings*` cases, shim members and typings
   - Do: `Split*`, `Join`, `Repeat`, `Replace`, `ReplaceAll`, `Cut*`, `Fields`, `FieldsFunc` with natives where JS has the primitive.
   - Test: `strings.test.js` — split/join/replace cases including empty separators and `n` limits.
   - Done when: cases pass four ways.
 
-- [ ] **Task 8.3 — Case mapping, trimming and the rest**
+- [x] **Task 8.3 — Case mapping, trimming and the rest**
   - Files: `stdlib/strings/strings.go`, `src/backend/js/natives.js`, `src/backend/wasm/natives.js` (`ToUpper`, `ToLower`, `EqualFold`)
   - Removes: the remaining `emitStrings*` (except `strings.Builder`), the rest of `src/backend/js/stdlib/strings.js` (except `Builder`), `strings` typings
   - Do: `ToUpper`, `ToLower`, `ToTitle`, `Title`, `EqualFold`, `Trim*`, `Map`, `IndexFunc`, `ToValidUTF8`.

@@ -18,7 +18,6 @@ import { sha256Methods } from "./sha256.js";
 import { sharedMethods } from "./shared.js";
 import { simdMethods } from "./simd.js";
 import { strconvMethods } from "./strconv.js";
-import { stringsMethods } from "./strings.js";
 import { syncMethods } from "./sync.js";
 import { testingMethods } from "./testing.js";
 import { timeMethods } from "./time.js";
@@ -30,7 +29,6 @@ import { unicodeMethods } from "./unicode.js";
 // dynamically without creating static call edges.
 const STDLIB_METHOD_MAP = {
 	fmt: "_genFmt",
-	strings: "_genStrings",
 	strconv: "_genStrconv",
 	math: "_genMath",
 	bits: "_genBits",
@@ -101,7 +99,6 @@ export const stdlibGenMethods = {
 	...sharedMethods,
 	...simdMethods,
 	...strconvMethods,
-	...stringsMethods,
 	...timeMethods,
 	...unicodeMethods,
 	...testingMethods,

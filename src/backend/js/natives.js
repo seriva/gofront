@@ -132,3 +132,131 @@ JS_NATIVES.set(
 	(a) =>
 		`((a, b) => { a ??= []; b ??= []; const n = Math.min(a.length, b.length); for (let i = 0; i < n; i++) if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1; return a.length < b.length ? -1 : a.length > b.length ? 1 : 0; })(${a[0]}, ${a[1]})`,
 );
+
+// ── strings ───────────────────────────────────────────────────
+//
+// GoFront strings are JS strings and offsets count UTF-16 units, so the host
+// searches give the Go body's answers.  Runes are code points: a rune that
+// is not one (negative, past U+10FFFF or a surrogate) is never found, and a
+// lone surrogate in a cutset or chars string never matches.
+
+const GO_SPACE =
+	"[ \\t\\n\\v\\f\\r\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]";
+const BAD_RUNE = "r < 0 || r > 0x10FFFF || (r >= 0xD800 && r <= 0xDFFF)";
+const SURROGATE = "(v >= 0xD800 && v <= 0xDFFF)";
+
+const strFn = (params, body) => (a) =>
+	`((${params}) => ${body})(${a.join(", ")})`;
+
+JS_NATIVES.set("strings.Index", (a) => `${a[0]}.indexOf(${a[1]})`);
+JS_NATIVES.set("strings.LastIndex", (a) => `${a[0]}.lastIndexOf(${a[1]})`);
+JS_NATIVES.set(
+	"strings.IndexByte",
+	(a) => `${a[0]}.indexOf(String.fromCharCode(${a[1]}))`,
+);
+JS_NATIVES.set(
+	"strings.LastIndexByte",
+	(a) => `${a[0]}.lastIndexOf(String.fromCharCode(${a[1]}))`,
+);
+JS_NATIVES.set(
+	"strings.IndexRune",
+	strFn("s, r", `${BAD_RUNE} ? -1 : s.indexOf(String.fromCodePoint(r))`),
+);
+JS_NATIVES.set(
+	"strings.IndexAny",
+	strFn(
+		"s, cs",
+		`{ let m = -1; for (const c of cs) { const v = c.codePointAt(0); if (${SURROGATE}) continue; const i = s.indexOf(c); if (i >= 0 && (m < 0 || i < m)) m = i; } return m; }`,
+	),
+);
+JS_NATIVES.set(
+	"strings.LastIndexAny",
+	strFn(
+		"s, cs",
+		`{ let m = -1; for (const c of cs) { const v = c.codePointAt(0); if (${SURROGATE}) continue; const i = s.lastIndexOf(c); if (i > m) m = i; } return m; }`,
+	),
+);
+JS_NATIVES.set("strings.Contains", (a) => `${a[0]}.includes(${a[1]})`);
+JS_NATIVES.set(
+	"strings.ContainsAny",
+	strFn(
+		"s, cs",
+		`{ for (const c of cs) { const v = c.codePointAt(0); if (!${SURROGATE} && s.includes(c)) return true; } return false; }`,
+	),
+);
+JS_NATIVES.set(
+	"strings.ContainsRune",
+	strFn("s, r", `!(${BAD_RUNE}) && s.includes(String.fromCodePoint(r))`),
+);
+JS_NATIVES.set("strings.HasPrefix", (a) => `${a[0]}.startsWith(${a[1]})`);
+JS_NATIVES.set("strings.HasSuffix", (a) => `${a[0]}.endsWith(${a[1]})`);
+// An empty substring counts the code points plus one, as in Go.
+JS_NATIVES.set(
+	"strings.Count",
+	strFn(
+		"s, t",
+		`{ if (t === "") return [...s].length + 1; let n = 0; for (let i = s.indexOf(t); i !== -1; i = s.indexOf(t, i + t.length)) n++; return n; }`,
+	),
+);
+
+JS_NATIVES.set(
+	"strings.Repeat",
+	strFn(
+		"s, n",
+		`{ if (n < 0) throw new Error("strings: negative Repeat count"); return s.repeat(n); }`,
+	),
+);
+JS_NATIVES.set("strings.Join", (a) => `(${a[0]} ?? []).join(${a[1]})`);
+// The replacement is a function so `$&` and friends stay literal.  An empty
+// old string matches before every code point and at the end.
+const replaceFn = (n) =>
+	`(s, o, w${n === null ? ", n" : ""}) => { ${n === null ? "" : `const n = ${n}; `}if (o === w || n === 0) return s; if (o !== "") { if (n < 0) return s.replaceAll(o, () => w); let r = "", i = 0; for (let k = n; k > 0; k--) { const j = s.indexOf(o, i); if (j < 0) break; r += s.slice(i, j) + w; i = j + o.length; } return r + s.slice(i); } const cs = [...s]; const m = n < 0 || n > cs.length + 1 ? cs.length + 1 : n; let r = ""; for (let k = 0; k < m; k++) r += (k > 0 ? cs[k - 1] : "") + w; return r + cs.slice(m - 1).join(""); }`;
+JS_NATIVES.set(
+	"strings.Replace",
+	(a) => `(${replaceFn(null)})(${a.join(", ")})`,
+);
+JS_NATIVES.set(
+	"strings.ReplaceAll",
+	(a) => `(${replaceFn(-1)})(${a.join(", ")})`,
+);
+JS_NATIVES.set(
+	"strings.Split",
+	strFn("s, sep", `sep === "" ? [...s] : s.split(sep)`),
+);
+JS_NATIVES.set(
+	"strings.Fields",
+	(a) => `${a[0]}.split(/${GO_SPACE}+/).filter((p) => p !== "")`,
+);
+
+// Case mapping goes letter by letter through the first code point of the
+// host's mapping, as the Go body does through `unicode.ToUpper`; ASCII text
+// takes the whole-string fast path.
+const caseNative = (method) =>
+	strFn(
+		"s",
+		`/^[\\x00-\\x7f]*$/.test(s) ? s.${method}() : Array.from(s, (c) => String.fromCodePoint(c.${method}().codePointAt(0))).join("")`,
+	);
+JS_NATIVES.set("strings.ToUpper", caseNative("toUpperCase"));
+JS_NATIVES.set("strings.ToLower", caseNative("toLowerCase"));
+JS_NATIVES.set(
+	"strings.TrimSpace",
+	strFn(
+		"s",
+		`{ const sp = /${GO_SPACE}/; let i = 0, j = s.length; while (i < j && sp.test(s[i])) i++; while (j > i && sp.test(s[j - 1])) j--; return s.slice(i, j); }`,
+	),
+);
+const TRIM_FN =
+	'(s, cs, l, r) => { if (s === "" || cs === "") return s; const set = new Set(cs); let i = 0, j = s.length; if (l) while (i < j) { const c = s.codePointAt(i); if (!set.has(String.fromCodePoint(c))) break; i += c > 0xFFFF ? 2 : 1; } if (r) while (j > i) { let k = j - 1; const lo = s.charCodeAt(k); if (lo >= 0xDC00 && lo <= 0xDFFF && k > i) { const hi = s.charCodeAt(k - 1); if (hi >= 0xD800 && hi <= 0xDBFF) k--; } if (!set.has(s.slice(k, j))) break; j = k; } return s.slice(i, j); }';
+const trimNative = (l, r) => (a) =>
+	`(${TRIM_FN})(${a[0]}, ${a[1]}, ${l}, ${r})`;
+JS_NATIVES.set("strings.Trim", trimNative(true, true));
+JS_NATIVES.set("strings.TrimLeft", trimNative(true, false));
+JS_NATIVES.set("strings.TrimRight", trimNative(false, true));
+JS_NATIVES.set(
+	"strings.TrimPrefix",
+	strFn("s, p", "s.startsWith(p) ? s.slice(p.length) : s"),
+);
+JS_NATIVES.set(
+	"strings.TrimSuffix",
+	strFn("s, p", "s.endsWith(p) ? s.slice(0, s.length - p.length) : s"),
+);
