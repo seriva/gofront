@@ -325,28 +325,28 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
 
 ### Phase 4: `sort` and `slices`
 
-- [ ] **Task 4.1 — pdqsort variant generator**
+- [x] **Task 4.1 — pdqsort variant generator**
   - Files: new `scripts/gen-pdq.js`, new `scripts/pdq-template.txt` (derived from the pdqsort in `stdlib/sort/sort.go`), `package.json` (`gen:pdq`; `npm run check` fails when regeneration changes a file)
   - Generates: `stdlib/sort/zsort_iface.go`, `stdlib/sort/zsort_func.go`, `stdlib/slices/zsort_ordered.go`, `stdlib/slices/zsort_cmp.go` (Go's BSD notice kept)
   - Do: one template with the four substitutions Go's `gen_sort_variants` uses; swap and inspect by index (`data[a], data[b] = data[b], data[a]`), never `&data[i]` (v1.8.0 D5).
   - Test: new `test/unit/compiler/gen-pdq.test.js` — regenerating is a no-op; `test/unit/stdlib/sort.test.js` tie cases print the order of equal keys for n = 5, 13, 40, 1000.
   - Done when: tie cases match Go's order in all four configurations.
 
-- [ ] **Task 4.2 — `slices` non-sorting members in Go**
+- [x] **Task 4.2 — `slices` non-sorting members in Go**
   - Files: `stdlib/slices/slices.go`, `src/backend/js/natives.js` (`slices.Contains`, `Index`, `Reverse`, `Clone` for primitive `E`)
   - Removes: `stdlib/slices/{extra,iter}.go`, non-sort members from `src/backend/js/stdlib/slices.js`, `emitSlices*` (non-sort) in `src/backend/wasm/stdlib/core.js`, `slices` entries in `src/typechecker/stdlib/extended.js`
   - Do: every existing non-sort/search member with Go's signatures (`S ~[]E`); JS natives keep today's `includes`/`indexOf` text and handle nil slices.
   - Test: `test/unit/stdlib/slices.test.js` — Insert/Delete/Compact/Concat/Clip/Grow/Equal/Compare/Min/Max with named, empty and nil slices; `type IDs []int` comes back as `IDs` from `Insert`/`Delete`/`Clone`/`Compact`/`Grow`; `slices.Contains(nil, 1)` → `false`, `slices.Index(nil, 1)` → `-1`.
   - Done when: cases pass four ways; `example/` JS differs only where a native's text differs (diff in the PR).
 
-- [ ] **Task 4.3 — `slices` sort and search family in Go**
+- [x] **Task 4.3 — `slices` sort and search family in Go**
   - Files: `stdlib/slices/sort.go`, `src/backend/js/natives.js` (`slices.Sort` for `int`/`string`), new `test/perf/stdlib-bench.js`
   - Removes: `emitSlicesSort*`, `BinarySearch*`, `IsSorted*`, `MinMax*` in `core.js`; the matching shim members and typings
   - Do: `Sort`, `SortFunc`, `SortStableFunc`, `IsSorted*`, `BinarySearch*`, `Min*`, `Max*` over the generated pdqsort; floats order `NaN` first via `cmp.Less`.
   - Test: `slices.test.js` — `NaN`, ±0, ties via `SortFunc`, `SortStableFunc` stability, large n; `test/unit/wasm/slices.test.js` — a counting `SortFunc` on 20,000 elements makes ≤ 400,000 comparisons; `stdlib-bench.js` records the WASM 200,000-`int` sort and JS `SortFunc` vs `Array.prototype.sort`.
   - Done when: cases pass four ways; WASM 200,000 `int` ≤ 100 ms; JS `SortFunc` ≤ 2× `Array.prototype.sort` with a comparator.
 
-- [ ] **Task 4.4 — `sort` in Go**
+- [x] **Task 4.4 — `sort` in Go**
   - Files: `stdlib/sort/sort.go` (keeps the `Interface` API; its pdqsort moves to the generated files), `src/backend/js/natives.js` (`sort.Ints`, `sort.Strings`)
   - Removes: `src/backend/js/stdlib/sort.js`, `emitSort*` in `core.js`, `sort` typings in `src/typechecker/stdlib/core.js`
   - Do: `Ints`, `Strings`, `Float64s`, `Slice`, `SliceStable`, `Sort`, `Stable`, `Reverse`, `Search*`, `IntSlice`/`StringSlice`/`Float64Slice`, `IsSorted`, `*AreSorted`, `Find`, `SliceIsSorted`.

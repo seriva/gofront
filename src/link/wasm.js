@@ -253,7 +253,12 @@ export function linkIntoBundle(
 	pkgTarget,
 	{ sourceMappingURL } = {},
 ) {
-	const none = { wasm: null, wat: null, sourceMapInfo: null };
+	const none = {
+		wasm: null,
+		wat: null,
+		sourceMapInfo: null,
+		stringTable: null,
+	};
 	if (options.isDependency) return none;
 	const linked = linkWasmUnits(options.wasmUnits, {
 		emitWat: options.emitWat,
@@ -267,6 +272,7 @@ export function linkIntoBundle(
 		wasm: linked.wasm,
 		wat: linked.wat ?? null,
 		sourceMapInfo: linked.sourceMapInfo ?? null,
+		stringTable: linked.stringTable ?? null,
 	};
 }
 

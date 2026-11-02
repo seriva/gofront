@@ -591,8 +591,20 @@ export const resolveMethods = {
 
 	// `explicit` seeds the leading type arguments of a partial instantiation
 	// (`F[int](x)`); the rest are inferred from the call arguments.
-	inferTypeArgs(genericType, argTypes, explicit = []) {
+	// `scope` resolves the type parameters of the calling function, so an
+	// argument of type `S ~[]E` unifies through its core type.
+	inferTypeArgs(genericType, argTypes, explicit = [], scope = null) {
 		const map = new Map();
+		const saved = this._inferScope;
+		this._inferScope = scope;
+		try {
+			return this._inferTypeArgs(genericType, argTypes, explicit, map);
+		} finally {
+			this._inferScope = saved;
+		}
+	},
+
+	_inferTypeArgs(genericType, argTypes, explicit, map) {
 		for (let i = 0; i < explicit.length; i++)
 			map.set(genericType.typeParams[i].name, explicit[i]);
 		const params = genericType.underlying.params;
@@ -617,7 +629,9 @@ export const resolveMethods = {
 				if (!arg || !tp.constraint) continue;
 				const terms = this._constraintTerms(tp.constraint, new Set(), scope);
 				if (terms?.length !== 1) continue;
-				const argUnder = this._deepUnderlying(this.resolveType(arg));
+				const argUnder =
+					this._coreOfTypeParam(arg) ??
+					this._deepUnderlying(this.resolveType(arg));
 				if (argUnder) this._inferFromPair(terms[0], argUnder, map);
 			}
 			if (map.size === before) break;
@@ -658,8 +672,19 @@ export const resolveMethods = {
 		}
 	},
 
+	// An argument whose type is a type parameter of the calling function
+	// (`S ~[]E`) unifies through its core type: that type, or null.
+	// `paramType` (optional) is the parameter it is matched against; a bare
+	// type parameter takes the argument as it is.
+	_coreOfTypeParam(argType, paramType = null) {
+		if (argType.kind !== "typeParam" || !this._inferScope) return null;
+		if (paramType?.kind === "typeParam") return null;
+		return this._coreType(argType, this._inferScope);
+	},
+
 	_inferFromPair(paramType, argType, map) {
 		if (!paramType || !argType) return;
+		argType = this._coreOfTypeParam(argType, paramType) ?? argType;
 		if (paramType.kind === "typeParam") {
 			const prev = map.get(paramType.name);
 			if (!prev || untypedWins(prev, argType)) map.set(paramType.name, argType);

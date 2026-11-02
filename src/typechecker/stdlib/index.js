@@ -2,8 +2,8 @@
 // checker. Called once from TypeChecker._setupGlobals() during construction.
 //
 // Delegates to two focused sub-modules:
-//   stdlib/core.js     — browser globals, fmt, strings, bytes, strconv, sort,
-//                        math, errors, time, unicode, os, slices, html, io
+//   stdlib/core.js     — browser globals, fmt, strings, bytes, strconv,
+//                        math, errors, time, unicode, os, html, io
 //   stdlib/extended.js — gom, maps, regexp, rand, utf8, path, builder types,
 //                        built-in functions
 

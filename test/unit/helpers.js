@@ -13,16 +13,23 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import vm from "node:vm";
 import { CodeGen } from "../../src/backend/js/index.js";
 import { instantiateWasm } from "../../src/backend/wasm/glue.js";
-import { compileDir, compileFiles, compileWasm } from "../../src/compiler.js";
+import {
+	compileDir,
+	compileFiles,
+	compileWasm as compileWasmSource,
+} from "../../src/compiler.js";
 import { DtsParser, parseDts } from "../../src/dts-parser.js";
 import { Lexer } from "../../src/lexer/lexer.js";
 import { Parser } from "../../src/parser/index.js";
-import { resolveAll } from "../../src/resolver.js";
+import {
+	isBuiltinPackage,
+	resolveAll,
+	resolveStdlibSource,
+} from "../../src/resolver.js";
 import { TypeChecker } from "../../src/typechecker/index.js";
 
 export {
 	compileDir,
-	compileWasm,
 	DtsParser,
 	instantiateWasm,
 	join,
@@ -69,6 +76,54 @@ export const FIXTURES = join(__dirname, "fixtures");
 
 // ── Compiler ─────────────────────────────────────────────────
 
+// Whether the program imports a package that exists only as Go source under
+// stdlib/ (no typechecker table).  The in-memory `compile` and `compileWasm`
+// helpers do not link those; they go through `compileFiles` instead.
+function importsGoSourceStdlib(ast) {
+	return ast.imports.some((imp) =>
+		imp.imports.some(
+			({ path }) =>
+				!path.startsWith("js:") &&
+				!path.startsWith(".") &&
+				!isBuiltinPackage(path) &&
+				resolveStdlibSource(path) !== null,
+		),
+	);
+}
+
+// `compileFiles` for one in-memory source; compile errors come back as an
+// `errors` array like the in-memory helpers return them.
+function compileSourceFile(source, target, options = {}) {
+	const dir = mkdtempSync(join(tmpdir(), "gofront-source-"));
+	try {
+		const goPath = join(dir, "main.go");
+		writeFileSync(goPath, source);
+		return {
+			res: compileFiles([goPath], { forceTarget: target, ...options }),
+			errors: [],
+		};
+	} catch (e) {
+		return { res: null, errors: [{ message: e.message }] };
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
+export function compileWasm(source, options = {}) {
+	const ast = new Parser(
+		new Lexer(source, "main.go").tokenize(),
+		"main.go",
+		source,
+	).parse();
+	if (!importsGoSourceStdlib(ast)) return compileWasmSource(source, options);
+	const { res, errors } = compileSourceFile(source, "wasm", {
+		exportAll: options.exportAll ?? true,
+	});
+	return errors.length > 0
+		? { wasm: null, errors }
+		: { ...res, stringTable: res.stringTable ?? [], errors: [] };
+}
+
 export function compile(
 	source,
 	{
@@ -104,6 +159,13 @@ export function compile(
 		if (!info) continue;
 		checker.addDefinitions(info.types, info.values);
 		jsImports.set(path, [...info.values.keys()]);
+	}
+
+	if (importsGoSourceStdlib(ast)) {
+		const { res, errors } = compileSourceFile(source, pkgTarget);
+		return errors.length > 0
+			? { js: null, errors }
+			: { js: res.js, errors: [], warnings: [] };
 	}
 
 	const errors = checker.check(ast);

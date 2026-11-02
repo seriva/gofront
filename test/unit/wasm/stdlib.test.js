@@ -612,7 +612,7 @@ import (
 )
 
 func Main() string {
-	var s []int = slices.Concat()
+	var s []int = slices.Concat[[]int]()
 	return fmt.Sprintf("%v", s == nil)
 }
 `;
@@ -2077,11 +2077,6 @@ ${body}
 
 test("stdlib functions taking a callback or returning several values name themselves in the error", () => {
 	const cases = [
-		[
-			"sort",
-			"f := sort.Slice\n\t_ = f",
-			"sort.Slice cannot be used as a value",
-		],
 		[
 			"strings",
 			"f := strings.Map\n\t_ = f",

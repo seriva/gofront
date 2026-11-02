@@ -116,9 +116,7 @@ export const WASM_SUPPORTED_STDLIB = new Set([
 	"strconv",
 	"unicode",
 	"unicode/utf8",
-	"slices",
 	"maps",
-	"sort",
 	"path",
 	"path/filepath",
 	"html",
@@ -306,21 +304,6 @@ export const WASM_STDLIB_MEMBERS = new Map([
 		]),
 	],
 	[
-		"sort",
-		new Set([
-			"Ints",
-			"Float64s",
-			"Strings",
-			"Slice",
-			"SliceStable",
-			"SliceIsSorted",
-			"Search",
-			"IntsAreSorted",
-			"Float64sAreSorted",
-			"StringsAreSorted",
-		]),
-	],
-	[
 		"fmt",
 		new Set([
 			"Sprintf",
@@ -431,39 +414,6 @@ export const WASM_STDLIB_MEMBERS = new Map([
 			"QuotedPrefix",
 			"IsPrint",
 			"IsGraphic",
-		]),
-	],
-	[
-		"slices",
-		new Set([
-			"Sort",
-			"Reverse",
-			"Contains",
-			"Index",
-			"IndexFunc",
-			"ContainsFunc",
-			"BinarySearch",
-			"BinarySearchFunc",
-			"Equal",
-			"Clone",
-			"Compare",
-			"SortFunc",
-			"SortStableFunc",
-			"IsSorted",
-			"IsSortedFunc",
-			"Min",
-			"Max",
-			"MinFunc",
-			"MaxFunc",
-			"Compact",
-			"CompactFunc",
-			"Concat",
-			"Delete",
-			"DeleteFunc",
-			"Insert",
-			"Replace",
-			"Grow",
-			"Clip",
 		]),
 	],
 	[
@@ -699,7 +649,15 @@ export const INTRINSICS = new Map([]);
 // Names a standard-library function may carry in `//gofront:native <name>`:
 // the function keeps its Go body, and a backend registry may replace calls to
 // it with host code (or decline).  A closed set; new names need a plan change.
-export const NATIVES = new Set([]);
+export const NATIVES = new Set([
+	"slices.Contains",
+	"slices.Index",
+	"slices.Reverse",
+	"slices.Clone",
+	"slices.Sort",
+	"sort.Ints",
+	"sort.Strings",
+]);
 
 // ── Static operator sets (module-level for reuse) ────────────
 export const CMP_OPS = new Set(["==", "!=", "<", ">", "<=", ">="]);

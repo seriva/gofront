@@ -1263,3 +1263,93 @@ func main() {
 		"2 3 true false 3\n",
 	);
 });
+
+section("WASM generics — core-typed type arguments");
+
+test("a call inside a generic function passes its own S ~[]E on", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+type Ordered interface{ ~int | ~string }
+
+func Sort[S ~[]E, E Ordered](x S) {
+	for i := 1; i < len(x); i++ {
+		for j := i; j > 0 && x[j] < x[j-1]; j-- {
+			x[j], x[j-1] = x[j-1], x[j]
+		}
+	}
+}
+
+func Sorted[E Ordered](a []E) []E {
+	s := append([]E(nil), a...)
+	Sort(s)
+	return s
+}
+
+func main() {
+	fmt.Println(Sorted([]int{3, 1, 2}), Sorted([]string{"b", "a"}))
+}
+`,
+		"[1 2 3] [a b]\n",
+	);
+});
+
+test("a partial instantiation F[S](nil, n) infers E from S", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func Grow[S ~[]E, E any](s S, n int) S {
+	if n > 0 {
+		s = append(s[:cap(s)], make([]E, n)...)[:len(s)]
+	}
+	return s
+}
+
+func Concat[S ~[]E, E any](parts ...S) S {
+	size := 0
+	for _, p := range parts {
+		size += len(p)
+	}
+	out := Grow[S](nil, size)
+	for _, p := range parts {
+		out = append(out, p...)
+	}
+	return out
+}
+
+func main() {
+	fmt.Println(Concat([]int{1}, nil, []int{2, 3}), len(Concat([]string{"a"})))
+}
+`,
+		"[1 2 3] 1\n",
+	);
+});
+
+test("an array element type is a type argument", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func Has[S ~[]E, E comparable](s S, v E) bool {
+	for _, x := range s {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
+func Id[T any](x T) T { return x }
+
+func main() {
+	fmt.Println(Has([][2]int{{1, 2}}, [2]int{1, 2}), Id([][2]int{{3, 4}}))
+}
+`,
+		"true [[3 4]]\n",
+	);
+});

@@ -118,7 +118,11 @@ export function typeToTypeNode(t) {
 	if (t.kind === "array") {
 		return {
 			kind: "ArrayType",
-			len: t.len ?? t.size ?? 0,
+			size: {
+				kind: "BasicLit",
+				litKind: "INT",
+				value: String(t.len ?? t.size ?? 0),
+			},
 			elem: typeToTypeNode(t.elem),
 		};
 	}
@@ -131,6 +135,44 @@ export function typeToTypeNode(t) {
 	}
 	if (t.kind === "typeParam") return { kind: "TypeName", name: t.name };
 	return { kind: "TypeName", name: t.name ?? "any" };
+}
+
+// Replaces the type parameters inside a checker type (`[]E`, `map[K]V`,
+// `Box[E]`) by their type arguments; the result mixes checker types and the
+// AST type nodes of the substitution, which `typeKey` and `typeToTypeNode`
+// both accept.
+function substituteInType(t, map) {
+	if (!t || typeof t !== "object") return t;
+	const sub = (x) => substituteInType(x, map);
+	switch (t.kind) {
+		case "typeParam":
+			return map.has(t.name) ? map.get(t.name) : t;
+		case "slice":
+		case "array":
+			return { ...t, elem: sub(t.elem) };
+		case "pointer":
+			return { ...t, base: sub(t.base) };
+		case "map":
+			return { ...t, key: sub(t.key), value: sub(t.value) };
+		case "func":
+			return {
+				...t,
+				params: (t.params ?? []).map(sub),
+				returns: (t.returns ?? []).map(sub),
+			};
+		case "named":
+			return t.typeArgs?.length ? { ...t, typeArgs: t.typeArgs.map(sub) } : t;
+		default:
+			return t;
+	}
+}
+
+// A partial instantiation (`Grow[S](nil, n)`) lists only the explicit type
+// arguments; the checker recorded the complete list, which replaces it.
+function completeTypeArgs(node, typeSubstMap) {
+	if (node._typeArgs?.length > (node.typeArgs?.length ?? 0))
+		return node._typeArgs.map((t) => substituteInType(t, typeSubstMap));
+	return node.typeArgs;
 }
 
 function getSpecializedName(baseName, typeArgs) {
@@ -252,6 +294,7 @@ function substituteTypesInAst(
 		}
 		const baseName = node.expr?.name;
 		if (baseName) {
+			node.typeArgs = completeTypeArgs(node, typeSubstMap);
 			const sName = getSpecializedName(baseName, node.typeArgs);
 			const isType = genericTypes ? genericTypes.has(baseName) : false;
 			if (onGenericUsage) {
@@ -328,7 +371,7 @@ function substituteTypesInAst(
 					if (name && typeSubstMap.has(name)) {
 						return typeSubstMap.get(name);
 					}
-					return t;
+					return substituteInType(t, typeSubstMap);
 				});
 				const baseName = node.func.name;
 				const sName = getSpecializedName(baseName, typeArgs);

@@ -2,6 +2,7 @@ package main
 
 import "./utils"
 import "js:./browser.d.ts"
+import "slices"
 import "unicode/utf8"
 
 // ── Application state ─────────────────────────────────────────
