@@ -16,6 +16,7 @@ section("bytes package");
 
 test("bytes.Contains", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	b := []byte("hello world")
 	console.log(bytes.Contains(b, []byte("world")))
@@ -27,6 +28,7 @@ func main() {
 
 test("bytes.HasPrefix", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	b := []byte("hello")
 	console.log(bytes.HasPrefix(b, []byte("hel")))
@@ -38,6 +40,7 @@ func main() {
 
 test("bytes.HasSuffix", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	b := []byte("hello")
 	console.log(bytes.HasSuffix(b, []byte("llo")))
@@ -49,6 +52,7 @@ func main() {
 
 test("bytes.Index", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	b := []byte("hello")
 	console.log(bytes.Index(b, []byte("ll")))
@@ -60,6 +64,7 @@ func main() {
 
 test("bytes.Join", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	parts := [][]byte{[]byte("a"), []byte("b"), []byte("c")}
 	result := bytes.Join(parts, []byte("-"))
@@ -71,6 +76,7 @@ func main() {
 
 test("bytes.Split", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	b := []byte("a,b,c")
 	parts := bytes.Split(b, []byte(","))
@@ -85,6 +91,7 @@ func main() {
 
 test("bytes.Replace", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	b := []byte("aaa")
 	result := bytes.Replace(b, []byte("a"), []byte("b"), 2)
@@ -96,6 +103,7 @@ func main() {
 
 test("bytes.ToUpper", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	b := []byte("hello")
 	console.log(string(bytes.ToUpper(b)))
@@ -106,6 +114,7 @@ func main() {
 
 test("bytes.ToLower", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	b := []byte("HELLO")
 	console.log(string(bytes.ToLower(b)))
@@ -116,6 +125,7 @@ func main() {
 
 test("bytes.TrimSpace", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	b := []byte("  hello  ")
 	console.log(string(bytes.TrimSpace(b)))
@@ -126,6 +136,7 @@ func main() {
 
 test("bytes.Equal", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	a := []byte("hello")
 	b := []byte("hello")
@@ -139,6 +150,7 @@ func main() {
 
 test("bytes.Count", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	b := []byte("banana")
 	console.log(bytes.Count(b, []byte("a")))
@@ -149,6 +161,7 @@ func main() {
 
 test("bytes.Repeat", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	b := []byte("ab")
 	console.log(string(bytes.Repeat(b, 3)))
@@ -159,6 +172,7 @@ func main() {
 
 test("error: bytes.Contains with wrong arg types", () => {
 	const { errors } = compile(`package main
+import "bytes"
 func main() {
 	bytes.Contains("hello", "world")
 }`);
@@ -173,6 +187,7 @@ section("bytes additions");
 
 test("bytes.ReplaceAll", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	b := []byte("aaa")
 	result := bytes.ReplaceAll(b, []byte("a"), []byte("b"))
@@ -184,6 +199,7 @@ func main() {
 
 test("bytes.TrimPrefix", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	b := []byte("hello world")
 	result := bytes.TrimPrefix(b, []byte("hello "))
@@ -195,6 +211,7 @@ func main() {
 
 test("bytes.TrimSuffix", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	b := []byte("hello world")
 	result := bytes.TrimSuffix(b, []byte(" world"))
@@ -206,6 +223,7 @@ func main() {
 
 test("bytes.IndexByte", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	b := []byte("hello")
 	console.log(bytes.IndexByte(b, 'l'))
@@ -217,6 +235,7 @@ func main() {
 
 test("bytes.LastIndex", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	b := []byte("hello world hello")
 	idx := bytes.LastIndex(b, []byte("hello"))
@@ -228,6 +247,7 @@ func main() {
 
 test("bytes.LastIndexByte", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	b := []byte("hello")
 	console.log(bytes.LastIndexByte(b, 'l'))
@@ -238,6 +258,7 @@ func main() {
 
 test("bytes.ContainsAny", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	b := []byte("hello")
 	console.log(bytes.ContainsAny(b, "aeiou"))
@@ -249,6 +270,7 @@ func main() {
 
 test("bytes.Map transforms bytes", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	b := []byte{65, 66, 67}
 	result := bytes.Map(func(r rune) rune { return r + 1 }, b)
@@ -262,6 +284,7 @@ func main() {
 
 test("bytes.Cut found", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	before, after, found := bytes.Cut([]byte("user:password"), []byte(":"))
 	console.log(string(before))
@@ -274,6 +297,7 @@ func main() {
 
 test("bytes.Cut not found", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	bef, aft, found := bytes.Cut([]byte("hello"), []byte(":"))
 	console.log(len(bef))
@@ -286,6 +310,7 @@ func main() {
 
 test("bytes.Fields splits on whitespace", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	b := []byte("  foo bar  baz  ")
 	f := bytes.Fields(b)
@@ -298,6 +323,7 @@ func main() {
 
 test("bytes.SplitN", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	b := []byte("a,b,c,d")
 	parts := bytes.SplitN(b, []byte(","), 3)
@@ -312,6 +338,7 @@ func main() {
 
 test("bytes.Index byte offset with non-ASCII input (P48)", () => {
 	const { js, errors } = compile(`package main
+import "bytes"
 func main() {
 	b := []byte("héllo")
 	console.log(bytes.Index(b, []byte("l")))

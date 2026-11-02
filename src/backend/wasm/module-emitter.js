@@ -22,7 +22,6 @@ const ERROR_PRODUCING_PKGS = new Set([
 	"io",
 	"os",
 	"strings",
-	"bytes",
 	"time",
 	"sync",
 	"crypto/rand",
@@ -48,7 +47,6 @@ const STDLIB_ENV_PKGS = new Set([
 	"testing",
 	"unicode",
 	"math/rand",
-	"bytes",
 	"io",
 	"os",
 	"time",
@@ -73,11 +71,7 @@ const STDLIB_ENV_PKGS = new Set([
 // locked before function bodies are emitted.
 // Emitter-backed types whose interface methods are registered as synthetic
 // functions (see _registerIoSyntheticMethods in index.js).
-const SYNTHETIC_METHOD_TYPES = new Set([
-	"strings.Builder",
-	"bytes.Buffer",
-	"os.File",
-]);
+const SYNTHETIC_METHOD_TYPES = new Set(["strings.Builder", "os.File"]);
 
 const S = "externref";
 const STDLIB_IMPORTS = [

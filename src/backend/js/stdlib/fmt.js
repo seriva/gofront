@@ -481,11 +481,6 @@ export const fmtMethods = {
 			const base = this._unboxWriter(w);
 			return `((__b, __s) => { __b._buf += __s; return [__s.length, null]; })(${base}, ${sprintfCall})`;
 		}
-		if (targetTypeName === "bytes.Buffer") {
-			const w = this.genExpr(writerArg);
-			const base = this._unboxWriter(w);
-			return `((__b, __s) => { const __bytes = new TextEncoder().encode(__s); for (let i = 0; i < __bytes.length; i++) __b._buf.push(__bytes[i]); return [__bytes.length, null]; })(${base}, ${sprintfCall})`;
-		}
 		// Any other io.Writer: Fprint* calls Write with the UTF-8 bytes.
 		const w = this.genExpr(writerArg);
 		return `((__w, __s) => __w.Write(new TextEncoder().encode(__s)))(${w}, ${sprintfCall})`;

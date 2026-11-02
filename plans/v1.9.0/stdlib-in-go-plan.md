@@ -408,21 +408,21 @@ Execution follows `/execute-plan`: epic branch `feat/stdlib-in-go`, one branch `
 
 ### Phase 7: `bytes`
 
-- [ ] **Task 7.1 — `bytes` functions in Go with natives**
+- [x] **Task 7.1 — `bytes` functions in Go with natives**
   - Files: `stdlib/bytes/bytes.go`, `src/backend/js/natives.js` (`IndexByte`, `Equal`, `Compare`)
   - Removes: `stdlib/bytes/{iter,search,split}.go`, `emitBytesCall`/`_emitBytes*` in `src/backend/wasm/stdlib/bytes.js`, function members of `src/backend/js/stdlib/bytes.js`, `bytes` function typings
   - Do: every existing `bytes` function with Go's signatures (`rune`/`byte` types for `ContainsRune`, `IndexByte`, `Map`, `FieldsFunc`, `TrimFunc`).
   - Test: `test/unit/stdlib/bytes.test.js` — functions; `bytes.IndexRune([]byte("a\xffb"), utf8.RuneError)` → `1`; `bytes.ToTitle` on WASM; `test/unit/builtins/bytes.test.js` unchanged.
   - Done when: cases pass four ways and `bytes` functions have no typechecker entry.
 
-- [ ] **Task 7.2 — `bytes.Buffer` in Go**
+- [x] **Task 7.2 — `bytes.Buffer` in Go**
   - Files: `stdlib/bytes/buffer.go`, `src/backend/js/expressions.js`, `src/backend/wasm/index.js` (`bytes.Buffer` sites)
   - Removes: `emitBytesBufferMethodCall` (the rest of `src/backend/wasm/stdlib/bytes.js`), `Buffer` in `src/backend/js/stdlib/bytes.js`, `bytes.Buffer` sites in `wasm/emit-builtins.js`
   - Do: `Write*`, `Read*`, `Bytes`, `String`, `Len`, `Cap`, `Grow`, `Truncate`, `Reset`, `Next`, `ReadFrom`, `WriteTo`, `UnreadByte`, `UnreadRune`, `NewBuffer`, `NewBufferString`; `fmt.Fprint*` into a `Buffer` goes through `io.Writer` (Task 6.1).
   - Test: `bytes.test.js` — buffer cases; `n, _ := fmt.Fprint(&b, "héé")` → `5`; value-copy, pointer, interface and map-value cases in `test/unit/builtins/bytes.test.js`; a program using `Buffer` is ≤ 4,500 bytes of dev `app.wasm`.
   - Done when: both pass and `src/backend/wasm/stdlib/bytes.js` is deleted.
 
-- [ ] **Task 7.3 — Remove dead `bytes` internals**
+- [x] **Task 7.3 — Remove dead `bytes` internals**
   - Files: `src/backend/wasm/stdlib/io.js`, `src/backend/wasm/emit-builtins.js`, `scripts/check-layers.js` (`ALLOW` entries made obsolete)
   - Do: delete helpers only the `bytes` emitters used and any `ALLOW` entry whose shim is gone.
   - Test: `test/unit/compiler/check-layers.test.js` passes with the shorter `ALLOW`; `test/unit/wasm/stdlib.test.js` unchanged.

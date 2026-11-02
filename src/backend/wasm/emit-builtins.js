@@ -1099,17 +1099,6 @@ export class BuiltinsEmitter {
 			case "rand":
 				this.emitRandCall(func.field, args, targetWasmType);
 				return true;
-			case "bytes":
-				if (func.field === "NewBuffer") {
-					this.emitBytesNewBuffer(call, targetWasmType);
-					return true;
-				}
-				if (func.field === "NewBufferString") {
-					this.emitBytesNewBufferString(call, targetWasmType);
-					return true;
-				}
-				this.emitBytesCall(func.field, args, targetWasmType);
-				return true;
 			case "time":
 				this.emitTimeCall(func.field, call, targetWasmType);
 				return true;
@@ -1278,10 +1267,6 @@ export class BuiltinsEmitter {
 	) {
 		if (recvTypeName === "strings.Builder") {
 			this.emitBuilderMethodCall(field, expr, args, targetWasmType);
-			return true;
-		}
-		if (recvTypeName === "bytes.Buffer") {
-			this.emitBytesBufferMethodCall(field, expr, args, targetWasmType);
 			return true;
 		}
 		if (recvTypeName === "time.Time") {

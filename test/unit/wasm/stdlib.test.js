@@ -1053,7 +1053,7 @@ test("Phase 6 negative bounds panics parity", () => {
 package main
 
 import (
-	"bytes"
+	${goCode.includes("bytes.") ? '"bytes"' : ""}
 	"math/rand"
 )
 

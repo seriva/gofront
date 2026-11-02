@@ -3,12 +3,10 @@
 //
 // Organized by domain:
 // - core.js:   math, math/bits, maps, strings, strconv, fmt, errors (As), testing
-// - bytes.js:  bytes package functions and bytes.Buffer methods
 // - pure.js:   stateless utilities (unicode, math/rand)
 // - io.js:     io constants/functions, readers/writers, fmt Fprint/Sscan, synthetic IO methods
 // - time.js:   time package (Duration, Time struct, components, Format/Parse, clock)
 
-import { BytesEmitter } from "./bytes.js";
 import { BINARY_MATH_IMPORTS, StdlibCoreEmitter } from "./core.js";
 import { IoEmitter } from "./io.js";
 import { ExtendedPackagesEmitter } from "./packages.js";
@@ -18,7 +16,6 @@ import { TimeEmitter } from "./time.js";
 
 export {
 	BINARY_MATH_IMPORTS,
-	BytesEmitter,
 	ExtendedPackagesEmitter,
 	IoEmitter,
 	PurePackagesEmitter,
@@ -29,7 +26,6 @@ export {
 
 export const stdlibEmitters = [
 	StdlibCoreEmitter,
-	BytesEmitter,
 	PurePackagesEmitter,
 	IoEmitter,
 	TimeEmitter,

@@ -395,7 +395,7 @@ function stdlibJs(pkg, reached, natives) {
 		strict: true,
 		natives,
 	}).generateAll(programs, { isTest: false });
-	// The runtime's own io.EOF producers (os.Stdin, bytes.Buffer) return
+	// The runtime's own io.EOF producers (os.Stdin) return
 	// `__io_eof`: make it the Go package's value so `err == io.EOF` holds.
 	return pkg.importPath === "io" && js.includes("let EOF$$io")
 		? `${js}\nvar __io_eof = EOF$$io;`

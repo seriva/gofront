@@ -11,10 +11,12 @@
 import { forEachChild } from "./walk.js";
 
 // Methods the runtime or emitter-backed stdlib call without a selector in
-// GoFront code (fmt verbs, errors.Is/As/Unwrap, encoding/json).
+// GoFront code (fmt verbs and Fprint* writers, errors.Is/As/Unwrap,
+// encoding/json).
 const IMPLICIT_METHODS = new Set([
 	"Error",
 	"String",
+	"Write",
 	"GoString",
 	"Format",
 	"Unwrap",

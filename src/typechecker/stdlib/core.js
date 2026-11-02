@@ -168,13 +168,6 @@ TIME_T.underlying.methods = new Map([
 	],
 ]);
 TIME_T.methods = TIME_T.underlying.methods;
-const BUFFER_T = {
-	kind: "named",
-	name: "bytes.Buffer",
-	underlying: { kind: "struct" },
-};
-const BUFFER_PTR_T = { kind: "pointer", base: BUFFER_T };
-
 export function setupCoreGlobals(globals, types) {
 	for (const g of BROWSER_GLOBALS) globals.define(g, ANY);
 
@@ -370,90 +363,6 @@ export function setupCoreGlobals(globals, types) {
 	});
 
 	const BYTE_SLICE = { kind: "slice", elem: UINT8 };
-	const byFn1 = (ret) => ({
-		kind: "func",
-		params: [BYTE_SLICE],
-		returns: [ret],
-	});
-	const byFn2 = (p2, ret) => ({
-		kind: "func",
-		params: [BYTE_SLICE, p2],
-		returns: [ret],
-	});
-	globals.define("bytes", {
-		kind: "namespace",
-		name: "bytes",
-		members: {
-			Contains: byFn2(BYTE_SLICE, BOOL),
-			HasPrefix: byFn2(BYTE_SLICE, BOOL),
-			HasSuffix: byFn2(BYTE_SLICE, BOOL),
-			Index: byFn2(BYTE_SLICE, INT),
-			Count: byFn2(BYTE_SLICE, INT),
-			Repeat: byFn2(INT, BYTE_SLICE),
-			Replace: {
-				kind: "func",
-				params: [BYTE_SLICE, BYTE_SLICE, BYTE_SLICE, INT],
-				returns: [BYTE_SLICE],
-			},
-			ToUpper: byFn1(BYTE_SLICE),
-			ToLower: byFn1(BYTE_SLICE),
-			ToTitle: byFn1(BYTE_SLICE),
-			TrimSpace: byFn1(BYTE_SLICE),
-			Trim: byFn2(STRING, BYTE_SLICE),
-			Equal: byFn2(BYTE_SLICE, BOOL),
-			Split: byFn2(BYTE_SLICE, { kind: "slice", elem: BYTE_SLICE }),
-			Join: {
-				kind: "func",
-				params: [{ kind: "slice", elem: BYTE_SLICE }, BYTE_SLICE],
-				returns: [BYTE_SLICE],
-			},
-			ReplaceAll: {
-				kind: "func",
-				params: [BYTE_SLICE, BYTE_SLICE, BYTE_SLICE],
-				returns: [BYTE_SLICE],
-			},
-			TrimPrefix: byFn2(BYTE_SLICE, BYTE_SLICE),
-			TrimSuffix: byFn2(BYTE_SLICE, BYTE_SLICE),
-			TrimLeft: byFn2(STRING, BYTE_SLICE),
-			TrimRight: byFn2(STRING, BYTE_SLICE),
-			TrimFunc: {
-				kind: "func",
-				params: [BYTE_SLICE, ANY],
-				returns: [BYTE_SLICE],
-			},
-			IndexByte: byFn2(INT, INT),
-			LastIndex: byFn2(BYTE_SLICE, INT),
-			LastIndexByte: byFn2(INT, INT),
-			Fields: byFn1({ kind: "slice", elem: BYTE_SLICE }),
-			FieldsFunc: byFn2(ANY, { kind: "slice", elem: BYTE_SLICE }),
-			Clone: byFn1(BYTE_SLICE),
-			Cut: {
-				kind: "func",
-				params: [BYTE_SLICE, BYTE_SLICE],
-				returns: [BYTE_SLICE, BYTE_SLICE, BOOL],
-			},
-			ContainsAny: byFn2(STRING, BOOL),
-			ContainsRune: byFn2(INT, BOOL),
-			Map: { kind: "func", params: [ANY, BYTE_SLICE], returns: [BYTE_SLICE] },
-			SplitN: {
-				kind: "func",
-				params: [BYTE_SLICE, BYTE_SLICE, INT],
-				returns: [{ kind: "slice", elem: BYTE_SLICE }],
-			},
-			NewBuffer: {
-				kind: "func",
-				params: [BYTE_SLICE],
-				returns: [BUFFER_PTR_T],
-			},
-			NewBufferString: {
-				kind: "func",
-				params: [STRING],
-				returns: [BUFFER_PTR_T],
-			},
-			ToValidUTF8: byFn2(BYTE_SLICE, BYTE_SLICE),
-			Buffer: BUFFER_T,
-		},
-	});
 
 	globals.define("strconv", {
 		kind: "namespace",

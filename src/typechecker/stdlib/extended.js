@@ -1,5 +1,5 @@
 // Extended standard library type definitions — gom, maps, regexp, rand, utf8,
-// path, strings.Builder / bytes.Buffer types, and built-in functions.
+// path, strings.Builder type, and built-in functions.
 
 import {
 	ANY,
@@ -243,24 +243,11 @@ export function setupExtendedGlobals(globals, types) {
 							["_len", INT],
 							["_self", ANY],
 						]
-					: name === "bytes.Buffer"
-						? [
-								["_buf", BYTE_SLICE_T],
-								["_lastOp", INT],
-								["_lastRuneLen", INT],
-							]
-						: [],
+					: [],
 			),
 			methods: new Map([..._builderBase, ...extra]),
 		},
 	});
-	const IO_READER = {
-		kind: "interface",
-		name: "io.Reader",
-		methods: new Map([
-			["Read", { kind: "func", params: [BYTE_SLICE_T], returns: [INT, ERROR] }],
-		]),
-	};
 	const IO_WRITER = {
 		kind: "interface",
 		name: "io.Writer",
@@ -278,45 +265,6 @@ export function setupExtendedGlobals(globals, types) {
 			["WriteRune", { kind: "func", params: [INT], returns: [INT, ERROR] }],
 		]),
 	);
-	types.set(
-		"bytes.Buffer",
-		_makeBuilderType("bytes.Buffer", [
-			["WriteRune", { kind: "func", params: [INT], returns: [INT, ERROR] }],
-			["Bytes", { kind: "func", params: [], returns: [BYTE_SLICE_T] }],
-			["Read", { kind: "func", params: [BYTE_SLICE_T], returns: [INT, ERROR] }],
-			["ReadRune", { kind: "func", params: [], returns: [INT32, INT, ERROR] }],
-			["UnreadRune", { kind: "func", params: [], returns: [ERROR] }],
-			["ReadByte", { kind: "func", params: [], returns: [UINT8, ERROR] }],
-			["UnreadByte", { kind: "func", params: [], returns: [ERROR] }],
-			[
-				"ReadBytes",
-				{ kind: "func", params: [UINT8], returns: [BYTE_SLICE_T, ERROR] },
-			],
-			[
-				"ReadString",
-				{ kind: "func", params: [UINT8], returns: [STRING, ERROR] },
-			],
-			[
-				"ReadFrom",
-				{ kind: "func", params: [IO_READER], returns: [INT64, ERROR] },
-			],
-			[
-				"WriteTo",
-				{ kind: "func", params: [IO_WRITER], returns: [INT64, ERROR] },
-			],
-			["Next", { kind: "func", params: [INT], returns: [BYTE_SLICE_T] }],
-			["Truncate", { kind: "func", params: [INT], returns: [VOID] }],
-			["Available", { kind: "func", params: [], returns: [INT] }],
-			[
-				"AvailableBuffer",
-				{ kind: "func", params: [], returns: [BYTE_SLICE_T] },
-			],
-			["Peek", { kind: "func", params: [INT], returns: [BYTE_SLICE_T, ERROR] }],
-		]),
-	);
-	const bytesPkg = globals.lookup("bytes");
-	if (bytesPkg?.members) bytesPkg.members.Buffer = types.get("bytes.Buffer");
-
 	globals.define("rand", {
 		kind: "namespace",
 		name: "rand",
