@@ -2,9 +2,11 @@
 
 import { fileURLToPath } from "node:url";
 import {
+	assertAllTargetsOutput,
 	assertEqual,
 	assertErrorContains,
 	assertProgramOutput,
+	assertWasmProgramOutput,
 	compile,
 	runJs,
 	section,
@@ -1177,6 +1179,237 @@ type impl struct{}
 func (impl) Do(f func(uint8) int) []any { return nil }
 func main() { var b Bag = impl{}; _ = b }`);
 	assertErrorContains(errors, "does not implement");
+});
+
+section("Named results in function literals");
+
+test("function literals with named results run on every target", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+var f = func() (res int) { res = 4; return }
+
+func main() {
+	g := func() (xs []int) { xs = []int{1}; return }
+	fmt.Println(g())
+	fmt.Println(f())
+	h := func(n int) (r string) { r = "x"; return r }
+	fmt.Println(h(1))
+	k := func() (a, b int, err error) { a, b = 1, 2; return }
+	fmt.Println(k())
+	d := func() (n int) {
+		defer func() { n *= 2 }()
+		n = 3
+		return
+	}
+	fmt.Println(d())
+	outer := func() (v int) {
+		inner := func() (v string) { v = "in"; return }
+		_ = inner()
+		v = 7
+		return
+	}
+	fmt.Println(outer())
+	z := func() (n int, s string) { return }
+	fmt.Println(z())
+}
+`,
+		"[1]\n4\nx\n1 2 <nil>\n6\n7\n0 \n",
+	);
+});
+
+test("a function literal without named results still needs a return value", () => {
+	const { errors } = compile(`package main
+func main() {
+	f := func() int { return }
+	_ = f
+}`);
+	assertErrorContains(errors, "Missing return value");
+});
+
+section("Comma-ok in var declarations");
+
+test("var v, ok = m[k] and x.(T) run on every target", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+type st struct{ n int }
+
+func two() (int, string) { return 1, "a" }
+
+var gm = map[string]int{"k": 4}
+var gv, gok = gm["k"]
+var gv2, gok2 = gm["z"]
+var ga, gb = two()
+
+func main() {
+	var w, ok1 = any(st{}).(interface{ M() })
+	fmt.Println(w == nil, ok1)
+	var n, ok2 = any(5).(int)
+	fmt.Println(n, ok2)
+	var s, ok3 = any(5).(string)
+	fmt.Printf("%q %v\\n", s, ok3)
+	m := map[string]int{"k": 3}
+	var v, ok4 = m["k"]
+	fmt.Println(v, ok4)
+	var v2, ok5 = m["z"]
+	_ = v2
+	fmt.Println(ok5)
+	var _, ok6 = m["k"]
+	fmt.Println(ok6)
+	var p, ok7 = any(&st{2}).(*st)
+	fmt.Println(p.n, ok7)
+	var a, b = two()
+	fmt.Println(a, b)
+	_ = gv2
+	fmt.Println(gv, gok, gok2, ga, gb)
+}
+`,
+		'true false\n5 true\n"" false\n3 true\nfalse\ntrue\n2 true\n1 a\n4 true false 1 a\n',
+	);
+});
+
+test("var _, ok = error(many{}).(interface{ Unwrap() []error }) is true in wasm", async () => {
+	await assertWasmProgramOutput(
+		`package main
+
+import "fmt"
+
+type many struct{}
+
+func (many) Error() string   { return "m" }
+func (many) Unwrap() []error { return nil }
+
+func main() {
+	var _, ok = error(many{}).(interface{ Unwrap() []error })
+	fmt.Println(ok)
+}
+`,
+		"true\n",
+	);
+});
+
+test("var v, ok with a non-comma-ok value is still a mismatch", () => {
+	const { errors } = compile(`package main
+func main() {
+	x := 1
+	var v, ok = x
+	_, _ = v, ok
+}`);
+	assertErrorContains(errors, "assignment mismatch: 2 variables but 1 value");
+});
+
+section("Self-referential local types");
+
+test("a type declared inside a function may refer to itself", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	type L struct {
+		next *L
+		v    int
+	}
+	a := &L{v: 1}
+	b := &L{next: a, v: 2}
+	fmt.Println(b.v, b.next.v)
+	type Tree struct {
+		kids []Tree
+		n    int
+	}
+	t := Tree{kids: []Tree{{n: 2}, {n: 3}}, n: 1}
+	sum := t.n
+	for _, k := range t.kids {
+		sum += k.n
+	}
+	fmt.Println(sum)
+	type Visit func(*L) int
+	var f Visit = func(p *L) int { return p.v }
+	fmt.Println(f(b))
+	for p := b; p != nil; p = p.next {
+		fmt.Print(p.v, " ")
+	}
+	fmt.Println()
+}
+`,
+		"2 1\n6\n2\n2 1 \n",
+	);
+});
+
+test("an unknown name in a local type is still reported", () => {
+	const { errors } = compile(`package main
+func main() {
+	type L struct{ next *M }
+	_ = L{}
+}`);
+	assertErrorContains(errors, "Unknown type 'M'");
+});
+
+section("Termination analysis follows fallthrough");
+
+test("a switch whose clause falls through into a returning clause terminates", async () => {
+	await assertAllTargetsOutput(
+		`package main
+
+import "fmt"
+
+func f(n int) int {
+	switch n {
+	case 0:
+		return 0
+	case 1:
+		fallthrough
+	case 2:
+		return 1
+	default:
+		return 2
+	}
+}
+
+func main() {
+	fmt.Println(f(0), f(1), f(2), f(3))
+}
+`,
+		"0 1 1 2\n",
+	);
+});
+
+test("a switch whose last clause falls off the end is still missing a return", () => {
+	const { errors } = compile(`package main
+func f(n int) int {
+	switch n {
+	case 0:
+		return 0
+	case 1:
+		fallthrough
+	default:
+		n++
+	}
+}
+func main() { _ = f(1) }`);
+	assertErrorContains(errors, "missing return at end of function 'f'");
+});
+
+test("a fallthrough into a clause that falls off the end is still missing a return", () => {
+	const { errors } = compile(`package main
+func f(n int) int {
+	switch n {
+	case 0:
+		fallthrough
+	case 1:
+		n++
+	default:
+		return 2
+	}
+}
+func main() { _ = f(1) }`);
+	assertErrorContains(errors, "missing return at end of function 'f'");
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

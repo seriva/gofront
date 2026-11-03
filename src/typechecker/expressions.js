@@ -4,6 +4,7 @@ import { EXCLUDED_STDLIB_MEMBERS } from "./stdlib/excluded.js";
 import { sharedInfo } from "./stdlib/shared.js";
 import {
 	ANY,
+	BASIC_TYPES,
 	BOOL,
 	BROWSER_GLOBALS,
 	COMPLEX64,
@@ -22,6 +23,7 @@ import {
 	isComplex64,
 	isComplexOrNumeric,
 	isInteger,
+	isNil,
 	isNumeric,
 	isString,
 	NIL,
@@ -38,6 +40,15 @@ import {
 	UNTYPED_STRING,
 	VOID,
 } from "./types.js";
+
+const NILABLE_KINDS = new Set([
+	"slice",
+	"map",
+	"pointer",
+	"func",
+	"interface",
+	"chan",
+]);
 
 /** @typedef {import('./index.js').TypeChecker} TypeChecker */
 
@@ -165,6 +176,11 @@ export const expressionCheckMethods = {
 				return UNTYPED_COMPLEX;
 			case "Ident": {
 				const t = scope.lookup(expr.name);
+				// `(*int)(nil)`: a predeclared type named where a type may stand.
+				if (!t && expr._typeRefOk && Object.hasOwn(BASIC_TYPES, expr.name)) {
+					expr._isTypeRef = true;
+					return BASIC_TYPES[expr.name];
+				}
 				if (!t) return this.err(`Undefined: '${expr.name}'`, expr);
 				if (this.types.has(expr.name) || t.kind === "typeParam")
 					expr._isTypeRef = true;
@@ -919,9 +935,12 @@ export const expressionCheckMethods = {
 		const ret = expr.returnType
 			? this.resolveTypeNode(expr.returnType, scope)
 			: VOID;
+		const bodyRet = this._injectNamedReturns(expr.returnType, inner)
+			? { ...ret, _hasNamedReturns: true }
+			: ret;
 		const savedDefer = this._deferCount;
 		this._deferCount = 0;
-		this.checkBlock(expr.body, inner, ret);
+		this.checkBlock(expr.body, inner, bodyRet);
 		this._reportUnused(inner, expr);
 		if (this._deferCount > 0) expr.body._hasDefer = true;
 		this._deferCount = savedDefer;
@@ -980,6 +999,7 @@ export const expressionCheckMethods = {
 		const targetType = this.resolveTypeNode(expr.targetType, scope);
 		// `any(x)` / `error(x)`: box x as an implicit conversion would.
 		this._markIfaceBox(targetType, srcType, expr.expr);
+		this._rejectNilConversion(srcType, targetType, expr);
 		const srcResolved =
 			srcType?.kind === "named" ? srcType.underlying : srcType;
 		const tgtResolved =
@@ -1021,11 +1041,41 @@ export const expressionCheckMethods = {
 		return targetType;
 	},
 
+	// `int(nil)`: only a type with a nil value converts from `nil`.
+	_rejectNilConversion(srcType, targetType, expr) {
+		if (!isNil(srcType) || !targetType || isAny(targetType)) return;
+		if (targetType.kind === "typeParam") return;
+		const kind = this._deepUnderlying(targetType)?.kind;
+		if (!kind || NILABLE_KINDS.has(kind)) return;
+		this.err(`cannot convert nil to ${typeStr(targetType)}`, expr);
+	},
+
+	// Pointers convert when their base types share an underlying type.
+	_pointerConversionOk(srcPtr, tgtPtr, srcType, targetType, expr) {
+		const sBase = this._deepUnderlying(srcPtr.base);
+		const tBase = this._deepUnderlying(tgtPtr.base);
+		if (typeStr(sBase) === typeStr(tBase)) return true;
+		if (!this._sameStructFields(sBase, tBase)) return false;
+		// WebAssembly struct types are nominal: the two pointers could not
+		// share one object.
+		if (this.target === "wasm" || this.target === "both") {
+			this.recordBlocker("pointer conversion between struct types");
+			this.err(
+				`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)} in a wasm package: pointers to distinct struct types cannot share storage; keep this code in a js package`,
+				expr,
+			);
+		}
+		return true;
+	},
+
 	_checkConversionValidity(srcType, targetType, expr) {
 		if (!srcType || !targetType || isAny(srcType) || isAny(targetType)) return;
 		const srcResolved = srcType.kind === "named" ? srcType.underlying : srcType;
 		const tgtResolved =
 			targetType.kind === "named" ? targetType.underlying : targetType;
+
+		// `nil` converts to any type that has a nil value.
+		if (isNil(srcType) && NILABLE_KINDS.has(tgtResolved?.kind)) return;
 
 		if (isNumeric(targetType) && isComplex(srcType)) {
 			this.err(
@@ -1089,17 +1139,18 @@ export const expressionCheckMethods = {
 						srcResolved.elem?.name === "int32")))
 		)
 			return;
-		if (srcResolved?.kind === "pointer" && tgtResolved?.kind === "pointer") {
-			const sBase =
-				srcResolved.base?.kind === "named"
-					? srcResolved.base.underlying
-					: srcResolved.base;
-			const tBase =
-				tgtResolved.base?.kind === "named"
-					? tgtResolved.base.underlying
-					: tgtResolved.base;
-			if (typeStr(sBase) === typeStr(tBase)) return;
-		}
+		if (
+			srcResolved?.kind === "pointer" &&
+			tgtResolved?.kind === "pointer" &&
+			this._pointerConversionOk(
+				srcResolved,
+				tgtResolved,
+				srcType,
+				targetType,
+				expr,
+			)
+		)
+			return;
 		this.err(
 			`cannot convert ${typeStr(srcType)} to ${typeStr(targetType)}`,
 			expr,
@@ -1490,7 +1541,12 @@ export const expressionCheckMethods = {
 
 		// Named type used as a constructor/conversion: Greeter(fn), NodeFunc(fn)
 		// The callee is a type name, not a callable variable.
-		if (fnType.kind === "named" && expr.func._isTypeRef) {
+		if (
+			(fnType.kind === "named" ||
+				fnType.kind === "pointer" ||
+				fnType.kind === "basic") &&
+			expr.func._isTypeRef
+		) {
 			expr._isTypeConversion = true;
 			expr._conversionTargetType = fnType;
 			if (expr.args.length !== 1) {

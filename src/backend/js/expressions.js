@@ -1489,7 +1489,7 @@ export const expressionGenMethods = {
 		this._withFnCtx(expr.body, () =>
 			this.indented(() => {
 				this._emitParamCopies(expr.params);
-				this._genBody(expr.body, expr);
+				this._withNamedReturns(expr, () => this._genBody(expr.body, expr));
 			}),
 		);
 		const body = this.out.join("\n");

@@ -64,13 +64,22 @@ export const terminationMethods = {
 
 	_isTerminatingSwitch(stmt) {
 		let hasDefault = false;
-		for (const c of stmt.cases ?? []) {
+		const cases = stmt.cases ?? [];
+		for (let i = 0; i < cases.length; i++) {
+			const c = cases[i];
 			if (!c.list) hasDefault = true;
 			if (!c.stmts?.length) return false;
 			const last = c.stmts[c.stmts.length - 1];
+			// `fallthrough` hands control to the next clause, which is checked
+			// on its own; the final clause has none to fall into.
+			if (this._isFallthrough(last) && i < cases.length - 1) continue;
 			if (!this._isTerminating(last)) return false;
 		}
 		return hasDefault;
+	},
+
+	_isFallthrough(stmt) {
+		return stmt?.kind === "BranchStmt" && stmt.keyword === "fallthrough";
 	},
 
 	_isTerminatingTypeSwitch(stmt) {
