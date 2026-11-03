@@ -209,23 +209,23 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
 
 ### Phase 3: Typechecker Checks and Diagnostics
 
-- [ ] Task 3.1: Reject implicit `float64` → `int` assignment
+- [x] Task 3.1: Reject implicit `float64` → `int` assignment
   - Files: `src/typechecker/assignability.js`, `test/unit/types/checks.test.js`
   - Test: L20 `var y float64 = 1; var i int = y` → `assertErrorContains(errors, "cannot use y (variable of type float64) as int value")`; untyped constants `var i int = 1.0` still accepted.
   - Done when: repro is a type error on all targets; `npm run check` (examples) and `npm test` stay green.
-- [ ] Task 3.2: Switch case types must match the tag
+- [x] Task 3.2: Switch case types must match the tag
   - Files: `src/typechecker/statements.js`, `test/unit/types/checks.test.js`
   - Test: L183 `switch name { case 5: }` (`name string`) → `assertErrorContains(errors, "cannot convert 5 (untyped int constant) to type string")`; same for the templ form (`test/unit/compiler/templ.test.js`).
   - Done when: both forms are type errors; no invalid WASM is emitted.
-- [ ] Task 3.3: Initialization cycles for constants and shadowed package vars
+- [x] Task 3.3: Initialization cycles for constants and shadowed package vars
   - Files: `src/typechecker/init-order.js`, `src/typechecker/constants.js`, `test/unit/language/init-order.test.js`
   - Test: L108 `const a = b; const b = a` → `assertErrorContains(errors, "initialization cycle")`; L114 `var x = func() int { { x := 1; _ = x }; return x }()` → same; `var x = func() int { x := 1; return x }()` still compiles.
   - Done when: both cycles are compile errors; the shadowed-only form compiles.
-- [ ] Task 3.4: One diagnostic per root cause
+- [x] Task 3.4: One diagnostic per root cause
   - Files: `src/typechecker/resolve.js`, `src/typechecker/expressions.js`, `test/unit/types/errors.test.js`
   - Test: L184 `func F(x Foo) {}` → exactly one `Unknown type 'Foo'`; L186a → only `package 'reflect' is not available`; L186b → only `os.ReadFile is not available` (count errors, assert message).
   - Done when: each repro yields exactly one error.
-- [ ] Task 3.5: Precision warning position and float contexts
+- [x] Task 3.5: Precision warning position and float contexts
   - Files: `src/backend/js/expressions.js`, `src/typechecker/const-fold.js`, `test/unit/language/constants.test.js`
   - Test: L187 package-level `var g float64 = 1<<53 + 1` → no warning (float context, see L188); `var g int = 1<<53 + 1` → warning text contains `main.go at line 3:`; L188 `var f float64 = 9007199254740993` → no warning.
   - Done when: warnings carry `line:col` and fire only for integer-typed contexts.

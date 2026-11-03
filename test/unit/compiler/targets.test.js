@@ -408,7 +408,7 @@ test("a precision warning repeats when the same package compiles again", () => {
 	try {
 		writeFileSync(
 			join(dir, "main.go"),
-			"package main\n\nvar g float64 = 1<<53 + 1\n\nfunc main() { println(g) }\n",
+			"package main\n\nvar g int = 1<<53 + 1\n\nfunc main() { println(g) }\n",
 		);
 		writeFileSync(join(dir, "other.go"), "package main\n\nvar h = 1\n");
 		console.error = (m) => logged.push(String(m));

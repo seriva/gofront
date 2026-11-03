@@ -1,6 +1,9 @@
 // TypeChecker expression-checking methods — installed as a mixin on TypeChecker.prototype.
 
-import { EXCLUDED_STDLIB_MEMBERS } from "./stdlib/excluded.js";
+import {
+	EXCLUDED_STDLIB_MEMBERS,
+	EXCLUDED_STDLIB_PACKAGES,
+} from "./stdlib/excluded.js";
 import { sharedInfo } from "./stdlib/shared.js";
 import {
 	ANY,
@@ -181,7 +184,16 @@ export const expressionCheckMethods = {
 					expr._isTypeRef = true;
 					return BASIC_TYPES[expr.name];
 				}
-				if (!t) return this.err(`Undefined: '${expr.name}'`, expr);
+				if (!t) {
+					// The import of an excluded package already reported; its
+					// uses are not a second root cause.
+					const imported = this._fileImports
+						?.get(this._currentFile)
+						?.get(expr.name);
+					if (imported && EXCLUDED_STDLIB_PACKAGES.has(imported))
+						return TAINTED_ANY;
+					return this.err(`Undefined: '${expr.name}'`, expr);
+				}
 				if (this.types.has(expr.name) || t.kind === "typeParam")
 					expr._isTypeRef = true;
 				// A Go declaration that shadows a browser global: JS output renames
