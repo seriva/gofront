@@ -409,7 +409,7 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
 
 ### Phase 13: WASM Interfaces and Type Switches
 
-- [ ] Task 13.1: Type switches with `case nil` and interface cases
+- [x] Task 13.1: Type switches with `case nil` and interface cases
   - Files: `src/backend/wasm/types.js`, `src/backend/wasm/emit-stmts.js`, `test/unit/wasm/interfaces.test.js`
   - Test: L11 → `nil`; L53 `case error:` on `any` → `d`.
   - Done when: both compile, validate and match Go.
@@ -417,15 +417,15 @@ Probed on `feat/follow-ups-2026-11-03` @ `a8cb777` (after Phases 1–2) using th
   - Files: `src/backend/wasm/types.js`, `src/backend/wasm/monomorph.js`, `test/unit/wasm/interfaces.test.js`
   - Test: L44a/L98 `type L string` cases → `L string`; L44b (wasm) → `T str`; L44c `conv[Small](130)` → `-126`; L154 (wasm) → `i32`; L104a `a.(iter.Seq[int])` → `true`.
   - Done when: five repros match Go on wasm.
-- [ ] Task 13.3: Typed nil pointers inside interfaces
+- [x] Task 13.3: Typed nil pointers inside interfaces
   - Files: `src/backend/wasm/emit.js`, `src/backend/wasm/stdlib/core.js`, `test/unit/wasm/interfaces.test.js`
   - Test: L103 → `true e`; L132 → `-1`; L137 → recovered `invalid memory address or nil pointer dereference`; L25 (wasm) → `0 0 0`; L105 `errors.As` with typed nil → `true` (js too).
   - Done when: five repros match Go on wasm (L105 also js/both).
-- [ ] Task 13.4: Dispatch on named func/map types and method values from interfaces
+- [x] Task 13.4: Dispatch on named func/map types and method values from interfaces
   - Files: `src/backend/wasm/emit.js`, `src/backend/wasm/method-expr.js`, `src/backend/js/expressions.js`
   - Test: `test/unit/wasm/interfaces.test.js` — L138 → `3 1`; L117 `f := n.Name; f()` → `a` (all targets).
   - Done when: both repros match Go on all targets.
-- [ ] Task 13.5: Runtime panics recover as `error` values
+- [x] Task 13.5: Runtime panics recover as `error` values
   - Files: `src/backend/wasm/module-emitter.js`, `src/backend/js/runtime.js`, `test/unit/wasm/defer_recover.test.js`
   - Test: L133 `recover().(error)` after index out of range → `true`; `.Error()` → Go's text.
   - Done when: repro matches Go on all targets.

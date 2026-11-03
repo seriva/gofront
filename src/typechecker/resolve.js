@@ -363,8 +363,11 @@ export const resolveMethods = {
 				? this.resolveTypeNode(node.expr, scope)
 				: null;
 		if (!base) return this.err(`Unknown type '${name ?? "?"}'`, node);
-		if (qualified) this.globals.lookup(sel.expr.name);
-		else if (name)
+		if (qualified) {
+			this.globals.lookup(sel.expr.name);
+			// `iter.Seq[int](f)`: the selector names the mangled stdlib type.
+			this._useQualifiedTypeName(sel, base);
+		} else if (name)
 			this._useQualifiedTypeName(node.name ? node : node.expr, base);
 		if (base.kind === "named" && base._generic?.isAlias) {
 			const aliasArgs = typeArgs.map((n) => this.resolveTypeNode(n, scope));

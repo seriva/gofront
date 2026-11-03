@@ -812,8 +812,11 @@ var __recover = __recover || function(ok) {
   const e = top.err;
   // A JS TypeError from using null as a pointer is Go's nil dereference.
   if (e && e.name === "TypeError" && /of null|undefined or null/.test(e.message))
-    return "runtime error: invalid memory address or nil pointer dereference";
-  return e?.message ?? String(e);
+    return __error("runtime error: invalid memory address or nil pointer dereference");
+  const msg = e?.message ?? String(e);
+  // A Go runtime panic recovers as an error value (runtime.Error).
+  if (/^(runtime error: |assignment to entry in nil map$|interface conversion: )/.test(msg)) return __error(msg);
+  return msg;
 };`;
 
 export const HELPER_SPRINTF =

@@ -561,6 +561,7 @@ export class CodeGen {
 			this.useHelper("ioEOF");
 			this._helpers.add("error");
 		}
+		if (name === "panicRt") this._helpers.add("error");
 		if (name === "append") this.useHelper("slice");
 		if (name === "sprint") this._helpers.add("sprintf");
 		if (name === "slice") this._helpers.add("sv");

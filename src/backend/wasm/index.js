@@ -86,8 +86,7 @@ function emitIndexPanicBody(mod, emitter) {
 	concat();
 	emitter.pushInstruction("end");
 	concat();
-	emitter.pushInstruction("any.convert_extern");
-	emitter.emitPanicThrow();
+	emitter.emitRuntimePanicThrow();
 }
 
 function peepholeOptimize(instructions) {
@@ -949,8 +948,7 @@ export function compileWasmModule(
 			const funcIdx = mod.getStringImportIndex();
 			emitter.pushInstruction({ op: "i32.const", value: strIdx });
 			emitter.pushInstruction({ op: "call", funcIndex: funcIdx });
-			emitter.pushInstruction("any.convert_extern");
-			emitter.emitPanicThrow();
+			emitter.emitRuntimePanicThrow();
 		} else if (fn._isPushPanic) {
 			const panicNodeTypeIndex = mod.getPanicNodeTypeIndex();
 			const panicGlobal = mod.getPanicGlobalIndex();

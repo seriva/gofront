@@ -2790,6 +2790,28 @@ export class StdlibCoreEmitter {
 		return { baseGoType, sInfo, valueBox };
 	}
 
+	// A typed nil `*T` in the chain (a marker object) matches a `*T` target.
+	_errorsAsNilBox(sInfo, valueBox, baseGoType) {
+		if (!sInfo || valueBox || baseGoType?.kind !== "pointer") return null;
+		return this.mod.getNilBoxType(baseGoType);
+	}
+
+	// Casts the matched error on the stack to the target; the typed-nil marker
+	// becomes a nil pointer.
+	_emitErrorsAsCast(nilBox, baseGoType, matchIndex) {
+		if (nilBox) this._emitRefCastOrNil(baseGoType, matchIndex);
+		else this.pushInstruction({ op: "ref.cast", typeIndex: matchIndex });
+	}
+
+	// With a `ref.test` result on the stack: also true when the value in
+	// `valTmp` is the typed-nil marker `nilBox`.
+	_emitOrTypedNil(nilBox, valTmp) {
+		if (!nilBox) return;
+		this.pushInstruction({ op: "local.get", index: valTmp });
+		this.pushInstruction({ op: "ref.test", typeIndex: nilBox.typeIndex });
+		this.pushInstruction("i32.or");
+	}
+
 	_emitErrorsAs(args) {
 		const errTmp = this.acquireTemp("anyref");
 		const resLoc = this.acquireTemp("i32");
@@ -2807,9 +2829,10 @@ export class StdlibCoreEmitter {
 
 		const { baseGoType, sInfo, valueBox } = this._errorsAsTarget(args[1]);
 		const matchIndex = valueBox ? valueBox.typeIndex : sInfo?.typeIndex;
+		const nilBox = this._errorsAsNilBox(sInfo, valueBox, baseGoType);
 		const pushMatched = () => {
 			this.pushInstruction({ op: "local.get", index: errTmp });
-			this.pushInstruction({ op: "ref.cast", typeIndex: matchIndex });
+			this._emitErrorsAsCast(nilBox, baseGoType, matchIndex);
 			if (valueBox)
 				this.pushInstruction({
 					op: "struct.get",
@@ -2856,6 +2879,7 @@ export class StdlibCoreEmitter {
 		if (sInfo) {
 			this.pushInstruction({ op: "local.get", index: errTmp });
 			this.pushInstruction({ op: "ref.test", typeIndex: matchIndex });
+			this._emitOrTypedNil(nilBox, errTmp);
 			this.pushInstruction({ op: "if", blockType: "void" });
 			if (targetLocal) {
 				if (targetLocal.isBoxed) {

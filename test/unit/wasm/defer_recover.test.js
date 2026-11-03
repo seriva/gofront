@@ -635,3 +635,29 @@ nil map write recovered: true
 `,
 	);
 });
+
+section("Runtime panics recover as error values");
+
+test("a recovered index-out-of-range panic is an error with the Go message", async () => {
+	await assertProgramOutput(
+		`package main
+
+import "fmt"
+
+func main() {
+	defer func() {
+		r := recover()
+		e, ok := r.(error)
+		fmt.Println(ok)
+		if ok {
+			fmt.Println(e.Error())
+		}
+	}()
+	a := []int{1}
+	i := 5
+	fmt.Println(a[i])
+}
+`,
+		"true\nruntime error: index out of range [5] with length 1\n",
+	);
+});

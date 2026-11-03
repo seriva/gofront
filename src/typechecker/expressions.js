@@ -654,6 +654,11 @@ export const expressionCheckMethods = {
 		const base = this.resolveType(
 			recvT?.kind === "named" ? recvT.underlying : recvT,
 		);
+		if (base?.kind === "interface" && base.methods?.has(expr.field)) {
+			// `i.M` binds the interface value; the call dispatches when it runs.
+			expr._isMethodValue = true;
+			return;
+		}
 		if (!recvT || !this._isStructOrNamedMethod(recvT, base, expr.field)) return;
 		expr._isMethodValue = true;
 		if (baseType.kind === "pointer")

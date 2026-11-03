@@ -102,6 +102,15 @@ export class ExprsEmitter {
 				return;
 			}
 
+			// A defined func or map type with methods is boxed to keep its identity,
+			// so interface dispatch can tell it from the plain func or map type.
+			if (this._isMethodNamedRef(goType)) {
+				const box = this.mod.getIfaceBoxType(this._resolveTestTarget(goType));
+				this._emitRawExpr(expr, box.wType);
+				this._emitBoxValue(box);
+				return;
+			}
+
 			if (
 				isSliceType(goType, this.mod.checker) ||
 				isArrayType(goType, this.mod.checker) ||
@@ -2577,6 +2586,8 @@ export class ExprsEmitter {
 	emitNarrowIntWrap(goType) {
 		if (!goType) return;
 		if (goType.kind === "TypeName" || goType.kind === "Ident") {
+			const declared = this.mod.checker?.types?.get(goType.name);
+			if (declared?.kind === "named") return this.emitNarrowIntWrap(declared);
 			return this.emitNarrowIntWrap({ kind: "basic", name: goType.name });
 		}
 		if (goType.kind === "named" && goType.underlying) {
