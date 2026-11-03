@@ -199,7 +199,7 @@ No longer reproducing on `ea3231a` (fixed by stdlib-in-go or earlier work; delet
   - Files: `src/typechecker/statements.js`, `test/unit/types/checks.test.js`
   - Test: L183 `switch name { case 5: }` (`name string`) → `assertErrorContains(errors, "cannot convert 5 (untyped int constant) to type string")`; same for the templ form (`test/unit/compiler/templ.test.js`).
   - Done when: both forms are type errors; no invalid WASM is emitted.
-- [ ] Task 3.3: Initialization cycles for constants and shadowed package vars
+- [x] Task 3.3: Initialization cycles for constants and shadowed package vars
   - Files: `src/typechecker/init-order.js`, `src/typechecker/constants.js`, `test/unit/language/init-order.test.js`
   - Test: L108 `const a = b; const b = a` → `assertErrorContains(errors, "initialization cycle")`; L114 `var x = func() int { { x := 1; _ = x }; return x }()` → same; `var x = func() int { x := 1; return x }()` still compiles.
   - Done when: both cycles are compile errors; the shadowed-only form compiles.
