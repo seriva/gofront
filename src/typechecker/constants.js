@@ -202,6 +202,15 @@ export const constantCheckMethods = {
 		if (base?.kind === "interface" || isAny(base)) target = defaultType(source);
 		const i = constIntValue(node._const);
 		const range = i === null ? null : this._intRange(target);
+		// A float or complex target holds the constant as a Number: Go rounds
+		// the same way, so the JS backend has nothing to warn about.
+		if (!range && node.kind) {
+			const u = this.resolveType(
+				target?.kind === "named" ? target.underlying : target,
+			);
+			if (u?.kind === "basic" && /^(float|complex)/.test(u.name))
+				node._floatConst = true;
+		}
 		if (!range) return false;
 		if (i >= range[0] && i <= range[1]) {
 			node._intConst = true; // the JS backend's precision warning reads this

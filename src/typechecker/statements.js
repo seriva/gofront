@@ -133,7 +133,8 @@ export const statementCheckMethods = {
 		if (this._checkDefineCommaOkAssert(stmt, rhs, scope)) return;
 		if (
 			stmt.rhs[0]?.kind !== "RangeExpr" &&
-			stmt.lhs.length !== rhsFlat.length
+			stmt.lhs.length !== rhsFlat.length &&
+			!rhsFlat.some((t) => t?._tainted)
 		) {
 			const vars =
 				stmt.lhs.length === 1 ? "1 variable" : `${stmt.lhs.length} variables`;
@@ -240,7 +241,8 @@ export const statementCheckMethods = {
 			if (
 				!stmt.rhs[0]?._commaOk &&
 				stmt.rhs[0]?.kind !== "RangeExpr" &&
-				stmt.lhs.length !== rhsFlat.length
+				stmt.lhs.length !== rhsFlat.length &&
+				!rhsFlat.some((t) => t?._tainted)
 			) {
 				const vars =
 					stmt.lhs.length === 1 ? "1 variable" : `${stmt.lhs.length} variables`;
